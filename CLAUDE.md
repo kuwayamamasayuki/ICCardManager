@@ -1,0 +1,183 @@
+# 交通系ICカード管理システム - 開発ガイド
+
+## プロジェクト概要
+
+複数の交通系ICカード（はやかけん、nimoca、SUGOCA等）を複数職員でシェア利用する際の出納記録を管理するWindowsデスクトップアプリケーション。
+
+## 技術スタック
+
+- **言語**: C# 12
+- **フレームワーク**: .NET 8 + WPF
+- **アーキテクチャ**: MVVM
+- **DB**: SQLite3
+- **ICカードリーダー**: PaSoRi（PC/SC API経由）
+- **帳票出力**: ClosedXML
+
+## ディレクトリ構成
+
+```
+ICCardManager/
+├── ICCardManager.sln
+├── src/
+│   └── ICCardManager/
+│       ├── App.xaml                    # アプリケーションエントリポイント
+│       ├── Views/                      # View (XAML)
+│       │   ├── MainWindow.xaml
+│       │   ├── HistoryView.xaml
+│       │   ├── Dialogs/
+│       │   │   ├── SettingsDialog.xaml
+│       │   │   ├── ReportDialog.xaml
+│       │   │   └── ...
+│       │   └── Controls/
+│       ├── ViewModels/                 # ViewModel
+│       │   ├── ViewModelBase.cs
+│       │   ├── MainViewModel.cs
+│       │   └── ...
+│       ├── Models/                     # エンティティ
+│       │   ├── Staff.cs
+│       │   ├── IcCard.cs
+│       │   ├── Ledger.cs
+│       │   └── ...
+│       ├── Services/                   # ビジネスロジック
+│       │   ├── LendingService.cs
+│       │   ├── ReportService.cs
+│       │   ├── SummaryGenerator.cs
+│       │   ├── CardTypeDetector.cs     # カード種別自動判別
+│       │   └── ...
+│       ├── Data/                       # データアクセス層
+│       │   ├── DbContext.cs
+│       │   ├── Repositories/
+│       │   └── schema.sql
+│       ├── Infrastructure/             # インフラ
+│       │   ├── CardReader/
+│       │   │   ├── ICardReader.cs
+│       │   │   └── PcScCardReader.cs
+│       │   └── Sound/
+│       │       └── SoundPlayer.cs
+│       ├── Common/                     # 共通ユーティリティ
+│       │   ├── WarekiConverter.cs
+│       │   └── Enums.cs
+│       └── Resources/
+│           ├── Sounds/
+│           └── Templates/
+│               └── 物品出納簿テンプレート.xlsx
+└── docs/                               # 設計書
+    ├── 01_システム概要設計書.md
+    ├── 02_DB設計書.md
+    ├── 03_画面設計書.md
+    ├── 04_機能設計書.md
+    ├── 05_クラス設計書.md
+    └── 06_シーケンス図.md
+```
+
+## 開発時の注意事項
+
+### 環境制約
+- インターネット非接続環境で動作する（クラウドサービス利用不可）
+- Microsoft 365 E3のみ例外的に利用可能
+- Windows 11専用（クロスプラットフォーム対応不要）
+- 自己完結型ビルド（single-file publish）で配布
+
+### DB設計原則
+- 日付はTEXT型（ISO 8601形式: YYYY-MM-DD HH:MM:SS）で保存
+- 表示時に和暦変換（WarekiConverter使用）
+- IDmは16進数文字列（16文字）として保存
+- 外部キー制約を有効化
+- **論理削除を採用**（staff, ic_cardテーブル）
+  - `is_deleted`フラグと`deleted_at`で管理
+  - 履歴参照時は`staff_name`（スナップショット）を使用
+- 6年経過データ（ledger）は起動時に自動削除
+
+### UI/UX原則
+- 音と色の両方で状態を通知（アクセシビリティ対応）
+- 音や色のみに依存しない（テキストメッセージ + アイコン必須）
+- 文字サイズは設定で変更可能（小/中/大/特大）
+- 貸出時: 薄いオレンジ背景(#FFE0B2) + 🚃→アイコン + 「ピッ」
+- 返却時: 薄い水色背景(#B3E5FC) + 🏠←アイコン + 「ピピッ」
+- エラー時: 薄い赤背景(#FFEBEE) + 「ピー」
+
+### アクセシビリティ方針
+- **色覚多様性対応**: 暖色（貸出）vs 寒色（返却）で色相差を明確に
+- **多重表現**: 色・アイコン・テキスト・音の4要素で状態を伝達
+- **コントラスト**: 背景色は彩度を確保しつつ、テキストとの可読性を維持
+- **高齢者対応**: 文字サイズ変更機能（小/中/大/特大）を提供
+
+### ICカード関連
+- 履歴は最大20件まで取得可能
+- **カード種別の自動判別**: IDmの先頭2バイト（発行者コード）で判別
+  - 01=Suica, 02=PASMO, 03=ICOCA, 04=PiTaPa
+  - 05=nimoca, 06=SUGOCA, 07=はやかけん
+  - 08=Kitaca, 09=TOICA, 0A=manaca
+  - 判別不可の場合は「その他」として登録、手動修正可能
+- **バス利用の判別**: 乗車駅・降車駅が両方空欄（かつチャージでない）場合はバス利用
+
+## よく使うコマンド
+
+```bash
+# ビルド
+dotnet build
+
+# 実行
+dotnet run --project src/ICCardManager
+
+# テスト実行
+dotnet test
+
+# 自己完結型ビルド（配布用）
+dotnet publish -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true
+
+# DB初期化（開発時）
+# DbContext.InitializeDatabase() を呼び出す
+```
+
+## 主要な業務ロジック
+
+### 状態遷移
+1. **職員証タッチ待ち** → 職員証タッチ → **ICカードタッチ待ち**
+2. **ICカードタッチ待ち** → ICカードタッチ → 貸出or返却処理 → **職員証タッチ待ち**
+3. タイムアウト（60秒） → **職員証タッチ待ち**
+
+### 貸出・返却フロー
+1. 職員証タッチ → IDm記録、状態遷移
+2. 交通系ICカードタッチ → 状態判定
+   - 未貸出(is_lent=0) → 貸出処理
+   - 貸出中(is_lent=1) → 返却処理
+3. 30秒以内に同一カード再タッチ → 逆処理（貸出→返却、返却→貸出）
+
+### バス利用判別ロジック
+```
+IF entry_station（乗車駅）が空欄 AND
+   exit_station（降車駅）が空欄 AND
+   is_charge = false
+THEN
+   → バス利用（is_bus = true）
+```
+
+### 摘要文字列生成ルール（SummaryGenerator）
+| パターン | 生成例 |
+|----------|--------|
+| 単純片道 | 鉄道（A駅～B駅） |
+| 往復 | 鉄道（A駅～B駅 往復） |
+| 乗継 | 鉄道（A駅～C駅） ※途中駅省略 |
+| 複数区間 | 鉄道（A駅～B駅、C駅～D駅） |
+| バス混在 | 鉄道（A駅～B駅）、バス（★） |
+
+### 月次帳票（物品出納簿）
+- 利用日ごとに1行（チャージと利用は別行）
+- summary=「（貸出中）」は出力しない
+- 年度末（3月）: 月計 → 累計 → 次年度繰越
+- 年度初め（4月）: 前年度繰越 → 通常データ
+
+### 論理削除の方針
+| テーブル | 削除方式 | 理由 |
+|----------|----------|------|
+| staff | 論理削除 | 履歴参照時に氏名を表示するため |
+| ic_card | 論理削除 | 履歴参照時にカード情報を表示するため |
+| ledger | 物理削除（6年後自動） | 監査対応の保存期間経過後は不要 |
+| operation_log | 削除しない | 監査証跡として永続保存 |
+
+## 参照ドキュメント
+
+- `プロンプト.md` - 詳細な要件定義
+- `docs/` - 設計書一式
+- `Resources/Templates/物品出納簿テンプレート.xlsx` - 月次帳票テンプレート
