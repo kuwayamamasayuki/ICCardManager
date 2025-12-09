@@ -4,12 +4,19 @@
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:vm="clr-namespace:ICCardManager.ViewModels"
+        xmlns:conv="clr-namespace:ICCardManager.Common"
         mc:Ignorable="d"
         d:DataContext="{d:DesignInstance Type=vm:MainViewModel}"
         Title="交通系ICカード管理システム"
         Height="700"
         Width="1000"
         WindowStartupLocation="CenterScreen">
+
+    <Window.Resources>
+        <conv:IntToVisibilityConverter x:Key="IntToVisibilityConverter"/>
+        <conv:BoolToVisibilityConverter x:Key="BoolToVisibilityConverter"/>
+        <conv:InverseBooleanConverter x:Key="InverseBooleanConverter"/>
+    </Window.Resources>
 
     <Window.InputBindings>
         <KeyBinding Key="Escape" Command="{Binding CancelCommand}"/>
@@ -139,7 +146,7 @@
                                FontSize="14"
                                FontWeight="Bold"
                                Margin="0,15,0,10"
-                               Visibility="{Binding WarningMessages.Count, Converter={StaticResource CountToVisibilityConverter}}"/>
+                               Visibility="{Binding WarningMessages.Count, Converter={StaticResource IntToVisibilityConverter}, Mode=OneWay}"/>
 
                     <ItemsControl Grid.Row="3"
                                   ItemsSource="{Binding WarningMessages}">
@@ -171,16 +178,30 @@
             </StackPanel>
         </Border>
 
-        <!-- 操作ヒント -->
+        <!-- 操作ヒント + デバッグボタン -->
         <Border Grid.Row="2" Background="#E3F2FD" Padding="15,10">
-            <TextBlock FontSize="12" Foreground="#1565C0">
-                <Run Text="操作: "/>
-                <Run Text="職員証タッチ → ICカードタッチ で貸出/返却"/>
-                <Run Text=" | "/>
-                <Run Text="ICカードのみタッチ で履歴表示"/>
-                <Run Text=" | "/>
-                <Run Text="[Esc] キャンセル"/>
-            </TextBlock>
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+
+                <TextBlock Grid.Column="0" FontSize="12" Foreground="#1565C0" VerticalAlignment="Center">
+                    <Run Text="操作: "/>
+                    <Run Text="職員証タッチ → ICカードタッチ で貸出/返却"/>
+                    <Run Text=" | "/>
+                    <Run Text="ICカードのみタッチ で履歴表示"/>
+                    <Run Text=" | "/>
+                    <Run Text="[Esc] キャンセル"/>
+                </TextBlock>
+
+                <!-- デバッグ用ボタン (DEBUG ビルドのみ表示) -->
+                <StackPanel Grid.Column="1" Orientation="Horizontal" Margin="20,0,0,0">
+                    <TextBlock Text="[DEBUG]" FontSize="10" Foreground="Red" VerticalAlignment="Center" Margin="0,0,10,0"/>
+                    <Button Content="職員証" Command="{Binding SimulateStaffCardCommand}" Padding="10,3" Margin="0,0,5,0"/>
+                    <Button Content="ICカード" Command="{Binding SimulateIcCardCommand}" Padding="10,3"/>
+                </StackPanel>
+            </Grid>
         </Border>
 
         <!-- ステータスバー -->
@@ -195,23 +216,10 @@
             <StatusBarItem>
                 <TextBlock>
                     <Run Text="貸出中: "/>
-                    <Run Text="{Binding LentCards.Count}"/>
+                    <Run Text="{Binding LentCards.Count, Mode=OneWay}"/>
                     <Run Text=" 枚"/>
                 </TextBlock>
             </StatusBarItem>
         </StatusBar>
     </Grid>
-
-    <Window.Resources>
-        <!-- Bool to Visibility Converter -->
-        <BooleanToVisibilityConverter x:Key="BoolToVisibilityConverter"/>
-
-        <!-- Int to Visibility Converter (0以外で表示) -->
-        <local:IntToVisibilityConverter x:Key="IntToVisibilityConverter"
-                                        xmlns:local="clr-namespace:ICCardManager.Views.Converters"/>
-
-        <!-- Count to Visibility Converter (0より大きければ表示) -->
-        <local:CountToVisibilityConverter x:Key="CountToVisibilityConverter"
-                                          xmlns:local="clr-namespace:ICCardManager.Views.Converters"/>
-    </Window.Resources>
 </Window>

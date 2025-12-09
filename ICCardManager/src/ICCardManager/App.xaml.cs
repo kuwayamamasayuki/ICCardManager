@@ -29,17 +29,54 @@ public partial class App : Application
     {
         base.OnStartup(e);
 
-        // DIコンテナの設定
-        var services = new ServiceCollection();
-        ConfigureServices(services);
-        ServiceProvider = services.BuildServiceProvider();
+        try
+        {
+            System.Diagnostics.Debug.WriteLine("アプリケーション起動開始");
 
-        // データベース初期化
-        InitializeDatabase();
+            // DIコンテナの設定
+            var services = new ServiceCollection();
+            ConfigureServices(services);
+            ServiceProvider = services.BuildServiceProvider();
 
-        // メインウィンドウを表示
-        var mainWindow = ServiceProvider.GetRequiredService<MainWindow>();
-        mainWindow.Show();
+            System.Diagnostics.Debug.WriteLine("DIコンテナ構築完了");
+
+            // データベース初期化
+            InitializeDatabase();
+
+            System.Diagnostics.Debug.WriteLine("データベース初期化完了");
+
+            // メインウィンドウを表示
+            var mainWindow = ServiceProvider.GetRequiredService<MainWindow>();
+            System.Diagnostics.Debug.WriteLine("MainWindow取得完了");
+
+            mainWindow.Show();
+            System.Diagnostics.Debug.WriteLine("MainWindow表示完了");
+        }
+        catch (Exception ex)
+        {
+            var errorMessage = $"起動エラー: {ex.Message}\n\n{ex.StackTrace}";
+
+            // クリップボードにコピー可能なエラーダイアログを表示
+            var result = MessageBox.Show(
+                $"{errorMessage}\n\n[はい]をクリックするとエラー内容をクリップボードにコピーします。",
+                "エラー",
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Error);
+
+            if (result == MessageBoxResult.Yes)
+            {
+                try
+                {
+                    System.Windows.Clipboard.SetText(errorMessage);
+                }
+                catch
+                {
+                    // クリップボードへのコピーに失敗した場合は無視
+                }
+            }
+
+            Shutdown(1);
+        }
     }
 
     /// <summary>

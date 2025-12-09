@@ -537,4 +537,30 @@ public partial class MainViewModel : ViewModelBase
     {
         // TODO: 職員管理画面を開く
     }
+
+#if DEBUG
+    /// <summary>
+    /// デバッグ用: 職員証タッチをシミュレート
+    /// </summary>
+    [RelayCommand]
+    public void SimulateStaffCard()
+    {
+        if (_cardReader is MockCardReader mockReader)
+        {
+            mockReader.SimulateCardRead("FFFF000000000001");
+        }
+    }
+
+    /// <summary>
+    /// デバッグ用: ICカードタッチをシミュレート
+    /// </summary>
+    [RelayCommand]
+    public void SimulateIcCard()
+    {
+        if (_cardReader is MockCardReader mockReader)
+        {
+            mockReader.SimulateCardRead("07FE112233445566");
+        }
+    }
+#endif
 }

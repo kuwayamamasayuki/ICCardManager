@@ -18,10 +18,9 @@
     <Product>交通系ICカード管理システム</Product>
     <Description>交通系ICカードの貸出管理システム</Description>
 
-    <!-- シングルファイル発行設定 -->
+    <!-- シングルファイル発行設定（dotnet publish時に使用） -->
     <PublishSingleFile>true</PublishSingleFile>
     <SelfContained>true</SelfContained>
-    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
     <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
 
