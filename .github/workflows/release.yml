@@ -1,0 +1,80 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+env:
+  DOTNET_VERSION: '8.0.x'
+  DOTNET_NOLOGO: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+
+jobs:
+  build-release:
+    runs-on: windows-latest
+
+    defaults:
+      run:
+        working-directory: ICCardManager
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: ${{ env.DOTNET_VERSION }}
+
+    - name: Restore dependencies
+      run: dotnet restore
+
+    - name: Run tests
+      run: dotnet test --configuration Release --verbosity normal
+
+    - name: Publish
+      run: |
+        dotnet publish src/ICCardManager/ICCardManager.csproj `
+          --configuration Release `
+          --runtime win-x64 `
+          --self-contained true `
+          -p:PublishSingleFile=true `
+          -p:IncludeNativeLibrariesForSelfExtract=true `
+          -p:EnableCompressionInSingleFile=true `
+          --output ./publish
+
+    - name: Create ZIP
+      run: |
+        Compress-Archive -Path ./publish/* -DestinationPath ICCardManager-${{ github.ref_name }}.zip
+
+    - name: Extract version info
+      id: version
+      run: |
+        $version = "${{ github.ref_name }}" -replace '^v', ''
+        echo "VERSION=$version" >> $env:GITHUB_OUTPUT
+      shell: pwsh
+
+    - name: Create Release
+      uses: softprops/action-gh-release@v1
+      with:
+        name: ICCardManager ${{ steps.version.outputs.VERSION }}
+        body: |
+          ## 交通系ICカード管理システム ${{ steps.version.outputs.VERSION }}
+
+          ### ダウンロード
+          - `ICCardManager-${{ github.ref_name }}.zip` をダウンロードして展開してください
+          - `ICCardManager.exe` を実行してください
+
+          ### 動作要件
+          - Windows 11
+          - PaSoRi (RC-S300/RC-S380)
+
+          ### 変更内容
+          変更内容はコミットログを参照してください。
+        files: |
+          ICCardManager/ICCardManager-${{ github.ref_name }}.zip
+        draft: false
+        prerelease: ${{ contains(github.ref_name, '-') }}
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
