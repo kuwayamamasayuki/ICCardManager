@@ -3,6 +3,7 @@ using PCSC;
 using PCSC.Exceptions;
 using PCSC.Iso7816;
 using PCSC.Monitoring;
+using PcscICardReader = PCSC.ICardReader;
 
 namespace ICCardManager.Infrastructure.CardReader;
 
@@ -132,7 +133,7 @@ public class PcScCardReader : ICardReader
     /// <inheritdoc/>
     public async Task<int?> ReadBalanceAsync(string idm)
     {
-        return await Task.Run(() =>
+        return await Task.Run<int?>(() =>
         {
             try
             {
@@ -201,7 +202,7 @@ public class PcScCardReader : ICardReader
     /// <summary>
     /// FeliCaカードからIDmを読み取る
     /// </summary>
-    private string? ReadIdm(ICardReader reader)
+    private string? ReadIdm(PcscICardReader reader)
     {
         // FeliCa Polling コマンド
         var pollingCommand = new byte[]
@@ -225,7 +226,7 @@ public class PcScCardReader : ICardReader
     /// <summary>
     /// 指定したブロックを読み取る
     /// </summary>
-    private byte[]? ReadBlock(ICardReader reader, string idm, byte[] serviceCode, int blockIndex)
+    private byte[]? ReadBlock(PcscICardReader reader, string idm, byte[] serviceCode, int blockIndex)
     {
         // FeliCa Read Without Encryption コマンド
         var idmBytes = StringToBytes(idm);

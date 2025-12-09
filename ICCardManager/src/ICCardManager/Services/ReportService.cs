@@ -1,3 +1,4 @@
+using System.IO;
 using ClosedXML.Excel;
 using ICCardManager.Common;
 using ICCardManager.Data.Repositories;
@@ -181,8 +182,8 @@ public class ReportService
 
         worksheet.Cell(row, 1).Value = dateStr;           // 出納年月日
         worksheet.Cell(row, 2).Value = ledger.Summary;    // 摘要
-        worksheet.Cell(row, 3).Value = ledger.Income > 0 ? ledger.Income : (object)"";  // 受入金額
-        worksheet.Cell(row, 4).Value = ledger.Expense > 0 ? ledger.Expense : (object)""; // 払出金額
+        worksheet.Cell(row, 3).Value = ledger.Income > 0 ? ledger.Income : Blank.Value;  // 受入金額
+        worksheet.Cell(row, 4).Value = ledger.Expense > 0 ? ledger.Expense : Blank.Value; // 払出金額
         worksheet.Cell(row, 5).Value = ledger.Balance;    // 残額
         worksheet.Cell(row, 6).Value = ledger.StaffName;  // 氏名
         worksheet.Cell(row, 7).Value = ledger.Note;       // 備考
@@ -199,9 +200,9 @@ public class ReportService
     {
         worksheet.Cell(row, 1).Value = "";  // 出納年月日（空欄）
         worksheet.Cell(row, 2).Value = SummaryGenerator.GetMonthlySummary(month); // 摘要
-        worksheet.Cell(row, 3).Value = income > 0 ? income : (object)"";   // 受入金額
-        worksheet.Cell(row, 4).Value = expense > 0 ? expense : (object)""; // 払出金額
-        worksheet.Cell(row, 5).Value = isMarch ? "" : balance; // 残額（3月は空欄）
+        worksheet.Cell(row, 3).Value = income > 0 ? income : Blank.Value;   // 受入金額
+        worksheet.Cell(row, 4).Value = expense > 0 ? expense : Blank.Value; // 払出金額
+        worksheet.Cell(row, 5).Value = isMarch ? Blank.Value : balance; // 残額（3月は空欄）
 
         // 月計行にスタイルを適用
         var range = worksheet.Range(row, 1, row, 7);
@@ -219,8 +220,8 @@ public class ReportService
     {
         worksheet.Cell(row, 1).Value = "";  // 出納年月日（空欄）
         worksheet.Cell(row, 2).Value = SummaryGenerator.GetCumulativeSummary(); // 摘要
-        worksheet.Cell(row, 3).Value = income > 0 ? income : (object)"";   // 受入金額
-        worksheet.Cell(row, 4).Value = expense > 0 ? expense : (object)""; // 払出金額
+        worksheet.Cell(row, 3).Value = income > 0 ? income : Blank.Value;   // 受入金額
+        worksheet.Cell(row, 4).Value = expense > 0 ? expense : Blank.Value; // 払出金額
         worksheet.Cell(row, 5).Value = balance; // 残額
 
         // 累計行にスタイルを適用
