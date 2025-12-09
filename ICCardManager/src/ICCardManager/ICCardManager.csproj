@@ -58,9 +58,13 @@
     <None Update="Resources\Templates\*.xlsx">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
-    <None Update="Data\schema.sql">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </None>
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- 埋め込みリソース（スキーマSQL） -->
+    <EmbeddedResource Include="Data\schema.sql">
+      <LogicalName>ICCardManager.Data.schema.sql</LogicalName>
+    </EmbeddedResource>
   </ItemGroup>
 
 </Project>
