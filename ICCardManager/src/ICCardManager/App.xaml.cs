@@ -115,6 +115,8 @@ public partial class App : Application
         services.AddTransient<StaffManageViewModel>();
         services.AddTransient<SettingsViewModel>();
         services.AddTransient<ReportViewModel>();
+        services.AddTransient<HistoryViewModel>();
+        services.AddTransient<BusStopInputViewModel>();
 
         // Views
         services.AddTransient<MainWindow>();
@@ -122,6 +124,8 @@ public partial class App : Application
         services.AddTransient<Views.Dialogs.StaffManageDialog>();
         services.AddTransient<Views.Dialogs.SettingsDialog>();
         services.AddTransient<Views.Dialogs.ReportDialog>();
+        services.AddTransient<Views.Dialogs.HistoryDialog>();
+        services.AddTransient<Views.Dialogs.BusStopInputDialog>();
     }
 
     /// <summary>

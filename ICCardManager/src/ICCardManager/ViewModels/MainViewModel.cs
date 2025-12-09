@@ -367,13 +367,25 @@ public partial class MainViewModel : ViewModelBase
             await CheckWarningsAsync();
 
             // バス利用がある場合はバス停入力画面を表示
-            if (result.HasBusUsage)
+            if (result.HasBusUsage && result.CreatedLedgers.Count > 0)
             {
-                // TODO: バス停入力画面を表示
+                // 作成された履歴からバス利用詳細を取得
+                var busLedger = result.CreatedLedgers.LastOrDefault(l => !l.IsLentRecord);
+                if (busLedger != null)
+                {
+                    // バス停入力ダイアログを表示
+                    var busDialog = App.Current.ServiceProvider.GetRequiredService<Views.Dialogs.BusStopInputDialog>();
+                    busDialog.Owner = System.Windows.Application.Current.MainWindow;
+                    await busDialog.InitializeWithLedgerIdAsync(busLedger.Id);
+                    busDialog.ShowDialog();
+                }
+            }
+            else
+            {
+                // バス利用がなければ2秒後にリセット
+                await Task.Delay(2000);
             }
 
-            // 2秒後にリセット
-            await Task.Delay(2000);
             ResetState();
         }
         else
@@ -409,10 +421,12 @@ public partial class MainViewModel : ViewModelBase
     /// <summary>
     /// 履歴表示
     /// </summary>
-    private Task ShowHistoryAsync(IcCard card)
+    private async Task ShowHistoryAsync(IcCard card)
     {
-        // TODO: 履歴表示画面を開く
-        return Task.CompletedTask;
+        var dialog = App.Current.ServiceProvider.GetRequiredService<Views.Dialogs.HistoryDialog>();
+        dialog.Owner = System.Windows.Application.Current.MainWindow;
+        await dialog.InitializeWithCardAsync(card);
+        dialog.ShowDialog();
     }
 
     /// <summary>
