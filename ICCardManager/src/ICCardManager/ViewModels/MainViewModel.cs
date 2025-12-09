@@ -554,7 +554,9 @@ public partial class MainViewModel : ViewModelBase
     [RelayCommand]
     public void OpenStaffManage()
     {
-        // TODO: 職員管理画面を開く
+        var dialog = App.Current.ServiceProvider.GetRequiredService<Views.Dialogs.StaffManageDialog>();
+        dialog.Owner = System.Windows.Application.Current.MainWindow;
+        dialog.ShowDialog();
     }
 
 #if DEBUG
