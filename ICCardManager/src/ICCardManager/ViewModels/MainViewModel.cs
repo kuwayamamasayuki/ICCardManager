@@ -179,9 +179,13 @@ public partial class MainViewModel : ViewModelBase
     /// <summary>
     /// カード読み取りイベント
     /// </summary>
-    private async void OnCardRead(object? sender, CardReadEventArgs e)
+    private void OnCardRead(object? sender, CardReadEventArgs e)
     {
-        await HandleCardReadAsync(e.Idm);
+        // UIスレッドで処理を実行（即時応答のため）
+        System.Windows.Application.Current.Dispatcher.InvokeAsync(async () =>
+        {
+            await HandleCardReadAsync(e.Idm);
+        });
     }
 
     /// <summary>
@@ -189,6 +193,12 @@ public partial class MainViewModel : ViewModelBase
     /// </summary>
     private async Task HandleCardReadAsync(string idm)
     {
+        // 処理中は無視
+        if (CurrentState == AppState.Processing)
+        {
+            return;
+        }
+
         switch (CurrentState)
         {
             case AppState.WaitingForStaffCard:
@@ -198,10 +208,6 @@ public partial class MainViewModel : ViewModelBase
             case AppState.WaitingForIcCard:
                 await HandleCardInIcCardWaitingStateAsync(idm);
                 break;
-
-            case AppState.Processing:
-                // 処理中は無視
-                break;
         }
     }
 
@@ -210,8 +216,16 @@ public partial class MainViewModel : ViewModelBase
     /// </summary>
     private async Task HandleCardInStaffWaitingStateAsync(string idm)
     {
+        // 職員証とカードを並列で検索（高速化）
+        var staffTask = _staffRepository.GetByIdmAsync(idm);
+        var cardTask = _cardRepository.GetByIdmAsync(idm);
+
+        await Task.WhenAll(staffTask, cardTask);
+
+        var staff = staffTask.Result;
+        var card = cardTask.Result;
+
         // 職員証かどうか確認
-        var staff = await _staffRepository.GetByIdmAsync(idm);
         if (staff != null)
         {
             // 職員証認識
@@ -224,7 +238,6 @@ public partial class MainViewModel : ViewModelBase
         }
 
         // 交通系ICカードかどうか確認
-        var card = await _cardRepository.GetByIdmAsync(idm);
         if (card != null)
         {
             // 履歴表示画面を開く
