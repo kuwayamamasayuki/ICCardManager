@@ -8,6 +8,7 @@ using ICCardManager.Infrastructure.CardReader;
 using ICCardManager.Infrastructure.Sound;
 using ICCardManager.Models;
 using ICCardManager.Services;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace ICCardManager.ViewModels;
 
@@ -526,7 +527,12 @@ public partial class MainViewModel : ViewModelBase
     [RelayCommand]
     public void OpenCardManage()
     {
-        // TODO: カード管理画面を開く
+        var dialog = App.Current.ServiceProvider.GetRequiredService<Views.Dialogs.CardManageDialog>();
+        dialog.Owner = System.Windows.Application.Current.MainWindow;
+        dialog.ShowDialog();
+
+        // ダイアログを閉じた後、貸出中カード一覧を更新
+        _ = RefreshLentCardsAsync();
     }
 
     /// <summary>
