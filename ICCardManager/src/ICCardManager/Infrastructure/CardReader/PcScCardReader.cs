@@ -1,5 +1,6 @@
 using ICCardManager.Models;
 using PCSC;
+using PCSC.Exceptions;
 using PCSC.Iso7816;
 using PCSC.Monitoring;
 
