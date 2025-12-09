@@ -124,9 +124,62 @@ public partial class App : Application
         var dbContext = ServiceProvider.GetRequiredService<DbContext>();
         dbContext.InitializeDatabase();
 
+#if DEBUG
+        // デバッグ時はテストデータを登録
+        RegisterTestDataAsync().Wait();
+#endif
+
         // 起動時処理
         PerformStartupTasks(dbContext);
     }
+
+#if DEBUG
+    /// <summary>
+    /// テストデータを登録（デバッグ用）
+    /// </summary>
+    private async Task RegisterTestDataAsync()
+    {
+        var staffRepository = ServiceProvider.GetRequiredService<IStaffRepository>();
+        var cardRepository = ServiceProvider.GetRequiredService<ICardRepository>();
+
+        // テスト職員を登録
+        var testStaffList = new[]
+        {
+            new Models.Staff { StaffIdm = "FFFF000000000001", Name = "山田太郎", Number = "001", Note = "テスト職員1" },
+            new Models.Staff { StaffIdm = "FFFF000000000002", Name = "鈴木花子", Number = "002", Note = "テスト職員2" },
+            new Models.Staff { StaffIdm = "FFFF000000000003", Name = "佐藤一郎", Number = "003", Note = "テスト職員3" },
+        };
+
+        foreach (var staff in testStaffList)
+        {
+            var existing = await staffRepository.GetByIdmAsync(staff.StaffIdm);
+            if (existing == null)
+            {
+                await staffRepository.InsertAsync(staff);
+                System.Diagnostics.Debug.WriteLine($"テスト職員を登録: {staff.Name}");
+            }
+        }
+
+        // テストカードを登録
+        var testCardList = new[]
+        {
+            new Models.IcCard { CardIdm = "07FE112233445566", CardType = "はやかけん", CardNumber = "TEST-001", Note = "テストカード1" },
+            new Models.IcCard { CardIdm = "05FE112233445567", CardType = "nimoca", CardNumber = "TEST-002", Note = "テストカード2" },
+            new Models.IcCard { CardIdm = "06FE112233445568", CardType = "SUGOCA", CardNumber = "TEST-003", Note = "テストカード3" },
+            new Models.IcCard { CardIdm = "01FE112233445569", CardType = "Suica", CardNumber = "TEST-004", Note = "テストカード4" },
+        };
+
+        foreach (var card in testCardList)
+        {
+            var existing = await cardRepository.GetByIdmAsync(card.CardIdm);
+            if (existing == null)
+            {
+                await cardRepository.InsertAsync(card);
+                System.Diagnostics.Debug.WriteLine($"テストカードを登録: {card.CardType} {card.CardNumber}");
+            }
+        }
+    }
+#endif
 
     /// <summary>
     /// 起動時タスクを実行
