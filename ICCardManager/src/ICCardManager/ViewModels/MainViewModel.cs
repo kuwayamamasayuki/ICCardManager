@@ -533,7 +533,9 @@ public partial class MainViewModel : ViewModelBase
     [RelayCommand]
     public void OpenReport()
     {
-        // TODO: 帳票作成画面を開く
+        var dialog = App.Current.ServiceProvider.GetRequiredService<Views.Dialogs.ReportDialog>();
+        dialog.Owner = System.Windows.Application.Current.MainWindow;
+        dialog.ShowDialog();
     }
 
     /// <summary>

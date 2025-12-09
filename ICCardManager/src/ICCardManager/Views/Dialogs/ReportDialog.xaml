@@ -1,0 +1,198 @@
+<Window x:Class="ICCardManager.Views.Dialogs.ReportDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:vm="clr-namespace:ICCardManager.ViewModels"
+        mc:Ignorable="d"
+        d:DataContext="{d:DesignInstance Type=vm:ReportViewModel}"
+        Title="帳票作成"
+        Height="600"
+        Width="700"
+        WindowStartupLocation="CenterOwner"
+        ResizeMode="CanResize">
+
+    <Window.Resources>
+        <BooleanToVisibilityConverter x:Key="BoolToVisibilityConverter"/>
+    </Window.Resources>
+
+    <Grid Margin="20">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <!-- 設定エリア -->
+        <Grid Grid.Row="0" Margin="0,0,0,15">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
+
+            <!-- 対象年月 -->
+            <GroupBox Grid.Column="0" Header="対象年月" Padding="10" Margin="0,0,10,0">
+                <StackPanel Orientation="Horizontal">
+                    <ComboBox ItemsSource="{Binding Years}"
+                              SelectedItem="{Binding SelectedYear}"
+                              Width="80"
+                              Padding="8"/>
+                    <TextBlock Text="年"
+                               VerticalAlignment="Center"
+                               Margin="5,0,15,0"/>
+                    <ComboBox ItemsSource="{Binding Months}"
+                              SelectedItem="{Binding SelectedMonth}"
+                              Width="60"
+                              Padding="8"/>
+                    <TextBlock Text="月"
+                               VerticalAlignment="Center"
+                               Margin="5,0,0,0"/>
+                </StackPanel>
+            </GroupBox>
+
+            <!-- 出力先 -->
+            <GroupBox Grid.Column="1" Header="出力先フォルダ" Padding="10">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <TextBox Grid.Column="0"
+                             Text="{Binding OutputFolder}"
+                             IsReadOnly="True"
+                             Padding="8"
+                             Background="#F5F5F5"/>
+                    <Button Grid.Column="1"
+                            Content="参照"
+                            Command="{Binding BrowseOutputFolderCommand}"
+                            Padding="10,8"
+                            Margin="10,0,0,0"/>
+                </Grid>
+            </GroupBox>
+        </Grid>
+
+        <!-- カード選択 -->
+        <GroupBox Grid.Row="1" Header="対象カード" Padding="10">
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="*"/>
+                </Grid.RowDefinitions>
+
+                <!-- 全選択チェックボックス -->
+                <CheckBox Grid.Row="0"
+                          Content="すべて選択"
+                          IsChecked="{Binding IsAllSelected}"
+                          Margin="0,0,0,10"/>
+
+                <!-- カード一覧 -->
+                <ListView Grid.Row="1"
+                          ItemsSource="{Binding Cards}"
+                          SelectionMode="Multiple"
+                          BorderThickness="1"
+                          BorderBrush="#DDDDDD">
+                    <ListView.ItemTemplate>
+                        <DataTemplate>
+                            <CheckBox IsChecked="{Binding IsSelected, Mode=TwoWay}"
+                                      Margin="5">
+                                <StackPanel Orientation="Horizontal">
+                                    <TextBlock Text="{Binding CardType}"
+                                               Width="100"
+                                               FontWeight="Bold"/>
+                                    <TextBlock Text="{Binding CardNumber}"
+                                               Width="100"/>
+                                    <TextBlock Text="{Binding Note}"
+                                               Foreground="Gray"/>
+                                </StackPanel>
+                            </CheckBox>
+                        </DataTemplate>
+                    </ListView.ItemTemplate>
+                    <ListView.ItemContainerStyle>
+                        <Style TargetType="ListViewItem">
+                            <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+                            <Setter Property="Padding" Value="5"/>
+                        </Style>
+                    </ListView.ItemContainerStyle>
+                </ListView>
+            </Grid>
+        </GroupBox>
+
+        <!-- 作成結果 -->
+        <GroupBox Grid.Row="2" Header="作成結果" Padding="10" Margin="0,15,0,0"
+                  Visibility="{Binding CreatedFiles.Count, Converter={StaticResource BoolToVisibilityConverter}}">
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" MaxHeight="120"/>
+                    <RowDefinition Height="Auto"/>
+                </Grid.RowDefinitions>
+                <ListBox Grid.Row="0"
+                         ItemsSource="{Binding CreatedFiles}"
+                         MaxHeight="100"
+                         BorderThickness="0">
+                    <ListBox.ItemTemplate>
+                        <DataTemplate>
+                            <TextBlock>
+                                <Hyperlink Command="{Binding DataContext.OpenCreatedFileCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                           CommandParameter="{Binding}">
+                                    <Run Text="{Binding Mode=OneWay}"/>
+                                </Hyperlink>
+                            </TextBlock>
+                        </DataTemplate>
+                    </ListBox.ItemTemplate>
+                </ListBox>
+                <Button Grid.Row="1"
+                        Content="出力フォルダを開く"
+                        Command="{Binding OpenOutputFolderCommand}"
+                        HorizontalAlignment="Left"
+                        Padding="15,8"
+                        Margin="0,10,0,0"/>
+            </Grid>
+        </GroupBox>
+
+        <!-- ボタンエリア -->
+        <Grid Grid.Row="3" Margin="0,15,0,0">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+
+            <!-- ステータスメッセージ -->
+            <TextBlock Grid.Column="0"
+                       Text="{Binding StatusMessage}"
+                       Foreground="#1976D2"
+                       FontWeight="Bold"
+                       VerticalAlignment="Center"/>
+
+            <!-- ボタン -->
+            <StackPanel Grid.Column="1"
+                        Orientation="Horizontal">
+                <Button Content="閉じる"
+                        Click="CloseButton_Click"
+                        Padding="20,10"
+                        Margin="0,0,10,0"
+                        MinWidth="100"/>
+                <Button Content="作成"
+                        Command="{Binding CreateReportCommand}"
+                        Padding="20,10"
+                        MinWidth="100"
+                        Background="#4CAF50"
+                        Foreground="White"/>
+            </StackPanel>
+        </Grid>
+
+        <!-- 処理中オーバーレイ -->
+        <Border Grid.RowSpan="4"
+                Background="#80000000"
+                Visibility="{Binding IsBusy, Converter={StaticResource BoolToVisibilityConverter}}">
+            <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
+                <ProgressBar IsIndeterminate="True" Width="250" Height="4"/>
+                <TextBlock Text="{Binding BusyMessage}"
+                           Foreground="White"
+                           FontSize="14"
+                           Margin="0,10,0,0"
+                           HorizontalAlignment="Center"/>
+            </StackPanel>
+        </Border>
+    </Grid>
+</Window>
