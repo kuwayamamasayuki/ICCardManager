@@ -113,11 +113,13 @@ public partial class App : Application
         services.AddTransient<MainViewModel>();
         services.AddTransient<CardManageViewModel>();
         services.AddTransient<StaffManageViewModel>();
+        services.AddTransient<SettingsViewModel>();
 
         // Views
         services.AddTransient<MainWindow>();
         services.AddTransient<Views.Dialogs.CardManageDialog>();
         services.AddTransient<Views.Dialogs.StaffManageDialog>();
+        services.AddTransient<Views.Dialogs.SettingsDialog>();
     }
 
     /// <summary>

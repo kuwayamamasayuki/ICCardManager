@@ -1,0 +1,201 @@
+using System.Collections.ObjectModel;
+using CommunityToolkit.Mvvm.ComponentModel;
+using CommunityToolkit.Mvvm.Input;
+using ICCardManager.Data.Repositories;
+using ICCardManager.Models;
+using Microsoft.Win32;
+
+namespace ICCardManager.ViewModels;
+
+/// <summary>
+/// 設定画面のViewModel
+/// </summary>
+public partial class SettingsViewModel : ViewModelBase
+{
+    private readonly ISettingsRepository _settingsRepository;
+
+    [ObservableProperty]
+    private int _warningBalance;
+
+    [ObservableProperty]
+    private string _backupPath = string.Empty;
+
+    [ObservableProperty]
+    private FontSizeOption _selectedFontSize;
+
+    [ObservableProperty]
+    private string _statusMessage = string.Empty;
+
+    [ObservableProperty]
+    private bool _hasChanges;
+
+    /// <summary>
+    /// 文字サイズの選択肢
+    /// </summary>
+    public ObservableCollection<FontSizeItem> FontSizeOptions { get; } = new()
+    {
+        new FontSizeItem { Value = FontSizeOption.Small, DisplayName = "小", BaseFontSize = 12 },
+        new FontSizeItem { Value = FontSizeOption.Medium, DisplayName = "中（標準）", BaseFontSize = 14 },
+        new FontSizeItem { Value = FontSizeOption.Large, DisplayName = "大", BaseFontSize = 16 },
+        new FontSizeItem { Value = FontSizeOption.ExtraLarge, DisplayName = "特大", BaseFontSize = 20 }
+    };
+
+    [ObservableProperty]
+    private FontSizeItem? _selectedFontSizeItem;
+
+    public SettingsViewModel(ISettingsRepository settingsRepository)
+    {
+        _settingsRepository = settingsRepository;
+    }
+
+    /// <summary>
+    /// 初期化
+    /// </summary>
+    public async Task InitializeAsync()
+    {
+        await LoadSettingsAsync();
+    }
+
+    /// <summary>
+    /// 設定を読み込み
+    /// </summary>
+    [RelayCommand]
+    public async Task LoadSettingsAsync()
+    {
+        using (BeginBusy("読み込み中..."))
+        {
+            var settings = await _settingsRepository.GetAppSettingsAsync();
+
+            WarningBalance = settings.WarningBalance;
+            BackupPath = settings.BackupPath;
+            SelectedFontSize = settings.FontSize;
+
+            // FontSizeItemを選択
+            SelectedFontSizeItem = FontSizeOptions.FirstOrDefault(x => x.Value == settings.FontSize)
+                                   ?? FontSizeOptions[1]; // デフォルトは「中」
+
+            HasChanges = false;
+            StatusMessage = string.Empty;
+        }
+    }
+
+    /// <summary>
+    /// 設定を保存
+    /// </summary>
+    [RelayCommand]
+    public async Task SaveAsync()
+    {
+        // バリデーション
+        if (WarningBalance < 0)
+        {
+            StatusMessage = "残額警告閾値は0以上の値を入力してください";
+            return;
+        }
+
+        if (WarningBalance > 50000)
+        {
+            StatusMessage = "残額警告閾値は50,000円以下の値を入力してください";
+            return;
+        }
+
+        using (BeginBusy("保存中..."))
+        {
+            var settings = new AppSettings
+            {
+                WarningBalance = WarningBalance,
+                BackupPath = BackupPath,
+                FontSize = SelectedFontSizeItem?.Value ?? FontSizeOption.Medium
+            };
+
+            var success = await _settingsRepository.SaveAppSettingsAsync(settings);
+
+            if (success)
+            {
+                StatusMessage = "設定を保存しました";
+                HasChanges = false;
+
+                // 文字サイズの変更を反映
+                ApplyFontSize(settings.FontSize);
+            }
+            else
+            {
+                StatusMessage = "設定の保存に失敗しました";
+            }
+        }
+    }
+
+    /// <summary>
+    /// バックアップフォルダを選択
+    /// </summary>
+    [RelayCommand]
+    public void BrowseBackupPath()
+    {
+        var dialog = new OpenFolderDialog
+        {
+            Title = "バックアップ先フォルダを選択",
+            InitialDirectory = string.IsNullOrEmpty(BackupPath)
+                ? Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments)
+                : BackupPath
+        };
+
+        if (dialog.ShowDialog() == true)
+        {
+            BackupPath = dialog.FolderName;
+            HasChanges = true;
+        }
+    }
+
+    /// <summary>
+    /// 文字サイズをアプリケーションに適用
+    /// </summary>
+    private void ApplyFontSize(FontSizeOption fontSize)
+    {
+        var baseFontSize = fontSize switch
+        {
+            FontSizeOption.Small => 12.0,
+            FontSizeOption.Medium => 14.0,
+            FontSizeOption.Large => 16.0,
+            FontSizeOption.ExtraLarge => 20.0,
+            _ => 14.0
+        };
+
+        // アプリケーション全体のフォントサイズを変更
+        if (System.Windows.Application.Current.Resources.Contains("BaseFontSize"))
+        {
+            System.Windows.Application.Current.Resources["BaseFontSize"] = baseFontSize;
+        }
+        else
+        {
+            System.Windows.Application.Current.Resources.Add("BaseFontSize", baseFontSize);
+        }
+    }
+
+    partial void OnWarningBalanceChanged(int value)
+    {
+        HasChanges = true;
+    }
+
+    partial void OnBackupPathChanged(string value)
+    {
+        HasChanges = true;
+    }
+
+    partial void OnSelectedFontSizeItemChanged(FontSizeItem? value)
+    {
+        if (value != null)
+        {
+            SelectedFontSize = value.Value;
+            HasChanges = true;
+        }
+    }
+}
+
+/// <summary>
+/// 文字サイズ選択アイテム
+/// </summary>
+public class FontSizeItem
+{
+    public FontSizeOption Value { get; set; }
+    public string DisplayName { get; set; } = string.Empty;
+    public double BaseFontSize { get; set; }
+}

@@ -522,7 +522,9 @@ public partial class MainViewModel : ViewModelBase
     [RelayCommand]
     public void OpenSettings()
     {
-        // TODO: 設定画面を開く
+        var dialog = App.Current.ServiceProvider.GetRequiredService<Views.Dialogs.SettingsDialog>();
+        dialog.Owner = System.Windows.Application.Current.MainWindow;
+        dialog.ShowDialog();
     }
 
     /// <summary>

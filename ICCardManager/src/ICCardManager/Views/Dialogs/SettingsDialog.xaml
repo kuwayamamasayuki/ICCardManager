@@ -1,0 +1,140 @@
+<Window x:Class="ICCardManager.Views.Dialogs.SettingsDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:vm="clr-namespace:ICCardManager.ViewModels"
+        mc:Ignorable="d"
+        d:DataContext="{d:DesignInstance Type=vm:SettingsViewModel}"
+        Title="設定"
+        Height="450"
+        Width="550"
+        WindowStartupLocation="CenterOwner"
+        ResizeMode="NoResize">
+
+    <Window.Resources>
+        <BooleanToVisibilityConverter x:Key="BoolToVisibilityConverter"/>
+    </Window.Resources>
+
+    <Grid Margin="20">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <!-- 設定項目 -->
+        <ScrollViewer Grid.Row="0" VerticalScrollBarVisibility="Auto">
+            <StackPanel>
+                <!-- 残額警告 -->
+                <GroupBox Header="残額警告" Margin="0,0,0,20" Padding="15">
+                    <StackPanel>
+                        <TextBlock Text="残額がこの金額を下回った場合に警告を表示します"
+                                   Foreground="Gray"
+                                   Margin="0,0,0,10"/>
+                        <StackPanel Orientation="Horizontal">
+                            <TextBox Text="{Binding WarningBalance, UpdateSourceTrigger=PropertyChanged}"
+                                     Width="120"
+                                     Padding="8"
+                                     VerticalAlignment="Center"/>
+                            <TextBlock Text="円"
+                                       VerticalAlignment="Center"
+                                       Margin="10,0,0,0"/>
+                        </StackPanel>
+                        <TextBlock Text="※ 0～50,000円の範囲で設定できます"
+                                   FontSize="11"
+                                   Foreground="Gray"
+                                   Margin="0,5,0,0"/>
+                    </StackPanel>
+                </GroupBox>
+
+                <!-- バックアップ -->
+                <GroupBox Header="バックアップ" Margin="0,0,0,20" Padding="15">
+                    <StackPanel>
+                        <TextBlock Text="データベースの自動バックアップ先フォルダ"
+                                   Foreground="Gray"
+                                   Margin="0,0,0,10"/>
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBox Grid.Column="0"
+                                     Text="{Binding BackupPath, UpdateSourceTrigger=PropertyChanged}"
+                                     Padding="8"
+                                     IsReadOnly="True"
+                                     Background="#F5F5F5"/>
+                            <Button Grid.Column="1"
+                                    Content="参照..."
+                                    Command="{Binding BrowseBackupPathCommand}"
+                                    Padding="15,8"
+                                    Margin="10,0,0,0"/>
+                        </Grid>
+                        <TextBlock Text="※ 空欄の場合、アプリケーションフォルダにバックアップされます"
+                                   FontSize="11"
+                                   Foreground="Gray"
+                                   Margin="0,5,0,0"/>
+                    </StackPanel>
+                </GroupBox>
+
+                <!-- 表示設定 -->
+                <GroupBox Header="表示設定" Margin="0,0,0,20" Padding="15">
+                    <StackPanel>
+                        <TextBlock Text="文字サイズ"
+                                   FontWeight="Bold"
+                                   Margin="0,0,0,10"/>
+                        <ComboBox ItemsSource="{Binding FontSizeOptions}"
+                                  SelectedItem="{Binding SelectedFontSizeItem}"
+                                  DisplayMemberPath="DisplayName"
+                                  Padding="8"
+                                  Width="200"
+                                  HorizontalAlignment="Left"/>
+                        <TextBlock Text="※ 文字サイズの変更は保存後に反映されます"
+                                   FontSize="11"
+                                   Foreground="Gray"
+                                   Margin="0,5,0,0"/>
+                    </StackPanel>
+                </GroupBox>
+
+                <!-- ステータスメッセージ -->
+                <TextBlock Text="{Binding StatusMessage}"
+                           Foreground="#1976D2"
+                           FontWeight="Bold"
+                           TextWrapping="Wrap"
+                           Margin="0,0,0,10"
+                           Visibility="{Binding StatusMessage, Converter={StaticResource BoolToVisibilityConverter}}"/>
+            </StackPanel>
+        </ScrollViewer>
+
+        <!-- ボタン -->
+        <StackPanel Grid.Row="1"
+                    Orientation="Horizontal"
+                    HorizontalAlignment="Right"
+                    Margin="0,20,0,0">
+            <Button Content="キャンセル"
+                    Click="CancelButton_Click"
+                    Padding="20,10"
+                    Margin="0,0,10,0"
+                    MinWidth="100"/>
+            <Button Content="保存"
+                    Command="{Binding SaveCommand}"
+                    Padding="20,10"
+                    MinWidth="100"
+                    Background="#2196F3"
+                    Foreground="White"/>
+        </StackPanel>
+
+        <!-- 処理中オーバーレイ -->
+        <Border Grid.RowSpan="2"
+                Background="#80000000"
+                Visibility="{Binding IsBusy, Converter={StaticResource BoolToVisibilityConverter}}">
+            <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
+                <ProgressBar IsIndeterminate="True" Width="200" Height="4"/>
+                <TextBlock Text="{Binding BusyMessage}"
+                           Foreground="White"
+                           FontSize="14"
+                           Margin="0,10,0,0"
+                           HorizontalAlignment="Center"/>
+            </StackPanel>
+        </Border>
+    </Grid>
+</Window>
