@@ -102,26 +102,33 @@
             </DataGrid>
 
             <!-- ボタン -->
-            <WrapPanel Grid.Row="2" Margin="0,10,0,0" Orientation="Horizontal">
-                <Button Content="新規登録"
-                        Command="{Binding StartNewCardCommand}"
-                        Padding="15,8"
-                        Margin="0,0,10,5"/>
-                <Button Content="編集"
-                        Command="{Binding StartEditCommand}"
-                        IsEnabled="{Binding SelectedCard, Converter={StaticResource BoolToVisibilityConverter}}"
-                        Padding="15,8"
-                        Margin="0,0,10,5"/>
-                <Button Content="削除"
-                        Command="{Binding DeleteCommand}"
-                        IsEnabled="{Binding SelectedCard, Converter={StaticResource BoolToVisibilityConverter}}"
-                        Padding="15,8"
-                        Margin="0,0,10,5"
-                        Foreground="Red"/>
-                <Button Content="完了"
+            <DockPanel Grid.Row="2" Margin="0,10,0,0" LastChildFill="True">
+                <!-- 完了ボタン（右端固定） -->
+                <Button DockPanel.Dock="Right"
+                        Content="完了"
                         Click="CloseButton_Click"
                         Padding="20,8"
-                        Margin="0,0,0,5"/></WrapPanel>
+                        Margin="10,0,0,5"
+                        VerticalAlignment="Top"/>
+                <!-- 左側のボタン群（折り返し可能） -->
+                <WrapPanel Orientation="Horizontal">
+                    <Button Content="新規登録"
+                            Command="{Binding StartNewCardCommand}"
+                            Padding="15,8"
+                            Margin="0,0,10,5"/>
+                    <Button Content="編集"
+                            Command="{Binding StartEditCommand}"
+                            IsEnabled="{Binding SelectedCard, Converter={StaticResource BoolToVisibilityConverter}}"
+                            Padding="15,8"
+                            Margin="0,0,10,5"/>
+                    <Button Content="削除"
+                            Command="{Binding DeleteCommand}"
+                            IsEnabled="{Binding SelectedCard, Converter={StaticResource BoolToVisibilityConverter}}"
+                            Padding="15,8"
+                            Margin="0,0,0,5"
+                            Foreground="Red"/>
+                </WrapPanel>
+            </DockPanel>
         </Grid>
 
         <!-- 右側: 編集フォーム -->
