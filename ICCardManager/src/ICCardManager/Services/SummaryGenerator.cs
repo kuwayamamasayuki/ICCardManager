@@ -3,12 +3,148 @@ using ICCardManager.Models;
 namespace ICCardManager.Services;
 
 /// <summary>
+/// 日別摘要の結果
+/// </summary>
+public class DailySummary
+{
+    /// <summary>
+    /// 利用日
+    /// </summary>
+    public DateTime Date { get; set; }
+
+    /// <summary>
+    /// 摘要文字列
+    /// </summary>
+    public string Summary { get; set; } = string.Empty;
+
+    /// <summary>
+    /// チャージかどうか
+    /// </summary>
+    public bool IsCharge { get; set; }
+}
+
+/// <summary>
 /// 摘要文字列を生成するサービス
 /// </summary>
 public class SummaryGenerator
 {
     /// <summary>
-    /// 利用履歴詳細から摘要文字列を生成
+    /// 利用履歴詳細から日付ごとの摘要リストを生成
+    /// - 日付ごとに分割
+    /// - 利用（鉄道・バス）とチャージは別行
+    /// - 古い順にソート（同日の利用とチャージも時刻順）
+    /// </summary>
+    /// <param name="details">利用履歴詳細のリスト（ICカードから取得した新しい順）</param>
+    /// <returns>日別摘要のリスト（古い順）</returns>
+    public List<DailySummary> GenerateByDate(IEnumerable<LedgerDetail> details)
+    {
+        var detailList = details.ToList();
+
+        if (detailList.Count == 0)
+        {
+            return new List<DailySummary>();
+        }
+
+        var results = new List<DailySummary>();
+
+        // 入力順にインデックスを付与（ICカード履歴は新しい順なので、インデックスが大きいほど古い）
+        var indexedDetails = detailList
+            .Select((d, index) => (Detail: d, Index: index))
+            .Where(x => x.Detail.UseDate.HasValue)
+            .ToList();
+
+        // 日付でグループ化（古い順にソート）
+        var groupedByDate = indexedDetails
+            .GroupBy(x => x.Detail.UseDate!.Value.Date)
+            .OrderBy(g => g.Key);
+
+        foreach (var dateGroup in groupedByDate)
+        {
+            var date = dateGroup.Key;
+            var dayItems = dateGroup.ToList();
+
+            // 利用（鉄道・バス）とチャージを分離
+            var usageItems = dayItems.Where(x => !x.Detail.IsCharge).ToList();
+            var chargeItems = dayItems.Where(x => x.Detail.IsCharge).ToList();
+
+            // 出力候補を作成（最古のインデックスと共に）
+            var summariesToAdd = new List<(int OldestIndex, DailySummary Summary)>();
+
+            // 利用がある場合は利用摘要を追加
+            if (usageItems.Count > 0)
+            {
+                // 古い順（インデックス降順）にソートして摘要生成
+                var usageDetails = usageItems
+                    .OrderByDescending(x => x.Index)
+                    .Select(x => x.Detail)
+                    .ToList();
+                var usageSummary = GenerateUsageSummary(usageDetails);
+                if (!string.IsNullOrEmpty(usageSummary))
+                {
+                    var oldestIndex = usageItems.Max(x => x.Index);
+                    summariesToAdd.Add((oldestIndex, new DailySummary
+                    {
+                        Date = date,
+                        Summary = usageSummary,
+                        IsCharge = false
+                    }));
+                }
+            }
+
+            // チャージがある場合はチャージ摘要を追加
+            if (chargeItems.Count > 0)
+            {
+                var oldestIndex = chargeItems.Max(x => x.Index);
+                summariesToAdd.Add((oldestIndex, new DailySummary
+                {
+                    Date = date,
+                    Summary = GetChargeSummary(),
+                    IsCharge = true
+                }));
+            }
+
+            // 古い順（インデックス降順）にソートして追加
+            foreach (var item in summariesToAdd.OrderByDescending(x => x.OldestIndex))
+            {
+                results.Add(item.Summary);
+            }
+        }
+
+        return results;
+    }
+
+    /// <summary>
+    /// 利用（鉄道・バス）の摘要を生成
+    /// </summary>
+    private string GenerateUsageSummary(List<LedgerDetail> usageDetails)
+    {
+        var railwayTrips = usageDetails.Where(d => !d.IsBus).ToList();
+        var busTrips = usageDetails.Where(d => d.IsBus).ToList();
+
+        var summaryParts = new List<string>();
+
+        // 鉄道利用がある場合
+        if (railwayTrips.Count > 0)
+        {
+            var railwaySummary = GenerateRailwaySummary(railwayTrips);
+            if (!string.IsNullOrEmpty(railwaySummary))
+            {
+                summaryParts.Add($"鉄道（{railwaySummary}）");
+            }
+        }
+
+        // バス利用がある場合
+        if (busTrips.Count > 0)
+        {
+            var busSummary = GenerateBusSummary(busTrips);
+            summaryParts.Add($"バス（{busSummary}）");
+        }
+
+        return string.Join("、", summaryParts);
+    }
+
+    /// <summary>
+    /// 利用履歴詳細から摘要文字列を生成（従来メソッド・互換性のため維持）
     /// </summary>
     /// <param name="details">利用履歴詳細のリスト</param>
     /// <returns>摘要文字列</returns>
@@ -180,6 +316,7 @@ public class SummaryGenerator
 
     /// <summary>
     /// 連続する経路を統合（乗継判定）
+    /// 注：起点と終点が同じになる循環移動の場合は統合せず、個別の経路を表示
     /// </summary>
     private List<(string Start, string End)> ConsolidateRoutes(List<(string Entry, string Exit)> routes)
     {
@@ -188,7 +325,8 @@ public class SummaryGenerator
             return new List<(string Start, string End)>();
         }
 
-        var consolidated = new List<(string Start, string End)>();
+        var result = new List<(string Start, string End)>();
+        var chainStartIndex = 0;
         var currentStart = routes[0].Entry;
         var currentEnd = routes[0].Exit;
 
@@ -201,14 +339,45 @@ public class SummaryGenerator
             }
             else
             {
-                consolidated.Add((currentStart, currentEnd));
+                // チェーンを結果に追加
+                AddConsolidatedChain(result, routes, chainStartIndex, i - 1, currentStart, currentEnd);
+
+                chainStartIndex = i;
                 currentStart = routes[i].Entry;
                 currentEnd = routes[i].Exit;
             }
         }
 
-        consolidated.Add((currentStart, currentEnd));
-        return consolidated;
+        // 最後のチェーンを追加
+        AddConsolidatedChain(result, routes, chainStartIndex, routes.Count - 1, currentStart, currentEnd);
+
+        return result;
+    }
+
+    /// <summary>
+    /// 統合されたチェーンを結果に追加
+    /// 起点と終点が同じ（循環）の場合は個別の経路を追加
+    /// </summary>
+    private void AddConsolidatedChain(
+        List<(string Start, string End)> result,
+        List<(string Entry, string Exit)> routes,
+        int chainStart,
+        int chainEnd,
+        string consolidatedStart,
+        string consolidatedEnd)
+    {
+        // 起点と終点が同じ場合（循環移動）は、統合せずに個別の経路を追加
+        if (consolidatedStart == consolidatedEnd && chainEnd > chainStart)
+        {
+            for (int i = chainStart; i <= chainEnd; i++)
+            {
+                result.Add((routes[i].Entry, routes[i].Exit));
+            }
+        }
+        else
+        {
+            result.Add((consolidatedStart, consolidatedEnd));
+        }
     }
 
     /// <summary>

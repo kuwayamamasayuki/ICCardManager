@@ -64,6 +64,10 @@
     <EmbeddedResource Include="Data\schema.sql">
       <LogicalName>ICCardManager.Data.schema.sql</LogicalName>
     </EmbeddedResource>
+    <!-- 埋め込みリソース（駅コードマスタ） -->
+    <EmbeddedResource Include="Resources\StationCode.csv">
+      <LogicalName>ICCardManager.Resources.StationCode.csv</LogicalName>
+    </EmbeddedResource>
   </ItemGroup>
 
 </Project>

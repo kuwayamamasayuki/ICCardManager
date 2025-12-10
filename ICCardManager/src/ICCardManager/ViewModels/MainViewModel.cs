@@ -408,13 +408,30 @@ public partial class MainViewModel : ViewModelBase
         var cardType = _cardTypeDetector.Detect(idm);
         var cardTypeName = CardTypeDetector.GetDisplayName(cardType);
 
-        // TODO: 登録確認ダイアログを表示
         _soundPlayer.Play(SoundType.Warning);
         SetState(CurrentState,
             $"⚠️ 未登録のカードです\n種別: {cardTypeName}",
             "#FFEBEE");
 
-        await Task.Delay(2000);
+        // 登録確認ダイアログを表示
+        var result = System.Windows.MessageBox.Show(
+            $"このカードは登録されていません。\n\n種別: {cardTypeName}\nIDm: {idm}\n\n新規登録しますか？",
+            "未登録カード",
+            System.Windows.MessageBoxButton.YesNo,
+            System.Windows.MessageBoxImage.Question);
+
+        if (result == System.Windows.MessageBoxResult.Yes)
+        {
+            // カード管理画面を開いて新規登録モードで開始
+            var dialog = App.Current.ServiceProvider.GetRequiredService<Views.Dialogs.CardManageDialog>();
+            dialog.Owner = System.Windows.Application.Current.MainWindow;
+            dialog.InitializeWithIdm(idm);
+            dialog.ShowDialog();
+
+            // ダイアログを閉じた後、貸出中カード一覧を更新
+            await RefreshLentCardsAsync();
+        }
+
         ResetState();
     }
 

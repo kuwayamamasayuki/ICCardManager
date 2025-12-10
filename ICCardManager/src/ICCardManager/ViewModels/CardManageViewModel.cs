@@ -121,6 +121,27 @@ public partial class CardManageViewModel : ViewModelBase
     }
 
     /// <summary>
+    /// IDmを指定して新規登録モードを開始（未登録カード検出時用）
+    /// </summary>
+    /// <param name="idm">カードのIDm</param>
+    public void StartNewCardWithIdm(string idm)
+    {
+        SelectedCard = null;
+        IsEditing = true;
+        IsNewCard = true;
+        EditCardIdm = idm;
+
+        // カード種別を自動判定
+        var detectedType = _cardTypeDetector.Detect(idm);
+        EditCardType = CardTypeDetector.GetDisplayName(detectedType);
+
+        EditCardNumber = string.Empty;
+        EditNote = string.Empty;
+        StatusMessage = $"カードを読み取りました: {EditCardType}";
+        IsWaitingForCard = false; // すでにIDmがあるので待機しない
+    }
+
+    /// <summary>
     /// 編集モードを開始
     /// </summary>
     [RelayCommand]

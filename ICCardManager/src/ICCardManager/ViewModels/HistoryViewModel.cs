@@ -36,6 +36,31 @@ public partial class HistoryViewModel : ViewModelBase
     [ObservableProperty]
     private string _statusMessage = string.Empty;
 
+    [ObservableProperty]
+    private string _selectedPeriodDisplay = string.Empty;
+
+    [ObservableProperty]
+    private bool _isMonthSelectorOpen;
+
+    [ObservableProperty]
+    private int _selectedYear;
+
+    [ObservableProperty]
+    private int _selectedMonth;
+
+    /// <summary>
+    /// 選択可能な年のリスト（過去6年分）
+    /// </summary>
+    public ObservableCollection<int> AvailableYears { get; } = new();
+
+    /// <summary>
+    /// 月のリスト（1～12）
+    /// </summary>
+    public ObservableCollection<int> AvailableMonths { get; } = new()
+    {
+        1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12
+    };
+
     public HistoryViewModel(
         ILedgerRepository ledgerRepository,
         ICardRepository cardRepository)
@@ -43,9 +68,20 @@ public partial class HistoryViewModel : ViewModelBase
         _ledgerRepository = ledgerRepository;
         _cardRepository = cardRepository;
 
-        // デフォルトは過去3ヶ月
-        ToDate = DateTime.Today;
-        FromDate = DateTime.Today.AddMonths(-3);
+        // 選択可能な年を初期化（今年度から過去6年分）
+        var currentYear = DateTime.Today.Year;
+        for (int year = currentYear; year >= currentYear - 6; year--)
+        {
+            AvailableYears.Add(year);
+        }
+
+        // デフォルトは今月
+        var today = DateTime.Today;
+        FromDate = new DateTime(today.Year, today.Month, 1);
+        ToDate = today;
+        SelectedYear = today.Year;
+        SelectedMonth = today.Month;
+        UpdateSelectedPeriodDisplay();
     }
 
     /// <summary>
@@ -94,9 +130,7 @@ public partial class HistoryViewModel : ViewModelBase
     public void SetThisMonth()
     {
         var today = DateTime.Today;
-        FromDate = new DateTime(today.Year, today.Month, 1);
-        ToDate = today;
-        _ = LoadHistoryAsync();
+        SetMonth(today.Year, today.Month);
     }
 
     /// <summary>
@@ -107,36 +141,56 @@ public partial class HistoryViewModel : ViewModelBase
     {
         var today = DateTime.Today;
         var lastMonth = today.AddMonths(-1);
-        FromDate = new DateTime(lastMonth.Year, lastMonth.Month, 1);
-        ToDate = new DateTime(lastMonth.Year, lastMonth.Month, DateTime.DaysInMonth(lastMonth.Year, lastMonth.Month));
+        SetMonth(lastMonth.Year, lastMonth.Month);
+    }
+
+    /// <summary>
+    /// 月選択ポップアップを開く
+    /// </summary>
+    [RelayCommand]
+    public void OpenMonthSelector()
+    {
+        IsMonthSelectorOpen = true;
+    }
+
+    /// <summary>
+    /// 月選択ポップアップを閉じる
+    /// </summary>
+    [RelayCommand]
+    public void CloseMonthSelector()
+    {
+        IsMonthSelectorOpen = false;
+    }
+
+    /// <summary>
+    /// 選択した月を適用
+    /// </summary>
+    [RelayCommand]
+    public void ApplySelectedMonth()
+    {
+        SetMonth(SelectedYear, SelectedMonth);
+        IsMonthSelectorOpen = false;
+    }
+
+    /// <summary>
+    /// 指定した年月に期間を設定
+    /// </summary>
+    private void SetMonth(int year, int month)
+    {
+        FromDate = new DateTime(year, month, 1);
+        ToDate = new DateTime(year, month, DateTime.DaysInMonth(year, month));
+        SelectedYear = year;
+        SelectedMonth = month;
+        UpdateSelectedPeriodDisplay();
         _ = LoadHistoryAsync();
     }
 
     /// <summary>
-    /// 期間を過去3ヶ月に設定
+    /// 選択中の期間表示を更新
     /// </summary>
-    [RelayCommand]
-    public void SetLast3Months()
+    private void UpdateSelectedPeriodDisplay()
     {
-        ToDate = DateTime.Today;
-        FromDate = DateTime.Today.AddMonths(-3);
-        _ = LoadHistoryAsync();
-    }
-
-    /// <summary>
-    /// 期間を今年度に設定
-    /// </summary>
-    [RelayCommand]
-    public void SetThisFiscalYear()
-    {
-        var today = DateTime.Today;
-        var fiscalYearStart = today.Month >= 4
-            ? new DateTime(today.Year, 4, 1)
-            : new DateTime(today.Year - 1, 4, 1);
-
-        FromDate = fiscalYearStart;
-        ToDate = today;
-        _ = LoadHistoryAsync();
+        SelectedPeriodDisplay = $"{FromDate:yyyy年M月}";
     }
 }
 

@@ -1,4 +1,6 @@
+using ICCardManager.Common;
 using ICCardManager.Models;
+using ICCardManager.Services;
 using PCSC;
 using PCSC.Exceptions;
 using PCSC.Monitoring;
@@ -150,13 +152,16 @@ public class PcScCardReader : ICardReader
 
                 System.Diagnostics.Debug.WriteLine($"履歴読み取り: {historyDataList.Count}件のデータを取得");
 
+                // IDmからカード種別を判定
+                var cardType = CardTypeDetector.DetectFromIdm(idm);
+
                 // 履歴データをパースして金額を計算
                 for (var i = 0; i < historyDataList.Count; i++)
                 {
                     var currentData = historyDataList[i];
                     var nextData = i + 1 < historyDataList.Count ? historyDataList[i + 1] : null;
 
-                    var detail = ParseHistoryData(currentData, nextData);
+                    var detail = ParseHistoryData(currentData, nextData, cardType);
                     if (detail != null)
                     {
                         details.Add(detail);
@@ -449,7 +454,8 @@ public class PcScCardReader : ICardReader
     /// </summary>
     /// <param name="currentData">現在のレコードデータ</param>
     /// <param name="previousData">前回のレコードデータ（金額計算用）</param>
-    private LedgerDetail? ParseHistoryData(byte[] currentData, byte[]? previousData)
+    /// <param name="cardType">カード種別（駅名検索の優先エリア決定に使用）</param>
+    private LedgerDetail? ParseHistoryData(byte[] currentData, byte[]? previousData, CardType cardType)
     {
         if (currentData == null || currentData.Length < 16)
         {
@@ -532,8 +538,8 @@ public class PcScCardReader : ICardReader
             return new LedgerDetail
             {
                 UseDate = useDate,
-                EntryStation = entryStationCode > 0 ? GetStationName(entryStationCode) : null,
-                ExitStation = exitStationCode > 0 ? GetStationName(exitStationCode) : null,
+                EntryStation = entryStationCode > 0 ? GetStationName(entryStationCode, cardType) : null,
+                ExitStation = exitStationCode > 0 ? GetStationName(exitStationCode, cardType) : null,
                 Amount = amount,
                 Balance = balance,
                 IsCharge = isCharge,
@@ -551,17 +557,14 @@ public class PcScCardReader : ICardReader
     /// 駅コードから駅名を取得
     /// </summary>
     /// <remarks>
-    /// 実際の実装では駅コードテーブルを参照する必要がある
-    /// ここでは仮実装としてコードをそのまま返す
+    /// StationMasterServiceを使用して駅コードマスタから駅名を解決する。
+    /// カード種別に応じて適切なエリア（関東/関西/中部/九州）を優先的に検索する。
     /// </remarks>
-    private static string GetStationName(int stationCode)
+    /// <param name="stationCode">駅コード（上位バイト:路線コード, 下位バイト:駅番号）</param>
+    /// <param name="cardType">カード種別（優先エリアの決定に使用）</param>
+    private static string GetStationName(int stationCode, CardType cardType)
     {
-        // TODO: 駅コードマスタテーブルを参照する実装に置き換える
-        // 現時点では駅コードを16進数文字列で返す
-        // 上位バイト: 路線コード, 下位バイト: 駅コード
-        var lineCode = (stationCode >> 8) & 0xFF;
-        var stationNum = stationCode & 0xFF;
-        return $"駅{lineCode:X2}-{stationNum:X2}";
+        return StationMasterService.Instance.GetStationName(stationCode, cardType);
     }
 
     /// <summary>

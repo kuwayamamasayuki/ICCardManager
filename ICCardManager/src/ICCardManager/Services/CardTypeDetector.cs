@@ -32,6 +32,16 @@ public class CardTypeDetector
     /// <returns>判別されたカード種別</returns>
     public CardType Detect(string idm)
     {
+        return DetectFromIdm(idm);
+    }
+
+    /// <summary>
+    /// IDmからカード種別を判別します（静的メソッド）
+    /// </summary>
+    /// <param name="idm">IDm (16桁の16進数文字列)</param>
+    /// <returns>判別されたカード種別</returns>
+    public static CardType DetectFromIdm(string idm)
+    {
         if (string.IsNullOrEmpty(idm) || idm.Length < 2)
         {
             return CardType.Unknown;

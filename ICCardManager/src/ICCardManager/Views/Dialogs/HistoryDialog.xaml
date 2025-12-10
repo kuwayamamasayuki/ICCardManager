@@ -69,41 +69,85 @@
                 <ColumnDefinition Width="*"/>
             </Grid.ColumnDefinitions>
 
-            <!-- 期間入力 -->
+            <!-- 現在の期間表示 -->
             <StackPanel Grid.Column="0" Orientation="Horizontal">
-                <TextBlock Text="期間:"
+                <TextBlock Text="表示期間:"
                            VerticalAlignment="Center"
                            Margin="0,0,10,0"/>
-                <DatePicker SelectedDate="{Binding FromDate}"
-                            Width="120"/>
-                <TextBlock Text="～"
-                           VerticalAlignment="Center"
-                           Margin="10,0,10,0"/>
-                <DatePicker SelectedDate="{Binding ToDate}"
-                            Width="120"/>
-                <Button Content="検索"
-                        Command="{Binding LoadHistoryCommand}"
-                        Padding="15,5"
-                        Margin="15,0,0,0"/>
+                <Border Background="#E3F2FD"
+                        CornerRadius="4"
+                        Padding="15,8">
+                    <TextBlock Text="{Binding SelectedPeriodDisplay}"
+                               FontSize="16"
+                               FontWeight="Bold"
+                               Foreground="#1565C0"/>
+                </Border>
             </StackPanel>
 
-            <!-- クイック選択ボタン -->
+            <!-- 月選択ボタン -->
             <StackPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Right">
                 <Button Content="今月"
                         Command="{Binding SetThisMonthCommand}"
-                        Padding="10,5"
+                        Padding="12,6"
                         Margin="0,0,5,0"/>
                 <Button Content="先月"
                         Command="{Binding SetLastMonthCommand}"
-                        Padding="10,5"
+                        Padding="12,6"
                         Margin="0,0,5,0"/>
-                <Button Content="3ヶ月"
-                        Command="{Binding SetLast3MonthsCommand}"
-                        Padding="10,5"
-                        Margin="0,0,5,0"/>
-                <Button Content="今年度"
-                        Command="{Binding SetThisFiscalYearCommand}"
-                        Padding="10,5"/>
+                <Button x:Name="OtherMonthButton"
+                        Content="その他の月..."
+                        Command="{Binding OpenMonthSelectorCommand}"
+                        Padding="12,6"/>
+
+                <!-- 月選択ポップアップ -->
+                <Popup IsOpen="{Binding IsMonthSelectorOpen}"
+                       PlacementTarget="{Binding ElementName=OtherMonthButton}"
+                       Placement="Bottom"
+                       StaysOpen="False"
+                       AllowsTransparency="True">
+                    <Border Background="White"
+                            BorderBrush="#CCCCCC"
+                            BorderThickness="1"
+                            CornerRadius="4"
+                            Padding="15"
+                            Margin="0,5,0,0">
+                        <Border.Effect>
+                            <DropShadowEffect BlurRadius="10" ShadowDepth="2" Opacity="0.3"/>
+                        </Border.Effect>
+                        <StackPanel>
+                            <TextBlock Text="月を選択"
+                                       FontWeight="Bold"
+                                       Margin="0,0,0,10"/>
+                            <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
+                                <ComboBox ItemsSource="{Binding AvailableYears}"
+                                          SelectedItem="{Binding SelectedYear}"
+                                          Width="80"
+                                          Padding="8"/>
+                                <TextBlock Text="年"
+                                           VerticalAlignment="Center"
+                                           Margin="5,0,15,0"/>
+                                <ComboBox ItemsSource="{Binding AvailableMonths}"
+                                          SelectedItem="{Binding SelectedMonth}"
+                                          Width="60"
+                                          Padding="8"/>
+                                <TextBlock Text="月"
+                                           VerticalAlignment="Center"
+                                           Margin="5,0,0,0"/>
+                            </StackPanel>
+                            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                                <Button Content="キャンセル"
+                                        Command="{Binding CloseMonthSelectorCommand}"
+                                        Padding="10,5"
+                                        Margin="0,0,10,0"/>
+                                <Button Content="適用"
+                                        Command="{Binding ApplySelectedMonthCommand}"
+                                        Padding="15,5"
+                                        Background="#2196F3"
+                                        Foreground="White"/>
+                            </StackPanel>
+                        </StackPanel>
+                    </Border>
+                </Popup>
             </StackPanel>
         </Grid>
 

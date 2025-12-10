@@ -116,7 +116,7 @@
                     Margin="0,0,10,0"
                     MinWidth="100"/>
             <Button Content="保存"
-                    Command="{Binding SaveCommand}"
+                    Command="{Binding SaveAsyncCommand}"
                     Padding="20,10"
                     MinWidth="100"
                     Background="#2196F3"
