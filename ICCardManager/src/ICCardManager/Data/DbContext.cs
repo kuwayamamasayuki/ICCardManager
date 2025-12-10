@@ -18,6 +18,15 @@ public class DbContext : IDisposable
     public string DatabasePath { get; }
 
     /// <summary>
+    /// テスト用のprotectedコンストラクタ
+    /// </summary>
+    protected DbContext()
+    {
+        DatabasePath = string.Empty;
+        _connectionString = string.Empty;
+    }
+
+    /// <summary>
     /// コンストラクタ
     /// </summary>
     /// <param name="databasePath">データベースファイルのパス（省略時はアプリフォルダ内）</param>
@@ -209,7 +218,7 @@ public class DbContext : IDisposable
     /// <summary>
     /// トランザクションを開始
     /// </summary>
-    public SqliteTransaction BeginTransaction()
+    public virtual SqliteTransaction BeginTransaction()
     {
         return GetConnection().BeginTransaction();
     }
