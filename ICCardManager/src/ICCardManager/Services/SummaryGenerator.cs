@@ -148,7 +148,7 @@ public class SummaryGenerator
     /// </summary>
     /// <param name="details">利用履歴詳細のリスト</param>
     /// <returns>摘要文字列</returns>
-    public string Generate(IEnumerable<LedgerDetail> details)
+    public virtual string Generate(IEnumerable<LedgerDetail> details)
     {
         var detailList = details.ToList();
 
