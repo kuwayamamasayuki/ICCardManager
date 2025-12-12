@@ -1,0 +1,306 @@
+using FluentAssertions;
+using ICCardManager.Data.Repositories;
+using ICCardManager.Models;
+using ICCardManager.ViewModels;
+using Moq;
+using Xunit;
+
+namespace ICCardManager.Tests.ViewModels;
+
+/// <summary>
+/// SettingsViewModelの単体テスト
+/// </summary>
+public class SettingsViewModelTests
+{
+    private readonly Mock<ISettingsRepository> _settingsRepositoryMock;
+    private readonly SettingsViewModel _viewModel;
+
+    public SettingsViewModelTests()
+    {
+        _settingsRepositoryMock = new Mock<ISettingsRepository>();
+        _viewModel = new SettingsViewModel(_settingsRepositoryMock.Object);
+    }
+
+    #region 設定読み込みテスト
+
+    /// <summary>
+    /// 設定が正しく読み込まれること
+    /// </summary>
+    [Fact]
+    public async Task LoadSettingsAsync_ShouldLoadSettingsCorrectly()
+    {
+        // Arrange
+        var settings = new AppSettings
+        {
+            WarningBalance = 2000,
+            BackupPath = @"C:\Backup",
+            FontSize = FontSizeOption.Large
+        };
+        _settingsRepositoryMock
+            .Setup(r => r.GetAppSettingsAsync())
+            .ReturnsAsync(settings);
+
+        // Act
+        await _viewModel.LoadSettingsAsync();
+
+        // Assert
+        _viewModel.WarningBalance.Should().Be(2000);
+        _viewModel.BackupPath.Should().Be(@"C:\Backup");
+        _viewModel.SelectedFontSize.Should().Be(FontSizeOption.Large);
+        _viewModel.SelectedFontSizeItem.Should().NotBeNull();
+        _viewModel.SelectedFontSizeItem!.Value.Should().Be(FontSizeOption.Large);
+        _viewModel.HasChanges.Should().BeFalse();
+    }
+
+    /// <summary>
+    /// デフォルト設定が正しく読み込まれること
+    /// </summary>
+    [Fact]
+    public async Task LoadSettingsAsync_WithDefaultSettings_ShouldSetMediumFontSize()
+    {
+        // Arrange
+        var settings = new AppSettings
+        {
+            WarningBalance = 1000,
+            BackupPath = "",
+            FontSize = FontSizeOption.Medium
+        };
+        _settingsRepositoryMock
+            .Setup(r => r.GetAppSettingsAsync())
+            .ReturnsAsync(settings);
+
+        // Act
+        await _viewModel.LoadSettingsAsync();
+
+        // Assert
+        _viewModel.SelectedFontSizeItem.Should().NotBeNull();
+        _viewModel.SelectedFontSizeItem!.DisplayName.Should().Be("中（標準）");
+    }
+
+    #endregion
+
+    #region バリデーションテスト
+
+    /// <summary>
+    /// 残額警告閾値が負の値の場合、エラーメッセージが表示されること
+    /// </summary>
+    [Fact]
+    public async Task SaveAsync_WithNegativeWarningBalance_ShouldShowErrorMessage()
+    {
+        // Arrange
+        _viewModel.WarningBalance = -100;
+
+        // Act
+        await _viewModel.SaveAsync();
+
+        // Assert
+        _viewModel.StatusMessage.Should().Contain("0以上");
+        _settingsRepositoryMock.Verify(r => r.SaveAppSettingsAsync(It.IsAny<AppSettings>()), Times.Never);
+    }
+
+    /// <summary>
+    /// 残額警告閾値が50,000円を超える場合、エラーメッセージが表示されること
+    /// </summary>
+    [Fact]
+    public async Task SaveAsync_WithExcessiveWarningBalance_ShouldShowErrorMessage()
+    {
+        // Arrange
+        _viewModel.WarningBalance = 60000;
+
+        // Act
+        await _viewModel.SaveAsync();
+
+        // Assert
+        _viewModel.StatusMessage.Should().Contain("50,000円以下");
+        _settingsRepositoryMock.Verify(r => r.SaveAppSettingsAsync(It.IsAny<AppSettings>()), Times.Never);
+    }
+
+    /// <summary>
+    /// 残額警告閾値が範囲内（0円）の場合、リポジトリに保存が試みられること
+    /// </summary>
+    /// <remarks>
+    /// SaveAsync成功後のApplyFontSizeはWPFコンテキストが必要なため、
+    /// リポジトリの呼び出しのみを検証します。
+    /// </remarks>
+    [Fact]
+    public async Task SaveAsync_WithZeroWarningBalance_ShouldCallRepository()
+    {
+        // Arrange
+        _viewModel.WarningBalance = 0;
+        _viewModel.BackupPath = "";
+        _settingsRepositoryMock
+            .Setup(r => r.SaveAppSettingsAsync(It.IsAny<AppSettings>()))
+            .ReturnsAsync(false); // WPF依存のApplyFontSizeを回避するためfalseを返す
+
+        // Act
+        await _viewModel.SaveAsync();
+
+        // Assert - リポジトリが正しいパラメータで呼ばれたことを検証
+        _settingsRepositoryMock.Verify(r => r.SaveAppSettingsAsync(It.Is<AppSettings>(s => s.WarningBalance == 0)), Times.Once);
+    }
+
+    /// <summary>
+    /// 残額警告閾値が範囲内（50,000円）の場合、リポジトリに保存が試みられること
+    /// </summary>
+    /// <remarks>
+    /// SaveAsync成功後のApplyFontSizeはWPFコンテキストが必要なため、
+    /// リポジトリの呼び出しのみを検証します。
+    /// </remarks>
+    [Fact]
+    public async Task SaveAsync_WithMaxWarningBalance_ShouldCallRepository()
+    {
+        // Arrange
+        _viewModel.WarningBalance = 50000;
+        _viewModel.BackupPath = "";
+        _settingsRepositoryMock
+            .Setup(r => r.SaveAppSettingsAsync(It.IsAny<AppSettings>()))
+            .ReturnsAsync(false); // WPF依存のApplyFontSizeを回避するためfalseを返す
+
+        // Act
+        await _viewModel.SaveAsync();
+
+        // Assert - リポジトリが正しいパラメータで呼ばれたことを検証
+        _settingsRepositoryMock.Verify(r => r.SaveAppSettingsAsync(It.Is<AppSettings>(s => s.WarningBalance == 50000)), Times.Once);
+    }
+
+    #endregion
+
+    #region 設定保存テスト
+
+    /// <summary>
+    /// 設定がリポジトリに正しく渡されること
+    /// </summary>
+    /// <remarks>
+    /// SaveAsync成功後のApplyFontSizeはWPFコンテキストが必要なため、
+    /// リポジトリへの呼び出し内容のみを検証します。
+    /// </remarks>
+    [Fact]
+    public async Task SaveAsync_WithValidSettings_ShouldCallRepositoryWithCorrectData()
+    {
+        // Arrange
+        _viewModel.WarningBalance = 3000;
+        _viewModel.BackupPath = @"D:\Backup";
+        _viewModel.SelectedFontSizeItem = _viewModel.FontSizeOptions.First(x => x.Value == FontSizeOption.Large);
+
+        _settingsRepositoryMock
+            .Setup(r => r.SaveAppSettingsAsync(It.IsAny<AppSettings>()))
+            .ReturnsAsync(false); // WPF依存のApplyFontSizeを回避するためfalseを返す
+
+        // Act
+        await _viewModel.SaveAsync();
+
+        // Assert - リポジトリが正しいパラメータで呼ばれたことを検証
+        _settingsRepositoryMock.Verify(r => r.SaveAppSettingsAsync(It.Is<AppSettings>(s =>
+            s.WarningBalance == 3000 &&
+            s.BackupPath == @"D:\Backup" &&
+            s.FontSize == FontSizeOption.Large
+        )), Times.Once);
+    }
+
+    /// <summary>
+    /// 保存に失敗した場合、エラーメッセージが表示されること
+    /// </summary>
+    [Fact]
+    public async Task SaveAsync_WhenSaveFails_ShouldShowErrorMessage()
+    {
+        // Arrange
+        _viewModel.WarningBalance = 1000;
+        _settingsRepositoryMock
+            .Setup(r => r.SaveAppSettingsAsync(It.IsAny<AppSettings>()))
+            .ReturnsAsync(false);
+
+        // Act
+        await _viewModel.SaveAsync();
+
+        // Assert
+        _viewModel.StatusMessage.Should().Contain("失敗");
+    }
+
+    #endregion
+
+    #region 変更検知テスト
+
+    /// <summary>
+    /// WarningBalanceを変更するとHasChangesがtrueになること
+    /// </summary>
+    [Fact]
+    public void OnWarningBalanceChanged_ShouldSetHasChangesToTrue()
+    {
+        // Arrange
+        _viewModel.HasChanges = false;
+
+        // Act
+        _viewModel.WarningBalance = 5000;
+
+        // Assert
+        _viewModel.HasChanges.Should().BeTrue();
+    }
+
+    /// <summary>
+    /// BackupPathを変更するとHasChangesがtrueになること
+    /// </summary>
+    [Fact]
+    public void OnBackupPathChanged_ShouldSetHasChangesToTrue()
+    {
+        // Arrange
+        _viewModel.HasChanges = false;
+
+        // Act
+        _viewModel.BackupPath = @"E:\NewBackup";
+
+        // Assert
+        _viewModel.HasChanges.Should().BeTrue();
+    }
+
+    /// <summary>
+    /// SelectedFontSizeItemを変更するとHasChangesがtrueになること
+    /// </summary>
+    [Fact]
+    public void OnSelectedFontSizeItemChanged_ShouldSetHasChangesToTrue()
+    {
+        // Arrange
+        _viewModel.HasChanges = false;
+
+        // Act
+        _viewModel.SelectedFontSizeItem = _viewModel.FontSizeOptions.Last();
+
+        // Assert
+        _viewModel.HasChanges.Should().BeTrue();
+        _viewModel.SelectedFontSize.Should().Be(_viewModel.FontSizeOptions.Last().Value);
+    }
+
+    #endregion
+
+    #region FontSizeOptionsテスト
+
+    /// <summary>
+    /// FontSizeOptionsが4つの選択肢を持つこと
+    /// </summary>
+    [Fact]
+    public void FontSizeOptions_ShouldHaveFourOptions()
+    {
+        // Assert
+        _viewModel.FontSizeOptions.Should().HaveCount(4);
+    }
+
+    /// <summary>
+    /// FontSizeOptionsが正しい値を持つこと
+    /// </summary>
+    [Theory]
+    [InlineData(FontSizeOption.Small, "小", 12)]
+    [InlineData(FontSizeOption.Medium, "中（標準）", 14)]
+    [InlineData(FontSizeOption.Large, "大", 16)]
+    [InlineData(FontSizeOption.ExtraLarge, "特大", 20)]
+    public void FontSizeOptions_ShouldHaveCorrectValues(FontSizeOption expected, string displayName, double baseFontSize)
+    {
+        // Act
+        var item = _viewModel.FontSizeOptions.FirstOrDefault(x => x.Value == expected);
+
+        // Assert
+        item.Should().NotBeNull();
+        item!.DisplayName.Should().Be(displayName);
+        item.BaseFontSize.Should().Be(baseFontSize);
+    }
+
+    #endregion
+}
