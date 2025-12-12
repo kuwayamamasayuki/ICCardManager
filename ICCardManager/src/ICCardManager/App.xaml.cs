@@ -1,4 +1,5 @@
 using System.Windows;
+using ICCardManager.Models;
 using ICCardManager.Data;
 using ICCardManager.Data.Repositories;
 using ICCardManager.Infrastructure.CardReader;
@@ -141,8 +142,59 @@ public partial class App : Application
         RegisterTestDataAsync().Wait();
 #endif
 
+        // 保存済み設定を適用
+        ApplySavedSettings();
+
         // 起動時処理
         PerformStartupTasks(dbContext);
+    }
+
+    /// <summary>
+    /// 保存済み設定を適用
+    /// </summary>
+    private void ApplySavedSettings()
+    {
+        try
+        {
+            var settingsRepository = ServiceProvider.GetRequiredService<ISettingsRepository>();
+            var settings = settingsRepository.GetAppSettingsAsync().Result;
+
+            // 文字サイズを適用
+            ApplyFontSize(settings.FontSize);
+
+            System.Diagnostics.Debug.WriteLine($"設定を適用: フォントサイズ={settings.FontSize}");
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"設定の適用でエラー: {ex.Message}");
+            // デフォルト値を適用
+            ApplyFontSize(FontSizeOption.Medium);
+        }
+    }
+
+    /// <summary>
+    /// 文字サイズをアプリケーション全体に適用
+    /// </summary>
+    public static void ApplyFontSize(FontSizeOption fontSize)
+    {
+        var baseFontSize = fontSize switch
+        {
+            FontSizeOption.Small => 12.0,
+            FontSizeOption.Medium => 14.0,
+            FontSizeOption.Large => 16.0,
+            FontSizeOption.ExtraLarge => 20.0,
+            _ => 14.0
+        };
+
+        // 比率に基づいて他のフォントサイズも計算
+        var largeFontSize = Math.Round(baseFontSize * 1.3);
+        var smallFontSize = Math.Round(baseFontSize * 0.85);
+
+        // アプリケーションリソースを更新
+        var resources = Application.Current.Resources;
+        resources["BaseFontSize"] = baseFontSize;
+        resources["LargeFontSize"] = largeFontSize;
+        resources["SmallFontSize"] = smallFontSize;
     }
 
 #if DEBUG
