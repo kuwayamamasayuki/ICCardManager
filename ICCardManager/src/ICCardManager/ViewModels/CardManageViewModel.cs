@@ -16,6 +16,7 @@ public partial class CardManageViewModel : ViewModelBase
     private readonly ICardRepository _cardRepository;
     private readonly ICardReader _cardReader;
     private readonly CardTypeDetector _cardTypeDetector;
+    private readonly IValidationService _validationService;
 
     [ObservableProperty]
     private ObservableCollection<IcCard> _cards = new();
@@ -68,11 +69,13 @@ public partial class CardManageViewModel : ViewModelBase
     public CardManageViewModel(
         ICardRepository cardRepository,
         ICardReader cardReader,
-        CardTypeDetector cardTypeDetector)
+        CardTypeDetector cardTypeDetector,
+        IValidationService validationService)
     {
         _cardRepository = cardRepository;
         _cardReader = cardReader;
         _cardTypeDetector = cardTypeDetector;
+        _validationService = validationService;
 
         // カード読み取りイベント
         _cardReader.CardRead += OnCardRead;
@@ -165,15 +168,25 @@ public partial class CardManageViewModel : ViewModelBase
     [RelayCommand]
     public async Task SaveAsync()
     {
-        if (string.IsNullOrWhiteSpace(EditCardIdm))
+        // バリデーション
+        var idmResult = _validationService.ValidateCardIdm(EditCardIdm);
+        if (!idmResult)
         {
-            StatusMessage = "カードIDmが入力されていません";
+            StatusMessage = idmResult.ErrorMessage!;
             return;
         }
 
-        if (string.IsNullOrWhiteSpace(EditCardType))
+        var typeResult = _validationService.ValidateCardType(EditCardType);
+        if (!typeResult)
         {
-            StatusMessage = "カード種別を選択してください";
+            StatusMessage = typeResult.ErrorMessage!;
+            return;
+        }
+
+        var numberResult = _validationService.ValidateCardNumber(EditCardNumber);
+        if (!numberResult)
+        {
+            StatusMessage = numberResult.ErrorMessage!;
             return;
         }
 

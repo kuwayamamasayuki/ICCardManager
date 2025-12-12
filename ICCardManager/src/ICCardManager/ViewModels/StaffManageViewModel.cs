@@ -4,6 +4,7 @@ using CommunityToolkit.Mvvm.Input;
 using ICCardManager.Data.Repositories;
 using ICCardManager.Infrastructure.CardReader;
 using ICCardManager.Models;
+using ICCardManager.Services;
 
 namespace ICCardManager.ViewModels;
 
@@ -14,6 +15,7 @@ public partial class StaffManageViewModel : ViewModelBase
 {
     private readonly IStaffRepository _staffRepository;
     private readonly ICardReader _cardReader;
+    private readonly IValidationService _validationService;
 
     [ObservableProperty]
     private ObservableCollection<Staff> _staffList = new();
@@ -47,10 +49,12 @@ public partial class StaffManageViewModel : ViewModelBase
 
     public StaffManageViewModel(
         IStaffRepository staffRepository,
-        ICardReader cardReader)
+        ICardReader cardReader,
+        IValidationService validationService)
     {
         _staffRepository = staffRepository;
         _cardReader = cardReader;
+        _validationService = validationService;
 
         // カード読み取りイベント
         _cardReader.CardRead += OnCardRead;
@@ -122,15 +126,18 @@ public partial class StaffManageViewModel : ViewModelBase
     [RelayCommand]
     public async Task SaveAsync()
     {
-        if (string.IsNullOrWhiteSpace(EditStaffIdm))
+        // バリデーション
+        var idmResult = _validationService.ValidateStaffIdm(EditStaffIdm);
+        if (!idmResult)
         {
-            StatusMessage = "職員証IDmが入力されていません";
+            StatusMessage = idmResult.ErrorMessage!;
             return;
         }
 
-        if (string.IsNullOrWhiteSpace(EditName))
+        var nameResult = _validationService.ValidateStaffName(EditName);
+        if (!nameResult)
         {
-            StatusMessage = "氏名を入力してください";
+            StatusMessage = nameResult.ErrorMessage!;
             return;
         }
 

@@ -93,6 +93,7 @@ public partial class App : Application
         services.AddSingleton<IOperationLogRepository, OperationLogRepository>();
 
         // Services層
+        services.AddSingleton<IValidationService, ValidationService>();
         services.AddSingleton<CardTypeDetector>();
         services.AddSingleton<SummaryGenerator>();
         services.AddSingleton<LendingService>();
