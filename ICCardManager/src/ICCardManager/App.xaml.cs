@@ -1,6 +1,7 @@
 using System.Windows;
 using ICCardManager.Data;
 using ICCardManager.Data.Repositories;
+using ICCardManager.Infrastructure.Caching;
 using ICCardManager.Infrastructure.CardReader;
 using ICCardManager.Infrastructure.Sound;
 using ICCardManager.Services;
@@ -84,6 +85,9 @@ public partial class App : Application
     /// </summary>
     private void ConfigureServices(IServiceCollection services)
     {
+        // Infrastructure層 - キャッシュ
+        services.AddSingleton<ICacheService, CacheService>();
+
         // Data層
         services.AddSingleton<DbContext>();
         services.AddSingleton<IStaffRepository, StaffRepository>();

@@ -1,3 +1,4 @@
+using ICCardManager.Infrastructure.Caching;
 using ICCardManager.Models;
 using Microsoft.Data.Sqlite;
 
@@ -9,14 +10,27 @@ namespace ICCardManager.Data.Repositories;
 public class StaffRepository : IStaffRepository
 {
     private readonly DbContext _dbContext;
+    private readonly ICacheService _cacheService;
 
-    public StaffRepository(DbContext dbContext)
+    public StaffRepository(DbContext dbContext, ICacheService cacheService)
     {
         _dbContext = dbContext;
+        _cacheService = cacheService;
     }
 
     /// <inheritdoc/>
     public async Task<IEnumerable<Staff>> GetAllAsync()
+    {
+        return await _cacheService.GetOrCreateAsync(
+            CacheKeys.AllStaff,
+            async () => await GetAllFromDbAsync(),
+            CacheDurations.StaffList);
+    }
+
+    /// <summary>
+    /// DBから全職員を取得
+    /// </summary>
+    private async Task<IEnumerable<Staff>> GetAllFromDbAsync()
     {
         var connection = _dbContext.GetConnection();
         var staffList = new List<Staff>();
@@ -86,6 +100,10 @@ public class StaffRepository : IStaffRepository
         try
         {
             var result = await command.ExecuteNonQueryAsync();
+            if (result > 0)
+            {
+                InvalidateStaffCache();
+            }
             return result > 0;
         }
         catch (SqliteException)
@@ -112,6 +130,10 @@ public class StaffRepository : IStaffRepository
         command.Parameters.AddWithValue("@note", (object?)staff.Note ?? DBNull.Value);
 
         var result = await command.ExecuteNonQueryAsync();
+        if (result > 0)
+        {
+            InvalidateStaffCache();
+        }
         return result > 0;
     }
 
@@ -130,7 +152,19 @@ public class StaffRepository : IStaffRepository
         command.Parameters.AddWithValue("@staffIdm", staffIdm);
 
         var result = await command.ExecuteNonQueryAsync();
+        if (result > 0)
+        {
+            InvalidateStaffCache();
+        }
         return result > 0;
+    }
+
+    /// <summary>
+    /// 職員関連のキャッシュをすべて無効化
+    /// </summary>
+    private void InvalidateStaffCache()
+    {
+        _cacheService.InvalidateByPrefix(CacheKeys.StaffPrefixForInvalidation);
     }
 
     /// <inheritdoc/>
