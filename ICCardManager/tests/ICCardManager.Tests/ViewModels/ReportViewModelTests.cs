@@ -1,6 +1,7 @@
 using System.IO;
 using FluentAssertions;
 using ICCardManager.Data.Repositories;
+using ICCardManager.Dtos;
 using ICCardManager.Models;
 using ICCardManager.Services;
 using ICCardManager.ViewModels;
@@ -266,7 +267,7 @@ public class ReportViewModelTests
     public async Task CreateReportAsync_WithEmptyOutputFolder_ShouldShowError()
     {
         // Arrange
-        var card = new IcCard { CardIdm = "01", CardType = "nimoca", CardNumber = "N-001" };
+        var card = new CardDto { CardIdm = "01", CardType = "nimoca", CardNumber = "N-001" };
         _viewModel.SelectedCards.Add(card);
         _viewModel.OutputFolder = "";
 
@@ -284,7 +285,7 @@ public class ReportViewModelTests
     public async Task CreateReportAsync_WithNonExistentFolder_ShouldShowError()
     {
         // Arrange
-        var card = new IcCard { CardIdm = "01", CardType = "nimoca", CardNumber = "N-001" };
+        var card = new CardDto { CardIdm = "01", CardType = "nimoca", CardNumber = "N-001" };
         _viewModel.SelectedCards.Add(card);
         _viewModel.OutputFolder = @"C:\NonExistentFolder12345";
 
