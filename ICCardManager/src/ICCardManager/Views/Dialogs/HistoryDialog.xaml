@@ -10,7 +10,9 @@
         Height="600"
         Width="900"
         WindowStartupLocation="CenterOwner"
-        ResizeMode="CanResize">
+        ResizeMode="CanResize"
+        AutomationProperties.Name="利用履歴ダイアログ"
+        AutomationProperties.HelpText="ICカードの利用履歴を表示します。期間を選択して確認できます。">
 
     <Window.Resources>
         <BooleanToVisibilityConverter x:Key="BoolToVisibilityConverter"/>
@@ -89,15 +91,21 @@
                 <Button Content="今月"
                         Command="{Binding SetThisMonthCommand}"
                         Padding="12,6"
-                        Margin="0,0,5,0"/>
+                        Margin="0,0,5,0"
+                        AutomationProperties.Name="今月の履歴を表示"
+                        ToolTip="今月の履歴を表示"/>
                 <Button Content="先月"
                         Command="{Binding SetLastMonthCommand}"
                         Padding="12,6"
-                        Margin="0,0,5,0"/>
+                        Margin="0,0,5,0"
+                        AutomationProperties.Name="先月の履歴を表示"
+                        ToolTip="先月の履歴を表示"/>
                 <Button x:Name="OtherMonthButton"
                         Content="その他の月..."
                         Command="{Binding OpenMonthSelectorCommand}"
-                        Padding="12,6"/>
+                        Padding="12,6"
+                        AutomationProperties.Name="その他の月を選択"
+                        ToolTip="任意の年月を選択して表示"/>
 
                 <!-- 月選択ポップアップ -->
                 <Popup IsOpen="{Binding IsMonthSelectorOpen}"
@@ -163,7 +171,9 @@
                   GridLinesVisibility="Horizontal"
                   HeadersVisibility="Column"
                   RowHeaderWidth="0"
-                  AlternatingRowBackground="#FAFAFA">
+                  AlternatingRowBackground="#FAFAFA"
+                  AutomationProperties.Name="利用履歴一覧"
+                  AutomationProperties.HelpText="選択した期間のカード利用履歴です。貸出中のレコードはオレンジ背景で表示されます。">
             <DataGrid.Columns>
                 <DataGridTextColumn Header="日付" Binding="{Binding DateDisplay}" Width="120"/>
                 <DataGridTextColumn Header="摘要" Binding="{Binding Summary}" Width="*"/>
@@ -222,11 +232,15 @@
         <Grid Grid.Row="3" Margin="0,15,0,0">
             <TextBlock Text="{Binding StatusMessage}"
                        Foreground="Gray"
-                       VerticalAlignment="Center"/>
+                       VerticalAlignment="Center"
+                       AutomationProperties.LiveSetting="Polite"/>
             <Button Content="閉じる"
                     Click="CloseButton_Click"
                     HorizontalAlignment="Right"
-                    Padding="20,8"/>
+                    Padding="20,8"
+                    IsCancel="True"
+                    AutomationProperties.Name="閉じる"
+                    ToolTip="ダイアログを閉じる (Escape)"/>
         </Grid>
 
         <!-- 処理中オーバーレイ -->

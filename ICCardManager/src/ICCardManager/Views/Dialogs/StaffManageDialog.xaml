@@ -10,7 +10,9 @@
         Height="550"
         Width="850"
         WindowStartupLocation="CenterOwner"
-        ResizeMode="CanResize">
+        ResizeMode="CanResize"
+        AutomationProperties.Name="職員管理ダイアログ"
+        AutomationProperties.HelpText="職員の登録・編集・削除ができます。職員証をタッチして新規登録できます。">
 
     <Window.Resources>
         <BooleanToVisibilityConverter x:Key="BoolToVisibilityConverter"/>
@@ -54,7 +56,9 @@
                       CanUserDeleteRows="False"
                       GridLinesVisibility="Horizontal"
                       HeadersVisibility="Column"
-                      RowHeaderWidth="0">
+                      RowHeaderWidth="0"
+                      AutomationProperties.Name="職員一覧"
+                      AutomationProperties.HelpText="登録されている職員の一覧です。選択して編集や削除ができます。">
                 <DataGrid.Columns>
                     <DataGridTextColumn Header="職員番号" Binding="{Binding Number}" Width="100"/>
                     <DataGridTextColumn Header="氏名" Binding="{Binding Name}" Width="150"/>
@@ -76,18 +80,27 @@
                     <Button Content="新規登録"
                             Command="{Binding StartNewStaffCommand}"
                             Padding="15,8"
-                            Margin="0,0,10,5"/>
+                            Margin="0,0,10,5"
+                            AutomationProperties.Name="新規職員登録"
+                            AutomationProperties.HelpText="新しい職員を登録します。職員証をタッチして登録できます。"
+                            ToolTip="新しい職員を登録"/>
                     <Button Content="編集"
                             Command="{Binding StartEditCommand}"
                             IsEnabled="{Binding SelectedStaff, Converter={StaticResource BoolToVisibilityConverter}}"
                             Padding="15,8"
-                            Margin="0,0,10,5"/>
+                            Margin="0,0,10,5"
+                            AutomationProperties.Name="職員情報編集"
+                            AutomationProperties.HelpText="選択した職員の情報を編集します"
+                            ToolTip="選択した職員を編集"/>
                     <Button Content="削除"
                             Command="{Binding DeleteCommand}"
                             IsEnabled="{Binding SelectedStaff, Converter={StaticResource BoolToVisibilityConverter}}"
                             Padding="15,8"
                             Margin="0,0,0,5"
-                            Foreground="Red"/>
+                            Foreground="Red"
+                            AutomationProperties.Name="職員削除"
+                            AutomationProperties.HelpText="選択した職員を削除します。削除後も履歴は保持されます。"
+                            ToolTip="選択した職員を削除"/>
                 </WrapPanel>
             </DockPanel>
         </Grid>
@@ -159,13 +172,19 @@
                     <TextBlock Text="氏名 *" FontWeight="Bold" Margin="0,0,0,5"/>
                     <TextBox Text="{Binding EditName, UpdateSourceTrigger=PropertyChanged}"
                              Padding="8"
-                             Margin="0,0,0,15"/>
+                             Margin="0,0,0,15"
+                             AutomationProperties.Name="氏名（必須）"
+                             AutomationProperties.HelpText="職員の氏名を入力してください"
+                             ToolTip="職員の氏名（必須）"/>
 
                     <!-- 職員番号 -->
                     <TextBlock Text="職員番号" FontWeight="Bold" Margin="0,0,0,5"/>
                     <TextBox Text="{Binding EditNumber, UpdateSourceTrigger=PropertyChanged}"
                              Padding="8"
-                             Margin="0,0,0,15"/>
+                             Margin="0,0,0,15"
+                             AutomationProperties.Name="職員番号"
+                             AutomationProperties.HelpText="職員番号を入力してください（任意）"
+                             ToolTip="職員番号（任意）"/>
 
                     <!-- 備考 -->
                     <TextBlock Text="備考" FontWeight="Bold" Margin="0,0,0,5"/>
@@ -175,7 +194,10 @@
                              AcceptsReturn="True"
                              Height="80"
                              VerticalScrollBarVisibility="Auto"
-                             Margin="0,0,0,15"/>
+                             Margin="0,0,0,15"
+                             AutomationProperties.Name="備考"
+                             AutomationProperties.HelpText="メモや備考を入力してください（任意）"
+                             ToolTip="備考（任意）"/>
 
                     <!-- ステータスメッセージ -->
                     <TextBlock Text="{Binding StatusMessage}"

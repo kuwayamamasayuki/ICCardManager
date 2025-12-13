@@ -10,7 +10,9 @@
         Height="600"
         Width="700"
         WindowStartupLocation="CenterOwner"
-        ResizeMode="CanResize">
+        ResizeMode="CanResize"
+        AutomationProperties.Name="帳票作成ダイアログ"
+        AutomationProperties.HelpText="物品出納簿をExcel形式で作成します。対象年月とカードを選択してください。">
 
     <Window.Resources>
         <BooleanToVisibilityConverter x:Key="BoolToVisibilityConverter"/>
@@ -32,19 +34,24 @@
             </Grid.ColumnDefinitions>
 
             <!-- 対象年月 -->
-            <GroupBox Grid.Column="0" Header="対象年月" Padding="10" Margin="0,0,10,0">
+            <GroupBox Grid.Column="0" Header="対象年月" Padding="10" Margin="0,0,10,0"
+                      AutomationProperties.Name="対象年月の選択">
                 <StackPanel Orientation="Horizontal">
                     <ComboBox ItemsSource="{Binding Years}"
                               SelectedItem="{Binding SelectedYear}"
                               Width="80"
-                              Padding="8"/>
+                              Padding="8"
+                              AutomationProperties.Name="年選択"
+                              ToolTip="対象年を選択"/>
                     <TextBlock Text="年"
                                VerticalAlignment="Center"
                                Margin="5,0,15,0"/>
                     <ComboBox ItemsSource="{Binding Months}"
                               SelectedItem="{Binding SelectedMonth}"
                               Width="60"
-                              Padding="8"/>
+                              Padding="8"
+                              AutomationProperties.Name="月選択"
+                              ToolTip="対象月を選択"/>
                     <TextBlock Text="月"
                                VerticalAlignment="Center"
                                Margin="5,0,0,0"/>
@@ -52,7 +59,8 @@
             </GroupBox>
 
             <!-- 出力先 -->
-            <GroupBox Grid.Column="1" Header="出力先フォルダ" Padding="10">
+            <GroupBox Grid.Column="1" Header="出力先フォルダ" Padding="10"
+                      AutomationProperties.Name="出力先フォルダの選択">
                 <Grid>
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*"/>
@@ -62,18 +70,22 @@
                              Text="{Binding OutputFolder}"
                              IsReadOnly="True"
                              Padding="8"
-                             Background="#F5F5F5"/>
+                             Background="#F5F5F5"
+                             AutomationProperties.Name="出力先フォルダパス"/>
                     <Button Grid.Column="1"
                             Content="参照"
                             Command="{Binding BrowseOutputFolderCommand}"
                             Padding="10,8"
-                            Margin="10,0,0,0"/>
+                            Margin="10,0,0,0"
+                            AutomationProperties.Name="出力フォルダを選択"
+                            ToolTip="帳票の出力先フォルダを選択"/>
                 </Grid>
             </GroupBox>
         </Grid>
 
         <!-- カード選択 -->
-        <GroupBox Grid.Row="1" Header="対象カード" Padding="10">
+        <GroupBox Grid.Row="1" Header="対象カード" Padding="10"
+                  AutomationProperties.Name="帳票作成対象カードの選択">
             <Grid>
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto"/>
@@ -84,7 +96,9 @@
                 <CheckBox Grid.Row="0"
                           Content="すべて選択"
                           IsChecked="{Binding IsAllSelected}"
-                          Margin="0,0,0,10"/>
+                          Margin="0,0,0,10"
+                          AutomationProperties.Name="すべてのカードを選択"
+                          ToolTip="すべてのカードを選択または解除"/>
 
                 <!-- カード一覧 -->
                 <ListView Grid.Row="1"
@@ -171,13 +185,20 @@
                         Click="CloseButton_Click"
                         Padding="20,10"
                         Margin="0,0,10,0"
-                        MinWidth="100"/>
+                        MinWidth="100"
+                        IsCancel="True"
+                        AutomationProperties.Name="閉じる"
+                        AutomationProperties.HelpText="ダイアログを閉じます"
+                        ToolTip="ダイアログを閉じる (Escape)"/>
                 <Button Content="作成"
                         Command="{Binding CreateReportCommand}"
                         Padding="20,10"
                         MinWidth="100"
                         Background="#4CAF50"
-                        Foreground="White"/>
+                        Foreground="White"
+                        AutomationProperties.Name="帳票を作成"
+                        AutomationProperties.HelpText="選択したカードの帳票を作成します"
+                        ToolTip="帳票を作成"/>
             </StackPanel>
         </Grid>
 

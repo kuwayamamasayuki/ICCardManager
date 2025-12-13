@@ -10,7 +10,9 @@
         Height="450"
         Width="550"
         WindowStartupLocation="CenterOwner"
-        ResizeMode="NoResize">
+        ResizeMode="NoResize"
+        AutomationProperties.Name="設定ダイアログ"
+        AutomationProperties.HelpText="アプリケーションの各種設定を変更できます。Escapeキーでキャンセルできます。">
 
     <Window.Resources>
         <BooleanToVisibilityConverter x:Key="BoolToVisibilityConverter"/>
@@ -35,7 +37,10 @@
                             <TextBox Text="{Binding WarningBalance, UpdateSourceTrigger=PropertyChanged}"
                                      Width="120"
                                      Padding="8"
-                                     VerticalAlignment="Center"/>
+                                     VerticalAlignment="Center"
+                                     AutomationProperties.Name="残額警告しきい値"
+                                     AutomationProperties.HelpText="この金額を下回ると警告が表示されます"
+                                     ToolTip="0～50,000円の範囲で設定"/>
                             <TextBlock Text="円"
                                        VerticalAlignment="Center"
                                        Margin="10,0,0,0"/>
@@ -62,12 +67,15 @@
                                      Text="{Binding BackupPath, UpdateSourceTrigger=PropertyChanged}"
                                      Padding="8"
                                      IsReadOnly="True"
-                                     Background="#F5F5F5"/>
+                                     Background="#F5F5F5"
+                                     AutomationProperties.Name="バックアップ先フォルダパス"/>
                             <Button Grid.Column="1"
                                     Content="参照..."
                                     Command="{Binding BrowseBackupPathCommand}"
                                     Padding="15,8"
-                                    Margin="10,0,0,0"/>
+                                    Margin="10,0,0,0"
+                                    AutomationProperties.Name="バックアップフォルダを選択"
+                                    ToolTip="バックアップ先フォルダを選択します"/>
                         </Grid>
                         <TextBlock Text="※ 空欄の場合、アプリケーションフォルダにバックアップされます"
                                    FontSize="{DynamicResource SmallFontSize}"
@@ -87,7 +95,10 @@
                                   DisplayMemberPath="DisplayName"
                                   Padding="8"
                                   Width="200"
-                                  HorizontalAlignment="Left"/>
+                                  HorizontalAlignment="Left"
+                                  AutomationProperties.Name="文字サイズ選択"
+                                  AutomationProperties.HelpText="画面に表示される文字のサイズを選択します"
+                                  ToolTip="小・中・大・特大から選択"/>
                         <TextBlock Text="※ 文字サイズの変更は保存後に反映されます"
                                    FontSize="{DynamicResource SmallFontSize}"
                                    Foreground="Gray"
@@ -114,13 +125,21 @@
                     Click="CancelButton_Click"
                     Padding="20,10"
                     Margin="0,0,10,0"
-                    MinWidth="100"/>
+                    MinWidth="100"
+                    IsCancel="True"
+                    AutomationProperties.Name="キャンセル"
+                    AutomationProperties.HelpText="変更を保存せずにダイアログを閉じます"
+                    ToolTip="変更を破棄 (Escape)"/>
             <Button Content="保存"
                     Command="{Binding SaveAsyncCommand}"
                     Padding="20,10"
                     MinWidth="100"
                     Background="#2196F3"
-                    Foreground="White"/>
+                    Foreground="White"
+                    IsDefault="True"
+                    AutomationProperties.Name="設定を保存"
+                    AutomationProperties.HelpText="変更を保存してダイアログを閉じます"
+                    ToolTip="設定を保存 (Enter)"/>
         </StackPanel>
 
         <!-- 処理中オーバーレイ -->

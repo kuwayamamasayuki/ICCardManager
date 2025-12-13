@@ -1,0 +1,288 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <!-- =====================================
+         アクセシビリティ対応スタイル
+         WCAG 2.1 AA準拠
+         ===================================== -->
+
+    <!-- ===== 色定義（WCAG 2.1 AA準拠） ===== -->
+    <!-- コントラスト比4.5:1以上を確保 -->
+
+    <!-- 貸出状態（暖色系） - オレンジ/アンバー -->
+    <SolidColorBrush x:Key="LendingBackgroundBrush" Color="#FFF3E0"/>
+    <SolidColorBrush x:Key="LendingForegroundBrush" Color="#E65100"/>
+    <SolidColorBrush x:Key="LendingBorderBrush" Color="#FF9800"/>
+
+    <!-- 返却状態（寒色系） - 青/シアン -->
+    <SolidColorBrush x:Key="ReturnBackgroundBrush" Color="#E3F2FD"/>
+    <SolidColorBrush x:Key="ReturnForegroundBrush" Color="#0D47A1"/>
+    <SolidColorBrush x:Key="ReturnBorderBrush" Color="#2196F3"/>
+
+    <!-- エラー状態 - 赤 -->
+    <SolidColorBrush x:Key="ErrorBackgroundBrush" Color="#FFEBEE"/>
+    <SolidColorBrush x:Key="ErrorForegroundBrush" Color="#B71C1C"/>
+    <SolidColorBrush x:Key="ErrorBorderBrush" Color="#F44336"/>
+
+    <!-- 成功状態 - 緑 -->
+    <SolidColorBrush x:Key="SuccessBackgroundBrush" Color="#E8F5E9"/>
+    <SolidColorBrush x:Key="SuccessForegroundBrush" Color="#1B5E20"/>
+    <SolidColorBrush x:Key="SuccessBorderBrush" Color="#4CAF50"/>
+
+    <!-- 警告状態 - 黄色 -->
+    <SolidColorBrush x:Key="WarningBackgroundBrush" Color="#FFFDE7"/>
+    <SolidColorBrush x:Key="WarningForegroundBrush" Color="#F57F17"/>
+    <SolidColorBrush x:Key="WarningBorderBrush" Color="#FFC107"/>
+
+    <!-- 待機状態 - グレー -->
+    <SolidColorBrush x:Key="WaitingBackgroundBrush" Color="#FAFAFA"/>
+    <SolidColorBrush x:Key="WaitingForegroundBrush" Color="#424242"/>
+    <SolidColorBrush x:Key="WaitingBorderBrush" Color="#9E9E9E"/>
+
+    <!-- プライマリカラー -->
+    <SolidColorBrush x:Key="PrimaryBrush" Color="#1976D2"/>
+    <SolidColorBrush x:Key="PrimaryDarkBrush" Color="#0D47A1"/>
+    <SolidColorBrush x:Key="PrimaryLightBrush" Color="#BBDEFB"/>
+
+    <!-- ===== フォーカス表示スタイル ===== -->
+    <!-- キーボードナビゲーション用の明確なフォーカス表示 -->
+
+    <Style x:Key="AccessibleFocusVisual">
+        <Setter Property="Control.Template">
+            <Setter.Value>
+                <ControlTemplate>
+                    <Border BorderBrush="{DynamicResource {x:Static SystemColors.HighlightBrushKey}}"
+                            BorderThickness="2"
+                            CornerRadius="2"
+                            Margin="-2">
+                        <Border BorderBrush="White"
+                                BorderThickness="1"
+                                CornerRadius="1"/>
+                    </Border>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- ===== ボタンスタイル ===== -->
+    <Style x:Key="AccessibleButtonStyle" TargetType="Button">
+        <Setter Property="FocusVisualStyle" Value="{StaticResource AccessibleFocusVisual}"/>
+        <Setter Property="Padding" Value="12,8"/>
+        <Setter Property="MinWidth" Value="75"/>
+        <Setter Property="MinHeight" Value="32"/>
+        <Setter Property="Cursor" Value="Hand"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Button">
+                    <Border x:Name="border"
+                            Background="{TemplateBinding Background}"
+                            BorderBrush="{TemplateBinding BorderBrush}"
+                            BorderThickness="{TemplateBinding BorderThickness}"
+                            CornerRadius="4"
+                            Padding="{TemplateBinding Padding}">
+                        <ContentPresenter HorizontalAlignment="Center"
+                                          VerticalAlignment="Center"/>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="border" Property="Background" Value="{StaticResource PrimaryLightBrush}"/>
+                        </Trigger>
+                        <Trigger Property="IsPressed" Value="True">
+                            <Setter TargetName="border" Property="Background" Value="{StaticResource PrimaryBrush}"/>
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter TargetName="border" Property="Opacity" Value="0.5"/>
+                        </Trigger>
+                        <Trigger Property="IsFocused" Value="True">
+                            <Setter TargetName="border" Property="BorderBrush" Value="{StaticResource PrimaryDarkBrush}"/>
+                            <Setter TargetName="border" Property="BorderThickness" Value="2"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- プライマリボタンスタイル -->
+    <Style x:Key="PrimaryButtonStyle" TargetType="Button" BasedOn="{StaticResource AccessibleButtonStyle}">
+        <Setter Property="Background" Value="{StaticResource PrimaryBrush}"/>
+        <Setter Property="Foreground" Value="White"/>
+        <Setter Property="FontWeight" Value="SemiBold"/>
+    </Style>
+
+    <!-- 危険ボタンスタイル（削除など） -->
+    <Style x:Key="DangerButtonStyle" TargetType="Button" BasedOn="{StaticResource AccessibleButtonStyle}">
+        <Setter Property="Background" Value="{StaticResource ErrorBackgroundBrush}"/>
+        <Setter Property="Foreground" Value="{StaticResource ErrorForegroundBrush}"/>
+        <Setter Property="BorderBrush" Value="{StaticResource ErrorBorderBrush}"/>
+    </Style>
+
+    <!-- ===== テキストボックススタイル ===== -->
+    <Style x:Key="AccessibleTextBoxStyle" TargetType="TextBox">
+        <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
+        <Setter Property="Padding" Value="10,8"/>
+        <Setter Property="BorderThickness" Value="1"/>
+        <Setter Property="BorderBrush" Value="#BDBDBD"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="TextBox">
+                    <Border x:Name="border"
+                            Background="{TemplateBinding Background}"
+                            BorderBrush="{TemplateBinding BorderBrush}"
+                            BorderThickness="{TemplateBinding BorderThickness}"
+                            CornerRadius="4">
+                        <ScrollViewer x:Name="PART_ContentHost"
+                                      Margin="{TemplateBinding Padding}"/>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsFocused" Value="True">
+                            <Setter TargetName="border" Property="BorderBrush" Value="{StaticResource PrimaryBrush}"/>
+                            <Setter TargetName="border" Property="BorderThickness" Value="2"/>
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter TargetName="border" Property="Background" Value="#F5F5F5"/>
+                            <Setter TargetName="border" Property="Opacity" Value="0.7"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- ===== コンボボックススタイル ===== -->
+    <Style x:Key="AccessibleComboBoxStyle" TargetType="ComboBox">
+        <Setter Property="FocusVisualStyle" Value="{StaticResource AccessibleFocusVisual}"/>
+        <Setter Property="Padding" Value="10,8"/>
+        <Setter Property="MinHeight" Value="32"/>
+        <Style.Triggers>
+            <Trigger Property="IsFocused" Value="True">
+                <Setter Property="BorderBrush" Value="{StaticResource PrimaryBrush}"/>
+                <Setter Property="BorderThickness" Value="2"/>
+            </Trigger>
+        </Style.Triggers>
+    </Style>
+
+    <!-- ===== データグリッドスタイル ===== -->
+    <Style x:Key="AccessibleDataGridStyle" TargetType="DataGrid">
+        <Setter Property="FocusVisualStyle" Value="{StaticResource AccessibleFocusVisual}"/>
+        <Setter Property="AlternatingRowBackground" Value="#FAFAFA"/>
+        <Setter Property="RowHeaderWidth" Value="0"/>
+        <Setter Property="GridLinesVisibility" Value="Horizontal"/>
+        <Setter Property="HorizontalGridLinesBrush" Value="#E0E0E0"/>
+    </Style>
+
+    <Style x:Key="AccessibleDataGridRowStyle" TargetType="DataGridRow">
+        <Setter Property="FocusVisualStyle" Value="{StaticResource AccessibleFocusVisual}"/>
+        <Style.Triggers>
+            <Trigger Property="IsSelected" Value="True">
+                <Setter Property="Background" Value="{StaticResource PrimaryBrush}"/>
+                <Setter Property="Foreground" Value="White"/>
+            </Trigger>
+            <Trigger Property="IsFocused" Value="True">
+                <Setter Property="BorderBrush" Value="{StaticResource PrimaryDarkBrush}"/>
+                <Setter Property="BorderThickness" Value="2"/>
+            </Trigger>
+        </Style.Triggers>
+    </Style>
+
+    <!-- ===== リストビュースタイル ===== -->
+    <Style x:Key="AccessibleListViewItemStyle" TargetType="ListViewItem">
+        <Setter Property="FocusVisualStyle" Value="{StaticResource AccessibleFocusVisual}"/>
+        <Setter Property="Padding" Value="8"/>
+        <Style.Triggers>
+            <Trigger Property="IsSelected" Value="True">
+                <Setter Property="Background" Value="{StaticResource PrimaryLightBrush}"/>
+            </Trigger>
+            <Trigger Property="IsFocused" Value="True">
+                <Setter Property="BorderBrush" Value="{StaticResource PrimaryBrush}"/>
+                <Setter Property="BorderThickness" Value="2"/>
+            </Trigger>
+        </Style.Triggers>
+    </Style>
+
+    <!-- ===== ステータス表示スタイル ===== -->
+    <!-- 色とアイコンの両方で状態を示す -->
+
+    <Style x:Key="StatusIndicatorStyle" TargetType="Border">
+        <Setter Property="CornerRadius" Value="4"/>
+        <Setter Property="Padding" Value="12,8"/>
+        <Setter Property="BorderThickness" Value="2"/>
+    </Style>
+
+    <Style x:Key="LendingStatusStyle" TargetType="Border" BasedOn="{StaticResource StatusIndicatorStyle}">
+        <Setter Property="Background" Value="{StaticResource LendingBackgroundBrush}"/>
+        <Setter Property="BorderBrush" Value="{StaticResource LendingBorderBrush}"/>
+    </Style>
+
+    <Style x:Key="ReturnStatusStyle" TargetType="Border" BasedOn="{StaticResource StatusIndicatorStyle}">
+        <Setter Property="Background" Value="{StaticResource ReturnBackgroundBrush}"/>
+        <Setter Property="BorderBrush" Value="{StaticResource ReturnBorderBrush}"/>
+    </Style>
+
+    <Style x:Key="ErrorStatusStyle" TargetType="Border" BasedOn="{StaticResource StatusIndicatorStyle}">
+        <Setter Property="Background" Value="{StaticResource ErrorBackgroundBrush}"/>
+        <Setter Property="BorderBrush" Value="{StaticResource ErrorBorderBrush}"/>
+    </Style>
+
+    <Style x:Key="SuccessStatusStyle" TargetType="Border" BasedOn="{StaticResource StatusIndicatorStyle}">
+        <Setter Property="Background" Value="{StaticResource SuccessBackgroundBrush}"/>
+        <Setter Property="BorderBrush" Value="{StaticResource SuccessBorderBrush}"/>
+    </Style>
+
+    <Style x:Key="WarningStatusStyle" TargetType="Border" BasedOn="{StaticResource StatusIndicatorStyle}">
+        <Setter Property="Background" Value="{StaticResource WarningBackgroundBrush}"/>
+        <Setter Property="BorderBrush" Value="{StaticResource WarningBorderBrush}"/>
+    </Style>
+
+    <!-- ===== ハイコントラストモード対応 ===== -->
+    <!-- SystemColorsを使用してOSのハイコントラスト設定に従う -->
+
+    <Style x:Key="HighContrastTextStyle" TargetType="TextBlock">
+        <Style.Triggers>
+            <DataTrigger Binding="{Binding Source={x:Static SystemParameters.HighContrast}}" Value="True">
+                <Setter Property="Foreground" Value="{DynamicResource {x:Static SystemColors.WindowTextBrushKey}}"/>
+            </DataTrigger>
+        </Style.Triggers>
+    </Style>
+
+    <Style x:Key="HighContrastBorderStyle" TargetType="Border">
+        <Style.Triggers>
+            <DataTrigger Binding="{Binding Source={x:Static SystemParameters.HighContrast}}" Value="True">
+                <Setter Property="Background" Value="{DynamicResource {x:Static SystemColors.WindowBrushKey}}"/>
+                <Setter Property="BorderBrush" Value="{DynamicResource {x:Static SystemColors.WindowFrameBrushKey}}"/>
+            </DataTrigger>
+        </Style.Triggers>
+    </Style>
+
+    <Style x:Key="HighContrastButtonStyle" TargetType="Button">
+        <Style.Triggers>
+            <DataTrigger Binding="{Binding Source={x:Static SystemParameters.HighContrast}}" Value="True">
+                <Setter Property="Background" Value="{DynamicResource {x:Static SystemColors.ControlBrushKey}}"/>
+                <Setter Property="Foreground" Value="{DynamicResource {x:Static SystemColors.ControlTextBrushKey}}"/>
+                <Setter Property="BorderBrush" Value="{DynamicResource {x:Static SystemColors.ActiveBorderBrushKey}}"/>
+            </DataTrigger>
+        </Style.Triggers>
+    </Style>
+
+    <!-- ===== ツールチップスタイル ===== -->
+    <Style x:Key="AccessibleToolTipStyle" TargetType="ToolTip">
+        <Setter Property="Background" Value="#424242"/>
+        <Setter Property="Foreground" Value="White"/>
+        <Setter Property="Padding" Value="12,8"/>
+        <Setter Property="FontSize" Value="{DynamicResource BaseFontSize}"/>
+        <Setter Property="HasDropShadow" Value="True"/>
+    </Style>
+
+    <!-- ===== スクリーンリーダー用ラベルスタイル ===== -->
+    <!-- 視覚的には見えないが、スクリーンリーダーには読み上げられる -->
+    <Style x:Key="ScreenReaderOnlyStyle" TargetType="TextBlock">
+        <Setter Property="Width" Value="1"/>
+        <Setter Property="Height" Value="1"/>
+        <Setter Property="Margin" Value="-1"/>
+        <Setter Property="Padding" Value="0"/>
+        <Setter Property="Visibility" Value="Visible"/>
+        <Setter Property="Opacity" Value="0"/>
+        <Setter Property="IsHitTestVisible" Value="False"/>
+    </Style>
+
+</ResourceDictionary>

@@ -10,7 +10,9 @@
         Height="600"
         Width="900"
         WindowStartupLocation="CenterOwner"
-        ResizeMode="CanResize">
+        ResizeMode="CanResize"
+        AutomationProperties.Name="カード管理ダイアログ"
+        AutomationProperties.HelpText="ICカードの登録・編集・削除ができます。カードをタッチして新規登録できます。">
 
     <Window.Resources>
         <BooleanToVisibilityConverter x:Key="BoolToVisibilityConverter"/>
@@ -54,7 +56,9 @@
                       CanUserDeleteRows="False"
                       GridLinesVisibility="Horizontal"
                       HeadersVisibility="Column"
-                      RowHeaderWidth="0">
+                      RowHeaderWidth="0"
+                      AutomationProperties.Name="カード一覧"
+                      AutomationProperties.HelpText="登録されているICカードの一覧です。選択して編集や削除ができます。">
                 <DataGrid.Columns>
                     <DataGridTextColumn Header="種別" Binding="{Binding CardType}" Width="100"/>
                     <DataGridTextColumn Header="管理番号" Binding="{Binding CardNumber}" Width="100"/>
@@ -115,18 +119,27 @@
                     <Button Content="新規登録"
                             Command="{Binding StartNewCardCommand}"
                             Padding="15,8"
-                            Margin="0,0,10,5"/>
+                            Margin="0,0,10,5"
+                            AutomationProperties.Name="新規カード登録"
+                            AutomationProperties.HelpText="新しいICカードを登録します。カードをタッチして登録できます。"
+                            ToolTip="新しいカードを登録"/>
                     <Button Content="編集"
                             Command="{Binding StartEditCommand}"
                             IsEnabled="{Binding SelectedCard, Converter={StaticResource BoolToVisibilityConverter}}"
                             Padding="15,8"
-                            Margin="0,0,10,5"/>
+                            Margin="0,0,10,5"
+                            AutomationProperties.Name="カード情報編集"
+                            AutomationProperties.HelpText="選択したカードの情報を編集します"
+                            ToolTip="選択したカードを編集"/>
                     <Button Content="削除"
                             Command="{Binding DeleteCommand}"
                             IsEnabled="{Binding SelectedCard, Converter={StaticResource BoolToVisibilityConverter}}"
                             Padding="15,8"
                             Margin="0,0,0,5"
-                            Foreground="Red"/>
+                            Foreground="Red"
+                            AutomationProperties.Name="カード削除"
+                            AutomationProperties.HelpText="選択したカードを削除します。削除後も履歴は保持されます。"
+                            ToolTip="選択したカードを削除"/>
                 </WrapPanel>
             </DockPanel>
         </Grid>
@@ -199,13 +212,19 @@
                     <ComboBox ItemsSource="{Binding CardTypes}"
                               SelectedItem="{Binding EditCardType}"
                               Padding="8"
-                              Margin="0,0,0,15"/>
+                              Margin="0,0,0,15"
+                              AutomationProperties.Name="カード種別選択"
+                              AutomationProperties.HelpText="ICカードの種類を選択してください"
+                              ToolTip="Suica、PASMO、ICOCAなどから選択"/>
 
                     <!-- 管理番号 -->
                     <TextBlock Text="管理番号" FontWeight="Bold" Margin="0,0,0,5"/>
                     <TextBox Text="{Binding EditCardNumber, UpdateSourceTrigger=PropertyChanged}"
                              Padding="8"
-                             Margin="0,0,0,5"/>
+                             Margin="0,0,0,5"
+                             AutomationProperties.Name="管理番号"
+                             AutomationProperties.HelpText="カードの管理番号を入力してください。空欄の場合は自動採番されます。"
+                             ToolTip="管理番号（空欄で自動採番）"/>
                     <TextBlock Text="空欄の場合は自動採番されます"
                                FontSize="{DynamicResource SmallFontSize}"
                                Foreground="Gray"
@@ -219,7 +238,10 @@
                              AcceptsReturn="True"
                              Height="80"
                              VerticalScrollBarVisibility="Auto"
-                             Margin="0,0,0,15"/>
+                             Margin="0,0,0,15"
+                             AutomationProperties.Name="備考"
+                             AutomationProperties.HelpText="メモや備考を入力してください（任意）"
+                             ToolTip="備考（任意）"/>
 
                     <!-- ステータスメッセージ -->
                     <TextBlock Text="{Binding StatusMessage}"
