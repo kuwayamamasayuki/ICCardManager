@@ -113,6 +113,7 @@ public partial class App : Application
         services.AddSingleton<SummaryGenerator>();
         services.AddSingleton<LendingService>();
         services.AddSingleton<ReportService>();
+        services.AddSingleton<PrintService>();
         services.AddSingleton<BackupService>();
         services.AddSingleton<OperationLogger>();
 
@@ -133,6 +134,7 @@ public partial class App : Application
         services.AddTransient<ReportViewModel>();
         services.AddTransient<HistoryViewModel>();
         services.AddTransient<BusStopInputViewModel>();
+        services.AddTransient<PrintPreviewViewModel>();
 
         // Views
         services.AddTransient<MainWindow>();
@@ -142,6 +144,7 @@ public partial class App : Application
         services.AddTransient<Views.Dialogs.ReportDialog>();
         services.AddTransient<Views.Dialogs.HistoryDialog>();
         services.AddTransient<Views.Dialogs.BusStopInputDialog>();
+        services.AddTransient<Views.Dialogs.PrintPreviewDialog>();
     }
 
     /// <summary>
