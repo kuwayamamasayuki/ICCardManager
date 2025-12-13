@@ -3,6 +3,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using ICCardManager.Data.Repositories;
 using ICCardManager.Models;
+using ICCardManager.Services;
 using Microsoft.Win32;
 
 namespace ICCardManager.ViewModels;
@@ -13,6 +14,7 @@ namespace ICCardManager.ViewModels;
 public partial class SettingsViewModel : ViewModelBase
 {
     private readonly ISettingsRepository _settingsRepository;
+    private readonly IValidationService _validationService;
 
     [ObservableProperty]
     private int _warningBalance;
@@ -43,9 +45,12 @@ public partial class SettingsViewModel : ViewModelBase
     [ObservableProperty]
     private FontSizeItem? _selectedFontSizeItem;
 
-    public SettingsViewModel(ISettingsRepository settingsRepository)
+    public SettingsViewModel(
+        ISettingsRepository settingsRepository,
+        IValidationService validationService)
     {
         _settingsRepository = settingsRepository;
+        _validationService = validationService;
     }
 
     /// <summary>
@@ -86,15 +91,10 @@ public partial class SettingsViewModel : ViewModelBase
     public async Task SaveAsync()
     {
         // バリデーション
-        if (WarningBalance < 0)
+        var balanceResult = _validationService.ValidateWarningBalance(WarningBalance);
+        if (!balanceResult)
         {
-            StatusMessage = "残額警告閾値は0以上の値を入力してください";
-            return;
-        }
-
-        if (WarningBalance > 50000)
-        {
-            StatusMessage = "残額警告閾値は50,000円以下の値を入力してください";
+            StatusMessage = balanceResult.ErrorMessage!;
             return;
         }
 
