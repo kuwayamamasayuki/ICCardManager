@@ -1,4 +1,5 @@
 using System.IO;
+using ICCardManager.Infrastructure.Caching;
 using ICCardManager.Models;
 
 namespace ICCardManager.Data.Repositories;
@@ -9,6 +10,7 @@ namespace ICCardManager.Data.Repositories;
 public class SettingsRepository : ISettingsRepository
 {
     private readonly DbContext _dbContext;
+    private readonly ICacheService _cacheService;
 
     // 設定キー定数
     public const string KeyWarningBalance = "warning_balance";
@@ -16,9 +18,10 @@ public class SettingsRepository : ISettingsRepository
     public const string KeyFontSize = "font_size";
     public const string KeyLastVacuumDate = "last_vacuum_date";
 
-    public SettingsRepository(DbContext dbContext)
+    public SettingsRepository(DbContext dbContext, ICacheService cacheService)
     {
         _dbContext = dbContext;
+        _cacheService = cacheService;
     }
 
     /// <inheritdoc/>
@@ -54,6 +57,17 @@ public class SettingsRepository : ISettingsRepository
 
     /// <inheritdoc/>
     public async Task<AppSettings> GetAppSettingsAsync()
+    {
+        return await _cacheService.GetOrCreateAsync(
+            CacheKeys.AppSettings,
+            async () => await GetAppSettingsFromDbAsync(),
+            CacheDurations.Settings);
+    }
+
+    /// <summary>
+    /// DBから設定を取得
+    /// </summary>
+    private async Task<AppSettings> GetAppSettingsFromDbAsync()
     {
         var settings = new AppSettings();
 
@@ -95,6 +109,9 @@ public class SettingsRepository : ISettingsRepository
         {
             success &= await SetAsync(KeyLastVacuumDate, settings.LastVacuumDate.Value.ToString("yyyy-MM-dd"));
         }
+
+        // 設定保存後にキャッシュを無効化
+        _cacheService.Invalidate(CacheKeys.AppSettings);
 
         return success;
     }

@@ -1,3 +1,4 @@
+using ICCardManager.Infrastructure.Caching;
 using ICCardManager.Models;
 using Microsoft.Data.Sqlite;
 
@@ -9,14 +10,27 @@ namespace ICCardManager.Data.Repositories;
 public class CardRepository : ICardRepository
 {
     private readonly DbContext _dbContext;
+    private readonly ICacheService _cacheService;
 
-    public CardRepository(DbContext dbContext)
+    public CardRepository(DbContext dbContext, ICacheService cacheService)
     {
         _dbContext = dbContext;
+        _cacheService = cacheService;
     }
 
     /// <inheritdoc/>
     public async Task<IEnumerable<IcCard>> GetAllAsync()
+    {
+        return await _cacheService.GetOrCreateAsync(
+            CacheKeys.AllCards,
+            async () => await GetAllFromDbAsync(),
+            CacheDurations.CardList);
+    }
+
+    /// <summary>
+    /// DBから全カードを取得
+    /// </summary>
+    private async Task<IEnumerable<IcCard>> GetAllFromDbAsync()
     {
         var connection = _dbContext.GetConnection();
         var cardList = new List<IcCard>();
@@ -42,6 +56,17 @@ public class CardRepository : ICardRepository
     /// <inheritdoc/>
     public async Task<IEnumerable<IcCard>> GetAvailableAsync()
     {
+        return await _cacheService.GetOrCreateAsync(
+            CacheKeys.AvailableCards,
+            async () => await GetAvailableFromDbAsync(),
+            CacheDurations.CardList);
+    }
+
+    /// <summary>
+    /// DBから貸出可能なカードを取得
+    /// </summary>
+    private async Task<IEnumerable<IcCard>> GetAvailableFromDbAsync()
+    {
         var connection = _dbContext.GetConnection();
         var cardList = new List<IcCard>();
 
@@ -65,6 +90,17 @@ public class CardRepository : ICardRepository
 
     /// <inheritdoc/>
     public async Task<IEnumerable<IcCard>> GetLentAsync()
+    {
+        return await _cacheService.GetOrCreateAsync(
+            CacheKeys.LentCards,
+            async () => await GetLentFromDbAsync(),
+            CacheDurations.LentCards);
+    }
+
+    /// <summary>
+    /// DBから貸出中のカードを取得
+    /// </summary>
+    private async Task<IEnumerable<IcCard>> GetLentFromDbAsync()
     {
         var connection = _dbContext.GetConnection();
         var cardList = new List<IcCard>();
@@ -138,6 +174,10 @@ public class CardRepository : ICardRepository
         try
         {
             var result = await command.ExecuteNonQueryAsync();
+            if (result > 0)
+            {
+                InvalidateCardCache();
+            }
             return result > 0;
         }
         catch (SqliteException)
@@ -164,6 +204,10 @@ public class CardRepository : ICardRepository
         command.Parameters.AddWithValue("@note", (object?)card.Note ?? DBNull.Value);
 
         var result = await command.ExecuteNonQueryAsync();
+        if (result > 0)
+        {
+            InvalidateCardCache();
+        }
         return result > 0;
     }
 
@@ -185,6 +229,11 @@ public class CardRepository : ICardRepository
         command.Parameters.AddWithValue("@staffIdm", (object?)staffIdm ?? DBNull.Value);
 
         var result = await command.ExecuteNonQueryAsync();
+        if (result > 0)
+        {
+            // 貸出状態変更時は即座にキャッシュを無効化
+            InvalidateCardCache();
+        }
         return result > 0;
     }
 
@@ -210,7 +259,19 @@ public class CardRepository : ICardRepository
         command.Parameters.AddWithValue("@cardIdm", cardIdm);
 
         var result = await command.ExecuteNonQueryAsync();
+        if (result > 0)
+        {
+            InvalidateCardCache();
+        }
         return result > 0;
+    }
+
+    /// <summary>
+    /// カード関連のキャッシュをすべて無効化
+    /// </summary>
+    private void InvalidateCardCache()
+    {
+        _cacheService.InvalidateByPrefix(CacheKeys.CardPrefixForInvalidation);
     }
 
     /// <inheritdoc/>
