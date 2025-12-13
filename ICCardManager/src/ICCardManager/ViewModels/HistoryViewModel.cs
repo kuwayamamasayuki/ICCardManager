@@ -1,8 +1,8 @@
 using System.Collections.ObjectModel;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
-using ICCardManager.Common;
 using ICCardManager.Data.Repositories;
+using ICCardManager.Dtos;
 using ICCardManager.Models;
 
 namespace ICCardManager.ViewModels;
@@ -16,13 +16,13 @@ public partial class HistoryViewModel : ViewModelBase
     private readonly ICardRepository _cardRepository;
 
     [ObservableProperty]
-    private IcCard? _card;
+    private CardDto? _card;
 
     [ObservableProperty]
-    private ObservableCollection<LedgerDisplayItem> _ledgers = new();
+    private ObservableCollection<LedgerDto> _ledgers = new();
 
     [ObservableProperty]
-    private LedgerDisplayItem? _selectedLedger;
+    private LedgerDto? _selectedLedger;
 
     [ObservableProperty]
     private int _currentBalance;
@@ -85,9 +85,18 @@ public partial class HistoryViewModel : ViewModelBase
     }
 
     /// <summary>
-    /// カードを設定して初期化
+    /// カードを設定して初期化（エンティティから）
     /// </summary>
     public async Task InitializeAsync(IcCard card)
+    {
+        Card = card.ToDto();
+        await LoadHistoryAsync();
+    }
+
+    /// <summary>
+    /// カードを設定して初期化（DTOから）
+    /// </summary>
+    public async Task InitializeAsync(CardDto card)
     {
         Card = card;
         await LoadHistoryAsync();
@@ -111,7 +120,7 @@ public partial class HistoryViewModel : ViewModelBase
 
             foreach (var ledger in ledgers.OrderByDescending(l => l.Date).ThenByDescending(l => l.Id))
             {
-                Ledgers.Add(new LedgerDisplayItem(ledger));
+                Ledgers.Add(ledger.ToDto());
             }
 
             // 最新の残高を取得
@@ -191,34 +200,5 @@ public partial class HistoryViewModel : ViewModelBase
     private void UpdateSelectedPeriodDisplay()
     {
         SelectedPeriodDisplay = $"{FromDate:yyyy年M月}";
-    }
-}
-
-/// <summary>
-/// 履歴表示用アイテム
-/// </summary>
-public class LedgerDisplayItem
-{
-    public Ledger Ledger { get; }
-
-    public int Id => Ledger.Id;
-    public DateTime Date => Ledger.Date;
-    public string DateDisplay => WarekiConverter.ToWareki(Ledger.Date);
-    public string Summary => Ledger.Summary;
-    public int? Income => Ledger.Income > 0 ? Ledger.Income : null;
-    public int? Expense => Ledger.Expense > 0 ? Ledger.Expense : null;
-    public int Balance => Ledger.Balance;
-    public string? StaffName => Ledger.StaffName;
-    public string? Note => Ledger.Note;
-
-    public string IncomeDisplay => Income.HasValue ? $"+{Income:N0}" : "";
-    public string ExpenseDisplay => Expense.HasValue ? $"-{Expense:N0}" : "";
-    public string BalanceDisplay => $"{Balance:N0}";
-
-    public bool IsLentRecord => Ledger.IsLentRecord;
-
-    public LedgerDisplayItem(Ledger ledger)
-    {
-        Ledger = ledger;
     }
 }

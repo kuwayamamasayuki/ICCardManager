@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using ICCardManager.Data.Repositories;
+using ICCardManager.Dtos;
 using ICCardManager.Infrastructure.CardReader;
 using ICCardManager.Models;
 
@@ -16,10 +17,10 @@ public partial class StaffManageViewModel : ViewModelBase
     private readonly ICardReader _cardReader;
 
     [ObservableProperty]
-    private ObservableCollection<Staff> _staffList = new();
+    private ObservableCollection<StaffDto> _staffList = new();
 
     [ObservableProperty]
-    private Staff? _selectedStaff;
+    private StaffDto? _selectedStaff;
 
     [ObservableProperty]
     private bool _isEditing;
@@ -76,7 +77,7 @@ public partial class StaffManageViewModel : ViewModelBase
             StaffList.Clear();
             foreach (var staff in staffList.OrderBy(s => s.Number).ThenBy(s => s.Name))
             {
-                StaffList.Add(staff);
+                StaffList.Add(staff.ToDto());
             }
         }
     }

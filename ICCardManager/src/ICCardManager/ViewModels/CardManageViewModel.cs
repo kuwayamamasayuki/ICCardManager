@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using ICCardManager.Data.Repositories;
+using ICCardManager.Dtos;
 using ICCardManager.Infrastructure.CardReader;
 using ICCardManager.Models;
 using ICCardManager.Services;
@@ -18,10 +19,10 @@ public partial class CardManageViewModel : ViewModelBase
     private readonly CardTypeDetector _cardTypeDetector;
 
     [ObservableProperty]
-    private ObservableCollection<IcCard> _cards = new();
+    private ObservableCollection<CardDto> _cards = new();
 
     [ObservableProperty]
-    private IcCard? _selectedCard;
+    private CardDto? _selectedCard;
 
     [ObservableProperty]
     private bool _isEditing;
@@ -98,7 +99,7 @@ public partial class CardManageViewModel : ViewModelBase
             Cards.Clear();
             foreach (var card in cards.OrderBy(c => c.CardType).ThenBy(c => c.CardNumber))
             {
-                Cards.Add(card);
+                Cards.Add(card.ToDto());
             }
         }
     }
@@ -225,7 +226,7 @@ public partial class CardManageViewModel : ViewModelBase
                     CardNumber = EditCardNumber,
                     Note = string.IsNullOrWhiteSpace(EditNote) ? null : EditNote,
                     IsLent = SelectedCard!.IsLent,
-                    LastLentAt = SelectedCard.LastLentAt,
+                    LastLentAt = SelectedCard.LentAt,
                     LastLentStaff = SelectedCard.LastLentStaff
                 };
 

@@ -4,7 +4,7 @@ using System.IO;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using ICCardManager.Data.Repositories;
-using ICCardManager.Models;
+using ICCardManager.Dtos;
 using ICCardManager.Services;
 using Microsoft.Win32;
 
@@ -19,10 +19,10 @@ public partial class ReportViewModel : ViewModelBase
     private readonly ICardRepository _cardRepository;
 
     [ObservableProperty]
-    private ObservableCollection<IcCard> _cards = new();
+    private ObservableCollection<CardDto> _cards = new();
 
     [ObservableProperty]
-    private ObservableCollection<IcCard> _selectedCards = new();
+    private ObservableCollection<CardDto> _selectedCards = new();
 
     [ObservableProperty]
     private int _selectedYear;
@@ -94,7 +94,7 @@ public partial class ReportViewModel : ViewModelBase
 
             foreach (var card in cards.OrderBy(c => c.CardType).ThenBy(c => c.CardNumber))
             {
-                Cards.Add(card);
+                Cards.Add(card.ToDto());
             }
 
             // デフォルトで全選択
@@ -134,7 +134,7 @@ public partial class ReportViewModel : ViewModelBase
     /// カードの選択状態を切り替え
     /// </summary>
     [RelayCommand]
-    public void ToggleCardSelection(IcCard card)
+    public void ToggleCardSelection(CardDto card)
     {
         if (SelectedCards.Contains(card))
         {
