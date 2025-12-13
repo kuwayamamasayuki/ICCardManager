@@ -189,7 +189,7 @@
                 <ProgressBar IsIndeterminate="True" Width="250" Height="4"/>
                 <TextBlock Text="{Binding BusyMessage}"
                            Foreground="White"
-                           FontSize="14"
+                           FontSize="{DynamicResource BaseFontSize}"
                            Margin="0,10,0,0"
                            HorizontalAlignment="Center"/>
             </StackPanel>

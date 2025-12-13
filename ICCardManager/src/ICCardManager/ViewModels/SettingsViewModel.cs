@@ -150,24 +150,8 @@ public partial class SettingsViewModel : ViewModelBase
     /// </summary>
     private void ApplyFontSize(FontSizeOption fontSize)
     {
-        var baseFontSize = fontSize switch
-        {
-            FontSizeOption.Small => 12.0,
-            FontSizeOption.Medium => 14.0,
-            FontSizeOption.Large => 16.0,
-            FontSizeOption.ExtraLarge => 20.0,
-            _ => 14.0
-        };
-
-        // アプリケーション全体のフォントサイズを変更
-        if (System.Windows.Application.Current.Resources.Contains("BaseFontSize"))
-        {
-            System.Windows.Application.Current.Resources["BaseFontSize"] = baseFontSize;
-        }
-        else
-        {
-            System.Windows.Application.Current.Resources.Add("BaseFontSize", baseFontSize);
-        }
+        // App.ApplyFontSizeを呼び出して、関連するすべてのフォントサイズを更新
+        App.ApplyFontSize(fontSize);
     }
 
     partial void OnWarningBalanceChanged(int value)

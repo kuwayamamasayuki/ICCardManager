@@ -39,14 +39,14 @@
                 </Grid.ColumnDefinitions>
 
                 <TextBlock Text="交通系ICカード管理システム"
-                           FontSize="22"
+                           FontSize="{DynamicResource TitleFontSize}"
                            FontWeight="Bold"
                            Foreground="White"
                            VerticalAlignment="Center"/>
 
                 <StackPanel Grid.Column="1" Orientation="Horizontal">
                     <TextBlock Text="{Binding CurrentDateTime}"
-                               FontSize="16"
+                               FontSize="{DynamicResource LargeFontSize}"
                                Foreground="White"
                                VerticalAlignment="Center"
                                Margin="0,0,20,0"/>
@@ -76,20 +76,20 @@
                 <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
                     <!-- 状態アイコン -->
                     <TextBlock Text="{Binding StatusIcon}"
-                               FontSize="72"
+                               FontSize="{DynamicResource IconFontSize}"
                                HorizontalAlignment="Center"
                                Margin="0,0,0,20"/>
 
                     <!-- ステータスメッセージ -->
                     <TextBlock Text="{Binding StatusMessage}"
-                               FontSize="28"
+                               FontSize="{DynamicResource StatusFontSize}"
                                FontWeight="Bold"
                                TextAlignment="Center"
                                TextWrapping="Wrap"
                                HorizontalAlignment="Center"/>
 
                     <!-- タイムアウト表示 -->
-                    <TextBlock FontSize="16"
+                    <TextBlock FontSize="{DynamicResource LargeFontSize}"
                                Foreground="Gray"
                                Margin="0,20,0,0"
                                HorizontalAlignment="Center"
@@ -114,7 +114,7 @@
                     <!-- 貸出中カード -->
                     <TextBlock Grid.Row="0"
                                Text="貸出中のカード"
-                               FontSize="14"
+                               FontSize="{DynamicResource BaseFontSize}"
                                FontWeight="Bold"
                                Margin="0,0,0,10"/>
 
@@ -132,7 +132,7 @@
                                             <Run Text=" "/>
                                             <Run Text="{Binding CardNumber}"/>
                                         </TextBlock>
-                                        <TextBlock FontSize="11" Foreground="Gray"
+                                        <TextBlock FontSize="{DynamicResource SmallFontSize}" Foreground="Gray"
                                                    Text="{Binding LastLentAt, StringFormat='{}{0:M/d H:mm}～'}"/>
                                     </StackPanel>
                                 </Border>
@@ -143,7 +143,7 @@
                     <!-- 警告エリア -->
                     <TextBlock Grid.Row="2"
                                Text="警告"
-                               FontSize="14"
+                               FontSize="{DynamicResource BaseFontSize}"
                                FontWeight="Bold"
                                Margin="0,15,0,10"
                                Visibility="{Binding WarningMessages.Count, Converter={StaticResource IntToVisibilityConverter}, Mode=OneWay}"/>
@@ -156,7 +156,7 @@
                                         Margin="0,2" Padding="10,8">
                                     <TextBlock Text="{Binding}"
                                                TextWrapping="Wrap"
-                                               FontSize="12"/>
+                                               FontSize="{DynamicResource SmallFontSize}"/>
                                 </Border>
                             </DataTemplate>
                         </ItemsControl.ItemTemplate>
@@ -172,7 +172,7 @@
                 <ProgressBar IsIndeterminate="True" Width="200" Height="4"/>
                 <TextBlock Text="{Binding BusyMessage}"
                            Foreground="White"
-                           FontSize="16"
+                           FontSize="{DynamicResource LargeFontSize}"
                            Margin="0,15,0,0"
                            HorizontalAlignment="Center"/>
             </StackPanel>
@@ -186,7 +186,7 @@
                     <ColumnDefinition Width="Auto"/>
                 </Grid.ColumnDefinitions>
 
-                <TextBlock Grid.Column="0" FontSize="12" Foreground="#1565C0" VerticalAlignment="Center">
+                <TextBlock Grid.Column="0" FontSize="{DynamicResource SmallFontSize}" Foreground="#1565C0" VerticalAlignment="Center">
                     <Run Text="操作: "/>
                     <Run Text="職員証タッチ → ICカードタッチ で貸出/返却"/>
                     <Run Text=" | "/>
