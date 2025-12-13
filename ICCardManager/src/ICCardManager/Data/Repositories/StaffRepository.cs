@@ -53,6 +53,28 @@ public class StaffRepository : IStaffRepository
     }
 
     /// <inheritdoc/>
+    public async Task<IEnumerable<Staff>> GetAllIncludingDeletedAsync()
+    {
+        var connection = _dbContext.GetConnection();
+        var staffList = new List<Staff>();
+
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT staff_idm, name, number, note, is_deleted, deleted_at
+            FROM staff
+            ORDER BY name
+            """;
+
+        await using var reader = await command.ExecuteReaderAsync();
+        while (await reader.ReadAsync())
+        {
+            staffList.Add(MapToStaff(reader));
+        }
+
+        return staffList;
+    }
+
+    /// <inheritdoc/>
     public async Task<Staff?> GetByIdmAsync(string staffIdm, bool includeDeleted = false)
     {
         var connection = _dbContext.GetConnection();

@@ -54,6 +54,29 @@ public class CardRepository : ICardRepository
     }
 
     /// <inheritdoc/>
+    public async Task<IEnumerable<IcCard>> GetAllIncludingDeletedAsync()
+    {
+        var connection = _dbContext.GetConnection();
+        var cardList = new List<IcCard>();
+
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT card_idm, card_type, card_number, note, is_deleted, deleted_at,
+                   is_lent, last_lent_at, last_lent_staff
+            FROM ic_card
+            ORDER BY card_type, card_number
+            """;
+
+        await using var reader = await command.ExecuteReaderAsync();
+        while (await reader.ReadAsync())
+        {
+            cardList.Add(MapToIcCard(reader));
+        }
+
+        return cardList;
+    }
+
+    /// <inheritdoc/>
     public async Task<IEnumerable<IcCard>> GetAvailableAsync()
     {
         return await _cacheService.GetOrCreateAsync(

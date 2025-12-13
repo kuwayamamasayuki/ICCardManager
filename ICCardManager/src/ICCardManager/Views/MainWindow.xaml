@@ -27,6 +27,7 @@
         <KeyBinding Key="F2" Command="{Binding OpenReportCommand}"/>
         <KeyBinding Key="F3" Command="{Binding OpenCardManageCommand}"/>
         <KeyBinding Key="F4" Command="{Binding OpenStaffManageCommand}"/>
+        <KeyBinding Key="F5" Command="{Binding OpenDataExportImportCommand}"/>
     </Window.InputBindings>
 
     <Grid>
@@ -84,6 +85,12 @@
                             AutomationProperties.Name="職員管理ダイアログを開く"
                             AutomationProperties.HelpText="職員の登録・編集を行います。ショートカット: F4"
                             ToolTip="職員管理を開く (F4)"/>
+                    <Button Content="データ入出力 (F5)" Margin="5,0" Padding="10,5"
+                            Command="{Binding OpenDataExportImportCommand}"
+                            TabIndex="5"
+                            AutomationProperties.Name="データエクスポート/インポートダイアログを開く"
+                            AutomationProperties.HelpText="カード・職員・履歴のCSVエクスポート/インポートを行います。ショートカット: F5"
+                            ToolTip="データ入出力を開く (F5)"/>
                 </StackPanel>
             </Grid>
         </Border>

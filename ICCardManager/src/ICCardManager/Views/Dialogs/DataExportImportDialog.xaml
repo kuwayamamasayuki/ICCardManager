@@ -1,0 +1,273 @@
+<Window x:Class="ICCardManager.Views.Dialogs.DataExportImportDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:vm="clr-namespace:ICCardManager.ViewModels"
+        mc:Ignorable="d"
+        d:DataContext="{d:DesignInstance Type=vm:DataExportImportViewModel}"
+        Title="データエクスポート/インポート"
+        Height="600"
+        Width="600"
+        WindowStartupLocation="CenterOwner"
+        ResizeMode="NoResize"
+        AutomationProperties.Name="データエクスポート/インポートダイアログ"
+        AutomationProperties.HelpText="カード、職員、履歴データのCSVエクスポート・インポートができます。Escapeキーで閉じます。">
+
+    <Window.Resources>
+        <BooleanToVisibilityConverter x:Key="BoolToVisibilityConverter"/>
+        <vm:DataTypeToDisplayNameConverter x:Key="DataTypeConverter"/>
+    </Window.Resources>
+
+    <Grid Margin="20">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <!-- エクスポート -->
+        <GroupBox Grid.Row="0" Header="エクスポート" Margin="0,0,0,15" Padding="15">
+            <StackPanel>
+                <TextBlock Text="データをCSVファイルに出力します"
+                           Foreground="Gray"
+                           FontSize="{DynamicResource SmallFontSize}"
+                           Margin="0,0,0,10"/>
+
+                <!-- データタイプ選択 -->
+                <Grid Margin="0,0,0,10">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="120"/>
+                        <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Text="データ種別:"
+                               VerticalAlignment="Center"
+                               FontSize="{DynamicResource BaseFontSize}"/>
+                    <ComboBox Grid.Column="1"
+                              ItemsSource="{Binding ExportDataTypes}"
+                              SelectedItem="{Binding SelectedExportType}"
+                              Padding="8"
+                              HorizontalAlignment="Left"
+                              Width="200"
+                              AutomationProperties.Name="エクスポートするデータ種別"
+                              ToolTip="エクスポートするデータの種類を選択します">
+                        <ComboBox.ItemTemplate>
+                            <DataTemplate>
+                                <TextBlock Text="{Binding Converter={StaticResource DataTypeConverter}}"/>
+                            </DataTemplate>
+                        </ComboBox.ItemTemplate>
+                    </ComboBox>
+                </Grid>
+
+                <!-- 日付範囲（履歴の場合のみ表示） -->
+                <Grid Margin="0,0,0,10"
+                      Visibility="{Binding IsLedgerExportSelected, Converter={StaticResource BoolToVisibilityConverter}}">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="120"/>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Text="対象期間:"
+                               VerticalAlignment="Center"
+                               FontSize="{DynamicResource BaseFontSize}"/>
+                    <DatePicker Grid.Column="1"
+                                SelectedDate="{Binding ExportStartDate}"
+                                Padding="5"
+                                Width="130"
+                                AutomationProperties.Name="開始日"
+                                ToolTip="エクスポート対象期間の開始日"/>
+                    <TextBlock Grid.Column="2"
+                               Text=" ～ "
+                               VerticalAlignment="Center"
+                               Margin="5,0"/>
+                    <DatePicker Grid.Column="3"
+                                SelectedDate="{Binding ExportEndDate}"
+                                Padding="5"
+                                Width="130"
+                                AutomationProperties.Name="終了日"
+                                ToolTip="エクスポート対象期間の終了日"/>
+                </Grid>
+
+                <!-- 削除済みを含む -->
+                <Grid Margin="0,0,0,10">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="120"/>
+                        <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
+                    <CheckBox Grid.Column="1"
+                              Content="削除済みデータを含める"
+                              IsChecked="{Binding IncludeDeletedInExport}"
+                              VerticalAlignment="Center"
+                              AutomationProperties.Name="削除済みデータを含める"
+                              ToolTip="論理削除されたデータもエクスポートに含めます"/>
+                </Grid>
+
+                <!-- エクスポートボタン -->
+                <Button Content="CSVエクスポート"
+                        Command="{Binding ExportCommand}"
+                        Padding="15,10"
+                        HorizontalAlignment="Left"
+                        Background="#4CAF50"
+                        Foreground="White"
+                        AutomationProperties.Name="CSVエクスポート実行"
+                        ToolTip="選択したデータをCSVファイルにエクスポートします"/>
+
+                <!-- 最後にエクスポートしたファイル -->
+                <StackPanel Orientation="Horizontal"
+                            Margin="0,10,0,0"
+                            Visibility="{Binding LastExportedFile, Converter={StaticResource BoolToVisibilityConverter}}">
+                    <TextBlock Text="出力先: "
+                               Foreground="Gray"
+                               FontSize="{DynamicResource SmallFontSize}"
+                               VerticalAlignment="Center"/>
+                    <TextBlock Text="{Binding LastExportedFile}"
+                               Foreground="Gray"
+                               FontSize="{DynamicResource SmallFontSize}"
+                               VerticalAlignment="Center"
+                               TextTrimming="CharacterEllipsis"
+                               MaxWidth="300"/>
+                    <Button Content="開く"
+                            Command="{Binding OpenExportedFileCommand}"
+                            Padding="5,2"
+                            Margin="10,0,0,0"
+                            FontSize="{DynamicResource SmallFontSize}"/>
+                    <Button Content="フォルダを開く"
+                            Command="{Binding OpenExportFolderCommand}"
+                            Padding="5,2"
+                            Margin="5,0,0,0"
+                            FontSize="{DynamicResource SmallFontSize}"/>
+                </StackPanel>
+            </StackPanel>
+        </GroupBox>
+
+        <!-- インポート -->
+        <GroupBox Grid.Row="1" Header="インポート" Margin="0,0,0,15" Padding="15">
+            <StackPanel>
+                <TextBlock Text="CSVファイルからデータを取り込みます"
+                           Foreground="Gray"
+                           FontSize="{DynamicResource SmallFontSize}"
+                           Margin="0,0,0,10"/>
+
+                <!-- データタイプ選択 -->
+                <Grid Margin="0,0,0,10">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="120"/>
+                        <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Text="データ種別:"
+                               VerticalAlignment="Center"
+                               FontSize="{DynamicResource BaseFontSize}"/>
+                    <ComboBox Grid.Column="1"
+                              ItemsSource="{Binding ImportDataTypes}"
+                              SelectedItem="{Binding SelectedImportType}"
+                              Padding="8"
+                              HorizontalAlignment="Left"
+                              Width="200"
+                              AutomationProperties.Name="インポートするデータ種別"
+                              ToolTip="インポートするデータの種類を選択します">
+                        <ComboBox.ItemTemplate>
+                            <DataTemplate>
+                                <TextBlock Text="{Binding Converter={StaticResource DataTypeConverter}}"/>
+                            </DataTemplate>
+                        </ComboBox.ItemTemplate>
+                    </ComboBox>
+                </Grid>
+
+                <!-- 既存スキップ -->
+                <Grid Margin="0,0,0,10">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="120"/>
+                        <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
+                    <CheckBox Grid.Column="1"
+                              Content="既存データはスキップする"
+                              IsChecked="{Binding SkipExistingOnImport}"
+                              VerticalAlignment="Center"
+                              AutomationProperties.Name="既存データをスキップ"
+                              ToolTip="同じIDmのデータが既に存在する場合はスキップします（オフの場合は上書き更新）"/>
+                </Grid>
+
+                <!-- インポートボタン -->
+                <Button Content="CSVインポート"
+                        Command="{Binding ImportCommand}"
+                        Padding="15,10"
+                        HorizontalAlignment="Left"
+                        Background="#2196F3"
+                        Foreground="White"
+                        AutomationProperties.Name="CSVインポート実行"
+                        ToolTip="CSVファイルからデータをインポートします"/>
+
+                <!-- 最後にインポートしたファイル -->
+                <TextBlock Text="{Binding LastImportedFile, StringFormat=インポート元: {0}}"
+                           Foreground="Gray"
+                           FontSize="{DynamicResource SmallFontSize}"
+                           Margin="0,10,0,0"
+                           TextTrimming="CharacterEllipsis"
+                           Visibility="{Binding LastImportedFile, Converter={StaticResource BoolToVisibilityConverter}}"/>
+            </StackPanel>
+        </GroupBox>
+
+        <!-- ステータスメッセージ -->
+        <Border Grid.Row="2"
+                Background="#E3F2FD"
+                Padding="10"
+                Margin="0,0,0,10"
+                CornerRadius="5"
+                Visibility="{Binding StatusMessage, Converter={StaticResource BoolToVisibilityConverter}}">
+            <TextBlock Text="{Binding StatusMessage}"
+                       Foreground="#1565C0"
+                       FontSize="{DynamicResource BaseFontSize}"
+                       TextWrapping="Wrap"/>
+        </Border>
+
+        <!-- インポートエラー一覧 -->
+        <GroupBox Grid.Row="3"
+                  Header="インポートエラー詳細"
+                  Padding="10"
+                  Visibility="{Binding ImportErrors.Count, Converter={StaticResource BoolToVisibilityConverter}}">
+            <ListBox ItemsSource="{Binding ImportErrors}"
+                     Background="#FFF3E0"
+                     BorderThickness="0"
+                     AutomationProperties.Name="インポートエラー一覧">
+                <ListBox.ItemTemplate>
+                    <DataTemplate>
+                        <TextBlock Text="{Binding}"
+                                   Foreground="#E65100"
+                                   FontSize="{DynamicResource SmallFontSize}"/>
+                    </DataTemplate>
+                </ListBox.ItemTemplate>
+            </ListBox>
+        </GroupBox>
+
+        <!-- 閉じるボタン -->
+        <StackPanel Grid.Row="4"
+                    Orientation="Horizontal"
+                    HorizontalAlignment="Right"
+                    Margin="0,15,0,0">
+            <Button Content="閉じる"
+                    Click="CloseButton_Click"
+                    Padding="20,10"
+                    MinWidth="100"
+                    IsCancel="True"
+                    AutomationProperties.Name="ダイアログを閉じる"
+                    ToolTip="ダイアログを閉じます (Escape)"/>
+        </StackPanel>
+
+        <!-- 処理中オーバーレイ -->
+        <Border Grid.RowSpan="5"
+                Background="#80000000"
+                Visibility="{Binding IsBusy, Converter={StaticResource BoolToVisibilityConverter}}">
+            <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
+                <ProgressBar IsIndeterminate="True" Width="200" Height="4"/>
+                <TextBlock Text="{Binding BusyMessage}"
+                           Foreground="White"
+                           FontSize="{DynamicResource BaseFontSize}"
+                           Margin="0,10,0,0"
+                           HorizontalAlignment="Center"/>
+            </StackPanel>
+        </Border>
+    </Grid>
+</Window>

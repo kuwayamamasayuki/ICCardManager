@@ -13,6 +13,11 @@ public interface ICardRepository
     Task<IEnumerable<IcCard>> GetAllAsync();
 
     /// <summary>
+    /// 全ICカードを取得（論理削除されたものを含む）
+    /// </summary>
+    Task<IEnumerable<IcCard>> GetAllIncludingDeletedAsync();
+
+    /// <summary>
     /// 貸出可能なICカードを取得
     /// </summary>
     Task<IEnumerable<IcCard>> GetAvailableAsync();

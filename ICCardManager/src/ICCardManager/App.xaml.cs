@@ -116,6 +116,8 @@ public partial class App : Application
         services.AddSingleton<PrintService>();
         services.AddSingleton<BackupService>();
         services.AddSingleton<OperationLogger>();
+        services.AddSingleton<CsvExportService>();
+        services.AddSingleton<CsvImportService>();
 
         // Infrastructure層
 #if DEBUG
@@ -135,6 +137,7 @@ public partial class App : Application
         services.AddTransient<HistoryViewModel>();
         services.AddTransient<BusStopInputViewModel>();
         services.AddTransient<PrintPreviewViewModel>();
+        services.AddTransient<DataExportImportViewModel>();
 
         // Views
         services.AddTransient<MainWindow>();
@@ -145,6 +148,7 @@ public partial class App : Application
         services.AddTransient<Views.Dialogs.HistoryDialog>();
         services.AddTransient<Views.Dialogs.BusStopInputDialog>();
         services.AddTransient<Views.Dialogs.PrintPreviewDialog>();
+        services.AddTransient<Views.Dialogs.DataExportImportDialog>();
     }
 
     /// <summary>

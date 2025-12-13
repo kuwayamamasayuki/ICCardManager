@@ -13,6 +13,11 @@ public interface IStaffRepository
     Task<IEnumerable<Staff>> GetAllAsync();
 
     /// <summary>
+    /// 全職員を取得（論理削除されたものを含む）
+    /// </summary>
+    Task<IEnumerable<Staff>> GetAllIncludingDeletedAsync();
+
+    /// <summary>
     /// IDmで職員を取得
     /// </summary>
     /// <param name="staffIdm">職員証IDm</param>
