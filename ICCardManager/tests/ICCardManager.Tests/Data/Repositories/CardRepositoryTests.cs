@@ -1,8 +1,10 @@
 using FluentAssertions;
 using ICCardManager.Data;
 using ICCardManager.Data.Repositories;
+using ICCardManager.Infrastructure.Caching;
 using ICCardManager.Models;
 using ICCardManager.Tests.Data;
+using Moq;
 using Xunit;
 
 namespace ICCardManager.Tests.Data.Repositories;
@@ -13,6 +15,7 @@ namespace ICCardManager.Tests.Data.Repositories;
 public class CardRepositoryTests : IDisposable
 {
     private readonly DbContext _dbContext;
+    private readonly Mock<ICacheService> _cacheServiceMock;
     private readonly CardRepository _repository;
     private readonly StaffRepository _staffRepository;
 
@@ -23,8 +26,23 @@ public class CardRepositoryTests : IDisposable
     public CardRepositoryTests()
     {
         _dbContext = TestDbContextFactory.Create();
-        _repository = new CardRepository(_dbContext);
-        _staffRepository = new StaffRepository(_dbContext);
+        _cacheServiceMock = new Mock<ICacheService>();
+
+        // キャッシュをバイパスしてファクトリ関数を直接実行するよう設定
+        _cacheServiceMock.Setup(c => c.GetOrCreateAsync(
+            It.IsAny<string>(),
+            It.IsAny<Func<Task<IEnumerable<IcCard>>>>(),
+            It.IsAny<TimeSpan>()))
+            .Returns((string key, Func<Task<IEnumerable<IcCard>>> factory, TimeSpan expiration) => factory());
+
+        _cacheServiceMock.Setup(c => c.GetOrCreateAsync(
+            It.IsAny<string>(),
+            It.IsAny<Func<Task<IEnumerable<Staff>>>>(),
+            It.IsAny<TimeSpan>()))
+            .Returns((string key, Func<Task<IEnumerable<Staff>>> factory, TimeSpan expiration) => factory());
+
+        _repository = new CardRepository(_dbContext, _cacheServiceMock.Object);
+        _staffRepository = new StaffRepository(_dbContext, _cacheServiceMock.Object);
     }
 
     public void Dispose()

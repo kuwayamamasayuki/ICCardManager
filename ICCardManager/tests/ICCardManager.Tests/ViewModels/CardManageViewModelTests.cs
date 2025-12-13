@@ -1,5 +1,6 @@
 using FluentAssertions;
 using ICCardManager.Data.Repositories;
+using ICCardManager.Dtos;
 using ICCardManager.Infrastructure.CardReader;
 using ICCardManager.Models;
 using ICCardManager.Services;
@@ -16,6 +17,7 @@ public class CardManageViewModelTests
 {
     private readonly Mock<ICardRepository> _cardRepositoryMock;
     private readonly Mock<ICardReader> _cardReaderMock;
+    private readonly Mock<IValidationService> _validationServiceMock;
     private readonly CardTypeDetector _cardTypeDetector;
     private readonly CardManageViewModel _viewModel;
 
@@ -23,11 +25,19 @@ public class CardManageViewModelTests
     {
         _cardRepositoryMock = new Mock<ICardRepository>();
         _cardReaderMock = new Mock<ICardReader>();
+        _validationServiceMock = new Mock<IValidationService>();
         _cardTypeDetector = new CardTypeDetector();
+
+        // バリデーションはデフォルトで成功を返す
+        _validationServiceMock.Setup(v => v.ValidateCardIdm(It.IsAny<string>())).Returns(ValidationResult.Success());
+        _validationServiceMock.Setup(v => v.ValidateCardNumber(It.IsAny<string>())).Returns(ValidationResult.Success());
+        _validationServiceMock.Setup(v => v.ValidateCardType(It.IsAny<string>())).Returns(ValidationResult.Success());
+
         _viewModel = new CardManageViewModel(
             _cardRepositoryMock.Object,
             _cardReaderMock.Object,
-            _cardTypeDetector);
+            _cardTypeDetector,
+            _validationServiceMock.Object);
     }
 
     #region カード一覧読み込みテスト
@@ -89,7 +99,7 @@ public class CardManageViewModelTests
     public void StartNewCard_ShouldSetEditingModeCorrectly()
     {
         // Arrange
-        _viewModel.SelectedCard = new IcCard { CardIdm = "existing" };
+        _viewModel.SelectedCard = new CardDto { CardIdm = "existing", CardType = "test", CardNumber = "001" };
 
         // Act
         _viewModel.StartNewCard();
@@ -169,7 +179,7 @@ public class CardManageViewModelTests
     public void StartEdit_ShouldLoadSelectedCardData()
     {
         // Arrange
-        var card = new IcCard
+        var card = new CardDto
         {
             CardIdm = "0102030405060708",
             CardType = "はやかけん",
@@ -280,6 +290,10 @@ public class CardManageViewModelTests
         _viewModel.EditCardIdm = "";
         _viewModel.EditCardType = "はやかけん";
 
+        // 空のIDmに対してエラーを返すようモックを設定
+        _validationServiceMock.Setup(v => v.ValidateCardIdm(string.Empty))
+            .Returns(ValidationResult.Failure("IDmを入力してください"));
+
         // Act
         await _viewModel.SaveAsync();
 
@@ -298,6 +312,10 @@ public class CardManageViewModelTests
         _viewModel.StartNewCard();
         _viewModel.EditCardIdm = "0102030405060708";
         _viewModel.EditCardType = "";
+
+        // 空の種別に対してエラーを返すようモックを設定
+        _validationServiceMock.Setup(v => v.ValidateCardType(string.Empty))
+            .Returns(ValidationResult.Failure("カード種別を選択してください"));
 
         // Act
         await _viewModel.SaveAsync();
@@ -342,13 +360,13 @@ public class CardManageViewModelTests
     public async Task SaveAsync_ExistingCard_ShouldUpdateCard()
     {
         // Arrange
-        var existingCard = new IcCard
+        var existingCard = new CardDto
         {
             CardIdm = "0102030405060708",
             CardType = "はやかけん",
             CardNumber = "H-001",
             IsLent = true,
-            LastLentAt = DateTime.Now,
+            LentAt = DateTime.Now,
             LastLentStaff = "staff123"
         };
         _viewModel.SelectedCard = existingCard;
@@ -384,7 +402,7 @@ public class CardManageViewModelTests
     public async Task DeleteAsync_ShouldDeleteCard()
     {
         // Arrange
-        var card = new IcCard
+        var card = new CardDto
         {
             CardIdm = "0102030405060708",
             CardType = "はやかけん",
@@ -412,7 +430,7 @@ public class CardManageViewModelTests
     public async Task DeleteAsync_LentCard_ShouldShowError()
     {
         // Arrange
-        var card = new IcCard
+        var card = new CardDto
         {
             CardIdm = "0102030405060708",
             CardType = "はやかけん",

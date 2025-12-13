@@ -1,5 +1,6 @@
 using FluentAssertions;
 using ICCardManager.Data.Repositories;
+using ICCardManager.Dtos;
 using ICCardManager.Models;
 using ICCardManager.ViewModels;
 using Moq;
@@ -87,7 +88,7 @@ public class HistoryViewModelTests
     public async Task InitializeAsync_ShouldSetCardAndLoadHistory()
     {
         // Arrange
-        var card = new IcCard { CardIdm = "01020304050607FF", CardType = "はやかけん", CardNumber = "H-001" };
+        var card = new CardDto { CardIdm = "01020304050607FF", CardType = "はやかけん", CardNumber = "H-001" };
         _ledgerRepositoryMock
             .Setup(r => r.GetByDateRangeAsync(card.CardIdm, It.IsAny<DateTime>(), It.IsAny<DateTime>()))
             .ReturnsAsync(new List<Ledger>());
@@ -114,7 +115,7 @@ public class HistoryViewModelTests
     public async Task LoadHistoryAsync_ShouldLoadLedgersOrderedByDateDesc()
     {
         // Arrange
-        var card = new IcCard { CardIdm = "01020304050607FF" };
+        var card = new CardDto { CardIdm = "01020304050607FF", CardType = "test", CardNumber = "001" };
         _viewModel.Card = card;
 
         var ledgers = new List<Ledger>
@@ -165,7 +166,7 @@ public class HistoryViewModelTests
     public async Task LoadHistoryAsync_WithNoHistory_ShouldSetBalanceToZero()
     {
         // Arrange
-        var card = new IcCard { CardIdm = "01020304050607FF" };
+        var card = new CardDto { CardIdm = "01020304050607FF", CardType = "test", CardNumber = "001" };
         _viewModel.Card = card;
 
         _ledgerRepositoryMock
@@ -306,16 +307,16 @@ public class HistoryViewModelTests
 
     #endregion
 
-    #region LedgerDisplayItemテスト
+    #region LedgerDtoテスト
 
     /// <summary>
-    /// LedgerDisplayItemが正しく表示用データを生成すること
+    /// LedgerDtoが正しく表示用データを生成すること
     /// </summary>
     [Fact]
-    public void LedgerDisplayItem_ShouldFormatDataCorrectly()
+    public void LedgerDto_ShouldFormatDataCorrectly()
     {
         // Arrange
-        var ledger = new Ledger
+        var displayItem = new LedgerDto
         {
             Id = 1,
             CardIdm = "01020304050607FF",
@@ -328,14 +329,11 @@ public class HistoryViewModelTests
             Note = "テスト"
         };
 
-        // Act
-        var displayItem = new LedgerDisplayItem(ledger);
-
         // Assert
         displayItem.Id.Should().Be(1);
         displayItem.Date.Should().Be(new DateTime(2024, 6, 15));
         displayItem.Summary.Should().Be("鉄道（福岡空港駅～博多駅）");
-        displayItem.Income.Should().BeNull(); // 0の場合はnull
+        displayItem.HasIncome.Should().BeFalse();
         displayItem.Expense.Should().Be(260);
         displayItem.Balance.Should().Be(1240);
         displayItem.StaffName.Should().Be("田中太郎");
@@ -349,10 +347,10 @@ public class HistoryViewModelTests
     /// チャージ時の表示が正しいこと
     /// </summary>
     [Fact]
-    public void LedgerDisplayItem_WithIncome_ShouldShowIncomeDisplay()
+    public void LedgerDto_WithIncome_ShouldShowIncomeDisplay()
     {
         // Arrange
-        var ledger = new Ledger
+        var displayItem = new LedgerDto
         {
             Id = 2,
             CardIdm = "01020304050607FF",
@@ -363,12 +361,9 @@ public class HistoryViewModelTests
             Balance = 4000
         };
 
-        // Act
-        var displayItem = new LedgerDisplayItem(ledger);
-
         // Assert
         displayItem.Income.Should().Be(3000);
-        displayItem.Expense.Should().BeNull(); // 0の場合はnull
+        displayItem.HasExpense.Should().BeFalse();
         displayItem.IncomeDisplay.Should().Be("+3,000");
         displayItem.ExpenseDisplay.Should().BeEmpty();
     }

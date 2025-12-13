@@ -1,8 +1,10 @@
 using FluentAssertions;
 using ICCardManager.Data;
 using ICCardManager.Data.Repositories;
+using ICCardManager.Infrastructure.Caching;
 using ICCardManager.Models;
 using ICCardManager.Tests.Data;
+using Moq;
 using Xunit;
 
 namespace ICCardManager.Tests.Data.Repositories;
@@ -13,12 +15,22 @@ namespace ICCardManager.Tests.Data.Repositories;
 public class SettingsRepositoryTests : IDisposable
 {
     private readonly DbContext _dbContext;
+    private readonly Mock<ICacheService> _cacheServiceMock;
     private readonly SettingsRepository _repository;
 
     public SettingsRepositoryTests()
     {
         _dbContext = TestDbContextFactory.Create();
-        _repository = new SettingsRepository(_dbContext);
+        _cacheServiceMock = new Mock<ICacheService>();
+
+        // キャッシュをバイパスしてファクトリ関数を直接実行するよう設定
+        _cacheServiceMock.Setup(c => c.GetOrCreateAsync(
+            It.IsAny<string>(),
+            It.IsAny<Func<Task<AppSettings>>>(),
+            It.IsAny<TimeSpan>()))
+            .Returns((string key, Func<Task<AppSettings>> factory, TimeSpan expiration) => factory());
+
+        _repository = new SettingsRepository(_dbContext, _cacheServiceMock.Object);
     }
 
     public void Dispose()

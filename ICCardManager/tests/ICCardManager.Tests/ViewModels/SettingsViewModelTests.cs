@@ -1,6 +1,7 @@
 using FluentAssertions;
 using ICCardManager.Data.Repositories;
 using ICCardManager.Models;
+using ICCardManager.Services;
 using ICCardManager.ViewModels;
 using Moq;
 using Xunit;
@@ -13,12 +14,20 @@ namespace ICCardManager.Tests.ViewModels;
 public class SettingsViewModelTests
 {
     private readonly Mock<ISettingsRepository> _settingsRepositoryMock;
+    private readonly Mock<IValidationService> _validationServiceMock;
     private readonly SettingsViewModel _viewModel;
 
     public SettingsViewModelTests()
     {
         _settingsRepositoryMock = new Mock<ISettingsRepository>();
-        _viewModel = new SettingsViewModel(_settingsRepositoryMock.Object);
+        _validationServiceMock = new Mock<IValidationService>();
+
+        // バリデーションはデフォルトで成功を返す
+        _validationServiceMock.Setup(v => v.ValidateWarningBalance(It.IsAny<int>())).Returns(ValidationResult.Success());
+
+        _viewModel = new SettingsViewModel(
+            _settingsRepositoryMock.Object,
+            _validationServiceMock.Object);
     }
 
     #region 設定読み込みテスト
@@ -90,6 +99,10 @@ public class SettingsViewModelTests
         // Arrange
         _viewModel.WarningBalance = -100;
 
+        // 負の値に対してエラーを返すようモックを設定
+        _validationServiceMock.Setup(v => v.ValidateWarningBalance(-100))
+            .Returns(ValidationResult.Failure("残額警告閾値は0以上で入力してください"));
+
         // Act
         await _viewModel.SaveAsync();
 
@@ -106,6 +119,10 @@ public class SettingsViewModelTests
     {
         // Arrange
         _viewModel.WarningBalance = 60000;
+
+        // 上限を超える値に対してエラーを返すようモックを設定
+        _validationServiceMock.Setup(v => v.ValidateWarningBalance(60000))
+            .Returns(ValidationResult.Failure("残額警告閾値は50,000円以下で入力してください"));
 
         // Act
         await _viewModel.SaveAsync();

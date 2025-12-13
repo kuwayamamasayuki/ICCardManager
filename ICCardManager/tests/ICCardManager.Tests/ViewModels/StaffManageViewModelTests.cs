@@ -1,7 +1,9 @@
 using FluentAssertions;
 using ICCardManager.Data.Repositories;
+using ICCardManager.Dtos;
 using ICCardManager.Infrastructure.CardReader;
 using ICCardManager.Models;
+using ICCardManager.Services;
 using ICCardManager.ViewModels;
 using Moq;
 using Xunit;
@@ -15,15 +17,23 @@ public class StaffManageViewModelTests
 {
     private readonly Mock<IStaffRepository> _staffRepositoryMock;
     private readonly Mock<ICardReader> _cardReaderMock;
+    private readonly Mock<IValidationService> _validationServiceMock;
     private readonly StaffManageViewModel _viewModel;
 
     public StaffManageViewModelTests()
     {
         _staffRepositoryMock = new Mock<IStaffRepository>();
         _cardReaderMock = new Mock<ICardReader>();
+        _validationServiceMock = new Mock<IValidationService>();
+
+        // バリデーションはデフォルトで成功を返す
+        _validationServiceMock.Setup(v => v.ValidateStaffIdm(It.IsAny<string>())).Returns(ValidationResult.Success());
+        _validationServiceMock.Setup(v => v.ValidateStaffName(It.IsAny<string>())).Returns(ValidationResult.Success());
+
         _viewModel = new StaffManageViewModel(
             _staffRepositoryMock.Object,
-            _cardReaderMock.Object);
+            _cardReaderMock.Object,
+            _validationServiceMock.Object);
     }
 
     #region 職員一覧読み込みテスト
@@ -83,7 +93,7 @@ public class StaffManageViewModelTests
     public void StartNewStaff_ShouldSetEditingModeCorrectly()
     {
         // Arrange
-        _viewModel.SelectedStaff = new Staff { StaffIdm = "existing", Name = "既存職員" };
+        _viewModel.SelectedStaff = new StaffDto { StaffIdm = "existing", Name = "既存職員" };
 
         // Act
         _viewModel.StartNewStaff();
@@ -111,7 +121,7 @@ public class StaffManageViewModelTests
     public void StartEdit_ShouldLoadSelectedStaffData()
     {
         // Arrange
-        var staff = new Staff
+        var staff = new StaffDto
         {
             StaffIdm = "FFFF000000000001",
             Name = "田中太郎",
@@ -221,6 +231,10 @@ public class StaffManageViewModelTests
         _viewModel.EditStaffIdm = "";
         _viewModel.EditName = "田中太郎";
 
+        // 空のIDmに対してエラーを返すようモックを設定
+        _validationServiceMock.Setup(v => v.ValidateStaffIdm(string.Empty))
+            .Returns(ValidationResult.Failure("IDmを入力してください"));
+
         // Act
         await _viewModel.SaveAsync();
 
@@ -239,6 +253,10 @@ public class StaffManageViewModelTests
         _viewModel.StartNewStaff();
         _viewModel.EditStaffIdm = "FFFF000000000001";
         _viewModel.EditName = "";
+
+        // 空の氏名に対してエラーを返すようモックを設定
+        _validationServiceMock.Setup(v => v.ValidateStaffName(string.Empty))
+            .Returns(ValidationResult.Failure("氏名を入力してください"));
 
         // Act
         await _viewModel.SaveAsync();
@@ -282,7 +300,7 @@ public class StaffManageViewModelTests
     public async Task SaveAsync_ExistingStaff_ShouldUpdateStaff()
     {
         // Arrange
-        var existingStaff = new Staff
+        var existingStaff = new StaffDto
         {
             StaffIdm = "FFFF000000000001",
             Name = "田中太郎",
@@ -343,7 +361,7 @@ public class StaffManageViewModelTests
     public async Task DeleteAsync_ShouldDeleteStaff()
     {
         // Arrange
-        var staff = new Staff
+        var staff = new StaffDto
         {
             StaffIdm = "FFFF000000000001",
             Name = "田中太郎"
@@ -385,7 +403,7 @@ public class StaffManageViewModelTests
     public async Task DeleteAsync_WhenDeleteFails_ShouldShowError()
     {
         // Arrange
-        var staff = new Staff { StaffIdm = "FFFF000000000001", Name = "田中太郎" };
+        var staff = new StaffDto { StaffIdm = "FFFF000000000001", Name = "田中太郎" };
         _viewModel.SelectedStaff = staff;
 
         _staffRepositoryMock.Setup(r => r.DeleteAsync("FFFF000000000001")).ReturnsAsync(false);
