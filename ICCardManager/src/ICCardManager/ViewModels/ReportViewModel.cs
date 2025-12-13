@@ -1,11 +1,13 @@
 using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.IO;
+using System.Windows;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using ICCardManager.Data.Repositories;
 using ICCardManager.Dtos;
 using ICCardManager.Services;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Win32;
 
 namespace ICCardManager.ViewModels;
@@ -16,6 +18,7 @@ namespace ICCardManager.ViewModels;
 public partial class ReportViewModel : ViewModelBase
 {
     private readonly ReportService _reportService;
+    private readonly PrintService _printService;
     private readonly ICardRepository _cardRepository;
 
     [ObservableProperty]
@@ -23,6 +26,9 @@ public partial class ReportViewModel : ViewModelBase
 
     [ObservableProperty]
     private ObservableCollection<CardDto> _selectedCards = new();
+
+    [ObservableProperty]
+    private CardDto? _previewCard;
 
     [ObservableProperty]
     private int _selectedYear;
@@ -54,9 +60,11 @@ public partial class ReportViewModel : ViewModelBase
 
     public ReportViewModel(
         ReportService reportService,
+        PrintService printService,
         ICardRepository cardRepository)
     {
         _reportService = reportService;
+        _printService = printService;
         _cardRepository = cardRepository;
 
         // 年の選択肢を初期化（過去5年分）
@@ -261,5 +269,56 @@ public partial class ReportViewModel : ViewModelBase
                 UseShellExecute = true
             });
         }
+    }
+
+    /// <summary>
+    /// 印刷プレビューを表示
+    /// </summary>
+    [RelayCommand]
+    public async Task PreviewReportAsync(CardDto card)
+    {
+        if (card == null)
+        {
+            StatusMessage = "プレビューするカードを選択してください";
+            return;
+        }
+
+        using (BeginBusy("プレビューを準備中..."))
+        {
+            // 帳票データを取得
+            var reportData = await _printService.GetReportDataAsync(card.CardIdm, SelectedYear, SelectedMonth);
+            if (reportData == null)
+            {
+                StatusMessage = "帳票データを取得できませんでした";
+                return;
+            }
+
+            // FlowDocumentを生成
+            var document = _printService.CreateFlowDocument(reportData);
+            var documentTitle = $"物品出納簿_{card.CardType}_{card.CardNumber}_{SelectedYear}年{SelectedMonth}月";
+
+            // プレビューダイアログを表示
+            var previewDialog = App.Current.ServiceProvider.GetRequiredService<Views.Dialogs.PrintPreviewDialog>();
+            previewDialog.ViewModel.SetDocument(document, documentTitle);
+            previewDialog.Owner = Application.Current.Windows.OfType<Window>().FirstOrDefault(w => w.IsActive)
+                                   ?? Application.Current.MainWindow;
+            previewDialog.ShowDialog();
+        }
+    }
+
+    /// <summary>
+    /// 選択中のカードをプレビュー
+    /// </summary>
+    [RelayCommand]
+    public async Task PreviewSelectedAsync()
+    {
+        if (SelectedCards.Count == 0)
+        {
+            StatusMessage = "プレビューするカードを選択してください";
+            return;
+        }
+
+        // 最初の選択カードをプレビュー
+        await PreviewReportAsync(SelectedCards.First());
     }
 }
