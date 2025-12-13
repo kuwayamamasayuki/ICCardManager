@@ -4,6 +4,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using ICCardManager.Common;
 using ICCardManager.Data.Repositories;
+using ICCardManager.Dtos;
 using ICCardManager.Infrastructure.CardReader;
 using ICCardManager.Infrastructure.Sound;
 using ICCardManager.Models;
@@ -78,7 +79,7 @@ public partial class MainViewModel : ViewModelBase
     private ObservableCollection<string> _warningMessages = new();
 
     [ObservableProperty]
-    private ObservableCollection<IcCard> _lentCards = new();
+    private ObservableCollection<CardDto> _lentCards = new();
 
     public MainViewModel(
         ICardReader cardReader,
@@ -172,7 +173,7 @@ public partial class MainViewModel : ViewModelBase
         LentCards.Clear();
         foreach (var card in lentCards)
         {
-            LentCards.Add(card);
+            LentCards.Add(card.ToDto());
         }
     }
 
