@@ -54,20 +54,3 @@ public enum CardType
     Unknown
 }
 
-/// <summary>
-/// 文字サイズ設定
-/// </summary>
-public enum FontSizeOption
-{
-    /// <summary>小</summary>
-    Small,
-
-    /// <summary>中</summary>
-    Medium,
-
-    /// <summary>大</summary>
-    Large,
-
-    /// <summary>特大</summary>
-    ExtraLarge
-}

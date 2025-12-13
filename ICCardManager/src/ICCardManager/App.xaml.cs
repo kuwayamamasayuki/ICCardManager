@@ -1,10 +1,14 @@
+using System.Threading.Tasks;
 using System.Windows;
-using ICCardManager.Models;
+using System.Windows.Threading;
+using ICCardManager.Common;
+using ICCardManager.Common.Exceptions;
 using ICCardManager.Data;
 using ICCardManager.Data.Repositories;
 using ICCardManager.Infrastructure.Caching;
 using ICCardManager.Infrastructure.CardReader;
 using ICCardManager.Infrastructure.Sound;
+using ICCardManager.Models;
 using ICCardManager.Services;
 using ICCardManager.ViewModels;
 using ICCardManager.Views;
@@ -30,6 +34,12 @@ public partial class App : Application
     protected override void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
+
+        // グローバル例外ハンドラーを登録
+        SetupGlobalExceptionHandlers();
+
+        // 古いログファイルを削除
+        ErrorDialogHelper.CleanupOldLogs();
 
         try
         {
@@ -303,4 +313,92 @@ public partial class App : Application
 
         base.OnExit(e);
     }
+
+    #region グローバル例外ハンドラー
+
+    /// <summary>
+    /// グローバル例外ハンドラーを設定
+    /// </summary>
+    private void SetupGlobalExceptionHandlers()
+    {
+        // UIスレッド上の未処理例外
+        DispatcherUnhandledException += OnDispatcherUnhandledException;
+
+        // 非UIスレッドの未処理例外
+        AppDomain.CurrentDomain.UnhandledException += OnUnhandledException;
+
+        // Task内の未観測例外
+        TaskScheduler.UnobservedTaskException += OnUnobservedTaskException;
+    }
+
+    /// <summary>
+    /// UIスレッドの未処理例外ハンドラー
+    /// </summary>
+    private void OnDispatcherUnhandledException(object sender, DispatcherUnhandledExceptionEventArgs e)
+    {
+        System.Diagnostics.Debug.WriteLine($"UIスレッド未処理例外: {e.Exception.GetType().Name}: {e.Exception.Message}");
+
+        // AppExceptionの場合はユーザーフレンドリーなメッセージを表示
+        if (e.Exception is AppException)
+        {
+            ErrorDialogHelper.ShowError(e.Exception);
+            e.Handled = true;
+            return;
+        }
+
+        // その他の例外
+        ErrorDialogHelper.ShowError(e.Exception, "予期しないエラー");
+        e.Handled = true;
+    }
+
+    /// <summary>
+    /// 非UIスレッドの未処理例外ハンドラー
+    /// </summary>
+    private void OnUnhandledException(object sender, UnhandledExceptionEventArgs e)
+    {
+        var exception = e.ExceptionObject as Exception ?? new Exception("Unknown error");
+
+        System.Diagnostics.Debug.WriteLine($"非UIスレッド未処理例外: {exception.GetType().Name}: {exception.Message}");
+
+        if (e.IsTerminating)
+        {
+            // アプリケーション終了を伴う致命的エラー
+            ErrorDialogHelper.ShowFatalError(exception);
+        }
+        else
+        {
+            // 継続可能なエラー
+            Dispatcher.Invoke(() =>
+            {
+                ErrorDialogHelper.ShowError(exception);
+            });
+        }
+    }
+
+    /// <summary>
+    /// Task内の未観測例外ハンドラー
+    /// </summary>
+    private void OnUnobservedTaskException(object? sender, UnobservedTaskExceptionEventArgs e)
+    {
+        System.Diagnostics.Debug.WriteLine($"Task未観測例外: {e.Exception.GetType().Name}: {e.Exception.Message}");
+
+        // 例外を観測済みとしてマーク（アプリケーションのクラッシュを防止）
+        e.SetObserved();
+
+        // エラーログに記録
+        foreach (var innerException in e.Exception.InnerExceptions)
+        {
+            System.Diagnostics.Debug.WriteLine($"  Inner: {innerException.GetType().Name}: {innerException.Message}");
+        }
+
+        // UIスレッドでエラーダイアログを表示
+        Dispatcher.Invoke(() =>
+        {
+            // 複数の例外がある場合は最初のものを表示
+            var displayException = e.Exception.InnerExceptions.FirstOrDefault() ?? e.Exception;
+            ErrorDialogHelper.ShowError(displayException, "バックグラウンド処理エラー");
+        });
+    }
+
+    #endregion
 }
