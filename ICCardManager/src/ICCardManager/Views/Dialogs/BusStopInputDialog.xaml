@@ -10,7 +10,9 @@
         Height="450"
         Width="600"
         WindowStartupLocation="CenterOwner"
-        ResizeMode="CanResize">
+        ResizeMode="CanResize"
+        AutomationProperties.Name="バス停名入力ダイアログ"
+        AutomationProperties.HelpText="バス利用の乗車・降車バス停名を入力します。スキップして後で入力することもできます。">
 
     <Window.Resources>
         <BooleanToVisibilityConverter x:Key="BoolToVisibilityConverter"/>
@@ -70,7 +72,9 @@
                                  Text="{Binding BusStops, UpdateSourceTrigger=PropertyChanged}"
                                  Padding="8"
                                  VerticalAlignment="Center"
-                                 ToolTip="乗車バス停～降車バス停"/>
+                                 AutomationProperties.Name="バス停名"
+                                 AutomationProperties.HelpText="乗車バス停～降車バス停の形式で入力"
+                                 ToolTip="乗車バス停～降車バス停（例: 天神～博多駅）"/>
                     </Grid>
                 </DataTemplate>
             </ListView.ItemTemplate>
@@ -98,12 +102,20 @@
             <Button Content="後で入力（スキップ）"
                     Command="{Binding SkipCommand}"
                     Padding="15,10"
-                    Margin="0,0,10,0"/>
+                    Margin="0,0,10,0"
+                    IsCancel="True"
+                    AutomationProperties.Name="スキップ"
+                    AutomationProperties.HelpText="バス停名を入力せずにダイアログを閉じます。後で入力できます。"
+                    ToolTip="後で入力する場合はスキップ (Escape)"/>
             <Button Content="保存"
                     Command="{Binding SaveCommand}"
                     Padding="20,10"
                     Background="#4CAF50"
-                    Foreground="White"/>
+                    Foreground="White"
+                    IsDefault="True"
+                    AutomationProperties.Name="バス停名を保存"
+                    AutomationProperties.HelpText="入力したバス停名を保存します"
+                    ToolTip="バス停名を保存 (Enter)"/>
         </StackPanel>
 
         <!-- 処理中オーバーレイ -->

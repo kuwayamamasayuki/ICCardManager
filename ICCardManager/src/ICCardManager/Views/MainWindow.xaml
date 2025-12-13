@@ -10,7 +10,9 @@
         Title="交通系ICカード管理システム"
         Height="700"
         Width="1000"
-        WindowStartupLocation="CenterScreen">
+        WindowStartupLocation="CenterScreen"
+        AutomationProperties.Name="交通系ICカード管理システム メインウィンドウ"
+        AutomationProperties.HelpText="職員証をタッチしてからICカードをタッチすると貸出または返却ができます">
 
     <Window.Resources>
         <conv:IntToVisibilityConverter x:Key="IntToVisibilityConverter"/>
@@ -19,7 +21,12 @@
     </Window.Resources>
 
     <Window.InputBindings>
+        <!-- キーボードショートカット -->
         <KeyBinding Key="Escape" Command="{Binding CancelCommand}"/>
+        <KeyBinding Key="F1" Command="{Binding OpenSettingsCommand}"/>
+        <KeyBinding Key="F2" Command="{Binding OpenReportCommand}"/>
+        <KeyBinding Key="F3" Command="{Binding OpenCardManageCommand}"/>
+        <KeyBinding Key="F4" Command="{Binding OpenStaffManageCommand}"/>
     </Window.InputBindings>
 
     <Grid>
@@ -49,16 +56,34 @@
                                FontSize="{DynamicResource LargeFontSize}"
                                Foreground="White"
                                VerticalAlignment="Center"
-                               Margin="0,0,20,0"/>
+                               Margin="0,0,20,0"
+                               AutomationProperties.Name="現在日時"
+                               AutomationProperties.LiveSetting="Polite"/>
 
-                    <Button Content="設定" Margin="5,0" Padding="10,5"
-                            Command="{Binding OpenSettingsCommand}"/>
-                    <Button Content="帳票" Margin="5,0" Padding="10,5"
-                            Command="{Binding OpenReportCommand}"/>
-                    <Button Content="カード管理" Margin="5,0" Padding="10,5"
-                            Command="{Binding OpenCardManageCommand}"/>
-                    <Button Content="職員管理" Margin="5,0" Padding="10,5"
-                            Command="{Binding OpenStaffManageCommand}"/>
+                    <Button Content="設定 (F1)" Margin="5,0" Padding="10,5"
+                            Command="{Binding OpenSettingsCommand}"
+                            TabIndex="1"
+                            AutomationProperties.Name="設定ダイアログを開く"
+                            AutomationProperties.HelpText="アプリケーションの設定を変更します。ショートカット: F1"
+                            ToolTip="設定を開く (F1)"/>
+                    <Button Content="帳票 (F2)" Margin="5,0" Padding="10,5"
+                            Command="{Binding OpenReportCommand}"
+                            TabIndex="2"
+                            AutomationProperties.Name="帳票ダイアログを開く"
+                            AutomationProperties.HelpText="物品出納簿を作成します。ショートカット: F2"
+                            ToolTip="帳票を開く (F2)"/>
+                    <Button Content="カード管理 (F3)" Margin="5,0" Padding="10,5"
+                            Command="{Binding OpenCardManageCommand}"
+                            TabIndex="3"
+                            AutomationProperties.Name="カード管理ダイアログを開く"
+                            AutomationProperties.HelpText="ICカードの登録・編集を行います。ショートカット: F3"
+                            ToolTip="カード管理を開く (F3)"/>
+                    <Button Content="職員管理 (F4)" Margin="5,0" Padding="10,5"
+                            Command="{Binding OpenStaffManageCommand}"
+                            TabIndex="4"
+                            AutomationProperties.Name="職員管理ダイアログを開く"
+                            AutomationProperties.HelpText="職員の登録・編集を行います。ショートカット: F4"
+                            ToolTip="職員管理を開く (F4)"/>
                 </StackPanel>
             </Grid>
         </Border>
@@ -72,13 +97,18 @@
 
             <!-- 中央エリア（ステータス表示） -->
             <Border Grid.Column="0" Padding="40"
-                    Background="{Binding StatusBackgroundColor}">
+                    Background="{Binding StatusBackgroundColor}"
+                    BorderThickness="3"
+                    BorderBrush="{Binding StatusBorderColor}"
+                    AutomationProperties.Name="操作ステータス表示エリア"
+                    AutomationProperties.LiveSetting="Assertive">
                 <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
                     <!-- 状態アイコン -->
                     <TextBlock Text="{Binding StatusIcon}"
                                FontSize="{DynamicResource IconFontSize}"
                                HorizontalAlignment="Center"
-                               Margin="0,0,0,20"/>
+                               Margin="0,0,0,20"
+                               AutomationProperties.Name="{Binding StatusIconDescription}"/>
 
                     <!-- ステータスメッセージ -->
                     <TextBlock Text="{Binding StatusMessage}"
@@ -86,14 +116,25 @@
                                FontWeight="Bold"
                                TextAlignment="Center"
                                TextWrapping="Wrap"
-                               HorizontalAlignment="Center"/>
+                               HorizontalAlignment="Center"
+                               AutomationProperties.LiveSetting="Assertive"/>
+
+                    <!-- 状態テキスト（色以外での状態表示） -->
+                    <TextBlock Text="{Binding StatusLabel}"
+                               FontSize="{DynamicResource LargeFontSize}"
+                               FontWeight="Bold"
+                               HorizontalAlignment="Center"
+                               Margin="0,15,0,0"
+                               Foreground="{Binding StatusForegroundColor}"/>
 
                     <!-- タイムアウト表示 -->
                     <TextBlock FontSize="{DynamicResource LargeFontSize}"
                                Foreground="Gray"
                                Margin="0,20,0,0"
                                HorizontalAlignment="Center"
-                               Visibility="{Binding RemainingSeconds, Converter={StaticResource IntToVisibilityConverter}}">
+                               Visibility="{Binding RemainingSeconds, Converter={StaticResource IntToVisibilityConverter}}"
+                               AutomationProperties.Name="残り時間"
+                               AutomationProperties.LiveSetting="Polite">
                         <Run Text="残り "/>
                         <Run Text="{Binding RemainingSeconds}"/>
                         <Run Text=" 秒"/>
