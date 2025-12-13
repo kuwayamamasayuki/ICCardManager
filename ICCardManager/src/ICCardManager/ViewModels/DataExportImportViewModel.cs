@@ -83,6 +83,21 @@ public partial class DataExportImportViewModel : ViewModelBase
     [ObservableProperty]
     private string _lastImportedFile = string.Empty;
 
+    [ObservableProperty]
+    private string _importPreviewFile = string.Empty;
+
+    [ObservableProperty]
+    private CsvImportPreviewResult? _importPreview;
+
+    [ObservableProperty]
+    private ObservableCollection<CsvImportPreviewItem> _previewItems = new();
+
+    [ObservableProperty]
+    private bool _hasPreview;
+
+    [ObservableProperty]
+    private string _previewSummary = string.Empty;
+
     /// <summary>
     /// エクスポート用データタイプの選択肢
     /// </summary>
@@ -91,7 +106,7 @@ public partial class DataExportImportViewModel : ViewModelBase
     /// <summary>
     /// インポート用データタイプの選択肢
     /// </summary>
-    public DataType[] ImportDataTypes { get; } = { DataType.Cards, DataType.Staff };
+    public DataType[] ImportDataTypes { get; } = { DataType.Cards, DataType.Staff, DataType.Ledgers };
 
     /// <summary>
     /// データタイプの表示名を取得
@@ -179,7 +194,193 @@ public partial class DataExportImportViewModel : ViewModelBase
     }
 
     /// <summary>
-    /// インポートを実行
+    /// インポートプレビューを実行
+    /// </summary>
+    [RelayCommand]
+    public async Task PreviewImportAsync()
+    {
+        var dialog = new OpenFileDialog
+        {
+            Filter = "CSV ファイル (*.csv)|*.csv|すべてのファイル (*.*)|*.*",
+            DefaultExt = ".csv"
+        };
+
+        if (dialog.ShowDialog() != true)
+        {
+            return;
+        }
+
+        ClearPreview();
+        ImportErrors.Clear();
+
+        using (BeginBusy("プレビュー読み込み中..."))
+        {
+            CsvImportPreviewResult preview;
+
+            switch (SelectedImportType)
+            {
+                case DataType.Cards:
+                    preview = await _importService.PreviewCardsAsync(dialog.FileName, SkipExistingOnImport);
+                    break;
+
+                case DataType.Staff:
+                    preview = await _importService.PreviewStaffAsync(dialog.FileName, SkipExistingOnImport);
+                    break;
+
+                case DataType.Ledgers:
+                    preview = await _importService.PreviewLedgersAsync(dialog.FileName);
+                    break;
+
+                default:
+                    StatusMessage = "不正なデータタイプです";
+                    return;
+            }
+
+            ImportPreviewFile = dialog.FileName;
+            ImportPreview = preview;
+
+            if (!string.IsNullOrEmpty(preview.ErrorMessage))
+            {
+                StatusMessage = $"プレビューエラー: {preview.ErrorMessage}";
+                return;
+            }
+
+            // プレビューアイテムを設定
+            PreviewItems.Clear();
+            foreach (var item in preview.Items)
+            {
+                PreviewItems.Add(item);
+            }
+
+            // エラー詳細を追加
+            foreach (var error in preview.Errors.Take(10))
+            {
+                ImportErrors.Add($"行{error.LineNumber}: {error.Message}");
+            }
+
+            if (preview.Errors.Count > 10)
+            {
+                ImportErrors.Add($"... 他 {preview.Errors.Count - 10}件のエラー");
+            }
+
+            // プレビューサマリを設定
+            var summaryParts = new List<string>();
+            if (preview.NewCount > 0) summaryParts.Add($"新規 {preview.NewCount}件");
+            if (preview.UpdateCount > 0) summaryParts.Add($"更新 {preview.UpdateCount}件");
+            if (preview.SkipCount > 0) summaryParts.Add($"スキップ {preview.SkipCount}件");
+            if (preview.ErrorCount > 0) summaryParts.Add($"エラー {preview.ErrorCount}件");
+
+            PreviewSummary = string.Join("、", summaryParts);
+            HasPreview = true;
+
+            if (preview.IsValid)
+            {
+                StatusMessage = "プレビューを確認して「インポート実行」ボタンを押してください";
+            }
+            else
+            {
+                StatusMessage = $"バリデーションエラーがあります。{preview.ErrorCount}件のエラーを修正してください";
+            }
+        }
+    }
+
+    /// <summary>
+    /// インポートを実行（プレビュー確認後）
+    /// </summary>
+    [RelayCommand]
+    public async Task ExecuteImportAsync()
+    {
+        if (ImportPreview == null || string.IsNullOrEmpty(ImportPreviewFile))
+        {
+            StatusMessage = "先にプレビューを実行してください";
+            return;
+        }
+
+        if (!ImportPreview.IsValid)
+        {
+            StatusMessage = "バリデーションエラーがあります。修正後に再度プレビューしてください";
+            return;
+        }
+
+        ImportErrors.Clear();
+
+        using (BeginBusy("インポート中..."))
+        {
+            CsvImportResult result;
+
+            switch (SelectedImportType)
+            {
+                case DataType.Cards:
+                    result = await _importService.ImportCardsAsync(ImportPreviewFile, SkipExistingOnImport);
+                    break;
+
+                case DataType.Staff:
+                    result = await _importService.ImportStaffAsync(ImportPreviewFile, SkipExistingOnImport);
+                    break;
+
+                case DataType.Ledgers:
+                    result = await _importService.ImportLedgersAsync(ImportPreviewFile);
+                    break;
+
+                default:
+                    StatusMessage = "不正なデータタイプです";
+                    return;
+            }
+
+            LastImportedFile = ImportPreviewFile;
+
+            if (result.Success)
+            {
+                var message = $"インポート完了: {result.ImportedCount}件を登録しました";
+                if (result.SkippedCount > 0)
+                {
+                    message += $"（{result.SkippedCount}件はスキップ）";
+                }
+                StatusMessage = message;
+                ClearPreview();
+            }
+            else if (!string.IsNullOrEmpty(result.ErrorMessage))
+            {
+                StatusMessage = $"インポートエラー: {result.ErrorMessage}";
+            }
+            else
+            {
+                var message = $"インポート完了（一部エラー）: {result.ImportedCount}件を登録、{result.ErrorCount}件がエラー";
+                if (result.SkippedCount > 0)
+                {
+                    message += $"、{result.SkippedCount}件はスキップ";
+                }
+                StatusMessage = message;
+
+                // エラー詳細を追加
+                foreach (var error in result.Errors.Take(10))
+                {
+                    ImportErrors.Add($"行{error.LineNumber}: {error.Message}");
+                }
+
+                if (result.Errors.Count > 10)
+                {
+                    ImportErrors.Add($"... 他 {result.Errors.Count - 10}件のエラー");
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// プレビューをクリア
+    /// </summary>
+    [RelayCommand]
+    public void ClearPreview()
+    {
+        ImportPreviewFile = string.Empty;
+        ImportPreview = null;
+        PreviewItems.Clear();
+        HasPreview = false;
+        PreviewSummary = string.Empty;
+    }
+
+    /// <summary>
+    /// インポートを実行（旧API互換 - 直接インポート）
     /// </summary>
     [RelayCommand]
     public async Task ImportAsync()
@@ -209,6 +410,10 @@ public partial class DataExportImportViewModel : ViewModelBase
 
                 case DataType.Staff:
                     result = await _importService.ImportStaffAsync(dialog.FileName, SkipExistingOnImport);
+                    break;
+
+                case DataType.Ledgers:
+                    result = await _importService.ImportLedgersAsync(dialog.FileName);
                     break;
 
                 default:

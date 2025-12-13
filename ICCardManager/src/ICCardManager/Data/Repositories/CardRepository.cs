@@ -180,9 +180,24 @@ public class CardRepository : ICardRepository
     /// <inheritdoc/>
     public async Task<bool> InsertAsync(IcCard card)
     {
+        return await InsertAsyncInternal(card, null);
+    }
+
+    /// <inheritdoc/>
+    public async Task<bool> InsertAsync(IcCard card, SqliteTransaction transaction)
+    {
+        return await InsertAsyncInternal(card, transaction);
+    }
+
+    /// <summary>
+    /// カード登録の内部実装
+    /// </summary>
+    private async Task<bool> InsertAsyncInternal(IcCard card, SqliteTransaction? transaction)
+    {
         var connection = _dbContext.GetConnection();
 
         await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
         command.CommandText = """
             INSERT INTO ic_card (card_idm, card_type, card_number, note, is_deleted, deleted_at,
                                  is_lent, last_lent_at, last_lent_staff)
@@ -197,8 +212,9 @@ public class CardRepository : ICardRepository
         try
         {
             var result = await command.ExecuteNonQueryAsync();
-            if (result > 0)
+            if (result > 0 && transaction == null)
             {
+                // トランザクション外の場合のみキャッシュ無効化
                 InvalidateCardCache();
             }
             return result > 0;
@@ -212,9 +228,24 @@ public class CardRepository : ICardRepository
     /// <inheritdoc/>
     public async Task<bool> UpdateAsync(IcCard card)
     {
+        return await UpdateAsyncInternal(card, null);
+    }
+
+    /// <inheritdoc/>
+    public async Task<bool> UpdateAsync(IcCard card, SqliteTransaction transaction)
+    {
+        return await UpdateAsyncInternal(card, transaction);
+    }
+
+    /// <summary>
+    /// カード更新の内部実装
+    /// </summary>
+    private async Task<bool> UpdateAsyncInternal(IcCard card, SqliteTransaction? transaction)
+    {
         var connection = _dbContext.GetConnection();
 
         await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
         command.CommandText = """
             UPDATE ic_card
             SET card_type = @cardType, card_number = @cardNumber, note = @note
@@ -227,8 +258,9 @@ public class CardRepository : ICardRepository
         command.Parameters.AddWithValue("@note", (object?)card.Note ?? DBNull.Value);
 
         var result = await command.ExecuteNonQueryAsync();
-        if (result > 0)
+        if (result > 0 && transaction == null)
         {
+            // トランザクション外の場合のみキャッシュ無効化
             InvalidateCardCache();
         }
         return result > 0;
