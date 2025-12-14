@@ -40,9 +40,18 @@ public partial class BusStopInputDialog : Window
     /// <summary>
     /// バス利用詳細を直接指定して初期化（返却時用）
     /// </summary>
+    public async Task InitializeWithDetailsAsync(Ledger ledger, IEnumerable<LedgerDetail> busDetails)
+    {
+        await _viewModel.InitializeWithDetailsAsync(ledger, busDetails);
+    }
+
+    /// <summary>
+    /// バス利用詳細を直接指定して初期化（返却時用・同期版 - 後方互換性のため）
+    /// </summary>
     public void InitializeWithDetails(Ledger ledger, IEnumerable<LedgerDetail> busDetails)
     {
-        _viewModel.InitializeWithDetails(ledger, busDetails);
+        // 非同期版を同期的に呼び出し（サジェスト読み込みを含む）
+        _ = _viewModel.InitializeWithDetailsAsync(ledger, busDetails);
     }
 
     /// <summary>
