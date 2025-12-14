@@ -90,8 +90,8 @@ public class HistoryViewModelTests
         // Arrange
         var card = new CardDto { CardIdm = "01020304050607FF", CardType = "はやかけん", CardNumber = "H-001" };
         _ledgerRepositoryMock
-            .Setup(r => r.GetByDateRangeAsync(card.CardIdm, It.IsAny<DateTime>(), It.IsAny<DateTime>()))
-            .ReturnsAsync(new List<Ledger>());
+            .Setup(r => r.GetPagedAsync(card.CardIdm, It.IsAny<DateTime>(), It.IsAny<DateTime>(), It.IsAny<int>(), It.IsAny<int>()))
+            .ReturnsAsync((new List<Ledger>(), 0));
         _ledgerRepositoryMock
             .Setup(r => r.GetLatestBeforeDateAsync(card.CardIdm, It.IsAny<DateTime>()))
             .ReturnsAsync((Ledger?)null);
@@ -101,7 +101,7 @@ public class HistoryViewModelTests
 
         // Assert
         _viewModel.Card.Should().Be(card);
-        _ledgerRepositoryMock.Verify(r => r.GetByDateRangeAsync(card.CardIdm, It.IsAny<DateTime>(), It.IsAny<DateTime>()), Times.Once);
+        _ledgerRepositoryMock.Verify(r => r.GetPagedAsync(card.CardIdm, It.IsAny<DateTime>(), It.IsAny<DateTime>(), It.IsAny<int>(), It.IsAny<int>()), Times.Once);
     }
 
     #endregion
@@ -112,7 +112,7 @@ public class HistoryViewModelTests
     /// 履歴が正しく読み込まれること
     /// </summary>
     [Fact]
-    public async Task LoadHistoryAsync_ShouldLoadLedgersOrderedByDateDesc()
+    public async Task LoadHistoryAsync_ShouldLoadLedgers()
     {
         // Arrange
         var card = new CardDto { CardIdm = "01020304050607FF", CardType = "test", CardNumber = "001" };
@@ -120,26 +120,25 @@ public class HistoryViewModelTests
 
         var ledgers = new List<Ledger>
         {
-            new() { Id = 1, CardIdm = card.CardIdm, Date = DateTime.Today.AddDays(-2), Summary = "鉄道", Balance = 1000 },
+            new() { Id = 3, CardIdm = card.CardIdm, Date = DateTime.Today, Summary = "鉄道", Balance = 1500 },
             new() { Id = 2, CardIdm = card.CardIdm, Date = DateTime.Today.AddDays(-1), Summary = "チャージ", Balance = 2000 },
-            new() { Id = 3, CardIdm = card.CardIdm, Date = DateTime.Today, Summary = "鉄道", Balance = 1500 }
+            new() { Id = 1, CardIdm = card.CardIdm, Date = DateTime.Today.AddDays(-2), Summary = "鉄道", Balance = 1000 }
         };
 
         _ledgerRepositoryMock
-            .Setup(r => r.GetByDateRangeAsync(card.CardIdm, It.IsAny<DateTime>(), It.IsAny<DateTime>()))
-            .ReturnsAsync(ledgers);
+            .Setup(r => r.GetPagedAsync(card.CardIdm, It.IsAny<DateTime>(), It.IsAny<DateTime>(), It.IsAny<int>(), It.IsAny<int>()))
+            .ReturnsAsync((ledgers, 3));
         _ledgerRepositoryMock
             .Setup(r => r.GetLatestBeforeDateAsync(card.CardIdm, It.IsAny<DateTime>()))
-            .ReturnsAsync(ledgers.Last());
+            .ReturnsAsync(ledgers.First());
 
         // Act
         await _viewModel.LoadHistoryAsync();
 
         // Assert
         _viewModel.Ledgers.Should().HaveCount(3);
-        _viewModel.Ledgers[0].Date.Should().Be(DateTime.Today); // 最新が先頭
         _viewModel.CurrentBalance.Should().Be(1500);
-        _viewModel.StatusMessage.Should().Contain("3件");
+        _viewModel.TotalCount.Should().Be(3);
     }
 
     /// <summary>
@@ -156,7 +155,7 @@ public class HistoryViewModelTests
 
         // Assert
         _viewModel.Ledgers.Should().BeEmpty();
-        _ledgerRepositoryMock.Verify(r => r.GetByDateRangeAsync(It.IsAny<string>(), It.IsAny<DateTime>(), It.IsAny<DateTime>()), Times.Never);
+        _ledgerRepositoryMock.Verify(r => r.GetPagedAsync(It.IsAny<string>(), It.IsAny<DateTime>(), It.IsAny<DateTime>(), It.IsAny<int>(), It.IsAny<int>()), Times.Never);
     }
 
     /// <summary>
@@ -170,8 +169,8 @@ public class HistoryViewModelTests
         _viewModel.Card = card;
 
         _ledgerRepositoryMock
-            .Setup(r => r.GetByDateRangeAsync(card.CardIdm, It.IsAny<DateTime>(), It.IsAny<DateTime>()))
-            .ReturnsAsync(new List<Ledger>());
+            .Setup(r => r.GetPagedAsync(card.CardIdm, It.IsAny<DateTime>(), It.IsAny<DateTime>(), It.IsAny<int>(), It.IsAny<int>()))
+            .ReturnsAsync((new List<Ledger>(), 0));
         _ledgerRepositoryMock
             .Setup(r => r.GetLatestBeforeDateAsync(card.CardIdm, It.IsAny<DateTime>()))
             .ReturnsAsync((Ledger?)null);
@@ -182,7 +181,307 @@ public class HistoryViewModelTests
         // Assert
         _viewModel.Ledgers.Should().BeEmpty();
         _viewModel.CurrentBalance.Should().Be(0);
-        _viewModel.StatusMessage.Should().Contain("0件");
+        _viewModel.TotalCount.Should().Be(0);
+    }
+
+    #endregion
+
+    #region ページネーションテスト
+
+    /// <summary>
+    /// デフォルトのページサイズが50件であること
+    /// </summary>
+    [Fact]
+    public void Constructor_ShouldSetDefaultPageSize()
+    {
+        // Assert
+        _viewModel.PageSize.Should().Be(50);
+        _viewModel.SelectedPageSizeItem.Should().NotBeNull();
+        _viewModel.SelectedPageSizeItem!.Value.Should().Be(50);
+    }
+
+    /// <summary>
+    /// ページサイズオプションが正しく設定されていること
+    /// </summary>
+    [Fact]
+    public void Constructor_ShouldHaveCorrectPageSizeOptions()
+    {
+        // Assert
+        _viewModel.PageSizeOptions.Should().HaveCount(4);
+        _viewModel.PageSizeOptions.Select(o => o.Value).Should().ContainInOrder(25, 50, 100, 200);
+    }
+
+    /// <summary>
+    /// ページ表示が正しくフォーマットされること
+    /// </summary>
+    [Fact]
+    public void PageDisplay_ShouldFormatCorrectly()
+    {
+        // Arrange
+        _viewModel.CurrentPage = 3;
+        _viewModel.TotalPages = 10;
+
+        // Assert
+        _viewModel.PageDisplay.Should().Be("3 / 10");
+    }
+
+    /// <summary>
+    /// 最初のページの場合、前に移動できないこと
+    /// </summary>
+    [Fact]
+    public void CanGoToPrevPage_WhenOnFirstPage_ShouldBeFalse()
+    {
+        // Arrange
+        _viewModel.CurrentPage = 1;
+        _viewModel.TotalPages = 5;
+
+        // Assert
+        _viewModel.CanGoToFirstPage.Should().BeFalse();
+        _viewModel.CanGoToPrevPage.Should().BeFalse();
+    }
+
+    /// <summary>
+    /// 最後のページの場合、次に移動できないこと
+    /// </summary>
+    [Fact]
+    public void CanGoToNextPage_WhenOnLastPage_ShouldBeFalse()
+    {
+        // Arrange
+        _viewModel.CurrentPage = 5;
+        _viewModel.TotalPages = 5;
+
+        // Assert
+        _viewModel.CanGoToNextPage.Should().BeFalse();
+        _viewModel.CanGoToLastPage.Should().BeFalse();
+    }
+
+    /// <summary>
+    /// 中間ページの場合、前後に移動可能であること
+    /// </summary>
+    [Fact]
+    public void Navigation_WhenOnMiddlePage_ShouldAllowBothDirections()
+    {
+        // Arrange
+        _viewModel.CurrentPage = 3;
+        _viewModel.TotalPages = 5;
+
+        // Assert
+        _viewModel.CanGoToFirstPage.Should().BeTrue();
+        _viewModel.CanGoToPrevPage.Should().BeTrue();
+        _viewModel.CanGoToNextPage.Should().BeTrue();
+        _viewModel.CanGoToLastPage.Should().BeTrue();
+    }
+
+    /// <summary>
+    /// 次のページに移動できること
+    /// </summary>
+    [Fact]
+    public async Task GoToNextPage_ShouldIncrementCurrentPage()
+    {
+        // Arrange
+        var card = new CardDto { CardIdm = "01020304050607FF", CardType = "test", CardNumber = "001" };
+        _viewModel.Card = card;
+        _viewModel.CurrentPage = 1;
+        _viewModel.TotalPages = 3;
+
+        // PageSize=50なので、totalCount=150でTotalPages=3になる
+        _ledgerRepositoryMock
+            .Setup(r => r.GetPagedAsync(card.CardIdm, It.IsAny<DateTime>(), It.IsAny<DateTime>(), It.IsAny<int>(), It.IsAny<int>()))
+            .ReturnsAsync((new List<Ledger>(), 150));
+        _ledgerRepositoryMock
+            .Setup(r => r.GetLatestBeforeDateAsync(card.CardIdm, It.IsAny<DateTime>()))
+            .ReturnsAsync((Ledger?)null);
+
+        // Act
+        await _viewModel.GoToNextPage();
+
+        // Assert
+        _viewModel.CurrentPage.Should().Be(2);
+        _viewModel.TotalPages.Should().Be(3);
+    }
+
+    /// <summary>
+    /// 前のページに移動できること
+    /// </summary>
+    [Fact]
+    public async Task GoToPrevPage_ShouldDecrementCurrentPage()
+    {
+        // Arrange
+        var card = new CardDto { CardIdm = "01020304050607FF", CardType = "test", CardNumber = "001" };
+        _viewModel.Card = card;
+        _viewModel.CurrentPage = 3;
+        _viewModel.TotalPages = 5;
+
+        // PageSize=50なので、totalCount=250でTotalPages=5になる
+        _ledgerRepositoryMock
+            .Setup(r => r.GetPagedAsync(card.CardIdm, It.IsAny<DateTime>(), It.IsAny<DateTime>(), It.IsAny<int>(), It.IsAny<int>()))
+            .ReturnsAsync((new List<Ledger>(), 250));
+        _ledgerRepositoryMock
+            .Setup(r => r.GetLatestBeforeDateAsync(card.CardIdm, It.IsAny<DateTime>()))
+            .ReturnsAsync((Ledger?)null);
+
+        // Act
+        await _viewModel.GoToPrevPage();
+
+        // Assert
+        _viewModel.CurrentPage.Should().Be(2);
+    }
+
+    /// <summary>
+    /// 最初のページに移動できること
+    /// </summary>
+    [Fact]
+    public async Task GoToFirstPage_ShouldSetCurrentPageToOne()
+    {
+        // Arrange
+        var card = new CardDto { CardIdm = "01020304050607FF", CardType = "test", CardNumber = "001" };
+        _viewModel.Card = card;
+        _viewModel.CurrentPage = 5;
+        _viewModel.TotalPages = 5;
+
+        // PageSize=50なので、totalCount=250でTotalPages=5になる
+        _ledgerRepositoryMock
+            .Setup(r => r.GetPagedAsync(card.CardIdm, It.IsAny<DateTime>(), It.IsAny<DateTime>(), It.IsAny<int>(), It.IsAny<int>()))
+            .ReturnsAsync((new List<Ledger>(), 250));
+        _ledgerRepositoryMock
+            .Setup(r => r.GetLatestBeforeDateAsync(card.CardIdm, It.IsAny<DateTime>()))
+            .ReturnsAsync((Ledger?)null);
+
+        // Act
+        await _viewModel.GoToFirstPage();
+
+        // Assert
+        _viewModel.CurrentPage.Should().Be(1);
+    }
+
+    /// <summary>
+    /// 最後のページに移動できること
+    /// </summary>
+    [Fact]
+    public async Task GoToLastPage_ShouldSetCurrentPageToTotalPages()
+    {
+        // Arrange
+        var card = new CardDto { CardIdm = "01020304050607FF", CardType = "test", CardNumber = "001" };
+        _viewModel.Card = card;
+        _viewModel.CurrentPage = 1;
+        _viewModel.TotalPages = 5;
+
+        // PageSize=50なので、totalCount=250でTotalPages=5になる
+        _ledgerRepositoryMock
+            .Setup(r => r.GetPagedAsync(card.CardIdm, It.IsAny<DateTime>(), It.IsAny<DateTime>(), It.IsAny<int>(), It.IsAny<int>()))
+            .ReturnsAsync((new List<Ledger>(), 250));
+        _ledgerRepositoryMock
+            .Setup(r => r.GetLatestBeforeDateAsync(card.CardIdm, It.IsAny<DateTime>()))
+            .ReturnsAsync((Ledger?)null);
+
+        // Act
+        await _viewModel.GoToLastPage();
+
+        // Assert
+        _viewModel.CurrentPage.Should().Be(5);
+    }
+
+    /// <summary>
+    /// 期間変更時にページが1にリセットされること
+    /// </summary>
+    [Fact]
+    public void SetThisMonth_ShouldResetToPageOne()
+    {
+        // Arrange
+        _viewModel.CurrentPage = 5;
+
+        // Act
+        _viewModel.SetThisMonth();
+
+        // Assert
+        _viewModel.CurrentPage.Should().Be(1);
+    }
+
+    /// <summary>
+    /// 先月選択時にページが1にリセットされること
+    /// </summary>
+    [Fact]
+    public void SetLastMonth_ShouldResetToPageOne()
+    {
+        // Arrange
+        _viewModel.CurrentPage = 5;
+
+        // Act
+        _viewModel.SetLastMonth();
+
+        // Assert
+        _viewModel.CurrentPage.Should().Be(1);
+    }
+
+    /// <summary>
+    /// 月選択適用時にページが1にリセットされること
+    /// </summary>
+    [Fact]
+    public void ApplySelectedMonth_ShouldResetToPageOne()
+    {
+        // Arrange
+        _viewModel.CurrentPage = 5;
+        _viewModel.SelectedYear = 2024;
+        _viewModel.SelectedMonth = 6;
+
+        // Act
+        _viewModel.ApplySelectedMonth();
+
+        // Assert
+        _viewModel.CurrentPage.Should().Be(1);
+    }
+
+    /// <summary>
+    /// 総ページ数が正しく計算されること
+    /// </summary>
+    [Fact]
+    public async Task LoadHistoryAsync_ShouldCalculateTotalPagesCorrectly()
+    {
+        // Arrange
+        var card = new CardDto { CardIdm = "01020304050607FF", CardType = "test", CardNumber = "001" };
+        _viewModel.Card = card;
+        _viewModel.PageSize = 25;
+
+        _ledgerRepositoryMock
+            .Setup(r => r.GetPagedAsync(card.CardIdm, It.IsAny<DateTime>(), It.IsAny<DateTime>(), It.IsAny<int>(), 25))
+            .ReturnsAsync((new List<Ledger>(), 60)); // 60件を25件/ページで3ページ
+        _ledgerRepositoryMock
+            .Setup(r => r.GetLatestBeforeDateAsync(card.CardIdm, It.IsAny<DateTime>()))
+            .ReturnsAsync((Ledger?)null);
+
+        // Act
+        await _viewModel.LoadHistoryAsync();
+
+        // Assert
+        _viewModel.TotalCount.Should().Be(60);
+        _viewModel.TotalPages.Should().Be(3); // 60 / 25 = 2.4 -> ceil = 3
+    }
+
+    /// <summary>
+    /// 現在のページが総ページ数を超えている場合に調整されること
+    /// </summary>
+    [Fact]
+    public async Task LoadHistoryAsync_ShouldAdjustCurrentPageIfExceedsTotalPages()
+    {
+        // Arrange
+        var card = new CardDto { CardIdm = "01020304050607FF", CardType = "test", CardNumber = "001" };
+        _viewModel.Card = card;
+        _viewModel.CurrentPage = 10;
+        _viewModel.PageSize = 50;
+
+        _ledgerRepositoryMock
+            .Setup(r => r.GetPagedAsync(card.CardIdm, It.IsAny<DateTime>(), It.IsAny<DateTime>(), It.IsAny<int>(), 50))
+            .ReturnsAsync((new List<Ledger>(), 100)); // 100件 / 50 = 2ページ
+        _ledgerRepositoryMock
+            .Setup(r => r.GetLatestBeforeDateAsync(card.CardIdm, It.IsAny<DateTime>()))
+            .ReturnsAsync((Ledger?)null);
+
+        // Act
+        await _viewModel.LoadHistoryAsync();
+
+        // Assert
+        _viewModel.TotalPages.Should().Be(2);
+        _viewModel.CurrentPage.Should().Be(2); // 10から2に調整
     }
 
     #endregion
