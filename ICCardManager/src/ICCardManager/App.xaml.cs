@@ -123,6 +123,7 @@ public partial class App : Application
 #if DEBUG
         // デバッグ時はモックを使用
         services.AddSingleton<ICardReader, MockCardReader>();
+        services.AddSingleton<DebugDataService>();
 #else
         services.AddSingleton<ICardReader, PcScCardReader>();
 #endif
@@ -227,45 +228,42 @@ public partial class App : Application
     /// </summary>
     private async Task RegisterTestDataAsync()
     {
-        var staffRepository = ServiceProvider.GetRequiredService<IStaffRepository>();
-        var cardRepository = ServiceProvider.GetRequiredService<ICardRepository>();
-
-        // テスト職員を登録
-        var testStaffList = new[]
+        try
         {
-            new Models.Staff { StaffIdm = "FFFF000000000001", Name = "山田太郎", Number = "001", Note = "テスト職員1" },
-            new Models.Staff { StaffIdm = "FFFF000000000002", Name = "鈴木花子", Number = "002", Note = "テスト職員2" },
-            new Models.Staff { StaffIdm = "FFFF000000000003", Name = "佐藤一郎", Number = "003", Note = "テスト職員3" },
-        };
-
-        foreach (var staff in testStaffList)
-        {
-            var existing = await staffRepository.GetByIdmAsync(staff.StaffIdm);
-            if (existing == null)
-            {
-                await staffRepository.InsertAsync(staff);
-                System.Diagnostics.Debug.WriteLine($"テスト職員を登録: {staff.Name}");
-            }
+            var debugDataService = ServiceProvider.GetRequiredService<DebugDataService>();
+            await debugDataService.RegisterAllTestDataAsync();
+            System.Diagnostics.Debug.WriteLine("[DEBUG] テストデータ登録完了");
         }
-
-        // テストカードを登録
-        var testCardList = new[]
+        catch (Exception ex)
         {
-            new Models.IcCard { CardIdm = "07FE112233445566", CardType = "はやかけん", CardNumber = "TEST-001", Note = "テストカード1" },
-            new Models.IcCard { CardIdm = "05FE112233445567", CardType = "nimoca", CardNumber = "TEST-002", Note = "テストカード2" },
-            new Models.IcCard { CardIdm = "06FE112233445568", CardType = "SUGOCA", CardNumber = "TEST-003", Note = "テストカード3" },
-            new Models.IcCard { CardIdm = "01FE112233445569", CardType = "Suica", CardNumber = "TEST-004", Note = "テストカード4" },
-        };
-
-        foreach (var card in testCardList)
-        {
-            var existing = await cardRepository.GetByIdmAsync(card.CardIdm);
-            if (existing == null)
-            {
-                await cardRepository.InsertAsync(card);
-                System.Diagnostics.Debug.WriteLine($"テストカードを登録: {card.CardType} {card.CardNumber}");
-            }
+            System.Diagnostics.Debug.WriteLine($"[DEBUG] テストデータ登録エラー: {ex.Message}");
         }
+    }
+
+    /// <summary>
+    /// デバッグ用: テストデータをリセット
+    /// </summary>
+    public async Task ResetTestDataAsync()
+    {
+        var debugDataService = ServiceProvider.GetRequiredService<DebugDataService>();
+        await debugDataService.ResetTestDataAsync();
+    }
+
+    /// <summary>
+    /// デバッグ用: 履歴データを生成
+    /// </summary>
+    public async Task GenerateHistoryAsync(string cardIdm, int days, string staffName)
+    {
+        var debugDataService = ServiceProvider.GetRequiredService<DebugDataService>();
+        await debugDataService.GenerateHistoryAsync(cardIdm, days, staffName);
+    }
+
+    /// <summary>
+    /// デバッグ用: テストデータ一覧を取得
+    /// </summary>
+    public static IEnumerable<(string Idm, string Description, bool IsStaff)> GetTestDataList()
+    {
+        return DebugDataService.GetAllTestIdms();
     }
 #endif
 
