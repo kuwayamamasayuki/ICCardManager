@@ -127,6 +127,11 @@ public partial class StaffManageViewModel : ViewModelBase
     [RelayCommand]
     public async Task SaveAsync()
     {
+        // 入力値をサニタイズ
+        var sanitizedName = InputSanitizer.SanitizeName(EditName);
+        var sanitizedNumber = InputSanitizer.SanitizeStaffNumber(EditNumber);
+        var sanitizedNote = InputSanitizer.SanitizeNote(EditNote);
+
         // バリデーション
         var idmResult = _validationService.ValidateStaffIdm(EditStaffIdm);
         if (!idmResult)
@@ -135,7 +140,7 @@ public partial class StaffManageViewModel : ViewModelBase
             return;
         }
 
-        var nameResult = _validationService.ValidateStaffName(EditName);
+        var nameResult = _validationService.ValidateStaffName(sanitizedName);
         if (!nameResult)
         {
             StatusMessage = nameResult.ErrorMessage!;
@@ -157,9 +162,9 @@ public partial class StaffManageViewModel : ViewModelBase
                 var staff = new Staff
                 {
                     StaffIdm = EditStaffIdm,
-                    Name = EditName,
-                    Number = string.IsNullOrWhiteSpace(EditNumber) ? null : EditNumber,
-                    Note = string.IsNullOrWhiteSpace(EditNote) ? null : EditNote
+                    Name = sanitizedName,
+                    Number = string.IsNullOrWhiteSpace(sanitizedNumber) ? null : sanitizedNumber,
+                    Note = string.IsNullOrWhiteSpace(sanitizedNote) ? null : sanitizedNote
                 };
 
                 var success = await _staffRepository.InsertAsync(staff);
@@ -180,9 +185,9 @@ public partial class StaffManageViewModel : ViewModelBase
                 var staff = new Staff
                 {
                     StaffIdm = EditStaffIdm,
-                    Name = EditName,
-                    Number = string.IsNullOrWhiteSpace(EditNumber) ? null : EditNumber,
-                    Note = string.IsNullOrWhiteSpace(EditNote) ? null : EditNote
+                    Name = sanitizedName,
+                    Number = string.IsNullOrWhiteSpace(sanitizedNumber) ? null : sanitizedNumber,
+                    Note = string.IsNullOrWhiteSpace(sanitizedNote) ? null : sanitizedNote
                 };
 
                 var success = await _staffRepository.UpdateAsync(staff);

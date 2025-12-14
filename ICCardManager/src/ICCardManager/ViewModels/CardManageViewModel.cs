@@ -169,6 +169,10 @@ public partial class CardManageViewModel : ViewModelBase
     [RelayCommand]
     public async Task SaveAsync()
     {
+        // 入力値をサニタイズ
+        var sanitizedCardNumber = InputSanitizer.SanitizeCardNumber(EditCardNumber);
+        var sanitizedNote = InputSanitizer.SanitizeNote(EditNote);
+
         // バリデーション
         var idmResult = _validationService.ValidateCardIdm(EditCardIdm);
         if (!idmResult)
@@ -184,17 +188,17 @@ public partial class CardManageViewModel : ViewModelBase
             return;
         }
 
-        var numberResult = _validationService.ValidateCardNumber(EditCardNumber);
+        var numberResult = _validationService.ValidateCardNumber(sanitizedCardNumber);
         if (!numberResult)
         {
             StatusMessage = numberResult.ErrorMessage!;
             return;
         }
 
-        if (string.IsNullOrWhiteSpace(EditCardNumber))
+        if (string.IsNullOrWhiteSpace(sanitizedCardNumber))
         {
             // 自動採番
-            EditCardNumber = await _cardRepository.GetNextCardNumberAsync(EditCardType);
+            sanitizedCardNumber = await _cardRepository.GetNextCardNumberAsync(EditCardType);
         }
 
         using (BeginBusy("保存中..."))
@@ -213,8 +217,8 @@ public partial class CardManageViewModel : ViewModelBase
                 {
                     CardIdm = EditCardIdm,
                     CardType = EditCardType,
-                    CardNumber = EditCardNumber,
-                    Note = string.IsNullOrWhiteSpace(EditNote) ? null : EditNote
+                    CardNumber = sanitizedCardNumber,
+                    Note = string.IsNullOrWhiteSpace(sanitizedNote) ? null : sanitizedNote
                 };
 
                 var success = await _cardRepository.InsertAsync(card);
@@ -236,8 +240,8 @@ public partial class CardManageViewModel : ViewModelBase
                 {
                     CardIdm = EditCardIdm,
                     CardType = EditCardType,
-                    CardNumber = EditCardNumber,
-                    Note = string.IsNullOrWhiteSpace(EditNote) ? null : EditNote,
+                    CardNumber = sanitizedCardNumber,
+                    Note = string.IsNullOrWhiteSpace(sanitizedNote) ? null : sanitizedNote,
                     IsLent = SelectedCard!.IsLent,
                     LastLentAt = SelectedCard.LentAt,
                     LastLentStaff = SelectedCard.LastLentStaff
