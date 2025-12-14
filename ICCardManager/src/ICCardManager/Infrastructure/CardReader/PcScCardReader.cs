@@ -16,8 +16,13 @@ public class PcScCardReader : ICardReader
 {
     private readonly ISCardContext _context;
     private ISCardMonitor? _monitor;
+    private System.Timers.Timer? _healthCheckTimer;
+    private System.Timers.Timer? _reconnectTimer;
     private bool _isReading;
     private bool _disposed;
+    private CardReaderConnectionState _connectionState = CardReaderConnectionState.Disconnected;
+    private int _reconnectAttempts;
+    private string[]? _lastKnownReaderNames;
 
     /// <summary>
     /// 最後に読み取ったカードのIDm
@@ -39,10 +44,27 @@ public class PcScCardReader : ICardReader
     /// </summary>
     private const ushort CyberneSystemCode = 0x0003;
 
+    /// <summary>
+    /// ヘルスチェック間隔（ミリ秒）
+    /// </summary>
+    private const int HealthCheckIntervalMs = 10000;
+
+    /// <summary>
+    /// 再接続間隔（ミリ秒）
+    /// </summary>
+    private const int ReconnectIntervalMs = 3000;
+
+    /// <summary>
+    /// 最大再接続試行回数
+    /// </summary>
+    private const int MaxReconnectAttempts = 10;
+
     public event EventHandler<CardReadEventArgs>? CardRead;
     public event EventHandler<Exception>? Error;
+    public event EventHandler<ConnectionStateChangedEventArgs>? ConnectionStateChanged;
 
     public bool IsReading => _isReading;
+    public CardReaderConnectionState ConnectionState => _connectionState;
 
     public PcScCardReader()
     {
@@ -59,12 +81,14 @@ public class PcScCardReader : ICardReader
                 var readerNames = _context.GetReaders();
                 if (readerNames == null || readerNames.Length == 0)
                 {
+                    SetConnectionState(CardReaderConnectionState.Disconnected, "カードリーダーが見つかりません");
                     throw new InvalidOperationException(
                         "カードリーダーが見つかりません。PaSoRiが接続されていることを確認してください。");
                 }
 
                 System.Diagnostics.Debug.WriteLine($"検出されたカードリーダー: {string.Join(", ", readerNames)}");
 
+                _lastKnownReaderNames = readerNames;
                 _monitor = MonitorFactory.Instance.Create(SCardScope.System);
                 _monitor.CardInserted += OnCardInserted;
                 _monitor.CardRemoved += OnCardRemoved;
@@ -72,7 +96,12 @@ public class PcScCardReader : ICardReader
                 _monitor.Start(readerNames);
 
                 _isReading = true;
+                _reconnectAttempts = 0;
+                SetConnectionState(CardReaderConnectionState.Connected);
                 System.Diagnostics.Debug.WriteLine("カードリーダー監視を開始しました");
+
+                // ヘルスチェックタイマーを開始
+                StartHealthCheckTimer();
             }
             catch (PCSCException ex)
             {
@@ -82,12 +111,14 @@ public class PcScCardReader : ICardReader
                     SCardError.NoReadersAvailable => "カードリーダーが見つかりません。",
                     _ => $"カードリーダーエラー: {ex.Message}"
                 };
+                SetConnectionState(CardReaderConnectionState.Disconnected, errorMessage);
                 var wrappedException = new InvalidOperationException(errorMessage, ex);
                 Error?.Invoke(this, wrappedException);
                 throw wrappedException;
             }
             catch (Exception ex)
             {
+                SetConnectionState(CardReaderConnectionState.Disconnected, ex.Message);
                 Error?.Invoke(this, ex);
                 throw;
             }
@@ -99,6 +130,10 @@ public class PcScCardReader : ICardReader
     {
         return Task.Run(() =>
         {
+            // タイマーを停止
+            StopHealthCheckTimer();
+            StopReconnectTimer();
+
             if (_monitor != null)
             {
                 _monitor.CardInserted -= OnCardInserted;
@@ -111,6 +146,7 @@ public class PcScCardReader : ICardReader
 
             _isReading = false;
             _lastReadIdm = null;
+            SetConnectionState(CardReaderConnectionState.Disconnected);
             System.Diagnostics.Debug.WriteLine("カードリーダー監視を停止しました");
         });
     }
@@ -296,7 +332,224 @@ public class PcScCardReader : ICardReader
     {
         System.Diagnostics.Debug.WriteLine($"モニター例外: {ex.Message}");
         Error?.Invoke(this, new InvalidOperationException($"カードリーダー監視エラー: {ex.Message}", ex));
+
+        // 切断として処理し、自動再接続を開始
+        if (_connectionState == CardReaderConnectionState.Connected)
+        {
+            SetConnectionState(CardReaderConnectionState.Disconnected, ex.Message);
+            StartReconnectTimer();
+        }
     }
+
+    #region 接続状態監視・再接続
+
+    /// <summary>
+    /// 接続状態を設定し、イベントを発火
+    /// </summary>
+    private void SetConnectionState(CardReaderConnectionState state, string? message = null, int retryCount = 0)
+    {
+        if (_connectionState == state && retryCount == 0)
+        {
+            return; // 状態が変わらない場合はスキップ
+        }
+
+        _connectionState = state;
+        System.Diagnostics.Debug.WriteLine($"接続状態変更: {state} (メッセージ: {message}, リトライ: {retryCount})");
+        ConnectionStateChanged?.Invoke(this, new ConnectionStateChangedEventArgs(state, message, retryCount));
+    }
+
+    /// <summary>
+    /// ヘルスチェックタイマーを開始
+    /// </summary>
+    private void StartHealthCheckTimer()
+    {
+        StopHealthCheckTimer();
+
+        _healthCheckTimer = new System.Timers.Timer(HealthCheckIntervalMs);
+        _healthCheckTimer.Elapsed += async (s, e) => await OnHealthCheckAsync();
+        _healthCheckTimer.AutoReset = true;
+        _healthCheckTimer.Start();
+
+        System.Diagnostics.Debug.WriteLine($"ヘルスチェックタイマー開始 ({HealthCheckIntervalMs}ms間隔)");
+    }
+
+    /// <summary>
+    /// ヘルスチェックタイマーを停止
+    /// </summary>
+    private void StopHealthCheckTimer()
+    {
+        if (_healthCheckTimer != null)
+        {
+            _healthCheckTimer.Stop();
+            _healthCheckTimer.Dispose();
+            _healthCheckTimer = null;
+        }
+    }
+
+    /// <summary>
+    /// ヘルスチェック実行
+    /// </summary>
+    private async Task OnHealthCheckAsync()
+    {
+        if (_connectionState == CardReaderConnectionState.Reconnecting)
+        {
+            return; // 再接続中はスキップ
+        }
+
+        var isConnected = await CheckConnectionAsync();
+        if (!isConnected && _connectionState == CardReaderConnectionState.Connected)
+        {
+            System.Diagnostics.Debug.WriteLine("ヘルスチェック: 接続が失われました");
+            SetConnectionState(CardReaderConnectionState.Disconnected, "接続が失われました");
+            StartReconnectTimer();
+        }
+    }
+
+    /// <inheritdoc/>
+    public Task<bool> CheckConnectionAsync()
+    {
+        return Task.Run(() =>
+        {
+            try
+            {
+                var readerNames = _context.GetReaders();
+                return readerNames != null && readerNames.Length > 0;
+            }
+            catch (PCSCException)
+            {
+                return false;
+            }
+            catch
+            {
+                return false;
+            }
+        });
+    }
+
+    /// <summary>
+    /// 再接続タイマーを開始
+    /// </summary>
+    private void StartReconnectTimer()
+    {
+        StopReconnectTimer();
+        StopHealthCheckTimer(); // 再接続中はヘルスチェックを停止
+
+        _reconnectAttempts = 0;
+        _reconnectTimer = new System.Timers.Timer(ReconnectIntervalMs);
+        _reconnectTimer.Elapsed += async (s, e) => await OnReconnectAttemptAsync();
+        _reconnectTimer.AutoReset = true;
+        _reconnectTimer.Start();
+
+        System.Diagnostics.Debug.WriteLine($"再接続タイマー開始 ({ReconnectIntervalMs}ms間隔, 最大{MaxReconnectAttempts}回)");
+    }
+
+    /// <summary>
+    /// 再接続タイマーを停止
+    /// </summary>
+    private void StopReconnectTimer()
+    {
+        if (_reconnectTimer != null)
+        {
+            _reconnectTimer.Stop();
+            _reconnectTimer.Dispose();
+            _reconnectTimer = null;
+        }
+    }
+
+    /// <summary>
+    /// 再接続試行
+    /// </summary>
+    private Task OnReconnectAttemptAsync()
+    {
+        _reconnectAttempts++;
+        System.Diagnostics.Debug.WriteLine($"再接続試行: {_reconnectAttempts}/{MaxReconnectAttempts}");
+
+        SetConnectionState(CardReaderConnectionState.Reconnecting, null, _reconnectAttempts);
+
+        if (_reconnectAttempts > MaxReconnectAttempts)
+        {
+            System.Diagnostics.Debug.WriteLine("再接続失敗: 最大試行回数に達しました");
+            StopReconnectTimer();
+            SetConnectionState(CardReaderConnectionState.Disconnected, $"再接続失敗（{MaxReconnectAttempts}回試行）");
+            Error?.Invoke(this, new InvalidOperationException($"カードリーダーへの再接続に失敗しました（{MaxReconnectAttempts}回試行）"));
+            return Task.CompletedTask;
+        }
+
+        try
+        {
+            // 既存のモニターを停止
+            if (_monitor != null)
+            {
+                _monitor.CardInserted -= OnCardInserted;
+                _monitor.CardRemoved -= OnCardRemoved;
+                _monitor.MonitorException -= OnMonitorException;
+                try { _monitor.Cancel(); } catch { }
+                try { _monitor.Dispose(); } catch { }
+                _monitor = null;
+            }
+
+            // リーダーを再検索
+            var readerNames = _context.GetReaders();
+            if (readerNames == null || readerNames.Length == 0)
+            {
+                System.Diagnostics.Debug.WriteLine("再接続: カードリーダーが見つかりません");
+                return Task.CompletedTask; // 次のリトライを待つ
+            }
+
+            // 新しいモニターを開始
+            _lastKnownReaderNames = readerNames;
+            _monitor = MonitorFactory.Instance.Create(SCardScope.System);
+            _monitor.CardInserted += OnCardInserted;
+            _monitor.CardRemoved += OnCardRemoved;
+            _monitor.MonitorException += OnMonitorException;
+            _monitor.Start(readerNames);
+
+            _isReading = true;
+            _reconnectAttempts = 0;
+
+            System.Diagnostics.Debug.WriteLine("再接続成功");
+            StopReconnectTimer();
+            SetConnectionState(CardReaderConnectionState.Connected, "再接続しました");
+
+            // ヘルスチェックを再開
+            StartHealthCheckTimer();
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"再接続試行エラー: {ex.Message}");
+            // 次のリトライを待つ
+        }
+
+        return Task.CompletedTask;
+    }
+
+    /// <inheritdoc/>
+    public async Task ReconnectAsync()
+    {
+        System.Diagnostics.Debug.WriteLine("手動再接続を開始");
+
+        if (_connectionState == CardReaderConnectionState.Reconnecting)
+        {
+            System.Diagnostics.Debug.WriteLine("既に再接続中です");
+            return;
+        }
+
+        StopReconnectTimer();
+        StopHealthCheckTimer();
+
+        SetConnectionState(CardReaderConnectionState.Reconnecting);
+        _reconnectAttempts = 0;
+
+        await OnReconnectAttemptAsync();
+
+        // 再接続に失敗した場合は自動再接続を開始
+        if (_connectionState != CardReaderConnectionState.Connected)
+        {
+            StartReconnectTimer();
+        }
+    }
+
+    #endregion
 
     /// <summary>
     /// FeliCaカードからIDmを読み取る
@@ -593,6 +846,8 @@ public class PcScCardReader : ICardReader
         {
             if (disposing)
             {
+                StopHealthCheckTimer();
+                StopReconnectTimer();
                 StopReadingAsync().Wait();
                 _context.Dispose();
             }

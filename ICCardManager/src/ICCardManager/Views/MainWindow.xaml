@@ -5,6 +5,7 @@
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:vm="clr-namespace:ICCardManager.ViewModels"
         xmlns:conv="clr-namespace:ICCardManager.Common"
+        xmlns:cardReader="clr-namespace:ICCardManager.Infrastructure.CardReader"
         mc:Ignorable="d"
         d:DataContext="{d:DesignInstance Type=vm:MainViewModel}"
         Title="交通系ICカード管理システム"
@@ -411,6 +412,76 @@
                     <Run Text="{Binding LentCards.Count, Mode=OneWay}"/>
                     <Run Text=" 枚"/>
                 </TextBlock>
+            </StatusBarItem>
+            <Separator/>
+            <!-- カードリーダー接続状態 -->
+            <StatusBarItem AutomationProperties.Name="カードリーダー接続状態">
+                <StackPanel Orientation="Horizontal">
+                    <!-- 接続状態アイコン -->
+                    <TextBlock x:Name="ConnectionIcon" VerticalAlignment="Center" Margin="0,0,5,0">
+                        <TextBlock.Style>
+                            <Style TargetType="TextBlock">
+                                <Setter Property="Text" Value="🔗"/>
+                                <Setter Property="Foreground" Value="#4CAF50"/>
+                                <Setter Property="ToolTip" Value="カードリーダー接続中"/>
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding CardReaderConnectionState}" Value="{x:Static cardReader:CardReaderConnectionState.Disconnected}">
+                                        <Setter Property="Text" Value="🔌"/>
+                                        <Setter Property="Foreground" Value="#F44336"/>
+                                        <Setter Property="ToolTip" Value="カードリーダー切断"/>
+                                    </DataTrigger>
+                                    <DataTrigger Binding="{Binding CardReaderConnectionState}" Value="{x:Static cardReader:CardReaderConnectionState.Reconnecting}">
+                                        <Setter Property="Text" Value="🔄"/>
+                                        <Setter Property="Foreground" Value="#FF9800"/>
+                                        <Setter Property="ToolTip" Value="再接続中..."/>
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </TextBlock.Style>
+                    </TextBlock>
+                    <!-- 接続状態テキスト -->
+                    <TextBlock VerticalAlignment="Center">
+                        <TextBlock.Style>
+                            <Style TargetType="TextBlock">
+                                <Setter Property="Text" Value="リーダー: 接続中"/>
+                                <Setter Property="Foreground" Value="#4CAF50"/>
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding CardReaderConnectionState}" Value="{x:Static cardReader:CardReaderConnectionState.Disconnected}">
+                                        <Setter Property="Text" Value="リーダー: 切断"/>
+                                        <Setter Property="Foreground" Value="#F44336"/>
+                                    </DataTrigger>
+                                    <DataTrigger Binding="{Binding CardReaderConnectionState}" Value="{x:Static cardReader:CardReaderConnectionState.Reconnecting}">
+                                        <Setter Property="Text">
+                                            <Setter.Value>
+                                                <Binding Path="CardReaderReconnectAttempts" StringFormat="リーダー: 再接続中 ({0}/10)"/>
+                                            </Setter.Value>
+                                        </Setter>
+                                        <Setter Property="Foreground" Value="#FF9800"/>
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </TextBlock.Style>
+                    </TextBlock>
+                    <!-- 手動再接続ボタン（切断時のみ表示） -->
+                    <Button Content="再接続"
+                            Command="{Binding ReconnectCardReaderAsyncCommand}"
+                            Margin="10,0,0,0"
+                            Padding="8,2"
+                            FontSize="11"
+                            AutomationProperties.Name="カードリーダーに再接続"
+                            ToolTip="カードリーダーへの接続を再試行します">
+                        <Button.Style>
+                            <Style TargetType="Button">
+                                <Setter Property="Visibility" Value="Collapsed"/>
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding CardReaderConnectionState}" Value="{x:Static cardReader:CardReaderConnectionState.Disconnected}">
+                                        <Setter Property="Visibility" Value="Visible"/>
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </Button.Style>
+                    </Button>
+                </StackPanel>
             </StatusBarItem>
         </StatusBar>
     </Grid>

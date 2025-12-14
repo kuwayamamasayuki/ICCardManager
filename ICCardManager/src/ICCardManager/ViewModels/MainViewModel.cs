@@ -126,6 +126,24 @@ public partial class MainViewModel : ViewModelBase
     private ObservableCollection<CardBalanceDashboardItem> _cardBalanceDashboard = new();
 
     /// <summary>
+    /// カードリーダー接続状態
+    /// </summary>
+    [ObservableProperty]
+    private CardReaderConnectionState _cardReaderConnectionState = CardReaderConnectionState.Disconnected;
+
+    /// <summary>
+    /// カードリーダー接続状態のメッセージ
+    /// </summary>
+    [ObservableProperty]
+    private string _cardReaderConnectionMessage = string.Empty;
+
+    /// <summary>
+    /// カードリーダー再接続試行回数
+    /// </summary>
+    [ObservableProperty]
+    private int _cardReaderReconnectAttempts;
+
+    /// <summary>
     /// ダッシュボードのソート順
     /// </summary>
     [ObservableProperty]
@@ -159,6 +177,7 @@ public partial class MainViewModel : ViewModelBase
         // イベント登録
         _cardReader.CardRead += OnCardRead;
         _cardReader.Error += OnCardReaderError;
+        _cardReader.ConnectionStateChanged += OnCardReaderConnectionStateChanged;
 
         // 日時更新タイマー
         var dateTimeTimer = new DispatcherTimer
@@ -668,7 +687,89 @@ public partial class MainViewModel : ViewModelBase
     /// </summary>
     private void OnCardReaderError(object? sender, Exception e)
     {
-        WarningMessages.Add($"⚠️ カードリーダーエラー: {e.Message}");
+        System.Windows.Application.Current.Dispatcher.InvokeAsync(() =>
+        {
+            WarningMessages.Add($"⚠️ カードリーダーエラー: {e.Message}");
+        });
+    }
+
+    /// <summary>
+    /// カードリーダー接続状態変更イベント
+    /// </summary>
+    private void OnCardReaderConnectionStateChanged(object? sender, ConnectionStateChangedEventArgs e)
+    {
+        System.Windows.Application.Current.Dispatcher.InvokeAsync(() =>
+        {
+            CardReaderConnectionState = e.State;
+            CardReaderConnectionMessage = e.Message ?? string.Empty;
+            CardReaderReconnectAttempts = e.RetryCount;
+
+            // 警告メッセージの更新
+            UpdateConnectionWarningMessage(e);
+        });
+    }
+
+    /// <summary>
+    /// 接続状態に応じた警告メッセージを更新
+    /// </summary>
+    private void UpdateConnectionWarningMessage(ConnectionStateChangedEventArgs e)
+    {
+        // 既存のカードリーダー関連の警告を削除
+        var existingWarnings = WarningMessages
+            .Where(w => w.Contains("カードリーダー") && !w.Contains("エラー:"))
+            .ToList();
+
+        foreach (var warning in existingWarnings)
+        {
+            WarningMessages.Remove(warning);
+        }
+
+        // 状態に応じて警告を追加
+        switch (e.State)
+        {
+            case CardReaderConnectionState.Disconnected:
+                if (!string.IsNullOrEmpty(e.Message))
+                {
+                    WarningMessages.Add($"⚠️ カードリーダー切断: {e.Message}");
+                }
+                else
+                {
+                    WarningMessages.Add("⚠️ カードリーダーが切断されています");
+                }
+                break;
+
+            case CardReaderConnectionState.Reconnecting:
+                WarningMessages.Add($"🔄 カードリーダーに再接続中... ({e.RetryCount}/10)");
+                break;
+
+            case CardReaderConnectionState.Connected:
+                // 再接続成功時はメッセージを表示
+                if (!string.IsNullOrEmpty(e.Message) && e.Message.Contains("再接続"))
+                {
+                    // 一時的に成功メッセージを表示（3秒後に削除）
+                    var successMessage = "✅ カードリーダーに再接続しました";
+                    WarningMessages.Add(successMessage);
+
+                    // 3秒後にメッセージを削除
+                    _ = Task.Delay(3000).ContinueWith(_ =>
+                    {
+                        System.Windows.Application.Current.Dispatcher.InvokeAsync(() =>
+                        {
+                            WarningMessages.Remove(successMessage);
+                        });
+                    });
+                }
+                break;
+        }
+    }
+
+    /// <summary>
+    /// カードリーダーを手動で再接続
+    /// </summary>
+    [RelayCommand]
+    public async Task ReconnectCardReaderAsync()
+    {
+        await _cardReader.ReconnectAsync();
     }
 
     /// <summary>
