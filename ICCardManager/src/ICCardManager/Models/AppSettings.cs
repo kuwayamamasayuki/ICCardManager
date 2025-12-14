@@ -25,6 +25,47 @@ public class AppSettings
     /// 最終VACUUM実行日
     /// </summary>
     public DateTime? LastVacuumDate { get; set; }
+
+    /// <summary>
+    /// メインウィンドウの位置・サイズ設定
+    /// </summary>
+    public WindowSettings MainWindowSettings { get; set; } = new();
+}
+
+/// <summary>
+/// ウィンドウの位置・サイズ設定
+/// </summary>
+public class WindowSettings
+{
+    /// <summary>
+    /// ウィンドウ左端のX座標
+    /// </summary>
+    public double? Left { get; set; }
+
+    /// <summary>
+    /// ウィンドウ上端のY座標
+    /// </summary>
+    public double? Top { get; set; }
+
+    /// <summary>
+    /// ウィンドウ幅
+    /// </summary>
+    public double? Width { get; set; }
+
+    /// <summary>
+    /// ウィンドウ高さ
+    /// </summary>
+    public double? Height { get; set; }
+
+    /// <summary>
+    /// 最大化状態かどうか
+    /// </summary>
+    public bool IsMaximized { get; set; }
+
+    /// <summary>
+    /// 有効な設定かどうか（一度でも保存されているか）
+    /// </summary>
+    public bool HasValidSettings => Left.HasValue && Top.HasValue && Width.HasValue && Height.HasValue;
 }
 
 /// <summary>

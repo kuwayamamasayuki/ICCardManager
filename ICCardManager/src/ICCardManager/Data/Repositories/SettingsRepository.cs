@@ -18,6 +18,13 @@ public class SettingsRepository : ISettingsRepository
     public const string KeyFontSize = "font_size";
     public const string KeyLastVacuumDate = "last_vacuum_date";
 
+    // ウィンドウ設定キー
+    public const string KeyWindowLeft = "window_left";
+    public const string KeyWindowTop = "window_top";
+    public const string KeyWindowWidth = "window_width";
+    public const string KeyWindowHeight = "window_height";
+    public const string KeyWindowMaximized = "window_maximized";
+
     public SettingsRepository(DbContext dbContext, ICacheService cacheService)
     {
         _dbContext = dbContext;
@@ -93,7 +100,47 @@ public class SettingsRepository : ISettingsRepository
             settings.LastVacuumDate = date;
         }
 
+        // ウィンドウ設定
+        settings.MainWindowSettings = await GetWindowSettingsFromDbAsync();
+
         return settings;
+    }
+
+    /// <summary>
+    /// DBからウィンドウ設定を取得
+    /// </summary>
+    private async Task<WindowSettings> GetWindowSettingsFromDbAsync()
+    {
+        var windowSettings = new WindowSettings();
+
+        var left = await GetAsync(KeyWindowLeft);
+        if (double.TryParse(left, out var leftValue))
+        {
+            windowSettings.Left = leftValue;
+        }
+
+        var top = await GetAsync(KeyWindowTop);
+        if (double.TryParse(top, out var topValue))
+        {
+            windowSettings.Top = topValue;
+        }
+
+        var width = await GetAsync(KeyWindowWidth);
+        if (double.TryParse(width, out var widthValue))
+        {
+            windowSettings.Width = widthValue;
+        }
+
+        var height = await GetAsync(KeyWindowHeight);
+        if (double.TryParse(height, out var heightValue))
+        {
+            windowSettings.Height = heightValue;
+        }
+
+        var maximized = await GetAsync(KeyWindowMaximized);
+        windowSettings.IsMaximized = maximized?.ToLowerInvariant() == "true";
+
+        return windowSettings;
     }
 
     /// <inheritdoc/>
@@ -110,8 +157,43 @@ public class SettingsRepository : ISettingsRepository
             success &= await SetAsync(KeyLastVacuumDate, settings.LastVacuumDate.Value.ToString("yyyy-MM-dd"));
         }
 
+        // ウィンドウ設定を保存
+        success &= await SaveWindowSettingsToDbAsync(settings.MainWindowSettings);
+
         // 設定保存後にキャッシュを無効化
         _cacheService.Invalidate(CacheKeys.AppSettings);
+
+        return success;
+    }
+
+    /// <summary>
+    /// ウィンドウ設定をDBに保存
+    /// </summary>
+    private async Task<bool> SaveWindowSettingsToDbAsync(WindowSettings windowSettings)
+    {
+        var success = true;
+
+        if (windowSettings.Left.HasValue)
+        {
+            success &= await SetAsync(KeyWindowLeft, windowSettings.Left.Value.ToString("F0"));
+        }
+
+        if (windowSettings.Top.HasValue)
+        {
+            success &= await SetAsync(KeyWindowTop, windowSettings.Top.Value.ToString("F0"));
+        }
+
+        if (windowSettings.Width.HasValue)
+        {
+            success &= await SetAsync(KeyWindowWidth, windowSettings.Width.Value.ToString("F0"));
+        }
+
+        if (windowSettings.Height.HasValue)
+        {
+            success &= await SetAsync(KeyWindowHeight, windowSettings.Height.Value.ToString("F0"));
+        }
+
+        success &= await SetAsync(KeyWindowMaximized, windowSettings.IsMaximized.ToString().ToLowerInvariant());
 
         return success;
     }
