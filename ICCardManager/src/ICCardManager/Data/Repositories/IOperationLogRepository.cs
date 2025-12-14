@@ -3,6 +3,57 @@ using ICCardManager.Models;
 namespace ICCardManager.Data.Repositories;
 
 /// <summary>
+/// 操作ログ検索条件
+/// </summary>
+public class OperationLogSearchCriteria
+{
+    /// <summary>開始日</summary>
+    public DateTime? FromDate { get; init; }
+
+    /// <summary>終了日</summary>
+    public DateTime? ToDate { get; init; }
+
+    /// <summary>操作種別（INSERT/UPDATE/DELETE）</summary>
+    public string? Action { get; init; }
+
+    /// <summary>対象テーブル（staff/ic_card/ledger）</summary>
+    public string? TargetTable { get; init; }
+
+    /// <summary>対象ID（カードIDmなど）</summary>
+    public string? TargetId { get; init; }
+
+    /// <summary>操作者名（部分一致）</summary>
+    public string? OperatorName { get; init; }
+}
+
+/// <summary>
+/// 操作ログ検索結果（ページネーション対応）
+/// </summary>
+public class OperationLogSearchResult
+{
+    /// <summary>検索結果のログ一覧</summary>
+    public IReadOnlyList<OperationLog> Items { get; init; } = Array.Empty<OperationLog>();
+
+    /// <summary>総件数</summary>
+    public int TotalCount { get; init; }
+
+    /// <summary>現在のページ（1始まり）</summary>
+    public int CurrentPage { get; init; }
+
+    /// <summary>1ページあたりの件数</summary>
+    public int PageSize { get; init; }
+
+    /// <summary>総ページ数</summary>
+    public int TotalPages => PageSize > 0 ? (int)Math.Ceiling((double)TotalCount / PageSize) : 0;
+
+    /// <summary>前のページがあるか</summary>
+    public bool HasPreviousPage => CurrentPage > 1;
+
+    /// <summary>次のページがあるか</summary>
+    public bool HasNextPage => CurrentPage < TotalPages;
+}
+
+/// <summary>
 /// 操作ログリポジトリインターフェース
 /// </summary>
 public interface IOperationLogRepository
@@ -31,4 +82,18 @@ public interface IOperationLogRepository
     /// <param name="targetTable">対象テーブル名</param>
     /// <param name="targetId">対象ID</param>
     Task<IEnumerable<OperationLog>> GetByTargetAsync(string targetTable, string targetId);
+
+    /// <summary>
+    /// 複合条件で操作ログを検索（ページネーション対応）
+    /// </summary>
+    /// <param name="criteria">検索条件</param>
+    /// <param name="page">ページ番号（1始まり）</param>
+    /// <param name="pageSize">1ページあたりの件数</param>
+    Task<OperationLogSearchResult> SearchAsync(OperationLogSearchCriteria criteria, int page = 1, int pageSize = 50);
+
+    /// <summary>
+    /// 複合条件で全件取得（CSV出力用）
+    /// </summary>
+    /// <param name="criteria">検索条件</param>
+    Task<IEnumerable<OperationLog>> SearchAllAsync(OperationLogSearchCriteria criteria);
 }

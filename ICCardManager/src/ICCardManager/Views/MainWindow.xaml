@@ -28,6 +28,7 @@
         <KeyBinding Key="F3" Command="{Binding OpenCardManageCommand}"/>
         <KeyBinding Key="F4" Command="{Binding OpenStaffManageCommand}"/>
         <KeyBinding Key="F5" Command="{Binding OpenDataExportImportCommand}"/>
+        <KeyBinding Key="F6" Command="{Binding OpenOperationLogCommand}"/>
     </Window.InputBindings>
 
     <Grid>
@@ -91,6 +92,12 @@
                             AutomationProperties.Name="データエクスポート/インポートダイアログを開く"
                             AutomationProperties.HelpText="カード・職員・履歴のCSVエクスポート/インポートを行います。ショートカット: F5"
                             ToolTip="データ入出力を開く (F5)"/>
+                    <Button Content="操作ログ (F6)" Margin="5,0" Padding="10,5"
+                            Command="{Binding OpenOperationLogCommand}"
+                            TabIndex="6"
+                            AutomationProperties.Name="操作ログダイアログを開く"
+                            AutomationProperties.HelpText="システムの操作履歴を検索・表示します。ショートカット: F6"
+                            ToolTip="操作ログを開く (F6)"/>
                 </StackPanel>
             </Grid>
         </Border>
