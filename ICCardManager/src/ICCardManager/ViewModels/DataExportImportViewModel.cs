@@ -165,15 +165,15 @@ public partial class DataExportImportViewModel : ViewModelBase
             switch (SelectedExportType)
             {
                 case DataType.Cards:
-                    result = await _exportService.ExportCardsAsync(dialog.FileName, IncludeDeletedInExport);
+                    result = await _exportService.ExportCardsAsync(dialog.FileName, IncludeDeletedInExport).ConfigureAwait(false);
                     break;
 
                 case DataType.Staff:
-                    result = await _exportService.ExportStaffAsync(dialog.FileName, IncludeDeletedInExport);
+                    result = await _exportService.ExportStaffAsync(dialog.FileName, IncludeDeletedInExport).ConfigureAwait(false);
                     break;
 
                 case DataType.Ledgers:
-                    result = await _exportService.ExportLedgersAsync(dialog.FileName, ExportStartDate, ExportEndDate);
+                    result = await _exportService.ExportLedgersAsync(dialog.FileName, ExportStartDate, ExportEndDate).ConfigureAwait(false);
                     break;
 
                 default:
@@ -220,15 +220,15 @@ public partial class DataExportImportViewModel : ViewModelBase
             switch (SelectedImportType)
             {
                 case DataType.Cards:
-                    preview = await _importService.PreviewCardsAsync(dialog.FileName, SkipExistingOnImport);
+                    preview = await _importService.PreviewCardsAsync(dialog.FileName, SkipExistingOnImport).ConfigureAwait(false);
                     break;
 
                 case DataType.Staff:
-                    preview = await _importService.PreviewStaffAsync(dialog.FileName, SkipExistingOnImport);
+                    preview = await _importService.PreviewStaffAsync(dialog.FileName, SkipExistingOnImport).ConfigureAwait(false);
                     break;
 
                 case DataType.Ledgers:
-                    preview = await _importService.PreviewLedgersAsync(dialog.FileName);
+                    preview = await _importService.PreviewLedgersAsync(dialog.FileName).ConfigureAwait(false);
                     break;
 
                 default:
@@ -311,15 +311,15 @@ public partial class DataExportImportViewModel : ViewModelBase
             switch (SelectedImportType)
             {
                 case DataType.Cards:
-                    result = await _importService.ImportCardsAsync(ImportPreviewFile, SkipExistingOnImport);
+                    result = await _importService.ImportCardsAsync(ImportPreviewFile, SkipExistingOnImport).ConfigureAwait(false);
                     break;
 
                 case DataType.Staff:
-                    result = await _importService.ImportStaffAsync(ImportPreviewFile, SkipExistingOnImport);
+                    result = await _importService.ImportStaffAsync(ImportPreviewFile, SkipExistingOnImport).ConfigureAwait(false);
                     break;
 
                 case DataType.Ledgers:
-                    result = await _importService.ImportLedgersAsync(ImportPreviewFile);
+                    result = await _importService.ImportLedgersAsync(ImportPreviewFile).ConfigureAwait(false);
                     break;
 
                 default:
@@ -405,15 +405,15 @@ public partial class DataExportImportViewModel : ViewModelBase
             switch (SelectedImportType)
             {
                 case DataType.Cards:
-                    result = await _importService.ImportCardsAsync(dialog.FileName, SkipExistingOnImport);
+                    result = await _importService.ImportCardsAsync(dialog.FileName, SkipExistingOnImport).ConfigureAwait(false);
                     break;
 
                 case DataType.Staff:
-                    result = await _importService.ImportStaffAsync(dialog.FileName, SkipExistingOnImport);
+                    result = await _importService.ImportStaffAsync(dialog.FileName, SkipExistingOnImport).ConfigureAwait(false);
                     break;
 
                 case DataType.Ledgers:
-                    result = await _importService.ImportLedgersAsync(dialog.FileName);
+                    result = await _importService.ImportLedgersAsync(dialog.FileName).ConfigureAwait(false);
                     break;
 
                 default:

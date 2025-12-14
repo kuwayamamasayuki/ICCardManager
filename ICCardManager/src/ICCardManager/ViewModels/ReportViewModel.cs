@@ -205,22 +205,32 @@ public partial class ReportViewModel : ViewModelBase
         CreatedFiles.Clear();
         StatusMessage = string.Empty;
 
-        using (BeginBusy($"帳票を作成中... (0/{SelectedCards.Count})"))
+        // キャンセル可能な処理として開始
+        using var busyScope = BeginCancellableBusy($"帳票を作成中... (0/{SelectedCards.Count})");
+
+        try
         {
             var cardIdms = SelectedCards.Select(c => c.CardIdm).ToList();
             var successCount = 0;
             var failedCards = new List<(string CardName, string ErrorMessage)>();
+            var totalCount = cardIdms.Count;
 
-            foreach (var cardIdm in cardIdms)
+            for (var i = 0; i < cardIdms.Count; i++)
             {
+                // キャンセルチェック
+                busyScope.ThrowIfCancellationRequested();
+
+                var cardIdm = cardIdms[i];
                 var card = SelectedCards.First(c => c.CardIdm == cardIdm);
                 var fileName = $"物品出納簿_{card.CardType}_{card.CardNumber}_{SelectedYear}年{SelectedMonth}月.xlsx";
                 var outputPath = Path.Combine(OutputFolder, fileName);
 
-                BusyMessage = $"帳票を作成中... ({successCount + 1}/{SelectedCards.Count}) {card.CardType} {card.CardNumber}";
+                // 進捗を更新
+                busyScope.ReportProgress(i, totalCount,
+                    $"帳票を作成中... ({i + 1}/{totalCount}) {card.CardType} {card.CardNumber}");
 
                 var result = await _reportService.CreateMonthlyReportAsync(
-                    cardIdm, SelectedYear, SelectedMonth, outputPath);
+                    cardIdm, SelectedYear, SelectedMonth, outputPath).ConfigureAwait(false);
 
                 if (result.Success)
                 {
@@ -245,6 +255,9 @@ public partial class ReportViewModel : ViewModelBase
                 }
             }
 
+            // 完了時の進捗を100%に
+            busyScope.ReportProgress(totalCount, totalCount, "完了");
+
             if (successCount == SelectedCards.Count)
             {
                 StatusMessage = $"{successCount}件の帳票を作成しました";
@@ -264,6 +277,11 @@ public partial class ReportViewModel : ViewModelBase
                         MessageBoxImage.Warning);
                 }
             }
+        }
+        catch (OperationCanceledException)
+        {
+            StatusMessage = "帳票作成がキャンセルされました";
+            System.Diagnostics.Debug.WriteLine("[ReportVM] 帳票作成がキャンセルされました");
         }
     }
 
