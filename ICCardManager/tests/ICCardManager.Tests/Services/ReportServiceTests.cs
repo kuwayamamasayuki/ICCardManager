@@ -808,4 +808,420 @@ public class ReportServiceTests : IDisposable
     }
 
     #endregion
+
+    #region 年度切り替えテスト（Issue #23）
+
+    /// <summary>
+    /// TC015: 3月の累計行が年度（前年4月～当年3月）の全月合計と一致する
+    /// </summary>
+    [Fact]
+    public async Task CreateMonthlyReportAsync_InMarch_CumulativeShouldMatchFiscalYearTotal()
+    {
+        // Arrange
+        var cardIdm = "0102030405060708";
+        var card = CreateTestCard(cardIdm);
+        var year = 2024;  // 2024年3月 = 2023年度末
+        var month = 3;
+        var outputPath = CreateTempFilePath();
+
+        // 3月のデータ
+        var marchLedgers = new List<Ledger>
+        {
+            CreateTestLedger(10, cardIdm, new DateTime(2024, 3, 15), "鉄道（博多～天神）", 0, 400, 12600)
+        };
+
+        // 年度全体のデータ（2023年4月～2024年3月）
+        var fiscalYearLedgers = new List<Ledger>
+        {
+            // 2023年4月
+            CreateTestLedger(1, cardIdm, new DateTime(2023, 4, 10), "役務費によりチャージ", 10000, 0, 10000),
+            // 2023年6月
+            CreateTestLedger(2, cardIdm, new DateTime(2023, 6, 20), "鉄道（博多～天神）", 0, 500, 9500),
+            // 2023年9月
+            CreateTestLedger(3, cardIdm, new DateTime(2023, 9, 5), "鉄道（天神～博多）", 0, 500, 9000),
+            // 2023年12月
+            CreateTestLedger(4, cardIdm, new DateTime(2023, 12, 10), "役務費によりチャージ", 5000, 0, 14000),
+            // 2024年1月
+            CreateTestLedger(5, cardIdm, new DateTime(2024, 1, 15), "バス（★）", 0, 300, 13700),
+            // 2024年2月
+            CreateTestLedger(6, cardIdm, new DateTime(2024, 2, 20), "鉄道（博多～天神）", 0, 700, 13000),
+            // 2024年3月
+            CreateTestLedger(10, cardIdm, new DateTime(2024, 3, 15), "鉄道（博多～天神）", 0, 400, 12600)
+        };
+
+        _cardRepositoryMock
+            .Setup(r => r.GetByIdmAsync(cardIdm, true))
+            .ReturnsAsync(card);
+        _ledgerRepositoryMock
+            .Setup(r => r.GetByMonthAsync(cardIdm, year, month))
+            .ReturnsAsync(marchLedgers);
+        _ledgerRepositoryMock
+            .Setup(r => r.GetByDateRangeAsync(cardIdm,
+                new DateTime(2023, 4, 1),  // 前年4月1日
+                new DateTime(2024, 3, 31)))  // 当年3月31日
+            .ReturnsAsync(fiscalYearLedgers);
+
+        // Act
+        var result = await _reportService.CreateMonthlyReportAsync(cardIdm, year, month, outputPath);
+
+        // Assert
+        result.Success.Should().BeTrue();
+
+        using var workbook = new XLWorkbook(outputPath);
+        var worksheet = workbook.Worksheets.First();
+
+        // 累計行の検証
+        // 年度受入合計: 10000 + 5000 = 15000
+        // 年度払出合計: 500 + 500 + 300 + 700 + 400 = 2400
+        var cumulativeRow = 9;  // データ1行 + 月計1行 + 累計
+        worksheet.Cell(cumulativeRow, 2).GetString().Should().Be("累計");
+        worksheet.Cell(cumulativeRow, 3).GetValue<int>().Should().Be(15000);  // 年度受入合計
+        worksheet.Cell(cumulativeRow, 4).GetValue<int>().Should().Be(2400);   // 年度払出合計
+        worksheet.Cell(cumulativeRow, 5).GetValue<int>().Should().Be(12600);  // 最終残額
+    }
+
+    /// <summary>
+    /// TC016: 4月の前年度繰越残高が3月末残高と一致する
+    /// </summary>
+    [Fact]
+    public async Task CreateMonthlyReportAsync_InApril_CarryoverShouldMatchMarchEndBalance()
+    {
+        // Arrange
+        var cardIdm = "0102030405060708";
+        var card = CreateTestCard(cardIdm);
+        var year = 2024;
+        var month = 4;
+        var outputPath = CreateTempFilePath();
+        var marchEndBalance = 12600;  // 3月末残高
+
+        var aprilLedgers = new List<Ledger>
+        {
+            CreateTestLedger(1, cardIdm, new DateTime(2024, 4, 10), "鉄道（博多～天神）", 0, 300, 12300)
+        };
+
+        _cardRepositoryMock
+            .Setup(r => r.GetByIdmAsync(cardIdm, true))
+            .ReturnsAsync(card);
+        _ledgerRepositoryMock
+            .Setup(r => r.GetByMonthAsync(cardIdm, year, month))
+            .ReturnsAsync(aprilLedgers);
+        _ledgerRepositoryMock
+            .Setup(r => r.GetCarryoverBalanceAsync(cardIdm, year - 1))  // 2023年度
+            .ReturnsAsync(marchEndBalance);
+
+        // Act
+        var result = await _reportService.CreateMonthlyReportAsync(cardIdm, year, month, outputPath);
+
+        // Assert
+        result.Success.Should().BeTrue();
+
+        using var workbook = new XLWorkbook(outputPath);
+        var worksheet = workbook.Worksheets.First();
+
+        // 前年度繰越行（行7）
+        worksheet.Cell(7, 1).GetString().Should().Be("4/1");
+        worksheet.Cell(7, 2).GetString().Should().Be("前年度より繰越");
+        worksheet.Cell(7, 3).GetValue<int>().Should().Be(marchEndBalance);
+        worksheet.Cell(7, 5).GetValue<int>().Should().Be(marchEndBalance);
+
+        // 通常データ行（行8）
+        worksheet.Cell(8, 1).GetString().Should().Be("4/10");
+        worksheet.Cell(8, 2).GetString().Should().Be("鉄道（博多～天神）");
+    }
+
+    /// <summary>
+    /// TC017: 3月にデータがない場合も月計・累計・繰越行が正しく出力される
+    /// </summary>
+    [Fact]
+    public async Task CreateMonthlyReportAsync_InMarch_WithNoData_ShouldOutputSummaryRows()
+    {
+        // Arrange
+        var cardIdm = "0102030405060708";
+        var card = CreateTestCard(cardIdm);
+        var year = 2024;
+        var month = 3;
+        var outputPath = CreateTempFilePath();
+
+        // 年度のデータ（3月以外）
+        var fiscalYearLedgers = new List<Ledger>
+        {
+            CreateTestLedger(1, cardIdm, new DateTime(2023, 4, 10), "役務費によりチャージ", 10000, 0, 10000),
+            CreateTestLedger(2, cardIdm, new DateTime(2023, 6, 20), "鉄道（博多～天神）", 0, 500, 9500),
+            CreateTestLedger(3, cardIdm, new DateTime(2024, 2, 15), "鉄道（天神～博多）", 0, 300, 9200)
+        };
+
+        _cardRepositoryMock
+            .Setup(r => r.GetByIdmAsync(cardIdm, true))
+            .ReturnsAsync(card);
+        _ledgerRepositoryMock
+            .Setup(r => r.GetByMonthAsync(cardIdm, year, month))
+            .ReturnsAsync(new List<Ledger>());  // 3月データなし
+        _ledgerRepositoryMock
+            .Setup(r => r.GetByDateRangeAsync(cardIdm,
+                new DateTime(2023, 4, 1),
+                new DateTime(2024, 3, 31)))
+            .ReturnsAsync(fiscalYearLedgers);
+
+        // Act
+        var result = await _reportService.CreateMonthlyReportAsync(cardIdm, year, month, outputPath);
+
+        // Assert
+        result.Success.Should().BeTrue();
+
+        using var workbook = new XLWorkbook(outputPath);
+        var worksheet = workbook.Worksheets.First();
+
+        // 月計行（3月はデータなしなので0）
+        worksheet.Cell(7, 2).GetString().Should().Be("3月計");
+        worksheet.Cell(7, 5).GetString().Should().BeEmpty();  // 3月の月計残額は空欄
+
+        // 累計行
+        worksheet.Cell(8, 2).GetString().Should().Be("累計");
+        worksheet.Cell(8, 3).GetValue<int>().Should().Be(10000);  // 年度受入合計
+        worksheet.Cell(8, 4).GetValue<int>().Should().Be(800);    // 年度払出合計 (500 + 300)
+        worksheet.Cell(8, 5).GetValue<int>().Should().Be(9200);   // 2月末の残高
+
+        // 次年度繰越行
+        worksheet.Cell(9, 2).GetString().Should().Be("次年度へ繰越");
+        worksheet.Cell(9, 4).GetValue<int>().Should().Be(9200);
+        worksheet.Cell(9, 5).GetValue<int>().Should().Be(0);
+    }
+
+    /// <summary>
+    /// TC018: 4月にデータがない場合でも前年度繰越行が先頭に出力される
+    /// </summary>
+    [Fact]
+    public async Task CreateMonthlyReportAsync_InApril_WithNoData_ShouldOutputCarryoverFirst()
+    {
+        // Arrange
+        var cardIdm = "0102030405060708";
+        var card = CreateTestCard(cardIdm);
+        var year = 2024;
+        var month = 4;
+        var outputPath = CreateTempFilePath();
+        var marchEndBalance = 9200;
+
+        _cardRepositoryMock
+            .Setup(r => r.GetByIdmAsync(cardIdm, true))
+            .ReturnsAsync(card);
+        _ledgerRepositoryMock
+            .Setup(r => r.GetByMonthAsync(cardIdm, year, month))
+            .ReturnsAsync(new List<Ledger>());  // 4月データなし
+        _ledgerRepositoryMock
+            .Setup(r => r.GetCarryoverBalanceAsync(cardIdm, year - 1))
+            .ReturnsAsync(marchEndBalance);
+
+        // Act
+        var result = await _reportService.CreateMonthlyReportAsync(cardIdm, year, month, outputPath);
+
+        // Assert
+        result.Success.Should().BeTrue();
+
+        using var workbook = new XLWorkbook(outputPath);
+        var worksheet = workbook.Worksheets.First();
+
+        // 前年度繰越行（行7）
+        worksheet.Cell(7, 2).GetString().Should().Be("前年度より繰越");
+        worksheet.Cell(7, 3).GetValue<int>().Should().Be(marchEndBalance);
+        worksheet.Cell(7, 5).GetValue<int>().Should().Be(marchEndBalance);
+
+        // 月計行（行8、データなし）
+        worksheet.Cell(8, 2).GetString().Should().Be("4月計");
+    }
+
+    /// <summary>
+    /// TC019: 年度をまたぐ貸出（3月貸出→4月返却）が正しく処理される
+    /// </summary>
+    [Fact]
+    public async Task CreateMonthlyReportAsync_CrossFiscalYearLending_ShouldBeHandledCorrectly()
+    {
+        // Arrange
+        var cardIdm = "0102030405060708";
+        var card = CreateTestCard(cardIdm);
+        var outputPath = CreateTempFilePath();
+
+        // 3月の帳票テスト（貸出中レコードを含む）
+        var marchLedgers = new List<Ledger>
+        {
+            // 3月25日に貸出開始、まだ返却されていない（貸出中）
+            CreateTestLedger(1, cardIdm, new DateTime(2024, 3, 20), "鉄道（博多～天神）", 0, 300, 9700),
+            CreateTestLedger(2, cardIdm, new DateTime(2024, 3, 25), SummaryGenerator.GetLendingSummary(), 0, 0, 9700, "田中太郎", isLentRecord: true)
+        };
+
+        var fiscalYearLedgers = new List<Ledger>
+        {
+            CreateTestLedger(1, cardIdm, new DateTime(2023, 4, 10), "役務費によりチャージ", 10000, 0, 10000),
+            CreateTestLedger(2, cardIdm, new DateTime(2024, 3, 20), "鉄道（博多～天神）", 0, 300, 9700)
+        };
+
+        _cardRepositoryMock
+            .Setup(r => r.GetByIdmAsync(cardIdm, true))
+            .ReturnsAsync(card);
+        _ledgerRepositoryMock
+            .Setup(r => r.GetByMonthAsync(cardIdm, 2024, 3))
+            .ReturnsAsync(marchLedgers);
+        _ledgerRepositoryMock
+            .Setup(r => r.GetByDateRangeAsync(cardIdm,
+                new DateTime(2023, 4, 1),
+                new DateTime(2024, 3, 31)))
+            .ReturnsAsync(fiscalYearLedgers);
+
+        // Act
+        var result = await _reportService.CreateMonthlyReportAsync(cardIdm, 2024, 3, outputPath);
+
+        // Assert
+        result.Success.Should().BeTrue();
+
+        using var workbook = new XLWorkbook(outputPath);
+        var worksheet = workbook.Worksheets.First();
+
+        // 貸出中レコードは除外されている
+        worksheet.Cell(7, 2).GetString().Should().Be("鉄道（博多～天神）");
+        worksheet.Cell(8, 2).GetString().Should().Be("3月計");  // 貸出中がスキップされたので月計は行8
+
+        // 次年度繰越は貸出中の残高で計算される
+        worksheet.Cell(10, 2).GetString().Should().Be("次年度へ繰越");
+        worksheet.Cell(10, 4).GetValue<int>().Should().Be(9700);
+    }
+
+    /// <summary>
+    /// TC020: 3月の次年度繰越残高が正しく0になる
+    /// </summary>
+    [Fact]
+    public async Task CreateMonthlyReportAsync_InMarch_CarryoverToNextYear_ShouldHaveZeroBalance()
+    {
+        // Arrange
+        var cardIdm = "0102030405060708";
+        var card = CreateTestCard(cardIdm);
+        var year = 2024;
+        var month = 3;
+        var outputPath = CreateTempFilePath();
+
+        var marchLedgers = new List<Ledger>
+        {
+            CreateTestLedger(1, cardIdm, new DateTime(2024, 3, 10), "鉄道（博多～天神）", 0, 500, 8500)
+        };
+
+        var fiscalYearLedgers = new List<Ledger>
+        {
+            CreateTestLedger(1, cardIdm, new DateTime(2023, 4, 10), "役務費によりチャージ", 10000, 0, 10000),
+            CreateTestLedger(2, cardIdm, new DateTime(2024, 1, 15), "鉄道（天神～博多）", 0, 1000, 9000),
+            CreateTestLedger(3, cardIdm, new DateTime(2024, 3, 10), "鉄道（博多～天神）", 0, 500, 8500)
+        };
+
+        _cardRepositoryMock
+            .Setup(r => r.GetByIdmAsync(cardIdm, true))
+            .ReturnsAsync(card);
+        _ledgerRepositoryMock
+            .Setup(r => r.GetByMonthAsync(cardIdm, year, month))
+            .ReturnsAsync(marchLedgers);
+        _ledgerRepositoryMock
+            .Setup(r => r.GetByDateRangeAsync(cardIdm,
+                new DateTime(2023, 4, 1),
+                new DateTime(2024, 3, 31)))
+            .ReturnsAsync(fiscalYearLedgers);
+
+        // Act
+        var result = await _reportService.CreateMonthlyReportAsync(cardIdm, year, month, outputPath);
+
+        // Assert
+        result.Success.Should().BeTrue();
+
+        using var workbook = new XLWorkbook(outputPath);
+        var worksheet = workbook.Worksheets.First();
+
+        // 次年度繰越行
+        var carryoverRow = 10;  // データ1行 + 月計 + 累計 + 繰越
+        worksheet.Cell(carryoverRow, 2).GetString().Should().Be("次年度へ繰越");
+        worksheet.Cell(carryoverRow, 4).GetValue<int>().Should().Be(8500);  // 払出として繰越
+        worksheet.Cell(carryoverRow, 5).GetValue<int>().Should().Be(0);     // 残額は0
+    }
+
+    /// <summary>
+    /// TC021: 3月と4月の繰越残高が連続して一致する（統合テスト）
+    /// </summary>
+    [Fact]
+    public async Task CreateMonthlyReportAsync_MarchAndApril_CarryoverBalancesShouldMatch()
+    {
+        // Arrange
+        var cardIdm = "0102030405060708";
+        var card = CreateTestCard(cardIdm);
+        var marchOutputPath = CreateTempFilePath();
+        var aprilOutputPath = CreateTempFilePath();
+        var marchEndBalance = 8500;
+
+        // 3月のデータ
+        var marchLedgers = new List<Ledger>
+        {
+            CreateTestLedger(1, cardIdm, new DateTime(2024, 3, 10), "鉄道（博多～天神）", 0, 500, marchEndBalance)
+        };
+
+        var fiscalYearLedgers = new List<Ledger>
+        {
+            CreateTestLedger(1, cardIdm, new DateTime(2023, 4, 10), "役務費によりチャージ", 10000, 0, 10000),
+            CreateTestLedger(2, cardIdm, new DateTime(2024, 1, 15), "鉄道（天神～博多）", 0, 1000, 9000),
+            CreateTestLedger(3, cardIdm, new DateTime(2024, 3, 10), "鉄道（博多～天神）", 0, 500, marchEndBalance)
+        };
+
+        // 4月のデータ
+        var aprilLedgers = new List<Ledger>
+        {
+            CreateTestLedger(4, cardIdm, new DateTime(2024, 4, 5), "鉄道（博多～天神）", 0, 300, 8200)
+        };
+
+        _cardRepositoryMock
+            .Setup(r => r.GetByIdmAsync(cardIdm, true))
+            .ReturnsAsync(card);
+
+        // 3月の設定
+        _ledgerRepositoryMock
+            .Setup(r => r.GetByMonthAsync(cardIdm, 2024, 3))
+            .ReturnsAsync(marchLedgers);
+        _ledgerRepositoryMock
+            .Setup(r => r.GetByDateRangeAsync(cardIdm,
+                new DateTime(2023, 4, 1),
+                new DateTime(2024, 3, 31)))
+            .ReturnsAsync(fiscalYearLedgers);
+
+        // 4月の設定
+        _ledgerRepositoryMock
+            .Setup(r => r.GetByMonthAsync(cardIdm, 2024, 4))
+            .ReturnsAsync(aprilLedgers);
+        _ledgerRepositoryMock
+            .Setup(r => r.GetCarryoverBalanceAsync(cardIdm, 2023))
+            .ReturnsAsync(marchEndBalance);
+
+        // Act - 3月帳票作成
+        var marchResult = await _reportService.CreateMonthlyReportAsync(cardIdm, 2024, 3, marchOutputPath);
+
+        // Act - 4月帳票作成
+        var aprilResult = await _reportService.CreateMonthlyReportAsync(cardIdm, 2024, 4, aprilOutputPath);
+
+        // Assert
+        marchResult.Success.Should().BeTrue();
+        aprilResult.Success.Should().BeTrue();
+
+        // 3月帳票の検証
+        using var marchWorkbook = new XLWorkbook(marchOutputPath);
+        var marchWorksheet = marchWorkbook.Worksheets.First();
+
+        // 次年度繰越の払出金額
+        marchWorksheet.Cell(10, 2).GetString().Should().Be("次年度へ繰越");
+        var marchCarryover = marchWorksheet.Cell(10, 4).GetValue<int>();
+        marchCarryover.Should().Be(marchEndBalance);
+
+        // 4月帳票の検証
+        using var aprilWorkbook = new XLWorkbook(aprilOutputPath);
+        var aprilWorksheet = aprilWorkbook.Worksheets.First();
+
+        // 前年度繰越の受入金額
+        aprilWorksheet.Cell(7, 2).GetString().Should().Be("前年度より繰越");
+        var aprilCarryover = aprilWorksheet.Cell(7, 3).GetValue<int>();
+        aprilCarryover.Should().Be(marchEndBalance);
+
+        // 3月の繰越と4月の繰越が一致
+        marchCarryover.Should().Be(aprilCarryover);
+    }
+
+    #endregion
 }

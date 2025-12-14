@@ -224,16 +224,21 @@ public class ReportService
             // 3月の場合は累計と次年度繰越を追加
             if (month == 3)
             {
-                // 年度の累計を計算
-                var fiscalYearStart = new DateTime(year, 4, 1);
-                var fiscalYearEnd = new DateTime(year + 1, 3, 31);
-                var yearlyLedgers = await _ledgerRepository.GetByDateRangeAsync(cardIdm, fiscalYearStart, fiscalYearEnd);
+                // 年度の累計を計算（3月は前年4月～当年3月が年度範囲）
+                var fiscalYearStart = new DateTime(year - 1, 4, 1);
+                var fiscalYearEnd = new DateTime(year, 3, 31);
+                var yearlyLedgers = (await _ledgerRepository.GetByDateRangeAsync(cardIdm, fiscalYearStart, fiscalYearEnd))
+                    .OrderBy(l => l.Date)
+                    .ThenBy(l => l.Id)
+                    .ToList();
 
                 var yearlyIncome = yearlyLedgers.Sum(l => l.Income);
                 var yearlyExpense = yearlyLedgers.Sum(l => l.Expense);
+                // 年度末残高は年度の最終レコードから取得（3月にデータがない場合も正しく処理）
+                var fiscalYearEndBalance = yearlyLedgers.LastOrDefault()?.Balance ?? monthEndBalance;
 
-                currentRow = WriteCumulativeRow(worksheet, currentRow, yearlyIncome, yearlyExpense, monthEndBalance);
-                WriteCarryoverToNextYearRow(worksheet, currentRow, monthEndBalance);
+                currentRow = WriteCumulativeRow(worksheet, currentRow, yearlyIncome, yearlyExpense, fiscalYearEndBalance);
+                WriteCarryoverToNextYearRow(worksheet, currentRow, fiscalYearEndBalance);
             }
 
             // ファイルを保存
