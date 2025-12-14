@@ -79,4 +79,10 @@ public interface ILedgerRepository
     /// </summary>
     /// <returns>カードIDmをキーとした最新残高のディクショナリ</returns>
     Task<Dictionary<string, (int Balance, DateTime? LastUsageDate)>> GetAllLatestBalancesAsync();
+
+    /// <summary>
+    /// 過去に入力されたバス停名を使用頻度順で取得（オートコンプリート用）
+    /// </summary>
+    /// <returns>バス停名と使用回数のリスト（使用頻度順）</returns>
+    Task<IEnumerable<(string BusStops, int UsageCount)>> GetBusStopSuggestionsAsync();
 }

@@ -313,6 +313,38 @@ public class LedgerRepository : ILedgerRepository
         return result;
     }
 
+    /// <inheritdoc/>
+    public async Task<IEnumerable<(string BusStops, int UsageCount)>> GetBusStopSuggestionsAsync()
+    {
+        var connection = _dbContext.GetConnection();
+        var result = new List<(string BusStops, int UsageCount)>();
+
+        await using var command = connection.CreateCommand();
+        // バス停名を重複排除し、使用頻度順でソート
+        // ★マークや空文字は除外
+        command.CommandText = """
+            SELECT bus_stops, COUNT(*) as usage_count
+            FROM ledger_detail
+            WHERE is_bus = 1
+              AND bus_stops IS NOT NULL
+              AND bus_stops != ''
+              AND bus_stops != '★'
+            GROUP BY bus_stops
+            ORDER BY usage_count DESC, bus_stops
+            LIMIT 100
+            """;
+
+        await using var reader = await command.ExecuteReaderAsync();
+        while (await reader.ReadAsync())
+        {
+            var busStops = reader.GetString(0);
+            var usageCount = reader.GetInt32(1);
+            result.Add((busStops, usageCount));
+        }
+
+        return result;
+    }
+
     /// <summary>
     /// 利用履歴詳細を取得
     /// </summary>

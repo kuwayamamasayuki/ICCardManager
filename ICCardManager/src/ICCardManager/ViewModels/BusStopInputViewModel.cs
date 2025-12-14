@@ -27,6 +27,12 @@ public partial class BusStopInputViewModel : ViewModelBase
     private bool _hasUnsavedChanges;
 
     /// <summary>
+    /// バス停名サジェストのマスターリスト（使用頻度順）
+    /// </summary>
+    [ObservableProperty]
+    private List<string> _busStopSuggestions = new();
+
+    /// <summary>
     /// 保存完了フラグ（ダイアログ結果用）
     /// </summary>
     public bool IsSaved { get; private set; }
@@ -43,6 +49,9 @@ public partial class BusStopInputViewModel : ViewModelBase
     {
         using (BeginBusy("読み込み中..."))
         {
+            // サジェスト候補を読み込み
+            await LoadBusStopSuggestionsAsync();
+
             // 履歴詳細を取得
             Ledger = await _ledgerRepository.GetByIdAsync(ledgerId);
             if (Ledger == null)
@@ -55,7 +64,9 @@ public partial class BusStopInputViewModel : ViewModelBase
             BusUsages.Clear();
             foreach (var detail in Ledger.Details.Where(d => d.IsBus))
             {
-                BusUsages.Add(new BusStopInputItem(detail));
+                var item = new BusStopInputItem(detail);
+                item.SetSuggestions(BusStopSuggestions);
+                BusUsages.Add(item);
             }
 
             if (BusUsages.Count == 0)
@@ -74,6 +85,38 @@ public partial class BusStopInputViewModel : ViewModelBase
     /// <summary>
     /// バス利用詳細を直接設定して初期化（返却時用）
     /// </summary>
+    public async Task InitializeWithDetailsAsync(Ledger ledger, IEnumerable<LedgerDetail> busDetails)
+    {
+        // サジェスト候補を読み込み
+        await LoadBusStopSuggestionsAsync();
+
+        Ledger = ledger;
+
+        BusUsages.Clear();
+        foreach (var detail in busDetails.Where(d => d.IsBus))
+        {
+            var item = new BusStopInputItem(detail);
+            item.SetSuggestions(BusStopSuggestions);
+            BusUsages.Add(item);
+        }
+
+        if (BusUsages.Count == 0)
+        {
+            StatusMessage = "バス利用の履歴がありません";
+        }
+        else
+        {
+            var suggestionCount = BusStopSuggestions.Count;
+            var suggestionInfo = suggestionCount > 0 ? $"（{suggestionCount}件の候補あり）" : "";
+            StatusMessage = $"{BusUsages.Count}件のバス利用があります。バス停名を入力してください。{suggestionInfo}";
+        }
+
+        HasUnsavedChanges = false;
+    }
+
+    /// <summary>
+    /// バス利用詳細を直接設定して初期化（返却時用・同期版）
+    /// </summary>
     public void InitializeWithDetails(Ledger ledger, IEnumerable<LedgerDetail> busDetails)
     {
         Ledger = ledger;
@@ -81,7 +124,9 @@ public partial class BusStopInputViewModel : ViewModelBase
         BusUsages.Clear();
         foreach (var detail in busDetails.Where(d => d.IsBus))
         {
-            BusUsages.Add(new BusStopInputItem(detail));
+            var item = new BusStopInputItem(detail);
+            item.SetSuggestions(BusStopSuggestions);
+            BusUsages.Add(item);
         }
 
         if (BusUsages.Count == 0)
@@ -94,6 +139,24 @@ public partial class BusStopInputViewModel : ViewModelBase
         }
 
         HasUnsavedChanges = false;
+    }
+
+    /// <summary>
+    /// バス停名サジェスト候補を読み込み
+    /// </summary>
+    private async Task LoadBusStopSuggestionsAsync()
+    {
+        try
+        {
+            var suggestions = await _ledgerRepository.GetBusStopSuggestionsAsync();
+            BusStopSuggestions = suggestions.Select(s => s.BusStops).ToList();
+            System.Diagnostics.Debug.WriteLine($"[BusStopInput] {BusStopSuggestions.Count}件のバス停名候補を読み込みました");
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"[BusStopInput] サジェスト候補の読み込みに失敗: {ex.Message}");
+            BusStopSuggestions = new List<string>();
+        }
     }
 
     /// <summary>
@@ -182,6 +245,23 @@ public partial class BusStopInputItem : ObservableObject
     [ObservableProperty]
     private string _busStops;
 
+    /// <summary>
+    /// 全サジェスト候補（マスター）
+    /// </summary>
+    private List<string> _allSuggestions = new();
+
+    /// <summary>
+    /// 現在のフィルター済みサジェスト候補
+    /// </summary>
+    [ObservableProperty]
+    private ObservableCollection<string> _filteredSuggestions = new();
+
+    /// <summary>
+    /// サジェストポップアップを表示するか
+    /// </summary>
+    [ObservableProperty]
+    private bool _showSuggestions;
+
     public DateTime? UseDate => Detail.UseDate;
     public string UseDateDisplay => Detail.UseDate.HasValue
         ? WarekiConverter.ToWareki(Detail.UseDate.Value)
@@ -195,8 +275,77 @@ public partial class BusStopInputItem : ObservableObject
         _busStops = detail.BusStops ?? string.Empty;
     }
 
+    /// <summary>
+    /// サジェスト候補を設定
+    /// </summary>
+    public void SetSuggestions(List<string> suggestions)
+    {
+        _allSuggestions = suggestions;
+    }
+
     partial void OnBusStopsChanged(string value)
     {
         Detail.BusStops = value;
+        UpdateFilteredSuggestions(value);
+    }
+
+    /// <summary>
+    /// 入力値でサジェストをフィルター
+    /// </summary>
+    private void UpdateFilteredSuggestions(string input)
+    {
+        FilteredSuggestions.Clear();
+
+        if (string.IsNullOrWhiteSpace(input) || _allSuggestions.Count == 0)
+        {
+            ShowSuggestions = false;
+            return;
+        }
+
+        // 入力文字列を含む候補を抽出（先頭一致優先、次に部分一致）
+        var inputLower = input.ToLowerInvariant();
+
+        var startsWithMatches = _allSuggestions
+            .Where(s => s.ToLowerInvariant().StartsWith(inputLower))
+            .Take(5);
+
+        var containsMatches = _allSuggestions
+            .Where(s => !s.ToLowerInvariant().StartsWith(inputLower) &&
+                        s.ToLowerInvariant().Contains(inputLower))
+            .Take(5);
+
+        var matches = startsWithMatches.Concat(containsMatches).Take(8).ToList();
+
+        if (matches.Count > 0 && !matches.Any(m => m.Equals(input, StringComparison.OrdinalIgnoreCase)))
+        {
+            foreach (var match in matches)
+            {
+                FilteredSuggestions.Add(match);
+            }
+            ShowSuggestions = true;
+        }
+        else
+        {
+            ShowSuggestions = false;
+        }
+    }
+
+    /// <summary>
+    /// サジェストを選択
+    /// </summary>
+    [RelayCommand]
+    public void SelectSuggestion(string suggestion)
+    {
+        BusStops = suggestion;
+        ShowSuggestions = false;
+    }
+
+    /// <summary>
+    /// サジェストを非表示
+    /// </summary>
+    [RelayCommand]
+    public void HideSuggestions()
+    {
+        ShowSuggestions = false;
     }
 }
