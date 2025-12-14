@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using FluentAssertions;
 using ICCardManager.Data.Repositories;
 using ICCardManager.Models;
@@ -14,19 +15,25 @@ namespace ICCardManager.Tests.ViewModels;
 public class SettingsViewModelTests
 {
     private readonly Mock<ISettingsRepository> _settingsRepositoryMock;
+    private readonly Mock<IStaffRepository> _staffRepositoryMock;
     private readonly Mock<IValidationService> _validationServiceMock;
     private readonly SettingsViewModel _viewModel;
 
     public SettingsViewModelTests()
     {
         _settingsRepositoryMock = new Mock<ISettingsRepository>();
+        _staffRepositoryMock = new Mock<IStaffRepository>();
         _validationServiceMock = new Mock<IValidationService>();
 
         // バリデーションはデフォルトで成功を返す
         _validationServiceMock.Setup(v => v.ValidateWarningBalance(It.IsAny<int>())).Returns(ValidationResult.Success());
 
+        // 空の職員リストを返す
+        _staffRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<Staff>());
+
         _viewModel = new SettingsViewModel(
             _settingsRepositoryMock.Object,
+            _staffRepositoryMock.Object,
             _validationServiceMock.Object);
     }
 
