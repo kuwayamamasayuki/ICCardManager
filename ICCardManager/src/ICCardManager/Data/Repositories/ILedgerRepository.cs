@@ -67,4 +67,16 @@ public interface ILedgerRepository
     /// <param name="cardIdm">ICカードIDm</param>
     /// <param name="fiscalYear">年度</param>
     Task<int?> GetCarryoverBalanceAsync(string cardIdm, int fiscalYear);
+
+    /// <summary>
+    /// 指定カードの最新利用履歴を取得
+    /// </summary>
+    /// <param name="cardIdm">ICカードIDm</param>
+    Task<Ledger?> GetLatestLedgerAsync(string cardIdm);
+
+    /// <summary>
+    /// 全カードの最新残高情報を一括取得（ダッシュボード用）
+    /// </summary>
+    /// <returns>カードIDmをキーとした最新残高のディクショナリ</returns>
+    Task<Dictionary<string, (int Balance, DateTime? LastUsageDate)>> GetAllLatestBalancesAsync();
 }

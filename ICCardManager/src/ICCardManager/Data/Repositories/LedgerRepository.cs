@@ -257,6 +257,62 @@ public class LedgerRepository : ILedgerRepository
         return ledger?.Balance;
     }
 
+    /// <inheritdoc/>
+    public async Task<Ledger?> GetLatestLedgerAsync(string cardIdm)
+    {
+        var connection = _dbContext.GetConnection();
+
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT id, card_idm, lender_idm, date, summary, income, expense, balance,
+                   staff_name, note, returner_idm, lent_at, returned_at, is_lent_record
+            FROM ledger
+            WHERE card_idm = @cardIdm
+            ORDER BY date DESC, id DESC
+            LIMIT 1
+            """;
+
+        command.Parameters.AddWithValue("@cardIdm", cardIdm);
+
+        await using var reader = await command.ExecuteReaderAsync();
+        if (await reader.ReadAsync())
+        {
+            return MapToLedger(reader);
+        }
+
+        return null;
+    }
+
+    /// <inheritdoc/>
+    public async Task<Dictionary<string, (int Balance, DateTime? LastUsageDate)>> GetAllLatestBalancesAsync()
+    {
+        var connection = _dbContext.GetConnection();
+        var result = new Dictionary<string, (int Balance, DateTime? LastUsageDate)>();
+
+        await using var command = connection.CreateCommand();
+        // サブクエリで各カードの最新レコードIDを取得し、JOINで残高情報を取得
+        command.CommandText = """
+            SELECT l.card_idm, l.balance, l.date
+            FROM ledger l
+            INNER JOIN (
+                SELECT card_idm, MAX(id) as max_id
+                FROM ledger
+                GROUP BY card_idm
+            ) latest ON l.card_idm = latest.card_idm AND l.id = latest.max_id
+            """;
+
+        await using var reader = await command.ExecuteReaderAsync();
+        while (await reader.ReadAsync())
+        {
+            var cardIdm = reader.GetString(0);
+            var balance = reader.GetInt32(1);
+            var lastUsageDate = reader.IsDBNull(2) ? (DateTime?)null : DateTime.Parse(reader.GetString(2));
+            result[cardIdm] = (balance, lastUsageDate);
+        }
+
+        return result;
+    }
+
     /// <summary>
     /// 利用履歴詳細を取得
     /// </summary>
