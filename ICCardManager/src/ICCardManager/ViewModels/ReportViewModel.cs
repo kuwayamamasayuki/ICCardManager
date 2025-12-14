@@ -209,6 +209,7 @@ public partial class ReportViewModel : ViewModelBase
         {
             var cardIdms = SelectedCards.Select(c => c.CardIdm).ToList();
             var successCount = 0;
+            var failedCards = new List<(string CardName, string ErrorMessage)>();
 
             foreach (var cardIdm in cardIdms)
             {
@@ -218,13 +219,29 @@ public partial class ReportViewModel : ViewModelBase
 
                 BusyMessage = $"帳票を作成中... ({successCount + 1}/{SelectedCards.Count}) {card.CardType} {card.CardNumber}";
 
-                var success = await _reportService.CreateMonthlyReportAsync(
+                var result = await _reportService.CreateMonthlyReportAsync(
                     cardIdm, SelectedYear, SelectedMonth, outputPath);
 
-                if (success)
+                if (result.Success)
                 {
                     CreatedFiles.Add(outputPath);
                     successCount++;
+                }
+                else
+                {
+                    failedCards.Add(($"{card.CardType} {card.CardNumber}", result.ErrorMessage ?? "不明なエラー"));
+
+                    // テンプレートエラーの場合は中断
+                    if (result.ErrorMessage?.Contains("テンプレート") == true)
+                    {
+                        MessageBox.Show(
+                            result.DetailedErrorMessage ?? result.ErrorMessage,
+                            "テンプレートエラー",
+                            MessageBoxButton.OK,
+                            MessageBoxImage.Error);
+                        StatusMessage = "テンプレートエラーにより中断しました";
+                        return;
+                    }
                 }
             }
 
@@ -235,6 +252,17 @@ public partial class ReportViewModel : ViewModelBase
             else
             {
                 StatusMessage = $"{successCount}/{SelectedCards.Count}件の帳票を作成しました（一部失敗）";
+
+                // 失敗したカードの詳細を表示
+                if (failedCards.Count > 0)
+                {
+                    var failedMessage = string.Join("\n", failedCards.Select(f => $"・{f.CardName}: {f.ErrorMessage}"));
+                    MessageBox.Show(
+                        $"以下のカードで帳票作成に失敗しました:\n\n{failedMessage}",
+                        "帳票作成エラー",
+                        MessageBoxButton.OK,
+                        MessageBoxImage.Warning);
+                }
             }
         }
     }

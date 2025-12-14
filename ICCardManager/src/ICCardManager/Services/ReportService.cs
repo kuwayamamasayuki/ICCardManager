@@ -7,19 +7,138 @@ using ICCardManager.Models;
 namespace ICCardManager.Services;
 
 /// <summary>
+/// 帳票作成結果
+/// </summary>
+public class ReportGenerationResult
+{
+    /// <summary>
+    /// 成功フラグ
+    /// </summary>
+    public bool Success { get; init; }
+
+    /// <summary>
+    /// エラーメッセージ（失敗時）
+    /// </summary>
+    public string? ErrorMessage { get; init; }
+
+    /// <summary>
+    /// 詳細エラーメッセージ（失敗時）
+    /// </summary>
+    public string? DetailedErrorMessage { get; init; }
+
+    /// <summary>
+    /// 出力ファイルパス（成功時）
+    /// </summary>
+    public string? OutputPath { get; init; }
+
+    /// <summary>
+    /// 成功結果を作成
+    /// </summary>
+    public static ReportGenerationResult SuccessResult(string outputPath) => new()
+    {
+        Success = true,
+        OutputPath = outputPath
+    };
+
+    /// <summary>
+    /// 失敗結果を作成
+    /// </summary>
+    public static ReportGenerationResult FailureResult(string message, string? detailedMessage = null) => new()
+    {
+        Success = false,
+        ErrorMessage = message,
+        DetailedErrorMessage = detailedMessage
+    };
+}
+
+/// <summary>
+/// 一括帳票作成結果
+/// </summary>
+public class BatchReportGenerationResult
+{
+    /// <summary>
+    /// 個別の作成結果
+    /// </summary>
+    public IReadOnlyList<(string CardIdm, string? CardName, ReportGenerationResult Result)> Results { get; }
+
+    /// <summary>
+    /// テンプレートエラーメッセージ（テンプレートが見つからない場合）
+    /// </summary>
+    public string? TemplateErrorMessage { get; init; }
+
+    /// <summary>
+    /// テンプレートが見つからなかった
+    /// </summary>
+    public bool IsTemplateError => TemplateErrorMessage != null;
+
+    /// <summary>
+    /// 成功した件数
+    /// </summary>
+    public int SuccessCount => Results.Count(r => r.Result.Success);
+
+    /// <summary>
+    /// 失敗した件数
+    /// </summary>
+    public int FailureCount => Results.Count(r => !r.Result.Success);
+
+    /// <summary>
+    /// 全件成功したか
+    /// </summary>
+    public bool AllSuccess => !IsTemplateError && Results.All(r => r.Result.Success);
+
+    /// <summary>
+    /// 成功したファイルパスの一覧
+    /// </summary>
+    public IReadOnlyList<string> SuccessfulFiles => Results
+        .Where(r => r.Result.Success && r.Result.OutputPath != null)
+        .Select(r => r.Result.OutputPath!)
+        .ToList()
+        .AsReadOnly();
+
+    public BatchReportGenerationResult(IEnumerable<(string CardIdm, string? CardName, ReportGenerationResult Result)> results)
+    {
+        Results = results.ToList().AsReadOnly();
+    }
+
+    private BatchReportGenerationResult()
+    {
+        Results = Array.Empty<(string, string?, ReportGenerationResult)>();
+    }
+
+    /// <summary>
+    /// テンプレートが見つからない場合の結果を作成
+    /// </summary>
+    public static BatchReportGenerationResult TemplateNotFound(string detailedMessage) => new()
+    {
+        TemplateErrorMessage = detailedMessage
+    };
+
+    /// <summary>
+    /// 結果サマリーを取得
+    /// </summary>
+    public string GetSummary()
+    {
+        if (IsTemplateError)
+        {
+            return $"テンプレートエラー: {TemplateErrorMessage}";
+        }
+
+        if (AllSuccess)
+        {
+            return $"{SuccessCount}件の帳票を作成しました。";
+        }
+
+        return $"{SuccessCount}件成功、{FailureCount}件失敗しました。";
+    }
+}
+
+/// <summary>
 /// 月次帳票作成サービス
 /// </summary>
 public class ReportService
 {
     private readonly ICardRepository _cardRepository;
     private readonly ILedgerRepository _ledgerRepository;
-
-    /// <summary>
-    /// テンプレートファイルのパス
-    /// </summary>
-    private string TemplatePath => Path.Combine(
-        AppDomain.CurrentDomain.BaseDirectory,
-        "Resources", "Templates", "物品出納簿テンプレート.xlsx");
 
     public ReportService(
         ICardRepository cardRepository,
@@ -36,15 +155,32 @@ public class ReportService
     /// <param name="year">年</param>
     /// <param name="month">月</param>
     /// <param name="outputPath">出力先パス</param>
-    public async Task<bool> CreateMonthlyReportAsync(string cardIdm, int year, int month, string outputPath)
+    /// <returns>作成結果（成功/失敗とエラーメッセージ）</returns>
+    public async Task<ReportGenerationResult> CreateMonthlyReportAsync(string cardIdm, int year, int month, string outputPath)
     {
+        string? templatePath = null;
+
         try
         {
+            // テンプレートパスを解決
+            try
+            {
+                templatePath = TemplateResolver.ResolveTemplatePath();
+            }
+            catch (TemplateNotFoundException ex)
+            {
+                return ReportGenerationResult.FailureResult(
+                    "テンプレートファイルが見つかりません",
+                    ex.GetDetailedMessage());
+            }
+
             // カード情報を取得
             var card = await _cardRepository.GetByIdmAsync(cardIdm, includeDeleted: true);
             if (card == null)
             {
-                return false;
+                return ReportGenerationResult.FailureResult(
+                    "カード情報が見つかりません",
+                    $"指定されたカード（IDm: {cardIdm}）は登録されていません。");
             }
 
             // 履歴を取得
@@ -55,7 +191,7 @@ public class ReportService
                 .ToList();
 
             // テンプレートを開く
-            using var workbook = new XLWorkbook(TemplatePath);
+            using var workbook = new XLWorkbook(templatePath);
             var worksheet = workbook.Worksheets.First();
 
             // ヘッダ情報を設定
@@ -102,12 +238,35 @@ public class ReportService
 
             // ファイルを保存
             workbook.SaveAs(outputPath);
-            return true;
+            return ReportGenerationResult.SuccessResult(outputPath);
         }
-        catch
+        catch (IOException ex)
         {
-            return false;
+            return ReportGenerationResult.FailureResult(
+                "ファイルの保存に失敗しました",
+                $"出力先ファイルに書き込めません。ファイルが他のアプリケーションで開かれている可能性があります。\n\n詳細: {ex.Message}");
         }
+        catch (Exception ex)
+        {
+            return ReportGenerationResult.FailureResult(
+                "帳票の作成に失敗しました",
+                $"予期しないエラーが発生しました。\n\n詳細: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// 月次帳票を作成（後方互換性のためのラッパー）
+    /// </summary>
+    /// <param name="cardIdm">対象カードIDm</param>
+    /// <param name="year">年</param>
+    /// <param name="month">月</param>
+    /// <param name="outputPath">出力先パス</param>
+    /// <returns>成功した場合true</returns>
+    [Obsolete("CreateMonthlyReportAsyncを使用してください。エラーメッセージが取得できます。")]
+    public async Task<bool> CreateMonthlyReportAsyncLegacy(string cardIdm, int year, int month, string outputPath)
+    {
+        var result = await CreateMonthlyReportAsync(cardIdm, year, month, outputPath);
+        return result.Success;
     }
 
     /// <summary>
@@ -117,10 +276,25 @@ public class ReportService
     /// <param name="year">年</param>
     /// <param name="month">月</param>
     /// <param name="outputFolder">出力先フォルダ</param>
-    public async Task<List<string>> CreateMonthlyReportsAsync(
+    /// <returns>一括作成結果</returns>
+    public async Task<BatchReportGenerationResult> CreateMonthlyReportsAsync(
         IEnumerable<string> cardIdms, int year, int month, string outputFolder)
     {
-        var createdFiles = new List<string>();
+        var results = new List<(string CardIdm, string? CardName, ReportGenerationResult Result)>();
+
+        // テンプレートの存在確認を先に行う
+        if (!TemplateResolver.TemplateExists())
+        {
+            try
+            {
+                TemplateResolver.ResolveTemplatePath();
+            }
+            catch (TemplateNotFoundException ex)
+            {
+                return BatchReportGenerationResult.TemplateNotFound(ex.GetDetailedMessage());
+            }
+        }
+
         Directory.CreateDirectory(outputFolder);
 
         foreach (var cardIdm in cardIdms)
@@ -128,19 +302,21 @@ public class ReportService
             var card = await _cardRepository.GetByIdmAsync(cardIdm, includeDeleted: true);
             if (card == null)
             {
+                results.Add((cardIdm, null, ReportGenerationResult.FailureResult(
+                    "カード情報が見つかりません",
+                    $"指定されたカード（IDm: {cardIdm}）は登録されていません。")));
                 continue;
             }
 
+            var cardName = $"{card.CardType} {card.CardNumber}";
             var fileName = $"物品出納簿_{card.CardType}_{card.CardNumber}_{year}年{month}月.xlsx";
             var outputPath = Path.Combine(outputFolder, fileName);
 
-            if (await CreateMonthlyReportAsync(cardIdm, year, month, outputPath))
-            {
-                createdFiles.Add(outputPath);
-            }
+            var result = await CreateMonthlyReportAsync(cardIdm, year, month, outputPath);
+            results.Add((cardIdm, cardName, result));
         }
 
-        return createdFiles;
+        return new BatchReportGenerationResult(results);
     }
 
     /// <summary>
