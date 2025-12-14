@@ -25,7 +25,7 @@
         <KeyBinding Key="Escape" Command="{Binding CancelCommand}"/>
         <KeyBinding Key="F1" Command="{Binding OpenSettingsCommand}"/>
         <KeyBinding Key="F2" Command="{Binding OpenReportCommand}"/>
-        <KeyBinding Key="F3" Command="{Binding OpenCardManageCommand}"/>
+        <KeyBinding Key="F3" Command="{Binding OpenCardManageAsyncCommand}"/>
         <KeyBinding Key="F4" Command="{Binding OpenStaffManageCommand}"/>
         <KeyBinding Key="F5" Command="{Binding OpenDataExportImportCommand}"/>
         <KeyBinding Key="F6" Command="{Binding OpenOperationLogCommand}"/>
@@ -75,7 +75,7 @@
                             AutomationProperties.HelpText="物品出納簿を作成します。ショートカット: F2"
                             ToolTip="帳票を開く (F2)"/>
                     <Button Content="カード管理 (F3)" Margin="5,0" Padding="10,5"
-                            Command="{Binding OpenCardManageCommand}"
+                            Command="{Binding OpenCardManageAsyncCommand}"
                             TabIndex="3"
                             AutomationProperties.Name="カード管理ダイアログを開く"
                             AutomationProperties.HelpText="ICカードの登録・編集を行います。ショートカット: F3"
@@ -156,54 +156,183 @@
                 </StackPanel>
             </Border>
 
-            <!-- 右サイドバー（貸出中カード一覧・警告） -->
+            <!-- 右サイドバー（カード残高ダッシュボード） -->
             <Border Grid.Column="1" Background="#F5F5F5" Padding="15">
                 <Grid>
                     <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
                         <RowDefinition Height="Auto"/>
                         <RowDefinition Height="*"/>
                         <RowDefinition Height="Auto"/>
                         <RowDefinition Height="Auto"/>
                     </Grid.RowDefinitions>
 
-                    <!-- 貸出中カード -->
-                    <TextBlock Grid.Row="0"
-                               Text="貸出中のカード"
-                               FontSize="{DynamicResource BaseFontSize}"
-                               FontWeight="Bold"
-                               Margin="0,0,0,10"/>
+                    <!-- ダッシュボードヘッダー -->
+                    <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="0,0,0,10">
+                        <TextBlock Text="💳 カード残高"
+                                   FontSize="{DynamicResource BaseFontSize}"
+                                   FontWeight="Bold"
+                                   VerticalAlignment="Center"/>
+                        <TextBlock Text="{Binding CardBalanceDashboard.Count, StringFormat=' ({0}枚)'}"
+                                   FontSize="{DynamicResource SmallFontSize}"
+                                   Foreground="Gray"
+                                   VerticalAlignment="Center"
+                                   Margin="5,0,0,0"/>
+                    </StackPanel>
 
-                    <ListView Grid.Row="1"
-                              ItemsSource="{Binding LentCards}"
+                    <!-- ソート選択 -->
+                    <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="0,0,0,10">
+                        <TextBlock Text="並び順:"
+                                   FontSize="{DynamicResource SmallFontSize}"
+                                   VerticalAlignment="Center"
+                                   Margin="0,0,5,0"/>
+                        <ComboBox SelectedValue="{Binding DashboardSortOrder}"
+                                  SelectedValuePath="Tag"
+                                  FontSize="{DynamicResource SmallFontSize}"
+                                  Width="130"
+                                  AutomationProperties.Name="ダッシュボードの並び順"
+                                  ToolTip="カード一覧の並び順を変更">
+                            <ComboBoxItem Content="残高（少ない順）" Tag="{x:Static vm:DashboardSortOrder.BalanceAscending}"/>
+                            <ComboBoxItem Content="残高（多い順）" Tag="{x:Static vm:DashboardSortOrder.BalanceDescending}"/>
+                            <ComboBoxItem Content="カード名順" Tag="{x:Static vm:DashboardSortOrder.CardName}"/>
+                            <ComboBoxItem Content="最終利用日順" Tag="{x:Static vm:DashboardSortOrder.LastUsageDate}"/>
+                        </ComboBox>
+                    </StackPanel>
+
+                    <!-- カード残高一覧 -->
+                    <ListView Grid.Row="2"
+                              ItemsSource="{Binding CardBalanceDashboard}"
+                              SelectedItem="{Binding SelectedDashboardItem}"
                               BorderThickness="0"
-                              Background="Transparent">
+                              Background="Transparent"
+                              AutomationProperties.Name="カード残高一覧"
+                              AutomationProperties.HelpText="カードをクリックすると履歴を表示します">
+                        <ListView.ItemContainerStyle>
+                            <Style TargetType="ListViewItem">
+                                <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+                                <Setter Property="Padding" Value="0"/>
+                                <Setter Property="Margin" Value="0,2"/>
+                                <Setter Property="Template">
+                                    <Setter.Value>
+                                        <ControlTemplate TargetType="ListViewItem">
+                                            <ContentPresenter/>
+                                        </ControlTemplate>
+                                    </Setter.Value>
+                                </Setter>
+                            </Style>
+                        </ListView.ItemContainerStyle>
                         <ListView.ItemTemplate>
                             <DataTemplate>
-                                <Border Background="White" CornerRadius="4"
-                                        Margin="0,2" Padding="10,8">
-                                    <StackPanel>
-                                        <TextBlock FontWeight="Bold">
+                                <Border CornerRadius="4"
+                                        Padding="10,8"
+                                        Cursor="Hand"
+                                        Background="{Binding RowBackgroundColor}">
+                                    <Border.InputBindings>
+                                        <MouseBinding MouseAction="LeftClick"
+                                                      Command="{Binding DataContext.OpenCardHistoryFromDashboardCommand, RelativeSource={RelativeSource AncestorType=ListView}}"
+                                                      CommandParameter="{Binding}"/>
+                                    </Border.InputBindings>
+                                    <Border.Style>
+                                        <Style TargetType="Border">
+                                            <Setter Property="Background" Value="White"/>
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding IsBalanceWarning}" Value="True">
+                                                    <Setter Property="Background" Value="#FFEBEE"/>
+                                                </DataTrigger>
+                                                <Trigger Property="IsMouseOver" Value="True">
+                                                    <Setter Property="BorderBrush" Value="#2196F3"/>
+                                                    <Setter Property="BorderThickness" Value="1"/>
+                                                </Trigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </Border.Style>
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="Auto"/>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                        </Grid.ColumnDefinitions>
+                                        <Grid.RowDefinitions>
+                                            <RowDefinition Height="Auto"/>
+                                            <RowDefinition Height="Auto"/>
+                                        </Grid.RowDefinitions>
+
+                                        <!-- 警告アイコン -->
+                                        <TextBlock Grid.Column="0" Grid.RowSpan="2"
+                                                   Text="{Binding WarningIcon}"
+                                                   FontSize="{DynamicResource LargeFontSize}"
+                                                   VerticalAlignment="Center"
+                                                   Margin="0,0,8,0"
+                                                   Foreground="#F44336"
+                                                   ToolTip="残高警告"
+                                                   Visibility="{Binding IsBalanceWarning, Converter={StaticResource BoolToVisibilityConverter}}"/>
+
+                                        <!-- カード名 -->
+                                        <TextBlock Grid.Column="1" Grid.Row="0"
+                                                   FontWeight="Bold"
+                                                   FontSize="{DynamicResource SmallFontSize}">
                                             <Run Text="{Binding CardType}"/>
                                             <Run Text=" "/>
                                             <Run Text="{Binding CardNumber}"/>
                                         </TextBlock>
-                                        <TextBlock FontSize="{DynamicResource SmallFontSize}" Foreground="Gray"
-                                                   Text="{Binding LastLentAt, StringFormat='{}{0:M/d H:mm}～'}"/>
-                                    </StackPanel>
+
+                                        <!-- 残高 -->
+                                        <TextBlock Grid.Column="2" Grid.Row="0"
+                                                   Text="{Binding BalanceDisplay}"
+                                                   FontWeight="Bold"
+                                                   FontSize="{DynamicResource SmallFontSize}"
+                                                   HorizontalAlignment="Right">
+                                            <TextBlock.Style>
+                                                <Style TargetType="TextBlock">
+                                                    <Setter Property="Foreground" Value="#424242"/>
+                                                    <Style.Triggers>
+                                                        <DataTrigger Binding="{Binding IsBalanceWarning}" Value="True">
+                                                            <Setter Property="Foreground" Value="#F44336"/>
+                                                        </DataTrigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </TextBlock.Style>
+                                        </TextBlock>
+
+                                        <!-- 最終利用日 + 貸出状態 -->
+                                        <StackPanel Grid.Column="1" Grid.Row="1" Grid.ColumnSpan="2"
+                                                    Orientation="Horizontal">
+                                            <TextBlock FontSize="10" Foreground="Gray">
+                                                <Run Text="最終: "/>
+                                                <Run Text="{Binding LastUsageDateDisplay}"/>
+                                            </TextBlock>
+                                            <TextBlock FontSize="10" Margin="10,0,0,0">
+                                                <TextBlock.Style>
+                                                    <Style TargetType="TextBlock">
+                                                        <Setter Property="Foreground" Value="#4CAF50"/>
+                                                        <Style.Triggers>
+                                                            <DataTrigger Binding="{Binding IsLent}" Value="True">
+                                                                <Setter Property="Foreground" Value="#FF9800"/>
+                                                            </DataTrigger>
+                                                        </Style.Triggers>
+                                                    </Style>
+                                                </TextBlock.Style>
+                                                <Run Text="{Binding LentStatusIcon}"/>
+                                                <Run Text=" "/>
+                                                <Run Text="{Binding LentInfoDisplay}"/>
+                                            </TextBlock>
+                                        </StackPanel>
+                                    </Grid>
                                 </Border>
                             </DataTemplate>
                         </ListView.ItemTemplate>
                     </ListView>
 
                     <!-- 警告エリア -->
-                    <TextBlock Grid.Row="2"
-                               Text="警告"
+                    <TextBlock Grid.Row="3"
+                               Text="⚠ システム警告"
                                FontSize="{DynamicResource BaseFontSize}"
                                FontWeight="Bold"
                                Margin="0,15,0,10"
+                               Foreground="#F44336"
                                Visibility="{Binding WarningMessages.Count, Converter={StaticResource IntToVisibilityConverter}, Mode=OneWay}"/>
 
-                    <ItemsControl Grid.Row="3"
+                    <ItemsControl Grid.Row="4"
                                   ItemsSource="{Binding WarningMessages}">
                         <ItemsControl.ItemTemplate>
                             <DataTemplate>
@@ -265,6 +394,14 @@
                 <TextBlock>
                     <Run Text="状態: "/>
                     <Run Text="{Binding CurrentState}"/>
+                </TextBlock>
+            </StatusBarItem>
+            <Separator/>
+            <StatusBarItem>
+                <TextBlock>
+                    <Run Text="登録カード: "/>
+                    <Run Text="{Binding CardBalanceDashboard.Count, Mode=OneWay}"/>
+                    <Run Text=" 枚"/>
                 </TextBlock>
             </StatusBarItem>
             <Separator/>

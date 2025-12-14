@@ -35,6 +35,32 @@ public enum AppState
 }
 
 /// <summary>
+/// ダッシュボードのソート順
+/// </summary>
+public enum DashboardSortOrder
+{
+    /// <summary>
+    /// カード種別・番号順（デフォルト）
+    /// </summary>
+    CardName,
+
+    /// <summary>
+    /// 残高昇順（少ない順）
+    /// </summary>
+    BalanceAscending,
+
+    /// <summary>
+    /// 残高降順（多い順）
+    /// </summary>
+    BalanceDescending,
+
+    /// <summary>
+    /// 最終利用日順（新しい順）
+    /// </summary>
+    LastUsageDate
+}
+
+/// <summary>
 /// メイン画面のViewModel
 /// </summary>
 public partial class MainViewModel : ViewModelBase
@@ -93,6 +119,24 @@ public partial class MainViewModel : ViewModelBase
     [ObservableProperty]
     private ObservableCollection<CardDto> _lentCards = new();
 
+    /// <summary>
+    /// カード残高ダッシュボード
+    /// </summary>
+    [ObservableProperty]
+    private ObservableCollection<CardBalanceDashboardItem> _cardBalanceDashboard = new();
+
+    /// <summary>
+    /// ダッシュボードのソート順
+    /// </summary>
+    [ObservableProperty]
+    private DashboardSortOrder _dashboardSortOrder = DashboardSortOrder.BalanceAscending;
+
+    /// <summary>
+    /// 選択中のダッシュボードアイテム
+    /// </summary>
+    [ObservableProperty]
+    private CardBalanceDashboardItem? _selectedDashboardItem;
+
     public MainViewModel(
         ICardReader cardReader,
         ISoundPlayer soundPlayer,
@@ -140,6 +184,9 @@ public partial class MainViewModel : ViewModelBase
             // 貸出中カードを取得
             await RefreshLentCardsAsync();
 
+            // カード残高ダッシュボードを取得
+            await RefreshDashboardAsync();
+
             // カード読み取り開始
             await _cardReader.StartReadingAsync();
         }
@@ -186,6 +233,80 @@ public partial class MainViewModel : ViewModelBase
         foreach (var card in lentCards)
         {
             LentCards.Add(card.ToDto());
+        }
+    }
+
+    /// <summary>
+    /// カード残高ダッシュボードを更新
+    /// </summary>
+    private async Task RefreshDashboardAsync()
+    {
+        var settings = await _settingsRepository.GetAppSettingsAsync();
+        var cards = await _cardRepository.GetAllAsync();
+        var balances = await _ledgerRepository.GetAllLatestBalancesAsync();
+        var staffList = await _staffRepository.GetAllAsync();
+        var staffDict = staffList.ToDictionary(s => s.StaffIdm, s => s.Name);
+
+        var dashboardItems = new List<CardBalanceDashboardItem>();
+
+        foreach (var card in cards)
+        {
+            var (balance, lastUsageDate) = balances.TryGetValue(card.CardIdm, out var info)
+                ? info
+                : (0, (DateTime?)null);
+
+            var staffName = card.IsLent && card.LastLentStaff != null && staffDict.TryGetValue(card.LastLentStaff, out var name)
+                ? name
+                : null;
+
+            dashboardItems.Add(new CardBalanceDashboardItem
+            {
+                CardIdm = card.CardIdm,
+                CardType = card.CardType,
+                CardNumber = card.CardNumber,
+                CurrentBalance = balance,
+                IsBalanceWarning = balance <= settings.WarningBalance,
+                LastUsageDate = lastUsageDate,
+                IsLent = card.IsLent,
+                LentStaffName = staffName
+            });
+        }
+
+        // ソート適用
+        var sortedItems = SortDashboardItems(dashboardItems);
+
+        CardBalanceDashboard.Clear();
+        foreach (var item in sortedItems)
+        {
+            CardBalanceDashboard.Add(item);
+        }
+    }
+
+    /// <summary>
+    /// ダッシュボードアイテムをソート
+    /// </summary>
+    private IEnumerable<CardBalanceDashboardItem> SortDashboardItems(IEnumerable<CardBalanceDashboardItem> items)
+    {
+        return DashboardSortOrder switch
+        {
+            DashboardSortOrder.CardName => items.OrderBy(x => x.CardType).ThenBy(x => x.CardNumber),
+            DashboardSortOrder.BalanceAscending => items.OrderBy(x => x.CurrentBalance).ThenBy(x => x.CardType).ThenBy(x => x.CardNumber),
+            DashboardSortOrder.BalanceDescending => items.OrderByDescending(x => x.CurrentBalance).ThenBy(x => x.CardType).ThenBy(x => x.CardNumber),
+            DashboardSortOrder.LastUsageDate => items.OrderByDescending(x => x.LastUsageDate ?? DateTime.MinValue).ThenBy(x => x.CardType).ThenBy(x => x.CardNumber),
+            _ => items
+        };
+    }
+
+    /// <summary>
+    /// ソート順変更時にダッシュボードを再ソート
+    /// </summary>
+    partial void OnDashboardSortOrderChanged(DashboardSortOrder value)
+    {
+        var sortedItems = SortDashboardItems(CardBalanceDashboard.ToList());
+        CardBalanceDashboard.Clear();
+        foreach (var item in sortedItems)
+        {
+            CardBalanceDashboard.Add(item);
         }
     }
 
@@ -377,6 +498,7 @@ public partial class MainViewModel : ViewModelBase
             SetState(AppState.WaitingForStaffCard, message, "#B3E5FC"); // 薄い水色
 
             await RefreshLentCardsAsync();
+            await RefreshDashboardAsync();
             await CheckWarningsAsync();
 
             // バス利用がある場合はバス停入力画面を表示
@@ -596,14 +718,15 @@ public partial class MainViewModel : ViewModelBase
     /// カード管理画面を開く
     /// </summary>
     [RelayCommand]
-    public void OpenCardManage()
+    public async Task OpenCardManageAsync()
     {
         var dialog = App.Current.ServiceProvider.GetRequiredService<Views.Dialogs.CardManageDialog>();
         dialog.Owner = System.Windows.Application.Current.MainWindow;
         dialog.ShowDialog();
 
-        // ダイアログを閉じた後、貸出中カード一覧を更新
-        _ = RefreshLentCardsAsync();
+        // ダイアログを閉じた後、貸出中カード一覧とダッシュボードを更新
+        await RefreshLentCardsAsync();
+        await RefreshDashboardAsync();
     }
 
     /// <summary>
@@ -637,6 +760,23 @@ public partial class MainViewModel : ViewModelBase
         var dialog = App.Current.ServiceProvider.GetRequiredService<Views.Dialogs.OperationLogDialog>();
         dialog.Owner = System.Windows.Application.Current.MainWindow;
         dialog.ShowDialog();
+    }
+
+    /// <summary>
+    /// ダッシュボードから履歴画面を開く
+    /// </summary>
+    [RelayCommand]
+    public async Task OpenCardHistoryFromDashboard(CardBalanceDashboardItem? item)
+    {
+        if (item == null) return;
+
+        var card = await _cardRepository.GetByIdmAsync(item.CardIdm);
+        if (card != null)
+        {
+            await ShowHistoryAsync(card);
+            // 履歴表示後にダッシュボードを更新
+            await RefreshDashboardAsync();
+        }
     }
 
 #if DEBUG
