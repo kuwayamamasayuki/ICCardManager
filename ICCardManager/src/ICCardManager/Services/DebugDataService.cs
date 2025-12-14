@@ -1,0 +1,300 @@
+#if DEBUG
+using ICCardManager.Data.Repositories;
+using ICCardManager.Models;
+
+namespace ICCardManager.Services;
+
+/// <summary>
+/// DEBUGビルド時のテストデータ管理サービス
+/// </summary>
+public class DebugDataService
+{
+    private readonly IStaffRepository _staffRepository;
+    private readonly ICardRepository _cardRepository;
+    private readonly ILedgerRepository _ledgerRepository;
+
+    /// <summary>
+    /// テスト職員データ
+    /// </summary>
+    public static readonly Staff[] TestStaffList =
+    {
+        new() { StaffIdm = "FFFF000000000001", Name = "山田太郎", Number = "001", Note = "テスト職員1（管理者）" },
+        new() { StaffIdm = "FFFF000000000002", Name = "鈴木花子", Number = "002", Note = "テスト職員2（一般）" },
+        new() { StaffIdm = "FFFF000000000003", Name = "佐藤一郎", Number = "003", Note = "テスト職員3（一般）" },
+        new() { StaffIdm = "FFFF000000000004", Name = "田中美咲", Number = "004", Note = "テスト職員4（一般）" },
+        new() { StaffIdm = "FFFF000000000005", Name = "伊藤健二", Number = "005", Note = "テスト職員5（新人）" },
+    };
+
+    /// <summary>
+    /// テストカードデータ
+    /// </summary>
+    public static readonly IcCard[] TestCardList =
+    {
+        new() { CardIdm = "07FE112233445566", CardType = "はやかけん", CardNumber = "H-001", Note = "テストカード1" },
+        new() { CardIdm = "05FE112233445567", CardType = "nimoca", CardNumber = "N-001", Note = "テストカード2" },
+        new() { CardIdm = "06FE112233445568", CardType = "SUGOCA", CardNumber = "S-001", Note = "テストカード3" },
+        new() { CardIdm = "01FE112233445569", CardType = "Suica", CardNumber = "Su-001", Note = "テストカード4（関東）" },
+        new() { CardIdm = "07FE112233445570", CardType = "はやかけん", CardNumber = "H-002", Note = "テストカード5" },
+        new() { CardIdm = "05FE112233445571", CardType = "nimoca", CardNumber = "N-002", Note = "テストカード6" },
+    };
+
+    /// <summary>
+    /// サンプル駅名データ（福岡周辺）
+    /// </summary>
+    private static readonly string[] SampleStations =
+    {
+        "博多", "天神", "薬院", "大橋", "春日", "二日市", "久留米",
+        "福岡空港", "貝塚", "箱崎", "千早", "香椎", "新宮", "古賀"
+    };
+
+    public DebugDataService(
+        IStaffRepository staffRepository,
+        ICardRepository cardRepository,
+        ILedgerRepository ledgerRepository)
+    {
+        _staffRepository = staffRepository;
+        _cardRepository = cardRepository;
+        _ledgerRepository = ledgerRepository;
+    }
+
+    /// <summary>
+    /// 全テストデータを登録
+    /// </summary>
+    public async Task RegisterAllTestDataAsync()
+    {
+        await RegisterTestStaffAsync();
+        await RegisterTestCardsAsync();
+        await RegisterSampleHistoryAsync();
+    }
+
+    /// <summary>
+    /// テスト職員を登録
+    /// </summary>
+    public async Task RegisterTestStaffAsync()
+    {
+        foreach (var staff in TestStaffList)
+        {
+            var existing = await _staffRepository.GetByIdmAsync(staff.StaffIdm);
+            if (existing == null)
+            {
+                await _staffRepository.InsertAsync(staff);
+                System.Diagnostics.Debug.WriteLine($"[DEBUG] テスト職員登録: {staff.Name} ({staff.StaffIdm})");
+            }
+        }
+    }
+
+    /// <summary>
+    /// テストカードを登録
+    /// </summary>
+    public async Task RegisterTestCardsAsync()
+    {
+        foreach (var card in TestCardList)
+        {
+            var existing = await _cardRepository.GetByIdmAsync(card.CardIdm);
+            if (existing == null)
+            {
+                await _cardRepository.InsertAsync(card);
+                System.Diagnostics.Debug.WriteLine($"[DEBUG] テストカード登録: {card.CardType} {card.CardNumber} ({card.CardIdm})");
+            }
+        }
+    }
+
+    /// <summary>
+    /// サンプル履歴データを登録
+    /// </summary>
+    public async Task RegisterSampleHistoryAsync()
+    {
+        var random = new Random(42); // 再現性のためシード固定
+        var today = DateTime.Now.Date;
+
+        // 各カードに対してサンプル履歴を登録
+        foreach (var card in TestCardList.Take(3)) // 最初の3枚のみ
+        {
+            // 既存の履歴があるかチェック
+            var existingHistory = await _ledgerRepository.GetByMonthAsync(card.CardIdm, today.Year, today.Month);
+            if (existingHistory.Any())
+            {
+                System.Diagnostics.Debug.WriteLine($"[DEBUG] 履歴が既に存在: {card.CardNumber}");
+                continue;
+            }
+
+            var balance = 10000; // 初期残高
+            var staffName = TestStaffList[random.Next(TestStaffList.Length)].Name;
+
+            // 過去30日分のサンプル履歴を生成
+            for (int daysAgo = 30; daysAgo >= 0; daysAgo--)
+            {
+                var date = today.AddDays(-daysAgo);
+
+                // 土日はスキップ（平日のみ利用）
+                if (date.DayOfWeek == DayOfWeek.Saturday || date.DayOfWeek == DayOfWeek.Sunday)
+                    continue;
+
+                // 30%の確率で利用
+                if (random.Next(100) > 30)
+                    continue;
+
+                // 残高が少ない場合はチャージ
+                if (balance < 1000)
+                {
+                    var chargeAmount = random.Next(1, 4) * 1000; // 1000, 2000, 3000円
+                    balance += chargeAmount;
+
+                    var chargeLedger = new Ledger
+                    {
+                        CardIdm = card.CardIdm,
+                        Date = date,
+                        Summary = SummaryGenerator.GetChargeSummary(),
+                        Income = chargeAmount,
+                        Expense = 0,
+                        Balance = balance,
+                        StaffName = staffName,
+                        Note = "テストデータ"
+                    };
+                    await _ledgerRepository.InsertAsync(chargeLedger);
+                }
+
+                // 鉄道利用（往復）
+                var fromIdx = random.Next(SampleStations.Length);
+                var toIdx = (fromIdx + random.Next(1, 5)) % SampleStations.Length;
+                var fare = 200 + random.Next(10) * 30; // 200-470円
+
+                balance -= fare * 2; // 往復分
+
+                var usageLedger = new Ledger
+                {
+                    CardIdm = card.CardIdm,
+                    Date = date,
+                    Summary = $"鉄道（{SampleStations[fromIdx]}～{SampleStations[toIdx]} 往復）",
+                    Income = 0,
+                    Expense = fare * 2,
+                    Balance = balance,
+                    StaffName = staffName,
+                    Note = "テストデータ"
+                };
+                await _ledgerRepository.InsertAsync(usageLedger);
+
+                // 20%の確率でバス利用も追加
+                if (random.Next(100) < 20)
+                {
+                    var busFare = 200 + random.Next(3) * 30; // 200-260円
+                    balance -= busFare;
+
+                    var busLedger = new Ledger
+                    {
+                        CardIdm = card.CardIdm,
+                        Date = date,
+                        Summary = "バス（★）",
+                        Income = 0,
+                        Expense = busFare,
+                        Balance = balance,
+                        StaffName = staffName,
+                        Note = "テストデータ"
+                    };
+                    await _ledgerRepository.InsertAsync(busLedger);
+                }
+            }
+
+            System.Diagnostics.Debug.WriteLine($"[DEBUG] サンプル履歴登録完了: {card.CardNumber}");
+        }
+    }
+
+    /// <summary>
+    /// テストデータをリセット（職員・カード・履歴を削除して再登録）
+    /// </summary>
+    public async Task ResetTestDataAsync()
+    {
+        System.Diagnostics.Debug.WriteLine("[DEBUG] テストデータリセット開始");
+
+        // テスト職員を削除
+        foreach (var staff in TestStaffList)
+        {
+            var existing = await _staffRepository.GetByIdmAsync(staff.StaffIdm);
+            if (existing != null)
+            {
+                await _staffRepository.DeleteAsync(staff.StaffIdm);
+                System.Diagnostics.Debug.WriteLine($"[DEBUG] テスト職員削除: {staff.Name}");
+            }
+        }
+
+        // テストカードを削除
+        foreach (var card in TestCardList)
+        {
+            var existing = await _cardRepository.GetByIdmAsync(card.CardIdm);
+            if (existing != null)
+            {
+                await _cardRepository.DeleteAsync(card.CardIdm);
+                System.Diagnostics.Debug.WriteLine($"[DEBUG] テストカード削除: {card.CardNumber}");
+            }
+        }
+
+        // 再登録
+        await RegisterAllTestDataAsync();
+
+        System.Diagnostics.Debug.WriteLine("[DEBUG] テストデータリセット完了");
+    }
+
+    /// <summary>
+    /// 任意のカードに履歴データを生成
+    /// </summary>
+    /// <param name="cardIdm">カードIDm</param>
+    /// <param name="days">生成する日数</param>
+    /// <param name="staffName">職員名</param>
+    public async Task GenerateHistoryAsync(string cardIdm, int days, string staffName)
+    {
+        var card = await _cardRepository.GetByIdmAsync(cardIdm);
+        if (card == null)
+        {
+            System.Diagnostics.Debug.WriteLine($"[DEBUG] カードが見つかりません: {cardIdm}");
+            return;
+        }
+
+        var random = new Random();
+        var today = DateTime.Now.Date;
+        var balance = 5000;
+
+        for (int daysAgo = days; daysAgo >= 0; daysAgo--)
+        {
+            var date = today.AddDays(-daysAgo);
+
+            // ランダムな駅間移動
+            var fromIdx = random.Next(SampleStations.Length);
+            var toIdx = (fromIdx + random.Next(1, 5)) % SampleStations.Length;
+            var fare = 200 + random.Next(10) * 30;
+
+            balance -= fare;
+
+            var ledger = new Ledger
+            {
+                CardIdm = cardIdm,
+                Date = date,
+                Summary = $"鉄道（{SampleStations[fromIdx]}～{SampleStations[toIdx]}）",
+                Income = 0,
+                Expense = fare,
+                Balance = balance,
+                StaffName = staffName,
+                Note = "生成されたテストデータ"
+            };
+            await _ledgerRepository.InsertAsync(ledger);
+        }
+
+        System.Diagnostics.Debug.WriteLine($"[DEBUG] 履歴生成完了: {card.CardNumber} - {days}日分");
+    }
+
+    /// <summary>
+    /// 全テストデータのIDm一覧を取得
+    /// </summary>
+    public static IEnumerable<(string Idm, string Description, bool IsStaff)> GetAllTestIdms()
+    {
+        foreach (var staff in TestStaffList)
+        {
+            yield return (staff.StaffIdm, $"職員: {staff.Name} ({staff.Number})", true);
+        }
+
+        foreach (var card in TestCardList)
+        {
+            yield return (card.CardIdm, $"カード: {card.CardType} {card.CardNumber}", false);
+        }
+    }
+}
+#endif
