@@ -3,6 +3,8 @@ using ICCardManager.Data;
 using ICCardManager.Data.Repositories;
 using ICCardManager.Models;
 using ICCardManager.Services;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Xunit;
 
@@ -19,6 +21,7 @@ public class LendingServiceTests : IDisposable
     private readonly Mock<ILedgerRepository> _ledgerRepositoryMock;
     private readonly Mock<ISettingsRepository> _settingsRepositoryMock;
     private readonly SummaryGenerator _summaryGenerator;
+    private readonly CardLockManager _lockManager;
     private readonly LendingService _service;
 
     // テスト用定数
@@ -37,6 +40,7 @@ public class LendingServiceTests : IDisposable
         _ledgerRepositoryMock = new Mock<ILedgerRepository>();
         _settingsRepositoryMock = new Mock<ISettingsRepository>();
         _summaryGenerator = new SummaryGenerator();
+        _lockManager = new CardLockManager(NullLogger<CardLockManager>.Instance);
 
         _service = new LendingService(
             _dbContext,
@@ -44,11 +48,13 @@ public class LendingServiceTests : IDisposable
             _staffRepositoryMock.Object,
             _ledgerRepositoryMock.Object,
             _settingsRepositoryMock.Object,
-            _summaryGenerator);
+            _summaryGenerator,
+            _lockManager);
     }
 
     public void Dispose()
     {
+        _lockManager.Dispose();
         _dbContext.Dispose();
         GC.SuppressFinalize(this);
     }
@@ -905,7 +911,8 @@ public class LendingServiceTests : IDisposable
             _staffRepositoryMock.Object,
             _ledgerRepositoryMock.Object,
             _settingsRepositoryMock.Object,
-            _summaryGenerator);
+            _summaryGenerator,
+            _lockManager);
 
         // Act - 最初の処理を開始し、ロックを保持させる
         var task1 = shortTimeoutService.LendAsync(TestStaffIdm, timeoutCardIdm);
@@ -1045,8 +1052,9 @@ public class LendingServiceTests : IDisposable
             IStaffRepository staffRepository,
             ILedgerRepository ledgerRepository,
             ISettingsRepository settingsRepository,
-            SummaryGenerator summaryGenerator)
-            : base(dbContext, cardRepository, staffRepository, ledgerRepository, settingsRepository, summaryGenerator)
+            SummaryGenerator summaryGenerator,
+            CardLockManager lockManager)
+            : base(dbContext, cardRepository, staffRepository, ledgerRepository, settingsRepository, summaryGenerator, lockManager)
         {
         }
 
