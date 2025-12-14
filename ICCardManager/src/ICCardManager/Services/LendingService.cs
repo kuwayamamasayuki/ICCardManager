@@ -1,4 +1,3 @@
-using System.Collections.Concurrent;
 using ICCardManager.Data;
 using ICCardManager.Data.Repositories;
 using ICCardManager.Models;
@@ -73,11 +72,7 @@ public class LendingService
     private readonly ILedgerRepository _ledgerRepository;
     private readonly ISettingsRepository _settingsRepository;
     private readonly SummaryGenerator _summaryGenerator;
-
-    /// <summary>
-    /// カードごとの排他制御用ロック
-    /// </summary>
-    private static readonly ConcurrentDictionary<string, SemaphoreSlim> _cardLocks = new();
+    private readonly CardLockManager _lockManager;
 
     /// <summary>
     /// 最後に処理したカードのIDm
@@ -110,7 +105,8 @@ public class LendingService
         IStaffRepository staffRepository,
         ILedgerRepository ledgerRepository,
         ISettingsRepository settingsRepository,
-        SummaryGenerator summaryGenerator)
+        SummaryGenerator summaryGenerator,
+        CardLockManager lockManager)
     {
         _dbContext = dbContext;
         _cardRepository = cardRepository;
@@ -118,6 +114,7 @@ public class LendingService
         _ledgerRepository = ledgerRepository;
         _settingsRepository = settingsRepository;
         _summaryGenerator = summaryGenerator;
+        _lockManager = lockManager;
     }
 
     /// <summary>
@@ -130,7 +127,7 @@ public class LendingService
         var result = new LendingResult { OperationType = LendingOperationType.Lend };
 
         // カードごとのロックを取得
-        var cardLock = GetCardLock(cardIdm);
+        var cardLock = _lockManager.GetLock(cardIdm);
         var lockAcquired = false;
 
         try
@@ -221,6 +218,8 @@ public class LendingService
             {
                 cardLock.Release();
             }
+            // ロック参照カウントをデクリメント
+            _lockManager.ReleaseLockReference(cardIdm);
         }
 
         return result;
@@ -237,7 +236,7 @@ public class LendingService
         var result = new LendingResult { OperationType = LendingOperationType.Return };
 
         // カードごとのロックを取得
-        var cardLock = GetCardLock(cardIdm);
+        var cardLock = _lockManager.GetLock(cardIdm);
         var lockAcquired = false;
 
         try
@@ -348,6 +347,8 @@ public class LendingService
             {
                 cardLock.Release();
             }
+            // ロック参照カウントをデクリメント
+            _lockManager.ReleaseLockReference(cardIdm);
         }
 
         return result;
@@ -471,16 +472,6 @@ public class LendingService
         LastProcessedCardIdm = null;
         LastProcessedTime = null;
         LastOperationType = null;
-    }
-
-    /// <summary>
-    /// カードごとのロックを取得または作成
-    /// </summary>
-    /// <param name="cardIdm">カードIDm</param>
-    /// <returns>SemaphoreSlim</returns>
-    private static SemaphoreSlim GetCardLock(string cardIdm)
-    {
-        return _cardLocks.GetOrAdd(cardIdm, _ => new SemaphoreSlim(1, 1));
     }
 
     /// <summary>

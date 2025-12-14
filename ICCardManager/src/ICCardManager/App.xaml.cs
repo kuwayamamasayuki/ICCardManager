@@ -140,6 +140,7 @@ public partial class App : Application
         services.AddSingleton<IValidationService, ValidationService>();
         services.AddSingleton<CardTypeDetector>();
         services.AddSingleton<SummaryGenerator>();
+        services.AddSingleton<CardLockManager>();
         services.AddSingleton<LendingService>();
         services.AddSingleton<ReportService>();
         services.AddSingleton<PrintService>();
