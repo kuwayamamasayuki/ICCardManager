@@ -7,12 +7,15 @@ using ICCardManager.Data;
 using ICCardManager.Data.Repositories;
 using ICCardManager.Infrastructure.Caching;
 using ICCardManager.Infrastructure.CardReader;
+using ICCardManager.Infrastructure.Logging;
 using ICCardManager.Infrastructure.Sound;
 using ICCardManager.Models;
 using ICCardManager.Services;
 using ICCardManager.ViewModels;
 using ICCardManager.Views;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 
 namespace ICCardManager;
 
@@ -25,6 +28,16 @@ public partial class App : Application
     /// サービスプロバイダー
     /// </summary>
     public IServiceProvider ServiceProvider { get; private set; } = null!;
+
+    /// <summary>
+    /// 設定
+    /// </summary>
+    public IConfiguration Configuration { get; private set; } = null!;
+
+    /// <summary>
+    /// アプリケーションロガー
+    /// </summary>
+    private ILogger<App>? _logger;
 
     /// <summary>
     /// 現在のアプリケーションインスタンス
@@ -43,26 +56,34 @@ public partial class App : Application
 
         try
         {
-            System.Diagnostics.Debug.WriteLine("アプリケーション起動開始");
+            // 設定ファイルを読み込み
+            Configuration = new ConfigurationBuilder()
+                .SetBasePath(AppContext.BaseDirectory)
+                .AddJsonFile("appsettings.json", optional: true, reloadOnChange: false)
+                .Build();
 
             // DIコンテナの設定
             var services = new ServiceCollection();
             ConfigureServices(services);
             ServiceProvider = services.BuildServiceProvider();
 
-            System.Diagnostics.Debug.WriteLine("DIコンテナ構築完了");
+            // ロガーを取得
+            _logger = ServiceProvider.GetRequiredService<ILogger<App>>();
+            _logger.LogInformation("アプリケーション起動開始");
+
+            _logger.LogDebug("DIコンテナ構築完了");
 
             // データベース初期化
             InitializeDatabase();
 
-            System.Diagnostics.Debug.WriteLine("データベース初期化完了");
+            _logger.LogDebug("データベース初期化完了");
 
             // メインウィンドウを表示
             var mainWindow = ServiceProvider.GetRequiredService<MainWindow>();
-            System.Diagnostics.Debug.WriteLine("MainWindow取得完了");
+            _logger.LogDebug("MainWindow取得完了");
 
             mainWindow.Show();
-            System.Diagnostics.Debug.WriteLine("MainWindow表示完了");
+            _logger.LogInformation("アプリケーション起動完了");
         }
         catch (Exception ex)
         {
@@ -96,6 +117,14 @@ public partial class App : Application
     /// </summary>
     private void ConfigureServices(IServiceCollection services)
     {
+        // ロギングの設定
+        services.AddLogging(builder =>
+        {
+            builder.AddConfiguration(Configuration.GetSection("Logging"));
+            builder.AddDebug();
+            builder.AddFile();
+        });
+
         // Infrastructure層 - キャッシュ
         services.AddSingleton<ICacheService, CacheService>();
 
@@ -187,11 +216,11 @@ public partial class App : Application
             // 文字サイズを適用
             ApplyFontSize(settings.FontSize);
 
-            System.Diagnostics.Debug.WriteLine($"設定を適用: フォントサイズ={settings.FontSize}");
+            _logger?.LogDebug("設定を適用: フォントサイズ={FontSize}", settings.FontSize);
         }
         catch (Exception ex)
         {
-            System.Diagnostics.Debug.WriteLine($"設定の適用でエラー: {ex.Message}");
+            _logger?.LogWarning(ex, "設定の適用でエラー");
             // デフォルト値を適用
             ApplyFontSize(FontSizeOption.Medium);
         }
@@ -232,11 +261,11 @@ public partial class App : Application
         {
             var debugDataService = ServiceProvider.GetRequiredService<DebugDataService>();
             await debugDataService.RegisterAllTestDataAsync();
-            System.Diagnostics.Debug.WriteLine("[DEBUG] テストデータ登録完了");
+            _logger?.LogDebug("テストデータ登録完了");
         }
         catch (Exception ex)
         {
-            System.Diagnostics.Debug.WriteLine($"[DEBUG] テストデータ登録エラー: {ex.Message}");
+            _logger?.LogWarning(ex, "テストデータ登録エラー");
         }
     }
 
@@ -282,7 +311,7 @@ public partial class App : Application
             var deletedCount = dbContext.CleanupOldData();
             if (deletedCount > 0)
             {
-                System.Diagnostics.Debug.WriteLine($"古いデータを{deletedCount}件削除しました");
+                _logger?.LogInformation("古いデータを{DeletedCount}件削除しました", deletedCount);
             }
 
             // VACUUM（月次実行）
@@ -300,13 +329,13 @@ public partial class App : Application
                     dbContext.Vacuum();
                     settings.LastVacuumDate = today;
                     _ = settingsRepository.SaveAppSettingsAsync(settings);
-                    System.Diagnostics.Debug.WriteLine("VACUUM実行完了");
+                    _logger?.LogInformation("VACUUM実行完了");
                 }
             }
         }
         catch (Exception ex)
         {
-            System.Diagnostics.Debug.WriteLine($"起動時タスクでエラー: {ex.Message}");
+            _logger?.LogError(ex, "起動時タスクでエラー");
         }
     }
 
@@ -343,7 +372,7 @@ public partial class App : Application
     /// </summary>
     private void OnDispatcherUnhandledException(object sender, DispatcherUnhandledExceptionEventArgs e)
     {
-        System.Diagnostics.Debug.WriteLine($"UIスレッド未処理例外: {e.Exception.GetType().Name}: {e.Exception.Message}");
+        _logger?.LogError(e.Exception, "UIスレッド未処理例外");
 
         // AppExceptionの場合はユーザーフレンドリーなメッセージを表示
         if (e.Exception is AppException)
@@ -365,7 +394,7 @@ public partial class App : Application
     {
         var exception = e.ExceptionObject as Exception ?? new Exception("Unknown error");
 
-        System.Diagnostics.Debug.WriteLine($"非UIスレッド未処理例外: {exception.GetType().Name}: {exception.Message}");
+        _logger?.LogCritical(exception, "非UIスレッド未処理例外 (IsTerminating={IsTerminating})", e.IsTerminating);
 
         if (e.IsTerminating)
         {
@@ -387,15 +416,15 @@ public partial class App : Application
     /// </summary>
     private void OnUnobservedTaskException(object? sender, UnobservedTaskExceptionEventArgs e)
     {
-        System.Diagnostics.Debug.WriteLine($"Task未観測例外: {e.Exception.GetType().Name}: {e.Exception.Message}");
+        _logger?.LogError(e.Exception, "Task未観測例外 (InnerCount={InnerCount})", e.Exception.InnerExceptions.Count);
 
         // 例外を観測済みとしてマーク（アプリケーションのクラッシュを防止）
         e.SetObserved();
 
-        // エラーログに記録
+        // 内部例外もログに記録
         foreach (var innerException in e.Exception.InnerExceptions)
         {
-            System.Diagnostics.Debug.WriteLine($"  Inner: {innerException.GetType().Name}: {innerException.Message}");
+            _logger?.LogError(innerException, "Task未観測例外の内部例外");
         }
 
         // UIスレッドでエラーダイアログを表示

@@ -1,6 +1,7 @@
 using ICCardManager.Common;
 using ICCardManager.Models;
 using ICCardManager.Services;
+using Microsoft.Extensions.Logging;
 using PCSC;
 using PCSC.Exceptions;
 using PCSC.Monitoring;
@@ -15,6 +16,7 @@ namespace ICCardManager.Infrastructure.CardReader;
 public class PcScCardReader : ICardReader
 {
     private readonly ISCardContext _context;
+    private readonly ILogger<PcScCardReader> _logger;
     private ISCardMonitor? _monitor;
     private System.Timers.Timer? _healthCheckTimer;
     private System.Timers.Timer? _reconnectTimer;
@@ -66,8 +68,9 @@ public class PcScCardReader : ICardReader
     public bool IsReading => _isReading;
     public CardReaderConnectionState ConnectionState => _connectionState;
 
-    public PcScCardReader()
+    public PcScCardReader(ILogger<PcScCardReader> logger)
     {
+        _logger = logger;
         _context = ContextFactory.Instance.Establish(SCardScope.System);
     }
 
@@ -86,7 +89,7 @@ public class PcScCardReader : ICardReader
                         "カードリーダーが見つかりません。PaSoRiが接続されていることを確認してください。");
                 }
 
-                System.Diagnostics.Debug.WriteLine($"検出されたカードリーダー: {string.Join(", ", readerNames)}");
+                _logger.LogInformation("検出されたカードリーダー: {ReaderNames}", string.Join(", ", readerNames));
 
                 _lastKnownReaderNames = readerNames;
                 _monitor = MonitorFactory.Instance.Create(SCardScope.System);
@@ -98,7 +101,7 @@ public class PcScCardReader : ICardReader
                 _isReading = true;
                 _reconnectAttempts = 0;
                 SetConnectionState(CardReaderConnectionState.Connected);
-                System.Diagnostics.Debug.WriteLine("カードリーダー監視を開始しました");
+                _logger.LogInformation("カードリーダー監視を開始しました");
 
                 // ヘルスチェックタイマーを開始
                 StartHealthCheckTimer();
@@ -147,7 +150,7 @@ public class PcScCardReader : ICardReader
             _isReading = false;
             _lastReadIdm = null;
             SetConnectionState(CardReaderConnectionState.Disconnected);
-            System.Diagnostics.Debug.WriteLine("カードリーダー監視を停止しました");
+            _logger.LogInformation("カードリーダー監視を停止しました");
         });
     }
 
