@@ -85,4 +85,20 @@ public interface ILedgerRepository
     /// </summary>
     /// <returns>バス停名と使用回数のリスト（使用頻度順）</returns>
     Task<IEnumerable<(string BusStops, int UsageCount)>> GetBusStopSuggestionsAsync();
+
+    /// <summary>
+    /// 指定期間の利用履歴をページング付きで取得
+    /// </summary>
+    /// <param name="cardIdm">ICカードIDm（nullの場合は全カード）</param>
+    /// <param name="fromDate">開始日</param>
+    /// <param name="toDate">終了日</param>
+    /// <param name="page">ページ番号（1から開始）</param>
+    /// <param name="pageSize">1ページあたりの件数</param>
+    /// <returns>履歴リストと総件数のタプル</returns>
+    Task<(IEnumerable<Ledger> Items, int TotalCount)> GetPagedAsync(
+        string? cardIdm,
+        DateTime fromDate,
+        DateTime toDate,
+        int page,
+        int pageSize);
 }

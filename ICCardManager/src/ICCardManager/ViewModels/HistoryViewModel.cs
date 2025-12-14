@@ -48,6 +48,86 @@ public partial class HistoryViewModel : ViewModelBase
     [ObservableProperty]
     private int _selectedMonth;
 
+    #region ページネーション関連プロパティ
+
+    /// <summary>
+    /// 現在のページ番号（1から開始）
+    /// </summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(CanGoToFirstPage))]
+    [NotifyPropertyChangedFor(nameof(CanGoToPrevPage))]
+    [NotifyPropertyChangedFor(nameof(CanGoToNextPage))]
+    [NotifyPropertyChangedFor(nameof(CanGoToLastPage))]
+    [NotifyPropertyChangedFor(nameof(PageDisplay))]
+    private int _currentPage = 1;
+
+    /// <summary>
+    /// 総ページ数
+    /// </summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(CanGoToFirstPage))]
+    [NotifyPropertyChangedFor(nameof(CanGoToPrevPage))]
+    [NotifyPropertyChangedFor(nameof(CanGoToNextPage))]
+    [NotifyPropertyChangedFor(nameof(CanGoToLastPage))]
+    [NotifyPropertyChangedFor(nameof(PageDisplay))]
+    private int _totalPages = 1;
+
+    /// <summary>
+    /// 総件数
+    /// </summary>
+    [ObservableProperty]
+    private int _totalCount;
+
+    /// <summary>
+    /// 1ページあたりの表示件数
+    /// </summary>
+    [ObservableProperty]
+    private int _pageSize = 50;
+
+    /// <summary>
+    /// 選択中の表示件数アイテム
+    /// </summary>
+    [ObservableProperty]
+    private PageSizeItem? _selectedPageSizeItem;
+
+    /// <summary>
+    /// ページ表示（「1 / 10」形式）
+    /// </summary>
+    public string PageDisplay => $"{CurrentPage} / {TotalPages}";
+
+    /// <summary>
+    /// 最初のページに移動可能か
+    /// </summary>
+    public bool CanGoToFirstPage => CurrentPage > 1;
+
+    /// <summary>
+    /// 前のページに移動可能か
+    /// </summary>
+    public bool CanGoToPrevPage => CurrentPage > 1;
+
+    /// <summary>
+    /// 次のページに移動可能か
+    /// </summary>
+    public bool CanGoToNextPage => CurrentPage < TotalPages;
+
+    /// <summary>
+    /// 最後のページに移動可能か
+    /// </summary>
+    public bool CanGoToLastPage => CurrentPage < TotalPages;
+
+    /// <summary>
+    /// 表示件数の選択肢
+    /// </summary>
+    public ObservableCollection<PageSizeItem> PageSizeOptions { get; } = new()
+    {
+        new PageSizeItem { Value = 25, DisplayName = "25件" },
+        new PageSizeItem { Value = 50, DisplayName = "50件" },
+        new PageSizeItem { Value = 100, DisplayName = "100件" },
+        new PageSizeItem { Value = 200, DisplayName = "200件" }
+    };
+
+    #endregion
+
     /// <summary>
     /// 選択可能な年のリスト（過去6年分）
     /// </summary>
@@ -82,6 +162,9 @@ public partial class HistoryViewModel : ViewModelBase
         SelectedYear = today.Year;
         SelectedMonth = today.Month;
         UpdateSelectedPeriodDisplay();
+
+        // ページサイズのデフォルト値を設定（50件）
+        SelectedPageSizeItem = PageSizeOptions.FirstOrDefault(x => x.Value == 50) ?? PageSizeOptions[1];
     }
 
     /// <summary>
@@ -114,13 +197,23 @@ public partial class HistoryViewModel : ViewModelBase
         {
             Ledgers.Clear();
 
-            // 履歴を取得
-            var ledgers = await _ledgerRepository.GetByDateRangeAsync(
-                Card.CardIdm, FromDate, ToDate.AddDays(1));
+            // ページングされた履歴を取得
+            var (ledgers, totalCount) = await _ledgerRepository.GetPagedAsync(
+                Card.CardIdm, FromDate, ToDate.AddDays(1), CurrentPage, PageSize);
 
-            foreach (var ledger in ledgers.OrderByDescending(l => l.Date).ThenByDescending(l => l.Id))
+            foreach (var ledger in ledgers)
             {
                 Ledgers.Add(ledger.ToDto());
+            }
+
+            // ページ情報を更新
+            TotalCount = totalCount;
+            TotalPages = Math.Max(1, (int)Math.Ceiling((double)totalCount / PageSize));
+
+            // 現在のページが総ページ数を超えている場合は調整
+            if (CurrentPage > TotalPages)
+            {
+                CurrentPage = TotalPages;
             }
 
             // 最新の残高を取得
@@ -128,7 +221,12 @@ public partial class HistoryViewModel : ViewModelBase
                 Card.CardIdm, DateTime.Now.AddDays(1));
             CurrentBalance = latestLedger?.Balance ?? 0;
 
-            StatusMessage = $"{Ledgers.Count}件の履歴を表示";
+            // ステータスメッセージを更新
+            var startIndex = (CurrentPage - 1) * PageSize + 1;
+            var endIndex = Math.Min(CurrentPage * PageSize, totalCount);
+            StatusMessage = totalCount > 0
+                ? $"{startIndex}～{endIndex}件を表示（全{totalCount:N0}件）"
+                : "該当する履歴がありません";
         }
     }
 
@@ -190,6 +288,7 @@ public partial class HistoryViewModel : ViewModelBase
         ToDate = new DateTime(year, month, DateTime.DaysInMonth(year, month));
         SelectedYear = year;
         SelectedMonth = month;
+        CurrentPage = 1; // フィルタ変更時はページ1にリセット
         UpdateSelectedPeriodDisplay();
         _ = LoadHistoryAsync();
     }
@@ -201,4 +300,80 @@ public partial class HistoryViewModel : ViewModelBase
     {
         SelectedPeriodDisplay = $"{FromDate:yyyy年M月}";
     }
+
+    #region ページナビゲーションコマンド
+
+    /// <summary>
+    /// 最初のページへ移動
+    /// </summary>
+    [RelayCommand(CanExecute = nameof(CanGoToFirstPage))]
+    public async Task GoToFirstPage()
+    {
+        CurrentPage = 1;
+        await LoadHistoryAsync();
+    }
+
+    /// <summary>
+    /// 前のページへ移動
+    /// </summary>
+    [RelayCommand(CanExecute = nameof(CanGoToPrevPage))]
+    public async Task GoToPrevPage()
+    {
+        if (CurrentPage > 1)
+        {
+            CurrentPage--;
+            await LoadHistoryAsync();
+        }
+    }
+
+    /// <summary>
+    /// 次のページへ移動
+    /// </summary>
+    [RelayCommand(CanExecute = nameof(CanGoToNextPage))]
+    public async Task GoToNextPage()
+    {
+        if (CurrentPage < TotalPages)
+        {
+            CurrentPage++;
+            await LoadHistoryAsync();
+        }
+    }
+
+    /// <summary>
+    /// 最後のページへ移動
+    /// </summary>
+    [RelayCommand(CanExecute = nameof(CanGoToLastPage))]
+    public async Task GoToLastPage()
+    {
+        CurrentPage = TotalPages;
+        await LoadHistoryAsync();
+    }
+
+    #endregion
+
+    #region プロパティ変更ハンドラ
+
+    /// <summary>
+    /// 表示件数の選択が変更されたとき
+    /// </summary>
+    partial void OnSelectedPageSizeItemChanged(PageSizeItem? value)
+    {
+        if (value != null && PageSize != value.Value)
+        {
+            PageSize = value.Value;
+            CurrentPage = 1; // ページサイズ変更時はページ1にリセット
+            _ = LoadHistoryAsync();
+        }
+    }
+
+    #endregion
+}
+
+/// <summary>
+/// 表示件数選択アイテム
+/// </summary>
+public class PageSizeItem
+{
+    public int Value { get; set; }
+    public string DisplayName { get; set; } = string.Empty;
 }

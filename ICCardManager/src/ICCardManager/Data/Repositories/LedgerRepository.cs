@@ -345,6 +345,69 @@ public class LedgerRepository : ILedgerRepository
         return result;
     }
 
+    /// <inheritdoc/>
+    public async Task<(IEnumerable<Ledger> Items, int TotalCount)> GetPagedAsync(
+        string? cardIdm,
+        DateTime fromDate,
+        DateTime toDate,
+        int page,
+        int pageSize)
+    {
+        var connection = _dbContext.GetConnection();
+
+        var whereClause = cardIdm != null
+            ? "WHERE card_idm = @cardIdm AND date BETWEEN @fromDate AND @toDate"
+            : "WHERE date BETWEEN @fromDate AND @toDate";
+
+        // 総件数を取得
+        await using var countCommand = connection.CreateCommand();
+        countCommand.CommandText = $"""
+            SELECT COUNT(*)
+            FROM ledger
+            {whereClause}
+            """;
+
+        if (cardIdm != null)
+        {
+            countCommand.Parameters.AddWithValue("@cardIdm", cardIdm);
+        }
+        countCommand.Parameters.AddWithValue("@fromDate", fromDate.ToString("yyyy-MM-dd"));
+        countCommand.Parameters.AddWithValue("@toDate", toDate.ToString("yyyy-MM-dd"));
+
+        var totalCount = Convert.ToInt32(await countCommand.ExecuteScalarAsync());
+
+        // ページングされたデータを取得
+        var ledgerList = new List<Ledger>();
+        var offset = (page - 1) * pageSize;
+
+        await using var command = connection.CreateCommand();
+        command.CommandText = $"""
+            SELECT id, card_idm, lender_idm, date, summary, income, expense, balance,
+                   staff_name, note, returner_idm, lent_at, returned_at, is_lent_record
+            FROM ledger
+            {whereClause}
+            ORDER BY date DESC, id DESC
+            LIMIT @pageSize OFFSET @offset
+            """;
+
+        if (cardIdm != null)
+        {
+            command.Parameters.AddWithValue("@cardIdm", cardIdm);
+        }
+        command.Parameters.AddWithValue("@fromDate", fromDate.ToString("yyyy-MM-dd"));
+        command.Parameters.AddWithValue("@toDate", toDate.ToString("yyyy-MM-dd"));
+        command.Parameters.AddWithValue("@pageSize", pageSize);
+        command.Parameters.AddWithValue("@offset", offset);
+
+        await using var reader = await command.ExecuteReaderAsync();
+        while (await reader.ReadAsync())
+        {
+            ledgerList.Add(MapToLedger(reader));
+        }
+
+        return (ledgerList, totalCount);
+    }
+
     /// <summary>
     /// 利用履歴詳細を取得
     /// </summary>

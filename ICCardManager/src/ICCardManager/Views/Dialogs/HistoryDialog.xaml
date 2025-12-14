@@ -230,17 +230,108 @@
 
         <!-- フッター -->
         <Grid Grid.Row="3" Margin="0,15,0,0">
-            <TextBlock Text="{Binding StatusMessage}"
-                       Foreground="Gray"
-                       VerticalAlignment="Center"
-                       AutomationProperties.LiveSetting="Polite"/>
-            <Button Content="閉じる"
-                    Click="CloseButton_Click"
-                    HorizontalAlignment="Right"
-                    Padding="20,8"
-                    IsCancel="True"
-                    AutomationProperties.Name="閉じる"
-                    ToolTip="ダイアログを閉じる (Escape)"/>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+            </Grid.RowDefinitions>
+
+            <!-- ページネーション -->
+            <Border Grid.Row="0"
+                    Background="#F5F5F5"
+                    CornerRadius="4"
+                    Padding="10,8"
+                    Margin="0,0,0,10">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+
+                    <!-- ナビゲーションボタン -->
+                    <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center">
+                        <Button Content="⏮"
+                                Command="{Binding GoToFirstPageCommand}"
+                                Padding="8,4"
+                                MinWidth="32"
+                                ToolTip="最初のページへ"
+                                AutomationProperties.Name="最初のページへ"/>
+                        <Button Content="◀"
+                                Command="{Binding GoToPrevPageCommand}"
+                                Padding="8,4"
+                                MinWidth="32"
+                                Margin="5,0,0,0"
+                                ToolTip="前のページへ"
+                                AutomationProperties.Name="前のページへ"/>
+
+                        <TextBlock Text="ページ"
+                                   VerticalAlignment="Center"
+                                   Margin="15,0,5,0"/>
+                        <Border Background="White"
+                                BorderBrush="#CCCCCC"
+                                BorderThickness="1"
+                                CornerRadius="2"
+                                Padding="10,4">
+                            <TextBlock Text="{Binding PageDisplay}"
+                                       FontWeight="SemiBold"
+                                       VerticalAlignment="Center"/>
+                        </Border>
+
+                        <Button Content="▶"
+                                Command="{Binding GoToNextPageCommand}"
+                                Padding="8,4"
+                                MinWidth="32"
+                                Margin="15,0,0,0"
+                                ToolTip="次のページへ"
+                                AutomationProperties.Name="次のページへ"/>
+                        <Button Content="⏭"
+                                Command="{Binding GoToLastPageCommand}"
+                                Padding="8,4"
+                                MinWidth="32"
+                                Margin="5,0,0,0"
+                                ToolTip="最後のページへ"
+                                AutomationProperties.Name="最後のページへ"/>
+                    </StackPanel>
+
+                    <!-- 表示件数選択 -->
+                    <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
+                        <TextBlock Text="表示件数:"
+                                   VerticalAlignment="Center"
+                                   Margin="0,0,8,0"/>
+                        <ComboBox ItemsSource="{Binding PageSizeOptions}"
+                                  SelectedItem="{Binding SelectedPageSizeItem}"
+                                  DisplayMemberPath="DisplayName"
+                                  Width="80"
+                                  Padding="8,4"
+                                  ToolTip="1ページに表示する件数を選択"
+                                  AutomationProperties.Name="表示件数選択"/>
+
+                        <TextBlock Text="|"
+                                   Foreground="#CCCCCC"
+                                   Margin="15,0"
+                                   VerticalAlignment="Center"/>
+
+                        <TextBlock Text="{Binding TotalCount, StringFormat=全 {0:N0} 件}"
+                                   FontWeight="SemiBold"
+                                   VerticalAlignment="Center"/>
+                    </StackPanel>
+                </Grid>
+            </Border>
+
+            <!-- ステータスと閉じるボタン -->
+            <Grid Grid.Row="1">
+                <TextBlock Text="{Binding StatusMessage}"
+                           Foreground="Gray"
+                           VerticalAlignment="Center"
+                           AutomationProperties.LiveSetting="Polite"/>
+                <Button Content="閉じる"
+                        Click="CloseButton_Click"
+                        HorizontalAlignment="Right"
+                        Padding="20,8"
+                        IsCancel="True"
+                        AutomationProperties.Name="閉じる"
+                        ToolTip="ダイアログを閉じる (Escape)"/>
+            </Grid>
         </Grid>
 
         <!-- 処理中オーバーレイ -->

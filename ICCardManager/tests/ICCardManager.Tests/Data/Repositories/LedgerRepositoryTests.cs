@@ -634,6 +634,187 @@ public class LedgerRepositoryTests : IDisposable
 
     #endregion
 
+    #region GetPagedAsync テスト
+
+    /// <summary>
+    /// ページングされた履歴を取得できることを確認
+    /// </summary>
+    [Fact]
+    public async Task GetPagedAsync_FirstPage_ReturnsCorrectRecords()
+    {
+        // Arrange - 5件のデータを登録
+        var today = DateTime.Today;
+        for (int i = 1; i <= 5; i++)
+        {
+            var ledger = CreateTestLedger(TestCardIdm, today.AddDays(-i), $"利用{i}", expense: 100 * i);
+            await _repository.InsertAsync(ledger);
+        }
+
+        // Act - 1ページ目、1ページあたり2件
+        var (items, totalCount) = await _repository.GetPagedAsync(TestCardIdm, today.AddDays(-10), today.AddDays(1), 1, 2);
+
+        // Assert
+        var itemList = items.ToList();
+        totalCount.Should().Be(5);
+        itemList.Should().HaveCount(2);
+        // 日付降順なので最新から取得される
+        itemList[0].Summary.Should().Be("利用1"); // 最新
+        itemList[1].Summary.Should().Be("利用2");
+    }
+
+    /// <summary>
+    /// 2ページ目以降を正しく取得できることを確認
+    /// </summary>
+    [Fact]
+    public async Task GetPagedAsync_SecondPage_ReturnsCorrectRecords()
+    {
+        // Arrange - 5件のデータを登録
+        var today = DateTime.Today;
+        for (int i = 1; i <= 5; i++)
+        {
+            var ledger = CreateTestLedger(TestCardIdm, today.AddDays(-i), $"利用{i}", expense: 100 * i);
+            await _repository.InsertAsync(ledger);
+        }
+
+        // Act - 2ページ目、1ページあたり2件
+        var (items, totalCount) = await _repository.GetPagedAsync(TestCardIdm, today.AddDays(-10), today.AddDays(1), 2, 2);
+
+        // Assert
+        var itemList = items.ToList();
+        totalCount.Should().Be(5);
+        itemList.Should().HaveCount(2);
+        itemList[0].Summary.Should().Be("利用3");
+        itemList[1].Summary.Should().Be("利用4");
+    }
+
+    /// <summary>
+    /// 最後のページが部分的なレコード数でも正しく取得できることを確認
+    /// </summary>
+    [Fact]
+    public async Task GetPagedAsync_LastPage_ReturnsPartialRecords()
+    {
+        // Arrange - 5件のデータを登録
+        var today = DateTime.Today;
+        for (int i = 1; i <= 5; i++)
+        {
+            var ledger = CreateTestLedger(TestCardIdm, today.AddDays(-i), $"利用{i}", expense: 100 * i);
+            await _repository.InsertAsync(ledger);
+        }
+
+        // Act - 3ページ目、1ページあたり2件（残り1件のみ）
+        var (items, totalCount) = await _repository.GetPagedAsync(TestCardIdm, today.AddDays(-10), today.AddDays(1), 3, 2);
+
+        // Assert
+        var itemList = items.ToList();
+        totalCount.Should().Be(5);
+        itemList.Should().HaveCount(1);
+        itemList[0].Summary.Should().Be("利用5");
+    }
+
+    /// <summary>
+    /// データがない場合は空リストと総件数0を返すことを確認
+    /// </summary>
+    [Fact]
+    public async Task GetPagedAsync_NoData_ReturnsEmptyAndZeroCount()
+    {
+        // Act
+        var (items, totalCount) = await _repository.GetPagedAsync(TestCardIdm, DateTime.Today.AddDays(-10), DateTime.Today, 1, 10);
+
+        // Assert
+        totalCount.Should().Be(0);
+        items.Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// カードIDmがnullの場合、全カードの履歴をページングで返すことを確認
+    /// </summary>
+    [Fact]
+    public async Task GetPagedAsync_NullCardIdm_ReturnsAllCardsWithPagination()
+    {
+        // Arrange - 2枚目のカードを追加
+        var card2 = new IcCard
+        {
+            CardIdm = "0102030405060709",
+            CardType = "nimoca",
+            CardNumber = "N001"
+        };
+        await _cardRepository.InsertAsync(card2);
+
+        var today = DateTime.Today;
+        var ledger1 = CreateTestLedger(TestCardIdm, today, "カード1利用", expense: 260);
+        var ledger2 = CreateTestLedger(card2.CardIdm, today.AddDays(-1), "カード2利用", expense: 310);
+
+        await _repository.InsertAsync(ledger1);
+        await _repository.InsertAsync(ledger2);
+
+        // Act
+        var (items, totalCount) = await _repository.GetPagedAsync(null, today.AddDays(-5), today.AddDays(1), 1, 10);
+
+        // Assert
+        var itemList = items.ToList();
+        totalCount.Should().Be(2);
+        itemList.Should().HaveCount(2);
+        itemList.Should().Contain(l => l.CardIdm == TestCardIdm);
+        itemList.Should().Contain(l => l.CardIdm == card2.CardIdm);
+    }
+
+    /// <summary>
+    /// 結果が日付降順でソートされていることを確認
+    /// </summary>
+    [Fact]
+    public async Task GetPagedAsync_ReturnsRecordsSortedByDateDescending()
+    {
+        // Arrange
+        var today = DateTime.Today;
+        var ledger1 = CreateTestLedger(TestCardIdm, today, "最新", expense: 260);
+        var ledger2 = CreateTestLedger(TestCardIdm, today.AddDays(-2), "2日前", expense: 310);
+        var ledger3 = CreateTestLedger(TestCardIdm, today.AddDays(-1), "昨日", expense: 200);
+
+        await _repository.InsertAsync(ledger1);
+        await _repository.InsertAsync(ledger2);
+        await _repository.InsertAsync(ledger3);
+
+        // Act
+        var (items, totalCount) = await _repository.GetPagedAsync(TestCardIdm, today.AddDays(-5), today.AddDays(1), 1, 10);
+
+        // Assert
+        var itemList = items.ToList();
+        totalCount.Should().Be(3);
+        itemList[0].Summary.Should().Be("最新");    // 今日
+        itemList[1].Summary.Should().Be("昨日");    // 昨日
+        itemList[2].Summary.Should().Be("2日前");   // 2日前
+    }
+
+    /// <summary>
+    /// 期間指定が正しく動作することを確認
+    /// </summary>
+    [Fact]
+    public async Task GetPagedAsync_WithDateRange_FiltersCorrectly()
+    {
+        // Arrange
+        var today = DateTime.Today;
+        var ledger1 = CreateTestLedger(TestCardIdm, today.AddDays(-10), "10日前", expense: 100);
+        var ledger2 = CreateTestLedger(TestCardIdm, today.AddDays(-5), "5日前", expense: 200);
+        var ledger3 = CreateTestLedger(TestCardIdm, today, "今日", expense: 300);
+
+        await _repository.InsertAsync(ledger1);
+        await _repository.InsertAsync(ledger2);
+        await _repository.InsertAsync(ledger3);
+
+        // Act - 過去7日間のみ取得
+        var (items, totalCount) = await _repository.GetPagedAsync(TestCardIdm, today.AddDays(-7), today.AddDays(1), 1, 10);
+
+        // Assert
+        var itemList = items.ToList();
+        totalCount.Should().Be(2);
+        itemList.Should().HaveCount(2);
+        itemList.Should().Contain(l => l.Summary == "5日前");
+        itemList.Should().Contain(l => l.Summary == "今日");
+        itemList.Should().NotContain(l => l.Summary == "10日前");
+    }
+
+    #endregion
+
     #region ヘルパーメソッド
 
     private static Ledger CreateTestLedger(string cardIdm, DateTime date, string summary, int income = 0, int expense = 0)
