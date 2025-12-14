@@ -4,6 +4,7 @@ using ICCardManager.Data;
 using ICCardManager.Data.Repositories;
 using ICCardManager.Models;
 using ICCardManager.Services;
+using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Xunit;
 
@@ -43,7 +44,10 @@ public class BackupServiceTests : IDisposable
         _settingsRepositoryMock.Setup(x => x.GetAppSettingsAsync())
             .ReturnsAsync(new AppSettings { BackupPath = _backupDirectory });
 
-        _service = new BackupService(_dbContext, _settingsRepositoryMock.Object);
+        _service = new BackupService(
+            _dbContext,
+            _settingsRepositoryMock.Object,
+            NullLogger<BackupService>.Instance);
     }
 
     public void Dispose()
@@ -292,7 +296,10 @@ public class BackupServiceTests : IDisposable
 
         // DbContextを作成して即座に破棄（接続を開かずにパスだけ設定）
         var restoreDbContext = new DbContext(restoreTargetPath);
-        var restoreService = new BackupService(restoreDbContext, _settingsRepositoryMock.Object);
+        var restoreService = new BackupService(
+            restoreDbContext,
+            _settingsRepositoryMock.Object,
+            NullLogger<BackupService>.Instance);
         restoreDbContext.Dispose(); // 接続を開く前に破棄
 
         // Act
@@ -337,7 +344,10 @@ public class BackupServiceTests : IDisposable
 
         // DbContextを作成して即座に破棄
         var restoreDbContext = new DbContext(restoreTargetPath);
-        var restoreService = new BackupService(restoreDbContext, _settingsRepositoryMock.Object);
+        var restoreService = new BackupService(
+            restoreDbContext,
+            _settingsRepositoryMock.Object,
+            NullLogger<BackupService>.Instance);
         restoreDbContext.Dispose();
 
         // Act
@@ -366,7 +376,10 @@ public class BackupServiceTests : IDisposable
         lockedStream.WriteByte(0);
 
         var restoreDbContext = new DbContext(restoreTargetPath);
-        var testService = new BackupService(restoreDbContext, _settingsRepositoryMock.Object);
+        var testService = new BackupService(
+            restoreDbContext,
+            _settingsRepositoryMock.Object,
+            NullLogger<BackupService>.Instance);
         restoreDbContext.Dispose();
 
         // Act
@@ -395,7 +408,10 @@ public class BackupServiceTests : IDisposable
         File.WriteAllText(restoreTargetPath, "different content that should be overwritten");
 
         var restoreDbContext = new DbContext(restoreTargetPath);
-        var restoreService = new BackupService(restoreDbContext, _settingsRepositoryMock.Object);
+        var restoreService = new BackupService(
+            restoreDbContext,
+            _settingsRepositoryMock.Object,
+            NullLogger<BackupService>.Instance);
         restoreDbContext.Dispose();
 
         // Act

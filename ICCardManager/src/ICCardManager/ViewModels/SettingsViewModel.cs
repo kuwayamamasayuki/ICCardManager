@@ -1,6 +1,7 @@
 using System.Collections.ObjectModel;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using ICCardManager.Common;
 using ICCardManager.Data.Repositories;
 using ICCardManager.Models;
 using ICCardManager.Services;
@@ -153,12 +154,26 @@ public partial class SettingsViewModel : ViewModelBase
             return;
         }
 
+        // バックアップパスの検証（空の場合はデフォルトを使用するのでスキップ）
+        var validatedBackupPath = BackupPath;
+        if (!string.IsNullOrWhiteSpace(BackupPath))
+        {
+            var pathResult = PathValidator.ValidateBackupPath(BackupPath);
+            if (!pathResult.IsValid)
+            {
+                StatusMessage = $"バックアップパスが無効です: {pathResult.ErrorMessage}";
+                return;
+            }
+            // パスを正規化
+            validatedBackupPath = PathValidator.NormalizePath(BackupPath) ?? BackupPath;
+        }
+
         using (BeginBusy("保存中..."))
         {
             var settings = new AppSettings
             {
                 WarningBalance = WarningBalance,
-                BackupPath = BackupPath,
+                BackupPath = validatedBackupPath,
                 FontSize = SelectedFontSizeItem?.Value ?? FontSizeOption.Medium,
                 SkipStaffTouch = SkipStaffTouch,
                 DefaultStaffIdm = SelectedDefaultStaff?.StaffIdm
@@ -170,6 +185,12 @@ public partial class SettingsViewModel : ViewModelBase
             {
                 StatusMessage = "設定を保存しました";
                 HasChanges = false;
+
+                // 正規化されたパスをUIに反映
+                if (BackupPath != validatedBackupPath)
+                {
+                    BackupPath = validatedBackupPath;
+                }
 
                 // 文字サイズの変更を反映
                 ApplyFontSize(settings.FontSize);

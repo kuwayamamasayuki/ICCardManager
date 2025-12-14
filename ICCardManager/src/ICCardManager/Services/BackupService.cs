@@ -1,6 +1,8 @@
 using System.IO;
+using ICCardManager.Common;
 using ICCardManager.Data;
 using ICCardManager.Data.Repositories;
+using Microsoft.Extensions.Logging;
 
 namespace ICCardManager.Services;
 
@@ -11,6 +13,7 @@ public class BackupService
 {
     private readonly DbContext _dbContext;
     private readonly ISettingsRepository _settingsRepository;
+    private readonly ILogger<BackupService> _logger;
 
     /// <summary>
     /// バックアップファイル保持世代数
@@ -27,10 +30,14 @@ public class BackupService
     /// </summary>
     private const string BackupFileExtension = ".db";
 
-    public BackupService(DbContext dbContext, ISettingsRepository settingsRepository)
+    public BackupService(
+        DbContext dbContext,
+        ISettingsRepository settingsRepository,
+        ILogger<BackupService> logger)
     {
         _dbContext = dbContext;
         _settingsRepository = settingsRepository;
+        _logger = logger;
     }
 
     /// <summary>
@@ -47,8 +54,25 @@ public class BackupService
 
             if (string.IsNullOrWhiteSpace(backupPath))
             {
-                backupPath = GetDefaultBackupPath();
+                backupPath = PathValidator.GetDefaultBackupPath();
+                _logger.LogDebug("バックアップパス未設定のためデフォルトを使用: {Path}", backupPath);
             }
+            else
+            {
+                // パスを検証
+                var validationResult = PathValidator.ValidateBackupPath(backupPath);
+                if (!validationResult.IsValid)
+                {
+                    _logger.LogWarning(
+                        "バックアップパスが無効です: {Path} - {Error}。デフォルトパスを使用します",
+                        backupPath,
+                        validationResult.ErrorMessage);
+                    backupPath = PathValidator.GetDefaultBackupPath();
+                }
+            }
+
+            // パスを正規化
+            backupPath = PathValidator.NormalizePath(backupPath) ?? PathValidator.GetDefaultBackupPath();
 
             // バックアップフォルダを作成
             Directory.CreateDirectory(backupPath);
@@ -62,13 +86,16 @@ public class BackupService
             var sourcePath = _dbContext.DatabasePath;
             File.Copy(sourcePath, backupFilePath, overwrite: true);
 
+            _logger.LogInformation("バックアップを作成しました: {Path}", backupFilePath);
+
             // 古いバックアップを削除
             await CleanupOldBackupsAsync(backupPath);
 
             return backupFilePath;
         }
-        catch
+        catch (Exception ex)
         {
+            _logger.LogError(ex, "自動バックアップに失敗しました");
             return null;
         }
     }
@@ -77,6 +104,7 @@ public class BackupService
     /// 指定したパスにバックアップを作成
     /// </summary>
     /// <param name="backupFilePath">バックアップファイルのパス</param>
+    /// <returns>成功時はtrue、失敗時はfalse</returns>
     public bool CreateBackup(string backupFilePath)
     {
         try
@@ -84,15 +112,29 @@ public class BackupService
             var directory = Path.GetDirectoryName(backupFilePath);
             if (!string.IsNullOrEmpty(directory))
             {
+                // ディレクトリパスを検証
+                var validationResult = PathValidator.ValidateBackupPath(directory);
+                if (!validationResult.IsValid)
+                {
+                    _logger.LogWarning(
+                        "バックアップ先ディレクトリが無効です: {Path} - {Error}",
+                        directory,
+                        validationResult.ErrorMessage);
+                    return false;
+                }
+
                 Directory.CreateDirectory(directory);
             }
 
             var sourcePath = _dbContext.DatabasePath;
             File.Copy(sourcePath, backupFilePath, overwrite: true);
+
+            _logger.LogInformation("バックアップを作成しました: {Path}", backupFilePath);
             return true;
         }
-        catch
+        catch (Exception ex)
         {
+            _logger.LogError(ex, "バックアップ作成に失敗しました: {Path}", backupFilePath);
             return false;
         }
     }
@@ -155,7 +197,20 @@ public class BackupService
 
         if (string.IsNullOrWhiteSpace(backupPath))
         {
-            backupPath = GetDefaultBackupPath();
+            backupPath = PathValidator.GetDefaultBackupPath();
+        }
+        else
+        {
+            // パスを検証
+            var validationResult = PathValidator.ValidateBackupPath(backupPath);
+            if (!validationResult.IsValid)
+            {
+                _logger.LogWarning(
+                    "バックアップパスが無効です: {Path} - {Error}。デフォルトパスを使用します",
+                    backupPath,
+                    validationResult.ErrorMessage);
+                backupPath = PathValidator.GetDefaultBackupPath();
+            }
         }
 
         if (!Directory.Exists(backupPath))
@@ -206,16 +261,6 @@ public class BackupService
         });
     }
 
-    /// <summary>
-    /// デフォルトのバックアップパスを取得
-    /// </summary>
-    private static string GetDefaultBackupPath()
-    {
-        return Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "ICCardManager",
-            "backup");
-    }
 }
 
 /// <summary>
