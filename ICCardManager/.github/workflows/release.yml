@@ -1,0 +1,105 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+env:
+  DOTNET_VERSION: '8.0.x'
+  PROJECT_PATH: 'ICCardManager/src/ICCardManager/ICCardManager.csproj'
+
+jobs:
+  release:
+    name: Build and Release
+    runs-on: windows-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Get version from tag
+        id: get_version
+        shell: bash
+        run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+
+      - name: Restore dependencies
+        run: dotnet restore ${{ env.PROJECT_PATH }}
+
+      - name: Run tests
+        run: dotnet test ICCardManager/ICCardManager.sln --configuration Release --verbosity normal
+
+      - name: Publish self-contained executable
+        run: |
+          dotnet publish ${{ env.PROJECT_PATH }} `
+            --configuration Release `
+            --runtime win-x64 `
+            --self-contained true `
+            -p:PublishSingleFile=true `
+            -p:Version=${{ steps.get_version.outputs.VERSION }} `
+            --output ./publish
+
+      - name: Create release archive
+        shell: pwsh
+        run: |
+          # Create release directory
+          New-Item -ItemType Directory -Force -Path "./release"
+
+          # Copy executable and resources
+          Copy-Item "./publish/ICCardManager.exe" "./release/"
+          Copy-Item -Recurse "./publish/Resources" "./release/"
+
+          # Create ZIP archive
+          Compress-Archive -Path "./release/*" -DestinationPath "./ICCardManager_v${{ steps.get_version.outputs.VERSION }}.zip"
+
+      - name: Generate release notes
+        id: release_notes
+        shell: bash
+        run: |
+          echo "NOTES<<EOF" >> $GITHUB_OUTPUT
+          echo "## ICCardManager v${{ steps.get_version.outputs.VERSION }}" >> $GITHUB_OUTPUT
+          echo "" >> $GITHUB_OUTPUT
+          echo "### 動作環境" >> $GITHUB_OUTPUT
+          echo "- Windows 10/11 (64-bit)" >> $GITHUB_OUTPUT
+          echo "- Sony PaSoRi (RC-S380等)" >> $GITHUB_OUTPUT
+          echo "- .NET Runtime: 不要（self-contained）" >> $GITHUB_OUTPUT
+          echo "" >> $GITHUB_OUTPUT
+          echo "### インストール方法" >> $GITHUB_OUTPUT
+          echo "1. ZIPファイルを任意のフォルダに展開" >> $GITHUB_OUTPUT
+          echo "2. \`ICCardManager.exe\` を実行" >> $GITHUB_OUTPUT
+          echo "" >> $GITHUB_OUTPUT
+          echo "### ファイル構成" >> $GITHUB_OUTPUT
+          echo "\`\`\`" >> $GITHUB_OUTPUT
+          echo "ICCardManager/" >> $GITHUB_OUTPUT
+          echo "├── ICCardManager.exe" >> $GITHUB_OUTPUT
+          echo "└── Resources/" >> $GITHUB_OUTPUT
+          echo "    ├── Sounds/" >> $GITHUB_OUTPUT
+          echo "    └── Templates/" >> $GITHUB_OUTPUT
+          echo "\`\`\`" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: ICCardManager v${{ steps.get_version.outputs.VERSION }}
+          body: ${{ steps.release_notes.outputs.NOTES }}
+          draft: false
+          prerelease: ${{ contains(github.ref, 'alpha') || contains(github.ref, 'beta') || contains(github.ref, 'rc') }}
+          files: |
+            ./ICCardManager_v${{ steps.get_version.outputs.VERSION }}.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ICCardManager-v${{ steps.get_version.outputs.VERSION }}
+          path: ./release/
+          retention-days: 90
