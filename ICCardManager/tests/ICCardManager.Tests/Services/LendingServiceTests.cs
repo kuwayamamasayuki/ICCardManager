@@ -731,4 +731,327 @@ public class LendingServiceTests : IDisposable
     }
 
     #endregion
+
+    #region 同時操作排他制御テスト（Issue #24）
+
+    /// <summary>
+    /// 同一カードへの同時貸出操作で、一方のみが成功することを確認
+    /// </summary>
+    [Fact]
+    public async Task LendAsync_ConcurrentLendOnSameCard_OnlyOneSucceeds()
+    {
+        // Arrange
+        var card = CreateTestCard(isLent: false);
+        var staff = CreateTestStaff();
+        var lendCount = 0;
+        var lockObj = new object();
+
+        _cardRepositoryMock.Setup(x => x.GetByIdmAsync(TestCardIdm, false))
+            .ReturnsAsync(() =>
+            {
+                // 最初の呼び出しは未貸出、2回目以降は貸出中を返す
+                lock (lockObj)
+                {
+                    var currentCount = lendCount;
+                    if (currentCount == 0)
+                    {
+                        return CreateTestCard(isLent: false);
+                    }
+                    return CreateTestCard(isLent: true);
+                }
+            });
+        _staffRepositoryMock.Setup(x => x.GetByIdmAsync(TestStaffIdm, false))
+            .ReturnsAsync(staff);
+        _ledgerRepositoryMock.Setup(x => x.InsertAsync(It.IsAny<Ledger>()))
+            .ReturnsAsync(() =>
+            {
+                lock (lockObj)
+                {
+                    return ++lendCount;
+                }
+            });
+        _cardRepositoryMock.Setup(x => x.UpdateLentStatusAsync(It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<DateTime?>(), It.IsAny<string?>()))
+            .ReturnsAsync(true);
+
+        // Act - 2つの貸出を同時実行
+        var task1 = _service.LendAsync(TestStaffIdm, TestCardIdm);
+        var task2 = _service.LendAsync(TestStaffIdm, TestCardIdm);
+
+        var results = await Task.WhenAll(task1, task2);
+
+        // Assert - 排他制御により、1つのみ成功（もう1つは「既に貸出中」または「処理中」でブロック）
+        var successCount = results.Count(r => r.Success);
+        var errorMessages = results.Where(r => !r.Success).Select(r => r.ErrorMessage).ToList();
+
+        successCount.Should().Be(1, "排他制御により同時貸出は1つのみ成功");
+        // 失敗理由は「既に貸出中」または「他の処理が実行中」
+        errorMessages.Should().ContainSingle();
+        errorMessages[0].Should().Match(m =>
+            m!.Contains("貸出中") || m.Contains("処理が実行中"));
+    }
+
+    /// <summary>
+    /// 異なるカードへの同時貸出操作は、両方成功することを確認
+    /// </summary>
+    [Fact]
+    public async Task LendAsync_ConcurrentLendOnDifferentCards_BothSucceed()
+    {
+        // Arrange
+        const string cardIdm1 = "0102030405060708";
+        const string cardIdm2 = "0807060504030201";
+        var card1 = new IcCard { CardIdm = cardIdm1, CardType = "はやかけん", CardNumber = "H001", IsLent = false };
+        var card2 = new IcCard { CardIdm = cardIdm2, CardType = "nimoca", CardNumber = "N001", IsLent = false };
+        var staff = CreateTestStaff();
+
+        _cardRepositoryMock.Setup(x => x.GetByIdmAsync(cardIdm1, false)).ReturnsAsync(card1);
+        _cardRepositoryMock.Setup(x => x.GetByIdmAsync(cardIdm2, false)).ReturnsAsync(card2);
+        _staffRepositoryMock.Setup(x => x.GetByIdmAsync(TestStaffIdm, false)).ReturnsAsync(staff);
+        _ledgerRepositoryMock.Setup(x => x.InsertAsync(It.IsAny<Ledger>())).ReturnsAsync(1);
+        _cardRepositoryMock.Setup(x => x.UpdateLentStatusAsync(It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<DateTime?>(), It.IsAny<string?>()))
+            .ReturnsAsync(true);
+
+        // Act - 異なるカードへの2つの貸出を同時実行
+        var task1 = _service.LendAsync(TestStaffIdm, cardIdm1);
+        var task2 = _service.LendAsync(TestStaffIdm, cardIdm2);
+
+        var results = await Task.WhenAll(task1, task2);
+
+        // Assert - 異なるカードは排他されないので両方成功
+        results.Should().AllSatisfy(r => r.Success.Should().BeTrue());
+    }
+
+    /// <summary>
+    /// 同一カードへの同時返却操作で、一方のみが成功することを確認
+    /// </summary>
+    [Fact]
+    public async Task ReturnAsync_ConcurrentReturnOnSameCard_OnlyOneSucceeds()
+    {
+        // Arrange
+        var card = CreateTestCard(isLent: true);
+        var staff = CreateTestStaff();
+        var lentRecord = CreateTestLentRecord();
+        var returnCount = 0;
+        var lockObj = new object();
+
+        _cardRepositoryMock.Setup(x => x.GetByIdmAsync(TestCardIdm, false))
+            .ReturnsAsync(() =>
+            {
+                lock (lockObj)
+                {
+                    // 最初は貸出中、返却後は未貸出
+                    return returnCount == 0 ? CreateTestCard(isLent: true) : CreateTestCard(isLent: false);
+                }
+            });
+        _staffRepositoryMock.Setup(x => x.GetByIdmAsync(TestStaffIdm, false))
+            .ReturnsAsync(staff);
+        _ledgerRepositoryMock.Setup(x => x.GetLentRecordAsync(TestCardIdm))
+            .ReturnsAsync(() =>
+            {
+                lock (lockObj)
+                {
+                    return returnCount == 0 ? lentRecord : null;
+                }
+            });
+        _ledgerRepositoryMock.Setup(x => x.UpdateAsync(It.IsAny<Ledger>()))
+            .Callback(() =>
+            {
+                lock (lockObj)
+                {
+                    returnCount++;
+                }
+            })
+            .ReturnsAsync(true);
+        _cardRepositoryMock.Setup(x => x.UpdateLentStatusAsync(TestCardIdm, false, null, null))
+            .ReturnsAsync(true);
+        _settingsRepositoryMock.Setup(x => x.GetAppSettingsAsync())
+            .ReturnsAsync(new AppSettings { WarningBalance = 1000 });
+
+        // Act - 2つの返却を同時実行
+        var task1 = _service.ReturnAsync(TestStaffIdm, TestCardIdm, new List<LedgerDetail>());
+        var task2 = _service.ReturnAsync(TestStaffIdm, TestCardIdm, new List<LedgerDetail>());
+
+        var results = await Task.WhenAll(task1, task2);
+
+        // Assert - 排他制御により、1つのみ成功
+        var successCount = results.Count(r => r.Success);
+        successCount.Should().Be(1, "排他制御により同時返却は1つのみ成功");
+    }
+
+    /// <summary>
+    /// 処理中の再タッチがタイムアウトで適切にハンドリングされることを確認
+    /// </summary>
+    [Fact]
+    public async Task LendAsync_LockTimeout_ReturnsAppropriateError()
+    {
+        // Arrange - TaskCompletionSourceで処理の完了を制御
+        var tcs = new TaskCompletionSource<int>();
+        var card = CreateTestCard(isLent: false);
+        var staff = CreateTestStaff();
+        var timeoutCardIdm = "TIMEOUT_TEST_CARD"; // 他テストと競合しないユニークなIDm
+
+        _cardRepositoryMock.Setup(x => x.GetByIdmAsync(timeoutCardIdm, false))
+            .ReturnsAsync(card);
+        _staffRepositoryMock.Setup(x => x.GetByIdmAsync(TestStaffIdm, false))
+            .ReturnsAsync(staff);
+        _ledgerRepositoryMock.Setup(x => x.InsertAsync(It.IsAny<Ledger>()))
+            .Returns(tcs.Task); // TaskCompletionSourceで完了を制御
+        _cardRepositoryMock.Setup(x => x.UpdateLentStatusAsync(It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<DateTime?>(), It.IsAny<string?>()))
+            .ReturnsAsync(true);
+
+        // 短いタイムアウトのサービスを作成
+        var shortTimeoutService = new ShortTimeoutLendingService(
+            _dbContext,
+            _cardRepositoryMock.Object,
+            _staffRepositoryMock.Object,
+            _ledgerRepositoryMock.Object,
+            _settingsRepositoryMock.Object,
+            _summaryGenerator);
+
+        // Act - 最初の処理を開始し、ロックを保持させる
+        var task1 = shortTimeoutService.LendAsync(TestStaffIdm, timeoutCardIdm);
+        await Task.Delay(30); // Task1がロックを取得しInsertAsyncに到達するまで待機
+
+        // 2つ目の処理を開始 - タイムアウトするはず
+        var task2 = shortTimeoutService.LendAsync(TestStaffIdm, timeoutCardIdm);
+        var result2 = await task2; // Task1がロックを保持しているのでタイムアウト
+
+        // Task1を完了させる
+        tcs.SetResult(1);
+        var result1 = await task1;
+
+        // Assert - 2つ目はタイムアウトでエラー
+        result2.Success.Should().BeFalse("排他ロックのタイムアウトによりエラー");
+        result2.ErrorMessage.Should().Contain("処理が実行中");
+    }
+
+    /// <summary>
+    /// 複数回の連続操作でデッドロックが発生しないことを確認
+    /// </summary>
+    [Fact]
+    public async Task LendAsync_MultipleConsecutiveOperations_NoDeadlock()
+    {
+        // Arrange
+        var staff = CreateTestStaff();
+        var operationCount = 0;
+        var lockObj = new object();
+
+        _cardRepositoryMock.Setup(x => x.GetByIdmAsync(TestCardIdm, false))
+            .ReturnsAsync(() =>
+            {
+                lock (lockObj)
+                {
+                    // 偶数回は未貸出、奇数回は貸出中
+                    return operationCount % 2 == 0 ? CreateTestCard(isLent: false) : CreateTestCard(isLent: true);
+                }
+            });
+        _staffRepositoryMock.Setup(x => x.GetByIdmAsync(TestStaffIdm, false))
+            .ReturnsAsync(staff);
+        _ledgerRepositoryMock.Setup(x => x.InsertAsync(It.IsAny<Ledger>()))
+            .Callback(() =>
+            {
+                lock (lockObj)
+                {
+                    operationCount++;
+                }
+            })
+            .ReturnsAsync(1);
+        _cardRepositoryMock.Setup(x => x.UpdateLentStatusAsync(It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<DateTime?>(), It.IsAny<string?>()))
+            .ReturnsAsync(true);
+
+        // Act - 連続して10回の操作を実行（タイムアウトなし = デッドロックなし）
+        var tasks = Enumerable.Range(0, 10)
+            .Select(_ => _service.LendAsync(TestStaffIdm, TestCardIdm))
+            .ToList();
+
+        // 10秒以内に完了すればデッドロックなし
+        var completedInTime = await Task.WhenAll(tasks).WaitAsync(TimeSpan.FromSeconds(10));
+
+        // Assert - 全ての操作が完了（デッドロックなし）
+        completedInTime.Should().NotBeNull();
+        completedInTime.Should().HaveCount(10);
+    }
+
+    /// <summary>
+    /// 同一カードへの貸出と返却の同時実行で排他制御が機能することを確認
+    /// </summary>
+    [Fact]
+    public async Task LendAndReturnAsync_ConcurrentOnSameCard_ProperlyHandled()
+    {
+        // Arrange
+        var cardLent = true; // 最初は貸出中
+        var lockObj = new object();
+        var lentRecord = CreateTestLentRecord();
+        var staff = CreateTestStaff();
+
+        _cardRepositoryMock.Setup(x => x.GetByIdmAsync(TestCardIdm, false))
+            .ReturnsAsync(() =>
+            {
+                lock (lockObj)
+                {
+                    return CreateTestCard(isLent: cardLent);
+                }
+            });
+        _staffRepositoryMock.Setup(x => x.GetByIdmAsync(TestStaffIdm, false))
+            .ReturnsAsync(staff);
+        _ledgerRepositoryMock.Setup(x => x.GetLentRecordAsync(TestCardIdm))
+            .ReturnsAsync(() =>
+            {
+                lock (lockObj)
+                {
+                    return cardLent ? lentRecord : null;
+                }
+            });
+        _ledgerRepositoryMock.Setup(x => x.InsertAsync(It.IsAny<Ledger>()))
+            .ReturnsAsync(1);
+        _ledgerRepositoryMock.Setup(x => x.UpdateAsync(It.IsAny<Ledger>()))
+            .Callback(() =>
+            {
+                lock (lockObj)
+                {
+                    cardLent = false;
+                }
+            })
+            .ReturnsAsync(true);
+        _cardRepositoryMock.Setup(x => x.UpdateLentStatusAsync(It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<DateTime?>(), It.IsAny<string?>()))
+            .ReturnsAsync(true);
+        _settingsRepositoryMock.Setup(x => x.GetAppSettingsAsync())
+            .ReturnsAsync(new AppSettings { WarningBalance = 1000 });
+
+        // Act - 貸出と返却を同時実行
+        var lendTask = _service.LendAsync(TestStaffIdm, TestCardIdm);
+        var returnTask = _service.ReturnAsync(TestStaffIdm, TestCardIdm, new List<LedgerDetail>());
+
+        var results = await Task.WhenAll(lendTask, returnTask);
+        var lendResult = results[0];
+        var returnResult = results[1];
+
+        // Assert - どちらか一方のみ成功（排他制御により順序が保証される）
+        var successCount = results.Count(r => r.Success);
+        successCount.Should().Be(1, "排他制御により同時操作は1つのみ成功");
+    }
+
+    #endregion
+
+    #region ヘルパークラス（同時操作テスト用）
+
+    /// <summary>
+    /// 短いロックタイムアウトを持つテスト用サービス
+    /// </summary>
+    private class ShortTimeoutLendingService : LendingService
+    {
+        public ShortTimeoutLendingService(
+            DbContext dbContext,
+            ICardRepository cardRepository,
+            IStaffRepository staffRepository,
+            ILedgerRepository ledgerRepository,
+            ISettingsRepository settingsRepository,
+            SummaryGenerator summaryGenerator)
+            : base(dbContext, cardRepository, staffRepository, ledgerRepository, settingsRepository, summaryGenerator)
+        {
+        }
+
+        protected override int GetLockTimeoutMs() => 100; // 100msの短いタイムアウト
+    }
+
+    #endregion
 }

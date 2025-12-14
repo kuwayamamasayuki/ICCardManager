@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using ICCardManager.Data;
 using ICCardManager.Data.Repositories;
 using ICCardManager.Models;
@@ -74,6 +75,11 @@ public class LendingService
     private readonly SummaryGenerator _summaryGenerator;
 
     /// <summary>
+    /// カードごとの排他制御用ロック
+    /// </summary>
+    private static readonly ConcurrentDictionary<string, SemaphoreSlim> _cardLocks = new();
+
+    /// <summary>
     /// 最後に処理したカードのIDm
     /// </summary>
     public string? LastProcessedCardIdm { get; private set; }
@@ -92,6 +98,11 @@ public class LendingService
     /// 30秒ルール適用の時間（秒）
     /// </summary>
     private const int RetouchTimeoutSeconds = 30;
+
+    /// <summary>
+    /// ロック取得のタイムアウト（ミリ秒）
+    /// </summary>
+    private const int LockTimeoutMs = 5000;
 
     public LendingService(
         DbContext dbContext,
@@ -118,8 +129,20 @@ public class LendingService
     {
         var result = new LendingResult { OperationType = LendingOperationType.Lend };
 
+        // カードごとのロックを取得
+        var cardLock = GetCardLock(cardIdm);
+        var lockAcquired = false;
+
         try
         {
+            // タイムアウト付きでロックを取得
+            lockAcquired = await cardLock.WaitAsync(GetLockTimeoutMs());
+            if (!lockAcquired)
+            {
+                result.ErrorMessage = "他の処理が実行中です。しばらく待ってから再度お試しください。";
+                return result;
+            }
+
             // カードを取得
             var card = await _cardRepository.GetByIdmAsync(cardIdm);
             if (card == null)
@@ -191,6 +214,14 @@ public class LendingService
         {
             result.ErrorMessage = $"貸出処理でエラーが発生しました: {ex.Message}";
         }
+        finally
+        {
+            // ロックを解放
+            if (lockAcquired)
+            {
+                cardLock.Release();
+            }
+        }
 
         return result;
     }
@@ -205,8 +236,20 @@ public class LendingService
     {
         var result = new LendingResult { OperationType = LendingOperationType.Return };
 
+        // カードごとのロックを取得
+        var cardLock = GetCardLock(cardIdm);
+        var lockAcquired = false;
+
         try
         {
+            // タイムアウト付きでロックを取得
+            lockAcquired = await cardLock.WaitAsync(GetLockTimeoutMs());
+            if (!lockAcquired)
+            {
+                result.ErrorMessage = "他の処理が実行中です。しばらく待ってから再度お試しください。";
+                return result;
+            }
+
             // カードを取得
             var card = await _cardRepository.GetByIdmAsync(cardIdm);
             if (card == null)
@@ -297,6 +340,14 @@ public class LendingService
         catch (Exception ex)
         {
             result.ErrorMessage = $"返却処理でエラーが発生しました: {ex.Message}";
+        }
+        finally
+        {
+            // ロックを解放
+            if (lockAcquired)
+            {
+                cardLock.Release();
+            }
         }
 
         return result;
@@ -421,4 +472,19 @@ public class LendingService
         LastProcessedTime = null;
         LastOperationType = null;
     }
+
+    /// <summary>
+    /// カードごとのロックを取得または作成
+    /// </summary>
+    /// <param name="cardIdm">カードIDm</param>
+    /// <returns>SemaphoreSlim</returns>
+    private static SemaphoreSlim GetCardLock(string cardIdm)
+    {
+        return _cardLocks.GetOrAdd(cardIdm, _ => new SemaphoreSlim(1, 1));
+    }
+
+    /// <summary>
+    /// ロック取得のタイムアウト値を取得（テスト用にオーバーライド可能）
+    /// </summary>
+    protected virtual int GetLockTimeoutMs() => LockTimeoutMs;
 }
