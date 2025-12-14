@@ -202,6 +202,48 @@ public partial class ReportViewModel : ViewModelBase
             return;
         }
 
+        // 上書き確認: 既存ファイルをチェック
+        var existingFiles = new List<string>();
+        var outputPaths = new Dictionary<string, string>(); // cardIdm -> outputPath
+
+        foreach (var card in SelectedCards)
+        {
+            var fileName = $"物品出納簿_{card.CardType}_{card.CardNumber}_{SelectedYear}年{SelectedMonth}月.xlsx";
+            var outputPath = Path.Combine(OutputFolder, fileName);
+            outputPaths[card.CardIdm] = outputPath;
+
+            if (File.Exists(outputPath))
+            {
+                existingFiles.Add(fileName);
+            }
+        }
+
+        // 既存ファイルがある場合は確認ダイアログを表示
+        var useAlternativeNames = false;
+        if (existingFiles.Count > 0)
+        {
+            var fileList = existingFiles.Count <= 5
+                ? string.Join("\n", existingFiles.Select(f => $"・{f}"))
+                : string.Join("\n", existingFiles.Take(5).Select(f => $"・{f}")) + $"\n・...他 {existingFiles.Count - 5} 件";
+
+            var result = MessageBox.Show(
+                $"以下のファイルが既に存在します:\n\n{fileList}\n\n上書きしますか？\n\n" +
+                "「はい」: 上書きする\n" +
+                "「いいえ」: 別名で保存する（日時を付加）\n" +
+                "「キャンセル」: 中止する",
+                "ファイル上書き確認",
+                MessageBoxButton.YesNoCancel,
+                MessageBoxImage.Question);
+
+            if (result == MessageBoxResult.Cancel)
+            {
+                StatusMessage = "帳票作成をキャンセルしました";
+                return;
+            }
+
+            useAlternativeNames = (result == MessageBoxResult.No);
+        }
+
         CreatedFiles.Clear();
         StatusMessage = string.Empty;
 
@@ -222,8 +264,13 @@ public partial class ReportViewModel : ViewModelBase
 
                 var cardIdm = cardIdms[i];
                 var card = SelectedCards.First(c => c.CardIdm == cardIdm);
-                var fileName = $"物品出納簿_{card.CardType}_{card.CardNumber}_{SelectedYear}年{SelectedMonth}月.xlsx";
-                var outputPath = Path.Combine(OutputFolder, fileName);
+                var outputPath = outputPaths[cardIdm];
+
+                // 別名保存の場合は日時を付加
+                if (useAlternativeNames && File.Exists(outputPath))
+                {
+                    outputPath = GetAlternativeFilePath(outputPath);
+                }
 
                 // 進捗を更新
                 busyScope.ReportProgress(i, totalCount,
@@ -366,5 +413,33 @@ public partial class ReportViewModel : ViewModelBase
 
         // 最初の選択カードをプレビュー
         await PreviewReportAsync(SelectedCards.First());
+    }
+
+    /// <summary>
+    /// 既存ファイルと重複しない代替ファイルパスを生成
+    /// </summary>
+    /// <param name="originalPath">元のファイルパス</param>
+    /// <returns>重複しないファイルパス</returns>
+    private static string GetAlternativeFilePath(string originalPath)
+    {
+        var directory = Path.GetDirectoryName(originalPath) ?? string.Empty;
+        var fileNameWithoutExt = Path.GetFileNameWithoutExtension(originalPath);
+        var extension = Path.GetExtension(originalPath);
+
+        // 日時を付加（yyyyMMdd_HHmmss形式）
+        var timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
+        var newFileName = $"{fileNameWithoutExt}_{timestamp}{extension}";
+        var newPath = Path.Combine(directory, newFileName);
+
+        // 万が一同じ秒に複数ファイルを作成する場合は連番を付加
+        var counter = 1;
+        while (File.Exists(newPath))
+        {
+            newFileName = $"{fileNameWithoutExt}_{timestamp}_{counter}{extension}";
+            newPath = Path.Combine(directory, newFileName);
+            counter++;
+        }
+
+        return newPath;
     }
 }
