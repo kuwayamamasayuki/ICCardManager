@@ -53,6 +53,28 @@ public class StaffRepository : IStaffRepository
     }
 
     /// <inheritdoc/>
+    public async Task<IEnumerable<Staff>> GetAllIncludingDeletedAsync()
+    {
+        var connection = _dbContext.GetConnection();
+        var staffList = new List<Staff>();
+
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT staff_idm, name, number, note, is_deleted, deleted_at
+            FROM staff
+            ORDER BY name
+            """;
+
+        await using var reader = await command.ExecuteReaderAsync();
+        while (await reader.ReadAsync())
+        {
+            staffList.Add(MapToStaff(reader));
+        }
+
+        return staffList;
+    }
+
+    /// <inheritdoc/>
     public async Task<Staff?> GetByIdmAsync(string staffIdm, bool includeDeleted = false)
     {
         var connection = _dbContext.GetConnection();
@@ -84,9 +106,24 @@ public class StaffRepository : IStaffRepository
     /// <inheritdoc/>
     public async Task<bool> InsertAsync(Staff staff)
     {
+        return await InsertAsyncInternal(staff, null);
+    }
+
+    /// <inheritdoc/>
+    public async Task<bool> InsertAsync(Staff staff, SqliteTransaction transaction)
+    {
+        return await InsertAsyncInternal(staff, transaction);
+    }
+
+    /// <summary>
+    /// 職員登録の内部実装
+    /// </summary>
+    private async Task<bool> InsertAsyncInternal(Staff staff, SqliteTransaction? transaction)
+    {
         var connection = _dbContext.GetConnection();
 
         await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
         command.CommandText = """
             INSERT INTO staff (staff_idm, name, number, note, is_deleted, deleted_at)
             VALUES (@staffIdm, @name, @number, @note, 0, NULL)
@@ -100,8 +137,9 @@ public class StaffRepository : IStaffRepository
         try
         {
             var result = await command.ExecuteNonQueryAsync();
-            if (result > 0)
+            if (result > 0 && transaction == null)
             {
+                // トランザクション外の場合のみキャッシュ無効化
                 InvalidateStaffCache();
             }
             return result > 0;
@@ -115,9 +153,24 @@ public class StaffRepository : IStaffRepository
     /// <inheritdoc/>
     public async Task<bool> UpdateAsync(Staff staff)
     {
+        return await UpdateAsyncInternal(staff, null);
+    }
+
+    /// <inheritdoc/>
+    public async Task<bool> UpdateAsync(Staff staff, SqliteTransaction transaction)
+    {
+        return await UpdateAsyncInternal(staff, transaction);
+    }
+
+    /// <summary>
+    /// 職員更新の内部実装
+    /// </summary>
+    private async Task<bool> UpdateAsyncInternal(Staff staff, SqliteTransaction? transaction)
+    {
         var connection = _dbContext.GetConnection();
 
         await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
         command.CommandText = """
             UPDATE staff
             SET name = @name, number = @number, note = @note
@@ -130,8 +183,9 @@ public class StaffRepository : IStaffRepository
         command.Parameters.AddWithValue("@note", (object?)staff.Note ?? DBNull.Value);
 
         var result = await command.ExecuteNonQueryAsync();
-        if (result > 0)
+        if (result > 0 && transaction == null)
         {
+            // トランザクション外の場合のみキャッシュ無効化
             InvalidateStaffCache();
         }
         return result > 0;

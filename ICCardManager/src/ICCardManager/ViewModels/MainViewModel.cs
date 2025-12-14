@@ -617,6 +617,17 @@ public partial class MainViewModel : ViewModelBase
         dialog.ShowDialog();
     }
 
+    /// <summary>
+    /// データエクスポート/インポート画面を開く
+    /// </summary>
+    [RelayCommand]
+    public void OpenDataExportImport()
+    {
+        var dialog = App.Current.ServiceProvider.GetRequiredService<Views.Dialogs.DataExportImportDialog>();
+        dialog.Owner = System.Windows.Application.Current.MainWindow;
+        dialog.ShowDialog();
+    }
+
 #if DEBUG
     /// <summary>
     /// デバッグ用: 職員証タッチをシミュレート

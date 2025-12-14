@@ -1,4 +1,5 @@
 using ICCardManager.Models;
+using Microsoft.Data.Sqlite;
 
 namespace ICCardManager.Data.Repositories;
 
@@ -11,6 +12,11 @@ public interface ICardRepository
     /// 全ICカードを取得（論理削除されていないもののみ）
     /// </summary>
     Task<IEnumerable<IcCard>> GetAllAsync();
+
+    /// <summary>
+    /// 全ICカードを取得（論理削除されたものを含む）
+    /// </summary>
+    Task<IEnumerable<IcCard>> GetAllIncludingDeletedAsync();
 
     /// <summary>
     /// 貸出可能なICカードを取得
@@ -35,9 +41,19 @@ public interface ICardRepository
     Task<bool> InsertAsync(IcCard card);
 
     /// <summary>
+    /// ICカードを登録（トランザクション対応）
+    /// </summary>
+    Task<bool> InsertAsync(IcCard card, SqliteTransaction transaction);
+
+    /// <summary>
     /// ICカード情報を更新
     /// </summary>
     Task<bool> UpdateAsync(IcCard card);
+
+    /// <summary>
+    /// ICカード情報を更新（トランザクション対応）
+    /// </summary>
+    Task<bool> UpdateAsync(IcCard card, SqliteTransaction transaction);
 
     /// <summary>
     /// 貸出状態を更新
