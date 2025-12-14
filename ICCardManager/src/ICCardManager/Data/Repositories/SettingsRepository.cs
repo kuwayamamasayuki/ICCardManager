@@ -25,6 +25,10 @@ public class SettingsRepository : ISettingsRepository
     public const string KeyWindowHeight = "window_height";
     public const string KeyWindowMaximized = "window_maximized";
 
+    // 職員証スキップ設定キー
+    public const string KeySkipStaffTouch = "skip_staff_touch";
+    public const string KeyDefaultStaffIdm = "default_staff_idm";
+
     public SettingsRepository(DbContext dbContext, ICacheService cacheService)
     {
         _dbContext = dbContext;
@@ -103,6 +107,13 @@ public class SettingsRepository : ISettingsRepository
         // ウィンドウ設定
         settings.MainWindowSettings = await GetWindowSettingsFromDbAsync();
 
+        // 職員証スキップ設定
+        var skipStaffTouch = await GetAsync(KeySkipStaffTouch);
+        settings.SkipStaffTouch = skipStaffTouch?.ToLowerInvariant() == "true";
+
+        var defaultStaffIdm = await GetAsync(KeyDefaultStaffIdm);
+        settings.DefaultStaffIdm = string.IsNullOrEmpty(defaultStaffIdm) ? null : defaultStaffIdm;
+
         return settings;
     }
 
@@ -159,6 +170,10 @@ public class SettingsRepository : ISettingsRepository
 
         // ウィンドウ設定を保存
         success &= await SaveWindowSettingsToDbAsync(settings.MainWindowSettings);
+
+        // 職員証スキップ設定を保存
+        success &= await SetAsync(KeySkipStaffTouch, settings.SkipStaffTouch.ToString().ToLowerInvariant());
+        success &= await SetAsync(KeyDefaultStaffIdm, settings.DefaultStaffIdm);
 
         // 設定保存後にキャッシュを無効化
         _cacheService.Invalidate(CacheKeys.AppSettings);

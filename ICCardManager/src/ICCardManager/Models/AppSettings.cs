@@ -30,6 +30,16 @@ public class AppSettings
     /// メインウィンドウの位置・サイズ設定
     /// </summary>
     public WindowSettings MainWindowSettings { get; set; } = new();
+
+    /// <summary>
+    /// 職員証タッチをスキップするかどうか
+    /// </summary>
+    public bool SkipStaffTouch { get; set; } = false;
+
+    /// <summary>
+    /// デフォルト職員のIDm（スキップ時に使用）
+    /// </summary>
+    public string? DefaultStaffIdm { get; set; }
 }
 
 /// <summary>
