@@ -13,8 +13,10 @@ public class MockCardReader : ICardReader
 
     public event EventHandler<CardReadEventArgs>? CardRead;
     public event EventHandler<Exception>? Error;
+    public event EventHandler<ConnectionStateChangedEventArgs>? ConnectionStateChanged;
 
     public bool IsReading => _isReading;
+    public CardReaderConnectionState ConnectionState => CardReaderConnectionState.Connected;
 
     /// <summary>
     /// シミュレーション用のカードIDm
@@ -134,6 +136,21 @@ public class MockCardReader : ICardReader
     {
         // テスト用のダミー残高を返す
         return Task.FromResult<int?>(4980);
+    }
+
+    /// <inheritdoc/>
+    public Task<bool> CheckConnectionAsync()
+    {
+        // モックは常に接続済み
+        return Task.FromResult(true);
+    }
+
+    /// <inheritdoc/>
+    public Task ReconnectAsync()
+    {
+        // モックでは再接続は不要（常に接続済み）
+        ConnectionStateChanged?.Invoke(this, new ConnectionStateChangedEventArgs(CardReaderConnectionState.Connected));
+        return Task.CompletedTask;
     }
 
     /// <inheritdoc/>
