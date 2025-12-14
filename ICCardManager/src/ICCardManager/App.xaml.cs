@@ -138,6 +138,7 @@ public partial class App : Application
         services.AddTransient<BusStopInputViewModel>();
         services.AddTransient<PrintPreviewViewModel>();
         services.AddTransient<DataExportImportViewModel>();
+        services.AddTransient<OperationLogSearchViewModel>();
 
         // Views
         services.AddTransient<MainWindow>();
@@ -149,6 +150,7 @@ public partial class App : Application
         services.AddTransient<Views.Dialogs.BusStopInputDialog>();
         services.AddTransient<Views.Dialogs.PrintPreviewDialog>();
         services.AddTransient<Views.Dialogs.DataExportImportDialog>();
+        services.AddTransient<Views.Dialogs.OperationLogDialog>();
     }
 
     /// <summary>

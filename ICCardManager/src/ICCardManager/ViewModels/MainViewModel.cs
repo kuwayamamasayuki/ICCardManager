@@ -628,6 +628,17 @@ public partial class MainViewModel : ViewModelBase
         dialog.ShowDialog();
     }
 
+    /// <summary>
+    /// 操作ログ画面を開く
+    /// </summary>
+    [RelayCommand]
+    public void OpenOperationLog()
+    {
+        var dialog = App.Current.ServiceProvider.GetRequiredService<Views.Dialogs.OperationLogDialog>();
+        dialog.Owner = System.Windows.Application.Current.MainWindow;
+        dialog.ShowDialog();
+    }
+
 #if DEBUG
     /// <summary>
     /// デバッグ用: 職員証タッチをシミュレート
