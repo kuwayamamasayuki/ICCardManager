@@ -129,7 +129,7 @@ public class ReportServiceTests : IDisposable
         var result = await _reportService.CreateMonthlyReportAsync(cardIdm, year, month, outputPath);
 
         // Assert
-        result.Should().BeTrue();
+        result.Success.Should().BeTrue();
         File.Exists(outputPath).Should().BeTrue();
 
         // Excelファイルの内容を検証
@@ -197,7 +197,7 @@ public class ReportServiceTests : IDisposable
         var result = await _reportService.CreateMonthlyReportAsync(cardIdm, year, month, outputPath);
 
         // Assert
-        result.Should().BeTrue();
+        result.Success.Should().BeTrue();
 
         using var workbook = new XLWorkbook(outputPath);
         var worksheet = workbook.Worksheets.First();
@@ -256,7 +256,7 @@ public class ReportServiceTests : IDisposable
         var result = await _reportService.CreateMonthlyReportAsync(cardIdm, year, month, outputPath);
 
         // Assert
-        result.Should().BeTrue();
+        result.Success.Should().BeTrue();
 
         using var workbook = new XLWorkbook(outputPath);
         var worksheet = workbook.Worksheets.First();
@@ -316,7 +316,7 @@ public class ReportServiceTests : IDisposable
         var result = await _reportService.CreateMonthlyReportAsync(cardIdm, year, month, outputPath);
 
         // Assert
-        result.Should().BeTrue();
+        result.Success.Should().BeTrue();
 
         using var workbook = new XLWorkbook(outputPath);
         var worksheet = workbook.Worksheets.First();
@@ -376,7 +376,7 @@ public class ReportServiceTests : IDisposable
         var result = await _reportService.CreateMonthlyReportAsync(cardIdm, year, month, outputPath);
 
         // Assert
-        result.Should().BeTrue();
+        result.Success.Should().BeTrue();
 
         using var workbook = new XLWorkbook(outputPath);
         var worksheet = workbook.Worksheets.First();
@@ -424,7 +424,7 @@ public class ReportServiceTests : IDisposable
         var result = await _reportService.CreateMonthlyReportAsync(cardIdm, year, month, outputPath);
 
         // Assert
-        result.Should().BeTrue();
+        result.Success.Should().BeTrue();
 
         using var workbook = new XLWorkbook(outputPath);
         var worksheet = workbook.Worksheets.First();
@@ -480,11 +480,12 @@ public class ReportServiceTests : IDisposable
                 new[] { cardIdm1, cardIdm2 }, year, month, outputFolder);
 
             // Assert
-            result.Should().HaveCount(2);
-            result.Should().Contain(f => f.Contains("はやかけん_001"));
-            result.Should().Contain(f => f.Contains("nimoca_002"));
+            result.AllSuccess.Should().BeTrue();
+            result.SuccessfulFiles.Should().HaveCount(2);
+            result.SuccessfulFiles.Should().Contain(f => f.Contains("はやかけん_001"));
+            result.SuccessfulFiles.Should().Contain(f => f.Contains("nimoca_002"));
 
-            foreach (var filePath in result)
+            foreach (var filePath in result.SuccessfulFiles)
             {
                 File.Exists(filePath).Should().BeTrue();
             }
@@ -527,7 +528,7 @@ public class ReportServiceTests : IDisposable
         var result = await _reportService.CreateMonthlyReportAsync(cardIdm, year, month, outputPath);
 
         // Assert
-        result.Should().BeTrue();
+        result.Success.Should().BeTrue();
         File.Exists(outputPath).Should().BeTrue();
 
         using var workbook = new XLWorkbook(outputPath);
@@ -541,10 +542,10 @@ public class ReportServiceTests : IDisposable
     }
 
     /// <summary>
-    /// TC009: 存在しないカードIDmの場合はfalseを返す
+    /// TC009: 存在しないカードIDmの場合は失敗結果を返す
     /// </summary>
     [Fact]
-    public async Task CreateMonthlyReportAsync_WithNonExistentCard_ShouldReturnFalse()
+    public async Task CreateMonthlyReportAsync_WithNonExistentCard_ShouldReturnFailureResult()
     {
         // Arrange
         var cardIdm = "FFFFFFFFFFFFFFFF";
@@ -560,12 +561,13 @@ public class ReportServiceTests : IDisposable
         var result = await _reportService.CreateMonthlyReportAsync(cardIdm, year, month, outputPath);
 
         // Assert
-        result.Should().BeFalse();
+        result.Success.Should().BeFalse();
+        result.ErrorMessage.Should().NotBeNullOrEmpty();
         File.Exists(outputPath).Should().BeFalse();
     }
 
     /// <summary>
-    /// TC010: 複数カード一括作成で存在しないカードはスキップされる
+    /// TC010: 複数カード一括作成で存在しないカードは失敗として記録される
     /// </summary>
     [Fact]
     public async Task CreateMonthlyReportsAsync_WithNonExistentCard_ShouldSkipInvalidCard()
@@ -600,8 +602,10 @@ public class ReportServiceTests : IDisposable
                 new[] { validCardIdm, invalidCardIdm }, year, month, outputFolder);
 
             // Assert
-            result.Should().HaveCount(1);
-            result.First().Should().Contain("はやかけん_001");
+            result.SuccessCount.Should().Be(1);
+            result.FailureCount.Should().Be(1);
+            result.SuccessfulFiles.Should().HaveCount(1);
+            result.SuccessfulFiles.First().Should().Contain("はやかけん_001");
         }
         finally
         {
@@ -641,7 +645,7 @@ public class ReportServiceTests : IDisposable
         var result = await _reportService.CreateMonthlyReportAsync(cardIdm, year, month, outputPath);
 
         // Assert
-        result.Should().BeTrue();
+        result.Success.Should().BeTrue();
 
         using var workbook = new XLWorkbook(outputPath);
         var worksheet = workbook.Worksheets.First();
@@ -688,7 +692,7 @@ public class ReportServiceTests : IDisposable
         var result = await _reportService.CreateMonthlyReportAsync(cardIdm, year, month, outputPath);
 
         // Assert
-        result.Should().BeTrue();
+        result.Success.Should().BeTrue();
 
         using var workbook = new XLWorkbook(outputPath);
         var worksheet = workbook.Worksheets.First();
@@ -739,7 +743,7 @@ public class ReportServiceTests : IDisposable
         var result = await _reportService.CreateMonthlyReportAsync(cardIdm, year, month, outputPath);
 
         // Assert
-        result.Should().BeTrue();
+        result.Success.Should().BeTrue();
 
         using var workbook = new XLWorkbook(outputPath);
         var worksheet = workbook.Worksheets.First();
@@ -792,7 +796,7 @@ public class ReportServiceTests : IDisposable
         var result = await _reportService.CreateMonthlyReportAsync(cardIdm, year, month, outputPath);
 
         // Assert
-        result.Should().BeTrue();
+        result.Success.Should().BeTrue();
 
         using var workbook = new XLWorkbook(outputPath);
         var worksheet = workbook.Worksheets.First();
