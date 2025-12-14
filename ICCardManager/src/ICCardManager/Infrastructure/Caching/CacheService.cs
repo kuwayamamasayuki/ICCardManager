@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using Microsoft.Extensions.Caching.Memory;
+using Microsoft.Extensions.Logging;
 
 namespace ICCardManager.Infrastructure.Caching;
 
@@ -10,11 +11,13 @@ public class CacheService : ICacheService, IDisposable
 {
     private readonly IMemoryCache _cache;
     private readonly ConcurrentDictionary<string, byte> _keys;
+    private readonly ILogger<CacheService> _logger;
     private readonly object _lock = new();
     private bool _disposed;
 
-    public CacheService()
+    public CacheService(ILogger<CacheService> logger)
     {
+        _logger = logger;
         _cache = new MemoryCache(new MemoryCacheOptions
         {
             // サイズ制限は設定しない（小規模アプリケーションのため）
@@ -28,12 +31,12 @@ public class CacheService : ICacheService, IDisposable
     {
         if (_cache.TryGetValue(key, out T? cachedValue) && cachedValue is not null)
         {
-            System.Diagnostics.Debug.WriteLine($"[Cache] HIT: {key}");
+            _logger.LogTrace("キャッシュヒット: {Key}", key);
             return cachedValue;
         }
 
         // キャッシュミス - ファクトリを実行
-        System.Diagnostics.Debug.WriteLine($"[Cache] MISS: {key}");
+        _logger.LogTrace("キャッシュミス: {Key}", key);
         var value = await factory();
 
         Set(key, value, absoluteExpiration);
@@ -46,11 +49,11 @@ public class CacheService : ICacheService, IDisposable
     {
         if (_cache.TryGetValue(key, out T? value))
         {
-            System.Diagnostics.Debug.WriteLine($"[Cache] HIT: {key}");
+            _logger.LogTrace("キャッシュヒット: {Key}", key);
             return value;
         }
 
-        System.Diagnostics.Debug.WriteLine($"[Cache] MISS: {key}");
+        _logger.LogTrace("キャッシュミス: {Key}", key);
         return default;
     }
 
@@ -66,13 +69,13 @@ public class CacheService : ICacheService, IDisposable
         options.RegisterPostEvictionCallback((evictedKey, _, _, _) =>
         {
             _keys.TryRemove(evictedKey.ToString()!, out _);
-            System.Diagnostics.Debug.WriteLine($"[Cache] EVICTED: {evictedKey}");
+            _logger.LogTrace("キャッシュ期限切れ: {Key}", evictedKey);
         });
 
         _cache.Set(key, value, options);
         _keys.TryAdd(key, 0);
 
-        System.Diagnostics.Debug.WriteLine($"[Cache] SET: {key} (expires in {absoluteExpiration.TotalSeconds}s)");
+        _logger.LogTrace("キャッシュ設定: {Key} (有効期限: {Seconds}秒)", key, absoluteExpiration.TotalSeconds);
     }
 
     /// <inheritdoc/>
@@ -82,7 +85,7 @@ public class CacheService : ICacheService, IDisposable
         {
             _cache.Remove(key);
             _keys.TryRemove(key, out _);
-            System.Diagnostics.Debug.WriteLine($"[Cache] INVALIDATED: {key}");
+            _logger.LogDebug("キャッシュ無効化: {Key}", key);
         }
     }
 
@@ -101,7 +104,7 @@ public class CacheService : ICacheService, IDisposable
                 _keys.TryRemove(key, out _);
             }
 
-            System.Diagnostics.Debug.WriteLine($"[Cache] INVALIDATED by prefix '{prefix}': {keysToRemove.Count} items");
+            _logger.LogDebug("プレフィックスでキャッシュ無効化: {Prefix} ({Count}件)", prefix, keysToRemove.Count);
         }
     }
 
@@ -110,12 +113,13 @@ public class CacheService : ICacheService, IDisposable
     {
         lock (_lock)
         {
+            var count = _keys.Count;
             foreach (var key in _keys.Keys.ToList())
             {
                 _cache.Remove(key);
             }
             _keys.Clear();
-            System.Diagnostics.Debug.WriteLine("[Cache] CLEARED all items");
+            _logger.LogInformation("全キャッシュをクリア ({Count}件)", count);
         }
     }
 

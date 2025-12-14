@@ -1,5 +1,6 @@
 using FluentAssertions;
 using ICCardManager.Infrastructure.Caching;
+using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
 
 namespace ICCardManager.Tests.Infrastructure.Caching;
@@ -13,7 +14,7 @@ public class CacheServiceTests : IDisposable
 
     public CacheServiceTests()
     {
-        _sut = new CacheService();
+        _sut = new CacheService(NullLogger<CacheService>.Instance);
     }
 
     public void Dispose()
@@ -363,7 +364,7 @@ public class CacheServiceTests : IDisposable
     public void Dispose_ShouldNotThrowOnMultipleCalls()
     {
         // Arrange
-        var cache = new CacheService();
+        var cache = new CacheService(NullLogger<CacheService>.Instance);
         cache.Set("key", "value", TimeSpan.FromMinutes(1));
 
         // Act & Assert
