@@ -93,7 +93,7 @@
                             AutomationProperties.HelpText="選択した職員の情報を編集します"
                             ToolTip="選択した職員を編集"/>
                     <Button Content="削除"
-                            Command="{Binding DeleteCommand}"
+                            Command="{Binding DeleteAsyncCommand}"
                             IsEnabled="{Binding SelectedStaff, Converter={StaticResource BoolToVisibilityConverter}}"
                             Padding="15,8"
                             Margin="0,0,0,5"
@@ -246,7 +246,7 @@
                             Padding="15,8"
                             Margin="0,0,10,0"/>
                     <Button Content="保存"
-                            Command="{Binding SaveCommand}"
+                            Command="{Binding SaveAsyncCommand}"
                             Padding="15,8"
                             Background="#2196F3"
                             Foreground="White"/>
