@@ -39,6 +39,19 @@ public partial class PrintPreviewViewModel : ViewModelBase
     [ObservableProperty]
     private string _statusMessage = string.Empty;
 
+    [ObservableProperty]
+    private double _contentScaleFactor = 1.0;
+
+    /// <summary>
+    /// A4横向きの幅（基準サイズ）
+    /// </summary>
+    private const double LandscapeWidth = 842;
+
+    /// <summary>
+    /// A4縦向きの幅
+    /// </summary>
+    private const double PortraitWidth = 595;
+
     /// <summary>
     /// ズーム倍率の選択肢
     /// </summary>
@@ -318,13 +331,16 @@ public partial class PrintPreviewViewModel : ViewModelBase
             // A4サイズに基づいて用紙サイズを更新
             if (value == PageOrientation.Landscape)
             {
-                Document.PageWidth = 842;   // A4横 (約29.7cm)
-                Document.PageHeight = 595;  // A4横 (約21cm)
+                Document.PageWidth = LandscapeWidth;   // A4横 (約29.7cm)
+                Document.PageHeight = PortraitWidth;   // A4横 (約21cm)
+                ContentScaleFactor = 1.0;              // 横向きはスケーリングなし
             }
             else
             {
-                Document.PageWidth = 595;   // A4縦 (約21cm)
-                Document.PageHeight = 842;  // A4縦 (約29.7cm)
+                Document.PageWidth = PortraitWidth;    // A4縦 (約21cm)
+                Document.PageHeight = LandscapeWidth;  // A4縦 (約29.7cm)
+                // 縦向きは横幅に収まるよう縮小
+                ContentScaleFactor = PortraitWidth / LandscapeWidth;  // ≈ 0.707
             }
 
             UpdatePageCount();
@@ -333,7 +349,10 @@ public partial class PrintPreviewViewModel : ViewModelBase
             DocumentNeedsRefresh?.Invoke(this, EventArgs.Empty);
 
             var orientationName = GetOrientationDisplayName(value);
-            StatusMessage = $"用紙方向を{orientationName}に変更しました";
+            var scaleInfo = value == PageOrientation.Portrait
+                ? $"（{ContentScaleFactor:P0}に縮小）"
+                : "";
+            StatusMessage = $"用紙方向を{orientationName}に変更しました{scaleInfo}";
         }
     }
 }

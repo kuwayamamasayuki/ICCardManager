@@ -16,6 +16,15 @@
         AutomationProperties.Name="印刷プレビューダイアログ"
         AutomationProperties.HelpText="帳票の印刷プレビューを表示します。ズームやページ送りができます。←→キーでページ移動できます。">
 
+    <Window.InputBindings>
+        <!-- テンキーのズーム操作 -->
+        <KeyBinding Key="Add" Modifiers="Ctrl" Command="{Binding ZoomInCommand}"/>
+        <KeyBinding Key="Subtract" Modifiers="Ctrl" Command="{Binding ZoomOutCommand}"/>
+        <!-- 通常キーボードのズーム操作（OemPlus/OemMinusはShift不要版） -->
+        <KeyBinding Key="OemPlus" Modifiers="Ctrl" Command="{Binding ZoomInCommand}"/>
+        <KeyBinding Key="OemMinus" Modifiers="Ctrl" Command="{Binding ZoomOutCommand}"/>
+    </Window.InputBindings>
+
     <Window.Resources>
         <BooleanToVisibilityConverter x:Key="BoolToVisibilityConverter"/>
         <common:OrientationToDisplayNameConverter x:Key="OrientationConverter"/>
