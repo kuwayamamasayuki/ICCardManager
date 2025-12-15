@@ -160,11 +160,24 @@
 
                 <!-- ステータスメッセージ -->
                 <TextBlock Text="{Binding StatusMessage}"
-                           Foreground="#1976D2"
+                           Foreground="#D32F2F"
                            FontWeight="Bold"
                            TextWrapping="Wrap"
-                           Margin="0,0,0,10"
-                           Visibility="{Binding StatusMessage, Converter={StaticResource BoolToVisibilityConverter}}"/>
+                           Margin="0,0,0,10">
+                    <TextBlock.Style>
+                        <Style TargetType="TextBlock">
+                            <Setter Property="Visibility" Value="Visible"/>
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding StatusMessage}" Value="">
+                                    <Setter Property="Visibility" Value="Collapsed"/>
+                                </DataTrigger>
+                                <DataTrigger Binding="{Binding StatusMessage}" Value="{x:Null}">
+                                    <Setter Property="Visibility" Value="Collapsed"/>
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </TextBlock.Style>
+                </TextBlock>
             </StackPanel>
         </ScrollViewer>
 
