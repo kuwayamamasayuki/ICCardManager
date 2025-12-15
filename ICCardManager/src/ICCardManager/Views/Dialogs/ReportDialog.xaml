@@ -121,34 +121,48 @@
                           ToolTip="すべてのカードを選択または解除"/>
 
                 <!-- カード一覧 -->
-                <ListView Grid.Row="1"
-                          ItemsSource="{Binding Cards}"
-                          SelectionMode="Multiple"
-                          BorderThickness="1"
-                          BorderBrush="#DDDDDD">
-                    <ListView.ItemTemplate>
+                <!-- Note: チェックボックスで選択を管理するため、ListViewの選択機能は無効化 -->
+                <ItemsControl Grid.Row="1"
+                              ItemsSource="{Binding Cards}"
+                              BorderThickness="1"
+                              BorderBrush="#DDDDDD"
+                              Background="White">
+                    <ItemsControl.ItemsPanel>
+                        <ItemsPanelTemplate>
+                            <VirtualizingStackPanel/>
+                        </ItemsPanelTemplate>
+                    </ItemsControl.ItemsPanel>
+                    <ItemsControl.Template>
+                        <ControlTemplate TargetType="ItemsControl">
+                            <Border BorderThickness="{TemplateBinding BorderThickness}"
+                                    BorderBrush="{TemplateBinding BorderBrush}"
+                                    Background="{TemplateBinding Background}">
+                                <ScrollViewer VerticalScrollBarVisibility="Auto"
+                                              HorizontalScrollBarVisibility="Disabled">
+                                    <ItemsPresenter/>
+                                </ScrollViewer>
+                            </Border>
+                        </ControlTemplate>
+                    </ItemsControl.Template>
+                    <ItemsControl.ItemTemplate>
                         <DataTemplate>
-                            <CheckBox IsChecked="{Binding IsSelected, Mode=TwoWay}"
-                                      Margin="5">
-                                <StackPanel Orientation="Horizontal">
-                                    <TextBlock Text="{Binding CardType}"
-                                               Width="100"
-                                               FontWeight="Bold"/>
-                                    <TextBlock Text="{Binding CardNumber}"
-                                               Width="100"/>
-                                    <TextBlock Text="{Binding Note}"
-                                               Foreground="Gray"/>
-                                </StackPanel>
-                            </CheckBox>
+                            <Border Padding="5" BorderThickness="0,0,0,1" BorderBrush="#EEEEEE">
+                                <CheckBox IsChecked="{Binding IsSelected, Mode=TwoWay}"
+                                          Margin="5">
+                                    <StackPanel Orientation="Horizontal">
+                                        <TextBlock Text="{Binding CardType}"
+                                                   Width="100"
+                                                   FontWeight="Bold"/>
+                                        <TextBlock Text="{Binding CardNumber}"
+                                                   Width="100"/>
+                                        <TextBlock Text="{Binding Note}"
+                                                   Foreground="Gray"/>
+                                    </StackPanel>
+                                </CheckBox>
+                            </Border>
                         </DataTemplate>
-                    </ListView.ItemTemplate>
-                    <ListView.ItemContainerStyle>
-                        <Style TargetType="ListViewItem">
-                            <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
-                            <Setter Property="Padding" Value="5"/>
-                        </Style>
-                    </ListView.ItemContainerStyle>
-                </ListView>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
             </Grid>
         </GroupBox>
 
