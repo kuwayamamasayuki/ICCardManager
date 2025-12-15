@@ -96,20 +96,49 @@ public partial class PrintPreviewViewModel : ViewModelBase
     }
 
     /// <summary>
+    /// ページ数を再計算（ウィンドウ表示後に呼び出す）
+    /// </summary>
+    public void RecalculatePageCount()
+    {
+        UpdatePageCount();
+    }
+
+    /// <summary>
     /// ページ数を更新
     /// </summary>
     private void UpdatePageCount()
     {
         if (Document != null)
         {
-            var paginator = ((IDocumentPaginatorSource)Document).DocumentPaginator;
+            try
+            {
+                var paginator = ((IDocumentPaginatorSource)Document).DocumentPaginator;
 
-            // ページ数計算のためにコンテンツサイズを設定
-            paginator.PageSize = new System.Windows.Size(
-                Document.PageWidth,
-                Document.PageHeight);
+                // ページ数計算のためにコンテンツサイズを設定
+                paginator.PageSize = new System.Windows.Size(
+                    Document.PageWidth,
+                    Document.PageHeight);
 
-            TotalPages = paginator.PageCount > 0 ? paginator.PageCount : 1;
+                // ドキュメントがまだレンダリングされていない場合、PageCountが正確でない可能性がある
+                // IsPageCountValidプロパティでチェック
+                if (paginator.IsPageCountValid)
+                {
+                    TotalPages = paginator.PageCount > 0 ? paginator.PageCount : 1;
+                }
+                else
+                {
+                    // ページ数が確定していない場合はデフォルト値を設定
+                    // ドキュメント表示後に再計算される
+                    TotalPages = 1;
+                }
+            }
+            catch (Exception ex)
+            {
+                // ドキュメントがまだビジュアルツリーにアタッチされていない場合など
+                // ページ数の取得に失敗することがある
+                System.Diagnostics.Debug.WriteLine($"[PrintPreviewVM] ページ数取得エラー: {ex.Message}");
+                TotalPages = 1;
+            }
         }
         else
         {

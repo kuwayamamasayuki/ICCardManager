@@ -18,6 +18,10 @@
     <Window.Resources>
         <BooleanToVisibilityConverter x:Key="BoolToVisibilityConverter"/>
         <common:OrientationToDisplayNameConverter x:Key="OrientationConverter"/>
+        <DropShadowEffect x:Key="DropShadowEffect"
+                          BlurRadius="15"
+                          ShadowDepth="5"
+                          Opacity="0.4"/>
     </Window.Resources>
 
     <Grid>
@@ -172,12 +176,6 @@
                         HorizontalAlignment="Center"
                         VerticalAlignment="Top"
                         Effect="{StaticResource DropShadowEffect}">
-                    <Border.Resources>
-                        <DropShadowEffect x:Key="DropShadowEffect"
-                                          BlurRadius="15"
-                                          ShadowDepth="5"
-                                          Opacity="0.4"/>
-                    </Border.Resources>
                     <FlowDocumentScrollViewer x:Name="DocumentViewer"
                                               Document="{Binding Document}"
                                               VerticalScrollBarVisibility="Hidden"
