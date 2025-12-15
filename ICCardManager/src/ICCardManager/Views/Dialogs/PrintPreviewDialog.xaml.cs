@@ -18,6 +18,18 @@ public partial class PrintPreviewDialog : Window
         InitializeComponent();
         ViewModel = viewModel;
         DataContext = viewModel;
+
+        // ウィンドウ表示後にページ数を再計算
+        Loaded += OnLoaded;
+    }
+
+    /// <summary>
+    /// ウィンドウ読み込み完了
+    /// </summary>
+    private void OnLoaded(object sender, RoutedEventArgs e)
+    {
+        // ドキュメントがビジュアルツリーにアタッチされた後でページ数を再計算
+        ViewModel.RecalculatePageCount();
     }
 
     /// <summary>
