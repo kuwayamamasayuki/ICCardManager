@@ -89,6 +89,29 @@ public partial class ReportViewModel : ViewModelBase
     }
 
     /// <summary>
+    /// 今月を選択
+    /// </summary>
+    [RelayCommand]
+    public void SelectThisMonth()
+    {
+        var now = DateTime.Now;
+        SelectedYear = now.Year;
+        SelectedMonth = now.Month;
+    }
+
+    /// <summary>
+    /// 先月を選択
+    /// </summary>
+    [RelayCommand]
+    public void SelectLastMonth()
+    {
+        var now = DateTime.Now;
+        var lastMonth = now.AddMonths(-1);
+        SelectedYear = lastMonth.Year;
+        SelectedMonth = lastMonth.Month;
+    }
+
+    /// <summary>
     /// カード一覧を読み込み
     /// </summary>
     [RelayCommand]
