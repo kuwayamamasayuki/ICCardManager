@@ -74,10 +74,27 @@ public partial class PrintPreviewDialog : Window
             // 一度nullを設定してから再設定することで強制的に再描画
             DocumentViewer.Document = null;
             DocumentViewer.Document = ViewModel.Document;
+
+            // ドキュメントのページサイズに合わせてビューアのサイズを設定
+            UpdateViewerSize();
         }
 
         // ページ数を再計算
         ViewModel.RecalculatePageCount();
+    }
+
+    /// <summary>
+    /// ビューアのサイズをドキュメントのページサイズに合わせて更新
+    /// </summary>
+    private void UpdateViewerSize()
+    {
+        if (ViewModel.Document != null)
+        {
+            // ドキュメントのページサイズをビューアのサイズとして設定
+            // ZoomはFlowDocumentScrollViewer内部で適用されるため、ここでは1:1で設定
+            DocumentViewer.Width = ViewModel.Document.PageWidth;
+            DocumentViewer.Height = ViewModel.Document.PageHeight;
+        }
     }
 
     /// <summary>

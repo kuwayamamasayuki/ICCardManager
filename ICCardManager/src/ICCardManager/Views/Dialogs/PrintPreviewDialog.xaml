@@ -176,15 +176,13 @@
                         HorizontalAlignment="Center"
                         VerticalAlignment="Top"
                         Effect="{StaticResource DropShadowEffect}">
-                    <!-- Note: DocumentプロパティはFlowDocumentの特性上、
+                    <!-- Note: DocumentプロパティとサイズはFlowDocumentの特性上、
                          データバインディングではなくコードビハインドで直接設定 -->
                     <FlowDocumentScrollViewer x:Name="DocumentViewer"
                                               VerticalScrollBarVisibility="Hidden"
                                               HorizontalScrollBarVisibility="Hidden"
                                               Zoom="{Binding ZoomLevel}"
                                               IsToolBarVisible="False"
-                                              MinWidth="400"
-                                              MinHeight="500"
                                               AutomationProperties.Name="ドキュメントプレビュー"/>
                 </Border>
             </ScrollViewer>
