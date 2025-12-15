@@ -337,10 +337,12 @@ public partial class PrintPreviewViewModel : ViewModelBase
             }
             else
             {
-                Document.PageWidth = PortraitWidth;    // A4縦 (約21cm)
-                Document.PageHeight = LandscapeWidth;  // A4縦 (約29.7cm)
-                // 縦向きは横幅に収まるよう縮小
+                // 縦向きでもコンテンツは横向きの幅で描画（テーブルが収まるように）
+                // ScaleTransformで縮小して縦向き用紙サイズに見せる
                 ContentScaleFactor = PortraitWidth / LandscapeWidth;  // ≈ 0.707
+                Document.PageWidth = LandscapeWidth;   // 842 (コンテンツが収まる幅)
+                // 縮小後にA4縦の高さ(842)になるように設定: 842 / 0.707 ≈ 1191
+                Document.PageHeight = LandscapeWidth / ContentScaleFactor;
             }
 
             UpdatePageCount();
