@@ -148,6 +148,7 @@ public partial class App : Application
         services.AddSingleton<OperationLogger>();
         services.AddSingleton<CsvExportService>();
         services.AddSingleton<CsvImportService>();
+        services.AddSingleton<IToastNotificationService, ToastNotificationService>();
 
         // Infrastructure層
 #if DEBUG

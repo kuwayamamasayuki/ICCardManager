@@ -73,6 +73,7 @@ public partial class MainViewModel : ViewModelBase
     private readonly ISettingsRepository _settingsRepository;
     private readonly LendingService _lendingService;
     private readonly CardTypeDetector _cardTypeDetector;
+    private readonly IToastNotificationService _toastNotificationService;
 
     private DispatcherTimer? _timeoutTimer;
     private string? _currentStaffIdm;
@@ -178,7 +179,8 @@ public partial class MainViewModel : ViewModelBase
         ILedgerRepository ledgerRepository,
         ISettingsRepository settingsRepository,
         LendingService lendingService,
-        CardTypeDetector cardTypeDetector)
+        CardTypeDetector cardTypeDetector,
+        IToastNotificationService toastNotificationService)
     {
         _cardReader = cardReader;
         _soundPlayer = soundPlayer;
@@ -188,6 +190,7 @@ public partial class MainViewModel : ViewModelBase
         _settingsRepository = settingsRepository;
         _lendingService = lendingService;
         _cardTypeDetector = cardTypeDetector;
+        _toastNotificationService = toastNotificationService;
 
         // イベント登録
         _cardReader.CardRead += OnCardRead;
@@ -530,8 +533,13 @@ public partial class MainViewModel : ViewModelBase
         if (result.Success)
         {
             _soundPlayer.Play(SoundType.Lend);
+
+            // トースト通知を表示（画面右上、フォーカスを奪わない）
+            _toastNotificationService.ShowLendNotification(card.CardType, card.CardNumber);
+
+            // メイン画面のステータスも更新（アクセシビリティ対応）
             SetState(AppState.WaitingForStaffCard,
-                $"🚃→ いってらっしゃい！\n{card.CardType} {card.CardNumber}",
+                $"🚃→ 貸出完了\n{card.CardType} {card.CardNumber}",
                 "#FFE0B2"); // 薄いオレンジ
 
             await RefreshLentCardsAsync();
@@ -568,7 +576,11 @@ public partial class MainViewModel : ViewModelBase
         {
             _soundPlayer.Play(SoundType.Return);
 
-            var message = $"🏠← おかえりなさい！\n{card.CardType} {card.CardNumber}\n残額: {result.Balance:N0}円";
+            // トースト通知を表示（画面右上、フォーカスを奪わない）
+            _toastNotificationService.ShowReturnNotification(card.CardType, card.CardNumber, result.Balance, result.IsLowBalance);
+
+            // メイン画面のステータスも更新（アクセシビリティ対応）
+            var message = $"🏠← 返却完了\n{card.CardType} {card.CardNumber}\n残額: {result.Balance:N0}円";
             if (result.IsLowBalance)
             {
                 message += "\n⚠️ 残額が少なくなっています";
