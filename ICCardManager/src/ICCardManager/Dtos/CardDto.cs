@@ -1,11 +1,18 @@
+using CommunityToolkit.Mvvm.ComponentModel;
+
 namespace ICCardManager.Dtos;
 
 /// <summary>
 /// カード情報DTO
 /// ViewModelで使用するカード情報の表示用オブジェクト
 /// </summary>
-public class CardDto
+public partial class CardDto : ObservableObject
 {
+    /// <summary>
+    /// 選択状態（帳票作成画面等で使用）
+    /// </summary>
+    [ObservableProperty]
+    private bool _isSelected;
     /// <summary>
     /// カードIDm（16進数16文字）
     /// </summary>

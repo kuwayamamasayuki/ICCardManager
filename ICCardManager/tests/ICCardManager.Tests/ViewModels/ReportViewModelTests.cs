@@ -381,6 +381,119 @@ public class ReportViewModelTests
 
     #endregion
 
+    #region 個別チェックボックス連動テスト
+
+    /// <summary>
+    /// 個別のカードのIsSelectedを変更するとSelectedCardsが更新されること
+    /// </summary>
+    [Fact]
+    public async Task CardIsSelected_WhenChangedToFalse_ShouldRemoveFromSelectedCards()
+    {
+        // Arrange
+        var cards = new List<IcCard>
+        {
+            new() { CardIdm = "01", CardType = "nimoca", CardNumber = "N-001" },
+            new() { CardIdm = "02", CardType = "はやかけん", CardNumber = "H-001" }
+        };
+        _cardRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(cards);
+        await _viewModel.LoadCardsAsync();
+
+        var targetCard = _viewModel.Cards[0];
+        _viewModel.SelectedCards.Should().HaveCount(2);
+
+        // Act - 個別チェックボックスをOFFにする（UIの動作をシミュレート）
+        targetCard.IsSelected = false;
+
+        // Assert
+        _viewModel.SelectedCards.Should().HaveCount(1);
+        _viewModel.SelectedCards.Should().NotContain(targetCard);
+        _viewModel.IsAllSelected.Should().BeFalse();
+    }
+
+    /// <summary>
+    /// 個別のカードのIsSelectedを変更してすべて選択状態になるとIsAllSelectedがtrueになること
+    /// </summary>
+    [Fact]
+    public async Task CardIsSelected_WhenAllSelected_ShouldSetIsAllSelectedToTrue()
+    {
+        // Arrange
+        var cards = new List<IcCard>
+        {
+            new() { CardIdm = "01", CardType = "nimoca", CardNumber = "N-001" },
+            new() { CardIdm = "02", CardType = "はやかけん", CardNumber = "H-001" }
+        };
+        _cardRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(cards);
+        await _viewModel.LoadCardsAsync();
+
+        // 全解除
+        _viewModel.IsAllSelected = false;
+        _viewModel.SelectedCards.Should().BeEmpty();
+
+        // Act - 個別に全カードを選択
+        foreach (var card in _viewModel.Cards)
+        {
+            card.IsSelected = true;
+        }
+
+        // Assert
+        _viewModel.SelectedCards.Should().HaveCount(2);
+        _viewModel.IsAllSelected.Should().BeTrue();
+    }
+
+    /// <summary>
+    /// すべて選択チェックボックスをONにすると各カードのIsSelectedもtrueになること
+    /// </summary>
+    [Fact]
+    public async Task IsAllSelected_WhenSetToTrue_ShouldSetAllCardsIsSelectedToTrue()
+    {
+        // Arrange
+        var cards = new List<IcCard>
+        {
+            new() { CardIdm = "01", CardType = "nimoca", CardNumber = "N-001" },
+            new() { CardIdm = "02", CardType = "はやかけん", CardNumber = "H-001" }
+        };
+        _cardRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(cards);
+        await _viewModel.LoadCardsAsync();
+
+        // 全解除
+        _viewModel.IsAllSelected = false;
+        _viewModel.Cards.All(c => !c.IsSelected).Should().BeTrue();
+
+        // Act
+        _viewModel.IsAllSelected = true;
+
+        // Assert
+        _viewModel.Cards.All(c => c.IsSelected).Should().BeTrue();
+        _viewModel.SelectedCards.Should().HaveCount(2);
+    }
+
+    /// <summary>
+    /// すべて選択チェックボックスをOFFにすると各カードのIsSelectedもfalseになること
+    /// </summary>
+    [Fact]
+    public async Task IsAllSelected_WhenSetToFalse_ShouldSetAllCardsIsSelectedToFalse()
+    {
+        // Arrange
+        var cards = new List<IcCard>
+        {
+            new() { CardIdm = "01", CardType = "nimoca", CardNumber = "N-001" },
+            new() { CardIdm = "02", CardType = "はやかけん", CardNumber = "H-001" }
+        };
+        _cardRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(cards);
+        await _viewModel.LoadCardsAsync();
+
+        _viewModel.Cards.All(c => c.IsSelected).Should().BeTrue();
+
+        // Act
+        _viewModel.IsAllSelected = false;
+
+        // Assert
+        _viewModel.Cards.All(c => !c.IsSelected).Should().BeTrue();
+        _viewModel.SelectedCards.Should().BeEmpty();
+    }
+
+    #endregion
+
     #region InitializeAsyncテスト
 
     /// <summary>
