@@ -133,6 +133,60 @@ public class MigrationRunner
     }
 
     /// <summary>
+    /// 未適用のマイグレーション一覧を取得（ドライラン用）
+    /// </summary>
+    /// <returns>未適用のマイグレーション一覧</returns>
+    public IReadOnlyList<IMigration> GetPendingMigrations()
+    {
+        var currentVersion = GetCurrentVersion();
+        return _migrations
+            .Where(m => m.Version > currentVersion)
+            .OrderBy(m => m.Version)
+            .ToList();
+    }
+
+    /// <summary>
+    /// マイグレーションシーケンスを検証（バージョンギャップの検出）
+    /// </summary>
+    /// <exception cref="MigrationException">バージョンギャップが検出された場合</exception>
+    public void ValidateMigrationSequence()
+    {
+        if (_migrations.Count == 0)
+        {
+            return;
+        }
+
+        var versions = _migrations.Select(m => m.Version).ToList();
+
+        // 重複チェック（最初に実行）
+        var duplicates = versions.GroupBy(v => v).Where(g => g.Count() > 1).Select(g => g.Key).ToList();
+        if (duplicates.Count > 0)
+        {
+            throw new MigrationException($"マイグレーションバージョンが重複しています: {string.Join(", ", duplicates)}");
+        }
+
+        // ソート後にギャップチェック
+        var sortedVersions = versions.OrderBy(v => v).ToList();
+
+        // 最初のバージョンは1であるべき
+        if (sortedVersions[0] != 1)
+        {
+            throw new MigrationException($"マイグレーションはバージョン1から開始する必要があります。最初のバージョン: {sortedVersions[0]}");
+        }
+
+        // 連続したバージョン番号であることを確認
+        for (var i = 1; i < sortedVersions.Count; i++)
+        {
+            var expected = sortedVersions[i - 1] + 1;
+            var actual = sortedVersions[i];
+            if (actual != expected)
+            {
+                throw new MigrationException($"マイグレーションバージョンにギャップがあります。バージョン{expected}が見つかりません（{sortedVersions[i - 1]}の次が{actual}）");
+            }
+        }
+    }
+
+    /// <summary>
     /// マイグレーションを適用
     /// </summary>
     private void ApplyMigration(IMigration migration)
@@ -150,11 +204,18 @@ public class MigrationRunner
 
             transaction.Commit();
             System.Diagnostics.Debug.WriteLine($"[Migration] Successfully applied migration {migration.Version}");
+
+            // 成功ログを記録
+            LogMigrationAction("MIGRATION_UP", migration, success: true);
         }
         catch (Exception ex)
         {
             System.Diagnostics.Debug.WriteLine($"[Migration] Failed to apply migration {migration.Version}: {ex.Message}");
             transaction.Rollback();
+
+            // 失敗ログを記録
+            LogMigrationAction("MIGRATION_UP", migration, success: false, ex.Message);
+
             throw new MigrationException($"マイグレーション {migration.Version} の適用に失敗しました: {migration.Description}", ex);
         }
     }
@@ -177,11 +238,18 @@ public class MigrationRunner
 
             transaction.Commit();
             System.Diagnostics.Debug.WriteLine($"[Migration] Successfully rolled back migration {migration.Version}");
+
+            // 成功ログを記録
+            LogMigrationAction("MIGRATION_DOWN", migration, success: true);
         }
         catch (Exception ex)
         {
             System.Diagnostics.Debug.WriteLine($"[Migration] Failed to rollback migration {migration.Version}: {ex.Message}");
             transaction.Rollback();
+
+            // 失敗ログを記録
+            LogMigrationAction("MIGRATION_DOWN", migration, success: false, ex.Message);
+
             throw new MigrationException($"マイグレーション {migration.Version} のロールバックに失敗しました: {migration.Description}", ex);
         }
     }
@@ -225,6 +293,50 @@ public class MigrationRunner
         command.CommandText = "DELETE FROM schema_migrations WHERE version = @version";
         command.Parameters.AddWithValue("@version", migration.Version);
         command.ExecuteNonQuery();
+    }
+
+    /// <summary>
+    /// マイグレーション実行ログを記録（operation_logテーブルが存在する場合）
+    /// </summary>
+    /// <param name="action">アクション（MIGRATION_UP / MIGRATION_DOWN）</param>
+    /// <param name="migration">マイグレーション</param>
+    /// <param name="success">成功したかどうか</param>
+    /// <param name="errorMessage">エラーメッセージ（失敗時）</param>
+    private void LogMigrationAction(string action, IMigration migration, bool success, string? errorMessage = null)
+    {
+        try
+        {
+            // operation_logテーブルの存在確認
+            using var checkCmd = _connection.CreateCommand();
+            checkCmd.CommandText = "SELECT name FROM sqlite_master WHERE type='table' AND name='operation_log'";
+            if (checkCmd.ExecuteScalar() == null)
+            {
+                // テーブルが存在しない場合はスキップ
+                return;
+            }
+
+            var afterData = success
+                ? $"{{\"version\":{migration.Version},\"description\":\"{migration.Description}\",\"status\":\"success\"}}"
+                : $"{{\"version\":{migration.Version},\"description\":\"{migration.Description}\",\"status\":\"failed\",\"error\":\"{errorMessage?.Replace("\"", "\\\"") ?? ""}\"}}";
+
+            using var command = _connection.CreateCommand();
+            command.CommandText = """
+                INSERT INTO operation_log (operator_idm, operator_name, target_table, target_id, action, after_data)
+                VALUES (@operator_idm, @operator_name, @target_table, @target_id, @action, @after_data)
+                """;
+            command.Parameters.AddWithValue("@operator_idm", "SYSTEM");
+            command.Parameters.AddWithValue("@operator_name", "MigrationRunner");
+            command.Parameters.AddWithValue("@target_table", "schema_migrations");
+            command.Parameters.AddWithValue("@target_id", migration.Version.ToString());
+            command.Parameters.AddWithValue("@action", action);
+            command.Parameters.AddWithValue("@after_data", afterData);
+            command.ExecuteNonQuery();
+        }
+        catch (Exception ex)
+        {
+            // ログ記録の失敗はマイグレーション自体には影響させない
+            System.Diagnostics.Debug.WriteLine($"[Migration] Failed to log migration action: {ex.Message}");
+        }
     }
 
     /// <summary>

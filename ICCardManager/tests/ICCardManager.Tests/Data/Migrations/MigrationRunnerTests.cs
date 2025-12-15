@@ -248,6 +248,186 @@ public class MigrationRunnerTests : IDisposable
         applied[0].AppliedAt.Should().BeBefore(DateTime.Now.AddSeconds(1));
     }
 
+    // ===== 新機能のテスト =====
+
+    [Fact]
+    [Trait("Category", "Unit")]
+    public void GetPendingMigrations_ReturnsPendingMigrationsInOrder()
+    {
+        // Arrange
+        var migrations = new[]
+        {
+            new TestMigration(1, "マイグレーション1"),
+            new TestMigration(2, "マイグレーション2"),
+            new TestMigration(3, "マイグレーション3")
+        };
+        var runner = new MigrationRunner(_connection, migrations);
+        runner.MigrateTo(1);
+
+        // Act
+        var pending = runner.GetPendingMigrations();
+
+        // Assert
+        pending.Should().HaveCount(2);
+        pending[0].Version.Should().Be(2);
+        pending[1].Version.Should().Be(3);
+    }
+
+    [Fact]
+    [Trait("Category", "Unit")]
+    public void GetPendingMigrations_AllApplied_ReturnsEmpty()
+    {
+        // Arrange
+        var migrations = new[]
+        {
+            new TestMigration(1, "マイグレーション1"),
+            new TestMigration(2, "マイグレーション2")
+        };
+        var runner = new MigrationRunner(_connection, migrations);
+        runner.MigrateToLatest();
+
+        // Act
+        var pending = runner.GetPendingMigrations();
+
+        // Assert
+        pending.Should().BeEmpty();
+    }
+
+    [Fact]
+    [Trait("Category", "Unit")]
+    public void ValidateMigrationSequence_ValidSequence_DoesNotThrow()
+    {
+        // Arrange
+        var migrations = new[]
+        {
+            new TestMigration(1, "マイグレーション1"),
+            new TestMigration(2, "マイグレーション2"),
+            new TestMigration(3, "マイグレーション3")
+        };
+        var runner = new MigrationRunner(_connection, migrations);
+
+        // Act & Assert
+        var act = () => runner.ValidateMigrationSequence();
+        act.Should().NotThrow();
+    }
+
+    [Fact]
+    [Trait("Category", "Unit")]
+    public void ValidateMigrationSequence_GapInVersions_ThrowsException()
+    {
+        // Arrange
+        var migrations = new[]
+        {
+            new TestMigration(1, "マイグレーション1"),
+            new TestMigration(3, "マイグレーション3") // バージョン2が欠落
+        };
+        var runner = new MigrationRunner(_connection, migrations);
+
+        // Act & Assert
+        var act = () => runner.ValidateMigrationSequence();
+        act.Should().Throw<MigrationException>()
+            .WithMessage("*バージョン2が見つかりません*");
+    }
+
+    [Fact]
+    [Trait("Category", "Unit")]
+    public void ValidateMigrationSequence_NotStartingWith1_ThrowsException()
+    {
+        // Arrange
+        var migrations = new[]
+        {
+            new TestMigration(2, "マイグレーション2"), // バージョン1から開始していない
+            new TestMigration(3, "マイグレーション3")
+        };
+        var runner = new MigrationRunner(_connection, migrations);
+
+        // Act & Assert
+        var act = () => runner.ValidateMigrationSequence();
+        act.Should().Throw<MigrationException>()
+            .WithMessage("*バージョン1から開始する必要があります*");
+    }
+
+    [Fact]
+    [Trait("Category", "Unit")]
+    public void ValidateMigrationSequence_DuplicateVersions_ThrowsException()
+    {
+        // Arrange
+        var migrations = new[]
+        {
+            new TestMigration(1, "マイグレーション1-A"),
+            new TestMigration(1, "マイグレーション1-B"), // 重複
+            new TestMigration(2, "マイグレーション2")
+        };
+        var runner = new MigrationRunner(_connection, migrations);
+
+        // Act & Assert
+        var act = () => runner.ValidateMigrationSequence();
+        act.Should().Throw<MigrationException>()
+            .WithMessage("*重複しています*");
+    }
+
+    [Fact]
+    [Trait("Category", "Unit")]
+    public void ValidateMigrationSequence_EmptyMigrations_DoesNotThrow()
+    {
+        // Arrange
+        var runner = new MigrationRunner(_connection, Array.Empty<IMigration>());
+
+        // Act & Assert
+        var act = () => runner.ValidateMigrationSequence();
+        act.Should().NotThrow();
+    }
+
+    [Fact]
+    [Trait("Category", "Unit")]
+    public void MigrateToLatest_WithOperationLogTable_LogsMigration()
+    {
+        // Arrange - operation_logテーブルを作成
+        using (var cmd = _connection.CreateCommand())
+        {
+            cmd.CommandText = """
+                CREATE TABLE operation_log (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    timestamp TEXT DEFAULT CURRENT_TIMESTAMP,
+                    operator_idm TEXT NOT NULL,
+                    operator_name TEXT NOT NULL,
+                    target_table TEXT,
+                    target_id TEXT,
+                    action TEXT,
+                    before_data TEXT,
+                    after_data TEXT
+                )
+                """;
+            cmd.ExecuteNonQuery();
+        }
+
+        var migration = new TestMigration(1, "テストマイグレーション");
+        var runner = new MigrationRunner(_connection, new[] { migration });
+
+        // Act
+        runner.MigrateToLatest();
+
+        // Assert - ログが記録されていることを確認
+        using var checkCmd = _connection.CreateCommand();
+        checkCmd.CommandText = "SELECT COUNT(*) FROM operation_log WHERE action = 'MIGRATION_UP'";
+        var logCount = Convert.ToInt32(checkCmd.ExecuteScalar());
+        logCount.Should().Be(1);
+    }
+
+    [Fact]
+    [Trait("Category", "Unit")]
+    public void MigrateToLatest_WithoutOperationLogTable_DoesNotFail()
+    {
+        // Arrange - operation_logテーブルなし
+        var migration = new TestMigration(1, "テストマイグレーション");
+        var runner = new MigrationRunner(_connection, new[] { migration });
+
+        // Act & Assert - エラーなく実行できること
+        var act = () => runner.MigrateToLatest();
+        act.Should().NotThrow();
+        runner.GetCurrentVersion().Should().Be(1);
+    }
+
     /// <summary>
     /// テスト用マイグレーション
     /// </summary>
