@@ -176,8 +176,9 @@
                         HorizontalAlignment="Center"
                         VerticalAlignment="Top"
                         Effect="{StaticResource DropShadowEffect}">
+                    <!-- Note: DocumentプロパティはFlowDocumentの特性上、
+                         データバインディングではなくコードビハインドで直接設定 -->
                     <FlowDocumentScrollViewer x:Name="DocumentViewer"
-                                              Document="{Binding Document}"
                                               VerticalScrollBarVisibility="Hidden"
                                               HorizontalScrollBarVisibility="Hidden"
                                               Zoom="{Binding ZoomLevel}"

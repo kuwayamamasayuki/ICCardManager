@@ -1,4 +1,5 @@
 using System.Windows;
+using System.Windows.Documents;
 using ICCardManager.ViewModels;
 
 namespace ICCardManager.Views.Dialogs;
@@ -19,8 +20,20 @@ public partial class PrintPreviewDialog : Window
         ViewModel = viewModel;
         DataContext = viewModel;
 
-        // ウィンドウ表示後にページ数を再計算
+        // ウィンドウ表示後にドキュメントを設定
         Loaded += OnLoaded;
+    }
+
+    /// <summary>
+    /// ドキュメントを設定（バインディングの代わりに直接設定）
+    /// </summary>
+    /// <remarks>
+    /// FlowDocumentは一度に1つの親要素にしか所属できないため、
+    /// データバインディングではなく直接設定する必要がある場合がある
+    /// </remarks>
+    public void SetDocument(FlowDocument document)
+    {
+        DocumentViewer.Document = document;
     }
 
     /// <summary>
@@ -28,7 +41,13 @@ public partial class PrintPreviewDialog : Window
     /// </summary>
     private void OnLoaded(object sender, RoutedEventArgs e)
     {
-        // ドキュメントがビジュアルツリーにアタッチされた後でページ数を再計算
+        // ViewModelのドキュメントをFlowDocumentScrollViewerに直接設定
+        if (ViewModel.Document != null)
+        {
+            DocumentViewer.Document = ViewModel.Document;
+        }
+
+        // ページ数を再計算
         ViewModel.RecalculatePageCount();
     }
 
