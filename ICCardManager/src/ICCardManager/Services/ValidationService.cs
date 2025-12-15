@@ -39,9 +39,9 @@ public partial class ValidationService : IValidationService
     private const int WarningBalanceMin = 0;
 
     /// <summary>
-    /// 残額警告閾値の最大値
+    /// 残額警告閾値の最大値（交通系ICカードのチャージ上限は20,000円）
     /// </summary>
-    private const int WarningBalanceMax = 50000;
+    private const int WarningBalanceMax = 20000;
 
     #endregion
 

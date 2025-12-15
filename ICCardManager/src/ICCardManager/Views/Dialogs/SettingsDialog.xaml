@@ -40,12 +40,12 @@
                                      VerticalAlignment="Center"
                                      AutomationProperties.Name="残額警告しきい値"
                                      AutomationProperties.HelpText="この金額を下回ると警告が表示されます"
-                                     ToolTip="0～50,000円の範囲で設定"/>
+                                     ToolTip="0～20,000円の範囲で設定"/>
                             <TextBlock Text="円"
                                        VerticalAlignment="Center"
                                        Margin="10,0,0,0"/>
                         </StackPanel>
-                        <TextBlock Text="※ 0～50,000円の範囲で設定できます"
+                        <TextBlock Text="※ 0～20,000円の範囲で設定できます"
                                    FontSize="{DynamicResource SmallFontSize}"
                                    Foreground="Gray"
                                    Margin="0,5,0,0"/>

@@ -313,8 +313,8 @@ public class ValidationServiceTests
     [Theory]
     [InlineData(0)]
     [InlineData(1000)]
-    [InlineData(25000)]
-    [InlineData(50000)]
+    [InlineData(15000)]
+    [InlineData(20000)]
     public void ValidateWarningBalance_WithValidBalance_ShouldReturnSuccess(int balance)
     {
         // Act
@@ -342,12 +342,12 @@ public class ValidationServiceTests
     }
 
     /// <summary>
-    /// 50,000円を超える残額警告閾値はエラーになること
+    /// 20,000円を超える残額警告閾値はエラーになること
     /// </summary>
     [Theory]
-    [InlineData(50001)]
-    [InlineData(60000)]
-    [InlineData(100000)]
+    [InlineData(20001)]
+    [InlineData(30000)]
+    [InlineData(50000)]
     public void ValidateWarningBalance_WithExcessiveBalance_ShouldReturnError(int balance)
     {
         // Act
@@ -355,7 +355,7 @@ public class ValidationServiceTests
 
         // Assert
         result.IsValid.Should().BeFalse();
-        result.ErrorMessage.Should().Contain("50,000円以下");
+        result.ErrorMessage.Should().Contain("20,000円以下");
     }
 
     #endregion

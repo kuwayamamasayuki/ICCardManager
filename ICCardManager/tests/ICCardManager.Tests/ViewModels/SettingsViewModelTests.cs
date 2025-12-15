@@ -119,23 +119,23 @@ public class SettingsViewModelTests
     }
 
     /// <summary>
-    /// 残額警告閾値が50,000円を超える場合、エラーメッセージが表示されること
+    /// 残額警告閾値が20,000円を超える場合、エラーメッセージが表示されること
     /// </summary>
     [Fact]
     public async Task SaveAsync_WithExcessiveWarningBalance_ShouldShowErrorMessage()
     {
         // Arrange
-        _viewModel.WarningBalance = 60000;
+        _viewModel.WarningBalance = 30000;
 
         // 上限を超える値に対してエラーを返すようモックを設定
-        _validationServiceMock.Setup(v => v.ValidateWarningBalance(60000))
-            .Returns(ValidationResult.Failure("残額警告閾値は50,000円以下で入力してください"));
+        _validationServiceMock.Setup(v => v.ValidateWarningBalance(30000))
+            .Returns(ValidationResult.Failure("残額警告閾値は20,000円以下で入力してください"));
 
         // Act
         await _viewModel.SaveAsync();
 
         // Assert
-        _viewModel.StatusMessage.Should().Contain("50,000円以下");
+        _viewModel.StatusMessage.Should().Contain("20,000円以下");
         _settingsRepositoryMock.Verify(r => r.SaveAppSettingsAsync(It.IsAny<AppSettings>()), Times.Never);
     }
 
@@ -164,7 +164,7 @@ public class SettingsViewModelTests
     }
 
     /// <summary>
-    /// 残額警告閾値が範囲内（50,000円）の場合、リポジトリに保存が試みられること
+    /// 残額警告閾値が範囲内（20,000円）の場合、リポジトリに保存が試みられること
     /// </summary>
     /// <remarks>
     /// SaveAsync成功後のApplyFontSizeはWPFコンテキストが必要なため、
@@ -174,7 +174,7 @@ public class SettingsViewModelTests
     public async Task SaveAsync_WithMaxWarningBalance_ShouldCallRepository()
     {
         // Arrange
-        _viewModel.WarningBalance = 50000;
+        _viewModel.WarningBalance = 20000;
         _viewModel.BackupPath = "";
         _settingsRepositoryMock
             .Setup(r => r.SaveAppSettingsAsync(It.IsAny<AppSettings>()))
@@ -184,7 +184,7 @@ public class SettingsViewModelTests
         await _viewModel.SaveAsync();
 
         // Assert - リポジトリが正しいパラメータで呼ばれたことを検証
-        _settingsRepositoryMock.Verify(r => r.SaveAppSettingsAsync(It.Is<AppSettings>(s => s.WarningBalance == 50000)), Times.Once);
+        _settingsRepositoryMock.Verify(r => r.SaveAppSettingsAsync(It.Is<AppSettings>(s => s.WarningBalance == 20000)), Times.Once);
     }
 
     #endregion
