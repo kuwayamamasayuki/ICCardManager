@@ -34,6 +34,12 @@ public partial class SettingsViewModel : ViewModelBase
     private bool _hasChanges;
 
     /// <summary>
+    /// 保存が完了したかどうか
+    /// </summary>
+    [ObservableProperty]
+    private bool _isSaved;
+
+    /// <summary>
     /// 職員証タッチをスキップするかどうか
     /// </summary>
     [ObservableProperty]
@@ -194,6 +200,9 @@ public partial class SettingsViewModel : ViewModelBase
 
                 // 文字サイズの変更を反映
                 ApplyFontSize(settings.FontSize);
+
+                // 保存完了フラグを立てる（ダイアログを閉じるトリガー）
+                IsSaved = true;
             }
             else
             {

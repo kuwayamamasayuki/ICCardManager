@@ -183,7 +183,7 @@
                     AutomationProperties.HelpText="変更を保存せずにダイアログを閉じます"
                     ToolTip="変更を破棄 (Escape)"/>
             <Button Content="保存"
-                    Command="{Binding SaveAsyncCommand}"
+                    Click="SaveButton_Click"
                     Padding="20,10"
                     MinWidth="100"
                     Background="#2196F3"
