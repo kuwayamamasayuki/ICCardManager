@@ -1,4 +1,5 @@
 using System.Windows;
+using System.Windows.Documents;
 using ICCardManager.ViewModels;
 
 namespace ICCardManager.Views.Dialogs;
@@ -19,8 +20,22 @@ public partial class PrintPreviewDialog : Window
         ViewModel = viewModel;
         DataContext = viewModel;
 
-        // ウィンドウ表示後にページ数を再計算
+        // イベント購読
         Loaded += OnLoaded;
+        Unloaded += OnUnloaded;
+        ViewModel.DocumentNeedsRefresh += OnDocumentNeedsRefresh;
+    }
+
+    /// <summary>
+    /// ドキュメントを設定（バインディングの代わりに直接設定）
+    /// </summary>
+    /// <remarks>
+    /// FlowDocumentは一度に1つの親要素にしか所属できないため、
+    /// データバインディングではなく直接設定する必要がある場合がある
+    /// </remarks>
+    public void SetDocument(FlowDocument document)
+    {
+        DocumentViewer.Document = document;
     }
 
     /// <summary>
@@ -28,8 +43,58 @@ public partial class PrintPreviewDialog : Window
     /// </summary>
     private void OnLoaded(object sender, RoutedEventArgs e)
     {
-        // ドキュメントがビジュアルツリーにアタッチされた後でページ数を再計算
+        // ViewModelのドキュメントをFlowDocumentScrollViewerに直接設定
+        RefreshDocument();
+    }
+
+    /// <summary>
+    /// ウィンドウアンロード時
+    /// </summary>
+    private void OnUnloaded(object sender, RoutedEventArgs e)
+    {
+        // イベント購読解除（メモリリーク防止）
+        ViewModel.DocumentNeedsRefresh -= OnDocumentNeedsRefresh;
+    }
+
+    /// <summary>
+    /// ドキュメント再描画イベントハンドラ
+    /// </summary>
+    private void OnDocumentNeedsRefresh(object? sender, EventArgs e)
+    {
+        RefreshDocument();
+    }
+
+    /// <summary>
+    /// ドキュメントを再設定して再描画
+    /// </summary>
+    private void RefreshDocument()
+    {
+        if (ViewModel.Document != null)
+        {
+            // 一度nullを設定してから再設定することで強制的に再描画
+            DocumentViewer.Document = null;
+            DocumentViewer.Document = ViewModel.Document;
+
+            // ドキュメントのページサイズに合わせてビューアのサイズを設定
+            UpdateViewerSize();
+        }
+
+        // ページ数を再計算
         ViewModel.RecalculatePageCount();
+    }
+
+    /// <summary>
+    /// ビューアのサイズをドキュメントのページサイズに合わせて更新
+    /// </summary>
+    private void UpdateViewerSize()
+    {
+        if (ViewModel.Document != null)
+        {
+            // ドキュメントのページサイズをビューアのサイズとして設定
+            // ZoomはFlowDocumentScrollViewer内部で適用されるため、ここでは1:1で設定
+            DocumentViewer.Width = ViewModel.Document.PageWidth;
+            DocumentViewer.Height = ViewModel.Document.PageHeight;
+        }
     }
 
     /// <summary>
