@@ -18,6 +18,16 @@ public partial class SettingsDialog : Window
         DataContext = _viewModel;
 
         Loaded += async (s, e) => await _viewModel.InitializeAsync();
+
+        // 保存完了時に自動的に閉じる
+        _viewModel.PropertyChanged += (s, e) =>
+        {
+            if (e.PropertyName == nameof(SettingsViewModel.IsSaved) && _viewModel.IsSaved)
+            {
+                DialogResult = true;
+                Close();
+            }
+        };
     }
 
     /// <summary>
