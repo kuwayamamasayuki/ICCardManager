@@ -13,6 +13,11 @@ public partial class PrintPreviewViewModel : ViewModelBase
 {
     private readonly PrintService _printService;
 
+    /// <summary>
+    /// ドキュメントの再描画が必要な場合に発火するイベント
+    /// </summary>
+    public event EventHandler? DocumentNeedsRefresh;
+
     [ObservableProperty]
     private FlowDocument? _document;
 
@@ -311,6 +316,9 @@ public partial class PrintPreviewViewModel : ViewModelBase
             }
 
             UpdatePageCount();
+
+            // FlowDocumentScrollViewerに再描画を通知
+            DocumentNeedsRefresh?.Invoke(this, EventArgs.Empty);
 
             var orientationName = GetOrientationDisplayName(value);
             StatusMessage = $"用紙方向を{orientationName}に変更しました";

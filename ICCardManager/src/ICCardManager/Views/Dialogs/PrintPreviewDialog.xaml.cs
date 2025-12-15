@@ -20,8 +20,10 @@ public partial class PrintPreviewDialog : Window
         ViewModel = viewModel;
         DataContext = viewModel;
 
-        // ウィンドウ表示後にドキュメントを設定
+        // イベント購読
         Loaded += OnLoaded;
+        Unloaded += OnUnloaded;
+        ViewModel.DocumentNeedsRefresh += OnDocumentNeedsRefresh;
     }
 
     /// <summary>
@@ -42,8 +44,35 @@ public partial class PrintPreviewDialog : Window
     private void OnLoaded(object sender, RoutedEventArgs e)
     {
         // ViewModelのドキュメントをFlowDocumentScrollViewerに直接設定
+        RefreshDocument();
+    }
+
+    /// <summary>
+    /// ウィンドウアンロード時
+    /// </summary>
+    private void OnUnloaded(object sender, RoutedEventArgs e)
+    {
+        // イベント購読解除（メモリリーク防止）
+        ViewModel.DocumentNeedsRefresh -= OnDocumentNeedsRefresh;
+    }
+
+    /// <summary>
+    /// ドキュメント再描画イベントハンドラ
+    /// </summary>
+    private void OnDocumentNeedsRefresh(object? sender, EventArgs e)
+    {
+        RefreshDocument();
+    }
+
+    /// <summary>
+    /// ドキュメントを再設定して再描画
+    /// </summary>
+    private void RefreshDocument()
+    {
         if (ViewModel.Document != null)
         {
+            // 一度nullを設定してから再設定することで強制的に再描画
+            DocumentViewer.Document = null;
             DocumentViewer.Document = ViewModel.Document;
         }
 
