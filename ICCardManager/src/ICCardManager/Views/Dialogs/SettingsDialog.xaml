@@ -40,12 +40,12 @@
                                      VerticalAlignment="Center"
                                      AutomationProperties.Name="残額警告しきい値"
                                      AutomationProperties.HelpText="この金額を下回ると警告が表示されます"
-                                     ToolTip="0～50,000円の範囲で設定"/>
+                                     ToolTip="0～20,000円の範囲で設定"/>
                             <TextBlock Text="円"
                                        VerticalAlignment="Center"
                                        Margin="10,0,0,0"/>
                         </StackPanel>
-                        <TextBlock Text="※ 0～50,000円の範囲で設定できます"
+                        <TextBlock Text="※ 0～20,000円の範囲で設定できます"
                                    FontSize="{DynamicResource SmallFontSize}"
                                    Foreground="Gray"
                                    Margin="0,5,0,0"/>
@@ -158,40 +158,56 @@
                     </StackPanel>
                 </GroupBox>
 
-                <!-- ステータスメッセージ -->
-                <TextBlock Text="{Binding StatusMessage}"
-                           Foreground="#1976D2"
-                           FontWeight="Bold"
-                           TextWrapping="Wrap"
-                           Margin="0,0,0,10"
-                           Visibility="{Binding StatusMessage, Converter={StaticResource BoolToVisibilityConverter}}"/>
             </StackPanel>
         </ScrollViewer>
 
-        <!-- ボタン -->
-        <StackPanel Grid.Row="1"
-                    Orientation="Horizontal"
-                    HorizontalAlignment="Right"
-                    Margin="0,20,0,0">
-            <Button Content="キャンセル"
-                    Click="CancelButton_Click"
-                    Padding="20,10"
-                    Margin="0,0,10,0"
-                    MinWidth="100"
-                    IsCancel="True"
-                    AutomationProperties.Name="キャンセル"
-                    AutomationProperties.HelpText="変更を保存せずにダイアログを閉じます"
-                    ToolTip="変更を破棄 (Escape)"/>
-            <Button Content="保存"
-                    Click="SaveButton_Click"
-                    Padding="20,10"
-                    MinWidth="100"
-                    Background="#2196F3"
-                    Foreground="White"
-                    IsDefault="True"
-                    AutomationProperties.Name="設定を保存"
-                    AutomationProperties.HelpText="変更を保存してダイアログを閉じます"
-                    ToolTip="設定を保存 (Enter)"/>
+        <!-- ステータスメッセージとボタン -->
+        <StackPanel Grid.Row="1" Margin="0,15,0,0">
+            <!-- エラーメッセージ（常に表示領域内） -->
+            <TextBlock Text="{Binding StatusMessage}"
+                       Foreground="#D32F2F"
+                       FontWeight="Bold"
+                       TextWrapping="Wrap"
+                       Margin="0,0,0,10"
+                       AutomationProperties.LiveSetting="Assertive">
+                <TextBlock.Style>
+                    <Style TargetType="TextBlock">
+                        <Setter Property="Visibility" Value="Visible"/>
+                        <Style.Triggers>
+                            <DataTrigger Binding="{Binding StatusMessage}" Value="">
+                                <Setter Property="Visibility" Value="Collapsed"/>
+                            </DataTrigger>
+                            <DataTrigger Binding="{Binding StatusMessage}" Value="{x:Null}">
+                                <Setter Property="Visibility" Value="Collapsed"/>
+                            </DataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </TextBlock.Style>
+            </TextBlock>
+
+            <!-- ボタン -->
+            <StackPanel Orientation="Horizontal"
+                        HorizontalAlignment="Right">
+                <Button Content="キャンセル"
+                        Click="CancelButton_Click"
+                        Padding="20,10"
+                        Margin="0,0,10,0"
+                        MinWidth="100"
+                        IsCancel="True"
+                        AutomationProperties.Name="キャンセル"
+                        AutomationProperties.HelpText="変更を保存せずにダイアログを閉じます"
+                        ToolTip="変更を破棄 (Escape)"/>
+                <Button Content="保存"
+                        Click="SaveButton_Click"
+                        Padding="20,10"
+                        MinWidth="100"
+                        Background="#2196F3"
+                        Foreground="White"
+                        IsDefault="True"
+                        AutomationProperties.Name="設定を保存"
+                        AutomationProperties.HelpText="変更を保存してダイアログを閉じます"
+                        ToolTip="設定を保存 (Enter)"/>
+            </StackPanel>
         </StackPanel>
 
         <!-- 処理中オーバーレイ -->
