@@ -151,7 +151,7 @@
                                AutomationProperties.Name="残り時間"
                                AutomationProperties.LiveSetting="Polite">
                         <Run Text="残り "/>
-                        <Run Text="{Binding RemainingSeconds}"/>
+                        <Run Text="{Binding RemainingSeconds, Mode=OneWay}"/>
                         <Run Text=" 秒"/>
                     </TextBlock>
                 </StackPanel>
@@ -272,9 +272,9 @@
                                         <TextBlock Grid.Column="1" Grid.Row="0"
                                                    FontWeight="Bold"
                                                    FontSize="{DynamicResource SmallFontSize}">
-                                            <Run Text="{Binding CardType}"/>
+                                            <Run Text="{Binding CardType, Mode=OneWay}"/>
                                             <Run Text=" "/>
-                                            <Run Text="{Binding CardNumber}"/>
+                                            <Run Text="{Binding CardNumber, Mode=OneWay}"/>
                                         </TextBlock>
 
                                         <!-- 残高 -->
@@ -300,7 +300,7 @@
                                                     Orientation="Horizontal">
                                             <TextBlock FontSize="10" Foreground="Gray">
                                                 <Run Text="最終: "/>
-                                                <Run Text="{Binding LastUsageDateDisplay}"/>
+                                                <Run Text="{Binding LastUsageDateDisplay, Mode=OneWay}"/>
                                             </TextBlock>
                                             <TextBlock FontSize="10" Margin="10,0,0,0">
                                                 <TextBlock.Style>
@@ -313,9 +313,9 @@
                                                         </Style.Triggers>
                                                     </Style>
                                                 </TextBlock.Style>
-                                                <Run Text="{Binding LentStatusIcon}"/>
+                                                <Run Text="{Binding LentStatusIcon, Mode=OneWay}"/>
                                                 <Run Text=" "/>
-                                                <Run Text="{Binding LentInfoDisplay}"/>
+                                                <Run Text="{Binding LentInfoDisplay, Mode=OneWay}"/>
                                             </TextBlock>
                                         </StackPanel>
                                     </Grid>
@@ -394,7 +394,7 @@
             <StatusBarItem>
                 <TextBlock>
                     <Run Text="状態: "/>
-                    <Run Text="{Binding CurrentState}"/>
+                    <Run Text="{Binding CurrentState, Mode=OneWay}"/>
                 </TextBlock>
             </StatusBarItem>
             <Separator/>
