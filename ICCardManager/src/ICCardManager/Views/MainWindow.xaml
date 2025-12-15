@@ -42,19 +42,19 @@
 
         <!-- ヘッダー -->
         <Border Grid.Row="0" Background="#2196F3" Padding="15,10">
-            <Grid>
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="*"/>
-                    <ColumnDefinition Width="Auto"/>
-                </Grid.ColumnDefinitions>
-
-                <TextBlock Text="交通系ICカード管理システム"
+            <DockPanel LastChildFill="False">
+                <!-- タイトル（左寄せ） -->
+                <TextBlock DockPanel.Dock="Left"
+                           Text="交通系ICカード管理システム"
                            FontSize="{DynamicResource TitleFontSize}"
                            FontWeight="Bold"
                            Foreground="White"
-                           VerticalAlignment="Center"/>
+                           VerticalAlignment="Center"
+                           Margin="0,0,30,0"/>
 
-                <StackPanel Grid.Column="1" Orientation="Horizontal">
+                <!-- 日時表示 + ボタン群（右寄せ） -->
+                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
+                    <!-- 日時表示 -->
                     <TextBlock Text="{Binding CurrentDateTime}"
                                FontSize="{DynamicResource LargeFontSize}"
                                Foreground="White"
@@ -100,7 +100,7 @@
                             AutomationProperties.HelpText="システムの操作履歴を検索・表示します。ショートカット: F6"
                             ToolTip="操作ログを開く (F6)"/>
                 </StackPanel>
-            </Grid>
+            </DockPanel>
         </Border>
 
         <!-- メインコンテンツ -->
