@@ -61,8 +61,27 @@ public enum DashboardSortOrder
 }
 
 /// <summary>
-/// メイン画面のViewModel
+/// メイン画面のViewModel。ICカードの貸出・返却処理を制御します。
 /// </summary>
+/// <remarks>
+/// <para>
+/// このViewModelは以下の状態遷移を管理します：
+/// </para>
+/// <list type="number">
+/// <item><description><see cref="AppState.WaitingForStaffCard"/> → 職員証タッチ → <see cref="AppState.WaitingForIcCard"/></description></item>
+/// <item><description><see cref="AppState.WaitingForIcCard"/> → ICカードタッチ → 貸出/返却処理 → <see cref="AppState.WaitingForStaffCard"/></description></item>
+/// <item><description>タイムアウト（60秒）で <see cref="AppState.WaitingForStaffCard"/> に戻る</description></item>
+/// </list>
+/// <para>
+/// <strong>30秒ルール:</strong> 同一カードが30秒以内に再タッチされた場合、
+/// 直前の処理と逆の処理（貸出→返却、返却→貸出）が実行されます。
+/// これにより、誤操作時の即時修正が可能です。
+/// </para>
+/// <para>
+/// <strong>職員証スキップモード:</strong> 設定で有効にすると、デフォルト職員として
+/// 常にICカード待ち状態から開始し、職員証タッチを省略できます。
+/// </para>
+/// </remarks>
 public partial class MainViewModel : ViewModelBase
 {
     private readonly ICardReader _cardReader;
@@ -208,8 +227,19 @@ public partial class MainViewModel : ViewModelBase
     }
 
     /// <summary>
-    /// 初期化
+    /// アプリケーションの初期化処理を実行します。
     /// </summary>
+    /// <remarks>
+    /// <para>以下の処理を順次実行します：</para>
+    /// <list type="number">
+    /// <item><description>警告チェック（残額低下、バス停名未入力）</description></item>
+    /// <item><description>貸出中カードの一覧取得</description></item>
+    /// <item><description>カード残高ダッシュボードの更新</description></item>
+    /// <item><description>職員証スキップ設定の読み込み</description></item>
+    /// <item><description>カードリーダー監視の開始</description></item>
+    /// </list>
+    /// </remarks>
+    /// <returns>初期化処理のTask</returns>
     [RelayCommand]
     public async Task InitializeAsync()
     {
@@ -522,8 +552,19 @@ public partial class MainViewModel : ViewModelBase
     }
 
     /// <summary>
-    /// 貸出処理
+    /// ICカードの貸出処理を実行します。
     /// </summary>
+    /// <param name="card">貸出対象のICカード</param>
+    /// <remarks>
+    /// <para>処理フロー：</para>
+    /// <list type="number">
+    /// <item><description>状態を <see cref="AppState.Processing"/> に変更</description></item>
+    /// <item><description><see cref="LendingService.LendAsync"/> を呼び出して貸出処理</description></item>
+    /// <item><description>成功時: 貸出音を再生、トースト通知を表示、画面を薄いオレンジ色に</description></item>
+    /// <item><description>失敗時: エラー音を再生、エラーメッセージを表示</description></item>
+    /// <item><description>2-3秒後に状態をリセット</description></item>
+    /// </list>
+    /// </remarks>
     private async Task ProcessLendAsync(IcCard card)
     {
         SetState(AppState.Processing, "処理中...");
@@ -561,8 +602,21 @@ public partial class MainViewModel : ViewModelBase
     }
 
     /// <summary>
-    /// 返却処理
+    /// ICカードの返却処理を実行します。
     /// </summary>
+    /// <param name="card">返却対象のICカード</param>
+    /// <remarks>
+    /// <para>処理フロー：</para>
+    /// <list type="number">
+    /// <item><description>状態を <see cref="AppState.Processing"/> に変更</description></item>
+    /// <item><description>カードリーダーで利用履歴を読み取り</description></item>
+    /// <item><description><see cref="LendingService.ReturnAsync"/> を呼び出して返却処理</description></item>
+    /// <item><description>成功時: 返却音を再生、トースト通知を表示、画面を薄い水色に</description></item>
+    /// <item><description>バス利用がある場合: バス停入力ダイアログを表示</description></item>
+    /// <item><description>残額が警告閾値未満の場合: 警告メッセージを表示</description></item>
+    /// <item><description>失敗時: エラー音を再生、エラーメッセージを表示</description></item>
+    /// </list>
+    /// </remarks>
     private async Task ProcessReturnAsync(IcCard card)
     {
         SetState(AppState.Processing, "履歴を読み取り中...");
