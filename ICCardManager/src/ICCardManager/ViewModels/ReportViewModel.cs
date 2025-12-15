@@ -120,12 +120,21 @@ public partial class ReportViewModel : ViewModelBase
         using (BeginBusy("読み込み中..."))
         {
             var cards = await _cardRepository.GetAllAsync();
+
+            // 既存のカードのイベント購読を解除
+            foreach (var card in Cards)
+            {
+                card.PropertyChanged -= OnCardPropertyChanged;
+            }
+
             Cards.Clear();
             SelectedCards.Clear();
 
             foreach (var card in cards.OrderBy(c => c.CardType).ThenBy(c => c.CardNumber))
             {
-                Cards.Add(card.ToDto());
+                var cardDto = card.ToDto();
+                cardDto.PropertyChanged += OnCardPropertyChanged;
+                Cards.Add(cardDto);
             }
 
             // デフォルトで全選択
@@ -135,17 +144,68 @@ public partial class ReportViewModel : ViewModelBase
     }
 
     /// <summary>
+    /// カードのプロパティ変更イベントハンドラ
+    /// </summary>
+    private void OnCardPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
+    {
+        // バルク操作中はスキップ（SelectAllCards/DeselectAllCardsから呼ばれた場合）
+        if (_isBulkUpdating)
+        {
+            return;
+        }
+
+        if (e.PropertyName == nameof(CardDto.IsSelected) && sender is CardDto card)
+        {
+            // IsSelected変更時にSelectedCardsを同期
+            if (card.IsSelected && !SelectedCards.Contains(card))
+            {
+                SelectedCards.Add(card);
+            }
+            else if (!card.IsSelected && SelectedCards.Contains(card))
+            {
+                SelectedCards.Remove(card);
+            }
+
+            // IsAllSelectedの状態を更新（無限ループ防止のため、変更がある場合のみ）
+            var shouldBeAllSelected = SelectedCards.Count == Cards.Count && Cards.Count > 0;
+            if (IsAllSelected != shouldBeAllSelected)
+            {
+                // 内部フラグを使って再帰呼び出しを防止
+                _isUpdatingFromCardSelection = true;
+                IsAllSelected = shouldBeAllSelected;
+                _isUpdatingFromCardSelection = false;
+            }
+        }
+    }
+
+    /// <summary>
+    /// カード選択からの更新中フラグ（無限ループ防止用）
+    /// </summary>
+    private bool _isUpdatingFromCardSelection;
+
+    /// <summary>
+    /// バルク更新中フラグ（SelectAllCards/DeselectAllCards実行中）
+    /// </summary>
+    private bool _isBulkUpdating;
+
+    /// <summary>
     /// 全選択/全解除
     /// </summary>
     partial void OnIsAllSelectedChanged(bool value)
     {
+        // 個別カード選択からの更新の場合は何もしない（無限ループ防止）
+        if (_isUpdatingFromCardSelection)
+        {
+            return;
+        }
+
         if (value)
         {
             SelectAllCards();
         }
         else
         {
-            SelectedCards.Clear();
+            DeselectAllCards();
         }
     }
 
@@ -154,10 +214,39 @@ public partial class ReportViewModel : ViewModelBase
     /// </summary>
     private void SelectAllCards()
     {
-        SelectedCards.Clear();
-        foreach (var card in Cards)
+        _isBulkUpdating = true;
+        try
         {
-            SelectedCards.Add(card);
+            SelectedCards.Clear();
+            foreach (var card in Cards)
+            {
+                card.IsSelected = true;
+                SelectedCards.Add(card);
+            }
+        }
+        finally
+        {
+            _isBulkUpdating = false;
+        }
+    }
+
+    /// <summary>
+    /// 全カードの選択を解除
+    /// </summary>
+    private void DeselectAllCards()
+    {
+        _isBulkUpdating = true;
+        try
+        {
+            foreach (var card in Cards)
+            {
+                card.IsSelected = false;
+            }
+            SelectedCards.Clear();
+        }
+        finally
+        {
+            _isBulkUpdating = false;
         }
     }
 
