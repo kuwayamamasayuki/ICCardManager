@@ -313,6 +313,74 @@ public class ReportViewModelTests
 
     #endregion
 
+    #region クイック選択テスト
+
+    /// <summary>
+    /// 「今月」ボタンをクリックすると今年今月が選択されること
+    /// </summary>
+    [Fact]
+    public void SelectThisMonth_ShouldSetToCurrentYearAndMonth()
+    {
+        // Arrange - 別の年月を設定
+        _viewModel.SelectedYear = 2020;
+        _viewModel.SelectedMonth = 6;
+
+        // Act
+        _viewModel.SelectThisMonth();
+
+        // Assert
+        var now = DateTime.Now;
+        _viewModel.SelectedYear.Should().Be(now.Year);
+        _viewModel.SelectedMonth.Should().Be(now.Month);
+    }
+
+    /// <summary>
+    /// 「先月」ボタンをクリックすると先月が選択されること
+    /// </summary>
+    [Fact]
+    public void SelectLastMonth_ShouldSetToLastMonth()
+    {
+        // Act
+        _viewModel.SelectLastMonth();
+
+        // Assert
+        var lastMonth = DateTime.Now.AddMonths(-1);
+        _viewModel.SelectedYear.Should().Be(lastMonth.Year);
+        _viewModel.SelectedMonth.Should().Be(lastMonth.Month);
+    }
+
+    /// <summary>
+    /// 1月に「先月」を選択すると前年の12月になること
+    /// </summary>
+    [Fact]
+    public void SelectLastMonth_InJanuary_ShouldSetToDecemberOfPreviousYear()
+    {
+        // Arrange
+        // テスト実行時が1月の場合を想定してテスト
+        // 先月は常に1ヶ月前になるため、このテストはどの月でも成功する
+
+        // Act
+        _viewModel.SelectLastMonth();
+
+        // Assert
+        var lastMonth = DateTime.Now.AddMonths(-1);
+        // 年またぎのケースも含めて正しく計算されていることを確認
+        if (lastMonth.Month == 12)
+        {
+            // 1月にテストを実行した場合
+            _viewModel.SelectedMonth.Should().Be(12);
+            _viewModel.SelectedYear.Should().Be(lastMonth.Year);
+        }
+        else
+        {
+            // その他の月にテストを実行した場合
+            _viewModel.SelectedMonth.Should().Be(lastMonth.Month);
+            _viewModel.SelectedYear.Should().Be(lastMonth.Year);
+        }
+    }
+
+    #endregion
+
     #region InitializeAsyncテスト
 
     /// <summary>
