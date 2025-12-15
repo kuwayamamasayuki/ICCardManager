@@ -1,4 +1,5 @@
 using System.IO;
+using ICCardManager.Data.Migrations;
 using Microsoft.Data.Sqlite;
 
 namespace ICCardManager.Data;
@@ -69,128 +70,92 @@ public class DbContext : IDisposable
     }
 
     /// <summary>
-    /// データベースを初期化（テーブル作成）
+    /// データベースを初期化（マイグレーションを実行）
     /// </summary>
     public void InitializeDatabase()
     {
         var connection = GetConnection();
 
-        // schema.sqlの内容を埋め込みリソースまたは直接実行
-        var schema = GetSchemaScript();
+        // 既存のDBがある場合（マイグレーション導入前）の対応
+        HandleLegacyDatabase(connection);
 
-        using var command = connection.CreateCommand();
-        command.CommandText = schema;
-        command.ExecuteNonQuery();
+        // マイグレーションを実行
+        var runner = new MigrationRunner(connection);
+        var appliedCount = runner.MigrateToLatest();
+
+        if (appliedCount > 0)
+        {
+            System.Diagnostics.Debug.WriteLine($"[DbContext] {appliedCount}件のマイグレーションを適用しました");
+        }
     }
 
     /// <summary>
-    /// スキーマスクリプトを取得
+    /// マイグレーション導入前の既存DBを処理
     /// </summary>
-    private static string GetSchemaScript()
+    /// <remarks>
+    /// staffテーブルが存在するがschema_migrationsテーブルが存在しない場合、
+    /// 既存DBとみなしてバージョン1として記録する
+    /// </remarks>
+    private void HandleLegacyDatabase(SqliteConnection connection)
     {
-        // 埋め込みリソースとして読み込む場合
-        var assembly = typeof(DbContext).Assembly;
-        var resourceName = "ICCardManager.Data.schema.sql";
+        // staffテーブルの存在確認（既存DBの判定）
+        using var checkStaffCmd = connection.CreateCommand();
+        checkStaffCmd.CommandText = "SELECT name FROM sqlite_master WHERE type='table' AND name='staff'";
+        var hasStaffTable = checkStaffCmd.ExecuteScalar() != null;
 
-        using var stream = assembly.GetManifestResourceStream(resourceName);
-        if (stream != null)
+        if (!hasStaffTable)
         {
-            using var reader = new StreamReader(stream);
-            return reader.ReadToEnd();
+            // 新規DBの場合は何もしない（マイグレーションが実行される）
+            return;
         }
 
-        // 埋め込みリソースがない場合は直接スキーマを返す
-        return GetInlineSchema();
+        // schema_migrationsテーブルの存在確認
+        using var checkMigrationCmd = connection.CreateCommand();
+        checkMigrationCmd.CommandText = "SELECT name FROM sqlite_master WHERE type='table' AND name='schema_migrations'";
+        var hasMigrationTable = checkMigrationCmd.ExecuteScalar() != null;
+
+        if (hasMigrationTable)
+        {
+            // 既にマイグレーション管理されている
+            return;
+        }
+
+        // 既存DBをバージョン1として記録
+        System.Diagnostics.Debug.WriteLine("[DbContext] 既存DBを検出しました。バージョン1として記録します。");
+
+        using var createTableCmd = connection.CreateCommand();
+        createTableCmd.CommandText = """
+            CREATE TABLE IF NOT EXISTS schema_migrations (
+                version INTEGER PRIMARY KEY,
+                description TEXT NOT NULL,
+                applied_at TEXT DEFAULT (datetime('now', 'localtime'))
+            )
+            """;
+        createTableCmd.ExecuteNonQuery();
+
+        using var insertCmd = connection.CreateCommand();
+        insertCmd.CommandText = "INSERT INTO schema_migrations (version, description) VALUES (1, '初期スキーマ（既存DB）')";
+        insertCmd.ExecuteNonQuery();
     }
 
     /// <summary>
-    /// インラインスキーマ定義（フォールバック用）
+    /// 現在のデータベースバージョンを取得
     /// </summary>
-    private static string GetInlineSchema()
+    public int GetDatabaseVersion()
     {
-        return """
-            PRAGMA foreign_keys = ON;
+        var connection = GetConnection();
+        var runner = new MigrationRunner(connection);
+        return runner.GetCurrentVersion();
+    }
 
-            CREATE TABLE IF NOT EXISTS staff (
-                staff_idm  TEXT PRIMARY KEY,
-                name       TEXT NOT NULL,
-                number     TEXT,
-                note       TEXT,
-                is_deleted INTEGER DEFAULT 0,
-                deleted_at TEXT
-            );
-
-            CREATE TABLE IF NOT EXISTS ic_card (
-                card_idm        TEXT PRIMARY KEY,
-                card_type       TEXT NOT NULL,
-                card_number     TEXT NOT NULL,
-                note            TEXT,
-                is_deleted      INTEGER DEFAULT 0,
-                deleted_at      TEXT,
-                is_lent         INTEGER DEFAULT 0,
-                last_lent_at    TEXT,
-                last_lent_staff TEXT REFERENCES staff(staff_idm)
-            );
-
-            CREATE TABLE IF NOT EXISTS ledger (
-                id             INTEGER PRIMARY KEY AUTOINCREMENT,
-                card_idm       TEXT    NOT NULL REFERENCES ic_card(card_idm),
-                lender_idm     TEXT    REFERENCES staff(staff_idm),
-                date           TEXT    NOT NULL,
-                summary        TEXT    NOT NULL,
-                income         INTEGER DEFAULT 0,
-                expense        INTEGER DEFAULT 0,
-                balance        INTEGER NOT NULL,
-                staff_name     TEXT,
-                note           TEXT,
-                returner_idm   TEXT,
-                lent_at        TEXT,
-                returned_at    TEXT,
-                is_lent_record INTEGER DEFAULT 0
-            );
-
-            CREATE TABLE IF NOT EXISTS ledger_detail (
-                ledger_id     INTEGER REFERENCES ledger(id) ON DELETE CASCADE,
-                use_date      TEXT,
-                entry_station TEXT,
-                exit_station  TEXT,
-                bus_stops     TEXT,
-                amount        INTEGER,
-                balance       INTEGER,
-                is_charge     INTEGER DEFAULT 0,
-                is_bus        INTEGER DEFAULT 0
-            );
-
-            CREATE TABLE IF NOT EXISTS operation_log (
-                id            INTEGER PRIMARY KEY AUTOINCREMENT,
-                timestamp     TEXT DEFAULT CURRENT_TIMESTAMP,
-                operator_idm  TEXT NOT NULL,
-                operator_name TEXT NOT NULL,
-                target_table  TEXT,
-                target_id     TEXT,
-                action        TEXT,
-                before_data   TEXT,
-                after_data    TEXT
-            );
-
-            CREATE TABLE IF NOT EXISTS settings (
-                key   TEXT PRIMARY KEY,
-                value TEXT
-            );
-
-            CREATE INDEX IF NOT EXISTS idx_staff_deleted      ON staff(is_deleted);
-            CREATE INDEX IF NOT EXISTS idx_card_deleted       ON ic_card(is_deleted);
-            CREATE INDEX IF NOT EXISTS idx_ledger_date        ON ledger(date);
-            CREATE INDEX IF NOT EXISTS idx_ledger_summary     ON ledger(summary);
-            CREATE INDEX IF NOT EXISTS idx_ledger_card_date   ON ledger(card_idm, date);
-            CREATE INDEX IF NOT EXISTS idx_ledger_lender      ON ledger(lender_idm);
-            CREATE INDEX IF NOT EXISTS idx_detail_ledger      ON ledger_detail(ledger_id);
-            CREATE INDEX IF NOT EXISTS idx_detail_bus         ON ledger_detail(is_bus);
-            CREATE INDEX IF NOT EXISTS idx_log_timestamp      ON operation_log(timestamp);
-
-            INSERT OR IGNORE INTO settings (key, value) VALUES ('warning_balance', '10000');
-            INSERT OR IGNORE INTO settings (key, value) VALUES ('font_size', 'medium');
-            """;
+    /// <summary>
+    /// 未適用のマイグレーションがあるか確認
+    /// </summary>
+    public bool HasPendingMigrations()
+    {
+        var connection = GetConnection();
+        var runner = new MigrationRunner(connection);
+        return runner.HasPendingMigrations();
     }
 
     /// <summary>
