@@ -62,8 +62,28 @@ public enum LendingOperationType
 }
 
 /// <summary>
-/// 貸出・返却処理サービス
+/// ICカードの貸出・返却処理を行うサービスです。
 /// </summary>
+/// <remarks>
+/// <para>
+/// このサービスは以下の機能を提供します：
+/// </para>
+/// <list type="bullet">
+/// <item><description>ICカードの貸出処理（<see cref="LendAsync"/>）</description></item>
+/// <item><description>ICカードの返却処理と利用履歴の記録（<see cref="ReturnAsync"/>）</description></item>
+/// <item><description>30秒ルールによる誤操作修正（<see cref="IsRetouchWithinTimeout"/>）</description></item>
+/// </list>
+/// <para>
+/// <strong>30秒ルール:</strong>
+/// 同一カードが30秒以内に再度タッチされた場合、直前の処理と逆の処理が実行されます。
+/// これにより、誤って貸出/返却した場合に即座に取り消すことができます。
+/// </para>
+/// <para>
+/// <strong>排他制御:</strong>
+/// 同一カードへの同時アクセスは <see cref="CardLockManager"/> により排他制御されます。
+/// ロック取得のタイムアウトは5秒で、タイムアウト時は処理が拒否されます。
+/// </para>
+/// </remarks>
 public class LendingService
 {
     private readonly DbContext _dbContext;
@@ -118,10 +138,24 @@ public class LendingService
     }
 
     /// <summary>
-    /// 貸出処理を実行
+    /// ICカードの貸出処理を実行します。
     /// </summary>
-    /// <param name="staffIdm">職員証IDm</param>
-    /// <param name="cardIdm">交通系ICカードIDm</param>
+    /// <param name="staffIdm">貸出者の職員証IDm（16桁の16進数文字列）</param>
+    /// <param name="cardIdm">貸出対象のICカードIDm（16桁の16進数文字列）</param>
+    /// <returns>貸出結果。成功時は <see cref="LendingResult.Success"/> が true</returns>
+    /// <remarks>
+    /// <para>処理フロー：</para>
+    /// <list type="number">
+    /// <item><description>カードごとの排他ロックを取得（タイムアウト: 5秒）</description></item>
+    /// <item><description>カードと職員の存在確認</description></item>
+    /// <item><description>貸出中でないことを確認</description></item>
+    /// <item><description>トランザクション内で貸出レコード作成とカード状態更新</description></item>
+    /// <item><description>30秒ルール用の処理情報を記録</description></item>
+    /// </list>
+    /// <para>
+    /// エラー時は <see cref="LendingResult.ErrorMessage"/> にエラー内容が設定されます。
+    /// </para>
+    /// </remarks>
     public async Task<LendingResult> LendAsync(string staffIdm, string cardIdm)
     {
         var result = new LendingResult { OperationType = LendingOperationType.Lend };
@@ -226,11 +260,28 @@ public class LendingService
     }
 
     /// <summary>
-    /// 返却処理を実行
+    /// ICカードの返却処理を実行し、利用履歴を記録します。
     /// </summary>
-    /// <param name="staffIdm">返却者の職員証IDm</param>
-    /// <param name="cardIdm">交通系ICカードIDm</param>
-    /// <param name="usageDetails">ICカードから読み取った利用履歴詳細</param>
+    /// <param name="staffIdm">返却者の職員証IDm（16桁の16進数文字列）</param>
+    /// <param name="cardIdm">返却対象のICカードIDm（16桁の16進数文字列）</param>
+    /// <param name="usageDetails">ICカードから読み取った利用履歴詳細（貸出時刻以降のみ使用）</param>
+    /// <returns>返却結果。成功時は残額や警告情報も含まれます</returns>
+    /// <remarks>
+    /// <para>処理フロー：</para>
+    /// <list type="number">
+    /// <item><description>カードごとの排他ロックを取得（タイムアウト: 5秒）</description></item>
+    /// <item><description>カード・職員・貸出レコードの存在確認</description></item>
+    /// <item><description>貸出時刻以降の利用履歴のみを抽出</description></item>
+    /// <item><description>日付ごとに利用履歴レコードを作成（<see cref="SummaryGenerator"/> で摘要生成）</description></item>
+    /// <item><description>貸出レコードを更新（返却者・返却時刻を記録）</description></item>
+    /// <item><description>カードの貸出状態を解除</description></item>
+    /// <item><description>残額警告チェック</description></item>
+    /// </list>
+    /// <para>
+    /// <see cref="LendingResult.HasBusUsage"/> でバス利用の有無を確認できます。
+    /// バス利用がある場合は、呼び出し元でバス停名入力ダイアログを表示してください。
+    /// </para>
+    /// </remarks>
     public async Task<LendingResult> ReturnAsync(string staffIdm, string cardIdm, IEnumerable<LedgerDetail> usageDetails)
     {
         var result = new LendingResult { OperationType = LendingOperationType.Return };
@@ -449,10 +500,31 @@ public class LendingService
     }
 
     /// <summary>
-    /// 30秒ルールが適用されるかチェック
+    /// 30秒ルールが適用されるかチェックします。
     /// </summary>
-    /// <param name="cardIdm">確認するカードIDm</param>
-    /// <returns>30秒以内の再タッチかどうか</returns>
+    /// <param name="cardIdm">確認するカードIDm（16桁の16進数文字列）</param>
+    /// <returns>
+    /// 30秒以内に同一カードが処理されていた場合は <c>true</c>。
+    /// 適用される場合、<see cref="LastOperationType"/> で前回の処理種別を確認できます。
+    /// </returns>
+    /// <remarks>
+    /// <para>
+    /// このメソッドは誤操作修正のための「30秒ルール」の判定に使用します。
+    /// </para>
+    /// <para>
+    /// <strong>使用例:</strong>
+    /// </para>
+    /// <code>
+    /// if (_lendingService.IsRetouchWithinTimeout(cardIdm))
+    /// {
+    ///     // 逆の処理を実行
+    ///     if (_lendingService.LastOperationType == LendingOperationType.Lend)
+    ///         await ProcessReturnAsync(card);  // 貸出直後 → 返却
+    ///     else
+    ///         await ProcessLendAsync(card);    // 返却直後 → 貸出
+    /// }
+    /// </code>
+    /// </remarks>
     public bool IsRetouchWithinTimeout(string cardIdm)
     {
         if (LastProcessedCardIdm != cardIdm || !LastProcessedTime.HasValue)

@@ -10,9 +10,37 @@ using PcscICardReader = PCSC.ICardReader;
 namespace ICCardManager.Infrastructure.CardReader;
 
 /// <summary>
-/// PC/SC APIを使用したICカードリーダー実装
-/// PaSoRi等のNFCリーダーで交通系ICカードを読み取る
+/// PC/SC APIを使用したICカードリーダー実装です。
+/// PaSoRi等のNFCリーダーで交通系ICカード（FeliCa）を読み取ります。
 /// </summary>
+/// <remarks>
+/// <para>
+/// このクラスは以下の機能を提供します：
+/// </para>
+/// <list type="bullet">
+/// <item><description>カードの検出と自動読み取り（<see cref="StartReadingAsync"/>）</description></item>
+/// <item><description>利用履歴の読み取り（<see cref="ReadHistoryAsync"/>）- 最大20件</description></item>
+/// <item><description>残高の読み取り（<see cref="ReadBalanceAsync"/>）</description></item>
+/// <item><description>接続状態の監視と自動再接続</description></item>
+/// </list>
+/// <para>
+/// <strong>接続状態管理:</strong>
+/// </para>
+/// <list type="bullet">
+/// <item><description><see cref="CardReaderConnectionState.Connected"/>: 正常接続中</description></item>
+/// <item><description><see cref="CardReaderConnectionState.Disconnected"/>: 切断（リーダー未接続/抜去）</description></item>
+/// <item><description><see cref="CardReaderConnectionState.Reconnecting"/>: 自動再接続試行中（最大10回）</description></item>
+/// </list>
+/// <para>
+/// <strong>読み取り重複防止:</strong>
+/// 同一カードの連続読み取りを防止するため、1秒以内の再読み取りは無視されます。
+/// </para>
+/// <para>
+/// <strong>対応カード:</strong>
+/// サイバネ規格（システムコード 0x0003）の交通系ICカード
+/// （Suica、PASMO、ICOCA、nimoca、SUGOCA、はやかけん等）
+/// </para>
+/// </remarks>
 public class PcScCardReader : ICardReader
 {
     private readonly ISCardContext _context;
@@ -74,7 +102,25 @@ public class PcScCardReader : ICardReader
         _context = ContextFactory.Instance.Establish(SCardScope.System);
     }
 
-    /// <inheritdoc/>
+    /// <summary>
+    /// カードリーダーの監視を開始し、カード検出時にイベントを発火します。
+    /// </summary>
+    /// <returns>監視開始処理のTask</returns>
+    /// <exception cref="InvalidOperationException">
+    /// カードリーダーが見つからない場合、またはスマートカードサービスが起動していない場合
+    /// </exception>
+    /// <remarks>
+    /// <para>処理フロー：</para>
+    /// <list type="number">
+    /// <item><description>PC/SCコンテキストからリーダー一覧を取得</description></item>
+    /// <item><description>SCardMonitorでカード挿入/取り外しを監視</description></item>
+    /// <item><description>ヘルスチェックタイマーを開始（10秒間隔）</description></item>
+    /// </list>
+    /// <para>
+    /// カードが検出されると <see cref="CardRead"/> イベントが発火します。
+    /// 切断時は自動再接続が試行されます。
+    /// </para>
+    /// </remarks>
     public Task StartReadingAsync()
     {
         return Task.Run(() =>
@@ -154,7 +200,32 @@ public class PcScCardReader : ICardReader
         });
     }
 
-    /// <inheritdoc/>
+    /// <summary>
+    /// ICカードから利用履歴を読み取ります。
+    /// </summary>
+    /// <param name="idm">読み取り対象カードのIDm（16桁の16進数文字列）</param>
+    /// <returns>利用履歴詳細のリスト（最大20件、新しい順）</returns>
+    /// <remarks>
+    /// <para>
+    /// FeliCaの履歴サービス（サービスコード: 0x090F）から履歴データを読み取り、
+    /// <see cref="LedgerDetail"/> オブジェクトに変換します。
+    /// </para>
+    /// <para>
+    /// <strong>履歴データの構造（16バイト）:</strong>
+    /// </para>
+    /// <list type="bullet">
+    /// <item><description>バイト0: 機器種別</description></item>
+    /// <item><description>バイト1: 利用種別（0x02=チャージ）</description></item>
+    /// <item><description>バイト4-5: 日付（2000年起点のビットフィールド）</description></item>
+    /// <item><description>バイト6-7: 入場駅コード</description></item>
+    /// <item><description>バイト8-9: 出場駅コード</description></item>
+    /// <item><description>バイト10-11: 残高（リトルエンディアン）</description></item>
+    /// </list>
+    /// <para>
+    /// <strong>バス利用判定:</strong>
+    /// 入場駅・出場駅が両方0で、かつチャージでない場合はバス利用と判定されます。
+    /// </para>
+    /// </remarks>
     public async Task<IEnumerable<LedgerDetail>> ReadHistoryAsync(string idm)
     {
         var details = new List<LedgerDetail>();
@@ -222,7 +293,15 @@ public class PcScCardReader : ICardReader
         return details;
     }
 
-    /// <inheritdoc/>
+    /// <summary>
+    /// ICカードの現在残高を読み取ります。
+    /// </summary>
+    /// <param name="idm">読み取り対象カードのIDm（16桁の16進数文字列）</param>
+    /// <returns>残高（円）。読み取り失敗時は <c>null</c></returns>
+    /// <remarks>
+    /// 履歴の最新レコード（ブロック0）から残高を取得します。
+    /// 残高はバイト10-11にリトルエンディアンで格納されています。
+    /// </remarks>
     public async Task<int?> ReadBalanceAsync(string idm)
     {
         return await Task.Run<int?>(() =>
@@ -526,7 +605,19 @@ public class PcScCardReader : ICardReader
         return Task.CompletedTask;
     }
 
-    /// <inheritdoc/>
+    /// <summary>
+    /// カードリーダーへの手動再接続を試行します。
+    /// </summary>
+    /// <returns>再接続処理のTask</returns>
+    /// <remarks>
+    /// <para>
+    /// 既存のモニターを停止し、新しいモニターを作成して接続を試みます。
+    /// 再接続に失敗した場合は、自動再接続タイマーが開始されます（3秒間隔、最大10回）。
+    /// </para>
+    /// <para>
+    /// 接続状態の変化は <see cref="ConnectionStateChanged"/> イベントで通知されます。
+    /// </para>
+    /// </remarks>
     public async Task ReconnectAsync()
     {
         System.Diagnostics.Debug.WriteLine("手動再接続を開始");

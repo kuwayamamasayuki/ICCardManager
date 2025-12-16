@@ -24,18 +24,76 @@ public class DailySummary
 }
 
 /// <summary>
-/// 摘要文字列を生成するサービス
+/// 交通系ICカードの利用履歴から摘要文字列を生成するサービスです。
 /// </summary>
+/// <remarks>
+/// <para>
+/// このクラスは物品出納簿の「摘要」列に表示する文字列を生成します。
+/// 以下のパターンの摘要を生成できます：
+/// </para>
+/// <list type="table">
+/// <listheader>
+/// <term>パターン</term>
+/// <description>出力例</description>
+/// </listheader>
+/// <item>
+/// <term>単純片道</term>
+/// <description>鉄道（A駅～B駅）</description>
+/// </item>
+/// <item>
+/// <term>往復</term>
+/// <description>鉄道（A駅～B駅 往復）</description>
+/// </item>
+/// <item>
+/// <term>乗継</term>
+/// <description>鉄道（A駅～C駅）※途中駅は省略</description>
+/// </item>
+/// <item>
+/// <term>複数区間</term>
+/// <description>鉄道（A駅～B駅、C駅～D駅）</description>
+/// </item>
+/// <item>
+/// <term>バス混在</term>
+/// <description>鉄道（A駅～B駅）、バス（★）</description>
+/// </item>
+/// <item>
+/// <term>チャージ</term>
+/// <description>役務費によりチャージ</description>
+/// </item>
+/// </list>
+/// <para>
+/// バス利用時は「★」マークが表示され、後からバス停名を入力できます。
+/// </para>
+/// </remarks>
 public class SummaryGenerator
 {
     /// <summary>
-    /// 利用履歴詳細から日付ごとの摘要リストを生成
-    /// - 日付ごとに分割
-    /// - 利用（鉄道・バス）とチャージは別行
-    /// - 古い順にソート（同日の利用とチャージも時刻順）
+    /// 利用履歴詳細から日付ごとの摘要リストを生成します。
     /// </summary>
     /// <param name="details">利用履歴詳細のリスト（ICカードから取得した新しい順）</param>
     /// <returns>日別摘要のリスト（古い順）</returns>
+    /// <remarks>
+    /// <para>このメソッドは以下の処理を行います：</para>
+    /// <list type="bullet">
+    /// <item><description>日付ごとにグループ化</description></item>
+    /// <item><description>利用（鉄道・バス）とチャージを別行として分離</description></item>
+    /// <item><description>古い順（時系列順）にソート</description></item>
+    /// </list>
+    /// <para>
+    /// ICカードの履歴は新しい順で格納されているため、
+    /// インデックスが大きいほど古いデータとして処理します。
+    /// </para>
+    /// </remarks>
+    /// <example>
+    /// <code>
+    /// var generator = new SummaryGenerator();
+    /// var summaries = generator.GenerateByDate(usageDetails);
+    /// foreach (var summary in summaries)
+    /// {
+    ///     Console.WriteLine($"{summary.Date:yyyy/MM/dd}: {summary.Summary}");
+    /// }
+    /// </code>
+    /// </example>
     public List<DailySummary> GenerateByDate(IEnumerable<LedgerDetail> details)
     {
         var detailList = details.ToList();
@@ -189,8 +247,18 @@ public class SummaryGenerator
     }
 
     /// <summary>
-    /// 鉄道利用の摘要を生成
+    /// 鉄道利用の摘要文字列を生成します。
     /// </summary>
+    /// <param name="trips">鉄道利用の履歴詳細リスト</param>
+    /// <returns>「A駅～B駅」形式の摘要文字列。往復の場合は「A駅～B駅 往復」形式</returns>
+    /// <remarks>
+    /// <para>アルゴリズム：</para>
+    /// <list type="number">
+    /// <item><description>往復パターン（A→B、B→A）を検出して「A駅～B駅 往復」として統合</description></item>
+    /// <item><description>乗継パターン（降車駅=次の乗車駅）を検出して「始発駅～終着駅」として統合</description></item>
+    /// <item><description>循環移動（始点=終点）の場合は統合せず個別表示</description></item>
+    /// </list>
+    /// </remarks>
     private string GenerateRailwaySummary(List<LedgerDetail> trips)
     {
         if (trips.Count == 0)
