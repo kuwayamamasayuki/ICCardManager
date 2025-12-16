@@ -1,5 +1,6 @@
 using System.Windows;
 using System.Windows.Documents;
+using System.Windows.Input;
 using ICCardManager.ViewModels;
 
 namespace ICCardManager.Views.Dialogs;
@@ -7,6 +8,20 @@ namespace ICCardManager.Views.Dialogs;
 /// <summary>
 /// 印刷プレビューダイアログ
 /// </summary>
+/// <remarks>
+/// <para>
+/// FlowDocumentPageViewerを使用してページ単位のプレビュー表示を実現します。
+/// </para>
+/// <para>
+/// <strong>機能:</strong>
+/// </para>
+/// <list type="bullet">
+/// <item><description>ページナビゲーション（前へ/次へ/最初/最後）</description></item>
+/// <item><description>キーボード操作（←→キーでページ移動）</description></item>
+/// <item><description>ズーム機能（拡大/縮小）</description></item>
+/// <item><description>用紙方向の変更（縦/横）</description></item>
+/// </list>
+/// </remarks>
 public partial class PrintPreviewDialog : Window
 {
     /// <summary>
@@ -24,6 +39,7 @@ public partial class PrintPreviewDialog : Window
         Loaded += OnLoaded;
         Unloaded += OnUnloaded;
         ViewModel.DocumentNeedsRefresh += OnDocumentNeedsRefresh;
+        ViewModel.PropertyChanged += OnViewModelPropertyChanged;
     }
 
     /// <summary>
@@ -43,8 +59,11 @@ public partial class PrintPreviewDialog : Window
     /// </summary>
     private void OnLoaded(object sender, RoutedEventArgs e)
     {
-        // ViewModelのドキュメントをFlowDocumentScrollViewerに直接設定
+        // ViewModelのドキュメントをFlowDocumentPageViewerに直接設定
         RefreshDocument();
+
+        // フォーカスを設定してキーボード操作を有効化
+        Focus();
     }
 
     /// <summary>
@@ -54,6 +73,19 @@ public partial class PrintPreviewDialog : Window
     {
         // イベント購読解除（メモリリーク防止）
         ViewModel.DocumentNeedsRefresh -= OnDocumentNeedsRefresh;
+        ViewModel.PropertyChanged -= OnViewModelPropertyChanged;
+    }
+
+    /// <summary>
+    /// ViewModelのプロパティ変更ハンドラ
+    /// </summary>
+    private void OnViewModelPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName == nameof(PrintPreviewViewModel.CurrentPage))
+        {
+            // ViewModelのCurrentPageが変更されたらビューアーのページを切り替え
+            GoToPage(ViewModel.CurrentPage);
+        }
     }
 
     /// <summary>
@@ -79,8 +111,51 @@ public partial class PrintPreviewDialog : Window
             UpdateViewerSize();
         }
 
-        // ページ数を再計算
-        ViewModel.RecalculatePageCount();
+        // ページ数を再計算（遅延実行でレンダリング完了後に実行）
+        Dispatcher.BeginInvoke(new Action(() =>
+        {
+            ViewModel.RecalculatePageCount();
+            UpdatePageCountFromViewer();
+        }), System.Windows.Threading.DispatcherPriority.Loaded);
+    }
+
+    /// <summary>
+    /// ビューアーからページ数を取得してViewModelを更新
+    /// </summary>
+    private void UpdatePageCountFromViewer()
+    {
+        if (DocumentViewer.Document != null)
+        {
+            // FlowDocumentPageViewerのPageCountプロパティを使用
+            var pageCount = DocumentViewer.PageCount;
+            if (pageCount > 0 && pageCount != ViewModel.TotalPages)
+            {
+                ViewModel.TotalPages = pageCount;
+            }
+        }
+    }
+
+    /// <summary>
+    /// 指定したページに移動
+    /// </summary>
+    /// <param name="pageNumber">1から始まるページ番号</param>
+    private void GoToPage(int pageNumber)
+    {
+        if (DocumentViewer.Document == null || pageNumber < 1)
+        {
+            return;
+        }
+
+        // FlowDocumentPageViewerはGoToPageコマンドで直接ページ移動できる
+        // ページ番号は1ベース
+        if (pageNumber >= 1 && pageNumber <= DocumentViewer.PageCount)
+        {
+            // NavigationCommands.GoToPageを使用
+            if (NavigationCommands.GoToPage.CanExecute(pageNumber, DocumentViewer))
+            {
+                NavigationCommands.GoToPage.Execute(pageNumber, DocumentViewer);
+            }
+        }
     }
 
     /// <summary>
@@ -91,9 +166,86 @@ public partial class PrintPreviewDialog : Window
         if (ViewModel.Document != null)
         {
             // ドキュメントのページサイズをビューアのサイズとして設定
-            // ZoomはFlowDocumentScrollViewer内部で適用されるため、ここでは1:1で設定
+            // ZoomはFlowDocumentPageViewer内部で適用されるため、ここでは1:1で設定
             DocumentViewer.Width = ViewModel.Document.PageWidth;
             DocumentViewer.Height = ViewModel.Document.PageHeight;
+        }
+    }
+
+    /// <summary>
+    /// キーボードイベントハンドラ（← →キーでページ移動）
+    /// </summary>
+    private void Window_PreviewKeyDown(object sender, KeyEventArgs e)
+    {
+        switch (e.Key)
+        {
+            case Key.Left:
+            case Key.PageUp:
+                // 前のページへ
+                if (ViewModel.PreviousPageCommand.CanExecute(null))
+                {
+                    ViewModel.PreviousPageCommand.Execute(null);
+                    e.Handled = true;
+                }
+                break;
+
+            case Key.Right:
+            case Key.PageDown:
+                // 次のページへ
+                if (ViewModel.NextPageCommand.CanExecute(null))
+                {
+                    ViewModel.NextPageCommand.Execute(null);
+                    e.Handled = true;
+                }
+                break;
+
+            case Key.Home:
+                // 最初のページへ
+                if (ViewModel.FirstPageCommand.CanExecute(null))
+                {
+                    ViewModel.FirstPageCommand.Execute(null);
+                    e.Handled = true;
+                }
+                break;
+
+            case Key.End:
+                // 最後のページへ
+                if (ViewModel.LastPageCommand.CanExecute(null))
+                {
+                    ViewModel.LastPageCommand.Execute(null);
+                    e.Handled = true;
+                }
+                break;
+
+            case Key.OemPlus:
+            case Key.Add:
+                // ズームイン（Ctrl+または+キー）
+                if (Keyboard.Modifiers == ModifierKeys.Control)
+                {
+                    ViewModel.ZoomInCommand.Execute(null);
+                    e.Handled = true;
+                }
+                break;
+
+            case Key.OemMinus:
+            case Key.Subtract:
+                // ズームアウト（Ctrl-または-キー）
+                if (Keyboard.Modifiers == ModifierKeys.Control)
+                {
+                    ViewModel.ZoomOutCommand.Execute(null);
+                    e.Handled = true;
+                }
+                break;
+
+            case Key.D0:
+            case Key.NumPad0:
+                // ズームリセット（Ctrl+0）
+                if (Keyboard.Modifiers == ModifierKeys.Control)
+                {
+                    ViewModel.ResetZoomCommand.Execute(null);
+                    e.Handled = true;
+                }
+                break;
         }
     }
 

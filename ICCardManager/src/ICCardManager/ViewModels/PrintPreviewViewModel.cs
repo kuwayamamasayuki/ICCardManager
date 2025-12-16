@@ -160,6 +160,12 @@ public partial class PrintPreviewViewModel : ViewModelBase
         OnPropertyChanged(nameof(PageDisplayText));
         OnPropertyChanged(nameof(IsFirstPage));
         OnPropertyChanged(nameof(IsLastPage));
+
+        // ページナビゲーションコマンドのCanExecuteを更新
+        NextPageCommand.NotifyCanExecuteChanged();
+        PreviousPageCommand.NotifyCanExecuteChanged();
+        FirstPageCommand.NotifyCanExecuteChanged();
+        LastPageCommand.NotifyCanExecuteChanged();
     }
 
     partial void OnTotalPagesChanged(int value)
@@ -167,6 +173,12 @@ public partial class PrintPreviewViewModel : ViewModelBase
         OnPropertyChanged(nameof(PageDisplayText));
         OnPropertyChanged(nameof(IsFirstPage));
         OnPropertyChanged(nameof(IsLastPage));
+
+        // ページナビゲーションコマンドのCanExecuteを更新
+        NextPageCommand.NotifyCanExecuteChanged();
+        PreviousPageCommand.NotifyCanExecuteChanged();
+        FirstPageCommand.NotifyCanExecuteChanged();
+        LastPageCommand.NotifyCanExecuteChanged();
     }
 
     /// <summary>

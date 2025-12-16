@@ -12,8 +12,9 @@
         Width="950"
         WindowStartupLocation="CenterOwner"
         ResizeMode="CanResize"
+        PreviewKeyDown="Window_PreviewKeyDown"
         AutomationProperties.Name="印刷プレビューダイアログ"
-        AutomationProperties.HelpText="帳票の印刷プレビューを表示します。ズームやページ送りができます。">
+        AutomationProperties.HelpText="帳票の印刷プレビューを表示します。ズームやページ送りができます。←→キーでページ移動できます。">
 
     <Window.Resources>
         <BooleanToVisibilityConverter x:Key="BoolToVisibilityConverter"/>
@@ -176,14 +177,10 @@
                         HorizontalAlignment="Center"
                         VerticalAlignment="Top"
                         Effect="{StaticResource DropShadowEffect}">
-                    <!-- Note: DocumentプロパティとサイズはFlowDocumentの特性上、
-                         データバインディングではなくコードビハインドで直接設定 -->
-                    <FlowDocumentScrollViewer x:Name="DocumentViewer"
-                                              VerticalScrollBarVisibility="Hidden"
-                                              HorizontalScrollBarVisibility="Hidden"
-                                              Zoom="{Binding ZoomLevel}"
-                                              IsToolBarVisible="False"
-                                              AutomationProperties.Name="ドキュメントプレビュー"/>
+                    <!-- FlowDocumentPageViewerを使用してページ単位の表示を実現 -->
+                    <FlowDocumentPageViewer x:Name="DocumentViewer"
+                                            Zoom="{Binding ZoomLevel}"
+                                            AutomationProperties.Name="ドキュメントプレビュー"/>
                 </Border>
             </ScrollViewer>
         </Border>
