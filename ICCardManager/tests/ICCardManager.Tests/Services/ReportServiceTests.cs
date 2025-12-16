@@ -1224,4 +1224,223 @@ public class ReportServiceTests : IDisposable
     }
 
     #endregion
+
+    #region TemplateResolver統合テスト
+
+    /// <summary>
+    /// ReportServiceがTemplateResolverを使用してテンプレートを正常に取得できる
+    /// </summary>
+    [Fact]
+    [Trait("Category", "Integration")]
+    public async Task CreateMonthlyReportAsync_UsesTemplateResolver_Successfully()
+    {
+        // Arrange
+        var cardIdm = "0102030405060708";
+        var card = CreateTestCard(cardIdm);
+        var outputPath = CreateTempFilePath();
+
+        var ledgers = new List<Ledger>
+        {
+            CreateTestLedger(1, cardIdm, new DateTime(2024, 1, 10), "鉄道（博多～天神）", 0, 500, 9500)
+        };
+
+        _cardRepositoryMock
+            .Setup(r => r.GetByIdmAsync(cardIdm, true))
+            .ReturnsAsync(card);
+        _ledgerRepositoryMock
+            .Setup(r => r.GetByMonthAsync(cardIdm, 2024, 1))
+            .ReturnsAsync(ledgers);
+
+        // Act
+        var result = await _reportService.CreateMonthlyReportAsync(cardIdm, 2024, 1, outputPath);
+
+        // Assert
+        result.Success.Should().BeTrue("テンプレートが正常に解決され、帳票が作成されるべき");
+        File.Exists(outputPath).Should().BeTrue("出力ファイルが存在するべき");
+
+        // ファイルがExcel形式であることを確認
+        using var workbook = new XLWorkbook(outputPath);
+        workbook.Worksheets.Should().NotBeEmpty("ワークシートが存在するべき");
+    }
+
+    /// <summary>
+    /// TemplateResolverからのテンプレートが埋め込みリソースから正しく取得される
+    /// </summary>
+    [Fact]
+    [Trait("Category", "Integration")]
+    public void TemplateResolver_InReportContext_ReturnsValidTemplate()
+    {
+        // Arrange & Act
+        // TemplateResolverがテンプレートを解決できることを確認
+        var templateExists = TemplateResolver.TemplateExists();
+        var templatePath = TemplateResolver.ResolveTemplatePath();
+
+        // Assert
+        templateExists.Should().BeTrue("ReportServiceが使用するテンプレートが存在するべき");
+        templatePath.Should().NotBeNullOrEmpty();
+        File.Exists(templatePath).Should().BeTrue();
+
+        // テンプレートファイルがClosedXMLで読み込めることを確認
+        using var workbook = new XLWorkbook(templatePath);
+        workbook.Worksheets.Should().NotBeEmpty("テンプレートにワークシートが存在するべき");
+    }
+
+    /// <summary>
+    /// 無効な出力パス（不正な文字を含む）でのReportService呼び出し時のエラーハンドリング
+    /// </summary>
+    /// <remarks>
+    /// Windows環境では &lt;&gt;|:"?* などの文字がファイルパスに使用できない
+    /// </remarks>
+    [Fact]
+    [Trait("Category", "Integration")]
+    public async Task CreateMonthlyReportAsync_WithInvalidPathCharacters_ReturnsFailure()
+    {
+        // Arrange
+        var cardIdm = "0102030405060708";
+        var card = CreateTestCard(cardIdm);
+        // Windowsで無効なファイル名文字（< > : | ? *）を含むパス
+        var invalidPath = Path.Combine(Path.GetTempPath(), "Invalid<>|Path", "report.xlsx");
+
+        var ledgers = new List<Ledger>
+        {
+            CreateTestLedger(1, cardIdm, new DateTime(2024, 1, 10), "鉄道（博多～天神）", 0, 500, 9500)
+        };
+
+        _cardRepositoryMock
+            .Setup(r => r.GetByIdmAsync(cardIdm, true))
+            .ReturnsAsync(card);
+        _ledgerRepositoryMock
+            .Setup(r => r.GetByMonthAsync(cardIdm, 2024, 1))
+            .ReturnsAsync(ledgers);
+
+        // Act
+        var result = await _reportService.CreateMonthlyReportAsync(cardIdm, 2024, 1, invalidPath);
+
+        // Assert
+        result.Success.Should().BeFalse("無効な文字を含むパスでは帳票作成に失敗するべき");
+        result.ErrorMessage.Should().NotBeNullOrEmpty("エラーメッセージが設定されるべき");
+    }
+
+    /// <summary>
+    /// カードが存在しない場合のReportService呼び出し時のエラーハンドリング
+    /// </summary>
+    [Fact]
+    [Trait("Category", "Integration")]
+    public async Task CreateMonthlyReportAsync_WithNonExistentCard_ReturnsFailure()
+    {
+        // Arrange
+        var cardIdm = "FFFFFFFFFFFFFFFF"; // 存在しないカードIDm
+        var outputPath = CreateTempFilePath();
+
+        _cardRepositoryMock
+            .Setup(r => r.GetByIdmAsync(cardIdm, true))
+            .ReturnsAsync((IcCard?)null);
+
+        // Act
+        var result = await _reportService.CreateMonthlyReportAsync(cardIdm, 2024, 1, outputPath);
+
+        // Assert
+        result.Success.Should().BeFalse("存在しないカードでは帳票作成に失敗するべき");
+        result.ErrorMessage.Should().NotBeNullOrEmpty("エラーメッセージが設定されるべき");
+    }
+
+    /// <summary>
+    /// 複数回の帳票作成でTemplateResolverが安定して動作する
+    /// </summary>
+    [Fact]
+    [Trait("Category", "Integration")]
+    public async Task CreateMonthlyReportAsync_MultipleCalls_TemplateResolverRemainsStable()
+    {
+        // Arrange
+        var cardIdm = "0102030405060708";
+        var card = CreateTestCard(cardIdm);
+        var outputPaths = Enumerable.Range(0, 3).Select(_ => CreateTempFilePath()).ToList();
+
+        var ledgers = new List<Ledger>
+        {
+            CreateTestLedger(1, cardIdm, new DateTime(2024, 1, 10), "鉄道（博多～天神）", 0, 500, 9500)
+        };
+
+        _cardRepositoryMock
+            .Setup(r => r.GetByIdmAsync(cardIdm, true))
+            .ReturnsAsync(card);
+        _ledgerRepositoryMock
+            .Setup(r => r.GetByMonthAsync(cardIdm, 2024, 1))
+            .ReturnsAsync(ledgers);
+
+        // Act & Assert
+        foreach (var outputPath in outputPaths)
+        {
+            var result = await _reportService.CreateMonthlyReportAsync(cardIdm, 2024, 1, outputPath);
+            result.Success.Should().BeTrue($"帳票作成が成功するべき: {outputPath}");
+            File.Exists(outputPath).Should().BeTrue($"出力ファイルが存在するべき: {outputPath}");
+        }
+    }
+
+    /// <summary>
+    /// ReportService呼び出し後もTemplateResolverのクリーンアップが正常に動作する
+    /// </summary>
+    [Fact]
+    [Trait("Category", "Integration")]
+    public async Task TemplateResolver_AfterReportCreation_CleanupWorksCorrectly()
+    {
+        // Arrange
+        var cardIdm = "0102030405060708";
+        var card = CreateTestCard(cardIdm);
+        var outputPath = CreateTempFilePath();
+
+        var ledgers = new List<Ledger>
+        {
+            CreateTestLedger(1, cardIdm, new DateTime(2024, 1, 10), "鉄道（博多～天神）", 0, 500, 9500)
+        };
+
+        _cardRepositoryMock
+            .Setup(r => r.GetByIdmAsync(cardIdm, true))
+            .ReturnsAsync(card);
+        _ledgerRepositoryMock
+            .Setup(r => r.GetByMonthAsync(cardIdm, 2024, 1))
+            .ReturnsAsync(ledgers);
+
+        // Act - 帳票作成
+        var result = await _reportService.CreateMonthlyReportAsync(cardIdm, 2024, 1, outputPath);
+
+        // Act - クリーンアップ実行
+        var cleanupAction = () => TemplateResolver.CleanupTempFiles();
+
+        // Assert
+        result.Success.Should().BeTrue();
+        cleanupAction.Should().NotThrow("帳票作成後もクリーンアップがエラーなく実行されるべき");
+    }
+
+    /// <summary>
+    /// TemplateNotFoundExceptionの詳細メッセージがデバッグに役立つ情報を含む
+    /// </summary>
+    [Fact]
+    [Trait("Category", "Integration")]
+    public void TemplateNotFoundException_DetailedMessage_ContainsDebugInfo()
+    {
+        // Arrange
+        var searchedPaths = new[]
+        {
+            "C:/App/Resources/物品出納簿テンプレート.xlsx",
+            "C:/App/bin/Resources/物品出納簿テンプレート.xlsx"
+        };
+        var exception = new TemplateNotFoundException(
+            "物品出納簿テンプレート",
+            searchedPaths,
+            "テンプレートファイルが見つかりません。アプリケーションを再インストールしてください。");
+
+        // Act
+        var detailedMessage = exception.GetDetailedMessage();
+
+        // Assert
+        detailedMessage.Should().Contain("検索したパス");
+        foreach (var path in searchedPaths)
+        {
+            detailedMessage.Should().Contain(path, "検索パスが詳細メッセージに含まれるべき");
+        }
+        exception.TemplateName.Should().Be("物品出納簿テンプレート");
+    }
+
+    #endregion
 }
