@@ -43,7 +43,7 @@ namespace ICCardManager.Infrastructure.CardReader;
 /// </remarks>
 public class PcScCardReader : ICardReader
 {
-    private readonly ISCardContext _context;
+    private readonly IPcScProvider _provider;
     private readonly ILogger<PcScCardReader> _logger;
     private ISCardMonitor? _monitor;
     private System.Timers.Timer? _healthCheckTimer;
@@ -77,17 +77,17 @@ public class PcScCardReader : ICardReader
     /// <summary>
     /// ヘルスチェック間隔（ミリ秒）
     /// </summary>
-    private const int HealthCheckIntervalMs = 10000;
+    internal const int HealthCheckIntervalMs = 10000;
 
     /// <summary>
     /// 再接続間隔（ミリ秒）
     /// </summary>
-    private const int ReconnectIntervalMs = 3000;
+    internal const int ReconnectIntervalMs = 3000;
 
     /// <summary>
     /// 最大再接続試行回数
     /// </summary>
-    private const int MaxReconnectAttempts = 10;
+    internal const int MaxReconnectAttempts = 10;
 
     public event EventHandler<CardReadEventArgs>? CardRead;
     public event EventHandler<Exception>? Error;
@@ -96,10 +96,24 @@ public class PcScCardReader : ICardReader
     public bool IsReading => _isReading;
     public CardReaderConnectionState ConnectionState => _connectionState;
 
+    /// <summary>
+    /// PcScCardReaderの新しいインスタンスを初期化します。
+    /// </summary>
+    /// <param name="logger">ロガー</param>
     public PcScCardReader(ILogger<PcScCardReader> logger)
+        : this(logger, new DefaultPcScProvider())
+    {
+    }
+
+    /// <summary>
+    /// テスト用のコンストラクタ。PC/SCプロバイダーを注入できます。
+    /// </summary>
+    /// <param name="logger">ロガー</param>
+    /// <param name="provider">PC/SCプロバイダー（テスト時はモックを注入）</param>
+    internal PcScCardReader(ILogger<PcScCardReader> logger, IPcScProvider provider)
     {
         _logger = logger;
-        _context = ContextFactory.Instance.Establish(SCardScope.System);
+        _provider = provider;
     }
 
     /// <summary>
@@ -127,7 +141,7 @@ public class PcScCardReader : ICardReader
         {
             try
             {
-                var readerNames = _context.GetReaders();
+                var readerNames = _provider.GetReaders();
                 if (readerNames == null || readerNames.Length == 0)
                 {
                     SetConnectionState(CardReaderConnectionState.Disconnected, "カードリーダーが見つかりません");
@@ -138,7 +152,7 @@ public class PcScCardReader : ICardReader
                 _logger.LogInformation("検出されたカードリーダー: {ReaderNames}", string.Join(", ", readerNames));
 
                 _lastKnownReaderNames = readerNames;
-                _monitor = MonitorFactory.Instance.Create(SCardScope.System);
+                _monitor = _provider.CreateMonitor();
                 _monitor.CardInserted += OnCardInserted;
                 _monitor.CardRemoved += OnCardRemoved;
                 _monitor.MonitorException += OnMonitorException;
@@ -234,14 +248,14 @@ public class PcScCardReader : ICardReader
         {
             try
             {
-                var readerNames = _context.GetReaders();
+                var readerNames = _provider.GetReaders();
                 if (readerNames == null || readerNames.Length == 0)
                 {
                     System.Diagnostics.Debug.WriteLine("履歴読み取り: カードリーダーが見つかりません");
                     return;
                 }
 
-                using var reader = _context.ConnectReader(readerNames[0], SCardShareMode.Shared, SCardProtocol.Any);
+                using var reader = _provider.ConnectReader(readerNames[0], SCardShareMode.Shared, SCardProtocol.Any);
 
                 // FeliCaの履歴読み取りコマンド
                 // サービスコード: 0x090F（履歴情報）
@@ -308,13 +322,13 @@ public class PcScCardReader : ICardReader
         {
             try
             {
-                var readerNames = _context.GetReaders();
+                var readerNames = _provider.GetReaders();
                 if (readerNames == null || readerNames.Length == 0)
                 {
                     return null;
                 }
 
-                using var reader = _context.ConnectReader(readerNames[0], SCardShareMode.Shared, SCardProtocol.Any);
+                using var reader = _provider.ConnectReader(readerNames[0], SCardShareMode.Shared, SCardProtocol.Any);
 
                 // 残高読み取り（履歴の最新レコードから取得）
                 var serviceCode = new byte[] { 0x0F, 0x09 };
@@ -354,7 +368,7 @@ public class PcScCardReader : ICardReader
         {
             System.Diagnostics.Debug.WriteLine($"カード検出: リーダー={e.ReaderName}");
 
-            using var reader = _context.ConnectReader(e.ReaderName, SCardShareMode.Shared, SCardProtocol.Any);
+            using var reader = _provider.ConnectReader(e.ReaderName, SCardShareMode.Shared, SCardProtocol.Any);
 
             // IDmを読み取り
             var idm = ReadIdm(reader);
@@ -494,7 +508,7 @@ public class PcScCardReader : ICardReader
         {
             try
             {
-                var readerNames = _context.GetReaders();
+                var readerNames = _provider.GetReaders();
                 return readerNames != null && readerNames.Length > 0;
             }
             catch (PCSCException)
@@ -571,7 +585,7 @@ public class PcScCardReader : ICardReader
             }
 
             // リーダーを再検索
-            var readerNames = _context.GetReaders();
+            var readerNames = _provider.GetReaders();
             if (readerNames == null || readerNames.Length == 0)
             {
                 System.Diagnostics.Debug.WriteLine("再接続: カードリーダーが見つかりません");
@@ -580,7 +594,7 @@ public class PcScCardReader : ICardReader
 
             // 新しいモニターを開始
             _lastKnownReaderNames = readerNames;
-            _monitor = MonitorFactory.Instance.Create(SCardScope.System);
+            _monitor = _provider.CreateMonitor();
             _monitor.CardInserted += OnCardInserted;
             _monitor.CardRemoved += OnCardRemoved;
             _monitor.MonitorException += OnMonitorException;
@@ -943,7 +957,7 @@ public class PcScCardReader : ICardReader
                 StopHealthCheckTimer();
                 StopReconnectTimer();
                 StopReadingAsync().Wait();
-                _context.Dispose();
+                _provider.Dispose();
             }
             _disposed = true;
         }
