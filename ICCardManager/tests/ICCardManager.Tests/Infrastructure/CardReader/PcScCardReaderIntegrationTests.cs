@@ -390,7 +390,6 @@ public class DefaultPcScProviderIntegrationTests : IDisposable
         {
             _skipReason = $"スマートカードサービスが利用できません: {ex.Message}";
             _output.WriteLine($"[SKIP] {_skipReason}");
-            _serviceAvailable = false;
             return false;
         }
     }
