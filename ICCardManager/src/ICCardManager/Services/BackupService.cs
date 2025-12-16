@@ -1,5 +1,7 @@
 using System.IO;
+using System.Security;
 using ICCardManager.Common;
+using ICCardManager.Common.Exceptions;
 using ICCardManager.Data;
 using ICCardManager.Data.Repositories;
 using Microsoft.Extensions.Logging;
@@ -46,11 +48,13 @@ public class BackupService
     /// <returns>作成されたバックアップファイルのパス（失敗時はnull）</returns>
     public async Task<string?> ExecuteAutoBackupAsync()
     {
+        string? backupPath = null;
+
         try
         {
             // バックアップ先フォルダを取得
             var settings = await _settingsRepository.GetAppSettingsAsync();
-            var backupPath = settings.BackupPath;
+            backupPath = settings.BackupPath;
 
             if (string.IsNullOrWhiteSpace(backupPath))
             {
@@ -93,9 +97,24 @@ public class BackupService
 
             return backupFilePath;
         }
+        catch (UnauthorizedAccessException ex)
+        {
+            _logger.LogError(ex, "自動バックアップに失敗しました（アクセス権限エラー）: {Path}", backupPath);
+            return null;
+        }
+        catch (IOException ex)
+        {
+            _logger.LogError(ex, "自動バックアップに失敗しました（I/Oエラー）: {Path}", backupPath);
+            return null;
+        }
+        catch (SecurityException ex)
+        {
+            _logger.LogError(ex, "自動バックアップに失敗しました（セキュリティエラー）: {Path}", backupPath);
+            return null;
+        }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "自動バックアップに失敗しました");
+            _logger.LogError(ex, "自動バックアップに失敗しました（予期しないエラー）");
             return null;
         }
     }
@@ -132,9 +151,34 @@ public class BackupService
             _logger.LogInformation("バックアップを作成しました: {Path}", backupFilePath);
             return true;
         }
+        catch (UnauthorizedAccessException ex)
+        {
+            _logger.LogError(ex,
+                "バックアップ作成に失敗しました（アクセス権限エラー）: {Path}, Source={Source}",
+                backupFilePath,
+                _dbContext.DatabasePath);
+            return false;
+        }
+        catch (IOException ex)
+        {
+            _logger.LogError(ex,
+                "バックアップ作成に失敗しました（I/Oエラー）: {Path}, Source={Source}",
+                backupFilePath,
+                _dbContext.DatabasePath);
+            return false;
+        }
+        catch (SecurityException ex)
+        {
+            _logger.LogError(ex,
+                "バックアップ作成に失敗しました（セキュリティエラー）: {Path}",
+                backupFilePath);
+            return false;
+        }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "バックアップ作成に失敗しました: {Path}", backupFilePath);
+            _logger.LogError(ex,
+                "バックアップ作成に失敗しました（予期しないエラー）: {Path}",
+                backupFilePath);
             return false;
         }
     }
@@ -145,17 +189,20 @@ public class BackupService
     /// <param name="backupFilePath">リストアするバックアップファイルのパス</param>
     public bool RestoreFromBackup(string backupFilePath)
     {
+        var targetPath = _dbContext.DatabasePath;
+        var tempPath = targetPath + ".temp";
+
         try
         {
             if (!File.Exists(backupFilePath))
             {
+                _logger.LogWarning(
+                    "リストア対象のバックアップファイルが存在しません: {Path}",
+                    backupFilePath);
                 return false;
             }
 
-            var targetPath = _dbContext.DatabasePath;
-
             // 現在のDBを退避
-            var tempPath = targetPath + ".temp";
             if (File.Exists(targetPath))
             {
                 File.Move(targetPath, tempPath, overwrite: true);
@@ -169,11 +216,19 @@ public class BackupService
                 {
                     File.Delete(tempPath);
                 }
+                _logger.LogInformation(
+                    "バックアップからリストアしました: {BackupPath} -> {TargetPath}",
+                    backupFilePath,
+                    targetPath);
                 return true;
             }
-            catch
+            catch (Exception ex)
             {
                 // 失敗したら退避ファイルを戻す
+                _logger.LogWarning(ex,
+                    "リストアに失敗したため、元のデータベースを復元します: {TempPath} -> {TargetPath}",
+                    tempPath,
+                    targetPath);
                 if (File.Exists(tempPath))
                 {
                     File.Move(tempPath, targetPath, overwrite: true);
@@ -181,8 +236,34 @@ public class BackupService
                 throw;
             }
         }
-        catch
+        catch (UnauthorizedAccessException ex)
         {
+            _logger.LogError(ex,
+                "リストアに失敗しました（アクセス権限エラー）: {BackupPath} -> {TargetPath}",
+                backupFilePath,
+                targetPath);
+            return false;
+        }
+        catch (IOException ex)
+        {
+            _logger.LogError(ex,
+                "リストアに失敗しました（I/Oエラー）: {BackupPath} -> {TargetPath}",
+                backupFilePath,
+                targetPath);
+            return false;
+        }
+        catch (SecurityException ex)
+        {
+            _logger.LogError(ex,
+                "リストアに失敗しました（セキュリティエラー）: {BackupPath}",
+                backupFilePath);
+            return false;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex,
+                "リストアに失敗しました（予期しないエラー）: {BackupPath}",
+                backupFilePath);
             return false;
         }
     }
@@ -251,10 +332,28 @@ public class BackupService
                     try
                     {
                         file.Delete();
+                        _logger.LogDebug("古いバックアップファイルを削除しました: {Path}", file.FullName);
                     }
-                    catch
+                    catch (UnauthorizedAccessException ex)
                     {
-                        // 削除に失敗しても続行
+                        // 削除に失敗しても続行（クリーンアップは最善努力）
+                        _logger.LogWarning(ex,
+                            "古いバックアップファイルの削除に失敗しました（アクセス権限エラー）: {Path}",
+                            file.FullName);
+                    }
+                    catch (IOException ex)
+                    {
+                        // 削除に失敗しても続行（ファイルが使用中など）
+                        _logger.LogWarning(ex,
+                            "古いバックアップファイルの削除に失敗しました（I/Oエラー）: {Path}",
+                            file.FullName);
+                    }
+                    catch (Exception ex)
+                    {
+                        // 予期しないエラーでも続行
+                        _logger.LogWarning(ex,
+                            "古いバックアップファイルの削除に失敗しました: {Path}",
+                            file.FullName);
                     }
                 }
             }

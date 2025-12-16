@@ -1,6 +1,8 @@
 using System.IO;
+using System.Security;
 using System.Text;
 using System.Text.RegularExpressions;
+using ICCardManager.Common.Exceptions;
 using ICCardManager.Data;
 using ICCardManager.Data.Repositories;
 using ICCardManager.Infrastructure.Caching;
@@ -330,7 +332,12 @@ public class CsvImportService
                     importedCount = 0;
                 }
             }
-            catch
+            catch (SqliteException ex)
+            {
+                transaction.Rollback();
+                throw DatabaseException.QueryFailed("CSV import transaction", ex);
+            }
+            catch (Exception)
             {
                 transaction.Rollback();
                 throw;
@@ -345,12 +352,48 @@ public class CsvImportService
                 Errors = errors
             };
         }
-        catch (Exception ex)
+        catch (FileNotFoundException)
+        {
+            return new CsvImportResult
+            {
+                Success = false,
+                ErrorMessage = "指定されたファイルが見つかりません。",
+                Errors = errors
+            };
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return new CsvImportResult
+            {
+                Success = false,
+                ErrorMessage = "ファイルへのアクセス権限がありません。",
+                Errors = errors
+            };
+        }
+        catch (IOException ex)
         {
             return new CsvImportResult
             {
                 Success = false,
                 ErrorMessage = $"ファイルの読み込みエラー: {ex.Message}",
+                Errors = errors
+            };
+        }
+        catch (DatabaseException ex)
+        {
+            return new CsvImportResult
+            {
+                Success = false,
+                ErrorMessage = ex.UserFriendlyMessage,
+                Errors = errors
+            };
+        }
+        catch (Exception ex)
+        {
+            return new CsvImportResult
+            {
+                Success = false,
+                ErrorMessage = $"予期しないエラーが発生しました: {ex.Message}",
                 Errors = errors
             };
         }
@@ -533,7 +576,12 @@ public class CsvImportService
                     importedCount = 0;
                 }
             }
-            catch
+            catch (SqliteException ex)
+            {
+                transaction.Rollback();
+                throw DatabaseException.QueryFailed("CSV import transaction", ex);
+            }
+            catch (Exception)
             {
                 transaction.Rollback();
                 throw;
@@ -548,12 +596,48 @@ public class CsvImportService
                 Errors = errors
             };
         }
-        catch (Exception ex)
+        catch (FileNotFoundException)
+        {
+            return new CsvImportResult
+            {
+                Success = false,
+                ErrorMessage = "指定されたファイルが見つかりません。",
+                Errors = errors
+            };
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return new CsvImportResult
+            {
+                Success = false,
+                ErrorMessage = "ファイルへのアクセス権限がありません。",
+                Errors = errors
+            };
+        }
+        catch (IOException ex)
         {
             return new CsvImportResult
             {
                 Success = false,
                 ErrorMessage = $"ファイルの読み込みエラー: {ex.Message}",
+                Errors = errors
+            };
+        }
+        catch (DatabaseException ex)
+        {
+            return new CsvImportResult
+            {
+                Success = false,
+                ErrorMessage = ex.UserFriendlyMessage,
+                Errors = errors
+            };
+        }
+        catch (Exception ex)
+        {
+            return new CsvImportResult
+            {
+                Success = false,
+                ErrorMessage = $"予期しないエラーが発生しました: {ex.Message}",
                 Errors = errors
             };
         }
@@ -700,12 +784,39 @@ public class CsvImportService
                 Items = items
             };
         }
-        catch (Exception ex)
+        catch (FileNotFoundException)
+        {
+            return new CsvImportPreviewResult
+            {
+                IsValid = false,
+                ErrorMessage = "指定されたファイルが見つかりません。",
+                Errors = errors
+            };
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return new CsvImportPreviewResult
+            {
+                IsValid = false,
+                ErrorMessage = "ファイルへのアクセス権限がありません。",
+                Errors = errors
+            };
+        }
+        catch (IOException ex)
         {
             return new CsvImportPreviewResult
             {
                 IsValid = false,
                 ErrorMessage = $"ファイルの読み込みエラー: {ex.Message}",
+                Errors = errors
+            };
+        }
+        catch (Exception ex)
+        {
+            return new CsvImportPreviewResult
+            {
+                IsValid = false,
+                ErrorMessage = $"予期しないエラーが発生しました: {ex.Message}",
                 Errors = errors
             };
         }
@@ -841,12 +952,39 @@ public class CsvImportService
                 Items = items
             };
         }
-        catch (Exception ex)
+        catch (FileNotFoundException)
+        {
+            return new CsvImportPreviewResult
+            {
+                IsValid = false,
+                ErrorMessage = "指定されたファイルが見つかりません。",
+                Errors = errors
+            };
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return new CsvImportPreviewResult
+            {
+                IsValid = false,
+                ErrorMessage = "ファイルへのアクセス権限がありません。",
+                Errors = errors
+            };
+        }
+        catch (IOException ex)
         {
             return new CsvImportPreviewResult
             {
                 IsValid = false,
                 ErrorMessage = $"ファイルの読み込みエラー: {ex.Message}",
+                Errors = errors
+            };
+        }
+        catch (Exception ex)
+        {
+            return new CsvImportPreviewResult
+            {
+                IsValid = false,
+                ErrorMessage = $"予期しないエラーが発生しました: {ex.Message}",
                 Errors = errors
             };
         }
@@ -1089,12 +1227,39 @@ public class CsvImportService
                 Errors = errors
             };
         }
-        catch (Exception ex)
+        catch (FileNotFoundException)
+        {
+            return new CsvImportResult
+            {
+                Success = false,
+                ErrorMessage = "指定されたファイルが見つかりません。",
+                Errors = errors
+            };
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return new CsvImportResult
+            {
+                Success = false,
+                ErrorMessage = "ファイルへのアクセス権限がありません。",
+                Errors = errors
+            };
+        }
+        catch (IOException ex)
         {
             return new CsvImportResult
             {
                 Success = false,
                 ErrorMessage = $"ファイルの読み込みエラー: {ex.Message}",
+                Errors = errors
+            };
+        }
+        catch (Exception ex)
+        {
+            return new CsvImportResult
+            {
+                Success = false,
+                ErrorMessage = $"予期しないエラーが発生しました: {ex.Message}",
                 Errors = errors
             };
         }
@@ -1240,12 +1405,39 @@ public class CsvImportService
                 Items = items
             };
         }
-        catch (Exception ex)
+        catch (FileNotFoundException)
+        {
+            return new CsvImportPreviewResult
+            {
+                IsValid = false,
+                ErrorMessage = "指定されたファイルが見つかりません。",
+                Errors = errors
+            };
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return new CsvImportPreviewResult
+            {
+                IsValid = false,
+                ErrorMessage = "ファイルへのアクセス権限がありません。",
+                Errors = errors
+            };
+        }
+        catch (IOException ex)
         {
             return new CsvImportPreviewResult
             {
                 IsValid = false,
                 ErrorMessage = $"ファイルの読み込みエラー: {ex.Message}",
+                Errors = errors
+            };
+        }
+        catch (Exception ex)
+        {
+            return new CsvImportPreviewResult
+            {
+                IsValid = false,
+                ErrorMessage = $"予期しないエラーが発生しました: {ex.Message}",
                 Errors = errors
             };
         }
