@@ -574,4 +574,233 @@ public class PcScCardReaderTests : IDisposable
     }
 
     #endregion
+
+    #region CardReadイベントテスト
+
+    /// <summary>
+    /// カード挿入時にCardReadイベントが発火する
+    /// </summary>
+    [Fact]
+    [Trait("Category", "Unit")]
+    public async Task CardInserted_FiresCardReadEvent_WithValidIdm()
+    {
+        // Arrange
+        _providerMock.Setup(p => p.GetReaders()).Returns(new[] { "Test Reader" });
+
+        // PcscICardReaderのモックを設定
+        var cardReaderMock = new Mock<PcscICardReader>();
+
+        // IDm読み取りレスポンス: IDm(8バイト) + SW1(90) + SW2(00)
+        // IDm = 01 23 45 67 89 AB CD EF
+        var idmResponse = new byte[] { 0x01, 0x23, 0x45, 0x67, 0x89, 0xAB, 0xCD, 0xEF, 0x90, 0x00 };
+
+        cardReaderMock
+            .Setup(r => r.Transmit(It.IsAny<byte[]>(), It.IsAny<byte[]>()))
+            .Returns((byte[] sendBuffer, byte[] receiveBuffer) =>
+            {
+                Array.Copy(idmResponse, receiveBuffer, idmResponse.Length);
+                return idmResponse.Length;
+            });
+
+        _providerMock
+            .Setup(p => p.ConnectReader(It.IsAny<string>(), It.IsAny<SCardShareMode>(), It.IsAny<SCardProtocol>()))
+            .Returns(cardReaderMock.Object);
+
+        var reader = CreateReader();
+        await reader.StartReadingAsync();
+
+        CardReadEventArgs? receivedArgs = null;
+        reader.CardRead += (s, e) => receivedArgs = e;
+
+        // Act - CardInsertedイベントをシミュレート
+        _monitorMock.Raise(
+            m => m.CardInserted += null,
+            this,
+            new CardStatusEventArgs("Test Reader", SCRState.Present, new byte[] { }));
+
+        // Assert
+        receivedArgs.Should().NotBeNull("CardReadイベントが発火すべき");
+        receivedArgs!.Idm.Should().Be("0123456789ABCDEF", "正しいIDmが設定されるべき");
+        receivedArgs.SystemCode.Should().Be("0003", "サイバネシステムコードが設定されるべき");
+    }
+
+    /// <summary>
+    /// IDm読み取り失敗時はCardReadイベントが発火しない
+    /// </summary>
+    [Fact]
+    [Trait("Category", "Unit")]
+    public async Task CardInserted_DoesNotFireCardReadEvent_WhenIdmReadFails()
+    {
+        // Arrange
+        _providerMock.Setup(p => p.GetReaders()).Returns(new[] { "Test Reader" });
+
+        var cardReaderMock = new Mock<PcscICardReader>();
+
+        // 失敗レスポンス（IDmなし）
+        var failResponse = new byte[] { 0x63, 0x00 }; // エラーステータス
+
+        cardReaderMock
+            .Setup(r => r.Transmit(It.IsAny<byte[]>(), It.IsAny<byte[]>()))
+            .Returns((byte[] sendBuffer, byte[] receiveBuffer) =>
+            {
+                Array.Copy(failResponse, receiveBuffer, failResponse.Length);
+                return failResponse.Length;
+            });
+
+        _providerMock
+            .Setup(p => p.ConnectReader(It.IsAny<string>(), It.IsAny<SCardShareMode>(), It.IsAny<SCardProtocol>()))
+            .Returns(cardReaderMock.Object);
+
+        var reader = CreateReader();
+        await reader.StartReadingAsync();
+
+        var cardReadFired = false;
+        reader.CardRead += (s, e) => cardReadFired = true;
+
+        // Act - CardInsertedイベントをシミュレート
+        _monitorMock.Raise(
+            m => m.CardInserted += null,
+            this,
+            new CardStatusEventArgs("Test Reader", SCRState.Present, new byte[] { }));
+
+        // Assert
+        cardReadFired.Should().BeFalse("IDm読み取り失敗時はCardReadイベントは発火しないべき");
+    }
+
+    /// <summary>
+    /// 同一カードの連続読み取りは無視される（1秒以内）
+    /// </summary>
+    [Fact]
+    [Trait("Category", "Unit")]
+    public async Task CardInserted_IgnoresDuplicateReads_Within1Second()
+    {
+        // Arrange
+        _providerMock.Setup(p => p.GetReaders()).Returns(new[] { "Test Reader" });
+
+        var cardReaderMock = new Mock<PcscICardReader>();
+        var idmResponse = new byte[] { 0x01, 0x23, 0x45, 0x67, 0x89, 0xAB, 0xCD, 0xEF, 0x90, 0x00 };
+
+        cardReaderMock
+            .Setup(r => r.Transmit(It.IsAny<byte[]>(), It.IsAny<byte[]>()))
+            .Returns((byte[] sendBuffer, byte[] receiveBuffer) =>
+            {
+                Array.Copy(idmResponse, receiveBuffer, idmResponse.Length);
+                return idmResponse.Length;
+            });
+
+        _providerMock
+            .Setup(p => p.ConnectReader(It.IsAny<string>(), It.IsAny<SCardShareMode>(), It.IsAny<SCardProtocol>()))
+            .Returns(cardReaderMock.Object);
+
+        var reader = CreateReader();
+        await reader.StartReadingAsync();
+
+        var cardReadCount = 0;
+        reader.CardRead += (s, e) => cardReadCount++;
+
+        // Act - 同じカードを2回タッチ（間隔なし）
+        _monitorMock.Raise(
+            m => m.CardInserted += null,
+            this,
+            new CardStatusEventArgs("Test Reader", SCRState.Present, new byte[] { }));
+
+        _monitorMock.Raise(
+            m => m.CardInserted += null,
+            this,
+            new CardStatusEventArgs("Test Reader", SCRState.Present, new byte[] { }));
+
+        // Assert
+        cardReadCount.Should().Be(1, "1秒以内の同一カード連続読み取りは無視されるべき");
+    }
+
+    /// <summary>
+    /// PCSC例外時はErrorイベントが発火する（カード取り外し以外）
+    /// </summary>
+    [Fact]
+    [Trait("Category", "Unit")]
+    public async Task CardInserted_FiresErrorEvent_OnPCSCException()
+    {
+        // Arrange
+        _providerMock.Setup(p => p.GetReaders()).Returns(new[] { "Test Reader" });
+
+        _providerMock
+            .Setup(p => p.ConnectReader(It.IsAny<string>(), It.IsAny<SCardShareMode>(), It.IsAny<SCardProtocol>()))
+            .Throws(new PCSCException(SCardError.NoService, "サービスエラー"));
+
+        var reader = CreateReader();
+        await reader.StartReadingAsync();
+
+        Exception? caughtException = null;
+        reader.Error += (s, e) => caughtException = e;
+
+        // Act
+        _monitorMock.Raise(
+            m => m.CardInserted += null,
+            this,
+            new CardStatusEventArgs("Test Reader", SCRState.Present, new byte[] { }));
+
+        // Assert
+        caughtException.Should().NotBeNull("PCSC例外時はErrorイベントが発火すべき");
+    }
+
+    /// <summary>
+    /// カード取り外し例外（RemovedCard）はErrorイベントを発火しない
+    /// </summary>
+    [Fact]
+    [Trait("Category", "Unit")]
+    public async Task CardInserted_DoesNotFireErrorEvent_OnRemovedCardException()
+    {
+        // Arrange
+        _providerMock.Setup(p => p.GetReaders()).Returns(new[] { "Test Reader" });
+
+        _providerMock
+            .Setup(p => p.ConnectReader(It.IsAny<string>(), It.IsAny<SCardShareMode>(), It.IsAny<SCardProtocol>()))
+            .Throws(new PCSCException(SCardError.RemovedCard, "カードが取り外されました"));
+
+        var reader = CreateReader();
+        await reader.StartReadingAsync();
+
+        Exception? caughtException = null;
+        reader.Error += (s, e) => caughtException = e;
+
+        // Act
+        _monitorMock.Raise(
+            m => m.CardInserted += null,
+            this,
+            new CardStatusEventArgs("Test Reader", SCRState.Present, new byte[] { }));
+
+        // Assert
+        caughtException.Should().BeNull("RemovedCard例外はErrorイベントを発火しないべき（正常動作）");
+    }
+
+    /// <summary>
+    /// モニター例外時にErrorイベントが発火し、切断状態になる
+    /// </summary>
+    [Fact]
+    [Trait("Category", "Unit")]
+    public async Task MonitorException_FiresErrorEvent_AndSetsDisconnectedState()
+    {
+        // Arrange
+        _providerMock.Setup(p => p.GetReaders()).Returns(new[] { "Test Reader" });
+        var reader = CreateReader();
+        await reader.StartReadingAsync();
+
+        Exception? caughtException = null;
+        reader.Error += (s, e) => caughtException = e;
+
+        var stateChanges = new List<CardReaderConnectionState>();
+        reader.ConnectionStateChanged += (s, e) => stateChanges.Add(e.State);
+
+        // Act - MonitorExceptionイベントをシミュレート
+        _monitorMock.Raise(
+            m => m.MonitorException += null,
+            this,
+            new PCSCException(SCardError.ReaderUnavailable, "リーダーが使用できません"));
+
+        // Assert
+        caughtException.Should().NotBeNull("モニター例外時はErrorイベントが発火すべき");
+        stateChanges.Should().Contain(CardReaderConnectionState.Disconnected, "モニター例外後は切断状態になるべき");
+    }
+
+    #endregion
 }
