@@ -1,4 +1,5 @@
 using FluentAssertions;
+using ICCardManager.Common.Exceptions;
 using ICCardManager.Infrastructure.CardReader;
 using Microsoft.Extensions.Logging;
 using Moq;
@@ -90,7 +91,7 @@ public class PcScCardReaderTests : IDisposable
         var reader = CreateReader();
 
         // Act & Assert
-        await Assert.ThrowsAsync<InvalidOperationException>(() => reader.StartReadingAsync());
+        await Assert.ThrowsAsync<CardReaderException>(() => reader.StartReadingAsync());
         // 例外がスローされた後、Disconnected状態になっていることを確認
         reader.ConnectionState.Should().Be(CardReaderConnectionState.Disconnected);
     }
@@ -107,7 +108,7 @@ public class PcScCardReaderTests : IDisposable
         var reader = CreateReader();
 
         // Act & Assert
-        await Assert.ThrowsAsync<InvalidOperationException>(() => reader.StartReadingAsync());
+        await Assert.ThrowsAsync<CardReaderException>(() => reader.StartReadingAsync());
         reader.ConnectionState.Should().Be(CardReaderConnectionState.Disconnected);
     }
 

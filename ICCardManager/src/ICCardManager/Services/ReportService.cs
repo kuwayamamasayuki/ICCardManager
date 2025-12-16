@@ -67,9 +67,19 @@ public class BatchReportGenerationResult
     public string? TemplateErrorMessage { get; init; }
 
     /// <summary>
+    /// ディレクトリエラーメッセージ（出力先フォルダの作成に失敗した場合）
+    /// </summary>
+    public string? DirectoryErrorMessage { get; init; }
+
+    /// <summary>
     /// テンプレートが見つからなかった
     /// </summary>
     public bool IsTemplateError => TemplateErrorMessage != null;
+
+    /// <summary>
+    /// ディレクトリ作成エラーがあった
+    /// </summary>
+    public bool IsDirectoryError => DirectoryErrorMessage != null;
 
     /// <summary>
     /// 成功した件数
@@ -84,7 +94,7 @@ public class BatchReportGenerationResult
     /// <summary>
     /// 全件成功したか
     /// </summary>
-    public bool AllSuccess => !IsTemplateError && Results.All(r => r.Result.Success);
+    public bool AllSuccess => !IsTemplateError && !IsDirectoryError && Results.All(r => r.Result.Success);
 
     /// <summary>
     /// 成功したファイルパスの一覧
@@ -114,6 +124,14 @@ public class BatchReportGenerationResult
     };
 
     /// <summary>
+    /// 出力先フォルダの作成に失敗した場合の結果を作成
+    /// </summary>
+    public static BatchReportGenerationResult DirectoryCreationFailed(string detailedMessage) => new()
+    {
+        DirectoryErrorMessage = detailedMessage
+    };
+
+    /// <summary>
     /// 結果サマリーを取得
     /// </summary>
     public string GetSummary()
@@ -121,6 +139,11 @@ public class BatchReportGenerationResult
         if (IsTemplateError)
         {
             return $"テンプレートエラー: {TemplateErrorMessage}";
+        }
+
+        if (IsDirectoryError)
+        {
+            return $"フォルダエラー: {DirectoryErrorMessage}";
         }
 
         if (AllSuccess)
@@ -245,6 +268,18 @@ public class ReportService
             workbook.SaveAs(outputPath);
             return ReportGenerationResult.SuccessResult(outputPath);
         }
+        catch (UnauthorizedAccessException ex)
+        {
+            return ReportGenerationResult.FailureResult(
+                "ファイルの保存に失敗しました",
+                $"出力先フォルダへのアクセス権限がありません。別のフォルダを指定するか、管理者に連絡してください。\n\n詳細: {ex.Message}");
+        }
+        catch (DirectoryNotFoundException ex)
+        {
+            return ReportGenerationResult.FailureResult(
+                "ファイルの保存に失敗しました",
+                $"出力先フォルダが見つかりません。フォルダのパスを確認してください。\n\n詳細: {ex.Message}");
+        }
         catch (IOException ex)
         {
             return ReportGenerationResult.FailureResult(
@@ -300,7 +335,25 @@ public class ReportService
             }
         }
 
-        Directory.CreateDirectory(outputFolder);
+        try
+        {
+            Directory.CreateDirectory(outputFolder);
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            return BatchReportGenerationResult.DirectoryCreationFailed(
+                $"出力先フォルダへのアクセス権限がありません。別のフォルダを指定するか、管理者に連絡してください。\n\n詳細: {ex.Message}");
+        }
+        catch (IOException ex)
+        {
+            return BatchReportGenerationResult.DirectoryCreationFailed(
+                $"出力先フォルダの作成に失敗しました。パスを確認してください。\n\n詳細: {ex.Message}");
+        }
+        catch (Exception ex)
+        {
+            return BatchReportGenerationResult.DirectoryCreationFailed(
+                $"出力先フォルダの作成中に予期しないエラーが発生しました。\n\n詳細: {ex.Message}");
+        }
 
         foreach (var cardIdm in cardIdms)
         {

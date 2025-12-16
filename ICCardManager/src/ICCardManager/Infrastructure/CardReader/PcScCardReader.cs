@@ -1,4 +1,5 @@
 using ICCardManager.Common;
+using ICCardManager.Common.Exceptions;
 using ICCardManager.Models;
 using ICCardManager.Services;
 using Microsoft.Extensions.Logging;
@@ -168,22 +169,22 @@ public class PcScCardReader : ICardReader
             }
             catch (PCSCException ex)
             {
-                var errorMessage = ex.SCardError switch
+                CardReaderException cardReaderException = ex.SCardError switch
                 {
-                    SCardError.NoService => "スマートカードサービスが起動していません。",
-                    SCardError.NoReadersAvailable => "カードリーダーが見つかりません。",
-                    _ => $"カードリーダーエラー: {ex.Message}"
+                    SCardError.NoService => CardReaderException.ServiceNotAvailable(ex),
+                    SCardError.NoReadersAvailable => CardReaderException.NotConnected(ex),
+                    _ => CardReaderException.ReadFailed(ex.Message, ex)
                 };
-                SetConnectionState(CardReaderConnectionState.Disconnected, errorMessage);
-                var wrappedException = new InvalidOperationException(errorMessage, ex);
-                Error?.Invoke(this, wrappedException);
-                throw wrappedException;
+                SetConnectionState(CardReaderConnectionState.Disconnected, cardReaderException.UserFriendlyMessage);
+                Error?.Invoke(this, cardReaderException);
+                throw cardReaderException;
             }
             catch (Exception ex)
             {
-                SetConnectionState(CardReaderConnectionState.Disconnected, ex.Message);
-                Error?.Invoke(this, ex);
-                throw;
+                var cardReaderException = CardReaderException.ReadFailed(ex.Message, ex);
+                SetConnectionState(CardReaderConnectionState.Disconnected, cardReaderException.UserFriendlyMessage);
+                Error?.Invoke(this, cardReaderException);
+                throw cardReaderException;
             }
         });
     }
@@ -295,12 +296,18 @@ public class PcScCardReader : ICardReader
             catch (PCSCException ex)
             {
                 System.Diagnostics.Debug.WriteLine($"履歴読み取りエラー(PCSC): {ex.Message}");
-                Error?.Invoke(this, new InvalidOperationException($"カードの履歴読み取りに失敗しました: {ex.Message}", ex));
+                CardReaderException cardReaderException = ex.SCardError switch
+                {
+                    SCardError.RemovedCard => CardReaderException.CardRemoved(ex),
+                    _ => CardReaderException.HistoryReadFailed(ex.Message, ex)
+                };
+                Error?.Invoke(this, cardReaderException);
             }
             catch (Exception ex)
             {
                 System.Diagnostics.Debug.WriteLine($"履歴読み取りエラー: {ex.Message}");
-                Error?.Invoke(this, ex);
+                var cardReaderException = CardReaderException.HistoryReadFailed(ex.Message, ex);
+                Error?.Invoke(this, cardReaderException);
             }
         });
 
@@ -347,13 +354,19 @@ public class PcScCardReader : ICardReader
             catch (PCSCException ex)
             {
                 System.Diagnostics.Debug.WriteLine($"残高読み取りエラー(PCSC): {ex.Message}");
-                Error?.Invoke(this, new InvalidOperationException($"カードの残高読み取りに失敗しました: {ex.Message}", ex));
+                CardReaderException cardReaderException = ex.SCardError switch
+                {
+                    SCardError.RemovedCard => CardReaderException.CardRemoved(ex),
+                    _ => CardReaderException.BalanceReadFailed(ex.Message, ex)
+                };
+                Error?.Invoke(this, cardReaderException);
                 return null;
             }
             catch (Exception ex)
             {
                 System.Diagnostics.Debug.WriteLine($"残高読み取りエラー: {ex.Message}");
-                Error?.Invoke(this, ex);
+                var cardReaderException = CardReaderException.BalanceReadFailed(ex.Message, ex);
+                Error?.Invoke(this, cardReaderException);
                 return null;
             }
         });
@@ -400,16 +413,23 @@ public class PcScCardReader : ICardReader
         catch (PCSCException ex)
         {
             System.Diagnostics.Debug.WriteLine($"カード読み取りエラー(PCSC): {ex.Message}, SCardError={ex.SCardError}");
-            // カードが素早く離された場合などは無視
-            if (ex.SCardError != SCardError.RemovedCard)
+            // カードが素早く離された場合は専用の例外で通知
+            if (ex.SCardError == SCardError.RemovedCard)
             {
-                Error?.Invoke(this, new InvalidOperationException($"カードの読み取りに失敗しました: {ex.Message}", ex));
+                // カードが素早く離された場合はデバッグログのみ（エラー通知不要）
+                _logger.LogDebug("カードが素早く離されました");
+            }
+            else
+            {
+                var cardReaderException = CardReaderException.ReadFailed(ex.Message, ex);
+                Error?.Invoke(this, cardReaderException);
             }
         }
         catch (Exception ex)
         {
             System.Diagnostics.Debug.WriteLine($"カード読み取りエラー: {ex.Message}");
-            Error?.Invoke(this, ex);
+            var cardReaderException = CardReaderException.ReadFailed(ex.Message, ex);
+            Error?.Invoke(this, cardReaderException);
         }
     }
 
@@ -427,12 +447,13 @@ public class PcScCardReader : ICardReader
     private void OnMonitorException(object sender, PCSCException ex)
     {
         System.Diagnostics.Debug.WriteLine($"モニター例外: {ex.Message}");
-        Error?.Invoke(this, new InvalidOperationException($"カードリーダー監視エラー: {ex.Message}", ex));
+        var monitorException = CardReaderException.MonitorError(ex.Message, ex);
+        Error?.Invoke(this, monitorException);
 
         // 切断として処理し、自動再接続を開始
         if (_connectionState == CardReaderConnectionState.Connected)
         {
-            SetConnectionState(CardReaderConnectionState.Disconnected, ex.Message);
+            SetConnectionState(CardReaderConnectionState.Disconnected, monitorException.UserFriendlyMessage);
             StartReconnectTimer();
         }
     }
@@ -566,8 +587,9 @@ public class PcScCardReader : ICardReader
         {
             System.Diagnostics.Debug.WriteLine("再接続失敗: 最大試行回数に達しました");
             StopReconnectTimer();
-            SetConnectionState(CardReaderConnectionState.Disconnected, $"再接続失敗（{MaxReconnectAttempts}回試行）");
-            Error?.Invoke(this, new InvalidOperationException($"カードリーダーへの再接続に失敗しました（{MaxReconnectAttempts}回試行）"));
+            var reconnectException = CardReaderException.ReconnectFailed(MaxReconnectAttempts);
+            SetConnectionState(CardReaderConnectionState.Disconnected, reconnectException.UserFriendlyMessage);
+            Error?.Invoke(this, reconnectException);
             return Task.CompletedTask;
         }
 
