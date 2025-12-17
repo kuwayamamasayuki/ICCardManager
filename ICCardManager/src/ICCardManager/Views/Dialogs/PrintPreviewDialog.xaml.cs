@@ -1,4 +1,5 @@
 using System.Windows;
+using System.Windows.Controls.Primitives;
 using System.Windows.Documents;
 using System.Windows.Input;
 using ICCardManager.ViewModels;
@@ -29,6 +30,11 @@ public partial class PrintPreviewDialog : Window
     /// </summary>
     public PrintPreviewViewModel ViewModel { get; }
 
+    /// <summary>
+    /// ページ変更イベントの再帰を防ぐフラグ
+    /// </summary>
+    private bool _isUpdatingPage;
+
     public PrintPreviewDialog(PrintPreviewViewModel viewModel)
     {
         InitializeComponent();
@@ -40,6 +46,7 @@ public partial class PrintPreviewDialog : Window
         Unloaded += OnUnloaded;
         ViewModel.DocumentNeedsRefresh += OnDocumentNeedsRefresh;
         ViewModel.PropertyChanged += OnViewModelPropertyChanged;
+        ViewModel.PageChangeRequested += OnPageChangeRequested;
     }
 
     /// <summary>
@@ -74,6 +81,7 @@ public partial class PrintPreviewDialog : Window
         // イベント購読解除（メモリリーク防止）
         ViewModel.DocumentNeedsRefresh -= OnDocumentNeedsRefresh;
         ViewModel.PropertyChanged -= OnViewModelPropertyChanged;
+        ViewModel.PageChangeRequested -= OnPageChangeRequested;
     }
 
     /// <summary>
@@ -97,6 +105,24 @@ public partial class PrintPreviewDialog : Window
     }
 
     /// <summary>
+    /// ViewModelからのページ変更要求
+    /// </summary>
+    private void OnPageChangeRequested(object? sender, int pageNumber)
+    {
+        if (_isUpdatingPage) return;
+
+        try
+        {
+            _isUpdatingPage = true;
+            GoToPage(pageNumber);
+        }
+        finally
+        {
+            _isUpdatingPage = false;
+        }
+    }
+
+    /// <summary>
     /// ドキュメントを再設定して再描画
     /// </summary>
     private void RefreshDocument()
@@ -106,9 +132,6 @@ public partial class PrintPreviewDialog : Window
             // 一度nullを設定してから再設定することで強制的に再描画
             DocumentViewer.Document = null;
             DocumentViewer.Document = ViewModel.Document;
-
-            // ドキュメントのページサイズに合わせてビューアのサイズを設定
-            UpdateViewerSize();
         }
 
         // ページ数を再計算（遅延実行でレンダリング完了後に実行）
@@ -159,11 +182,11 @@ public partial class PrintPreviewDialog : Window
     }
 
     /// <summary>
-    /// ビューアのサイズをドキュメントのページサイズに合わせて更新
+    /// ページ情報を更新
     /// </summary>
-    private void UpdateViewerSize()
+    private void UpdatePageInfo()
     {
-        if (ViewModel.Document != null)
+        if (ViewModel.Document != null && DocumentViewer.Document != null)
         {
             // ドキュメントのページサイズをビューアのサイズとして設定
             // ZoomはFlowDocumentPageViewer内部で適用されるため、ここでは1:1で設定

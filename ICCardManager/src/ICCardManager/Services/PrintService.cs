@@ -251,12 +251,14 @@ public class PrintService
             Margin = new Thickness(0, 0, 0, 15)
         };
 
-        table.Columns.Add(new TableColumn { Width = new GridLength(80) });
-        table.Columns.Add(new TableColumn { Width = new GridLength(150) });
-        table.Columns.Add(new TableColumn { Width = new GridLength(80) });
-        table.Columns.Add(new TableColumn { Width = new GridLength(100) });
-        table.Columns.Add(new TableColumn { Width = new GridLength(80) });
-        table.Columns.Add(new TableColumn { Width = new GridLength(150) });
+        // 列定義（比例幅を使用して用紙サイズに自動調整）
+        // 元の比率: 80:150:80:100:80:150 = 640
+        table.Columns.Add(new TableColumn { Width = new GridLength(1, GridUnitType.Star) });
+        table.Columns.Add(new TableColumn { Width = new GridLength(1.9, GridUnitType.Star) });
+        table.Columns.Add(new TableColumn { Width = new GridLength(1, GridUnitType.Star) });
+        table.Columns.Add(new TableColumn { Width = new GridLength(1.25, GridUnitType.Star) });
+        table.Columns.Add(new TableColumn { Width = new GridLength(1, GridUnitType.Star) });
+        table.Columns.Add(new TableColumn { Width = new GridLength(1.9, GridUnitType.Star) });
 
         var rowGroup = new TableRowGroup();
         var row = new TableRow();
@@ -314,14 +316,16 @@ public class PrintService
             BorderThickness = new Thickness(1)
         };
 
-        // 列定義
-        table.Columns.Add(new TableColumn { Width = new GridLength(60) });   // 日付
-        table.Columns.Add(new TableColumn { Width = new GridLength(200) });  // 摘要
-        table.Columns.Add(new TableColumn { Width = new GridLength(80) });   // 受入
-        table.Columns.Add(new TableColumn { Width = new GridLength(80) });   // 払出
-        table.Columns.Add(new TableColumn { Width = new GridLength(80) });   // 残高
-        table.Columns.Add(new TableColumn { Width = new GridLength(80) });   // 氏名
-        table.Columns.Add(new TableColumn { Width = new GridLength(100) });  // 備考
+        // 列定義（比例幅を使用して用紙サイズに自動調整）
+        // 元の比率: 60:200:80:80:80:80:100 = 680
+        // Star比率: 1:3.3:1.3:1.3:1.3:1.3:1.7 ≈ 11.2
+        table.Columns.Add(new TableColumn { Width = new GridLength(1, GridUnitType.Star) });     // 日付
+        table.Columns.Add(new TableColumn { Width = new GridLength(3.3, GridUnitType.Star) });   // 摘要
+        table.Columns.Add(new TableColumn { Width = new GridLength(1.3, GridUnitType.Star) });   // 受入
+        table.Columns.Add(new TableColumn { Width = new GridLength(1.3, GridUnitType.Star) });   // 払出
+        table.Columns.Add(new TableColumn { Width = new GridLength(1.3, GridUnitType.Star) });   // 残高
+        table.Columns.Add(new TableColumn { Width = new GridLength(1.3, GridUnitType.Star) });   // 氏名
+        table.Columns.Add(new TableColumn { Width = new GridLength(1.7, GridUnitType.Star) });   // 備考
 
         var rowGroup = new TableRowGroup();
 
