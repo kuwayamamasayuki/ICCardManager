@@ -18,6 +18,11 @@ public partial class PrintPreviewViewModel : ViewModelBase
     /// </summary>
     public event EventHandler? DocumentNeedsRefresh;
 
+    /// <summary>
+    /// ページ変更要求イベント（ページ番号は1-based）
+    /// </summary>
+    public event EventHandler<int>? PageChangeRequested;
+
     [ObservableProperty]
     private FlowDocument? _document;
 
@@ -25,6 +30,7 @@ public partial class PrintPreviewViewModel : ViewModelBase
     private string _documentTitle = string.Empty;
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(EffectiveZoom))]
     private double _zoomLevel = 100;
 
     [ObservableProperty]
@@ -51,6 +57,19 @@ public partial class PrintPreviewViewModel : ViewModelBase
     /// A4縦向きの幅
     /// </summary>
     private const double PortraitWidth = 595;
+
+    /// <summary>
+    /// コンテンツの自動縮小スケール（1.0 = 100%、縦向き時は小さくなる）
+    /// </summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(EffectiveZoom))]
+    private double _contentScale = 1.0;
+
+    /// <summary>
+    /// 実効ズーム倍率（ZoomLevel * ContentScale）
+    /// XAMLのScaleTransformにバインドする用
+    /// </summary>
+    public double EffectiveZoom => ZoomLevel * ContentScale;
 
     /// <summary>
     /// ズーム倍率の選択肢
@@ -109,7 +128,7 @@ public partial class PrintPreviewViewModel : ViewModelBase
         Document = document;
         DocumentTitle = title;
         CurrentPage = 1;
-        UpdatePageCount();
+        InternalUpdatePageCount();
         StatusMessage = $"「{title}」を表示中";
     }
 
@@ -118,13 +137,30 @@ public partial class PrintPreviewViewModel : ViewModelBase
     /// </summary>
     public void RecalculatePageCount()
     {
-        UpdatePageCount();
+        InternalUpdatePageCount();
     }
 
     /// <summary>
-    /// ページ数を更新
+    /// ページ数と現在ページを更新（Viewから呼び出し用）
     /// </summary>
-    private void UpdatePageCount()
+    public void UpdatePageCount(int totalPages, int currentPage)
+    {
+        TotalPages = totalPages > 0 ? totalPages : 1;
+        CurrentPage = Math.Max(1, Math.Min(currentPage, TotalPages));
+
+        OnPropertyChanged(nameof(PageDisplayText));
+        OnPropertyChanged(nameof(IsFirstPage));
+        OnPropertyChanged(nameof(IsLastPage));
+        NextPageCommand.NotifyCanExecuteChanged();
+        PreviousPageCommand.NotifyCanExecuteChanged();
+        FirstPageCommand.NotifyCanExecuteChanged();
+        LastPageCommand.NotifyCanExecuteChanged();
+    }
+
+    /// <summary>
+    /// ページ数を更新（内部用）
+    /// </summary>
+    private void InternalUpdatePageCount()
     {
         if (Document != null)
         {
@@ -187,7 +223,7 @@ public partial class PrintPreviewViewModel : ViewModelBase
         OnPropertyChanged(nameof(IsFirstPage));
         OnPropertyChanged(nameof(IsLastPage));
 
-        // ページナビゲーションコマンドのCanExecuteを更新
+                // ページナビゲーションコマンドのCanExecuteを更新
         NextPageCommand.NotifyCanExecuteChanged();
         PreviousPageCommand.NotifyCanExecuteChanged();
         FirstPageCommand.NotifyCanExecuteChanged();
@@ -203,6 +239,7 @@ public partial class PrintPreviewViewModel : ViewModelBase
         if (CurrentPage < TotalPages)
         {
             CurrentPage++;
+            PageChangeRequested?.Invoke(this, CurrentPage);
         }
     }
 
@@ -217,6 +254,7 @@ public partial class PrintPreviewViewModel : ViewModelBase
         if (CurrentPage > 1)
         {
             CurrentPage--;
+            PageChangeRequested?.Invoke(this, CurrentPage);
         }
     }
 
@@ -229,6 +267,7 @@ public partial class PrintPreviewViewModel : ViewModelBase
     private void FirstPage()
     {
         CurrentPage = 1;
+        PageChangeRequested?.Invoke(this, CurrentPage);
     }
 
     private bool CanGoFirstPage() => !IsFirstPage;
@@ -240,6 +279,7 @@ public partial class PrintPreviewViewModel : ViewModelBase
     private void LastPage()
     {
         CurrentPage = TotalPages;
+        PageChangeRequested?.Invoke(this, CurrentPage);
     }
 
     private bool CanGoLastPage() => !IsLastPage;
@@ -345,9 +385,13 @@ public partial class PrintPreviewViewModel : ViewModelBase
                 Document.PageHeight = LandscapeWidth / ContentScaleFactor;
             }
 
-            UpdatePageCount();
+            // テーブルは比例幅（Star sizing）を使用しているため、
+            // 用紙サイズに合わせて自動的にリサイズされる
+            ContentScale = 1.0;
 
-            // FlowDocumentScrollViewerに再描画を通知
+            InternalUpdatePageCount();
+
+            // FlowDocumentPageViewerに再描画を通知
             DocumentNeedsRefresh?.Invoke(this, EventArgs.Empty);
 
             var orientationName = GetOrientationDisplayName(value);
