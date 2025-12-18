@@ -533,7 +533,9 @@ public partial class ReportViewModel : ViewModelBase
         // 複数カードの場合は結合ドキュメントを生成
         using (BeginBusy($"プレビューを準備中... ({SelectedCards.Count}件)"))
         {
-            var cardIdms = SelectedCards.Select(c => c.CardIdm).ToList();
+            // 表示順（Cardsの順序）でカードを取得（選択順ではなく一覧の並び順）
+            var orderedSelectedCards = Cards.Where(c => c.IsSelected).ToList();
+            var cardIdms = orderedSelectedCards.Select(c => c.CardIdm).ToList();
             var combinedDocument = await _printService.CreateCombinedFlowDocumentAsync(
                 cardIdms, SelectedYear, SelectedMonth);
 
@@ -543,10 +545,10 @@ public partial class ReportViewModel : ViewModelBase
                 return;
             }
 
-            // ドキュメントタイトルを生成
-            var documentTitle = SelectedCards.Count == 2
-                ? $"物品出納簿_{SelectedCards[0].DisplayName}_{SelectedCards[1].DisplayName}_{SelectedYear}年{SelectedMonth}月"
-                : $"物品出納簿_{SelectedCards.Count}件_{SelectedYear}年{SelectedMonth}月";
+            // ドキュメントタイトルを生成（表示順で）
+            var documentTitle = orderedSelectedCards.Count == 2
+                ? $"物品出納簿_{orderedSelectedCards[0].DisplayName}_{orderedSelectedCards[1].DisplayName}_{SelectedYear}年{SelectedMonth}月"
+                : $"物品出納簿_{orderedSelectedCards.Count}件_{SelectedYear}年{SelectedMonth}月";
 
             // プレビューダイアログを表示
             var previewDialog = App.Current.ServiceProvider.GetRequiredService<Views.Dialogs.PrintPreviewDialog>();
