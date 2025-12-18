@@ -4,6 +4,7 @@ using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Documents;
 using System.Windows.Input;
+using System.Windows.Threading;
 using ICCardManager.ViewModels;
 
 namespace ICCardManager.Views.Dialogs;
@@ -31,11 +32,6 @@ public partial class PrintPreviewDialog : Window
     /// ViewModel
     /// </summary>
     public PrintPreviewViewModel ViewModel { get; }
-
-    /// <summary>
-    /// 初期化完了フラグ（初期化中のイベントを無視するため）
-    /// </summary>
-    private bool _isInitialized;
 
     /// <summary>
     /// MasterPageNumberプロパティの変更を監視するためのDescriptor
@@ -147,8 +143,6 @@ public partial class PrintPreviewDialog : Window
     /// </summary>
     private void RefreshDocument()
     {
-        _isInitialized = false;
-
         if (ViewModel.Document != null)
         {
             // 一度nullを設定してから再設定することで強制的に再描画
@@ -171,21 +165,26 @@ public partial class PrintPreviewDialog : Window
         {
             ViewModel.RecalculatePageCount();
 
-            // 最初のページに移動してMasterPageNumberを0にリセット
+            // レイアウトを強制更新してからFirstPage()を呼び出す
+            DocumentViewer.UpdateLayout();
             DocumentViewer.FirstPage();
 
-            var pageCount = DocumentViewer.PageCount;
-            // FirstPage()後のMasterPageNumberを読み取る（0ベース→1ベースに変換）
-            var currentPage = DocumentViewer.MasterPageNumber + 1;
+            // FirstPage()が効かない場合に備えて再試行
+            if (DocumentViewer.MasterPageNumber != 0)
+            {
+                DocumentViewer.UpdateLayout();
+                DocumentViewer.FirstPage();
+            }
 
+            var pageCount = DocumentViewer.PageCount;
+
+            // 初期表示は常に1ページ目として表示（MasterPageNumberに関係なく）
             if (pageCount > 0)
             {
                 ViewModel.TotalPages = pageCount;
-                ViewModel.CurrentPage = currentPage;
-                UpdatePageDisplay(currentPage, pageCount);
+                ViewModel.CurrentPage = 1;
+                UpdatePageDisplay(1, pageCount);
             }
-
-            _isInitialized = true;
 
             // 初期化完了後にMasterPageNumber監視を開始
             SubscribeToMasterPageNumberChanges();
@@ -203,34 +202,9 @@ public partial class PrintPreviewDialog : Window
             paginator.ComputePageCountCompleted -= OnComputePageCountCompleted;
         }
 
-        // UIスレッドでページ数を更新
-        Dispatcher.BeginInvoke(new Action(() =>
-        {
-            UpdatePageCountFromViewer();
-        }), System.Windows.Threading.DispatcherPriority.Normal);
-    }
-
-    /// <summary>
-    /// ビューアーからページ数を取得してViewModelを更新
-    /// </summary>
-    private void UpdatePageCountFromViewer()
-    {
-        // 初期化完了前は何もしない（ContextIdleで正しく初期化されるため）
-        if (!_isInitialized) return;
-
-        if (DocumentViewer.Document != null)
-        {
-            // FlowDocumentPageViewerのPageCountプロパティを使用
-            var pageCount = DocumentViewer.PageCount;
-            var currentPage = DocumentViewer.MasterPageNumber + 1;
-
-            if (pageCount > 0)
-            {
-                ViewModel.TotalPages = pageCount;
-                ViewModel.CurrentPage = currentPage;
-                UpdatePageDisplay(currentPage, pageCount);
-            }
-        }
+        // 注: 以前はここでUpdatePageCountFromViewer()を呼び出していたが、
+        // ContextIdleで初期化が完了した後に実行されると表示を上書きしてしまうため削除。
+        // ページ数の更新はContextIdleコールバックとOnMasterPageNumberChangedで処理される。
     }
 
     /// <summary>
