@@ -74,15 +74,23 @@ public partial class PrintPreviewDialog : Window
         // ViewModelのドキュメントをFlowDocumentPageViewerに直接設定
         RefreshDocument();
 
+        // フォーカスを設定してキーボード操作を有効化
+        Focus();
+    }
+
+    /// <summary>
+    /// MasterPageNumber監視を開始
+    /// </summary>
+    private void SubscribeToMasterPageNumberChanges()
+    {
+        if (_masterPageNumberDescriptor != null) return; // 既に購読済み
+
         // FlowDocumentPageViewerのMasterPageNumberプロパティの変更を監視
         // これによりViewerのページ変更（組み込みナビゲーション含む）をViewModelに同期
         _masterPageNumberDescriptor = DependencyPropertyDescriptor.FromProperty(
             FlowDocumentPageViewer.MasterPageNumberProperty,
             typeof(FlowDocumentPageViewer));
         _masterPageNumberDescriptor?.AddValueChanged(DocumentViewer, OnMasterPageNumberChanged);
-
-        // フォーカスを設定してキーボード操作を有効化
-        Focus();
     }
 
     /// <summary>
@@ -90,8 +98,7 @@ public partial class PrintPreviewDialog : Window
     /// </summary>
     private void OnMasterPageNumberChanged(object? sender, EventArgs e)
     {
-        // 初期化完了前はイベントを無視（初期化時のFirstPage()呼び出し等による）
-        if (!_isInitialized) return;
+        // 購読は初期化完了後に行われるため、ここでは_isInitializedチェック不要
         if (DocumentViewer.Document == null) return;
 
         // MasterPageNumberは0ベース、表示は1ベース
@@ -179,6 +186,9 @@ public partial class PrintPreviewDialog : Window
             }
 
             _isInitialized = true;
+
+            // 初期化完了後にMasterPageNumber監視を開始
+            SubscribeToMasterPageNumberChanges();
         }), System.Windows.Threading.DispatcherPriority.ContextIdle);
     }
 
