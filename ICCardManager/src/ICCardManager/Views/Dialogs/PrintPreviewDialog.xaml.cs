@@ -93,13 +93,33 @@ public partial class PrintPreviewDialog : Window
     {
         if (DocumentViewer.Document == null) return;
 
-        // MasterPageNumberは0ベース、CurrentPageは1ベース
-        int viewerPage = DocumentViewer.MasterPageNumber + 1;
+        // MasterPageNumberは0ベース、表示は1ベース
+        int currentPage = DocumentViewer.MasterPageNumber + 1;
+        int totalPages = DocumentViewer.PageCount;
 
-        // 常にViewerの値をViewModelに反映（Viewerが真実の情報源）
-        if (viewerPage >= 1 && viewerPage <= DocumentViewer.PageCount)
+        // ツールバーのページ表示を直接更新（Viewerの値を直接反映）
+        UpdatePageDisplay(currentPage, totalPages);
+
+        // ViewModelも更新（CanExecuteの判定用）
+        ViewModel.CurrentPage = currentPage;
+        if (totalPages > 0)
         {
-            ViewModel.CurrentPage = viewerPage;
+            ViewModel.TotalPages = totalPages;
+        }
+    }
+
+    /// <summary>
+    /// ページ表示を更新
+    /// </summary>
+    private void UpdatePageDisplay(int currentPage, int totalPages)
+    {
+        if (totalPages > 0)
+        {
+            PageDisplayTextBlock.Text = $"{currentPage} / {totalPages} ページ";
+        }
+        else
+        {
+            PageDisplayTextBlock.Text = "ページなし";
         }
     }
 
@@ -181,9 +201,13 @@ public partial class PrintPreviewDialog : Window
         {
             // FlowDocumentPageViewerのPageCountプロパティを使用
             var pageCount = DocumentViewer.PageCount;
-            if (pageCount > 0 && pageCount != ViewModel.TotalPages)
+            var currentPage = DocumentViewer.MasterPageNumber + 1;
+
+            if (pageCount > 0)
             {
                 ViewModel.TotalPages = pageCount;
+                ViewModel.CurrentPage = currentPage;
+                UpdatePageDisplay(currentPage, pageCount);
             }
         }
     }

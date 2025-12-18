@@ -119,7 +119,8 @@
                             BorderThickness="1"
                             Padding="10,4"
                             VerticalAlignment="Center">
-                        <TextBlock Text="{Binding PageDisplayText}"
+                        <TextBlock x:Name="PageDisplayTextBlock"
+                                   Text="1 / 1 ページ"
                                    FontWeight="Bold"
                                    AutomationProperties.LiveSetting="Polite"/>
                     </Border>
