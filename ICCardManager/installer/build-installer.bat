@@ -2,10 +2,17 @@
 chcp 65001 > nul
 setlocal enabledelayedexpansion
 
+:: 使用方法: build-installer.bat [Version]
+:: 例: build-installer.bat 1.0.0
+
 echo ======================================
 echo  ICCardManager インストーラービルド
 echo ======================================
 echo.
+
+:: バージョン引数の処理（デフォルト: 1.0.0）
+set "VERSION=1.0.0"
+if not "%~1"=="" set "VERSION=%~1"
 
 set "SCRIPT_DIR=%~dp0"
 set "PROJECT_ROOT=%SCRIPT_DIR%.."
@@ -32,6 +39,9 @@ if "%ISCC%"=="" (
     exit /b 1
 )
 
+echo バージョン: %VERSION%
+echo.
+
 echo [1/3] アプリケーションのビルド...
 pushd "%SRC_DIR%"
 dotnet publish -c Release -r win-x64 --self-contained true -o "%PUBLISH_DIR%" -v q
@@ -56,7 +66,7 @@ echo   実行ファイル: OK
 echo.
 echo [3/3] インストーラーの作成...
 if not exist "%OUTPUT_DIR%" mkdir "%OUTPUT_DIR%"
-"%ISCC%" "%SCRIPT_DIR%ICCardManager.iss"
+"%ISCC%" /DMyAppVersion=%VERSION% "%SCRIPT_DIR%ICCardManager.iss"
 if errorlevel 1 (
     echo エラー: インストーラーの作成に失敗しました。
     pause

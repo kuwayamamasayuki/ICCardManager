@@ -10,7 +10,7 @@
 
 [Setup]
 ; 基本設定
-AppId={{A1B2C3D4-E5F6-7890-ABCD-EF1234567890}
+AppId={{F6CAE9C5-02D4-474A-A5E0-CC41150FBFC7}
 AppName={#MyAppName}
 AppVersion={#MyAppVersion}
 AppVerName={#MyAppName} {#MyAppVersion}
@@ -49,6 +49,9 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 [Files]
 ; メインアプリケーション
 Source: "..\publish\{#MyAppExeName}"; DestDir: "{app}"; Flags: ignoreversion
+
+; 設定ファイル
+Source: "..\publish\appsettings.json"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
 
 ; サウンドファイル
 Source: "..\publish\Resources\Sounds\*"; DestDir: "{app}\Resources\Sounds"; Flags: ignoreversion recursesubdirs createallsubdirs
