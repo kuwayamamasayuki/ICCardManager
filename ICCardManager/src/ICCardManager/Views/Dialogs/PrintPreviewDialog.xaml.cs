@@ -33,11 +33,6 @@ public partial class PrintPreviewDialog : Window
     public PrintPreviewViewModel ViewModel { get; }
 
     /// <summary>
-    /// ページ変更イベントの再帰を防ぐフラグ
-    /// </summary>
-    private bool _isUpdatingPage;
-
-    /// <summary>
     /// MasterPageNumberプロパティの変更を監視するためのDescriptor
     /// </summary>
     private DependencyPropertyDescriptor? _masterPageNumberDescriptor;
@@ -96,22 +91,15 @@ public partial class PrintPreviewDialog : Window
     /// </summary>
     private void OnMasterPageNumberChanged(object? sender, EventArgs e)
     {
-        if (_isUpdatingPage || DocumentViewer.Document == null) return;
+        if (DocumentViewer.Document == null) return;
 
         // MasterPageNumberは0ベース、CurrentPageは1ベース
         int viewerPage = DocumentViewer.MasterPageNumber + 1;
 
-        if (viewerPage != ViewModel.CurrentPage && viewerPage >= 1 && viewerPage <= DocumentViewer.PageCount)
+        // 常にViewerの値をViewModelに反映（Viewerが真実の情報源）
+        if (viewerPage >= 1 && viewerPage <= DocumentViewer.PageCount)
         {
-            try
-            {
-                _isUpdatingPage = true;
-                ViewModel.CurrentPage = viewerPage;
-            }
-            finally
-            {
-                _isUpdatingPage = false;
-            }
+            ViewModel.CurrentPage = viewerPage;
         }
     }
 
