@@ -326,14 +326,14 @@ public class PrintService
         return combinedDoc;
     }
 
-    // ページレイアウト定数（実測に基づく値）
+    // ページレイアウト定数（FlowDocument自動分割を防ぐため大きめの値）
     private const double PagePaddingSize = 50;        // ページ余白
-    private const double HeaderBlockHeight = 95;      // タイトル(18pt+margin20) + ヘッダーテーブル(2行+margin)
-    private const double TableHeaderHeight = 22;      // テーブル列ヘッダーの高さ
-    private const double SingleLineRowHeight = 18;    // 1行データの高さ
-    private const double DoubleLineRowHeight = 34;    // 2行データの高さ
-    private const double SummaryRowHeight = 20;       // 合計行の高さ
-    private const double SafetyMargin = 10;           // 安全マージン
+    private const double HeaderBlockHeight = 130;     // タイトル + ヘッダーテーブル + マージン
+    private const double TableHeaderHeight = 30;      // テーブル列ヘッダーの高さ
+    private const double SingleLineRowHeight = 24;    // 1行データの高さ
+    private const double DoubleLineRowHeight = 46;    // 2行データの高さ
+    private const double SummaryRowHeight = 26;       // 合計行の高さ
+    private const double SafetyMargin = 40;           // 安全マージン（大きめ）
 
     // 摘要欄の1行あたり文字数（フォントサイズ11pt、列幅から計算）
     private const int SummaryCharsPerLineLandscape = 24;  // 横向き時
