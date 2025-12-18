@@ -302,7 +302,7 @@ public class PrintService
         // 1ページに収まる場合は従来通り
         if (totalRows <= RowsPerFirstPage)
         {
-            AddPageContent(doc, data, data.Rows, true, false);
+            AddPageContent(doc, data, data.Rows, false, false);
         }
         else
         {
@@ -337,18 +337,8 @@ public class PrintService
                 var pageRows = remainingRows.Take(takeCount).ToList();
                 remainingRows = remainingRows.Skip(takeCount).ToList();
 
-                // ページ区切りを追加（最初のページ以外）
-                if (!isFirstPage)
-                {
-                    var pageBreak = new Paragraph
-                    {
-                        BreakPageBefore = true
-                    };
-                    doc.Blocks.Add(pageBreak);
-                }
-
-                // ページコンテンツを追加
-                AddPageContent(doc, data, pageRows, isFirstPage, !isLastPage);
+                // ページコンテンツを追加（2ページ目以降はページ区切り付き）
+                AddPageContent(doc, data, pageRows, !isFirstPage, !isLastPage);
 
                 isFirstPage = false;
                 pageIndex++;
@@ -371,7 +361,7 @@ public class PrintService
         FlowDocument doc,
         ReportPrintData data,
         List<ReportPrintRow> rows,
-        bool isFirstPage,
+        bool addPageBreakBefore,
         bool hideSummary)
     {
         // タイトル
@@ -382,6 +372,13 @@ public class PrintService
             TextAlignment = TextAlignment.Center,
             Margin = new Thickness(0, 0, 0, 20)
         };
+
+        // 2ページ目以降はタイトルの前でページ区切り
+        if (addPageBreakBefore)
+        {
+            titlePara.BreakPageBefore = true;
+        }
+
         doc.Blocks.Add(titlePara);
 
         // ヘッダ情報
