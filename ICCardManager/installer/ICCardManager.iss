@@ -21,10 +21,8 @@ AppUpdatesURL=https://github.com/kuwayamamasayuki/ICCardManager/releases
 DefaultDirName={autopf}\{#MyAppNameEn}
 DefaultGroupName={#MyAppName}
 DisableProgramGroupPage=yes
-LicenseFile=
 OutputDir=output
 OutputBaseFilename=ICCardManager_Setup_{#MyAppVersion}
-SetupIconFile=
 Compression=lzma2/max
 SolidCompression=yes
 WizardStyle=modern
@@ -47,7 +45,6 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
-Name: "quicklaunchicon"; Description: "{cm:CreateQuickLaunchIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked; OnlyBelowVersion: 6.1; Check: not IsAdminInstallMode
 
 [Files]
 ; メインアプリケーション
@@ -72,7 +69,6 @@ Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChang
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 var
   AppDataPath: string;
-  ResultCode: Integer;
 begin
   if CurUninstallStep = usPostUninstall then
   begin
