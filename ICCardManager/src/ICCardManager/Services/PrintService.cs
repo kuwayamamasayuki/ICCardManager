@@ -270,6 +270,16 @@ public class PrintService
     }
 
     /// <summary>
+    /// 1ページあたりの推定データ行数（ヘッダー込みのページ）
+    /// </summary>
+    private const int RowsPerFirstPage = 18;
+
+    /// <summary>
+    /// 2ページ目以降の1ページあたりの推定データ行数
+    /// </summary>
+    private const int RowsPerSubsequentPage = 20;
+
+    /// <summary>
     /// FlowDocumentを生成
     /// </summary>
     public FlowDocument CreateFlowDocument(ReportPrintData data)
@@ -284,6 +294,86 @@ public class PrintService
             FontSize = 11
         };
 
+        // データ行 + 合計行の総数を計算
+        var totalRows = data.Rows.Count + 1; // +1 は月計行
+        if (data.CumulativeTotal != null) totalRows++;
+        if (data.CarryoverToNextYear.HasValue) totalRows++;
+
+        // 1ページに収まる場合は従来通り
+        if (totalRows <= RowsPerFirstPage)
+        {
+            AddPageContent(doc, data, data.Rows, true, false);
+        }
+        else
+        {
+            // 複数ページに分割
+            var remainingRows = new List<ReportPrintRow>(data.Rows);
+            var isFirstPage = true;
+            var pageIndex = 0;
+
+            while (remainingRows.Count > 0 || pageIndex == 0)
+            {
+                var rowsForThisPage = isFirstPage ? RowsPerFirstPage : RowsPerSubsequentPage;
+
+                // 最終ページかどうかを判定（合計行のスペースを考慮）
+                var summaryRowCount = 1; // 月計
+                if (data.CumulativeTotal != null) summaryRowCount++;
+                if (data.CarryoverToNextYear.HasValue) summaryRowCount++;
+
+                var isLastPage = remainingRows.Count <= rowsForThisPage - summaryRowCount;
+
+                // このページに表示する行数を決定
+                int takeCount;
+                if (isLastPage)
+                {
+                    takeCount = remainingRows.Count;
+                }
+                else
+                {
+                    // 合計行のスペースは不要（最終ページでないため）
+                    takeCount = Math.Min(remainingRows.Count, rowsForThisPage);
+                }
+
+                var pageRows = remainingRows.Take(takeCount).ToList();
+                remainingRows = remainingRows.Skip(takeCount).ToList();
+
+                // ページ区切りを追加（最初のページ以外）
+                if (!isFirstPage)
+                {
+                    var pageBreak = new Paragraph
+                    {
+                        BreakPageBefore = true
+                    };
+                    doc.Blocks.Add(pageBreak);
+                }
+
+                // ページコンテンツを追加
+                AddPageContent(doc, data, pageRows, isFirstPage, !isLastPage);
+
+                isFirstPage = false;
+                pageIndex++;
+
+                // 残りの行がない場合でも、最終ページで合計行を追加
+                if (remainingRows.Count == 0 && !isLastPage)
+                {
+                    break;
+                }
+            }
+        }
+
+        return doc;
+    }
+
+    /// <summary>
+    /// 1ページ分のコンテンツを追加
+    /// </summary>
+    private void AddPageContent(
+        FlowDocument doc,
+        ReportPrintData data,
+        List<ReportPrintRow> rows,
+        bool isFirstPage,
+        bool hideSummary)
+    {
         // タイトル
         var titlePara = new Paragraph(new Run("物品出納簿"))
         {
@@ -298,11 +388,12 @@ public class PrintService
         var headerTable = CreateHeaderTable(data);
         doc.Blocks.Add(headerTable);
 
-        // データテーブル
-        var dataTable = CreateDataTable(data);
+        // データテーブル（このページ分のみ）
+        var pageData = data with { Rows = rows };
+        var dataTable = hideSummary
+            ? CreateDataTableWithoutSummary(pageData)
+            : CreateDataTable(pageData);
         doc.Blocks.Add(dataTable);
-
-        return doc;
     }
 
     /// <summary>
@@ -374,6 +465,22 @@ public class PrintService
     /// </summary>
     private Table CreateDataTable(ReportPrintData data)
     {
+        return CreateDataTableInternal(data, includeSummary: true);
+    }
+
+    /// <summary>
+    /// 合計行を含まないデータテーブルを作成（複数ページの途中ページ用）
+    /// </summary>
+    private Table CreateDataTableWithoutSummary(ReportPrintData data)
+    {
+        return CreateDataTableInternal(data, includeSummary: false);
+    }
+
+    /// <summary>
+    /// データテーブルを作成（内部実装）
+    /// </summary>
+    private Table CreateDataTableInternal(ReportPrintData data, bool includeSummary)
+    {
         var table = new Table
         {
             CellSpacing = 0,
@@ -419,43 +526,47 @@ public class PrintService
             rowGroup.Rows.Add(dataRow);
         }
 
-        // 月計行
-        var monthlyRow = new TableRow { Background = new SolidColorBrush(Color.FromRgb(240, 240, 240)) };
-        monthlyRow.Cells.Add(CreateDataCell("", true, TextAlignment.Center));
-        monthlyRow.Cells.Add(CreateDataCell(data.MonthlyTotal.Label, true, TextAlignment.Left));
-        monthlyRow.Cells.Add(CreateDataCell(data.MonthlyTotal.Income > 0 ? data.MonthlyTotal.Income.ToString("N0") : "", true, TextAlignment.Right));
-        monthlyRow.Cells.Add(CreateDataCell(data.MonthlyTotal.Expense > 0 ? data.MonthlyTotal.Expense.ToString("N0") : "", true, TextAlignment.Right));
-        monthlyRow.Cells.Add(CreateDataCell(data.MonthlyTotal.Balance?.ToString("N0") ?? "", true, TextAlignment.Right));
-        monthlyRow.Cells.Add(CreateDataCell("", true, TextAlignment.Left));
-        monthlyRow.Cells.Add(CreateDataCell("", true, TextAlignment.Left));
-        rowGroup.Rows.Add(monthlyRow);
-
-        // 累計行（3月のみ）
-        if (data.CumulativeTotal != null)
+        // 合計行を含める場合のみ追加
+        if (includeSummary)
         {
-            var cumulativeRow = new TableRow { Background = new SolidColorBrush(Color.FromRgb(230, 230, 230)) };
-            cumulativeRow.Cells.Add(CreateDataCell("", true, TextAlignment.Center));
-            cumulativeRow.Cells.Add(CreateDataCell(data.CumulativeTotal.Label, true, TextAlignment.Left));
-            cumulativeRow.Cells.Add(CreateDataCell(data.CumulativeTotal.Income > 0 ? data.CumulativeTotal.Income.ToString("N0") : "", true, TextAlignment.Right));
-            cumulativeRow.Cells.Add(CreateDataCell(data.CumulativeTotal.Expense > 0 ? data.CumulativeTotal.Expense.ToString("N0") : "", true, TextAlignment.Right));
-            cumulativeRow.Cells.Add(CreateDataCell(data.CumulativeTotal.Balance?.ToString("N0") ?? "", true, TextAlignment.Right));
-            cumulativeRow.Cells.Add(CreateDataCell("", true, TextAlignment.Left));
-            cumulativeRow.Cells.Add(CreateDataCell("", true, TextAlignment.Left));
-            rowGroup.Rows.Add(cumulativeRow);
-        }
+            // 月計行
+            var monthlyRow = new TableRow { Background = new SolidColorBrush(Color.FromRgb(240, 240, 240)) };
+            monthlyRow.Cells.Add(CreateDataCell("", true, TextAlignment.Center));
+            monthlyRow.Cells.Add(CreateDataCell(data.MonthlyTotal.Label, true, TextAlignment.Left));
+            monthlyRow.Cells.Add(CreateDataCell(data.MonthlyTotal.Income > 0 ? data.MonthlyTotal.Income.ToString("N0") : "", true, TextAlignment.Right));
+            monthlyRow.Cells.Add(CreateDataCell(data.MonthlyTotal.Expense > 0 ? data.MonthlyTotal.Expense.ToString("N0") : "", true, TextAlignment.Right));
+            monthlyRow.Cells.Add(CreateDataCell(data.MonthlyTotal.Balance?.ToString("N0") ?? "", true, TextAlignment.Right));
+            monthlyRow.Cells.Add(CreateDataCell("", true, TextAlignment.Left));
+            monthlyRow.Cells.Add(CreateDataCell("", true, TextAlignment.Left));
+            rowGroup.Rows.Add(monthlyRow);
 
-        // 次年度繰越行（3月のみ）
-        if (data.CarryoverToNextYear.HasValue)
-        {
-            var carryoverRow = new TableRow { Background = new SolidColorBrush(Color.FromRgb(220, 220, 220)) };
-            carryoverRow.Cells.Add(CreateDataCell("", true, TextAlignment.Center));
-            carryoverRow.Cells.Add(CreateDataCell(SummaryGenerator.GetCarryoverToNextYearSummary(), true, TextAlignment.Left));
-            carryoverRow.Cells.Add(CreateDataCell("", true, TextAlignment.Right));
-            carryoverRow.Cells.Add(CreateDataCell(data.CarryoverToNextYear.Value.ToString("N0"), true, TextAlignment.Right));
-            carryoverRow.Cells.Add(CreateDataCell("0", true, TextAlignment.Right));
-            carryoverRow.Cells.Add(CreateDataCell("", true, TextAlignment.Left));
-            carryoverRow.Cells.Add(CreateDataCell("", true, TextAlignment.Left));
-            rowGroup.Rows.Add(carryoverRow);
+            // 累計行（3月のみ）
+            if (data.CumulativeTotal != null)
+            {
+                var cumulativeRow = new TableRow { Background = new SolidColorBrush(Color.FromRgb(230, 230, 230)) };
+                cumulativeRow.Cells.Add(CreateDataCell("", true, TextAlignment.Center));
+                cumulativeRow.Cells.Add(CreateDataCell(data.CumulativeTotal.Label, true, TextAlignment.Left));
+                cumulativeRow.Cells.Add(CreateDataCell(data.CumulativeTotal.Income > 0 ? data.CumulativeTotal.Income.ToString("N0") : "", true, TextAlignment.Right));
+                cumulativeRow.Cells.Add(CreateDataCell(data.CumulativeTotal.Expense > 0 ? data.CumulativeTotal.Expense.ToString("N0") : "", true, TextAlignment.Right));
+                cumulativeRow.Cells.Add(CreateDataCell(data.CumulativeTotal.Balance?.ToString("N0") ?? "", true, TextAlignment.Right));
+                cumulativeRow.Cells.Add(CreateDataCell("", true, TextAlignment.Left));
+                cumulativeRow.Cells.Add(CreateDataCell("", true, TextAlignment.Left));
+                rowGroup.Rows.Add(cumulativeRow);
+            }
+
+            // 次年度繰越行（3月のみ）
+            if (data.CarryoverToNextYear.HasValue)
+            {
+                var carryoverRow = new TableRow { Background = new SolidColorBrush(Color.FromRgb(220, 220, 220)) };
+                carryoverRow.Cells.Add(CreateDataCell("", true, TextAlignment.Center));
+                carryoverRow.Cells.Add(CreateDataCell(SummaryGenerator.GetCarryoverToNextYearSummary(), true, TextAlignment.Left));
+                carryoverRow.Cells.Add(CreateDataCell("", true, TextAlignment.Right));
+                carryoverRow.Cells.Add(CreateDataCell(data.CarryoverToNextYear.Value.ToString("N0"), true, TextAlignment.Right));
+                carryoverRow.Cells.Add(CreateDataCell("0", true, TextAlignment.Right));
+                carryoverRow.Cells.Add(CreateDataCell("", true, TextAlignment.Left));
+                carryoverRow.Cells.Add(CreateDataCell("", true, TextAlignment.Left));
+                rowGroup.Rows.Add(carryoverRow);
+            }
         }
 
         table.RowGroups.Add(rowGroup);
