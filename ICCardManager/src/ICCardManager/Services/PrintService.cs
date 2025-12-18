@@ -342,9 +342,9 @@ public class PrintService
     // 合計行の高さ
     private const double SummaryRowHeight = 22;       // 月計/累計/繰越行
 
-    // 摘要欄の1行あたり文字数
-    private const int SummaryCharsLandscape = 26;     // 横向き時
-    private const int SummaryCharsPortrait = 18;      // 縦向き時
+    // 摘要欄の1行あたり文字数（実測値：セル幅÷フォントサイズ）
+    private const int SummaryCharsLandscape = 20;     // 横向き時（幅211pt / 11pt）
+    private const int SummaryCharsPortrait = 12;      // 縦向き時（幅138pt / 11pt）
 
     /// <summary>
     /// ヘッダー部分の合計高さを取得（タイトル + カード情報 + 列ヘッダー + テーブル罫線）
