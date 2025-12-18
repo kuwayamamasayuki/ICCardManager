@@ -272,12 +272,13 @@ public class PrintService
     /// <summary>
     /// 1ページあたりの推定データ行数（ヘッダー込みのページ）
     /// </summary>
-    private const int RowsPerFirstPage = 18;
+    private const int RowsPerFirstPage = 16;
 
     /// <summary>
     /// 2ページ目以降の1ページあたりの推定データ行数
+    /// （2ページ目以降もヘッダーを表示するため、1ページ目と同じ行数）
     /// </summary>
-    private const int RowsPerSubsequentPage = 20;
+    private const int RowsPerSubsequentPage = 16;
 
     /// <summary>
     /// FlowDocumentを生成
