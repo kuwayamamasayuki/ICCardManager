@@ -19,6 +19,10 @@ if exist "%ProgramFiles(x86)%\Inno Setup 6\ISCC.exe" (
     set "ISCC=%ProgramFiles(x86)%\Inno Setup 6\ISCC.exe"
 ) else if exist "%ProgramFiles%\Inno Setup 6\ISCC.exe" (
     set "ISCC=%ProgramFiles%\Inno Setup 6\ISCC.exe"
+) else if exist "D:\Program Files (x86)\Inno Setup 6\ISCC.exe" (
+    set "ISCC=D:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+) else if exist "D:\Program Files\Inno Setup 6\ISCC.exe" (
+    set "ISCC=D:\Program Files\Inno Setup 6\ISCC.exe"
 )
 
 if "%ISCC%"=="" (
