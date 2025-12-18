@@ -329,28 +329,29 @@ public class PrintService
     // ページレイアウト定数
     private const double PagePaddingSize = 50;        // ページ余白（上下左右）
 
-    // ヘッダー部分の高さ（実測値）
-    private const double TitleHeight = 38;            // タイトル「物品出納簿」(FontSize18 + Margin20)
-    private const double CardInfoTableHeight = 50;    // カード情報テーブル（2行 + Margin15）
-    private const double ColumnHeaderHeight = 20;     // データテーブルの列ヘッダー行
+    // ヘッダー部分の高さ（実測値ベース、少し余裕を持たせる）
+    private const double TitleHeight = 45;            // タイトル「物品出納簿」(FontSize18行高さ24 + Margin20 + 余裕)
+    private const double CardInfoTableHeight = 58;    // カード情報テーブル（2行×14pt + パディング + Margin15 + 余裕）
+    private const double ColumnHeaderHeight = 25;     // データテーブルの列ヘッダー行（セルパディング含む）
+    private const double TableBorderHeight = 2;       // データテーブル上下の罫線
 
-    // データ行の高さ（実測値）
-    private const double DataRowHeight = 18;          // 1行データ
-    private const double DataRowHeightDouble = 32;    // 2行データ（摘要が折り返す場合）
+    // データ行の高さ（実測値ベース）
+    private const double DataRowHeight = 22;          // 1行データ（FontSize11 + パディング + 罫線）
+    private const double DataRowHeightDouble = 38;    // 2行データ（摘要が折り返す場合）
 
     // 合計行の高さ
-    private const double SummaryRowHeight = 18;       // 月計/累計/繰越行
+    private const double SummaryRowHeight = 22;       // 月計/累計/繰越行
 
     // 摘要欄の1行あたり文字数
     private const int SummaryCharsLandscape = 26;     // 横向き時
     private const int SummaryCharsPortrait = 18;      // 縦向き時
 
     /// <summary>
-    /// ヘッダー部分の合計高さを取得
+    /// ヘッダー部分の合計高さを取得（タイトル + カード情報 + 列ヘッダー + テーブル罫線）
     /// </summary>
     private double GetHeaderTotalHeight()
     {
-        return TitleHeight + CardInfoTableHeight + ColumnHeaderHeight;
+        return TitleHeight + CardInfoTableHeight + ColumnHeaderHeight + TableBorderHeight;
     }
 
     /// <summary>
