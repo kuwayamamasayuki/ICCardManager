@@ -139,6 +139,9 @@ public partial class PrintPreviewDialog : Window
             DocumentViewer.Document = null;
             DocumentViewer.Document = ViewModel.Document;
 
+            // 即座に最初のページに移動（MasterPageNumberを0にリセット）
+            DocumentViewer.FirstPage();
+
             // DocumentPaginatorのページ数計算完了イベントを購読
             var paginator = ((IDocumentPaginatorSource)ViewModel.Document).DocumentPaginator;
             paginator.ComputePageCountCompleted += OnComputePageCountCompleted;
@@ -155,10 +158,10 @@ public partial class PrintPreviewDialog : Window
         {
             ViewModel.RecalculatePageCount();
 
-            // 最初のページに移動
+            // 初期化時は明示的に1ページ目に移動してから表示
+            // ContextIdle時点でMasterPageNumberが0でない可能性があるため、再度FirstPageを呼ぶ
             DocumentViewer.FirstPage();
 
-            // 初期化時は明示的に1ページ目として表示（FirstPageの効果が非同期の場合に備えて）
             var pageCount = DocumentViewer.PageCount;
             if (pageCount > 0)
             {
