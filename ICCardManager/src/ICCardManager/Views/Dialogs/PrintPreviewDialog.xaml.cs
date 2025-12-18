@@ -132,15 +132,15 @@ public partial class PrintPreviewDialog : Window
             if (_isUpdatingPage) return;
 
             // ViewModelのCurrentPageが変更されたらビューアーのページを切り替え
-            try
-            {
-                _isUpdatingPage = true;
-                GoToPage(ViewModel.CurrentPage);
-            }
-            finally
+            _isUpdatingPage = true;
+            GoToPage(ViewModel.CurrentPage);
+
+            // Viewerのページ変更は非同期のため、フラグリセットを遅延させる
+            // ContextIdleでUI更新完了後にリセット
+            Dispatcher.BeginInvoke(new Action(() =>
             {
                 _isUpdatingPage = false;
-            }
+            }), System.Windows.Threading.DispatcherPriority.ContextIdle);
         }
     }
 
