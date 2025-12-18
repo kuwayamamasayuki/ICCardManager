@@ -389,6 +389,9 @@ public partial class PrintPreviewViewModel : ViewModelBase
             // 用紙サイズに合わせて自動的にリサイズされる
             ContentScale = 1.0;
 
+            // 用紙方向変更時は最初のページに戻す（ページ数が変わるため）
+            CurrentPage = 1;
+
             InternalUpdatePageCount();
 
             // FlowDocumentPageViewerに再描画を通知
