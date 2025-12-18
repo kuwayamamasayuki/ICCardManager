@@ -1,8 +1,10 @@
 using System.ComponentModel;
 using System.Windows;
+using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Documents;
 using System.Windows.Input;
+using System.Windows.Threading;
 using ICCardManager.ViewModels;
 
 namespace ICCardManager.Views.Dialogs;
@@ -32,9 +34,16 @@ public partial class PrintPreviewDialog : Window
     public PrintPreviewViewModel ViewModel { get; }
 
     /// <summary>
-    /// ページ変更イベントの再帰を防ぐフラグ
+    /// MasterPageNumberプロパティの変更を監視するためのDescriptor
     /// </summary>
-    private bool _isUpdatingPage;
+    private DependencyPropertyDescriptor? _masterPageNumberDescriptor;
+
+    /// <summary>
+    /// 初期化時のMasterPageNumber（ベースライン）
+    /// FlowDocumentPageViewerのMasterPageNumberが0から始まらない場合があるため、
+    /// この値を基準にしてページ番号を計算する
+    /// </summary>
+    private int _baselineMasterPageNumber;
 
     public PrintPreviewDialog(PrintPreviewViewModel viewModel)
     {
@@ -46,8 +55,6 @@ public partial class PrintPreviewDialog : Window
         Loaded += OnLoaded;
         Unloaded += OnUnloaded;
         ViewModel.DocumentNeedsRefresh += OnDocumentNeedsRefresh;
-        ViewModel.PropertyChanged += OnViewModelPropertyChanged;
-        ViewModel.PageChangeRequested += OnPageChangeRequested;
     }
 
     /// <summary>
@@ -75,26 +82,59 @@ public partial class PrintPreviewDialog : Window
     }
 
     /// <summary>
+    /// MasterPageNumber監視を開始
+    /// </summary>
+    private void SubscribeToMasterPageNumberChanges()
+    {
+        if (_masterPageNumberDescriptor != null) return; // 既に購読済み
+
+        // FlowDocumentPageViewerのMasterPageNumberプロパティの変更を監視
+        // これによりViewerのページ変更（組み込みナビゲーション含む）をViewModelに同期
+        _masterPageNumberDescriptor = DependencyPropertyDescriptor.FromProperty(
+            FlowDocumentPageViewer.MasterPageNumberProperty,
+            typeof(FlowDocumentPageViewer));
+        _masterPageNumberDescriptor?.AddValueChanged(DocumentViewer, OnMasterPageNumberChanged);
+    }
+
+    /// <summary>
+    /// FlowDocumentPageViewerのMasterPageNumber変更時のハンドラ
+    /// </summary>
+    private void OnMasterPageNumberChanged(object? sender, EventArgs e)
+    {
+        if (DocumentViewer.Document == null) return;
+
+        // ベースラインからの相対位置でページ番号を計算
+        // MasterPageNumberが1から始まる場合でも、表示は1から始まるようにする
+        int currentPage = DocumentViewer.MasterPageNumber - _baselineMasterPageNumber + 1;
+        int totalPages = DocumentViewer.PageCount;
+
+        // ツールバーのページ表示を直接更新
+        UpdatePageDisplay(currentPage, totalPages);
+    }
+
+    /// <summary>
+    /// ページ表示を更新
+    /// </summary>
+    private void UpdatePageDisplay(int currentPage, int totalPages)
+    {
+        if (totalPages > 0)
+        {
+            PageDisplayTextBlock.Text = $"{currentPage} / {totalPages} ページ";
+        }
+        else
+        {
+            PageDisplayTextBlock.Text = "ページなし";
+        }
+    }
+
+    /// <summary>
     /// ウィンドウアンロード時
     /// </summary>
     private void OnUnloaded(object sender, RoutedEventArgs e)
     {
         // イベント購読解除（メモリリーク防止）
         ViewModel.DocumentNeedsRefresh -= OnDocumentNeedsRefresh;
-        ViewModel.PropertyChanged -= OnViewModelPropertyChanged;
-        ViewModel.PageChangeRequested -= OnPageChangeRequested;
-    }
-
-    /// <summary>
-    /// ViewModelのプロパティ変更ハンドラ
-    /// </summary>
-    private void OnViewModelPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
-    {
-        if (e.PropertyName == nameof(PrintPreviewViewModel.CurrentPage))
-        {
-            // ViewModelのCurrentPageが変更されたらビューアーのページを切り替え
-            GoToPage(ViewModel.CurrentPage);
-        }
+        _masterPageNumberDescriptor?.RemoveValueChanged(DocumentViewer, OnMasterPageNumberChanged);
     }
 
     /// <summary>
@@ -103,24 +143,6 @@ public partial class PrintPreviewDialog : Window
     private void OnDocumentNeedsRefresh(object? sender, EventArgs e)
     {
         RefreshDocument();
-    }
-
-    /// <summary>
-    /// ViewModelからのページ変更要求
-    /// </summary>
-    private void OnPageChangeRequested(object? sender, int pageNumber)
-    {
-        if (_isUpdatingPage) return;
-
-        try
-        {
-            _isUpdatingPage = true;
-            GoToPage(pageNumber);
-        }
-        finally
-        {
-            _isUpdatingPage = false;
-        }
     }
 
     /// <summary>
@@ -149,7 +171,34 @@ public partial class PrintPreviewDialog : Window
         Dispatcher.BeginInvoke(new Action(() =>
         {
             ViewModel.RecalculatePageCount();
-            UpdatePageCountFromViewer();
+
+            // レイアウトを強制更新してからFirstPage()を呼び出す
+            DocumentViewer.UpdateLayout();
+            DocumentViewer.FirstPage();
+
+            // FirstPage()が効かない場合に備えて再試行
+            if (DocumentViewer.MasterPageNumber != 0)
+            {
+                DocumentViewer.UpdateLayout();
+                DocumentViewer.FirstPage();
+            }
+
+            var pageCount = DocumentViewer.PageCount;
+
+            // 現在のMasterPageNumberをベースラインとして保存
+            // これ以降のページ番号計算はこのベースラインを基準にする
+            _baselineMasterPageNumber = DocumentViewer.MasterPageNumber;
+
+            // 初期表示は常に1ページ目として表示（MasterPageNumberに関係なく）
+            if (pageCount > 0)
+            {
+                ViewModel.TotalPages = pageCount;
+                ViewModel.CurrentPage = 1;
+                UpdatePageDisplay(1, pageCount);
+            }
+
+            // 初期化完了後にMasterPageNumber監視を開始
+            SubscribeToMasterPageNumberChanges();
         }), System.Windows.Threading.DispatcherPriority.ContextIdle);
     }
 
@@ -164,50 +213,9 @@ public partial class PrintPreviewDialog : Window
             paginator.ComputePageCountCompleted -= OnComputePageCountCompleted;
         }
 
-        // UIスレッドでページ数を更新
-        Dispatcher.BeginInvoke(new Action(() =>
-        {
-            UpdatePageCountFromViewer();
-        }), System.Windows.Threading.DispatcherPriority.Normal);
-    }
-
-    /// <summary>
-    /// ビューアーからページ数を取得してViewModelを更新
-    /// </summary>
-    private void UpdatePageCountFromViewer()
-    {
-        if (DocumentViewer.Document != null)
-        {
-            // FlowDocumentPageViewerのPageCountプロパティを使用
-            var pageCount = DocumentViewer.PageCount;
-            if (pageCount > 0 && pageCount != ViewModel.TotalPages)
-            {
-                ViewModel.TotalPages = pageCount;
-            }
-        }
-    }
-
-    /// <summary>
-    /// 指定したページに移動
-    /// </summary>
-    /// <param name="pageNumber">1から始まるページ番号</param>
-    private void GoToPage(int pageNumber)
-    {
-        if (DocumentViewer.Document == null || pageNumber < 1)
-        {
-            return;
-        }
-
-        // FlowDocumentPageViewerはGoToPageコマンドで直接ページ移動できる
-        // ページ番号は1ベース
-        if (pageNumber >= 1 && pageNumber <= DocumentViewer.PageCount)
-        {
-            // NavigationCommands.GoToPageを使用
-            if (NavigationCommands.GoToPage.CanExecute(pageNumber, DocumentViewer))
-            {
-                NavigationCommands.GoToPage.Execute(pageNumber, DocumentViewer);
-            }
-        }
+        // 注: 以前はここでUpdatePageCountFromViewer()を呼び出していたが、
+        // ContextIdleで初期化が完了した後に実行されると表示を上書きしてしまうため削除。
+        // ページ数の更新はContextIdleコールバックとOnMasterPageNumberChangedで処理される。
     }
 
     /// <summary>
@@ -225,6 +233,38 @@ public partial class PrintPreviewDialog : Window
     }
 
     /// <summary>
+    /// 最初のページへ移動
+    /// </summary>
+    private void FirstPageButton_Click(object sender, RoutedEventArgs e)
+    {
+        DocumentViewer.FirstPage();
+    }
+
+    /// <summary>
+    /// 前のページへ移動
+    /// </summary>
+    private void PreviousPageButton_Click(object sender, RoutedEventArgs e)
+    {
+        DocumentViewer.PreviousPage();
+    }
+
+    /// <summary>
+    /// 次のページへ移動
+    /// </summary>
+    private void NextPageButton_Click(object sender, RoutedEventArgs e)
+    {
+        DocumentViewer.NextPage();
+    }
+
+    /// <summary>
+    /// 最後のページへ移動
+    /// </summary>
+    private void LastPageButton_Click(object sender, RoutedEventArgs e)
+    {
+        DocumentViewer.LastPage();
+    }
+
+    /// <summary>
     /// キーボードイベントハンドラ（← →キーでページ移動）
     /// </summary>
     private void Window_PreviewKeyDown(object sender, KeyEventArgs e)
@@ -234,39 +274,27 @@ public partial class PrintPreviewDialog : Window
             case Key.Left:
             case Key.PageUp:
                 // 前のページへ
-                if (ViewModel.PreviousPageCommand.CanExecute(null))
-                {
-                    ViewModel.PreviousPageCommand.Execute(null);
-                    e.Handled = true;
-                }
+                DocumentViewer.PreviousPage();
+                e.Handled = true;
                 break;
 
             case Key.Right:
             case Key.PageDown:
                 // 次のページへ
-                if (ViewModel.NextPageCommand.CanExecute(null))
-                {
-                    ViewModel.NextPageCommand.Execute(null);
-                    e.Handled = true;
-                }
+                DocumentViewer.NextPage();
+                e.Handled = true;
                 break;
 
             case Key.Home:
                 // 最初のページへ
-                if (ViewModel.FirstPageCommand.CanExecute(null))
-                {
-                    ViewModel.FirstPageCommand.Execute(null);
-                    e.Handled = true;
-                }
+                DocumentViewer.FirstPage();
+                e.Handled = true;
                 break;
 
             case Key.End:
                 // 最後のページへ
-                if (ViewModel.LastPageCommand.CanExecute(null))
-                {
-                    ViewModel.LastPageCommand.Execute(null);
-                    e.Handled = true;
-                }
+                DocumentViewer.LastPage();
+                e.Handled = true;
                 break;
 
             case Key.OemPlus:

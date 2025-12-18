@@ -100,14 +100,14 @@
                                VerticalAlignment="Center"
                                Margin="0,0,10,0"/>
                     <Button Content="⏮"
-                            Command="{Binding FirstPageCommand}"
+                            Click="FirstPageButton_Click"
                             Width="30"
                             Height="28"
                             FontSize="12"
                             ToolTip="最初のページ"
                             AutomationProperties.Name="最初のページ"/>
                     <Button Content="◀"
-                            Command="{Binding PreviousPageCommand}"
+                            Click="PreviousPageButton_Click"
                             Width="30"
                             Height="28"
                             FontSize="12"
@@ -119,12 +119,13 @@
                             BorderThickness="1"
                             Padding="10,4"
                             VerticalAlignment="Center">
-                        <TextBlock Text="{Binding PageDisplayText}"
+                        <TextBlock x:Name="PageDisplayTextBlock"
+                                   Text="1 / 1 ページ"
                                    FontWeight="Bold"
                                    AutomationProperties.LiveSetting="Polite"/>
                     </Border>
                     <Button Content="▶"
-                            Command="{Binding NextPageCommand}"
+                            Click="NextPageButton_Click"
                             Width="30"
                             Height="28"
                             FontSize="12"
@@ -132,7 +133,7 @@
                             ToolTip="次のページ"
                             AutomationProperties.Name="次のページ"/>
                     <Button Content="⏭"
-                            Command="{Binding LastPageCommand}"
+                            Click="LastPageButton_Click"
                             Width="30"
                             Height="28"
                             FontSize="12"

@@ -19,9 +19,12 @@ public partial class PrintPreviewViewModel : ViewModelBase
     public event EventHandler? DocumentNeedsRefresh;
 
     /// <summary>
-    /// ページ変更要求イベント（ページ番号は1-based）
+    /// ナビゲーション要求イベント
     /// </summary>
-    public event EventHandler<int>? PageChangeRequested;
+    public event Action? NavigateNextRequested;
+    public event Action? NavigatePreviousRequested;
+    public event Action? NavigateFirstRequested;
+    public event Action? NavigateLastRequested;
 
     [ObservableProperty]
     private FlowDocument? _document;
@@ -236,11 +239,9 @@ public partial class PrintPreviewViewModel : ViewModelBase
     [RelayCommand(CanExecute = nameof(CanGoNextPage))]
     private void NextPage()
     {
-        if (CurrentPage < TotalPages)
-        {
-            CurrentPage++;
-            PageChangeRequested?.Invoke(this, CurrentPage);
-        }
+        // Viewに対してナビゲーション要求を発火
+        // CurrentPageはViewerのMasterPageNumber変更時に更新される
+        NavigateNextRequested?.Invoke();
     }
 
     private bool CanGoNextPage() => !IsLastPage;
@@ -251,11 +252,7 @@ public partial class PrintPreviewViewModel : ViewModelBase
     [RelayCommand(CanExecute = nameof(CanGoPreviousPage))]
     private void PreviousPage()
     {
-        if (CurrentPage > 1)
-        {
-            CurrentPage--;
-            PageChangeRequested?.Invoke(this, CurrentPage);
-        }
+        NavigatePreviousRequested?.Invoke();
     }
 
     private bool CanGoPreviousPage() => !IsFirstPage;
@@ -266,8 +263,7 @@ public partial class PrintPreviewViewModel : ViewModelBase
     [RelayCommand(CanExecute = nameof(CanGoFirstPage))]
     private void FirstPage()
     {
-        CurrentPage = 1;
-        PageChangeRequested?.Invoke(this, CurrentPage);
+        NavigateFirstRequested?.Invoke();
     }
 
     private bool CanGoFirstPage() => !IsFirstPage;
@@ -278,8 +274,7 @@ public partial class PrintPreviewViewModel : ViewModelBase
     [RelayCommand(CanExecute = nameof(CanGoLastPage))]
     private void LastPage()
     {
-        CurrentPage = TotalPages;
-        PageChangeRequested?.Invoke(this, CurrentPage);
+        NavigateLastRequested?.Invoke();
     }
 
     private bool CanGoLastPage() => !IsLastPage;
@@ -388,6 +383,9 @@ public partial class PrintPreviewViewModel : ViewModelBase
             // テーブルは比例幅（Star sizing）を使用しているため、
             // 用紙サイズに合わせて自動的にリサイズされる
             ContentScale = 1.0;
+
+            // 用紙方向変更時は最初のページに戻す（ページ数が変わるため）
+            CurrentPage = 1;
 
             InternalUpdatePageCount();
 
