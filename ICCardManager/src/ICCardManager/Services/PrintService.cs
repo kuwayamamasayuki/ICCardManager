@@ -270,19 +270,253 @@ public class PrintService
     }
 
     /// <summary>
-    /// FlowDocumentを生成
+    /// 複数カードの帳票データからFlowDocumentを生成（用紙方向指定）
+    /// </summary>
+    /// <param name="dataList">帳票データのリスト</param>
+    /// <param name="orientation">用紙方向</param>
+    /// <returns>結合されたFlowDocument</returns>
+    public FlowDocument CreateFlowDocumentForMultipleCards(
+        List<ReportPrintData> dataList,
+        PageOrientation orientation)
+    {
+        if (dataList.Count == 0)
+        {
+            return new FlowDocument();
+        }
+
+        // 最初のカードでドキュメントを作成
+        var combinedDoc = CreateFlowDocument(dataList[0], orientation);
+
+        // 用紙サイズを取得
+        double pageWidth = orientation == PageOrientation.Landscape ? 842 : 595;
+        double pageHeight = orientation == PageOrientation.Landscape ? 595 : 842;
+
+        // 2枚目以降のカードを追加
+        for (int i = 1; i < dataList.Count; i++)
+        {
+            var data = dataList[i];
+
+            // 合計行の数を計算
+            var summaryRowCount = 1;
+            if (data.CumulativeTotal != null) summaryRowCount++;
+            if (data.CarryoverToNextYear.HasValue) summaryRowCount++;
+
+            // コンテンツの高さに基づいてページをグループ化
+            var pageGroups = GroupRowsByPage(data.Rows, pageWidth, pageHeight, summaryRowCount, false);
+
+            // 1ページに収まる場合
+            if (pageGroups.Count <= 1)
+            {
+                AddPageContent(combinedDoc, data, data.Rows, true, false);
+            }
+            else
+            {
+                // 複数ページに分割
+                for (int j = 0; j < pageGroups.Count; j++)
+                {
+                    var isLastPage = (j == pageGroups.Count - 1);
+                    var pageRows = pageGroups[j];
+
+                    // このカードの全ページでページ区切りが必要（2枚目以降のカードなので）
+                    AddPageContent(combinedDoc, data, pageRows, true, !isLastPage);
+                }
+            }
+        }
+
+        return combinedDoc;
+    }
+
+    // ページレイアウト定数
+    private const double PagePaddingSize = 50;        // ページ余白（上下左右）
+
+    // ヘッダー部分の高さ（実測値ベース、少し余裕を持たせる）
+    private const double TitleHeight = 45;            // タイトル「物品出納簿」(FontSize18行高さ24 + Margin20 + 余裕)
+    private const double CardInfoTableHeight = 58;    // カード情報テーブル（2行×14pt + パディング + Margin15 + 余裕）
+    private const double ColumnHeaderHeight = 25;     // データテーブルの列ヘッダー行（セルパディング含む）
+    private const double TableBorderHeight = 2;       // データテーブル上下の罫線
+
+    // データ行の高さ（実測値ベース）
+    private const double DataRowHeight = 22;          // 1行データ（FontSize11 + パディング + 罫線）
+    private const double DataRowHeightDouble = 38;    // 2行データ（摘要が折り返す場合）
+
+    // 合計行の高さ
+    private const double SummaryRowHeight = 22;       // 月計/累計/繰越行
+
+    // 摘要欄の1行あたり文字数（実測値：セル幅÷フォントサイズ）
+    private const int SummaryCharsLandscape = 20;     // 横向き時（幅211pt / 11pt）
+    private const int SummaryCharsPortrait = 12;      // 縦向き時（幅138pt / 11pt）
+
+    /// <summary>
+    /// ヘッダー部分の合計高さを取得（タイトル + カード情報 + 列ヘッダー + テーブル罫線）
+    /// </summary>
+    private double GetHeaderTotalHeight()
+    {
+        return TitleHeight + CardInfoTableHeight + ColumnHeaderHeight + TableBorderHeight;
+    }
+
+    /// <summary>
+    /// データ行の高さを取得（摘要欄の文字数に基づく）
+    /// </summary>
+    private double GetDataRowHeight(ReportPrintRow row, bool isLandscape)
+    {
+        if (string.IsNullOrEmpty(row.Summary))
+            return DataRowHeight;
+
+        var maxChars = isLandscape ? SummaryCharsLandscape : SummaryCharsPortrait;
+        return row.Summary.Length <= maxChars ? DataRowHeight : DataRowHeightDouble;
+    }
+
+    /// <summary>
+    /// データ領域の利用可能な高さを計算
+    /// </summary>
+    private double GetAvailableDataHeight(double pageHeight)
+    {
+        // ページ高さ - 上下余白 - ヘッダー部分
+        return pageHeight - (PagePaddingSize * 2) - GetHeaderTotalHeight();
+    }
+
+    /// <summary>
+    /// 行をページごとにグループ化（高さを積み上げて改ページ位置を決定）
+    /// </summary>
+    private List<List<ReportPrintRow>> GroupRowsByPage(
+        List<ReportPrintRow> rows,
+        double pageWidth,
+        double pageHeight,
+        int summaryRowCount,
+        bool isFirstCard)
+    {
+        var isLandscape = pageWidth > pageHeight;
+        var availableHeight = GetAvailableDataHeight(pageHeight);
+        var summaryTotalHeight = summaryRowCount * SummaryRowHeight;
+
+        var pages = new List<List<ReportPrintRow>>();
+        var currentPage = new List<ReportPrintRow>();
+        double accumulatedHeight = 0;
+
+        for (int i = 0; i < rows.Count; i++)
+        {
+            var row = rows[i];
+            var rowHeight = GetDataRowHeight(row, isLandscape);
+
+            // この行を追加した後の残り行の合計高さを計算
+            double remainingRowsHeight = 0;
+            for (int j = i + 1; j < rows.Count; j++)
+            {
+                remainingRowsHeight += GetDataRowHeight(rows[j], isLandscape);
+            }
+
+            // 残り全部を入れても収まるか？（最終ページ判定）
+            var canFitAll = accumulatedHeight + rowHeight + remainingRowsHeight + summaryTotalHeight <= availableHeight;
+
+            // 最終ページでない場合は合計行のスペースは不要
+            var spaceForSummary = canFitAll ? summaryTotalHeight : 0;
+
+            // この行を追加すると溢れるか？
+            if (accumulatedHeight + rowHeight + spaceForSummary > availableHeight && currentPage.Count > 0)
+            {
+                // 現在のページを確定して新しいページを開始
+                pages.Add(currentPage);
+                currentPage = new List<ReportPrintRow>();
+                accumulatedHeight = 0;
+            }
+
+            currentPage.Add(row);
+            accumulatedHeight += rowHeight;
+        }
+
+        if (currentPage.Count > 0)
+        {
+            pages.Add(currentPage);
+        }
+
+        return pages;
+    }
+
+    /// <summary>
+    /// FlowDocumentを生成（横向きデフォルト）
     /// </summary>
     public FlowDocument CreateFlowDocument(ReportPrintData data)
     {
+        return CreateFlowDocument(data, PageOrientation.Landscape);
+    }
+
+    /// <summary>
+    /// FlowDocumentを生成（用紙方向指定）
+    /// </summary>
+    public FlowDocument CreateFlowDocument(ReportPrintData data, PageOrientation orientation)
+    {
+        // 用紙方向に応じたページサイズを設定
+        double pageWidth, pageHeight;
+
+        if (orientation == PageOrientation.Landscape)
+        {
+            pageWidth = 842;   // A4横
+            pageHeight = 595;
+        }
+        else
+        {
+            pageWidth = 595;   // A4縦
+            pageHeight = 842;
+        }
+
         var doc = new FlowDocument
         {
-            PageWidth = 842,  // A4横 (約29.7cm)
-            PageHeight = 595, // A4横 (約21cm)
-            PagePadding = new Thickness(50),
+            PageWidth = pageWidth,
+            PageHeight = pageHeight,
+            PagePadding = new Thickness(PagePaddingSize),
             ColumnWidth = double.MaxValue,
             FontFamily = new FontFamily("Yu Gothic UI, Meiryo, MS Gothic"),
             FontSize = 11
         };
+
+        // 合計行の数を計算
+        var summaryRowCount = 1; // 月計
+        if (data.CumulativeTotal != null) summaryRowCount++;
+        if (data.CarryoverToNextYear.HasValue) summaryRowCount++;
+
+        // コンテンツの高さに基づいてページをグループ化
+        var pageGroups = GroupRowsByPage(data.Rows, pageWidth, pageHeight, summaryRowCount, true);
+
+        // 1ページに収まる場合
+        if (pageGroups.Count <= 1)
+        {
+            AddPageContent(doc, data, data.Rows, false, false);
+        }
+        else
+        {
+            // 複数ページに分割
+            for (int i = 0; i < pageGroups.Count; i++)
+            {
+                var isFirstPage = (i == 0);
+                var isLastPage = (i == pageGroups.Count - 1);
+                var pageRows = pageGroups[i];
+
+                // ページコンテンツを追加（2ページ目以降はページ区切り付き）
+                AddPageContent(doc, data, pageRows, !isFirstPage, !isLastPage);
+            }
+        }
+
+        return doc;
+    }
+
+    /// <summary>
+    /// 1ページ分のコンテンツを追加
+    /// </summary>
+    private void AddPageContent(
+        FlowDocument doc,
+        ReportPrintData data,
+        List<ReportPrintRow> rows,
+        bool addPageBreakBefore,
+        bool hideSummary)
+    {
+        // Sectionでページコンテンツを囲む（FlowDocumentの自動分割を制御）
+        var section = new Section();
+
+        // 2ページ目以降はセクションの前でページ区切り
+        if (addPageBreakBefore)
+        {
+            section.BreakPageBefore = true;
+        }
 
         // タイトル
         var titlePara = new Paragraph(new Run("物品出納簿"))
@@ -292,17 +526,20 @@ public class PrintService
             TextAlignment = TextAlignment.Center,
             Margin = new Thickness(0, 0, 0, 20)
         };
-        doc.Blocks.Add(titlePara);
+        section.Blocks.Add(titlePara);
 
         // ヘッダ情報
         var headerTable = CreateHeaderTable(data);
-        doc.Blocks.Add(headerTable);
+        section.Blocks.Add(headerTable);
 
-        // データテーブル
-        var dataTable = CreateDataTable(data);
-        doc.Blocks.Add(dataTable);
+        // データテーブル（このページ分のみ）
+        var pageData = data with { Rows = rows };
+        var dataTable = hideSummary
+            ? CreateDataTableWithoutSummary(pageData)
+            : CreateDataTable(pageData);
+        section.Blocks.Add(dataTable);
 
-        return doc;
+        doc.Blocks.Add(section);
     }
 
     /// <summary>
@@ -374,6 +611,22 @@ public class PrintService
     /// </summary>
     private Table CreateDataTable(ReportPrintData data)
     {
+        return CreateDataTableInternal(data, includeSummary: true);
+    }
+
+    /// <summary>
+    /// 合計行を含まないデータテーブルを作成（複数ページの途中ページ用）
+    /// </summary>
+    private Table CreateDataTableWithoutSummary(ReportPrintData data)
+    {
+        return CreateDataTableInternal(data, includeSummary: false);
+    }
+
+    /// <summary>
+    /// データテーブルを作成（内部実装）
+    /// </summary>
+    private Table CreateDataTableInternal(ReportPrintData data, bool includeSummary)
+    {
         var table = new Table
         {
             CellSpacing = 0,
@@ -419,43 +672,47 @@ public class PrintService
             rowGroup.Rows.Add(dataRow);
         }
 
-        // 月計行
-        var monthlyRow = new TableRow { Background = new SolidColorBrush(Color.FromRgb(240, 240, 240)) };
-        monthlyRow.Cells.Add(CreateDataCell("", true, TextAlignment.Center));
-        monthlyRow.Cells.Add(CreateDataCell(data.MonthlyTotal.Label, true, TextAlignment.Left));
-        monthlyRow.Cells.Add(CreateDataCell(data.MonthlyTotal.Income > 0 ? data.MonthlyTotal.Income.ToString("N0") : "", true, TextAlignment.Right));
-        monthlyRow.Cells.Add(CreateDataCell(data.MonthlyTotal.Expense > 0 ? data.MonthlyTotal.Expense.ToString("N0") : "", true, TextAlignment.Right));
-        monthlyRow.Cells.Add(CreateDataCell(data.MonthlyTotal.Balance?.ToString("N0") ?? "", true, TextAlignment.Right));
-        monthlyRow.Cells.Add(CreateDataCell("", true, TextAlignment.Left));
-        monthlyRow.Cells.Add(CreateDataCell("", true, TextAlignment.Left));
-        rowGroup.Rows.Add(monthlyRow);
-
-        // 累計行（3月のみ）
-        if (data.CumulativeTotal != null)
+        // 合計行を含める場合のみ追加
+        if (includeSummary)
         {
-            var cumulativeRow = new TableRow { Background = new SolidColorBrush(Color.FromRgb(230, 230, 230)) };
-            cumulativeRow.Cells.Add(CreateDataCell("", true, TextAlignment.Center));
-            cumulativeRow.Cells.Add(CreateDataCell(data.CumulativeTotal.Label, true, TextAlignment.Left));
-            cumulativeRow.Cells.Add(CreateDataCell(data.CumulativeTotal.Income > 0 ? data.CumulativeTotal.Income.ToString("N0") : "", true, TextAlignment.Right));
-            cumulativeRow.Cells.Add(CreateDataCell(data.CumulativeTotal.Expense > 0 ? data.CumulativeTotal.Expense.ToString("N0") : "", true, TextAlignment.Right));
-            cumulativeRow.Cells.Add(CreateDataCell(data.CumulativeTotal.Balance?.ToString("N0") ?? "", true, TextAlignment.Right));
-            cumulativeRow.Cells.Add(CreateDataCell("", true, TextAlignment.Left));
-            cumulativeRow.Cells.Add(CreateDataCell("", true, TextAlignment.Left));
-            rowGroup.Rows.Add(cumulativeRow);
-        }
+            // 月計行
+            var monthlyRow = new TableRow { Background = new SolidColorBrush(Color.FromRgb(240, 240, 240)) };
+            monthlyRow.Cells.Add(CreateDataCell("", true, TextAlignment.Center));
+            monthlyRow.Cells.Add(CreateDataCell(data.MonthlyTotal.Label, true, TextAlignment.Left));
+            monthlyRow.Cells.Add(CreateDataCell(data.MonthlyTotal.Income > 0 ? data.MonthlyTotal.Income.ToString("N0") : "", true, TextAlignment.Right));
+            monthlyRow.Cells.Add(CreateDataCell(data.MonthlyTotal.Expense > 0 ? data.MonthlyTotal.Expense.ToString("N0") : "", true, TextAlignment.Right));
+            monthlyRow.Cells.Add(CreateDataCell(data.MonthlyTotal.Balance?.ToString("N0") ?? "", true, TextAlignment.Right));
+            monthlyRow.Cells.Add(CreateDataCell("", true, TextAlignment.Left));
+            monthlyRow.Cells.Add(CreateDataCell("", true, TextAlignment.Left));
+            rowGroup.Rows.Add(monthlyRow);
 
-        // 次年度繰越行（3月のみ）
-        if (data.CarryoverToNextYear.HasValue)
-        {
-            var carryoverRow = new TableRow { Background = new SolidColorBrush(Color.FromRgb(220, 220, 220)) };
-            carryoverRow.Cells.Add(CreateDataCell("", true, TextAlignment.Center));
-            carryoverRow.Cells.Add(CreateDataCell(SummaryGenerator.GetCarryoverToNextYearSummary(), true, TextAlignment.Left));
-            carryoverRow.Cells.Add(CreateDataCell("", true, TextAlignment.Right));
-            carryoverRow.Cells.Add(CreateDataCell(data.CarryoverToNextYear.Value.ToString("N0"), true, TextAlignment.Right));
-            carryoverRow.Cells.Add(CreateDataCell("0", true, TextAlignment.Right));
-            carryoverRow.Cells.Add(CreateDataCell("", true, TextAlignment.Left));
-            carryoverRow.Cells.Add(CreateDataCell("", true, TextAlignment.Left));
-            rowGroup.Rows.Add(carryoverRow);
+            // 累計行（3月のみ）
+            if (data.CumulativeTotal != null)
+            {
+                var cumulativeRow = new TableRow { Background = new SolidColorBrush(Color.FromRgb(230, 230, 230)) };
+                cumulativeRow.Cells.Add(CreateDataCell("", true, TextAlignment.Center));
+                cumulativeRow.Cells.Add(CreateDataCell(data.CumulativeTotal.Label, true, TextAlignment.Left));
+                cumulativeRow.Cells.Add(CreateDataCell(data.CumulativeTotal.Income > 0 ? data.CumulativeTotal.Income.ToString("N0") : "", true, TextAlignment.Right));
+                cumulativeRow.Cells.Add(CreateDataCell(data.CumulativeTotal.Expense > 0 ? data.CumulativeTotal.Expense.ToString("N0") : "", true, TextAlignment.Right));
+                cumulativeRow.Cells.Add(CreateDataCell(data.CumulativeTotal.Balance?.ToString("N0") ?? "", true, TextAlignment.Right));
+                cumulativeRow.Cells.Add(CreateDataCell("", true, TextAlignment.Left));
+                cumulativeRow.Cells.Add(CreateDataCell("", true, TextAlignment.Left));
+                rowGroup.Rows.Add(cumulativeRow);
+            }
+
+            // 次年度繰越行（3月のみ）
+            if (data.CarryoverToNextYear.HasValue)
+            {
+                var carryoverRow = new TableRow { Background = new SolidColorBrush(Color.FromRgb(220, 220, 220)) };
+                carryoverRow.Cells.Add(CreateDataCell("", true, TextAlignment.Center));
+                carryoverRow.Cells.Add(CreateDataCell(SummaryGenerator.GetCarryoverToNextYearSummary(), true, TextAlignment.Left));
+                carryoverRow.Cells.Add(CreateDataCell("", true, TextAlignment.Right));
+                carryoverRow.Cells.Add(CreateDataCell(data.CarryoverToNextYear.Value.ToString("N0"), true, TextAlignment.Right));
+                carryoverRow.Cells.Add(CreateDataCell("0", true, TextAlignment.Right));
+                carryoverRow.Cells.Add(CreateDataCell("", true, TextAlignment.Left));
+                carryoverRow.Cells.Add(CreateDataCell("", true, TextAlignment.Left));
+                rowGroup.Rows.Add(carryoverRow);
+            }
         }
 
         table.RowGroups.Add(rowGroup);

@@ -498,13 +498,11 @@ public partial class ReportViewModel : ViewModelBase
                 return;
             }
 
-            // FlowDocumentを生成
-            var document = _printService.CreateFlowDocument(reportData);
             var documentTitle = $"物品出納簿_{card.CardType}_{card.CardNumber}_{SelectedYear}年{SelectedMonth}月";
 
-            // プレビューダイアログを表示
+            // プレビューダイアログを表示（ReportPrintDataを渡して用紙方向変更時に再生成可能に）
             var previewDialog = App.Current.ServiceProvider.GetRequiredService<Views.Dialogs.PrintPreviewDialog>();
-            previewDialog.ViewModel.SetDocument(document, documentTitle);
+            previewDialog.ViewModel.SetDocument(reportData, documentTitle);
             previewDialog.Owner = Application.Current.Windows.OfType<Window>().FirstOrDefault(w => w.IsActive)
                                    ?? Application.Current.MainWindow;
             previewDialog.ShowDialog();
@@ -535,11 +533,19 @@ public partial class ReportViewModel : ViewModelBase
         {
             // 表示順（Cardsの順序）でカードを取得（選択順ではなく一覧の並び順）
             var orderedSelectedCards = Cards.Where(c => c.IsSelected).ToList();
-            var cardIdms = orderedSelectedCards.Select(c => c.CardIdm).ToList();
-            var combinedDocument = await _printService.CreateCombinedFlowDocumentAsync(
-                cardIdms, SelectedYear, SelectedMonth);
 
-            if (combinedDocument == null)
+            // 各カードの帳票データを取得
+            var reportDataList = new List<Services.ReportPrintData>();
+            foreach (var cardVm in orderedSelectedCards)
+            {
+                var data = await _printService.GetReportDataAsync(cardVm.CardIdm, SelectedYear, SelectedMonth);
+                if (data != null)
+                {
+                    reportDataList.Add(data);
+                }
+            }
+
+            if (reportDataList.Count == 0)
             {
                 StatusMessage = "帳票データを取得できませんでした";
                 return;
@@ -550,9 +556,9 @@ public partial class ReportViewModel : ViewModelBase
                 ? $"物品出納簿_{orderedSelectedCards[0].DisplayName}_{orderedSelectedCards[1].DisplayName}_{SelectedYear}年{SelectedMonth}月"
                 : $"物品出納簿_{orderedSelectedCards.Count}件_{SelectedYear}年{SelectedMonth}月";
 
-            // プレビューダイアログを表示
+            // プレビューダイアログを表示（List<ReportPrintData>を渡して用紙方向変更時に再生成可能に）
             var previewDialog = App.Current.ServiceProvider.GetRequiredService<Views.Dialogs.PrintPreviewDialog>();
-            previewDialog.ViewModel.SetDocument(combinedDocument, documentTitle);
+            previewDialog.ViewModel.SetDocument(reportDataList, documentTitle);
             previewDialog.Owner = Application.Current.Windows.OfType<Window>().FirstOrDefault(w => w.IsActive)
                                    ?? Application.Current.MainWindow;
             previewDialog.ShowDialog();

@@ -14,6 +14,11 @@ public partial class PrintPreviewViewModel : ViewModelBase
     private readonly PrintService _printService;
 
     /// <summary>
+    /// 再生成用の帳票データ（単一または複数カード）
+    /// </summary>
+    private List<ReportPrintData>? _reportDataList;
+
+    /// <summary>
     /// ドキュメントの再描画が必要な場合に発火するイベント
     /// </summary>
     public event EventHandler? DocumentNeedsRefresh;
@@ -124,11 +129,38 @@ public partial class PrintPreviewViewModel : ViewModelBase
     }
 
     /// <summary>
-    /// ドキュメントを設定
+    /// ドキュメントを設定（従来互換）
     /// </summary>
     public void SetDocument(FlowDocument document, string title)
     {
+        _reportDataList = null; // 再生成不可
         Document = document;
+        DocumentTitle = title;
+        CurrentPage = 1;
+        InternalUpdatePageCount();
+        StatusMessage = $"「{title}」を表示中";
+    }
+
+    /// <summary>
+    /// ドキュメントを設定（単一カード、用紙方向変更時に再生成可能）
+    /// </summary>
+    public void SetDocument(ReportPrintData reportData, string title)
+    {
+        _reportDataList = new List<ReportPrintData> { reportData };
+        Document = _printService.CreateFlowDocument(reportData, SelectedOrientation);
+        DocumentTitle = title;
+        CurrentPage = 1;
+        InternalUpdatePageCount();
+        StatusMessage = $"「{title}」を表示中";
+    }
+
+    /// <summary>
+    /// ドキュメントを設定（複数カード、用紙方向変更時に再生成可能）
+    /// </summary>
+    public void SetDocument(List<ReportPrintData> reportDataList, string title)
+    {
+        _reportDataList = reportDataList;
+        Document = _printService.CreateFlowDocumentForMultipleCards(reportDataList, SelectedOrientation);
         DocumentTitle = title;
         CurrentPage = 1;
         InternalUpdatePageCount();
@@ -361,35 +393,47 @@ public partial class PrintPreviewViewModel : ViewModelBase
     /// </summary>
     partial void OnSelectedOrientationChanged(PageOrientation value)
     {
-        if (Document != null)
+        // 帳票データがある場合はドキュメントを再生成（行数が変わるため）
+        if (_reportDataList != null && _reportDataList.Count > 0)
         {
-            // A4サイズに基づいて用紙サイズを更新
-            if (value == PageOrientation.Landscape)
+            if (_reportDataList.Count == 1)
             {
-                Document.PageWidth = LandscapeWidth;   // A4横 (約29.7cm)
-                Document.PageHeight = PortraitWidth;   // A4横 (約21cm)
-                ContentScaleFactor = 1.0;              // 横向きはスケーリングなし
+                Document = _printService.CreateFlowDocument(_reportDataList[0], value);
             }
             else
             {
-                // 縦向きでもコンテンツは横向きの幅で描画（テーブルが収まるように）
-                // ScaleTransformで縮小して縦向き用紙サイズに見せる
-                ContentScaleFactor = PortraitWidth / LandscapeWidth;  // ≈ 0.707
-                Document.PageWidth = LandscapeWidth;   // 842 (コンテンツが収まる幅)
-                // 縮小後にA4縦の高さ(842)になるように設定: 842 / 0.707 ≈ 1191
-                Document.PageHeight = LandscapeWidth / ContentScaleFactor;
+                Document = _printService.CreateFlowDocumentForMultipleCards(_reportDataList, value);
             }
 
-            // テーブルは比例幅（Star sizing）を使用しているため、
-            // 用紙サイズに合わせて自動的にリサイズされる
-            ContentScale = 1.0;
-
-            // 用紙方向変更時は最初のページに戻す（ページ数が変わるため）
+            // 用紙方向変更時は最初のページに戻す
             CurrentPage = 1;
-
             InternalUpdatePageCount();
 
             // FlowDocumentPageViewerに再描画を通知
+            DocumentNeedsRefresh?.Invoke(this, EventArgs.Empty);
+
+            var orientationName = GetOrientationDisplayName(value);
+            StatusMessage = $"用紙方向を{orientationName}に変更しました";
+        }
+        else if (Document != null)
+        {
+            // 従来の動作（帳票データがない場合はページサイズのみ変更）
+            if (value == PageOrientation.Landscape)
+            {
+                Document.PageWidth = LandscapeWidth;
+                Document.PageHeight = PortraitWidth;
+                ContentScaleFactor = 1.0;
+            }
+            else
+            {
+                ContentScaleFactor = PortraitWidth / LandscapeWidth;
+                Document.PageWidth = LandscapeWidth;
+                Document.PageHeight = LandscapeWidth / ContentScaleFactor;
+            }
+
+            ContentScale = 1.0;
+            CurrentPage = 1;
+            InternalUpdatePageCount();
             DocumentNeedsRefresh?.Invoke(this, EventArgs.Empty);
 
             var orientationName = GetOrientationDisplayName(value);
