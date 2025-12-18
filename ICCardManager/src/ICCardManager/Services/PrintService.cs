@@ -287,47 +287,37 @@ public class PrintService
         // 最初のカードでドキュメントを作成
         var combinedDoc = CreateFlowDocument(dataList[0], orientation);
 
+        // 用紙サイズを取得
+        double pageWidth = orientation == PageOrientation.Landscape ? 842 : 595;
+        double pageHeight = orientation == PageOrientation.Landscape ? 595 : 842;
+
         // 2枚目以降のカードを追加
         for (int i = 1; i < dataList.Count; i++)
         {
             var data = dataList[i];
 
-            // 用紙方向に応じた行数を取得
-            int rowsPerPage = orientation == PageOrientation.Landscape
-                ? RowsPerPageLandscape
-                : RowsPerPagePortrait;
+            // 合計行の数を計算
+            var summaryRowCount = 1;
+            if (data.CumulativeTotal != null) summaryRowCount++;
+            if (data.CarryoverToNextYear.HasValue) summaryRowCount++;
 
-            // データ行 + 合計行の総数を計算
-            var totalRows = data.Rows.Count + 1;
-            if (data.CumulativeTotal != null) totalRows++;
-            if (data.CarryoverToNextYear.HasValue) totalRows++;
+            // コンテンツの高さに基づいてページをグループ化
+            var pageGroups = GroupRowsByPage(data.Rows, pageWidth, pageHeight, summaryRowCount, false);
 
             // 1ページに収まる場合
-            if (totalRows <= rowsPerPage)
+            if (pageGroups.Count <= 1)
             {
                 AddPageContent(combinedDoc, data, data.Rows, true, false);
             }
             else
             {
                 // 複数ページに分割
-                var remainingRows = new List<ReportPrintRow>(data.Rows);
-
-                while (remainingRows.Count > 0)
+                for (int j = 0; j < pageGroups.Count; j++)
                 {
-                    var summaryRowCount = 1;
-                    if (data.CumulativeTotal != null) summaryRowCount++;
-                    if (data.CarryoverToNextYear.HasValue) summaryRowCount++;
+                    var isLastPage = (j == pageGroups.Count - 1);
+                    var pageRows = pageGroups[j];
 
-                    var isLastPage = remainingRows.Count <= rowsPerPage - summaryRowCount;
-
-                    int takeCount = isLastPage
-                        ? remainingRows.Count
-                        : Math.Min(remainingRows.Count, rowsPerPage);
-
-                    var pageRows = remainingRows.Take(takeCount).ToList();
-                    remainingRows = remainingRows.Skip(takeCount).ToList();
-
-                    // このカードの最初のページでも、ドキュメント全体では2枚目以降なのでページ区切りが必要
+                    // このカードの全ページでページ区切りが必要（2枚目以降のカードなので）
                     AddPageContent(combinedDoc, data, pageRows, true, !isLastPage);
                 }
             }
@@ -336,15 +326,83 @@ public class PrintService
         return combinedDoc;
     }
 
-    /// <summary>
-    /// 横向き時の1ページあたりのデータ行数
-    /// </summary>
-    private const int RowsPerPageLandscape = 18;
+    // ページレイアウト定数
+    private const double PagePaddingSize = 50;           // ページ余白
+    private const double HeaderBlockHeight = 100;        // タイトル＋ヘッダーテーブルの高さ
+    private const double TableHeaderHeight = 25;         // テーブル列ヘッダーの高さ
+    private const double BaseRowHeight = 22;             // 1行データの基本高さ
+    private const double TwoLineRowHeight = 38;          // 2行に折り返すデータの高さ
+    private const double SummaryRowHeight = 24;          // 合計行の高さ
+    private const double SummaryColumnWidthRatio = 0.22; // 摘要列の幅比率（全体の約22%）
+    private const double CharsPerPoint = 6.5;            // 1文字あたりの幅（11ptフォント時の概算）
 
     /// <summary>
-    /// 縦向き時の1ページあたりのデータ行数
+    /// 行の高さを推定（摘要欄の文字数に基づく）
     /// </summary>
-    private const int RowsPerPagePortrait = 28;
+    private double EstimateRowHeight(ReportPrintRow row, double pageWidth)
+    {
+        if (string.IsNullOrEmpty(row.Summary))
+            return BaseRowHeight;
+
+        // 摘要列の利用可能幅を計算
+        var contentWidth = pageWidth - (PagePaddingSize * 2);
+        var summaryColumnWidth = contentWidth * SummaryColumnWidthRatio;
+        var charsPerLine = summaryColumnWidth / CharsPerPoint;
+
+        // 摘要が1行に収まるかどうか
+        return row.Summary.Length <= charsPerLine ? BaseRowHeight : TwoLineRowHeight;
+    }
+
+    /// <summary>
+    /// 行をページごとにグループ化（コンテンツの高さに基づく）
+    /// </summary>
+    private List<List<ReportPrintRow>> GroupRowsByPage(
+        List<ReportPrintRow> rows,
+        double pageWidth,
+        double pageHeight,
+        int summaryRowCount,
+        bool isFirstCard)
+    {
+        var pages = new List<List<ReportPrintRow>>();
+        var currentPage = new List<ReportPrintRow>();
+
+        // 利用可能なコンテンツ高さ
+        var contentHeight = pageHeight - (PagePaddingSize * 2);
+        var availableHeight = contentHeight - HeaderBlockHeight - TableHeaderHeight;
+
+        double currentHeight = 0;
+
+        for (int i = 0; i < rows.Count; i++)
+        {
+            var row = rows[i];
+            var rowHeight = EstimateRowHeight(row, pageWidth);
+
+            // 最終ページの場合は合計行のスペースを確保
+            var remainingRows = rows.Count - i;
+            var isLastPage = (remainingRows == 1) ||
+                (currentHeight + rowHeight + (remainingRows - 1) * BaseRowHeight <= availableHeight);
+
+            var requiredSpaceForSummary = isLastPage ? summaryRowCount * SummaryRowHeight : 0;
+
+            // 現在の行を追加すると溢れる場合、新しいページを開始
+            if (currentHeight + rowHeight + requiredSpaceForSummary > availableHeight && currentPage.Count > 0)
+            {
+                pages.Add(currentPage);
+                currentPage = new List<ReportPrintRow>();
+                currentHeight = 0;
+            }
+
+            currentPage.Add(row);
+            currentHeight += rowHeight;
+        }
+
+        if (currentPage.Count > 0)
+        {
+            pages.Add(currentPage);
+        }
+
+        return pages;
+    }
 
     /// <summary>
     /// FlowDocumentを生成（横向きデフォルト）
@@ -359,85 +417,54 @@ public class PrintService
     /// </summary>
     public FlowDocument CreateFlowDocument(ReportPrintData data, PageOrientation orientation)
     {
-        // 用紙方向に応じたページサイズと行数を設定
+        // 用紙方向に応じたページサイズを設定
         double pageWidth, pageHeight;
-        int rowsPerPage;
 
         if (orientation == PageOrientation.Landscape)
         {
             pageWidth = 842;   // A4横
             pageHeight = 595;
-            rowsPerPage = RowsPerPageLandscape;
         }
         else
         {
             pageWidth = 595;   // A4縦
             pageHeight = 842;
-            rowsPerPage = RowsPerPagePortrait;
         }
 
         var doc = new FlowDocument
         {
             PageWidth = pageWidth,
             PageHeight = pageHeight,
-            PagePadding = new Thickness(50),
+            PagePadding = new Thickness(PagePaddingSize),
             ColumnWidth = double.MaxValue,
             FontFamily = new FontFamily("Yu Gothic UI, Meiryo, MS Gothic"),
             FontSize = 11
         };
 
-        // データ行 + 合計行の総数を計算
-        var totalRows = data.Rows.Count + 1; // +1 は月計行
-        if (data.CumulativeTotal != null) totalRows++;
-        if (data.CarryoverToNextYear.HasValue) totalRows++;
+        // 合計行の数を計算
+        var summaryRowCount = 1; // 月計
+        if (data.CumulativeTotal != null) summaryRowCount++;
+        if (data.CarryoverToNextYear.HasValue) summaryRowCount++;
 
-        // 1ページに収まる場合は従来通り
-        if (totalRows <= rowsPerPage)
+        // コンテンツの高さに基づいてページをグループ化
+        var pageGroups = GroupRowsByPage(data.Rows, pageWidth, pageHeight, summaryRowCount, true);
+
+        // 1ページに収まる場合
+        if (pageGroups.Count <= 1)
         {
             AddPageContent(doc, data, data.Rows, false, false);
         }
         else
         {
             // 複数ページに分割
-            var remainingRows = new List<ReportPrintRow>(data.Rows);
-            var isFirstPage = true;
-            var pageIndex = 0;
-
-            while (remainingRows.Count > 0 || pageIndex == 0)
+            for (int i = 0; i < pageGroups.Count; i++)
             {
-                // 最終ページかどうかを判定（合計行のスペースを考慮）
-                var summaryRowCount = 1; // 月計
-                if (data.CumulativeTotal != null) summaryRowCount++;
-                if (data.CarryoverToNextYear.HasValue) summaryRowCount++;
-
-                var isLastPage = remainingRows.Count <= rowsPerPage - summaryRowCount;
-
-                // このページに表示する行数を決定
-                int takeCount;
-                if (isLastPage)
-                {
-                    takeCount = remainingRows.Count;
-                }
-                else
-                {
-                    // 合計行のスペースは不要（最終ページでないため）
-                    takeCount = Math.Min(remainingRows.Count, rowsPerPage);
-                }
-
-                var pageRows = remainingRows.Take(takeCount).ToList();
-                remainingRows = remainingRows.Skip(takeCount).ToList();
+                var isFirstPage = (i == 0);
+                var isLastPage = (i == pageGroups.Count - 1);
+                var pageRows = pageGroups[i];
 
                 // ページコンテンツを追加（2ページ目以降はページ区切り付き）
                 AddPageContent(doc, data, pageRows, !isFirstPage, !isLastPage);
-
-                isFirstPage = false;
-                pageIndex++;
-
-                // 残りの行がない場合でも、最終ページで合計行を追加
-                if (remainingRows.Count == 0 && !isLastPage)
-                {
-                    break;
-                }
             }
         }
 
