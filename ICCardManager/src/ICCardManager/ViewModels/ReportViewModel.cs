@@ -523,8 +523,38 @@ public partial class ReportViewModel : ViewModelBase
             return;
         }
 
-        // 最初の選択カードをプレビュー
-        await PreviewReportAsync(SelectedCards.First());
+        // 単一カードの場合は既存の処理を使用
+        if (SelectedCards.Count == 1)
+        {
+            await PreviewReportAsync(SelectedCards.First());
+            return;
+        }
+
+        // 複数カードの場合は結合ドキュメントを生成
+        using (BeginBusy($"プレビューを準備中... ({SelectedCards.Count}件)"))
+        {
+            var cardIdms = SelectedCards.Select(c => c.CardIdm).ToList();
+            var combinedDocument = await _printService.CreateCombinedFlowDocumentAsync(
+                cardIdms, SelectedYear, SelectedMonth);
+
+            if (combinedDocument == null)
+            {
+                StatusMessage = "帳票データを取得できませんでした";
+                return;
+            }
+
+            // ドキュメントタイトルを生成
+            var documentTitle = SelectedCards.Count == 2
+                ? $"物品出納簿_{SelectedCards[0].DisplayName}_{SelectedCards[1].DisplayName}_{SelectedYear}年{SelectedMonth}月"
+                : $"物品出納簿_{SelectedCards.Count}件_{SelectedYear}年{SelectedMonth}月";
+
+            // プレビューダイアログを表示
+            var previewDialog = App.Current.ServiceProvider.GetRequiredService<Views.Dialogs.PrintPreviewDialog>();
+            previewDialog.ViewModel.SetDocument(combinedDocument, documentTitle);
+            previewDialog.Owner = Application.Current.Windows.OfType<Window>().FirstOrDefault(w => w.IsActive)
+                                   ?? Application.Current.MainWindow;
+            previewDialog.ShowDialog();
+        }
     }
 
     /// <summary>
