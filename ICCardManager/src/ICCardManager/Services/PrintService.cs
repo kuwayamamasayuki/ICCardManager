@@ -331,8 +331,8 @@ public class PrintService
 
     // 1ページあたりの最大行数（固定値、確実に収まる保守的な値）
     // 摘要欄が2行になる場合は2行としてカウント
-    private const int MaxRowsPerPageLandscape = 12;   // 横向き: 12行まで
-    private const int MaxRowsPerPagePortrait = 22;    // 縦向き: 22行まで
+    private const int MaxRowsPerPageLandscape = 10;   // 横向き: 10行まで
+    private const int MaxRowsPerPagePortrait = 18;    // 縦向き: 18行まで
     private const int SummaryCharsPerLineLandscape = 22;  // 横向き時の摘要1行あたり文字数
     private const int SummaryCharsPerLinePortrait = 14;   // 縦向き時の摘要1行あたり文字数
 
