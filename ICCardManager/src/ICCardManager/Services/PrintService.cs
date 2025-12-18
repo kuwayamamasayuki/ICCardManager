@@ -326,36 +326,31 @@ public class PrintService
         return combinedDoc;
     }
 
-    // ページレイアウト定数（実測値に基づく保守的な値）
-    private const double PagePaddingSize = 50;           // ページ余白
-    private const double HeaderBlockHeight = 130;        // タイトル＋ヘッダーテーブルの高さ（マージン含む）
-    private const double TableHeaderHeight = 30;         // テーブル列ヘッダーの高さ
-    private const double BaseRowHeight = 24;             // 1行データの基本高さ
-    private const double TwoLineRowHeight = 44;          // 2行に折り返すデータの高さ
-    private const double SummaryRowHeight = 26;          // 合計行の高さ
-    private const double SafetyMargin = 20;              // 安全マージン（FlowDocument自動改ページ防止）
-    private const double SummaryColumnWidthRatio = 0.22; // 摘要列の幅比率（全体の約22%）
-    private const double CharsPerPoint = 7.0;            // 1文字あたりの幅（11ptフォント時の概算、保守的）
+    // ページレイアウト定数
+    private const double PagePaddingSize = 50;        // ページ余白
+
+    // 1ページあたりの最大行数（固定値、確実に収まる保守的な値）
+    // 摘要欄が2行になる場合は2行としてカウント
+    private const int MaxRowsPerPageLandscape = 12;   // 横向き: 12行まで
+    private const int MaxRowsPerPagePortrait = 22;    // 縦向き: 22行まで
+    private const int SummaryCharsPerLineLandscape = 22;  // 横向き時の摘要1行あたり文字数
+    private const int SummaryCharsPerLinePortrait = 14;   // 縦向き時の摘要1行あたり文字数
 
     /// <summary>
-    /// 行の高さを推定（摘要欄の文字数に基づく）
+    /// 行が何行分のスペースを使うか計算（摘要欄の文字数に基づく）
     /// </summary>
-    private double EstimateRowHeight(ReportPrintRow row, double pageWidth)
+    private int GetRowLineCount(ReportPrintRow row, bool isLandscape)
     {
         if (string.IsNullOrEmpty(row.Summary))
-            return BaseRowHeight;
+            return 1;
 
-        // 摘要列の利用可能幅を計算
-        var contentWidth = pageWidth - (PagePaddingSize * 2);
-        var summaryColumnWidth = contentWidth * SummaryColumnWidthRatio;
-        var charsPerLine = summaryColumnWidth / CharsPerPoint;
-
-        // 摘要が1行に収まるかどうか（保守的に判定）
-        return row.Summary.Length <= charsPerLine ? BaseRowHeight : TwoLineRowHeight;
+        var charsPerLine = isLandscape ? SummaryCharsPerLineLandscape : SummaryCharsPerLinePortrait;
+        // 摘要が1行に収まるかどうか
+        return row.Summary.Length <= charsPerLine ? 1 : 2;
     }
 
     /// <summary>
-    /// 行をページごとにグループ化（コンテンツの高さに基づく）
+    /// 行をページごとにグループ化（行数に基づく、摘要2行は2行としてカウント）
     /// </summary>
     private List<List<ReportPrintRow>> GroupRowsByPage(
         List<ReportPrintRow> rows,
@@ -364,42 +359,41 @@ public class PrintService
         int summaryRowCount,
         bool isFirstCard)
     {
+        var isLandscape = pageWidth > pageHeight;
+        var maxRowsPerPage = isLandscape ? MaxRowsPerPageLandscape : MaxRowsPerPagePortrait;
+
         var pages = new List<List<ReportPrintRow>>();
         var currentPage = new List<ReportPrintRow>();
-
-        // 利用可能なコンテンツ高さ（安全マージンを差し引く）
-        var contentHeight = pageHeight - (PagePaddingSize * 2);
-        var availableHeight = contentHeight - HeaderBlockHeight - TableHeaderHeight - SafetyMargin;
-
-        double currentHeight = 0;
+        var currentLineCount = 0;
 
         for (int i = 0; i < rows.Count; i++)
         {
             var row = rows[i];
-            var rowHeight = EstimateRowHeight(row, pageWidth);
+            var lineCount = GetRowLineCount(row, isLandscape);
 
-            // 最終ページの場合は合計行のスペースを確保
-            var remainingRows = rows.Count - i;
-            var remainingHeight = 0.0;
+            // 残りの行数を計算
+            var remainingLineCount = 0;
             for (int j = i + 1; j < rows.Count; j++)
             {
-                remainingHeight += EstimateRowHeight(rows[j], pageWidth);
+                remainingLineCount += GetRowLineCount(rows[j], isLandscape);
             }
-            var isLastPage = (remainingRows == 1) ||
-                (currentHeight + rowHeight + remainingHeight <= availableHeight);
 
-            var requiredSpaceForSummary = isLastPage ? summaryRowCount * SummaryRowHeight : 0;
+            // 最終ページの場合は合計行のスペースを確保
+            var isLastPage = (i == rows.Count - 1) ||
+                (currentLineCount + lineCount + remainingLineCount <= maxRowsPerPage - summaryRowCount);
+
+            var requiredLinesForSummary = isLastPage ? summaryRowCount : 0;
 
             // 現在の行を追加すると溢れる場合、新しいページを開始
-            if (currentHeight + rowHeight + requiredSpaceForSummary > availableHeight && currentPage.Count > 0)
+            if (currentLineCount + lineCount + requiredLinesForSummary > maxRowsPerPage && currentPage.Count > 0)
             {
                 pages.Add(currentPage);
                 currentPage = new List<ReportPrintRow>();
-                currentHeight = 0;
+                currentLineCount = 0;
             }
 
             currentPage.Add(row);
-            currentHeight += rowHeight;
+            currentLineCount += lineCount;
         }
 
         if (currentPage.Count > 0)
