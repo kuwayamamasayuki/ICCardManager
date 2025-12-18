@@ -38,6 +38,13 @@ public partial class PrintPreviewDialog : Window
     /// </summary>
     private DependencyPropertyDescriptor? _masterPageNumberDescriptor;
 
+    /// <summary>
+    /// 初期化時のMasterPageNumber（ベースライン）
+    /// FlowDocumentPageViewerのMasterPageNumberが0から始まらない場合があるため、
+    /// この値を基準にしてページ番号を計算する
+    /// </summary>
+    private int _baselineMasterPageNumber;
+
     public PrintPreviewDialog(PrintPreviewViewModel viewModel)
     {
         InitializeComponent();
@@ -94,14 +101,14 @@ public partial class PrintPreviewDialog : Window
     /// </summary>
     private void OnMasterPageNumberChanged(object? sender, EventArgs e)
     {
-        // 購読は初期化完了後に行われるため、ここでは_isInitializedチェック不要
         if (DocumentViewer.Document == null) return;
 
-        // MasterPageNumberは0ベース、表示は1ベース
-        int currentPage = DocumentViewer.MasterPageNumber + 1;
+        // ベースラインからの相対位置でページ番号を計算
+        // MasterPageNumberが1から始まる場合でも、表示は1から始まるようにする
+        int currentPage = DocumentViewer.MasterPageNumber - _baselineMasterPageNumber + 1;
         int totalPages = DocumentViewer.PageCount;
 
-        // ツールバーのページ表示を直接更新（Viewerの値を直接反映）
+        // ツールバーのページ表示を直接更新
         UpdatePageDisplay(currentPage, totalPages);
     }
 
@@ -177,6 +184,10 @@ public partial class PrintPreviewDialog : Window
             }
 
             var pageCount = DocumentViewer.PageCount;
+
+            // 現在のMasterPageNumberをベースラインとして保存
+            // これ以降のページ番号計算はこのベースラインを基準にする
+            _baselineMasterPageNumber = DocumentViewer.MasterPageNumber;
 
             // 初期表示は常に1ページ目として表示（MasterPageNumberに関係なく）
             if (pageCount > 0)
