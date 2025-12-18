@@ -162,9 +162,17 @@ public partial class PrintPreviewDialog : Window
         {
             ViewModel.RecalculatePageCount();
 
-            // 最初のページに移動してからページ表示を更新
+            // 最初のページに移動
             DocumentViewer.FirstPage();
-            UpdatePageCountFromViewer();
+
+            // 初期化時は明示的に1ページ目として表示（FirstPageの効果が非同期の場合に備えて）
+            var pageCount = DocumentViewer.PageCount;
+            if (pageCount > 0)
+            {
+                ViewModel.TotalPages = pageCount;
+                ViewModel.CurrentPage = 1;
+                UpdatePageDisplay(1, pageCount);
+            }
         }), System.Windows.Threading.DispatcherPriority.ContextIdle);
     }
 
