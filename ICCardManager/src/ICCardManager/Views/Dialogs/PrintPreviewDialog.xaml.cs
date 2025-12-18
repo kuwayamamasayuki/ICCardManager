@@ -47,12 +47,6 @@ public partial class PrintPreviewDialog : Window
         Loaded += OnLoaded;
         Unloaded += OnUnloaded;
         ViewModel.DocumentNeedsRefresh += OnDocumentNeedsRefresh;
-
-        // ナビゲーションイベントを購読（ViewModelからの要求でDocumentViewerを直接操作）
-        ViewModel.NavigateNextRequested += () => DocumentViewer.NextPage();
-        ViewModel.NavigatePreviousRequested += () => DocumentViewer.PreviousPage();
-        ViewModel.NavigateFirstRequested += () => DocumentViewer.FirstPage();
-        ViewModel.NavigateLastRequested += () => DocumentViewer.LastPage();
     }
 
     /// <summary>
@@ -227,6 +221,38 @@ public partial class PrintPreviewDialog : Window
     }
 
     /// <summary>
+    /// 最初のページへ移動
+    /// </summary>
+    private void FirstPageButton_Click(object sender, RoutedEventArgs e)
+    {
+        DocumentViewer.FirstPage();
+    }
+
+    /// <summary>
+    /// 前のページへ移動
+    /// </summary>
+    private void PreviousPageButton_Click(object sender, RoutedEventArgs e)
+    {
+        DocumentViewer.PreviousPage();
+    }
+
+    /// <summary>
+    /// 次のページへ移動
+    /// </summary>
+    private void NextPageButton_Click(object sender, RoutedEventArgs e)
+    {
+        DocumentViewer.NextPage();
+    }
+
+    /// <summary>
+    /// 最後のページへ移動
+    /// </summary>
+    private void LastPageButton_Click(object sender, RoutedEventArgs e)
+    {
+        DocumentViewer.LastPage();
+    }
+
+    /// <summary>
     /// キーボードイベントハンドラ（← →キーでページ移動）
     /// </summary>
     private void Window_PreviewKeyDown(object sender, KeyEventArgs e)
@@ -236,39 +262,27 @@ public partial class PrintPreviewDialog : Window
             case Key.Left:
             case Key.PageUp:
                 // 前のページへ
-                if (ViewModel.PreviousPageCommand.CanExecute(null))
-                {
-                    ViewModel.PreviousPageCommand.Execute(null);
-                    e.Handled = true;
-                }
+                DocumentViewer.PreviousPage();
+                e.Handled = true;
                 break;
 
             case Key.Right:
             case Key.PageDown:
                 // 次のページへ
-                if (ViewModel.NextPageCommand.CanExecute(null))
-                {
-                    ViewModel.NextPageCommand.Execute(null);
-                    e.Handled = true;
-                }
+                DocumentViewer.NextPage();
+                e.Handled = true;
                 break;
 
             case Key.Home:
                 // 最初のページへ
-                if (ViewModel.FirstPageCommand.CanExecute(null))
-                {
-                    ViewModel.FirstPageCommand.Execute(null);
-                    e.Handled = true;
-                }
+                DocumentViewer.FirstPage();
+                e.Handled = true;
                 break;
 
             case Key.End:
                 // 最後のページへ
-                if (ViewModel.LastPageCommand.CanExecute(null))
-                {
-                    ViewModel.LastPageCommand.Execute(null);
-                    e.Handled = true;
-                }
+                DocumentViewer.LastPage();
+                e.Handled = true;
                 break;
 
             case Key.OemPlus:
