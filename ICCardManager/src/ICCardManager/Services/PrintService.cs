@@ -326,33 +326,56 @@ public class PrintService
         return combinedDoc;
     }
 
-    // ページレイアウト定数（FlowDocument自動分割を防ぐため大きめの値）
-    private const double PagePaddingSize = 50;        // ページ余白
-    private const double HeaderBlockHeight = 130;     // タイトル + ヘッダーテーブル + マージン
-    private const double TableHeaderHeight = 30;      // テーブル列ヘッダーの高さ
-    private const double SingleLineRowHeight = 24;    // 1行データの高さ
-    private const double DoubleLineRowHeight = 46;    // 2行データの高さ
-    private const double SummaryRowHeight = 26;       // 合計行の高さ
-    private const double SafetyMargin = 40;           // 安全マージン（大きめ）
+    // ページレイアウト定数
+    private const double PagePaddingSize = 50;        // ページ余白（上下左右）
 
-    // 摘要欄の1行あたり文字数（フォントサイズ11pt、列幅から計算）
-    private const int SummaryCharsPerLineLandscape = 24;  // 横向き時
-    private const int SummaryCharsPerLinePortrait = 16;   // 縦向き時
+    // ヘッダー部分の高さ（実測値）
+    private const double TitleHeight = 38;            // タイトル「物品出納簿」(FontSize18 + Margin20)
+    private const double CardInfoTableHeight = 50;    // カード情報テーブル（2行 + Margin15）
+    private const double ColumnHeaderHeight = 20;     // データテーブルの列ヘッダー行
+
+    // データ行の高さ（実測値）
+    private const double DataRowHeight = 18;          // 1行データ
+    private const double DataRowHeightDouble = 32;    // 2行データ（摘要が折り返す場合）
+
+    // 合計行の高さ
+    private const double SummaryRowHeight = 18;       // 月計/累計/繰越行
+
+    // 摘要欄の1行あたり文字数
+    private const int SummaryCharsLandscape = 26;     // 横向き時
+    private const int SummaryCharsPortrait = 18;      // 縦向き時
 
     /// <summary>
-    /// 行の高さを推定（摘要欄の文字数に基づく）
+    /// ヘッダー部分の合計高さを取得
     /// </summary>
-    private double EstimateRowHeight(ReportPrintRow row, bool isLandscape)
+    private double GetHeaderTotalHeight()
     {
-        if (string.IsNullOrEmpty(row.Summary))
-            return SingleLineRowHeight;
-
-        var charsPerLine = isLandscape ? SummaryCharsPerLineLandscape : SummaryCharsPerLinePortrait;
-        return row.Summary.Length <= charsPerLine ? SingleLineRowHeight : DoubleLineRowHeight;
+        return TitleHeight + CardInfoTableHeight + ColumnHeaderHeight;
     }
 
     /// <summary>
-    /// 行をページごとにグループ化（コンテンツの高さに基づく動的計算）
+    /// データ行の高さを取得（摘要欄の文字数に基づく）
+    /// </summary>
+    private double GetDataRowHeight(ReportPrintRow row, bool isLandscape)
+    {
+        if (string.IsNullOrEmpty(row.Summary))
+            return DataRowHeight;
+
+        var maxChars = isLandscape ? SummaryCharsLandscape : SummaryCharsPortrait;
+        return row.Summary.Length <= maxChars ? DataRowHeight : DataRowHeightDouble;
+    }
+
+    /// <summary>
+    /// データ領域の利用可能な高さを計算
+    /// </summary>
+    private double GetAvailableDataHeight(double pageHeight)
+    {
+        // ページ高さ - 上下余白 - ヘッダー部分
+        return pageHeight - (PagePaddingSize * 2) - GetHeaderTotalHeight();
+    }
+
+    /// <summary>
+    /// 行をページごとにグループ化（高さを積み上げて改ページ位置を決定）
     /// </summary>
     private List<List<ReportPrintRow>> GroupRowsByPage(
         List<ReportPrintRow> rows,
@@ -362,43 +385,42 @@ public class PrintService
         bool isFirstCard)
     {
         var isLandscape = pageWidth > pageHeight;
-
-        // 利用可能なデータ領域の高さを計算
-        var contentHeight = pageHeight - (PagePaddingSize * 2);
-        var availableHeight = contentHeight - HeaderBlockHeight - TableHeaderHeight - SafetyMargin;
+        var availableHeight = GetAvailableDataHeight(pageHeight);
+        var summaryTotalHeight = summaryRowCount * SummaryRowHeight;
 
         var pages = new List<List<ReportPrintRow>>();
         var currentPage = new List<ReportPrintRow>();
-        double currentHeight = 0;
+        double accumulatedHeight = 0;
 
         for (int i = 0; i < rows.Count; i++)
         {
             var row = rows[i];
-            var rowHeight = EstimateRowHeight(row, isLandscape);
+            var rowHeight = GetDataRowHeight(row, isLandscape);
 
-            // 残りの行の高さを計算
-            double remainingHeight = 0;
+            // この行を追加した後の残り行の合計高さを計算
+            double remainingRowsHeight = 0;
             for (int j = i + 1; j < rows.Count; j++)
             {
-                remainingHeight += EstimateRowHeight(rows[j], isLandscape);
+                remainingRowsHeight += GetDataRowHeight(rows[j], isLandscape);
             }
 
-            // 最終ページかどうかを判定
-            var isLastPage = (i == rows.Count - 1) ||
-                (currentHeight + rowHeight + remainingHeight <= availableHeight - summaryRowCount * SummaryRowHeight);
+            // 残り全部を入れても収まるか？（最終ページ判定）
+            var canFitAll = accumulatedHeight + rowHeight + remainingRowsHeight + summaryTotalHeight <= availableHeight;
 
-            var requiredSpaceForSummary = isLastPage ? summaryRowCount * SummaryRowHeight : 0;
+            // 最終ページでない場合は合計行のスペースは不要
+            var spaceForSummary = canFitAll ? summaryTotalHeight : 0;
 
-            // 現在の行を追加すると溢れる場合、新しいページを開始
-            if (currentHeight + rowHeight + requiredSpaceForSummary > availableHeight && currentPage.Count > 0)
+            // この行を追加すると溢れるか？
+            if (accumulatedHeight + rowHeight + spaceForSummary > availableHeight && currentPage.Count > 0)
             {
+                // 現在のページを確定して新しいページを開始
                 pages.Add(currentPage);
                 currentPage = new List<ReportPrintRow>();
-                currentHeight = 0;
+                accumulatedHeight = 0;
             }
 
             currentPage.Add(row);
-            currentHeight += rowHeight;
+            accumulatedHeight += rowHeight;
         }
 
         if (currentPage.Count > 0)
