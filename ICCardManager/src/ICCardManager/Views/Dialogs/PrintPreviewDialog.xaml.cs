@@ -70,8 +70,63 @@ public partial class PrintPreviewDialog : Window
         // ViewModelのドキュメントをFlowDocumentPageViewerに直接設定
         RefreshDocument();
 
+        // FlowDocumentPageViewerの組み込みナビゲーションコマンドをフック
+        // これによりViewerのページ変更をViewModelに同期
+        CommandManager.AddExecutedHandler(DocumentViewer, OnNavigationCommandExecuted);
+
         // フォーカスを設定してキーボード操作を有効化
         Focus();
+    }
+
+    /// <summary>
+    /// ナビゲーションコマンド実行時のハンドラ
+    /// </summary>
+    private void OnNavigationCommandExecuted(object sender, ExecutedRoutedEventArgs e)
+    {
+        if (_isUpdatingPage || DocumentViewer.Document == null) return;
+
+        // ページナビゲーションコマンドが実行されたらViewModelを更新
+        int newPage = ViewModel.CurrentPage;
+
+        if (e.Command == NavigationCommands.NextPage)
+        {
+            newPage = Math.Min(ViewModel.CurrentPage + 1, DocumentViewer.PageCount);
+        }
+        else if (e.Command == NavigationCommands.PreviousPage)
+        {
+            newPage = Math.Max(ViewModel.CurrentPage - 1, 1);
+        }
+        else if (e.Command == NavigationCommands.FirstPage)
+        {
+            newPage = 1;
+        }
+        else if (e.Command == NavigationCommands.LastPage)
+        {
+            newPage = DocumentViewer.PageCount;
+        }
+        else if (e.Command == NavigationCommands.GoToPage && e.Parameter is int pageNumber)
+        {
+            newPage = Math.Max(1, Math.Min(pageNumber, DocumentViewer.PageCount));
+        }
+        else
+        {
+            // 他のコマンドは無視
+            return;
+        }
+
+        // ViewModelを更新（再帰防止フラグ付き）
+        if (newPage != ViewModel.CurrentPage)
+        {
+            try
+            {
+                _isUpdatingPage = true;
+                ViewModel.CurrentPage = newPage;
+            }
+            finally
+            {
+                _isUpdatingPage = false;
+            }
+        }
     }
 
     /// <summary>
@@ -83,6 +138,7 @@ public partial class PrintPreviewDialog : Window
         ViewModel.DocumentNeedsRefresh -= OnDocumentNeedsRefresh;
         ViewModel.PropertyChanged -= OnViewModelPropertyChanged;
         ViewModel.PageChangeRequested -= OnPageChangeRequested;
+        CommandManager.RemoveExecutedHandler(DocumentViewer, OnNavigationCommandExecuted);
     }
 
     /// <summary>
