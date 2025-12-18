@@ -18,11 +18,6 @@ public partial class PrintPreviewViewModel : ViewModelBase
     /// </summary>
     public event EventHandler? DocumentNeedsRefresh;
 
-    /// <summary>
-    /// ページ変更要求イベント（ページ番号は1-based）
-    /// </summary>
-    public event EventHandler<int>? PageChangeRequested;
-
     [ObservableProperty]
     private FlowDocument? _document;
 
@@ -239,7 +234,6 @@ public partial class PrintPreviewViewModel : ViewModelBase
         if (CurrentPage < TotalPages)
         {
             CurrentPage++;
-            PageChangeRequested?.Invoke(this, CurrentPage);
         }
     }
 
@@ -254,7 +248,6 @@ public partial class PrintPreviewViewModel : ViewModelBase
         if (CurrentPage > 1)
         {
             CurrentPage--;
-            PageChangeRequested?.Invoke(this, CurrentPage);
         }
     }
 
@@ -267,7 +260,6 @@ public partial class PrintPreviewViewModel : ViewModelBase
     private void FirstPage()
     {
         CurrentPage = 1;
-        PageChangeRequested?.Invoke(this, CurrentPage);
     }
 
     private bool CanGoFirstPage() => !IsFirstPage;
@@ -279,7 +271,6 @@ public partial class PrintPreviewViewModel : ViewModelBase
     private void LastPage()
     {
         CurrentPage = TotalPages;
-        PageChangeRequested?.Invoke(this, CurrentPage);
     }
 
     private bool CanGoLastPage() => !IsLastPage;

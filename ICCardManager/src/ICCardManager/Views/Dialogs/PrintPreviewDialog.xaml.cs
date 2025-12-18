@@ -53,7 +53,6 @@ public partial class PrintPreviewDialog : Window
         Unloaded += OnUnloaded;
         ViewModel.DocumentNeedsRefresh += OnDocumentNeedsRefresh;
         ViewModel.PropertyChanged += OnViewModelPropertyChanged;
-        ViewModel.PageChangeRequested += OnPageChangeRequested;
     }
 
     /// <summary>
@@ -119,7 +118,6 @@ public partial class PrintPreviewDialog : Window
         // イベント購読解除（メモリリーク防止）
         ViewModel.DocumentNeedsRefresh -= OnDocumentNeedsRefresh;
         ViewModel.PropertyChanged -= OnViewModelPropertyChanged;
-        ViewModel.PageChangeRequested -= OnPageChangeRequested;
         _masterPageNumberDescriptor?.RemoveValueChanged(DocumentViewer, OnMasterPageNumberChanged);
     }
 
@@ -130,8 +128,19 @@ public partial class PrintPreviewDialog : Window
     {
         if (e.PropertyName == nameof(PrintPreviewViewModel.CurrentPage))
         {
+            // 再帰防止: Viewer→ViewModel同期中はスキップ
+            if (_isUpdatingPage) return;
+
             // ViewModelのCurrentPageが変更されたらビューアーのページを切り替え
-            GoToPage(ViewModel.CurrentPage);
+            try
+            {
+                _isUpdatingPage = true;
+                GoToPage(ViewModel.CurrentPage);
+            }
+            finally
+            {
+                _isUpdatingPage = false;
+            }
         }
     }
 
@@ -141,24 +150,6 @@ public partial class PrintPreviewDialog : Window
     private void OnDocumentNeedsRefresh(object? sender, EventArgs e)
     {
         RefreshDocument();
-    }
-
-    /// <summary>
-    /// ViewModelからのページ変更要求
-    /// </summary>
-    private void OnPageChangeRequested(object? sender, int pageNumber)
-    {
-        if (_isUpdatingPage) return;
-
-        try
-        {
-            _isUpdatingPage = true;
-            GoToPage(pageNumber);
-        }
-        finally
-        {
-            _isUpdatingPage = false;
-        }
     }
 
     /// <summary>
