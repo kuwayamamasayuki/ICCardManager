@@ -326,15 +326,16 @@ public class PrintService
         return combinedDoc;
     }
 
-    // ページレイアウト定数
+    // ページレイアウト定数（実測値に基づく保守的な値）
     private const double PagePaddingSize = 50;           // ページ余白
-    private const double HeaderBlockHeight = 100;        // タイトル＋ヘッダーテーブルの高さ
-    private const double TableHeaderHeight = 25;         // テーブル列ヘッダーの高さ
-    private const double BaseRowHeight = 22;             // 1行データの基本高さ
-    private const double TwoLineRowHeight = 38;          // 2行に折り返すデータの高さ
-    private const double SummaryRowHeight = 24;          // 合計行の高さ
+    private const double HeaderBlockHeight = 130;        // タイトル＋ヘッダーテーブルの高さ（マージン含む）
+    private const double TableHeaderHeight = 30;         // テーブル列ヘッダーの高さ
+    private const double BaseRowHeight = 24;             // 1行データの基本高さ
+    private const double TwoLineRowHeight = 44;          // 2行に折り返すデータの高さ
+    private const double SummaryRowHeight = 26;          // 合計行の高さ
+    private const double SafetyMargin = 20;              // 安全マージン（FlowDocument自動改ページ防止）
     private const double SummaryColumnWidthRatio = 0.22; // 摘要列の幅比率（全体の約22%）
-    private const double CharsPerPoint = 6.5;            // 1文字あたりの幅（11ptフォント時の概算）
+    private const double CharsPerPoint = 7.0;            // 1文字あたりの幅（11ptフォント時の概算、保守的）
 
     /// <summary>
     /// 行の高さを推定（摘要欄の文字数に基づく）
@@ -349,7 +350,7 @@ public class PrintService
         var summaryColumnWidth = contentWidth * SummaryColumnWidthRatio;
         var charsPerLine = summaryColumnWidth / CharsPerPoint;
 
-        // 摘要が1行に収まるかどうか
+        // 摘要が1行に収まるかどうか（保守的に判定）
         return row.Summary.Length <= charsPerLine ? BaseRowHeight : TwoLineRowHeight;
     }
 
@@ -366,9 +367,9 @@ public class PrintService
         var pages = new List<List<ReportPrintRow>>();
         var currentPage = new List<ReportPrintRow>();
 
-        // 利用可能なコンテンツ高さ
+        // 利用可能なコンテンツ高さ（安全マージンを差し引く）
         var contentHeight = pageHeight - (PagePaddingSize * 2);
-        var availableHeight = contentHeight - HeaderBlockHeight - TableHeaderHeight;
+        var availableHeight = contentHeight - HeaderBlockHeight - TableHeaderHeight - SafetyMargin;
 
         double currentHeight = 0;
 
@@ -379,8 +380,13 @@ public class PrintService
 
             // 最終ページの場合は合計行のスペースを確保
             var remainingRows = rows.Count - i;
+            var remainingHeight = 0.0;
+            for (int j = i + 1; j < rows.Count; j++)
+            {
+                remainingHeight += EstimateRowHeight(rows[j], pageWidth);
+            }
             var isLastPage = (remainingRows == 1) ||
-                (currentHeight + rowHeight + (remainingRows - 1) * BaseRowHeight <= availableHeight);
+                (currentHeight + rowHeight + remainingHeight <= availableHeight);
 
             var requiredSpaceForSummary = isLastPage ? summaryRowCount * SummaryRowHeight : 0;
 
@@ -481,6 +487,15 @@ public class PrintService
         bool addPageBreakBefore,
         bool hideSummary)
     {
+        // Sectionでページコンテンツを囲む（FlowDocumentの自動分割を制御）
+        var section = new Section();
+
+        // 2ページ目以降はセクションの前でページ区切り
+        if (addPageBreakBefore)
+        {
+            section.BreakPageBefore = true;
+        }
+
         // タイトル
         var titlePara = new Paragraph(new Run("物品出納簿"))
         {
@@ -489,25 +504,20 @@ public class PrintService
             TextAlignment = TextAlignment.Center,
             Margin = new Thickness(0, 0, 0, 20)
         };
-
-        // 2ページ目以降はタイトルの前でページ区切り
-        if (addPageBreakBefore)
-        {
-            titlePara.BreakPageBefore = true;
-        }
-
-        doc.Blocks.Add(titlePara);
+        section.Blocks.Add(titlePara);
 
         // ヘッダ情報
         var headerTable = CreateHeaderTable(data);
-        doc.Blocks.Add(headerTable);
+        section.Blocks.Add(headerTable);
 
         // データテーブル（このページ分のみ）
         var pageData = data with { Rows = rows };
         var dataTable = hideSummary
             ? CreateDataTableWithoutSummary(pageData)
             : CreateDataTable(pageData);
-        doc.Blocks.Add(dataTable);
+        section.Blocks.Add(dataTable);
+
+        doc.Blocks.Add(section);
     }
 
     /// <summary>
