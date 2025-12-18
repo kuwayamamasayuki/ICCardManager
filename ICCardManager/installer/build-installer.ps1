@@ -51,7 +51,7 @@ Write-Host "  Inno Setup: $IsccPath" -ForegroundColor Green
 # Step 2: アプリケーションのビルド
 if (-not $SkipBuild) {
     Write-Host ""
-    Write-Host "[2/4] アプリケーションのビルド..." -ForegroundColor Yellow
+    Write-Host "[2/5] アプリケーションのビルド..." -ForegroundColor Yellow
 
     Push-Location $SrcDir
     try {
@@ -70,12 +70,37 @@ if (-not $SkipBuild) {
     }
 } else {
     Write-Host ""
-    Write-Host "[2/4] ビルドをスキップ（既存のpublishを使用）..." -ForegroundColor Yellow
+    Write-Host "[2/5] ビルドをスキップ（既存のpublishを使用）..." -ForegroundColor Yellow
 }
 
-# Step 3: 発行ファイルの確認
+# Step 3: リソースファイルのコピー
 Write-Host ""
-Write-Host "[3/4] 発行ファイルの確認..." -ForegroundColor Yellow
+Write-Host "[3/5] リソースファイルのコピー..." -ForegroundColor Yellow
+
+$SoundsSource = Join-Path $SrcDir "Resources\Sounds"
+$SoundsDest = Join-Path $PublishDir "Resources\Sounds"
+$TemplatesSource = Join-Path $SrcDir "Resources\Templates"
+$TemplatesDest = Join-Path $PublishDir "Resources\Templates"
+
+# Soundsフォルダのコピー
+if (Test-Path $SoundsSource) {
+    if (-not (Test-Path $SoundsDest)) { New-Item -ItemType Directory -Path $SoundsDest -Force | Out-Null }
+    Copy-Item -Path "$SoundsSource\*" -Destination $SoundsDest -Force -ErrorAction SilentlyContinue
+    $SoundCount = (Get-ChildItem $SoundsDest -Filter "*.wav" -ErrorAction SilentlyContinue).Count
+    Write-Host "  サウンドファイル: $SoundCount 個コピー" -ForegroundColor Green
+}
+
+# Templatesフォルダのコピー
+if (Test-Path $TemplatesSource) {
+    if (-not (Test-Path $TemplatesDest)) { New-Item -ItemType Directory -Path $TemplatesDest -Force | Out-Null }
+    Copy-Item -Path "$TemplatesSource\*" -Destination $TemplatesDest -Force -ErrorAction SilentlyContinue
+    $TemplateCount = (Get-ChildItem $TemplatesDest -Filter "*.xlsx" -ErrorAction SilentlyContinue).Count
+    Write-Host "  テンプレートファイル: $TemplateCount 個コピー" -ForegroundColor Green
+}
+
+# Step 4: 発行ファイルの確認
+Write-Host ""
+Write-Host "[4/5] 発行ファイルの確認..." -ForegroundColor Yellow
 
 $ExePath = Join-Path $PublishDir "ICCardManager.exe"
 if (-not (Test-Path $ExePath)) {
@@ -96,9 +121,9 @@ if (Test-Path $ResourcesDir) {
     Write-Host "  テンプレートファイル: $($TemplateFiles.Count) 個" -ForegroundColor Green
 }
 
-# Step 4: インストーラーの作成
+# Step 5: インストーラーの作成
 Write-Host ""
-Write-Host "[4/4] インストーラーの作成..." -ForegroundColor Yellow
+Write-Host "[5/5] インストーラーの作成..." -ForegroundColor Yellow
 
 # 出力ディレクトリの作成
 if (-not (Test-Path $OutputDir)) {

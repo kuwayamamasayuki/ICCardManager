@@ -42,7 +42,7 @@ if "%ISCC%"=="" (
 echo バージョン: %VERSION%
 echo.
 
-echo [1/3] アプリケーションのビルド...
+echo [1/4] アプリケーションのビルド...
 pushd "%SRC_DIR%"
 dotnet publish -c Release -r win-x64 --self-contained true -o "%PUBLISH_DIR%" -v q
 if errorlevel 1 (
@@ -55,7 +55,17 @@ popd
 echo   ビルド完了
 
 echo.
-echo [2/3] ファイルの確認...
+echo [2/4] リソースファイルのコピー...
+:: Soundsフォルダのコピー
+if not exist "%PUBLISH_DIR%\Resources\Sounds" mkdir "%PUBLISH_DIR%\Resources\Sounds"
+xcopy /Y /Q "%SRC_DIR%\Resources\Sounds\*" "%PUBLISH_DIR%\Resources\Sounds\" >nul 2>&1
+:: Templatesフォルダのコピー
+if not exist "%PUBLISH_DIR%\Resources\Templates" mkdir "%PUBLISH_DIR%\Resources\Templates"
+xcopy /Y /Q "%SRC_DIR%\Resources\Templates\*" "%PUBLISH_DIR%\Resources\Templates\" >nul 2>&1
+echo   リソースコピー完了
+
+echo.
+echo [3/4] ファイルの確認...
 if not exist "%PUBLISH_DIR%\ICCardManager.exe" (
     echo エラー: ICCardManager.exe が見つかりません。
     pause
@@ -64,7 +74,7 @@ if not exist "%PUBLISH_DIR%\ICCardManager.exe" (
 echo   実行ファイル: OK
 
 echo.
-echo [3/3] インストーラーの作成...
+echo [4/4] インストーラーの作成...
 if not exist "%OUTPUT_DIR%" mkdir "%OUTPUT_DIR%"
 "%ISCC%" /DMyAppVersion=%VERSION% "%SCRIPT_DIR%ICCardManager.iss"
 if errorlevel 1 (
