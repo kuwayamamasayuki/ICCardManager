@@ -93,13 +93,6 @@ public partial class PrintPreviewDialog : Window
 
         // ツールバーのページ表示を直接更新（Viewerの値を直接反映）
         UpdatePageDisplay(currentPage, totalPages);
-
-        // ViewModelも更新（CanExecuteの判定用）
-        ViewModel.CurrentPage = currentPage;
-        if (totalPages > 0)
-        {
-            ViewModel.TotalPages = totalPages;
-        }
     }
 
     /// <summary>
