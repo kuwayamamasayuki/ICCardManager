@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.Windows;
 using System.Windows.Controls.Primitives;
 using System.Windows.Documents;
@@ -132,14 +133,42 @@ public partial class PrintPreviewDialog : Window
             // 一度nullを設定してから再設定することで強制的に再描画
             DocumentViewer.Document = null;
             DocumentViewer.Document = ViewModel.Document;
+
+            // DocumentPaginatorのページ数計算完了イベントを購読
+            var paginator = ((IDocumentPaginatorSource)ViewModel.Document).DocumentPaginator;
+            paginator.ComputePageCountCompleted += OnComputePageCountCompleted;
+
+            // ページ数の非同期計算を開始
+            if (!paginator.IsPageCountValid)
+            {
+                paginator.ComputePageCountAsync();
+            }
         }
 
-        // ページ数を再計算（遅延実行でレンダリング完了後に実行）
+        // ページ数を再計算（レンダリング完了後に実行、ContextIdleで確実にUI更新後）
         Dispatcher.BeginInvoke(new Action(() =>
         {
             ViewModel.RecalculatePageCount();
             UpdatePageCountFromViewer();
-        }), System.Windows.Threading.DispatcherPriority.Loaded);
+        }), System.Windows.Threading.DispatcherPriority.ContextIdle);
+    }
+
+    /// <summary>
+    /// ページ数計算完了時のハンドラ
+    /// </summary>
+    private void OnComputePageCountCompleted(object? sender, AsyncCompletedEventArgs e)
+    {
+        if (sender is DocumentPaginator paginator)
+        {
+            // イベント購読解除（メモリリーク防止）
+            paginator.ComputePageCountCompleted -= OnComputePageCountCompleted;
+        }
+
+        // UIスレッドでページ数を更新
+        Dispatcher.BeginInvoke(new Action(() =>
+        {
+            UpdatePageCountFromViewer();
+        }), System.Windows.Threading.DispatcherPriority.Normal);
     }
 
     /// <summary>

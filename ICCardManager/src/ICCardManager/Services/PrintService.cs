@@ -205,6 +205,71 @@ public class PrintService
     }
 
     /// <summary>
+    /// 複数カードの帳票データを取得して結合したFlowDocumentを生成
+    /// </summary>
+    /// <param name="cardIdms">カードIDmのリスト</param>
+    /// <param name="year">年</param>
+    /// <param name="month">月</param>
+    /// <returns>結合されたFlowDocument（各カードはページ区切りで分離）</returns>
+    public async Task<FlowDocument?> CreateCombinedFlowDocumentAsync(
+        IEnumerable<string> cardIdms,
+        int year,
+        int month)
+    {
+        var cardIdmList = cardIdms.ToList();
+        if (cardIdmList.Count == 0)
+        {
+            return null;
+        }
+
+        // 最初のカードでドキュメントを作成
+        var firstData = await GetReportDataAsync(cardIdmList[0], year, month);
+        if (firstData == null)
+        {
+            return null;
+        }
+
+        var combinedDoc = CreateFlowDocument(firstData);
+
+        // 2枚目以降のカードを追加
+        for (int i = 1; i < cardIdmList.Count; i++)
+        {
+            var data = await GetReportDataAsync(cardIdmList[i], year, month);
+            if (data == null)
+            {
+                continue;
+            }
+
+            // ページ区切りを追加
+            var pageBreak = new Paragraph
+            {
+                BreakPageBefore = true
+            };
+            combinedDoc.Blocks.Add(pageBreak);
+
+            // タイトル
+            var titlePara = new Paragraph(new Run("物品出納簿"))
+            {
+                FontSize = 18,
+                FontWeight = FontWeights.Bold,
+                TextAlignment = TextAlignment.Center,
+                Margin = new Thickness(0, 0, 0, 20)
+            };
+            combinedDoc.Blocks.Add(titlePara);
+
+            // ヘッダ情報
+            var headerTable = CreateHeaderTable(data);
+            combinedDoc.Blocks.Add(headerTable);
+
+            // データテーブル
+            var dataTable = CreateDataTable(data);
+            combinedDoc.Blocks.Add(dataTable);
+        }
+
+        return combinedDoc;
+    }
+
+    /// <summary>
     /// FlowDocumentを生成
     /// </summary>
     public FlowDocument CreateFlowDocument(ReportPrintData data)
