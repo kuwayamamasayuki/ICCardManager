@@ -1,7 +1,6 @@
 using System.ComponentModel;
 using System.Windows;
 using System.Windows.Controls;
-using System.Windows.Controls.Primitives;
 using System.Windows.Documents;
 using System.Windows.Input;
 using ICCardManager.ViewModels;
@@ -32,10 +31,6 @@ public partial class PrintPreviewDialog : Window
     /// </summary>
     public PrintPreviewViewModel ViewModel { get; }
 
-    /// <summary>
-    /// MasterPageNumberプロパティの変更を監視するためのDescriptor
-    /// </summary>
-    private DependencyPropertyDescriptor? _masterPageNumberDescriptor;
 
     public PrintPreviewDialog(PrintPreviewViewModel viewModel)
     {
@@ -69,30 +64,8 @@ public partial class PrintPreviewDialog : Window
         // ViewModelのドキュメントをFlowDocumentPageViewerに直接設定
         RefreshDocument();
 
-        // FlowDocumentPageViewerのMasterPageNumberプロパティの変更を監視
-        // これによりViewerのページ変更をViewModelに同期
-        _masterPageNumberDescriptor = DependencyPropertyDescriptor.FromProperty(
-            FlowDocumentPageViewer.MasterPageNumberProperty,
-            typeof(FlowDocumentPageViewer));
-        _masterPageNumberDescriptor?.AddValueChanged(DocumentViewer, OnMasterPageNumberChanged);
-
         // フォーカスを設定してキーボード操作を有効化
         Focus();
-    }
-
-    /// <summary>
-    /// FlowDocumentPageViewerのMasterPageNumber変更時のハンドラ
-    /// </summary>
-    private void OnMasterPageNumberChanged(object? sender, EventArgs e)
-    {
-        if (DocumentViewer.Document == null) return;
-
-        // MasterPageNumberは0ベース、表示は1ベース
-        int currentPage = DocumentViewer.MasterPageNumber + 1;
-        int totalPages = DocumentViewer.PageCount;
-
-        // ツールバーのページ表示を直接更新（Viewerの値を直接反映）
-        UpdatePageDisplay(currentPage, totalPages);
     }
 
     /// <summary>
@@ -111,13 +84,29 @@ public partial class PrintPreviewDialog : Window
     }
 
     /// <summary>
+    /// ナビゲーション後にページ表示を更新
+    /// </summary>
+    private void UpdatePageDisplayAfterNavigation()
+    {
+        // Dispatcherで遅延実行してナビゲーション完了を待つ
+        Dispatcher.BeginInvoke(new Action(() =>
+        {
+            if (DocumentViewer.Document != null)
+            {
+                int currentPage = DocumentViewer.MasterPageNumber + 1;
+                int totalPages = DocumentViewer.PageCount;
+                UpdatePageDisplay(currentPage, totalPages);
+            }
+        }), System.Windows.Threading.DispatcherPriority.Input);
+    }
+
+    /// <summary>
     /// ウィンドウアンロード時
     /// </summary>
     private void OnUnloaded(object sender, RoutedEventArgs e)
     {
         // イベント購読解除（メモリリーク防止）
         ViewModel.DocumentNeedsRefresh -= OnDocumentNeedsRefresh;
-        _masterPageNumberDescriptor?.RemoveValueChanged(DocumentViewer, OnMasterPageNumberChanged);
     }
 
     /// <summary>
@@ -230,6 +219,7 @@ public partial class PrintPreviewDialog : Window
     private void FirstPageButton_Click(object sender, RoutedEventArgs e)
     {
         DocumentViewer.FirstPage();
+        UpdatePageDisplayAfterNavigation();
     }
 
     /// <summary>
@@ -238,6 +228,7 @@ public partial class PrintPreviewDialog : Window
     private void PreviousPageButton_Click(object sender, RoutedEventArgs e)
     {
         DocumentViewer.PreviousPage();
+        UpdatePageDisplayAfterNavigation();
     }
 
     /// <summary>
@@ -246,6 +237,7 @@ public partial class PrintPreviewDialog : Window
     private void NextPageButton_Click(object sender, RoutedEventArgs e)
     {
         DocumentViewer.NextPage();
+        UpdatePageDisplayAfterNavigation();
     }
 
     /// <summary>
@@ -254,6 +246,7 @@ public partial class PrintPreviewDialog : Window
     private void LastPageButton_Click(object sender, RoutedEventArgs e)
     {
         DocumentViewer.LastPage();
+        UpdatePageDisplayAfterNavigation();
     }
 
     /// <summary>
@@ -267,6 +260,7 @@ public partial class PrintPreviewDialog : Window
             case Key.PageUp:
                 // 前のページへ
                 DocumentViewer.PreviousPage();
+                UpdatePageDisplayAfterNavigation();
                 e.Handled = true;
                 break;
 
@@ -274,18 +268,21 @@ public partial class PrintPreviewDialog : Window
             case Key.PageDown:
                 // 次のページへ
                 DocumentViewer.NextPage();
+                UpdatePageDisplayAfterNavigation();
                 e.Handled = true;
                 break;
 
             case Key.Home:
                 // 最初のページへ
                 DocumentViewer.FirstPage();
+                UpdatePageDisplayAfterNavigation();
                 e.Handled = true;
                 break;
 
             case Key.End:
                 // 最後のページへ
                 DocumentViewer.LastPage();
+                UpdatePageDisplayAfterNavigation();
                 e.Handled = true;
                 break;
 
