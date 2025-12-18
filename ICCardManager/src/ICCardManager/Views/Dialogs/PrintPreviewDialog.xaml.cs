@@ -164,8 +164,11 @@ public partial class PrintPreviewDialog : Window
         {
             ViewModel.RecalculatePageCount();
 
+            // 最初のページに移動してMasterPageNumberを0にリセット
+            DocumentViewer.FirstPage();
+
             var pageCount = DocumentViewer.PageCount;
-            // MasterPageNumberの実際の値を読み取る（0ベース→1ベースに変換）
+            // FirstPage()後のMasterPageNumberを読み取る（0ベース→1ベースに変換）
             var currentPage = DocumentViewer.MasterPageNumber + 1;
 
             if (pageCount > 0)
@@ -202,6 +205,9 @@ public partial class PrintPreviewDialog : Window
     /// </summary>
     private void UpdatePageCountFromViewer()
     {
+        // 初期化完了前は何もしない（ContextIdleで正しく初期化されるため）
+        if (!_isInitialized) return;
+
         if (DocumentViewer.Document != null)
         {
             // FlowDocumentPageViewerのPageCountプロパティを使用
