@@ -161,10 +161,10 @@ public partial class PrintPreviewDialog : Window
         Dispatcher.BeginInvoke(new Action(() =>
         {
             ViewModel.RecalculatePageCount();
-            UpdatePageCountFromViewer();
 
-            // ドキュメント更新後は最初のページに移動（ViewModelと同期）
+            // 最初のページに移動してからページ表示を更新
             DocumentViewer.FirstPage();
+            UpdatePageCountFromViewer();
         }), System.Windows.Threading.DispatcherPriority.ContextIdle);
     }
 
