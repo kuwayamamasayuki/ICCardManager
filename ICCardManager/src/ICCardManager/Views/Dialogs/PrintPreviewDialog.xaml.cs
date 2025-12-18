@@ -52,7 +52,12 @@ public partial class PrintPreviewDialog : Window
         Loaded += OnLoaded;
         Unloaded += OnUnloaded;
         ViewModel.DocumentNeedsRefresh += OnDocumentNeedsRefresh;
-        ViewModel.PropertyChanged += OnViewModelPropertyChanged;
+
+        // ナビゲーションイベントを購読（ViewModelからの要求でDocumentViewerを直接操作）
+        ViewModel.NavigateNextRequested += () => DocumentViewer.NextPage();
+        ViewModel.NavigatePreviousRequested += () => DocumentViewer.PreviousPage();
+        ViewModel.NavigateFirstRequested += () => DocumentViewer.FirstPage();
+        ViewModel.NavigateLastRequested += () => DocumentViewer.LastPage();
     }
 
     /// <summary>
@@ -117,31 +122,7 @@ public partial class PrintPreviewDialog : Window
     {
         // イベント購読解除（メモリリーク防止）
         ViewModel.DocumentNeedsRefresh -= OnDocumentNeedsRefresh;
-        ViewModel.PropertyChanged -= OnViewModelPropertyChanged;
         _masterPageNumberDescriptor?.RemoveValueChanged(DocumentViewer, OnMasterPageNumberChanged);
-    }
-
-    /// <summary>
-    /// ViewModelのプロパティ変更ハンドラ
-    /// </summary>
-    private void OnViewModelPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
-    {
-        if (e.PropertyName == nameof(PrintPreviewViewModel.CurrentPage))
-        {
-            // 再帰防止: Viewer→ViewModel同期中はスキップ
-            if (_isUpdatingPage) return;
-
-            // ViewModelのCurrentPageが変更されたらビューアーのページを切り替え
-            _isUpdatingPage = true;
-            GoToPage(ViewModel.CurrentPage);
-
-            // Viewerのページ変更は非同期のため、フラグリセットを遅延させる
-            // ContextIdleでUI更新完了後にリセット
-            Dispatcher.BeginInvoke(new Action(() =>
-            {
-                _isUpdatingPage = false;
-            }), System.Windows.Threading.DispatcherPriority.ContextIdle);
-        }
     }
 
     /// <summary>
@@ -215,29 +196,6 @@ public partial class PrintPreviewDialog : Window
             if (pageCount > 0 && pageCount != ViewModel.TotalPages)
             {
                 ViewModel.TotalPages = pageCount;
-            }
-        }
-    }
-
-    /// <summary>
-    /// 指定したページに移動
-    /// </summary>
-    /// <param name="pageNumber">1から始まるページ番号</param>
-    private void GoToPage(int pageNumber)
-    {
-        if (DocumentViewer.Document == null || pageNumber < 1)
-        {
-            return;
-        }
-
-        // FlowDocumentPageViewerはGoToPageコマンドで直接ページ移動できる
-        // ページ番号は1ベース
-        if (pageNumber >= 1 && pageNumber <= DocumentViewer.PageCount)
-        {
-            // NavigationCommands.GoToPageを使用
-            if (NavigationCommands.GoToPage.CanExecute(pageNumber, DocumentViewer))
-            {
-                NavigationCommands.GoToPage.Execute(pageNumber, DocumentViewer);
             }
         }
     }

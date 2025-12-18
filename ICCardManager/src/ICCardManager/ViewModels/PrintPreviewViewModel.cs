@@ -18,6 +18,14 @@ public partial class PrintPreviewViewModel : ViewModelBase
     /// </summary>
     public event EventHandler? DocumentNeedsRefresh;
 
+    /// <summary>
+    /// ナビゲーション要求イベント
+    /// </summary>
+    public event Action? NavigateNextRequested;
+    public event Action? NavigatePreviousRequested;
+    public event Action? NavigateFirstRequested;
+    public event Action? NavigateLastRequested;
+
     [ObservableProperty]
     private FlowDocument? _document;
 
@@ -231,10 +239,9 @@ public partial class PrintPreviewViewModel : ViewModelBase
     [RelayCommand(CanExecute = nameof(CanGoNextPage))]
     private void NextPage()
     {
-        if (CurrentPage < TotalPages)
-        {
-            CurrentPage++;
-        }
+        // Viewに対してナビゲーション要求を発火
+        // CurrentPageはViewerのMasterPageNumber変更時に更新される
+        NavigateNextRequested?.Invoke();
     }
 
     private bool CanGoNextPage() => !IsLastPage;
@@ -245,10 +252,7 @@ public partial class PrintPreviewViewModel : ViewModelBase
     [RelayCommand(CanExecute = nameof(CanGoPreviousPage))]
     private void PreviousPage()
     {
-        if (CurrentPage > 1)
-        {
-            CurrentPage--;
-        }
+        NavigatePreviousRequested?.Invoke();
     }
 
     private bool CanGoPreviousPage() => !IsFirstPage;
@@ -259,7 +263,7 @@ public partial class PrintPreviewViewModel : ViewModelBase
     [RelayCommand(CanExecute = nameof(CanGoFirstPage))]
     private void FirstPage()
     {
-        CurrentPage = 1;
+        NavigateFirstRequested?.Invoke();
     }
 
     private bool CanGoFirstPage() => !IsFirstPage;
@@ -270,7 +274,7 @@ public partial class PrintPreviewViewModel : ViewModelBase
     [RelayCommand(CanExecute = nameof(CanGoLastPage))]
     private void LastPage()
     {
-        CurrentPage = TotalPages;
+        NavigateLastRequested?.Invoke();
     }
 
     private bool CanGoLastPage() => !IsLastPage;
