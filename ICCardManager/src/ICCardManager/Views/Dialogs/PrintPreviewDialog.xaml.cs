@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Windows;
+using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Documents;
 using System.Windows.Input;
@@ -36,6 +37,11 @@ public partial class PrintPreviewDialog : Window
     /// </summary>
     private bool _isUpdatingPage;
 
+    /// <summary>
+    /// MasterPageNumberプロパティの変更を監視するためのDescriptor
+    /// </summary>
+    private DependencyPropertyDescriptor? _masterPageNumberDescriptor;
+
     public PrintPreviewDialog(PrintPreviewViewModel viewModel)
     {
         InitializeComponent();
@@ -70,57 +76,33 @@ public partial class PrintPreviewDialog : Window
         // ViewModelのドキュメントをFlowDocumentPageViewerに直接設定
         RefreshDocument();
 
-        // FlowDocumentPageViewerの組み込みナビゲーションコマンドをフック
+        // FlowDocumentPageViewerのMasterPageNumberプロパティの変更を監視
         // これによりViewerのページ変更をViewModelに同期
-        CommandManager.AddExecutedHandler(DocumentViewer, OnNavigationCommandExecuted);
+        _masterPageNumberDescriptor = DependencyPropertyDescriptor.FromProperty(
+            FlowDocumentPageViewer.MasterPageNumberProperty,
+            typeof(FlowDocumentPageViewer));
+        _masterPageNumberDescriptor?.AddValueChanged(DocumentViewer, OnMasterPageNumberChanged);
 
         // フォーカスを設定してキーボード操作を有効化
         Focus();
     }
 
     /// <summary>
-    /// ナビゲーションコマンド実行時のハンドラ
+    /// FlowDocumentPageViewerのMasterPageNumber変更時のハンドラ
     /// </summary>
-    private void OnNavigationCommandExecuted(object sender, ExecutedRoutedEventArgs e)
+    private void OnMasterPageNumberChanged(object? sender, EventArgs e)
     {
         if (_isUpdatingPage || DocumentViewer.Document == null) return;
 
-        // ページナビゲーションコマンドが実行されたらViewModelを更新
-        int newPage = ViewModel.CurrentPage;
+        // MasterPageNumberは0ベース、CurrentPageは1ベース
+        int viewerPage = DocumentViewer.MasterPageNumber + 1;
 
-        if (e.Command == NavigationCommands.NextPage)
-        {
-            newPage = Math.Min(ViewModel.CurrentPage + 1, DocumentViewer.PageCount);
-        }
-        else if (e.Command == NavigationCommands.PreviousPage)
-        {
-            newPage = Math.Max(ViewModel.CurrentPage - 1, 1);
-        }
-        else if (e.Command == NavigationCommands.FirstPage)
-        {
-            newPage = 1;
-        }
-        else if (e.Command == NavigationCommands.LastPage)
-        {
-            newPage = DocumentViewer.PageCount;
-        }
-        else if (e.Command == NavigationCommands.GoToPage && e.Parameter is int pageNumber)
-        {
-            newPage = Math.Max(1, Math.Min(pageNumber, DocumentViewer.PageCount));
-        }
-        else
-        {
-            // 他のコマンドは無視
-            return;
-        }
-
-        // ViewModelを更新（再帰防止フラグ付き）
-        if (newPage != ViewModel.CurrentPage)
+        if (viewerPage != ViewModel.CurrentPage && viewerPage >= 1 && viewerPage <= DocumentViewer.PageCount)
         {
             try
             {
                 _isUpdatingPage = true;
-                ViewModel.CurrentPage = newPage;
+                ViewModel.CurrentPage = viewerPage;
             }
             finally
             {
@@ -138,7 +120,7 @@ public partial class PrintPreviewDialog : Window
         ViewModel.DocumentNeedsRefresh -= OnDocumentNeedsRefresh;
         ViewModel.PropertyChanged -= OnViewModelPropertyChanged;
         ViewModel.PageChangeRequested -= OnPageChangeRequested;
-        CommandManager.RemoveExecutedHandler(DocumentViewer, OnNavigationCommandExecuted);
+        _masterPageNumberDescriptor?.RemoveValueChanged(DocumentViewer, OnMasterPageNumberChanged);
     }
 
     /// <summary>
