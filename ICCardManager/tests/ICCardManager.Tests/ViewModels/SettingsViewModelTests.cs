@@ -331,4 +331,102 @@ public class SettingsViewModelTests
     }
 
     #endregion
+
+    #region SoundModeテスト
+
+    /// <summary>
+    /// SoundModeOptionsが4つの選択肢を持つこと
+    /// </summary>
+    [Fact]
+    public void SoundModeOptions_ShouldHaveFourOptions()
+    {
+        // Assert
+        _viewModel.SoundModeOptions.Should().HaveCount(4);
+    }
+
+    /// <summary>
+    /// SoundModeOptionsが正しい値を持つこと
+    /// </summary>
+    [Theory]
+    [InlineData(SoundMode.Beep, "効果音（ピッ/ピピッ）")]
+    [InlineData(SoundMode.VoiceMale, "音声（男性）")]
+    [InlineData(SoundMode.VoiceFemale, "音声（女性）")]
+    [InlineData(SoundMode.None, "無し")]
+    public void SoundModeOptions_ShouldHaveCorrectValues(SoundMode expected, string displayName)
+    {
+        // Act
+        var item = _viewModel.SoundModeOptions.FirstOrDefault(x => x.Value == expected);
+
+        // Assert
+        item.Should().NotBeNull();
+        item!.DisplayName.Should().Be(displayName);
+    }
+
+    /// <summary>
+    /// SelectedSoundModeItemを変更するとHasChangesがtrueになること
+    /// </summary>
+    [Fact]
+    public void OnSelectedSoundModeItemChanged_ShouldSetHasChangesToTrue()
+    {
+        // Arrange
+        _viewModel.HasChanges = false;
+
+        // Act
+        _viewModel.SelectedSoundModeItem = _viewModel.SoundModeOptions.Last();
+
+        // Assert
+        _viewModel.HasChanges.Should().BeTrue();
+    }
+
+    /// <summary>
+    /// 設定読み込み時にSoundModeが正しく設定されること
+    /// </summary>
+    [Fact]
+    public async Task LoadSettingsAsync_ShouldLoadSoundModeCorrectly()
+    {
+        // Arrange
+        var settings = new AppSettings
+        {
+            WarningBalance = 1000,
+            BackupPath = "",
+            FontSize = FontSizeOption.Medium,
+            SoundMode = SoundMode.VoiceFemale
+        };
+        _settingsRepositoryMock
+            .Setup(r => r.GetAppSettingsAsync())
+            .ReturnsAsync(settings);
+
+        // Act
+        await _viewModel.LoadSettingsAsync();
+
+        // Assert
+        _viewModel.SelectedSoundModeItem.Should().NotBeNull();
+        _viewModel.SelectedSoundModeItem!.Value.Should().Be(SoundMode.VoiceFemale);
+    }
+
+    /// <summary>
+    /// 設定保存時にSoundModeがリポジトリに正しく渡されること
+    /// </summary>
+    [Fact]
+    public async Task SaveAsync_ShouldSaveSoundModeCorrectly()
+    {
+        // Arrange
+        _viewModel.WarningBalance = 1000;
+        _viewModel.BackupPath = "";
+        _viewModel.SelectedSoundModeItem = _viewModel.SoundModeOptions.First(x => x.Value == SoundMode.VoiceMale);
+
+        _settingsRepositoryMock
+            .Setup(r => r.SaveAppSettingsAsync(It.IsAny<AppSettings>()))
+            .ReturnsAsync(false); // WPF依存のApplyFontSizeを回避するためfalseを返す
+
+        // Act
+        await _viewModel.SaveAsync();
+
+        // Assert - リポジトリが正しいSoundModeで呼ばれたことを検証
+        _settingsRepositoryMock.Verify(r => r.SaveAppSettingsAsync(It.Is<AppSettings>(s =>
+            s.SoundMode == SoundMode.VoiceMale
+        )), Times.Once);
+    }
+
+    #endregion
 }

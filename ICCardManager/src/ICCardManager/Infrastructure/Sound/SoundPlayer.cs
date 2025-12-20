@@ -20,23 +20,27 @@ public class SoundPlayer : ISoundPlayer
         AppDomain.CurrentDomain.BaseDirectory,
         "Resources", "Sounds");
 
+    /// <summary>
+    /// 音声を有効にするかどうか（マスタースイッチ）
+    /// </summary>
+    /// <remarks>
+    /// IsEnabled: 一時的に全音声を無効化するためのスイッチ（デバッグ用途など）
+    /// SoundMode.None: ユーザー設定として恒久的に無音を選択
+    /// 両方とも音声を無効化できるが、用途が異なる
+    /// </remarks>
     public bool IsEnabled { get; set; } = true;
 
     /// <summary>
-    /// 音声モード
+    /// 音声モード（ユーザー設定）
     /// </summary>
+    /// <remarks>
+    /// 全ての音声ファイルは初期化時にロード済みのため、
+    /// モード変更時の再読み込みは不要
+    /// </remarks>
     public SoundMode SoundMode
     {
         get => _soundMode;
-        set
-        {
-            if (_soundMode != value)
-            {
-                _soundMode = value;
-                // モード変更時にプレイヤーを再読み込み
-                ReloadPlayers();
-            }
-        }
+        set => _soundMode = value;
     }
 
     /// <summary>
@@ -116,22 +120,6 @@ public class SoundPlayer : ISoundPlayer
         {
             _players[fileName] = null;
         }
-    }
-
-    /// <summary>
-    /// プレイヤーを再読み込み
-    /// </summary>
-    private void ReloadPlayers()
-    {
-        // 既存のプレイヤーを破棄
-        foreach (var player in _players.Values)
-        {
-            player?.Dispose();
-        }
-        _players.Clear();
-
-        // 再読み込み
-        LoadPlayers();
     }
 
     /// <summary>
