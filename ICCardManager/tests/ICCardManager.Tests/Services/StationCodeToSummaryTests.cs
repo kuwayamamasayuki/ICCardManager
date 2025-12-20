@@ -29,6 +29,11 @@ public class StationCodeToSummaryTests
     private readonly SummaryGenerator _summaryGenerator;
     private readonly ITestOutputHelper _output;
 
+    /// <summary>
+    /// テスト入力データを一時保存するリスト
+    /// </summary>
+    private readonly List<TestInputRecord> _inputRecords = new();
+
     public StationCodeToSummaryTests(ITestOutputHelper output)
     {
         _output = output;
@@ -36,10 +41,39 @@ public class StationCodeToSummaryTests
         _summaryGenerator = new SummaryGenerator();
     }
 
+    #region テスト入力データ記録用
+
+    /// <summary>
+    /// テスト入力データを格納するレコード
+    /// </summary>
+    private record TestInputRecord(
+        DateTime UseDate,
+        string RecordType,           // "鉄道", "バス", "チャージ"
+        int? EntryStationCode,       // 乗車駅コード（鉄道のみ）
+        int? ExitStationCode,        // 降車駅コード（鉄道のみ）
+        string? EntryStationName,    // 乗車駅名（鉄道のみ）
+        string? ExitStationName,     // 降車駅名（鉄道のみ）
+        CardType? CardType,          // カード種別（鉄道のみ）
+        int Amount,
+        int Balance,
+        string? BusStops = null      // バス停（バスのみ）
+    );
+
+    #endregion
+
     #region ヘルパーメソッド
 
     /// <summary>
+    /// 入力記録をクリア（各テストの最初に呼び出す）
+    /// </summary>
+    private void ClearInputRecords()
+    {
+        _inputRecords.Clear();
+    }
+
+    /// <summary>
     /// 駅コードから駅名を取得して LedgerDetail を生成
+    /// 同時に入力データを記録する
     /// </summary>
     private LedgerDetail CreateRailwayUsageFromCodes(
         DateTime useDate,
@@ -52,7 +86,12 @@ public class StationCodeToSummaryTests
         var entryStation = _stationService.GetStationName(entryStationCode, cardType);
         var exitStation = _stationService.GetStationName(exitStationCode, cardType);
 
-        _output.WriteLine($"駅コード変換: 0x{entryStationCode:X4} -> {entryStation}, 0x{exitStationCode:X4} -> {exitStation}");
+        // 入力データを記録
+        _inputRecords.Add(new TestInputRecord(
+            useDate, "鉄道",
+            entryStationCode, exitStationCode,
+            entryStation, exitStation,
+            cardType, amount, balance));
 
         return new LedgerDetail
         {
@@ -67,29 +106,142 @@ public class StationCodeToSummaryTests
     }
 
     /// <summary>
-    /// テスト結果を出力
+    /// バス利用の入力データを記録
     /// </summary>
-    private void OutputResult(string testName, List<LedgerDetail> details, string result)
+    private void RecordBusInput(DateTime useDate, int amount, int balance, string? busStops)
     {
-        _output.WriteLine($"");
-        _output.WriteLine($"=== {testName} ===");
-        _output.WriteLine($"入力件数: {details.Count}");
-        foreach (var d in details)
+        _inputRecords.Add(new TestInputRecord(
+            useDate, "バス",
+            null, null, null, null, null,
+            amount, balance, busStops));
+    }
+
+    /// <summary>
+    /// チャージの入力データを記録
+    /// </summary>
+    private void RecordChargeInput(DateTime useDate, int amount, int balance)
+    {
+        _inputRecords.Add(new TestInputRecord(
+            useDate, "チャージ",
+            null, null, null, null, null,
+            amount, balance));
+    }
+
+    /// <summary>
+    /// カード種別を日本語で取得
+    /// </summary>
+    private static string GetCardTypeName(CardType? cardType) => cardType switch
+    {
+        Common.CardType.Hayakaken => "はやかけん",
+        Common.CardType.Suica => "Suica",
+        Common.CardType.PASMO => "PASMO",
+        Common.CardType.ICOCA => "ICOCA",
+        Common.CardType.SUGOCA => "SUGOCA",
+        Common.CardType.Nimoca => "nimoca",
+        Common.CardType.Kitaca => "Kitaca",
+        Common.CardType.TOICA => "TOICA",
+        Common.CardType.Manaca => "manaca",
+        Common.CardType.PiTaPa => "PiTaPa",
+        _ => "不明"
+    };
+
+    /// <summary>
+    /// テスト結果を詳細に出力
+    /// </summary>
+    private void OutputTestResult(string testName, string result)
+    {
+        _output.WriteLine("");
+        _output.WriteLine($"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+        _output.WriteLine($"テスト: {testName}");
+        _output.WriteLine($"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+        _output.WriteLine("");
+        _output.WriteLine("【ICカード履歴データ（入力）】");
+        _output.WriteLine($"  件数: {_inputRecords.Count}");
+        _output.WriteLine("");
+
+        for (int i = 0; i < _inputRecords.Count; i++)
         {
-            if (d.IsCharge)
+            var rec = _inputRecords[i];
+            _output.WriteLine($"  [{i + 1}] {rec.RecordType}");
+            _output.WriteLine($"      日時: {rec.UseDate:yyyy-MM-dd}");
+
+            if (rec.RecordType == "鉄道")
             {
-                _output.WriteLine($"  チャージ: {d.Amount}円");
+                _output.WriteLine($"      カード種別: {GetCardTypeName(rec.CardType)}");
+                _output.WriteLine($"      乗車駅: 0x{rec.EntryStationCode:X4} → {rec.EntryStationName}");
+                _output.WriteLine($"      降車駅: 0x{rec.ExitStationCode:X4} → {rec.ExitStationName}");
+                _output.WriteLine($"      金額: {rec.Amount}円");
+                _output.WriteLine($"      残高: {rec.Balance}円");
             }
-            else if (d.IsBus)
+            else if (rec.RecordType == "バス")
             {
-                _output.WriteLine($"  バス: {d.BusStops ?? "(未入力)"}");
+                _output.WriteLine($"      バス停: {rec.BusStops ?? "(未入力)"}");
+                _output.WriteLine($"      金額: {rec.Amount}円");
+                _output.WriteLine($"      残高: {rec.Balance}円");
             }
-            else
+            else if (rec.RecordType == "チャージ")
             {
-                _output.WriteLine($"  鉄道: {d.EntryStation} → {d.ExitStation}");
+                _output.WriteLine($"      金額: {rec.Amount}円");
+                _output.WriteLine($"      残高: {rec.Balance}円");
             }
+            _output.WriteLine("");
         }
-        _output.WriteLine($"生成された摘要: \"{result}\"");
+
+        _output.WriteLine("【生成された摘要（出力）】");
+        _output.WriteLine($"  {result}");
+        _output.WriteLine("");
+    }
+
+    /// <summary>
+    /// GenerateByDate用のテスト結果を詳細に出力
+    /// </summary>
+    private void OutputTestResultByDate(string testName, List<DailySummary> results)
+    {
+        _output.WriteLine("");
+        _output.WriteLine($"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+        _output.WriteLine($"テスト: {testName}");
+        _output.WriteLine($"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+        _output.WriteLine("");
+        _output.WriteLine("【ICカード履歴データ（入力）】");
+        _output.WriteLine($"  件数: {_inputRecords.Count}");
+        _output.WriteLine("");
+
+        for (int i = 0; i < _inputRecords.Count; i++)
+        {
+            var rec = _inputRecords[i];
+            _output.WriteLine($"  [{i + 1}] {rec.RecordType}");
+            _output.WriteLine($"      日時: {rec.UseDate:yyyy-MM-dd}");
+
+            if (rec.RecordType == "鉄道")
+            {
+                _output.WriteLine($"      カード種別: {GetCardTypeName(rec.CardType)}");
+                _output.WriteLine($"      乗車駅: 0x{rec.EntryStationCode:X4} → {rec.EntryStationName}");
+                _output.WriteLine($"      降車駅: 0x{rec.ExitStationCode:X4} → {rec.ExitStationName}");
+                _output.WriteLine($"      金額: {rec.Amount}円");
+                _output.WriteLine($"      残高: {rec.Balance}円");
+            }
+            else if (rec.RecordType == "バス")
+            {
+                _output.WriteLine($"      バス停: {rec.BusStops ?? "(未入力)"}");
+                _output.WriteLine($"      金額: {rec.Amount}円");
+                _output.WriteLine($"      残高: {rec.Balance}円");
+            }
+            else if (rec.RecordType == "チャージ")
+            {
+                _output.WriteLine($"      金額: {rec.Amount}円");
+                _output.WriteLine($"      残高: {rec.Balance}円");
+            }
+            _output.WriteLine("");
+        }
+
+        _output.WriteLine("【生成された摘要（出力）】");
+        _output.WriteLine($"  件数: {results.Count}");
+        foreach (var r in results)
+        {
+            var typeLabel = r.IsCharge ? "[チャージ]" : "[利用]";
+            _output.WriteLine($"  {r.Date:yyyy-MM-dd} {typeLabel}: {r.Summary}");
+        }
+        _output.WriteLine("");
     }
 
     #endregion
@@ -104,6 +256,7 @@ public class StationCodeToSummaryTests
     public void AirportLine_SingleTrip_Tenjin_To_Hakata()
     {
         // Arrange
+        ClearInputRecords();
         var details = new List<LedgerDetail>
         {
             CreateRailwayUsageFromCodes(
@@ -120,7 +273,7 @@ public class StationCodeToSummaryTests
 
         // Assert
         result.Should().Be("鉄道（天神～博多）");
-        OutputResult("空港線 単純片道", details, result);
+        OutputTestResult("空港線 単純片道", result);
     }
 
     /// <summary>
@@ -130,6 +283,7 @@ public class StationCodeToSummaryTests
     public void AirportLine_RoundTrip_Tenjin_Hakata()
     {
         // Arrange
+        ClearInputRecords();
         var details = new List<LedgerDetail>
         {
             CreateRailwayUsageFromCodes(
@@ -153,7 +307,7 @@ public class StationCodeToSummaryTests
 
         // Assert
         result.Should().Be("鉄道（博多～天神 往復）");
-        OutputResult("空港線 往復", details, result);
+        OutputTestResult("空港線 往復", result);
     }
 
     /// <summary>
@@ -164,6 +318,7 @@ public class StationCodeToSummaryTests
     public void HakozakiLine_SingleTrip_Nakasu_To_Kaizuka()
     {
         // Arrange
+        ClearInputRecords();
         var details = new List<LedgerDetail>
         {
             CreateRailwayUsageFromCodes(
@@ -180,7 +335,7 @@ public class StationCodeToSummaryTests
 
         // Assert
         result.Should().Be("鉄道（中洲川端～貝塚）");
-        OutputResult("箱崎線 単純片道", details, result);
+        OutputTestResult("箱崎線 単純片道", result);
     }
 
     /// <summary>
@@ -191,6 +346,7 @@ public class StationCodeToSummaryTests
     public void NanakumaLine_SingleTrip_TenjinMinami_To_Ropponmatsu()
     {
         // Arrange
+        ClearInputRecords();
         var details = new List<LedgerDetail>
         {
             CreateRailwayUsageFromCodes(
@@ -207,7 +363,7 @@ public class StationCodeToSummaryTests
 
         // Assert
         result.Should().Be("鉄道（天神南～六本松）");
-        OutputResult("七隈線 単純片道", details, result);
+        OutputTestResult("七隈線 単純片道", result);
     }
 
     #endregion
@@ -222,6 +378,7 @@ public class StationCodeToSummaryTests
     public void Transfer_AirportLine_To_HakozakiLine()
     {
         // Arrange
+        ClearInputRecords();
         var details = new List<LedgerDetail>
         {
             // 2区間目: 中洲川端→貝塚（新しい方）
@@ -247,7 +404,7 @@ public class StationCodeToSummaryTests
 
         // Assert - 乗継として統合される（天神～貝塚）
         result.Should().Be("鉄道（中洲川端～貝塚、天神～中洲川端）");
-        OutputResult("空港線→箱崎線 乗継", details, result);
+        OutputTestResult("空港線→箱崎線 乗継", result);
     }
 
     #endregion
@@ -262,6 +419,7 @@ public class StationCodeToSummaryTests
     public void KagoshimaLine_SingleTrip_Hakata_To_Yoshizuka()
     {
         // Arrange
+        ClearInputRecords();
         var details = new List<LedgerDetail>
         {
             CreateRailwayUsageFromCodes(
@@ -278,7 +436,7 @@ public class StationCodeToSummaryTests
 
         // Assert
         result.Should().Be("鉄道（博多～吉塚）");
-        OutputResult("JR鹿児島本線 単純片道", details, result);
+        OutputTestResult("JR鹿児島本線 単純片道", result);
     }
 
     /// <summary>
@@ -288,6 +446,7 @@ public class StationCodeToSummaryTests
     public void KagoshimaLine_RoundTrip_Hakata_Futsukaichi()
     {
         // Arrange
+        ClearInputRecords();
         var details = new List<LedgerDetail>
         {
             CreateRailwayUsageFromCodes(
@@ -311,7 +470,7 @@ public class StationCodeToSummaryTests
 
         // Assert
         result.Should().Be("鉄道（二日市～博多 往復）");
-        OutputResult("JR鹿児島本線 往復", details, result);
+        OutputTestResult("JR鹿児島本線 往復", result);
     }
 
     #endregion
@@ -326,6 +485,7 @@ public class StationCodeToSummaryTests
     public void YamanoteLine_SingleTrip_Shinagawa_To_Shibuya()
     {
         // Arrange
+        ClearInputRecords();
         var details = new List<LedgerDetail>
         {
             CreateRailwayUsageFromCodes(
@@ -342,7 +502,7 @@ public class StationCodeToSummaryTests
 
         // Assert
         result.Should().Be("鉄道（品川～渋谷）");
-        OutputResult("JR山手線 単純片道", details, result);
+        OutputTestResult("JR山手線 単純片道", result);
     }
 
     /// <summary>
@@ -352,6 +512,7 @@ public class StationCodeToSummaryTests
     public void YamanoteLine_RoundTrip_Shinjuku_Ikebukuro()
     {
         // Arrange
+        ClearInputRecords();
         var details = new List<LedgerDetail>
         {
             CreateRailwayUsageFromCodes(
@@ -375,7 +536,7 @@ public class StationCodeToSummaryTests
 
         // Assert
         result.Should().Be("鉄道（池袋～新宿 往復）");
-        OutputResult("JR山手線 往復", details, result);
+        OutputTestResult("JR山手線 往復", result);
     }
 
     /// <summary>
@@ -385,6 +546,7 @@ public class StationCodeToSummaryTests
     public void TokaidoLine_SingleTrip_Tokyo_To_Yokohama()
     {
         // Arrange
+        ClearInputRecords();
         var details = new List<LedgerDetail>
         {
             CreateRailwayUsageFromCodes(
@@ -401,7 +563,7 @@ public class StationCodeToSummaryTests
 
         // Assert
         result.Should().Be("鉄道（東京～横浜）");
-        OutputResult("JR東海道本線 単純片道", details, result);
+        OutputTestResult("JR東海道本線 単純片道", result);
     }
 
     #endregion
@@ -415,6 +577,7 @@ public class StationCodeToSummaryTests
     public void BusinessTrip_Hayakaken_In_Tokyo()
     {
         // Arrange - はやかけんで山手線を利用
+        ClearInputRecords();
         var details = new List<LedgerDetail>
         {
             CreateRailwayUsageFromCodes(
@@ -431,7 +594,7 @@ public class StationCodeToSummaryTests
 
         // Assert - 関東の駅名が正しく解決される
         result.Should().Be("鉄道（渋谷～新宿）");
-        OutputResult("はやかけんで東京出張", details, result);
+        OutputTestResult("はやかけんで東京出張", result);
     }
 
     /// <summary>
@@ -458,8 +621,19 @@ public class StationCodeToSummaryTests
         var suicaEntry = _stationService.GetStationName(entryCode, CardType.Suica);
         var suicaExit = _stationService.GetStationName(exitCode, CardType.Suica);
 
-        _output.WriteLine($"はやかけん: 0x{entryCode:X4} -> {hayakakenEntry}, 0x{exitCode:X4} -> {hayakakenExit}");
-        _output.WriteLine($"Suica: 0x{entryCode:X4} -> {suicaEntry}, 0x{exitCode:X4} -> {suicaExit}");
+        _output.WriteLine("");
+        _output.WriteLine("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+        _output.WriteLine("テスト: 駅コード重複時のカード種別優先順位");
+        _output.WriteLine("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+        _output.WriteLine("");
+        _output.WriteLine("【入力駅コード】");
+        _output.WriteLine($"  乗車駅コード: 0x{entryCode:X4}");
+        _output.WriteLine($"  降車駅コード: 0x{exitCode:X4}");
+        _output.WriteLine("");
+        _output.WriteLine("【カード種別による駅名解決結果】");
+        _output.WriteLine($"  はやかけん（九州優先）: 0x{entryCode:X4} → {hayakakenEntry}, 0x{exitCode:X4} → {hayakakenExit}");
+        _output.WriteLine($"  Suica（関東→関西→中部→九州）: 0x{entryCode:X4} → {suicaEntry}, 0x{exitCode:X4} → {suicaExit}");
+        _output.WriteLine("");
 
         // Assert - カード種別により異なる駅名が返される
         hayakakenEntry.Should().Be("天神");
@@ -479,6 +653,7 @@ public class StationCodeToSummaryTests
     public void GenerateByDate_TwoDays_Commute()
     {
         // Arrange
+        ClearInputRecords();
         var details = new List<LedgerDetail>
         {
             // 12/9: 往復（新しい順）
@@ -516,11 +691,7 @@ public class StationCodeToSummaryTests
         results[1].Date.Should().Be(new DateTime(2024, 12, 9));
         results[1].Summary.Should().Be("鉄道（天神～博多 往復）");
 
-        _output.WriteLine("=== 2日間の通勤記録 ===");
-        foreach (var r in results)
-        {
-            _output.WriteLine($"  {r.Date:yyyy-MM-dd}: {r.Summary}");
-        }
+        OutputTestResultByDate("2日間の通勤記録", results);
     }
 
     /// <summary>
@@ -530,9 +701,11 @@ public class StationCodeToSummaryTests
     public void GenerateByDate_Railway_And_Bus()
     {
         // Arrange
+        ClearInputRecords();
+        // バス（新しい方）
+        RecordBusInput(new DateTime(2024, 12, 9), 230, 4560, "天神～博多駅");
         var details = new List<LedgerDetail>
         {
-            // バス（新しい方）
             new LedgerDetail
             {
                 UseDate = new DateTime(2024, 12, 9),
@@ -559,8 +732,7 @@ public class StationCodeToSummaryTests
         results.Should().HaveCount(1);
         results[0].Summary.Should().Be("鉄道（天神～博多）、バス（天神～博多駅）");
 
-        _output.WriteLine("=== 鉄道とバスの複合利用 ===");
-        _output.WriteLine($"  {results[0].Date:yyyy-MM-dd}: {results[0].Summary}");
+        OutputTestResultByDate("鉄道とバスの複合利用", results);
     }
 
     /// <summary>
@@ -570,6 +742,7 @@ public class StationCodeToSummaryTests
     public void GenerateByDate_Usage_And_Charge()
     {
         // Arrange
+        ClearInputRecords();
         var details = new List<LedgerDetail>
         {
             // 利用（新しい方）
@@ -590,6 +763,8 @@ public class StationCodeToSummaryTests
                 IsBus = false
             }
         };
+        // チャージを記録
+        RecordChargeInput(new DateTime(2024, 12, 9), 3000, 5000);
 
         // Act
         var results = _summaryGenerator.GenerateByDate(details);
@@ -603,11 +778,7 @@ public class StationCodeToSummaryTests
         results[1].IsCharge.Should().BeFalse();
         results[1].Summary.Should().Be("鉄道（天神～博多）");
 
-        _output.WriteLine("=== 利用とチャージの混在 ===");
-        foreach (var r in results)
-        {
-            _output.WriteLine($"  {r.Date:yyyy-MM-dd}: IsCharge={r.IsCharge}, {r.Summary}");
-        }
+        OutputTestResultByDate("利用とチャージの混在", results);
     }
 
     #endregion
@@ -621,6 +792,7 @@ public class StationCodeToSummaryTests
     public void UnknownStationCode_FallbackFormat()
     {
         // Arrange
+        ClearInputRecords();
         // 0xFFFE, 0xFFFF は確実に未登録のコード
         var details = new List<LedgerDetail>
         {
@@ -638,7 +810,7 @@ public class StationCodeToSummaryTests
 
         // Assert - フォールバック形式「駅XX-YY」が使われる
         result.Should().Be("鉄道（駅FF-FE～駅FF-FF）");
-        OutputResult("未登録駅コード", details, result);
+        OutputTestResult("未登録駅コード", result);
     }
 
     #endregion
@@ -652,6 +824,7 @@ public class StationCodeToSummaryTests
     public void SameStation_Entry_And_Exit()
     {
         // Arrange
+        ClearInputRecords();
         var details = new List<LedgerDetail>
         {
             CreateRailwayUsageFromCodes(
@@ -668,7 +841,7 @@ public class StationCodeToSummaryTests
 
         // Assert
         result.Should().Be("鉄道（天神～天神）");
-        OutputResult("同一駅乗降", details, result);
+        OutputTestResult("同一駅乗降", result);
     }
 
     /// <summary>
@@ -678,6 +851,7 @@ public class StationCodeToSummaryTests
     public void ThreeSegments_DoubleTransfer()
     {
         // Arrange: 天神→中洲川端→箱崎宮前→貝塚
+        ClearInputRecords();
         var details = new List<LedgerDetail>
         {
             // 3区間目（最新）
@@ -708,7 +882,7 @@ public class StationCodeToSummaryTests
         // 駅名が同じでも乗継として認識される
         result.Should().Contain("天神");
         result.Should().Contain("貝塚");
-        OutputResult("3区間連続利用", details, result);
+        OutputTestResult("3区間連続利用", result);
     }
 
     #endregion
