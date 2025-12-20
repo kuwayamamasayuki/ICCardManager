@@ -1,3 +1,5 @@
+using ICCardManager.Models;
+
 namespace ICCardManager.Infrastructure.Sound;
 
 /// <summary>
@@ -47,4 +49,9 @@ public interface ISoundPlayer : IDisposable
     /// 音声を有効にするかどうか
     /// </summary>
     bool IsEnabled { get; set; }
+
+    /// <summary>
+    /// 音声モード
+    /// </summary>
+    SoundMode SoundMode { get; set; }
 }

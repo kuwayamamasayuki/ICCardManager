@@ -29,6 +29,9 @@ public class SettingsRepository : ISettingsRepository
     public const string KeySkipStaffTouch = "skip_staff_touch";
     public const string KeyDefaultStaffIdm = "default_staff_idm";
 
+    // 音声モード設定キー
+    public const string KeySoundMode = "sound_mode";
+
     public SettingsRepository(DbContext dbContext, ICacheService cacheService)
     {
         _dbContext = dbContext;
@@ -114,6 +117,10 @@ public class SettingsRepository : ISettingsRepository
         var defaultStaffIdm = await GetAsync(KeyDefaultStaffIdm);
         settings.DefaultStaffIdm = string.IsNullOrEmpty(defaultStaffIdm) ? null : defaultStaffIdm;
 
+        // 音声モード設定
+        var soundMode = await GetAsync(KeySoundMode);
+        settings.SoundMode = ParseSoundMode(soundMode);
+
         return settings;
     }
 
@@ -174,6 +181,9 @@ public class SettingsRepository : ISettingsRepository
         // 職員証スキップ設定を保存
         success &= await SetAsync(KeySkipStaffTouch, settings.SkipStaffTouch.ToString().ToLowerInvariant());
         success &= await SetAsync(KeyDefaultStaffIdm, settings.DefaultStaffIdm);
+
+        // 音声モード設定を保存
+        success &= await SetAsync(KeySoundMode, SoundModeToString(settings.SoundMode));
 
         // 設定保存後にキャッシュを無効化
         _cacheService.Invalidate(CacheKeys.AppSettings);
@@ -253,6 +263,36 @@ public class SettingsRepository : ISettingsRepository
             FontSizeOption.Large => "large",
             FontSizeOption.ExtraLarge => "xlarge",
             _ => "medium"
+        };
+    }
+
+    /// <summary>
+    /// 文字列からSoundModeに変換
+    /// </summary>
+    private static SoundMode ParseSoundMode(string? value)
+    {
+        return value?.ToLowerInvariant() switch
+        {
+            "beep" => SoundMode.Beep,
+            "voice_male" => SoundMode.VoiceMale,
+            "voice_female" => SoundMode.VoiceFemale,
+            "none" => SoundMode.None,
+            _ => SoundMode.Beep
+        };
+    }
+
+    /// <summary>
+    /// SoundModeを文字列に変換
+    /// </summary>
+    private static string SoundModeToString(SoundMode soundMode)
+    {
+        return soundMode switch
+        {
+            SoundMode.Beep => "beep",
+            SoundMode.VoiceMale => "voice_male",
+            SoundMode.VoiceFemale => "voice_female",
+            SoundMode.None => "none",
+            _ => "beep"
         };
     }
 }

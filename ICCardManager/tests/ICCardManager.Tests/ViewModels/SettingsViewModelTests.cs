@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using FluentAssertions;
 using ICCardManager.Data.Repositories;
+using ICCardManager.Infrastructure.Sound;
 using ICCardManager.Models;
 using ICCardManager.Services;
 using ICCardManager.ViewModels;
@@ -17,6 +18,7 @@ public class SettingsViewModelTests
     private readonly Mock<ISettingsRepository> _settingsRepositoryMock;
     private readonly Mock<IStaffRepository> _staffRepositoryMock;
     private readonly Mock<IValidationService> _validationServiceMock;
+    private readonly Mock<ISoundPlayer> _soundPlayerMock;
     private readonly SettingsViewModel _viewModel;
 
     public SettingsViewModelTests()
@@ -24,6 +26,7 @@ public class SettingsViewModelTests
         _settingsRepositoryMock = new Mock<ISettingsRepository>();
         _staffRepositoryMock = new Mock<IStaffRepository>();
         _validationServiceMock = new Mock<IValidationService>();
+        _soundPlayerMock = new Mock<ISoundPlayer>();
 
         // バリデーションはデフォルトで成功を返す
         _validationServiceMock.Setup(v => v.ValidateWarningBalance(It.IsAny<int>())).Returns(ValidationResult.Success());
@@ -34,7 +37,8 @@ public class SettingsViewModelTests
         _viewModel = new SettingsViewModel(
             _settingsRepositoryMock.Object,
             _staffRepositoryMock.Object,
-            _validationServiceMock.Object);
+            _validationServiceMock.Object,
+            _soundPlayerMock.Object);
     }
 
     #region 設定読み込みテスト

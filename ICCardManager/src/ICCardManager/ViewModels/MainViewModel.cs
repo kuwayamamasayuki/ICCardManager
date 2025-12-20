@@ -271,6 +271,9 @@ public partial class MainViewModel : ViewModelBase
         _skipStaffTouchEnabled = settings.SkipStaffTouch;
         _defaultStaffIdm = settings.DefaultStaffIdm;
 
+        // 音声モードを適用
+        _soundPlayer.SoundMode = settings.SoundMode;
+
         if (_skipStaffTouchEnabled && !string.IsNullOrEmpty(_defaultStaffIdm))
         {
             // デフォルト職員名を取得
