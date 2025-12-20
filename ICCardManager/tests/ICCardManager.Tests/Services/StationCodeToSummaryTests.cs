@@ -132,16 +132,16 @@ public class StationCodeToSummaryTests
     /// </summary>
     private static string GetCardTypeName(CardType? cardType) => cardType switch
     {
-        Common.CardType.Hayakaken => "はやかけん",
-        Common.CardType.Suica => "Suica",
-        Common.CardType.PASMO => "PASMO",
-        Common.CardType.ICOCA => "ICOCA",
-        Common.CardType.SUGOCA => "SUGOCA",
-        Common.CardType.Nimoca => "nimoca",
-        Common.CardType.Kitaca => "Kitaca",
-        Common.CardType.TOICA => "TOICA",
-        Common.CardType.Manaca => "manaca",
-        Common.CardType.PiTaPa => "PiTaPa",
+        CardType.Hayakaken => "はやかけん",
+        CardType.Suica => "Suica",
+        CardType.PASMO => "PASMO",
+        CardType.ICOCA => "ICOCA",
+        CardType.SUGOCA => "SUGOCA",
+        CardType.Nimoca => "nimoca",
+        CardType.Kitaca => "Kitaca",
+        CardType.TOICA => "TOICA",
+        CardType.Manaca => "manaca",
+        CardType.PiTaPa => "PiTaPa",
         _ => "不明"
     };
 
