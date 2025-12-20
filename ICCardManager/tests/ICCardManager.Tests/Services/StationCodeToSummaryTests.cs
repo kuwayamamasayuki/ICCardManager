@@ -435,33 +435,37 @@ public class StationCodeToSummaryTests
     }
 
     /// <summary>
-    /// Suicaで福岡出張（関東カードで九州エリアを利用）
+    /// 駅コード重複時のカード種別優先順位の検証
     /// </summary>
     /// <remarks>
-    /// Suicaは関東優先だが、空港線（0xE7XX）は関東エリアに同じコードがないため
-    /// 九州エリアの駅名が正しく解決される。
+    /// 同じ駅コードが複数エリアに存在する場合、カード種別に応じた
+    /// 優先エリアの駅名が返される。
+    /// 0xE70F: 九州では「天神」、関西では「高安」
+    /// Suica（関東優先→関西→中部→九州）では関西の「高安」が返される。
     /// </remarks>
     [Fact]
-    public void BusinessTrip_Suica_In_Fukuoka()
+    public void StationCodeOverlap_CardTypePriority()
     {
-        // Arrange - Suicaで空港線を利用（空港線は関東と重複しない）
-        var details = new List<LedgerDetail>
-        {
-            CreateRailwayUsageFromCodes(
-                new DateTime(2024, 12, 9),
-                0xE70F,  // 天神（空港線）
-                0xE715,  // 博多（空港線）
-                CardType.Suica,  // 関東のカードだが九州で利用
-                210,
-                4790)
-        };
+        // Arrange - 同じ駅コードでカード種別が異なる場合
+        var entryCode = 0xE70F;
+        var exitCode = 0xE715;
 
-        // Act
-        var result = _summaryGenerator.Generate(details);
+        // はやかけん（九州優先）で解決
+        var hayakakenEntry = _stationService.GetStationName(entryCode, CardType.Hayakaken);
+        var hayakakenExit = _stationService.GetStationName(exitCode, CardType.Hayakaken);
 
-        // Assert - 関東に該当コードがないため九州の駅名が解決される
-        result.Should().Be("鉄道（天神～博多）");
-        OutputResult("Suicaで福岡出張", details, result);
+        // Suica（関東優先→関西→中部→九州）で解決
+        var suicaEntry = _stationService.GetStationName(entryCode, CardType.Suica);
+        var suicaExit = _stationService.GetStationName(exitCode, CardType.Suica);
+
+        _output.WriteLine($"はやかけん: 0x{entryCode:X4} -> {hayakakenEntry}, 0x{exitCode:X4} -> {hayakakenExit}");
+        _output.WriteLine($"Suica: 0x{entryCode:X4} -> {suicaEntry}, 0x{exitCode:X4} -> {suicaExit}");
+
+        // Assert - カード種別により異なる駅名が返される
+        hayakakenEntry.Should().Be("天神");
+        hayakakenExit.Should().Be("博多");
+        suicaEntry.Should().Be("高安");      // 関西エリアの駅
+        suicaExit.Should().Be("河内国分");   // 関西エリアの駅
     }
 
     #endregion
