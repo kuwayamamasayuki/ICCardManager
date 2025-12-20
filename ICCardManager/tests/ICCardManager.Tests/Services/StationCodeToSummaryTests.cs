@@ -437,26 +437,30 @@ public class StationCodeToSummaryTests
     /// <summary>
     /// Suicaで福岡出張（関東カードで九州エリアを利用）
     /// </summary>
+    /// <remarks>
+    /// Suicaは関東優先だが、空港線（0xE7XX）は関東エリアに同じコードがないため
+    /// 九州エリアの駅名が正しく解決される。
+    /// </remarks>
     [Fact]
     public void BusinessTrip_Suica_In_Fukuoka()
     {
-        // Arrange - Suicaで箱崎線を利用（箱崎線は他エリアと重複しない）
+        // Arrange - Suicaで空港線を利用（空港線は関東と重複しない）
         var details = new List<LedgerDetail>
         {
             CreateRailwayUsageFromCodes(
                 new DateTime(2024, 12, 9),
-                0xE801,  // 中洲川端（箱崎線）
-                0xE80D,  // 貝塚（箱崎線）
+                0xE70F,  // 天神（空港線）
+                0xE715,  // 博多（空港線）
                 CardType.Suica,  // 関東のカードだが九州で利用
-                260,
-                4740)
+                210,
+                4790)
         };
 
         // Act
         var result = _summaryGenerator.Generate(details);
 
-        // Assert - 九州の駅名が正しく解決される
-        result.Should().Be("鉄道（中洲川端～貝塚）");
+        // Assert - 関東に該当コードがないため九州の駅名が解決される
+        result.Should().Be("鉄道（天神～博多）");
         OutputResult("Suicaで福岡出張", details, result);
     }
 
@@ -613,12 +617,13 @@ public class StationCodeToSummaryTests
     public void UnknownStationCode_FallbackFormat()
     {
         // Arrange
+        // 0xFFFE, 0xFFFF は確実に未登録のコード
         var details = new List<LedgerDetail>
         {
             CreateRailwayUsageFromCodes(
                 new DateTime(2024, 12, 9),
-                0xFF01,  // 未登録の駅コード
-                0xFF02,  // 未登録の駅コード
+                0xFFFE,  // 未登録の駅コード（路線255, 駅254）
+                0xFFFF,  // 未登録の駅コード（路線255, 駅255）
                 CardType.Hayakaken,
                 500,
                 4500)
@@ -628,7 +633,7 @@ public class StationCodeToSummaryTests
         var result = _summaryGenerator.Generate(details);
 
         // Assert - フォールバック形式「駅XX-YY」が使われる
-        result.Should().Be("鉄道（駅FF-01～駅FF-02）");
+        result.Should().Be("鉄道（駅FF-FE～駅FF-FF）");
         OutputResult("未登録駅コード", details, result);
     }
 
