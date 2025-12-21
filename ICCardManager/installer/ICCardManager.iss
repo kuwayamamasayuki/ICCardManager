@@ -29,14 +29,17 @@ WizardStyle=modern
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 
+; アイコン設定（インストーラーと「設定」→「アプリ」で表示されるアイコン）
+SetupIconFile=app.ico
+
 ; 日本語設定
 ShowLanguageDialog=auto
 
 ; 管理者権限
 PrivilegesRequired=admin
 
-; アンインストール設定
-UninstallDisplayIcon={app}\{#MyAppExeName}
+; アンインストール設定（「設定」→「アプリ」で表示されるアイコン）
+UninstallDisplayIcon={app}\app.ico
 UninstallDisplayName={#MyAppName}
 
 [Languages]
@@ -50,6 +53,9 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 ; メインアプリケーション
 Source: "..\publish\{#MyAppExeName}"; DestDir: "{app}"; Flags: ignoreversion
 
+; アイコンファイル（「設定」→「アプリ」で表示されるアイコン）
+Source: "app.ico"; DestDir: "{app}"; Flags: ignoreversion
+
 ; 設定ファイル
 Source: "..\publish\appsettings.json"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
 
@@ -60,9 +66,9 @@ Source: "..\publish\Resources\Sounds\*"; DestDir: "{app}\Resources\Sounds"; Flag
 Source: "..\publish\Resources\Templates\*"; DestDir: "{app}\Resources\Templates"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
-Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
+Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\app.ico"
 Name: "{group}\{cm:UninstallProgram,{#MyAppName}}"; Filename: "{uninstallexe}"
-Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
+Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\app.ico"; Tasks: desktopicon
 
 [Run]
 Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChange(MyAppName, '&', '&&')}}"; Flags: nowait postinstall skipifsilent

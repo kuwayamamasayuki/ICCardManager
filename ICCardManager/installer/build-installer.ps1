@@ -32,7 +32,7 @@ Write-Host "======================================" -ForegroundColor Cyan
 Write-Host ""
 
 # Step 1: Inno Setup の確認
-Write-Host "[1/4] Inno Setup の確認..." -ForegroundColor Yellow
+Write-Host "[1/6] Inno Setup の確認..." -ForegroundColor Yellow
 $IsccPath = $null
 foreach ($path in $InnoSetupPaths) {
     if (Test-Path $path) {
@@ -48,10 +48,27 @@ if (-not $IsccPath) {
 }
 Write-Host "  Inno Setup: $IsccPath" -ForegroundColor Green
 
-# Step 2: アプリケーションのビルド
+# Step 2: アイコンの生成
+Write-Host ""
+Write-Host "[2/6] アイコンの生成..." -ForegroundColor Yellow
+$IconScript = Join-Path $ScriptDir "generate-icon.ps1"
+$IconPath = Join-Path $ScriptDir "app.ico"
+
+if (Test-Path $IconScript) {
+    & $IconScript
+    if (Test-Path $IconPath) {
+        Write-Host "  アイコン生成完了: $IconPath" -ForegroundColor Green
+    } else {
+        Write-Host "警告: アイコンの生成に失敗しました。" -ForegroundColor Yellow
+    }
+} else {
+    Write-Host "警告: アイコン生成スクリプトが見つかりません: $IconScript" -ForegroundColor Yellow
+}
+
+# Step 3: アプリケーションのビルド
 if (-not $SkipBuild) {
     Write-Host ""
-    Write-Host "[2/5] アプリケーションのビルド..." -ForegroundColor Yellow
+    Write-Host "[3/6] アプリケーションのビルド..." -ForegroundColor Yellow
 
     Push-Location $SrcDir
     try {
@@ -70,12 +87,12 @@ if (-not $SkipBuild) {
     }
 } else {
     Write-Host ""
-    Write-Host "[2/5] ビルドをスキップ（既存のpublishを使用）..." -ForegroundColor Yellow
+    Write-Host "[3/6] ビルドをスキップ（既存のpublishを使用）..." -ForegroundColor Yellow
 }
 
-# Step 3: リソースファイルのコピー
+# Step 4: リソースファイルのコピー
 Write-Host ""
-Write-Host "[3/5] リソースファイルのコピー..." -ForegroundColor Yellow
+Write-Host "[4/6] リソースファイルのコピー..." -ForegroundColor Yellow
 
 $SoundsSource = Join-Path $SrcDir "Resources\Sounds"
 $SoundsDest = Join-Path $PublishDir "Resources\Sounds"
@@ -98,9 +115,9 @@ if (Test-Path $TemplatesSource) {
     Write-Host "  テンプレートファイル: $TemplateCount 個コピー" -ForegroundColor Green
 }
 
-# Step 4: 発行ファイルの確認
+# Step 5: 発行ファイルの確認
 Write-Host ""
-Write-Host "[4/5] 発行ファイルの確認..." -ForegroundColor Yellow
+Write-Host "[5/6] 発行ファイルの確認..." -ForegroundColor Yellow
 
 $ExePath = Join-Path $PublishDir "ICCardManager.exe"
 if (-not (Test-Path $ExePath)) {
@@ -121,9 +138,9 @@ if (Test-Path $ResourcesDir) {
     Write-Host "  テンプレートファイル: $($TemplateFiles.Count) 個" -ForegroundColor Green
 }
 
-# Step 5: インストーラーの作成
+# Step 6: インストーラーの作成
 Write-Host ""
-Write-Host "[5/5] インストーラーの作成..." -ForegroundColor Yellow
+Write-Host "[6/6] インストーラーの作成..." -ForegroundColor Yellow
 
 # 出力ディレクトリの作成
 if (-not (Test-Path $OutputDir)) {
