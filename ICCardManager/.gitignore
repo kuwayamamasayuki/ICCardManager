@@ -1,0 +1,34 @@
+# ビルド出力
+bin/
+obj/
+publish/
+
+# IDE
+.vs/
+.vscode/
+*.user
+*.suo
+
+# テスト結果
+test-results/
+TestResults/
+*.trx
+
+# インストーラー出力
+installer/output/
+
+# ユーザー固有ファイル
+*.db
+appsettings.Development.json
+
+# OS生成ファイル
+Thumbs.db
+.DS_Store
+
+# 一時ファイル
+*.tmp
+*.temp
+*.log
+
+# デバッグシンボル（本番環境不要）
+*.pdb

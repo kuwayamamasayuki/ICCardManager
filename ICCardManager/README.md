@@ -180,6 +180,37 @@ dotnet publish src/ICCardManager/ICCardManager.csproj \
 # 出力先: bin/Release/net8.0-windows/win-x64/publish/
 ```
 
+### インストーラーのビルド
+
+配布用インストーラーを作成できます。
+
+#### 前提条件
+
+- [Inno Setup 6](https://jrsoftware.org/isinfo.php) がインストールされていること
+
+#### ビルド手順
+
+```powershell
+# PowerShellスクリプトを使用（推奨）
+cd installer
+.\build-installer.ps1
+
+# または、バッチファイルを使用
+.\build-installer.bat
+
+# ビルド済みのpublishフォルダを使用する場合
+.\build-installer.ps1 -SkipBuild
+
+# バージョンを指定する場合
+.\build-installer.ps1 -Version "1.1.0"
+```
+
+#### 出力ファイル
+
+```
+installer/output/ICCardManager_Setup_1.0.0.exe
+```
+
 ### テスト実行
 
 ```bash
