@@ -19,6 +19,17 @@ public class OperationLogRepositoryTests : IDisposable
         _dbContext = new DbContext(":memory:");
         _dbContext.InitializeDatabase();
         _repository = new OperationLogRepository(_dbContext);
+
+        // マイグレーション時に自動挿入されるログをクリア
+        ClearOperationLogs();
+    }
+
+    private void ClearOperationLogs()
+    {
+        var connection = _dbContext.GetConnection();
+        using var command = connection.CreateCommand();
+        command.CommandText = "DELETE FROM operation_log";
+        command.ExecuteNonQuery();
     }
 
     public void Dispose()
