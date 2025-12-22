@@ -26,7 +26,7 @@
         <KeyBinding Key="Escape" Command="{Binding CancelCommand}"/>
         <KeyBinding Key="F1" Command="{Binding OpenSettingsCommand}"/>
         <KeyBinding Key="F2" Command="{Binding OpenReportCommand}"/>
-        <KeyBinding Key="F3" Command="{Binding OpenCardManageAsyncCommand}"/>
+        <KeyBinding Key="F3" Command="{Binding OpenCardManageCommand}"/>
         <KeyBinding Key="F4" Command="{Binding OpenStaffManageCommand}"/>
         <KeyBinding Key="F5" Command="{Binding OpenDataExportImportCommand}"/>
         <KeyBinding Key="F6" Command="{Binding OpenOperationLogCommand}"/>
@@ -76,7 +76,7 @@
                             AutomationProperties.HelpText="物品出納簿を作成します。ショートカット: F2"
                             ToolTip="帳票を開く (F2)"/>
                     <Button Content="カード管理 (F3)" Margin="5,0" Padding="10,5"
-                            Command="{Binding OpenCardManageAsyncCommand}"
+                            Command="{Binding OpenCardManageCommand}"
                             TabIndex="3"
                             AutomationProperties.Name="カード管理ダイアログを開く"
                             AutomationProperties.HelpText="ICカードの登録・編集を行います。ショートカット: F3"
@@ -464,7 +464,7 @@
                     </TextBlock>
                     <!-- 手動再接続ボタン（切断時のみ表示） -->
                     <Button Content="再接続"
-                            Command="{Binding ReconnectCardReaderAsyncCommand}"
+                            Command="{Binding ReconnectCardReaderCommand}"
                             Margin="10,0,0,0"
                             Padding="8,2"
                             FontSize="11"
