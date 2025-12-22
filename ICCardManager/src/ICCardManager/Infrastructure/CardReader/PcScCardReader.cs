@@ -345,7 +345,9 @@ public class PcScCardReader : ICardReader
                 {
                     // バイト10-11が残高（リトルエンディアン）
                     var balance = historyData[10] + (historyData[11] << 8);
+#if DEBUG
                     System.Diagnostics.Debug.WriteLine($"残高読み取り: {balance}円");
+#endif
                     return balance;
                 }
 
@@ -391,7 +393,9 @@ public class PcScCardReader : ICardReader
                 return;
             }
 
+#if DEBUG
             System.Diagnostics.Debug.WriteLine($"IDm読み取り成功: {idm}");
+#endif
 
             // 同一カードの連続読み取りを防止
             var now = DateTime.Now;
@@ -914,9 +918,11 @@ public class PcScCardReader : ICardReader
                 }
             }
 
+#if DEBUG
             System.Diagnostics.Debug.WriteLine(
                 $"履歴: 日付={useDate:yyyy/MM/dd}, 入場={entryStationCode:X4}, 出場={exitStationCode:X4}, " +
                 $"残高={balance}, 金額={amount}, チャージ={isCharge}, バス={isBus}");
+#endif
 
             return new LedgerDetail
             {

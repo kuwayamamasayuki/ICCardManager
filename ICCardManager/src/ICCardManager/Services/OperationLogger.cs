@@ -233,7 +233,7 @@ public class OperationLogger
         return JsonSerializer.Serialize(obj, new JsonSerializerOptions
         {
             WriteIndented = false,
-            Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping
+            Encoder = System.Text.Encodings.Web.JavaScriptEncoder.Create(System.Text.Unicode.UnicodeRanges.All)
         });
     }
 }
