@@ -135,13 +135,13 @@ public partial class CardManageViewModel : ViewModelBase
         IsNewCard = true;
         EditCardIdm = idm;
 
-        // カード種別を自動判定
-        var detectedType = _cardTypeDetector.Detect(idm);
-        EditCardType = CardTypeDetector.GetDisplayName(detectedType);
+        // カード種別はユーザーに手動選択させる（IDmからの自動判定は技術的に不可能なため）
+        // デフォルトはnimoca（利用頻度が最も高いため）
+        EditCardType = "nimoca";
 
         EditCardNumber = string.Empty;
         EditNote = string.Empty;
-        StatusMessage = $"カードを読み取りました: {EditCardType}";
+        StatusMessage = "カードを読み取りました。カード種別を確認してください。";
         IsWaitingForCard = false; // すでにIDmがあるので待機しない
     }
 
@@ -320,11 +320,11 @@ public partial class CardManageViewModel : ViewModelBase
         {
             EditCardIdm = e.Idm;
 
-            // カード種別を自動判定
-            var detectedType = _cardTypeDetector.Detect(e.Idm);
-            EditCardType = CardTypeDetector.GetDisplayName(detectedType);
+            // カード種別はユーザーに手動選択させる（IDmからの自動判定は技術的に不可能なため）
+            // デフォルトはnimoca（利用頻度が最も高いため）
+            EditCardType = "nimoca";
 
-            StatusMessage = $"カードを読み取りました: {EditCardType}";
+            StatusMessage = "カードを読み取りました。カード種別を確認してください。";
             IsWaitingForCard = false;
         });
     }
