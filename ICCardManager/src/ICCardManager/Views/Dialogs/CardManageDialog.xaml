@@ -290,7 +290,7 @@
                             Padding="15,8"
                             Margin="0,0,10,0"/>
                     <Button Content="保存"
-                            Command="{Binding SaveAsyncCommand}"
+                            Command="{Binding SaveCommand}"
                             Padding="15,8"
                             Background="#2196F3"
                             Foreground="White"/>
