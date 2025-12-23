@@ -101,6 +101,9 @@ public partial class StaffManageViewModel : ViewModelBase
         EditNote = string.Empty;
         StatusMessage = "職員証をタッチするとIDmを読み取ります";
         IsWaitingForCard = true;
+
+        // MainViewModelでの未登録カード処理を抑制
+        App.IsStaffCardRegistrationActive = true;
     }
 
     /// <summary>
@@ -259,6 +262,9 @@ public partial class StaffManageViewModel : ViewModelBase
         EditNumber = string.Empty;
         EditNote = string.Empty;
         StatusMessage = string.Empty;
+
+        // 職員証登録モードを解除
+        App.IsStaffCardRegistrationActive = false;
     }
 
     /// <summary>
@@ -274,6 +280,9 @@ public partial class StaffManageViewModel : ViewModelBase
             EditStaffIdm = e.Idm;
             StatusMessage = "職員証を読み取りました";
             IsWaitingForCard = false;
+
+            // カード読み取り完了後、フラグを解除
+            App.IsStaffCardRegistrationActive = false;
         });
     }
 
@@ -299,5 +308,8 @@ public partial class StaffManageViewModel : ViewModelBase
     public void Cleanup()
     {
         _cardReader.CardRead -= OnCardRead;
+
+        // ダイアログ終了時にフラグを解除
+        App.IsStaffCardRegistrationActive = false;
     }
 }
