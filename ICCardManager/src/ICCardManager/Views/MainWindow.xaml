@@ -63,37 +63,43 @@
                                AutomationProperties.Name="現在日時"
                                AutomationProperties.LiveSetting="Polite"/>
 
-                    <Button Content="設定 (F1)" Margin="5,0" Padding="10,5"
+                    <Button Content="設定 (F1)" Margin="5,0"
+                            Style="{StaticResource AccessibleButtonStyle}"
                             Command="{Binding OpenSettingsCommand}"
                             TabIndex="1"
                             AutomationProperties.Name="設定ダイアログを開く"
                             AutomationProperties.HelpText="アプリケーションの設定を変更します。ショートカット: F1"
                             ToolTip="設定を開く (F1)"/>
-                    <Button Content="帳票 (F2)" Margin="5,0" Padding="10,5"
+                    <Button Content="帳票 (F2)" Margin="5,0"
+                            Style="{StaticResource AccessibleButtonStyle}"
                             Command="{Binding OpenReportCommand}"
                             TabIndex="2"
                             AutomationProperties.Name="帳票ダイアログを開く"
                             AutomationProperties.HelpText="物品出納簿を作成します。ショートカット: F2"
                             ToolTip="帳票を開く (F2)"/>
-                    <Button Content="カード管理 (F3)" Margin="5,0" Padding="10,5"
+                    <Button Content="カード管理 (F3)" Margin="5,0"
+                            Style="{StaticResource AccessibleButtonStyle}"
                             Command="{Binding OpenCardManageCommand}"
                             TabIndex="3"
                             AutomationProperties.Name="カード管理ダイアログを開く"
                             AutomationProperties.HelpText="ICカードの登録・編集を行います。ショートカット: F3"
                             ToolTip="カード管理を開く (F3)"/>
-                    <Button Content="職員管理 (F4)" Margin="5,0" Padding="10,5"
+                    <Button Content="職員管理 (F4)" Margin="5,0"
+                            Style="{StaticResource AccessibleButtonStyle}"
                             Command="{Binding OpenStaffManageCommand}"
                             TabIndex="4"
                             AutomationProperties.Name="職員管理ダイアログを開く"
                             AutomationProperties.HelpText="職員の登録・編集を行います。ショートカット: F4"
                             ToolTip="職員管理を開く (F4)"/>
-                    <Button Content="データ入出力 (F5)" Margin="5,0" Padding="10,5"
+                    <Button Content="データ入出力 (F5)" Margin="5,0"
+                            Style="{StaticResource AccessibleButtonStyle}"
                             Command="{Binding OpenDataExportImportCommand}"
                             TabIndex="5"
                             AutomationProperties.Name="データエクスポート/インポートダイアログを開く"
                             AutomationProperties.HelpText="カード・職員・履歴のCSVエクスポート/インポートを行います。ショートカット: F5"
                             ToolTip="データ入出力を開く (F5)"/>
-                    <Button Content="操作ログ (F6)" Margin="5,0" Padding="10,5"
+                    <Button Content="操作ログ (F6)" Margin="5,0"
+                            Style="{StaticResource AccessibleButtonStyle}"
                             Command="{Binding OpenOperationLogCommand}"
                             TabIndex="6"
                             AutomationProperties.Name="操作ログダイアログを開く"
@@ -191,6 +197,7 @@
                                   SelectedValuePath="Tag"
                                   FontSize="{DynamicResource SmallFontSize}"
                                   Width="130"
+                                  TabIndex="9"
                                   AutomationProperties.Name="ダッシュボードの並び順"
                                   ToolTip="カード一覧の並び順を変更">
                             <ComboBoxItem Content="残高（少ない順）" Tag="{x:Static vm:DashboardSortOrder.BalanceAscending}"/>
@@ -206,22 +213,43 @@
                               SelectedItem="{Binding SelectedDashboardItem}"
                               BorderThickness="0"
                               Background="Transparent"
+                              TabIndex="10"
+                              KeyboardNavigation.TabNavigation="Once"
                               AutomationProperties.Name="カード残高一覧"
-                              AutomationProperties.HelpText="カードをクリックすると履歴を表示します">
+                              AutomationProperties.HelpText="カードをクリックまたはEnterキーで履歴を表示します。上下矢印キーで選択を移動できます">
                         <ListView.ItemContainerStyle>
                             <Style TargetType="ListViewItem">
                                 <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
                                 <Setter Property="Padding" Value="0"/>
                                 <Setter Property="Margin" Value="0,2"/>
+                                <Setter Property="Focusable" Value="True"/>
+                                <Setter Property="AutomationProperties.Name" Value="{Binding DisplayName}"/>
                                 <Setter Property="Template">
                                     <Setter.Value>
                                         <ControlTemplate TargetType="ListViewItem">
-                                            <ContentPresenter/>
+                                            <Border x:Name="ItemBorder"
+                                                    BorderThickness="2"
+                                                    BorderBrush="Transparent"
+                                                    CornerRadius="4">
+                                                <ContentPresenter/>
+                                            </Border>
+                                            <ControlTemplate.Triggers>
+                                                <Trigger Property="IsKeyboardFocused" Value="True">
+                                                    <Setter TargetName="ItemBorder" Property="BorderBrush" Value="#2196F3"/>
+                                                </Trigger>
+                                                <Trigger Property="IsSelected" Value="True">
+                                                    <Setter TargetName="ItemBorder" Property="BorderBrush" Value="#1976D2"/>
+                                                </Trigger>
+                                            </ControlTemplate.Triggers>
                                         </ControlTemplate>
                                     </Setter.Value>
                                 </Setter>
                             </Style>
                         </ListView.ItemContainerStyle>
+                        <ListView.InputBindings>
+                            <KeyBinding Key="Enter" Command="{Binding OpenCardHistoryFromDashboardCommand}" CommandParameter="{Binding SelectedDashboardItem}"/>
+                            <KeyBinding Key="Space" Command="{Binding OpenCardHistoryFromDashboardCommand}" CommandParameter="{Binding SelectedDashboardItem}"/>
+                        </ListView.InputBindings>
                         <ListView.ItemTemplate>
                             <DataTemplate>
                                 <Border CornerRadius="4"
