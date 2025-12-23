@@ -1,5 +1,6 @@
 using System.Windows;
 using System.Windows.Interop;
+using ICCardManager.Common;
 using ICCardManager.Data.Repositories;
 using ICCardManager.Models;
 using ICCardManager.ViewModels;
@@ -28,17 +29,32 @@ public partial class MainWindow : Window
 
     private async void MainWindow_Loaded(object sender, RoutedEventArgs e)
     {
-        // ウィンドウ位置・サイズを復元
-        await RestoreWindowPositionAsync();
+        try
+        {
+            // ウィンドウ位置・サイズを復元
+            await RestoreWindowPositionAsync();
 
-        // 初期化を実行
-        await _viewModel.InitializeAsync();
+            // 初期化を実行
+            await _viewModel.InitializeAsync();
+        }
+        catch (Exception ex)
+        {
+            ErrorDialogHelper.ShowError(ex, "初期化エラー");
+        }
     }
 
     private async void MainWindow_Closing(object? sender, System.ComponentModel.CancelEventArgs e)
     {
-        // ウィンドウ位置・サイズを保存
-        await SaveWindowPositionAsync();
+        try
+        {
+            // ウィンドウ位置・サイズを保存
+            await SaveWindowPositionAsync();
+        }
+        catch (Exception ex)
+        {
+            // 終了時のエラーは警告のみ（アプリ終了を妨げない）
+            System.Diagnostics.Debug.WriteLine($"[MainWindow] 終了時エラー: {ex.Message}");
+        }
     }
 
     /// <summary>

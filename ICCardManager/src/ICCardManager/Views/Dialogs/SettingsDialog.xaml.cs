@@ -1,4 +1,5 @@
 using System.Windows;
+using ICCardManager.Common;
 using ICCardManager.ViewModels;
 
 namespace ICCardManager.Views.Dialogs;
@@ -17,7 +18,19 @@ public partial class SettingsDialog : Window
         _viewModel = viewModel;
         DataContext = _viewModel;
 
-        Loaded += async (s, e) => await _viewModel.InitializeAsync();
+        Loaded += SettingsDialog_Loaded;
+    }
+
+    private async void SettingsDialog_Loaded(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            await _viewModel.InitializeAsync();
+        }
+        catch (Exception ex)
+        {
+            ErrorDialogHelper.ShowError(ex, "初期化エラー");
+        }
     }
 
     /// <summary>
@@ -25,13 +38,20 @@ public partial class SettingsDialog : Window
     /// </summary>
     private async void SaveButton_Click(object sender, RoutedEventArgs e)
     {
-        await _viewModel.SaveAsync();
-
-        // 保存が成功した場合（IsSavedがtrue）、ダイアログを閉じる
-        if (_viewModel.IsSaved)
+        try
         {
-            DialogResult = true;
-            Close();
+            await _viewModel.SaveAsync();
+
+            // 保存が成功した場合（IsSavedがtrue）、ダイアログを閉じる
+            if (_viewModel.IsSaved)
+            {
+                DialogResult = true;
+                Close();
+            }
+        }
+        catch (Exception ex)
+        {
+            ErrorDialogHelper.ShowError(ex, "保存エラー");
         }
     }
 

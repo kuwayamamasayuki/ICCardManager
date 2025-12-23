@@ -1,4 +1,5 @@
 using System.Windows;
+using ICCardManager.Common;
 using ICCardManager.ViewModels;
 
 namespace ICCardManager.Views.Dialogs;
@@ -18,7 +19,13 @@ public partial class CardManageDialog : Window
         _viewModel = viewModel;
         DataContext = _viewModel;
 
-        Loaded += async (s, e) =>
+        Loaded += CardManageDialog_Loaded;
+        Closed += (s, e) => _viewModel.Cleanup();
+    }
+
+    private async void CardManageDialog_Loaded(object sender, RoutedEventArgs e)
+    {
+        try
         {
             await _viewModel.InitializeAsync();
             // IDmが事前に設定されている場合は新規登録モードで開始
@@ -26,8 +33,11 @@ public partial class CardManageDialog : Window
             {
                 _viewModel.StartNewCardWithIdm(_presetIdm);
             }
-        };
-        Closed += (s, e) => _viewModel.Cleanup();
+        }
+        catch (Exception ex)
+        {
+            ErrorDialogHelper.ShowError(ex, "初期化エラー");
+        }
     }
 
     /// <summary>
