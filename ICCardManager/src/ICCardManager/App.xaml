@@ -9,18 +9,18 @@
                 <ResourceDictionary Source="Resources/Styles/AccessibilityStyles.xaml"/>
             </ResourceDictionary.MergedDictionaries>
 
-            <!-- フォントサイズリソース -->
-            <!-- BaseFontSize: 通常のテキスト用（設定で変更可能） -->
+            <!-- フォントサイズリソース（すべて設定で変更可能、比率で自動計算） -->
+            <!-- BaseFontSize: 通常のテキスト用（基準サイズ） -->
             <sys:Double x:Key="BaseFontSize">14</sys:Double>
             <!-- LargeFontSize: 見出し用（BaseFontSizeの約1.3倍） -->
             <sys:Double x:Key="LargeFontSize">18</sys:Double>
             <!-- SmallFontSize: 補足テキスト用（BaseFontSizeの約0.85倍） -->
             <sys:Double x:Key="SmallFontSize">12</sys:Double>
-            <!-- TitleFontSize: タイトル用（固定） -->
+            <!-- TitleFontSize: タイトル用（BaseFontSizeの約1.6倍） -->
             <sys:Double x:Key="TitleFontSize">22</sys:Double>
-            <!-- IconFontSize: アイコン用（固定） -->
-            <sys:Double x:Key="IconFontSize">72</sys:Double>
-            <!-- StatusFontSize: ステータスメッセージ用（固定） -->
+            <!-- IconFontSize: アイコン用（BaseFontSizeの約5倍） -->
+            <sys:Double x:Key="IconFontSize">70</sys:Double>
+            <!-- StatusFontSize: ステータスメッセージ用（BaseFontSizeの約2倍） -->
             <sys:Double x:Key="StatusFontSize">28</sys:Double>
         </ResourceDictionary>
     </Application.Resources>

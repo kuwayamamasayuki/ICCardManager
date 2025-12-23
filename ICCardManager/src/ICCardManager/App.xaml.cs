@@ -248,11 +248,19 @@ public partial class App : Application
         var largeFontSize = Math.Round(baseFontSize * 1.3);
         var smallFontSize = Math.Round(baseFontSize * 0.85);
 
+        // タイトル・ステータス・アイコン用のフォントサイズも比率で計算
+        var titleFontSize = Math.Round(baseFontSize * 1.6);      // タイトル用（約1.6倍）
+        var statusFontSize = Math.Round(baseFontSize * 2.0);     // ステータスメッセージ用（約2倍）
+        var iconFontSize = Math.Round(baseFontSize * 5.0);       // アイコン用（約5倍）
+
         // アプリケーションリソースを更新
         var resources = Application.Current.Resources;
         resources["BaseFontSize"] = baseFontSize;
         resources["LargeFontSize"] = largeFontSize;
         resources["SmallFontSize"] = smallFontSize;
+        resources["TitleFontSize"] = titleFontSize;
+        resources["StatusFontSize"] = statusFontSize;
+        resources["IconFontSize"] = iconFontSize;
     }
 
 #if DEBUG
