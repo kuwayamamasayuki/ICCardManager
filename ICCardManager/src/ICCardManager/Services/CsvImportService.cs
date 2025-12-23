@@ -152,251 +152,180 @@ public class CsvImportService
     public async Task<CsvImportResult> ImportCardsAsync(string filePath, bool skipExisting = true)
     {
         var errors = new List<CsvImportError>();
+        return await ExecuteImportWithErrorHandlingAsync(
+            () => ImportCardsInternalAsync(filePath, skipExisting, errors),
+            errors);
+    }
+
+    /// <summary>
+    /// カードCSVインポートの内部処理
+    /// </summary>
+    private async Task<CsvImportResult> ImportCardsInternalAsync(
+        string filePath,
+        bool skipExisting,
+        List<CsvImportError> errors)
+    {
         var importedCount = 0;
         var skippedCount = 0;
 
-        try
+        var lines = await ReadCsvFileAsync(filePath);
+        if (lines.Count < 2)
         {
-            var lines = await ReadCsvFileAsync(filePath);
-            if (lines.Count < 2)
-            {
-                return new CsvImportResult
-                {
-                    Success = false,
-                    ErrorMessage = "CSVファイルにデータがありません（ヘッダー行のみ）"
-                };
-            }
-
-            // バリデーションパス: まず全データをバリデーション
-            var validRecords = new List<(int LineNumber, IcCard Card, bool IsUpdate)>();
-
-            for (var i = 1; i < lines.Count; i++)
-            {
-                var lineNumber = i + 1;
-                var line = lines[i];
-
-                if (string.IsNullOrWhiteSpace(line))
-                {
-                    continue;
-                }
-
-                var fields = ParseCsvLine(line);
-
-                // 最低4列（カードIDm, カード種別, 管理番号, 備考）が必要
-                if (fields.Count < 4)
-                {
-                    errors.Add(new CsvImportError
-                    {
-                        LineNumber = lineNumber,
-                        Message = "列数が不足しています",
-                        Data = line
-                    });
-                    continue;
-                }
-
-                var cardIdm = fields[0].Trim();
-                var cardType = fields[1].Trim();
-                var cardNumber = fields[2].Trim();
-                var note = fields.Count > 3 ? fields[3].Trim() : "";
-
-                // バリデーション
-                if (string.IsNullOrWhiteSpace(cardIdm))
-                {
-                    errors.Add(new CsvImportError
-                    {
-                        LineNumber = lineNumber,
-                        Message = "カードIDmは必須です",
-                        Data = line
-                    });
-                    continue;
-                }
-
-                var idmValidation = _validationService.ValidateCardIdm(cardIdm);
-                if (!idmValidation.IsValid)
-                {
-                    errors.Add(new CsvImportError
-                    {
-                        LineNumber = lineNumber,
-                        Message = idmValidation.ErrorMessage ?? "カードIDmの形式が不正です",
-                        Data = cardIdm
-                    });
-                    continue;
-                }
-
-                if (string.IsNullOrWhiteSpace(cardType))
-                {
-                    errors.Add(new CsvImportError
-                    {
-                        LineNumber = lineNumber,
-                        Message = "カード種別は必須です",
-                        Data = line
-                    });
-                    continue;
-                }
-
-                if (string.IsNullOrWhiteSpace(cardNumber))
-                {
-                    errors.Add(new CsvImportError
-                    {
-                        LineNumber = lineNumber,
-                        Message = "管理番号は必須です",
-                        Data = line
-                    });
-                    continue;
-                }
-
-                // 既存チェック
-                var existingCard = await _cardRepository.GetByIdmAsync(cardIdm, includeDeleted: true);
-                if (existingCard != null)
-                {
-                    if (skipExisting)
-                    {
-                        skippedCount++;
-                        continue;
-                    }
-
-                    // 更新処理用のカード
-                    existingCard.CardType = cardType;
-                    existingCard.CardNumber = cardNumber;
-                    existingCard.Note = string.IsNullOrWhiteSpace(note) ? null : note;
-                    validRecords.Add((lineNumber, existingCard, true));
-                }
-                else
-                {
-                    // 新規登録用のカード
-                    var card = new IcCard
-                    {
-                        CardIdm = cardIdm,
-                        CardType = cardType,
-                        CardNumber = cardNumber,
-                        Note = string.IsNullOrWhiteSpace(note) ? null : note
-                    };
-                    validRecords.Add((lineNumber, card, false));
-                }
-            }
-
-            // バリデーションエラーがあれば中断
-            if (errors.Count > 0)
-            {
-                return new CsvImportResult
-                {
-                    Success = false,
-                    ImportedCount = 0,
-                    SkippedCount = skippedCount,
-                    ErrorCount = errors.Count,
-                    Errors = errors
-                };
-            }
-
-            // トランザクション内でインポート実行
-            using var transaction = _dbContext.BeginTransaction();
-            try
-            {
-                foreach (var (lineNumber, card, isUpdate) in validRecords)
-                {
-                    bool success;
-                    if (isUpdate)
-                    {
-                        success = await _cardRepository.UpdateAsync(card, transaction);
-                    }
-                    else
-                    {
-                        success = await _cardRepository.InsertAsync(card, transaction);
-                    }
-
-                    if (success)
-                    {
-                        importedCount++;
-                    }
-                    else
-                    {
-                        errors.Add(new CsvImportError
-                        {
-                            LineNumber = lineNumber,
-                            Message = isUpdate ? "カードの更新に失敗しました" : "カードの登録に失敗しました",
-                            Data = card.CardIdm
-                        });
-                    }
-                }
-
-                // すべて成功したらコミット
-                if (errors.Count == 0)
-                {
-                    transaction.Commit();
-                    // コミット後にキャッシュを無効化
-                    _cacheService.InvalidateByPrefix(CacheKeys.CardPrefixForInvalidation);
-                }
-                else
-                {
-                    transaction.Rollback();
-                    importedCount = 0;
-                }
-            }
-            catch (SqliteException ex)
-            {
-                transaction.Rollback();
-                throw DatabaseException.QueryFailed("CSV import transaction", ex);
-            }
-            catch (Exception)
-            {
-                transaction.Rollback();
-                throw;
-            }
-
             return new CsvImportResult
             {
-                Success = errors.Count == 0,
-                ImportedCount = importedCount,
+                Success = false,
+                ErrorMessage = "CSVファイルにデータがありません（ヘッダー行のみ）"
+            };
+        }
+
+        // バリデーションパス: まず全データをバリデーション
+        var validRecords = new List<(int LineNumber, IcCard Card, bool IsUpdate)>();
+
+        for (var i = 1; i < lines.Count; i++)
+        {
+            var lineNumber = i + 1;
+            var line = lines[i];
+
+            if (string.IsNullOrWhiteSpace(line))
+            {
+                continue;
+            }
+
+            var fields = ParseCsvLine(line);
+
+            // 最低4列（カードIDm, カード種別, 管理番号, 備考）が必要
+            if (!ValidateColumnCount(fields, 4, lineNumber, line, errors))
+            {
+                continue;
+            }
+
+            var cardIdm = fields[0].Trim();
+            var cardType = fields[1].Trim();
+            var cardNumber = fields[2].Trim();
+            var note = fields.Count > 3 ? fields[3].Trim() : "";
+
+            // バリデーション（共通メソッドを使用）
+            if (!ValidateIdm(cardIdm, lineNumber, "カードIDm", line, errors))
+            {
+                continue;
+            }
+
+            if (!ValidateRequired(cardType, lineNumber, "カード種別", line, errors))
+            {
+                continue;
+            }
+
+            if (!ValidateRequired(cardNumber, lineNumber, "管理番号", line, errors))
+            {
+                continue;
+            }
+
+            // 既存チェック
+            var existingCard = await _cardRepository.GetByIdmAsync(cardIdm, includeDeleted: true);
+            if (existingCard != null)
+            {
+                if (skipExisting)
+                {
+                    skippedCount++;
+                    continue;
+                }
+
+                // 更新処理用のカード
+                existingCard.CardType = cardType;
+                existingCard.CardNumber = cardNumber;
+                existingCard.Note = string.IsNullOrWhiteSpace(note) ? null : note;
+                validRecords.Add((lineNumber, existingCard, true));
+            }
+            else
+            {
+                // 新規登録用のカード
+                var card = new IcCard
+                {
+                    CardIdm = cardIdm,
+                    CardType = cardType,
+                    CardNumber = cardNumber,
+                    Note = string.IsNullOrWhiteSpace(note) ? null : note
+                };
+                validRecords.Add((lineNumber, card, false));
+            }
+        }
+
+        // バリデーションエラーがあれば中断
+        if (errors.Count > 0)
+        {
+            return new CsvImportResult
+            {
+                Success = false,
+                ImportedCount = 0,
                 SkippedCount = skippedCount,
                 ErrorCount = errors.Count,
                 Errors = errors
             };
         }
-        catch (FileNotFoundException)
+
+        // トランザクション内でインポート実行
+        using var transaction = _dbContext.BeginTransaction();
+        try
         {
-            return new CsvImportResult
+            foreach (var (lineNumber, card, isUpdate) in validRecords)
             {
-                Success = false,
-                ErrorMessage = "指定されたファイルが見つかりません。",
-                Errors = errors
-            };
+                bool success;
+                if (isUpdate)
+                {
+                    success = await _cardRepository.UpdateAsync(card, transaction);
+                }
+                else
+                {
+                    success = await _cardRepository.InsertAsync(card, transaction);
+                }
+
+                if (success)
+                {
+                    importedCount++;
+                }
+                else
+                {
+                    errors.Add(new CsvImportError
+                    {
+                        LineNumber = lineNumber,
+                        Message = isUpdate ? "カードの更新に失敗しました" : "カードの登録に失敗しました",
+                        Data = card.CardIdm
+                    });
+                }
+            }
+
+            // すべて成功したらコミット
+            if (errors.Count == 0)
+            {
+                transaction.Commit();
+                // コミット後にキャッシュを無効化
+                _cacheService.InvalidateByPrefix(CacheKeys.CardPrefixForInvalidation);
+            }
+            else
+            {
+                transaction.Rollback();
+                importedCount = 0;
+            }
         }
-        catch (UnauthorizedAccessException)
+        catch (SqliteException ex)
         {
-            return new CsvImportResult
-            {
-                Success = false,
-                ErrorMessage = "ファイルへのアクセス権限がありません。",
-                Errors = errors
-            };
+            transaction.Rollback();
+            throw DatabaseException.QueryFailed("CSV import transaction", ex);
         }
-        catch (IOException ex)
+        catch (Exception)
         {
-            return new CsvImportResult
-            {
-                Success = false,
-                ErrorMessage = $"ファイルの読み込みエラー: {ex.Message}",
-                Errors = errors
-            };
+            transaction.Rollback();
+            throw;
         }
-        catch (DatabaseException ex)
+
+        return new CsvImportResult
         {
-            return new CsvImportResult
-            {
-                Success = false,
-                ErrorMessage = ex.UserFriendlyMessage,
-                Errors = errors
-            };
-        }
-        catch (Exception ex)
-        {
-            return new CsvImportResult
-            {
-                Success = false,
-                ErrorMessage = $"予期しないエラーが発生しました: {ex.Message}",
-                Errors = errors
-            };
-        }
+            Success = errors.Count == 0,
+            ImportedCount = importedCount,
+            SkippedCount = skippedCount,
+            ErrorCount = errors.Count,
+            Errors = errors
+        };
     }
 
     /// <summary>
@@ -407,240 +336,175 @@ public class CsvImportService
     public async Task<CsvImportResult> ImportStaffAsync(string filePath, bool skipExisting = true)
     {
         var errors = new List<CsvImportError>();
+        return await ExecuteImportWithErrorHandlingAsync(
+            () => ImportStaffInternalAsync(filePath, skipExisting, errors),
+            errors);
+    }
+
+    /// <summary>
+    /// 職員CSVインポートの内部処理
+    /// </summary>
+    private async Task<CsvImportResult> ImportStaffInternalAsync(
+        string filePath,
+        bool skipExisting,
+        List<CsvImportError> errors)
+    {
         var importedCount = 0;
         var skippedCount = 0;
 
-        try
+        var lines = await ReadCsvFileAsync(filePath);
+        if (lines.Count < 2)
         {
-            var lines = await ReadCsvFileAsync(filePath);
-            if (lines.Count < 2)
-            {
-                return new CsvImportResult
-                {
-                    Success = false,
-                    ErrorMessage = "CSVファイルにデータがありません（ヘッダー行のみ）"
-                };
-            }
-
-            // バリデーションパス: まず全データをバリデーション
-            var validRecords = new List<(int LineNumber, Staff Staff, bool IsUpdate)>();
-
-            for (var i = 1; i < lines.Count; i++)
-            {
-                var lineNumber = i + 1;
-                var line = lines[i];
-
-                if (string.IsNullOrWhiteSpace(line))
-                {
-                    continue;
-                }
-
-                var fields = ParseCsvLine(line);
-
-                // 最低4列（職員IDm, 氏名, 職員番号, 備考）が必要
-                if (fields.Count < 4)
-                {
-                    errors.Add(new CsvImportError
-                    {
-                        LineNumber = lineNumber,
-                        Message = "列数が不足しています",
-                        Data = line
-                    });
-                    continue;
-                }
-
-                var staffIdm = fields[0].Trim();
-                var name = fields[1].Trim();
-                var number = fields.Count > 2 ? fields[2].Trim() : "";
-                var note = fields.Count > 3 ? fields[3].Trim() : "";
-
-                // バリデーション
-                if (string.IsNullOrWhiteSpace(staffIdm))
-                {
-                    errors.Add(new CsvImportError
-                    {
-                        LineNumber = lineNumber,
-                        Message = "職員IDmは必須です",
-                        Data = line
-                    });
-                    continue;
-                }
-
-                var staffIdmValidation = _validationService.ValidateStaffIdm(staffIdm);
-                if (!staffIdmValidation.IsValid)
-                {
-                    errors.Add(new CsvImportError
-                    {
-                        LineNumber = lineNumber,
-                        Message = staffIdmValidation.ErrorMessage ?? "職員IDmの形式が不正です",
-                        Data = staffIdm
-                    });
-                    continue;
-                }
-
-                if (string.IsNullOrWhiteSpace(name))
-                {
-                    errors.Add(new CsvImportError
-                    {
-                        LineNumber = lineNumber,
-                        Message = "氏名は必須です",
-                        Data = line
-                    });
-                    continue;
-                }
-
-                // 既存チェック
-                var existingStaff = await _staffRepository.GetByIdmAsync(staffIdm, includeDeleted: true);
-                if (existingStaff != null)
-                {
-                    if (skipExisting)
-                    {
-                        skippedCount++;
-                        continue;
-                    }
-
-                    // 更新処理用の職員
-                    existingStaff.Name = name;
-                    existingStaff.Number = string.IsNullOrWhiteSpace(number) ? null : number;
-                    existingStaff.Note = string.IsNullOrWhiteSpace(note) ? null : note;
-                    validRecords.Add((lineNumber, existingStaff, true));
-                }
-                else
-                {
-                    // 新規登録用の職員
-                    var staff = new Staff
-                    {
-                        StaffIdm = staffIdm,
-                        Name = name,
-                        Number = string.IsNullOrWhiteSpace(number) ? null : number,
-                        Note = string.IsNullOrWhiteSpace(note) ? null : note
-                    };
-                    validRecords.Add((lineNumber, staff, false));
-                }
-            }
-
-            // バリデーションエラーがあれば中断
-            if (errors.Count > 0)
-            {
-                return new CsvImportResult
-                {
-                    Success = false,
-                    ImportedCount = 0,
-                    SkippedCount = skippedCount,
-                    ErrorCount = errors.Count,
-                    Errors = errors
-                };
-            }
-
-            // トランザクション内でインポート実行
-            using var transaction = _dbContext.BeginTransaction();
-            try
-            {
-                foreach (var (lineNumber, staff, isUpdate) in validRecords)
-                {
-                    bool success;
-                    if (isUpdate)
-                    {
-                        success = await _staffRepository.UpdateAsync(staff, transaction);
-                    }
-                    else
-                    {
-                        success = await _staffRepository.InsertAsync(staff, transaction);
-                    }
-
-                    if (success)
-                    {
-                        importedCount++;
-                    }
-                    else
-                    {
-                        errors.Add(new CsvImportError
-                        {
-                            LineNumber = lineNumber,
-                            Message = isUpdate ? "職員の更新に失敗しました" : "職員の登録に失敗しました",
-                            Data = staff.StaffIdm
-                        });
-                    }
-                }
-
-                // すべて成功したらコミット
-                if (errors.Count == 0)
-                {
-                    transaction.Commit();
-                    // コミット後にキャッシュを無効化
-                    _cacheService.InvalidateByPrefix(CacheKeys.StaffPrefixForInvalidation);
-                }
-                else
-                {
-                    transaction.Rollback();
-                    importedCount = 0;
-                }
-            }
-            catch (SqliteException ex)
-            {
-                transaction.Rollback();
-                throw DatabaseException.QueryFailed("CSV import transaction", ex);
-            }
-            catch (Exception)
-            {
-                transaction.Rollback();
-                throw;
-            }
-
             return new CsvImportResult
             {
-                Success = errors.Count == 0,
-                ImportedCount = importedCount,
+                Success = false,
+                ErrorMessage = "CSVファイルにデータがありません（ヘッダー行のみ）"
+            };
+        }
+
+        // バリデーションパス: まず全データをバリデーション
+        var validRecords = new List<(int LineNumber, Staff Staff, bool IsUpdate)>();
+
+        for (var i = 1; i < lines.Count; i++)
+        {
+            var lineNumber = i + 1;
+            var line = lines[i];
+
+            if (string.IsNullOrWhiteSpace(line))
+            {
+                continue;
+            }
+
+            var fields = ParseCsvLine(line);
+
+            // 最低4列（職員IDm, 氏名, 職員番号, 備考）が必要
+            if (!ValidateColumnCount(fields, 4, lineNumber, line, errors))
+            {
+                continue;
+            }
+
+            var staffIdm = fields[0].Trim();
+            var name = fields[1].Trim();
+            var number = fields.Count > 2 ? fields[2].Trim() : "";
+            var note = fields.Count > 3 ? fields[3].Trim() : "";
+
+            // バリデーション（共通メソッドを使用）
+            if (!ValidateIdm(staffIdm, lineNumber, "職員IDm", line, errors, isStaff: true))
+            {
+                continue;
+            }
+
+            if (!ValidateRequired(name, lineNumber, "氏名", line, errors))
+            {
+                continue;
+            }
+
+            // 既存チェック
+            var existingStaff = await _staffRepository.GetByIdmAsync(staffIdm, includeDeleted: true);
+            if (existingStaff != null)
+            {
+                if (skipExisting)
+                {
+                    skippedCount++;
+                    continue;
+                }
+
+                // 更新処理用の職員
+                existingStaff.Name = name;
+                existingStaff.Number = string.IsNullOrWhiteSpace(number) ? null : number;
+                existingStaff.Note = string.IsNullOrWhiteSpace(note) ? null : note;
+                validRecords.Add((lineNumber, existingStaff, true));
+            }
+            else
+            {
+                // 新規登録用の職員
+                var staff = new Staff
+                {
+                    StaffIdm = staffIdm,
+                    Name = name,
+                    Number = string.IsNullOrWhiteSpace(number) ? null : number,
+                    Note = string.IsNullOrWhiteSpace(note) ? null : note
+                };
+                validRecords.Add((lineNumber, staff, false));
+            }
+        }
+
+        // バリデーションエラーがあれば中断
+        if (errors.Count > 0)
+        {
+            return new CsvImportResult
+            {
+                Success = false,
+                ImportedCount = 0,
                 SkippedCount = skippedCount,
                 ErrorCount = errors.Count,
                 Errors = errors
             };
         }
-        catch (FileNotFoundException)
+
+        // トランザクション内でインポート実行
+        using var transaction = _dbContext.BeginTransaction();
+        try
         {
-            return new CsvImportResult
+            foreach (var (lineNumber, staff, isUpdate) in validRecords)
             {
-                Success = false,
-                ErrorMessage = "指定されたファイルが見つかりません。",
-                Errors = errors
-            };
+                bool success;
+                if (isUpdate)
+                {
+                    success = await _staffRepository.UpdateAsync(staff, transaction);
+                }
+                else
+                {
+                    success = await _staffRepository.InsertAsync(staff, transaction);
+                }
+
+                if (success)
+                {
+                    importedCount++;
+                }
+                else
+                {
+                    errors.Add(new CsvImportError
+                    {
+                        LineNumber = lineNumber,
+                        Message = isUpdate ? "職員の更新に失敗しました" : "職員の登録に失敗しました",
+                        Data = staff.StaffIdm
+                    });
+                }
+            }
+
+            // すべて成功したらコミット
+            if (errors.Count == 0)
+            {
+                transaction.Commit();
+                // コミット後にキャッシュを無効化
+                _cacheService.InvalidateByPrefix(CacheKeys.StaffPrefixForInvalidation);
+            }
+            else
+            {
+                transaction.Rollback();
+                importedCount = 0;
+            }
         }
-        catch (UnauthorizedAccessException)
+        catch (SqliteException ex)
         {
-            return new CsvImportResult
-            {
-                Success = false,
-                ErrorMessage = "ファイルへのアクセス権限がありません。",
-                Errors = errors
-            };
+            transaction.Rollback();
+            throw DatabaseException.QueryFailed("CSV import transaction", ex);
         }
-        catch (IOException ex)
+        catch (Exception)
         {
-            return new CsvImportResult
-            {
-                Success = false,
-                ErrorMessage = $"ファイルの読み込みエラー: {ex.Message}",
-                Errors = errors
-            };
+            transaction.Rollback();
+            throw;
         }
-        catch (DatabaseException ex)
+
+        return new CsvImportResult
         {
-            return new CsvImportResult
-            {
-                Success = false,
-                ErrorMessage = ex.UserFriendlyMessage,
-                Errors = errors
-            };
-        }
-        catch (Exception ex)
-        {
-            return new CsvImportResult
-            {
-                Success = false,
-                ErrorMessage = $"予期しないエラーが発生しました: {ex.Message}",
-                Errors = errors
-            };
-        }
+            Success = errors.Count == 0,
+            ImportedCount = importedCount,
+            SkippedCount = skippedCount,
+            ErrorCount = errors.Count,
+            Errors = errors
+        };
     }
 
     /// <summary>
@@ -651,175 +515,113 @@ public class CsvImportService
     public async Task<CsvImportPreviewResult> PreviewCardsAsync(string filePath, bool skipExisting = true)
     {
         var errors = new List<CsvImportError>();
+        return await ExecutePreviewWithErrorHandlingAsync(
+            () => PreviewCardsInternalAsync(filePath, skipExisting, errors),
+            errors);
+    }
+
+    /// <summary>
+    /// カードCSVプレビューの内部処理
+    /// </summary>
+    private async Task<CsvImportPreviewResult> PreviewCardsInternalAsync(
+        string filePath,
+        bool skipExisting,
+        List<CsvImportError> errors)
+    {
         var items = new List<CsvImportPreviewItem>();
         var newCount = 0;
         var updateCount = 0;
         var skipCount = 0;
 
-        try
+        var lines = await ReadCsvFileAsync(filePath);
+        if (lines.Count < 2)
         {
-            var lines = await ReadCsvFileAsync(filePath);
-            if (lines.Count < 2)
+            return new CsvImportPreviewResult
             {
-                return new CsvImportPreviewResult
-                {
-                    IsValid = false,
-                    ErrorMessage = "CSVファイルにデータがありません（ヘッダー行のみ）"
-                };
+                IsValid = false,
+                ErrorMessage = "CSVファイルにデータがありません（ヘッダー行のみ）"
+            };
+        }
+
+        for (var i = 1; i < lines.Count; i++)
+        {
+            var lineNumber = i + 1;
+            var line = lines[i];
+
+            if (string.IsNullOrWhiteSpace(line))
+            {
+                continue;
             }
 
-            for (var i = 1; i < lines.Count; i++)
+            var fields = ParseCsvLine(line);
+
+            if (!ValidateColumnCount(fields, 4, lineNumber, line, errors))
             {
-                var lineNumber = i + 1;
-                var line = lines[i];
+                continue;
+            }
 
-                if (string.IsNullOrWhiteSpace(line))
+            var cardIdm = fields[0].Trim();
+            var cardType = fields[1].Trim();
+            var cardNumber = fields[2].Trim();
+
+            // バリデーション（共通メソッドを使用）
+            if (!ValidateIdm(cardIdm, lineNumber, "カードIDm", line, errors))
+            {
+                continue;
+            }
+
+            if (!ValidateRequired(cardType, lineNumber, "カード種別", line, errors))
+            {
+                continue;
+            }
+
+            if (!ValidateRequired(cardNumber, lineNumber, "管理番号", line, errors))
+            {
+                continue;
+            }
+
+            // 既存チェック
+            var existingCard = await _cardRepository.GetByIdmAsync(cardIdm, includeDeleted: true);
+            ImportAction action;
+            if (existingCard != null)
+            {
+                if (skipExisting)
                 {
-                    continue;
-                }
-
-                var fields = ParseCsvLine(line);
-
-                if (fields.Count < 4)
-                {
-                    errors.Add(new CsvImportError
-                    {
-                        LineNumber = lineNumber,
-                        Message = "列数が不足しています",
-                        Data = line
-                    });
-                    continue;
-                }
-
-                var cardIdm = fields[0].Trim();
-                var cardType = fields[1].Trim();
-                var cardNumber = fields[2].Trim();
-
-                // バリデーション
-                if (string.IsNullOrWhiteSpace(cardIdm))
-                {
-                    errors.Add(new CsvImportError
-                    {
-                        LineNumber = lineNumber,
-                        Message = "カードIDmは必須です",
-                        Data = line
-                    });
-                    continue;
-                }
-
-                var idmValidation = _validationService.ValidateCardIdm(cardIdm);
-                if (!idmValidation.IsValid)
-                {
-                    errors.Add(new CsvImportError
-                    {
-                        LineNumber = lineNumber,
-                        Message = idmValidation.ErrorMessage ?? "カードIDmの形式が不正です",
-                        Data = cardIdm
-                    });
-                    continue;
-                }
-
-                if (string.IsNullOrWhiteSpace(cardType))
-                {
-                    errors.Add(new CsvImportError
-                    {
-                        LineNumber = lineNumber,
-                        Message = "カード種別は必須です",
-                        Data = line
-                    });
-                    continue;
-                }
-
-                if (string.IsNullOrWhiteSpace(cardNumber))
-                {
-                    errors.Add(new CsvImportError
-                    {
-                        LineNumber = lineNumber,
-                        Message = "管理番号は必須です",
-                        Data = line
-                    });
-                    continue;
-                }
-
-                // 既存チェック
-                var existingCard = await _cardRepository.GetByIdmAsync(cardIdm, includeDeleted: true);
-                ImportAction action;
-                if (existingCard != null)
-                {
-                    if (skipExisting)
-                    {
-                        action = ImportAction.Skip;
-                        skipCount++;
-                    }
-                    else
-                    {
-                        action = ImportAction.Update;
-                        updateCount++;
-                    }
+                    action = ImportAction.Skip;
+                    skipCount++;
                 }
                 else
                 {
-                    action = ImportAction.Insert;
-                    newCount++;
+                    action = ImportAction.Update;
+                    updateCount++;
                 }
-
-                items.Add(new CsvImportPreviewItem
-                {
-                    LineNumber = lineNumber,
-                    Idm = cardIdm,
-                    Name = cardType,
-                    AdditionalInfo = cardNumber,
-                    Action = action
-                });
+            }
+            else
+            {
+                action = ImportAction.Insert;
+                newCount++;
             }
 
-            return new CsvImportPreviewResult
+            items.Add(new CsvImportPreviewItem
             {
-                IsValid = errors.Count == 0,
-                NewCount = newCount,
-                UpdateCount = updateCount,
-                SkipCount = skipCount,
-                ErrorCount = errors.Count,
-                Errors = errors,
-                Items = items
-            };
+                LineNumber = lineNumber,
+                Idm = cardIdm,
+                Name = cardType,
+                AdditionalInfo = cardNumber,
+                Action = action
+            });
         }
-        catch (FileNotFoundException)
+
+        return new CsvImportPreviewResult
         {
-            return new CsvImportPreviewResult
-            {
-                IsValid = false,
-                ErrorMessage = "指定されたファイルが見つかりません。",
-                Errors = errors
-            };
-        }
-        catch (UnauthorizedAccessException)
-        {
-            return new CsvImportPreviewResult
-            {
-                IsValid = false,
-                ErrorMessage = "ファイルへのアクセス権限がありません。",
-                Errors = errors
-            };
-        }
-        catch (IOException ex)
-        {
-            return new CsvImportPreviewResult
-            {
-                IsValid = false,
-                ErrorMessage = $"ファイルの読み込みエラー: {ex.Message}",
-                Errors = errors
-            };
-        }
-        catch (Exception ex)
-        {
-            return new CsvImportPreviewResult
-            {
-                IsValid = false,
-                ErrorMessage = $"予期しないエラーが発生しました: {ex.Message}",
-                Errors = errors
-            };
-        }
+            IsValid = errors.Count == 0,
+            NewCount = newCount,
+            UpdateCount = updateCount,
+            SkipCount = skipCount,
+            ErrorCount = errors.Count,
+            Errors = errors,
+            Items = items
+        };
     }
 
     /// <summary>
@@ -830,164 +632,108 @@ public class CsvImportService
     public async Task<CsvImportPreviewResult> PreviewStaffAsync(string filePath, bool skipExisting = true)
     {
         var errors = new List<CsvImportError>();
+        return await ExecutePreviewWithErrorHandlingAsync(
+            () => PreviewStaffInternalAsync(filePath, skipExisting, errors),
+            errors);
+    }
+
+    /// <summary>
+    /// 職員CSVプレビューの内部処理
+    /// </summary>
+    private async Task<CsvImportPreviewResult> PreviewStaffInternalAsync(
+        string filePath,
+        bool skipExisting,
+        List<CsvImportError> errors)
+    {
         var items = new List<CsvImportPreviewItem>();
         var newCount = 0;
         var updateCount = 0;
         var skipCount = 0;
 
-        try
+        var lines = await ReadCsvFileAsync(filePath);
+        if (lines.Count < 2)
         {
-            var lines = await ReadCsvFileAsync(filePath);
-            if (lines.Count < 2)
+            return new CsvImportPreviewResult
             {
-                return new CsvImportPreviewResult
-                {
-                    IsValid = false,
-                    ErrorMessage = "CSVファイルにデータがありません（ヘッダー行のみ）"
-                };
+                IsValid = false,
+                ErrorMessage = "CSVファイルにデータがありません（ヘッダー行のみ）"
+            };
+        }
+
+        for (var i = 1; i < lines.Count; i++)
+        {
+            var lineNumber = i + 1;
+            var line = lines[i];
+
+            if (string.IsNullOrWhiteSpace(line))
+            {
+                continue;
             }
 
-            for (var i = 1; i < lines.Count; i++)
+            var fields = ParseCsvLine(line);
+
+            if (!ValidateColumnCount(fields, 4, lineNumber, line, errors))
             {
-                var lineNumber = i + 1;
-                var line = lines[i];
+                continue;
+            }
 
-                if (string.IsNullOrWhiteSpace(line))
+            var staffIdm = fields[0].Trim();
+            var name = fields[1].Trim();
+            var number = fields.Count > 2 ? fields[2].Trim() : "";
+
+            // バリデーション（共通メソッドを使用）
+            if (!ValidateIdm(staffIdm, lineNumber, "職員IDm", line, errors, isStaff: true))
+            {
+                continue;
+            }
+
+            if (!ValidateRequired(name, lineNumber, "氏名", line, errors))
+            {
+                continue;
+            }
+
+            // 既存チェック
+            var existingStaff = await _staffRepository.GetByIdmAsync(staffIdm, includeDeleted: true);
+            ImportAction action;
+            if (existingStaff != null)
+            {
+                if (skipExisting)
                 {
-                    continue;
-                }
-
-                var fields = ParseCsvLine(line);
-
-                if (fields.Count < 4)
-                {
-                    errors.Add(new CsvImportError
-                    {
-                        LineNumber = lineNumber,
-                        Message = "列数が不足しています",
-                        Data = line
-                    });
-                    continue;
-                }
-
-                var staffIdm = fields[0].Trim();
-                var name = fields[1].Trim();
-                var number = fields.Count > 2 ? fields[2].Trim() : "";
-
-                // バリデーション
-                if (string.IsNullOrWhiteSpace(staffIdm))
-                {
-                    errors.Add(new CsvImportError
-                    {
-                        LineNumber = lineNumber,
-                        Message = "職員IDmは必須です",
-                        Data = line
-                    });
-                    continue;
-                }
-
-                var staffIdmValidation = _validationService.ValidateStaffIdm(staffIdm);
-                if (!staffIdmValidation.IsValid)
-                {
-                    errors.Add(new CsvImportError
-                    {
-                        LineNumber = lineNumber,
-                        Message = staffIdmValidation.ErrorMessage ?? "職員IDmの形式が不正です",
-                        Data = staffIdm
-                    });
-                    continue;
-                }
-
-                if (string.IsNullOrWhiteSpace(name))
-                {
-                    errors.Add(new CsvImportError
-                    {
-                        LineNumber = lineNumber,
-                        Message = "氏名は必須です",
-                        Data = line
-                    });
-                    continue;
-                }
-
-                // 既存チェック
-                var existingStaff = await _staffRepository.GetByIdmAsync(staffIdm, includeDeleted: true);
-                ImportAction action;
-                if (existingStaff != null)
-                {
-                    if (skipExisting)
-                    {
-                        action = ImportAction.Skip;
-                        skipCount++;
-                    }
-                    else
-                    {
-                        action = ImportAction.Update;
-                        updateCount++;
-                    }
+                    action = ImportAction.Skip;
+                    skipCount++;
                 }
                 else
                 {
-                    action = ImportAction.Insert;
-                    newCount++;
+                    action = ImportAction.Update;
+                    updateCount++;
                 }
-
-                items.Add(new CsvImportPreviewItem
-                {
-                    LineNumber = lineNumber,
-                    Idm = staffIdm,
-                    Name = name,
-                    AdditionalInfo = string.IsNullOrWhiteSpace(number) ? null : number,
-                    Action = action
-                });
+            }
+            else
+            {
+                action = ImportAction.Insert;
+                newCount++;
             }
 
-            return new CsvImportPreviewResult
+            items.Add(new CsvImportPreviewItem
             {
-                IsValid = errors.Count == 0,
-                NewCount = newCount,
-                UpdateCount = updateCount,
-                SkipCount = skipCount,
-                ErrorCount = errors.Count,
-                Errors = errors,
-                Items = items
-            };
+                LineNumber = lineNumber,
+                Idm = staffIdm,
+                Name = name,
+                AdditionalInfo = string.IsNullOrWhiteSpace(number) ? null : number,
+                Action = action
+            });
         }
-        catch (FileNotFoundException)
+
+        return new CsvImportPreviewResult
         {
-            return new CsvImportPreviewResult
-            {
-                IsValid = false,
-                ErrorMessage = "指定されたファイルが見つかりません。",
-                Errors = errors
-            };
-        }
-        catch (UnauthorizedAccessException)
-        {
-            return new CsvImportPreviewResult
-            {
-                IsValid = false,
-                ErrorMessage = "ファイルへのアクセス権限がありません。",
-                Errors = errors
-            };
-        }
-        catch (IOException ex)
-        {
-            return new CsvImportPreviewResult
-            {
-                IsValid = false,
-                ErrorMessage = $"ファイルの読み込みエラー: {ex.Message}",
-                Errors = errors
-            };
-        }
-        catch (Exception ex)
-        {
-            return new CsvImportPreviewResult
-            {
-                IsValid = false,
-                ErrorMessage = $"予期しないエラーが発生しました: {ex.Message}",
-                Errors = errors
-            };
-        }
+            IsValid = errors.Count == 0,
+            NewCount = newCount,
+            UpdateCount = updateCount,
+            SkipCount = skipCount,
+            ErrorCount = errors.Count,
+            Errors = errors,
+            Items = items
+        };
     }
 
     /// <summary>
@@ -1463,6 +1209,241 @@ public class CsvImportService
 
         return lines;
     }
+
+    #region 共通処理基盤
+
+    /// <summary>
+    /// CSVインポート処理を標準的な例外ハンドリングで実行
+    /// </summary>
+    /// <param name="operation">実行する処理</param>
+    /// <param name="errors">エラーリスト（処理中にエラーが追加される場合に使用）</param>
+    /// <returns>インポート結果</returns>
+    private async Task<CsvImportResult> ExecuteImportWithErrorHandlingAsync(
+        Func<Task<CsvImportResult>> operation,
+        List<CsvImportError>? errors = null)
+    {
+        errors ??= new List<CsvImportError>();
+
+        try
+        {
+            return await operation();
+        }
+        catch (FileNotFoundException)
+        {
+            return new CsvImportResult
+            {
+                Success = false,
+                ErrorMessage = "指定されたファイルが見つかりません。",
+                Errors = errors
+            };
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return new CsvImportResult
+            {
+                Success = false,
+                ErrorMessage = "ファイルへのアクセス権限がありません。",
+                Errors = errors
+            };
+        }
+        catch (IOException ex)
+        {
+            return new CsvImportResult
+            {
+                Success = false,
+                ErrorMessage = $"ファイルの読み込みエラー: {ex.Message}",
+                Errors = errors
+            };
+        }
+        catch (DatabaseException ex)
+        {
+            return new CsvImportResult
+            {
+                Success = false,
+                ErrorMessage = ex.UserFriendlyMessage,
+                Errors = errors
+            };
+        }
+        catch (Exception ex)
+        {
+            return new CsvImportResult
+            {
+                Success = false,
+                ErrorMessage = $"予期しないエラーが発生しました: {ex.Message}",
+                Errors = errors
+            };
+        }
+    }
+
+    /// <summary>
+    /// CSVプレビュー処理を標準的な例外ハンドリングで実行
+    /// </summary>
+    /// <param name="operation">実行する処理</param>
+    /// <param name="errors">エラーリスト（処理中にエラーが追加される場合に使用）</param>
+    /// <returns>プレビュー結果</returns>
+    private async Task<CsvImportPreviewResult> ExecutePreviewWithErrorHandlingAsync(
+        Func<Task<CsvImportPreviewResult>> operation,
+        List<CsvImportError>? errors = null)
+    {
+        errors ??= new List<CsvImportError>();
+
+        try
+        {
+            return await operation();
+        }
+        catch (FileNotFoundException)
+        {
+            return new CsvImportPreviewResult
+            {
+                IsValid = false,
+                ErrorMessage = "指定されたファイルが見つかりません。",
+                Errors = errors
+            };
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return new CsvImportPreviewResult
+            {
+                IsValid = false,
+                ErrorMessage = "ファイルへのアクセス権限がありません。",
+                Errors = errors
+            };
+        }
+        catch (IOException ex)
+        {
+            return new CsvImportPreviewResult
+            {
+                IsValid = false,
+                ErrorMessage = $"ファイルの読み込みエラー: {ex.Message}",
+                Errors = errors
+            };
+        }
+        catch (DatabaseException ex)
+        {
+            return new CsvImportPreviewResult
+            {
+                IsValid = false,
+                ErrorMessage = ex.UserFriendlyMessage,
+                Errors = errors
+            };
+        }
+        catch (Exception ex)
+        {
+            return new CsvImportPreviewResult
+            {
+                IsValid = false,
+                ErrorMessage = $"予期しないエラーが発生しました: {ex.Message}",
+                Errors = errors
+            };
+        }
+    }
+
+    /// <summary>
+    /// IDmのバリデーションを実行し、エラーがあればリストに追加
+    /// </summary>
+    /// <param name="idm">検証するIDm</param>
+    /// <param name="lineNumber">行番号</param>
+    /// <param name="fieldName">フィールド名（エラーメッセージ用）</param>
+    /// <param name="line">元の行データ</param>
+    /// <param name="errors">エラーリスト</param>
+    /// <param name="isStaff">職員IDmかどうか</param>
+    /// <returns>バリデーション成功の場合true</returns>
+    private bool ValidateIdm(
+        string idm,
+        int lineNumber,
+        string fieldName,
+        string line,
+        List<CsvImportError> errors,
+        bool isStaff = false)
+    {
+        if (string.IsNullOrWhiteSpace(idm))
+        {
+            errors.Add(new CsvImportError
+            {
+                LineNumber = lineNumber,
+                Message = $"{fieldName}は必須です",
+                Data = line
+            });
+            return false;
+        }
+
+        var validation = isStaff
+            ? _validationService.ValidateStaffIdm(idm)
+            : _validationService.ValidateCardIdm(idm);
+
+        if (!validation.IsValid)
+        {
+            errors.Add(new CsvImportError
+            {
+                LineNumber = lineNumber,
+                Message = validation.ErrorMessage ?? $"{fieldName}の形式が不正です",
+                Data = idm
+            });
+            return false;
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// 必須フィールドのバリデーションを実行し、エラーがあればリストに追加
+    /// </summary>
+    /// <param name="value">検証する値</param>
+    /// <param name="lineNumber">行番号</param>
+    /// <param name="fieldName">フィールド名</param>
+    /// <param name="line">元の行データ</param>
+    /// <param name="errors">エラーリスト</param>
+    /// <returns>バリデーション成功の場合true</returns>
+    private static bool ValidateRequired(
+        string value,
+        int lineNumber,
+        string fieldName,
+        string line,
+        List<CsvImportError> errors)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            errors.Add(new CsvImportError
+            {
+                LineNumber = lineNumber,
+                Message = $"{fieldName}は必須です",
+                Data = line
+            });
+            return false;
+        }
+        return true;
+    }
+
+    /// <summary>
+    /// CSV行の列数をバリデーション
+    /// </summary>
+    /// <param name="fields">パースされたフィールド</param>
+    /// <param name="minColumns">最低列数</param>
+    /// <param name="lineNumber">行番号</param>
+    /// <param name="line">元の行データ</param>
+    /// <param name="errors">エラーリスト</param>
+    /// <returns>バリデーション成功の場合true</returns>
+    private static bool ValidateColumnCount(
+        List<string> fields,
+        int minColumns,
+        int lineNumber,
+        string line,
+        List<CsvImportError> errors)
+    {
+        if (fields.Count < minColumns)
+        {
+            errors.Add(new CsvImportError
+            {
+                LineNumber = lineNumber,
+                Message = "列数が不足しています",
+                Data = line
+            });
+            return false;
+        }
+        return true;
+    }
+
+    #endregion
 
     /// <summary>
     /// CSV行をパース（ダブルクォート対応）
