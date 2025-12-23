@@ -48,7 +48,7 @@
             <!-- アイコン -->
             <TextBlock x:Name="IconText"
                        Grid.Column="0"
-                       FontSize="48"
+                       FontSize="{DynamicResource IconFontSize}"
                        VerticalAlignment="Center"
                        Margin="0,0,15,0"
                        AutomationProperties.Name="通知アイコン"/>
@@ -56,18 +56,18 @@
             <!-- メッセージ -->
             <StackPanel Grid.Column="1" VerticalAlignment="Center">
                 <TextBlock x:Name="TitleText"
-                           FontSize="22"
+                           FontSize="{DynamicResource TitleFontSize}"
                            FontWeight="Bold"
                            TextWrapping="Wrap"
                            AutomationProperties.Name="通知タイトル"/>
                 <TextBlock x:Name="MessageText"
-                           FontSize="14"
+                           FontSize="{DynamicResource BaseFontSize}"
                            Margin="0,5,0,0"
                            TextWrapping="Wrap"
                            Opacity="0.8"
                            AutomationProperties.Name="通知メッセージ"/>
                 <TextBlock x:Name="SubMessageText"
-                           FontSize="12"
+                           FontSize="{DynamicResource SmallFontSize}"
                            Margin="0,5,0,0"
                            TextWrapping="Wrap"
                            Opacity="0.6"

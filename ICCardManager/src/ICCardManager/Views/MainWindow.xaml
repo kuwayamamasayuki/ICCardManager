@@ -298,11 +298,11 @@
                                         <!-- 最終利用日 + 貸出状態 -->
                                         <StackPanel Grid.Column="1" Grid.Row="1" Grid.ColumnSpan="2"
                                                     Orientation="Horizontal">
-                                            <TextBlock FontSize="10" Foreground="Gray">
+                                            <TextBlock FontSize="{DynamicResource SmallFontSize}" Foreground="Gray">
                                                 <Run Text="最終: "/>
                                                 <Run Text="{Binding LastUsageDateDisplay, Mode=OneWay}"/>
                                             </TextBlock>
-                                            <TextBlock FontSize="10" Margin="10,0,0,0">
+                                            <TextBlock FontSize="{DynamicResource SmallFontSize}" Margin="10,0,0,0">
                                                 <TextBlock.Style>
                                                     <Style TargetType="TextBlock">
                                                         <Setter Property="Foreground" Value="#4CAF50"/>
@@ -382,7 +382,7 @@
 
                 <!-- デバッグ用ボタン (DEBUG ビルドのみ表示) -->
                 <StackPanel Grid.Column="1" Orientation="Horizontal" Margin="20,0,0,0">
-                    <TextBlock Text="[DEBUG]" FontSize="10" Foreground="Red" VerticalAlignment="Center" Margin="0,0,10,0"/>
+                    <TextBlock Text="[DEBUG]" FontSize="{DynamicResource SmallFontSize}" Foreground="Red" VerticalAlignment="Center" Margin="0,0,10,0"/>
                     <Button Content="職員証" Command="{Binding SimulateStaffCardCommand}" Padding="10,3" Margin="0,0,5,0"/>
                     <Button Content="ICカード" Command="{Binding SimulateIcCardCommand}" Padding="10,3"/>
                 </StackPanel>
@@ -467,7 +467,7 @@
                             Command="{Binding ReconnectCardReaderCommand}"
                             Margin="10,0,0,0"
                             Padding="8,2"
-                            FontSize="11"
+                            FontSize="{DynamicResource SmallFontSize}"
                             AutomationProperties.Name="カードリーダーに再接続"
                             ToolTip="カードリーダーへの接続を再試行します">
                         <Button.Style>
