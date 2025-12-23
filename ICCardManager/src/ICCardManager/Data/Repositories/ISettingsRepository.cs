@@ -26,6 +26,15 @@ public interface ISettingsRepository
     Task<AppSettings> GetAppSettingsAsync();
 
     /// <summary>
+    /// 全設定をAppSettingsオブジェクトとして取得（同期版）
+    /// </summary>
+    /// <remarks>
+    /// アプリケーション起動時など、非同期が使用できない場面で使用。
+    /// 通常はGetAppSettingsAsync()を使用すること。
+    /// </remarks>
+    AppSettings GetAppSettings();
+
+    /// <summary>
     /// AppSettingsオブジェクトを保存
     /// </summary>
     Task<bool> SaveAppSettingsAsync(AppSettings settings);
