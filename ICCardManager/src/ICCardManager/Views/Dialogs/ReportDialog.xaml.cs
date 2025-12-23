@@ -1,4 +1,5 @@
 using System.Windows;
+using ICCardManager.Common;
 using ICCardManager.ViewModels;
 
 namespace ICCardManager.Views.Dialogs;
@@ -17,7 +18,19 @@ public partial class ReportDialog : Window
         _viewModel = viewModel;
         DataContext = _viewModel;
 
-        Loaded += async (s, e) => await _viewModel.InitializeAsync();
+        Loaded += ReportDialog_Loaded;
+    }
+
+    private async void ReportDialog_Loaded(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            await _viewModel.InitializeAsync();
+        }
+        catch (Exception ex)
+        {
+            ErrorDialogHelper.ShowError(ex, "初期化エラー");
+        }
     }
 
     /// <summary>
