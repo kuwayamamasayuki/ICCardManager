@@ -127,81 +127,89 @@ public partial class StaffManageViewModel : ViewModelBase
     [RelayCommand]
     public async Task SaveAsync()
     {
-        // 入力値をサニタイズ
-        var sanitizedName = InputSanitizer.SanitizeName(EditName);
-        var sanitizedNumber = InputSanitizer.SanitizeStaffNumber(EditNumber);
-        var sanitizedNote = InputSanitizer.SanitizeNote(EditNote);
-
-        // バリデーション
-        var idmResult = _validationService.ValidateStaffIdm(EditStaffIdm);
-        if (!idmResult)
+        try
         {
-            StatusMessage = idmResult.ErrorMessage!;
-            return;
-        }
+            // 入力値をサニタイズ
+            var sanitizedName = InputSanitizer.SanitizeName(EditName);
+            var sanitizedNumber = InputSanitizer.SanitizeStaffNumber(EditNumber);
+            var sanitizedNote = InputSanitizer.SanitizeNote(EditNote);
 
-        var nameResult = _validationService.ValidateStaffName(sanitizedName);
-        if (!nameResult)
-        {
-            StatusMessage = nameResult.ErrorMessage!;
-            return;
-        }
-
-        using (BeginBusy("保存中..."))
-        {
-            if (IsNewStaff)
+            // バリデーション
+            var idmResult = _validationService.ValidateStaffIdm(EditStaffIdm);
+            if (!idmResult)
             {
-                // 重複チェック
-                var existing = await _staffRepository.GetByIdmAsync(EditStaffIdm, includeDeleted: true);
-                if (existing != null)
-                {
-                    StatusMessage = "この職員証は既に登録されています";
-                    return;
-                }
+                StatusMessage = idmResult.ErrorMessage!;
+                return;
+            }
 
-                var staff = new Staff
-                {
-                    StaffIdm = EditStaffIdm,
-                    Name = sanitizedName,
-                    Number = string.IsNullOrWhiteSpace(sanitizedNumber) ? null : sanitizedNumber,
-                    Note = string.IsNullOrWhiteSpace(sanitizedNote) ? null : sanitizedNote
-                };
+            var nameResult = _validationService.ValidateStaffName(sanitizedName);
+            if (!nameResult)
+            {
+                StatusMessage = nameResult.ErrorMessage!;
+                return;
+            }
 
-                var success = await _staffRepository.InsertAsync(staff);
-                if (success)
+            using (BeginBusy("保存中..."))
+            {
+                if (IsNewStaff)
                 {
-                    StatusMessage = "登録しました";
-                    await LoadStaffAsync();
-                    CancelEdit();
+                    // 重複チェック
+                    var existing = await _staffRepository.GetByIdmAsync(EditStaffIdm, includeDeleted: true);
+                    if (existing != null)
+                    {
+                        StatusMessage = "この職員証は既に登録されています";
+                        return;
+                    }
+
+                    var staff = new Staff
+                    {
+                        StaffIdm = EditStaffIdm,
+                        Name = sanitizedName,
+                        Number = string.IsNullOrWhiteSpace(sanitizedNumber) ? null : sanitizedNumber,
+                        Note = string.IsNullOrWhiteSpace(sanitizedNote) ? null : sanitizedNote
+                    };
+
+                    var success = await _staffRepository.InsertAsync(staff);
+                    if (success)
+                    {
+                        StatusMessage = "登録しました";
+                        await LoadStaffAsync();
+                        CancelEdit();
+                    }
+                    else
+                    {
+                        StatusMessage = "登録に失敗しました";
+                    }
                 }
                 else
                 {
-                    StatusMessage = "登録に失敗しました";
-                }
-            }
-            else
-            {
-                // 更新
-                var staff = new Staff
-                {
-                    StaffIdm = EditStaffIdm,
-                    Name = sanitizedName,
-                    Number = string.IsNullOrWhiteSpace(sanitizedNumber) ? null : sanitizedNumber,
-                    Note = string.IsNullOrWhiteSpace(sanitizedNote) ? null : sanitizedNote
-                };
+                    // 更新
+                    var staff = new Staff
+                    {
+                        StaffIdm = EditStaffIdm,
+                        Name = sanitizedName,
+                        Number = string.IsNullOrWhiteSpace(sanitizedNumber) ? null : sanitizedNumber,
+                        Note = string.IsNullOrWhiteSpace(sanitizedNote) ? null : sanitizedNote
+                    };
 
-                var success = await _staffRepository.UpdateAsync(staff);
-                if (success)
-                {
-                    StatusMessage = "更新しました";
-                    await LoadStaffAsync();
-                    CancelEdit();
-                }
-                else
-                {
-                    StatusMessage = "更新に失敗しました";
+                    var success = await _staffRepository.UpdateAsync(staff);
+                    if (success)
+                    {
+                        StatusMessage = "更新しました";
+                        await LoadStaffAsync();
+                        CancelEdit();
+                    }
+                    else
+                    {
+                        StatusMessage = "更新に失敗しました";
+                    }
                 }
             }
+        }
+        catch (Exception ex)
+        {
+            StatusMessage = $"エラー: {ex.Message}";
+            System.Diagnostics.Debug.WriteLine($"[StaffManageViewModel] SaveAsync エラー: {ex}");
         }
     }
 
@@ -213,19 +221,27 @@ public partial class StaffManageViewModel : ViewModelBase
     {
         if (SelectedStaff == null) return;
 
-        using (BeginBusy("削除中..."))
+        try
         {
-            var success = await _staffRepository.DeleteAsync(SelectedStaff.StaffIdm);
-            if (success)
+            using (BeginBusy("削除中..."))
             {
-                StatusMessage = "削除しました";
-                await LoadStaffAsync();
-                CancelEdit();
+                var success = await _staffRepository.DeleteAsync(SelectedStaff.StaffIdm);
+                if (success)
+                {
+                    StatusMessage = "削除しました";
+                    await LoadStaffAsync();
+                    CancelEdit();
+                }
+                else
+                {
+                    StatusMessage = "削除に失敗しました";
+                }
             }
-            else
-            {
-                StatusMessage = "削除に失敗しました";
-            }
+        }
+        catch (Exception ex)
+        {
+            StatusMessage = $"エラー: {ex.Message}";
+            System.Diagnostics.Debug.WriteLine($"[StaffManageViewModel] DeleteAsync エラー: {ex}");
         }
     }
 
