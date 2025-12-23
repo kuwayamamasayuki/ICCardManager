@@ -75,6 +75,116 @@ public class SettingsRepository : ISettingsRepository
             CacheDurations.Settings);
     }
 
+    /// <inheritdoc/>
+    public AppSettings GetAppSettings()
+    {
+        // キャッシュから取得を試みる（同期版）
+        var cached = _cacheService.Get<AppSettings>(CacheKeys.AppSettings);
+        if (cached != null)
+        {
+            return cached;
+        }
+
+        // DBから同期的に取得
+        var settings = GetAppSettingsFromDb();
+        _cacheService.Set(CacheKeys.AppSettings, settings, CacheDurations.Settings);
+        return settings;
+    }
+
+    /// <summary>
+    /// DBから設定を取得（同期版）
+    /// </summary>
+    private AppSettings GetAppSettingsFromDb()
+    {
+        var settings = new AppSettings();
+
+        // 残額警告閾値
+        var warningBalance = Get(KeyWarningBalance);
+        if (int.TryParse(warningBalance, out var balance))
+        {
+            settings.WarningBalance = balance;
+        }
+
+        // バックアップパス
+        var backupPath = Get(KeyBackupPath);
+        settings.BackupPath = backupPath ?? GetDefaultBackupPath();
+
+        // 文字サイズ
+        var fontSize = Get(KeyFontSize);
+        settings.FontSize = ParseFontSize(fontSize);
+
+        // 最終VACUUM実行日
+        var lastVacuumDate = Get(KeyLastVacuumDate);
+        if (DateTime.TryParse(lastVacuumDate, out var date))
+        {
+            settings.LastVacuumDate = date;
+        }
+
+        // ウィンドウ設定
+        settings.MainWindowSettings = GetWindowSettingsFromDb();
+
+        // 職員証スキップ設定
+        var skipStaffTouch = Get(KeySkipStaffTouch);
+        settings.SkipStaffTouch = skipStaffTouch?.ToLowerInvariant() == "true";
+
+        var defaultStaffIdm = Get(KeyDefaultStaffIdm);
+        settings.DefaultStaffIdm = string.IsNullOrEmpty(defaultStaffIdm) ? null : defaultStaffIdm;
+
+        return settings;
+    }
+
+    /// <summary>
+    /// 設定値を取得（同期版）
+    /// </summary>
+    private string? Get(string key)
+    {
+        var connection = _dbContext.GetConnection();
+
+        using var command = connection.CreateCommand();
+        command.CommandText = "SELECT value FROM settings WHERE key = @key";
+        command.Parameters.AddWithValue("@key", key);
+
+        var result = command.ExecuteScalar();
+        return result == DBNull.Value ? null : result?.ToString();
+    }
+
+    /// <summary>
+    /// DBからウィンドウ設定を取得（同期版）
+    /// </summary>
+    private WindowSettings GetWindowSettingsFromDb()
+    {
+        var windowSettings = new WindowSettings();
+
+        var left = Get(KeyWindowLeft);
+        if (double.TryParse(left, out var leftValue))
+        {
+            windowSettings.Left = leftValue;
+        }
+
+        var top = Get(KeyWindowTop);
+        if (double.TryParse(top, out var topValue))
+        {
+            windowSettings.Top = topValue;
+        }
+
+        var width = Get(KeyWindowWidth);
+        if (double.TryParse(width, out var widthValue))
+        {
+            windowSettings.Width = widthValue;
+        }
+
+        var height = Get(KeyWindowHeight);
+        if (double.TryParse(height, out var heightValue))
+        {
+            windowSettings.Height = heightValue;
+        }
+
+        var maximized = Get(KeyWindowMaximized);
+        windowSettings.IsMaximized = maximized?.ToLowerInvariant() == "true";
+
+        return windowSettings;
+    }
+
     /// <summary>
     /// DBから設定を取得
     /// </summary>

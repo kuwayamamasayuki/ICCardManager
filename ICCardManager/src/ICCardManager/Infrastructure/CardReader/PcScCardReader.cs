@@ -192,27 +192,36 @@ public class PcScCardReader : ICardReader
     /// <inheritdoc/>
     public Task StopReadingAsync()
     {
-        return Task.Run(() =>
+        return Task.Run(StopReadingCore);
+    }
+
+    /// <summary>
+    /// カード読み取り停止の内部処理（同期版）
+    /// </summary>
+    /// <remarks>
+    /// Disposeメソッドから直接呼び出し可能。
+    /// StopReadingAsyncはこのメソッドをTask.Runでラップして呼び出す。
+    /// </remarks>
+    private void StopReadingCore()
+    {
+        // タイマーを停止
+        StopHealthCheckTimer();
+        StopReconnectTimer();
+
+        if (_monitor != null)
         {
-            // タイマーを停止
-            StopHealthCheckTimer();
-            StopReconnectTimer();
+            _monitor.CardInserted -= OnCardInserted;
+            _monitor.CardRemoved -= OnCardRemoved;
+            _monitor.MonitorException -= OnMonitorException;
+            _monitor.Cancel();
+            _monitor.Dispose();
+            _monitor = null;
+        }
 
-            if (_monitor != null)
-            {
-                _monitor.CardInserted -= OnCardInserted;
-                _monitor.CardRemoved -= OnCardRemoved;
-                _monitor.MonitorException -= OnMonitorException;
-                _monitor.Cancel();
-                _monitor.Dispose();
-                _monitor = null;
-            }
-
-            _isReading = false;
-            _lastReadIdm = null;
-            SetConnectionState(CardReaderConnectionState.Disconnected);
-            _logger.LogInformation("カードリーダー監視を停止しました");
-        });
+        _isReading = false;
+        _lastReadIdm = null;
+        SetConnectionState(CardReaderConnectionState.Disconnected);
+        _logger.LogInformation("カードリーダー監視を停止しました");
     }
 
     /// <summary>
@@ -976,9 +985,8 @@ public class PcScCardReader : ICardReader
         {
             if (disposing)
             {
-                StopHealthCheckTimer();
-                StopReconnectTimer();
-                StopReadingAsync().Wait();
+                // 同期版メソッドを直接呼び出してデッドロックを防止
+                StopReadingCore();
                 _provider.Dispose();
             }
             _disposed = true;

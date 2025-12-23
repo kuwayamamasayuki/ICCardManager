@@ -195,7 +195,8 @@ public partial class App : Application
 
 #if DEBUG
         // デバッグ時はテストデータを登録
-        RegisterTestDataAsync().Wait();
+        // Task.Runで別スレッドに移動し、UIスレッドのデッドロックを防止
+        Task.Run(() => RegisterTestDataAsync()).GetAwaiter().GetResult();
 #endif
 
         // 保存済み設定を適用
@@ -213,7 +214,8 @@ public partial class App : Application
         try
         {
             var settingsRepository = ServiceProvider.GetRequiredService<ISettingsRepository>();
-            var settings = settingsRepository.GetAppSettingsAsync().Result;
+            // 同期版メソッドを使用してデッドロックを防止
+            var settings = settingsRepository.GetAppSettings();
 
             // 文字サイズを適用
             ApplyFontSize(settings.FontSize);

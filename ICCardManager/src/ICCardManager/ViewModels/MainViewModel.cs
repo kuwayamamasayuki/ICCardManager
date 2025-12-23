@@ -468,8 +468,9 @@ public partial class MainViewModel : ViewModelBase
 
         await Task.WhenAll(staffTask, cardTask);
 
-        var staff = staffTask.Result;
-        var card = cardTask.Result;
+        // awaitを使用してデッドロックを防止（Task.WhenAll後でも.Resultは避ける）
+        var staff = await staffTask;
+        var card = await cardTask;
 
         // 職員証かどうか確認
         if (staff != null)
