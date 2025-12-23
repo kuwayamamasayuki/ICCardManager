@@ -240,14 +240,16 @@ public class OperationLogRepository : IOperationLogRepository
 
         if (!string.IsNullOrEmpty(criteria.TargetId))
         {
-            conditions.Add("target_id LIKE @targetId");
-            parameters["@targetId"] = $"%{criteria.TargetId}%";
+            var escapedId = EscapeLikeWildcards(criteria.TargetId);
+            conditions.Add("target_id LIKE @targetId ESCAPE '\\'");
+            parameters["@targetId"] = $"%{escapedId}%";
         }
 
         if (!string.IsNullOrEmpty(criteria.OperatorName))
         {
-            conditions.Add("operator_name LIKE @operatorName");
-            parameters["@operatorName"] = $"%{criteria.OperatorName}%";
+            var escapedName = EscapeLikeWildcards(criteria.OperatorName);
+            conditions.Add("operator_name LIKE @operatorName ESCAPE '\\'");
+            parameters["@operatorName"] = $"%{escapedName}%";
         }
 
         var whereClause = conditions.Count > 0
@@ -255,6 +257,19 @@ public class OperationLogRepository : IOperationLogRepository
             : "";
 
         return (whereClause, parameters);
+    }
+
+    /// <summary>
+    /// LIKE句で使用する文字列からワイルドカード文字をエスケープ
+    /// </summary>
+    /// <param name="value">エスケープする文字列</param>
+    /// <returns>エスケープ済み文字列</returns>
+    private static string EscapeLikeWildcards(string value)
+    {
+        return value
+            .Replace("\\", "\\\\")  // バックスラッシュを先にエスケープ
+            .Replace("%", "\\%")    // %をエスケープ
+            .Replace("_", "\\_");   // _をエスケープ
     }
 
     /// <summary>

@@ -1,4 +1,6 @@
 using System.IO;
+using System.Security.AccessControl;
+using System.Security.Principal;
 using ICCardManager.Data.Migrations;
 using Microsoft.Data.Sqlite;
 
@@ -76,6 +78,9 @@ public class DbContext : IDisposable
     {
         var connection = GetConnection();
 
+        // データベースファイルのアクセス権限を制限
+        RestrictDatabaseFilePermissions(DatabasePath);
+
         // 既存のDBがある場合（マイグレーション導入前）の対応
         HandleLegacyDatabase(connection);
 
@@ -136,6 +141,53 @@ public class DbContext : IDisposable
         using var insertCmd = connection.CreateCommand();
         insertCmd.CommandText = "INSERT INTO schema_migrations (version, description) VALUES (1, '初期スキーマ（既存DB）')";
         insertCmd.ExecuteNonQuery();
+    }
+
+    /// <summary>
+    /// データベースファイルのアクセス権限を現在のユーザーのみに制限
+    /// </summary>
+    /// <param name="dbPath">データベースファイルのパス</param>
+    private static void RestrictDatabaseFilePermissions(string dbPath)
+    {
+        try
+        {
+            if (!File.Exists(dbPath))
+            {
+                return;
+            }
+
+            var fileInfo = new FileInfo(dbPath);
+            var fileSecurity = fileInfo.GetAccessControl();
+
+            // 継承を無効化し、既存のルールを保持しない
+            fileSecurity.SetAccessRuleProtection(isProtected: true, preserveInheritance: false);
+
+            // 既存のアクセスルールをすべて削除
+            var rules = fileSecurity.GetAccessRules(true, true, typeof(SecurityIdentifier));
+            foreach (FileSystemAccessRule rule in rules)
+            {
+                fileSecurity.RemoveAccessRule(rule);
+            }
+
+            // 現在のユーザーにフルコントロール権限を付与
+            var currentUser = WindowsIdentity.GetCurrent().User;
+            if (currentUser != null)
+            {
+                var accessRule = new FileSystemAccessRule(
+                    currentUser,
+                    FileSystemRights.FullControl,
+                    AccessControlType.Allow);
+                fileSecurity.AddAccessRule(accessRule);
+            }
+
+            fileInfo.SetAccessControl(fileSecurity);
+            System.Diagnostics.Debug.WriteLine("[DbContext] データベースファイルのアクセス権限を制限しました");
+        }
+        catch (Exception ex)
+        {
+            // アクセス権限の設定に失敗してもアプリケーションは続行
+            System.Diagnostics.Debug.WriteLine($"[DbContext] アクセス権限の設定に失敗: {ex.Message}");
+        }
     }
 
     /// <summary>
