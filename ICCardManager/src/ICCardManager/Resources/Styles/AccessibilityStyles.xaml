@@ -65,11 +65,13 @@
     </Style>
 
     <!-- ===== ボタンスタイル ===== -->
+    <!-- 高齢者向けに最適化されたボタンサイズとフォーカス表示 -->
+    <!-- 高コントラストモード時はシステムカラーを自動適用 -->
     <Style x:Key="AccessibleButtonStyle" TargetType="Button">
         <Setter Property="FocusVisualStyle" Value="{StaticResource AccessibleFocusVisual}"/>
-        <Setter Property="Padding" Value="12,8"/>
+        <Setter Property="Padding" Value="15,8"/>
         <Setter Property="MinWidth" Value="75"/>
-        <Setter Property="MinHeight" Value="32"/>
+        <Setter Property="MinHeight" Value="40"/>
         <Setter Property="Cursor" Value="Hand"/>
         <Setter Property="Template">
             <Setter.Value>
@@ -97,6 +99,12 @@
                             <Setter TargetName="border" Property="BorderBrush" Value="{StaticResource PrimaryDarkBrush}"/>
                             <Setter TargetName="border" Property="BorderThickness" Value="2"/>
                         </Trigger>
+                        <!-- 高コントラストモード対応 -->
+                        <DataTrigger Binding="{Binding Source={x:Static SystemParameters.HighContrast}}" Value="True">
+                            <Setter TargetName="border" Property="Background" Value="{DynamicResource {x:Static SystemColors.ControlBrushKey}}"/>
+                            <Setter Property="Foreground" Value="{DynamicResource {x:Static SystemColors.ControlTextBrushKey}}"/>
+                            <Setter TargetName="border" Property="BorderBrush" Value="{DynamicResource {x:Static SystemColors.ActiveBorderBrushKey}}"/>
+                        </DataTrigger>
                     </ControlTemplate.Triggers>
                 </ControlTemplate>
             </Setter.Value>
@@ -235,8 +243,23 @@
     </Style>
 
     <!-- ===== ハイコントラストモード対応 ===== -->
-    <!-- SystemColorsを使用してOSのハイコントラスト設定に従う -->
+    <!--
+         高コントラストモードへの対応方法:
 
+         1. AccessibleButtonStyle等の主要スタイルには高コントラスト対応が組み込まれています
+            → Style="{StaticResource AccessibleButtonStyle}" を使用するだけで自動対応
+
+         2. 個別に高コントラスト対応が必要な場合は以下のユーティリティスタイルを使用:
+            - HighContrastTextStyle: TextBlock用
+            - HighContrastBorderStyle: Border用
+            - HighContrastButtonStyle: 追加のボタンカスタマイズ用
+
+         使用例:
+         <TextBlock Style="{StaticResource HighContrastTextStyle}" Text="..." />
+         <Border Style="{StaticResource HighContrastBorderStyle}">...</Border>
+    -->
+
+    <!-- 高コントラスト対応TextBlockスタイル（個別適用用） -->
     <Style x:Key="HighContrastTextStyle" TargetType="TextBlock">
         <Style.Triggers>
             <DataTrigger Binding="{Binding Source={x:Static SystemParameters.HighContrast}}" Value="True">
@@ -245,6 +268,7 @@
         </Style.Triggers>
     </Style>
 
+    <!-- 高コントラスト対応Borderスタイル（個別適用用） -->
     <Style x:Key="HighContrastBorderStyle" TargetType="Border">
         <Style.Triggers>
             <DataTrigger Binding="{Binding Source={x:Static SystemParameters.HighContrast}}" Value="True">
@@ -254,6 +278,7 @@
         </Style.Triggers>
     </Style>
 
+    <!-- 高コントラスト対応Buttonスタイル（個別適用用、AccessibleButtonStyleには既に組み込み済み） -->
     <Style x:Key="HighContrastButtonStyle" TargetType="Button">
         <Style.Triggers>
             <DataTrigger Binding="{Binding Source={x:Static SystemParameters.HighContrast}}" Value="True">
