@@ -40,6 +40,11 @@ public class AppSettings
     /// デフォルト職員のIDm（スキップ時に使用）
     /// </summary>
     public string? DefaultStaffIdm { get; set; }
+
+    /// <summary>
+    /// 音声モード
+    /// </summary>
+    public SoundMode SoundMode { get; set; } = SoundMode.Beep;
 }
 
 /// <summary>
@@ -102,4 +107,30 @@ public enum FontSizeOption
     /// 特大
     /// </summary>
     ExtraLarge
+}
+
+/// <summary>
+/// 音声モードオプション
+/// </summary>
+public enum SoundMode
+{
+    /// <summary>
+    /// 効果音のみ（ピッ/ピピッ）
+    /// </summary>
+    Beep,
+
+    /// <summary>
+    /// 音声（男性）
+    /// </summary>
+    VoiceMale,
+
+    /// <summary>
+    /// 音声（女性）
+    /// </summary>
+    VoiceFemale,
+
+    /// <summary>
+    /// 無し
+    /// </summary>
+    None
 }

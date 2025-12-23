@@ -3,6 +3,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using ICCardManager.Common;
 using ICCardManager.Data.Repositories;
+using ICCardManager.Infrastructure.Sound;
 using ICCardManager.Models;
 using ICCardManager.Services;
 using Microsoft.Win32;
@@ -17,6 +18,7 @@ public partial class SettingsViewModel : ViewModelBase
     private readonly ISettingsRepository _settingsRepository;
     private readonly IStaffRepository _staffRepository;
     private readonly IValidationService _validationService;
+    private readonly ISoundPlayer _soundPlayer;
 
     [ObservableProperty]
     private int _warningBalance;
@@ -71,14 +73,30 @@ public partial class SettingsViewModel : ViewModelBase
     [ObservableProperty]
     private FontSizeItem? _selectedFontSizeItem;
 
+    /// <summary>
+    /// 音声モードの選択肢
+    /// </summary>
+    public ObservableCollection<SoundModeItem> SoundModeOptions { get; } = new()
+    {
+        new SoundModeItem { Value = SoundMode.Beep, DisplayName = "効果音（ピッ/ピピッ）" },
+        new SoundModeItem { Value = SoundMode.VoiceMale, DisplayName = "音声（男性）" },
+        new SoundModeItem { Value = SoundMode.VoiceFemale, DisplayName = "音声（女性）" },
+        new SoundModeItem { Value = SoundMode.None, DisplayName = "無し" }
+    };
+
+    [ObservableProperty]
+    private SoundModeItem? _selectedSoundModeItem;
+
     public SettingsViewModel(
         ISettingsRepository settingsRepository,
         IStaffRepository staffRepository,
-        IValidationService validationService)
+        IValidationService validationService,
+        ISoundPlayer soundPlayer)
     {
         _settingsRepository = settingsRepository;
         _staffRepository = staffRepository;
         _validationService = validationService;
+        _soundPlayer = soundPlayer;
     }
 
     /// <summary>
@@ -106,6 +124,10 @@ public partial class SettingsViewModel : ViewModelBase
             // FontSizeItemを選択
             SelectedFontSizeItem = FontSizeOptions.FirstOrDefault(x => x.Value == settings.FontSize)
                                    ?? FontSizeOptions[1]; // デフォルトは「中」
+
+            // SoundModeItemを選択
+            SelectedSoundModeItem = SoundModeOptions.FirstOrDefault(x => x.Value == settings.SoundMode)
+                                    ?? SoundModeOptions[0]; // デフォルトは「効果音」
 
             // 職員一覧を読み込み
             await LoadStaffListAsync();
@@ -181,6 +203,7 @@ public partial class SettingsViewModel : ViewModelBase
                 WarningBalance = WarningBalance,
                 BackupPath = validatedBackupPath,
                 FontSize = SelectedFontSizeItem?.Value ?? FontSizeOption.Medium,
+                SoundMode = SelectedSoundModeItem?.Value ?? SoundMode.Beep,
                 SkipStaffTouch = SkipStaffTouch,
                 DefaultStaffIdm = SelectedDefaultStaff?.StaffIdm
             };
@@ -200,6 +223,9 @@ public partial class SettingsViewModel : ViewModelBase
 
                 // 文字サイズの変更を反映
                 ApplyFontSize(settings.FontSize);
+
+                // 音声モードの変更を反映
+                _soundPlayer.SoundMode = settings.SoundMode;
 
                 // 保存完了フラグを立てる（ダイアログを閉じるトリガー）
                 IsSaved = true;
@@ -269,6 +295,11 @@ public partial class SettingsViewModel : ViewModelBase
     {
         HasChanges = true;
     }
+
+    partial void OnSelectedSoundModeItemChanged(SoundModeItem? value)
+    {
+        HasChanges = true;
+    }
 }
 
 /// <summary>
@@ -288,4 +319,13 @@ public class StaffItem
 {
     public string StaffIdm { get; set; } = string.Empty;
     public string Name { get; set; } = string.Empty;
+}
+
+/// <summary>
+/// 音声モード選択アイテム
+/// </summary>
+public class SoundModeItem
+{
+    public SoundMode Value { get; set; }
+    public string DisplayName { get; set; } = string.Empty;
 }

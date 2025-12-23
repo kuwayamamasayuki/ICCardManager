@@ -106,6 +106,32 @@
                     </StackPanel>
                 </GroupBox>
 
+                <!-- 音声設定 -->
+                <GroupBox Header="音声設定" Margin="0,0,0,20" Padding="15">
+                    <StackPanel>
+                        <TextBlock Text="貸出・返却時の音声"
+                                   FontWeight="Bold"
+                                   Margin="0,0,0,10"/>
+                        <ComboBox ItemsSource="{Binding SoundModeOptions}"
+                                  SelectedItem="{Binding SelectedSoundModeItem}"
+                                  DisplayMemberPath="DisplayName"
+                                  Padding="8"
+                                  Width="250"
+                                  HorizontalAlignment="Left"
+                                  AutomationProperties.Name="音声モード選択"
+                                  AutomationProperties.HelpText="貸出・返却時に再生される音声を選択します"
+                                  ToolTip="効果音・音声（男性/女性）・無しから選択"/>
+                        <TextBlock Text="※ 音声（男性）:「いってらっしゃい」「おかえりなさい」"
+                                   FontSize="{DynamicResource SmallFontSize}"
+                                   Foreground="Gray"
+                                   Margin="0,5,0,0"/>
+                        <TextBlock Text="※ 音声（女性）:「いってらっしゃい」「おかえりなさい」"
+                                   FontSize="{DynamicResource SmallFontSize}"
+                                   Foreground="Gray"
+                                   Margin="0,2,0,0"/>
+                    </StackPanel>
+                </GroupBox>
+
                 <!-- 操作設定 -->
                 <GroupBox Header="操作設定" Margin="0,0,0,20" Padding="15">
                     <StackPanel>
