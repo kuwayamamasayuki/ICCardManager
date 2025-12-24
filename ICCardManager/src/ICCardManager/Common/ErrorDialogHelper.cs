@@ -10,8 +10,11 @@ namespace ICCardManager.Common;
 /// </summary>
 public static class ErrorDialogHelper
 {
+    /// <summary>
+    /// ログディレクトリ（CommonApplicationDataを使用して全ユーザーで共有）
+    /// </summary>
     private static readonly string LogDirectory = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+        Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
         "ICCardManager",
         "Logs");
 

@@ -42,14 +42,55 @@ public class DbContext : IDisposable
     /// <summary>
     /// デフォルトのデータベースパスを取得
     /// </summary>
+    /// <remarks>
+    /// CommonApplicationData（C:\ProgramData）を使用することで、
+    /// 異なるユーザーがログインしても同じデータにアクセスできるようにする
+    /// </remarks>
     private static string GetDefaultDatabasePath()
     {
         var appDataPath = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
             "ICCardManager");
 
-        Directory.CreateDirectory(appDataPath);
+        // ディレクトリを作成し、全ユーザーがアクセスできるように権限を設定
+        EnsureDirectoryWithPermissions(appDataPath);
+
         return Path.Combine(appDataPath, "iccard.db");
+    }
+
+    /// <summary>
+    /// ディレクトリを作成し、全ユーザーがアクセスできるように権限を設定
+    /// </summary>
+    /// <param name="directoryPath">ディレクトリパス</param>
+    private static void EnsureDirectoryWithPermissions(string directoryPath)
+    {
+        try
+        {
+            if (!Directory.Exists(directoryPath))
+            {
+                var directoryInfo = Directory.CreateDirectory(directoryPath);
+
+                // Usersグループにフルコントロール権限を付与
+                var directorySecurity = directoryInfo.GetAccessControl();
+                var usersIdentity = new SecurityIdentifier(WellKnownSidType.BuiltinUsersSid, null);
+                var accessRule = new FileSystemAccessRule(
+                    usersIdentity,
+                    FileSystemRights.FullControl,
+                    InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit,
+                    PropagationFlags.None,
+                    AccessControlType.Allow);
+                directorySecurity.AddAccessRule(accessRule);
+                directoryInfo.SetAccessControl(directorySecurity);
+
+                System.Diagnostics.Debug.WriteLine($"[DbContext] ディレクトリを作成し権限を設定: {directoryPath}");
+            }
+        }
+        catch (Exception ex)
+        {
+            // 権限設定に失敗してもディレクトリ作成は試みる
+            System.Diagnostics.Debug.WriteLine($"[DbContext] ディレクトリ権限設定エラー: {ex.Message}");
+            Directory.CreateDirectory(directoryPath);
+        }
     }
 
     /// <summary>

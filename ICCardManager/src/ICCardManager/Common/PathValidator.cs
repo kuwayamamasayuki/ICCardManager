@@ -236,10 +236,13 @@ public static partial class PathValidator
     /// <summary>
     /// デフォルトのバックアップパスを取得
     /// </summary>
+    /// <remarks>
+    /// CommonApplicationData（C:\ProgramData）を使用して全ユーザーで共有
+    /// </remarks>
     public static string GetDefaultBackupPath()
     {
         return Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
             "ICCardManager",
             "backup");
     }
