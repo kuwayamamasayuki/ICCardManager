@@ -336,10 +336,13 @@ public class SettingsRepository : ISettingsRepository
     /// <summary>
     /// デフォルトのバックアップパスを取得
     /// </summary>
+    /// <remarks>
+    /// CommonApplicationData（C:\ProgramData）を使用して全ユーザーで共有
+    /// </remarks>
     private static string GetDefaultBackupPath()
     {
         var appDataPath = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
             "ICCardManager",
             "backup");
 
