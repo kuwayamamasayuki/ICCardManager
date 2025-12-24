@@ -258,7 +258,8 @@ public class DbContext : IDisposable
     {
         var connection = GetConnection();
         using var command = connection.CreateCommand();
-        command.CommandText = "DELETE FROM ledger WHERE date < date('now', '-6 years')";
+        // 'localtime'を指定してローカル時間で比較（DateTime.Nowとの整合性のため）
+        command.CommandText = "DELETE FROM ledger WHERE date < date('now', 'localtime', '-6 years')";
         return command.ExecuteNonQuery();
     }
 

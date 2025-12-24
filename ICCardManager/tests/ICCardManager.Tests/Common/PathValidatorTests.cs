@@ -359,7 +359,7 @@ public class PathValidatorTests : IDisposable
     /// デフォルトパスがLocalApplicationData内であることを確認
     /// </summary>
     [Fact]
-    public void GetDefaultBackupPath_ReturnsLocalAppDataPath()
+    public void GetDefaultBackupPath_ReturnsCommonAppDataPath()
     {
         // Act
         var result = PathValidator.GetDefaultBackupPath();
@@ -367,7 +367,8 @@ public class PathValidatorTests : IDisposable
         // Assert
         result.Should().Contain("ICCardManager");
         result.Should().Contain("backup");
-        result.Should().StartWith(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData));
+        // Issue #160: ユーザー非依存の場所（CommonApplicationData）を使用
+        result.Should().StartWith(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData));
     }
 
     /// <summary>

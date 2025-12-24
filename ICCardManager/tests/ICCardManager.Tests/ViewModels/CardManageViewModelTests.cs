@@ -118,12 +118,13 @@ public class CardManageViewModelTests
 
     /// <summary>
     /// IDmを指定して新規登録モードを開始できること
+    /// カード種別はユーザーに手動選択させるため、デフォルト値（nimoca）が設定される
     /// </summary>
     [Fact]
-    public void StartNewCardWithIdm_ShouldSetIdmAndAutoDetectType()
+    public void StartNewCardWithIdm_ShouldSetIdmAndDefaultType()
     {
         // Arrange
-        var idm = "07FE112233445566"; // はやかけん
+        var idm = "07FE112233445566";
 
         // Act
         _viewModel.StartNewCardWithIdm(idm);
@@ -133,39 +134,26 @@ public class CardManageViewModelTests
         _viewModel.IsNewCard.Should().BeTrue();
         _viewModel.IsWaitingForCard.Should().BeFalse(); // IDmがあるので待機しない
         _viewModel.EditCardIdm.Should().Be(idm);
-        _viewModel.EditCardType.Should().Be("はやかけん");
-    }
-
-    /// <summary>
-    /// nimocaのIDmで種別が自動検出されること
-    /// </summary>
-    [Fact]
-    public void StartNewCardWithIdm_WithNimocaIdm_ShouldDetectNimoca()
-    {
-        // Arrange
-        var idm = "05FE112233445566"; // nimoca
-
-        // Act
-        _viewModel.StartNewCardWithIdm(idm);
-
-        // Assert
+        // カード種別は手動選択のためデフォルト値（nimoca）が設定される
         _viewModel.EditCardType.Should().Be("nimoca");
     }
 
     /// <summary>
-    /// SUGOCAのIDmで種別が自動検出されること
+    /// どのIDmでもカード種別はデフォルト値（nimoca）が設定されること
+    /// （IDmからの自動判定は技術的に信頼性が低いため手動選択に変更）
     /// </summary>
-    [Fact]
-    public void StartNewCardWithIdm_WithSugocaIdm_ShouldDetectSugoca()
+    [Theory]
+    [InlineData("05FE112233445566")] // nimoca系IDm
+    [InlineData("06FE112233445566")] // SUGOCA系IDm
+    [InlineData("07FE112233445566")] // はやかけん系IDm
+    [InlineData("01FE112233445566")] // Suica系IDm
+    public void StartNewCardWithIdm_AnyIdm_ShouldSetDefaultType(string idm)
     {
-        // Arrange
-        var idm = "06FE112233445566"; // SUGOCA
-
         // Act
         _viewModel.StartNewCardWithIdm(idm);
 
-        // Assert
-        _viewModel.EditCardType.Should().Be("SUGOCA");
+        // Assert - すべてのIDmでデフォルト値（nimoca）が設定される
+        _viewModel.EditCardType.Should().Be("nimoca");
     }
 
     #endregion
