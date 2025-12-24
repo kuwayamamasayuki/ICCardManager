@@ -49,6 +49,11 @@ public partial class App : Application
     /// </summary>
     public static bool IsStaffCardRegistrationActive { get; set; }
 
+    /// <summary>
+    /// ICカード登録モードが有効かどうか（MainViewModelでの未登録カード処理を抑制するため）
+    /// </summary>
+    public static bool IsCardRegistrationActive { get; set; }
+
     protected override void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);

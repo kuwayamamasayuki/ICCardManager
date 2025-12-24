@@ -695,6 +695,12 @@ public partial class MainViewModel : ViewModelBase
             return;
         }
 
+        // ICカード登録モード中は処理をスキップ（CardManageViewModelが処理する）
+        if (App.IsCardRegistrationActive)
+        {
+            return;
+        }
+
         var cardType = _cardTypeDetector.Detect(idm);
         var cardTypeName = CardTypeDetector.GetDisplayName(cardType);
 

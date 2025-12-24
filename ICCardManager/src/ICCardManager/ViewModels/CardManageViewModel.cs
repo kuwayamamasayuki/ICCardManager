@@ -122,6 +122,9 @@ public partial class CardManageViewModel : ViewModelBase
         EditNote = string.Empty;
         StatusMessage = "カードをタッチするとIDmを読み取ります";
         IsWaitingForCard = true;
+
+        // MainViewModelでの未登録カード処理を抑制
+        App.IsCardRegistrationActive = true;
     }
 
     /// <summary>
@@ -306,6 +309,9 @@ public partial class CardManageViewModel : ViewModelBase
         EditCardNumber = string.Empty;
         EditNote = string.Empty;
         StatusMessage = string.Empty;
+
+        // ICカード登録モードを解除
+        App.IsCardRegistrationActive = false;
     }
 
     /// <summary>
@@ -326,6 +332,9 @@ public partial class CardManageViewModel : ViewModelBase
 
             StatusMessage = "カードを読み取りました。カード種別を確認してください。";
             IsWaitingForCard = false;
+
+            // カード読み取り完了後、フラグを解除
+            App.IsCardRegistrationActive = false;
         });
     }
 
@@ -351,5 +360,8 @@ public partial class CardManageViewModel : ViewModelBase
     public void Cleanup()
     {
         _cardReader.CardRead -= OnCardRead;
+
+        // ダイアログ終了時にフラグを解除
+        App.IsCardRegistrationActive = false;
     }
 }
