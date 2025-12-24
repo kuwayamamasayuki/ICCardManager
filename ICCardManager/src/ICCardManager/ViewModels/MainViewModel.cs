@@ -689,6 +689,12 @@ public partial class MainViewModel : ViewModelBase
     /// </summary>
     private async Task HandleUnregisteredCardAsync(string idm)
     {
+        // 職員証登録モード中は処理をスキップ（StaffManageViewModelが処理する）
+        if (App.IsStaffCardRegistrationActive)
+        {
+            return;
+        }
+
         var cardType = _cardTypeDetector.Detect(idm);
         var cardTypeName = CardTypeDetector.GetDisplayName(cardType);
 

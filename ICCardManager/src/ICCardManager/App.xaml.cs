@@ -44,6 +44,11 @@ public partial class App : Application
     /// </summary>
     public static new App Current => (App)Application.Current;
 
+    /// <summary>
+    /// 職員証登録モードが有効かどうか（MainViewModelでの未登録カード処理を抑制するため）
+    /// </summary>
+    public static bool IsStaffCardRegistrationActive { get; set; }
+
     protected override void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
