@@ -26,6 +26,8 @@
 
 ### 前提条件
 
+#### 必須: pandoc
+
 [pandoc](https://pandoc.org/) がインストールされている必要があります。
 
 ```powershell
@@ -36,10 +38,21 @@ winget install pandoc
 # https://pandoc.org/installing.html
 ```
 
+#### オプション: mermaid-filter（Mermaid図のレンダリング用）
+
+開発者ガイドなどに含まれるMermaid図を画像としてレンダリングするには、[mermaid-filter](https://github.com/raghur/mermaid-filter) が必要です。
+
+```powershell
+# Node.jsがインストールされている環境で
+npm install -g mermaid-filter
+```
+
+> **注意**: mermaid-filterがインストールされていない場合でも変換は可能ですが、Mermaid図はコードブロックのまま出力されます。
+
 ### 変換手順
 
 ```powershell
-# 全マニュアルを変換（更新があるもののみ）
+# 全マニュアルを変換（更新があるもののみ、Mermaid図もレンダリング）
 .\convert-to-docx.ps1
 
 # 全マニュアルを強制変換
@@ -49,21 +62,27 @@ winget install pandoc
 .\convert-to-docx.ps1 -Target user   # ユーザーマニュアル
 .\convert-to-docx.ps1 -Target admin  # 管理者マニュアル
 .\convert-to-docx.ps1 -Target dev    # 開発者ガイド
+
+# Mermaidフィルターを使用しない（高速変換）
+.\convert-to-docx.ps1 -NoMermaid
 ```
 
 バッチファイルを使用する場合:
 
 ```batch
-rem 全マニュアルを変換（更新があるもののみ）
+rem 全マニュアルを変換（更新があるもののみ、Mermaid図もレンダリング）
 convert-to-docx.bat
 
 rem 全マニュアルを強制変換
 convert-to-docx.bat /force
 
 rem 特定のマニュアルのみ変換
-convert-to-docx.bat user   # ユーザーマニュアル
-convert-to-docx.bat admin  # 管理者マニュアル
-convert-to-docx.bat dev    # 開発者ガイド
+convert-to-docx.bat user   rem ユーザーマニュアル
+convert-to-docx.bat admin  rem 管理者マニュアル
+convert-to-docx.bat dev    rem 開発者ガイド
+
+rem Mermaidフィルターを使用しない（高速変換）
+convert-to-docx.bat /nomermaid
 ```
 
 ### 出力ファイル
@@ -86,3 +105,4 @@ Word形式が必要な場合は、編集後に変換スクリプトを実行し�
 - `.docx` ファイルはGitの管理対象外です
 - マニュアルの原本は `.md` ファイルです
 - Word形式は配布用に都度生成してください
+- 開発者ガイドのMermaid図をレンダリングするには `mermaid-filter` が必要です
