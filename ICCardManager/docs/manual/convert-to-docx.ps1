@@ -3,13 +3,18 @@
 #   .\convert-to-docx.ps1              # 全マニュアルを変換（更新があるもののみ）
 #   .\convert-to-docx.ps1 -Force       # 全マニュアルを強制変換
 #   .\convert-to-docx.ps1 -Target user # ユーザーマニュアルのみ変換
-# 前提条件: pandocがインストールされていること
-#   インストール: winget install pandoc または https://pandoc.org/installing.html
+#   .\convert-to-docx.ps1 -NoMermaid   # Mermaidフィルターを使用しない
+# 前提条件:
+#   1. pandocがインストールされていること
+#      インストール: winget install pandoc または https://pandoc.org/installing.html
+#   2. Mermaid図をレンダリングする場合、mermaid-filterが必要
+#      インストール: npm install -g mermaid-filter
 
 param(
     [ValidateSet("all", "user", "admin", "dev")]
     [string]$Target = "all",
-    [switch]$Force
+    [switch]$Force,
+    [switch]$NoMermaid
 )
 
 $ErrorActionPreference = "Stop"
@@ -66,6 +71,23 @@ if (-not $PandocPath) {
     exit 1
 }
 Write-Host "  pandoc: $($PandocPath.Source)" -ForegroundColor Green
+
+# mermaid-filterの確認
+$UseMermaidFilter = $false
+if (-not $NoMermaid) {
+    Write-Host "[準備] mermaid-filterの確認..." -ForegroundColor Yellow
+    $MermaidFilterPath = Get-Command mermaid-filter.cmd -ErrorAction SilentlyContinue
+
+    if ($MermaidFilterPath) {
+        $UseMermaidFilter = $true
+        Write-Host "  mermaid-filter: $($MermaidFilterPath.Source)" -ForegroundColor Green
+    } else {
+        Write-Host "  警告: mermaid-filterが見つかりません。Mermaid図はテキストのまま出力されます。" -ForegroundColor Yellow
+        Write-Host "  インストール: npm install -g mermaid-filter" -ForegroundColor Gray
+    }
+} else {
+    Write-Host "[準備] mermaid-filter: スキップ (-NoMermaid指定)" -ForegroundColor Gray
+}
 Write-Host ""
 
 # 変換結果の追跡
@@ -104,7 +126,11 @@ foreach ($Manual in $Manuals) {
     }
 
     # 変換実行
-    Write-Host "  変換中..." -ForegroundColor Yellow
+    if ($UseMermaidFilter) {
+        Write-Host "  変換中（Mermaidフィルター有効）..." -ForegroundColor Yellow
+    } else {
+        Write-Host "  変換中..." -ForegroundColor Yellow
+    }
 
     $PandocArgs = @(
         $InputPath,
@@ -117,6 +143,11 @@ foreach ($Manual in $Manuals) {
         "--metadata", "author=システム管理者",
         "--metadata", "lang=ja-JP"
     )
+
+    # mermaid-filterが有効な場合、フィルターを追加
+    if ($UseMermaidFilter) {
+        $PandocArgs += @("-F", "mermaid-filter.cmd")
+    }
 
     try {
         & pandoc $PandocArgs

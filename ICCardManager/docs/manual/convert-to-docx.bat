@@ -4,25 +4,39 @@ setlocal enabledelayedexpansion
 
 rem マニュアル Word変換スクリプト
 rem 使用方法:
-rem   convert-to-docx.bat         全マニュアルを変換（更新があるもののみ）
-rem   convert-to-docx.bat /force  全マニュアルを強制変換
-rem   convert-to-docx.bat user    ユーザーマニュアルのみ変換
-rem   convert-to-docx.bat admin   管理者マニュアルのみ変換
-rem   convert-to-docx.bat dev     開発者ガイドのみ変換
+rem   convert-to-docx.bat            全マニュアルを変換（更新があるもののみ）
+rem   convert-to-docx.bat /force     全マニュアルを強制変換
+rem   convert-to-docx.bat /nomermaid Mermaidフィルターを使用しない
+rem   convert-to-docx.bat user       ユーザーマニュアルのみ変換
+rem   convert-to-docx.bat admin      管理者マニュアルのみ変換
+rem   convert-to-docx.bat dev        開発者ガイドのみ変換
+rem 前提条件:
+rem   1. pandocがインストールされていること
+rem   2. Mermaid図をレンダリングする場合、mermaid-filterが必要
+rem      インストール: npm install -g mermaid-filter
 
 set "SCRIPT_DIR=%~dp0"
 set "TARGET=all"
 set "FORCE=0"
+set "NOMERMAID=0"
+set "USE_MERMAID=0"
 set "CONVERTED=0"
 set "SKIPPED=0"
 set "ERRORS=0"
 
 rem 引数の解析
+:parse_args
+if "%~1"=="" goto :done_args
 if "%~1"=="/force" set "FORCE=1"
 if "%~1"=="-force" set "FORCE=1"
+if "%~1"=="/nomermaid" set "NOMERMAID=1"
+if "%~1"=="-nomermaid" set "NOMERMAID=1"
 if "%~1"=="user" set "TARGET=user"
 if "%~1"=="admin" set "TARGET=admin"
 if "%~1"=="dev" set "TARGET=dev"
+shift
+goto :parse_args
+:done_args
 
 echo ======================================
 echo  マニュアル Word変換
@@ -40,6 +54,21 @@ if errorlevel 1 (
     echo.
     pause
     exit /b 1
+)
+
+rem mermaid-filterの確認
+if %NOMERMAID%==0 (
+    where mermaid-filter.cmd >nul 2>&1
+    if errorlevel 1 (
+        echo 警告: mermaid-filterが見つかりません。Mermaid図はテキストのまま出力されます。
+        echo   インストール: npm install -g mermaid-filter
+        echo.
+    ) else (
+        set "USE_MERMAID=1"
+        echo [準備] mermaid-filter: 有効
+    )
+) else (
+    echo [準備] mermaid-filter: スキップ ^(/nomermaid指定^)
 )
 
 rem ユーザーマニュアル
@@ -109,8 +138,13 @@ if %FORCE%==0 (
 )
 
 rem 変換実行
-echo   変換中...
-pandoc "%INPUT_FILE%" -o "%OUTPUT_FILE%" --from markdown --to docx --toc --toc-depth=2 --metadata title="%TITLE%" --metadata author="システム管理者" --metadata lang=ja-JP
+if !USE_MERMAID!==1 (
+    echo   変換中（Mermaidフィルター有効）...
+    pandoc "%INPUT_FILE%" -o "%OUTPUT_FILE%" --from markdown --to docx --toc --toc-depth=2 --metadata title="%TITLE%" --metadata author="システム管理者" --metadata lang=ja-JP -F mermaid-filter.cmd
+) else (
+    echo   変換中...
+    pandoc "%INPUT_FILE%" -o "%OUTPUT_FILE%" --from markdown --to docx --toc --toc-depth=2 --metadata title="%TITLE%" --metadata author="システム管理者" --metadata lang=ja-JP
+)
 
 if errorlevel 1 (
     echo   エラー: 変換に失敗しました
