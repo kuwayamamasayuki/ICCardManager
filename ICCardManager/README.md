@@ -233,9 +233,9 @@ dotnet test --filter "FullyQualifiedName~SummaryGeneratorTests"
 | ドキュメント | 説明 |
 |--------------|------|
 | [設計書一式](docs/design/) | システム設計書（概要、DB、画面、機能、クラス、シーケンス図） |
-| [開発者ガイド](docs/開発者ガイド.md) | 開発・運用・保守向けガイド |
 | [ユーザーマニュアル](docs/manual/ユーザーマニュアル.md) | 一般ユーザー向け操作マニュアル |
 | [管理者マニュアル](docs/manual/管理者マニュアル.md) | システム管理者向けマニュアル |
+| [開発者ガイド](docs/manual/開発者ガイド.md) | 開発・運用・保守向けガイド |
 | [配布手順書](docs/DISTRIBUTION.md) | ビルド・配布手順 |
 
 ## トラブルシューティング
