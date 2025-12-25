@@ -39,20 +39,46 @@ winget install pandoc
 ### 変換手順
 
 ```powershell
-# PowerShellスクリプトを使用
+# 全マニュアルを変換（更新があるもののみ）
 .\convert-to-docx.ps1
 
-# または、バッチファイルを使用
-.\convert-to-docx.bat
+# 全マニュアルを強制変換
+.\convert-to-docx.ps1 -Force
+
+# 特定のマニュアルのみ変換
+.\convert-to-docx.ps1 -Target user   # ユーザーマニュアル
+.\convert-to-docx.ps1 -Target admin  # 管理者マニュアル
+.\convert-to-docx.ps1 -Target dev    # 開発者ガイド
+```
+
+バッチファイルを使用する場合:
+
+```batch
+rem 全マニュアルを変換（更新があるもののみ）
+convert-to-docx.bat
+
+rem 全マニュアルを強制変換
+convert-to-docx.bat /force
+
+rem 特定のマニュアルのみ変換
+convert-to-docx.bat user   # ユーザーマニュアル
+convert-to-docx.bat admin  # 管理者マニュアル
+convert-to-docx.bat dev    # 開発者ガイド
 ```
 
 ### 出力ファイル
 
-変換後、`ユーザーマニュアル.docx` が同じディレクトリに生成されます。
+変換後、以下のファイルが同じディレクトリに生成されます（更新があるもののみ）:
+
+- `ユーザーマニュアル.docx`
+- `管理者マニュアル.docx`
+- `開発者ガイド.docx`
+
+> **注意**: `.md` ファイルより `.docx` ファイルの方が新しい場合は、変換がスキップされます。強制的に変換する場合は `-Force` オプションを使用してください。
 
 ## マニュアルの更新
 
-マニュアルの内容を更新する場合は、`ユーザーマニュアル.md` を編集してください。
+マニュアルの内容を更新する場合は、対応する `.md` ファイルを編集してください。
 Word形式が必要な場合は、編集後に変換スクリプトを実行して再生成してください。
 
 ## 注意事項
