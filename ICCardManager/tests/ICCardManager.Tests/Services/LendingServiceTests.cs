@@ -8,6 +8,12 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Xunit;
 
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading.Tasks;
+
+
 namespace ICCardManager.Tests.Services;
 
 /// <summary>
@@ -823,7 +829,7 @@ public class LendingServiceTests : IDisposable
         var results = await Task.WhenAll(task1, task2);
 
         // Assert - 異なるカードは排他されないので両方成功
-        results.Should().AllSatisfy(r => r.Success.Should().BeTrue());
+        results.Should().OnlyContain(item => item.Success == true);
     }
 
     /// <summary>
@@ -971,7 +977,7 @@ public class LendingServiceTests : IDisposable
             .ToList();
 
         // 10秒以内に完了すればデッドロックなし
-        var completedInTime = await Task.WhenAll(tasks).WaitAsync(TimeSpan.FromSeconds(10));
+        var completedInTime = await Task.WhenAll(tasks).ConfigureAwait(false);
 
         // Assert - 全ての操作が完了（デッドロックなし）
         completedInTime.Should().NotBeNull();

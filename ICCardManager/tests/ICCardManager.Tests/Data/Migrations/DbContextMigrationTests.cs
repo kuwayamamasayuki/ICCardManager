@@ -1,7 +1,13 @@
 using FluentAssertions;
 using ICCardManager.Data;
-using Microsoft.Data.Sqlite;
+using System.Data.SQLite;
 using Xunit;
+
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading.Tasks;
+
 
 namespace ICCardManager.Tests.Data.Migrations;
 
@@ -64,28 +70,26 @@ public class DbContextMigrationTests : IDisposable
         // 既存DBの状態を作成（マイグレーション前の形式）
         using (var cmd = connection.CreateCommand())
         {
-            cmd.CommandText = """
-                CREATE TABLE staff (
-                    staff_idm TEXT PRIMARY KEY,
-                    name TEXT NOT NULL
-                );
-                CREATE TABLE ic_card (
-                    card_idm TEXT PRIMARY KEY,
-                    card_type TEXT NOT NULL,
-                    card_number TEXT NOT NULL
-                );
-                CREATE TABLE ledger (
-                    id INTEGER PRIMARY KEY,
-                    card_idm TEXT NOT NULL,
-                    date TEXT NOT NULL,
-                    summary TEXT NOT NULL,
-                    balance INTEGER NOT NULL
-                );
-                CREATE TABLE settings (
-                    key TEXT PRIMARY KEY,
-                    value TEXT
-                );
-                """;
+            cmd.CommandText = @"CREATE TABLE staff (
+    staff_idm TEXT PRIMARY KEY,
+    name TEXT NOT NULL
+);
+CREATE TABLE ic_card (
+    card_idm TEXT PRIMARY KEY,
+    card_type TEXT NOT NULL,
+    card_number TEXT NOT NULL
+);
+CREATE TABLE ledger (
+    id INTEGER PRIMARY KEY,
+    card_idm TEXT NOT NULL,
+    date TEXT NOT NULL,
+    summary TEXT NOT NULL,
+    balance INTEGER NOT NULL
+);
+CREATE TABLE settings (
+    key TEXT PRIMARY KEY,
+    value TEXT
+);";
             cmd.ExecuteNonQuery();
         }
 
@@ -168,7 +172,7 @@ public class DbContextMigrationTests : IDisposable
         GetSettingValue(connection, "font_size").Should().Be("medium");
     }
 
-    private static void TableShouldExist(SqliteConnection connection, string tableName)
+    private static void TableShouldExist(SQLiteConnection connection, string tableName)
     {
         using var cmd = connection.CreateCommand();
         cmd.CommandText = $"SELECT name FROM sqlite_master WHERE type='table' AND name='{tableName}'";
@@ -176,7 +180,7 @@ public class DbContextMigrationTests : IDisposable
         result.Should().NotBeNull($"テーブル '{tableName}' が存在するべきです");
     }
 
-    private static string? GetSettingValue(SqliteConnection connection, string key)
+    private static string? GetSettingValue(SQLiteConnection connection, string key)
     {
         using var cmd = connection.CreateCommand();
         cmd.CommandText = "SELECT value FROM settings WHERE key = @key";

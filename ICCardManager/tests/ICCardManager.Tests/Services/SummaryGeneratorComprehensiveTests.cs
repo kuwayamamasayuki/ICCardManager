@@ -4,6 +4,12 @@ using ICCardManager.Services;
 using Xunit;
 using Xunit.Abstractions;
 
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading.Tasks;
+
+
 namespace ICCardManager.Tests.Services;
 
 /// <summary>
@@ -286,7 +292,7 @@ public class SummaryGeneratorComprehensiveTests
         results[0].Date.Should().Be(new DateTime(2024, 12, 1));
         results[1].Date.Should().Be(new DateTime(2024, 12, 5));
         results[2].Date.Should().Be(new DateTime(2024, 12, 8));
-        results.Should().AllSatisfy(r => r.IsCharge.Should().BeTrue());
+        results.Should().OnlyContain(item => item.IsCharge == true);
         results.Should().AllSatisfy(r => r.Summary.Should().Be("役務費によりチャージ"));
         OutputInputAndResult(details, results);
     }

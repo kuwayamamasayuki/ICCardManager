@@ -3,6 +3,12 @@ using ICCardManager.Dtos;
 using ICCardManager.Models;
 using Xunit;
 
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading.Tasks;
+
+
 namespace ICCardManager.Tests.Dtos;
 
 /// <summary>

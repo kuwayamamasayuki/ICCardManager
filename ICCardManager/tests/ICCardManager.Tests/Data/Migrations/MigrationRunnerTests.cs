@@ -1,7 +1,13 @@
 using FluentAssertions;
 using ICCardManager.Data.Migrations;
-using Microsoft.Data.Sqlite;
+using System.Data.SQLite;
 using Xunit;
+
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading.Tasks;
+
 
 namespace ICCardManager.Tests.Data.Migrations;
 
@@ -10,11 +16,11 @@ namespace ICCardManager.Tests.Data.Migrations;
 /// </summary>
 public class MigrationRunnerTests : IDisposable
 {
-    private readonly SqliteConnection _connection;
+    private readonly SQLiteConnection _connection;
 
     public MigrationRunnerTests()
     {
-        _connection = new SqliteConnection("Data Source=:memory:");
+        _connection = new SQLiteConnection("Data Source=:memory:");
         _connection.Open();
     }
 
@@ -385,19 +391,17 @@ public class MigrationRunnerTests : IDisposable
         // Arrange - operation_logテーブルを作成
         using (var cmd = _connection.CreateCommand())
         {
-            cmd.CommandText = """
-                CREATE TABLE operation_log (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    timestamp TEXT DEFAULT CURRENT_TIMESTAMP,
-                    operator_idm TEXT NOT NULL,
-                    operator_name TEXT NOT NULL,
-                    target_table TEXT,
-                    target_id TEXT,
-                    action TEXT,
-                    before_data TEXT,
-                    after_data TEXT
-                )
-                """;
+            cmd.CommandText = @"CREATE TABLE operation_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp TEXT DEFAULT CURRENT_TIMESTAMP,
+    operator_idm TEXT NOT NULL,
+    operator_name TEXT NOT NULL,
+    target_table TEXT,
+    target_id TEXT,
+    action TEXT,
+    before_data TEXT,
+    after_data TEXT
+)";
             cmd.ExecuteNonQuery();
         }
 
@@ -444,12 +448,12 @@ public class MigrationRunnerTests : IDisposable
             Description = description;
         }
 
-        public void Up(SqliteConnection connection, SqliteTransaction transaction)
+        public void Up(SQLiteConnection connection, SQLiteTransaction transaction)
         {
             UpCalled = true;
         }
 
-        public void Down(SqliteConnection connection, SqliteTransaction transaction)
+        public void Down(SQLiteConnection connection, SQLiteTransaction transaction)
         {
             DownCalled = true;
         }
@@ -475,12 +479,12 @@ public class MigrationRunnerTests : IDisposable
             Description = description;
         }
 
-        public void Up(SqliteConnection connection, SqliteTransaction transaction)
+        public void Up(SQLiteConnection connection, SQLiteTransaction transaction)
         {
             throw new InvalidOperationException("マイグレーション失敗");
         }
 
-        public void Down(SqliteConnection connection, SqliteTransaction transaction)
+        public void Down(SQLiteConnection connection, SQLiteTransaction transaction)
         {
             // ダウングレードは成功する
         }

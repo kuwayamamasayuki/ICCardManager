@@ -1,7 +1,13 @@
 using FluentAssertions;
 using ICCardManager.Data.Migrations;
-using Microsoft.Data.Sqlite;
+using System.Data.SQLite;
 using Xunit;
+
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading.Tasks;
+
 
 namespace ICCardManager.Tests.Data.Migrations;
 
@@ -10,11 +16,11 @@ namespace ICCardManager.Tests.Data.Migrations;
 /// </summary>
 public class Migration001InitialTests : IDisposable
 {
-    private readonly SqliteConnection _connection;
+    private readonly SQLiteConnection _connection;
 
     public Migration001InitialTests()
     {
-        _connection = new SqliteConnection("Data Source=:memory:");
+        _connection = new SQLiteConnection("Data Source=:memory:");
         _connection.Open();
 
         // 外部キー制約を有効化
