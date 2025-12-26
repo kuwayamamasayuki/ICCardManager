@@ -1,41 +1,46 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading.Tasks;
 using System.Windows;
 using ICCardManager.Common;
 using ICCardManager.ViewModels;
 
-namespace ICCardManager.Views.Dialogs;
-
-/// <summary>
-/// 操作ログ検索ダイアログ
-/// </summary>
-public partial class OperationLogDialog : Window
+namespace ICCardManager.Views.Dialogs
 {
-    private readonly OperationLogSearchViewModel _viewModel;
-
-    public OperationLogDialog(OperationLogSearchViewModel viewModel)
+/// <summary>
+    /// 操作ログ検索ダイアログ
+    /// </summary>
+    public partial class OperationLogDialog : Window
     {
-        InitializeComponent();
+        private readonly OperationLogSearchViewModel _viewModel;
 
-        _viewModel = viewModel;
-        DataContext = _viewModel;
-
-        // 画面表示時に初期検索を実行
-        Loaded += OperationLogDialog_Loaded;
-    }
-
-    private async void OperationLogDialog_Loaded(object sender, RoutedEventArgs e)
-    {
-        try
+        public OperationLogDialog(OperationLogSearchViewModel viewModel)
         {
-            await _viewModel.InitializeAsync();
-        }
-        catch (Exception ex)
-        {
-            ErrorDialogHelper.ShowError(ex, "初期化エラー");
-        }
-    }
+            InitializeComponent();
 
-    private void CloseButton_Click(object sender, RoutedEventArgs e)
-    {
-        Close();
+            _viewModel = viewModel;
+            DataContext = _viewModel;
+
+            // 画面表示時に初期検索を実行
+            Loaded += OperationLogDialog_Loaded;
+        }
+
+        private async void OperationLogDialog_Loaded(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                await _viewModel.InitializeAsync();
+            }
+            catch (Exception ex)
+            {
+                ErrorDialogHelper.ShowError(ex, "初期化エラー");
+            }
+        }
+
+        private void CloseButton_Click(object sender, RoutedEventArgs e)
+        {
+            Close();
+        }
     }
 }

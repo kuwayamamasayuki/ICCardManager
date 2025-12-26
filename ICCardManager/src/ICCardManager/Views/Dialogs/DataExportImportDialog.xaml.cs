@@ -1,24 +1,29 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading.Tasks;
 using System.Windows;
 using ICCardManager.ViewModels;
 
-namespace ICCardManager.Views.Dialogs;
-
-/// <summary>
-/// データエクスポート/インポートダイアログ
-/// </summary>
-public partial class DataExportImportDialog : Window
+namespace ICCardManager.Views.Dialogs
 {
-    public DataExportImportDialog(DataExportImportViewModel viewModel)
-    {
-        InitializeComponent();
-        DataContext = viewModel;
-    }
-
-    /// <summary>
-    /// 閉じるボタンクリック
+/// <summary>
+    /// データエクスポート/インポートダイアログ
     /// </summary>
-    private void CloseButton_Click(object sender, RoutedEventArgs e)
+    public partial class DataExportImportDialog : Window
     {
-        Close();
+        public DataExportImportDialog(DataExportImportViewModel viewModel)
+        {
+            InitializeComponent();
+            DataContext = viewModel;
+        }
+
+        /// <summary>
+        /// 閉じるボタンクリック
+        /// </summary>
+        private void CloseButton_Click(object sender, RoutedEventArgs e)
+        {
+            Close();
+        }
     }
 }

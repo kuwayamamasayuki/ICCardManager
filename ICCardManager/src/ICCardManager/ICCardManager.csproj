@@ -1,12 +1,10 @@
-<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk.WindowsDesktop">
 
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
-    <TargetFramework>net8.0-windows</TargetFramework>
+    <TargetFramework>net48</TargetFramework>
     <UseWPF>true</UseWPF>
-    <Nullable>enable</Nullable>
-    <ImplicitUsings>enable</ImplicitUsings>
-    <LangVersion>12.0</LangVersion>
+    <LangVersion>10.0</LangVersion>
     <RootNamespace>ICCardManager</RootNamespace>
     <AssemblyName>ICCardManager</AssemblyName>
 
@@ -20,17 +18,6 @@
 
     <!-- アプリケーションアイコン -->
     <ApplicationIcon>Resources\app.ico</ApplicationIcon>
-
-    <!-- シングルファイル発行設定（dotnet publish時に使用） -->
-    <PublishSingleFile>true</PublishSingleFile>
-    <SelfContained>true</SelfContained>
-    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
-    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
-
-    <!-- 静的解析 -->
-    <AnalysisLevel>latest</AnalysisLevel>
-    <EnableNETAnalyzers>true</EnableNETAnalyzers>
-    <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
 
     <!-- XMLドキュメント生成 -->
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
@@ -47,23 +34,23 @@
   </ItemGroup>
 
   <ItemGroup>
-    <!-- SQLite -->
-    <PackageReference Include="Microsoft.Data.Sqlite" Version="8.0.0" />
+    <!-- SQLite (.NET Framework対応版) -->
+    <PackageReference Include="System.Data.SQLite.Core" Version="1.0.118" />
 
     <!-- Excel操作 -->
     <PackageReference Include="ClosedXML" Version="0.102.2" />
 
-    <!-- DI Container -->
-    <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="8.0.0" />
-    <PackageReference Include="Microsoft.Extensions.Hosting" Version="8.0.0" />
+    <!-- DI Container (.NET Framework対応版) -->
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="3.1.32" />
+    <PackageReference Include="Microsoft.Extensions.Hosting" Version="3.1.32" />
 
-    <!-- Logging -->
-    <PackageReference Include="Microsoft.Extensions.Logging" Version="8.0.0" />
-    <PackageReference Include="Microsoft.Extensions.Logging.Debug" Version="8.0.0" />
-    <PackageReference Include="Microsoft.Extensions.Configuration.Json" Version="8.0.0" />
+    <!-- Logging (.NET Framework対応版) -->
+    <PackageReference Include="Microsoft.Extensions.Logging" Version="3.1.32" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Debug" Version="3.1.32" />
+    <PackageReference Include="Microsoft.Extensions.Configuration.Json" Version="3.1.32" />
 
-    <!-- Memory Cache -->
-    <PackageReference Include="Microsoft.Extensions.Caching.Memory" Version="8.0.1" />
+    <!-- Memory Cache (.NET Framework対応版) -->
+    <PackageReference Include="Microsoft.Extensions.Caching.Memory" Version="3.1.32" />
 
     <!-- MVVM Toolkit -->
     <PackageReference Include="CommunityToolkit.Mvvm" Version="8.2.2" />
@@ -71,6 +58,13 @@
     <!-- PC/SC (スマートカード) -->
     <PackageReference Include="PCSC" Version="6.1.3" />
     <PackageReference Include="PCSC.Iso7816" Version="6.1.3" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- .NET Framework アセンブリ参照 -->
+    <Reference Include="ReachFramework" />
+    <Reference Include="System.Printing" />
+    <Reference Include="System.Windows.Forms" />
   </ItemGroup>
 
   <ItemGroup>

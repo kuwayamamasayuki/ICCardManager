@@ -9,6 +9,12 @@ using PCSC.Monitoring;
 using Xunit;
 using PcscICardReader = PCSC.ICardReader;
 
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading.Tasks;
+
+
 namespace ICCardManager.Tests.Infrastructure.CardReader;
 
 /// <summary>
@@ -465,10 +471,11 @@ public class PcScCardReaderTests : IDisposable
     public void CardReaderConnectionState_HasCorrectValues()
     {
         // Assert
-        Enum.GetValues<CardReaderConnectionState>().Should().HaveCount(3);
-        CardReaderConnectionState.Connected.Should().BeDefined();
-        CardReaderConnectionState.Disconnected.Should().BeDefined();
-        CardReaderConnectionState.Reconnecting.Should().BeDefined();
+        // .NET Framework 4.8ではEnum.GetValues<T>()が使えないためtypeofを使用
+        Enum.GetValues(typeof(CardReaderConnectionState)).Length.Should().Be(3);
+        Enum.IsDefined(typeof(CardReaderConnectionState), CardReaderConnectionState.Connected).Should().BeTrue();
+        Enum.IsDefined(typeof(CardReaderConnectionState), CardReaderConnectionState.Disconnected).Should().BeTrue();
+        Enum.IsDefined(typeof(CardReaderConnectionState), CardReaderConnectionState.Reconnecting).Should().BeTrue();
     }
 
     #endregion

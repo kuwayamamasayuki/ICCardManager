@@ -7,6 +7,12 @@ using ICCardManager.Services;
 using Moq;
 using Xunit;
 
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading.Tasks;
+
+
 namespace ICCardManager.Tests.Services;
 
 /// <summary>
@@ -83,7 +89,7 @@ public class CsvExportServiceTests : IDisposable
         File.Exists(filePath).Should().BeTrue();
 
         // ファイル内容を確認
-        var lines = await File.ReadAllLinesAsync(filePath, Encoding.UTF8);
+        var lines = await Task.Run(() => File.ReadAllLines(filePath, Encoding.UTF8));
         lines.Should().HaveCount(3); // ヘッダー + 2行
         lines[0].Should().Be("カードIDm,カード種別,管理番号,備考,削除済み");
     }
@@ -111,7 +117,7 @@ public class CsvExportServiceTests : IDisposable
         result.Success.Should().BeTrue();
         result.ExportedCount.Should().Be(2);
 
-        var content = await File.ReadAllTextAsync(filePath, Encoding.UTF8);
+        var content = await Task.Run(() => File.ReadAllText(filePath, Encoding.UTF8));
         content.Should().Contain(",0"); // 削除済み=0
         content.Should().Contain(",1"); // 削除済み=1
     }
@@ -134,7 +140,7 @@ public class CsvExportServiceTests : IDisposable
         result.Success.Should().BeTrue();
         result.ExportedCount.Should().Be(0);
 
-        var lines = await File.ReadAllLinesAsync(filePath, Encoding.UTF8);
+        var lines = await Task.Run(() => File.ReadAllLines(filePath, Encoding.UTF8));
         lines.Should().HaveCount(1); // ヘッダーのみ
     }
 
@@ -165,7 +171,7 @@ public class CsvExportServiceTests : IDisposable
         // Assert
         result.Success.Should().BeTrue();
 
-        var content = await File.ReadAllTextAsync(filePath, Encoding.UTF8);
+        var content = await Task.Run(() => File.ReadAllText(filePath, Encoding.UTF8));
         content.Should().Contain("\"Su,ica\""); // カンマはダブルクォートで囲む
         content.Should().Contain("\"テスト\"\"備考\"\"\""); // ダブルクォートはエスケープ
     }
@@ -200,7 +206,7 @@ public class CsvExportServiceTests : IDisposable
         File.Exists(filePath).Should().BeTrue();
 
         // ファイル内容を確認
-        var lines = await File.ReadAllLinesAsync(filePath, Encoding.UTF8);
+        var lines = await Task.Run(() => File.ReadAllLines(filePath, Encoding.UTF8));
         lines.Should().HaveCount(3); // ヘッダー + 2行
         lines[0].Should().Be("職員IDm,氏名,職員番号,備考,削除済み");
     }
@@ -284,7 +290,7 @@ public class CsvExportServiceTests : IDisposable
         result.FilePath.Should().Be(filePath);
 
         // ファイル内容を確認
-        var lines = await File.ReadAllLinesAsync(filePath, Encoding.UTF8);
+        var lines = await Task.Run(() => File.ReadAllLines(filePath, Encoding.UTF8));
         lines.Should().HaveCount(3); // ヘッダー + 2行
         lines[0].Should().Be("日付,カードIDm,摘要,受入金額,払出金額,残額,利用者,備考");
     }
@@ -312,7 +318,7 @@ public class CsvExportServiceTests : IDisposable
         result.Success.Should().BeTrue();
         result.ExportedCount.Should().Be(0);
 
-        var lines = await File.ReadAllLinesAsync(filePath, Encoding.UTF8);
+        var lines = await Task.Run(() => File.ReadAllLines(filePath, Encoding.UTF8));
         lines.Should().HaveCount(1); // ヘッダーのみ
     }
 

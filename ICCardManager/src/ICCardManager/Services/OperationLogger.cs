@@ -1,239 +1,244 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading.Tasks;
 using System.Text.Json;
 using ICCardManager.Data.Repositories;
 using ICCardManager.Models;
 
-namespace ICCardManager.Services;
-
-/// <summary>
-/// 操作ログ記録サービス
-/// </summary>
-public class OperationLogger
+namespace ICCardManager.Services
 {
-    private readonly IOperationLogRepository _operationLogRepository;
-    private readonly IStaffRepository _staffRepository;
-
-    /// <summary>
-    /// 操作種別
+/// <summary>
+    /// 操作ログ記録サービス
     /// </summary>
-    public static class Actions
+    public class OperationLogger
     {
-        public const string Insert = "INSERT";
-        public const string Update = "UPDATE";
-        public const string Delete = "DELETE";
-    }
+        private readonly IOperationLogRepository _operationLogRepository;
+        private readonly IStaffRepository _staffRepository;
 
-    /// <summary>
-    /// 対象テーブル名
-    /// </summary>
-    public static class Tables
-    {
-        public const string Staff = "staff";
-        public const string IcCard = "ic_card";
-        public const string Ledger = "ledger";
-    }
-
-    public OperationLogger(
-        IOperationLogRepository operationLogRepository,
-        IStaffRepository staffRepository)
-    {
-        _operationLogRepository = operationLogRepository;
-        _staffRepository = staffRepository;
-    }
-
-    /// <summary>
-    /// 職員登録のログを記録
-    /// </summary>
-    public async Task LogStaffInsertAsync(string operatorIdm, Staff staff)
-    {
-        var operatorName = await GetOperatorNameAsync(operatorIdm);
-
-        var log = new OperationLog
+        /// <summary>
+        /// 操作種別
+        /// </summary>
+        public static class Actions
         {
-            Timestamp = DateTime.Now,
-            OperatorIdm = operatorIdm,
-            OperatorName = operatorName,
-            TargetTable = Tables.Staff,
-            TargetId = staff.StaffIdm,
-            Action = Actions.Insert,
-            BeforeData = null,
-            AfterData = SerializeToJson(staff)
-        };
+            public const string Insert = "INSERT";
+            public const string Update = "UPDATE";
+            public const string Delete = "DELETE";
+        }
 
-        await _operationLogRepository.InsertAsync(log);
-    }
-
-    /// <summary>
-    /// 職員更新のログを記録
-    /// </summary>
-    public async Task LogStaffUpdateAsync(string operatorIdm, Staff beforeStaff, Staff afterStaff)
-    {
-        var operatorName = await GetOperatorNameAsync(operatorIdm);
-
-        var log = new OperationLog
+        /// <summary>
+        /// 対象テーブル名
+        /// </summary>
+        public static class Tables
         {
-            Timestamp = DateTime.Now,
-            OperatorIdm = operatorIdm,
-            OperatorName = operatorName,
-            TargetTable = Tables.Staff,
-            TargetId = afterStaff.StaffIdm,
-            Action = Actions.Update,
-            BeforeData = SerializeToJson(beforeStaff),
-            AfterData = SerializeToJson(afterStaff)
-        };
+            public const string Staff = "staff";
+            public const string IcCard = "ic_card";
+            public const string Ledger = "ledger";
+        }
 
-        await _operationLogRepository.InsertAsync(log);
-    }
-
-    /// <summary>
-    /// 職員削除のログを記録
-    /// </summary>
-    public async Task LogStaffDeleteAsync(string operatorIdm, Staff staff)
-    {
-        var operatorName = await GetOperatorNameAsync(operatorIdm);
-
-        var log = new OperationLog
+        public OperationLogger(
+            IOperationLogRepository operationLogRepository,
+            IStaffRepository staffRepository)
         {
-            Timestamp = DateTime.Now,
-            OperatorIdm = operatorIdm,
-            OperatorName = operatorName,
-            TargetTable = Tables.Staff,
-            TargetId = staff.StaffIdm,
-            Action = Actions.Delete,
-            BeforeData = SerializeToJson(staff),
-            AfterData = null
-        };
+            _operationLogRepository = operationLogRepository;
+            _staffRepository = staffRepository;
+        }
 
-        await _operationLogRepository.InsertAsync(log);
-    }
-
-    /// <summary>
-    /// ICカード登録のログを記録
-    /// </summary>
-    public async Task LogCardInsertAsync(string operatorIdm, IcCard card)
-    {
-        var operatorName = await GetOperatorNameAsync(operatorIdm);
-
-        var log = new OperationLog
+        /// <summary>
+        /// 職員登録のログを記録
+        /// </summary>
+        public async Task LogStaffInsertAsync(string operatorIdm, Staff staff)
         {
-            Timestamp = DateTime.Now,
-            OperatorIdm = operatorIdm,
-            OperatorName = operatorName,
-            TargetTable = Tables.IcCard,
-            TargetId = card.CardIdm,
-            Action = Actions.Insert,
-            BeforeData = null,
-            AfterData = SerializeToJson(card)
-        };
+            var operatorName = await GetOperatorNameAsync(operatorIdm);
 
-        await _operationLogRepository.InsertAsync(log);
-    }
+            var log = new OperationLog
+            {
+                Timestamp = DateTime.Now,
+                OperatorIdm = operatorIdm,
+                OperatorName = operatorName,
+                TargetTable = Tables.Staff,
+                TargetId = staff.StaffIdm,
+                Action = Actions.Insert,
+                BeforeData = null,
+                AfterData = SerializeToJson(staff)
+            };
 
-    /// <summary>
-    /// ICカード更新のログを記録
-    /// </summary>
-    public async Task LogCardUpdateAsync(string operatorIdm, IcCard beforeCard, IcCard afterCard)
-    {
-        var operatorName = await GetOperatorNameAsync(operatorIdm);
+            await _operationLogRepository.InsertAsync(log);
+        }
 
-        var log = new OperationLog
+        /// <summary>
+        /// 職員更新のログを記録
+        /// </summary>
+        public async Task LogStaffUpdateAsync(string operatorIdm, Staff beforeStaff, Staff afterStaff)
         {
-            Timestamp = DateTime.Now,
-            OperatorIdm = operatorIdm,
-            OperatorName = operatorName,
-            TargetTable = Tables.IcCard,
-            TargetId = afterCard.CardIdm,
-            Action = Actions.Update,
-            BeforeData = SerializeToJson(beforeCard),
-            AfterData = SerializeToJson(afterCard)
-        };
+            var operatorName = await GetOperatorNameAsync(operatorIdm);
 
-        await _operationLogRepository.InsertAsync(log);
-    }
+            var log = new OperationLog
+            {
+                Timestamp = DateTime.Now,
+                OperatorIdm = operatorIdm,
+                OperatorName = operatorName,
+                TargetTable = Tables.Staff,
+                TargetId = afterStaff.StaffIdm,
+                Action = Actions.Update,
+                BeforeData = SerializeToJson(beforeStaff),
+                AfterData = SerializeToJson(afterStaff)
+            };
 
-    /// <summary>
-    /// ICカード削除のログを記録
-    /// </summary>
-    public async Task LogCardDeleteAsync(string operatorIdm, IcCard card)
-    {
-        var operatorName = await GetOperatorNameAsync(operatorIdm);
+            await _operationLogRepository.InsertAsync(log);
+        }
 
-        var log = new OperationLog
+        /// <summary>
+        /// 職員削除のログを記録
+        /// </summary>
+        public async Task LogStaffDeleteAsync(string operatorIdm, Staff staff)
         {
-            Timestamp = DateTime.Now,
-            OperatorIdm = operatorIdm,
-            OperatorName = operatorName,
-            TargetTable = Tables.IcCard,
-            TargetId = card.CardIdm,
-            Action = Actions.Delete,
-            BeforeData = SerializeToJson(card),
-            AfterData = null
-        };
+            var operatorName = await GetOperatorNameAsync(operatorIdm);
 
-        await _operationLogRepository.InsertAsync(log);
-    }
+            var log = new OperationLog
+            {
+                Timestamp = DateTime.Now,
+                OperatorIdm = operatorIdm,
+                OperatorName = operatorName,
+                TargetTable = Tables.Staff,
+                TargetId = staff.StaffIdm,
+                Action = Actions.Delete,
+                BeforeData = SerializeToJson(staff),
+                AfterData = null
+            };
 
-    /// <summary>
-    /// 履歴更新のログを記録
-    /// </summary>
-    public async Task LogLedgerUpdateAsync(string operatorIdm, Ledger beforeLedger, Ledger afterLedger)
-    {
-        var operatorName = await GetOperatorNameAsync(operatorIdm);
+            await _operationLogRepository.InsertAsync(log);
+        }
 
-        var log = new OperationLog
+        /// <summary>
+        /// ICカード登録のログを記録
+        /// </summary>
+        public async Task LogCardInsertAsync(string operatorIdm, IcCard card)
         {
-            Timestamp = DateTime.Now,
-            OperatorIdm = operatorIdm,
-            OperatorName = operatorName,
-            TargetTable = Tables.Ledger,
-            TargetId = afterLedger.Id.ToString(),
-            Action = Actions.Update,
-            BeforeData = SerializeToJson(beforeLedger),
-            AfterData = SerializeToJson(afterLedger)
-        };
+            var operatorName = await GetOperatorNameAsync(operatorIdm);
 
-        await _operationLogRepository.InsertAsync(log);
-    }
+            var log = new OperationLog
+            {
+                Timestamp = DateTime.Now,
+                OperatorIdm = operatorIdm,
+                OperatorName = operatorName,
+                TargetTable = Tables.IcCard,
+                TargetId = card.CardIdm,
+                Action = Actions.Insert,
+                BeforeData = null,
+                AfterData = SerializeToJson(card)
+            };
 
-    /// <summary>
-    /// 履歴削除のログを記録
-    /// </summary>
-    public async Task LogLedgerDeleteAsync(string operatorIdm, Ledger ledger)
-    {
-        var operatorName = await GetOperatorNameAsync(operatorIdm);
+            await _operationLogRepository.InsertAsync(log);
+        }
 
-        var log = new OperationLog
+        /// <summary>
+        /// ICカード更新のログを記録
+        /// </summary>
+        public async Task LogCardUpdateAsync(string operatorIdm, IcCard beforeCard, IcCard afterCard)
         {
-            Timestamp = DateTime.Now,
-            OperatorIdm = operatorIdm,
-            OperatorName = operatorName,
-            TargetTable = Tables.Ledger,
-            TargetId = ledger.Id.ToString(),
-            Action = Actions.Delete,
-            BeforeData = SerializeToJson(ledger),
-            AfterData = null
-        };
+            var operatorName = await GetOperatorNameAsync(operatorIdm);
 
-        await _operationLogRepository.InsertAsync(log);
-    }
+            var log = new OperationLog
+            {
+                Timestamp = DateTime.Now,
+                OperatorIdm = operatorIdm,
+                OperatorName = operatorName,
+                TargetTable = Tables.IcCard,
+                TargetId = afterCard.CardIdm,
+                Action = Actions.Update,
+                BeforeData = SerializeToJson(beforeCard),
+                AfterData = SerializeToJson(afterCard)
+            };
 
-    /// <summary>
-    /// 操作者の氏名を取得
-    /// </summary>
-    private async Task<string> GetOperatorNameAsync(string operatorIdm)
-    {
-        var staff = await _staffRepository.GetByIdmAsync(operatorIdm, includeDeleted: true);
-        return staff?.Name ?? "不明";
-    }
+            await _operationLogRepository.InsertAsync(log);
+        }
 
-    /// <summary>
-    /// オブジェクトをJSON文字列にシリアライズ
-    /// </summary>
-    private static string SerializeToJson<T>(T obj)
-    {
-        return JsonSerializer.Serialize(obj, new JsonSerializerOptions
+        /// <summary>
+        /// ICカード削除のログを記録
+        /// </summary>
+        public async Task LogCardDeleteAsync(string operatorIdm, IcCard card)
         {
-            WriteIndented = false,
-            Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping
-        });
+            var operatorName = await GetOperatorNameAsync(operatorIdm);
+
+            var log = new OperationLog
+            {
+                Timestamp = DateTime.Now,
+                OperatorIdm = operatorIdm,
+                OperatorName = operatorName,
+                TargetTable = Tables.IcCard,
+                TargetId = card.CardIdm,
+                Action = Actions.Delete,
+                BeforeData = SerializeToJson(card),
+                AfterData = null
+            };
+
+            await _operationLogRepository.InsertAsync(log);
+        }
+
+        /// <summary>
+        /// 履歴更新のログを記録
+        /// </summary>
+        public async Task LogLedgerUpdateAsync(string operatorIdm, Ledger beforeLedger, Ledger afterLedger)
+        {
+            var operatorName = await GetOperatorNameAsync(operatorIdm);
+
+            var log = new OperationLog
+            {
+                Timestamp = DateTime.Now,
+                OperatorIdm = operatorIdm,
+                OperatorName = operatorName,
+                TargetTable = Tables.Ledger,
+                TargetId = afterLedger.Id.ToString(),
+                Action = Actions.Update,
+                BeforeData = SerializeToJson(beforeLedger),
+                AfterData = SerializeToJson(afterLedger)
+            };
+
+            await _operationLogRepository.InsertAsync(log);
+        }
+
+        /// <summary>
+        /// 履歴削除のログを記録
+        /// </summary>
+        public async Task LogLedgerDeleteAsync(string operatorIdm, Ledger ledger)
+        {
+            var operatorName = await GetOperatorNameAsync(operatorIdm);
+
+            var log = new OperationLog
+            {
+                Timestamp = DateTime.Now,
+                OperatorIdm = operatorIdm,
+                OperatorName = operatorName,
+                TargetTable = Tables.Ledger,
+                TargetId = ledger.Id.ToString(),
+                Action = Actions.Delete,
+                BeforeData = SerializeToJson(ledger),
+                AfterData = null
+            };
+
+            await _operationLogRepository.InsertAsync(log);
+        }
+
+        /// <summary>
+        /// 操作者の氏名を取得
+        /// </summary>
+        private async Task<string> GetOperatorNameAsync(string operatorIdm)
+        {
+            var staff = await _staffRepository.GetByIdmAsync(operatorIdm, includeDeleted: true);
+            return staff?.Name ?? "不明";
+        }
+
+        /// <summary>
+        /// オブジェクトをJSON文字列にシリアライズ
+        /// </summary>
+        private static string SerializeToJson<T>(T obj)
+        {
+            return JsonSerializer.Serialize(obj, new JsonSerializerOptions
+            {
+                WriteIndented = false,
+                Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping
+            });
+        }
     }
 }

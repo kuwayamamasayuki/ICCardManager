@@ -8,6 +8,12 @@ using ICCardManager.Models;
 using ICCardManager.Services;
 using Microsoft.Win32;
 
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading.Tasks;
+
+
 namespace ICCardManager.ViewModels;
 
 /// <summary>
@@ -243,18 +249,21 @@ public partial class SettingsViewModel : ViewModelBase
     [RelayCommand]
     public void BrowseBackupPath()
     {
-        var dialog = new OpenFolderDialog
+        // .NET Framework 4.8ではOpenFolderDialogがないためFolderBrowserDialogを使用
+        using (var dialog = new System.Windows.Forms.FolderBrowserDialog
         {
-            Title = "バックアップ先フォルダを選択",
-            InitialDirectory = string.IsNullOrEmpty(BackupPath)
+            Description = "バックアップ先フォルダを選択",
+            SelectedPath = string.IsNullOrEmpty(BackupPath)
                 ? Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments)
-                : BackupPath
-        };
-
-        if (dialog.ShowDialog() == true)
+                : BackupPath,
+            ShowNewFolderButton = true
+        })
         {
-            BackupPath = dialog.FolderName;
-            HasChanges = true;
+            if (dialog.ShowDialog() == System.Windows.Forms.DialogResult.OK)
+            {
+                BackupPath = dialog.SelectedPath;
+                HasChanges = true;
+            }
         }
     }
 

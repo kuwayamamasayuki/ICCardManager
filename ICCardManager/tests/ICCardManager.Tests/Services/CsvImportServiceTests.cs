@@ -6,9 +6,15 @@ using ICCardManager.Data.Repositories;
 using ICCardManager.Infrastructure.Caching;
 using ICCardManager.Models;
 using ICCardManager.Services;
-using Microsoft.Data.Sqlite;
+using System.Data.SQLite;
 using Moq;
 using Xunit;
+
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading.Tasks;
+
 
 namespace ICCardManager.Tests.Services;
 
@@ -24,7 +30,7 @@ public class CsvImportServiceTests : IDisposable
     private readonly Mock<IValidationService> _validationServiceMock;
     private readonly Mock<DbContext> _dbContextMock;
     private readonly Mock<ICacheService> _cacheServiceMock;
-    private readonly SqliteConnection _connection;
+    private readonly SQLiteConnection _connection;
     private readonly CsvImportService _service;
 
     // UTF-8 with BOM (Excel対応)
@@ -52,7 +58,7 @@ public class CsvImportServiceTests : IDisposable
 
         // トランザクションのモック（実際のトランザクションは使用しない）
         var connectionString = "Data Source=:memory:";
-        _connection = new SqliteConnection(connectionString);
+        _connection = new SQLiteConnection(connectionString);
         _connection.Open();
         var transaction = _connection.BeginTransaction();
 
@@ -97,17 +103,15 @@ public class CsvImportServiceTests : IDisposable
     public async Task ImportCardsAsync_WithValidData_ImportsSuccessfully()
     {
         // Arrange
-        var csvContent = """
-            カードIDm,カード種別,管理番号,備考
-            0123456789ABCDEF,Suica,001,テスト1
-            FEDCBA9876543210,PASMO,002,テスト2
-            """;
+        var csvContent = @"カードIDm,カード種別,管理番号,備考
+0123456789ABCDEF,Suica,001,テスト1
+FEDCBA9876543210,PASMO,002,テスト2";
 
         var filePath = Path.Combine(_testDirectory, "cards_import.csv");
-        await File.WriteAllTextAsync(filePath, csvContent, CsvEncoding);
+        await Task.Run(() => File.WriteAllText(filePath, csvContent, CsvEncoding));
 
         _cardRepositoryMock.Setup(x => x.GetByIdmAsync(It.IsAny<string>(), true)).ReturnsAsync((IcCard?)null);
-        _cardRepositoryMock.Setup(x => x.InsertAsync(It.IsAny<IcCard>(), It.IsAny<SqliteTransaction>())).ReturnsAsync(true);
+        _cardRepositoryMock.Setup(x => x.InsertAsync(It.IsAny<IcCard>(), It.IsAny<SQLiteTransaction>())).ReturnsAsync(true);
 
         // Act
         var result = await _service.ImportCardsAsync(filePath);
@@ -125,13 +129,11 @@ public class CsvImportServiceTests : IDisposable
     public async Task ImportCardsAsync_ExistingCard_Skipped()
     {
         // Arrange
-        var csvContent = """
-            カードIDm,カード種別,管理番号,備考
-            0123456789ABCDEF,Suica,001,テスト
-            """;
+        var csvContent = @"カードIDm,カード種別,管理番号,備考
+0123456789ABCDEF,Suica,001,テスト";
 
         var filePath = Path.Combine(_testDirectory, "cards_existing.csv");
-        await File.WriteAllTextAsync(filePath, csvContent, CsvEncoding);
+        await Task.Run(() => File.WriteAllText(filePath, csvContent, CsvEncoding));
 
         var existingCard = new IcCard { CardIdm = "0123456789ABCDEF", CardType = "Suica", CardNumber = "001" };
         _cardRepositoryMock.Setup(x => x.GetByIdmAsync("0123456789ABCDEF", true)).ReturnsAsync(existingCard);
@@ -152,13 +154,11 @@ public class CsvImportServiceTests : IDisposable
     public async Task ImportCardsAsync_InvalidIdm_ReturnsValidationError()
     {
         // Arrange
-        var csvContent = """
-            カードIDm,カード種別,管理番号,備考
-            INVALID_IDM,Suica,001,テスト
-            """;
+        var csvContent = @"カードIDm,カード種別,管理番号,備考
+INVALID_IDM,Suica,001,テスト";
 
         var filePath = Path.Combine(_testDirectory, "cards_invalid.csv");
-        await File.WriteAllTextAsync(filePath, csvContent, CsvEncoding);
+        await Task.Run(() => File.WriteAllText(filePath, csvContent, CsvEncoding));
 
         _validationServiceMock.Setup(x => x.ValidateCardIdm("INVALID_IDM"))
             .Returns(ValidationResult.Failure("IDmの形式が不正です"));
@@ -179,13 +179,11 @@ public class CsvImportServiceTests : IDisposable
     public async Task ImportCardsAsync_MissingRequiredFields_ReturnsError()
     {
         // Arrange
-        var csvContent = """
-            カードIDm,カード種別,管理番号,備考
-            ,Suica,001,テスト
-            """;
+        var csvContent = @"カードIDm,カード種別,管理番号,備考
+,Suica,001,テスト";
 
         var filePath = Path.Combine(_testDirectory, "cards_missing.csv");
-        await File.WriteAllTextAsync(filePath, csvContent, CsvEncoding);
+        await Task.Run(() => File.WriteAllText(filePath, csvContent, CsvEncoding));
 
         // Act
         var result = await _service.ImportCardsAsync(filePath);
@@ -206,7 +204,7 @@ public class CsvImportServiceTests : IDisposable
         var csvContent = "カードIDm,カード種別,管理番号,備考";
 
         var filePath = Path.Combine(_testDirectory, "cards_header_only.csv");
-        await File.WriteAllTextAsync(filePath, csvContent, CsvEncoding);
+        await Task.Run(() => File.WriteAllText(filePath, csvContent, CsvEncoding));
 
         // Act
         var result = await _service.ImportCardsAsync(filePath);
@@ -227,17 +225,15 @@ public class CsvImportServiceTests : IDisposable
     public async Task ImportStaffAsync_WithValidData_ImportsSuccessfully()
     {
         // Arrange
-        var csvContent = """
-            職員IDm,氏名,職員番号,備考
-            0123456789ABCDEF,山田太郎,001,テスト1
-            FEDCBA9876543210,鈴木花子,002,テスト2
-            """;
+        var csvContent = @"職員IDm,氏名,職員番号,備考
+0123456789ABCDEF,山田太郎,001,テスト1
+FEDCBA9876543210,鈴木花子,002,テスト2";
 
         var filePath = Path.Combine(_testDirectory, "staff_import.csv");
-        await File.WriteAllTextAsync(filePath, csvContent, CsvEncoding);
+        await Task.Run(() => File.WriteAllText(filePath, csvContent, CsvEncoding));
 
         _staffRepositoryMock.Setup(x => x.GetByIdmAsync(It.IsAny<string>(), true)).ReturnsAsync((Staff?)null);
-        _staffRepositoryMock.Setup(x => x.InsertAsync(It.IsAny<Staff>(), It.IsAny<SqliteTransaction>())).ReturnsAsync(true);
+        _staffRepositoryMock.Setup(x => x.InsertAsync(It.IsAny<Staff>(), It.IsAny<SQLiteTransaction>())).ReturnsAsync(true);
 
         // Act
         var result = await _service.ImportStaffAsync(filePath);
@@ -255,13 +251,11 @@ public class CsvImportServiceTests : IDisposable
     public async Task ImportStaffAsync_ExistingStaff_Skipped()
     {
         // Arrange
-        var csvContent = """
-            職員IDm,氏名,職員番号,備考
-            0123456789ABCDEF,山田太郎,001,テスト
-            """;
+        var csvContent = @"職員IDm,氏名,職員番号,備考
+0123456789ABCDEF,山田太郎,001,テスト";
 
         var filePath = Path.Combine(_testDirectory, "staff_existing.csv");
-        await File.WriteAllTextAsync(filePath, csvContent, CsvEncoding);
+        await Task.Run(() => File.WriteAllText(filePath, csvContent, CsvEncoding));
 
         var existingStaff = new Staff { StaffIdm = "0123456789ABCDEF", Name = "山田太郎", Number = "001" };
         _staffRepositoryMock.Setup(x => x.GetByIdmAsync("0123456789ABCDEF", true)).ReturnsAsync(existingStaff);
@@ -282,13 +276,11 @@ public class CsvImportServiceTests : IDisposable
     public async Task ImportStaffAsync_MissingName_ReturnsError()
     {
         // Arrange
-        var csvContent = """
-            職員IDm,氏名,職員番号,備考
-            0123456789ABCDEF,,001,テスト
-            """;
+        var csvContent = @"職員IDm,氏名,職員番号,備考
+0123456789ABCDEF,,001,テスト";
 
         var filePath = Path.Combine(_testDirectory, "staff_missing_name.csv");
-        await File.WriteAllTextAsync(filePath, csvContent, CsvEncoding);
+        await Task.Run(() => File.WriteAllText(filePath, csvContent, CsvEncoding));
 
         // Act
         var result = await _service.ImportStaffAsync(filePath);
@@ -310,14 +302,12 @@ public class CsvImportServiceTests : IDisposable
     public async Task PreviewCardsAsync_WithValidData_ReturnsPreview()
     {
         // Arrange
-        var csvContent = """
-            カードIDm,カード種別,管理番号,備考
-            0123456789ABCDEF,Suica,001,テスト1
-            FEDCBA9876543210,PASMO,002,テスト2
-            """;
+        var csvContent = @"カードIDm,カード種別,管理番号,備考
+0123456789ABCDEF,Suica,001,テスト1
+FEDCBA9876543210,PASMO,002,テスト2";
 
         var filePath = Path.Combine(_testDirectory, "cards_preview.csv");
-        await File.WriteAllTextAsync(filePath, csvContent, CsvEncoding);
+        await Task.Run(() => File.WriteAllText(filePath, csvContent, CsvEncoding));
 
         _cardRepositoryMock.Setup(x => x.GetByIdmAsync(It.IsAny<string>(), true)).ReturnsAsync((IcCard?)null);
 
@@ -340,13 +330,11 @@ public class CsvImportServiceTests : IDisposable
     public async Task PreviewCardsAsync_ExistingCard_ShowsAsSkip()
     {
         // Arrange
-        var csvContent = """
-            カードIDm,カード種別,管理番号,備考
-            0123456789ABCDEF,Suica,001,テスト
-            """;
+        var csvContent = @"カードIDm,カード種別,管理番号,備考
+0123456789ABCDEF,Suica,001,テスト";
 
         var filePath = Path.Combine(_testDirectory, "cards_preview_existing.csv");
-        await File.WriteAllTextAsync(filePath, csvContent, CsvEncoding);
+        await Task.Run(() => File.WriteAllText(filePath, csvContent, CsvEncoding));
 
         var existingCard = new IcCard { CardIdm = "0123456789ABCDEF", CardType = "Suica", CardNumber = "001" };
         _cardRepositoryMock.Setup(x => x.GetByIdmAsync("0123456789ABCDEF", true)).ReturnsAsync(existingCard);
@@ -368,13 +356,11 @@ public class CsvImportServiceTests : IDisposable
     public async Task PreviewCardsAsync_ExistingCardNoSkip_ShowsAsUpdate()
     {
         // Arrange
-        var csvContent = """
-            カードIDm,カード種別,管理番号,備考
-            0123456789ABCDEF,Suica,001,テスト
-            """;
+        var csvContent = @"カードIDm,カード種別,管理番号,備考
+0123456789ABCDEF,Suica,001,テスト";
 
         var filePath = Path.Combine(_testDirectory, "cards_preview_update.csv");
-        await File.WriteAllTextAsync(filePath, csvContent, CsvEncoding);
+        await Task.Run(() => File.WriteAllText(filePath, csvContent, CsvEncoding));
 
         var existingCard = new IcCard { CardIdm = "0123456789ABCDEF", CardType = "Suica", CardNumber = "001" };
         _cardRepositoryMock.Setup(x => x.GetByIdmAsync("0123456789ABCDEF", true)).ReturnsAsync(existingCard);
@@ -395,13 +381,11 @@ public class CsvImportServiceTests : IDisposable
     public async Task PreviewCardsAsync_ValidationError_ReturnsInvalid()
     {
         // Arrange
-        var csvContent = """
-            カードIDm,カード種別,管理番号,備考
-            INVALID_IDM,Suica,001,テスト
-            """;
+        var csvContent = @"カードIDm,カード種別,管理番号,備考
+INVALID_IDM,Suica,001,テスト";
 
         var filePath = Path.Combine(_testDirectory, "cards_preview_invalid.csv");
-        await File.WriteAllTextAsync(filePath, csvContent, CsvEncoding);
+        await Task.Run(() => File.WriteAllText(filePath, csvContent, CsvEncoding));
 
         _validationServiceMock.Setup(x => x.ValidateCardIdm("INVALID_IDM"))
             .Returns(ValidationResult.Failure("IDmの形式が不正です"));
@@ -425,14 +409,12 @@ public class CsvImportServiceTests : IDisposable
     public async Task PreviewStaffAsync_WithValidData_ReturnsPreview()
     {
         // Arrange
-        var csvContent = """
-            職員IDm,氏名,職員番号,備考
-            0123456789ABCDEF,山田太郎,001,テスト1
-            FEDCBA9876543210,鈴木花子,002,テスト2
-            """;
+        var csvContent = @"職員IDm,氏名,職員番号,備考
+0123456789ABCDEF,山田太郎,001,テスト1
+FEDCBA9876543210,鈴木花子,002,テスト2";
 
         var filePath = Path.Combine(_testDirectory, "staff_preview.csv");
-        await File.WriteAllTextAsync(filePath, csvContent, CsvEncoding);
+        await Task.Run(() => File.WriteAllText(filePath, csvContent, CsvEncoding));
 
         _staffRepositoryMock.Setup(x => x.GetByIdmAsync(It.IsAny<string>(), true)).ReturnsAsync((Staff?)null);
 
@@ -461,18 +443,16 @@ public class CsvImportServiceTests : IDisposable
     public async Task ImportCardsAsync_QuotedFields_ParsesCorrectly()
     {
         // Arrange
-        var csvContent = """
-            カードIDm,カード種別,管理番号,備考
-            0123456789ABCDEF,"Su,ica",001,"テスト,備考"
-            """;
+        var csvContent = @"カードIDm,カード種別,管理番号,備考
+0123456789ABCDEF,""Su,ica"",001,""テスト,備考""";
 
         var filePath = Path.Combine(_testDirectory, "cards_quoted.csv");
-        await File.WriteAllTextAsync(filePath, csvContent, CsvEncoding);
+        await Task.Run(() => File.WriteAllText(filePath, csvContent, CsvEncoding));
 
         _cardRepositoryMock.Setup(x => x.GetByIdmAsync(It.IsAny<string>(), true)).ReturnsAsync((IcCard?)null);
         _cardRepositoryMock
-            .Setup(x => x.InsertAsync(It.IsAny<IcCard>(), It.IsAny<SqliteTransaction>()))
-            .Callback<IcCard, SqliteTransaction>((card, _) =>
+            .Setup(x => x.InsertAsync(It.IsAny<IcCard>(), It.IsAny<SQLiteTransaction>()))
+            .Callback<IcCard, SQLiteTransaction>((card, _) =>
             {
                 // カード種別が正しくパースされているか確認
                 card.CardType.Should().Be("Su,ica");
@@ -499,12 +479,12 @@ public class CsvImportServiceTests : IDisposable
 
 
         var filePath = Path.Combine(_testDirectory, "cards_escaped.csv");
-        await File.WriteAllTextAsync(filePath, csvContent, CsvEncoding);
+        await Task.Run(() => File.WriteAllText(filePath, csvContent, CsvEncoding));
 
         _cardRepositoryMock.Setup(x => x.GetByIdmAsync(It.IsAny<string>(), true)).ReturnsAsync((IcCard?)null);
         _cardRepositoryMock
-            .Setup(x => x.InsertAsync(It.IsAny<IcCard>(), It.IsAny<SqliteTransaction>()))
-            .Callback<IcCard, SqliteTransaction>((card, _) =>
+            .Setup(x => x.InsertAsync(It.IsAny<IcCard>(), It.IsAny<SQLiteTransaction>()))
+            .Callback<IcCard, SQLiteTransaction>((card, _) =>
             {
                 // エスケープされたダブルクォートが正しくパースされているか確認
                 card.Note.Should().Be("テスト\"備考\"");

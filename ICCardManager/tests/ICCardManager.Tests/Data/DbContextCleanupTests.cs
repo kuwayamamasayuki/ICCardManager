@@ -7,6 +7,12 @@ using ICCardManager.Models;
 using Moq;
 using Xunit;
 
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading.Tasks;
+
+
 namespace ICCardManager.Tests.Data;
 
 /// <summary>

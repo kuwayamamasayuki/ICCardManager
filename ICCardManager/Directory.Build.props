@@ -1,8 +1,7 @@
 <Project>
   <PropertyGroup>
     <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
-    <Nullable>enable</Nullable>
-    <ImplicitUsings>enable</ImplicitUsings>
-    <LangVersion>12.0</LangVersion>
+    <!-- C# 9.0を使用してCommunityToolkit.Mvvmのソースジェネレータを有効化 -->
+    <LangVersion>10.0</LangVersion>
   </PropertyGroup>
 </Project>

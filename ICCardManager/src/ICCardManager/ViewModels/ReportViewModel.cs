@@ -10,6 +10,12 @@ using ICCardManager.Services;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Win32;
 
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading.Tasks;
+
+
 namespace ICCardManager.ViewModels;
 
 /// <summary>
@@ -275,17 +281,20 @@ public partial class ReportViewModel : ViewModelBase
     [RelayCommand]
     public void BrowseOutputFolder()
     {
-        var dialog = new OpenFolderDialog
+        // .NET Framework 4.8ではOpenFolderDialogがないためFolderBrowserDialogを使用
+        using (var dialog = new System.Windows.Forms.FolderBrowserDialog
         {
-            Title = "出力先フォルダを選択",
-            InitialDirectory = string.IsNullOrEmpty(OutputFolder)
+            Description = "出力先フォルダを選択",
+            SelectedPath = string.IsNullOrEmpty(OutputFolder)
                 ? Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments)
-                : OutputFolder
-        };
-
-        if (dialog.ShowDialog() == true)
+                : OutputFolder,
+            ShowNewFolderButton = true
+        })
         {
-            OutputFolder = dialog.FolderName;
+            if (dialog.ShowDialog() == System.Windows.Forms.DialogResult.OK)
+            {
+                OutputFolder = dialog.SelectedPath;
+            }
         }
     }
 

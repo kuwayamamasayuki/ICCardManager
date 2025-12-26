@@ -1,3 +1,7 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading.Tasks;
 using System.ComponentModel;
 using System.Windows;
 using System.Windows.Controls;
@@ -7,333 +11,334 @@ using System.Windows.Input;
 using System.Windows.Threading;
 using ICCardManager.ViewModels;
 
-namespace ICCardManager.Views.Dialogs;
-
-/// <summary>
-/// 印刷プレビューダイアログ
-/// </summary>
-/// <remarks>
-/// <para>
-/// FlowDocumentPageViewerを使用してページ単位のプレビュー表示を実現します。
-/// </para>
-/// <para>
-/// <strong>機能:</strong>
-/// </para>
-/// <list type="bullet">
-/// <item><description>ページナビゲーション（前へ/次へ/最初/最後）</description></item>
-/// <item><description>キーボード操作（←→キーでページ移動）</description></item>
-/// <item><description>ズーム機能（拡大/縮小）</description></item>
-/// <item><description>用紙方向の変更（縦/横）</description></item>
-/// </list>
-/// </remarks>
-public partial class PrintPreviewDialog : Window
+namespace ICCardManager.Views.Dialogs
 {
-    /// <summary>
-    /// ViewModel
-    /// </summary>
-    public PrintPreviewViewModel ViewModel { get; }
-
-    /// <summary>
-    /// MasterPageNumberプロパティの変更を監視するためのDescriptor
-    /// </summary>
-    private DependencyPropertyDescriptor? _masterPageNumberDescriptor;
-
-    /// <summary>
-    /// 初期化時のMasterPageNumber（ベースライン）
-    /// FlowDocumentPageViewerのMasterPageNumberが0から始まらない場合があるため、
-    /// この値を基準にしてページ番号を計算する
-    /// </summary>
-    private int _baselineMasterPageNumber;
-
-    public PrintPreviewDialog(PrintPreviewViewModel viewModel)
-    {
-        InitializeComponent();
-        ViewModel = viewModel;
-        DataContext = viewModel;
-
-        // イベント購読
-        Loaded += OnLoaded;
-        Unloaded += OnUnloaded;
-        ViewModel.DocumentNeedsRefresh += OnDocumentNeedsRefresh;
-    }
-
-    /// <summary>
-    /// ドキュメントを設定（バインディングの代わりに直接設定）
+/// <summary>
+    /// 印刷プレビューダイアログ
     /// </summary>
     /// <remarks>
-    /// FlowDocumentは一度に1つの親要素にしか所属できないため、
-    /// データバインディングではなく直接設定する必要がある場合がある
+    /// <para>
+    /// FlowDocumentPageViewerを使用してページ単位のプレビュー表示を実現します。
+    /// </para>
+    /// <para>
+    /// <strong>機能:</strong>
+    /// </para>
+    /// <list type="bullet">
+    /// <item><description>ページナビゲーション（前へ/次へ/最初/最後）</description></item>
+    /// <item><description>キーボード操作（←→キーでページ移動）</description></item>
+    /// <item><description>ズーム機能（拡大/縮小）</description></item>
+    /// <item><description>用紙方向の変更（縦/横）</description></item>
+    /// </list>
     /// </remarks>
-    public void SetDocument(FlowDocument document)
+    public partial class PrintPreviewDialog : Window
     {
-        DocumentViewer.Document = document;
-    }
+        /// <summary>
+        /// ViewModel
+        /// </summary>
+        public PrintPreviewViewModel ViewModel { get; }
 
-    /// <summary>
-    /// ウィンドウ読み込み完了
-    /// </summary>
-    private void OnLoaded(object sender, RoutedEventArgs e)
-    {
-        // ViewModelのドキュメントをFlowDocumentPageViewerに直接設定
-        RefreshDocument();
+        /// <summary>
+        /// MasterPageNumberプロパティの変更を監視するためのDescriptor
+        /// </summary>
+        private DependencyPropertyDescriptor _masterPageNumberDescriptor;
 
-        // フォーカスを設定してキーボード操作を有効化
-        Focus();
-    }
+        /// <summary>
+        /// 初期化時のMasterPageNumber（ベースライン）
+        /// FlowDocumentPageViewerのMasterPageNumberが0から始まらない場合があるため、
+        /// この値を基準にしてページ番号を計算する
+        /// </summary>
+        private int _baselineMasterPageNumber;
 
-    /// <summary>
-    /// MasterPageNumber監視を開始
-    /// </summary>
-    private void SubscribeToMasterPageNumberChanges()
-    {
-        if (_masterPageNumberDescriptor != null) return; // 既に購読済み
-
-        // FlowDocumentPageViewerのMasterPageNumberプロパティの変更を監視
-        // これによりViewerのページ変更（組み込みナビゲーション含む）をViewModelに同期
-        _masterPageNumberDescriptor = DependencyPropertyDescriptor.FromProperty(
-            FlowDocumentPageViewer.MasterPageNumberProperty,
-            typeof(FlowDocumentPageViewer));
-        _masterPageNumberDescriptor?.AddValueChanged(DocumentViewer, OnMasterPageNumberChanged);
-    }
-
-    /// <summary>
-    /// FlowDocumentPageViewerのMasterPageNumber変更時のハンドラ
-    /// </summary>
-    private void OnMasterPageNumberChanged(object? sender, EventArgs e)
-    {
-        if (DocumentViewer.Document == null) return;
-
-        // ベースラインからの相対位置でページ番号を計算
-        // MasterPageNumberが1から始まる場合でも、表示は1から始まるようにする
-        int currentPage = DocumentViewer.MasterPageNumber - _baselineMasterPageNumber + 1;
-        int totalPages = DocumentViewer.PageCount;
-
-        // ツールバーのページ表示を直接更新
-        UpdatePageDisplay(currentPage, totalPages);
-    }
-
-    /// <summary>
-    /// ページ表示を更新
-    /// </summary>
-    private void UpdatePageDisplay(int currentPage, int totalPages)
-    {
-        if (totalPages > 0)
+        public PrintPreviewDialog(PrintPreviewViewModel viewModel)
         {
-            PageDisplayTextBlock.Text = $"{currentPage} / {totalPages} ページ";
+            InitializeComponent();
+            ViewModel = viewModel;
+            DataContext = viewModel;
+
+            // イベント購読
+            Loaded += OnLoaded;
+            Unloaded += OnUnloaded;
+            ViewModel.DocumentNeedsRefresh += OnDocumentNeedsRefresh;
         }
-        else
+
+        /// <summary>
+        /// ドキュメントを設定（バインディングの代わりに直接設定）
+        /// </summary>
+        /// <remarks>
+        /// FlowDocumentは一度に1つの親要素にしか所属できないため、
+        /// データバインディングではなく直接設定する必要がある場合がある
+        /// </remarks>
+        public void SetDocument(FlowDocument document)
         {
-            PageDisplayTextBlock.Text = "ページなし";
+            DocumentViewer.Document = document;
         }
-    }
 
-    /// <summary>
-    /// ウィンドウアンロード時
-    /// </summary>
-    private void OnUnloaded(object sender, RoutedEventArgs e)
-    {
-        // イベント購読解除（メモリリーク防止）
-        ViewModel.DocumentNeedsRefresh -= OnDocumentNeedsRefresh;
-        _masterPageNumberDescriptor?.RemoveValueChanged(DocumentViewer, OnMasterPageNumberChanged);
-    }
-
-    /// <summary>
-    /// ドキュメント再描画イベントハンドラ
-    /// </summary>
-    private void OnDocumentNeedsRefresh(object? sender, EventArgs e)
-    {
-        RefreshDocument();
-    }
-
-    /// <summary>
-    /// ドキュメントを再設定して再描画
-    /// </summary>
-    private void RefreshDocument()
-    {
-        if (ViewModel.Document != null)
+        /// <summary>
+        /// ウィンドウ読み込み完了
+        /// </summary>
+        private void OnLoaded(object sender, RoutedEventArgs e)
         {
-            // 一度nullを設定してから再設定することで強制的に再描画
-            DocumentViewer.Document = null;
-            DocumentViewer.Document = ViewModel.Document;
+            // ViewModelのドキュメントをFlowDocumentPageViewerに直接設定
+            RefreshDocument();
 
-            // DocumentPaginatorのページ数計算完了イベントを購読
-            var paginator = ((IDocumentPaginatorSource)ViewModel.Document).DocumentPaginator;
-            paginator.ComputePageCountCompleted += OnComputePageCountCompleted;
+            // フォーカスを設定してキーボード操作を有効化
+            Focus();
+        }
 
-            // ページ数の非同期計算を開始
-            if (!paginator.IsPageCountValid)
+        /// <summary>
+        /// MasterPageNumber監視を開始
+        /// </summary>
+        private void SubscribeToMasterPageNumberChanges()
+        {
+            if (_masterPageNumberDescriptor != null) return; // 既に購読済み
+
+            // FlowDocumentPageViewerのMasterPageNumberプロパティの変更を監視
+            // これによりViewerのページ変更（組み込みナビゲーション含む）をViewModelに同期
+            _masterPageNumberDescriptor = DependencyPropertyDescriptor.FromProperty(
+                FlowDocumentPageViewer.MasterPageNumberProperty,
+                typeof(FlowDocumentPageViewer));
+            _masterPageNumberDescriptor?.AddValueChanged(DocumentViewer, OnMasterPageNumberChanged);
+        }
+
+        /// <summary>
+        /// FlowDocumentPageViewerのMasterPageNumber変更時のハンドラ
+        /// </summary>
+        private void OnMasterPageNumberChanged(object sender, EventArgs e)
+        {
+            if (DocumentViewer.Document == null) return;
+
+            // ベースラインからの相対位置でページ番号を計算
+            // MasterPageNumberが1から始まる場合でも、表示は1から始まるようにする
+            int currentPage = DocumentViewer.MasterPageNumber - _baselineMasterPageNumber + 1;
+            int totalPages = DocumentViewer.PageCount;
+
+            // ツールバーのページ表示を直接更新
+            UpdatePageDisplay(currentPage, totalPages);
+        }
+
+        /// <summary>
+        /// ページ表示を更新
+        /// </summary>
+        private void UpdatePageDisplay(int currentPage, int totalPages)
+        {
+            if (totalPages > 0)
             {
-                paginator.ComputePageCountAsync();
+                PageDisplayTextBlock.Text = $"{currentPage} / {totalPages} ページ";
+            }
+            else
+            {
+                PageDisplayTextBlock.Text = "ページなし";
             }
         }
 
-        // ページ数を再計算（レンダリング完了後に実行、ContextIdleで確実にUI更新後）
-        Dispatcher.BeginInvoke(new Action(() =>
-        {
-            ViewModel.RecalculatePageCount();
-
-            // レイアウトを強制更新してからFirstPage()を呼び出す
-            DocumentViewer.UpdateLayout();
-            DocumentViewer.FirstPage();
-
-            // FirstPage()が効かない場合に備えて再試行
-            if (DocumentViewer.MasterPageNumber != 0)
-            {
-                DocumentViewer.UpdateLayout();
-                DocumentViewer.FirstPage();
-            }
-
-            var pageCount = DocumentViewer.PageCount;
-
-            // 現在のMasterPageNumberをベースラインとして保存
-            // これ以降のページ番号計算はこのベースラインを基準にする
-            _baselineMasterPageNumber = DocumentViewer.MasterPageNumber;
-
-            // 初期表示は常に1ページ目として表示（MasterPageNumberに関係なく）
-            if (pageCount > 0)
-            {
-                ViewModel.TotalPages = pageCount;
-                ViewModel.CurrentPage = 1;
-                UpdatePageDisplay(1, pageCount);
-            }
-
-            // 初期化完了後にMasterPageNumber監視を開始
-            SubscribeToMasterPageNumberChanges();
-        }), System.Windows.Threading.DispatcherPriority.ContextIdle);
-    }
-
-    /// <summary>
-    /// ページ数計算完了時のハンドラ
-    /// </summary>
-    private void OnComputePageCountCompleted(object? sender, AsyncCompletedEventArgs e)
-    {
-        if (sender is DocumentPaginator paginator)
+        /// <summary>
+        /// ウィンドウアンロード時
+        /// </summary>
+        private void OnUnloaded(object sender, RoutedEventArgs e)
         {
             // イベント購読解除（メモリリーク防止）
-            paginator.ComputePageCountCompleted -= OnComputePageCountCompleted;
+            ViewModel.DocumentNeedsRefresh -= OnDocumentNeedsRefresh;
+            _masterPageNumberDescriptor?.RemoveValueChanged(DocumentViewer, OnMasterPageNumberChanged);
         }
 
-        // 注: 以前はここでUpdatePageCountFromViewer()を呼び出していたが、
-        // ContextIdleで初期化が完了した後に実行されると表示を上書きしてしまうため削除。
-        // ページ数の更新はContextIdleコールバックとOnMasterPageNumberChangedで処理される。
-    }
-
-    /// <summary>
-    /// ページ情報を更新
-    /// </summary>
-    private void UpdatePageInfo()
-    {
-        if (ViewModel.Document != null && DocumentViewer.Document != null)
+        /// <summary>
+        /// ドキュメント再描画イベントハンドラ
+        /// </summary>
+        private void OnDocumentNeedsRefresh(object sender, EventArgs e)
         {
-            // ドキュメントのページサイズをビューアのサイズとして設定
-            // ZoomはFlowDocumentPageViewer内部で適用されるため、ここでは1:1で設定
-            DocumentViewer.Width = ViewModel.Document.PageWidth;
-            DocumentViewer.Height = ViewModel.Document.PageHeight;
+            RefreshDocument();
         }
-    }
 
-    /// <summary>
-    /// 最初のページへ移動
-    /// </summary>
-    private void FirstPageButton_Click(object sender, RoutedEventArgs e)
-    {
-        DocumentViewer.FirstPage();
-    }
-
-    /// <summary>
-    /// 前のページへ移動
-    /// </summary>
-    private void PreviousPageButton_Click(object sender, RoutedEventArgs e)
-    {
-        DocumentViewer.PreviousPage();
-    }
-
-    /// <summary>
-    /// 次のページへ移動
-    /// </summary>
-    private void NextPageButton_Click(object sender, RoutedEventArgs e)
-    {
-        DocumentViewer.NextPage();
-    }
-
-    /// <summary>
-    /// 最後のページへ移動
-    /// </summary>
-    private void LastPageButton_Click(object sender, RoutedEventArgs e)
-    {
-        DocumentViewer.LastPage();
-    }
-
-    /// <summary>
-    /// キーボードイベントハンドラ（← →キーでページ移動）
-    /// </summary>
-    private void Window_PreviewKeyDown(object sender, KeyEventArgs e)
-    {
-        switch (e.Key)
+        /// <summary>
+        /// ドキュメントを再設定して再描画
+        /// </summary>
+        private void RefreshDocument()
         {
-            case Key.Left:
-            case Key.PageUp:
-                // 前のページへ
-                DocumentViewer.PreviousPage();
-                e.Handled = true;
-                break;
+            if (ViewModel.Document != null)
+            {
+                // 一度nullを設定してから再設定することで強制的に再描画
+                DocumentViewer.Document = null;
+                DocumentViewer.Document = ViewModel.Document;
 
-            case Key.Right:
-            case Key.PageDown:
-                // 次のページへ
-                DocumentViewer.NextPage();
-                e.Handled = true;
-                break;
+                // DocumentPaginatorのページ数計算完了イベントを購読
+                var paginator = ((IDocumentPaginatorSource)ViewModel.Document).DocumentPaginator;
+                paginator.ComputePageCountCompleted += OnComputePageCountCompleted;
 
-            case Key.Home:
-                // 最初のページへ
+                // ページ数の非同期計算を開始
+                if (!paginator.IsPageCountValid)
+                {
+                    paginator.ComputePageCountAsync();
+                }
+            }
+
+            // ページ数を再計算（レンダリング完了後に実行、ContextIdleで確実にUI更新後）
+            Dispatcher.BeginInvoke(new Action(() =>
+            {
+                ViewModel.RecalculatePageCount();
+
+                // レイアウトを強制更新してからFirstPage()を呼び出す
+                DocumentViewer.UpdateLayout();
                 DocumentViewer.FirstPage();
-                e.Handled = true;
-                break;
 
-            case Key.End:
-                // 最後のページへ
-                DocumentViewer.LastPage();
-                e.Handled = true;
-                break;
-
-            case Key.OemPlus:
-            case Key.Add:
-                // ズームイン（Ctrl+または+キー）
-                if (Keyboard.Modifiers == ModifierKeys.Control)
+                // FirstPage()が効かない場合に備えて再試行
+                if (DocumentViewer.MasterPageNumber != 0)
                 {
-                    ViewModel.ZoomInCommand.Execute(null);
-                    e.Handled = true;
+                    DocumentViewer.UpdateLayout();
+                    DocumentViewer.FirstPage();
                 }
-                break;
 
-            case Key.OemMinus:
-            case Key.Subtract:
-                // ズームアウト（Ctrl-または-キー）
-                if (Keyboard.Modifiers == ModifierKeys.Control)
-                {
-                    ViewModel.ZoomOutCommand.Execute(null);
-                    e.Handled = true;
-                }
-                break;
+                var pageCount = DocumentViewer.PageCount;
 
-            case Key.D0:
-            case Key.NumPad0:
-                // ズームリセット（Ctrl+0）
-                if (Keyboard.Modifiers == ModifierKeys.Control)
+                // 現在のMasterPageNumberをベースラインとして保存
+                // これ以降のページ番号計算はこのベースラインを基準にする
+                _baselineMasterPageNumber = DocumentViewer.MasterPageNumber;
+
+                // 初期表示は常に1ページ目として表示（MasterPageNumberに関係なく）
+                if (pageCount > 0)
                 {
-                    ViewModel.ResetZoomCommand.Execute(null);
-                    e.Handled = true;
+                    ViewModel.TotalPages = pageCount;
+                    ViewModel.CurrentPage = 1;
+                    UpdatePageDisplay(1, pageCount);
                 }
-                break;
+
+                // 初期化完了後にMasterPageNumber監視を開始
+                SubscribeToMasterPageNumberChanges();
+            }), System.Windows.Threading.DispatcherPriority.ContextIdle);
         }
-    }
 
-    /// <summary>
-    /// 閉じるボタン
-    /// </summary>
-    private void CloseButton_Click(object sender, RoutedEventArgs e)
-    {
-        Close();
+        /// <summary>
+        /// ページ数計算完了時のハンドラ
+        /// </summary>
+        private void OnComputePageCountCompleted(object sender, AsyncCompletedEventArgs e)
+        {
+            if (sender is DocumentPaginator paginator)
+            {
+                // イベント購読解除（メモリリーク防止）
+                paginator.ComputePageCountCompleted -= OnComputePageCountCompleted;
+            }
+
+            // 注: 以前はここでUpdatePageCountFromViewer()を呼び出していたが、
+            // ContextIdleで初期化が完了した後に実行されると表示を上書きしてしまうため削除。
+            // ページ数の更新はContextIdleコールバックとOnMasterPageNumberChangedで処理される。
+        }
+
+        /// <summary>
+        /// ページ情報を更新
+        /// </summary>
+        private void UpdatePageInfo()
+        {
+            if (ViewModel.Document != null && DocumentViewer.Document != null)
+            {
+                // ドキュメントのページサイズをビューアのサイズとして設定
+                // ZoomはFlowDocumentPageViewer内部で適用されるため、ここでは1:1で設定
+                DocumentViewer.Width = ViewModel.Document.PageWidth;
+                DocumentViewer.Height = ViewModel.Document.PageHeight;
+            }
+        }
+
+        /// <summary>
+        /// 最初のページへ移動
+        /// </summary>
+        private void FirstPageButton_Click(object sender, RoutedEventArgs e)
+        {
+            DocumentViewer.FirstPage();
+        }
+
+        /// <summary>
+        /// 前のページへ移動
+        /// </summary>
+        private void PreviousPageButton_Click(object sender, RoutedEventArgs e)
+        {
+            DocumentViewer.PreviousPage();
+        }
+
+        /// <summary>
+        /// 次のページへ移動
+        /// </summary>
+        private void NextPageButton_Click(object sender, RoutedEventArgs e)
+        {
+            DocumentViewer.NextPage();
+        }
+
+        /// <summary>
+        /// 最後のページへ移動
+        /// </summary>
+        private void LastPageButton_Click(object sender, RoutedEventArgs e)
+        {
+            DocumentViewer.LastPage();
+        }
+
+        /// <summary>
+        /// キーボードイベントハンドラ（← →キーでページ移動）
+        /// </summary>
+        private void Window_PreviewKeyDown(object sender, KeyEventArgs e)
+        {
+            switch (e.Key)
+            {
+                case Key.Left:
+                case Key.PageUp:
+                    // 前のページへ
+                    DocumentViewer.PreviousPage();
+                    e.Handled = true;
+                    break;
+
+                case Key.Right:
+                case Key.PageDown:
+                    // 次のページへ
+                    DocumentViewer.NextPage();
+                    e.Handled = true;
+                    break;
+
+                case Key.Home:
+                    // 最初のページへ
+                    DocumentViewer.FirstPage();
+                    e.Handled = true;
+                    break;
+
+                case Key.End:
+                    // 最後のページへ
+                    DocumentViewer.LastPage();
+                    e.Handled = true;
+                    break;
+
+                case Key.OemPlus:
+                case Key.Add:
+                    // ズームイン（Ctrl+または+キー）
+                    if (Keyboard.Modifiers == ModifierKeys.Control)
+                    {
+                        ViewModel.ZoomInCommand.Execute(null);
+                        e.Handled = true;
+                    }
+                    break;
+
+                case Key.OemMinus:
+                case Key.Subtract:
+                    // ズームアウト（Ctrl-または-キー）
+                    if (Keyboard.Modifiers == ModifierKeys.Control)
+                    {
+                        ViewModel.ZoomOutCommand.Execute(null);
+                        e.Handled = true;
+                    }
+                    break;
+
+                case Key.D0:
+                case Key.NumPad0:
+                    // ズームリセット（Ctrl+0）
+                    if (Keyboard.Modifiers == ModifierKeys.Control)
+                    {
+                        ViewModel.ResetZoomCommand.Execute(null);
+                        e.Handled = true;
+                    }
+                    break;
+            }
+        }
+
+        /// <summary>
+        /// 閉じるボタン
+        /// </summary>
+        private void CloseButton_Click(object sender, RoutedEventArgs e)
+        {
+            Close();
+        }
     }
 }

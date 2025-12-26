@@ -8,6 +8,12 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Xunit;
 
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading.Tasks;
+
+
 namespace ICCardManager.Tests.Services;
 
 /// <summary>
@@ -161,7 +167,7 @@ public class BackupServiceTests : IDisposable
         {
             var timestamp = DateTime.Now.AddMinutes(-i).ToString("yyyyMMdd_HHmmss");
             var dummyBackupPath = Path.Combine(_backupDirectory, $"backup_{timestamp}.db");
-            await File.WriteAllTextAsync(dummyBackupPath, "dummy");
+            await Task.Run(() => File.WriteAllText(dummyBackupPath, "dummy"));
             // ファイルの作成日時を調整
             File.SetCreationTime(dummyBackupPath, DateTime.Now.AddMinutes(-i));
         }
@@ -438,7 +444,7 @@ public class BackupServiceTests : IDisposable
         {
             var timestamp = DateTime.Now.AddMinutes(-i).ToString("yyyyMMdd_HHmmss");
             var backupPath = Path.Combine(_backupDirectory, $"backup_{timestamp}.db");
-            await File.WriteAllTextAsync(backupPath, $"backup{i}");
+            await Task.Run(() => File.WriteAllText(backupPath, $"backup{i}"));
             File.SetCreationTime(backupPath, DateTime.Now.AddMinutes(-i));
             await Task.Delay(10); // タイムスタンプの違いを確保
         }
@@ -465,7 +471,7 @@ public class BackupServiceTests : IDisposable
         for (int i = 0; i < timestamps.Length; i++)
         {
             var backupPath = Path.Combine(_backupDirectory, $"backup_{timestamps[i]}.db");
-            await File.WriteAllTextAsync(backupPath, $"backup{i}");
+            await Task.Run(() => File.WriteAllText(backupPath, $"backup{i}"));
             File.SetCreationTime(backupPath, baseDate.AddHours(i));
         }
 
@@ -505,9 +511,9 @@ public class BackupServiceTests : IDisposable
     public async Task GetBackupFilesAsync_OtherFiles_NotIncluded()
     {
         // Arrange - バックアップファイルとそうでないファイルを作成
-        await File.WriteAllTextAsync(Path.Combine(_backupDirectory, "backup_20240101_120000.db"), "backup");
-        await File.WriteAllTextAsync(Path.Combine(_backupDirectory, "other_file.db"), "other");
-        await File.WriteAllTextAsync(Path.Combine(_backupDirectory, "backup.txt"), "not a db");
+        await Task.Run(() => File.WriteAllText(Path.Combine(_backupDirectory, "backup_20240101_120000.db"), "backup"));
+        await Task.Run(() => File.WriteAllText(Path.Combine(_backupDirectory, "other_file.db"), "other"));
+        await Task.Run(() => File.WriteAllText(Path.Combine(_backupDirectory, "backup.txt"), "not a db"));
 
         // Act
         var result = (await _service.GetBackupFilesAsync()).ToList();
@@ -527,7 +533,7 @@ public class BackupServiceTests : IDisposable
         var timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
         var backupPath = Path.Combine(_backupDirectory, $"backup_{timestamp}.db");
         var content = "test backup content";
-        await File.WriteAllTextAsync(backupPath, content);
+        await Task.Run(() => File.WriteAllText(backupPath, content));
         var creationTime = DateTime.Now;
         File.SetCreationTime(backupPath, creationTime);
 
@@ -556,7 +562,7 @@ public class BackupServiceTests : IDisposable
         {
             var timestamp = DateTime.Now.AddMinutes(-(i + 1)).ToString("yyyyMMdd_HHmmss");
             var dummyBackupPath = Path.Combine(_backupDirectory, $"backup_{timestamp}.db");
-            await File.WriteAllTextAsync(dummyBackupPath, "dummy");
+            await Task.Run(() => File.WriteAllText(dummyBackupPath, "dummy"));
             File.SetCreationTime(dummyBackupPath, DateTime.Now.AddMinutes(-(i + 1)));
         }
 
@@ -582,7 +588,7 @@ public class BackupServiceTests : IDisposable
         {
             var timestamp = DateTime.Now.AddMinutes(-(i + 1)).ToString("yyyyMMdd_HHmmss");
             var dummyBackupPath = Path.Combine(_backupDirectory, $"backup_{timestamp}.db");
-            await File.WriteAllTextAsync(dummyBackupPath, "dummy");
+            await Task.Run(() => File.WriteAllText(dummyBackupPath, "dummy"));
             File.SetCreationTime(dummyBackupPath, DateTime.Now.AddMinutes(-(i + 1)));
         }
 

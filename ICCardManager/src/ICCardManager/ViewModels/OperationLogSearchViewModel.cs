@@ -8,6 +8,12 @@ using ICCardManager.Models;
 using ICCardManager.Services;
 using Microsoft.Win32;
 
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading.Tasks;
+
+
 namespace ICCardManager.ViewModels;
 
 /// <summary>
@@ -335,7 +341,8 @@ public partial class OperationLogSearchViewModel : ViewModelBase
                 }
 
                 // UTF-8 with BOM (Excel対応)
-                await File.WriteAllLinesAsync(dialog.FileName, lines, new UTF8Encoding(true));
+                // .NET Framework 4.8ではFile.WriteAllLinesAsyncがないためTask.Runで同期版を使用
+                await Task.Run(() => File.WriteAllLines(dialog.FileName, lines, new UTF8Encoding(true)));
 
                 LastExportedFile = dialog.FileName;
                 StatusMessage = $"エクスポート完了: {logs.Count()}件を出力しました";

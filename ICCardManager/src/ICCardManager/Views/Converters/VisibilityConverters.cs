@@ -1,105 +1,110 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading.Tasks;
 using System.Globalization;
 using System.Windows;
 using System.Windows.Data;
 
-namespace ICCardManager.Views.Converters;
-
-/// <summary>
-/// 整数値をVisibilityに変換（0以外でVisible）
-/// </summary>
-public class IntToVisibilityConverter : IValueConverter
+namespace ICCardManager.Views.Converters
 {
-    public object Convert(object value, Type targetType, object parameter, CultureInfo culture)
-    {
-        if (value is int intValue)
-        {
-            return intValue != 0 ? Visibility.Visible : Visibility.Collapsed;
-        }
-        return Visibility.Collapsed;
-    }
-
-    public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture)
-    {
-        throw new NotImplementedException();
-    }
-}
-
 /// <summary>
-/// コレクションのCountをVisibilityに変換（0より大きければVisible）
-/// </summary>
-public class CountToVisibilityConverter : IValueConverter
-{
-    public object Convert(object value, Type targetType, object parameter, CultureInfo culture)
+    /// 整数値をVisibilityに変換（0以外でVisible）
+    /// </summary>
+    public class IntToVisibilityConverter : IValueConverter
     {
-        if (value is int count)
+        public object Convert(object value, Type targetType, object parameter, CultureInfo culture)
         {
-            return count > 0 ? Visibility.Visible : Visibility.Collapsed;
+            if (value is int intValue)
+            {
+                return intValue != 0 ? Visibility.Visible : Visibility.Collapsed;
+            }
+            return Visibility.Collapsed;
         }
-        return Visibility.Collapsed;
-    }
 
-    public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture)
-    {
-        throw new NotImplementedException();
-    }
-}
-
-/// <summary>
-/// 逆Bool変換
-/// </summary>
-public class InverseBoolConverter : IValueConverter
-{
-    public object Convert(object value, Type targetType, object parameter, CultureInfo culture)
-    {
-        if (value is bool boolValue)
+        public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture)
         {
-            return !boolValue;
+            throw new NotImplementedException();
         }
-        return false;
     }
 
-    public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture)
+    /// <summary>
+    /// コレクションのCountをVisibilityに変換（0より大きければVisible）
+    /// </summary>
+    public class CountToVisibilityConverter : IValueConverter
     {
-        if (value is bool boolValue)
+        public object Convert(object value, Type targetType, object parameter, CultureInfo culture)
         {
-            return !boolValue;
+            if (value is int count)
+            {
+                return count > 0 ? Visibility.Visible : Visibility.Collapsed;
+            }
+            return Visibility.Collapsed;
         }
-        return false;
-    }
-}
 
-/// <summary>
-/// 文字列が空でない場合にVisibleを返す
-/// </summary>
-public class StringNotEmptyToVisibilityConverter : IValueConverter
-{
-    public object Convert(object value, Type targetType, object parameter, CultureInfo culture)
-    {
-        if (value is string str)
+        public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture)
         {
-            return !string.IsNullOrWhiteSpace(str) ? Visibility.Visible : Visibility.Collapsed;
+            throw new NotImplementedException();
         }
-        return Visibility.Collapsed;
     }
 
-    public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture)
+    /// <summary>
+    /// 逆Bool変換
+    /// </summary>
+    public class InverseBoolConverter : IValueConverter
     {
-        throw new NotImplementedException();
-    }
-}
+        public object Convert(object value, Type targetType, object parameter, CultureInfo culture)
+        {
+            if (value is bool boolValue)
+            {
+                return !boolValue;
+            }
+            return false;
+        }
 
-/// <summary>
-/// オブジェクトがnullでない場合にtrueを返す（IsEnabled用）
-/// </summary>
-public class NotNullToBoolConverter : IValueConverter
-{
-    public object Convert(object value, Type targetType, object parameter, CultureInfo culture)
-    {
-        return value != null;
+        public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture)
+        {
+            if (value is bool boolValue)
+            {
+                return !boolValue;
+            }
+            return false;
+        }
     }
 
-    public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture)
+    /// <summary>
+    /// 文字列が空でない場合にVisibleを返す
+    /// </summary>
+    public class StringNotEmptyToVisibilityConverter : IValueConverter
     {
-        throw new NotImplementedException();
+        public object Convert(object value, Type targetType, object parameter, CultureInfo culture)
+        {
+            if (value is string str)
+            {
+                return !string.IsNullOrWhiteSpace(str) ? Visibility.Visible : Visibility.Collapsed;
+            }
+            return Visibility.Collapsed;
+        }
+
+        public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture)
+        {
+            throw new NotImplementedException();
+        }
+    }
+
+    /// <summary>
+    /// オブジェクトがnullでない場合にtrueを返す（IsEnabled用）
+    /// </summary>
+    public class NotNullToBoolConverter : IValueConverter
+    {
+        public object Convert(object value, Type targetType, object parameter, CultureInfo culture)
+        {
+            return value != null;
+        }
+
+        public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture)
+        {
+            throw new NotImplementedException();
+        }
     }
 }

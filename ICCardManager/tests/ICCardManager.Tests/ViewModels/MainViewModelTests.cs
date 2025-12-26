@@ -2,6 +2,12 @@ using FluentAssertions;
 using ICCardManager.ViewModels;
 using Xunit;
 
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading.Tasks;
+
+
 namespace ICCardManager.Tests.ViewModels;
 
 /// <summary>
@@ -39,7 +45,8 @@ public class MainViewModelTests
     public void AppState_ShouldHaveAllRequiredStates()
     {
         // Assert
-        Enum.GetValues<AppState>().Should().HaveCount(3);
+        // .NET Framework 4.8ではEnum.GetValues<T>()が使えないためtypeofを使用
+        Enum.GetValues(typeof(AppState)).Length.Should().Be(3);
         Enum.IsDefined(typeof(AppState), AppState.WaitingForStaffCard).Should().BeTrue();
         Enum.IsDefined(typeof(AppState), AppState.WaitingForIcCard).Should().BeTrue();
         Enum.IsDefined(typeof(AppState), AppState.Processing).Should().BeTrue();
@@ -62,7 +69,8 @@ public class MainViewModelTests
     public void AppState_EachState_ShouldHaveDistinctValue()
     {
         // Arrange
-        var states = Enum.GetValues<AppState>();
+        // .NET Framework 4.8ではEnum.GetValues<T>()が使えないためtypeofを使用してキャスト
+        var states = Enum.GetValues(typeof(AppState)).Cast<AppState>().ToArray();
 
         // Assert - 全ての状態が一意の値を持つ
         states.Distinct().Should().HaveCount(states.Length);
