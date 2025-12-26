@@ -488,7 +488,10 @@ public partial class MainViewModel : ViewModelBase
             _currentStaffIdm = idm;
             _currentStaffName = staff.Name;
 
-            SetState(AppState.WaitingForIcCard, $"🚃 {staff.Name} さん、ICカードをタッチしてください");
+            // メイン画面は変更せず、ポップアップ通知のみ表示（Issue #186）
+            // 「職員証をタッチしてください」のメッセージはクリアする
+            SetInternalState(AppState.WaitingForIcCard, clearStatusMessage: true);
+            _toastNotificationService.ShowStaffRecognizedNotification(staff.Name);
             StartTimeout();
             return;
         }
@@ -517,7 +520,8 @@ public partial class MainViewModel : ViewModelBase
         if (staff != null)
         {
             _soundPlayer.Play(SoundType.Error);
-            SetState(AppState.WaitingForIcCard, "⚠️ ICカードをタッチしてください（職員証がタッチされました）", "#FFEBEE");
+            // メイン画面は変更せず、トースト通知で警告（Issue #186）
+            _toastNotificationService.ShowWarning("職員証です", "ICカードをタッチしてください");
             StartTimeout();
             return;
         }
@@ -577,7 +581,8 @@ public partial class MainViewModel : ViewModelBase
     /// </remarks>
     private async Task ProcessLendAsync(IcCard card)
     {
-        SetState(AppState.Processing, "処理中...");
+        // メイン画面は変更せず、内部状態のみ更新（Issue #186）
+        SetInternalState(AppState.Processing);
 
         var result = await _lendingService.LendAsync(_currentStaffIdm!, card.CardIdm);
 
@@ -588,25 +593,21 @@ public partial class MainViewModel : ViewModelBase
             // トースト通知を表示（画面右上、フォーカスを奪わない）
             _toastNotificationService.ShowLendNotification(card.CardType, card.CardNumber);
 
-            // メイン画面のステータスも更新（アクセシビリティ対応）
-            SetState(AppState.WaitingForStaffCard,
-                $"🚃→ 貸出完了\n{card.CardType} {card.CardNumber}",
-                "#FFE0B2"); // 薄いオレンジ
+            // メイン画面は変更しない（Issue #186: 職員の操作を妨げない）
 
             await RefreshLentCardsAsync();
 
-            // 2秒後にリセット
-            await Task.Delay(2000);
+            // 状態をリセット（次の操作を受け付ける）
             ResetState();
         }
         else
         {
             _soundPlayer.Play(SoundType.Error);
-            SetState(AppState.WaitingForStaffCard,
-                $"⚠️ エラー: {result.ErrorMessage}",
-                "#FFEBEE");
 
-            await Task.Delay(3000);
+            // エラー時はトースト通知で表示（メイン画面は変更しない）
+            _toastNotificationService.ShowError("エラー", result.ErrorMessage ?? "貸出処理に失敗しました");
+
+            // 状態をリセット
             ResetState();
         }
     }
@@ -629,7 +630,8 @@ public partial class MainViewModel : ViewModelBase
     /// </remarks>
     private async Task ProcessReturnAsync(IcCard card)
     {
-        SetState(AppState.Processing, "履歴を読み取り中...");
+        // メイン画面は変更せず、内部状態のみ更新（Issue #186）
+        SetInternalState(AppState.Processing);
 
         // カードから履歴を読み取る
         var usageDetails = await _cardReader.ReadHistoryAsync(card.CardIdm);
@@ -643,14 +645,7 @@ public partial class MainViewModel : ViewModelBase
             // トースト通知を表示（画面右上、フォーカスを奪わない）
             _toastNotificationService.ShowReturnNotification(card.CardType, card.CardNumber, result.Balance, result.IsLowBalance);
 
-            // メイン画面のステータスも更新（アクセシビリティ対応）
-            var message = $"🏠← 返却完了\n{card.CardType} {card.CardNumber}\n残額: {result.Balance:N0}円";
-            if (result.IsLowBalance)
-            {
-                message += "\n⚠️ 残額が少なくなっています";
-            }
-
-            SetState(AppState.WaitingForStaffCard, message, "#B3E5FC"); // 薄い水色
+            // メイン画面は変更しない（Issue #186: 職員の操作を妨げない）
 
             await RefreshLentCardsAsync();
             await RefreshDashboardAsync();
@@ -670,22 +665,18 @@ public partial class MainViewModel : ViewModelBase
                     busDialog.ShowDialog();
                 }
             }
-            else
-            {
-                // バス利用がなければ2秒後にリセット
-                await Task.Delay(2000);
-            }
 
+            // 状態をリセット（次の操作を受け付ける）
             ResetState();
         }
         else
         {
             _soundPlayer.Play(SoundType.Error);
-            SetState(AppState.WaitingForStaffCard,
-                $"⚠️ エラー: {result.ErrorMessage}",
-                "#FFEBEE");
 
-            await Task.Delay(3000);
+            // エラー時はトースト通知で表示（メイン画面は変更しない）
+            _toastNotificationService.ShowError("エラー", result.ErrorMessage ?? "返却処理に失敗しました");
+
+            // 状態をリセット
             ResetState();
         }
     }
@@ -711,9 +702,7 @@ public partial class MainViewModel : ViewModelBase
         var cardTypeName = CardTypeDetector.GetDisplayName(cardType);
 
         _soundPlayer.Play(SoundType.Warning);
-        SetState(CurrentState,
-            $"⚠️ 未登録のカードです\n種別: {cardTypeName}",
-            "#FFEBEE");
+        // メイン画面は変更しない（Issue #186）
 
         // 登録確認ダイアログを表示
         var result = System.Windows.MessageBox.Show(
@@ -774,6 +763,32 @@ public partial class MainViewModel : ViewModelBase
             AppState.Processing => "⏳",
             _ => "👤"
         };
+    }
+
+    /// <summary>
+    /// 内部状態のみを設定（UIは変更しない）
+    /// </summary>
+    /// <remarks>
+    /// カードタッチ時にメイン画面を変更せず、ポップアップ通知のみ表示するために使用。
+    /// Issue #186: 職員の操作を妨げないよう、メイン画面は変更しない。
+    /// </remarks>
+    /// <param name="state">新しい状態</param>
+    /// <param name="clearStatusMessage">ステータスメッセージをクリアするかどうか</param>
+    private void SetInternalState(AppState state, bool clearStatusMessage = false)
+    {
+        CurrentState = state;
+
+        if (clearStatusMessage)
+        {
+            // 「職員証をタッチしてください」などの待機メッセージをクリア
+            StatusMessage = string.Empty;
+            StatusBackgroundColor = "#FFFFFF";
+            StatusBorderColor = "#9E9E9E";
+            StatusForegroundColor = "#424242";
+            StatusLabel = string.Empty;
+            StatusIcon = string.Empty;
+            StatusIconDescription = string.Empty;
+        }
     }
 
     /// <summary>
