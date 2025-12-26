@@ -489,7 +489,8 @@ public partial class MainViewModel : ViewModelBase
             _currentStaffName = staff.Name;
 
             // メイン画面は変更せず、ポップアップ通知のみ表示（Issue #186）
-            SetInternalState(AppState.WaitingForIcCard);
+            // 「職員証をタッチしてください」のメッセージはクリアする
+            SetInternalState(AppState.WaitingForIcCard, clearStatusMessage: true);
             _toastNotificationService.ShowStaffRecognizedNotification(staff.Name);
             StartTimeout();
             return;
@@ -771,9 +772,23 @@ public partial class MainViewModel : ViewModelBase
     /// カードタッチ時にメイン画面を変更せず、ポップアップ通知のみ表示するために使用。
     /// Issue #186: 職員の操作を妨げないよう、メイン画面は変更しない。
     /// </remarks>
-    private void SetInternalState(AppState state)
+    /// <param name="state">新しい状態</param>
+    /// <param name="clearStatusMessage">ステータスメッセージをクリアするかどうか</param>
+    private void SetInternalState(AppState state, bool clearStatusMessage = false)
     {
         CurrentState = state;
+
+        if (clearStatusMessage)
+        {
+            // 「職員証をタッチしてください」などの待機メッセージをクリア
+            StatusMessage = string.Empty;
+            StatusBackgroundColor = "#FFFFFF";
+            StatusBorderColor = "#9E9E9E";
+            StatusForegroundColor = "#424242";
+            StatusLabel = string.Empty;
+            StatusIcon = string.Empty;
+            StatusIconDescription = string.Empty;
+        }
     }
 
     /// <summary>

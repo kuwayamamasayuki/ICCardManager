@@ -60,9 +60,13 @@ namespace ICCardManager.Services
         /// <summary>
         /// エラー通知を表示
         /// </summary>
+        /// <remarks>
+        /// エラー通知は自動消去されません。ユーザーがクリックして閉じる必要があります。
+        /// これにより、重要なエラーメッセージを見逃すことを防ぎます。
+        /// </remarks>
         public void ShowError(string title, string message)
         {
-            ToastNotificationWindow.Show(ToastType.Error, title, message);
+            ToastNotificationWindow.Show(ToastType.Error, title, message, autoClose: false);
         }
     }
 }

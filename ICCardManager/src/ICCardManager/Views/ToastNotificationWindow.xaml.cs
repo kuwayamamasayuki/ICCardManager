@@ -52,6 +52,7 @@ namespace ICCardManager.Views
     {
         private readonly DispatcherTimer _autoCloseTimer;
         private const int DefaultDisplayDurationMs = 3000;
+        private bool _autoCloseEnabled = true;
 
         public ToastNotificationWindow()
         {
@@ -66,6 +67,9 @@ namespace ICCardManager.Views
 
             // 画面右上に配置
             Loaded += OnLoaded;
+
+            // クリックで閉じる（エラー通知など自動消去されない場合用）
+            MouseLeftButtonDown += (s, e) => FadeOutAndClose();
         }
 
         /// <summary>
@@ -75,7 +79,10 @@ namespace ICCardManager.Views
         {
             PositionToTopRight();
             StartFadeInAnimation();
-            _autoCloseTimer.Start();
+            if (_autoCloseEnabled)
+            {
+                _autoCloseTimer.Start();
+            }
         }
 
         /// <summary>
@@ -145,11 +152,13 @@ namespace ICCardManager.Views
         /// <param name="message">メッセージ</param>
         /// <param name="additionalInfo">追加情報</param>
         /// <param name="subMessage">サブメッセージ</param>
-        public static void Show(ToastType type, string title, string message, string additionalInfo = null, string subMessage = null)
+        /// <param name="autoClose">自動消去するかどうか（デフォルト: true、エラー時はfalse推奨）</param>
+        public static void Show(ToastType type, string title, string message, string additionalInfo = null, string subMessage = null, bool autoClose = true)
         {
             Application.Current.Dispatcher.Invoke(() =>
             {
                 var toast = new ToastNotificationWindow();
+                toast._autoCloseEnabled = autoClose;
                 toast.ApplyStyle(type);
                 toast.TitleText.Text = title;
                 toast.MessageText.Text = message;
@@ -162,6 +171,15 @@ namespace ICCardManager.Views
                 if (!string.IsNullOrEmpty(subMessage))
                 {
                     toast.SubMessageText.Text = subMessage;
+                    toast.SubMessageText.Visibility = Visibility.Visible;
+                }
+
+                // エラー時は自動消去しない場合、クリックで閉じるヒントを表示
+                if (!autoClose)
+                {
+                    toast.SubMessageText.Text = string.IsNullOrEmpty(subMessage)
+                        ? "クリックして閉じる"
+                        : $"{subMessage}\n（クリックして閉じる）";
                     toast.SubMessageText.Visibility = Visibility.Visible;
                 }
 
