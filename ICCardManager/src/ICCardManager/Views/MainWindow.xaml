@@ -13,7 +13,7 @@
         Width="1000"
         WindowStartupLocation="CenterScreen"
         AutomationProperties.Name="交通系ICカード管理システム メインウィンドウ"
-        AutomationProperties.HelpText="職員証をタッチしてからICカードをタッチすると貸出または返却ができます">
+        AutomationProperties.HelpText="職員証をタッチしてから交通系ICカードをタッチすると貸出または返却ができます">
 
     <Window.Resources>
         <conv:IntToVisibilityConverter x:Key="IntToVisibilityConverter"/>
@@ -82,7 +82,7 @@
                             Command="{Binding OpenCardManageCommand}"
                             TabIndex="3"
                             AutomationProperties.Name="カード管理ダイアログを開く"
-                            AutomationProperties.HelpText="ICカードの登録・編集を行います。ショートカット: F3"
+                            AutomationProperties.HelpText="交通系ICカードの登録・編集を行います。ショートカット: F3"
                             ToolTip="カード管理を開く (F3)"/>
                     <Button Content="職員管理 (F4)" Margin="5,0"
                             Style="{StaticResource AccessibleButtonStyle}"
@@ -401,9 +401,9 @@
 
                 <TextBlock Grid.Column="0" FontSize="{DynamicResource SmallFontSize}" Foreground="#1565C0" VerticalAlignment="Center">
                     <Run Text="操作: "/>
-                    <Run Text="職員証タッチ → ICカードタッチ で貸出/返却"/>
+                    <Run Text="職員証タッチ → 交通系ICカードタッチ で貸出/返却"/>
                     <Run Text=" | "/>
-                    <Run Text="ICカードのみタッチ で履歴表示"/>
+                    <Run Text="交通系ICカードのみタッチ で履歴表示"/>
                     <Run Text=" | "/>
                     <Run Text="[Esc] キャンセル"/>
                 </TextBlock>
@@ -412,7 +412,7 @@
                 <StackPanel Grid.Column="1" Orientation="Horizontal" Margin="20,0,0,0">
                     <TextBlock Text="[DEBUG]" FontSize="{DynamicResource SmallFontSize}" Foreground="Red" VerticalAlignment="Center" Margin="0,0,10,0"/>
                     <Button Content="職員証" Command="{Binding SimulateStaffCardCommand}" Padding="10,3" Margin="0,0,5,0"/>
-                    <Button Content="ICカード" Command="{Binding SimulateIcCardCommand}" Padding="10,3"/>
+                    <Button Content="交通系ICカード" Command="{Binding SimulateIcCardCommand}" Padding="10,3"/>
                 </StackPanel>
             </Grid>
         </Border>

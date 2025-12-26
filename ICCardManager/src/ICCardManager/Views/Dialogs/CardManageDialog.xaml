@@ -12,7 +12,7 @@
         WindowStartupLocation="CenterOwner"
         ResizeMode="CanResize"
         AutomationProperties.Name="カード管理ダイアログ"
-        AutomationProperties.HelpText="ICカードの登録・編集・削除ができます。カードをタッチして新規登録できます。">
+        AutomationProperties.HelpText="交通系ICカードの登録・編集・削除ができます。カードをタッチして新規登録できます。">
 
     <Window.Resources>
         <BooleanToVisibilityConverter x:Key="BoolToVisibilityConverter"/>
@@ -58,7 +58,7 @@
                       HeadersVisibility="Column"
                       RowHeaderWidth="0"
                       AutomationProperties.Name="カード一覧"
-                      AutomationProperties.HelpText="登録されているICカードの一覧です。選択して編集や削除ができます。">
+                      AutomationProperties.HelpText="登録されている交通系ICカードの一覧です。選択して編集や削除ができます。">
                 <DataGrid.Columns>
                     <DataGridTextColumn Header="種別" Binding="{Binding CardType}" Width="100"/>
                     <DataGridTextColumn Header="管理番号" Binding="{Binding CardNumber}" Width="100"/>
@@ -121,7 +121,7 @@
                             Padding="15,8"
                             Margin="0,0,10,5"
                             AutomationProperties.Name="新規カード登録"
-                            AutomationProperties.HelpText="新しいICカードを登録します。カードをタッチして登録できます。"
+                            AutomationProperties.HelpText="新しい交通系ICカードを登録します。カードをタッチして登録できます。"
                             ToolTip="新しいカードを登録"/>
                     <Button Content="編集"
                             Command="{Binding StartEditCommand}"
@@ -214,7 +214,7 @@
                               Padding="8"
                               Margin="0,0,0,15"
                               AutomationProperties.Name="カード種別選択"
-                              AutomationProperties.HelpText="ICカードの種類を選択してください"
+                              AutomationProperties.HelpText="交通系ICカードの種類を選択してください"
                               ToolTip="Suica、PASMO、ICOCAなどから選択"/>
 
                     <!-- 管理番号 -->

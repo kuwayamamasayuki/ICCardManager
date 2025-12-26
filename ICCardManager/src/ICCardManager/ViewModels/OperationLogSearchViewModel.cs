@@ -54,7 +54,7 @@ public class OperationLogDisplayItem
     public string TargetTableDisplay => TargetTable switch
     {
         "staff" => "職員",
-        "ic_card" => "ICカード",
+        "ic_card" => "交通系ICカード",
         "ledger" => "利用履歴",
         _ => TargetTable
     };
@@ -142,7 +142,7 @@ public partial class OperationLogSearchViewModel : ViewModelBase
     {
         new TargetTableItem { Value = "", DisplayName = "すべて" },
         new TargetTableItem { Value = "staff", DisplayName = "職員" },
-        new TargetTableItem { Value = "ic_card", DisplayName = "ICカード" },
+        new TargetTableItem { Value = "ic_card", DisplayName = "交通系ICカード" },
         new TargetTableItem { Value = "ledger", DisplayName = "利用履歴" }
     };
 
@@ -457,7 +457,7 @@ public partial class OperationLogSearchViewModel : ViewModelBase
         var target = log.TargetTable switch
         {
             "staff" => "職員",
-            "ic_card" => "ICカード",
+            "ic_card" => "交通系ICカード",
             "ledger" => "利用履歴",
             _ => log.TargetTable ?? ""
         };

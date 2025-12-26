@@ -309,7 +309,7 @@ public partial class MainViewModel : ViewModelBase
         {
             _currentStaffIdm = _defaultStaffIdm;
             _currentStaffName = _defaultStaffName;
-            SetState(AppState.WaitingForIcCard, $"🚃 ICカードをタッチしてください\n（操作者: {_defaultStaffName}）");
+            SetState(AppState.WaitingForIcCard, $"🚃 交通系ICカードをタッチしてください\n（操作者: {_defaultStaffName}）");
         }
     }
 
@@ -521,7 +521,7 @@ public partial class MainViewModel : ViewModelBase
         {
             _soundPlayer.Play(SoundType.Error);
             // メイン画面は変更せず、トースト通知で警告（Issue #186）
-            _toastNotificationService.ShowWarning("職員証です", "ICカードをタッチしてください");
+            _toastNotificationService.ShowWarning("職員証です", "交通系ICカードをタッチしてください");
             StartTimeout();
             return;
         }
@@ -803,7 +803,7 @@ public partial class MainViewModel : ViewModelBase
         {
             _currentStaffIdm = _defaultStaffIdm;
             _currentStaffName = _defaultStaffName;
-            SetState(AppState.WaitingForIcCard, $"🚃 ICカードをタッチしてください\n（操作者: {_defaultStaffName}）");
+            SetState(AppState.WaitingForIcCard, $"🚃 交通系ICカードをタッチしてください\n（操作者: {_defaultStaffName}）");
         }
         else
         {
