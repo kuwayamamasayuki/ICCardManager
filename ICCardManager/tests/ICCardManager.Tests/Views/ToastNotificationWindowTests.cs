@@ -191,7 +191,7 @@ ToastNotificationWindowは画面右上に表示されるフォーカスを奪わ
     表示内容:
     - 種類: Info
     - タイトル: "{staffName} さん"
-    - メッセージ: "ICカードをタッチしてください"
+    - メッセージ: "交通系ICカードをタッチしてください"
     動作:
     - メイン画面の状態は内部的に WaitingForIcCard に変更
     - メイン画面の表示（StatusMessage等）はクリアされる

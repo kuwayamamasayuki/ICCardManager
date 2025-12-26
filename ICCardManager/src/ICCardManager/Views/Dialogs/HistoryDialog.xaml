@@ -12,7 +12,7 @@
         WindowStartupLocation="CenterOwner"
         ResizeMode="CanResize"
         AutomationProperties.Name="利用履歴ダイアログ"
-        AutomationProperties.HelpText="ICカードの利用履歴を表示します。期間を選択して確認できます。">
+        AutomationProperties.HelpText="交通系ICカードの利用履歴を表示します。期間を選択して確認できます。">
 
     <Window.Resources>
         <BooleanToVisibilityConverter x:Key="BoolToVisibilityConverter"/>

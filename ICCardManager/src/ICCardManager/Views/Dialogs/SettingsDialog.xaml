@@ -139,8 +139,8 @@
                                   Content="職員証タッチをスキップする"
                                   FontWeight="Bold"
                                   AutomationProperties.Name="職員証タッチスキップ"
-                                  AutomationProperties.HelpText="有効にすると、ICカードのみで貸出・返却ができます"
-                                  ToolTip="少人数環境向け：職員証をタッチせずにICカードのみで操作可能にします"/>
+                                  AutomationProperties.HelpText="有効にすると、交通系ICカードのみで貸出・返却ができます"
+                                  ToolTip="少人数環境向け：職員証をタッチせずに交通系ICカードのみで操作可能にします"/>
 
                         <StackPanel Margin="0,15,0,0"
                                     IsEnabled="{Binding SkipStaffTouch}">
@@ -174,7 +174,7 @@
                                 <TextBlock Text="⚠️ セキュリティに関する注意"
                                            FontWeight="Bold"
                                            Foreground="#E65100"/>
-                                <TextBlock Text="この機能を有効にすると、誰でもICカードをタッチするだけで貸出・返却が可能になります。限られた職員のみが使用する環境でのみご利用ください。"
+                                <TextBlock Text="この機能を有効にすると、誰でも交通系ICカードをタッチするだけで貸出・返却が可能になります。限られた職員のみが使用する環境でのみご利用ください。"
                                            TextWrapping="Wrap"
                                            FontSize="{DynamicResource SmallFontSize}"
                                            Foreground="#795548"
