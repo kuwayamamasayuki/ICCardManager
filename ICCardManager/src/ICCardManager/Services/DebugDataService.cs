@@ -301,5 +301,5 @@ namespace ICCardManager.Services
             }
         }
     }
-    #endif
 }
+#endif
