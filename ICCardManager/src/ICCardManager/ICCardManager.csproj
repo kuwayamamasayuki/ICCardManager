@@ -21,7 +21,8 @@
 
     <!-- XMLドキュメント生成 -->
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
-    <NoWarn>$(NoWarn);CS1591</NoWarn>
+    <!-- CS1591: XMLコメント欠落, CS8632: Nullable注釈警告（.NET Fx 4.8ではNullable無効のため） -->
+    <NoWarn>$(NoWarn);CS1591;CS8632</NoWarn>
 
     <!-- テストプロジェクトからinternalメンバーへのアクセスを許可 -->
     <InternalsVisibleTo>ICCardManager.Tests</InternalsVisibleTo>
