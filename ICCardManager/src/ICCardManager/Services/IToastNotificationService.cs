@@ -31,6 +31,12 @@ namespace ICCardManager.Services
         void ShowReturnNotification(string cardType, string cardNumber, int balance, bool isLowBalance = false);
 
         /// <summary>
+        /// 職員証認識通知を表示
+        /// </summary>
+        /// <param name="staffName">職員名</param>
+        void ShowStaffRecognizedNotification(string staffName);
+
+        /// <summary>
         /// 情報通知を表示
         /// </summary>
         /// <param name="title">タイトル</param>

@@ -34,6 +34,14 @@ namespace ICCardManager.Services
         }
 
         /// <summary>
+        /// 職員証認識通知を表示
+        /// </summary>
+        public void ShowStaffRecognizedNotification(string staffName)
+        {
+            ToastNotificationWindow.Show(ToastType.Info, $"{staffName} さん", "ICカードをタッチしてください");
+        }
+
+        /// <summary>
         /// 情報通知を表示
         /// </summary>
         public void ShowInfo(string title, string message)
