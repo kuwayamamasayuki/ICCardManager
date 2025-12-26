@@ -11,7 +11,7 @@
 #      インストール: npm install -g mermaid-filter
 
 param(
-    [ValidateSet("all", "user", "admin", "dev")]
+    [ValidateSet("all", "user", "user-summary", "admin", "dev")]
     [string]$Target = "all",
     [switch]$Force,
     [switch]$NoMermaid
@@ -30,6 +30,13 @@ $Manuals = @(
         Input = "ユーザーマニュアル.md"
         Output = "ユーザーマニュアル.docx"
         Title = "交通系ICカード管理システム ユーザーマニュアル"
+    },
+    @{
+        Name = "ユーザーマニュアル概要版"
+        Key = "user-summary"
+        Input = "ユーザーマニュアル概要版.md"
+        Output = "ユーザーマニュアル概要版.docx"
+        Title = "交通系ICカード管理システム 操作ガイド（概要版）"
     },
     @{
         Name = "管理者マニュアル"
