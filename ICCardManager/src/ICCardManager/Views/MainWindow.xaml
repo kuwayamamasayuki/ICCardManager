@@ -77,13 +77,13 @@
                             AutomationProperties.Name="帳票ダイアログを開く"
                             AutomationProperties.HelpText="物品出納簿を作成します。ショートカット: F2"
                             ToolTip="帳票を開く (F2)"/>
-                    <Button Content="カード管理 (F3)" Margin="5,0"
+                    <Button Content="交通系ICカード管理 (F3)" Margin="5,0"
                             Style="{StaticResource AccessibleButtonStyle}"
                             Command="{Binding OpenCardManageCommand}"
                             TabIndex="3"
-                            AutomationProperties.Name="カード管理ダイアログを開く"
+                            AutomationProperties.Name="交通系ICカード管理ダイアログを開く"
                             AutomationProperties.HelpText="交通系ICカードの登録・編集を行います。ショートカット: F3"
-                            ToolTip="カード管理を開く (F3)"/>
+                            ToolTip="交通系ICカード管理を開く (F3)"/>
                     <Button Content="職員管理 (F4)" Margin="5,0"
                             Style="{StaticResource AccessibleButtonStyle}"
                             Command="{Binding OpenStaffManageCommand}"
