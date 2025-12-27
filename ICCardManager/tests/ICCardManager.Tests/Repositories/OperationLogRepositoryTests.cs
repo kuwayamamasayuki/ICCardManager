@@ -25,6 +25,25 @@ public class OperationLogRepositoryTests : IDisposable
         _dbContext = new DbContext(":memory:");
         _dbContext.InitializeDatabase();
         _repository = new OperationLogRepository(_dbContext);
+
+        // 各テストの前にテストデータをクリーンアップ
+        ClearTestData();
+    }
+
+    /// <summary>
+    /// テストデータをクリアして、テスト間の分離を確保する
+    /// </summary>
+    /// <remarks>
+    /// インメモリSQLiteデータベースでは、同一接続を使用しないと
+    /// 別のデータベースインスタンスに対して操作してしまうため、
+    /// DbContext.GetConnection()を使用して同じ接続を取得する。
+    /// </remarks>
+    private void ClearTestData()
+    {
+        var connection = _dbContext.GetConnection();
+        using var command = connection.CreateCommand();
+        command.CommandText = "DELETE FROM operation_log";
+        command.ExecuteNonQuery();
     }
 
     public void Dispose()
