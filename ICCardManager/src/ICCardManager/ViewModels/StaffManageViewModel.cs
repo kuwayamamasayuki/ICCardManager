@@ -291,6 +291,25 @@ namespace ICCardManager.ViewModels
         }
 
         /// <summary>
+        /// 選択職員変更時の処理
+        /// </summary>
+        partial void OnSelectedStaffChanged(StaffDto? value)
+        {
+            // 新規登録モード中は選択変更を無視
+            if (IsNewStaff) return;
+
+            // 職員が選択された場合、編集中なら選択した職員の情報で更新
+            if (value != null && IsEditing)
+            {
+                EditStaffIdm = value.StaffIdm;
+                EditName = value.Name;
+                EditNumber = value.Number ?? string.Empty;
+                EditNote = value.Note ?? string.Empty;
+                StatusMessage = string.Empty;
+            }
+        }
+
+        /// <summary>
         /// デバッグ用: カード読み取りをシミュレート
         /// </summary>
         [RelayCommand]

@@ -343,6 +343,25 @@ namespace ICCardManager.ViewModels
         }
 
         /// <summary>
+        /// 選択カード変更時の処理
+        /// </summary>
+        partial void OnSelectedCardChanged(CardDto? value)
+        {
+            // 新規登録モード中は選択変更を無視
+            if (IsNewCard) return;
+
+            // カードが選択された場合、編集中なら選択したカードの情報で更新
+            if (value != null && IsEditing)
+            {
+                EditCardIdm = value.CardIdm;
+                EditCardType = value.CardType;
+                EditCardNumber = value.CardNumber;
+                EditNote = value.Note ?? string.Empty;
+                StatusMessage = string.Empty;
+            }
+        }
+
+        /// <summary>
         /// デバッグ用: カード読み取りをシミュレート
         /// </summary>
         [RelayCommand]
