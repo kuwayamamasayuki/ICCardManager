@@ -41,7 +41,8 @@ public partial class BusStopInputViewModel : ViewModelBase
     /// <summary>
     /// 保存完了フラグ（ダイアログ結果用）
     /// </summary>
-    public bool IsSaved { get; private set; }
+    [ObservableProperty]
+    private bool _isSaved;
 
     public BusStopInputViewModel(ILedgerRepository ledgerRepository)
     {
