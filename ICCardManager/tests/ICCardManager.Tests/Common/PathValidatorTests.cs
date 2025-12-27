@@ -362,10 +362,14 @@ public class PathValidatorTests : IDisposable
     #region GetDefaultBackupPath テスト
 
     /// <summary>
-    /// デフォルトパスがLocalApplicationData内であることを確認
+    /// デフォルトパスがCommonApplicationData内であることを確認
     /// </summary>
+    /// <remarks>
+    /// バックアップは共有フォルダ（C:\ProgramData）に保存される。
+    /// これにより、管理者が全ユーザーのバックアップを一元管理できる。
+    /// </remarks>
     [Fact]
-    public void GetDefaultBackupPath_ReturnsLocalAppDataPath()
+    public void GetDefaultBackupPath_ReturnsCommonAppDataPath()
     {
         // Act
         var result = PathValidator.GetDefaultBackupPath();
@@ -373,7 +377,7 @@ public class PathValidatorTests : IDisposable
         // Assert
         result.Should().Contain("ICCardManager");
         result.Should().Contain("backup");
-        result.Should().StartWith(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData));
+        result.Should().StartWith(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData));
     }
 
     /// <summary>
