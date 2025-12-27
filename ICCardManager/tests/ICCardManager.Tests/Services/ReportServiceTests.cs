@@ -1305,7 +1305,8 @@ public class ReportServiceTests : IDisposable
         var cardIdm = "0102030405060708";
         var card = CreateTestCard(cardIdm);
         // Windowsで無効なファイル名文字（< > : | ? *）を含むパス
-        var invalidPath = Path.Combine(Path.GetTempPath(), "Invalid<>|Path", "report.xlsx");
+        // Path.Combineは無効な文字で例外をスローするため、直接文字列で構築
+        var invalidPath = Path.GetTempPath() + "Invalid<>|Path" + Path.DirectorySeparatorChar + "report.xlsx";
 
         var ledgers = new List<Ledger>
         {
