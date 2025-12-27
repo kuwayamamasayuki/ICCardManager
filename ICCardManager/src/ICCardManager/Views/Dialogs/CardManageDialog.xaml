@@ -6,12 +6,12 @@
         xmlns:vm="clr-namespace:ICCardManager.ViewModels"
         mc:Ignorable="d"
         d:DataContext="{d:DesignInstance Type=vm:CardManageViewModel}"
-        Title="カード管理"
+        Title="交通系ICカード管理"
         Height="600"
         Width="900"
         WindowStartupLocation="CenterOwner"
         ResizeMode="CanResize"
-        AutomationProperties.Name="カード管理ダイアログ"
+        AutomationProperties.Name="交通系ICカード管理ダイアログ"
         AutomationProperties.HelpText="交通系ICカードの登録・編集・削除ができます。カードをタッチして新規登録できます。">
 
     <Window.Resources>
@@ -34,7 +34,7 @@
 
             <!-- ヘッダー -->
             <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="0,0,0,10">
-                <TextBlock Text="登録済みカード一覧"
+                <TextBlock Text="登録済み交通系ICカード一覧"
                            FontSize="{DynamicResource LargeFontSize}"
                            FontWeight="Bold"
                            VerticalAlignment="Center"/>
@@ -168,7 +168,7 @@
                                     <Setter Property="Text" Value="新規登録"/>
                                 </DataTrigger>
                                 <DataTrigger Binding="{Binding IsNewCard}" Value="False">
-                                    <Setter Property="Text" Value="カード編集"/>
+                                    <Setter Property="Text" Value="交通系ICカード編集"/>
                                 </DataTrigger>
                             </Style.Triggers>
                         </Style>
