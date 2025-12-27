@@ -93,6 +93,20 @@ public partial class SettingsViewModel : ViewModelBase
     [ObservableProperty]
     private SoundModeItem? _selectedSoundModeItem;
 
+    /// <summary>
+    /// トースト位置の選択肢
+    /// </summary>
+    public ObservableCollection<ToastPositionItem> ToastPositionOptions { get; } = new()
+    {
+        new ToastPositionItem { Value = ToastPosition.TopRight, DisplayName = "右上（デフォルト）" },
+        new ToastPositionItem { Value = ToastPosition.TopLeft, DisplayName = "左上" },
+        new ToastPositionItem { Value = ToastPosition.BottomRight, DisplayName = "右下" },
+        new ToastPositionItem { Value = ToastPosition.BottomLeft, DisplayName = "左下" }
+    };
+
+    [ObservableProperty]
+    private ToastPositionItem? _selectedToastPositionItem;
+
     public SettingsViewModel(
         ISettingsRepository settingsRepository,
         IStaffRepository staffRepository,
@@ -134,6 +148,10 @@ public partial class SettingsViewModel : ViewModelBase
             // SoundModeItemを選択
             SelectedSoundModeItem = SoundModeOptions.FirstOrDefault(x => x.Value == settings.SoundMode)
                                     ?? SoundModeOptions[0]; // デフォルトは「効果音」
+
+            // ToastPositionItemを選択
+            SelectedToastPositionItem = ToastPositionOptions.FirstOrDefault(x => x.Value == settings.ToastPosition)
+                                        ?? ToastPositionOptions[0]; // デフォルトは「右上」
 
             // 職員一覧を読み込み
             await LoadStaffListAsync();
@@ -210,6 +228,7 @@ public partial class SettingsViewModel : ViewModelBase
                 BackupPath = validatedBackupPath,
                 FontSize = SelectedFontSizeItem?.Value ?? FontSizeOption.Medium,
                 SoundMode = SelectedSoundModeItem?.Value ?? SoundMode.Beep,
+                ToastPosition = SelectedToastPositionItem?.Value ?? ToastPosition.TopRight,
                 SkipStaffTouch = SkipStaffTouch,
                 DefaultStaffIdm = SelectedDefaultStaff?.StaffIdm
             };
@@ -232,6 +251,9 @@ public partial class SettingsViewModel : ViewModelBase
 
                 // 音声モードの変更を反映
                 _soundPlayer.SoundMode = settings.SoundMode;
+
+                // トースト位置の変更を反映
+                App.ApplyToastPosition(settings.ToastPosition);
 
                 // 保存完了フラグを立てる（ダイアログを閉じるトリガー）
                 IsSaved = true;
@@ -309,6 +331,11 @@ public partial class SettingsViewModel : ViewModelBase
     {
         HasChanges = true;
     }
+
+    partial void OnSelectedToastPositionItemChanged(ToastPositionItem? value)
+    {
+        HasChanges = true;
+    }
 }
 
 /// <summary>
@@ -336,5 +363,14 @@ public class StaffItem
 public class SoundModeItem
 {
     public SoundMode Value { get; set; }
+    public string DisplayName { get; set; } = string.Empty;
+}
+
+/// <summary>
+/// トースト位置選択アイテム
+/// </summary>
+public class ToastPositionItem
+{
+    public ToastPosition Value { get; set; }
     public string DisplayName { get; set; } = string.Empty;
 }

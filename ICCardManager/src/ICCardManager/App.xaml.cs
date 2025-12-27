@@ -233,13 +233,17 @@ namespace ICCardManager
                 // 文字サイズを適用
                 ApplyFontSize(settings.FontSize);
 
-                _logger?.LogDebug("設定を適用: フォントサイズ={FontSize}", settings.FontSize);
+                // トースト位置を適用
+                ApplyToastPosition(settings.ToastPosition);
+
+                _logger?.LogDebug("設定を適用: フォントサイズ={FontSize}, トースト位置={ToastPosition}", settings.FontSize, settings.ToastPosition);
             }
             catch (Exception ex)
             {
                 _logger?.LogWarning(ex, "設定の適用でエラー");
                 // デフォルト値を適用
                 ApplyFontSize(FontSizeOption.Medium);
+                ApplyToastPosition(ToastPosition.TopRight);
             }
         }
 
@@ -274,6 +278,14 @@ namespace ICCardManager
             resources["TitleFontSize"] = titleFontSize;
             resources["StatusFontSize"] = statusFontSize;
             resources["IconFontSize"] = iconFontSize;
+        }
+
+        /// <summary>
+        /// トースト通知の表示位置をアプリケーション全体に適用
+        /// </summary>
+        public static void ApplyToastPosition(ToastPosition position)
+        {
+            Views.ToastNotificationWindow.CurrentPosition = position;
         }
 
     #if DEBUG

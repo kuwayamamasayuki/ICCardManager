@@ -49,6 +49,11 @@ namespace ICCardManager.Models
         /// 音声モード
         /// </summary>
         public SoundMode SoundMode { get; set; } = SoundMode.Beep;
+
+        /// <summary>
+        /// トースト通知の表示位置
+        /// </summary>
+        public ToastPosition ToastPosition { get; set; } = ToastPosition.TopRight;
     }
 
     /// <summary>
@@ -137,5 +142,31 @@ namespace ICCardManager.Models
         /// 無し
         /// </summary>
         None
+    }
+
+    /// <summary>
+    /// トースト通知の表示位置オプション
+    /// </summary>
+    public enum ToastPosition
+    {
+        /// <summary>
+        /// 右上（デフォルト）
+        /// </summary>
+        TopRight,
+
+        /// <summary>
+        /// 左上
+        /// </summary>
+        TopLeft,
+
+        /// <summary>
+        /// 右下
+        /// </summary>
+        BottomRight,
+
+        /// <summary>
+        /// 左下
+        /// </summary>
+        BottomLeft
     }
 }

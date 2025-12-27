@@ -132,6 +132,28 @@
                     </StackPanel>
                 </GroupBox>
 
+                <!-- 通知設定 -->
+                <GroupBox Header="通知設定" Margin="0,0,0,20" Padding="15">
+                    <StackPanel>
+                        <TextBlock Text="トースト通知の表示位置"
+                                   FontWeight="Bold"
+                                   Margin="0,0,0,10"/>
+                        <ComboBox ItemsSource="{Binding ToastPositionOptions}"
+                                  SelectedItem="{Binding SelectedToastPositionItem}"
+                                  DisplayMemberPath="DisplayName"
+                                  Padding="8"
+                                  Width="200"
+                                  HorizontalAlignment="Left"
+                                  AutomationProperties.Name="トースト通知位置選択"
+                                  AutomationProperties.HelpText="貸出・返却時の通知が表示される画面の位置を選択します"
+                                  ToolTip="右上・左上・右下・左下から選択"/>
+                        <TextBlock Text="※ 「いってらっしゃい！」「おかえりなさい！」の表示位置"
+                                   FontSize="{DynamicResource SmallFontSize}"
+                                   Foreground="Gray"
+                                   Margin="0,5,0,0"/>
+                    </StackPanel>
+                </GroupBox>
+
                 <!-- 操作設定 -->
                 <GroupBox Header="操作設定" Margin="0,0,0,20" Padding="15">
                     <StackPanel>

@@ -6,6 +6,7 @@ using System.Windows;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
 using System.Windows.Threading;
+using ICCardManager.Models;
 
 namespace ICCardManager.Views
 {
@@ -54,6 +55,11 @@ namespace ICCardManager.Views
         private const int DefaultDisplayDurationMs = 3000;
         private bool _autoCloseEnabled = true;
 
+        /// <summary>
+        /// 現在のトースト表示位置
+        /// </summary>
+        public static ToastPosition CurrentPosition { get; set; } = ToastPosition.TopRight;
+
         public ToastNotificationWindow()
         {
             InitializeComponent();
@@ -73,11 +79,11 @@ namespace ICCardManager.Views
         }
 
         /// <summary>
-        /// ウィンドウ読み込み時に画面右上に配置
+        /// ウィンドウ読み込み時に指定位置に配置
         /// </summary>
         private void OnLoaded(object sender, RoutedEventArgs e)
         {
-            PositionToTopRight();
+            PositionToast();
             StartFadeInAnimation();
             if (_autoCloseEnabled)
             {
@@ -86,13 +92,36 @@ namespace ICCardManager.Views
         }
 
         /// <summary>
-        /// 画面右上に配置
+        /// 設定に応じた位置に配置
         /// </summary>
-        private void PositionToTopRight()
+        private void PositionToast()
         {
             var workArea = SystemParameters.WorkArea;
-            Left = workArea.Right - ActualWidth - 20;
-            Top = workArea.Top + 20;
+            const double margin = 20;
+
+            switch (CurrentPosition)
+            {
+                case ToastPosition.TopRight:
+                    Left = workArea.Right - ActualWidth - margin;
+                    Top = workArea.Top + margin;
+                    break;
+                case ToastPosition.TopLeft:
+                    Left = workArea.Left + margin;
+                    Top = workArea.Top + margin;
+                    break;
+                case ToastPosition.BottomRight:
+                    Left = workArea.Right - ActualWidth - margin;
+                    Top = workArea.Bottom - ActualHeight - margin;
+                    break;
+                case ToastPosition.BottomLeft:
+                    Left = workArea.Left + margin;
+                    Top = workArea.Bottom - ActualHeight - margin;
+                    break;
+                default:
+                    Left = workArea.Right - ActualWidth - margin;
+                    Top = workArea.Top + margin;
+                    break;
+            }
         }
 
         /// <summary>
