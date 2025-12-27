@@ -36,6 +36,9 @@ namespace ICCardManager.Data.Repositories
         // 音声モード設定キー
         public const string KeySoundMode = "sound_mode";
 
+        // トースト位置設定キー
+        public const string KeyToastPosition = "toast_position";
+
         public SettingsRepository(DbContext dbContext, ICacheService cacheService)
         {
             _dbContext = dbContext;
@@ -135,6 +138,14 @@ ON CONFLICT(key) DO UPDATE SET value = @value";
             var defaultStaffIdm = Get(KeyDefaultStaffIdm);
             settings.DefaultStaffIdm = string.IsNullOrEmpty(defaultStaffIdm) ? null : defaultStaffIdm;
 
+            // 音声モード設定
+            var soundMode = Get(KeySoundMode);
+            settings.SoundMode = ParseSoundMode(soundMode);
+
+            // トースト位置設定
+            var toastPosition = Get(KeyToastPosition);
+            settings.ToastPosition = ParseToastPosition(toastPosition);
+
             return settings;
         }
 
@@ -233,6 +244,10 @@ ON CONFLICT(key) DO UPDATE SET value = @value";
             var soundMode = await GetAsync(KeySoundMode);
             settings.SoundMode = ParseSoundMode(soundMode);
 
+            // トースト位置設定
+            var toastPosition = await GetAsync(KeyToastPosition);
+            settings.ToastPosition = ParseToastPosition(toastPosition);
+
             return settings;
         }
 
@@ -296,6 +311,9 @@ ON CONFLICT(key) DO UPDATE SET value = @value";
 
             // 音声モード設定を保存
             success &= await SetAsync(KeySoundMode, SoundModeToString(settings.SoundMode));
+
+            // トースト位置設定を保存
+            success &= await SetAsync(KeyToastPosition, ToastPositionToString(settings.ToastPosition));
 
             // 設定保存後にキャッシュを無効化
             _cacheService.Invalidate(CacheKeys.AppSettings);
@@ -408,6 +426,36 @@ ON CONFLICT(key) DO UPDATE SET value = @value";
                 SoundMode.VoiceFemale => "voice_female",
                 SoundMode.None => "none",
                 _ => "beep"
+            };
+        }
+
+        /// <summary>
+        /// 文字列からToastPositionに変換
+        /// </summary>
+        private static ToastPosition ParseToastPosition(string value)
+        {
+            return value?.ToLowerInvariant() switch
+            {
+                "top_right" => ToastPosition.TopRight,
+                "top_left" => ToastPosition.TopLeft,
+                "bottom_right" => ToastPosition.BottomRight,
+                "bottom_left" => ToastPosition.BottomLeft,
+                _ => ToastPosition.TopRight
+            };
+        }
+
+        /// <summary>
+        /// ToastPositionを文字列に変換
+        /// </summary>
+        private static string ToastPositionToString(ToastPosition position)
+        {
+            return position switch
+            {
+                ToastPosition.TopRight => "top_right",
+                ToastPosition.TopLeft => "top_left",
+                ToastPosition.BottomRight => "bottom_right",
+                ToastPosition.BottomLeft => "bottom_left",
+                _ => "top_right"
             };
         }
     }
