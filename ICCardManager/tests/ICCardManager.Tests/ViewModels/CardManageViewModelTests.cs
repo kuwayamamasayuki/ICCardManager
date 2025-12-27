@@ -125,11 +125,15 @@ public class CardManageViewModelTests
     /// <summary>
     /// IDmを指定して新規登録モードを開始できること
     /// </summary>
+    /// <remarks>
+    /// カード種別はIDmから自動判定できないため、デフォルト値（nimoca）が設定される。
+    /// ユーザーは必要に応じて手動でカード種別を変更する。
+    /// </remarks>
     [Fact]
-    public void StartNewCardWithIdm_ShouldSetIdmAndAutoDetectType()
+    public void StartNewCardWithIdm_ShouldSetIdmAndDefaultCardType()
     {
         // Arrange
-        var idm = "07FE112233445566"; // はやかけん
+        var idm = "0102030405060708";
 
         // Act
         _viewModel.StartNewCardWithIdm(idm);
@@ -139,39 +143,8 @@ public class CardManageViewModelTests
         _viewModel.IsNewCard.Should().BeTrue();
         _viewModel.IsWaitingForCard.Should().BeFalse(); // IDmがあるので待機しない
         _viewModel.EditCardIdm.Should().Be(idm);
-        _viewModel.EditCardType.Should().Be("はやかけん");
-    }
-
-    /// <summary>
-    /// nimocaのIDmで種別が自動検出されること
-    /// </summary>
-    [Fact]
-    public void StartNewCardWithIdm_WithNimocaIdm_ShouldDetectNimoca()
-    {
-        // Arrange
-        var idm = "05FE112233445566"; // nimoca
-
-        // Act
-        _viewModel.StartNewCardWithIdm(idm);
-
-        // Assert
+        // カード種別はIDmから自動判定できないため、デフォルト値（nimoca）が設定される
         _viewModel.EditCardType.Should().Be("nimoca");
-    }
-
-    /// <summary>
-    /// SUGOCAのIDmで種別が自動検出されること
-    /// </summary>
-    [Fact]
-    public void StartNewCardWithIdm_WithSugocaIdm_ShouldDetectSugoca()
-    {
-        // Arrange
-        var idm = "06FE112233445566"; // SUGOCA
-
-        // Act
-        _viewModel.StartNewCardWithIdm(idm);
-
-        // Assert
-        _viewModel.EditCardType.Should().Be("SUGOCA");
     }
 
     #endregion
