@@ -357,9 +357,9 @@
                                   AlternatingRowBackground="#FAFAFA"
                                   AutomationProperties.Name="利用履歴一覧">
                             <DataGrid.Columns>
-                                <DataGridTextColumn Header="日付" Binding="{Binding DateDisplay}" Width="120"/>
+                                <DataGridTextColumn Header="日付" Binding="{Binding DateDisplay}" Width="90"/>
                                 <DataGridTextColumn Header="摘要" Binding="{Binding Summary}" Width="*"/>
-                                <DataGridTextColumn Header="受入" Width="90">
+                                <DataGridTextColumn Header="受入" Width="75">
                                     <DataGridTextColumn.Binding>
                                         <Binding Path="IncomeDisplay"/>
                                     </DataGridTextColumn.Binding>
@@ -371,7 +371,7 @@
                                         </Style>
                                     </DataGridTextColumn.ElementStyle>
                                 </DataGridTextColumn>
-                                <DataGridTextColumn Header="払出" Width="90">
+                                <DataGridTextColumn Header="払出" Width="75">
                                     <DataGridTextColumn.Binding>
                                         <Binding Path="ExpenseDisplay"/>
                                     </DataGridTextColumn.Binding>
@@ -383,7 +383,7 @@
                                         </Style>
                                     </DataGridTextColumn.ElementStyle>
                                 </DataGridTextColumn>
-                                <DataGridTextColumn Header="残高" Width="100">
+                                <DataGridTextColumn Header="残高" Width="85">
                                     <DataGridTextColumn.Binding>
                                         <Binding Path="BalanceDisplay"/>
                                     </DataGridTextColumn.Binding>
@@ -393,9 +393,9 @@
                                         </Style>
                                     </DataGridTextColumn.ElementStyle>
                                 </DataGridTextColumn>
-                                <DataGridTextColumn Header="利用者" Binding="{Binding StaffName}" Width="100"/>
-                                <DataGridTextColumn Header="備考" Binding="{Binding Note}" Width="100"/>
-                                <DataGridTemplateColumn Header="操作" Width="130">
+                                <DataGridTextColumn Header="利用者" Binding="{Binding StaffName}" Width="80"/>
+                                <DataGridTextColumn Header="備考" Binding="{Binding Note}" Width="80"/>
+                                <DataGridTemplateColumn Header="操作" Width="110">
                                     <DataGridTemplateColumn.CellTemplate>
                                         <DataTemplate>
                                             <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
