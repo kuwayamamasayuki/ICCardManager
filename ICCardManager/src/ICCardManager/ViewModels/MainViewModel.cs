@@ -267,6 +267,10 @@ public partial class MainViewModel : ViewModelBase
     [NotifyPropertyChangedFor(nameof(HistoryCanGoToNextPage))]
     [NotifyPropertyChangedFor(nameof(HistoryCanGoToLastPage))]
     [NotifyPropertyChangedFor(nameof(HistoryPageDisplay))]
+    [NotifyCanExecuteChangedFor(nameof(HistoryGoToFirstPageCommand))]
+    [NotifyCanExecuteChangedFor(nameof(HistoryGoToPrevPageCommand))]
+    [NotifyCanExecuteChangedFor(nameof(HistoryGoToNextPageCommand))]
+    [NotifyCanExecuteChangedFor(nameof(HistoryGoToLastPageCommand))]
     private int _historyCurrentPage = 1;
 
     /// <summary>
@@ -278,6 +282,10 @@ public partial class MainViewModel : ViewModelBase
     [NotifyPropertyChangedFor(nameof(HistoryCanGoToNextPage))]
     [NotifyPropertyChangedFor(nameof(HistoryCanGoToLastPage))]
     [NotifyPropertyChangedFor(nameof(HistoryPageDisplay))]
+    [NotifyCanExecuteChangedFor(nameof(HistoryGoToFirstPageCommand))]
+    [NotifyCanExecuteChangedFor(nameof(HistoryGoToPrevPageCommand))]
+    [NotifyCanExecuteChangedFor(nameof(HistoryGoToNextPageCommand))]
+    [NotifyCanExecuteChangedFor(nameof(HistoryGoToLastPageCommand))]
     private int _historyTotalPages = 1;
 
     /// <summary>
@@ -925,9 +933,9 @@ public partial class MainViewModel : ViewModelBase
         {
             HistoryLedgers.Clear();
 
-            // ページングされた履歴を取得
+            // ページングされた履歴を取得（BETWEEN句は両端を含むため、AddDays(1)は不要）
             var (ledgers, totalCount) = await _ledgerRepository.GetPagedAsync(
-                HistoryCard.CardIdm, HistoryFromDate, HistoryToDate.AddDays(1), HistoryCurrentPage, HistoryPageSize);
+                HistoryCard.CardIdm, HistoryFromDate, HistoryToDate, HistoryCurrentPage, HistoryPageSize);
 
             foreach (var ledger in ledgers)
             {
