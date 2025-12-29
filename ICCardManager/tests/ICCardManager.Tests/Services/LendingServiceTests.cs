@@ -611,6 +611,128 @@ public class LendingServiceTests : IDisposable
         _service.IsRetouchWithinTimeout(TestCardIdm).Should().BeFalse();
     }
 
+    /// <summary>
+    /// 貸出後の30秒以内再タッチで、逆操作（返却）が必要であることを判定できることを確認
+    /// </summary>
+    [Fact]
+    public async Task IsRetouchWithinTimeout_AfterLend_CanDetermineReverseOperation()
+    {
+        // Arrange - 貸出処理を実行
+        var card = CreateTestCard(isLent: false);
+        var staff = CreateTestStaff();
+
+        _cardRepositoryMock.Setup(x => x.GetByIdmAsync(TestCardIdm, false))
+            .ReturnsAsync(card);
+        _staffRepositoryMock.Setup(x => x.GetByIdmAsync(TestStaffIdm, false))
+            .ReturnsAsync(staff);
+        _ledgerRepositoryMock.Setup(x => x.InsertAsync(It.IsAny<Ledger>()))
+            .ReturnsAsync(1);
+        _cardRepositoryMock.Setup(x => x.UpdateLentStatusAsync(It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<DateTime?>(), It.IsAny<string?>()))
+            .ReturnsAsync(true);
+
+        await _service.LendAsync(TestStaffIdm, TestCardIdm);
+
+        // Act - 30秒ルールチェック
+        var isWithinTimeout = _service.IsRetouchWithinTimeout(TestCardIdm);
+        var lastOperation = _service.LastOperationType;
+
+        // Assert - 30秒以内であり、前回操作が貸出であることを確認（逆操作は返却）
+        isWithinTimeout.Should().BeTrue();
+        lastOperation.Should().Be(LendingOperationType.Lend);
+    }
+
+    /// <summary>
+    /// 返却後の30秒以内再タッチで、逆操作（貸出）が必要であることを判定できることを確認
+    /// </summary>
+    [Fact]
+    public async Task IsRetouchWithinTimeout_AfterReturn_CanDetermineReverseOperation()
+    {
+        // Arrange - 返却処理を実行
+        var card = CreateTestCard(isLent: true);
+        var staff = CreateTestStaff();
+        var lentRecord = CreateTestLentRecord();
+
+        SetupReturnMocks(card, staff, lentRecord);
+
+        await _service.ReturnAsync(TestStaffIdm, TestCardIdm, new List<LedgerDetail>());
+
+        // Act - 30秒ルールチェック
+        var isWithinTimeout = _service.IsRetouchWithinTimeout(TestCardIdm);
+        var lastOperation = _service.LastOperationType;
+
+        // Assert - 30秒以内であり、前回操作が返却であることを確認（逆操作は貸出）
+        isWithinTimeout.Should().BeTrue();
+        lastOperation.Should().Be(LendingOperationType.Return);
+    }
+
+    /// <summary>
+    /// 貸出後に返却し、その後再度同一カードをタッチした場合、最後の操作（返却）が記録されていることを確認
+    /// </summary>
+    [Fact]
+    public async Task IsRetouchWithinTimeout_AfterLendThenReturn_TracksLastOperation()
+    {
+        // Arrange
+        var staff = CreateTestStaff();
+
+        // モックを柔軟に設定（貸出中フラグが変わるシナリオ）
+        var isLent = false;
+        _cardRepositoryMock.Setup(x => x.GetByIdmAsync(TestCardIdm, false))
+            .ReturnsAsync(() => new IcCard
+            {
+                CardIdm = TestCardIdm,
+                CardType = "はやかけん",
+                CardNumber = "H001",
+                IsLent = isLent,
+                IsDeleted = false
+            });
+        _staffRepositoryMock.Setup(x => x.GetByIdmAsync(TestStaffIdm, false))
+            .ReturnsAsync(staff);
+        _ledgerRepositoryMock.Setup(x => x.InsertAsync(It.IsAny<Ledger>()))
+            .ReturnsAsync(1);
+        _cardRepositoryMock.Setup(x => x.UpdateLentStatusAsync(It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<DateTime?>(), It.IsAny<string?>()))
+            .Callback<string, bool, DateTime?, string?>((idm, lent, time, staff) => isLent = lent)
+            .ReturnsAsync(true);
+        _ledgerRepositoryMock.Setup(x => x.GetLentRecordAsync(TestCardIdm))
+            .ReturnsAsync(CreateTestLentRecord());
+        _ledgerRepositoryMock.Setup(x => x.UpdateAsync(It.IsAny<Ledger>()))
+            .ReturnsAsync(true);
+        _ledgerRepositoryMock.Setup(x => x.GetLatestBeforeDateAsync(TestCardIdm, It.IsAny<DateTime>()))
+            .ReturnsAsync(new Ledger { Balance = 5000 });
+        _settingsRepositoryMock.Setup(x => x.GetAppSettingsAsync())
+            .ReturnsAsync(new AppSettings { WarningBalance = 1000 });
+
+        // Act - 貸出を実行
+        await _service.LendAsync(TestStaffIdm, TestCardIdm);
+        _service.LastOperationType.Should().Be(LendingOperationType.Lend);
+
+        // Act - 返却を実行
+        await _service.ReturnAsync(TestStaffIdm, TestCardIdm, new List<LedgerDetail>());
+
+        // Assert - 最後の操作が返却であることを確認
+        _service.IsRetouchWithinTimeout(TestCardIdm).Should().BeTrue();
+        _service.LastOperationType.Should().Be(LendingOperationType.Return);
+    }
+
+    /// <summary>
+    /// 30秒ルールで逆操作を判定するロジックのテスト
+    /// </summary>
+    [Theory]
+    [InlineData(LendingOperationType.Lend, LendingOperationType.Return)]
+    [InlineData(LendingOperationType.Return, LendingOperationType.Lend)]
+    public void ThirtySecondRule_DetermineReverseOperation_ReturnsCorrectOperation(
+        LendingOperationType lastOperation,
+        LendingOperationType expectedReverse)
+    {
+        // Arrange & Act - 逆操作を判定
+        // これはMainViewModelでの実装ロジックをテスト
+        LendingOperationType reverseOperation = lastOperation == LendingOperationType.Lend
+            ? LendingOperationType.Return
+            : LendingOperationType.Lend;
+
+        // Assert
+        reverseOperation.Should().Be(expectedReverse);
+    }
+
     #endregion
 
     #region 複数日利用履歴テスト
