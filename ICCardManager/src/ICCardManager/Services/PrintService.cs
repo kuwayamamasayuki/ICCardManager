@@ -579,24 +579,16 @@ namespace ICCardManager.Services
             var rowGroup = new TableRowGroup();
             var row = new TableRow();
 
+            // 設計書に合わせて1行に収める
+            // 物品の分類: 雑品（金券類）  品名: はやかけん  規格: H001  単位: 円
             row.Cells.Add(CreateHeaderCell("物品分類:", false));
             row.Cells.Add(CreateHeaderCell("雑品（金券類）", true));
             row.Cells.Add(CreateHeaderCell("品名:", false));
             row.Cells.Add(CreateHeaderCell(data.CardType, true));
             row.Cells.Add(CreateHeaderCell("規格:", false));
-            row.Cells.Add(CreateHeaderCell(data.CardNumber, true));
+            row.Cells.Add(CreateHeaderCell($"{data.CardNumber}  単位: 円", true));
 
             rowGroup.Rows.Add(row);
-
-            var row2 = new TableRow();
-            row2.Cells.Add(CreateHeaderCell("年月:", false));
-            row2.Cells.Add(CreateHeaderCell(data.WarekiYearMonth, true));
-            row2.Cells.Add(CreateHeaderCell("単位:", false));
-            row2.Cells.Add(CreateHeaderCell("円", true));
-            row2.Cells.Add(CreateHeaderCell("", false));
-            row2.Cells.Add(CreateHeaderCell("", false));
-
-            rowGroup.Rows.Add(row2);
             table.RowGroups.Add(rowGroup);
 
             return table;
