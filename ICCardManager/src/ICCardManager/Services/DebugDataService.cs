@@ -155,7 +155,19 @@ namespace ICCardManager.Services
                             StaffName = staffName,
                             Note = "テストデータ"
                         };
-                        await _ledgerRepository.InsertAsync(chargeLedger);
+                        var chargeLedgerId = await _ledgerRepository.InsertAsync(chargeLedger);
+
+                        // チャージの詳細レコードを作成
+                        var chargeDetail = new LedgerDetail
+                        {
+                            LedgerId = chargeLedgerId,
+                            UseDate = date.AddHours(8).AddMinutes(random.Next(60)),
+                            Amount = chargeAmount,
+                            Balance = balance,
+                            IsCharge = true,
+                            IsBus = false
+                        };
+                        await _ledgerRepository.InsertDetailAsync(chargeDetail);
                     }
 
                     // 鉄道利用（往復）
@@ -176,7 +188,36 @@ namespace ICCardManager.Services
                         StaffName = staffName,
                         Note = "テストデータ"
                     };
-                    await _ledgerRepository.InsertAsync(usageLedger);
+                    var usageLedgerId = await _ledgerRepository.InsertAsync(usageLedger);
+
+                    // 往路の詳細レコード
+                    var outboundBalance = balance + fare; // 復路分を足し戻す
+                    var outboundDetail = new LedgerDetail
+                    {
+                        LedgerId = usageLedgerId,
+                        UseDate = date.AddHours(8).AddMinutes(random.Next(60)),
+                        EntryStation = SampleStations[fromIdx],
+                        ExitStation = SampleStations[toIdx],
+                        Amount = fare,
+                        Balance = outboundBalance,
+                        IsCharge = false,
+                        IsBus = false
+                    };
+                    await _ledgerRepository.InsertDetailAsync(outboundDetail);
+
+                    // 復路の詳細レコード
+                    var returnDetail = new LedgerDetail
+                    {
+                        LedgerId = usageLedgerId,
+                        UseDate = date.AddHours(17).AddMinutes(random.Next(60)),
+                        EntryStation = SampleStations[toIdx],
+                        ExitStation = SampleStations[fromIdx],
+                        Amount = fare,
+                        Balance = balance,
+                        IsCharge = false,
+                        IsBus = false
+                    };
+                    await _ledgerRepository.InsertDetailAsync(returnDetail);
 
                     // 20%の確率でバス利用も追加
                     if (random.Next(100) < 20)
@@ -195,7 +236,19 @@ namespace ICCardManager.Services
                             StaffName = staffName,
                             Note = "テストデータ"
                         };
-                        await _ledgerRepository.InsertAsync(busLedger);
+                        var busLedgerId = await _ledgerRepository.InsertAsync(busLedger);
+
+                        // バス利用の詳細レコード
+                        var busDetail = new LedgerDetail
+                        {
+                            LedgerId = busLedgerId,
+                            UseDate = date.AddHours(12).AddMinutes(random.Next(60)),
+                            Amount = busFare,
+                            Balance = balance,
+                            IsCharge = false,
+                            IsBus = true
+                        };
+                        await _ledgerRepository.InsertDetailAsync(busDetail);
                     }
                 }
 
