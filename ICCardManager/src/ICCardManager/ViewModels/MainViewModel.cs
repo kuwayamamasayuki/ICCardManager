@@ -105,6 +105,16 @@ public partial class MainViewModel : ViewModelBase
     private string? _currentStaffName;
 
     /// <summary>
+    /// 30秒ルール用: 最後に操作を行った職員IDm
+    /// </summary>
+    private string? _lastProcessedStaffIdm;
+
+    /// <summary>
+    /// 30秒ルール用: 最後に操作を行った職員名
+    /// </summary>
+    private string? _lastProcessedStaffName;
+
+    /// <summary>
     /// タイムアウト時間（秒）
     /// </summary>
     private const int TimeoutSeconds = 60;
@@ -644,6 +654,14 @@ public partial class MainViewModel : ViewModelBase
         // 交通系ICカードかどうか確認
         if (card != null)
         {
+            // 30秒ルールチェック：職員証スキップモードでない場合も適用
+            if (_lendingService.IsRetouchWithinTimeout(idm))
+            {
+                // 30秒以内の再タッチ → 逆の処理を行う
+                await Process30SecondRuleAsync(card);
+                return;
+            }
+
             // 履歴表示画面を開く
             await ShowHistoryAsync(card);
             return;
@@ -685,16 +703,7 @@ public partial class MainViewModel : ViewModelBase
         if (_lendingService.IsRetouchWithinTimeout(idm))
         {
             // 逆の処理を行う
-            if (_lendingService.LastOperationType == LendingOperationType.Lend)
-            {
-                // 貸出直後の再タッチ → 返却へ
-                await ProcessReturnAsync(card);
-            }
-            else
-            {
-                // 返却直後の再タッチ → 貸出へ
-                await ProcessLendAsync(card);
-            }
+            await Process30SecondRuleAsync(card);
         }
         else
         {
@@ -707,6 +716,47 @@ public partial class MainViewModel : ViewModelBase
             {
                 await ProcessLendAsync(card);
             }
+        }
+    }
+
+    /// <summary>
+    /// 30秒ルールによる逆操作を実行します。
+    /// </summary>
+    /// <param name="card">対象のICカード</param>
+    /// <remarks>
+    /// <para>
+    /// 同一カードが30秒以内に再タッチされた場合に呼び出されます。
+    /// 直前の処理と逆の処理（貸出→返却、返却→貸出）を実行します。
+    /// </para>
+    /// <para>
+    /// 職員証スキップモードでない場合も動作するよう、
+    /// 最後に操作を行った職員の情報を使用します。
+    /// </para>
+    /// </remarks>
+    private async Task Process30SecondRuleAsync(IcCard card)
+    {
+        // 30秒ルール用に保存した職員情報を使用
+        if (string.IsNullOrEmpty(_lastProcessedStaffIdm))
+        {
+            _soundPlayer.Play(SoundType.Error);
+            _toastNotificationService.ShowError("エラー", "操作者情報がありません。職員証をタッチしてください。");
+            return;
+        }
+
+        // 一時的に職員情報を設定
+        _currentStaffIdm = _lastProcessedStaffIdm;
+        _currentStaffName = _lastProcessedStaffName;
+
+        // 逆の処理を行う
+        if (_lendingService.LastOperationType == LendingOperationType.Lend)
+        {
+            // 貸出直後の再タッチ → 返却へ
+            await ProcessReturnAsync(card);
+        }
+        else
+        {
+            // 返却直後の再タッチ → 貸出へ
+            await ProcessLendAsync(card);
         }
     }
 
@@ -741,6 +791,10 @@ public partial class MainViewModel : ViewModelBase
             // メイン画面は変更しない（Issue #186: 職員の操作を妨げない）
 
             await RefreshLentCardsAsync();
+
+            // 30秒ルール用に職員情報を保存（ResetStateの前に保存）
+            _lastProcessedStaffIdm = _currentStaffIdm;
+            _lastProcessedStaffName = _currentStaffName;
 
             // 状態をリセット（次の操作を受け付ける）
             ResetState();
@@ -810,6 +864,10 @@ public partial class MainViewModel : ViewModelBase
                     busDialog.ShowDialog();
                 }
             }
+
+            // 30秒ルール用に職員情報を保存（ResetStateの前に保存）
+            _lastProcessedStaffIdm = _currentStaffIdm;
+            _lastProcessedStaffName = _currentStaffName;
 
             // 状態をリセット（次の操作を受け付ける）
             ResetState();
