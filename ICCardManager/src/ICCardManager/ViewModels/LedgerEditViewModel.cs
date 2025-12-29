@@ -197,7 +197,7 @@ namespace ICCardManager.ViewModels
 
                 if (result)
                 {
-                    // 操作ログを記録（operatorIdmはnull - GUI操作のため）
+                    // 操作ログを記録（GUI操作のためoperatorIdmはnull）
                     await _operationLogger.LogLedgerUpdateAsync(null, beforeLedger, ledger);
 
                     IsSaved = true;
