@@ -184,6 +184,7 @@ namespace ICCardManager
             services.AddTransient<PrintPreviewViewModel>();
             services.AddTransient<DataExportImportViewModel>();
             services.AddTransient<OperationLogSearchViewModel>();
+            services.AddTransient<LedgerEditViewModel>();
 
             // Views
             services.AddTransient<MainWindow>();
@@ -196,6 +197,8 @@ namespace ICCardManager
             services.AddTransient<Views.Dialogs.PrintPreviewDialog>();
             services.AddTransient<Views.Dialogs.DataExportImportDialog>();
             services.AddTransient<Views.Dialogs.OperationLogDialog>();
+            services.AddTransient<Views.Dialogs.LedgerDetailDialog>();
+            services.AddTransient<Views.Dialogs.LedgerEditDialog>();
         }
 
         /// <summary>

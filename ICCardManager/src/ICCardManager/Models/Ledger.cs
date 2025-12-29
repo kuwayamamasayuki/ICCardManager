@@ -84,5 +84,10 @@ namespace ICCardManager.Models
         /// 利用履歴詳細のコレクション（ナビゲーションプロパティ）
         /// </summary>
         public List<LedgerDetail> Details { get; set; } = new();
+
+        /// <summary>
+        /// 詳細件数（クエリで取得）
+        /// </summary>
+        public int DetailCount { get; set; }
     }
 }

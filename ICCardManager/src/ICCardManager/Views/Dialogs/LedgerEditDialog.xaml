@@ -1,0 +1,198 @@
+<Window x:Class="ICCardManager.Views.Dialogs.LedgerEditDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:vm="clr-namespace:ICCardManager.ViewModels"
+        mc:Ignorable="d"
+        d:DataContext="{d:DesignInstance Type=vm:LedgerEditViewModel}"
+        Title="利用履歴の変更"
+        Height="400"
+        Width="600"
+        WindowStartupLocation="CenterOwner"
+        ResizeMode="NoResize"
+        AutomationProperties.Name="利用履歴変更ダイアログ"
+        AutomationProperties.HelpText="選択した履歴の摘要と備考を変更できます。">
+
+    <Window.Resources>
+        <BooleanToVisibilityConverter x:Key="BoolToVisibilityConverter"/>
+    </Window.Resources>
+
+    <Grid Margin="20">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <!-- 履歴情報ヘッダー（読み取り専用） -->
+        <Border Grid.Row="0" Background="#E3F2FD" CornerRadius="4" Padding="15" Margin="0,0,0,15">
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                </Grid.RowDefinitions>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+
+                <!-- 日付 -->
+                <TextBlock Grid.Row="0" Grid.Column="0"
+                           Text="{Binding DateDisplay}"
+                           FontSize="{DynamicResource LargeFontSize}"
+                           FontWeight="Bold"
+                           VerticalAlignment="Center"/>
+
+                <!-- 金額情報 -->
+                <StackPanel Grid.Row="0" Grid.Column="1" Orientation="Horizontal">
+                    <TextBlock Text="{Binding IncomeDisplay}"
+                               FontSize="{DynamicResource LargeFontSize}"
+                               FontWeight="Bold"
+                               Foreground="Green"
+                               VerticalAlignment="Center"
+                               Margin="0,0,15,0"
+                               Visibility="{Binding HasIncome, Converter={StaticResource BoolToVisibilityConverter}}"/>
+                    <TextBlock Text="{Binding ExpenseDisplay}"
+                               FontSize="{DynamicResource LargeFontSize}"
+                               FontWeight="Bold"
+                               Foreground="OrangeRed"
+                               VerticalAlignment="Center"
+                               Margin="0,0,15,0"
+                               Visibility="{Binding HasExpense, Converter={StaticResource BoolToVisibilityConverter}}"/>
+                    <TextBlock Text="残高:"
+                               FontSize="{DynamicResource BaseFontSize}"
+                               VerticalAlignment="Center"/>
+                    <TextBlock Text="{Binding BalanceDisplay}"
+                               FontSize="{DynamicResource LargeFontSize}"
+                               FontWeight="Bold"
+                               Foreground="#1565C0"
+                               Margin="5,0,0,0"
+                               VerticalAlignment="Center"/>
+                </StackPanel>
+
+                <!-- 利用者 -->
+                <StackPanel Grid.Row="1" Grid.ColumnSpan="2" Orientation="Horizontal" Margin="0,8,0,0">
+                    <TextBlock Text="利用者:"
+                               FontSize="{DynamicResource SmallFontSize}"
+                               Foreground="Gray"
+                               VerticalAlignment="Center"/>
+                    <TextBlock Text="{Binding StaffName}"
+                               FontSize="{DynamicResource SmallFontSize}"
+                               Margin="5,0,0,0"
+                               VerticalAlignment="Center"/>
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <!-- 摘要入力 -->
+        <Grid Grid.Row="1" Margin="0,0,0,15">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="80"/>
+                <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
+
+            <TextBlock Grid.Column="0"
+                       Text="摘要:"
+                       FontSize="{DynamicResource BaseFontSize}"
+                       VerticalAlignment="Center"/>
+            <TextBox Grid.Column="1"
+                     Text="{Binding Summary, UpdateSourceTrigger=PropertyChanged}"
+                     FontSize="{DynamicResource BaseFontSize}"
+                     Padding="10,8"
+                     AutomationProperties.Name="摘要"
+                     AutomationProperties.HelpText="履歴の摘要を編集します"
+                     ToolTip="履歴の摘要（例: 鉄道（博多駅～天神）、チャージ など）"/>
+        </Grid>
+
+        <!-- 備考入力 -->
+        <Grid Grid.Row="2" Margin="0,0,0,15">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="80"/>
+                <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="*"/>
+            </Grid.RowDefinitions>
+
+            <TextBlock Grid.Row="0" Grid.Column="0"
+                       Text="備考:"
+                       FontSize="{DynamicResource BaseFontSize}"
+                       VerticalAlignment="Top"
+                       Margin="0,8,0,0"/>
+            <TextBox Grid.Row="0" Grid.RowSpan="2" Grid.Column="1"
+                     Text="{Binding Note, UpdateSourceTrigger=PropertyChanged}"
+                     FontSize="{DynamicResource BaseFontSize}"
+                     Padding="10,8"
+                     TextWrapping="Wrap"
+                     AcceptsReturn="True"
+                     VerticalScrollBarVisibility="Auto"
+                     MinHeight="80"
+                     AutomationProperties.Name="備考"
+                     AutomationProperties.HelpText="履歴の備考を編集します"
+                     ToolTip="備考（任意）"/>
+        </Grid>
+
+        <!-- ステータスメッセージ -->
+        <TextBlock Grid.Row="3"
+                   Text="{Binding StatusMessage}"
+                   Foreground="#D32F2F"
+                   FontSize="{DynamicResource SmallFontSize}"
+                   Margin="0,0,0,10">
+            <TextBlock.Style>
+                <Style TargetType="TextBlock">
+                    <Setter Property="Visibility" Value="Visible"/>
+                    <Style.Triggers>
+                        <DataTrigger Binding="{Binding StatusMessage}" Value="{x:Null}">
+                            <Setter Property="Visibility" Value="Collapsed"/>
+                        </DataTrigger>
+                        <DataTrigger Binding="{Binding StatusMessage}" Value="">
+                            <Setter Property="Visibility" Value="Collapsed"/>
+                        </DataTrigger>
+                    </Style.Triggers>
+                </Style>
+            </TextBlock.Style>
+        </TextBlock>
+
+        <!-- ボタン -->
+        <StackPanel Grid.Row="4"
+                    Orientation="Horizontal"
+                    HorizontalAlignment="Right">
+            <Button Content="キャンセル"
+                    Command="{Binding CancelCommand}"
+                    Click="CancelButton_Click"
+                    Padding="20,10"
+                    Margin="0,0,10,0"
+                    IsCancel="True"
+                    FontSize="{DynamicResource BaseFontSize}"
+                    AutomationProperties.Name="キャンセル"
+                    ToolTip="変更を破棄してダイアログを閉じる (Escape)"/>
+            <Button Content="保存"
+                    Command="{Binding SaveCommand}"
+                    Padding="25,10"
+                    Background="#4CAF50"
+                    Foreground="White"
+                    IsDefault="True"
+                    FontSize="{DynamicResource BaseFontSize}"
+                    AutomationProperties.Name="保存"
+                    ToolTip="変更を保存 (Enter)"/>
+        </StackPanel>
+
+        <!-- 処理中オーバーレイ -->
+        <Border Grid.RowSpan="5"
+                Background="#80000000"
+                Visibility="{Binding IsBusy, Converter={StaticResource BoolToVisibilityConverter}}">
+            <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
+                <ProgressBar IsIndeterminate="True" Width="200" Height="4"/>
+                <TextBlock Text="{Binding BusyMessage}"
+                           Foreground="White"
+                           FontSize="{DynamicResource BaseFontSize}"
+                           Margin="0,10,0,0"
+                           HorizontalAlignment="Center"/>
+            </StackPanel>
+        </Border>
+    </Grid>
+</Window>

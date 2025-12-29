@@ -1083,6 +1083,59 @@ public partial class MainViewModel : ViewModelBase
 
     #endregion
 
+    #region 履歴詳細・変更コマンド
+
+    /// <summary>
+    /// 履歴詳細を表示
+    /// </summary>
+    [RelayCommand]
+    public async Task ShowLedgerDetail(LedgerDto ledger)
+    {
+        if (ledger == null || !ledger.HasDetails) return;
+
+        // 詳細データを取得
+        var ledgerWithDetails = await _ledgerRepository.GetByIdAsync(ledger.Id);
+        if (ledgerWithDetails == null) return;
+
+        var detailDto = ledgerWithDetails.ToDto();
+
+        // 詳細ダイアログを表示
+        var dialog = App.Current.ServiceProvider.GetRequiredService<Views.Dialogs.LedgerDetailDialog>();
+        dialog.Owner = System.Windows.Application.Current.MainWindow;
+        dialog.Initialize(detailDto);
+        dialog.ShowDialog();
+    }
+
+    /// <summary>
+    /// 履歴を変更
+    /// </summary>
+    [RelayCommand]
+    public async Task EditLedger(LedgerDto ledger)
+    {
+        if (ledger == null) return;
+
+        // 詳細データを取得
+        var ledgerWithDetails = await _ledgerRepository.GetByIdAsync(ledger.Id);
+        if (ledgerWithDetails == null) return;
+
+        var detailDto = ledgerWithDetails.ToDto();
+
+        // 変更ダイアログを表示
+        var dialog = App.Current.ServiceProvider.GetRequiredService<Views.Dialogs.LedgerEditDialog>();
+        dialog.Owner = System.Windows.Application.Current.MainWindow;
+        await dialog.InitializeAsync(detailDto);
+
+        if (dialog.ShowDialog() == true)
+        {
+            // 変更後に履歴を再読み込み
+            await LoadHistoryLedgersAsync();
+            // ダッシュボードも更新
+            await RefreshDashboardAsync();
+        }
+    }
+
+    #endregion
+
     /// <summary>
     /// 状態を設定
     /// </summary>

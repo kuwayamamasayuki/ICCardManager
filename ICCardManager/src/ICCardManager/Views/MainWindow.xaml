@@ -394,7 +394,27 @@
                                     </DataGridTextColumn.ElementStyle>
                                 </DataGridTextColumn>
                                 <DataGridTextColumn Header="利用者" Binding="{Binding StaffName}" Width="100"/>
-                                <DataGridTextColumn Header="備考" Binding="{Binding Note}" Width="120"/>
+                                <DataGridTextColumn Header="備考" Binding="{Binding Note}" Width="100"/>
+                                <DataGridTemplateColumn Header="操作" Width="130">
+                                    <DataGridTemplateColumn.CellTemplate>
+                                        <DataTemplate>
+                                            <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
+                                                <Button Content="詳細"
+                                                        Command="{Binding DataContext.ShowLedgerDetailCommand, RelativeSource={RelativeSource AncestorType=DataGrid}}"
+                                                        CommandParameter="{Binding}"
+                                                        IsEnabled="{Binding HasDetails}"
+                                                        Padding="8,2"
+                                                        Margin="0,0,5,0"
+                                                        ToolTip="利用詳細を表示"/>
+                                                <Button Content="変更"
+                                                        Command="{Binding DataContext.EditLedgerCommand, RelativeSource={RelativeSource AncestorType=DataGrid}}"
+                                                        CommandParameter="{Binding}"
+                                                        Padding="8,2"
+                                                        ToolTip="履歴内容を変更"/>
+                                            </StackPanel>
+                                        </DataTemplate>
+                                    </DataGridTemplateColumn.CellTemplate>
+                                </DataGridTemplateColumn>
                             </DataGrid.Columns>
 
                             <!-- 貸出中レコードのスタイル -->
