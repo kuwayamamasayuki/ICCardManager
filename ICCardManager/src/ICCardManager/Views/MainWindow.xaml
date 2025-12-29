@@ -96,6 +96,13 @@
                             AutomationProperties.Name="操作ログダイアログを開く"
                             AutomationProperties.HelpText="システムの操作履歴を検索・表示します。ショートカット: F6"
                             ToolTip="操作ログを開く (F6)"/>
+                    <Button Content="終了" Margin="15,0,5,0"
+                            Style="{StaticResource AccessibleButtonStyle}"
+                            Command="{Binding ExitCommand}"
+                            TabIndex="7"
+                            AutomationProperties.Name="アプリケーションを終了"
+                            AutomationProperties.HelpText="アプリケーションを終了します。"
+                            ToolTip="アプリケーションを終了"/>
                 </StackPanel>
             </DockPanel>
         </Border>
