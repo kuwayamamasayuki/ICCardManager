@@ -196,6 +196,148 @@ public partial class MainViewModel : ViewModelBase
     [ObservableProperty]
     private CardBalanceDashboardItem? _selectedDashboardItem;
 
+    #region 履歴表示関連プロパティ
+
+    /// <summary>
+    /// 履歴表示中のカード
+    /// </summary>
+    [ObservableProperty]
+    private CardDto? _historyCard;
+
+    /// <summary>
+    /// 履歴一覧
+    /// </summary>
+    [ObservableProperty]
+    private ObservableCollection<LedgerDto> _historyLedgers = new();
+
+    /// <summary>
+    /// 履歴表示中かどうか
+    /// </summary>
+    [ObservableProperty]
+    private bool _isHistoryVisible;
+
+    /// <summary>
+    /// 履歴表示中のカードの現在残高
+    /// </summary>
+    [ObservableProperty]
+    private int _historyCurrentBalance;
+
+    /// <summary>
+    /// 履歴の表示期間開始日
+    /// </summary>
+    [ObservableProperty]
+    private DateTime _historyFromDate;
+
+    /// <summary>
+    /// 履歴の表示期間終了日
+    /// </summary>
+    [ObservableProperty]
+    private DateTime _historyToDate;
+
+    /// <summary>
+    /// 履歴の選択中期間表示
+    /// </summary>
+    [ObservableProperty]
+    private string _historyPeriodDisplay = string.Empty;
+
+    /// <summary>
+    /// 月選択ポップアップを表示中か
+    /// </summary>
+    [ObservableProperty]
+    private bool _isHistoryMonthSelectorOpen;
+
+    /// <summary>
+    /// 履歴の選択中の年
+    /// </summary>
+    [ObservableProperty]
+    private int _historySelectedYear;
+
+    /// <summary>
+    /// 履歴の選択中の月
+    /// </summary>
+    [ObservableProperty]
+    private int _historySelectedMonth;
+
+    /// <summary>
+    /// 履歴の現在ページ
+    /// </summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HistoryCanGoToFirstPage))]
+    [NotifyPropertyChangedFor(nameof(HistoryCanGoToPrevPage))]
+    [NotifyPropertyChangedFor(nameof(HistoryCanGoToNextPage))]
+    [NotifyPropertyChangedFor(nameof(HistoryCanGoToLastPage))]
+    [NotifyPropertyChangedFor(nameof(HistoryPageDisplay))]
+    private int _historyCurrentPage = 1;
+
+    /// <summary>
+    /// 履歴の総ページ数
+    /// </summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HistoryCanGoToFirstPage))]
+    [NotifyPropertyChangedFor(nameof(HistoryCanGoToPrevPage))]
+    [NotifyPropertyChangedFor(nameof(HistoryCanGoToNextPage))]
+    [NotifyPropertyChangedFor(nameof(HistoryCanGoToLastPage))]
+    [NotifyPropertyChangedFor(nameof(HistoryPageDisplay))]
+    private int _historyTotalPages = 1;
+
+    /// <summary>
+    /// 履歴の総件数
+    /// </summary>
+    [ObservableProperty]
+    private int _historyTotalCount;
+
+    /// <summary>
+    /// 履歴の1ページあたり表示件数
+    /// </summary>
+    [ObservableProperty]
+    private int _historyPageSize = 50;
+
+    /// <summary>
+    /// 履歴のステータスメッセージ
+    /// </summary>
+    [ObservableProperty]
+    private string _historyStatusMessage = string.Empty;
+
+    /// <summary>
+    /// 履歴ページ表示
+    /// </summary>
+    public string HistoryPageDisplay => $"{HistoryCurrentPage} / {HistoryTotalPages}";
+
+    /// <summary>
+    /// 履歴: 最初のページに移動可能か
+    /// </summary>
+    public bool HistoryCanGoToFirstPage => HistoryCurrentPage > 1;
+
+    /// <summary>
+    /// 履歴: 前のページに移動可能か
+    /// </summary>
+    public bool HistoryCanGoToPrevPage => HistoryCurrentPage > 1;
+
+    /// <summary>
+    /// 履歴: 次のページに移動可能か
+    /// </summary>
+    public bool HistoryCanGoToNextPage => HistoryCurrentPage < HistoryTotalPages;
+
+    /// <summary>
+    /// 履歴: 最後のページに移動可能か
+    /// </summary>
+    public bool HistoryCanGoToLastPage => HistoryCurrentPage < HistoryTotalPages;
+
+    /// <summary>
+    /// 選択可能な年のリスト（過去6年分）
+    /// </summary>
+    public ObservableCollection<int> HistoryAvailableYears { get; } = new();
+
+    /// <summary>
+    /// 月のリスト（1～12）
+    /// </summary>
+    public ObservableCollection<int> HistoryAvailableMonths { get; } = new()
+    {
+        1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12
+    };
+
+    #endregion
+
     public MainViewModel(
         ICardReader cardReader,
         ISoundPlayer soundPlayer,
@@ -230,6 +372,21 @@ public partial class MainViewModel : ViewModelBase
         dateTimeTimer.Tick += (s, e) => UpdateDateTime();
         dateTimeTimer.Start();
         UpdateDateTime();
+
+        // 履歴表示用の年リストを初期化（今年度から過去6年分）
+        var currentYear = DateTime.Today.Year;
+        for (int year = currentYear; year >= currentYear - 6; year--)
+        {
+            HistoryAvailableYears.Add(year);
+        }
+
+        // 履歴期間のデフォルト設定（今月）
+        var today = DateTime.Today;
+        HistoryFromDate = new DateTime(today.Year, today.Month, 1);
+        HistoryToDate = today;
+        HistorySelectedYear = today.Year;
+        HistorySelectedMonth = today.Month;
+        UpdateHistoryPeriodDisplay();
     }
 
     /// <summary>
@@ -727,15 +884,204 @@ public partial class MainViewModel : ViewModelBase
     }
 
     /// <summary>
-    /// 履歴表示
+    /// 履歴表示（メイン画面に表示）
     /// </summary>
     private async Task ShowHistoryAsync(IcCard card)
     {
-        var dialog = App.Current.ServiceProvider.GetRequiredService<Views.Dialogs.HistoryDialog>();
-        dialog.Owner = System.Windows.Application.Current.MainWindow;
-        await dialog.InitializeWithCardAsync(card);
-        dialog.ShowDialog();
+        HistoryCard = card.ToDto();
+        HistoryCurrentPage = 1;
+
+        // 期間を今月にリセット
+        var today = DateTime.Today;
+        HistoryFromDate = new DateTime(today.Year, today.Month, 1);
+        HistoryToDate = today;
+        HistorySelectedYear = today.Year;
+        HistorySelectedMonth = today.Month;
+        UpdateHistoryPeriodDisplay();
+
+        await LoadHistoryLedgersAsync();
+        IsHistoryVisible = true;
     }
+
+    /// <summary>
+    /// 履歴を閉じる
+    /// </summary>
+    [RelayCommand]
+    public void CloseHistory()
+    {
+        IsHistoryVisible = false;
+        HistoryCard = null;
+        HistoryLedgers.Clear();
+    }
+
+    /// <summary>
+    /// 履歴データを読み込み
+    /// </summary>
+    private async Task LoadHistoryLedgersAsync()
+    {
+        if (HistoryCard == null) return;
+
+        using (BeginBusy("読み込み中..."))
+        {
+            HistoryLedgers.Clear();
+
+            // ページングされた履歴を取得
+            var (ledgers, totalCount) = await _ledgerRepository.GetPagedAsync(
+                HistoryCard.CardIdm, HistoryFromDate, HistoryToDate.AddDays(1), HistoryCurrentPage, HistoryPageSize);
+
+            foreach (var ledger in ledgers)
+            {
+                HistoryLedgers.Add(ledger.ToDto());
+            }
+
+            // ページ情報を更新
+            HistoryTotalCount = totalCount;
+            HistoryTotalPages = Math.Max(1, (int)Math.Ceiling((double)totalCount / HistoryPageSize));
+
+            // 現在のページが総ページ数を超えている場合は調整
+            if (HistoryCurrentPage > HistoryTotalPages)
+            {
+                HistoryCurrentPage = HistoryTotalPages;
+            }
+
+            // 最新の残高を取得
+            var latestLedger = await _ledgerRepository.GetLatestBeforeDateAsync(
+                HistoryCard.CardIdm, DateTime.Now.AddDays(1));
+            HistoryCurrentBalance = latestLedger?.Balance ?? 0;
+
+            // ステータスメッセージを更新
+            var startIndex = (HistoryCurrentPage - 1) * HistoryPageSize + 1;
+            var endIndex = Math.Min(HistoryCurrentPage * HistoryPageSize, totalCount);
+            HistoryStatusMessage = totalCount > 0
+                ? $"{startIndex}～{endIndex}件を表示（全{totalCount:N0}件）"
+                : "該当する履歴がありません";
+        }
+    }
+
+    /// <summary>
+    /// 履歴期間表示を更新
+    /// </summary>
+    private void UpdateHistoryPeriodDisplay()
+    {
+        HistoryPeriodDisplay = $"{HistoryFromDate:yyyy年M月}";
+    }
+
+    #region 履歴期間選択コマンド
+
+    /// <summary>
+    /// 履歴を今月に設定
+    /// </summary>
+    [RelayCommand]
+    public async Task HistorySetThisMonth()
+    {
+        var today = DateTime.Today;
+        await SetHistoryMonth(today.Year, today.Month);
+    }
+
+    /// <summary>
+    /// 履歴を先月に設定
+    /// </summary>
+    [RelayCommand]
+    public async Task HistorySetLastMonth()
+    {
+        var today = DateTime.Today;
+        var lastMonth = today.AddMonths(-1);
+        await SetHistoryMonth(lastMonth.Year, lastMonth.Month);
+    }
+
+    /// <summary>
+    /// 月選択ポップアップを開く
+    /// </summary>
+    [RelayCommand]
+    public void HistoryOpenMonthSelector()
+    {
+        IsHistoryMonthSelectorOpen = true;
+    }
+
+    /// <summary>
+    /// 月選択ポップアップを閉じる
+    /// </summary>
+    [RelayCommand]
+    public void HistoryCloseMonthSelector()
+    {
+        IsHistoryMonthSelectorOpen = false;
+    }
+
+    /// <summary>
+    /// 選択した月を適用
+    /// </summary>
+    [RelayCommand]
+    public async Task HistoryApplySelectedMonth()
+    {
+        await SetHistoryMonth(HistorySelectedYear, HistorySelectedMonth);
+        IsHistoryMonthSelectorOpen = false;
+    }
+
+    /// <summary>
+    /// 指定した年月に履歴期間を設定
+    /// </summary>
+    private async Task SetHistoryMonth(int year, int month)
+    {
+        HistoryFromDate = new DateTime(year, month, 1);
+        HistoryToDate = new DateTime(year, month, DateTime.DaysInMonth(year, month));
+        HistorySelectedYear = year;
+        HistorySelectedMonth = month;
+        HistoryCurrentPage = 1;
+        UpdateHistoryPeriodDisplay();
+        await LoadHistoryLedgersAsync();
+    }
+
+    #endregion
+
+    #region 履歴ページナビゲーションコマンド
+
+    /// <summary>
+    /// 履歴: 最初のページへ移動
+    /// </summary>
+    [RelayCommand(CanExecute = nameof(HistoryCanGoToFirstPage))]
+    public async Task HistoryGoToFirstPage()
+    {
+        HistoryCurrentPage = 1;
+        await LoadHistoryLedgersAsync();
+    }
+
+    /// <summary>
+    /// 履歴: 前のページへ移動
+    /// </summary>
+    [RelayCommand(CanExecute = nameof(HistoryCanGoToPrevPage))]
+    public async Task HistoryGoToPrevPage()
+    {
+        if (HistoryCurrentPage > 1)
+        {
+            HistoryCurrentPage--;
+            await LoadHistoryLedgersAsync();
+        }
+    }
+
+    /// <summary>
+    /// 履歴: 次のページへ移動
+    /// </summary>
+    [RelayCommand(CanExecute = nameof(HistoryCanGoToNextPage))]
+    public async Task HistoryGoToNextPage()
+    {
+        if (HistoryCurrentPage < HistoryTotalPages)
+        {
+            HistoryCurrentPage++;
+            await LoadHistoryLedgersAsync();
+        }
+    }
+
+    /// <summary>
+    /// 履歴: 最後のページへ移動
+    /// </summary>
+    [RelayCommand(CanExecute = nameof(HistoryCanGoToLastPage))]
+    public async Task HistoryGoToLastPage()
+    {
+        HistoryCurrentPage = HistoryTotalPages;
+        await LoadHistoryLedgersAsync();
+    }
+
+    #endregion
 
     /// <summary>
     /// 状態を設定
@@ -1047,7 +1393,7 @@ public partial class MainViewModel : ViewModelBase
     }
 
     /// <summary>
-    /// ダッシュボードから履歴画面を開く
+    /// ダッシュボードから履歴を表示
     /// </summary>
     [RelayCommand]
     public async Task OpenCardHistoryFromDashboard(CardBalanceDashboardItem? item)
@@ -1058,8 +1404,6 @@ public partial class MainViewModel : ViewModelBase
         if (card != null)
         {
             await ShowHistoryAsync(card);
-            // 履歴表示後にダッシュボードを更新
-            await RefreshDashboardAsync();
         }
     }
 

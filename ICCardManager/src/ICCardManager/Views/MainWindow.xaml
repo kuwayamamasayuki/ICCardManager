@@ -116,52 +116,366 @@
                 <ColumnDefinition Width="320"/>
             </Grid.ColumnDefinitions>
 
-            <!-- 中央エリア（ステータス表示） -->
-            <Border Grid.Column="0" Padding="40"
-                    Background="{Binding StatusBackgroundColor}"
-                    BorderThickness="3"
-                    BorderBrush="{Binding StatusBorderColor}"
-                    AutomationProperties.Name="操作ステータス表示エリア"
-                    AutomationProperties.LiveSetting="Assertive">
-                <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
-                    <!-- 状態アイコン -->
-                    <TextBlock Text="{Binding StatusIcon}"
-                               FontSize="{DynamicResource IconFontSize}"
-                               HorizontalAlignment="Center"
-                               Margin="0,0,0,20"
-                               AutomationProperties.Name="{Binding StatusIconDescription}"/>
+            <!-- 中央エリア -->
+            <Grid Grid.Column="0">
+                <!-- 初期画面（使い方ガイド） -->
+                <Border Padding="40"
+                        Background="#FAFAFA"
+                        Visibility="{Binding IsHistoryVisible, Converter={StaticResource BoolToVisibilityConverter}, ConverterParameter=invert}"
+                        AutomationProperties.Name="使い方ガイド">
+                    <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" MaxWidth="600">
+                        <TextBlock Text="🚃"
+                                   FontSize="64"
+                                   HorizontalAlignment="Center"
+                                   Margin="0,0,0,20"/>
+                        <TextBlock Text="交通系ICカード管理システム"
+                                   FontSize="{DynamicResource TitleFontSize}"
+                                   FontWeight="Bold"
+                                   HorizontalAlignment="Center"
+                                   Margin="0,0,0,30"/>
 
-                    <!-- ステータスメッセージ -->
-                    <TextBlock Text="{Binding StatusMessage}"
-                               FontSize="{DynamicResource StatusFontSize}"
-                               FontWeight="Bold"
-                               TextAlignment="Center"
-                               TextWrapping="Wrap"
-                               HorizontalAlignment="Center"
-                               AutomationProperties.LiveSetting="Assertive"/>
+                        <!-- 使い方ガイド -->
+                        <Border Background="White" CornerRadius="8" Padding="25" Margin="0,0,0,20">
+                            <StackPanel>
+                                <TextBlock Text="📖 使い方"
+                                           FontSize="{DynamicResource LargeFontSize}"
+                                           FontWeight="Bold"
+                                           Margin="0,0,0,15"/>
 
-                    <!-- 状態テキスト（色以外での状態表示） -->
-                    <TextBlock Text="{Binding StatusLabel}"
-                               FontSize="{DynamicResource LargeFontSize}"
-                               FontWeight="Bold"
-                               HorizontalAlignment="Center"
-                               Margin="0,15,0,0"
-                               Foreground="{Binding StatusForegroundColor}"/>
+                                <Grid Margin="0,0,0,10">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="40"/>
+                                        <ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Grid.Column="0" Text="1️⃣" FontSize="{DynamicResource BaseFontSize}" VerticalAlignment="Top"/>
+                                    <TextBlock Grid.Column="1" TextWrapping="Wrap" FontSize="{DynamicResource BaseFontSize}">
+                                        <Run FontWeight="Bold">貸出・返却：</Run>
+                                        <Run>職員証をタッチ → 交通系ICカードをタッチ</Run>
+                                    </TextBlock>
+                                </Grid>
 
-                    <!-- タイムアウト表示 -->
-                    <TextBlock FontSize="{DynamicResource LargeFontSize}"
-                               Foreground="Gray"
-                               Margin="0,20,0,0"
-                               HorizontalAlignment="Center"
-                               Visibility="{Binding RemainingSeconds, Converter={StaticResource IntToVisibilityConverter}}"
-                               AutomationProperties.Name="残り時間"
-                               AutomationProperties.LiveSetting="Polite">
-                        <Run Text="残り "/>
-                        <Run Text="{Binding RemainingSeconds, Mode=OneWay}"/>
-                        <Run Text=" 秒"/>
-                    </TextBlock>
-                </StackPanel>
-            </Border>
+                                <Grid Margin="0,0,0,10">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="40"/>
+                                        <ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Grid.Column="0" Text="2️⃣" FontSize="{DynamicResource BaseFontSize}" VerticalAlignment="Top"/>
+                                    <TextBlock Grid.Column="1" TextWrapping="Wrap" FontSize="{DynamicResource BaseFontSize}">
+                                        <Run FontWeight="Bold">履歴確認：</Run>
+                                        <Run>交通系ICカードをタッチ、または右のカード一覧をクリック</Run>
+                                    </TextBlock>
+                                </Grid>
+
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="40"/>
+                                        <ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Grid.Column="0" Text="3️⃣" FontSize="{DynamicResource BaseFontSize}" VerticalAlignment="Top"/>
+                                    <TextBlock Grid.Column="1" TextWrapping="Wrap" FontSize="{DynamicResource BaseFontSize}">
+                                        <Run FontWeight="Bold">誤操作の修正：</Run>
+                                        <Run>30秒以内に同じカードを再タッチすると逆の処理（貸出→返却、返却→貸出）ができます</Run>
+                                    </TextBlock>
+                                </Grid>
+                            </StackPanel>
+                        </Border>
+
+                        <!-- ショートカット -->
+                        <Border Background="#E3F2FD" CornerRadius="8" Padding="20">
+                            <StackPanel>
+                                <TextBlock Text="⌨️ ショートカットキー"
+                                           FontSize="{DynamicResource BaseFontSize}"
+                                           FontWeight="Bold"
+                                           Margin="0,0,0,10"/>
+                                <WrapPanel>
+                                    <TextBlock Text="F1: 設定" FontSize="{DynamicResource SmallFontSize}" Margin="0,0,20,5"/>
+                                    <TextBlock Text="F2: 帳票" FontSize="{DynamicResource SmallFontSize}" Margin="0,0,20,5"/>
+                                    <TextBlock Text="F3: カード管理" FontSize="{DynamicResource SmallFontSize}" Margin="0,0,20,5"/>
+                                    <TextBlock Text="F4: 職員管理" FontSize="{DynamicResource SmallFontSize}" Margin="0,0,20,5"/>
+                                    <TextBlock Text="F5: データ入出力" FontSize="{DynamicResource SmallFontSize}" Margin="0,0,20,5"/>
+                                    <TextBlock Text="F6: 操作ログ" FontSize="{DynamicResource SmallFontSize}" Margin="0,0,0,5"/>
+                                </WrapPanel>
+                            </StackPanel>
+                        </Border>
+                    </StackPanel>
+                </Border>
+
+                <!-- 履歴表示エリア -->
+                <Border Padding="15"
+                        Background="White"
+                        Visibility="{Binding IsHistoryVisible, Converter={StaticResource BoolToVisibilityConverter}}"
+                        AutomationProperties.Name="利用履歴表示エリア">
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="*"/>
+                            <RowDefinition Height="Auto"/>
+                        </Grid.RowDefinitions>
+
+                        <!-- カード情報ヘッダー -->
+                        <Border Grid.Row="0" Background="#E3F2FD" CornerRadius="4" Padding="15" Margin="0,0,0,10">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+
+                                <StackPanel Grid.Column="0" Orientation="Horizontal">
+                                    <TextBlock Text="{Binding HistoryCard.CardType}"
+                                               FontSize="{DynamicResource LargeFontSize}"
+                                               FontWeight="Bold"
+                                               VerticalAlignment="Center"/>
+                                    <TextBlock Text="{Binding HistoryCard.CardNumber}"
+                                               FontSize="{DynamicResource LargeFontSize}"
+                                               Margin="15,0,0,0"
+                                               VerticalAlignment="Center"/>
+                                    <TextBlock Text="{Binding HistoryCard.Note}"
+                                               FontSize="{DynamicResource BaseFontSize}"
+                                               Foreground="Gray"
+                                               Margin="20,0,0,0"
+                                               VerticalAlignment="Center"/>
+                                </StackPanel>
+
+                                <StackPanel Grid.Column="1" Orientation="Horizontal" Margin="0,0,20,0">
+                                    <TextBlock Text="現在残高:"
+                                               FontSize="{DynamicResource BaseFontSize}"
+                                               VerticalAlignment="Center"/>
+                                    <TextBlock Text="{Binding HistoryCurrentBalance, StringFormat={}{0:N0}円}"
+                                               FontSize="{DynamicResource TitleFontSize}"
+                                               FontWeight="Bold"
+                                               Foreground="#1565C0"
+                                               Margin="10,0,0,0"
+                                               VerticalAlignment="Center"/>
+                                </StackPanel>
+
+                                <Button Grid.Column="2"
+                                        Content="✕ 閉じる"
+                                        Command="{Binding CloseHistoryCommand}"
+                                        Padding="15,8"
+                                        AutomationProperties.Name="履歴を閉じる"
+                                        ToolTip="履歴表示を閉じる"/>
+                            </Grid>
+                        </Border>
+
+                        <!-- 期間選択 -->
+                        <Grid Grid.Row="1" Margin="0,0,0,10">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+
+                            <StackPanel Grid.Column="0" Orientation="Horizontal">
+                                <TextBlock Text="表示期間:"
+                                           VerticalAlignment="Center"
+                                           Margin="0,0,10,0"/>
+                                <Border Background="#E3F2FD"
+                                        CornerRadius="4"
+                                        Padding="15,8">
+                                    <TextBlock Text="{Binding HistoryPeriodDisplay}"
+                                               FontSize="{DynamicResource LargeFontSize}"
+                                               FontWeight="Bold"
+                                               Foreground="#1565C0"/>
+                                </Border>
+                            </StackPanel>
+
+                            <StackPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Right">
+                                <Button Content="今月"
+                                        Command="{Binding HistorySetThisMonthCommand}"
+                                        Padding="12,6"
+                                        Margin="0,0,5,0"
+                                        ToolTip="今月の履歴を表示"/>
+                                <Button Content="先月"
+                                        Command="{Binding HistorySetLastMonthCommand}"
+                                        Padding="12,6"
+                                        Margin="0,0,5,0"
+                                        ToolTip="先月の履歴を表示"/>
+                                <Button x:Name="HistoryOtherMonthButton"
+                                        Content="その他の月..."
+                                        Command="{Binding HistoryOpenMonthSelectorCommand}"
+                                        Padding="12,6"
+                                        ToolTip="任意の年月を選択"/>
+
+                                <!-- 月選択ポップアップ -->
+                                <Popup IsOpen="{Binding IsHistoryMonthSelectorOpen}"
+                                       PlacementTarget="{Binding ElementName=HistoryOtherMonthButton}"
+                                       Placement="Bottom"
+                                       StaysOpen="False"
+                                       AllowsTransparency="True">
+                                    <Border Background="White"
+                                            BorderBrush="#CCCCCC"
+                                            BorderThickness="1"
+                                            CornerRadius="4"
+                                            Padding="15"
+                                            Margin="0,5,0,0">
+                                        <Border.Effect>
+                                            <DropShadowEffect BlurRadius="10" ShadowDepth="2" Opacity="0.3"/>
+                                        </Border.Effect>
+                                        <StackPanel>
+                                            <TextBlock Text="月を選択" FontWeight="Bold" Margin="0,0,0,10"/>
+                                            <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
+                                                <ComboBox ItemsSource="{Binding HistoryAvailableYears}"
+                                                          SelectedItem="{Binding HistorySelectedYear}"
+                                                          Width="80"
+                                                          Padding="8"/>
+                                                <TextBlock Text="年" VerticalAlignment="Center" Margin="5,0,15,0"/>
+                                                <ComboBox ItemsSource="{Binding HistoryAvailableMonths}"
+                                                          SelectedItem="{Binding HistorySelectedMonth}"
+                                                          Width="60"
+                                                          Padding="8"/>
+                                                <TextBlock Text="月" VerticalAlignment="Center" Margin="5,0,0,0"/>
+                                            </StackPanel>
+                                            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                                                <Button Content="キャンセル"
+                                                        Command="{Binding HistoryCloseMonthSelectorCommand}"
+                                                        Padding="10,5"
+                                                        Margin="0,0,10,0"/>
+                                                <Button Content="適用"
+                                                        Command="{Binding HistoryApplySelectedMonthCommand}"
+                                                        Padding="15,5"
+                                                        Background="#2196F3"
+                                                        Foreground="White"/>
+                                            </StackPanel>
+                                        </StackPanel>
+                                    </Border>
+                                </Popup>
+                            </StackPanel>
+                        </Grid>
+
+                        <!-- 履歴一覧 -->
+                        <DataGrid Grid.Row="2"
+                                  ItemsSource="{Binding HistoryLedgers}"
+                                  AutoGenerateColumns="False"
+                                  IsReadOnly="True"
+                                  SelectionMode="Single"
+                                  CanUserAddRows="False"
+                                  CanUserDeleteRows="False"
+                                  GridLinesVisibility="Horizontal"
+                                  HeadersVisibility="Column"
+                                  RowHeaderWidth="0"
+                                  AlternatingRowBackground="#FAFAFA"
+                                  AutomationProperties.Name="利用履歴一覧">
+                            <DataGrid.Columns>
+                                <DataGridTextColumn Header="日付" Binding="{Binding DateDisplay}" Width="120"/>
+                                <DataGridTextColumn Header="摘要" Binding="{Binding Summary}" Width="*"/>
+                                <DataGridTextColumn Header="受入" Width="90">
+                                    <DataGridTextColumn.Binding>
+                                        <Binding Path="IncomeDisplay"/>
+                                    </DataGridTextColumn.Binding>
+                                    <DataGridTextColumn.ElementStyle>
+                                        <Style TargetType="TextBlock">
+                                            <Setter Property="HorizontalAlignment" Value="Right"/>
+                                            <Setter Property="Foreground" Value="Green"/>
+                                            <Setter Property="FontWeight" Value="Bold"/>
+                                        </Style>
+                                    </DataGridTextColumn.ElementStyle>
+                                </DataGridTextColumn>
+                                <DataGridTextColumn Header="払出" Width="90">
+                                    <DataGridTextColumn.Binding>
+                                        <Binding Path="ExpenseDisplay"/>
+                                    </DataGridTextColumn.Binding>
+                                    <DataGridTextColumn.ElementStyle>
+                                        <Style TargetType="TextBlock">
+                                            <Setter Property="HorizontalAlignment" Value="Right"/>
+                                            <Setter Property="Foreground" Value="OrangeRed"/>
+                                            <Setter Property="FontWeight" Value="Bold"/>
+                                        </Style>
+                                    </DataGridTextColumn.ElementStyle>
+                                </DataGridTextColumn>
+                                <DataGridTextColumn Header="残高" Width="100">
+                                    <DataGridTextColumn.Binding>
+                                        <Binding Path="BalanceDisplay"/>
+                                    </DataGridTextColumn.Binding>
+                                    <DataGridTextColumn.ElementStyle>
+                                        <Style TargetType="TextBlock">
+                                            <Setter Property="HorizontalAlignment" Value="Right"/>
+                                        </Style>
+                                    </DataGridTextColumn.ElementStyle>
+                                </DataGridTextColumn>
+                                <DataGridTextColumn Header="利用者" Binding="{Binding StaffName}" Width="100"/>
+                                <DataGridTextColumn Header="備考" Binding="{Binding Note}" Width="120"/>
+                            </DataGrid.Columns>
+
+                            <!-- 貸出中レコードのスタイル -->
+                            <DataGrid.RowStyle>
+                                <Style TargetType="DataGridRow">
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding IsLentRecord}" Value="True">
+                                            <Setter Property="Background" Value="#FFF3E0"/>
+                                            <Setter Property="FontStyle" Value="Italic"/>
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </DataGrid.RowStyle>
+                        </DataGrid>
+
+                        <!-- フッター（ページネーション） -->
+                        <Border Grid.Row="3"
+                                Background="#F5F5F5"
+                                CornerRadius="4"
+                                Padding="10,8"
+                                Margin="0,10,0,0">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+
+                                <!-- ナビゲーションボタン -->
+                                <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center">
+                                    <Button Content="⏮"
+                                            Command="{Binding HistoryGoToFirstPageCommand}"
+                                            Padding="8,4"
+                                            MinWidth="32"
+                                            ToolTip="最初のページへ"/>
+                                    <Button Content="◀"
+                                            Command="{Binding HistoryGoToPrevPageCommand}"
+                                            Padding="8,4"
+                                            MinWidth="32"
+                                            Margin="5,0,0,0"
+                                            ToolTip="前のページへ"/>
+
+                                    <TextBlock Text="ページ"
+                                               VerticalAlignment="Center"
+                                               Margin="15,0,5,0"/>
+                                    <Border Background="White"
+                                            BorderBrush="#CCCCCC"
+                                            BorderThickness="1"
+                                            CornerRadius="2"
+                                            Padding="10,4">
+                                        <TextBlock Text="{Binding HistoryPageDisplay}"
+                                                   FontWeight="SemiBold"
+                                                   VerticalAlignment="Center"/>
+                                    </Border>
+
+                                    <Button Content="▶"
+                                            Command="{Binding HistoryGoToNextPageCommand}"
+                                            Padding="8,4"
+                                            MinWidth="32"
+                                            Margin="15,0,0,0"
+                                            ToolTip="次のページへ"/>
+                                    <Button Content="⏭"
+                                            Command="{Binding HistoryGoToLastPageCommand}"
+                                            Padding="8,4"
+                                            MinWidth="32"
+                                            Margin="5,0,0,0"
+                                            ToolTip="最後のページへ"/>
+                                </StackPanel>
+
+                                <!-- 件数表示 -->
+                                <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
+                                    <TextBlock Text="{Binding HistoryStatusMessage}"
+                                               FontSize="{DynamicResource SmallFontSize}"
+                                               Foreground="Gray"
+                                               VerticalAlignment="Center"/>
+                                </StackPanel>
+                            </Grid>
+                        </Border>
+                    </Grid>
+                </Border>
+            </Grid>
 
             <!-- 右サイドバー（カード残高ダッシュボード） -->
             <Border Grid.Column="1" Background="#F5F5F5" Padding="15">
