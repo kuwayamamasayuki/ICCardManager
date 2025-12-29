@@ -111,8 +111,8 @@ namespace ICCardManager.Services
             var random = new Random(42); // 再現性のためシード固定
             var today = DateTime.Now.Date;
 
-            // 各カードに対してサンプル履歴を登録
-            foreach (var card in TestCardList.Take(3)) // 最初の3枚のみ
+            // 各カードに対してサンプル履歴を登録（全カード）
+            foreach (var card in TestCardList)
             {
                 // 既存の履歴があるかチェック
                 var existingHistory = await _ledgerRepository.GetByMonthAsync(card.CardIdm, today.Year, today.Month);
@@ -122,11 +122,12 @@ namespace ICCardManager.Services
                     continue;
                 }
 
-                var balance = 10000; // 初期残高
+                var balance = 20000; // 初期残高（長期間データ用に増額）
                 var staffName = TestStaffList[random.Next(TestStaffList.Length)].Name;
 
-                // 過去30日分のサンプル履歴を生成
-                for (int daysAgo = 30; daysAgo >= 0; daysAgo--)
+                // 過去180日分（約6ヶ月）のサンプル履歴を生成
+                // ページング（50件/ページ）や過去月確認のテスト用
+                for (int daysAgo = 180; daysAgo >= 0; daysAgo--)
                 {
                     var date = today.AddDays(-daysAgo);
 
@@ -134,8 +135,8 @@ namespace ICCardManager.Services
                     if (date.DayOfWeek == DayOfWeek.Saturday || date.DayOfWeek == DayOfWeek.Sunday)
                         continue;
 
-                    // 30%の確率で利用
-                    if (random.Next(100) > 30)
+                    // 50%の確率で利用（ページングテスト用にデータ量を増加）
+                    if (random.Next(100) > 50)
                         continue;
 
                     // 残高が少ない場合はチャージ
