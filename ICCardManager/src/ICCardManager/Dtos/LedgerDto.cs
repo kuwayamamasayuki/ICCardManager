@@ -97,6 +97,21 @@ namespace ICCardManager.Dtos
         /// </summary>
         public bool HasExpense => Expense > 0;
 
+        /// <summary>
+        /// 詳細件数（直接設定用）
+        /// </summary>
+        public int DetailCountValue { get; set; }
+
+        /// <summary>
+        /// 詳細があるかどうか（詳細が2件以上ある場合）
+        /// </summary>
+        public bool HasDetails => DetailCount > 1;
+
+        /// <summary>
+        /// 詳細件数
+        /// </summary>
+        public int DetailCount => Details?.Count > 0 ? Details.Count : DetailCountValue;
+
         #endregion
     }
 }

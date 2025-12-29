@@ -78,6 +78,10 @@ namespace ICCardManager.Dtos
         /// </summary>
         public static LedgerDto ToDto(this Ledger ledger)
         {
+            // Detailsが設定されている場合はそちらから件数を取得、
+            // なければDetailCountプロパティを使用
+            var detailCount = ledger.Details?.Count > 0 ? ledger.Details.Count : ledger.DetailCount;
+
             return new LedgerDto
             {
                 Id = ledger.Id,
@@ -91,7 +95,8 @@ namespace ICCardManager.Dtos
                 StaffName = ledger.StaffName,
                 Note = ledger.Note,
                 IsLentRecord = ledger.IsLentRecord,
-                Details = ledger.Details.Select(d => d.ToDto()).ToList()
+                Details = ledger.Details?.Select(d => d.ToDto()).ToList() ?? new List<LedgerDetailDto>(),
+                DetailCountValue = detailCount
             };
         }
 

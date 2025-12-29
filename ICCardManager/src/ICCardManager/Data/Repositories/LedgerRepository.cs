@@ -364,11 +364,12 @@ FROM ledger
             var offset = (page - 1) * pageSize;
 
             using var command = connection.CreateCommand();
-            command.CommandText = $@"SELECT id, card_idm, lender_idm, date, summary, income, expense, balance,
-       staff_name, note, returner_idm, lent_at, returned_at, is_lent_record
-FROM ledger
-{whereClause}
-ORDER BY date DESC, id DESC
+            command.CommandText = $@"SELECT l.id, l.card_idm, l.lender_idm, l.date, l.summary, l.income, l.expense, l.balance,
+       l.staff_name, l.note, l.returner_idm, l.lent_at, l.returned_at, l.is_lent_record,
+       (SELECT COUNT(*) FROM ledger_detail WHERE ledger_id = l.id) as detail_count
+FROM ledger l
+{whereClause.Replace("card_idm", "l.card_idm").Replace("date ", "l.date ")}
+ORDER BY l.date DESC, l.id DESC
 LIMIT @pageSize OFFSET @offset";
 
             if (cardIdm != null)
@@ -383,7 +384,7 @@ LIMIT @pageSize OFFSET @offset";
             using var reader = await command.ExecuteReaderAsync();
             while (await reader.ReadAsync())
             {
-                ledgerList.Add(MapToLedger(reader));
+                ledgerList.Add(MapToLedgerWithDetailCount(reader));
             }
 
             return (ledgerList, totalCount);
@@ -436,6 +437,31 @@ ORDER BY use_date";
                 LentAt = reader.IsDBNull(11) ? null : DateTime.Parse(reader.GetString(11)),
                 ReturnedAt = reader.IsDBNull(12) ? null : DateTime.Parse(reader.GetString(12)),
                 IsLentRecord = reader.GetInt32(13) == 1
+            };
+        }
+
+        /// <summary>
+        /// DataReaderからLedgerオブジェクトにマッピング（詳細件数を含む）
+        /// </summary>
+        private static Ledger MapToLedgerWithDetailCount(DbDataReader reader)
+        {
+            return new Ledger
+            {
+                Id = reader.GetInt32(0),
+                CardIdm = reader.GetString(1),
+                LenderIdm = reader.IsDBNull(2) ? null : reader.GetString(2),
+                Date = DateTime.Parse(reader.GetString(3)),
+                Summary = reader.GetString(4),
+                Income = reader.GetInt32(5),
+                Expense = reader.GetInt32(6),
+                Balance = reader.GetInt32(7),
+                StaffName = reader.IsDBNull(8) ? null : reader.GetString(8),
+                Note = reader.IsDBNull(9) ? null : reader.GetString(9),
+                ReturnerIdm = reader.IsDBNull(10) ? null : reader.GetString(10),
+                LentAt = reader.IsDBNull(11) ? null : DateTime.Parse(reader.GetString(11)),
+                ReturnedAt = reader.IsDBNull(12) ? null : DateTime.Parse(reader.GetString(12)),
+                IsLentRecord = reader.GetInt32(13) == 1,
+                DetailCount = reader.GetInt32(14)
             };
         }
 
