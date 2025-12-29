@@ -27,6 +27,22 @@ namespace ICCardManager.Services
         }
 
         /// <summary>
+        /// GUI操作用の識別子
+        /// </summary>
+        public static class GuiOperator
+        {
+            /// <summary>
+            /// GUI操作を示すIDm（16文字の16進数形式）
+            /// </summary>
+            public const string Idm = "0000000000000000";
+
+            /// <summary>
+            /// GUI操作を示す操作者名
+            /// </summary>
+            public const string Name = "GUI操作";
+        }
+
+        /// <summary>
         /// 対象テーブル名
         /// </summary>
         public static class Tables
@@ -179,14 +195,20 @@ namespace ICCardManager.Services
         /// <summary>
         /// 履歴更新のログを記録
         /// </summary>
-        public async Task LogLedgerUpdateAsync(string operatorIdm, Ledger beforeLedger, Ledger afterLedger)
+        /// <param name="operatorIdm">操作者IDm（nullまたは空文字列の場合はGUI操作として記録）</param>
+        /// <param name="beforeLedger">変更前の履歴データ</param>
+        /// <param name="afterLedger">変更後の履歴データ</param>
+        public async Task LogLedgerUpdateAsync(string? operatorIdm, Ledger beforeLedger, Ledger afterLedger)
         {
-            var operatorName = await GetOperatorNameAsync(operatorIdm);
+            // GUI操作（operatorIdmがnullまたは空）の場合はGUI用識別子を使用
+            var isGuiOperation = string.IsNullOrEmpty(operatorIdm);
+            var actualIdm = isGuiOperation ? GuiOperator.Idm : operatorIdm;
+            var operatorName = isGuiOperation ? GuiOperator.Name : await GetOperatorNameAsync(operatorIdm!);
 
             var log = new OperationLog
             {
                 Timestamp = DateTime.Now,
-                OperatorIdm = operatorIdm,
+                OperatorIdm = actualIdm,
                 OperatorName = operatorName,
                 TargetTable = Tables.Ledger,
                 TargetId = afterLedger.Id.ToString(),
