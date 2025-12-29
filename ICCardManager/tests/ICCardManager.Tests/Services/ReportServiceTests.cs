@@ -142,9 +142,9 @@ public class ReportServiceTests : IDisposable
         using var workbook = new XLWorkbook(outputPath);
         var worksheet = workbook.Worksheets.First();
 
-        // ヘッダー情報の検証
-        worksheet.Cell("D2").GetString().Should().Be("はやかけん");
-        worksheet.Cell("F2").GetString().Should().Be("001");
+        // ヘッダー情報の検証（1行目に品名・規格を設定）
+        worksheet.Cell("D1").GetString().Should().Be("はやかけん");
+        worksheet.Cell("G1").GetString().Should().Be("001");
 
         // データ行の検証（行7から開始）
         worksheet.Cell(7, 1).GetString().Should().Be("6/5");
@@ -540,8 +540,8 @@ public class ReportServiceTests : IDisposable
         using var workbook = new XLWorkbook(outputPath);
         var worksheet = workbook.Worksheets.First();
 
-        // ヘッダーは設定されている
-        worksheet.Cell("D2").GetString().Should().Be("はやかけん");
+        // ヘッダーは設定されている（1行目に品名を設定）
+        worksheet.Cell("D1").GetString().Should().Be("はやかけん");
 
         // 月計行のみ出力（データなし）
         worksheet.Cell(7, 2).GetString().Should().Be("11月計");
@@ -656,14 +656,15 @@ public class ReportServiceTests : IDisposable
         using var workbook = new XLWorkbook(outputPath);
         var worksheet = workbook.Worksheets.First();
 
-        worksheet.Cell("B2").GetString().Should().Be("雑品（金券類）");
-        worksheet.Cell("D2").GetString().Should().Be("SUGOCA");
-        worksheet.Cell("F2").GetString().Should().Be("S-003");
-        worksheet.Cell("H2").GetString().Should().Be("円");
-        // 和暦年月の検証（R6年5月 - 短縮形式）
-        worksheet.Cell("B3").GetString().Should().Contain("R");
-        worksheet.Cell("B3").GetString().Should().Contain("6年");
-        worksheet.Cell("B3").GetString().Should().Contain("5月");
+        // 1行目のヘッダ情報検証（テンプレートの値 + コードで設定した値）
+        worksheet.Cell("B1").GetString().Should().Be("雑品（金券類）");  // テンプレートの値
+        worksheet.Cell("D1").GetString().Should().Be("SUGOCA");          // 品名（コードで設定）
+        worksheet.Cell("G1").GetString().Should().Be("S-003");           // 規格（コードで設定）
+        worksheet.Cell("I1").GetString().Should().Be("円");              // テンプレートの値
+        // 2行目に和暦年月の検証（R6年5月 - 短縮形式）
+        worksheet.Cell("B2").GetString().Should().Contain("R");
+        worksheet.Cell("B2").GetString().Should().Contain("6年");
+        worksheet.Cell("B2").GetString().Should().Contain("5月");
     }
 
     /// <summary>

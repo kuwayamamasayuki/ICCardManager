@@ -389,12 +389,13 @@ namespace ICCardManager.Services
             var targetDate = new DateTime(year, month, 1);
             var warekiYearMonth = WarekiConverter.ToWarekiYearMonth(targetDate);
 
-            // テンプレートのセル位置に依存（実際の位置は要調整）
-            worksheet.Cell("B2").Value = "雑品（金券類）";  // 物品の分類
-            worksheet.Cell("D2").Value = card.CardType;      // 品名
-            worksheet.Cell("F2").Value = card.CardNumber;    // 規格
-            worksheet.Cell("H2").Value = "円";               // 単位
-            worksheet.Cell("B3").Value = warekiYearMonth;    // 年月
+            // 1行目のヘッダ情報を設定（テンプレートのセル位置に合わせる）
+            // A1=物品の分類, B1=値, C1=品名, D1=値, F1=規格, G1=値, H1=単位, I1=円
+            worksheet.Cell("D1").Value = card.CardType;      // 品名の値
+            worksheet.Cell("G1").Value = card.CardNumber;    // 規格の値
+
+            // 2行目に年月を設定
+            worksheet.Cell("B2").Value = warekiYearMonth;    // 年月
 
             // ヘッダ行のフォントサイズを調整して1行に収める
             AdjustHeaderRowFontSize(worksheet);
