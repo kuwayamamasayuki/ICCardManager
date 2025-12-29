@@ -222,7 +222,7 @@ namespace ICCardManager.Services
                 var worksheet = workbook.Worksheets.First();
 
                 // ヘッダ情報を設定
-                SetHeaderInfo(worksheet, card, year, month);
+                SetHeaderInfo(worksheet, card);
 
                 // データを出力
                 var startRow = 7; // データ開始行（テンプレートに依存）
@@ -384,17 +384,32 @@ namespace ICCardManager.Services
         /// <summary>
         /// ヘッダ情報を設定
         /// </summary>
-        private void SetHeaderInfo(IXLWorksheet worksheet, IcCard card, int year, int month)
+        private void SetHeaderInfo(IXLWorksheet worksheet, IcCard card)
         {
-            var targetDate = new DateTime(year, month, 1);
-            var warekiYearMonth = WarekiConverter.ToWarekiYearMonth(targetDate);
+            // 1行目のヘッダ情報を設定（テンプレートのセル位置に合わせる）
+            // D1: 品名の値、G1: 規格の値
+            worksheet.Cell("D1").Value = card.CardType;      // 品名の値
+            worksheet.Cell("G1").Value = card.CardNumber;    // 規格の値
 
-            // テンプレートのセル位置に依存（実際の位置は要調整）
-            worksheet.Cell("B2").Value = "雑品（金券類）";  // 物品の分類
-            worksheet.Cell("D2").Value = card.CardType;      // 品名
-            worksheet.Cell("F2").Value = card.CardNumber;    // 規格
-            worksheet.Cell("H2").Value = "円";               // 単位
-            worksheet.Cell("B3").Value = warekiYearMonth;    // 年月
+            // ヘッダ行のフォントサイズを調整して1行に収める
+            AdjustHeaderRowFontSize(worksheet);
+        }
+
+        /// <summary>
+        /// ヘッダ行のフォントサイズを調整
+        /// </summary>
+        /// <remarks>
+        /// 物品分類～単位：円までのヘッダ部分（1行目）を1行に収めるため、
+        /// フォントサイズを小さくして調整します。
+        /// </remarks>
+        private void AdjustHeaderRowFontSize(IXLWorksheet worksheet)
+        {
+            // 1行目（物品分類～単位：円）のフォントサイズを9ptに設定
+            const double headerFontSize = 9;
+
+            // A1～K1の範囲のフォントサイズを調整
+            var headerRange = worksheet.Range("A1:K1");
+            headerRange.Style.Font.FontSize = headerFontSize;
         }
 
         /// <summary>
