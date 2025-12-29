@@ -926,8 +926,9 @@ public partial class MainViewModel : ViewModelBase
             HistoryLedgers.Clear();
 
             // ページングされた履歴を取得
+            // 注: 日付はyyyy-MM-dd形式で保存されているため、AddDays(1)は不要
             var (ledgers, totalCount) = await _ledgerRepository.GetPagedAsync(
-                HistoryCard.CardIdm, HistoryFromDate, HistoryToDate.AddDays(1), HistoryCurrentPage, HistoryPageSize);
+                HistoryCard.CardIdm, HistoryFromDate, HistoryToDate, HistoryCurrentPage, HistoryPageSize);
 
             foreach (var ledger in ledgers)
             {
