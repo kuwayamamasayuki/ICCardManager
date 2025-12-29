@@ -149,9 +149,6 @@ public partial class MainViewModel : ViewModelBase
     private string _statusIconDescription = "待機中アイコン";
 
     [ObservableProperty]
-    private string _currentDateTime = string.Empty;
-
-    [ObservableProperty]
     private int _remainingSeconds;
 
     [ObservableProperty]
@@ -363,15 +360,6 @@ public partial class MainViewModel : ViewModelBase
         _cardReader.CardRead += OnCardRead;
         _cardReader.Error += OnCardReaderError;
         _cardReader.ConnectionStateChanged += OnCardReaderConnectionStateChanged;
-
-        // 日時更新タイマー
-        var dateTimeTimer = new DispatcherTimer
-        {
-            Interval = TimeSpan.FromSeconds(1)
-        };
-        dateTimeTimer.Tick += (s, e) => UpdateDateTime();
-        dateTimeTimer.Start();
-        UpdateDateTime();
 
         // 履歴表示用の年リストを初期化（今年度から過去6年分）
         var currentYear = DateTime.Today.Year;
@@ -1344,15 +1332,6 @@ public partial class MainViewModel : ViewModelBase
     public async Task ReconnectCardReaderAsync()
     {
         await _cardReader.ReconnectAsync();
-    }
-
-    /// <summary>
-    /// 日時を更新
-    /// </summary>
-    private void UpdateDateTime()
-    {
-        var now = DateTime.Now;
-        CurrentDateTime = $"{WarekiConverter.ToWareki(now)} {now:HH:mm:ss}";
     }
 
     /// <summary>

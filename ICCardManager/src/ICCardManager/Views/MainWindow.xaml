@@ -52,17 +52,8 @@
                            VerticalAlignment="Center"
                            Margin="0,0,30,0"/>
 
-                <!-- 日時表示 + ボタン群（右寄せ） -->
+                <!-- ボタン群（右寄せ） -->
                 <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
-                    <!-- 日時表示 -->
-                    <TextBlock Text="{Binding CurrentDateTime}"
-                               FontSize="{DynamicResource LargeFontSize}"
-                               Foreground="White"
-                               VerticalAlignment="Center"
-                               Margin="0,0,20,0"
-                               AutomationProperties.Name="現在日時"
-                               AutomationProperties.LiveSetting="Polite"/>
-
                     <Button Content="設定 (F1)" Margin="5,0"
                             Style="{StaticResource AccessibleButtonStyle}"
                             Command="{Binding OpenSettingsCommand}"
