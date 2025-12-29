@@ -403,7 +403,7 @@ LIMIT @pageSize OFFSET @offset";
        bus_stops, amount, balance, is_charge, is_bus
 FROM ledger_detail
 WHERE ledger_id = @ledgerId
-ORDER BY use_date";
+ORDER BY use_date DESC";
 
             command.Parameters.AddWithValue("@ledgerId", ledgerId);
 
