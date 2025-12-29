@@ -106,13 +106,18 @@ namespace ICCardManager.Services
         /// <summary>
         /// サンプル履歴データを登録
         /// </summary>
+        /// <remarks>
+        /// 各月50件以上のレコードを生成（ページングテスト用）
+        /// - 平日は毎日2-3件のレコードを生成
+        /// - 約22平日/月 × 2-3件 = 50-70件/月
+        /// </remarks>
         public async Task RegisterSampleHistoryAsync()
         {
             var random = new Random(42); // 再現性のためシード固定
             var today = DateTime.Now.Date;
 
-            // 各カードに対してサンプル履歴を登録
-            foreach (var card in TestCardList.Take(3)) // 最初の3枚のみ
+            // 各カードに対してサンプル履歴を登録（全カード）
+            foreach (var card in TestCardList)
             {
                 // 既存の履歴があるかチェック
                 var existingHistory = await _ledgerRepository.GetByMonthAsync(card.CardIdm, today.Year, today.Month);
@@ -122,11 +127,12 @@ namespace ICCardManager.Services
                     continue;
                 }
 
-                var balance = 10000; // 初期残高
+                var balance = 50000; // 初期残高（長期間・大量データ用に増額）
                 var staffName = TestStaffList[random.Next(TestStaffList.Length)].Name;
 
-                // 過去30日分のサンプル履歴を生成
-                for (int daysAgo = 30; daysAgo >= 0; daysAgo--)
+                // 過去180日分（約6ヶ月）のサンプル履歴を生成
+                // 各月50件以上のデータでページングテストが可能
+                for (int daysAgo = 180; daysAgo >= 0; daysAgo--)
                 {
                     var date = today.AddDays(-daysAgo);
 
@@ -134,14 +140,10 @@ namespace ICCardManager.Services
                     if (date.DayOfWeek == DayOfWeek.Saturday || date.DayOfWeek == DayOfWeek.Sunday)
                         continue;
 
-                    // 30%の確率で利用
-                    if (random.Next(100) > 30)
-                        continue;
-
                     // 残高が少ない場合はチャージ
-                    if (balance < 1000)
+                    if (balance < 3000)
                     {
-                        var chargeAmount = random.Next(1, 4) * 1000; // 1000, 2000, 3000円
+                        var chargeAmount = random.Next(3, 6) * 1000; // 3000, 4000, 5000円
                         balance += chargeAmount;
 
                         var chargeLedger = new Ledger
@@ -161,7 +163,7 @@ namespace ICCardManager.Services
                         var chargeDetail = new LedgerDetail
                         {
                             LedgerId = chargeLedgerId,
-                            UseDate = date.AddHours(8).AddMinutes(random.Next(60)),
+                            UseDate = date.AddHours(7).AddMinutes(random.Next(60)),
                             Amount = chargeAmount,
                             Balance = balance,
                             IsCharge = true,
@@ -170,57 +172,91 @@ namespace ICCardManager.Services
                         await _ledgerRepository.InsertDetailAsync(chargeDetail);
                     }
 
-                    // 鉄道利用（往復）
+                    // 1件目: 朝の通勤（往復）
                     var fromIdx = random.Next(SampleStations.Length);
                     var toIdx = (fromIdx + random.Next(1, 5)) % SampleStations.Length;
-                    var fare = 200 + random.Next(10) * 30; // 200-470円
+                    var fare1 = 200 + random.Next(10) * 30; // 200-470円
 
-                    balance -= fare * 2; // 往復分
+                    balance -= fare1 * 2; // 往復分
 
-                    var usageLedger = new Ledger
+                    var usageLedger1 = new Ledger
                     {
                         CardIdm = card.CardIdm,
                         Date = date,
                         Summary = $"鉄道（{SampleStations[fromIdx]}～{SampleStations[toIdx]} 往復）",
                         Income = 0,
-                        Expense = fare * 2,
+                        Expense = fare1 * 2,
                         Balance = balance,
                         StaffName = staffName,
                         Note = "テストデータ"
                     };
-                    var usageLedgerId = await _ledgerRepository.InsertAsync(usageLedger);
+                    var usageLedgerId1 = await _ledgerRepository.InsertAsync(usageLedger1);
 
                     // 往路の詳細レコード
-                    var outboundBalance = balance + fare; // 復路分を足し戻す
-                    var outboundDetail = new LedgerDetail
+                    var outboundBalance1 = balance + fare1;
+                    var outboundDetail1 = new LedgerDetail
                     {
-                        LedgerId = usageLedgerId,
+                        LedgerId = usageLedgerId1,
                         UseDate = date.AddHours(8).AddMinutes(random.Next(60)),
                         EntryStation = SampleStations[fromIdx],
                         ExitStation = SampleStations[toIdx],
-                        Amount = fare,
-                        Balance = outboundBalance,
+                        Amount = fare1,
+                        Balance = outboundBalance1,
                         IsCharge = false,
                         IsBus = false
                     };
-                    await _ledgerRepository.InsertDetailAsync(outboundDetail);
+                    await _ledgerRepository.InsertDetailAsync(outboundDetail1);
 
                     // 復路の詳細レコード
-                    var returnDetail = new LedgerDetail
+                    var returnDetail1 = new LedgerDetail
                     {
-                        LedgerId = usageLedgerId,
-                        UseDate = date.AddHours(17).AddMinutes(random.Next(60)),
+                        LedgerId = usageLedgerId1,
+                        UseDate = date.AddHours(18).AddMinutes(random.Next(60)),
                         EntryStation = SampleStations[toIdx],
                         ExitStation = SampleStations[fromIdx],
-                        Amount = fare,
+                        Amount = fare1,
                         Balance = balance,
                         IsCharge = false,
                         IsBus = false
                     };
-                    await _ledgerRepository.InsertDetailAsync(returnDetail);
+                    await _ledgerRepository.InsertDetailAsync(returnDetail1);
 
-                    // 20%の確率でバス利用も追加
-                    if (random.Next(100) < 20)
+                    // 2件目: 昼の外出（片道）
+                    var fromIdx2 = random.Next(SampleStations.Length);
+                    var toIdx2 = (fromIdx2 + random.Next(1, 3)) % SampleStations.Length;
+                    var fare2 = 200 + random.Next(5) * 30; // 200-320円
+
+                    balance -= fare2;
+
+                    var usageLedger2 = new Ledger
+                    {
+                        CardIdm = card.CardIdm,
+                        Date = date,
+                        Summary = $"鉄道（{SampleStations[fromIdx2]}～{SampleStations[toIdx2]}）",
+                        Income = 0,
+                        Expense = fare2,
+                        Balance = balance,
+                        StaffName = staffName,
+                        Note = "テストデータ"
+                    };
+                    var usageLedgerId2 = await _ledgerRepository.InsertAsync(usageLedger2);
+
+                    // 片道の詳細レコード
+                    var onewayDetail = new LedgerDetail
+                    {
+                        LedgerId = usageLedgerId2,
+                        UseDate = date.AddHours(12).AddMinutes(random.Next(60)),
+                        EntryStation = SampleStations[fromIdx2],
+                        ExitStation = SampleStations[toIdx2],
+                        Amount = fare2,
+                        Balance = balance,
+                        IsCharge = false,
+                        IsBus = false
+                    };
+                    await _ledgerRepository.InsertDetailAsync(onewayDetail);
+
+                    // 3件目: 50%の確率でバス利用も追加
+                    if (random.Next(100) < 50)
                     {
                         var busFare = 200 + random.Next(3) * 30; // 200-260円
                         balance -= busFare;
@@ -242,7 +278,7 @@ namespace ICCardManager.Services
                         var busDetail = new LedgerDetail
                         {
                             LedgerId = busLedgerId,
-                            UseDate = date.AddHours(12).AddMinutes(random.Next(60)),
+                            UseDate = date.AddHours(15).AddMinutes(random.Next(60)),
                             Amount = busFare,
                             Balance = balance,
                             IsCharge = false,
