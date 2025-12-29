@@ -1347,6 +1347,15 @@ public partial class MainViewModel : ViewModelBase
     }
 
     /// <summary>
+    /// アプリケーションを終了
+    /// </summary>
+    [RelayCommand]
+    public void Exit()
+    {
+        System.Windows.Application.Current.Shutdown();
+    }
+
+    /// <summary>
     /// 設定画面を開く
     /// </summary>
     [RelayCommand]
