@@ -222,7 +222,7 @@ namespace ICCardManager.Services
                 var worksheet = workbook.Worksheets.First();
 
                 // ヘッダ情報を設定
-                SetHeaderInfo(worksheet, card, year, month);
+                SetHeaderInfo(worksheet, card);
 
                 // データを出力
                 var startRow = 7; // データ開始行（テンプレートに依存）
@@ -384,18 +384,12 @@ namespace ICCardManager.Services
         /// <summary>
         /// ヘッダ情報を設定
         /// </summary>
-        private void SetHeaderInfo(IXLWorksheet worksheet, IcCard card, int year, int month)
+        private void SetHeaderInfo(IXLWorksheet worksheet, IcCard card)
         {
-            var targetDate = new DateTime(year, month, 1);
-            var warekiYearMonth = WarekiConverter.ToWarekiYearMonth(targetDate);
-
             // 1行目のヘッダ情報を設定（テンプレートのセル位置に合わせる）
             // D1: 品名の値、G1: 規格の値
             worksheet.Cell("D1").Value = card.CardType;      // 品名の値
             worksheet.Cell("G1").Value = card.CardNumber;    // 規格の値
-
-            // 3行目に年月を設定（テンプレートのA3に「年月」ラベルがある場合）
-            worksheet.Cell("B3").Value = warekiYearMonth;    // 年月
 
             // ヘッダ行のフォントサイズを調整して1行に収める
             AdjustHeaderRowFontSize(worksheet);
