@@ -661,10 +661,10 @@ public class ReportServiceTests : IDisposable
         worksheet.Cell("D1").GetString().Should().Be("SUGOCA");          // 品名（コードで設定）
         worksheet.Cell("G1").GetString().Should().Be("S-003");           // 規格（コードで設定）
         worksheet.Cell("I1").GetString().Should().Be("円");              // テンプレートの値
-        // 2行目に和暦年月の検証（R6年5月 - 短縮形式）
-        worksheet.Cell("B2").GetString().Should().Contain("R");
-        worksheet.Cell("B2").GetString().Should().Contain("6年");
-        worksheet.Cell("B2").GetString().Should().Contain("5月");
+        // 3行目に和暦年月の検証（R6年5月 - 短縮形式）
+        worksheet.Cell("B3").GetString().Should().Contain("R");
+        worksheet.Cell("B3").GetString().Should().Contain("6年");
+        worksheet.Cell("B3").GetString().Should().Contain("5月");
     }
 
     /// <summary>
