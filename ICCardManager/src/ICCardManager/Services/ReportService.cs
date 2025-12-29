@@ -395,6 +395,26 @@ namespace ICCardManager.Services
             worksheet.Cell("F2").Value = card.CardNumber;    // 規格
             worksheet.Cell("H2").Value = "円";               // 単位
             worksheet.Cell("B3").Value = warekiYearMonth;    // 年月
+
+            // ヘッダ行のフォントサイズを調整して1行に収める
+            AdjustHeaderRowFontSize(worksheet);
+        }
+
+        /// <summary>
+        /// ヘッダ行のフォントサイズを調整
+        /// </summary>
+        /// <remarks>
+        /// 物品分類～単位：円までのヘッダ部分（1行目）を1行に収めるため、
+        /// フォントサイズを小さくして調整します。
+        /// </remarks>
+        private void AdjustHeaderRowFontSize(IXLWorksheet worksheet)
+        {
+            // 1行目（物品分類～単位：円）のフォントサイズを9ptに設定
+            const double headerFontSize = 9;
+
+            // A1～K1の範囲のフォントサイズを調整
+            var headerRange = worksheet.Range("A1:K1");
+            headerRange.Style.Font.FontSize = headerFontSize;
         }
 
         /// <summary>
