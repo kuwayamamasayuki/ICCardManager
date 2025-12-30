@@ -93,7 +93,7 @@ public class PcScCardReaderTests : IDisposable
     public async Task StartReadingAsync_WhenNoReaderAvailable_ThrowsAndSetsDisconnectedState()
     {
         // Arrange
-        _providerMock.Setup(p => p.GetReaders()).Returns((string[]?)null);
+        _providerMock.Setup(p => p.GetReaders()).Returns((string[]?)null!);
         var reader = CreateReader();
 
         // Act & Assert
@@ -164,7 +164,7 @@ public class PcScCardReaderTests : IDisposable
     public async Task CheckConnectionAsync_WhenNoReaderAvailable_ReturnsFalse()
     {
         // Arrange
-        _providerMock.Setup(p => p.GetReaders()).Returns((string[]?)null);
+        _providerMock.Setup(p => p.GetReaders()).Returns((string[]?)null!);
         var reader = CreateReader();
 
         // Act
@@ -260,7 +260,7 @@ public class PcScCardReaderTests : IDisposable
     public async Task ReconnectAsync_ReportsRetryCount()
     {
         // Arrange
-        _providerMock.Setup(p => p.GetReaders()).Returns((string[]?)null);
+        _providerMock.Setup(p => p.GetReaders()).Returns((string[]?)null!);
         var reader = CreateReader();
         var retryCountReported = 0;
         reader.ConnectionStateChanged += (s, e) =>
@@ -291,7 +291,7 @@ public class PcScCardReaderTests : IDisposable
         await reader.StartReadingAsync();
 
         // 再接続中状態をシミュレート
-        _providerMock.Setup(p => p.GetReaders()).Returns((string[]?)null);
+        _providerMock.Setup(p => p.GetReaders()).Returns((string[]?)null!);
         await reader.ReconnectAsync();
 
         var callCountBefore = _providerMock.Invocations.Count(i => i.Method.Name == "GetReaders");
