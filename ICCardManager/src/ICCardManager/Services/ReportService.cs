@@ -417,9 +417,9 @@ namespace ICCardManager.Services
         /// </summary>
         private int WriteCarryoverRow(IXLWorksheet worksheet, int row, int balance)
         {
-            // 列配置: A=出納年月日, B=摘要, C=空, D=受入金額, E=払出金額, F=残額, G=氏名, H=備考
+            // 列配置: A=出納年月日, B-C=摘要(結合), D=受入金額, E=払出金額, F=残額, G=氏名, H-K=備考(結合)
             worksheet.Cell(row, 1).Value = "4/1"; // 出納年月日 (A列)
-            worksheet.Cell(row, 2).Value = SummaryGenerator.GetCarryoverFromPreviousYearSummary(); // 摘要 (B列)
+            worksheet.Cell(row, 2).Value = SummaryGenerator.GetCarryoverFromPreviousYearSummary(); // 摘要 (B-C列)
             worksheet.Cell(row, 4).Value = balance; // 受入金額 (D列)
             worksheet.Cell(row, 5).Value = "";      // 払出金額 (E列)
             worksheet.Cell(row, 6).Value = balance; // 残額 (F列)
@@ -437,14 +437,14 @@ namespace ICCardManager.Services
         {
             var dateStr = $"{ledger.Date.Month}/{ledger.Date.Day}";
 
-            // 列配置: A=出納年月日, B=摘要, C=空, D=受入金額, E=払出金額, F=残額, G=氏名, H=備考
+            // 列配置: A=出納年月日, B-C=摘要(結合), D=受入金額, E=払出金額, F=残額, G=氏名, H-K=備考(結合)
             worksheet.Cell(row, 1).Value = dateStr;           // 出納年月日 (A列)
-            worksheet.Cell(row, 2).Value = ledger.Summary;    // 摘要 (B列)
+            worksheet.Cell(row, 2).Value = ledger.Summary;    // 摘要 (B-C列)
             worksheet.Cell(row, 4).Value = ledger.Income > 0 ? ledger.Income : Blank.Value;  // 受入金額 (D列)
             worksheet.Cell(row, 5).Value = ledger.Expense > 0 ? ledger.Expense : Blank.Value; // 払出金額 (E列)
             worksheet.Cell(row, 6).Value = ledger.Balance;    // 残額 (F列)
             worksheet.Cell(row, 7).Value = ledger.StaffName;  // 氏名 (G列)
-            worksheet.Cell(row, 8).Value = ledger.Note;       // 備考 (H列)
+            worksheet.Cell(row, 8).Value = ledger.Note;       // 備考 (H-K列)
 
             // 罫線を適用
             ApplyDataRowBorder(worksheet, row);
@@ -459,15 +459,15 @@ namespace ICCardManager.Services
             IXLWorksheet worksheet, int row, int month,
             int income, int expense, int balance, bool isMarch)
         {
-            // 列配置: A=出納年月日, B=摘要, C=空, D=受入金額, E=払出金額, F=残額, G=氏名, H=備考
+            // 列配置: A=出納年月日, B-C=摘要(結合), D=受入金額, E=払出金額, F=残額, G=氏名, H-K=備考(結合)
             worksheet.Cell(row, 1).Value = "";  // 出納年月日（空欄）(A列)
-            worksheet.Cell(row, 2).Value = SummaryGenerator.GetMonthlySummary(month); // 摘要 (B列)
+            worksheet.Cell(row, 2).Value = SummaryGenerator.GetMonthlySummary(month); // 摘要 (B-C列)
             worksheet.Cell(row, 4).Value = income > 0 ? income : Blank.Value;   // 受入金額 (D列)
             worksheet.Cell(row, 5).Value = expense > 0 ? expense : Blank.Value; // 払出金額 (E列)
             worksheet.Cell(row, 6).Value = isMarch ? Blank.Value : balance; // 残額（3月は空欄）(F列)
 
             // 月計行にスタイルを適用
-            var range = worksheet.Range(row, 1, row, 8);
+            var range = worksheet.Range(row, 1, row, 11);
             range.Style.Font.Bold = true;
 
             // 罫線を適用
@@ -483,15 +483,15 @@ namespace ICCardManager.Services
             IXLWorksheet worksheet, int row,
             int income, int expense, int balance)
         {
-            // 列配置: A=出納年月日, B=摘要, C=空, D=受入金額, E=払出金額, F=残額, G=氏名, H=備考
+            // 列配置: A=出納年月日, B-C=摘要(結合), D=受入金額, E=払出金額, F=残額, G=氏名, H-K=備考(結合)
             worksheet.Cell(row, 1).Value = "";  // 出納年月日（空欄）(A列)
-            worksheet.Cell(row, 2).Value = SummaryGenerator.GetCumulativeSummary(); // 摘要 (B列)
+            worksheet.Cell(row, 2).Value = SummaryGenerator.GetCumulativeSummary(); // 摘要 (B-C列)
             worksheet.Cell(row, 4).Value = income > 0 ? income : Blank.Value;   // 受入金額 (D列)
             worksheet.Cell(row, 5).Value = expense > 0 ? expense : Blank.Value; // 払出金額 (E列)
             worksheet.Cell(row, 6).Value = balance; // 残額 (F列)
 
             // 累計行にスタイルを適用
-            var range = worksheet.Range(row, 1, row, 8);
+            var range = worksheet.Range(row, 1, row, 11);
             range.Style.Font.Bold = true;
 
             // 罫線を適用
@@ -505,15 +505,15 @@ namespace ICCardManager.Services
         /// </summary>
         private int WriteCarryoverToNextYearRow(IXLWorksheet worksheet, int row, int balance)
         {
-            // 列配置: A=出納年月日, B=摘要, C=空, D=受入金額, E=払出金額, F=残額, G=氏名, H=備考
+            // 列配置: A=出納年月日, B-C=摘要(結合), D=受入金額, E=払出金額, F=残額, G=氏名, H-K=備考(結合)
             worksheet.Cell(row, 1).Value = "";  // 出納年月日（空欄）(A列)
-            worksheet.Cell(row, 2).Value = SummaryGenerator.GetCarryoverToNextYearSummary(); // 摘要 (B列)
+            worksheet.Cell(row, 2).Value = SummaryGenerator.GetCarryoverToNextYearSummary(); // 摘要 (B-C列)
             worksheet.Cell(row, 4).Value = "";  // 受入金額 (D列)
             worksheet.Cell(row, 5).Value = balance; // 払出金額 (E列)
             worksheet.Cell(row, 6).Value = 0;   // 残額 (F列)
 
             // 繰越行にスタイルを適用
-            var range = worksheet.Range(row, 1, row, 8);
+            var range = worksheet.Range(row, 1, row, 11);
             range.Style.Font.Bold = true;
 
             // 罫線を適用
@@ -523,12 +523,18 @@ namespace ICCardManager.Services
         }
 
         /// <summary>
-        /// データ行に罫線を適用
+        /// データ行に罫線を適用し、セルを結合
         /// </summary>
         private void ApplyDataRowBorder(IXLWorksheet worksheet, int row)
         {
-            // A列からH列まで罫線を適用
-            var range = worksheet.Range(row, 1, row, 8);
+            // B列とC列を結合（摘要）
+            worksheet.Range(row, 2, row, 3).Merge();
+
+            // H列からK列を結合（備考）
+            worksheet.Range(row, 8, row, 11).Merge();
+
+            // A列からK列まで罫線を適用
+            var range = worksheet.Range(row, 1, row, 11);
             range.Style.Border.TopBorder = XLBorderStyleValues.Thin;
             range.Style.Border.BottomBorder = XLBorderStyleValues.Thin;
             range.Style.Border.LeftBorder = XLBorderStyleValues.Thin;
