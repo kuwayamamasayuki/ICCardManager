@@ -146,28 +146,28 @@ public class ReportServiceTests : IDisposable
         worksheet.Cell("D1").GetString().Should().Be("はやかけん");
         worksheet.Cell("G1").GetString().Should().Be("001");
 
-        // データ行の検証（行7から開始）
-        worksheet.Cell(7, 1).GetString().Should().Be("6/5");
-        worksheet.Cell(7, 2).GetString().Should().Be("鉄道（博多～天神）");
-        worksheet.Cell(7, 4).GetValue<int>().Should().Be(300);
-        worksheet.Cell(7, 5).GetValue<int>().Should().Be(4700);
-        worksheet.Cell(7, 6).GetString().Should().Be("田中太郎");
+        // データ行の検証（行3から開始、列はD=受入, E=払出, F=残額, G=氏名）
+        worksheet.Cell(3, 1).GetString().Should().Be("6/5");
+        worksheet.Cell(3, 2).GetString().Should().Be("鉄道（博多～天神）");
+        worksheet.Cell(3, 5).GetValue<int>().Should().Be(300);   // 払出金額 (E列)
+        worksheet.Cell(3, 6).GetValue<int>().Should().Be(4700);  // 残額 (F列)
+        worksheet.Cell(3, 7).GetString().Should().Be("田中太郎"); // 氏名 (G列)
 
-        worksheet.Cell(8, 1).GetString().Should().Be("6/10");
-        worksheet.Cell(8, 2).GetString().Should().Be("役務費によりチャージ");
-        worksheet.Cell(8, 3).GetValue<int>().Should().Be(5000);
-        worksheet.Cell(8, 5).GetValue<int>().Should().Be(9700);
+        worksheet.Cell(4, 1).GetString().Should().Be("6/10");
+        worksheet.Cell(4, 2).GetString().Should().Be("役務費によりチャージ");
+        worksheet.Cell(4, 4).GetValue<int>().Should().Be(5000);  // 受入金額 (D列)
+        worksheet.Cell(4, 6).GetValue<int>().Should().Be(9700);  // 残額 (F列)
 
-        worksheet.Cell(9, 1).GetString().Should().Be("6/15");
-        worksheet.Cell(9, 2).GetString().Should().Be("鉄道（天神～博多）");
-        worksheet.Cell(9, 4).GetValue<int>().Should().Be(300);
-        worksheet.Cell(9, 5).GetValue<int>().Should().Be(9400);
+        worksheet.Cell(5, 1).GetString().Should().Be("6/15");
+        worksheet.Cell(5, 2).GetString().Should().Be("鉄道（天神～博多）");
+        worksheet.Cell(5, 5).GetValue<int>().Should().Be(300);   // 払出金額 (E列)
+        worksheet.Cell(5, 6).GetValue<int>().Should().Be(9400);  // 残額 (F列)
 
         // 月計行の検証
-        worksheet.Cell(10, 2).GetString().Should().Be("6月計");
-        worksheet.Cell(10, 3).GetValue<int>().Should().Be(5000);  // 受入合計
-        worksheet.Cell(10, 4).GetValue<int>().Should().Be(600);   // 払出合計
-        worksheet.Cell(10, 5).GetValue<int>().Should().Be(9400);  // 残額
+        worksheet.Cell(6, 2).GetString().Should().Be("6月計");
+        worksheet.Cell(6, 4).GetValue<int>().Should().Be(5000);  // 受入合計 (D列)
+        worksheet.Cell(6, 5).GetValue<int>().Should().Be(600);   // 払出合計 (E列)
+        worksheet.Cell(6, 6).GetValue<int>().Should().Be(9400);  // 残額 (F列)
     }
 
     /// <summary>
@@ -208,15 +208,15 @@ public class ReportServiceTests : IDisposable
         using var workbook = new XLWorkbook(outputPath);
         var worksheet = workbook.Worksheets.First();
 
-        // 前年度繰越行の検証（行7）
-        worksheet.Cell(7, 1).GetString().Should().Be("4/1");
-        worksheet.Cell(7, 2).GetString().Should().Be("前年度より繰越");
-        worksheet.Cell(7, 3).GetValue<int>().Should().Be(10000);
-        worksheet.Cell(7, 5).GetValue<int>().Should().Be(10000);
+        // 前年度繰越行の検証（行3）
+        worksheet.Cell(3, 1).GetString().Should().Be("4/1");
+        worksheet.Cell(3, 2).GetString().Should().Be("前年度より繰越");
+        worksheet.Cell(3, 4).GetValue<int>().Should().Be(10000);  // 受入金額 (D列)
+        worksheet.Cell(3, 6).GetValue<int>().Should().Be(10000);  // 残額 (F列)
 
-        // データ行は行8から
-        worksheet.Cell(8, 1).GetString().Should().Be("4/5");
-        worksheet.Cell(8, 2).GetString().Should().Be("鉄道（博多～天神）");
+        // データ行は行4から
+        worksheet.Cell(4, 1).GetString().Should().Be("4/5");
+        worksheet.Cell(4, 2).GetString().Should().Be("鉄道（博多～天神）");
     }
 
     /// <summary>
@@ -267,26 +267,26 @@ public class ReportServiceTests : IDisposable
         using var workbook = new XLWorkbook(outputPath);
         var worksheet = workbook.Worksheets.First();
 
-        // データ行の検証
-        worksheet.Cell(7, 2).GetString().Should().Be("鉄道（博多～天神）");
-        worksheet.Cell(8, 2).GetString().Should().Be("役務費によりチャージ");
+        // データ行の検証（行3から開始）
+        worksheet.Cell(3, 2).GetString().Should().Be("鉄道（博多～天神）");
+        worksheet.Cell(4, 2).GetString().Should().Be("役務費によりチャージ");
 
-        // 月計行の検証（行9）- 3月は残額が空欄
-        worksheet.Cell(9, 2).GetString().Should().Be("3月計");
-        worksheet.Cell(9, 3).GetValue<int>().Should().Be(5000);  // 受入：3月のチャージ
-        worksheet.Cell(9, 4).GetValue<int>().Should().Be(300);   // 払出：3月の利用
-        worksheet.Cell(9, 5).GetString().Should().BeEmpty();     // 3月は残額空欄
+        // 月計行の検証（行5）- 3月は残額が空欄
+        worksheet.Cell(5, 2).GetString().Should().Be("3月計");
+        worksheet.Cell(5, 4).GetValue<int>().Should().Be(5000);  // 受入：3月のチャージ (D列)
+        worksheet.Cell(5, 5).GetValue<int>().Should().Be(300);   // 払出：3月の利用 (E列)
+        worksheet.Cell(5, 6).GetString().Should().BeEmpty();     // 3月は残額空欄 (F列)
 
-        // 累計行の検証（行10）
-        worksheet.Cell(10, 2).GetString().Should().Be("累計");
-        worksheet.Cell(10, 3).GetValue<int>().Should().Be(15000);  // 年度累計受入
-        worksheet.Cell(10, 4).GetValue<int>().Should().Be(1600);   // 年度累計払出
-        worksheet.Cell(10, 5).GetValue<int>().Should().Be(13700);  // 最終残額
+        // 累計行の検証（行6）
+        worksheet.Cell(6, 2).GetString().Should().Be("累計");
+        worksheet.Cell(6, 4).GetValue<int>().Should().Be(15000);  // 年度累計受入 (D列)
+        worksheet.Cell(6, 5).GetValue<int>().Should().Be(1600);   // 年度累計払出 (E列)
+        worksheet.Cell(6, 6).GetValue<int>().Should().Be(13700);  // 最終残額 (F列)
 
-        // 次年度繰越行の検証（行11）
-        worksheet.Cell(11, 2).GetString().Should().Be("次年度へ繰越");
-        worksheet.Cell(11, 4).GetValue<int>().Should().Be(13700);  // 払出として繰越
-        worksheet.Cell(11, 5).GetValue<int>().Should().Be(0);      // 残額0
+        // 次年度繰越行の検証（行7）
+        worksheet.Cell(7, 2).GetString().Should().Be("次年度へ繰越");
+        worksheet.Cell(7, 5).GetValue<int>().Should().Be(13700);  // 払出として繰越 (E列)
+        worksheet.Cell(7, 6).GetValue<int>().Should().Be(0);      // 残額0 (F列)
     }
 
     /// <summary>
@@ -327,27 +327,27 @@ public class ReportServiceTests : IDisposable
         using var workbook = new XLWorkbook(outputPath);
         var worksheet = workbook.Worksheets.First();
 
-        // 各行のデータ検証
-        worksheet.Cell(7, 2).GetString().Should().Be("役務費によりチャージ");
-        worksheet.Cell(7, 3).GetValue<int>().Should().Be(10000);
+        // 各行のデータ検証（行3から開始、D=受入、E=払出）
+        worksheet.Cell(3, 2).GetString().Should().Be("役務費によりチャージ");
+        worksheet.Cell(3, 4).GetValue<int>().Should().Be(10000);  // 受入金額 (D列)
 
-        worksheet.Cell(8, 2).GetString().Should().Be("鉄道（博多～天神）");
-        worksheet.Cell(8, 4).GetValue<int>().Should().Be(300);
+        worksheet.Cell(4, 2).GetString().Should().Be("鉄道（博多～天神）");
+        worksheet.Cell(4, 5).GetValue<int>().Should().Be(300);    // 払出金額 (E列)
 
-        worksheet.Cell(9, 2).GetString().Should().Be("バス（★）");
-        worksheet.Cell(9, 4).GetValue<int>().Should().Be(200);
+        worksheet.Cell(5, 2).GetString().Should().Be("バス（★）");
+        worksheet.Cell(5, 5).GetValue<int>().Should().Be(200);    // 払出金額 (E列)
 
-        worksheet.Cell(10, 2).GetString().Should().Be("役務費によりチャージ");
-        worksheet.Cell(10, 3).GetValue<int>().Should().Be(3000);
+        worksheet.Cell(6, 2).GetString().Should().Be("役務費によりチャージ");
+        worksheet.Cell(6, 4).GetValue<int>().Should().Be(3000);   // 受入金額 (D列)
 
-        worksheet.Cell(11, 2).GetString().Should().Be("鉄道（天神～博多 往復）");
-        worksheet.Cell(11, 4).GetValue<int>().Should().Be(600);
+        worksheet.Cell(7, 2).GetString().Should().Be("鉄道（天神～博多 往復）");
+        worksheet.Cell(7, 5).GetValue<int>().Should().Be(600);    // 払出金額 (E列)
 
-        // 月計の検証
-        worksheet.Cell(12, 2).GetString().Should().Be("7月計");
-        worksheet.Cell(12, 3).GetValue<int>().Should().Be(13000);  // チャージ合計
-        worksheet.Cell(12, 4).GetValue<int>().Should().Be(1100);   // 利用合計
-        worksheet.Cell(12, 5).GetValue<int>().Should().Be(11900);  // 最終残額
+        // 月計の検証（行8）
+        worksheet.Cell(8, 2).GetString().Should().Be("7月計");
+        worksheet.Cell(8, 4).GetValue<int>().Should().Be(13000);  // チャージ合計 (D列)
+        worksheet.Cell(8, 5).GetValue<int>().Should().Be(1100);   // 利用合計 (E列)
+        worksheet.Cell(8, 6).GetValue<int>().Should().Be(11900);  // 最終残額 (F列)
     }
 
     /// <summary>
@@ -387,14 +387,14 @@ public class ReportServiceTests : IDisposable
         using var workbook = new XLWorkbook(outputPath);
         var worksheet = workbook.Worksheets.First();
 
-        // 行7と行8にデータがあり、貸出中レコードは除外されている
-        worksheet.Cell(7, 2).GetString().Should().Be("鉄道（博多～天神）");
-        worksheet.Cell(8, 2).GetString().Should().Be("鉄道（天神～博多）");
-        // 貸出中レコードがスキップされたので、月計は行9
-        worksheet.Cell(9, 2).GetString().Should().Be("8月計");
+        // 行3と行4にデータがあり、貸出中レコードは除外されている
+        worksheet.Cell(3, 2).GetString().Should().Be("鉄道（博多～天神）");
+        worksheet.Cell(4, 2).GetString().Should().Be("鉄道（天神～博多）");
+        // 貸出中レコードがスキップされたので、月計は行5
+        worksheet.Cell(5, 2).GetString().Should().Be("8月計");
 
-        // 月計には貸出中レコードが含まれない
-        worksheet.Cell(9, 4).GetValue<int>().Should().Be(600);  // 300 + 300 = 600
+        // 月計には貸出中レコードが含まれない（払出金額はE列）
+        worksheet.Cell(5, 5).GetValue<int>().Should().Be(600);  // 300 + 300 = 600
     }
 
     /// <summary>
@@ -435,11 +435,11 @@ public class ReportServiceTests : IDisposable
         using var workbook = new XLWorkbook(outputPath);
         var worksheet = workbook.Worksheets.First();
 
-        // 日付順 → ID順でソートされている
-        worksheet.Cell(7, 2).GetString().Should().Be("利用1");   // 9/1, ID:1
-        worksheet.Cell(8, 2).GetString().Should().Be("利用2");   // 9/10, ID:2
-        worksheet.Cell(9, 2).GetString().Should().Be("利用3");   // 9/15, ID:3
-        worksheet.Cell(10, 2).GetString().Should().Be("利用4");  // 9/15, ID:4
+        // 日付順 → ID順でソートされている（行3から開始）
+        worksheet.Cell(3, 2).GetString().Should().Be("利用1");   // 9/1, ID:1
+        worksheet.Cell(4, 2).GetString().Should().Be("利用2");   // 9/10, ID:2
+        worksheet.Cell(5, 2).GetString().Should().Be("利用3");   // 9/15, ID:3
+        worksheet.Cell(6, 2).GetString().Should().Be("利用4");  // 9/15, ID:4
     }
 
     /// <summary>
@@ -543,8 +543,8 @@ public class ReportServiceTests : IDisposable
         // ヘッダーは設定されている（1行目に品名を設定）
         worksheet.Cell("D1").GetString().Should().Be("はやかけん");
 
-        // 月計行のみ出力（データなし）
-        worksheet.Cell(7, 2).GetString().Should().Be("11月計");
+        // 月計行のみ出力（データなし、行3）
+        worksheet.Cell(3, 2).GetString().Should().Be("11月計");
     }
 
     /// <summary>
@@ -700,13 +700,13 @@ public class ReportServiceTests : IDisposable
         using var workbook = new XLWorkbook(outputPath);
         var worksheet = workbook.Worksheets.First();
 
-        // 利用行：受入（列3）は空欄
-        worksheet.Cell(7, 3).IsEmpty().Should().BeTrue();
-        worksheet.Cell(7, 4).GetValue<int>().Should().Be(300);
+        // 利用行：受入（D列）は空欄、払出はE列
+        worksheet.Cell(3, 4).IsEmpty().Should().BeTrue();    // 受入金額 (D列)
+        worksheet.Cell(3, 5).GetValue<int>().Should().Be(300); // 払出金額 (E列)
 
-        // チャージ行：払出（列4）は空欄
-        worksheet.Cell(8, 3).GetValue<int>().Should().Be(5000);
-        worksheet.Cell(8, 4).IsEmpty().Should().BeTrue();
+        // チャージ行：受入はD列、払出（E列）は空欄
+        worksheet.Cell(4, 4).GetValue<int>().Should().Be(5000); // 受入金額 (D列)
+        worksheet.Cell(4, 5).IsEmpty().Should().BeTrue();       // 払出金額 (E列)
     }
 
     /// <summary>
@@ -751,20 +751,20 @@ public class ReportServiceTests : IDisposable
         using var workbook = new XLWorkbook(outputPath);
         var worksheet = workbook.Worksheets.First();
 
-        // データ行はボールドではない
-        worksheet.Cell(7, 2).Style.Font.Bold.Should().BeFalse();
+        // データ行はボールドではない（行3から開始）
+        worksheet.Cell(3, 2).Style.Font.Bold.Should().BeFalse();
 
-        // 月計行はボールド
-        worksheet.Cell(8, 2).GetString().Should().Be("3月計");
-        worksheet.Cell(8, 2).Style.Font.Bold.Should().BeTrue();
+        // 月計行はボールド（行4）
+        worksheet.Cell(4, 2).GetString().Should().Be("3月計");
+        worksheet.Cell(4, 2).Style.Font.Bold.Should().BeTrue();
 
-        // 累計行はボールド
-        worksheet.Cell(9, 2).GetString().Should().Be("累計");
-        worksheet.Cell(9, 2).Style.Font.Bold.Should().BeTrue();
+        // 累計行はボールド（行5）
+        worksheet.Cell(5, 2).GetString().Should().Be("累計");
+        worksheet.Cell(5, 2).Style.Font.Bold.Should().BeTrue();
 
-        // 次年度繰越行はボールド
-        worksheet.Cell(10, 2).GetString().Should().Be("次年度へ繰越");
-        worksheet.Cell(10, 2).Style.Font.Bold.Should().BeTrue();
+        // 次年度繰越行はボールド（行6）
+        worksheet.Cell(6, 2).GetString().Should().Be("次年度へ繰越");
+        worksheet.Cell(6, 2).Style.Font.Bold.Should().BeTrue();
     }
 
     /// <summary>
@@ -804,10 +804,10 @@ public class ReportServiceTests : IDisposable
         using var workbook = new XLWorkbook(outputPath);
         var worksheet = workbook.Worksheets.First();
 
-        // 前年度繰越は0で出力
-        worksheet.Cell(7, 2).GetString().Should().Be("前年度より繰越");
-        worksheet.Cell(7, 3).GetValue<int>().Should().Be(0);
-        worksheet.Cell(7, 5).GetValue<int>().Should().Be(0);
+        // 前年度繰越は0で出力（行3、D=受入、F=残額）
+        worksheet.Cell(3, 2).GetString().Should().Be("前年度より繰越");
+        worksheet.Cell(3, 4).GetValue<int>().Should().Be(0);  // 受入金額 (D列)
+        worksheet.Cell(3, 6).GetValue<int>().Should().Be(0);  // 残額 (F列)
     }
 
     #endregion
@@ -873,14 +873,14 @@ public class ReportServiceTests : IDisposable
         using var workbook = new XLWorkbook(outputPath);
         var worksheet = workbook.Worksheets.First();
 
-        // 累計行の検証
+        // 累計行の検証（行3=データ、行4=月計、行5=累計）
         // 年度受入合計: 10000 + 5000 = 15000
         // 年度払出合計: 500 + 500 + 300 + 700 + 400 = 2400
-        var cumulativeRow = 9;  // データ1行 + 月計1行 + 累計
+        var cumulativeRow = 5;  // データ1行 + 月計1行 + 累計
         worksheet.Cell(cumulativeRow, 2).GetString().Should().Be("累計");
-        worksheet.Cell(cumulativeRow, 3).GetValue<int>().Should().Be(15000);  // 年度受入合計
-        worksheet.Cell(cumulativeRow, 4).GetValue<int>().Should().Be(2400);   // 年度払出合計
-        worksheet.Cell(cumulativeRow, 5).GetValue<int>().Should().Be(12600);  // 最終残額
+        worksheet.Cell(cumulativeRow, 4).GetValue<int>().Should().Be(15000);  // 年度受入合計 (D列)
+        worksheet.Cell(cumulativeRow, 5).GetValue<int>().Should().Be(2400);   // 年度払出合計 (E列)
+        worksheet.Cell(cumulativeRow, 6).GetValue<int>().Should().Be(12600);  // 最終残額 (F列)
     }
 
     /// <summary>
@@ -921,15 +921,15 @@ public class ReportServiceTests : IDisposable
         using var workbook = new XLWorkbook(outputPath);
         var worksheet = workbook.Worksheets.First();
 
-        // 前年度繰越行（行7）
-        worksheet.Cell(7, 1).GetString().Should().Be("4/1");
-        worksheet.Cell(7, 2).GetString().Should().Be("前年度より繰越");
-        worksheet.Cell(7, 3).GetValue<int>().Should().Be(marchEndBalance);
-        worksheet.Cell(7, 5).GetValue<int>().Should().Be(marchEndBalance);
+        // 前年度繰越行（行3）- 列配置: A=日付, B=摘要, D=受入金額, F=残額
+        worksheet.Cell(3, 1).GetString().Should().Be("4/1");
+        worksheet.Cell(3, 2).GetString().Should().Be("前年度より繰越");
+        worksheet.Cell(3, 4).GetValue<int>().Should().Be(marchEndBalance);  // D列=受入金額
+        worksheet.Cell(3, 6).GetValue<int>().Should().Be(marchEndBalance);  // F列=残額
 
-        // 通常データ行（行8）
-        worksheet.Cell(8, 1).GetString().Should().Be("4/10");
-        worksheet.Cell(8, 2).GetString().Should().Be("鉄道（博多～天神）");
+        // 通常データ行（行4）
+        worksheet.Cell(4, 1).GetString().Should().Be("4/10");
+        worksheet.Cell(4, 2).GetString().Should().Be("鉄道（博多～天神）");
     }
 
     /// <summary>
@@ -974,20 +974,20 @@ public class ReportServiceTests : IDisposable
         using var workbook = new XLWorkbook(outputPath);
         var worksheet = workbook.Worksheets.First();
 
-        // 月計行（3月はデータなしなので0）
-        worksheet.Cell(7, 2).GetString().Should().Be("3月計");
-        worksheet.Cell(7, 5).GetString().Should().BeEmpty();  // 3月の月計残額は空欄
+        // 月計行（3月はデータなしなので0）- 行3、列配置: B=摘要, F=残額
+        worksheet.Cell(3, 2).GetString().Should().Be("3月計");
+        worksheet.Cell(3, 6).GetString().Should().BeEmpty();  // 3月の月計残額は空欄 (F列)
 
-        // 累計行
-        worksheet.Cell(8, 2).GetString().Should().Be("累計");
-        worksheet.Cell(8, 3).GetValue<int>().Should().Be(10000);  // 年度受入合計
-        worksheet.Cell(8, 4).GetValue<int>().Should().Be(800);    // 年度払出合計 (500 + 300)
-        worksheet.Cell(8, 5).GetValue<int>().Should().Be(9200);   // 2月末の残高
+        // 累計行 - 行4、列配置: D=受入金額, E=払出金額, F=残額
+        worksheet.Cell(4, 2).GetString().Should().Be("累計");
+        worksheet.Cell(4, 4).GetValue<int>().Should().Be(10000);  // D列=年度受入合計
+        worksheet.Cell(4, 5).GetValue<int>().Should().Be(800);    // E列=年度払出合計 (500 + 300)
+        worksheet.Cell(4, 6).GetValue<int>().Should().Be(9200);   // F列=2月末の残高
 
-        // 次年度繰越行
-        worksheet.Cell(9, 2).GetString().Should().Be("次年度へ繰越");
-        worksheet.Cell(9, 4).GetValue<int>().Should().Be(9200);
-        worksheet.Cell(9, 5).GetValue<int>().Should().Be(0);
+        // 次年度繰越行 - 行5、列配置: E=払出金額, F=残額
+        worksheet.Cell(5, 2).GetString().Should().Be("次年度へ繰越");
+        worksheet.Cell(5, 5).GetValue<int>().Should().Be(9200);   // E列=払出金額
+        worksheet.Cell(5, 6).GetValue<int>().Should().Be(0);      // F列=残額
     }
 
     /// <summary>
@@ -1023,13 +1023,13 @@ public class ReportServiceTests : IDisposable
         using var workbook = new XLWorkbook(outputPath);
         var worksheet = workbook.Worksheets.First();
 
-        // 前年度繰越行（行7）
-        worksheet.Cell(7, 2).GetString().Should().Be("前年度より繰越");
-        worksheet.Cell(7, 3).GetValue<int>().Should().Be(marchEndBalance);
-        worksheet.Cell(7, 5).GetValue<int>().Should().Be(marchEndBalance);
+        // 前年度繰越行（行3）- 列配置: D=受入金額, F=残額
+        worksheet.Cell(3, 2).GetString().Should().Be("前年度より繰越");
+        worksheet.Cell(3, 4).GetValue<int>().Should().Be(marchEndBalance);  // D列=受入金額
+        worksheet.Cell(3, 6).GetValue<int>().Should().Be(marchEndBalance);  // F列=残額
 
-        // 月計行（行8、データなし）
-        worksheet.Cell(8, 2).GetString().Should().Be("4月計");
+        // 月計行（行4、データなし）
+        worksheet.Cell(4, 2).GetString().Should().Be("4月計");
     }
 
     /// <summary>
@@ -1079,12 +1079,12 @@ public class ReportServiceTests : IDisposable
         var worksheet = workbook.Worksheets.First();
 
         // 貸出中レコードは除外されている
-        worksheet.Cell(7, 2).GetString().Should().Be("鉄道（博多～天神）");
-        worksheet.Cell(8, 2).GetString().Should().Be("3月計");  // 貸出中がスキップされたので月計は行8
+        worksheet.Cell(3, 2).GetString().Should().Be("鉄道（博多～天神）");
+        worksheet.Cell(4, 2).GetString().Should().Be("3月計");  // 貸出中がスキップされたので月計は行4
 
         // 次年度繰越は貸出中の残高で計算される
-        worksheet.Cell(10, 2).GetString().Should().Be("次年度へ繰越");
-        worksheet.Cell(10, 4).GetValue<int>().Should().Be(9700);
+        worksheet.Cell(6, 2).GetString().Should().Be("次年度へ繰越");
+        worksheet.Cell(6, 5).GetValue<int>().Should().Be(9700);  // E列=払出金額
     }
 
     /// <summary>
@@ -1134,10 +1134,10 @@ public class ReportServiceTests : IDisposable
         var worksheet = workbook.Worksheets.First();
 
         // 次年度繰越行
-        var carryoverRow = 10;  // データ1行 + 月計 + 累計 + 繰越
+        var carryoverRow = 6;  // データ1行(3) + 月計(4) + 累計(5) + 繰越(6)
         worksheet.Cell(carryoverRow, 2).GetString().Should().Be("次年度へ繰越");
-        worksheet.Cell(carryoverRow, 4).GetValue<int>().Should().Be(8500);  // 払出として繰越
-        worksheet.Cell(carryoverRow, 5).GetValue<int>().Should().Be(0);     // 残額は0
+        worksheet.Cell(carryoverRow, 5).GetValue<int>().Should().Be(8500);  // E列=払出として繰越
+        worksheet.Cell(carryoverRow, 6).GetValue<int>().Should().Be(0);     // F列=残額は0
     }
 
     /// <summary>
@@ -1209,8 +1209,8 @@ public class ReportServiceTests : IDisposable
         var marchWorksheet = marchWorkbook.Worksheets.First();
 
         // 次年度繰越の払出金額
-        marchWorksheet.Cell(10, 2).GetString().Should().Be("次年度へ繰越");
-        var marchCarryover = marchWorksheet.Cell(10, 4).GetValue<int>();
+        marchWorksheet.Cell(6, 2).GetString().Should().Be("次年度へ繰越");
+        var marchCarryover = marchWorksheet.Cell(6, 5).GetValue<int>();  // E列=払出金額
         marchCarryover.Should().Be(marchEndBalance);
 
         // 4月帳票の検証
@@ -1218,8 +1218,8 @@ public class ReportServiceTests : IDisposable
         var aprilWorksheet = aprilWorkbook.Worksheets.First();
 
         // 前年度繰越の受入金額
-        aprilWorksheet.Cell(7, 2).GetString().Should().Be("前年度より繰越");
-        var aprilCarryover = aprilWorksheet.Cell(7, 3).GetValue<int>();
+        aprilWorksheet.Cell(3, 2).GetString().Should().Be("前年度より繰越");
+        var aprilCarryover = aprilWorksheet.Cell(3, 4).GetValue<int>();  // D列=受入金額
         aprilCarryover.Should().Be(marchEndBalance);
 
         // 3月の繰越と4月の繰越が一致
