@@ -24,12 +24,12 @@
     <Window.InputBindings>
         <!-- キーボードショートカット -->
         <KeyBinding Key="Escape" Command="{Binding CancelCommand}"/>
-        <KeyBinding Key="F1" Command="{Binding OpenSettingsCommand}"/>
-        <KeyBinding Key="F2" Command="{Binding OpenReportCommand}"/>
+        <KeyBinding Key="F1" Command="{Binding OpenReportCommand}"/>
+        <KeyBinding Key="F2" Command="{Binding OpenStaffManageCommand}"/>
         <KeyBinding Key="F3" Command="{Binding OpenCardManageCommand}"/>
-        <KeyBinding Key="F4" Command="{Binding OpenStaffManageCommand}"/>
-        <KeyBinding Key="F5" Command="{Binding OpenDataExportImportCommand}"/>
-        <KeyBinding Key="F6" Command="{Binding OpenOperationLogCommand}"/>
+        <KeyBinding Key="F4" Command="{Binding OpenDataExportImportCommand}"/>
+        <KeyBinding Key="F5" Command="{Binding OpenOperationLogCommand}"/>
+        <KeyBinding Key="F6" Command="{Binding OpenSettingsCommand}"/>
     </Window.InputBindings>
 
     <Grid>
@@ -54,20 +54,20 @@
 
                 <!-- ボタン群（右寄せ） -->
                 <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
-                    <Button Content="設定 (F1)" Margin="5,0"
-                            Style="{StaticResource AccessibleButtonStyle}"
-                            Command="{Binding OpenSettingsCommand}"
-                            TabIndex="1"
-                            AutomationProperties.Name="設定ダイアログを開く"
-                            AutomationProperties.HelpText="アプリケーションの設定を変更します。ショートカット: F1"
-                            ToolTip="設定を開く (F1)"/>
-                    <Button Content="帳票 (F2)" Margin="5,0"
+                    <Button Content="帳票 (F1)" Margin="5,0"
                             Style="{StaticResource AccessibleButtonStyle}"
                             Command="{Binding OpenReportCommand}"
-                            TabIndex="2"
+                            TabIndex="1"
                             AutomationProperties.Name="帳票ダイアログを開く"
-                            AutomationProperties.HelpText="物品出納簿を作成します。ショートカット: F2"
-                            ToolTip="帳票を開く (F2)"/>
+                            AutomationProperties.HelpText="物品出納簿を作成します。ショートカット: F1"
+                            ToolTip="帳票を開く (F1)"/>
+                    <Button Content="職員管理 (F2)" Margin="5,0"
+                            Style="{StaticResource AccessibleButtonStyle}"
+                            Command="{Binding OpenStaffManageCommand}"
+                            TabIndex="2"
+                            AutomationProperties.Name="職員管理ダイアログを開く"
+                            AutomationProperties.HelpText="職員の登録・編集を行います。ショートカット: F2"
+                            ToolTip="職員管理を開く (F2)"/>
                     <Button Content="交通系ICカード管理 (F3)" Margin="5,0"
                             Style="{StaticResource AccessibleButtonStyle}"
                             Command="{Binding OpenCardManageCommand}"
@@ -75,27 +75,27 @@
                             AutomationProperties.Name="交通系ICカード管理ダイアログを開く"
                             AutomationProperties.HelpText="交通系ICカードの登録・編集を行います。ショートカット: F3"
                             ToolTip="交通系ICカード管理を開く (F3)"/>
-                    <Button Content="職員管理 (F4)" Margin="5,0"
-                            Style="{StaticResource AccessibleButtonStyle}"
-                            Command="{Binding OpenStaffManageCommand}"
-                            TabIndex="4"
-                            AutomationProperties.Name="職員管理ダイアログを開く"
-                            AutomationProperties.HelpText="職員の登録・編集を行います。ショートカット: F4"
-                            ToolTip="職員管理を開く (F4)"/>
-                    <Button Content="データ入出力 (F5)" Margin="5,0"
+                    <Button Content="データ入出力 (F4)" Margin="5,0"
                             Style="{StaticResource AccessibleButtonStyle}"
                             Command="{Binding OpenDataExportImportCommand}"
-                            TabIndex="5"
+                            TabIndex="4"
                             AutomationProperties.Name="データエクスポート/インポートダイアログを開く"
-                            AutomationProperties.HelpText="カード・職員・履歴のCSVエクスポート/インポートを行います。ショートカット: F5"
-                            ToolTip="データ入出力を開く (F5)"/>
-                    <Button Content="操作ログ (F6)" Margin="5,0"
+                            AutomationProperties.HelpText="カード・職員・履歴のCSVエクスポート/インポートを行います。ショートカット: F4"
+                            ToolTip="データ入出力を開く (F4)"/>
+                    <Button Content="操作ログ (F5)" Margin="5,0"
                             Style="{StaticResource AccessibleButtonStyle}"
                             Command="{Binding OpenOperationLogCommand}"
-                            TabIndex="6"
+                            TabIndex="5"
                             AutomationProperties.Name="操作ログダイアログを開く"
-                            AutomationProperties.HelpText="システムの操作履歴を検索・表示します。ショートカット: F6"
-                            ToolTip="操作ログを開く (F6)"/>
+                            AutomationProperties.HelpText="システムの操作履歴を検索・表示します。ショートカット: F5"
+                            ToolTip="操作ログを開く (F5)"/>
+                    <Button Content="設定 (F6)" Margin="5,0"
+                            Style="{StaticResource AccessibleButtonStyle}"
+                            Command="{Binding OpenSettingsCommand}"
+                            TabIndex="6"
+                            AutomationProperties.Name="設定ダイアログを開く"
+                            AutomationProperties.HelpText="アプリケーションの設定を変更します。ショートカット: F6"
+                            ToolTip="設定を開く (F6)"/>
                     <Button Content="終了" Margin="15,0,5,0"
                             Style="{StaticResource AccessibleButtonStyle}"
                             Command="{Binding ExitCommand}"
@@ -186,12 +186,12 @@
                                            FontWeight="Bold"
                                            Margin="0,0,0,10"/>
                                 <WrapPanel>
-                                    <TextBlock Text="F1: 設定" FontSize="{DynamicResource SmallFontSize}" Margin="0,0,20,5"/>
-                                    <TextBlock Text="F2: 帳票" FontSize="{DynamicResource SmallFontSize}" Margin="0,0,20,5"/>
+                                    <TextBlock Text="F1: 帳票" FontSize="{DynamicResource SmallFontSize}" Margin="0,0,20,5"/>
+                                    <TextBlock Text="F2: 職員管理" FontSize="{DynamicResource SmallFontSize}" Margin="0,0,20,5"/>
                                     <TextBlock Text="F3: カード管理" FontSize="{DynamicResource SmallFontSize}" Margin="0,0,20,5"/>
-                                    <TextBlock Text="F4: 職員管理" FontSize="{DynamicResource SmallFontSize}" Margin="0,0,20,5"/>
-                                    <TextBlock Text="F5: データ入出力" FontSize="{DynamicResource SmallFontSize}" Margin="0,0,20,5"/>
-                                    <TextBlock Text="F6: 操作ログ" FontSize="{DynamicResource SmallFontSize}" Margin="0,0,0,5"/>
+                                    <TextBlock Text="F4: データ入出力" FontSize="{DynamicResource SmallFontSize}" Margin="0,0,20,5"/>
+                                    <TextBlock Text="F5: 操作ログ" FontSize="{DynamicResource SmallFontSize}" Margin="0,0,20,5"/>
+                                    <TextBlock Text="F6: 設定" FontSize="{DynamicResource SmallFontSize}" Margin="0,0,0,5"/>
                                 </WrapPanel>
                             </StackPanel>
                         </Border>
