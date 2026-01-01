@@ -232,7 +232,7 @@ namespace ICCardManager.Services
                 if (month == 4)
                 {
                     var carryover = await _ledgerRepository.GetCarryoverBalanceAsync(cardIdm, year - 1);
-                    currentRow = WriteCarryoverRow(worksheet, currentRow, carryover ?? 0);
+                    currentRow = WriteCarryoverRow(worksheet, currentRow, carryover ?? 0, year);
                 }
 
                 // 各履歴行を出力
@@ -415,10 +415,11 @@ namespace ICCardManager.Services
         /// <summary>
         /// 前年度繰越行を出力
         /// </summary>
-        private int WriteCarryoverRow(IXLWorksheet worksheet, int row, int balance)
+        private int WriteCarryoverRow(IXLWorksheet worksheet, int row, int balance, int year)
         {
             // 列配置: A=出納年月日, B-C=摘要(結合), D=受入金額, E=払出金額, F=残額, G=氏名, H-K=備考(結合)
-            worksheet.Cell(row, 1).Value = "4/1"; // 出納年月日 (A列)
+            var carryoverDate = new DateTime(year, 4, 1);
+            worksheet.Cell(row, 1).Value = WarekiConverter.ToWareki(carryoverDate); // 出納年月日 (A列)
             worksheet.Cell(row, 2).Value = SummaryGenerator.GetCarryoverFromPreviousYearSummary(); // 摘要 (B-C列)
             worksheet.Cell(row, 4).Value = balance; // 受入金額 (D列)
             worksheet.Cell(row, 5).Value = "";      // 払出金額 (E列)
@@ -435,7 +436,7 @@ namespace ICCardManager.Services
         /// </summary>
         private int WriteDataRow(IXLWorksheet worksheet, int row, Ledger ledger)
         {
-            var dateStr = $"{ledger.Date.Month}/{ledger.Date.Day}";
+            var dateStr = WarekiConverter.ToWareki(ledger.Date);
 
             // 列配置: A=出納年月日, B-C=摘要(結合), D=受入金額, E=払出金額, F=残額, G=氏名, H-K=備考(結合)
             worksheet.Cell(row, 1).Value = dateStr;           // 出納年月日 (A列)

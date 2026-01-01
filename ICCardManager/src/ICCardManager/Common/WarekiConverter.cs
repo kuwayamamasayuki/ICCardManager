@@ -30,7 +30,7 @@ namespace ICCardManager.Common
         /// DateTime を和暦文字列に変換します
         /// </summary>
         /// <param name="date">変換する日付</param>
-        /// <returns>和暦文字列 (例: "R7.11.05")</returns>
+        /// <returns>和暦文字列 (例: "R7.11.5")</returns>
         public static string ToWareki(DateTime date)
         {
             try
@@ -42,12 +42,12 @@ namespace ICCardManager.Common
 
                 var eraAbbr = EraAbbreviations.TryGetValue(era, out var abbr) ? abbr : "?";
 
-                return $"{eraAbbr}{year}.{month:D2}.{day:D2}";
+                return $"{eraAbbr}{year}.{month}.{day}";
             }
             catch
             {
                 // 変換できない場合は西暦形式で返す
-                return date.ToString("yyyy.MM.dd");
+                return date.ToString("yyyy.M.d");
             }
         }
 

@@ -147,18 +147,19 @@ public class ReportServiceTests : IDisposable
         worksheet.Cell("G1").GetString().Should().Be("001");
 
         // データ行の検証（行3から開始、列はD=受入, E=払出, F=残額, G=氏名）
-        worksheet.Cell(3, 1).GetString().Should().Be("6/5");
+        // 日付は和暦形式（R6.6.5 等）
+        worksheet.Cell(3, 1).GetString().Should().Be("R6.6.5");
         worksheet.Cell(3, 2).GetString().Should().Be("鉄道（博多～天神）");
         worksheet.Cell(3, 5).GetValue<int>().Should().Be(300);   // 払出金額 (E列)
         worksheet.Cell(3, 6).GetValue<int>().Should().Be(4700);  // 残額 (F列)
         worksheet.Cell(3, 7).GetString().Should().Be("田中太郎"); // 氏名 (G列)
 
-        worksheet.Cell(4, 1).GetString().Should().Be("6/10");
+        worksheet.Cell(4, 1).GetString().Should().Be("R6.6.10");
         worksheet.Cell(4, 2).GetString().Should().Be("役務費によりチャージ");
         worksheet.Cell(4, 4).GetValue<int>().Should().Be(5000);  // 受入金額 (D列)
         worksheet.Cell(4, 6).GetValue<int>().Should().Be(9700);  // 残額 (F列)
 
-        worksheet.Cell(5, 1).GetString().Should().Be("6/15");
+        worksheet.Cell(5, 1).GetString().Should().Be("R6.6.15");
         worksheet.Cell(5, 2).GetString().Should().Be("鉄道（天神～博多）");
         worksheet.Cell(5, 5).GetValue<int>().Should().Be(300);   // 払出金額 (E列)
         worksheet.Cell(5, 6).GetValue<int>().Should().Be(9400);  // 残額 (F列)
@@ -208,14 +209,14 @@ public class ReportServiceTests : IDisposable
         using var workbook = new XLWorkbook(outputPath);
         var worksheet = workbook.Worksheets.First();
 
-        // 前年度繰越行の検証（行3）
-        worksheet.Cell(3, 1).GetString().Should().Be("4/1");
+        // 前年度繰越行の検証（行3）- 日付は和暦形式
+        worksheet.Cell(3, 1).GetString().Should().Be("R6.4.1");
         worksheet.Cell(3, 2).GetString().Should().Be("前年度より繰越");
         worksheet.Cell(3, 4).GetValue<int>().Should().Be(10000);  // 受入金額 (D列)
         worksheet.Cell(3, 6).GetValue<int>().Should().Be(10000);  // 残額 (F列)
 
-        // データ行は行4から
-        worksheet.Cell(4, 1).GetString().Should().Be("4/5");
+        // データ行は行4から - 日付は和暦形式
+        worksheet.Cell(4, 1).GetString().Should().Be("R6.4.5");
         worksheet.Cell(4, 2).GetString().Should().Be("鉄道（博多～天神）");
     }
 
@@ -921,14 +922,14 @@ public class ReportServiceTests : IDisposable
         using var workbook = new XLWorkbook(outputPath);
         var worksheet = workbook.Worksheets.First();
 
-        // 前年度繰越行（行3）- 列配置: A=日付, B=摘要, D=受入金額, F=残額
-        worksheet.Cell(3, 1).GetString().Should().Be("4/1");
+        // 前年度繰越行（行3）- 列配置: A=日付（和暦形式）, B=摘要, D=受入金額, F=残額
+        worksheet.Cell(3, 1).GetString().Should().Be("R6.4.1");
         worksheet.Cell(3, 2).GetString().Should().Be("前年度より繰越");
         worksheet.Cell(3, 4).GetValue<int>().Should().Be(marchEndBalance);  // D列=受入金額
         worksheet.Cell(3, 6).GetValue<int>().Should().Be(marchEndBalance);  // F列=残額
 
-        // 通常データ行（行4）
-        worksheet.Cell(4, 1).GetString().Should().Be("4/10");
+        // 通常データ行（行4）- 日付は和暦形式
+        worksheet.Cell(4, 1).GetString().Should().Be("R6.4.10");
         worksheet.Cell(4, 2).GetString().Should().Be("鉄道（博多～天神）");
     }
 

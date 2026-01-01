@@ -13,10 +13,10 @@ namespace ICCardManager.Tests.Common;
 public class WarekiConverterTests
 {
     [Theory]
-    [InlineData(2025, 11, 5, "R7.11.05")]
-    [InlineData(2025, 1, 5, "R7.01.05")]
+    [InlineData(2025, 11, 5, "R7.11.5")]
+    [InlineData(2025, 1, 5, "R7.1.5")]
     [InlineData(2025, 12, 31, "R7.12.31")]
-    [InlineData(2019, 5, 1, "R1.05.01")]  // 令和元年
+    [InlineData(2019, 5, 1, "R1.5.1")]  // 令和元年
     public void ToWareki_ReiwaDate_ReturnsCorrectFormat(int year, int month, int day, string expected)
     {
         // Arrange
@@ -39,7 +39,7 @@ public class WarekiConverterTests
         var result = WarekiConverter.ToWareki(date);
 
         // Assert
-        result.Should().Be("H31.04.30");
+        result.Should().Be("H31.4.30");
     }
 
     [Theory]
