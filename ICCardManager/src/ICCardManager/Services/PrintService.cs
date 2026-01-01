@@ -136,9 +136,10 @@ namespace ICCardManager.Services
             if (month == 4)
             {
                 var carryover = await _ledgerRepository.GetCarryoverBalanceAsync(cardIdm, year - 1);
+                var carryoverDate = new DateTime(year, 4, 1);
                 rows.Add(new ReportPrintRow
                 {
-                    DateDisplay = "4/1",
+                    DateDisplay = WarekiConverter.ToWareki(carryoverDate),
                     Summary = SummaryGenerator.GetCarryoverFromPreviousYearSummary(),
                     Income = carryover ?? 0,
                     Balance = carryover ?? 0,
@@ -151,7 +152,7 @@ namespace ICCardManager.Services
             {
                 rows.Add(new ReportPrintRow
                 {
-                    DateDisplay = $"{ledger.Date.Month}/{ledger.Date.Day}",
+                    DateDisplay = WarekiConverter.ToWareki(ledger.Date),
                     Summary = ledger.Summary,
                     Income = ledger.Income > 0 ? ledger.Income : null,
                     Expense = ledger.Expense > 0 ? ledger.Expense : null,
