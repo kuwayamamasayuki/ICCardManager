@@ -244,7 +244,7 @@ public class DtoMapperTests
         dto.Id.Should().Be(1);
         dto.CardIdm.Should().Be("07FE112233445566");
         dto.Date.Should().Be(new DateTime(2025, 1, 15));
-        dto.DateDisplay.Should().Contain("R7"); // 和暦変換される（短縮形式: R7.01.15）
+        dto.DateDisplay.Should().Contain("R7"); // 和暦変換される（短縮形式: R7.1.15）
         dto.Summary.Should().Be("鉄道（博多駅～天神駅）");
         dto.Income.Should().Be(0);
         dto.Expense.Should().Be(210);
