@@ -6,8 +6,8 @@
 
 ## 技術スタック
 
-- **言語**: C# 12
-- **フレームワーク**: .NET 8 + WPF
+- **言語**: C# 10
+- **フレームワーク**: .NET Framework 4.8 + WPF
 - **アーキテクチャ**: MVVM
 - **DB**: SQLite3
 - **ICカードリーダー**: PaSoRi（PC/SC API経由）
@@ -128,8 +128,8 @@ dotnet run --project src/ICCardManager
 # テスト実行
 dotnet test
 
-# 自己完結型ビルド（配布用）
-dotnet publish -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true
+# リリースビルド（配布用）
+dotnet publish -c Release
 
 # DB初期化（開発時）
 # DbContext.InitializeDatabase() を呼び出す
