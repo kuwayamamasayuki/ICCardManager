@@ -51,7 +51,7 @@
 
 | 項目 | 要件 |
 |------|------|
-| .NET Runtime | **不要**（自己完結型ビルド） |
+| .NET Framework | 4.8（通常Windows 10/11にプリインストール済み） |
 | PaSoRiドライバ | [ソニー公式サイト](https://www.sony.co.jp/Products/felica/consumer/support/download/)よりダウンロード |
 | Excel | 出力ファイルの閲覧に必要 |
 
@@ -141,8 +141,8 @@
 
 | カテゴリ | 技術 | バージョン |
 |----------|------|------------|
-| 言語 | C# | 12 |
-| フレームワーク | .NET | 8.0 |
+| 言語 | C# | 10 |
+| フレームワーク | .NET Framework | 4.8 |
 | UI | WPF | - |
 | アーキテクチャ | MVVM | - |
 | データベース | SQLite | 3.x |
@@ -174,10 +174,9 @@ ICCardManager/
 dotnet build
 
 # リリースビルド（配布用）
-dotnet publish src/ICCardManager/ICCardManager.csproj \
-  -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true
+dotnet publish src/ICCardManager/ICCardManager.csproj -c Release
 
-# 出力先: bin/Release/net8.0-windows/win-x64/publish/
+# 出力先: src/ICCardManager/bin/Release/net48/publish/
 ```
 
 ### インストーラーのビルド

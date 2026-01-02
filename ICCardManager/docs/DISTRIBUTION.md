@@ -8,7 +8,7 @@
 
 ### 開発マシン
 - Windows 10/11 (64-bit)
-- .NET 8 SDK
+- .NET SDK（.NET Framework 4.8対応版）または Visual Studio 2022
 - Visual Studio 2022 または VS Code（任意）
 
 ### ビルドコマンド
@@ -18,7 +18,7 @@
 cd src/ICCardManager
 
 # リリースビルド（配布用）
-dotnet publish -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true
+dotnet publish -c Release
 ```
 
 ### ビルドオプションの説明
@@ -26,29 +26,16 @@ dotnet publish -c Release -r win-x64 --self-contained true -p:PublishSingleFile=
 | オプション | 説明 |
 |-----------|------|
 | `-c Release` | リリース構成でビルド（最適化有効） |
-| `-r win-x64` | Windows 64-bit向けにビルド |
-| `--self-contained true` | .NET ランタイムを同梱（実行環境に.NET不要） |
-| `-p:PublishSingleFile=true` | 単一の実行ファイルにパッケージング |
-
-### 追加の設定（csproj）
-
-以下の設定は `ICCardManager.csproj` に既に構成済みです：
-
-```xml
-<PublishSingleFile>true</PublishSingleFile>
-<SelfContained>true</SelfContained>
-<IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
-<EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
-```
 
 ## 出力ファイル構成
 
-ビルド成功後、以下のファイルが `bin/Release/net8.0-windows/win-x64/publish/` に生成されます：
+ビルド成功後、以下のファイルが `bin/Release/net48/publish/` に生成されます：
 
 ```
 publish/
-├── ICCardManager.exe          # メイン実行ファイル（約70-75MB）
+├── ICCardManager.exe          # メイン実行ファイル
 ├── ICCardManager.pdb          # デバッグシンボル（配布時は任意）
+├── *.dll                      # 依存ライブラリ
 └── Resources/
     ├── Sounds/
     │   ├── error.wav          # エラー音
@@ -63,11 +50,12 @@ publish/
 
 | ファイル | サイズ目安 |
 |----------|-----------|
-| ICCardManager.exe | 約 70-75 MB |
+| ICCardManager.exe | 約 1 MB |
+| 依存DLL合計 | 約 15-20 MB |
 | Resources/ 合計 | 約 100 KB |
 
-> **注記**: 実行ファイルが大きいのは、.NET ランタイム全体を同梱しているためです。
-> これにより、配布先のPCに.NETがインストールされていなくても動作します。
+> **注記**: .NET Framework 4.8はWindows 10/11にプリインストールされているため、
+> 配布先のPCに追加のランタイムインストールは通常不要です。
 
 ## 配布パッケージの作成
 
@@ -75,12 +63,12 @@ publish/
 
 1. **ビルドの実行**
    ```bash
-   dotnet publish -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true
+   dotnet publish -c Release
    ```
 
 2. **出力ディレクトリの確認**
    ```
-   bin/Release/net8.0-windows/win-x64/publish/
+   bin/Release/net48/publish/
    ```
 
 3. **配布用ZIPの作成**
@@ -109,7 +97,7 @@ publish/
 
 - **OS**: Windows 10/11 (64-bit)
 - **ICカードリーダー**: Sony PaSoRi（RC-S380等）
-- **.NET**: 不要（実行ファイルに同梱）
+- **.NET Framework**: 4.8（Windows 10/11にプリインストール済み）
 
 ### インストール手順
 
