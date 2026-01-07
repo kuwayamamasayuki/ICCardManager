@@ -101,4 +101,33 @@ namespace ICCardManager.Common
             return 100.0;
         }
     }
+
+    /// <summary>
+    /// ファイルサイズを人間が読みやすい形式に変換するコンバーター
+    /// 例: 1024 → "1 KB", 1048576 → "1 MB"
+    /// </summary>
+    public class FileSizeConverter : IValueConverter
+    {
+        public object Convert(object value, Type targetType, object parameter, CultureInfo culture)
+        {
+            if (value is long bytes)
+            {
+                string[] sizes = { "B", "KB", "MB", "GB" };
+                int order = 0;
+                double size = bytes;
+                while (size >= 1024 && order < sizes.Length - 1)
+                {
+                    order++;
+                    size /= 1024;
+                }
+                return $"{size:0.##} {sizes[order]}";
+            }
+            return value?.ToString() ?? string.Empty;
+        }
+
+        public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture)
+        {
+            throw new NotImplementedException();
+        }
+    }
 }
