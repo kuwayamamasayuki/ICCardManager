@@ -1501,6 +1501,17 @@ public partial class MainViewModel : ViewModelBase
     }
 
     /// <summary>
+    /// システム管理画面を開く
+    /// </summary>
+    [RelayCommand]
+    public void OpenSystemManage()
+    {
+        var dialog = App.Current.ServiceProvider.GetRequiredService<Views.Dialogs.SystemManageDialog>();
+        dialog.Owner = System.Windows.Application.Current.MainWindow;
+        dialog.ShowDialog();
+    }
+
+    /// <summary>
     /// ダッシュボードから履歴を表示
     /// </summary>
     [RelayCommand]
