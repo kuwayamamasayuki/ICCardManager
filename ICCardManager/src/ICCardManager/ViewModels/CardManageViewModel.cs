@@ -19,6 +19,7 @@ namespace ICCardManager.ViewModels
     public partial class CardManageViewModel : ViewModelBase
     {
         private readonly ICardRepository _cardRepository;
+        private readonly ILedgerRepository _ledgerRepository;
         private readonly ICardReader _cardReader;
         private readonly CardTypeDetector _cardTypeDetector;
         private readonly IValidationService _validationService;
@@ -73,11 +74,13 @@ namespace ICCardManager.ViewModels
 
         public CardManageViewModel(
             ICardRepository cardRepository,
+            ILedgerRepository ledgerRepository,
             ICardReader cardReader,
             CardTypeDetector cardTypeDetector,
             IValidationService validationService)
         {
             _cardRepository = cardRepository;
+            _ledgerRepository = ledgerRepository;
             _cardReader = cardReader;
             _cardTypeDetector = cardTypeDetector;
             _validationService = validationService;
@@ -231,6 +234,9 @@ namespace ICCardManager.ViewModels
                     var success = await _cardRepository.InsertAsync(card);
                     if (success)
                     {
+                        // カード残額を読み取り、「新規購入」レコードを作成
+                        await CreateNewPurchaseLedgerAsync(EditCardIdm);
+
                         StatusMessage = "登録しました";
                         await LoadCardsAsync();
                         CancelEdit();
@@ -374,6 +380,50 @@ namespace ICCardManager.ViewModels
                 // 未使用のIDmを生成
                 var newIdm = $"07FE{Guid.NewGuid().ToString("N").Substring(0, 12).ToUpper()}";
                 mockReader.SimulateCardRead(newIdm);
+            }
+        }
+
+        /// <summary>
+        /// 新規購入レコードを作成
+        /// </summary>
+        /// <param name="cardIdm">カードのIDm</param>
+        private async Task CreateNewPurchaseLedgerAsync(string cardIdm)
+        {
+            try
+            {
+                // カード残額を読み取る
+                var balance = await _cardReader.ReadBalanceAsync(cardIdm);
+
+                // 残額が取得できた場合のみレコードを作成
+                if (balance.HasValue)
+                {
+                    var now = DateTime.Now;
+                    var ledger = new Ledger
+                    {
+                        CardIdm = cardIdm,
+                        LenderIdm = null,  // 新規購入時は貸出者なし
+                        Date = now.Date,
+                        Summary = "新規購入",
+                        Income = balance.Value,  // 受入金額 = カード残額
+                        Expense = 0,
+                        Balance = balance.Value,
+                        StaffName = null,  // 利用者なし
+                        Note = null,
+                        ReturnerIdm = null,
+                        LentAt = null,
+                        ReturnedAt = null,
+                        IsLentRecord = false
+                    };
+
+                    await _ledgerRepository.InsertAsync(ledger);
+                }
+                // 残額が取得できなかった場合は、新規購入レコードは作成しない
+                // （カードがタッチされていない、または読み取りエラー）
+            }
+            catch (Exception)
+            {
+                // 残額読み取りエラーの場合は、カード登録自体は成功させる
+                // 新規購入レコードは後から手動で追加可能
             }
         }
 
