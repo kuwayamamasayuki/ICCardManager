@@ -4,6 +4,7 @@
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:vm="clr-namespace:ICCardManager.ViewModels"
+        xmlns:common="clr-namespace:ICCardManager.Common"
         mc:Ignorable="d"
         d:DataContext="{d:DesignInstance Type=vm:SystemManageViewModel}"
         Title="システム管理"
@@ -17,7 +18,7 @@
 
     <Window.Resources>
         <BooleanToVisibilityConverter x:Key="BoolToVisibilityConverter"/>
-        <vm:FileSizeConverter x:Key="FileSizeConverter"/>
+        <common:FileSizeConverter x:Key="FileSizeConverter"/>
 
         <!-- エラー用の背景色 -->
         <SolidColorBrush x:Key="ErrorBackgroundBrush" Color="#FFEBEE"/>

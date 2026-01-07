@@ -1,11 +1,11 @@
 using System;
 using System.Collections.ObjectModel;
-using System.Globalization;
 using System.IO;
 using System.Windows;
-using System.Windows.Data;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using ICCardManager.Common;
+using ICCardManager.Data.Repositories;
 using ICCardManager.Services;
 using Microsoft.Win32;
 using System.Threading.Tasks;
@@ -13,39 +13,12 @@ using System.Threading.Tasks;
 namespace ICCardManager.ViewModels;
 
 /// <summary>
-/// ファイルサイズを人間が読みやすい形式に変換するコンバーター
-/// </summary>
-public class FileSizeConverter : IValueConverter
-{
-    public object Convert(object value, Type targetType, object parameter, CultureInfo culture)
-    {
-        if (value is long bytes)
-        {
-            string[] sizes = { "B", "KB", "MB", "GB" };
-            int order = 0;
-            double size = bytes;
-            while (size >= 1024 && order < sizes.Length - 1)
-            {
-                order++;
-                size /= 1024;
-            }
-            return $"{size:0.##} {sizes[order]}";
-        }
-        return value?.ToString() ?? string.Empty;
-    }
-
-    public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture)
-    {
-        throw new NotImplementedException();
-    }
-}
-
-/// <summary>
 /// システム管理ViewModel（バックアップ/リストア）
 /// </summary>
 public partial class SystemManageViewModel : ViewModelBase
 {
     private readonly BackupService _backupService;
+    private readonly ISettingsRepository _settingsRepository;
 
     [ObservableProperty]
     private ObservableCollection<BackupFileInfo> _backupFiles = new();
@@ -67,9 +40,10 @@ public partial class SystemManageViewModel : ViewModelBase
     /// </summary>
     public bool HasSelectedBackup => SelectedBackup != null;
 
-    public SystemManageViewModel(BackupService backupService)
+    public SystemManageViewModel(BackupService backupService, ISettingsRepository settingsRepository)
     {
         _backupService = backupService;
+        _settingsRepository = settingsRepository;
     }
 
     partial void OnSelectedBackupChanged(BackupFileInfo? value)
@@ -187,12 +161,26 @@ public partial class SystemManageViewModel : ViewModelBase
         {
             try
             {
-                // リストア前に現在のDBをバックアップ
-                var preRestoreBackupPath = Path.Combine(
-                    Path.GetDirectoryName(SelectedBackup.FilePath) ?? "",
-                    $"backup_pre_restore_{DateTime.Now:yyyyMMdd_HHmmss}.db");
+                // リストア前バックアップの保存先を設定から取得
+                var preRestoreBackupPath = await GetPreRestoreBackupPathAsync();
 
-                _backupService.CreateBackup(preRestoreBackupPath);
+                // リストア前に現在のDBをバックアップ
+                var backupSuccess = _backupService.CreateBackup(preRestoreBackupPath);
+                if (!backupSuccess)
+                {
+                    // バックアップ失敗時はユーザーに確認
+                    var continueResult = MessageBox.Show(
+                        "現在のデータのバックアップに失敗しました。\n" +
+                        "バックアップなしでリストアを続行しますか？",
+                        "警告",
+                        MessageBoxButton.YesNo,
+                        MessageBoxImage.Warning);
+                    if (continueResult != MessageBoxResult.Yes)
+                    {
+                        SetStatus("リストアをキャンセルしました", false);
+                        return;
+                    }
+                }
 
                 // リストア実行
                 var success = _backupService.RestoreFromBackup(SelectedBackup.FilePath);
@@ -284,13 +272,26 @@ public partial class SystemManageViewModel : ViewModelBase
         {
             try
             {
-                // リストア前に現在のDBをバックアップ
-                var folder = Path.GetDirectoryName(dialog.FileName) ?? "";
-                var preRestoreBackupPath = Path.Combine(
-                    folder,
-                    $"backup_pre_restore_{DateTime.Now:yyyyMMdd_HHmmss}.db");
+                // リストア前バックアップの保存先を設定から取得
+                var preRestoreBackupPath = await GetPreRestoreBackupPathAsync();
 
-                _backupService.CreateBackup(preRestoreBackupPath);
+                // リストア前に現在のDBをバックアップ
+                var backupSuccess = _backupService.CreateBackup(preRestoreBackupPath);
+                if (!backupSuccess)
+                {
+                    // バックアップ失敗時はユーザーに確認
+                    var continueResult = MessageBox.Show(
+                        "現在のデータのバックアップに失敗しました。\n" +
+                        "バックアップなしでリストアを続行しますか？",
+                        "警告",
+                        MessageBoxButton.YesNo,
+                        MessageBoxImage.Warning);
+                    if (continueResult != MessageBoxResult.Yes)
+                    {
+                        SetStatus("リストアをキャンセルしました", false);
+                        return;
+                    }
+                }
 
                 // リストア実行
                 var success = _backupService.RestoreFromBackup(dialog.FileName);
@@ -319,6 +320,28 @@ public partial class SystemManageViewModel : ViewModelBase
                 SetStatus($"リストアに失敗しました: {ex.Message}", true);
             }
         }
+    }
+
+    /// <summary>
+    /// リストア前バックアップの保存パスを取得
+    /// 設定で指定されたバックアップフォルダを使用し、未設定の場合はデフォルトパスを使用
+    /// </summary>
+    private async Task<string> GetPreRestoreBackupPathAsync()
+    {
+        var settings = await _settingsRepository.GetAppSettingsAsync();
+        var backupFolder = !string.IsNullOrEmpty(settings.BackupPath)
+            ? settings.BackupPath
+            : PathValidator.GetDefaultBackupPath();
+
+        // バックアップフォルダが存在しない場合は作成
+        if (!Directory.Exists(backupFolder))
+        {
+            Directory.CreateDirectory(backupFolder);
+        }
+
+        return Path.Combine(
+            backupFolder,
+            $"backup_pre_restore_{DateTime.Now:yyyyMMdd_HHmmss}.db");
     }
 
     /// <summary>
