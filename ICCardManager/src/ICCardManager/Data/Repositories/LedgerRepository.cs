@@ -127,7 +127,7 @@ SELECT last_insert_rowid();";
 
             command.Parameters.AddWithValue("@cardIdm", ledger.CardIdm);
             command.Parameters.AddWithValue("@lenderIdm", (object)ledger.LenderIdm ?? DBNull.Value);
-            command.Parameters.AddWithValue("@date", ledger.Date.ToString("yyyy-MM-dd"));
+            command.Parameters.AddWithValue("@date", ledger.Date.ToString("yyyy-MM-dd HH:mm:ss"));
             command.Parameters.AddWithValue("@summary", ledger.Summary);
             command.Parameters.AddWithValue("@income", ledger.Income);
             command.Parameters.AddWithValue("@expense", ledger.Expense);
@@ -158,7 +158,7 @@ WHERE id = @id";
 
             command.Parameters.AddWithValue("@id", ledger.Id);
             command.Parameters.AddWithValue("@lenderIdm", (object)ledger.LenderIdm ?? DBNull.Value);
-            command.Parameters.AddWithValue("@date", ledger.Date.ToString("yyyy-MM-dd"));
+            command.Parameters.AddWithValue("@date", ledger.Date.ToString("yyyy-MM-dd HH:mm:ss"));
             command.Parameters.AddWithValue("@summary", ledger.Summary);
             command.Parameters.AddWithValue("@income", ledger.Income);
             command.Parameters.AddWithValue("@expense", ledger.Expense);

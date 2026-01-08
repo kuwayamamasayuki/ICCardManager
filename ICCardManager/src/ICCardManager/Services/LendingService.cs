@@ -213,7 +213,7 @@ namespace ICCardManager.Services
                     {
                         CardIdm = cardIdm,
                         LenderIdm = staffIdm,
-                        Date = now.Date,
+                        Date = now,
                         Summary = SummaryGenerator.GetLendingSummary(),
                         Income = 0,
                         Expense = 0,
@@ -444,7 +444,7 @@ namespace ICCardManager.Services
                     var chargeLedger = new Ledger
                     {
                         CardIdm = cardIdm,
-                        Date = date,
+                        Date = charge.UseDate ?? date,  // 利用日時があれば時刻を含めて使用
                         Summary = SummaryGenerator.GetChargeSummary(),
                         Income = income,
                         Expense = 0,
@@ -473,7 +473,7 @@ namespace ICCardManager.Services
                     var usageLedger = new Ledger
                     {
                         CardIdm = cardIdm,
-                        Date = date,
+                        Date = usageDetails.FirstOrDefault()?.UseDate ?? date,  // 利用日時があれば時刻を含めて使用
                         Summary = summary,
                         Income = 0,
                         Expense = expense,

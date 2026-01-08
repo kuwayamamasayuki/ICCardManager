@@ -402,7 +402,7 @@ namespace ICCardManager.ViewModels
                     {
                         CardIdm = cardIdm,
                         LenderIdm = null,  // 新規購入時は貸出者なし
-                        Date = now.Date,
+                        Date = now,
                         Summary = "新規購入",
                         Income = balance.Value,  // 受入金額 = カード残額
                         Expense = 0,

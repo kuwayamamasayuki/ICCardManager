@@ -38,7 +38,7 @@ CREATE TABLE IF NOT EXISTS ledger (
     id             INTEGER PRIMARY KEY AUTOINCREMENT,
     card_idm       TEXT    NOT NULL REFERENCES ic_card(card_idm),
     lender_idm     TEXT    REFERENCES staff(staff_idm),
-    date           TEXT    NOT NULL,       -- 出納年月日（YYYY-MM-DD）
+    date           TEXT    NOT NULL,       -- 出納年月日時（YYYY-MM-DD HH:MM:SS）
     summary        TEXT    NOT NULL,       -- 摘要
     income         INTEGER DEFAULT 0,      -- 受入金額（チャージ額）
     expense        INTEGER DEFAULT 0,      -- 払出金額（利用額）
