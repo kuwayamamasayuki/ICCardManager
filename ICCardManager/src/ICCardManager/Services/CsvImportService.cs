@@ -745,8 +745,9 @@ namespace ICCardManager.Services
         /// </summary>
         /// <param name="filePath">CSVファイルパス</param>
         /// <remarks>
-        /// CSVフォーマット: 日付,カードIDm,摘要,受入金額,払出金額,残額,利用者,備考
+        /// CSVフォーマット: 日時,カードIDm,管理番号,摘要,受入金額,払出金額,残額,利用者,備考
         /// 注意: LedgerDetailはインポートされません（エクスポート時に含まれないため）
+        /// 注意: 管理番号は参照用で、実際のデータ識別はカードIDmで行います
         /// </remarks>
         public async Task<CsvImportResult> ImportLedgersAsync(string filePath)
         {
@@ -789,13 +790,13 @@ namespace ICCardManager.Services
 
                     var fields = ParseCsvLine(line);
 
-                    // 最低8列（日付,カードIDm,摘要,受入金額,払出金額,残額,利用者,備考）が必要
-                    if (fields.Count < 8)
+                    // 最低9列（日時,カードIDm,管理番号,摘要,受入金額,払出金額,残額,利用者,備考）が必要
+                    if (fields.Count < 9)
                     {
                         errors.Add(new CsvImportError
                         {
                             LineNumber = lineNumber,
-                            Message = "列数が不足しています（8列必要）",
+                            Message = "列数が不足しています（9列必要）",
                             Data = line
                         });
                         continue;
@@ -803,20 +804,21 @@ namespace ICCardManager.Services
 
                     var dateStr = fields[0].Trim();
                     var cardIdm = fields[1].Trim();
-                    var summary = fields[2].Trim();
-                    var incomeStr = fields[3].Trim();
-                    var expenseStr = fields[4].Trim();
-                    var balanceStr = fields[5].Trim();
-                    var staffName = fields[6].Trim();
-                    var note = fields[7].Trim();
+                    // fields[2] は管理番号（参照用、インポート時は使用しない）
+                    var summary = fields[3].Trim();
+                    var incomeStr = fields[4].Trim();
+                    var expenseStr = fields[5].Trim();
+                    var balanceStr = fields[6].Trim();
+                    var staffName = fields[7].Trim();
+                    var note = fields[8].Trim();
 
-                    // バリデーション: 日付
+                    // バリデーション: 日時
                     if (!DateTime.TryParse(dateStr, out var date))
                     {
                         errors.Add(new CsvImportError
                         {
                             LineNumber = lineNumber,
-                            Message = "日付の形式が不正です",
+                            Message = "日時の形式が不正です",
                             Data = dateStr
                         });
                         continue;
@@ -1057,12 +1059,12 @@ namespace ICCardManager.Services
 
                     var fields = ParseCsvLine(line);
 
-                    if (fields.Count < 8)
+                    if (fields.Count < 9)
                     {
                         errors.Add(new CsvImportError
                         {
                             LineNumber = lineNumber,
-                            Message = "列数が不足しています（8列必要）",
+                            Message = "列数が不足しています（9列必要）",
                             Data = line
                         });
                         continue;
@@ -1070,16 +1072,17 @@ namespace ICCardManager.Services
 
                     var dateStr = fields[0].Trim();
                     var cardIdm = fields[1].Trim();
-                    var summary = fields[2].Trim();
-                    var balanceStr = fields[5].Trim();
+                    // fields[2] は管理番号（参照用）
+                    var summary = fields[3].Trim();
+                    var balanceStr = fields[6].Trim();
 
-                    // バリデーション: 日付
+                    // バリデーション: 日時
                     if (!DateTime.TryParse(dateStr, out var date))
                     {
                         errors.Add(new CsvImportError
                         {
                             LineNumber = lineNumber,
-                            Message = "日付の形式が不正です",
+                            Message = "日時の形式が不正です",
                             Data = dateStr
                         });
                         continue;
@@ -1139,7 +1142,7 @@ namespace ICCardManager.Services
                         LineNumber = lineNumber,
                         Idm = cardIdm,
                         Name = summary,
-                        AdditionalInfo = date.ToString("yyyy-MM-dd"),
+                        AdditionalInfo = date.ToString("yyyy-MM-dd HH:mm:ss"),
                         Action = ImportAction.Insert
                     });
                 }

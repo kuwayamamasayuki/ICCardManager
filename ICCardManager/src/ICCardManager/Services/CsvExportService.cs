@@ -161,17 +161,25 @@ namespace ICCardManager.Services
                 // cardIdmがnullの場合は全カードの履歴を取得
                 var ledgers = await _ledgerRepository.GetByDateRangeAsync(cardIdm, startDate, endDate);
 
+                // カードIDmから管理番号へのマッピングを作成
+                var allCards = await _cardRepository.GetAllIncludingDeletedAsync();
+                var cardNumberMap = allCards.ToDictionary(c => c.CardIdm, c => c.CardNumber ?? "");
+
                 var lines = new List<string>
                 {
-                    // ヘッダー行
-                    "日付,カードIDm,摘要,受入金額,払出金額,残額,利用者,備考"
+                    // ヘッダー行（Issue #265: 管理番号列追加、Issue #266: 日付→日時）
+                    "日時,カードIDm,管理番号,摘要,受入金額,払出金額,残額,利用者,備考"
                 };
 
                 foreach (var ledger in ledgers.OrderBy(l => l.Date).ThenBy(l => l.Id))
                 {
+                    // 管理番号を取得（見つからない場合は空文字）
+                    var cardNumber = cardNumberMap.TryGetValue(ledger.CardIdm, out var num) ? num : "";
+
                     lines.Add(string.Join(",",
-                        ledger.Date.ToString("yyyy-MM-dd"),
+                        ledger.Date.ToString("yyyy-MM-dd HH:mm:ss"),
                         EscapeCsvField(ledger.CardIdm),
+                        EscapeCsvField(cardNumber),
                         EscapeCsvField(ledger.Summary),
                         ledger.Income > 0 ? ledger.Income.ToString() : "",
                         ledger.Expense > 0 ? ledger.Expense.ToString() : "",
