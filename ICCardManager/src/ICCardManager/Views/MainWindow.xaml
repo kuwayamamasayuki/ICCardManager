@@ -28,9 +28,8 @@
         <KeyBinding Key="F2" Command="{Binding OpenStaffManageCommand}"/>
         <KeyBinding Key="F3" Command="{Binding OpenCardManageCommand}"/>
         <KeyBinding Key="F4" Command="{Binding OpenDataExportImportCommand}"/>
-        <KeyBinding Key="F5" Command="{Binding OpenOperationLogCommand}"/>
-        <KeyBinding Key="F6" Command="{Binding OpenSettingsCommand}"/>
-        <KeyBinding Key="F7" Command="{Binding OpenSystemManageCommand}"/>
+        <KeyBinding Key="F5" Command="{Binding OpenSettingsCommand}"/>
+        <KeyBinding Key="F6" Command="{Binding OpenSystemManageCommand}"/>
     </Window.InputBindings>
 
     <Grid>
@@ -83,31 +82,24 @@
                             AutomationProperties.Name="データエクスポート/インポートダイアログを開く"
                             AutomationProperties.HelpText="カード・職員・履歴のCSVエクスポート/インポートを行います。ショートカット: F4"
                             ToolTip="データ入出力を開く (F4)"/>
-                    <Button Content="操作ログ (F5)" Margin="5,0"
-                            Style="{StaticResource AccessibleButtonStyle}"
-                            Command="{Binding OpenOperationLogCommand}"
-                            TabIndex="5"
-                            AutomationProperties.Name="操作ログダイアログを開く"
-                            AutomationProperties.HelpText="システムの操作履歴を検索・表示します。ショートカット: F5"
-                            ToolTip="操作ログを開く (F5)"/>
-                    <Button Content="設定 (F6)" Margin="5,0"
+                    <Button Content="設定 (F5)" Margin="5,0"
                             Style="{StaticResource AccessibleButtonStyle}"
                             Command="{Binding OpenSettingsCommand}"
-                            TabIndex="6"
+                            TabIndex="5"
                             AutomationProperties.Name="設定ダイアログを開く"
-                            AutomationProperties.HelpText="アプリケーションの設定を変更します。ショートカット: F6"
-                            ToolTip="設定を開く (F6)"/>
-                    <Button Content="システム管理 (F7)" Margin="5,0"
+                            AutomationProperties.HelpText="アプリケーションの設定を変更します。ショートカット: F5"
+                            ToolTip="設定を開く (F5)"/>
+                    <Button Content="システム管理 (F6)" Margin="5,0"
                             Style="{StaticResource AccessibleButtonStyle}"
                             Command="{Binding OpenSystemManageCommand}"
-                            TabIndex="7"
+                            TabIndex="6"
                             AutomationProperties.Name="システム管理ダイアログを開く"
-                            AutomationProperties.HelpText="データベースのバックアップ・リストアを行います。ショートカット: F7"
-                            ToolTip="システム管理を開く (F7)"/>
+                            AutomationProperties.HelpText="データベースのバックアップ・リストア・操作ログを管理します。ショートカット: F6"
+                            ToolTip="システム管理を開く (F6)"/>
                     <Button Content="終了" Margin="15,0,5,0"
                             Style="{StaticResource AccessibleButtonStyle}"
                             Command="{Binding ExitCommand}"
-                            TabIndex="8"
+                            TabIndex="7"
                             AutomationProperties.Name="アプリケーションを終了"
                             AutomationProperties.HelpText="アプリケーションを終了します。"
                             ToolTip="アプリケーションを終了"/>
@@ -198,8 +190,8 @@
                                     <TextBlock Text="F2: 職員管理" FontSize="{DynamicResource SmallFontSize}" Margin="0,0,20,5"/>
                                     <TextBlock Text="F3: カード管理" FontSize="{DynamicResource SmallFontSize}" Margin="0,0,20,5"/>
                                     <TextBlock Text="F4: データ入出力" FontSize="{DynamicResource SmallFontSize}" Margin="0,0,20,5"/>
-                                    <TextBlock Text="F5: 操作ログ" FontSize="{DynamicResource SmallFontSize}" Margin="0,0,20,5"/>
-                                    <TextBlock Text="F6: 設定" FontSize="{DynamicResource SmallFontSize}" Margin="0,0,0,5"/>
+                                    <TextBlock Text="F5: 設定" FontSize="{DynamicResource SmallFontSize}" Margin="0,0,20,5"/>
+                                    <TextBlock Text="F6: システム管理" FontSize="{DynamicResource SmallFontSize}" Margin="0,0,0,5"/>
                                 </WrapPanel>
                             </StackPanel>
                         </Border>

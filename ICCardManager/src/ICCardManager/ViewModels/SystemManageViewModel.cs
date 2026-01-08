@@ -7,13 +7,14 @@ using CommunityToolkit.Mvvm.Input;
 using ICCardManager.Common;
 using ICCardManager.Data.Repositories;
 using ICCardManager.Services;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Win32;
 using System.Threading.Tasks;
 
 namespace ICCardManager.ViewModels;
 
 /// <summary>
-/// システム管理ViewModel（バックアップ/リストア）
+/// システム管理ViewModel（バックアップ/リストア/操作ログ）
 /// </summary>
 public partial class SystemManageViewModel : ViewModelBase
 {
@@ -351,5 +352,16 @@ public partial class SystemManageViewModel : ViewModelBase
     {
         StatusMessage = message;
         IsStatusError = isError;
+    }
+
+    /// <summary>
+    /// 操作ログダイアログを開く
+    /// </summary>
+    [RelayCommand]
+    public void OpenOperationLog()
+    {
+        var dialog = App.Current.ServiceProvider.GetRequiredService<Views.Dialogs.OperationLogDialog>();
+        dialog.Owner = Application.Current.MainWindow;
+        dialog.ShowDialog();
     }
 }

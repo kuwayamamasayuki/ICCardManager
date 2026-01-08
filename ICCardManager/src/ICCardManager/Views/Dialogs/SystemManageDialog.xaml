@@ -8,13 +8,13 @@
         mc:Ignorable="d"
         d:DataContext="{d:DesignInstance Type=vm:SystemManageViewModel}"
         Title="システム管理"
-        Height="550"
+        Height="620"
         Width="650"
         WindowStartupLocation="CenterOwner"
         ResizeMode="NoResize"
         Loaded="Window_Loaded"
         AutomationProperties.Name="システム管理ダイアログ"
-        AutomationProperties.HelpText="データベースのバックアップとリストアを行います。Escapeキーで閉じます。">
+        AutomationProperties.HelpText="操作ログの確認、データベースのバックアップとリストアを行います。Escapeキーで閉じます。">
 
     <Window.Resources>
         <BooleanToVisibilityConverter x:Key="BoolToVisibilityConverter"/>
@@ -30,13 +30,33 @@
     <Grid Margin="20">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
 
+        <!-- 操作ログ -->
+        <GroupBox Grid.Row="0" Header="操作ログ" Margin="0,0,0,15" Padding="15">
+            <StackPanel>
+                <TextBlock Text="システムの操作履歴を確認できます。"
+                           Foreground="Gray"
+                           FontSize="{DynamicResource SmallFontSize}"
+                           Margin="0,0,0,10"/>
+
+                <Button Content="操作ログを表示"
+                        Command="{Binding OpenOperationLogCommand}"
+                        Padding="15,10"
+                        Background="#2196F3"
+                        Foreground="White"
+                        HorizontalAlignment="Left"
+                        AutomationProperties.Name="操作ログを表示"
+                        ToolTip="操作履歴の検索・確認を行います"/>
+            </StackPanel>
+        </GroupBox>
+
         <!-- 手動バックアップ -->
-        <GroupBox Grid.Row="0" Header="手動バックアップ" Margin="0,0,0,15" Padding="15">
+        <GroupBox Grid.Row="1" Header="手動バックアップ" Margin="0,0,0,15" Padding="15">
             <StackPanel>
                 <TextBlock Text="任意のタイミングでデータベースのバックアップを作成できます。"
                            Foreground="Gray"
@@ -71,7 +91,7 @@
         </GroupBox>
 
         <!-- リストア -->
-        <GroupBox Grid.Row="1" Header="リストア（データ復元）" Padding="15">
+        <GroupBox Grid.Row="2" Header="リストア（データ復元）" Padding="15">
             <Grid>
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto"/>
@@ -143,7 +163,7 @@
         </GroupBox>
 
         <!-- ステータスメッセージ -->
-        <Border Grid.Row="2"
+        <Border Grid.Row="3"
                 Padding="10"
                 Margin="0,15,0,0"
                 CornerRadius="5"
@@ -175,7 +195,7 @@
         </Border>
 
         <!-- 閉じるボタン -->
-        <StackPanel Grid.Row="3"
+        <StackPanel Grid.Row="4"
                     Orientation="Horizontal"
                     HorizontalAlignment="Right"
                     Margin="0,15,0,0">
@@ -189,7 +209,7 @@
         </StackPanel>
 
         <!-- 処理中オーバーレイ -->
-        <Border Grid.RowSpan="4"
+        <Border Grid.RowSpan="5"
                 Background="#80000000"
                 Visibility="{Binding IsBusy, Converter={StaticResource BoolToVisibilityConverter}}">
             <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
