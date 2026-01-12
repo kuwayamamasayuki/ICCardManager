@@ -215,7 +215,7 @@ public class StaffManageViewModelTests
         _viewModel.EditStaffIdm = "FFFF000000000001";
         _viewModel.EditName = "田中太郎";
 
-        var existingStaff = new Staff { StaffIdm = "FFFF000000000001", Name = "既存職員" };
+        var existingStaff = new Staff { StaffIdm = "FFFF000000000001", Name = "既存職員", Number = "E001" };
         _staffRepositoryMock.Setup(r => r.GetByIdmAsync("FFFF000000000001", true)).ReturnsAsync(existingStaff);
 
         // Act
@@ -223,6 +223,7 @@ public class StaffManageViewModelTests
 
         // Assert
         _viewModel.StatusMessage.Should().Contain("既に登録");
+        _viewModel.StatusMessage.Should().Contain("既存職員");  // 氏名が表示されること
         _staffRepositoryMock.Verify(r => r.InsertAsync(It.IsAny<Staff>()), Times.Never);
     }
 

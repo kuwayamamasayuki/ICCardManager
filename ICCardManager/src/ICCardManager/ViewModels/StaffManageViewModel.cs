@@ -164,7 +164,10 @@ namespace ICCardManager.ViewModels
                         var existing = await _staffRepository.GetByIdmAsync(EditStaffIdm, includeDeleted: true);
                         if (existing != null)
                         {
-                            StatusMessage = "この職員証は既に登録されています";
+                            var identifier = string.IsNullOrWhiteSpace(existing.Number)
+                                ? existing.Name
+                                : $"{existing.Name}（{existing.Number}）";
+                            StatusMessage = $"この職員証は {identifier} として既に登録されています";
                             return;
                         }
 
