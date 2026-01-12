@@ -42,8 +42,10 @@ ORDER BY date, id";
             {
                 command.Parameters.AddWithValue("@cardIdm", cardIdm);
             }
-            command.Parameters.AddWithValue("@fromDate", fromDate.ToString("yyyy-MM-dd"));
-            command.Parameters.AddWithValue("@toDate", toDate.ToString("yyyy-MM-dd"));
+            // 日付範囲フィルタリング: 時刻を含むデータに対応
+            // fromDate: その日の00:00:00から、toDate: その日の23:59:59まで
+            command.Parameters.AddWithValue("@fromDate", fromDate.Date.ToString("yyyy-MM-dd HH:mm:ss"));
+            command.Parameters.AddWithValue("@toDate", toDate.Date.AddDays(1).AddSeconds(-1).ToString("yyyy-MM-dd HH:mm:ss"));
 
             using var reader = await command.ExecuteReaderAsync();
             while (await reader.ReadAsync())
@@ -354,8 +356,9 @@ FROM ledger
             {
                 countCommand.Parameters.AddWithValue("@cardIdm", cardIdm);
             }
-            countCommand.Parameters.AddWithValue("@fromDate", fromDate.ToString("yyyy-MM-dd"));
-            countCommand.Parameters.AddWithValue("@toDate", toDate.ToString("yyyy-MM-dd"));
+            // 日付範囲フィルタリング: 時刻を含むデータに対応
+            countCommand.Parameters.AddWithValue("@fromDate", fromDate.Date.ToString("yyyy-MM-dd HH:mm:ss"));
+            countCommand.Parameters.AddWithValue("@toDate", toDate.Date.AddDays(1).AddSeconds(-1).ToString("yyyy-MM-dd HH:mm:ss"));
 
             var totalCount = Convert.ToInt32(await countCommand.ExecuteScalarAsync());
 
@@ -376,8 +379,9 @@ LIMIT @pageSize OFFSET @offset";
             {
                 command.Parameters.AddWithValue("@cardIdm", cardIdm);
             }
-            command.Parameters.AddWithValue("@fromDate", fromDate.ToString("yyyy-MM-dd"));
-            command.Parameters.AddWithValue("@toDate", toDate.ToString("yyyy-MM-dd"));
+            // 日付範囲フィルタリング: 時刻を含むデータに対応
+            command.Parameters.AddWithValue("@fromDate", fromDate.Date.ToString("yyyy-MM-dd HH:mm:ss"));
+            command.Parameters.AddWithValue("@toDate", toDate.Date.AddDays(1).AddSeconds(-1).ToString("yyyy-MM-dd HH:mm:ss"));
             command.Parameters.AddWithValue("@pageSize", pageSize);
             command.Parameters.AddWithValue("@offset", offset);
 
