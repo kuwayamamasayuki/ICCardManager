@@ -204,6 +204,26 @@ WHERE staff_idm = @staffIdm AND is_deleted = 0";
             return result > 0;
         }
 
+        /// <inheritdoc/>
+        public async Task<bool> RestoreAsync(string staffIdm)
+        {
+            var connection = _dbContext.GetConnection();
+
+            using var command = connection.CreateCommand();
+            command.CommandText = @"UPDATE staff
+SET is_deleted = 0, deleted_at = NULL
+WHERE staff_idm = @staffIdm AND is_deleted = 1";
+
+            command.Parameters.AddWithValue("@staffIdm", staffIdm);
+
+            var result = await command.ExecuteNonQueryAsync();
+            if (result > 0)
+            {
+                InvalidateStaffCache();
+            }
+            return result > 0;
+        }
+
         /// <summary>
         /// 職員関連のキャッシュをすべて無効化
         /// </summary>

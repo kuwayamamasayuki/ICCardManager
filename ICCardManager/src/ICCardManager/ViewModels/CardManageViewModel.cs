@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 using System.Collections.ObjectModel;
+using System.Windows;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using ICCardManager.Data.Repositories;
@@ -219,8 +220,36 @@ namespace ICCardManager.ViewModels
                     var existing = await _cardRepository.GetByIdmAsync(EditCardIdm, includeDeleted: true);
                     if (existing != null)
                     {
-                        StatusMessage = $"このカードは {existing.CardNumber} として既に登録されています";
-                        return;
+                        if (existing.IsDeleted)
+                        {
+                            // 削除済みカードの場合は復元を提案
+                            var result = MessageBox.Show(
+                                $"このカードは以前 {existing.CardNumber} として登録されていましたが、削除されています。\n\n復元しますか？",
+                                "削除済みカード",
+                                MessageBoxButton.YesNo,
+                                MessageBoxImage.Question);
+
+                            if (result == MessageBoxResult.Yes)
+                            {
+                                var restored = await _cardRepository.RestoreAsync(EditCardIdm);
+                                if (restored)
+                                {
+                                    StatusMessage = $"{existing.CardNumber} を復元しました";
+                                    await LoadCardsAsync();
+                                    CancelEdit();
+                                }
+                                else
+                                {
+                                    StatusMessage = "復元に失敗しました";
+                                }
+                            }
+                            return;
+                        }
+                        else
+                        {
+                            StatusMessage = $"このカードは {existing.CardNumber} として既に登録されています";
+                            return;
+                        }
                     }
 
                     var card = new IcCard

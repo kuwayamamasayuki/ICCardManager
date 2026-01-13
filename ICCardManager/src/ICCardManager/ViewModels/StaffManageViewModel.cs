@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 using System.Collections.ObjectModel;
+using System.Windows;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using ICCardManager.Data.Repositories;
@@ -167,8 +168,37 @@ namespace ICCardManager.ViewModels
                             var identifier = string.IsNullOrWhiteSpace(existing.Number)
                                 ? existing.Name
                                 : $"{existing.Name}（{existing.Number}）";
-                            StatusMessage = $"この職員証は {identifier} として既に登録されています";
-                            return;
+
+                            if (existing.IsDeleted)
+                            {
+                                // 削除済み職員の場合は復元を提案
+                                var result = MessageBox.Show(
+                                    $"この職員証は以前 {identifier} として登録されていましたが、削除されています。\n\n復元しますか？",
+                                    "削除済み職員",
+                                    MessageBoxButton.YesNo,
+                                    MessageBoxImage.Question);
+
+                                if (result == MessageBoxResult.Yes)
+                                {
+                                    var restored = await _staffRepository.RestoreAsync(EditStaffIdm);
+                                    if (restored)
+                                    {
+                                        StatusMessage = $"{identifier} を復元しました";
+                                        await LoadStaffAsync();
+                                        CancelEdit();
+                                    }
+                                    else
+                                    {
+                                        StatusMessage = "復元に失敗しました";
+                                    }
+                                }
+                                return;
+                            }
+                            else
+                            {
+                                StatusMessage = $"この職員証は {identifier} として既に登録されています";
+                                return;
+                            }
                         }
 
                         var staff = new Staff
