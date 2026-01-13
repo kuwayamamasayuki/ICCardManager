@@ -342,9 +342,9 @@ namespace ICCardManager.ViewModels
 
                 StatusMessage = "カードを読み取りました。カード種別を確認してください。";
                 IsWaitingForCard = false;
-
-                // カード読み取り完了後、フラグを解除
-                App.IsCardRegistrationActive = false;
+                // 注意: App.IsCardRegistrationActive はここで解除しない
+                // ダイアログが開いている間は常にフラグを維持し、
+                // CancelEdit() または Cleanup() でのみ解除する
             });
         }
 
