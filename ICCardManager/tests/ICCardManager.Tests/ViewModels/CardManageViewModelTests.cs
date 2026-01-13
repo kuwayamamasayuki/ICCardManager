@@ -247,7 +247,7 @@ public class CardManageViewModelTests
         _viewModel.EditCardType = "はやかけん";
         _viewModel.EditCardNumber = "H-001";
 
-        var existingCard = new IcCard { CardIdm = "0102030405060708" };
+        var existingCard = new IcCard { CardIdm = "0102030405060708", CardNumber = "H-999" };
         _cardRepositoryMock.Setup(r => r.GetByIdmAsync("0102030405060708", true)).ReturnsAsync(existingCard);
 
         // Act
@@ -255,6 +255,7 @@ public class CardManageViewModelTests
 
         // Assert
         _viewModel.StatusMessage.Should().Contain("既に登録");
+        _viewModel.StatusMessage.Should().Contain("H-999");  // 管理番号が表示されること
         _cardRepositoryMock.Verify(r => r.InsertAsync(It.IsAny<IcCard>()), Times.Never);
     }
 

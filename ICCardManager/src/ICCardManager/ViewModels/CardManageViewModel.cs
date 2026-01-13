@@ -219,7 +219,7 @@ namespace ICCardManager.ViewModels
                     var existing = await _cardRepository.GetByIdmAsync(EditCardIdm, includeDeleted: true);
                     if (existing != null)
                     {
-                        StatusMessage = "このカードは既に登録されています";
+                        StatusMessage = $"このカードは {existing.CardNumber} として既に登録されています";
                         return;
                     }
 
