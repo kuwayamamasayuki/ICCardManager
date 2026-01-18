@@ -306,6 +306,26 @@ WHERE card_idm = @cardIdm AND is_deleted = 0 AND is_lent = 0";
             return result > 0;
         }
 
+        /// <inheritdoc/>
+        public async Task<bool> RestoreAsync(string cardIdm)
+        {
+            var connection = _dbContext.GetConnection();
+
+            using var command = connection.CreateCommand();
+            command.CommandText = @"UPDATE ic_card
+SET is_deleted = 0, deleted_at = NULL
+WHERE card_idm = @cardIdm AND is_deleted = 1";
+
+            command.Parameters.AddWithValue("@cardIdm", cardIdm);
+
+            var result = await command.ExecuteNonQueryAsync();
+            if (result > 0)
+            {
+                InvalidateCardCache();
+            }
+            return result > 0;
+        }
+
         /// <summary>
         /// カード関連のキャッシュをすべて無効化
         /// </summary>
