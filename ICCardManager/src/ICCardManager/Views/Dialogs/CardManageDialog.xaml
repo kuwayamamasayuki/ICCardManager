@@ -243,12 +243,22 @@
                              AutomationProperties.HelpText="メモや備考を入力してください（任意）"
                              ToolTip="備考（任意）"/>
 
-                    <!-- ステータスメッセージ -->
+                    <!-- ステータスメッセージ（エラー時は赤色: Issue #286） -->
                     <TextBlock Text="{Binding StatusMessage}"
-                               Foreground="#1976D2"
                                FontWeight="Bold"
                                TextWrapping="Wrap"
-                               Margin="0,0,0,10"/>
+                               Margin="0,0,0,10">
+                        <TextBlock.Style>
+                            <Style TargetType="TextBlock">
+                                <Setter Property="Foreground" Value="#1976D2"/>
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding IsStatusError}" Value="True">
+                                        <Setter Property="Foreground" Value="#D32F2F"/>
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </TextBlock.Style>
+                    </TextBlock>
                 </StackPanel>
 
                 <!-- 未選択時の表示（編集モードでない場合のみ表示） -->
