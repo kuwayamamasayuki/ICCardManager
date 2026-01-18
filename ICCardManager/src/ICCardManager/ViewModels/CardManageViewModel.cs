@@ -360,17 +360,60 @@ namespace ICCardManager.ViewModels
         {
             if (!IsWaitingForCard) return;
 
-            // UIスレッドで実行
-            System.Windows.Application.Current.Dispatcher.Invoke(() =>
+            // UIスレッドで非同期実行（登録済みチェックを即座に行うため）
+            System.Windows.Application.Current.Dispatcher.InvokeAsync(async () =>
             {
                 EditCardIdm = e.Idm;
+                IsWaitingForCard = false;
 
+                // 即座に登録済みチェックを実行（Issue #284）
+                var existing = await _cardRepository.GetByIdmAsync(e.Idm, includeDeleted: true);
+                if (existing != null)
+                {
+                    if (existing.IsDeleted)
+                    {
+                        // 削除済みカードの場合は復元を提案
+                        var result = MessageBox.Show(
+                            $"このカードは以前 {existing.CardNumber} として登録されていましたが、削除されています。\n\n復元しますか？",
+                            "削除済みカード",
+                            MessageBoxButton.YesNo,
+                            MessageBoxImage.Question);
+
+                        if (result == MessageBoxResult.Yes)
+                        {
+                            var restored = await _cardRepository.RestoreAsync(e.Idm);
+                            if (restored)
+                            {
+                                StatusMessage = $"{existing.CardNumber} を復元しました";
+                                await LoadCardsAsync();
+                                CancelEdit();
+                            }
+                            else
+                            {
+                                StatusMessage = "復元に失敗しました";
+                            }
+                        }
+                        else
+                        {
+                            // 復元しない場合は編集モードをキャンセル
+                            CancelEdit();
+                        }
+                    }
+                    else
+                    {
+                        // 既に登録済みの場合はメッセージを表示
+                        StatusMessage = $"このカードは {existing.CardNumber} として既に登録されています";
+                        // フォームはそのままにして、ユーザーが確認できるようにする
+                    }
+                    return;
+                }
+
+                // 未登録カードの場合は通常処理
                 // カード種別はユーザーに手動選択させる（IDmからの自動判定は技術的に不可能なため）
                 // デフォルトはnimoca（利用頻度が最も高いため）
                 EditCardType = "nimoca";
-
                 StatusMessage = "カードを読み取りました。カード種別を確認してください。";
-                IsWaitingForCard = false;
+
                 // 注意: App.IsCardRegistrationActive はここで解除しない
                 // ダイアログが開いている間は常にフラグを維持し、
                 // CancelEdit() または Cleanup() でのみ解除する
