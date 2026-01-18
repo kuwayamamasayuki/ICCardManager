@@ -53,6 +53,9 @@ namespace ICCardManager.ViewModels
         private string _statusMessage = string.Empty;
 
         [ObservableProperty]
+        private bool _isStatusError;
+
+        [ObservableProperty]
         private bool _isWaitingForCard;
 
         /// <summary>
@@ -129,6 +132,7 @@ namespace ICCardManager.ViewModels
             EditCardNumber = string.Empty;
             EditNote = string.Empty;
             StatusMessage = "カードをタッチするとIDmを読み取ります";
+            IsStatusError = false;
             IsWaitingForCard = true;
 
             // MainViewModelでの未登録カード処理を抑制
@@ -153,6 +157,7 @@ namespace ICCardManager.ViewModels
             EditCardNumber = string.Empty;
             EditNote = string.Empty;
             StatusMessage = "カードを読み取りました。カード種別を確認してください。";
+            IsStatusError = false;
             IsWaitingForCard = false; // すでにIDmがあるので待機しない
         }
 
@@ -171,6 +176,7 @@ namespace ICCardManager.ViewModels
             EditCardNumber = SelectedCard.CardNumber;
             EditNote = SelectedCard.Note ?? string.Empty;
             StatusMessage = string.Empty;
+            IsStatusError = false;
             IsWaitingForCard = false;
         }
 
@@ -189,6 +195,7 @@ namespace ICCardManager.ViewModels
             if (!idmResult)
             {
                 StatusMessage = idmResult.ErrorMessage!;
+                IsStatusError = true;
                 return;
             }
 
@@ -196,6 +203,7 @@ namespace ICCardManager.ViewModels
             if (!typeResult)
             {
                 StatusMessage = typeResult.ErrorMessage!;
+                IsStatusError = true;
                 return;
             }
 
@@ -203,6 +211,7 @@ namespace ICCardManager.ViewModels
             if (!numberResult)
             {
                 StatusMessage = numberResult.ErrorMessage!;
+                IsStatusError = true;
                 return;
             }
 
@@ -235,12 +244,14 @@ namespace ICCardManager.ViewModels
                                 if (restored)
                                 {
                                     StatusMessage = $"{existing.CardNumber} を復元しました";
+                                    IsStatusError = false;
                                     await LoadCardsAsync();
                                     CancelEdit();
                                 }
                                 else
                                 {
                                     StatusMessage = "復元に失敗しました";
+                                    IsStatusError = true;
                                 }
                             }
                             return;
@@ -248,6 +259,7 @@ namespace ICCardManager.ViewModels
                         else
                         {
                             StatusMessage = $"このカードは {existing.CardNumber} として既に登録されています";
+                            IsStatusError = true;
                             return;
                         }
                     }
@@ -267,12 +279,14 @@ namespace ICCardManager.ViewModels
                         await CreateNewPurchaseLedgerAsync(EditCardIdm);
 
                         StatusMessage = "登録しました";
+                        IsStatusError = false;
                         await LoadCardsAsync();
                         CancelEdit();
                     }
                     else
                     {
                         StatusMessage = "登録に失敗しました";
+                        IsStatusError = true;
                     }
                 }
                 else
@@ -293,12 +307,14 @@ namespace ICCardManager.ViewModels
                     if (success)
                     {
                         StatusMessage = "更新しました";
+                        IsStatusError = false;
                         await LoadCardsAsync();
                         CancelEdit();
                     }
                     else
                     {
                         StatusMessage = "更新に失敗しました";
+                        IsStatusError = true;
                     }
                 }
             }
@@ -315,6 +331,7 @@ namespace ICCardManager.ViewModels
             if (SelectedCard.IsLent)
             {
                 StatusMessage = "貸出中のカードは削除できません";
+                IsStatusError = true;
                 return;
             }
 
@@ -324,12 +341,14 @@ namespace ICCardManager.ViewModels
                 if (success)
                 {
                     StatusMessage = "削除しました";
+                    IsStatusError = false;
                     await LoadCardsAsync();
                     CancelEdit();
                 }
                 else
                 {
                     StatusMessage = "削除に失敗しました";
+                    IsStatusError = true;
                 }
             }
         }
@@ -348,6 +367,7 @@ namespace ICCardManager.ViewModels
             EditCardNumber = string.Empty;
             EditNote = string.Empty;
             StatusMessage = string.Empty;
+            IsStatusError = false;
 
             // ICカード登録モードを解除
             App.IsCardRegistrationActive = false;
@@ -385,12 +405,14 @@ namespace ICCardManager.ViewModels
                             if (restored)
                             {
                                 StatusMessage = $"{existing.CardNumber} を復元しました";
+                                IsStatusError = false;
                                 await LoadCardsAsync();
                                 CancelEdit();
                             }
                             else
                             {
                                 StatusMessage = "復元に失敗しました";
+                                IsStatusError = true;
                             }
                         }
                         else
@@ -401,8 +423,9 @@ namespace ICCardManager.ViewModels
                     }
                     else
                     {
-                        // 既に登録済みの場合はメッセージを表示
+                        // 既に登録済みの場合はメッセージを表示（赤色で目立たせる: Issue #286）
                         StatusMessage = $"このカードは {existing.CardNumber} として既に登録されています";
+                        IsStatusError = true;
                         // フォームはそのままにして、ユーザーが確認できるようにする
                     }
                     return;
@@ -413,6 +436,7 @@ namespace ICCardManager.ViewModels
                 // デフォルトはnimoca（利用頻度が最も高いため）
                 EditCardType = "nimoca";
                 StatusMessage = "カードを読み取りました。カード種別を確認してください。";
+                IsStatusError = false;
 
                 // 注意: App.IsCardRegistrationActive はここで解除しない
                 // ダイアログが開いている間は常にフラグを維持し、
@@ -436,6 +460,7 @@ namespace ICCardManager.ViewModels
                 EditCardNumber = value.CardNumber;
                 EditNote = value.Note ?? string.Empty;
                 StatusMessage = string.Empty;
+                IsStatusError = false;
             }
         }
 

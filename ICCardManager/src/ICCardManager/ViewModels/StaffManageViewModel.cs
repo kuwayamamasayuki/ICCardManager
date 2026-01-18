@@ -51,6 +51,9 @@ namespace ICCardManager.ViewModels
         private string _statusMessage = string.Empty;
 
         [ObservableProperty]
+        private bool _isStatusError;
+
+        [ObservableProperty]
         private bool _isWaitingForCard;
 
         public StaffManageViewModel(
@@ -105,6 +108,7 @@ namespace ICCardManager.ViewModels
             EditNumber = string.Empty;
             EditNote = string.Empty;
             StatusMessage = "職員証をタッチするとIDmを読み取ります";
+            IsStatusError = false;
             IsWaitingForCard = true;
 
             // MainViewModelでの未登録カード処理を抑制
@@ -126,6 +130,7 @@ namespace ICCardManager.ViewModels
             EditNumber = SelectedStaff.Number ?? string.Empty;
             EditNote = SelectedStaff.Note ?? string.Empty;
             StatusMessage = string.Empty;
+            IsStatusError = false;
             IsWaitingForCard = false;
         }
 
@@ -147,6 +152,7 @@ namespace ICCardManager.ViewModels
                 if (!idmResult)
                 {
                     StatusMessage = idmResult.ErrorMessage!;
+                    IsStatusError = true;
                     return;
                 }
 
@@ -154,6 +160,7 @@ namespace ICCardManager.ViewModels
                 if (!nameResult)
                 {
                     StatusMessage = nameResult.ErrorMessage!;
+                    IsStatusError = true;
                     return;
                 }
 
@@ -184,12 +191,14 @@ namespace ICCardManager.ViewModels
                                     if (restored)
                                     {
                                         StatusMessage = $"{identifier} を復元しました";
+                                        IsStatusError = false;
                                         await LoadStaffAsync();
                                         CancelEdit();
                                     }
                                     else
                                     {
                                         StatusMessage = "復元に失敗しました";
+                                        IsStatusError = true;
                                     }
                                 }
                                 return;
@@ -197,6 +206,7 @@ namespace ICCardManager.ViewModels
                             else
                             {
                                 StatusMessage = $"この職員証は {identifier} として既に登録されています";
+                                IsStatusError = true;
                                 return;
                             }
                         }
@@ -213,12 +223,14 @@ namespace ICCardManager.ViewModels
                         if (success)
                         {
                             StatusMessage = "登録しました";
+                            IsStatusError = false;
                             await LoadStaffAsync();
                             CancelEdit();
                         }
                         else
                         {
                             StatusMessage = "登録に失敗しました";
+                            IsStatusError = true;
                         }
                     }
                     else
@@ -236,12 +248,14 @@ namespace ICCardManager.ViewModels
                         if (success)
                         {
                             StatusMessage = "更新しました";
+                            IsStatusError = false;
                             await LoadStaffAsync();
                             CancelEdit();
                         }
                         else
                         {
                             StatusMessage = "更新に失敗しました";
+                            IsStatusError = true;
                         }
                     }
                 }
@@ -249,6 +263,7 @@ namespace ICCardManager.ViewModels
             catch (Exception ex)
             {
                 StatusMessage = $"エラー: {ex.Message}";
+                IsStatusError = true;
                 System.Diagnostics.Debug.WriteLine($"[StaffManageViewModel] SaveAsync エラー: {ex}");
             }
         }
@@ -269,18 +284,21 @@ namespace ICCardManager.ViewModels
                     if (success)
                     {
                         StatusMessage = "削除しました";
+                        IsStatusError = false;
                         await LoadStaffAsync();
                         CancelEdit();
                     }
                     else
                     {
                         StatusMessage = "削除に失敗しました";
+                        IsStatusError = true;
                     }
                 }
             }
             catch (Exception ex)
             {
                 StatusMessage = $"エラー: {ex.Message}";
+                IsStatusError = true;
                 System.Diagnostics.Debug.WriteLine($"[StaffManageViewModel] DeleteAsync エラー: {ex}");
             }
         }
@@ -340,12 +358,14 @@ namespace ICCardManager.ViewModels
                             if (restored)
                             {
                                 StatusMessage = $"{identifier} を復元しました";
+                                IsStatusError = false;
                                 await LoadStaffAsync();
                                 CancelEdit();
                             }
                             else
                             {
                                 StatusMessage = "復元に失敗しました";
+                                IsStatusError = true;
                             }
                         }
                         else
@@ -356,8 +376,9 @@ namespace ICCardManager.ViewModels
                     }
                     else
                     {
-                        // 既に登録済みの場合はメッセージを表示
+                        // 既に登録済みの場合はメッセージを表示（赤色で目立たせる: Issue #286）
                         StatusMessage = $"この職員証は {identifier} として既に登録されています";
+                        IsStatusError = true;
                         // フォームはそのままにして、ユーザーが確認できるようにする
                     }
 
@@ -368,6 +389,7 @@ namespace ICCardManager.ViewModels
 
                 // 未登録職員証の場合は通常処理
                 StatusMessage = "職員証を読み取りました";
+                IsStatusError = false;
 
                 // カード読み取り完了後、フラグを解除
                 App.IsStaffCardRegistrationActive = false;
@@ -390,6 +412,7 @@ namespace ICCardManager.ViewModels
                 EditNumber = value.Number ?? string.Empty;
                 EditNote = value.Note ?? string.Empty;
                 StatusMessage = string.Empty;
+                IsStatusError = false;
             }
         }
 
