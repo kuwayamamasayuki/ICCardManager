@@ -80,9 +80,10 @@ public partial class ReportViewModel : ViewModelBase
             Years.Add(year);
         }
 
-        // デフォルト値
-        SelectedYear = currentYear;
-        SelectedMonth = DateTime.Now.Month;
+        // デフォルト値（先月が最も使用頻度が高いため、先月をデフォルトに設定）
+        var lastMonth = DateTime.Now.AddMonths(-1);
+        SelectedYear = lastMonth.Year;
+        SelectedMonth = lastMonth.Month;
         OutputFolder = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
     }
 

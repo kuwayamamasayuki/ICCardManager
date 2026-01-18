@@ -57,23 +57,25 @@
                                    VerticalAlignment="Center"
                                    Margin="5,0,0,0"/>
                     </StackPanel>
-                    <!-- クイック選択ボタン -->
+                    <!-- クイック選択ボタン（使用頻度順: 先月 > 今月） -->
                     <StackPanel Orientation="Horizontal" Margin="0,10,0,0">
+                        <Button Content="先月"
+                                Command="{Binding SelectLastMonthCommand}"
+                                Padding="18,8"
+                                Margin="0,0,10,0"
+                                Background="#4CAF50"
+                                Foreground="White"
+                                FontWeight="Bold"
+                                BorderBrush="#388E3C"
+                                AutomationProperties.Name="先月を選択"
+                                ToolTip="対象年月を先月に設定（最も使用頻度が高い）"/>
                         <Button Content="今月"
                                 Command="{Binding SelectThisMonthCommand}"
                                 Padding="15,6"
-                                Margin="0,0,10,0"
                                 Background="#E3F2FD"
                                 BorderBrush="#2196F3"
                                 AutomationProperties.Name="今月を選択"
                                 ToolTip="対象年月を今月に設定"/>
-                        <Button Content="先月"
-                                Command="{Binding SelectLastMonthCommand}"
-                                Padding="15,6"
-                                Background="#E3F2FD"
-                                BorderBrush="#2196F3"
-                                AutomationProperties.Name="先月を選択"
-                                ToolTip="対象年月を先月に設定"/>
                     </StackPanel>
                 </StackPanel>
             </GroupBox>
