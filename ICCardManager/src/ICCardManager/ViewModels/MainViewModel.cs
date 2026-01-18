@@ -617,6 +617,14 @@ public partial class MainViewModel : ViewModelBase
             return;
         }
 
+        // カード登録モード中は処理をスキップ（CardManageViewModelが処理する）
+        // 職員証登録モード中は処理をスキップ（StaffManageViewModelが処理する）
+        // ※登録済みカード/職員証も含め、すべてのカード読み取りを無視する
+        if (App.IsCardRegistrationActive || App.IsStaffCardRegistrationActive)
+        {
+            return;
+        }
+
         switch (CurrentState)
         {
             case AppState.WaitingForStaffCard:
