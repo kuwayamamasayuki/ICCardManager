@@ -97,7 +97,6 @@ public partial class MainViewModel : ViewModelBase
     private readonly ILedgerRepository _ledgerRepository;
     private readonly ISettingsRepository _settingsRepository;
     private readonly LendingService _lendingService;
-    private readonly CardTypeDetector _cardTypeDetector;
     private readonly IToastNotificationService _toastNotificationService;
 
     private DispatcherTimer? _timeoutTimer;
@@ -361,7 +360,6 @@ public partial class MainViewModel : ViewModelBase
         ILedgerRepository ledgerRepository,
         ISettingsRepository settingsRepository,
         LendingService lendingService,
-        CardTypeDetector cardTypeDetector,
         IToastNotificationService toastNotificationService)
     {
         _cardReader = cardReader;
@@ -371,7 +369,6 @@ public partial class MainViewModel : ViewModelBase
         _ledgerRepository = ledgerRepository;
         _settingsRepository = settingsRepository;
         _lendingService = lendingService;
-        _cardTypeDetector = cardTypeDetector;
         _toastNotificationService = toastNotificationService;
 
         // イベント登録
@@ -917,15 +914,13 @@ public partial class MainViewModel : ViewModelBase
             return;
         }
 
-        var cardType = _cardTypeDetector.Detect(idm);
-        var cardTypeName = CardTypeDetector.GetDisplayName(cardType);
-
         _soundPlayer.Play(SoundType.Warning);
         // メイン画面は変更しない（Issue #186）
 
         // 登録確認ダイアログを表示
+        // 種別は自動判別できないため、IDmは職員にとって意味がないため、表示しない（Issue #278）
         var result = System.Windows.MessageBox.Show(
-            $"このカードは登録されていません。\n\n種別: {cardTypeName}\nIDm: {idm}\n\n新規登録しますか？",
+            "このカードは登録されていません。\n\n新規登録しますか？",
             "未登録カード",
             System.Windows.MessageBoxButton.YesNo,
             System.Windows.MessageBoxImage.Question);
