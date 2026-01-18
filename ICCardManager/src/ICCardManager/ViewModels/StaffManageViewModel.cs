@@ -311,12 +311,63 @@ namespace ICCardManager.ViewModels
         {
             if (!IsWaitingForCard) return;
 
-            // UIスレッドで実行
-            System.Windows.Application.Current.Dispatcher.Invoke(() =>
+            // UIスレッドで非同期実行（登録済みチェックを即座に行うため）
+            System.Windows.Application.Current.Dispatcher.InvokeAsync(async () =>
             {
                 EditStaffIdm = e.Idm;
-                StatusMessage = "職員証を読み取りました";
                 IsWaitingForCard = false;
+
+                // 即座に登録済みチェックを実行（Issue #284）
+                var existing = await _staffRepository.GetByIdmAsync(e.Idm, includeDeleted: true);
+                if (existing != null)
+                {
+                    var identifier = string.IsNullOrWhiteSpace(existing.Number)
+                        ? existing.Name
+                        : $"{existing.Name}（{existing.Number}）";
+
+                    if (existing.IsDeleted)
+                    {
+                        // 削除済み職員の場合は復元を提案
+                        var result = MessageBox.Show(
+                            $"この職員証は以前 {identifier} として登録されていましたが、削除されています。\n\n復元しますか？",
+                            "削除済み職員",
+                            MessageBoxButton.YesNo,
+                            MessageBoxImage.Question);
+
+                        if (result == MessageBoxResult.Yes)
+                        {
+                            var restored = await _staffRepository.RestoreAsync(e.Idm);
+                            if (restored)
+                            {
+                                StatusMessage = $"{identifier} を復元しました";
+                                await LoadStaffAsync();
+                                CancelEdit();
+                            }
+                            else
+                            {
+                                StatusMessage = "復元に失敗しました";
+                            }
+                        }
+                        else
+                        {
+                            // 復元しない場合は編集モードをキャンセル
+                            CancelEdit();
+                        }
+                    }
+                    else
+                    {
+                        // 既に登録済みの場合はメッセージを表示
+                        StatusMessage = $"この職員証は {identifier} として既に登録されています";
+                        // フォームはそのままにして、ユーザーが確認できるようにする
+                    }
+
+                    // カード読み取り完了後、フラグを解除
+                    App.IsStaffCardRegistrationActive = false;
+                    return;
+                }
+
+                // 未登録職員証の場合は通常処理
+                StatusMessage = "職員証を読み取りました";
 
                 // カード読み取り完了後、フラグを解除
                 App.IsStaffCardRegistrationActive = false;
