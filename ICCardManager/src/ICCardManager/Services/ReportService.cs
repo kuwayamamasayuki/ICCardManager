@@ -393,6 +393,26 @@ namespace ICCardManager.Services
 
             // ヘッダ行のフォントサイズを調整して1行に収める
             AdjustHeaderRowFontSize(worksheet);
+
+            // 印刷ヘッダーにページ番号を設定（頁欄の代わり）
+            SetPrintPageNumber(worksheet);
+        }
+
+        /// <summary>
+        /// 印刷ヘッダーにページ番号を設定
+        /// </summary>
+        /// <remarks>
+        /// Excelのセル内に動的なページ番号を表示することはできないため、
+        /// 印刷ヘッダーの右側にページ番号を設定します。
+        /// 印刷時に「頁 1 / 2」のような形式で表示されます。
+        /// </remarks>
+        private void SetPrintPageNumber(IXLWorksheet worksheet)
+        {
+            // 印刷ヘッダーの右側にページ番号を設定
+            worksheet.PageSetup.Header.Right.AddText("頁 ");
+            worksheet.PageSetup.Header.Right.AddText(XLHFPredefinedText.PageNumber);
+            worksheet.PageSetup.Header.Right.AddText(" / ");
+            worksheet.PageSetup.Header.Right.AddText(XLHFPredefinedText.NumberOfPages);
         }
 
         /// <summary>
