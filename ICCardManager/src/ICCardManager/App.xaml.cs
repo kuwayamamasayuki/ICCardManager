@@ -57,6 +57,21 @@ namespace ICCardManager
         /// </summary>
         public static bool IsCardRegistrationActive { get; set; }
 
+        /// <summary>
+        /// DEBUGビルドかどうか（XAMLからデバッグ用UIの表示制御に使用: Issue #289）
+        /// </summary>
+        public static bool IsDebugBuild
+        {
+            get
+            {
+#if DEBUG
+                return true;
+#else
+                return false;
+#endif
+            }
+        }
+
         protected override void OnStartup(StartupEventArgs e)
         {
             base.OnStartup(e);
