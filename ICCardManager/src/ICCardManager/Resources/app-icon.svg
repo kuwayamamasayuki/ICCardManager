@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!-- 交通系ICカード管理システム アプリケーションアイコン -->
-<!-- Issue #269: ICカードリーダーにカードをかざすイメージ -->
+<!-- Issue #269: ICカードを手に持ってリーダーにかざすイメージ -->
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
   <defs>
     <!-- グラデーション定義 -->
@@ -17,9 +17,16 @@
       <stop offset="0%" style="stop-color:#00cc66"/>
       <stop offset="100%" style="stop-color:#009944"/>
     </linearGradient>
+    <linearGradient id="skinGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#f5d0b0"/>
+      <stop offset="100%" style="stop-color:#e8b090"/>
+    </linearGradient>
     <!-- 影用フィルター -->
     <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
       <feDropShadow dx="2" dy="4" stdDeviation="4" flood-opacity="0.3"/>
+    </filter>
+    <filter id="cardShadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="1" dy="2" stdDeviation="2" flood-opacity="0.25"/>
     </filter>
   </defs>
 
@@ -29,42 +36,71 @@
   <!-- ICカードリーダー本体 (SONY RC-S380風) -->
   <g filter="url(#shadow)">
     <!-- リーダー本体（黒い四角形） -->
-    <rect x="40" y="140" width="176" height="100" rx="12" ry="12" fill="url(#readerGradient)"/>
+    <rect x="40" y="155" width="176" height="90" rx="12" ry="12" fill="url(#readerGradient)"/>
 
     <!-- リーダー上面（タッチ面） -->
-    <rect x="50" y="150" width="156" height="70" rx="8" ry="8" fill="#2a2a2a"/>
+    <rect x="50" y="165" width="156" height="60" rx="8" ry="8" fill="#2a2a2a"/>
 
     <!-- タッチ面の中央マーク（NFCシンボル風） -->
-    <circle cx="128" cy="185" r="20" fill="none" stroke="#555" stroke-width="3"/>
-    <circle cx="128" cy="185" r="12" fill="none" stroke="#555" stroke-width="2"/>
-    <circle cx="128" cy="185" r="5" fill="#555"/>
+    <circle cx="128" cy="195" r="18" fill="none" stroke="#555" stroke-width="3"/>
+    <circle cx="128" cy="195" r="10" fill="none" stroke="#555" stroke-width="2"/>
+    <circle cx="128" cy="195" r="4" fill="#555"/>
 
     <!-- ステータスLED（緑色で点灯中） -->
-    <rect x="185" y="230" width="20" height="4" rx="2" fill="url(#screenGradient)"/>
+    <rect x="185" y="235" width="20" height="4" rx="2" fill="url(#screenGradient)"/>
   </g>
 
-  <!-- 交通系ICカード（斜めに傾けてかざしている状態） -->
-  <g filter="url(#shadow)" transform="rotate(-15, 128, 80)">
+  <!-- 手（手首から先） -->
+  <g filter="url(#cardShadow)">
+    <!-- 手のひら・手首部分 -->
+    <path d="M 200 20
+             Q 220 25, 230 50
+             L 235 90
+             Q 238 110, 225 125
+             L 195 135
+             Q 175 138, 165 125
+             L 155 95
+             Q 150 75, 160 55
+             L 175 30
+             Q 185 18, 200 20 Z"
+          fill="url(#skinGradient)" stroke="#d4a574" stroke-width="1"/>
+
+    <!-- 親指 -->
+    <path d="M 160 75
+             Q 145 70, 140 80
+             Q 135 95, 145 105
+             Q 155 115, 165 110
+             L 165 95
+             Q 160 85, 160 75 Z"
+          fill="url(#skinGradient)" stroke="#d4a574" stroke-width="1"/>
+
+    <!-- 指の付け根の線 -->
+    <path d="M 175 30 Q 180 45, 175 55" fill="none" stroke="#d4a574" stroke-width="1" opacity="0.5"/>
+    <path d="M 195 25 Q 200 40, 198 50" fill="none" stroke="#d4a574" stroke-width="1" opacity="0.5"/>
+  </g>
+
+  <!-- 交通系ICカード（手に持って斜めにかざしている状態） -->
+  <g filter="url(#cardShadow)" transform="rotate(-25, 128, 85)">
     <!-- カード本体（銀色） -->
-    <rect x="70" y="30" width="116" height="73" rx="6" ry="6" fill="url(#cardGradient)" stroke="#888" stroke-width="1"/>
+    <rect x="55" y="50" width="105" height="66" rx="5" ry="5" fill="url(#cardGradient)" stroke="#888" stroke-width="1"/>
 
     <!-- ICチップ部分（金色） -->
-    <rect x="82" y="45" width="28" height="22" rx="2" ry="2" fill="#d4af37"/>
-    <line x1="88" y1="45" x2="88" y2="67" stroke="#c4a030" stroke-width="1"/>
-    <line x1="96" y1="45" x2="96" y2="67" stroke="#c4a030" stroke-width="1"/>
-    <line x1="104" y1="45" x2="104" y2="67" stroke="#c4a030" stroke-width="1"/>
-    <line x1="82" y1="52" x2="110" y2="52" stroke="#c4a030" stroke-width="1"/>
-    <line x1="82" y1="60" x2="110" y2="60" stroke="#c4a030" stroke-width="1"/>
+    <rect x="65" y="62" width="24" height="18" rx="2" ry="2" fill="#d4af37"/>
+    <line x1="70" y1="62" x2="70" y2="80" stroke="#c4a030" stroke-width="1"/>
+    <line x1="77" y1="62" x2="77" y2="80" stroke="#c4a030" stroke-width="1"/>
+    <line x1="84" y1="62" x2="84" y2="80" stroke="#c4a030" stroke-width="1"/>
+    <line x1="65" y1="68" x2="89" y2="68" stroke="#c4a030" stroke-width="1"/>
+    <line x1="65" y1="74" x2="89" y2="74" stroke="#c4a030" stroke-width="1"/>
 
     <!-- 「交通系IC」テキスト -->
-    <text x="128" y="88" font-family="Arial, sans-serif" font-size="14" font-weight="bold"
+    <text x="107" y="102" font-family="Arial, sans-serif" font-size="11" font-weight="bold"
           fill="#333" text-anchor="middle">交通系IC</text>
   </g>
 
   <!-- WiFi/NFC波形（カードとリーダー間の通信を表現） -->
-  <g stroke="#00aa55" fill="none" stroke-width="2" opacity="0.7">
-    <path d="M 108 120 Q 128 130, 148 120" stroke-dasharray="4,2"/>
-    <path d="M 100 128 Q 128 142, 156 128" stroke-dasharray="4,2"/>
-    <path d="M 92 136 Q 128 154, 164 136" stroke-dasharray="4,2"/>
+  <g stroke="#00aa55" fill="none" stroke-width="2.5" opacity="0.8">
+    <path d="M 100 130 Q 128 138, 156 130"/>
+    <path d="M 92 140 Q 128 152, 164 140"/>
+    <path d="M 84 150 Q 128 166, 172 150"/>
   </g>
 </svg>
