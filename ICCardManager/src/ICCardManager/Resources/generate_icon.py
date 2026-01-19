@@ -4,7 +4,7 @@
 Issue #269: かっこいいアイコンを作成する
 
 このスクリプトは標準ライブラリのみを使用して、
-手に持ったICカードをリーダーにかざすアイコンを生成します。
+親指と人差し指でICカードを持ってリーダーにかざすアイコンを生成します。
 
 使用方法:
     python generate_icon.py
@@ -57,7 +57,7 @@ def create_png(width, height, pixels):
 def draw_icon(size):
     """
     指定サイズのアイコン画像を生成
-    手に持ったICカードをリーダーにかざすイメージ
+    親指と人差し指でICカードを持ってリーダーにかざすイメージ
     """
     pixels = [(0, 0, 0, 0)] * (size * size)  # 透明で初期化
 
@@ -74,7 +74,6 @@ def draw_icon(size):
             if a == 255:
                 pixels[idx] = color
             elif a > 0:
-                # 簡易アルファブレンド
                 er, eg, eb, ea = existing
                 alpha = a / 255.0
                 nr = int(r * alpha + er * (1 - alpha))
@@ -92,13 +91,12 @@ def draw_icon(size):
         """角丸四角形を描画"""
         for y in range(int(y1), int(y2)):
             for x in range(int(x1), int(x2)):
-                # 角の処理
                 in_corner = False
                 corners = [
-                    (x1 + radius, y1 + radius),  # 左上
-                    (x2 - radius, y1 + radius),  # 右上
-                    (x1 + radius, y2 - radius),  # 左下
-                    (x2 - radius, y2 - radius),  # 右下
+                    (x1 + radius, y1 + radius),
+                    (x2 - radius, y1 + radius),
+                    (x1 + radius, y2 - radius),
+                    (x2 - radius, y2 - radius),
                 ]
                 for cx, cy in corners:
                     dx = abs(x - cx)
@@ -112,15 +110,19 @@ def draw_icon(size):
 
     def fill_ellipse(cx, cy, rx, ry, color):
         """楕円を塗りつぶす"""
+        if rx <= 0 or ry <= 0:
+            return
         for y in range(int(cy - ry), int(cy + ry + 1)):
             for x in range(int(cx - rx), int(cx + rx + 1)):
-                dx = (x - cx) / rx if rx > 0 else 0
-                dy = (y - cy) / ry if ry > 0 else 0
+                dx = (x - cx) / rx
+                dy = (y - cy) / ry
                 if dx * dx + dy * dy <= 1:
                     set_pixel(int(x), int(y), color)
 
     def draw_circle(cx, cy, r, color, thickness=1):
         """円の輪郭を描画"""
+        if r <= 0:
+            return
         for angle in range(360):
             rad = math.radians(angle)
             for dr in range(-thickness // 2, thickness // 2 + 1):
@@ -130,29 +132,25 @@ def draw_icon(size):
 
     def fill_rotated_rect(cx, cy, w, h, angle_deg, color):
         """回転した四角形を塗りつぶす"""
+        if w <= 0 or h <= 0:
+            return
         angle = math.radians(angle_deg)
         cos_a = math.cos(angle)
         sin_a = math.sin(angle)
 
-        # 四角形の頂点
         hw, hh = w / 2, h / 2
-        corners = [
-            (-hw, -hh), (hw, -hh), (hw, hh), (-hw, hh)
-        ]
-        # 回転して座標変換
+        corners = [(-hw, -hh), (hw, -hh), (hw, hh), (-hw, hh)]
         rotated = []
         for px, py in corners:
             rx = px * cos_a - py * sin_a + cx
             ry = px * sin_a + py * cos_a + cy
             rotated.append((rx, ry))
 
-        # バウンディングボックス
         min_x = int(min(p[0] for p in rotated))
         max_x = int(max(p[0] for p in rotated))
         min_y = int(min(p[1] for p in rotated))
         max_y = int(max(p[1] for p in rotated))
 
-        # 点が四角形内かチェック
         def point_in_polygon(x, y):
             n = len(rotated)
             inside = False
@@ -170,98 +168,88 @@ def draw_icon(size):
                 if point_in_polygon(x, y):
                     set_pixel(x, y, color)
 
-    def draw_hand(s):
-        """手（手首から先）を描画"""
-        skin_color = (245, 208, 176, 255)
-        skin_outline = (212, 165, 116, 255)
-
-        # 簡略化した手のシルエット（楕円と四角形の組み合わせ）
-        # 手首
-        wrist_x = int(195 * s)
-        wrist_y = int(85 * s)
-        wrist_w = int(35 * s)
-        wrist_h = int(55 * s)
-
-        # 手のひら（楕円）
-        palm_cx = int(188 * s)
-        palm_cy = int(60 * s)
-        palm_rx = int(32 * s)
-        palm_ry = int(38 * s)
-        fill_ellipse(palm_cx, palm_cy, palm_rx, palm_ry, skin_color)
-
-        # 手首部分（四角形）
-        fill_rounded_rect(int(170 * s), int(75 * s), int(220 * s), int(140 * s), int(8 * s), skin_color)
-
-        # 親指
-        thumb_cx = int(148 * s)
-        thumb_cy = int(85 * s)
-        fill_ellipse(thumb_cx, thumb_cy, int(12 * s), int(18 * s), skin_color)
-
-    def draw_card(s, angle=-25):
-        """斜めに傾いたICカードを描画"""
-        card_color = (200, 200, 210, 255)
-        card_border = (150, 150, 160, 255)
-        chip_color = (212, 175, 55, 255)
-
-        # カードの中心と寸法
-        card_cx = int(108 * s)
-        card_cy = int(70 * s)
-        card_w = int(95 * s)
-        card_h = int(60 * s)
-
-        # 回転したカード本体
-        fill_rotated_rect(card_cx, card_cy, card_w, card_h, angle, card_color)
-
-        # ICチップ（簡易版 - 小さいサイズでは省略）
-        if s >= 0.125:  # 32x32以上
-            chip_cx = int(75 * s)
-            chip_cy = int(62 * s)
-            chip_w = int(22 * s)
-            chip_h = int(16 * s)
-            fill_rotated_rect(chip_cx, chip_cy, chip_w, chip_h, angle, chip_color)
-
     # スケーリング係数
     s = size / 256.0
 
     # 色定義
-    reader_color = (40, 40, 40, 255)      # リーダー本体（ダークグレー）
-    reader_top = (50, 50, 50, 255)        # リーダー上面
-    led_color = (0, 200, 100, 255)        # LED（緑）
-    wave_color = (0, 170, 85, 180)        # 通信波（緑、半透明）
-    nfc_color = (80, 80, 80, 255)         # NFCマーク
+    reader_color = (40, 40, 40, 255)
+    reader_top = (50, 50, 50, 255)
+    led_color = (0, 200, 100, 255)
+    wave_color = (0, 170, 85, 180)
+    nfc_color = (80, 80, 80, 255)
+    card_color = (210, 210, 215, 255)
+    chip_color = (212, 175, 55, 255)
+    skin_color = (245, 208, 176, 255)
 
-    # ICカードリーダー本体
-    fill_rounded_rect(40*s, 155*s, 216*s, 245*s, 12*s, reader_color)
-    fill_rounded_rect(50*s, 165*s, 206*s, 225*s, 8*s, reader_top)
+    # === ICカードリーダー（小さめ、下部に配置） ===
+    fill_rounded_rect(58*s, 185*s, 198*s, 245*s, 8*s, reader_color)
+    fill_rounded_rect(68*s, 193*s, 188*s, 233*s, 5*s, reader_top)
 
-    # リーダー中央のNFCマーク（同心円）
-    cx, cy = int(128*s), int(195*s)
-    draw_circle(cx, cy, int(18*s), nfc_color, max(1, int(2*s)))
-    draw_circle(cx, cy, int(10*s), nfc_color, max(1, int(1.5*s)))
-    if s >= 0.125:  # 32x32以上
-        fill_ellipse(cx, cy, int(4*s), int(4*s), nfc_color)
+    # NFCマーク
+    cx_r, cy_r = int(128*s), int(213*s)
+    if s >= 0.125:
+        draw_circle(cx_r, cy_r, int(12*s), nfc_color, max(1, int(1.5*s)))
+        draw_circle(cx_r, cy_r, int(6*s), nfc_color, max(1, int(1*s)))
+        fill_ellipse(cx_r, cy_r, int(2*s), int(2*s), nfc_color)
 
     # ステータスLED
-    fill_rect(185*s, 235*s, 205*s, 239*s, led_color)
+    fill_rect(168*s, 237*s, 182*s, 240*s, led_color)
 
-    # 手を描画
-    draw_hand(s)
+    # === 交通系ICカード（大きく、斜めに、中央〜上に配置） ===
+    card_cx = int(108 * s)
+    card_cy = int(75 * s)
+    card_w = int(120 * s)
+    card_h = int(75 * s)
+    card_angle = -20
 
-    # 交通系ICカード（斜め）
-    draw_card(s, -25)
+    fill_rotated_rect(card_cx, card_cy, card_w, card_h, card_angle, card_color)
 
-    # 通信波（弧線）
-    wave_y_start = int(130*s)
-    for wave_idx, wave_offset in enumerate([0, 10, 20]):
+    # ICチップ（大きいサイズのみ）
+    if s >= 0.125:
+        chip_cx = int(70 * s)
+        chip_cy = int(65 * s)
+        chip_w = int(28 * s)
+        chip_h = int(20 * s)
+        fill_rotated_rect(chip_cx, chip_cy, chip_w, chip_h, card_angle, chip_color)
+
+    # === 手（親指と人差し指でカードの右端をつまむ） ===
+
+    # 人差し指（カードの上側、曲げた形）
+    finger_cx = int(205 * s)
+    finger_cy = int(55 * s)
+    finger_w = int(38 * s)
+    finger_h = int(18 * s)
+    fill_rotated_rect(finger_cx, finger_cy, finger_w, finger_h, -30, skin_color)
+    # 指先の丸み
+    fill_ellipse(int(188 * s), int(62 * s), int(10 * s), int(9 * s), skin_color)
+
+    # 親指（カードの下側）
+    thumb_cx = int(210 * s)
+    thumb_cy = int(105 * s)
+    thumb_w = int(35 * s)
+    thumb_h = int(16 * s)
+    fill_rotated_rect(thumb_cx, thumb_cy, thumb_w, thumb_h, 15, skin_color)
+    # 親指の先の丸み
+    fill_ellipse(int(195 * s), int(100 * s), int(9 * s), int(8 * s), skin_color)
+
+    # 手のひら（右端に少し見える部分）
+    palm_cx = int(235 * s)
+    palm_cy = int(80 * s)
+    palm_rx = int(22 * s)
+    palm_ry = int(35 * s)
+    fill_ellipse(palm_cx, palm_cy, palm_rx, palm_ry, skin_color)
+
+    # === 通信波（弧線） ===
+    wave_y_start = int(148 * s)
+    for wave_idx, wave_offset in enumerate([0, 12, 24]):
         wave_y = wave_y_start + int(wave_offset * s)
-        wave_width = int((56 + wave_offset * 3) * s)
+        wave_width = int((50 + wave_offset * 2.5) * s)
         wave_cx = int(128 * s)
         for x in range(wave_cx - wave_width // 2, wave_cx + wave_width // 2):
-            # 簡易的な弧を描画
             dx = abs(x - wave_cx)
-            dy = int(dx * dx / (wave_width * 0.5) * 0.3)
+            dy = int(dx * dx / (wave_width * 0.5) * 0.25)
             blend_pixel(x, wave_y + dy, wave_color)
-            if s >= 0.5:  # 大きいサイズでは線を太く
+            if s >= 0.5:
                 blend_pixel(x, wave_y + dy + 1, wave_color)
 
     return pixels
@@ -281,40 +269,28 @@ def create_ico(output_path):
         images.append((size, png_data))
 
     # ICO ファイル構造
-    # ICONDIR (6 bytes)
-    ico_data = struct.pack('<HHH', 0, 1, len(images))  # Reserved, Type=1 (ICO), Count
+    ico_data = struct.pack('<HHH', 0, 1, len(images))
 
-    # ICONDIRENTRY の位置を計算
     header_size = 6 + 16 * len(images)
     current_offset = header_size
 
     entries = []
     for size, png_data in images:
-        # ICONDIRENTRY (16 bytes)
-        width = size if size < 256 else 0  # 256は0で表現
+        width = size if size < 256 else 0
         height = size if size < 256 else 0
         entry = struct.pack('<BBBBHHII',
-            width,          # Width
-            height,         # Height
-            0,              # Color count (0 for > 256 colors)
-            0,              # Reserved
-            1,              # Color planes
-            32,             # Bits per pixel
-            len(png_data),  # Size of image data
-            current_offset  # Offset to image data
+            width, height, 0, 0, 1, 32,
+            len(png_data), current_offset
         )
         entries.append(entry)
         current_offset += len(png_data)
 
-    # 全てのエントリを追加
     for entry in entries:
         ico_data += entry
 
-    # 画像データを追加
     for size, png_data in images:
         ico_data += png_data
 
-    # ファイルに書き込み
     with open(output_path, 'wb') as f:
         f.write(ico_data)
 

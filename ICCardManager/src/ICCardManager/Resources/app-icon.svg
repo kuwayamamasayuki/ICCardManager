@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!-- 交通系ICカード管理システム アプリケーションアイコン -->
-<!-- Issue #269: ICカードを手に持ってリーダーにかざすイメージ -->
+<!-- Issue #269: ICカードを親指と人差し指で持ってリーダーにかざすイメージ -->
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
   <defs>
     <!-- グラデーション定義 -->
@@ -9,9 +9,9 @@
       <stop offset="100%" style="stop-color:#1a1a1a"/>
     </linearGradient>
     <linearGradient id="cardGradient" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" style="stop-color:#e8e8e8"/>
-      <stop offset="50%" style="stop-color:#c0c0c0"/>
-      <stop offset="100%" style="stop-color:#a8a8a8"/>
+      <stop offset="0%" style="stop-color:#f0f0f0"/>
+      <stop offset="50%" style="stop-color:#d0d0d0"/>
+      <stop offset="100%" style="stop-color:#b8b8b8"/>
     </linearGradient>
     <linearGradient id="screenGradient" x1="0%" y1="0%" x2="0%" y2="100%">
       <stop offset="0%" style="stop-color:#00cc66"/>
@@ -23,84 +23,85 @@
     </linearGradient>
     <!-- 影用フィルター -->
     <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
-      <feDropShadow dx="2" dy="4" stdDeviation="4" flood-opacity="0.3"/>
+      <feDropShadow dx="2" dy="3" stdDeviation="3" flood-opacity="0.25"/>
     </filter>
     <filter id="cardShadow" x="-20%" y="-20%" width="140%" height="140%">
-      <feDropShadow dx="1" dy="2" stdDeviation="2" flood-opacity="0.25"/>
+      <feDropShadow dx="2" dy="4" stdDeviation="4" flood-opacity="0.3"/>
     </filter>
   </defs>
 
   <!-- 背景（透明） -->
   <rect width="256" height="256" fill="none"/>
 
-  <!-- ICカードリーダー本体 (SONY RC-S380風) -->
+  <!-- ICカードリーダー本体（小さめ） -->
   <g filter="url(#shadow)">
-    <!-- リーダー本体（黒い四角形） -->
-    <rect x="40" y="155" width="176" height="90" rx="12" ry="12" fill="url(#readerGradient)"/>
-
+    <!-- リーダー本体 -->
+    <rect x="58" y="185" width="140" height="60" rx="8" ry="8" fill="url(#readerGradient)"/>
     <!-- リーダー上面（タッチ面） -->
-    <rect x="50" y="165" width="156" height="60" rx="8" ry="8" fill="#2a2a2a"/>
-
+    <rect x="68" y="193" width="120" height="40" rx="5" ry="5" fill="#2a2a2a"/>
     <!-- タッチ面の中央マーク（NFCシンボル風） -->
-    <circle cx="128" cy="195" r="18" fill="none" stroke="#555" stroke-width="3"/>
-    <circle cx="128" cy="195" r="10" fill="none" stroke="#555" stroke-width="2"/>
-    <circle cx="128" cy="195" r="4" fill="#555"/>
-
-    <!-- ステータスLED（緑色で点灯中） -->
-    <rect x="185" y="235" width="20" height="4" rx="2" fill="url(#screenGradient)"/>
+    <circle cx="128" cy="213" r="12" fill="none" stroke="#555" stroke-width="2"/>
+    <circle cx="128" cy="213" r="6" fill="none" stroke="#555" stroke-width="1.5"/>
+    <circle cx="128" cy="213" r="2" fill="#555"/>
+    <!-- ステータスLED -->
+    <rect x="168" y="237" width="14" height="3" rx="1.5" fill="url(#screenGradient)"/>
   </g>
 
-  <!-- 手（手首から先） -->
-  <g filter="url(#cardShadow)">
-    <!-- 手のひら・手首部分 -->
-    <path d="M 200 20
-             Q 220 25, 230 50
-             L 235 90
-             Q 238 110, 225 125
-             L 195 135
-             Q 175 138, 165 125
-             L 155 95
-             Q 150 75, 160 55
-             L 175 30
-             Q 185 18, 200 20 Z"
-          fill="url(#skinGradient)" stroke="#d4a574" stroke-width="1"/>
-
-    <!-- 親指 -->
-    <path d="M 160 75
-             Q 145 70, 140 80
-             Q 135 95, 145 105
-             Q 155 115, 165 110
-             L 165 95
-             Q 160 85, 160 75 Z"
-          fill="url(#skinGradient)" stroke="#d4a574" stroke-width="1"/>
-
-    <!-- 指の付け根の線 -->
-    <path d="M 175 30 Q 180 45, 175 55" fill="none" stroke="#d4a574" stroke-width="1" opacity="0.5"/>
-    <path d="M 195 25 Q 200 40, 198 50" fill="none" stroke="#d4a574" stroke-width="1" opacity="0.5"/>
-  </g>
-
-  <!-- 交通系ICカード（手に持って斜めにかざしている状態） -->
-  <g filter="url(#cardShadow)" transform="rotate(-25, 128, 85)">
-    <!-- カード本体（銀色） -->
-    <rect x="55" y="50" width="105" height="66" rx="5" ry="5" fill="url(#cardGradient)" stroke="#888" stroke-width="1"/>
+  <!-- 交通系ICカード（大きく、斜めに） -->
+  <g filter="url(#cardShadow)" transform="rotate(-20, 128, 90)">
+    <!-- カード本体 -->
+    <rect x="48" y="35" width="135" height="85" rx="6" ry="6" fill="url(#cardGradient)" stroke="#999" stroke-width="1.5"/>
 
     <!-- ICチップ部分（金色） -->
-    <rect x="65" y="62" width="24" height="18" rx="2" ry="2" fill="#d4af37"/>
-    <line x1="70" y1="62" x2="70" y2="80" stroke="#c4a030" stroke-width="1"/>
-    <line x1="77" y1="62" x2="77" y2="80" stroke="#c4a030" stroke-width="1"/>
-    <line x1="84" y1="62" x2="84" y2="80" stroke="#c4a030" stroke-width="1"/>
-    <line x1="65" y1="68" x2="89" y2="68" stroke="#c4a030" stroke-width="1"/>
-    <line x1="65" y1="74" x2="89" y2="74" stroke="#c4a030" stroke-width="1"/>
+    <rect x="62" y="52" width="32" height="24" rx="2" ry="2" fill="#d4af37"/>
+    <line x1="69" y1="52" x2="69" y2="76" stroke="#c4a030" stroke-width="1"/>
+    <line x1="78" y1="52" x2="78" y2="76" stroke="#c4a030" stroke-width="1"/>
+    <line x1="87" y1="52" x2="87" y2="76" stroke="#c4a030" stroke-width="1"/>
+    <line x1="62" y1="60" x2="94" y2="60" stroke="#c4a030" stroke-width="1"/>
+    <line x1="62" y1="68" x2="94" y2="68" stroke="#c4a030" stroke-width="1"/>
 
-    <!-- 「交通系IC」テキスト -->
-    <text x="107" y="102" font-family="Arial, sans-serif" font-size="11" font-weight="bold"
-          fill="#333" text-anchor="middle">交通系IC</text>
+    <!-- カード内のライン装飾 -->
+    <line x1="62" y1="95" x2="168" y2="95" stroke="#bbb" stroke-width="1"/>
+    <line x1="62" y1="105" x2="140" y2="105" stroke="#ccc" stroke-width="1"/>
   </g>
 
-  <!-- WiFi/NFC波形（カードとリーダー間の通信を表現） -->
-  <g stroke="#00aa55" fill="none" stroke-width="2.5" opacity="0.8">
-    <path d="M 100 130 Q 128 138, 156 130"/>
-    <path d="M 92 140 Q 128 152, 164 140"/>
-    <path d="M 84 150 Q 128 166, 172 150"/>
+  <!-- 手（親指と人差し指でカードの右端を持つ） -->
+  <g filter="url(#shadow)">
+    <!-- 人差し指（カードの上側） -->
+    <path d="M 195 45
+             Q 210 42, 220 48
+             Q 232 55, 235 70
+             L 230 85
+             Q 225 92, 215 90
+             L 195 82
+             Q 188 78, 190 68
+             L 195 45 Z"
+          fill="url(#skinGradient)" stroke="#d4a574" stroke-width="1"/>
+
+    <!-- 親指（カードの下側） -->
+    <path d="M 200 120
+             Q 215 125, 225 118
+             Q 238 108, 235 95
+             L 228 88
+             Q 220 85, 210 90
+             L 195 100
+             Q 188 108, 195 115
+             L 200 120 Z"
+          fill="url(#skinGradient)" stroke="#d4a574" stroke-width="1"/>
+
+    <!-- 手のひら（指の付け根部分、右端に少し見える） -->
+    <path d="M 220 70
+             Q 240 75, 250 95
+             Q 255 115, 245 130
+             L 225 120
+             Q 215 100, 220 70 Z"
+          fill="url(#skinGradient)" stroke="#d4a574" stroke-width="1"/>
+  </g>
+
+  <!-- WiFi/NFC波形（通信を表現） -->
+  <g stroke="#00aa55" fill="none" stroke-width="3" opacity="0.7">
+    <path d="M 105 150 Q 128 158, 151 150"/>
+    <path d="M 95 162 Q 128 174, 161 162"/>
+    <path d="M 85 174 Q 128 190, 171 174"/>
   </g>
 </svg>
