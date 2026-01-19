@@ -92,12 +92,19 @@ public partial class SystemManageViewModel : ViewModelBase
     [RelayCommand]
     public async Task CreateBackupAsync()
     {
+        // 自動バックアップと同じフォルダをデフォルトに設定
+        var settings = await _settingsRepository.GetAppSettingsAsync();
+        var defaultBackupFolder = !string.IsNullOrEmpty(settings.BackupPath)
+            ? settings.BackupPath
+            : PathValidator.GetDefaultBackupPath();
+
         var dialog = new SaveFileDialog
         {
             Filter = "データベースファイル (*.db)|*.db",
             DefaultExt = ".db",
             FileName = $"backup_manual_{DateTime.Now:yyyyMMdd_HHmmss}.db",
-            Title = "バックアップファイルの保存先を選択"
+            Title = "バックアップファイルの保存先を選択",
+            InitialDirectory = Directory.Exists(defaultBackupFolder) ? defaultBackupFolder : null
         };
 
         if (dialog.ShowDialog() != true)
