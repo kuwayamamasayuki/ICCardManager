@@ -529,10 +529,14 @@ namespace ICCardManager.Services
         private void ApplyDataRowBorder(IXLWorksheet worksheet, int row)
         {
             // B列とC列を結合（摘要）
-            worksheet.Range(row, 2, row, 3).Merge();
+            var summaryRange = worksheet.Range(row, 2, row, 3);
+            summaryRange.Merge();
+            summaryRange.Style.Alignment.WrapText = true; // 折り返して全体を表示
 
             // H列からK列を結合（備考）
-            worksheet.Range(row, 8, row, 11).Merge();
+            var noteRange = worksheet.Range(row, 8, row, 11);
+            noteRange.Merge();
+            noteRange.Style.Alignment.WrapText = true; // 折り返して全体を表示
 
             // A列（出納年月日）を中央寄せ
             worksheet.Cell(row, 1).Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
