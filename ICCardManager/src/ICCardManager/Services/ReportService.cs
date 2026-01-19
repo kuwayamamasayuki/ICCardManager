@@ -534,6 +534,9 @@ namespace ICCardManager.Services
             // H列からK列を結合（備考）
             worksheet.Range(row, 8, row, 11).Merge();
 
+            // A列（出納年月日）を中央寄せ
+            worksheet.Cell(row, 1).Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
+
             // A列からK列まで罫線を適用
             var range = worksheet.Range(row, 1, row, 11);
             range.Style.Border.TopBorder = XLBorderStyleValues.Thin;
