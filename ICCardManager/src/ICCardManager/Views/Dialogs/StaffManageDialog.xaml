@@ -5,6 +5,7 @@
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:vm="clr-namespace:ICCardManager.ViewModels"
         xmlns:converters="clr-namespace:ICCardManager.Views.Converters"
+        xmlns:app="clr-namespace:ICCardManager"
         mc:Ignorable="d"
         d:DataContext="{d:DesignInstance Type=vm:StaffManageViewModel}"
         Title="職員管理"
@@ -161,12 +162,26 @@
                                     </Style>
                                 </TextBlock.Style>
                             </TextBlock>
-                            <!-- デバッグ用ボタン -->
+                            <!-- デバッグ用ボタン (DEBUG ビルドのみ表示: Issue #289) -->
                             <Button Content="[DEBUG] 職員証読み取りシミュレート"
                                     Command="{Binding SimulateCardReadCommand}"
                                     Margin="0,10,0,0"
-                                    Padding="10,5"
-                                    Visibility="{Binding IsWaitingForCard, Converter={StaticResource BoolToVisibilityConverter}}"/>
+                                    Padding="10,5">
+                                <Button.Style>
+                                    <Style TargetType="Button">
+                                        <Setter Property="Visibility" Value="Collapsed"/>
+                                        <Style.Triggers>
+                                            <MultiDataTrigger>
+                                                <MultiDataTrigger.Conditions>
+                                                    <Condition Binding="{Binding IsWaitingForCard}" Value="True"/>
+                                                    <Condition Binding="{Binding Source={x:Static app:App.IsDebugBuild}}" Value="True"/>
+                                                </MultiDataTrigger.Conditions>
+                                                <Setter Property="Visibility" Value="Visible"/>
+                                            </MultiDataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </Button.Style>
+                            </Button>
                         </StackPanel>
                     </Border>
 
