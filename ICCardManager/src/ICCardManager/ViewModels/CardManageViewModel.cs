@@ -162,9 +162,14 @@ namespace ICCardManager.ViewModels
         }
 
         /// <summary>
+        /// 編集コマンドが実行可能かどうか
+        /// </summary>
+        private bool CanEdit() => SelectedCard != null;
+
+        /// <summary>
         /// 編集モードを開始
         /// </summary>
-        [RelayCommand]
+        [RelayCommand(CanExecute = nameof(CanEdit))]
         public void StartEdit()
         {
             if (SelectedCard == null) return;
@@ -321,9 +326,14 @@ namespace ICCardManager.ViewModels
         }
 
         /// <summary>
+        /// 削除コマンドが実行可能かどうか
+        /// </summary>
+        private bool CanDelete() => SelectedCard != null && !SelectedCard.IsLent;
+
+        /// <summary>
         /// 削除
         /// </summary>
-        [RelayCommand]
+        [RelayCommand(CanExecute = nameof(CanDelete))]
         public async Task DeleteAsync()
         {
             if (SelectedCard == null) return;
@@ -332,6 +342,18 @@ namespace ICCardManager.ViewModels
             {
                 StatusMessage = "貸出中のカードは削除できません";
                 IsStatusError = true;
+                return;
+            }
+
+            // 削除確認ダイアログを表示
+            var result = MessageBox.Show(
+                $"カード「{SelectedCard.CardType} {SelectedCard.CardNumber}」を削除しますか？\n\n※削除後も履歴データは保持されます。",
+                "削除確認",
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Warning);
+
+            if (result != MessageBoxResult.Yes)
+            {
                 return;
             }
 
@@ -449,6 +471,10 @@ namespace ICCardManager.ViewModels
         /// </summary>
         partial void OnSelectedCardChanged(CardDto? value)
         {
+            // コマンドの実行可否を再評価
+            StartEditCommand.NotifyCanExecuteChanged();
+            DeleteCommand.NotifyCanExecuteChanged();
+
             // 新規登録モード中は選択変更を無視
             if (IsNewCard) return;
 
