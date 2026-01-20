@@ -126,7 +126,6 @@
                             ToolTip="新しいカードを登録"/>
                     <Button Content="編集"
                             Command="{Binding StartEditCommand}"
-                            IsEnabled="{Binding SelectedCard, Converter={StaticResource BoolToVisibilityConverter}}"
                             Padding="15,8"
                             Margin="0,0,10,5"
                             AutomationProperties.Name="カード情報編集"
@@ -134,7 +133,6 @@
                             ToolTip="選択したカードを編集"/>
                     <Button Content="削除"
                             Command="{Binding DeleteCommand}"
-                            IsEnabled="{Binding SelectedCard, Converter={StaticResource BoolToVisibilityConverter}}"
                             Padding="15,8"
                             Margin="0,0,0,5"
                             Foreground="Red"
