@@ -553,6 +553,9 @@ namespace ICCardManager.Services
             dateCell.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
             dateCell.Style.Alignment.ShrinkToFit = true;
 
+            // G列（氏名）を中央寄せ
+            worksheet.Cell(row, 7).Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
+
             // A列からK列まで罫線を適用
             var range = worksheet.Range(row, 1, row, 11);
             range.Style.Border.TopBorder = XLBorderStyleValues.Thin;
