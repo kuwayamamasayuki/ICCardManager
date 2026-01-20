@@ -221,11 +221,12 @@ namespace ICCardManager.Services
                 using var workbook = new XLWorkbook(templatePath);
                 var worksheet = workbook.Worksheets.First();
 
-                // ヘッダ情報を設定
+                // ヘッダ情報を設定（印刷ヘッダーへの移行とRow 1削除を含む）
                 SetHeaderInfo(worksheet, card);
 
                 // データを出力
-                var startRow = 3; // データ開始行（テンプレートに依存）
+                // Row 1削除後は列ヘッダーが1行目になるため、データは2行目から開始
+                var startRow = 2;
                 var currentRow = startRow;
 
                 // 4月の場合は前年度繰越を追加
@@ -384,52 +385,52 @@ namespace ICCardManager.Services
         /// <summary>
         /// ヘッダ情報を設定
         /// </summary>
+        /// <remarks>
+        /// Excelのセル内に動的なページ番号を表示することはできないため、
+        /// テンプレートの1行目（物品分類、品名、規格、単位、頁）の内容を
+        /// すべて印刷ヘッダーに移動します。
+        ///
+        /// 処理内容:
+        /// 1. 印刷ヘッダーにすべての物品情報とページ番号を設定
+        /// 2. テンプレートの1行目を削除（列ヘッダーが1行目になる）
+        /// 3. 列ヘッダー（旧2行目、新1行目）を印刷タイトル行に設定
+        /// </remarks>
         private void SetHeaderInfo(IXLWorksheet worksheet, IcCard card)
         {
-            // 1行目のヘッダ情報を設定（テンプレートのセル位置に合わせる）
-            // D1: 品名の値、G1: 規格の値
-            worksheet.Cell("D1").Value = card.CardType;      // 品名の値
-            worksheet.Cell("G1").Value = card.CardNumber;    // 規格の値
+            // 印刷ヘッダーにすべての物品情報を設定
+            SetPrintHeader(worksheet, card);
 
-            // ヘッダ行のフォントサイズを調整して1行に収める
-            AdjustHeaderRowFontSize(worksheet);
+            // テンプレートの1行目（物品情報行）を削除
+            // これにより、列ヘッダー（出納年月日、摘要、...）が1行目になる
+            worksheet.Row(1).Delete();
 
-            // 印刷ヘッダーにページ番号を設定（頁欄の代わり）
-            SetPrintPageNumber(worksheet);
+            // 新しい1行目（旧2行目の列ヘッダー）を印刷タイトル行として設定
+            // 複数ページに印刷される場合、各ページの上部に列ヘッダーが繰り返し印刷される
+            worksheet.PageSetup.SetRowsToRepeatAtTop(1, 1);
         }
 
         /// <summary>
-        /// 印刷ヘッダーにページ番号を設定
+        /// 印刷ヘッダーにすべての物品情報とページ番号を設定
         /// </summary>
         /// <remarks>
-        /// Excelのセル内に動的なページ番号を表示することはできないため、
-        /// 印刷ヘッダーの右側にページ番号を設定します。
-        /// 印刷時に「頁 1 / 2」のような形式で表示されます。
+        /// 印刷ヘッダーの構成:
+        /// - 左側: 物品の分類: 雑品（金券類）
+        /// - 中央: 品名: {カード種別}　規格: {カード番号}　単位: 円
+        /// - 右側: 頁 X / Y
         /// </remarks>
-        private void SetPrintPageNumber(IXLWorksheet worksheet)
+        private void SetPrintHeader(IXLWorksheet worksheet, IcCard card)
         {
-            // 印刷ヘッダーの右側にページ番号を設定
+            // 左側: 物品の分類
+            worksheet.PageSetup.Header.Left.AddText("物品の分類: 雑品（金券類）");
+
+            // 中央: 品名、規格、単位
+            worksheet.PageSetup.Header.Center.AddText($"品名: {card.CardType}　規格: {card.CardNumber}　単位: 円");
+
+            // 右側: ページ番号
             worksheet.PageSetup.Header.Right.AddText("頁 ");
             worksheet.PageSetup.Header.Right.AddText(XLHFPredefinedText.PageNumber);
             worksheet.PageSetup.Header.Right.AddText(" / ");
             worksheet.PageSetup.Header.Right.AddText(XLHFPredefinedText.NumberOfPages);
-        }
-
-        /// <summary>
-        /// ヘッダ行のフォントサイズを調整
-        /// </summary>
-        /// <remarks>
-        /// 物品分類～単位：円までのヘッダ部分（1行目）を1行に収めるため、
-        /// フォントサイズを小さくして調整します。
-        /// </remarks>
-        private void AdjustHeaderRowFontSize(IXLWorksheet worksheet)
-        {
-            // 1行目（物品分類～単位：円）のフォントサイズを9ptに設定
-            const double headerFontSize = 9;
-
-            // A1～K1の範囲のフォントサイズを調整
-            var headerRange = worksheet.Range("A1:K1");
-            headerRange.Style.Font.FontSize = headerFontSize;
         }
 
         /// <summary>
