@@ -528,6 +528,9 @@ namespace ICCardManager.Services
         /// </summary>
         private void ApplyDataRowBorder(IXLWorksheet worksheet, int row)
         {
+            // 行の高さを30に設定
+            worksheet.Row(row).Height = 30;
+
             // B列とC列を結合（摘要）
             var summaryRange = worksheet.Range(row, 2, row, 3);
             summaryRange.Merge();
