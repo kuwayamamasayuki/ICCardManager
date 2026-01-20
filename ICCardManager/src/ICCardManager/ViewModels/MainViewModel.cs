@@ -900,6 +900,10 @@ public partial class MainViewModel : ViewModelBase
     /// <summary>
     /// 未登録カードの処理
     /// </summary>
+    /// <remarks>
+    /// Issue #312: IDmからカード種別（Suica/PASMO等）や職員証かどうかを判別することは
+    /// 技術的に不可能なため、常にユーザーに選択させる。
+    /// </remarks>
     private async Task HandleUnregisteredCardAsync(string idm)
     {
         // 職員証登録モード中は処理をスキップ（StaffManageViewModelが処理する）
@@ -917,24 +921,39 @@ public partial class MainViewModel : ViewModelBase
         _soundPlayer.Play(SoundType.Warning);
         // メイン画面は変更しない（Issue #186）
 
-        // 登録確認ダイアログを表示
-        // 種別は自動判別できないため、IDmは職員にとって意味がないため、表示しない（Issue #278）
-        var result = System.Windows.MessageBox.Show(
-            "このカードは登録されていません。\n\n新規登録しますか？",
-            "未登録カード",
-            System.Windows.MessageBoxButton.YesNo,
-            System.Windows.MessageBoxImage.Question);
-
-        if (result == System.Windows.MessageBoxResult.Yes)
+        // Issue #312: IDmからカード種別を判別することは技術的に不可能なため、
+        // カスタムダイアログでユーザーに職員証か交通系ICカードかを選択させる
+        var selectionDialog = new Views.Dialogs.CardTypeSelectionDialog
         {
-            // カード管理画面を開いて新規登録モードで開始
-            var dialog = App.Current.ServiceProvider.GetRequiredService<Views.Dialogs.CardManageDialog>();
-            dialog.Owner = System.Windows.Application.Current.MainWindow;
-            dialog.InitializeWithIdm(idm);
-            dialog.ShowDialog();
+            Owner = System.Windows.Application.Current.MainWindow
+        };
+        selectionDialog.ShowDialog();
 
-            // ダイアログを閉じた後、貸出中カード一覧を更新
-            await RefreshLentCardsAsync();
+        switch (selectionDialog.SelectionResult)
+        {
+            case Views.Dialogs.CardTypeSelectionResult.StaffCard:
+                // 職員管理画面を開いて新規登録モードで開始
+                var staffDialog = App.Current.ServiceProvider.GetRequiredService<Views.Dialogs.StaffManageDialog>();
+                staffDialog.Owner = System.Windows.Application.Current.MainWindow;
+                staffDialog.InitializeWithIdm(idm);
+                staffDialog.ShowDialog();
+                break;
+
+            case Views.Dialogs.CardTypeSelectionResult.IcCard:
+                // カード管理画面を開いて新規登録モードで開始
+                var cardDialog = App.Current.ServiceProvider.GetRequiredService<Views.Dialogs.CardManageDialog>();
+                cardDialog.Owner = System.Windows.Application.Current.MainWindow;
+                cardDialog.InitializeWithIdm(idm);
+                cardDialog.ShowDialog();
+
+                // ダイアログを閉じた後、貸出中カード一覧を更新
+                await RefreshLentCardsAsync();
+                break;
+
+            case Views.Dialogs.CardTypeSelectionResult.Cancel:
+            default:
+                // キャンセル - 何もしない
+                break;
         }
 
         ResetState();

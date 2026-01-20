@@ -116,6 +116,24 @@ namespace ICCardManager.ViewModels
         }
 
         /// <summary>
+        /// IDmを指定して新規登録モードを開始（未登録カード検出時用）
+        /// </summary>
+        /// <param name="idm">職員証のIDm</param>
+        public void StartNewStaffWithIdm(string idm)
+        {
+            SelectedStaff = null;
+            IsEditing = true;
+            IsNewStaff = true;
+            EditStaffIdm = idm;
+            EditName = string.Empty;
+            EditNumber = string.Empty;
+            EditNote = string.Empty;
+            StatusMessage = "職員証を読み取りました。氏名を入力してください。";
+            IsStatusError = false;
+            IsWaitingForCard = false; // すでにIDmがあるので待機しない
+        }
+
+        /// <summary>
         /// 編集モードを開始
         /// </summary>
         [RelayCommand]
