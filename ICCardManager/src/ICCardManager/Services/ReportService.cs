@@ -546,8 +546,12 @@ namespace ICCardManager.Services
             noteRange.Merge();
             noteRange.Style.Alignment.WrapText = true; // 折り返して全体を表示
 
-            // A列（出納年月日）を中央寄せ
-            worksheet.Cell(row, 1).Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
+            // A列（出納年月日）のフォントサイズを14ptに設定し、中央寄せ
+            // 文字が大きすぎる場合に備えて「縮小して全体を表示する」を設定
+            var dateCell = worksheet.Cell(row, 1);
+            dateCell.Style.Font.FontSize = 14;
+            dateCell.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
+            dateCell.Style.Alignment.ShrinkToFit = true;
 
             // A列からK列まで罫線を適用
             var range = worksheet.Range(row, 1, row, 11);
