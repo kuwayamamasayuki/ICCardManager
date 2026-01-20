@@ -259,6 +259,17 @@ namespace ICCardManager.ViewModels
                                     IsStatusError = true;
                                 }
                             }
+                            else
+                            {
+                                // Issue #314: 復元しない場合は案内メッセージを表示
+                                MessageBox.Show(
+                                    $"このカードは以前 {existing.CardNumber} として登録されていたため、新規登録はできません。\n\n" +
+                                    "異なるカード番号等で登録したい場合は、先に復元を行い、その後に編集してください。",
+                                    "ご案内",
+                                    MessageBoxButton.OK,
+                                    MessageBoxImage.Information);
+                                CancelEdit();
+                            }
                             return;
                         }
                         else
@@ -439,7 +450,13 @@ namespace ICCardManager.ViewModels
                         }
                         else
                         {
-                            // 復元しない場合は編集モードをキャンセル
+                            // Issue #314: 復元しない場合は案内メッセージを表示
+                            MessageBox.Show(
+                                $"このカードは以前 {existing.CardNumber} として登録されていたため、新規登録はできません。\n\n" +
+                                "異なるカード番号等で登録したい場合は、先に復元を行い、その後に編集してください。",
+                                "ご案内",
+                                MessageBoxButton.OK,
+                                MessageBoxImage.Information);
                             CancelEdit();
                         }
                     }
