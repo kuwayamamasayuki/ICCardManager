@@ -531,6 +531,11 @@ namespace ICCardManager.Services
             // 行の高さを30に設定
             worksheet.Row(row).Height = 30;
 
+            // D〜F列（受入金額、払出金額、残額）のフォントサイズを14ptに設定
+            // 最大金額20,000円（6文字）を考慮し、列幅10.58に収まるサイズ
+            var amountRange = worksheet.Range(row, 4, row, 6);
+            amountRange.Style.Font.FontSize = 14;
+
             // B列とC列を結合（摘要）
             var summaryRange = worksheet.Range(row, 2, row, 3);
             summaryRange.Merge();
