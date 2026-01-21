@@ -1,28 +1,27 @@
 using System.Windows;
-using ICCardManager.ViewModels;
 
-namespace ICCardManager.Views.Dialogs
+namespace DebugDataViewer
 {
     /// <summary>
-    /// デバッグ用データビューアダイアログ
+    /// デバッグ用データビューアのメインウィンドウ
     /// ICカードの生データおよびDBデータを確認するための開発者向けツール
     /// </summary>
-    public partial class DebugDataViewerDialog : Window
+    public partial class MainWindow : Window
     {
-        private readonly DebugDataViewerViewModel _viewModel;
+        private readonly MainViewModel _viewModel;
 
-        public DebugDataViewerDialog(DebugDataViewerViewModel viewModel)
+        public MainWindow(MainViewModel viewModel)
         {
             InitializeComponent();
 
             _viewModel = viewModel;
             DataContext = _viewModel;
 
-            Loaded += DebugDataViewerDialog_Loaded;
+            Loaded += MainWindow_Loaded;
             Closed += (s, e) => _viewModel.Cleanup();
         }
 
-        private async void DebugDataViewerDialog_Loaded(object sender, RoutedEventArgs e)
+        private async void MainWindow_Loaded(object sender, RoutedEventArgs e)
         {
             await _viewModel.InitializeAsync();
         }

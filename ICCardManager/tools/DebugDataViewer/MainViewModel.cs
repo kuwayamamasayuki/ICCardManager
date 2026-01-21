@@ -1,8 +1,10 @@
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.ComponentModel;
 using System.Data;
 using System.Linq;
+using System.Runtime.CompilerServices;
 using System.Text;
 using System.Threading.Tasks;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -11,7 +13,7 @@ using ICCardManager.Data;
 using ICCardManager.Infrastructure.CardReader;
 using ICCardManager.Models;
 
-namespace ICCardManager.ViewModels
+namespace DebugDataViewer
 {
     /// <summary>
     /// 履歴アイテム（デバッグ表示用）
@@ -31,10 +33,23 @@ namespace ICCardManager.ViewModels
     /// <summary>
     /// デバッグ用データビューアのViewModel
     /// </summary>
-    public partial class DebugDataViewerViewModel : ViewModelBase
+    public partial class MainViewModel : ObservableObject
     {
         private readonly ICardReader _cardReader;
         private readonly DbContext _dbContext;
+
+        #region 共通プロパティ
+
+        [ObservableProperty]
+        private bool _isBusy;
+
+        [ObservableProperty]
+        private string _busyMessage = string.Empty;
+
+        [ObservableProperty]
+        private string _databasePath = string.Empty;
+
+        #endregion
 
         #region カードデータ関連プロパティ
 
@@ -90,10 +105,13 @@ namespace ICCardManager.ViewModels
 
         #endregion
 
-        public DebugDataViewerViewModel(ICardReader cardReader, DbContext dbContext)
+        public MainViewModel(ICardReader cardReader, DbContext dbContext)
         {
             _cardReader = cardReader;
             _dbContext = dbContext;
+
+            // データベースパスを取得
+            DatabasePath = _dbContext.DatabasePath;
 
             // カード読み取りイベントを登録
             _cardReader.CardRead += OnCardRead;
@@ -233,40 +251,45 @@ namespace ICCardManager.ViewModels
 
             try
             {
-                using (BeginBusy($"{SelectedTableName}を読み込み中..."))
+                IsBusy = true;
+                BusyMessage = $"{SelectedTableName}を読み込み中...";
+
+                await Task.Run(() =>
                 {
-                    await Task.Run(() =>
+                    var connection = _dbContext.GetConnection();
+
+                    // テーブル名をサニタイズ（SQLインジェクション対策）
+                    var validTables = new[] { "staff", "ic_card", "ledger", "ledger_detail", "operation_log", "settings" };
+                    if (!validTables.Contains(SelectedTableName))
                     {
-                        var connection = _dbContext.GetConnection();
+                        throw new ArgumentException($"無効なテーブル名: {SelectedTableName}");
+                    }
 
-                        // テーブル名をサニタイズ（SQLインジェクション対策）
-                        var validTables = new[] { "staff", "ic_card", "ledger", "ledger_detail", "operation_log", "settings" };
-                        if (!validTables.Contains(SelectedTableName))
-                        {
-                            throw new ArgumentException($"無効なテーブル名: {SelectedTableName}");
-                        }
+                    using var command = connection.CreateCommand();
+                    command.CommandText = $"SELECT * FROM {SelectedTableName} ORDER BY 1";
 
-                        using var command = connection.CreateCommand();
-                        command.CommandText = $"SELECT * FROM {SelectedTableName} ORDER BY 1";
+                    using var adapter = new System.Data.SQLite.SQLiteDataAdapter(command);
+                    var dataTable = new DataTable();
+                    adapter.Fill(dataTable);
 
-                        using var adapter = new System.Data.SQLite.SQLiteDataAdapter(command);
-                        var dataTable = new DataTable();
-                        adapter.Fill(dataTable);
-
-                        // UIスレッドで更新
-                        System.Windows.Application.Current.Dispatcher.Invoke(() =>
-                        {
-                            TableData = dataTable.DefaultView;
-                            RecordCount = dataTable.Rows.Count;
-                            DbStatusMessage = $"{SelectedTableName}テーブルを読み込みました";
-                        });
+                    // UIスレッドで更新
+                    System.Windows.Application.Current.Dispatcher.Invoke(() =>
+                    {
+                        TableData = dataTable.DefaultView;
+                        RecordCount = dataTable.Rows.Count;
+                        DbStatusMessage = $"{SelectedTableName}テーブルを読み込みました";
                     });
-                }
+                });
             }
             catch (Exception ex)
             {
                 DbStatusMessage = $"エラー: {ex.Message}";
                 System.Diagnostics.Debug.WriteLine($"[DebugDataViewer] DB読み込みエラー: {ex}");
+            }
+            finally
+            {
+                IsBusy = false;
+                BusyMessage = string.Empty;
             }
         }
 

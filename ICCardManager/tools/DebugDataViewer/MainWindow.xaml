@@ -1,18 +1,16 @@
-<Window x:Class="ICCardManager.Views.Dialogs.DebugDataViewerDialog"
+<Window x:Class="DebugDataViewer.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
-        xmlns:vm="clr-namespace:ICCardManager.ViewModels"
+        xmlns:local="clr-namespace:DebugDataViewer"
         mc:Ignorable="d"
-        d:DataContext="{d:DesignInstance Type=vm:DebugDataViewerViewModel}"
-        Title="デバッグ用データビューア"
-        Height="700"
-        Width="900"
-        WindowStartupLocation="CenterOwner"
-        ResizeMode="CanResize"
-        AutomationProperties.Name="デバッグ用データビューアダイアログ"
-        AutomationProperties.HelpText="ICカードの生データおよびDBデータを確認するための開発者向けツールです">
+        d:DataContext="{d:DesignInstance Type=local:MainViewModel}"
+        Title="ICカード管理システム - デバッグ用データビューア"
+        Height="750"
+        Width="1000"
+        WindowStartupLocation="CenterScreen"
+        ResizeMode="CanResize">
 
     <Window.Resources>
         <BooleanToVisibilityConverter x:Key="BoolToVisibilityConverter"/>
@@ -32,11 +30,22 @@
 
     <Grid Margin="15">
         <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
 
-        <TabControl Grid.Row="0">
+        <!-- ヘッダー -->
+        <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="0,0,0,15">
+            <TextBlock Text="デバッグ用データビューア" FontSize="20" FontWeight="Bold"/>
+            <TextBlock Text=" - ICカードの生データおよびDBデータを確認"
+                       FontSize="14"
+                       Foreground="Gray"
+                       VerticalAlignment="Bottom"
+                       Margin="10,0,0,2"/>
+        </StackPanel>
+
+        <TabControl Grid.Row="1">
             <!-- カードデータタブ -->
             <TabItem Header="カードデータ">
                 <Grid Margin="15">
@@ -185,17 +194,21 @@
             </TabItem>
         </TabControl>
 
-        <!-- 閉じるボタン -->
-        <StackPanel Grid.Row="1" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,15,0,0">
+        <!-- フッター -->
+        <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,15,0,0">
+            <TextBlock Text="{Binding DatabasePath, StringFormat=DB: {0}}"
+                       Foreground="Gray"
+                       FontSize="11"
+                       VerticalAlignment="Center"
+                       Margin="0,0,20,0"/>
             <Button Content="閉じる"
                     Click="CloseButton_Click"
                     Padding="20,10"
-                    MinWidth="100"
-                    IsCancel="True"/>
+                    MinWidth="100"/>
         </StackPanel>
 
         <!-- 処理中オーバーレイ -->
-        <Border Grid.RowSpan="2"
+        <Border Grid.RowSpan="3"
                 Background="#80000000"
                 Visibility="{Binding IsBusy, Converter={StaticResource BoolToVisibilityConverter}}">
             <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
