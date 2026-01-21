@@ -198,67 +198,128 @@ namespace DebugDataViewer
         /// <summary>
         /// カード読み取りイベントハンドラ
         /// </summary>
-        private async void OnCardRead(object sender, CardReadEventArgs e)
+        private void OnCardRead(object sender, CardReadEventArgs e)
         {
             if (!IsWaitingForCard) return;
 
             IsWaitingForCard = false;
             OnPropertyChanged(nameof(IsNotWaitingForCard));
 
-            await System.Windows.Application.Current.Dispatcher.InvokeAsync(async () =>
+            // UIスレッドで非同期処理を実行
+            _ = System.Windows.Application.Current.Dispatcher.InvokeAsync(() => ReadCardDataAsync(e));
+        }
+
+        /// <summary>
+        /// カードデータを読み取る（UIスレッドで実行）
+        /// </summary>
+        private async Task ReadCardDataAsync(CardReadEventArgs e)
+        {
+            var rawDataBuilder = new StringBuilder();
+            var errors = new List<string>();
+
+            try
             {
+                CardStatusMessage = "基本情報を読み取り中...";
+
+                // 基本情報（CardReadイベントから取得済み）
+                CardIdm = e.Idm;
+                CardSystemCode = e.SystemCode ?? "(不明)";
+
+                rawDataBuilder.AppendLine($"IDm: {e.Idm}");
+                rawDataBuilder.AppendLine($"SystemCode: {e.SystemCode}");
+                rawDataBuilder.AppendLine();
+
+                // 残高を読み取り
+                CardStatusMessage = "残高を読み取り中...（カードを離さないでください）";
                 try
                 {
-                    CardStatusMessage = "読み取り中...";
-
-                    // 基本情報
-                    CardIdm = e.Idm;
-                    CardSystemCode = e.SystemCode ?? "(不明)";
-
-                    // 残高を読み取り
                     var balance = await _cardReader.ReadBalanceAsync(e.Idm);
-                    CardBalance = balance.HasValue ? $"¥{balance.Value:N0}" : "(読み取り失敗)";
-
-                    // 履歴を読み取り
-                    var history = await _cardReader.ReadHistoryAsync(e.Idm);
-                    var historyList = history.ToList();
-
-                    // 生データ表示（履歴はすでにパース済みなので、概要を表示）
-                    var rawDataBuilder = new StringBuilder();
-                    rawDataBuilder.AppendLine($"IDm: {e.Idm}");
-                    rawDataBuilder.AppendLine($"SystemCode: {e.SystemCode}");
-                    rawDataBuilder.AppendLine($"履歴件数: {historyList.Count}件");
-                    rawDataBuilder.AppendLine();
-                    rawDataBuilder.AppendLine("※生のバイトデータは実機でのみ取得可能です。");
-                    rawDataBuilder.AppendLine("※ここではパース後のデータを表示しています。");
-                    RawHistoryData = rawDataBuilder.ToString();
-
-                    // 履歴データを成形して表示
-                    CardHistoryItems.Clear();
-                    var index = 1;
-                    foreach (var detail in historyList)
+                    if (balance.HasValue)
                     {
-                        CardHistoryItems.Add(new CardHistoryItem
-                        {
-                            Index = index++,
-                            UseDate = detail.UseDate,
-                            EntryStation = detail.EntryStation ?? "-",
-                            ExitStation = detail.ExitStation ?? "-",
-                            Amount = detail.Amount,
-                            Balance = detail.Balance,
-                            TransactionType = detail.IsCharge ? "チャージ" : (detail.IsBus ? "バス" : "鉄道"),
-                            RawData = FormatDetailAsRaw(detail)
-                        });
+                        CardBalance = $"¥{balance.Value:N0}";
+                        rawDataBuilder.AppendLine($"残高: {balance.Value}円 (0x{balance.Value:X4})");
                     }
+                    else
+                    {
+                        CardBalance = "(読み取り失敗 - null)";
+                        errors.Add("残高: 読み取り結果がnull");
+                        rawDataBuilder.AppendLine("残高: 読み取り失敗 (null)");
+                    }
+                }
+                catch (Exception balanceEx)
+                {
+                    CardBalance = $"(エラー: {balanceEx.Message})";
+                    errors.Add($"残高: {balanceEx.Message}");
+                    rawDataBuilder.AppendLine($"残高: エラー - {balanceEx.Message}");
+                    rawDataBuilder.AppendLine($"  詳細: {balanceEx.GetType().Name}");
+                }
 
+                // 履歴を読み取り
+                CardStatusMessage = "履歴を読み取り中...（カードを離さないでください）";
+                var historyList = new List<LedgerDetail>();
+                try
+                {
+                    var history = await _cardReader.ReadHistoryAsync(e.Idm);
+                    historyList = history?.ToList() ?? new List<LedgerDetail>();
+                    rawDataBuilder.AppendLine($"履歴件数: {historyList.Count}件");
+                }
+                catch (Exception historyEx)
+                {
+                    errors.Add($"履歴: {historyEx.Message}");
+                    rawDataBuilder.AppendLine($"履歴: エラー - {historyEx.Message}");
+                    rawDataBuilder.AppendLine($"  詳細: {historyEx.GetType().Name}");
+                }
+
+                rawDataBuilder.AppendLine();
+                if (errors.Count > 0)
+                {
+                    rawDataBuilder.AppendLine("=== エラー詳細 ===");
+                    foreach (var error in errors)
+                    {
+                        rawDataBuilder.AppendLine($"・{error}");
+                    }
+                    rawDataBuilder.AppendLine();
+                    rawDataBuilder.AppendLine("※カードを読み取り中は離さないでください");
+                }
+
+                RawHistoryData = rawDataBuilder.ToString();
+
+                // 履歴データを成形して表示
+                CardHistoryItems.Clear();
+                var index = 1;
+                foreach (var detail in historyList)
+                {
+                    CardHistoryItems.Add(new CardHistoryItem
+                    {
+                        Index = index++,
+                        UseDate = detail.UseDate,
+                        EntryStation = detail.EntryStation ?? "-",
+                        ExitStation = detail.ExitStation ?? "-",
+                        Amount = detail.Amount,
+                        Balance = detail.Balance,
+                        TransactionType = detail.IsCharge ? "チャージ" : (detail.IsBus ? "バス" : "鉄道"),
+                        RawData = FormatDetailAsRaw(detail)
+                    });
+                }
+
+                // 完了メッセージ
+                if (errors.Count > 0)
+                {
+                    CardStatusMessage = $"読み取り完了（一部エラーあり: {errors.Count}件）- 詳細は生データ欄を確認";
+                }
+                else
+                {
                     CardStatusMessage = $"読み取り完了（履歴: {historyList.Count}件）";
                 }
-                catch (Exception ex)
-                {
-                    CardStatusMessage = $"エラー: {ex.Message}";
-                    System.Diagnostics.Debug.WriteLine($"[DebugDataViewer] カード読み取りエラー: {ex}");
-                }
-            });
+            }
+            catch (Exception ex)
+            {
+                CardStatusMessage = $"予期せぬエラー: {ex.Message}";
+                rawDataBuilder.AppendLine();
+                rawDataBuilder.AppendLine("=== 予期せぬエラー ===");
+                rawDataBuilder.AppendLine(ex.ToString());
+                RawHistoryData = rawDataBuilder.ToString();
+            }
         }
 
         /// <summary>
