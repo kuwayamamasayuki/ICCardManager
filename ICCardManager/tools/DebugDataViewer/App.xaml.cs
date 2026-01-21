@@ -39,8 +39,31 @@ namespace DebugDataViewer
             }
             catch (Exception ex)
             {
+                var errorMessage = $"起動エラーが発生しました:\n\n{ex.Message}\n\n詳細:\n{ex}";
+
+                // クリップボードにコピー
+                try
+                {
+                    Clipboard.SetText(errorMessage);
+                }
+                catch
+                {
+                    // クリップボードへのコピーに失敗しても続行
+                }
+
+                // エラーログファイルに出力
+                try
+                {
+                    var logPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "error.log");
+                    File.WriteAllText(logPath, $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}]\n{errorMessage}");
+                }
+                catch
+                {
+                    // ログ出力に失敗しても続行
+                }
+
                 MessageBox.Show(
-                    $"起動エラーが発生しました:\n\n{ex.Message}\n\n詳細:\n{ex}",
+                    $"起動エラーが発生しました。\n\nエラー内容はクリップボードにコピーされました。\nまた、error.log ファイルにも出力されています。\n\n{ex.Message}",
                     "DebugDataViewer - エラー",
                     MessageBoxButton.OK,
                     MessageBoxImage.Error);
