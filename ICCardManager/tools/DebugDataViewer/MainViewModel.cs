@@ -217,9 +217,6 @@ namespace DebugDataViewer
             var rawDataBuilder = new StringBuilder();
             var errors = new List<string>();
 
-            // 交通系ICカードのシステムコード
-            const string CYBERNETICS_SYSTEM_CODE = "88B4";
-
             try
             {
                 CardStatusMessage = "基本情報を読み取り中...";
@@ -228,29 +225,14 @@ namespace DebugDataViewer
                 CardIdm = e.Idm;
                 CardSystemCode = e.SystemCode ?? "(不明)";
 
-                // カード種別を判定
-                var isTransportCard = string.Equals(e.SystemCode, CYBERNETICS_SYSTEM_CODE, StringComparison.OrdinalIgnoreCase);
-                var cardTypeName = GetCardTypeName(e.SystemCode);
-
                 rawDataBuilder.AppendLine($"IDm: {e.Idm}");
-                rawDataBuilder.AppendLine($"SystemCode: {e.SystemCode}");
-                rawDataBuilder.AppendLine($"カード種別: {cardTypeName}");
+                rawDataBuilder.AppendLine($"SystemCode: {e.SystemCode} (※ポーリング応答値)");
+                rawDataBuilder.AppendLine();
+                rawDataBuilder.AppendLine("※SystemCodeはポーリング時の応答値であり、カード種別の判定には使用できません。");
+                rawDataBuilder.AppendLine("※残高・履歴の読み取りを試みてカード種別を判定します。");
                 rawDataBuilder.AppendLine();
 
-                if (!isTransportCard)
-                {
-                    rawDataBuilder.AppendLine("=== 注意 ===");
-                    rawDataBuilder.AppendLine("このカードは交通系ICカードではありません。");
-                    rawDataBuilder.AppendLine("残高・履歴データは交通系ICカード専用の機能です。");
-                    rawDataBuilder.AppendLine();
-
-                    CardBalance = "(対象外)";
-                    RawHistoryData = rawDataBuilder.ToString();
-                    CardStatusMessage = $"読み取り完了 - {cardTypeName}（残高・履歴なし）";
-                    return;
-                }
-
-                // 残高を読み取り
+                // 残高を読み取り（カード種別に関係なく試行）
                 CardStatusMessage = "残高を読み取り中...（カードを離さないでください）";
                 try
                 {
@@ -323,14 +305,21 @@ namespace DebugDataViewer
                     });
                 }
 
-                // 完了メッセージ
-                if (errors.Count > 0)
+                // 完了メッセージ（残高読み取り成功=交通系ICカード）
+                var balanceReadSuccess = !errors.Any(e => e.StartsWith("残高:"));
+                var historyReadSuccess = !errors.Any(e => e.StartsWith("履歴:"));
+
+                if (balanceReadSuccess && historyReadSuccess)
                 {
-                    CardStatusMessage = $"読み取り完了（一部エラーあり: {errors.Count}件）- 詳細は生データ欄を確認";
+                    CardStatusMessage = $"読み取り完了 - 交通系ICカード（残高: {CardBalance}、履歴: {historyList.Count}件）";
+                }
+                else if (!balanceReadSuccess && !historyReadSuccess)
+                {
+                    CardStatusMessage = "読み取り完了 - 交通系ICカードではない可能性があります（残高・履歴なし）";
                 }
                 else
                 {
-                    CardStatusMessage = $"読み取り完了（履歴: {historyList.Count}件）";
+                    CardStatusMessage = $"読み取り完了（一部エラーあり）- 詳細は生データ欄を確認";
                 }
             }
             catch (Exception ex)
@@ -341,26 +330,6 @@ namespace DebugDataViewer
                 rawDataBuilder.AppendLine(ex.ToString());
                 RawHistoryData = rawDataBuilder.ToString();
             }
-        }
-
-        /// <summary>
-        /// システムコードからカード種別名を取得
-        /// </summary>
-        private string GetCardTypeName(string systemCode)
-        {
-            if (string.IsNullOrEmpty(systemCode))
-                return "不明";
-
-            return systemCode.ToUpperInvariant() switch
-            {
-                "88B4" => "交通系ICカード（Cybernetics）",
-                "0003" => "FeliCa Lite（職員証・会員証等）",
-                "8008" => "WAON",
-                "8004" => "Edy",
-                "FE00" => "FeliCa Plug / NFC Forum Type 3 Tag",
-                "12FC" => "FeliCa（汎用）",
-                _ => $"不明 (0x{systemCode})"
-            };
         }
 
         /// <summary>
