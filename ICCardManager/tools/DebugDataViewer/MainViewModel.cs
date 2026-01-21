@@ -115,6 +115,8 @@ namespace DebugDataViewer
 
             // カード読み取りイベントを登録
             _cardReader.CardRead += OnCardRead;
+            _cardReader.ConnectionStateChanged += OnConnectionStateChanged;
+            _cardReader.Error += OnCardReaderError;
         }
 
         /// <summary>
@@ -124,6 +126,55 @@ namespace DebugDataViewer
         {
             // 初期状態でstaffテーブルを読み込む
             await LoadTableDataAsync();
+
+            // カードリーダーの監視を開始
+            try
+            {
+                await _cardReader.StartReadingAsync();
+                CardStatusMessage = _cardReader.ConnectionState == CardReaderConnectionState.Connected
+                    ? "カードをタッチしてください"
+                    : "カードリーダーに接続中...";
+            }
+            catch (Exception ex)
+            {
+                CardStatusMessage = $"カードリーダー初期化エラー: {ex.Message}";
+            }
+        }
+
+        /// <summary>
+        /// 接続状態変更イベントハンドラ
+        /// </summary>
+        private void OnConnectionStateChanged(object sender, ConnectionStateChangedEventArgs e)
+        {
+            System.Windows.Application.Current?.Dispatcher.InvokeAsync(() =>
+            {
+                switch (e.State)
+                {
+                    case CardReaderConnectionState.Connected:
+                        if (!IsWaitingForCard)
+                        {
+                            CardStatusMessage = "カードをタッチしてください";
+                        }
+                        break;
+                    case CardReaderConnectionState.Disconnected:
+                        CardStatusMessage = $"カードリーダー未接続: {e.Message ?? "リーダーを確認してください"}";
+                        break;
+                    case CardReaderConnectionState.Reconnecting:
+                        CardStatusMessage = $"再接続中... (試行 {e.RetryCount})";
+                        break;
+                }
+            });
+        }
+
+        /// <summary>
+        /// カードリーダーエラーイベントハンドラ
+        /// </summary>
+        private void OnCardReaderError(object sender, Exception e)
+        {
+            System.Windows.Application.Current?.Dispatcher.InvokeAsync(() =>
+            {
+                CardStatusMessage = $"エラー: {e.Message}";
+            });
         }
 
         /// <summary>
@@ -296,9 +347,22 @@ namespace DebugDataViewer
         /// <summary>
         /// クリーンアップ
         /// </summary>
-        public void Cleanup()
+        public async void Cleanup()
         {
+            // カードリーダーの監視を停止
+            try
+            {
+                await _cardReader.StopReadingAsync();
+            }
+            catch
+            {
+                // 停止時のエラーは無視
+            }
+
+            // イベント購読を解除
             _cardReader.CardRead -= OnCardRead;
+            _cardReader.ConnectionStateChanged -= OnConnectionStateChanged;
+            _cardReader.Error -= OnCardReaderError;
         }
 
         partial void OnIsWaitingForCardChanged(bool value)
