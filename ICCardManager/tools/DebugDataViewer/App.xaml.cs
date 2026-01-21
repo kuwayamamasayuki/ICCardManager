@@ -26,14 +26,26 @@ namespace DebugDataViewer
         {
             base.OnStartup(e);
 
-            // DIコンテナのセットアップ
-            var services = new ServiceCollection();
-            ConfigureServices(services);
-            ServiceProvider = services.BuildServiceProvider();
+            try
+            {
+                // DIコンテナのセットアップ
+                var services = new ServiceCollection();
+                ConfigureServices(services);
+                ServiceProvider = services.BuildServiceProvider();
 
-            // メインウィンドウを表示
-            var mainWindow = ServiceProvider.GetRequiredService<MainWindow>();
-            mainWindow.Show();
+                // メインウィンドウを表示
+                var mainWindow = ServiceProvider.GetRequiredService<MainWindow>();
+                mainWindow.Show();
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(
+                    $"起動エラーが発生しました:\n\n{ex.Message}\n\n詳細:\n{ex}",
+                    "DebugDataViewer - エラー",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Error);
+                Shutdown(1);
+            }
         }
 
         /// <summary>
