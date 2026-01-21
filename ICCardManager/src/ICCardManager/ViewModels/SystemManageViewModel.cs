@@ -371,4 +371,15 @@ public partial class SystemManageViewModel : ViewModelBase
         dialog.Owner = Application.Current.MainWindow;
         dialog.ShowDialog();
     }
+
+    /// <summary>
+    /// デバッグ用データビューアダイアログを開く
+    /// </summary>
+    [RelayCommand]
+    public void OpenDebugDataViewer()
+    {
+        var dialog = App.Current.ServiceProvider.GetRequiredService<Views.Dialogs.DebugDataViewerDialog>();
+        dialog.Owner = Application.Current.MainWindow;
+        dialog.ShowDialog();
+    }
 }

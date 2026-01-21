@@ -8,7 +8,7 @@
         mc:Ignorable="d"
         d:DataContext="{d:DesignInstance Type=vm:SystemManageViewModel}"
         Title="システム管理"
-        Height="620"
+        Height="720"
         Width="650"
         WindowStartupLocation="CenterOwner"
         ResizeMode="NoResize"
@@ -32,6 +32,7 @@
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
@@ -162,8 +163,27 @@
             </Grid>
         </GroupBox>
 
+        <!-- デバッグツール（開発者向け） -->
+        <GroupBox Grid.Row="3" Header="デバッグツール（開発者向け）" Margin="0,15,0,0" Padding="15">
+            <StackPanel>
+                <TextBlock Text="ICカードの生データおよびDBデータを確認できます。"
+                           Foreground="Gray"
+                           FontSize="{DynamicResource SmallFontSize}"
+                           Margin="0,0,0,10"/>
+
+                <Button Content="デバッグ用データビューア"
+                        Command="{Binding OpenDebugDataViewerCommand}"
+                        Padding="15,10"
+                        Background="#607D8B"
+                        Foreground="White"
+                        HorizontalAlignment="Left"
+                        AutomationProperties.Name="デバッグ用データビューアを開く"
+                        ToolTip="ICカードの生データおよびDBデータを確認します"/>
+            </StackPanel>
+        </GroupBox>
+
         <!-- ステータスメッセージ -->
-        <Border Grid.Row="3"
+        <Border Grid.Row="4"
                 Padding="10"
                 Margin="0,15,0,0"
                 CornerRadius="5"
@@ -195,7 +215,7 @@
         </Border>
 
         <!-- 閉じるボタン -->
-        <StackPanel Grid.Row="4"
+        <StackPanel Grid.Row="5"
                     Orientation="Horizontal"
                     HorizontalAlignment="Right"
                     Margin="0,15,0,0">
@@ -209,7 +229,7 @@
         </StackPanel>
 
         <!-- 処理中オーバーレイ -->
-        <Border Grid.RowSpan="5"
+        <Border Grid.RowSpan="6"
                 Background="#80000000"
                 Visibility="{Binding IsBusy, Converter={StaticResource BoolToVisibilityConverter}}">
             <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
