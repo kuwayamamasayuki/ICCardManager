@@ -2,6 +2,7 @@ using System;
 using System.IO;
 using System.Windows;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using ICCardManager.Data;
 using ICCardManager.Infrastructure.CardReader;
 
@@ -76,6 +77,13 @@ namespace DebugDataViewer
         /// </summary>
         private void ConfigureServices(IServiceCollection services)
         {
+            // ロギング
+            services.AddLogging(builder =>
+            {
+                builder.AddDebug();
+                builder.SetMinimumLevel(LogLevel.Debug);
+            });
+
             // データベースコンテキスト
             var dbPath = FindDatabasePath();
             services.AddSingleton(sp => new DbContext(dbPath));
