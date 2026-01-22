@@ -184,7 +184,9 @@ namespace ICCardManager
             services.AddSingleton<ICardReader, MockCardReader>();
             services.AddSingleton<DebugDataService>();
     #else
-            services.AddSingleton<ICardReader, PcScCardReader>();
+            // Sony PaSoRi 用の FelicaCardReader を使用（Issue #321）
+            // PC/SC API では FeliCa の残高・履歴が読み取れないため、felicalib.dll 経由で読み取る
+            services.AddSingleton<ICardReader, FelicaCardReader>();
     #endif
             services.AddSingleton<ISoundPlayer, SoundPlayer>();
 
