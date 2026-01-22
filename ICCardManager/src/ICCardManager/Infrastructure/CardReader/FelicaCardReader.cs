@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Threading;
 using System.Threading.Tasks;
 using System.Timers;
 using FelicaLib;
@@ -38,6 +37,7 @@ namespace ICCardManager.Infrastructure.CardReader
     public class FelicaCardReader : ICardReader
     {
         private readonly ILogger<FelicaCardReader> _logger;
+        private readonly object _lockObject = new object();
         private Timer _pollingTimer;
         private Timer _healthCheckTimer;
         private bool _isReading;
@@ -156,6 +156,10 @@ namespace ICCardManager.Infrastructure.CardReader
         /// </summary>
         /// <param name="idm">カードのIDm</param>
         /// <returns>利用履歴詳細のリスト（最大20件、新しい順）</returns>
+        /// <remarks>
+        /// 読み取り前にカードのIDmを検証し、指定されたカードと一致することを確認します。
+        /// カードが載せ替えられた場合は空のリストを返します。
+        /// </remarks>
         public async Task<IEnumerable<LedgerDetail>> ReadHistoryAsync(string idm)
         {
             var details = new List<LedgerDetail>();
@@ -164,6 +168,15 @@ namespace ICCardManager.Infrastructure.CardReader
             {
                 try
                 {
+                    // IDm検証: 読み取り対象のカードが載っていることを確認
+                    var currentIdmBytes = FelicaUtility.GetIDm(FelicaSystemCode.Suica);
+                    var currentIdm = GetIdmString(currentIdmBytes);
+                    if (!string.Equals(currentIdm, idm, StringComparison.OrdinalIgnoreCase))
+                    {
+                        _logger.LogWarning("FelicaCardReader: 履歴読み取り時にIDmが一致しません。期待={Expected}, 実際={Actual}", idm, currentIdm);
+                        return;
+                    }
+
                     // FelicaUtility.ReadBlocksWithoutEncryption で複数ブロックを一括取得
                     var historyDataList = new List<byte[]>();
 
@@ -214,12 +227,25 @@ namespace ICCardManager.Infrastructure.CardReader
         /// </summary>
         /// <param name="idm">カードのIDm</param>
         /// <returns>残高（円）。読み取り失敗時は null</returns>
+        /// <remarks>
+        /// 読み取り前にカードのIDmを検証し、指定されたカードと一致することを確認します。
+        /// カードが載せ替えられた場合は null を返します。
+        /// </remarks>
         public async Task<int?> ReadBalanceAsync(string idm)
         {
             return await Task.Run<int?>(() =>
             {
                 try
                 {
+                    // IDm検証: 読み取り対象のカードが載っていることを確認
+                    var currentIdmBytes = FelicaUtility.GetIDm(FelicaSystemCode.Suica);
+                    var currentIdm = GetIdmString(currentIdmBytes);
+                    if (!string.Equals(currentIdm, idm, StringComparison.OrdinalIgnoreCase))
+                    {
+                        _logger.LogWarning("FelicaCardReader: 残高読み取り時にIDmが一致しません。期待={Expected}, 実際={Actual}", idm, currentIdm);
+                        return null;
+                    }
+
                     // 最新の履歴レコード（ブロック0）から残高を取得
                     var data = FelicaUtility.ReadWithoutEncryption(
                         FelicaSystemCode.Suica,
@@ -361,15 +387,18 @@ namespace ICCardManager.Infrastructure.CardReader
                     return;
                 }
 
-                // 同一カードの連続読み取りを防止
-                var now = DateTime.Now;
-                if (idm == _lastReadIdm && (now - _lastReadTime).TotalMilliseconds < DuplicateReadPreventionMs)
+                // 同一カードの連続読み取りを防止（スレッドセーフ）
+                lock (_lockObject)
                 {
-                    return;
-                }
+                    var now = DateTime.Now;
+                    if (idm == _lastReadIdm && (now - _lastReadTime).TotalMilliseconds < DuplicateReadPreventionMs)
+                    {
+                        return;
+                    }
 
-                _lastReadIdm = idm;
-                _lastReadTime = now;
+                    _lastReadIdm = idm;
+                    _lastReadTime = now;
+                }
 
                 _logger.LogInformation("FelicaCardReader: カード検出 IDm={Idm}", idm);
 
