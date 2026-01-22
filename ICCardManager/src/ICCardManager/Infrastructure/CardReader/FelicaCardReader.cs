@@ -37,12 +37,28 @@ namespace ICCardManager.Infrastructure.CardReader
     public class FelicaCardReader : ICardReader
     {
         private readonly ILogger<FelicaCardReader> _logger;
-        private readonly object _lockObject = new object();
+
+        /// <summary>
+        /// FelicaUtility へのアクセスを同期するためのロックオブジェクト。
+        /// FelicaLib.DotNet はスレッドセーフではないため、すべてのアクセスを直列化する必要があります。
+        /// </summary>
+        private readonly object _felicaLock = new object();
+
+        /// <summary>
+        /// 最後に読み取ったIDmの同期用ロックオブジェクト
+        /// </summary>
+        private readonly object _lastReadLock = new object();
+
         private Timer _pollingTimer;
         private Timer _healthCheckTimer;
         private bool _isReading;
         private bool _disposed;
         private CardReaderConnectionState _connectionState = CardReaderConnectionState.Disconnected;
+
+        /// <summary>
+        /// ポーリング処理中かどうか（再入防止用）
+        /// </summary>
+        private volatile bool _isPolling;
 
         /// <summary>
         /// 最後に読み取ったカードのIDm
@@ -57,12 +73,12 @@ namespace ICCardManager.Infrastructure.CardReader
         /// <summary>
         /// 同一カードの連続読み取りを防止する時間（ミリ秒）
         /// </summary>
-        private const int DuplicateReadPreventionMs = 1000;
+        private const int DuplicateReadPreventionMs = 1500;
 
         /// <summary>
         /// カード検出のポーリング間隔（ミリ秒）
         /// </summary>
-        private const int PollingIntervalMs = 300;
+        private const int PollingIntervalMs = 500;
 
         /// <summary>
         /// ヘルスチェック間隔（ミリ秒）
@@ -73,6 +89,16 @@ namespace ICCardManager.Infrastructure.CardReader
         /// 最大履歴件数
         /// </summary>
         private const int MaxHistoryCount = 20;
+
+        /// <summary>
+        /// 残高サービスコード (サイバネ規格)
+        /// </summary>
+        private const int SuicaBalanceServiceCode = 0x008B;
+
+        /// <summary>
+        /// ワイルドカードシステムコード（すべてのFeliCaカードを検出）
+        /// </summary>
+        private const int WildcardSystemCode = 0xFFFF;
 
         public event EventHandler<CardReadEventArgs> CardRead;
         public event EventHandler<Exception> Error;
@@ -166,56 +192,70 @@ namespace ICCardManager.Infrastructure.CardReader
 
             await Task.Run(() =>
             {
-                try
+                lock (_felicaLock)
                 {
-                    // IDm検証: 読み取り対象のカードが載っていることを確認
-                    var currentIdmBytes = FelicaUtility.GetIDm(FelicaSystemCode.Suica);
-                    var currentIdm = GetIdmString(currentIdmBytes);
-                    if (!string.Equals(currentIdm, idm, StringComparison.OrdinalIgnoreCase))
+                    try
                     {
-                        _logger.LogWarning("FelicaCardReader: 履歴読み取り時にIDmが一致しません。期待={Expected}, 実際={Actual}", idm, currentIdm);
-                        return;
-                    }
-
-                    // FelicaUtility.ReadBlocksWithoutEncryption で複数ブロックを一括取得
-                    var historyDataList = new List<byte[]>();
-
-                    foreach (var data in FelicaUtility.ReadBlocksWithoutEncryption(
-                        FelicaSystemCode.Suica,
-                        FelicaServiceCode.SuicaHistory,
-                        0,
-                        MaxHistoryCount))
-                    {
-                        if (data == null || data.All(b => b == 0))
+                        // IDm検証: 読み取り対象のカードが載っていることを確認
+                        var currentIdmBytes = FelicaUtility.GetIDm(FelicaSystemCode.Suica);
+                        var currentIdm = GetIdmString(currentIdmBytes);
+                        if (!string.Equals(currentIdm, idm, StringComparison.OrdinalIgnoreCase))
                         {
-                            break;
+                            _logger.LogWarning("FelicaCardReader: 履歴読み取り時にIDmが一致しません。期待={Expected}, 実際={Actual}", idm, currentIdm);
+                            return;
                         }
-                        historyDataList.Add(data);
-                    }
 
-                    _logger.LogDebug("FelicaCardReader: 履歴データを {Count} 件取得", historyDataList.Count);
+                        // FelicaUtility.ReadBlocksWithoutEncryption で複数ブロックを一括取得
+                        var historyDataList = new List<byte[]>();
 
-                    // IDmからカード種別を判定
-                    var cardType = CardTypeDetector.DetectFromIdm(idm);
+                        _logger.LogDebug("FelicaCardReader: 履歴読み取り開始 (システムコード=0x{SystemCode:X4}, サービスコード=0x{ServiceCode:X4})",
+                            (int)FelicaSystemCode.Suica, (int)FelicaServiceCode.SuicaHistory);
 
-                    // 履歴データをパースして金額を計算
-                    for (int i = 0; i < historyDataList.Count; i++)
-                    {
-                        var currentData = historyDataList[i];
-                        var nextData = i + 1 < historyDataList.Count ? historyDataList[i + 1] : null;
-
-                        var detail = ParseHistoryData(currentData, nextData, cardType);
-                        if (detail != null)
+                        int blockIndex = 0;
+                        foreach (var data in FelicaUtility.ReadBlocksWithoutEncryption(
+                            FelicaSystemCode.Suica,
+                            FelicaServiceCode.SuicaHistory,
+                            0,
+                            MaxHistoryCount))
                         {
-                            details.Add(detail);
+                            if (data == null)
+                            {
+                                _logger.LogDebug("FelicaCardReader: ブロック{Index}はnull", blockIndex);
+                                break;
+                            }
+                            if (data.All(b => b == 0))
+                            {
+                                _logger.LogDebug("FelicaCardReader: ブロック{Index}は全て0", blockIndex);
+                                break;
+                            }
+                            _logger.LogDebug("FelicaCardReader: ブロック{Index}: {Data}", blockIndex, BitConverter.ToString(data));
+                            historyDataList.Add(data);
+                            blockIndex++;
+                        }
+
+                        _logger.LogInformation("FelicaCardReader: 履歴データを {Count} 件取得", historyDataList.Count);
+
+                        // IDmからカード種別を判定
+                        var cardType = CardTypeDetector.DetectFromIdm(idm);
+
+                        // 履歴データをパースして金額を計算
+                        for (int i = 0; i < historyDataList.Count; i++)
+                        {
+                            var currentData = historyDataList[i];
+                            var nextData = i + 1 < historyDataList.Count ? historyDataList[i + 1] : null;
+
+                            var detail = ParseHistoryData(currentData, nextData, cardType);
+                            if (detail != null)
+                            {
+                                details.Add(detail);
+                            }
                         }
                     }
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogError(ex, "FelicaCardReader: 履歴読み取りエラー");
-                    var cardReaderException = CardReaderException.HistoryReadFailed(ex.Message, ex);
-                    Error?.Invoke(this, cardReaderException);
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(ex, "FelicaCardReader: 履歴読み取りエラー");
+                        Error?.Invoke(this, CardReaderException.HistoryReadFailed(ex.Message, ex));
+                    }
                 }
             });
 
@@ -228,46 +268,90 @@ namespace ICCardManager.Infrastructure.CardReader
         /// <param name="idm">カードのIDm</param>
         /// <returns>残高（円）。読み取り失敗時は null</returns>
         /// <remarks>
+        /// <para>
         /// 読み取り前にカードのIDmを検証し、指定されたカードと一致することを確認します。
         /// カードが載せ替えられた場合は null を返します。
+        /// </para>
+        /// <para>
+        /// 残高は以下の順序で取得を試みます：
+        /// 1. 残高専用サービスコード (0x008B) から直接取得
+        /// 2. 履歴サービスコードの最新レコードから取得（フォールバック）
+        /// </para>
         /// </remarks>
         public async Task<int?> ReadBalanceAsync(string idm)
         {
             return await Task.Run<int?>(() =>
             {
-                try
+                lock (_felicaLock)
                 {
-                    // IDm検証: 読み取り対象のカードが載っていることを確認
-                    var currentIdmBytes = FelicaUtility.GetIDm(FelicaSystemCode.Suica);
-                    var currentIdm = GetIdmString(currentIdmBytes);
-                    if (!string.Equals(currentIdm, idm, StringComparison.OrdinalIgnoreCase))
+                    try
                     {
-                        _logger.LogWarning("FelicaCardReader: 残高読み取り時にIDmが一致しません。期待={Expected}, 実際={Actual}", idm, currentIdm);
+                        // IDm検証: 読み取り対象のカードが載っていることを確認
+                        var currentIdmBytes = FelicaUtility.GetIDm(FelicaSystemCode.Suica);
+                        var currentIdm = GetIdmString(currentIdmBytes);
+                        if (!string.Equals(currentIdm, idm, StringComparison.OrdinalIgnoreCase))
+                        {
+                            _logger.LogWarning("FelicaCardReader: 残高読み取り時にIDmが一致しません。期待={Expected}, 実際={Actual}", idm, currentIdm);
+                            return null;
+                        }
+
+                        // 方法1: 残高専用サービスコード (0x008B) から直接取得
+                        try
+                        {
+                            _logger.LogDebug("FelicaCardReader: 残高サービス(0x{ServiceCode:X4})から読み取り試行", SuicaBalanceServiceCode);
+                            var balanceData = FelicaUtility.ReadWithoutEncryption(
+                                FelicaSystemCode.Suica,
+                                SuicaBalanceServiceCode,
+                                0);
+
+                            if (balanceData != null && balanceData.Length >= 2)
+                            {
+                                _logger.LogDebug("FelicaCardReader: 残高サービスデータ: {Data}", BitConverter.ToString(balanceData));
+                                // バイト0-1が残高（リトルエンディアン）
+                                var balance = balanceData[0] + (balanceData[1] << 8);
+                                _logger.LogDebug("FelicaCardReader: 残高読み取り成功（残高サービス）: {Balance}円", balance);
+                                return balance;
+                            }
+                            else
+                            {
+                                _logger.LogDebug("FelicaCardReader: 残高サービスからのデータがnullまたは短い: Length={Length}", balanceData?.Length ?? -1);
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogDebug("FelicaCardReader: 残高サービスからの読み取り失敗、履歴にフォールバック: {Message}", ex.Message);
+                        }
+
+                        // 方法2: 履歴サービスコードの最新レコードから取得（フォールバック）
+                        _logger.LogDebug("FelicaCardReader: 履歴サービス(0x{ServiceCode:X4})から読み取り試行", (int)FelicaServiceCode.SuicaHistory);
+                        var historyData = FelicaUtility.ReadWithoutEncryption(
+                            FelicaSystemCode.Suica,
+                            FelicaServiceCode.SuicaHistory,
+                            0);
+
+                        if (historyData != null && historyData.Length >= 12)
+                        {
+                            _logger.LogDebug("FelicaCardReader: 履歴サービスデータ: {Data}", BitConverter.ToString(historyData));
+                            // バイト10-11が残高（リトルエンディアン）
+                            var balance = historyData[10] + (historyData[11] << 8);
+                            _logger.LogDebug("FelicaCardReader: 残高読み取り成功（履歴サービス）: {Balance}円 (byte10=0x{Byte10:X2}, byte11=0x{Byte11:X2})",
+                                balance, historyData[10], historyData[11]);
+                            return balance;
+                        }
+                        else
+                        {
+                            _logger.LogDebug("FelicaCardReader: 履歴サービスからのデータがnullまたは短い: Length={Length}", historyData?.Length ?? -1);
+                        }
+
+                        _logger.LogWarning("FelicaCardReader: 残高データを取得できませんでした");
                         return null;
                     }
-
-                    // 最新の履歴レコード（ブロック0）から残高を取得
-                    var data = FelicaUtility.ReadWithoutEncryption(
-                        FelicaSystemCode.Suica,
-                        FelicaServiceCode.SuicaHistory,
-                        0);
-
-                    if (data != null && data.Length >= 12)
+                    catch (Exception ex)
                     {
-                        // バイト10-11が残高（リトルエンディアン）
-                        var balance = data[10] + (data[11] << 8);
-                        _logger.LogDebug("FelicaCardReader: 残高読み取り成功: {Balance}円", balance);
-                        return balance;
+                        _logger.LogError(ex, "FelicaCardReader: 残高読み取りエラー");
+                        Error?.Invoke(this, CardReaderException.BalanceReadFailed(ex.Message, ex));
+                        return null;
                     }
-
-                    return null;
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogError(ex, "FelicaCardReader: 残高読み取りエラー");
-                    var cardReaderException = CardReaderException.BalanceReadFailed(ex.Message, ex);
-                    Error?.Invoke(this, cardReaderException);
-                    return null;
                 }
             });
         }
@@ -317,24 +401,28 @@ namespace ICCardManager.Infrastructure.CardReader
         /// </summary>
         private bool CheckFelicaLibAvailable()
         {
-            try
+            lock (_felicaLock)
             {
-                // FelicaUtility でテスト読み取りを試行
-                // カードがなくても例外が発生しなければ DLL は存在する
-                _ = FelicaUtility.GetIDm(FelicaSystemCode.Suica);
-                return true;
-            }
-            catch (DllNotFoundException)
-            {
-                _logger.LogError("FelicaCardReader: felicalib.dll が見つかりません");
-                return false;
-            }
-            catch (Exception ex)
-            {
-                // カードがない、リーダーが接続されていない等の場合はエラーになるが、
-                // DLL自体は存在する
-                _logger.LogDebug("FelicaCardReader: ヘルスチェック例外（カードなし等）: {Message}", ex.Message);
-                return true;
+                try
+                {
+                    // FelicaUtility でテスト読み取りを試行
+                    // ワイルドカードシステムコードを使用してすべてのFeliCaカードに対応
+                    // カードがなくても例外が発生しなければ DLL は存在する
+                    _ = FelicaUtility.GetIDm(WildcardSystemCode);
+                    return true;
+                }
+                catch (DllNotFoundException)
+                {
+                    _logger.LogError("FelicaCardReader: felicalib.dll が見つかりません");
+                    return false;
+                }
+                catch (Exception ex)
+                {
+                    // カードがない、リーダーが接続されていない等の場合はエラーになるが、
+                    // DLL自体は存在する
+                    _logger.LogDebug("FelicaCardReader: ヘルスチェック例外（カードなし等）: {Message}", ex.Message);
+                    return true;
+                }
             }
         }
 
@@ -372,23 +460,39 @@ namespace ICCardManager.Infrastructure.CardReader
         /// </summary>
         private void OnPollingTimerElapsed(object sender, ElapsedEventArgs e)
         {
+            // 再入防止: 前回のポーリングが完了していない場合はスキップ
+            if (_isPolling)
+            {
+                return;
+            }
+
             try
             {
-                // IDm を取得（カードが載っていれば取得できる）
-                var idmBytes = FelicaUtility.GetIDm(FelicaSystemCode.Suica);
-                if (idmBytes == null || idmBytes.Length == 0)
+                _isPolling = true;
+
+                string idm;
+
+                // FelicaUtility へのアクセスはすべてロックで保護
+                lock (_felicaLock)
                 {
-                    return; // カードなし
+                    // ワイルドカードシステムコード（0xFFFF）ですべてのFeliCaカードを検出
+                    // これにより、交通系ICカードだけでなく職員証なども検出できる
+                    var idmBytes = FelicaUtility.GetIDm(WildcardSystemCode);
+                    if (idmBytes == null || idmBytes.Length == 0)
+                    {
+                        return; // カードなし
+                    }
+
+                    idm = GetIdmString(idmBytes);
                 }
 
-                var idm = GetIdmString(idmBytes);
                 if (string.IsNullOrEmpty(idm))
                 {
                     return;
                 }
 
                 // 同一カードの連続読み取りを防止（スレッドセーフ）
-                lock (_lockObject)
+                lock (_lastReadLock)
                 {
                     var now = DateTime.Now;
                     if (idm == _lastReadIdm && (now - _lastReadTime).TotalMilliseconds < DuplicateReadPreventionMs)
@@ -402,7 +506,7 @@ namespace ICCardManager.Infrastructure.CardReader
 
                 _logger.LogInformation("FelicaCardReader: カード検出 IDm={Idm}", idm);
 
-                // イベントを発火
+                // イベントを発火（UIスレッドで処理されるため、ここでは即座に返る）
                 CardRead?.Invoke(this, new CardReadEventArgs
                 {
                     Idm = idm,
@@ -413,6 +517,10 @@ namespace ICCardManager.Infrastructure.CardReader
             {
                 // Polling 失敗はカードが載っていない場合も含むので、通常はログを出さない
                 System.Diagnostics.Debug.WriteLine($"FelicaCardReader Polling: {ex.Message}");
+            }
+            finally
+            {
+                _isPolling = false;
             }
         }
 
@@ -448,6 +556,12 @@ namespace ICCardManager.Infrastructure.CardReader
         /// </summary>
         private void OnHealthCheckTimerElapsed(object sender, ElapsedEventArgs e)
         {
+            // ポーリング中はヘルスチェックをスキップ（デッドロック防止）
+            if (_isPolling)
+            {
+                return;
+            }
+
             try
             {
                 var isAvailable = CheckFelicaLibAvailable();
@@ -464,7 +578,8 @@ namespace ICCardManager.Infrastructure.CardReader
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "FelicaCardReader: ヘルスチェックエラー");
+                // ヘルスチェックの例外はアプリをクラッシュさせない
+                System.Diagnostics.Debug.WriteLine($"FelicaCardReader HealthCheck: {ex.Message}");
             }
         }
 

@@ -8,6 +8,9 @@
     <RootNamespace>ICCardManager</RootNamespace>
     <AssemblyName>ICCardManager</AssemblyName>
 
+    <!-- 32ビットモード (felicalib.dllがx86のため) -->
+    <PlatformTarget>x86</PlatformTarget>
+
     <!-- バージョン情報 -->
     <Version>1.0.0</Version>
     <FileVersion>1.0.0.0</FileVersion>
@@ -81,6 +84,10 @@
     </None>
     <!-- 設定ファイル -->
     <None Update="appsettings.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+    <!-- FeliCa ネイティブライブラリ (Sony PaSoRi用) -->
+    <None Include="felicalib.dll">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
   </ItemGroup>

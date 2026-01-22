@@ -259,36 +259,18 @@ namespace ICCardManager
         /// <summary>
         /// felicalib.dll が利用可能かどうかを確認します。
         /// </summary>
+        /// <remarks>
+        /// プロジェクトはx86（32ビット）でビルドされるため、32ビット版のfelicalib.dllのみをチェックします。
+        /// </remarks>
         private static bool IsFelicaLibAvailable()
         {
             try
             {
-                // felicalib.dll または felicalib64.dll の存在を確認
+                // felicalib.dll の存在を確認（x86固定ビルドのため32ビット版のみ）
                 var baseDir = AppContext.BaseDirectory;
-                var is64Bit = IntPtr.Size == 8;
-                var dllName = is64Bit ? "felicalib64.dll" : "felicalib.dll";
-                var dllPath = System.IO.Path.Combine(baseDir, dllName);
+                var dllPath = System.IO.Path.Combine(baseDir, "felicalib.dll");
 
-                if (System.IO.File.Exists(dllPath))
-                {
-                    return true;
-                }
-
-                // システムパスも確認
-                var systemPath = Environment.GetEnvironmentVariable("PATH");
-                if (!string.IsNullOrEmpty(systemPath))
-                {
-                    foreach (var path in systemPath.Split(';'))
-                    {
-                        var fullPath = System.IO.Path.Combine(path.Trim(), dllName);
-                        if (System.IO.File.Exists(fullPath))
-                        {
-                            return true;
-                        }
-                    }
-                }
-
-                return false;
+                return System.IO.File.Exists(dllPath);
             }
             catch
             {
