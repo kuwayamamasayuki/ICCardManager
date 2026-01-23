@@ -235,8 +235,11 @@ namespace ICCardManager.Infrastructure.CardReader
 
                         _logger.LogInformation("FelicaCardReader: 履歴データを {Count} 件取得", historyDataList.Count);
 
-                        // IDmからカード種別を判定
-                        var cardType = CardTypeDetector.DetectFromIdm(idm);
+                        // 駅名解決にはCardType.Unknownを使用
+                        // 注: IDmの先頭2バイトは製造者コードであり、カード種別ではないため、
+                        //     CardTypeDetector.DetectFromIdmは信頼できない
+                        //     StationMasterServiceのUnknown優先順位（九州優先）が使用される
+                        var cardType = CardType.Unknown;
 
                         // 履歴データをパースして金額を計算
                         for (int i = 0; i < historyDataList.Count; i++)

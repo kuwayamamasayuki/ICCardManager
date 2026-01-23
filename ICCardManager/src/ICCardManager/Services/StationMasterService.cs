@@ -71,7 +71,7 @@ namespace ICCardManager.Services
             { CardType.PiTaPa, new[] { 1, 0, 2, 3 } },     // PiTaPa: 関西優先
             { CardType.TOICA, new[] { 2, 0, 1, 3 } },      // TOICA: 中部優先
             { CardType.Manaca, new[] { 2, 0, 1, 3 } },     // manaca: 中部優先
-            { CardType.Unknown, new[] { 0, 1, 2, 3 } },    // 不明: 関東から順に検索
+            { CardType.Unknown, new[] { 3, 0, 1, 2 } },    // 不明: 九州優先（福岡での使用を考慮）
         };
 
         private StationMasterService()
