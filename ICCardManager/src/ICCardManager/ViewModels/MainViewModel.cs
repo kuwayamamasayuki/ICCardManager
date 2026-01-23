@@ -847,11 +847,13 @@ public partial class MainViewModel : ViewModelBase
 
         // カードから履歴を読み取る
         var usageDetails = await _cardReader.ReadHistoryAsync(card.CardIdm);
+        var usageDetailsList = usageDetails.ToList();
 
-        var result = await _lendingService.ReturnAsync(_currentStaffIdm!, card.CardIdm, usageDetails);
+        var result = await _lendingService.ReturnAsync(_currentStaffIdm!, card.CardIdm, usageDetailsList);
 
         if (result.Success)
         {
+            // 残高はLendingServiceで設定済み（カードから直接読み取った値を優先）
             _soundPlayer.Play(SoundType.Return);
 
             // トースト通知を表示（画面右上、フォーカスを奪わない）
