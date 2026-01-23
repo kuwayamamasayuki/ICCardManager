@@ -88,14 +88,66 @@ namespace DebugDataViewer
             var dbPath = FindDatabasePath();
             services.AddSingleton(sp => new DbContext(dbPath));
 
-            // カードリーダー
-            services.AddSingleton<ICardReader, PcScCardReader>();
+            // カードリーダーの自動選択:
+            // 1. felicalib.dll が存在する場合: FelicaCardReader（残高・履歴読み取り可能）
+            // 2. それ以外: PcScCardReader（IDm読み取りのみ）
+            services.AddSingleton<ICardReader>(sp => CreateCardReader(sp));
 
             // ViewModel
             services.AddTransient<MainViewModel>();
 
             // Views
             services.AddTransient<MainWindow>();
+        }
+
+        /// <summary>
+        /// 利用可能なカードリーダーを自動選択して作成します。
+        /// </summary>
+        /// <remarks>
+        /// 以下の優先順位でカードリーダーを選択します：
+        /// 1. FelicaCardReader: felicalib.dll が利用可能な場合（残高・履歴読み取り可能）
+        /// 2. PcScCardReader: PC/SC API が利用可能な場合（IDm読み取りのみ）
+        /// </remarks>
+        private static ICardReader CreateCardReader(IServiceProvider sp)
+        {
+            var loggerFactory = sp.GetRequiredService<ILoggerFactory>();
+
+            // felicalib.dll の存在を確認
+            if (IsFelicaLibAvailable())
+            {
+                var logger = loggerFactory.CreateLogger<FelicaCardReader>();
+                System.Diagnostics.Debug.WriteLine("[DebugDataViewer] FelicaCardReader を使用します（残高・履歴読み取り可能）");
+                return new FelicaCardReader(logger);
+            }
+
+            // フォールバック: PcScCardReader
+            {
+                var logger = loggerFactory.CreateLogger<PcScCardReader>();
+                System.Diagnostics.Debug.WriteLine("[DebugDataViewer] PcScCardReader を使用します（IDm読み取りのみ、残高・履歴は読み取れません）");
+                return new PcScCardReader(logger);
+            }
+        }
+
+        /// <summary>
+        /// felicalib.dll が利用可能かどうかを確認します。
+        /// </summary>
+        /// <remarks>
+        /// プロジェクトはx86（32ビット）でビルドされるため、32ビット版のfelicalib.dllのみをチェックします。
+        /// </remarks>
+        private static bool IsFelicaLibAvailable()
+        {
+            try
+            {
+                // felicalib.dll の存在を確認（x86固定ビルドのため32ビット版のみ）
+                var baseDir = AppDomain.CurrentDomain.BaseDirectory;
+                var dllPath = Path.Combine(baseDir, "felicalib.dll");
+
+                return File.Exists(dllPath);
+            }
+            catch
+            {
+                return false;
+            }
         }
 
         /// <summary>
