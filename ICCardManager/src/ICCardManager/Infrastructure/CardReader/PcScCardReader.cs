@@ -71,9 +71,14 @@ namespace ICCardManager.Infrastructure.CardReader
         private DateTime _lastReadTime = DateTime.MinValue;
 
         /// <summary>
-        /// 同一カードの連続読み取りを防止する時間（ミリ秒）
+        /// カードがリーダーから離されたかどうか（置きっぱなし検出用）
         /// </summary>
-        private const int DuplicateReadPreventionMs = 1000;
+        /// <remarks>
+        /// Issue #323 対応: カードを置きっぱなしにした場合の連続読み取りを防止するためのフラグ。
+        /// OnCardRemovedイベントで true に設定され、次のOnCardInsertedで false にリセットされる。
+        /// 同じカードが検出された場合、このフラグが true の場合のみイベントを発火する。
+        /// </remarks>
+        private volatile bool _cardWasLifted = true;
 
         /// <summary>
         /// FeliCaのシステムコード（サイバネ規格）
@@ -225,6 +230,7 @@ namespace ICCardManager.Infrastructure.CardReader
 
             _isReading = false;
             _lastReadIdm = null;
+            _cardWasLifted = true;  // 次回開始時に最初のカードを検出できるようにリセット
             SetConnectionState(CardReaderConnectionState.Disconnected);
             _logger.LogInformation("カードリーダー監視を停止しました");
         }
@@ -412,14 +418,31 @@ namespace ICCardManager.Infrastructure.CardReader
 
                 // 同一カードの連続読み取りを防止
                 var now = DateTime.Now;
-                if (idm == _lastReadIdm && (now - _lastReadTime).TotalMilliseconds < DuplicateReadPreventionMs)
+                if (idm == _lastReadIdm)
                 {
-                    System.Diagnostics.Debug.WriteLine("同一カードの連続読み取りを無視");
-                    return;
+                    // 【重要】まずカード離脱をチェック
+                    // Issue #323: カードが離されていない場合（置きっぱなし）は常に無視
+                    // PC/SCモニターはカード挿入時にOnCardInsertedが呼ばれるが、
+                    // 一部のリーダー/ドライバーではカードを置いたままでも
+                    // 周期的にOnCardInsertedが呼ばれることがある
+                    if (!_cardWasLifted)
+                    {
+                        System.Diagnostics.Debug.WriteLine("同一カードの連続読み取りを無視（カード未離脱）");
+                        return;
+                    }
+
+                    // カードが離された場合：
+                    // 30秒ルール（誤操作キャンセル機能）を正しく動作させるため、
+                    // 時間制限は設けない。
+                    // OnCardRemoved イベントが発火しないと _cardWasLifted は true にならないため、
+                    // 物理的にカードが離れない限り再読み取りは発生しない。
+                    System.Diagnostics.Debug.WriteLine("カードが離されて再度置かれました");
                 }
 
+                // 新しいカード、または離されてから再度置かれたカードとして処理
                 _lastReadIdm = idm;
                 _lastReadTime = now;
+                _cardWasLifted = false;  // カードが検出されたのでフラグをリセット
 
                 CardRead?.Invoke(this, new CardReadEventArgs
                 {
@@ -435,6 +458,10 @@ namespace ICCardManager.Infrastructure.CardReader
                 {
                     // カードが素早く離された場合はデバッグログのみ（エラー通知不要）
                     _logger.LogDebug("カードが素早く離されました");
+                    // Issue #323: カード離脱とみなす
+                    // OnCardRemovedイベントより先にこの例外が発生することがあるため、
+                    // ここでもフラグを設定する
+                    _cardWasLifted = true;
                 }
                 else
                 {
@@ -453,9 +480,15 @@ namespace ICCardManager.Infrastructure.CardReader
         /// <summary>
         /// カード取り外し時のイベントハンドラ
         /// </summary>
+        /// <remarks>
+        /// Issue #323: カードがリーダーから離されたことを記録。
+        /// 次回同じカードが検出されたときにイベントを発火するためのフラグを設定する。
+        /// </remarks>
         private void OnCardRemoved(object sender, CardStatusEventArgs e)
         {
             System.Diagnostics.Debug.WriteLine($"カード取り外し: リーダー={e.ReaderName}");
+            // Issue #323: 次回同じカードが検出されたときにイベントを発火するためフラグを立てる
+            _cardWasLifted = true;
         }
 
         /// <summary>
