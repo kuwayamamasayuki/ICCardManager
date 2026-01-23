@@ -143,8 +143,69 @@ namespace ICCardManager.ViewModels
         /// IDmを指定して新規登録モードを開始（未登録カード検出時用）
         /// </summary>
         /// <param name="idm">カードのIDm</param>
-        public void StartNewCardWithIdm(string idm)
+        /// <returns>処理が完了したかどうか（削除済みカードの復元で完了した場合はtrue）</returns>
+        public async Task<bool> StartNewCardWithIdmAsync(string idm)
         {
+            // Issue #284対応: タッチ時点で削除済みカードチェックを行う
+            var existing = await _cardRepository.GetByIdmAsync(idm, includeDeleted: true);
+            if (existing != null)
+            {
+                if (existing.IsDeleted)
+                {
+                    // 削除済みカードの場合は復元を提案
+                    var result = MessageBox.Show(
+                        $"このカードは以前 {existing.CardNumber} として登録されていましたが、削除されています。\n\n復元しますか？",
+                        "削除済みカード",
+                        MessageBoxButton.YesNo,
+                        MessageBoxImage.Question);
+
+                    if (result == MessageBoxResult.Yes)
+                    {
+                        var restored = await _cardRepository.RestoreAsync(idm);
+                        if (restored)
+                        {
+                            MessageBox.Show(
+                                $"{existing.CardNumber} を復元しました",
+                                "復元完了",
+                                MessageBoxButton.OK,
+                                MessageBoxImage.Information);
+                            return true; // ダイアログを閉じる
+                        }
+                        else
+                        {
+                            MessageBox.Show(
+                                "復元に失敗しました",
+                                "エラー",
+                                MessageBoxButton.OK,
+                                MessageBoxImage.Error);
+                            return true; // ダイアログを閉じる
+                        }
+                    }
+                    else
+                    {
+                        // Issue #314: 復元しない場合は案内メッセージを表示
+                        MessageBox.Show(
+                            $"このカードは以前 {existing.CardNumber} として登録されていたため、新規登録はできません。\n\n" +
+                            "異なるカード番号等で登録したい場合は、先に復元を行い、その後に編集してください。",
+                            "ご案内",
+                            MessageBoxButton.OK,
+                            MessageBoxImage.Information);
+                        return true; // ダイアログを閉じる
+                    }
+                }
+                else
+                {
+                    // 既に登録済みの場合はメッセージを表示して終了
+                    MessageBox.Show(
+                        $"このカードは {existing.CardNumber} として既に登録されています",
+                        "登録済みカード",
+                        MessageBoxButton.OK,
+                        MessageBoxImage.Information);
+                    return true; // ダイアログを閉じる
+                }
+            }
+
+            // 未登録カードの場合は通常処理
             SelectedCard = null;
             IsEditing = true;
             IsNewCard = true;
@@ -159,6 +220,8 @@ namespace ICCardManager.ViewModels
             StatusMessage = "カードを読み取りました。カード種別を確認してください。";
             IsStatusError = false;
             IsWaitingForCard = false; // すでにIDmがあるので待機しない
+
+            return false; // ダイアログは開いたまま
         }
 
         /// <summary>
