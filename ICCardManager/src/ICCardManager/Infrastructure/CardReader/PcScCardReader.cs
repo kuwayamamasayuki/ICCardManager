@@ -81,15 +81,6 @@ namespace ICCardManager.Infrastructure.CardReader
         private volatile bool _cardWasLifted = true;
 
         /// <summary>
-        /// 同一カードの連続読み取りを防止する時間（ミリ秒）
-        /// </summary>
-        /// <remarks>
-        /// カードを離してすぐに再度タッチした場合の重複読み取りを防止する。
-        /// 30秒ルール（誤操作キャンセル機能）の誤動作を防ぐため、1秒以内の再読み取りは無視される。
-        /// </remarks>
-        private const int DuplicateReadPreventionMs = 1000;
-
-        /// <summary>
         /// FeliCaのシステムコード（サイバネ規格）
         /// </summary>
         private const ushort CyberneSystemCode = 0x0003;
@@ -429,14 +420,8 @@ namespace ICCardManager.Infrastructure.CardReader
                 var now = DateTime.Now;
                 if (idm == _lastReadIdm)
                 {
-                    // 時間ベースの重複防止チェック
-                    if ((now - _lastReadTime).TotalMilliseconds < DuplicateReadPreventionMs)
-                    {
-                        System.Diagnostics.Debug.WriteLine("同一カードの連続読み取りを無視（時間ベース）");
-                        return;
-                    }
-
-                    // Issue #323: カードが離されていない場合（置きっぱなし）は無視
+                    // 【重要】まずカード離脱をチェック
+                    // Issue #323: カードが離されていない場合（置きっぱなし）は常に無視
                     // PC/SCモニターはカード挿入時にOnCardInsertedが呼ばれるが、
                     // 一部のリーダー/ドライバーではカードを置いたままでも
                     // 周期的にOnCardInsertedが呼ばれることがある
@@ -445,6 +430,13 @@ namespace ICCardManager.Infrastructure.CardReader
                         System.Diagnostics.Debug.WriteLine("同一カードの連続読み取りを無視（カード未離脱）");
                         return;
                     }
+
+                    // カードが離された場合：
+                    // 30秒ルール（誤操作キャンセル機能）を正しく動作させるため、
+                    // 時間制限は設けない。
+                    // OnCardRemoved イベントが発火しないと _cardWasLifted は true にならないため、
+                    // 物理的にカードが離れない限り再読み取りは発生しない。
+                    System.Diagnostics.Debug.WriteLine("カードが離されて再度置かれました");
                 }
 
                 // 新しいカード、または離されてから再度置かれたカードとして処理

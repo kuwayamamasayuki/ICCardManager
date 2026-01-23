@@ -88,17 +88,6 @@ namespace ICCardManager.Infrastructure.CardReader
         private volatile bool _cardWasLifted = true;
 
         /// <summary>
-        /// 同一カードの連続読み取りを防止する時間（ミリ秒）
-        /// </summary>
-        /// <remarks>
-        /// 1500ms に設定した理由:
-        /// - カードタッチ後、ユーザーがカードを離すまでの平均時間は約1秒
-        /// - 誤って2回読み取りされることを防ぐため、余裕を持って1.5秒に設定
-        /// - 30秒ルール（同一カード再タッチで逆処理）はLendingService側で制御
-        /// </remarks>
-        private const int DuplicateReadPreventionMs = 1500;
-
-        /// <summary>
         /// カード検出のポーリング間隔（ミリ秒）
         /// </summary>
         /// <remarks>
@@ -537,18 +526,17 @@ namespace ICCardManager.Infrastructure.CardReader
                     // 同一カードの場合
                     if (idm == _lastReadIdm)
                     {
-                        // タイムアウト内の再検出は無視（チャタリング防止）
-                        if ((now - _lastReadTime).TotalMilliseconds < DuplicateReadPreventionMs)
-                        {
-                            return;
-                        }
-
-                        // カードが離されていない場合（置きっぱなし）は無視
-                        // カードが一度離されてから再度置かれた場合のみイベントを発火
+                        // 【重要】まずカード離脱をチェック
+                        // カードが離されていない場合（置きっぱなし）は常に無視
                         if (!_cardWasLifted)
                         {
                             return;
                         }
+
+                        // カードが離された場合：
+                        // 30秒ルール（誤操作キャンセル機能）を正しく動作させるため、
+                        // 時間制限は設けない。
+                        // ポーリング間隔（250ms）が自然なチャタリング防止となる。
                     }
 
                     // 新しいカード、または離されてから再度置かれたカードとして処理
