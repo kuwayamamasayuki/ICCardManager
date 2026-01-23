@@ -35,7 +35,13 @@ namespace ICCardManager.Views.Dialogs
                 // IDmが事前に設定されている場合は新規登録モードで開始
                 if (!string.IsNullOrEmpty(_presetIdm))
                 {
-                    _viewModel.StartNewCardWithIdm(_presetIdm);
+                    // Issue #284対応: タッチ時点で削除済み/登録済みチェックを行う
+                    var shouldClose = await _viewModel.StartNewCardWithIdmAsync(_presetIdm);
+                    if (shouldClose)
+                    {
+                        // 削除済みカードの復元完了、または登録済みカードの場合はダイアログを閉じる
+                        Close();
+                    }
                 }
             }
             catch (Exception ex)

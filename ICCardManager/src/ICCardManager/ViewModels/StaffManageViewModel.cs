@@ -119,8 +119,72 @@ namespace ICCardManager.ViewModels
         /// IDmを指定して新規登録モードを開始（未登録カード検出時用）
         /// </summary>
         /// <param name="idm">職員証のIDm</param>
-        public void StartNewStaffWithIdm(string idm)
+        /// <returns>処理が完了したかどうか（削除済み職員の復元で完了した場合はtrue）</returns>
+        public async Task<bool> StartNewStaffWithIdmAsync(string idm)
         {
+            // Issue #284対応: タッチ時点で削除済み職員チェックを行う
+            var existing = await _staffRepository.GetByIdmAsync(idm, includeDeleted: true);
+            if (existing != null)
+            {
+                // 識別子を決定（名前優先、なければ職員番号）
+                var identifier = !string.IsNullOrEmpty(existing.Name) ? existing.Name : existing.Number;
+
+                if (existing.IsDeleted)
+                {
+                    // 削除済み職員の場合は復元を提案
+                    var result = MessageBox.Show(
+                        $"この職員証は以前 {identifier} として登録されていましたが、削除されています。\n\n復元しますか？",
+                        "削除済み職員",
+                        MessageBoxButton.YesNo,
+                        MessageBoxImage.Question);
+
+                    if (result == MessageBoxResult.Yes)
+                    {
+                        var restored = await _staffRepository.RestoreAsync(idm);
+                        if (restored)
+                        {
+                            MessageBox.Show(
+                                $"{identifier} を復元しました",
+                                "復元完了",
+                                MessageBoxButton.OK,
+                                MessageBoxImage.Information);
+                            return true; // ダイアログを閉じる
+                        }
+                        else
+                        {
+                            MessageBox.Show(
+                                "復元に失敗しました",
+                                "エラー",
+                                MessageBoxButton.OK,
+                                MessageBoxImage.Error);
+                            return true; // ダイアログを閉じる
+                        }
+                    }
+                    else
+                    {
+                        // Issue #314: 復元しない場合は案内メッセージを表示
+                        MessageBox.Show(
+                            $"この職員証は以前 {identifier} として登録されていたため、新規登録はできません。\n\n" +
+                            "異なる情報で登録したい場合は、先に復元を行い、その後に編集してください。",
+                            "ご案内",
+                            MessageBoxButton.OK,
+                            MessageBoxImage.Information);
+                        return true; // ダイアログを閉じる
+                    }
+                }
+                else
+                {
+                    // 既に登録済みの場合はメッセージを表示して終了
+                    MessageBox.Show(
+                        $"この職員証は {identifier} として既に登録されています",
+                        "登録済み職員証",
+                        MessageBoxButton.OK,
+                        MessageBoxImage.Information);
+                    return true; // ダイアログを閉じる
+                }
+            }
+
+            // 未登録職員証の場合は通常処理
             SelectedStaff = null;
             IsEditing = true;
             IsNewStaff = true;
@@ -131,6 +195,8 @@ namespace ICCardManager.ViewModels
             StatusMessage = "職員証を読み取りました。氏名を入力してください。";
             IsStatusError = false;
             IsWaitingForCard = false; // すでにIDmがあるので待機しない
+
+            return false; // ダイアログは開いたまま
         }
 
         /// <summary>
