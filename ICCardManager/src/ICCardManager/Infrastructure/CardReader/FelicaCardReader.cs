@@ -559,6 +559,12 @@ namespace ICCardManager.Infrastructure.CardReader
                 // Polling 失敗はカードが載っていない場合も含むので、Traceレベルでログ出力
                 // 通常運用時は出力されず、詳細デバッグ時のみ確認可能
                 _logger.LogTrace("FelicaCardReader: ポーリング例外（カードなし等）: {Message}", ex.Message);
+
+                // Issue #323: 例外発生時もカード離脱とみなす
+                // FelicaUtility.GetIDm() はカードがない場合に null を返すこともあれば
+                // 例外をスローすることもある（ライブラリの実装による）
+                // どちらの場合でもカードが離された状態として扱う
+                _cardWasLifted = true;
             }
             finally
             {

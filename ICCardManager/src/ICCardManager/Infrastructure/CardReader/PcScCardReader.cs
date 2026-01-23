@@ -458,6 +458,10 @@ namespace ICCardManager.Infrastructure.CardReader
                 {
                     // カードが素早く離された場合はデバッグログのみ（エラー通知不要）
                     _logger.LogDebug("カードが素早く離されました");
+                    // Issue #323: カード離脱とみなす
+                    // OnCardRemovedイベントより先にこの例外が発生することがあるため、
+                    // ここでもフラグを設定する
+                    _cardWasLifted = true;
                 }
                 else
                 {
