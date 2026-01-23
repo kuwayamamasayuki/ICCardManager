@@ -180,12 +180,15 @@ namespace ICCardManager
 
             // Infrastructure層
     #if DEBUG
-            // デバッグ時はモックを使用
-            services.AddSingleton<ICardReader, MockCardReader>();
+            // デバッグ時はテストデータサービスを登録
             services.AddSingleton<DebugDataService>();
-    #else
-            services.AddSingleton<ICardReader, PcScCardReader>();
     #endif
+
+            // カードリーダーの自動選択:
+            // 1. felicalib.dll が存在する場合: FelicaCardReader（残高・履歴読み取り可能）
+            // 2. それ以外: PcScCardReader（IDm読み取りのみ）
+            // ※ デバッグ時にモックを使用する場合は appsettings.json で "UseRealCardReader": false に設定
+            services.AddSingleton<ICardReader>(sp => CreateCardReader(sp));
             services.AddSingleton<ISoundPlayer, SoundPlayer>();
 
             // ViewModels
@@ -216,6 +219,63 @@ namespace ICCardManager
             services.AddTransient<Views.Dialogs.LedgerDetailDialog>();
             services.AddTransient<Views.Dialogs.LedgerEditDialog>();
             services.AddTransient<Views.Dialogs.SystemManageDialog>();
+        }
+
+        /// <summary>
+        /// 利用可能なカードリーダーを自動選択して作成します。
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// 以下の優先順位でカードリーダーを選択します：
+        /// </para>
+        /// <list type="number">
+        /// <item><description>FelicaCardReader: felicalib.dll が利用可能な場合（残高・履歴読み取り可能）</description></item>
+        /// <item><description>PcScCardReader: PC/SC API が利用可能な場合（IDm読み取りのみ）</description></item>
+        /// </list>
+        /// <para>
+        /// FelicaCardReader を使用するには、Sony NFCポートソフトウェアがインストールされている必要があります。
+        /// </para>
+        /// </remarks>
+        private static ICardReader CreateCardReader(IServiceProvider sp)
+        {
+            var loggerFactory = sp.GetRequiredService<ILoggerFactory>();
+
+            // felicalib.dll の存在を確認
+            if (IsFelicaLibAvailable())
+            {
+                var logger = loggerFactory.CreateLogger<FelicaCardReader>();
+                logger.LogInformation("FelicaCardReader を使用します（残高・履歴読み取り可能）");
+                return new FelicaCardReader(logger);
+            }
+
+            // フォールバック: PcScCardReader
+            {
+                var logger = loggerFactory.CreateLogger<PcScCardReader>();
+                logger.LogInformation("PcScCardReader を使用します（IDm読み取りのみ、残高・履歴は読み取れません）");
+                return new PcScCardReader(logger);
+            }
+        }
+
+        /// <summary>
+        /// felicalib.dll が利用可能かどうかを確認します。
+        /// </summary>
+        /// <remarks>
+        /// プロジェクトはx86（32ビット）でビルドされるため、32ビット版のfelicalib.dllのみをチェックします。
+        /// </remarks>
+        private static bool IsFelicaLibAvailable()
+        {
+            try
+            {
+                // felicalib.dll の存在を確認（x86固定ビルドのため32ビット版のみ）
+                var baseDir = AppContext.BaseDirectory;
+                var dllPath = System.IO.Path.Combine(baseDir, "felicalib.dll");
+
+                return System.IO.File.Exists(dllPath);
+            }
+            catch
+            {
+                return false;
+            }
         }
 
         /// <summary>

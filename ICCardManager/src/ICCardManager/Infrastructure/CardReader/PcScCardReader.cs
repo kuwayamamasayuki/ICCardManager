@@ -291,8 +291,11 @@ namespace ICCardManager.Infrastructure.CardReader
 
                     System.Diagnostics.Debug.WriteLine($"履歴読み取り: {historyDataList.Count}件のデータを取得");
 
-                    // IDmからカード種別を判定
-                    var cardType = CardTypeDetector.DetectFromIdm(idm);
+                    // 駅名解決にはCardType.Unknownを使用
+                    // 注: IDmの先頭2バイトは製造者コードであり、カード種別ではないため、
+                    //     CardTypeDetector.DetectFromIdmは信頼できない
+                    //     StationMasterServiceのUnknown優先順位（九州優先）が使用される
+                    var cardType = CardType.Unknown;
 
                     // 履歴データをパースして金額を計算
                     for (var i = 0; i < historyDataList.Count; i++)

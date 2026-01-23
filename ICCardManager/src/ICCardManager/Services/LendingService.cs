@@ -5,6 +5,7 @@ using System.Threading.Tasks;
 using ICCardManager.Data;
 using ICCardManager.Data.Repositories;
 using ICCardManager.Models;
+using Microsoft.Extensions.Logging;
 
 namespace ICCardManager.Services
 {
@@ -97,6 +98,7 @@ namespace ICCardManager.Services
         private readonly ISettingsRepository _settingsRepository;
         private readonly SummaryGenerator _summaryGenerator;
         private readonly CardLockManager _lockManager;
+        private readonly ILogger<LendingService> _logger;
 
         /// <summary>
         /// 最後に処理したカードのIDm
@@ -130,7 +132,8 @@ namespace ICCardManager.Services
             ILedgerRepository ledgerRepository,
             ISettingsRepository settingsRepository,
             SummaryGenerator summaryGenerator,
-            CardLockManager lockManager)
+            CardLockManager lockManager,
+            ILogger<LendingService> logger)
         {
             _dbContext = dbContext;
             _cardRepository = cardRepository;
@@ -139,6 +142,7 @@ namespace ICCardManager.Services
             _settingsRepository = settingsRepository;
             _summaryGenerator = summaryGenerator;
             _lockManager = lockManager;
+            _logger = logger;
         }
 
         /// <summary>
@@ -338,11 +342,25 @@ namespace ICCardManager.Services
                 var now = DateTime.Now;
                 var detailList = usageDetails.ToList();
 
+                _logger.LogDebug("LendingService: 返却処理 - 受け取った履歴件数={Count}", detailList.Count);
+
                 // 貸出時刻以降の利用履歴のみを抽出
+                // 注意: FeliCa履歴の日付は時刻を含まないため、日付部分のみで比較する
                 var lentAt = lentRecord.LentAt ?? now.AddDays(-1);
+                var lentDate = lentAt.Date;  // 時刻を切り捨てて日付のみにする
                 var usageSinceLent = detailList
-                    .Where(d => d.UseDate == null || d.UseDate >= lentAt)
+                    .Where(d => d.UseDate == null || d.UseDate.Value.Date >= lentDate)
                     .ToList();
+
+                _logger.LogDebug("LendingService: 貸出時刻={LentAt}, 抽出後の履歴件数={Count}",
+                    lentAt.ToString("yyyy-MM-dd HH:mm:ss"), usageSinceLent.Count);
+
+                // 履歴データの詳細をログ出力
+                foreach (var detail in usageSinceLent.Take(5))
+                {
+                    _logger.LogDebug("LendingService: 履歴詳細 - 日付={Date}, 残高={Balance}, 金額={Amount}, チャージ={IsCharge}",
+                        detail.UseDate?.ToString("yyyy-MM-dd"), detail.Balance, detail.Amount, detail.IsCharge);
+                }
 
                 // トランザクション開始
                 using var transaction = _dbContext.BeginTransaction();
@@ -370,13 +388,28 @@ namespace ICCardManager.Services
                     transaction.Commit();
 
                     // 残額チェック
-                    var latestLedger = createdLedgers.LastOrDefault();
-                    if (latestLedger != null)
+                    // カードから直接読み取った残高を優先（履歴の先頭が最新）
+                    // FelicaCardReaderで読み取った場合、各LedgerDetail.Balanceには実際の残高が設定されている
+                    var cardBalance = detailList.FirstOrDefault()?.Balance;
+                    if (cardBalance.HasValue && cardBalance.Value > 0)
                     {
-                        result.Balance = latestLedger.Balance;
-                        var settings = await _settingsRepository.GetAppSettingsAsync();
-                        result.IsLowBalance = result.Balance < settings.WarningBalance;
+                        result.Balance = cardBalance.Value;
+                        _logger.LogDebug("LendingService: カードから直接読み取った残高を使用: {Balance}円", result.Balance);
                     }
+                    else
+                    {
+                        // フォールバック: 作成したledgerレコードの残高を使用
+                        var latestLedger = createdLedgers.LastOrDefault();
+                        if (latestLedger != null)
+                        {
+                            result.Balance = latestLedger.Balance;
+                            _logger.LogDebug("LendingService: ledgerレコードの残高を使用: {Balance}円", result.Balance);
+                        }
+                    }
+
+                    // 低残高チェック
+                    var settings = await _settingsRepository.GetAppSettingsAsync();
+                    result.IsLowBalance = result.Balance < settings.WarningBalance;
 
                     // 処理情報を記録
                     LastProcessedCardIdm = cardIdm;
@@ -412,10 +445,25 @@ namespace ICCardManager.Services
         /// <summary>
         /// 利用履歴詳細からledgerレコードを作成
         /// </summary>
+        /// <remarks>
+        /// <para>
+        /// カードから読み取った履歴データを元に、ledgerレコードを作成します。
+        /// FelicaCardReaderで読み取った場合、各 <see cref="LedgerDetail.Balance"/> には
+        /// カードから直接読み取った残高が設定されているため、これを優先的に使用します。
+        /// </para>
+        /// </remarks>
         private async Task<List<Ledger>> CreateUsageLedgersAsync(
             string cardIdm, string staffName, List<LedgerDetail> details)
         {
             var createdLedgers = new List<Ledger>();
+
+            _logger.LogDebug("LendingService: CreateUsageLedgersAsync開始 - 履歴件数={Count}", details.Count);
+
+            if (details.Count == 0)
+            {
+                _logger.LogDebug("LendingService: 履歴データがありません");
+                return createdLedgers;
+            }
 
             // 日付でグループ化
             var groupedByDate = details
@@ -423,7 +471,17 @@ namespace ICCardManager.Services
                 .GroupBy(d => d.UseDate!.Value.Date)
                 .OrderBy(g => g.Key);
 
-            // 前回の残高を取得
+            var dateGroups = groupedByDate.ToList();
+            _logger.LogDebug("LendingService: 日付グループ数={Count}, 日付一覧={Dates}",
+                dateGroups.Count, string.Join(", ", dateGroups.Select(g => g.Key.ToString("yyyy-MM-dd"))));
+
+            // カードから読み取った残高を優先的に使用
+            // 履歴データには各取引後の残高が含まれているため、これを直接使用する
+            // フォールバック: データベースの最終残高（PcScCardReader等、残高が読めない場合用）
+            var useCardBalance = details.Any(d => d.Balance.HasValue && d.Balance.Value > 0);
+            _logger.LogDebug("LendingService: カード残高使用={UseCardBalance}", useCardBalance);
+
+            // フォールバック用: データベースから前回の残高を取得
             var lastBalance = await GetLastBalanceAsync(cardIdm);
 
             foreach (var dateGroup in groupedByDate)
@@ -438,17 +496,32 @@ namespace ICCardManager.Services
                 // チャージがある場合、別レコードとして作成
                 foreach (var charge in chargeDetails)
                 {
-                    var income = charge.Amount ?? 0;
-                    lastBalance += income;
+                    int balance;
+                    int income;
+
+                    if (useCardBalance && charge.Balance.HasValue)
+                    {
+                        // カードから読み取った残高を使用
+                        balance = charge.Balance.Value;
+                        income = charge.Amount ?? (balance - lastBalance);
+                        lastBalance = balance;
+                    }
+                    else
+                    {
+                        // フォールバック: Amountから計算
+                        income = charge.Amount ?? 0;
+                        lastBalance += income;
+                        balance = lastBalance;
+                    }
 
                     var chargeLedger = new Ledger
                     {
                         CardIdm = cardIdm,
-                        Date = charge.UseDate ?? date,  // 利用日時があれば時刻を含めて使用
+                        Date = charge.UseDate ?? date,
                         Summary = SummaryGenerator.GetChargeSummary(),
                         Income = income,
                         Expense = 0,
-                        Balance = lastBalance,
+                        Balance = balance,
                         StaffName = staffName
                     };
 
@@ -465,19 +538,57 @@ namespace ICCardManager.Services
                 // 利用がある場合
                 if (usageDetails.Count > 0)
                 {
-                    var expense = usageDetails.Sum(d => d.Amount ?? 0);
-                    lastBalance -= expense;
+                    int balance;
+                    int expense;
+
+                    if (useCardBalance)
+                    {
+                        // カードから読み取った残高を使用（日付内の最新レコードの残高）
+                        // 利用履歴は時刻順にソートされていないので、残高が最小のものを選ぶ
+                        // （利用後なので残高は減っている）
+                        var latestDetail = usageDetails
+                            .Where(d => d.Balance.HasValue)
+                            .OrderBy(d => d.Balance)
+                            .FirstOrDefault();
+
+                        if (latestDetail?.Balance != null)
+                        {
+                            balance = latestDetail.Balance.Value;
+                            expense = usageDetails.Sum(d => d.Amount ?? 0);
+                            if (expense == 0)
+                            {
+                                // Amountが設定されていない場合、残高差から計算
+                                expense = lastBalance - balance;
+                                if (expense < 0) expense = 0;
+                            }
+                            lastBalance = balance;
+                        }
+                        else
+                        {
+                            // フォールバック
+                            expense = usageDetails.Sum(d => d.Amount ?? 0);
+                            lastBalance -= expense;
+                            balance = lastBalance;
+                        }
+                    }
+                    else
+                    {
+                        // フォールバック: Amountから計算
+                        expense = usageDetails.Sum(d => d.Amount ?? 0);
+                        lastBalance -= expense;
+                        balance = lastBalance;
+                    }
 
                     var summary = _summaryGenerator.Generate(usageDetails);
 
                     var usageLedger = new Ledger
                     {
                         CardIdm = cardIdm,
-                        Date = usageDetails.FirstOrDefault()?.UseDate ?? date,  // 利用日時があれば時刻を含めて使用
+                        Date = usageDetails.FirstOrDefault()?.UseDate ?? date,
                         Summary = summary,
                         Income = 0,
                         Expense = expense,
-                        Balance = lastBalance,
+                        Balance = balance,
                         StaffName = staffName
                     };
 
