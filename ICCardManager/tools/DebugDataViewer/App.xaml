@@ -1,0 +1,10 @@
+<Application x:Class="DebugDataViewer.App"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <Application.Resources>
+        <!-- 基本フォントサイズ -->
+        <sys:Double x:Key="BaseFontSize" xmlns:sys="clr-namespace:System;assembly=mscorlib">14</sys:Double>
+        <sys:Double x:Key="SmallFontSize" xmlns:sys="clr-namespace:System;assembly=mscorlib">12</sys:Double>
+        <sys:Double x:Key="LargeFontSize" xmlns:sys="clr-namespace:System;assembly=mscorlib">16</sys:Double>
+    </Application.Resources>
+</Application>
