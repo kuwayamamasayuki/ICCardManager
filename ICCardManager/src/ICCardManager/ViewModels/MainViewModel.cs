@@ -853,16 +853,7 @@ public partial class MainViewModel : ViewModelBase
 
         if (result.Success)
         {
-            // 履歴データから最新の残高を取得（履歴の先頭が最新）
-            // LendingServiceの計算結果より、カードから直接読み取った値を優先
-            var latestBalance = usageDetailsList.FirstOrDefault()?.Balance;
-            if (latestBalance.HasValue && latestBalance.Value > 0)
-            {
-                result.Balance = latestBalance.Value;
-                var settings = await _settingsRepository.GetAppSettingsAsync();
-                result.IsLowBalance = result.Balance < settings.WarningBalance;
-            }
-
+            // 残高はLendingServiceで設定済み（カードから直接読み取った値を優先）
             _soundPlayer.Play(SoundType.Return);
 
             // トースト通知を表示（画面右上、フォーカスを奪わない）

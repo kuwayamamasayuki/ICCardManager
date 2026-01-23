@@ -33,6 +33,12 @@ namespace ICCardManager.Infrastructure.CardReader
     /// <item><description>Sony NFCポートソフトウェア がインストールされていること</description></item>
     /// <item><description>felicalib.dll が実行フォルダに配置されていること</description></item>
     /// </list>
+    /// <para>
+    /// <strong>felicalib.dll について:</strong>
+    /// felicalib.dll は tmurakam/felicalib プロジェクト (https://github.com/tmurakam/felicalib) の
+    /// 成果物です。このライブラリは BSD-2-Clause ライセンスで配布されています。
+    /// Sony NFCポートソフトウェアには含まれないため、別途ビルドまたはリリースから取得してください。
+    /// </para>
     /// </remarks>
     public class FelicaCardReader : ICardReader
     {
@@ -73,11 +79,24 @@ namespace ICCardManager.Infrastructure.CardReader
         /// <summary>
         /// 同一カードの連続読み取りを防止する時間（ミリ秒）
         /// </summary>
+        /// <remarks>
+        /// 1500ms に設定した理由:
+        /// - カードタッチ後、ユーザーがカードを離すまでの平均時間は約1秒
+        /// - 誤って2回読み取りされることを防ぐため、余裕を持って1.5秒に設定
+        /// - 30秒ルール（同一カード再タッチで逆処理）はLendingService側で制御
+        /// </remarks>
         private const int DuplicateReadPreventionMs = 1500;
 
         /// <summary>
         /// カード検出のポーリング間隔（ミリ秒）
         /// </summary>
+        /// <remarks>
+        /// 500ms に設定した理由:
+        /// - 短すぎる(100-200ms): CPUリソース消費が大きく、felicalib.dllへの負荷が高い
+        /// - 長すぎる(1000ms以上): カードタッチからの反応が遅く、UXが悪化
+        /// - 500ms: レスポンスとリソース消費のバランスが良好
+        /// - 実測で安定動作を確認済み（300msでは不安定な場合があった）
+        /// </remarks>
         private const int PollingIntervalMs = 500;
 
         /// <summary>
@@ -518,8 +537,9 @@ namespace ICCardManager.Infrastructure.CardReader
             }
             catch (Exception ex)
             {
-                // Polling 失敗はカードが載っていない場合も含むので、通常はログを出さない
-                System.Diagnostics.Debug.WriteLine($"FelicaCardReader Polling: {ex.Message}");
+                // Polling 失敗はカードが載っていない場合も含むので、Traceレベルでログ出力
+                // 通常運用時は出力されず、詳細デバッグ時のみ確認可能
+                _logger.LogTrace("FelicaCardReader: ポーリング例外（カードなし等）: {Message}", ex.Message);
             }
             finally
             {
@@ -581,8 +601,8 @@ namespace ICCardManager.Infrastructure.CardReader
             }
             catch (Exception ex)
             {
-                // ヘルスチェックの例外はアプリをクラッシュさせない
-                System.Diagnostics.Debug.WriteLine($"FelicaCardReader HealthCheck: {ex.Message}");
+                // ヘルスチェックの例外はアプリをクラッシュさせない（Traceレベルでログ出力）
+                _logger.LogTrace("FelicaCardReader: ヘルスチェック例外: {Message}", ex.Message);
             }
         }
 

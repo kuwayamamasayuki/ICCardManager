@@ -388,13 +388,28 @@ namespace ICCardManager.Services
                     transaction.Commit();
 
                     // 残額チェック
-                    var latestLedger = createdLedgers.LastOrDefault();
-                    if (latestLedger != null)
+                    // カードから直接読み取った残高を優先（履歴の先頭が最新）
+                    // FelicaCardReaderで読み取った場合、各LedgerDetail.Balanceには実際の残高が設定されている
+                    var cardBalance = detailList.FirstOrDefault()?.Balance;
+                    if (cardBalance.HasValue && cardBalance.Value > 0)
                     {
-                        result.Balance = latestLedger.Balance;
-                        var settings = await _settingsRepository.GetAppSettingsAsync();
-                        result.IsLowBalance = result.Balance < settings.WarningBalance;
+                        result.Balance = cardBalance.Value;
+                        _logger.LogDebug("LendingService: カードから直接読み取った残高を使用: {Balance}円", result.Balance);
                     }
+                    else
+                    {
+                        // フォールバック: 作成したledgerレコードの残高を使用
+                        var latestLedger = createdLedgers.LastOrDefault();
+                        if (latestLedger != null)
+                        {
+                            result.Balance = latestLedger.Balance;
+                            _logger.LogDebug("LendingService: ledgerレコードの残高を使用: {Balance}円", result.Balance);
+                        }
+                    }
+
+                    // 低残高チェック
+                    var settings = await _settingsRepository.GetAppSettingsAsync();
+                    result.IsLowBalance = result.Balance < settings.WarningBalance;
 
                     // 処理情報を記録
                     LastProcessedCardIdm = cardIdm;
