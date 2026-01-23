@@ -77,6 +77,17 @@ namespace ICCardManager.Infrastructure.CardReader
         private DateTime _lastReadTime = DateTime.MinValue;
 
         /// <summary>
+        /// カードがリーダーから離されたかどうか（置きっぱなし検出用）
+        /// </summary>
+        /// <remarks>
+        /// Issue #323 対応: カードを置きっぱなしにした場合の連続読み取りを防止するためのフラグ。
+        /// カードが検出されなくなった（離された）ときに true になり、
+        /// 次にカードが検出されたときに false にリセットされる。
+        /// 同じカードが検出された場合、このフラグが true の場合のみイベントを発火する。
+        /// </remarks>
+        private volatile bool _cardWasLifted = true;
+
+        /// <summary>
         /// 同一カードの連続読み取りを防止する時間（ミリ秒）
         /// </summary>
         /// <remarks>
@@ -502,7 +513,10 @@ namespace ICCardManager.Infrastructure.CardReader
                     var idmBytes = FelicaUtility.GetIDm(WildcardSystemCode);
                     if (idmBytes == null || idmBytes.Length == 0)
                     {
-                        return; // カードなし
+                        // カードが検出されない = カードが離された
+                        // Issue #323: 次回同じカードが検出されたときにイベントを発火するためフラグを立てる
+                        _cardWasLifted = true;
+                        return;
                     }
 
                     idm = GetIdmString(idmBytes);
@@ -510,20 +524,37 @@ namespace ICCardManager.Infrastructure.CardReader
 
                 if (string.IsNullOrEmpty(idm))
                 {
+                    _cardWasLifted = true;
                     return;
                 }
 
                 // 同一カードの連続読み取りを防止（スレッドセーフ）
+                // Issue #323: カードを置きっぱなしにした場合の連続読み取りを防止
                 lock (_lastReadLock)
                 {
                     var now = DateTime.Now;
-                    if (idm == _lastReadIdm && (now - _lastReadTime).TotalMilliseconds < DuplicateReadPreventionMs)
+
+                    // 同一カードの場合
+                    if (idm == _lastReadIdm)
                     {
-                        return;
+                        // タイムアウト内の再検出は無視（チャタリング防止）
+                        if ((now - _lastReadTime).TotalMilliseconds < DuplicateReadPreventionMs)
+                        {
+                            return;
+                        }
+
+                        // カードが離されていない場合（置きっぱなし）は無視
+                        // カードが一度離されてから再度置かれた場合のみイベントを発火
+                        if (!_cardWasLifted)
+                        {
+                            return;
+                        }
                     }
 
+                    // 新しいカード、または離されてから再度置かれたカードとして処理
                     _lastReadIdm = idm;
                     _lastReadTime = now;
+                    _cardWasLifted = false;  // カードが検出されたのでフラグをリセット
                 }
 
                 _logger.LogInformation("FelicaCardReader: カード検出 IDm={Idm}", idm);
