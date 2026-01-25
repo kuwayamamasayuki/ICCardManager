@@ -119,5 +119,17 @@ namespace ICCardManager.Data.Repositories
         /// <returns>既存の履歴詳細キーのセット</returns>
         Task<HashSet<(DateTime? UseDate, int? Balance, bool IsCharge)>> GetExistingDetailKeysAsync(
             string cardIdm, DateTime fromDate);
+
+        /// <summary>
+        /// 指定カードの既存の履歴キーを取得（CSVインポート重複チェック用）
+        /// </summary>
+        /// <remarks>
+        /// Issue #334対応: CSVインポート時に既存の履歴をスキップするための重複チェックに使用。
+        /// キーは card_idm + date + summary + income + expense + balance の組み合わせ。
+        /// </remarks>
+        /// <param name="cardIdms">チェック対象のカードIDmリスト</param>
+        /// <returns>既存の履歴キーのセット</returns>
+        Task<HashSet<(string CardIdm, DateTime Date, string Summary, int Income, int Expense, int Balance)>> GetExistingLedgerKeysAsync(
+            IEnumerable<string> cardIdms);
     }
 }

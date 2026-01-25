@@ -1003,10 +1003,22 @@ namespace ICCardManager.Services
                     };
                 }
 
+                // Issue #334: 既存履歴の重複チェック用キーを取得
+                var uniqueCardIdms = validRecords.Select(r => r.Ledger.CardIdm).Distinct();
+                var existingLedgerKeys = await _ledgerRepository.GetExistingLedgerKeysAsync(uniqueCardIdms);
+
                 // インポート実行（履歴はトランザクションなしで直接インポート）
                 // 注: LedgerRepository.InsertAsyncはトランザクション対応していないため
                 foreach (var (lineNumber, ledger) in validRecords)
                 {
+                    // 重複チェック: 同じ履歴が既に存在する場合はスキップ
+                    var ledgerKey = (ledger.CardIdm, ledger.Date, ledger.Summary, ledger.Income, ledger.Expense, ledger.Balance);
+                    if (existingLedgerKeys.Contains(ledgerKey))
+                    {
+                        skippedCount++;
+                        continue;
+                    }
+
                     try
                     {
                         var id = await _ledgerRepository.InsertAsync(ledger);
@@ -1091,6 +1103,7 @@ namespace ICCardManager.Services
             var errors = new List<CsvImportError>();
             var items = new List<CsvImportPreviewItem>();
             var newCount = 0;
+            var skipCount = 0;
 
             try
             {
@@ -1111,6 +1124,10 @@ namespace ICCardManager.Services
                 {
                     existingCardIdms.Add(card.CardIdm);
                 }
+
+                // 仮バリデーションでカードIDmを収集（重複チェック用）
+                var cardIdmsInFile = new HashSet<string>();
+                var validatedRecords = new List<(int LineNumber, string CardIdm, DateTime Date, string Summary, int Income, int Expense, int Balance)>();
 
                 for (var i = 1; i < lines.Count; i++)
                 {
@@ -1139,6 +1156,8 @@ namespace ICCardManager.Services
                     var cardIdm = fields[1].Trim();
                     // fields[2] は管理番号（参照用）
                     var summary = fields[3].Trim();
+                    var incomeStr = fields[4].Trim();
+                    var expenseStr = fields[5].Trim();
                     var balanceStr = fields[6].Trim();
 
                     // バリデーション: 日時
@@ -1190,7 +1209,7 @@ namespace ICCardManager.Services
                     }
 
                     // バリデーション: 残額
-                    if (!int.TryParse(balanceStr, out _))
+                    if (!int.TryParse(balanceStr, out var balance))
                     {
                         errors.Add(new CsvImportError
                         {
@@ -1201,14 +1220,63 @@ namespace ICCardManager.Services
                         continue;
                     }
 
-                    newCount++;
+                    // 受入金額（空なら0）
+                    var income = 0;
+                    if (!string.IsNullOrWhiteSpace(incomeStr) && !int.TryParse(incomeStr, out income))
+                    {
+                        errors.Add(new CsvImportError
+                        {
+                            LineNumber = lineNumber,
+                            Message = "受入金額の形式が不正です",
+                            Data = incomeStr
+                        });
+                        continue;
+                    }
+
+                    // 払出金額（空なら0）
+                    var expense = 0;
+                    if (!string.IsNullOrWhiteSpace(expenseStr) && !int.TryParse(expenseStr, out expense))
+                    {
+                        errors.Add(new CsvImportError
+                        {
+                            LineNumber = lineNumber,
+                            Message = "払出金額の形式が不正です",
+                            Data = expenseStr
+                        });
+                        continue;
+                    }
+
+                    cardIdmsInFile.Add(cardIdm);
+                    validatedRecords.Add((lineNumber, cardIdm, date, summary, income, expense, balance));
+                }
+
+                // Issue #334: 既存履歴の重複チェック用キーを取得
+                var existingLedgerKeys = await _ledgerRepository.GetExistingLedgerKeysAsync(cardIdmsInFile);
+
+                // プレビューアイテムを生成
+                foreach (var (lineNumber, cardIdm, date, summary, income, expense, balance) in validatedRecords)
+                {
+                    var ledgerKey = (cardIdm, date, summary, income, expense, balance);
+                    ImportAction action;
+
+                    if (existingLedgerKeys.Contains(ledgerKey))
+                    {
+                        action = ImportAction.Skip;
+                        skipCount++;
+                    }
+                    else
+                    {
+                        action = ImportAction.Insert;
+                        newCount++;
+                    }
+
                     items.Add(new CsvImportPreviewItem
                     {
                         LineNumber = lineNumber,
                         Idm = cardIdm,
                         Name = summary,
                         AdditionalInfo = date.ToString("yyyy-MM-dd HH:mm:ss"),
-                        Action = ImportAction.Insert
+                        Action = action
                     });
                 }
 
@@ -1217,7 +1285,7 @@ namespace ICCardManager.Services
                     IsValid = errors.Count == 0,
                     NewCount = newCount,
                     UpdateCount = 0,
-                    SkipCount = 0,
+                    SkipCount = skipCount,
                     ErrorCount = errors.Count,
                     Errors = errors,
                     Items = items
