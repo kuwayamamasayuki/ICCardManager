@@ -62,6 +62,13 @@ namespace ICCardManager.Data.Repositories
         Task<bool> RestoreAsync(string staffIdm);
 
         /// <summary>
+        /// 論理削除された職員を復元（トランザクション対応）
+        /// </summary>
+        /// <param name="staffIdm">職員証IDm</param>
+        /// <param name="transaction">SQLiteトランザクション</param>
+        Task<bool> RestoreAsync(string staffIdm, SQLiteTransaction transaction);
+
+        /// <summary>
         /// IDmが存在するか確認
         /// </summary>
         Task<bool> ExistsAsync(string staffIdm);

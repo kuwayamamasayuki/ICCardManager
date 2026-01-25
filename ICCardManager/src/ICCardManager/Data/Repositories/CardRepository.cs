@@ -309,9 +309,24 @@ WHERE card_idm = @cardIdm AND is_deleted = 0 AND is_lent = 0";
         /// <inheritdoc/>
         public async Task<bool> RestoreAsync(string cardIdm)
         {
+            return await RestoreAsyncInternal(cardIdm, null);
+        }
+
+        /// <inheritdoc/>
+        public async Task<bool> RestoreAsync(string cardIdm, SQLiteTransaction transaction)
+        {
+            return await RestoreAsyncInternal(cardIdm, transaction);
+        }
+
+        /// <summary>
+        /// カード復元の内部実装
+        /// </summary>
+        private async Task<bool> RestoreAsyncInternal(string cardIdm, SQLiteTransaction? transaction)
+        {
             var connection = _dbContext.GetConnection();
 
             using var command = connection.CreateCommand();
+            command.Transaction = transaction;
             command.CommandText = @"UPDATE ic_card
 SET is_deleted = 0, deleted_at = NULL
 WHERE card_idm = @cardIdm AND is_deleted = 1";
@@ -319,8 +334,9 @@ WHERE card_idm = @cardIdm AND is_deleted = 1";
             command.Parameters.AddWithValue("@cardIdm", cardIdm);
 
             var result = await command.ExecuteNonQueryAsync();
-            if (result > 0)
+            if (result > 0 && transaction == null)
             {
+                // トランザクション外の場合のみキャッシュ無効化
                 InvalidateCardCache();
             }
             return result > 0;

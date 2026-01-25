@@ -117,7 +117,10 @@ namespace ICCardManager.Services
         Update,
 
         /// <summary>スキップ</summary>
-        Skip
+        Skip,
+
+        /// <summary>削除済みを復元して更新</summary>
+        Restore
     }
 
     /// <summary>
@@ -183,7 +186,8 @@ namespace ICCardManager.Services
             }
 
             // バリデーションパス: まず全データをバリデーション
-            var validRecords = new List<(int LineNumber, IcCard Card, bool IsUpdate)>();
+            // IsRestore: 削除済みカードを復元して更新する場合true
+            var validRecords = new List<(int LineNumber, IcCard Card, bool IsUpdate, bool IsRestore)>();
 
             for (var i = 1; i < lines.Count; i++)
             {
@@ -224,21 +228,33 @@ namespace ICCardManager.Services
                     continue;
                 }
 
-                // 既存チェック
+                // 既存チェック（削除済みも含めて検索）
                 var existingCard = await _cardRepository.GetByIdmAsync(cardIdm, includeDeleted: true);
                 if (existingCard != null)
                 {
-                    if (skipExisting)
+                    // 削除済みカードの場合は復元対象として扱う
+                    if (existingCard.IsDeleted)
                     {
+                        // 削除済みカードは復元して更新する（skipExistingでもスキップしない）
+                        existingCard.CardType = cardType;
+                        existingCard.CardNumber = cardNumber;
+                        existingCard.Note = string.IsNullOrWhiteSpace(note) ? null : note;
+                        validRecords.Add((lineNumber, existingCard, true, true)); // isRestore = true
+                    }
+                    else if (skipExisting)
+                    {
+                        // 有効なカードが存在し、スキップ設定の場合
                         skippedCount++;
                         continue;
                     }
-
-                    // 更新処理用のカード
-                    existingCard.CardType = cardType;
-                    existingCard.CardNumber = cardNumber;
-                    existingCard.Note = string.IsNullOrWhiteSpace(note) ? null : note;
-                    validRecords.Add((lineNumber, existingCard, true));
+                    else
+                    {
+                        // 有効なカードを更新
+                        existingCard.CardType = cardType;
+                        existingCard.CardNumber = cardNumber;
+                        existingCard.Note = string.IsNullOrWhiteSpace(note) ? null : note;
+                        validRecords.Add((lineNumber, existingCard, true, false)); // isRestore = false
+                    }
                 }
                 else
                 {
@@ -250,7 +266,7 @@ namespace ICCardManager.Services
                         CardNumber = cardNumber,
                         Note = string.IsNullOrWhiteSpace(note) ? null : note
                     };
-                    validRecords.Add((lineNumber, card, false));
+                    validRecords.Add((lineNumber, card, false, false));
                 }
             }
 
@@ -271,10 +287,19 @@ namespace ICCardManager.Services
             using var transaction = _dbContext.BeginTransaction();
             try
             {
-                foreach (var (lineNumber, card, isUpdate) in validRecords)
+                foreach (var (lineNumber, card, isUpdate, isRestore) in validRecords)
                 {
                     bool success;
-                    if (isUpdate)
+                    if (isRestore)
+                    {
+                        // 削除済みカードを復元してから更新（トランザクション内）
+                        success = await _cardRepository.RestoreAsync(card.CardIdm, transaction);
+                        if (success)
+                        {
+                            success = await _cardRepository.UpdateAsync(card, transaction);
+                        }
+                    }
+                    else if (isUpdate)
                     {
                         success = await _cardRepository.UpdateAsync(card, transaction);
                     }
@@ -289,10 +314,13 @@ namespace ICCardManager.Services
                     }
                     else
                     {
+                        var message = isRestore ? "カードの復元・更新に失敗しました"
+                            : isUpdate ? "カードの更新に失敗しました"
+                            : "カードの登録に失敗しました";
                         errors.Add(new CsvImportError
                         {
                             LineNumber = lineNumber,
-                            Message = isUpdate ? "カードの更新に失敗しました" : "カードの登録に失敗しました",
+                            Message = message,
                             Data = card.CardIdm
                         });
                     }
@@ -367,7 +395,8 @@ namespace ICCardManager.Services
             }
 
             // バリデーションパス: まず全データをバリデーション
-            var validRecords = new List<(int LineNumber, Staff Staff, bool IsUpdate)>();
+            // IsRestore: 削除済み職員を復元して更新する場合true
+            var validRecords = new List<(int LineNumber, Staff Staff, bool IsUpdate, bool IsRestore)>();
 
             for (var i = 1; i < lines.Count; i++)
             {
@@ -403,21 +432,33 @@ namespace ICCardManager.Services
                     continue;
                 }
 
-                // 既存チェック
+                // 既存チェック（削除済みも含めて検索）
                 var existingStaff = await _staffRepository.GetByIdmAsync(staffIdm, includeDeleted: true);
                 if (existingStaff != null)
                 {
-                    if (skipExisting)
+                    // 削除済み職員の場合は復元対象として扱う
+                    if (existingStaff.IsDeleted)
                     {
+                        // 削除済み職員は復元して更新する（skipExistingでもスキップしない）
+                        existingStaff.Name = name;
+                        existingStaff.Number = string.IsNullOrWhiteSpace(number) ? null : number;
+                        existingStaff.Note = string.IsNullOrWhiteSpace(note) ? null : note;
+                        validRecords.Add((lineNumber, existingStaff, true, true)); // isRestore = true
+                    }
+                    else if (skipExisting)
+                    {
+                        // 有効な職員が存在し、スキップ設定の場合
                         skippedCount++;
                         continue;
                     }
-
-                    // 更新処理用の職員
-                    existingStaff.Name = name;
-                    existingStaff.Number = string.IsNullOrWhiteSpace(number) ? null : number;
-                    existingStaff.Note = string.IsNullOrWhiteSpace(note) ? null : note;
-                    validRecords.Add((lineNumber, existingStaff, true));
+                    else
+                    {
+                        // 有効な職員を更新
+                        existingStaff.Name = name;
+                        existingStaff.Number = string.IsNullOrWhiteSpace(number) ? null : number;
+                        existingStaff.Note = string.IsNullOrWhiteSpace(note) ? null : note;
+                        validRecords.Add((lineNumber, existingStaff, true, false)); // isRestore = false
+                    }
                 }
                 else
                 {
@@ -429,7 +470,7 @@ namespace ICCardManager.Services
                         Number = string.IsNullOrWhiteSpace(number) ? null : number,
                         Note = string.IsNullOrWhiteSpace(note) ? null : note
                     };
-                    validRecords.Add((lineNumber, staff, false));
+                    validRecords.Add((lineNumber, staff, false, false));
                 }
             }
 
@@ -450,10 +491,19 @@ namespace ICCardManager.Services
             using var transaction = _dbContext.BeginTransaction();
             try
             {
-                foreach (var (lineNumber, staff, isUpdate) in validRecords)
+                foreach (var (lineNumber, staff, isUpdate, isRestore) in validRecords)
                 {
                     bool success;
-                    if (isUpdate)
+                    if (isRestore)
+                    {
+                        // 削除済み職員を復元してから更新（トランザクション内）
+                        success = await _staffRepository.RestoreAsync(staff.StaffIdm, transaction);
+                        if (success)
+                        {
+                            success = await _staffRepository.UpdateAsync(staff, transaction);
+                        }
+                    }
+                    else if (isUpdate)
                     {
                         success = await _staffRepository.UpdateAsync(staff, transaction);
                     }
@@ -468,10 +518,13 @@ namespace ICCardManager.Services
                     }
                     else
                     {
+                        var message = isRestore ? "職員の復元・更新に失敗しました"
+                            : isUpdate ? "職員の更新に失敗しました"
+                            : "職員の登録に失敗しました";
                         errors.Add(new CsvImportError
                         {
                             LineNumber = lineNumber,
-                            Message = isUpdate ? "職員の更新に失敗しました" : "職員の登録に失敗しました",
+                            Message = message,
                             Data = staff.StaffIdm
                         });
                     }
@@ -584,12 +637,18 @@ namespace ICCardManager.Services
                     continue;
                 }
 
-                // 既存チェック
+                // 既存チェック（削除済みも含めて検索）
                 var existingCard = await _cardRepository.GetByIdmAsync(cardIdm, includeDeleted: true);
                 ImportAction action;
                 if (existingCard != null)
                 {
-                    if (skipExisting)
+                    // 削除済みカードの場合は復元対象として扱う
+                    if (existingCard.IsDeleted)
+                    {
+                        action = ImportAction.Restore;
+                        updateCount++; // 復元+更新なので更新件数に含める
+                    }
+                    else if (skipExisting)
                     {
                         action = ImportAction.Skip;
                         skipCount++;
@@ -696,12 +755,18 @@ namespace ICCardManager.Services
                     continue;
                 }
 
-                // 既存チェック
+                // 既存チェック（削除済みも含めて検索）
                 var existingStaff = await _staffRepository.GetByIdmAsync(staffIdm, includeDeleted: true);
                 ImportAction action;
                 if (existingStaff != null)
                 {
-                    if (skipExisting)
+                    // 削除済み職員の場合は復元対象として扱う
+                    if (existingStaff.IsDeleted)
+                    {
+                        action = ImportAction.Restore;
+                        updateCount++; // 復元+更新なので更新件数に含める
+                    }
+                    else if (skipExisting)
                     {
                         action = ImportAction.Skip;
                         skipCount++;
