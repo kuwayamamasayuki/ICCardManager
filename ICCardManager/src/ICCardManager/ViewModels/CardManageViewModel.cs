@@ -24,6 +24,7 @@ namespace ICCardManager.ViewModels
         private readonly ICardReader _cardReader;
         private readonly CardTypeDetector _cardTypeDetector;
         private readonly IValidationService _validationService;
+        private readonly OperationLogger _operationLogger;
 
         [ObservableProperty]
         private ObservableCollection<CardDto> _cards = new();
@@ -81,13 +82,15 @@ namespace ICCardManager.ViewModels
             ILedgerRepository ledgerRepository,
             ICardReader cardReader,
             CardTypeDetector cardTypeDetector,
-            IValidationService validationService)
+            IValidationService validationService,
+            OperationLogger operationLogger)
         {
             _cardRepository = cardRepository;
             _ledgerRepository = ledgerRepository;
             _cardReader = cardReader;
             _cardTypeDetector = cardTypeDetector;
             _validationService = validationService;
+            _operationLogger = operationLogger;
 
             // カード読み取りイベント
             _cardReader.CardRead += OnCardRead;
@@ -164,6 +167,13 @@ namespace ICCardManager.ViewModels
                         var restored = await _cardRepository.RestoreAsync(idm);
                         if (restored)
                         {
+                            // 操作ログを記録（復元後のデータを取得）
+                            var restoredCard = await _cardRepository.GetByIdmAsync(idm);
+                            if (restoredCard != null)
+                            {
+                                await _operationLogger.LogCardRestoreAsync(null, restoredCard);
+                            }
+
                             MessageBox.Show(
                                 $"{existing.CardNumber} を復元しました",
                                 "復元完了",
@@ -311,6 +321,13 @@ namespace ICCardManager.ViewModels
                                 var restored = await _cardRepository.RestoreAsync(EditCardIdm);
                                 if (restored)
                                 {
+                                    // 操作ログを記録（復元後のデータを取得）
+                                    var restoredCard = await _cardRepository.GetByIdmAsync(EditCardIdm);
+                                    if (restoredCard != null)
+                                    {
+                                        await _operationLogger.LogCardRestoreAsync(null, restoredCard);
+                                    }
+
                                     StatusMessage = $"{existing.CardNumber} を復元しました";
                                     IsStatusError = false;
                                     await LoadCardsAsync();
@@ -354,6 +371,9 @@ namespace ICCardManager.ViewModels
                     var success = await _cardRepository.InsertAsync(card);
                     if (success)
                     {
+                        // 操作ログを記録
+                        await _operationLogger.LogCardInsertAsync(null, card);
+
                         // カード残額を読み取り、「新規購入」レコードを作成
                         await CreateNewPurchaseLedgerAsync(EditCardIdm);
 
@@ -370,6 +390,9 @@ namespace ICCardManager.ViewModels
                 }
                 else
                 {
+                    // 更新前のデータを取得（操作ログ用）
+                    var beforeCard = await _cardRepository.GetByIdmAsync(EditCardIdm);
+
                     // 更新
                     var card = new IcCard
                     {
@@ -385,6 +408,12 @@ namespace ICCardManager.ViewModels
                     var success = await _cardRepository.UpdateAsync(card);
                     if (success)
                     {
+                        // 操作ログを記録
+                        if (beforeCard != null)
+                        {
+                            await _operationLogger.LogCardUpdateAsync(null, beforeCard, card);
+                        }
+
                         StatusMessage = "更新しました";
                         IsStatusError = false;
                         await LoadCardsAsync();
@@ -433,9 +462,18 @@ namespace ICCardManager.ViewModels
 
             using (BeginBusy("削除中..."))
             {
+                // 削除前のデータを取得（操作ログ用）
+                var card = await _cardRepository.GetByIdmAsync(SelectedCard.CardIdm);
+
                 var success = await _cardRepository.DeleteAsync(SelectedCard.CardIdm);
                 if (success)
                 {
+                    // 操作ログを記録
+                    if (card != null)
+                    {
+                        await _operationLogger.LogCardDeleteAsync(null, card);
+                    }
+
                     StatusMessage = "削除しました";
                     IsStatusError = false;
                     await LoadCardsAsync();
@@ -500,6 +538,13 @@ namespace ICCardManager.ViewModels
                             var restored = await _cardRepository.RestoreAsync(e.Idm);
                             if (restored)
                             {
+                                // 操作ログを記録（復元後のデータを取得）
+                                var restoredCard = await _cardRepository.GetByIdmAsync(e.Idm);
+                                if (restoredCard != null)
+                                {
+                                    await _operationLogger.LogCardRestoreAsync(null, restoredCard);
+                                }
+
                                 StatusMessage = $"{existing.CardNumber} を復元しました";
                                 IsStatusError = false;
                                 await LoadCardsAsync();

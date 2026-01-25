@@ -7,6 +7,7 @@ using ICCardManager.Services;
 using ICCardManager.ViewModels;
 using Moq;
 using Xunit;
+using IOperationLogRepository = ICCardManager.Data.Repositories.IOperationLogRepository;
 
 using System;
 using System.Collections.Generic;
@@ -22,17 +23,26 @@ namespace ICCardManager.Tests.ViewModels;
 public class CardManageViewModelTests
 {
     private readonly Mock<ICardRepository> _cardRepositoryMock;
+    private readonly Mock<ILedgerRepository> _ledgerRepositoryMock;
     private readonly Mock<ICardReader> _cardReaderMock;
     private readonly Mock<IValidationService> _validationServiceMock;
+    private readonly Mock<IStaffRepository> _staffRepositoryMock;
+    private readonly Mock<OperationLogger> _operationLoggerMock;
     private readonly CardTypeDetector _cardTypeDetector;
     private readonly CardManageViewModel _viewModel;
 
     public CardManageViewModelTests()
     {
         _cardRepositoryMock = new Mock<ICardRepository>();
+        _ledgerRepositoryMock = new Mock<ILedgerRepository>();
         _cardReaderMock = new Mock<ICardReader>();
         _validationServiceMock = new Mock<IValidationService>();
+        _staffRepositoryMock = new Mock<IStaffRepository>();
         _cardTypeDetector = new CardTypeDetector();
+
+        // OperationLoggerのモック（コンストラクタ引数が必要なためMock.Ofで作成）
+        var operationLogRepositoryMock = new Mock<IOperationLogRepository>();
+        _operationLoggerMock = new Mock<OperationLogger>(operationLogRepositoryMock.Object, _staffRepositoryMock.Object);
 
         // バリデーションはデフォルトで成功を返す
         _validationServiceMock.Setup(v => v.ValidateCardIdm(It.IsAny<string>())).Returns(ValidationResult.Success());
@@ -41,9 +51,11 @@ public class CardManageViewModelTests
 
         _viewModel = new CardManageViewModel(
             _cardRepositoryMock.Object,
+            _ledgerRepositoryMock.Object,
             _cardReaderMock.Object,
             _cardTypeDetector,
-            _validationServiceMock.Object);
+            _validationServiceMock.Object,
+            _operationLoggerMock.Object);
     }
 
     #region カード一覧読み込みテスト

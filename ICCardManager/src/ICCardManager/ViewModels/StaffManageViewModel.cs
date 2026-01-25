@@ -22,6 +22,7 @@ namespace ICCardManager.ViewModels
         private readonly IStaffRepository _staffRepository;
         private readonly ICardReader _cardReader;
         private readonly IValidationService _validationService;
+        private readonly OperationLogger _operationLogger;
 
         [ObservableProperty]
         private ObservableCollection<StaffDto> _staffList = new();
@@ -59,11 +60,13 @@ namespace ICCardManager.ViewModels
         public StaffManageViewModel(
             IStaffRepository staffRepository,
             ICardReader cardReader,
-            IValidationService validationService)
+            IValidationService validationService,
+            OperationLogger operationLogger)
         {
             _staffRepository = staffRepository;
             _cardReader = cardReader;
             _validationService = validationService;
+            _operationLogger = operationLogger;
 
             // カード読み取りイベント
             _cardReader.CardRead += OnCardRead;
@@ -143,6 +146,13 @@ namespace ICCardManager.ViewModels
                         var restored = await _staffRepository.RestoreAsync(idm);
                         if (restored)
                         {
+                            // 操作ログを記録（復元後のデータを取得）
+                            var restoredStaff = await _staffRepository.GetByIdmAsync(idm);
+                            if (restoredStaff != null)
+                            {
+                                await _operationLogger.LogStaffRestoreAsync(null, restoredStaff);
+                            }
+
                             MessageBox.Show(
                                 $"{identifier} を復元しました",
                                 "復元完了",
@@ -274,6 +284,13 @@ namespace ICCardManager.ViewModels
                                     var restored = await _staffRepository.RestoreAsync(EditStaffIdm);
                                     if (restored)
                                     {
+                                        // 操作ログを記録（復元後のデータを取得）
+                                        var restoredStaff = await _staffRepository.GetByIdmAsync(EditStaffIdm);
+                                        if (restoredStaff != null)
+                                        {
+                                            await _operationLogger.LogStaffRestoreAsync(null, restoredStaff);
+                                        }
+
                                         StatusMessage = $"{identifier} を復元しました";
                                         IsStatusError = false;
                                         await LoadStaffAsync();
@@ -317,6 +334,9 @@ namespace ICCardManager.ViewModels
                         var success = await _staffRepository.InsertAsync(staff);
                         if (success)
                         {
+                            // 操作ログを記録
+                            await _operationLogger.LogStaffInsertAsync(null, staff);
+
                             StatusMessage = "登録しました";
                             IsStatusError = false;
                             await LoadStaffAsync();
@@ -330,6 +350,9 @@ namespace ICCardManager.ViewModels
                     }
                     else
                     {
+                        // 更新前のデータを取得（操作ログ用）
+                        var beforeStaff = await _staffRepository.GetByIdmAsync(EditStaffIdm);
+
                         // 更新
                         var staff = new Staff
                         {
@@ -342,6 +365,12 @@ namespace ICCardManager.ViewModels
                         var success = await _staffRepository.UpdateAsync(staff);
                         if (success)
                         {
+                            // 操作ログを記録
+                            if (beforeStaff != null)
+                            {
+                                await _operationLogger.LogStaffUpdateAsync(null, beforeStaff, staff);
+                            }
+
                             StatusMessage = "更新しました";
                             IsStatusError = false;
                             await LoadStaffAsync();
@@ -375,9 +404,18 @@ namespace ICCardManager.ViewModels
             {
                 using (BeginBusy("削除中..."))
                 {
+                    // 削除前のデータを取得（操作ログ用）
+                    var staff = await _staffRepository.GetByIdmAsync(SelectedStaff.StaffIdm);
+
                     var success = await _staffRepository.DeleteAsync(SelectedStaff.StaffIdm);
                     if (success)
                     {
+                        // 操作ログを記録
+                        if (staff != null)
+                        {
+                            await _operationLogger.LogStaffDeleteAsync(null, staff);
+                        }
+
                         StatusMessage = "削除しました";
                         IsStatusError = false;
                         await LoadStaffAsync();
@@ -452,6 +490,13 @@ namespace ICCardManager.ViewModels
                             var restored = await _staffRepository.RestoreAsync(e.Idm);
                             if (restored)
                             {
+                                // 操作ログを記録（復元後のデータを取得）
+                                var restoredStaff = await _staffRepository.GetByIdmAsync(e.Idm);
+                                if (restoredStaff != null)
+                                {
+                                    await _operationLogger.LogStaffRestoreAsync(null, restoredStaff);
+                                }
+
                                 StatusMessage = $"{identifier} を復元しました";
                                 IsStatusError = false;
                                 await LoadStaffAsync();
