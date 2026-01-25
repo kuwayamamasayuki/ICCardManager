@@ -207,9 +207,24 @@ WHERE staff_idm = @staffIdm AND is_deleted = 0";
         /// <inheritdoc/>
         public async Task<bool> RestoreAsync(string staffIdm)
         {
+            return await RestoreAsyncInternal(staffIdm, null);
+        }
+
+        /// <inheritdoc/>
+        public async Task<bool> RestoreAsync(string staffIdm, SQLiteTransaction transaction)
+        {
+            return await RestoreAsyncInternal(staffIdm, transaction);
+        }
+
+        /// <summary>
+        /// 職員復元の内部実装
+        /// </summary>
+        private async Task<bool> RestoreAsyncInternal(string staffIdm, SQLiteTransaction? transaction)
+        {
             var connection = _dbContext.GetConnection();
 
             using var command = connection.CreateCommand();
+            command.Transaction = transaction;
             command.CommandText = @"UPDATE staff
 SET is_deleted = 0, deleted_at = NULL
 WHERE staff_idm = @staffIdm AND is_deleted = 1";
@@ -217,8 +232,9 @@ WHERE staff_idm = @staffIdm AND is_deleted = 1";
             command.Parameters.AddWithValue("@staffIdm", staffIdm);
 
             var result = await command.ExecuteNonQueryAsync();
-            if (result > 0)
+            if (result > 0 && transaction == null)
             {
+                // トランザクション外の場合のみキャッシュ無効化
                 InvalidateStaffCache();
             }
             return result > 0;

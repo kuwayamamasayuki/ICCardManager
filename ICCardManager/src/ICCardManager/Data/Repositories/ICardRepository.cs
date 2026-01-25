@@ -81,6 +81,13 @@ namespace ICCardManager.Data.Repositories
         Task<bool> RestoreAsync(string cardIdm);
 
         /// <summary>
+        /// 論理削除されたICカードを復元（トランザクション対応）
+        /// </summary>
+        /// <param name="cardIdm">ICカードIDm</param>
+        /// <param name="transaction">SQLiteトランザクション</param>
+        Task<bool> RestoreAsync(string cardIdm, SQLiteTransaction transaction);
+
+        /// <summary>
         /// IDmが存在するか確認
         /// </summary>
         Task<bool> ExistsAsync(string cardIdm);
