@@ -36,16 +36,6 @@ namespace ICCardManager.Models
         public WindowSettings MainWindowSettings { get; set; } = new();
 
         /// <summary>
-        /// 職員証タッチをスキップするかどうか
-        /// </summary>
-        public bool SkipStaffTouch { get; set; } = false;
-
-        /// <summary>
-        /// デフォルト職員のIDm（スキップ時に使用）
-        /// </summary>
-        public string DefaultStaffIdm { get; set; }
-
-        /// <summary>
         /// 音声モード
         /// </summary>
         public SoundMode SoundMode { get; set; } = SoundMode.Beep;

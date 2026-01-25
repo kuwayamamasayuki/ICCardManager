@@ -29,10 +29,6 @@ namespace ICCardManager.Data.Repositories
         public const string KeyWindowHeight = "window_height";
         public const string KeyWindowMaximized = "window_maximized";
 
-        // 職員証スキップ設定キー
-        public const string KeySkipStaffTouch = "skip_staff_touch";
-        public const string KeyDefaultStaffIdm = "default_staff_idm";
-
         // 音声モード設定キー
         public const string KeySoundMode = "sound_mode";
 
@@ -131,13 +127,6 @@ ON CONFLICT(key) DO UPDATE SET value = @value";
             // ウィンドウ設定
             settings.MainWindowSettings = GetWindowSettingsFromDb();
 
-            // 職員証スキップ設定
-            var skipStaffTouch = Get(KeySkipStaffTouch);
-            settings.SkipStaffTouch = skipStaffTouch?.ToLowerInvariant() == "true";
-
-            var defaultStaffIdm = Get(KeyDefaultStaffIdm);
-            settings.DefaultStaffIdm = string.IsNullOrEmpty(defaultStaffIdm) ? null : defaultStaffIdm;
-
             // 音声モード設定
             var soundMode = Get(KeySoundMode);
             settings.SoundMode = ParseSoundMode(soundMode);
@@ -233,13 +222,6 @@ ON CONFLICT(key) DO UPDATE SET value = @value";
             // ウィンドウ設定
             settings.MainWindowSettings = await GetWindowSettingsFromDbAsync();
 
-            // 職員証スキップ設定
-            var skipStaffTouch = await GetAsync(KeySkipStaffTouch);
-            settings.SkipStaffTouch = skipStaffTouch?.ToLowerInvariant() == "true";
-
-            var defaultStaffIdm = await GetAsync(KeyDefaultStaffIdm);
-            settings.DefaultStaffIdm = string.IsNullOrEmpty(defaultStaffIdm) ? null : defaultStaffIdm;
-
             // 音声モード設定
             var soundMode = await GetAsync(KeySoundMode);
             settings.SoundMode = ParseSoundMode(soundMode);
@@ -304,10 +286,6 @@ ON CONFLICT(key) DO UPDATE SET value = @value";
 
             // ウィンドウ設定を保存
             success &= await SaveWindowSettingsToDbAsync(settings.MainWindowSettings);
-
-            // 職員証スキップ設定を保存
-            success &= await SetAsync(KeySkipStaffTouch, settings.SkipStaffTouch.ToString().ToLowerInvariant());
-            success &= await SetAsync(KeyDefaultStaffIdm, settings.DefaultStaffIdm);
 
             // 音声モード設定を保存
             success &= await SetAsync(KeySoundMode, SoundModeToString(settings.SoundMode));
