@@ -487,5 +487,35 @@ ORDER BY use_date DESC";
                 IsBus = reader.GetInt32(8) == 1
             };
         }
+
+        /// <inheritdoc/>
+        public async Task<HashSet<(DateTime? UseDate, int? Balance, bool IsCharge)>> GetExistingDetailKeysAsync(
+            string cardIdm, DateTime fromDate)
+        {
+            var connection = _dbContext.GetConnection();
+            var result = new HashSet<(DateTime? UseDate, int? Balance, bool IsCharge)>();
+
+            using var command = connection.CreateCommand();
+            // ledger と ledger_detail を JOIN して、指定カードの指定日以降の履歴詳細を取得
+            // Issue #326: 重複チェック用のキー（use_date + balance + is_charge）を取得
+            command.CommandText = @"SELECT d.use_date, d.balance, d.is_charge
+FROM ledger_detail d
+INNER JOIN ledger l ON d.ledger_id = l.id
+WHERE l.card_idm = @cardIdm AND l.date >= @fromDate";
+
+            command.Parameters.AddWithValue("@cardIdm", cardIdm);
+            command.Parameters.AddWithValue("@fromDate", fromDate.Date.ToString("yyyy-MM-dd HH:mm:ss"));
+
+            using var reader = await command.ExecuteReaderAsync();
+            while (await reader.ReadAsync())
+            {
+                var useDate = reader.IsDBNull(0) ? (DateTime?)null : DateTime.Parse(reader.GetString(0));
+                var balance = reader.IsDBNull(1) ? (int?)null : reader.GetInt32(1);
+                var isCharge = reader.GetInt32(2) == 1;
+                result.Add((useDate, balance, isCharge));
+            }
+
+            return result;
+        }
     }
 }
