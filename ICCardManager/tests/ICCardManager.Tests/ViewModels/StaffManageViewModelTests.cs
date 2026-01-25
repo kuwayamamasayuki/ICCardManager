@@ -7,6 +7,7 @@ using ICCardManager.Services;
 using ICCardManager.ViewModels;
 using Moq;
 using Xunit;
+using IOperationLogRepository = ICCardManager.Data.Repositories.IOperationLogRepository;
 
 using System;
 using System.Collections.Generic;
@@ -24,6 +25,7 @@ public class StaffManageViewModelTests
     private readonly Mock<IStaffRepository> _staffRepositoryMock;
     private readonly Mock<ICardReader> _cardReaderMock;
     private readonly Mock<IValidationService> _validationServiceMock;
+    private readonly Mock<OperationLogger> _operationLoggerMock;
     private readonly StaffManageViewModel _viewModel;
 
     public StaffManageViewModelTests()
@@ -32,6 +34,10 @@ public class StaffManageViewModelTests
         _cardReaderMock = new Mock<ICardReader>();
         _validationServiceMock = new Mock<IValidationService>();
 
+        // OperationLoggerのモック（コンストラクタ引数が必要なためMock.Ofで作成）
+        var operationLogRepositoryMock = new Mock<IOperationLogRepository>();
+        _operationLoggerMock = new Mock<OperationLogger>(operationLogRepositoryMock.Object, _staffRepositoryMock.Object);
+
         // バリデーションはデフォルトで成功を返す
         _validationServiceMock.Setup(v => v.ValidateStaffIdm(It.IsAny<string>())).Returns(ValidationResult.Success());
         _validationServiceMock.Setup(v => v.ValidateStaffName(It.IsAny<string>())).Returns(ValidationResult.Success());
@@ -39,7 +45,8 @@ public class StaffManageViewModelTests
         _viewModel = new StaffManageViewModel(
             _staffRepositoryMock.Object,
             _cardReaderMock.Object,
-            _validationServiceMock.Object);
+            _validationServiceMock.Object,
+            _operationLoggerMock.Object);
     }
 
     #region 職員一覧読み込みテスト

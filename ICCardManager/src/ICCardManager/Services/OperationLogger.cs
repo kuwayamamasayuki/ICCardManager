@@ -24,6 +24,7 @@ namespace ICCardManager.Services
             public const string Insert = "INSERT";
             public const string Update = "UPDATE";
             public const string Delete = "DELETE";
+            public const string Restore = "RESTORE";
         }
 
         /// <summary>
@@ -63,14 +64,18 @@ namespace ICCardManager.Services
         /// <summary>
         /// 職員登録のログを記録
         /// </summary>
-        public async Task LogStaffInsertAsync(string operatorIdm, Staff staff)
+        /// <param name="operatorIdm">操作者IDm（nullまたは空文字列の場合はGUI操作として記録）</param>
+        /// <param name="staff">登録した職員データ</param>
+        public async Task LogStaffInsertAsync(string? operatorIdm, Staff staff)
         {
-            var operatorName = await GetOperatorNameAsync(operatorIdm);
+            var isGuiOperation = string.IsNullOrEmpty(operatorIdm);
+            var actualIdm = isGuiOperation ? GuiOperator.Idm : operatorIdm;
+            var operatorName = isGuiOperation ? GuiOperator.Name : await GetOperatorNameAsync(operatorIdm!);
 
             var log = new OperationLog
             {
                 Timestamp = DateTime.Now,
-                OperatorIdm = operatorIdm,
+                OperatorIdm = actualIdm,
                 OperatorName = operatorName,
                 TargetTable = Tables.Staff,
                 TargetId = staff.StaffIdm,
@@ -85,14 +90,19 @@ namespace ICCardManager.Services
         /// <summary>
         /// 職員更新のログを記録
         /// </summary>
-        public async Task LogStaffUpdateAsync(string operatorIdm, Staff beforeStaff, Staff afterStaff)
+        /// <param name="operatorIdm">操作者IDm（nullまたは空文字列の場合はGUI操作として記録）</param>
+        /// <param name="beforeStaff">変更前の職員データ</param>
+        /// <param name="afterStaff">変更後の職員データ</param>
+        public async Task LogStaffUpdateAsync(string? operatorIdm, Staff beforeStaff, Staff afterStaff)
         {
-            var operatorName = await GetOperatorNameAsync(operatorIdm);
+            var isGuiOperation = string.IsNullOrEmpty(operatorIdm);
+            var actualIdm = isGuiOperation ? GuiOperator.Idm : operatorIdm;
+            var operatorName = isGuiOperation ? GuiOperator.Name : await GetOperatorNameAsync(operatorIdm!);
 
             var log = new OperationLog
             {
                 Timestamp = DateTime.Now,
-                OperatorIdm = operatorIdm,
+                OperatorIdm = actualIdm,
                 OperatorName = operatorName,
                 TargetTable = Tables.Staff,
                 TargetId = afterStaff.StaffIdm,
@@ -107,14 +117,18 @@ namespace ICCardManager.Services
         /// <summary>
         /// 職員削除のログを記録
         /// </summary>
-        public async Task LogStaffDeleteAsync(string operatorIdm, Staff staff)
+        /// <param name="operatorIdm">操作者IDm（nullまたは空文字列の場合はGUI操作として記録）</param>
+        /// <param name="staff">削除する職員データ</param>
+        public async Task LogStaffDeleteAsync(string? operatorIdm, Staff staff)
         {
-            var operatorName = await GetOperatorNameAsync(operatorIdm);
+            var isGuiOperation = string.IsNullOrEmpty(operatorIdm);
+            var actualIdm = isGuiOperation ? GuiOperator.Idm : operatorIdm;
+            var operatorName = isGuiOperation ? GuiOperator.Name : await GetOperatorNameAsync(operatorIdm!);
 
             var log = new OperationLog
             {
                 Timestamp = DateTime.Now,
-                OperatorIdm = operatorIdm,
+                OperatorIdm = actualIdm,
                 OperatorName = operatorName,
                 TargetTable = Tables.Staff,
                 TargetId = staff.StaffIdm,
@@ -127,16 +141,46 @@ namespace ICCardManager.Services
         }
 
         /// <summary>
-        /// ICカード登録のログを記録
+        /// 職員復元のログを記録
         /// </summary>
-        public async Task LogCardInsertAsync(string operatorIdm, IcCard card)
+        /// <param name="operatorIdm">操作者IDm（nullまたは空文字列の場合はGUI操作として記録）</param>
+        /// <param name="staff">復元後の職員データ</param>
+        public async Task LogStaffRestoreAsync(string? operatorIdm, Staff staff)
         {
-            var operatorName = await GetOperatorNameAsync(operatorIdm);
+            var isGuiOperation = string.IsNullOrEmpty(operatorIdm);
+            var actualIdm = isGuiOperation ? GuiOperator.Idm : operatorIdm;
+            var operatorName = isGuiOperation ? GuiOperator.Name : await GetOperatorNameAsync(operatorIdm!);
 
             var log = new OperationLog
             {
                 Timestamp = DateTime.Now,
-                OperatorIdm = operatorIdm,
+                OperatorIdm = actualIdm,
+                OperatorName = operatorName,
+                TargetTable = Tables.Staff,
+                TargetId = staff.StaffIdm,
+                Action = Actions.Restore,
+                BeforeData = null,
+                AfterData = SerializeToJson(staff)
+            };
+
+            await _operationLogRepository.InsertAsync(log);
+        }
+
+        /// <summary>
+        /// ICカード登録のログを記録
+        /// </summary>
+        /// <param name="operatorIdm">操作者IDm（nullまたは空文字列の場合はGUI操作として記録）</param>
+        /// <param name="card">登録したICカードデータ</param>
+        public async Task LogCardInsertAsync(string? operatorIdm, IcCard card)
+        {
+            var isGuiOperation = string.IsNullOrEmpty(operatorIdm);
+            var actualIdm = isGuiOperation ? GuiOperator.Idm : operatorIdm;
+            var operatorName = isGuiOperation ? GuiOperator.Name : await GetOperatorNameAsync(operatorIdm!);
+
+            var log = new OperationLog
+            {
+                Timestamp = DateTime.Now,
+                OperatorIdm = actualIdm,
                 OperatorName = operatorName,
                 TargetTable = Tables.IcCard,
                 TargetId = card.CardIdm,
@@ -151,14 +195,19 @@ namespace ICCardManager.Services
         /// <summary>
         /// ICカード更新のログを記録
         /// </summary>
-        public async Task LogCardUpdateAsync(string operatorIdm, IcCard beforeCard, IcCard afterCard)
+        /// <param name="operatorIdm">操作者IDm（nullまたは空文字列の場合はGUI操作として記録）</param>
+        /// <param name="beforeCard">変更前のICカードデータ</param>
+        /// <param name="afterCard">変更後のICカードデータ</param>
+        public async Task LogCardUpdateAsync(string? operatorIdm, IcCard beforeCard, IcCard afterCard)
         {
-            var operatorName = await GetOperatorNameAsync(operatorIdm);
+            var isGuiOperation = string.IsNullOrEmpty(operatorIdm);
+            var actualIdm = isGuiOperation ? GuiOperator.Idm : operatorIdm;
+            var operatorName = isGuiOperation ? GuiOperator.Name : await GetOperatorNameAsync(operatorIdm!);
 
             var log = new OperationLog
             {
                 Timestamp = DateTime.Now,
-                OperatorIdm = operatorIdm,
+                OperatorIdm = actualIdm,
                 OperatorName = operatorName,
                 TargetTable = Tables.IcCard,
                 TargetId = afterCard.CardIdm,
@@ -173,20 +222,50 @@ namespace ICCardManager.Services
         /// <summary>
         /// ICカード削除のログを記録
         /// </summary>
-        public async Task LogCardDeleteAsync(string operatorIdm, IcCard card)
+        /// <param name="operatorIdm">操作者IDm（nullまたは空文字列の場合はGUI操作として記録）</param>
+        /// <param name="card">削除するICカードデータ</param>
+        public async Task LogCardDeleteAsync(string? operatorIdm, IcCard card)
         {
-            var operatorName = await GetOperatorNameAsync(operatorIdm);
+            var isGuiOperation = string.IsNullOrEmpty(operatorIdm);
+            var actualIdm = isGuiOperation ? GuiOperator.Idm : operatorIdm;
+            var operatorName = isGuiOperation ? GuiOperator.Name : await GetOperatorNameAsync(operatorIdm!);
 
             var log = new OperationLog
             {
                 Timestamp = DateTime.Now,
-                OperatorIdm = operatorIdm,
+                OperatorIdm = actualIdm,
                 OperatorName = operatorName,
                 TargetTable = Tables.IcCard,
                 TargetId = card.CardIdm,
                 Action = Actions.Delete,
                 BeforeData = SerializeToJson(card),
                 AfterData = null
+            };
+
+            await _operationLogRepository.InsertAsync(log);
+        }
+
+        /// <summary>
+        /// ICカード復元のログを記録
+        /// </summary>
+        /// <param name="operatorIdm">操作者IDm（nullまたは空文字列の場合はGUI操作として記録）</param>
+        /// <param name="card">復元後のICカードデータ</param>
+        public async Task LogCardRestoreAsync(string? operatorIdm, IcCard card)
+        {
+            var isGuiOperation = string.IsNullOrEmpty(operatorIdm);
+            var actualIdm = isGuiOperation ? GuiOperator.Idm : operatorIdm;
+            var operatorName = isGuiOperation ? GuiOperator.Name : await GetOperatorNameAsync(operatorIdm!);
+
+            var log = new OperationLog
+            {
+                Timestamp = DateTime.Now,
+                OperatorIdm = actualIdm,
+                OperatorName = operatorName,
+                TargetTable = Tables.IcCard,
+                TargetId = card.CardIdm,
+                Action = Actions.Restore,
+                BeforeData = null,
+                AfterData = SerializeToJson(card)
             };
 
             await _operationLogRepository.InsertAsync(log);
