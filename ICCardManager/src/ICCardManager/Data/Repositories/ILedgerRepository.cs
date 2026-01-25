@@ -105,5 +105,19 @@ namespace ICCardManager.Data.Repositories
             DateTime toDate,
             int page,
             int pageSize);
+
+        /// <summary>
+        /// 指定カードの既存の履歴詳細キーを取得（重複チェック用）
+        /// </summary>
+        /// <remarks>
+        /// Issue #326対応: 同じ履歴を二回以上登録しないための重複チェックに使用。
+        /// キーは use_date + balance + is_charge の組み合わせ。
+        /// FeliCa履歴では取引ごとに残高が変化するため、この組み合わせで一意に識別可能。
+        /// </remarks>
+        /// <param name="cardIdm">ICカードIDm</param>
+        /// <param name="fromDate">検索開始日</param>
+        /// <returns>既存の履歴詳細キーのセット</returns>
+        Task<HashSet<(DateTime? UseDate, int? Balance, bool IsCharge)>> GetExistingDetailKeysAsync(
+            string cardIdm, DateTime fromDate);
     }
 }

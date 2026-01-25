@@ -451,6 +451,10 @@ namespace ICCardManager.Services
         /// FelicaCardReaderで読み取った場合、各 <see cref="LedgerDetail.Balance"/> には
         /// カードから直接読み取った残高が設定されているため、これを優先的に使用します。
         /// </para>
+        /// <para>
+        /// Issue #326対応: 同じ履歴を二回以上登録しないため、
+        /// 既存の履歴詳細と照合して重複を除外します。
+        /// </para>
         /// </remarks>
         private async Task<List<Ledger>> CreateUsageLedgersAsync(
             string cardIdm, string staffName, List<LedgerDetail> details)
@@ -462,6 +466,38 @@ namespace ICCardManager.Services
             if (details.Count == 0)
             {
                 _logger.LogDebug("LendingService: 履歴データがありません");
+                return createdLedgers;
+            }
+
+            // Issue #326: 既存の履歴詳細と照合して重複を除外
+            // 最も古い履歴の日付を基準に既存データを取得
+            var oldestDate = details
+                .Where(d => d.UseDate.HasValue)
+                .Select(d => d.UseDate!.Value)
+                .DefaultIfEmpty(DateTime.Today)
+                .Min();
+
+            var existingKeys = await _ledgerRepository.GetExistingDetailKeysAsync(cardIdm, oldestDate);
+
+            if (existingKeys.Count > 0)
+            {
+                var originalCount = details.Count;
+                details = details
+                    .Where(d => !existingKeys.Contains((d.UseDate, d.Balance, d.IsCharge)))
+                    .ToList();
+
+                var removedCount = originalCount - details.Count;
+                if (removedCount > 0)
+                {
+                    _logger.LogInformation(
+                        "LendingService: 重複履歴を除外しました（除外件数={RemovedCount}, 残り件数={RemainingCount}）",
+                        removedCount, details.Count);
+                }
+            }
+
+            if (details.Count == 0)
+            {
+                _logger.LogDebug("LendingService: 重複除外後、登録対象の履歴がありません");
                 return createdLedgers;
             }
 
