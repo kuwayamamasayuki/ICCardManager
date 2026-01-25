@@ -22,7 +22,6 @@ namespace ICCardManager.ViewModels;
 public partial class SettingsViewModel : ViewModelBase
 {
     private readonly ISettingsRepository _settingsRepository;
-    private readonly IStaffRepository _staffRepository;
     private readonly IValidationService _validationService;
     private readonly ISoundPlayer _soundPlayer;
 
@@ -46,24 +45,6 @@ public partial class SettingsViewModel : ViewModelBase
     /// </summary>
     [ObservableProperty]
     private bool _isSaved;
-
-    /// <summary>
-    /// 職員証タッチをスキップするかどうか
-    /// </summary>
-    [ObservableProperty]
-    private bool _skipStaffTouch;
-
-    /// <summary>
-    /// 職員一覧（デフォルト職員選択用）
-    /// </summary>
-    [ObservableProperty]
-    private ObservableCollection<StaffItem> _staffList = new();
-
-    /// <summary>
-    /// 選択されたデフォルト職員
-    /// </summary>
-    [ObservableProperty]
-    private StaffItem? _selectedDefaultStaff;
 
     /// <summary>
     /// 文字サイズの選択肢
@@ -109,12 +90,10 @@ public partial class SettingsViewModel : ViewModelBase
 
     public SettingsViewModel(
         ISettingsRepository settingsRepository,
-        IStaffRepository staffRepository,
         IValidationService validationService,
         ISoundPlayer soundPlayer)
     {
         _settingsRepository = settingsRepository;
-        _staffRepository = staffRepository;
         _validationService = validationService;
         _soundPlayer = soundPlayer;
     }
@@ -153,35 +132,8 @@ public partial class SettingsViewModel : ViewModelBase
             SelectedToastPositionItem = ToastPositionOptions.FirstOrDefault(x => x.Value == settings.ToastPosition)
                                         ?? ToastPositionOptions[0]; // デフォルトは「右上」
 
-            // 職員一覧を読み込み
-            await LoadStaffListAsync();
-
-            // 職員証スキップ設定を読み込み
-            SkipStaffTouch = settings.SkipStaffTouch;
-            if (!string.IsNullOrEmpty(settings.DefaultStaffIdm))
-            {
-                SelectedDefaultStaff = StaffList.FirstOrDefault(s => s.StaffIdm == settings.DefaultStaffIdm);
-            }
-
             HasChanges = false;
             StatusMessage = string.Empty;
-        }
-    }
-
-    /// <summary>
-    /// 職員一覧を読み込み
-    /// </summary>
-    private async Task LoadStaffListAsync()
-    {
-        var staffMembers = await _staffRepository.GetAllAsync();
-        StaffList.Clear();
-        foreach (var staff in staffMembers.OrderBy(s => s.Name))
-        {
-            StaffList.Add(new StaffItem
-            {
-                StaffIdm = staff.StaffIdm,
-                Name = staff.Name
-            });
         }
     }
 
@@ -196,13 +148,6 @@ public partial class SettingsViewModel : ViewModelBase
         if (!balanceResult)
         {
             StatusMessage = balanceResult.ErrorMessage!;
-            return;
-        }
-
-        // 職員証スキップ時はデフォルト職員が必須
-        if (SkipStaffTouch && SelectedDefaultStaff == null)
-        {
-            StatusMessage = "職員証スキップを有効にするには、デフォルト職員を選択してください";
             return;
         }
 
@@ -228,9 +173,7 @@ public partial class SettingsViewModel : ViewModelBase
                 BackupPath = validatedBackupPath,
                 FontSize = SelectedFontSizeItem?.Value ?? FontSizeOption.Medium,
                 SoundMode = SelectedSoundModeItem?.Value ?? SoundMode.Beep,
-                ToastPosition = SelectedToastPositionItem?.Value ?? ToastPosition.TopRight,
-                SkipStaffTouch = SkipStaffTouch,
-                DefaultStaffIdm = SelectedDefaultStaff?.StaffIdm
+                ToastPosition = SelectedToastPositionItem?.Value ?? ToastPosition.TopRight
             };
 
             var success = await _settingsRepository.SaveAppSettingsAsync(settings);
@@ -317,16 +260,6 @@ public partial class SettingsViewModel : ViewModelBase
         }
     }
 
-    partial void OnSkipStaffTouchChanged(bool value)
-    {
-        HasChanges = true;
-    }
-
-    partial void OnSelectedDefaultStaffChanged(StaffItem? value)
-    {
-        HasChanges = true;
-    }
-
     partial void OnSelectedSoundModeItemChanged(SoundModeItem? value)
     {
         HasChanges = true;
@@ -346,15 +279,6 @@ public class FontSizeItem
     public FontSizeOption Value { get; set; }
     public string DisplayName { get; set; } = string.Empty;
     public double BaseFontSize { get; set; }
-}
-
-/// <summary>
-/// 職員選択アイテム
-/// </summary>
-public class StaffItem
-{
-    public string StaffIdm { get; set; } = string.Empty;
-    public string Name { get; set; } = string.Empty;
 }
 
 /// <summary>

@@ -118,21 +118,6 @@ public partial class MainViewModel : ViewModelBase
     /// </summary>
     private const int TimeoutSeconds = 60;
 
-    /// <summary>
-    /// 職員証タッチスキップモードが有効か
-    /// </summary>
-    private bool _skipStaffTouchEnabled;
-
-    /// <summary>
-    /// デフォルト職員IDm（スキップモード用）
-    /// </summary>
-    private string? _defaultStaffIdm;
-
-    /// <summary>
-    /// デフォルト職員名（スキップモード用）
-    /// </summary>
-    private string? _defaultStaffName;
-
     [ObservableProperty]
     private AppState _currentState = AppState.WaitingForStaffCard;
 
@@ -420,56 +405,12 @@ public partial class MainViewModel : ViewModelBase
             // カード残高ダッシュボードを取得
             await RefreshDashboardAsync();
 
-            // 職員証スキップ設定を読み込み
-            await LoadSkipStaffTouchSettingsAsync();
+            // 音声モード設定を適用
+            var settings = await _settingsRepository.GetAppSettingsAsync();
+            _soundPlayer.SoundMode = settings.SoundMode;
 
             // カード読み取り開始
             await _cardReader.StartReadingAsync();
-        }
-    }
-
-    /// <summary>
-    /// 職員証スキップ設定を読み込み
-    /// </summary>
-    private async Task LoadSkipStaffTouchSettingsAsync()
-    {
-        var settings = await _settingsRepository.GetAppSettingsAsync();
-        _skipStaffTouchEnabled = settings.SkipStaffTouch;
-        _defaultStaffIdm = settings.DefaultStaffIdm;
-
-        // 音声モードを適用
-        _soundPlayer.SoundMode = settings.SoundMode;
-
-        if (_skipStaffTouchEnabled && !string.IsNullOrEmpty(_defaultStaffIdm))
-        {
-            // デフォルト職員名を取得
-            var staff = await _staffRepository.GetByIdmAsync(_defaultStaffIdm);
-            _defaultStaffName = staff?.Name;
-
-            if (staff != null)
-            {
-                // スキップモードで初期化：ICカード待ち状態から開始
-                ApplySkipStaffTouchMode();
-            }
-            else
-            {
-                // デフォルト職員が見つからない場合は通常モード
-                _skipStaffTouchEnabled = false;
-                WarningMessages.Add("⚠️ 設定されたデフォルト職員が見つかりません。職員証スキップは無効です。");
-            }
-        }
-    }
-
-    /// <summary>
-    /// 職員証スキップモードを適用
-    /// </summary>
-    private void ApplySkipStaffTouchMode()
-    {
-        if (_skipStaffTouchEnabled && !string.IsNullOrEmpty(_defaultStaffIdm) && !string.IsNullOrEmpty(_defaultStaffName))
-        {
-            _currentStaffIdm = _defaultStaffIdm;
-            _currentStaffName = _defaultStaffName;
-            SetState(AppState.WaitingForIcCard, $"🚃 交通系ICカードをタッチしてください\n（操作者: {_defaultStaffName}）");
         }
     }
 
@@ -1276,19 +1217,9 @@ public partial class MainViewModel : ViewModelBase
     {
         StopTimeout();
 
-        // スキップモードの場合はICカード待ち状態に戻す
-        if (_skipStaffTouchEnabled && !string.IsNullOrEmpty(_defaultStaffIdm) && !string.IsNullOrEmpty(_defaultStaffName))
-        {
-            _currentStaffIdm = _defaultStaffIdm;
-            _currentStaffName = _defaultStaffName;
-            SetState(AppState.WaitingForIcCard, $"🚃 交通系ICカードをタッチしてください\n（操作者: {_defaultStaffName}）");
-        }
-        else
-        {
-            _currentStaffIdm = null;
-            _currentStaffName = null;
-            SetState(AppState.WaitingForStaffCard, "職員証をタッチしてください");
-        }
+        _currentStaffIdm = null;
+        _currentStaffName = null;
+        SetState(AppState.WaitingForStaffCard, "職員証をタッチしてください");
     }
 
     /// <summary>
@@ -1455,14 +1386,9 @@ public partial class MainViewModel : ViewModelBase
         dialog.Owner = System.Windows.Application.Current.MainWindow;
         dialog.ShowDialog();
 
-        // 設定変更後にスキップ設定を再読み込み
-        await LoadSkipStaffTouchSettingsAsync();
-
-        // スキップモードでない場合は通常状態にリセット
-        if (!_skipStaffTouchEnabled && CurrentState == AppState.WaitingForIcCard && _currentStaffIdm == _defaultStaffIdm)
-        {
-            ResetState();
-        }
+        // 設定変更後に音声モードを再適用
+        var settings = await _settingsRepository.GetAppSettingsAsync();
+        _soundPlayer.SoundMode = settings.SoundMode;
     }
 
     /// <summary>
