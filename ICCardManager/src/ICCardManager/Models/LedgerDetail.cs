@@ -56,6 +56,15 @@ namespace ICCardManager.Models
         public bool IsBus { get; set; }
 
         /// <summary>
+        /// ICカードから読み取った生データ（16バイト）
+        /// </summary>
+        /// <remarks>
+        /// デバッグ・診断目的でのみ使用。DBには保存されない。
+        /// FeliCa履歴ブロックの生バイト列をそのまま保持する。
+        /// </remarks>
+        public byte[] RawBytes { get; set; }
+
+        /// <summary>
         /// 親レコードへの参照（ナビゲーションプロパティ）
         /// </summary>
         public Ledger Ledger { get; set; }
