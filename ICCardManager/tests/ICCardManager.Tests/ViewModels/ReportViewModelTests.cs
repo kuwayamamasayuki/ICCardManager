@@ -44,15 +44,15 @@ public class ReportViewModelTests
     #region 初期化テスト
 
     /// <summary>
-    /// デフォルトで今年今月が選択されていること
+    /// デフォルトで先月が選択されていること（先月が最も使用頻度が高いため）
     /// </summary>
     [Fact]
-    public void Constructor_ShouldSetDefaultYearAndMonthToNow()
+    public void Constructor_ShouldSetDefaultYearAndMonthToLastMonth()
     {
         // Assert
-        var now = DateTime.Now;
-        _viewModel.SelectedYear.Should().Be(now.Year);
-        _viewModel.SelectedMonth.Should().Be(now.Month);
+        var lastMonth = DateTime.Now.AddMonths(-1);
+        _viewModel.SelectedYear.Should().Be(lastMonth.Year);
+        _viewModel.SelectedMonth.Should().Be(lastMonth.Month);
     }
 
     /// <summary>
