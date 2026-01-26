@@ -166,35 +166,43 @@ public partial class DataExportImportViewModel : ViewModelBase
 
         using (BeginBusy("エクスポート中..."))
         {
-            CsvExportResult result;
-
-            switch (SelectedExportType)
+            try
             {
-                case DataType.Cards:
-                    result = await _exportService.ExportCardsAsync(dialog.FileName, IncludeDeletedInExport).ConfigureAwait(false);
-                    break;
+                CsvExportResult result;
 
-                case DataType.Staff:
-                    result = await _exportService.ExportStaffAsync(dialog.FileName, IncludeDeletedInExport).ConfigureAwait(false);
-                    break;
+                switch (SelectedExportType)
+                {
+                    case DataType.Cards:
+                        result = await _exportService.ExportCardsAsync(dialog.FileName, IncludeDeletedInExport);
+                        break;
 
-                case DataType.Ledgers:
-                    result = await _exportService.ExportLedgersAsync(dialog.FileName, ExportStartDate, ExportEndDate).ConfigureAwait(false);
-                    break;
+                    case DataType.Staff:
+                        result = await _exportService.ExportStaffAsync(dialog.FileName, IncludeDeletedInExport);
+                        break;
 
-                default:
-                    StatusMessage = "不正なデータタイプです";
-                    return;
+                    case DataType.Ledgers:
+                        result = await _exportService.ExportLedgersAsync(dialog.FileName, ExportStartDate, ExportEndDate);
+                        break;
+
+                    default:
+                        StatusMessage = "不正なデータタイプです";
+                        return;
+                }
+
+                if (result.Success)
+                {
+                    LastExportedFile = result.FilePath;
+                    StatusMessage = $"エクスポート完了: {result.ExportedCount}件を出力しました";
+                }
+                else
+                {
+                    StatusMessage = $"エクスポートエラー: {result.ErrorMessage}";
+                }
             }
-
-            if (result.Success)
+            catch (Exception ex)
             {
-                LastExportedFile = result.FilePath;
-                StatusMessage = $"エクスポート完了: {result.ExportedCount}件を出力しました";
-            }
-            else
-            {
-                StatusMessage = $"エクスポートエラー: {result.ErrorMessage}";
+                StatusMessage = $"エクスポートエラー: {ex.Message}";
+                System.Diagnostics.Debug.WriteLine($"[Export Error] {ex.GetType().Name}: {ex.Message}");
             }
         }
     }
@@ -221,71 +229,79 @@ public partial class DataExportImportViewModel : ViewModelBase
 
         using (BeginBusy("プレビュー読み込み中..."))
         {
-            CsvImportPreviewResult preview;
-
-            switch (SelectedImportType)
+            try
             {
-                case DataType.Cards:
-                    preview = await _importService.PreviewCardsAsync(dialog.FileName, SkipExistingOnImport).ConfigureAwait(false);
-                    break;
+                CsvImportPreviewResult preview;
 
-                case DataType.Staff:
-                    preview = await _importService.PreviewStaffAsync(dialog.FileName, SkipExistingOnImport).ConfigureAwait(false);
-                    break;
+                switch (SelectedImportType)
+                {
+                    case DataType.Cards:
+                        preview = await _importService.PreviewCardsAsync(dialog.FileName, SkipExistingOnImport);
+                        break;
 
-                case DataType.Ledgers:
-                    preview = await _importService.PreviewLedgersAsync(dialog.FileName).ConfigureAwait(false);
-                    break;
+                    case DataType.Staff:
+                        preview = await _importService.PreviewStaffAsync(dialog.FileName, SkipExistingOnImport);
+                        break;
 
-                default:
-                    StatusMessage = "不正なデータタイプです";
+                    case DataType.Ledgers:
+                        preview = await _importService.PreviewLedgersAsync(dialog.FileName);
+                        break;
+
+                    default:
+                        StatusMessage = "不正なデータタイプです";
+                        return;
+                }
+
+                ImportPreviewFile = dialog.FileName;
+                ImportPreview = preview;
+
+                if (!string.IsNullOrEmpty(preview.ErrorMessage))
+                {
+                    StatusMessage = $"プレビューエラー: {preview.ErrorMessage}";
                     return;
+                }
+
+                // プレビューアイテムを設定
+                PreviewItems.Clear();
+                foreach (var item in preview.Items)
+                {
+                    PreviewItems.Add(item);
+                }
+
+                // エラー詳細を追加
+                foreach (var error in preview.Errors.Take(10))
+                {
+                    ImportErrors.Add($"行{error.LineNumber}: {error.Message}");
+                }
+
+                if (preview.Errors.Count > 10)
+                {
+                    ImportErrors.Add($"... 他 {preview.Errors.Count - 10}件のエラー");
+                }
+
+                // プレビューサマリを設定
+                var summaryParts = new List<string>();
+                if (preview.NewCount > 0) summaryParts.Add($"新規 {preview.NewCount}件");
+                if (preview.UpdateCount > 0) summaryParts.Add($"更新 {preview.UpdateCount}件");
+                if (preview.SkipCount > 0) summaryParts.Add($"スキップ {preview.SkipCount}件");
+                if (preview.ErrorCount > 0) summaryParts.Add($"エラー {preview.ErrorCount}件");
+
+                PreviewSummary = string.Join("、", summaryParts);
+                HasPreview = true;
+
+                if (preview.IsValid)
+                {
+                    StatusMessage = "プレビューを確認して「インポート実行」ボタンを押してください";
+                }
+                else
+                {
+                    StatusMessage = $"バリデーションエラーがあります。{preview.ErrorCount}件のエラーを修正してください";
+                }
             }
-
-            ImportPreviewFile = dialog.FileName;
-            ImportPreview = preview;
-
-            if (!string.IsNullOrEmpty(preview.ErrorMessage))
+            catch (Exception ex)
             {
-                StatusMessage = $"プレビューエラー: {preview.ErrorMessage}";
-                return;
-            }
-
-            // プレビューアイテムを設定
-            PreviewItems.Clear();
-            foreach (var item in preview.Items)
-            {
-                PreviewItems.Add(item);
-            }
-
-            // エラー詳細を追加
-            foreach (var error in preview.Errors.Take(10))
-            {
-                ImportErrors.Add($"行{error.LineNumber}: {error.Message}");
-            }
-
-            if (preview.Errors.Count > 10)
-            {
-                ImportErrors.Add($"... 他 {preview.Errors.Count - 10}件のエラー");
-            }
-
-            // プレビューサマリを設定
-            var summaryParts = new List<string>();
-            if (preview.NewCount > 0) summaryParts.Add($"新規 {preview.NewCount}件");
-            if (preview.UpdateCount > 0) summaryParts.Add($"更新 {preview.UpdateCount}件");
-            if (preview.SkipCount > 0) summaryParts.Add($"スキップ {preview.SkipCount}件");
-            if (preview.ErrorCount > 0) summaryParts.Add($"エラー {preview.ErrorCount}件");
-
-            PreviewSummary = string.Join("、", summaryParts);
-            HasPreview = true;
-
-            if (preview.IsValid)
-            {
-                StatusMessage = "プレビューを確認して「インポート実行」ボタンを押してください";
-            }
-            else
-            {
-                StatusMessage = $"バリデーションエラーがあります。{preview.ErrorCount}件のエラーを修正してください";
+                StatusMessage = $"プレビューエラー: {ex.Message}";
+                System.Diagnostics.Debug.WriteLine($"[Preview Error] {ex.GetType().Name}: {ex.Message}");
             }
         }
     }
@@ -312,62 +328,70 @@ public partial class DataExportImportViewModel : ViewModelBase
 
         using (BeginBusy("インポート中..."))
         {
-            CsvImportResult result;
-
-            switch (SelectedImportType)
+            try
             {
-                case DataType.Cards:
-                    result = await _importService.ImportCardsAsync(ImportPreviewFile, SkipExistingOnImport).ConfigureAwait(false);
-                    break;
+                CsvImportResult result;
 
-                case DataType.Staff:
-                    result = await _importService.ImportStaffAsync(ImportPreviewFile, SkipExistingOnImport).ConfigureAwait(false);
-                    break;
+                switch (SelectedImportType)
+                {
+                    case DataType.Cards:
+                        result = await _importService.ImportCardsAsync(ImportPreviewFile, SkipExistingOnImport);
+                        break;
 
-                case DataType.Ledgers:
-                    result = await _importService.ImportLedgersAsync(ImportPreviewFile).ConfigureAwait(false);
-                    break;
+                    case DataType.Staff:
+                        result = await _importService.ImportStaffAsync(ImportPreviewFile, SkipExistingOnImport);
+                        break;
 
-                default:
-                    StatusMessage = "不正なデータタイプです";
-                    return;
+                    case DataType.Ledgers:
+                        result = await _importService.ImportLedgersAsync(ImportPreviewFile);
+                        break;
+
+                    default:
+                        StatusMessage = "不正なデータタイプです";
+                        return;
+                }
+
+                LastImportedFile = ImportPreviewFile;
+
+                if (result.Success)
+                {
+                    var message = $"インポート完了: {result.ImportedCount}件を登録しました";
+                    if (result.SkippedCount > 0)
+                    {
+                        message += $"（{result.SkippedCount}件はスキップ）";
+                    }
+                    StatusMessage = message;
+                    ClearPreview();
+                }
+                else if (!string.IsNullOrEmpty(result.ErrorMessage))
+                {
+                    StatusMessage = $"インポートエラー: {result.ErrorMessage}";
+                }
+                else
+                {
+                    var message = $"インポート完了（一部エラー）: {result.ImportedCount}件を登録、{result.ErrorCount}件がエラー";
+                    if (result.SkippedCount > 0)
+                    {
+                        message += $"、{result.SkippedCount}件はスキップ";
+                    }
+                    StatusMessage = message;
+
+                    // エラー詳細を追加
+                    foreach (var error in result.Errors.Take(10))
+                    {
+                        ImportErrors.Add($"行{error.LineNumber}: {error.Message}");
+                    }
+
+                    if (result.Errors.Count > 10)
+                    {
+                        ImportErrors.Add($"... 他 {result.Errors.Count - 10}件のエラー");
+                    }
+                }
             }
-
-            LastImportedFile = ImportPreviewFile;
-
-            if (result.Success)
+            catch (Exception ex)
             {
-                var message = $"インポート完了: {result.ImportedCount}件を登録しました";
-                if (result.SkippedCount > 0)
-                {
-                    message += $"（{result.SkippedCount}件はスキップ）";
-                }
-                StatusMessage = message;
-                ClearPreview();
-            }
-            else if (!string.IsNullOrEmpty(result.ErrorMessage))
-            {
-                StatusMessage = $"インポートエラー: {result.ErrorMessage}";
-            }
-            else
-            {
-                var message = $"インポート完了（一部エラー）: {result.ImportedCount}件を登録、{result.ErrorCount}件がエラー";
-                if (result.SkippedCount > 0)
-                {
-                    message += $"、{result.SkippedCount}件はスキップ";
-                }
-                StatusMessage = message;
-
-                // エラー詳細を追加
-                foreach (var error in result.Errors.Take(10))
-                {
-                    ImportErrors.Add($"行{error.LineNumber}: {error.Message}");
-                }
-
-                if (result.Errors.Count > 10)
-                {
-                    ImportErrors.Add($"... 他 {result.Errors.Count - 10}件のエラー");
-                }
+                StatusMessage = $"インポートエラー: {ex.Message}";
+                System.Diagnostics.Debug.WriteLine($"[ExecuteImport Error] {ex.GetType().Name}: {ex.Message}");
             }
         }
     }
@@ -406,61 +430,70 @@ public partial class DataExportImportViewModel : ViewModelBase
 
         using (BeginBusy("インポート中..."))
         {
-            CsvImportResult result;
-
-            switch (SelectedImportType)
+            try
             {
-                case DataType.Cards:
-                    result = await _importService.ImportCardsAsync(dialog.FileName, SkipExistingOnImport).ConfigureAwait(false);
-                    break;
+                CsvImportResult result;
 
-                case DataType.Staff:
-                    result = await _importService.ImportStaffAsync(dialog.FileName, SkipExistingOnImport).ConfigureAwait(false);
-                    break;
+                switch (SelectedImportType)
+                {
+                    case DataType.Cards:
+                        result = await _importService.ImportCardsAsync(dialog.FileName, SkipExistingOnImport);
+                        break;
 
-                case DataType.Ledgers:
-                    result = await _importService.ImportLedgersAsync(dialog.FileName).ConfigureAwait(false);
-                    break;
+                    case DataType.Staff:
+                        result = await _importService.ImportStaffAsync(dialog.FileName, SkipExistingOnImport);
+                        break;
 
-                default:
-                    StatusMessage = "不正なデータタイプです";
-                    return;
+                    case DataType.Ledgers:
+                        result = await _importService.ImportLedgersAsync(dialog.FileName);
+                        break;
+
+                    default:
+                        StatusMessage = "不正なデータタイプです";
+                        return;
+                }
+
+                LastImportedFile = dialog.FileName;
+
+                if (result.Success)
+                {
+                    var message = $"インポート完了: {result.ImportedCount}件を登録しました";
+                    if (result.SkippedCount > 0)
+                    {
+                        message += $"（{result.SkippedCount}件はスキップ）";
+                    }
+                    StatusMessage = message;
+                }
+                else if (!string.IsNullOrEmpty(result.ErrorMessage))
+                {
+                    StatusMessage = $"インポートエラー: {result.ErrorMessage}";
+                }
+                else
+                {
+                    var message = $"インポート完了（一部エラー）: {result.ImportedCount}件を登録、{result.ErrorCount}件がエラー";
+                    if (result.SkippedCount > 0)
+                    {
+                        message += $"、{result.SkippedCount}件はスキップ";
+                    }
+                    StatusMessage = message;
+
+                    // エラー詳細を追加
+                    foreach (var error in result.Errors.Take(10))
+                    {
+                        ImportErrors.Add($"行{error.LineNumber}: {error.Message}");
+                    }
+
+                    if (result.Errors.Count > 10)
+                    {
+                        ImportErrors.Add($"... 他 {result.Errors.Count - 10}件のエラー");
+                    }
+                }
             }
-
-            LastImportedFile = dialog.FileName;
-
-            if (result.Success)
+            catch (Exception ex)
             {
-                var message = $"インポート完了: {result.ImportedCount}件を登録しました";
-                if (result.SkippedCount > 0)
-                {
-                    message += $"（{result.SkippedCount}件はスキップ）";
-                }
-                StatusMessage = message;
-            }
-            else if (!string.IsNullOrEmpty(result.ErrorMessage))
-            {
-                StatusMessage = $"インポートエラー: {result.ErrorMessage}";
-            }
-            else
-            {
-                var message = $"インポート完了（一部エラー）: {result.ImportedCount}件を登録、{result.ErrorCount}件がエラー";
-                if (result.SkippedCount > 0)
-                {
-                    message += $"、{result.SkippedCount}件はスキップ";
-                }
-                StatusMessage = message;
-
-                // エラー詳細を追加
-                foreach (var error in result.Errors.Take(10))
-                {
-                    ImportErrors.Add($"行{error.LineNumber}: {error.Message}");
-                }
-
-                if (result.Errors.Count > 10)
-                {
-                    ImportErrors.Add($"... 他 {result.Errors.Count - 10}件のエラー");
-                }
+                StatusMessage = $"インポートエラー: {ex.Message}";
+                System.Diagnostics.Debug.WriteLine($"[Import Error] {ex.GetType().Name}: {ex.Message}");
+                System.Diagnostics.Debug.WriteLine($"[Import Error] StackTrace: {ex.StackTrace}");
             }
         }
     }
