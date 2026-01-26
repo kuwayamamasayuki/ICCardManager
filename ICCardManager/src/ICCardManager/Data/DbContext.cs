@@ -256,11 +256,16 @@ namespace ICCardManager.Data
         /// <summary>
         /// 6年経過したデータを削除
         /// </summary>
+        /// <remarks>
+        /// dateカラムは 'YYYY-MM-DD HH:MM:SS' 形式で保存されているため、
+        /// date()関数で日付部分のみを抽出して比較する必要があります。
+        /// また、'localtime'を指定することでローカルタイムゾーンで比較します。
+        /// </remarks>
         public int CleanupOldData()
         {
             var connection = GetConnection();
             using var command = connection.CreateCommand();
-            command.CommandText = "DELETE FROM ledger WHERE date < date('now', '-6 years')";
+            command.CommandText = "DELETE FROM ledger WHERE date(date) < date('now', '-6 years', 'localtime')";
             return command.ExecuteNonQuery();
         }
 

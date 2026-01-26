@@ -292,7 +292,7 @@ public class CsvExportServiceTests : IDisposable
         // ファイル内容を確認
         var lines = await Task.Run(() => File.ReadAllLines(filePath, Encoding.UTF8));
         lines.Should().HaveCount(3); // ヘッダー + 2行
-        lines[0].Should().Be("日付,カードIDm,摘要,受入金額,払出金額,残額,利用者,備考");
+        lines[0].Should().Be("日時,カードIDm,管理番号,摘要,受入金額,払出金額,残額,利用者,備考");
     }
 
     /// <summary>
