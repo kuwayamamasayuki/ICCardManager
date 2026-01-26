@@ -55,7 +55,8 @@ public class LendingServiceTests : IDisposable
             _ledgerRepositoryMock.Object,
             _settingsRepositoryMock.Object,
             _summaryGenerator,
-            _lockManager);
+            _lockManager,
+            NullLogger<LendingService>.Instance);
     }
 
     public void Dispose()
@@ -1040,7 +1041,8 @@ public class LendingServiceTests : IDisposable
             _ledgerRepositoryMock.Object,
             _settingsRepositoryMock.Object,
             _summaryGenerator,
-            _lockManager);
+            _lockManager,
+            NullLogger<LendingService>.Instance);
 
         // Act - 最初の処理を開始し、ロックを保持させる
         var task1 = shortTimeoutService.LendAsync(TestStaffIdm, timeoutCardIdm);
@@ -1181,8 +1183,9 @@ public class LendingServiceTests : IDisposable
             ILedgerRepository ledgerRepository,
             ISettingsRepository settingsRepository,
             SummaryGenerator summaryGenerator,
-            CardLockManager lockManager)
-            : base(dbContext, cardRepository, staffRepository, ledgerRepository, settingsRepository, summaryGenerator, lockManager)
+            CardLockManager lockManager,
+            ILogger<LendingService> logger)
+            : base(dbContext, cardRepository, staffRepository, ledgerRepository, settingsRepository, summaryGenerator, lockManager, logger)
         {
         }
 

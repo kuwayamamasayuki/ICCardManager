@@ -138,25 +138,28 @@ public class CardManageViewModelTests
     /// IDmを指定して新規登録モードを開始できること
     /// </summary>
     /// <remarks>
-    /// カード種別はIDmから自動判定できないため、デフォルト値（nimoca）が設定される。
+    /// カード種別はIDmから自動判定できないため、デフォルト値が設定される。
     /// ユーザーは必要に応じて手動でカード種別を変更する。
     /// </remarks>
     [Fact]
-    public void StartNewCardWithIdm_ShouldSetIdmAndDefaultCardType()
+    public async Task StartNewCardWithIdmAsync_ShouldSetIdmAndDefaultCardType()
     {
         // Arrange
         var idm = "0102030405060708";
+        // 未登録カード（既存カードなし）のシナリオ
+        _cardRepositoryMock.Setup(r => r.GetByIdmAsync(idm, true)).ReturnsAsync((IcCard)null);
 
         // Act
-        _viewModel.StartNewCardWithIdm(idm);
+        var completed = await _viewModel.StartNewCardWithIdmAsync(idm);
 
         // Assert
+        completed.Should().BeFalse(); // 新規登録モードに入るのでfalse
         _viewModel.IsEditing.Should().BeTrue();
         _viewModel.IsNewCard.Should().BeTrue();
         _viewModel.IsWaitingForCard.Should().BeFalse(); // IDmがあるので待機しない
         _viewModel.EditCardIdm.Should().Be(idm);
-        // カード種別はIDmから自動判定できないため、デフォルト値（nimoca）が設定される
-        _viewModel.EditCardType.Should().Be("nimoca");
+        // カード種別はIDmから自動判定できないため、デフォルト値（はやかけん）が設定される
+        _viewModel.EditCardType.Should().Be("はやかけん");
     }
 
     #endregion
