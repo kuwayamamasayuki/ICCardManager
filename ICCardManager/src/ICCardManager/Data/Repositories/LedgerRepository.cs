@@ -517,5 +517,50 @@ WHERE l.card_idm = @cardIdm AND l.date >= @fromDate";
 
             return result;
         }
+
+        /// <inheritdoc/>
+        public async Task<HashSet<(string CardIdm, DateTime Date, string Summary, int Income, int Expense, int Balance)>> GetExistingLedgerKeysAsync(
+            IEnumerable<string> cardIdms)
+        {
+            var result = new HashSet<(string CardIdm, DateTime Date, string Summary, int Income, int Expense, int Balance)>();
+
+            var cardIdmList = cardIdms.ToList();
+            if (cardIdmList.Count == 0)
+            {
+                return result;
+            }
+
+            var connection = _dbContext.GetConnection();
+
+            using var command = connection.CreateCommand();
+
+            // カードIDmのIN句を構築
+            var parameters = new List<string>();
+            for (var i = 0; i < cardIdmList.Count; i++)
+            {
+                var paramName = $"@cardIdm{i}";
+                parameters.Add(paramName);
+                command.Parameters.AddWithValue(paramName, cardIdmList[i]);
+            }
+
+            // Issue #334: CSVインポート重複チェック用のキー（card_idm + date + summary + income + expense + balance）を取得
+            command.CommandText = $@"SELECT card_idm, date, summary, income, expense, balance
+FROM ledger
+WHERE card_idm IN ({string.Join(", ", parameters)})";
+
+            using var reader = await command.ExecuteReaderAsync();
+            while (await reader.ReadAsync())
+            {
+                var cardIdm = reader.GetString(0);
+                var date = DateTime.Parse(reader.GetString(1));
+                var summary = reader.GetString(2);
+                var income = reader.GetInt32(3);
+                var expense = reader.GetInt32(4);
+                var balance = reader.GetInt32(5);
+                result.Add((cardIdm, date, summary, income, expense, balance));
+            }
+
+            return result;
+        }
     }
 }
