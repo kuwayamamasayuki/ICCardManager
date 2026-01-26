@@ -62,8 +62,8 @@ public class ImportActionToDisplayNameConverter : IValueConverter
         {
             return action switch
             {
-                Services.ImportAction.Insert => "新規追加",
-                Services.ImportAction.Update => "更新",
+                Services.ImportAction.Insert => "追加",
+                Services.ImportAction.Update => "修正",
                 Services.ImportAction.Skip => "スキップ",
                 Services.ImportAction.Restore => "復元",
                 _ => action.ToString()
