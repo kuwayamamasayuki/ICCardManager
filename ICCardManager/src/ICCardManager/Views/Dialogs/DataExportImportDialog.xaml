@@ -7,16 +7,19 @@
         mc:Ignorable="d"
         d:DataContext="{d:DesignInstance Type=vm:DataExportImportViewModel}"
         Title="データエクスポート/インポート"
-        Height="600"
-        Width="600"
+        Height="750"
+        Width="800"
         WindowStartupLocation="CenterOwner"
-        ResizeMode="NoResize"
+        ResizeMode="CanResize"
+        MinHeight="600"
+        MinWidth="700"
         AutomationProperties.Name="データエクスポート/インポートダイアログ"
         AutomationProperties.HelpText="カード、職員、履歴データのCSVエクスポート・インポートができます。Escapeキーで閉じます。">
 
     <Window.Resources>
         <BooleanToVisibilityConverter x:Key="BoolToVisibilityConverter"/>
         <vm:DataTypeToDisplayNameConverter x:Key="DataTypeConverter"/>
+        <vm:ImportActionToDisplayNameConverter x:Key="ImportActionConverter"/>
     </Window.Resources>
 
     <Grid Margin="20">
@@ -191,20 +194,56 @@
                 </Grid>
 
                 <!-- インポートボタン -->
-                <Button Content="CSVインポート"
-                        Command="{Binding ImportCommand}"
-                        Padding="15,10"
-                        HorizontalAlignment="Left"
-                        Background="#2196F3"
-                        Foreground="White"
-                        AutomationProperties.Name="CSVインポート実行"
-                        ToolTip="CSVファイルからデータをインポートします"/>
+                <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
+                    <Button Content="プレビュー"
+                            Command="{Binding PreviewImportCommand}"
+                            Padding="15,10"
+                            Background="#FF9800"
+                            Foreground="White"
+                            AutomationProperties.Name="インポートプレビュー"
+                            ToolTip="CSVファイルの内容をプレビューし、変更点を確認します"/>
+                    <Button Content="インポート実行"
+                            Command="{Binding ExecuteImportCommand}"
+                            Padding="15,10"
+                            Margin="10,0,0,0"
+                            Background="#4CAF50"
+                            Foreground="White"
+                            IsEnabled="{Binding HasPreview}"
+                            AutomationProperties.Name="インポート実行"
+                            ToolTip="プレビュー済みのデータをインポートします"/>
+                    <Button Content="直接インポート"
+                            Command="{Binding ImportCommand}"
+                            Padding="15,10"
+                            Margin="10,0,0,0"
+                            Background="#2196F3"
+                            Foreground="White"
+                            AutomationProperties.Name="直接CSVインポート"
+                            ToolTip="プレビューなしで直接インポートします"/>
+                </StackPanel>
+
+                <!-- プレビューサマリ -->
+                <Border Background="#FFF3E0"
+                        Padding="10"
+                        CornerRadius="3"
+                        Margin="0,0,0,10"
+                        Visibility="{Binding HasPreview, Converter={StaticResource BoolToVisibilityConverter}}">
+                    <StackPanel>
+                        <TextBlock FontWeight="Bold" FontSize="{DynamicResource BaseFontSize}">
+                            <Run Text="プレビュー結果: "/>
+                            <Run Text="{Binding PreviewSummary}" Foreground="#E65100"/>
+                        </TextBlock>
+                        <TextBlock Text="{Binding ImportPreviewFile, StringFormat=ファイル: {0}}"
+                                   Foreground="Gray"
+                                   FontSize="{DynamicResource SmallFontSize}"
+                                   Margin="0,5,0,0"
+                                   TextTrimming="CharacterEllipsis"/>
+                    </StackPanel>
+                </Border>
 
                 <!-- 最後にインポートしたファイル -->
-                <TextBlock Text="{Binding LastImportedFile, StringFormat=インポート元: {0}}"
+                <TextBlock Text="{Binding LastImportedFile, StringFormat=インポート完了: {0}}"
                            Foreground="Gray"
                            FontSize="{DynamicResource SmallFontSize}"
-                           Margin="0,10,0,0"
                            TextTrimming="CharacterEllipsis"
                            Visibility="{Binding LastImportedFile, Converter={StaticResource BoolToVisibilityConverter}}"/>
             </StackPanel>
@@ -223,24 +262,118 @@
                        TextWrapping="Wrap"/>
         </Border>
 
-        <!-- インポートエラー一覧 -->
-        <GroupBox Grid.Row="3"
-                  Header="インポートエラー詳細"
-                  Padding="10"
-                  Visibility="{Binding ImportErrors.Count, Converter={StaticResource BoolToVisibilityConverter}}">
-            <ListBox ItemsSource="{Binding ImportErrors}"
-                     Background="#FFF3E0"
-                     BorderThickness="0"
-                     AutomationProperties.Name="インポートエラー一覧">
-                <ListBox.ItemTemplate>
-                    <DataTemplate>
-                        <TextBlock Text="{Binding}"
-                                   Foreground="#E65100"
-                                   FontSize="{DynamicResource SmallFontSize}"/>
-                    </DataTemplate>
-                </ListBox.ItemTemplate>
-            </ListBox>
-        </GroupBox>
+        <!-- プレビュー結果/エラー一覧 -->
+        <TabControl Grid.Row="3" Margin="0,0,0,10">
+            <!-- プレビュー結果タブ -->
+            <TabItem Header="変更点プレビュー"
+                     Visibility="{Binding HasPreview, Converter={StaticResource BoolToVisibilityConverter}}">
+                <DataGrid ItemsSource="{Binding PreviewItems}"
+                          AutoGenerateColumns="False"
+                          IsReadOnly="True"
+                          CanUserAddRows="False"
+                          CanUserDeleteRows="False"
+                          SelectionMode="Single"
+                          GridLinesVisibility="Horizontal"
+                          HeadersVisibility="Column"
+                          BorderThickness="1"
+                          BorderBrush="#DDD"
+                          AutomationProperties.Name="インポートプレビュー一覧">
+                    <DataGrid.Columns>
+                        <DataGridTextColumn Header="行" Binding="{Binding LineNumber}" Width="50"/>
+                        <DataGridTextColumn Header="IDm" Binding="{Binding Idm}" Width="140"/>
+                        <DataGridTextColumn Header="名前" Binding="{Binding Name}" Width="120"/>
+                        <DataGridTextColumn Header="追加情報" Binding="{Binding AdditionalInfo}" Width="100"/>
+                        <DataGridTemplateColumn Header="アクション" Width="80">
+                            <DataGridTemplateColumn.CellTemplate>
+                                <DataTemplate>
+                                    <TextBlock Text="{Binding Action, Converter={StaticResource ImportActionConverter}}"
+                                               Padding="5,2">
+                                        <TextBlock.Style>
+                                            <Style TargetType="TextBlock">
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding Action}" Value="Insert">
+                                                        <Setter Property="Foreground" Value="#4CAF50"/>
+                                                        <Setter Property="FontWeight" Value="Bold"/>
+                                                    </DataTrigger>
+                                                    <DataTrigger Binding="{Binding Action}" Value="Update">
+                                                        <Setter Property="Foreground" Value="#FF9800"/>
+                                                        <Setter Property="FontWeight" Value="Bold"/>
+                                                    </DataTrigger>
+                                                    <DataTrigger Binding="{Binding Action}" Value="Skip">
+                                                        <Setter Property="Foreground" Value="#9E9E9E"/>
+                                                    </DataTrigger>
+                                                    <DataTrigger Binding="{Binding Action}" Value="Restore">
+                                                        <Setter Property="Foreground" Value="#2196F3"/>
+                                                        <Setter Property="FontWeight" Value="Bold"/>
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </TextBlock.Style>
+                                    </TextBlock>
+                                </DataTemplate>
+                            </DataGridTemplateColumn.CellTemplate>
+                        </DataGridTemplateColumn>
+                        <DataGridTemplateColumn Header="変更点" Width="*">
+                            <DataGridTemplateColumn.CellTemplate>
+                                <DataTemplate>
+                                    <TextBlock Text="{Binding ChangesSummary}"
+                                               Foreground="#E65100"
+                                               TextTrimming="CharacterEllipsis"
+                                               ToolTip="{Binding ChangesSummary}"
+                                               Padding="5,2">
+                                        <TextBlock.Style>
+                                            <Style TargetType="TextBlock">
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding HasChanges}" Value="True">
+                                                        <Setter Property="FontStyle" Value="Italic"/>
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </TextBlock.Style>
+                                    </TextBlock>
+                                </DataTemplate>
+                            </DataGridTemplateColumn.CellTemplate>
+                        </DataGridTemplateColumn>
+                    </DataGrid.Columns>
+                    <DataGrid.RowDetailsTemplate>
+                        <DataTemplate>
+                            <Border Background="#FFF8E1" Padding="10" Margin="0,2"
+                                    Visibility="{Binding HasChanges, Converter={StaticResource BoolToVisibilityConverter}}">
+                                <StackPanel>
+                                    <TextBlock Text="変更内容の詳細:" FontWeight="Bold" Margin="0,0,0,5"/>
+                                    <ItemsControl ItemsSource="{Binding Changes}">
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate>
+                                                <TextBlock Text="{Binding DisplayText}"
+                                                           Foreground="#795548"
+                                                           Margin="10,2,0,2"/>
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+                                </StackPanel>
+                            </Border>
+                        </DataTemplate>
+                    </DataGrid.RowDetailsTemplate>
+                </DataGrid>
+            </TabItem>
+
+            <!-- エラー一覧タブ -->
+            <TabItem Header="エラー詳細"
+                     Visibility="{Binding ImportErrors.Count, Converter={StaticResource BoolToVisibilityConverter}}">
+                <ListBox ItemsSource="{Binding ImportErrors}"
+                         Background="#FFF3E0"
+                         BorderThickness="0"
+                         AutomationProperties.Name="インポートエラー一覧">
+                    <ListBox.ItemTemplate>
+                        <DataTemplate>
+                            <TextBlock Text="{Binding}"
+                                       Foreground="#E65100"
+                                       FontSize="{DynamicResource SmallFontSize}"/>
+                        </DataTemplate>
+                    </ListBox.ItemTemplate>
+                </ListBox>
+            </TabItem>
+        </TabControl>
 
         <!-- 閉じるボタン -->
         <StackPanel Grid.Row="4"

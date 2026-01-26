@@ -52,6 +52,33 @@ public class DataTypeToDisplayNameConverter : IValueConverter
 }
 
 /// <summary>
+/// ImportAction enumの表示名変換コンバーター
+/// </summary>
+public class ImportActionToDisplayNameConverter : IValueConverter
+{
+    public object Convert(object value, Type targetType, object parameter, CultureInfo culture)
+    {
+        if (value is Services.ImportAction action)
+        {
+            return action switch
+            {
+                Services.ImportAction.Insert => "追加",
+                Services.ImportAction.Update => "修正",
+                Services.ImportAction.Skip => "スキップ",
+                Services.ImportAction.Restore => "復元",
+                _ => action.ToString()
+            };
+        }
+        return value?.ToString() ?? string.Empty;
+    }
+
+    public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture)
+    {
+        throw new NotImplementedException();
+    }
+}
+
+/// <summary>
 /// データエクスポート/インポートViewModel
 /// </summary>
 public partial class DataExportImportViewModel : ViewModelBase
@@ -244,7 +271,7 @@ public partial class DataExportImportViewModel : ViewModelBase
                         break;
 
                     case DataType.Ledgers:
-                        preview = await _importService.PreviewLedgersAsync(dialog.FileName);
+                        preview = await _importService.PreviewLedgersAsync(dialog.FileName, SkipExistingOnImport);
                         break;
 
                     default:
@@ -343,7 +370,7 @@ public partial class DataExportImportViewModel : ViewModelBase
                         break;
 
                     case DataType.Ledgers:
-                        result = await _importService.ImportLedgersAsync(ImportPreviewFile);
+                        result = await _importService.ImportLedgersAsync(ImportPreviewFile, SkipExistingOnImport);
                         break;
 
                     default:
@@ -445,7 +472,7 @@ public partial class DataExportImportViewModel : ViewModelBase
                         break;
 
                     case DataType.Ledgers:
-                        result = await _importService.ImportLedgersAsync(dialog.FileName);
+                        result = await _importService.ImportLedgersAsync(dialog.FileName, SkipExistingOnImport);
                         break;
 
                     default:

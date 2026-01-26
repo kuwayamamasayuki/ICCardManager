@@ -167,8 +167,8 @@ namespace ICCardManager.Services
 
                 var lines = new List<string>
                 {
-                    // ヘッダー行（Issue #265: 管理番号列追加、Issue #266: 日付→日時）
-                    "日時,カードIDm,管理番号,摘要,受入金額,払出金額,残額,利用者,備考"
+                    // ヘッダー行（Issue #265: 管理番号列追加、Issue #266: 日付→日時、Issue #342: ID列追加）
+                    "ID,日時,カードIDm,管理番号,摘要,受入金額,払出金額,残額,利用者,備考"
                 };
 
                 foreach (var ledger in ledgers.OrderBy(l => l.Date).ThenBy(l => l.Id))
@@ -177,6 +177,7 @@ namespace ICCardManager.Services
                     var cardNumber = cardNumberMap.TryGetValue(ledger.CardIdm, out var num) ? num : "";
 
                     lines.Add(string.Join(",",
+                        ledger.Id.ToString(),
                         ledger.Date.ToString("yyyy-MM-dd HH:mm:ss"),
                         EscapeCsvField(ledger.CardIdm),
                         EscapeCsvField(cardNumber),
