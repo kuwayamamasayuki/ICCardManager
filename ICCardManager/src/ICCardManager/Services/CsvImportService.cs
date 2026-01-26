@@ -1071,12 +1071,20 @@ namespace ICCardManager.Services
                         var existingLedger = await _ledgerRepository.GetByIdAsync(ledgerId.Value);
                         if (existingLedger != null)
                         {
-                            if (skipExisting)
+                            // 変更点を検出（skipExistingに関係なく常にチェック）
+                            var hasChanges = existingLedger.Summary != summary ||
+                                            (existingLedger.StaffName ?? "") != staffName ||
+                                            (existingLedger.Note ?? "") != note;
+                            if (hasChanges)
                             {
+                                isUpdate = true;
+                            }
+                            else
+                            {
+                                // 変更がない場合はスキップ
                                 skippedCount++;
                                 continue;
                             }
-                            isUpdate = true;
                         }
                     }
 
@@ -1435,26 +1443,19 @@ namespace ICCardManager.Services
                         var existingLedger = await _ledgerRepository.GetByIdAsync(ledgerId.Value);
                         if (existingLedger != null)
                         {
-                            if (skipExisting)
+                            // 変更点を検出（skipExistingに関係なく常にチェック）
+                            DetectLedgerChanges(existingLedger, summary, staffName, note, changes);
+                            if (changes.Count > 0)
                             {
-                                action = ImportAction.Skip;
-                                skipCount++;
+                                // 変更がある場合は更新
+                                action = ImportAction.Update;
+                                updateCount++;
                             }
                             else
                             {
-                                // 変更点を検出
-                                DetectLedgerChanges(existingLedger, summary, staffName, note, changes);
-                                if (changes.Count > 0)
-                                {
-                                    action = ImportAction.Update;
-                                    updateCount++;
-                                }
-                                else
-                                {
-                                    // 変更点がない場合はスキップ
-                                    action = ImportAction.Skip;
-                                    skipCount++;
-                                }
+                                // 変更点がない場合はスキップ
+                                action = ImportAction.Skip;
+                                skipCount++;
                             }
                         }
                         else
