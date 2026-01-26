@@ -882,16 +882,19 @@ namespace ICCardManager.Services
         /// 履歴CSVをインポート
         /// </summary>
         /// <param name="filePath">CSVファイルパス</param>
+        /// <param name="skipExisting">既存データをスキップするか（falseの場合は更新）</param>
         /// <remarks>
-        /// CSVフォーマット: 日時,カードIDm,管理番号,摘要,受入金額,払出金額,残額,利用者,備考
+        /// 新フォーマット: ID,日時,カードIDm,管理番号,摘要,受入金額,払出金額,残額,利用者,備考
+        /// 旧フォーマット: 日時,カードIDm,管理番号,摘要,受入金額,払出金額,残額,利用者,備考
         /// 注意: LedgerDetailはインポートされません（エクスポート時に含まれないため）
         /// 注意: 管理番号は参照用で、実際のデータ識別はカードIDmで行います
         /// </remarks>
-        public async Task<CsvImportResult> ImportLedgersAsync(string filePath)
+        public async Task<CsvImportResult> ImportLedgersAsync(string filePath, bool skipExisting = true)
         {
             var errors = new List<CsvImportError>();
             var importedCount = 0;
             var skippedCount = 0;
+            var updatedCount = 0;
 
             try
             {
@@ -905,8 +908,14 @@ namespace ICCardManager.Services
                     };
                 }
 
+                // ヘッダー行を解析してID列の有無を判定
+                var headerFields = ParseCsvLine(lines[0]);
+                var hasIdColumn = headerFields.Count > 0 && headerFields[0].Trim().Equals("ID", StringComparison.OrdinalIgnoreCase);
+                var minColumns = hasIdColumn ? 10 : 9;
+
                 // バリデーションパス: まず全データをバリデーション
-                var validRecords = new List<(int LineNumber, Ledger Ledger)>();
+                // IsUpdate: 既存レコードを更新する場合true
+                var validRecords = new List<(int LineNumber, Ledger Ledger, bool IsUpdate)>();
                 var existingCardIdms = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
                 // 全カードのIDmをキャッシュ（パフォーマンス向上）
@@ -928,27 +937,46 @@ namespace ICCardManager.Services
 
                     var fields = ParseCsvLine(line);
 
-                    // 最低9列（日時,カードIDm,管理番号,摘要,受入金額,払出金額,残額,利用者,備考）が必要
-                    if (fields.Count < 9)
+                    if (fields.Count < minColumns)
                     {
                         errors.Add(new CsvImportError
                         {
                             LineNumber = lineNumber,
-                            Message = "列数が不足しています（9列必要）",
+                            Message = $"列数が不足しています（{minColumns}列必要）",
                             Data = line
                         });
                         continue;
                     }
 
-                    var dateStr = fields[0].Trim();
-                    var cardIdm = fields[1].Trim().ToUpperInvariant(); // IDmは大文字に正規化
-                    // fields[2] は管理番号（参照用、インポート時は使用しない）
-                    var summary = fields[3].Trim();
-                    var incomeStr = fields[4].Trim();
-                    var expenseStr = fields[5].Trim();
-                    var balanceStr = fields[6].Trim();
-                    var staffName = fields[7].Trim();
-                    var note = fields[8].Trim();
+                    // フィールドのインデックスを調整（ID列の有無による）
+                    var offset = hasIdColumn ? 1 : 0;
+                    var idStr = hasIdColumn ? fields[0].Trim() : "";
+                    var dateStr = fields[0 + offset].Trim();
+                    var cardIdm = fields[1 + offset].Trim().ToUpperInvariant(); // IDmは大文字に正規化
+                    // fields[2 + offset] は管理番号（参照用、インポート時は使用しない）
+                    var summary = fields[3 + offset].Trim();
+                    var incomeStr = fields[4 + offset].Trim();
+                    var expenseStr = fields[5 + offset].Trim();
+                    var balanceStr = fields[6 + offset].Trim();
+                    var staffName = fields[7 + offset].Trim();
+                    var note = fields[8 + offset].Trim();
+
+                    // ID列がある場合、IDを解析
+                    int? ledgerId = null;
+                    if (hasIdColumn && !string.IsNullOrWhiteSpace(idStr))
+                    {
+                        if (!int.TryParse(idStr, out var parsedId))
+                        {
+                            errors.Add(new CsvImportError
+                            {
+                                LineNumber = lineNumber,
+                                Message = "IDの形式が不正です",
+                                Data = idStr
+                            });
+                            continue;
+                        }
+                        ledgerId = parsedId;
+                    }
 
                     // バリデーション: 日時
                     if (!DateTime.TryParse(dateStr, out var date))
@@ -1036,8 +1064,25 @@ namespace ICCardManager.Services
                         continue;
                     }
 
+                    // 既存レコードの確認（IDがある場合）
+                    var isUpdate = false;
+                    if (ledgerId.HasValue)
+                    {
+                        var existingLedger = await _ledgerRepository.GetByIdAsync(ledgerId.Value);
+                        if (existingLedger != null)
+                        {
+                            if (skipExisting)
+                            {
+                                skippedCount++;
+                                continue;
+                            }
+                            isUpdate = true;
+                        }
+                    }
+
                     var ledger = new Ledger
                     {
+                        Id = ledgerId ?? 0,
                         CardIdm = cardIdm,
                         Date = date,
                         Summary = summary,
@@ -1048,7 +1093,7 @@ namespace ICCardManager.Services
                         Note = string.IsNullOrWhiteSpace(note) ? null : note
                     };
 
-                    validRecords.Add((lineNumber, ledger));
+                    validRecords.Add((lineNumber, ledger, isUpdate));
                 }
 
                 // バリデーションエラーがあれば中断
@@ -1076,45 +1121,68 @@ namespace ICCardManager.Services
                     };
                 }
 
-                // Issue #334: 既存履歴の重複チェック用キーを取得
-                var uniqueCardIdms = validRecords.Select(r => r.Ledger.CardIdm).Distinct();
+                // Issue #334: 新規追加分のみ既存履歴の重複チェック用キーを取得
+                var newRecords = validRecords.Where(r => !r.IsUpdate).ToList();
+                var uniqueCardIdms = newRecords.Select(r => r.Ledger.CardIdm).Distinct();
                 var existingLedgerKeys = await _ledgerRepository.GetExistingLedgerKeysAsync(uniqueCardIdms);
 
                 // インポート実行（履歴はトランザクションなしで直接インポート）
-                // 注: LedgerRepository.InsertAsyncはトランザクション対応していないため
-                foreach (var (lineNumber, ledger) in validRecords)
+                foreach (var (lineNumber, ledger, isUpdate) in validRecords)
                 {
-                    // 重複チェック: 同じ履歴が既に存在する場合はスキップ
-                    var ledgerKey = (ledger.CardIdm, ledger.Date, ledger.Summary, ledger.Income, ledger.Expense, ledger.Balance);
-                    if (existingLedgerKeys.Contains(ledgerKey))
-                    {
-                        skippedCount++;
-                        continue;
-                    }
-
                     try
                     {
-                        var id = await _ledgerRepository.InsertAsync(ledger);
-                        if (id > 0)
+                        if (isUpdate)
                         {
-                            importedCount++;
+                            // 既存レコードを更新
+                            var success = await _ledgerRepository.UpdateAsync(ledger);
+                            if (success)
+                            {
+                                updatedCount++;
+                            }
+                            else
+                            {
+                                errors.Add(new CsvImportError
+                                {
+                                    LineNumber = lineNumber,
+                                    Message = "履歴の更新に失敗しました",
+                                    Data = ledger.CardIdm
+                                });
+                            }
                         }
                         else
                         {
-                            errors.Add(new CsvImportError
+                            // 重複チェック: 同じ履歴が既に存在する場合はスキップ
+                            var ledgerKey = (ledger.CardIdm, ledger.Date, ledger.Summary, ledger.Income, ledger.Expense, ledger.Balance);
+                            if (existingLedgerKeys.Contains(ledgerKey))
                             {
-                                LineNumber = lineNumber,
-                                Message = "履歴の登録に失敗しました",
-                                Data = ledger.CardIdm
-                            });
+                                skippedCount++;
+                                continue;
+                            }
+
+                            // 新規登録
+                            var id = await _ledgerRepository.InsertAsync(ledger);
+                            if (id > 0)
+                            {
+                                importedCount++;
+                            }
+                            else
+                            {
+                                errors.Add(new CsvImportError
+                                {
+                                    LineNumber = lineNumber,
+                                    Message = "履歴の登録に失敗しました",
+                                    Data = ledger.CardIdm
+                                });
+                            }
                         }
                     }
                     catch (Exception ex)
                     {
+                        var action = isUpdate ? "更新" : "登録";
                         errors.Add(new CsvImportError
                         {
                             LineNumber = lineNumber,
-                            Message = $"履歴の登録中にエラーが発生しました: {ex.Message}",
+                            Message = $"履歴の{action}中にエラーが発生しました: {ex.Message}",
                             Data = ledger.CardIdm
                         });
                     }
@@ -1123,7 +1191,7 @@ namespace ICCardManager.Services
                 return new CsvImportResult
                 {
                     Success = errors.Count == 0,
-                    ImportedCount = importedCount,
+                    ImportedCount = importedCount + updatedCount,
                     SkippedCount = skippedCount,
                     ErrorCount = errors.Count,
                     Errors = errors
@@ -1171,11 +1239,13 @@ namespace ICCardManager.Services
         /// 履歴CSVのインポートプレビューを取得
         /// </summary>
         /// <param name="filePath">CSVファイルパス</param>
-        public async Task<CsvImportPreviewResult> PreviewLedgersAsync(string filePath)
+        /// <param name="skipExisting">既存データをスキップするか（falseの場合は更新）</param>
+        public async Task<CsvImportPreviewResult> PreviewLedgersAsync(string filePath, bool skipExisting = true)
         {
             var errors = new List<CsvImportError>();
             var items = new List<CsvImportPreviewItem>();
             var newCount = 0;
+            var updateCount = 0;
             var skipCount = 0;
 
             try
@@ -1190,6 +1260,11 @@ namespace ICCardManager.Services
                     };
                 }
 
+                // ヘッダー行を解析してID列の有無を判定
+                var headerFields = ParseCsvLine(lines[0]);
+                var hasIdColumn = headerFields.Count > 0 && headerFields[0].Trim().Equals("ID", StringComparison.OrdinalIgnoreCase);
+                var minColumns = hasIdColumn ? 10 : 9;
+
                 // 全カードのIDmをキャッシュ
                 var existingCardIdms = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                 var allCards = await _cardRepository.GetAllIncludingDeletedAsync();
@@ -1200,7 +1275,7 @@ namespace ICCardManager.Services
 
                 // 仮バリデーションでカードIDmを収集（重複チェック用）
                 var cardIdmsInFile = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-                var validatedRecords = new List<(int LineNumber, string CardIdm, DateTime Date, string Summary, int Income, int Expense, int Balance)>();
+                var validatedRecords = new List<(int LineNumber, int? LedgerId, string CardIdm, DateTime Date, string Summary, int Income, int Expense, int Balance, string StaffName, string Note)>();
 
                 for (var i = 1; i < lines.Count; i++)
                 {
@@ -1214,24 +1289,46 @@ namespace ICCardManager.Services
 
                     var fields = ParseCsvLine(line);
 
-                    if (fields.Count < 9)
+                    if (fields.Count < minColumns)
                     {
                         errors.Add(new CsvImportError
                         {
                             LineNumber = lineNumber,
-                            Message = "列数が不足しています（9列必要）",
+                            Message = $"列数が不足しています（{minColumns}列必要）",
                             Data = line
                         });
                         continue;
                     }
 
-                    var dateStr = fields[0].Trim();
-                    var cardIdm = fields[1].Trim().ToUpperInvariant(); // IDmは大文字に正規化
-                    // fields[2] は管理番号（参照用）
-                    var summary = fields[3].Trim();
-                    var incomeStr = fields[4].Trim();
-                    var expenseStr = fields[5].Trim();
-                    var balanceStr = fields[6].Trim();
+                    // フィールドのインデックスを調整（ID列の有無による）
+                    var offset = hasIdColumn ? 1 : 0;
+                    var idStr = hasIdColumn ? fields[0].Trim() : "";
+                    var dateStr = fields[0 + offset].Trim();
+                    var cardIdm = fields[1 + offset].Trim().ToUpperInvariant(); // IDmは大文字に正規化
+                    // fields[2 + offset] は管理番号（参照用）
+                    var summary = fields[3 + offset].Trim();
+                    var incomeStr = fields[4 + offset].Trim();
+                    var expenseStr = fields[5 + offset].Trim();
+                    var balanceStr = fields[6 + offset].Trim();
+                    var staffName = fields[7 + offset].Trim();
+                    var note = fields[8 + offset].Trim();
+
+                    // ID列がある場合、IDを解析
+                    int? ledgerId = null;
+                    if (hasIdColumn && !string.IsNullOrWhiteSpace(idStr))
+                    {
+                        if (!int.TryParse(idStr, out var parsedId))
+                        {
+                            errors.Add(new CsvImportError
+                            {
+                                LineNumber = lineNumber,
+                                Message = "IDの形式が不正です",
+                                Data = idStr
+                            });
+                            continue;
+                        }
+                        ledgerId = parsedId;
+                    }
 
                     // バリデーション: 日時
                     if (!DateTime.TryParse(dateStr, out var date))
@@ -1320,27 +1417,67 @@ namespace ICCardManager.Services
                     }
 
                     cardIdmsInFile.Add(cardIdm);
-                    validatedRecords.Add((lineNumber, cardIdm, date, summary, income, expense, balance));
+                    validatedRecords.Add((lineNumber, ledgerId, cardIdm, date, summary, income, expense, balance, staffName, note));
                 }
 
-                // Issue #334: 既存履歴の重複チェック用キーを取得
+                // Issue #334: 既存履歴の重複チェック用キーを取得（新規追加分のみ）
                 var existingLedgerKeys = await _ledgerRepository.GetExistingLedgerKeysAsync(cardIdmsInFile);
 
                 // プレビューアイテムを生成
-                foreach (var (lineNumber, cardIdm, date, summary, income, expense, balance) in validatedRecords)
+                foreach (var (lineNumber, ledgerId, cardIdm, date, summary, income, expense, balance, staffName, note) in validatedRecords)
                 {
-                    var ledgerKey = (cardIdm, date, summary, income, expense, balance);
                     ImportAction action;
+                    var changes = new List<FieldChange>();
 
-                    if (existingLedgerKeys.Contains(ledgerKey))
+                    if (ledgerId.HasValue)
                     {
-                        action = ImportAction.Skip;
-                        skipCount++;
+                        // IDがある場合は既存レコードを検索
+                        var existingLedger = await _ledgerRepository.GetByIdAsync(ledgerId.Value);
+                        if (existingLedger != null)
+                        {
+                            if (skipExisting)
+                            {
+                                action = ImportAction.Skip;
+                                skipCount++;
+                            }
+                            else
+                            {
+                                // 変更点を検出
+                                DetectLedgerChanges(existingLedger, summary, staffName, note, changes);
+                                if (changes.Count > 0)
+                                {
+                                    action = ImportAction.Update;
+                                    updateCount++;
+                                }
+                                else
+                                {
+                                    // 変更点がない場合はスキップ
+                                    action = ImportAction.Skip;
+                                    skipCount++;
+                                }
+                            }
+                        }
+                        else
+                        {
+                            // IDが指定されているがレコードが見つからない場合は新規追加
+                            action = ImportAction.Insert;
+                            newCount++;
+                        }
                     }
                     else
                     {
-                        action = ImportAction.Insert;
-                        newCount++;
+                        // IDがない場合は従来の重複チェック
+                        var ledgerKey = (cardIdm, date, summary, income, expense, balance);
+                        if (existingLedgerKeys.Contains(ledgerKey))
+                        {
+                            action = ImportAction.Skip;
+                            skipCount++;
+                        }
+                        else
+                        {
+                            action = ImportAction.Insert;
+                            newCount++;
+                        }
                     }
 
                     items.Add(new CsvImportPreviewItem
@@ -1349,7 +1486,8 @@ namespace ICCardManager.Services
                         Idm = cardIdm,
                         Name = summary,
                         AdditionalInfo = date.ToString("yyyy-MM-dd HH:mm:ss"),
-                        Action = action
+                        Action = action,
+                        Changes = changes
                     });
                 }
 
@@ -1357,7 +1495,7 @@ namespace ICCardManager.Services
                 {
                     IsValid = errors.Count == 0,
                     NewCount = newCount,
-                    UpdateCount = 0,
+                    UpdateCount = updateCount,
                     SkipCount = skipCount,
                     ErrorCount = errors.Count,
                     Errors = errors,
@@ -1720,6 +1858,54 @@ namespace ICCardManager.Services
                     FieldName = "職員番号",
                     OldValue = existingStaff.Number ?? "(なし)",
                     NewValue = newNumber
+                });
+            }
+        }
+
+        /// <summary>
+        /// 履歴データの変更点を検出
+        /// </summary>
+        /// <param name="existingLedger">既存の履歴</param>
+        /// <param name="newSummary">新しい摘要</param>
+        /// <param name="newStaffName">新しい利用者名</param>
+        /// <param name="newNote">新しい備考</param>
+        /// <param name="changes">変更点リスト（検出結果が追加される）</param>
+        private static void DetectLedgerChanges(
+            Ledger existingLedger,
+            string newSummary,
+            string newStaffName,
+            string newNote,
+            List<FieldChange> changes)
+        {
+            if (existingLedger.Summary != newSummary)
+            {
+                changes.Add(new FieldChange
+                {
+                    FieldName = "摘要",
+                    OldValue = existingLedger.Summary ?? "(なし)",
+                    NewValue = newSummary
+                });
+            }
+
+            var existingStaffName = existingLedger.StaffName ?? "";
+            if (existingStaffName != newStaffName)
+            {
+                changes.Add(new FieldChange
+                {
+                    FieldName = "利用者",
+                    OldValue = string.IsNullOrEmpty(existingStaffName) ? "(なし)" : existingStaffName,
+                    NewValue = string.IsNullOrEmpty(newStaffName) ? "(なし)" : newStaffName
+                });
+            }
+
+            var existingNote = existingLedger.Note ?? "";
+            if (existingNote != newNote)
+            {
+                changes.Add(new FieldChange
+                {
+                    FieldName = "備考",
+                    OldValue = string.IsNullOrEmpty(existingNote) ? "(なし)" : existingNote,
+                    NewValue = string.IsNullOrEmpty(newNote) ? "(なし)" : newNote
                 });
             }
         }

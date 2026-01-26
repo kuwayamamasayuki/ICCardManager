@@ -271,7 +271,7 @@ public partial class DataExportImportViewModel : ViewModelBase
                         break;
 
                     case DataType.Ledgers:
-                        preview = await _importService.PreviewLedgersAsync(dialog.FileName);
+                        preview = await _importService.PreviewLedgersAsync(dialog.FileName, SkipExistingOnImport);
                         break;
 
                     default:
@@ -370,7 +370,7 @@ public partial class DataExportImportViewModel : ViewModelBase
                         break;
 
                     case DataType.Ledgers:
-                        result = await _importService.ImportLedgersAsync(ImportPreviewFile);
+                        result = await _importService.ImportLedgersAsync(ImportPreviewFile, SkipExistingOnImport);
                         break;
 
                     default:
@@ -472,7 +472,7 @@ public partial class DataExportImportViewModel : ViewModelBase
                         break;
 
                     case DataType.Ledgers:
-                        result = await _importService.ImportLedgersAsync(dialog.FileName);
+                        result = await _importService.ImportLedgersAsync(dialog.FileName, SkipExistingOnImport);
                         break;
 
                     default:
