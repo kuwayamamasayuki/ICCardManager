@@ -236,7 +236,7 @@ namespace ICCardManager.Services
                     continue;
                 }
 
-                var cardIdm = fields[0].Trim();
+                var cardIdm = fields[0].Trim().ToUpperInvariant(); // IDmは大文字に正規化
                 var cardType = fields[1].Trim();
                 var cardNumber = fields[2].Trim();
                 var note = fields.Count > 3 ? fields[3].Trim() : "";
@@ -445,7 +445,7 @@ namespace ICCardManager.Services
                     continue;
                 }
 
-                var staffIdm = fields[0].Trim();
+                var staffIdm = fields[0].Trim().ToUpperInvariant(); // IDmは大文字に正規化
                 var name = fields[1].Trim();
                 var number = fields.Count > 2 ? fields[2].Trim() : "";
                 var note = fields.Count > 3 ? fields[3].Trim() : "";
@@ -646,7 +646,7 @@ namespace ICCardManager.Services
                     continue;
                 }
 
-                var cardIdm = fields[0].Trim();
+                var cardIdm = fields[0].Trim().ToUpperInvariant(); // IDmは大文字に正規化
                 var cardType = fields[1].Trim();
                 var cardNumber = fields[2].Trim();
 
@@ -791,7 +791,7 @@ namespace ICCardManager.Services
                     continue;
                 }
 
-                var staffIdm = fields[0].Trim();
+                var staffIdm = fields[0].Trim().ToUpperInvariant(); // IDmは大文字に正規化
                 var name = fields[1].Trim();
                 var number = fields.Count > 2 ? fields[2].Trim() : "";
 
@@ -907,7 +907,7 @@ namespace ICCardManager.Services
 
                 // バリデーションパス: まず全データをバリデーション
                 var validRecords = new List<(int LineNumber, Ledger Ledger)>();
-                var existingCardIdms = new HashSet<string>();
+                var existingCardIdms = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
                 // 全カードのIDmをキャッシュ（パフォーマンス向上）
                 var allCards = await _cardRepository.GetAllIncludingDeletedAsync();
@@ -941,7 +941,7 @@ namespace ICCardManager.Services
                     }
 
                     var dateStr = fields[0].Trim();
-                    var cardIdm = fields[1].Trim();
+                    var cardIdm = fields[1].Trim().ToUpperInvariant(); // IDmは大文字に正規化
                     // fields[2] は管理番号（参照用、インポート時は使用しない）
                     var summary = fields[3].Trim();
                     var incomeStr = fields[4].Trim();
@@ -1191,7 +1191,7 @@ namespace ICCardManager.Services
                 }
 
                 // 全カードのIDmをキャッシュ
-                var existingCardIdms = new HashSet<string>();
+                var existingCardIdms = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                 var allCards = await _cardRepository.GetAllIncludingDeletedAsync();
                 foreach (var card in allCards)
                 {
@@ -1199,7 +1199,7 @@ namespace ICCardManager.Services
                 }
 
                 // 仮バリデーションでカードIDmを収集（重複チェック用）
-                var cardIdmsInFile = new HashSet<string>();
+                var cardIdmsInFile = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                 var validatedRecords = new List<(int LineNumber, string CardIdm, DateTime Date, string Summary, int Income, int Expense, int Balance)>();
 
                 for (var i = 1; i < lines.Count; i++)
@@ -1226,7 +1226,7 @@ namespace ICCardManager.Services
                     }
 
                     var dateStr = fields[0].Trim();
-                    var cardIdm = fields[1].Trim();
+                    var cardIdm = fields[1].Trim().ToUpperInvariant(); // IDmは大文字に正規化
                     // fields[2] は管理番号（参照用）
                     var summary = fields[3].Trim();
                     var incomeStr = fields[4].Trim();
