@@ -732,6 +732,10 @@ namespace ICCardManager.Infrastructure.CardReader
                     }
                 }
 
+                // 生データを保持（デバッグ・診断用）
+                var rawBytes = new byte[16];
+                Array.Copy(currentData, 0, rawBytes, 0, Math.Min(currentData.Length, 16));
+
                 return new LedgerDetail
                 {
                     UseDate = useDate,
@@ -740,7 +744,8 @@ namespace ICCardManager.Infrastructure.CardReader
                     Amount = amount,
                     Balance = balance,
                     IsCharge = isCharge,
-                    IsBus = isBus
+                    IsBus = isBus,
+                    RawBytes = rawBytes
                 };
             }
             catch (Exception ex)

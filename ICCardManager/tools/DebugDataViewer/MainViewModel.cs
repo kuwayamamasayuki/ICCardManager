@@ -285,6 +285,27 @@ namespace DebugDataViewer
                     rawDataBuilder.AppendLine("※カードを読み取り中は離さないでください");
                 }
 
+                // 生データ構造の説明を追加
+                if (historyList.Count > 0)
+                {
+                    rawDataBuilder.AppendLine();
+                    rawDataBuilder.AppendLine("=== FeliCa履歴ブロック構造（16バイト） ===");
+                    rawDataBuilder.AppendLine("バイト位置 | 内容");
+                    rawDataBuilder.AppendLine("----------|------------------");
+                    rawDataBuilder.AppendLine("  00      | 機器種別");
+                    rawDataBuilder.AppendLine("  01      | 利用種別（02=チャージ）");
+                    rawDataBuilder.AppendLine("  02      | 支払種別");
+                    rawDataBuilder.AppendLine("  03      | 入出場種別");
+                    rawDataBuilder.AppendLine("  04-05   | 日付（ビットフィールド）");
+                    rawDataBuilder.AppendLine("  06-07   | 入場駅コード（BE）");
+                    rawDataBuilder.AppendLine("  08-09   | 出場駅コード（BE）");
+                    rawDataBuilder.AppendLine("  0A-0B   | 残額（LE）");
+                    rawDataBuilder.AppendLine("  0C-0F   | 予備");
+                    rawDataBuilder.AppendLine();
+                    rawDataBuilder.AppendLine("※BE=ビッグエンディアン、LE=リトルエンディアン");
+                    rawDataBuilder.AppendLine("※日付: bit15-9=年(2000+), bit8-5=月, bit4-0=日");
+                }
+
                 RawHistoryData = rawDataBuilder.ToString();
 
                 // 履歴データを成形して表示
@@ -333,11 +354,17 @@ namespace DebugDataViewer
         }
 
         /// <summary>
-        /// 履歴詳細を擬似的な生データ形式で表示
+        /// 履歴詳細の生データを16進数形式で表示
         /// </summary>
         private string FormatDetailAsRaw(LedgerDetail detail)
         {
-            // 実際の生データは取得できないため、データの内容を16進数風に表示
+            // 実際の生データがある場合は16進数で表示
+            if (detail.RawBytes != null && detail.RawBytes.Length > 0)
+            {
+                return BitConverter.ToString(detail.RawBytes).Replace("-", " ");
+            }
+
+            // 生データがない場合は従来の擬似表示（互換性のため）
             var parts = new List<string>();
 
             if (detail.UseDate.HasValue)
@@ -356,7 +383,7 @@ namespace DebugDataViewer
                 parts.Add($"BAL:{detail.Balance.Value:X4}");
             }
 
-            return string.Join(" ", parts);
+            return parts.Count > 0 ? string.Join(" ", parts) : "(データなし)";
         }
 
         /// <summary>
