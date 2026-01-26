@@ -103,6 +103,35 @@ namespace ICCardManager.Services
 
         /// <summary>アクション（新規/更新/スキップ）</summary>
         public ImportAction Action { get; set; }
+
+        /// <summary>変更点リスト（更新時のみ）</summary>
+        public List<FieldChange> Changes { get; set; } = new();
+
+        /// <summary>変更点があるか</summary>
+        public bool HasChanges => Changes.Count > 0;
+
+        /// <summary>変更点のサマリ文字列</summary>
+        public string ChangesSummary => HasChanges
+            ? string.Join("、", Changes.Select(c => c.FieldName))
+            : string.Empty;
+    }
+
+    /// <summary>
+    /// フィールド変更情報
+    /// </summary>
+    public class FieldChange
+    {
+        /// <summary>フィールド名</summary>
+        public string FieldName { get; set; } = string.Empty;
+
+        /// <summary>変更前の値</summary>
+        public string OldValue { get; set; } = string.Empty;
+
+        /// <summary>変更後の値</summary>
+        public string NewValue { get; set; } = string.Empty;
+
+        /// <summary>変更内容の表示文字列</summary>
+        public string DisplayText => $"{FieldName}: {OldValue ?? "(なし)"} → {NewValue ?? "(なし)"}";
     }
 
     /// <summary>
@@ -640,6 +669,8 @@ namespace ICCardManager.Services
                 // 既存チェック（削除済みも含めて検索）
                 var existingCard = await _cardRepository.GetByIdmAsync(cardIdm, includeDeleted: true);
                 ImportAction action;
+                var changes = new List<FieldChange>();
+
                 if (existingCard != null)
                 {
                     // 削除済みカードの場合は復元対象として扱う
@@ -647,6 +678,14 @@ namespace ICCardManager.Services
                     {
                         action = ImportAction.Restore;
                         updateCount++; // 復元+更新なので更新件数に含める
+                        // 復元時も変更点を検出
+                        DetectCardChanges(existingCard, cardType, cardNumber, changes);
+                        changes.Insert(0, new FieldChange
+                        {
+                            FieldName = "状態",
+                            OldValue = "削除済み",
+                            NewValue = "有効"
+                        });
                     }
                     else if (skipExisting)
                     {
@@ -656,7 +695,18 @@ namespace ICCardManager.Services
                     else
                     {
                         action = ImportAction.Update;
-                        updateCount++;
+                        // 変更点を検出
+                        DetectCardChanges(existingCard, cardType, cardNumber, changes);
+                        if (changes.Count > 0)
+                        {
+                            updateCount++;
+                        }
+                        else
+                        {
+                            // 変更点がない場合はスキップ扱い
+                            action = ImportAction.Skip;
+                            skipCount++;
+                        }
                     }
                 }
                 else
@@ -671,7 +721,8 @@ namespace ICCardManager.Services
                     Idm = cardIdm,
                     Name = cardType,
                     AdditionalInfo = cardNumber,
-                    Action = action
+                    Action = action,
+                    Changes = changes
                 });
             }
 
@@ -758,6 +809,8 @@ namespace ICCardManager.Services
                 // 既存チェック（削除済みも含めて検索）
                 var existingStaff = await _staffRepository.GetByIdmAsync(staffIdm, includeDeleted: true);
                 ImportAction action;
+                var changes = new List<FieldChange>();
+
                 if (existingStaff != null)
                 {
                     // 削除済み職員の場合は復元対象として扱う
@@ -765,6 +818,14 @@ namespace ICCardManager.Services
                     {
                         action = ImportAction.Restore;
                         updateCount++; // 復元+更新なので更新件数に含める
+                        // 復元時も変更点を検出
+                        DetectStaffChanges(existingStaff, name, number, changes);
+                        changes.Insert(0, new FieldChange
+                        {
+                            FieldName = "状態",
+                            OldValue = "削除済み",
+                            NewValue = "有効"
+                        });
                     }
                     else if (skipExisting)
                     {
@@ -774,7 +835,18 @@ namespace ICCardManager.Services
                     else
                     {
                         action = ImportAction.Update;
-                        updateCount++;
+                        // 変更点を検出
+                        DetectStaffChanges(existingStaff, name, number, changes);
+                        if (changes.Count > 0)
+                        {
+                            updateCount++;
+                        }
+                        else
+                        {
+                            // 変更点がない場合はスキップ扱い
+                            action = ImportAction.Skip;
+                            skipCount++;
+                        }
                     }
                 }
                 else
@@ -789,7 +861,8 @@ namespace ICCardManager.Services
                     Idm = staffIdm,
                     Name = name,
                     AdditionalInfo = string.IsNullOrWhiteSpace(number) ? null : number,
-                    Action = action
+                    Action = action,
+                    Changes = changes
                 });
             }
 
@@ -1581,6 +1654,74 @@ namespace ICCardManager.Services
                 return false;
             }
             return true;
+        }
+
+        /// <summary>
+        /// カードデータの変更点を検出
+        /// </summary>
+        /// <param name="existingCard">既存のカード</param>
+        /// <param name="newCardType">新しいカード種別</param>
+        /// <param name="newCardNumber">新しい管理番号</param>
+        /// <param name="changes">変更点リスト（検出結果が追加される）</param>
+        private static void DetectCardChanges(
+            IcCard existingCard,
+            string newCardType,
+            string newCardNumber,
+            List<FieldChange> changes)
+        {
+            if (existingCard.CardType != newCardType)
+            {
+                changes.Add(new FieldChange
+                {
+                    FieldName = "カード種別",
+                    OldValue = existingCard.CardType ?? "(なし)",
+                    NewValue = newCardType
+                });
+            }
+
+            if (existingCard.CardNumber != newCardNumber)
+            {
+                changes.Add(new FieldChange
+                {
+                    FieldName = "管理番号",
+                    OldValue = existingCard.CardNumber ?? "(なし)",
+                    NewValue = newCardNumber
+                });
+            }
+        }
+
+        /// <summary>
+        /// 職員データの変更点を検出
+        /// </summary>
+        /// <param name="existingStaff">既存の職員</param>
+        /// <param name="newName">新しい氏名</param>
+        /// <param name="newNumber">新しい職員番号</param>
+        /// <param name="changes">変更点リスト（検出結果が追加される）</param>
+        private static void DetectStaffChanges(
+            Staff existingStaff,
+            string newName,
+            string newNumber,
+            List<FieldChange> changes)
+        {
+            if (existingStaff.Name != newName)
+            {
+                changes.Add(new FieldChange
+                {
+                    FieldName = "氏名",
+                    OldValue = existingStaff.Name ?? "(なし)",
+                    NewValue = newName
+                });
+            }
+
+            if (existingStaff.Number != newNumber)
+            {
+                changes.Add(new FieldChange
+                {
+                    FieldName = "職員番号",
+                    OldValue = existingStaff.Number ?? "(なし)",
+                    NewValue = newNumber
+                });
+            }
         }
 
         #endregion

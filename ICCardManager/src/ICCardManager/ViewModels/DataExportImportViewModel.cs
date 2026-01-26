@@ -52,6 +52,33 @@ public class DataTypeToDisplayNameConverter : IValueConverter
 }
 
 /// <summary>
+/// ImportAction enumの表示名変換コンバーター
+/// </summary>
+public class ImportActionToDisplayNameConverter : IValueConverter
+{
+    public object Convert(object value, Type targetType, object parameter, CultureInfo culture)
+    {
+        if (value is Services.ImportAction action)
+        {
+            return action switch
+            {
+                Services.ImportAction.Insert => "新規追加",
+                Services.ImportAction.Update => "更新",
+                Services.ImportAction.Skip => "スキップ",
+                Services.ImportAction.Restore => "復元",
+                _ => action.ToString()
+            };
+        }
+        return value?.ToString() ?? string.Empty;
+    }
+
+    public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture)
+    {
+        throw new NotImplementedException();
+    }
+}
+
+/// <summary>
 /// データエクスポート/インポートViewModel
 /// </summary>
 public partial class DataExportImportViewModel : ViewModelBase
