@@ -13,6 +13,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
+using System.Windows;
 
 
 namespace ICCardManager.Tests.ViewModels;
@@ -407,6 +408,10 @@ public class CardManageViewModelTests
         };
         _viewModel.SelectedCard = card;
 
+        // 確認ダイアログで「はい」を返すようにする
+        _viewModel.ShowConfirmDialog = (msg, title, btn, icon) => MessageBoxResult.Yes;
+
+        _cardRepositoryMock.Setup(r => r.GetByIdmAsync("0102030405060708", false)).ReturnsAsync(new IcCard { CardIdm = "0102030405060708" });
         _cardRepositoryMock.Setup(r => r.DeleteAsync("0102030405060708")).ReturnsAsync(true);
         _cardRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<IcCard>());
 

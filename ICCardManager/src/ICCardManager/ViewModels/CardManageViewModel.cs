@@ -77,6 +77,12 @@ namespace ICCardManager.ViewModels
             "その他"
         };
 
+        /// <summary>
+        /// 確認ダイアログ表示用デリゲート（テスト時に差し替え可能）
+        /// </summary>
+        internal Func<string, string, MessageBoxButton, MessageBoxImage, MessageBoxResult> ShowConfirmDialog { get; set; }
+            = MessageBox.Show;
+
         public CardManageViewModel(
             ICardRepository cardRepository,
             ILedgerRepository ledgerRepository,
@@ -449,7 +455,7 @@ namespace ICCardManager.ViewModels
             }
 
             // 削除確認ダイアログを表示
-            var result = MessageBox.Show(
+            var result = ShowConfirmDialog(
                 $"カード「{SelectedCard.CardType} {SelectedCard.CardNumber}」を削除しますか？\n\n※削除後も履歴データは保持されます。",
                 "削除確認",
                 MessageBoxButton.YesNo,

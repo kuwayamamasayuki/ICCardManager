@@ -362,13 +362,13 @@ FEDCBA9876543210,PASMO,002,テスト2";
         var filePath = Path.Combine(_testDirectory, "cards_preview_update.csv");
         await Task.Run(() => File.WriteAllText(filePath, csvContent, CsvEncoding));
 
-        var existingCard = new IcCard { CardIdm = "0123456789ABCDEF", CardType = "Suica", CardNumber = "001" };
+        var existingCard = new IcCard { CardIdm = "0123456789ABCDEF", CardType = "PASMO", CardNumber = "999" };
         _cardRepositoryMock.Setup(x => x.GetByIdmAsync("0123456789ABCDEF", true)).ReturnsAsync(existingCard);
 
         // Act
         var result = await _service.PreviewCardsAsync(filePath, skipExisting: false);
 
-        // Assert
+        // Assert - CSVデータ(Suica/001)と既存データ(PASMO/999)に差分があるため更新扱い
         result.IsValid.Should().BeTrue();
         result.UpdateCount.Should().Be(1);
         result.Items.Should().ContainSingle(item => item.Action == ImportAction.Update);
