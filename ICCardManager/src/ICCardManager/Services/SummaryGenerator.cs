@@ -270,8 +270,17 @@ namespace ICCardManager.Services
                 return string.Empty;
             }
 
+            // 残高ベースの入力順序バリデーション：
+            // ICカードの履歴は新しい順で格納されるが、摘要生成には古い順が必要。
+            // UseDate昇順（古い日付を先に）+ Balance降順（同日内では残高が高い方が先＝先に利用した）
+            // でソートすることで、呼び出し元の入力順序に依存せず正しく処理できる。
+            var sortedTrips = trips
+                .OrderBy(t => t.UseDate ?? DateTime.MaxValue)
+                .ThenByDescending(t => t.Balance ?? 0)
+                .ToList();
+
             // 駅→駅のペアを抽出
-            var routes = trips
+            var routes = sortedTrips
                 .Where(t => !string.IsNullOrEmpty(t.EntryStation) && !string.IsNullOrEmpty(t.ExitStation))
                 .Select(t => (Entry: t.EntryStation!, Exit: t.ExitStation!))
                 .ToList();
