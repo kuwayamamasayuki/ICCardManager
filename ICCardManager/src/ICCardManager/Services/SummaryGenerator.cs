@@ -270,8 +270,15 @@ namespace ICCardManager.Services
                 return string.Empty;
             }
 
+            // 古い順にソート（行きを基準に往復表示するため）
+            // Generate()経由では新しい順、GenerateByDate()経由では古い順で渡されるため、
+            // ここで統一的に古い順にソートする
+            var sortedTrips = trips
+                .OrderBy(t => t.UseDate ?? DateTime.MaxValue)
+                .ToList();
+
             // 駅→駅のペアを抽出
-            var routes = trips
+            var routes = sortedTrips
                 .Where(t => !string.IsNullOrEmpty(t.EntryStation) && !string.IsNullOrEmpty(t.ExitStation))
                 .Select(t => (Entry: t.EntryStation!, Exit: t.ExitStation!))
                 .ToList();
