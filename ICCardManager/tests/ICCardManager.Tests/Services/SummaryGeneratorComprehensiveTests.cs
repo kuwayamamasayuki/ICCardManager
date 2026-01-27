@@ -422,19 +422,28 @@ public class SummaryGeneratorComprehensiveTests
     {
         // Arrange: 5日間の通勤記録（各日往復）
         // TC008/TC012/TC014と同じデータパターンで統一
-        // ICカード履歴は新しい順：[0]が新しい、[1]が古い
+        // ICカード履歴は新しい順：[偶数] 帰り(新しい・残額低い)、[奇数] 行き(古い・残額高い)
+        //
+        // 時系列順（古い→新しい）：
+        //   12/5 AM 天神→博多 残9790 → 12/5 PM 博多→天神 残9580
+        //   12/6 AM 天神→博多 残9370 → 12/6 PM 博多→天神 残9160
+        //   ...
+        //   12/9 AM 天神→博多 残8110 → 12/9 PM 博多→天神 残7900
+        //
+        // ICカード格納順（新しい→古い）：
+        //   [0] 12/9 PM 博多→天神 残7900 → [1] 12/9 AM 天神→博多 残8110
+        //   [2] 12/8 PM 博多→天神 残8320 → [3] 12/8 AM 天神→博多 残8530
+        //   ...
+        //   [8] 12/5 PM 博多→天神 残9580 → [9] 12/5 AM 天神→博多 残9790
         var details = new List<LedgerDetail>();
-        var balance = 10000;
 
         for (int day = 0; day < 5; day++)
         {
             var date = new DateTime(2024, 12, 9 - day);
-            // [偶数インデックス] 博多→天神
-            balance -= 210;
-            details.Add(CreateRailwayUsage(date, "博多", "天神", 210, balance));
-            // [奇数インデックス] 天神→博多
-            balance -= 210;
-            details.Add(CreateRailwayUsage(date, "天神", "博多", 210, balance));
+            // [偶数インデックス] 博多→天神（帰り=夕方、残額が低い＝新しい取引）
+            details.Add(CreateRailwayUsage(date, "博多", "天神", 210, 7900 + 420 * day));
+            // [奇数インデックス] 天神→博多（行き=朝、残額が高い＝古い取引）
+            details.Add(CreateRailwayUsage(date, "天神", "博多", 210, 8110 + 420 * day));
         }
 
         // Act
@@ -914,15 +923,15 @@ public class SummaryGeneratorComprehensiveTests
     [Fact]
     public void TC032_Generate_鉄道往復()
     {
-        // ICカード履歴は新しい順：[0]帰り(新しい)、[1]行き(古い)
-        // 往復表示は古い方（行き）を基準にする（TC008と同じ結果になる）
+        // Generate()は入力順序に依存せず、残高ベースで古い順にソートする。
+        // 天神→博多(残4790)が行き（残額高い＝先に利用）、博多→天神(残4580)が帰り（残額低い＝後に利用）。
+        // → 行きの「天神～博多」を基準に往復表示
         var details = new List<LedgerDetail>
         {
             CreateRailwayUsage(new DateTime(2024, 12, 9), "博多", "天神", 210, 4580),
             CreateRailwayUsage(new DateTime(2024, 12, 9), "天神", "博多", 210, 4790)
         };
         var result = _generator.Generate(details);
-        // Issue #336修正: 行き（天神→博多）を基準に表示する
         result.Should().Be("鉄道（天神～博多 往復）");
         _output.WriteLine($"Generate() = \"{result}\"");
     }
@@ -937,6 +946,69 @@ public class SummaryGeneratorComprehensiveTests
         };
         var result = _generator.Generate(details);
         result.Should().Be("鉄道（天神～博多）、バス（天神～博多駅）");
+        _output.WriteLine($"Generate() = \"{result}\"");
+    }
+
+    [Fact]
+    public void TC033B_Generate_残高ベース入力順序バリデーション_逆順入力でも正しく往復表示()
+    {
+        // Arrange: ICカード履歴の新しい順（博多→天神が先）でGenerate()に渡す。
+        // 残高ベースのソートにより、残額が高い方（天神→博多=行き）が先と判断され、
+        // 「天神～博多 往復」と正しく表示される。
+        // ※ この挙動はGenerateRailwaySummary内の残高ソートが入力順序を自動補正する
+        //   ことで実現される（呼び出し元が正しい順序で渡す必要がない）。
+        var details = new List<LedgerDetail>
+        {
+            // ICカード履歴順（新しい順）: 帰り→行き
+            CreateRailwayUsage(new DateTime(2024, 12, 9), "博多", "天神", 210, 4580),  // 帰り（残額低い=後に利用）
+            CreateRailwayUsage(new DateTime(2024, 12, 9), "天神", "博多", 210, 4790)   // 行き（残額高い=先に利用）
+        };
+
+        // Act
+        var result = _generator.Generate(details);
+
+        // Assert: 残額ソートにより、行き（天神→博多）が基準になる
+        result.Should().Be("鉄道（天神～博多 往復）");
+        _output.WriteLine($"Generate() = \"{result}\"");
+    }
+
+    [Fact]
+    public void TC033C_Generate_残高ベース入力順序バリデーション_乗継の逆順入力()
+    {
+        // Arrange: 乗継データが逆順（新しい順）で渡された場合でも正しく統合される
+        var details = new List<LedgerDetail>
+        {
+            // ICカード履歴順（新しい順）: 乗継後→最初の乗車
+            CreateRailwayUsage(new DateTime(2024, 12, 9), "中洲川端", "貝塚", 260, 4530),  // 2番目の乗車（残額低い）
+            CreateRailwayUsage(new DateTime(2024, 12, 9), "天神", "中洲川端", 210, 4790)    // 1番目の乗車（残額高い）
+        };
+
+        // Act
+        var result = _generator.Generate(details);
+
+        // Assert: 残額ソートにより天神→中洲川端が先、乗継統合で天神～貝塚
+        result.Should().Be("鉄道（天神～貝塚）");
+        _output.WriteLine($"Generate() = \"{result}\"");
+    }
+
+    [Fact]
+    public void TC033D_Generate_残高ベース入力順序バリデーション_3区間シャッフル入力()
+    {
+        // Arrange: 3区間の利用がシャッフルされた順序で渡された場合
+        // 時系列順：天神→中洲川端(4790) → 中洲川端→箱崎宮前(4530) → 箱崎宮前→貝塚(4270)
+        // 入力順（シャッフル）：2番目、3番目、1番目
+        var details = new List<LedgerDetail>
+        {
+            CreateRailwayUsage(new DateTime(2024, 12, 9), "中洲川端", "箱崎宮前", 260, 4530),
+            CreateRailwayUsage(new DateTime(2024, 12, 9), "箱崎宮前", "貝塚", 260, 4270),
+            CreateRailwayUsage(new DateTime(2024, 12, 9), "天神", "中洲川端", 210, 4790)
+        };
+
+        // Act: 残額ソートにより正しい時系列に並べ替え → 乗継統合
+        var result = _generator.Generate(details);
+
+        // Assert: 残額ソートで天神(4790)→中洲川端(4530)→箱崎宮前(4270)→貝塚と統合
+        result.Should().Be("鉄道（天神～貝塚）");
         _output.WriteLine($"Generate() = \"{result}\"");
     }
 
