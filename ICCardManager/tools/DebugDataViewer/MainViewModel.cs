@@ -76,6 +76,12 @@ namespace DebugDataViewer
         [ObservableProperty]
         private ObservableCollection<CardHistoryItem> _cardHistoryItems = new();
 
+        [ObservableProperty]
+        private CardHistoryItem _selectedCardHistoryItem;
+
+        [ObservableProperty]
+        private string _selectedItemBitDetail = string.Empty;
+
         #endregion
 
         #region DBデータ関連プロパティ
@@ -192,6 +198,7 @@ namespace DebugDataViewer
             CardSystemCode = string.Empty;
             CardBalance = string.Empty;
             RawHistoryData = string.Empty;
+            SelectedItemBitDetail = string.Empty;
             CardHistoryItems.Clear();
         }
 
@@ -466,6 +473,60 @@ namespace DebugDataViewer
         partial void OnIsWaitingForCardChanged(bool value)
         {
             OnPropertyChanged(nameof(IsNotWaitingForCard));
+        }
+
+        /// <summary>
+        /// 選択された履歴アイテムが変更されたときにビット単位解析を更新する
+        /// </summary>
+        partial void OnSelectedCardHistoryItemChanged(CardHistoryItem value)
+        {
+            if (value?.RawData == null || value.RawData == "(データなし)")
+            {
+                SelectedItemBitDetail = string.Empty;
+                return;
+            }
+
+            var rawBytes = HexStringToBytes(value.RawData);
+            if (rawBytes != null && rawBytes.Length >= 16)
+            {
+                var fields = FelicaBlockParser.Parse(rawBytes);
+                SelectedItemBitDetail = FelicaBlockParser.FormatAsText(fields);
+            }
+            else
+            {
+                SelectedItemBitDetail = "(生データが16バイトではないため解析できません)";
+            }
+        }
+
+        /// <summary>
+        /// スペース区切りの16進数文字列をバイト配列に変換する
+        /// </summary>
+        internal static byte[] HexStringToBytes(string hex)
+        {
+            if (string.IsNullOrWhiteSpace(hex))
+            {
+                return null;
+            }
+
+            try
+            {
+                var cleaned = hex.Replace(" ", "");
+                if (cleaned.Length % 2 != 0)
+                {
+                    return null;
+                }
+
+                var bytes = new byte[cleaned.Length / 2];
+                for (int i = 0; i < bytes.Length; i++)
+                {
+                    bytes[i] = Convert.ToByte(cleaned.Substring(i * 2, 2), 16);
+                }
+                return bytes;
+            }
+            catch
+            {
+                return null;
+            }
         }
     }
 }
