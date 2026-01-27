@@ -859,6 +859,8 @@ public class LendingServiceTests : IDisposable
             .ReturnsAsync(true);
         _ledgerRepositoryMock.Setup(x => x.GetLatestBeforeDateAsync(TestCardIdm, It.IsAny<DateTime>()))
             .ReturnsAsync(new Ledger { Balance = 10000 });
+        _ledgerRepositoryMock.Setup(x => x.GetExistingDetailKeysAsync(TestCardIdm, It.IsAny<DateTime>()))
+            .ReturnsAsync(new HashSet<(DateTime?, int?, bool)>());
         _cardRepositoryMock.Setup(x => x.UpdateLentStatusAsync(TestCardIdm, false, null, null))
             .ReturnsAsync(true);
         _settingsRepositoryMock.Setup(x => x.GetAppSettingsAsync())

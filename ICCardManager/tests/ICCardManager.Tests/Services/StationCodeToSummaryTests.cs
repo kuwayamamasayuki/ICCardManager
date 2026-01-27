@@ -311,8 +311,8 @@ public class StationCodeToSummaryTests
         // Act
         var result = _summaryGenerator.Generate(details);
 
-        // Assert
-        result.Should().Be("鉄道（博多～天神 往復）");
+        // Assert: 残高ソートにより行き（天神→博多, 残額高い=先に利用）が基準
+        result.Should().Be("鉄道（天神～博多 往復）");
         OutputTestResult("空港線 往復", result);
     }
 
@@ -408,8 +408,8 @@ public class StationCodeToSummaryTests
         // Act
         var result = _summaryGenerator.Generate(details);
 
-        // Assert - 乗継として統合される（天神～貝塚）
-        result.Should().Be("鉄道（中洲川端～貝塚、天神～中洲川端）");
+        // Assert - 残高ソートにより天神→中洲川端が先になり、乗継として統合される
+        result.Should().Be("鉄道（天神～貝塚）");
         OutputTestResult("空港線→箱崎線 乗継", result);
     }
 
@@ -474,8 +474,8 @@ public class StationCodeToSummaryTests
         // Act
         var result = _summaryGenerator.Generate(details);
 
-        // Assert
-        result.Should().Be("鉄道（二日市～博多 往復）");
+        // Assert: 残高ソートにより行き（博多→二日市, 残額高い=先に利用）が基準
+        result.Should().Be("鉄道（博多～二日市 往復）");
         OutputTestResult("JR鹿児島本線 往復", result);
     }
 
@@ -540,8 +540,8 @@ public class StationCodeToSummaryTests
         // Act
         var result = _summaryGenerator.Generate(details);
 
-        // Assert
-        result.Should().Be("鉄道（池袋～新宿 往復）");
+        // Assert: 残高ソートにより行き（新宿→池袋, 残額高い=先に利用）が基準
+        result.Should().Be("鉄道（新宿～池袋 往復）");
         OutputTestResult("JR山手線 往復", result);
     }
 
