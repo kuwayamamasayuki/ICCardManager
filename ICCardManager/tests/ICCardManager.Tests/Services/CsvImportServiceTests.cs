@@ -362,7 +362,8 @@ FEDCBA9876543210,PASMO,002,テスト2";
         var filePath = Path.Combine(_testDirectory, "cards_preview_update.csv");
         await Task.Run(() => File.WriteAllText(filePath, csvContent, CsvEncoding));
 
-        var existingCard = new IcCard { CardIdm = "0123456789ABCDEF", CardType = "Suica", CardNumber = "001" };
+        // 既存カードのカード種別が異なる → 変更ありと検出される
+        var existingCard = new IcCard { CardIdm = "0123456789ABCDEF", CardType = "PASMO", CardNumber = "001" };
         _cardRepositoryMock.Setup(x => x.GetByIdmAsync("0123456789ABCDEF", true)).ReturnsAsync(existingCard);
 
         // Act
