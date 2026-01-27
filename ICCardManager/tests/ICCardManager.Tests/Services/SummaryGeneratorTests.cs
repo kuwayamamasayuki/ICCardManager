@@ -71,16 +71,11 @@ public class SummaryGeneratorTests
     public void Generate_RoundTrip_ReturnsRoundTripFormat()
     {
         // Arrange
+        // ICカード履歴は新しい順で格納されているため、
+        // 帰り（天神→博多）が先、行き（博多→天神）が後になる
         var details = new List<LedgerDetail>
         {
-            new LedgerDetail
-            {
-                EntryStation = "博多",
-                ExitStation = "天神",
-                IsCharge = false,
-                IsBus = false,
-                Amount = 260
-            },
+            // 帰り（新しい）: 天神→博多
             new LedgerDetail
             {
                 EntryStation = "天神",
@@ -88,6 +83,15 @@ public class SummaryGeneratorTests
                 IsCharge = false,
                 IsBus = false,
                 Amount = 260
+            },
+            // 行き（古い）: 博多→天神
+            new LedgerDetail
+            {
+                EntryStation = "博多",
+                ExitStation = "天神",
+                IsCharge = false,
+                IsBus = false,
+                Amount = 260
             }
         };
 
@@ -95,6 +99,7 @@ public class SummaryGeneratorTests
         var result = _generator.Generate(details);
 
         // Assert
+        // 時系列順で最初の移動方向（博多→天神）が先に表示される
         result.Should().Be("鉄道（博多～天神 往復）");
     }
 
@@ -102,19 +107,23 @@ public class SummaryGeneratorTests
     public void Generate_TransferTrip_ReturnsConsolidatedFormat()
     {
         // Arrange
+        // ICカード履歴は新しい順で格納されているため、
+        // 2区間目（天神→薬院）が先、1区間目（博多→天神）が後になる
         var details = new List<LedgerDetail>
         {
-            new LedgerDetail
-            {
-                EntryStation = "博多",
-                ExitStation = "天神",
-                IsCharge = false,
-                IsBus = false
-            },
+            // 2区間目（新しい）: 天神→薬院
             new LedgerDetail
             {
                 EntryStation = "天神",
                 ExitStation = "薬院",
+                IsCharge = false,
+                IsBus = false
+            },
+            // 1区間目（古い）: 博多→天神
+            new LedgerDetail
+            {
+                EntryStation = "博多",
+                ExitStation = "天神",
                 IsCharge = false,
                 IsBus = false
             }
@@ -124,6 +133,7 @@ public class SummaryGeneratorTests
         var result = _generator.Generate(details);
 
         // Assert
+        // 乗り継ぎは始発駅～終着駅に統合される
         result.Should().Be("鉄道（博多～薬院）");
     }
 
@@ -131,19 +141,23 @@ public class SummaryGeneratorTests
     public void Generate_MultipleSeparateTrips_ReturnsMultipleRoutes()
     {
         // Arrange
+        // ICカード履歴は新しい順で格納されているため、
+        // 後の移動（薬院→大橋）が先、先の移動（博多→天神）が後になる
         var details = new List<LedgerDetail>
         {
-            new LedgerDetail
-            {
-                EntryStation = "博多",
-                ExitStation = "天神",
-                IsCharge = false,
-                IsBus = false
-            },
+            // 2回目の移動（新しい）: 薬院→大橋
             new LedgerDetail
             {
                 EntryStation = "薬院",
                 ExitStation = "大橋",
+                IsCharge = false,
+                IsBus = false
+            },
+            // 1回目の移動（古い）: 博多→天神
+            new LedgerDetail
+            {
+                EntryStation = "博多",
+                ExitStation = "天神",
                 IsCharge = false,
                 IsBus = false
             }
@@ -153,6 +167,7 @@ public class SummaryGeneratorTests
         var result = _generator.Generate(details);
 
         // Assert
+        // 時系列順で表示される
         result.Should().Be("鉄道（博多～天神、薬院～大橋）");
     }
 
@@ -207,16 +222,11 @@ public class SummaryGeneratorTests
     public void Generate_RailwayAndBus_ReturnsCombinedSummary()
     {
         // Arrange
+        // ICカード履歴は新しい順で格納されているため、
+        // 後の利用（バス）が先、先の利用（鉄道）が後になる
         var details = new List<LedgerDetail>
         {
-            new LedgerDetail
-            {
-                EntryStation = "博多",
-                ExitStation = "天神",
-                IsCharge = false,
-                IsBus = false,
-                Amount = 260
-            },
+            // 2回目の移動（新しい）: バス
             new LedgerDetail
             {
                 EntryStation = null,
@@ -224,6 +234,15 @@ public class SummaryGeneratorTests
                 IsCharge = false,
                 IsBus = true,
                 Amount = 230
+            },
+            // 1回目の移動（古い）: 鉄道
+            new LedgerDetail
+            {
+                EntryStation = "博多",
+                ExitStation = "天神",
+                IsCharge = false,
+                IsBus = false,
+                Amount = 260
             }
         };
 
@@ -231,6 +250,7 @@ public class SummaryGeneratorTests
         var result = _generator.Generate(details);
 
         // Assert
+        // 鉄道が先、バスが後に表示される（種別でグループ化）
         result.Should().Be("鉄道（博多～天神）、バス（★）");
     }
 

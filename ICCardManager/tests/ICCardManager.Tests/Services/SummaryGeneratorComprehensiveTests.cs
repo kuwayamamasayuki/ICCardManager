@@ -914,13 +914,16 @@ public class SummaryGeneratorComprehensiveTests
     [Fact]
     public void TC032_Generate_鉄道往復()
     {
+        // ICカード履歴は新しい順：[0]帰り(新しい)、[1]行き(古い)
+        // 往復表示は古い方（行き）を基準にする（TC008と同じ結果になる）
         var details = new List<LedgerDetail>
         {
             CreateRailwayUsage(new DateTime(2024, 12, 9), "博多", "天神", 210, 4580),
             CreateRailwayUsage(new DateTime(2024, 12, 9), "天神", "博多", 210, 4790)
         };
         var result = _generator.Generate(details);
-        result.Should().Be("鉄道（博多～天神 往復）");
+        // Issue #336修正: 行き（天神→博多）を基準に表示する
+        result.Should().Be("鉄道（天神～博多 往復）");
         _output.WriteLine($"Generate() = \"{result}\"");
     }
 
