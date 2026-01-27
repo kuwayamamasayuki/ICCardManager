@@ -98,6 +98,7 @@ namespace ICCardManager.Services
         /// }
         /// </code>
         /// </example>
+        /// <seealso cref="Generate"/>
         public List<DailySummary> GenerateByDate(IEnumerable<LedgerDetail> details)
         {
             var detailList = details.ToList();
@@ -208,11 +209,24 @@ namespace ICCardManager.Services
         /// <summary>
         /// 利用履歴詳細から摘要文字列を生成（従来メソッド・互換性のため維持）
         /// </summary>
-        /// <param name="details">利用履歴詳細のリスト</param>
+        /// <param name="details">利用履歴詳細のリスト（ICカードから取得した新しい順）</param>
         /// <returns>摘要文字列</returns>
+        /// <remarks>
+        /// <para>
+        /// ICカード履歴は新しい順で格納されているため、内部で古い順（時系列順）に
+        /// 変換してから処理します。これにより、往復検出時に出発点が正しく
+        /// 摘要の先頭に表示されます。
+        /// </para>
+        /// <para>
+        /// 例：薬院→博多→薬院の往復移動は「薬院～博多 往復」と表示されます。
+        /// </para>
+        /// </remarks>
+        /// <seealso cref="GenerateByDate"/>
         public virtual string Generate(IEnumerable<LedgerDetail> details)
         {
-            var detailList = details.ToList();
+            // ICカード履歴は新しい順で格納されているため、
+            // 逆順にして古い順（時系列順）に変換する (Issue #336)
+            var detailList = details.Reverse().ToList();
 
             if (detailList.Count == 0)
             {
@@ -315,6 +329,20 @@ namespace ICCardManager.Services
         /// <summary>
         /// 往復を検出
         /// </summary>
+        /// <param name="routes">経路リスト（時系列順：古い順であること）</param>
+        /// <returns>往復経路のリスト。Startは出発点（往路の乗車駅）、Endは折り返し点（往路の降車駅）</returns>
+        /// <remarks>
+        /// <para>
+        /// 入力リストは必ず時系列順（古い順）であること。
+        /// 往復検出時は最初にマッチした経路（routes[i]）の方向を採用するため、
+        /// 順序が逆だと「帰りの経路」が先に来てしまい、摘要の駅順が逆転する。
+        /// </para>
+        /// <para>
+        /// 例：薬院→博多→薬院の移動
+        /// - 正しい順序: [(薬院,博多), (博多,薬院)] → "薬院～博多 往復"
+        /// - 逆順の場合: [(博多,薬院), (薬院,博多)] → "博多～薬院 往復" (不正)
+        /// </para>
+        /// </remarks>
         private List<(string Start, string End)> DetectRoundTrips(List<(string Entry, string Exit)> routes)
         {
             var roundTrips = new List<(string Start, string End)>();

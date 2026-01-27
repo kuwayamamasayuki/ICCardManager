@@ -158,7 +158,8 @@ public class CardManageViewModelTests
         _viewModel.IsNewCard.Should().BeTrue();
         _viewModel.IsWaitingForCard.Should().BeFalse(); // IDmがあるので待機しない
         _viewModel.EditCardIdm.Should().Be(idm);
-        // カード種別はIDmから自動判定できないため、デフォルト値（nimoca：利用頻度が最も高い）が設定される
+        // カード種別はIDmから自動判定できないため、デフォルト値（nimoca）が設定される
+        // ※利用頻度が最も高いためnimocaがデフォルト
         _viewModel.EditCardType.Should().Be("nimoca");
     }
 
