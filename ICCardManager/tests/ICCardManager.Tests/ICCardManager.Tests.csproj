@@ -32,6 +32,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\ICCardManager\ICCardManager.csproj" />
+    <ProjectReference Include="..\..\tools\DebugDataViewer\DebugDataViewer.csproj" />
   </ItemGroup>
 
 </Project>

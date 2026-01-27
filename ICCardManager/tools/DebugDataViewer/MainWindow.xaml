@@ -7,7 +7,7 @@
         mc:Ignorable="d"
         d:DataContext="{d:DesignInstance Type=local:MainViewModel}"
         Title="ICカード管理システム - デバッグ用データビューア"
-        Height="750"
+        Height="850"
         Width="1000"
         WindowStartupLocation="CenterScreen"
         ResizeMode="CanResize">
@@ -108,34 +108,66 @@
                                  HorizontalScrollBarVisibility="Auto"/>
                     </GroupBox>
 
-                    <!-- 履歴データ（成形済み） -->
+                    <!-- 履歴データ（成形済み）+ ビット解析 -->
                     <GroupBox Grid.Row="3" Header="履歴データ（成形済み）" Padding="10">
-                        <DataGrid ItemsSource="{Binding CardHistoryItems}"
-                                  AutoGenerateColumns="False"
-                                  IsReadOnly="True"
-                                  CanUserAddRows="False"
-                                  CanUserDeleteRows="False"
-                                  GridLinesVisibility="Horizontal"
-                                  HeadersVisibility="Column"
-                                  VerticalScrollBarVisibility="Auto">
-                            <DataGrid.Columns>
-                                <DataGridTextColumn Header="#" Binding="{Binding Index}" Width="30"/>
-                                <DataGridTextColumn Header="利用日時" Binding="{Binding UseDate, StringFormat=yyyy/MM/dd HH:mm}" Width="120"/>
-                                <DataGridTextColumn Header="乗車駅" Binding="{Binding EntryStation}" Width="100"/>
-                                <DataGridTextColumn Header="降車駅" Binding="{Binding ExitStation}" Width="100"/>
-                                <DataGridTextColumn Header="金額" Binding="{Binding Amount, StringFormat=¥{0:N0}}" Width="70"/>
-                                <DataGridTextColumn Header="残高" Binding="{Binding Balance, StringFormat=¥{0:N0}}" Width="70"/>
-                                <DataGridTextColumn Header="種別" Binding="{Binding TransactionType}" Width="60"/>
-                                <DataGridTextColumn Header="生データ" Binding="{Binding RawData}" Width="*">
-                                    <DataGridTextColumn.ElementStyle>
-                                        <Style TargetType="TextBlock">
-                                            <Setter Property="FontFamily" Value="Consolas, Courier New, monospace"/>
-                                            <Setter Property="FontSize" Value="10"/>
-                                        </Style>
-                                    </DataGridTextColumn.ElementStyle>
-                                </DataGridTextColumn>
-                            </DataGrid.Columns>
-                        </DataGrid>
+                        <Grid>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="2*"/>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="*"/>
+                            </Grid.RowDefinitions>
+
+                            <!-- 履歴データグリッド -->
+                            <DataGrid Grid.Row="0"
+                                      ItemsSource="{Binding CardHistoryItems}"
+                                      SelectedItem="{Binding SelectedCardHistoryItem, Mode=TwoWay}"
+                                      AutoGenerateColumns="False"
+                                      IsReadOnly="True"
+                                      CanUserAddRows="False"
+                                      CanUserDeleteRows="False"
+                                      GridLinesVisibility="Horizontal"
+                                      HeadersVisibility="Column"
+                                      VerticalScrollBarVisibility="Auto">
+                                <DataGrid.Columns>
+                                    <DataGridTextColumn Header="#" Binding="{Binding Index}" Width="30"/>
+                                    <DataGridTextColumn Header="利用日時" Binding="{Binding UseDate, StringFormat=yyyy/MM/dd HH:mm}" Width="120"/>
+                                    <DataGridTextColumn Header="乗車駅" Binding="{Binding EntryStation}" Width="100"/>
+                                    <DataGridTextColumn Header="降車駅" Binding="{Binding ExitStation}" Width="100"/>
+                                    <DataGridTextColumn Header="金額" Binding="{Binding Amount, StringFormat=¥{0:N0}}" Width="70"/>
+                                    <DataGridTextColumn Header="残高" Binding="{Binding Balance, StringFormat=¥{0:N0}}" Width="70"/>
+                                    <DataGridTextColumn Header="種別" Binding="{Binding TransactionType}" Width="60"/>
+                                    <DataGridTextColumn Header="生データ" Binding="{Binding RawData}" Width="*">
+                                        <DataGridTextColumn.ElementStyle>
+                                            <Style TargetType="TextBlock">
+                                                <Setter Property="FontFamily" Value="Consolas, Courier New, monospace"/>
+                                                <Setter Property="FontSize" Value="10"/>
+                                            </Style>
+                                        </DataGridTextColumn.ElementStyle>
+                                    </DataGridTextColumn>
+                                </DataGrid.Columns>
+                            </DataGrid>
+
+                            <!-- リサイズ用スプリッター -->
+                            <GridSplitter Grid.Row="1"
+                                          Height="5"
+                                          HorizontalAlignment="Stretch"
+                                          VerticalAlignment="Center"
+                                          Background="#CCCCCC"/>
+
+                            <!-- ビット単位フィールド解析パネル -->
+                            <GroupBox Grid.Row="2"
+                                      Header="ビット単位フィールド解析（選択行）"
+                                      Padding="5"
+                                      Margin="0,5,0,0">
+                                <TextBox Text="{Binding SelectedItemBitDetail, Mode=OneWay}"
+                                         Style="{StaticResource MonospaceTextBoxStyle}"
+                                         FontSize="11"
+                                         TextWrapping="NoWrap"
+                                         VerticalScrollBarVisibility="Auto"
+                                         HorizontalScrollBarVisibility="Auto"
+                                         VerticalAlignment="Stretch"/>
+                            </GroupBox>
+                        </Grid>
                     </GroupBox>
                 </Grid>
             </TabItem>
