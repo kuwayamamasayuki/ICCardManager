@@ -1,4 +1,4 @@
-# ICCardManager インストーラービルドスクリプト
+﻿# ICCardManager インストーラービルドスクリプト
 # 使用方法: .\build-installer.ps1 [-SkipBuild] [-Version "1.0.0"]
 
 param(
@@ -18,6 +18,7 @@ $OutputDir = Join-Path $ScriptDir "output"
 
 # Inno Setup のパス（標準インストール場所）
 $InnoSetupPaths = @(
+    "${env:LOCALAPPDATA}\Programs\Inno Setup 6\ISCC.exe",
     "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe",
     "${env:ProgramFiles}\Inno Setup 6\ISCC.exe",
     "C:\Program Files (x86)\Inno Setup 6\ISCC.exe",
@@ -72,12 +73,16 @@ if (-not $SkipBuild) {
 
     Push-Location $SrcDir
     try {
-        # クリーンビルド
-        dotnet clean -c Release -v q
-        if ($LASTEXITCODE -ne 0) { throw "クリーンに失敗しました" }
+        # obj/binフォルダを削除してクリーンな状態にする
+        if (Test-Path "obj") { Remove-Item -Recurse -Force "obj" }
+        if (Test-Path "bin") { Remove-Item -Recurse -Force "bin" }
 
-        # 発行
-        dotnet publish -c Release -r win-x64 --self-contained true -o $PublishDir -v q
+        # 復元
+        dotnet restore -v q
+        if ($LASTEXITCODE -ne 0) { throw "復元に失敗しました" }
+
+        # 発行（.NET Framework 4.8 x86）
+        dotnet publish -c Release -o $PublishDir -v q
         if ($LASTEXITCODE -ne 0) { throw "ビルドに失敗しました" }
 
         Write-Host "  ビルド完了: $PublishDir" -ForegroundColor Green
