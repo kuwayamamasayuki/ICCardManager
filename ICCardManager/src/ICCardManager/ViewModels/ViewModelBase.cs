@@ -147,7 +147,9 @@ namespace ICCardManager.ViewModels
             {
                 _cancellationTokenSource.Cancel();
                 BusyMessage = "キャンセル中...";
+#if DEBUG
                 System.Diagnostics.Debug.WriteLine("[UI] 操作がキャンセルされました");
+#endif
             }
         }
 

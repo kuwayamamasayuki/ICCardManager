@@ -86,13 +86,17 @@ namespace ICCardManager.Data
                     directorySecurity.AddAccessRule(accessRule);
                     directoryInfo.SetAccessControl(directorySecurity);
 
+#if DEBUG
                     System.Diagnostics.Debug.WriteLine($"[DbContext] ディレクトリを作成し権限を設定: {directoryPath}");
+#endif
                 }
             }
             catch (Exception ex)
             {
                 // 権限設定に失敗してもディレクトリ作成は試みる
+#if DEBUG
                 System.Diagnostics.Debug.WriteLine($"[DbContext] ディレクトリ権限設定エラー: {ex.Message}");
+#endif
                 Directory.CreateDirectory(directoryPath);
             }
         }
@@ -135,7 +139,9 @@ namespace ICCardManager.Data
 
             if (appliedCount > 0)
             {
+#if DEBUG
                 System.Diagnostics.Debug.WriteLine($"[DbContext] {appliedCount}件のマイグレーションを適用しました");
+#endif
             }
         }
 
@@ -171,7 +177,9 @@ namespace ICCardManager.Data
             }
 
             // 既存DBをバージョン1として記録
+#if DEBUG
             System.Diagnostics.Debug.WriteLine("[DbContext] 既存DBを検出しました。バージョン1として記録します。");
+#endif
 
             using var createTableCmd = connection.CreateCommand();
             createTableCmd.CommandText = @"CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -224,12 +232,16 @@ namespace ICCardManager.Data
                 }
 
                 fileInfo.SetAccessControl(fileSecurity);
+#if DEBUG
                 System.Diagnostics.Debug.WriteLine("[DbContext] データベースファイルのアクセス権限を制限しました");
+#endif
             }
             catch (Exception ex)
             {
                 // アクセス権限の設定に失敗してもアプリケーションは続行
+#if DEBUG
                 System.Diagnostics.Debug.WriteLine($"[DbContext] アクセス権限の設定に失敗: {ex.Message}");
+#endif
             }
         }
 

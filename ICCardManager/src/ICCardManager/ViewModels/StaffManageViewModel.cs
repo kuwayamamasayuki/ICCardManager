@@ -388,7 +388,9 @@ namespace ICCardManager.ViewModels
             {
                 StatusMessage = $"エラー: {ex.Message}";
                 IsStatusError = true;
+#if DEBUG
                 System.Diagnostics.Debug.WriteLine($"[StaffManageViewModel] SaveAsync エラー: {ex}");
+#endif
             }
         }
 
@@ -432,7 +434,9 @@ namespace ICCardManager.ViewModels
             {
                 StatusMessage = $"エラー: {ex.Message}";
                 IsStatusError = true;
+#if DEBUG
                 System.Diagnostics.Debug.WriteLine($"[StaffManageViewModel] DeleteAsync エラー: {ex}");
+#endif
             }
         }
 

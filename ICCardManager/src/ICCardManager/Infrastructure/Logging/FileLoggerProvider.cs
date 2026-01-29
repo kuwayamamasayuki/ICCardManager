@@ -77,7 +77,9 @@ namespace ICCardManager.Infrastructure.Logging
             if (!_logQueue.TryAdd(message))
             {
                 // キューがいっぱい - ログを破棄
+#if DEBUG
                 System.Diagnostics.Debug.WriteLine("[FileLogger] Log queue full, message dropped");
+#endif
             }
         }
 
@@ -110,7 +112,9 @@ namespace ICCardManager.Infrastructure.Logging
             }
             catch (Exception ex)
             {
+#if DEBUG
                 System.Diagnostics.Debug.WriteLine($"[FileLogger] Failed to write log: {ex.Message}");
+#endif
             }
         }
 
@@ -180,13 +184,17 @@ namespace ICCardManager.Infrastructure.Logging
                     if (fileInfo.LastWriteTime < cutoffDate)
                     {
                         fileInfo.Delete();
+#if DEBUG
                         System.Diagnostics.Debug.WriteLine($"[FileLogger] Deleted old log: {fileInfo.Name}");
+#endif
                     }
                 }
             }
             catch (Exception ex)
             {
+#if DEBUG
                 System.Diagnostics.Debug.WriteLine($"[FileLogger] Failed to cleanup old logs: {ex.Message}");
+#endif
             }
         }
 
@@ -213,13 +221,17 @@ namespace ICCardManager.Infrastructure.Logging
                     directorySecurity.AddAccessRule(accessRule);
                     directoryInfo.SetAccessControl(directorySecurity);
 
+#if DEBUG
                     System.Diagnostics.Debug.WriteLine($"[FileLogger] ディレクトリを作成し権限を設定: {directoryPath}");
+#endif
                 }
             }
             catch (Exception ex)
             {
                 // 権限設定に失敗してもディレクトリ作成は試みる
+#if DEBUG
                 System.Diagnostics.Debug.WriteLine($"[FileLogger] ディレクトリ権限設定エラー: {ex.Message}");
+#endif
                 Directory.CreateDirectory(directoryPath);
             }
         }

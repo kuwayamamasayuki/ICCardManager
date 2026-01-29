@@ -198,7 +198,9 @@ namespace ICCardManager.Data.Migrations
             using var transaction = _connection.BeginTransaction();
             try
             {
+#if DEBUG
                 System.Diagnostics.Debug.WriteLine($"[Migration] Applying migration {migration.Version}: {migration.Description}");
+#endif
 
                 // マイグレーションを実行
                 migration.Up(_connection, transaction);
@@ -207,14 +209,18 @@ namespace ICCardManager.Data.Migrations
                 RecordMigration(migration, transaction);
 
                 transaction.Commit();
+#if DEBUG
                 System.Diagnostics.Debug.WriteLine($"[Migration] Successfully applied migration {migration.Version}");
+#endif
 
                 // 成功ログを記録
                 LogMigrationAction("MIGRATION_UP", migration, success: true);
             }
             catch (Exception ex)
             {
+#if DEBUG
                 System.Diagnostics.Debug.WriteLine($"[Migration] Failed to apply migration {migration.Version}: {ex.Message}");
+#endif
                 transaction.Rollback();
 
                 // 失敗ログを記録
@@ -232,7 +238,9 @@ namespace ICCardManager.Data.Migrations
             using var transaction = _connection.BeginTransaction();
             try
             {
+#if DEBUG
                 System.Diagnostics.Debug.WriteLine($"[Migration] Rolling back migration {migration.Version}: {migration.Description}");
+#endif
 
                 // マイグレーションをロールバック
                 migration.Down(_connection, transaction);
@@ -241,14 +249,18 @@ namespace ICCardManager.Data.Migrations
                 RemoveMigrationRecord(migration, transaction);
 
                 transaction.Commit();
+#if DEBUG
                 System.Diagnostics.Debug.WriteLine($"[Migration] Successfully rolled back migration {migration.Version}");
+#endif
 
                 // 成功ログを記録
                 LogMigrationAction("MIGRATION_DOWN", migration, success: true);
             }
             catch (Exception ex)
             {
+#if DEBUG
                 System.Diagnostics.Debug.WriteLine($"[Migration] Failed to rollback migration {migration.Version}: {ex.Message}");
+#endif
                 transaction.Rollback();
 
                 // 失敗ログを記録
@@ -335,7 +347,9 @@ VALUES (@operator_idm, @operator_name, @target_table, @target_id, @action, @afte
             catch (Exception ex)
             {
                 // ログ記録の失敗はマイグレーション自体には影響させない
+#if DEBUG
                 System.Diagnostics.Debug.WriteLine($"[Migration] Failed to log migration action: {ex.Message}");
+#endif
             }
         }
 

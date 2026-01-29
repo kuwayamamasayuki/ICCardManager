@@ -229,7 +229,9 @@ public partial class DataExportImportViewModel : ViewModelBase
             catch (Exception ex)
             {
                 StatusMessage = $"エクスポートエラー: {ex.Message}";
+#if DEBUG
                 System.Diagnostics.Debug.WriteLine($"[Export Error] {ex.GetType().Name}: {ex.Message}");
+#endif
             }
         }
     }
@@ -328,7 +330,9 @@ public partial class DataExportImportViewModel : ViewModelBase
             catch (Exception ex)
             {
                 StatusMessage = $"プレビューエラー: {ex.Message}";
+#if DEBUG
                 System.Diagnostics.Debug.WriteLine($"[Preview Error] {ex.GetType().Name}: {ex.Message}");
+#endif
             }
         }
     }
@@ -418,7 +422,9 @@ public partial class DataExportImportViewModel : ViewModelBase
             catch (Exception ex)
             {
                 StatusMessage = $"インポートエラー: {ex.Message}";
+#if DEBUG
                 System.Diagnostics.Debug.WriteLine($"[ExecuteImport Error] {ex.GetType().Name}: {ex.Message}");
+#endif
             }
         }
     }
@@ -519,8 +525,10 @@ public partial class DataExportImportViewModel : ViewModelBase
             catch (Exception ex)
             {
                 StatusMessage = $"インポートエラー: {ex.Message}";
+#if DEBUG
                 System.Diagnostics.Debug.WriteLine($"[Import Error] {ex.GetType().Name}: {ex.Message}");
                 System.Diagnostics.Debug.WriteLine($"[Import Error] StackTrace: {ex.StackTrace}");
+#endif
             }
         }
     }

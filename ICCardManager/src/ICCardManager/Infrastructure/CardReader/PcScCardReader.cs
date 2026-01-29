@@ -272,7 +272,9 @@ namespace ICCardManager.Infrastructure.CardReader
                     var readerNames = _provider.GetReaders();
                     if (readerNames == null || readerNames.Length == 0)
                     {
+#if DEBUG
                         System.Diagnostics.Debug.WriteLine("履歴読み取り: カードリーダーが見つかりません");
+#endif
                         return;
                     }
 
@@ -295,7 +297,9 @@ namespace ICCardManager.Infrastructure.CardReader
                         historyDataList.Add(historyData);
                     }
 
+#if DEBUG
                     System.Diagnostics.Debug.WriteLine($"履歴読み取り: {historyDataList.Count}件のデータを取得");
+#endif
 
                     // 駅名解決にはCardType.Unknownを使用
                     // 注: IDmの先頭2バイトは製造者コードであり、カード種別ではないため、
@@ -318,7 +322,9 @@ namespace ICCardManager.Infrastructure.CardReader
                 }
                 catch (PCSCException ex)
                 {
+#if DEBUG
                     System.Diagnostics.Debug.WriteLine($"履歴読み取りエラー(PCSC): {ex.Message}");
+#endif
                     CardReaderException cardReaderException = ex.SCardError switch
                     {
                         SCardError.RemovedCard => CardReaderException.CardRemoved(ex),
@@ -328,7 +334,9 @@ namespace ICCardManager.Infrastructure.CardReader
                 }
                 catch (Exception ex)
                 {
+#if DEBUG
                     System.Diagnostics.Debug.WriteLine($"履歴読み取りエラー: {ex.Message}");
+#endif
                     var cardReaderException = CardReaderException.HistoryReadFailed(ex.Message, ex);
                     Error?.Invoke(this, cardReaderException);
                 }
@@ -368,7 +376,9 @@ namespace ICCardManager.Infrastructure.CardReader
                     {
                         // バイト10-11が残高（リトルエンディアン）
                         var balance = historyData[10] + (historyData[11] << 8);
+#if DEBUG
                         System.Diagnostics.Debug.WriteLine($"残高読み取り: {balance}円");
+#endif
                         return balance;
                     }
 
@@ -376,7 +386,9 @@ namespace ICCardManager.Infrastructure.CardReader
                 }
                 catch (PCSCException ex)
                 {
+#if DEBUG
                     System.Diagnostics.Debug.WriteLine($"残高読み取りエラー(PCSC): {ex.Message}");
+#endif
                     CardReaderException cardReaderException = ex.SCardError switch
                     {
                         SCardError.RemovedCard => CardReaderException.CardRemoved(ex),
@@ -387,7 +399,9 @@ namespace ICCardManager.Infrastructure.CardReader
                 }
                 catch (Exception ex)
                 {
+#if DEBUG
                     System.Diagnostics.Debug.WriteLine($"残高読み取りエラー: {ex.Message}");
+#endif
                     var cardReaderException = CardReaderException.BalanceReadFailed(ex.Message, ex);
                     Error?.Invoke(this, cardReaderException);
                     return null;
@@ -402,7 +416,9 @@ namespace ICCardManager.Infrastructure.CardReader
         {
             try
             {
+#if DEBUG
                 System.Diagnostics.Debug.WriteLine($"カード検出: リーダー={e.ReaderName}");
+#endif
 
                 using var reader = _provider.ConnectReader(e.ReaderName, SCardShareMode.Shared, SCardProtocol.Any);
 
@@ -410,11 +426,15 @@ namespace ICCardManager.Infrastructure.CardReader
                 var idm = ReadIdm(reader);
                 if (string.IsNullOrEmpty(idm))
                 {
+#if DEBUG
                     System.Diagnostics.Debug.WriteLine("IDmの読み取りに失敗しました");
+#endif
                     return;
                 }
 
+#if DEBUG
                 System.Diagnostics.Debug.WriteLine($"IDm読み取り成功: {idm}");
+#endif
 
                 // 同一カードの連続読み取りを防止
                 var now = DateTime.Now;
@@ -427,7 +447,9 @@ namespace ICCardManager.Infrastructure.CardReader
                     // 周期的にOnCardInsertedが呼ばれることがある
                     if (!_cardWasLifted)
                     {
+#if DEBUG
                         System.Diagnostics.Debug.WriteLine("同一カードの連続読み取りを無視（カード未離脱）");
+#endif
                         return;
                     }
 
@@ -436,7 +458,9 @@ namespace ICCardManager.Infrastructure.CardReader
                     // 時間制限は設けない。
                     // OnCardRemoved イベントが発火しないと _cardWasLifted は true にならないため、
                     // 物理的にカードが離れない限り再読み取りは発生しない。
+#if DEBUG
                     System.Diagnostics.Debug.WriteLine("カードが離されて再度置かれました");
+#endif
                 }
 
                 // 新しいカード、または離されてから再度置かれたカードとして処理
@@ -452,7 +476,9 @@ namespace ICCardManager.Infrastructure.CardReader
             }
             catch (PCSCException ex)
             {
+#if DEBUG
                 System.Diagnostics.Debug.WriteLine($"カード読み取りエラー(PCSC): {ex.Message}, SCardError={ex.SCardError}");
+#endif
                 // カードが素早く離された場合は専用の例外で通知
                 if (ex.SCardError == SCardError.RemovedCard)
                 {
@@ -471,7 +497,9 @@ namespace ICCardManager.Infrastructure.CardReader
             }
             catch (Exception ex)
             {
+#if DEBUG
                 System.Diagnostics.Debug.WriteLine($"カード読み取りエラー: {ex.Message}");
+#endif
                 var cardReaderException = CardReaderException.ReadFailed(ex.Message, ex);
                 Error?.Invoke(this, cardReaderException);
             }
@@ -486,7 +514,9 @@ namespace ICCardManager.Infrastructure.CardReader
         /// </remarks>
         private void OnCardRemoved(object sender, CardStatusEventArgs e)
         {
+#if DEBUG
             System.Diagnostics.Debug.WriteLine($"カード取り外し: リーダー={e.ReaderName}");
+#endif
             // Issue #323: 次回同じカードが検出されたときにイベントを発火するためフラグを立てる
             _cardWasLifted = true;
         }
@@ -496,7 +526,9 @@ namespace ICCardManager.Infrastructure.CardReader
         /// </summary>
         private void OnMonitorException(object sender, PCSCException ex)
         {
+#if DEBUG
             System.Diagnostics.Debug.WriteLine($"モニター例外: {ex.Message}");
+#endif
             var monitorException = CardReaderException.MonitorError(ex.Message, ex);
             Error?.Invoke(this, monitorException);
 
@@ -521,7 +553,9 @@ namespace ICCardManager.Infrastructure.CardReader
             }
 
             _connectionState = state;
+#if DEBUG
             System.Diagnostics.Debug.WriteLine($"接続状態変更: {state} (メッセージ: {message}, リトライ: {retryCount})");
+#endif
             ConnectionStateChanged?.Invoke(this, new ConnectionStateChangedEventArgs(state, message, retryCount));
         }
 
@@ -537,7 +571,9 @@ namespace ICCardManager.Infrastructure.CardReader
             _healthCheckTimer.AutoReset = true;
             _healthCheckTimer.Start();
 
+#if DEBUG
             System.Diagnostics.Debug.WriteLine($"ヘルスチェックタイマー開始 ({HealthCheckIntervalMs}ms間隔)");
+#endif
         }
 
         /// <summary>
@@ -566,7 +602,9 @@ namespace ICCardManager.Infrastructure.CardReader
             var isConnected = await CheckConnectionAsync();
             if (!isConnected && _connectionState == CardReaderConnectionState.Connected)
             {
+#if DEBUG
                 System.Diagnostics.Debug.WriteLine("ヘルスチェック: 接続が失われました");
+#endif
                 SetConnectionState(CardReaderConnectionState.Disconnected, "接続が失われました");
                 StartReconnectTimer();
             }
@@ -607,7 +645,9 @@ namespace ICCardManager.Infrastructure.CardReader
             _reconnectTimer.AutoReset = true;
             _reconnectTimer.Start();
 
+#if DEBUG
             System.Diagnostics.Debug.WriteLine($"再接続タイマー開始 ({ReconnectIntervalMs}ms間隔, 最大{MaxReconnectAttempts}回)");
+#endif
         }
 
         /// <summary>
@@ -629,13 +669,17 @@ namespace ICCardManager.Infrastructure.CardReader
         private Task OnReconnectAttemptAsync()
         {
             _reconnectAttempts++;
+#if DEBUG
             System.Diagnostics.Debug.WriteLine($"再接続試行: {_reconnectAttempts}/{MaxReconnectAttempts}");
+#endif
 
             SetConnectionState(CardReaderConnectionState.Reconnecting, null, _reconnectAttempts);
 
             if (_reconnectAttempts > MaxReconnectAttempts)
             {
+#if DEBUG
                 System.Diagnostics.Debug.WriteLine("再接続失敗: 最大試行回数に達しました");
+#endif
                 StopReconnectTimer();
                 var reconnectException = CardReaderException.ReconnectFailed(MaxReconnectAttempts);
                 SetConnectionState(CardReaderConnectionState.Disconnected, reconnectException.UserFriendlyMessage);
@@ -660,7 +704,9 @@ namespace ICCardManager.Infrastructure.CardReader
                 var readerNames = _provider.GetReaders();
                 if (readerNames == null || readerNames.Length == 0)
                 {
+#if DEBUG
                     System.Diagnostics.Debug.WriteLine("再接続: カードリーダーが見つかりません");
+#endif
                     return Task.CompletedTask; // 次のリトライを待つ
                 }
 
@@ -675,7 +721,9 @@ namespace ICCardManager.Infrastructure.CardReader
                 _isReading = true;
                 _reconnectAttempts = 0;
 
+#if DEBUG
                 System.Diagnostics.Debug.WriteLine("再接続成功");
+#endif
                 StopReconnectTimer();
                 SetConnectionState(CardReaderConnectionState.Connected, "再接続しました");
 
@@ -684,7 +732,9 @@ namespace ICCardManager.Infrastructure.CardReader
             }
             catch (Exception ex)
             {
+#if DEBUG
                 System.Diagnostics.Debug.WriteLine($"再接続試行エラー: {ex.Message}");
+#endif
                 // 次のリトライを待つ
             }
 
@@ -706,11 +756,15 @@ namespace ICCardManager.Infrastructure.CardReader
         /// </remarks>
         public async Task ReconnectAsync()
         {
+#if DEBUG
             System.Diagnostics.Debug.WriteLine("手動再接続を開始");
+#endif
 
             if (_connectionState == CardReaderConnectionState.Reconnecting)
             {
+#if DEBUG
                 System.Diagnostics.Debug.WriteLine("既に再接続中です");
+#endif
                 return;
             }
 
@@ -792,7 +846,9 @@ namespace ICCardManager.Infrastructure.CardReader
             }
             catch (Exception ex)
             {
+#if DEBUG
                 System.Diagnostics.Debug.WriteLine($"Pollingコマンドエラー: {ex.Message}");
+#endif
             }
 
             return null;
@@ -873,13 +929,17 @@ namespace ICCardManager.Infrastructure.CardReader
                     }
                     else
                     {
+#if DEBUG
                         System.Diagnostics.Debug.WriteLine($"ブロック読み取りエラー: ステータス={statusFlag1:X2} {statusFlag2:X2}");
+#endif
                     }
                 }
             }
             catch (Exception ex)
             {
+#if DEBUG
                 System.Diagnostics.Debug.WriteLine($"ブロック{blockIndex}読み取り失敗: {ex.Message}");
+#endif
             }
 
             return null;
@@ -967,9 +1027,11 @@ namespace ICCardManager.Infrastructure.CardReader
                     }
                 }
 
+#if DEBUG
                 System.Diagnostics.Debug.WriteLine(
                     $"履歴: 日付={useDate:yyyy/MM/dd}, 入場={entryStationCode:X4}, 出場={exitStationCode:X4}, " +
                     $"残高={balance}, 金額={amount}, チャージ={isCharge}, バス={isBus}");
+#endif
 
                 // 生データを保持（デバッグ・診断用）
                 var rawBytes = new byte[16];
@@ -989,7 +1051,9 @@ namespace ICCardManager.Infrastructure.CardReader
             }
             catch (Exception ex)
             {
+#if DEBUG
                 System.Diagnostics.Debug.WriteLine($"履歴データのパースエラー: {ex.Message}");
+#endif
                 return null;
             }
         }
