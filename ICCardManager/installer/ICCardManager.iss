@@ -50,14 +50,17 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
 
 [Files]
-; メインアプリケーション
-Source: "..\publish\{#MyAppExeName}"; DestDir: "{app}"; Flags: ignoreversion
+; メインアプリケーションと依存DLL（すべてのDLL/EXE/config/pdbを含める）
+Source: "..\publish\*.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\publish\*.dll"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\publish\*.config"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
+Source: "..\publish\*.json"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
+
+; x86ネイティブDLL（SQLite Interop等）
+Source: "..\publish\x86\*"; DestDir: "{app}\x86"; Flags: ignoreversion recursesubdirs createallsubdirs skipifsourcedoesntexist
 
 ; アイコンファイル（「設定」→「アプリ」で表示されるアイコン）
 Source: "app.ico"; DestDir: "{app}"; Flags: ignoreversion
-
-; 設定ファイル
-Source: "..\publish\appsettings.json"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
 
 ; サウンドファイル
 Source: "..\publish\Resources\Sounds\*"; DestDir: "{app}\Resources\Sounds"; Flags: ignoreversion recursesubdirs createallsubdirs
