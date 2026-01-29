@@ -6,6 +6,8 @@ using System.Threading.Tasks;
 using System.Collections.Concurrent;
 using System.IO;
 using System.Text;
+using System.Security.AccessControl;
+using System.Security.Principal;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
@@ -33,14 +35,15 @@ namespace ICCardManager.Infrastructure.Logging
         {
             Options = options.Value;
 
-            // ログディレクトリを決定
-            var appDirectory = AppContext.BaseDirectory;
-            _logDirectory = Path.Combine(appDirectory, Options.Path);
+            // ログディレクトリを決定（DBと同じくCommonApplicationDataに保存）
+            // C:\ProgramData\ICCardManager\Logs を使用し、全ユーザーで共有
+            var appDataDirectory = Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData);
+            _logDirectory = Path.Combine(appDataDirectory, "ICCardManager", Options.Path);
 
             if (Options.Enabled)
             {
-                // ログディレクトリを作成
-                Directory.CreateDirectory(_logDirectory);
+                // ログディレクトリを作成（全ユーザーがアクセスできるように権限を設定）
+                EnsureDirectoryWithPermissions(_logDirectory);
 
                 // 古いログファイルを削除
                 CleanupOldLogs();
@@ -184,6 +187,40 @@ namespace ICCardManager.Infrastructure.Logging
             catch (Exception ex)
             {
                 System.Diagnostics.Debug.WriteLine($"[FileLogger] Failed to cleanup old logs: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// ディレクトリを作成し、全ユーザーがアクセスできるように権限を設定
+        /// </summary>
+        private static void EnsureDirectoryWithPermissions(string directoryPath)
+        {
+            try
+            {
+                if (!Directory.Exists(directoryPath))
+                {
+                    var directoryInfo = Directory.CreateDirectory(directoryPath);
+
+                    // Usersグループにフルコントロール権限を付与
+                    var directorySecurity = directoryInfo.GetAccessControl();
+                    var usersIdentity = new SecurityIdentifier(WellKnownSidType.BuiltinUsersSid, null);
+                    var accessRule = new FileSystemAccessRule(
+                        usersIdentity,
+                        FileSystemRights.FullControl,
+                        InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit,
+                        PropagationFlags.None,
+                        AccessControlType.Allow);
+                    directorySecurity.AddAccessRule(accessRule);
+                    directoryInfo.SetAccessControl(directorySecurity);
+
+                    System.Diagnostics.Debug.WriteLine($"[FileLogger] ディレクトリを作成し権限を設定: {directoryPath}");
+                }
+            }
+            catch (Exception ex)
+            {
+                // 権限設定に失敗してもディレクトリ作成は試みる
+                System.Diagnostics.Debug.WriteLine($"[FileLogger] ディレクトリ権限設定エラー: {ex.Message}");
+                Directory.CreateDirectory(directoryPath);
             }
         }
 
