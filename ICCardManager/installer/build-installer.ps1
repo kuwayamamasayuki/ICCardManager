@@ -120,6 +120,15 @@ if (Test-Path $TemplatesSource) {
     Write-Host "  テンプレートファイル: $TemplateCount 個コピー" -ForegroundColor Green
 }
 
+# SQLite.Interop.dll のコピー（x86ネイティブDLL）
+$SqliteInteropSource = Join-Path $SrcDir "bin\Release\net48\x86"
+$SqliteInteropDest = Join-Path $PublishDir "x86"
+if (Test-Path $SqliteInteropSource) {
+    if (-not (Test-Path $SqliteInteropDest)) { New-Item -ItemType Directory -Path $SqliteInteropDest -Force | Out-Null }
+    Copy-Item -Path "$SqliteInteropSource\*" -Destination $SqliteInteropDest -Force -ErrorAction SilentlyContinue
+    Write-Host "  SQLite.Interop.dll: x86 フォルダにコピー" -ForegroundColor Green
+}
+
 # Step 5: 発行ファイルの確認
 Write-Host ""
 Write-Host "[5/6] 発行ファイルの確認..." -ForegroundColor Yellow

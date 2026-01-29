@@ -33,9 +33,10 @@ namespace ICCardManager.Infrastructure.Logging
         {
             Options = options.Value;
 
-            // ログディレクトリを決定
-            var appDirectory = AppContext.BaseDirectory;
-            _logDirectory = Path.Combine(appDirectory, Options.Path);
+            // ログディレクトリを決定（ユーザーデータはLocalAppDataに保存）
+            // Program Filesは管理者権限が必要なため、%LOCALAPPDATA%\ICCardManager\Logsを使用
+            var appDataDirectory = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+            _logDirectory = Path.Combine(appDataDirectory, "ICCardManager", Options.Path);
 
             if (Options.Enabled)
             {
