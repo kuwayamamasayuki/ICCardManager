@@ -24,6 +24,12 @@
     <NoWarn>$(NoWarn);CS1591;CS8632</NoWarn>
   </PropertyGroup>
 
+  <!-- リリースビルド時はPDBファイルを生成しない -->
+  <PropertyGroup Condition="'$(Configuration)'=='Release'">
+    <DebugType>none</DebugType>
+    <DebugSymbols>false</DebugSymbols>
+  </PropertyGroup>
+
   <ItemGroup>
     <!-- メインプロジェクトを参照 -->
     <ProjectReference Include="..\..\src\ICCardManager\ICCardManager.csproj" />
