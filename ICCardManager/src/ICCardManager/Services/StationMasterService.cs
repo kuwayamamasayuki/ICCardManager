@@ -94,11 +94,15 @@ namespace ICCardManager.Services
                 {
                     LoadFromEmbeddedResource();
                     _isLoaded = true;
+#if DEBUG
                     System.Diagnostics.Debug.WriteLine($"駅マスタ読み込み完了: {_stations.Count}件, {_lineNames.Count}路線");
+#endif
                 }
                 catch (Exception ex)
                 {
+#if DEBUG
                     System.Diagnostics.Debug.WriteLine($"駅マスタ読み込みエラー: {ex.Message}");
+#endif
                     LoadFallbackData();
                     _isLoaded = true;
                 }
@@ -479,7 +483,9 @@ namespace ICCardManager.Services
             _areaLineCodes[2] = new HashSet<int> { 1 };
             _areaLineCodes[3] = new HashSet<int> { 231, 232, 233 };
 
+#if DEBUG
             System.Diagnostics.Debug.WriteLine($"フォールバックデータ読み込み完了: {_stations.Count}件");
+#endif
         }
 
         /// <summary>

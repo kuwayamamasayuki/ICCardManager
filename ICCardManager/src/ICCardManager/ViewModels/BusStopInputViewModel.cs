@@ -157,11 +157,15 @@ public partial class BusStopInputViewModel : ViewModelBase
         {
             var suggestions = await _ledgerRepository.GetBusStopSuggestionsAsync();
             BusStopSuggestions = suggestions.Select(s => s.BusStops).ToList();
+#if DEBUG
             System.Diagnostics.Debug.WriteLine($"[BusStopInput] {BusStopSuggestions.Count}件のバス停名候補を読み込みました");
+#endif
         }
         catch (Exception ex)
         {
+#if DEBUG
             System.Diagnostics.Debug.WriteLine($"[BusStopInput] サジェスト候補の読み込みに失敗: {ex.Message}");
+#endif
             BusStopSuggestions = new List<string>();
         }
     }

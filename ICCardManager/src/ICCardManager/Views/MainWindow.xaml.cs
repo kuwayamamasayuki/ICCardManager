@@ -57,7 +57,9 @@ namespace ICCardManager.Views
             catch (Exception ex)
             {
                 // 終了時のエラーは警告のみ（アプリ終了を妨げない）
+#if DEBUG
                 System.Diagnostics.Debug.WriteLine($"[MainWindow] 終了時エラー: {ex.Message}");
+#endif
             }
         }
 
@@ -91,11 +93,15 @@ namespace ICCardManager.Views
                 }
 
                 await _settingsRepository.SaveAppSettingsAsync(settings);
+#if DEBUG
                 System.Diagnostics.Debug.WriteLine($"[MainWindow] ウィンドウ位置を保存: Left={settings.MainWindowSettings.Left}, Top={settings.MainWindowSettings.Top}, Width={settings.MainWindowSettings.Width}, Height={settings.MainWindowSettings.Height}, Maximized={settings.MainWindowSettings.IsMaximized}");
+#endif
             }
             catch (Exception ex)
             {
+#if DEBUG
                 System.Diagnostics.Debug.WriteLine($"[MainWindow] ウィンドウ位置の保存に失敗: {ex.Message}");
+#endif
             }
         }
 
@@ -111,7 +117,9 @@ namespace ICCardManager.Views
 
                 if (!windowSettings.HasValidSettings)
                 {
+#if DEBUG
                     System.Diagnostics.Debug.WriteLine("[MainWindow] 保存されたウィンドウ位置がありません。デフォルトを使用します。");
+#endif
                     return;
                 }
 
@@ -141,11 +149,15 @@ namespace ICCardManager.Views
                     WindowState = WindowState.Maximized;
                 }
 
+#if DEBUG
                 System.Diagnostics.Debug.WriteLine($"[MainWindow] ウィンドウ位置を復元: Left={left}, Top={top}, Width={width}, Height={height}, Maximized={windowSettings.IsMaximized}");
+#endif
             }
             catch (Exception ex)
             {
+#if DEBUG
                 System.Diagnostics.Debug.WriteLine($"[MainWindow] ウィンドウ位置の復元に失敗: {ex.Message}");
+#endif
             }
         }
 
@@ -219,7 +231,9 @@ namespace ICCardManager.Views
             left = (workAreaWidth - width) / 2;
             top = (workAreaHeight - height) / 2;
 
+#if DEBUG
             System.Diagnostics.Debug.WriteLine($"[MainWindow] 画面外補正を適用: Left={left}, Top={top}");
+#endif
             return (left, top, width, height);
         }
     }

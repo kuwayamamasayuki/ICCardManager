@@ -450,7 +450,9 @@ public partial class ReportViewModel : ViewModelBase
         catch (OperationCanceledException)
         {
             StatusMessage = "帳票作成がキャンセルされました";
+#if DEBUG
             System.Diagnostics.Debug.WriteLine("[ReportVM] 帳票作成がキャンセルされました");
+#endif
         }
     }
 

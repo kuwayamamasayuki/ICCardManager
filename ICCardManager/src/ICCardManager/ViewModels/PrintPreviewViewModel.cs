@@ -231,7 +231,9 @@ public partial class PrintPreviewViewModel : ViewModelBase
             {
                 // ドキュメントがまだビジュアルツリーにアタッチされていない場合など
                 // ページ数の取得に失敗することがある
+#if DEBUG
                 System.Diagnostics.Debug.WriteLine($"[PrintPreviewVM] ページ数取得エラー: {ex.Message}");
+#endif
                 TotalPages = 1;
             }
         }
