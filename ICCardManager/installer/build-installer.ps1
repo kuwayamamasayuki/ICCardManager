@@ -86,6 +86,13 @@ if (-not $SkipBuild) {
         if ($LASTEXITCODE -ne 0) { throw "ビルドに失敗しました" }
 
         Write-Host "  ビルド完了: $PublishDir" -ForegroundColor Green
+
+        # PDBファイルを削除（リリースビルドでは不要）
+        $PdbFiles = Get-ChildItem $PublishDir -Filter "*.pdb" -ErrorAction SilentlyContinue
+        if ($PdbFiles) {
+            $PdbFiles | Remove-Item -Force
+            Write-Host "  PDBファイル: $($PdbFiles.Count) 個削除" -ForegroundColor Green
+        }
     }
     finally {
         Pop-Location
