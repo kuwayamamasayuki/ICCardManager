@@ -3,12 +3,13 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+#if DEBUG
 using ICCardManager.Models;
 
 namespace ICCardManager.Infrastructure.CardReader
 {
 /// <summary>
-    /// テスト用のモックICカードリーダー
+    /// テスト用のモックICカードリーダー（DEBUGビルド専用）
     /// </summary>
     public class MockCardReader : ICardReader
     {
@@ -305,3 +306,4 @@ namespace ICCardManager.Infrastructure.CardReader
         public Dictionary<string, int> CustomBalances { get; } = new();
     }
 }
+#endif

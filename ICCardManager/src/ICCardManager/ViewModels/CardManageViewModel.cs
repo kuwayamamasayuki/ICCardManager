@@ -615,6 +615,7 @@ namespace ICCardManager.ViewModels
             }
         }
 
+#if DEBUG
         /// <summary>
         /// デバッグ用: カード読み取りをシミュレート
         /// </summary>
@@ -630,6 +631,7 @@ namespace ICCardManager.ViewModels
                 mockReader.SimulateCardRead(newIdm);
             }
         }
+#endif
 
         /// <summary>
         /// 新規購入レコードを作成
