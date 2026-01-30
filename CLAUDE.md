@@ -28,10 +28,17 @@ ICCardManager/
 │       │   │   ├── SettingsDialog.xaml
 │       │   │   ├── ReportDialog.xaml
 │       │   │   └── ...
+│       │   ├── Converters/             # WPF値コンバーター
+│       │   │   └── VisibilityConverters.cs
 │       │   └── Controls/
 │       ├── ViewModels/                 # ViewModel
 │       │   ├── ViewModelBase.cs
 │       │   ├── MainViewModel.cs
+│       │   └── ...
+│       ├── Dtos/                       # DTOクラス
+│       │   ├── CardDto.cs
+│       │   ├── StaffDto.cs
+│       │   ├── LedgerDto.cs
 │       │   └── ...
 │       ├── Models/                     # エンティティ
 │       │   ├── Staff.cs
@@ -52,13 +59,26 @@ ICCardManager/
 │       │   ├── CardReader/
 │       │   │   ├── ICardReader.cs
 │       │   │   └── PcScCardReader.cs
-│       │   └── Sound/
-│       │       └── SoundPlayer.cs
+│       │   ├── Sound/
+│       │   │   └── SoundPlayer.cs
+│       │   ├── Caching/                # キャッシング機能
+│       │   │   ├── ICacheService.cs
+│       │   │   └── CacheService.cs
+│       │   └── Logging/                # ログ機能
+│       │       ├── FileLogger.cs
+│       │       └── FileLoggerProvider.cs
 │       ├── Common/                     # 共通ユーティリティ
 │       │   ├── WarekiConverter.cs
-│       │   └── Enums.cs
+│       │   ├── Enums.cs
+│       │   ├── Converters.cs           # WPF値コンバーター
+│       │   └── Exceptions/             # カスタム例外クラス
+│       │       ├── AppException.cs
+│       │       ├── BusinessException.cs
+│       │       └── ...
 │       └── Resources/
 │           ├── Sounds/
+│           ├── Styles/                 # WPF用スタイル定義
+│           │   └── AccessibilityStyles.xaml
 │           └── Templates/
 │               └── 物品出納簿テンプレート.xlsx
 └── docs/                               # ドキュメント
@@ -185,7 +205,7 @@ THEN
 
 ## 参照ドキュメント
 
-- `プロンプト.md` - 詳細な要件定義
+- `初期プロンプト.md` - 詳細な要件定義
 - `docs/design/` - 設計書一式
 - `docs/manual/` - マニュアル（ユーザー・管理者・開発者）
 - `Resources/Templates/物品出納簿テンプレート.xlsx` - 月次帳票テンプレート
