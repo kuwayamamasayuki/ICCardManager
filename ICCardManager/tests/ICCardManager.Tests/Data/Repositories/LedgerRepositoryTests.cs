@@ -405,6 +405,75 @@ public class LedgerRepositoryTests : IDisposable
 
     #endregion
 
+    #region DeleteAsync テスト
+
+    /// <summary>
+    /// 履歴を削除できることを確認
+    /// </summary>
+    [Fact]
+    public async Task DeleteAsync_ExistingLedger_ReturnsTrue()
+    {
+        // Arrange
+        var ledger = CreateTestLedger(TestCardIdm, DateTime.Today, "（貸出中）");
+        ledger.IsLentRecord = true;
+        var id = await _repository.InsertAsync(ledger);
+
+        // Act
+        var result = await _repository.DeleteAsync(id);
+
+        // Assert
+        result.Should().BeTrue();
+
+        var deleted = await _repository.GetByIdAsync(id);
+        deleted.Should().BeNull();
+    }
+
+    /// <summary>
+    /// 履歴と詳細を同時に削除できることを確認
+    /// </summary>
+    [Fact]
+    public async Task DeleteAsync_WithDetails_DeletesBoth()
+    {
+        // Arrange
+        var ledger = CreateTestLedger(TestCardIdm, DateTime.Today, "鉄道（博多～天神）", expense: 260);
+        var id = await _repository.InsertAsync(ledger);
+
+        var detail = new LedgerDetail
+        {
+            LedgerId = id,
+            UseDate = DateTime.Today,
+            EntryStation = "博多",
+            ExitStation = "天神",
+            Amount = 260,
+            Balance = 9740
+        };
+        await _repository.InsertDetailAsync(detail);
+
+        // Act
+        var result = await _repository.DeleteAsync(id);
+
+        // Assert
+        result.Should().BeTrue();
+
+        var deleted = await _repository.GetByIdAsync(id);
+        deleted.Should().BeNull();
+    }
+
+    /// <summary>
+    /// 存在しないIDの削除はfalseを返すことを確認
+    /// </summary>
+    [Fact]
+    public async Task DeleteAsync_NonExistingId_ReturnsFalse()
+    {
+        // Arrange & Act
+        var result = await _repository.DeleteAsync(99999);
+
+        // Assert
+        result.Should().BeFalse();
+    }
+
+    #endregion
+
     #region GetLatestBeforeDateAsync テスト
 
     /// <summary>
