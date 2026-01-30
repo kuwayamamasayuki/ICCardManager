@@ -566,7 +566,7 @@ namespace ICCardManager.Services
         /// </summary>
         public static string GetRefundSummary()
         {
-            return "払い戻し";
+            return "払戻しによる払出";
         }
 
         /// <summary>
