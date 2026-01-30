@@ -562,6 +562,14 @@ namespace ICCardManager.Services
         }
 
         /// <summary>
+        /// 払い戻しの摘要を生成
+        /// </summary>
+        public static string GetRefundSummary()
+        {
+            return "払い戻し";
+        }
+
+        /// <summary>
         /// 前年度繰越の摘要を生成
         /// </summary>
         public static string GetCarryoverFromPreviousYearSummary()

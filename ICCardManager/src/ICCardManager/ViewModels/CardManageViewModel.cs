@@ -512,6 +512,116 @@ namespace ICCardManager.ViewModels
         }
 
         /// <summary>
+        /// 払い戻しが可能か判定
+        /// </summary>
+        /// <remarks>
+        /// 払い戻しの条件:
+        /// - カードが選択されている
+        /// - 貸出中でない（手元にないカードは払い戻し操作自体が意味をなさない）
+        /// </remarks>
+        private bool CanRefund() => SelectedCard != null && !SelectedCard.IsLent;
+
+        /// <summary>
+        /// 払い戻し処理
+        /// </summary>
+        /// <remarks>
+        /// Issue #379対応: 交通系ICカードの払い戻しに対応。
+        /// 払い戻し時は残高を払出金額として計上し、残高を0にしてからカードを論理削除する。
+        /// これにより、物品出納簿に払い戻しの記録が残る。
+        /// </remarks>
+        [RelayCommand(CanExecute = nameof(CanRefund))]
+        public async Task RefundAsync()
+        {
+            if (SelectedCard == null) return;
+
+            if (SelectedCard.IsLent)
+            {
+                StatusMessage = "貸出中のカードは払い戻しできません";
+                IsStatusError = true;
+                return;
+            }
+
+            // 最新の残高を取得
+            var latestLedger = await _ledgerRepository.GetLatestLedgerAsync(SelectedCard.CardIdm);
+            var currentBalance = latestLedger?.Balance ?? 0;
+
+            // 払い戻し確認ダイアログを表示
+            var message = currentBalance > 0
+                ? $"カード「{SelectedCard.CardType} {SelectedCard.CardNumber}」を払い戻しますか？\n\n現在の残高: ¥{currentBalance:N0}\n\n※払い戻し後、このカードは削除されます。"
+                : $"カード「{SelectedCard.CardType} {SelectedCard.CardNumber}」を払い戻しますか？\n\n現在の残高: ¥0（残高なし）\n\n※払い戻し後、このカードは削除されます。";
+
+            var result = MessageBox.Show(
+                message,
+                "払い戻し確認",
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Warning);
+
+            if (result != MessageBoxResult.Yes)
+            {
+                return;
+            }
+
+            using (BeginBusy("払い戻し処理中..."))
+            {
+                // 払い戻しのLedgerを作成
+                var now = DateTime.Now;
+                var refundLedger = new Ledger
+                {
+                    CardIdm = SelectedCard.CardIdm,
+                    LenderIdm = null,
+                    Date = now,
+                    Summary = SummaryGenerator.GetRefundSummary(),
+                    Income = 0,
+                    Expense = currentBalance,  // 残高を払出金額として計上
+                    Balance = 0,                // 払い戻し後の残高は0
+                    StaffName = null,
+                    Note = null,
+                    ReturnerIdm = null,
+                    LentAt = null,
+                    ReturnedAt = null,
+                    IsLentRecord = false
+                };
+
+                var ledgerId = await _ledgerRepository.InsertAsync(refundLedger);
+
+                if (ledgerId > 0)
+                {
+                    // 払い戻し後のデータを取得（操作ログ用）
+                    var card = await _cardRepository.GetByIdmAsync(SelectedCard.CardIdm);
+
+                    // カードを論理削除
+                    var deleteSuccess = await _cardRepository.DeleteAsync(SelectedCard.CardIdm);
+
+                    if (deleteSuccess)
+                    {
+                        // 操作ログを記録（払い戻しは削除操作として記録）
+                        if (card != null)
+                        {
+                            await _operationLogger.LogCardDeleteAsync(null, card);
+                        }
+
+                        StatusMessage = currentBalance > 0
+                            ? $"払い戻しが完了しました（払戻額: ¥{currentBalance:N0}）"
+                            : "払い戻しが完了しました";
+                        IsStatusError = false;
+                        await LoadCardsAsync();
+                        CancelEdit();
+                    }
+                    else
+                    {
+                        StatusMessage = "カードの削除に失敗しました";
+                        IsStatusError = true;
+                    }
+                }
+                else
+                {
+                    StatusMessage = "払い戻し記録の作成に失敗しました";
+                    IsStatusError = true;
+                }
+            }
+        }
+
+        /// <summary>
         /// 編集をキャンセル
         /// </summary>
         [RelayCommand]
