@@ -134,11 +134,19 @@
                     <Button Content="削除"
                             Command="{Binding DeleteCommand}"
                             Padding="15,8"
-                            Margin="0,0,0,5"
+                            Margin="0,0,10,5"
                             Foreground="Red"
                             AutomationProperties.Name="カード削除"
                             AutomationProperties.HelpText="選択したカードを削除します。削除後も履歴は保持されます。"
                             ToolTip="選択したカードを削除"/>
+                    <Button Content="払い戻し"
+                            Command="{Binding RefundCommand}"
+                            Padding="15,8"
+                            Margin="0,0,0,5"
+                            Foreground="DarkOrange"
+                            AutomationProperties.Name="カード払い戻し"
+                            AutomationProperties.HelpText="選択したカードを払い戻します。残高が払出金額として記録され、カードは削除されます。"
+                            ToolTip="払い戻し処理を行い、カードを削除"/>
                 </WrapPanel>
             </DockPanel>
         </Grid>
