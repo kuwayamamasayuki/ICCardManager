@@ -56,6 +56,11 @@ namespace ICCardManager.Dtos
         public bool IsCharge { get; set; }
 
         /// <summary>
+        /// ポイント還元フラグ
+        /// </summary>
+        public bool IsPointRedemption { get; set; }
+
+        /// <summary>
         /// バス利用フラグ
         /// </summary>
         public bool IsBus { get; set; }
@@ -72,6 +77,11 @@ namespace ICCardManager.Dtos
                 if (IsCharge)
                 {
                     return "チャージ";
+                }
+
+                if (IsPointRedemption)
+                {
+                    return "ポイント還元";
                 }
 
                 if (IsBus)

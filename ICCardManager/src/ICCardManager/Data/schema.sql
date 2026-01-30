@@ -55,15 +55,16 @@ CREATE TABLE IF NOT EXISTS ledger (
 -- 利用履歴詳細（ICカードの個別利用記録）
 -- ============================================
 CREATE TABLE IF NOT EXISTS ledger_detail (
-    ledger_id     INTEGER REFERENCES ledger(id) ON DELETE CASCADE,
-    use_date      TEXT,                    -- 利用日時
-    entry_station TEXT,                    -- 乗車駅
-    exit_station  TEXT,                    -- 降車駅
-    bus_stops     TEXT,                    -- バス停名（手入力）
-    amount        INTEGER,                 -- 利用額／チャージ額
-    balance       INTEGER,                 -- 残額
-    is_charge     INTEGER DEFAULT 0,       -- チャージフラグ
-    is_bus        INTEGER DEFAULT 0        -- バス利用フラグ
+    ledger_id           INTEGER REFERENCES ledger(id) ON DELETE CASCADE,
+    use_date            TEXT,                    -- 利用日時
+    entry_station       TEXT,                    -- 乗車駅
+    exit_station        TEXT,                    -- 降車駅
+    bus_stops           TEXT,                    -- バス停名（手入力）
+    amount              INTEGER,                 -- 利用額／チャージ額
+    balance             INTEGER,                 -- 残額
+    is_charge           INTEGER DEFAULT 0,       -- チャージフラグ
+    is_point_redemption INTEGER DEFAULT 0,       -- ポイント還元フラグ
+    is_bus              INTEGER DEFAULT 0        -- バス利用フラグ
 );
 
 -- ============================================

@@ -25,6 +25,11 @@ namespace ICCardManager.Services
         /// チャージかどうか
         /// </summary>
         public bool IsCharge { get; set; }
+
+        /// <summary>
+        /// ポイント還元かどうか
+        /// </summary>
+        public bool IsPointRedemption { get; set; }
     }
 
     /// <summary>
@@ -126,9 +131,10 @@ namespace ICCardManager.Services
                 var date = dateGroup.Key;
                 var dayItems = dateGroup.ToList();
 
-                // 利用（鉄道・バス）とチャージを分離
-                var usageItems = dayItems.Where(x => !x.Detail.IsCharge).ToList();
+                // 利用（鉄道・バス）、チャージ、ポイント還元を分離
+                var usageItems = dayItems.Where(x => !x.Detail.IsCharge && !x.Detail.IsPointRedemption).ToList();
                 var chargeItems = dayItems.Where(x => x.Detail.IsCharge).ToList();
+                var pointRedemptionItems = dayItems.Where(x => x.Detail.IsPointRedemption).ToList();
 
                 // 出力候補を作成（最古のインデックスと共に）
                 var summariesToAdd = new List<(int OldestIndex, DailySummary Summary)>();
@@ -149,7 +155,8 @@ namespace ICCardManager.Services
                         {
                             Date = date,
                             Summary = usageSummary,
-                            IsCharge = false
+                            IsCharge = false,
+                            IsPointRedemption = false
                         }));
                     }
                 }
@@ -162,7 +169,21 @@ namespace ICCardManager.Services
                     {
                         Date = date,
                         Summary = GetChargeSummary(),
-                        IsCharge = true
+                        IsCharge = true,
+                        IsPointRedemption = false
+                    }));
+                }
+
+                // ポイント還元がある場合はポイント還元摘要を追加
+                if (pointRedemptionItems.Count > 0)
+                {
+                    var oldestIndex = pointRedemptionItems.Max(x => x.Index);
+                    summariesToAdd.Add((oldestIndex, new DailySummary
+                    {
+                        Date = date,
+                        Summary = GetPointRedemptionSummary(),
+                        IsCharge = false,
+                        IsPointRedemption = true
                     }));
                 }
 
@@ -239,8 +260,14 @@ namespace ICCardManager.Services
                 return "役務費によりチャージ";
             }
 
-            var railwayTrips = detailList.Where(d => !d.IsCharge && !d.IsBus).ToList();
-            var busTrips = detailList.Where(d => !d.IsCharge && d.IsBus).ToList();
+            // ポイント還元のみの場合
+            if (detailList.All(d => d.IsPointRedemption))
+            {
+                return "ポイント還元";
+            }
+
+            var railwayTrips = detailList.Where(d => !d.IsCharge && !d.IsPointRedemption && !d.IsBus).ToList();
+            var busTrips = detailList.Where(d => !d.IsCharge && !d.IsPointRedemption && d.IsBus).ToList();
 
             var summaryParts = new List<string>();
 
@@ -524,6 +551,14 @@ namespace ICCardManager.Services
         public static string GetChargeSummary()
         {
             return "役務費によりチャージ";
+        }
+
+        /// <summary>
+        /// ポイント還元の摘要を生成
+        /// </summary>
+        public static string GetPointRedemptionSummary()
+        {
+            return "ポイント還元";
         }
 
         /// <summary>

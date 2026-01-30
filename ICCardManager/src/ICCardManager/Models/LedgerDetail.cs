@@ -51,6 +51,16 @@ namespace ICCardManager.Models
         public bool IsCharge { get; set; }
 
         /// <summary>
+        /// ポイント還元フラグ（true: ポイント還元）
+        /// </summary>
+        /// <remarks>
+        /// ポイント還元はチャージと同様に残高が増加する取引ですが、
+        /// 摘要の表示を区別するために別フラグで管理します。
+        /// FeliCaの利用種別コード 0x0D（ポイント還元）で判定されます。
+        /// </remarks>
+        public bool IsPointRedemption { get; set; }
+
+        /// <summary>
         /// バス利用フラグ（true: バス）
         /// </summary>
         public bool IsBus { get; set; }

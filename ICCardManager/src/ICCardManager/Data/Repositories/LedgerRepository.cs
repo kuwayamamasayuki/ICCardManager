@@ -203,9 +203,9 @@ WHERE id = @id";
 
             using var command = connection.CreateCommand();
             command.CommandText = @"INSERT INTO ledger_detail (ledger_id, use_date, entry_station, exit_station,
-                           bus_stops, amount, balance, is_charge, is_bus)
+                           bus_stops, amount, balance, is_charge, is_point_redemption, is_bus)
 VALUES (@ledgerId, @useDate, @entryStation, @exitStation,
-       @busStops, @amount, @balance, @isCharge, @isBus)";
+       @busStops, @amount, @balance, @isCharge, @isPointRedemption, @isBus)";
 
             command.Parameters.AddWithValue("@ledgerId", detail.LedgerId);
             command.Parameters.AddWithValue("@useDate", detail.UseDate.HasValue ? detail.UseDate.Value.ToString("yyyy-MM-dd HH:mm:ss") : DBNull.Value);
@@ -215,6 +215,7 @@ VALUES (@ledgerId, @useDate, @entryStation, @exitStation,
             command.Parameters.AddWithValue("@amount", detail.Amount.HasValue ? detail.Amount.Value : DBNull.Value);
             command.Parameters.AddWithValue("@balance", detail.Balance.HasValue ? detail.Balance.Value : DBNull.Value);
             command.Parameters.AddWithValue("@isCharge", detail.IsCharge ? 1 : 0);
+            command.Parameters.AddWithValue("@isPointRedemption", detail.IsPointRedemption ? 1 : 0);
             command.Parameters.AddWithValue("@isBus", detail.IsBus ? 1 : 0);
 
             var result = await command.ExecuteNonQueryAsync();
@@ -424,7 +425,7 @@ LIMIT @pageSize OFFSET @offset";
 
             using var command = connection.CreateCommand();
             command.CommandText = @"SELECT ledger_id, use_date, entry_station, exit_station,
-       bus_stops, amount, balance, is_charge, is_bus
+       bus_stops, amount, balance, is_charge, is_point_redemption, is_bus
 FROM ledger_detail
 WHERE ledger_id = @ledgerId
 ORDER BY use_date DESC";
@@ -504,7 +505,8 @@ ORDER BY use_date DESC";
                 Amount = reader.IsDBNull(5) ? null : reader.GetInt32(5),
                 Balance = reader.IsDBNull(6) ? null : reader.GetInt32(6),
                 IsCharge = reader.GetInt32(7) == 1,
-                IsBus = reader.GetInt32(8) == 1
+                IsPointRedemption = !reader.IsDBNull(8) && reader.GetInt32(8) == 1,
+                IsBus = reader.GetInt32(9) == 1
             };
         }
 
