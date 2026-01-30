@@ -15,6 +15,7 @@ namespace ICCardManager.Views.Dialogs
     {
         private readonly CardManageViewModel _viewModel;
         private string _presetIdm;
+        private int? _presetBalance;
 
         public CardManageDialog(CardManageViewModel viewModel)
         {
@@ -35,6 +36,12 @@ namespace ICCardManager.Views.Dialogs
                 // IDmが事前に設定されている場合は新規登録モードで開始
                 if (!string.IsNullOrEmpty(_presetIdm))
                 {
+                    // Issue #381対応: 事前に読み取った残高をViewModelに設定
+                    if (_presetBalance.HasValue)
+                    {
+                        _viewModel.SetPreReadBalance(_presetBalance);
+                    }
+
                     // Issue #284対応: タッチ時点で削除済み/登録済みチェックを行う
                     var shouldClose = await _viewModel.StartNewCardWithIdmAsync(_presetIdm);
                     if (shouldClose)
@@ -57,6 +64,22 @@ namespace ICCardManager.Views.Dialogs
         public void InitializeWithIdm(string idm)
         {
             _presetIdm = idm;
+        }
+
+        /// <summary>
+        /// IDmと残高を指定して新規登録モードで初期化（Issue #381対応）
+        /// </summary>
+        /// <remarks>
+        /// カード検出時に残高を事前に読み取っておくことで、
+        /// ユーザーがフォーム入力中にカードがリーダーから離れても
+        /// 正しい残高で「新規購入」レコードを作成できる。
+        /// </remarks>
+        /// <param name="idm">カードのIDm</param>
+        /// <param name="balance">事前に読み取ったカード残高</param>
+        public void InitializeWithIdmAndBalance(string idm, int? balance)
+        {
+            _presetIdm = idm;
+            _presetBalance = balance;
         }
 
         /// <summary>

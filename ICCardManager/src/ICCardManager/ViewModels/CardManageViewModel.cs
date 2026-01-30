@@ -60,6 +60,16 @@ namespace ICCardManager.ViewModels
         private bool _isWaitingForCard;
 
         /// <summary>
+        /// 事前に読み取った残高（Issue #381対応）
+        /// </summary>
+        /// <remarks>
+        /// 未登録カード検出時にMainViewModelで残高を読み取り、この値に設定する。
+        /// CreateNewPurchaseLedgerAsyncでこの値を使用することで、カードがリーダーから
+        /// 離れた後でも正しい残高で「新規購入」レコードを作成できる。
+        /// </remarks>
+        private int? _preReadBalance;
+
+        /// <summary>
         /// カード種別の選択肢
         /// </summary>
         public ObservableCollection<string> CardTypes { get; } = new()
@@ -232,6 +242,20 @@ namespace ICCardManager.ViewModels
             IsWaitingForCard = false; // すでにIDmがあるので待機しない
 
             return false; // ダイアログは開いたまま
+        }
+
+        /// <summary>
+        /// 事前に読み取った残高を設定（Issue #381対応）
+        /// </summary>
+        /// <remarks>
+        /// MainViewModelで未登録カード検出時に残高を読み取り、この値を設定する。
+        /// カードがリーダーから離れる前に残高を保持しておくことで、
+        /// 後からCreateNewPurchaseLedgerAsyncで使用できる。
+        /// </remarks>
+        /// <param name="balance">カード残高（読み取り失敗時はnull）</param>
+        public void SetPreReadBalance(int? balance)
+        {
+            _preReadBalance = balance;
         }
 
         /// <summary>
@@ -641,8 +665,16 @@ namespace ICCardManager.ViewModels
         {
             try
             {
-                // カード残額を読み取る
-                var balance = await _cardReader.ReadBalanceAsync(cardIdm);
+                // Issue #381対応: 事前に読み取った残高を優先的に使用
+                // カードがリーダーから離れた後でも正しい残高で登録できる
+                int? balance = _preReadBalance;
+
+                // 事前読み取り残高がない場合のみ、カードから読み取りを試みる
+                // （手動で新規登録モードを開始した場合のフォールバック）
+                if (!balance.HasValue)
+                {
+                    balance = await _cardReader.ReadBalanceAsync(cardIdm);
+                }
 
                 // 残額が取得できた場合のみレコードを作成
                 if (balance.HasValue)
@@ -674,6 +706,11 @@ namespace ICCardManager.ViewModels
             {
                 // 残額読み取りエラーの場合は、カード登録自体は成功させる
                 // 新規購入レコードは後から手動で追加可能
+            }
+            finally
+            {
+                // 使用後は事前読み取り残高をクリア
+                _preReadBalance = null;
             }
         }
 

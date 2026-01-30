@@ -883,10 +883,22 @@ public partial class MainViewModel : ViewModelBase
                 break;
 
             case Views.Dialogs.CardTypeSelectionResult.IcCard:
+                // Issue #381対応: カードがリーダー上にある間に残高を読み取っておく
+                // ユーザーがフォームを入力している間にカードが離れても正しい残高で登録できる
+                int? preReadBalance = null;
+                try
+                {
+                    preReadBalance = await _cardReader.ReadBalanceAsync(idm);
+                }
+                catch
+                {
+                    // 残高読み取りエラーは無視（カード登録は続行可能）
+                }
+
                 // カード管理画面を開いて新規登録モードで開始
                 var cardDialog = App.Current.ServiceProvider.GetRequiredService<Views.Dialogs.CardManageDialog>();
                 cardDialog.Owner = System.Windows.Application.Current.MainWindow;
-                cardDialog.InitializeWithIdm(idm);
+                cardDialog.InitializeWithIdmAndBalance(idm, preReadBalance);
                 cardDialog.ShowDialog();
 
                 // ダイアログを閉じた後、貸出中カード一覧を更新
