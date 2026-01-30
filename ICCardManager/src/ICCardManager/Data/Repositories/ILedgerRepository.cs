@@ -49,6 +49,13 @@ namespace ICCardManager.Data.Repositories
         Task<bool> UpdateAsync(Ledger ledger);
 
         /// <summary>
+        /// 利用履歴を削除
+        /// </summary>
+        /// <param name="id">利用履歴ID</param>
+        /// <returns>削除成功の場合true</returns>
+        Task<bool> DeleteAsync(int id);
+
+        /// <summary>
         /// 利用履歴詳細を登録
         /// </summary>
         Task<bool> InsertDetailAsync(LedgerDetail detail);

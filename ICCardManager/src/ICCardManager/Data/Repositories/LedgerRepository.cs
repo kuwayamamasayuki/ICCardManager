@@ -177,6 +177,26 @@ WHERE id = @id";
         }
 
         /// <inheritdoc/>
+        public async Task<bool> DeleteAsync(int id)
+        {
+            var connection = _dbContext.GetConnection();
+
+            // 詳細レコードを先に削除
+            using var deleteDetailCommand = connection.CreateCommand();
+            deleteDetailCommand.CommandText = "DELETE FROM ledger_detail WHERE ledger_id = @id";
+            deleteDetailCommand.Parameters.AddWithValue("@id", id);
+            await deleteDetailCommand.ExecuteNonQueryAsync();
+
+            // メインレコードを削除
+            using var command = connection.CreateCommand();
+            command.CommandText = "DELETE FROM ledger WHERE id = @id";
+            command.Parameters.AddWithValue("@id", id);
+
+            var result = await command.ExecuteNonQueryAsync();
+            return result > 0;
+        }
+
+        /// <inheritdoc/>
         public async Task<bool> InsertDetailAsync(LedgerDetail detail)
         {
             var connection = _dbContext.GetConnection();
