@@ -128,6 +128,7 @@ namespace ICCardManager.Dtos
                 Amount = detail.Amount,
                 Balance = detail.Balance,
                 IsCharge = detail.IsCharge,
+                IsPointRedemption = detail.IsPointRedemption,
                 IsBus = detail.IsBus
             };
         }

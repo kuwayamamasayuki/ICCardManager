@@ -175,7 +175,8 @@ dotnet publish -c Release
 ```
 IF entry_station（乗車駅）が空欄 AND
    exit_station（降車駅）が空欄 AND
-   is_charge = false
+   is_charge = false AND
+   is_point_redemption = false
 THEN
    → バス利用（is_bus = true）
 ```
@@ -188,6 +189,8 @@ THEN
 | 乗継 | 鉄道（A駅～C駅） ※途中駅省略 |
 | 複数区間 | 鉄道（A駅～B駅、C駅～D駅） |
 | バス混在 | 鉄道（A駅～B駅）、バス（★） |
+| チャージ | 役務費によりチャージ |
+| ポイント還元 | ポイント還元 |
 
 ### 月次帳票（物品出納簿）
 - 利用日ごとに1行（チャージと利用は別行）

@@ -713,17 +713,22 @@ namespace ICCardManager.Infrastructure.CardReader
                 }
 
                 // 利用種別の判定
-                var isCharge = usageType == 0x02;
+                // 0x02: チャージ（現金入金）
+                // 0x0D: ポイント還元
+                // 0x14: オートチャージ（チャージとして扱う）
+                var isCharge = usageType == 0x02 || usageType == 0x14;
+                var isPointRedemption = usageType == 0x0D;
 
-                // バス利用の判定: 駅コードが両方0かつチャージでない場合
-                var isBus = !isCharge && entryStationCode == 0 && exitStationCode == 0;
+                // バス利用の判定: 駅コードが両方0かつチャージでもポイント還元でもない場合
+                var isBus = !isCharge && !isPointRedemption && entryStationCode == 0 && exitStationCode == 0;
 
                 // 金額の計算
                 int? amount = null;
                 if (previousBalance.HasValue)
                 {
-                    if (isCharge)
+                    if (isCharge || isPointRedemption)
                     {
+                        // チャージまたはポイント還元は残高が増加する
                         amount = balance - previousBalance.Value;
                     }
                     else
@@ -744,6 +749,7 @@ namespace ICCardManager.Infrastructure.CardReader
                     Amount = amount,
                     Balance = balance,
                     IsCharge = isCharge,
+                    IsPointRedemption = isPointRedemption,
                     IsBus = isBus,
                     RawBytes = rawBytes
                 };
