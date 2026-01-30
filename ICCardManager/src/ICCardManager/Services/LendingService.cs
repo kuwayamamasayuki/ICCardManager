@@ -522,7 +522,56 @@ namespace ICCardManager.Services
                 var date = dateGroup.Key;
                 var dailyDetails = dateGroup.ToList();
 
-                // チャージとそれ以外を分ける
+                // Issue #380: 残高不足パターンの検出とマージ処理
+                // パターン: 小額チャージ → 利用（残高0）の連続で、チャージ後残高 = 利用額の場合
+                // 例: 残高200円、運賃210円 → 10円チャージ → 210円支払い → 残高0円
+                var insufficientBalancePairs = DetectInsufficientBalancePattern(dailyDetails);
+
+                foreach (var pair in insufficientBalancePairs)
+                {
+                    var charge = pair.Charge;
+                    var usage = pair.Usage;
+                    var originalBalance = (charge.Balance ?? 0) - (charge.Amount ?? 0);
+                    var shortfall = charge.Amount ?? 0;
+                    var totalFare = usage.Amount ?? 0;
+
+                    _logger.LogDebug("LendingService: 残高不足パターン検出 - 元残高={OriginalBalance}, 不足額={Shortfall}, 運賃={Fare}",
+                        originalBalance, shortfall, totalFare);
+
+                    // マージしたLedgerを作成
+                    var summary = _summaryGenerator.Generate(new List<LedgerDetail> { usage });
+                    var note = SummaryGenerator.GetInsufficientBalanceNote(totalFare, shortfall);
+
+                    var mergedLedger = new Ledger
+                    {
+                        CardIdm = cardIdm,
+                        Date = usage.UseDate ?? date,
+                        Summary = summary,
+                        Income = 0,
+                        Expense = originalBalance,  // 実際にカードから支払った金額（元の残高）
+                        Balance = 0,
+                        StaffName = staffName,
+                        Note = note
+                    };
+
+                    var ledgerId = await _ledgerRepository.InsertAsync(mergedLedger);
+                    mergedLedger.Id = ledgerId;
+
+                    // 利用詳細のみを登録（チャージ詳細はスキップ）
+                    usage.LedgerId = ledgerId;
+                    await _ledgerRepository.InsertDetailAsync(usage);
+
+                    createdLedgers.Add(mergedLedger);
+
+                    // 処理済みの項目をdailyDetailsから除外
+                    dailyDetails.Remove(charge);
+                    dailyDetails.Remove(usage);
+
+                    // lastBalanceを更新
+                    lastBalance = 0;
+                }
+
+                // チャージとそれ以外を分ける（残高不足パターンで処理済みのものは除外されている）
                 var chargeDetails = dailyDetails.Where(d => d.IsCharge).ToList();
                 var usageDetails = dailyDetails.Where(d => !d.IsCharge).ToList();
 
@@ -645,6 +694,72 @@ namespace ICCardManager.Services
         {
             var lastLedger = await _ledgerRepository.GetLatestBeforeDateAsync(cardIdm, DateTime.Now.AddDays(1));
             return lastLedger?.Balance ?? 0;
+        }
+
+        /// <summary>
+        /// 残高不足パターンを検出
+        /// </summary>
+        /// <remarks>
+        /// Issue #380対応: 残高が不足して不足分だけを現金でチャージした場合のパターンを検出。
+        ///
+        /// パターン:
+        /// 1. 小額のチャージ（不足分）
+        /// 2. 直後の利用（運賃）で残高が0になる
+        /// 3. チャージ後の残高 = 利用額（運賃）
+        ///
+        /// 例: 残高200円、運賃210円の場合
+        /// - チャージ: 10円（残高 → 210円）
+        /// - 利用: 210円（残高 → 0円）
+        /// この場合、チャージ後残高(210) = 利用額(210) となる。
+        /// </remarks>
+        /// <param name="dailyDetails">日付グループ内の履歴詳細リスト</param>
+        /// <returns>検出されたペアのリスト</returns>
+        private static List<(LedgerDetail Charge, LedgerDetail Usage)> DetectInsufficientBalancePattern(
+            List<LedgerDetail> dailyDetails)
+        {
+            var result = new List<(LedgerDetail Charge, LedgerDetail Usage)>();
+            var processedIndices = new HashSet<int>();
+
+            for (int i = 0; i < dailyDetails.Count; i++)
+            {
+                if (processedIndices.Contains(i)) continue;
+
+                var current = dailyDetails[i];
+
+                // チャージレコードを探す
+                if (!current.IsCharge) continue;
+                if (!current.Balance.HasValue || !current.Amount.HasValue) continue;
+
+                // 対応する利用レコードを探す
+                for (int j = 0; j < dailyDetails.Count; j++)
+                {
+                    if (i == j || processedIndices.Contains(j)) continue;
+
+                    var candidate = dailyDetails[j];
+
+                    // 利用レコード（チャージでもポイント還元でもない）
+                    if (candidate.IsCharge || candidate.IsPointRedemption) continue;
+                    if (!candidate.Balance.HasValue || !candidate.Amount.HasValue) continue;
+
+                    // パターン検出条件:
+                    // 1. チャージ後の残高 = 利用額（運賃）
+                    // 2. 利用後の残高 = 0
+                    var chargeAfterBalance = current.Balance.Value;
+                    var usageAmount = candidate.Amount.Value;
+                    var usageAfterBalance = candidate.Balance.Value;
+
+                    if (chargeAfterBalance == usageAmount && usageAfterBalance == 0)
+                    {
+                        // パターン検出！
+                        result.Add((current, candidate));
+                        processedIndices.Add(i);
+                        processedIndices.Add(j);
+                        break;
+                    }
+                }
+            }
+
+            return result;
         }
 
         /// <summary>
