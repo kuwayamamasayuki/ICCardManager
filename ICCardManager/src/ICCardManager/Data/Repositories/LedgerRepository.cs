@@ -393,7 +393,7 @@ FROM ledger
        (SELECT COUNT(*) FROM ledger_detail WHERE ledger_id = l.id) as detail_count
 FROM ledger l
 {whereClause.Replace("card_idm", "l.card_idm").Replace("date ", "l.date ")}
-ORDER BY l.date DESC, l.id DESC
+ORDER BY l.date ASC, l.id ASC
 LIMIT @pageSize OFFSET @offset";
 
             if (cardIdm != null)
@@ -428,7 +428,7 @@ LIMIT @pageSize OFFSET @offset";
        bus_stops, amount, balance, is_charge, is_point_redemption, is_bus
 FROM ledger_detail
 WHERE ledger_id = @ledgerId
-ORDER BY use_date DESC";
+ORDER BY use_date ASC";
 
             command.Parameters.AddWithValue("@ledgerId", ledgerId);
 
