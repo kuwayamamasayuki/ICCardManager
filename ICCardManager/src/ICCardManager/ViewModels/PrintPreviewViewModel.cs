@@ -229,6 +229,7 @@ public partial class PrintPreviewViewModel : ViewModelBase
             }
             catch (Exception ex)
             {
+                _ = ex; // 警告抑制（DEBUGビルドでのみ使用）
                 // ドキュメントがまだビジュアルツリーにアタッチされていない場合など
                 // ページ数の取得に失敗することがある
 #if DEBUG

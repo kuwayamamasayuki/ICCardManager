@@ -732,6 +732,7 @@ namespace ICCardManager.Infrastructure.CardReader
             }
             catch (Exception ex)
             {
+                _ = ex; // 警告抑制（DEBUGビルドでのみ使用）
 #if DEBUG
                 System.Diagnostics.Debug.WriteLine($"再接続試行エラー: {ex.Message}");
 #endif
@@ -846,6 +847,7 @@ namespace ICCardManager.Infrastructure.CardReader
             }
             catch (Exception ex)
             {
+                _ = ex; // 警告抑制（DEBUGビルドでのみ使用）
 #if DEBUG
                 System.Diagnostics.Debug.WriteLine($"Pollingコマンドエラー: {ex.Message}");
 #endif
@@ -937,6 +939,7 @@ namespace ICCardManager.Infrastructure.CardReader
             }
             catch (Exception ex)
             {
+                _ = ex; // 警告抑制（DEBUGビルドでのみ使用）
 #if DEBUG
                 System.Diagnostics.Debug.WriteLine($"ブロック{blockIndex}読み取り失敗: {ex.Message}");
 #endif
@@ -1055,6 +1058,7 @@ namespace ICCardManager.Infrastructure.CardReader
             }
             catch (Exception ex)
             {
+                _ = ex; // 警告抑制（DEBUGビルドでのみ使用）
 #if DEBUG
                 System.Diagnostics.Debug.WriteLine($"履歴データのパースエラー: {ex.Message}");
 #endif

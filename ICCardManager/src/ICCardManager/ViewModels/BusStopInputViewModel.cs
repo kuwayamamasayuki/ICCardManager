@@ -163,6 +163,7 @@ public partial class BusStopInputViewModel : ViewModelBase
         }
         catch (Exception ex)
         {
+            _ = ex; // 警告抑制（DEBUGビルドでのみ使用）
 #if DEBUG
             System.Diagnostics.Debug.WriteLine($"[BusStopInput] サジェスト候補の読み込みに失敗: {ex.Message}");
 #endif
