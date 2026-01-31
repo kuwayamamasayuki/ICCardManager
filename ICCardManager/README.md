@@ -61,26 +61,16 @@
 
 ### インストール手順
 
-1. 配布されたZIPファイルを任意のフォルダに展開
-   ```
-   推奨: C:\ICCardManager\ または D:\ICCardManager\
-   ```
+1. 配布されたインストーラー（`ICCardManager_Setup_x.x.x.exe`）を実行
+2. 画面の指示に従ってインストール
+3. インストール完了後、デスクトップのショートカットまたはスタートメニューからアプリを起動
 
-2. フォルダ構成を確認
-   ```
-   ICCardManager/
-   ├── ICCardManager.exe      # メインアプリケーション
-   └── Resources/
-       ├── Sounds/            # 通知音
-       └── Templates/         # 帳票テンプレート
-   ```
-
-3. `ICCardManager.exe` を実行
+> **Note**: インストール先はデフォルトで `C:\Program Files\ICCardManager\` になります。
 
 ### 初回起動時の注意
 
-- **Windows SmartScreen警告**: 「詳細情報」→「実行」をクリック
-- **データベース**: `iccard.db` が自動作成されます
+- **Windows SmartScreen警告**: インストーラー実行時に「詳細情報」→「実行」をクリック
+- **データベース**: 初回起動時に `C:\ProgramData\ICCardManager\iccard.db` が自動作成されます
 
 ### 初期設定
 
@@ -251,8 +241,8 @@ dotnet test --filter "FullyQualifiedName~SummaryGeneratorTests"
 <details>
 <summary>アプリケーションが起動しない</summary>
 
-1. `Resources` フォルダが `ICCardManager.exe` と同じ階層にあるか確認
-2. アンチウイルスソフトの除外設定に追加
+1. インストーラーを使用して再インストール
+2. アンチウイルスソフトの除外設定にインストールフォルダを追加
 3. 右クリック → 「管理者として実行」を試行
 
 </details>
@@ -260,8 +250,17 @@ dotnet test --filter "FullyQualifiedName~SummaryGeneratorTests"
 <details>
 <summary>帳票出力でエラーが発生する</summary>
 
-1. `Resources/Templates/物品出納簿テンプレート.xlsx` が存在するか確認
+1. インストールフォルダ内の `Resources/Templates/物品出納簿テンプレート.xlsx` が存在するか確認
 2. 出力先フォルダに書き込み権限があるか確認
+
+</details>
+
+<details>
+<summary>アンインストール方法</summary>
+
+1. 「設定」→「アプリ」→「交通系ICカード管理システム」を選択
+2. 「アンインストール」をクリック
+3. アンインストール完了時に、ユーザーデータ・バックアップ・ログの削除を選択可能
 
 </details>
 
