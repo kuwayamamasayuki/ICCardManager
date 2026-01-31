@@ -597,6 +597,9 @@ public partial class MainViewModel : ViewModelBase
             _currentStaffIdm = idm;
             _currentStaffName = staff.Name;
 
+            // 認識音を再生（Issue #411）
+            _soundPlayer.Play(SoundType.Lend);
+
             // メイン画面は変更せず、ポップアップ通知のみ表示（Issue #186）
             // 「職員証をタッチしてください」のメッセージはクリアする
             SetInternalState(AppState.WaitingForIcCard, clearStatusMessage: true);
