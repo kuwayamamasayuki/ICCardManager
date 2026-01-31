@@ -112,6 +112,7 @@ namespace ICCardManager.Infrastructure.Logging
             }
             catch (Exception ex)
             {
+                _ = ex; // 警告抑制（DEBUGビルドでのみ使用）
 #if DEBUG
                 System.Diagnostics.Debug.WriteLine($"[FileLogger] Failed to write log: {ex.Message}");
 #endif
@@ -192,6 +193,7 @@ namespace ICCardManager.Infrastructure.Logging
             }
             catch (Exception ex)
             {
+                _ = ex; // 警告抑制（DEBUGビルドでのみ使用）
 #if DEBUG
                 System.Diagnostics.Debug.WriteLine($"[FileLogger] Failed to cleanup old logs: {ex.Message}");
 #endif
@@ -228,6 +230,7 @@ namespace ICCardManager.Infrastructure.Logging
             }
             catch (Exception ex)
             {
+                _ = ex; // 警告抑制（DEBUGビルドでのみ使用）
                 // 権限設定に失敗してもディレクトリ作成は試みる
 #if DEBUG
                 System.Diagnostics.Debug.WriteLine($"[FileLogger] ディレクトリ権限設定エラー: {ex.Message}");

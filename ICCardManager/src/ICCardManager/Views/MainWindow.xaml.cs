@@ -56,6 +56,7 @@ namespace ICCardManager.Views
             }
             catch (Exception ex)
             {
+                _ = ex; // 警告抑制（DEBUGビルドでのみ使用）
                 // 終了時のエラーは警告のみ（アプリ終了を妨げない）
 #if DEBUG
                 System.Diagnostics.Debug.WriteLine($"[MainWindow] 終了時エラー: {ex.Message}");
@@ -99,6 +100,7 @@ namespace ICCardManager.Views
             }
             catch (Exception ex)
             {
+                _ = ex; // 警告抑制（DEBUGビルドでのみ使用）
 #if DEBUG
                 System.Diagnostics.Debug.WriteLine($"[MainWindow] ウィンドウ位置の保存に失敗: {ex.Message}");
 #endif
@@ -155,6 +157,7 @@ namespace ICCardManager.Views
             }
             catch (Exception ex)
             {
+                _ = ex; // 警告抑制（DEBUGビルドでのみ使用）
 #if DEBUG
                 System.Diagnostics.Debug.WriteLine($"[MainWindow] ウィンドウ位置の復元に失敗: {ex.Message}");
 #endif

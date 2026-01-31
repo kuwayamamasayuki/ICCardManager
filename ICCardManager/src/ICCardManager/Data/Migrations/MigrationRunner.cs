@@ -346,6 +346,7 @@ VALUES (@operator_idm, @operator_name, @target_table, @target_id, @action, @afte
             }
             catch (Exception ex)
             {
+                _ = ex; // 警告抑制（DEBUGビルドでのみ使用）
                 // ログ記録の失敗はマイグレーション自体には影響させない
 #if DEBUG
                 System.Diagnostics.Debug.WriteLine($"[Migration] Failed to log migration action: {ex.Message}");

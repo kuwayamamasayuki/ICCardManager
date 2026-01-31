@@ -100,6 +100,7 @@ namespace ICCardManager.Services
                 }
                 catch (Exception ex)
                 {
+                    _ = ex; // 警告抑制（DEBUGビルドでのみ使用）
 #if DEBUG
                     System.Diagnostics.Debug.WriteLine($"駅マスタ読み込みエラー: {ex.Message}");
 #endif

@@ -93,6 +93,7 @@ namespace ICCardManager.Data
             }
             catch (Exception ex)
             {
+                _ = ex; // 警告抑制（DEBUGビルドでのみ使用）
                 // 権限設定に失敗してもディレクトリ作成は試みる
 #if DEBUG
                 System.Diagnostics.Debug.WriteLine($"[DbContext] ディレクトリ権限設定エラー: {ex.Message}");
@@ -238,6 +239,7 @@ namespace ICCardManager.Data
             }
             catch (Exception ex)
             {
+                _ = ex; // 警告抑制（DEBUGビルドでのみ使用）
                 // アクセス権限の設定に失敗してもアプリケーションは続行
 #if DEBUG
                 System.Diagnostics.Debug.WriteLine($"[DbContext] アクセス権限の設定に失敗: {ex.Message}");
