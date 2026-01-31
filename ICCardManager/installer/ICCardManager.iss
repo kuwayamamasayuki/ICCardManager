@@ -89,20 +89,79 @@ Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChang
 
 [Code]
 // アンインストール時にユーザーデータを削除するか確認
+// TaskDialogMsgBoxを使用した3択ダイアログ
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 var
   AppDataPath: string;
+  BackupPath: string;
+  LogsPath: string;
+  UserDataExists, BackupExists, LogsExists: Boolean;
+  ButtonResult: Integer;
+  Message: string;
+  ButtonLabels: TArrayOfString;
 begin
   if CurUninstallStep = usPostUninstall then
   begin
-    AppDataPath := ExpandConstant('{localappdata}\ICCardManager');
-    if DirExists(AppDataPath) then
-    begin
-      if MsgBox('ユーザーデータ（データベース、設定ファイル）を削除しますか？' + #13#10 +
-                'キャンセルするとデータは残ります。', mbConfirmation, MB_YESNO) = IDYES then
-      begin
-        DelTree(AppDataPath, True, True, True);
-      end;
+    // CommonApplicationData（C:\ProgramData）を使用
+    AppDataPath := ExpandConstant('{commonappdata}\ICCardManager');
+    BackupPath := AppDataPath + '\backup';
+    LogsPath := AppDataPath + '\Logs';
+
+    // 各ディレクトリの存在確認
+    UserDataExists := DirExists(AppDataPath);
+    BackupExists := DirExists(BackupPath);
+    LogsExists := DirExists(LogsPath);
+
+    // データが存在しない場合は何もしない
+    if not UserDataExists then
+      Exit;
+
+    // メッセージを構築
+    Message := '以下のデータが残っています：' + #13#10 + #13#10 +
+               '・ユーザーデータ（データベース、設定）' + #13#10 +
+               '  ' + AppDataPath + #13#10;
+
+    if BackupExists then
+      Message := Message + #13#10 + '・バックアップファイル' + #13#10 +
+                 '  ' + BackupPath + #13#10;
+
+    if LogsExists then
+      Message := Message + #13#10 + '・ログファイル' + #13#10 +
+                 '  ' + LogsPath + #13#10;
+
+    Message := Message + #13#10 + '削除方法を選択してください。';
+
+    // ボタンラベルを設定
+    SetArrayLength(ButtonLabels, 3);
+    ButtonLabels[0] := 'すべて削除';
+    ButtonLabels[1] := 'データのみ残す';
+    ButtonLabels[2] := '何も削除しない';
+
+    // TaskDialogMsgBoxで3択ダイアログを表示
+    // IDYES=すべて削除、IDNO=データのみ残す、IDCANCEL=何も削除しない
+    ButtonResult := TaskDialogMsgBox(
+      'データの削除',
+      Message,
+      mbConfirmation,
+      MB_YESNOCANCEL,
+      ButtonLabels,
+      0);
+
+    case ButtonResult of
+      IDYES:
+        begin
+          // すべて削除
+          DelTree(AppDataPath, True, True, True);
+        end;
+      IDNO:
+        begin
+          // バックアップとログのみ削除（ユーザーデータは残す）
+          if BackupExists then
+            DelTree(BackupPath, True, True, True);
+          if LogsExists then
+            DelTree(LogsPath, True, True, True);
+        end;
+      // IDCANCEL: 何も削除しない
     end;
   end;
 end;
