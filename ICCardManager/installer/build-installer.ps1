@@ -1,9 +1,10 @@
 ﻿# ICCardManager インストーラービルドスクリプト
 # 使用方法: .\build-installer.ps1 [-SkipBuild] [-Version "1.0.0"]
+# バージョンを指定しない場合、csprojファイルから自動的に読み取ります
 
 param(
     [switch]$SkipBuild,
-    [string]$Version = "1.0.0"
+    [string]$Version = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -15,6 +16,22 @@ $SrcDir = Join-Path $ProjectRoot "src\ICCardManager"
 $PublishDir = Join-Path $ProjectRoot "publish"
 $InstallerScript = Join-Path $ScriptDir "ICCardManager.iss"
 $OutputDir = Join-Path $ScriptDir "output"
+$CsprojPath = Join-Path $SrcDir "ICCardManager.csproj"
+
+# バージョンが指定されていない場合、csprojから読み取る
+if ([string]::IsNullOrEmpty($Version)) {
+    if (Test-Path $CsprojPath) {
+        [xml]$csproj = Get-Content $CsprojPath
+        $Version = $csproj.Project.PropertyGroup.Version | Where-Object { $_ } | Select-Object -First 1
+        if ([string]::IsNullOrEmpty($Version)) {
+            $Version = "1.0.0"
+            Write-Host "警告: csprojからバージョンを読み取れませんでした。デフォルト値を使用します: $Version" -ForegroundColor Yellow
+        }
+    } else {
+        $Version = "1.0.0"
+        Write-Host "警告: csprojファイルが見つかりません。デフォルト値を使用します: $Version" -ForegroundColor Yellow
+    }
+}
 
 # Inno Setup のパス（標準インストール場所）
 $InnoSetupPaths = @(
@@ -30,6 +47,8 @@ $InnoSetupPaths = @(
 Write-Host "======================================" -ForegroundColor Cyan
 Write-Host " ICCardManager インストーラービルド" -ForegroundColor Cyan
 Write-Host "======================================" -ForegroundColor Cyan
+Write-Host ""
+Write-Host "バージョン: $Version" -ForegroundColor Cyan
 Write-Host ""
 
 # Step 1: Inno Setup の確認
