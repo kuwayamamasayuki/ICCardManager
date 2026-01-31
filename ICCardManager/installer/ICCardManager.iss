@@ -1,9 +1,13 @@
 ; ICCardManager インストーラースクリプト
 ; Inno Setup 6.x 用
+; バージョンはコマンドラインから /DMyAppVersion=x.y.z で指定可能
 
 #define MyAppName "交通系ICカード管理システム"
 #define MyAppNameEn "ICCardManager"
-#define MyAppVersion "1.0.0"
+; コマンドラインでバージョンが指定されていない場合のデフォルト値
+#ifndef MyAppVersion
+  #define MyAppVersion "1.0.0"
+#endif
 #define MyAppPublisher "Your Organization"
 #define MyAppExeName "ICCardManager.exe"
 #define MyAppDescription "交通系ICカードの貸出管理システム"
