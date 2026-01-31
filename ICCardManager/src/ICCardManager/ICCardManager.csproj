@@ -12,9 +12,9 @@
     <PlatformTarget>x86</PlatformTarget>
 
     <!-- バージョン情報 -->
-    <Version>1.0.6</Version>
-    <FileVersion>1.0.6.0</FileVersion>
-    <AssemblyVersion>1.0.6.0</AssemblyVersion>
+    <Version>1.0.7</Version>
+    <FileVersion>1.0.7.0</FileVersion>
+    <AssemblyVersion>1.0.7.0</AssemblyVersion>
     <Company>Your Organization</Company>
     <Product>交通系ICカード管理システム</Product>
     <Description>交通系ICカードの貸出管理システム</Description>
