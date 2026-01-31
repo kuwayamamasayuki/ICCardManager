@@ -2,14 +2,14 @@
 
 ## 概要
 
-本ドキュメントでは、ICCardManager の配布用パッケージの作成手順と、エンドユーザーへの配布方法について説明します。
+本ドキュメントでは、ICCardManager の配布用インストーラーの作成手順と、エンドユーザーへの配布方法について説明します。
 
 ## ビルド環境要件
 
 ### 開発マシン
 - Windows 10/11 (64-bit)
 - .NET SDK（.NET Framework 4.8対応版）または Visual Studio 2022
-- Visual Studio 2022 または VS Code（任意）
+- [Inno Setup 6](https://jrsoftware.org/isinfo.php)（インストーラー作成用）
 
 ### ビルドコマンド
 
@@ -25,7 +25,7 @@ dotnet publish -c Release
 
 | オプション | 説明 |
 |-----------|------|
-| `-c Release` | リリース構成でビルド（最適化有効） |
+| `-c Release` | リリース構成でビルド（最適化有効、PDBなし） |
 
 ## 出力ファイル構成
 
@@ -34,8 +34,10 @@ dotnet publish -c Release
 ```
 publish/
 ├── ICCardManager.exe          # メイン実行ファイル
-├── ICCardManager.pdb          # デバッグシンボル（配布時は任意）
 ├── *.dll                      # 依存ライブラリ
+├── appsettings.json           # 設定ファイル
+├── x86/                       # 32bit ネイティブDLL
+│   └── SQLite.Interop.dll
 └── Resources/
     ├── Sounds/
     │   ├── error.wav          # エラー音
@@ -53,43 +55,62 @@ publish/
 | ICCardManager.exe | 約 1 MB |
 | 依存DLL合計 | 約 15-20 MB |
 | Resources/ 合計 | 約 100 KB |
+| インストーラー | 約 10 MB |
 
 > **注記**: .NET Framework 4.8はWindows 10/11にプリインストールされているため、
 > 配布先のPCに追加のランタイムインストールは通常不要です。
 
-## 配布パッケージの作成
+## インストーラーの作成
 
-### 手順
+### 前提条件
 
-1. **ビルドの実行**
-   ```bash
-   dotnet publish -c Release
-   ```
+- [Inno Setup 6](https://jrsoftware.org/isinfo.php) がインストールされていること
+- Inno Setup のパスが環境変数に登録されていること（通常はインストール時に自動設定）
 
-2. **出力ディレクトリの確認**
-   ```
-   bin/Release/net48/publish/
-   ```
+### 作成手順
 
-3. **配布用ZIPの作成**
-   - `publish` フォルダの内容をZIPに圧縮
-   - ファイル名例: `ICCardManager_v1.0.0.zip`
+#### PowerShellスクリプトを使用（推奨）
 
-4. **配布物の構成**
-   ```
-   ICCardManager_v1.0.0.zip
-   ├── ICCardManager.exe
-   └── Resources/
-       ├── Sounds/
-       │   ├── error.wav
-       │   ├── lend.wav
-       │   ├── return.wav
-       │   └── warning.wav
-       └── Templates/
-           └── 物品出納簿テンプレート.xlsx
-   ```
+```powershell
+# installerディレクトリに移動
+cd installer
 
-> **注記**: `ICCardManager.pdb` は通常配布には含めません（デバッグ用途のみ）。
+# インストーラーをビルド（アプリケーションのビルドも含む）
+.\build-installer.ps1
+
+# または、ビルド済みのpublishフォルダを使用する場合
+.\build-installer.ps1 -SkipBuild
+
+# バージョンを明示的に指定する場合
+.\build-installer.ps1 -Version "1.0.7"
+```
+
+#### バッチファイルを使用
+
+```cmd
+cd installer
+build-installer.bat
+```
+
+### 出力ファイル
+
+```
+installer/output/ICCardManager_Setup_1.0.7.exe
+```
+
+> **注記**: バージョン番号は `src/ICCardManager/ICCardManager.csproj` の `<Version>` タグから自動取得されます。
+
+### インストーラーの構成内容
+
+インストーラーには以下が含まれます：
+
+| 内容 | 説明 |
+|------|------|
+| アプリケーション本体 | ICCardManager.exe と依存DLL |
+| サウンドファイル | Resources/Sounds/ 配下のWAVファイル |
+| テンプレートファイル | Resources/Templates/物品出納簿テンプレート.xlsx |
+| ドキュメント | ユーザーマニュアル、管理者マニュアル（md/docx形式） |
+| アイコン | アプリケーションアイコン（app.ico） |
 
 ## インストール手順（エンドユーザー向け）
 
@@ -98,58 +119,67 @@ publish/
 - **OS**: Windows 10/11 (64-bit)
 - **ICカードリーダー**: Sony PaSoRi（RC-S380等）
 - **.NET Framework**: 4.8（Windows 10/11にプリインストール済み）
+- **ストレージ**: 100MB以上の空き容量
 
 ### インストール手順
 
-1. 配布されたZIPファイルを任意のフォルダに展開
-   - 推奨: `C:\ICCardManager\` または `D:\ICCardManager\`
+1. 配布されたインストーラー（`ICCardManager_Setup_x.x.x.exe`）を実行
+2. 「WindowsによってPCが保護されました」と表示された場合は「詳細情報」→「実行」をクリック
+3. 画面の指示に従ってインストール
+4. インストール完了後、デスクトップのショートカットまたはスタートメニューからアプリを起動
 
-2. フォルダ構成を確認
-   ```
-   ICCardManager/
-   ├── ICCardManager.exe
-   └── Resources/
-       ├── Sounds/
-       └── Templates/
-   ```
+### インストール先フォルダ
 
-3. `ICCardManager.exe` を実行
+| 種類 | パス |
+|------|------|
+| プログラム | `C:\Program Files\ICCardManager\` |
+| データベース・設定 | `C:\ProgramData\ICCardManager\` |
+| バックアップ | `C:\ProgramData\ICCardManager\backup\` |
+| ログ | `C:\ProgramData\ICCardManager\Logs\` |
 
 ### 初回起動時の注意
 
-- **Windows SmartScreen警告**: 初回起動時に「WindowsによってPCが保護されました」と表示される場合があります
-  - 「詳細情報」→「実行」をクリックして起動
+- **データベース**: 初回起動時に `C:\ProgramData\ICCardManager\iccard.db` が自動作成されます
 
-- **データベース**: 初回起動時に自動作成されます
-  - 場所: 実行ファイルと同じフォルダ内の `iccard.db`
+### 作成されるショートカット
 
-### ショートカットの作成（任意）
+インストーラーにより以下のショートカットが自動作成されます：
 
-デスクトップやスタートメニューにショートカットを作成する場合：
+- **スタートメニュー**: 「交通系ICカード管理システム」グループ
+  - アプリケーション本体
+  - ドキュメントフォルダ
+  - アンインストール
+- **デスクトップ**: アプリケーションショートカット（オプション）
 
-1. `ICCardManager.exe` を右クリック
-2. 「送る」→「デスクトップ（ショートカットを作成）」
+## アンインストール
+
+### 手順
+
+1. 「設定」→「アプリ」→「交通系ICカード管理システム」を選択
+2. 「アンインストール」をクリック
+3. アンインストール完了時にデータ削除オプションが表示されます
+   - **すべて削除**: データベース、バックアップ、ログをすべて削除
+   - **データのみ残す**: バックアップとログは削除、データベースは残す
+   - **何も削除しない**: ユーザーデータをすべて残す
+
+> **注記**: アンインストール後に再インストールする場合、「何も削除しない」を選択すると既存のデータを引き継げます。
 
 ## トラブルシューティング
 
 ### 起動しない場合
 
-1. **Resourcesフォルダの確認**
-   - `ICCardManager.exe` と同じ階層に `Resources` フォルダがあるか確認
-   - 音声ファイル（4つのWAVファイル）が存在するか確認
-
-2. **アンチウイルスソフトの確認**
+1. **アンチウイルスソフトの確認**
    - 一部のアンチウイルスソフトが誤検知する場合があります
-   - 除外設定に追加してください
+   - 除外設定に `C:\Program Files\ICCardManager\` を追加してください
 
-3. **管理者権限での実行**
+2. **管理者権限での実行**
    - ICカードリーダーへのアクセスに管理者権限が必要な場合があります
    - 右クリック→「管理者として実行」を試してください
 
 ### 帳票出力でエラーが発生する場合
 
 1. **テンプレートファイルの確認**
-   - `Resources/Templates/物品出納簿テンプレート.xlsx` が存在するか確認
+   - `C:\Program Files\ICCardManager\Resources\Templates\物品出納簿テンプレート.xlsx` が存在するか確認
 
 2. **出力先フォルダのアクセス権限**
    - 出力先フォルダに書き込み権限があるか確認
@@ -172,6 +202,15 @@ publish/
 - **Y**: マイナーバージョン（機能追加・改善）
 - **Z**: パッチバージョン（バグ修正）
 
+### バージョン管理ファイル
+
+バージョン番号は以下のファイルで一元管理されます：
+
+| ファイル | 用途 |
+|----------|------|
+| `src/ICCardManager/ICCardManager.csproj` | アプリケーションバージョン（Version, FileVersion, AssemblyVersion） |
+| `installer/ICCardManager.iss` | インストーラーバージョン（csprojから自動取得） |
+
 ### 更新履歴の管理
 
 リリースごとに以下を記録:
@@ -180,12 +219,14 @@ publish/
 - 変更内容の概要
 - 既知の問題（あれば）
 
+更新履歴は `README.md` の「更新履歴」セクションに記載します。
+
 ## セキュリティに関する注意
 
 - データベース（`iccard.db`）には個人情報（職員名、ICカードIDm）が含まれます
-- 適切なアクセス制御を行ってください
+- `C:\ProgramData\ICCardManager\` フォルダへの適切なアクセス制御を行ってください
 - バックアップファイルも同様に管理してください
 
 ---
 
-*このドキュメントは ICCardManager Issue #30 の一部として作成されました。*
+*このドキュメントは ICCardManager Issue #30 の一部として作成され、Issue #421 でインストーラー対応に更新されました。*
