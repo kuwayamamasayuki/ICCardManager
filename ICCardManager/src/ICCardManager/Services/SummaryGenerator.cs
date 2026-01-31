@@ -570,6 +570,21 @@ namespace ICCardManager.Services
         }
 
         /// <summary>
+        /// 残高不足時の備考テキストを生成
+        /// </summary>
+        /// <remarks>
+        /// Issue #380対応: 残高不足で不足分を現金でチャージした場合の備考テキスト。
+        /// 例: 運賃210円に対し残高200円の場合、不足額10円を現金で支払い。
+        /// </remarks>
+        /// <param name="totalFare">支払総額（運賃）</param>
+        /// <param name="shortfall">不足額（現金支払額）</param>
+        /// <returns>備考テキスト</returns>
+        public static string GetInsufficientBalanceNote(int totalFare, int shortfall)
+        {
+            return $"支払額{totalFare}円のうち不足額{shortfall}円は現金で支払（旅費支給）";
+        }
+
+        /// <summary>
         /// 前年度繰越の摘要を生成
         /// </summary>
         public static string GetCarryoverFromPreviousYearSummary()

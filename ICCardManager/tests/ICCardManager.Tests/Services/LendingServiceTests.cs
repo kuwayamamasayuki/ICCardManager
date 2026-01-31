@@ -1198,4 +1198,206 @@ public class LendingServiceTests : IDisposable
     }
 
     #endregion
+
+    #region 残高不足パターン検出テスト（Issue #380）
+
+    /// <summary>
+    /// 残高不足パターンが正しく検出されることを確認
+    /// </summary>
+    /// <remarks>
+    /// シナリオ: 残高200円、運賃210円
+    /// - チャージ: 10円（残高 → 210円）
+    /// - 利用: 210円（残高 → 0円）
+    /// → パターン検出条件: charge.Balance(210) == usage.Amount(210) かつ usage.Balance(0) == 0
+    /// </remarks>
+    [Fact]
+    public void DetectInsufficientBalancePattern_ValidPattern_ReturnsMatchedPair()
+    {
+        // Arrange
+        var today = DateTime.Today;
+        var details = new List<LedgerDetail>
+        {
+            new()
+            {
+                UseDate = today,
+                IsCharge = true,
+                Amount = 10,       // 不足分のチャージ
+                Balance = 210      // チャージ後の残高（= 運賃と同額）
+            },
+            new()
+            {
+                UseDate = today,
+                IsCharge = false,
+                EntryStation = "博多",
+                ExitStation = "天神",
+                Amount = 210,      // 運賃
+                Balance = 0        // 利用後の残高
+            }
+        };
+
+        // Act
+        var result = LendingService.DetectInsufficientBalancePattern(details);
+
+        // Assert
+        result.Should().HaveCount(1);
+        result[0].Charge.Amount.Should().Be(10);
+        result[0].Usage.Amount.Should().Be(210);
+    }
+
+    /// <summary>
+    /// 通常のチャージ（不足分ではない）はパターンとして検出されないことを確認
+    /// </summary>
+    [Fact]
+    public void DetectInsufficientBalancePattern_RegularCharge_ReturnsEmpty()
+    {
+        // Arrange - 通常のチャージ（3000円）と利用（260円）
+        var today = DateTime.Today;
+        var details = new List<LedgerDetail>
+        {
+            new()
+            {
+                UseDate = today,
+                IsCharge = true,
+                Amount = 3000,
+                Balance = 5000     // チャージ後の残高（運賃とは異なる）
+            },
+            new()
+            {
+                UseDate = today,
+                IsCharge = false,
+                EntryStation = "博多",
+                ExitStation = "天神",
+                Amount = 260,
+                Balance = 4740     // 利用後の残高（0ではない）
+            }
+        };
+
+        // Act
+        var result = LendingService.DetectInsufficientBalancePattern(details);
+
+        // Assert
+        result.Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// 利用後の残高が0でない場合はパターンとして検出されないことを確認
+    /// </summary>
+    [Fact]
+    public void DetectInsufficientBalancePattern_NonZeroBalance_ReturnsEmpty()
+    {
+        // Arrange - チャージ後残高と運賃は一致するが、利用後残高が0ではない
+        var today = DateTime.Today;
+        var details = new List<LedgerDetail>
+        {
+            new()
+            {
+                UseDate = today,
+                IsCharge = true,
+                Amount = 10,
+                Balance = 210
+            },
+            new()
+            {
+                UseDate = today,
+                IsCharge = false,
+                EntryStation = "博多",
+                ExitStation = "天神",
+                Amount = 210,
+                Balance = 100      // 0ではない（別のチャージがあった等）
+            }
+        };
+
+        // Act
+        var result = LendingService.DetectInsufficientBalancePattern(details);
+
+        // Assert
+        result.Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// チャージ後残高と運賃が一致しない場合はパターンとして検出されないことを確認
+    /// </summary>
+    [Fact]
+    public void DetectInsufficientBalancePattern_MismatchedAmount_ReturnsEmpty()
+    {
+        // Arrange - チャージ後残高(200) != 運賃(210)
+        var today = DateTime.Today;
+        var details = new List<LedgerDetail>
+        {
+            new()
+            {
+                UseDate = today,
+                IsCharge = true,
+                Amount = 10,
+                Balance = 200      // 運賃(210)と一致しない
+            },
+            new()
+            {
+                UseDate = today,
+                IsCharge = false,
+                EntryStation = "博多",
+                ExitStation = "天神",
+                Amount = 210,
+                Balance = 0
+            }
+        };
+
+        // Act
+        var result = LendingService.DetectInsufficientBalancePattern(details);
+
+        // Assert
+        result.Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// 空のリストを渡した場合、空の結果が返ることを確認
+    /// </summary>
+    [Fact]
+    public void DetectInsufficientBalancePattern_EmptyList_ReturnsEmpty()
+    {
+        // Arrange
+        var details = new List<LedgerDetail>();
+
+        // Act
+        var result = LendingService.DetectInsufficientBalancePattern(details);
+
+        // Assert
+        result.Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// ポイント還元はパターン検出から除外されることを確認
+    /// </summary>
+    [Fact]
+    public void DetectInsufficientBalancePattern_PointRedemption_NotMatched()
+    {
+        // Arrange - ポイント還元は利用として扱わない
+        var today = DateTime.Today;
+        var details = new List<LedgerDetail>
+        {
+            new()
+            {
+                UseDate = today,
+                IsCharge = true,
+                Amount = 10,
+                Balance = 210
+            },
+            new()
+            {
+                UseDate = today,
+                IsCharge = false,
+                IsPointRedemption = true,  // ポイント還元
+                Amount = 210,
+                Balance = 0
+            }
+        };
+
+        // Act
+        var result = LendingService.DetectInsufficientBalancePattern(details);
+
+        // Assert
+        result.Should().BeEmpty();
+    }
+
+    #endregion
 }
