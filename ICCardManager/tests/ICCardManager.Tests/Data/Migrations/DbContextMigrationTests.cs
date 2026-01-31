@@ -68,6 +68,7 @@ public class DbContextMigrationTests : IDisposable
         var connection = _dbContext.GetConnection();
 
         // 既存DBの状態を作成（マイグレーション前の形式）
+        // Note: レガシーDBでも ledger_detail と operation_log は存在していた
         using (var cmd = connection.CreateCommand())
         {
             cmd.CommandText = @"CREATE TABLE staff (
@@ -86,6 +87,28 @@ CREATE TABLE ledger (
     summary TEXT NOT NULL,
     balance INTEGER NOT NULL
 );
+CREATE TABLE ledger_detail (
+    ledger_id INTEGER,
+    use_date TEXT,
+    entry_station TEXT,
+    exit_station TEXT,
+    bus_stops TEXT,
+    amount INTEGER,
+    balance INTEGER,
+    is_charge INTEGER DEFAULT 0,
+    is_bus INTEGER DEFAULT 0
+);
+CREATE TABLE operation_log (
+    id INTEGER PRIMARY KEY,
+    timestamp TEXT,
+    operator_idm TEXT NOT NULL,
+    operator_name TEXT NOT NULL,
+    target_table TEXT,
+    target_id TEXT,
+    action TEXT,
+    before_data TEXT,
+    after_data TEXT
+);
 CREATE TABLE settings (
     key TEXT PRIMARY KEY,
     value TEXT
@@ -97,10 +120,11 @@ CREATE TABLE settings (
         _dbContext.InitializeDatabase();
 
         // Assert
-        _dbContext.GetDatabaseVersion().Should().Be(1);
+        // レガシーDBはバージョン1として認識され、その後Migration_002も適用されるので最終バージョンは2
+        _dbContext.GetDatabaseVersion().Should().Be(2);
         TableShouldExist(connection, "schema_migrations");
 
-        // マイグレーション記録を確認
+        // バージョン1（既存DB認識）の記録が存在することを確認
         using var checkCmd = connection.CreateCommand();
         checkCmd.CommandText = "SELECT description FROM schema_migrations WHERE version = 1";
         var description = checkCmd.ExecuteScalar()?.ToString();
@@ -124,8 +148,9 @@ CREATE TABLE settings (
         cmd.CommandText = "SELECT COUNT(*) FROM schema_migrations";
         var count = Convert.ToInt32(cmd.ExecuteScalar());
 
-        // マイグレーションは1つだけ適用されているはず
-        count.Should().Be(1);
+        // 現在のマイグレーション数と一致するはず（重複していないこと）
+        // Migration_001_Initial + Migration_002_AddPointRedemption = 2
+        count.Should().Be(2);
     }
 
     [Fact]
