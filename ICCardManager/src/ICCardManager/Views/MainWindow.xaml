@@ -11,7 +11,9 @@
         d:DataContext="{d:DesignInstance Type=vm:MainViewModel}"
         Title="交通系ICカード管理システム"
         Height="700"
-        Width="1000"
+        Width="1150"
+        MinWidth="1100"
+        MinHeight="600"
         WindowStartupLocation="CenterScreen"
         AutomationProperties.Name="交通系ICカード管理システム メインウィンドウ"
         AutomationProperties.HelpText="職員証をタッチしてから交通系ICカードをタッチすると貸出または返却ができます">
