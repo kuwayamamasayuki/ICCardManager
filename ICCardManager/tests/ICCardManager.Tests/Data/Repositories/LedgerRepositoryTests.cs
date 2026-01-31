@@ -732,9 +732,9 @@ public class LedgerRepositoryTests : IDisposable
         var itemList = items.ToList();
         totalCount.Should().Be(5);
         itemList.Should().HaveCount(2);
-        // 日付降順なので最新から取得される
-        itemList[0].Summary.Should().Be("利用1"); // 最新
-        itemList[1].Summary.Should().Be("利用2");
+        // 日付昇順なので古いものから取得される（物品出納簿の記載順に合わせる）
+        itemList[0].Summary.Should().Be("利用5"); // 最古
+        itemList[1].Summary.Should().Be("利用4");
     }
 
     /// <summary>
@@ -759,7 +759,7 @@ public class LedgerRepositoryTests : IDisposable
         totalCount.Should().Be(5);
         itemList.Should().HaveCount(2);
         itemList[0].Summary.Should().Be("利用3");
-        itemList[1].Summary.Should().Be("利用4");
+        itemList[1].Summary.Should().Be("利用2");
     }
 
     /// <summary>
@@ -783,7 +783,7 @@ public class LedgerRepositoryTests : IDisposable
         var itemList = items.ToList();
         totalCount.Should().Be(5);
         itemList.Should().HaveCount(1);
-        itemList[0].Summary.Should().Be("利用5");
+        itemList[0].Summary.Should().Be("利用1"); // 最新（最後のページ）
     }
 
     /// <summary>
@@ -834,10 +834,10 @@ public class LedgerRepositoryTests : IDisposable
     }
 
     /// <summary>
-    /// 結果が日付降順でソートされていることを確認
+    /// 結果が日付昇順でソートされていることを確認（物品出納簿の記載順に合わせる）
     /// </summary>
     [Fact]
-    public async Task GetPagedAsync_ReturnsRecordsSortedByDateDescending()
+    public async Task GetPagedAsync_ReturnsRecordsSortedByDateAscending()
     {
         // Arrange
         var today = DateTime.Today;
@@ -855,9 +855,9 @@ public class LedgerRepositoryTests : IDisposable
         // Assert
         var itemList = items.ToList();
         totalCount.Should().Be(3);
-        itemList[0].Summary.Should().Be("最新");    // 今日
+        itemList[0].Summary.Should().Be("2日前");   // 最古
         itemList[1].Summary.Should().Be("昨日");    // 昨日
-        itemList[2].Summary.Should().Be("2日前");   // 2日前
+        itemList[2].Summary.Should().Be("最新");    // 今日
     }
 
     /// <summary>
