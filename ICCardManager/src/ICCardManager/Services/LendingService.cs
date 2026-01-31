@@ -714,7 +714,7 @@ namespace ICCardManager.Services
         /// </remarks>
         /// <param name="dailyDetails">日付グループ内の履歴詳細リスト</param>
         /// <returns>検出されたペアのリスト</returns>
-        private static List<(LedgerDetail Charge, LedgerDetail Usage)> DetectInsufficientBalancePattern(
+        internal static List<(LedgerDetail Charge, LedgerDetail Usage)> DetectInsufficientBalancePattern(
             List<LedgerDetail> dailyDetails)
         {
             var result = new List<(LedgerDetail Charge, LedgerDetail Usage)>();
