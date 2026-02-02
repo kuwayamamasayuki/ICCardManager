@@ -5,6 +5,8 @@
 .DESCRIPTION
     マニュアル用のスクリーンショットを対話的に取得します。
     各画面で操作を行い、準備ができたらEnterキーを押すとスクリーンショットを保存します。
+    ICCardManagerのウィンドウを自動検索するため、PowerShellウィンドウではなく
+    アプリのウィンドウが撮影されます。
 
 .PARAMETER RequiredOnly
     必須画面（6枚）のみを取得します。
@@ -25,7 +27,7 @@
 
 .NOTES
     作成日: 2026-02-02
-    Issue: #427
+    Issue: #427, #435
 #>
 
 param(
@@ -34,15 +36,18 @@ param(
     [string]$OutputDir
 )
 
-# Win32 API定義
-Add-Type @"
+# 必要なアセンブリをロード
+Add-Type -AssemblyName System.Windows.Forms
+Add-Type -AssemblyName System.Drawing
+
+# Win32 API定義（DPI対応版・マルチウィンドウ対応）
+if (-not ([System.Management.Automation.PSTypeName]'Win32ApiDpi2').Type) {
+    Add-Type -TypeDefinition @"
 using System;
+using System.Collections.Generic;
 using System.Runtime.InteropServices;
 
-public class Win32Screenshot {
-    [DllImport("user32.dll")]
-    public static extern IntPtr GetForegroundWindow();
-
+public class Win32ApiDpi2 {
     [DllImport("user32.dll")]
     public static extern bool GetWindowRect(IntPtr hWnd, out RECT lpRect);
 
@@ -50,7 +55,23 @@ public class Win32Screenshot {
     public static extern bool SetForegroundWindow(IntPtr hWnd);
 
     [DllImport("user32.dll")]
-    public static extern IntPtr FindWindow(string lpClassName, string lpWindowName);
+    public static extern bool SetProcessDPIAware();
+
+    [DllImport("user32.dll")]
+    public static extern bool IsWindowVisible(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
+
+    [DllImport("user32.dll")]
+    public static extern bool EnumWindows(EnumWindowsProc lpEnumFunc, IntPtr lParam);
+
+    public delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
+
+    [DllImport("dwmapi.dll")]
+    public static extern int DwmGetWindowAttribute(IntPtr hwnd, int dwAttribute, out RECT pvAttribute, int cbAttribute);
+
+    public const int DWMWA_EXTENDED_FRAME_BOUNDS = 9;
 
     [StructLayout(LayoutKind.Sequential)]
     public struct RECT {
@@ -59,11 +80,60 @@ public class Win32Screenshot {
         public int Right;
         public int Bottom;
     }
+
+    // DWM APIを使用してウィンドウの実際の境界を取得（DPI対応）
+    public static bool GetWindowRectDpi(IntPtr hWnd, out RECT rect) {
+        int result = DwmGetWindowAttribute(hWnd, DWMWA_EXTENDED_FRAME_BOUNDS, out rect, Marshal.SizeOf(typeof(RECT)));
+        if (result == 0) {
+            return true;
+        }
+        return GetWindowRect(hWnd, out rect);
+    }
+
+    // 指定プロセスの全ウィンドウを含む境界を取得
+    public static RECT GetProcessWindowsBounds(int processId) {
+        RECT bounds = new RECT();
+        bounds.Left = int.MaxValue;
+        bounds.Top = int.MaxValue;
+        bounds.Right = int.MinValue;
+        bounds.Bottom = int.MinValue;
+        bool found = false;
+
+        EnumWindows((hWnd, lParam) => {
+            if (!IsWindowVisible(hWnd)) return true;
+
+            uint pid;
+            GetWindowThreadProcessId(hWnd, out pid);
+
+            if (pid == processId) {
+                RECT rect;
+                if (GetWindowRectDpi(hWnd, out rect)) {
+                    if (rect.Right - rect.Left > 0 && rect.Bottom - rect.Top > 0) {
+                        if (rect.Left < bounds.Left) bounds.Left = rect.Left;
+                        if (rect.Top < bounds.Top) bounds.Top = rect.Top;
+                        if (rect.Right > bounds.Right) bounds.Right = rect.Right;
+                        if (rect.Bottom > bounds.Bottom) bounds.Bottom = rect.Bottom;
+                        found = true;
+                    }
+                }
+            }
+            return true;
+        }, IntPtr.Zero);
+
+        if (!found) {
+            bounds.Left = 0;
+            bounds.Top = 0;
+            bounds.Right = 0;
+            bounds.Bottom = 0;
+        }
+
+        return bounds;
+    }
 }
 "@
-
-Add-Type -AssemblyName System.Windows.Forms
-Add-Type -AssemblyName System.Drawing
+    # プロセスをDPI対応にする
+    [Win32ApiDpi2]::SetProcessDPIAware() | Out-Null
+}
 
 # スクリプトのディレクトリを取得
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -148,15 +218,29 @@ function Take-Screenshot {
         [string]$OutputPath
     )
 
-    Start-Sleep -Milliseconds 300
+    # ICCardManagerのプロセスを取得
+    $process = Get-Process -Name "ICCardManager" -ErrorAction SilentlyContinue | Select-Object -First 1
 
-    $hwnd = [Win32Screenshot]::GetForegroundWindow()
-    $rect = New-Object Win32Screenshot+RECT
-
-    if (-not [Win32Screenshot]::GetWindowRect($hwnd, [ref]$rect)) {
-        Write-Host "    ! ウィンドウの位置を取得できませんでした" -ForegroundColor Red
+    if ($null -eq $process) {
+        Write-Host "    ! ICCardManagerのプロセスが見つかりません" -ForegroundColor Red
+        Write-Host "      ICCardManager.exe が起動しているか確認してください" -ForegroundColor Yellow
         return $false
     }
+
+    $hwnd = $process.MainWindowHandle
+
+    if ($hwnd -eq [IntPtr]::Zero) {
+        Write-Host "    ! ICCardManagerのウィンドウハンドルを取得できません" -ForegroundColor Red
+        Write-Host "      アプリのウィンドウが最小化されていないか確認してください" -ForegroundColor Yellow
+        return $false
+    }
+
+    # ウィンドウをフォアグラウンドに移動
+    [Win32ApiDpi2]::SetForegroundWindow($hwnd) | Out-Null
+    Start-Sleep -Milliseconds 500
+
+    # プロセスの全ウィンドウ（メイン + トースト通知等）を含む境界を取得
+    $rect = [Win32ApiDpi2]::GetProcessWindowsBounds($process.Id)
 
     $width = $rect.Right - $rect.Left
     $height = $rect.Bottom - $rect.Top
@@ -194,6 +278,7 @@ function Show-Header {
     Write-Host "取得枚数: $($screens.Count) 枚" -ForegroundColor Gray
     Write-Host ""
     Write-Host "【注意事項】" -ForegroundColor Yellow
+    Write-Host "  - ICCardManagerのウィンドウが他のウィンドウで隠れていないことを確認"
     Write-Host "  - 文字サイズは「中（標準）」設定で撮影してください"
     Write-Host "  - 個人情報（実名やIDm）が映らないようにしてください"
     Write-Host "  - ダイアログ画面は ESC で閉じてから次に進んでください"
