@@ -12,9 +12,16 @@ namespace ICCardManager.Services
     /// 駅コードから駅名を解決するサービス
     /// </summary>
     /// <remarks>
+    /// <para>
     /// 埋め込みリソースのCSVファイルから全国の駅データを読み込み、
     /// エリアコード+路線コード+駅コードから駅名を検索する。
     /// カード種別に応じて適切なエリアを優先的に検索する。
+    /// </para>
+    /// <para>
+    /// 駅コードデータの出典:
+    /// 「プロデルで交通系ICカード履歴ビューアを作る」
+    /// https://produ.irelang.jp/blog/2017/08/305/
+    /// </para>
     /// </remarks>
     public class StationMasterService
     {
