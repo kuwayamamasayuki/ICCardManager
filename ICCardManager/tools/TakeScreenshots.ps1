@@ -37,43 +37,45 @@ param(
 )
 
 # Win32 API定義（型が既に存在する場合はスキップ）
-if (-not ([System.Management.Automation.PSTypeName]'Win32Screenshot2').Type) {
+if (-not ([System.Management.Automation.PSTypeName]'Win32Screenshot3').Type) {
 Add-Type @"
 using System;
-using System.Collections.Generic;
-using System.Diagnostics;
+using System.Drawing;
 using System.Runtime.InteropServices;
-using System.Text;
 
-public class Win32Screenshot2 {
-    [DllImport("user32.dll")]
-    public static extern IntPtr GetForegroundWindow();
-
+public class Win32Screenshot3 {
     [DllImport("user32.dll")]
     public static extern bool GetWindowRect(IntPtr hWnd, out RECT lpRect);
+
+    [DllImport("user32.dll")]
+    public static extern bool PrintWindow(IntPtr hWnd, IntPtr hdcBlt, uint nFlags);
 
     [DllImport("user32.dll")]
     public static extern bool SetForegroundWindow(IntPtr hWnd);
 
     [DllImport("user32.dll")]
-    public static extern IntPtr FindWindow(string lpClassName, string lpWindowName);
+    public static extern IntPtr GetWindowDC(IntPtr hWnd);
 
     [DllImport("user32.dll")]
-    public static extern int GetWindowText(IntPtr hWnd, StringBuilder lpString, int nMaxCount);
+    public static extern int ReleaseDC(IntPtr hWnd, IntPtr hDC);
 
-    [DllImport("user32.dll")]
-    public static extern int GetWindowTextLength(IntPtr hWnd);
+    [DllImport("gdi32.dll")]
+    public static extern IntPtr CreateCompatibleDC(IntPtr hdc);
 
-    [DllImport("user32.dll")]
-    public static extern bool IsWindowVisible(IntPtr hWnd);
+    [DllImport("gdi32.dll")]
+    public static extern IntPtr CreateCompatibleBitmap(IntPtr hdc, int nWidth, int nHeight);
 
-    [DllImport("user32.dll")]
-    public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
+    [DllImport("gdi32.dll")]
+    public static extern IntPtr SelectObject(IntPtr hdc, IntPtr hgdiobj);
 
-    [DllImport("user32.dll")]
-    public static extern bool EnumWindows(EnumWindowsProc lpEnumFunc, IntPtr lParam);
+    [DllImport("gdi32.dll")]
+    public static extern bool DeleteObject(IntPtr hObject);
 
-    public delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
+    [DllImport("gdi32.dll")]
+    public static extern bool DeleteDC(IntPtr hdc);
+
+    public const uint PW_CLIENTONLY = 1;
+    public const uint PW_RENDERFULLCONTENT = 2;
 
     [StructLayout(LayoutKind.Sequential)]
     public struct RECT {
@@ -83,39 +85,40 @@ public class Win32Screenshot2 {
         public int Bottom;
     }
 
-    // ICCardManager.exeプロセスのウィンドウを検索
-    public static IntPtr FindICCardManagerWindow() {
-        IntPtr foundWindow = IntPtr.Zero;
-
-        // ICCardManager.exeプロセスを検索
-        Process[] processes = Process.GetProcessesByName("ICCardManager");
-        if (processes.Length == 0) {
-            return IntPtr.Zero;
+    // PrintWindowを使用してウィンドウをキャプチャ
+    public static Bitmap CaptureWindow(IntPtr hWnd) {
+        RECT rect;
+        if (!GetWindowRect(hWnd, out rect)) {
+            return null;
         }
 
-        int targetProcessId = processes[0].Id;
+        int width = rect.Right - rect.Left;
+        int height = rect.Bottom - rect.Top;
 
-        EnumWindows((hWnd, lParam) => {
-            if (!IsWindowVisible(hWnd)) return true;
+        if (width <= 0 || height <= 0) {
+            return null;
+        }
 
-            uint processId;
-            GetWindowThreadProcessId(hWnd, out processId);
+        // ビットマップを作成
+        Bitmap bmp = new Bitmap(width, height, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+        using (Graphics gfxBmp = Graphics.FromImage(bmp)) {
+            IntPtr hdcBitmap = gfxBmp.GetHdc();
+            // PrintWindowでウィンドウの内容をキャプチャ（PW_RENDERFULLCONTENTで完全な内容を取得）
+            bool success = PrintWindow(hWnd, hdcBitmap, PW_RENDERFULLCONTENT);
+            gfxBmp.ReleaseHdc(hdcBitmap);
 
-            if (processId == targetProcessId) {
-                // このウィンドウがICCardManagerのウィンドウ
-                int length = GetWindowTextLength(hWnd);
-                if (length > 0) {
-                    foundWindow = hWnd;
-                    return false; // 検索を停止
-                }
+            if (!success) {
+                // フォールバック: PW_RENDERFULLCONTENTが失敗した場合は通常モードで再試行
+                hdcBitmap = gfxBmp.GetHdc();
+                PrintWindow(hWnd, hdcBitmap, 0);
+                gfxBmp.ReleaseHdc(hdcBitmap);
             }
-            return true;
-        }, IntPtr.Zero);
+        }
 
-        return foundWindow;
+        return bmp;
     }
 }
-"@
+"@ -ReferencedAssemblies System.Drawing
 }
 
 Add-Type -AssemblyName System.Windows.Forms
@@ -223,29 +226,17 @@ function Take-Screenshot {
         return $false
     }
 
-    $rect = New-Object Win32Screenshot2+RECT
-
-    if (-not [Win32Screenshot2]::GetWindowRect($hwnd, [ref]$rect)) {
-        Write-Host "    ! ウィンドウの位置を取得できませんでした" -ForegroundColor Red
-        return $false
-    }
-
-    $width = $rect.Right - $rect.Left
-    $height = $rect.Bottom - $rect.Top
-
-    if ($width -le 0 -or $height -le 0) {
-        Write-Host "    ! ウィンドウサイズが不正です" -ForegroundColor Red
-        return $false
-    }
-
     try {
-        $bitmap = New-Object System.Drawing.Bitmap($width, $height)
-        $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
-        $graphics.CopyFromScreen($rect.Left, $rect.Top, 0, 0, $bitmap.Size)
+        # PrintWindow APIを使用してウィンドウの内容を直接キャプチャ
+        # （他のウィンドウの重なりやマルチモニター環境に影響されない）
+        $bitmap = [Win32Screenshot3]::CaptureWindow($hwnd)
+
+        if ($null -eq $bitmap) {
+            Write-Host "    ! ウィンドウのキャプチャに失敗しました" -ForegroundColor Red
+            return $false
+        }
 
         $bitmap.Save($OutputPath, [System.Drawing.Imaging.ImageFormat]::Png)
-
-        $graphics.Dispose()
         $bitmap.Dispose()
 
         return $true
