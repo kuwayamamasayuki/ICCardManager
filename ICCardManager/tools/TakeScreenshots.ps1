@@ -36,6 +36,10 @@ param(
     [string]$OutputDir
 )
 
+# 必要なアセンブリをロード（型定義の前に必要）
+Add-Type -AssemblyName System.Windows.Forms
+Add-Type -AssemblyName System.Drawing
+
 # Win32 API定義（型が既に存在する場合はスキップ）
 if (-not ([System.Management.Automation.PSTypeName]'Win32Screenshot3').Type) {
 Add-Type @"
@@ -118,11 +122,8 @@ public class Win32Screenshot3 {
         return bmp;
     }
 }
-"@ -ReferencedAssemblies System.Drawing
+"@
 }
-
-Add-Type -AssemblyName System.Windows.Forms
-Add-Type -AssemblyName System.Drawing
 
 # スクリプトのディレクトリを取得
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
