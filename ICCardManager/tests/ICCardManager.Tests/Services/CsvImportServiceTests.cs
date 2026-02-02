@@ -510,10 +510,10 @@ FEDCBA9876543210,鈴木花子,002,テスト2";
     public async Task PreviewLedgersAsync_ValidBalanceConsistency_ReturnsValid()
     {
         // Arrange
-        // 残高整合: 1000 + 0 - 200 = 800, 800 + 0 - 300 = 500
+        // 残高整合: 初回1000円、1000 + 0 - 200 = 800円
         var csvContent = @"日時,カードIDm,管理番号,摘要,受入金額,払出金額,残額,利用者,備考
 2024-01-01 10:00:00,0123456789ABCDEF,001,鉄道（A駅～B駅）,,200,1000,山田太郎,
-2024-01-02 10:00:00,0123456789ABCDEF,001,鉄道（B駅～C駅）,,300,800,山田太郎,";
+2024-01-02 10:00:00,0123456789ABCDEF,001,鉄道（B駅～C駅）,,200,800,山田太郎,";
 
         var filePath = Path.Combine(_testDirectory, "ledgers_valid_balance.csv");
         await Task.Run(() => File.WriteAllText(filePath, csvContent, CsvEncoding));
@@ -577,11 +577,11 @@ FEDCBA9876543210,鈴木花子,002,テスト2";
     public async Task PreviewLedgersAsync_WithCharge_BalanceConsistencyValid()
     {
         // Arrange
-        // 1000 + 0 - 200 = 800, 800 + 1000 - 0 = 1800（チャージ）, 1800 + 0 - 500 = 1300
+        // 初回1000円、1000 + 1000 - 0 = 2000（チャージ）、2000 + 0 - 500 = 1500
         var csvContent = @"日時,カードIDm,管理番号,摘要,受入金額,払出金額,残額,利用者,備考
 2024-01-01 10:00:00,0123456789ABCDEF,001,鉄道（A駅～B駅）,,200,1000,山田太郎,
-2024-01-02 10:00:00,0123456789ABCDEF,001,役務費によりチャージ,1000,,800,山田太郎,
-2024-01-03 10:00:00,0123456789ABCDEF,001,鉄道（C駅～D駅）,,500,1800,山田太郎,";
+2024-01-02 10:00:00,0123456789ABCDEF,001,役務費によりチャージ,1000,,2000,山田太郎,
+2024-01-03 10:00:00,0123456789ABCDEF,001,鉄道（C駅～D駅）,,500,1500,山田太郎,";
 
         var filePath = Path.Combine(_testDirectory, "ledgers_with_charge.csv");
         await Task.Run(() => File.WriteAllText(filePath, csvContent, CsvEncoding));
@@ -609,12 +609,12 @@ FEDCBA9876543210,鈴木花子,002,テスト2";
     public async Task PreviewLedgersAsync_MultipleCards_BalanceConsistencyPerCard()
     {
         // Arrange
-        // カード1: 1000 - 200 = 800 (OK)
-        // カード2: 500 - 100 = 350 (NG: 実際は400であるべき)
+        // カード1: 初回1000円、1000 - 200 = 800 (OK)
+        // カード2: 初回500円、500 - 50 = 450 なのに 350 と記録 (NG)
         var csvContent = @"日時,カードIDm,管理番号,摘要,受入金額,払出金額,残額,利用者,備考
 2024-01-01 10:00:00,0123456789ABCDEF,001,鉄道（A駅～B駅）,,200,1000,山田太郎,
 2024-01-01 10:00:00,FEDCBA9876543210,002,鉄道（X駅～Y駅）,,100,500,鈴木花子,
-2024-01-02 10:00:00,0123456789ABCDEF,001,鉄道（B駅～C駅）,,100,800,山田太郎,
+2024-01-02 10:00:00,0123456789ABCDEF,001,鉄道（B駅～C駅）,,200,800,山田太郎,
 2024-01-02 10:00:00,FEDCBA9876543210,002,鉄道（Y駅～Z駅）,,50,350,鈴木花子,";
 
         var filePath = Path.Combine(_testDirectory, "ledgers_multi_cards.csv");
@@ -635,9 +635,9 @@ FEDCBA9876543210,鈴木花子,002,テスト2";
         // Assert
         result.IsValid.Should().BeFalse();
         result.ErrorCount.Should().Be(1);
-        // カード2のエラーのみ（500 - 100 = 400円が期待値なのに350円と記録）
+        // カード2のエラーのみ（500 - 50 = 450円が期待値なのに350円と記録）
         result.Errors.Should().Contain(e => e.Data == "FEDCBA9876543210");
-        result.Errors.Should().Contain(e => e.Message.Contains("期待値: 400円") && e.Message.Contains("実際: 350円"));
+        result.Errors.Should().Contain(e => e.Message.Contains("期待値: 450円") && e.Message.Contains("実際: 350円"));
     }
 
     /// <summary>
