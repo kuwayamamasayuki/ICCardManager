@@ -40,18 +40,26 @@ param(
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 
-# Win32 API定義（シンプル版）
-if (-not ([System.Management.Automation.PSTypeName]'Win32Api').Type) {
+# Win32 API定義（DPI対応版）
+if (-not ([System.Management.Automation.PSTypeName]'Win32ApiDpi').Type) {
     Add-Type -TypeDefinition @"
 using System;
 using System.Runtime.InteropServices;
 
-public class Win32Api {
+public class Win32ApiDpi {
     [DllImport("user32.dll")]
     public static extern bool GetWindowRect(IntPtr hWnd, out RECT lpRect);
 
     [DllImport("user32.dll")]
     public static extern bool SetForegroundWindow(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    public static extern bool SetProcessDPIAware();
+
+    [DllImport("dwmapi.dll")]
+    public static extern int DwmGetWindowAttribute(IntPtr hwnd, int dwAttribute, out RECT pvAttribute, int cbAttribute);
+
+    public const int DWMWA_EXTENDED_FRAME_BOUNDS = 9;
 
     [StructLayout(LayoutKind.Sequential)]
     public struct RECT {
@@ -60,8 +68,21 @@ public class Win32Api {
         public int Right;
         public int Bottom;
     }
+
+    // DWM APIを使用してウィンドウの実際の境界を取得（DPI対応）
+    public static bool GetWindowRectDpi(IntPtr hWnd, out RECT rect) {
+        // DWM APIで正確なウィンドウ境界を取得
+        int result = DwmGetWindowAttribute(hWnd, DWMWA_EXTENDED_FRAME_BOUNDS, out rect, Marshal.SizeOf(typeof(RECT)));
+        if (result == 0) {
+            return true;
+        }
+        // フォールバック
+        return GetWindowRect(hWnd, out rect);
+    }
 }
 "@
+    # プロセスをDPI対応にする
+    [Win32ApiDpi]::SetProcessDPIAware() | Out-Null
 }
 
 # スクリプトのディレクトリを取得
@@ -165,12 +186,12 @@ function Take-Screenshot {
     }
 
     # ウィンドウをフォアグラウンドに移動
-    [Win32Api]::SetForegroundWindow($hwnd) | Out-Null
+    [Win32ApiDpi]::SetForegroundWindow($hwnd) | Out-Null
     Start-Sleep -Milliseconds 500
 
-    # ウィンドウの位置とサイズを取得
-    $rect = New-Object Win32Api+RECT
-    if (-not [Win32Api]::GetWindowRect($hwnd, [ref]$rect)) {
+    # ウィンドウの位置とサイズを取得（DWM APIで正確な境界を取得）
+    $rect = New-Object Win32ApiDpi+RECT
+    if (-not [Win32ApiDpi]::GetWindowRectDpi($hwnd, [ref]$rect)) {
         Write-Host "    ! ウィンドウの位置を取得できませんでした" -ForegroundColor Red
         return $false
     }
