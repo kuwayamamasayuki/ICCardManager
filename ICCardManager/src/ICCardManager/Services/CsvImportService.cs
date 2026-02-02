@@ -1104,6 +1104,9 @@ namespace ICCardManager.Services
                     validRecords.Add((lineNumber, ledger, isUpdate));
                 }
 
+                // Issue #428: 金額の整合性チェック（カードごとに残高の連続性を検証）
+                ValidateBalanceConsistencyForLedgers(validRecords, errors);
+
                 // バリデーションエラーがあれば中断
                 if (errors.Count > 0)
                 {
@@ -1427,6 +1430,9 @@ namespace ICCardManager.Services
                     cardIdmsInFile.Add(cardIdm);
                     validatedRecords.Add((lineNumber, ledgerId, cardIdm, date, summary, income, expense, balance, staffName, note));
                 }
+
+                // Issue #428: 金額の整合性チェック（カードごとに残高の連続性を検証）
+                ValidateBalanceConsistency(validatedRecords, errors);
 
                 // Issue #334: 既存履歴の重複チェック用キーを取得（新規追加分のみ）
                 var existingLedgerKeys = await _ledgerRepository.GetExistingLedgerKeysAsync(cardIdmsInFile);
@@ -1908,6 +1914,90 @@ namespace ICCardManager.Services
                     OldValue = string.IsNullOrEmpty(existingNote) ? "(なし)" : existingNote,
                     NewValue = string.IsNullOrEmpty(newNote) ? "(なし)" : newNote
                 });
+            }
+        }
+
+        /// <summary>
+        /// 残高整合性チェック（プレビュー用）
+        /// カードごとに日時順で残高の連続性を検証します。
+        /// 計算式: 前の残高 + 受入金額 - 払出金額 = 今回の残高
+        /// </summary>
+        /// <param name="records">検証対象レコード（LineNumber, LedgerId, CardIdm, Date, Summary, Income, Expense, Balance, StaffName, Note）</param>
+        /// <param name="errors">エラーリスト</param>
+        private static void ValidateBalanceConsistency(
+            List<(int LineNumber, int? LedgerId, string CardIdm, DateTime Date, string Summary, int Income, int Expense, int Balance, string StaffName, string Note)> records,
+            List<CsvImportError> errors)
+        {
+            if (records.Count == 0) return;
+
+            // カードごとにグループ化して日時順にソート
+            var groupedByCard = records
+                .GroupBy(r => r.CardIdm, StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(g => g.Key, g => g.OrderBy(r => r.Date).ThenBy(r => r.LineNumber).ToList());
+
+            foreach (var (cardIdm, cardRecords) in groupedByCard)
+            {
+                for (var i = 1; i < cardRecords.Count; i++)
+                {
+                    var prevRecord = cardRecords[i - 1];
+                    var currentRecord = cardRecords[i];
+
+                    // 期待される残高: 前の残高 + 受入金額 - 払出金額
+                    var expectedBalance = prevRecord.Balance + currentRecord.Income - currentRecord.Expense;
+
+                    if (expectedBalance != currentRecord.Balance)
+                    {
+                        errors.Add(new CsvImportError
+                        {
+                            LineNumber = currentRecord.LineNumber,
+                            Message = $"残高が一致しません（期待値: {expectedBalance}円、実際: {currentRecord.Balance}円）。" +
+                                      $"前回残高: {prevRecord.Balance}円 + 受入: {currentRecord.Income}円 - 払出: {currentRecord.Expense}円",
+                            Data = cardIdm
+                        });
+                    }
+                }
+            }
+        }
+
+        /// <summary>
+        /// 残高整合性チェック（インポート用）
+        /// カードごとに日時順で残高の連続性を検証します。
+        /// 計算式: 前の残高 + 受入金額 - 払出金額 = 今回の残高
+        /// </summary>
+        /// <param name="records">検証対象レコード（LineNumber, Ledger, IsUpdate）</param>
+        /// <param name="errors">エラーリスト</param>
+        private static void ValidateBalanceConsistencyForLedgers(
+            List<(int LineNumber, Ledger Ledger, bool IsUpdate)> records,
+            List<CsvImportError> errors)
+        {
+            if (records.Count == 0) return;
+
+            // カードごとにグループ化して日時順にソート
+            var groupedByCard = records
+                .GroupBy(r => r.Ledger.CardIdm, StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(g => g.Key, g => g.OrderBy(r => r.Ledger.Date).ThenBy(r => r.LineNumber).ToList());
+
+            foreach (var (cardIdm, cardRecords) in groupedByCard)
+            {
+                for (var i = 1; i < cardRecords.Count; i++)
+                {
+                    var prevRecord = cardRecords[i - 1];
+                    var currentRecord = cardRecords[i];
+
+                    // 期待される残高: 前の残高 + 受入金額 - 払出金額
+                    var expectedBalance = prevRecord.Ledger.Balance + currentRecord.Ledger.Income - currentRecord.Ledger.Expense;
+
+                    if (expectedBalance != currentRecord.Ledger.Balance)
+                    {
+                        errors.Add(new CsvImportError
+                        {
+                            LineNumber = currentRecord.LineNumber,
+                            Message = $"残高が一致しません（期待値: {expectedBalance}円、実際: {currentRecord.Ledger.Balance}円）。" +
+                                      $"前回残高: {prevRecord.Ledger.Balance}円 + 受入: {currentRecord.Ledger.Income}円 - 払出: {currentRecord.Ledger.Expense}円",
+                            Data = cardIdm
+                        });
+                    }
+                }
             }
         }
 
