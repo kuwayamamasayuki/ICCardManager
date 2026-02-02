@@ -281,17 +281,18 @@
                                 </Border>
                             </StackPanel>
 
+                            <!-- 月選択ボタン（使用頻度順: 先月 > 今月。帳票画面と同じ順序） -->
                             <StackPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Right">
-                                <Button Content="今月"
-                                        Command="{Binding HistorySetThisMonthCommand}"
-                                        Padding="12,6"
-                                        Margin="0,0,5,0"
-                                        ToolTip="今月の履歴を表示"/>
                                 <Button Content="先月"
                                         Command="{Binding HistorySetLastMonthCommand}"
                                         Padding="12,6"
                                         Margin="0,0,5,0"
                                         ToolTip="先月の履歴を表示"/>
+                                <Button Content="今月"
+                                        Command="{Binding HistorySetThisMonthCommand}"
+                                        Padding="12,6"
+                                        Margin="0,0,5,0"
+                                        ToolTip="今月の履歴を表示"/>
                                 <Button x:Name="HistoryOtherMonthButton"
                                         Content="その他の月..."
                                         Command="{Binding HistoryOpenMonthSelectorCommand}"
