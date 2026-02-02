@@ -40,13 +40,14 @@ param(
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 
-# Win32 API定義（DPI対応版）
-if (-not ([System.Management.Automation.PSTypeName]'Win32ApiDpi').Type) {
+# Win32 API定義（DPI対応版・マルチウィンドウ対応）
+if (-not ([System.Management.Automation.PSTypeName]'Win32ApiDpi2').Type) {
     Add-Type -TypeDefinition @"
 using System;
+using System.Collections.Generic;
 using System.Runtime.InteropServices;
 
-public class Win32ApiDpi {
+public class Win32ApiDpi2 {
     [DllImport("user32.dll")]
     public static extern bool GetWindowRect(IntPtr hWnd, out RECT lpRect);
 
@@ -55,6 +56,17 @@ public class Win32ApiDpi {
 
     [DllImport("user32.dll")]
     public static extern bool SetProcessDPIAware();
+
+    [DllImport("user32.dll")]
+    public static extern bool IsWindowVisible(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
+
+    [DllImport("user32.dll")]
+    public static extern bool EnumWindows(EnumWindowsProc lpEnumFunc, IntPtr lParam);
+
+    public delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
 
     [DllImport("dwmapi.dll")]
     public static extern int DwmGetWindowAttribute(IntPtr hwnd, int dwAttribute, out RECT pvAttribute, int cbAttribute);
@@ -71,18 +83,56 @@ public class Win32ApiDpi {
 
     // DWM APIを使用してウィンドウの実際の境界を取得（DPI対応）
     public static bool GetWindowRectDpi(IntPtr hWnd, out RECT rect) {
-        // DWM APIで正確なウィンドウ境界を取得
         int result = DwmGetWindowAttribute(hWnd, DWMWA_EXTENDED_FRAME_BOUNDS, out rect, Marshal.SizeOf(typeof(RECT)));
         if (result == 0) {
             return true;
         }
-        // フォールバック
         return GetWindowRect(hWnd, out rect);
+    }
+
+    // 指定プロセスの全ウィンドウを含む境界を取得
+    public static RECT GetProcessWindowsBounds(int processId) {
+        RECT bounds = new RECT();
+        bounds.Left = int.MaxValue;
+        bounds.Top = int.MaxValue;
+        bounds.Right = int.MinValue;
+        bounds.Bottom = int.MinValue;
+        bool found = false;
+
+        EnumWindows((hWnd, lParam) => {
+            if (!IsWindowVisible(hWnd)) return true;
+
+            uint pid;
+            GetWindowThreadProcessId(hWnd, out pid);
+
+            if (pid == processId) {
+                RECT rect;
+                if (GetWindowRectDpi(hWnd, out rect)) {
+                    if (rect.Right - rect.Left > 0 && rect.Bottom - rect.Top > 0) {
+                        if (rect.Left < bounds.Left) bounds.Left = rect.Left;
+                        if (rect.Top < bounds.Top) bounds.Top = rect.Top;
+                        if (rect.Right > bounds.Right) bounds.Right = rect.Right;
+                        if (rect.Bottom > bounds.Bottom) bounds.Bottom = rect.Bottom;
+                        found = true;
+                    }
+                }
+            }
+            return true;
+        }, IntPtr.Zero);
+
+        if (!found) {
+            bounds.Left = 0;
+            bounds.Top = 0;
+            bounds.Right = 0;
+            bounds.Bottom = 0;
+        }
+
+        return bounds;
     }
 }
 "@
     # プロセスをDPI対応にする
-    [Win32ApiDpi]::SetProcessDPIAware() | Out-Null
+    [Win32ApiDpi2]::SetProcessDPIAware() | Out-Null
 }
 
 # スクリプトのディレクトリを取得
@@ -186,15 +236,11 @@ function Take-Screenshot {
     }
 
     # ウィンドウをフォアグラウンドに移動
-    [Win32ApiDpi]::SetForegroundWindow($hwnd) | Out-Null
+    [Win32ApiDpi2]::SetForegroundWindow($hwnd) | Out-Null
     Start-Sleep -Milliseconds 500
 
-    # ウィンドウの位置とサイズを取得（DWM APIで正確な境界を取得）
-    $rect = New-Object Win32ApiDpi+RECT
-    if (-not [Win32ApiDpi]::GetWindowRectDpi($hwnd, [ref]$rect)) {
-        Write-Host "    ! ウィンドウの位置を取得できませんでした" -ForegroundColor Red
-        return $false
-    }
+    # プロセスの全ウィンドウ（メイン + トースト通知等）を含む境界を取得
+    $rect = [Win32ApiDpi2]::GetProcessWindowsBounds($process.Id)
 
     $width = $rect.Right - $rect.Left
     $height = $rect.Bottom - $rect.Top
