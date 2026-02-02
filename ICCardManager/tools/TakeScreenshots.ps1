@@ -206,12 +206,20 @@ function Take-Screenshot {
 
     Start-Sleep -Milliseconds 300
 
-    # ICCardManager.exeプロセスのウィンドウを検索
-    $hwnd = [Win32Screenshot2]::FindICCardManagerWindow()
+    # PowerShellのGet-ProcessでICCardManagerのメインウィンドウハンドルを取得
+    $process = Get-Process -Name "ICCardManager" -ErrorAction SilentlyContinue | Select-Object -First 1
+
+    if ($null -eq $process) {
+        Write-Host "    ! ICCardManagerのプロセスが見つかりません" -ForegroundColor Red
+        Write-Host "      ICCardManager.exe が起動しているか確認してください" -ForegroundColor Yellow
+        return $false
+    }
+
+    $hwnd = $process.MainWindowHandle
 
     if ($hwnd -eq [IntPtr]::Zero) {
-        Write-Host "    ! ICCardManagerのウィンドウが見つかりません" -ForegroundColor Red
-        Write-Host "      ICCardManager.exe が起動しているか確認してください" -ForegroundColor Yellow
+        Write-Host "    ! ICCardManagerのウィンドウハンドルを取得できません" -ForegroundColor Red
+        Write-Host "      アプリのウィンドウが最小化されていないか確認してください" -ForegroundColor Yellow
         return $false
     }
 
