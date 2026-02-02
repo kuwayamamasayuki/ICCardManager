@@ -1935,8 +1935,11 @@ namespace ICCardManager.Services
                 .GroupBy(r => r.CardIdm, StringComparer.OrdinalIgnoreCase)
                 .ToDictionary(g => g.Key, g => g.OrderBy(r => r.Date).ThenBy(r => r.LineNumber).ToList());
 
-            foreach (var (cardIdm, cardRecords) in groupedByCard)
+            foreach (var kvp in groupedByCard)
             {
+                var cardIdm = kvp.Key;
+                var cardRecords = kvp.Value;
+
                 for (var i = 1; i < cardRecords.Count; i++)
                 {
                     var prevRecord = cardRecords[i - 1];
@@ -1977,8 +1980,11 @@ namespace ICCardManager.Services
                 .GroupBy(r => r.Ledger.CardIdm, StringComparer.OrdinalIgnoreCase)
                 .ToDictionary(g => g.Key, g => g.OrderBy(r => r.Ledger.Date).ThenBy(r => r.LineNumber).ToList());
 
-            foreach (var (cardIdm, cardRecords) in groupedByCard)
+            foreach (var kvp in groupedByCard)
             {
+                var cardIdm = kvp.Key;
+                var cardRecords = kvp.Value;
+
                 for (var i = 1; i < cardRecords.Count; i++)
                 {
                     var prevRecord = cardRecords[i - 1];
