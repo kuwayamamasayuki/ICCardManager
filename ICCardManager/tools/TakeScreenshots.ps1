@@ -37,14 +37,15 @@ param(
 )
 
 # Win32 API定義（型が既に存在する場合はスキップ）
-if (-not ([System.Management.Automation.PSTypeName]'Win32Screenshot').Type) {
+if (-not ([System.Management.Automation.PSTypeName]'Win32Screenshot2').Type) {
 Add-Type @"
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Text;
 
-public class Win32Screenshot {
+public class Win32Screenshot2 {
     [DllImport("user32.dll")]
     public static extern IntPtr GetForegroundWindow();
 
@@ -67,6 +68,9 @@ public class Win32Screenshot {
     public static extern bool IsWindowVisible(IntPtr hWnd);
 
     [DllImport("user32.dll")]
+    public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
+
+    [DllImport("user32.dll")]
     public static extern bool EnumWindows(EnumWindowsProc lpEnumFunc, IntPtr lParam);
 
     public delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
@@ -79,31 +83,31 @@ public class Win32Screenshot {
         public int Bottom;
     }
 
-    // ICCardManager関連のウィンドウを検索
+    // ICCardManager.exeプロセスのウィンドウを検索
     public static IntPtr FindICCardManagerWindow() {
         IntPtr foundWindow = IntPtr.Zero;
+
+        // ICCardManager.exeプロセスを検索
+        Process[] processes = Process.GetProcessesByName("ICCardManager");
+        if (processes.Length == 0) {
+            return IntPtr.Zero;
+        }
+
+        int targetProcessId = processes[0].Id;
 
         EnumWindows((hWnd, lParam) => {
             if (!IsWindowVisible(hWnd)) return true;
 
-            int length = GetWindowTextLength(hWnd);
-            if (length == 0) return true;
+            uint processId;
+            GetWindowThreadProcessId(hWnd, out processId);
 
-            StringBuilder sb = new StringBuilder(length + 1);
-            GetWindowText(hWnd, sb, sb.Capacity);
-            string title = sb.ToString();
-
-            // ICCardManager関連のウィンドウを検索（メイン画面またはダイアログ）
-            if (title.Contains("交通系ICカード管理システム") ||
-                title.Contains("カード管理") ||
-                title.Contains("職員管理") ||
-                title.Contains("帳票出力") ||
-                title.Contains("設定") ||
-                title.Contains("システム管理") ||
-                title.Contains("データ入出力") ||
-                title.Contains("履歴")) {
-                foundWindow = hWnd;
-                return false; // 検索を停止
+            if (processId == targetProcessId) {
+                // このウィンドウがICCardManagerのウィンドウ
+                int length = GetWindowTextLength(hWnd);
+                if (length > 0) {
+                    foundWindow = hWnd;
+                    return false; // 検索を停止
+                }
             }
             return true;
         }, IntPtr.Zero);
@@ -202,18 +206,18 @@ function Take-Screenshot {
 
     Start-Sleep -Milliseconds 300
 
-    # ICCardManager関連のウィンドウを検索
-    $hwnd = [Win32Screenshot]::FindICCardManagerWindow()
+    # ICCardManager.exeプロセスのウィンドウを検索
+    $hwnd = [Win32Screenshot2]::FindICCardManagerWindow()
 
     if ($hwnd -eq [IntPtr]::Zero) {
         Write-Host "    ! ICCardManagerのウィンドウが見つかりません" -ForegroundColor Red
-        Write-Host "      アプリが起動しているか確認してください" -ForegroundColor Yellow
+        Write-Host "      ICCardManager.exe が起動しているか確認してください" -ForegroundColor Yellow
         return $false
     }
 
-    $rect = New-Object Win32Screenshot+RECT
+    $rect = New-Object Win32Screenshot2+RECT
 
-    if (-not [Win32Screenshot]::GetWindowRect($hwnd, [ref]$rect)) {
+    if (-not [Win32Screenshot2]::GetWindowRect($hwnd, [ref]$rect)) {
         Write-Host "    ! ウィンドウの位置を取得できませんでした" -ForegroundColor Red
         return $false
     }
