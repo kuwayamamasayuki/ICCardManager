@@ -36,7 +36,8 @@ param(
     [string]$OutputDir
 )
 
-# Win32 API定義
+# Win32 API定義（型が既に存在する場合はスキップ）
+if (-not ([System.Management.Automation.PSTypeName]'Win32Screenshot').Type) {
 Add-Type @"
 using System;
 using System.Collections.Generic;
@@ -111,6 +112,7 @@ public class Win32Screenshot {
     }
 }
 "@
+}
 
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
