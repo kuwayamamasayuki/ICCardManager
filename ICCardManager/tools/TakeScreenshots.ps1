@@ -5,6 +5,8 @@
 .DESCRIPTION
     マニュアル用のスクリーンショットを対話的に取得します。
     各画面で操作を行い、準備ができたらEnterキーを押すとスクリーンショットを保存します。
+    ICCardManagerのウィンドウを自動検索するため、PowerShellウィンドウではなく
+    アプリのウィンドウが撮影されます。
 
 .PARAMETER RequiredOnly
     必須画面（6枚）のみを取得します。
@@ -25,7 +27,7 @@
 
 .NOTES
     作成日: 2026-02-02
-    Issue: #427
+    Issue: #427, #435
 #>
 
 param(
@@ -37,7 +39,9 @@ param(
 # Win32 API定義
 Add-Type @"
 using System;
+using System.Collections.Generic;
 using System.Runtime.InteropServices;
+using System.Text;
 
 public class Win32Screenshot {
     [DllImport("user32.dll")]
@@ -52,12 +56,58 @@ public class Win32Screenshot {
     [DllImport("user32.dll")]
     public static extern IntPtr FindWindow(string lpClassName, string lpWindowName);
 
+    [DllImport("user32.dll")]
+    public static extern int GetWindowText(IntPtr hWnd, StringBuilder lpString, int nMaxCount);
+
+    [DllImport("user32.dll")]
+    public static extern int GetWindowTextLength(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    public static extern bool IsWindowVisible(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    public static extern bool EnumWindows(EnumWindowsProc lpEnumFunc, IntPtr lParam);
+
+    public delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
+
     [StructLayout(LayoutKind.Sequential)]
     public struct RECT {
         public int Left;
         public int Top;
         public int Right;
         public int Bottom;
+    }
+
+    // ICCardManager関連のウィンドウを検索
+    public static IntPtr FindICCardManagerWindow() {
+        IntPtr foundWindow = IntPtr.Zero;
+
+        EnumWindows((hWnd, lParam) => {
+            if (!IsWindowVisible(hWnd)) return true;
+
+            int length = GetWindowTextLength(hWnd);
+            if (length == 0) return true;
+
+            StringBuilder sb = new StringBuilder(length + 1);
+            GetWindowText(hWnd, sb, sb.Capacity);
+            string title = sb.ToString();
+
+            // ICCardManager関連のウィンドウを検索（メイン画面またはダイアログ）
+            if (title.Contains("交通系ICカード管理システム") ||
+                title.Contains("カード管理") ||
+                title.Contains("職員管理") ||
+                title.Contains("帳票出力") ||
+                title.Contains("設定") ||
+                title.Contains("システム管理") ||
+                title.Contains("データ入出力") ||
+                title.Contains("履歴")) {
+                foundWindow = hWnd;
+                return false; // 検索を停止
+            }
+            return true;
+        }, IntPtr.Zero);
+
+        return foundWindow;
     }
 }
 "@
@@ -150,7 +200,15 @@ function Take-Screenshot {
 
     Start-Sleep -Milliseconds 300
 
-    $hwnd = [Win32Screenshot]::GetForegroundWindow()
+    # ICCardManager関連のウィンドウを検索
+    $hwnd = [Win32Screenshot]::FindICCardManagerWindow()
+
+    if ($hwnd -eq [IntPtr]::Zero) {
+        Write-Host "    ! ICCardManagerのウィンドウが見つかりません" -ForegroundColor Red
+        Write-Host "      アプリが起動しているか確認してください" -ForegroundColor Yellow
+        return $false
+    }
+
     $rect = New-Object Win32Screenshot+RECT
 
     if (-not [Win32Screenshot]::GetWindowRect($hwnd, [ref]$rect)) {
