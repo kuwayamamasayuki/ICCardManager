@@ -593,6 +593,15 @@ namespace ICCardManager.Services
         }
 
         /// <summary>
+        /// 前月繰越の摘要を生成
+        /// </summary>
+        /// <param name="previousMonth">前月の月番号（1-12）</param>
+        public static string GetCarryoverFromPreviousMonthSummary(int previousMonth)
+        {
+            return $"{previousMonth}月より繰越";
+        }
+
+        /// <summary>
         /// 次年度繰越の摘要を生成
         /// </summary>
         public static string GetCarryoverToNextYearSummary()
