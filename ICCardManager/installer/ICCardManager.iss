@@ -50,9 +50,13 @@ UninstallDisplayName={#MyAppName}
 Name: "japanese"; MessagesFile: "compiler:Languages\Japanese.isl"
 Name: "english"; MessagesFile: "compiler:Default.isl"
 
+[CustomMessages]
+japanese.AutoStartProgram=Windows起動時に自動実行
+english.AutoStartProgram=Run at Windows startup
+
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
-Name: "autostart"; Description: "Windows起動時に自動実行"; GroupDescription: "{cm:AdditionalIcons}"; Flags: checked
+Name: "autostart"; Description: "{cm:AutoStartProgram}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: checked
 
 [Files]
 ; メインアプリケーションと依存DLL（すべてのDLL/EXE/config/pdbを含める）
