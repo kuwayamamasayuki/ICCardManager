@@ -158,7 +158,7 @@ namespace DebugDataViewer
             // 優先順位:
             // 1. コマンドライン引数
             // 2. 実行ファイルと同じディレクトリ
-            // 3. メインアプリの標準パス
+            // 3. メインアプリの標準パス (CommonApplicationData = C:\ProgramData)
 
             var args = Environment.GetCommandLineArgs();
             if (args.Length > 1 && File.Exists(args[1]))
@@ -173,9 +173,10 @@ namespace DebugDataViewer
                 return localDb;
             }
 
-            // メインアプリの標準パス
+            // メインアプリの標準パス (C:\ProgramData\ICCardManager\iccard.db)
+            // メインアプリはCommonApplicationDataを使用して全ユーザーで共有している
             var appDataPath = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
                 "ICCardManager",
                 "iccard.db");
             if (File.Exists(appDataPath))
@@ -183,8 +184,8 @@ namespace DebugDataViewer
                 return appDataPath;
             }
 
-            // 見つからない場合はデフォルトパスを返す（DbContextが初期化する）
-            return localDb;
+            // 見つからない場合はCommonApplicationDataのパスを返す（メインアプリと同じ場所）
+            return appDataPath;
         }
 
         protected override void OnExit(ExitEventArgs e)
