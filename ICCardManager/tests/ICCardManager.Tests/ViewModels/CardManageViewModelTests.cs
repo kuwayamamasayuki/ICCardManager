@@ -29,6 +29,7 @@ public class CardManageViewModelTests
     private readonly Mock<IStaffRepository> _staffRepositoryMock;
     private readonly Mock<OperationLogger> _operationLoggerMock;
     private readonly Mock<IDialogService> _dialogServiceMock;
+    private readonly Mock<IStaffAuthService> _staffAuthServiceMock;
     private readonly CardTypeDetector _cardTypeDetector;
     private readonly CardManageViewModel _viewModel;
 
@@ -40,6 +41,7 @@ public class CardManageViewModelTests
         _validationServiceMock = new Mock<IValidationService>();
         _staffRepositoryMock = new Mock<IStaffRepository>();
         _dialogServiceMock = new Mock<IDialogService>();
+        _staffAuthServiceMock = new Mock<IStaffAuthService>();
         _cardTypeDetector = new CardTypeDetector();
 
         // OperationLoggerのモック（コンストラクタ引数が必要なためMock.Ofで作成）
@@ -55,6 +57,10 @@ public class CardManageViewModelTests
         _dialogServiceMock.Setup(d => d.ShowConfirmation(It.IsAny<string>(), It.IsAny<string>())).Returns(true);
         _dialogServiceMock.Setup(d => d.ShowWarningConfirmation(It.IsAny<string>(), It.IsAny<string>())).Returns(true);
 
+        // 認証はデフォルトで成功を返す（Issue #429）
+        _staffAuthServiceMock.Setup(s => s.RequestAuthenticationAsync(It.IsAny<string>()))
+            .ReturnsAsync(new StaffAuthResult { Idm = "TEST_OPERATOR_IDM", StaffName = "テスト操作者" });
+
         _viewModel = new CardManageViewModel(
             _cardRepositoryMock.Object,
             _ledgerRepositoryMock.Object,
@@ -62,7 +68,8 @@ public class CardManageViewModelTests
             _cardTypeDetector,
             _validationServiceMock.Object,
             _operationLoggerMock.Object,
-            _dialogServiceMock.Object);
+            _dialogServiceMock.Object,
+            _staffAuthServiceMock.Object);
     }
 
     #region カード一覧読み込みテスト

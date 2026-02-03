@@ -27,6 +27,7 @@ public class StaffManageViewModelTests
     private readonly Mock<IValidationService> _validationServiceMock;
     private readonly Mock<OperationLogger> _operationLoggerMock;
     private readonly Mock<IDialogService> _dialogServiceMock;
+    private readonly Mock<IStaffAuthService> _staffAuthServiceMock;
     private readonly StaffManageViewModel _viewModel;
 
     public StaffManageViewModelTests()
@@ -35,6 +36,7 @@ public class StaffManageViewModelTests
         _cardReaderMock = new Mock<ICardReader>();
         _validationServiceMock = new Mock<IValidationService>();
         _dialogServiceMock = new Mock<IDialogService>();
+        _staffAuthServiceMock = new Mock<IStaffAuthService>();
 
         // OperationLoggerのモック（コンストラクタ引数が必要なためMock.Ofで作成）
         var operationLogRepositoryMock = new Mock<IOperationLogRepository>();
@@ -48,12 +50,17 @@ public class StaffManageViewModelTests
         _dialogServiceMock.Setup(d => d.ShowConfirmation(It.IsAny<string>(), It.IsAny<string>())).Returns(true);
         _dialogServiceMock.Setup(d => d.ShowWarningConfirmation(It.IsAny<string>(), It.IsAny<string>())).Returns(true);
 
+        // 認証はデフォルトで成功を返す（Issue #429）
+        _staffAuthServiceMock.Setup(s => s.RequestAuthenticationAsync(It.IsAny<string>()))
+            .ReturnsAsync(new StaffAuthResult { Idm = "TEST_OPERATOR_IDM", StaffName = "テスト操作者" });
+
         _viewModel = new StaffManageViewModel(
             _staffRepositoryMock.Object,
             _cardReaderMock.Object,
             _validationServiceMock.Object,
             _operationLoggerMock.Object,
-            _dialogServiceMock.Object);
+            _dialogServiceMock.Object,
+            _staffAuthServiceMock.Object);
     }
 
     #region 職員一覧読み込みテスト

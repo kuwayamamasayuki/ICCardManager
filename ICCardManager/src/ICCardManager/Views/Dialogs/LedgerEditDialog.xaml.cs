@@ -43,6 +43,16 @@ namespace ICCardManager.Views.Dialogs
         }
 
         /// <summary>
+        /// 認証済みIDmを含めて履歴データで初期化
+        /// </summary>
+        /// <param name="ledger">編集対象の履歴データ</param>
+        /// <param name="operatorIdm">認証済み職員のIDm（Issue #429）</param>
+        public async Task InitializeWithAuthAsync(LedgerDto ledger, string operatorIdm)
+        {
+            await _viewModel.InitializeAsync(ledger, operatorIdm);
+        }
+
+        /// <summary>
         /// キャンセルボタンクリック
         /// </summary>
         private void CancelButton_Click(object sender, RoutedEventArgs e)
