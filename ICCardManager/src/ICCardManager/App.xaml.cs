@@ -78,6 +78,19 @@ namespace ICCardManager
             }
         }
 
+        /// <summary>
+        /// アプリケーションのバージョン番号（XAMLからバインド可能: Issue #475）
+        /// </summary>
+        public static string AppVersion
+        {
+            get
+            {
+                var version = System.Reflection.Assembly.GetExecutingAssembly().GetName().Version;
+                // Major.Minor.Build 形式で返す（Revisionは省略）
+                return version != null ? $"{version.Major}.{version.Minor}.{version.Build}" : "不明";
+            }
+        }
+
         protected override void OnStartup(StartupEventArgs e)
         {
             base.OnStartup(e);

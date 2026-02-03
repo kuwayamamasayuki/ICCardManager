@@ -848,6 +848,16 @@
                     </Button>
                 </StackPanel>
             </StatusBarItem>
+            <Separator/>
+            <!-- バージョン表示（Issue #475） -->
+            <StatusBarItem HorizontalAlignment="Right"
+                           AutomationProperties.Name="アプリケーションバージョン">
+                <TextBlock Foreground="Gray"
+                           ToolTip="アプリケーションのバージョン番号">
+                    <Run Text="Ver. "/>
+                    <Run Text="{Binding Source={x:Static app:App.AppVersion}, Mode=OneTime}"/>
+                </TextBlock>
+            </StatusBarItem>
         </StatusBar>
     </Grid>
 </Window>
