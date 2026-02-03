@@ -225,7 +225,7 @@ namespace ICCardManager.Services
                 SetHeaderInfo(worksheet, card);
 
                 // データを出力
-                var startRow = 3; // データ開始行（テンプレートに依存）
+                var startRow = 5; // データ開始行（テンプレートに依存: 新テンプレートでは5行目から）
                 var currentRow = startRow;
 
                 // 4月の場合は前年度繰越を追加
@@ -386,10 +386,10 @@ namespace ICCardManager.Services
         /// </summary>
         private void SetHeaderInfo(IXLWorksheet worksheet, IcCard card)
         {
-            // 1行目のヘッダ情報を設定（テンプレートのセル位置に合わせる）
-            // D1: 品名の値、G1: 規格の値
-            worksheet.Cell("D1").Value = card.CardType;      // 品名の値
-            worksheet.Cell("G1").Value = card.CardNumber;    // 規格の値
+            // 2行目のヘッダ情報を設定（新テンプレートのセル位置に合わせる）
+            // E2: 品名の値（D2の「品名」ラベルの右）、H2: 規格の値（G2の「規格」ラベルの右）
+            worksheet.Cell("E2").Value = card.CardType;      // 品名の値
+            worksheet.Cell("H2").Value = card.CardNumber;    // 規格の値
 
             // ヘッダ行のフォントサイズを調整して1行に収める
             AdjustHeaderRowFontSize(worksheet);
@@ -399,16 +399,16 @@ namespace ICCardManager.Services
         /// ヘッダ行のフォントサイズを調整
         /// </summary>
         /// <remarks>
-        /// 物品分類～単位：円までのヘッダ部分（1行目）を1行に収めるため、
+        /// 物品分類～単位：円までのヘッダ部分（2行目）を1行に収めるため、
         /// フォントサイズを小さくして調整します。
         /// </remarks>
         private void AdjustHeaderRowFontSize(IXLWorksheet worksheet)
         {
-            // 1行目（物品分類～単位：円）のフォントサイズを9ptに設定
+            // 2行目（物品分類～単位：円）のフォントサイズを9ptに設定
             const double headerFontSize = 9;
 
-            // A1～K1の範囲のフォントサイズを調整
-            var headerRange = worksheet.Range("A1:K1");
+            // A2～L2の範囲のフォントサイズを調整
+            var headerRange = worksheet.Range("A2:L2");
             headerRange.Style.Font.FontSize = headerFontSize;
         }
 
@@ -417,13 +417,13 @@ namespace ICCardManager.Services
         /// </summary>
         private int WriteCarryoverRow(IXLWorksheet worksheet, int row, int balance, int year)
         {
-            // 列配置: A=出納年月日, B-C=摘要(結合), D=受入金額, E=払出金額, F=残額, G=氏名, H-K=備考(結合)
+            // 列配置: A=出納年月日, B-D=摘要(結合), E=受入金額, F=払出金額, G=残額, H=氏名, I-L=備考(結合)
             var carryoverDate = new DateTime(year, 4, 1);
             worksheet.Cell(row, 1).Value = WarekiConverter.ToWareki(carryoverDate); // 出納年月日 (A列)
-            worksheet.Cell(row, 2).Value = SummaryGenerator.GetCarryoverFromPreviousYearSummary(); // 摘要 (B-C列)
-            worksheet.Cell(row, 4).Value = balance; // 受入金額 (D列)
-            worksheet.Cell(row, 5).Value = "";      // 払出金額 (E列)
-            worksheet.Cell(row, 6).Value = balance; // 残額 (F列)
+            worksheet.Cell(row, 2).Value = SummaryGenerator.GetCarryoverFromPreviousYearSummary(); // 摘要 (B-D列)
+            worksheet.Cell(row, 5).Value = balance; // 受入金額 (E列)
+            worksheet.Cell(row, 6).Value = "";      // 払出金額 (F列)
+            worksheet.Cell(row, 7).Value = balance; // 残額 (G列)
 
             // 罫線を適用
             ApplyDataRowBorder(worksheet, row);
@@ -438,14 +438,14 @@ namespace ICCardManager.Services
         {
             var dateStr = WarekiConverter.ToWareki(ledger.Date);
 
-            // 列配置: A=出納年月日, B-C=摘要(結合), D=受入金額, E=払出金額, F=残額, G=氏名, H-K=備考(結合)
+            // 列配置: A=出納年月日, B-D=摘要(結合), E=受入金額, F=払出金額, G=残額, H=氏名, I-L=備考(結合)
             worksheet.Cell(row, 1).Value = dateStr;           // 出納年月日 (A列)
-            worksheet.Cell(row, 2).Value = ledger.Summary;    // 摘要 (B-C列)
-            worksheet.Cell(row, 4).Value = ledger.Income > 0 ? ledger.Income : Blank.Value;  // 受入金額 (D列)
-            worksheet.Cell(row, 5).Value = ledger.Expense > 0 ? ledger.Expense : Blank.Value; // 払出金額 (E列)
-            worksheet.Cell(row, 6).Value = ledger.Balance;    // 残額 (F列)
-            worksheet.Cell(row, 7).Value = ledger.StaffName;  // 氏名 (G列)
-            worksheet.Cell(row, 8).Value = ledger.Note;       // 備考 (H-K列)
+            worksheet.Cell(row, 2).Value = ledger.Summary;    // 摘要 (B-D列)
+            worksheet.Cell(row, 5).Value = ledger.Income > 0 ? ledger.Income : Blank.Value;  // 受入金額 (E列)
+            worksheet.Cell(row, 6).Value = ledger.Expense > 0 ? ledger.Expense : Blank.Value; // 払出金額 (F列)
+            worksheet.Cell(row, 7).Value = ledger.Balance;    // 残額 (G列)
+            worksheet.Cell(row, 8).Value = ledger.StaffName;  // 氏名 (H列)
+            worksheet.Cell(row, 9).Value = ledger.Note;       // 備考 (I-L列)
 
             // 罫線を適用
             ApplyDataRowBorder(worksheet, row);
@@ -460,15 +460,15 @@ namespace ICCardManager.Services
             IXLWorksheet worksheet, int row, int month,
             int income, int expense, int balance, bool isMarch)
         {
-            // 列配置: A=出納年月日, B-C=摘要(結合), D=受入金額, E=払出金額, F=残額, G=氏名, H-K=備考(結合)
+            // 列配置: A=出納年月日, B-D=摘要(結合), E=受入金額, F=払出金額, G=残額, H=氏名, I-L=備考(結合)
             worksheet.Cell(row, 1).Value = "";  // 出納年月日（空欄）(A列)
-            worksheet.Cell(row, 2).Value = SummaryGenerator.GetMonthlySummary(month); // 摘要 (B-C列)
-            worksheet.Cell(row, 4).Value = income > 0 ? income : Blank.Value;   // 受入金額 (D列)
-            worksheet.Cell(row, 5).Value = expense > 0 ? expense : Blank.Value; // 払出金額 (E列)
-            worksheet.Cell(row, 6).Value = isMarch ? Blank.Value : balance; // 残額（3月は空欄）(F列)
+            worksheet.Cell(row, 2).Value = SummaryGenerator.GetMonthlySummary(month); // 摘要 (B-D列)
+            worksheet.Cell(row, 5).Value = income > 0 ? income : Blank.Value;   // 受入金額 (E列)
+            worksheet.Cell(row, 6).Value = expense > 0 ? expense : Blank.Value; // 払出金額 (F列)
+            worksheet.Cell(row, 7).Value = isMarch ? Blank.Value : balance; // 残額（3月は空欄）(G列)
 
             // 月計行にスタイルを適用
-            var range = worksheet.Range(row, 1, row, 11);
+            var range = worksheet.Range(row, 1, row, 12);
             range.Style.Font.Bold = true;
 
             // 罫線を適用
@@ -484,15 +484,15 @@ namespace ICCardManager.Services
             IXLWorksheet worksheet, int row,
             int income, int expense, int balance)
         {
-            // 列配置: A=出納年月日, B-C=摘要(結合), D=受入金額, E=払出金額, F=残額, G=氏名, H-K=備考(結合)
+            // 列配置: A=出納年月日, B-D=摘要(結合), E=受入金額, F=払出金額, G=残額, H=氏名, I-L=備考(結合)
             worksheet.Cell(row, 1).Value = "";  // 出納年月日（空欄）(A列)
-            worksheet.Cell(row, 2).Value = SummaryGenerator.GetCumulativeSummary(); // 摘要 (B-C列)
-            worksheet.Cell(row, 4).Value = income > 0 ? income : Blank.Value;   // 受入金額 (D列)
-            worksheet.Cell(row, 5).Value = expense > 0 ? expense : Blank.Value; // 払出金額 (E列)
-            worksheet.Cell(row, 6).Value = balance; // 残額 (F列)
+            worksheet.Cell(row, 2).Value = SummaryGenerator.GetCumulativeSummary(); // 摘要 (B-D列)
+            worksheet.Cell(row, 5).Value = income > 0 ? income : Blank.Value;   // 受入金額 (E列)
+            worksheet.Cell(row, 6).Value = expense > 0 ? expense : Blank.Value; // 払出金額 (F列)
+            worksheet.Cell(row, 7).Value = balance; // 残額 (G列)
 
             // 累計行にスタイルを適用
-            var range = worksheet.Range(row, 1, row, 11);
+            var range = worksheet.Range(row, 1, row, 12);
             range.Style.Font.Bold = true;
 
             // 罫線を適用
@@ -506,15 +506,15 @@ namespace ICCardManager.Services
         /// </summary>
         private int WriteCarryoverToNextYearRow(IXLWorksheet worksheet, int row, int balance)
         {
-            // 列配置: A=出納年月日, B-C=摘要(結合), D=受入金額, E=払出金額, F=残額, G=氏名, H-K=備考(結合)
+            // 列配置: A=出納年月日, B-D=摘要(結合), E=受入金額, F=払出金額, G=残額, H=氏名, I-L=備考(結合)
             worksheet.Cell(row, 1).Value = "";  // 出納年月日（空欄）(A列)
-            worksheet.Cell(row, 2).Value = SummaryGenerator.GetCarryoverToNextYearSummary(); // 摘要 (B-C列)
-            worksheet.Cell(row, 4).Value = "";  // 受入金額 (D列)
-            worksheet.Cell(row, 5).Value = balance; // 払出金額 (E列)
-            worksheet.Cell(row, 6).Value = 0;   // 残額 (F列)
+            worksheet.Cell(row, 2).Value = SummaryGenerator.GetCarryoverToNextYearSummary(); // 摘要 (B-D列)
+            worksheet.Cell(row, 5).Value = "";  // 受入金額 (E列)
+            worksheet.Cell(row, 6).Value = balance; // 払出金額 (F列)
+            worksheet.Cell(row, 7).Value = 0;   // 残額 (G列)
 
             // 繰越行にスタイルを適用
-            var range = worksheet.Range(row, 1, row, 11);
+            var range = worksheet.Range(row, 1, row, 12);
             range.Style.Font.Bold = true;
 
             // 罫線を適用
@@ -531,18 +531,18 @@ namespace ICCardManager.Services
             // 行の高さを30に設定
             worksheet.Row(row).Height = 30;
 
-            // D〜F列（受入金額、払出金額、残額）のフォントサイズを14ptに設定
-            // 最大金額20,000円（6文字）を考慮し、列幅10.58に収まるサイズ
-            var amountRange = worksheet.Range(row, 4, row, 6);
+            // E〜G列（受入金額、払出金額、残額）のフォントサイズを14ptに設定
+            // 最大金額20,000円（6文字）を考慮し、列幅10に収まるサイズ
+            var amountRange = worksheet.Range(row, 5, row, 7);
             amountRange.Style.Font.FontSize = 14;
 
-            // B列とC列を結合（摘要）
-            var summaryRange = worksheet.Range(row, 2, row, 3);
+            // B列からD列を結合（摘要）
+            var summaryRange = worksheet.Range(row, 2, row, 4);
             summaryRange.Merge();
             summaryRange.Style.Alignment.WrapText = true; // 折り返して全体を表示
 
-            // H列からK列を結合（備考）
-            var noteRange = worksheet.Range(row, 8, row, 11);
+            // I列からL列を結合（備考）
+            var noteRange = worksheet.Range(row, 9, row, 12);
             noteRange.Merge();
             noteRange.Style.Alignment.WrapText = true; // 折り返して全体を表示
 
@@ -553,11 +553,11 @@ namespace ICCardManager.Services
             dateCell.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
             dateCell.Style.Alignment.ShrinkToFit = true;
 
-            // G列（氏名）を中央寄せ
-            worksheet.Cell(row, 7).Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
+            // H列（氏名）を中央寄せ
+            worksheet.Cell(row, 8).Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
 
-            // A列からK列まで罫線を適用
-            var range = worksheet.Range(row, 1, row, 11);
+            // A列からL列まで罫線を適用
+            var range = worksheet.Range(row, 1, row, 12);
             range.Style.Border.TopBorder = XLBorderStyleValues.Thin;
             range.Style.Border.BottomBorder = XLBorderStyleValues.Thin;
             range.Style.Border.LeftBorder = XLBorderStyleValues.Thin;
