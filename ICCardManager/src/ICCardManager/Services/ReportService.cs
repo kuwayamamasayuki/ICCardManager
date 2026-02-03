@@ -387,9 +387,10 @@ namespace ICCardManager.Services
         private void SetHeaderInfo(IXLWorksheet worksheet, IcCard card)
         {
             // 2行目のヘッダ情報を設定（新テンプレートのセル位置に合わせる）
-            // E2: 品名の値（D2の「品名」ラベルの右）、H2: 規格の値（G2の「規格」ラベルの右）
+            worksheet.Cell("B2").Value = "雑品（金券類）";   // 物品の分類の値（固定）
             worksheet.Cell("E2").Value = card.CardType;      // 品名の値
             worksheet.Cell("H2").Value = card.CardNumber;    // 規格の値
+            worksheet.Cell("J2").Value = "円";               // 単位の値（固定）
 
             // ヘッダ行のフォントサイズを調整して1行に収める
             AdjustHeaderRowFontSize(worksheet);
@@ -470,6 +471,11 @@ namespace ICCardManager.Services
             // 月計行にスタイルを適用
             var range = worksheet.Range(row, 1, row, 12);
             range.Style.Font.Bold = true;
+
+            // 月計テキスト（B列）を中央揃え・14ptに設定
+            var summaryCell = worksheet.Cell(row, 2);
+            summaryCell.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
+            summaryCell.Style.Font.FontSize = 14;
 
             // 罫線を適用
             ApplyDataRowBorder(worksheet, row);

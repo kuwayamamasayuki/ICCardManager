@@ -659,9 +659,11 @@ public class ReportServiceTests : IDisposable
 
         // 2行目のヘッダ情報検証（テンプレートの値 + コードで設定した値）
         worksheet.Cell("A2").GetString().Should().Be("物品の分類");      // テンプレートの値
+        worksheet.Cell("B2").GetString().Should().Be("雑品（金券類）");  // 分類の値（コードで設定）
         worksheet.Cell("E2").GetString().Should().Be("SUGOCA");          // 品名（コードで設定）
         worksheet.Cell("H2").GetString().Should().Be("S-003");           // 規格（コードで設定）
         worksheet.Cell("I2").GetString().Should().Be("単位");            // テンプレートの値
+        worksheet.Cell("J2").GetString().Should().Be("円");              // 単位の値（コードで設定）
     }
 
     /// <summary>
