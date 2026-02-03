@@ -84,7 +84,7 @@ Source: "..\docs\manual\管理者マニュアル.docx"; DestDir: "{app}\Docs"; F
 
 ; デバッグツール（Issue #447対応）
 ; Toolsフォルダにすべてのファイルを配置
-Source: "..\publish\Tools\DebugDataViewer.exe"; DestDir: "{app}\Tools"; Flags: ignoreversion
+Source: "..\publish\Tools\*.exe"; DestDir: "{app}\Tools"; Flags: ignoreversion
 Source: "..\publish\Tools\*.dll"; DestDir: "{app}\Tools"; Flags: ignoreversion
 Source: "..\publish\Tools\*.config"; DestDir: "{app}\Tools"; Flags: ignoreversion skipifsourcedoesntexist
 Source: "..\publish\Tools\*.json"; DestDir: "{app}\Tools"; Flags: ignoreversion skipifsourcedoesntexist
