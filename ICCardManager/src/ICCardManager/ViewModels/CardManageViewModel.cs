@@ -725,6 +725,7 @@ namespace ICCardManager.ViewModels
             // コマンドの実行可否を再評価
             StartEditCommand.NotifyCanExecuteChanged();
             DeleteCommand.NotifyCanExecuteChanged();
+            RefundCommand.NotifyCanExecuteChanged();  // Issue #446対応: 払い戻しボタンの状態も更新
 
             // 新規登録モード中は選択変更を無視
             if (IsNewCard) return;
