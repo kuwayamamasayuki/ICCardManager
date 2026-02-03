@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 using System.Windows;
+using System.Windows.Input;
 using ICCardManager.Common;
 using ICCardManager.ViewModels;
 
@@ -65,6 +66,18 @@ namespace ICCardManager.Views.Dialogs
         private void CloseButton_Click(object sender, RoutedEventArgs e)
         {
             Close();
+        }
+
+        /// <summary>
+        /// キー入力処理（Issue #445対応: ESCキーで閉じる）
+        /// </summary>
+        private void Window_KeyDown(object sender, KeyEventArgs e)
+        {
+            if (e.Key == Key.Escape)
+            {
+                Close();
+                e.Handled = true;
+            }
         }
     }
 }
