@@ -458,6 +458,11 @@ namespace ICCardManager.Services
             worksheet.Cell(row, 6).Value = "";      // 払出金額 (F列)
             worksheet.Cell(row, 7).Value = balance; // 残額 (G列)
 
+            // 繰越テキスト（B列）を中央揃え・14ptに設定
+            var summaryCell = worksheet.Cell(row, 2);
+            summaryCell.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
+            summaryCell.Style.Font.FontSize = 14;
+
             // 罫線を適用
             ApplyDataRowBorder(worksheet, row);
 
@@ -565,6 +570,7 @@ namespace ICCardManager.Services
         /// Issue #451対応:
         /// - 受入金額・払出金額は0も表示（空欄にしない）
         /// - 上下に太線罫線を追加
+        /// - 累計テキストを中央揃え・14ptに設定
         /// </remarks>
         private int WriteCumulativeRow(
             IXLWorksheet worksheet, int row,
@@ -580,6 +586,11 @@ namespace ICCardManager.Services
             // 累計行にスタイルを適用
             var range = worksheet.Range(row, 1, row, 12);
             range.Style.Font.Bold = true;
+
+            // 累計テキスト（B列）を中央揃え・14ptに設定
+            var summaryCell = worksheet.Cell(row, 2);
+            summaryCell.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
+            summaryCell.Style.Font.FontSize = 14;
 
             // 罫線を適用（累計行は上下を太線に）
             ApplySummaryRowBorder(worksheet, row);
