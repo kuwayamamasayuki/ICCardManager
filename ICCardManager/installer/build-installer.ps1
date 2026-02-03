@@ -52,7 +52,7 @@ Write-Host "バージョン: $Version" -ForegroundColor Cyan
 Write-Host ""
 
 # Step 1: Inno Setup の確認
-Write-Host "[1/6] Inno Setup の確認..." -ForegroundColor Yellow
+Write-Host "[1/8] Inno Setup の確認..." -ForegroundColor Yellow
 $IsccPath = $null
 foreach ($path in $InnoSetupPaths) {
     if (Test-Path $path) {
@@ -70,7 +70,7 @@ Write-Host "  Inno Setup: $IsccPath" -ForegroundColor Green
 
 # Step 2: アイコンの生成
 Write-Host ""
-Write-Host "[2/6] アイコンの生成..." -ForegroundColor Yellow
+Write-Host "[2/8] アイコンの生成..." -ForegroundColor Yellow
 $IconScript = Join-Path $ScriptDir "generate-icon.ps1"
 $IconPath = Join-Path $ScriptDir "app.ico"
 
@@ -88,7 +88,7 @@ if (Test-Path $IconScript) {
 # Step 3: アプリケーションのビルド
 if (-not $SkipBuild) {
     Write-Host ""
-    Write-Host "[3/6] アプリケーションのビルド..." -ForegroundColor Yellow
+    Write-Host "[3/8] アプリケーションのビルド..." -ForegroundColor Yellow
 
     Push-Location $SrcDir
     try {
@@ -118,12 +118,60 @@ if (-not $SkipBuild) {
     }
 } else {
     Write-Host ""
-    Write-Host "[3/6] ビルドをスキップ（既存のpublishを使用）..." -ForegroundColor Yellow
+    Write-Host "[3/8] ビルドをスキップ（既存のpublishを使用）..." -ForegroundColor Yellow
 }
 
-# Step 4: リソースファイルのコピー
+# Step 4: デバッグツールのビルド
+if (-not $SkipBuild) {
+    Write-Host ""
+    Write-Host "[4/8] デバッグツールのビルド..." -ForegroundColor Yellow
+
+    $DebugToolDir = Join-Path $ProjectRoot "tools\DebugDataViewer"
+    $DebugToolPublishDir = Join-Path $PublishDir "Tools"
+
+    Push-Location $DebugToolDir
+    try {
+        # obj/binフォルダを削除してクリーンな状態にする
+        if (Test-Path "obj") { Remove-Item -Recurse -Force "obj" }
+        if (Test-Path "bin") { Remove-Item -Recurse -Force "bin" }
+
+        # 復元
+        dotnet restore -v q
+        if ($LASTEXITCODE -ne 0) { throw "復元に失敗しました" }
+
+        # 発行（.NET Framework 4.8 x86）
+        dotnet publish -c Release -o $DebugToolPublishDir -v q
+        if ($LASTEXITCODE -ne 0) { throw "ビルドに失敗しました" }
+
+        Write-Host "  DebugDataViewer ビルド完了: $DebugToolPublishDir" -ForegroundColor Green
+
+        # PDBファイルを削除（リリースビルドでは不要）
+        $PdbFiles = Get-ChildItem $DebugToolPublishDir -Filter "*.pdb" -ErrorAction SilentlyContinue
+        if ($PdbFiles) {
+            $PdbFiles | Remove-Item -Force
+            Write-Host "  PDBファイル: $($PdbFiles.Count) 個削除" -ForegroundColor Green
+        }
+
+        # ICCardManager.exe をToolsフォルダにコピー（依存関係として必要）
+        $MainAppExe = Join-Path $PublishDir "ICCardManager.exe"
+        if (Test-Path $MainAppExe) {
+            Copy-Item $MainAppExe -Destination $DebugToolPublishDir -Force
+            Write-Host "  ICCardManager.exe をToolsフォルダにコピー" -ForegroundColor Green
+        } else {
+            Write-Host "  警告: ICCardManager.exe が見つかりません。先にメインアプリをビルドしてください。" -ForegroundColor Yellow
+        }
+    }
+    finally {
+        Pop-Location
+    }
+} else {
+    Write-Host ""
+    Write-Host "[4/8] デバッグツールのビルドをスキップ..." -ForegroundColor Yellow
+}
+
+# Step 5: リソースファイルのコピー
 Write-Host ""
-Write-Host "[4/6] リソースファイルのコピー..." -ForegroundColor Yellow
+Write-Host "[5/8] リソースファイルのコピー..." -ForegroundColor Yellow
 
 $SoundsSource = Join-Path $SrcDir "Resources\Sounds"
 $SoundsDest = Join-Path $PublishDir "Resources\Sounds"
@@ -155,9 +203,9 @@ if (Test-Path $SqliteInteropSource) {
     Write-Host "  SQLite.Interop.dll: x86 フォルダにコピー" -ForegroundColor Green
 }
 
-# Step 5: 発行ファイルの確認
+# Step 6: 発行ファイルの確認
 Write-Host ""
-Write-Host "[5/6] 発行ファイルの確認..." -ForegroundColor Yellow
+Write-Host "[6/8] 発行ファイルの確認..." -ForegroundColor Yellow
 
 $ExePath = Join-Path $PublishDir "ICCardManager.exe"
 if (-not (Test-Path $ExePath)) {
@@ -178,9 +226,18 @@ if (Test-Path $ResourcesDir) {
     Write-Host "  テンプレートファイル: $($TemplateFiles.Count) 個" -ForegroundColor Green
 }
 
-# Step 6: インストーラーの作成
+# デバッグツールの確認
+$DebugToolExe = Join-Path $PublishDir "Tools\DebugDataViewer.exe"
+if (Test-Path $DebugToolExe) {
+    $DebugToolInfo = Get-Item $DebugToolExe
+    Write-Host "  デバッグツール: $($DebugToolInfo.Name) ($([math]::Round($DebugToolInfo.Length / 1KB, 2)) KB)" -ForegroundColor Green
+} else {
+    Write-Host "  デバッグツール: 見つかりません（-SkipBuildの場合はビルドが必要です）" -ForegroundColor Yellow
+}
+
+# Step 7: インストーラーの作成
 Write-Host ""
-Write-Host "[6/6] インストーラーの作成..." -ForegroundColor Yellow
+Write-Host "[7/8] インストーラーの作成..." -ForegroundColor Yellow
 
 # 出力ディレクトリの作成
 if (-not (Test-Path $OutputDir)) {
