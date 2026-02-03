@@ -124,12 +124,21 @@ public class ReportServiceTests : IDisposable
             CreateTestLedger(3, cardIdm, new DateTime(2024, 6, 15), "鉄道（天神～博多）", 0, 300, 9400, "鈴木花子", "会議")
         };
 
+        // 5月の前月残高（繰越用）
+        var mayLedgers = new List<Ledger>
+        {
+            CreateTestLedger(0, cardIdm, new DateTime(2024, 5, 31), "前月末データ", 0, 0, 5000)
+        };
+
         _cardRepositoryMock
             .Setup(r => r.GetByIdmAsync(cardIdm, true))
             .ReturnsAsync(card);
         _ledgerRepositoryMock
             .Setup(r => r.GetByMonthAsync(cardIdm, year, month))
             .ReturnsAsync(ledgers);
+        _ledgerRepositoryMock
+            .Setup(r => r.GetByMonthAsync(cardIdm, year, 5))  // 5月の前月残高
+            .ReturnsAsync(mayLedgers);
 
         // Act
         var result = await _reportService.CreateMonthlyReportAsync(cardIdm, year, month, outputPath);
@@ -146,29 +155,35 @@ public class ReportServiceTests : IDisposable
         worksheet.Cell("E2").GetString().Should().Be("はやかけん");
         worksheet.Cell("H2").GetString().Should().Be("001");
 
-        // データ行の検証（行5から開始、列はE=受入, F=払出, G=残額, H=氏名）
+        // 前月繰越行の検証（行5）- Issue #451で追加
+        worksheet.Cell(5, 1).GetString().Should().Be("R6.6.1");
+        worksheet.Cell(5, 2).GetString().Should().Be("5月より繰越");
+        worksheet.Cell(5, 5).GetValue<int>().Should().Be(5000);  // 受入金額 (E列)
+        worksheet.Cell(5, 7).GetValue<int>().Should().Be(5000);  // 残額 (G列)
+
+        // データ行の検証（行6から開始、列はE=受入, F=払出, G=残額, H=氏名）
         // 日付は和暦形式（R6.6.5 等）
-        worksheet.Cell(5, 1).GetString().Should().Be("R6.6.5");
-        worksheet.Cell(5, 2).GetString().Should().Be("鉄道（博多～天神）");
-        worksheet.Cell(5, 6).GetValue<int>().Should().Be(300);   // 払出金額 (F列)
-        worksheet.Cell(5, 7).GetValue<int>().Should().Be(4700);  // 残額 (G列)
-        worksheet.Cell(5, 8).GetString().Should().Be("田中太郎"); // 氏名 (H列)
+        worksheet.Cell(6, 1).GetString().Should().Be("R6.6.5");
+        worksheet.Cell(6, 2).GetString().Should().Be("鉄道（博多～天神）");
+        worksheet.Cell(6, 6).GetValue<int>().Should().Be(300);   // 払出金額 (F列)
+        worksheet.Cell(6, 7).GetValue<int>().Should().Be(4700);  // 残額 (G列)
+        worksheet.Cell(6, 8).GetString().Should().Be("田中太郎"); // 氏名 (H列)
 
-        worksheet.Cell(6, 1).GetString().Should().Be("R6.6.10");
-        worksheet.Cell(6, 2).GetString().Should().Be("役務費によりチャージ");
-        worksheet.Cell(6, 5).GetValue<int>().Should().Be(5000);  // 受入金額 (E列)
-        worksheet.Cell(6, 7).GetValue<int>().Should().Be(9700);  // 残額 (G列)
+        worksheet.Cell(7, 1).GetString().Should().Be("R6.6.10");
+        worksheet.Cell(7, 2).GetString().Should().Be("役務費によりチャージ");
+        worksheet.Cell(7, 5).GetValue<int>().Should().Be(5000);  // 受入金額 (E列)
+        worksheet.Cell(7, 7).GetValue<int>().Should().Be(9700);  // 残額 (G列)
 
-        worksheet.Cell(7, 1).GetString().Should().Be("R6.6.15");
-        worksheet.Cell(7, 2).GetString().Should().Be("鉄道（天神～博多）");
-        worksheet.Cell(7, 6).GetValue<int>().Should().Be(300);   // 払出金額 (F列)
-        worksheet.Cell(7, 7).GetValue<int>().Should().Be(9400);  // 残額 (G列)
-
-        // 月計行の検証
-        worksheet.Cell(8, 2).GetString().Should().Be("6月計");
-        worksheet.Cell(8, 5).GetValue<int>().Should().Be(5000);  // 受入合計 (E列)
-        worksheet.Cell(8, 6).GetValue<int>().Should().Be(600);   // 払出合計 (F列)
+        worksheet.Cell(8, 1).GetString().Should().Be("R6.6.15");
+        worksheet.Cell(8, 2).GetString().Should().Be("鉄道（天神～博多）");
+        worksheet.Cell(8, 6).GetValue<int>().Should().Be(300);   // 払出金額 (F列)
         worksheet.Cell(8, 7).GetValue<int>().Should().Be(9400);  // 残額 (G列)
+
+        // 月計行の検証（行9）- Issue #451: 残額は常に空欄
+        worksheet.Cell(9, 2).GetString().Should().Be("6月計");
+        worksheet.Cell(9, 5).GetValue<int>().Should().Be(5000);  // 受入合計 (E列)
+        worksheet.Cell(9, 6).GetValue<int>().Should().Be(600);   // 払出合計 (F列)
+        worksheet.Cell(9, 7).GetString().Should().BeEmpty();     // 残額は常に空欄 (G列)
     }
 
     /// <summary>
@@ -239,6 +254,12 @@ public class ReportServiceTests : IDisposable
             CreateTestLedger(2, cardIdm, new DateTime(2024, 3, 20), "役務費によりチャージ", 5000, 0, 13700, "鈴木花子")
         };
 
+        // 2月の前月残高（繰越用）
+        var februaryLedgers = new List<Ledger>
+        {
+            CreateTestLedger(0, cardIdm, new DateTime(2024, 2, 28), "前月末データ", 0, 0, 9000)
+        };
+
         // 年度の累計データ（2023年4月～2024年3月）
         var yearlyLedgers = new List<Ledger>
         {
@@ -256,6 +277,9 @@ public class ReportServiceTests : IDisposable
             .Setup(r => r.GetByMonthAsync(cardIdm, year, month))
             .ReturnsAsync(marchLedgers);
         _ledgerRepositoryMock
+            .Setup(r => r.GetByMonthAsync(cardIdm, year, 2))  // 2月の前月残高
+            .ReturnsAsync(februaryLedgers);
+        _ledgerRepositoryMock
             .Setup(r => r.GetByDateRangeAsync(cardIdm, It.IsAny<DateTime>(), It.IsAny<DateTime>()))
             .ReturnsAsync(yearlyLedgers);
 
@@ -268,26 +292,31 @@ public class ReportServiceTests : IDisposable
         using var workbook = new XLWorkbook(outputPath);
         var worksheet = workbook.Worksheets.First();
 
-        // データ行の検証（行5から開始）
-        worksheet.Cell(5, 2).GetString().Should().Be("鉄道（博多～天神）");
-        worksheet.Cell(6, 2).GetString().Should().Be("役務費によりチャージ");
+        // 前月繰越行の検証（行5）- Issue #451で追加
+        worksheet.Cell(5, 2).GetString().Should().Be("2月より繰越");
+        worksheet.Cell(5, 5).GetValue<int>().Should().Be(9000);  // 受入金額 (E列)
+        worksheet.Cell(5, 7).GetValue<int>().Should().Be(9000);  // 残額 (G列)
 
-        // 月計行の検証（行7）- 3月は残額が空欄
-        worksheet.Cell(7, 2).GetString().Should().Be("3月計");
-        worksheet.Cell(7, 5).GetValue<int>().Should().Be(5000);  // 受入：3月のチャージ (E列)
-        worksheet.Cell(7, 6).GetValue<int>().Should().Be(300);   // 払出：3月の利用 (F列)
-        worksheet.Cell(7, 7).GetString().Should().BeEmpty();     // 3月は残額空欄 (G列)
+        // データ行の検証（行6から開始）
+        worksheet.Cell(6, 2).GetString().Should().Be("鉄道（博多～天神）");
+        worksheet.Cell(7, 2).GetString().Should().Be("役務費によりチャージ");
 
-        // 累計行の検証（行8）
-        worksheet.Cell(8, 2).GetString().Should().Be("累計");
-        worksheet.Cell(8, 5).GetValue<int>().Should().Be(15000);  // 年度累計受入 (E列)
-        worksheet.Cell(8, 6).GetValue<int>().Should().Be(1600);   // 年度累計払出 (F列)
-        worksheet.Cell(8, 7).GetValue<int>().Should().Be(13700);  // 最終残額 (G列)
+        // 月計行の検証（行8）- Issue #451: 残額は常に空欄
+        worksheet.Cell(8, 2).GetString().Should().Be("3月計");
+        worksheet.Cell(8, 5).GetValue<int>().Should().Be(5000);  // 受入：3月のチャージ (E列)
+        worksheet.Cell(8, 6).GetValue<int>().Should().Be(300);   // 払出：3月の利用 (F列)
+        worksheet.Cell(8, 7).GetString().Should().BeEmpty();     // 残額は常に空欄 (G列)
 
-        // 次年度繰越行の検証（行9）
-        worksheet.Cell(9, 2).GetString().Should().Be("次年度へ繰越");
-        worksheet.Cell(9, 6).GetValue<int>().Should().Be(13700);  // 払出として繰越 (F列)
-        worksheet.Cell(9, 7).GetValue<int>().Should().Be(0);      // 残額0 (G列)
+        // 累計行の検証（行9）
+        worksheet.Cell(9, 2).GetString().Should().Be("累計");
+        worksheet.Cell(9, 5).GetValue<int>().Should().Be(15000);  // 年度累計受入 (E列)
+        worksheet.Cell(9, 6).GetValue<int>().Should().Be(1600);   // 年度累計払出 (F列)
+        worksheet.Cell(9, 7).GetValue<int>().Should().Be(13700);  // 最終残額 (G列)
+
+        // 次年度繰越行の検証（行10）
+        worksheet.Cell(10, 2).GetString().Should().Be("次年度へ繰越");
+        worksheet.Cell(10, 6).GetValue<int>().Should().Be(13700);  // 払出として繰越 (F列)
+        worksheet.Cell(10, 7).GetValue<int>().Should().Be(0);      // 残額0 (G列)
     }
 
     /// <summary>
@@ -312,12 +341,21 @@ public class ReportServiceTests : IDisposable
             CreateTestLedger(5, cardIdm, new DateTime(2024, 7, 20), "鉄道（天神～博多 往復）", 0, 600, 11900, "山田次郎"),
         };
 
+        // 6月の前月残高（繰越用）
+        var juneLedgers = new List<Ledger>
+        {
+            CreateTestLedger(0, cardIdm, new DateTime(2024, 6, 30), "前月末データ", 0, 0, 0)
+        };
+
         _cardRepositoryMock
             .Setup(r => r.GetByIdmAsync(cardIdm, true))
             .ReturnsAsync(card);
         _ledgerRepositoryMock
             .Setup(r => r.GetByMonthAsync(cardIdm, year, month))
             .ReturnsAsync(ledgers);
+        _ledgerRepositoryMock
+            .Setup(r => r.GetByMonthAsync(cardIdm, year, 6))  // 6月の前月残高
+            .ReturnsAsync(juneLedgers);
 
         // Act
         var result = await _reportService.CreateMonthlyReportAsync(cardIdm, year, month, outputPath);
@@ -328,27 +366,30 @@ public class ReportServiceTests : IDisposable
         using var workbook = new XLWorkbook(outputPath);
         var worksheet = workbook.Worksheets.First();
 
-        // 各行のデータ検証（行5から開始、E=受入、F=払出）
-        worksheet.Cell(5, 2).GetString().Should().Be("役務費によりチャージ");
-        worksheet.Cell(5, 5).GetValue<int>().Should().Be(10000);  // 受入金額 (E列)
+        // 前月繰越行の検証（行5）- Issue #451で追加
+        worksheet.Cell(5, 2).GetString().Should().Be("6月より繰越");
 
-        worksheet.Cell(6, 2).GetString().Should().Be("鉄道（博多～天神）");
-        worksheet.Cell(6, 6).GetValue<int>().Should().Be(300);    // 払出金額 (F列)
+        // 各行のデータ検証（行6から開始、E=受入、F=払出）
+        worksheet.Cell(6, 2).GetString().Should().Be("役務費によりチャージ");
+        worksheet.Cell(6, 5).GetValue<int>().Should().Be(10000);  // 受入金額 (E列)
 
-        worksheet.Cell(7, 2).GetString().Should().Be("バス（★）");
-        worksheet.Cell(7, 6).GetValue<int>().Should().Be(200);    // 払出金額 (F列)
+        worksheet.Cell(7, 2).GetString().Should().Be("鉄道（博多～天神）");
+        worksheet.Cell(7, 6).GetValue<int>().Should().Be(300);    // 払出金額 (F列)
 
-        worksheet.Cell(8, 2).GetString().Should().Be("役務費によりチャージ");
-        worksheet.Cell(8, 5).GetValue<int>().Should().Be(3000);   // 受入金額 (E列)
+        worksheet.Cell(8, 2).GetString().Should().Be("バス（★）");
+        worksheet.Cell(8, 6).GetValue<int>().Should().Be(200);    // 払出金額 (F列)
 
-        worksheet.Cell(9, 2).GetString().Should().Be("鉄道（天神～博多 往復）");
-        worksheet.Cell(9, 6).GetValue<int>().Should().Be(600);    // 払出金額 (F列)
+        worksheet.Cell(9, 2).GetString().Should().Be("役務費によりチャージ");
+        worksheet.Cell(9, 5).GetValue<int>().Should().Be(3000);   // 受入金額 (E列)
 
-        // 月計の検証（行10）
-        worksheet.Cell(10, 2).GetString().Should().Be("7月計");
-        worksheet.Cell(10, 5).GetValue<int>().Should().Be(13000);  // チャージ合計 (E列)
-        worksheet.Cell(10, 6).GetValue<int>().Should().Be(1100);   // 利用合計 (F列)
-        worksheet.Cell(10, 7).GetValue<int>().Should().Be(11900);  // 最終残額 (G列)
+        worksheet.Cell(10, 2).GetString().Should().Be("鉄道（天神～博多 往復）");
+        worksheet.Cell(10, 6).GetValue<int>().Should().Be(600);    // 払出金額 (F列)
+
+        // 月計の検証（行11）- Issue #451: 残額は常に空欄
+        worksheet.Cell(11, 2).GetString().Should().Be("7月計");
+        worksheet.Cell(11, 5).GetValue<int>().Should().Be(13000);  // チャージ合計 (E列)
+        worksheet.Cell(11, 6).GetValue<int>().Should().Be(1100);   // 利用合計 (F列)
+        worksheet.Cell(11, 7).GetString().Should().BeEmpty();      // 残額は常に空欄 (G列)
     }
 
     /// <summary>
@@ -372,12 +413,21 @@ public class ReportServiceTests : IDisposable
             CreateTestLedger(3, cardIdm, new DateTime(2024, 8, 10), "鉄道（天神～博多）", 0, 300, 9400, "鈴木花子")
         };
 
+        // 7月の前月残高（繰越用）
+        var julyLedgers = new List<Ledger>
+        {
+            CreateTestLedger(0, cardIdm, new DateTime(2024, 7, 31), "前月末データ", 0, 0, 10000)
+        };
+
         _cardRepositoryMock
             .Setup(r => r.GetByIdmAsync(cardIdm, true))
             .ReturnsAsync(card);
         _ledgerRepositoryMock
             .Setup(r => r.GetByMonthAsync(cardIdm, year, month))
             .ReturnsAsync(ledgers);
+        _ledgerRepositoryMock
+            .Setup(r => r.GetByMonthAsync(cardIdm, year, 7))  // 7月の前月残高
+            .ReturnsAsync(julyLedgers);
 
         // Act
         var result = await _reportService.CreateMonthlyReportAsync(cardIdm, year, month, outputPath);
@@ -388,14 +438,17 @@ public class ReportServiceTests : IDisposable
         using var workbook = new XLWorkbook(outputPath);
         var worksheet = workbook.Worksheets.First();
 
-        // 行5と行6にデータがあり、貸出中レコードは除外されている
-        worksheet.Cell(5, 2).GetString().Should().Be("鉄道（博多～天神）");
-        worksheet.Cell(6, 2).GetString().Should().Be("鉄道（天神～博多）");
-        // 貸出中レコードがスキップされたので、月計は行7
-        worksheet.Cell(7, 2).GetString().Should().Be("8月計");
+        // 前月繰越行の検証（行5）- Issue #451で追加
+        worksheet.Cell(5, 2).GetString().Should().Be("7月より繰越");
+
+        // 行6と行7にデータがあり、貸出中レコードは除外されている
+        worksheet.Cell(6, 2).GetString().Should().Be("鉄道（博多～天神）");
+        worksheet.Cell(7, 2).GetString().Should().Be("鉄道（天神～博多）");
+        // 貸出中レコードがスキップされたので、月計は行8
+        worksheet.Cell(8, 2).GetString().Should().Be("8月計");
 
         // 月計には貸出中レコードが含まれない（払出金額はF列）
-        worksheet.Cell(7, 6).GetValue<int>().Should().Be(600);  // 300 + 300 = 600
+        worksheet.Cell(8, 6).GetValue<int>().Should().Be(600);  // 300 + 300 = 600
     }
 
     /// <summary>
@@ -420,12 +473,21 @@ public class ReportServiceTests : IDisposable
             CreateTestLedger(2, cardIdm, new DateTime(2024, 9, 10), "利用2", 0, 100, 9800),
         };
 
+        // 8月の前月残高（繰越用）
+        var augustLedgers = new List<Ledger>
+        {
+            CreateTestLedger(0, cardIdm, new DateTime(2024, 8, 31), "前月末データ", 0, 0, 10000)
+        };
+
         _cardRepositoryMock
             .Setup(r => r.GetByIdmAsync(cardIdm, true))
             .ReturnsAsync(card);
         _ledgerRepositoryMock
             .Setup(r => r.GetByMonthAsync(cardIdm, year, month))
             .ReturnsAsync(ledgers);
+        _ledgerRepositoryMock
+            .Setup(r => r.GetByMonthAsync(cardIdm, year, 8))  // 8月の前月残高
+            .ReturnsAsync(augustLedgers);
 
         // Act
         var result = await _reportService.CreateMonthlyReportAsync(cardIdm, year, month, outputPath);
@@ -436,11 +498,14 @@ public class ReportServiceTests : IDisposable
         using var workbook = new XLWorkbook(outputPath);
         var worksheet = workbook.Worksheets.First();
 
-        // 日付順 → ID順でソートされている（行5から開始）
-        worksheet.Cell(5, 2).GetString().Should().Be("利用1");   // 9/1, ID:1
-        worksheet.Cell(6, 2).GetString().Should().Be("利用2");   // 9/10, ID:2
-        worksheet.Cell(7, 2).GetString().Should().Be("利用3");   // 9/15, ID:3
-        worksheet.Cell(8, 2).GetString().Should().Be("利用4");  // 9/15, ID:4
+        // 前月繰越行の検証（行5）- Issue #451で追加
+        worksheet.Cell(5, 2).GetString().Should().Be("8月より繰越");
+
+        // 日付順 → ID順でソートされている（行6から開始）
+        worksheet.Cell(6, 2).GetString().Should().Be("利用1");   // 9/1, ID:1
+        worksheet.Cell(7, 2).GetString().Should().Be("利用2");   // 9/10, ID:2
+        worksheet.Cell(8, 2).GetString().Should().Be("利用3");   // 9/15, ID:3
+        worksheet.Cell(9, 2).GetString().Should().Be("利用4");   // 9/15, ID:4
     }
 
     /// <summary>
@@ -524,12 +589,21 @@ public class ReportServiceTests : IDisposable
         var month = 11;
         var outputPath = CreateTempFilePath();
 
+        // 10月の前月残高（繰越用）
+        var octoberLedgers = new List<Ledger>
+        {
+            CreateTestLedger(0, cardIdm, new DateTime(2024, 10, 31), "前月末データ", 0, 0, 5000)
+        };
+
         _cardRepositoryMock
             .Setup(r => r.GetByIdmAsync(cardIdm, true))
             .ReturnsAsync(card);
         _ledgerRepositoryMock
             .Setup(r => r.GetByMonthAsync(cardIdm, year, month))
             .ReturnsAsync(new List<Ledger>());
+        _ledgerRepositoryMock
+            .Setup(r => r.GetByMonthAsync(cardIdm, year, 10))  // 10月の前月残高
+            .ReturnsAsync(octoberLedgers);
 
         // Act
         var result = await _reportService.CreateMonthlyReportAsync(cardIdm, year, month, outputPath);
@@ -544,8 +618,11 @@ public class ReportServiceTests : IDisposable
         // ヘッダーは設定されている（2行目に品名を設定）
         worksheet.Cell("E2").GetString().Should().Be("はやかけん");
 
-        // 月計行のみ出力（データなし、行5）
-        worksheet.Cell(5, 2).GetString().Should().Be("11月計");
+        // 前月繰越行の検証（行5）- Issue #451で追加
+        worksheet.Cell(5, 2).GetString().Should().Be("10月より繰越");
+
+        // 月計行のみ出力（データなし、行6）
+        worksheet.Cell(6, 2).GetString().Should().Be("11月計");
     }
 
     /// <summary>
@@ -667,7 +744,7 @@ public class ReportServiceTests : IDisposable
     }
 
     /// <summary>
-    /// TC012: 金額0の場合は空欄になる
+    /// TC012: 金額0の場合は空欄になる（データ行のみ、月計行は0を表示）
     /// </summary>
     [Fact]
     public async Task CreateMonthlyReportAsync_WithZeroAmount_ShouldShowBlank()
@@ -687,12 +764,21 @@ public class ReportServiceTests : IDisposable
             CreateTestLedger(2, cardIdm, new DateTime(2024, 6, 10), "役務費によりチャージ", 5000, 0, 14700)
         };
 
+        // 5月の前月残高（繰越用）
+        var mayLedgers = new List<Ledger>
+        {
+            CreateTestLedger(0, cardIdm, new DateTime(2024, 5, 31), "前月末データ", 0, 0, 10000)
+        };
+
         _cardRepositoryMock
             .Setup(r => r.GetByIdmAsync(cardIdm, true))
             .ReturnsAsync(card);
         _ledgerRepositoryMock
             .Setup(r => r.GetByMonthAsync(cardIdm, year, month))
             .ReturnsAsync(ledgers);
+        _ledgerRepositoryMock
+            .Setup(r => r.GetByMonthAsync(cardIdm, year, 5))  // 5月の前月残高
+            .ReturnsAsync(mayLedgers);
 
         // Act
         var result = await _reportService.CreateMonthlyReportAsync(cardIdm, year, month, outputPath);
@@ -703,13 +789,16 @@ public class ReportServiceTests : IDisposable
         using var workbook = new XLWorkbook(outputPath);
         var worksheet = workbook.Worksheets.First();
 
-        // 利用行：受入（E列）は空欄、払出はF列
-        worksheet.Cell(5, 5).IsEmpty().Should().BeTrue();    // 受入金額 (E列)
-        worksheet.Cell(5, 6).GetValue<int>().Should().Be(300); // 払出金額 (F列)
+        // 前月繰越行の検証（行5）- Issue #451で追加
+        worksheet.Cell(5, 2).GetString().Should().Be("5月より繰越");
+
+        // 利用行：受入（E列）は空欄、払出はF列（行6から開始）
+        worksheet.Cell(6, 5).IsEmpty().Should().BeTrue();    // 受入金額 (E列)
+        worksheet.Cell(6, 6).GetValue<int>().Should().Be(300); // 払出金額 (F列)
 
         // チャージ行：受入はE列、払出（F列）は空欄
-        worksheet.Cell(6, 5).GetValue<int>().Should().Be(5000); // 受入金額 (E列)
-        worksheet.Cell(6, 6).IsEmpty().Should().BeTrue();       // 払出金額 (F列)
+        worksheet.Cell(7, 5).GetValue<int>().Should().Be(5000); // 受入金額 (E列)
+        worksheet.Cell(7, 6).IsEmpty().Should().BeTrue();       // 払出金額 (F列)
     }
 
     /// <summary>
@@ -730,6 +819,12 @@ public class ReportServiceTests : IDisposable
             CreateTestLedger(1, cardIdm, new DateTime(2024, 3, 5), "鉄道（博多～天神）", 0, 300, 9700)
         };
 
+        // 2月の前月残高（繰越用）
+        var februaryLedgers = new List<Ledger>
+        {
+            CreateTestLedger(0, cardIdm, new DateTime(2024, 2, 28), "前月末データ", 0, 0, 10000)
+        };
+
         var yearlyLedgers = new List<Ledger>
         {
             CreateTestLedger(1, cardIdm, new DateTime(2024, 3, 5), "鉄道（博多～天神）", 0, 300, 9700)
@@ -741,6 +836,9 @@ public class ReportServiceTests : IDisposable
         _ledgerRepositoryMock
             .Setup(r => r.GetByMonthAsync(cardIdm, year, month))
             .ReturnsAsync(marchLedgers);
+        _ledgerRepositoryMock
+            .Setup(r => r.GetByMonthAsync(cardIdm, year, 2))  // 2月の前月残高
+            .ReturnsAsync(februaryLedgers);
         _ledgerRepositoryMock
             .Setup(r => r.GetByDateRangeAsync(cardIdm, It.IsAny<DateTime>(), It.IsAny<DateTime>()))
             .ReturnsAsync(yearlyLedgers);
@@ -754,20 +852,24 @@ public class ReportServiceTests : IDisposable
         using var workbook = new XLWorkbook(outputPath);
         var worksheet = workbook.Worksheets.First();
 
-        // データ行はボールドではない（行5から開始）
+        // 前月繰越行はボールドではない（行5）- Issue #451で追加
+        worksheet.Cell(5, 2).GetString().Should().Be("2月より繰越");
         worksheet.Cell(5, 2).Style.Font.Bold.Should().BeFalse();
 
-        // 月計行はボールド（行6）
-        worksheet.Cell(6, 2).GetString().Should().Be("3月計");
-        worksheet.Cell(6, 2).Style.Font.Bold.Should().BeTrue();
+        // データ行はボールドではない（行6から開始）
+        worksheet.Cell(6, 2).Style.Font.Bold.Should().BeFalse();
 
-        // 累計行はボールド（行7）
-        worksheet.Cell(7, 2).GetString().Should().Be("累計");
+        // 月計行はボールド（行7）
+        worksheet.Cell(7, 2).GetString().Should().Be("3月計");
         worksheet.Cell(7, 2).Style.Font.Bold.Should().BeTrue();
 
-        // 次年度繰越行はボールド（行8）
-        worksheet.Cell(8, 2).GetString().Should().Be("次年度へ繰越");
+        // 累計行はボールド（行8）
+        worksheet.Cell(8, 2).GetString().Should().Be("累計");
         worksheet.Cell(8, 2).Style.Font.Bold.Should().BeTrue();
+
+        // 次年度繰越行はボールド（行9）
+        worksheet.Cell(9, 2).GetString().Should().Be("次年度へ繰越");
+        worksheet.Cell(9, 2).Style.Font.Bold.Should().BeTrue();
     }
 
     /// <summary>
@@ -836,6 +938,12 @@ public class ReportServiceTests : IDisposable
             CreateTestLedger(10, cardIdm, new DateTime(2024, 3, 15), "鉄道（博多～天神）", 0, 400, 12600)
         };
 
+        // 2月の前月残高（繰越用）
+        var februaryLedgers = new List<Ledger>
+        {
+            CreateTestLedger(6, cardIdm, new DateTime(2024, 2, 20), "鉄道（博多～天神）", 0, 700, 13000)
+        };
+
         // 年度全体のデータ（2023年4月～2024年3月）
         var fiscalYearLedgers = new List<Ledger>
         {
@@ -862,6 +970,9 @@ public class ReportServiceTests : IDisposable
             .Setup(r => r.GetByMonthAsync(cardIdm, year, month))
             .ReturnsAsync(marchLedgers);
         _ledgerRepositoryMock
+            .Setup(r => r.GetByMonthAsync(cardIdm, year, 2))  // 2月の前月残高
+            .ReturnsAsync(februaryLedgers);
+        _ledgerRepositoryMock
             .Setup(r => r.GetByDateRangeAsync(cardIdm,
                 new DateTime(2023, 4, 1),  // 前年4月1日
                 new DateTime(2024, 3, 31)))  // 当年3月31日
@@ -876,10 +987,11 @@ public class ReportServiceTests : IDisposable
         using var workbook = new XLWorkbook(outputPath);
         var worksheet = workbook.Worksheets.First();
 
-        // 累計行の検証（行5=データ、行6=月計、行7=累計）
+        // Issue #451: 前月繰越行が追加されるため、行番号が+1
+        // 累計行の検証（行5=繰越、行6=データ、行7=月計、行8=累計）
         // 年度受入合計: 10000 + 5000 = 15000
         // 年度払出合計: 500 + 500 + 300 + 700 + 400 = 2400
-        var cumulativeRow = 7;  // データ1行(5) + 月計1行(6) + 累計(7)
+        var cumulativeRow = 8;  // 繰越(5) + データ1行(6) + 月計1行(7) + 累計(8)
         worksheet.Cell(cumulativeRow, 2).GetString().Should().Be("累計");
         worksheet.Cell(cumulativeRow, 5).GetValue<int>().Should().Be(15000);  // 年度受入合計 (E列)
         worksheet.Cell(cumulativeRow, 6).GetValue<int>().Should().Be(2400);   // 年度払出合計 (F列)
@@ -948,6 +1060,12 @@ public class ReportServiceTests : IDisposable
         var month = 3;
         var outputPath = CreateTempFilePath();
 
+        // 2月の前月残高（繰越用）
+        var februaryLedgers = new List<Ledger>
+        {
+            CreateTestLedger(3, cardIdm, new DateTime(2024, 2, 15), "鉄道（天神～博多）", 0, 300, 9200)
+        };
+
         // 年度のデータ（3月以外）
         var fiscalYearLedgers = new List<Ledger>
         {
@@ -963,6 +1081,9 @@ public class ReportServiceTests : IDisposable
             .Setup(r => r.GetByMonthAsync(cardIdm, year, month))
             .ReturnsAsync(new List<Ledger>());  // 3月データなし
         _ledgerRepositoryMock
+            .Setup(r => r.GetByMonthAsync(cardIdm, year, 2))  // 2月の前月残高
+            .ReturnsAsync(februaryLedgers);
+        _ledgerRepositoryMock
             .Setup(r => r.GetByDateRangeAsync(cardIdm,
                 new DateTime(2023, 4, 1),
                 new DateTime(2024, 3, 31)))
@@ -977,20 +1098,29 @@ public class ReportServiceTests : IDisposable
         using var workbook = new XLWorkbook(outputPath);
         var worksheet = workbook.Worksheets.First();
 
-        // 月計行（3月はデータなしなので0）- 行5、列配置: B=摘要, G=残額
-        worksheet.Cell(5, 2).GetString().Should().Be("3月計");
-        worksheet.Cell(5, 7).GetString().Should().BeEmpty();  // 3月の月計残額は空欄 (G列)
+        // Issue #451: 前月繰越行が追加されるため、行番号が+1
 
-        // 累計行 - 行6、列配置: E=受入金額, F=払出金額, G=残額
-        worksheet.Cell(6, 2).GetString().Should().Be("累計");
-        worksheet.Cell(6, 5).GetValue<int>().Should().Be(10000);  // E列=年度受入合計
-        worksheet.Cell(6, 6).GetValue<int>().Should().Be(800);    // F列=年度払出合計 (500 + 300)
-        worksheet.Cell(6, 7).GetValue<int>().Should().Be(9200);   // G列=2月末の残高
+        // 前月繰越行（行5）- Issue #451で追加
+        worksheet.Cell(5, 2).GetString().Should().Be("2月より繰越");
+        worksheet.Cell(5, 5).GetValue<int>().Should().Be(9200);  // 受入金額 (E列)
+        worksheet.Cell(5, 7).GetValue<int>().Should().Be(9200);  // 残額 (G列)
 
-        // 次年度繰越行 - 行7、列配置: F=払出金額, G=残額
-        worksheet.Cell(7, 2).GetString().Should().Be("次年度へ繰越");
-        worksheet.Cell(7, 6).GetValue<int>().Should().Be(9200);   // F列=払出金額
-        worksheet.Cell(7, 7).GetValue<int>().Should().Be(0);      // G列=残額
+        // 月計行（3月はデータなしなので0）- 行6、列配置: B=摘要, G=残額
+        worksheet.Cell(6, 2).GetString().Should().Be("3月計");
+        worksheet.Cell(6, 5).GetValue<int>().Should().Be(0);     // 受入0も表示 (E列)
+        worksheet.Cell(6, 6).GetValue<int>().Should().Be(0);     // 払出0も表示 (F列)
+        worksheet.Cell(6, 7).GetString().Should().BeEmpty();     // 残額は常に空欄 (G列)
+
+        // 累計行 - 行7、列配置: E=受入金額, F=払出金額, G=残額
+        worksheet.Cell(7, 2).GetString().Should().Be("累計");
+        worksheet.Cell(7, 5).GetValue<int>().Should().Be(10000);  // E列=年度受入合計
+        worksheet.Cell(7, 6).GetValue<int>().Should().Be(800);    // F列=年度払出合計 (500 + 300)
+        worksheet.Cell(7, 7).GetValue<int>().Should().Be(9200);   // G列=2月末の残高
+
+        // 次年度繰越行 - 行8、列配置: F=払出金額, G=残額
+        worksheet.Cell(8, 2).GetString().Should().Be("次年度へ繰越");
+        worksheet.Cell(8, 6).GetValue<int>().Should().Be(9200);   // F列=払出金額
+        worksheet.Cell(8, 7).GetValue<int>().Should().Be(0);      // G列=残額
     }
 
     /// <summary>
@@ -1031,8 +1161,11 @@ public class ReportServiceTests : IDisposable
         worksheet.Cell(5, 5).GetValue<int>().Should().Be(marchEndBalance);  // E列=受入金額
         worksheet.Cell(5, 7).GetValue<int>().Should().Be(marchEndBalance);  // G列=残額
 
-        // 月計行（行6、データなし）
+        // 月計行（行6、データなし）- Issue #451: 0も表示
         worksheet.Cell(6, 2).GetString().Should().Be("4月計");
+        worksheet.Cell(6, 5).GetValue<int>().Should().Be(0);     // 受入0も表示 (E列)
+        worksheet.Cell(6, 6).GetValue<int>().Should().Be(0);     // 払出0も表示 (F列)
+        worksheet.Cell(6, 7).GetString().Should().BeEmpty();     // 残額は常に空欄 (G列)
     }
 
     /// <summary>
@@ -1054,6 +1187,12 @@ public class ReportServiceTests : IDisposable
             CreateTestLedger(2, cardIdm, new DateTime(2024, 3, 25), SummaryGenerator.GetLendingSummary(), 0, 0, 9700, "田中太郎", isLentRecord: true)
         };
 
+        // 2月の前月残高（繰越用）
+        var februaryLedgers = new List<Ledger>
+        {
+            CreateTestLedger(0, cardIdm, new DateTime(2024, 2, 28), "前月末データ", 0, 0, 10000)
+        };
+
         var fiscalYearLedgers = new List<Ledger>
         {
             CreateTestLedger(1, cardIdm, new DateTime(2023, 4, 10), "役務費によりチャージ", 10000, 0, 10000),
@@ -1066,6 +1205,9 @@ public class ReportServiceTests : IDisposable
         _ledgerRepositoryMock
             .Setup(r => r.GetByMonthAsync(cardIdm, 2024, 3))
             .ReturnsAsync(marchLedgers);
+        _ledgerRepositoryMock
+            .Setup(r => r.GetByMonthAsync(cardIdm, 2024, 2))  // 2月の前月残高
+            .ReturnsAsync(februaryLedgers);
         _ledgerRepositoryMock
             .Setup(r => r.GetByDateRangeAsync(cardIdm,
                 new DateTime(2023, 4, 1),
@@ -1081,13 +1223,18 @@ public class ReportServiceTests : IDisposable
         using var workbook = new XLWorkbook(outputPath);
         var worksheet = workbook.Worksheets.First();
 
+        // Issue #451: 前月繰越行が追加されるため、行番号が+1
+
+        // 前月繰越行（行5）
+        worksheet.Cell(5, 2).GetString().Should().Be("2月より繰越");
+
         // 貸出中レコードは除外されている
-        worksheet.Cell(5, 2).GetString().Should().Be("鉄道（博多～天神）");
-        worksheet.Cell(6, 2).GetString().Should().Be("3月計");  // 貸出中がスキップされたので月計は行6
+        worksheet.Cell(6, 2).GetString().Should().Be("鉄道（博多～天神）");
+        worksheet.Cell(7, 2).GetString().Should().Be("3月計");  // 貸出中がスキップされたので月計は行7
 
         // 次年度繰越は貸出中の残高で計算される
-        worksheet.Cell(8, 2).GetString().Should().Be("次年度へ繰越");
-        worksheet.Cell(8, 6).GetValue<int>().Should().Be(9700);  // F列=払出金額
+        worksheet.Cell(9, 2).GetString().Should().Be("次年度へ繰越");
+        worksheet.Cell(9, 6).GetValue<int>().Should().Be(9700);  // F列=払出金額
     }
 
     /// <summary>
@@ -1108,6 +1255,12 @@ public class ReportServiceTests : IDisposable
             CreateTestLedger(1, cardIdm, new DateTime(2024, 3, 10), "鉄道（博多～天神）", 0, 500, 8500)
         };
 
+        // 2月の前月残高（繰越用）
+        var februaryLedgers = new List<Ledger>
+        {
+            CreateTestLedger(0, cardIdm, new DateTime(2024, 2, 28), "前月末データ", 0, 0, 9000)
+        };
+
         var fiscalYearLedgers = new List<Ledger>
         {
             CreateTestLedger(1, cardIdm, new DateTime(2023, 4, 10), "役務費によりチャージ", 10000, 0, 10000),
@@ -1121,6 +1274,9 @@ public class ReportServiceTests : IDisposable
         _ledgerRepositoryMock
             .Setup(r => r.GetByMonthAsync(cardIdm, year, month))
             .ReturnsAsync(marchLedgers);
+        _ledgerRepositoryMock
+            .Setup(r => r.GetByMonthAsync(cardIdm, year, 2))  // 2月の前月残高
+            .ReturnsAsync(februaryLedgers);
         _ledgerRepositoryMock
             .Setup(r => r.GetByDateRangeAsync(cardIdm,
                 new DateTime(2023, 4, 1),
@@ -1136,8 +1292,9 @@ public class ReportServiceTests : IDisposable
         using var workbook = new XLWorkbook(outputPath);
         var worksheet = workbook.Worksheets.First();
 
+        // Issue #451: 前月繰越行が追加されるため、行番号が+1
         // 次年度繰越行
-        var carryoverRow = 8;  // データ1行(5) + 月計(6) + 累計(7) + 繰越(8)
+        var carryoverRow = 9;  // 繰越(5) + データ1行(6) + 月計(7) + 累計(8) + 次年度繰越(9)
         worksheet.Cell(carryoverRow, 2).GetString().Should().Be("次年度へ繰越");
         worksheet.Cell(carryoverRow, 6).GetValue<int>().Should().Be(8500);  // F列=払出として繰越
         worksheet.Cell(carryoverRow, 7).GetValue<int>().Should().Be(0);     // G列=残額は0
@@ -1162,6 +1319,12 @@ public class ReportServiceTests : IDisposable
             CreateTestLedger(1, cardIdm, new DateTime(2024, 3, 10), "鉄道（博多～天神）", 0, 500, marchEndBalance)
         };
 
+        // 2月の前月残高（繰越用）
+        var februaryLedgers = new List<Ledger>
+        {
+            CreateTestLedger(2, cardIdm, new DateTime(2024, 2, 15), "鉄道（天神～博多）", 0, 1000, 9000)
+        };
+
         var fiscalYearLedgers = new List<Ledger>
         {
             CreateTestLedger(1, cardIdm, new DateTime(2023, 4, 10), "役務費によりチャージ", 10000, 0, 10000),
@@ -1183,6 +1346,9 @@ public class ReportServiceTests : IDisposable
         _ledgerRepositoryMock
             .Setup(r => r.GetByMonthAsync(cardIdm, 2024, 3))
             .ReturnsAsync(marchLedgers);
+        _ledgerRepositoryMock
+            .Setup(r => r.GetByMonthAsync(cardIdm, 2024, 2))  // 2月の前月残高
+            .ReturnsAsync(februaryLedgers);
         _ledgerRepositoryMock
             .Setup(r => r.GetByDateRangeAsync(cardIdm,
                 new DateTime(2023, 4, 1),
@@ -1211,9 +1377,10 @@ public class ReportServiceTests : IDisposable
         using var marchWorkbook = new XLWorkbook(marchOutputPath);
         var marchWorksheet = marchWorkbook.Worksheets.First();
 
+        // Issue #451: 前月繰越行が追加されるため、行番号が+1
         // 次年度繰越の払出金額
-        marchWorksheet.Cell(8, 2).GetString().Should().Be("次年度へ繰越");
-        var marchCarryover = marchWorksheet.Cell(8, 6).GetValue<int>();  // F列=払出金額
+        marchWorksheet.Cell(9, 2).GetString().Should().Be("次年度へ繰越");
+        var marchCarryover = marchWorksheet.Cell(9, 6).GetValue<int>();  // F列=払出金額
         marchCarryover.Should().Be(marchEndBalance);
 
         // 4月帳票の検証

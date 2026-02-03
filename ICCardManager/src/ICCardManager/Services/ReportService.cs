@@ -228,11 +228,18 @@ namespace ICCardManager.Services
                 var startRow = 5; // データ開始行（テンプレートに依存: 新テンプレートでは5行目から）
                 var currentRow = startRow;
 
-                // 4月の場合は前年度繰越を追加
+                // 繰越行を追加
                 if (month == 4)
                 {
+                    // 4月の場合は前年度繰越のみ（月繰越は行わない）
                     var carryover = await _ledgerRepository.GetCarryoverBalanceAsync(cardIdm, year - 1);
-                    currentRow = WriteCarryoverRow(worksheet, currentRow, carryover ?? 0, year);
+                    currentRow = WriteFiscalYearCarryoverRow(worksheet, currentRow, carryover ?? 0, year);
+                }
+                else
+                {
+                    // 4月以外は前月繰越を追加
+                    var previousMonthBalance = await GetPreviousMonthBalanceAsync(cardIdm, year, month);
+                    currentRow = WriteMonthlyCarryoverRow(worksheet, currentRow, previousMonthBalance, year, month);
                 }
 
                 // 各履歴行を出力
@@ -246,26 +253,29 @@ namespace ICCardManager.Services
                 var monthlyExpense = ledgers.Sum(l => l.Expense);
                 var monthEndBalance = ledgers.LastOrDefault()?.Balance ?? 0;
 
-                currentRow = WriteMonthlyTotalRow(worksheet, currentRow, month, monthlyIncome, monthlyExpense, monthEndBalance, month == 3);
+                // 月計行（残額欄は空欄、0も表示）
+                currentRow = WriteMonthlyTotalRow(worksheet, currentRow, month, monthlyIncome, monthlyExpense);
 
-                // 3月の場合は累計と次年度繰越を追加
+                // 累計行を追加（全月で出力）
+                // 年度の範囲を計算（4月～翌年3月）
+                var fiscalYearStartYear = month >= 4 ? year : year - 1;
+                var fiscalYearStart = new DateTime(fiscalYearStartYear, 4, 1);
+                var fiscalYearEnd = new DateTime(year, month, DateTime.DaysInMonth(year, month));
+                var yearlyLedgers = (await _ledgerRepository.GetByDateRangeAsync(cardIdm, fiscalYearStart, fiscalYearEnd))
+                    .OrderBy(l => l.Date)
+                    .ThenBy(l => l.Id)
+                    .ToList();
+
+                var yearlyIncome = yearlyLedgers.Sum(l => l.Income);
+                var yearlyExpense = yearlyLedgers.Sum(l => l.Expense);
+                var currentBalance = yearlyLedgers.LastOrDefault()?.Balance ?? monthEndBalance;
+
+                currentRow = WriteCumulativeRow(worksheet, currentRow, yearlyIncome, yearlyExpense, currentBalance);
+
+                // 3月の場合は次年度繰越を追加
                 if (month == 3)
                 {
-                    // 年度の累計を計算（3月は前年4月～当年3月が年度範囲）
-                    var fiscalYearStart = new DateTime(year - 1, 4, 1);
-                    var fiscalYearEnd = new DateTime(year, 3, 31);
-                    var yearlyLedgers = (await _ledgerRepository.GetByDateRangeAsync(cardIdm, fiscalYearStart, fiscalYearEnd))
-                        .OrderBy(l => l.Date)
-                        .ThenBy(l => l.Id)
-                        .ToList();
-
-                    var yearlyIncome = yearlyLedgers.Sum(l => l.Income);
-                    var yearlyExpense = yearlyLedgers.Sum(l => l.Expense);
-                    // 年度末残高は年度の最終レコードから取得（3月にデータがない場合も正しく処理）
-                    var fiscalYearEndBalance = yearlyLedgers.LastOrDefault()?.Balance ?? monthEndBalance;
-
-                    currentRow = WriteCumulativeRow(worksheet, currentRow, yearlyIncome, yearlyExpense, fiscalYearEndBalance);
-                    WriteCarryoverToNextYearRow(worksheet, currentRow, fiscalYearEndBalance);
+                    WriteCarryoverToNextYearRow(worksheet, currentRow, currentBalance);
                 }
 
                 // ファイルを保存
@@ -414,9 +424,9 @@ namespace ICCardManager.Services
         }
 
         /// <summary>
-        /// 前年度繰越行を出力
+        /// 前年度繰越行を出力（4月用）
         /// </summary>
-        private int WriteCarryoverRow(IXLWorksheet worksheet, int row, int balance, int year)
+        private int WriteFiscalYearCarryoverRow(IXLWorksheet worksheet, int row, int balance, int year)
         {
             // 列配置: A=出納年月日, B-D=摘要(結合), E=受入金額, F=払出金額, G=残額, H=氏名, I-L=備考(結合)
             var carryoverDate = new DateTime(year, 4, 1);
@@ -430,6 +440,65 @@ namespace ICCardManager.Services
             ApplyDataRowBorder(worksheet, row);
 
             return row + 1;
+        }
+
+        /// <summary>
+        /// 前月繰越行を出力（4月以外用）
+        /// </summary>
+        private int WriteMonthlyCarryoverRow(IXLWorksheet worksheet, int row, int balance, int year, int month)
+        {
+            // 前月の月番号を計算
+            var previousMonth = month == 1 ? 12 : month - 1;
+
+            // 列配置: A=出納年月日, B-D=摘要(結合), E=受入金額, F=払出金額, G=残額, H=氏名, I-L=備考(結合)
+            var carryoverDate = new DateTime(year, month, 1);
+            worksheet.Cell(row, 1).Value = WarekiConverter.ToWareki(carryoverDate); // 出納年月日 (A列)
+            worksheet.Cell(row, 2).Value = SummaryGenerator.GetCarryoverFromPreviousMonthSummary(previousMonth); // 摘要 (B-D列)
+            worksheet.Cell(row, 5).Value = balance; // 受入金額 (E列)
+            worksheet.Cell(row, 6).Value = "";      // 払出金額 (F列)
+            worksheet.Cell(row, 7).Value = balance; // 残額 (G列)
+
+            // 罫線を適用
+            ApplyDataRowBorder(worksheet, row);
+
+            return row + 1;
+        }
+
+        /// <summary>
+        /// 前月の残高を取得
+        /// </summary>
+        private async Task<int> GetPreviousMonthBalanceAsync(string cardIdm, int year, int month)
+        {
+            // 前月の年月を計算
+            int previousYear, previousMonth;
+            if (month == 1)
+            {
+                previousYear = year - 1;
+                previousMonth = 12;
+            }
+            else
+            {
+                previousYear = year;
+                previousMonth = month - 1;
+            }
+
+            // 前月の履歴を取得し、最後の残高を返す
+            var previousLedgers = (await _ledgerRepository.GetByMonthAsync(cardIdm, previousYear, previousMonth))
+                .Where(l => l.Summary != SummaryGenerator.GetLendingSummary())
+                .OrderBy(l => l.Date)
+                .ThenBy(l => l.Id)
+                .ToList();
+
+            if (previousLedgers.Count > 0)
+            {
+                return previousLedgers.Last().Balance;
+            }
+
+            // 前月のデータがない場合は、さらに前の月から繰り越しを探す
+            // 年度開始月（4月）まで遡って繰越残高を取得
+            var fiscalYearStartYear = month >= 4 ? year : year - 1;
+            var carryover = await _ledgerRepository.GetCarryoverBalanceAsync(cardIdm, fiscalYearStartYear - 1);
+            return carryover ?? 0;
         }
 
         /// <summary>
@@ -457,16 +526,22 @@ namespace ICCardManager.Services
         /// <summary>
         /// 月計行を出力
         /// </summary>
+        /// <remarks>
+        /// Issue #451対応:
+        /// - 受入金額・払出金額は0も表示（空欄にしない）
+        /// - 残額は常に空欄
+        /// - 上下に太線罫線を追加
+        /// </remarks>
         private int WriteMonthlyTotalRow(
             IXLWorksheet worksheet, int row, int month,
-            int income, int expense, int balance, bool isMarch)
+            int income, int expense)
         {
             // 列配置: A=出納年月日, B-D=摘要(結合), E=受入金額, F=払出金額, G=残額, H=氏名, I-L=備考(結合)
             worksheet.Cell(row, 1).Value = "";  // 出納年月日（空欄）(A列)
             worksheet.Cell(row, 2).Value = SummaryGenerator.GetMonthlySummary(month); // 摘要 (B-D列)
-            worksheet.Cell(row, 5).Value = income > 0 ? income : Blank.Value;   // 受入金額 (E列)
-            worksheet.Cell(row, 6).Value = expense > 0 ? expense : Blank.Value; // 払出金額 (F列)
-            worksheet.Cell(row, 7).Value = isMarch ? Blank.Value : balance; // 残額（3月は空欄）(G列)
+            worksheet.Cell(row, 5).Value = income;   // 受入金額 (E列) - 0も表示
+            worksheet.Cell(row, 6).Value = expense;  // 払出金額 (F列) - 0も表示
+            worksheet.Cell(row, 7).Value = "";       // 残額（常に空欄）(G列)
 
             // 月計行にスタイルを適用
             var range = worksheet.Range(row, 1, row, 12);
@@ -477,8 +552,8 @@ namespace ICCardManager.Services
             summaryCell.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
             summaryCell.Style.Font.FontSize = 14;
 
-            // 罫線を適用
-            ApplyDataRowBorder(worksheet, row);
+            // 罫線を適用（月計行は上下を太線に）
+            ApplySummaryRowBorder(worksheet, row);
 
             return row + 1;
         }
@@ -486,6 +561,11 @@ namespace ICCardManager.Services
         /// <summary>
         /// 累計行を出力
         /// </summary>
+        /// <remarks>
+        /// Issue #451対応:
+        /// - 受入金額・払出金額は0も表示（空欄にしない）
+        /// - 上下に太線罫線を追加
+        /// </remarks>
         private int WriteCumulativeRow(
             IXLWorksheet worksheet, int row,
             int income, int expense, int balance)
@@ -493,16 +573,16 @@ namespace ICCardManager.Services
             // 列配置: A=出納年月日, B-D=摘要(結合), E=受入金額, F=払出金額, G=残額, H=氏名, I-L=備考(結合)
             worksheet.Cell(row, 1).Value = "";  // 出納年月日（空欄）(A列)
             worksheet.Cell(row, 2).Value = SummaryGenerator.GetCumulativeSummary(); // 摘要 (B-D列)
-            worksheet.Cell(row, 5).Value = income > 0 ? income : Blank.Value;   // 受入金額 (E列)
-            worksheet.Cell(row, 6).Value = expense > 0 ? expense : Blank.Value; // 払出金額 (F列)
+            worksheet.Cell(row, 5).Value = income;   // 受入金額 (E列) - 0も表示
+            worksheet.Cell(row, 6).Value = expense;  // 払出金額 (F列) - 0も表示
             worksheet.Cell(row, 7).Value = balance; // 残額 (G列)
 
             // 累計行にスタイルを適用
             var range = worksheet.Range(row, 1, row, 12);
             range.Style.Font.Bold = true;
 
-            // 罫線を適用
-            ApplyDataRowBorder(worksheet, row);
+            // 罫線を適用（累計行は上下を太線に）
+            ApplySummaryRowBorder(worksheet, row);
 
             return row + 1;
         }
@@ -567,6 +647,58 @@ namespace ICCardManager.Services
             range.Style.Border.TopBorder = XLBorderStyleValues.Thin;
             range.Style.Border.BottomBorder = XLBorderStyleValues.Thin;
             range.Style.Border.InsideBorder = XLBorderStyleValues.Thin;
+
+            // 両端（A列左側、L列右側）は太線で表示
+            worksheet.Cell(row, 1).Style.Border.LeftBorder = XLBorderStyleValues.Medium;
+            worksheet.Cell(row, 12).Style.Border.RightBorder = XLBorderStyleValues.Medium;
+
+            // 行全体を上下中央揃えに設定
+            range.Style.Alignment.Vertical = XLAlignmentVerticalValues.Center;
+        }
+
+        /// <summary>
+        /// 月計・累計行に罫線を適用し、セルを結合
+        /// </summary>
+        /// <remarks>
+        /// Issue #451対応:
+        /// 月計・累計行の上下罫線を太線（Medium）にして視覚的に区切りを明確化。
+        /// 会計マニュアルの「月計・累計欄の上下線は朱線又は太線を用いること」に対応。
+        /// </remarks>
+        private void ApplySummaryRowBorder(IXLWorksheet worksheet, int row)
+        {
+            // 行の高さを30に設定
+            worksheet.Row(row).Height = 30;
+
+            // E〜G列（受入金額、払出金額、残額）のフォントサイズを14ptに設定
+            var amountRange = worksheet.Range(row, 5, row, 7);
+            amountRange.Style.Font.FontSize = 14;
+
+            // B列からD列を結合（摘要）
+            var summaryRange = worksheet.Range(row, 2, row, 4);
+            summaryRange.Merge();
+            summaryRange.Style.Alignment.WrapText = true;
+
+            // I列からL列を結合（備考）
+            var noteRange = worksheet.Range(row, 9, row, 12);
+            noteRange.Merge();
+            noteRange.Style.Alignment.WrapText = true;
+
+            // A列（出納年月日）のフォントサイズを14ptに設定し、中央寄せ
+            var dateCell = worksheet.Cell(row, 1);
+            dateCell.Style.Font.FontSize = 14;
+            dateCell.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
+            dateCell.Style.Alignment.ShrinkToFit = true;
+
+            // H列（氏名）を中央寄せ
+            worksheet.Cell(row, 8).Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
+
+            // A列からL列まで罫線を適用（内側は細線）
+            var range = worksheet.Range(row, 1, row, 12);
+            range.Style.Border.InsideBorder = XLBorderStyleValues.Thin;
+
+            // 月計・累計行は上下を太線に
+            range.Style.Border.TopBorder = XLBorderStyleValues.Medium;
+            range.Style.Border.BottomBorder = XLBorderStyleValues.Medium;
 
             // 両端（A列左側、L列右側）は太線で表示
             worksheet.Cell(row, 1).Style.Border.LeftBorder = XLBorderStyleValues.Medium;
