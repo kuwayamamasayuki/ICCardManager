@@ -66,7 +66,7 @@ try {
 
     # フッターにページ番号フィールドを挿入（中央揃え）
     $Footer.Range.ParagraphFormat.Alignment = 1  # wdAlignParagraphCenter
-    $Footer.Range.Fields.Add($Footer.Range, -1, "PAGE", $false)  # wdFieldPage = 33, but -1 for auto
+    $Footer.Range.Fields.Add($Footer.Range, -1, "PAGE", $false) | Out-Null  # wdFieldPage = 33, but -1 for auto
 
     Write-Host "  ページ番号: フッター中央" -ForegroundColor Gray
 
@@ -83,7 +83,8 @@ try {
     }
 
     # wdFormatDocumentDefault = 16 (docx形式)
-    $Doc.SaveAs2([ref]$OutputPath, [ref]16)
+    # 注意: COM Interopでは[ref]キャストではなく直接値を渡す
+    $Doc.SaveAs($OutputPath, 16)
     $Doc.Close()
 
     Write-Host ""
