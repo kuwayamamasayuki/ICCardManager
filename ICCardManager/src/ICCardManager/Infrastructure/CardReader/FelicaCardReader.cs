@@ -110,11 +110,6 @@ namespace ICCardManager.Infrastructure.CardReader
         private const int MaxHistoryCount = 20;
 
         /// <summary>
-        /// 残高サービスコード (サイバネ規格)
-        /// </summary>
-        private const int SuicaBalanceServiceCode = 0x008B;
-
-        /// <summary>
         /// ワイルドカードシステムコード（すべてのFeliCaカードを検出）
         /// </summary>
         private const int WildcardSystemCode = 0xFFFF;
@@ -295,9 +290,12 @@ namespace ICCardManager.Infrastructure.CardReader
         /// カードが載せ替えられた場合は null を返します。
         /// </para>
         /// <para>
-        /// 残高は以下の順序で取得を試みます：
-        /// 1. 残高専用サービスコード (0x008B) から直接取得
-        /// 2. 履歴サービスコードの最新レコードから取得（フォールバック）
+        /// 残高は履歴サービス(0x090F)の最新レコード（ブロック0）から取得します。
+        /// バイト10-11にリトルエンディアンで残高が格納されています。
+        /// </para>
+        /// <para>
+        /// 注: 残高専用サービス(0x008B)は使用しません。一部のカードでは
+        /// バイト位置が異なる場合があるためです (Issue #465)。
         /// </para>
         /// </remarks>
         public async Task<int?> ReadBalanceAsync(string idm)
@@ -317,34 +315,9 @@ namespace ICCardManager.Infrastructure.CardReader
                             return null;
                         }
 
-                        // 方法1: 残高専用サービスコード (0x008B) から直接取得
-                        try
-                        {
-                            _logger.LogDebug("FelicaCardReader: 残高サービス(0x{ServiceCode:X4})から読み取り試行", SuicaBalanceServiceCode);
-                            var balanceData = FelicaUtility.ReadWithoutEncryption(
-                                FelicaSystemCode.Suica,
-                                SuicaBalanceServiceCode,
-                                0);
-
-                            if (balanceData != null && balanceData.Length >= 2)
-                            {
-                                _logger.LogDebug("FelicaCardReader: 残高サービスデータ: {Data}", BitConverter.ToString(balanceData));
-                                // バイト0-1が残高（リトルエンディアン）
-                                var balance = balanceData[0] + (balanceData[1] << 8);
-                                _logger.LogDebug("FelicaCardReader: 残高読み取り成功（残高サービス）: {Balance}円", balance);
-                                return balance;
-                            }
-                            else
-                            {
-                                _logger.LogDebug("FelicaCardReader: 残高サービスからのデータがnullまたは短い: Length={Length}", balanceData?.Length ?? -1);
-                            }
-                        }
-                        catch (Exception ex)
-                        {
-                            _logger.LogDebug("FelicaCardReader: 残高サービスからの読み取り失敗、履歴にフォールバック: {Message}", ex.Message);
-                        }
-
-                        // 方法2: 履歴サービスコードの最新レコードから取得（フォールバック）
+                        // 履歴サービスコードの最新レコードから残高を取得
+                        // 注: 残高サービス(0x008B)はバイト位置が異なる場合があるため、
+                        //     履歴サービス(0x090F)を使用する（Issue #465対応）
                         _logger.LogDebug("FelicaCardReader: 履歴サービス(0x{ServiceCode:X4})から読み取り試行", (int)FelicaServiceCode.SuicaHistory);
                         var historyData = FelicaUtility.ReadWithoutEncryption(
                             FelicaSystemCode.Suica,
