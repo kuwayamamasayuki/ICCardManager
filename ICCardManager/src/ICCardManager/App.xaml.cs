@@ -177,6 +177,7 @@ namespace ICCardManager
             services.AddSingleton<CsvExportService>();
             services.AddSingleton<CsvImportService>();
             services.AddSingleton<IToastNotificationService, ToastNotificationService>();
+            services.AddSingleton<IDialogService, DialogService>();
 
             // Infrastructure層
     #if DEBUG

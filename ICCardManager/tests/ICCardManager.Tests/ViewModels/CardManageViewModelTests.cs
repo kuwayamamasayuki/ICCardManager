@@ -28,6 +28,7 @@ public class CardManageViewModelTests
     private readonly Mock<IValidationService> _validationServiceMock;
     private readonly Mock<IStaffRepository> _staffRepositoryMock;
     private readonly Mock<OperationLogger> _operationLoggerMock;
+    private readonly Mock<IDialogService> _dialogServiceMock;
     private readonly CardTypeDetector _cardTypeDetector;
     private readonly CardManageViewModel _viewModel;
 
@@ -38,6 +39,7 @@ public class CardManageViewModelTests
         _cardReaderMock = new Mock<ICardReader>();
         _validationServiceMock = new Mock<IValidationService>();
         _staffRepositoryMock = new Mock<IStaffRepository>();
+        _dialogServiceMock = new Mock<IDialogService>();
         _cardTypeDetector = new CardTypeDetector();
 
         // OperationLoggerのモック（コンストラクタ引数が必要なためMock.Ofで作成）
@@ -49,13 +51,18 @@ public class CardManageViewModelTests
         _validationServiceMock.Setup(v => v.ValidateCardNumber(It.IsAny<string>())).Returns(ValidationResult.Success());
         _validationServiceMock.Setup(v => v.ValidateCardType(It.IsAny<string>())).Returns(ValidationResult.Success());
 
+        // ダイアログはデフォルトでYes/Trueを返す（テストがブロックされないように）
+        _dialogServiceMock.Setup(d => d.ShowConfirmation(It.IsAny<string>(), It.IsAny<string>())).Returns(true);
+        _dialogServiceMock.Setup(d => d.ShowWarningConfirmation(It.IsAny<string>(), It.IsAny<string>())).Returns(true);
+
         _viewModel = new CardManageViewModel(
             _cardRepositoryMock.Object,
             _ledgerRepositoryMock.Object,
             _cardReaderMock.Object,
             _cardTypeDetector,
             _validationServiceMock.Object,
-            _operationLoggerMock.Object);
+            _operationLoggerMock.Object,
+            _dialogServiceMock.Object);
     }
 
     #region カード一覧読み込みテスト

@@ -26,6 +26,7 @@ public class StaffManageViewModelTests
     private readonly Mock<ICardReader> _cardReaderMock;
     private readonly Mock<IValidationService> _validationServiceMock;
     private readonly Mock<OperationLogger> _operationLoggerMock;
+    private readonly Mock<IDialogService> _dialogServiceMock;
     private readonly StaffManageViewModel _viewModel;
 
     public StaffManageViewModelTests()
@@ -33,6 +34,7 @@ public class StaffManageViewModelTests
         _staffRepositoryMock = new Mock<IStaffRepository>();
         _cardReaderMock = new Mock<ICardReader>();
         _validationServiceMock = new Mock<IValidationService>();
+        _dialogServiceMock = new Mock<IDialogService>();
 
         // OperationLoggerのモック（コンストラクタ引数が必要なためMock.Ofで作成）
         var operationLogRepositoryMock = new Mock<IOperationLogRepository>();
@@ -42,11 +44,16 @@ public class StaffManageViewModelTests
         _validationServiceMock.Setup(v => v.ValidateStaffIdm(It.IsAny<string>())).Returns(ValidationResult.Success());
         _validationServiceMock.Setup(v => v.ValidateStaffName(It.IsAny<string>())).Returns(ValidationResult.Success());
 
+        // ダイアログはデフォルトでYes/Trueを返す（テストがブロックされないように）
+        _dialogServiceMock.Setup(d => d.ShowConfirmation(It.IsAny<string>(), It.IsAny<string>())).Returns(true);
+        _dialogServiceMock.Setup(d => d.ShowWarningConfirmation(It.IsAny<string>(), It.IsAny<string>())).Returns(true);
+
         _viewModel = new StaffManageViewModel(
             _staffRepositoryMock.Object,
             _cardReaderMock.Object,
             _validationServiceMock.Object,
-            _operationLoggerMock.Object);
+            _operationLoggerMock.Object,
+            _dialogServiceMock.Object);
     }
 
     #region 職員一覧読み込みテスト

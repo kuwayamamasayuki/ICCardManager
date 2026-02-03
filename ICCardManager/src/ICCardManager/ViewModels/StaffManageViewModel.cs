@@ -23,6 +23,7 @@ namespace ICCardManager.ViewModels
         private readonly ICardReader _cardReader;
         private readonly IValidationService _validationService;
         private readonly OperationLogger _operationLogger;
+        private readonly IDialogService _dialogService;
 
         [ObservableProperty]
         private ObservableCollection<StaffDto> _staffList = new();
@@ -61,12 +62,14 @@ namespace ICCardManager.ViewModels
             IStaffRepository staffRepository,
             ICardReader cardReader,
             IValidationService validationService,
-            OperationLogger operationLogger)
+            OperationLogger operationLogger,
+            IDialogService dialogService)
         {
             _staffRepository = staffRepository;
             _cardReader = cardReader;
             _validationService = validationService;
             _operationLogger = operationLogger;
+            _dialogService = dialogService;
 
             // カード読み取りイベント
             _cardReader.CardRead += OnCardRead;
@@ -135,13 +138,11 @@ namespace ICCardManager.ViewModels
                 if (existing.IsDeleted)
                 {
                     // 削除済み職員の場合は復元を提案
-                    var result = MessageBox.Show(
+                    var confirmed = _dialogService.ShowConfirmation(
                         $"この職員証は以前 {identifier} として登録されていましたが、削除されています。\n\n復元しますか？",
-                        "削除済み職員",
-                        MessageBoxButton.YesNo,
-                        MessageBoxImage.Question);
+                        "削除済み職員");
 
-                    if (result == MessageBoxResult.Yes)
+                    if (confirmed)
                     {
                         var restored = await _staffRepository.RestoreAsync(idm);
                         if (restored)
@@ -153,43 +154,35 @@ namespace ICCardManager.ViewModels
                                 await _operationLogger.LogStaffRestoreAsync(null, restoredStaff);
                             }
 
-                            MessageBox.Show(
+                            _dialogService.ShowInformation(
                                 $"{identifier} を復元しました",
-                                "復元完了",
-                                MessageBoxButton.OK,
-                                MessageBoxImage.Information);
+                                "復元完了");
                             return true; // ダイアログを閉じる
                         }
                         else
                         {
-                            MessageBox.Show(
+                            _dialogService.ShowError(
                                 "復元に失敗しました",
-                                "エラー",
-                                MessageBoxButton.OK,
-                                MessageBoxImage.Error);
+                                "エラー");
                             return true; // ダイアログを閉じる
                         }
                     }
                     else
                     {
                         // Issue #314: 復元しない場合は案内メッセージを表示
-                        MessageBox.Show(
+                        _dialogService.ShowInformation(
                             $"この職員証は以前 {identifier} として登録されていたため、新規登録はできません。\n\n" +
                             "異なる情報で登録したい場合は、先に復元を行い、その後に編集してください。",
-                            "ご案内",
-                            MessageBoxButton.OK,
-                            MessageBoxImage.Information);
+                            "ご案内");
                         return true; // ダイアログを閉じる
                     }
                 }
                 else
                 {
                     // 既に登録済みの場合はメッセージを表示して終了
-                    MessageBox.Show(
+                    _dialogService.ShowInformation(
                         $"この職員証は {identifier} として既に登録されています",
-                        "登録済み職員証",
-                        MessageBoxButton.OK,
-                        MessageBoxImage.Information);
+                        "登録済み職員証");
                     return true; // ダイアログを閉じる
                 }
             }
@@ -273,13 +266,11 @@ namespace ICCardManager.ViewModels
                             if (existing.IsDeleted)
                             {
                                 // 削除済み職員の場合は復元を提案
-                                var result = MessageBox.Show(
+                                var confirmed = _dialogService.ShowConfirmation(
                                     $"この職員証は以前 {identifier} として登録されていましたが、削除されています。\n\n復元しますか？",
-                                    "削除済み職員",
-                                    MessageBoxButton.YesNo,
-                                    MessageBoxImage.Question);
+                                    "削除済み職員");
 
-                                if (result == MessageBoxResult.Yes)
+                                if (confirmed)
                                 {
                                     var restored = await _staffRepository.RestoreAsync(EditStaffIdm);
                                     if (restored)
@@ -305,12 +296,10 @@ namespace ICCardManager.ViewModels
                                 else
                                 {
                                     // Issue #314: 復元しない場合は案内メッセージを表示
-                                    MessageBox.Show(
+                                    _dialogService.ShowInformation(
                                         $"この職員証は以前 {identifier} として登録されていたため、新規登録はできません。\n\n" +
                                         "異なる名前等で登録したい場合は、先に復元を行い、その後に編集してください。",
-                                        "ご案内",
-                                        MessageBoxButton.OK,
-                                        MessageBoxImage.Information);
+                                        "ご案内");
                                     CancelEdit();
                                 }
                                 return;
@@ -483,13 +472,11 @@ namespace ICCardManager.ViewModels
                     if (existing.IsDeleted)
                     {
                         // 削除済み職員の場合は復元を提案
-                        var result = MessageBox.Show(
+                        var confirmed = _dialogService.ShowConfirmation(
                             $"この職員証は以前 {identifier} として登録されていましたが、削除されています。\n\n復元しますか？",
-                            "削除済み職員",
-                            MessageBoxButton.YesNo,
-                            MessageBoxImage.Question);
+                            "削除済み職員");
 
-                        if (result == MessageBoxResult.Yes)
+                        if (confirmed)
                         {
                             var restored = await _staffRepository.RestoreAsync(e.Idm);
                             if (restored)
@@ -515,12 +502,10 @@ namespace ICCardManager.ViewModels
                         else
                         {
                             // Issue #314: 復元しない場合は案内メッセージを表示
-                            MessageBox.Show(
+                            _dialogService.ShowInformation(
                                 $"この職員証は以前 {identifier} として登録されていたため、新規登録はできません。\n\n" +
                                 "異なる名前等で登録したい場合は、先に復元を行い、その後に編集してください。",
-                                "ご案内",
-                                MessageBoxButton.OK,
-                                MessageBoxImage.Information);
+                                "ご案内");
                             CancelEdit();
                         }
                     }

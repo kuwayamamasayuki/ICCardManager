@@ -25,6 +25,7 @@ namespace ICCardManager.ViewModels
         private readonly CardTypeDetector _cardTypeDetector;
         private readonly IValidationService _validationService;
         private readonly OperationLogger _operationLogger;
+        private readonly IDialogService _dialogService;
 
         [ObservableProperty]
         private ObservableCollection<CardDto> _cards = new();
@@ -93,7 +94,8 @@ namespace ICCardManager.ViewModels
             ICardReader cardReader,
             CardTypeDetector cardTypeDetector,
             IValidationService validationService,
-            OperationLogger operationLogger)
+            OperationLogger operationLogger,
+            IDialogService dialogService)
         {
             _cardRepository = cardRepository;
             _ledgerRepository = ledgerRepository;
@@ -101,6 +103,7 @@ namespace ICCardManager.ViewModels
             _cardTypeDetector = cardTypeDetector;
             _validationService = validationService;
             _operationLogger = operationLogger;
+            _dialogService = dialogService;
 
             // カード読み取りイベント
             _cardReader.CardRead += OnCardRead;
@@ -166,13 +169,11 @@ namespace ICCardManager.ViewModels
                 if (existing.IsDeleted)
                 {
                     // 削除済みカードの場合は復元を提案
-                    var result = MessageBox.Show(
+                    var confirmed = _dialogService.ShowConfirmation(
                         $"このカードは以前 {existing.CardNumber} として登録されていましたが、削除されています。\n\n復元しますか？",
-                        "削除済みカード",
-                        MessageBoxButton.YesNo,
-                        MessageBoxImage.Question);
+                        "削除済みカード");
 
-                    if (result == MessageBoxResult.Yes)
+                    if (confirmed)
                     {
                         var restored = await _cardRepository.RestoreAsync(idm);
                         if (restored)
@@ -184,43 +185,35 @@ namespace ICCardManager.ViewModels
                                 await _operationLogger.LogCardRestoreAsync(null, restoredCard);
                             }
 
-                            MessageBox.Show(
+                            _dialogService.ShowInformation(
                                 $"{existing.CardNumber} を復元しました",
-                                "復元完了",
-                                MessageBoxButton.OK,
-                                MessageBoxImage.Information);
+                                "復元完了");
                             return true; // ダイアログを閉じる
                         }
                         else
                         {
-                            MessageBox.Show(
+                            _dialogService.ShowError(
                                 "復元に失敗しました",
-                                "エラー",
-                                MessageBoxButton.OK,
-                                MessageBoxImage.Error);
+                                "エラー");
                             return true; // ダイアログを閉じる
                         }
                     }
                     else
                     {
                         // Issue #314: 復元しない場合は案内メッセージを表示
-                        MessageBox.Show(
+                        _dialogService.ShowInformation(
                             $"このカードは以前 {existing.CardNumber} として登録されていたため、新規登録はできません。\n\n" +
                             "異なるカード番号等で登録したい場合は、先に復元を行い、その後に編集してください。",
-                            "ご案内",
-                            MessageBoxButton.OK,
-                            MessageBoxImage.Information);
+                            "ご案内");
                         return true; // ダイアログを閉じる
                     }
                 }
                 else
                 {
                     // 既に登録済みの場合はメッセージを表示して終了
-                    MessageBox.Show(
+                    _dialogService.ShowInformation(
                         $"このカードは {existing.CardNumber} として既に登録されています",
-                        "登録済みカード",
-                        MessageBoxButton.OK,
-                        MessageBoxImage.Information);
+                        "登録済みカード");
                     return true; // ダイアログを閉じる
                 }
             }
@@ -334,13 +327,11 @@ namespace ICCardManager.ViewModels
                         if (existing.IsDeleted)
                         {
                             // 削除済みカードの場合は復元を提案
-                            var result = MessageBox.Show(
+                            var confirmed = _dialogService.ShowConfirmation(
                                 $"このカードは以前 {existing.CardNumber} として登録されていましたが、削除されています。\n\n復元しますか？",
-                                "削除済みカード",
-                                MessageBoxButton.YesNo,
-                                MessageBoxImage.Question);
+                                "削除済みカード");
 
-                            if (result == MessageBoxResult.Yes)
+                            if (confirmed)
                             {
                                 var restored = await _cardRepository.RestoreAsync(EditCardIdm);
                                 if (restored)
@@ -366,12 +357,10 @@ namespace ICCardManager.ViewModels
                             else
                             {
                                 // Issue #314: 復元しない場合は案内メッセージを表示
-                                MessageBox.Show(
+                                _dialogService.ShowInformation(
                                     $"このカードは以前 {existing.CardNumber} として登録されていたため、新規登録はできません。\n\n" +
                                     "異なるカード番号等で登録したい場合は、先に復元を行い、その後に編集してください。",
-                                    "ご案内",
-                                    MessageBoxButton.OK,
-                                    MessageBoxImage.Information);
+                                    "ご案内");
                                 CancelEdit();
                             }
                             return;
@@ -473,13 +462,11 @@ namespace ICCardManager.ViewModels
             }
 
             // 削除確認ダイアログを表示
-            var result = MessageBox.Show(
+            var confirmed = _dialogService.ShowWarningConfirmation(
                 $"カード「{SelectedCard.CardType} {SelectedCard.CardNumber}」を削除しますか？\n\n※削除後も履歴データは保持されます。",
-                "削除確認",
-                MessageBoxButton.YesNo,
-                MessageBoxImage.Warning);
+                "削除確認");
 
-            if (result != MessageBoxResult.Yes)
+            if (!confirmed)
             {
                 return;
             }
@@ -550,13 +537,9 @@ namespace ICCardManager.ViewModels
                 ? $"カード「{SelectedCard.CardType} {SelectedCard.CardNumber}」を払い戻しますか？\n\n現在の残高: ¥{currentBalance:N0}\n\n※払い戻し後、このカードは削除されます。"
                 : $"カード「{SelectedCard.CardType} {SelectedCard.CardNumber}」を払い戻しますか？\n\n現在の残高: ¥0（残高なし）\n\n※払い戻し後、このカードは削除されます。";
 
-            var result = MessageBox.Show(
-                message,
-                "払い戻し確認",
-                MessageBoxButton.YesNo,
-                MessageBoxImage.Warning);
+            var confirmed = _dialogService.ShowWarningConfirmation(message, "払い戻し確認");
 
-            if (result != MessageBoxResult.Yes)
+            if (!confirmed)
             {
                 return;
             }
@@ -661,13 +644,11 @@ namespace ICCardManager.ViewModels
                     if (existing.IsDeleted)
                     {
                         // 削除済みカードの場合は復元を提案
-                        var result = MessageBox.Show(
+                        var confirmed = _dialogService.ShowConfirmation(
                             $"このカードは以前 {existing.CardNumber} として登録されていましたが、削除されています。\n\n復元しますか？",
-                            "削除済みカード",
-                            MessageBoxButton.YesNo,
-                            MessageBoxImage.Question);
+                            "削除済みカード");
 
-                        if (result == MessageBoxResult.Yes)
+                        if (confirmed)
                         {
                             var restored = await _cardRepository.RestoreAsync(e.Idm);
                             if (restored)
@@ -693,12 +674,10 @@ namespace ICCardManager.ViewModels
                         else
                         {
                             // Issue #314: 復元しない場合は案内メッセージを表示
-                            MessageBox.Show(
+                            _dialogService.ShowInformation(
                                 $"このカードは以前 {existing.CardNumber} として登録されていたため、新規登録はできません。\n\n" +
                                 "異なるカード番号等で登録したい場合は、先に復元を行い、その後に編集してください。",
-                                "ご案内",
-                                MessageBoxButton.OK,
-                                MessageBoxImage.Information);
+                                "ご案内");
                             CancelEdit();
                         }
                     }
