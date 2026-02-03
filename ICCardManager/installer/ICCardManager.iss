@@ -52,7 +52,7 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
-Name: "autostart"; Description: "Windowsログイン時に自動起動する（常駐）"; GroupDescription: "起動設定:"; Flags: checked
+Name: "autostart"; Description: "Windows起動時に自動実行"; GroupDescription: "{cm:AdditionalIcons}"; Flags: checked
 
 [Files]
 ; メインアプリケーションと依存DLL（すべてのDLL/EXE/config/pdbを含める）
