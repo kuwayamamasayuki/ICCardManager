@@ -698,6 +698,19 @@ namespace ICCardManager.ViewModels
                 StatusMessage = "カードを読み取りました。カード種別を確認してください。";
                 IsStatusError = false;
 
+                // Issue #443対応: カード読み取り時点で残高を事前取得
+                // カードがリーダーにある間に残高を読み取り、保存時に使用する
+                // これにより、ユーザーがフォーム入力中にカードを離しても正しい残高で登録できる
+                try
+                {
+                    _preReadBalance = await _cardReader.ReadBalanceAsync(e.Idm);
+                }
+                catch
+                {
+                    // 残高読み取り失敗時はnullのまま（CreateNewPurchaseLedgerAsyncで再試行される）
+                    _preReadBalance = null;
+                }
+
                 // 注意: App.IsCardRegistrationActive はここで解除しない
                 // ダイアログが開いている間は常にフラグを維持し、
                 // CancelEdit() または Cleanup() でのみ解除する

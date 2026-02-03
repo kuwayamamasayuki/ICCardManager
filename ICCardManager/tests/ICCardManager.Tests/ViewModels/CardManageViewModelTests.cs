@@ -518,4 +518,111 @@ public class CardManageViewModelTests
     }
 
     #endregion
+
+    #region Issue #443: 新規カード登録時の残高テスト
+
+    /// <summary>
+    /// 新規カード登録時に残高が正しく読み取られ、新規購入レコードに反映されること
+    /// </summary>
+    [Fact]
+    public async Task SaveAsync_NewCard_ShouldCreatePurchaseLedgerWithPreReadBalance()
+    {
+        // Arrange
+        var idm = "0102030405060708";
+        var balance = 5000;
+
+        _cardRepositoryMock.Setup(r => r.GetByIdmAsync(idm, true)).ReturnsAsync((IcCard?)null);
+        _cardRepositoryMock.Setup(r => r.InsertAsync(It.IsAny<IcCard>())).ReturnsAsync(true);
+        _cardReaderMock.Setup(r => r.ReadBalanceAsync(idm)).ReturnsAsync(balance);
+
+        // SetPreReadBalanceを使用して事前読み取り残高を設定（MainViewModelからの呼び出しをシミュレート）
+        _viewModel.SetPreReadBalance(balance);
+
+        _viewModel.StartNewCard();
+        _viewModel.EditCardIdm = idm;
+        _viewModel.EditCardType = "nimoca";
+        _viewModel.EditCardNumber = "N-001";
+
+        // Act
+        await _viewModel.SaveAsync();
+
+        // Assert
+        // 新規購入レコードが作成されること
+        _ledgerRepositoryMock.Verify(r => r.InsertAsync(It.Is<Ledger>(l =>
+            l.CardIdm == idm &&
+            l.Summary == "新規購入" &&
+            l.Income == balance &&
+            l.Balance == balance
+        )), Times.Once);
+    }
+
+    /// <summary>
+    /// 残高が事前読み取りされていない場合でも、保存時にカードから読み取りを試みること
+    /// </summary>
+    [Fact]
+    public async Task SaveAsync_NewCard_WithoutPreReadBalance_ShouldTryReadBalanceAtSaveTime()
+    {
+        // Arrange
+        var idm = "0102030405060708";
+        var balance = 3000;
+
+        _cardRepositoryMock.Setup(r => r.GetByIdmAsync(idm, true)).ReturnsAsync((IcCard?)null);
+        _cardRepositoryMock.Setup(r => r.InsertAsync(It.IsAny<IcCard>())).ReturnsAsync(true);
+        _cardReaderMock.Setup(r => r.ReadBalanceAsync(idm)).ReturnsAsync(balance);
+
+        // 事前読み取り残高は設定しない（手動新規登録のフォールバックケース）
+
+        _viewModel.StartNewCard();
+        _viewModel.EditCardIdm = idm;
+        _viewModel.EditCardType = "nimoca";
+        _viewModel.EditCardNumber = "N-001";
+
+        // Act
+        await _viewModel.SaveAsync();
+
+        // Assert
+        // 保存時にReadBalanceAsyncが呼び出されること
+        _cardReaderMock.Verify(r => r.ReadBalanceAsync(idm), Times.Once);
+
+        // 新規購入レコードが作成されること
+        _ledgerRepositoryMock.Verify(r => r.InsertAsync(It.Is<Ledger>(l =>
+            l.CardIdm == idm &&
+            l.Summary == "新規購入" &&
+            l.Income == balance &&
+            l.Balance == balance
+        )), Times.Once);
+    }
+
+    /// <summary>
+    /// 残高読み取りに失敗した場合は新規購入レコードが作成されないこと
+    /// </summary>
+    [Fact]
+    public async Task SaveAsync_NewCard_WhenBalanceReadFails_ShouldNotCreatePurchaseLedger()
+    {
+        // Arrange
+        var idm = "0102030405060708";
+
+        _cardRepositoryMock.Setup(r => r.GetByIdmAsync(idm, true)).ReturnsAsync((IcCard?)null);
+        _cardRepositoryMock.Setup(r => r.InsertAsync(It.IsAny<IcCard>())).ReturnsAsync(true);
+        _cardReaderMock.Setup(r => r.ReadBalanceAsync(idm)).ReturnsAsync((int?)null);  // 残高読み取り失敗
+
+        _viewModel.StartNewCard();
+        _viewModel.EditCardIdm = idm;
+        _viewModel.EditCardType = "nimoca";
+        _viewModel.EditCardNumber = "N-001";
+
+        // Act
+        await _viewModel.SaveAsync();
+
+        // Assert
+        // カード自体は登録される
+        _cardRepositoryMock.Verify(r => r.InsertAsync(It.IsAny<IcCard>()), Times.Once);
+
+        // 残高が取得できないため新規購入レコードは作成されない
+        _ledgerRepositoryMock.Verify(r => r.InsertAsync(It.Is<Ledger>(l =>
+            l.Summary == "新規購入"
+        )), Times.Never);
+    }
+
+    #endregion
 }
