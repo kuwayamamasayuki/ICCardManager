@@ -70,6 +70,21 @@ Write-Host ""
 Write-Host "[準備] pandocの確認..." -ForegroundColor Yellow
 $PandocPath = Get-Command pandoc -ErrorAction SilentlyContinue
 
+# PATHに無い場合、一般的なインストール場所を検索
+if (-not $PandocPath) {
+    $CommonPaths = @(
+        "$env:LOCALAPPDATA\Pandoc\pandoc.exe",
+        "$env:ProgramFiles\Pandoc\pandoc.exe",
+        "${env:ProgramFiles(x86)}\Pandoc\pandoc.exe"
+    )
+    foreach ($Path in $CommonPaths) {
+        if (Test-Path $Path) {
+            $PandocPath = Get-Item $Path
+            break
+        }
+    }
+}
+
 if (-not $PandocPath) {
     Write-Host "エラー: pandocが見つかりません。" -ForegroundColor Red
     Write-Host ""
@@ -79,7 +94,10 @@ if (-not $PandocPath) {
     Write-Host ""
     exit 1
 }
-Write-Host "  pandoc: $($PandocPath.Source)" -ForegroundColor Green
+
+# パスの取得（Get-CommandとGet-Itemで異なるプロパティ名）
+$PandocExe = if ($PandocPath.Source) { $PandocPath.Source } else { $PandocPath.FullName }
+Write-Host "  pandoc: $PandocExe" -ForegroundColor Green
 
 # リファレンスドキュメントの確認
 $ReferenceDocPath = Join-Path $ScriptDir "reference.docx"
@@ -173,7 +191,7 @@ foreach ($Manual in $Manuals) {
     }
 
     try {
-        & pandoc $PandocArgs
+        & $PandocExe $PandocArgs
         if ($LASTEXITCODE -ne 0) {
             throw "pandocがエラーコード $LASTEXITCODE を返しました"
         }
