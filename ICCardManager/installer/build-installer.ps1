@@ -160,6 +160,34 @@ if (-not $SkipBuild) {
         } else {
             Write-Host "  警告: ICCardManager.exe が見つかりません。先にメインアプリをビルドしてください。" -ForegroundColor Yellow
         }
+
+        # SQLite.Interop.dll (x86/x64) をToolsフォルダにコピー（Issue #466対応）
+        # System.Data.SQLite.Coreパッケージはネイティブのx86/x64 DLLを必要とする
+        $SqliteX86Source = Join-Path $DebugToolPublishDir "x86"
+        if (-not (Test-Path $SqliteX86Source)) {
+            # dotnet publish で出力されない場合、bin/Releaseからコピー
+            $SqliteX86Source = Join-Path $DebugToolDir "bin\Release\net48\x86"
+        }
+        if (Test-Path $SqliteX86Source) {
+            $SqliteX86Dest = Join-Path $DebugToolPublishDir "x86"
+            if (-not (Test-Path $SqliteX86Dest)) { New-Item -ItemType Directory -Path $SqliteX86Dest -Force | Out-Null }
+            Copy-Item -Path "$SqliteX86Source\*" -Destination $SqliteX86Dest -Force -ErrorAction SilentlyContinue
+            Write-Host "  SQLite.Interop.dll: x86 フォルダをコピー" -ForegroundColor Green
+        } else {
+            Write-Host "  警告: x86フォルダが見つかりません。SQLiteが動作しない可能性があります。" -ForegroundColor Yellow
+        }
+
+        $SqliteX64Source = Join-Path $DebugToolPublishDir "x64"
+        if (-not (Test-Path $SqliteX64Source)) {
+            # dotnet publish で出力されない場合、bin/Releaseからコピー
+            $SqliteX64Source = Join-Path $DebugToolDir "bin\Release\net48\x64"
+        }
+        if (Test-Path $SqliteX64Source) {
+            $SqliteX64Dest = Join-Path $DebugToolPublishDir "x64"
+            if (-not (Test-Path $SqliteX64Dest)) { New-Item -ItemType Directory -Path $SqliteX64Dest -Force | Out-Null }
+            Copy-Item -Path "$SqliteX64Source\*" -Destination $SqliteX64Dest -Force -ErrorAction SilentlyContinue
+            Write-Host "  SQLite.Interop.dll: x64 フォルダをコピー" -ForegroundColor Green
+        }
     }
     finally {
         Pop-Location
