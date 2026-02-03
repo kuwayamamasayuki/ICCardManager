@@ -24,10 +24,54 @@
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
 
-        <!-- 設定項目 -->
+        <!-- 設定項目 (Issue #453: 並び順を変更) -->
         <ScrollViewer Grid.Row="0" VerticalScrollBarVisibility="Auto">
             <StackPanel>
-                <!-- 残額警告 -->
+                <!-- 1. 通知設定 -->
+                <GroupBox Header="通知設定" Margin="0,0,0,20" Padding="15">
+                    <StackPanel>
+                        <TextBlock Text="トースト通知の表示位置"
+                                   FontWeight="Bold"
+                                   Margin="0,0,0,10"/>
+                        <ComboBox ItemsSource="{Binding ToastPositionOptions}"
+                                  SelectedItem="{Binding SelectedToastPositionItem}"
+                                  DisplayMemberPath="DisplayName"
+                                  Padding="8"
+                                  Width="200"
+                                  HorizontalAlignment="Left"
+                                  AutomationProperties.Name="トースト通知位置選択"
+                                  AutomationProperties.HelpText="貸出・返却時の通知が表示される画面の位置を選択します"
+                                  ToolTip="右上・左上・右下・左下から選択"/>
+                        <TextBlock Text="※ 「いってらっしゃい！」「おかえりなさい！」の表示位置"
+                                   FontSize="{DynamicResource SmallFontSize}"
+                                   Foreground="Gray"
+                                   Margin="0,5,0,0"/>
+                    </StackPanel>
+                </GroupBox>
+
+                <!-- 2. 表示設定 -->
+                <GroupBox Header="表示設定" Margin="0,0,0,20" Padding="15">
+                    <StackPanel>
+                        <TextBlock Text="文字サイズ"
+                                   FontWeight="Bold"
+                                   Margin="0,0,0,10"/>
+                        <ComboBox ItemsSource="{Binding FontSizeOptions}"
+                                  SelectedItem="{Binding SelectedFontSizeItem}"
+                                  DisplayMemberPath="DisplayName"
+                                  Padding="8"
+                                  Width="200"
+                                  HorizontalAlignment="Left"
+                                  AutomationProperties.Name="文字サイズ選択"
+                                  AutomationProperties.HelpText="画面に表示される文字のサイズを選択します"
+                                  ToolTip="小・中・大・特大から選択"/>
+                        <TextBlock Text="※ 文字サイズの変更は保存後に反映されます"
+                                   FontSize="{DynamicResource SmallFontSize}"
+                                   Foreground="Gray"
+                                   Margin="0,5,0,0"/>
+                    </StackPanel>
+                </GroupBox>
+
+                <!-- 3. 残額警告 -->
                 <GroupBox Header="残額警告" Margin="0,0,0,20" Padding="15">
                     <StackPanel>
                         <TextBlock Text="残額がこの金額を下回った場合に警告を表示します"
@@ -52,61 +96,7 @@
                     </StackPanel>
                 </GroupBox>
 
-                <!-- バックアップ -->
-                <GroupBox Header="バックアップ" Margin="0,0,0,20" Padding="15">
-                    <StackPanel>
-                        <TextBlock Text="データベースの自動バックアップ先フォルダ"
-                                   Foreground="Gray"
-                                   Margin="0,0,0,10"/>
-                        <Grid>
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="*"/>
-                                <ColumnDefinition Width="Auto"/>
-                            </Grid.ColumnDefinitions>
-                            <TextBox Grid.Column="0"
-                                     Text="{Binding BackupPath, UpdateSourceTrigger=PropertyChanged}"
-                                     Padding="8"
-                                     IsReadOnly="True"
-                                     Background="#F5F5F5"
-                                     AutomationProperties.Name="バックアップ先フォルダパス"/>
-                            <Button Grid.Column="1"
-                                    Content="参照..."
-                                    Command="{Binding BrowseBackupPathCommand}"
-                                    Padding="15,8"
-                                    Margin="10,0,0,0"
-                                    AutomationProperties.Name="バックアップフォルダを選択"
-                                    ToolTip="バックアップ先フォルダを選択します"/>
-                        </Grid>
-                        <TextBlock Text="※ 空欄の場合、アプリケーションフォルダにバックアップされます"
-                                   FontSize="{DynamicResource SmallFontSize}"
-                                   Foreground="Gray"
-                                   Margin="0,5,0,0"/>
-                    </StackPanel>
-                </GroupBox>
-
-                <!-- 表示設定 -->
-                <GroupBox Header="表示設定" Margin="0,0,0,20" Padding="15">
-                    <StackPanel>
-                        <TextBlock Text="文字サイズ"
-                                   FontWeight="Bold"
-                                   Margin="0,0,0,10"/>
-                        <ComboBox ItemsSource="{Binding FontSizeOptions}"
-                                  SelectedItem="{Binding SelectedFontSizeItem}"
-                                  DisplayMemberPath="DisplayName"
-                                  Padding="8"
-                                  Width="200"
-                                  HorizontalAlignment="Left"
-                                  AutomationProperties.Name="文字サイズ選択"
-                                  AutomationProperties.HelpText="画面に表示される文字のサイズを選択します"
-                                  ToolTip="小・中・大・特大から選択"/>
-                        <TextBlock Text="※ 文字サイズの変更は保存後に反映されます"
-                                   FontSize="{DynamicResource SmallFontSize}"
-                                   Foreground="Gray"
-                                   Margin="0,5,0,0"/>
-                    </StackPanel>
-                </GroupBox>
-
-                <!-- 音声設定 -->
+                <!-- 4. 音声設定 -->
                 <GroupBox Header="音声設定" Margin="0,0,0,20" Padding="15">
                     <StackPanel>
                         <TextBlock Text="貸出・返却時の音声"
@@ -132,22 +122,32 @@
                     </StackPanel>
                 </GroupBox>
 
-                <!-- 通知設定 -->
-                <GroupBox Header="通知設定" Margin="0,0,0,20" Padding="15">
+                <!-- 5. バックアップ -->
+                <GroupBox Header="バックアップ" Margin="0,0,0,20" Padding="15">
                     <StackPanel>
-                        <TextBlock Text="トースト通知の表示位置"
-                                   FontWeight="Bold"
+                        <TextBlock Text="データベースの自動バックアップ先フォルダ"
+                                   Foreground="Gray"
                                    Margin="0,0,0,10"/>
-                        <ComboBox ItemsSource="{Binding ToastPositionOptions}"
-                                  SelectedItem="{Binding SelectedToastPositionItem}"
-                                  DisplayMemberPath="DisplayName"
-                                  Padding="8"
-                                  Width="200"
-                                  HorizontalAlignment="Left"
-                                  AutomationProperties.Name="トースト通知位置選択"
-                                  AutomationProperties.HelpText="貸出・返却時の通知が表示される画面の位置を選択します"
-                                  ToolTip="右上・左上・右下・左下から選択"/>
-                        <TextBlock Text="※ 「いってらっしゃい！」「おかえりなさい！」の表示位置"
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBox Grid.Column="0"
+                                     Text="{Binding BackupPath, UpdateSourceTrigger=PropertyChanged}"
+                                     Padding="8"
+                                     IsReadOnly="True"
+                                     Background="#F5F5F5"
+                                     AutomationProperties.Name="バックアップ先フォルダパス"/>
+                            <Button Grid.Column="1"
+                                    Content="参照..."
+                                    Command="{Binding BrowseBackupPathCommand}"
+                                    Padding="15,8"
+                                    Margin="10,0,0,0"
+                                    AutomationProperties.Name="バックアップフォルダを選択"
+                                    ToolTip="バックアップ先フォルダを選択します"/>
+                        </Grid>
+                        <TextBlock Text="※ 空欄の場合、アプリケーションフォルダにバックアップされます"
                                    FontSize="{DynamicResource SmallFontSize}"
                                    Foreground="Gray"
                                    Margin="0,5,0,0"/>
