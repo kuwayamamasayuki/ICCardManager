@@ -560,8 +560,14 @@ namespace ICCardManager.Services
             var range = worksheet.Range(row, 1, row, 12);
             range.Style.Border.TopBorder = XLBorderStyleValues.Thin;
             range.Style.Border.BottomBorder = XLBorderStyleValues.Thin;
-            range.Style.Border.LeftBorder = XLBorderStyleValues.Thin;
-            range.Style.Border.RightBorder = XLBorderStyleValues.Thin;
+            range.Style.Border.InsideBorder = XLBorderStyleValues.Thin;
+
+            // 両端（A列左側、L列右側）は太線で表示
+            worksheet.Cell(row, 1).Style.Border.LeftBorder = XLBorderStyleValues.Medium;
+            worksheet.Cell(row, 12).Style.Border.RightBorder = XLBorderStyleValues.Medium;
+
+            // 行全体を上下中央揃えに設定
+            range.Style.Alignment.Vertical = XLAlignmentVerticalValues.Center;
         }
     }
 }
