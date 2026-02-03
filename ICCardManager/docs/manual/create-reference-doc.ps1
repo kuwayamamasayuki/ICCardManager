@@ -64,9 +64,9 @@ try {
     $Section = $Doc.Sections.Item(1)
     $Footer = $Section.Footers.Item(1)  # wdHeaderFooterPrimary = 1
 
-    # フッターにページ番号フィールドを挿入（中央揃え）
-    $Footer.Range.ParagraphFormat.Alignment = 1  # wdAlignParagraphCenter
-    $Footer.Range.Fields.Add($Footer.Range, -1, "PAGE", $false) | Out-Null  # wdFieldPage = 33, but -1 for auto
+    # PageNumbers.Addを使用してページ番号を中央下に配置
+    # wdAlignPageNumberCenter = 1, wdAlignPageNumberLeft = 0, wdAlignPageNumberRight = 2
+    $Footer.PageNumbers.Add(1, $true) | Out-Null  # 第1引数: 配置(1=中央), 第2引数: 最初のページにも表示
 
     Write-Host "  ページ番号: フッター中央" -ForegroundColor Gray
 
