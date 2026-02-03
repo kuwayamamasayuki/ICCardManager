@@ -151,6 +151,15 @@ if (-not $SkipBuild) {
             $PdbFiles | Remove-Item -Force
             Write-Host "  PDBファイル: $($PdbFiles.Count) 個削除" -ForegroundColor Green
         }
+
+        # ICCardManager.exe をToolsフォルダにコピー（依存関係として必要）
+        $MainAppExe = Join-Path $PublishDir "ICCardManager.exe"
+        if (Test-Path $MainAppExe) {
+            Copy-Item $MainAppExe -Destination $DebugToolPublishDir -Force
+            Write-Host "  ICCardManager.exe をToolsフォルダにコピー" -ForegroundColor Green
+        } else {
+            Write-Host "  警告: ICCardManager.exe が見つかりません。先にメインアプリをビルドしてください。" -ForegroundColor Yellow
+        }
     }
     finally {
         Pop-Location
