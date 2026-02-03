@@ -170,11 +170,13 @@ foreach ($Manual in $Manuals) {
     }
 
     # Issue #454対応: --tocを削除（Markdownファイルに目次が既にあるため、重複を防ぐ）
+    # --resource-path: 画像などのリソースをMarkdownファイルの場所から相対パスで解決
     $PandocArgs = @(
         $InputPath,
         "-o", $OutputPath,
         "--from", "markdown",
         "--to", "docx",
+        "--resource-path", $ScriptDir,
         "--metadata", "title=$($Manual.Title)",
         "--metadata", "author=システム管理者",
         "--metadata", "lang=ja-JP"
