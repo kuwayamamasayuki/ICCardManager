@@ -52,6 +52,7 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
+Name: "autostart"; Description: "Windowsログイン時に自動起動する（常駐）"; GroupDescription: "起動設定:"; Flags: checked
 
 [Files]
 ; メインアプリケーションと依存DLL（すべてのDLL/EXE/config/pdbを含める）
@@ -98,6 +99,12 @@ Name: "{group}\ドキュメント"; Filename: "{app}\Docs"
 Name: "{group}\デバッグツール"; Filename: "{app}\Tools\DebugDataViewer.exe"
 Name: "{group}\{cm:UninstallProgram,{#MyAppName}}"; Filename: "{uninstallexe}"
 Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\app.ico"; Tasks: desktopicon
+
+[Registry]
+; 常駐オプション（Issue #452対応）: Windowsログイン時に自動起動
+; HKLM（全ユーザー向け）にRunキーを登録
+; uninsdeletevalue: アンインストール時に自動削除
+Root: HKLM; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "{#MyAppNameEn}"; ValueData: """{app}\{#MyAppExeName}"""; Flags: uninsdeletevalue; Tasks: autostart
 
 [Run]
 Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChange(MyAppName, '&', '&&')}}"; Flags: nowait postinstall skipifsilent
