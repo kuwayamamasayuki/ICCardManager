@@ -274,7 +274,7 @@ public class DtoMapperTests
     /// 払出金額の表示プロパティが正しいこと
     /// </summary>
     [Theory]
-    [InlineData(210, "-210")]
+    [InlineData(210, "210")]
     [InlineData(0, "")]
     public void LedgerDto_ExpenseDisplay_ShouldFormatCorrectly(int expense, string expected)
     {

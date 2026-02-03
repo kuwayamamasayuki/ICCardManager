@@ -644,7 +644,7 @@ public class HistoryViewModelTests
         displayItem.StaffName.Should().Be("田中太郎");
         displayItem.Note.Should().Be("テスト");
         displayItem.IncomeDisplay.Should().BeEmpty();
-        displayItem.ExpenseDisplay.Should().Be("-260");
+        displayItem.ExpenseDisplay.Should().Be("260");
         displayItem.BalanceDisplay.Should().Be("1,240");
     }
 

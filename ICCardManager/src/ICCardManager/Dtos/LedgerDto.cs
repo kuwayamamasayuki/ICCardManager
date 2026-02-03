@@ -80,7 +80,7 @@ namespace ICCardManager.Dtos
         /// <summary>
         /// 表示用: 払出金額（金額がある場合のみ表示）
         /// </summary>
-        public string ExpenseDisplay => Expense > 0 ? $"-{Expense:N0}" : "";
+        public string ExpenseDisplay => Expense > 0 ? $"{Expense:N0}" : "";
 
         /// <summary>
         /// 表示用: 残額
