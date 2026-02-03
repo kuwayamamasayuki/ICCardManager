@@ -9,6 +9,8 @@
 #      インストール: winget install pandoc または https://pandoc.org/installing.html
 #   2. Mermaid図をレンダリングする場合、mermaid-filterが必要
 #      インストール: npm install -g mermaid-filter
+#   3. ページ番号・余白を設定する場合、リファレンスドキュメントが必要
+#      作成: .\create-reference-doc.ps1 を実行
 
 param(
     [ValidateSet("all", "user", "user-summary", "admin", "dev")]
@@ -79,6 +81,16 @@ if (-not $PandocPath) {
 }
 Write-Host "  pandoc: $($PandocPath.Source)" -ForegroundColor Green
 
+# リファレンスドキュメントの確認
+$ReferenceDocPath = Join-Path $ScriptDir "reference.docx"
+$UseReferenceDoc = Test-Path $ReferenceDocPath
+if ($UseReferenceDoc) {
+    Write-Host "  reference.docx: 使用する（ページ番号・余白を適用）" -ForegroundColor Green
+} else {
+    Write-Host "  警告: reference.docx が見つかりません。ページ番号・余白はデフォルトになります。" -ForegroundColor Yellow
+    Write-Host "  作成: .\create-reference-doc.ps1 を実行してください。" -ForegroundColor Gray
+}
+
 # mermaid-filterの確認
 $UseMermaidFilter = $false
 if (-not $NoMermaid) {
@@ -139,17 +151,21 @@ foreach ($Manual in $Manuals) {
         Write-Host "  変換中..." -ForegroundColor Yellow
     }
 
+    # Issue #454対応: --tocを削除（Markdownファイルに目次が既にあるため、重複を防ぐ）
     $PandocArgs = @(
         $InputPath,
         "-o", $OutputPath,
         "--from", "markdown",
         "--to", "docx",
-        "--toc",
-        "--toc-depth=2",
         "--metadata", "title=$($Manual.Title)",
         "--metadata", "author=システム管理者",
         "--metadata", "lang=ja-JP"
     )
+
+    # リファレンスドキュメントが存在する場合、使用する（ページ番号・余白を適用）
+    if ($UseReferenceDoc) {
+        $PandocArgs += @("--reference-doc", $ReferenceDocPath)
+    }
 
     # mermaid-filterが有効な場合、フィルターを追加
     if ($UseMermaidFilter) {
