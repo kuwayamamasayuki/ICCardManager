@@ -98,6 +98,7 @@ public partial class MainViewModel : ViewModelBase
     private readonly ISettingsRepository _settingsRepository;
     private readonly LendingService _lendingService;
     private readonly IToastNotificationService _toastNotificationService;
+    private readonly IStaffAuthService _staffAuthService;
 
     private DispatcherTimer? _timeoutTimer;
     private string? _currentStaffIdm;
@@ -345,7 +346,8 @@ public partial class MainViewModel : ViewModelBase
         ILedgerRepository ledgerRepository,
         ISettingsRepository settingsRepository,
         LendingService lendingService,
-        IToastNotificationService toastNotificationService)
+        IToastNotificationService toastNotificationService,
+        IStaffAuthService staffAuthService)
     {
         _cardReader = cardReader;
         _soundPlayer = soundPlayer;
@@ -355,6 +357,7 @@ public partial class MainViewModel : ViewModelBase
         _settingsRepository = settingsRepository;
         _lendingService = lendingService;
         _toastNotificationService = toastNotificationService;
+        _staffAuthService = staffAuthService;
 
         // イベント登録
         _cardReader.CardRead += OnCardRead;
@@ -557,8 +560,9 @@ public partial class MainViewModel : ViewModelBase
 
         // カード登録モード中は処理をスキップ（CardManageViewModelが処理する）
         // 職員証登録モード中は処理をスキップ（StaffManageViewModelが処理する）
+        // 職員証認証モード中は処理をスキップ（StaffAuthDialogが処理する）Issue #429
         // ※登録済みカード/職員証も含め、すべてのカード読み取りを無視する
-        if (App.IsCardRegistrationActive || App.IsStaffCardRegistrationActive)
+        if (App.IsCardRegistrationActive || App.IsStaffCardRegistrationActive || App.IsAuthenticationActive)
         {
             return;
         }
@@ -1149,16 +1153,24 @@ public partial class MainViewModel : ViewModelBase
     {
         if (ledger == null) return;
 
+        // Issue #429: 履歴編集は認証が必要
+        var authResult = await _staffAuthService.RequestAuthenticationAsync("履歴の編集");
+        if (authResult == null)
+        {
+            // 認証キャンセルまたはタイムアウト
+            return;
+        }
+
         // 詳細データを取得
         var ledgerWithDetails = await _ledgerRepository.GetByIdAsync(ledger.Id);
         if (ledgerWithDetails == null) return;
 
         var detailDto = ledgerWithDetails.ToDto();
 
-        // 変更ダイアログを表示
+        // 変更ダイアログを表示（認証済みIDmを渡す）
         var dialog = App.Current.ServiceProvider.GetRequiredService<Views.Dialogs.LedgerEditDialog>();
         dialog.Owner = System.Windows.Application.Current.MainWindow;
-        await dialog.InitializeAsync(detailDto);
+        await dialog.InitializeWithAuthAsync(detailDto, authResult.Idm);
 
         if (dialog.ShowDialog() == true)
         {

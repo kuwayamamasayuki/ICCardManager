@@ -1,0 +1,85 @@
+<Window x:Class="ICCardManager.Views.Dialogs.StaffAuthDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="職員証による認証"
+        Height="320"
+        Width="400"
+        WindowStartupLocation="CenterOwner"
+        ResizeMode="NoResize"
+        ShowInTaskbar="False"
+        AutomationProperties.Name="職員証認証ダイアログ"
+        AutomationProperties.HelpText="重要な操作を行うために職員証による認証が必要です">
+
+    <Grid Margin="25">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <!-- アイコンとタイトル -->
+        <StackPanel Grid.Row="0" HorizontalAlignment="Center" Margin="0,0,0,20">
+            <TextBlock Text="🔐" FontSize="48" HorizontalAlignment="Center" Margin="0,0,0,10"/>
+            <TextBlock Text="職員証をタッチしてください"
+                       FontSize="{DynamicResource LargeFontSize}"
+                       FontWeight="Bold"
+                       HorizontalAlignment="Center"/>
+        </StackPanel>
+
+        <!-- 操作内容の説明 -->
+        <Border Grid.Row="1" Background="#E3F2FD" CornerRadius="4" Padding="12" Margin="0,0,0,15">
+            <StackPanel>
+                <TextBlock Text="操作内容:"
+                           FontSize="{DynamicResource SmallFontSize}"
+                           Foreground="#666"
+                           Margin="0,0,0,3"/>
+                <TextBlock x:Name="OperationDescriptionText"
+                           Text="履歴の編集"
+                           FontSize="{DynamicResource BaseFontSize}"
+                           FontWeight="SemiBold"
+                           Foreground="#1565C0"/>
+            </StackPanel>
+        </Border>
+
+        <!-- ステータスメッセージ -->
+        <Border x:Name="StatusBorder" Grid.Row="2" CornerRadius="4" Padding="12" Margin="0,0,0,15"
+                Background="#FFF3E0" Visibility="Collapsed">
+            <TextBlock x:Name="StatusText"
+                       Text=""
+                       FontSize="{DynamicResource BaseFontSize}"
+                       TextWrapping="Wrap"
+                       Foreground="#E65100"
+                       HorizontalAlignment="Center"/>
+        </Border>
+
+        <!-- タイムアウト表示 -->
+        <StackPanel Grid.Row="3" HorizontalAlignment="Center" Margin="0,0,0,20">
+            <TextBlock Text="残り時間:"
+                       FontSize="{DynamicResource SmallFontSize}"
+                       Foreground="#666"
+                       HorizontalAlignment="Center"/>
+            <TextBlock x:Name="TimeoutText"
+                       Text="60秒"
+                       FontSize="{DynamicResource LargeFontSize}"
+                       FontWeight="Bold"
+                       Foreground="#1976D2"
+                       HorizontalAlignment="Center"/>
+        </StackPanel>
+
+        <!-- キャンセルボタン -->
+        <Button x:Name="CancelButton"
+                Grid.Row="4"
+                Content="キャンセル"
+                Width="120"
+                Height="40"
+                HorizontalAlignment="Center"
+                FontSize="{DynamicResource BaseFontSize}"
+                IsCancel="True"
+                Click="CancelButton_Click"
+                AutomationProperties.Name="キャンセル"
+                AutomationProperties.HelpText="認証をキャンセルします"
+                ToolTip="認証をキャンセル (Escape)"/>
+    </Grid>
+</Window>

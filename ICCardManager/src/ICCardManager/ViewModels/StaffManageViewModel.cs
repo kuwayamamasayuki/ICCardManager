@@ -24,6 +24,7 @@ namespace ICCardManager.ViewModels
         private readonly IValidationService _validationService;
         private readonly OperationLogger _operationLogger;
         private readonly IDialogService _dialogService;
+        private readonly IStaffAuthService _staffAuthService;
 
         [ObservableProperty]
         private ObservableCollection<StaffDto> _staffList = new();
@@ -63,13 +64,15 @@ namespace ICCardManager.ViewModels
             ICardReader cardReader,
             IValidationService validationService,
             OperationLogger operationLogger,
-            IDialogService dialogService)
+            IDialogService dialogService,
+            IStaffAuthService staffAuthService)
         {
             _staffRepository = staffRepository;
             _cardReader = cardReader;
             _validationService = validationService;
             _operationLogger = operationLogger;
             _dialogService = dialogService;
+            _staffAuthService = staffAuthService;
 
             // カード読み取りイベント
             _cardReader.CardRead += OnCardRead;
@@ -391,6 +394,14 @@ namespace ICCardManager.ViewModels
         {
             if (SelectedStaff == null) return;
 
+            // Issue #429: 職員の削除は認証が必要
+            var authResult = await _staffAuthService.RequestAuthenticationAsync("職員の削除");
+            if (authResult == null)
+            {
+                // 認証キャンセルまたはタイムアウト
+                return;
+            }
+
             try
             {
                 using (BeginBusy("削除中..."))
@@ -401,10 +412,10 @@ namespace ICCardManager.ViewModels
                     var success = await _staffRepository.DeleteAsync(SelectedStaff.StaffIdm);
                     if (success)
                     {
-                        // 操作ログを記録
+                        // 操作ログを記録（Issue #429: 認証済み職員のIDmを使用）
                         if (staff != null)
                         {
-                            await _operationLogger.LogStaffDeleteAsync(null, staff);
+                            await _operationLogger.LogStaffDeleteAsync(authResult.Idm, staff);
                         }
 
                         StatusMessage = "削除しました";

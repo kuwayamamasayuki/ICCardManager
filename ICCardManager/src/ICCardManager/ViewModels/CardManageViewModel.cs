@@ -26,6 +26,7 @@ namespace ICCardManager.ViewModels
         private readonly IValidationService _validationService;
         private readonly OperationLogger _operationLogger;
         private readonly IDialogService _dialogService;
+        private readonly IStaffAuthService _staffAuthService;
 
         [ObservableProperty]
         private ObservableCollection<CardDto> _cards = new();
@@ -95,7 +96,8 @@ namespace ICCardManager.ViewModels
             CardTypeDetector cardTypeDetector,
             IValidationService validationService,
             OperationLogger operationLogger,
-            IDialogService dialogService)
+            IDialogService dialogService,
+            IStaffAuthService staffAuthService)
         {
             _cardRepository = cardRepository;
             _ledgerRepository = ledgerRepository;
@@ -104,6 +106,7 @@ namespace ICCardManager.ViewModels
             _validationService = validationService;
             _operationLogger = operationLogger;
             _dialogService = dialogService;
+            _staffAuthService = staffAuthService;
 
             // カード読み取りイベント
             _cardReader.CardRead += OnCardRead;
@@ -461,6 +464,14 @@ namespace ICCardManager.ViewModels
                 return;
             }
 
+            // Issue #429: ICカードの削除は認証が必要
+            var authResult = await _staffAuthService.RequestAuthenticationAsync("ICカードの削除");
+            if (authResult == null)
+            {
+                // 認証キャンセルまたはタイムアウト
+                return;
+            }
+
             // 削除確認ダイアログを表示
             var confirmed = _dialogService.ShowWarningConfirmation(
                 $"カード「{SelectedCard.CardType} {SelectedCard.CardNumber}」を削除しますか？\n\n※削除後も履歴データは保持されます。",
@@ -479,10 +490,10 @@ namespace ICCardManager.ViewModels
                 var success = await _cardRepository.DeleteAsync(SelectedCard.CardIdm);
                 if (success)
                 {
-                    // 操作ログを記録
+                    // 操作ログを記録（Issue #429: 認証済み職員のIDmを使用）
                     if (card != null)
                     {
-                        await _operationLogger.LogCardDeleteAsync(null, card);
+                        await _operationLogger.LogCardDeleteAsync(authResult.Idm, card);
                     }
 
                     StatusMessage = "削除しました";

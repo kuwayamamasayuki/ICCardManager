@@ -58,6 +58,12 @@ namespace ICCardManager
         public static bool IsCardRegistrationActive { get; set; }
 
         /// <summary>
+        /// 職員証認証モードが有効かどうか（MainViewModelでのカード処理を抑制するため）
+        /// Issue #429: 重要な操作の前に職員証タッチを必須とする
+        /// </summary>
+        public static bool IsAuthenticationActive { get; set; }
+
+        /// <summary>
         /// DEBUGビルドかどうか（XAMLからデバッグ用UIの表示制御に使用: Issue #289）
         /// </summary>
         public static bool IsDebugBuild
@@ -178,6 +184,7 @@ namespace ICCardManager
             services.AddSingleton<CsvImportService>();
             services.AddSingleton<IToastNotificationService, ToastNotificationService>();
             services.AddSingleton<IDialogService, DialogService>();
+            services.AddSingleton<IStaffAuthService, StaffAuthService>();
 
             // Infrastructure層
     #if DEBUG

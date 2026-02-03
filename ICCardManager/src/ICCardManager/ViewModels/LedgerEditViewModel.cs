@@ -23,6 +23,11 @@ namespace ICCardManager.ViewModels
         private string _cardIdm = string.Empty;
 
         /// <summary>
+        /// 操作者の職員IDm（Issue #429: 認証済み職員のIDm）
+        /// </summary>
+        private string? _operatorIdm;
+
+        /// <summary>
         /// ステータスメッセージ
         /// </summary>
         [ObservableProperty]
@@ -109,9 +114,13 @@ namespace ICCardManager.ViewModels
         /// <summary>
         /// 履歴データで初期化
         /// </summary>
-        public Task InitializeAsync(LedgerDto ledger)
+        /// <param name="ledger">編集対象の履歴データ</param>
+        /// <param name="operatorIdm">操作者の職員IDm（Issue #429: 認証済み職員のIDm）</param>
+        public Task InitializeAsync(LedgerDto ledger, string? operatorIdm = null)
         {
             if (ledger == null) return Task.CompletedTask;
+
+            _operatorIdm = operatorIdm;
 
             IsBusy = true;
             BusyMessage = "読み込み中...";
@@ -197,8 +206,8 @@ namespace ICCardManager.ViewModels
 
                 if (result)
                 {
-                    // 操作ログを記録（GUI操作のためoperatorIdmはnull）
-                    await _operationLogger.LogLedgerUpdateAsync(null, beforeLedger, ledger);
+                    // 操作ログを記録（Issue #429: 認証済み職員のIDmを使用）
+                    await _operationLogger.LogLedgerUpdateAsync(_operatorIdm, beforeLedger, ledger);
 
                     IsSaved = true;
                 }
