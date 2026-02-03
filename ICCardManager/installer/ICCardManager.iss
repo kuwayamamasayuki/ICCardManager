@@ -1,4 +1,4 @@
-; ICCardManager インストーラースクリプト
+﻿; ICCardManager インストーラースクリプト
 ; Inno Setup 6.x 用
 ; バージョンはコマンドラインから /DMyAppVersion=x.y.z で指定可能
 
