@@ -424,11 +424,14 @@ LIMIT @pageSize OFFSET @offset";
             var details = new List<LedgerDetail>();
 
             using var command = connection.CreateCommand();
+            // Issue #393: 履歴詳細を古い順（時系列順）で表示
+            // use_dateだけでは同日の順序が不定になるため、rowid（挿入順序）で補完
+            // rowid昇順 = ICカードから読み取った順序 = 古い取引から順
             command.CommandText = @"SELECT ledger_id, use_date, entry_station, exit_station,
        bus_stops, amount, balance, is_charge, is_point_redemption, is_bus
 FROM ledger_detail
 WHERE ledger_id = @ledgerId
-ORDER BY use_date ASC";
+ORDER BY use_date ASC, rowid ASC";
 
             command.Parameters.AddWithValue("@ledgerId", ledgerId);
 
