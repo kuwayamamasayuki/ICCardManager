@@ -132,19 +132,23 @@ namespace ICCardManager.Services
 
             var rows = new List<ReportPrintRow>();
 
-            // 4月の場合は前年度繰越を追加
+            // 4月の場合は前年度繰越を追加（新規購入カードの場合は繰越行を出力しない）
             if (month == 4)
             {
                 var carryover = await _ledgerRepository.GetCarryoverBalanceAsync(cardIdm, year - 1);
-                var carryoverDate = new DateTime(year, 4, 1);
-                rows.Add(new ReportPrintRow
+                // 前年度のデータがある場合のみ繰越行を追加
+                if (carryover.HasValue)
                 {
-                    DateDisplay = WarekiConverter.ToWareki(carryoverDate),
-                    Summary = SummaryGenerator.GetCarryoverFromPreviousYearSummary(),
-                    Income = carryover ?? 0,
-                    Balance = carryover ?? 0,
-                    IsBold = true
-                });
+                    var carryoverDate = new DateTime(year, 4, 1);
+                    rows.Add(new ReportPrintRow
+                    {
+                        DateDisplay = WarekiConverter.ToWareki(carryoverDate),
+                        Summary = SummaryGenerator.GetCarryoverFromPreviousYearSummary(),
+                        Income = carryover.Value,
+                        Balance = carryover.Value,
+                        IsBold = true
+                    });
+                }
             }
 
             // 各履歴行

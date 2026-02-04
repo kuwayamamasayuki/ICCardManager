@@ -228,18 +228,26 @@ namespace ICCardManager.Services
                 var startRow = 5; // データ開始行（テンプレートに依存: 新テンプレートでは5行目から）
                 var currentRow = startRow;
 
-                // 繰越行を追加
+                // 繰越行を追加（新規購入カードの場合は繰越行を出力しない）
                 if (month == 4)
                 {
                     // 4月の場合は前年度繰越のみ（月繰越は行わない）
                     var carryover = await _ledgerRepository.GetCarryoverBalanceAsync(cardIdm, year - 1);
-                    currentRow = WriteFiscalYearCarryoverRow(worksheet, currentRow, carryover ?? 0, year);
+                    // 前年度のデータがある場合のみ繰越行を出力
+                    if (carryover.HasValue)
+                    {
+                        currentRow = WriteFiscalYearCarryoverRow(worksheet, currentRow, carryover.Value, year);
+                    }
                 }
                 else
                 {
                     // 4月以外は前月繰越を追加
                     var previousMonthBalance = await GetPreviousMonthBalanceAsync(cardIdm, year, month);
-                    currentRow = WriteMonthlyCarryoverRow(worksheet, currentRow, previousMonthBalance, year, month);
+                    // 過去のデータがある場合のみ繰越行を出力
+                    if (previousMonthBalance.HasValue)
+                    {
+                        currentRow = WriteMonthlyCarryoverRow(worksheet, currentRow, previousMonthBalance.Value, year, month);
+                    }
                 }
 
                 // 各履歴行を出力
@@ -472,7 +480,14 @@ namespace ICCardManager.Services
         /// <summary>
         /// 前月の残高を取得
         /// </summary>
-        private async Task<int> GetPreviousMonthBalanceAsync(string cardIdm, int year, int month)
+        /// <summary>
+        /// 前月の残高を取得
+        /// </summary>
+        /// <param name="cardIdm">カードIDm</param>
+        /// <param name="year">年</param>
+        /// <param name="month">月</param>
+        /// <returns>前月残高。過去のデータがない場合はnull</returns>
+        private async Task<int?> GetPreviousMonthBalanceAsync(string cardIdm, int year, int month)
         {
             // 前月の年月を計算
             int previousYear, previousMonth;
@@ -503,7 +518,8 @@ namespace ICCardManager.Services
             // 年度開始月（4月）まで遡って繰越残高を取得
             var fiscalYearStartYear = month >= 4 ? year : year - 1;
             var carryover = await _ledgerRepository.GetCarryoverBalanceAsync(cardIdm, fiscalYearStartYear - 1);
-            return carryover ?? 0;
+            // 過去のデータがない場合はnullを返す（新規購入カードの場合）
+            return carryover;
         }
 
         /// <summary>
