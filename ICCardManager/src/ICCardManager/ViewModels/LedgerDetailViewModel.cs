@@ -89,7 +89,7 @@ namespace ICCardManager.ViewModels
                 {
                     return $"+{Detail.Amount:N0}円";
                 }
-                return $"-{Detail.Amount:N0}円";
+                return $"{Detail.Amount:N0}円";
             }
         }
 
