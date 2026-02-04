@@ -463,10 +463,11 @@ namespace ICCardManager.Services
             var previousMonth = month == 1 ? 12 : month - 1;
 
             // 列配置: A=出納年月日, B-D=摘要(結合), E=受入金額, F=払出金額, G=残額, H=氏名, I-L=備考(結合)
+            // Issue #481: 月次繰越の受入欄は記載しない（年度繰越のみ受入欄に記載）
             var carryoverDate = new DateTime(year, month, 1);
             worksheet.Cell(row, 1).Value = WarekiConverter.ToWareki(carryoverDate); // 出納年月日 (A列)
             worksheet.Cell(row, 2).Value = SummaryGenerator.GetCarryoverFromPreviousMonthSummary(previousMonth); // 摘要 (B-D列)
-            worksheet.Cell(row, 5).Value = balance; // 受入金額 (E列)
+            worksheet.Cell(row, 5).Value = "";      // 受入金額 (E列) - 月次繰越は空欄
             worksheet.Cell(row, 6).Value = "";      // 払出金額 (F列)
             worksheet.Cell(row, 7).Value = balance; // 残額 (G列)
 
