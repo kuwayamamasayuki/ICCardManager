@@ -871,6 +871,24 @@ public partial class MainViewModel : ViewModelBase
         _soundPlayer.Play(SoundType.Warning);
         // メイン画面は変更しない（Issue #186）
 
+        // Issue #482対応: カード種別選択の前に残高を読み取っておく
+        // 選択中にカードを離しても正しい残高で登録できる
+        // エラーイベントを一時的に抑制（ユーザーに混乱を与えるエラーメッセージを防止）
+        int? preReadBalance = null;
+        _cardReader.Error -= OnCardReaderError;
+        try
+        {
+            preReadBalance = await _cardReader.ReadBalanceAsync(idm);
+        }
+        catch
+        {
+            // 残高読み取りエラーは無視（カード登録は続行可能）
+        }
+        finally
+        {
+            _cardReader.Error += OnCardReaderError;
+        }
+
         // Issue #312: IDmからカード種別を判別することは技術的に不可能なため、
         // カスタムダイアログでユーザーに職員証か交通系ICカードかを選択させる
         var selectionDialog = new Views.Dialogs.CardTypeSelectionDialog
@@ -890,19 +908,8 @@ public partial class MainViewModel : ViewModelBase
                 break;
 
             case Views.Dialogs.CardTypeSelectionResult.IcCard:
-                // Issue #381対応: カードがリーダー上にある間に残高を読み取っておく
-                // ユーザーがフォームを入力している間にカードが離れても正しい残高で登録できる
-                int? preReadBalance = null;
-                try
-                {
-                    preReadBalance = await _cardReader.ReadBalanceAsync(idm);
-                }
-                catch
-                {
-                    // 残高読み取りエラーは無視（カード登録は続行可能）
-                }
-
                 // カード管理画面を開いて新規登録モードで開始
+                // Issue #482: 事前に読み取った残高を渡す
                 var cardDialog = App.Current.ServiceProvider.GetRequiredService<Views.Dialogs.CardManageDialog>();
                 cardDialog.Owner = System.Windows.Application.Current.MainWindow;
                 cardDialog.InitializeWithIdmAndBalance(idm, preReadBalance);
