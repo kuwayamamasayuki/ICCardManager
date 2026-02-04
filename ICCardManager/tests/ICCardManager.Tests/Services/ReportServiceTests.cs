@@ -1787,4 +1787,241 @@ public class ReportServiceTests : IDisposable
     }
 
     #endregion
+
+    #region Issue #477 年度ファイル・月別シート機能テスト
+
+    /// <summary>
+    /// TC025: Issue #477 - 帳票作成でシート名が月名になる
+    /// </summary>
+    [Fact]
+    public async Task CreateMonthlyReportAsync_CreatesWorksheetWithMonthName()
+    {
+        // Arrange
+        var cardIdm = "0102030405060708";
+        var card = CreateTestCard(cardIdm);
+        var outputPath = CreateTempFilePath();
+        var year = 2024;
+        var month = 6;
+
+        var ledgers = new List<Ledger>
+        {
+            CreateTestLedger(1, cardIdm, new DateTime(year, month, 10), "鉄道（博多～天神）", 0, 500, 9500)
+        };
+
+        _cardRepositoryMock
+            .Setup(r => r.GetByIdmAsync(cardIdm, true))
+            .ReturnsAsync(card);
+        _ledgerRepositoryMock
+            .Setup(r => r.GetByMonthAsync(cardIdm, year, month))
+            .ReturnsAsync(ledgers);
+
+        // Act
+        var result = await _reportService.CreateMonthlyReportAsync(cardIdm, year, month, outputPath);
+
+        // Assert
+        result.Success.Should().BeTrue();
+
+        using var workbook = new XLWorkbook(outputPath);
+        workbook.Worksheets.Should().ContainSingle();
+        var worksheet = workbook.Worksheets.First();
+        worksheet.Name.Should().Be($"{month}月", "シート名が月名であるべき");
+    }
+
+    /// <summary>
+    /// TC026: Issue #477 - 同一ファイルに複数月のシートを追加できる
+    /// </summary>
+    [Fact]
+    public async Task CreateMonthlyReportAsync_AddsMultipleMonthSheets_ToSameFile()
+    {
+        // Arrange
+        var cardIdm = "0102030405060708";
+        var card = CreateTestCard(cardIdm);
+        var outputPath = CreateTempFilePath();
+        var year = 2024;
+
+        // 6月のデータ
+        var juneLedgers = new List<Ledger>
+        {
+            CreateTestLedger(1, cardIdm, new DateTime(year, 6, 10), "鉄道（博多～天神）", 0, 500, 9500)
+        };
+        // 7月のデータ
+        var julyLedgers = new List<Ledger>
+        {
+            CreateTestLedger(2, cardIdm, new DateTime(year, 7, 15), "鉄道（天神～博多）", 0, 300, 9200)
+        };
+
+        _cardRepositoryMock
+            .Setup(r => r.GetByIdmAsync(cardIdm, true))
+            .ReturnsAsync(card);
+        _ledgerRepositoryMock
+            .Setup(r => r.GetByMonthAsync(cardIdm, year, 6))
+            .ReturnsAsync(juneLedgers);
+        _ledgerRepositoryMock
+            .Setup(r => r.GetByMonthAsync(cardIdm, year, 7))
+            .ReturnsAsync(julyLedgers);
+        // 前月残高のモック設定
+        _ledgerRepositoryMock
+            .Setup(r => r.GetByMonthAsync(cardIdm, year, 5))
+            .ReturnsAsync(new List<Ledger>
+            {
+                CreateTestLedger(0, cardIdm, new DateTime(year, 5, 1), "5月データ", 10000, 0, 10000)
+            });
+        _ledgerRepositoryMock
+            .Setup(r => r.GetCarryoverBalanceAsync(cardIdm, year - 1))
+            .ReturnsAsync(10000);
+
+        // Act - 6月帳票作成
+        var result1 = await _reportService.CreateMonthlyReportAsync(cardIdm, year, 6, outputPath);
+        // Act - 7月帳票作成（同じファイルに追加）
+        var result2 = await _reportService.CreateMonthlyReportAsync(cardIdm, year, 7, outputPath);
+
+        // Assert
+        result1.Success.Should().BeTrue();
+        result2.Success.Should().BeTrue();
+
+        using var workbook = new XLWorkbook(outputPath);
+        workbook.Worksheets.Should().HaveCount(2, "2つのシートが存在するべき");
+        workbook.Worksheets.Select(w => w.Name).Should().Contain("6月");
+        workbook.Worksheets.Select(w => w.Name).Should().Contain("7月");
+    }
+
+    /// <summary>
+    /// TC027: Issue #477 - 既存シートを上書き更新できる
+    /// </summary>
+    [Fact]
+    public async Task CreateMonthlyReportAsync_UpdatesExistingMonthSheet()
+    {
+        // Arrange
+        var cardIdm = "0102030405060708";
+        var card = CreateTestCard(cardIdm);
+        var outputPath = CreateTempFilePath();
+        var year = 2024;
+        var month = 6;
+
+        // 初回データ
+        var initialLedgers = new List<Ledger>
+        {
+            CreateTestLedger(1, cardIdm, new DateTime(year, month, 10), "初回データ", 0, 500, 9500)
+        };
+        // 更新データ
+        var updatedLedgers = new List<Ledger>
+        {
+            CreateTestLedger(1, cardIdm, new DateTime(year, month, 10), "更新データ1", 0, 500, 9500),
+            CreateTestLedger(2, cardIdm, new DateTime(year, month, 15), "更新データ2", 0, 300, 9200)
+        };
+
+        _cardRepositoryMock
+            .Setup(r => r.GetByIdmAsync(cardIdm, true))
+            .ReturnsAsync(card);
+
+        // 初回作成
+        _ledgerRepositoryMock
+            .Setup(r => r.GetByMonthAsync(cardIdm, year, month))
+            .ReturnsAsync(initialLedgers);
+        await _reportService.CreateMonthlyReportAsync(cardIdm, year, month, outputPath);
+
+        // 更新用データに差し替え
+        _ledgerRepositoryMock
+            .Setup(r => r.GetByMonthAsync(cardIdm, year, month))
+            .ReturnsAsync(updatedLedgers);
+
+        // Act - 同月を再度作成（上書き）
+        var result = await _reportService.CreateMonthlyReportAsync(cardIdm, year, month, outputPath);
+
+        // Assert
+        result.Success.Should().BeTrue();
+
+        using var workbook = new XLWorkbook(outputPath);
+        workbook.Worksheets.Should().ContainSingle("シートは1つのみであるべき");
+        var worksheet = workbook.Worksheets.First();
+        worksheet.Name.Should().Be($"{month}月");
+
+        // 更新データの検証（データ行は5行目から開始、繰越行がないので5行目がデータ）
+        worksheet.Cell(5, 2).GetString().Should().Be("更新データ1", "更新後のデータが反映されるべき");
+        worksheet.Cell(6, 2).GetString().Should().Be("更新データ2", "2行目のデータも反映されるべき");
+    }
+
+    /// <summary>
+    /// TC028: Issue #477 - シートが月順（4月〜3月）に並ぶ
+    /// </summary>
+    [Fact]
+    public async Task CreateMonthlyReportAsync_SheetsAreOrderedByFiscalMonth()
+    {
+        // Arrange
+        var cardIdm = "0102030405060708";
+        var card = CreateTestCard(cardIdm);
+        var outputPath = CreateTempFilePath();
+        var year = 2024;
+
+        _cardRepositoryMock
+            .Setup(r => r.GetByIdmAsync(cardIdm, true))
+            .ReturnsAsync(card);
+        // 各月のデータをモック
+        foreach (var m in new[] { 7, 4, 10, 1 })
+        {
+            var actualYear = m >= 4 ? year : year + 1;
+            _ledgerRepositoryMock
+                .Setup(r => r.GetByMonthAsync(cardIdm, actualYear, m))
+                .ReturnsAsync(new List<Ledger>
+                {
+                    CreateTestLedger(m, cardIdm, new DateTime(actualYear, m, 10), $"{m}月データ", 0, 100, 9000 - m * 100)
+                });
+        }
+        _ledgerRepositoryMock
+            .Setup(r => r.GetCarryoverBalanceAsync(cardIdm, It.IsAny<int>()))
+            .ReturnsAsync(10000);
+
+        // Act - 順不同で作成
+        await _reportService.CreateMonthlyReportAsync(cardIdm, year, 7, outputPath);     // 7月
+        await _reportService.CreateMonthlyReportAsync(cardIdm, year, 4, outputPath);     // 4月
+        await _reportService.CreateMonthlyReportAsync(cardIdm, year, 10, outputPath);    // 10月
+        await _reportService.CreateMonthlyReportAsync(cardIdm, year + 1, 1, outputPath); // 1月
+
+        // Assert - シートが月順（4月→7月→10月→1月）に並ぶ
+        using var workbook = new XLWorkbook(outputPath);
+        var sheetNames = workbook.Worksheets.Select(w => w.Name).ToList();
+
+        sheetNames.Should().HaveCount(4);
+        sheetNames[0].Should().Be("4月", "4月が最初であるべき");
+        sheetNames[1].Should().Be("7月", "7月が2番目であるべき");
+        sheetNames[2].Should().Be("10月", "10月が3番目であるべき");
+        sheetNames[3].Should().Be("1月", "1月が最後であるべき");
+    }
+
+    /// <summary>
+    /// TC029: Issue #477 - GetFiscalYear が正しく年度を計算する
+    /// </summary>
+    [Theory]
+    [InlineData(2024, 4, 2024)]  // 4月は同年度
+    [InlineData(2024, 12, 2024)] // 12月は同年度
+    [InlineData(2025, 1, 2024)]  // 1月は前年度
+    [InlineData(2025, 3, 2024)]  // 3月は前年度
+    public void GetFiscalYear_ReturnsCorrectFiscalYear(int year, int month, int expectedFiscalYear)
+    {
+        // Act
+        var result = ReportService.GetFiscalYear(year, month);
+
+        // Assert
+        result.Should().Be(expectedFiscalYear);
+    }
+
+    /// <summary>
+    /// TC030: Issue #477 - GetFiscalYearFileName が正しいファイル名を生成する
+    /// </summary>
+    [Fact]
+    public void GetFiscalYearFileName_GeneratesCorrectFileName()
+    {
+        // Arrange
+        var cardType = "はやかけん";
+        var cardNumber = "H001";
+        var fiscalYear = 2024;
+
+        // Act
+        var result = ReportService.GetFiscalYearFileName(cardType, cardNumber, fiscalYear);
+
+        // Assert
+        result.Should().Be("物品出納簿_はやかけん_H001_2024年度.xlsx");
+    }
+
+    #endregion
 }

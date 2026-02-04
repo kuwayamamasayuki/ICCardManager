@@ -325,12 +325,14 @@ public partial class ReportViewModel : ViewModelBase
         }
 
         // 上書き確認: 既存ファイルをチェック
+        // Issue #477: 年度ファイル名に変更
         var existingFiles = new List<string>();
         var outputPaths = new Dictionary<string, string>(); // cardIdm -> outputPath
+        var fiscalYear = ReportService.GetFiscalYear(SelectedYear, SelectedMonth);
 
         foreach (var card in SelectedCards)
         {
-            var fileName = $"物品出納簿_{card.CardType}_{card.CardNumber}_{SelectedYear}年{SelectedMonth}月.xlsx";
+            var fileName = ReportService.GetFiscalYearFileName(card.CardType, card.CardNumber, fiscalYear);
             var outputPath = Path.Combine(OutputFolder, fileName);
             outputPaths[card.CardIdm] = outputPath;
 
@@ -341,6 +343,7 @@ public partial class ReportViewModel : ViewModelBase
         }
 
         // 既存ファイルがある場合は確認ダイアログを表示
+        // Issue #477: 年度ファイルの該当月シートのみ更新
         var useAlternativeNames = false;
         if (existingFiles.Count > 0)
         {
@@ -349,11 +352,13 @@ public partial class ReportViewModel : ViewModelBase
                 : string.Join("\n", existingFiles.Take(5).Select(f => $"・{f}")) + $"\n・...他 {existingFiles.Count - 5} 件";
 
             var result = MessageBox.Show(
-                $"以下のファイルが既に存在します:\n\n{fileList}\n\n上書きしますか？\n\n" +
-                "「はい」: 上書きする\n" +
+                $"以下のファイルが既に存在します:\n\n{fileList}\n\n" +
+                $"{SelectedMonth}月のシートを更新しますか？\n" +
+                $"（他の月のシートは変更されません）\n\n" +
+                "「はい」: 更新する\n" +
                 "「いいえ」: 別名で保存する（日時を付加）\n" +
                 "「キャンセル」: 中止する",
-                "ファイル上書き確認",
+                "ファイル更新確認",
                 MessageBoxButton.YesNoCancel,
                 MessageBoxImage.Question);
 
