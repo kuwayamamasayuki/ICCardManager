@@ -224,6 +224,7 @@ namespace ICCardManager
             services.AddTransient<DataExportImportViewModel>();
             services.AddTransient<OperationLogSearchViewModel>();
             services.AddTransient<LedgerEditViewModel>();
+            services.AddTransient<LedgerDetailViewModel>();
             services.AddTransient<SystemManageViewModel>();
 
             // Views

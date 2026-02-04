@@ -203,9 +203,9 @@ WHERE id = @id";
 
             using var command = connection.CreateCommand();
             command.CommandText = @"INSERT INTO ledger_detail (ledger_id, use_date, entry_station, exit_station,
-                           bus_stops, amount, balance, is_charge, is_point_redemption, is_bus)
+                           bus_stops, amount, balance, is_charge, is_point_redemption, is_bus, group_id)
 VALUES (@ledgerId, @useDate, @entryStation, @exitStation,
-       @busStops, @amount, @balance, @isCharge, @isPointRedemption, @isBus)";
+       @busStops, @amount, @balance, @isCharge, @isPointRedemption, @isBus, @groupId)";
 
             command.Parameters.AddWithValue("@ledgerId", detail.LedgerId);
             command.Parameters.AddWithValue("@useDate", detail.UseDate.HasValue ? detail.UseDate.Value.ToString("yyyy-MM-dd HH:mm:ss") : DBNull.Value);
@@ -217,6 +217,7 @@ VALUES (@ledgerId, @useDate, @entryStation, @exitStation,
             command.Parameters.AddWithValue("@isCharge", detail.IsCharge ? 1 : 0);
             command.Parameters.AddWithValue("@isPointRedemption", detail.IsPointRedemption ? 1 : 0);
             command.Parameters.AddWithValue("@isBus", detail.IsBus ? 1 : 0);
+            command.Parameters.AddWithValue("@groupId", detail.GroupId.HasValue ? detail.GroupId.Value : DBNull.Value);
 
             var result = await command.ExecuteNonQueryAsync();
             return result > 0;
@@ -428,7 +429,7 @@ LIMIT @pageSize OFFSET @offset";
             // use_dateだけでは同日の順序が不定になるため、rowid（挿入順序）で補完
             // rowid昇順 = ICカードから読み取った順序 = 古い取引から順
             command.CommandText = @"SELECT ledger_id, use_date, entry_station, exit_station,
-       bus_stops, amount, balance, is_charge, is_point_redemption, is_bus
+       bus_stops, amount, balance, is_charge, is_point_redemption, is_bus, group_id, rowid
 FROM ledger_detail
 WHERE ledger_id = @ledgerId
 ORDER BY use_date ASC, rowid ASC";
@@ -496,6 +497,10 @@ ORDER BY use_date ASC, rowid ASC";
         /// <summary>
         /// DataReaderからLedgerDetailオブジェクトにマッピング
         /// </summary>
+        /// <remarks>
+        /// SELECTの列順序: ledger_id, use_date, entry_station, exit_station,
+        /// bus_stops, amount, balance, is_charge, is_point_redemption, is_bus, group_id, rowid
+        /// </remarks>
         private static LedgerDetail MapToLedgerDetail(DbDataReader reader)
         {
             return new LedgerDetail
@@ -509,7 +514,8 @@ ORDER BY use_date ASC, rowid ASC";
                 Balance = reader.IsDBNull(6) ? null : reader.GetInt32(6),
                 IsCharge = reader.GetInt32(7) == 1,
                 IsPointRedemption = !reader.IsDBNull(8) && reader.GetInt32(8) == 1,
-                IsBus = reader.GetInt32(9) == 1
+                IsBus = reader.GetInt32(9) == 1,
+                GroupId = reader.IsDBNull(10) ? null : reader.GetInt32(10)
             };
         }
 
@@ -586,6 +592,21 @@ WHERE card_idm IN ({string.Join(", ", parameters)})";
             }
 
             return result;
+        }
+
+        /// <inheritdoc/>
+        public async Task<bool> ReplaceDetailsAsync(int ledgerId, IEnumerable<LedgerDetail> details)
+        {
+            var connection = _dbContext.GetConnection();
+
+            // 既存の詳細をすべて削除
+            using var deleteCommand = connection.CreateCommand();
+            deleteCommand.CommandText = "DELETE FROM ledger_detail WHERE ledger_id = @ledgerId";
+            deleteCommand.Parameters.AddWithValue("@ledgerId", ledgerId);
+            await deleteCommand.ExecuteNonQueryAsync();
+
+            // 新しい詳細を登録
+            return await InsertDetailsAsync(ledgerId, details);
         }
     }
 }

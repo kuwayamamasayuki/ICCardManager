@@ -299,8 +299,9 @@ namespace ICCardManager.Services
         /// <remarks>
         /// <para>アルゴリズム：</para>
         /// <list type="number">
-        /// <item><description>往復パターン（A→B、B→A）を検出して「A駅～B駅 往復」として統合</description></item>
-        /// <item><description>乗継パターン（降車駅=次の乗車駅）を検出して「始発駅～終着駅」として統合</description></item>
+        /// <item><description>GroupIdが設定されている場合、同じGroupIdの経路を1つの乗り継ぎとして統合</description></item>
+        /// <item><description>GroupIdが未設定の場合、往復パターン（A→B、B→A）を検出して「A駅～B駅 往復」として統合</description></item>
+        /// <item><description>GroupIdが未設定の場合、乗継パターン（降車駅=次の乗車駅）を検出して「始発駅～終着駅」として統合</description></item>
         /// <item><description>循環移動（始点=終点）の場合は統合せず個別表示</description></item>
         /// </list>
         /// </remarks>
@@ -320,6 +321,70 @@ namespace ICCardManager.Services
                 .ThenByDescending(t => t.Balance ?? 0)
                 .ToList();
 
+            // Issue #484: GroupIdが設定されている場合はそのグループ化を優先
+            var hasGroupId = sortedTrips.Any(t => t.GroupId.HasValue);
+            if (hasGroupId)
+            {
+                return GenerateRailwaySummaryWithGroupId(sortedTrips);
+            }
+
+            // GroupIdが設定されていない場合は従来の自動判定
+            return GenerateRailwaySummaryAutomatic(sortedTrips);
+        }
+
+        /// <summary>
+        /// GroupIdに基づいて鉄道利用の摘要を生成（Issue #484）
+        /// </summary>
+        private string GenerateRailwaySummaryWithGroupId(List<LedgerDetail> sortedTrips)
+        {
+            var result = new List<string>();
+
+            // GroupIdでグループ化（NULLは個別のグループとして扱う）
+            // まず、GroupIdがある経路とない経路を分離
+            var groupedTrips = sortedTrips
+                .Where(t => t.GroupId.HasValue && !string.IsNullOrEmpty(t.EntryStation) && !string.IsNullOrEmpty(t.ExitStation))
+                .GroupBy(t => t.GroupId!.Value)
+                .OrderBy(g => g.Min(t => t.UseDate ?? DateTime.MaxValue));
+
+            var ungroupedTrips = sortedTrips
+                .Where(t => !t.GroupId.HasValue && !string.IsNullOrEmpty(t.EntryStation) && !string.IsNullOrEmpty(t.ExitStation))
+                .ToList();
+
+            // グループ化された経路を処理
+            foreach (var group in groupedTrips)
+            {
+                var groupTrips = group.OrderBy(t => t.UseDate ?? DateTime.MaxValue).ToList();
+                if (groupTrips.Count == 1)
+                {
+                    result.Add($"{groupTrips[0].EntryStation}～{groupTrips[0].ExitStation}");
+                }
+                else
+                {
+                    // グループ内の最初の乗車駅と最後の降車駅を使用
+                    var firstStation = groupTrips.First().EntryStation;
+                    var lastStation = groupTrips.Last().ExitStation;
+                    result.Add($"{firstStation}～{lastStation}");
+                }
+            }
+
+            // グループ化されていない経路は自動判定
+            if (ungroupedTrips.Count > 0)
+            {
+                var autoSummary = GenerateRailwaySummaryAutomatic(ungroupedTrips);
+                if (!string.IsNullOrEmpty(autoSummary))
+                {
+                    result.Add(autoSummary);
+                }
+            }
+
+            return string.Join("、", result);
+        }
+
+        /// <summary>
+        /// 自動判定で鉄道利用の摘要を生成（従来のロジック）
+        /// </summary>
+        private string GenerateRailwaySummaryAutomatic(List<LedgerDetail> sortedTrips)
+        {
             // 駅→駅のペアを抽出
             var routes = sortedTrips
                 .Where(t => !string.IsNullOrEmpty(t.EntryStation) && !string.IsNullOrEmpty(t.ExitStation))

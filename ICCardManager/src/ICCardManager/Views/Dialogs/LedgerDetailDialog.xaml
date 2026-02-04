@@ -3,24 +3,51 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:vm="clr-namespace:ICCardManager.ViewModels"
         mc:Ignorable="d"
+        d:DataContext="{d:DesignInstance Type=vm:LedgerDetailViewModel}"
         Title="利用履歴詳細"
-        Height="400"
-        Width="700"
+        Height="500"
+        Width="800"
         WindowStartupLocation="CenterOwner"
         ResizeMode="CanResize"
         AutomationProperties.Name="利用履歴詳細ダイアログ"
-        AutomationProperties.HelpText="選択した履歴の詳細（個別の乗車記録）を表示します。">
+        AutomationProperties.HelpText="選択した履歴の詳細（個別の乗車記録）を表示・編集します。">
+
+    <Window.InputBindings>
+        <!-- Ctrl+G: 統合 -->
+        <KeyBinding Key="G" Modifiers="Control" Command="{Binding MergeCommand}"/>
+        <!-- Ctrl+U: 分割 -->
+        <KeyBinding Key="U" Modifiers="Control" Command="{Binding SplitCommand}"/>
+        <!-- Ctrl+A: すべて選択 -->
+        <KeyBinding Key="A" Modifiers="Control" Command="{Binding SelectAllCommand}"/>
+        <!-- Ctrl+S: 保存 -->
+        <KeyBinding Key="S" Modifiers="Control" Command="{Binding SaveCommand}"/>
+    </Window.InputBindings>
+
+    <Window.Resources>
+        <BooleanToVisibilityConverter x:Key="BoolToVisibilityConverter"/>
+
+        <!-- グループ色のブラシ -->
+        <SolidColorBrush x:Key="GroupColor0" Color="Transparent"/>
+        <SolidColorBrush x:Key="GroupColor1" Color="#E3F2FD"/>
+        <SolidColorBrush x:Key="GroupColor2" Color="#E8F5E9"/>
+        <SolidColorBrush x:Key="GroupColor3" Color="#FFF3E0"/>
+        <SolidColorBrush x:Key="GroupColor4" Color="#F3E5F5"/>
+        <SolidColorBrush x:Key="GroupColor5" Color="#FFEBEE"/>
+    </Window.Resources>
 
     <Grid Margin="15">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
 
         <!-- 親レコード情報ヘッダー -->
-        <Border Grid.Row="0" Background="#E3F2FD" CornerRadius="4" Padding="15" Margin="0,0,0,15">
+        <Border Grid.Row="0" Background="#E3F2FD" CornerRadius="4" Padding="15" Margin="0,0,0,10">
             <Grid>
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto"/>
@@ -33,34 +60,38 @@
 
                 <!-- 日付と摘要 -->
                 <StackPanel Grid.Row="0" Grid.Column="0" Orientation="Horizontal">
-                    <TextBlock x:Name="DateText"
+                    <TextBlock Text="{Binding DateDisplay}"
                                FontSize="{DynamicResource LargeFontSize}"
                                FontWeight="Bold"
                                VerticalAlignment="Center"/>
-                    <TextBlock x:Name="SummaryText"
+                    <TextBlock Text="{Binding SummaryDisplay}"
                                FontSize="{DynamicResource BaseFontSize}"
                                Margin="20,0,0,0"
-                               VerticalAlignment="Center"/>
+                               VerticalAlignment="Center"
+                               TextTrimming="CharacterEllipsis"
+                               MaxWidth="300"/>
                 </StackPanel>
 
                 <!-- 金額情報 -->
                 <StackPanel Grid.Row="0" Grid.Column="1" Orientation="Horizontal">
-                    <TextBlock x:Name="IncomeText"
+                    <TextBlock Text="{Binding IncomeDisplay}"
                                FontSize="{DynamicResource LargeFontSize}"
                                FontWeight="Bold"
                                Foreground="Green"
                                VerticalAlignment="Center"
-                               Margin="0,0,15,0"/>
-                    <TextBlock x:Name="ExpenseText"
+                               Margin="0,0,15,0"
+                               Visibility="{Binding IncomeDisplay, Converter={StaticResource BoolToVisibilityConverter}}"/>
+                    <TextBlock Text="{Binding ExpenseDisplay}"
                                FontSize="{DynamicResource LargeFontSize}"
                                FontWeight="Bold"
                                Foreground="OrangeRed"
                                VerticalAlignment="Center"
-                               Margin="0,0,15,0"/>
+                               Margin="0,0,15,0"
+                               Visibility="{Binding ExpenseDisplay, Converter={StaticResource BoolToVisibilityConverter}}"/>
                     <TextBlock Text="残高:"
                                FontSize="{DynamicResource BaseFontSize}"
                                VerticalAlignment="Center"/>
-                    <TextBlock x:Name="BalanceText"
+                    <TextBlock Text="{Binding BalanceDisplay}"
                                FontSize="{DynamicResource LargeFontSize}"
                                FontWeight="Bold"
                                Foreground="#1565C0"
@@ -74,7 +105,7 @@
                                FontSize="{DynamicResource SmallFontSize}"
                                Foreground="Gray"
                                VerticalAlignment="Center"/>
-                    <TextBlock x:Name="StaffNameText"
+                    <TextBlock Text="{Binding StaffName}"
                                FontSize="{DynamicResource SmallFontSize}"
                                Margin="5,0,20,0"
                                VerticalAlignment="Center"/>
@@ -82,32 +113,164 @@
                                FontSize="{DynamicResource SmallFontSize}"
                                Foreground="Gray"
                                VerticalAlignment="Center"/>
-                    <TextBlock x:Name="NoteText"
+                    <TextBlock Text="{Binding Note}"
                                FontSize="{DynamicResource SmallFontSize}"
                                Margin="5,0,0,0"
-                               VerticalAlignment="Center"/>
+                               VerticalAlignment="Center"
+                               TextTrimming="CharacterEllipsis"
+                               MaxWidth="300"/>
                 </StackPanel>
+            </Grid>
+        </Border>
+
+        <!-- 統合・分割ツールバー -->
+        <Border Grid.Row="1" Background="#F5F5F5" CornerRadius="4" Padding="10" Margin="0,0,0,10">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+
+                <StackPanel Orientation="Horizontal">
+                    <Button Content="📦 統合 (Ctrl+G)"
+                            Command="{Binding MergeCommand}"
+                            Padding="12,6"
+                            Margin="0,0,8,0"
+                            ToolTip="選択した項目を1つの乗り継ぎとして統合します"
+                            AutomationProperties.Name="統合">
+                        <Button.Style>
+                            <Style TargetType="Button">
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding CanMerge}" Value="False">
+                                        <Setter Property="IsEnabled" Value="False"/>
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </Button.Style>
+                    </Button>
+                    <Button Content="📤 分割 (Ctrl+U)"
+                            Command="{Binding SplitCommand}"
+                            Padding="12,6"
+                            Margin="0,0,8,0"
+                            ToolTip="選択した項目の統合を解除します"
+                            AutomationProperties.Name="分割">
+                        <Button.Style>
+                            <Style TargetType="Button">
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding CanSplit}" Value="False">
+                                        <Setter Property="IsEnabled" Value="False"/>
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </Button.Style>
+                    </Button>
+                    <Button Content="🔄 自動検出に戻す"
+                            Command="{Binding ResetToAutoDetectCommand}"
+                            Padding="12,6"
+                            ToolTip="すべての統合を解除し、自動検出モードに戻します"
+                            AutomationProperties.Name="自動検出に戻す"/>
+                </StackPanel>
+
+                <TextBlock Grid.Column="1"
+                           Text="{Binding StatusMessage}"
+                           Foreground="#666666"
+                           VerticalAlignment="Center"
+                           FontSize="{DynamicResource SmallFontSize}"/>
             </Grid>
         </Border>
 
         <!-- 詳細一覧 -->
         <DataGrid x:Name="DetailsDataGrid"
-                  Grid.Row="1"
+                  Grid.Row="2"
+                  ItemsSource="{Binding Items}"
                   AutoGenerateColumns="False"
-                  IsReadOnly="True"
-                  SelectionMode="Single"
+                  IsReadOnly="False"
+                  SelectionMode="Extended"
                   CanUserAddRows="False"
                   CanUserDeleteRows="False"
                   GridLinesVisibility="Horizontal"
                   HeadersVisibility="Column"
                   RowHeaderWidth="0"
-                  AlternatingRowBackground="#FAFAFA"
                   AutomationProperties.Name="利用詳細一覧"
-                  AutomationProperties.HelpText="個別の乗車記録やチャージ記録の一覧です。">
+                  AutomationProperties.HelpText="チェックボックスで項目を選択し、統合または分割できます。">
             <DataGrid.Columns>
-                <DataGridTextColumn Header="日時" Binding="{Binding UseDateDisplay}" Width="140"/>
-                <DataGridTextColumn Header="区間" Binding="{Binding RouteDisplay}" Width="*"/>
-                <DataGridTextColumn Header="金額" Width="100">
+                <!-- 選択チェックボックス -->
+                <DataGridTemplateColumn Header="選択" Width="50">
+                    <DataGridTemplateColumn.CellTemplate>
+                        <DataTemplate>
+                            <CheckBox IsChecked="{Binding IsSelected, UpdateSourceTrigger=PropertyChanged}"
+                                      HorizontalAlignment="Center"
+                                      VerticalAlignment="Center"
+                                      Click="CheckBox_Click"/>
+                        </DataTemplate>
+                    </DataGridTemplateColumn.CellTemplate>
+                </DataGridTemplateColumn>
+
+                <!-- グループ表示 -->
+                <DataGridTemplateColumn Header="グループ" Width="70">
+                    <DataGridTemplateColumn.CellTemplate>
+                        <DataTemplate>
+                            <Border CornerRadius="3" Padding="4,2" HorizontalAlignment="Center">
+                                <Border.Style>
+                                    <Style TargetType="Border">
+                                        <Setter Property="Background" Value="Transparent"/>
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding GroupColorIndex}" Value="1">
+                                                <Setter Property="Background" Value="#1976D2"/>
+                                            </DataTrigger>
+                                            <DataTrigger Binding="{Binding GroupColorIndex}" Value="2">
+                                                <Setter Property="Background" Value="#388E3C"/>
+                                            </DataTrigger>
+                                            <DataTrigger Binding="{Binding GroupColorIndex}" Value="3">
+                                                <Setter Property="Background" Value="#F57C00"/>
+                                            </DataTrigger>
+                                            <DataTrigger Binding="{Binding GroupColorIndex}" Value="4">
+                                                <Setter Property="Background" Value="#7B1FA2"/>
+                                            </DataTrigger>
+                                            <DataTrigger Binding="{Binding GroupColorIndex}" Value="5">
+                                                <Setter Property="Background" Value="#D32F2F"/>
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </Border.Style>
+                                <TextBlock HorizontalAlignment="Center">
+                                    <TextBlock.Style>
+                                        <Style TargetType="TextBlock">
+                                            <Setter Property="Text" Value="-"/>
+                                            <Setter Property="Foreground" Value="Gray"/>
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding GroupId}" Value="{x:Null}">
+                                                    <Setter Property="Text" Value="-"/>
+                                                    <Setter Property="Foreground" Value="Gray"/>
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </TextBlock.Style>
+                                </TextBlock>
+                                <Border.ToolTip>
+                                    <ToolTip>
+                                        <TextBlock>
+                                            <TextBlock.Style>
+                                                <Style TargetType="TextBlock">
+                                                    <Setter Property="Text" Value="グループなし（自動検出）"/>
+                                                    <Style.Triggers>
+                                                        <DataTrigger Binding="{Binding GroupId}" Value="{x:Null}">
+                                                            <Setter Property="Text" Value="グループなし（自動検出）"/>
+                                                        </DataTrigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </TextBlock.Style>
+                                        </TextBlock>
+                                    </ToolTip>
+                                </Border.ToolTip>
+                            </Border>
+                        </DataTemplate>
+                    </DataGridTemplateColumn.CellTemplate>
+                </DataGridTemplateColumn>
+
+                <DataGridTextColumn Header="日時" Binding="{Binding UseDateDisplay}" Width="140" IsReadOnly="True"/>
+                <DataGridTextColumn Header="区間" Binding="{Binding RouteDisplay}" Width="*" IsReadOnly="True"/>
+                <DataGridTextColumn Header="金額" Width="100" IsReadOnly="True">
                     <DataGridTextColumn.Binding>
                         <Binding Path="AmountDisplay"/>
                     </DataGridTextColumn.Binding>
@@ -117,7 +280,7 @@
                         </Style>
                     </DataGridTextColumn.ElementStyle>
                 </DataGridTextColumn>
-                <DataGridTextColumn Header="残高" Width="100">
+                <DataGridTextColumn Header="残高" Width="100" IsReadOnly="True">
                     <DataGridTextColumn.Binding>
                         <Binding Path="BalanceDisplay"/>
                     </DataGridTextColumn.Binding>
@@ -129,12 +292,27 @@
                 </DataGridTextColumn>
             </DataGrid.Columns>
 
-            <!-- チャージ行のスタイル -->
+            <!-- 行スタイル（グループ色） -->
             <DataGrid.RowStyle>
                 <Style TargetType="DataGridRow">
                     <Style.Triggers>
-                        <DataTrigger Binding="{Binding IsCharge}" Value="True">
+                        <DataTrigger Binding="{Binding GroupColorIndex}" Value="1">
+                            <Setter Property="Background" Value="#E3F2FD"/>
+                        </DataTrigger>
+                        <DataTrigger Binding="{Binding GroupColorIndex}" Value="2">
                             <Setter Property="Background" Value="#E8F5E9"/>
+                        </DataTrigger>
+                        <DataTrigger Binding="{Binding GroupColorIndex}" Value="3">
+                            <Setter Property="Background" Value="#FFF3E0"/>
+                        </DataTrigger>
+                        <DataTrigger Binding="{Binding GroupColorIndex}" Value="4">
+                            <Setter Property="Background" Value="#F3E5F5"/>
+                        </DataTrigger>
+                        <DataTrigger Binding="{Binding GroupColorIndex}" Value="5">
+                            <Setter Property="Background" Value="#FFEBEE"/>
+                        </DataTrigger>
+                        <DataTrigger Binding="{Binding IsCharge}" Value="True">
+                            <Setter Property="FontWeight" Value="Bold"/>
                         </DataTrigger>
                         <DataTrigger Binding="{Binding IsBus}" Value="True">
                             <Setter Property="FontStyle" Value="Italic"/>
@@ -144,20 +322,61 @@
             </DataGrid.RowStyle>
         </DataGrid>
 
+        <!-- 操作説明 -->
+        <Border Grid.Row="3" Background="#FFFDE7" CornerRadius="4" Padding="10" Margin="0,10,0,0">
+            <TextBlock TextWrapping="Wrap" FontSize="{DynamicResource SmallFontSize}">
+                <Run FontWeight="Bold">操作方法:</Run>
+                <Run Text=" チェックボックスで複数選択 → [統合] で1つの乗り継ぎに / [分割] で個別に戻す"/>
+                <LineBreak/>
+                <Run Text="同じ色の行は1つの乗り継ぎとして摘要に統合されます。色がない行は自動検出されます。"/>
+            </TextBlock>
+        </Border>
+
         <!-- フッター -->
-        <Grid Grid.Row="2" Margin="0,15,0,0">
+        <Grid Grid.Row="4" Margin="0,15,0,0">
             <StackPanel Orientation="Horizontal">
-                <TextBlock x:Name="DetailCountText"
+                <TextBlock Text="{Binding DetailCountDisplay}"
                            Foreground="Gray"
                            VerticalAlignment="Center"/>
+                <TextBlock Text=" | " Foreground="Gray" VerticalAlignment="Center"
+                           Visibility="{Binding HasChanges, Converter={StaticResource BoolToVisibilityConverter}}"/>
+                <TextBlock Text="未保存の変更があります"
+                           Foreground="#D32F2F"
+                           FontWeight="Bold"
+                           VerticalAlignment="Center"
+                           Visibility="{Binding HasChanges, Converter={StaticResource BoolToVisibilityConverter}}"/>
             </StackPanel>
-            <Button Content="閉じる"
-                    Click="CloseButton_Click"
-                    HorizontalAlignment="Right"
-                    Padding="20,8"
-                    IsCancel="True"
-                    AutomationProperties.Name="閉じる"
-                    ToolTip="ダイアログを閉じる (Escape)"/>
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                <Button Content="保存 (Ctrl+S)"
+                        Command="{Binding SaveCommand}"
+                        Padding="15,8"
+                        Margin="0,0,10,0"
+                        Background="#4CAF50"
+                        Foreground="White"
+                        AutomationProperties.Name="保存"
+                        ToolTip="変更を保存します"
+                        Visibility="{Binding HasChanges, Converter={StaticResource BoolToVisibilityConverter}}"/>
+                <Button Content="閉じる"
+                        Click="CloseButton_Click"
+                        Padding="20,8"
+                        IsCancel="True"
+                        AutomationProperties.Name="閉じる"
+                        ToolTip="ダイアログを閉じる (Escape)"/>
+            </StackPanel>
         </Grid>
+
+        <!-- 処理中オーバーレイ -->
+        <Border Grid.RowSpan="5"
+                Background="#80000000"
+                Visibility="{Binding IsBusy, Converter={StaticResource BoolToVisibilityConverter}}">
+            <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
+                <ProgressBar IsIndeterminate="True" Width="200" Height="4"/>
+                <TextBlock Text="保存中..."
+                           Foreground="White"
+                           FontSize="{DynamicResource BaseFontSize}"
+                           Margin="0,10,0,0"
+                           HorizontalAlignment="Center"/>
+            </StackPanel>
+        </Border>
     </Grid>
 </Window>
