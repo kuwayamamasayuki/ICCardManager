@@ -873,8 +873,11 @@ public class ReportServiceTests : IDisposable
     }
 
     /// <summary>
-    /// TC014: 4月で前年度繰越が0の場合も正しく出力される
+    /// TC014: 4月で前年度繰越が0の場合は繰越0を出力
     /// </summary>
+    /// <remarks>
+    /// 前年度のデータが存在し残高が0の場合は繰越行を出力する（Issue #479とは別のケース）
+    /// </remarks>
     [Fact]
     public async Task CreateMonthlyReportAsync_InApril_WithZeroCarryover_ShouldOutputZero()
     {
@@ -898,7 +901,7 @@ public class ReportServiceTests : IDisposable
             .ReturnsAsync(ledgers);
         _ledgerRepositoryMock
             .Setup(r => r.GetCarryoverBalanceAsync(cardIdm, year - 1))
-            .ReturnsAsync((int?)null);  // 前年度データなし
+            .ReturnsAsync(0);  // 前年度データあり、残高0
 
         // Act
         var result = await _reportService.CreateMonthlyReportAsync(cardIdm, year, month, outputPath);
@@ -913,6 +916,101 @@ public class ReportServiceTests : IDisposable
         worksheet.Cell(5, 2).GetString().Should().Be("前年度より繰越");
         worksheet.Cell(5, 5).GetValue<int>().Should().Be(0);  // 受入金額 (E列)
         worksheet.Cell(5, 7).GetValue<int>().Should().Be(0);  // 残額 (G列)
+    }
+
+    /// <summary>
+    /// TC022: Issue #479 - 新規購入カードの4月には前年度繰越行を出力しない
+    /// </summary>
+    [Fact]
+    public async Task CreateMonthlyReportAsync_InApril_NewCard_ShouldSkipCarryoverRow()
+    {
+        // Arrange
+        var cardIdm = "0102030405060708";
+        var card = CreateTestCard(cardIdm);
+        var year = 2024;
+        var month = 4;
+        var outputPath = CreateTempFilePath();
+
+        var ledgers = new List<Ledger>
+        {
+            CreateTestLedger(1, cardIdm, new DateTime(2024, 4, 5), "役務費によりチャージ", 10000, 0, 10000)
+        };
+
+        _cardRepositoryMock
+            .Setup(r => r.GetByIdmAsync(cardIdm, true))
+            .ReturnsAsync(card);
+        _ledgerRepositoryMock
+            .Setup(r => r.GetByMonthAsync(cardIdm, year, month))
+            .ReturnsAsync(ledgers);
+        _ledgerRepositoryMock
+            .Setup(r => r.GetCarryoverBalanceAsync(cardIdm, year - 1))
+            .ReturnsAsync((int?)null);  // 前年度データなし（新規購入）
+
+        // Act
+        var result = await _reportService.CreateMonthlyReportAsync(cardIdm, year, month, outputPath);
+
+        // Assert
+        result.Success.Should().BeTrue();
+
+        using var workbook = new XLWorkbook(outputPath);
+        var worksheet = workbook.Worksheets.First();
+
+        // Issue #479: 繰越行が出力されず、データ行が行5から開始
+        worksheet.Cell(5, 2).GetString().Should().Be("役務費によりチャージ");  // データが行5から
+        worksheet.Cell(5, 5).GetValue<int>().Should().Be(10000);  // 受入金額 (E列)
+        worksheet.Cell(5, 7).GetValue<int>().Should().Be(10000);  // 残額 (G列)
+
+        // 月計行は行6
+        worksheet.Cell(6, 2).GetString().Should().Be("4月計");
+    }
+
+    /// <summary>
+    /// TC023: Issue #479 - 新規購入カードの5月以降でも繰越行を出力しない
+    /// </summary>
+    [Fact]
+    public async Task CreateMonthlyReportAsync_NewCard_ShouldSkipMonthlyCarryoverRow()
+    {
+        // Arrange
+        var cardIdm = "0102030405060708";
+        var card = CreateTestCard(cardIdm);
+        var year = 2024;
+        var month = 5;  // 5月（新規購入して最初の利用月）
+        var outputPath = CreateTempFilePath();
+
+        var ledgers = new List<Ledger>
+        {
+            CreateTestLedger(1, cardIdm, new DateTime(2024, 5, 10), "役務費によりチャージ", 10000, 0, 10000),
+            CreateTestLedger(2, cardIdm, new DateTime(2024, 5, 15), "鉄道（博多～天神）", 0, 300, 9700)
+        };
+
+        _cardRepositoryMock
+            .Setup(r => r.GetByIdmAsync(cardIdm, true))
+            .ReturnsAsync(card);
+        _ledgerRepositoryMock
+            .Setup(r => r.GetByMonthAsync(cardIdm, year, month))
+            .ReturnsAsync(ledgers);
+        _ledgerRepositoryMock
+            .Setup(r => r.GetByMonthAsync(cardIdm, year, 4))  // 4月の前月残高
+            .ReturnsAsync(new List<Ledger>());  // 4月データなし
+        _ledgerRepositoryMock
+            .Setup(r => r.GetCarryoverBalanceAsync(cardIdm, year - 1))  // 前年度繰越を探す
+            .ReturnsAsync((int?)null);  // 前年度データなし（新規購入）
+
+        // Act
+        var result = await _reportService.CreateMonthlyReportAsync(cardIdm, year, month, outputPath);
+
+        // Assert
+        result.Success.Should().BeTrue();
+
+        using var workbook = new XLWorkbook(outputPath);
+        var worksheet = workbook.Worksheets.First();
+
+        // Issue #479: 繰越行が出力されず、データ行が行5から開始
+        worksheet.Cell(5, 2).GetString().Should().Be("役務費によりチャージ");  // データが行5から
+        worksheet.Cell(6, 2).GetString().Should().Be("鉄道（博多～天神）");
+
+        // 月計行は行7
+        worksheet.Cell(7, 2).GetString().Should().Be("5月計");
     }
 
     #endregion
