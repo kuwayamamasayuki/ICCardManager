@@ -915,8 +915,10 @@ public partial class MainViewModel : ViewModelBase
                 cardDialog.InitializeWithIdmAndBalance(idm, preReadBalance);
                 cardDialog.ShowDialog();
 
-                // ダイアログを閉じた後、貸出中カード一覧を更新
+                // ダイアログを閉じた後、貸出中カード一覧とダッシュボードを更新
+                // Issue #483: RefreshDashboardAsync を追加してカード一覧を更新
                 await RefreshLentCardsAsync();
+                await RefreshDashboardAsync();
                 break;
 
             case Views.Dialogs.CardTypeSelectionResult.Cancel:
