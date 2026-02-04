@@ -75,7 +75,7 @@ namespace ICCardManager.Dtos
         /// <summary>
         /// 表示用: 受入金額（金額がある場合のみ表示）
         /// </summary>
-        public string IncomeDisplay => Income > 0 ? $"+{Income:N0}" : "";
+        public string IncomeDisplay => Income > 0 ? $"{Income:N0}" : "";
 
         /// <summary>
         /// 表示用: 払出金額（金額がある場合のみ表示）

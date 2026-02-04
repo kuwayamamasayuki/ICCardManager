@@ -240,8 +240,8 @@ namespace ICCardManager.ViewModels
             // ヘッダー情報を設定
             DateDisplay = WarekiConverter.ToWareki(_ledger.Date);
             SummaryDisplay = _ledger.Summary;
-            IncomeDisplay = _ledger.Income > 0 ? $"+{_ledger.Income:N0}円" : string.Empty;
-            ExpenseDisplay = _ledger.Expense > 0 ? $"-{_ledger.Expense:N0}円" : string.Empty;
+            IncomeDisplay = _ledger.Income > 0 ? $"{_ledger.Income:N0}円" : string.Empty;
+            ExpenseDisplay = _ledger.Expense > 0 ? $"{_ledger.Expense:N0}円" : string.Empty;
             BalanceDisplay = $"{_ledger.Balance:N0}円";
             StaffName = _ledger.StaffName ?? "-";
             Note = _ledger.Note ?? string.Empty;
