@@ -150,5 +150,16 @@ namespace ICCardManager.Data.Repositories
         /// <param name="details">新しい詳細リスト</param>
         /// <returns>成功した場合true</returns>
         Task<bool> ReplaceDetailsAsync(int ledgerId, IEnumerable<LedgerDetail> details);
+
+        /// <summary>
+        /// 指定カードの新規購入日を取得
+        /// </summary>
+        /// <remarks>
+        /// Issue #501対応: 物品出納簿の作成時に、新規購入より前の月をスキップするために使用。
+        /// summary = "新規購入" の最初のレコードの日付を返す。
+        /// </remarks>
+        /// <param name="cardIdm">ICカードIDm</param>
+        /// <returns>新規購入日、存在しない場合はnull</returns>
+        Task<DateTime?> GetPurchaseDateAsync(string cardIdm);
     }
 }

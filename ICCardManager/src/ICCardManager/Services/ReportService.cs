@@ -21,6 +21,11 @@ namespace ICCardManager.Services
         public bool Success { get; set; }
 
         /// <summary>
+        /// スキップフラグ（新規購入より前の月など、作成対象外の場合）
+        /// </summary>
+        public bool Skipped { get; set; }
+
+        /// <summary>
         /// エラーメッセージ（失敗時）
         /// </summary>
         public string ErrorMessage { get; set; }
@@ -52,6 +57,16 @@ namespace ICCardManager.Services
             Success = false,
             ErrorMessage = message,
             DetailedErrorMessage = detailedMessage
+        };
+
+        /// <summary>
+        /// スキップ結果を作成（新規購入より前の月など）
+        /// </summary>
+        public static ReportGenerationResult SkippedResult(string reason) => new()
+        {
+            Success = true, // エラーではないのでSuccessはtrue
+            Skipped = true,
+            ErrorMessage = reason
         };
     }
 
@@ -86,14 +101,19 @@ namespace ICCardManager.Services
         public bool IsDirectoryError => DirectoryErrorMessage != null;
 
         /// <summary>
-        /// 成功した件数
+        /// 成功した件数（スキップを除く）
         /// </summary>
-        public int SuccessCount => Results.Count(r => r.Result.Success);
+        public int SuccessCount => Results.Count(r => r.Result.Success && !r.Result.Skipped);
 
         /// <summary>
         /// 失敗した件数
         /// </summary>
         public int FailureCount => Results.Count(r => !r.Result.Success);
+
+        /// <summary>
+        /// スキップした件数（新規購入より前の月など）
+        /// </summary>
+        public int SkippedCount => Results.Count(r => r.Result.Skipped);
 
         /// <summary>
         /// 全件成功したか
@@ -212,6 +232,19 @@ namespace ICCardManager.Services
                     return ReportGenerationResult.FailureResult(
                         "カード情報が見つかりません",
                         $"指定されたカード（IDm: {cardIdm}）は登録されていません。");
+                }
+
+                // Issue #501: 新規購入より前の月はスキップ
+                var purchaseDate = await _ledgerRepository.GetPurchaseDateAsync(cardIdm);
+                if (purchaseDate.HasValue)
+                {
+                    var requestedMonth = new DateTime(year, month, 1);
+                    var purchaseMonth = new DateTime(purchaseDate.Value.Year, purchaseDate.Value.Month, 1);
+                    if (requestedMonth < purchaseMonth)
+                    {
+                        return ReportGenerationResult.SkippedResult(
+                            $"新規購入（{purchaseDate.Value:yyyy/MM}）より前の月です");
+                    }
                 }
 
                 // 履歴を取得
