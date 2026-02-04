@@ -52,7 +52,7 @@ Write-Host "バージョン: $Version" -ForegroundColor Cyan
 Write-Host ""
 
 # Step 1: Inno Setup の確認
-Write-Host "[1/8] Inno Setup の確認..." -ForegroundColor Yellow
+Write-Host "[1/9] Inno Setup の確認..." -ForegroundColor Yellow
 $IsccPath = $null
 foreach ($path in $InnoSetupPaths) {
     if (Test-Path $path) {
@@ -70,7 +70,7 @@ Write-Host "  Inno Setup: $IsccPath" -ForegroundColor Green
 
 # Step 2: アイコンの生成
 Write-Host ""
-Write-Host "[2/8] アイコンの生成..." -ForegroundColor Yellow
+Write-Host "[2/9] アイコンの生成..." -ForegroundColor Yellow
 $IconScript = Join-Path $ScriptDir "generate-icon.ps1"
 $IconPath = Join-Path $ScriptDir "app.ico"
 
@@ -88,7 +88,7 @@ if (Test-Path $IconScript) {
 # Step 3: アプリケーションのビルド
 if (-not $SkipBuild) {
     Write-Host ""
-    Write-Host "[3/8] アプリケーションのビルド..." -ForegroundColor Yellow
+    Write-Host "[3/9] アプリケーションのビルド..." -ForegroundColor Yellow
 
     Push-Location $SrcDir
     try {
@@ -118,13 +118,13 @@ if (-not $SkipBuild) {
     }
 } else {
     Write-Host ""
-    Write-Host "[3/8] ビルドをスキップ（既存のpublishを使用）..." -ForegroundColor Yellow
+    Write-Host "[3/9] ビルドをスキップ（既存のpublishを使用）..." -ForegroundColor Yellow
 }
 
 # Step 4: デバッグツールのビルド
 if (-not $SkipBuild) {
     Write-Host ""
-    Write-Host "[4/8] デバッグツールのビルド..." -ForegroundColor Yellow
+    Write-Host "[4/9] デバッグツールのビルド..." -ForegroundColor Yellow
 
     $DebugToolDir = Join-Path $ProjectRoot "tools\DebugDataViewer"
     $DebugToolPublishDir = Join-Path $PublishDir "Tools"
@@ -194,12 +194,12 @@ if (-not $SkipBuild) {
     }
 } else {
     Write-Host ""
-    Write-Host "[4/8] デバッグツールのビルドをスキップ..." -ForegroundColor Yellow
+    Write-Host "[4/9] デバッグツールのビルドをスキップ..." -ForegroundColor Yellow
 }
 
 # Step 5: リソースファイルのコピー
 Write-Host ""
-Write-Host "[5/8] リソースファイルのコピー..." -ForegroundColor Yellow
+Write-Host "[5/9] リソースファイルのコピー..." -ForegroundColor Yellow
 
 $SoundsSource = Join-Path $SrcDir "Resources\Sounds"
 $SoundsDest = Join-Path $PublishDir "Resources\Sounds"
@@ -233,7 +233,7 @@ if (Test-Path $SqliteInteropSource) {
 
 # Step 6: 発行ファイルの確認
 Write-Host ""
-Write-Host "[6/8] 発行ファイルの確認..." -ForegroundColor Yellow
+Write-Host "[6/9] 発行ファイルの確認..." -ForegroundColor Yellow
 
 $ExePath = Join-Path $PublishDir "ICCardManager.exe"
 if (-not (Test-Path $ExePath)) {
@@ -263,9 +263,43 @@ if (Test-Path $DebugToolExe) {
     Write-Host "  デバッグツール: 見つかりません（-SkipBuildの場合はビルドが必要です）" -ForegroundColor Yellow
 }
 
-# Step 7: インストーラーの作成
+# Step 7: マニュアルの変換（Issue #480）
 Write-Host ""
-Write-Host "[7/8] インストーラーの作成..." -ForegroundColor Yellow
+Write-Host "[7/9] マニュアルの変換..." -ForegroundColor Yellow
+
+$ManualDir = Join-Path $ProjectRoot "docs\manual"
+$ConvertScript = Join-Path $ManualDir "convert-to-docx.ps1"
+
+# pandocがインストールされているか確認
+$PandocPath = Get-Command pandoc -ErrorAction SilentlyContinue
+if (-not $PandocPath) {
+    Write-Host "  警告: pandocがインストールされていません。マニュアル変換をスキップします。" -ForegroundColor Yellow
+    Write-Host "  インストール: winget install pandoc または https://pandoc.org/installing.html" -ForegroundColor Yellow
+} elseif (-not (Test-Path $ConvertScript)) {
+    Write-Host "  警告: 変換スクリプトが見つかりません: $ConvertScript" -ForegroundColor Yellow
+} else {
+    # 変換スクリプトを実行（更新が必要なマニュアルのみ変換）
+    Push-Location $ManualDir
+    try {
+        & $ConvertScript -NoMermaid
+        if ($LASTEXITCODE -eq 0) {
+            Write-Host "  マニュアル変換完了" -ForegroundColor Green
+        } else {
+            Write-Host "  警告: マニュアル変換でエラーが発生しました（ビルドは続行）" -ForegroundColor Yellow
+        }
+    }
+    catch {
+        Write-Host "  警告: マニュアル変換中に例外が発生しました: $_" -ForegroundColor Yellow
+        Write-Host "  ビルドは続行します" -ForegroundColor Yellow
+    }
+    finally {
+        Pop-Location
+    }
+}
+
+# Step 8: インストーラーの作成
+Write-Host ""
+Write-Host "[8/9] インストーラーの作成..." -ForegroundColor Yellow
 
 # 出力ディレクトリの作成
 if (-not (Test-Path $OutputDir)) {
