@@ -176,13 +176,17 @@ namespace ICCardManager.Services
         }
 
         /// <summary>
-        /// 月次帳票を作成
+        /// 月次帳票を作成（年度ファイルの該当月シートを作成/更新）
         /// </summary>
         /// <param name="cardIdm">対象カードIDm</param>
         /// <param name="year">年</param>
         /// <param name="month">月</param>
-        /// <param name="outputPath">出力先パス</param>
+        /// <param name="outputPath">出力先パス（年度ファイル）</param>
         /// <returns>作成結果（成功/失敗とエラーメッセージ）</returns>
+        /// <remarks>
+        /// Issue #477対応: 年度ごとに1つのExcelファイルを作成し、月ごとにワークシートを分ける。
+        /// 上書き時は当該月のワークシートのみ修正する。
+        /// </remarks>
         public async Task<ReportGenerationResult> CreateMonthlyReportAsync(string cardIdm, int year, int month, string outputPath)
         {
             string templatePath = null;
@@ -219,79 +223,122 @@ namespace ICCardManager.Services
                     .ThenBy(l => l.Id)
                     .ToList();
 
-                // テンプレートを開く
-                using var workbook = new XLWorkbook(templatePath);
-                var worksheet = workbook.Worksheets.First();
+                // Issue #477: 既存ファイルがあれば開く、なければテンプレートから新規作成
+                XLWorkbook workbook;
+                bool isExistingFile = File.Exists(outputPath);
 
-                // ヘッダ情報を設定
-                SetHeaderInfo(worksheet, card);
-
-                // データを出力
-                var startRow = 5; // データ開始行（テンプレートに依存: 新テンプレートでは5行目から）
-                var currentRow = startRow;
-
-                // 繰越行を追加（新規購入カードの場合は繰越行を出力しない）
-                if (month == 4)
+                if (isExistingFile)
                 {
-                    // 4月の場合は前年度繰越のみ（月繰越は行わない）
-                    var carryover = await _ledgerRepository.GetCarryoverBalanceAsync(cardIdm, year - 1);
-                    // 前年度のデータがある場合のみ繰越行を出力
-                    if (carryover.HasValue)
-                    {
-                        currentRow = WriteFiscalYearCarryoverRow(worksheet, currentRow, carryover.Value, year);
-                    }
+                    workbook = new XLWorkbook(outputPath);
                 }
                 else
                 {
-                    // 4月以外は前月繰越を追加
-                    var previousMonthBalance = await GetPreviousMonthBalanceAsync(cardIdm, year, month);
-                    // 過去のデータがある場合のみ繰越行を出力
-                    if (previousMonthBalance.HasValue)
+                    workbook = new XLWorkbook(templatePath);
+                }
+
+                using (workbook)
+                {
+                    // シート名を決定（月名）
+                    var sheetName = GetMonthSheetName(month);
+
+                    // Issue #477: 該当月のシートを取得または作成
+                    IXLWorksheet worksheet;
+                    if (workbook.Worksheets.TryGetWorksheet(sheetName, out worksheet))
                     {
-                        currentRow = WriteMonthlyCarryoverRow(worksheet, currentRow, previousMonthBalance.Value, year, month);
+                        // 既存シートがある場合はデータ部分をクリア
+                        ClearWorksheetData(worksheet);
                     }
+                    else if (isExistingFile)
+                    {
+                        // 既存ファイルに新しいシートを追加（テンプレートからコピー）
+                        using var templateWorkbook = new XLWorkbook(templatePath);
+                        var templateSheet = templateWorkbook.Worksheets.First();
+
+                        // テンプレートシートをコピーして追加
+                        worksheet = workbook.Worksheets.Add(sheetName);
+                        CopyWorksheetFormat(templateSheet, worksheet);
+                    }
+                    else
+                    {
+                        // 新規ファイルの場合、テンプレートの最初のシートをリネーム
+                        worksheet = workbook.Worksheets.First();
+                        worksheet.Name = sheetName;
+                    }
+
+                    // シートを月順に並び替え
+                    ReorderWorksheetsByMonth(workbook);
+
+                    // ヘッダ情報を設定
+                    SetHeaderInfo(worksheet, card);
+
+                    // データを出力
+                    var startRow = 5; // データ開始行（テンプレートに依存: 新テンプレートでは5行目から）
+                    var currentRow = startRow;
+
+                    // 繰越行を追加（新規購入カードの場合は繰越行を出力しない）
+                    if (month == 4)
+                    {
+                        // 4月の場合は前年度繰越のみ（月繰越は行わない）
+                        var carryover = await _ledgerRepository.GetCarryoverBalanceAsync(cardIdm, year - 1);
+                        // 前年度のデータがある場合のみ繰越行を出力
+                        if (carryover.HasValue)
+                        {
+                            currentRow = WriteFiscalYearCarryoverRow(worksheet, currentRow, carryover.Value, year);
+                        }
+                    }
+                    else
+                    {
+                        // 4月以外は前月繰越を追加
+                        var previousMonthBalance = await GetPreviousMonthBalanceAsync(cardIdm, year, month);
+                        // 過去のデータがある場合のみ繰越行を出力
+                        if (previousMonthBalance.HasValue)
+                        {
+                            currentRow = WriteMonthlyCarryoverRow(worksheet, currentRow, previousMonthBalance.Value, year, month);
+                        }
+                    }
+
+                    // 各履歴行を出力
+                    foreach (var ledger in ledgers)
+                    {
+                        currentRow = WriteDataRow(worksheet, currentRow, ledger);
+                    }
+
+                    // 月計を出力
+                    var monthlyIncome = ledgers.Sum(l => l.Income);
+                    var monthlyExpense = ledgers.Sum(l => l.Expense);
+                    var monthEndBalance = ledgers.LastOrDefault()?.Balance ?? 0;
+
+                    // 月計行（残額欄は空欄、0も表示）
+                    currentRow = WriteMonthlyTotalRow(worksheet, currentRow, month, monthlyIncome, monthlyExpense);
+
+                    // 累計行を追加（全月で出力）
+                    // 年度の範囲を計算（4月～翌年3月）
+                    var fiscalYearStartYear = month >= 4 ? year : year - 1;
+                    var fiscalYearStart = new DateTime(fiscalYearStartYear, 4, 1);
+                    var fiscalYearEnd = new DateTime(year, month, DateTime.DaysInMonth(year, month));
+                    // Issue #478: 同一日ではチャージ（Income > 0）を利用より先に表示（一貫性のため）
+                    var yearlyLedgers = (await _ledgerRepository.GetByDateRangeAsync(cardIdm, fiscalYearStart, fiscalYearEnd))
+                        .OrderBy(l => l.Date)
+                        .ThenByDescending(l => l.Income)
+                        .ThenBy(l => l.Id)
+                        .ToList();
+
+                    var yearlyIncome = yearlyLedgers.Sum(l => l.Income);
+                    var yearlyExpense = yearlyLedgers.Sum(l => l.Expense);
+                    var currentBalance = yearlyLedgers.LastOrDefault()?.Balance ?? monthEndBalance;
+
+                    currentRow = WriteCumulativeRow(worksheet, currentRow, yearlyIncome, yearlyExpense, currentBalance);
+
+                    // 3月の場合は次年度繰越を追加
+                    if (month == 3)
+                    {
+                        WriteCarryoverToNextYearRow(worksheet, currentRow, currentBalance);
+                    }
+
+                    // ファイルを保存
+                    workbook.SaveAs(outputPath);
                 }
 
-                // 各履歴行を出力
-                foreach (var ledger in ledgers)
-                {
-                    currentRow = WriteDataRow(worksheet, currentRow, ledger);
-                }
-
-                // 月計を出力
-                var monthlyIncome = ledgers.Sum(l => l.Income);
-                var monthlyExpense = ledgers.Sum(l => l.Expense);
-                var monthEndBalance = ledgers.LastOrDefault()?.Balance ?? 0;
-
-                // 月計行（残額欄は空欄、0も表示）
-                currentRow = WriteMonthlyTotalRow(worksheet, currentRow, month, monthlyIncome, monthlyExpense);
-
-                // 累計行を追加（全月で出力）
-                // 年度の範囲を計算（4月～翌年3月）
-                var fiscalYearStartYear = month >= 4 ? year : year - 1;
-                var fiscalYearStart = new DateTime(fiscalYearStartYear, 4, 1);
-                var fiscalYearEnd = new DateTime(year, month, DateTime.DaysInMonth(year, month));
-                // Issue #478: 同一日ではチャージ（Income > 0）を利用より先に表示（一貫性のため）
-                var yearlyLedgers = (await _ledgerRepository.GetByDateRangeAsync(cardIdm, fiscalYearStart, fiscalYearEnd))
-                    .OrderBy(l => l.Date)
-                    .ThenByDescending(l => l.Income)
-                    .ThenBy(l => l.Id)
-                    .ToList();
-
-                var yearlyIncome = yearlyLedgers.Sum(l => l.Income);
-                var yearlyExpense = yearlyLedgers.Sum(l => l.Expense);
-                var currentBalance = yearlyLedgers.LastOrDefault()?.Balance ?? monthEndBalance;
-
-                currentRow = WriteCumulativeRow(worksheet, currentRow, yearlyIncome, yearlyExpense, currentBalance);
-
-                // 3月の場合は次年度繰越を追加
-                if (month == 3)
-                {
-                    WriteCarryoverToNextYearRow(worksheet, currentRow, currentBalance);
-                }
-
-                // ファイルを保存
-                workbook.SaveAs(outputPath);
                 return ReportGenerationResult.SuccessResult(outputPath);
             }
             catch (UnauthorizedAccessException ex)
@@ -317,6 +364,73 @@ namespace ICCardManager.Services
                 return ReportGenerationResult.FailureResult(
                     "帳票の作成に失敗しました",
                     $"予期しないエラーが発生しました。\n\n詳細: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// 月に対応するシート名を取得
+        /// </summary>
+        private static string GetMonthSheetName(int month)
+        {
+            return $"{month}月";
+        }
+
+        /// <summary>
+        /// ワークシートのデータ部分をクリア（5行目以降）
+        /// </summary>
+        private static void ClearWorksheetData(IXLWorksheet worksheet)
+        {
+            // 5行目から使用されている最終行までをクリア
+            var lastRowUsed = worksheet.LastRowUsed()?.RowNumber() ?? 4;
+            if (lastRowUsed >= 5)
+            {
+                var rangeToDelete = worksheet.Range(5, 1, lastRowUsed, 12);
+                rangeToDelete.Clear();
+            }
+        }
+
+        /// <summary>
+        /// テンプレートシートのフォーマットを新しいシートにコピー
+        /// </summary>
+        private static void CopyWorksheetFormat(IXLWorksheet source, IXLWorksheet target)
+        {
+            // 1〜4行目（ヘッダ部分）をコピー
+            var headerRange = source.Range(1, 1, 4, 12);
+            headerRange.CopyTo(target.Cell(1, 1));
+
+            // 列幅をコピー
+            for (int col = 1; col <= 12; col++)
+            {
+                target.Column(col).Width = source.Column(col).Width;
+            }
+
+            // 行の高さをコピー（1〜4行目）
+            for (int row = 1; row <= 4; row++)
+            {
+                target.Row(row).Height = source.Row(row).Height;
+            }
+        }
+
+        /// <summary>
+        /// ワークシートを月順（4月〜3月）に並び替え
+        /// </summary>
+        private static void ReorderWorksheetsByMonth(XLWorkbook workbook)
+        {
+            // 月の順序（4月が最初、3月が最後）
+            var monthOrder = new[] { 4, 5, 6, 7, 8, 9, 10, 11, 12, 1, 2, 3 };
+
+            var sheets = workbook.Worksheets.ToList();
+            var position = 1;
+
+            foreach (var month in monthOrder)
+            {
+                var sheetName = GetMonthSheetName(month);
+                var sheet = sheets.FirstOrDefault(s => s.Name == sheetName);
+                if (sheet != null)
+                {
+                    sheet.Position = position;
+                    position++;
+                }
             }
         }
 
@@ -393,7 +507,9 @@ namespace ICCardManager.Services
                 }
 
                 var cardName = $"{card.CardType} {card.CardNumber}";
-                var fileName = $"物品出納簿_{card.CardType}_{card.CardNumber}_{year}年{month}月.xlsx";
+                // Issue #477: 年度ファイル名に変更
+                var fiscalYear = GetFiscalYear(year, month);
+                var fileName = GetFiscalYearFileName(card.CardType, card.CardNumber, fiscalYear);
                 var outputPath = Path.Combine(outputFolder, fileName);
 
                 var result = await CreateMonthlyReportAsync(cardIdm, year, month, outputPath);
@@ -401,6 +517,29 @@ namespace ICCardManager.Services
             }
 
             return new BatchReportGenerationResult(results);
+        }
+
+        /// <summary>
+        /// 年度を計算（4月〜翌3月が同一年度）
+        /// </summary>
+        /// <param name="year">西暦年</param>
+        /// <param name="month">月</param>
+        /// <returns>年度（例: 2024年4月〜2025年3月 → 2024）</returns>
+        public static int GetFiscalYear(int year, int month)
+        {
+            return month >= 4 ? year : year - 1;
+        }
+
+        /// <summary>
+        /// 年度ファイル名を生成
+        /// </summary>
+        /// <param name="cardType">カード種別</param>
+        /// <param name="cardNumber">カード番号</param>
+        /// <param name="fiscalYear">年度</param>
+        /// <returns>ファイル名（例: 物品出納簿_はやかけん_H001_2024年度.xlsx）</returns>
+        public static string GetFiscalYearFileName(string cardType, string cardNumber, int fiscalYear)
+        {
+            return $"物品出納簿_{cardType}_{cardNumber}_{fiscalYear}年度.xlsx";
         }
 
         /// <summary>
