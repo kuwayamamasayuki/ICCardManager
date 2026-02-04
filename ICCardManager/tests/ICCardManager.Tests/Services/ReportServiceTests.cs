@@ -2024,4 +2024,148 @@ public class ReportServiceTests : IDisposable
     }
 
     #endregion
+
+    #region Issue #457: ページネーション
+
+    /// <summary>
+    /// TC031: Issue #457 - 12行以下のデータでは改ページが挿入されない
+    /// </summary>
+    [Fact]
+    public async Task CreateMonthlyReportAsync_DataWithin12Rows_NoPageBreak()
+    {
+        // Arrange
+        var cardIdm = "0102030405060708";
+        var card = CreateTestCard(cardIdm);
+        var year = 2025;
+        var month = 1;
+        var outputPath = CreateTempFilePath();
+
+        // 9件のデータ（繰越行1 + データ9件 + 月計1 + 累計1 = 12行）
+        var ledgers = Enumerable.Range(1, 9)
+            .Select(i => CreateTestLedger(
+                i,
+                cardIdm,
+                new DateTime(year, month, i),
+                $"鉄道（駅{i}～駅{i + 1}）",
+                0,
+                200,
+                2000 - (i * 200),
+                "テスト太郎"))
+            .ToList();
+
+        _cardRepositoryMock.Setup(x => x.GetByIdmAsync(cardIdm, It.IsAny<bool>()))
+            .ReturnsAsync(card);
+        _ledgerRepositoryMock.Setup(x => x.GetByMonthAsync(cardIdm, year, month))
+            .ReturnsAsync(ledgers);
+        _ledgerRepositoryMock.Setup(x => x.GetByDateRangeAsync(cardIdm, It.IsAny<DateTime>(), It.IsAny<DateTime>()))
+            .ReturnsAsync(ledgers);
+        _ledgerRepositoryMock.Setup(x => x.GetCarryoverBalanceAsync(cardIdm, It.IsAny<int>()))
+            .ReturnsAsync(2000);
+
+        // Act
+        var result = await _reportService.CreateMonthlyReportAsync(cardIdm, year, month, outputPath);
+
+        // Assert
+        result.Success.Should().BeTrue();
+        File.Exists(outputPath).Should().BeTrue();
+
+        using var workbook = new XLWorkbook(outputPath);
+        var worksheet = workbook.Worksheets.First();
+
+        // 改ページがないことを確認
+        worksheet.PageSetup.RowBreaks.Count.Should().Be(0);
+    }
+
+    /// <summary>
+    /// TC032: Issue #457 - 12行を超えるデータで改ページが挿入される
+    /// </summary>
+    [Fact]
+    public async Task CreateMonthlyReportAsync_DataExceeds12Rows_PageBreakInserted()
+    {
+        // Arrange
+        var cardIdm = "0102030405060708";
+        var card = CreateTestCard(cardIdm);
+        var year = 2025;
+        var month = 1;
+        var outputPath = CreateTempFilePath();
+
+        // 15件のデータ（繰越行1 + データ15件 + 月計1 + 累計1 = 18行 > 12行）
+        var ledgers = Enumerable.Range(1, 15)
+            .Select(i => CreateTestLedger(
+                i,
+                cardIdm,
+                new DateTime(year, month, i),
+                $"鉄道（駅{i}～駅{i + 1}）",
+                0,
+                200,
+                3000 - (i * 200),
+                "テスト太郎"))
+            .ToList();
+
+        _cardRepositoryMock.Setup(x => x.GetByIdmAsync(cardIdm, It.IsAny<bool>()))
+            .ReturnsAsync(card);
+        _ledgerRepositoryMock.Setup(x => x.GetByMonthAsync(cardIdm, year, month))
+            .ReturnsAsync(ledgers);
+        _ledgerRepositoryMock.Setup(x => x.GetByDateRangeAsync(cardIdm, It.IsAny<DateTime>(), It.IsAny<DateTime>()))
+            .ReturnsAsync(ledgers);
+        _ledgerRepositoryMock.Setup(x => x.GetCarryoverBalanceAsync(cardIdm, It.IsAny<int>()))
+            .ReturnsAsync(3000);
+
+        // Act
+        var result = await _reportService.CreateMonthlyReportAsync(cardIdm, year, month, outputPath);
+
+        // Assert
+        result.Success.Should().BeTrue();
+        File.Exists(outputPath).Should().BeTrue();
+
+        using var workbook = new XLWorkbook(outputPath);
+        var worksheet = workbook.Worksheets.First();
+
+        // 改ページが挿入されていることを確認
+        worksheet.PageSetup.RowBreaks.Count.Should().BeGreaterThan(0);
+    }
+
+    /// <summary>
+    /// TC033: Issue #457 - 印刷設定が正しく適用される
+    /// </summary>
+    [Fact]
+    public async Task CreateMonthlyReportAsync_PrintSettingsConfigured()
+    {
+        // Arrange
+        var cardIdm = "0102030405060708";
+        var card = CreateTestCard(cardIdm);
+        var year = 2025;
+        var month = 1;
+        var outputPath = CreateTempFilePath();
+
+        var ledgers = new List<Ledger>
+        {
+            CreateTestLedger(1, cardIdm, new DateTime(year, month, 1), "鉄道（博多～薬院）", 0, 210, 790, "テスト太郎")
+        };
+
+        _cardRepositoryMock.Setup(x => x.GetByIdmAsync(cardIdm, It.IsAny<bool>()))
+            .ReturnsAsync(card);
+        _ledgerRepositoryMock.Setup(x => x.GetByMonthAsync(cardIdm, year, month))
+            .ReturnsAsync(ledgers);
+        _ledgerRepositoryMock.Setup(x => x.GetByDateRangeAsync(cardIdm, It.IsAny<DateTime>(), It.IsAny<DateTime>()))
+            .ReturnsAsync(ledgers);
+        _ledgerRepositoryMock.Setup(x => x.GetCarryoverBalanceAsync(cardIdm, It.IsAny<int>()))
+            .ReturnsAsync(1000);
+
+        // Act
+        var result = await _reportService.CreateMonthlyReportAsync(cardIdm, year, month, outputPath);
+
+        // Assert
+        result.Success.Should().BeTrue();
+        File.Exists(outputPath).Should().BeTrue();
+
+        using var workbook = new XLWorkbook(outputPath);
+        var worksheet = workbook.Worksheets.First();
+
+        // 印刷設定を確認
+        worksheet.PageSetup.PaperSize.Should().Be(XLPaperSize.A4Paper);
+        worksheet.PageSetup.PageOrientation.Should().Be(XLPageOrientation.Landscape);
+    }
+
+    #endregion
 }

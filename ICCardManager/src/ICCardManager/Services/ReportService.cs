@@ -271,9 +271,14 @@ namespace ICCardManager.Services
                     // ヘッダ情報を設定
                     SetHeaderInfo(worksheet, card);
 
-                    // データを出力
-                    var startRow = 5; // データ開始行（テンプレートに依存: 新テンプレートでは5行目から）
-                    var currentRow = startRow;
+                    // Issue #457: ページ設定（印刷時に1-4行目をヘッダーとして各ページに繰り返す）
+                    ConfigurePageSetup(worksheet);
+
+                    // Issue #457: データ出力（5～16行に内容を記載、それを超える場合は改ページ）
+                    const int DataStartRow = 5;      // データ開始行
+                    const int RowsPerPage = 12;      // 1ページあたりの最大データ行数（5～16行目）
+                    var currentRow = DataStartRow;
+                    var rowsOnCurrentPage = 0;
 
                     // 繰越行を追加（新規購入カードの場合は繰越行を出力しない）
                     if (month == 4)
@@ -283,7 +288,10 @@ namespace ICCardManager.Services
                         // 前年度のデータがある場合のみ繰越行を出力
                         if (carryover.HasValue)
                         {
+                            // Issue #457: 改ページチェック
+                            (currentRow, rowsOnCurrentPage) = CheckAndInsertPageBreak(worksheet, currentRow, rowsOnCurrentPage, RowsPerPage);
                             currentRow = WriteFiscalYearCarryoverRow(worksheet, currentRow, carryover.Value, year);
+                            rowsOnCurrentPage++;
                         }
                     }
                     else
@@ -293,14 +301,20 @@ namespace ICCardManager.Services
                         // 過去のデータがある場合のみ繰越行を出力
                         if (previousMonthBalance.HasValue)
                         {
+                            // Issue #457: 改ページチェック
+                            (currentRow, rowsOnCurrentPage) = CheckAndInsertPageBreak(worksheet, currentRow, rowsOnCurrentPage, RowsPerPage);
                             currentRow = WriteMonthlyCarryoverRow(worksheet, currentRow, previousMonthBalance.Value, year, month);
+                            rowsOnCurrentPage++;
                         }
                     }
 
                     // 各履歴行を出力
                     foreach (var ledger in ledgers)
                     {
+                        // Issue #457: 改ページチェック
+                        (currentRow, rowsOnCurrentPage) = CheckAndInsertPageBreak(worksheet, currentRow, rowsOnCurrentPage, RowsPerPage);
                         currentRow = WriteDataRow(worksheet, currentRow, ledger);
+                        rowsOnCurrentPage++;
                     }
 
                     // 月計を出力
@@ -308,8 +322,11 @@ namespace ICCardManager.Services
                     var monthlyExpense = ledgers.Sum(l => l.Expense);
                     var monthEndBalance = ledgers.LastOrDefault()?.Balance ?? 0;
 
+                    // Issue #457: 改ページチェック
+                    (currentRow, rowsOnCurrentPage) = CheckAndInsertPageBreak(worksheet, currentRow, rowsOnCurrentPage, RowsPerPage);
                     // 月計行（残額欄は空欄、0も表示）
                     currentRow = WriteMonthlyTotalRow(worksheet, currentRow, month, monthlyIncome, monthlyExpense);
+                    rowsOnCurrentPage++;
 
                     // 累計行を追加（全月で出力）
                     // 年度の範囲を計算（4月～翌年3月）
@@ -327,13 +344,26 @@ namespace ICCardManager.Services
                     var yearlyExpense = yearlyLedgers.Sum(l => l.Expense);
                     var currentBalance = yearlyLedgers.LastOrDefault()?.Balance ?? monthEndBalance;
 
+                    // Issue #457: 改ページチェック
+                    (currentRow, rowsOnCurrentPage) = CheckAndInsertPageBreak(worksheet, currentRow, rowsOnCurrentPage, RowsPerPage);
                     currentRow = WriteCumulativeRow(worksheet, currentRow, yearlyIncome, yearlyExpense, currentBalance);
+                    rowsOnCurrentPage++;
 
                     // 3月の場合は次年度繰越を追加
                     if (month == 3)
                     {
+                        // Issue #457: 改ページチェック
+                        (currentRow, rowsOnCurrentPage) = CheckAndInsertPageBreak(worksheet, currentRow, rowsOnCurrentPage, RowsPerPage);
                         WriteCarryoverToNextYearRow(worksheet, currentRow, currentBalance);
+                        currentRow++;
+                        rowsOnCurrentPage++;
                     }
+
+                    // Issue #457: 最終ページの空白行に罫線を引く
+                    FillEmptyRowsWithBorders(worksheet, currentRow, rowsOnCurrentPage, RowsPerPage);
+
+                    // Issue #457: 印刷範囲を設定（全データを含む）
+                    SetPrintArea(worksheet, currentRow, rowsOnCurrentPage, RowsPerPage);
 
                     // ファイルを保存
                     workbook.SaveAs(outputPath);
@@ -398,6 +428,10 @@ namespace ICCardManager.Services
             var headerRange = source.Range(1, 1, 4, 12);
             headerRange.CopyTo(target.Cell(1, 1));
 
+            // 17〜22行目（備考欄/フッタ部分）をコピー
+            var notesRange = source.Range(17, 1, 22, 12);
+            notesRange.CopyTo(target.Cell(17, 1));
+
             // 列幅をコピー
             for (int col = 1; col <= 12; col++)
             {
@@ -406,6 +440,12 @@ namespace ICCardManager.Services
 
             // 行の高さをコピー（1〜4行目）
             for (int row = 1; row <= 4; row++)
+            {
+                target.Row(row).Height = source.Row(row).Height;
+            }
+
+            // 行の高さをコピー（17〜22行目）
+            for (int row = 17; row <= 22; row++)
             {
                 target.Row(row).Height = source.Row(row).Height;
             }
@@ -879,6 +919,202 @@ namespace ICCardManager.Services
 
             // 行全体を上下中央揃えに設定
             range.Style.Alignment.Vertical = XLAlignmentVerticalValues.Center;
+        }
+
+        /// <summary>
+        /// Issue #457: 改ページが必要かチェックし、必要なら挿入する
+        /// </summary>
+        /// <param name="worksheet">ワークシート</param>
+        /// <param name="currentRow">現在の行番号</param>
+        /// <param name="rowsOnCurrentPage">現在のページに書かれた行数</param>
+        /// <param name="rowsPerPage">1ページあたりの最大行数</param>
+        /// <returns>更新された（currentRow, rowsOnCurrentPage）のタプル</returns>
+        /// <remarks>
+        /// テンプレート構造（1ページ = 22行）:
+        /// - 1-4行: ヘッダー（4行）
+        /// - 5-16行: データエリア（12行）
+        /// - 17-22行: 備考欄（6行）
+        ///
+        /// 12行を超えるデータがある場合:
+        /// - 新しいページ（23行目～）にヘッダーと備考欄をコピー
+        /// - データは新しいページのデータエリア（ヘッダーの後）に書き込む
+        /// </remarks>
+        private static (int currentRow, int rowsOnCurrentPage) CheckAndInsertPageBreak(
+            IXLWorksheet worksheet, int currentRow, int rowsOnCurrentPage, int rowsPerPage)
+        {
+            const int HeaderRows = 4;   // ヘッダーの行数（1-4行目）
+            const int NotesRows = 6;    // 備考欄の行数（17-22行目）
+
+            if (rowsOnCurrentPage >= rowsPerPage)
+            {
+                // 新しいページの開始行 = 現在の行 + 備考欄の行数
+                // 例: currentRow=17 → newPageStartRow=23
+                //     currentRow=39 → newPageStartRow=45
+                var newPageStartRow = currentRow + NotesRows;
+
+                // ヘッダー（1-4行目）を新しいページにコピー
+                CopyHeaderToNewPage(worksheet, newPageStartRow);
+
+                // 備考欄（17-22行目）を新しいページにコピー
+                // 備考欄の開始行 = 新しいページの開始行 + ヘッダー + データエリア
+                var notesTargetRow = newPageStartRow + HeaderRows + rowsPerPage;
+                CopyNotesToNewPage(worksheet, notesTargetRow);
+
+                // 新しいページの改ページを挿入
+                // AddHorizontalPageBreak(row) は row の直前に改ページを挿入
+                // 前のページの最終行（備考欄の最終行）の直後に改ページを入れるため、newPageStartRowを指定
+                worksheet.PageSetup.AddHorizontalPageBreak(newPageStartRow - 1);
+
+                // データの開始行（ヘッダーの後）
+                var newDataStartRow = newPageStartRow + HeaderRows;
+
+                return (newDataStartRow, 0);
+            }
+            return (currentRow, rowsOnCurrentPage);
+        }
+
+        /// <summary>
+        /// Issue #457: ヘッダー（1-4行目）を新しいページにコピー
+        /// </summary>
+        private static void CopyHeaderToNewPage(IXLWorksheet worksheet, int targetStartRow)
+        {
+            // 1-4行目の内容を新しいページにコピー
+            var sourceRange = worksheet.Range(1, 1, 4, 12);
+            sourceRange.CopyTo(worksheet.Cell(targetStartRow, 1));
+
+            // 行の高さもコピー
+            for (int i = 0; i < 4; i++)
+            {
+                worksheet.Row(targetStartRow + i).Height = worksheet.Row(1 + i).Height;
+            }
+        }
+
+        /// <summary>
+        /// Issue #457: 備考欄（17-22行目）を新しいページにコピー
+        /// </summary>
+        private static void CopyNotesToNewPage(IXLWorksheet worksheet, int targetStartRow)
+        {
+            // 17-22行目の内容を新しいページにコピー
+            var sourceRange = worksheet.Range(17, 1, 22, 12);
+            sourceRange.CopyTo(worksheet.Cell(targetStartRow, 1));
+
+            // 行の高さもコピー
+            for (int i = 0; i < 6; i++)
+            {
+                worksheet.Row(targetStartRow + i).Height = worksheet.Row(17 + i).Height;
+            }
+        }
+
+        /// <summary>
+        /// Issue #457: 最終ページの空白行に罫線を引く
+        /// </summary>
+        /// <param name="worksheet">ワークシート</param>
+        /// <param name="currentRow">現在の行番号（最後に書いた行の次）</param>
+        /// <param name="rowsOnCurrentPage">現在のページに書かれた行数</param>
+        /// <param name="rowsPerPage">1ページあたりの最大行数</param>
+        private static void FillEmptyRowsWithBorders(IXLWorksheet worksheet, int currentRow, int rowsOnCurrentPage, int rowsPerPage)
+        {
+            // 最終ページに空白行がある場合、罫線を引く
+            if (rowsOnCurrentPage > 0 && rowsOnCurrentPage < rowsPerPage)
+            {
+                var emptyRowsCount = rowsPerPage - rowsOnCurrentPage;
+                for (int i = 0; i < emptyRowsCount; i++)
+                {
+                    var row = currentRow + i;
+                    ApplyEmptyRowBorder(worksheet, row);
+                }
+            }
+        }
+
+        /// <summary>
+        /// Issue #457: 空白行に罫線を適用
+        /// </summary>
+        private static void ApplyEmptyRowBorder(IXLWorksheet worksheet, int row)
+        {
+            // 行の高さを30に設定
+            worksheet.Row(row).Height = 30;
+
+            // B列からD列を結合（摘要）
+            var summaryRange = worksheet.Range(row, 2, row, 4);
+            summaryRange.Merge();
+
+            // I列からL列を結合（備考）
+            var noteRange = worksheet.Range(row, 9, row, 12);
+            noteRange.Merge();
+
+            // A列からL列まで罫線を適用
+            var range = worksheet.Range(row, 1, row, 12);
+            range.Style.Border.TopBorder = XLBorderStyleValues.Thin;
+            range.Style.Border.BottomBorder = XLBorderStyleValues.Thin;
+            range.Style.Border.InsideBorder = XLBorderStyleValues.Thin;
+
+            // 両端（A列左側、L列右側）は太線で表示
+            worksheet.Cell(row, 1).Style.Border.LeftBorder = XLBorderStyleValues.Medium;
+            worksheet.Cell(row, 12).Style.Border.RightBorder = XLBorderStyleValues.Medium;
+        }
+
+        /// <summary>
+        /// Issue #457: ワークシートの印刷設定を行う
+        /// </summary>
+        /// <param name="worksheet">ワークシート</param>
+        private static void ConfigurePageSetup(IXLWorksheet worksheet)
+        {
+            // 用紙サイズ: A4
+            worksheet.PageSetup.PaperSize = XLPaperSize.A4Paper;
+
+            // 印刷の向き: 横
+            worksheet.PageSetup.PageOrientation = XLPageOrientation.Landscape;
+
+            // マージンの設定（単位: インチ）
+            worksheet.PageSetup.Margins.Top = 0.5;
+            worksheet.PageSetup.Margins.Bottom = 0.5;
+            worksheet.PageSetup.Margins.Left = 0.5;
+            worksheet.PageSetup.Margins.Right = 0.5;
+
+            // 注: 印刷タイトル（SetRowsToRepeatAtTop）は使用しない
+            // 各ページにヘッダーをコピーするため不要
+        }
+
+        /// <summary>
+        /// Issue #457: 印刷範囲を設定
+        /// </summary>
+        /// <param name="worksheet">ワークシート</param>
+        /// <param name="currentRow">現在の行番号（最後に書いた行の次）</param>
+        /// <param name="rowsOnCurrentPage">現在のページに書かれた行数</param>
+        /// <param name="rowsPerPage">1ページあたりの最大行数</param>
+        private static void SetPrintArea(IXLWorksheet worksheet, int currentRow, int rowsOnCurrentPage, int rowsPerPage)
+        {
+            const int NotesRows = 6;    // 備考欄の行数
+            const int RowsPerPageTotal = 22;  // 1ページの総行数
+
+            // 最終行を計算
+            int lastRow;
+            if (rowsOnCurrentPage == 0)
+            {
+                // 改ページ直後（データがまだ書かれていない）
+                // 前のページの備考欄の最終行
+                lastRow = currentRow - 1;
+            }
+            else
+            {
+                // 現在のページにデータがある場合
+                // 現在のページの備考欄の最終行を計算
+                // データエリアの最終行 = currentRow - 1
+                // 備考欄の最終行 = データエリアの最終行 + NotesRows + (rowsPerPage - rowsOnCurrentPage)
+                var dataAreaEndRow = currentRow - 1;
+                var remainingDataRows = rowsPerPage - rowsOnCurrentPage;
+                lastRow = dataAreaEndRow + remainingDataRows + NotesRows;
+            }
+
+            // 1ページ目のみの場合は22行目まで
+            if (lastRow < RowsPerPageTotal)
+            {
+                lastRow = RowsPerPageTotal;
+            }
+
+            // 印刷範囲を設定（A1からL列の最終行まで）
+            worksheet.PageSetup.PrintAreas.Clear();
+            worksheet.PageSetup.PrintAreas.Add(1, 1, lastRow, 12);
         }
     }
 }
