@@ -156,9 +156,10 @@ public class ReportServiceTests : IDisposable
         worksheet.Cell("H2").GetString().Should().Be("001");
 
         // 前月繰越行の検証（行5）- Issue #451で追加
+        // Issue #481: 月次繰越の受入欄は空欄（年度繰越のみ受入欄に記載）
         worksheet.Cell(5, 1).GetString().Should().Be("R6.6.1");
         worksheet.Cell(5, 2).GetString().Should().Be("5月より繰越");
-        worksheet.Cell(5, 5).GetValue<int>().Should().Be(5000);  // 受入金額 (E列)
+        worksheet.Cell(5, 5).IsEmpty().Should().BeTrue();        // 受入金額 (E列) - 月次繰越は空欄
         worksheet.Cell(5, 7).GetValue<int>().Should().Be(5000);  // 残額 (G列)
 
         // データ行の検証（行6から開始、列はE=受入, F=払出, G=残額, H=氏名）
@@ -293,8 +294,9 @@ public class ReportServiceTests : IDisposable
         var worksheet = workbook.Worksheets.First();
 
         // 前月繰越行の検証（行5）- Issue #451で追加
+        // Issue #481: 月次繰越の受入欄は空欄（年度繰越のみ受入欄に記載）
         worksheet.Cell(5, 2).GetString().Should().Be("2月より繰越");
-        worksheet.Cell(5, 5).GetValue<int>().Should().Be(9000);  // 受入金額 (E列)
+        worksheet.Cell(5, 5).IsEmpty().Should().BeTrue();        // 受入金額 (E列) - 月次繰越は空欄
         worksheet.Cell(5, 7).GetValue<int>().Should().Be(9000);  // 残額 (G列)
 
         // データ行の検証（行6から開始）
@@ -1268,8 +1270,9 @@ public class ReportServiceTests : IDisposable
         // Issue #451: 前月繰越行が追加されるため、行番号が+1
 
         // 前月繰越行（行5）- Issue #451で追加
+        // Issue #481: 月次繰越の受入欄は空欄（年度繰越のみ受入欄に記載）
         worksheet.Cell(5, 2).GetString().Should().Be("2月より繰越");
-        worksheet.Cell(5, 5).GetValue<int>().Should().Be(9200);  // 受入金額 (E列)
+        worksheet.Cell(5, 5).IsEmpty().Should().BeTrue();        // 受入金額 (E列) - 月次繰越は空欄
         worksheet.Cell(5, 7).GetValue<int>().Should().Be(9200);  // 残額 (G列)
 
         // 月計行（3月はデータなしなので0）- 行6、列配置: B=摘要, G=残額
