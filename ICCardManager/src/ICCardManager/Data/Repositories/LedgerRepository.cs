@@ -610,5 +610,26 @@ WHERE card_idm IN ({string.Join(", ", parameters)})";
             // 新しい詳細を登録
             return await InsertDetailsAsync(ledgerId, details);
         }
+
+        /// <inheritdoc/>
+        public async Task<DateTime?> GetPurchaseDateAsync(string cardIdm)
+        {
+            var connection = _dbContext.GetConnection();
+
+            using var command = connection.CreateCommand();
+            // Issue #501: 新規購入レコードの最初の日付を取得
+            command.CommandText = @"SELECT MIN(date) FROM ledger
+WHERE card_idm = @cardIdm AND summary = '新規購入'";
+
+            command.Parameters.AddWithValue("@cardIdm", cardIdm);
+
+            var result = await command.ExecuteScalarAsync();
+            if (result != null && result != DBNull.Value)
+            {
+                return DateTime.Parse((string)result);
+            }
+
+            return null;
+        }
     }
 }

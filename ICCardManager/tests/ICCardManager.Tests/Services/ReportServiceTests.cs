@@ -2023,5 +2023,75 @@ public class ReportServiceTests : IDisposable
         result.Should().Be("物品出納簿_はやかけん_H001_2024年度.xlsx");
     }
 
+    /// <summary>
+    /// TC031: Issue #501 - 新規購入より前の月の帳票はスキップされる
+    /// </summary>
+    [Fact]
+    public async Task CreateMonthlyReportAsync_BeforePurchaseDate_ShouldReturnSkipped()
+    {
+        // Arrange
+        var cardIdm = "0102030405060708";
+        var card = CreateTestCard(cardIdm);
+        var year = 2024;
+        var month = 4;  // 4月（新規購入は6月）
+        var outputPath = CreateTempFilePath();
+
+        _cardRepositoryMock
+            .Setup(r => r.GetByIdmAsync(cardIdm, true))
+            .ReturnsAsync(card);
+        _ledgerRepositoryMock
+            .Setup(r => r.GetPurchaseDateAsync(cardIdm))
+            .ReturnsAsync(new DateTime(2024, 6, 15));  // 6月15日に新規購入
+
+        // Act
+        var result = await _reportService.CreateMonthlyReportAsync(cardIdm, year, month, outputPath);
+
+        // Assert
+        result.Success.Should().BeTrue("スキップはエラーではない");
+        result.Skipped.Should().BeTrue("新規購入より前の月はスキップ");
+        result.ErrorMessage.Should().Contain("新規購入");
+        File.Exists(outputPath).Should().BeFalse("ファイルは作成されない");
+    }
+
+    /// <summary>
+    /// TC032: Issue #501 - 新規購入月の帳票は正常に作成される
+    /// </summary>
+    [Fact]
+    public async Task CreateMonthlyReportAsync_OnPurchaseMonth_ShouldSucceed()
+    {
+        // Arrange
+        var cardIdm = "0102030405060708";
+        var card = CreateTestCard(cardIdm);
+        var year = 2024;
+        var month = 6;  // 6月（新規購入月）
+        var outputPath = CreateTempFilePath();
+
+        var ledgers = new List<Ledger>
+        {
+            CreateTestLedger(1, cardIdm, new DateTime(2024, 6, 15), "新規購入", 10000, 0, 10000)
+        };
+
+        _cardRepositoryMock
+            .Setup(r => r.GetByIdmAsync(cardIdm, true))
+            .ReturnsAsync(card);
+        _ledgerRepositoryMock
+            .Setup(r => r.GetPurchaseDateAsync(cardIdm))
+            .ReturnsAsync(new DateTime(2024, 6, 15));  // 6月15日に新規購入
+        _ledgerRepositoryMock
+            .Setup(r => r.GetByMonthAsync(cardIdm, year, month))
+            .ReturnsAsync(ledgers);
+        _ledgerRepositoryMock
+            .Setup(r => r.GetCarryoverBalanceAsync(cardIdm, It.IsAny<int>()))
+            .ReturnsAsync((int?)null);
+
+        // Act
+        var result = await _reportService.CreateMonthlyReportAsync(cardIdm, year, month, outputPath);
+
+        // Assert
+        result.Success.Should().BeTrue();
+        result.Skipped.Should().BeFalse("新規購入月はスキップしない");
+        File.Exists(outputPath).Should().BeTrue("ファイルが作成される");
+    }
+
     #endregion
 }
