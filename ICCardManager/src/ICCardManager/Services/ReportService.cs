@@ -947,7 +947,9 @@ namespace ICCardManager.Services
                 CopyNotesToNewPage(worksheet, notesTargetRow);
 
                 // 新しいページの改ページを挿入
-                worksheet.PageSetup.AddHorizontalPageBreak(newPageStartRow);
+                // AddHorizontalPageBreak(row) は row の直前に改ページを挿入
+                // 前のページの最終行（備考欄の最終行）の直後に改ページを入れるため、newPageStartRowを指定
+                worksheet.PageSetup.AddHorizontalPageBreak(newPageStartRow - 1);
 
                 // データの開始行（ヘッダーの後）
                 var newDataStartRow = newPageStartRow + HeaderRows;
