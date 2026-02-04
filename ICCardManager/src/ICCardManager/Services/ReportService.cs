@@ -355,7 +355,11 @@ namespace ICCardManager.Services
                         // Issue #457: 改ページチェック
                         (currentRow, rowsOnCurrentPage) = CheckAndInsertPageBreak(worksheet, currentRow, rowsOnCurrentPage, RowsPerPage);
                         WriteCarryoverToNextYearRow(worksheet, currentRow, currentBalance);
+                        currentRow++;
                     }
+
+                    // Issue #457: 印刷範囲を設定（全データを含む）
+                    SetPrintArea(worksheet, currentRow, rowsOnCurrentPage, RowsPerPage);
 
                     // ファイルを保存
                     workbook.SaveAs(outputPath);
@@ -912,30 +916,65 @@ namespace ICCardManager.Services
         /// <param name="rowsPerPage">1ページあたりの最大行数</param>
         /// <returns>更新された（currentRow, rowsOnCurrentPage）のタプル</returns>
         /// <remarks>
-        /// テンプレート構造:
-        /// - 1-4行: ヘッダー
+        /// テンプレート構造（1ページ = 22行）:
+        /// - 1-4行: ヘッダー（4行）
         /// - 5-16行: データエリア（12行）
-        /// - 17-22行: 備考欄（6行）- データを書き込まない
+        /// - 17-22行: 備考欄（6行）
         ///
-        /// 12行を超えるデータは、17-22行目をスキップして23行目から書き込む。
-        /// 1ページ = 18行（データ12行 + 備考欄6行）
+        /// 12行を超えるデータがある場合:
+        /// - 新しいページ（23行目～）にヘッダーと備考欄をコピー
+        /// - データは新しいページのデータエリア（ヘッダーの後）に書き込む
         /// </remarks>
         private static (int currentRow, int rowsOnCurrentPage) CheckAndInsertPageBreak(
             IXLWorksheet worksheet, int currentRow, int rowsOnCurrentPage, int rowsPerPage)
         {
-            const int NotesRows = 6;  // 備考欄の行数（17-22行目）
+            const int HeaderRows = 4;   // ヘッダーの行数（1-4行目）
+            const int NotesRows = 6;    // 備考欄の行数（17-22行目）
 
             if (rowsOnCurrentPage >= rowsPerPage)
             {
-                // 備考欄（6行）をスキップして次のページのデータ開始行へ
-                var newRow = currentRow + NotesRows;
+                // 新しいページの開始行 = 現在の行 + 備考欄の行数
+                // 例: currentRow=17 → newPageStartRow=23
+                //     currentRow=39 → newPageStartRow=45
+                var newPageStartRow = currentRow + NotesRows;
 
-                // 新しいページの開始行の直前に改ページを挿入
-                worksheet.PageSetup.AddHorizontalPageBreak(newRow);
+                // ヘッダー（1-4行目）を新しいページにコピー
+                CopyHeaderToNewPage(worksheet, newPageStartRow);
 
-                return (newRow, 0);
+                // 備考欄（17-22行目）を新しいページにコピー
+                // 備考欄の開始行 = 新しいページの開始行 + ヘッダー + データエリア
+                var notesTargetRow = newPageStartRow + HeaderRows + rowsPerPage;
+                CopyNotesToNewPage(worksheet, notesTargetRow);
+
+                // 新しいページの改ページを挿入
+                worksheet.PageSetup.AddHorizontalPageBreak(newPageStartRow);
+
+                // データの開始行（ヘッダーの後）
+                var newDataStartRow = newPageStartRow + HeaderRows;
+
+                return (newDataStartRow, 0);
             }
             return (currentRow, rowsOnCurrentPage);
+        }
+
+        /// <summary>
+        /// Issue #457: ヘッダー（1-4行目）を新しいページにコピー
+        /// </summary>
+        private static void CopyHeaderToNewPage(IXLWorksheet worksheet, int targetStartRow)
+        {
+            // 1-4行目の内容を新しいページにコピー
+            var sourceRange = worksheet.Range(1, 1, 4, 12);
+            sourceRange.CopyTo(worksheet.Cell(targetStartRow, 1));
+        }
+
+        /// <summary>
+        /// Issue #457: 備考欄（17-22行目）を新しいページにコピー
+        /// </summary>
+        private static void CopyNotesToNewPage(IXLWorksheet worksheet, int targetStartRow)
+        {
+            // 17-22行目の内容を新しいページにコピー
+            var sourceRange = worksheet.Range(17, 1, 22, 12);
+            sourceRange.CopyTo(worksheet.Cell(targetStartRow, 1));
         }
 
         /// <summary>
@@ -944,9 +983,6 @@ namespace ICCardManager.Services
         /// <param name="worksheet">ワークシート</param>
         private static void ConfigurePageSetup(IXLWorksheet worksheet)
         {
-            // 印刷時に1～4行目（タイトル・ヘッダ行）を各ページに繰り返す
-            worksheet.PageSetup.SetRowsToRepeatAtTop(1, 4);
-
             // 用紙サイズ: A4
             worksheet.PageSetup.PaperSize = XLPaperSize.A4Paper;
 
@@ -959,8 +995,50 @@ namespace ICCardManager.Services
             worksheet.PageSetup.Margins.Left = 0.5;
             worksheet.PageSetup.Margins.Right = 0.5;
 
-            // 幅を1ページに収める（高さは自動）
-            worksheet.PageSetup.FitToPages(1, 0);
+            // 注: 印刷タイトル（SetRowsToRepeatAtTop）は使用しない
+            // 各ページにヘッダーをコピーするため不要
+        }
+
+        /// <summary>
+        /// Issue #457: 印刷範囲を設定
+        /// </summary>
+        /// <param name="worksheet">ワークシート</param>
+        /// <param name="currentRow">現在の行番号（最後に書いた行の次）</param>
+        /// <param name="rowsOnCurrentPage">現在のページに書かれた行数</param>
+        /// <param name="rowsPerPage">1ページあたりの最大行数</param>
+        private static void SetPrintArea(IXLWorksheet worksheet, int currentRow, int rowsOnCurrentPage, int rowsPerPage)
+        {
+            const int NotesRows = 6;    // 備考欄の行数
+            const int RowsPerPageTotal = 22;  // 1ページの総行数
+
+            // 最終行を計算
+            int lastRow;
+            if (rowsOnCurrentPage == 0)
+            {
+                // 改ページ直後（データがまだ書かれていない）
+                // 前のページの備考欄の最終行
+                lastRow = currentRow - 1;
+            }
+            else
+            {
+                // 現在のページにデータがある場合
+                // 現在のページの備考欄の最終行を計算
+                // データエリアの最終行 = currentRow - 1
+                // 備考欄の最終行 = データエリアの最終行 + NotesRows + (rowsPerPage - rowsOnCurrentPage)
+                var dataAreaEndRow = currentRow - 1;
+                var remainingDataRows = rowsPerPage - rowsOnCurrentPage;
+                lastRow = dataAreaEndRow + remainingDataRows + NotesRows;
+            }
+
+            // 1ページ目のみの場合は22行目まで
+            if (lastRow < RowsPerPageTotal)
+            {
+                lastRow = RowsPerPageTotal;
+            }
+
+            // 印刷範囲を設定（A1からL列の最終行まで）
+            worksheet.PageSetup.PrintAreas.Clear();
+            worksheet.PageSetup.PrintAreas.Add(1, 1, lastRow, 12);
         }
     }
 }
