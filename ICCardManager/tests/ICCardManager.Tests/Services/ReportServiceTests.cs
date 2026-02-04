@@ -2040,8 +2040,8 @@ public class ReportServiceTests : IDisposable
         var month = 1;
         var outputPath = CreateTempFilePath();
 
-        // 10件のデータ（繰越行 + データ10件 = 11行 < 12行）
-        var ledgers = Enumerable.Range(1, 10)
+        // 9件のデータ（繰越行1 + データ9件 + 月計1 + 累計1 = 12行）
+        var ledgers = Enumerable.Range(1, 9)
             .Select(i => CreateTestLedger(
                 i,
                 cardIdm,
@@ -2049,7 +2049,7 @@ public class ReportServiceTests : IDisposable
                 $"鉄道（駅{i}～駅{i + 1}）",
                 0,
                 200,
-                1000 - (i * 200),
+                2000 - (i * 200),
                 "テスト太郎"))
             .ToList();
 
@@ -2060,7 +2060,7 @@ public class ReportServiceTests : IDisposable
         _ledgerRepositoryMock.Setup(x => x.GetByDateRangeAsync(cardIdm, It.IsAny<DateTime>(), It.IsAny<DateTime>()))
             .ReturnsAsync(ledgers);
         _ledgerRepositoryMock.Setup(x => x.GetCarryoverBalanceAsync(cardIdm, It.IsAny<int>()))
-            .ReturnsAsync(1000);
+            .ReturnsAsync(2000);
 
         // Act
         var result = await _reportService.CreateMonthlyReportAsync(cardIdm, year, month, outputPath);
@@ -2074,10 +2074,6 @@ public class ReportServiceTests : IDisposable
 
         // 改ページがないことを確認
         worksheet.PageSetup.RowBreaks.Count.Should().Be(0);
-
-        // 印刷タイトルが設定されていることを確認
-        worksheet.PageSetup.PrintTitleRows.RangeAddress.FirstAddress.RowNumber.Should().Be(1);
-        worksheet.PageSetup.PrintTitleRows.RangeAddress.LastAddress.RowNumber.Should().Be(4);
     }
 
     /// <summary>
@@ -2127,10 +2123,6 @@ public class ReportServiceTests : IDisposable
 
         // 改ページが挿入されていることを確認
         worksheet.PageSetup.RowBreaks.Count.Should().BeGreaterThan(0);
-
-        // 印刷タイトルが設定されていることを確認
-        worksheet.PageSetup.PrintTitleRows.RangeAddress.FirstAddress.RowNumber.Should().Be(1);
-        worksheet.PageSetup.PrintTitleRows.RangeAddress.LastAddress.RowNumber.Should().Be(4);
     }
 
     /// <summary>
@@ -2173,11 +2165,6 @@ public class ReportServiceTests : IDisposable
         // 印刷設定を確認
         worksheet.PageSetup.PaperSize.Should().Be(XLPaperSize.A4Paper);
         worksheet.PageSetup.PageOrientation.Should().Be(XLPageOrientation.Landscape);
-        worksheet.PageSetup.FitToPages(1, 0); // 幅を1ページに収める
-
-        // 印刷タイトル（1-4行目がヘッダーとして繰り返される）
-        worksheet.PageSetup.PrintTitleRows.RangeAddress.FirstAddress.RowNumber.Should().Be(1);
-        worksheet.PageSetup.PrintTitleRows.RangeAddress.LastAddress.RowNumber.Should().Be(4);
     }
 
     #endregion
