@@ -911,14 +911,29 @@ namespace ICCardManager.Services
         /// <param name="rowsOnCurrentPage">現在のページに書かれた行数</param>
         /// <param name="rowsPerPage">1ページあたりの最大行数</param>
         /// <returns>更新された（currentRow, rowsOnCurrentPage）のタプル</returns>
+        /// <remarks>
+        /// テンプレート構造:
+        /// - 1-4行: ヘッダー
+        /// - 5-16行: データエリア（12行）
+        /// - 17-22行: 備考欄（6行）- データを書き込まない
+        ///
+        /// 12行を超えるデータは、17-22行目をスキップして23行目から書き込む。
+        /// 1ページ = 18行（データ12行 + 備考欄6行）
+        /// </remarks>
         private static (int currentRow, int rowsOnCurrentPage) CheckAndInsertPageBreak(
             IXLWorksheet worksheet, int currentRow, int rowsOnCurrentPage, int rowsPerPage)
         {
+            const int NotesRows = 6;  // 備考欄の行数（17-22行目）
+
             if (rowsOnCurrentPage >= rowsPerPage)
             {
-                // 現在の行の直前に改ページを挿入
-                worksheet.PageSetup.AddHorizontalPageBreak(currentRow);
-                return (currentRow, 0);
+                // 備考欄（6行）をスキップして次のページのデータ開始行へ
+                var newRow = currentRow + NotesRows;
+
+                // 新しいページの開始行の直前に改ページを挿入
+                worksheet.PageSetup.AddHorizontalPageBreak(newRow);
+
+                return (newRow, 0);
             }
             return (currentRow, rowsOnCurrentPage);
         }
