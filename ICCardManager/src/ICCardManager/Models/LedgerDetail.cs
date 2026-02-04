@@ -66,6 +66,16 @@ namespace ICCardManager.Models
         public bool IsBus { get; set; }
 
         /// <summary>
+        /// グループID（乗り継ぎ統合用）
+        /// </summary>
+        /// <remarks>
+        /// Issue #484: 乗車履歴の統合・分割機能
+        /// 同じGroupIdを持つ詳細は1つの乗り継ぎとして摘要に統合される。
+        /// NULLの場合は従来通りSummaryGeneratorが自動判定する。
+        /// </remarks>
+        public int? GroupId { get; set; }
+
+        /// <summary>
         /// ICカードから読み取った生データ（16バイト）
         /// </summary>
         /// <remarks>

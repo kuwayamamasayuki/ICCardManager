@@ -64,7 +64,8 @@ CREATE TABLE IF NOT EXISTS ledger_detail (
     balance             INTEGER,                 -- 残額
     is_charge           INTEGER DEFAULT 0,       -- チャージフラグ
     is_point_redemption INTEGER DEFAULT 0,       -- ポイント還元フラグ
-    is_bus              INTEGER DEFAULT 0        -- バス利用フラグ
+    is_bus              INTEGER DEFAULT 0,       -- バス利用フラグ
+    group_id            INTEGER                  -- グループID（乗り継ぎ統合用、NULLは自動判定）
 );
 
 -- ============================================

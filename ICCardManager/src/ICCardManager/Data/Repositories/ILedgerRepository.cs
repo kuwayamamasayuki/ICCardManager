@@ -138,5 +138,17 @@ namespace ICCardManager.Data.Repositories
         /// <returns>既存の履歴キーのセット</returns>
         Task<HashSet<(string CardIdm, DateTime Date, string Summary, int Income, int Expense, int Balance)>> GetExistingLedgerKeysAsync(
             IEnumerable<string> cardIdms);
+
+        /// <summary>
+        /// 利用履歴詳細を置き換え（全削除後に再登録）
+        /// </summary>
+        /// <remarks>
+        /// Issue #484対応: 乗車履歴の統合・分割機能で、グループIDを更新する際に使用。
+        /// 既存の詳細をすべて削除してから新しい詳細リストを登録する。
+        /// </remarks>
+        /// <param name="ledgerId">利用履歴ID</param>
+        /// <param name="details">新しい詳細リスト</param>
+        /// <returns>成功した場合true</returns>
+        Task<bool> ReplaceDetailsAsync(int ledgerId, IEnumerable<LedgerDetail> details);
     }
 }
