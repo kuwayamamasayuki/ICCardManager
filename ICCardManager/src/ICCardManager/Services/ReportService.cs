@@ -356,7 +356,11 @@ namespace ICCardManager.Services
                         (currentRow, rowsOnCurrentPage) = CheckAndInsertPageBreak(worksheet, currentRow, rowsOnCurrentPage, RowsPerPage);
                         WriteCarryoverToNextYearRow(worksheet, currentRow, currentBalance);
                         currentRow++;
+                        rowsOnCurrentPage++;
                     }
+
+                    // Issue #457: 最終ページの空白行に罫線を引く
+                    FillEmptyRowsWithBorders(worksheet, currentRow, rowsOnCurrentPage, RowsPerPage);
 
                     // Issue #457: 印刷範囲を設定（全データを含む）
                     SetPrintArea(worksheet, currentRow, rowsOnCurrentPage, RowsPerPage);
@@ -967,6 +971,12 @@ namespace ICCardManager.Services
             // 1-4行目の内容を新しいページにコピー
             var sourceRange = worksheet.Range(1, 1, 4, 12);
             sourceRange.CopyTo(worksheet.Cell(targetStartRow, 1));
+
+            // 行の高さもコピー
+            for (int i = 0; i < 4; i++)
+            {
+                worksheet.Row(targetStartRow + i).Height = worksheet.Row(1 + i).Height;
+            }
         }
 
         /// <summary>
@@ -977,6 +987,60 @@ namespace ICCardManager.Services
             // 17-22行目の内容を新しいページにコピー
             var sourceRange = worksheet.Range(17, 1, 22, 12);
             sourceRange.CopyTo(worksheet.Cell(targetStartRow, 1));
+
+            // 行の高さもコピー
+            for (int i = 0; i < 6; i++)
+            {
+                worksheet.Row(targetStartRow + i).Height = worksheet.Row(17 + i).Height;
+            }
+        }
+
+        /// <summary>
+        /// Issue #457: 最終ページの空白行に罫線を引く
+        /// </summary>
+        /// <param name="worksheet">ワークシート</param>
+        /// <param name="currentRow">現在の行番号（最後に書いた行の次）</param>
+        /// <param name="rowsOnCurrentPage">現在のページに書かれた行数</param>
+        /// <param name="rowsPerPage">1ページあたりの最大行数</param>
+        private static void FillEmptyRowsWithBorders(IXLWorksheet worksheet, int currentRow, int rowsOnCurrentPage, int rowsPerPage)
+        {
+            // 最終ページに空白行がある場合、罫線を引く
+            if (rowsOnCurrentPage > 0 && rowsOnCurrentPage < rowsPerPage)
+            {
+                var emptyRowsCount = rowsPerPage - rowsOnCurrentPage;
+                for (int i = 0; i < emptyRowsCount; i++)
+                {
+                    var row = currentRow + i;
+                    ApplyEmptyRowBorder(worksheet, row);
+                }
+            }
+        }
+
+        /// <summary>
+        /// Issue #457: 空白行に罫線を適用
+        /// </summary>
+        private static void ApplyEmptyRowBorder(IXLWorksheet worksheet, int row)
+        {
+            // 行の高さを30に設定
+            worksheet.Row(row).Height = 30;
+
+            // B列からD列を結合（摘要）
+            var summaryRange = worksheet.Range(row, 2, row, 4);
+            summaryRange.Merge();
+
+            // I列からL列を結合（備考）
+            var noteRange = worksheet.Range(row, 9, row, 12);
+            noteRange.Merge();
+
+            // A列からL列まで罫線を適用
+            var range = worksheet.Range(row, 1, row, 12);
+            range.Style.Border.TopBorder = XLBorderStyleValues.Thin;
+            range.Style.Border.BottomBorder = XLBorderStyleValues.Thin;
+            range.Style.Border.InsideBorder = XLBorderStyleValues.Thin;
+
+            // 両端（A列左側、L列右側）は太線で表示
+            worksheet.Cell(row, 1).Style.Border.LeftBorder = XLBorderStyleValues.Medium;
+            worksheet.Cell(row, 12).Style.Border.RightBorder = XLBorderStyleValues.Medium;
         }
 
         /// <summary>
