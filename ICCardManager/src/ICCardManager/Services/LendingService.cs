@@ -344,16 +344,19 @@ namespace ICCardManager.Services
 
                 _logger.LogDebug("LendingService: 返却処理 - 受け取った履歴件数={Count}", detailList.Count);
 
-                // 貸出時刻以降の利用履歴のみを抽出
+                // 貸出タッチを忘れた場合でも履歴が正しく記録されるよう、日付フィルタを緩和
+                // 重複チェックは CreateUsageLedgersAsync 内の既存履歴照合（Issue #326）で行う
                 // 注意: FeliCa履歴の日付は時刻を含まないため、日付部分のみで比較する
                 var lentAt = lentRecord.LentAt ?? now.AddDays(-1);
                 var lentDate = lentAt.Date;  // 時刻を切り捨てて日付のみにする
+                // 貸出日の1週間前までの履歴を対象とする（貸出タッチ忘れへの対応）
+                var filterStartDate = lentDate.AddDays(-7);
                 var usageSinceLent = detailList
-                    .Where(d => d.UseDate == null || d.UseDate.Value.Date >= lentDate)
+                    .Where(d => d.UseDate == null || d.UseDate.Value.Date >= filterStartDate)
                     .ToList();
 
-                _logger.LogDebug("LendingService: 貸出時刻={LentAt}, 抽出後の履歴件数={Count}",
-                    lentAt.ToString("yyyy-MM-dd HH:mm:ss"), usageSinceLent.Count);
+                _logger.LogDebug("LendingService: 貸出時刻={LentAt}, フィルタ開始日={FilterStart}, 抽出後の履歴件数={Count}",
+                    lentAt.ToString("yyyy-MM-dd HH:mm:ss"), filterStartDate.ToString("yyyy-MM-dd"), usageSinceLent.Count);
 
                 // 履歴データの詳細をログ出力
                 foreach (var detail in usageSinceLent.Take(5))
