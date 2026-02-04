@@ -271,9 +271,14 @@ namespace ICCardManager.Services
                     // ヘッダ情報を設定
                     SetHeaderInfo(worksheet, card);
 
-                    // データを出力
-                    var startRow = 5; // データ開始行（テンプレートに依存: 新テンプレートでは5行目から）
-                    var currentRow = startRow;
+                    // Issue #457: ページ設定（印刷時に1-4行目をヘッダーとして各ページに繰り返す）
+                    ConfigurePageSetup(worksheet);
+
+                    // Issue #457: データ出力（5～16行に内容を記載、それを超える場合は改ページ）
+                    const int DataStartRow = 5;      // データ開始行
+                    const int RowsPerPage = 12;      // 1ページあたりの最大データ行数（5～16行目）
+                    var currentRow = DataStartRow;
+                    var rowsOnCurrentPage = 0;
 
                     // 繰越行を追加（新規購入カードの場合は繰越行を出力しない）
                     if (month == 4)
@@ -283,7 +288,10 @@ namespace ICCardManager.Services
                         // 前年度のデータがある場合のみ繰越行を出力
                         if (carryover.HasValue)
                         {
+                            // Issue #457: 改ページチェック
+                            (currentRow, rowsOnCurrentPage) = CheckAndInsertPageBreak(worksheet, currentRow, rowsOnCurrentPage, RowsPerPage);
                             currentRow = WriteFiscalYearCarryoverRow(worksheet, currentRow, carryover.Value, year);
+                            rowsOnCurrentPage++;
                         }
                     }
                     else
@@ -293,14 +301,20 @@ namespace ICCardManager.Services
                         // 過去のデータがある場合のみ繰越行を出力
                         if (previousMonthBalance.HasValue)
                         {
+                            // Issue #457: 改ページチェック
+                            (currentRow, rowsOnCurrentPage) = CheckAndInsertPageBreak(worksheet, currentRow, rowsOnCurrentPage, RowsPerPage);
                             currentRow = WriteMonthlyCarryoverRow(worksheet, currentRow, previousMonthBalance.Value, year, month);
+                            rowsOnCurrentPage++;
                         }
                     }
 
                     // 各履歴行を出力
                     foreach (var ledger in ledgers)
                     {
+                        // Issue #457: 改ページチェック
+                        (currentRow, rowsOnCurrentPage) = CheckAndInsertPageBreak(worksheet, currentRow, rowsOnCurrentPage, RowsPerPage);
                         currentRow = WriteDataRow(worksheet, currentRow, ledger);
+                        rowsOnCurrentPage++;
                     }
 
                     // 月計を出力
@@ -308,8 +322,11 @@ namespace ICCardManager.Services
                     var monthlyExpense = ledgers.Sum(l => l.Expense);
                     var monthEndBalance = ledgers.LastOrDefault()?.Balance ?? 0;
 
+                    // Issue #457: 改ページチェック
+                    (currentRow, rowsOnCurrentPage) = CheckAndInsertPageBreak(worksheet, currentRow, rowsOnCurrentPage, RowsPerPage);
                     // 月計行（残額欄は空欄、0も表示）
                     currentRow = WriteMonthlyTotalRow(worksheet, currentRow, month, monthlyIncome, monthlyExpense);
+                    rowsOnCurrentPage++;
 
                     // 累計行を追加（全月で出力）
                     // 年度の範囲を計算（4月～翌年3月）
@@ -327,11 +344,16 @@ namespace ICCardManager.Services
                     var yearlyExpense = yearlyLedgers.Sum(l => l.Expense);
                     var currentBalance = yearlyLedgers.LastOrDefault()?.Balance ?? monthEndBalance;
 
+                    // Issue #457: 改ページチェック
+                    (currentRow, rowsOnCurrentPage) = CheckAndInsertPageBreak(worksheet, currentRow, rowsOnCurrentPage, RowsPerPage);
                     currentRow = WriteCumulativeRow(worksheet, currentRow, yearlyIncome, yearlyExpense, currentBalance);
+                    rowsOnCurrentPage++;
 
                     // 3月の場合は次年度繰越を追加
                     if (month == 3)
                     {
+                        // Issue #457: 改ページチェック
+                        (currentRow, rowsOnCurrentPage) = CheckAndInsertPageBreak(worksheet, currentRow, rowsOnCurrentPage, RowsPerPage);
                         WriteCarryoverToNextYearRow(worksheet, currentRow, currentBalance);
                     }
 
@@ -879,6 +901,51 @@ namespace ICCardManager.Services
 
             // 行全体を上下中央揃えに設定
             range.Style.Alignment.Vertical = XLAlignmentVerticalValues.Center;
+        }
+
+        /// <summary>
+        /// Issue #457: 改ページが必要かチェックし、必要なら挿入する
+        /// </summary>
+        /// <param name="worksheet">ワークシート</param>
+        /// <param name="currentRow">現在の行番号</param>
+        /// <param name="rowsOnCurrentPage">現在のページに書かれた行数</param>
+        /// <param name="rowsPerPage">1ページあたりの最大行数</param>
+        /// <returns>更新された（currentRow, rowsOnCurrentPage）のタプル</returns>
+        private static (int currentRow, int rowsOnCurrentPage) CheckAndInsertPageBreak(
+            IXLWorksheet worksheet, int currentRow, int rowsOnCurrentPage, int rowsPerPage)
+        {
+            if (rowsOnCurrentPage >= rowsPerPage)
+            {
+                // 現在の行の直前に改ページを挿入
+                worksheet.PageSetup.AddHorizontalPageBreak(currentRow);
+                return (currentRow, 0);
+            }
+            return (currentRow, rowsOnCurrentPage);
+        }
+
+        /// <summary>
+        /// Issue #457: ワークシートの印刷設定を行う
+        /// </summary>
+        /// <param name="worksheet">ワークシート</param>
+        private static void ConfigurePageSetup(IXLWorksheet worksheet)
+        {
+            // 印刷時に1～4行目（タイトル・ヘッダ行）を各ページに繰り返す
+            worksheet.PageSetup.SetRowsToRepeatAtTop(1, 4);
+
+            // 用紙サイズ: A4
+            worksheet.PageSetup.PaperSize = XLPaperSize.A4Paper;
+
+            // 印刷の向き: 横
+            worksheet.PageSetup.PageOrientation = XLPageOrientation.Landscape;
+
+            // マージンの設定（単位: インチ）
+            worksheet.PageSetup.Margins.Top = 0.5;
+            worksheet.PageSetup.Margins.Bottom = 0.5;
+            worksheet.PageSetup.Margins.Left = 0.5;
+            worksheet.PageSetup.Margins.Right = 0.5;
+
+            // 幅を1ページに収める（高さは自動）
+            worksheet.PageSetup.FitToPages(1, 0);
         }
     }
 }
