@@ -77,21 +77,7 @@ namespace ICCardManager.ViewModels
         /// <summary>
         /// 金額表示
         /// </summary>
-        public string AmountDisplay
-        {
-            get
-            {
-                if (!Detail.Amount.HasValue)
-                {
-                    return "-";
-                }
-                if (Detail.IsCharge || Detail.IsPointRedemption)
-                {
-                    return $"+{Detail.Amount:N0}円";
-                }
-                return $"{Detail.Amount:N0}円";
-            }
-        }
+        public string AmountDisplay => Detail.Amount.HasValue ? $"{Detail.Amount:N0}円" : "-";
 
         /// <summary>
         /// 残高表示
