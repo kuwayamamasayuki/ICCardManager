@@ -669,7 +669,7 @@ public class HistoryViewModelTests
         // Assert
         displayItem.Income.Should().Be(3000);
         displayItem.HasExpense.Should().BeFalse();
-        displayItem.IncomeDisplay.Should().Be("+3,000");
+        displayItem.IncomeDisplay.Should().Be("3,000");
         displayItem.ExpenseDisplay.Should().BeEmpty();
     }
 

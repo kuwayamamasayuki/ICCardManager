@@ -259,7 +259,7 @@ public class DtoMapperTests
     /// 受入金額の表示プロパティが正しいこと
     /// </summary>
     [Theory]
-    [InlineData(1000, "+1,000")]
+    [InlineData(1000, "1,000")]
     [InlineData(0, "")]
     public void LedgerDto_IncomeDisplay_ShouldFormatCorrectly(int income, string expected)
     {
