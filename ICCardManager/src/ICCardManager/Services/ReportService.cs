@@ -428,6 +428,10 @@ namespace ICCardManager.Services
             var headerRange = source.Range(1, 1, 4, 12);
             headerRange.CopyTo(target.Cell(1, 1));
 
+            // 17〜22行目（備考欄/フッタ部分）をコピー
+            var notesRange = source.Range(17, 1, 22, 12);
+            notesRange.CopyTo(target.Cell(17, 1));
+
             // 列幅をコピー
             for (int col = 1; col <= 12; col++)
             {
@@ -436,6 +440,12 @@ namespace ICCardManager.Services
 
             // 行の高さをコピー（1〜4行目）
             for (int row = 1; row <= 4; row++)
+            {
+                target.Row(row).Height = source.Row(row).Height;
+            }
+
+            // 行の高さをコピー（17〜22行目）
+            for (int row = 17; row <= 22; row++)
             {
                 target.Row(row).Height = source.Row(row).Height;
             }
