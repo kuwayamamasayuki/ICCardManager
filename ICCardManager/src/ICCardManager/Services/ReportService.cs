@@ -271,9 +271,15 @@ namespace ICCardManager.Services
                     // ヘッダ情報を設定
                     SetHeaderInfo(worksheet, card);
 
+                    // Issue #457: ページ設定（印刷時に1-4行目をヘッダーとして各ページに繰り返す）
+                    ConfigurePageSetup(worksheet);
+
                     // データを出力
-                    var startRow = 5; // データ開始行（テンプレートに依存: 新テンプレートでは5行目から）
-                    var currentRow = startRow;
+                    // Issue #457: 5～16行に内容を記載、それを超える場合は改ページ
+                    const int DataStartRow = 5;      // データ開始行
+                    const int RowsPerPage = 12;      // 1ページあたりの最大データ行数（5～16行目）
+                    var currentRow = DataStartRow;
+                    var rowsOnCurrentPage = 0;
 
                     // 繰越行を追加（新規購入カードの場合は繰越行を出力しない）
                     if (month == 4)
@@ -284,6 +290,7 @@ namespace ICCardManager.Services
                         if (carryover.HasValue)
                         {
                             currentRow = WriteFiscalYearCarryoverRow(worksheet, currentRow, carryover.Value, year);
+                            rowsOnCurrentPage++;
                         }
                     }
                     else
@@ -294,13 +301,22 @@ namespace ICCardManager.Services
                         if (previousMonthBalance.HasValue)
                         {
                             currentRow = WriteMonthlyCarryoverRow(worksheet, currentRow, previousMonthBalance.Value, year, month);
+                            rowsOnCurrentPage++;
                         }
                     }
 
-                    // 各履歴行を出力
+                    // 各履歴行を出力（ページネーション対応）
                     foreach (var ledger in ledgers)
                     {
+                        // Issue #457: 12行を超える場合は改ページ
+                        if (rowsOnCurrentPage >= RowsPerPage)
+                        {
+                            worksheet.PageSetup.AddHorizontalPageBreak(currentRow);
+                            rowsOnCurrentPage = 0;
+                        }
+
                         currentRow = WriteDataRow(worksheet, currentRow, ledger);
+                        rowsOnCurrentPage++;
                     }
 
                     // 月計を出力
@@ -308,8 +324,15 @@ namespace ICCardManager.Services
                     var monthlyExpense = ledgers.Sum(l => l.Expense);
                     var monthEndBalance = ledgers.LastOrDefault()?.Balance ?? 0;
 
+                    // Issue #457: 月計行も改ページ判定
+                    if (rowsOnCurrentPage >= RowsPerPage)
+                    {
+                        worksheet.PageSetup.AddHorizontalPageBreak(currentRow);
+                        rowsOnCurrentPage = 0;
+                    }
                     // 月計行（残額欄は空欄、0も表示）
                     currentRow = WriteMonthlyTotalRow(worksheet, currentRow, month, monthlyIncome, monthlyExpense);
+                    rowsOnCurrentPage++;
 
                     // 累計行を追加（全月で出力）
                     // 年度の範囲を計算（4月～翌年3月）
@@ -327,11 +350,23 @@ namespace ICCardManager.Services
                     var yearlyExpense = yearlyLedgers.Sum(l => l.Expense);
                     var currentBalance = yearlyLedgers.LastOrDefault()?.Balance ?? monthEndBalance;
 
+                    // Issue #457: 累計行も改ページ判定
+                    if (rowsOnCurrentPage >= RowsPerPage)
+                    {
+                        worksheet.PageSetup.AddHorizontalPageBreak(currentRow);
+                        rowsOnCurrentPage = 0;
+                    }
                     currentRow = WriteCumulativeRow(worksheet, currentRow, yearlyIncome, yearlyExpense, currentBalance);
+                    rowsOnCurrentPage++;
 
                     // 3月の場合は次年度繰越を追加
                     if (month == 3)
                     {
+                        // Issue #457: 次年度繰越行も改ページ判定
+                        if (rowsOnCurrentPage >= RowsPerPage)
+                        {
+                            worksheet.PageSetup.AddHorizontalPageBreak(currentRow);
+                        }
                         WriteCarryoverToNextYearRow(worksheet, currentRow, currentBalance);
                     }
 
@@ -572,6 +607,33 @@ namespace ICCardManager.Services
             // A2～L2の範囲のフォントサイズを調整
             var headerRange = worksheet.Range("A2:L2");
             headerRange.Style.Font.FontSize = headerFontSize;
+        }
+
+        /// <summary>
+        /// ページ設定を構成（Issue #457: 印刷時のページネーション対応）
+        /// </summary>
+        /// <remarks>
+        /// - 1～4行目をヘッダーとして各印刷ページに繰り返す
+        /// - 用紙サイズはA4、横向き
+        /// - 印刷マージンを適切に設定
+        /// </remarks>
+        private static void ConfigurePageSetup(IXLWorksheet worksheet)
+        {
+            // 印刷時に1～4行目（タイトル・ヘッダ行）を各ページに繰り返す
+            worksheet.PageSetup.SetRowsToRepeatAtTop(1, 4);
+
+            // 用紙設定
+            worksheet.PageSetup.PaperSize = XLPaperSize.A4Paper;
+            worksheet.PageSetup.PageOrientation = XLPageOrientation.Landscape;
+
+            // 印刷マージン（インチ単位）
+            worksheet.PageSetup.Margins.Top = 0.5;
+            worksheet.PageSetup.Margins.Bottom = 0.5;
+            worksheet.PageSetup.Margins.Left = 0.5;
+            worksheet.PageSetup.Margins.Right = 0.5;
+
+            // ページ幅に収める（ページ数は自動）
+            worksheet.PageSetup.FitToPages(1, 0);
         }
 
         /// <summary>

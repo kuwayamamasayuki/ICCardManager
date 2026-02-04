@@ -2024,4 +2024,145 @@ public class ReportServiceTests : IDisposable
     }
 
     #endregion
+
+    #region Issue #457 ページネーション機能テスト
+
+    /// <summary>
+    /// TC031: Issue #457 - 印刷タイトル（ヘッダー行）が設定される
+    /// </summary>
+    [Fact]
+    public async Task CreateMonthlyReportAsync_SetsPrintTitles()
+    {
+        // Arrange
+        var cardIdm = "0102030405060708";
+        var card = CreateTestCard(cardIdm);
+        var outputPath = CreateTempFilePath();
+        var year = 2024;
+        var month = 6;
+
+        var ledgers = new List<Ledger>
+        {
+            CreateTestLedger(1, cardIdm, new DateTime(year, month, 10), "鉄道（博多～天神）", 0, 500, 9500)
+        };
+
+        _cardRepositoryMock
+            .Setup(r => r.GetByIdmAsync(cardIdm, true))
+            .ReturnsAsync(card);
+        _ledgerRepositoryMock
+            .Setup(r => r.GetByMonthAsync(cardIdm, year, month))
+            .ReturnsAsync(ledgers);
+
+        // Act
+        var result = await _reportService.CreateMonthlyReportAsync(cardIdm, year, month, outputPath);
+
+        // Assert
+        result.Success.Should().BeTrue();
+
+        using var workbook = new XLWorkbook(outputPath);
+        var worksheet = workbook.Worksheets.First();
+
+        // 印刷タイトルが1～4行目に設定されていることを確認
+        var rowsToRepeat = worksheet.PageSetup.RowsToRepeatAtTop;
+        rowsToRepeat.Should().NotBeNull("印刷タイトルが設定されているべき");
+        rowsToRepeat.FirstRow().RowNumber().Should().Be(1, "印刷タイトルは1行目から開始すべき");
+        rowsToRepeat.LastRow().RowNumber().Should().Be(4, "印刷タイトルは4行目まで含むべき");
+    }
+
+    /// <summary>
+    /// TC032: Issue #457 - 12行を超えるデータで改ページが挿入される
+    /// </summary>
+    [Fact]
+    public async Task CreateMonthlyReportAsync_AddsPageBreak_WhenDataExceeds12Rows()
+    {
+        // Arrange
+        var cardIdm = "0102030405060708";
+        var card = CreateTestCard(cardIdm);
+        var outputPath = CreateTempFilePath();
+        var year = 2024;
+        var month = 6;
+
+        // 15件の履歴データを作成（繰越1行 + データ15行 = 16行で改ページが発生するはず）
+        var ledgers = Enumerable.Range(1, 15)
+            .Select(i => CreateTestLedger(i, cardIdm, new DateTime(year, month, i), $"鉄道（博多～天神{i}）", 0, 100, 10000 - i * 100))
+            .ToList();
+
+        _cardRepositoryMock
+            .Setup(r => r.GetByIdmAsync(cardIdm, true))
+            .ReturnsAsync(card);
+        _ledgerRepositoryMock
+            .Setup(r => r.GetByMonthAsync(cardIdm, year, month))
+            .ReturnsAsync(ledgers);
+        _ledgerRepositoryMock
+            .Setup(r => r.GetByMonthAsync(cardIdm, year, 5))  // 前月残高
+            .ReturnsAsync(new List<Ledger>
+            {
+                CreateTestLedger(0, cardIdm, new DateTime(year, 5, 1), "5月データ", 10000, 0, 10000)
+            });
+        _ledgerRepositoryMock
+            .Setup(r => r.GetCarryoverBalanceAsync(cardIdm, year - 1))
+            .ReturnsAsync(10000);
+
+        // Act
+        var result = await _reportService.CreateMonthlyReportAsync(cardIdm, year, month, outputPath);
+
+        // Assert
+        result.Success.Should().BeTrue();
+
+        using var workbook = new XLWorkbook(outputPath);
+        var worksheet = workbook.Worksheets.First();
+
+        // 改ページが存在することを確認
+        var pageBreaks = worksheet.PageSetup.RowBreaks;
+        pageBreaks.Should().NotBeEmpty("12行を超えるデータがある場合、改ページが挿入されるべき");
+    }
+
+    /// <summary>
+    /// TC033: Issue #457 - 12行以内のデータでは改ページが挿入されない
+    /// </summary>
+    [Fact]
+    public async Task CreateMonthlyReportAsync_NoPageBreak_WhenDataWithin12Rows()
+    {
+        // Arrange
+        var cardIdm = "0102030405060708";
+        var card = CreateTestCard(cardIdm);
+        var outputPath = CreateTempFilePath();
+        var year = 2024;
+        var month = 6;
+
+        // 8件の履歴データを作成（繰越1行 + データ8行 + 月計1行 + 累計1行 = 11行）
+        var ledgers = Enumerable.Range(1, 8)
+            .Select(i => CreateTestLedger(i, cardIdm, new DateTime(year, month, i), $"鉄道（博多～天神{i}）", 0, 100, 10000 - i * 100))
+            .ToList();
+
+        _cardRepositoryMock
+            .Setup(r => r.GetByIdmAsync(cardIdm, true))
+            .ReturnsAsync(card);
+        _ledgerRepositoryMock
+            .Setup(r => r.GetByMonthAsync(cardIdm, year, month))
+            .ReturnsAsync(ledgers);
+        _ledgerRepositoryMock
+            .Setup(r => r.GetByMonthAsync(cardIdm, year, 5))  // 前月残高
+            .ReturnsAsync(new List<Ledger>
+            {
+                CreateTestLedger(0, cardIdm, new DateTime(year, 5, 1), "5月データ", 10000, 0, 10000)
+            });
+        _ledgerRepositoryMock
+            .Setup(r => r.GetCarryoverBalanceAsync(cardIdm, year - 1))
+            .ReturnsAsync(10000);
+
+        // Act
+        var result = await _reportService.CreateMonthlyReportAsync(cardIdm, year, month, outputPath);
+
+        // Assert
+        result.Success.Should().BeTrue();
+
+        using var workbook = new XLWorkbook(outputPath);
+        var worksheet = workbook.Worksheets.First();
+
+        // 改ページが存在しないことを確認
+        var pageBreaks = worksheet.PageSetup.RowBreaks;
+        pageBreaks.Should().BeEmpty("12行以内のデータでは改ページが挿入されないべき");
+    }
+
+    #endregion
 }
