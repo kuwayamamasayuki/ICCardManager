@@ -121,9 +121,11 @@ namespace ICCardManager.Services
                 return null;
             }
 
+            // Issue #478: 同一日ではチャージ（Income > 0）を利用より先に表示
             var ledgers = (await _ledgerRepository.GetByMonthAsync(cardIdm, year, month))
                 .Where(l => l.Summary != SummaryGenerator.GetLendingSummary())
                 .OrderBy(l => l.Date)
+                .ThenByDescending(l => l.Income)
                 .ThenBy(l => l.Id)
                 .ToList();
 

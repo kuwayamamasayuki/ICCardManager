@@ -211,9 +211,11 @@ namespace ICCardManager.Services
                 }
 
                 // 履歴を取得
+                // Issue #478: 同一日ではチャージ（Income > 0）を利用より先に表示
                 var ledgers = (await _ledgerRepository.GetByMonthAsync(cardIdm, year, month))
                     .Where(l => l.Summary != SummaryGenerator.GetLendingSummary()) // 貸出中レコードを除外
                     .OrderBy(l => l.Date)
+                    .ThenByDescending(l => l.Income)
                     .ThenBy(l => l.Id)
                     .ToList();
 
@@ -269,8 +271,10 @@ namespace ICCardManager.Services
                 var fiscalYearStartYear = month >= 4 ? year : year - 1;
                 var fiscalYearStart = new DateTime(fiscalYearStartYear, 4, 1);
                 var fiscalYearEnd = new DateTime(year, month, DateTime.DaysInMonth(year, month));
+                // Issue #478: 同一日ではチャージ（Income > 0）を利用より先に表示（一貫性のため）
                 var yearlyLedgers = (await _ledgerRepository.GetByDateRangeAsync(cardIdm, fiscalYearStart, fiscalYearEnd))
                     .OrderBy(l => l.Date)
+                    .ThenByDescending(l => l.Income)
                     .ThenBy(l => l.Id)
                     .ToList();
 
@@ -503,9 +507,11 @@ namespace ICCardManager.Services
             }
 
             // 前月の履歴を取得し、最後の残高を返す
+            // Issue #478: 同一日ではチャージ（Income > 0）を利用より先に表示（一貫性のため）
             var previousLedgers = (await _ledgerRepository.GetByMonthAsync(cardIdm, previousYear, previousMonth))
                 .Where(l => l.Summary != SummaryGenerator.GetLendingSummary())
                 .OrderBy(l => l.Date)
+                .ThenByDescending(l => l.Income)
                 .ThenBy(l => l.Id)
                 .ToList();
 

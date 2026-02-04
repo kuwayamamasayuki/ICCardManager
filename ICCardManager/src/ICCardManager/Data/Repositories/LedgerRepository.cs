@@ -32,11 +32,12 @@ namespace ICCardManager.Data.Repositories
                 ? "WHERE card_idm = @cardIdm AND date BETWEEN @fromDate AND @toDate"
                 : "WHERE date BETWEEN @fromDate AND @toDate";
 
+            // Issue #478: 同一日ではチャージ（income > 0）を利用より先に表示
             command.CommandText = $@"SELECT id, card_idm, lender_idm, date, summary, income, expense, balance,
        staff_name, note, returner_idm, lent_at, returned_at, is_lent_record
 FROM ledger
 {whereClause}
-ORDER BY date, id";
+ORDER BY date ASC, income DESC, id ASC";
 
             if (cardIdm != null)
             {
@@ -389,12 +390,13 @@ FROM ledger
             var offset = (page - 1) * pageSize;
 
             using var command = connection.CreateCommand();
+            // Issue #478: 同一日ではチャージ（income > 0）を利用より先に表示
             command.CommandText = $@"SELECT l.id, l.card_idm, l.lender_idm, l.date, l.summary, l.income, l.expense, l.balance,
        l.staff_name, l.note, l.returner_idm, l.lent_at, l.returned_at, l.is_lent_record,
        (SELECT COUNT(*) FROM ledger_detail WHERE ledger_id = l.id) as detail_count
 FROM ledger l
 {whereClause.Replace("card_idm", "l.card_idm").Replace("date ", "l.date ")}
-ORDER BY l.date ASC, l.id ASC
+ORDER BY l.date ASC, l.income DESC, l.id ASC
 LIMIT @pageSize OFFSET @offset";
 
             if (cardIdm != null)
@@ -426,13 +428,13 @@ LIMIT @pageSize OFFSET @offset";
 
             using var command = connection.CreateCommand();
             // Issue #393: 履歴詳細を古い順（時系列順）で表示
-            // use_dateだけでは同日の順序が不定になるため、rowid（挿入順序）で補完
-            // rowid昇順 = ICカードから読み取った順序 = 古い取引から順
+            // Issue #478: 同一日ではチャージ（is_charge=1）を利用より先に表示
+            // use_dateだけでは同日の順序が不定になるため、is_chargeとrowid（挿入順序）で補完
             command.CommandText = @"SELECT ledger_id, use_date, entry_station, exit_station,
        bus_stops, amount, balance, is_charge, is_point_redemption, is_bus, group_id, rowid
 FROM ledger_detail
 WHERE ledger_id = @ledgerId
-ORDER BY use_date ASC, rowid ASC";
+ORDER BY use_date ASC, is_charge DESC, is_point_redemption DESC, rowid ASC";
 
             command.Parameters.AddWithValue("@ledgerId", ledgerId);
 
