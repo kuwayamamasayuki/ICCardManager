@@ -120,8 +120,8 @@ CREATE TABLE settings (
         _dbContext.InitializeDatabase();
 
         // Assert
-        // レガシーDBはバージョン1として認識され、その後Migration_002, Migration_003も適用されるので最終バージョンは3
-        _dbContext.GetDatabaseVersion().Should().Be(3);
+        // レガシーDBはバージョン1として認識され、その後Migration_002〜004も適用されるので最終バージョンは4
+        _dbContext.GetDatabaseVersion().Should().Be(4);
         TableShouldExist(connection, "schema_migrations");
 
         // バージョン1（既存DB認識）の記録が存在することを確認
