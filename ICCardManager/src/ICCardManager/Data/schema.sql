@@ -103,6 +103,9 @@ CREATE INDEX IF NOT EXISTS idx_ledger_lender      ON ledger(lender_idm);
 CREATE INDEX IF NOT EXISTS idx_detail_ledger      ON ledger_detail(ledger_id);
 CREATE INDEX IF NOT EXISTS idx_detail_bus         ON ledger_detail(is_bus);
 CREATE INDEX IF NOT EXISTS idx_log_timestamp      ON operation_log(timestamp);
+-- Issue #504: 起動高速化のための追加インデックス
+CREATE INDEX IF NOT EXISTS idx_ledger_card_id     ON ledger(card_idm, id DESC);
+CREATE INDEX IF NOT EXISTS idx_card_lent_deleted  ON ic_card(is_lent, is_deleted);
 
 -- ============================================
 -- 初期データ

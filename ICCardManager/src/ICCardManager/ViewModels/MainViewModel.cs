@@ -399,32 +399,67 @@ public partial class MainViewModel : ViewModelBase
     {
         using (BeginBusy("初期化中..."))
         {
-            // 起動時チェック
-            await CheckWarningsAsync();
+            // Issue #504: 初期化処理を並列化して高速化
+            // 設定取得は他の処理と並列で実行可能
+            var settingsTask = _settingsRepository.GetAppSettingsAsync();
+
+            // ダッシュボード更新（カード情報・残高を取得）
+            await RefreshDashboardAsync();
+
+            // 設定を待機
+            var settings = await settingsTask;
+            _soundPlayer.SoundMode = settings.SoundMode;
 
             // 貸出中カードを取得
             await RefreshLentCardsAsync();
 
-            // カード残高ダッシュボードを取得
-            await RefreshDashboardAsync();
-
-            // 音声モード設定を適用
-            var settings = await _settingsRepository.GetAppSettingsAsync();
-            _soundPlayer.SoundMode = settings.SoundMode;
+            // 警告チェック（ダッシュボードデータを使用して高速化）
+            CheckWarningsFromDashboard(settings.WarningBalance);
 
             // カード読み取り開始
             await _cardReader.StartReadingAsync();
+
+            // Issue #504: バス停未入力チェックはバックグラウンドで実行（起動を遅延させない）
+            _ = CheckIncompleteBusStopsAsync();
         }
     }
 
     /// <summary>
-    /// 警告チェック
+    /// 警告チェック（従来版、必要に応じて使用）
     /// </summary>
     private async Task CheckWarningsAsync()
     {
+        var settings = await _settingsRepository.GetAppSettingsAsync();
+        CheckWarningsFromDashboard(settings.WarningBalance);
+        await CheckIncompleteBusStopsAsync();
+    }
+
+    /// <summary>
+    /// Issue #504: ダッシュボードデータから警告をチェック（高速版）
+    /// </summary>
+    /// <remarks>
+    /// 既に読み込み済みのダッシュボードデータを使用して、追加のDBクエリなしで警告をチェック。
+    /// </remarks>
+    private void CheckWarningsFromDashboard(int warningBalance)
+    {
         WarningMessages.Clear();
 
-        // バス停名未入力チェック
+        // 残額警告チェック（ダッシュボードから取得済みのデータを使用）
+        foreach (var item in CardBalanceDashboard)
+        {
+            if (item.CurrentBalance < warningBalance)
+            {
+                WarningMessages.Add($"⚠️ {item.CardType} {item.CardNumber}: 残額 {item.CurrentBalance:N0}円");
+            }
+        }
+    }
+
+    /// <summary>
+    /// バス停名未入力チェック（バックグラウンドで実行）
+    /// </summary>
+    private async Task CheckIncompleteBusStopsAsync()
+    {
+        // バス停名未入力チェックはバックグラウンドで実行
         var ledgers = await _ledgerRepository.GetByDateRangeAsync(
             null, DateTime.Now.AddYears(-1), DateTime.Now);
 
@@ -432,19 +467,6 @@ public partial class MainViewModel : ViewModelBase
         if (incompleteCount > 0)
         {
             WarningMessages.Add($"⚠️ バス停名が未入力の履歴が{incompleteCount}件あります");
-        }
-
-        // 残額警告チェック
-        var settings = await _settingsRepository.GetAppSettingsAsync();
-        var cards = await _cardRepository.GetAllAsync();
-
-        foreach (var card in cards)
-        {
-            var lastLedger = await _ledgerRepository.GetLatestBeforeDateAsync(card.CardIdm, DateTime.Now.AddDays(1));
-            if (lastLedger != null && lastLedger.Balance < settings.WarningBalance)
-            {
-                WarningMessages.Add($"⚠️ {card.CardType} {card.CardNumber}: 残額 {lastLedger.Balance:N0}円");
-            }
         }
     }
 
@@ -466,11 +488,18 @@ public partial class MainViewModel : ViewModelBase
     /// </summary>
     private async Task RefreshDashboardAsync()
     {
-        var settings = await _settingsRepository.GetAppSettingsAsync();
-        var cards = await _cardRepository.GetAllAsync();
-        var balances = await _ledgerRepository.GetAllLatestBalancesAsync();
-        var staffList = await _staffRepository.GetAllAsync();
-        var staffDict = staffList.ToDictionary(s => s.StaffIdm, s => s.Name);
+        // Issue #504: データ取得を並列化して高速化
+        var settingsTask = _settingsRepository.GetAppSettingsAsync();
+        var cardsTask = _cardRepository.GetAllAsync();
+        var balancesTask = _ledgerRepository.GetAllLatestBalancesAsync();
+        var staffTask = _staffRepository.GetAllAsync();
+
+        await Task.WhenAll(settingsTask, cardsTask, balancesTask, staffTask);
+
+        var settings = settingsTask.Result;
+        var cards = cardsTask.Result;
+        var balances = balancesTask.Result;
+        var staffDict = staffTask.Result.ToDictionary(s => s.StaffIdm, s => s.Name);
 
         var dashboardItems = new List<CardBalanceDashboardItem>();
 
