@@ -4,6 +4,10 @@ using System.IO;
 using System.Windows.Data;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using ICCardManager.Data.Repositories;
+using ICCardManager.Dtos;
+using ICCardManager.Infrastructure.CardReader;
+using ICCardManager.Models;
 using ICCardManager.Services;
 using Microsoft.Win32;
 
@@ -86,6 +90,8 @@ public partial class DataExportImportViewModel : ViewModelBase
     private readonly CsvExportService _exportService;
     private readonly CsvImportService _importService;
     private readonly IDialogService _dialogService;
+    private readonly ICardRepository _cardRepository;
+    private readonly ICardReader? _cardReader;
 
     [ObservableProperty]
     private DataType _selectedExportType = DataType.Cards;
@@ -132,6 +138,49 @@ public partial class DataExportImportViewModel : ViewModelBase
     [ObservableProperty]
     private string _previewSummary = string.Empty;
 
+    // Issue #511: カード選択機能
+    /// <summary>
+    /// 利用履歴インポート用: 登録済みカード一覧（ドロップダウン用）
+    /// </summary>
+    [ObservableProperty]
+    private ObservableCollection<CardDto> _availableCards = new();
+
+    /// <summary>
+    /// 利用履歴インポート用: 選択されたインポート先カード
+    /// </summary>
+    [ObservableProperty]
+    private CardDto? _selectedTargetCard;
+
+    /// <summary>
+    /// 利用履歴インポート用: カード指定方法（true=一覧から選択、false=カードタッチ）
+    /// </summary>
+    [ObservableProperty]
+    private bool _useCardListSelection = true;
+
+    /// <summary>
+    /// 利用履歴インポート用: カードリーダーが利用可能か
+    /// </summary>
+    [ObservableProperty]
+    private bool _isCardReaderAvailable;
+
+    /// <summary>
+    /// 利用履歴インポート用: タッチで読み取ったカードのIDm
+    /// </summary>
+    [ObservableProperty]
+    private string _touchedCardIdm = string.Empty;
+
+    /// <summary>
+    /// 利用履歴インポート用: タッチで読み取ったカードの情報表示
+    /// </summary>
+    [ObservableProperty]
+    private string _touchedCardInfo = string.Empty;
+
+    /// <summary>
+    /// 利用履歴インポート用: カードタッチ待機中かどうか
+    /// </summary>
+    [ObservableProperty]
+    private bool _isWaitingForCardTouch;
+
     /// <summary>
     /// エクスポート用データタイプの選択肢
     /// </summary>
@@ -161,19 +210,87 @@ public partial class DataExportImportViewModel : ViewModelBase
     /// </summary>
     public bool IsLedgerExportSelected => SelectedExportType == DataType.Ledgers;
 
+    /// <summary>
+    /// 利用履歴インポートが選択されているか（カード指定UIの表示制御用）
+    /// </summary>
+    public bool IsLedgerImportSelected => SelectedImportType == DataType.Ledgers;
+
+    /// <summary>
+    /// インポート時に使用するターゲットカードIDmを取得
+    /// </summary>
+    /// <returns>選択またはタッチされたカードのIDm。未選択の場合はnull</returns>
+    private string? GetTargetCardIdm()
+    {
+        if (SelectedImportType != DataType.Ledgers)
+        {
+            return null;
+        }
+
+        if (UseCardListSelection)
+        {
+            return SelectedTargetCard?.CardIdm;
+        }
+        else
+        {
+            return string.IsNullOrWhiteSpace(TouchedCardIdm) ? null : TouchedCardIdm;
+        }
+    }
+
     public DataExportImportViewModel(
         CsvExportService exportService,
         CsvImportService importService,
-        IDialogService dialogService)
+        IDialogService dialogService,
+        ICardRepository cardRepository,
+        ICardReader? cardReader = null)
     {
         _exportService = exportService;
         _importService = importService;
         _dialogService = dialogService;
+        _cardRepository = cardRepository;
+        _cardReader = cardReader;
+
+        // カードリーダーイベント購読
+        if (_cardReader != null)
+        {
+            _cardReader.CardRead += OnCardRead;
+        }
+    }
+
+    /// <summary>
+    /// 初期化（登録済みカード一覧の読み込み）
+    /// </summary>
+    public async Task InitializeAsync()
+    {
+        // 登録済みカード一覧を取得
+        var cards = await _cardRepository.GetAllAsync();
+        AvailableCards.Clear();
+        foreach (var card in cards.OrderBy(c => c.CardType).ThenBy(c => c.CardNumber))
+        {
+            AvailableCards.Add(card.ToDto());
+        }
+
+        // カードリーダーが利用可能か確認
+        IsCardReaderAvailable = _cardReader != null &&
+                                _cardReader.ConnectionState == CardReaderConnectionState.Connected;
     }
 
     partial void OnSelectedExportTypeChanged(DataType value)
     {
         OnPropertyChanged(nameof(IsLedgerExportSelected));
+    }
+
+    partial void OnSelectedImportTypeChanged(DataType value)
+    {
+        OnPropertyChanged(nameof(IsLedgerImportSelected));
+
+        // 利用履歴以外が選択された場合、カード指定をクリア
+        if (value != DataType.Ledgers)
+        {
+            SelectedTargetCard = null;
+            TouchedCardIdm = string.Empty;
+            TouchedCardInfo = string.Empty;
+            IsWaitingForCardTouch = false;
+        }
     }
 
     /// <summary>
@@ -282,7 +399,8 @@ public partial class DataExportImportViewModel : ViewModelBase
                         break;
 
                     case DataType.Ledgers:
-                        preview = await _importService.PreviewLedgersAsync(dialog.FileName, SkipExistingOnImport);
+                        // Issue #511: ターゲットカードIDmを渡す
+                        preview = await _importService.PreviewLedgersAsync(dialog.FileName, SkipExistingOnImport, GetTargetCardIdm());
                         break;
 
                     default:
@@ -383,7 +501,8 @@ public partial class DataExportImportViewModel : ViewModelBase
                         break;
 
                     case DataType.Ledgers:
-                        result = await _importService.ImportLedgersAsync(ImportPreviewFile, SkipExistingOnImport);
+                        // Issue #511: ターゲットカードIDmを渡す
+                        result = await _importService.ImportLedgersAsync(ImportPreviewFile, SkipExistingOnImport, GetTargetCardIdm());
                         break;
 
                     default:
@@ -487,7 +606,8 @@ public partial class DataExportImportViewModel : ViewModelBase
                         break;
 
                     case DataType.Ledgers:
-                        result = await _importService.ImportLedgersAsync(dialog.FileName, SkipExistingOnImport);
+                        // Issue #511: ターゲットカードIDmを渡す
+                        result = await _importService.ImportLedgersAsync(dialog.FileName, SkipExistingOnImport, GetTargetCardIdm());
                         break;
 
                     default:
@@ -593,4 +713,128 @@ public partial class DataExportImportViewModel : ViewModelBase
             _ => $"export_{timestamp}.csv"
         };
     }
+
+    #region Issue #511: カードタッチによるIDm取得
+
+    /// <summary>
+    /// カードタッチ待機を開始
+    /// </summary>
+    [RelayCommand]
+    public async Task StartCardTouchAsync()
+    {
+        if (_cardReader == null)
+        {
+            StatusMessage = "カードリーダーが利用できません";
+            return;
+        }
+
+        // 接続状態を再確認
+        IsCardReaderAvailable = _cardReader.ConnectionState == CardReaderConnectionState.Connected;
+        if (!IsCardReaderAvailable)
+        {
+            StatusMessage = "カードリーダーが接続されていません";
+            return;
+        }
+
+        // タッチ待機を開始
+        IsWaitingForCardTouch = true;
+        TouchedCardIdm = string.Empty;
+        TouchedCardInfo = "カードをタッチしてください...";
+        StatusMessage = "カードをタッチしてください";
+
+        // 読み取りを開始（既に開始されている場合は何もしない）
+        try
+        {
+            if (!_cardReader.IsReading)
+            {
+                await _cardReader.StartReadingAsync();
+            }
+        }
+        catch (Exception ex)
+        {
+            IsWaitingForCardTouch = false;
+            TouchedCardInfo = string.Empty;
+            StatusMessage = $"カードリーダーの開始に失敗しました: {ex.Message}";
+        }
+    }
+
+    /// <summary>
+    /// カードタッチ待機をキャンセル
+    /// </summary>
+    [RelayCommand]
+    public void CancelCardTouch()
+    {
+        IsWaitingForCardTouch = false;
+        TouchedCardInfo = string.IsNullOrWhiteSpace(TouchedCardIdm)
+            ? string.Empty
+            : TouchedCardInfo; // 既にカードが読み取られていれば情報を維持
+        StatusMessage = string.Empty;
+    }
+
+    /// <summary>
+    /// カード読み取りイベントハンドラ
+    /// </summary>
+    private async void OnCardRead(object? sender, CardReadEventArgs e)
+    {
+        if (!IsWaitingForCardTouch)
+        {
+            return;
+        }
+
+        // UIスレッドで実行
+        await System.Windows.Application.Current.Dispatcher.InvokeAsync(async () =>
+        {
+            IsWaitingForCardTouch = false;
+
+            // 読み取ったIDmで登録済みカードを検索
+            var card = await _cardRepository.GetByIdmAsync(e.Idm);
+
+            if (card != null)
+            {
+                // 登録済みカードが見つかった
+                TouchedCardIdm = card.CardIdm;
+                var shortIdm = card.CardIdm.Length > 8
+                    ? card.CardIdm.Substring(0, 8) + "..."
+                    : card.CardIdm;
+                TouchedCardInfo = $"{card.CardType} {card.CardNumber} ({shortIdm})";
+                StatusMessage = $"カードを読み取りました: {card.CardType} {card.CardNumber}";
+            }
+            else
+            {
+                // 未登録カード
+                TouchedCardIdm = string.Empty;
+                TouchedCardInfo = "未登録のカードです";
+                StatusMessage = "このカードはシステムに登録されていません。先にカード管理で登録してください。";
+                _dialogService.ShowWarning(
+                    "タッチされたカードはシステムに登録されていません。\n\n利用履歴をインポートするには、先にカード管理で対象のICカードを登録してください。",
+                    "未登録カード");
+            }
+        });
+    }
+
+    /// <summary>
+    /// カード指定をクリア
+    /// </summary>
+    [RelayCommand]
+    public void ClearTargetCard()
+    {
+        SelectedTargetCard = null;
+        TouchedCardIdm = string.Empty;
+        TouchedCardInfo = string.Empty;
+        IsWaitingForCardTouch = false;
+    }
+
+    /// <summary>
+    /// クリーンアップ（ダイアログ終了時に呼び出し）
+    /// </summary>
+    public void Cleanup()
+    {
+        if (_cardReader != null)
+        {
+            _cardReader.CardRead -= OnCardRead;
+        }
+        IsWaitingForCardTouch = false;
+    }
+
+    #endregion
 }

@@ -20,6 +20,9 @@
         <BooleanToVisibilityConverter x:Key="BoolToVisibilityConverter"/>
         <vm:DataTypeToDisplayNameConverter x:Key="DataTypeConverter"/>
         <vm:ImportActionToDisplayNameConverter x:Key="ImportActionConverter"/>
+        <!-- Issue #511: 追加のコンバーター -->
+        <common:InverseBooleanConverter x:Key="InverseBoolConverter" xmlns:common="clr-namespace:ICCardManager.Common"/>
+        <common:BoolToVisibilityConverter x:Key="InverseBoolToVisibilityConverter" xmlns:common="clr-namespace:ICCardManager.Common"/>
     </Window.Resources>
 
     <Grid Margin="20">
@@ -192,6 +195,140 @@
                               AutomationProperties.Name="既存データをスキップ"
                               ToolTip="同じIDmのデータが既に存在する場合はスキップします（オフの場合は上書き更新）"/>
                 </Grid>
+
+                <!-- Issue #511: カード指定セクション（利用履歴インポート時のみ表示） -->
+                <Border BorderBrush="#E0E0E0"
+                        BorderThickness="1"
+                        CornerRadius="4"
+                        Padding="10"
+                        Margin="0,0,0,10"
+                        Background="#FAFAFA"
+                        Visibility="{Binding IsLedgerImportSelected, Converter={StaticResource BoolToVisibilityConverter}}">
+                    <StackPanel>
+                        <TextBlock Text="インポート先カード"
+                                   FontWeight="Bold"
+                                   FontSize="{DynamicResource BaseFontSize}"
+                                   Margin="0,0,0,5"/>
+                        <TextBlock Text="CSVにカードIDmが含まれない場合、ここで指定したカードの履歴としてインポートします"
+                                   Foreground="Gray"
+                                   FontSize="{DynamicResource SmallFontSize}"
+                                   TextWrapping="Wrap"
+                                   Margin="0,0,0,10"/>
+
+                        <!-- 方法1: 一覧から選択 -->
+                        <RadioButton Content="登録済みカード一覧から選択"
+                                     IsChecked="{Binding UseCardListSelection}"
+                                     GroupName="CardSelectionMethod"
+                                     Margin="0,0,0,5"
+                                     AutomationProperties.Name="登録済みカード一覧から選択"
+                                     ToolTip="既に登録されているカードの一覧から選択します"/>
+                        <ComboBox ItemsSource="{Binding AvailableCards}"
+                                  SelectedItem="{Binding SelectedTargetCard}"
+                                  IsEnabled="{Binding UseCardListSelection}"
+                                  Padding="8"
+                                  Margin="20,0,0,10"
+                                  HorizontalAlignment="Left"
+                                  Width="350"
+                                  AutomationProperties.Name="インポート先カード選択"
+                                  ToolTip="インポート先のカードを選択します">
+                            <ComboBox.ItemTemplate>
+                                <DataTemplate>
+                                    <StackPanel Orientation="Horizontal">
+                                        <TextBlock Text="{Binding CardType}" FontWeight="SemiBold"/>
+                                        <TextBlock Text=" " />
+                                        <TextBlock Text="{Binding CardNumber}"/>
+                                        <TextBlock Text=" (" Foreground="Gray"/>
+                                        <TextBlock Text="{Binding CardIdm}" Foreground="Gray" FontSize="11"/>
+                                        <TextBlock Text=")" Foreground="Gray"/>
+                                    </StackPanel>
+                                </DataTemplate>
+                            </ComboBox.ItemTemplate>
+                        </ComboBox>
+
+                        <!-- 方法2: カードタッチ -->
+                        <RadioButton Content="カードをタッチして指定"
+                                     IsChecked="{Binding UseCardListSelection, Converter={StaticResource InverseBoolConverter}}"
+                                     IsEnabled="{Binding IsCardReaderAvailable}"
+                                     GroupName="CardSelectionMethod"
+                                     Margin="0,0,0,5"
+                                     AutomationProperties.Name="カードをタッチして指定"
+                                     ToolTip="ICカードをリーダーにタッチしてカードを指定します">
+                            <RadioButton.Style>
+                                <Style TargetType="RadioButton">
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding IsCardReaderAvailable}" Value="False">
+                                            <Setter Property="Foreground" Value="Gray"/>
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </RadioButton.Style>
+                        </RadioButton>
+                        <StackPanel Orientation="Horizontal" Margin="20,0,0,5">
+                            <Button Content="カードをタッチ"
+                                    Command="{Binding StartCardTouchCommand}"
+                                    Padding="10,5"
+                                    Background="#2196F3"
+                                    Foreground="White"
+                                    AutomationProperties.Name="カードタッチ開始"
+                                    ToolTip="カードリーダーでカードを読み取ります">
+                                <Button.Style>
+                                    <Style TargetType="Button">
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding UseCardListSelection}" Value="True">
+                                                <Setter Property="IsEnabled" Value="False"/>
+                                            </DataTrigger>
+                                            <DataTrigger Binding="{Binding IsCardReaderAvailable}" Value="False">
+                                                <Setter Property="IsEnabled" Value="False"/>
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </Button.Style>
+                            </Button>
+                            <Button Content="キャンセル"
+                                    Command="{Binding CancelCardTouchCommand}"
+                                    Padding="10,5"
+                                    Margin="5,0,0,0"
+                                    Visibility="{Binding IsWaitingForCardTouch, Converter={StaticResource BoolToVisibilityConverter}}"
+                                    AutomationProperties.Name="カードタッチキャンセル"/>
+                            <TextBlock Text="{Binding TouchedCardInfo}"
+                                       VerticalAlignment="Center"
+                                       Margin="10,0,0,0"
+                                       FontSize="{DynamicResource BaseFontSize}">
+                                <TextBlock.Style>
+                                    <Style TargetType="TextBlock">
+                                        <Setter Property="Foreground" Value="#1565C0"/>
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding TouchedCardInfo}" Value="未登録のカードです">
+                                                <Setter Property="Foreground" Value="#D32F2F"/>
+                                            </DataTrigger>
+                                            <DataTrigger Binding="{Binding TouchedCardInfo}" Value="カードをタッチしてください...">
+                                                <Setter Property="Foreground" Value="Gray"/>
+                                                <Setter Property="FontStyle" Value="Italic"/>
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </TextBlock.Style>
+                            </TextBlock>
+                        </StackPanel>
+
+                        <!-- カードリーダー未接続の場合の注意 -->
+                        <TextBlock Text="※ カードリーダーが接続されていません"
+                                   Foreground="#D32F2F"
+                                   FontSize="{DynamicResource SmallFontSize}"
+                                   Margin="20,5,0,0"
+                                   Visibility="{Binding IsCardReaderAvailable, Converter={StaticResource InverseBoolToVisibilityConverter}, ConverterParameter=invert}"/>
+
+                        <!-- クリアボタン -->
+                        <Button Content="指定をクリア"
+                                Command="{Binding ClearTargetCardCommand}"
+                                Padding="8,4"
+                                Margin="0,10,0,0"
+                                HorizontalAlignment="Left"
+                                FontSize="{DynamicResource SmallFontSize}"
+                                AutomationProperties.Name="カード指定をクリア"
+                                ToolTip="選択したカードの指定を解除します"/>
+                    </StackPanel>
+                </Border>
 
                 <!-- インポートボタン -->
                 <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
