@@ -85,6 +85,7 @@ public partial class DataExportImportViewModel : ViewModelBase
 {
     private readonly CsvExportService _exportService;
     private readonly CsvImportService _importService;
+    private readonly IDialogService _dialogService;
 
     [ObservableProperty]
     private DataType _selectedExportType = DataType.Cards;
@@ -162,10 +163,12 @@ public partial class DataExportImportViewModel : ViewModelBase
 
     public DataExportImportViewModel(
         CsvExportService exportService,
-        CsvImportService importService)
+        CsvImportService importService,
+        IDialogService dialogService)
     {
         _exportService = exportService;
         _importService = importService;
+        _dialogService = dialogService;
     }
 
     partial void OnSelectedExportTypeChanged(DataType value)
@@ -220,10 +223,16 @@ public partial class DataExportImportViewModel : ViewModelBase
                 {
                     LastExportedFile = result.FilePath;
                     StatusMessage = $"エクスポート完了: {result.ExportedCount}件を出力しました";
+
+                    // Issue #512: 保存完了メッセージを表示
+                    _dialogService.ShowInformation(
+                        $"CSVファイルを保存しました。\n\n出力先: {result.FilePath}\n出力件数: {result.ExportedCount}件",
+                        "エクスポート完了");
                 }
                 else
                 {
                     StatusMessage = $"エクスポートエラー: {result.ErrorMessage}";
+                    _dialogService.ShowError($"エクスポートに失敗しました。\n\n{result.ErrorMessage}", "エクスポートエラー");
                 }
             }
             catch (Exception ex)
