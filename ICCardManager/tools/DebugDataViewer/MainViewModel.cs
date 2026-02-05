@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Data;
+using System.IO;
 using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Text;
@@ -12,6 +13,7 @@ using CommunityToolkit.Mvvm.Input;
 using ICCardManager.Data;
 using ICCardManager.Infrastructure.CardReader;
 using ICCardManager.Models;
+using Microsoft.Win32;
 
 namespace DebugDataViewer
 {
@@ -36,7 +38,7 @@ namespace DebugDataViewer
     public partial class MainViewModel : ObservableObject
     {
         private readonly ICardReader _cardReader;
-        private readonly DbContext _dbContext;
+        private DbContext _dbContext;
 
         #region 共通プロパティ
 
@@ -441,6 +443,69 @@ namespace DebugDataViewer
             {
                 DbStatusMessage = $"エラー: {ex.Message}";
                 System.Diagnostics.Debug.WriteLine($"[DebugDataViewer] DB読み込みエラー: {ex}");
+            }
+            finally
+            {
+                IsBusy = false;
+                BusyMessage = string.Empty;
+            }
+        }
+
+        /// <summary>
+        /// データベースファイルを選択（Issue #507）
+        /// </summary>
+        [RelayCommand]
+        private async Task SelectDatabaseAsync()
+        {
+            var dialog = new OpenFileDialog
+            {
+                Title = "データベースファイルを選択",
+                Filter = "SQLiteデータベース (*.db)|*.db|すべてのファイル (*.*)|*.*",
+                DefaultExt = ".db",
+                CheckFileExists = true
+            };
+
+            // 現在のDBファイルのディレクトリを初期ディレクトリに設定
+            if (!string.IsNullOrEmpty(DatabasePath) && File.Exists(DatabasePath))
+            {
+                dialog.InitialDirectory = Path.GetDirectoryName(DatabasePath);
+            }
+
+            if (dialog.ShowDialog() == true)
+            {
+                await ChangeDatabaseAsync(dialog.FileName);
+            }
+        }
+
+        /// <summary>
+        /// データベースを変更する（Issue #507）
+        /// </summary>
+        /// <param name="newDatabasePath">新しいデータベースファイルのパス</param>
+        private async Task ChangeDatabaseAsync(string newDatabasePath)
+        {
+            try
+            {
+                IsBusy = true;
+                BusyMessage = "データベースを切り替え中...";
+
+                // 古いDbContextを破棄
+                _dbContext?.Dispose();
+
+                // 新しいDbContextを作成
+                _dbContext = new DbContext(newDatabasePath);
+
+                // データベースパスを更新
+                DatabasePath = _dbContext.DatabasePath;
+
+                // テーブルデータを再読み込み
+                await LoadTableDataAsync();
+
+                DbStatusMessage = $"データベースを切り替えました: {Path.GetFileName(newDatabasePath)}";
+            }
+            catch (Exception ex)
+            {
+                DbStatusMessage = $"データベース切り替えエラー: {ex.Message}";
+                System.Diagnostics.Debug.WriteLine($"[DebugDataViewer] DB切り替えエラー: {ex}");
             }
             finally
             {

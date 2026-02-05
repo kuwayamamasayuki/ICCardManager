@@ -232,7 +232,14 @@
                        Foreground="Gray"
                        FontSize="11"
                        VerticalAlignment="Center"
-                       Margin="0,0,20,0"/>
+                       Margin="0,0,10,0"/>
+            <Button Content="選択..."
+                    Command="{Binding SelectDatabaseCommand}"
+                    Padding="10,5"
+                    FontSize="11"
+                    VerticalAlignment="Center"
+                    ToolTip="別のデータベースファイルを開く"
+                    Margin="0,0,20,0"/>
             <Button Content="閉じる"
                     Click="CloseButton_Click"
                     Padding="20,10"
