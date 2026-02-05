@@ -53,5 +53,14 @@ namespace ICCardManager.Models
         /// 最終貸出者IDm（FK→staff）
         /// </summary>
         public string LastLentStaff { get; set; }
+
+        /// <summary>
+        /// 開始ページ番号（Issue #510: 年度途中導入対応）
+        /// </summary>
+        /// <remarks>
+        /// 紙の出納簿からの繰越時に、帳票のページ番号をこの値から開始する。
+        /// デフォルトは1。
+        /// </remarks>
+        public int StartingPageNumber { get; set; } = 1;
     }
 }

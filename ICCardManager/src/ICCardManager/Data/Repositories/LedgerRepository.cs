@@ -618,8 +618,10 @@ WHERE card_idm IN ({string.Join(", ", parameters)})";
 
             using var command = connection.CreateCommand();
             // Issue #501: 新規購入レコードの最初の日付を取得
+            // Issue #510: 年度途中導入の繰越レコード（「○月から繰越」）も認識する
             command.CommandText = @"SELECT MIN(date) FROM ledger
-WHERE card_idm = @cardIdm AND summary = '新規購入'";
+WHERE card_idm = @cardIdm
+  AND (summary = '新規購入' OR summary LIKE '%月から繰越')";
 
             command.Parameters.AddWithValue("@cardIdm", cardIdm);
 

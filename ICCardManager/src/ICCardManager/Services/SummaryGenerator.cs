@@ -675,6 +675,36 @@ namespace ICCardManager.Services
         }
 
         /// <summary>
+        /// 年度途中導入時の繰越摘要を生成（Issue #510）
+        /// </summary>
+        /// <param name="carryoverMonth">繰越元の月（1-12）</param>
+        /// <returns>「○月から繰越」形式の摘要文字列</returns>
+        /// <remarks>
+        /// 年度途中から本アプリを導入する場合に使用。
+        /// 例: 5月まで紙の出納簿を使用し、6月からアプリを使う場合は「5月から繰越」を生成。
+        /// </remarks>
+        public static string GetMidYearCarryoverSummary(int carryoverMonth)
+        {
+            return $"{carryoverMonth}月から繰越";
+        }
+
+        /// <summary>
+        /// 摘要が年度途中導入の繰越かどうかを判定（Issue #510）
+        /// </summary>
+        /// <param name="summary">摘要文字列</param>
+        /// <returns>「○月から繰越」形式の場合true</returns>
+        public static bool IsMidYearCarryoverSummary(string? summary)
+        {
+            if (string.IsNullOrEmpty(summary))
+            {
+                return false;
+            }
+            // "1月から繰越" ～ "12月から繰越" のパターンにマッチ
+            return System.Text.RegularExpressions.Regex.IsMatch(
+                summary, @"^(1[0-2]|[1-9])月から繰越$");
+        }
+
+        /// <summary>
         /// 月計の摘要を生成
         /// </summary>
         public static string GetMonthlySummary(int month)

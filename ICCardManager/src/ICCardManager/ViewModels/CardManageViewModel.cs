@@ -72,6 +72,16 @@ namespace ICCardManager.ViewModels
         private int? _preReadBalance;
 
         /// <summary>
+        /// カード登録モードの選択結果（Issue #510対応）
+        /// </summary>
+        /// <remarks>
+        /// null: 未選択（新規購入として扱う）
+        /// IsNewPurchase=true: 新規購入
+        /// IsNewPurchase=false: 紙の出納簿からの繰越
+        /// </remarks>
+        private Views.Dialogs.CardRegistrationModeResult? _registrationModeResult;
+
+        /// <summary>
         /// カード種別の選択肢
         /// </summary>
         public ObservableCollection<string> CardTypes { get; } = new()
@@ -376,12 +386,24 @@ namespace ICCardManager.ViewModels
                         }
                     }
 
+                    // Issue #510: 登録モード選択ダイアログを表示
+                    var modeResult = ShowRegistrationModeDialog();
+                    if (modeResult == null)
+                    {
+                        // キャンセルされた場合
+                        StatusMessage = "登録がキャンセルされました";
+                        IsStatusError = false;
+                        return;
+                    }
+                    _registrationModeResult = modeResult;
+
                     var card = new IcCard
                     {
                         CardIdm = EditCardIdm,
                         CardType = EditCardType,
                         CardNumber = sanitizedCardNumber,
-                        Note = string.IsNullOrWhiteSpace(sanitizedNote) ? null : sanitizedNote
+                        Note = string.IsNullOrWhiteSpace(sanitizedNote) ? null : sanitizedNote,
+                        StartingPageNumber = modeResult.StartingPageNumber
                     };
 
                     var success = await _cardRepository.InsertAsync(card);
@@ -390,8 +412,9 @@ namespace ICCardManager.ViewModels
                         // 操作ログを記録
                         await _operationLogger.LogCardInsertAsync(null, card);
 
-                        // カード残額を読み取り、「新規購入」レコードを作成
-                        await CreateNewPurchaseLedgerAsync(EditCardIdm);
+                        // カード残額を読み取り、初期レコードを作成
+                        // Issue #510: 登録モードに応じて「新規購入」または「○月から繰越」レコードを作成
+                        await CreateInitialLedgerAsync(EditCardIdm, modeResult);
 
                         StatusMessage = "登録しました";
                         IsStatusError = false;
@@ -403,6 +426,7 @@ namespace ICCardManager.ViewModels
                         StatusMessage = "登録に失敗しました";
                         IsStatusError = true;
                     }
+                    _registrationModeResult = null;
                 }
                 else
                 {
@@ -772,10 +796,20 @@ namespace ICCardManager.ViewModels
 #endif
 
         /// <summary>
-        /// 新規購入レコードを作成
+        /// カード登録モード選択ダイアログを表示（Issue #510）
+        /// </summary>
+        /// <returns>選択結果。キャンセル時はnull</returns>
+        private Views.Dialogs.CardRegistrationModeResult? ShowRegistrationModeDialog()
+        {
+            return _dialogService.ShowCardRegistrationModeDialog();
+        }
+
+        /// <summary>
+        /// 初期レコード（新規購入または繰越）を作成（Issue #510）
         /// </summary>
         /// <param name="cardIdm">カードのIDm</param>
-        private async Task CreateNewPurchaseLedgerAsync(string cardIdm)
+        /// <param name="modeResult">登録モードの選択結果</param>
+        private async Task CreateInitialLedgerAsync(string cardIdm, Views.Dialogs.CardRegistrationModeResult modeResult)
         {
             try
             {
@@ -794,12 +828,25 @@ namespace ICCardManager.ViewModels
                 if (balance.HasValue)
                 {
                     var now = DateTime.Now;
+
+                    // Issue #510: 登録モードに応じて摘要を決定
+                    string summary;
+                    if (modeResult.IsNewPurchase)
+                    {
+                        summary = "新規購入";
+                    }
+                    else
+                    {
+                        // 繰越モード: 「○月から繰越」
+                        summary = SummaryGenerator.GetMidYearCarryoverSummary(modeResult.CarryoverMonth!.Value);
+                    }
+
                     var ledger = new Ledger
                     {
                         CardIdm = cardIdm,
-                        LenderIdm = null,  // 新規購入時は貸出者なし
+                        LenderIdm = null,  // 新規購入/繰越時は貸出者なし
                         Date = now,
-                        Summary = "新規購入",
+                        Summary = summary,
                         Income = balance.Value,  // 受入金額 = カード残額
                         Expense = 0,
                         Balance = balance.Value,
@@ -813,13 +860,13 @@ namespace ICCardManager.ViewModels
 
                     await _ledgerRepository.InsertAsync(ledger);
                 }
-                // 残額が取得できなかった場合は、新規購入レコードは作成しない
+                // 残額が取得できなかった場合は、初期レコードは作成しない
                 // （カードがタッチされていない、または読み取りエラー）
             }
             catch (Exception)
             {
                 // 残額読み取りエラーの場合は、カード登録自体は成功させる
-                // 新規購入レコードは後から手動で追加可能
+                // 初期レコードは後から手動で追加可能
             }
             finally
             {

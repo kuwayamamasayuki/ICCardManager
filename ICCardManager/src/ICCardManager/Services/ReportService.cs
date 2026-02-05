@@ -301,8 +301,11 @@ namespace ICCardManager.Services
                     // シートを月順に並び替え
                     ReorderWorksheetsByMonth(workbook);
 
-                    // ヘッダ情報を設定
-                    SetHeaderInfo(worksheet, card);
+                    // Issue #510: ページ番号の初期値を取得
+                    var currentPageNumber = card.StartingPageNumber;
+
+                    // ヘッダ情報を設定（Issue #510: ページ番号も設定）
+                    SetHeaderInfo(worksheet, card, currentPageNumber);
 
                     // Issue #457: ページ設定（印刷時に1-4行目をヘッダーとして各ページに繰り返す）
                     ConfigurePageSetup(worksheet);
@@ -322,7 +325,7 @@ namespace ICCardManager.Services
                         if (carryover.HasValue)
                         {
                             // Issue #457: 改ページチェック
-                            (currentRow, rowsOnCurrentPage) = CheckAndInsertPageBreak(worksheet, currentRow, rowsOnCurrentPage, RowsPerPage);
+                            (currentRow, rowsOnCurrentPage, currentPageNumber) = CheckAndInsertPageBreak(worksheet, currentRow, rowsOnCurrentPage, RowsPerPage, currentPageNumber);
                             currentRow = WriteFiscalYearCarryoverRow(worksheet, currentRow, carryover.Value, year);
                             rowsOnCurrentPage++;
                         }
@@ -335,7 +338,7 @@ namespace ICCardManager.Services
                         if (previousMonthBalance.HasValue)
                         {
                             // Issue #457: 改ページチェック
-                            (currentRow, rowsOnCurrentPage) = CheckAndInsertPageBreak(worksheet, currentRow, rowsOnCurrentPage, RowsPerPage);
+                            (currentRow, rowsOnCurrentPage, currentPageNumber) = CheckAndInsertPageBreak(worksheet, currentRow, rowsOnCurrentPage, RowsPerPage, currentPageNumber);
                             currentRow = WriteMonthlyCarryoverRow(worksheet, currentRow, previousMonthBalance.Value, year, month);
                             rowsOnCurrentPage++;
                         }
@@ -345,7 +348,7 @@ namespace ICCardManager.Services
                     foreach (var ledger in ledgers)
                     {
                         // Issue #457: 改ページチェック
-                        (currentRow, rowsOnCurrentPage) = CheckAndInsertPageBreak(worksheet, currentRow, rowsOnCurrentPage, RowsPerPage);
+                        (currentRow, rowsOnCurrentPage, currentPageNumber) = CheckAndInsertPageBreak(worksheet, currentRow, rowsOnCurrentPage, RowsPerPage, currentPageNumber);
                         currentRow = WriteDataRow(worksheet, currentRow, ledger);
                         rowsOnCurrentPage++;
                     }
@@ -356,7 +359,7 @@ namespace ICCardManager.Services
                     var monthEndBalance = ledgers.LastOrDefault()?.Balance ?? 0;
 
                     // Issue #457: 改ページチェック
-                    (currentRow, rowsOnCurrentPage) = CheckAndInsertPageBreak(worksheet, currentRow, rowsOnCurrentPage, RowsPerPage);
+                    (currentRow, rowsOnCurrentPage, currentPageNumber) = CheckAndInsertPageBreak(worksheet, currentRow, rowsOnCurrentPage, RowsPerPage, currentPageNumber);
                     // 月計行（残額欄は空欄、0も表示）
                     currentRow = WriteMonthlyTotalRow(worksheet, currentRow, month, monthlyIncome, monthlyExpense);
                     rowsOnCurrentPage++;
@@ -378,7 +381,7 @@ namespace ICCardManager.Services
                     var currentBalance = yearlyLedgers.LastOrDefault()?.Balance ?? monthEndBalance;
 
                     // Issue #457: 改ページチェック
-                    (currentRow, rowsOnCurrentPage) = CheckAndInsertPageBreak(worksheet, currentRow, rowsOnCurrentPage, RowsPerPage);
+                    (currentRow, rowsOnCurrentPage, currentPageNumber) = CheckAndInsertPageBreak(worksheet, currentRow, rowsOnCurrentPage, RowsPerPage, currentPageNumber);
                     currentRow = WriteCumulativeRow(worksheet, currentRow, yearlyIncome, yearlyExpense, currentBalance);
                     rowsOnCurrentPage++;
 
@@ -386,7 +389,7 @@ namespace ICCardManager.Services
                     if (month == 3)
                     {
                         // Issue #457: 改ページチェック
-                        (currentRow, rowsOnCurrentPage) = CheckAndInsertPageBreak(worksheet, currentRow, rowsOnCurrentPage, RowsPerPage);
+                        (currentRow, rowsOnCurrentPage, currentPageNumber) = CheckAndInsertPageBreak(worksheet, currentRow, rowsOnCurrentPage, RowsPerPage, currentPageNumber);
                         WriteCarryoverToNextYearRow(worksheet, currentRow, currentBalance);
                         currentRow++;
                         rowsOnCurrentPage++;
@@ -618,16 +621,42 @@ namespace ICCardManager.Services
         /// <summary>
         /// ヘッダ情報を設定
         /// </summary>
-        private void SetHeaderInfo(IXLWorksheet worksheet, IcCard card)
+        /// <param name="worksheet">ワークシート</param>
+        /// <param name="card">カード情報</param>
+        /// <param name="pageNumber">ページ番号（省略時は設定しない）</param>
+        /// <param name="headerStartRow">ヘッダーの開始行（デフォルトは1）</param>
+        private void SetHeaderInfo(IXLWorksheet worksheet, IcCard card, int? pageNumber = null, int headerStartRow = 1)
         {
-            // 2行目のヘッダ情報を設定（新テンプレートのセル位置に合わせる）
-            worksheet.Cell("B2").Value = "雑品（金券類）";   // 物品の分類の値（固定）
-            worksheet.Cell("E2").Value = card.CardType;      // 品名の値
-            worksheet.Cell("H2").Value = card.CardNumber;    // 規格の値
-            worksheet.Cell("J2").Value = "円";               // 単位の値（固定）
+            // ヘッダ情報を設定（指定された開始行からの相対位置）
+            var row2 = headerStartRow + 1;  // 2行目（テンプレートでは2行目にヘッダー情報）
+            worksheet.Cell(row2, 2).Value = "雑品（金券類）";   // B列: 物品の分類の値（固定）
+            worksheet.Cell(row2, 5).Value = card.CardType;      // E列: 品名の値
+            worksheet.Cell(row2, 8).Value = card.CardNumber;    // H列: 規格の値
+            worksheet.Cell(row2, 10).Value = "円";              // J列: 単位の値（固定）
 
-            // ヘッダ行のフォントサイズを調整して1行に収める
-            AdjustHeaderRowFontSize(worksheet);
+            // Issue #510: ページ番号を設定
+            if (pageNumber.HasValue)
+            {
+                worksheet.Cell(row2, 12).Value = pageNumber.Value;  // L列: 頁の値
+            }
+
+            // ヘッダ行のフォントサイズを調整して1行に収める（1ページ目のみ）
+            if (headerStartRow == 1)
+            {
+                AdjustHeaderRowFontSize(worksheet);
+            }
+        }
+
+        /// <summary>
+        /// ページ番号を設定（Issue #510）
+        /// </summary>
+        /// <param name="worksheet">ワークシート</param>
+        /// <param name="headerStartRow">ヘッダーの開始行</param>
+        /// <param name="pageNumber">ページ番号</param>
+        private static void SetPageNumber(IXLWorksheet worksheet, int headerStartRow, int pageNumber)
+        {
+            var row2 = headerStartRow + 1;  // ヘッダー情報は開始行+1
+            worksheet.Cell(row2, 12).Value = pageNumber;  // L列: 頁の値
         }
 
         /// <summary>
@@ -956,12 +985,14 @@ namespace ICCardManager.Services
 
         /// <summary>
         /// Issue #457: 改ページが必要かチェックし、必要なら挿入する
+        /// Issue #510: ページ番号のトラッキングを追加
         /// </summary>
         /// <param name="worksheet">ワークシート</param>
         /// <param name="currentRow">現在の行番号</param>
         /// <param name="rowsOnCurrentPage">現在のページに書かれた行数</param>
         /// <param name="rowsPerPage">1ページあたりの最大行数</param>
-        /// <returns>更新された（currentRow, rowsOnCurrentPage）のタプル</returns>
+        /// <param name="currentPageNumber">現在のページ番号（省略時はページ番号を設定しない）</param>
+        /// <returns>更新された（currentRow, rowsOnCurrentPage, newPageNumber）のタプル</returns>
         /// <remarks>
         /// テンプレート構造（1ページ = 22行）:
         /// - 1-4行: ヘッダー（4行）
@@ -972,8 +1003,8 @@ namespace ICCardManager.Services
         /// - 新しいページ（23行目～）にヘッダーと備考欄をコピー
         /// - データは新しいページのデータエリア（ヘッダーの後）に書き込む
         /// </remarks>
-        private static (int currentRow, int rowsOnCurrentPage) CheckAndInsertPageBreak(
-            IXLWorksheet worksheet, int currentRow, int rowsOnCurrentPage, int rowsPerPage)
+        private static (int currentRow, int rowsOnCurrentPage, int pageNumber) CheckAndInsertPageBreak(
+            IXLWorksheet worksheet, int currentRow, int rowsOnCurrentPage, int rowsPerPage, int currentPageNumber)
         {
             const int HeaderRows = 4;   // ヘッダーの行数（1-4行目）
             const int NotesRows = 6;    // 備考欄の行数（17-22行目）
@@ -998,12 +1029,16 @@ namespace ICCardManager.Services
                 // 前のページの最終行（備考欄の最終行）の直後に改ページを入れるため、newPageStartRowを指定
                 worksheet.PageSetup.AddHorizontalPageBreak(newPageStartRow - 1);
 
+                // Issue #510: 新しいページにページ番号を設定
+                var newPageNumber = currentPageNumber + 1;
+                SetPageNumber(worksheet, newPageStartRow, newPageNumber);
+
                 // データの開始行（ヘッダーの後）
                 var newDataStartRow = newPageStartRow + HeaderRows;
 
-                return (newDataStartRow, 0);
+                return (newDataStartRow, 0, newPageNumber);
             }
-            return (currentRow, rowsOnCurrentPage);
+            return (currentRow, rowsOnCurrentPage, currentPageNumber);
         }
 
         /// <summary>

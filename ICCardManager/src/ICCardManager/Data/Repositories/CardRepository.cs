@@ -42,7 +42,7 @@ namespace ICCardManager.Data.Repositories
 
             using var command = connection.CreateCommand();
             command.CommandText = @"SELECT card_idm, card_type, card_number, note, is_deleted, deleted_at,
-       is_lent, last_lent_at, last_lent_staff
+       is_lent, last_lent_at, last_lent_staff, starting_page_number
 FROM ic_card
 WHERE is_deleted = 0
 ORDER BY card_type, card_number";
@@ -64,7 +64,7 @@ ORDER BY card_type, card_number";
 
             using var command = connection.CreateCommand();
             command.CommandText = @"SELECT card_idm, card_type, card_number, note, is_deleted, deleted_at,
-       is_lent, last_lent_at, last_lent_staff
+       is_lent, last_lent_at, last_lent_staff, starting_page_number
 FROM ic_card
 ORDER BY card_type, card_number";
 
@@ -96,7 +96,7 @@ ORDER BY card_type, card_number";
 
             using var command = connection.CreateCommand();
             command.CommandText = @"SELECT card_idm, card_type, card_number, note, is_deleted, deleted_at,
-       is_lent, last_lent_at, last_lent_staff
+       is_lent, last_lent_at, last_lent_staff, starting_page_number
 FROM ic_card
 WHERE is_deleted = 0 AND is_lent = 0
 ORDER BY card_type, card_number";
@@ -129,7 +129,7 @@ ORDER BY card_type, card_number";
 
             using var command = connection.CreateCommand();
             command.CommandText = @"SELECT card_idm, card_type, card_number, note, is_deleted, deleted_at,
-       is_lent, last_lent_at, last_lent_staff
+       is_lent, last_lent_at, last_lent_staff, starting_page_number
 FROM ic_card
 WHERE is_deleted = 0 AND is_lent = 1
 ORDER BY last_lent_at DESC";
@@ -151,11 +151,11 @@ ORDER BY last_lent_at DESC";
             using var command = connection.CreateCommand();
             command.CommandText = includeDeleted
                 ? @"SELECT card_idm, card_type, card_number, note, is_deleted, deleted_at,
-       is_lent, last_lent_at, last_lent_staff
+       is_lent, last_lent_at, last_lent_staff, starting_page_number
 FROM ic_card
 WHERE card_idm = @cardIdm"
                 : @"SELECT card_idm, card_type, card_number, note, is_deleted, deleted_at,
-       is_lent, last_lent_at, last_lent_staff
+       is_lent, last_lent_at, last_lent_staff, starting_page_number
 FROM ic_card
 WHERE card_idm = @cardIdm AND is_deleted = 0";
 
@@ -192,13 +192,14 @@ WHERE card_idm = @cardIdm AND is_deleted = 0";
             using var command = connection.CreateCommand();
             command.Transaction = transaction;
             command.CommandText = @"INSERT INTO ic_card (card_idm, card_type, card_number, note, is_deleted, deleted_at,
-                     is_lent, last_lent_at, last_lent_staff)
-VALUES (@cardIdm, @cardType, @cardNumber, @note, 0, NULL, 0, NULL, NULL)";
+                     is_lent, last_lent_at, last_lent_staff, starting_page_number)
+VALUES (@cardIdm, @cardType, @cardNumber, @note, 0, NULL, 0, NULL, NULL, @startingPageNumber)";
 
             command.Parameters.AddWithValue("@cardIdm", card.CardIdm);
             command.Parameters.AddWithValue("@cardType", card.CardType);
             command.Parameters.AddWithValue("@cardNumber", card.CardNumber);
             command.Parameters.AddWithValue("@note", (object)card.Note ?? DBNull.Value);
+            command.Parameters.AddWithValue("@startingPageNumber", card.StartingPageNumber);
 
             try
             {
@@ -238,13 +239,14 @@ VALUES (@cardIdm, @cardType, @cardNumber, @note, 0, NULL, 0, NULL, NULL)";
             using var command = connection.CreateCommand();
             command.Transaction = transaction;
             command.CommandText = @"UPDATE ic_card
-SET card_type = @cardType, card_number = @cardNumber, note = @note
+SET card_type = @cardType, card_number = @cardNumber, note = @note, starting_page_number = @startingPageNumber
 WHERE card_idm = @cardIdm AND is_deleted = 0";
 
             command.Parameters.AddWithValue("@cardIdm", card.CardIdm);
             command.Parameters.AddWithValue("@cardType", card.CardType);
             command.Parameters.AddWithValue("@cardNumber", card.CardNumber);
             command.Parameters.AddWithValue("@note", (object)card.Note ?? DBNull.Value);
+            command.Parameters.AddWithValue("@startingPageNumber", card.StartingPageNumber);
 
             var result = await command.ExecuteNonQueryAsync();
             if (result > 0 && transaction == null)
@@ -396,7 +398,8 @@ WHERE card_type = @cardType";
                 DeletedAt = reader.IsDBNull(5) ? null : DateTime.Parse(reader.GetString(5)),
                 IsLent = reader.GetInt32(6) == 1,
                 LastLentAt = reader.IsDBNull(7) ? null : DateTime.Parse(reader.GetString(7)),
-                LastLentStaff = reader.IsDBNull(8) ? null : reader.GetString(8)
+                LastLentStaff = reader.IsDBNull(8) ? null : reader.GetString(8),
+                StartingPageNumber = reader.IsDBNull(9) ? 1 : reader.GetInt32(9)
             };
         }
     }

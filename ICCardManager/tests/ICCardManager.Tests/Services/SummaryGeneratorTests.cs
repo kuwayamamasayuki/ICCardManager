@@ -316,4 +316,43 @@ public class SummaryGeneratorTests
         // Assert
         result.Should().Be("累計");
     }
+
+    #region Issue #510: 年度途中導入対応
+
+    [Theory]
+    [InlineData(1, "1月から繰越")]
+    [InlineData(4, "4月から繰越")]
+    [InlineData(5, "5月から繰越")]
+    [InlineData(12, "12月から繰越")]
+    public void GetMidYearCarryoverSummary_ReturnsCorrectFormat(int month, string expected)
+    {
+        // Act
+        var result = SummaryGenerator.GetMidYearCarryoverSummary(month);
+
+        // Assert
+        result.Should().Be(expected);
+    }
+
+    [Theory]
+    [InlineData("1月から繰越", true)]
+    [InlineData("5月から繰越", true)]
+    [InlineData("12月から繰越", true)]
+    [InlineData("10月から繰越", true)]
+    [InlineData("新規購入", false)]
+    [InlineData("前年度より繰越", false)]
+    [InlineData("5月より繰越", false)]  // 「より」ではなく「から」
+    [InlineData("13月から繰越", false)]  // 無効な月
+    [InlineData("0月から繰越", false)]   // 無効な月
+    [InlineData("", false)]
+    [InlineData(null, false)]
+    public void IsMidYearCarryoverSummary_CorrectlyIdentifiesPattern(string? summary, bool expected)
+    {
+        // Act
+        var result = SummaryGenerator.IsMidYearCarryoverSummary(summary);
+
+        // Assert
+        result.Should().Be(expected);
+    }
+
+    #endregion
 }

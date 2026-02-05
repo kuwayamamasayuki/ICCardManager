@@ -31,7 +31,8 @@ namespace ICCardManager.Dtos
                 IsLent = card.IsLent,
                 LastLentStaff = card.LastLentStaff,
                 LentStaffName = staffName,
-                LentAt = card.LastLentAt
+                LentAt = card.LastLentAt,
+                StartingPageNumber = card.StartingPageNumber
             };
         }
 
@@ -175,7 +176,8 @@ namespace ICCardManager.Dtos
                 Note = dto.Note,
                 IsLent = dto.IsLent,
                 LastLentStaff = dto.LastLentStaff,
-                LastLentAt = dto.LentAt
+                LastLentAt = dto.LentAt,
+                StartingPageNumber = dto.StartingPageNumber
             };
         }
 
