@@ -46,6 +46,10 @@ PrivilegesRequired=admin
 UninstallDisplayIcon={app}\app.ico
 UninstallDisplayName={#MyAppName}
 
+; Issue #506: アンインストーラーのファイル名をわかりやすく
+; デフォルトの unins000.exe を Uninstall_ICCardManager.exe にリネーム
+; 注: 実際のリネームは [Code] セクションの CurStepChanged で実行
+
 [Languages]
 Name: "japanese"; MessagesFile: "compiler:Languages\Japanese.isl"
 Name: "english"; MessagesFile: "compiler:Default.isl"
@@ -97,7 +101,8 @@ Source: "..\publish\Tools\x64\*"; DestDir: "{app}\Tools\x64"; Flags: ignoreversi
 Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\app.ico"
 Name: "{group}\ドキュメント"; Filename: "{app}\Docs"
 Name: "{group}\デバッグツール"; Filename: "{app}\Tools\DebugDataViewer.exe"
-Name: "{group}\{cm:UninstallProgram,{#MyAppName}}"; Filename: "{uninstallexe}"
+; Issue #506: リネーム後のアンインストーラーを参照
+Name: "{group}\{cm:UninstallProgram,{#MyAppName}}"; Filename: "{app}\Uninstall_ICCardManager.exe"
 Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\app.ico"; Tasks: desktopicon
 
 [Registry]
@@ -110,6 +115,56 @@ Root: HKLM; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: 
 Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChange(MyAppName, '&', '&&')}}"; Flags: nowait postinstall skipifsilent
 
 [Code]
+// Issue #506: アンインストーラーのファイル名を変更
+// unins000.exe/dat → Uninstall_ICCardManager.exe/dat
+const
+  NewUninstallName = 'Uninstall_ICCardManager';
+
+procedure RenameUninstaller();
+var
+  AppDir: string;
+  OldExe, NewExe: string;
+  OldDat, NewDat: string;
+  UninstallKey: string;
+begin
+  AppDir := ExpandConstant('{app}');
+  OldExe := AppDir + '\unins000.exe';
+  NewExe := AppDir + '\' + NewUninstallName + '.exe';
+  OldDat := AppDir + '\unins000.dat';
+  NewDat := AppDir + '\' + NewUninstallName + '.dat';
+
+  // ファイルが存在する場合のみリネーム
+  if FileExists(OldExe) then
+  begin
+    // 既存のリネーム先があれば削除
+    if FileExists(NewExe) then
+      DeleteFile(NewExe);
+    if FileExists(NewDat) then
+      DeleteFile(NewDat);
+
+    // リネーム実行
+    RenameFile(OldExe, NewExe);
+    if FileExists(OldDat) then
+      RenameFile(OldDat, NewDat);
+
+    // レジストリのUninstallStringを更新
+    UninstallKey := 'Software\Microsoft\Windows\CurrentVersion\Uninstall\{#SetupSetting("AppId")}_is1';
+    if RegKeyExists(HKLM, UninstallKey) then
+    begin
+      RegWriteStringValue(HKLM, UninstallKey, 'UninstallString', '"' + NewExe + '"');
+      RegWriteStringValue(HKLM, UninstallKey, 'QuietUninstallString', '"' + NewExe + '" /SILENT');
+    end;
+  end;
+end;
+
+procedure CurStepChanged(CurStep: TSetupStep);
+begin
+  if CurStep = ssPostInstall then
+  begin
+    RenameUninstaller();
+  end;
+end;
+
 // アンインストール時にユーザーデータを削除するか確認
 // TaskDialogMsgBoxを使用した3択ダイアログ
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
