@@ -28,8 +28,27 @@ namespace ICCardManager.Data.Migrations
 
             // ic_cardテーブルに (is_lent, is_deleted) の複合インデックスを追加
             // GetLentAsync() で貸出中カードを高速に取得するため
-            ExecuteNonQuery(connection, transaction,
-                "CREATE INDEX IF NOT EXISTS idx_card_lent_deleted ON ic_card(is_lent, is_deleted)");
+            // Note: レガシーDBではis_lentカラムが存在しない可能性があるためチェック
+            if (ColumnExists(connection, "ic_card", "is_lent"))
+            {
+                ExecuteNonQuery(connection, transaction,
+                    "CREATE INDEX IF NOT EXISTS idx_card_lent_deleted ON ic_card(is_lent, is_deleted)");
+            }
+        }
+
+        private static bool ColumnExists(SQLiteConnection connection, string tableName, string columnName)
+        {
+            using var command = connection.CreateCommand();
+            command.CommandText = $"PRAGMA table_info({tableName})";
+            using var reader = command.ExecuteReader();
+            while (reader.Read())
+            {
+                if (reader.GetString(1).Equals(columnName, StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+            }
+            return false;
         }
 
         public void Down(SQLiteConnection connection, SQLiteTransaction transaction)

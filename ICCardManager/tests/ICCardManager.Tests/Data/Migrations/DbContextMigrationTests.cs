@@ -149,8 +149,8 @@ CREATE TABLE settings (
         var count = Convert.ToInt32(cmd.ExecuteScalar());
 
         // 現在のマイグレーション数と一致するはず（重複していないこと）
-        // Migration_001_Initial + Migration_002_AddPointRedemption + Migration_003_AddTripGroupId = 3
-        count.Should().Be(3);
+        // Migration_001 + Migration_002 + Migration_003 + Migration_004 = 4
+        count.Should().Be(4);
     }
 
     [Fact]
