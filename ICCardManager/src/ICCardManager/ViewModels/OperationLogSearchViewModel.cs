@@ -71,6 +71,7 @@ public class OperationLogDisplayItem
 public partial class OperationLogSearchViewModel : ViewModelBase
 {
     private readonly IOperationLogRepository _operationLogRepository;
+    private readonly IDialogService _dialogService;
 
     // 検索条件
     [ObservableProperty]
@@ -158,9 +159,12 @@ public partial class OperationLogSearchViewModel : ViewModelBase
         ? $"{TotalCount}件中 {(CurrentPage - 1) * PageSize + 1}～{Math.Min(CurrentPage * PageSize, TotalCount)}件を表示"
         : "0件";
 
-    public OperationLogSearchViewModel(IOperationLogRepository operationLogRepository)
+    public OperationLogSearchViewModel(
+        IOperationLogRepository operationLogRepository,
+        IDialogService dialogService)
     {
         _operationLogRepository = operationLogRepository;
+        _dialogService = dialogService;
 
         // デフォルトは今月
         var today = DateTime.Today;
@@ -346,10 +350,16 @@ public partial class OperationLogSearchViewModel : ViewModelBase
 
                 LastExportedFile = dialog.FileName;
                 StatusMessage = $"エクスポート完了: {logs.Count()}件を出力しました";
+
+                // Issue #512: 保存完了メッセージを表示
+                _dialogService.ShowInformation(
+                    $"CSVファイルを保存しました。\n\n出力先: {dialog.FileName}\n出力件数: {logs.Count()}件",
+                    "エクスポート完了");
             }
             catch (Exception ex)
             {
                 StatusMessage = $"エクスポートエラー: {ex.Message}";
+                _dialogService.ShowError($"エクスポートに失敗しました。\n\n{ex.Message}", "エクスポートエラー");
             }
         }
     }
