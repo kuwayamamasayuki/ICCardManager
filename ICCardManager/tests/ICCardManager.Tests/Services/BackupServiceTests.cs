@@ -429,6 +429,50 @@ public class BackupServiceTests : IDisposable
         restoredContent.Should().BeEquivalentTo(backupContent);
     }
 
+    /// <summary>
+    /// Issue #508: DB接続が開いている状態でもリストアできることを確認
+    /// </summary>
+    /// <remarks>
+    /// 本番環境ではDbContextがシングルトンで接続が開いたままになる。
+    /// RestoreFromBackupはCloseConnection()を呼んでファイルロックを解放する。
+    /// </remarks>
+    [Fact]
+    public async Task RestoreFromBackup_WithOpenConnection_ClosesConnectionAndRestoresSuccessfully()
+    {
+        // Arrange - バックアップを作成
+        await _service.ExecuteAutoBackupAsync();
+        var backupFiles = Directory.GetFiles(_backupDirectory, "backup_*.db");
+        var latestBackup = backupFiles[0];
+        var backupSize = new FileInfo(latestBackup).Length;
+
+        // リストア先として別のDBファイルを使用
+        var restoreTargetPath = Path.Combine(_testDirectory, "restore_open_connection.db");
+
+        // 本番環境のシミュレーション: DbContextを作成し、接続を開いたまま保持
+        var restoreDbContext = new DbContext(restoreTargetPath);
+        restoreDbContext.InitializeDatabase(); // これにより接続が開かれる
+        var connection = restoreDbContext.GetConnection(); // 接続を取得して開いた状態を確認
+
+        var restoreService = new BackupService(
+            restoreDbContext,
+            _settingsRepositoryMock.Object,
+            NullLogger<BackupService>.Instance);
+
+        // Act - 接続が開いている状態でリストア（Issue #508の修正により成功するはず）
+        var result = restoreService.RestoreFromBackup(latestBackup);
+
+        // Assert
+        result.Should().BeTrue("接続を閉じてからリストアするため成功するはず");
+        File.Exists(restoreTargetPath).Should().BeTrue();
+        new FileInfo(restoreTargetPath).Length.Should().Be(backupSize);
+
+        // 接続を再度取得できることを確認（GetConnectionで自動再接続される）
+        var newConnection = restoreDbContext.GetConnection();
+        newConnection.State.Should().Be(System.Data.ConnectionState.Open);
+
+        restoreDbContext.Dispose();
+    }
+
     #endregion
 
     #region GetBackupFilesAsync テスト

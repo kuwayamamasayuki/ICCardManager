@@ -206,6 +206,11 @@ namespace ICCardManager.Services
                     return false;
                 }
 
+                // Issue #508: DBファイルを置き換える前に接続を閉じる
+                // SQLite接続が開いているとファイルがロックされ、置き換えに失敗する
+                _dbContext.CloseConnection();
+                _logger.LogDebug("リストア準備: DB接続を閉じました");
+
                 // 現在のDBを退避
                 if (File.Exists(targetPath))
                 {
