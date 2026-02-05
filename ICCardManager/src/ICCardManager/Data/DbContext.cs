@@ -122,6 +122,27 @@ namespace ICCardManager.Data
         }
 
         /// <summary>
+        /// データベース接続を一時的に閉じる（Issue #508: リストア用）
+        /// </summary>
+        /// <remarks>
+        /// リストア処理でDBファイルを置き換える前に呼び出す。
+        /// 接続を閉じることでファイルロックを解放する。
+        /// その後GetConnection()を呼ぶと自動的に再接続される。
+        /// </remarks>
+        public void CloseConnection()
+        {
+            if (_connection != null)
+            {
+                _connection.Close();
+                _connection.Dispose();
+                _connection = null;
+#if DEBUG
+                System.Diagnostics.Debug.WriteLine("[DbContext] 接続を閉じました（リストア準備）");
+#endif
+            }
+        }
+
+        /// <summary>
         /// データベースを初期化（マイグレーションを実行）
         /// </summary>
         public void InitializeDatabase()
