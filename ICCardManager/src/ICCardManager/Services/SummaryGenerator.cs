@@ -77,6 +77,48 @@ namespace ICCardManager.Services
     public class SummaryGenerator
     {
         /// <summary>
+        /// 乗り継ぎ駅として同一視するグループ
+        /// </summary>
+        /// <remarks>
+        /// 異なる事業者間で駅名が異なるが、物理的に近接する駅のグループ。
+        /// 同一グループ内の駅間の移動は乗り継ぎとして判定される。
+        /// </remarks>
+        private static readonly List<HashSet<string>> TransferStationGroups = new()
+        {
+            // 天神グループ（福岡市地下鉄・西鉄）
+            new HashSet<string> { "天神", "福岡（天神）" },
+
+            // 千早グループ（JR・西鉄）
+            new HashSet<string> { "千早", "西鉄千早" }
+        };
+
+        /// <summary>
+        /// 2つの駅が乗り継ぎ駅として同一かどうかを判定
+        /// </summary>
+        /// <param name="station1">駅名1</param>
+        /// <param name="station2">駅名2</param>
+        /// <returns>同一（完全一致または同一グループ内）の場合true</returns>
+        private static bool AreTransferStations(string station1, string station2)
+        {
+            // 完全一致
+            if (station1 == station2)
+            {
+                return true;
+            }
+
+            // 同一グループ内かチェック
+            foreach (var group in TransferStationGroups)
+            {
+                if (group.Contains(station1) && group.Contains(station2))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        /// <summary>
         /// 利用履歴詳細から日付ごとの摘要リストを生成します。
         /// </summary>
         /// <param name="details">利用履歴詳細のリスト（ICカードから取得した新しい順）</param>
@@ -533,8 +575,8 @@ namespace ICCardManager.Services
 
             for (int i = 1; i < routes.Count; i++)
             {
-                // 降車駅と次の乗車駅が同じ場合は乗継として統合
-                if (currentEnd == routes[i].Entry)
+                // 降車駅と次の乗車駅が同じ（または乗り継ぎ駅として同一視できる）場合は乗継として統合
+                if (AreTransferStations(currentEnd, routes[i].Entry))
                 {
                     currentEnd = routes[i].Exit;
                 }
