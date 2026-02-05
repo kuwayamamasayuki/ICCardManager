@@ -689,6 +689,12 @@ namespace ICCardManager.Services
             worksheet.Cell(row, 6).Value = "";      // 払出金額 (F列)
             worksheet.Cell(row, 7).Value = balance; // 残額 (G列)
 
+            // Issue #509: 金額セルの表示形式を明示的に数値に設定
+            var incomeCell = worksheet.Cell(row, 5);
+            var balanceCell = worksheet.Cell(row, 7);
+            incomeCell.Style.NumberFormat.Format = "#,##0";  // 会計形式（3桁カンマ区切り）
+            balanceCell.Style.NumberFormat.Format = "#,##0";
+
             // 罫線を適用
             ApplyDataRowBorder(worksheet, row);
 
@@ -711,6 +717,10 @@ namespace ICCardManager.Services
             worksheet.Cell(row, 5).Value = "";      // 受入金額 (E列) - 月次繰越は空欄
             worksheet.Cell(row, 6).Value = "";      // 払出金額 (F列)
             worksheet.Cell(row, 7).Value = balance; // 残額 (G列)
+
+            // Issue #509: 金額セルの表示形式を明示的に数値に設定
+            var balanceCell = worksheet.Cell(row, 7);
+            balanceCell.Style.NumberFormat.Format = "#,##0";  // 会計形式（3桁カンマ区切り）
 
             // 繰越テキスト（B列）を中央揃え・14ptに設定
             var summaryCell = worksheet.Cell(row, 2);
@@ -786,6 +796,14 @@ namespace ICCardManager.Services
             worksheet.Cell(row, 8).Value = ledger.StaffName;  // 氏名 (H列)
             worksheet.Cell(row, 9).Value = ledger.Note;       // 備考 (I-L列)
 
+            // Issue #509: 金額セルの表示形式を明示的に数値に設定
+            var incomeCell = worksheet.Cell(row, 5);
+            var expenseCell = worksheet.Cell(row, 6);
+            var balanceCell = worksheet.Cell(row, 7);
+            incomeCell.Style.NumberFormat.Format = "#,##0";  // 会計形式（3桁カンマ区切り）
+            expenseCell.Style.NumberFormat.Format = "#,##0";
+            balanceCell.Style.NumberFormat.Format = "#,##0";
+
             // 罫線を適用
             ApplyDataRowBorder(worksheet, row);
 
@@ -811,6 +829,12 @@ namespace ICCardManager.Services
             worksheet.Cell(row, 5).Value = income;   // 受入金額 (E列) - 0も表示
             worksheet.Cell(row, 6).Value = expense;  // 払出金額 (F列) - 0も表示
             worksheet.Cell(row, 7).Value = "";       // 残額（常に空欄）(G列)
+
+            // Issue #509: 金額セルの表示形式を明示的に数値に設定
+            var incomeCell = worksheet.Cell(row, 5);
+            var expenseCell = worksheet.Cell(row, 6);
+            incomeCell.Style.NumberFormat.Format = "#,##0";  // 会計形式（3桁カンマ区切り）
+            expenseCell.Style.NumberFormat.Format = "#,##0";
 
             // 月計行にスタイルを適用
             var range = worksheet.Range(row, 1, row, 12);
@@ -847,6 +871,15 @@ namespace ICCardManager.Services
             worksheet.Cell(row, 6).Value = expense;  // 払出金額 (F列) - 0も表示
             worksheet.Cell(row, 7).Value = balance; // 残額 (G列)
 
+            // Issue #509: 金額セルの表示形式を明示的に数値に設定
+            // テンプレートのセル書式が「文字列」になっている場合に備えて
+            var incomeCell = worksheet.Cell(row, 5);
+            var expenseCell = worksheet.Cell(row, 6);
+            var balanceCell = worksheet.Cell(row, 7);
+            incomeCell.Style.NumberFormat.Format = "#,##0";  // 会計形式（3桁カンマ区切り）
+            expenseCell.Style.NumberFormat.Format = "#,##0";
+            balanceCell.Style.NumberFormat.Format = "#,##0";
+
             // 累計行にスタイルを適用
             var range = worksheet.Range(row, 1, row, 12);
             range.Style.Font.Bold = true;
@@ -873,6 +906,12 @@ namespace ICCardManager.Services
             worksheet.Cell(row, 5).Value = "";  // 受入金額 (E列)
             worksheet.Cell(row, 6).Value = balance; // 払出金額 (F列)
             worksheet.Cell(row, 7).Value = 0;   // 残額 (G列)
+
+            // Issue #509: 金額セルの表示形式を明示的に数値に設定
+            var expenseCell = worksheet.Cell(row, 6);
+            var balanceCell = worksheet.Cell(row, 7);
+            expenseCell.Style.NumberFormat.Format = "#,##0";  // 会計形式（3桁カンマ区切り）
+            balanceCell.Style.NumberFormat.Format = "#,##0";
 
             // 繰越行にスタイルを適用
             var range = worksheet.Range(row, 1, row, 12);
