@@ -20,15 +20,16 @@ CREATE TABLE IF NOT EXISTS staff (
 -- 交通系ICカードマスタ
 -- ============================================
 CREATE TABLE IF NOT EXISTS ic_card (
-    card_idm        TEXT PRIMARY KEY,      -- ICカードIDm（16進数16文字）
-    card_type       TEXT NOT NULL,         -- カード種別
-    card_number     TEXT NOT NULL,         -- 通し番号（管理番号）
-    note            TEXT,                  -- 備考
-    is_deleted      INTEGER DEFAULT 0,     -- 削除フラグ
-    deleted_at      TEXT,                  -- 削除日時
-    is_lent         INTEGER DEFAULT 0,     -- 貸出状態（0:未貸出、1:貸出中）
-    last_lent_at    TEXT,                  -- 最終貸出日時
-    last_lent_staff TEXT REFERENCES staff(staff_idm)  -- 最終貸出者IDm
+    card_idm             TEXT PRIMARY KEY,      -- ICカードIDm（16進数16文字）
+    card_type            TEXT NOT NULL,         -- カード種別
+    card_number          TEXT NOT NULL,         -- 通し番号（管理番号）
+    note                 TEXT,                  -- 備考
+    is_deleted           INTEGER DEFAULT 0,     -- 削除フラグ
+    deleted_at           TEXT,                  -- 削除日時
+    is_lent              INTEGER DEFAULT 0,     -- 貸出状態（0:未貸出、1:貸出中）
+    last_lent_at         TEXT,                  -- 最終貸出日時
+    last_lent_staff      TEXT REFERENCES staff(staff_idm),  -- 最終貸出者IDm
+    starting_page_number INTEGER DEFAULT 1      -- 開始ページ番号（Issue #510）
 );
 
 -- ============================================

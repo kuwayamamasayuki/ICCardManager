@@ -120,8 +120,8 @@ CREATE TABLE settings (
         _dbContext.InitializeDatabase();
 
         // Assert
-        // レガシーDBはバージョン1として認識され、その後Migration_002〜004も適用されるので最終バージョンは4
-        _dbContext.GetDatabaseVersion().Should().Be(4);
+        // レガシーDBはバージョン1として認識され、その後Migration_002〜005も適用されるので最終バージョンは5
+        _dbContext.GetDatabaseVersion().Should().Be(5);
         TableShouldExist(connection, "schema_migrations");
 
         // バージョン1（既存DB認識）の記録が存在することを確認
@@ -149,8 +149,8 @@ CREATE TABLE settings (
         var count = Convert.ToInt32(cmd.ExecuteScalar());
 
         // 現在のマイグレーション数と一致するはず（重複していないこと）
-        // Migration_001 + Migration_002 + Migration_003 + Migration_004 = 4
-        count.Should().Be(4);
+        // Migration_001 + Migration_002 + Migration_003 + Migration_004 + Migration_005 = 5
+        count.Should().Be(5);
     }
 
     [Fact]

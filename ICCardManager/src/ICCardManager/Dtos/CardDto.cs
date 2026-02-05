@@ -71,5 +71,14 @@ namespace ICCardManager.Dtos
         /// 表示用: 貸出日時
         /// </summary>
         public string LentAtDisplay => LentAt?.ToString("yyyy/MM/dd HH:mm");
+
+        /// <summary>
+        /// 開始ページ番号（Issue #510: 年度途中導入対応）
+        /// </summary>
+        /// <remarks>
+        /// 紙の出納簿からの繰越時に、帳票のページ番号をこの値から開始する。
+        /// デフォルトは1。
+        /// </remarks>
+        public int StartingPageNumber { get; set; } = 1;
     }
 }
