@@ -89,22 +89,7 @@ namespace ICCardManager.Services
             new HashSet<string> { "天神", "福岡（天神）" },
 
             // 千早グループ（JR・西鉄）
-            new HashSet<string> { "千早", "西鉄千早" },
-
-            // 空港グループ（出張の出発地/帰着地として同一視）
-            new HashSet<string>
-            {
-                "福岡空港",
-                "羽田空港第1ターミナル",
-                "羽田空港第2ターミナル",
-                "羽田空港第1・第2ターミナル",
-                "新千歳空港",
-                "仙台空港",
-                "成田空港",
-                "中部国際空港",
-                "関西空港",
-                "大阪空港"
-            }
+            new HashSet<string> { "千早", "西鉄千早" }
         };
 
         /// <summary>
