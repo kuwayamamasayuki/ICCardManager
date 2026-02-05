@@ -48,5 +48,11 @@ namespace ICCardManager.Services
         /// <param name="message">メッセージ</param>
         /// <param name="title">タイトル</param>
         void ShowError(string message, string title);
+
+        /// <summary>
+        /// カード登録モード選択ダイアログを表示（Issue #510）
+        /// </summary>
+        /// <returns>選択結果。キャンセル時はnull</returns>
+        Views.Dialogs.CardRegistrationModeResult? ShowCardRegistrationModeDialog();
     }
 }

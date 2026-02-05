@@ -62,5 +62,20 @@ namespace ICCardManager.Services
                 MessageBoxButton.OK,
                 MessageBoxImage.Error);
         }
+
+        /// <inheritdoc/>
+        public Views.Dialogs.CardRegistrationModeResult? ShowCardRegistrationModeDialog()
+        {
+            var dialog = new Views.Dialogs.CardRegistrationModeDialog();
+            dialog.Owner = Application.Current.MainWindow;
+
+            var result = dialog.ShowDialog();
+            if (result == true)
+            {
+                return dialog.Result;
+            }
+
+            return null;
+        }
     }
 }

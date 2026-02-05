@@ -801,16 +801,7 @@ namespace ICCardManager.ViewModels
         /// <returns>選択結果。キャンセル時はnull</returns>
         private Views.Dialogs.CardRegistrationModeResult? ShowRegistrationModeDialog()
         {
-            var dialog = new Views.Dialogs.CardRegistrationModeDialog();
-            dialog.Owner = Application.Current.MainWindow;
-
-            var result = dialog.ShowDialog();
-            if (result == true)
-            {
-                return dialog.Result;
-            }
-
-            return null;
+            return _dialogService.ShowCardRegistrationModeDialog();
         }
 
         /// <summary>

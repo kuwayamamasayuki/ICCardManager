@@ -57,6 +57,15 @@ public class CardManageViewModelTests
         _dialogServiceMock.Setup(d => d.ShowConfirmation(It.IsAny<string>(), It.IsAny<string>())).Returns(true);
         _dialogServiceMock.Setup(d => d.ShowWarningConfirmation(It.IsAny<string>(), It.IsAny<string>())).Returns(true);
 
+        // カード登録モードダイアログはデフォルトで「新規購入」を返す（Issue #510）
+        _dialogServiceMock.Setup(d => d.ShowCardRegistrationModeDialog())
+            .Returns(new ICCardManager.Views.Dialogs.CardRegistrationModeResult
+            {
+                IsNewPurchase = true,
+                CarryoverMonth = 4,
+                StartingPageNumber = 1
+            });
+
         // 認証はデフォルトで成功を返す（Issue #429）
         _staffAuthServiceMock.Setup(s => s.RequestAuthenticationAsync(It.IsAny<string>()))
             .ReturnsAsync(new StaffAuthResult { Idm = "TEST_OPERATOR_IDM", StaffName = "テスト操作者" });
