@@ -1,6 +1,7 @@
 using System.Collections.ObjectModel;
 using System.IO;
 using System.Text;
+using System.Text.Json;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using ICCardManager.Data.Repositories;
@@ -461,6 +462,7 @@ public partial class OperationLogSearchViewModel : ViewModelBase
             "INSERT" => "登録",
             "UPDATE" => "更新",
             "DELETE" => "削除",
+            "RESTORE" => "復元",
             _ => log.Action ?? ""
         };
 
@@ -472,12 +474,108 @@ public partial class OperationLogSearchViewModel : ViewModelBase
             _ => log.TargetTable ?? ""
         };
 
+        // UPDATE操作の場合は変更内容の詳細を表示（Issue #537）
+        if (log.Action == "UPDATE" && !string.IsNullOrEmpty(log.BeforeData) && !string.IsNullOrEmpty(log.AfterData))
+        {
+            var changes = GetChangedFieldsDescription(log.TargetTable, log.BeforeData, log.AfterData);
+            if (!string.IsNullOrEmpty(changes))
+            {
+                return $"{target}を{action}: {changes}";
+            }
+        }
+
         if (string.IsNullOrEmpty(log.TargetId))
         {
             return $"{target}を{action}";
         }
 
         return $"{target}（{log.TargetId}）を{action}";
+    }
+
+    /// <summary>
+    /// 変更されたフィールドの説明を生成（Issue #537）
+    /// </summary>
+    private static string GetChangedFieldsDescription(string? targetTable, string beforeJson, string afterJson)
+    {
+        try
+        {
+            var before = JsonDocument.Parse(beforeJson);
+            var after = JsonDocument.Parse(afterJson);
+
+            var changes = new List<string>();
+
+            // テーブルごとに監視するフィールドを定義
+            var fieldsToWatch = targetTable switch
+            {
+                "ledger" => new Dictionary<string, string>
+                {
+                    { "StaffName", "利用者" },
+                    { "Summary", "摘要" },
+                    { "Note", "備考" },
+                    { "LenderIdm", "貸出者IDm" }
+                },
+                "staff" => new Dictionary<string, string>
+                {
+                    { "Name", "氏名" },
+                    { "Number", "職員番号" },
+                    { "Note", "備考" }
+                },
+                "ic_card" => new Dictionary<string, string>
+                {
+                    { "CardType", "カード種別" },
+                    { "CardNumber", "カード番号" },
+                    { "Note", "備考" }
+                },
+                _ => new Dictionary<string, string>()
+            };
+
+            foreach (var field in fieldsToWatch)
+            {
+                var beforeValue = GetJsonPropertyValue(before, field.Key);
+                var afterValue = GetJsonPropertyValue(after, field.Key);
+
+                // LenderIdmの変更は、StaffNameの変更として表示済みなのでスキップ
+                if (field.Key == "LenderIdm")
+                {
+                    continue;
+                }
+
+                if (beforeValue != afterValue)
+                {
+                    var beforeDisplay = string.IsNullOrEmpty(beforeValue) ? "（なし）" : beforeValue;
+                    var afterDisplay = string.IsNullOrEmpty(afterValue) ? "（なし）" : afterValue;
+
+                    // 長すぎる値は省略
+                    if (beforeDisplay.Length > 30) beforeDisplay = beforeDisplay.Substring(0, 30) + "...";
+                    if (afterDisplay.Length > 30) afterDisplay = afterDisplay.Substring(0, 30) + "...";
+
+                    changes.Add($"{field.Value}: {beforeDisplay}→{afterDisplay}");
+                }
+            }
+
+            return string.Join("、", changes);
+        }
+        catch
+        {
+            // JSON解析エラーの場合は空文字列を返す
+            return string.Empty;
+        }
+    }
+
+    /// <summary>
+    /// JSONドキュメントからプロパティ値を取得
+    /// </summary>
+    private static string? GetJsonPropertyValue(JsonDocument doc, string propertyName)
+    {
+        if (doc.RootElement.TryGetProperty(propertyName, out var prop))
+        {
+            if (prop.ValueKind == JsonValueKind.Null)
+            {
+                return null;
+            }
+            return prop.ToString();
+        }
+        return null;
     }
 
     /// <summary>
