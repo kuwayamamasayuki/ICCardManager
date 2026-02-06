@@ -505,9 +505,10 @@
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto"/>
                         <RowDefinition Height="Auto"/>
-                        <RowDefinition Height="*"/>
+                        <!-- Issue #541: カード一覧とシステム警告の高さ比率を7:3に調整 -->
+                        <RowDefinition Height="7*" MinHeight="100"/>
                         <RowDefinition Height="Auto"/>
-                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="3*" MaxHeight="200"/>
                     </Grid.RowDefinitions>
 
                     <!-- ダッシュボードヘッダー -->
@@ -697,19 +698,23 @@
                                Foreground="#F44336"
                                Visibility="{Binding WarningMessages.Count, Converter={StaticResource IntToVisibilityConverter}, Mode=OneWay}"/>
 
-                    <ItemsControl Grid.Row="4"
-                                  ItemsSource="{Binding WarningMessages}">
-                        <ItemsControl.ItemTemplate>
-                            <DataTemplate>
-                                <Border Background="#FFF3E0" CornerRadius="4"
-                                        Margin="0,2" Padding="10,8">
-                                    <TextBlock Text="{Binding}"
-                                               TextWrapping="Wrap"
-                                               FontSize="{DynamicResource SmallFontSize}"/>
-                                </Border>
-                            </DataTemplate>
-                        </ItemsControl.ItemTemplate>
-                    </ItemsControl>
+                    <!-- Issue #541: 警告エリアにスクロール機能を追加（高さ制限対応） -->
+                    <ScrollViewer Grid.Row="4"
+                                  VerticalScrollBarVisibility="Auto"
+                                  HorizontalScrollBarVisibility="Disabled">
+                        <ItemsControl ItemsSource="{Binding WarningMessages}">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <Border Background="#FFF3E0" CornerRadius="4"
+                                            Margin="0,2" Padding="10,8">
+                                        <TextBlock Text="{Binding}"
+                                                   TextWrapping="Wrap"
+                                                   FontSize="{DynamicResource SmallFontSize}"/>
+                                    </Border>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </ScrollViewer>
                 </Grid>
             </Border>
         </Grid>
