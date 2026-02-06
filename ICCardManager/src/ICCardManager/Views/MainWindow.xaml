@@ -11,7 +11,7 @@
         d:DataContext="{d:DesignInstance Type=vm:MainViewModel}"
         Title="交通系ICカード管理システム"
         Height="700"
-        Width="1320"
+        Width="1250"
         MinWidth="{DynamicResource WindowMinWidth}"
         MinHeight="600"
         WindowStartupLocation="CenterScreen"
@@ -615,7 +615,7 @@
                                             </Style.Triggers>
                                         </Style>
                                     </Border.Style>
-                                    <!-- Issue #542: フォントサイズ「特大」対応のため縦レイアウトに変更 -->
+                                    <!-- Issue #542: 2行レイアウト（DockPanelで左右配置し、大きなフォントでも崩れないように） -->
                                     <StackPanel>
                                         <!-- 1行目: カード名 + 残高 -->
                                         <DockPanel>
@@ -655,27 +655,33 @@
                                                 <Run Text="{Binding CardNumber, Mode=OneWay}"/>
                                             </TextBlock>
                                         </DockPanel>
-                                        <!-- 2行目: 最終利用日 -->
-                                        <TextBlock FontSize="{DynamicResource SmallFontSize}" Foreground="Gray">
-                                            <Run Text="最終: "/>
-                                            <Run Text="{Binding LastUsageDateDisplay, Mode=OneWay}"/>
-                                        </TextBlock>
-                                        <!-- 3行目: 貸出状態 -->
-                                        <TextBlock FontSize="{DynamicResource SmallFontSize}">
-                                            <TextBlock.Style>
-                                                <Style TargetType="TextBlock">
-                                                    <Setter Property="Foreground" Value="#4CAF50"/>
-                                                    <Style.Triggers>
-                                                        <DataTrigger Binding="{Binding IsLent}" Value="True">
-                                                            <Setter Property="Foreground" Value="#FF9800"/>
-                                                        </DataTrigger>
-                                                    </Style.Triggers>
-                                                </Style>
-                                            </TextBlock.Style>
-                                            <Run Text="{Binding LentStatusIcon, Mode=OneWay}"/>
-                                            <Run Text=" "/>
-                                            <Run Text="{Binding LentInfoDisplay, Mode=OneWay}"/>
-                                        </TextBlock>
+                                        <!-- 2行目: 最終利用日（左） + 貸出状態（右） -->
+                                        <DockPanel>
+                                            <!-- 貸出状態（右寄せ） -->
+                                            <TextBlock DockPanel.Dock="Right"
+                                                       FontSize="{DynamicResource SmallFontSize}"
+                                                       Margin="5,0,0,0">
+                                                <TextBlock.Style>
+                                                    <Style TargetType="TextBlock">
+                                                        <Setter Property="Foreground" Value="#4CAF50"/>
+                                                        <Style.Triggers>
+                                                            <DataTrigger Binding="{Binding IsLent}" Value="True">
+                                                                <Setter Property="Foreground" Value="#FF9800"/>
+                                                            </DataTrigger>
+                                                        </Style.Triggers>
+                                                    </Style>
+                                                </TextBlock.Style>
+                                                <Run Text="{Binding LentStatusIcon, Mode=OneWay}"/>
+                                                <Run Text=" "/>
+                                                <Run Text="{Binding LentInfoDisplay, Mode=OneWay}"/>
+                                            </TextBlock>
+                                            <!-- 最終利用日（左寄せ、省略可能） -->
+                                            <TextBlock FontSize="{DynamicResource SmallFontSize}"
+                                                       Foreground="Gray"
+                                                       TextTrimming="CharacterEllipsis">
+                                                <Run Text="{Binding LastUsageDateDisplay, Mode=OneWay}"/>
+                                            </TextBlock>
+                                        </DockPanel>
                                     </StackPanel>
                                 </Border>
                             </DataTemplate>

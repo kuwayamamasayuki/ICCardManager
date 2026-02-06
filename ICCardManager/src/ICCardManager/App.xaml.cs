@@ -372,14 +372,13 @@ namespace ICCardManager
             var statusFontSize = Math.Round(baseFontSize * 2.0);     // ステータスメッセージ用（約2倍）
             var iconFontSize = Math.Round(baseFontSize * 5.0);       // アイコン用（約5倍）
 
-            // Issue #542: サイドバー幅をフォントサイズに応じて調整
-            // フォントが大きくなってもコンテンツ幅はあまり増えないため、控えめな係数を使用
-            // 基準: Medium (14) で 380px、差分 × 6 で調整
-            // Small(12)→368, Medium(14)→380, Large(16)→392, ExtraLarge(20)→416
-            var sidebarWidth = Math.Round(380 + (baseFontSize - 14) * 6);
-            // ウィンドウ最小幅はフォントサイズに関係なく固定（1280px）
-            // フォントが大きくなってもウィンドウを広げる必要はない
-            const double windowMinWidth = 1280;
+            // Issue #542: サイドバー幅をフォントサイズに応じて微調整
+            // フォントが大きくなってもコンテンツ幅はほとんど増えないため、最小限の係数を使用
+            // 基準: Medium (14) で 340px、差分 × 3 で調整
+            // Small(12)→334, Medium(14)→340, Large(16)→346, ExtraLarge(20)→358
+            var sidebarWidth = Math.Round(340 + (baseFontSize - 14) * 3);
+            // ウィンドウ最小幅はフォントサイズに関係なく固定（1200px）
+            const double windowMinWidth = 1200;
 
             // アプリケーションリソースを更新
             var resources = Application.Current.Resources;
