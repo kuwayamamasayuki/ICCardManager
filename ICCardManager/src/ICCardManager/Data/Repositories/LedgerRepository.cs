@@ -517,7 +517,9 @@ ORDER BY use_date ASC, is_charge DESC, is_point_redemption DESC, rowid ASC";
                 IsCharge = reader.GetInt32(7) == 1,
                 IsPointRedemption = !reader.IsDBNull(8) && reader.GetInt32(8) == 1,
                 IsBus = reader.GetInt32(9) == 1,
-                GroupId = reader.IsDBNull(10) ? null : reader.GetInt32(10)
+                GroupId = reader.IsDBNull(10) ? null : reader.GetInt32(10),
+                // Issue #548: rowidを使って正しい時系列順を保持
+                SequenceNumber = reader.IsDBNull(11) ? 0 : (int)reader.GetInt64(11)
             };
         }
 

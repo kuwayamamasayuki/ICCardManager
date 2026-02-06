@@ -76,6 +76,15 @@ namespace ICCardManager.Models
         public int? GroupId { get; set; }
 
         /// <summary>
+        /// シーケンス番号（時系列順序）
+        /// </summary>
+        /// <remarks>
+        /// Issue #548: チャージが間に入っても正しい時系列順を保持するため。
+        /// DBのrowidから取得。小さい値ほど先（古い）の利用。
+        /// </remarks>
+        public int SequenceNumber { get; set; }
+
+        /// <summary>
         /// ICカードから読み取った生データ（16バイト）
         /// </summary>
         /// <remarks>
