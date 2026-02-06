@@ -1,8 +1,10 @@
 using System.Collections.ObjectModel;
 using System.IO;
 using System.Text;
+using System.Text.Json;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using ICCardManager.Common;
 using ICCardManager.Data.Repositories;
 using ICCardManager.Models;
 using ICCardManager.Services;
@@ -59,6 +61,10 @@ public class OperationLogDisplayItem
         _ => TargetTable
     };
     public string TargetId { get; init; } = string.Empty;
+    /// <summary>
+    /// 対象の詳細表示名（例: 「田中太郎（001）」「はやかけん 001」「R7.2.6 鉄道（博多～天神）」）
+    /// </summary>
+    public string TargetDisplayName { get; init; } = string.Empty;
     public string OperatorName { get; init; } = string.Empty;
     public string? BeforeData { get; init; }
     public string? AfterData { get; init; }
@@ -436,6 +442,8 @@ public partial class OperationLogSearchViewModel : ViewModelBase
     {
         // 詳細サマリーを生成
         var detailSummary = GenerateDetailSummary(log);
+        // 対象の詳細表示名を生成
+        var targetDisplayName = GenerateTargetDisplayName(log);
 
         return new OperationLogDisplayItem
         {
@@ -444,11 +452,106 @@ public partial class OperationLogSearchViewModel : ViewModelBase
             Action = log.Action ?? "",
             TargetTable = log.TargetTable ?? "",
             TargetId = log.TargetId ?? "",
+            TargetDisplayName = targetDisplayName,
             OperatorName = log.OperatorName,
             BeforeData = log.BeforeData,
             AfterData = log.AfterData,
             DetailSummary = detailSummary
         };
+    }
+
+    /// <summary>
+    /// 対象の詳細表示名を生成（例: 「田中太郎（001）」「はやかけん 001」「R7.2.6 鉄道（博多～天神）」）
+    /// </summary>
+    private static string GenerateTargetDisplayName(OperationLog log)
+    {
+        // BeforeDataまたはAfterDataからJSONを取得（UPDATE/DELETEはBefore、INSERTはAfter）
+        var jsonData = !string.IsNullOrEmpty(log.AfterData) ? log.AfterData : log.BeforeData;
+        if (string.IsNullOrEmpty(jsonData))
+        {
+            return log.TargetId ?? "";
+        }
+
+        try
+        {
+            var doc = JsonDocument.Parse(jsonData);
+
+            return log.TargetTable switch
+            {
+                "staff" => GenerateStaffDisplayName(doc),
+                "ic_card" => GenerateCardDisplayName(doc),
+                "ledger" => GenerateLedgerDisplayName(doc),
+                _ => log.TargetId ?? ""
+            };
+        }
+        catch
+        {
+            // JSON解析エラーの場合は従来のTargetIdを返す
+            return log.TargetId ?? "";
+        }
+    }
+
+    /// <summary>
+    /// 職員の表示名を生成（例: 「田中太郎（001）」）
+    /// </summary>
+    private static string GenerateStaffDisplayName(JsonDocument doc)
+    {
+        var name = GetJsonPropertyValue(doc, "Name");
+        var number = GetJsonPropertyValue(doc, "Number");
+
+        if (string.IsNullOrEmpty(name))
+        {
+            return GetJsonPropertyValue(doc, "StaffIdm") ?? "";
+        }
+
+        if (!string.IsNullOrEmpty(number))
+        {
+            return $"{name}（{number}）";
+        }
+
+        return name;
+    }
+
+    /// <summary>
+    /// カードの表示名を生成（例: 「はやかけん 001」）
+    /// </summary>
+    private static string GenerateCardDisplayName(JsonDocument doc)
+    {
+        var cardType = GetJsonPropertyValue(doc, "CardType");
+        var cardNumber = GetJsonPropertyValue(doc, "CardNumber");
+
+        if (string.IsNullOrEmpty(cardType) && string.IsNullOrEmpty(cardNumber))
+        {
+            return GetJsonPropertyValue(doc, "CardIdm") ?? "";
+        }
+
+        return $"{cardType ?? ""} {cardNumber ?? ""}".Trim();
+    }
+
+    /// <summary>
+    /// 利用履歴の表示名を生成（例: 「R7.2.6 鉄道（博多～天神）」）
+    /// </summary>
+    private static string GenerateLedgerDisplayName(JsonDocument doc)
+    {
+        var dateStr = GetJsonPropertyValue(doc, "Date");
+        var summary = GetJsonPropertyValue(doc, "Summary");
+
+        var parts = new List<string>();
+
+        // 日付を和暦に変換
+        if (!string.IsNullOrEmpty(dateStr) && DateTime.TryParse(dateStr, out var date))
+        {
+            parts.Add(WarekiConverter.ToWareki(date));
+        }
+
+        // 摘要（長すぎる場合は省略）
+        if (!string.IsNullOrEmpty(summary))
+        {
+            var displaySummary = summary.Length > 25 ? summary.Substring(0, 25) + "..." : summary;
+            parts.Add(displaySummary);
+        }
+
+        return parts.Count > 0 ? string.Join(" ", parts) : GetJsonPropertyValue(doc, "Id")?.ToString() ?? "";
     }
 
     /// <summary>
@@ -461,6 +564,7 @@ public partial class OperationLogSearchViewModel : ViewModelBase
             "INSERT" => "登録",
             "UPDATE" => "更新",
             "DELETE" => "削除",
+            "RESTORE" => "復元",
             _ => log.Action ?? ""
         };
 
@@ -472,12 +576,108 @@ public partial class OperationLogSearchViewModel : ViewModelBase
             _ => log.TargetTable ?? ""
         };
 
+        // UPDATE操作の場合は変更内容の詳細を表示（Issue #537）
+        if (log.Action == "UPDATE" && !string.IsNullOrEmpty(log.BeforeData) && !string.IsNullOrEmpty(log.AfterData))
+        {
+            var changes = GetChangedFieldsDescription(log.TargetTable, log.BeforeData, log.AfterData);
+            if (!string.IsNullOrEmpty(changes))
+            {
+                return $"{target}を{action}: {changes}";
+            }
+        }
+
         if (string.IsNullOrEmpty(log.TargetId))
         {
             return $"{target}を{action}";
         }
 
         return $"{target}（{log.TargetId}）を{action}";
+    }
+
+    /// <summary>
+    /// 変更されたフィールドの説明を生成（Issue #537）
+    /// </summary>
+    private static string GetChangedFieldsDescription(string? targetTable, string beforeJson, string afterJson)
+    {
+        try
+        {
+            var before = JsonDocument.Parse(beforeJson);
+            var after = JsonDocument.Parse(afterJson);
+
+            var changes = new List<string>();
+
+            // テーブルごとに監視するフィールドを定義
+            var fieldsToWatch = targetTable switch
+            {
+                "ledger" => new Dictionary<string, string>
+                {
+                    { "StaffName", "利用者" },
+                    { "Summary", "摘要" },
+                    { "Note", "備考" },
+                    { "LenderIdm", "貸出者IDm" }
+                },
+                "staff" => new Dictionary<string, string>
+                {
+                    { "Name", "氏名" },
+                    { "Number", "職員番号" },
+                    { "Note", "備考" }
+                },
+                "ic_card" => new Dictionary<string, string>
+                {
+                    { "CardType", "カード種別" },
+                    { "CardNumber", "カード番号" },
+                    { "Note", "備考" }
+                },
+                _ => new Dictionary<string, string>()
+            };
+
+            foreach (var field in fieldsToWatch)
+            {
+                var beforeValue = GetJsonPropertyValue(before, field.Key);
+                var afterValue = GetJsonPropertyValue(after, field.Key);
+
+                // LenderIdmの変更は、StaffNameの変更として表示済みなのでスキップ
+                if (field.Key == "LenderIdm")
+                {
+                    continue;
+                }
+
+                if (beforeValue != afterValue)
+                {
+                    var beforeDisplay = string.IsNullOrEmpty(beforeValue) ? "（なし）" : beforeValue;
+                    var afterDisplay = string.IsNullOrEmpty(afterValue) ? "（なし）" : afterValue;
+
+                    // 長すぎる値は省略
+                    if (beforeDisplay.Length > 30) beforeDisplay = beforeDisplay.Substring(0, 30) + "...";
+                    if (afterDisplay.Length > 30) afterDisplay = afterDisplay.Substring(0, 30) + "...";
+
+                    changes.Add($"{field.Value}: {beforeDisplay}→{afterDisplay}");
+                }
+            }
+
+            return string.Join("、", changes);
+        }
+        catch
+        {
+            // JSON解析エラーの場合は空文字列を返す
+            return string.Empty;
+        }
+    }
+
+    /// <summary>
+    /// JSONドキュメントからプロパティ値を取得
+    /// </summary>
+    private static string? GetJsonPropertyValue(JsonDocument doc, string propertyName)
+    {
+        if (doc.RootElement.TryGetProperty(propertyName, out var prop))
+        {
+            if (prop.ValueKind == JsonValueKind.Null)
+            {
+                return null;
+            }
+            return prop.ToString();
+        }
+        return null;
     }
 
     /// <summary>
