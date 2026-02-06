@@ -43,6 +43,7 @@
                 BorderThickness="1">
             <StackPanel>
                 <RadioButton x:Name="NewPurchaseRadio"
+                             GroupName="RegistrationMode"
                              Content="新規購入"
                              FontSize="{DynamicResource BaseFontSize}"
                              FontWeight="Bold"
@@ -66,6 +67,7 @@
                 BorderThickness="1">
             <StackPanel>
                 <RadioButton x:Name="CarryoverRadio"
+                             GroupName="RegistrationMode"
                              Content="紙の出納簿からの繰越"
                              FontSize="{DynamicResource BaseFontSize}"
                              FontWeight="Bold"
@@ -126,8 +128,9 @@
                     HorizontalAlignment="Right">
             <Button x:Name="OkButton"
                     Content="OK"
-                    Width="100"
+                    MinWidth="100"
                     Height="36"
+                    Padding="16,0"
                     Margin="0,0,10,0"
                     FontSize="{DynamicResource BaseFontSize}"
                     FontWeight="Bold"
@@ -140,8 +143,9 @@
 
             <Button x:Name="CancelButton"
                     Content="キャンセル"
-                    Width="100"
+                    MinWidth="120"
                     Height="36"
+                    Padding="16,0"
                     FontSize="{DynamicResource BaseFontSize}"
                     IsCancel="True"
                     Click="CancelButton_Click"
