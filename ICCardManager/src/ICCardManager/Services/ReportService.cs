@@ -276,10 +276,17 @@ namespace ICCardManager.Services
 
                     // Issue #477: 該当月のシートを取得または作成
                     IXLWorksheet worksheet;
+
                     if (workbook.Worksheets.TryGetWorksheet(sheetName, out worksheet))
                     {
                         // 既存シートがある場合はデータ部分をクリア
                         ClearWorksheetData(worksheet);
+
+                        // Issue #531: 既存シートにもテンプレートのページ設定（フッター含む）を適用
+                        // これにより、上書き時にフッターが失われる問題を修正
+                        using var templateWorkbook = new XLWorkbook(templatePath);
+                        var templateSheet = templateWorkbook.Worksheets.First();
+                        CopyPageSetup(templateSheet, worksheet);
                     }
                     else if (isExistingFile)
                     {
@@ -484,6 +491,87 @@ namespace ICCardManager.Services
             for (int row = 17; row <= 22; row++)
             {
                 target.Row(row).Height = source.Row(row).Height;
+            }
+
+            // Issue #531: ページ設定（フッター/ヘッダー含む）をコピー
+            CopyPageSetup(source, target);
+        }
+
+        /// <summary>
+        /// Issue #531: ページ設定（フッター/ヘッダー含む）をコピー
+        /// </summary>
+        /// <remarks>
+        /// テンプレートに設定されているフッター、ヘッダー、その他のページ設定を
+        /// 新しいワークシートにコピーします。
+        /// </remarks>
+        private static void CopyPageSetup(IXLWorksheet source, IXLWorksheet target)
+        {
+            var sourceSetup = source.PageSetup;
+            var targetSetup = target.PageSetup;
+
+            // 基本ページ設定
+            targetSetup.PaperSize = sourceSetup.PaperSize;
+            targetSetup.PageOrientation = sourceSetup.PageOrientation;
+
+            // マージン
+            targetSetup.Margins.Top = sourceSetup.Margins.Top;
+            targetSetup.Margins.Bottom = sourceSetup.Margins.Bottom;
+            targetSetup.Margins.Left = sourceSetup.Margins.Left;
+            targetSetup.Margins.Right = sourceSetup.Margins.Right;
+            targetSetup.Margins.Header = sourceSetup.Margins.Header;
+            targetSetup.Margins.Footer = sourceSetup.Margins.Footer;
+
+            // フッター設定をコピー（全ページ共通の設定をコピー）
+            CopyHeaderFooterItem(sourceSetup.Footer.Left, targetSetup.Footer.Left);
+            CopyHeaderFooterItem(sourceSetup.Footer.Center, targetSetup.Footer.Center);
+            CopyHeaderFooterItem(sourceSetup.Footer.Right, targetSetup.Footer.Right);
+
+            // ヘッダー設定をコピー
+            CopyHeaderFooterItem(sourceSetup.Header.Left, targetSetup.Header.Left);
+            CopyHeaderFooterItem(sourceSetup.Header.Center, targetSetup.Header.Center);
+            CopyHeaderFooterItem(sourceSetup.Header.Right, targetSetup.Header.Right);
+
+            // その他のページ設定
+            targetSetup.CenterHorizontally = sourceSetup.CenterHorizontally;
+            targetSetup.CenterVertically = sourceSetup.CenterVertically;
+            targetSetup.BlackAndWhite = sourceSetup.BlackAndWhite;
+            targetSetup.DraftQuality = sourceSetup.DraftQuality;
+            targetSetup.ShowGridlines = sourceSetup.ShowGridlines;
+            targetSetup.ShowRowAndColumnHeadings = sourceSetup.ShowRowAndColumnHeadings;
+            targetSetup.FirstPageNumber = sourceSetup.FirstPageNumber;
+            targetSetup.HorizontalDpi = sourceSetup.HorizontalDpi;
+            targetSetup.VerticalDpi = sourceSetup.VerticalDpi;
+            targetSetup.PageOrder = sourceSetup.PageOrder;
+
+            // スケール設定
+            if (sourceSetup.PagesWide > 0 || sourceSetup.PagesTall > 0)
+            {
+                targetSetup.PagesWide = sourceSetup.PagesWide;
+                targetSetup.PagesTall = sourceSetup.PagesTall;
+            }
+            else
+            {
+                targetSetup.Scale = sourceSetup.Scale;
+            }
+        }
+
+        /// <summary>
+        /// Issue #531: ヘッダー/フッターアイテムをコピー
+        /// </summary>
+        private static void CopyHeaderFooterItem(IXLHFItem source, IXLHFItem target)
+        {
+            target.Clear();
+
+            // 各ページ種別の設定をコピー
+            var occurrences = new[] { XLHFOccurrence.AllPages, XLHFOccurrence.FirstPage, XLHFOccurrence.OddPages, XLHFOccurrence.EvenPages };
+
+            foreach (var occurrence in occurrences)
+            {
+                var text = source.GetText(occurrence);
+                if (!string.IsNullOrEmpty(text))
+                {
+                    target.AddText(text, occurrence);
+                }
             }
         }
 
