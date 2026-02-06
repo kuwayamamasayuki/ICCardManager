@@ -40,6 +40,20 @@ namespace ICCardManager.Models
         public DateTime? DeletedAt { get; set; }
 
         /// <summary>
+        /// 払戻済フラグ（Issue #530）
+        /// </summary>
+        /// <remarks>
+        /// 払い戻したカードは削除せず、この状態で残す。
+        /// 払戻済カードは貸出対象外だが、帳票作成は可能。
+        /// </remarks>
+        public bool IsRefunded { get; set; }
+
+        /// <summary>
+        /// 払戻日時（Issue #530）
+        /// </summary>
+        public DateTime? RefundedAt { get; set; }
+
+        /// <summary>
         /// 貸出状態（true: 貸出中）
         /// </summary>
         public bool IsLent { get; set; }

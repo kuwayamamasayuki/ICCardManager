@@ -689,6 +689,17 @@ public partial class MainViewModel : ViewModelBase
             return;
         }
 
+        // Issue #530: 払戻済カードは貸出対象外
+        if (card.IsRefunded)
+        {
+            _soundPlayer.Play(SoundType.Error);
+            _toastNotificationService.ShowError(
+                "払戻済カード",
+                $"{card.CardType} {card.CardNumber} は払い戻し済みのため貸出できません");
+            ResetState();
+            return;
+        }
+
         // 30秒ルールチェック
         if (_lendingService.IsRetouchWithinTimeout(idm))
         {

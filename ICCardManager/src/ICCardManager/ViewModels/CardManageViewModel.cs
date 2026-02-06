@@ -471,7 +471,10 @@ namespace ICCardManager.ViewModels
         /// <summary>
         /// 削除コマンドが実行可能かどうか
         /// </summary>
-        private bool CanDelete() => SelectedCard != null && !SelectedCard.IsLent;
+        /// <remarks>
+        /// Issue #530: 払戻済カードは既に運用から除外されているため削除不可
+        /// </remarks>
+        private bool CanDelete() => SelectedCard != null && !SelectedCard.IsLent && !SelectedCard.IsRefunded;
 
         /// <summary>
         /// 削除
@@ -541,15 +544,19 @@ namespace ICCardManager.ViewModels
         /// - カードが選択されている
         /// - 貸出中でない（手元にないカードは払い戻し操作自体が意味をなさない）
         /// </remarks>
-        private bool CanRefund() => SelectedCard != null && !SelectedCard.IsLent;
+        /// <remarks>
+        /// Issue #530: 既に払戻済のカードは再度払い戻しできない
+        /// </remarks>
+        private bool CanRefund() => SelectedCard != null && !SelectedCard.IsLent && !SelectedCard.IsRefunded;
 
         /// <summary>
         /// 払い戻し処理
         /// </summary>
         /// <remarks>
         /// Issue #379対応: 交通系ICカードの払い戻しに対応。
-        /// 払い戻し時は残高を払出金額として計上し、残高を0にしてからカードを論理削除する。
-        /// これにより、物品出納簿に払い戻しの記録が残る。
+        /// 払い戻し時は残高を払出金額として計上し、残高を0にする。
+        /// Issue #530対応: 払戻済カードは削除せず「払戻済」状態として保持。
+        /// 払戻済カードは帳票作成時に引き続き選択可能だが、貸出対象からは除外される。
         /// </remarks>
         [RelayCommand(CanExecute = nameof(CanRefund))]
         public async Task RefundAsync()
@@ -567,10 +574,10 @@ namespace ICCardManager.ViewModels
             var latestLedger = await _ledgerRepository.GetLatestLedgerAsync(SelectedCard.CardIdm);
             var currentBalance = latestLedger?.Balance ?? 0;
 
-            // 払い戻し確認ダイアログを表示
+            // 払い戻し確認ダイアログを表示（Issue #530: 削除ではなく払戻済状態になることを明記）
             var message = currentBalance > 0
-                ? $"カード「{SelectedCard.CardType} {SelectedCard.CardNumber}」を払い戻しますか？\n\n現在の残高: ¥{currentBalance:N0}\n\n※払い戻し後、このカードは削除されます。"
-                : $"カード「{SelectedCard.CardType} {SelectedCard.CardNumber}」を払い戻しますか？\n\n現在の残高: ¥0（残高なし）\n\n※払い戻し後、このカードは削除されます。";
+                ? $"カード「{SelectedCard.CardType} {SelectedCard.CardNumber}」を払い戻しますか？\n\n現在の残高: ¥{currentBalance:N0}\n\n※払い戻し後、このカードは「払戻済」となり、貸出対象外になります。\n　帳票の作成には引き続き使用できます。"
+                : $"カード「{SelectedCard.CardType} {SelectedCard.CardNumber}」を払い戻しますか？\n\n現在の残高: ¥0（残高なし）\n\n※払い戻し後、このカードは「払戻済」となり、貸出対象外になります。\n　帳票の作成には引き続き使用できます。";
 
             var confirmed = _dialogService.ShowWarningConfirmation(message, "払い戻し確認");
 
@@ -604,18 +611,21 @@ namespace ICCardManager.ViewModels
 
                 if (ledgerId > 0)
                 {
-                    // 払い戻し後のデータを取得（操作ログ用）
-                    var card = await _cardRepository.GetByIdmAsync(SelectedCard.CardIdm);
+                    // 払い戻し前のデータを取得（操作ログ用）
+                    var beforeCard = await _cardRepository.GetByIdmAsync(SelectedCard.CardIdm);
 
-                    // カードを論理削除
-                    var deleteSuccess = await _cardRepository.DeleteAsync(SelectedCard.CardIdm);
+                    // Issue #530: カードを「払戻済」状態に設定（論理削除ではない）
+                    var refundSuccess = await _cardRepository.SetRefundedAsync(SelectedCard.CardIdm);
 
-                    if (deleteSuccess)
+                    if (refundSuccess)
                     {
-                        // 操作ログを記録（払い戻しは削除操作として記録）
-                        if (card != null)
+                        // 払い戻し後のデータを取得（操作ログ用）
+                        var afterCard = await _cardRepository.GetByIdmAsync(SelectedCard.CardIdm);
+
+                        // 操作ログを記録（払い戻しはカード更新として記録）
+                        if (beforeCard != null && afterCard != null)
                         {
-                            await _operationLogger.LogCardDeleteAsync(null, card);
+                            await _operationLogger.LogCardUpdateAsync(null, beforeCard, afterCard);
                         }
 
                         StatusMessage = currentBalance > 0
@@ -627,7 +637,7 @@ namespace ICCardManager.ViewModels
                     }
                     else
                     {
-                        StatusMessage = "カードの削除に失敗しました";
+                        StatusMessage = "払戻済状態への変更に失敗しました";
                         IsStatusError = true;
                     }
                 }

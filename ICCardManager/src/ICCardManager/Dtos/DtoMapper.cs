@@ -32,7 +32,9 @@ namespace ICCardManager.Dtos
                 LastLentStaff = card.LastLentStaff,
                 LentStaffName = staffName,
                 LentAt = card.LastLentAt,
-                StartingPageNumber = card.StartingPageNumber
+                StartingPageNumber = card.StartingPageNumber,
+                IsRefunded = card.IsRefunded,
+                RefundedAt = card.RefundedAt
             };
         }
 
@@ -177,7 +179,9 @@ namespace ICCardManager.Dtos
                 IsLent = dto.IsLent,
                 LastLentStaff = dto.LastLentStaff,
                 LastLentAt = dto.LentAt,
-                StartingPageNumber = dto.StartingPageNumber
+                StartingPageNumber = dto.StartingPageNumber,
+                IsRefunded = dto.IsRefunded,
+                RefundedAt = dto.RefundedAt
             };
         }
 
