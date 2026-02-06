@@ -55,58 +55,58 @@
                            VerticalAlignment="Center"
                            Margin="0,0,30,0"/>
 
-                <!-- ボタン群（右寄せ） -->
-                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
-                    <Button Content="帳票 (F1)" Margin="5,0"
+                <!-- ボタン群（右寄せ・折り返し対応） -->
+                <WrapPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
+                    <Button Content="帳票 (F1)" Margin="5,3"
                             Style="{StaticResource AccessibleButtonStyle}"
                             Command="{Binding OpenReportCommand}"
                             TabIndex="1"
                             AutomationProperties.Name="帳票ダイアログを開く"
                             AutomationProperties.HelpText="物品出納簿を作成します。ショートカット: F1"
                             ToolTip="帳票を開く (F1)"/>
-                    <Button Content="職員管理 (F2)" Margin="5,0"
+                    <Button Content="職員管理 (F2)" Margin="5,3"
                             Style="{StaticResource AccessibleButtonStyle}"
                             Command="{Binding OpenStaffManageCommand}"
                             TabIndex="2"
                             AutomationProperties.Name="職員管理ダイアログを開く"
                             AutomationProperties.HelpText="職員の登録・編集を行います。ショートカット: F2"
                             ToolTip="職員管理を開く (F2)"/>
-                    <Button Content="交通系ICカード管理 (F3)" Margin="5,0"
+                    <Button Content="交通系ICカード管理 (F3)" Margin="5,3"
                             Style="{StaticResource AccessibleButtonStyle}"
                             Command="{Binding OpenCardManageCommand}"
                             TabIndex="3"
                             AutomationProperties.Name="交通系ICカード管理ダイアログを開く"
                             AutomationProperties.HelpText="交通系ICカードの登録・編集を行います。ショートカット: F3"
                             ToolTip="交通系ICカード管理を開く (F3)"/>
-                    <Button Content="データ入出力 (F4)" Margin="5,0"
+                    <Button Content="データ入出力 (F4)" Margin="5,3"
                             Style="{StaticResource AccessibleButtonStyle}"
                             Command="{Binding OpenDataExportImportCommand}"
                             TabIndex="4"
                             AutomationProperties.Name="データエクスポート/インポートダイアログを開く"
                             AutomationProperties.HelpText="カード・職員・履歴のCSVエクスポート/インポートを行います。ショートカット: F4"
                             ToolTip="データ入出力を開く (F4)"/>
-                    <Button Content="設定 (F5)" Margin="5,0"
+                    <Button Content="設定 (F5)" Margin="5,3"
                             Style="{StaticResource AccessibleButtonStyle}"
                             Command="{Binding OpenSettingsCommand}"
                             TabIndex="5"
                             AutomationProperties.Name="設定ダイアログを開く"
                             AutomationProperties.HelpText="アプリケーションの設定を変更します。ショートカット: F5"
                             ToolTip="設定を開く (F5)"/>
-                    <Button Content="システム管理 (F6)" Margin="5,0"
+                    <Button Content="システム管理 (F6)" Margin="5,3"
                             Style="{StaticResource AccessibleButtonStyle}"
                             Command="{Binding OpenSystemManageCommand}"
                             TabIndex="6"
                             AutomationProperties.Name="システム管理ダイアログを開く"
                             AutomationProperties.HelpText="データベースのバックアップ・リストア・操作ログを管理します。ショートカット: F6"
                             ToolTip="システム管理を開く (F6)"/>
-                    <Button Content="終了" Margin="15,0,5,0"
+                    <Button Content="終了" Margin="15,3,5,3"
                             Style="{StaticResource AccessibleButtonStyle}"
                             Command="{Binding ExitCommand}"
                             TabIndex="7"
                             AutomationProperties.Name="アプリケーションを終了"
                             AutomationProperties.HelpText="アプリケーションを終了します。"
                             ToolTip="アプリケーションを終了"/>
-                </StackPanel>
+                </WrapPanel>
             </DockPanel>
         </Border>
 
