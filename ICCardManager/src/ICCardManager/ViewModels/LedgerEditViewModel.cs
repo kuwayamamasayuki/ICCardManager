@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Collections.ObjectModel;
 using System.Linq;
 using System.Threading.Tasks;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -17,6 +18,7 @@ namespace ICCardManager.ViewModels
     public partial class LedgerEditViewModel : ViewModelBase
     {
         private readonly ILedgerRepository _ledgerRepository;
+        private readonly IStaffRepository _staffRepository;
         private readonly OperationLogger _operationLogger;
 
         private int _ledgerId;
@@ -70,10 +72,22 @@ namespace ICCardManager.ViewModels
         private string _balanceDisplay = string.Empty;
 
         /// <summary>
-        /// 利用者名
+        /// 利用者名（表示用）
         /// </summary>
         [ObservableProperty]
         private string _staffName = string.Empty;
+
+        /// <summary>
+        /// 職員リスト（選択肢）
+        /// </summary>
+        [ObservableProperty]
+        private ObservableCollection<Staff> _staffList = new();
+
+        /// <summary>
+        /// 選択中の職員
+        /// </summary>
+        [ObservableProperty]
+        private Staff? _selectedStaff;
 
         /// <summary>
         /// 受入金額があるか
@@ -103,11 +117,18 @@ namespace ICCardManager.ViewModels
         /// </summary>
         private string _originalNote = string.Empty;
 
+        /// <summary>
+        /// 元の利用者IDm（変更検知用）
+        /// </summary>
+        private string? _originalLenderIdm;
+
         public LedgerEditViewModel(
             ILedgerRepository ledgerRepository,
+            IStaffRepository staffRepository,
             OperationLogger operationLogger)
         {
             _ledgerRepository = ledgerRepository;
+            _staffRepository = staffRepository;
             _operationLogger = operationLogger;
         }
 
@@ -116,9 +137,9 @@ namespace ICCardManager.ViewModels
         /// </summary>
         /// <param name="ledger">編集対象の履歴データ</param>
         /// <param name="operatorIdm">操作者の職員IDm（Issue #429: 認証済み職員のIDm）</param>
-        public Task InitializeAsync(LedgerDto ledger, string? operatorIdm = null)
+        public async Task InitializeAsync(LedgerDto ledger, string? operatorIdm = null)
         {
-            if (ledger == null) return Task.CompletedTask;
+            if (ledger == null) return;
 
             _operatorIdm = operatorIdm;
 
@@ -140,6 +161,23 @@ namespace ICCardManager.ViewModels
                 HasIncome = ledger.HasIncome;
                 HasExpense = ledger.HasExpense;
 
+                // 職員リストを読み込み
+                var staffMembers = await _staffRepository.GetAllAsync();
+                StaffList.Clear();
+                foreach (var staff in staffMembers.OrderBy(s => s.Name))
+                {
+                    StaffList.Add(staff);
+                }
+
+                // 現在の利用者を選択状態にする
+                // LenderIdmはLedgerDtoに含まれていないため、DBから取得
+                var fullLedger = await _ledgerRepository.GetByIdAsync(_ledgerId);
+                if (fullLedger != null)
+                {
+                    _originalLenderIdm = fullLedger.LenderIdm;
+                    SelectedStaff = StaffList.FirstOrDefault(s => s.StaffIdm == fullLedger.LenderIdm);
+                }
+
                 // 元の値を保存
                 _originalSummary = ledger.Summary;
                 _originalNote = ledger.Note ?? string.Empty;
@@ -148,8 +186,6 @@ namespace ICCardManager.ViewModels
             {
                 IsBusy = false;
             }
-
-            return Task.CompletedTask;
         }
 
         /// <summary>
@@ -164,8 +200,12 @@ namespace ICCardManager.ViewModels
 
             try
             {
+                // 利用者の変更があるかチェック
+                var newLenderIdm = SelectedStaff?.StaffIdm;
+                var staffChanged = newLenderIdm != _originalLenderIdm;
+
                 // 変更があるかチェック
-                if (Summary == _originalSummary && Note == _originalNote)
+                if (Summary == _originalSummary && Note == _originalNote && !staffChanged)
                 {
                     IsSaved = true;
                     return;
@@ -201,6 +241,13 @@ namespace ICCardManager.ViewModels
                 // 値を更新
                 ledger.Summary = Summary;
                 ledger.Note = Note;
+
+                // 利用者の変更がある場合（Issue #529）
+                if (staffChanged && SelectedStaff != null)
+                {
+                    ledger.LenderIdm = SelectedStaff.StaffIdm;
+                    ledger.StaffName = SelectedStaff.Name;
+                }
 
                 var result = await _ledgerRepository.UpdateAsync(ledger);
 

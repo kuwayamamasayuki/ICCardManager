@@ -12,7 +12,7 @@
         WindowStartupLocation="CenterOwner"
         ResizeMode="NoResize"
         AutomationProperties.Name="利用履歴変更ダイアログ"
-        AutomationProperties.HelpText="選択した履歴の摘要と備考を変更できます。">
+        AutomationProperties.HelpText="選択した履歴の利用者、摘要、備考を変更できます。">
 
     <Window.Resources>
         <BooleanToVisibilityConverter x:Key="BoolToVisibilityConverter"/>
@@ -73,16 +73,21 @@
                                VerticalAlignment="Center"/>
                 </StackPanel>
 
-                <!-- 利用者 -->
+                <!-- 利用者（選択可能 Issue #529） -->
                 <StackPanel Grid.Row="1" Grid.ColumnSpan="2" Orientation="Horizontal" Margin="0,8,0,0">
                     <TextBlock Text="利用者:"
                                FontSize="{DynamicResource SmallFontSize}"
                                Foreground="Gray"
                                VerticalAlignment="Center"/>
-                    <TextBlock Text="{Binding StaffName}"
-                               FontSize="{DynamicResource SmallFontSize}"
-                               Margin="5,0,0,0"
-                               VerticalAlignment="Center"/>
+                    <ComboBox ItemsSource="{Binding StaffList}"
+                              SelectedItem="{Binding SelectedStaff}"
+                              DisplayMemberPath="Name"
+                              FontSize="{DynamicResource SmallFontSize}"
+                              Margin="5,0,0,0"
+                              MinWidth="150"
+                              VerticalAlignment="Center"
+                              AutomationProperties.Name="利用者を選択"
+                              ToolTip="利用者を変更できます（前の利用者が返却し忘れた場合など）"/>
                 </StackPanel>
             </Grid>
         </Border>
