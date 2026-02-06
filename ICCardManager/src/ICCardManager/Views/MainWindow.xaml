@@ -615,78 +615,68 @@
                                             </Style.Triggers>
                                         </Style>
                                     </Border.Style>
-                                    <Grid>
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="Auto"/>
-                                            <ColumnDefinition Width="*"/>
-                                            <ColumnDefinition Width="Auto"/>
-                                        </Grid.ColumnDefinitions>
-                                        <Grid.RowDefinitions>
-                                            <RowDefinition Height="Auto"/>
-                                            <RowDefinition Height="Auto"/>
-                                        </Grid.RowDefinitions>
-
-                                        <!-- 警告アイコン -->
-                                        <TextBlock Grid.Column="0" Grid.RowSpan="2"
-                                                   Text="{Binding WarningIcon}"
-                                                   FontSize="{DynamicResource LargeFontSize}"
-                                                   VerticalAlignment="Center"
-                                                   Margin="0,0,8,0"
-                                                   Foreground="#F44336"
-                                                   ToolTip="残高警告"
-                                                   Visibility="{Binding IsBalanceWarning, Converter={StaticResource BoolToVisibilityConverter}}"/>
-
-                                        <!-- カード名 -->
-                                        <TextBlock Grid.Column="1" Grid.Row="0"
-                                                   FontWeight="Bold"
-                                                   FontSize="{DynamicResource SmallFontSize}">
-                                            <Run Text="{Binding CardType, Mode=OneWay}"/>
-                                            <Run Text=" "/>
-                                            <Run Text="{Binding CardNumber, Mode=OneWay}"/>
-                                        </TextBlock>
-
-                                        <!-- 残高 -->
-                                        <TextBlock Grid.Column="2" Grid.Row="0"
-                                                   Text="{Binding BalanceDisplay}"
-                                                   FontWeight="Bold"
-                                                   FontSize="{DynamicResource SmallFontSize}"
-                                                   HorizontalAlignment="Right">
-                                            <TextBlock.Style>
-                                                <Style TargetType="TextBlock">
-                                                    <Setter Property="Foreground" Value="#424242"/>
-                                                    <Style.Triggers>
-                                                        <DataTrigger Binding="{Binding IsBalanceWarning}" Value="True">
-                                                            <Setter Property="Foreground" Value="#F44336"/>
-                                                        </DataTrigger>
-                                                    </Style.Triggers>
-                                                </Style>
-                                            </TextBlock.Style>
-                                        </TextBlock>
-
-                                        <!-- 最終利用日 + 貸出状態 -->
-                                        <StackPanel Grid.Column="1" Grid.Row="1" Grid.ColumnSpan="2"
-                                                    Orientation="Horizontal">
-                                            <TextBlock FontSize="{DynamicResource SmallFontSize}" Foreground="Gray">
-                                                <Run Text="最終: "/>
-                                                <Run Text="{Binding LastUsageDateDisplay, Mode=OneWay}"/>
-                                            </TextBlock>
-                                            <TextBlock FontSize="{DynamicResource SmallFontSize}" Margin="10,0,0,0">
+                                    <!-- Issue #542: フォントサイズ「特大」対応のため縦レイアウトに変更 -->
+                                    <StackPanel>
+                                        <!-- 1行目: カード名 + 残高 -->
+                                        <DockPanel>
+                                            <!-- 警告アイコン -->
+                                            <TextBlock DockPanel.Dock="Left"
+                                                       Text="{Binding WarningIcon}"
+                                                       FontSize="{DynamicResource LargeFontSize}"
+                                                       VerticalAlignment="Center"
+                                                       Margin="0,0,8,0"
+                                                       Foreground="#F44336"
+                                                       ToolTip="残高警告"
+                                                       Visibility="{Binding IsBalanceWarning, Converter={StaticResource BoolToVisibilityConverter}}"/>
+                                            <!-- 残高（右寄せ） -->
+                                            <TextBlock DockPanel.Dock="Right"
+                                                       Text="{Binding BalanceDisplay}"
+                                                       FontWeight="Bold"
+                                                       FontSize="{DynamicResource SmallFontSize}"
+                                                       VerticalAlignment="Center">
                                                 <TextBlock.Style>
                                                     <Style TargetType="TextBlock">
-                                                        <Setter Property="Foreground" Value="#4CAF50"/>
+                                                        <Setter Property="Foreground" Value="#424242"/>
                                                         <Style.Triggers>
-                                                            <DataTrigger Binding="{Binding IsLent}" Value="True">
-                                                                <Setter Property="Foreground" Value="#FF9800"/>
+                                                            <DataTrigger Binding="{Binding IsBalanceWarning}" Value="True">
+                                                                <Setter Property="Foreground" Value="#F44336"/>
                                                             </DataTrigger>
                                                         </Style.Triggers>
                                                     </Style>
                                                 </TextBlock.Style>
-                                                <Run Text="{Binding LentStatusIcon, Mode=OneWay}"/>
-                                                <Run Text=" "/>
-                                                <Run Text="{Binding LentInfoDisplay, Mode=OneWay}"/>
                                             </TextBlock>
-                                        </StackPanel>
-                                    </Grid>
+                                            <!-- カード名 -->
+                                            <TextBlock FontWeight="Bold"
+                                                       FontSize="{DynamicResource SmallFontSize}"
+                                                       TextTrimming="CharacterEllipsis"
+                                                       VerticalAlignment="Center">
+                                                <Run Text="{Binding CardType, Mode=OneWay}"/>
+                                                <Run Text=" "/>
+                                                <Run Text="{Binding CardNumber, Mode=OneWay}"/>
+                                            </TextBlock>
+                                        </DockPanel>
+                                        <!-- 2行目: 最終利用日 -->
+                                        <TextBlock FontSize="{DynamicResource SmallFontSize}" Foreground="Gray">
+                                            <Run Text="最終: "/>
+                                            <Run Text="{Binding LastUsageDateDisplay, Mode=OneWay}"/>
+                                        </TextBlock>
+                                        <!-- 3行目: 貸出状態 -->
+                                        <TextBlock FontSize="{DynamicResource SmallFontSize}">
+                                            <TextBlock.Style>
+                                                <Style TargetType="TextBlock">
+                                                    <Setter Property="Foreground" Value="#4CAF50"/>
+                                                    <Style.Triggers>
+                                                        <DataTrigger Binding="{Binding IsLent}" Value="True">
+                                                            <Setter Property="Foreground" Value="#FF9800"/>
+                                                        </DataTrigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </TextBlock.Style>
+                                            <Run Text="{Binding LentStatusIcon, Mode=OneWay}"/>
+                                            <Run Text=" "/>
+                                            <Run Text="{Binding LentInfoDisplay, Mode=OneWay}"/>
+                                        </TextBlock>
+                                    </StackPanel>
                                 </Border>
                             </DataTemplate>
                         </ListView.ItemTemplate>
