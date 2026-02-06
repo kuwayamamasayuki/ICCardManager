@@ -794,6 +794,12 @@ public partial class MainViewModel : ViewModelBase
             await RefreshLentCardsAsync();
             await RefreshDashboardAsync();
 
+            // 履歴が開いていれば再読み込み（Issue #526）
+            if (IsHistoryVisible)
+            {
+                await LoadHistoryLedgersAsync();
+            }
+
             // 30秒ルール用に職員情報を保存（ResetStateの前に保存）
             _lastProcessedStaffIdm = _currentStaffIdm;
             _lastProcessedStaffName = _currentStaffName;
