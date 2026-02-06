@@ -1,0 +1,67 @@
+<Window x:Class="ICCardManager.Views.Dialogs.MergeHistoryDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="統合の取り消し"
+        Height="380"
+        Width="520"
+        MinHeight="300"
+        MinWidth="400"
+        WindowStartupLocation="CenterOwner"
+        ShowInTaskbar="False"
+        AutomationProperties.Name="統合履歴選択ダイアログ"
+        AutomationProperties.HelpText="元に戻したい統合履歴を選択して取り消しボタンを押します">
+
+    <Grid Margin="20">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <!-- ヘッダー -->
+        <TextBlock Grid.Row="0"
+                   Text="元に戻す統合履歴を選択してください"
+                   FontSize="{DynamicResource BaseFontSize}"
+                   FontWeight="Bold"
+                   Margin="0,0,0,12"/>
+
+        <!-- 統合履歴リスト -->
+        <ListView x:Name="HistoryListView"
+                  Grid.Row="1"
+                  SelectionMode="Single"
+                  Margin="0,0,0,16"
+                  AutomationProperties.Name="統合履歴一覧"
+                  MouseDoubleClick="HistoryListView_MouseDoubleClick">
+            <ListView.View>
+                <GridView>
+                    <GridViewColumn Header="統合日時" Width="140"
+                                    DisplayMemberBinding="{Binding MergedAtDisplay}"/>
+                    <GridViewColumn Header="内容" Width="320"
+                                    DisplayMemberBinding="{Binding Description}"/>
+                </GridView>
+            </ListView.View>
+        </ListView>
+
+        <!-- ボタン -->
+        <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right">
+            <Button x:Name="UndoButton"
+                    Content="選択した統合を元に戻す"
+                    Padding="16,8"
+                    FontSize="{DynamicResource BaseFontSize}"
+                    IsEnabled="False"
+                    Click="UndoButton_Click"
+                    AutomationProperties.Name="選択した統合を元に戻す"
+                    AutomationProperties.HelpText="選択した統合操作を取り消します"/>
+
+            <Button x:Name="CancelButton"
+                    Content="閉じる"
+                    Padding="16,8"
+                    Margin="10,0,0,0"
+                    FontSize="{DynamicResource BaseFontSize}"
+                    IsCancel="True"
+                    Click="CancelButton_Click"
+                    AutomationProperties.Name="閉じる"
+                    AutomationProperties.HelpText="ダイアログを閉じます"/>
+        </StackPanel>
+    </Grid>
+</Window>

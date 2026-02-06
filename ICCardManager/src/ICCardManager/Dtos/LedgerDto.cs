@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.ComponentModel;
 using System.Linq;
 using System.Threading.Tasks;
 namespace ICCardManager.Dtos
@@ -8,8 +9,27 @@ namespace ICCardManager.Dtos
     /// 利用履歴DTO
     /// ViewModelで使用する履歴表示用オブジェクト
     /// </summary>
-    public class LedgerDto
+    public class LedgerDto : INotifyPropertyChanged
     {
+        public event PropertyChangedEventHandler PropertyChanged;
+
+        /// <summary>
+        /// 統合対象として選択されているか（チェックボックス用）
+        /// </summary>
+        private bool _isChecked;
+        public bool IsChecked
+        {
+            get => _isChecked;
+            set
+            {
+                if (_isChecked != value)
+                {
+                    _isChecked = value;
+                    PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(IsChecked)));
+                }
+            }
+        }
+
         /// <summary>
         /// レコードID
         /// </summary>

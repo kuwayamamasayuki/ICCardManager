@@ -37,7 +37,7 @@ namespace ICCardManager.Data.Repositories
        staff_name, note, returner_idm, lent_at, returned_at, is_lent_record
 FROM ledger
 {whereClause}
-ORDER BY date ASC, income DESC, id ASC";
+ORDER BY date ASC, income DESC, balance DESC, id ASC";
 
             if (cardIdm != null)
             {
@@ -396,7 +396,7 @@ FROM ledger
        (SELECT COUNT(*) FROM ledger_detail WHERE ledger_id = l.id) as detail_count
 FROM ledger l
 {whereClause.Replace("card_idm", "l.card_idm").Replace("date ", "l.date ")}
-ORDER BY l.date ASC, l.income DESC, l.id ASC
+ORDER BY l.date ASC, l.income DESC, l.balance DESC, l.id ASC
 LIMIT @pageSize OFFSET @offset";
 
             if (cardIdm != null)
@@ -663,6 +663,143 @@ WHERE id = @id";
                 transaction.Rollback();
                 throw;
             }
+        }
+
+        /// <inheritdoc/>
+        public async Task<bool> UnmergeLedgersAsync(Services.LedgerMergeUndoData undoData)
+        {
+            var connection = _dbContext.GetConnection();
+
+            using var transaction = _dbContext.BeginTransaction();
+            try
+            {
+                // 1. ソースLedgerを再作成し、新IDを取得
+                var idMapping = new Dictionary<int, int>();
+                foreach (var source in undoData.DeletedSources)
+                {
+                    using var insertCommand = connection.CreateCommand();
+                    insertCommand.CommandText = @"INSERT INTO ledger (card_idm, lender_idm, date, summary, income, expense, balance,
+                           staff_name, note, returner_idm, lent_at, returned_at, is_lent_record)
+VALUES (@cardIdm, @lenderIdm, @date, @summary, @income, @expense, @balance,
+       @staffName, @note, @returnerIdm, @lentAt, @returnedAt, @isLentRecord);
+SELECT last_insert_rowid();";
+
+                    insertCommand.Parameters.AddWithValue("@cardIdm", source.CardIdm);
+                    insertCommand.Parameters.AddWithValue("@lenderIdm", (object)source.LenderIdm ?? DBNull.Value);
+                    insertCommand.Parameters.AddWithValue("@date", source.DateText);
+                    insertCommand.Parameters.AddWithValue("@summary", source.Summary);
+                    insertCommand.Parameters.AddWithValue("@income", source.Income);
+                    insertCommand.Parameters.AddWithValue("@expense", source.Expense);
+                    insertCommand.Parameters.AddWithValue("@balance", source.Balance);
+                    insertCommand.Parameters.AddWithValue("@staffName", (object)source.StaffName ?? DBNull.Value);
+                    insertCommand.Parameters.AddWithValue("@note", (object)source.Note ?? DBNull.Value);
+                    insertCommand.Parameters.AddWithValue("@returnerIdm", (object)source.ReturnerIdm ?? DBNull.Value);
+                    insertCommand.Parameters.AddWithValue("@lentAt", (object)source.LentAtText ?? DBNull.Value);
+                    insertCommand.Parameters.AddWithValue("@returnedAt", (object)source.ReturnedAtText ?? DBNull.Value);
+                    insertCommand.Parameters.AddWithValue("@isLentRecord", source.IsLentRecord ? 1 : 0);
+
+                    var newId = Convert.ToInt32(await insertCommand.ExecuteScalarAsync());
+                    idMapping[source.Id] = newId;
+                }
+
+                // 2. Detailを元のLedgerに戻す（SequenceNumber=rowidでマッピング）
+                foreach (var entry in undoData.DetailOriginalLedgerMap)
+                {
+                    var sequenceNumber = int.Parse(entry.Key);
+                    var originalLedgerId = entry.Value;
+
+                    // ターゲットLedgerに属するDetailのうち、ソースに属していたものを移動
+                    if (originalLedgerId != undoData.OriginalTarget.Id)
+                    {
+                        int newLedgerId;
+                        if (idMapping.TryGetValue(originalLedgerId, out newLedgerId))
+                        {
+                            using var moveCommand = connection.CreateCommand();
+                            moveCommand.CommandText = "UPDATE ledger_detail SET ledger_id = @newLedgerId WHERE rowid = @rowid";
+                            moveCommand.Parameters.AddWithValue("@newLedgerId", newLedgerId);
+                            moveCommand.Parameters.AddWithValue("@rowid", sequenceNumber);
+                            await moveCommand.ExecuteNonQueryAsync();
+                        }
+                    }
+                }
+
+                // 3. ターゲットLedgerを元の状態に復元
+                var original = undoData.OriginalTarget;
+                using var updateCommand = connection.CreateCommand();
+                updateCommand.CommandText = @"UPDATE ledger
+SET summary = @summary, income = @income, expense = @expense,
+    balance = @balance, note = @note
+WHERE id = @id";
+                updateCommand.Parameters.AddWithValue("@summary", original.Summary);
+                updateCommand.Parameters.AddWithValue("@income", original.Income);
+                updateCommand.Parameters.AddWithValue("@expense", original.Expense);
+                updateCommand.Parameters.AddWithValue("@balance", original.Balance);
+                updateCommand.Parameters.AddWithValue("@note", (object)original.Note ?? DBNull.Value);
+                updateCommand.Parameters.AddWithValue("@id", original.Id);
+                await updateCommand.ExecuteNonQueryAsync();
+
+                transaction.Commit();
+                return true;
+            }
+            catch
+            {
+                transaction.Rollback();
+                throw;
+            }
+        }
+
+        /// <inheritdoc/>
+        public async Task SaveMergeHistoryAsync(int targetLedgerId, string description, string undoDataJson)
+        {
+            var connection = _dbContext.GetConnection();
+
+            using var command = connection.CreateCommand();
+            command.CommandText = @"INSERT INTO ledger_merge_history (target_ledger_id, description, undo_data)
+VALUES (@targetLedgerId, @description, @undoData)";
+            command.Parameters.AddWithValue("@targetLedgerId", targetLedgerId);
+            command.Parameters.AddWithValue("@description", description);
+            command.Parameters.AddWithValue("@undoData", undoDataJson);
+
+            await command.ExecuteNonQueryAsync();
+        }
+
+        /// <inheritdoc/>
+        public async Task<List<(int Id, DateTime MergedAt, int TargetLedgerId, string Description, string UndoDataJson, bool IsUndone)>> GetMergeHistoriesAsync(bool undoneOnly)
+        {
+            var connection = _dbContext.GetConnection();
+            var result = new List<(int, DateTime, int, string, string, bool)>();
+
+            using var command = connection.CreateCommand();
+            command.CommandText = undoneOnly
+                ? "SELECT id, merged_at, target_ledger_id, description, undo_data, is_undone FROM ledger_merge_history WHERE is_undone = 1 ORDER BY merged_at DESC"
+                : "SELECT id, merged_at, target_ledger_id, description, undo_data, is_undone FROM ledger_merge_history ORDER BY merged_at DESC";
+
+            using var reader = await command.ExecuteReaderAsync();
+            while (await reader.ReadAsync())
+            {
+                result.Add((
+                    reader.GetInt32(0),
+                    DateTime.Parse(reader.GetString(1)),
+                    reader.GetInt32(2),
+                    reader.GetString(3),
+                    reader.GetString(4),
+                    reader.GetInt32(5) == 1
+                ));
+            }
+
+            return result;
+        }
+
+        /// <inheritdoc/>
+        public async Task MarkMergeHistoryUndoneAsync(int historyId)
+        {
+            var connection = _dbContext.GetConnection();
+
+            using var command = connection.CreateCommand();
+            command.CommandText = "UPDATE ledger_merge_history SET is_undone = 1 WHERE id = @id";
+            command.Parameters.AddWithValue("@id", historyId);
+
+            await command.ExecuteNonQueryAsync();
         }
 
         /// <inheritdoc/>

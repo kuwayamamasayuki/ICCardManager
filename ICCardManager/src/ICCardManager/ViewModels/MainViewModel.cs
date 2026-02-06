@@ -1,5 +1,4 @@
 using System;
-using System.Collections;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Linq;
@@ -1047,7 +1046,9 @@ public partial class MainViewModel : ViewModelBase
 
             foreach (var ledger in ledgers)
             {
-                HistoryLedgers.Add(ledger.ToDto());
+                var dto = ledger.ToDto();
+                SubscribeLedgerCheckedChanged(dto);
+                HistoryLedgers.Add(dto);
             }
 
             // ページ情報を更新
@@ -1071,6 +1072,9 @@ public partial class MainViewModel : ViewModelBase
             HistoryStatusMessage = totalCount > 0
                 ? $"{startIndex}～{endIndex}件を表示（全{totalCount:N0}件）"
                 : "該当する履歴がありません";
+
+            // 統合取り消しボタンの有効/無効を更新
+            await RefreshUndoMergeAvailabilityAsync();
         }
     }
 
@@ -1269,31 +1273,43 @@ public partial class MainViewModel : ViewModelBase
     #region 履歴統合（Issue #548）
 
     /// <summary>
-    /// 履歴DataGridの選択アイテム（WPF DataGrid.SelectedItemsは直接バインド不可のためIListで受け取る）
+    /// 元に戻せる統合履歴が存在するか（「統合を元に戻す」ボタンの有効/無効制御用）
     /// </summary>
-    private IList? _historySelectedItems;
-    public IList? HistorySelectedItems
+    private bool _hasUndoableMergeHistories;
+
+    /// <summary>
+    /// チェックされた履歴を取得
+    /// </summary>
+    private List<LedgerDto> GetCheckedLedgers()
     {
-        get => _historySelectedItems;
-        set
-        {
-            _historySelectedItems = value;
-            OnPropertyChanged();
-            MergeHistoryLedgersCommand.NotifyCanExecuteChanged();
-        }
+        return HistoryLedgers.Where(d => d.IsChecked).ToList();
     }
 
     /// <summary>
-    /// 選択した履歴を統合
+    /// チェックボックスの変更を監視するためのハンドラを登録
+    /// </summary>
+    private void SubscribeLedgerCheckedChanged(LedgerDto dto)
+    {
+        dto.PropertyChanged += (s, e) =>
+        {
+            if (e.PropertyName == nameof(LedgerDto.IsChecked))
+            {
+                MergeHistoryLedgersCommand.NotifyCanExecuteChanged();
+            }
+        };
+    }
+
+    /// <summary>
+    /// チェックされた履歴を統合
     /// </summary>
     [RelayCommand(CanExecute = nameof(CanMergeHistoryLedgers))]
     public async Task MergeHistoryLedgers()
     {
-        var selectedDtos = HistorySelectedItems?.Cast<LedgerDto>().ToList();
-        if (selectedDtos == null || selectedDtos.Count < 2) return;
+        var checkedDtos = GetCheckedLedgers();
+        if (checkedDtos.Count < 2) return;
 
-        // 隣接チェック: 選択されたアイテムがHistoryLedgers内で連続しているか
-        var indices = selectedDtos
+        // 隣接チェック: チェックされたアイテムがHistoryLedgers内で連続しているか
+        var indices = checkedDtos
             .Select(dto => HistoryLedgers.IndexOf(dto))
             .OrderBy(i => i)
             .ToList();
@@ -1303,7 +1319,7 @@ public partial class MainViewModel : ViewModelBase
             if (indices[i] != indices[i - 1] + 1)
             {
                 MessageBox.Show(
-                    "隣接する履歴のみ統合できます。\n連続した行を選択してください。",
+                    "隣接する履歴のみ統合できます。\n連続した行にチェックを入れてください。",
                     "統合できません",
                     MessageBoxButton.OK,
                     MessageBoxImage.Warning);
@@ -1315,12 +1331,12 @@ public partial class MainViewModel : ViewModelBase
         var sortedDtos = indices.Select(i => HistoryLedgers[i]).ToList();
 
         // 確認ダイアログ
-        var message = "以下の履歴を統合します。この操作は元に戻せません。\n\n";
+        var message = "以下の履歴を統合します。\n\n";
         foreach (var dto in sortedDtos)
         {
             message += $"  • {dto.DateDisplay}  {dto.Summary}  残高:{dto.BalanceDisplay}\n";
         }
-        message += "\n統合してよろしいですか？";
+        message += "\n統合してよろしいですか？（統合後に「元に戻す」ことができます）";
 
         var result = MessageBox.Show(
             message,
@@ -1338,7 +1354,12 @@ public partial class MainViewModel : ViewModelBase
         {
             await LoadHistoryLedgersAsync();
             await RefreshDashboardAsync();
-            _toastNotificationService.ShowInfo("統合完了", "履歴を統合しました");
+            UndoMergeHistoryLedgersCommand.NotifyCanExecuteChanged();
+            MessageBox.Show(
+                "履歴を統合しました。\n「統合を元に戻す」ボタンで取り消せます。",
+                "統合完了",
+                MessageBoxButton.OK,
+                MessageBoxImage.Information);
         }
         else
         {
@@ -1355,20 +1376,106 @@ public partial class MainViewModel : ViewModelBase
     /// </summary>
     private bool CanMergeHistoryLedgers()
     {
-        if (HistorySelectedItems == null || HistorySelectedItems.Count < 2)
+        var checkedDtos = GetCheckedLedgers();
+
+        if (checkedDtos.Count < 2)
             return false;
 
-        var selectedDtos = HistorySelectedItems.Cast<LedgerDto>().ToList();
-
         // 同一カードかチェック
-        if (selectedDtos.Select(d => d.CardIdm).Distinct().Count() > 1)
+        if (checkedDtos.Select(d => d.CardIdm).Distinct().Count() > 1)
             return false;
 
         // 貸出中レコードがないかチェック
-        if (selectedDtos.Any(d => d.IsLentRecord))
+        if (checkedDtos.Any(d => d.IsLentRecord))
+            return false;
+
+        // チャージと利用の混在チェック
+        if (checkedDtos.Any(d => d.Income > 0) && checkedDtos.Any(d => d.Expense > 0))
             return false;
 
         return true;
+    }
+
+    /// <summary>
+    /// 統合取り消しコマンドの実行可否
+    /// </summary>
+    private bool CanUndoMergeHistoryLedgers() => _hasUndoableMergeHistories;
+
+    /// <summary>
+    /// 元に戻せる統合履歴の有無を非同期にチェックし、ボタンの有効/無効を更新する
+    /// </summary>
+    private async Task RefreshUndoMergeAvailabilityAsync()
+    {
+        var histories = await _ledgerMergeService.GetUndoableMergeHistoriesAsync();
+        _hasUndoableMergeHistories = histories.Count > 0;
+        UndoMergeHistoryLedgersCommand.NotifyCanExecuteChanged();
+    }
+
+    /// <summary>
+    /// 過去の統合を元に戻す（ダイアログで履歴を選択）
+    /// </summary>
+    [RelayCommand(CanExecute = nameof(CanUndoMergeHistoryLedgers))]
+    public async Task UndoMergeHistoryLedgers()
+    {
+        // DBから元に戻せる統合履歴を取得
+        var histories = await _ledgerMergeService.GetUndoableMergeHistoriesAsync();
+
+        if (histories.Count == 0)
+        {
+            _hasUndoableMergeHistories = false;
+            UndoMergeHistoryLedgersCommand.NotifyCanExecuteChanged();
+            return;
+        }
+
+        // 新しい順に表示用アイテムを作成
+        var items = histories
+            .OrderByDescending(h => h.MergedAt)
+            .Select(h => new Views.Dialogs.MergeHistoryItem
+            {
+                Id = h.Id,
+                MergedAtDisplay = h.MergedAt.ToString("yyyy/MM/dd HH:mm"),
+                Description = h.Description
+            })
+            .ToList();
+
+        // 選択ダイアログを表示
+        var dialog = new Views.Dialogs.MergeHistoryDialog(items)
+        {
+            Owner = Application.Current.MainWindow
+        };
+
+        if (dialog.ShowDialog() == true && dialog.SelectedHistoryId.HasValue)
+        {
+            await ExecuteUnmergeAsync(dialog.SelectedHistoryId.Value);
+        }
+    }
+
+    /// <summary>
+    /// undo実行の共通処理
+    /// </summary>
+    private async Task ExecuteUnmergeAsync(int mergeHistoryId)
+    {
+        var undoResult = await _ledgerMergeService.UnmergeAsync(mergeHistoryId);
+
+        if (undoResult.Success)
+        {
+            await LoadHistoryLedgersAsync();
+            await RefreshDashboardAsync();
+            UndoMergeHistoryLedgersCommand.NotifyCanExecuteChanged();
+            MessageBox.Show(
+                "統合を元に戻しました。",
+                "取り消し完了",
+                MessageBoxButton.OK,
+                MessageBoxImage.Information);
+        }
+        else
+        {
+            MessageBox.Show(
+                undoResult.ErrorMessage,
+                "取り消しエラー",
+                MessageBoxButton.OK,
+                MessageBoxImage.Error);
+        }
     }
 
     #endregion

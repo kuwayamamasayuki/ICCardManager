@@ -165,6 +165,33 @@ namespace ICCardManager.Data.Repositories
         Task<bool> MergeLedgersAsync(int targetLedgerId, IEnumerable<int> sourceLedgerIds, Ledger updatedTarget);
 
         /// <summary>
+        /// 統合を元に戻す（ソースLedgerを再作成し、Detailsを元のLedgerに戻す）
+        /// </summary>
+        /// <remarks>
+        /// Issue #548対応: 統合操作のUndoを実現する。
+        /// トランザクション内で、ソースLedgerを再作成し、DetailのledgerIdを元に戻す。
+        /// </remarks>
+        /// <param name="undoData">統合時に保存されたUndoデータ</param>
+        /// <returns>成功した場合true</returns>
+        Task<bool> UnmergeLedgersAsync(Services.LedgerMergeUndoData undoData);
+
+        /// <summary>
+        /// 統合履歴をDBに保存
+        /// </summary>
+        Task SaveMergeHistoryAsync(int targetLedgerId, string description, string undoDataJson);
+
+        /// <summary>
+        /// 統合履歴一覧を取得
+        /// </summary>
+        /// <param name="undoneOnly">取り消し済みのみを取得するか</param>
+        Task<List<(int Id, DateTime MergedAt, int TargetLedgerId, string Description, string UndoDataJson, bool IsUndone)>> GetMergeHistoriesAsync(bool undoneOnly);
+
+        /// <summary>
+        /// 統合履歴を取り消し済みにマーク
+        /// </summary>
+        Task MarkMergeHistoryUndoneAsync(int historyId);
+
+        /// <summary>
         /// 指定カードの新規購入日（または繰越日）を取得
         /// </summary>
         /// <remarks>

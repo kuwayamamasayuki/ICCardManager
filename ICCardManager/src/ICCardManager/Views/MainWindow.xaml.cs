@@ -166,17 +166,6 @@ namespace ICCardManager.Views
         }
 
         /// <summary>
-        /// 履歴DataGridの選択変更をViewModelに通知
-        /// </summary>
-        private void HistoryDataGrid_SelectionChanged(object sender, SelectionChangedEventArgs e)
-        {
-            if (sender is DataGrid dg)
-            {
-                _viewModel.HistorySelectedItems = dg.SelectedItems;
-            }
-        }
-
-        /// <summary>
         /// ウィンドウが画面内に収まるように補正
         /// </summary>
         /// <param name="left">左端座標</param>

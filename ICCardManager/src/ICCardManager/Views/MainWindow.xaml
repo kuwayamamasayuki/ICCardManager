@@ -302,12 +302,18 @@
 
                                 <!-- 統合ボタン（Issue #548） -->
                                 <Border Width="1" Background="#BDBDBD" Margin="10,2"/>
-                                <Button Content="📦 選択した履歴を統合"
+                                <Button Content="📦 チェックした履歴を統合"
                                         Command="{Binding MergeHistoryLedgersCommand}"
                                         Padding="12,6"
-                                        ToolTip="Ctrl+クリックで複数選択した履歴を1つに統合します"
-                                        AutomationProperties.Name="選択した履歴を統合"
-                                        AutomationProperties.HelpText="複数の履歴を選択して統合ボタンを押すと、1つの履歴にまとめます"/>
+                                        ToolTip="チェックボックスで選んだ履歴を1つに統合します"
+                                        AutomationProperties.Name="チェックした履歴を統合"
+                                        AutomationProperties.HelpText="チェックボックスで統合したい履歴を選んでからこのボタンを押すと、1つの履歴にまとめます"/>
+                                <Button Content="↩ 統合を元に戻す"
+                                        Command="{Binding UndoMergeHistoryLedgersCommand}"
+                                        Padding="12,6"
+                                        ToolTip="過去の統合操作を元に戻します"
+                                        AutomationProperties.Name="統合を元に戻す"
+                                        AutomationProperties.HelpText="過去の統合操作を選んで取り消して元の状態に戻します"/>
 
                                 <!-- 月選択ポップアップ -->
                                 <Popup IsOpen="{Binding IsHistoryMonthSelectorOpen}"
@@ -361,8 +367,7 @@
                                   ItemsSource="{Binding HistoryLedgers}"
                                   AutoGenerateColumns="False"
                                   IsReadOnly="True"
-                                  SelectionMode="Extended"
-                                  SelectionChanged="HistoryDataGrid_SelectionChanged"
+                                  SelectionMode="Single"
                                   CanUserAddRows="False"
                                   CanUserDeleteRows="False"
                                   GridLinesVisibility="Horizontal"
@@ -370,8 +375,18 @@
                                   RowHeaderWidth="0"
                                   AlternatingRowBackground="#FAFAFA"
                                   AutomationProperties.Name="利用履歴一覧"
-                                  AutomationProperties.HelpText="Ctrl+クリックで複数選択し、統合ボタンで1つにまとめられます">
+                                  AutomationProperties.HelpText="チェックボックスで統合したい履歴を選択し、統合ボタンを押します">
                             <DataGrid.Columns>
+                                <DataGridTemplateColumn Header="選択" Width="45">
+                                    <DataGridTemplateColumn.CellTemplate>
+                                        <DataTemplate>
+                                            <CheckBox IsChecked="{Binding IsChecked, UpdateSourceTrigger=PropertyChanged}"
+                                                      HorizontalAlignment="Center"
+                                                      VerticalAlignment="Center"
+                                                      AutomationProperties.Name="統合対象として選択"/>
+                                        </DataTemplate>
+                                    </DataGridTemplateColumn.CellTemplate>
+                                </DataGridTemplateColumn>
                                 <DataGridTextColumn Header="日付" Binding="{Binding DateDisplay}" Width="90"/>
                                 <DataGridTextColumn Header="摘要" Binding="{Binding Summary}" Width="*"/>
                                 <DataGridTextColumn Header="受入" Width="75">

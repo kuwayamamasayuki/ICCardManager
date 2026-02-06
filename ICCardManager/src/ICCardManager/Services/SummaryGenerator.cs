@@ -408,10 +408,13 @@ namespace ICCardManager.Services
                 }
                 else
                 {
-                    // グループ内の最初の乗車駅と最後の降車駅を使用
-                    var firstStation = groupTrips.First().EntryStation;
-                    var lastStation = groupTrips.Last().ExitStation;
-                    result.Add($"{firstStation}～{lastStation}");
+                    // Issue #548: グループ内でも往復・乗継を自動判定
+                    // 単純にfirst/lastを使うと往復（A→B, B→A）で「A～A」になるバグがあった
+                    var groupSummary = GenerateRailwaySummaryAutomatic(groupTrips);
+                    if (!string.IsNullOrEmpty(groupSummary))
+                    {
+                        result.Add(groupSummary);
+                    }
                 }
             }
 
