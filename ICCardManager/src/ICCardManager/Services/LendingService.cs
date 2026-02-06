@@ -150,6 +150,7 @@ namespace ICCardManager.Services
         /// </summary>
         /// <param name="staffIdm">貸出者の職員証IDm（16桁の16進数文字列）</param>
         /// <param name="cardIdm">貸出対象のICカードIDm（16桁の16進数文字列）</param>
+        /// <param name="balance">カードの現在残高（読み取れなかった場合はnull）</param>
         /// <returns>貸出結果。成功時は <see cref="LendingResult.Success"/> が true</returns>
         /// <remarks>
         /// <para>処理フロー：</para>
@@ -164,7 +165,7 @@ namespace ICCardManager.Services
         /// エラー時は <see cref="LendingResult.ErrorMessage"/> にエラー内容が設定されます。
         /// </para>
         /// </remarks>
-        public async Task<LendingResult> LendAsync(string staffIdm, string cardIdm)
+        public async Task<LendingResult> LendAsync(string staffIdm, string cardIdm, int? balance = null)
         {
             var result = new LendingResult { OperationType = LendingOperationType.Lend };
 
@@ -213,6 +214,7 @@ namespace ICCardManager.Services
                 try
                 {
                     // 貸出レコードを作成
+                    var currentBalance = balance ?? 0;
                     var ledger = new Ledger
                     {
                         CardIdm = cardIdm,
@@ -221,7 +223,7 @@ namespace ICCardManager.Services
                         Summary = SummaryGenerator.GetLendingSummary(),
                         Income = 0,
                         Expense = 0,
-                        Balance = 0,
+                        Balance = currentBalance,
                         StaffName = staff.Name,
                         LentAt = now,
                         IsLentRecord = true
@@ -242,6 +244,7 @@ namespace ICCardManager.Services
                     LastOperationType = LendingOperationType.Lend;
 
                     result.Success = true;
+                    result.Balance = currentBalance;
                 }
                 catch
                 {
