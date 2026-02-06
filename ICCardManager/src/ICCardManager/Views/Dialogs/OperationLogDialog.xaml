@@ -209,7 +209,7 @@
                     </DataGridTextColumn.ElementStyle>
                 </DataGridTextColumn>
                 <DataGridTextColumn Header="対象" Binding="{Binding TargetTableDisplay}" Width="80"/>
-                <DataGridTextColumn Header="対象ID" Binding="{Binding TargetId}" Width="180"/>
+                <DataGridTextColumn Header="対象詳細" Binding="{Binding TargetDisplayName}" Width="250"/>
                 <DataGridTextColumn Header="操作者" Binding="{Binding OperatorName}" Width="100"/>
                 <DataGridTextColumn Header="詳細" Binding="{Binding DetailSummary}" Width="*"/>
             </DataGrid.Columns>

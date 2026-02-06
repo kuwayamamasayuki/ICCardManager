@@ -4,6 +4,7 @@ using System.Text;
 using System.Text.Json;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using ICCardManager.Common;
 using ICCardManager.Data.Repositories;
 using ICCardManager.Models;
 using ICCardManager.Services;
@@ -60,6 +61,10 @@ public class OperationLogDisplayItem
         _ => TargetTable
     };
     public string TargetId { get; init; } = string.Empty;
+    /// <summary>
+    /// 対象の詳細表示名（例: 「田中太郎（001）」「はやかけん 001」「R7.2.6 鉄道（博多～天神）」）
+    /// </summary>
+    public string TargetDisplayName { get; init; } = string.Empty;
     public string OperatorName { get; init; } = string.Empty;
     public string? BeforeData { get; init; }
     public string? AfterData { get; init; }
@@ -437,6 +442,8 @@ public partial class OperationLogSearchViewModel : ViewModelBase
     {
         // 詳細サマリーを生成
         var detailSummary = GenerateDetailSummary(log);
+        // 対象の詳細表示名を生成
+        var targetDisplayName = GenerateTargetDisplayName(log);
 
         return new OperationLogDisplayItem
         {
@@ -445,11 +452,106 @@ public partial class OperationLogSearchViewModel : ViewModelBase
             Action = log.Action ?? "",
             TargetTable = log.TargetTable ?? "",
             TargetId = log.TargetId ?? "",
+            TargetDisplayName = targetDisplayName,
             OperatorName = log.OperatorName,
             BeforeData = log.BeforeData,
             AfterData = log.AfterData,
             DetailSummary = detailSummary
         };
+    }
+
+    /// <summary>
+    /// 対象の詳細表示名を生成（例: 「田中太郎（001）」「はやかけん 001」「R7.2.6 鉄道（博多～天神）」）
+    /// </summary>
+    private static string GenerateTargetDisplayName(OperationLog log)
+    {
+        // BeforeDataまたはAfterDataからJSONを取得（UPDATE/DELETEはBefore、INSERTはAfter）
+        var jsonData = !string.IsNullOrEmpty(log.AfterData) ? log.AfterData : log.BeforeData;
+        if (string.IsNullOrEmpty(jsonData))
+        {
+            return log.TargetId ?? "";
+        }
+
+        try
+        {
+            var doc = JsonDocument.Parse(jsonData);
+
+            return log.TargetTable switch
+            {
+                "staff" => GenerateStaffDisplayName(doc),
+                "ic_card" => GenerateCardDisplayName(doc),
+                "ledger" => GenerateLedgerDisplayName(doc),
+                _ => log.TargetId ?? ""
+            };
+        }
+        catch
+        {
+            // JSON解析エラーの場合は従来のTargetIdを返す
+            return log.TargetId ?? "";
+        }
+    }
+
+    /// <summary>
+    /// 職員の表示名を生成（例: 「田中太郎（001）」）
+    /// </summary>
+    private static string GenerateStaffDisplayName(JsonDocument doc)
+    {
+        var name = GetJsonPropertyValue(doc, "Name");
+        var number = GetJsonPropertyValue(doc, "Number");
+
+        if (string.IsNullOrEmpty(name))
+        {
+            return GetJsonPropertyValue(doc, "StaffIdm") ?? "";
+        }
+
+        if (!string.IsNullOrEmpty(number))
+        {
+            return $"{name}（{number}）";
+        }
+
+        return name;
+    }
+
+    /// <summary>
+    /// カードの表示名を生成（例: 「はやかけん 001」）
+    /// </summary>
+    private static string GenerateCardDisplayName(JsonDocument doc)
+    {
+        var cardType = GetJsonPropertyValue(doc, "CardType");
+        var cardNumber = GetJsonPropertyValue(doc, "CardNumber");
+
+        if (string.IsNullOrEmpty(cardType) && string.IsNullOrEmpty(cardNumber))
+        {
+            return GetJsonPropertyValue(doc, "CardIdm") ?? "";
+        }
+
+        return $"{cardType ?? ""} {cardNumber ?? ""}".Trim();
+    }
+
+    /// <summary>
+    /// 利用履歴の表示名を生成（例: 「R7.2.6 鉄道（博多～天神）」）
+    /// </summary>
+    private static string GenerateLedgerDisplayName(JsonDocument doc)
+    {
+        var dateStr = GetJsonPropertyValue(doc, "Date");
+        var summary = GetJsonPropertyValue(doc, "Summary");
+
+        var parts = new List<string>();
+
+        // 日付を和暦に変換
+        if (!string.IsNullOrEmpty(dateStr) && DateTime.TryParse(dateStr, out var date))
+        {
+            parts.Add(WarekiConverter.ToWareki(date));
+        }
+
+        // 摘要（長すぎる場合は省略）
+        if (!string.IsNullOrEmpty(summary))
+        {
+            var displaySummary = summary.Length > 25 ? summary.Substring(0, 25) + "..." : summary;
+            parts.Add(displaySummary);
+        }
+
+        return parts.Count > 0 ? string.Join(" ", parts) : GetJsonPropertyValue(doc, "Id")?.ToString() ?? "";
     }
 
     /// <summary>
