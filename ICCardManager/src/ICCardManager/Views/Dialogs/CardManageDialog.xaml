@@ -71,32 +71,30 @@
                                 <TextBlock>
                                     <TextBlock.Style>
                                         <Style TargetType="TextBlock">
+                                            <Setter Property="Text" Value="利用可"/>
+                                            <Setter Property="Foreground" Value="DarkGreen"/>
+                                            <Setter Property="FontWeight" Value="Bold"/>
                                             <Style.Triggers>
-                                                <DataTrigger Binding="{Binding IsLent}" Value="True">
+                                                <!-- Issue #530: 払戻済状態（最優先） -->
+                                                <DataTrigger Binding="{Binding IsRefunded}" Value="True">
+                                                    <Setter Property="Text" Value="払戻済"/>
+                                                    <Setter Property="Foreground" Value="Gray"/>
+                                                    <Setter Property="FontWeight" Value="Normal"/>
+                                                </DataTrigger>
+                                                <!-- 貸出中（払戻済でない場合のみ適用） -->
+                                                <MultiDataTrigger>
+                                                    <MultiDataTrigger.Conditions>
+                                                        <Condition Binding="{Binding IsRefunded}" Value="False"/>
+                                                        <Condition Binding="{Binding IsLent}" Value="True"/>
+                                                    </MultiDataTrigger.Conditions>
                                                     <Setter Property="Text" Value="貸出中"/>
                                                     <Setter Property="Foreground" Value="OrangeRed"/>
                                                     <Setter Property="FontWeight" Value="Bold"/>
-                                                </DataTrigger>
-                                                <DataTrigger Binding="{Binding IsLent}" Value="False">
-                                                    <Setter Property="Text" Value="利用可"/>
-                                                    <Setter Property="Foreground" Value="DarkGreen"/>
-                                                    <Setter Property="FontWeight" Value="Bold"/>
-                                                </DataTrigger>
+                                                </MultiDataTrigger>
                                                 <!-- 選択時は白文字に -->
-                                                <MultiDataTrigger>
-                                                    <MultiDataTrigger.Conditions>
-                                                        <Condition Binding="{Binding IsLent}" Value="False"/>
-                                                        <Condition Binding="{Binding IsSelected, RelativeSource={RelativeSource AncestorType=DataGridRow}}" Value="True"/>
-                                                    </MultiDataTrigger.Conditions>
+                                                <DataTrigger Binding="{Binding IsSelected, RelativeSource={RelativeSource AncestorType=DataGridRow}}" Value="True">
                                                     <Setter Property="Foreground" Value="White"/>
-                                                </MultiDataTrigger>
-                                                <MultiDataTrigger>
-                                                    <MultiDataTrigger.Conditions>
-                                                        <Condition Binding="{Binding IsLent}" Value="True"/>
-                                                        <Condition Binding="{Binding IsSelected, RelativeSource={RelativeSource AncestorType=DataGridRow}}" Value="True"/>
-                                                    </MultiDataTrigger.Conditions>
-                                                    <Setter Property="Foreground" Value="White"/>
-                                                </MultiDataTrigger>
+                                                </DataTrigger>
                                             </Style.Triggers>
                                         </Style>
                                     </TextBlock.Style>
@@ -146,8 +144,8 @@
                             Margin="0,0,0,5"
                             Foreground="DarkOrange"
                             AutomationProperties.Name="カード払い戻し"
-                            AutomationProperties.HelpText="選択したカードを払い戻します。残高が払出金額として記録され、カードは削除されます。"
-                            ToolTip="払い戻し処理を行い、カードを削除"/>
+                            AutomationProperties.HelpText="選択したカードを払い戻します。残高が払出金額として記録され、カードは「払戻済」状態になります。帳票作成は引き続き可能です。"
+                            ToolTip="払い戻し処理を行い、カードを「払戻済」状態に設定"/>
                 </WrapPanel>
             </DockPanel>
         </Grid>

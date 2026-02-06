@@ -63,9 +63,26 @@ namespace ICCardManager.Dtos
         public string DisplayName => $"{CardType} {CardNumber}";
 
         /// <summary>
+        /// 払戻済フラグ（Issue #530）
+        /// </summary>
+        /// <remarks>
+        /// 払い戻したカードは削除せず、この状態で残す。
+        /// 払戻済カードは貸出対象外だが、帳票作成は可能。
+        /// </remarks>
+        public bool IsRefunded { get; set; }
+
+        /// <summary>
+        /// 払戻日時（Issue #530）
+        /// </summary>
+        public DateTime? RefundedAt { get; set; }
+
+        /// <summary>
         /// 表示用: 貸出状態テキスト
         /// </summary>
-        public string LentStatusDisplay => IsLent ? "貸出中" : "在庫";
+        /// <remarks>
+        /// Issue #530対応: 払戻済の場合は「払戻済」と表示
+        /// </remarks>
+        public string LentStatusDisplay => IsRefunded ? "払戻済" : (IsLent ? "貸出中" : "在庫");
 
         /// <summary>
         /// 表示用: 貸出日時

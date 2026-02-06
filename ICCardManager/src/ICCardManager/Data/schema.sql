@@ -26,6 +26,8 @@ CREATE TABLE IF NOT EXISTS ic_card (
     note                 TEXT,                  -- 備考
     is_deleted           INTEGER DEFAULT 0,     -- 削除フラグ
     deleted_at           TEXT,                  -- 削除日時
+    is_refunded          INTEGER DEFAULT 0,     -- 払戻済フラグ（Issue #530）
+    refunded_at          TEXT,                  -- 払戻日時（Issue #530）
     is_lent              INTEGER DEFAULT 0,     -- 貸出状態（0:未貸出、1:貸出中）
     last_lent_at         TEXT,                  -- 最終貸出日時
     last_lent_staff      TEXT REFERENCES staff(staff_idm),  -- 最終貸出者IDm

@@ -97,5 +97,15 @@ namespace ICCardManager.Data.Repositories
         /// </summary>
         /// <param name="cardType">カード種別</param>
         Task<string> GetNextCardNumberAsync(string cardType);
+
+        /// <summary>
+        /// ICカードを払戻済状態に設定（Issue #530）
+        /// </summary>
+        /// <remarks>
+        /// 払戻済カードは論理削除と異なり、帳票作成時には引き続き選択可能。
+        /// ただし、貸出対象からは除外される。
+        /// </remarks>
+        /// <param name="cardIdm">ICカードIDm</param>
+        Task<bool> SetRefundedAsync(string cardIdm);
     }
 }

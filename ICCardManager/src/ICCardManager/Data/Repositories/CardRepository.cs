@@ -42,7 +42,8 @@ namespace ICCardManager.Data.Repositories
 
             using var command = connection.CreateCommand();
             command.CommandText = @"SELECT card_idm, card_type, card_number, note, is_deleted, deleted_at,
-       is_lent, last_lent_at, last_lent_staff, starting_page_number
+       is_lent, last_lent_at, last_lent_staff, starting_page_number,
+       is_refunded, refunded_at
 FROM ic_card
 WHERE is_deleted = 0
 ORDER BY card_type, card_number";
@@ -64,7 +65,8 @@ ORDER BY card_type, card_number";
 
             using var command = connection.CreateCommand();
             command.CommandText = @"SELECT card_idm, card_type, card_number, note, is_deleted, deleted_at,
-       is_lent, last_lent_at, last_lent_staff, starting_page_number
+       is_lent, last_lent_at, last_lent_staff, starting_page_number,
+       is_refunded, refunded_at
 FROM ic_card
 ORDER BY card_type, card_number";
 
@@ -89,6 +91,12 @@ ORDER BY card_type, card_number";
         /// <summary>
         /// DBから貸出可能なカードを取得
         /// </summary>
+        /// <remarks>
+        /// 貸出可能なカードの条件:
+        /// - 論理削除されていない（is_deleted = 0）
+        /// - 払戻済でない（is_refunded = 0）←Issue #530
+        /// - 貸出中でない（is_lent = 0）
+        /// </remarks>
         private async Task<IEnumerable<IcCard>> GetAvailableFromDbAsync()
         {
             var connection = _dbContext.GetConnection();
@@ -96,9 +104,10 @@ ORDER BY card_type, card_number";
 
             using var command = connection.CreateCommand();
             command.CommandText = @"SELECT card_idm, card_type, card_number, note, is_deleted, deleted_at,
-       is_lent, last_lent_at, last_lent_staff, starting_page_number
+       is_lent, last_lent_at, last_lent_staff, starting_page_number,
+       is_refunded, refunded_at
 FROM ic_card
-WHERE is_deleted = 0 AND is_lent = 0
+WHERE is_deleted = 0 AND is_refunded = 0 AND is_lent = 0
 ORDER BY card_type, card_number";
 
             using var reader = await command.ExecuteReaderAsync();
@@ -129,7 +138,8 @@ ORDER BY card_type, card_number";
 
             using var command = connection.CreateCommand();
             command.CommandText = @"SELECT card_idm, card_type, card_number, note, is_deleted, deleted_at,
-       is_lent, last_lent_at, last_lent_staff, starting_page_number
+       is_lent, last_lent_at, last_lent_staff, starting_page_number,
+       is_refunded, refunded_at
 FROM ic_card
 WHERE is_deleted = 0 AND is_lent = 1
 ORDER BY last_lent_at DESC";
@@ -151,11 +161,13 @@ ORDER BY last_lent_at DESC";
             using var command = connection.CreateCommand();
             command.CommandText = includeDeleted
                 ? @"SELECT card_idm, card_type, card_number, note, is_deleted, deleted_at,
-       is_lent, last_lent_at, last_lent_staff, starting_page_number
+       is_lent, last_lent_at, last_lent_staff, starting_page_number,
+       is_refunded, refunded_at
 FROM ic_card
 WHERE card_idm = @cardIdm"
                 : @"SELECT card_idm, card_type, card_number, note, is_deleted, deleted_at,
-       is_lent, last_lent_at, last_lent_staff, starting_page_number
+       is_lent, last_lent_at, last_lent_staff, starting_page_number,
+       is_refunded, refunded_at
 FROM ic_card
 WHERE card_idm = @cardIdm AND is_deleted = 0";
 
@@ -399,8 +411,37 @@ WHERE card_type = @cardType";
                 IsLent = reader.GetInt32(6) == 1,
                 LastLentAt = reader.IsDBNull(7) ? null : DateTime.Parse(reader.GetString(7)),
                 LastLentStaff = reader.IsDBNull(8) ? null : reader.GetString(8),
-                StartingPageNumber = reader.IsDBNull(9) ? 1 : reader.GetInt32(9)
+                StartingPageNumber = reader.IsDBNull(9) ? 1 : reader.GetInt32(9),
+                IsRefunded = reader.IsDBNull(10) ? false : reader.GetInt32(10) == 1,
+                RefundedAt = reader.IsDBNull(11) ? null : DateTime.Parse(reader.GetString(11))
             };
+        }
+
+        /// <inheritdoc/>
+        public async Task<bool> SetRefundedAsync(string cardIdm)
+        {
+            var connection = _dbContext.GetConnection();
+
+            // 貸出中は払戻不可
+            var card = await GetByIdmAsync(cardIdm);
+            if (card == null || card.IsLent)
+            {
+                return false;
+            }
+
+            using var command = connection.CreateCommand();
+            command.CommandText = @"UPDATE ic_card
+SET is_refunded = 1, refunded_at = datetime('now', 'localtime')
+WHERE card_idm = @cardIdm AND is_deleted = 0 AND is_refunded = 0 AND is_lent = 0";
+
+            command.Parameters.AddWithValue("@cardIdm", cardIdm);
+
+            var result = await command.ExecuteNonQueryAsync();
+            if (result > 0)
+            {
+                InvalidateCardCache();
+            }
+            return result > 0;
         }
     }
 }
