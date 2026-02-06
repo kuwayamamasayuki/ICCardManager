@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 using System.Windows;
+using System.Windows.Controls;
 using System.Windows.Interop;
 using ICCardManager.Common;
 using ICCardManager.Data.Repositories;
@@ -161,6 +162,17 @@ namespace ICCardManager.Views
 #if DEBUG
                 System.Diagnostics.Debug.WriteLine($"[MainWindow] ウィンドウ位置の復元に失敗: {ex.Message}");
 #endif
+            }
+        }
+
+        /// <summary>
+        /// 履歴DataGridの選択変更をViewModelに通知
+        /// </summary>
+        private void HistoryDataGrid_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+            if (sender is DataGrid dg)
+            {
+                _viewModel.HistorySelectedItems = dg.SelectedItems;
             }
         }
 

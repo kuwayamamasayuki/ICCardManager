@@ -25,6 +25,7 @@ namespace ICCardManager.Services
             public const string Update = "UPDATE";
             public const string Delete = "DELETE";
             public const string Restore = "RESTORE";
+            public const string Merge = "MERGE";
         }
 
         /// <summary>
@@ -316,6 +317,33 @@ namespace ICCardManager.Services
                 Action = Actions.Delete,
                 BeforeData = SerializeToJson(ledger),
                 AfterData = null
+            };
+
+            await _operationLogRepository.InsertAsync(log);
+        }
+
+        /// <summary>
+        /// 履歴統合のログを記録
+        /// </summary>
+        /// <param name="operatorIdm">操作者IDm（nullまたは空文字列の場合はGUI操作として記録）</param>
+        /// <param name="sourceLedgers">統合元の履歴データリスト</param>
+        /// <param name="mergedLedger">統合後の履歴データ</param>
+        public async Task LogLedgerMergeAsync(string? operatorIdm, IReadOnlyList<Ledger> sourceLedgers, Ledger mergedLedger)
+        {
+            var isGuiOperation = string.IsNullOrEmpty(operatorIdm);
+            var actualIdm = isGuiOperation ? GuiOperator.Idm : operatorIdm;
+            var operatorName = isGuiOperation ? GuiOperator.Name : await GetOperatorNameAsync(operatorIdm!);
+
+            var log = new OperationLog
+            {
+                Timestamp = DateTime.Now,
+                OperatorIdm = actualIdm,
+                OperatorName = operatorName,
+                TargetTable = Tables.Ledger,
+                TargetId = mergedLedger.Id.ToString(),
+                Action = Actions.Merge,
+                BeforeData = SerializeToJson(sourceLedgers),
+                AfterData = SerializeToJson(mergedLedger)
             };
 
             await _operationLogRepository.InsertAsync(log);

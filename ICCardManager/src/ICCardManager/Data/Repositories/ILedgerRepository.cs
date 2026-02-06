@@ -152,6 +152,19 @@ namespace ICCardManager.Data.Repositories
         Task<bool> ReplaceDetailsAsync(int ledgerId, IEnumerable<LedgerDetail> details);
 
         /// <summary>
+        /// 複数のLedgerレコードを1つに統合する
+        /// </summary>
+        /// <remarks>
+        /// Issue #548対応: 履歴一覧から複数のエントリを統合する機能。
+        /// トランザクション内で、ソースのdetailsをターゲットに移動し、ソースを削除する。
+        /// </remarks>
+        /// <param name="targetLedgerId">統合先のLedger ID</param>
+        /// <param name="sourceLedgerIds">統合元のLedger IDリスト（削除される）</param>
+        /// <param name="updatedTarget">更新後のターゲットLedger</param>
+        /// <returns>成功した場合true</returns>
+        Task<bool> MergeLedgersAsync(int targetLedgerId, IEnumerable<int> sourceLedgerIds, Ledger updatedTarget);
+
+        /// <summary>
         /// 指定カードの新規購入日（または繰越日）を取得
         /// </summary>
         /// <remarks>
