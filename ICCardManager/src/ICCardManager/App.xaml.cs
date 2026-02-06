@@ -373,13 +373,13 @@ namespace ICCardManager
             var iconFontSize = Math.Round(baseFontSize * 5.0);       // アイコン用（約5倍）
 
             // Issue #542: サイドバー幅をフォントサイズに応じて調整
-            // 線形スケーリングではなく、緩やかな増加に変更
-            // 基準: Medium (14) で 380px、差分 × 12 で調整
-            // Small(12)→356, Medium(14)→380, Large(16)→404, ExtraLarge(20)→452
-            var sidebarWidth = Math.Round(380 + (baseFontSize - 14) * 12);
-            // ウィンドウ最小幅も同様に緩やかな増加
-            // 基準: Medium (14) で 1280px、差分 × 40 で調整
-            var windowMinWidth = Math.Round(1280 + (baseFontSize - 14) * 40);
+            // フォントが大きくなってもコンテンツ幅はあまり増えないため、控えめな係数を使用
+            // 基準: Medium (14) で 380px、差分 × 6 で調整
+            // Small(12)→368, Medium(14)→380, Large(16)→392, ExtraLarge(20)→416
+            var sidebarWidth = Math.Round(380 + (baseFontSize - 14) * 6);
+            // ウィンドウ最小幅はフォントサイズに関係なく固定（1280px）
+            // フォントが大きくなってもウィンドウを広げる必要はない
+            const double windowMinWidth = 1280;
 
             // アプリケーションリソースを更新
             var resources = Application.Current.Resources;
