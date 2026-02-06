@@ -22,6 +22,11 @@
             <sys:Double x:Key="IconFontSize">70</sys:Double>
             <!-- StatusFontSize: ステータスメッセージ用（BaseFontSizeの約2倍） -->
             <sys:Double x:Key="StatusFontSize">28</sys:Double>
+
+            <!-- Issue #542: サイドバー幅（フォントサイズに応じて動的に変更） -->
+            <sys:Double x:Key="SidebarWidth">350</sys:Double>
+            <!-- Issue #542: ウィンドウ最小幅（固定値） -->
+            <sys:Double x:Key="WindowMinWidth">1200</sys:Double>
         </ResourceDictionary>
     </Application.Resources>
 </Application>

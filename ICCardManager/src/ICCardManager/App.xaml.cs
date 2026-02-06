@@ -372,6 +372,13 @@ namespace ICCardManager
             var statusFontSize = Math.Round(baseFontSize * 2.0);     // ステータスメッセージ用（約2倍）
             var iconFontSize = Math.Round(baseFontSize * 5.0);       // アイコン用（約5倍）
 
+            // Issue #542: サイドバー幅をフォントサイズに応じて調整
+            // 基準: Medium (14) で 350px、差分 × 5 で調整
+            // Small(12)→340, Medium(14)→350, Large(16)→360, ExtraLarge(20)→380
+            var sidebarWidth = Math.Round(350 + (baseFontSize - 14) * 5);
+            // ウィンドウ最小幅はフォントサイズに関係なく固定（1200px）
+            const double windowMinWidth = 1200;
+
             // アプリケーションリソースを更新
             var resources = Application.Current.Resources;
             resources["BaseFontSize"] = baseFontSize;
@@ -380,6 +387,8 @@ namespace ICCardManager
             resources["TitleFontSize"] = titleFontSize;
             resources["StatusFontSize"] = statusFontSize;
             resources["IconFontSize"] = iconFontSize;
+            resources["SidebarWidth"] = sidebarWidth;
+            resources["WindowMinWidth"] = windowMinWidth;
         }
 
         /// <summary>
