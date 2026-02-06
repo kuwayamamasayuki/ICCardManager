@@ -123,6 +123,7 @@ namespace ICCardManager.ViewModels
 
     /// <summary>
     /// 利用履歴詳細ダイアログ用ViewModel（Issue #484: 統合・分割機能対応）
+    /// Issue #548: 分割線クリック方式UIに変更
     /// </summary>
     public partial class LedgerDetailViewModel : ObservableObject
     {
@@ -132,7 +133,6 @@ namespace ICCardManager.ViewModels
         private readonly ILogger<LedgerDetailViewModel> _logger;
 
         private Ledger _ledger = null!;
-        private int _nextGroupId = 1;
 
         /// <summary>
         /// 詳細アイテムリスト
@@ -206,16 +206,6 @@ namespace ICCardManager.ViewModels
         private string _statusMessage = string.Empty;
 
         /// <summary>
-        /// 統合コマンドが実行可能か
-        /// </summary>
-        public bool CanMerge => Items.Count(i => i.IsSelected) >= 2;
-
-        /// <summary>
-        /// 分割コマンドが実行可能か
-        /// </summary>
-        public bool CanSplit => Items.Any(i => i.IsSelected && i.GroupId.HasValue);
-
-        /// <summary>
         /// 保存完了時のコールバック
         /// </summary>
         public Action? OnSaveCompleted { get; set; }
@@ -267,14 +257,125 @@ namespace ICCardManager.ViewModels
                 Items.Add(new LedgerDetailItemViewModel(detail, index++));
             }
 
-            // 既存のGroupIdから次のGroupIdを決定
-            _nextGroupId = Items.Any(i => i.GroupId.HasValue)
-                ? Items.Where(i => i.GroupId.HasValue).Max(i => i.GroupId!.Value) + 1
-                : 1;
+            // 既存のGroupIdから分割線位置を設定
+            InitializeDividersFromGroupIds();
 
             UpdateGroupColors();
             UpdateDetailCountDisplay();
             HasChanges = false;
+        }
+
+        /// <summary>
+        /// 既存のGroupIdから分割線位置を初期化
+        /// </summary>
+        private void InitializeDividersFromGroupIds()
+        {
+            for (int i = 0; i < Items.Count - 1; i++)
+            {
+                var current = Items[i];
+                var next = Items[i + 1];
+
+                bool currentHasGroup = current.GroupId.HasValue;
+                bool nextHasGroup = next.GroupId.HasValue;
+
+                if (currentHasGroup && nextHasGroup)
+                {
+                    // 両方グループに属している場合、グループIDが異なれば分割線
+                    current.ShowDividerBelow = current.GroupId != next.GroupId;
+                }
+                else if (currentHasGroup || nextHasGroup)
+                {
+                    // 片方だけグループに属している場合は分割線
+                    current.ShowDividerBelow = true;
+                }
+                else
+                {
+                    // 両方グループなしの場合は分割線なし
+                    current.ShowDividerBelow = false;
+                }
+            }
+
+            // 最後のアイテムには分割線なし
+            if (Items.Count > 0)
+            {
+                Items[Items.Count - 1].ShowDividerBelow = false;
+            }
+        }
+
+        /// <summary>
+        /// 指定位置の分割線をトグル（挿入/削除）
+        /// Issue #548: 分割線クリック方式UI
+        /// </summary>
+        /// <param name="index">分割線をトグルするアイテムのインデックス（この行の下の分割線）</param>
+        public void ToggleDividerAt(int index)
+        {
+            if (index < 0 || index >= Items.Count - 1)
+            {
+                return; // 最後のアイテムの下には分割線を置けない
+            }
+
+            var item = Items[index];
+            item.ShowDividerBelow = !item.ShowDividerBelow;
+
+            // 分割線の状態からGroupIdを再計算
+            RecalculateGroupsFromDividers();
+
+            UpdateGroupColors();
+            UpdateDetailCountDisplay();
+            HasChanges = true;
+
+            if (item.ShowDividerBelow)
+            {
+                StatusMessage = "分割線を挿入しました（グループを分割）";
+                _logger.LogDebug("Inserted divider after index {Index}", index);
+            }
+            else
+            {
+                StatusMessage = "分割線を削除しました（グループを統合）";
+                _logger.LogDebug("Removed divider after index {Index}", index);
+            }
+        }
+
+        /// <summary>
+        /// 分割線の状態からGroupIdを再計算
+        /// 連続する分割線なしのアイテムは同じグループになる
+        /// </summary>
+        private void RecalculateGroupsFromDividers()
+        {
+            if (Items.Count == 0) return;
+
+            int currentGroupId = 1;
+            int groupStartIndex = 0;
+
+            for (int i = 0; i < Items.Count; i++)
+            {
+                var item = Items[i];
+
+                if (item.ShowDividerBelow || i == Items.Count - 1)
+                {
+                    // 分割線があるか、最後のアイテムの場合
+                    // groupStartIndex から i までが1つのグループ
+                    int groupSize = i - groupStartIndex + 1;
+
+                    if (groupSize >= 2)
+                    {
+                        // 2つ以上のアイテムがあればグループとして設定
+                        for (int j = groupStartIndex; j <= i; j++)
+                        {
+                            Items[j].GroupId = currentGroupId;
+                        }
+                        currentGroupId++;
+                    }
+                    else
+                    {
+                        // 1つのアイテムだけならグループなし（自動検出に任せる）
+                        Items[i].GroupId = null;
+                    }
+
+                    // 次のグループの開始位置
+                    groupStartIndex = i + 1;
+                }
+            }
         }
 
         /// <summary>
@@ -304,49 +405,6 @@ namespace ICCardManager.ViewModels
                     item.GroupLabel = "-";
                 }
             }
-
-            // 分割線の表示を更新（Issue #548: 分割線UI）
-            UpdateDividerLines();
-        }
-
-        /// <summary>
-        /// 分割線の表示を更新（Issue #548）
-        /// グループ境界に分割線を表示
-        /// </summary>
-        private void UpdateDividerLines()
-        {
-            for (int i = 0; i < Items.Count; i++)
-            {
-                var current = Items[i];
-                // 最後のアイテムには分割線を表示しない
-                if (i == Items.Count - 1)
-                {
-                    current.ShowDividerBelow = false;
-                    continue;
-                }
-
-                var next = Items[i + 1];
-                // 現在と次のアイテムのグループが異なる場合、または
-                // どちらかがグループに属していない場合に分割線を表示
-                bool currentHasGroup = current.GroupId.HasValue;
-                bool nextHasGroup = next.GroupId.HasValue;
-
-                if (currentHasGroup && nextHasGroup)
-                {
-                    // 両方グループに属している場合、グループIDが異なれば分割線
-                    current.ShowDividerBelow = current.GroupId != next.GroupId;
-                }
-                else if (currentHasGroup || nextHasGroup)
-                {
-                    // 片方だけグループに属している場合は分割線
-                    current.ShowDividerBelow = true;
-                }
-                else
-                {
-                    // 両方グループなしの場合は分割線なし（自動検出モード）
-                    current.ShowDividerBelow = false;
-                }
-            }
         }
 
         /// <summary>
@@ -371,73 +429,7 @@ namespace ICCardManager.ViewModels
         }
 
         /// <summary>
-        /// 選択状態変更時の処理
-        /// </summary>
-        public void OnSelectionChanged()
-        {
-            OnPropertyChanged(nameof(CanMerge));
-            OnPropertyChanged(nameof(CanSplit));
-        }
-
-        /// <summary>
-        /// 選択した項目を統合（Ctrl+G）
-        /// </summary>
-        [RelayCommand]
-        private void Merge()
-        {
-            var selectedItems = Items.Where(i => i.IsSelected).ToList();
-            if (selectedItems.Count < 2)
-            {
-                StatusMessage = "2つ以上の項目を選択してください";
-                return;
-            }
-
-            // 新しいグループIDを割り当て
-            var newGroupId = _nextGroupId++;
-            foreach (var item in selectedItems)
-            {
-                item.GroupId = newGroupId;
-                item.IsSelected = false;
-            }
-
-            UpdateGroupColors();
-            UpdateDetailCountDisplay();
-            HasChanges = true;
-            StatusMessage = $"{selectedItems.Count}件を統合しました";
-
-            _logger.LogDebug("Merged {Count} items into group {GroupId}", selectedItems.Count, newGroupId);
-        }
-
-        /// <summary>
-        /// 選択した項目を分割（Ctrl+U）
-        /// </summary>
-        [RelayCommand]
-        private void Split()
-        {
-            var selectedItems = Items.Where(i => i.IsSelected && i.GroupId.HasValue).ToList();
-            if (selectedItems.Count == 0)
-            {
-                StatusMessage = "グループ化された項目を選択してください";
-                return;
-            }
-
-            // グループIDを解除
-            foreach (var item in selectedItems)
-            {
-                item.GroupId = null;
-                item.IsSelected = false;
-            }
-
-            UpdateGroupColors();
-            UpdateDetailCountDisplay();
-            HasChanges = true;
-            StatusMessage = $"{selectedItems.Count}件の統合を解除しました";
-
-            _logger.LogDebug("Split {Count} items from groups", selectedItems.Count);
-        }
-
-        /// <summary>
-        /// 自動検出に戻す
+        /// 自動検出に戻す（すべての分割線を削除）
         /// </summary>
         [RelayCommand]
         private void ResetToAutoDetect()
@@ -445,16 +437,71 @@ namespace ICCardManager.ViewModels
             foreach (var item in Items)
             {
                 item.GroupId = null;
-                item.IsSelected = false;
+                item.ShowDividerBelow = false;
             }
 
-            _nextGroupId = 1;
             UpdateGroupColors();
             UpdateDetailCountDisplay();
             HasChanges = true;
-            StatusMessage = "自動検出モードに戻しました";
+            StatusMessage = "自動検出モードに戻しました（すべての分割線を削除）";
 
             _logger.LogDebug("Reset all groups to auto-detect");
+        }
+
+        /// <summary>
+        /// すべて統合（すべての分割線を削除してグループ化）
+        /// </summary>
+        [RelayCommand]
+        private void MergeAll()
+        {
+            if (Items.Count < 2)
+            {
+                StatusMessage = "統合する項目がありません";
+                return;
+            }
+
+            // すべての分割線を削除
+            foreach (var item in Items)
+            {
+                item.ShowDividerBelow = false;
+            }
+
+            // グループを再計算（すべてが1つのグループになる）
+            RecalculateGroupsFromDividers();
+            UpdateGroupColors();
+            UpdateDetailCountDisplay();
+            HasChanges = true;
+            StatusMessage = "すべてを1つのグループに統合しました";
+
+            _logger.LogDebug("Merged all items into one group");
+        }
+
+        /// <summary>
+        /// すべて分割（すべての行の間に分割線を挿入）
+        /// </summary>
+        [RelayCommand]
+        private void SplitAll()
+        {
+            if (Items.Count < 2)
+            {
+                StatusMessage = "分割する項目がありません";
+                return;
+            }
+
+            // 最後以外のすべての行の下に分割線を挿入
+            for (int i = 0; i < Items.Count - 1; i++)
+            {
+                Items[i].ShowDividerBelow = true;
+            }
+
+            // グループを再計算（すべてが個別になる）
+            RecalculateGroupsFromDividers();
+            UpdateGroupColors();
+            UpdateDetailCountDisplay();
+            HasChanges = true;
+            StatusMessage = "すべてを個別に分割しました";
+
+            _logger.LogDebug("Split all items into separate entries");
         }
 
         /// <summary>
@@ -531,30 +578,5 @@ namespace ICCardManager.ViewModels
             }
         }
 
-        /// <summary>
-        /// すべて選択
-        /// </summary>
-        [RelayCommand]
-        private void SelectAll()
-        {
-            foreach (var item in Items)
-            {
-                item.IsSelected = true;
-            }
-            OnSelectionChanged();
-        }
-
-        /// <summary>
-        /// 選択解除
-        /// </summary>
-        [RelayCommand]
-        private void DeselectAll()
-        {
-            foreach (var item in Items)
-            {
-                item.IsSelected = false;
-            }
-            OnSelectionChanged();
-        }
     }
 }

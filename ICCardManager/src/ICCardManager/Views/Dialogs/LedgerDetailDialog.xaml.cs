@@ -60,11 +60,14 @@ namespace ICCardManager.Views.Dialogs
         }
 
         /// <summary>
-        /// チェックボックスクリック時の処理
+        /// 分割線ボタンクリック時の処理（Issue #548: 分割線クリック方式UI）
         /// </summary>
-        private void CheckBox_Click(object sender, RoutedEventArgs e)
+        private void DividerButton_Click(object sender, RoutedEventArgs e)
         {
-            _viewModel?.OnSelectionChanged();
+            if (sender is System.Windows.Controls.Button button && button.Tag is int index)
+            {
+                _viewModel?.ToggleDividerAt(index);
+            }
         }
 
         /// <summary>
