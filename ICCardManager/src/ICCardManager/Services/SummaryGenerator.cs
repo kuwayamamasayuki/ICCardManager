@@ -395,7 +395,11 @@ namespace ICCardManager.Services
             // グループ化された経路を処理
             foreach (var group in groupedTrips)
             {
-                var groupTrips = group.OrderBy(t => t.UseDate ?? DateTime.MaxValue).ToList();
+                // 時系列順でソート：UseDate昇順 + Balance降順（残高が高い方が先に利用）
+                var groupTrips = group
+                    .OrderBy(t => t.UseDate ?? DateTime.MaxValue)
+                    .ThenByDescending(t => t.Balance ?? 0)
+                    .ToList();
                 if (groupTrips.Count == 1)
                 {
                     result.Add($"{groupTrips[0].EntryStation}～{groupTrips[0].ExitStation}");
