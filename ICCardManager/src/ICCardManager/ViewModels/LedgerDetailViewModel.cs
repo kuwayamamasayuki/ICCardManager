@@ -100,6 +100,19 @@ namespace ICCardManager.ViewModels
         [ObservableProperty]
         private int _groupColorIndex;
 
+        /// <summary>
+        /// グループラベル（A, B, C...）アクセシビリティ対応: Issue #548
+        /// 色だけでなくアルファベットでもグループを識別可能に
+        /// </summary>
+        [ObservableProperty]
+        private string _groupLabel = "-";
+
+        /// <summary>
+        /// このアイテムの下に分割線を表示するか（Issue #548: 分割線UI）
+        /// </summary>
+        [ObservableProperty]
+        private bool _showDividerBelow;
+
         public LedgerDetailItemViewModel(LedgerDetail detail, int index)
         {
             Detail = detail;
@@ -265,7 +278,7 @@ namespace ICCardManager.ViewModels
         }
 
         /// <summary>
-        /// グループの色インデックスを更新
+        /// グループの色インデックスとラベルを更新（Issue #548: アクセシビリティ対応）
         /// </summary>
         private void UpdateGroupColors()
         {
@@ -280,11 +293,58 @@ namespace ICCardManager.ViewModels
             {
                 if (item.GroupId.HasValue)
                 {
-                    item.GroupColorIndex = groupIds.IndexOf(item.GroupId.Value) % 5 + 1; // 1-5の色
+                    var groupIndex = groupIds.IndexOf(item.GroupId.Value);
+                    item.GroupColorIndex = groupIndex % 5 + 1; // 1-5の色
+                    // A, B, C... のラベルを設定（アクセシビリティ対応）
+                    item.GroupLabel = ((char)('A' + groupIndex % 26)).ToString();
                 }
                 else
                 {
                     item.GroupColorIndex = 0; // グループなし
+                    item.GroupLabel = "-";
+                }
+            }
+
+            // 分割線の表示を更新（Issue #548: 分割線UI）
+            UpdateDividerLines();
+        }
+
+        /// <summary>
+        /// 分割線の表示を更新（Issue #548）
+        /// グループ境界に分割線を表示
+        /// </summary>
+        private void UpdateDividerLines()
+        {
+            for (int i = 0; i < Items.Count; i++)
+            {
+                var current = Items[i];
+                // 最後のアイテムには分割線を表示しない
+                if (i == Items.Count - 1)
+                {
+                    current.ShowDividerBelow = false;
+                    continue;
+                }
+
+                var next = Items[i + 1];
+                // 現在と次のアイテムのグループが異なる場合、または
+                // どちらかがグループに属していない場合に分割線を表示
+                bool currentHasGroup = current.GroupId.HasValue;
+                bool nextHasGroup = next.GroupId.HasValue;
+
+                if (currentHasGroup && nextHasGroup)
+                {
+                    // 両方グループに属している場合、グループIDが異なれば分割線
+                    current.ShowDividerBelow = current.GroupId != next.GroupId;
+                }
+                else if (currentHasGroup || nextHasGroup)
+                {
+                    // 片方だけグループに属している場合は分割線
+                    current.ShowDividerBelow = true;
+                }
+                else
+                {
+                    // 両方グループなしの場合は分割線なし（自動検出モード）
+                    current.ShowDividerBelow = false;
                 }
             }
         }

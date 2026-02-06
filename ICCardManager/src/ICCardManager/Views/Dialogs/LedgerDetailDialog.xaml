@@ -206,11 +206,11 @@
                     </DataGridTemplateColumn.CellTemplate>
                 </DataGridTemplateColumn>
 
-                <!-- グループ表示 -->
+                <!-- グループ表示（Issue #548: アクセシビリティ対応 - 色＋アルファベット） -->
                 <DataGridTemplateColumn Header="グループ" Width="70">
                     <DataGridTemplateColumn.CellTemplate>
                         <DataTemplate>
-                            <Border CornerRadius="3" Padding="4,2" HorizontalAlignment="Center">
+                            <Border CornerRadius="3" Padding="6,2" HorizontalAlignment="Center" MinWidth="28">
                                 <Border.Style>
                                     <Style TargetType="Border">
                                         <Setter Property="Background" Value="Transparent"/>
@@ -233,14 +233,15 @@
                                         </Style.Triggers>
                                     </Style>
                                 </Border.Style>
-                                <TextBlock HorizontalAlignment="Center">
+                                <!-- Issue #548: グループラベル（A, B, C...）を表示 -->
+                                <TextBlock Text="{Binding GroupLabel}"
+                                           HorizontalAlignment="Center"
+                                           FontWeight="Bold">
                                     <TextBlock.Style>
                                         <Style TargetType="TextBlock">
-                                            <Setter Property="Text" Value="-"/>
-                                            <Setter Property="Foreground" Value="Gray"/>
+                                            <Setter Property="Foreground" Value="White"/>
                                             <Style.Triggers>
-                                                <DataTrigger Binding="{Binding GroupId}" Value="{x:Null}">
-                                                    <Setter Property="Text" Value="-"/>
+                                                <DataTrigger Binding="{Binding GroupColorIndex}" Value="0">
                                                     <Setter Property="Foreground" Value="Gray"/>
                                                 </DataTrigger>
                                             </Style.Triggers>
@@ -248,20 +249,48 @@
                                     </TextBlock.Style>
                                 </TextBlock>
                                 <Border.ToolTip>
-                                    <ToolTip>
-                                        <TextBlock>
-                                            <TextBlock.Style>
-                                                <Style TargetType="TextBlock">
-                                                    <Setter Property="Text" Value="グループなし（自動検出）"/>
-                                                    <Style.Triggers>
-                                                        <DataTrigger Binding="{Binding GroupId}" Value="{x:Null}">
-                                                            <Setter Property="Text" Value="グループなし（自動検出）"/>
-                                                        </DataTrigger>
-                                                    </Style.Triggers>
-                                                </Style>
-                                            </TextBlock.Style>
-                                        </TextBlock>
-                                    </ToolTip>
+                                    <TextBlock>
+                                        <TextBlock.Style>
+                                            <Style TargetType="TextBlock">
+                                                <Setter Property="Text" Value="グループなし（自動検出）"/>
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding GroupColorIndex}" Value="0">
+                                                        <Setter Property="Text" Value="グループなし（自動検出）"/>
+                                                    </DataTrigger>
+                                                    <MultiDataTrigger>
+                                                        <MultiDataTrigger.Conditions>
+                                                            <Condition Binding="{Binding GroupColorIndex}" Value="1"/>
+                                                        </MultiDataTrigger.Conditions>
+                                                        <Setter Property="Text" Value="グループA（青）"/>
+                                                    </MultiDataTrigger>
+                                                    <MultiDataTrigger>
+                                                        <MultiDataTrigger.Conditions>
+                                                            <Condition Binding="{Binding GroupColorIndex}" Value="2"/>
+                                                        </MultiDataTrigger.Conditions>
+                                                        <Setter Property="Text" Value="グループB（緑）"/>
+                                                    </MultiDataTrigger>
+                                                    <MultiDataTrigger>
+                                                        <MultiDataTrigger.Conditions>
+                                                            <Condition Binding="{Binding GroupColorIndex}" Value="3"/>
+                                                        </MultiDataTrigger.Conditions>
+                                                        <Setter Property="Text" Value="グループC（オレンジ）"/>
+                                                    </MultiDataTrigger>
+                                                    <MultiDataTrigger>
+                                                        <MultiDataTrigger.Conditions>
+                                                            <Condition Binding="{Binding GroupColorIndex}" Value="4"/>
+                                                        </MultiDataTrigger.Conditions>
+                                                        <Setter Property="Text" Value="グループD（紫）"/>
+                                                    </MultiDataTrigger>
+                                                    <MultiDataTrigger>
+                                                        <MultiDataTrigger.Conditions>
+                                                            <Condition Binding="{Binding GroupColorIndex}" Value="5"/>
+                                                        </MultiDataTrigger.Conditions>
+                                                        <Setter Property="Text" Value="グループE（赤）"/>
+                                                    </MultiDataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </TextBlock.Style>
+                                    </TextBlock>
                                 </Border.ToolTip>
                             </Border>
                         </DataTemplate>
@@ -292,10 +321,14 @@
                 </DataGridTextColumn>
             </DataGrid.Columns>
 
-            <!-- 行スタイル（グループ色） -->
+            <!-- 行スタイル（グループ色＋分割線: Issue #548） -->
             <DataGrid.RowStyle>
                 <Style TargetType="DataGridRow">
+                    <!-- デフォルトのボーダー設定 -->
+                    <Setter Property="BorderBrush" Value="Transparent"/>
+                    <Setter Property="BorderThickness" Value="0,0,0,0"/>
                     <Style.Triggers>
+                        <!-- グループ色の背景 -->
                         <DataTrigger Binding="{Binding GroupColorIndex}" Value="1">
                             <Setter Property="Background" Value="#E3F2FD"/>
                         </DataTrigger>
@@ -317,6 +350,11 @@
                         <DataTrigger Binding="{Binding IsBus}" Value="True">
                             <Setter Property="FontStyle" Value="Italic"/>
                         </DataTrigger>
+                        <!-- Issue #548: 分割線（グループ境界に太い下線を表示） -->
+                        <DataTrigger Binding="{Binding ShowDividerBelow}" Value="True">
+                            <Setter Property="BorderBrush" Value="#757575"/>
+                            <Setter Property="BorderThickness" Value="0,0,0,3"/>
+                        </DataTrigger>
                     </Style.Triggers>
                 </Style>
             </DataGrid.RowStyle>
@@ -328,7 +366,7 @@
                 <Run FontWeight="Bold">操作方法:</Run>
                 <Run Text=" チェックボックスで複数選択 → [統合] で1つの乗り継ぎに / [分割] で個別に戻す"/>
                 <LineBreak/>
-                <Run Text="同じ色の行は1つの乗り継ぎとして摘要に統合されます。色がない行は自動検出されます。"/>
+                <Run Text="同じグループ（A,B,C...）の行は1つの乗り継ぎとして摘要に統合されます。太い線はグループの境界です。"/>
             </TextBlock>
         </Border>
 
