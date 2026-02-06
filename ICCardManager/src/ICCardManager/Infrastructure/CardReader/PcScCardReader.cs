@@ -1014,8 +1014,29 @@ namespace ICCardManager.Infrastructure.CardReader
                 var isCharge = usageType == 0x02 || usageType == 0x14;
                 var isPointRedemption = usageType == 0x0D;
 
-                // バス利用の判定: 駅コードが両方0かつチャージでもポイント還元でもない場合
-                var isBus = !isCharge && !isPointRedemption && entryStationCode == 0 && exitStationCode == 0;
+                // 駅名の解決を試みる（バス判定に使用）
+                string entryStationName = null;
+                string exitStationName = null;
+                if (entryStationCode > 0)
+                {
+                    var lineCode = (entryStationCode >> 8) & 0xFF;
+                    var stationNum = entryStationCode & 0xFF;
+                    entryStationName = StationMasterService.Instance.GetStationNameOrNull(lineCode, stationNum, cardType);
+                }
+                if (exitStationCode > 0)
+                {
+                    var lineCode = (exitStationCode >> 8) & 0xFF;
+                    var stationNum = exitStationCode & 0xFF;
+                    exitStationName = StationMasterService.Instance.GetStationNameOrNull(lineCode, stationNum, cardType);
+                }
+
+                // バス利用の判定:
+                // 1. 駅コードが両方0の場合（従来のバス判定）
+                // 2. 駅コードはあるが駅名が両方とも解決できなかった場合（西鉄バス等）
+                // かつ、チャージでもポイント還元でもない場合
+                var isBus = !isCharge && !isPointRedemption &&
+                           ((entryStationCode == 0 && exitStationCode == 0) ||
+                            (entryStationName == null && exitStationName == null));
 
                 // 金額の計算
                 int? amount = null;
@@ -1046,8 +1067,9 @@ namespace ICCardManager.Infrastructure.CardReader
                 return new LedgerDetail
                 {
                     UseDate = useDate,
-                    EntryStation = entryStationCode > 0 ? GetStationName(entryStationCode, cardType) : null,
-                    ExitStation = exitStationCode > 0 ? GetStationName(exitStationCode, cardType) : null,
+                    // バス利用の場合はnullを設定（バス停名入力ダイアログを表示するため）
+                    EntryStation = isBus ? null : entryStationName,
+                    ExitStation = isBus ? null : exitStationName,
                     Amount = amount,
                     Balance = balance,
                     IsCharge = isCharge,

@@ -854,6 +854,12 @@ public partial class MainViewModel : ViewModelBase
                     busDialog.Owner = System.Windows.Application.Current.MainWindow;
                     await busDialog.InitializeWithLedgerIdAsync(busLedger.Id);
                     busDialog.ShowDialog();
+
+                    // バス停名入力後に履歴が開いていれば再読み込み
+                    if (IsHistoryVisible)
+                    {
+                        await LoadHistoryLedgersAsync();
+                    }
                 }
             }
 

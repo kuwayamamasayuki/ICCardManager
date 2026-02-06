@@ -4,6 +4,7 @@ using CommunityToolkit.Mvvm.Input;
 using ICCardManager.Common;
 using ICCardManager.Data.Repositories;
 using ICCardManager.Models;
+using ICCardManager.Services;
 
 using System;
 using System.Collections.Generic;
@@ -197,6 +198,10 @@ public partial class BusStopInputViewModel : ViewModelBase
                     : item.BusStops;
             }
 
+            // 摘要を再生成（バス停名を反映）
+            var summaryGenerator = new SummaryGenerator();
+            Ledger.Summary = summaryGenerator.Generate(Ledger.Details);
+
             // 履歴を更新
             var success = await _ledgerRepository.UpdateAsync(Ledger);
 
@@ -231,6 +236,10 @@ public partial class BusStopInputViewModel : ViewModelBase
                     item.Detail.BusStops = "★";
                 }
             }
+
+            // 摘要を再生成（★マークを反映）
+            var summaryGenerator = new SummaryGenerator();
+            Ledger.Summary = summaryGenerator.Generate(Ledger.Details);
 
             var success = await _ledgerRepository.UpdateAsync(Ledger);
 
