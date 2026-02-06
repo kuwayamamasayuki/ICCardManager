@@ -769,7 +769,18 @@ public partial class MainViewModel : ViewModelBase
         // メイン画面は変更せず、内部状態のみ更新（Issue #186）
         SetInternalState(AppState.Processing);
 
-        var result = await _lendingService.LendAsync(_currentStaffIdm!, card.CardIdm);
+        // カードから残高を読み取る（Issue #526: 貸出時も残高を記録）
+        int? balance = null;
+        try
+        {
+            balance = await _cardReader.ReadBalanceAsync(card.CardIdm);
+        }
+        catch
+        {
+            // 残高読み取りエラーは無視（貸出処理は続行）
+        }
+
+        var result = await _lendingService.LendAsync(_currentStaffIdm!, card.CardIdm, balance);
 
         if (result.Success)
         {
@@ -781,6 +792,13 @@ public partial class MainViewModel : ViewModelBase
             // メイン画面は変更しない（Issue #186: 職員の操作を妨げない）
 
             await RefreshLentCardsAsync();
+            await RefreshDashboardAsync();
+
+            // 履歴が開いていれば再読み込み（Issue #526）
+            if (IsHistoryVisible)
+            {
+                await LoadHistoryLedgersAsync();
+            }
 
             // 30秒ルール用に職員情報を保存（ResetStateの前に保存）
             _lastProcessedStaffIdm = _currentStaffIdm;
