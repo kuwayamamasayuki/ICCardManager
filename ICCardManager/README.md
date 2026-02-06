@@ -266,7 +266,7 @@ dotnet test --filter "FullyQualifiedName~SummaryGeneratorTests"
 
 ## ライセンス
 
-Private - All Rights Reserved
+[MIT License](LICENSE)
 
 ## 更新履歴
 
