@@ -193,6 +193,7 @@ namespace ICCardManager
             services.AddSingleton<PrintService>();
             services.AddSingleton<BackupService>();
             services.AddSingleton<OperationLogger>();
+            services.AddSingleton<LedgerMergeService>();
             services.AddSingleton<CsvExportService>();
             services.AddSingleton<CsvImportService>();
             services.AddSingleton<IToastNotificationService, ToastNotificationService>();

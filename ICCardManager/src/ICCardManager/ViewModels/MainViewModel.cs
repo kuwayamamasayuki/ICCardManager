@@ -1,4 +1,10 @@
+using System;
+using System.Collections;
+using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.Linq;
+using System.Threading.Tasks;
+using System.Windows;
 using System.Windows.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -10,11 +16,6 @@ using ICCardManager.Infrastructure.Sound;
 using ICCardManager.Models;
 using ICCardManager.Services;
 using Microsoft.Extensions.DependencyInjection;
-
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Threading.Tasks;
 
 
 namespace ICCardManager.ViewModels;
@@ -99,6 +100,7 @@ public partial class MainViewModel : ViewModelBase
     private readonly LendingService _lendingService;
     private readonly IToastNotificationService _toastNotificationService;
     private readonly IStaffAuthService _staffAuthService;
+    private readonly LedgerMergeService _ledgerMergeService;
 
     private DispatcherTimer? _timeoutTimer;
     private string? _currentStaffIdm;
@@ -347,7 +349,8 @@ public partial class MainViewModel : ViewModelBase
         ISettingsRepository settingsRepository,
         LendingService lendingService,
         IToastNotificationService toastNotificationService,
-        IStaffAuthService staffAuthService)
+        IStaffAuthService staffAuthService,
+        LedgerMergeService ledgerMergeService)
     {
         _cardReader = cardReader;
         _soundPlayer = soundPlayer;
@@ -358,6 +361,7 @@ public partial class MainViewModel : ViewModelBase
         _lendingService = lendingService;
         _toastNotificationService = toastNotificationService;
         _staffAuthService = staffAuthService;
+        _ledgerMergeService = ledgerMergeService;
 
         // イベント登録
         _cardReader.CardRead += OnCardRead;
@@ -1258,6 +1262,113 @@ public partial class MainViewModel : ViewModelBase
             // ダッシュボードも更新
             await RefreshDashboardAsync();
         }
+    }
+
+    #endregion
+
+    #region 履歴統合（Issue #548）
+
+    /// <summary>
+    /// 履歴DataGridの選択アイテム（WPF DataGrid.SelectedItemsは直接バインド不可のためIListで受け取る）
+    /// </summary>
+    private IList? _historySelectedItems;
+    public IList? HistorySelectedItems
+    {
+        get => _historySelectedItems;
+        set
+        {
+            _historySelectedItems = value;
+            OnPropertyChanged();
+            MergeHistoryLedgersCommand.NotifyCanExecuteChanged();
+        }
+    }
+
+    /// <summary>
+    /// 選択した履歴を統合
+    /// </summary>
+    [RelayCommand(CanExecute = nameof(CanMergeHistoryLedgers))]
+    public async Task MergeHistoryLedgers()
+    {
+        var selectedDtos = HistorySelectedItems?.Cast<LedgerDto>().ToList();
+        if (selectedDtos == null || selectedDtos.Count < 2) return;
+
+        // 隣接チェック: 選択されたアイテムがHistoryLedgers内で連続しているか
+        var indices = selectedDtos
+            .Select(dto => HistoryLedgers.IndexOf(dto))
+            .OrderBy(i => i)
+            .ToList();
+
+        for (int i = 1; i < indices.Count; i++)
+        {
+            if (indices[i] != indices[i - 1] + 1)
+            {
+                MessageBox.Show(
+                    "隣接する履歴のみ統合できます。\n連続した行を選択してください。",
+                    "統合できません",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Warning);
+                return;
+            }
+        }
+
+        // 表示順（古い順）でソートされたDTOリスト
+        var sortedDtos = indices.Select(i => HistoryLedgers[i]).ToList();
+
+        // 確認ダイアログ
+        var message = "以下の履歴を統合します。この操作は元に戻せません。\n\n";
+        foreach (var dto in sortedDtos)
+        {
+            message += $"  • {dto.DateDisplay}  {dto.Summary}  残高:{dto.BalanceDisplay}\n";
+        }
+        message += "\n統合してよろしいですか？";
+
+        var result = MessageBox.Show(
+            message,
+            "履歴の統合",
+            MessageBoxButton.YesNo,
+            MessageBoxImage.Question);
+
+        if (result != MessageBoxResult.Yes) return;
+
+        // 統合実行
+        var ledgerIds = sortedDtos.Select(dto => dto.Id).ToList();
+        var mergeResult = await _ledgerMergeService.MergeAsync(ledgerIds);
+
+        if (mergeResult.Success)
+        {
+            await LoadHistoryLedgersAsync();
+            await RefreshDashboardAsync();
+            _toastNotificationService.ShowInfo("統合完了", "履歴を統合しました");
+        }
+        else
+        {
+            MessageBox.Show(
+                mergeResult.ErrorMessage,
+                "統合エラー",
+                MessageBoxButton.OK,
+                MessageBoxImage.Error);
+        }
+    }
+
+    /// <summary>
+    /// 統合コマンドの実行可否
+    /// </summary>
+    private bool CanMergeHistoryLedgers()
+    {
+        if (HistorySelectedItems == null || HistorySelectedItems.Count < 2)
+            return false;
+
+        var selectedDtos = HistorySelectedItems.Cast<LedgerDto>().ToList();
+
+        // 同一カードかチェック
+        if (selectedDtos.Select(d => d.CardIdm).Distinct().Count() > 1)
+            return false;
+
+        // 貸出中レコードがないかチェック
+        if (selectedDtos.Any(d => d.IsLentRecord))
+            return false;
+
+        return true;
     }
 
     #endregion

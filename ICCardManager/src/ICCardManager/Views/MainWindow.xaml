@@ -300,6 +300,15 @@
                                         Padding="12,6"
                                         ToolTip="任意の年月を選択"/>
 
+                                <!-- 統合ボタン（Issue #548） -->
+                                <Border Width="1" Background="#BDBDBD" Margin="10,2"/>
+                                <Button Content="📦 選択した履歴を統合"
+                                        Command="{Binding MergeHistoryLedgersCommand}"
+                                        Padding="12,6"
+                                        ToolTip="Ctrl+クリックで複数選択した履歴を1つに統合します"
+                                        AutomationProperties.Name="選択した履歴を統合"
+                                        AutomationProperties.HelpText="複数の履歴を選択して統合ボタンを押すと、1つの履歴にまとめます"/>
+
                                 <!-- 月選択ポップアップ -->
                                 <Popup IsOpen="{Binding IsHistoryMonthSelectorOpen}"
                                        PlacementTarget="{Binding ElementName=HistoryOtherMonthButton}"
@@ -348,17 +357,20 @@
 
                         <!-- 履歴一覧 -->
                         <DataGrid Grid.Row="2"
+                                  x:Name="HistoryDataGrid"
                                   ItemsSource="{Binding HistoryLedgers}"
                                   AutoGenerateColumns="False"
                                   IsReadOnly="True"
-                                  SelectionMode="Single"
+                                  SelectionMode="Extended"
+                                  SelectionChanged="HistoryDataGrid_SelectionChanged"
                                   CanUserAddRows="False"
                                   CanUserDeleteRows="False"
                                   GridLinesVisibility="Horizontal"
                                   HeadersVisibility="Column"
                                   RowHeaderWidth="0"
                                   AlternatingRowBackground="#FAFAFA"
-                                  AutomationProperties.Name="利用履歴一覧">
+                                  AutomationProperties.Name="利用履歴一覧"
+                                  AutomationProperties.HelpText="Ctrl+クリックで複数選択し、統合ボタンで1つにまとめられます">
                             <DataGrid.Columns>
                                 <DataGridTextColumn Header="日付" Binding="{Binding DateDisplay}" Width="90"/>
                                 <DataGridTextColumn Header="摘要" Binding="{Binding Summary}" Width="*"/>

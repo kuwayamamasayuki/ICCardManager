@@ -429,12 +429,12 @@ LIMIT @pageSize OFFSET @offset";
             using var command = connection.CreateCommand();
             // Issue #393: 履歴詳細を古い順（時系列順）で表示
             // Issue #478: 同一日ではチャージ（is_charge=1）を利用より先に表示
-            // Issue #548: ICカード履歴は新しい順で挿入されるため、rowid DESCで古い順に
+            // Issue #548: rowid ASCで古い順に（小さいrowidほど古い＝先に利用）
             command.CommandText = @"SELECT ledger_id, use_date, entry_station, exit_station,
        bus_stops, amount, balance, is_charge, is_point_redemption, is_bus, group_id, rowid
 FROM ledger_detail
 WHERE ledger_id = @ledgerId
-ORDER BY use_date ASC, is_charge DESC, is_point_redemption DESC, rowid DESC";
+ORDER BY use_date ASC, is_charge DESC, is_point_redemption DESC, rowid ASC";
 
             command.Parameters.AddWithValue("@ledgerId", ledgerId);
 
@@ -611,6 +611,58 @@ WHERE card_idm IN ({string.Join(", ", parameters)})";
 
             // 新しい詳細を登録
             return await InsertDetailsAsync(ledgerId, details);
+        }
+
+        /// <inheritdoc/>
+        public async Task<bool> MergeLedgersAsync(int targetLedgerId, IEnumerable<int> sourceLedgerIds, Ledger updatedTarget)
+        {
+            var connection = _dbContext.GetConnection();
+            var sourceIds = sourceLedgerIds.ToList();
+
+            using var transaction = _dbContext.BeginTransaction();
+            try
+            {
+                // 1. ソースの詳細をターゲットに移動（UPDATEでrowid保持）
+                foreach (var sourceId in sourceIds)
+                {
+                    using var moveCommand = connection.CreateCommand();
+                    moveCommand.CommandText = "UPDATE ledger_detail SET ledger_id = @targetId WHERE ledger_id = @sourceId";
+                    moveCommand.Parameters.AddWithValue("@targetId", targetLedgerId);
+                    moveCommand.Parameters.AddWithValue("@sourceId", sourceId);
+                    await moveCommand.ExecuteNonQueryAsync();
+                }
+
+                // 2. ターゲットLedgerを更新
+                using var updateCommand = connection.CreateCommand();
+                updateCommand.CommandText = @"UPDATE ledger
+SET summary = @summary, income = @income, expense = @expense,
+    balance = @balance, note = @note
+WHERE id = @id";
+                updateCommand.Parameters.AddWithValue("@summary", updatedTarget.Summary);
+                updateCommand.Parameters.AddWithValue("@income", updatedTarget.Income);
+                updateCommand.Parameters.AddWithValue("@expense", updatedTarget.Expense);
+                updateCommand.Parameters.AddWithValue("@balance", updatedTarget.Balance);
+                updateCommand.Parameters.AddWithValue("@note", (object)updatedTarget.Note ?? DBNull.Value);
+                updateCommand.Parameters.AddWithValue("@id", targetLedgerId);
+                await updateCommand.ExecuteNonQueryAsync();
+
+                // 3. ソースLedgerを削除（detailsは既に移動済み）
+                foreach (var sourceId in sourceIds)
+                {
+                    using var deleteCommand = connection.CreateCommand();
+                    deleteCommand.CommandText = "DELETE FROM ledger WHERE id = @id";
+                    deleteCommand.Parameters.AddWithValue("@id", sourceId);
+                    await deleteCommand.ExecuteNonQueryAsync();
+                }
+
+                transaction.Commit();
+                return true;
+            }
+            catch
+            {
+                transaction.Rollback();
+                throw;
+            }
         }
 
         /// <inheritdoc/>
