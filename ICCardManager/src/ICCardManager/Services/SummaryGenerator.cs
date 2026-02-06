@@ -355,10 +355,11 @@ namespace ICCardManager.Services
             }
 
             // Issue #548: SequenceNumberを使って正しい時系列順にソート
-            // SequenceNumberはDBのrowidから取得され、チャージが間に入っても正しい順序を保持する
+            // ICカード履歴は新しい順で読み取られ、その順でDBに挿入されるため、
+            // rowid（=SequenceNumber）が大きいほど古い（先に利用した）
             // SequenceNumberが0（未設定）の場合は従来のBalance降順を使用
             var sortedTrips = trips
-                .OrderBy(t => t.SequenceNumber > 0 ? t.SequenceNumber : int.MaxValue)
+                .OrderByDescending(t => t.SequenceNumber > 0 ? t.SequenceNumber : 0)
                 .ThenBy(t => t.UseDate ?? DateTime.MaxValue)
                 .ThenByDescending(t => t.Balance ?? 0)
                 .ToList();
@@ -396,9 +397,9 @@ namespace ICCardManager.Services
             foreach (var group in groupedTrips)
             {
                 // Issue #548: SequenceNumberを使って正しい時系列順にソート
-                // チャージが間に入っても正しい順序を保持
+                // rowid（=SequenceNumber）が大きいほど古い（先に利用した）
                 var groupTrips = group
-                    .OrderBy(t => t.SequenceNumber > 0 ? t.SequenceNumber : int.MaxValue)
+                    .OrderByDescending(t => t.SequenceNumber > 0 ? t.SequenceNumber : 0)
                     .ThenBy(t => t.UseDate ?? DateTime.MaxValue)
                     .ThenByDescending(t => t.Balance ?? 0)
                     .ToList();

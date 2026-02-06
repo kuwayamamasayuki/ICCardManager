@@ -429,12 +429,12 @@ LIMIT @pageSize OFFSET @offset";
             using var command = connection.CreateCommand();
             // Issue #393: 履歴詳細を古い順（時系列順）で表示
             // Issue #478: 同一日ではチャージ（is_charge=1）を利用より先に表示
-            // use_dateだけでは同日の順序が不定になるため、is_chargeとrowid（挿入順序）で補完
+            // Issue #548: ICカード履歴は新しい順で挿入されるため、rowid DESCで古い順に
             command.CommandText = @"SELECT ledger_id, use_date, entry_station, exit_station,
        bus_stops, amount, balance, is_charge, is_point_redemption, is_bus, group_id, rowid
 FROM ledger_detail
 WHERE ledger_id = @ledgerId
-ORDER BY use_date ASC, is_charge DESC, is_point_redemption DESC, rowid ASC";
+ORDER BY use_date ASC, is_charge DESC, is_point_redemption DESC, rowid DESC";
 
             command.Parameters.AddWithValue("@ledgerId", ledgerId);
 
