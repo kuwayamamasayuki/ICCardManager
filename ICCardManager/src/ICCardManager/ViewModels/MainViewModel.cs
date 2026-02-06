@@ -1214,8 +1214,14 @@ public partial class MainViewModel : ViewModelBase
         // 詳細ダイアログを表示
         var dialog = App.Current.ServiceProvider.GetRequiredService<Views.Dialogs.LedgerDetailDialog>();
         dialog.Owner = System.Windows.Application.Current.MainWindow;
-        dialog.Initialize(detailDto);
+        await dialog.InitializeAsync(detailDto.Id);
         dialog.ShowDialog();
+
+        // Issue #548: 保存が行われた場合は履歴を再読み込み
+        if (dialog.WasSaved)
+        {
+            await LoadHistoryLedgersAsync();
+        }
     }
 
     /// <summary>

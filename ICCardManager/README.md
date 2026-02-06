@@ -282,6 +282,7 @@ dotnet test --filter "FullyQualifiedName~SummaryGeneratorTests"
 
 **改善**
 - 起動時間を短縮
+- 乗車履歴統合・分割UIを大幅改善（分割線クリック方式、アルファベットラベル追加）
 
 **バグ修正**
 - 空港グループを乗り継ぎ同一視から除外

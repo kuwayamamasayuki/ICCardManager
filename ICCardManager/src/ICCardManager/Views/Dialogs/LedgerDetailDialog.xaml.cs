@@ -20,6 +20,11 @@ namespace ICCardManager.Views.Dialogs
     {
         private LedgerDetailViewModel? _viewModel;
 
+        /// <summary>
+        /// 保存が行われたかどうか（Issue #548: 履歴画面の即時反映用）
+        /// </summary>
+        public bool WasSaved { get; private set; }
+
         public LedgerDetailDialog()
         {
             InitializeComponent();
@@ -37,7 +42,8 @@ namespace ICCardManager.Views.Dialogs
 
             _viewModel.OnSaveCompleted = () =>
             {
-                // 保存完了時は何もしない（ダイアログは開いたまま）
+                // Issue #548: 保存完了時にフラグを設定（履歴画面の即時反映用）
+                WasSaved = true;
             };
 
             await _viewModel.InitializeAsync(ledgerId, operatorIdm);
@@ -60,11 +66,14 @@ namespace ICCardManager.Views.Dialogs
         }
 
         /// <summary>
-        /// チェックボックスクリック時の処理
+        /// 分割線ボタンクリック時の処理（Issue #548: 分割線クリック方式UI）
         /// </summary>
-        private void CheckBox_Click(object sender, RoutedEventArgs e)
+        private void DividerButton_Click(object sender, RoutedEventArgs e)
         {
-            _viewModel?.OnSelectionChanged();
+            if (sender is System.Windows.Controls.Button button && button.Tag is int index)
+            {
+                _viewModel?.ToggleDividerAt(index);
+            }
         }
 
         /// <summary>

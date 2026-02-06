@@ -354,12 +354,13 @@ namespace ICCardManager.Services
                 return string.Empty;
             }
 
-            // 残高ベースの入力順序バリデーション：
-            // ICカードの履歴は新しい順で格納されるが、摘要生成には古い順が必要。
-            // UseDate昇順（古い日付を先に）+ Balance降順（同日内では残高が高い方が先＝先に利用した）
-            // でソートすることで、呼び出し元の入力順序に依存せず正しく処理できる。
+            // Issue #548: SequenceNumberを使って正しい時系列順にソート
+            // ICカード履歴は新しい順で読み取られ、その順でDBに挿入されるため、
+            // rowid（=SequenceNumber）が大きいほど古い（先に利用した）
+            // SequenceNumberが0（未設定）の場合は従来のBalance降順を使用
             var sortedTrips = trips
-                .OrderBy(t => t.UseDate ?? DateTime.MaxValue)
+                .OrderByDescending(t => t.SequenceNumber > 0 ? t.SequenceNumber : 0)
+                .ThenBy(t => t.UseDate ?? DateTime.MaxValue)
                 .ThenByDescending(t => t.Balance ?? 0)
                 .ToList();
 
@@ -395,7 +396,13 @@ namespace ICCardManager.Services
             // グループ化された経路を処理
             foreach (var group in groupedTrips)
             {
-                var groupTrips = group.OrderBy(t => t.UseDate ?? DateTime.MaxValue).ToList();
+                // Issue #548: SequenceNumberを使って正しい時系列順にソート
+                // rowid（=SequenceNumber）が大きいほど古い（先に利用した）
+                var groupTrips = group
+                    .OrderByDescending(t => t.SequenceNumber > 0 ? t.SequenceNumber : 0)
+                    .ThenBy(t => t.UseDate ?? DateTime.MaxValue)
+                    .ThenByDescending(t => t.Balance ?? 0)
+                    .ToList();
                 if (groupTrips.Count == 1)
                 {
                     result.Add($"{groupTrips[0].EntryStation}～{groupTrips[0].ExitStation}");
