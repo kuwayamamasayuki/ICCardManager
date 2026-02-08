@@ -166,7 +166,7 @@ dotnet build
 # リリースビルド（配布用）
 dotnet publish src/ICCardManager/ICCardManager.csproj -c Release
 
-# 出力先: src/ICCardManager/bin/Release/net48/publish/
+# 出力先: src/ICCardManager/bin/Release/net48/
 ```
 
 ### インストーラーのビルド
