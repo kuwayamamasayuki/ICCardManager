@@ -543,7 +543,7 @@
 
                     <!-- ダッシュボードヘッダー -->
                     <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="0,0,0,10">
-                        <TextBlock Text="💳 カード残高"
+                        <TextBlock Text="💳 カード一覧"
                                    FontSize="{DynamicResource BaseFontSize}"
                                    FontWeight="Bold"
                                    VerticalAlignment="Center"/>
@@ -574,7 +574,7 @@
                         </ComboBox>
                     </StackPanel>
 
-                    <!-- カード残高一覧 -->
+                    <!-- カード一覧 -->
                     <ListView Grid.Row="2"
                               ItemsSource="{Binding CardBalanceDashboard}"
                               SelectedItem="{Binding SelectedDashboardItem}"
@@ -582,7 +582,7 @@
                               Background="Transparent"
                               TabIndex="10"
                               KeyboardNavigation.TabNavigation="Once"
-                              AutomationProperties.Name="カード残高一覧"
+                              AutomationProperties.Name="カード一覧"
                               AutomationProperties.HelpText="カードをクリックまたはEnterキーで履歴を表示します。上下矢印キーで選択を移動できます">
                         <ListView.ItemContainerStyle>
                             <Style TargetType="ListViewItem">
