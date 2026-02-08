@@ -293,7 +293,7 @@ dotnet test --filter "FullyQualifiedName~SummaryGeneratorTests"
 - 履歴一覧から複数エントリの統合機能を追加（チェックボックスで選択→統合ボタン）
 - 統合の取り消し機能を追加（DB永続化された履歴から任意の統合を選んで元に戻せる）
 - 統合履歴選択ダイアログを追加（一覧から取り消したい統合を選択）
-- 履歴統合のユニットテスト30件を追加（LedgerMergeServiceTests）
+- 履歴統合のユニットテスト31件を追加（LedgerMergeServiceTests）
 - 払戻済カード状態の追加
 - 操作ログに変更内容の詳細表示を追加
 - 履歴編集画面で利用者の変更を可能に
