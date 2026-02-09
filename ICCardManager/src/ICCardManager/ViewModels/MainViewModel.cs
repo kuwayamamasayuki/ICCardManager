@@ -1722,9 +1722,10 @@ public partial class MainViewModel : ViewModelBase
         dialog.Owner = System.Windows.Application.Current.MainWindow;
         dialog.ShowDialog();
 
-        // 設定変更後に音声モードを再適用
+        // 設定変更後に音声モードを再適用し、カード一覧を更新（残額警告閾値の変更を反映）
         var settings = await _settingsRepository.GetAppSettingsAsync();
         _soundPlayer.SoundMode = settings.SoundMode;
+        await RefreshDashboardAsync();
     }
 
     /// <summary>
