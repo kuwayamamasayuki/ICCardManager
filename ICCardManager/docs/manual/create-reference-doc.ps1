@@ -76,11 +76,35 @@ try {
     $Doc.Content.Text = "Sample Document for Pandoc Reference`r`n"
 
     # Issue #600: テーブルスタイルの設定（印刷時に罫線が表示されるようにする）
-    # pandocはreference.docx内のテーブルスタイルを参照して出力する。
-    # テーブルが存在しない場合、罫線なしのデフォルトスタイルが適用され印刷時に消える。
+    # pandocは reference.docx 内の "Table" という名前のテーブルスタイルを参照して出力する。
+    # "Table" スタイルが存在しない場合、罫線なしのデフォルトが適用され印刷時に消える。
+    # 参考: https://github.com/jgm/pandoc/issues/3275
     Write-Host "[設定] テーブルスタイルを設定中..." -ForegroundColor Yellow
 
-    # ドキュメント末尾にカーソルを移動してテーブルを挿入
+    # 罫線パラメータ（黒・単線・0.5pt）
+    # wdLineStyleSingle = 1, wdLineWidth050pt = 4
+    # 外枠: wdBorderTop=-1, wdBorderLeft=-2, wdBorderBottom=-3, wdBorderRight=-4
+    # 内側: wdBorderHorizontal=-5, wdBorderVertical=-6
+    $LineStyle = 1  # wdLineStyleSingle（単線）
+    $LineWidth = 4  # wdLineWidth050pt（0.5pt）
+
+    # "Table" テーブルスタイルを作成（pandocが参照する名前）
+    # wdStyleTypeTable = 3
+    try {
+        $TableStyle = $Doc.Styles.Add("Table", 3)
+        foreach ($BorderId in @(-1, -2, -3, -4, -5, -6)) {
+            $Border = $TableStyle.Table.Borders.Item($BorderId)
+            $Border.LineStyle = $LineStyle
+            $Border.LineWidth = $LineWidth
+            $Border.Color = 0  # 黒（wdColorBlack）
+        }
+        Write-Host "  テーブルスタイル 'Table': 黒・単線・0.5pt（全罫線）" -ForegroundColor Gray
+    }
+    catch {
+        Write-Host "  警告: テーブルスタイル 'Table' の作成をスキップ（convert-to-docx.ps1の後処理で代替）" -ForegroundColor Yellow
+    }
+
+    # ドキュメント末尾にカーソルを移動してサンプルテーブルを挿入
     $Range = $Doc.Content
     $Range.Collapse(0)  # wdCollapseEnd = 0
     $Range.InsertParagraphAfter()
@@ -90,13 +114,7 @@ try {
     # サンプルテーブルを作成（2行×3列）
     $Table = $Doc.Tables.Add($Range, 2, 3)
 
-    # 全罫線を設定（黒・単線・0.5pt）
-    # wdLineStyleSingle = 1, wdLineWidth050pt = 4
-    # 外枠: wdBorderTop=-1, wdBorderLeft=-2, wdBorderBottom=-3, wdBorderRight=-4
-    # 内側: wdBorderHorizontal=-5, wdBorderVertical=-6
-    $LineStyle = 1  # wdLineStyleSingle（単線）
-    $LineWidth = 4  # wdLineWidth050pt（0.5pt）
-
+    # サンプルテーブルにもインライン罫線を設定（視覚的な確認用）
     foreach ($BorderId in @(-1, -2, -3, -4, -5, -6)) {
         $Border = $Table.Borders.Item($BorderId)
         $Border.LineStyle = $LineStyle
@@ -104,7 +122,7 @@ try {
         $Border.Color = 0  # 黒（wdColorBlack）
     }
 
-    # サンプルデータ（pandocのスタイル認識用）
+    # サンプルデータ
     $Table.Cell(1, 1).Range.Text = "Header 1"
     $Table.Cell(1, 2).Range.Text = "Header 2"
     $Table.Cell(1, 3).Range.Text = "Header 3"
@@ -112,7 +130,7 @@ try {
     $Table.Cell(2, 2).Range.Text = "Data 2"
     $Table.Cell(2, 3).Range.Text = "Data 3"
 
-    Write-Host "  テーブルスタイル: 黒・単線・0.5pt（全罫線）" -ForegroundColor Gray
+    Write-Host "  サンプルテーブル: 黒・単線・0.5pt（全罫線）" -ForegroundColor Gray
 
     # 保存
     Write-Host "[保存] ファイルを保存中..." -ForegroundColor Yellow
