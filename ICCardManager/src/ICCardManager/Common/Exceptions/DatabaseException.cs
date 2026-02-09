@@ -115,7 +115,7 @@ namespace ICCardManager.Common.Exceptions
             return entityType.ToLowerInvariant() switch
             {
                 "staff" => "職員",
-                "iccard" or "ic_card" or "card" => "ICカード",
+                "iccard" or "ic_card" or "card" => "交通系ICカード",
                 "ledger" => "出納記録",
                 "ledgerdetail" or "ledger_detail" => "利用明細",
                 "settings" => "設定",

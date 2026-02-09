@@ -492,7 +492,7 @@ namespace ICCardManager.ViewModels
             }
 
             // Issue #429: ICカードの削除は認証が必要
-            var authResult = await _staffAuthService.RequestAuthenticationAsync("ICカードの削除");
+            var authResult = await _staffAuthService.RequestAuthenticationAsync("交通系ICカードの削除");
             if (authResult == null)
             {
                 // 認証キャンセルまたはタイムアウト
