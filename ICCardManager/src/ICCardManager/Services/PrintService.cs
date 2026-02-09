@@ -39,7 +39,7 @@ namespace ICCardManager.Services
         /// <summary>月計</summary>
         public ReportPrintTotal MonthlyTotal { get; set; } = new();
 
-        /// <summary>累計（3月のみ）</summary>
+        /// <summary>累計</summary>
         public ReportPrintTotal? CumulativeTotal { get; set; }
 
         /// <summary>次年度繰越（3月のみ）</summary>
@@ -152,6 +152,24 @@ namespace ICCardManager.Services
                     });
                 }
             }
+            else
+            {
+                // 4月以外は前月繰越を追加
+                var previousMonthBalance = await GetPreviousMonthBalanceAsync(cardIdm, year, month);
+                if (previousMonthBalance.HasValue)
+                {
+                    int previousMonth = month == 1 ? 12 : month - 1;
+                    var carryoverDate = new DateTime(year, month, 1);
+                    rows.Add(new ReportPrintRow
+                    {
+                        DateDisplay = WarekiConverter.ToWareki(carryoverDate),
+                        Summary = SummaryGenerator.GetCarryoverFromPreviousMonthSummary(previousMonth),
+                        Income = previousMonthBalance.Value,
+                        Balance = previousMonthBalance.Value,
+                        IsBold = true
+                    });
+                }
+            }
 
             // 各履歴行
             foreach (var ledger in ledgers)
@@ -185,29 +203,37 @@ namespace ICCardManager.Services
                     Label = SummaryGenerator.GetMonthlySummary(month),
                     Income = monthlyIncome,
                     Expense = monthlyExpense,
-                    Balance = month == 3 ? null : monthEndBalance
+                    Balance = null
                 }
             };
 
-            // 3月の場合は累計と次年度繰越を追加
+            // 累計を追加（全月で出力）
+            var fiscalYearStartYear = month >= 4 ? year : year - 1;
+            var fiscalYearStart = new DateTime(fiscalYearStartYear, 4, 1);
+            var fiscalYearEnd = new DateTime(year, month, DateTime.DaysInMonth(year, month));
+            var yearlyLedgers = (await _ledgerRepository.GetByDateRangeAsync(cardIdm, fiscalYearStart, fiscalYearEnd))
+                .Where(l => l.Summary != SummaryGenerator.GetLendingSummary())
+                .OrderBy(l => l.Date)
+                .ThenByDescending(l => l.Income)
+                .ThenBy(l => l.Id)
+                .ToList();
+
+            var yearlyIncome = yearlyLedgers.Sum(l => l.Income);
+            var yearlyExpense = yearlyLedgers.Sum(l => l.Expense);
+            var currentBalance = yearlyLedgers.LastOrDefault()?.Balance ?? monthEndBalance;
+
+            result.CumulativeTotal = new ReportPrintTotal
+            {
+                Label = SummaryGenerator.GetCumulativeSummary(),
+                Income = yearlyIncome,
+                Expense = yearlyExpense,
+                Balance = currentBalance
+            };
+
+            // 3月のみ次年度繰越
             if (month == 3)
             {
-                var fiscalYearStart = new DateTime(year, 4, 1);
-                var fiscalYearEnd = new DateTime(year + 1, 3, 31);
-                var yearlyLedgers = await _ledgerRepository.GetByDateRangeAsync(cardIdm, fiscalYearStart, fiscalYearEnd);
-
-                var yearlyIncome = yearlyLedgers.Sum(l => l.Income);
-                var yearlyExpense = yearlyLedgers.Sum(l => l.Expense);
-
-                // .NET Framework 4.8ではclassにwith式が使えないためプロパティを直接代入
-                result.CumulativeTotal = new ReportPrintTotal
-                {
-                    Label = SummaryGenerator.GetCumulativeSummary(),
-                    Income = yearlyIncome,
-                    Expense = yearlyExpense,
-                    Balance = monthEndBalance
-                };
-                result.CarryoverToNextYear = monthEndBalance;
+                result.CarryoverToNextYear = currentBalance;
             }
 
             return result;
@@ -699,7 +725,7 @@ namespace ICCardManager.Services
                 monthlyRow.Cells.Add(CreateDataCell("", true, TextAlignment.Left));
                 rowGroup.Rows.Add(monthlyRow);
 
-                // 累計行（3月のみ）
+                // 累計行
                 if (data.CumulativeTotal != null)
                 {
                     var cumulativeRow = new TableRow { Background = new SolidColorBrush(Color.FromRgb(230, 230, 230)) };
@@ -777,6 +803,48 @@ namespace ICCardManager.Services
             }
 
             return false;
+        }
+
+        /// <summary>
+        /// 前月の残高を取得
+        /// </summary>
+        /// <param name="cardIdm">カードIDm</param>
+        /// <param name="year">年</param>
+        /// <param name="month">月</param>
+        /// <returns>前月残高。過去のデータがない場合はnull</returns>
+        private async Task<int?> GetPreviousMonthBalanceAsync(string cardIdm, int year, int month)
+        {
+            // 前月の年月を計算
+            int previousYear, previousMonth;
+            if (month == 1)
+            {
+                previousYear = year - 1;
+                previousMonth = 12;
+            }
+            else
+            {
+                previousYear = year;
+                previousMonth = month - 1;
+            }
+
+            // 前月の履歴を取得し、最後の残高を返す
+            var previousLedgers = (await _ledgerRepository.GetByMonthAsync(cardIdm, previousYear, previousMonth))
+                .Where(l => l.Summary != SummaryGenerator.GetLendingSummary())
+                .OrderBy(l => l.Date)
+                .ThenByDescending(l => l.Income)
+                .ThenBy(l => l.Id)
+                .ToList();
+
+            if (previousLedgers.Count > 0)
+            {
+                return previousLedgers.Last().Balance;
+            }
+
+            // 前月のデータがない場合は、さらに前の月から繰り越しを探す
+            // 年度開始月（4月）まで遡って繰越残高を取得
+            var fiscalYearStartYear = month >= 4 ? year : year - 1;
+            var carryover = await _ledgerRepository.GetCarryoverBalanceAsync(cardIdm, fiscalYearStartYear - 1);
+            return carryover;
         }
 
         /// <summary>
