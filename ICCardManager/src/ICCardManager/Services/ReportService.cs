@@ -1001,12 +1001,12 @@ namespace ICCardManager.Services
             expenseCell.Style.NumberFormat.Format = "#,##0";  // 会計形式（3桁カンマ区切り）
             balanceCell.Style.NumberFormat.Format = "#,##0";
 
-            // 繰越行にスタイルを適用
+            // 罫線を適用（ApplyDataRowBorderでBold=falseにリセットされるため、先に呼ぶ）
+            ApplyDataRowBorder(worksheet, row);
+
+            // 繰越行にスタイルを適用（ApplyDataRowBorder後に設定して上書き）
             var range = worksheet.Range(row, 1, row, 12);
             range.Style.Font.Bold = true;
-
-            // 罫線を適用
-            ApplyDataRowBorder(worksheet, row);
 
             return row + 1;
         }
@@ -1018,6 +1018,11 @@ namespace ICCardManager.Services
         {
             // 行の高さを30に設定
             worksheet.Row(row).Height = 30;
+
+            // Issue #591: 既存ファイル上書き時に前回の太字書式が残る場合があるため、
+            // データ行では太字を明示的にリセットする
+            var fullRange = worksheet.Range(row, 1, row, 12);
+            fullRange.Style.Font.Bold = false;
 
             // E〜G列（受入金額、払出金額、残額）のフォントサイズを14ptに設定
             // 最大金額20,000円（6文字）を考慮し、列幅10に収まるサイズ
@@ -1228,6 +1233,10 @@ namespace ICCardManager.Services
         {
             // 行の高さを30に設定
             worksheet.Row(row).Height = 30;
+
+            // Issue #591: 既存ファイル上書き時に残った太字書式をリセット
+            var fullRange = worksheet.Range(row, 1, row, 12);
+            fullRange.Style.Font.Bold = false;
 
             // B列からD列を結合（摘要）
             var summaryRange = worksheet.Range(row, 2, row, 4);
