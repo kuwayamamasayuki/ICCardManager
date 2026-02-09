@@ -22,7 +22,7 @@
         <!-- アイコンとタイトル -->
         <StackPanel Grid.Row="0" HorizontalAlignment="Center" Margin="0,0,0,20">
             <TextBlock Text="🔐" FontSize="48" HorizontalAlignment="Center" Margin="0,0,0,10"/>
-            <TextBlock Text="操作者を記録するため職員証をタッチしてください"
+            <TextBlock Text="操作者を記録するため、職員証をタッチしてください"
                        FontSize="{DynamicResource LargeFontSize}"
                        FontWeight="Bold"
                        HorizontalAlignment="Center"
