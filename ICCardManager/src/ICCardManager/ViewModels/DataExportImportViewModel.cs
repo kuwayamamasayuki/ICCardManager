@@ -521,10 +521,18 @@ public partial class DataExportImportViewModel : ViewModelBase
                     }
                     StatusMessage = message;
                     ClearPreview();
+
+                    _dialogService.ShowInformation(
+                        $"インポートが完了しました。\n\n登録件数: {result.ImportedCount}件"
+                        + (result.SkippedCount > 0 ? $"\nスキップ: {result.SkippedCount}件" : ""),
+                        "インポート完了");
                 }
                 else if (!string.IsNullOrEmpty(result.ErrorMessage))
                 {
                     StatusMessage = $"インポートエラー: {result.ErrorMessage}";
+                    _dialogService.ShowError(
+                        $"インポートに失敗しました。\n\n{result.ErrorMessage}",
+                        "インポートエラー");
                 }
                 else
                 {
@@ -545,11 +553,20 @@ public partial class DataExportImportViewModel : ViewModelBase
                     {
                         ImportErrors.Add($"... 他 {result.Errors.Count - 10}件のエラー");
                     }
+
+                    _dialogService.ShowWarning(
+                        $"インポートが完了しましたが、一部エラーがあります。\n\n登録件数: {result.ImportedCount}件\nエラー: {result.ErrorCount}件"
+                        + (result.SkippedCount > 0 ? $"\nスキップ: {result.SkippedCount}件" : "")
+                        + "\n\n詳細はエラー一覧を確認してください。",
+                        "インポート完了（一部エラー）");
                 }
             }
             catch (Exception ex)
             {
                 StatusMessage = $"インポートエラー: {ex.Message}";
+                _dialogService.ShowError(
+                    $"インポート中にエラーが発生しました。\n\n{ex.Message}",
+                    "インポートエラー");
 #if DEBUG
                 System.Diagnostics.Debug.WriteLine($"[ExecuteImport Error] {ex.GetType().Name}: {ex.Message}");
 #endif
@@ -625,10 +642,18 @@ public partial class DataExportImportViewModel : ViewModelBase
                         message += $"（{result.SkippedCount}件はスキップ）";
                     }
                     StatusMessage = message;
+
+                    _dialogService.ShowInformation(
+                        $"インポートが完了しました。\n\n登録件数: {result.ImportedCount}件"
+                        + (result.SkippedCount > 0 ? $"\nスキップ: {result.SkippedCount}件" : ""),
+                        "インポート完了");
                 }
                 else if (!string.IsNullOrEmpty(result.ErrorMessage))
                 {
                     StatusMessage = $"インポートエラー: {result.ErrorMessage}";
+                    _dialogService.ShowError(
+                        $"インポートに失敗しました。\n\n{result.ErrorMessage}",
+                        "インポートエラー");
                 }
                 else
                 {
@@ -649,11 +674,20 @@ public partial class DataExportImportViewModel : ViewModelBase
                     {
                         ImportErrors.Add($"... 他 {result.Errors.Count - 10}件のエラー");
                     }
+
+                    _dialogService.ShowWarning(
+                        $"インポートが完了しましたが、一部エラーがあります。\n\n登録件数: {result.ImportedCount}件\nエラー: {result.ErrorCount}件"
+                        + (result.SkippedCount > 0 ? $"\nスキップ: {result.SkippedCount}件" : "")
+                        + "\n\n詳細はエラー一覧を確認してください。",
+                        "インポート完了（一部エラー）");
                 }
             }
             catch (Exception ex)
             {
                 StatusMessage = $"インポートエラー: {ex.Message}";
+                _dialogService.ShowError(
+                    $"インポート中にエラーが発生しました。\n\n{ex.Message}",
+                    "インポートエラー");
 #if DEBUG
                 System.Diagnostics.Debug.WriteLine($"[Import Error] {ex.GetType().Name}: {ex.Message}");
                 System.Diagnostics.Debug.WriteLine($"[Import Error] StackTrace: {ex.StackTrace}");

@@ -185,7 +185,7 @@ namespace ICCardManager.Services
         /// </summary>
         /// <param name="filePath">CSVファイルパス</param>
         /// <param name="skipExisting">既存データをスキップするか（falseの場合は更新）</param>
-        public async Task<CsvImportResult> ImportCardsAsync(string filePath, bool skipExisting = true)
+        public virtual async Task<CsvImportResult> ImportCardsAsync(string filePath, bool skipExisting = true)
         {
             var errors = new List<CsvImportError>();
             return await ExecuteImportWithErrorHandlingAsync(
@@ -394,7 +394,7 @@ namespace ICCardManager.Services
         /// </summary>
         /// <param name="filePath">CSVファイルパス</param>
         /// <param name="skipExisting">既存データをスキップするか（falseの場合は更新）</param>
-        public async Task<CsvImportResult> ImportStaffAsync(string filePath, bool skipExisting = true)
+        public virtual async Task<CsvImportResult> ImportStaffAsync(string filePath, bool skipExisting = true)
         {
             var errors = new List<CsvImportError>();
             return await ExecuteImportWithErrorHandlingAsync(
@@ -891,7 +891,7 @@ namespace ICCardManager.Services
         /// 注意: 管理番号は参照用で、実際のデータ識別はカードIDmで行います
         /// Issue #511: CSVのIDm列が空の場合、targetCardIdmが指定されていればそのIDmを使用
         /// </remarks>
-        public async Task<CsvImportResult> ImportLedgersAsync(string filePath, bool skipExisting = true, string? targetCardIdm = null)
+        public virtual async Task<CsvImportResult> ImportLedgersAsync(string filePath, bool skipExisting = true, string? targetCardIdm = null)
         {
             var errors = new List<CsvImportError>();
             var importedCount = 0;
