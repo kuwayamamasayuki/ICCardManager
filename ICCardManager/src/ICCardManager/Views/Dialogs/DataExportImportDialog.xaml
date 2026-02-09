@@ -253,7 +253,7 @@
                                      GroupName="CardSelectionMethod"
                                      Margin="0,0,0,5"
                                      AutomationProperties.Name="カードをタッチして指定"
-                                     ToolTip="ICカードをリーダーにタッチしてカードを指定します">
+                                     ToolTip="交通系ICカードをリーダーにタッチしてカードを指定します">
                             <RadioButton.Style>
                                 <Style TargetType="RadioButton">
                                     <Style.Triggers>

@@ -130,7 +130,36 @@ public class AppExceptionTests
         var cardException = DatabaseException.NotFound("IcCard", "ABCDEF");
 
         // Assert
-        cardException.UserFriendlyMessage.Should().Contain("ICカード");
+        cardException.UserFriendlyMessage.Should().Contain("交通系ICカード");
+    }
+
+    [Theory]
+    [InlineData("iccard")]
+    [InlineData("ic_card")]
+    [InlineData("card")]
+    [InlineData("IcCard")]
+    [InlineData("IC_CARD")]
+    [InlineData("CARD")]
+    public void DatabaseException_NotFound_CardEntityVariants_AllReturnTransitIcCardName(string entityType)
+    {
+        // Act
+        var exception = DatabaseException.NotFound(entityType, "TEST123");
+
+        // Assert - 「交通系ICカード」と表示されること（単なる「ICカード」ではない）
+        exception.UserFriendlyMessage.Should().Contain("交通系ICカード");
+    }
+
+    [Theory]
+    [InlineData("iccard")]
+    [InlineData("ic_card")]
+    [InlineData("card")]
+    public void DatabaseException_DuplicateEntry_CardEntityVariants_AllReturnTransitIcCardName(string entityType)
+    {
+        // Act
+        var exception = DatabaseException.DuplicateEntry(entityType, "TEST123");
+
+        // Assert - 「交通系ICカード」と表示されること
+        exception.UserFriendlyMessage.Should().Contain("交通系ICカード");
     }
 
     [Fact]
