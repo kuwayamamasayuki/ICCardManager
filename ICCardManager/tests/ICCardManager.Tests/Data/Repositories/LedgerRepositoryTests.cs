@@ -249,6 +249,43 @@ public class LedgerRepositoryTests : IDisposable
     }
 
     /// <summary>
+    /// 同一日付で新規購入がチャージよりもincomeが小さい場合でも、新規購入が先に表示されることを確認
+    /// Issue #590: summaryベースのCASE式で新規購入/繰越を最優先にソート（income額に依存しない）
+    /// </summary>
+    [Fact]
+    public async Task GetByDateRangeAsync_SameDateWithTime_IncomeRecordComesFirst()
+    {
+        // Arrange
+        var today = DateTime.Today;
+
+        // チャージ: 時刻 00:00:00（カードリーダーからの履歴）income=3000
+        var charge = CreateTestLedger(TestCardIdm, today, "役務費によりチャージ", income: 3000);
+        charge.Balance = 4000;
+        await _repository.InsertAsync(charge);
+
+        // バス利用: 時刻 00:00:00（カードリーダーからの履歴）
+        var busUsage = CreateTestLedger(TestCardIdm, today, "バス（★）", expense: 200);
+        busUsage.Balance = 3800;
+        await _repository.InsertAsync(busUsage);
+
+        // 新規購入: 時刻 14:30:00（DateTime.Now相当）income=1000（チャージより小さい）
+        var purchase = CreateTestLedger(TestCardIdm, today.AddHours(14).AddMinutes(30), "新規購入", income: 1000);
+        purchase.Balance = 1000;
+        await _repository.InsertAsync(purchase);
+
+        // Act
+        var result = (await _repository.GetByDateRangeAsync(TestCardIdm, today.AddDays(-1), today)).ToList();
+
+        // Assert
+        result.Should().HaveCount(3);
+        // 新規購入はincome=1000 < チャージのincome=3000 だが、CASE式により最優先
+        result[0].Summary.Should().Be("新規購入");
+        // チャージ（income=3000）がバス利用（income=0）より先
+        result[1].Summary.Should().Be("役務費によりチャージ");
+        result[2].Summary.Should().Be("バス（★）");
+    }
+
+    /// <summary>
     /// 結果が日付順でソートされていることを確認
     /// </summary>
     [Fact]
@@ -831,6 +868,44 @@ public class LedgerRepositoryTests : IDisposable
         itemList.Should().HaveCount(2);
         itemList.Should().Contain(l => l.CardIdm == TestCardIdm);
         itemList.Should().Contain(l => l.CardIdm == card2.CardIdm);
+    }
+
+    /// <summary>
+    /// 同一日付で新規購入がチャージよりもincomeが小さい場合でも、新規購入が先に表示されることを確認
+    /// Issue #590: GetPagedAsync でも summaryベースのCASE式ソートが効くことを検証
+    /// </summary>
+    [Fact]
+    public async Task GetPagedAsync_SameDateWithTime_IncomeRecordComesFirst()
+    {
+        // Arrange
+        var today = DateTime.Today;
+
+        // チャージ: 時刻 00:00:00（カードリーダーからの履歴）income=3000
+        var charge = CreateTestLedger(TestCardIdm, today, "役務費によりチャージ", income: 3000);
+        charge.Balance = 4000;
+        await _repository.InsertAsync(charge);
+
+        // バス利用: 時刻 00:00:00（カードリーダーからの履歴）
+        var busUsage = CreateTestLedger(TestCardIdm, today, "バス（★）", expense: 200);
+        busUsage.Balance = 3800;
+        await _repository.InsertAsync(busUsage);
+
+        // 新規購入: 時刻 14:30:00（DateTime.Now相当）income=1000（チャージより小さい）
+        var purchase = CreateTestLedger(TestCardIdm, today.AddHours(14).AddMinutes(30), "新規購入", income: 1000);
+        purchase.Balance = 1000;
+        await _repository.InsertAsync(purchase);
+
+        // Act
+        var (items, totalCount) = await _repository.GetPagedAsync(TestCardIdm, today.AddDays(-1), today, 1, 10);
+
+        // Assert
+        var itemList = items.ToList();
+        totalCount.Should().Be(3);
+        // 新規購入はincome=1000 < チャージのincome=3000 だが、CASE式により最優先
+        itemList[0].Summary.Should().Be("新規購入");
+        // チャージ（income=3000）がバス利用（income=0）より先
+        itemList[1].Summary.Should().Be("役務費によりチャージ");
+        itemList[2].Summary.Should().Be("バス（★）");
     }
 
     /// <summary>
