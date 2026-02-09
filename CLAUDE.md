@@ -217,7 +217,6 @@ THEN
 
 ## 参照ドキュメント
 
-- `初期プロンプト.md` - 詳細な要件定義
 - `docs/design/` - 設計書一式
 - `docs/manual/` - マニュアル（ユーザー・管理者・開発者）
 - `Resources/Templates/物品出納簿テンプレート.xlsx` - 月次帳票テンプレート
