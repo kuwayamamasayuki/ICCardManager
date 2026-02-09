@@ -877,21 +877,25 @@ public partial class MainViewModel : ViewModelBase
             // バス利用がある場合はバス停入力画面を表示
             if (result.HasBusUsage && result.CreatedLedgers.Count > 0)
             {
-                // 作成された履歴からバス利用詳細を取得
-                var busLedger = result.CreatedLedgers.LastOrDefault(l => !l.IsLentRecord);
-                if (busLedger != null)
+                // Issue #593: バス利用を含むLedgerをすべて取得（Summaryで判定）
+                // LastOrDefaultでは最後のLedgerのみ取得されるため、バス利用が別日にある場合に空ダイアログになる
+                var busLedgers = result.CreatedLedgers
+                    .Where(l => !l.IsLentRecord && l.Summary != null && l.Summary.Contains("バス"))
+                    .ToList();
+
+                foreach (var busLedger in busLedgers)
                 {
                     // バス停入力ダイアログを表示
                     var busDialog = App.Current.ServiceProvider.GetRequiredService<Views.Dialogs.BusStopInputDialog>();
                     busDialog.Owner = System.Windows.Application.Current.MainWindow;
                     await busDialog.InitializeWithLedgerIdAsync(busLedger.Id);
                     busDialog.ShowDialog();
+                }
 
-                    // バス停名入力後に履歴が開いていれば再読み込み
-                    if (IsHistoryVisible)
-                    {
-                        await LoadHistoryLedgersAsync();
-                    }
+                // バス停名入力後に履歴が開いていれば再読み込み
+                if (busLedgers.Count > 0 && IsHistoryVisible)
+                {
+                    await LoadHistoryLedgersAsync();
                 }
             }
 

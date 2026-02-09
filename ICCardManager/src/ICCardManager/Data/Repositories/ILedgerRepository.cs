@@ -98,6 +98,13 @@ namespace ICCardManager.Data.Repositories
         Task<IEnumerable<(string BusStops, int UsageCount)>> GetBusStopSuggestionsAsync();
 
         /// <summary>
+        /// バス利用詳細のバス停名を更新
+        /// </summary>
+        /// <param name="ledgerId">利用履歴ID</param>
+        /// <param name="updates">更新対象（SequenceNumber=rowid, BusStops=バス停名）のリスト</param>
+        Task UpdateDetailBusStopsAsync(int ledgerId, IEnumerable<(int SequenceNumber, string BusStops)> updates);
+
+        /// <summary>
         /// 指定期間の利用履歴をページング付きで取得
         /// </summary>
         /// <param name="cardIdm">ICカードIDm（nullの場合は全カード）</param>

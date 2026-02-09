@@ -198,6 +198,12 @@ public partial class BusStopInputViewModel : ViewModelBase
                     : item.BusStops;
             }
 
+            // Issue #593: バス停名をledger_detailに保存（サジェスト候補の蓄積に必要）
+            var busStopUpdates = BusUsages
+                .Select(item => (item.Detail.SequenceNumber, item.Detail.BusStops))
+                .ToList();
+            await _ledgerRepository.UpdateDetailBusStopsAsync(Ledger.Id, busStopUpdates);
+
             // 摘要を再生成（バス停名を反映）
             var summaryGenerator = new SummaryGenerator();
             Ledger.Summary = summaryGenerator.Generate(Ledger.Details);
@@ -236,6 +242,12 @@ public partial class BusStopInputViewModel : ViewModelBase
                     item.Detail.BusStops = "★";
                 }
             }
+
+            // Issue #593: バス停名をledger_detailに保存
+            var busStopUpdates = BusUsages
+                .Select(item => (item.Detail.SequenceNumber, item.Detail.BusStops))
+                .ToList();
+            await _ledgerRepository.UpdateDetailBusStopsAsync(Ledger.Id, busStopUpdates);
 
             // 摘要を再生成（★マークを反映）
             var summaryGenerator = new SummaryGenerator();
