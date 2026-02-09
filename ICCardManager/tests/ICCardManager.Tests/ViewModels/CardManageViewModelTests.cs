@@ -3,8 +3,11 @@ using ICCardManager.Data.Repositories;
 using ICCardManager.Dtos;
 using ICCardManager.Infrastructure.CardReader;
 using ICCardManager.Models;
+using ICCardManager.Data;
 using ICCardManager.Services;
 using ICCardManager.ViewModels;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Xunit;
 using IOperationLogRepository = ICCardManager.Data.Repositories.IOperationLogRepository;
@@ -31,6 +34,7 @@ public class CardManageViewModelTests
     private readonly Mock<IDialogService> _dialogServiceMock;
     private readonly Mock<IStaffAuthService> _staffAuthServiceMock;
     private readonly CardTypeDetector _cardTypeDetector;
+    private readonly LendingService _lendingService;
     private readonly CardManageViewModel _viewModel;
 
     public CardManageViewModelTests()
@@ -47,6 +51,22 @@ public class CardManageViewModelTests
         // OperationLoggerのモック（コンストラクタ引数が必要なためMock.Ofで作成）
         var operationLogRepositoryMock = new Mock<IOperationLogRepository>();
         _operationLoggerMock = new Mock<OperationLogger>(operationLogRepositoryMock.Object, _staffRepositoryMock.Object);
+
+        // LendingServiceの作成（Issue #596対応）
+        var settingsRepositoryMock = new Mock<ISettingsRepository>();
+        var summaryGenerator = new SummaryGenerator();
+        var lockManager = new CardLockManager(NullLogger<CardLockManager>.Instance);
+        var dbContext = new DbContext(":memory:");
+        dbContext.InitializeDatabase();
+        _lendingService = new LendingService(
+            dbContext,
+            _cardRepositoryMock.Object,
+            _staffRepositoryMock.Object,
+            _ledgerRepositoryMock.Object,
+            settingsRepositoryMock.Object,
+            summaryGenerator,
+            lockManager,
+            NullLogger<LendingService>.Instance);
 
         // バリデーションはデフォルトで成功を返す
         _validationServiceMock.Setup(v => v.ValidateCardIdm(It.IsAny<string>())).Returns(ValidationResult.Success());
@@ -78,7 +98,8 @@ public class CardManageViewModelTests
             _validationServiceMock.Object,
             _operationLoggerMock.Object,
             _dialogServiceMock.Object,
-            _staffAuthServiceMock.Object);
+            _staffAuthServiceMock.Object,
+            _lendingService);
     }
 
     #region カード一覧読み込みテスト

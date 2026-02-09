@@ -952,16 +952,19 @@ public partial class MainViewModel : ViewModelBase
 
         // Issue #482対応: カード種別選択の前に残高を読み取っておく
         // 選択中にカードを離しても正しい残高で登録できる
+        // Issue #596対応: 履歴も事前に読み取っておく（カード登録時に当月分をインポートするため）
         // エラーイベントを一時的に抑制（ユーザーに混乱を与えるエラーメッセージを防止）
         int? preReadBalance = null;
+        List<LedgerDetail> preReadHistory = null;
         _cardReader.Error -= OnCardReaderError;
         try
         {
             preReadBalance = await _cardReader.ReadBalanceAsync(idm);
+            preReadHistory = (await _cardReader.ReadHistoryAsync(idm))?.ToList();
         }
         catch
         {
-            // 残高読み取りエラーは無視（カード登録は続行可能）
+            // 残高・履歴読み取りエラーは無視（カード登録は続行可能）
         }
         finally
         {
@@ -989,9 +992,10 @@ public partial class MainViewModel : ViewModelBase
             case Views.Dialogs.CardTypeSelectionResult.IcCard:
                 // カード管理画面を開いて新規登録モードで開始
                 // Issue #482: 事前に読み取った残高を渡す
+                // Issue #596: 事前に読み取った履歴も渡す
                 var cardDialog = App.Current.ServiceProvider.GetRequiredService<Views.Dialogs.CardManageDialog>();
                 cardDialog.Owner = System.Windows.Application.Current.MainWindow;
-                cardDialog.InitializeWithIdmAndBalance(idm, preReadBalance);
+                cardDialog.InitializeWithIdmBalanceAndHistory(idm, preReadBalance, preReadHistory);
                 cardDialog.ShowDialog();
 
                 // ダイアログを閉じた後、貸出中カード一覧とダッシュボードを更新

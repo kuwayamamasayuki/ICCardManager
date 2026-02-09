@@ -3,6 +3,7 @@ using ICCardManager.Data;
 using ICCardManager.Data.Repositories;
 using ICCardManager.Models;
 using ICCardManager.Services;
+using ICCardManager.ViewModels;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
@@ -1608,6 +1609,220 @@ public class LendingServiceTests : IDisposable
         result.Success.Should().BeTrue();
         result.MayHaveIncompleteHistory.Should().BeFalse(
             "今月の既存レコードがあるため、既にアプリで追跡中");
+    }
+
+    #endregion
+
+    #region ImportHistoryForRegistrationAsync テスト（Issue #596）
+
+    /// <summary>
+    /// ImportHistoryForRegistrationAsync に空リストを渡した場合、ImportedCount=0で成功すること
+    /// </summary>
+    [Fact]
+    public async Task ImportHistoryForRegistrationAsync_EmptyList_ReturnsZeroImported()
+    {
+        // Arrange
+        var importFromDate = new DateTime(2026, 2, 1);
+        var emptyHistory = new List<LedgerDetail>();
+
+        // Act
+        var result = await _service.ImportHistoryForRegistrationAsync(TestCardIdm, emptyHistory, importFromDate);
+
+        // Assert
+        result.Success.Should().BeTrue();
+        result.ImportedCount.Should().Be(0);
+        result.MayHaveIncompleteHistory.Should().BeFalse();
+    }
+
+    /// <summary>
+    /// ImportHistoryForRegistrationAsync に importFromDate より前のエントリのみを渡した場合、
+    /// ImportedCount=0 で成功すること
+    /// </summary>
+    [Fact]
+    public async Task ImportHistoryForRegistrationAsync_OnlyEntriesBeforeImportDate_ReturnsZeroImported()
+    {
+        // Arrange
+        var importFromDate = new DateTime(2026, 2, 1);
+        var history = new List<LedgerDetail>
+        {
+            new() { UseDate = new DateTime(2026, 1, 15), Balance = 5000, Amount = 210, EntryStation = "天神", ExitStation = "博多" },
+            new() { UseDate = new DateTime(2026, 1, 20), Balance = 4790, Amount = 210, EntryStation = "博多", ExitStation = "天神" },
+            new() { UseDate = new DateTime(2026, 1, 31), Balance = 4580, Amount = 210, EntryStation = "天神", ExitStation = "中洲川端" }
+        };
+
+        // Act
+        var result = await _service.ImportHistoryForRegistrationAsync(TestCardIdm, history, importFromDate);
+
+        // Assert
+        result.Success.Should().BeTrue();
+        result.ImportedCount.Should().Be(0);
+    }
+
+    /// <summary>
+    /// ImportHistoryForRegistrationAsync に当月の利用・チャージ混在履歴を渡した場合、
+    /// 正しいledgerが作成されること
+    /// </summary>
+    [Fact]
+    public async Task ImportHistoryForRegistrationAsync_MixedUsageAndCharge_CreatesCorrectLedgers()
+    {
+        // Arrange
+        var importFromDate = new DateTime(2026, 2, 1);
+        var history = new List<LedgerDetail>
+        {
+            // 2/3: チャージ 3000円
+            new() { UseDate = new DateTime(2026, 2, 3), Balance = 8000, Amount = 3000, IsCharge = true },
+            // 2/5: 鉄道利用
+            new() { UseDate = new DateTime(2026, 2, 5), Balance = 7790, Amount = 210, EntryStation = "天神", ExitStation = "博多" },
+            // 2/7: 鉄道利用
+            new() { UseDate = new DateTime(2026, 2, 7), Balance = 7580, Amount = 210, EntryStation = "博多", ExitStation = "天神" }
+        };
+
+        // モックセットアップ: 重複なし
+        _ledgerRepositoryMock.Setup(x => x.GetExistingDetailKeysAsync(TestCardIdm, It.IsAny<DateTime>()))
+            .ReturnsAsync(new HashSet<(DateTime?, int?, bool)>());
+        _ledgerRepositoryMock.Setup(x => x.GetLatestBeforeDateAsync(TestCardIdm, It.IsAny<DateTime>()))
+            .ReturnsAsync(new Ledger { Balance = 5000 });
+        _ledgerRepositoryMock.Setup(x => x.InsertAsync(It.IsAny<Ledger>()))
+            .ReturnsAsync(1);
+        _ledgerRepositoryMock.Setup(x => x.InsertDetailAsync(It.IsAny<LedgerDetail>()))
+            .ReturnsAsync(true);
+        _ledgerRepositoryMock.Setup(x => x.InsertDetailsAsync(It.IsAny<int>(), It.IsAny<IEnumerable<LedgerDetail>>()))
+            .ReturnsAsync(true);
+
+        // Act
+        var result = await _service.ImportHistoryForRegistrationAsync(TestCardIdm, history, importFromDate);
+
+        // Assert
+        result.Success.Should().BeTrue();
+        result.ImportedCount.Should().BeGreaterThan(0, "チャージと利用がインポートされるべき");
+        result.MayHaveIncompleteHistory.Should().BeFalse("3件しかないため、不完全ではない");
+    }
+
+    /// <summary>
+    /// ImportHistoryForRegistrationAsync で staffName が null で登録されること
+    /// </summary>
+    [Fact]
+    public async Task ImportHistoryForRegistrationAsync_StaffNameIsNull()
+    {
+        // Arrange
+        var importFromDate = new DateTime(2026, 2, 1);
+        var history = new List<LedgerDetail>
+        {
+            new() { UseDate = new DateTime(2026, 2, 5), Balance = 4790, Amount = 210, EntryStation = "天神", ExitStation = "博多" }
+        };
+
+        Ledger capturedLedger = null;
+        _ledgerRepositoryMock.Setup(x => x.GetExistingDetailKeysAsync(TestCardIdm, It.IsAny<DateTime>()))
+            .ReturnsAsync(new HashSet<(DateTime?, int?, bool)>());
+        _ledgerRepositoryMock.Setup(x => x.GetLatestBeforeDateAsync(TestCardIdm, It.IsAny<DateTime>()))
+            .ReturnsAsync(new Ledger { Balance = 5000 });
+        _ledgerRepositoryMock.Setup(x => x.InsertAsync(It.IsAny<Ledger>()))
+            .Callback<Ledger>(l => capturedLedger = l)
+            .ReturnsAsync(1);
+        _ledgerRepositoryMock.Setup(x => x.InsertDetailsAsync(It.IsAny<int>(), It.IsAny<IEnumerable<LedgerDetail>>()))
+            .ReturnsAsync(true);
+
+        // Act
+        var result = await _service.ImportHistoryForRegistrationAsync(TestCardIdm, history, importFromDate);
+
+        // Assert
+        result.Success.Should().BeTrue();
+        capturedLedger.Should().NotBeNull();
+        capturedLedger!.StaffName.Should().BeNull("カード登録時は利用者情報がないため");
+    }
+
+    /// <summary>
+    /// ImportHistoryForRegistrationAsync に 20件すべて当月の履歴を渡した場合、
+    /// MayHaveIncompleteHistory=true であること
+    /// </summary>
+    [Fact]
+    public async Task ImportHistoryForRegistrationAsync_All20CurrentMonth_MayHaveIncompleteHistoryTrue()
+    {
+        // Arrange
+        var importFromDate = new DateTime(2026, 2, 1);
+        var history = Enumerable.Range(1, 20).Select(i => new LedgerDetail
+        {
+            UseDate = new DateTime(2026, 2, Math.Min(i, 28)),
+            Balance = 10000 - i * 200,
+            Amount = 200,
+            EntryStation = "天神",
+            ExitStation = "博多"
+        }).ToList();
+
+        _ledgerRepositoryMock.Setup(x => x.GetExistingDetailKeysAsync(TestCardIdm, It.IsAny<DateTime>()))
+            .ReturnsAsync(new HashSet<(DateTime?, int?, bool)>());
+        _ledgerRepositoryMock.Setup(x => x.GetLatestBeforeDateAsync(TestCardIdm, It.IsAny<DateTime>()))
+            .ReturnsAsync(new Ledger { Balance = 10000 });
+        _ledgerRepositoryMock.Setup(x => x.InsertAsync(It.IsAny<Ledger>()))
+            .ReturnsAsync(1);
+        _ledgerRepositoryMock.Setup(x => x.InsertDetailsAsync(It.IsAny<int>(), It.IsAny<IEnumerable<LedgerDetail>>()))
+            .ReturnsAsync(true);
+
+        // Act
+        var result = await _service.ImportHistoryForRegistrationAsync(TestCardIdm, history, importFromDate);
+
+        // Assert
+        result.Success.Should().BeTrue();
+        result.MayHaveIncompleteHistory.Should().BeTrue(
+            "20件すべてが当月のため、月初めの履歴が不足している可能性がある");
+    }
+
+    #endregion
+
+    #region CalculatePreHistoryBalance テスト（Issue #596）
+
+    /// <summary>
+    /// 利用エントリの場合: balance + amount で初期残高を逆算すること
+    /// </summary>
+    [Fact]
+    public void CalculatePreHistoryBalance_UsageEntry_ReturnsBalancePlusAmount()
+    {
+        // Arrange - 利用210円で残高が4790円になった場合、利用前は5000円
+        var history = new List<LedgerDetail>
+        {
+            new() { UseDate = new DateTime(2026, 2, 5), Balance = 4790, Amount = 210, IsCharge = false }
+        };
+
+        // Act
+        var result = CardManageViewModel.CalculatePreHistoryBalance(history);
+
+        // Assert
+        result.Should().Be(5000, "利用前の残高 = 利用後残高(4790) + 利用額(210)");
+    }
+
+    /// <summary>
+    /// チャージエントリの場合: balance - amount で初期残高を逆算すること
+    /// </summary>
+    [Fact]
+    public void CalculatePreHistoryBalance_ChargeEntry_ReturnsBalanceMinusAmount()
+    {
+        // Arrange - チャージ3000円で残高が8000円になった場合、チャージ前は5000円
+        var history = new List<LedgerDetail>
+        {
+            new() { UseDate = new DateTime(2026, 2, 3), Balance = 8000, Amount = 3000, IsCharge = true }
+        };
+
+        // Act
+        var result = CardManageViewModel.CalculatePreHistoryBalance(history);
+
+        // Assert
+        result.Should().Be(5000, "チャージ前の残高 = チャージ後残高(8000) - チャージ額(3000)");
+    }
+
+    /// <summary>
+    /// 空リストの場合: 0 を返すこと
+    /// </summary>
+    [Fact]
+    public void CalculatePreHistoryBalance_EmptyList_ReturnsZero()
+    {
+        // Arrange
+        var history = new List<LedgerDetail>();
+
+        // Act
+        var result = CardManageViewModel.CalculatePreHistoryBalance(history);
+
+        // Assert
+        result.Should().Be(0);
     }
 
     #endregion

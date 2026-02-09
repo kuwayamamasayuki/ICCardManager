@@ -27,6 +27,7 @@ namespace ICCardManager.ViewModels
         private readonly OperationLogger _operationLogger;
         private readonly IDialogService _dialogService;
         private readonly IStaffAuthService _staffAuthService;
+        private readonly LendingService _lendingService;
 
         [ObservableProperty]
         private ObservableCollection<CardDto> _cards = new();
@@ -72,6 +73,15 @@ namespace ICCardManager.ViewModels
         private int? _preReadBalance;
 
         /// <summary>
+        /// 事前に読み取った履歴（Issue #596対応）
+        /// </summary>
+        /// <remarks>
+        /// 未登録カード検出時にMainViewModelで履歴を読み取り、この値に設定する。
+        /// カード登録後にImportHistoryForRegistrationAsyncで当月分の履歴をインポートする。
+        /// </remarks>
+        private List<LedgerDetail> _preReadHistory;
+
+        /// <summary>
         /// カード登録モードの選択結果（Issue #510対応）
         /// </summary>
         /// <remarks>
@@ -107,7 +117,8 @@ namespace ICCardManager.ViewModels
             IValidationService validationService,
             OperationLogger operationLogger,
             IDialogService dialogService,
-            IStaffAuthService staffAuthService)
+            IStaffAuthService staffAuthService,
+            LendingService lendingService)
         {
             _cardRepository = cardRepository;
             _ledgerRepository = ledgerRepository;
@@ -117,6 +128,7 @@ namespace ICCardManager.ViewModels
             _operationLogger = operationLogger;
             _dialogService = dialogService;
             _staffAuthService = staffAuthService;
+            _lendingService = lendingService;
 
             // カード読み取りイベント
             _cardReader.CardRead += OnCardRead;
@@ -262,6 +274,19 @@ namespace ICCardManager.ViewModels
         public void SetPreReadBalance(int? balance)
         {
             _preReadBalance = balance;
+        }
+
+        /// <summary>
+        /// 事前に読み取った履歴を設定（Issue #596対応）
+        /// </summary>
+        /// <remarks>
+        /// MainViewModelで未登録カード検出時に履歴を読み取り、この値を設定する。
+        /// カード登録後に当月分の履歴をインポートする際に使用する。
+        /// </remarks>
+        /// <param name="history">カード利用履歴</param>
+        public void SetPreReadHistory(List<LedgerDetail> history)
+        {
+            _preReadHistory = history;
         }
 
         /// <summary>
@@ -412,9 +437,46 @@ namespace ICCardManager.ViewModels
                         // 操作ログを記録
                         await _operationLogger.LogCardInsertAsync(null, card);
 
-                        // カード残額を読み取り、初期レコードを作成
-                        // Issue #510: 登録モードに応じて「新規購入」または「○月から繰越」レコードを作成
-                        await CreateInitialLedgerAsync(EditCardIdm, modeResult);
+                        // Issue #596: 履歴のインポート対象を決定
+                        var history = _preReadHistory;
+                        if (history == null || history.Count == 0)
+                        {
+                            // フォールバック: カードから直接読み取り
+                            try { history = (await _cardReader.ReadHistoryAsync(EditCardIdm))?.ToList(); }
+                            catch { history = null; }
+                        }
+
+                        var importFromDate = GetImportFromDate(modeResult);
+                        var filteredHistory = history?
+                            .Where(d => d.UseDate.HasValue && d.UseDate.Value.Date >= importFromDate)
+                            .OrderBy(d => d.UseDate)
+                            .ThenByDescending(d => d.Balance)
+                            .ToList();
+
+                        if (filteredHistory != null && filteredHistory.Count > 0)
+                        {
+                            // 履歴がある場合: 初期残高を逆算してから初期レコード作成
+                            var preHistoryBalance = CalculatePreHistoryBalance(filteredHistory);
+                            await CreateInitialLedgerAsync(EditCardIdm, modeResult,
+                                overrideDate: importFromDate, overrideBalance: preHistoryBalance);
+
+                            // 履歴をインポート
+                            var importResult = await _lendingService.ImportHistoryForRegistrationAsync(
+                                EditCardIdm, filteredHistory, importFromDate);
+
+                            if (importResult.MayHaveIncompleteHistory)
+                            {
+                                _dialogService.ShowInformation(
+                                    "カード内の履歴がすべて今月分のため、月初めからの履歴が不足している可能性があります。\n" +
+                                    "不足分はCSVインポートで補完してください。",
+                                    "履歴インポートの注意");
+                            }
+                        }
+                        else
+                        {
+                            // 履歴がない場合: 従来どおり
+                            await CreateInitialLedgerAsync(EditCardIdm, modeResult);
+                        }
 
                         StatusMessage = "登録しました";
                         IsStatusError = false;
@@ -819,13 +881,19 @@ namespace ICCardManager.ViewModels
         /// </summary>
         /// <param name="cardIdm">カードのIDm</param>
         /// <param name="modeResult">登録モードの選択結果</param>
-        private async Task CreateInitialLedgerAsync(string cardIdm, Views.Dialogs.CardRegistrationModeResult modeResult)
+        /// <param name="overrideDate">日付の上書き（Issue #596: 履歴がある場合、インポート開始日を使用）</param>
+        /// <param name="overrideBalance">残高の上書き（Issue #596: 履歴がある場合、逆算した初期残高を使用）</param>
+        private async Task CreateInitialLedgerAsync(
+            string cardIdm,
+            Views.Dialogs.CardRegistrationModeResult modeResult,
+            DateTime? overrideDate = null,
+            int? overrideBalance = null)
         {
             try
             {
+                // Issue #596: overrideBalanceが指定された場合はそれを使用
                 // Issue #381対応: 事前に読み取った残高を優先的に使用
-                // カードがリーダーから離れた後でも正しい残高で登録できる
-                int? balance = _preReadBalance;
+                int? balance = overrideBalance ?? _preReadBalance;
 
                 // 事前読み取り残高がない場合のみ、カードから読み取りを試みる
                 // （手動で新規登録モードを開始した場合のフォールバック）
@@ -851,14 +919,27 @@ namespace ICCardManager.ViewModels
                         summary = SummaryGenerator.GetMidYearCarryoverSummary(modeResult.CarryoverMonth!.Value);
                     }
 
+                    // Issue #596: overrideDateが指定された場合はそれを使用
+                    DateTime recordDate;
+                    if (overrideDate.HasValue)
+                    {
+                        recordDate = overrideDate.Value;
+                    }
+                    else if (modeResult.IsNewPurchase)
+                    {
+                        recordDate = now;
+                    }
+                    else
+                    {
+                        // Issue #599: 繰越モードの場合は繰越月の翌月1日をレコード日付とする
+                        recordDate = SummaryGenerator.GetMidYearCarryoverDate(modeResult.CarryoverMonth!.Value, now);
+                    }
+
                     var ledger = new Ledger
                     {
                         CardIdm = cardIdm,
                         LenderIdm = null,  // 新規購入/繰越時は貸出者なし
-                        // Issue #599: 繰越モードの場合は繰越月の翌月1日をレコード日付とする
-                        Date = modeResult.IsNewPurchase
-                            ? now
-                            : SummaryGenerator.GetMidYearCarryoverDate(modeResult.CarryoverMonth!.Value, now),
+                        Date = recordDate,
                         Summary = summary,
                         Income = balance.Value,  // 受入金額 = カード残額
                         Expense = 0,
@@ -886,6 +967,48 @@ namespace ICCardManager.ViewModels
                 // 使用後は事前読み取り残高をクリア
                 _preReadBalance = null;
             }
+        }
+
+        /// <summary>
+        /// 履歴インポート前の初期残高を逆算（Issue #596）
+        /// </summary>
+        /// <remarks>
+        /// 最も古い履歴エントリの残高と金額から、その取引前の残高を計算する。
+        /// チャージの場合: 残高 - 金額 = チャージ前の残高
+        /// 利用の場合: 残高 + 金額 = 利用前の残高
+        /// </remarks>
+        /// <param name="sortedHistory">日付順にソート済みの履歴リスト</param>
+        /// <returns>最初の取引前の残高</returns>
+        internal static int CalculatePreHistoryBalance(List<LedgerDetail> sortedHistory)
+        {
+            var oldest = sortedHistory
+                .Where(d => d.UseDate.HasValue && d.Balance.HasValue)
+                .OrderBy(d => d.UseDate)
+                .ThenByDescending(d => d.Balance)
+                .FirstOrDefault();
+
+            if (oldest == null) return 0;
+
+            if (oldest.IsCharge || oldest.IsPointRedemption)
+                return (oldest.Balance ?? 0) - (oldest.Amount ?? 0);
+            else
+                return (oldest.Balance ?? 0) + (oldest.Amount ?? 0);
+        }
+
+        /// <summary>
+        /// 履歴インポートの開始日を取得（Issue #596）
+        /// </summary>
+        /// <remarks>
+        /// 新規購入: 当月1日
+        /// 繰越: 繰越月の翌月1日（SummaryGenerator.GetMidYearCarryoverDateを使用）
+        /// </remarks>
+        private static DateTime GetImportFromDate(Views.Dialogs.CardRegistrationModeResult modeResult)
+        {
+            if (modeResult.IsNewPurchase)
+                return new DateTime(DateTime.Now.Year, DateTime.Now.Month, 1);
+            else
+                return SummaryGenerator.GetMidYearCarryoverDate(
+                    modeResult.CarryoverMonth!.Value, DateTime.Now);
         }
 
         /// <summary>

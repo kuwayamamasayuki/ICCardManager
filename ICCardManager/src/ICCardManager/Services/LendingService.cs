@@ -61,6 +61,35 @@ namespace ICCardManager.Services
     }
 
     /// <summary>
+    /// カード登録時の履歴インポート結果
+    /// </summary>
+    /// <remarks>
+    /// Issue #596対応: カード登録時に当月履歴を自動読み取りした結果を格納する。
+    /// </remarks>
+    public class HistoryImportResult
+    {
+        /// <summary>
+        /// インポートが成功したかどうか
+        /// </summary>
+        public bool Success { get; set; }
+
+        /// <summary>
+        /// インポートされた履歴レコード数
+        /// </summary>
+        public int ImportedCount { get; set; }
+
+        /// <summary>
+        /// 今月の履歴が不完全な可能性があるか
+        /// </summary>
+        /// <remarks>
+        /// カード内の20件の履歴がすべて対象期間内の場合、
+        /// 月初めからの履歴が不足している可能性がある。
+        /// trueの場合、CSVインポートで不足分を補完する必要がある旨をユーザーに通知する。
+        /// </remarks>
+        public bool MayHaveIncompleteHistory { get; set; }
+    }
+
+    /// <summary>
     /// 貸出・返却の処理種別
     /// </summary>
     public enum LendingOperationType
@@ -837,6 +866,70 @@ namespace ICCardManager.Services
             LastProcessedCardIdm = null;
             LastProcessedTime = null;
             LastOperationType = null;
+        }
+
+        /// <summary>
+        /// カード登録時に履歴をインポート（Issue #596）
+        /// </summary>
+        /// <remarks>
+        /// カード登録直後に呼び出され、カード内の履歴から対象期間（importFromDate以降）の
+        /// レコードをledgerに登録する。既存の <see cref="CreateUsageLedgersAsync"/> を
+        /// 内部で利用し、重複チェック・チャージ分離・残高不足パターン検出等を再利用する。
+        /// </remarks>
+        /// <param name="cardIdm">カードのIDm</param>
+        /// <param name="historyDetails">カードから読み取った履歴詳細</param>
+        /// <param name="importFromDate">インポート対象の開始日</param>
+        /// <returns>インポート結果</returns>
+        public async Task<HistoryImportResult> ImportHistoryForRegistrationAsync(
+            string cardIdm, List<LedgerDetail> historyDetails, DateTime importFromDate)
+        {
+            var result = new HistoryImportResult();
+
+            try
+            {
+                // importFromDate以降の履歴のみをフィルタ（呼び出し元で既にフィルタ済みだが安全のため再チェック）
+                var filtered = historyDetails
+                    .Where(d => d.UseDate.HasValue && d.UseDate.Value.Date >= importFromDate.Date)
+                    .OrderBy(d => d.UseDate)
+                    .ThenByDescending(d => d.Balance)
+                    .ToList();
+
+                if (filtered.Count == 0)
+                {
+                    result.Success = true;
+                    result.ImportedCount = 0;
+                    return result;
+                }
+
+                // トランザクション開始
+                using var transaction = _dbContext.BeginTransaction();
+
+                try
+                {
+                    // 既存のCreateUsageLedgersAsyncを利用（staffNameはnull: 登録時には利用者情報がないため）
+                    var createdLedgers = await CreateUsageLedgersAsync(cardIdm, null, filtered);
+
+                    transaction.Commit();
+
+                    result.Success = true;
+                    result.ImportedCount = createdLedgers.Count;
+
+                    // 完全性チェック: 元の履歴（フィルタ前）を使用
+                    result.MayHaveIncompleteHistory = CheckHistoryCompleteness(historyDetails, importFromDate);
+                }
+                catch
+                {
+                    transaction.Rollback();
+                    throw;
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "カード登録時の履歴インポートでエラーが発生しました（CardIdm={CardIdm}）", cardIdm);
+                result.Success = false;
+            }
+
+            return result;
         }
 
         /// <summary>
