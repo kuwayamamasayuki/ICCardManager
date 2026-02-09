@@ -21,6 +21,80 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+# Issue #600: テーブル罫線の後処理
+# pandocが生成するdocxのテーブルには罫線が含まれないことがある。
+# --reference-doc のテーブルスタイル継承はpandocバージョンにより挙動が異なるため、
+# 生成後にdocx（ZIPアーカイブ）内のXMLを直接編集して罫線を確実に付与する。
+function Add-TableBordersToDocx {
+    param([string]$DocxPath)
+
+    Add-Type -AssemblyName System.IO.Compression
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+
+    $archive = [System.IO.Compression.ZipFile]::Open(
+        $DocxPath, [System.IO.Compression.ZipArchiveMode]::Update)
+    try {
+        $entry = $archive.GetEntry("word/document.xml")
+        if (-not $entry) { return 0 }
+
+        # XMLを読み込み
+        $stream = $entry.Open()
+        $xml = New-Object System.Xml.XmlDocument
+        $xml.PreserveWhitespace = $true
+        $xml.Load($stream)
+        $stream.Dispose()
+
+        $ns = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+        $nsm = New-Object System.Xml.XmlNamespaceManager($xml.NameTable)
+        $nsm.AddNamespace("w", $ns)
+
+        $tableCount = 0
+        $tblPrNodes = $xml.SelectNodes("//w:tblPr", $nsm)
+
+        foreach ($tblPr in $tblPrNodes) {
+            # 既に罫線定義がある場合はスキップ
+            $existingBorders = $tblPr.SelectSingleNode("w:tblBorders", $nsm)
+            if ($existingBorders) { continue }
+
+            # tblBordersを作成（黒・単線・0.5pt）
+            $tblBorders = $xml.CreateElement("w", "tblBorders", $ns)
+
+            foreach ($side in @("top", "left", "bottom", "right", "insideH", "insideV")) {
+                $border = $xml.CreateElement("w", $side, $ns)
+                $border.SetAttribute("val", $ns, "single")
+                $border.SetAttribute("sz", $ns, "4")      # 0.5pt
+                $border.SetAttribute("space", $ns, "0")
+                $border.SetAttribute("color", $ns, "000000")  # 黒
+                $tblBorders.AppendChild($border) | Out-Null
+            }
+
+            # OOXMLスキーマ順序に合わせてtblLayoutの前に挿入
+            $tblLayout = $tblPr.SelectSingleNode("w:tblLayout", $nsm)
+            if ($tblLayout) {
+                $tblPr.InsertBefore($tblBorders, $tblLayout) | Out-Null
+            } else {
+                $tblPr.AppendChild($tblBorders) | Out-Null
+            }
+            $tableCount++
+        }
+
+        if ($tableCount -gt 0) {
+            # 変更をZIPに書き戻す
+            $entry.Delete()
+            $newEntry = $archive.CreateEntry(
+                "word/document.xml", [System.IO.Compression.CompressionLevel]::Optimal)
+            $newStream = $newEntry.Open()
+            $xml.Save($newStream)
+            $newStream.Dispose()
+        }
+
+        return $tableCount
+    }
+    finally {
+        $archive.Dispose()
+    }
+}
+
 # スクリプトのディレクトリを取得
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 
@@ -196,6 +270,17 @@ foreach ($Manual in $Manuals) {
         & $PandocExe $PandocArgs
         if ($LASTEXITCODE -ne 0) {
             throw "pandocがエラーコード $LASTEXITCODE を返しました"
+        }
+
+        # Issue #600: テーブルに罫線を追加（後処理）
+        try {
+            $borderCount = Add-TableBordersToDocx -DocxPath $OutputPath
+            if ($borderCount -gt 0) {
+                Write-Host "    テーブル罫線: ${borderCount}個のテーブルに適用" -ForegroundColor Gray
+            }
+        }
+        catch {
+            Write-Host "    警告: テーブル罫線の後処理をスキップしました: $($_.Exception.Message)" -ForegroundColor Yellow
         }
 
         $FileInfo = Get-Item $OutputPath
