@@ -27,11 +27,12 @@
 
     <Grid Margin="20">
         <Grid.RowDefinitions>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="*"/>
-            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>   <!-- Row 0: Export GroupBox -->
+            <RowDefinition Height="Auto"/>   <!-- Row 1: Import GroupBox -->
+            <RowDefinition Height="Auto"/>   <!-- Row 2: Status message -->
+            <RowDefinition Height="*"/>      <!-- Row 3: プレビュー結果（サマリー + DataGrid） -->
+            <RowDefinition Height="Auto"/>   <!-- Row 4: エラー一覧 -->
+            <RowDefinition Height="Auto"/>   <!-- Row 5: Close button -->
         </Grid.RowDefinitions>
 
         <!-- エクスポート -->
@@ -358,25 +359,6 @@
                             ToolTip="プレビューなしで直接インポートします"/>
                 </StackPanel>
 
-                <!-- プレビューサマリ -->
-                <Border Background="#FFF3E0"
-                        Padding="10"
-                        CornerRadius="3"
-                        Margin="0,0,0,10"
-                        Visibility="{Binding HasPreview, Converter={StaticResource BoolToVisibilityConverter}}">
-                    <StackPanel>
-                        <TextBlock FontWeight="Bold" FontSize="{DynamicResource BaseFontSize}">
-                            <Run Text="プレビュー結果: "/>
-                            <Run Text="{Binding PreviewSummary}" Foreground="#E65100"/>
-                        </TextBlock>
-                        <TextBlock Text="{Binding ImportPreviewFile, StringFormat=ファイル: {0}}"
-                                   Foreground="Gray"
-                                   FontSize="{DynamicResource SmallFontSize}"
-                                   Margin="0,5,0,0"
-                                   TextTrimming="CharacterEllipsis"/>
-                    </StackPanel>
-                </Border>
-
                 <!-- 最後にインポートしたファイル -->
                 <TextBlock Text="{Binding LastImportedFile, StringFormat=インポート完了: {0}}"
                            Foreground="Gray"
@@ -399,107 +381,131 @@
                        TextWrapping="Wrap"/>
         </Border>
 
-        <!-- プレビュー結果/エラー一覧 -->
-        <TabControl Grid.Row="3" Margin="0,0,0,10">
-            <!-- プレビュー結果タブ -->
-            <TabItem Header="変更点プレビュー"
-                     Visibility="{Binding HasPreview, Converter={StaticResource BoolToVisibilityConverter}}">
-                <DataGrid ItemsSource="{Binding PreviewItems}"
-                          AutoGenerateColumns="False"
-                          IsReadOnly="True"
-                          CanUserAddRows="False"
-                          CanUserDeleteRows="False"
-                          SelectionMode="Single"
-                          GridLinesVisibility="Horizontal"
-                          HeadersVisibility="Column"
-                          BorderThickness="1"
-                          BorderBrush="#DDD"
-                          AutomationProperties.Name="インポートプレビュー一覧">
-                    <DataGrid.Columns>
-                        <DataGridTextColumn Header="行" Binding="{Binding LineNumber}" Width="50"/>
-                        <DataGridTextColumn Header="IDm" Binding="{Binding Idm}" Width="140"/>
-                        <DataGridTextColumn Header="名前" Binding="{Binding Name}" Width="120"/>
-                        <DataGridTextColumn Header="追加情報" Binding="{Binding AdditionalInfo}" Width="100"/>
-                        <DataGridTemplateColumn Header="アクション" Width="80">
-                            <DataGridTemplateColumn.CellTemplate>
-                                <DataTemplate>
-                                    <TextBlock Text="{Binding Action, Converter={StaticResource ImportActionConverter}}"
-                                               Padding="5,2">
-                                        <TextBlock.Style>
-                                            <Style TargetType="TextBlock">
-                                                <Style.Triggers>
-                                                    <DataTrigger Binding="{Binding Action}" Value="Insert">
-                                                        <Setter Property="Foreground" Value="#4CAF50"/>
-                                                        <Setter Property="FontWeight" Value="Bold"/>
-                                                    </DataTrigger>
-                                                    <DataTrigger Binding="{Binding Action}" Value="Update">
-                                                        <Setter Property="Foreground" Value="#FF9800"/>
-                                                        <Setter Property="FontWeight" Value="Bold"/>
-                                                    </DataTrigger>
-                                                    <DataTrigger Binding="{Binding Action}" Value="Skip">
-                                                        <Setter Property="Foreground" Value="#9E9E9E"/>
-                                                    </DataTrigger>
-                                                    <DataTrigger Binding="{Binding Action}" Value="Restore">
-                                                        <Setter Property="Foreground" Value="#2196F3"/>
-                                                        <Setter Property="FontWeight" Value="Bold"/>
-                                                    </DataTrigger>
-                                                </Style.Triggers>
-                                            </Style>
-                                        </TextBlock.Style>
-                                    </TextBlock>
-                                </DataTemplate>
-                            </DataGridTemplateColumn.CellTemplate>
-                        </DataGridTemplateColumn>
-                        <DataGridTemplateColumn Header="変更点" Width="*">
-                            <DataGridTemplateColumn.CellTemplate>
-                                <DataTemplate>
-                                    <TextBlock Text="{Binding ChangesSummary}"
-                                               Foreground="#E65100"
-                                               TextTrimming="CharacterEllipsis"
-                                               ToolTip="{Binding ChangesSummary}"
-                                               Padding="5,2">
-                                        <TextBlock.Style>
-                                            <Style TargetType="TextBlock">
-                                                <Style.Triggers>
-                                                    <DataTrigger Binding="{Binding HasChanges}" Value="True">
-                                                        <Setter Property="FontStyle" Value="Italic"/>
-                                                    </DataTrigger>
-                                                </Style.Triggers>
-                                            </Style>
-                                        </TextBlock.Style>
-                                    </TextBlock>
-                                </DataTemplate>
-                            </DataGridTemplateColumn.CellTemplate>
-                        </DataGridTemplateColumn>
-                    </DataGrid.Columns>
-                    <DataGrid.RowDetailsTemplate>
-                        <DataTemplate>
-                            <Border Background="#FFF8E1" Padding="10" Margin="0,2"
-                                    Visibility="{Binding HasChanges, Converter={StaticResource BoolToVisibilityConverter}}">
-                                <StackPanel>
-                                    <TextBlock Text="変更内容の詳細:" FontWeight="Bold" Margin="0,0,0,5"/>
-                                    <ItemsControl ItemsSource="{Binding Changes}">
-                                        <ItemsControl.ItemTemplate>
-                                            <DataTemplate>
-                                                <TextBlock Text="{Binding DisplayText}"
-                                                           Foreground="#795548"
-                                                           Margin="10,2,0,2"/>
-                                            </DataTemplate>
-                                        </ItemsControl.ItemTemplate>
-                                    </ItemsControl>
-                                </StackPanel>
-                            </Border>
-                        </DataTemplate>
-                    </DataGrid.RowDetailsTemplate>
-                </DataGrid>
-            </TabItem>
+        <!-- プレビュー結果セクション -->
+        <Grid Grid.Row="3" Margin="0,0,0,10"
+              Visibility="{Binding HasPreview, Converter={StaticResource BoolToVisibilityConverter}}">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>  <!-- サマリーバナー -->
+                <RowDefinition Height="*"/>     <!-- DataGrid -->
+            </Grid.RowDefinitions>
 
-            <!-- エラー一覧タブ -->
-            <TabItem Header="エラー詳細"
-                     Visibility="{Binding ImportErrors.Count, Converter={StaticResource BoolToVisibilityConverter}}">
+            <!-- プレビューサマリー -->
+            <Border Grid.Row="0" Background="#FFF3E0" Padding="10" CornerRadius="3" Margin="0,0,0,5">
+                <StackPanel>
+                    <TextBlock FontWeight="Bold" FontSize="{DynamicResource BaseFontSize}">
+                        <Run Text="プレビュー結果: "/>
+                        <Run Text="{Binding PreviewSummary}" Foreground="#E65100"/>
+                    </TextBlock>
+                    <TextBlock Text="{Binding ImportPreviewFile, StringFormat=ファイル: {0}}"
+                               Foreground="Gray"
+                               FontSize="{DynamicResource SmallFontSize}"
+                               Margin="0,5,0,0"
+                               TextTrimming="CharacterEllipsis"/>
+                </StackPanel>
+            </Border>
+
+            <!-- プレビューDataGrid -->
+            <DataGrid Grid.Row="1"
+                      ItemsSource="{Binding PreviewItems}"
+                      AutoGenerateColumns="False"
+                      IsReadOnly="True"
+                      CanUserAddRows="False"
+                      CanUserDeleteRows="False"
+                      SelectionMode="Single"
+                      GridLinesVisibility="Horizontal"
+                      HeadersVisibility="Column"
+                      BorderThickness="1"
+                      BorderBrush="#DDD"
+                      MinHeight="120"
+                      AutomationProperties.Name="インポートプレビュー一覧">
+                <DataGrid.Columns>
+                    <DataGridTextColumn Header="行" Binding="{Binding LineNumber}" Width="50"/>
+                    <DataGridTextColumn Header="IDm" Binding="{Binding Idm}" Width="140"/>
+                    <DataGridTextColumn Header="名前" Binding="{Binding Name}" Width="120"/>
+                    <DataGridTextColumn Header="追加情報" Binding="{Binding AdditionalInfo}" Width="100"/>
+                    <DataGridTemplateColumn Header="アクション" Width="80">
+                        <DataGridTemplateColumn.CellTemplate>
+                            <DataTemplate>
+                                <TextBlock Text="{Binding Action, Converter={StaticResource ImportActionConverter}}"
+                                           Padding="5,2">
+                                    <TextBlock.Style>
+                                        <Style TargetType="TextBlock">
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding Action}" Value="Insert">
+                                                    <Setter Property="Foreground" Value="#4CAF50"/>
+                                                    <Setter Property="FontWeight" Value="Bold"/>
+                                                </DataTrigger>
+                                                <DataTrigger Binding="{Binding Action}" Value="Update">
+                                                    <Setter Property="Foreground" Value="#FF9800"/>
+                                                    <Setter Property="FontWeight" Value="Bold"/>
+                                                </DataTrigger>
+                                                <DataTrigger Binding="{Binding Action}" Value="Skip">
+                                                    <Setter Property="Foreground" Value="#9E9E9E"/>
+                                                </DataTrigger>
+                                                <DataTrigger Binding="{Binding Action}" Value="Restore">
+                                                    <Setter Property="Foreground" Value="#2196F3"/>
+                                                    <Setter Property="FontWeight" Value="Bold"/>
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </TextBlock.Style>
+                                </TextBlock>
+                            </DataTemplate>
+                        </DataGridTemplateColumn.CellTemplate>
+                    </DataGridTemplateColumn>
+                    <DataGridTemplateColumn Header="変更点" Width="*">
+                        <DataGridTemplateColumn.CellTemplate>
+                            <DataTemplate>
+                                <TextBlock Text="{Binding ChangesSummary}"
+                                           Foreground="#E65100"
+                                           TextTrimming="CharacterEllipsis"
+                                           ToolTip="{Binding ChangesSummary}"
+                                           Padding="5,2">
+                                    <TextBlock.Style>
+                                        <Style TargetType="TextBlock">
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding HasChanges}" Value="True">
+                                                    <Setter Property="FontStyle" Value="Italic"/>
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </TextBlock.Style>
+                                </TextBlock>
+                            </DataTemplate>
+                        </DataGridTemplateColumn.CellTemplate>
+                    </DataGridTemplateColumn>
+                </DataGrid.Columns>
+                <DataGrid.RowDetailsTemplate>
+                    <DataTemplate>
+                        <Border Background="#FFF8E1" Padding="10" Margin="0,2"
+                                Visibility="{Binding HasChanges, Converter={StaticResource BoolToVisibilityConverter}}">
+                            <StackPanel>
+                                <TextBlock Text="変更内容の詳細:" FontWeight="Bold" Margin="0,0,0,5"/>
+                                <ItemsControl ItemsSource="{Binding Changes}">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <TextBlock Text="{Binding DisplayText}"
+                                                       Foreground="#795548"
+                                                       Margin="10,2,0,2"/>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                            </StackPanel>
+                        </Border>
+                    </DataTemplate>
+                </DataGrid.RowDetailsTemplate>
+            </DataGrid>
+        </Grid>
+
+        <!-- エラー一覧セクション -->
+        <Border Grid.Row="4" Background="#FFF3E0" Padding="10" CornerRadius="3" Margin="0,0,0,10"
+                Visibility="{Binding ImportErrors.Count, Converter={StaticResource BoolToVisibilityConverter}}">
+            <StackPanel>
+                <TextBlock Text="エラー詳細" FontWeight="Bold" FontSize="{DynamicResource BaseFontSize}" Margin="0,0,0,5"/>
                 <ListBox ItemsSource="{Binding ImportErrors}"
                          Background="#FFF3E0"
                          BorderThickness="0"
+                         MaxHeight="150"
                          AutomationProperties.Name="インポートエラー一覧">
                     <ListBox.ItemTemplate>
                         <DataTemplate>
@@ -509,11 +515,11 @@
                         </DataTemplate>
                     </ListBox.ItemTemplate>
                 </ListBox>
-            </TabItem>
-        </TabControl>
+            </StackPanel>
+        </Border>
 
         <!-- 閉じるボタン -->
-        <StackPanel Grid.Row="4"
+        <StackPanel Grid.Row="5"
                     Orientation="Horizontal"
                     HorizontalAlignment="Right"
                     Margin="0,15,0,0">
@@ -527,7 +533,7 @@
         </StackPanel>
 
         <!-- 処理中オーバーレイ -->
-        <Border Grid.RowSpan="5"
+        <Border Grid.RowSpan="6"
                 Background="#80000000"
                 Visibility="{Binding IsBusy, Converter={StaticResource BoolToVisibilityConverter}}">
             <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
