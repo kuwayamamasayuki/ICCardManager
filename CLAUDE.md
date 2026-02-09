@@ -28,9 +28,8 @@ ICCardManager/
 │       │   │   ├── SettingsDialog.xaml
 │       │   │   ├── ReportDialog.xaml
 │       │   │   └── ...
-│       │   ├── Converters/             # WPF値コンバーター
-│       │   │   └── VisibilityConverters.cs
-│       │   └── Controls/
+│       │   └── Converters/             # WPF値コンバーター
+│       │       └── VisibilityConverters.cs
 │       ├── ViewModels/                 # ViewModel
 │       │   ├── ViewModelBase.cs
 │       │   ├── MainViewModel.cs
