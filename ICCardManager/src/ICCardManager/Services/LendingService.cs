@@ -48,6 +48,16 @@ namespace ICCardManager.Services
         /// 作成された履歴レコード
         /// </summary>
         public List<Ledger> CreatedLedgers { get; set; } = new();
+
+        /// <summary>
+        /// 今月の利用履歴が不完全な可能性があるか（返却時のみ）
+        /// </summary>
+        /// <remarks>
+        /// Issue #596対応: カード内の20件の履歴がすべて今月以降の場合、
+        /// 今月初日から読み取れなかった履歴がある可能性がある。
+        /// trueの場合、CSVインポートで不足分を補完する必要がある旨をユーザーに通知する。
+        /// </remarks>
+        public bool MayHaveIncompleteHistory { get; set; }
     }
 
     /// <summary>
@@ -368,6 +378,12 @@ namespace ICCardManager.Services
                         detail.UseDate?.ToString("yyyy-MM-dd"), detail.Balance, detail.Amount, detail.IsCharge);
                 }
 
+                // Issue #596: 今月の履歴完全性チェック（トランザクション前に既存レコードを確認）
+                var currentMonthStart = new DateTime(now.Year, now.Month, 1);
+                var existingMonthRecords = await _ledgerRepository.GetByMonthAsync(cardIdm, now.Year, now.Month);
+                var hadExistingCurrentMonthRecords = existingMonthRecords
+                    .Any(l => !l.IsLentRecord);
+
                 // トランザクション開始
                 using var transaction = _dbContext.BeginTransaction();
 
@@ -420,6 +436,14 @@ namespace ICCardManager.Services
                     LastOperationType = LendingOperationType.Return;
 
                     result.Success = true;
+
+                    // Issue #596: 今月の履歴が不完全な可能性をチェック
+                    // 条件: このカードの今月の既存レコードがなく（月途中導入の可能性）、
+                    //       かつカード内に20件の履歴があり、すべて今月以降の場合
+                    if (!hadExistingCurrentMonthRecords)
+                    {
+                        result.MayHaveIncompleteHistory = CheckHistoryCompleteness(detailList, currentMonthStart);
+                    }
                 }
                 catch
                 {
@@ -819,5 +843,32 @@ namespace ICCardManager.Services
         /// ロック取得のタイムアウト値を取得（テスト用にオーバーライド可能）
         /// </summary>
         protected virtual int GetLockTimeoutMs() => LockTimeoutMs;
+
+        /// <summary>
+        /// カードから読み取った履歴の完全性をチェック
+        /// </summary>
+        /// <remarks>
+        /// Issue #596対応: カード内の履歴20件がすべて今月以降の場合、
+        /// 今月初日以降の古い履歴がカードから押し出されている可能性がある。
+        /// </remarks>
+        /// <param name="rawDetails">カードから読み取った生の履歴（最大20件）</param>
+        /// <param name="currentMonthStart">今月1日</param>
+        /// <returns>今月の履歴が不完全な可能性がある場合true</returns>
+        internal static bool CheckHistoryCompleteness(IList<LedgerDetail> rawDetails, DateTime currentMonthStart)
+        {
+            // 20件未満の場合はカード内の全履歴を取得済み
+            if (rawDetails.Count < 20)
+            {
+                return false;
+            }
+
+            // 日付のある履歴のうち、今月より前のものがあれば今月分は全件カバー
+            var hasPreCurrentMonth = rawDetails
+                .Where(d => d.UseDate.HasValue)
+                .Any(d => d.UseDate.Value.Date < currentMonthStart);
+
+            // 先月以前の履歴がなければ → 今月分が押し出されている可能性あり
+            return !hasPreCurrentMonth;
+        }
     }
 }

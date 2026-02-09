@@ -1400,4 +1400,215 @@ public class LendingServiceTests : IDisposable
     }
 
     #endregion
+
+    #region 履歴完全性チェックテスト（Issue #596）
+
+    /// <summary>
+    /// 20件すべてが今月の履歴の場合、不完全な可能性ありと判定されること
+    /// </summary>
+    [Fact]
+    public void CheckHistoryCompleteness_All20EntriesCurrentMonth_ReturnsTrue()
+    {
+        // Arrange
+        var currentMonthStart = new DateTime(2026, 2, 1);
+        var details = Enumerable.Range(1, 20).Select(i => new LedgerDetail
+        {
+            UseDate = new DateTime(2026, 2, i),
+            Balance = 1000 - i * 10,
+            Amount = 210
+        }).ToList();
+
+        // Act
+        var result = LendingService.CheckHistoryCompleteness(details, currentMonthStart);
+
+        // Assert
+        result.Should().BeTrue("20件すべてが今月なので、今月初旬の履歴が押し出されている可能性がある");
+    }
+
+    /// <summary>
+    /// 20件の中に先月以前の履歴がある場合、今月分は全件カバー済みと判定されること
+    /// </summary>
+    [Fact]
+    public void CheckHistoryCompleteness_HasPreCurrentMonthEntries_ReturnsFalse()
+    {
+        // Arrange
+        var currentMonthStart = new DateTime(2026, 2, 1);
+        var details = new List<LedgerDetail>();
+
+        // 今月分15件
+        for (int i = 1; i <= 15; i++)
+        {
+            details.Add(new LedgerDetail
+            {
+                UseDate = new DateTime(2026, 2, i),
+                Balance = 1000 - i * 10,
+                Amount = 210
+            });
+        }
+        // 先月分5件
+        for (int i = 27; i <= 31; i++)
+        {
+            if (i <= 31)
+            {
+                details.Add(new LedgerDetail
+                {
+                    UseDate = new DateTime(2026, 1, Math.Min(i, 31)),
+                    Balance = 2000 - i * 10,
+                    Amount = 210
+                });
+            }
+        }
+
+        // Act
+        var result = LendingService.CheckHistoryCompleteness(details, currentMonthStart);
+
+        // Assert
+        result.Should().BeFalse("先月の履歴が含まれているので、今月分は全件カバー済み");
+    }
+
+    /// <summary>
+    /// 20件未満の履歴の場合、カード内の全履歴取得済みと判定されること
+    /// </summary>
+    [Fact]
+    public void CheckHistoryCompleteness_LessThan20Entries_ReturnsFalse()
+    {
+        // Arrange
+        var currentMonthStart = new DateTime(2026, 2, 1);
+        var details = Enumerable.Range(1, 15).Select(i => new LedgerDetail
+        {
+            UseDate = new DateTime(2026, 2, i),
+            Balance = 1000 - i * 10,
+            Amount = 210
+        }).ToList();
+
+        // Act
+        var result = LendingService.CheckHistoryCompleteness(details, currentMonthStart);
+
+        // Assert
+        result.Should().BeFalse("20件未満なのでカード内の全履歴を取得済み");
+    }
+
+    /// <summary>
+    /// 空の履歴の場合、不完全とは判定されないこと
+    /// </summary>
+    [Fact]
+    public void CheckHistoryCompleteness_EmptyHistory_ReturnsFalse()
+    {
+        // Arrange
+        var currentMonthStart = new DateTime(2026, 2, 1);
+        var details = new List<LedgerDetail>();
+
+        // Act
+        var result = LendingService.CheckHistoryCompleteness(details, currentMonthStart);
+
+        // Assert
+        result.Should().BeFalse("空の履歴は不完全とは判定されない");
+    }
+
+    /// <summary>
+    /// 日付なしのエントリを含む場合でも正しく判定されること
+    /// </summary>
+    [Fact]
+    public void CheckHistoryCompleteness_WithNullDates_HandledCorrectly()
+    {
+        // Arrange
+        var currentMonthStart = new DateTime(2026, 2, 1);
+        var details = new List<LedgerDetail>();
+
+        // 今月分18件
+        for (int i = 1; i <= 18; i++)
+        {
+            details.Add(new LedgerDetail
+            {
+                UseDate = new DateTime(2026, 2, i),
+                Balance = 1000 - i * 10,
+                Amount = 210
+            });
+        }
+        // 日付なし2件
+        details.Add(new LedgerDetail { UseDate = null, Balance = 500 });
+        details.Add(new LedgerDetail { UseDate = null, Balance = 400 });
+
+        // Act
+        var result = LendingService.CheckHistoryCompleteness(details, currentMonthStart);
+
+        // Assert
+        result.Should().BeTrue("日付のあるエントリがすべて今月なので、不完全の可能性あり");
+    }
+
+    /// <summary>
+    /// ReturnAsync で今月の既存レコードがない場合、MayHaveIncompleteHistoryが設定されること
+    /// </summary>
+    [Fact]
+    public async Task ReturnAsync_FirstReturnThisMonth_20EntriesAllCurrentMonth_SetsMayHaveIncompleteHistory()
+    {
+        // Arrange
+        var card = CreateTestCard(isLent: true);
+        var staff = CreateTestStaff();
+        var lentRecord = CreateTestLentRecord();
+        var now = DateTime.Now;
+
+        // 今月の20件の履歴
+        var usageDetails = Enumerable.Range(1, 20).Select(i => new LedgerDetail
+        {
+            UseDate = new DateTime(now.Year, now.Month, Math.Min(i, DateTime.DaysInMonth(now.Year, now.Month))),
+            Balance = 10000 - i * 200,
+            Amount = 200,
+            EntryStation = "天神",
+            ExitStation = "博多"
+        }).ToList();
+
+        SetupReturnMocks(card, staff, lentRecord);
+        // 今月の既存レコードなし
+        _ledgerRepositoryMock.Setup(x => x.GetByMonthAsync(TestCardIdm, now.Year, now.Month))
+            .ReturnsAsync(new List<Ledger>());
+
+        // Act
+        var result = await _service.ReturnAsync(TestStaffIdm, TestCardIdm, usageDetails);
+
+        // Assert
+        result.Success.Should().BeTrue();
+        result.MayHaveIncompleteHistory.Should().BeTrue(
+            "今月の既存レコードがなく、20件すべて今月なので不完全の可能性あり");
+    }
+
+    /// <summary>
+    /// ReturnAsync で今月の既存レコードがある場合、MayHaveIncompleteHistoryはfalseであること
+    /// </summary>
+    [Fact]
+    public async Task ReturnAsync_HasExistingCurrentMonthRecords_MayHaveIncompleteHistoryFalse()
+    {
+        // Arrange
+        var card = CreateTestCard(isLent: true);
+        var staff = CreateTestStaff();
+        var lentRecord = CreateTestLentRecord();
+        var now = DateTime.Now;
+
+        var usageDetails = Enumerable.Range(1, 20).Select(i => new LedgerDetail
+        {
+            UseDate = new DateTime(now.Year, now.Month, Math.Min(i, DateTime.DaysInMonth(now.Year, now.Month))),
+            Balance = 10000 - i * 200,
+            Amount = 200,
+            EntryStation = "天神",
+            ExitStation = "博多"
+        }).ToList();
+
+        SetupReturnMocks(card, staff, lentRecord);
+        // 今月の既存レコードあり（アプリで既に追跡中）
+        _ledgerRepositoryMock.Setup(x => x.GetByMonthAsync(TestCardIdm, now.Year, now.Month))
+            .ReturnsAsync(new List<Ledger>
+            {
+                new Ledger { Date = new DateTime(now.Year, now.Month, 1), Summary = "鉄道（天神～博多）" }
+            });
+
+        // Act
+        var result = await _service.ReturnAsync(TestStaffIdm, TestCardIdm, usageDetails);
+
+        // Assert
+        result.Success.Should().BeTrue();
+        result.MayHaveIncompleteHistory.Should().BeFalse(
+            "今月の既存レコードがあるため、既にアプリで追跡中");
+    }
+
+    #endregion
 }
