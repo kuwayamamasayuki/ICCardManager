@@ -965,6 +965,107 @@ public class LedgerRepositoryTests : IDisposable
 
     #endregion
 
+    #region UpdateDetailBusStopsAsync テスト
+
+    /// <summary>
+    /// バス停名をledger_detailに更新できることを確認
+    /// Issue #593: SaveAsync/SkipAsyncでバス停名がledger_detailに反映されるための基盤メソッド
+    /// </summary>
+    [Fact]
+    public async Task UpdateDetailBusStopsAsync_UpdatesBusStopsInDatabase()
+    {
+        // Arrange - バス利用のLedgerと詳細を登録
+        var ledger = CreateTestLedger(TestCardIdm, DateTime.Today, "バス（★）", expense: 200);
+        var ledgerId = await _repository.InsertAsync(ledger);
+
+        var busDetail = new LedgerDetail
+        {
+            LedgerId = ledgerId,
+            UseDate = DateTime.Today,
+            BusStops = "★",
+            Amount = 200,
+            Balance = 9800,
+            IsCharge = false,
+            IsBus = true
+        };
+        await _repository.InsertDetailAsync(busDetail);
+
+        // 挿入後のDetailを取得してSequenceNumber（rowid）を確認
+        var insertedLedger = await _repository.GetByIdAsync(ledgerId);
+        var insertedDetail = insertedLedger!.Details.First();
+        insertedDetail.BusStops.Should().Be("★");
+
+        // Act - バス停名を更新
+        var updates = new[] { (insertedDetail.SequenceNumber, "天神～博多駅") };
+        await _repository.UpdateDetailBusStopsAsync(ledgerId, updates);
+
+        // Assert - 再取得して更新を確認
+        var updatedLedger = await _repository.GetByIdAsync(ledgerId);
+        updatedLedger!.Details.Should().HaveCount(1);
+        updatedLedger.Details[0].BusStops.Should().Be("天神～博多駅");
+    }
+
+    /// <summary>
+    /// 指定したDetailのみが更新され、他のDetailは変更されないことを確認
+    /// </summary>
+    [Fact]
+    public async Task UpdateDetailBusStopsAsync_OnlyUpdatesSpecifiedDetails()
+    {
+        // Arrange - バスと鉄道の2つの詳細を登録
+        var ledger = CreateTestLedger(TestCardIdm, DateTime.Today, "鉄道（博多～天神）、バス（★）", expense: 460);
+        var ledgerId = await _repository.InsertAsync(ledger);
+
+        // 鉄道利用
+        var trainDetail = new LedgerDetail
+        {
+            LedgerId = ledgerId,
+            UseDate = DateTime.Today,
+            EntryStation = "博多",
+            ExitStation = "天神",
+            Amount = 260,
+            Balance = 9740,
+            IsCharge = false,
+            IsBus = false
+        };
+        await _repository.InsertDetailAsync(trainDetail);
+
+        // バス利用
+        var busDetail = new LedgerDetail
+        {
+            LedgerId = ledgerId,
+            UseDate = DateTime.Today,
+            BusStops = "★",
+            Amount = 200,
+            Balance = 9540,
+            IsCharge = false,
+            IsBus = true
+        };
+        await _repository.InsertDetailAsync(busDetail);
+
+        // 挿入後のDetailを取得
+        var insertedLedger = await _repository.GetByIdAsync(ledgerId);
+        var busDetailInserted = insertedLedger!.Details.First(d => d.IsBus);
+        var trainDetailInserted = insertedLedger.Details.First(d => !d.IsBus);
+
+        // Act - バス詳細のみ更新
+        var updates = new[] { (busDetailInserted.SequenceNumber, "天神～博多駅") };
+        await _repository.UpdateDetailBusStopsAsync(ledgerId, updates);
+
+        // Assert - バスは更新、鉄道は変更なし
+        var updatedLedger = await _repository.GetByIdAsync(ledgerId);
+        updatedLedger!.Details.Should().HaveCount(2);
+
+        var updatedBus = updatedLedger.Details.First(d => d.IsBus);
+        updatedBus.BusStops.Should().Be("天神～博多駅");
+
+        var updatedTrain = updatedLedger.Details.First(d => !d.IsBus);
+        updatedTrain.EntryStation.Should().Be("博多");
+        updatedTrain.ExitStation.Should().Be("天神");
+        updatedTrain.BusStops.Should().BeNull(); // 変更されていない
+    }
+
+    #endregion
+
     #region ヘルパーメソッド
 
     private static Ledger CreateTestLedger(string cardIdm, DateTime date, string summary, int income = 0, int expense = 0)

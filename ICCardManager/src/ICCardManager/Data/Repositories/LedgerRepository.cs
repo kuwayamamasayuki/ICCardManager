@@ -359,6 +359,25 @@ LIMIT 100";
         }
 
         /// <inheritdoc/>
+        public async Task UpdateDetailBusStopsAsync(int ledgerId, IEnumerable<(int SequenceNumber, string BusStops)> updates)
+        {
+            var connection = _dbContext.GetConnection();
+
+            foreach (var (sequenceNumber, busStops) in updates)
+            {
+                using var command = connection.CreateCommand();
+                command.CommandText = @"UPDATE ledger_detail SET bus_stops = @busStops
+WHERE ledger_id = @ledgerId AND rowid = @rowid";
+
+                command.Parameters.AddWithValue("@busStops", (object)busStops ?? DBNull.Value);
+                command.Parameters.AddWithValue("@ledgerId", ledgerId);
+                command.Parameters.AddWithValue("@rowid", sequenceNumber);
+
+                await command.ExecuteNonQueryAsync();
+            }
+        }
+
+        /// <inheritdoc/>
         public async Task<(IEnumerable<Ledger> Items, int TotalCount)> GetPagedAsync(
             string cardIdm,
             DateTime fromDate,
