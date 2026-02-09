@@ -2238,4 +2238,164 @@ public class ReportServiceTests : IDisposable
     }
 
     #endregion
+
+    #region Issue #591: 既存ファイル上書き時の太字書式リセット
+
+    /// <summary>
+    /// TC034: Issue #591 - 既存ファイル上書き時にデータ行の太字がリセットされる
+    /// </summary>
+    /// <remarks>
+    /// 前回の帳票出力で月計行（太字）だった行位置に、
+    /// 今回の帳票出力でデータ行が書き込まれた場合、
+    /// 太字書式が残らないことを検証する。
+    /// </remarks>
+    [Fact]
+    public async Task CreateMonthlyReportAsync_OverwriteExistingFile_DataRowsShouldNotBeBold()
+    {
+        // Arrange
+        var cardIdm = "0102030405060708";
+        var card = CreateTestCard(cardIdm);
+        var year = 2024;
+        var month = 6;
+        var outputPath = CreateTempFilePath();
+
+        // === 初回: データ1件 → 月計行が行7に出力（太字） ===
+        // 行5=繰越、行6=データ1件、行7=月計（太字）
+        var initialLedgers = new List<Ledger>
+        {
+            CreateTestLedger(1, cardIdm, new DateTime(year, month, 10), "鉄道（博多～天神）", 0, 300, 9700, "田中太郎")
+        };
+        var mayLedgers = new List<Ledger>
+        {
+            CreateTestLedger(0, cardIdm, new DateTime(year, 5, 31), "前月末データ", 0, 0, 10000)
+        };
+
+        _cardRepositoryMock
+            .Setup(r => r.GetByIdmAsync(cardIdm, true))
+            .ReturnsAsync(card);
+        _ledgerRepositoryMock
+            .Setup(r => r.GetByMonthAsync(cardIdm, year, month))
+            .ReturnsAsync(initialLedgers);
+        _ledgerRepositoryMock
+            .Setup(r => r.GetByMonthAsync(cardIdm, year, 5))
+            .ReturnsAsync(mayLedgers);
+
+        // 初回帳票作成
+        var result1 = await _reportService.CreateMonthlyReportAsync(cardIdm, year, month, outputPath);
+        result1.Success.Should().BeTrue("初回帳票作成が成功するべき");
+
+        // 初回の行7が月計行（太字）であることを確認
+        using (var wb1 = new XLWorkbook(outputPath))
+        {
+            var ws1 = wb1.Worksheets.First();
+            ws1.Cell(7, 2).GetString().Should().Be("6月計");
+            ws1.Cell(7, 2).Style.Font.Bold.Should().BeTrue("初回の行7は月計行で太字であるべき");
+        }
+
+        // === 2回目: データ3件 → 行7はデータ行に変わる ===
+        // 行5=繰越、行6=データ1件目、行7=データ2件目、行8=データ3件目、行9=月計
+        var updatedLedgers = new List<Ledger>
+        {
+            CreateTestLedger(1, cardIdm, new DateTime(year, month, 5), "鉄道（博多～天神）", 0, 300, 9700, "田中太郎"),
+            CreateTestLedger(2, cardIdm, new DateTime(year, month, 10), "バス（博多駅前Ｂ～薬院駅前）", 0, 200, 9500, "鈴木花子"),
+            CreateTestLedger(3, cardIdm, new DateTime(year, month, 15), "鉄道（天神～博多）", 0, 300, 9200, "山田次郎")
+        };
+
+        _ledgerRepositoryMock
+            .Setup(r => r.GetByMonthAsync(cardIdm, year, month))
+            .ReturnsAsync(updatedLedgers);
+
+        // Act - 同じファイルに上書き
+        var result2 = await _reportService.CreateMonthlyReportAsync(cardIdm, year, month, outputPath);
+
+        // Assert
+        result2.Success.Should().BeTrue("2回目の帳票作成が成功するべき");
+
+        using var workbook = new XLWorkbook(outputPath);
+        var worksheet = workbook.Worksheets.First();
+
+        // データ行（行6〜8）が太字でないことを検証
+        worksheet.Cell(6, 2).GetString().Should().Be("鉄道（博多～天神）");
+        worksheet.Cell(6, 2).Style.Font.Bold.Should().BeFalse("データ行（行6）は太字でないべき");
+
+        // 行7: 初回は月計行（太字）だったが、2回目ではデータ行に変わった
+        worksheet.Cell(7, 2).GetString().Should().Be("バス（博多駅前Ｂ～薬院駅前）");
+        worksheet.Cell(7, 2).Style.Font.Bold.Should().BeFalse("行7のデータ行は太字でないべき（Issue #591の核心）");
+
+        worksheet.Cell(8, 2).GetString().Should().Be("鉄道（天神～博多）");
+        worksheet.Cell(8, 2).Style.Font.Bold.Should().BeFalse("データ行（行8）は太字でないべき");
+
+        // 月計行（行9）は太字であること
+        worksheet.Cell(9, 2).GetString().Should().Be("6月計");
+        worksheet.Cell(9, 2).Style.Font.Bold.Should().BeTrue("月計行は太字であるべき");
+    }
+
+    /// <summary>
+    /// TC035: Issue #591 - 空白行の太字もリセットされる
+    /// </summary>
+    /// <remarks>
+    /// ページネーションで追加される空白行にも太字リセットが適用されることを検証する。
+    /// 行レイアウト: 繰越(5) + データ2件(6-7) + 月計(8) + 累計(9) = 5行
+    /// 残り7行は空白行（行10〜16）に罫線が適用される
+    /// </remarks>
+    [Fact]
+    public async Task CreateMonthlyReportAsync_OverwriteExistingFile_EmptyRowsShouldNotBeBold()
+    {
+        // Arrange
+        var cardIdm = "0102030405060708";
+        var card = CreateTestCard(cardIdm);
+        var year = 2024;
+        var month = 6;
+        var outputPath = CreateTempFilePath();
+
+        var ledgers = new List<Ledger>
+        {
+            CreateTestLedger(1, cardIdm, new DateTime(year, month, 5), "鉄道（博多～天神）", 0, 300, 9700, "田中太郎"),
+            CreateTestLedger(2, cardIdm, new DateTime(year, month, 15), "鉄道（天神～博多）", 0, 300, 9400, "鈴木花子")
+        };
+        var mayLedgers = new List<Ledger>
+        {
+            CreateTestLedger(0, cardIdm, new DateTime(year, 5, 31), "前月末データ", 0, 0, 10000)
+        };
+
+        _cardRepositoryMock
+            .Setup(r => r.GetByIdmAsync(cardIdm, true))
+            .ReturnsAsync(card);
+        _ledgerRepositoryMock
+            .Setup(r => r.GetByMonthAsync(cardIdm, year, month))
+            .ReturnsAsync(ledgers);
+        _ledgerRepositoryMock
+            .Setup(r => r.GetByMonthAsync(cardIdm, year, 5))
+            .ReturnsAsync(mayLedgers);
+
+        // Act
+        var result = await _reportService.CreateMonthlyReportAsync(cardIdm, year, month, outputPath);
+
+        // Assert
+        result.Success.Should().BeTrue();
+
+        using var workbook = new XLWorkbook(outputPath);
+        var worksheet = workbook.Worksheets.First();
+
+        // データ行が太字でないこと
+        worksheet.Cell(6, 2).Style.Font.Bold.Should().BeFalse("データ行は太字でないべき");
+        worksheet.Cell(7, 2).Style.Font.Bold.Should().BeFalse("データ行は太字でないべき");
+
+        // 月計行は太字であること
+        worksheet.Cell(8, 2).GetString().Should().Be("6月計");
+        worksheet.Cell(8, 2).Style.Font.Bold.Should().BeTrue("月計行は太字であるべき");
+
+        // 累計行は太字であること
+        worksheet.Cell(9, 2).GetString().Should().Be("累計");
+        worksheet.Cell(9, 2).Style.Font.Bold.Should().BeTrue("累計行は太字であるべき");
+
+        // 空白行が太字でないことを検証（累計行の次の行から）
+        for (var emptyRow = 10; emptyRow <= 16; emptyRow++)
+        {
+            worksheet.Cell(emptyRow, 1).Style.Font.Bold.Should().BeFalse(
+                $"空白行（行{emptyRow}）は太字でないべき");
+        }
+    }
+
+    #endregion
 }
