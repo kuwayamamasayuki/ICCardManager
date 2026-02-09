@@ -5,6 +5,7 @@ using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Input;
 using ICCardManager.Common;
+using ICCardManager.Models;
 using ICCardManager.ViewModels;
 
 namespace ICCardManager.Views.Dialogs
@@ -17,6 +18,7 @@ namespace ICCardManager.Views.Dialogs
         private readonly CardManageViewModel _viewModel;
         private string _presetIdm;
         private int? _presetBalance;
+        private List<LedgerDetail> _presetHistory;
 
         public CardManageDialog(CardManageViewModel viewModel)
         {
@@ -41,6 +43,12 @@ namespace ICCardManager.Views.Dialogs
                     if (_presetBalance.HasValue)
                     {
                         _viewModel.SetPreReadBalance(_presetBalance);
+                    }
+
+                    // Issue #596対応: 事前に読み取った履歴をViewModelに設定
+                    if (_presetHistory != null)
+                    {
+                        _viewModel.SetPreReadHistory(_presetHistory);
                     }
 
                     // Issue #284対応: タッチ時点で削除済み/登録済みチェックを行う
@@ -81,6 +89,23 @@ namespace ICCardManager.Views.Dialogs
         {
             _presetIdm = idm;
             _presetBalance = balance;
+        }
+
+        /// <summary>
+        /// IDm・残高・履歴を指定して新規登録モードで初期化（Issue #596対応）
+        /// </summary>
+        /// <remarks>
+        /// カード検出時に残高と履歴を事前に読み取っておくことで、
+        /// カード登録後に当月分の履歴を自動インポートできる。
+        /// </remarks>
+        /// <param name="idm">カードのIDm</param>
+        /// <param name="balance">事前に読み取ったカード残高</param>
+        /// <param name="history">事前に読み取ったカード利用履歴</param>
+        public void InitializeWithIdmBalanceAndHistory(string idm, int? balance, List<LedgerDetail> history)
+        {
+            _presetIdm = idm;
+            _presetBalance = balance;
+            _presetHistory = history;
         }
 
         /// <summary>
