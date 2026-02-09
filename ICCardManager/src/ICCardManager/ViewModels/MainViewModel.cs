@@ -899,6 +899,14 @@ public partial class MainViewModel : ViewModelBase
                 }
             }
 
+            // Issue #596: 今月の履歴が不完全な可能性がある場合に通知
+            if (result.MayHaveIncompleteHistory)
+            {
+                _toastNotificationService.ShowWarning(
+                    "履歴の確認",
+                    "今月の利用履歴がすべて取得できていない可能性があります。\nCSVインポートで不足分を補完してください。");
+            }
+
             // 30秒ルール用に職員情報を保存（ResetStateの前に保存）
             _lastProcessedStaffIdm = _currentStaffIdm;
             _lastProcessedStaffName = _currentStaffName;
