@@ -355,4 +355,60 @@ public class SummaryGeneratorTests
     }
 
     #endregion
+
+    #region Issue #599: 繰越レコード日付計算
+
+    [Fact]
+    public void GetMidYearCarryoverDate_BasicCase_ReturnsFirstDayOfNextMonth()
+    {
+        // Arrange: 2月9日に「1月から繰越」→ 2月1日
+        var registrationDate = new DateTime(2026, 2, 9);
+
+        // Act
+        var result = SummaryGenerator.GetMidYearCarryoverDate(1, registrationDate);
+
+        // Assert
+        result.Should().Be(new DateTime(2026, 2, 1));
+    }
+
+    [Fact]
+    public void GetMidYearCarryoverDate_DecemberCarryover_ReturnsJanuaryFirstSameYear()
+    {
+        // Arrange: 1月15日に「12月から繰越」→ 1月1日（同年）
+        var registrationDate = new DateTime(2026, 1, 15);
+
+        // Act
+        var result = SummaryGenerator.GetMidYearCarryoverDate(12, registrationDate);
+
+        // Assert
+        result.Should().Be(new DateTime(2026, 1, 1));
+    }
+
+    [Fact]
+    public void GetMidYearCarryoverDate_FarPastMonth_ReturnsPreviousYear()
+    {
+        // Arrange: 2月15日に「11月から繰越」→ 前年12月1日
+        var registrationDate = new DateTime(2026, 2, 15);
+
+        // Act
+        var result = SummaryGenerator.GetMidYearCarryoverDate(11, registrationDate);
+
+        // Assert
+        result.Should().Be(new DateTime(2025, 12, 1));
+    }
+
+    [Fact]
+    public void GetMidYearCarryoverDate_FiscalYearStart_ReturnsAprilFirst()
+    {
+        // Arrange: 4月1日に「3月から繰越」→ 4月1日
+        var registrationDate = new DateTime(2026, 4, 1);
+
+        // Act
+        var result = SummaryGenerator.GetMidYearCarryoverDate(3, registrationDate);
+
+        // Assert
+        result.Should().Be(new DateTime(2026, 4, 1));
+    }
+
+    #endregion
 }

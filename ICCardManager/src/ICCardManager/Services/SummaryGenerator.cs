@@ -740,6 +740,32 @@ namespace ICCardManager.Services
         }
 
         /// <summary>
+        /// 年度途中導入の繰越レコード日付を計算（Issue #599）
+        /// </summary>
+        /// <param name="carryoverMonth">繰越元の月（1-12）</param>
+        /// <param name="registrationDate">登録日</param>
+        /// <returns>繰越月の翌月1日</returns>
+        /// <remarks>
+        /// 繰越レコードの日付は「繰越月の翌月1日」とする。
+        /// 例: 2月9日に「1月から繰越」→ 2月1日、1月15日に「12月から繰越」→ 1月1日。
+        /// 翌月が登録月より後の場合は前年のデータとみなす。
+        /// 例: 2月15日に「11月から繰越」→ 前年12月1日。
+        /// </remarks>
+        public static DateTime GetMidYearCarryoverDate(int carryoverMonth, DateTime registrationDate)
+        {
+            var nextMonth = (carryoverMonth % 12) + 1;
+            var recordYear = registrationDate.Year;
+
+            // 翌月が登録月より後の場合、前年のデータ
+            if (nextMonth > registrationDate.Month)
+            {
+                recordYear--;
+            }
+
+            return new DateTime(recordYear, nextMonth, 1);
+        }
+
+        /// <summary>
         /// 摘要が年度途中導入の繰越かどうかを判定（Issue #510）
         /// </summary>
         /// <param name="summary">摘要文字列</param>
