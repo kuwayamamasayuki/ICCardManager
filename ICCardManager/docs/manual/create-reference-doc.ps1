@@ -5,6 +5,7 @@
 #   - 余白: やや狭い (上下左右 1.27cm / 0.5インチ)
 #   - ページ番号: フッター中央に表示
 #   - 用紙サイズ: A4
+#   - テーブルスタイル: 黒・単線・0.5ptの罫線（Issue #600: 印刷時に罫線が消えないようにする）
 #
 # 使用方法:
 #   .\create-reference-doc.ps1
@@ -73,6 +74,45 @@ try {
     # サンプルテキストを追加（pandocがスタイルを認識するため）
     Write-Host "[設定] サンプルスタイルを追加中..." -ForegroundColor Yellow
     $Doc.Content.Text = "Sample Document for Pandoc Reference`r`n"
+
+    # Issue #600: テーブルスタイルの設定（印刷時に罫線が表示されるようにする）
+    # pandocはreference.docx内のテーブルスタイルを参照して出力する。
+    # テーブルが存在しない場合、罫線なしのデフォルトスタイルが適用され印刷時に消える。
+    Write-Host "[設定] テーブルスタイルを設定中..." -ForegroundColor Yellow
+
+    # ドキュメント末尾にカーソルを移動してテーブルを挿入
+    $Range = $Doc.Content
+    $Range.Collapse(0)  # wdCollapseEnd = 0
+    $Range.InsertParagraphAfter()
+    $Range = $Doc.Content
+    $Range.Collapse(0)
+
+    # サンプルテーブルを作成（2行×3列）
+    $Table = $Doc.Tables.Add($Range, 2, 3)
+
+    # 全罫線を設定（黒・単線・0.5pt）
+    # wdLineStyleSingle = 1, wdLineWidth050pt = 4
+    # 外枠: wdBorderTop=-1, wdBorderLeft=-2, wdBorderBottom=-3, wdBorderRight=-4
+    # 内側: wdBorderHorizontal=-5, wdBorderVertical=-6
+    $LineStyle = 1  # wdLineStyleSingle（単線）
+    $LineWidth = 4  # wdLineWidth050pt（0.5pt）
+
+    foreach ($BorderId in @(-1, -2, -3, -4, -5, -6)) {
+        $Border = $Table.Borders.Item($BorderId)
+        $Border.LineStyle = $LineStyle
+        $Border.LineWidth = $LineWidth
+        $Border.Color = 0  # 黒（wdColorBlack）
+    }
+
+    # サンプルデータ（pandocのスタイル認識用）
+    $Table.Cell(1, 1).Range.Text = "Header 1"
+    $Table.Cell(1, 2).Range.Text = "Header 2"
+    $Table.Cell(1, 3).Range.Text = "Header 3"
+    $Table.Cell(2, 1).Range.Text = "Data 1"
+    $Table.Cell(2, 2).Range.Text = "Data 2"
+    $Table.Cell(2, 3).Range.Text = "Data 3"
+
+    Write-Host "  テーブルスタイル: 黒・単線・0.5pt（全罫線）" -ForegroundColor Gray
 
     # 保存
     Write-Host "[保存] ファイルを保存中..." -ForegroundColor Yellow
