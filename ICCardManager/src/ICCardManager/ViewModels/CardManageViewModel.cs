@@ -855,7 +855,10 @@ namespace ICCardManager.ViewModels
                     {
                         CardIdm = cardIdm,
                         LenderIdm = null,  // 新規購入/繰越時は貸出者なし
-                        Date = now,
+                        // Issue #599: 繰越モードの場合は繰越月の翌月1日をレコード日付とする
+                        Date = modeResult.IsNewPurchase
+                            ? now
+                            : SummaryGenerator.GetMidYearCarryoverDate(modeResult.CarryoverMonth!.Value, now),
                         Summary = summary,
                         Income = balance.Value,  // 受入金額 = カード残額
                         Expense = 0,
