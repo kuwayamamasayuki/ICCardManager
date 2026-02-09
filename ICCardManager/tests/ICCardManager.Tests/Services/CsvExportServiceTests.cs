@@ -322,6 +322,166 @@ public class CsvExportServiceTests : IDisposable
         lines.Should().HaveCount(1); // ヘッダーのみ
     }
 
+    /// <summary>
+    /// Issue #592: 複数カードの履歴がカード別にまとめて出力されることを確認
+    /// </summary>
+    [Fact]
+    public async Task ExportLedgersAsync_MultipleCards_GroupsByCard()
+    {
+        // Arrange
+        // 意図的に異なるカードのデータを日付順に混在させる
+        var ledgers = new List<Ledger>
+        {
+            new Ledger { Id = 1, CardIdm = "CARD_A_IDM_00001", Date = new DateTime(2024, 1, 10), Summary = "A-利用1", Income = 0, Expense = 300, Balance = 9700 },
+            new Ledger { Id = 2, CardIdm = "CARD_B_IDM_00002", Date = new DateTime(2024, 1, 12), Summary = "B-利用1", Income = 0, Expense = 200, Balance = 4800 },
+            new Ledger { Id = 3, CardIdm = "CARD_A_IDM_00001", Date = new DateTime(2024, 1, 15), Summary = "A-利用2", Income = 0, Expense = 300, Balance = 9400 },
+            new Ledger { Id = 4, CardIdm = "CARD_B_IDM_00002", Date = new DateTime(2024, 1, 18), Summary = "B-利用2", Income = 0, Expense = 200, Balance = 4600 },
+            new Ledger { Id = 5, CardIdm = "CARD_A_IDM_00001", Date = new DateTime(2024, 1, 20), Summary = "A-利用3", Income = 0, Expense = 300, Balance = 9100 },
+        };
+
+        var cards = new List<IcCard>
+        {
+            new IcCard { CardIdm = "CARD_A_IDM_00001", CardType = "はやかけん", CardNumber = "001" },
+            new IcCard { CardIdm = "CARD_B_IDM_00002", CardType = "nimoca", CardNumber = "002" },
+        };
+
+        _ledgerRepositoryMock
+            .Setup(x => x.GetByDateRangeAsync(null, It.IsAny<DateTime>(), It.IsAny<DateTime>()))
+            .ReturnsAsync(ledgers);
+        _cardRepositoryMock
+            .Setup(x => x.GetAllIncludingDeletedAsync())
+            .ReturnsAsync(cards);
+
+        var filePath = Path.Combine(_testDirectory, "ledgers_grouped.csv");
+
+        // Act
+        var result = await _service.ExportLedgersAsync(
+            filePath,
+            new DateTime(2024, 1, 1),
+            new DateTime(2024, 1, 31));
+
+        // Assert
+        result.Success.Should().BeTrue();
+        result.ExportedCount.Should().Be(5);
+
+        var lines = await Task.Run(() => File.ReadAllLines(filePath, Encoding.UTF8));
+        lines.Should().HaveCount(6); // ヘッダー + 5行
+
+        // nimoca < はやかけん（Latin文字 < カタカナ）の順でソート
+        // カードBの履歴（nimoca/002）が先にまとまって出力される
+        lines[1].Should().Contain("CARD_B_IDM_00002");
+        lines[1].Should().Contain("B-利用1");
+        lines[2].Should().Contain("CARD_B_IDM_00002");
+        lines[2].Should().Contain("B-利用2");
+
+        // カードAの履歴（はやかけん/001）が後にまとまって出力される
+        lines[3].Should().Contain("CARD_A_IDM_00001");
+        lines[3].Should().Contain("A-利用1");
+        lines[4].Should().Contain("CARD_A_IDM_00001");
+        lines[4].Should().Contain("A-利用2");
+        lines[5].Should().Contain("CARD_A_IDM_00001");
+        lines[5].Should().Contain("A-利用3");
+    }
+
+    /// <summary>
+    /// Issue #592: 同一カード内の履歴が日付順・ID順を維持することを確認
+    /// </summary>
+    [Fact]
+    public async Task ExportLedgersAsync_MultipleCards_MaintainsChronologicalOrderWithinCard()
+    {
+        // Arrange
+        // 同一カード内で日付が前後するデータ
+        var ledgers = new List<Ledger>
+        {
+            new Ledger { Id = 3, CardIdm = "CARD_A_IDM_00001", Date = new DateTime(2024, 1, 20), Summary = "A-3番目", Income = 0, Expense = 100, Balance = 9700 },
+            new Ledger { Id = 1, CardIdm = "CARD_A_IDM_00001", Date = new DateTime(2024, 1, 5), Summary = "A-1番目", Income = 0, Expense = 100, Balance = 9900 },
+            new Ledger { Id = 2, CardIdm = "CARD_A_IDM_00001", Date = new DateTime(2024, 1, 10), Summary = "A-2番目", Income = 0, Expense = 100, Balance = 9800 },
+            new Ledger { Id = 4, CardIdm = "CARD_B_IDM_00002", Date = new DateTime(2024, 1, 1), Summary = "B-1番目", Income = 0, Expense = 200, Balance = 4800 },
+        };
+
+        var cards = new List<IcCard>
+        {
+            new IcCard { CardIdm = "CARD_A_IDM_00001", CardType = "はやかけん", CardNumber = "001" },
+            new IcCard { CardIdm = "CARD_B_IDM_00002", CardType = "nimoca", CardNumber = "002" },
+        };
+
+        _ledgerRepositoryMock
+            .Setup(x => x.GetByDateRangeAsync(null, It.IsAny<DateTime>(), It.IsAny<DateTime>()))
+            .ReturnsAsync(ledgers);
+        _cardRepositoryMock
+            .Setup(x => x.GetAllIncludingDeletedAsync())
+            .ReturnsAsync(cards);
+
+        var filePath = Path.Combine(_testDirectory, "ledgers_order.csv");
+
+        // Act
+        var result = await _service.ExportLedgersAsync(
+            filePath,
+            new DateTime(2024, 1, 1),
+            new DateTime(2024, 1, 31));
+
+        // Assert
+        result.Success.Should().BeTrue();
+
+        var lines = await Task.Run(() => File.ReadAllLines(filePath, Encoding.UTF8));
+
+        // nimoca < はやかけん のため、カードBが先
+        lines[1].Should().Contain("B-1番目"); // カードB（nimoca）1/1
+
+        // カードA内は日付順（1/5 → 1/10 → 1/20）
+        lines[2].Should().Contain("A-1番目"); // 1/5
+        lines[3].Should().Contain("A-2番目"); // 1/10
+        lines[4].Should().Contain("A-3番目"); // 1/20
+    }
+
+    /// <summary>
+    /// Issue #592: カードのグループ順がカード種別→管理番号順であることを確認
+    /// </summary>
+    [Fact]
+    public async Task ExportLedgersAsync_MultipleCards_OrderedByCardTypeThenNumber()
+    {
+        // Arrange
+        var ledgers = new List<Ledger>
+        {
+            new Ledger { Id = 1, CardIdm = "CARD_C_IDM_00003", Date = new DateTime(2024, 1, 10), Summary = "C-利用", Income = 0, Expense = 100, Balance = 9900 },
+            new Ledger { Id = 2, CardIdm = "CARD_A_IDM_00001", Date = new DateTime(2024, 1, 10), Summary = "A-利用", Income = 0, Expense = 100, Balance = 9900 },
+            new Ledger { Id = 3, CardIdm = "CARD_B_IDM_00002", Date = new DateTime(2024, 1, 10), Summary = "B-利用", Income = 0, Expense = 100, Balance = 9900 },
+        };
+
+        // カード種別→管理番号順: nimoca/001 → nimoca/002 → はやかけん/001
+        var cards = new List<IcCard>
+        {
+            new IcCard { CardIdm = "CARD_A_IDM_00001", CardType = "nimoca", CardNumber = "001" },
+            new IcCard { CardIdm = "CARD_B_IDM_00002", CardType = "nimoca", CardNumber = "002" },
+            new IcCard { CardIdm = "CARD_C_IDM_00003", CardType = "はやかけん", CardNumber = "001" },
+        };
+
+        _ledgerRepositoryMock
+            .Setup(x => x.GetByDateRangeAsync(null, It.IsAny<DateTime>(), It.IsAny<DateTime>()))
+            .ReturnsAsync(ledgers);
+        _cardRepositoryMock
+            .Setup(x => x.GetAllIncludingDeletedAsync())
+            .ReturnsAsync(cards);
+
+        var filePath = Path.Combine(_testDirectory, "ledgers_card_order.csv");
+
+        // Act
+        var result = await _service.ExportLedgersAsync(
+            filePath,
+            new DateTime(2024, 1, 1),
+            new DateTime(2024, 1, 31));
+
+        // Assert
+        result.Success.Should().BeTrue();
+
+        var lines = await Task.Run(() => File.ReadAllLines(filePath, Encoding.UTF8));
+
+        // nimoca/001 (カードA) → nimoca/002 (カードB) → はやかけん/001 (カードC)
+        lines[1].Should().Contain("A-利用");
+        lines[2].Should().Contain("B-利用");
+        lines[3].Should().Contain("C-利用");
+    }
+
     #endregion
 
     #region エラーハンドリング テスト

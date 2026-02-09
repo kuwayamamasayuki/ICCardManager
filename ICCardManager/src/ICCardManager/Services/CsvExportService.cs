@@ -165,13 +165,23 @@ namespace ICCardManager.Services
                 var allCards = await _cardRepository.GetAllIncludingDeletedAsync();
                 var cardNumberMap = allCards.ToDictionary(c => c.CardIdm, c => c.CardNumber ?? "");
 
+                // Issue #592: カード種別・管理番号順のソートキーを作成（同一カードの履歴をまとめる）
+                var cardSortKeyMap = allCards.ToDictionary(
+                    c => c.CardIdm,
+                    c => $"{c.CardType ?? ""}\t{c.CardNumber ?? ""}");
+
                 var lines = new List<string>
                 {
                     // ヘッダー行（Issue #265: 管理番号列追加、Issue #266: 日付→日時、Issue #342: ID列追加）
                     "ID,日時,カードIDm,管理番号,摘要,受入金額,払出金額,残額,利用者,備考"
                 };
 
-                foreach (var ledger in ledgers.OrderBy(l => l.Date).ThenBy(l => l.Id))
+                // Issue #592: 同一カードの履歴をまとめて出力
+                // カード種別・管理番号順でグループ化し、各カード内は日付順・ID順を維持
+                foreach (var ledger in ledgers
+                    .OrderBy(l => cardSortKeyMap.TryGetValue(l.CardIdm, out var key) ? key : l.CardIdm)
+                    .ThenBy(l => l.Date)
+                    .ThenBy(l => l.Id))
                 {
                     // 管理番号を取得（見つからない場合は空文字）
                     var cardNumber = cardNumberMap.TryGetValue(ledger.CardIdm, out var num) ? num : "";
