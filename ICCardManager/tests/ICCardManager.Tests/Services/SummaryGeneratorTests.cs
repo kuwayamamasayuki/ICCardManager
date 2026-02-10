@@ -411,4 +411,138 @@ public class SummaryGeneratorTests
     }
 
     #endregion
+
+    #region Issue #633: GroupIdによる分割が摘要に反映される
+
+    [Fact]
+    public void Generate_RoundTrip_WithSingleItemGroupIds_ReturnsSeparateTrips()
+    {
+        // Arrange
+        // 往復（博多→天神、天神→博多）を個別GroupIdで分割した場合
+        // Generate()はReverse()するため、新しい順（ICカード順）で渡す
+        var details = new List<LedgerDetail>
+        {
+            // 帰り（新しい）: 天神→博多
+            new LedgerDetail
+            {
+                EntryStation = "天神",
+                ExitStation = "博多",
+                IsCharge = false,
+                IsBus = false,
+                Amount = 260,
+                UseDate = new DateTime(2026, 2, 10, 15, 0, 0),
+                Balance = 740,
+                SequenceNumber = 2,
+                GroupId = 2
+            },
+            // 行き（古い）: 博多→天神
+            new LedgerDetail
+            {
+                EntryStation = "博多",
+                ExitStation = "天神",
+                IsCharge = false,
+                IsBus = false,
+                Amount = 260,
+                UseDate = new DateTime(2026, 2, 10, 10, 0, 0),
+                Balance = 1000,
+                SequenceNumber = 1,
+                GroupId = 1
+            }
+        };
+
+        // Act
+        var result = _generator.Generate(details);
+
+        // Assert
+        // GroupIdが異なるため、往復検出されず個別表示される
+        result.Should().Be("鉄道（博多～天神、天神～博多）");
+    }
+
+    [Fact]
+    public void Generate_TransferTrip_WithSingleItemGroupIds_ReturnsSeparateTrips()
+    {
+        // Arrange
+        // 乗継（博多→天神、天神→薬院）を個別GroupIdで分割した場合
+        var details = new List<LedgerDetail>
+        {
+            // 2区間目（新しい）: 天神→薬院
+            new LedgerDetail
+            {
+                EntryStation = "天神",
+                ExitStation = "薬院",
+                IsCharge = false,
+                IsBus = false,
+                Amount = 210,
+                UseDate = new DateTime(2026, 2, 10, 10, 30, 0),
+                Balance = 530,
+                SequenceNumber = 2,
+                GroupId = 2
+            },
+            // 1区間目（古い）: 博多→天神
+            new LedgerDetail
+            {
+                EntryStation = "博多",
+                ExitStation = "天神",
+                IsCharge = false,
+                IsBus = false,
+                Amount = 260,
+                UseDate = new DateTime(2026, 2, 10, 10, 0, 0),
+                Balance = 740,
+                SequenceNumber = 1,
+                GroupId = 1
+            }
+        };
+
+        // Act
+        var result = _generator.Generate(details);
+
+        // Assert
+        // GroupIdが異なるため、乗継統合されず個別表示される
+        result.Should().Be("鉄道（博多～天神、天神～薬院）");
+    }
+
+    [Fact]
+    public void Generate_RoundTrip_WithoutGroupId_ReturnsRoundTrip()
+    {
+        // Arrange
+        // GroupIdなし（自動検出モード）の場合は従来通り往復検出される
+        var details = new List<LedgerDetail>
+        {
+            // 帰り（新しい）: 天神→博多
+            new LedgerDetail
+            {
+                EntryStation = "天神",
+                ExitStation = "博多",
+                IsCharge = false,
+                IsBus = false,
+                Amount = 260,
+                UseDate = new DateTime(2026, 2, 10, 15, 0, 0),
+                Balance = 740,
+                SequenceNumber = 2,
+                GroupId = null
+            },
+            // 行き（古い）: 博多→天神
+            new LedgerDetail
+            {
+                EntryStation = "博多",
+                ExitStation = "天神",
+                IsCharge = false,
+                IsBus = false,
+                Amount = 260,
+                UseDate = new DateTime(2026, 2, 10, 10, 0, 0),
+                Balance = 1000,
+                SequenceNumber = 1,
+                GroupId = null
+            }
+        };
+
+        // Act
+        var result = _generator.Generate(details);
+
+        // Assert
+        // GroupIdがnullなので自動検出で往復判定
+        result.Should().Be("鉄道（博多～天神 往復）");
+    }
+
+    #endregion
 }
