@@ -227,6 +227,7 @@ namespace ICCardManager
             services.AddTransient<OperationLogSearchViewModel>();
             services.AddTransient<LedgerEditViewModel>();
             services.AddTransient<LedgerDetailViewModel>();
+            services.AddTransient<LedgerDetailEditViewModel>();
             services.AddTransient<SystemManageViewModel>();
 
             // Views
@@ -242,6 +243,7 @@ namespace ICCardManager
             services.AddTransient<Views.Dialogs.OperationLogDialog>();
             services.AddTransient<Views.Dialogs.LedgerDetailDialog>();
             services.AddTransient<Views.Dialogs.LedgerEditDialog>();
+            services.AddTransient<Views.Dialogs.LedgerDetailEditDialog>();
             services.AddTransient<Views.Dialogs.SystemManageDialog>();
         }
 

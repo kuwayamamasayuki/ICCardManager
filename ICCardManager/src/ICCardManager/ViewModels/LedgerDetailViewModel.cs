@@ -11,6 +11,7 @@ using ICCardManager.Data.Repositories;
 using ICCardManager.Dtos;
 using ICCardManager.Models;
 using ICCardManager.Services;
+using ICCardManager.Views.Dialogs;
 using Microsoft.Extensions.Logging;
 
 namespace ICCardManager.ViewModels
@@ -215,6 +216,34 @@ namespace ICCardManager.ViewModels
         /// </summary>
         [ObservableProperty]
         private bool _hasMultipleGroups;
+
+        /// <summary>
+        /// 選択中のアイテム（Issue #635: 行操作用）
+        /// </summary>
+        [ObservableProperty]
+        private LedgerDetailItemViewModel? _selectedItem;
+
+        /// <summary>
+        /// 選択中のインデックス
+        /// </summary>
+        [ObservableProperty]
+        private int _selectedIndex = -1;
+
+        /// <summary>
+        /// アイテムが選択されているかどうか
+        /// </summary>
+        [ObservableProperty]
+        private bool _hasSelectedItem;
+
+        /// <summary>
+        /// ダイアログ生成コールバック（Issue #635）
+        /// </summary>
+        public Func<LedgerDetailEditDialog>? CreateEditDialogFunc { get; set; }
+
+        /// <summary>
+        /// 削除確認コールバック（Issue #635）
+        /// </summary>
+        public Func<string, bool>? OnRequestDeleteConfirmation { get; set; }
 
         /// <summary>
         /// 操作者IDm（ログ記録用）
@@ -526,6 +555,149 @@ namespace ICCardManager.ViewModels
         }
 
         /// <summary>
+        /// アイテムを選択（Issue #635）
+        /// </summary>
+        [RelayCommand]
+        private void SelectItem(LedgerDetailItemViewModel? item)
+        {
+            // 前の選択を解除
+            if (SelectedItem != null)
+            {
+                SelectedItem.IsSelected = false;
+            }
+
+            if (item != null)
+            {
+                item.IsSelected = true;
+                SelectedItem = item;
+                SelectedIndex = item.Index;
+                HasSelectedItem = true;
+            }
+            else
+            {
+                SelectedItem = null;
+                SelectedIndex = -1;
+                HasSelectedItem = false;
+            }
+        }
+
+        /// <summary>
+        /// 行の追加（Issue #635）
+        /// </summary>
+        [RelayCommand]
+        private void InsertRow()
+        {
+            if (CreateEditDialogFunc == null) return;
+
+            var dialog = CreateEditDialogFunc();
+            var vm = (LedgerDetailEditViewModel)dialog.DataContext;
+
+            int suggestedIndex = HasSelectedItem ? SelectedIndex + 1 : Items.Count;
+            vm.InitializeForInsert(Items, suggestedIndex);
+
+            if (dialog.ShowDialog() == true && dialog.Result != null)
+            {
+                var newDetail = dialog.Result;
+                newDetail.LedgerId = _ledger.Id;
+                var actualIndex = Math.Max(0, Math.Min(dialog.InsertIndex, Items.Count));
+                var newItem = new LedgerDetailItemViewModel(newDetail, actualIndex);
+
+                Items.Insert(actualIndex, newItem);
+                ReindexItems();
+                RecalculateGroupsFromDividers();
+                UpdateGroupColors();
+                UpdateDetailCountDisplay();
+                HasChanges = true;
+                StatusMessage = "行を追加しました";
+
+                _logger.LogDebug("Inserted detail row at index {Index}", actualIndex);
+            }
+        }
+
+        /// <summary>
+        /// 行の編集（Issue #635）
+        /// </summary>
+        [RelayCommand]
+        private void EditRow()
+        {
+            if (SelectedItem == null || CreateEditDialogFunc == null) return;
+
+            var dialog = CreateEditDialogFunc();
+            var vm = (LedgerDetailEditViewModel)dialog.DataContext;
+            vm.InitializeForEdit(SelectedItem, Items);
+
+            if (dialog.ShowDialog() == true && dialog.Result != null)
+            {
+                var updatedDetail = dialog.Result;
+                updatedDetail.LedgerId = _ledger.Id;
+                // GroupIdと分割線状態を引き継ぐ
+                updatedDetail.GroupId = SelectedItem.Detail.GroupId;
+
+                var index = SelectedItem.Index;
+                var showDivider = SelectedItem.ShowDividerBelow;
+                var groupId = SelectedItem.GroupId;
+
+                var newItem = new LedgerDetailItemViewModel(updatedDetail, index)
+                {
+                    ShowDividerBelow = showDivider,
+                    GroupId = groupId
+                };
+
+                Items[index] = newItem;
+                SelectItem(newItem);
+                HasChanges = true;
+                StatusMessage = "行を更新しました";
+
+                _logger.LogDebug("Edited detail row at index {Index}", index);
+            }
+        }
+
+        /// <summary>
+        /// 行の削除（Issue #635）
+        /// </summary>
+        [RelayCommand]
+        private void DeleteRow()
+        {
+            if (SelectedItem == null) return;
+
+            var routeDisplay = SelectedItem.RouteDisplay;
+            var message = $"「{routeDisplay}」を削除してよろしいですか？";
+
+            if (OnRequestDeleteConfirmation != null && !OnRequestDeleteConfirmation(message))
+            {
+                return;
+            }
+
+            var index = SelectedItem.Index;
+            Items.RemoveAt(index);
+            ReindexItems();
+            RecalculateGroupsFromDividers();
+            UpdateGroupColors();
+            UpdateDetailCountDisplay();
+            SelectItem(null);
+            HasChanges = true;
+            StatusMessage = "行を削除しました";
+
+            _logger.LogDebug("Deleted detail row at index {Index}", index);
+        }
+
+        /// <summary>
+        /// 全アイテムのIndexを振り直す（Issue #635）
+        /// </summary>
+        private void ReindexItems()
+        {
+            for (int i = 0; i < Items.Count; i++)
+            {
+                Items[i].Index = i;
+            }
+            // 最後のアイテムの分割線を削除
+            if (Items.Count > 0)
+            {
+                Items[Items.Count - 1].ShowDividerBelow = false;
+            }
+        }
+
+        /// <summary>
         /// 変更を保存
         /// </summary>
         [RelayCommand]
@@ -557,23 +729,46 @@ namespace ICCardManager.ViewModels
                     return;
                 }
 
+                // 更新前の状態を保存
+                var beforeLedger = new Ledger
+                {
+                    Id = _ledger.Id,
+                    CardIdm = _ledger.CardIdm,
+                    Summary = _ledger.Summary,
+                    Date = _ledger.Date,
+                    Income = _ledger.Income,
+                    Expense = _ledger.Expense,
+                    Balance = _ledger.Balance
+                };
+
                 // 摘要を再生成
                 var newSummary = _summaryGenerator.Generate(updatedDetails);
+                bool hasUpdates = false;
+
                 if (!string.IsNullOrEmpty(newSummary) && newSummary != _ledger.Summary)
                 {
-                    // 更新前の状態を保存
-                    var beforeLedger = new Ledger
-                    {
-                        Id = _ledger.Id,
-                        CardIdm = _ledger.CardIdm,
-                        Summary = _ledger.Summary,
-                        Date = _ledger.Date,
-                        Balance = _ledger.Balance
-                    };
-
                     _ledger.Summary = newSummary;
-                    await _ledgerRepository.UpdateAsync(_ledger);
                     SummaryDisplay = newSummary;
+                    hasUpdates = true;
+                }
+
+                // Issue #635: Income/Expense/Balanceを再計算
+                var (newIncome, newExpense, newBalance) = LedgerSplitService.CalculateGroupFinancials(updatedDetails);
+                if (newIncome != _ledger.Income || newExpense != _ledger.Expense || newBalance != _ledger.Balance)
+                {
+                    _ledger.Income = newIncome;
+                    _ledger.Expense = newExpense;
+                    _ledger.Balance = newBalance;
+
+                    IncomeDisplay = newIncome > 0 ? $"{newIncome:N0}円" : string.Empty;
+                    ExpenseDisplay = newExpense > 0 ? $"{newExpense:N0}円" : string.Empty;
+                    BalanceDisplay = $"{newBalance:N0}円";
+                    hasUpdates = true;
+                }
+
+                if (hasUpdates)
+                {
+                    await _ledgerRepository.UpdateAsync(_ledger);
 
                     // 操作ログを記録（operatorIdmを設定してGUI操作を区別）
                     if (!string.IsNullOrEmpty(_operatorIdm))

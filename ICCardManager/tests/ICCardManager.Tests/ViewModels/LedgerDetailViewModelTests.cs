@@ -242,4 +242,99 @@ public class LedgerDetailViewModelTests
     }
 
     #endregion
+
+    #region Issue #635: 行選択テスト
+
+    [Fact]
+    public void SelectItem_SetsSelectedItemAndDeselectsPrevious()
+    {
+        // Arrange
+        AddItems(3);
+
+        // Act: 1番目を選択
+        _viewModel.SelectItemCommand.Execute(_viewModel.Items[0]);
+
+        // Assert
+        _viewModel.SelectedItem.Should().Be(_viewModel.Items[0]);
+        _viewModel.HasSelectedItem.Should().BeTrue();
+        _viewModel.Items[0].IsSelected.Should().BeTrue();
+
+        // Act: 2番目を選択
+        _viewModel.SelectItemCommand.Execute(_viewModel.Items[1]);
+
+        // Assert: 前の選択が解除され、新しい選択が設定される
+        _viewModel.SelectedItem.Should().Be(_viewModel.Items[1]);
+        _viewModel.Items[0].IsSelected.Should().BeFalse("前の選択が解除される");
+        _viewModel.Items[1].IsSelected.Should().BeTrue();
+    }
+
+    [Fact]
+    public void SelectItem_Null_ClearsSelection()
+    {
+        // Arrange
+        AddItems(2);
+        _viewModel.SelectItemCommand.Execute(_viewModel.Items[0]);
+
+        // Act
+        _viewModel.SelectItemCommand.Execute(null);
+
+        // Assert
+        _viewModel.SelectedItem.Should().BeNull();
+        _viewModel.HasSelectedItem.Should().BeFalse();
+        _viewModel.Items[0].IsSelected.Should().BeFalse();
+    }
+
+    #endregion
+
+    #region Issue #635: 行削除テスト
+
+    [Fact]
+    public void DeleteRow_RemovesAndReindexes()
+    {
+        // Arrange
+        AddItems(3);
+        _viewModel.SelectItemCommand.Execute(_viewModel.Items[1]); // 2番目を選択
+        _viewModel.OnRequestDeleteConfirmation = _ => true; // 常にYes
+
+        // Act
+        _viewModel.DeleteRowCommand.Execute(null);
+
+        // Assert
+        _viewModel.Items.Count.Should().Be(2);
+        _viewModel.Items[0].Index.Should().Be(0, "インデックスが振り直される");
+        _viewModel.Items[1].Index.Should().Be(1, "インデックスが振り直される");
+    }
+
+    [Fact]
+    public void DeleteRow_SetsHasChanges()
+    {
+        // Arrange
+        AddItems(2);
+        _viewModel.HasChanges = false;
+        _viewModel.SelectItemCommand.Execute(_viewModel.Items[0]);
+        _viewModel.OnRequestDeleteConfirmation = _ => true;
+
+        // Act
+        _viewModel.DeleteRowCommand.Execute(null);
+
+        // Assert
+        _viewModel.HasChanges.Should().BeTrue();
+    }
+
+    [Fact]
+    public void DeleteRow_CancelledByUser_DoesNotRemove()
+    {
+        // Arrange
+        AddItems(3);
+        _viewModel.SelectItemCommand.Execute(_viewModel.Items[0]);
+        _viewModel.OnRequestDeleteConfirmation = _ => false; // No
+
+        // Act
+        _viewModel.DeleteRowCommand.Execute(null);
+
+        // Assert
+        _viewModel.Items.Count.Should().Be(3, "キャンセルされたので削除されない");
+    }
+
+    #endregion
 }

@@ -4,6 +4,7 @@ using System.Linq;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Input;
 using ICCardManager.Dtos;
 using ICCardManager.Models;
 using ICCardManager.ViewModels;
@@ -52,6 +53,19 @@ namespace ICCardManager.Views.Dialogs
                 }
             };
 
+            // Issue #635: ダイアログファクトリを設定
+            _viewModel.CreateEditDialogFunc = () =>
+            {
+                var dialog = App.Current.ServiceProvider.GetRequiredService<LedgerDetailEditDialog>();
+                dialog.Owner = this;
+                return dialog;
+            };
+
+            // Issue #635: 削除確認コールバックを設定
+            _viewModel.OnRequestDeleteConfirmation = (message) =>
+                MessageBox.Show(message, "確認", MessageBoxButton.YesNo, MessageBoxImage.Warning)
+                == MessageBoxResult.Yes;
+
             await _viewModel.InitializeAsync(ledgerId, operatorIdm);
         }
 
@@ -79,6 +93,17 @@ namespace ICCardManager.Views.Dialogs
             if (sender is System.Windows.Controls.Button button && button.Tag is int index)
             {
                 _viewModel?.ToggleDividerAt(index);
+            }
+        }
+
+        /// <summary>
+        /// データ行クリック時の処理（Issue #635: 行選択）
+        /// </summary>
+        private void DataRow_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+        {
+            if (sender is Border border && border.Tag is LedgerDetailItemViewModel item)
+            {
+                _viewModel?.SelectItemCommand.Execute(item);
             }
         }
 

@@ -141,8 +141,31 @@
                     <Button Content="🔄 自動検出に戻す"
                             Command="{Binding ResetToAutoDetectCommand}"
                             Padding="12,6"
+                            Margin="0,0,8,0"
                             ToolTip="すべての分割線を削除し、自動検出モードに戻します"
                             AutomationProperties.Name="自動検出に戻す"/>
+
+                    <!-- Issue #635: 行操作ボタン -->
+                    <Border Width="1" Background="#BDBDBD" Margin="4,2"/>
+                    <Button Content="➕ 行の追加"
+                            Command="{Binding InsertRowCommand}"
+                            Padding="12,6"
+                            Margin="8,0,8,0"
+                            ToolTip="利用詳細行を手動で追加します"
+                            AutomationProperties.Name="行の追加"/>
+                    <Button Content="✏️ 編集"
+                            Command="{Binding EditRowCommand}"
+                            IsEnabled="{Binding HasSelectedItem}"
+                            Padding="12,6"
+                            Margin="0,0,8,0"
+                            ToolTip="選択した行を編集します"
+                            AutomationProperties.Name="編集"/>
+                    <Button Content="🗑️ 削除"
+                            Command="{Binding DeleteRowCommand}"
+                            IsEnabled="{Binding HasSelectedItem}"
+                            Padding="12,6"
+                            ToolTip="選択した行を削除します"
+                            AutomationProperties.Name="削除"/>
                 </StackPanel>
 
                 <TextBlock Grid.Column="1"
@@ -185,11 +208,21 @@
                         <ItemsControl.ItemTemplate>
                             <DataTemplate>
                                 <StackPanel>
-                                    <!-- データ行 -->
-                                    <Border Padding="8,8" x:Name="DataRowBorder">
+                                    <!-- データ行（Issue #635: 選択・ダブルクリック対応） -->
+                                    <Border Padding="8,8" x:Name="DataRowBorder"
+                                            Tag="{Binding}"
+                                            Cursor="Hand"
+                                            MouseLeftButtonDown="DataRow_MouseLeftButtonDown"
+                                            MouseRightButtonDown="DataRow_MouseLeftButtonDown">
+                                        <Border.InputBindings>
+                                            <MouseBinding MouseAction="LeftDoubleClick"
+                                                          Command="{Binding DataContext.EditRowCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}"/>
+                                        </Border.InputBindings>
                                         <Border.Style>
                                             <Style TargetType="Border">
                                                 <Setter Property="Background" Value="Transparent"/>
+                                                <Setter Property="BorderThickness" Value="2"/>
+                                                <Setter Property="BorderBrush" Value="Transparent"/>
                                                 <Style.Triggers>
                                                     <DataTrigger Binding="{Binding GroupColorIndex}" Value="1">
                                                         <Setter Property="Background" Value="#E3F2FD"/>
@@ -205,6 +238,11 @@
                                                     </DataTrigger>
                                                     <DataTrigger Binding="{Binding GroupColorIndex}" Value="5">
                                                         <Setter Property="Background" Value="#FFEBEE"/>
+                                                    </DataTrigger>
+                                                    <!-- 選択状態 -->
+                                                    <DataTrigger Binding="{Binding IsSelected}" Value="True">
+                                                        <Setter Property="BorderBrush" Value="#1976D2"/>
+                                                        <Setter Property="Background" Value="#E3F2FD"/>
                                                     </DataTrigger>
                                                 </Style.Triggers>
                                             </Style>
@@ -391,6 +429,8 @@
                     <Run Text=" 行と行の間をクリックして分割線を挿入/削除できます。"/>
                     <LineBreak/>
                     <Run Text="太い線で区切られていない連続した行は、1つの乗り継ぎとして摘要にまとめられます。"/>
+                    <LineBreak/>
+                    <Run Text="行を選択して「編集」「削除」が可能です。「行の追加」で手動入力もできます。ダブルクリックで編集できます。"/>
                 </TextBlock>
                 <!-- 複数グループ時の追加説明（Issue #634） -->
                 <TextBlock TextWrapping="Wrap"

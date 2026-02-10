@@ -1,0 +1,249 @@
+<Window x:Class="ICCardManager.Views.Dialogs.LedgerDetailEditDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:vm="clr-namespace:ICCardManager.ViewModels"
+        mc:Ignorable="d"
+        d:DataContext="{d:DesignInstance Type=vm:LedgerDetailEditViewModel}"
+        Title="{Binding DialogTitle}"
+        SizeToContent="Height"
+        Width="500"
+        WindowStartupLocation="CenterOwner"
+        ResizeMode="NoResize"
+        AutomationProperties.Name="利用詳細の追加・編集ダイアログ">
+
+    <Window.Resources>
+        <BooleanToVisibilityConverter x:Key="BoolToVisibilityConverter"/>
+    </Window.Resources>
+
+    <Grid Margin="20">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/> <!-- 利用種別 -->
+            <RowDefinition Height="Auto"/> <!-- 利用日時 -->
+            <RowDefinition Height="Auto"/> <!-- 鉄道フィールド -->
+            <RowDefinition Height="Auto"/> <!-- バスフィールド -->
+            <RowDefinition Height="Auto"/> <!-- 金額・残高 -->
+            <RowDefinition Height="Auto"/> <!-- 挿入位置 -->
+            <RowDefinition Height="Auto"/> <!-- エラー -->
+            <RowDefinition Height="Auto"/> <!-- ボタン -->
+        </Grid.RowDefinitions>
+
+        <!-- 利用種別 -->
+        <StackPanel Grid.Row="0" Margin="0,0,0,12">
+            <TextBlock Text="利用種別"
+                       FontSize="{DynamicResource SmallFontSize}"
+                       FontWeight="SemiBold"
+                       Margin="0,0,0,4"/>
+            <ComboBox ItemsSource="{Binding UsageTypeOptions}"
+                      SelectedValue="{Binding SelectedUsageType}"
+                      SelectedValuePath="Value"
+                      DisplayMemberPath="DisplayName"
+                      FontSize="{DynamicResource BaseFontSize}"
+                      Padding="8,6"
+                      AutomationProperties.Name="利用種別"/>
+        </StackPanel>
+
+        <!-- 利用日時 -->
+        <StackPanel Grid.Row="1" Margin="0,0,0,12">
+            <TextBlock Text="利用日時"
+                       FontSize="{DynamicResource SmallFontSize}"
+                       FontWeight="SemiBold"
+                       Margin="0,0,0,4"/>
+            <StackPanel Orientation="Horizontal">
+                <DatePicker SelectedDate="{Binding UseDate, UpdateSourceTrigger=PropertyChanged}"
+                            FontSize="{DynamicResource BaseFontSize}"
+                            Width="180"
+                            AutomationProperties.Name="利用日"/>
+                <TextBox Text="{Binding UseTimeText, UpdateSourceTrigger=PropertyChanged}"
+                         FontSize="{DynamicResource BaseFontSize}"
+                         Width="80"
+                         Margin="10,0,0,0"
+                         Padding="8,6"
+                         AutomationProperties.Name="利用時刻"
+                         ToolTip="HH:mm 形式（例: 09:30）"/>
+                <TextBlock Text="（HH:mm）"
+                           FontSize="{DynamicResource SmallFontSize}"
+                           Foreground="Gray"
+                           VerticalAlignment="Center"
+                           Margin="6,0,0,0"/>
+            </StackPanel>
+        </StackPanel>
+
+        <!-- 鉄道利用フィールド -->
+        <StackPanel Grid.Row="2" Margin="0,0,0,12"
+                    Visibility="{Binding ShowRailFields, Converter={StaticResource BoolToVisibilityConverter}}">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="10"/>
+                    <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+                <StackPanel Grid.Column="0">
+                    <TextBlock Text="乗車駅"
+                               FontSize="{DynamicResource SmallFontSize}"
+                               FontWeight="SemiBold"
+                               Margin="0,0,0,4"/>
+                    <TextBox Text="{Binding EntryStation, UpdateSourceTrigger=PropertyChanged}"
+                             FontSize="{DynamicResource BaseFontSize}"
+                             Padding="8,6"
+                             AutomationProperties.Name="乗車駅"/>
+                </StackPanel>
+                <StackPanel Grid.Column="2">
+                    <TextBlock Text="降車駅"
+                               FontSize="{DynamicResource SmallFontSize}"
+                               FontWeight="SemiBold"
+                               Margin="0,0,0,4"/>
+                    <TextBox Text="{Binding ExitStation, UpdateSourceTrigger=PropertyChanged}"
+                             FontSize="{DynamicResource BaseFontSize}"
+                             Padding="8,6"
+                             AutomationProperties.Name="降車駅"/>
+                </StackPanel>
+            </Grid>
+        </StackPanel>
+
+        <!-- バス利用フィールド -->
+        <StackPanel Grid.Row="3" Margin="0,0,0,12"
+                    Visibility="{Binding ShowBusFields, Converter={StaticResource BoolToVisibilityConverter}}">
+            <TextBlock Text="バス停名"
+                       FontSize="{DynamicResource SmallFontSize}"
+                       FontWeight="SemiBold"
+                       Margin="0,0,0,4"/>
+            <TextBox Text="{Binding BusStops, UpdateSourceTrigger=PropertyChanged}"
+                     FontSize="{DynamicResource BaseFontSize}"
+                     Padding="8,6"
+                     AutomationProperties.Name="バス停名"
+                     ToolTip="バス停名を入力してください（空欄の場合は★で表示）"/>
+        </StackPanel>
+
+        <!-- 金額・残高 -->
+        <StackPanel Grid.Row="4" Margin="0,0,0,12">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="10"/>
+                    <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+                <StackPanel Grid.Column="0">
+                    <TextBlock Text="金額"
+                               FontSize="{DynamicResource SmallFontSize}"
+                               FontWeight="SemiBold"
+                               Margin="0,0,0,4"/>
+                    <StackPanel Orientation="Horizontal">
+                        <TextBox Text="{Binding AmountText, UpdateSourceTrigger=PropertyChanged}"
+                                 FontSize="{DynamicResource BaseFontSize}"
+                                 Width="120"
+                                 Padding="8,6"
+                                 AutomationProperties.Name="金額"/>
+                        <TextBlock Text="円"
+                                   FontSize="{DynamicResource BaseFontSize}"
+                                   VerticalAlignment="Center"
+                                   Margin="6,0,0,0"/>
+                    </StackPanel>
+                </StackPanel>
+                <StackPanel Grid.Column="2">
+                    <TextBlock Text="残額"
+                               FontSize="{DynamicResource SmallFontSize}"
+                               FontWeight="SemiBold"
+                               Margin="0,0,0,4"/>
+                    <StackPanel Orientation="Horizontal">
+                        <TextBox Text="{Binding BalanceText, UpdateSourceTrigger=PropertyChanged}"
+                                 FontSize="{DynamicResource BaseFontSize}"
+                                 Width="120"
+                                 Padding="8,6"
+                                 IsReadOnly="{Binding AutoCalculateBalance}"
+                                 AutomationProperties.Name="残額"/>
+                        <TextBlock Text="円"
+                                   FontSize="{DynamicResource BaseFontSize}"
+                                   VerticalAlignment="Center"
+                                   Margin="6,0,0,0"/>
+                    </StackPanel>
+                    <CheckBox Content="自動計算"
+                              IsChecked="{Binding AutoCalculateBalance}"
+                              FontSize="{DynamicResource SmallFontSize}"
+                              Margin="0,4,0,0"
+                              AutomationProperties.Name="残高自動計算"/>
+                </StackPanel>
+            </Grid>
+        </StackPanel>
+
+        <!-- 挿入位置（追加モード時のみ） -->
+        <Border Grid.Row="5" Margin="0,0,0,12"
+                Background="#F5F5F5" CornerRadius="4" Padding="12"
+                Visibility="{Binding IsInsertMode, Converter={StaticResource BoolToVisibilityConverter}}">
+            <StackPanel>
+                <TextBlock Text="挿入位置"
+                           FontSize="{DynamicResource SmallFontSize}"
+                           FontWeight="SemiBold"
+                           Margin="0,0,0,6"/>
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <Button Grid.Column="0"
+                            Content="&#x25B2;"
+                            Command="{Binding MoveInsertPositionUpCommand}"
+                            Padding="10,4"
+                            FontSize="{DynamicResource BaseFontSize}"
+                            AutomationProperties.Name="挿入位置を上に移動"
+                            ToolTip="挿入位置を1つ上に移動"/>
+                    <TextBlock Grid.Column="1"
+                               Text="{Binding InsertPositionDescription}"
+                               FontSize="{DynamicResource SmallFontSize}"
+                               VerticalAlignment="Center"
+                               HorizontalAlignment="Center"
+                               TextTrimming="CharacterEllipsis"
+                               Margin="8,0"/>
+                    <Button Grid.Column="2"
+                            Content="&#x25BC;"
+                            Command="{Binding MoveInsertPositionDownCommand}"
+                            Padding="10,4"
+                            FontSize="{DynamicResource BaseFontSize}"
+                            AutomationProperties.Name="挿入位置を下に移動"
+                            ToolTip="挿入位置を1つ下に移動"/>
+                </Grid>
+            </StackPanel>
+        </Border>
+
+        <!-- バリデーションエラー -->
+        <Border Grid.Row="6" Margin="0,0,0,12"
+                Background="#FFEBEE" CornerRadius="4" Padding="10"
+                Visibility="{Binding HasValidationError, Converter={StaticResource BoolToVisibilityConverter}}">
+            <TextBlock Text="{Binding ValidationMessage}"
+                       FontSize="{DynamicResource SmallFontSize}"
+                       Foreground="#D32F2F"
+                       TextWrapping="Wrap"/>
+        </Border>
+
+        <!-- ボタン -->
+        <Grid Grid.Row="7" Margin="0,8,0,0">
+            <Button Content="キャンセル"
+                    Click="CancelButton_Click"
+                    HorizontalAlignment="Left"
+                    Padding="20,8"
+                    IsCancel="True"
+                    FontSize="{DynamicResource BaseFontSize}"
+                    AutomationProperties.Name="キャンセル"/>
+            <Button Command="{Binding ConfirmCommand}"
+                    HorizontalAlignment="Right"
+                    Padding="20,8"
+                    Background="#4CAF50"
+                    Foreground="White"
+                    FontSize="{DynamicResource BaseFontSize}"
+                    AutomationProperties.Name="確定">
+                <Button.Style>
+                    <Style TargetType="Button">
+                        <Setter Property="Content" Value="追加"/>
+                        <Style.Triggers>
+                            <DataTrigger Binding="{Binding IsInsertMode}" Value="False">
+                                <Setter Property="Content" Value="更新"/>
+                            </DataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </Button.Style>
+            </Button>
+        </Grid>
+    </Grid>
+</Window>

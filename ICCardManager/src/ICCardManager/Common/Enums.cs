@@ -57,4 +57,22 @@ namespace ICCardManager.Common
         /// <summary>その他・不明</summary>
         Unknown
     }
+
+    /// <summary>
+    /// 利用種別（履歴詳細の手動入力用）
+    /// </summary>
+    public enum UsageType
+    {
+        /// <summary>鉄道利用</summary>
+        Rail,
+
+        /// <summary>バス利用</summary>
+        Bus,
+
+        /// <summary>チャージ</summary>
+        Charge,
+
+        /// <summary>ポイント還元</summary>
+        PointRedemption
+    }
 }
