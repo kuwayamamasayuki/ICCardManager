@@ -90,7 +90,7 @@ namespace ICCardManager.Views.Dialogs
             {
                 Title = "保存方法の選択",
                 Width = 420,
-                Height = 200,
+                SizeToContent = SizeToContent.Height,
                 WindowStartupLocation = WindowStartupLocation.CenterOwner,
                 Owner = this,
                 ResizeMode = ResizeMode.NoResize,
@@ -99,11 +99,24 @@ namespace ICCardManager.Views.Dialogs
 
             var panel = new StackPanel { Margin = new Thickness(20) };
 
+            var baseFontSize = (double)Application.Current.Resources["BaseFontSize"];
+            var smallFontSize = (double)Application.Current.Resources["SmallFontSize"];
+
             panel.Children.Add(new TextBlock
             {
                 Text = "グループが複数あります。どのように保存しますか？",
                 TextWrapping = TextWrapping.Wrap,
-                FontSize = (double)Application.Current.Resources["BaseFontSize"],
+                FontSize = baseFontSize,
+                Margin = new Thickness(0, 0, 0, 8)
+            });
+
+            panel.Children.Add(new TextBlock
+            {
+                Text = "「別々の履歴に分割」… グループごとに別の履歴レコードを作成\n"
+                     + "「摘要のみ更新」… 1つの履歴レコードのまま摘要を変更",
+                TextWrapping = TextWrapping.Wrap,
+                FontSize = smallFontSize,
+                Foreground = System.Windows.Media.Brushes.Gray,
                 Margin = new Thickness(0, 0, 0, 20)
             });
 
@@ -118,7 +131,7 @@ namespace ICCardManager.Views.Dialogs
                 Content = "別々の履歴に分割",
                 Padding = new Thickness(16, 8, 16, 8),
                 Margin = new Thickness(0, 0, 8, 0),
-                FontSize = (double)Application.Current.Resources["BaseFontSize"]
+                FontSize = baseFontSize
             };
             splitButton.Click += (s, e) =>
             {
@@ -131,7 +144,7 @@ namespace ICCardManager.Views.Dialogs
                 Content = "摘要のみ更新",
                 Padding = new Thickness(16, 8, 16, 8),
                 Margin = new Thickness(0, 0, 8, 0),
-                FontSize = (double)Application.Current.Resources["BaseFontSize"]
+                FontSize = baseFontSize
             };
             summaryButton.Click += (s, e) =>
             {
@@ -144,7 +157,7 @@ namespace ICCardManager.Views.Dialogs
                 Content = "キャンセル",
                 Padding = new Thickness(16, 8, 16, 8),
                 IsCancel = true,
-                FontSize = (double)Application.Current.Resources["BaseFontSize"]
+                FontSize = baseFontSize
             };
             cancelButton.Click += (s, e) =>
             {
