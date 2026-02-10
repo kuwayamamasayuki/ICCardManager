@@ -2398,4 +2398,178 @@ public class ReportServiceTests : IDisposable
     }
 
     #endregion
+
+    #region Issue #637: 帳票上書き時に備考欄が消える問題
+
+    /// <summary>
+    /// TC035: Issue #637 - 帳票を二回出力しても備考欄（17-22行目）が保持される
+    /// </summary>
+    /// <remarks>
+    /// ClearWorksheetDataが5行目以降をすべてクリアするため、
+    /// 備考欄（17-22行目）のセルデータも消えてしまう問題を修正。
+    /// テンプレートから備考欄を復元することで対処。
+    /// </remarks>
+    [Fact]
+    public async Task CreateMonthlyReportAsync_SecondGeneration_NotesRowsPreserved()
+    {
+        // Arrange
+        var cardIdm = "0102030405060708";
+        var card = CreateTestCard(cardIdm);
+        var outputPath = CreateTempFilePath();
+        var year = 2024;
+        var month = 6;
+
+        var ledgers = new List<Ledger>
+        {
+            CreateTestLedger(1, cardIdm, new DateTime(year, month, 10), "鉄道（博多～天神）", 0, 300, 9700, "田中太郎")
+        };
+
+        _cardRepositoryMock
+            .Setup(r => r.GetByIdmAsync(cardIdm, true))
+            .ReturnsAsync(card);
+        _ledgerRepositoryMock
+            .Setup(r => r.GetByMonthAsync(cardIdm, year, month))
+            .ReturnsAsync(ledgers);
+
+        // Act - 1回目の帳票作成
+        var result1 = await _reportService.CreateMonthlyReportAsync(cardIdm, year, month, outputPath);
+        result1.Success.Should().BeTrue("1回目の帳票作成が成功するべき");
+
+        // 1回目の備考欄を検証
+        using (var wb1 = new XLWorkbook(outputPath))
+        {
+            var ws1 = wb1.Worksheets.First();
+            ws1.Cell(17, 1).GetString().Should().Contain("備考",
+                "1回目: 17行目に備考欄のテキストが存在するべき");
+        }
+
+        // Act - 2回目の帳票作成（同じ月を上書き）
+        var result2 = await _reportService.CreateMonthlyReportAsync(cardIdm, year, month, outputPath);
+
+        // Assert
+        result2.Success.Should().BeTrue("2回目の帳票作成が成功するべき");
+
+        using var workbook = new XLWorkbook(outputPath);
+        var worksheet = workbook.Worksheets.First();
+
+        // 備考欄（17-22行目）が保持されていることを検証
+        worksheet.Cell(17, 1).GetString().Should().Contain("備考",
+            "2回目の帳票出力後も17行目に備考欄のテキストが存在するべき（Issue #637）");
+        worksheet.Cell(18, 1).GetString().Should().NotBeNullOrEmpty(
+            "2回目の帳票出力後も18行目のテキストが存在するべき");
+        worksheet.Cell(19, 1).GetString().Should().NotBeNullOrEmpty(
+            "2回目の帳票出力後も19行目のテキストが存在するべき");
+        worksheet.Cell(20, 1).GetString().Should().NotBeNullOrEmpty(
+            "2回目の帳票出力後も20行目のテキストが存在するべき");
+        worksheet.Cell(21, 1).GetString().Should().NotBeNullOrEmpty(
+            "2回目の帳票出力後も21行目のテキストが存在するべき");
+    }
+
+    /// <summary>
+    /// TC036: Issue #637 - 帳票を三回出力しても備考欄が保持される
+    /// </summary>
+    [Fact]
+    public async Task CreateMonthlyReportAsync_ThirdGeneration_NotesRowsPreserved()
+    {
+        // Arrange
+        var cardIdm = "0102030405060708";
+        var card = CreateTestCard(cardIdm);
+        var outputPath = CreateTempFilePath();
+        var year = 2024;
+        var month = 6;
+
+        var ledgers = new List<Ledger>
+        {
+            CreateTestLedger(1, cardIdm, new DateTime(year, month, 10), "鉄道（博多～天神）", 0, 300, 9700, "田中太郎")
+        };
+
+        _cardRepositoryMock
+            .Setup(r => r.GetByIdmAsync(cardIdm, true))
+            .ReturnsAsync(card);
+        _ledgerRepositoryMock
+            .Setup(r => r.GetByMonthAsync(cardIdm, year, month))
+            .ReturnsAsync(ledgers);
+
+        // 1回目
+        await _reportService.CreateMonthlyReportAsync(cardIdm, year, month, outputPath);
+        // 2回目
+        await _reportService.CreateMonthlyReportAsync(cardIdm, year, month, outputPath);
+        // 3回目
+        var result = await _reportService.CreateMonthlyReportAsync(cardIdm, year, month, outputPath);
+
+        // Assert
+        result.Success.Should().BeTrue("3回目の帳票作成が成功するべき");
+
+        using var workbook = new XLWorkbook(outputPath);
+        var worksheet = workbook.Worksheets.First();
+
+        // 備考欄（17-22行目）が保持されていることを検証
+        worksheet.Cell(17, 1).GetString().Should().Contain("備考",
+            "3回目の帳票出力後も備考欄が保持されるべき（Issue #637）");
+        for (int row = 18; row <= 21; row++)
+        {
+            worksheet.Cell(row, 1).GetString().Should().NotBeNullOrEmpty(
+                $"3回目の帳票出力後も{row}行目のテキストが存在するべき");
+        }
+    }
+
+    /// <summary>
+    /// TC037: Issue #637 - 別の月を追加出力しても元の月の備考欄が保持される
+    /// </summary>
+    [Fact]
+    public async Task CreateMonthlyReportAsync_DifferentMonth_OriginalNotesPreserved()
+    {
+        // Arrange
+        var cardIdm = "0102030405060708";
+        var card = CreateTestCard(cardIdm);
+        var outputPath = CreateTempFilePath();
+        var year = 2024;
+
+        var juneLedgers = new List<Ledger>
+        {
+            CreateTestLedger(1, cardIdm, new DateTime(year, 6, 10), "鉄道（博多～天神）", 0, 300, 9700, "田中太郎")
+        };
+        var julyLedgers = new List<Ledger>
+        {
+            CreateTestLedger(2, cardIdm, new DateTime(year, 7, 5), "鉄道（天神～博多）", 0, 300, 9400, "鈴木花子")
+        };
+        // 7月の前月残高（6月末）
+        var juneEndLedgers = new List<Ledger>
+        {
+            CreateTestLedger(1, cardIdm, new DateTime(year, 6, 30), "6月末データ", 0, 0, 9700)
+        };
+
+        _cardRepositoryMock
+            .Setup(r => r.GetByIdmAsync(cardIdm, true))
+            .ReturnsAsync(card);
+        _ledgerRepositoryMock
+            .Setup(r => r.GetByMonthAsync(cardIdm, year, 6))
+            .ReturnsAsync(juneLedgers);
+        _ledgerRepositoryMock
+            .Setup(r => r.GetByMonthAsync(cardIdm, year, 7))
+            .ReturnsAsync(julyLedgers);
+
+        // 6月を出力（1回目：新規ファイル作成）
+        await _reportService.CreateMonthlyReportAsync(cardIdm, year, 6, outputPath);
+
+        // 7月を出力（既存ファイルに新しいシートを追加）
+        var result = await _reportService.CreateMonthlyReportAsync(cardIdm, year, 7, outputPath);
+
+        // Assert
+        result.Success.Should().BeTrue();
+
+        using var workbook = new XLWorkbook(outputPath);
+
+        // 6月シートの備考欄が保持されている
+        var juneSheet = workbook.Worksheet("6月");
+        juneSheet.Cell(17, 1).GetString().Should().Contain("備考",
+            "別の月を追加出力後も6月シートの備考欄が保持されるべき");
+
+        // 7月シートにも備考欄が存在する
+        var julySheet = workbook.Worksheet("7月");
+        julySheet.Cell(17, 1).GetString().Should().Contain("備考",
+            "新規追加された7月シートにも備考欄が存在するべき");
+    }
+
+    #endregion
 }
