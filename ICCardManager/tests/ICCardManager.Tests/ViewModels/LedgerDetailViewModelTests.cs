@@ -31,12 +31,19 @@ public class LedgerDetailViewModelTests
         var operationLogger = new OperationLogger(
             operationLogRepoMock.Object,
             staffRepoMock.Object);
+        var splitServiceLogger = NullLogger<LedgerSplitService>.Instance;
+        var ledgerSplitService = new LedgerSplitService(
+            ledgerRepoMock.Object,
+            summaryGenerator,
+            operationLogger,
+            splitServiceLogger);
         var logger = NullLogger<LedgerDetailViewModel>.Instance;
 
         _viewModel = new LedgerDetailViewModel(
             ledgerRepoMock.Object,
             summaryGenerator,
             operationLogger,
+            ledgerSplitService,
             logger);
     }
 
@@ -184,6 +191,54 @@ public class LedgerDetailViewModelTests
 
         // Assert
         _viewModel.HasChanges.Should().BeTrue();
+    }
+
+    #endregion
+
+    #region Issue #634: HasMultipleGroups テスト
+
+    [Fact]
+    public void ToggleDividerAt_TwoItems_HasMultipleGroupsIsTrue()
+    {
+        // Arrange
+        AddItems(2);
+        _viewModel.HasMultipleGroups.Should().BeFalse("初期状態ではfalse");
+
+        // Act: 分割線を挿入して2グループにする
+        _viewModel.ToggleDividerAt(0);
+
+        // Assert
+        _viewModel.HasMultipleGroups.Should().BeTrue("2グループある場合はtrue");
+    }
+
+    [Fact]
+    public void MergeAll_HasMultipleGroupsIsFalse()
+    {
+        // Arrange: まず分割してMultipleGroupsをtrueにする
+        AddItems(3);
+        _viewModel.SplitAllCommand.Execute(null);
+        _viewModel.HasMultipleGroups.Should().BeTrue();
+
+        // Act: すべて統合
+        _viewModel.MergeAllCommand.Execute(null);
+
+        // Assert
+        _viewModel.HasMultipleGroups.Should().BeFalse("統合後はfalse");
+    }
+
+    [Fact]
+    public void ToggleDividerAt_RemoveDivider_HasMultipleGroupsReturnsFalse()
+    {
+        // Arrange
+        AddItems(2);
+        _viewModel.ToggleDividerAt(0);
+        _viewModel.HasMultipleGroups.Should().BeTrue();
+
+        // Act: 分割線を削除
+        _viewModel.ToggleDividerAt(0);
+
+        // Assert
+        _viewModel.HasMultipleGroups.Should().BeFalse("分割線を外すとfalseに戻る");
     }
 
     #endregion

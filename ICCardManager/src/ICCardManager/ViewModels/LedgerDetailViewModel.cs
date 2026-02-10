@@ -211,19 +211,29 @@ namespace ICCardManager.ViewModels
         public Action? OnSaveCompleted { get; set; }
 
         /// <summary>
+        /// 複数グループがあるかどうか（Issue #634: ボタン切り替え用）
+        /// </summary>
+        [ObservableProperty]
+        private bool _hasMultipleGroups;
+
+        /// <summary>
         /// 操作者IDm（ログ記録用）
         /// </summary>
         private string? _operatorIdm;
+
+        private readonly LedgerSplitService _ledgerSplitService;
 
         public LedgerDetailViewModel(
             ILedgerRepository ledgerRepository,
             SummaryGenerator summaryGenerator,
             OperationLogger operationLogger,
+            LedgerSplitService ledgerSplitService,
             ILogger<LedgerDetailViewModel> logger)
         {
             _ledgerRepository = ledgerRepository;
             _summaryGenerator = summaryGenerator;
             _operationLogger = operationLogger;
+            _ledgerSplitService = ledgerSplitService;
             _logger = logger;
         }
 
@@ -427,6 +437,8 @@ namespace ICCardManager.ViewModels
                 .Distinct()
                 .Count();
 
+            HasMultipleGroups = groupCount >= 2;
+
             if (groupCount > 0)
             {
                 DetailCountDisplay = $"{Items.Count}件の詳細（{groupCount}グループ）";
@@ -579,6 +591,54 @@ namespace ICCardManager.ViewModels
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Failed to save ledger detail changes");
+                StatusMessage = $"エラー: {ex.Message}";
+            }
+            finally
+            {
+                IsBusy = false;
+            }
+        }
+
+        /// <summary>
+        /// 台帳分割による保存（Issue #634）
+        /// </summary>
+        [RelayCommand]
+        private async Task SaveWithFullSplitAsync()
+        {
+            if (!HasChanges) return;
+
+            IsBusy = true;
+            StatusMessage = "分割中...";
+
+            try
+            {
+                var updatedDetails = Items.Select(item =>
+                {
+                    var detail = item.Detail;
+                    detail.GroupId = item.GroupId;
+                    return detail;
+                }).ToList();
+
+                var result = await _ledgerSplitService.SplitAsync(
+                    _ledger.Id, updatedDetails, _operatorIdm);
+
+                if (!result.Success)
+                {
+                    StatusMessage = $"分割に失敗しました: {result.ErrorMessage}";
+                    return;
+                }
+
+                HasChanges = false;
+                StatusMessage = $"{result.CreatedLedgerIds.Count + 1}件の履歴に分割しました";
+                _logger.LogInformation(
+                    "Split ledger {LedgerId} into separate ledgers",
+                    _ledger.Id);
+
+                OnSaveCompleted?.Invoke();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to split ledger {LedgerId}", _ledger.Id);
                 StatusMessage = $"エラー: {ex.Message}";
             }
             finally
