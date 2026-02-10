@@ -44,6 +44,12 @@ namespace ICCardManager.Views.Dialogs
             {
                 // Issue #548: 保存完了時にフラグを設定（履歴画面の即時反映用）
                 WasSaved = true;
+
+                // Issue #634: 分割/摘要更新の保存後はダイアログを閉じる
+                if (_viewModel.HasMultipleGroups)
+                {
+                    Close();
+                }
             };
 
             await _viewModel.InitializeAsync(ledgerId, operatorIdm);
