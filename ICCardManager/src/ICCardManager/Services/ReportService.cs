@@ -282,11 +282,14 @@ namespace ICCardManager.Services
                         // 既存シートがある場合はデータ部分をクリア
                         ClearWorksheetData(worksheet);
 
-                        // Issue #531: 既存シートにもテンプレートのページ設定（フッター含む）を適用
-                        // これにより、上書き時にフッターが失われる問題を修正
+                        // Issue #531: 既存シートにもテンプレートのページ設定を適用
                         using var templateWorkbook = new XLWorkbook(templatePath);
                         var templateSheet = templateWorkbook.Worksheets.First();
                         CopyPageSetup(templateSheet, worksheet);
+
+                        // Issue #637: 備考欄（17-22行目）をテンプレートから復元する
+                        // ClearWorksheetDataで5行目以降がクリアされるため、備考欄のセルデータも消える
+                        CopyNotesSection(templateSheet, worksheet);
                     }
                     else if (isExistingFile)
                     {
@@ -472,8 +475,7 @@ namespace ICCardManager.Services
             headerRange.CopyTo(target.Cell(1, 1));
 
             // 17〜22行目（備考欄/フッタ部分）をコピー
-            var notesRange = source.Range(17, 1, 22, 12);
-            notesRange.CopyTo(target.Cell(17, 1));
+            CopyNotesSection(source, target);
 
             // 列幅をコピー
             for (int col = 1; col <= 12; col++)
@@ -483,12 +485,6 @@ namespace ICCardManager.Services
 
             // 行の高さをコピー（1〜4行目）
             for (int row = 1; row <= 4; row++)
-            {
-                target.Row(row).Height = source.Row(row).Height;
-            }
-
-            // 行の高さをコピー（17〜22行目）
-            for (int row = 17; row <= 22; row++)
             {
                 target.Row(row).Height = source.Row(row).Height;
             }
@@ -552,6 +548,28 @@ namespace ICCardManager.Services
             else
             {
                 targetSetup.Scale = sourceSetup.Scale;
+            }
+        }
+
+        /// <summary>
+        /// Issue #637: テンプレートから備考欄（17-22行目）を復元する
+        /// </summary>
+        /// <remarks>
+        /// ClearWorksheetDataは5行目以降をすべてクリアするため、
+        /// 備考欄（17-22行目）のセルデータも消えてしまう。
+        /// テンプレートから備考欄を復元する必要がある。
+        /// また、改ページ処理（CopyNotesToNewPage）はこの17-22行目を
+        /// コピー元として使用するため、ここが空だと2ページ目以降の備考欄も消える。
+        /// </remarks>
+        private static void CopyNotesSection(IXLWorksheet source, IXLWorksheet target)
+        {
+            var notesRange = source.Range(17, 1, 22, 12);
+            notesRange.CopyTo(target.Cell(17, 1));
+
+            // 行の高さもコピー
+            for (int row = 17; row <= 22; row++)
+            {
+                target.Row(row).Height = source.Row(row).Height;
             }
         }
 
