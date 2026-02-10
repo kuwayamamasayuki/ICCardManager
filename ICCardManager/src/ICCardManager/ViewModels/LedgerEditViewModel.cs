@@ -242,11 +242,20 @@ namespace ICCardManager.ViewModels
                 ledger.Summary = Summary;
                 ledger.Note = Note;
 
-                // 利用者の変更がある場合（Issue #529）
-                if (staffChanged && SelectedStaff != null)
+                // 利用者の変更がある場合（Issue #529, Issue #636）
+                if (staffChanged)
                 {
-                    ledger.LenderIdm = SelectedStaff.StaffIdm;
-                    ledger.StaffName = SelectedStaff.Name;
+                    if (SelectedStaff != null)
+                    {
+                        ledger.LenderIdm = SelectedStaff.StaffIdm;
+                        ledger.StaffName = SelectedStaff.Name;
+                    }
+                    else
+                    {
+                        // 利用者を空欄にする（Issue #636）
+                        ledger.LenderIdm = null;
+                        ledger.StaffName = null;
+                    }
                 }
 
                 var result = await _ledgerRepository.UpdateAsync(ledger);
@@ -271,6 +280,15 @@ namespace ICCardManager.ViewModels
             {
                 IsBusy = false;
             }
+        }
+
+        /// <summary>
+        /// 利用者の選択をクリア（Issue #636）
+        /// </summary>
+        [RelayCommand]
+        private void ClearStaff()
+        {
+            SelectedStaff = null;
         }
 
         /// <summary>
