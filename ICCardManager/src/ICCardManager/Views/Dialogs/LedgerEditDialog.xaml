@@ -73,7 +73,7 @@
                                VerticalAlignment="Center"/>
                 </StackPanel>
 
-                <!-- 利用者（選択可能 Issue #529） -->
+                <!-- 利用者（選択可能 Issue #529, クリア可能 Issue #636） -->
                 <StackPanel Grid.Row="1" Grid.ColumnSpan="2" Orientation="Horizontal" Margin="0,8,0,0">
                     <TextBlock Text="利用者:"
                                FontSize="{DynamicResource SmallFontSize}"
@@ -88,6 +88,14 @@
                               VerticalAlignment="Center"
                               AutomationProperties.Name="利用者を選択"
                               ToolTip="利用者を変更できます（前の利用者が返却し忘れた場合など）"/>
+                    <Button Content="×"
+                            Command="{Binding ClearStaffCommand}"
+                            FontSize="{DynamicResource SmallFontSize}"
+                            Padding="6,1"
+                            Margin="4,0,0,0"
+                            VerticalAlignment="Center"
+                            AutomationProperties.Name="利用者をクリア"
+                            ToolTip="利用者の選択を解除して空欄にします"/>
                 </StackPanel>
             </Grid>
         </Border>
