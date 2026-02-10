@@ -47,23 +47,7 @@ namespace ICCardManager.Views.Dialogs
             };
 
             // Issue #634: 分割モード選択のコールバックを設定
-            _viewModel.OnRequestSplitMode = () =>
-            {
-                var result = MessageBox.Show(
-                    "グループが複数あります。どのように保存しますか？\n\n" +
-                    "「はい」→ 別々の履歴に分割（グループごとに別の履歴レコードを作成）\n" +
-                    "「いいえ」→ 摘要のみ更新（1つの履歴レコードのまま摘要を変更）",
-                    "保存方法の選択",
-                    MessageBoxButton.YesNoCancel,
-                    MessageBoxImage.Question);
-
-                return result switch
-                {
-                    MessageBoxResult.Yes => SplitSaveMode.FullSplit,
-                    MessageBoxResult.No => SplitSaveMode.SummaryOnly,
-                    _ => SplitSaveMode.Cancel
-                };
-            };
+            _viewModel.OnRequestSplitMode = () => ShowSplitModeDialog();
 
             await _viewModel.InitializeAsync(ledgerId, operatorIdm);
         }
@@ -93,6 +77,90 @@ namespace ICCardManager.Views.Dialogs
             {
                 _viewModel?.ToggleDividerAt(index);
             }
+        }
+
+        /// <summary>
+        /// 分割モード選択ダイアログを表示（Issue #634）
+        /// </summary>
+        private SplitSaveMode ShowSplitModeDialog()
+        {
+            var selectedMode = SplitSaveMode.Cancel;
+
+            var dialog = new Window
+            {
+                Title = "保存方法の選択",
+                Width = 420,
+                Height = 200,
+                WindowStartupLocation = WindowStartupLocation.CenterOwner,
+                Owner = this,
+                ResizeMode = ResizeMode.NoResize,
+                WindowStyle = WindowStyle.ToolWindow
+            };
+
+            var panel = new StackPanel { Margin = new Thickness(20) };
+
+            panel.Children.Add(new TextBlock
+            {
+                Text = "グループが複数あります。どのように保存しますか？",
+                TextWrapping = TextWrapping.Wrap,
+                FontSize = (double)Application.Current.Resources["BaseFontSize"],
+                Margin = new Thickness(0, 0, 0, 20)
+            });
+
+            var buttonPanel = new StackPanel
+            {
+                Orientation = Orientation.Horizontal,
+                HorizontalAlignment = HorizontalAlignment.Center
+            };
+
+            var splitButton = new Button
+            {
+                Content = "別々の履歴に分割",
+                Padding = new Thickness(16, 8, 16, 8),
+                Margin = new Thickness(0, 0, 8, 0),
+                FontSize = (double)Application.Current.Resources["BaseFontSize"]
+            };
+            splitButton.Click += (s, e) =>
+            {
+                selectedMode = SplitSaveMode.FullSplit;
+                dialog.Close();
+            };
+
+            var summaryButton = new Button
+            {
+                Content = "摘要のみ更新",
+                Padding = new Thickness(16, 8, 16, 8),
+                Margin = new Thickness(0, 0, 8, 0),
+                FontSize = (double)Application.Current.Resources["BaseFontSize"]
+            };
+            summaryButton.Click += (s, e) =>
+            {
+                selectedMode = SplitSaveMode.SummaryOnly;
+                dialog.Close();
+            };
+
+            var cancelButton = new Button
+            {
+                Content = "キャンセル",
+                Padding = new Thickness(16, 8, 16, 8),
+                IsCancel = true,
+                FontSize = (double)Application.Current.Resources["BaseFontSize"]
+            };
+            cancelButton.Click += (s, e) =>
+            {
+                selectedMode = SplitSaveMode.Cancel;
+                dialog.Close();
+            };
+
+            buttonPanel.Children.Add(splitButton);
+            buttonPanel.Children.Add(summaryButton);
+            buttonPanel.Children.Add(cancelButton);
+            panel.Children.Add(buttonPanel);
+
+            dialog.Content = panel;
+            dialog.ShowDialog();
+
+            return selectedMode;
         }
 
         /// <summary>
