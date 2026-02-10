@@ -340,9 +340,18 @@ namespace ICCardManager.ViewModels
         /// 分割線の状態からGroupIdを再計算
         /// 連続する分割線なしのアイテムは同じグループになる
         /// </summary>
+        /// <remarks>
+        /// Issue #633: 分割線が1つでも存在する場合、単独アイテムにもGroupIdを付与する。
+        /// これにより、SummaryGeneratorがGroupIdベースの摘要生成パスを使用し、
+        /// ユーザーの明示的な分割操作が摘要に正しく反映される。
+        /// 分割線がない場合はすべてのGroupIdをnullにして自動検出モードに戻す。
+        /// </remarks>
         private void RecalculateGroupsFromDividers()
         {
             if (Items.Count == 0) return;
+
+            // 分割線が存在するかチェック
+            bool hasDividers = Items.Any(item => item.ShowDividerBelow);
 
             int currentGroupId = 1;
             int groupStartIndex = 0;
@@ -353,13 +362,10 @@ namespace ICCardManager.ViewModels
 
                 if (item.ShowDividerBelow || i == Items.Count - 1)
                 {
-                    // 分割線があるか、最後のアイテムの場合
-                    // groupStartIndex から i までが1つのグループ
-                    int groupSize = i - groupStartIndex + 1;
-
-                    if (groupSize >= 2)
+                    if (hasDividers)
                     {
-                        // 2つ以上のアイテムがあればグループとして設定
+                        // 分割線が存在する場合: 全アイテムにGroupIdを付与
+                        // （単独アイテムも含む。これにより摘要生成でGroupIdパスが使われる）
                         for (int j = groupStartIndex; j <= i; j++)
                         {
                             Items[j].GroupId = currentGroupId;
@@ -368,8 +374,11 @@ namespace ICCardManager.ViewModels
                     }
                     else
                     {
-                        // 1つのアイテムだけならグループなし（自動検出に任せる）
-                        Items[i].GroupId = null;
+                        // 分割線なし: GroupIdをクリアして自動検出モードに戻す
+                        for (int j = groupStartIndex; j <= i; j++)
+                        {
+                            Items[j].GroupId = null;
+                        }
                     }
 
                     // 次のグループの開始位置
