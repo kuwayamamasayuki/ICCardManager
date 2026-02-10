@@ -16,6 +16,19 @@ using Microsoft.Extensions.Logging;
 namespace ICCardManager.ViewModels
 {
     /// <summary>
+    /// 分割保存モード（Issue #634）
+    /// </summary>
+    public enum SplitSaveMode
+    {
+        /// <summary>摘要のみ更新（既存動作）</summary>
+        SummaryOnly,
+        /// <summary>台帳を分割（グループごとに別の履歴レコードを作成）</summary>
+        FullSplit,
+        /// <summary>キャンセル</summary>
+        Cancel
+    }
+
+    /// <summary>
     /// 利用履歴詳細表示用のアイテム
     /// </summary>
     public partial class LedgerDetailItemViewModel : ObservableObject
@@ -211,19 +224,29 @@ namespace ICCardManager.ViewModels
         public Action? OnSaveCompleted { get; set; }
 
         /// <summary>
+        /// 分割モードを問い合わせるコールバック（Issue #634: Viewが設定）
+        /// グループが2つ以上ある場合に呼び出される
+        /// </summary>
+        public Func<SplitSaveMode>? OnRequestSplitMode { get; set; }
+
+        /// <summary>
         /// 操作者IDm（ログ記録用）
         /// </summary>
         private string? _operatorIdm;
+
+        private readonly LedgerSplitService _ledgerSplitService;
 
         public LedgerDetailViewModel(
             ILedgerRepository ledgerRepository,
             SummaryGenerator summaryGenerator,
             OperationLogger operationLogger,
+            LedgerSplitService ledgerSplitService,
             ILogger<LedgerDetailViewModel> logger)
         {
             _ledgerRepository = ledgerRepository;
             _summaryGenerator = summaryGenerator;
             _operationLogger = operationLogger;
+            _ledgerSplitService = ledgerSplitService;
             _logger = logger;
         }
 
@@ -524,6 +547,25 @@ namespace ICCardManager.ViewModels
                 return;
             }
 
+            // Issue #634: 複数グループがある場合は分割モードを問い合わせ
+            var distinctGroups = Items
+                .Where(i => i.GroupId.HasValue)
+                .Select(i => i.GroupId!.Value)
+                .Distinct()
+                .Count();
+
+            if (distinctGroups >= 2 && OnRequestSplitMode != null)
+            {
+                var mode = OnRequestSplitMode.Invoke();
+                if (mode == SplitSaveMode.Cancel) return;
+                if (mode == SplitSaveMode.FullSplit)
+                {
+                    await SaveWithFullSplitAsync();
+                    return;
+                }
+                // SummaryOnly: 既存の摘要のみ更新ロジックに進む
+            }
+
             IsBusy = true;
             StatusMessage = "保存中...";
 
@@ -579,6 +621,51 @@ namespace ICCardManager.ViewModels
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Failed to save ledger detail changes");
+                StatusMessage = $"エラー: {ex.Message}";
+            }
+            finally
+            {
+                IsBusy = false;
+            }
+        }
+
+        /// <summary>
+        /// 台帳分割による保存（Issue #634）
+        /// </summary>
+        private async Task SaveWithFullSplitAsync()
+        {
+            IsBusy = true;
+            StatusMessage = "分割中...";
+
+            try
+            {
+                var updatedDetails = Items.Select(item =>
+                {
+                    var detail = item.Detail;
+                    detail.GroupId = item.GroupId;
+                    return detail;
+                }).ToList();
+
+                var result = await _ledgerSplitService.SplitAsync(
+                    _ledger.Id, updatedDetails, _operatorIdm);
+
+                if (!result.Success)
+                {
+                    StatusMessage = $"分割に失敗しました: {result.ErrorMessage}";
+                    return;
+                }
+
+                HasChanges = false;
+                StatusMessage = $"{result.CreatedLedgerIds.Count + 1}件の履歴に分割しました";
+                _logger.LogInformation(
+                    "Split ledger {LedgerId} into separate ledgers",
+                    _ledger.Id);
+
+                OnSaveCompleted?.Invoke();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to split ledger {LedgerId}", _ledger.Id);
                 StatusMessage = $"エラー: {ex.Message}";
             }
             finally

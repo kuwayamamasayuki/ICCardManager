@@ -26,6 +26,7 @@ namespace ICCardManager.Services
             public const string Delete = "DELETE";
             public const string Restore = "RESTORE";
             public const string Merge = "MERGE";
+            public const string Split = "SPLIT";
         }
 
         /// <summary>
@@ -344,6 +345,33 @@ namespace ICCardManager.Services
                 Action = Actions.Merge,
                 BeforeData = SerializeToJson(sourceLedgers),
                 AfterData = SerializeToJson(mergedLedger)
+            };
+
+            await _operationLogRepository.InsertAsync(log);
+        }
+
+        /// <summary>
+        /// 履歴分割のログを記録（Issue #634）
+        /// </summary>
+        /// <param name="operatorIdm">操作者IDm（nullまたは空文字列の場合はGUI操作として記録）</param>
+        /// <param name="originalLedger">分割前の履歴データ</param>
+        /// <param name="splitLedgers">分割後の履歴データリスト</param>
+        public async Task LogLedgerSplitAsync(string? operatorIdm, Ledger originalLedger, IReadOnlyList<Ledger> splitLedgers)
+        {
+            var isGuiOperation = string.IsNullOrEmpty(operatorIdm);
+            var actualIdm = isGuiOperation ? GuiOperator.Idm : operatorIdm;
+            var operatorName = isGuiOperation ? GuiOperator.Name : await GetOperatorNameAsync(operatorIdm!);
+
+            var log = new OperationLog
+            {
+                Timestamp = DateTime.Now,
+                OperatorIdm = actualIdm,
+                OperatorName = operatorName,
+                TargetTable = Tables.Ledger,
+                TargetId = originalLedger.Id.ToString(),
+                Action = Actions.Split,
+                BeforeData = SerializeToJson(originalLedger),
+                AfterData = SerializeToJson(splitLedgers)
             };
 
             await _operationLogRepository.InsertAsync(log);

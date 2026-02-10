@@ -31,12 +31,19 @@ public class LedgerDetailViewModelTests
         var operationLogger = new OperationLogger(
             operationLogRepoMock.Object,
             staffRepoMock.Object);
+        var splitServiceLogger = NullLogger<LedgerSplitService>.Instance;
+        var ledgerSplitService = new LedgerSplitService(
+            ledgerRepoMock.Object,
+            summaryGenerator,
+            operationLogger,
+            splitServiceLogger);
         var logger = NullLogger<LedgerDetailViewModel>.Instance;
 
         _viewModel = new LedgerDetailViewModel(
             ledgerRepoMock.Object,
             summaryGenerator,
             operationLogger,
+            ledgerSplitService,
             logger);
     }
 
@@ -184,6 +191,67 @@ public class LedgerDetailViewModelTests
 
         // Assert
         _viewModel.HasChanges.Should().BeTrue();
+    }
+
+    #endregion
+
+    #region Issue #634: OnRequestSplitMode テスト
+
+    [Fact]
+    public void OnRequestSplitMode_TwoGroups_CallbackIsInvoked()
+    {
+        // Arrange: 2グループに分割してOnRequestSplitModeを設定
+        AddItems(2);
+        _viewModel.ToggleDividerAt(0);
+
+        // Items[0].GroupId と Items[1].GroupId が異なる（2グループ）ことを確認
+        var distinctGroups = _viewModel.Items
+            .Where(i => i.GroupId.HasValue)
+            .Select(i => i.GroupId!.Value)
+            .Distinct()
+            .Count();
+        distinctGroups.Should().Be(2, "2つのグループがある");
+
+        // OnRequestSplitModeが呼ばれることを検証
+        bool callbackInvoked = false;
+        _viewModel.OnRequestSplitMode = () =>
+        {
+            callbackInvoked = true;
+            return SplitSaveMode.Cancel; // テストではキャンセル
+        };
+
+        // Act: SaveCommandを実行（_ledgerが未初期化のため内部でSaveAsyncが動く前にHasChangesチェックを通過する必要あり）
+        // HasChangesはToggleDividerAtで既にtrueになっている
+        _viewModel.SaveCommand.Execute(null);
+
+        // Assert
+        callbackInvoked.Should().BeTrue("2グループある場合にOnRequestSplitModeが呼ばれる");
+    }
+
+    [Fact]
+    public void OnRequestSplitMode_SingleGroup_NotInvoked()
+    {
+        // Arrange: 分割線なし（1グループ）
+        AddItems(2);
+        // 分割線を入れない → GroupIdはすべてnull
+
+        bool callbackInvoked = false;
+        _viewModel.OnRequestSplitMode = () =>
+        {
+            callbackInvoked = true;
+            return SplitSaveMode.Cancel;
+        };
+
+        // HasChangesをtrueにするために一度分割してから統合
+        _viewModel.ToggleDividerAt(0);
+        _viewModel.ToggleDividerAt(0); // 元に戻す（1グループ）
+        // HasChangesはまだtrueのはず
+
+        // Act
+        _viewModel.SaveCommand.Execute(null);
+
+        // Assert
+        callbackInvoked.Should().BeFalse("1グループの場合はOnRequestSplitModeが呼ばれない");
     }
 
     #endregion

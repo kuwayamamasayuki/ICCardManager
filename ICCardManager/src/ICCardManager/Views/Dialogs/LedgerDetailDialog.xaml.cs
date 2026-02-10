@@ -46,6 +46,25 @@ namespace ICCardManager.Views.Dialogs
                 WasSaved = true;
             };
 
+            // Issue #634: 分割モード選択のコールバックを設定
+            _viewModel.OnRequestSplitMode = () =>
+            {
+                var result = MessageBox.Show(
+                    "グループが複数あります。どのように保存しますか？\n\n" +
+                    "「はい」→ 別々の履歴に分割（グループごとに別の履歴レコードを作成）\n" +
+                    "「いいえ」→ 摘要のみ更新（1つの履歴レコードのまま摘要を変更）",
+                    "保存方法の選択",
+                    MessageBoxButton.YesNoCancel,
+                    MessageBoxImage.Question);
+
+                return result switch
+                {
+                    MessageBoxResult.Yes => SplitSaveMode.FullSplit,
+                    MessageBoxResult.No => SplitSaveMode.SummaryOnly,
+                    _ => SplitSaveMode.Cancel
+                };
+            };
+
             await _viewModel.InitializeAsync(ledgerId, operatorIdm);
         }
 
