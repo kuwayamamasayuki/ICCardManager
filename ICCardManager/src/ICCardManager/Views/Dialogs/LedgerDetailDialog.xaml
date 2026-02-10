@@ -385,12 +385,22 @@
 
         <!-- 操作説明 -->
         <Border Grid.Row="3" Background="#FFFDE7" CornerRadius="4" Padding="10" Margin="0,10,0,0">
-            <TextBlock TextWrapping="Wrap" FontSize="{DynamicResource SmallFontSize}">
-                <Run FontWeight="Bold">操作方法:</Run>
-                <Run Text=" 行と行の間をクリックして分割線を挿入/削除できます。"/>
-                <LineBreak/>
-                <Run Text="太い線で区切られていない連続した行は、1つの乗り継ぎとして摘要にまとめられます。"/>
-            </TextBlock>
+            <StackPanel>
+                <TextBlock TextWrapping="Wrap" FontSize="{DynamicResource SmallFontSize}">
+                    <Run FontWeight="Bold">操作方法:</Run>
+                    <Run Text=" 行と行の間をクリックして分割線を挿入/削除できます。"/>
+                    <LineBreak/>
+                    <Run Text="太い線で区切られていない連続した行は、1つの乗り継ぎとして摘要にまとめられます。"/>
+                </TextBlock>
+                <!-- 複数グループ時の追加説明（Issue #634） -->
+                <TextBlock TextWrapping="Wrap"
+                           FontSize="{DynamicResource SmallFontSize}"
+                           Margin="0,6,0,0"
+                           Visibility="{Binding HasMultipleGroups, Converter={StaticResource BoolToVisibilityConverter}}">
+                    <Run FontWeight="Bold">保存方法:</Run>
+                    <Run Text=" 「別々の履歴に分割」を押すとグループごとに別の履歴レコードが作られます。「摘要のみ更新」を押すと1つの履歴のまま摘要だけが変わります。"/>
+                </TextBlock>
+            </StackPanel>
         </Border>
 
         <!-- フッター -->
@@ -408,6 +418,7 @@
                            Visibility="{Binding HasChanges, Converter={StaticResource BoolToVisibilityConverter}}"/>
             </StackPanel>
             <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                <!-- 通常保存ボタン（1グループまたはグループなしの場合） -->
                 <Button Content="保存 (Ctrl+S)"
                         Command="{Binding SaveCommand}"
                         Padding="15,8"
@@ -415,8 +426,47 @@
                         Background="#4CAF50"
                         Foreground="White"
                         AutomationProperties.Name="保存"
-                        ToolTip="変更を保存します"
-                        Visibility="{Binding HasChanges, Converter={StaticResource BoolToVisibilityConverter}}"/>
+                        ToolTip="変更を保存します">
+                    <Button.Style>
+                        <Style TargetType="Button">
+                            <Setter Property="Visibility" Value="{Binding HasChanges, Converter={StaticResource BoolToVisibilityConverter}}"/>
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding HasMultipleGroups}" Value="True">
+                                    <Setter Property="Visibility" Value="Collapsed"/>
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </Button.Style>
+                </Button>
+                <!-- 分割保存ボタン群（複数グループの場合）（Issue #634） -->
+                <StackPanel Orientation="Horizontal"
+                            Visibility="{Binding HasChanges, Converter={StaticResource BoolToVisibilityConverter}}">
+                    <StackPanel.Style>
+                        <Style TargetType="StackPanel">
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding HasMultipleGroups}" Value="False">
+                                    <Setter Property="Visibility" Value="Collapsed"/>
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </StackPanel.Style>
+                    <Button Content="別々の履歴に分割"
+                            Command="{Binding SaveWithFullSplitCommand}"
+                            Padding="15,8"
+                            Margin="0,0,6,0"
+                            Background="#1565C0"
+                            Foreground="White"
+                            AutomationProperties.Name="別々の履歴に分割"
+                            ToolTip="グループごとに別の履歴レコードを作成します"/>
+                    <Button Content="摘要のみ更新"
+                            Command="{Binding SaveCommand}"
+                            Padding="15,8"
+                            Margin="0,0,10,0"
+                            Background="#4CAF50"
+                            Foreground="White"
+                            AutomationProperties.Name="摘要のみ更新"
+                            ToolTip="1つの履歴レコードのまま摘要を変更します"/>
+                </StackPanel>
                 <Button Content="閉じる"
                         Click="CloseButton_Click"
                         Padding="20,8"

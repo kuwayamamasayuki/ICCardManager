@@ -195,63 +195,50 @@ public class LedgerDetailViewModelTests
 
     #endregion
 
-    #region Issue #634: OnRequestSplitMode テスト
+    #region Issue #634: HasMultipleGroups テスト
 
     [Fact]
-    public void OnRequestSplitMode_TwoGroups_CallbackIsInvoked()
+    public void ToggleDividerAt_TwoItems_HasMultipleGroupsIsTrue()
     {
-        // Arrange: 2グループに分割してOnRequestSplitModeを設定
+        // Arrange
         AddItems(2);
+        _viewModel.HasMultipleGroups.Should().BeFalse("初期状態ではfalse");
+
+        // Act: 分割線を挿入して2グループにする
         _viewModel.ToggleDividerAt(0);
 
-        // Items[0].GroupId と Items[1].GroupId が異なる（2グループ）ことを確認
-        var distinctGroups = _viewModel.Items
-            .Where(i => i.GroupId.HasValue)
-            .Select(i => i.GroupId!.Value)
-            .Distinct()
-            .Count();
-        distinctGroups.Should().Be(2, "2つのグループがある");
-
-        // OnRequestSplitModeが呼ばれることを検証
-        bool callbackInvoked = false;
-        _viewModel.OnRequestSplitMode = () =>
-        {
-            callbackInvoked = true;
-            return SplitSaveMode.Cancel; // テストではキャンセル
-        };
-
-        // Act: SaveCommandを実行（_ledgerが未初期化のため内部でSaveAsyncが動く前にHasChangesチェックを通過する必要あり）
-        // HasChangesはToggleDividerAtで既にtrueになっている
-        _viewModel.SaveCommand.Execute(null);
-
         // Assert
-        callbackInvoked.Should().BeTrue("2グループある場合にOnRequestSplitModeが呼ばれる");
+        _viewModel.HasMultipleGroups.Should().BeTrue("2グループある場合はtrue");
     }
 
     [Fact]
-    public void OnRequestSplitMode_SingleGroup_NotInvoked()
+    public void MergeAll_HasMultipleGroupsIsFalse()
     {
-        // Arrange: 分割線なし（1グループ）
-        AddItems(2);
-        // 分割線を入れない → GroupIdはすべてnull
+        // Arrange: まず分割してMultipleGroupsをtrueにする
+        AddItems(3);
+        _viewModel.SplitAllCommand.Execute(null);
+        _viewModel.HasMultipleGroups.Should().BeTrue();
 
-        bool callbackInvoked = false;
-        _viewModel.OnRequestSplitMode = () =>
-        {
-            callbackInvoked = true;
-            return SplitSaveMode.Cancel;
-        };
-
-        // HasChangesをtrueにするために一度分割してから統合
-        _viewModel.ToggleDividerAt(0);
-        _viewModel.ToggleDividerAt(0); // 元に戻す（1グループ）
-        // HasChangesはまだtrueのはず
-
-        // Act
-        _viewModel.SaveCommand.Execute(null);
+        // Act: すべて統合
+        _viewModel.MergeAllCommand.Execute(null);
 
         // Assert
-        callbackInvoked.Should().BeFalse("1グループの場合はOnRequestSplitModeが呼ばれない");
+        _viewModel.HasMultipleGroups.Should().BeFalse("統合後はfalse");
+    }
+
+    [Fact]
+    public void ToggleDividerAt_RemoveDivider_HasMultipleGroupsReturnsFalse()
+    {
+        // Arrange
+        AddItems(2);
+        _viewModel.ToggleDividerAt(0);
+        _viewModel.HasMultipleGroups.Should().BeTrue();
+
+        // Act: 分割線を削除
+        _viewModel.ToggleDividerAt(0);
+
+        // Assert
+        _viewModel.HasMultipleGroups.Should().BeFalse("分割線を外すとfalseに戻る");
     }
 
     #endregion

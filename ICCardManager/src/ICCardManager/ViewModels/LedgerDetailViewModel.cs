@@ -16,19 +16,6 @@ using Microsoft.Extensions.Logging;
 namespace ICCardManager.ViewModels
 {
     /// <summary>
-    /// 分割保存モード（Issue #634）
-    /// </summary>
-    public enum SplitSaveMode
-    {
-        /// <summary>摘要のみ更新（既存動作）</summary>
-        SummaryOnly,
-        /// <summary>台帳を分割（グループごとに別の履歴レコードを作成）</summary>
-        FullSplit,
-        /// <summary>キャンセル</summary>
-        Cancel
-    }
-
-    /// <summary>
     /// 利用履歴詳細表示用のアイテム
     /// </summary>
     public partial class LedgerDetailItemViewModel : ObservableObject
@@ -224,10 +211,10 @@ namespace ICCardManager.ViewModels
         public Action? OnSaveCompleted { get; set; }
 
         /// <summary>
-        /// 分割モードを問い合わせるコールバック（Issue #634: Viewが設定）
-        /// グループが2つ以上ある場合に呼び出される
+        /// 複数グループがあるかどうか（Issue #634: ボタン切り替え用）
         /// </summary>
-        public Func<SplitSaveMode>? OnRequestSplitMode { get; set; }
+        [ObservableProperty]
+        private bool _hasMultipleGroups;
 
         /// <summary>
         /// 操作者IDm（ログ記録用）
@@ -450,6 +437,8 @@ namespace ICCardManager.ViewModels
                 .Distinct()
                 .Count();
 
+            HasMultipleGroups = groupCount >= 2;
+
             if (groupCount > 0)
             {
                 DetailCountDisplay = $"{Items.Count}件の詳細（{groupCount}グループ）";
@@ -547,25 +536,6 @@ namespace ICCardManager.ViewModels
                 return;
             }
 
-            // Issue #634: 複数グループがある場合は分割モードを問い合わせ
-            var distinctGroups = Items
-                .Where(i => i.GroupId.HasValue)
-                .Select(i => i.GroupId!.Value)
-                .Distinct()
-                .Count();
-
-            if (distinctGroups >= 2 && OnRequestSplitMode != null)
-            {
-                var mode = OnRequestSplitMode.Invoke();
-                if (mode == SplitSaveMode.Cancel) return;
-                if (mode == SplitSaveMode.FullSplit)
-                {
-                    await SaveWithFullSplitAsync();
-                    return;
-                }
-                // SummaryOnly: 既存の摘要のみ更新ロジックに進む
-            }
-
             IsBusy = true;
             StatusMessage = "保存中...";
 
@@ -632,8 +602,11 @@ namespace ICCardManager.ViewModels
         /// <summary>
         /// 台帳分割による保存（Issue #634）
         /// </summary>
+        [RelayCommand]
         private async Task SaveWithFullSplitAsync()
         {
+            if (!HasChanges) return;
+
             IsBusy = true;
             StatusMessage = "分割中...";
 
