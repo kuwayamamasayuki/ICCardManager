@@ -87,9 +87,9 @@ if not exist "%PROJECT_ROOT%\docs\manual\convert-to-docx.bat" (
     echo   警告: 変換スクリプトが見つかりません。マニュアル変換をスキップします。
     goto skip_manual_docx
 )
-:: Issue #643: インストーラー作成時は常に強制変換（/force）
+:: Issue #643: .mdが.docxより新しい場合に変換
 pushd "%PROJECT_ROOT%\docs\manual"
-call convert-to-docx.bat /force
+call convert-to-docx.bat
 popd
 echo   docx変換完了
 :skip_manual_docx
@@ -101,9 +101,9 @@ if not exist "%PROJECT_ROOT%\docs\manual\convert-to-pdf.ps1" (
     echo   警告: PDF変換スクリプトが見つかりません。PDF変換をスキップします。
     goto skip_manual_pdf
 )
-:: Issue #643: Word COM経由でPDF変換（-Forceで強制変換）
+:: Issue #643: Word COM経由でPDF変換（.docxが.pdfより新しい場合に変換）
 pushd "%PROJECT_ROOT%\docs\manual"
-powershell.exe -ExecutionPolicy Bypass -File "%PROJECT_ROOT%\docs\manual\convert-to-pdf.ps1" -Force
+powershell.exe -ExecutionPolicy Bypass -File "%PROJECT_ROOT%\docs\manual\convert-to-pdf.ps1"
 if errorlevel 1 (
     echo   警告: PDF変換でエラーが発生しました（ビルドは続行）
 ) else (

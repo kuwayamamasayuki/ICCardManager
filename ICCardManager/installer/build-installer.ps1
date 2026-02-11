@@ -278,10 +278,10 @@ if (-not $PandocPath) {
 } elseif (-not (Test-Path $ConvertDocxScript)) {
     Write-Host "  警告: 変換スクリプトが見つかりません: $ConvertDocxScript" -ForegroundColor Yellow
 } else {
-    # Issue #643: インストーラー作成時は常に強制変換（-Force）
+    # Issue #643: .mdが.docxより新しい場合に変換
     Push-Location $ManualDir
     try {
-        & $ConvertDocxScript -Force -NoMermaid
+        & $ConvertDocxScript -NoMermaid
         if ($LASTEXITCODE -eq 0) {
             Write-Host "  docx変換完了" -ForegroundColor Green
         } else {
@@ -306,10 +306,10 @@ $ConvertPdfScript = Join-Path $ManualDir "convert-to-pdf.ps1"
 if (-not (Test-Path $ConvertPdfScript)) {
     Write-Host "  警告: PDF変換スクリプトが見つかりません: $ConvertPdfScript" -ForegroundColor Yellow
 } else {
-    # PDF変換にはMicrosoft Wordと.docxファイルが必要
+    # PDF変換にはMicrosoft Wordと.docxファイルが必要（.docxが.pdfより新しい場合に変換）
     Push-Location $ManualDir
     try {
-        & $ConvertPdfScript -Force
+        & $ConvertPdfScript
         if ($LASTEXITCODE -eq 0) {
             Write-Host "  PDF変換完了" -ForegroundColor Green
         } else {
