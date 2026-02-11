@@ -42,7 +42,7 @@ if "%ISCC%"=="" (
 echo バージョン: %VERSION%
 echo.
 
-echo [1/5] アプリケーションのビルド...
+echo [1/6] アプリケーションのビルド...
 pushd "%SRC_DIR%"
 dotnet publish -c Release -r win-x64 --self-contained true -o "%PUBLISH_DIR%" -v q
 if errorlevel 1 (
@@ -55,7 +55,7 @@ popd
 echo   ビルド完了
 
 echo.
-echo [2/5] リソースファイルのコピー...
+echo [2/6] リソースファイルのコピー...
 :: Soundsフォルダのコピー
 if not exist "%PUBLISH_DIR%\Resources\Sounds" mkdir "%PUBLISH_DIR%\Resources\Sounds"
 xcopy /Y /Q "%SRC_DIR%\Resources\Sounds\*" "%PUBLISH_DIR%\Resources\Sounds\" >nul 2>&1
@@ -65,7 +65,7 @@ xcopy /Y /Q "%SRC_DIR%\Resources\Templates\*" "%PUBLISH_DIR%\Resources\Templates
 echo   リソースコピー完了
 
 echo.
-echo [3/5] ファイルの確認...
+echo [3/6] ファイルの確認...
 if not exist "%PUBLISH_DIR%\ICCardManager.exe" (
     echo エラー: ICCardManager.exe が見つかりません。
     pause
@@ -74,28 +74,46 @@ if not exist "%PUBLISH_DIR%\ICCardManager.exe" (
 echo   実行ファイル: OK
 
 echo.
-echo [4/5] マニュアルの変換...
+echo [4/6] マニュアルの変換（docx形式）...
 :: pandocがインストールされているか確認
 where pandoc >nul 2>&1
 if errorlevel 1 (
     echo   警告: pandocがインストールされていません。マニュアル変換をスキップします。
     echo   インストール: winget install pandoc または https://pandoc.org/installing.html
-    goto skip_manual
+    goto skip_manual_docx
 )
 :: 変換スクリプトの存在確認
 if not exist "%PROJECT_ROOT%\docs\manual\convert-to-docx.bat" (
     echo   警告: 変換スクリプトが見つかりません。マニュアル変換をスキップします。
-    goto skip_manual
+    goto skip_manual_docx
 )
-:: マニュアル変換を実行（更新が必要なもののみ）
+:: Issue #643: インストーラー作成時は常に強制変換（/force）
 pushd "%PROJECT_ROOT%\docs\manual"
-call convert-to-docx.bat
+call convert-to-docx.bat /force
 popd
-echo   マニュアル変換完了
-:skip_manual
+echo   docx変換完了
+:skip_manual_docx
 
 echo.
-echo [5/5] インストーラーの作成...
+echo [5/6] マニュアルの変換（PDF形式）...
+:: PDF変換スクリプトの存在確認
+if not exist "%PROJECT_ROOT%\docs\manual\convert-to-pdf.ps1" (
+    echo   警告: PDF変換スクリプトが見つかりません。PDF変換をスキップします。
+    goto skip_manual_pdf
+)
+:: Issue #643: Word COM経由でPDF変換（-Forceで強制変換）
+pushd "%PROJECT_ROOT%\docs\manual"
+powershell.exe -ExecutionPolicy Bypass -File "%PROJECT_ROOT%\docs\manual\convert-to-pdf.ps1" -Force
+if errorlevel 1 (
+    echo   警告: PDF変換でエラーが発生しました（ビルドは続行）
+) else (
+    echo   PDF変換完了
+)
+popd
+:skip_manual_pdf
+
+echo.
+echo [6/6] インストーラーの作成...
 if not exist "%OUTPUT_DIR%" mkdir "%OUTPUT_DIR%"
 "%ISCC%" /DMyAppVersion=%VERSION% "%SCRIPT_DIR%ICCardManager.iss"
 if errorlevel 1 (

@@ -263,33 +263,33 @@ if (Test-Path $DebugToolExe) {
     Write-Host "  デバッグツール: 見つかりません（-SkipBuildの場合はビルドが必要です）" -ForegroundColor Yellow
 }
 
-# Step 7: マニュアルの変換（Issue #480）
+# Step 7: マニュアルの変換 - docx形式（Issue #480, #643）
 Write-Host ""
-Write-Host "[7/9] マニュアルの変換..." -ForegroundColor Yellow
+Write-Host "[7/9] マニュアルの変換（docx形式）..." -ForegroundColor Yellow
 
 $ManualDir = Join-Path $ProjectRoot "docs\manual"
-$ConvertScript = Join-Path $ManualDir "convert-to-docx.ps1"
+$ConvertDocxScript = Join-Path $ManualDir "convert-to-docx.ps1"
 
 # pandocがインストールされているか確認
 $PandocPath = Get-Command pandoc -ErrorAction SilentlyContinue
 if (-not $PandocPath) {
     Write-Host "  警告: pandocがインストールされていません。マニュアル変換をスキップします。" -ForegroundColor Yellow
     Write-Host "  インストール: winget install pandoc または https://pandoc.org/installing.html" -ForegroundColor Yellow
-} elseif (-not (Test-Path $ConvertScript)) {
-    Write-Host "  警告: 変換スクリプトが見つかりません: $ConvertScript" -ForegroundColor Yellow
+} elseif (-not (Test-Path $ConvertDocxScript)) {
+    Write-Host "  警告: 変換スクリプトが見つかりません: $ConvertDocxScript" -ForegroundColor Yellow
 } else {
-    # 変換スクリプトを実行（更新が必要なマニュアルのみ変換）
+    # Issue #643: インストーラー作成時は常に強制変換（-Force）
     Push-Location $ManualDir
     try {
-        & $ConvertScript -NoMermaid
+        & $ConvertDocxScript -Force -NoMermaid
         if ($LASTEXITCODE -eq 0) {
-            Write-Host "  マニュアル変換完了" -ForegroundColor Green
+            Write-Host "  docx変換完了" -ForegroundColor Green
         } else {
-            Write-Host "  警告: マニュアル変換でエラーが発生しました（ビルドは続行）" -ForegroundColor Yellow
+            Write-Host "  警告: docx変換でエラーが発生しました（ビルドは続行）" -ForegroundColor Yellow
         }
     }
     catch {
-        Write-Host "  警告: マニュアル変換中に例外が発生しました: $_" -ForegroundColor Yellow
+        Write-Host "  警告: docx変換中に例外が発生しました: $_" -ForegroundColor Yellow
         Write-Host "  ビルドは続行します" -ForegroundColor Yellow
     }
     finally {
@@ -297,9 +297,37 @@ if (-not $PandocPath) {
     }
 }
 
-# Step 8: インストーラーの作成
+# Step 8: マニュアルの変換 - PDF形式（Issue #643）
 Write-Host ""
-Write-Host "[8/9] インストーラーの作成..." -ForegroundColor Yellow
+Write-Host "[8/9] マニュアルの変換（PDF形式）..." -ForegroundColor Yellow
+
+$ConvertPdfScript = Join-Path $ManualDir "convert-to-pdf.ps1"
+
+if (-not (Test-Path $ConvertPdfScript)) {
+    Write-Host "  警告: PDF変換スクリプトが見つかりません: $ConvertPdfScript" -ForegroundColor Yellow
+} else {
+    # PDF変換にはMicrosoft Wordと.docxファイルが必要
+    Push-Location $ManualDir
+    try {
+        & $ConvertPdfScript -Force
+        if ($LASTEXITCODE -eq 0) {
+            Write-Host "  PDF変換完了" -ForegroundColor Green
+        } else {
+            Write-Host "  警告: PDF変換でエラーが発生しました（ビルドは続行）" -ForegroundColor Yellow
+        }
+    }
+    catch {
+        Write-Host "  警告: PDF変換中に例外が発生しました: $_" -ForegroundColor Yellow
+        Write-Host "  ビルドは続行します" -ForegroundColor Yellow
+    }
+    finally {
+        Pop-Location
+    }
+}
+
+# Step 9: インストーラーの作成
+Write-Host ""
+Write-Host "[9/9] インストーラーの作成..." -ForegroundColor Yellow
 
 # 出力ディレクトリの作成
 if (-not (Test-Path $OutputDir)) {
