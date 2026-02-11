@@ -1850,9 +1850,9 @@ public partial class MainViewModel : ViewModelBase
     [RelayCommand]
     public void SimulateStaffCard()
     {
-        if (_cardReader is MockCardReader mockReader)
+        if (_cardReader is HybridCardReader hybridReader)
         {
-            mockReader.SimulateCardRead("FFFF000000000001");
+            hybridReader.SimulateCardRead("FFFF000000000001");
         }
     }
 
@@ -1862,9 +1862,9 @@ public partial class MainViewModel : ViewModelBase
     [RelayCommand]
     public void SimulateIcCard()
     {
-        if (_cardReader is MockCardReader mockReader)
+        if (_cardReader is HybridCardReader hybridReader)
         {
-            mockReader.SimulateCardRead("07FE112233445566");
+            hybridReader.SimulateCardRead("07FE112233445566");
         }
     }
 

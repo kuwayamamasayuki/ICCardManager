@@ -31,7 +31,7 @@ public partial class VirtualCardViewModel : ObservableObject
 {
     private const int MaxEntries = 20;
 
-    private readonly MockCardReader _mockCardReader;
+    private readonly HybridCardReader _hybridCardReader;
 
     /// <summary>
     /// 履歴エントリの一覧
@@ -71,9 +71,9 @@ public partial class VirtualCardViewModel : ObservableObject
     /// </summary>
     public Action CloseAction { get; set; }
 
-    public VirtualCardViewModel(MockCardReader mockCardReader)
+    public VirtualCardViewModel(HybridCardReader hybridCardReader)
     {
-        _mockCardReader = mockCardReader;
+        _hybridCardReader = hybridCardReader;
 
         // DebugDataService のテストデータから表示名を構築
         CardSelectItems = DebugDataService.TestCardList
@@ -168,19 +168,19 @@ public partial class VirtualCardViewModel : ObservableObject
         }
 
         // MockCardReader に設定
-        _mockCardReader.SetCustomHistory(cardIdm, historyDetails);
+        _hybridCardReader.SetCustomHistory(cardIdm, historyDetails);
 
         // 残高: エントリがあれば先頭（最新）の残高、なければデフォルト
         var balance = historyDetails.Count > 0 ? historyDetails.First().Balance ?? 5000 : 5000;
-        _mockCardReader.SetCustomBalance(cardIdm, balance);
+        _hybridCardReader.SetCustomBalance(cardIdm, balance);
 
         // ダイアログを閉じる
         CloseAction?.Invoke();
 
         // 職員証タッチ → 少し待機 → ICカードタッチ
-        _mockCardReader.SimulateCardRead(staffIdm);
+        _hybridCardReader.SimulateCardRead(staffIdm);
         await Task.Delay(500);
-        _mockCardReader.SimulateCardRead(cardIdm);
+        _hybridCardReader.SimulateCardRead(cardIdm);
     }
 }
 

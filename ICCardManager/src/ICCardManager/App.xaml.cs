@@ -208,9 +208,10 @@ namespace ICCardManager
     #endif
 
     #if DEBUG
-            // Issue #640: デバッグ時は MockCardReader を使用（仮想タッチ機能のため）
-            services.AddSingleton<MockCardReader>();
-            services.AddSingleton<ICardReader>(sp => sp.GetRequiredService<MockCardReader>());
+            // Issue #640: HybridCardReader で物理カードリーダーをラップ
+            // 物理カードリーダー（PaSoRi）も使いつつ、仮想タッチ機能も利用可能にする
+            services.AddSingleton<HybridCardReader>(sp => new HybridCardReader(CreateCardReader(sp)));
+            services.AddSingleton<ICardReader>(sp => sp.GetRequiredService<HybridCardReader>());
     #else
             // カードリーダーの自動選択:
             // 1. felicalib.dll が存在する場合: FelicaCardReader（残高・履歴読み取り可能）
