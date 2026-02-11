@@ -20,6 +20,7 @@
 | `開発者ガイド.md` | 開発者ガイド本体（Markdown形式） |
 | `convert-to-docx.ps1` | Word形式への変換スクリプト（PowerShell） |
 | `convert-to-docx.bat` | Word形式への変換スクリプト（バッチファイル） |
+| `convert-to-pdf.ps1` | PDF形式への変換スクリプト（PowerShell） |
 
 ## Word形式への変換
 
@@ -96,6 +97,47 @@ convert-to-docx.bat /nomermaid
 
 > **注意**: `.md` ファイルより `.docx` ファイルの方が新しい場合は、変換がスキップされます。強制的に変換する場合は `-Force` オプションを使用してください。
 
+## PDF形式への変換
+
+マニュアルをPDF形式で出力することもできます。`.docx` → `.pdf` の変換を Microsoft Word 経由で行います。
+
+### 追加の前提条件
+
+#### 必須: Microsoft Word
+
+PDF出力には Microsoft Word（Microsoft 365 等）が必要です。Word の COM オートメーションで `.docx` を PDF に変換します。
+
+#### 必須: .docx ファイル
+
+PDF変換の入力は `.docx` ファイルです。先に `.\convert-to-docx.ps1` を実行して `.docx` を生成してください。
+
+### PDF変換手順
+
+```powershell
+# 1. まず .docx を生成（未生成の場合）
+.\convert-to-docx.ps1
+
+# 2. .docx → .pdf に変換
+.\convert-to-pdf.ps1
+
+# 全マニュアルを強制変換
+.\convert-to-pdf.ps1 -Force
+
+# 特定のマニュアルのみ変換
+.\convert-to-pdf.ps1 -Target user   # ユーザーマニュアル
+.\convert-to-pdf.ps1 -Target admin  # 管理者マニュアル
+.\convert-to-pdf.ps1 -Target dev    # 開発者ガイド
+```
+
+### PDF出力ファイル
+
+変換後、以下のファイルが同じディレクトリに生成されます：
+
+- `ユーザーマニュアル.pdf`
+- `ユーザーマニュアル概要版.pdf`
+- `管理者マニュアル.pdf`
+- `開発者ガイド.pdf`
+
 ## マニュアルの更新
 
 マニュアルの内容を更新する場合は、対応する `.md` ファイルを編集してください。
@@ -103,7 +145,7 @@ Word形式が必要な場合は、編集後に変換スクリプトを実行し�
 
 ## 注意事項
 
-- `.docx` ファイルはGitの管理対象外です
+- `.docx` / `.pdf` ファイルはGitの管理対象外です
 - マニュアルの原本は `.md` ファイルです
-- Word形式は配布用に都度生成してください
+- Word形式・PDF形式は配布用に都度生成してください
 - 開発者ガイドのMermaid図をレンダリングするには `mermaid-filter` が必要です

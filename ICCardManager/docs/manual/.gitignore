@@ -1,2 +1,4 @@
 # 生成されるWord文書（Markdownから都度生成）
 *.docx
+# 生成されるPDF文書（Markdownから都度生成）
+*.pdf

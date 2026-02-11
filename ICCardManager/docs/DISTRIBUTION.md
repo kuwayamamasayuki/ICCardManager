@@ -109,7 +109,7 @@ installer/output/ICCardManager_Setup_1.0.7.exe
 | アプリケーション本体 | ICCardManager.exe と依存DLL |
 | サウンドファイル | Resources/Sounds/ 配下のWAVファイル |
 | テンプレートファイル | Resources/Templates/物品出納簿テンプレート.xlsx |
-| ドキュメント | ユーザーマニュアル、管理者マニュアル（md/docx形式） |
+| ドキュメント | ユーザーマニュアル、管理者マニュアル（md/docx/pdf形式） |
 | アイコン | アプリケーションアイコン（app.ico） |
 
 ## インストール手順（エンドユーザー向け）
