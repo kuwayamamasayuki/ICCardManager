@@ -30,13 +30,13 @@
                 <ColumnDefinition Width="*"/>
             </Grid.ColumnDefinitions>
 
-            <TextBlock Grid.Column="0" Text="カードIDm:" VerticalAlignment="Center" Margin="0,0,8,0"/>
-            <ComboBox Grid.Column="1" ItemsSource="{Binding CardIdmList}"
-                      SelectedItem="{Binding SelectedCardIdm}" IsEditable="True"/>
+            <TextBlock Grid.Column="0" Text="交通系ICカード:" VerticalAlignment="Center" Margin="0,0,8,0"/>
+            <ComboBox Grid.Column="1" ItemsSource="{Binding CardSelectItems}"
+                      SelectedItem="{Binding SelectedCard}"/>
 
-            <TextBlock Grid.Column="3" Text="職員IDm:" VerticalAlignment="Center" Margin="0,0,8,0"/>
-            <ComboBox Grid.Column="4" ItemsSource="{Binding StaffIdmList}"
-                      SelectedItem="{Binding SelectedStaffIdm}" IsEditable="True"/>
+            <TextBlock Grid.Column="3" Text="職員:" VerticalAlignment="Center" Margin="0,0,8,0"/>
+            <ComboBox Grid.Column="4" ItemsSource="{Binding StaffSelectItems}"
+                      SelectedItem="{Binding SelectedStaff}"/>
         </Grid>
 
         <!-- 履歴一覧 DataGrid -->

@@ -9,8 +9,20 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using ICCardManager.Infrastructure.CardReader;
 using ICCardManager.Models;
+using ICCardManager.Services;
 
 namespace ICCardManager.ViewModels;
+
+/// <summary>
+/// カード/職員の選択肢（表示名 + IDm）
+/// </summary>
+public class IdmSelectItem
+{
+    public string Idm { get; set; }
+    public string DisplayName { get; set; }
+
+    public override string ToString() => DisplayName;
+}
 
 /// <summary>
 /// 仮想ICカードタッチ設定ダイアログのViewModel（Issue #640）
@@ -27,26 +39,26 @@ public partial class VirtualCardViewModel : ObservableObject
     public ObservableCollection<VirtualHistoryEntry> Entries { get; } = new();
 
     /// <summary>
-    /// 選択可能なカードIDmリスト
+    /// 選択可能なカードリスト（表示名付き）
     /// </summary>
-    public List<string> CardIdmList { get; }
+    public List<IdmSelectItem> CardSelectItems { get; }
 
     /// <summary>
-    /// 選択可能な職員IDmリスト
+    /// 選択可能な職員リスト（表示名付き）
     /// </summary>
-    public List<string> StaffIdmList { get; }
+    public List<IdmSelectItem> StaffSelectItems { get; }
 
     /// <summary>
-    /// 選択されたカードIDm
+    /// 選択されたカード
     /// </summary>
     [ObservableProperty]
-    private string _selectedCardIdm;
+    private IdmSelectItem _selectedCard;
 
     /// <summary>
-    /// 選択された職員IDm
+    /// 選択された職員
     /// </summary>
     [ObservableProperty]
-    private string _selectedStaffIdm;
+    private IdmSelectItem _selectedStaff;
 
     /// <summary>
     /// 選択されたエントリ
@@ -63,10 +75,17 @@ public partial class VirtualCardViewModel : ObservableObject
     {
         _mockCardReader = mockCardReader;
 
-        CardIdmList = mockCardReader.MockCards.ToList();
-        StaffIdmList = mockCardReader.MockStaffCards.ToList();
-        SelectedCardIdm = CardIdmList.FirstOrDefault();
-        SelectedStaffIdm = StaffIdmList.FirstOrDefault();
+        // DebugDataService のテストデータから表示名を構築
+        CardSelectItems = DebugDataService.TestCardList
+            .Select(c => new IdmSelectItem { Idm = c.CardIdm, DisplayName = $"{c.CardType} {c.CardNumber}" })
+            .ToList();
+
+        StaffSelectItems = DebugDataService.TestStaffList
+            .Select(s => new IdmSelectItem { Idm = s.StaffIdm, DisplayName = $"{s.Name}（{s.Number}）" })
+            .ToList();
+
+        SelectedCard = CardSelectItems.FirstOrDefault();
+        SelectedStaff = StaffSelectItems.FirstOrDefault();
 
         Entries.CollectionChanged += (_, _) => AddEntryCommand.NotifyCanExecuteChanged();
     }
@@ -107,12 +126,15 @@ public partial class VirtualCardViewModel : ObservableObject
     [RelayCommand]
     public async Task ApplyAndTouchAsync()
     {
-        if (string.IsNullOrEmpty(SelectedCardIdm) || string.IsNullOrEmpty(SelectedStaffIdm))
+        if (SelectedCard == null || SelectedStaff == null)
         {
             MessageBox.Show("カードと職員を選択してください。", "仮想タッチ",
                 MessageBoxButton.OK, MessageBoxImage.Warning);
             return;
         }
+
+        var cardIdm = SelectedCard.Idm;
+        var staffIdm = SelectedStaff.Idm;
 
         // 履歴データを LedgerDetail に変換
         var historyDetails = Entries.Select(e => new LedgerDetail
@@ -146,19 +168,19 @@ public partial class VirtualCardViewModel : ObservableObject
         }
 
         // MockCardReader に設定
-        _mockCardReader.SetCustomHistory(SelectedCardIdm, historyDetails);
+        _mockCardReader.SetCustomHistory(cardIdm, historyDetails);
 
         // 残高: エントリがあれば先頭（最新）の残高、なければデフォルト
         var balance = historyDetails.Count > 0 ? historyDetails.First().Balance ?? 5000 : 5000;
-        _mockCardReader.SetCustomBalance(SelectedCardIdm, balance);
+        _mockCardReader.SetCustomBalance(cardIdm, balance);
 
         // ダイアログを閉じる
         CloseAction?.Invoke();
 
         // 職員証タッチ → 少し待機 → ICカードタッチ
-        _mockCardReader.SimulateCardRead(SelectedStaffIdm);
+        _mockCardReader.SimulateCardRead(staffIdm);
         await Task.Delay(500);
-        _mockCardReader.SimulateCardRead(SelectedCardIdm);
+        _mockCardReader.SimulateCardRead(cardIdm);
     }
 }
 

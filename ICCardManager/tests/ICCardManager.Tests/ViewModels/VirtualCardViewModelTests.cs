@@ -3,6 +3,7 @@ using System.Linq;
 using System.Threading.Tasks;
 using FluentAssertions;
 using ICCardManager.Infrastructure.CardReader;
+using ICCardManager.Services;
 using ICCardManager.ViewModels;
 using Xunit;
 
@@ -21,23 +22,34 @@ public class VirtualCardViewModelTests
     #region コンストラクタ
 
     [Fact]
-    public void Constructor_InitializesCardAndStaffLists()
+    public void Constructor_InitializesCardSelectItems_WithDisplayNames()
     {
-        var mockReader = CreateMockReader();
-        var vm = CreateViewModel(mockReader);
+        var vm = CreateViewModel();
 
-        vm.CardIdmList.Should().BeEquivalentTo(mockReader.MockCards);
-        vm.StaffIdmList.Should().BeEquivalentTo(mockReader.MockStaffCards);
+        vm.CardSelectItems.Should().HaveCount(DebugDataService.TestCardList.Length);
+        vm.CardSelectItems[0].DisplayName.Should().Contain("はやかけん");
+        vm.CardSelectItems[0].Idm.Should().Be("07FE112233445566");
+    }
+
+    [Fact]
+    public void Constructor_InitializesStaffSelectItems_WithDisplayNames()
+    {
+        var vm = CreateViewModel();
+
+        vm.StaffSelectItems.Should().HaveCount(DebugDataService.TestStaffList.Length);
+        vm.StaffSelectItems[0].DisplayName.Should().Contain("山田太郎");
+        vm.StaffSelectItems[0].Idm.Should().Be("FFFF000000000001");
     }
 
     [Fact]
     public void Constructor_SelectsFirstCardAndStaff()
     {
-        var mockReader = CreateMockReader();
-        var vm = CreateViewModel(mockReader);
+        var vm = CreateViewModel();
 
-        vm.SelectedCardIdm.Should().Be(mockReader.MockCards.First());
-        vm.SelectedStaffIdm.Should().Be(mockReader.MockStaffCards.First());
+        vm.SelectedCard.Should().NotBeNull();
+        vm.SelectedCard.Idm.Should().Be(DebugDataService.TestCardList.First().CardIdm);
+        vm.SelectedStaff.Should().NotBeNull();
+        vm.SelectedStaff.Idm.Should().Be(DebugDataService.TestStaffList.First().StaffIdm);
     }
 
     [Fact]
@@ -171,11 +183,10 @@ public class VirtualCardViewModelTests
     public async Task ApplyAndTouchAsync_SetsCustomHistoryOnMockReader()
     {
         var mockReader = CreateMockReader();
-        // StartReadingAsync を呼んで _isReading を true にする
         await mockReader.StartReadingAsync();
 
         var vm = CreateViewModel(mockReader);
-        vm.CloseAction = () => { }; // ダイアログ閉じを無視
+        vm.CloseAction = () => { };
 
         vm.AddEntry();
         vm.Entries[0].EntryStation = "博多";
@@ -184,8 +195,7 @@ public class VirtualCardViewModelTests
 
         await vm.ApplyAndTouchAsync();
 
-        // MockCardReader にカスタム履歴が設定されたか確認
-        var history = await mockReader.ReadHistoryAsync(vm.SelectedCardIdm);
+        var history = await mockReader.ReadHistoryAsync(vm.SelectedCard.Idm);
         history.Should().HaveCount(1);
         var entry = history.First();
         entry.EntryStation.Should().Be("博多");
@@ -207,7 +217,7 @@ public class VirtualCardViewModelTests
 
         await vm.ApplyAndTouchAsync();
 
-        var balance = await mockReader.ReadBalanceAsync(vm.SelectedCardIdm);
+        var balance = await mockReader.ReadBalanceAsync(vm.SelectedCard.Idm);
         balance.Should().Be(3200);
     }
 
@@ -228,7 +238,7 @@ public class VirtualCardViewModelTests
 
         await vm.ApplyAndTouchAsync();
 
-        var history = await mockReader.ReadHistoryAsync(vm.SelectedCardIdm);
+        var history = await mockReader.ReadHistoryAsync(vm.SelectedCard.Idm);
         history.First().IsBus.Should().BeTrue();
     }
 
@@ -247,7 +257,7 @@ public class VirtualCardViewModelTests
 
         await vm.ApplyAndTouchAsync();
 
-        var history = await mockReader.ReadHistoryAsync(vm.SelectedCardIdm);
+        var history = await mockReader.ReadHistoryAsync(vm.SelectedCard.Idm);
         history.First().IsCharge.Should().BeTrue();
     }
 
@@ -267,8 +277,8 @@ public class VirtualCardViewModelTests
 
         // 職員証 → ICカードの順で2回タッチ
         readIdms.Should().HaveCount(2);
-        readIdms[0].Should().Be(vm.SelectedStaffIdm);
-        readIdms[1].Should().Be(vm.SelectedCardIdm);
+        readIdms[0].Should().Be(vm.SelectedStaff.Idm);
+        readIdms[1].Should().Be(vm.SelectedCard.Idm);
     }
 
     #endregion
@@ -285,6 +295,17 @@ public class VirtualCardViewModelTests
         entry.ExitStation.Should().Be("");
         entry.Balance.Should().Be(0);
         entry.IsCharge.Should().BeFalse();
+    }
+
+    #endregion
+
+    #region IdmSelectItem
+
+    [Fact]
+    public void IdmSelectItem_ToString_ReturnsDisplayName()
+    {
+        var item = new IdmSelectItem { Idm = "123", DisplayName = "テスト表示名" };
+        item.ToString().Should().Be("テスト表示名");
     }
 
     #endregion
