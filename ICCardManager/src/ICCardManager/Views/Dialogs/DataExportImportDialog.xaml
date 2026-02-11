@@ -23,20 +23,28 @@
         <!-- Issue #511: 追加のコンバーター -->
         <common:InverseBooleanConverter x:Key="InverseBoolConverter" xmlns:common="clr-namespace:ICCardManager.Common"/>
         <common:BoolToVisibilityConverter x:Key="InverseBoolToVisibilityConverter" xmlns:common="clr-namespace:ICCardManager.Common"/>
+        <!-- Issue #638: 文字列/整数値用Visibilityコンバーター -->
+        <common:StringToVisibilityConverter x:Key="StringToVisibilityConverter" xmlns:common="clr-namespace:ICCardManager.Common"/>
+        <common:IntToVisibilityConverter x:Key="IntToVisibilityConverter" xmlns:common="clr-namespace:ICCardManager.Common"/>
     </Window.Resources>
 
     <Grid Margin="20">
         <Grid.RowDefinitions>
-            <RowDefinition Height="Auto"/>   <!-- Row 0: Export GroupBox -->
-            <RowDefinition Height="Auto"/>   <!-- Row 1: Import GroupBox -->
-            <RowDefinition Height="Auto"/>   <!-- Row 2: Status message -->
-            <RowDefinition Height="*"/>      <!-- Row 3: プレビュー結果（サマリー + DataGrid） -->
-            <RowDefinition Height="Auto"/>   <!-- Row 4: エラー一覧 -->
-            <RowDefinition Height="Auto"/>   <!-- Row 5: Close button -->
+            <RowDefinition Height="Auto" MaxHeight="400"/>  <!-- Row 0: Export/Import（スクロール可能） -->
+            <RowDefinition Height="Auto"/>   <!-- Row 1: Status message -->
+            <RowDefinition Height="*" MinHeight="150"/>  <!-- Row 2: プレビュー結果（サマリー + DataGrid） -->
+            <RowDefinition Height="Auto"/>   <!-- Row 3: エラー一覧 -->
+            <RowDefinition Height="Auto"/>   <!-- Row 4: Close button -->
         </Grid.RowDefinitions>
 
+        <!-- エクスポート/インポート設定（スクロール可能エリア） -->
+        <ScrollViewer Grid.Row="0"
+                      VerticalScrollBarVisibility="Auto"
+                      Margin="0,0,0,10">
+        <StackPanel>
+
         <!-- エクスポート -->
-        <GroupBox Grid.Row="0" Header="エクスポート" Margin="0,0,0,15" Padding="15">
+        <GroupBox Header="エクスポート" Margin="0,0,0,15" Padding="15">
             <StackPanel>
                 <TextBlock Text="データをCSVファイルに出力します"
                            Foreground="Gray"
@@ -125,7 +133,7 @@
                 <!-- 最後にエクスポートしたファイル -->
                 <StackPanel Orientation="Horizontal"
                             Margin="0,10,0,0"
-                            Visibility="{Binding LastExportedFile, Converter={StaticResource BoolToVisibilityConverter}}">
+                            Visibility="{Binding LastExportedFile, Converter={StaticResource StringToVisibilityConverter}}">
                     <TextBlock Text="出力先: "
                                Foreground="Gray"
                                FontSize="{DynamicResource SmallFontSize}"
@@ -151,7 +159,7 @@
         </GroupBox>
 
         <!-- インポート -->
-        <GroupBox Grid.Row="1" Header="インポート" Margin="0,0,0,15" Padding="15">
+        <GroupBox Header="インポート" Margin="0,0,0,15" Padding="15">
             <StackPanel>
                 <TextBlock Text="CSVファイルからデータを取り込みます"
                            Foreground="Gray"
@@ -364,17 +372,20 @@
                            Foreground="Gray"
                            FontSize="{DynamicResource SmallFontSize}"
                            TextTrimming="CharacterEllipsis"
-                           Visibility="{Binding LastImportedFile, Converter={StaticResource BoolToVisibilityConverter}}"/>
+                           Visibility="{Binding LastImportedFile, Converter={StaticResource StringToVisibilityConverter}}"/>
             </StackPanel>
         </GroupBox>
 
+        </StackPanel>
+        </ScrollViewer>
+
         <!-- ステータスメッセージ -->
-        <Border Grid.Row="2"
+        <Border Grid.Row="1"
                 Background="#E3F2FD"
                 Padding="10"
                 Margin="0,0,0,10"
                 CornerRadius="5"
-                Visibility="{Binding StatusMessage, Converter={StaticResource BoolToVisibilityConverter}}">
+                Visibility="{Binding StatusMessage, Converter={StaticResource StringToVisibilityConverter}}">
             <TextBlock Text="{Binding StatusMessage}"
                        Foreground="#1565C0"
                        FontSize="{DynamicResource BaseFontSize}"
@@ -382,7 +393,7 @@
         </Border>
 
         <!-- プレビュー結果セクション -->
-        <Grid Grid.Row="3" Margin="0,0,0,10"
+        <Grid Grid.Row="2" Margin="0,0,0,10"
               Visibility="{Binding HasPreview, Converter={StaticResource BoolToVisibilityConverter}}">
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto"/>  <!-- サマリーバナー -->
@@ -498,8 +509,8 @@
         </Grid>
 
         <!-- エラー一覧セクション -->
-        <Border Grid.Row="4" Background="#FFF3E0" Padding="10" CornerRadius="3" Margin="0,0,0,10"
-                Visibility="{Binding ImportErrors.Count, Converter={StaticResource BoolToVisibilityConverter}}">
+        <Border Grid.Row="3" Background="#FFF3E0" Padding="10" CornerRadius="3" Margin="0,0,0,10"
+                Visibility="{Binding ImportErrors.Count, Converter={StaticResource IntToVisibilityConverter}}">
             <StackPanel>
                 <TextBlock Text="エラー詳細" FontWeight="Bold" FontSize="{DynamicResource BaseFontSize}" Margin="0,0,0,5"/>
                 <ListBox ItemsSource="{Binding ImportErrors}"
@@ -519,7 +530,7 @@
         </Border>
 
         <!-- 閉じるボタン -->
-        <StackPanel Grid.Row="5"
+        <StackPanel Grid.Row="4"
                     Orientation="Horizontal"
                     HorizontalAlignment="Right"
                     Margin="0,15,0,0">
@@ -533,7 +544,7 @@
         </StackPanel>
 
         <!-- 処理中オーバーレイ -->
-        <Border Grid.RowSpan="6"
+        <Border Grid.RowSpan="5"
                 Background="#80000000"
                 Visibility="{Binding IsBusy, Converter={StaticResource BoolToVisibilityConverter}}">
             <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
