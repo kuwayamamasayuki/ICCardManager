@@ -7,6 +7,7 @@ using System.Threading.Tasks;
 using System.Windows;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using ICCardManager.Data.Repositories;
 using ICCardManager.Infrastructure.CardReader;
 using ICCardManager.Models;
 using ICCardManager.Services;
@@ -32,6 +33,7 @@ public partial class VirtualCardViewModel : ObservableObject
     private const int MaxEntries = 20;
 
     private readonly HybridCardReader _hybridCardReader;
+    private readonly ICardRepository _cardRepository;
 
     /// <summary>
     /// 履歴エントリの一覧
@@ -70,16 +72,17 @@ public partial class VirtualCardViewModel : ObservableObject
     /// 現在のカード残高（履歴の残高はこの値から自動計算される）
     /// </summary>
     [ObservableProperty]
-    private int _currentBalance = 5000;
+    private int _currentBalance;
 
     /// <summary>
     /// ダイアログを閉じるためのAction（Viewから設定）
     /// </summary>
     public Action CloseAction { get; set; }
 
-    public VirtualCardViewModel(HybridCardReader hybridCardReader)
+    public VirtualCardViewModel(HybridCardReader hybridCardReader, ICardRepository cardRepository)
     {
         _hybridCardReader = hybridCardReader;
+        _cardRepository = cardRepository;
 
         // DebugDataService のテストデータから表示名を構築
         CardSelectItems = DebugDataService.TestCardList
@@ -94,6 +97,51 @@ public partial class VirtualCardViewModel : ObservableObject
         SelectedStaff = StaffSelectItems.FirstOrDefault();
 
         Entries.CollectionChanged += (_, _) => AddEntryCommand.NotifyCanExecuteChanged();
+    }
+
+    /// <summary>
+    /// ダイアログ表示時の初期化（選択されたカードの現在残高を読み取る）
+    /// </summary>
+    public async Task InitializeAsync()
+    {
+        if (SelectedCard != null)
+        {
+            await LoadCurrentBalanceAsync(SelectedCard.Idm);
+        }
+    }
+
+    /// <summary>
+    /// 指定IDmのカード残高を読み取って CurrentBalance に反映
+    /// </summary>
+    private async Task LoadCurrentBalanceAsync(string idm)
+    {
+        try
+        {
+            var balance = await _hybridCardReader.ReadBalanceAsync(idm);
+            if (balance.HasValue)
+            {
+                CurrentBalance = balance.Value;
+                return;
+            }
+        }
+        catch
+        {
+            // 残高読み取り失敗は無視
+        }
+
+        // 読み取れなかった場合はデフォルト値
+        CurrentBalance = 0;
+    }
+
+    /// <summary>
+    /// カード選択変更時に残高を再読み取り
+    /// </summary>
+    partial void OnSelectedCardChanged(IdmSelectItem value)
+    {
+        if (value != null)
+        {
+            _ = LoadCurrentBalanceAsync(value.Idm);
+        }
     }
 
     /// <summary>
@@ -170,11 +218,30 @@ public partial class VirtualCardViewModel : ObservableObject
         }
 
         // エントリがある場合のみカスタム履歴・残高を設定
-        // エントリがない場合は実カードリーダーの値をそのまま使用する
         if (historyDetails.Count > 0)
         {
             _hybridCardReader.SetCustomHistory(cardIdm, historyDetails);
             _hybridCardReader.SetCustomBalance(cardIdm, CurrentBalance);
+
+            // カードが貸出中でない場合は、先に貸出してから返却する
+            // （履歴は返却処理時にのみ読み取られるため）
+            var card = await _cardRepository.GetByIdmAsync(cardIdm);
+            if (card != null && !card.IsLent)
+            {
+                CloseAction?.Invoke();
+
+                // 1. 貸出: 職員証タッチ → ICカードタッチ
+                _hybridCardReader.SimulateCardRead(staffIdm);
+                await Task.Delay(500);
+                _hybridCardReader.SimulateCardRead(cardIdm);
+                await Task.Delay(1500); // 貸出処理の完了を待つ
+
+                // 2. 返却: 職員証タッチ → ICカードタッチ（ここで履歴が読み取られる）
+                _hybridCardReader.SimulateCardRead(staffIdm);
+                await Task.Delay(500);
+                _hybridCardReader.SimulateCardRead(cardIdm);
+                return;
+            }
         }
 
         // ダイアログを閉じる

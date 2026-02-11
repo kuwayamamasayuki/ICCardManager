@@ -2,9 +2,12 @@
 using System.Linq;
 using System.Threading.Tasks;
 using FluentAssertions;
+using ICCardManager.Data.Repositories;
 using ICCardManager.Infrastructure.CardReader;
+using ICCardManager.Models;
 using ICCardManager.Services;
 using ICCardManager.ViewModels;
+using Moq;
 using Xunit;
 
 namespace ICCardManager.Tests.ViewModels;
@@ -13,10 +16,21 @@ public class VirtualCardViewModelTests
 {
     private static HybridCardReader CreateHybridReader() => new(new MockCardReader());
 
-    private static VirtualCardViewModel CreateViewModel(HybridCardReader hybridReader = null)
+    private static Mock<ICardRepository> CreateMockCardRepository(bool isLent = false)
+    {
+        var mock = new Mock<ICardRepository>();
+        mock.Setup(r => r.GetByIdmAsync(It.IsAny<string>(), It.IsAny<bool>()))
+            .ReturnsAsync(new IcCard { IsLent = isLent });
+        return mock;
+    }
+
+    private static VirtualCardViewModel CreateViewModel(
+        HybridCardReader hybridReader = null,
+        Mock<ICardRepository> mockRepo = null)
     {
         hybridReader ??= CreateHybridReader();
-        return new VirtualCardViewModel(hybridReader);
+        mockRepo ??= CreateMockCardRepository();
+        return new VirtualCardViewModel(hybridReader, mockRepo.Object);
     }
 
     #region コンストラクタ
@@ -59,11 +73,32 @@ public class VirtualCardViewModelTests
         vm.Entries.Should().BeEmpty();
     }
 
+    #endregion
+
+    #region InitializeAsync（残高読み取り）
+
     [Fact]
-    public void Constructor_DefaultCurrentBalance_Is5000()
+    public async Task InitializeAsync_ReadsBalanceFromReader()
     {
-        var vm = CreateViewModel();
-        vm.CurrentBalance.Should().Be(5000);
+        var hybridReader = CreateHybridReader();
+        // MockCardReader のデフォルト残高は 4980
+        var vm = CreateViewModel(hybridReader);
+
+        await vm.InitializeAsync();
+
+        vm.CurrentBalance.Should().Be(4980);
+    }
+
+    [Fact]
+    public async Task InitializeAsync_WithCustomBalance_ReadsCustomValue()
+    {
+        var hybridReader = CreateHybridReader();
+        hybridReader.SetCustomBalance("07FE112233445566", 12345);
+        var vm = CreateViewModel(hybridReader);
+
+        await vm.InitializeAsync();
+
+        vm.CurrentBalance.Should().Be(12345);
     }
 
     #endregion
@@ -177,11 +212,12 @@ public class VirtualCardViewModelTests
     [Fact]
     public async Task ApplyAndTouchAsync_CalculatesBalanceFromAmount_Usage()
     {
-        // 現在残高5000、利用200円 → 残高は5000
         var hybridReader = CreateHybridReader();
         await hybridReader.StartReadingAsync();
+        // カードが貸出中の場合（返却フロー）
+        var mockRepo = CreateMockCardRepository(isLent: true);
 
-        var vm = CreateViewModel(hybridReader);
+        var vm = CreateViewModel(hybridReader, mockRepo);
         vm.CloseAction = () => { };
         vm.CurrentBalance = 5000;
 
@@ -195,7 +231,7 @@ public class VirtualCardViewModelTests
 
         var history = (await hybridReader.ReadHistoryAsync(vm.SelectedCard.Idm)).ToList();
         history.Should().HaveCount(1);
-        history[0].Balance.Should().Be(5000);  // 現在残高がそのまま
+        history[0].Balance.Should().Be(5000);
         history[0].Amount.Should().Be(200);
         history[0].EntryStation.Should().Be("博多");
         history[0].ExitStation.Should().Be("天神");
@@ -204,11 +240,11 @@ public class VirtualCardViewModelTests
     [Fact]
     public async Task ApplyAndTouchAsync_CalculatesBalanceFromAmount_Charge()
     {
-        // 現在残高8000、チャージ3000円 → 残高は8000
         var hybridReader = CreateHybridReader();
         await hybridReader.StartReadingAsync();
+        var mockRepo = CreateMockCardRepository(isLent: true);
 
-        var vm = CreateViewModel(hybridReader);
+        var vm = CreateViewModel(hybridReader, mockRepo);
         vm.CloseAction = () => { };
         vm.CurrentBalance = 8000;
 
@@ -227,12 +263,11 @@ public class VirtualCardViewModelTests
     [Fact]
     public async Task ApplyAndTouchAsync_MultipleEntries_CalculatesBalancesCorrectly()
     {
-        // 現在残高4800、エントリ: [利用200, チャージ3000, 利用300]
-        // → 残高: [4800, 5000(=4800+200), 2000(=5000-3000)]
         var hybridReader = CreateHybridReader();
         await hybridReader.StartReadingAsync();
+        var mockRepo = CreateMockCardRepository(isLent: true);
 
-        var vm = CreateViewModel(hybridReader);
+        var vm = CreateViewModel(hybridReader, mockRepo);
         vm.CloseAction = () => { };
         vm.CurrentBalance = 4800;
 
@@ -266,8 +301,9 @@ public class VirtualCardViewModelTests
     {
         var hybridReader = CreateHybridReader();
         await hybridReader.StartReadingAsync();
+        var mockRepo = CreateMockCardRepository(isLent: true);
 
-        var vm = CreateViewModel(hybridReader);
+        var vm = CreateViewModel(hybridReader, mockRepo);
         vm.CloseAction = () => { };
         vm.CurrentBalance = 3200;
 
@@ -285,8 +321,9 @@ public class VirtualCardViewModelTests
     {
         var hybridReader = CreateHybridReader();
         await hybridReader.StartReadingAsync();
+        var mockRepo = CreateMockCardRepository(isLent: true);
 
-        var vm = CreateViewModel(hybridReader);
+        var vm = CreateViewModel(hybridReader, mockRepo);
         vm.CloseAction = () => { };
 
         vm.AddEntry();
@@ -310,13 +347,64 @@ public class VirtualCardViewModelTests
         var vm = CreateViewModel(hybridReader);
         vm.CloseAction = () => { };
 
-        // エントリを追加せずにタッチ実行
         await vm.ApplyAndTouchAsync();
 
-        // カスタム残高が設定されていないため、実カードリーダーの値が返ること
         var balance = await hybridReader.ReadBalanceAsync(vm.SelectedCard.Idm);
-        // MockCardReader のデフォルト残高（4980）が返る
         balance.Should().Be(4980);
+    }
+
+    [Fact]
+    public async Task ApplyAndTouchAsync_CardNotLent_AutoLendThenReturn()
+    {
+        // カードが貸出中でない場合、自動で貸出→返却の2ステップを実行する
+        var hybridReader = CreateHybridReader();
+        await hybridReader.StartReadingAsync();
+        var mockRepo = CreateMockCardRepository(isLent: false);
+
+        var vm = CreateViewModel(hybridReader, mockRepo);
+        vm.CloseAction = () => { };
+        vm.CurrentBalance = 5000;
+
+        vm.AddEntry();
+        vm.Entries[0].Amount = 200;
+
+        var readIdms = new System.Collections.Generic.List<string>();
+        hybridReader.CardRead += (_, e) => readIdms.Add(e.Idm);
+
+        await vm.ApplyAndTouchAsync();
+
+        // 貸出（職員証→ICカード）+ 返却（職員証→ICカード）= 4回のタッチ
+        readIdms.Should().HaveCount(4);
+        readIdms[0].Should().Be(vm.SelectedStaff.Idm);  // 貸出: 職員証
+        readIdms[1].Should().Be(vm.SelectedCard.Idm);    // 貸出: ICカード
+        readIdms[2].Should().Be(vm.SelectedStaff.Idm);   // 返却: 職員証
+        readIdms[3].Should().Be(vm.SelectedCard.Idm);    // 返却: ICカード
+    }
+
+    [Fact]
+    public async Task ApplyAndTouchAsync_CardAlreadyLent_SingleReturn()
+    {
+        // カードが貸出中の場合、返却のみ（2回のタッチ）
+        var hybridReader = CreateHybridReader();
+        await hybridReader.StartReadingAsync();
+        var mockRepo = CreateMockCardRepository(isLent: true);
+
+        var vm = CreateViewModel(hybridReader, mockRepo);
+        vm.CloseAction = () => { };
+        vm.CurrentBalance = 5000;
+
+        vm.AddEntry();
+        vm.Entries[0].Amount = 200;
+
+        var readIdms = new System.Collections.Generic.List<string>();
+        hybridReader.CardRead += (_, e) => readIdms.Add(e.Idm);
+
+        await vm.ApplyAndTouchAsync();
+
+        // 返却のみ: 職員証→ICカード = 2回
+        readIdms.Should().HaveCount(2);
+        readIdms[0].Should().Be(vm.SelectedStaff.Idm);
+        readIdms[1].Should().Be(vm.SelectedCard.Idm);
     }
 
     [Fact]
@@ -331,9 +419,9 @@ public class VirtualCardViewModelTests
         var readIdms = new System.Collections.Generic.List<string>();
         hybridReader.CardRead += (_, e) => readIdms.Add(e.Idm);
 
+        // エントリなし → 単純なタッチ（貸出/返却）
         await vm.ApplyAndTouchAsync();
 
-        // 職員証 → ICカードの順で2回タッチ
         readIdms.Should().HaveCount(2);
         readIdms[0].Should().Be(vm.SelectedStaff.Idm);
         readIdms[1].Should().Be(vm.SelectedCard.Idm);
@@ -349,11 +437,9 @@ public class VirtualCardViewModelTests
         var mockReader = new MockCardReader();
         var hybridReader = new HybridCardReader(mockReader);
 
-        // MockCardReader のデフォルト履歴データが返されること
         var history = await hybridReader.ReadHistoryAsync("07FE112233445566");
         history.Should().NotBeNull();
 
-        // MockCardReader のデフォルト残高が返されること
         var balance = await hybridReader.ReadBalanceAsync("07FE112233445566");
         balance.Should().Be(mockReader.MockBalance);
     }
@@ -364,7 +450,7 @@ public class VirtualCardViewModelTests
         var mockReader = new MockCardReader();
         var hybridReader = new HybridCardReader(mockReader);
 
-        var customHistory = new System.Collections.Generic.List<Models.LedgerDetail>
+        var customHistory = new System.Collections.Generic.List<LedgerDetail>
         {
             new() { EntryStation = "博多", ExitStation = "天神", Balance = 1000 }
         };
@@ -389,7 +475,6 @@ public class VirtualCardViewModelTests
         var readIdms = new System.Collections.Generic.List<string>();
         hybridReader.CardRead += (_, e) => readIdms.Add(e.Idm);
 
-        // 実カードリーダー（MockCardReader）経由のイベントが転送されること
         mockReader.SimulateCardRead("FROM_REAL_READER");
 
         readIdms.Should().HaveCount(1);
@@ -405,7 +490,6 @@ public class VirtualCardViewModelTests
         var readIdms = new System.Collections.Generic.List<string>();
         hybridReader.CardRead += (_, e) => readIdms.Add(e.Idm);
 
-        // HybridCardReader の SimulateCardRead は IsReading に依存しない
         hybridReader.SimulateCardRead("VIRTUAL_TOUCH");
 
         readIdms.Should().HaveCount(1);

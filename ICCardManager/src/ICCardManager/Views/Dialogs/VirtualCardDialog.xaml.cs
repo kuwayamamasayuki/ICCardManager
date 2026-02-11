@@ -17,6 +17,7 @@ namespace ICCardManager.Views.Dialogs
             InitializeComponent();
             DataContext = viewModel;
             viewModel.CloseAction = () => Close();
+            Loaded += async (_, _) => await viewModel.InitializeAsync();
         }
 #else
         public VirtualCardDialog()
