@@ -30,11 +30,12 @@
 
     <Grid Margin="20">
         <Grid.RowDefinitions>
-            <RowDefinition Height="Auto" MaxHeight="400"/>  <!-- Row 0: Export/Import（スクロール可能） -->
-            <RowDefinition Height="Auto"/>   <!-- Row 1: Status message -->
-            <RowDefinition Height="*" MinHeight="150"/>  <!-- Row 2: プレビュー結果（サマリー + DataGrid） -->
-            <RowDefinition Height="Auto"/>   <!-- Row 3: エラー一覧 -->
-            <RowDefinition Height="Auto"/>   <!-- Row 4: Close button -->
+            <RowDefinition Height="Auto" MaxHeight="350"/>  <!-- Row 0: Export/Import設定（スクロール可能） -->
+            <RowDefinition Height="Auto"/>   <!-- Row 1: アクションボタン（常に表示） -->
+            <RowDefinition Height="Auto"/>   <!-- Row 2: Status message -->
+            <RowDefinition Height="*" MinHeight="150"/>  <!-- Row 3: プレビュー結果（サマリー + DataGrid） -->
+            <RowDefinition Height="Auto"/>   <!-- Row 4: エラー一覧 -->
+            <RowDefinition Height="Auto"/>   <!-- Row 5: Close button -->
         </Grid.RowDefinitions>
 
         <!-- エクスポート/インポート設定（スクロール可能エリア） -->
@@ -339,34 +340,6 @@
                     </StackPanel>
                 </Border>
 
-                <!-- インポートボタン -->
-                <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
-                    <Button Content="プレビュー"
-                            Command="{Binding PreviewImportCommand}"
-                            Padding="15,10"
-                            Background="#FF9800"
-                            Foreground="White"
-                            AutomationProperties.Name="インポートプレビュー"
-                            ToolTip="CSVファイルの内容をプレビューし、変更点を確認します"/>
-                    <Button Content="インポート実行"
-                            Command="{Binding ExecuteImportCommand}"
-                            Padding="15,10"
-                            Margin="10,0,0,0"
-                            Background="#4CAF50"
-                            Foreground="White"
-                            IsEnabled="{Binding HasPreview}"
-                            AutomationProperties.Name="インポート実行"
-                            ToolTip="プレビュー済みのデータをインポートします"/>
-                    <Button Content="直接インポート"
-                            Command="{Binding ImportCommand}"
-                            Padding="15,10"
-                            Margin="10,0,0,0"
-                            Background="#2196F3"
-                            Foreground="White"
-                            AutomationProperties.Name="直接CSVインポート"
-                            ToolTip="プレビューなしで直接インポートします"/>
-                </StackPanel>
-
                 <!-- 最後にインポートしたファイル -->
                 <TextBlock Text="{Binding LastImportedFile, StringFormat=インポート完了: {0}}"
                            Foreground="Gray"
@@ -379,8 +352,36 @@
         </StackPanel>
         </ScrollViewer>
 
+        <!-- アクションボタン（常に表示） -->
+        <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="0,0,0,10">
+            <Button Content="プレビュー"
+                    Command="{Binding PreviewImportCommand}"
+                    Padding="15,10"
+                    Background="#FF9800"
+                    Foreground="White"
+                    AutomationProperties.Name="インポートプレビュー"
+                    ToolTip="CSVファイルの内容をプレビューし、変更点を確認します"/>
+            <Button Content="インポート実行"
+                    Command="{Binding ExecuteImportCommand}"
+                    Padding="15,10"
+                    Margin="10,0,0,0"
+                    Background="#4CAF50"
+                    Foreground="White"
+                    IsEnabled="{Binding HasPreview}"
+                    AutomationProperties.Name="インポート実行"
+                    ToolTip="プレビュー済みのデータをインポートします"/>
+            <Button Content="直接インポート"
+                    Command="{Binding ImportCommand}"
+                    Padding="15,10"
+                    Margin="10,0,0,0"
+                    Background="#2196F3"
+                    Foreground="White"
+                    AutomationProperties.Name="直接CSVインポート"
+                    ToolTip="プレビューなしで直接インポートします"/>
+        </StackPanel>
+
         <!-- ステータスメッセージ -->
-        <Border Grid.Row="1"
+        <Border Grid.Row="2"
                 Background="#E3F2FD"
                 Padding="10"
                 Margin="0,0,0,10"
@@ -393,7 +394,7 @@
         </Border>
 
         <!-- プレビュー結果セクション -->
-        <Grid Grid.Row="2" Margin="0,0,0,10"
+        <Grid Grid.Row="3" Margin="0,0,0,10"
               Visibility="{Binding HasPreview, Converter={StaticResource BoolToVisibilityConverter}}">
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto"/>  <!-- サマリーバナー -->
@@ -509,7 +510,7 @@
         </Grid>
 
         <!-- エラー一覧セクション -->
-        <Border Grid.Row="3" Background="#FFF3E0" Padding="10" CornerRadius="3" Margin="0,0,0,10"
+        <Border Grid.Row="4" Background="#FFF3E0" Padding="10" CornerRadius="3" Margin="0,0,0,10"
                 Visibility="{Binding ImportErrors.Count, Converter={StaticResource IntToVisibilityConverter}}">
             <StackPanel>
                 <TextBlock Text="エラー詳細" FontWeight="Bold" FontSize="{DynamicResource BaseFontSize}" Margin="0,0,0,5"/>
@@ -530,7 +531,7 @@
         </Border>
 
         <!-- 閉じるボタン -->
-        <StackPanel Grid.Row="4"
+        <StackPanel Grid.Row="5"
                     Orientation="Horizontal"
                     HorizontalAlignment="Right"
                     Margin="0,15,0,0">
@@ -544,7 +545,7 @@
         </StackPanel>
 
         <!-- 処理中オーバーレイ -->
-        <Border Grid.RowSpan="5"
+        <Border Grid.RowSpan="6"
                 Background="#80000000"
                 Visibility="{Binding IsBusy, Converter={StaticResource BoolToVisibilityConverter}}">
             <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
