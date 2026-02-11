@@ -83,8 +83,9 @@ $ConvertedCount = 0
 $SkippedCount = 0
 $ErrorCount = 0
 
-# PDF保存形式の定数
-$wdFormatPDF = 17
+# ExportAsFixedFormat の定数
+$wdExportFormatPDF = 17
+$wdExportOptimizeForPrint = 0
 
 try {
     # 各マニュアルを処理
@@ -124,8 +125,13 @@ try {
             # Wordで.docxを開く
             $Doc = $Word.Documents.Open($InputPath, $false, $true)  # ReadOnly=true
 
-            # PDF形式で保存
-            $Doc.SaveAs([ref]$OutputPath, [ref]$wdFormatPDF)
+            # ExportAsFixedFormat でPDF出力（SaveAsではなくこちらがPDF出力の正式API）
+            $Doc.ExportAsFixedFormat(
+                $OutputPath,
+                $wdExportFormatPDF,
+                $false,                   # OpenAfterExport
+                $wdExportOptimizeForPrint  # OptimizeFor
+            )
             $Doc.Close($false)  # 保存せずに閉じる
 
             $FileInfo = Get-Item $OutputPath
