@@ -1803,6 +1803,32 @@ public partial class MainViewModel : ViewModelBase
     }
 
     /// <summary>
+    /// ヘルプ（ドキュメントフォルダ）を開く（Issue #641）
+    /// </summary>
+    [RelayCommand]
+    public void OpenHelp()
+    {
+        var exeDir = AppDomain.CurrentDomain.BaseDirectory;
+        var docsPath = System.IO.Path.Combine(exeDir, "Docs");
+        if (System.IO.Directory.Exists(docsPath))
+        {
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+            {
+                FileName = docsPath,
+                UseShellExecute = true
+            });
+        }
+        else
+        {
+            MessageBox.Show(
+                "ドキュメントフォルダが見つかりません。\nアプリケーションを再インストールしてください。",
+                "ヘルプ",
+                MessageBoxButton.OK,
+                MessageBoxImage.Warning);
+        }
+    }
+
+    /// <summary>
     /// ダッシュボードから履歴を表示
     /// </summary>
     [RelayCommand]

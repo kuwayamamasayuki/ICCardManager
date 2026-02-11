@@ -33,6 +33,7 @@
         <KeyBinding Key="F4" Command="{Binding OpenDataExportImportCommand}"/>
         <KeyBinding Key="F5" Command="{Binding OpenSettingsCommand}"/>
         <KeyBinding Key="F6" Command="{Binding OpenSystemManageCommand}"/>
+        <KeyBinding Key="F7" Command="{Binding OpenHelpCommand}"/>
     </Window.InputBindings>
 
     <Grid>
@@ -99,10 +100,17 @@
                             AutomationProperties.Name="システム管理ダイアログを開く"
                             AutomationProperties.HelpText="データベースのバックアップ・リストア・操作ログを管理します。ショートカット: F6"
                             ToolTip="システム管理を開く (F6)"/>
+                    <Button Content="ヘルプ (F7)" Margin="5,3"
+                            Style="{StaticResource AccessibleButtonStyle}"
+                            Command="{Binding OpenHelpCommand}"
+                            TabIndex="7"
+                            AutomationProperties.Name="ヘルプを開く"
+                            AutomationProperties.HelpText="ユーザーマニュアル等のドキュメントフォルダを開きます。ショートカット: F7"
+                            ToolTip="ヘルプを開く (F7)"/>
                     <Button Content="終了" Margin="15,3,5,3"
                             Style="{StaticResource AccessibleButtonStyle}"
                             Command="{Binding ExitCommand}"
-                            TabIndex="7"
+                            TabIndex="8"
                             AutomationProperties.Name="アプリケーションを終了"
                             AutomationProperties.HelpText="アプリケーションを終了します。"
                             ToolTip="アプリケーションを終了"/>
