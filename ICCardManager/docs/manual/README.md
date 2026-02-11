@@ -99,28 +99,25 @@ convert-to-docx.bat /nomermaid
 
 ## PDF形式への変換
 
-マニュアルをPDF形式で出力することもできます。
+マニュアルをPDF形式で出力することもできます。`.docx` → `.pdf` の変換を Microsoft Word 経由で行います。
 
 ### 追加の前提条件
 
-#### 必須: LaTeXエンジン（xelatex）
+#### 必須: Microsoft Word
 
-PDF出力にはLaTeXエンジンが必要です。[MiKTeX](https://miktex.org/) のインストールを推奨します。
+PDF出力には Microsoft Word（Microsoft 365 等）が必要です。Word の COM オートメーションで `.docx` を PDF に変換します。
 
-```powershell
-# wingetでインストール
-winget install MiKTeX.MiKTeX
+#### 必須: .docx ファイル
 
-# または、公式サイトからダウンロード
-# https://miktex.org/download
-```
-
-> **注意**: MiKTeX初回使用時に必要なパッケージの自動インストールを求められます。「Always install」を選択すると以降は自動でインストールされます。
+PDF変換の入力は `.docx` ファイルです。先に `.\convert-to-docx.ps1` を実行して `.docx` を生成してください。
 
 ### PDF変換手順
 
 ```powershell
-# 全マニュアルをPDFに変換（更新があるもののみ）
+# 1. まず .docx を生成（未生成の場合）
+.\convert-to-docx.ps1
+
+# 2. .docx → .pdf に変換
 .\convert-to-pdf.ps1
 
 # 全マニュアルを強制変換
@@ -130,9 +127,6 @@ winget install MiKTeX.MiKTeX
 .\convert-to-pdf.ps1 -Target user   # ユーザーマニュアル
 .\convert-to-pdf.ps1 -Target admin  # 管理者マニュアル
 .\convert-to-pdf.ps1 -Target dev    # 開発者ガイド
-
-# Mermaidフィルターを使用しない（高速変換）
-.\convert-to-pdf.ps1 -NoMermaid
 ```
 
 ### PDF出力ファイル

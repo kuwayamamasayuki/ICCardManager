@@ -1,23 +1,18 @@
-# マニュアル PDF変換スクリプト
+# マニュアル PDF変換スクリプト（Word経由）
 # 使用方法:
 #   .\convert-to-pdf.ps1              # 全マニュアルを変換（更新があるもののみ）
 #   .\convert-to-pdf.ps1 -Force       # 全マニュアルを強制変換
 #   .\convert-to-pdf.ps1 -Target user # ユーザーマニュアルのみ変換
-#   .\convert-to-pdf.ps1 -NoMermaid   # Mermaidフィルターを使用しない
 # 前提条件:
-#   1. pandocがインストールされていること
-#      インストール: winget install pandoc または https://pandoc.org/installing.html
-#   2. LaTeXエンジン（xelatex）がインストールされていること
-#      インストール: winget install MiKTeX.MiKTeX または https://miktex.org/download
-#      ※ 初回変換時にパッケージの自動インストールを求められる場合があります
-#   3. Mermaid図をレンダリングする場合、mermaid-filterが必要
-#      インストール: npm install -g mermaid-filter
+#   1. Microsoft Word がインストールされていること（Microsoft 365 等）
+#   2. .docx ファイルが生成済みであること（.\convert-to-docx.ps1 を先に実行）
+# 処理フロー:
+#   .md → .docx（convert-to-docx.ps1）→ .pdf（本スクリプト / Word COM）
 
 param(
     [ValidateSet("all", "user", "user-summary", "admin", "dev")]
     [string]$Target = "all",
-    [switch]$Force,
-    [switch]$NoMermaid
+    [switch]$Force
 )
 
 $ErrorActionPreference = "Stop"
@@ -25,35 +20,32 @@ $ErrorActionPreference = "Stop"
 # スクリプトのディレクトリを取得
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 
-# マニュアル定義
+# マニュアル定義（入力は.docx、出力は.pdf）
 $Manuals = @(
     @{
         Name = "ユーザーマニュアル"
         Key = "user"
-        Input = "ユーザーマニュアル.md"
+        Input = "ユーザーマニュアル.docx"
         Output = "ユーザーマニュアル.pdf"
-        Title = "交通系ICカード管理システム ユーザーマニュアル"
     },
     @{
         Name = "ユーザーマニュアル概要版"
         Key = "user-summary"
-        Input = "ユーザーマニュアル概要版.md"
+        # 概要版は修正版docxが配布対象
+        Input = "ユーザーマニュアル概要版（修正版）.docx"
         Output = "ユーザーマニュアル概要版.pdf"
-        Title = "交通系ICカード管理システム 操作ガイド（概要版）"
     },
     @{
         Name = "管理者マニュアル"
         Key = "admin"
-        Input = "管理者マニュアル.md"
+        Input = "管理者マニュアル.docx"
         Output = "管理者マニュアル.pdf"
-        Title = "交通系ICカード管理システム 管理者マニュアル"
     },
     @{
         Name = "開発者ガイド"
         Key = "dev"
-        Input = "開発者ガイド.md"
+        Input = "開発者ガイド.docx"
         Output = "開発者ガイド.pdf"
-        Title = "交通系ICカード管理システム 開発者ガイド"
     }
 )
 
@@ -63,138 +55,27 @@ if ($Target -ne "all") {
 }
 
 Write-Host "======================================" -ForegroundColor Cyan
-Write-Host " マニュアル PDF変換" -ForegroundColor Cyan
+Write-Host " マニュアル PDF変換（Word経由）" -ForegroundColor Cyan
 Write-Host "======================================" -ForegroundColor Cyan
 Write-Host ""
 
-# pandocの確認
-Write-Host "[準備] pandocの確認..." -ForegroundColor Yellow
-$PandocPath = Get-Command pandoc -ErrorAction SilentlyContinue
-
-# PATHに無い場合、一般的なインストール場所を検索
-if (-not $PandocPath) {
-    $CommonPaths = @(
-        "$env:LOCALAPPDATA\Pandoc\pandoc.exe",
-        "$env:ProgramFiles\Pandoc\pandoc.exe",
-        "${env:ProgramFiles(x86)}\Pandoc\pandoc.exe"
-    )
-    foreach ($Path in $CommonPaths) {
-        if (Test-Path $Path) {
-            $PandocPath = Get-Item $Path
-            break
-        }
-    }
+# Word COMオブジェクトの作成
+Write-Host "[準備] Microsoft Wordの確認..." -ForegroundColor Yellow
+$Word = $null
+try {
+    $Word = New-Object -ComObject Word.Application
+    $Word.Visible = $false
+    $Word.DisplayAlerts = 0  # wdAlertsNone
+    Write-Host "  Word: $($Word.Version)" -ForegroundColor Green
 }
-
-if (-not $PandocPath) {
-    Write-Host "エラー: pandocが見つかりません。" -ForegroundColor Red
+catch {
+    Write-Host "エラー: Microsoft Wordが見つかりません。" -ForegroundColor Red
     Write-Host ""
-    Write-Host "pandocをインストールしてください:" -ForegroundColor Yellow
-    Write-Host "  方法1: winget install pandoc" -ForegroundColor White
-    Write-Host "  方法2: https://pandoc.org/installing.html からダウンロード" -ForegroundColor White
+    Write-Host "Microsoft Word（Microsoft 365等）がインストールされている必要があります。" -ForegroundColor Yellow
     Write-Host ""
     exit 1
 }
 
-# パスの取得（Get-CommandとGet-Itemで異なるプロパティ名）
-$PandocExe = if ($PandocPath.Source) { $PandocPath.Source } else { $PandocPath.FullName }
-Write-Host "  pandoc: $PandocExe" -ForegroundColor Green
-
-# LaTeXエンジンの確認
-Write-Host "[準備] LaTeXエンジンの確認..." -ForegroundColor Yellow
-$XelatexPath = Get-Command xelatex -ErrorAction SilentlyContinue
-
-if (-not $XelatexPath) {
-    # MiKTeXの一般的なインストール場所を検索
-    $MiKTeXPaths = @(
-        "$env:LOCALAPPDATA\Programs\MiKTeX\miktex\bin\x64\xelatex.exe",
-        "$env:ProgramFiles\MiKTeX\miktex\bin\x64\xelatex.exe",
-        "${env:ProgramFiles(x86)}\MiKTeX\miktex\bin\x64\xelatex.exe"
-    )
-    foreach ($Path in $MiKTeXPaths) {
-        if (Test-Path $Path) {
-            $XelatexPath = Get-Item $Path
-            break
-        }
-    }
-}
-
-if (-not $XelatexPath) {
-    Write-Host "エラー: xelatexが見つかりません。" -ForegroundColor Red
-    Write-Host ""
-    Write-Host "LaTeXエンジンをインストールしてください:" -ForegroundColor Yellow
-    Write-Host "  方法1: winget install MiKTeX.MiKTeX" -ForegroundColor White
-    Write-Host "  方法2: https://miktex.org/download からダウンロード" -ForegroundColor White
-    Write-Host ""
-    Write-Host "※ MiKTeX初回使用時に必要なパッケージの自動インストールを求められます。" -ForegroundColor Gray
-    Write-Host "  「Always install」を選択すると以降は自動でインストールされます。" -ForegroundColor Gray
-    Write-Host ""
-    exit 1
-}
-
-$XelatexExe = if ($XelatexPath.Source) { $XelatexPath.Source } else { $XelatexPath.FullName }
-Write-Host "  xelatex: $XelatexExe" -ForegroundColor Green
-
-# 日本語フォントの確認
-Write-Host "[準備] 日本語フォントの確認..." -ForegroundColor Yellow
-$CJKMainFont = $null
-$CJKSansFont = $null
-$CJKMonoFont = $null
-
-# Windows標準の日本語フォントを優先順位順に検索
-$MainFontCandidates = @("Yu Mincho", "MS Mincho", "IPAex明朝")
-$SansFontCandidates = @("Yu Gothic", "MS Gothic", "IPAexゴシック")
-$MonoFontCandidates = @("MS Gothic", "Yu Gothic", "IPAexゴシック")
-
-# フォントの存在確認（Windowsフォントフォルダを検索）
-$FontsDir = "$env:WINDIR\Fonts"
-
-foreach ($Font in $MainFontCandidates) {
-    # fc-listで確認（利用可能な場合）
-    $FcList = Get-Command fc-list -ErrorAction SilentlyContinue
-    if ($FcList) {
-        $Result = & fc-list ":family=$Font" 2>$null
-        if ($Result) {
-            $CJKMainFont = $Font
-            break
-        }
-    } else {
-        # fc-listがない場合はフォント名をそのまま使用（xelatexが解決する）
-        $CJKMainFont = $Font
-        break
-    }
-}
-
-foreach ($Font in $SansFontCandidates) {
-    $CJKSansFont = $Font
-    break
-}
-
-foreach ($Font in $MonoFontCandidates) {
-    $CJKMonoFont = $Font
-    break
-}
-
-Write-Host "  メインフォント: $CJKMainFont" -ForegroundColor Green
-Write-Host "  サンセリフ: $CJKSansFont" -ForegroundColor Green
-Write-Host "  等幅: $CJKMonoFont" -ForegroundColor Green
-
-# mermaid-filterの確認
-$UseMermaidFilter = $false
-if (-not $NoMermaid) {
-    Write-Host "[準備] mermaid-filterの確認..." -ForegroundColor Yellow
-    $MermaidFilterPath = Get-Command mermaid-filter.cmd -ErrorAction SilentlyContinue
-
-    if ($MermaidFilterPath) {
-        $UseMermaidFilter = $true
-        Write-Host "  mermaid-filter: $($MermaidFilterPath.Source)" -ForegroundColor Green
-    } else {
-        Write-Host "  警告: mermaid-filterが見つかりません。Mermaid図はテキストのまま出力されます。" -ForegroundColor Yellow
-        Write-Host "  インストール: npm install -g mermaid-filter" -ForegroundColor Gray
-    }
-} else {
-    Write-Host "[準備] mermaid-filter: スキップ (-NoMermaid指定)" -ForegroundColor Gray
-}
 Write-Host ""
 
 # 変換結果の追跡
@@ -202,88 +83,72 @@ $ConvertedCount = 0
 $SkippedCount = 0
 $ErrorCount = 0
 
-# 各マニュアルを処理
-foreach ($Manual in $Manuals) {
-    $InputPath = Join-Path $ScriptDir $Manual.Input
-    $OutputPath = Join-Path $ScriptDir $Manual.Output
+# PDF保存形式の定数
+$wdFormatPDF = 17
 
-    Write-Host "--------------------------------------" -ForegroundColor Gray
-    Write-Host "[$($Manual.Name)]" -ForegroundColor Cyan
+try {
+    # 各マニュアルを処理
+    foreach ($Manual in $Manuals) {
+        $InputPath = Join-Path $ScriptDir $Manual.Input
+        $OutputPath = Join-Path $ScriptDir $Manual.Output
 
-    # 入力ファイルの確認
-    if (-not (Test-Path $InputPath)) {
-        Write-Host "  スキップ: 入力ファイルが見つかりません" -ForegroundColor Yellow
-        Write-Host "    $InputPath" -ForegroundColor Gray
-        $SkippedCount++
-        continue
-    }
+        Write-Host "--------------------------------------" -ForegroundColor Gray
+        Write-Host "[$($Manual.Name)]" -ForegroundColor Cyan
 
-    # 更新チェック（-Forceでない場合）
-    if (-not $Force -and (Test-Path $OutputPath)) {
-        $InputInfo = Get-Item $InputPath
-        $OutputInfo = Get-Item $OutputPath
-
-        if ($OutputInfo.LastWriteTime -ge $InputInfo.LastWriteTime) {
-            Write-Host "  スキップ: 変更なし（.pdfが最新）" -ForegroundColor Gray
-            Write-Host "    .md:  $($InputInfo.LastWriteTime.ToString('yyyy-MM-dd HH:mm:ss'))" -ForegroundColor Gray
-            Write-Host "    .pdf: $($OutputInfo.LastWriteTime.ToString('yyyy-MM-dd HH:mm:ss'))" -ForegroundColor Gray
+        # 入力ファイル（.docx）の確認
+        if (-not (Test-Path $InputPath)) {
+            Write-Host "  スキップ: .docxファイルが見つかりません" -ForegroundColor Yellow
+            Write-Host "    $InputPath" -ForegroundColor Gray
+            Write-Host "    → 先に .\convert-to-docx.ps1 を実行してください" -ForegroundColor Gray
             $SkippedCount++
             continue
         }
-    }
 
-    # 変換実行
-    if ($UseMermaidFilter) {
-        Write-Host "  変換中（Mermaidフィルター有効）..." -ForegroundColor Yellow
-    } else {
-        Write-Host "  変換中..." -ForegroundColor Yellow
-    }
+        # 更新チェック（-Forceでない場合）
+        if (-not $Force -and (Test-Path $OutputPath)) {
+            $InputInfo = Get-Item $InputPath
+            $OutputInfo = Get-Item $OutputPath
 
-    # pandoc引数の構築
-    # xelatexを使用し、日本語フォントを指定
-    $PandocArgs = @(
-        $InputPath,
-        "-o", $OutputPath,
-        "--from", "markdown",
-        "--to", "pdf",
-        "--pdf-engine", "xelatex",
-        "--resource-path", $ScriptDir,
-        "-V", "CJKmainfont=$CJKMainFont",
-        "-V", "CJKsansfont=$CJKSansFont",
-        "-V", "CJKmonofont=$CJKMonoFont",
-        "-V", "geometry:margin=2.5cm",
-        "-V", "documentclass=ltjarticle",
-        "-V", "classoption=a4paper",
-        "--metadata", "title=$($Manual.Title)",
-        "--metadata", "author=システム管理者",
-        "--metadata", "lang=ja"
-    )
-
-    # mermaid-filterが有効な場合、フィルターを追加
-    if ($UseMermaidFilter) {
-        $PandocArgs += @("-F", "mermaid-filter.cmd")
-    }
-
-    try {
-        & $PandocExe $PandocArgs
-        if ($LASTEXITCODE -ne 0) {
-            throw "pandocがエラーコード $LASTEXITCODE を返しました"
+            if ($OutputInfo.LastWriteTime -ge $InputInfo.LastWriteTime) {
+                Write-Host "  スキップ: 変更なし（.pdfが最新）" -ForegroundColor Gray
+                Write-Host "    .docx: $($InputInfo.LastWriteTime.ToString('yyyy-MM-dd HH:mm:ss'))" -ForegroundColor Gray
+                Write-Host "    .pdf:  $($OutputInfo.LastWriteTime.ToString('yyyy-MM-dd HH:mm:ss'))" -ForegroundColor Gray
+                $SkippedCount++
+                continue
+            }
         }
 
-        $FileInfo = Get-Item $OutputPath
-        Write-Host "  完了: $($Manual.Output)" -ForegroundColor Green
-        Write-Host "    サイズ: $([math]::Round($FileInfo.Length / 1KB, 2)) KB" -ForegroundColor Gray
-        $ConvertedCount++
+        Write-Host "  変換中..." -ForegroundColor Yellow
+
+        try {
+            # Wordで.docxを開く
+            $Doc = $Word.Documents.Open($InputPath, $false, $true)  # ReadOnly=true
+
+            # PDF形式で保存
+            $Doc.SaveAs([ref]$OutputPath, [ref]$wdFormatPDF)
+            $Doc.Close($false)  # 保存せずに閉じる
+
+            $FileInfo = Get-Item $OutputPath
+            Write-Host "  完了: $($Manual.Output)" -ForegroundColor Green
+            Write-Host "    サイズ: $([math]::Round($FileInfo.Length / 1KB, 2)) KB" -ForegroundColor Gray
+            $ConvertedCount++
+        }
+        catch {
+            Write-Host "  エラー: 変換に失敗しました" -ForegroundColor Red
+            Write-Host "    $($_.Exception.Message)" -ForegroundColor Red
+            $ErrorCount++
+        }
     }
-    catch {
-        Write-Host "  エラー: 変換に失敗しました" -ForegroundColor Red
-        Write-Host "    $($_.Exception.Message)" -ForegroundColor Red
+}
+finally {
+    # Wordを終了（必ず実行）
+    if ($Word) {
         Write-Host ""
-        Write-Host "  トラブルシューティング:" -ForegroundColor Yellow
-        Write-Host "    1. MiKTeXのパッケージマネージャーを起動して更新を確認してください" -ForegroundColor Gray
-        Write-Host "    2. MiKTeXの設定で「Always install missing packages」を有効にしてください" -ForegroundColor Gray
-        Write-Host "    3. xelatex が正しく動作するか確認: xelatex --version" -ForegroundColor Gray
-        $ErrorCount++
+        Write-Host "[後処理] Wordを終了しています..." -ForegroundColor Gray
+        $Word.Quit()
+        [System.Runtime.InteropServices.Marshal]::ReleaseComObject($Word) | Out-Null
+        [GC]::Collect()
+        [GC]::WaitForPendingFinalizers()
     }
 }
 
