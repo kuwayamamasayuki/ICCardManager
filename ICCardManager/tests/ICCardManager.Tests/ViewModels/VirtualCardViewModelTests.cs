@@ -262,6 +262,24 @@ public class VirtualCardViewModelTests
     }
 
     [Fact]
+    public async Task ApplyAndTouchAsync_NoEntries_DoesNotOverrideBalance()
+    {
+        var hybridReader = CreateHybridReader();
+        await hybridReader.StartReadingAsync();
+
+        var vm = CreateViewModel(hybridReader);
+        vm.CloseAction = () => { };
+
+        // エントリを追加せずにタッチ実行
+        await vm.ApplyAndTouchAsync();
+
+        // カスタム残高が設定されていないため、実カードリーダーの値が返ること
+        var balance = await hybridReader.ReadBalanceAsync(vm.SelectedCard.Idm);
+        // MockCardReader のデフォルト残高（4980）が返る（5000ではない）
+        balance.Should().Be(4980);
+    }
+
+    [Fact]
     public async Task ApplyAndTouchAsync_FiresCardReadEvents()
     {
         var hybridReader = CreateHybridReader();

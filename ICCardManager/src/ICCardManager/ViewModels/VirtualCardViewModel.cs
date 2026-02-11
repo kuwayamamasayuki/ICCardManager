@@ -167,12 +167,14 @@ public partial class VirtualCardViewModel : ObservableObject
             }
         }
 
-        // MockCardReader に設定
-        _hybridCardReader.SetCustomHistory(cardIdm, historyDetails);
-
-        // 残高: エントリがあれば先頭（最新）の残高、なければデフォルト
-        var balance = historyDetails.Count > 0 ? historyDetails.First().Balance ?? 5000 : 5000;
-        _hybridCardReader.SetCustomBalance(cardIdm, balance);
+        // エントリがある場合のみカスタム履歴・残高を設定
+        // エントリがない場合は実カードリーダーの値をそのまま使用する
+        if (historyDetails.Count > 0)
+        {
+            _hybridCardReader.SetCustomHistory(cardIdm, historyDetails);
+            var balance = historyDetails.First().Balance ?? 0;
+            _hybridCardReader.SetCustomBalance(cardIdm, balance);
+        }
 
         // ダイアログを閉じる
         CloseAction?.Invoke();
