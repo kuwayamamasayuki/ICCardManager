@@ -1076,18 +1076,24 @@ namespace ICCardManager.Services
 
                     // 既存レコードの確認（IDがある場合）
                     var isUpdate = false;
+                    Ledger existingLedgerForUpdate = null;
                     if (ledgerId.HasValue)
                     {
                         var existingLedger = await _ledgerRepository.GetByIdAsync(ledgerId.Value);
                         if (existingLedger != null)
                         {
-                            // 変更点を検出（skipExistingに関係なく常にチェック）
+                            // Issue #639: 金額・日付を含む全フィールドで変更点を検出
                             var hasChanges = existingLedger.Summary != summary ||
                                             (existingLedger.StaffName ?? "") != staffName ||
-                                            (existingLedger.Note ?? "") != note;
+                                            (existingLedger.Note ?? "") != note ||
+                                            existingLedger.Income != income ||
+                                            existingLedger.Expense != expense ||
+                                            existingLedger.Balance != balance ||
+                                            existingLedger.Date != date;
                             if (hasChanges)
                             {
                                 isUpdate = true;
+                                existingLedgerForUpdate = existingLedger;
                             }
                             else
                             {
@@ -1108,7 +1114,13 @@ namespace ICCardManager.Services
                         Expense = expense,
                         Balance = balance,
                         StaffName = string.IsNullOrWhiteSpace(staffName) ? null : staffName,
-                        Note = string.IsNullOrWhiteSpace(note) ? null : note
+                        Note = string.IsNullOrWhiteSpace(note) ? null : note,
+                        // Issue #639: 更新時はCSVに含まれないフィールドを既存レコードから引き継ぐ
+                        LenderIdm = existingLedgerForUpdate?.LenderIdm,
+                        ReturnerIdm = existingLedgerForUpdate?.ReturnerIdm,
+                        LentAt = existingLedgerForUpdate?.LentAt,
+                        ReturnedAt = existingLedgerForUpdate?.ReturnedAt,
+                        IsLentRecord = existingLedgerForUpdate?.IsLentRecord ?? false
                     };
 
                     validRecords.Add((lineNumber, ledger, isUpdate));
@@ -1469,8 +1481,8 @@ namespace ICCardManager.Services
                         var existingLedger = await _ledgerRepository.GetByIdAsync(ledgerId.Value);
                         if (existingLedger != null)
                         {
-                            // 変更点を検出（skipExistingに関係なく常にチェック）
-                            DetectLedgerChanges(existingLedger, summary, staffName, note, changes);
+                            // Issue #639: 金額・日付を含む全フィールドで変更点を検出
+                            DetectLedgerChanges(existingLedger, date, summary, income, expense, balance, staffName, note, changes);
                             if (changes.Count > 0)
                             {
                                 // 変更がある場合は更新
@@ -1899,11 +1911,26 @@ namespace ICCardManager.Services
         /// <param name="changes">変更点リスト（検出結果が追加される）</param>
         private static void DetectLedgerChanges(
             Ledger existingLedger,
+            DateTime newDate,
             string newSummary,
+            int newIncome,
+            int newExpense,
+            int newBalance,
             string newStaffName,
             string newNote,
             List<FieldChange> changes)
         {
+            // Issue #639: 金額・日付フィールドの変更も検出
+            if (existingLedger.Date != newDate)
+            {
+                changes.Add(new FieldChange
+                {
+                    FieldName = "日時",
+                    OldValue = existingLedger.Date.ToString("yyyy-MM-dd HH:mm:ss"),
+                    NewValue = newDate.ToString("yyyy-MM-dd HH:mm:ss")
+                });
+            }
+
             if (existingLedger.Summary != newSummary)
             {
                 changes.Add(new FieldChange
@@ -1911,6 +1938,36 @@ namespace ICCardManager.Services
                     FieldName = "摘要",
                     OldValue = existingLedger.Summary ?? "(なし)",
                     NewValue = newSummary
+                });
+            }
+
+            if (existingLedger.Income != newIncome)
+            {
+                changes.Add(new FieldChange
+                {
+                    FieldName = "受入金額",
+                    OldValue = $"{existingLedger.Income}円",
+                    NewValue = $"{newIncome}円"
+                });
+            }
+
+            if (existingLedger.Expense != newExpense)
+            {
+                changes.Add(new FieldChange
+                {
+                    FieldName = "払出金額",
+                    OldValue = $"{existingLedger.Expense}円",
+                    NewValue = $"{newExpense}円"
+                });
+            }
+
+            if (existingLedger.Balance != newBalance)
+            {
+                changes.Add(new FieldChange
+                {
+                    FieldName = "残額",
+                    OldValue = $"{existingLedger.Balance}円",
+                    NewValue = $"{newBalance}円"
                 });
             }
 
