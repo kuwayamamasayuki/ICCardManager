@@ -59,6 +59,13 @@ public class VirtualCardViewModelTests
         vm.Entries.Should().BeEmpty();
     }
 
+    [Fact]
+    public void Constructor_DefaultCurrentBalance_Is5000()
+    {
+        var vm = CreateViewModel();
+        vm.CurrentBalance.Should().Be(5000);
+    }
+
     #endregion
 
     #region AddEntry
@@ -74,25 +81,13 @@ public class VirtualCardViewModelTests
     }
 
     [Fact]
-    public void AddEntry_DefaultBalance_Is5000ForFirstEntry()
+    public void AddEntry_DefaultAmount_Is200()
     {
         var vm = CreateViewModel();
 
         vm.AddEntry();
 
-        vm.Entries[0].Balance.Should().Be(5000);
-    }
-
-    [Fact]
-    public void AddEntry_InheritsBalanceFromLastEntry()
-    {
-        var vm = CreateViewModel();
-
-        vm.AddEntry();
-        vm.Entries[0].Balance = 3000;
-        vm.AddEntry();
-
-        vm.Entries[1].Balance.Should().Be(3000);
+        vm.Entries[0].Amount.Should().Be(200);
     }
 
     [Fact]
@@ -177,43 +172,107 @@ public class VirtualCardViewModelTests
 
     #endregion
 
-    #region ApplyAndTouch
+    #region ApplyAndTouch - 残高計算
 
     [Fact]
-    public async Task ApplyAndTouchAsync_SetsCustomHistoryOnHybridReader()
+    public async Task ApplyAndTouchAsync_CalculatesBalanceFromAmount_Usage()
     {
+        // 現在残高5000、利用200円 → 残高は5000
         var hybridReader = CreateHybridReader();
         await hybridReader.StartReadingAsync();
 
         var vm = CreateViewModel(hybridReader);
         vm.CloseAction = () => { };
+        vm.CurrentBalance = 5000;
 
         vm.AddEntry();
         vm.Entries[0].EntryStation = "博多";
         vm.Entries[0].ExitStation = "天神";
-        vm.Entries[0].Balance = 4500;
+        vm.Entries[0].Amount = 200;
+        vm.Entries[0].IsCharge = false;
 
         await vm.ApplyAndTouchAsync();
 
-        var history = await hybridReader.ReadHistoryAsync(vm.SelectedCard.Idm);
+        var history = (await hybridReader.ReadHistoryAsync(vm.SelectedCard.Idm)).ToList();
         history.Should().HaveCount(1);
-        var entry = history.First();
-        entry.EntryStation.Should().Be("博多");
-        entry.ExitStation.Should().Be("天神");
-        entry.Balance.Should().Be(4500);
+        history[0].Balance.Should().Be(5000);  // 現在残高がそのまま
+        history[0].Amount.Should().Be(200);
+        history[0].EntryStation.Should().Be("博多");
+        history[0].ExitStation.Should().Be("天神");
     }
 
     [Fact]
-    public async Task ApplyAndTouchAsync_SetsCustomBalanceOnHybridReader()
+    public async Task ApplyAndTouchAsync_CalculatesBalanceFromAmount_Charge()
+    {
+        // 現在残高8000、チャージ3000円 → 残高は8000
+        var hybridReader = CreateHybridReader();
+        await hybridReader.StartReadingAsync();
+
+        var vm = CreateViewModel(hybridReader);
+        vm.CloseAction = () => { };
+        vm.CurrentBalance = 8000;
+
+        vm.AddEntry();
+        vm.Entries[0].IsCharge = true;
+        vm.Entries[0].Amount = 3000;
+
+        await vm.ApplyAndTouchAsync();
+
+        var history = (await hybridReader.ReadHistoryAsync(vm.SelectedCard.Idm)).ToList();
+        history[0].Balance.Should().Be(8000);
+        history[0].Amount.Should().Be(3000);
+        history[0].IsCharge.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task ApplyAndTouchAsync_MultipleEntries_CalculatesBalancesCorrectly()
+    {
+        // 現在残高4800、エントリ: [利用200, チャージ3000, 利用300]
+        // → 残高: [4800, 5000(=4800+200), 2000(=5000-3000)]
+        var hybridReader = CreateHybridReader();
+        await hybridReader.StartReadingAsync();
+
+        var vm = CreateViewModel(hybridReader);
+        vm.CloseAction = () => { };
+        vm.CurrentBalance = 4800;
+
+        vm.AddEntry(); // index 0: 利用200円（最新）
+        vm.Entries[0].EntryStation = "博多";
+        vm.Entries[0].ExitStation = "天神";
+        vm.Entries[0].Amount = 200;
+        vm.Entries[0].IsCharge = false;
+
+        vm.AddEntry(); // index 1: チャージ3000円
+        vm.Entries[1].IsCharge = true;
+        vm.Entries[1].Amount = 3000;
+
+        vm.AddEntry(); // index 2: 利用300円（最古）
+        vm.Entries[2].EntryStation = "薬院";
+        vm.Entries[2].ExitStation = "大橋";
+        vm.Entries[2].Amount = 300;
+        vm.Entries[2].IsCharge = false;
+
+        await vm.ApplyAndTouchAsync();
+
+        var history = (await hybridReader.ReadHistoryAsync(vm.SelectedCard.Idm)).ToList();
+        history.Should().HaveCount(3);
+        history[0].Balance.Should().Be(4800);  // 現在残高
+        history[1].Balance.Should().Be(5000);  // 4800 + 200（利用前の残高）
+        history[2].Balance.Should().Be(2000);  // 5000 - 3000（チャージ前の残高）
+    }
+
+    [Fact]
+    public async Task ApplyAndTouchAsync_SetsCustomBalance_ToCurrentBalance()
     {
         var hybridReader = CreateHybridReader();
         await hybridReader.StartReadingAsync();
 
         var vm = CreateViewModel(hybridReader);
         vm.CloseAction = () => { };
+        vm.CurrentBalance = 3200;
 
         vm.AddEntry();
-        vm.Entries[0].Balance = 3200;
+        vm.Entries[0].Amount = 200;
 
         await vm.ApplyAndTouchAsync();
 
@@ -234,31 +293,12 @@ public class VirtualCardViewModelTests
         vm.Entries[0].EntryStation = "";
         vm.Entries[0].ExitStation = "";
         vm.Entries[0].IsCharge = false;
-        vm.Entries[0].Balance = 4000;
+        vm.Entries[0].Amount = 230;
 
         await vm.ApplyAndTouchAsync();
 
         var history = await hybridReader.ReadHistoryAsync(vm.SelectedCard.Idm);
         history.First().IsBus.Should().BeTrue();
-    }
-
-    [Fact]
-    public async Task ApplyAndTouchAsync_ChargeEntry_SetsIsCharge()
-    {
-        var hybridReader = CreateHybridReader();
-        await hybridReader.StartReadingAsync();
-
-        var vm = CreateViewModel(hybridReader);
-        vm.CloseAction = () => { };
-
-        vm.AddEntry();
-        vm.Entries[0].IsCharge = true;
-        vm.Entries[0].Balance = 8000;
-
-        await vm.ApplyAndTouchAsync();
-
-        var history = await hybridReader.ReadHistoryAsync(vm.SelectedCard.Idm);
-        history.First().IsCharge.Should().BeTrue();
     }
 
     [Fact]
@@ -275,7 +315,7 @@ public class VirtualCardViewModelTests
 
         // カスタム残高が設定されていないため、実カードリーダーの値が返ること
         var balance = await hybridReader.ReadBalanceAsync(vm.SelectedCard.Idm);
-        // MockCardReader のデフォルト残高（4980）が返る（5000ではない）
+        // MockCardReader のデフォルト残高（4980）が返る
         balance.Should().Be(4980);
     }
 
@@ -384,7 +424,7 @@ public class VirtualCardViewModelTests
         entry.UseDate.Should().Be(System.DateTime.Today);
         entry.EntryStation.Should().Be("");
         entry.ExitStation.Should().Be("");
-        entry.Balance.Should().Be(0);
+        entry.Amount.Should().Be(0);
         entry.IsCharge.Should().BeFalse();
     }
 

@@ -67,6 +67,12 @@ public partial class VirtualCardViewModel : ObservableObject
     private VirtualHistoryEntry _selectedEntry;
 
     /// <summary>
+    /// 現在のカード残高（履歴の残高はこの値から自動計算される）
+    /// </summary>
+    [ObservableProperty]
+    private int _currentBalance = 5000;
+
+    /// <summary>
     /// ダイアログを閉じるためのAction（Viewから設定）
     /// </summary>
     public Action CloseAction { get; set; }
@@ -99,7 +105,7 @@ public partial class VirtualCardViewModel : ObservableObject
         Entries.Add(new VirtualHistoryEntry
         {
             UseDate = DateTime.Today,
-            Balance = Entries.Count > 0 ? Entries.Last().Balance : 5000
+            Amount = 200
         });
     }
 
@@ -136,35 +142,31 @@ public partial class VirtualCardViewModel : ObservableObject
         var cardIdm = SelectedCard.Idm;
         var staffIdm = SelectedStaff.Idm;
 
-        // 履歴データを LedgerDetail に変換
-        var historyDetails = Entries.Select(e => new LedgerDetail
-        {
-            UseDate = e.UseDate,
-            EntryStation = string.IsNullOrWhiteSpace(e.EntryStation) ? null : e.EntryStation,
-            ExitStation = string.IsNullOrWhiteSpace(e.ExitStation) ? null : e.ExitStation,
-            Balance = e.Balance,
-            IsCharge = e.IsCharge,
-            IsBus = !e.IsCharge &&
-                    string.IsNullOrWhiteSpace(e.EntryStation) &&
-                    string.IsNullOrWhiteSpace(e.ExitStation)
-        }).ToList();
+        // 履歴データを LedgerDetail に変換し、残高を金額から自動計算
+        // エントリは新しい順（index 0 が最新）で、各エントリの Balance は取引後の残高
+        var historyDetails = new List<LedgerDetail>();
+        var balance = CurrentBalance;
 
-        // 金額を残高差分から計算
-        for (int i = 0; i < historyDetails.Count; i++)
+        foreach (var e in Entries)
         {
-            if (i < historyDetails.Count - 1)
+            historyDetails.Add(new LedgerDetail
             {
-                var current = historyDetails[i];
-                var next = historyDetails[i + 1];
-                if (current.IsCharge)
-                {
-                    current.Amount = current.Balance - next.Balance;
-                }
-                else
-                {
-                    current.Amount = next.Balance - current.Balance;
-                }
-            }
+                UseDate = e.UseDate,
+                EntryStation = string.IsNullOrWhiteSpace(e.EntryStation) ? null : e.EntryStation,
+                ExitStation = string.IsNullOrWhiteSpace(e.ExitStation) ? null : e.ExitStation,
+                Amount = e.Amount,
+                Balance = balance,
+                IsCharge = e.IsCharge,
+                IsBus = !e.IsCharge &&
+                        string.IsNullOrWhiteSpace(e.EntryStation) &&
+                        string.IsNullOrWhiteSpace(e.ExitStation)
+            });
+
+            // 次のエントリ（1つ前の取引）の残高を逆算
+            if (e.IsCharge)
+                balance -= e.Amount; // チャージ前の残高 = チャージ後 - チャージ額
+            else
+                balance += e.Amount; // 利用前の残高 = 利用後 + 利用額
         }
 
         // エントリがある場合のみカスタム履歴・残高を設定
@@ -172,8 +174,7 @@ public partial class VirtualCardViewModel : ObservableObject
         if (historyDetails.Count > 0)
         {
             _hybridCardReader.SetCustomHistory(cardIdm, historyDetails);
-            var balance = historyDetails.First().Balance ?? 0;
-            _hybridCardReader.SetCustomBalance(cardIdm, balance);
+            _hybridCardReader.SetCustomBalance(cardIdm, CurrentBalance);
         }
 
         // ダイアログを閉じる
@@ -200,8 +201,11 @@ public partial class VirtualHistoryEntry : ObservableObject
     [ObservableProperty]
     private string _exitStation = "";
 
+    /// <summary>
+    /// 金額（チャージの場合は受入額、利用の場合は払出額）
+    /// </summary>
     [ObservableProperty]
-    private int _balance;
+    private int _amount;
 
     [ObservableProperty]
     private bool _isCharge;

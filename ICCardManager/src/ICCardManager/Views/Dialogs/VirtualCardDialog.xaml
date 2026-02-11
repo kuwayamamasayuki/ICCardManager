@@ -20,7 +20,7 @@
             [DEBUG専用] 仮想的にICカードをタッチします。最大20件の履歴を指定できます。
         </TextBlock>
 
-        <!-- カード・職員選択 -->
+        <!-- カード・職員・残高選択 -->
         <Grid Grid.Row="1" Margin="0,0,0,12">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="Auto"/>
@@ -28,6 +28,9 @@
                 <ColumnDefinition Width="20"/>
                 <ColumnDefinition Width="Auto"/>
                 <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="20"/>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="80"/>
             </Grid.ColumnDefinitions>
 
             <TextBlock Grid.Column="0" Text="交通系ICカード:" VerticalAlignment="Center" Margin="0,0,8,0"/>
@@ -37,6 +40,10 @@
             <TextBlock Grid.Column="3" Text="職員:" VerticalAlignment="Center" Margin="0,0,8,0"/>
             <ComboBox Grid.Column="4" ItemsSource="{Binding StaffSelectItems}"
                       SelectedItem="{Binding SelectedStaff}"/>
+
+            <TextBlock Grid.Column="6" Text="現在残高:" VerticalAlignment="Center" Margin="0,0,8,0"/>
+            <TextBox Grid.Column="7" Text="{Binding CurrentBalance, UpdateSourceTrigger=PropertyChanged}"
+                     VerticalContentAlignment="Center"/>
         </Grid>
 
         <!-- 履歴一覧 DataGrid -->
@@ -67,8 +74,8 @@
                                     Binding="{Binding EntryStation, UpdateSourceTrigger=PropertyChanged}"/>
                 <DataGridTextColumn Header="降車駅" Width="*"
                                     Binding="{Binding ExitStation, UpdateSourceTrigger=PropertyChanged}"/>
-                <DataGridTextColumn Header="残高" Width="80"
-                                    Binding="{Binding Balance, UpdateSourceTrigger=PropertyChanged}"/>
+                <DataGridTextColumn Header="金額" Width="80"
+                                    Binding="{Binding Amount, UpdateSourceTrigger=PropertyChanged}"/>
                 <DataGridCheckBoxColumn Header="チャージ" Width="70"
                                         Binding="{Binding IsCharge, UpdateSourceTrigger=PropertyChanged}"/>
             </DataGrid.Columns>
