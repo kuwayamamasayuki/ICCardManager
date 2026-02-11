@@ -1867,5 +1867,16 @@ public partial class MainViewModel : ViewModelBase
             mockReader.SimulateCardRead("07FE112233445566");
         }
     }
+
+    /// <summary>
+    /// デバッグ用: 仮想タッチ設定ダイアログを開く（Issue #640）
+    /// </summary>
+    [RelayCommand]
+    public void OpenVirtualCard()
+    {
+        var dialog = App.Current.ServiceProvider.GetRequiredService<Views.Dialogs.VirtualCardDialog>();
+        dialog.Owner = System.Windows.Application.Current.MainWindow;
+        dialog.ShowDialog();
+    }
 #endif
 }

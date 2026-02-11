@@ -207,11 +207,16 @@ namespace ICCardManager
             services.AddSingleton<DebugDataService>();
     #endif
 
+    #if DEBUG
+            // Issue #640: デバッグ時は MockCardReader を使用（仮想タッチ機能のため）
+            services.AddSingleton<MockCardReader>();
+            services.AddSingleton<ICardReader>(sp => sp.GetRequiredService<MockCardReader>());
+    #else
             // カードリーダーの自動選択:
             // 1. felicalib.dll が存在する場合: FelicaCardReader（残高・履歴読み取り可能）
             // 2. それ以外: PcScCardReader（IDm読み取りのみ）
-            // ※ デバッグ時にモックを使用する場合は appsettings.json で "UseRealCardReader": false に設定
             services.AddSingleton<ICardReader>(sp => CreateCardReader(sp));
+    #endif
             services.AddSingleton<ISoundPlayer, SoundPlayer>();
 
             // ViewModels
@@ -228,6 +233,10 @@ namespace ICCardManager
             services.AddTransient<LedgerEditViewModel>();
             services.AddTransient<LedgerDetailViewModel>();
             services.AddTransient<SystemManageViewModel>();
+    #if DEBUG
+            // Issue #640: 仮想タッチ設定ダイアログ
+            services.AddTransient<VirtualCardViewModel>();
+    #endif
 
             // Views
             services.AddTransient<MainWindow>();
@@ -243,6 +252,9 @@ namespace ICCardManager
             services.AddTransient<Views.Dialogs.LedgerDetailDialog>();
             services.AddTransient<Views.Dialogs.LedgerEditDialog>();
             services.AddTransient<Views.Dialogs.SystemManageDialog>();
+    #if DEBUG
+            services.AddTransient<Views.Dialogs.VirtualCardDialog>();
+    #endif
         }
 
         /// <summary>
