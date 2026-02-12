@@ -999,13 +999,13 @@ namespace ICCardManager.ViewModels
         /// 履歴インポートの開始日を取得（Issue #596）
         /// </summary>
         /// <remarks>
-        /// 新規購入: 当月1日
+        /// 新規購入: 当日（Issue #657: 月初めではなく購入日を使用）
         /// 繰越: 繰越月の翌月1日（SummaryGenerator.GetMidYearCarryoverDateを使用）
         /// </remarks>
-        private static DateTime GetImportFromDate(Views.Dialogs.CardRegistrationModeResult modeResult)
+        internal static DateTime GetImportFromDate(Views.Dialogs.CardRegistrationModeResult modeResult)
         {
             if (modeResult.IsNewPurchase)
-                return new DateTime(DateTime.Now.Year, DateTime.Now.Month, 1);
+                return DateTime.Today;
             else
                 return SummaryGenerator.GetMidYearCarryoverDate(
                     modeResult.CarryoverMonth!.Value, DateTime.Now);
