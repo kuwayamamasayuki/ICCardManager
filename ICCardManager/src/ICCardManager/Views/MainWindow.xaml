@@ -788,7 +788,9 @@
                             Visibility="{Binding Source={x:Static app:App.IsDebugBuild}, Converter={StaticResource BoolToVisibilityConverter}}">
                     <TextBlock Text="[DEBUG]" FontSize="{DynamicResource SmallFontSize}" Foreground="Red" VerticalAlignment="Center" Margin="0,0,10,0"/>
                     <Button Content="職員証" Command="{Binding SimulateStaffCardCommand}" Padding="10,3" Margin="0,0,5,0"/>
-                    <Button Content="交通系ICカード" Command="{Binding SimulateIcCardCommand}" Padding="10,3"/>
+                    <Button Content="交通系ICカード" Command="{Binding SimulateIcCardCommand}" Padding="10,3" Margin="0,0,5,0"/>
+                    <Button Content="仮想タッチ" Command="{Binding OpenVirtualCardCommand}" Padding="10,3"
+                            Background="#E8F5E9" ToolTip="履歴データを指定して仮想タッチを実行"/>
                 </StackPanel>
             </Grid>
         </Border>

@@ -332,7 +332,7 @@ namespace ICCardManager.Services
         /// バス利用がある場合は、呼び出し元でバス停名入力ダイアログを表示してください。
         /// </para>
         /// </remarks>
-        public async Task<LendingResult> ReturnAsync(string staffIdm, string cardIdm, IEnumerable<LedgerDetail> usageDetails)
+        public async Task<LendingResult> ReturnAsync(string staffIdm, string cardIdm, IEnumerable<LedgerDetail> usageDetails, bool skipDuplicateCheck = false)
         {
             var result = new LendingResult { OperationType = LendingOperationType.Return };
 
@@ -420,7 +420,7 @@ namespace ICCardManager.Services
                 {
                     // 利用日ごとにグループ化して履歴を作成
                     var createdLedgers = await CreateUsageLedgersAsync(
-                        cardIdm, lentRecord.StaffName ?? string.Empty, usageSinceLent);
+                        cardIdm, lentRecord.StaffName ?? string.Empty, usageSinceLent, skipDuplicateCheck);
 
                     result.CreatedLedgers.AddRange(createdLedgers);
 
@@ -513,11 +513,11 @@ namespace ICCardManager.Services
         /// </para>
         /// </remarks>
         private async Task<List<Ledger>> CreateUsageLedgersAsync(
-            string cardIdm, string staffName, List<LedgerDetail> details)
+            string cardIdm, string staffName, List<LedgerDetail> details, bool skipDuplicateCheck = false)
         {
             var createdLedgers = new List<Ledger>();
 
-            _logger.LogDebug("LendingService: CreateUsageLedgersAsync開始 - 履歴件数={Count}", details.Count);
+            _logger.LogDebug("LendingService: CreateUsageLedgersAsync開始 - 履歴件数={Count}, skipDuplicateCheck={Skip}", details.Count, skipDuplicateCheck);
 
             if (details.Count == 0)
             {
@@ -526,35 +526,39 @@ namespace ICCardManager.Services
             }
 
             // Issue #326: 既存の履歴詳細と照合して重複を除外
-            // 最も古い履歴の日付を基準に既存データを取得
-            var oldestDate = details
-                .Where(d => d.UseDate.HasValue)
-                .Select(d => d.UseDate!.Value)
-                .DefaultIfEmpty(DateTime.Today)
-                .Min();
-
-            var existingKeys = await _ledgerRepository.GetExistingDetailKeysAsync(cardIdm, oldestDate);
-
-            if (existingKeys.Count > 0)
+            // 仮想タッチの場合はスキップ（物理カード読み取りではないため重複は発生しない）
+            if (!skipDuplicateCheck)
             {
-                var originalCount = details.Count;
-                details = details
-                    .Where(d => !existingKeys.Contains((d.UseDate, d.Balance, d.IsCharge)))
-                    .ToList();
+                // 最も古い履歴の日付を基準に既存データを取得
+                var oldestDate = details
+                    .Where(d => d.UseDate.HasValue)
+                    .Select(d => d.UseDate!.Value)
+                    .DefaultIfEmpty(DateTime.Today)
+                    .Min();
 
-                var removedCount = originalCount - details.Count;
-                if (removedCount > 0)
+                var existingKeys = await _ledgerRepository.GetExistingDetailKeysAsync(cardIdm, oldestDate);
+
+                if (existingKeys.Count > 0)
                 {
-                    _logger.LogInformation(
-                        "LendingService: 重複履歴を除外しました（除外件数={RemovedCount}, 残り件数={RemainingCount}）",
-                        removedCount, details.Count);
-                }
-            }
+                    var originalCount = details.Count;
+                    details = details
+                        .Where(d => !existingKeys.Contains((d.UseDate, d.Balance, d.IsCharge)))
+                        .ToList();
 
-            if (details.Count == 0)
-            {
-                _logger.LogDebug("LendingService: 重複除外後、登録対象の履歴がありません");
-                return createdLedgers;
+                    var removedCount = originalCount - details.Count;
+                    if (removedCount > 0)
+                    {
+                        _logger.LogInformation(
+                            "LendingService: 重複履歴を除外しました（除外件数={RemovedCount}, 残り件数={RemainingCount}）",
+                            removedCount, details.Count);
+                    }
+                }
+
+                if (details.Count == 0)
+                {
+                    _logger.LogDebug("LendingService: 重複除外後、登録対象の履歴がありません");
+                    return createdLedgers;
+                }
             }
 
             // 日付でグループ化
