@@ -662,4 +662,49 @@ public class CardManageViewModelTests
     }
 
     #endregion
+
+    #region Issue #657: GetImportFromDateテスト
+
+    /// <summary>
+    /// 新規購入時、GetImportFromDateが当日を返すこと（月初めではない）
+    /// </summary>
+    [Fact]
+    public void GetImportFromDate_NewPurchase_ShouldReturnToday()
+    {
+        // Arrange
+        var modeResult = new ICCardManager.Views.Dialogs.CardRegistrationModeResult
+        {
+            IsNewPurchase = true
+        };
+
+        // Act
+        var result = CardManageViewModel.GetImportFromDate(modeResult);
+
+        // Assert
+        result.Should().Be(DateTime.Today);
+    }
+
+    /// <summary>
+    /// 繰越時、GetImportFromDateがSummaryGenerator.GetMidYearCarryoverDateと同じ値を返すこと
+    /// </summary>
+    [Fact]
+    public void GetImportFromDate_Carryover_ShouldReturnMidYearCarryoverDate()
+    {
+        // Arrange
+        var carryoverMonth = 10; // 10月繰越
+        var modeResult = new ICCardManager.Views.Dialogs.CardRegistrationModeResult
+        {
+            IsNewPurchase = false,
+            CarryoverMonth = carryoverMonth
+        };
+        var expected = SummaryGenerator.GetMidYearCarryoverDate(carryoverMonth, DateTime.Now);
+
+        // Act
+        var result = CardManageViewModel.GetImportFromDate(modeResult);
+
+        // Assert
+        result.Should().Be(expected);
+    }
+
+    #endregion
 }
