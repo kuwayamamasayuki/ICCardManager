@@ -54,6 +54,21 @@
                            FontSize="{DynamicResource SmallFontSize}"
                            Foreground="#666"
                            Margin="20,5,0,0"/>
+
+                <!-- 購入日選択（Issue #658） -->
+                <StackPanel x:Name="NewPurchaseOptionsPanel" Margin="20,10,0,0" IsEnabled="True">
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="購入日:"
+                                   FontSize="{DynamicResource BaseFontSize}"
+                                   VerticalAlignment="Center"
+                                   Margin="0,0,8,0"/>
+                        <DatePicker x:Name="PurchaseDatePicker"
+                                    Width="130"
+                                    Padding="5"
+                                    FontSize="{DynamicResource BaseFontSize}"
+                                    AutomationProperties.Name="購入日の選択"/>
+                    </StackPanel>
+                </StackPanel>
             </StackPanel>
         </Border>
 

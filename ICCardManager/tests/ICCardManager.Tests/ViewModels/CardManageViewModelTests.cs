@@ -707,4 +707,49 @@ public class CardManageViewModelTests
     }
 
     #endregion
+
+    #region Issue #658: 新規購入カードに購入日を指定可能にする
+
+    /// <summary>
+    /// 購入日を明示的に指定した場合、GetImportFromDateがその日付を返すこと
+    /// </summary>
+    [Fact]
+    public void GetImportFromDate_NewPurchaseWithExplicitDate_ShouldReturnSpecifiedDate()
+    {
+        // Arrange
+        var purchaseDate = new DateTime(2026, 2, 5);
+        var modeResult = new ICCardManager.Views.Dialogs.CardRegistrationModeResult
+        {
+            IsNewPurchase = true,
+            PurchaseDate = purchaseDate
+        };
+
+        // Act
+        var result = CardManageViewModel.GetImportFromDate(modeResult);
+
+        // Assert
+        result.Should().Be(purchaseDate.Date);
+    }
+
+    /// <summary>
+    /// 購入日がnull（未指定）の場合、GetImportFromDateが当日を返すこと（後方互換性）
+    /// </summary>
+    [Fact]
+    public void GetImportFromDate_NewPurchaseWithNullDate_ShouldReturnToday()
+    {
+        // Arrange
+        var modeResult = new ICCardManager.Views.Dialogs.CardRegistrationModeResult
+        {
+            IsNewPurchase = true,
+            PurchaseDate = null
+        };
+
+        // Act
+        var result = CardManageViewModel.GetImportFromDate(modeResult);
+
+        // Assert
+        result.Should().Be(DateTime.Today);
+    }
+
+    #endregion
 }
