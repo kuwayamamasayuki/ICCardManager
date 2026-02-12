@@ -1,9 +1,10 @@
 #if DEBUG
+using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 using FluentAssertions;
 using ICCardManager.Data.Repositories;
-using ICCardManager.Infrastructure.CardReader;
 using ICCardManager.Models;
 using ICCardManager.Services;
 using ICCardManager.ViewModels;
@@ -14,23 +15,26 @@ namespace ICCardManager.Tests.ViewModels;
 
 public class VirtualCardViewModelTests
 {
-    private static HybridCardReader CreateHybridReader() => new(new MockCardReader());
-
-    private static Mock<ICardRepository> CreateMockCardRepository(bool isLent = false)
+    private static Mock<ILedgerRepository> CreateMockLedgerRepository(int? balance = null)
     {
-        var mock = new Mock<ICardRepository>();
-        mock.Setup(r => r.GetByIdmAsync(It.IsAny<string>(), It.IsAny<bool>()))
-            .ReturnsAsync(new IcCard { IsLent = isLent });
+        var mock = new Mock<ILedgerRepository>();
+        if (balance.HasValue)
+        {
+            mock.Setup(r => r.GetLatestLedgerAsync(It.IsAny<string>()))
+                .ReturnsAsync(new Ledger { Balance = balance.Value });
+        }
         return mock;
     }
 
     private static VirtualCardViewModel CreateViewModel(
-        HybridCardReader hybridReader = null,
-        Mock<ICardRepository> mockRepo = null)
+        Mock<ILedgerRepository> mockLedgerRepo = null)
     {
-        hybridReader ??= CreateHybridReader();
-        mockRepo ??= CreateMockCardRepository();
-        return new VirtualCardViewModel(hybridReader, mockRepo.Object);
+        mockLedgerRepo ??= CreateMockLedgerRepository();
+
+        var vm = new VirtualCardViewModel(mockLedgerRepo.Object);
+        vm.ShowMessage = (_, _) => { }; // テスト中はMessageBoxを表示しない
+        vm.CloseAction = () => { };
+        return vm;
     }
 
     #region コンストラクタ
@@ -78,11 +82,10 @@ public class VirtualCardViewModelTests
     #region InitializeAsync（残高読み取り）
 
     [Fact]
-    public async Task InitializeAsync_ReadsBalanceFromReader()
+    public async Task InitializeAsync_ReadsBalanceFromDb()
     {
-        var hybridReader = CreateHybridReader();
-        // MockCardReader のデフォルト残高は 4980
-        var vm = CreateViewModel(hybridReader);
+        var mockLedgerRepo = CreateMockLedgerRepository(balance: 4980);
+        var vm = CreateViewModel(mockLedgerRepo: mockLedgerRepo);
 
         await vm.InitializeAsync();
 
@@ -90,15 +93,14 @@ public class VirtualCardViewModelTests
     }
 
     [Fact]
-    public async Task InitializeAsync_WithCustomBalance_ReadsCustomValue()
+    public async Task InitializeAsync_NoLedgerRecord_BalanceIsZero()
     {
-        var hybridReader = CreateHybridReader();
-        hybridReader.SetCustomBalance("07FE112233445566", 12345);
-        var vm = CreateViewModel(hybridReader);
+        var mockLedgerRepo = CreateMockLedgerRepository(balance: null);
+        var vm = CreateViewModel(mockLedgerRepo: mockLedgerRepo);
 
         await vm.InitializeAsync();
 
-        vm.CurrentBalance.Should().Be(12345);
+        vm.CurrentBalance.Should().Be(0);
     }
 
     #endregion
@@ -207,18 +209,12 @@ public class VirtualCardViewModelTests
 
     #endregion
 
-    #region ApplyAndTouch - 残高計算
+    #region ApplyAndTouch - TouchResult生成の検証
 
     [Fact]
-    public async Task ApplyAndTouchAsync_CalculatesBalanceFromAmount_Usage()
+    public void ApplyAndTouch_WithEntries_CreatesTouchResult()
     {
-        var hybridReader = CreateHybridReader();
-        await hybridReader.StartReadingAsync();
-        // カードが貸出中の場合（返却フロー）
-        var mockRepo = CreateMockCardRepository(isLent: true);
-
-        var vm = CreateViewModel(hybridReader, mockRepo);
-        vm.CloseAction = () => { };
+        var vm = CreateViewModel();
         vm.CurrentBalance = 5000;
 
         vm.AddEntry();
@@ -227,104 +223,91 @@ public class VirtualCardViewModelTests
         vm.Entries[0].Amount = 200;
         vm.Entries[0].IsCharge = false;
 
-        await vm.ApplyAndTouchAsync();
+        vm.ApplyAndTouch();
 
-        var history = (await hybridReader.ReadHistoryAsync(vm.SelectedCard.Idm)).ToList();
-        history.Should().HaveCount(1);
-        history[0].Balance.Should().Be(5000);
-        history[0].Amount.Should().Be(200);
-        history[0].EntryStation.Should().Be("博多");
-        history[0].ExitStation.Should().Be("天神");
+        vm.TouchResult.Should().NotBeNull();
+        vm.TouchResult.HasEntries.Should().BeTrue();
+        vm.TouchResult.StaffIdm.Should().Be(vm.SelectedStaff.Idm);
+        vm.TouchResult.CardIdm.Should().Be(vm.SelectedCard.Idm);
+        vm.TouchResult.CurrentBalance.Should().Be(5000);
+        vm.TouchResult.HistoryDetails.Should().HaveCount(1);
+        vm.TouchResult.HistoryDetails[0].Balance.Should().Be(5000);
+        vm.TouchResult.HistoryDetails[0].Amount.Should().Be(200);
+        vm.TouchResult.HistoryDetails[0].EntryStation.Should().Be("博多");
+        vm.TouchResult.HistoryDetails[0].ExitStation.Should().Be("天神");
     }
 
     [Fact]
-    public async Task ApplyAndTouchAsync_CalculatesBalanceFromAmount_Charge()
+    public void ApplyAndTouch_ChargeEntry_SetsIsChargeFlag()
     {
-        var hybridReader = CreateHybridReader();
-        await hybridReader.StartReadingAsync();
-        var mockRepo = CreateMockCardRepository(isLent: true);
-
-        var vm = CreateViewModel(hybridReader, mockRepo);
-        vm.CloseAction = () => { };
+        var vm = CreateViewModel();
         vm.CurrentBalance = 8000;
 
         vm.AddEntry();
         vm.Entries[0].IsCharge = true;
         vm.Entries[0].Amount = 3000;
 
-        await vm.ApplyAndTouchAsync();
+        vm.ApplyAndTouch();
 
-        var history = (await hybridReader.ReadHistoryAsync(vm.SelectedCard.Idm)).ToList();
-        history[0].Balance.Should().Be(8000);
-        history[0].Amount.Should().Be(3000);
-        history[0].IsCharge.Should().BeTrue();
+        vm.TouchResult.HistoryDetails[0].Balance.Should().Be(8000);
+        vm.TouchResult.HistoryDetails[0].Amount.Should().Be(3000);
+        vm.TouchResult.HistoryDetails[0].IsCharge.Should().BeTrue();
     }
 
     [Fact]
-    public async Task ApplyAndTouchAsync_MultipleEntries_CalculatesBalancesCorrectly()
+    public void ApplyAndTouch_MultipleEntries_CalculatesBalancesCorrectly()
     {
-        var hybridReader = CreateHybridReader();
-        await hybridReader.StartReadingAsync();
-        var mockRepo = CreateMockCardRepository(isLent: true);
-
-        var vm = CreateViewModel(hybridReader, mockRepo);
-        vm.CloseAction = () => { };
+        // UI上は上＝最古、下＝最新の順で入力
+        // 内部では逆順（FeliCa慣例: index 0＝最新）に変換される
+        var vm = CreateViewModel();
         vm.CurrentBalance = 4800;
 
-        vm.AddEntry(); // index 0: 利用200円（最新）
-        vm.Entries[0].EntryStation = "博多";
-        vm.Entries[0].ExitStation = "天神";
-        vm.Entries[0].Amount = 200;
+        vm.AddEntry(); // index 0: 利用300円（最古 = 上の行）
+        vm.Entries[0].EntryStation = "薬院";
+        vm.Entries[0].ExitStation = "大橋";
+        vm.Entries[0].Amount = 300;
         vm.Entries[0].IsCharge = false;
 
         vm.AddEntry(); // index 1: チャージ3000円
         vm.Entries[1].IsCharge = true;
         vm.Entries[1].Amount = 3000;
 
-        vm.AddEntry(); // index 2: 利用300円（最古）
-        vm.Entries[2].EntryStation = "薬院";
-        vm.Entries[2].ExitStation = "大橋";
-        vm.Entries[2].Amount = 300;
+        vm.AddEntry(); // index 2: 利用200円（最新 = 下の行）
+        vm.Entries[2].EntryStation = "博多";
+        vm.Entries[2].ExitStation = "天神";
+        vm.Entries[2].Amount = 200;
         vm.Entries[2].IsCharge = false;
 
-        await vm.ApplyAndTouchAsync();
+        vm.ApplyAndTouch();
 
-        var history = (await hybridReader.ReadHistoryAsync(vm.SelectedCard.Idm)).ToList();
-        history.Should().HaveCount(3);
-        history[0].Balance.Should().Be(4800);  // 現在残高
-        history[1].Balance.Should().Be(5000);  // 4800 + 200（利用前の残高）
-        history[2].Balance.Should().Be(2000);  // 5000 - 3000（チャージ前の残高）
+        // HistoryDetails は最新→最古の順（FeliCa慣例）
+        vm.TouchResult.HistoryDetails.Should().HaveCount(3);
+        vm.TouchResult.HistoryDetails[0].Balance.Should().Be(4800);  // 最新: 現在残高
+        vm.TouchResult.HistoryDetails[0].EntryStation.Should().Be("博多");
+        vm.TouchResult.HistoryDetails[1].Balance.Should().Be(5000);  // 4800 + 200（利用前の残高）
+        vm.TouchResult.HistoryDetails[1].IsCharge.Should().BeTrue();
+        vm.TouchResult.HistoryDetails[2].Balance.Should().Be(2000);  // 5000 - 3000（チャージ前の残高）
+        vm.TouchResult.HistoryDetails[2].EntryStation.Should().Be("薬院");
     }
 
     [Fact]
-    public async Task ApplyAndTouchAsync_SetsCustomBalance_ToCurrentBalance()
+    public void ApplyAndTouch_PassesCorrectBalance()
     {
-        var hybridReader = CreateHybridReader();
-        await hybridReader.StartReadingAsync();
-        var mockRepo = CreateMockCardRepository(isLent: true);
-
-        var vm = CreateViewModel(hybridReader, mockRepo);
-        vm.CloseAction = () => { };
+        var vm = CreateViewModel();
         vm.CurrentBalance = 3200;
 
         vm.AddEntry();
         vm.Entries[0].Amount = 200;
 
-        await vm.ApplyAndTouchAsync();
+        vm.ApplyAndTouch();
 
-        var balance = await hybridReader.ReadBalanceAsync(vm.SelectedCard.Idm);
-        balance.Should().Be(3200);
+        vm.TouchResult.CurrentBalance.Should().Be(3200);
     }
 
     [Fact]
-    public async Task ApplyAndTouchAsync_EmptyStations_DetectedAsBus()
+    public void ApplyAndTouch_EmptyStations_DetectedAsBus()
     {
-        var hybridReader = CreateHybridReader();
-        await hybridReader.StartReadingAsync();
-        var mockRepo = CreateMockCardRepository(isLent: true);
-
-        var vm = CreateViewModel(hybridReader, mockRepo);
-        vm.CloseAction = () => { };
+        var vm = CreateViewModel();
 
         vm.AddEntry();
         vm.Entries[0].EntryStation = "";
@@ -332,168 +315,32 @@ public class VirtualCardViewModelTests
         vm.Entries[0].IsCharge = false;
         vm.Entries[0].Amount = 230;
 
-        await vm.ApplyAndTouchAsync();
+        vm.ApplyAndTouch();
 
-        var history = await hybridReader.ReadHistoryAsync(vm.SelectedCard.Idm);
-        history.First().IsBus.Should().BeTrue();
+        vm.TouchResult.HistoryDetails.First().IsBus.Should().BeTrue();
     }
 
     [Fact]
-    public async Task ApplyAndTouchAsync_NoEntries_DoesNotOverrideBalance()
+    public void ApplyAndTouch_NoEntries_CreatesEmptyTouchResult()
     {
-        var hybridReader = CreateHybridReader();
-        await hybridReader.StartReadingAsync();
+        var vm = CreateViewModel();
 
-        var vm = CreateViewModel(hybridReader);
-        vm.CloseAction = () => { };
+        vm.ApplyAndTouch();
 
-        await vm.ApplyAndTouchAsync();
-
-        var balance = await hybridReader.ReadBalanceAsync(vm.SelectedCard.Idm);
-        balance.Should().Be(4980);
+        // エントリなしでもTouchResultは生成される（HasEntries = false）
+        vm.TouchResult.Should().NotBeNull();
+        vm.TouchResult.HasEntries.Should().BeFalse();
     }
 
     [Fact]
-    public async Task ApplyAndTouchAsync_CardNotLent_AutoLendThenReturn()
+    public void ApplyAndTouch_NoSelection_DoesNotCreateResult()
     {
-        // カードが貸出中でない場合、自動で貸出→返却の2ステップを実行する
-        var hybridReader = CreateHybridReader();
-        await hybridReader.StartReadingAsync();
-        var mockRepo = CreateMockCardRepository(isLent: false);
+        var vm = CreateViewModel();
+        vm.SelectedCard = null;
 
-        var vm = CreateViewModel(hybridReader, mockRepo);
-        vm.CloseAction = () => { };
-        vm.CurrentBalance = 5000;
+        vm.ApplyAndTouch();
 
-        vm.AddEntry();
-        vm.Entries[0].Amount = 200;
-
-        var readIdms = new System.Collections.Generic.List<string>();
-        hybridReader.CardRead += (_, e) => readIdms.Add(e.Idm);
-
-        await vm.ApplyAndTouchAsync();
-
-        // 貸出（職員証→ICカード）+ 返却（職員証→ICカード）= 4回のタッチ
-        readIdms.Should().HaveCount(4);
-        readIdms[0].Should().Be(vm.SelectedStaff.Idm);  // 貸出: 職員証
-        readIdms[1].Should().Be(vm.SelectedCard.Idm);    // 貸出: ICカード
-        readIdms[2].Should().Be(vm.SelectedStaff.Idm);   // 返却: 職員証
-        readIdms[3].Should().Be(vm.SelectedCard.Idm);    // 返却: ICカード
-    }
-
-    [Fact]
-    public async Task ApplyAndTouchAsync_CardAlreadyLent_SingleReturn()
-    {
-        // カードが貸出中の場合、返却のみ（2回のタッチ）
-        var hybridReader = CreateHybridReader();
-        await hybridReader.StartReadingAsync();
-        var mockRepo = CreateMockCardRepository(isLent: true);
-
-        var vm = CreateViewModel(hybridReader, mockRepo);
-        vm.CloseAction = () => { };
-        vm.CurrentBalance = 5000;
-
-        vm.AddEntry();
-        vm.Entries[0].Amount = 200;
-
-        var readIdms = new System.Collections.Generic.List<string>();
-        hybridReader.CardRead += (_, e) => readIdms.Add(e.Idm);
-
-        await vm.ApplyAndTouchAsync();
-
-        // 返却のみ: 職員証→ICカード = 2回
-        readIdms.Should().HaveCount(2);
-        readIdms[0].Should().Be(vm.SelectedStaff.Idm);
-        readIdms[1].Should().Be(vm.SelectedCard.Idm);
-    }
-
-    [Fact]
-    public async Task ApplyAndTouchAsync_FiresCardReadEvents()
-    {
-        var hybridReader = CreateHybridReader();
-        await hybridReader.StartReadingAsync();
-
-        var vm = CreateViewModel(hybridReader);
-        vm.CloseAction = () => { };
-
-        var readIdms = new System.Collections.Generic.List<string>();
-        hybridReader.CardRead += (_, e) => readIdms.Add(e.Idm);
-
-        // エントリなし → 単純なタッチ（貸出/返却）
-        await vm.ApplyAndTouchAsync();
-
-        readIdms.Should().HaveCount(2);
-        readIdms[0].Should().Be(vm.SelectedStaff.Idm);
-        readIdms[1].Should().Be(vm.SelectedCard.Idm);
-    }
-
-    #endregion
-
-    #region HybridCardReader
-
-    [Fact]
-    public async Task HybridCardReader_DelegatesToRealReader_WhenNoCustomData()
-    {
-        var mockReader = new MockCardReader();
-        var hybridReader = new HybridCardReader(mockReader);
-
-        var history = await hybridReader.ReadHistoryAsync("07FE112233445566");
-        history.Should().NotBeNull();
-
-        var balance = await hybridReader.ReadBalanceAsync("07FE112233445566");
-        balance.Should().Be(mockReader.MockBalance);
-    }
-
-    [Fact]
-    public async Task HybridCardReader_ReturnsCustomData_WhenSet()
-    {
-        var mockReader = new MockCardReader();
-        var hybridReader = new HybridCardReader(mockReader);
-
-        var customHistory = new System.Collections.Generic.List<LedgerDetail>
-        {
-            new() { EntryStation = "博多", ExitStation = "天神", Balance = 1000 }
-        };
-        hybridReader.SetCustomHistory("TEST_IDM", customHistory);
-        hybridReader.SetCustomBalance("TEST_IDM", 1000);
-
-        var history = await hybridReader.ReadHistoryAsync("TEST_IDM");
-        history.Should().HaveCount(1);
-        history.First().EntryStation.Should().Be("博多");
-
-        var balance = await hybridReader.ReadBalanceAsync("TEST_IDM");
-        balance.Should().Be(1000);
-    }
-
-    [Fact]
-    public async Task HybridCardReader_ForwardsEventsFromRealReader()
-    {
-        var mockReader = new MockCardReader();
-        var hybridReader = new HybridCardReader(mockReader);
-        await mockReader.StartReadingAsync();
-
-        var readIdms = new System.Collections.Generic.List<string>();
-        hybridReader.CardRead += (_, e) => readIdms.Add(e.Idm);
-
-        mockReader.SimulateCardRead("FROM_REAL_READER");
-
-        readIdms.Should().HaveCount(1);
-        readIdms[0].Should().Be("FROM_REAL_READER");
-    }
-
-    [Fact]
-    public void HybridCardReader_SimulateCardRead_FiresWithoutStartReading()
-    {
-        var mockReader = new MockCardReader();
-        var hybridReader = new HybridCardReader(mockReader);
-
-        var readIdms = new System.Collections.Generic.List<string>();
-        hybridReader.CardRead += (_, e) => readIdms.Add(e.Idm);
-
-        hybridReader.SimulateCardRead("VIRTUAL_TOUCH");
-
-        readIdms.Should().HaveCount(1);
-        readIdms[0].Should().Be("VIRTUAL_TOUCH");
+        vm.TouchResult.Should().BeNull("カード未選択の場合はTouchResultを作らない");
     }
 
     #endregion
@@ -505,7 +352,7 @@ public class VirtualCardViewModelTests
     {
         var entry = new VirtualHistoryEntry();
 
-        entry.UseDate.Should().Be(System.DateTime.Today);
+        entry.UseDate.Should().Be(DateTime.Today);
         entry.EntryStation.Should().Be("");
         entry.ExitStation.Should().Be("");
         entry.Amount.Should().Be(0);

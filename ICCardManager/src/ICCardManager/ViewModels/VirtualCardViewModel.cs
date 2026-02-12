@@ -26,14 +26,25 @@ public class IdmSelectItem
 }
 
 /// <summary>
+/// 仮想タッチの実行結果（ダイアログからMainViewModelへの受け渡し用）
+/// </summary>
+internal class VirtualTouchResult
+{
+    public string StaffIdm { get; set; }
+    public string CardIdm { get; set; }
+    public int CurrentBalance { get; set; }
+    public List<LedgerDetail> HistoryDetails { get; set; }
+    public bool HasEntries => HistoryDetails?.Count > 0;
+}
+
+/// <summary>
 /// 仮想ICカードタッチ設定ダイアログのViewModel（Issue #640）
 /// </summary>
 public partial class VirtualCardViewModel : ObservableObject
 {
     private const int MaxEntries = 20;
 
-    private readonly HybridCardReader _hybridCardReader;
-    private readonly ICardRepository _cardRepository;
+    private readonly ILedgerRepository _ledgerRepository;
 
     /// <summary>
     /// 履歴エントリの一覧
@@ -79,10 +90,25 @@ public partial class VirtualCardViewModel : ObservableObject
     /// </summary>
     public Action CloseAction { get; set; }
 
-    public VirtualCardViewModel(HybridCardReader hybridCardReader, ICardRepository cardRepository)
+    /// <summary>
+    /// メッセージ表示用デリゲート（テストでの差し替え用）
+    /// </summary>
+    internal Action<string, string> ShowMessage { get; set; } =
+        (message, title) => MessageBox.Show(message, title, MessageBoxButton.OK, MessageBoxImage.Warning);
+
+    /// <summary>
+    /// タッチ実行結果（ダイアログ閉鎖後にMainViewModelが参照する）
+    /// nullの場合はキャンセル扱い
+    /// </summary>
+    internal VirtualTouchResult TouchResult { get; private set; }
+
+    /// <summary>
+    /// DI用コンストラクタ
+    /// </summary>
+    public VirtualCardViewModel(
+        ILedgerRepository ledgerRepository)
     {
-        _hybridCardReader = hybridCardReader;
-        _cardRepository = cardRepository;
+        _ledgerRepository = ledgerRepository;
 
         // DebugDataService のテストデータから表示名を構築
         CardSelectItems = DebugDataService.TestCardList
@@ -100,7 +126,7 @@ public partial class VirtualCardViewModel : ObservableObject
     }
 
     /// <summary>
-    /// ダイアログ表示時の初期化（選択されたカードの現在残高を読み取る）
+    /// ダイアログ表示時の初期化（選択されたカードの現在残高をDBから読み取る）
     /// </summary>
     public async Task InitializeAsync()
     {
@@ -111,25 +137,24 @@ public partial class VirtualCardViewModel : ObservableObject
     }
 
     /// <summary>
-    /// 指定IDmのカード残高を読み取って CurrentBalance に反映
+    /// 指定IDmのカード残高をDBから読み取って CurrentBalance に反映
     /// </summary>
     private async Task LoadCurrentBalanceAsync(string idm)
     {
         try
         {
-            var balance = await _hybridCardReader.ReadBalanceAsync(idm);
-            if (balance.HasValue)
+            var latestLedger = await _ledgerRepository.GetLatestLedgerAsync(idm);
+            if (latestLedger != null)
             {
-                CurrentBalance = balance.Value;
+                CurrentBalance = latestLedger.Balance;
                 return;
             }
         }
         catch
         {
-            // 残高読み取り失敗は無視
+            // DB読み取り失敗は無視
         }
 
-        // 読み取れなかった場合はデフォルト値
         CurrentBalance = 0;
     }
 
@@ -175,15 +200,15 @@ public partial class VirtualCardViewModel : ObservableObject
     }
 
     /// <summary>
-    /// 設定を適用してカードタッチをシミュレート
+    /// 入力データをTouchResultに格納してダイアログを閉じる。
+    /// 実際の貸出・返却処理はMainViewModelがShowDialog()後に実行する。
     /// </summary>
     [RelayCommand]
-    public async Task ApplyAndTouchAsync()
+    public void ApplyAndTouch()
     {
         if (SelectedCard == null || SelectedStaff == null)
         {
-            MessageBox.Show("カードと職員を選択してください。", "仮想タッチ",
-                MessageBoxButton.OK, MessageBoxImage.Warning);
+            ShowMessage("カードと職員を選択してください。", "仮想タッチ");
             return;
         }
 
@@ -191,11 +216,12 @@ public partial class VirtualCardViewModel : ObservableObject
         var staffIdm = SelectedStaff.Idm;
 
         // 履歴データを LedgerDetail に変換し、残高を金額から自動計算
-        // エントリは新しい順（index 0 が最新）で、各エントリの Balance は取引後の残高
+        // UI上は上＝最古、下＝最新の順で入力されるが、
+        // FeliCa履歴の慣例（index 0＝最新）に合わせて逆順にする
         var historyDetails = new List<LedgerDetail>();
         var balance = CurrentBalance;
 
-        foreach (var e in Entries)
+        foreach (var e in Entries.Reverse())
         {
             historyDetails.Add(new LedgerDetail
             {
@@ -212,45 +238,21 @@ public partial class VirtualCardViewModel : ObservableObject
 
             // 次のエントリ（1つ前の取引）の残高を逆算
             if (e.IsCharge)
-                balance -= e.Amount; // チャージ前の残高 = チャージ後 - チャージ額
+                balance -= e.Amount;
             else
-                balance += e.Amount; // 利用前の残高 = 利用後 + 利用額
+                balance += e.Amount;
         }
 
-        // エントリがある場合のみカスタム履歴・残高を設定
-        if (historyDetails.Count > 0)
+        // 結果を格納（実処理はMainViewModelが行う）
+        TouchResult = new VirtualTouchResult
         {
-            _hybridCardReader.SetCustomHistory(cardIdm, historyDetails);
-            _hybridCardReader.SetCustomBalance(cardIdm, CurrentBalance);
+            StaffIdm = staffIdm,
+            CardIdm = cardIdm,
+            CurrentBalance = CurrentBalance,
+            HistoryDetails = historyDetails
+        };
 
-            // カードが貸出中でない場合は、先に貸出してから返却する
-            // （履歴は返却処理時にのみ読み取られるため）
-            var card = await _cardRepository.GetByIdmAsync(cardIdm);
-            if (card != null && !card.IsLent)
-            {
-                CloseAction?.Invoke();
-
-                // 1. 貸出: 職員証タッチ → ICカードタッチ
-                _hybridCardReader.SimulateCardRead(staffIdm);
-                await Task.Delay(500);
-                _hybridCardReader.SimulateCardRead(cardIdm);
-                await Task.Delay(1500); // 貸出処理の完了を待つ
-
-                // 2. 返却: 職員証タッチ → ICカードタッチ（ここで履歴が読み取られる）
-                _hybridCardReader.SimulateCardRead(staffIdm);
-                await Task.Delay(500);
-                _hybridCardReader.SimulateCardRead(cardIdm);
-                return;
-            }
-        }
-
-        // ダイアログを閉じる
         CloseAction?.Invoke();
-
-        // 職員証タッチ → 少し待機 → ICカードタッチ
-        _hybridCardReader.SimulateCardRead(staffIdm);
-        await Task.Delay(500);
-        _hybridCardReader.SimulateCardRead(cardIdm);
     }
 }
 

@@ -473,6 +473,7 @@ public partial class MainViewModel : ViewModelBase
         }
     }
 
+
     /// <summary>
     /// 貸出中カードを更新
     /// </summary>
@@ -1872,11 +1873,84 @@ public partial class MainViewModel : ViewModelBase
     /// デバッグ用: 仮想タッチ設定ダイアログを開く（Issue #640）
     /// </summary>
     [RelayCommand]
-    public void OpenVirtualCard()
+    public async Task OpenVirtualCardAsync()
     {
         var dialog = App.Current.ServiceProvider.GetRequiredService<Views.Dialogs.VirtualCardDialog>();
         dialog.Owner = System.Windows.Application.Current.MainWindow;
         dialog.ShowDialog();
+
+        // ダイアログを閉じた後、TouchResult を参照して処理を実行
+        if (dialog.DataContext is VirtualCardViewModel vm && vm.TouchResult != null)
+        {
+            await ProcessVirtualTouchAsync(vm.TouchResult);
+        }
+
+        await RefreshLentCardsAsync();
+        await RefreshDashboardAsync();
+    }
+
+    /// <summary>
+    /// 仮想タッチの結果を処理する（ShowDialog後に呼び出される）
+    /// </summary>
+    private async Task ProcessVirtualTouchAsync(VirtualTouchResult touchResult)
+    {
+        try
+        {
+            var staffIdm = touchResult.StaffIdm;
+            var cardIdm = touchResult.CardIdm;
+
+            if (touchResult.HasEntries)
+            {
+                // エントリがある場合: LendAsync → ReturnAsync で履歴を直接DBに反映
+                var card = await _cardRepository.GetByIdmAsync(cardIdm);
+
+                if (card == null)
+                {
+                    MessageBox.Show($"カードがデータベースに登録されていません。\nIDm: {cardIdm}",
+                        "仮想タッチ", MessageBoxButton.OK, MessageBoxImage.Error);
+                    return;
+                }
+
+                if (!card.IsLent)
+                {
+                    var lendResult = await _lendingService.LendAsync(staffIdm, cardIdm, touchResult.CurrentBalance);
+                    if (!lendResult.Success)
+                    {
+                        MessageBox.Show($"貸出処理に失敗しました: {lendResult.ErrorMessage}", "仮想タッチ",
+                            MessageBoxButton.OK, MessageBoxImage.Error);
+                        return;
+                    }
+                }
+
+                // 仮想タッチは物理カード読み取りではないため、重複チェックをスキップ
+                var returnResult = await _lendingService.ReturnAsync(staffIdm, cardIdm, touchResult.HistoryDetails, skipDuplicateCheck: true);
+                if (!returnResult.Success)
+                {
+                    MessageBox.Show($"返却処理に失敗しました: {returnResult.ErrorMessage}", "仮想タッチ",
+                        MessageBoxButton.OK, MessageBoxImage.Error);
+                    return;
+                }
+
+                // 返却成功: 通常の返却と同じUI通知を表示
+                _soundPlayer.Play(SoundType.Return);
+                _toastNotificationService.ShowReturnNotification(card.CardType, card.CardNumber, returnResult.Balance, returnResult.IsLowBalance);
+            }
+            else
+            {
+                // エントリなし: SimulateCardRead で通常の貸出タッチをシミュレート
+                if (_cardReader is HybridCardReader hybridReader)
+                {
+                    hybridReader.SimulateCardRead(staffIdm);
+                    await Task.Delay(500);
+                    hybridReader.SimulateCardRead(cardIdm);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show($"仮想タッチ処理でエラーが発生しました:\n{ex.Message}", "仮想タッチエラー",
+                MessageBoxButton.OK, MessageBoxImage.Error);
+        }
     }
 #endif
 }
