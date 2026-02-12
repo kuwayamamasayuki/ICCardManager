@@ -927,7 +927,8 @@ namespace ICCardManager.ViewModels
                     }
                     else if (modeResult.IsNewPurchase)
                     {
-                        recordDate = now;
+                        // Issue #658: 購入日が指定されている場合はその日付を使用
+                        recordDate = modeResult.PurchaseDate?.Date ?? now;
                     }
                     else
                     {
@@ -1005,7 +1006,7 @@ namespace ICCardManager.ViewModels
         internal static DateTime GetImportFromDate(Views.Dialogs.CardRegistrationModeResult modeResult)
         {
             if (modeResult.IsNewPurchase)
-                return DateTime.Today;
+                return modeResult.PurchaseDate?.Date ?? DateTime.Today;
             else
                 return SummaryGenerator.GetMidYearCarryoverDate(
                     modeResult.CarryoverMonth!.Value, DateTime.Now);

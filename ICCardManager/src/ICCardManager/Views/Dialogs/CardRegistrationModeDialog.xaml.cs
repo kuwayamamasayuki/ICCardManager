@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Windows;
 
@@ -22,6 +23,11 @@ namespace ICCardManager.Views.Dialogs
         /// 開始ページ番号。デフォルトは1
         /// </summary>
         public int StartingPageNumber { get; set; } = 1;
+
+        /// <summary>
+        /// 購入日（Issue #658）。新規購入モード時に指定可能。nullの場合は当日
+        /// </summary>
+        public DateTime? PurchaseDate { get; set; }
     }
 
     /// <summary>
@@ -61,6 +67,13 @@ namespace ICCardManager.Views.Dialogs
         {
             InitializeComponent();
             InitializeMonthComboBox();
+            InitializePurchaseDatePicker();
+        }
+
+        private void InitializePurchaseDatePicker()
+        {
+            PurchaseDatePicker.SelectedDate = DateTime.Today;
+            PurchaseDatePicker.DisplayDateEnd = DateTime.Today;
         }
 
         private void InitializeMonthComboBox()
@@ -80,6 +93,10 @@ namespace ICCardManager.Views.Dialogs
             {
                 CarryoverOptionsPanel.IsEnabled = false;
             }
+            if (NewPurchaseOptionsPanel != null)
+            {
+                NewPurchaseOptionsPanel.IsEnabled = true;
+            }
         }
 
         private void CarryoverRadio_Checked(object sender, RoutedEventArgs e)
@@ -87,6 +104,10 @@ namespace ICCardManager.Views.Dialogs
             if (CarryoverOptionsPanel != null)
             {
                 CarryoverOptionsPanel.IsEnabled = true;
+            }
+            if (NewPurchaseOptionsPanel != null)
+            {
+                NewPurchaseOptionsPanel.IsEnabled = false;
             }
         }
 
@@ -99,6 +120,7 @@ namespace ICCardManager.Views.Dialogs
                 result.IsNewPurchase = true;
                 result.CarryoverMonth = null;
                 result.StartingPageNumber = 1;
+                result.PurchaseDate = PurchaseDatePicker.SelectedDate ?? DateTime.Today;
             }
             else
             {
