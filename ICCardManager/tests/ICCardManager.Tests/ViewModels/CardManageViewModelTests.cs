@@ -752,4 +752,77 @@ public class CardManageViewModelTests
     }
 
     #endregion
+
+    #region Issue #665: カード新規登録時の履歴事前読み取り
+
+    /// <summary>
+    /// 事前読み取り履歴が設定されている場合、SaveAsyncがその履歴を使用し
+    /// カードリーダーへの再読み取りを行わないこと
+    /// </summary>
+    [Fact]
+    public async Task SaveAsync_NewCard_WithPreReadHistory_ShouldUsePreReadHistoryWithoutReReading()
+    {
+        // Arrange
+        var idm = "0102030405060708";
+        var balance = 5000;
+        var today = DateTime.Today;
+
+        var preReadHistory = new List<LedgerDetail>
+        {
+            new() { UseDate = today, EntryStation = "博多", ExitStation = "天神", Amount = 210, Balance = 4790 }
+        };
+
+        _cardRepositoryMock.Setup(r => r.GetByIdmAsync(idm, true)).ReturnsAsync((IcCard?)null);
+        _cardRepositoryMock.Setup(r => r.InsertAsync(It.IsAny<IcCard>())).ReturnsAsync(true);
+
+        _viewModel.SetPreReadBalance(balance);
+        _viewModel.SetPreReadHistory(preReadHistory);
+
+        _viewModel.StartNewCard();
+        _viewModel.EditCardIdm = idm;
+        _viewModel.EditCardType = "nimoca";
+        _viewModel.EditCardNumber = "N-001";
+
+        // Act
+        await _viewModel.SaveAsync();
+
+        // Assert
+        // 事前読み取り履歴が使用されるため、カードリーダーのReadHistoryAsyncは呼ばれないこと
+        _cardReaderMock.Verify(r => r.ReadHistoryAsync(It.IsAny<string>()), Times.Never);
+    }
+
+    /// <summary>
+    /// 事前読み取り履歴がnullの場合、SaveAsyncがカードリーダーから直接読み取りを試みること
+    /// （フォールバック動作の確認）
+    /// </summary>
+    [Fact]
+    public async Task SaveAsync_NewCard_WithoutPreReadHistory_ShouldFallbackToCardReader()
+    {
+        // Arrange
+        var idm = "0102030405060708";
+        var balance = 5000;
+
+        _cardRepositoryMock.Setup(r => r.GetByIdmAsync(idm, true)).ReturnsAsync((IcCard?)null);
+        _cardRepositoryMock.Setup(r => r.InsertAsync(It.IsAny<IcCard>())).ReturnsAsync(true);
+        _cardReaderMock.Setup(r => r.ReadBalanceAsync(idm)).ReturnsAsync(balance);
+        _cardReaderMock.Setup(r => r.ReadHistoryAsync(idm))
+            .ReturnsAsync(new List<LedgerDetail>());
+
+        _viewModel.SetPreReadBalance(balance);
+        // SetPreReadHistoryを呼ばない（_preReadHistoryはnull）
+
+        _viewModel.StartNewCard();
+        _viewModel.EditCardIdm = idm;
+        _viewModel.EditCardType = "nimoca";
+        _viewModel.EditCardNumber = "N-001";
+
+        // Act
+        await _viewModel.SaveAsync();
+
+        // Assert
+        // 事前読み取り履歴がないため、カードリーダーから直接読み取りを試みること
+        _cardReaderMock.Verify(r => r.ReadHistoryAsync(idm), Times.Once);
+    }
+
+    #endregion
 }
