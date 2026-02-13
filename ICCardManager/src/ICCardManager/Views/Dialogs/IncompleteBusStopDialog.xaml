@@ -1,0 +1,159 @@
+<Window x:Class="ICCardManager.Views.Dialogs.IncompleteBusStopDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:vm="clr-namespace:ICCardManager.ViewModels"
+        mc:Ignorable="d"
+        d:DataContext="{d:DesignInstance Type=vm:IncompleteBusStopViewModel}"
+        Title="バス停名未入力の履歴"
+        Height="500"
+        Width="800"
+        MinHeight="350"
+        MinWidth="600"
+        WindowStartupLocation="CenterOwner"
+        ResizeMode="CanResize"
+        AutomationProperties.Name="バス停名未入力履歴一覧ダイアログ"
+        AutomationProperties.HelpText="バス停名が未入力の利用履歴を確認できます。項目を選択して履歴を表示ボタンを押すと、そのカードの履歴が表示されます。">
+
+    <Window.Resources>
+        <BooleanToVisibilityConverter x:Key="BoolToVisibilityConverter"/>
+    </Window.Resources>
+
+    <Grid Margin="20">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <!-- ヘッダー -->
+        <StackPanel Grid.Row="0" Margin="0,0,0,10">
+            <TextBlock Text="バス停名未入力の履歴一覧"
+                       FontSize="{DynamicResource LargeFontSize}"
+                       FontWeight="Bold"/>
+            <TextBlock Text="バス停名が未入力（★マーク）の利用履歴です。項目を選択して「履歴を表示」を押すと、そのカードの履歴画面に遷移します。"
+                       FontSize="{DynamicResource SmallFontSize}"
+                       Foreground="Gray"
+                       TextWrapping="Wrap"
+                       Margin="0,5,0,0"/>
+        </StackPanel>
+
+        <!-- フィルタ行 -->
+        <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="0,0,0,10">
+            <TextBlock Text="カード:"
+                       VerticalAlignment="Center"
+                       FontSize="{DynamicResource BaseFontSize}"
+                       Margin="0,0,8,0"/>
+            <ComboBox ItemsSource="{Binding CardFilterOptions}"
+                      SelectedItem="{Binding SelectedCardFilter}"
+                      Width="200"
+                      FontSize="{DynamicResource BaseFontSize}"
+                      AutomationProperties.Name="カード名フィルタ"
+                      ToolTip="表示するカードを絞り込みます"/>
+        </StackPanel>
+
+        <!-- DataGrid -->
+        <DataGrid Grid.Row="2"
+                  ItemsSource="{Binding Items}"
+                  SelectedItem="{Binding SelectedItem}"
+                  AutoGenerateColumns="False"
+                  IsReadOnly="True"
+                  SelectionMode="Single"
+                  CanUserSortColumns="True"
+                  CanUserReorderColumns="False"
+                  CanUserResizeColumns="True"
+                  HeadersVisibility="Column"
+                  RowHeaderWidth="0"
+                  GridLinesVisibility="Horizontal"
+                  BorderBrush="#E0E0E0"
+                  BorderThickness="1"
+                  FontSize="{DynamicResource BaseFontSize}"
+                  MouseDoubleClick="DataGrid_MouseDoubleClick"
+                  AutomationProperties.Name="バス停名未入力履歴一覧">
+
+            <DataGrid.Columns>
+                <DataGridTextColumn Header="利用日"
+                                    Binding="{Binding DateDisplay}"
+                                    Width="100"
+                                    SortMemberPath="Date"/>
+                <DataGridTextColumn Header="カード名"
+                                    Binding="{Binding CardDisplayName}"
+                                    Width="150"/>
+                <DataGridTextColumn Header="摘要"
+                                    Binding="{Binding Summary}"
+                                    Width="*"/>
+                <DataGridTextColumn Header="金額"
+                                    Binding="{Binding ExpenseDisplay}"
+                                    Width="80">
+                    <DataGridTextColumn.ElementStyle>
+                        <Style TargetType="TextBlock">
+                            <Setter Property="HorizontalAlignment" Value="Right"/>
+                        </Style>
+                    </DataGridTextColumn.ElementStyle>
+                </DataGridTextColumn>
+                <DataGridTextColumn Header="利用者"
+                                    Binding="{Binding StaffName}"
+                                    Width="100"/>
+            </DataGrid.Columns>
+        </DataGrid>
+
+        <!-- フッター -->
+        <Grid Grid.Row="3" Margin="0,15,0,0">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+
+            <!-- ステータス -->
+            <TextBlock Grid.Column="0"
+                       VerticalAlignment="Center"
+                       FontSize="{DynamicResource SmallFontSize}"
+                       Foreground="Gray">
+                <Run Text="{Binding Items.Count, Mode=OneWay, StringFormat={}{0}件}"/>
+            </TextBlock>
+
+            <!-- ボタン -->
+            <StackPanel Grid.Column="2" Orientation="Horizontal">
+                <Button Content="履歴を表示"
+                        Command="{Binding ConfirmCommand}"
+                        Padding="20,8"
+                        AutomationProperties.Name="選択したカードの履歴を表示"
+                        ToolTip="選択した項目のカード履歴を表示します">
+                    <Button.Style>
+                        <Style TargetType="Button">
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding SelectedItem}" Value="{x:Null}">
+                                    <Setter Property="IsEnabled" Value="False"/>
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </Button.Style>
+                </Button>
+                <Button Content="閉じる"
+                        Click="CloseButton_Click"
+                        Padding="20,8"
+                        Margin="10,0,0,0"
+                        IsCancel="True"
+                        AutomationProperties.Name="閉じる"
+                        ToolTip="ダイアログを閉じる (Escape)"/>
+            </StackPanel>
+        </Grid>
+
+        <!-- 処理中オーバーレイ -->
+        <Border Grid.RowSpan="4"
+                Background="#80000000"
+                Visibility="{Binding IsBusy, Converter={StaticResource BoolToVisibilityConverter}}">
+            <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
+                <ProgressBar IsIndeterminate="True" Width="200" Height="4"/>
+                <TextBlock Text="{Binding BusyMessage}"
+                           Foreground="White"
+                           FontSize="{DynamicResource BaseFontSize}"
+                           Margin="0,10,0,0"
+                           HorizontalAlignment="Center"/>
+            </StackPanel>
+        </Border>
+    </Grid>
+</Window>

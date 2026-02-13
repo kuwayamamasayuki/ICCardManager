@@ -735,12 +735,30 @@
                     <ScrollViewer Grid.Row="4"
                                   VerticalScrollBarVisibility="Auto"
                                   HorizontalScrollBarVisibility="Disabled">
+                        <!-- Issue #672: 警告をクリック可能に -->
                         <ItemsControl ItemsSource="{Binding WarningMessages}">
                             <ItemsControl.ItemTemplate>
                                 <DataTemplate>
-                                    <Border Background="#FFF3E0" CornerRadius="4"
-                                            Margin="0,2" Padding="10,8">
-                                        <TextBlock Text="{Binding}"
+                                    <Border CornerRadius="4"
+                                            Margin="0,2" Padding="10,8"
+                                            Cursor="Hand"
+                                            AutomationProperties.Name="{Binding DisplayText}">
+                                        <Border.InputBindings>
+                                            <MouseBinding MouseAction="LeftClick"
+                                                          Command="{Binding DataContext.HandleWarningClickCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
+                                                          CommandParameter="{Binding}"/>
+                                        </Border.InputBindings>
+                                        <Border.Style>
+                                            <Style TargetType="Border">
+                                                <Setter Property="Background" Value="#FFF3E0"/>
+                                                <Style.Triggers>
+                                                    <Trigger Property="IsMouseOver" Value="True">
+                                                        <Setter Property="Background" Value="#FFE0B2"/>
+                                                    </Trigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </Border.Style>
+                                        <TextBlock Text="{Binding DisplayText}"
                                                    TextWrapping="Wrap"
                                                    FontSize="{DynamicResource SmallFontSize}"/>
                                     </Border>
