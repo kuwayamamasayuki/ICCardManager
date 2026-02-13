@@ -898,6 +898,10 @@ public partial class MainViewModel : ViewModelBase
                 {
                     await LoadHistoryLedgersAsync();
                 }
+
+                // Issue #660: バス停名入力後に警告メッセージを再チェック
+                // バス停名の入力により★が消えた場合、件数を更新し、0件なら非表示にする
+                await CheckWarningsAsync();
             }
 
             // Issue #596: 今月の履歴が不完全な可能性がある場合に通知
