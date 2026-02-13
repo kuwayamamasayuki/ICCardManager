@@ -1250,6 +1250,8 @@ public partial class MainViewModel : ViewModelBase
         if (dialog.WasSaved)
         {
             await LoadHistoryLedgersAsync();
+            // Issue #660: 分割等で摘要が変わった場合に警告を更新
+            await CheckWarningsAsync();
         }
     }
 
@@ -1286,6 +1288,8 @@ public partial class MainViewModel : ViewModelBase
             await LoadHistoryLedgersAsync();
             // ダッシュボードも更新
             await RefreshDashboardAsync();
+            // Issue #660: 編集で摘要が変わった場合に警告を更新
+            await CheckWarningsAsync();
         }
     }
 
