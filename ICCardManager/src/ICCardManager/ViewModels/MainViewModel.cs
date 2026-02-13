@@ -1739,6 +1739,8 @@ public partial class MainViewModel : ViewModelBase
         var settings = await _settingsRepository.GetAppSettingsAsync();
         _soundPlayer.SoundMode = settings.SoundMode;
         await RefreshDashboardAsync();
+        // Issue #661: 残額警告の閾値変更後に警告メッセージを更新
+        await CheckWarningsAsync();
     }
 
     /// <summary>
