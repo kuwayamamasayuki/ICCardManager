@@ -818,6 +818,18 @@ namespace ICCardManager.ViewModels
                     _preReadBalance = null;
                 }
 
+                // Issue #665: カード読み取り時点で履歴も事前取得
+                // カードがリーダーにある間に履歴を読み取り、保存時に使用する
+                // これにより、ユーザーがカードを離しても正しく履歴をインポートできる
+                try
+                {
+                    _preReadHistory = (await _cardReader.ReadHistoryAsync(e.Idm))?.ToList();
+                }
+                catch
+                {
+                    _preReadHistory = null;
+                }
+
                 // 注意: App.IsCardRegistrationActive はここで解除しない
                 // ダイアログが開いている間は常にフラグを維持し、
                 // CancelEdit() または Cleanup() でのみ解除する
