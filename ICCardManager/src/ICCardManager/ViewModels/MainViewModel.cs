@@ -898,6 +898,10 @@ public partial class MainViewModel : ViewModelBase
                 {
                     await LoadHistoryLedgersAsync();
                 }
+
+                // Issue #660: バス停名入力後に警告メッセージを再チェック
+                // バス停名の入力により★が消えた場合、件数を更新し、0件なら非表示にする
+                await CheckWarningsAsync();
             }
 
             // Issue #596: 今月の履歴が不完全な可能性がある場合に通知
@@ -1246,6 +1250,8 @@ public partial class MainViewModel : ViewModelBase
         if (dialog.WasSaved)
         {
             await LoadHistoryLedgersAsync();
+            // Issue #660: 分割等で摘要が変わった場合に警告を更新
+            await CheckWarningsAsync();
         }
     }
 
@@ -1282,6 +1288,8 @@ public partial class MainViewModel : ViewModelBase
             await LoadHistoryLedgersAsync();
             // ダッシュボードも更新
             await RefreshDashboardAsync();
+            // Issue #660: 編集で摘要が変わった場合に警告を更新
+            await CheckWarningsAsync();
         }
     }
 
