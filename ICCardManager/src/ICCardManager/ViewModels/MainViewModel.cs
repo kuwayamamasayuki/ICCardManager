@@ -794,7 +794,9 @@ public partial class MainViewModel : ViewModelBase
         SetInternalState(AppState.Processing);
 
         // カードから残高を読み取る（Issue #526: 貸出時も残高を記録）
+        // Issue #656: エラーイベントを一時的に抑制（カード離脱時の警告メッセージを防止）
         int? balance = null;
+        _cardReader.Error -= OnCardReaderError;
         try
         {
             balance = await _cardReader.ReadBalanceAsync(card.CardIdm);
@@ -802,6 +804,10 @@ public partial class MainViewModel : ViewModelBase
         catch
         {
             // 残高読み取りエラーは無視（貸出処理は続行）
+        }
+        finally
+        {
+            _cardReader.Error += OnCardReaderError;
         }
 
         var result = await _lendingService.LendAsync(_currentStaffIdm!, card.CardIdm, balance);

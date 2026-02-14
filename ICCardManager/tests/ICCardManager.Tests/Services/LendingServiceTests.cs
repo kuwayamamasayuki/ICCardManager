@@ -251,6 +251,145 @@ public class LendingServiceTests : IDisposable
         result.ErrorMessage.Should().Contain("エラーが発生しました");
     }
 
+    /// <summary>
+    /// Issue #656: 残高が渡された場合、その値が使用されること
+    /// </summary>
+    [Fact]
+    public async Task LendAsync_WithBalance_UsesProvidedBalance()
+    {
+        // Arrange
+        var card = CreateTestCard(isLent: false);
+        var staff = CreateTestStaff();
+        Ledger? capturedLedger = null;
+
+        _cardRepositoryMock.Setup(x => x.GetByIdmAsync(TestCardIdm, false))
+            .ReturnsAsync(card);
+        _staffRepositoryMock.Setup(x => x.GetByIdmAsync(TestStaffIdm, false))
+            .ReturnsAsync(staff);
+        _ledgerRepositoryMock.Setup(x => x.InsertAsync(It.IsAny<Ledger>()))
+            .Callback<Ledger>(l => capturedLedger = l)
+            .ReturnsAsync(1);
+        _cardRepositoryMock.Setup(x => x.UpdateLentStatusAsync(It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<DateTime?>(), It.IsAny<string?>()))
+            .ReturnsAsync(true);
+
+        // Act
+        var result = await _service.LendAsync(TestStaffIdm, TestCardIdm, balance: 1500);
+
+        // Assert
+        result.Success.Should().BeTrue();
+        result.Balance.Should().Be(1500);
+        capturedLedger.Should().NotBeNull();
+        capturedLedger!.Balance.Should().Be(1500);
+    }
+
+    /// <summary>
+    /// Issue #656: 残高がnullの場合、直近の履歴から残高を取得すること
+    /// </summary>
+    [Fact]
+    public async Task LendAsync_WithNullBalance_FallsBackToLatestLedgerBalance()
+    {
+        // Arrange
+        var card = CreateTestCard(isLent: false);
+        var staff = CreateTestStaff();
+        Ledger? capturedLedger = null;
+
+        var latestLedger = new Ledger
+        {
+            Id = 100,
+            CardIdm = TestCardIdm,
+            Date = DateTime.Now.AddDays(-1),
+            Balance = 2300,
+            Summary = "鉄道（博多駅～天神駅）"
+        };
+
+        _cardRepositoryMock.Setup(x => x.GetByIdmAsync(TestCardIdm, false))
+            .ReturnsAsync(card);
+        _staffRepositoryMock.Setup(x => x.GetByIdmAsync(TestStaffIdm, false))
+            .ReturnsAsync(staff);
+        _ledgerRepositoryMock.Setup(x => x.GetLatestLedgerAsync(TestCardIdm))
+            .ReturnsAsync(latestLedger);
+        _ledgerRepositoryMock.Setup(x => x.InsertAsync(It.IsAny<Ledger>()))
+            .Callback<Ledger>(l => capturedLedger = l)
+            .ReturnsAsync(1);
+        _cardRepositoryMock.Setup(x => x.UpdateLentStatusAsync(It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<DateTime?>(), It.IsAny<string?>()))
+            .ReturnsAsync(true);
+
+        // Act
+        var result = await _service.LendAsync(TestStaffIdm, TestCardIdm, balance: null);
+
+        // Assert
+        result.Success.Should().BeTrue();
+        result.Balance.Should().Be(2300);
+        capturedLedger.Should().NotBeNull();
+        capturedLedger!.Balance.Should().Be(2300);
+    }
+
+    /// <summary>
+    /// Issue #656: 残高がnullかつ直近の履歴もない場合、0になること
+    /// </summary>
+    [Fact]
+    public async Task LendAsync_WithNullBalanceAndNoLedgerHistory_DefaultsToZero()
+    {
+        // Arrange
+        var card = CreateTestCard(isLent: false);
+        var staff = CreateTestStaff();
+        Ledger? capturedLedger = null;
+
+        _cardRepositoryMock.Setup(x => x.GetByIdmAsync(TestCardIdm, false))
+            .ReturnsAsync(card);
+        _staffRepositoryMock.Setup(x => x.GetByIdmAsync(TestStaffIdm, false))
+            .ReturnsAsync(staff);
+        _ledgerRepositoryMock.Setup(x => x.GetLatestLedgerAsync(TestCardIdm))
+            .ReturnsAsync((Ledger?)null);
+        _ledgerRepositoryMock.Setup(x => x.InsertAsync(It.IsAny<Ledger>()))
+            .Callback<Ledger>(l => capturedLedger = l)
+            .ReturnsAsync(1);
+        _cardRepositoryMock.Setup(x => x.UpdateLentStatusAsync(It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<DateTime?>(), It.IsAny<string?>()))
+            .ReturnsAsync(true);
+
+        // Act
+        var result = await _service.LendAsync(TestStaffIdm, TestCardIdm, balance: null);
+
+        // Assert
+        result.Success.Should().BeTrue();
+        result.Balance.Should().Be(0);
+        capturedLedger.Should().NotBeNull();
+        capturedLedger!.Balance.Should().Be(0);
+    }
+
+    /// <summary>
+    /// Issue #656: 残高が0の場合（実際に0円）、DBフォールバックが発動しないこと
+    /// </summary>
+    [Fact]
+    public async Task LendAsync_WithZeroBalance_DoesNotFallBackToDb()
+    {
+        // Arrange
+        var card = CreateTestCard(isLent: false);
+        var staff = CreateTestStaff();
+        Ledger? capturedLedger = null;
+
+        _cardRepositoryMock.Setup(x => x.GetByIdmAsync(TestCardIdm, false))
+            .ReturnsAsync(card);
+        _staffRepositoryMock.Setup(x => x.GetByIdmAsync(TestStaffIdm, false))
+            .ReturnsAsync(staff);
+        _ledgerRepositoryMock.Setup(x => x.InsertAsync(It.IsAny<Ledger>()))
+            .Callback<Ledger>(l => capturedLedger = l)
+            .ReturnsAsync(1);
+        _cardRepositoryMock.Setup(x => x.UpdateLentStatusAsync(It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<DateTime?>(), It.IsAny<string?>()))
+            .ReturnsAsync(true);
+
+        // Act
+        var result = await _service.LendAsync(TestStaffIdm, TestCardIdm, balance: 0);
+
+        // Assert
+        result.Success.Should().BeTrue();
+        result.Balance.Should().Be(0);
+        capturedLedger.Should().NotBeNull();
+        capturedLedger!.Balance.Should().Be(0);
+        // DBフォールバックが呼ばれていないことを確認
+        _ledgerRepositoryMock.Verify(x => x.GetLatestLedgerAsync(It.IsAny<string>()), Times.Never);
+    }
+
     #endregion
 
     #region ReturnAsync 正常系テスト
