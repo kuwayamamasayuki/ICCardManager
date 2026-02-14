@@ -195,6 +195,7 @@ namespace ICCardManager
             services.AddSingleton<OperationLogger>();
             services.AddSingleton<LedgerMergeService>();
             services.AddSingleton<LedgerSplitService>();
+            services.AddSingleton<LedgerConsistencyChecker>();
             services.AddSingleton<CsvExportService>();
             services.AddSingleton<CsvImportService>();
             services.AddSingleton<IToastNotificationService, ToastNotificationService>();
@@ -235,6 +236,7 @@ namespace ICCardManager
             services.AddTransient<LedgerDetailViewModel>();
             services.AddTransient<SystemManageViewModel>();
             services.AddTransient<IncompleteBusStopViewModel>();
+            services.AddTransient<LedgerRowEditViewModel>();
     #if DEBUG
             // Issue #640: 仮想タッチ設定ダイアログ
             services.AddTransient<VirtualCardViewModel>();
@@ -255,6 +257,7 @@ namespace ICCardManager
             services.AddTransient<Views.Dialogs.LedgerEditDialog>();
             services.AddTransient<Views.Dialogs.SystemManageDialog>();
             services.AddTransient<Views.Dialogs.IncompleteBusStopDialog>();
+            services.AddTransient<Views.Dialogs.LedgerRowEditDialog>();
     #if DEBUG
             services.AddTransient<Views.Dialogs.VirtualCardDialog>();
     #endif

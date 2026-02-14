@@ -302,6 +302,32 @@ namespace ICCardManager.Services
         }
 
         /// <summary>
+        /// 履歴挿入のログを記録（Issue #635: 行の追加）
+        /// </summary>
+        /// <param name="operatorIdm">操作者IDm（nullまたは空文字列の場合はGUI操作として記録）</param>
+        /// <param name="ledger">挿入した履歴データ</param>
+        public async Task LogLedgerInsertAsync(string? operatorIdm, Ledger ledger)
+        {
+            var isGuiOperation = string.IsNullOrEmpty(operatorIdm);
+            var actualIdm = isGuiOperation ? GuiOperator.Idm : operatorIdm;
+            var operatorName = isGuiOperation ? GuiOperator.Name : await GetOperatorNameAsync(operatorIdm!);
+
+            var log = new OperationLog
+            {
+                Timestamp = DateTime.Now,
+                OperatorIdm = actualIdm,
+                OperatorName = operatorName,
+                TargetTable = Tables.Ledger,
+                TargetId = ledger.Id.ToString(),
+                Action = Actions.Insert,
+                BeforeData = null,
+                AfterData = SerializeToJson(ledger)
+            };
+
+            await _operationLogRepository.InsertAsync(log);
+        }
+
+        /// <summary>
         /// 履歴削除のログを記録
         /// </summary>
         public async Task LogLedgerDeleteAsync(string operatorIdm, Ledger ledger)
