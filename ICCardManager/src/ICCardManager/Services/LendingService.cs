@@ -258,7 +258,18 @@ namespace ICCardManager.Services
                 try
                 {
                     // 貸出レコードを作成
+                    // Issue #656: カードから残高を読み取れなかった場合、直近の履歴から残高を取得
                     var currentBalance = balance ?? 0;
+                    if (!balance.HasValue)
+                    {
+                        var latestLedger = await _ledgerRepository.GetLatestLedgerAsync(cardIdm);
+                        if (latestLedger != null)
+                        {
+                            currentBalance = latestLedger.Balance;
+                            _logger.LogInformation(
+                                "LendAsync: カード残高を読み取れなかったため、直近の履歴残高を使用: {Balance}円", currentBalance);
+                        }
+                    }
                     var ledger = new Ledger
                     {
                         CardIdm = cardIdm,
