@@ -11,7 +11,7 @@
         d:DataContext="{d:DesignInstance Type=vm:MainViewModel}"
         Title="交通系ICカード管理システム"
         Height="700"
-        Width="1250"
+        Width="1350"
         MinWidth="{DynamicResource WindowMinWidth}"
         MinHeight="600"
         WindowStartupLocation="CenterScreen"

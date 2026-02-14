@@ -393,8 +393,8 @@ namespace ICCardManager
             // 基準: Medium (14) で 350px、差分 × 5 で調整
             // Small(12)→340, Medium(14)→350, Large(16)→360, ExtraLarge(20)→380
             var sidebarWidth = Math.Round(350 + (baseFontSize - 14) * 5);
-            // ウィンドウ最小幅はフォントサイズに関係なく固定（1200px）
-            const double windowMinWidth = 1200;
+            // Issue #663: ウィンドウ最小幅はフォントサイズに関係なく固定（1300px）
+            const double windowMinWidth = 1300;
 
             // アプリケーションリソースを更新
             var resources = Application.Current.Resources;
