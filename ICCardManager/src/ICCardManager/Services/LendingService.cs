@@ -331,6 +331,7 @@ namespace ICCardManager.Services
         /// <param name="staffIdm">返却者の職員証IDm（16桁の16進数文字列）</param>
         /// <param name="cardIdm">返却対象のICカードIDm（16桁の16進数文字列）</param>
         /// <param name="usageDetails">ICカードから読み取った利用履歴詳細（貸出時刻以降のみ使用）</param>
+        /// <param name="skipDuplicateCheck">重複チェックをスキップするかどうか（既定値: false）</param>
         /// <returns>返却結果。成功時は残額や警告情報も含まれます</returns>
         /// <remarks>
         /// <para>処理フロー：</para>
