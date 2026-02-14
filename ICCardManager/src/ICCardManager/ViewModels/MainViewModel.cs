@@ -1270,47 +1270,9 @@ public partial class MainViewModel : ViewModelBase
         }
     }
 
-    /// <summary>
-    /// 履歴を変更
-    /// </summary>
-    [RelayCommand]
-    public async Task EditLedger(LedgerDto ledger)
-    {
-        if (ledger == null) return;
-
-        // Issue #429: 履歴編集は認証が必要
-        var authResult = await _staffAuthService.RequestAuthenticationAsync("履歴の編集");
-        if (authResult == null)
-        {
-            // 認証キャンセルまたはタイムアウト
-            return;
-        }
-
-        // 詳細データを取得
-        var ledgerWithDetails = await _ledgerRepository.GetByIdAsync(ledger.Id);
-        if (ledgerWithDetails == null) return;
-
-        var detailDto = ledgerWithDetails.ToDto();
-
-        // 変更ダイアログを表示（認証済みIDmを渡す）
-        var dialog = App.Current.ServiceProvider.GetRequiredService<Views.Dialogs.LedgerEditDialog>();
-        dialog.Owner = System.Windows.Application.Current.MainWindow;
-        await dialog.InitializeWithAuthAsync(detailDto, authResult.Idm);
-
-        if (dialog.ShowDialog() == true)
-        {
-            // 変更後に履歴を再読み込み
-            await LoadHistoryLedgersAsync();
-            // ダッシュボードも更新
-            await RefreshDashboardAsync();
-            // Issue #660: 編集で摘要が変わった場合に警告を更新
-            await CheckWarningsAsync();
-        }
-    }
-
     #endregion
 
-    #region 履歴行の追加・削除・全項目修正（Issue #635）
+    #region 履歴行の追加・削除・変更（Issue #635）
 
     /// <summary>
     /// 履歴行を追加
@@ -1379,15 +1341,15 @@ public partial class MainViewModel : ViewModelBase
     }
 
     /// <summary>
-    /// 履歴行の全項目を修正
+    /// 履歴を変更
     /// </summary>
     [RelayCommand]
-    public async Task EditLedgerFull(LedgerDto ledger)
+    public async Task EditLedger(LedgerDto ledger)
     {
         if (ledger == null) return;
 
         // 認証
-        var authResult = await _staffAuthService.RequestAuthenticationAsync("履歴の修正");
+        var authResult = await _staffAuthService.RequestAuthenticationAsync("履歴の変更");
         if (authResult == null) return;
 
         // 全項目編集ダイアログ表示
