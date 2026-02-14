@@ -4,7 +4,7 @@
 # このスクリプトは以下の設定を持つリファレンスドキュメントを生成します:
 #   - 余白: やや狭い (上下左右 1.27cm / 0.5インチ)
 #   - ページ番号: フッター中央に表示
-#   - 用紙サイズ: A4
+#   - 用紙サイズ: A4横 (ランドスケープ)
 #   - テーブルスタイル: 黒・単線・0.5ptの罫線（Issue #600: 印刷時に罫線が消えないようにする）
 #
 # 使用方法:
@@ -48,6 +48,9 @@ try {
     # 用紙サイズ: A4
     $PageSetup.PaperSize = 7  # wdPaperA4
 
+    # Issue #692: 用紙の向き: 横 (ランドスケープ)
+    $PageSetup.Orientation = 1  # wdOrientLandscape
+
     # 余白: やや狭い (1.27cm = 36ポイント)
     # Word の「やや狭い」は上下左右 1.27cm (0.5インチ)
     $NarrowMargin = 36  # ポイント (1.27cm ≈ 36pt)
@@ -56,6 +59,7 @@ try {
     $PageSetup.LeftMargin = $NarrowMargin
     $PageSetup.RightMargin = $NarrowMargin
 
+    Write-Host "  用紙の向き: A4横 (ランドスケープ)" -ForegroundColor Gray
     Write-Host "  余白: 上下左右 1.27cm (やや狭い)" -ForegroundColor Gray
 
     # フッターにページ番号を追加
