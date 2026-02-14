@@ -6,6 +6,7 @@
 
 | ファイル | 対象 | 説明 |
 |----------|------|------|
+| [はじめに.md](はじめに.md) | 全員 | マニュアルの案内（どのマニュアルを読むべきか） |
 | [ユーザーマニュアル.md](ユーザーマニュアル.md) | 一般ユーザー | ICカードの貸出・返却操作（詳細版） |
 | [ユーザーマニュアル概要版.md](ユーザーマニュアル概要版.md) | 一般ユーザー | ICカードの貸出・返却操作（2ページの概要版） |
 | [管理者マニュアル.md](管理者マニュアル.md) | システム管理者 | 職員・カード管理、バックアップ、設定 |
@@ -15,6 +16,7 @@
 
 | ファイル | 説明 |
 |----------|------|
+| `はじめに.md` | はじめに（マニュアルの案内） |
 | `ユーザーマニュアル.md` | ユーザーマニュアル本体（Markdown形式） |
 | `管理者マニュアル.md` | 管理者マニュアル本体（Markdown形式） |
 | `開発者ガイド.md` | 開発者ガイド本体（Markdown形式） |
@@ -61,6 +63,7 @@ npm install -g mermaid-filter
 .\convert-to-docx.ps1 -Force
 
 # 特定のマニュアルのみ変換
+.\convert-to-docx.ps1 -Target intro  # はじめに
 .\convert-to-docx.ps1 -Target user   # ユーザーマニュアル
 .\convert-to-docx.ps1 -Target admin  # 管理者マニュアル
 .\convert-to-docx.ps1 -Target dev    # 開発者ガイド
@@ -79,6 +82,7 @@ rem 全マニュアルを強制変換
 convert-to-docx.bat /force
 
 rem 特定のマニュアルのみ変換
+convert-to-docx.bat intro  rem はじめに
 convert-to-docx.bat user   rem ユーザーマニュアル
 convert-to-docx.bat admin  rem 管理者マニュアル
 convert-to-docx.bat dev    rem 開発者ガイド
@@ -91,6 +95,7 @@ convert-to-docx.bat /nomermaid
 
 変換後、以下のファイルが同じディレクトリに生成されます（更新があるもののみ）:
 
+- `はじめに.docx`
 - `ユーザーマニュアル.docx`
 - `管理者マニュアル.docx`
 - `開発者ガイド.docx`
@@ -124,6 +129,7 @@ PDF変換の入力は `.docx` ファイルです。先に `.\convert-to-docx.ps1
 .\convert-to-pdf.ps1 -Force
 
 # 特定のマニュアルのみ変換
+.\convert-to-pdf.ps1 -Target intro  # はじめに
 .\convert-to-pdf.ps1 -Target user   # ユーザーマニュアル
 .\convert-to-pdf.ps1 -Target admin  # 管理者マニュアル
 .\convert-to-pdf.ps1 -Target dev    # 開発者ガイド
@@ -133,6 +139,7 @@ PDF変換の入力は `.docx` ファイルです。先に `.\convert-to-docx.ps1
 
 変換後、以下のファイルが同じディレクトリに生成されます：
 
+- `はじめに.pdf`
 - `ユーザーマニュアル.pdf`
 - `ユーザーマニュアル概要版.pdf`
 - `管理者マニュアル.pdf`
