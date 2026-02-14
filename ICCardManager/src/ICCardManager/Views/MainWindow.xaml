@@ -308,6 +308,15 @@
                                         Padding="12,6"
                                         ToolTip="任意の年月を選択"/>
 
+                                <!-- 行操作ボタン（Issue #635） -->
+                                <Border Width="1" Background="#BDBDBD" Margin="10,2"/>
+                                <Button Content="＋ 行を追加"
+                                        Command="{Binding AddLedgerRowCommand}"
+                                        Padding="12,6"
+                                        ToolTip="履歴に新しい行を挿入します"
+                                        AutomationProperties.Name="履歴行を追加"
+                                        AutomationProperties.HelpText="手動で履歴行を追加します（日付・摘要・金額等を入力）"/>
+
                                 <!-- 統合ボタン（Issue #548） -->
                                 <Border Width="1" Background="#BDBDBD" Margin="10,2"/>
                                 <Button Content="📦 チェックした履歴を統合"
@@ -432,7 +441,7 @@
                                 </DataGridTextColumn>
                                 <DataGridTextColumn Header="利用者" Binding="{Binding StaffName}" Width="80"/>
                                 <DataGridTextColumn Header="備考" Binding="{Binding Note}" Width="80"/>
-                                <DataGridTemplateColumn Header="操作" Width="110">
+                                <DataGridTemplateColumn Header="操作" Width="210">
                                     <DataGridTemplateColumn.CellTemplate>
                                         <DataTemplate>
                                             <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
@@ -441,13 +450,26 @@
                                                         CommandParameter="{Binding}"
                                                         IsEnabled="{Binding HasDetails}"
                                                         Padding="8,2"
-                                                        Margin="0,0,5,0"
+                                                        Margin="0,0,3,0"
                                                         ToolTip="利用詳細を表示"/>
                                                 <Button Content="変更"
                                                         Command="{Binding DataContext.EditLedgerCommand, RelativeSource={RelativeSource AncestorType=DataGrid}}"
                                                         CommandParameter="{Binding}"
                                                         Padding="8,2"
-                                                        ToolTip="履歴内容を変更"/>
+                                                        Margin="0,0,3,0"
+                                                        ToolTip="摘要・備考・利用者を変更"/>
+                                                <Button Content="修正"
+                                                        Command="{Binding DataContext.EditLedgerFullCommand, RelativeSource={RelativeSource AncestorType=DataGrid}}"
+                                                        CommandParameter="{Binding}"
+                                                        Padding="8,2"
+                                                        Margin="0,0,3,0"
+                                                        ToolTip="全項目（日付・金額含む）を修正"/>
+                                                <Button Content="削除"
+                                                        Command="{Binding DataContext.DeleteLedgerRowCommand, RelativeSource={RelativeSource AncestorType=DataGrid}}"
+                                                        CommandParameter="{Binding}"
+                                                        Padding="8,2"
+                                                        Foreground="#D32F2F"
+                                                        ToolTip="この行を削除"/>
                                             </StackPanel>
                                         </DataTemplate>
                                     </DataGridTemplateColumn.CellTemplate>

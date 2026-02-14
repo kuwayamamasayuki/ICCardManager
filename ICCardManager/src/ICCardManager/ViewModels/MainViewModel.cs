@@ -1310,6 +1310,129 @@ public partial class MainViewModel : ViewModelBase
 
     #endregion
 
+    #region 履歴行の追加・削除・全項目修正（Issue #635）
+
+    /// <summary>
+    /// 履歴行を追加
+    /// </summary>
+    [RelayCommand]
+    public async Task AddLedgerRow()
+    {
+        if (HistoryCard == null) return;
+
+        // 認証
+        var authResult = await _staffAuthService.RequestAuthenticationAsync("履歴の追加");
+        if (authResult == null) return;
+
+        // ダイアログ表示
+        var dialog = App.Current.ServiceProvider.GetRequiredService<Views.Dialogs.LedgerRowEditDialog>();
+        dialog.Owner = Application.Current.MainWindow;
+
+        // 現在表示中の月の履歴を渡して初期化（挿入位置プレビュー用）
+        var allLedgers = HistoryLedgers.ToList();
+        await dialog.InitializeForAddAsync(HistoryCard.CardIdm, allLedgers, authResult.Idm);
+
+        if (dialog.ShowDialog() == true)
+        {
+            await CheckAndNotifyConsistencyAsync();
+            await LoadHistoryLedgersAsync();
+            await RefreshDashboardAsync();
+            await CheckWarningsAsync();
+        }
+    }
+
+    /// <summary>
+    /// 履歴行を削除
+    /// </summary>
+    [RelayCommand]
+    public async Task DeleteLedgerRow(LedgerDto ledger)
+    {
+        if (ledger == null) return;
+        if (ledger.IsLentRecord)
+        {
+            MessageBox.Show("貸出中のレコードは削除できません。", "削除不可",
+                MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+
+        // 認証
+        var authResult = await _staffAuthService.RequestAuthenticationAsync("履歴の削除");
+        if (authResult == null) return;
+
+        // 確認
+        var result = MessageBox.Show(
+            $"以下の履歴を削除してよろしいですか？\n\n日付: {ledger.DateDisplay}\n摘要: {ledger.Summary}\n残高: {ledger.BalanceDisplay}円",
+            "履歴の削除", MessageBoxButton.YesNo, MessageBoxImage.Warning);
+        if (result != MessageBoxResult.Yes) return;
+
+        // 削除実行
+        var fullLedger = await _ledgerRepository.GetByIdAsync(ledger.Id);
+        if (fullLedger == null) return;
+        await _ledgerRepository.DeleteAsync(ledger.Id);
+        var operationLogger = App.Current.ServiceProvider.GetRequiredService<OperationLogger>();
+        await operationLogger.LogLedgerDeleteAsync(authResult.Idm, fullLedger);
+
+        await CheckAndNotifyConsistencyAsync();
+        await LoadHistoryLedgersAsync();
+        await RefreshDashboardAsync();
+        await CheckWarningsAsync();
+    }
+
+    /// <summary>
+    /// 履歴行の全項目を修正
+    /// </summary>
+    [RelayCommand]
+    public async Task EditLedgerFull(LedgerDto ledger)
+    {
+        if (ledger == null) return;
+
+        // 認証
+        var authResult = await _staffAuthService.RequestAuthenticationAsync("履歴の修正");
+        if (authResult == null) return;
+
+        // 全項目編集ダイアログ表示
+        var dialog = App.Current.ServiceProvider.GetRequiredService<Views.Dialogs.LedgerRowEditDialog>();
+        dialog.Owner = Application.Current.MainWindow;
+        await dialog.InitializeForEditAsync(ledger, authResult.Idm);
+
+        if (dialog.ShowDialog() == true)
+        {
+            await CheckAndNotifyConsistencyAsync();
+            await LoadHistoryLedgersAsync();
+            await RefreshDashboardAsync();
+            await CheckWarningsAsync();
+        }
+    }
+
+    /// <summary>
+    /// 残高整合性チェック＆通知
+    /// </summary>
+    private async Task CheckAndNotifyConsistencyAsync()
+    {
+        if (HistoryCard == null) return;
+
+        var checker = App.Current.ServiceProvider.GetRequiredService<LedgerConsistencyChecker>();
+        var checkResult = await checker.CheckBalanceConsistencyAsync(
+            HistoryCard.CardIdm, HistoryFromDate, HistoryToDate);
+
+        if (!checkResult.IsConsistent)
+        {
+            var fix = MessageBox.Show(
+                $"残高の整合性に問題が {checkResult.Inconsistencies.Count} 件見つかりました。\n自動的に残高を再計算しますか？",
+                "残高の整合性チェック", MessageBoxButton.YesNo, MessageBoxImage.Question);
+
+            if (fix == MessageBoxResult.Yes)
+            {
+                var fixedCount = await checker.RecalculateBalancesAsync(
+                    HistoryCard.CardIdm, HistoryFromDate, HistoryToDate);
+                MessageBox.Show($"{fixedCount} 件の残高を修正しました。", "残高再計算完了",
+                    MessageBoxButton.OK, MessageBoxImage.Information);
+            }
+        }
+    }
+
+    #endregion
+
     #region 履歴統合（Issue #548）
 
     /// <summary>
