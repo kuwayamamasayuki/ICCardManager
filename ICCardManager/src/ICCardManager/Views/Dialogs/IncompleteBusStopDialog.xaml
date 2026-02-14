@@ -14,7 +14,7 @@
         WindowStartupLocation="CenterOwner"
         ResizeMode="CanResize"
         AutomationProperties.Name="バス停名未入力履歴一覧ダイアログ"
-        AutomationProperties.HelpText="バス停名が未入力の利用履歴を確認できます。項目を選択して履歴を表示ボタンを押すと、そのカードの履歴が表示されます。">
+        AutomationProperties.HelpText="バス停名が未入力の利用履歴を確認できます。項目を選択してバス停名を入力ボタンを押すと、バス停名入力画面に遷移します。">
 
     <Window.Resources>
         <BooleanToVisibilityConverter x:Key="BoolToVisibilityConverter"/>
@@ -33,19 +33,29 @@
             <TextBlock Text="バス停名未入力の履歴一覧"
                        FontSize="{DynamicResource LargeFontSize}"
                        FontWeight="Bold"/>
-            <TextBlock Text="バス停名が未入力（★マーク）の利用履歴です。項目を選択して「履歴を表示」を押すと、そのカードの履歴画面に遷移します。"
+            <TextBlock Text="バス停名が未入力（★マーク）の利用履歴です。項目を選択して「バス停名を入力」を押すと、バス停名入力画面に遷移します。"
                        FontSize="{DynamicResource SmallFontSize}"
                        Foreground="Gray"
                        TextWrapping="Wrap"
                        Margin="0,5,0,0"/>
         </StackPanel>
 
-        <!-- フィルタ行 -->
+        <!-- フィルタ行（Issue #703: 利用日を左、カードを右に配置） -->
         <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="0,0,0,10">
-            <TextBlock Text="カード:"
+            <TextBlock Text="利用日:"
                        VerticalAlignment="Center"
                        FontSize="{DynamicResource BaseFontSize}"
                        Margin="0,0,8,0"/>
+            <ComboBox ItemsSource="{Binding DateFilterOptions}"
+                      SelectedItem="{Binding SelectedDateFilter}"
+                      Width="150"
+                      FontSize="{DynamicResource BaseFontSize}"
+                      AutomationProperties.Name="利用日フィルタ"
+                      ToolTip="表示する利用日を絞り込みます"/>
+            <TextBlock Text="カード:"
+                       VerticalAlignment="Center"
+                       FontSize="{DynamicResource BaseFontSize}"
+                       Margin="20,0,8,0"/>
             <ComboBox ItemsSource="{Binding CardFilterOptions}"
                       SelectedItem="{Binding SelectedCardFilter}"
                       Width="200"
@@ -115,13 +125,13 @@
                 <Run Text="{Binding Items.Count, Mode=OneWay, StringFormat={}{0}件}"/>
             </TextBlock>
 
-            <!-- ボタン -->
+            <!-- ボタン（Issue #703: バス停名入力画面に直接遷移） -->
             <StackPanel Grid.Column="2" Orientation="Horizontal">
-                <Button Content="履歴を表示"
-                        Command="{Binding ConfirmCommand}"
+                <Button Content="バス停名を入力"
+                        Click="InputBusStopButton_Click"
                         Padding="20,8"
-                        AutomationProperties.Name="選択したカードの履歴を表示"
-                        ToolTip="選択した項目のカード履歴を表示します">
+                        AutomationProperties.Name="選択した履歴のバス停名を入力"
+                        ToolTip="選択した項目のバス停名入力画面を開きます">
                     <Button.Style>
                         <Style TargetType="Button">
                             <Style.Triggers>

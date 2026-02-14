@@ -1,13 +1,14 @@
 using System;
+using System.Threading.Tasks;
 using System.Windows;
-using System.Windows.Controls;
 using System.Windows.Input;
 using ICCardManager.ViewModels;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace ICCardManager.Views.Dialogs
 {
     /// <summary>
-    /// バス停名未入力一覧ダイアログ（Issue #672）
+    /// バス停名未入力一覧ダイアログ（Issue #672, #703）
     /// </summary>
     public partial class IncompleteBusStopDialog : Window
     {
@@ -19,16 +20,6 @@ namespace ICCardManager.Views.Dialogs
 
             _viewModel = viewModel;
             DataContext = _viewModel;
-
-            // 確認完了時に自動的に閉じる
-            _viewModel.PropertyChanged += (s, e) =>
-            {
-                if (e.PropertyName == nameof(IncompleteBusStopViewModel.IsConfirmed) && _viewModel.IsConfirmed)
-                {
-                    DialogResult = true;
-                    Close();
-                }
-            };
 
             Loaded += async (s, e) =>
             {
@@ -48,18 +39,39 @@ namespace ICCardManager.Views.Dialogs
         }
 
         /// <summary>
-        /// 選択されたカードのIDm
+        /// バス停名入力画面を開く（Issue #703）
         /// </summary>
-        public string SelectedCardIdm => _viewModel.SelectedCardIdm;
+        private async Task OpenBusStopInputAsync(int ledgerId)
+        {
+            var busDialog = App.Current.ServiceProvider
+                .GetRequiredService<BusStopInputDialog>();
+            busDialog.Owner = this;
+            await busDialog.InitializeWithLedgerIdAsync(ledgerId);
+
+            if (busDialog.ShowDialog() == true)
+            {
+                // 保存成功時：一覧を更新（入力済みの項目が消える）
+                await _viewModel.InitializeAsync();
+            }
+        }
 
         /// <summary>
-        /// DataGridの行ダブルクリックで確定
+        /// 「バス停名を入力」ボタンクリック（Issue #703）
         /// </summary>
-        private void DataGrid_MouseDoubleClick(object sender, MouseButtonEventArgs e)
+        private async void InputBusStopButton_Click(object sender, RoutedEventArgs e)
+        {
+            if (_viewModel.SelectedItem == null) return;
+            await OpenBusStopInputAsync(_viewModel.SelectedItem.LedgerId);
+        }
+
+        /// <summary>
+        /// DataGridの行ダブルクリックでバス停名入力画面を開く（Issue #703）
+        /// </summary>
+        private async void DataGrid_MouseDoubleClick(object sender, MouseButtonEventArgs e)
         {
             if (_viewModel.SelectedItem != null)
             {
-                _viewModel.ConfirmCommand.Execute(null);
+                await OpenBusStopInputAsync(_viewModel.SelectedItem.LedgerId);
             }
         }
 

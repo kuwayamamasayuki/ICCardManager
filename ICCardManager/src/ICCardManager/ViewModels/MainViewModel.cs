@@ -2023,21 +2023,14 @@ public partial class MainViewModel : ViewModelBase
                 break;
 
             case WarningType.IncompleteBusStop:
-                // バス停未入力警告: 一覧ダイアログを表示
+                // バス停未入力警告: 一覧ダイアログを表示（Issue #703: ダイアログ内で直接バス停名入力）
                 var dialog = App.Current.ServiceProvider
                     .GetRequiredService<Views.Dialogs.IncompleteBusStopDialog>();
                 dialog.Owner = System.Windows.Application.Current.MainWindow;
                 dialog.ShowDialog();
 
-                // ダイアログでカードが選択された場合、そのカードの履歴を表示
-                if (dialog.DialogResult == true && !string.IsNullOrEmpty(dialog.SelectedCardIdm))
-                {
-                    var selectedCard = await _cardRepository.GetByIdmAsync(dialog.SelectedCardIdm);
-                    if (selectedCard != null)
-                    {
-                        await ShowHistoryAsync(selectedCard);
-                    }
-                }
+                // ダイアログ内でバス停名が入力された可能性があるため、警告を更新
+                await CheckWarningsAsync();
                 break;
         }
     }

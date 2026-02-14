@@ -4,14 +4,13 @@ using System.Collections.ObjectModel;
 using System.Linq;
 using System.Threading.Tasks;
 using CommunityToolkit.Mvvm.ComponentModel;
-using CommunityToolkit.Mvvm.Input;
 using ICCardManager.Data.Repositories;
 using ICCardManager.Dtos;
 
 namespace ICCardManager.ViewModels
 {
     /// <summary>
-    /// バス停名未入力一覧ダイアログのViewModel（Issue #672）
+    /// バス停名未入力一覧ダイアログのViewModel（Issue #672, #703）
     /// </summary>
     public partial class IncompleteBusStopViewModel : ViewModelBase
     {
@@ -27,6 +26,18 @@ namespace ICCardManager.ViewModels
         private IncompleteBusStopItem _selectedItem;
 
         /// <summary>
+        /// 利用日フィルタの選択肢
+        /// </summary>
+        [ObservableProperty]
+        private ObservableCollection<string> _dateFilterOptions = new();
+
+        /// <summary>
+        /// 選択中の利用日フィルタ
+        /// </summary>
+        [ObservableProperty]
+        private string _selectedDateFilter = "すべて";
+
+        /// <summary>
         /// カード名フィルタの選択肢
         /// </summary>
         [ObservableProperty]
@@ -39,15 +50,14 @@ namespace ICCardManager.ViewModels
         private string _selectedCardFilter = "すべて";
 
         /// <summary>
-        /// 確認完了フラグ（ダイアログ結果用）
-        /// </summary>
-        [ObservableProperty]
-        private bool _isConfirmed;
-
-        /// <summary>
         /// 選択されたカードのIDm
         /// </summary>
         public string SelectedCardIdm => SelectedItem?.CardIdm;
+
+        /// <summary>
+        /// 選択された履歴のID
+        /// </summary>
+        public int? SelectedLedgerId => SelectedItem?.LedgerId;
 
         public IncompleteBusStopViewModel(
             ILedgerRepository ledgerRepository,
@@ -64,6 +74,10 @@ namespace ICCardManager.ViewModels
         {
             using (BeginBusy("読み込み中..."))
             {
+                // フィルタ条件を保持（バス停名入力後の再読み込み時に復元するため）
+                var previousDateFilter = SelectedDateFilter;
+                var previousCardFilter = SelectedCardFilter;
+
                 var ledgers = await _ledgerRepository.GetByDateRangeAsync(
                     null, DateTime.Now.AddYears(-1), DateTime.Now);
                 var incompleteLedgers = ledgers.Where(l => l.Summary.Contains("★")).ToList();
@@ -82,6 +96,15 @@ namespace ICCardManager.ViewModels
                     StaffName = l.StaffName ?? ""
                 }).OrderByDescending(i => i.Date).ToList();
 
+                // 利用日フィルタの選択肢を構築
+                DateFilterOptions.Clear();
+                DateFilterOptions.Add("すべて");
+                foreach (var date in _allItems.Select(i => i.DateDisplay).Distinct().OrderByDescending(d => d))
+                {
+                    DateFilterOptions.Add(date);
+                }
+
+                // カード名フィルタの選択肢を構築
                 CardFilterOptions.Clear();
                 CardFilterOptions.Add("すべて");
                 foreach (var cardName in _allItems.Select(i => i.CardDisplayName).Distinct().OrderBy(n => n))
@@ -89,10 +112,15 @@ namespace ICCardManager.ViewModels
                     CardFilterOptions.Add(cardName);
                 }
 
+                // 以前の選択値が新しい選択肢に存在する場合は復元、なければ「すべて」に戻す
+                SelectedDateFilter = DateFilterOptions.Contains(previousDateFilter) ? previousDateFilter : "すべて";
+                SelectedCardFilter = CardFilterOptions.Contains(previousCardFilter) ? previousCardFilter : "すべて";
+
                 ApplyFilter();
             }
         }
 
+        partial void OnSelectedDateFilterChanged(string value) => ApplyFilter();
         partial void OnSelectedCardFilterChanged(string value) => ApplyFilter();
 
         /// <summary>
@@ -102,24 +130,17 @@ namespace ICCardManager.ViewModels
         {
             var filtered = _allItems.AsEnumerable();
 
+            if (!string.IsNullOrEmpty(SelectedDateFilter) && SelectedDateFilter != "すべて")
+            {
+                filtered = filtered.Where(i => i.DateDisplay == SelectedDateFilter);
+            }
+
             if (!string.IsNullOrEmpty(SelectedCardFilter) && SelectedCardFilter != "すべて")
             {
                 filtered = filtered.Where(i => i.CardDisplayName == SelectedCardFilter);
             }
 
             Items = new ObservableCollection<IncompleteBusStopItem>(filtered);
-        }
-
-        /// <summary>
-        /// 選択確定
-        /// </summary>
-        [RelayCommand]
-        public void Confirm()
-        {
-            if (SelectedItem != null)
-            {
-                IsConfirmed = true;
-            }
         }
     }
 }
