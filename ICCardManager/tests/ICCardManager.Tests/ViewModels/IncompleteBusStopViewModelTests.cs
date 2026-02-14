@@ -13,7 +13,7 @@ using Xunit;
 namespace ICCardManager.Tests.ViewModels;
 
 /// <summary>
-/// IncompleteBusStopViewModelの単体テスト（Issue #672）
+/// IncompleteBusStopViewModelの単体テスト（Issue #672, #703）
 /// </summary>
 public class IncompleteBusStopViewModelTests
 {
@@ -197,6 +197,42 @@ public class IncompleteBusStopViewModelTests
         _viewModel.CardFilterOptions.Should().Contain("nimoca 002");
     }
 
+    /// <summary>
+    /// 利用日フィルタの選択肢が正しく構築されること（Issue #703）
+    /// </summary>
+    [Fact]
+    public async Task InitializeAsync_ShouldBuildDateFilterOptions()
+    {
+        // Arrange
+        var ledgers = new List<Ledger>
+        {
+            new Ledger { Id = 1, CardIdm = "CARD001", Date = new DateTime(2026, 1, 10), Summary = "バス（★）", Expense = 200 },
+            new Ledger { Id = 2, CardIdm = "CARD001", Date = new DateTime(2026, 1, 15), Summary = "バス（★）", Expense = 300 },
+            new Ledger { Id = 3, CardIdm = "CARD002", Date = new DateTime(2026, 1, 10), Summary = "バス（★）", Expense = 150 },
+        };
+        var cards = new List<IcCard>
+        {
+            new IcCard { CardIdm = "CARD001", CardType = "はやかけん", CardNumber = "001" },
+            new IcCard { CardIdm = "CARD002", CardType = "nimoca", CardNumber = "002" },
+        };
+
+        _ledgerRepositoryMock
+            .Setup(r => r.GetByDateRangeAsync(null, It.IsAny<DateTime>(), It.IsAny<DateTime>()))
+            .ReturnsAsync(ledgers);
+        _cardRepositoryMock
+            .Setup(r => r.GetAllAsync())
+            .ReturnsAsync(cards);
+
+        // Act
+        await _viewModel.InitializeAsync();
+
+        // Assert: "すべて" + 2つの重複しない日付（降順）
+        _viewModel.DateFilterOptions.Should().HaveCount(3);
+        _viewModel.DateFilterOptions[0].Should().Be("すべて");
+        _viewModel.DateFilterOptions[1].Should().Be("2026/01/15");
+        _viewModel.DateFilterOptions[2].Should().Be("2026/01/10");
+    }
+
     #endregion
 
     #region カードフィルタテスト
@@ -275,44 +311,150 @@ public class IncompleteBusStopViewModelTests
 
     #endregion
 
-    #region Confirmコマンドテスト
+    #region 利用日フィルタテスト（Issue #703）
 
     /// <summary>
-    /// 選択がある場合にIsConfirmedがtrueになること
+    /// 利用日フィルタで絞り込みが機能すること
     /// </summary>
     [Fact]
-    public void Confirm_WithSelectedItem_ShouldSetIsConfirmedTrue()
+    public async Task SelectedDateFilter_ShouldFilterItemsByDate()
+    {
+        // Arrange
+        var ledgers = new List<Ledger>
+        {
+            new Ledger { Id = 1, CardIdm = "CARD001", Date = new DateTime(2026, 1, 10), Summary = "バス（★）", Expense = 200 },
+            new Ledger { Id = 2, CardIdm = "CARD001", Date = new DateTime(2026, 1, 15), Summary = "バス（★）", Expense = 300 },
+            new Ledger { Id = 3, CardIdm = "CARD002", Date = new DateTime(2026, 1, 10), Summary = "バス（★）", Expense = 150 },
+        };
+        var cards = new List<IcCard>
+        {
+            new IcCard { CardIdm = "CARD001", CardType = "はやかけん", CardNumber = "001" },
+            new IcCard { CardIdm = "CARD002", CardType = "nimoca", CardNumber = "002" },
+        };
+
+        _ledgerRepositoryMock
+            .Setup(r => r.GetByDateRangeAsync(null, It.IsAny<DateTime>(), It.IsAny<DateTime>()))
+            .ReturnsAsync(ledgers);
+        _cardRepositoryMock
+            .Setup(r => r.GetAllAsync())
+            .ReturnsAsync(cards);
+
+        await _viewModel.InitializeAsync();
+
+        // Act
+        _viewModel.SelectedDateFilter = "2026/01/10";
+
+        // Assert
+        _viewModel.Items.Should().HaveCount(2);
+        _viewModel.Items.Should().OnlyContain(i => i.DateDisplay == "2026/01/10");
+    }
+
+    /// <summary>
+    /// 利用日フィルタで「すべて」を選択するとリセットされること
+    /// </summary>
+    [Fact]
+    public async Task SelectedDateFilter_AllOption_ShouldShowAllItems()
+    {
+        // Arrange
+        var ledgers = new List<Ledger>
+        {
+            new Ledger { Id = 1, CardIdm = "CARD001", Date = new DateTime(2026, 1, 10), Summary = "バス（★）", Expense = 200 },
+            new Ledger { Id = 2, CardIdm = "CARD001", Date = new DateTime(2026, 1, 15), Summary = "バス（★）", Expense = 300 },
+        };
+        var cards = new List<IcCard>
+        {
+            new IcCard { CardIdm = "CARD001", CardType = "はやかけん", CardNumber = "001" },
+        };
+
+        _ledgerRepositoryMock
+            .Setup(r => r.GetByDateRangeAsync(null, It.IsAny<DateTime>(), It.IsAny<DateTime>()))
+            .ReturnsAsync(ledgers);
+        _cardRepositoryMock
+            .Setup(r => r.GetAllAsync())
+            .ReturnsAsync(cards);
+
+        await _viewModel.InitializeAsync();
+        _viewModel.SelectedDateFilter = "2026/01/10";
+        _viewModel.Items.Should().HaveCount(1);
+
+        // Act
+        _viewModel.SelectedDateFilter = "すべて";
+
+        // Assert
+        _viewModel.Items.Should().HaveCount(2);
+    }
+
+    /// <summary>
+    /// 利用日フィルタとカードフィルタの併用が機能すること（Issue #703）
+    /// </summary>
+    [Fact]
+    public async Task CombinedFilters_ShouldFilterByBothDateAndCard()
+    {
+        // Arrange: 3件のデータ（2日付×2カード、ただし1つは別日付）
+        var ledgers = new List<Ledger>
+        {
+            new Ledger { Id = 1, CardIdm = "CARD001", Date = new DateTime(2026, 1, 10), Summary = "バス（★）", Expense = 200 },
+            new Ledger { Id = 2, CardIdm = "CARD002", Date = new DateTime(2026, 1, 10), Summary = "バス（★）", Expense = 300 },
+            new Ledger { Id = 3, CardIdm = "CARD001", Date = new DateTime(2026, 1, 15), Summary = "バス（★）", Expense = 150 },
+        };
+        var cards = new List<IcCard>
+        {
+            new IcCard { CardIdm = "CARD001", CardType = "はやかけん", CardNumber = "001" },
+            new IcCard { CardIdm = "CARD002", CardType = "nimoca", CardNumber = "002" },
+        };
+
+        _ledgerRepositoryMock
+            .Setup(r => r.GetByDateRangeAsync(null, It.IsAny<DateTime>(), It.IsAny<DateTime>()))
+            .ReturnsAsync(ledgers);
+        _cardRepositoryMock
+            .Setup(r => r.GetAllAsync())
+            .ReturnsAsync(cards);
+
+        await _viewModel.InitializeAsync();
+        _viewModel.Items.Should().HaveCount(3);
+
+        // Act: 日付とカードの両方で絞り込み
+        _viewModel.SelectedDateFilter = "2026/01/10";
+        _viewModel.SelectedCardFilter = "はやかけん 001";
+
+        // Assert: 1/10のはやかけん001の1件のみ
+        _viewModel.Items.Should().HaveCount(1);
+        _viewModel.Items[0].LedgerId.Should().Be(1);
+    }
+
+    #endregion
+
+    #region SelectedLedgerId テスト（Issue #703）
+
+    /// <summary>
+    /// 選択された項目のLedgerIdが取得できること
+    /// </summary>
+    [Fact]
+    public void SelectedLedgerId_WithSelectedItem_ShouldReturnLedgerId()
     {
         // Arrange
         _viewModel.SelectedItem = new IncompleteBusStopItem
         {
-            LedgerId = 1,
+            LedgerId = 42,
             CardIdm = "CARD001",
             CardDisplayName = "はやかけん 001"
         };
 
-        // Act
-        _viewModel.ConfirmCommand.Execute(null);
-
-        // Assert
-        _viewModel.IsConfirmed.Should().BeTrue();
-        _viewModel.SelectedCardIdm.Should().Be("CARD001");
+        // Act & Assert
+        _viewModel.SelectedLedgerId.Should().Be(42);
     }
 
     /// <summary>
-    /// 選択がない場合にIsConfirmedがfalseのままであること
+    /// 選択されていない場合にnullが返ること
     /// </summary>
     [Fact]
-    public void Confirm_WithoutSelectedItem_ShouldNotSetIsConfirmed()
+    public void SelectedLedgerId_WithoutSelectedItem_ShouldReturnNull()
     {
         // Arrange
         _viewModel.SelectedItem = null;
 
-        // Act
-        _viewModel.ConfirmCommand.Execute(null);
-
-        // Assert
-        _viewModel.IsConfirmed.Should().BeFalse();
+        // Act & Assert
+        _viewModel.SelectedLedgerId.Should().BeNull();
     }
 
     #endregion
