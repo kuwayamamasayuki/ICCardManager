@@ -181,7 +181,7 @@ public partial class MainViewModel : ViewModelBase
     /// ダッシュボードのソート順
     /// </summary>
     [ObservableProperty]
-    private DashboardSortOrder _dashboardSortOrder = DashboardSortOrder.BalanceAscending;
+    private DashboardSortOrder _dashboardSortOrder = DashboardSortOrder.CardName;
 
     /// <summary>
     /// 選択中のダッシュボードアイテム
