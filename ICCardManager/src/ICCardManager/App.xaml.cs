@@ -234,6 +234,7 @@ namespace ICCardManager
             services.AddTransient<LedgerEditViewModel>();
             services.AddTransient<LedgerDetailViewModel>();
             services.AddTransient<SystemManageViewModel>();
+            services.AddTransient<IncompleteBusStopViewModel>();
     #if DEBUG
             // Issue #640: 仮想タッチ設定ダイアログ
             services.AddTransient<VirtualCardViewModel>();
@@ -253,6 +254,7 @@ namespace ICCardManager
             services.AddTransient<Views.Dialogs.LedgerDetailDialog>();
             services.AddTransient<Views.Dialogs.LedgerEditDialog>();
             services.AddTransient<Views.Dialogs.SystemManageDialog>();
+            services.AddTransient<Views.Dialogs.IncompleteBusStopDialog>();
     #if DEBUG
             services.AddTransient<Views.Dialogs.VirtualCardDialog>();
     #endif

@@ -148,7 +148,7 @@ public partial class MainViewModel : ViewModelBase
     private int _remainingSeconds;
 
     [ObservableProperty]
-    private ObservableCollection<string> _warningMessages = new();
+    private ObservableCollection<WarningItem> _warningMessages = new();
 
     [ObservableProperty]
     private ObservableCollection<CardDto> _lentCards = new();
@@ -452,7 +452,12 @@ public partial class MainViewModel : ViewModelBase
         {
             if (item.CurrentBalance < warningBalance)
             {
-                WarningMessages.Add($"⚠️ {item.CardType} {item.CardNumber}: 残額 {item.CurrentBalance:N0}円");
+                WarningMessages.Add(new WarningItem
+                {
+                    DisplayText = $"⚠️ {item.CardType} {item.CardNumber}: 残額 {item.CurrentBalance:N0}円",
+                    Type = WarningType.LowBalance,
+                    CardIdm = item.CardIdm
+                });
             }
         }
     }
@@ -469,7 +474,11 @@ public partial class MainViewModel : ViewModelBase
         var incompleteCount = ledgers.Count(l => l.Summary.Contains("★"));
         if (incompleteCount > 0)
         {
-            WarningMessages.Add($"⚠️ バス停名が未入力の履歴が{incompleteCount}件あります");
+            WarningMessages.Add(new WarningItem
+            {
+                DisplayText = $"⚠️ バス停名が未入力の履歴が{incompleteCount}件あります",
+                Type = WarningType.IncompleteBusStop
+            });
         }
     }
 
@@ -1621,7 +1630,11 @@ public partial class MainViewModel : ViewModelBase
     {
         System.Windows.Application.Current.Dispatcher.InvokeAsync(() =>
         {
-            WarningMessages.Add($"⚠️ カードリーダーエラー: {e.Message}");
+            WarningMessages.Add(new WarningItem
+            {
+                DisplayText = $"⚠️ カードリーダーエラー: {e.Message}",
+                Type = WarningType.CardReaderError
+            });
         });
     }
 
@@ -1646,9 +1659,9 @@ public partial class MainViewModel : ViewModelBase
     /// </summary>
     private void UpdateConnectionWarningMessage(ConnectionStateChangedEventArgs e)
     {
-        // 既存のカードリーダー関連の警告を削除
+        // 既存のカードリーダー接続関連の警告を削除（エラーは残す）
         var existingWarnings = WarningMessages
-            .Where(w => w.Contains("カードリーダー") && !w.Contains("エラー:"))
+            .Where(w => w.Type == WarningType.CardReaderConnection)
             .ToList();
 
         foreach (var warning in existingWarnings)
@@ -1660,18 +1673,21 @@ public partial class MainViewModel : ViewModelBase
         switch (e.State)
         {
             case CardReaderConnectionState.Disconnected:
-                if (!string.IsNullOrEmpty(e.Message))
+                WarningMessages.Add(new WarningItem
                 {
-                    WarningMessages.Add($"⚠️ カードリーダー切断: {e.Message}");
-                }
-                else
-                {
-                    WarningMessages.Add("⚠️ カードリーダーが切断されています");
-                }
+                    DisplayText = !string.IsNullOrEmpty(e.Message)
+                        ? $"⚠️ カードリーダー切断: {e.Message}"
+                        : "⚠️ カードリーダーが切断されています",
+                    Type = WarningType.CardReaderConnection
+                });
                 break;
 
             case CardReaderConnectionState.Reconnecting:
-                WarningMessages.Add($"🔄 カードリーダーに再接続中... ({e.RetryCount}/10)");
+                WarningMessages.Add(new WarningItem
+                {
+                    DisplayText = $"🔄 カードリーダーに再接続中... ({e.RetryCount}/10)",
+                    Type = WarningType.CardReaderConnection
+                });
                 break;
 
             case CardReaderConnectionState.Connected:
@@ -1679,15 +1695,19 @@ public partial class MainViewModel : ViewModelBase
                 if (!string.IsNullOrEmpty(e.Message) && e.Message.Contains("再接続"))
                 {
                     // 一時的に成功メッセージを表示（3秒後に削除）
-                    var successMessage = "✅ カードリーダーに再接続しました";
-                    WarningMessages.Add(successMessage);
+                    var successWarning = new WarningItem
+                    {
+                        DisplayText = "✅ カードリーダーに再接続しました",
+                        Type = WarningType.CardReaderConnection
+                    };
+                    WarningMessages.Add(successWarning);
 
                     // 3秒後にメッセージを削除
                     _ = Task.Delay(3000).ContinueWith(_ =>
                     {
                         System.Windows.Application.Current.Dispatcher.InvokeAsync(() =>
                         {
-                            WarningMessages.Remove(successMessage);
+                            WarningMessages.Remove(successWarning);
                         });
                     });
                 }
@@ -1851,6 +1871,45 @@ public partial class MainViewModel : ViewModelBase
         if (card != null)
         {
             await ShowHistoryAsync(card);
+        }
+    }
+
+    /// <summary>
+    /// Issue #672: 警告クリック時の処理
+    /// </summary>
+    [RelayCommand]
+    public async Task HandleWarningClick(WarningItem warning)
+    {
+        if (warning == null) return;
+
+        switch (warning.Type)
+        {
+            case WarningType.LowBalance:
+                // 残額警告: 直接カード履歴を表示
+                var card = await _cardRepository.GetByIdmAsync(warning.CardIdm);
+                if (card != null)
+                {
+                    await ShowHistoryAsync(card);
+                }
+                break;
+
+            case WarningType.IncompleteBusStop:
+                // バス停未入力警告: 一覧ダイアログを表示
+                var dialog = App.Current.ServiceProvider
+                    .GetRequiredService<Views.Dialogs.IncompleteBusStopDialog>();
+                dialog.Owner = System.Windows.Application.Current.MainWindow;
+                dialog.ShowDialog();
+
+                // ダイアログでカードが選択された場合、そのカードの履歴を表示
+                if (dialog.DialogResult == true && !string.IsNullOrEmpty(dialog.SelectedCardIdm))
+                {
+                    var selectedCard = await _cardRepository.GetByIdmAsync(dialog.SelectedCardIdm);
+                    if (selectedCard != null)
+                    {
+                        await ShowHistoryAsync(selectedCard);
+                    }
+                }
+                break;
         }
     }
 
