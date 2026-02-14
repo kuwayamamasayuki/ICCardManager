@@ -1767,6 +1767,97 @@ public class LendingServiceTests : IDisposable
             "20件すべてが当月のため、月初めの履歴が不足している可能性がある");
     }
 
+    /// <summary>
+    /// Issue #664: 20件すべてが対象期間内の場合、EarliestHistoryDateに最古日付が設定されること
+    /// </summary>
+    [Fact]
+    public async Task ImportHistoryForRegistrationAsync_IncompleteHistory_SetsEarliestHistoryDate()
+    {
+        // Arrange: 繰越で importFromDate=1月1日、履歴が1月+2月にまたがる20件
+        var importFromDate = new DateTime(2026, 1, 1);
+        var history = new List<LedgerDetail>();
+        // 1月分10件
+        for (int i = 0; i < 10; i++)
+        {
+            history.Add(new LedgerDetail
+            {
+                UseDate = new DateTime(2026, 1, 15 + i),
+                Balance = 10000 - i * 200,
+                Amount = 200,
+                EntryStation = "天神",
+                ExitStation = "博多"
+            });
+        }
+        // 2月分10件
+        for (int i = 0; i < 10; i++)
+        {
+            history.Add(new LedgerDetail
+            {
+                UseDate = new DateTime(2026, 2, 1 + i),
+                Balance = 8000 - i * 200,
+                Amount = 200,
+                EntryStation = "天神",
+                ExitStation = "博多"
+            });
+        }
+
+        _ledgerRepositoryMock.Setup(x => x.GetExistingDetailKeysAsync(TestCardIdm, It.IsAny<DateTime>()))
+            .ReturnsAsync(new HashSet<(DateTime?, int?, bool)>());
+        _ledgerRepositoryMock.Setup(x => x.GetLatestBeforeDateAsync(TestCardIdm, It.IsAny<DateTime>()))
+            .ReturnsAsync(new Ledger { Balance = 10000 });
+        _ledgerRepositoryMock.Setup(x => x.InsertAsync(It.IsAny<Ledger>()))
+            .ReturnsAsync(1);
+        _ledgerRepositoryMock.Setup(x => x.InsertDetailsAsync(It.IsAny<int>(), It.IsAny<IEnumerable<LedgerDetail>>()))
+            .ReturnsAsync(true);
+
+        // Act
+        var result = await _service.ImportHistoryForRegistrationAsync(TestCardIdm, history, importFromDate);
+
+        // Assert
+        result.Success.Should().BeTrue();
+        result.MayHaveIncompleteHistory.Should().BeTrue(
+            "20件すべてが importFromDate 以降のため、それより前の履歴が不足している可能性がある");
+        result.EarliestHistoryDate.Should().Be(new DateTime(2026, 1, 15),
+            "履歴の最古日付が設定されること");
+    }
+
+    /// <summary>
+    /// Issue #664: 20件未満の場合、EarliestHistoryDateはnullのままであること
+    /// </summary>
+    [Fact]
+    public async Task ImportHistoryForRegistrationAsync_LessThan20_EarliestHistoryDateIsNull()
+    {
+        // Arrange: 10件のみ（20件未満 → MayHaveIncompleteHistory=false）
+        var importFromDate = new DateTime(2026, 2, 1);
+        var history = Enumerable.Range(1, 10).Select(i => new LedgerDetail
+        {
+            UseDate = new DateTime(2026, 2, i),
+            Balance = 10000 - i * 200,
+            Amount = 200,
+            EntryStation = "天神",
+            ExitStation = "博多"
+        }).ToList();
+
+        _ledgerRepositoryMock.Setup(x => x.GetExistingDetailKeysAsync(TestCardIdm, It.IsAny<DateTime>()))
+            .ReturnsAsync(new HashSet<(DateTime?, int?, bool)>());
+        _ledgerRepositoryMock.Setup(x => x.GetLatestBeforeDateAsync(TestCardIdm, It.IsAny<DateTime>()))
+            .ReturnsAsync(new Ledger { Balance = 10000 });
+        _ledgerRepositoryMock.Setup(x => x.InsertAsync(It.IsAny<Ledger>()))
+            .ReturnsAsync(1);
+        _ledgerRepositoryMock.Setup(x => x.InsertDetailsAsync(It.IsAny<int>(), It.IsAny<IEnumerable<LedgerDetail>>()))
+            .ReturnsAsync(true);
+
+        // Act
+        var result = await _service.ImportHistoryForRegistrationAsync(TestCardIdm, history, importFromDate);
+
+        // Assert
+        result.Success.Should().BeTrue();
+        result.MayHaveIncompleteHistory.Should().BeFalse(
+            "20件未満なのでカード内の全履歴を取得済み");
+        result.EarliestHistoryDate.Should().BeNull(
+            "不完全でない場合はEarliestHistoryDateは設定されない");
+    }
+
     #endregion
 
     #region CalculatePreHistoryBalance テスト（Issue #596）
