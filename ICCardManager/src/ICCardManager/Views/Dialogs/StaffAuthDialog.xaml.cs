@@ -79,6 +79,14 @@ namespace ICCardManager.Views.Dialogs
 
             // タイムアウトタイマー開始
             _timeoutTimer.Start();
+
+#if DEBUG
+            // Issue #688: デバッグモードでは仮想タッチボタンを表示
+            if (_cardReader is HybridCardReader)
+            {
+                DebugVirtualTouchButton.Visibility = Visibility.Visible;
+            }
+#endif
         }
 
         private void OnClosed(object? sender, EventArgs e)
@@ -178,6 +186,19 @@ namespace ICCardManager.Views.Dialogs
                 StatusText.Foreground = new System.Windows.Media.SolidColorBrush(
                     System.Windows.Media.Color.FromRgb(0x2E, 0x7D, 0x32));
             }
+        }
+
+        /// <summary>
+        /// Issue #688: デバッグ用仮想タッチボタンのクリックハンドラ
+        /// </summary>
+        private void DebugVirtualTouchButton_Click(object sender, RoutedEventArgs e)
+        {
+#if DEBUG
+            if (_cardReader is HybridCardReader hybridReader)
+            {
+                hybridReader.SimulateCardRead("FFFF000000000001");
+            }
+#endif
         }
 
         private void CancelButton_Click(object sender, RoutedEventArgs e)
