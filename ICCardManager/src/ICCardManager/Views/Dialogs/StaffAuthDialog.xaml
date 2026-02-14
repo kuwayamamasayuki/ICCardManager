@@ -71,18 +71,33 @@
         </StackPanel>
 
         <!-- キャンセルボタン -->
-        <Button x:Name="CancelButton"
-                Grid.Row="4"
-                Content="キャンセル"
-                MinWidth="120"
-                Height="40"
-                Padding="16,0"
-                HorizontalAlignment="Center"
-                FontSize="{DynamicResource BaseFontSize}"
-                IsCancel="True"
-                Click="CancelButton_Click"
-                AutomationProperties.Name="キャンセル"
-                AutomationProperties.HelpText="認証をキャンセルします"
-                ToolTip="認証をキャンセル (Escape)"/>
+        <StackPanel Grid.Row="4" HorizontalAlignment="Center" Orientation="Horizontal">
+            <Button x:Name="CancelButton"
+                    Content="キャンセル"
+                    MinWidth="120"
+                    Height="40"
+                    Padding="16,0"
+                    FontSize="{DynamicResource BaseFontSize}"
+                    IsCancel="True"
+                    Click="CancelButton_Click"
+                    AutomationProperties.Name="キャンセル"
+                    AutomationProperties.HelpText="認証をキャンセルします"
+                    ToolTip="認証をキャンセル (Escape)"/>
+
+            <!-- Issue #688: デバッグモード用仮想タッチボタン -->
+            <Button x:Name="DebugVirtualTouchButton"
+                    Content="🃏 職員証（仮想タッチ）"
+                    MinWidth="180"
+                    Height="40"
+                    Padding="16,0"
+                    Margin="10,0,0,0"
+                    FontSize="{DynamicResource BaseFontSize}"
+                    Background="#FFF3E0"
+                    Foreground="#E65100"
+                    Click="DebugVirtualTouchButton_Click"
+                    Visibility="Collapsed"
+                    AutomationProperties.Name="職員証仮想タッチ（デバッグ用）"
+                    ToolTip="デバッグ用: 職員証の仮想タッチをシミュレート"/>
+        </StackPanel>
     </Grid>
 </Window>
