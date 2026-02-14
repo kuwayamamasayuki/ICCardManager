@@ -87,6 +87,11 @@ namespace ICCardManager.Services
         /// trueの場合、CSVインポートで不足分を補完する必要がある旨をユーザーに通知する。
         /// </remarks>
         public bool MayHaveIncompleteHistory { get; set; }
+
+        /// <summary>
+        /// カード内の履歴の最古日付（Issue #664: 不完全履歴の場合のみ有効）
+        /// </summary>
+        public DateTime? EarliestHistoryDate { get; set; }
     }
 
     /// <summary>
@@ -920,6 +925,14 @@ namespace ICCardManager.Services
 
                     // 完全性チェック: 元の履歴（フィルタ前）を使用
                     result.MayHaveIncompleteHistory = CheckHistoryCompleteness(historyDetails, importFromDate);
+
+                    // Issue #664: 不完全な場合、履歴の最古日付をメッセージ用に記録
+                    if (result.MayHaveIncompleteHistory)
+                    {
+                        result.EarliestHistoryDate = historyDetails
+                            .Where(d => d.UseDate.HasValue)
+                            .Min(d => d.UseDate.Value);
+                    }
                 }
                 catch
                 {

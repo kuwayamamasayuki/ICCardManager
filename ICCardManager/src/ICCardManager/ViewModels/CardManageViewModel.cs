@@ -466,8 +466,12 @@ namespace ICCardManager.ViewModels
 
                             if (importResult.MayHaveIncompleteHistory)
                             {
+                                // Issue #664: カード内の履歴の実際の最古月を表示
+                                var monthText = importResult.EarliestHistoryDate.HasValue
+                                    ? $"{importResult.EarliestHistoryDate.Value.Month}月以降分"
+                                    : "今月分";
                                 _dialogService.ShowInformation(
-                                    "カード内の履歴がすべて今月分のため、月初めからの履歴が不足している可能性があります。\n" +
+                                    $"交通系ICカード内の履歴が{monthText}のため、それより前の履歴が不足している可能性があります。\n" +
                                     "不足分はCSVインポートで補完してください。",
                                     "履歴インポートの注意");
                             }
