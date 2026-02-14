@@ -7,6 +7,7 @@ rem 使用方法:
 rem   convert-to-docx.bat            全マニュアルを変換（更新があるもののみ）
 rem   convert-to-docx.bat /force     全マニュアルを強制変換
 rem   convert-to-docx.bat /nomermaid Mermaidフィルターを使用しない
+rem   convert-to-docx.bat intro      はじめにのみ変換
 rem   convert-to-docx.bat user       ユーザーマニュアルのみ変換
 rem   convert-to-docx.bat admin      管理者マニュアルのみ変換
 rem   convert-to-docx.bat dev        開発者ガイドのみ変換
@@ -31,6 +32,7 @@ if "%~1"=="/force" set "FORCE=1"
 if "%~1"=="-force" set "FORCE=1"
 if "%~1"=="/nomermaid" set "NOMERMAID=1"
 if "%~1"=="-nomermaid" set "NOMERMAID=1"
+if "%~1"=="intro" set "TARGET=intro"
 if "%~1"=="user" set "TARGET=user"
 if "%~1"=="admin" set "TARGET=admin"
 if "%~1"=="dev" set "TARGET=dev"
@@ -70,6 +72,10 @@ if %NOMERMAID%==0 (
 ) else (
     echo [準備] mermaid-filter: スキップ ^(/nomermaid指定^)
 )
+
+rem はじめに
+if "%TARGET%"=="all" call :convert_manual "はじめに" "はじめに.md" "はじめに.docx" "交通系ICカード管理システム はじめに"
+if "%TARGET%"=="intro" call :convert_manual "はじめに" "はじめに.md" "はじめに.docx" "交通系ICカード管理システム はじめに"
 
 rem ユーザーマニュアル
 if "%TARGET%"=="all" call :convert_manual "ユーザーマニュアル" "ユーザーマニュアル.md" "ユーザーマニュアル.docx" "交通系ICカード管理システム ユーザーマニュアル"

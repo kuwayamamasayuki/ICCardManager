@@ -10,7 +10,7 @@
 #   .md → .docx（convert-to-docx.ps1）→ .pdf（本スクリプト / Word COM）
 
 param(
-    [ValidateSet("all", "user", "user-summary", "admin", "dev")]
+    [ValidateSet("all", "intro", "user", "user-summary", "admin", "dev")]
     [string]$Target = "all",
     [switch]$Force
 )
@@ -22,6 +22,12 @@ $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 
 # マニュアル定義（入力は.docx、出力は.pdf）
 $Manuals = @(
+    @{
+        Name = "はじめに"
+        Key = "intro"
+        Input = "はじめに.docx"
+        Output = "はじめに.pdf"
+    },
     @{
         Name = "ユーザーマニュアル"
         Key = "user"

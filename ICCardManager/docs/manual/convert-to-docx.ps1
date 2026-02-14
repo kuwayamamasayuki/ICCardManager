@@ -13,7 +13,7 @@
 #      作成: .\create-reference-doc.ps1 を実行
 
 param(
-    [ValidateSet("all", "user", "user-summary", "admin", "dev")]
+    [ValidateSet("all", "intro", "user", "user-summary", "admin", "dev")]
     [string]$Target = "all",
     [switch]$Force,
     [switch]$NoMermaid
@@ -100,6 +100,13 @@ $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 
 # マニュアル定義
 $Manuals = @(
+    @{
+        Name = "はじめに"
+        Key = "intro"
+        Input = "はじめに.md"
+        Output = "はじめに.docx"
+        Title = "交通系ICカード管理システム はじめに"
+    },
     @{
         Name = "ユーザーマニュアル"
         Key = "user"
