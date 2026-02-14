@@ -1905,7 +1905,11 @@ namespace ICCardManager.Services
         /// 履歴データの変更点を検出
         /// </summary>
         /// <param name="existingLedger">既存の履歴</param>
+        /// <param name="newDate">新しい日付</param>
         /// <param name="newSummary">新しい摘要</param>
+        /// <param name="newIncome">新しい受入金額</param>
+        /// <param name="newExpense">新しい払出金額</param>
+        /// <param name="newBalance">新しい残高</param>
         /// <param name="newStaffName">新しい利用者名</param>
         /// <param name="newNote">新しい備考</param>
         /// <param name="changes">変更点リスト（検出結果が追加される）</param>
