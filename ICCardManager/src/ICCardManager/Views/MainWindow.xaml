@@ -441,7 +441,7 @@
                                 </DataGridTextColumn>
                                 <DataGridTextColumn Header="利用者" Binding="{Binding StaffName}" Width="80"/>
                                 <DataGridTextColumn Header="備考" Binding="{Binding Note}" Width="80"/>
-                                <DataGridTemplateColumn Header="操作" Width="210">
+                                <DataGridTemplateColumn Header="操作" Width="170">
                                     <DataGridTemplateColumn.CellTemplate>
                                         <DataTemplate>
                                             <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
@@ -457,13 +457,7 @@
                                                         CommandParameter="{Binding}"
                                                         Padding="8,2"
                                                         Margin="0,0,3,0"
-                                                        ToolTip="摘要・備考・利用者を変更"/>
-                                                <Button Content="修正"
-                                                        Command="{Binding DataContext.EditLedgerFullCommand, RelativeSource={RelativeSource AncestorType=DataGrid}}"
-                                                        CommandParameter="{Binding}"
-                                                        Padding="8,2"
-                                                        Margin="0,0,3,0"
-                                                        ToolTip="全項目（日付・金額含む）を修正"/>
+                                                        ToolTip="摘要・備考・利用者・日付・金額を変更"/>
                                                 <Button Content="削除"
                                                         Command="{Binding DataContext.DeleteLedgerRowCommand, RelativeSource={RelativeSource AncestorType=DataGrid}}"
                                                         CommandParameter="{Binding}"
