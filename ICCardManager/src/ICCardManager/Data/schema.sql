@@ -95,6 +95,18 @@ CREATE TABLE IF NOT EXISTS settings (
 );
 
 -- ============================================
+-- 統合履歴（Issue #548）
+-- ============================================
+CREATE TABLE IF NOT EXISTS ledger_merge_history (
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    merged_at        TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,  -- 統合日時
+    target_ledger_id INTEGER NOT NULL,                         -- 統合先レコードID
+    description      TEXT NOT NULL,                            -- 統合内容の説明
+    undo_data        TEXT NOT NULL,                            -- undo用データ（JSON）
+    is_undone        INTEGER DEFAULT 0                         -- 取消済フラグ
+);
+
+-- ============================================
 -- インデックス定義
 -- ============================================
 CREATE INDEX IF NOT EXISTS idx_staff_deleted      ON staff(is_deleted);
@@ -109,6 +121,8 @@ CREATE INDEX IF NOT EXISTS idx_log_timestamp      ON operation_log(timestamp);
 -- Issue #504: 起動高速化のための追加インデックス
 CREATE INDEX IF NOT EXISTS idx_ledger_card_id     ON ledger(card_idm, id DESC);
 CREATE INDEX IF NOT EXISTS idx_card_lent_deleted  ON ic_card(is_lent, is_deleted);
+-- Issue #548: 統合履歴テーブルの検索用インデックス
+CREATE INDEX IF NOT EXISTS idx_merge_history_target ON ledger_merge_history(target_ledger_id);
 
 -- ============================================
 -- 初期データ
