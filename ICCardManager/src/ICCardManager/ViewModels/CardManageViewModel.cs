@@ -63,6 +63,12 @@ namespace ICCardManager.ViewModels
         private bool _isWaitingForCard;
 
         /// <summary>
+        /// 新規登録・更新・復元後にハイライト表示するカードのIDm
+        /// </summary>
+        [ObservableProperty]
+        private string? _newlyRegisteredIdm;
+
+        /// <summary>
         /// 事前に読み取った残高（Issue #381対応）
         /// </summary>
         /// <remarks>
@@ -381,10 +387,12 @@ namespace ICCardManager.ViewModels
                                         await _operationLogger.LogCardRestoreAsync(null, restoredCard);
                                     }
 
+                                    var restoredIdm = EditCardIdm;
                                     StatusMessage = $"{existing.CardNumber} を復元しました";
                                     IsStatusError = false;
                                     await LoadCardsAsync();
                                     CancelEdit();
+                                    SelectAndHighlight(restoredIdm);
                                 }
                                 else
                                 {
@@ -482,10 +490,12 @@ namespace ICCardManager.ViewModels
                             await CreateInitialLedgerAsync(EditCardIdm, modeResult);
                         }
 
+                        var savedIdm = EditCardIdm;
                         StatusMessage = "登録しました";
                         IsStatusError = false;
                         await LoadCardsAsync();
                         CancelEdit();
+                        SelectAndHighlight(savedIdm);
                     }
                     else
                     {
@@ -520,10 +530,12 @@ namespace ICCardManager.ViewModels
                             await _operationLogger.LogCardUpdateAsync(null, beforeCard, card);
                         }
 
+                        var updatedIdm = EditCardIdm;
                         StatusMessage = "更新しました";
                         IsStatusError = false;
                         await LoadCardsAsync();
                         CancelEdit();
+                        SelectAndHighlight(updatedIdm);
                     }
                     else
                     {
@@ -771,10 +783,12 @@ namespace ICCardManager.ViewModels
                                     await _operationLogger.LogCardRestoreAsync(null, restoredCard);
                                 }
 
+                                var restoredIdm = e.Idm;
                                 StatusMessage = $"{existing.CardNumber} を復元しました";
                                 IsStatusError = false;
                                 await LoadCardsAsync();
                                 CancelEdit();
+                                SelectAndHighlight(restoredIdm);
                             }
                             else
                             {
@@ -1026,6 +1040,21 @@ namespace ICCardManager.ViewModels
             else
                 return SummaryGenerator.GetMidYearCarryoverDate(
                     modeResult.CarryoverMonth!.Value, DateTime.Now);
+        }
+
+        /// <summary>
+        /// 保存・更新・復元後にハイライト対象のIDmを設定する
+        /// </summary>
+        /// <remarks>
+        /// View層がNewlyRegisteredIdmの変更を監視し、該当行のスクロール＋ハイライトを行う。
+        /// 選択行の背景色と競合しないよう、SelectedCardは設定しない（View層で選択解除する）。
+        /// </remarks>
+        /// <param name="idm">ハイライト対象のカードIDm</param>
+        private void SelectAndHighlight(string idm)
+        {
+            // 同じIDmの連続操作でもPropertyChangedが発火するようリセット
+            NewlyRegisteredIdm = null;
+            NewlyRegisteredIdm = idm;
         }
 
         /// <summary>

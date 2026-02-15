@@ -50,7 +50,8 @@
             </StackPanel>
 
             <!-- 職員一覧 -->
-            <DataGrid Grid.Row="1"
+            <DataGrid x:Name="StaffDataGrid"
+                      Grid.Row="1"
                       ItemsSource="{Binding StaffList}"
                       SelectedItem="{Binding SelectedStaff}"
                       AutoGenerateColumns="False"

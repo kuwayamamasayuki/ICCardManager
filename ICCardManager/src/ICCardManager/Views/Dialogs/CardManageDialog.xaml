@@ -48,7 +48,8 @@
             </StackPanel>
 
             <!-- カード一覧 -->
-            <DataGrid Grid.Row="1"
+            <DataGrid x:Name="CardDataGrid"
+                      Grid.Row="1"
                       ItemsSource="{Binding Cards}"
                       SelectedItem="{Binding SelectedCard}"
                       AutoGenerateColumns="False"

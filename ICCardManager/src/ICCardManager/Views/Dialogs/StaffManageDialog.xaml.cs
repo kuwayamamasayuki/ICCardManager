@@ -1,11 +1,14 @@
 using System;
 using System.Collections.Generic;
+using System.ComponentModel;
 using System.Linq;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Input;
+using System.Windows.Threading;
 using ICCardManager.Common;
 using ICCardManager.ViewModels;
+using ICCardManager.Views.Helpers;
 
 namespace ICCardManager.Views.Dialogs
 {
@@ -25,7 +28,8 @@ namespace ICCardManager.Views.Dialogs
             DataContext = _viewModel;
 
             Loaded += StaffManageDialog_Loaded;
-            Closed += (s, e) => _viewModel.Cleanup();
+            _viewModel.PropertyChanged += ViewModel_PropertyChanged;
+            Closed += StaffManageDialog_Closed;
         }
 
         private async void StaffManageDialog_Loaded(object sender, RoutedEventArgs e)
@@ -48,6 +52,33 @@ namespace ICCardManager.Views.Dialogs
             catch (Exception ex)
             {
                 ErrorDialogHelper.ShowError(ex, "初期化エラー");
+            }
+        }
+
+        private void StaffManageDialog_Closed(object sender, EventArgs e)
+        {
+            _viewModel.PropertyChanged -= ViewModel_PropertyChanged;
+            _viewModel.Cleanup();
+        }
+
+        /// <summary>
+        /// ViewModelのプロパティ変更を監視し、ハイライト表示を実行
+        /// </summary>
+        private void ViewModel_PropertyChanged(object sender, PropertyChangedEventArgs e)
+        {
+            if (e.PropertyName == nameof(StaffManageViewModel.NewlyRegisteredIdm)
+                && _viewModel.NewlyRegisteredIdm != null)
+            {
+                var idm = _viewModel.NewlyRegisteredIdm;
+                // DataGridの描画完了を待ってからハイライト実行
+                Dispatcher.InvokeAsync(() =>
+                {
+                    var item = _viewModel.StaffList.FirstOrDefault(s => s.StaffIdm == idm);
+                    if (item != null)
+                    {
+                        DataGridHighlightHelper.HighlightRow(StaffDataGrid, item);
+                    }
+                }, DispatcherPriority.ContextIdle);
             }
         }
 

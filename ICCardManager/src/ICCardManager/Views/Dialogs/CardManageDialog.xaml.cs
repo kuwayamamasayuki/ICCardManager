@@ -1,12 +1,15 @@
 using System;
 using System.Collections.Generic;
+using System.ComponentModel;
 using System.Linq;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Input;
+using System.Windows.Threading;
 using ICCardManager.Common;
 using ICCardManager.Models;
 using ICCardManager.ViewModels;
+using ICCardManager.Views.Helpers;
 
 namespace ICCardManager.Views.Dialogs
 {
@@ -28,7 +31,8 @@ namespace ICCardManager.Views.Dialogs
             DataContext = _viewModel;
 
             Loaded += CardManageDialog_Loaded;
-            Closed += (s, e) => _viewModel.Cleanup();
+            _viewModel.PropertyChanged += ViewModel_PropertyChanged;
+            Closed += CardManageDialog_Closed;
         }
 
         private async void CardManageDialog_Loaded(object sender, RoutedEventArgs e)
@@ -63,6 +67,33 @@ namespace ICCardManager.Views.Dialogs
             catch (Exception ex)
             {
                 ErrorDialogHelper.ShowError(ex, "初期化エラー");
+            }
+        }
+
+        private void CardManageDialog_Closed(object sender, EventArgs e)
+        {
+            _viewModel.PropertyChanged -= ViewModel_PropertyChanged;
+            _viewModel.Cleanup();
+        }
+
+        /// <summary>
+        /// ViewModelのプロパティ変更を監視し、ハイライト表示を実行
+        /// </summary>
+        private void ViewModel_PropertyChanged(object sender, PropertyChangedEventArgs e)
+        {
+            if (e.PropertyName == nameof(CardManageViewModel.NewlyRegisteredIdm)
+                && _viewModel.NewlyRegisteredIdm != null)
+            {
+                var idm = _viewModel.NewlyRegisteredIdm;
+                // DataGridの描画完了を待ってからハイライト実行
+                Dispatcher.InvokeAsync(() =>
+                {
+                    var item = _viewModel.Cards.FirstOrDefault(c => c.CardIdm == idm);
+                    if (item != null)
+                    {
+                        DataGridHighlightHelper.HighlightRow(CardDataGrid, item);
+                    }
+                }, DispatcherPriority.ContextIdle);
             }
         }
 
