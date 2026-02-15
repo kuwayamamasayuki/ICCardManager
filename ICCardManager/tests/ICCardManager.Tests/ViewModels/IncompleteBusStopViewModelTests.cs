@@ -545,4 +545,185 @@ public class IncompleteBusStopViewModelTests
     }
 
     #endregion
+
+    #region UpdateItemSummaryAsync テスト（Issue #709）
+
+    /// <summary>
+    /// UpdateItemSummaryAsync: 摘要が更新されること
+    /// </summary>
+    [Fact]
+    public async Task UpdateItemSummaryAsync_ShouldUpdateSummary()
+    {
+        // Arrange: 初期化してItems内に★付き摘要のアイテムを準備
+        var ledgers = new List<Ledger>
+        {
+            new Ledger { Id = 10, CardIdm = "CARD001", Date = new DateTime(2026, 1, 10), Summary = "バス（★）", Expense = 200, StaffName = "田中" },
+        };
+        var cards = new List<IcCard>
+        {
+            new IcCard { CardIdm = "CARD001", CardType = "はやかけん", CardNumber = "001" },
+        };
+
+        _ledgerRepositoryMock
+            .Setup(r => r.GetByDateRangeAsync(null, It.IsAny<DateTime>(), It.IsAny<DateTime>()))
+            .ReturnsAsync(ledgers);
+        _cardRepositoryMock
+            .Setup(r => r.GetAllAsync())
+            .ReturnsAsync(cards);
+
+        await _viewModel.InitializeAsync();
+        _viewModel.Items.Should().HaveCount(1);
+        _viewModel.Items[0].Summary.Should().Be("バス（★）");
+
+        // GetByIdAsync が更新済みの摘要を返す
+        _ledgerRepositoryMock
+            .Setup(r => r.GetByIdAsync(10))
+            .ReturnsAsync(new Ledger { Id = 10, CardIdm = "CARD001", Date = new DateTime(2026, 1, 10), Summary = "バス（天神→博多）", Expense = 200, StaffName = "田中" });
+
+        // Act
+        var result = await _viewModel.UpdateItemSummaryAsync(10);
+
+        // Assert
+        result.Should().NotBeNull();
+        result.Summary.Should().Be("バス（天神→博多）");
+        _viewModel.Items[0].Summary.Should().Be("バス（天神→博多）");
+    }
+
+    /// <summary>
+    /// UpdateItemSummaryAsync: 存在しないledgerIdはnullを返すこと
+    /// </summary>
+    [Fact]
+    public async Task UpdateItemSummaryAsync_ShouldReturnNull_WhenLedgerNotFound()
+    {
+        // Arrange
+        _ledgerRepositoryMock
+            .Setup(r => r.GetByIdAsync(999))
+            .ReturnsAsync((Ledger)null);
+
+        // Act
+        var result = await _viewModel.UpdateItemSummaryAsync(999);
+
+        // Assert
+        result.Should().BeNull();
+    }
+
+    /// <summary>
+    /// UpdateItemSummaryAsync: Itemsコレクションが差し替えられ他プロパティが保持されること
+    /// </summary>
+    [Fact]
+    public async Task UpdateItemSummaryAsync_ShouldReplaceItemAndPreserveOtherProperties()
+    {
+        // Arrange
+        var ledgers = new List<Ledger>
+        {
+            new Ledger { Id = 20, CardIdm = "CARD002", Date = new DateTime(2026, 2, 5), Summary = "バス（★）、鉄道（A駅～B駅）", Expense = 500, StaffName = "鈴木" },
+        };
+        var cards = new List<IcCard>
+        {
+            new IcCard { CardIdm = "CARD002", CardType = "nimoca", CardNumber = "002" },
+        };
+
+        _ledgerRepositoryMock
+            .Setup(r => r.GetByDateRangeAsync(null, It.IsAny<DateTime>(), It.IsAny<DateTime>()))
+            .ReturnsAsync(ledgers);
+        _cardRepositoryMock
+            .Setup(r => r.GetAllAsync())
+            .ReturnsAsync(cards);
+
+        await _viewModel.InitializeAsync();
+        var originalItem = _viewModel.Items[0];
+
+        // GetByIdAsync が更新済みの摘要を返す
+        _ledgerRepositoryMock
+            .Setup(r => r.GetByIdAsync(20))
+            .ReturnsAsync(new Ledger { Id = 20, CardIdm = "CARD002", Date = new DateTime(2026, 2, 5), Summary = "バス（天神→博多）、鉄道（A駅～B駅）", Expense = 500, StaffName = "鈴木" });
+
+        // Act
+        var result = await _viewModel.UpdateItemSummaryAsync(20);
+
+        // Assert: 新しいオブジェクトに差し替わる
+        result.Should().NotBeSameAs(originalItem);
+        _viewModel.Items[0].Should().BeSameAs(result);
+
+        // 他のプロパティは保持される
+        result.CardDisplayName.Should().Be("nimoca 002");
+        result.CardIdm.Should().Be("CARD002");
+        result.Date.Should().Be(new DateTime(2026, 2, 5));
+        result.Expense.Should().Be(500);
+        result.StaffName.Should().Be("鈴木");
+        result.Summary.Should().Be("バス（天神→博多）、鉄道（A駅～B駅）");
+    }
+
+    /// <summary>
+    /// UpdateItemSummaryAsync: _allItemsも更新されフィルタ適用後に正しい摘要が表示されること
+    /// </summary>
+    [Fact]
+    public async Task UpdateItemSummaryAsync_ShouldUpdateAllItems_SoFilterReflectsNewSummary()
+    {
+        // Arrange: 2件のデータを準備
+        var ledgers = new List<Ledger>
+        {
+            new Ledger { Id = 30, CardIdm = "CARD001", Date = new DateTime(2026, 1, 10), Summary = "バス（★）", Expense = 200, StaffName = "田中" },
+            new Ledger { Id = 31, CardIdm = "CARD002", Date = new DateTime(2026, 1, 15), Summary = "バス（★）", Expense = 300, StaffName = "鈴木" },
+        };
+        var cards = new List<IcCard>
+        {
+            new IcCard { CardIdm = "CARD001", CardType = "はやかけん", CardNumber = "001" },
+            new IcCard { CardIdm = "CARD002", CardType = "nimoca", CardNumber = "002" },
+        };
+
+        _ledgerRepositoryMock
+            .Setup(r => r.GetByDateRangeAsync(null, It.IsAny<DateTime>(), It.IsAny<DateTime>()))
+            .ReturnsAsync(ledgers);
+        _cardRepositoryMock
+            .Setup(r => r.GetAllAsync())
+            .ReturnsAsync(cards);
+
+        await _viewModel.InitializeAsync();
+        _viewModel.Items.Should().HaveCount(2);
+
+        // Id=30 のアイテムの摘要を更新
+        _ledgerRepositoryMock
+            .Setup(r => r.GetByIdAsync(30))
+            .ReturnsAsync(new Ledger { Id = 30, CardIdm = "CARD001", Date = new DateTime(2026, 1, 10), Summary = "バス（天神→博多）", Expense = 200, StaffName = "田中" });
+
+        await _viewModel.UpdateItemSummaryAsync(30);
+
+        // Act: フィルタを適用（_allItemsのデータが使われる）
+        _viewModel.SelectedCardFilter = "はやかけん 001";
+
+        // Assert: フィルタ適用後も更新された摘要が表示される
+        _viewModel.Items.Should().HaveCount(1);
+        _viewModel.Items[0].Summary.Should().Be("バス（天神→博多）");
+    }
+
+    /// <summary>
+    /// UpdateItemSummaryAsync: Items内に該当ledgerIdが存在しない場合nullを返すこと
+    /// </summary>
+    [Fact]
+    public async Task UpdateItemSummaryAsync_ShouldReturnNull_WhenItemNotInCollection()
+    {
+        // Arrange: Itemsは空だがDBにはレコードがある
+        _ledgerRepositoryMock
+            .Setup(r => r.GetByDateRangeAsync(null, It.IsAny<DateTime>(), It.IsAny<DateTime>()))
+            .ReturnsAsync(new List<Ledger>());
+        _cardRepositoryMock
+            .Setup(r => r.GetAllAsync())
+            .ReturnsAsync(new List<IcCard>());
+
+        await _viewModel.InitializeAsync();
+        _viewModel.Items.Should().BeEmpty();
+
+        _ledgerRepositoryMock
+            .Setup(r => r.GetByIdAsync(50))
+            .ReturnsAsync(new Ledger { Id = 50, Summary = "バス（天神→博多）" });
+
+        // Act
+        var result = await _viewModel.UpdateItemSummaryAsync(50);
+
+        // Assert
+        result.Should().BeNull();
+    }
+
+    #endregion
 }

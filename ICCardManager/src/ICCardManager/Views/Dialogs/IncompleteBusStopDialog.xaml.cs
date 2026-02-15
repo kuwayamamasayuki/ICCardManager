@@ -2,7 +2,9 @@ using System;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Input;
+using System.Windows.Threading;
 using ICCardManager.ViewModels;
+using ICCardManager.Views.Helpers;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace ICCardManager.Views.Dialogs
@@ -39,7 +41,7 @@ namespace ICCardManager.Views.Dialogs
         }
 
         /// <summary>
-        /// バス停名入力画面を開く（Issue #703）
+        /// バス停名入力画面を開く（Issue #703, #709）
         /// </summary>
         private async Task OpenBusStopInputAsync(int ledgerId)
         {
@@ -50,8 +52,24 @@ namespace ICCardManager.Views.Dialogs
 
             if (busDialog.ShowDialog() == true)
             {
-                // 保存成功時：一覧を更新（入力済みの項目が消える）
-                await _viewModel.InitializeAsync();
+                // Issue #709: 更新済み摘要を表示してからハイライト→削除
+                var updatedItem = await _viewModel.UpdateItemSummaryAsync(ledgerId);
+                if (updatedItem != null && !updatedItem.Summary.Contains("★"))
+                {
+                    // 摘要が完全に更新された場合：ハイライト→2秒後に一覧から削除
+                    Dispatcher.InvokeAsync(() =>
+                    {
+                        DataGridHighlightHelper.HighlightRow(BusStopDataGrid, updatedItem, 2.0, () =>
+                        {
+                            Dispatcher.InvokeAsync(async () => await _viewModel.InitializeAsync());
+                        });
+                    }, DispatcherPriority.ContextIdle);
+                }
+                else
+                {
+                    // 摘要にまだ★が残る場合（一部のみ入力）：通常の再読み込み
+                    await _viewModel.InitializeAsync();
+                }
             }
         }
 
