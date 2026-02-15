@@ -4,7 +4,9 @@
         Title="仮想交通系ICカード設定 [DEBUG]"
         Width="700" Height="550"
         WindowStartupLocation="CenterOwner"
-        ResizeMode="CanResizeWithGrip">
+        ResizeMode="CanResizeWithGrip"
+        AutomationProperties.Name="仮想交通系ICカード設定ダイアログ"
+        AutomationProperties.HelpText="DEBUG専用。仮想的にICカードをタッチしてテストできます。最大20件の履歴を指定できます。">
     <Grid Margin="16">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
@@ -35,15 +37,21 @@
 
             <TextBlock Grid.Column="0" Text="交通系ICカード:" VerticalAlignment="Center" Margin="0,0,8,0"/>
             <ComboBox Grid.Column="1" ItemsSource="{Binding CardSelectItems}"
-                      SelectedItem="{Binding SelectedCard}"/>
+                      SelectedItem="{Binding SelectedCard}"
+                      AutomationProperties.Name="交通系ICカード選択"
+                      ToolTip="シミュレーション対象の交通系ICカードを選択"/>
 
             <TextBlock Grid.Column="3" Text="職員:" VerticalAlignment="Center" Margin="0,0,8,0"/>
             <ComboBox Grid.Column="4" ItemsSource="{Binding StaffSelectItems}"
-                      SelectedItem="{Binding SelectedStaff}"/>
+                      SelectedItem="{Binding SelectedStaff}"
+                      AutomationProperties.Name="職員選択"
+                      ToolTip="タッチする職員を選択"/>
 
             <TextBlock Grid.Column="6" Text="現在残高:" VerticalAlignment="Center" Margin="0,0,8,0"/>
             <TextBox Grid.Column="7" Text="{Binding CurrentBalance, UpdateSourceTrigger=PropertyChanged}"
-                     VerticalContentAlignment="Center"/>
+                     VerticalContentAlignment="Center"
+                     AutomationProperties.Name="現在残高"
+                     ToolTip="カードの現在残高を入力"/>
         </Grid>
 
         <!-- 履歴一覧 DataGrid -->
@@ -55,7 +63,9 @@
                   HeadersVisibility="Column"
                   SelectionMode="Single"
                   GridLinesVisibility="All"
-                  Margin="0,0,0,8">
+                  Margin="0,0,0,8"
+                  AutomationProperties.Name="利用履歴一覧"
+                  AutomationProperties.HelpText="仮想ICカードの利用履歴を入力します。セルをクリックして編集できます。">
             <DataGrid.Columns>
                 <DataGridTemplateColumn Header="日付" Width="130">
                     <DataGridTemplateColumn.CellTemplate>
@@ -83,9 +93,13 @@
 
         <!-- 追加・削除ボタン -->
         <StackPanel Grid.Row="3" Orientation="Horizontal" Margin="0,0,0,16">
-            <Button Content="追加" Command="{Binding AddEntryCommand}" Padding="16,4" Margin="0,0,8,0"/>
+            <Button Content="追加" Command="{Binding AddEntryCommand}" Padding="16,4" Margin="0,0,8,0"
+                    AutomationProperties.Name="履歴追加"
+                    ToolTip="利用履歴エントリを1件追加します（最大20件）"/>
             <Button Content="削除" Command="{Binding RemoveEntryCommand}"
-                    CommandParameter="{Binding SelectedEntry}" Padding="16,4" Margin="0,0,8,0"/>
+                    CommandParameter="{Binding SelectedEntry}" Padding="16,4" Margin="0,0,8,0"
+                    AutomationProperties.Name="履歴削除"
+                    ToolTip="選択した利用履歴エントリを削除します"/>
             <TextBlock VerticalAlignment="Center" Foreground="Gray">
                 <Run Text="{Binding Entries.Count, Mode=OneWay}"/><Run Text=" / 20 件"/>
             </TextBlock>
@@ -95,9 +109,13 @@
         <StackPanel Grid.Row="4" Orientation="Horizontal" HorizontalAlignment="Right">
             <Button Content="タッチ実行" Command="{Binding ApplyAndTouchCommand}"
                     Padding="24,8" Margin="0,0,8,0" FontWeight="Bold"
-                    Background="#4CAF50" Foreground="White"/>
+                    Background="#4CAF50" Foreground="White"
+                    AutomationProperties.Name="タッチ実行"
+                    ToolTip="指定した情報で仮想ICカードタッチをシミュレーション実行します"/>
             <Button Content="閉じる" Click="CloseButton_Click"
-                    Padding="24,8"/>
+                    Padding="24,8"
+                    AutomationProperties.Name="閉じる"
+                    ToolTip="ダイアログを閉じる"/>
         </StackPanel>
     </Grid>
 </Window>
