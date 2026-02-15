@@ -84,14 +84,16 @@ namespace ICCardManager.Views.Dialogs
             if (e.PropertyName == nameof(CardManageViewModel.NewlyRegisteredIdm)
                 && _viewModel.NewlyRegisteredIdm != null)
             {
-                // レイアウト更新後にハイライトを実行
+                var idm = _viewModel.NewlyRegisteredIdm;
+                // DataGridの描画完了を待ってからハイライト実行
                 Dispatcher.InvokeAsync(() =>
                 {
-                    if (_viewModel.SelectedCard != null)
+                    var item = _viewModel.Cards.FirstOrDefault(c => c.CardIdm == idm);
+                    if (item != null)
                     {
-                        DataGridHighlightHelper.HighlightRow(CardDataGrid, _viewModel.SelectedCard);
+                        DataGridHighlightHelper.HighlightRow(CardDataGrid, item);
                     }
-                }, DispatcherPriority.Loaded);
+                }, DispatcherPriority.ContextIdle);
             }
         }
 

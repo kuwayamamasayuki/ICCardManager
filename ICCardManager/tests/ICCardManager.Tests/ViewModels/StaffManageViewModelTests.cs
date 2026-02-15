@@ -448,33 +448,6 @@ public class StaffManageViewModelTests
     #region ハイライト表示テスト（Issue #707）
 
     /// <summary>
-    /// 新規職員保存後、SelectedStaffが新登録職員に設定されること
-    /// </summary>
-    [Fact]
-    public async Task SaveAsync_NewStaff_ShouldSetSelectedStaffToNewlyRegistered()
-    {
-        // Arrange
-        var idm = "FFFF000000000001";
-        _viewModel.StartNewStaff();
-        _viewModel.EditStaffIdm = idm;
-        _viewModel.EditName = "田中太郎";
-
-        _staffRepositoryMock.Setup(r => r.GetByIdmAsync(idm, true)).ReturnsAsync((Staff?)null);
-        _staffRepositoryMock.Setup(r => r.InsertAsync(It.IsAny<Staff>())).ReturnsAsync(true);
-        _staffRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<Staff>
-        {
-            new() { StaffIdm = idm, Name = "田中太郎", Number = null }
-        });
-
-        // Act
-        await _viewModel.SaveAsync();
-
-        // Assert
-        _viewModel.SelectedStaff.Should().NotBeNull();
-        _viewModel.SelectedStaff!.StaffIdm.Should().Be(idm);
-    }
-
-    /// <summary>
     /// 新規職員保存後、NewlyRegisteredIdmが保存IDmに設定されること
     /// </summary>
     [Fact]
@@ -529,8 +502,49 @@ public class StaffManageViewModelTests
 
         // Assert
         _viewModel.NewlyRegisteredIdm.Should().Be(idm);
-        _viewModel.SelectedStaff.Should().NotBeNull();
-        _viewModel.SelectedStaff!.StaffIdm.Should().Be(idm);
+    }
+
+    /// <summary>
+    /// 同じIDmで連続操作してもNewlyRegisteredIdmが再設定されること
+    /// </summary>
+    [Fact]
+    public async Task SaveAsync_SameIdmTwice_ShouldResetAndSetNewlyRegisteredIdm()
+    {
+        // Arrange
+        var idm = "FFFF000000000001";
+        _staffRepositoryMock.Setup(r => r.GetByIdmAsync(idm, true)).ReturnsAsync((Staff?)null);
+        _staffRepositoryMock.Setup(r => r.InsertAsync(It.IsAny<Staff>())).ReturnsAsync(true);
+        _staffRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<Staff>
+        {
+            new() { StaffIdm = idm, Name = "田中太郎", Number = null }
+        });
+
+        // Act: 1回目
+        _viewModel.StartNewStaff();
+        _viewModel.EditStaffIdm = idm;
+        _viewModel.EditName = "田中太郎";
+        await _viewModel.SaveAsync();
+
+        // PropertyChangedイベントの発火を確認するためトラッキング
+        var propertyChangedCount = 0;
+        _viewModel.PropertyChanged += (s, e) =>
+        {
+            if (e.PropertyName == nameof(StaffManageViewModel.NewlyRegisteredIdm)
+                && _viewModel.NewlyRegisteredIdm != null)
+                propertyChangedCount++;
+        };
+
+        // Act: 2回目（同じIDm）— 更新として
+        var existingStaff = new StaffDto { StaffIdm = idm, Name = "田中太郎" };
+        _viewModel.SelectedStaff = existingStaff;
+        _viewModel.StartEdit();
+        _viewModel.EditName = "田中花子";
+        _staffRepositoryMock.Setup(r => r.UpdateAsync(It.IsAny<Staff>())).ReturnsAsync(true);
+        await _viewModel.SaveAsync();
+
+        // Assert: 2回目でもPropertyChangedが発火していること
+        propertyChangedCount.Should().BeGreaterOrEqualTo(1);
+        _viewModel.NewlyRegisteredIdm.Should().Be(idm);
     }
 
     #endregion

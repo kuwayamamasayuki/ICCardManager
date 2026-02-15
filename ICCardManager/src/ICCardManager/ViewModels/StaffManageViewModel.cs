@@ -595,17 +595,18 @@ namespace ICCardManager.ViewModels
 #endif
 
         /// <summary>
-        /// 保存・更新・復元後に該当行を選択しハイライト対象に設定する
+        /// 保存・更新・復元後にハイライト対象のIDmを設定する
         /// </summary>
+        /// <remarks>
+        /// View層がNewlyRegisteredIdmの変更を監視し、該当行のスクロール＋ハイライトを行う。
+        /// 選択行の背景色と競合しないよう、SelectedStaffは設定しない（View層で選択解除する）。
+        /// </remarks>
         /// <param name="idm">ハイライト対象の職員IDm</param>
         private void SelectAndHighlight(string idm)
         {
-            var item = StaffList.FirstOrDefault(s => s.StaffIdm == idm);
-            if (item != null)
-            {
-                SelectedStaff = item;
-                NewlyRegisteredIdm = idm;
-            }
+            // 同じIDmの連続操作でもPropertyChangedが発火するようリセット
+            NewlyRegisteredIdm = null;
+            NewlyRegisteredIdm = idm;
         }
 
         /// <summary>

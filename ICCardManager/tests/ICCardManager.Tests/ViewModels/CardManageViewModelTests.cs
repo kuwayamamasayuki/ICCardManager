@@ -432,34 +432,6 @@ public class CardManageViewModelTests
     #region ハイライト表示テスト（Issue #707）
 
     /// <summary>
-    /// 新規カード保存後、SelectedCardが新登録カードに設定されること
-    /// </summary>
-    [Fact]
-    public async Task SaveAsync_NewCard_ShouldSetSelectedCardToNewlyRegistered()
-    {
-        // Arrange
-        var idm = "0102030405060708";
-        _viewModel.StartNewCard();
-        _viewModel.EditCardIdm = idm;
-        _viewModel.EditCardType = "はやかけん";
-        _viewModel.EditCardNumber = "H-001";
-
-        _cardRepositoryMock.Setup(r => r.GetByIdmAsync(idm, true)).ReturnsAsync((IcCard?)null);
-        _cardRepositoryMock.Setup(r => r.InsertAsync(It.IsAny<IcCard>())).ReturnsAsync(true);
-        _cardRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<IcCard>
-        {
-            new() { CardIdm = idm, CardType = "はやかけん", CardNumber = "H-001" }
-        });
-
-        // Act
-        await _viewModel.SaveAsync();
-
-        // Assert
-        _viewModel.SelectedCard.Should().NotBeNull();
-        _viewModel.SelectedCard!.CardIdm.Should().Be(idm);
-    }
-
-    /// <summary>
     /// 新規カード保存後、NewlyRegisteredIdmが保存IDmに設定されること
     /// </summary>
     [Fact]
@@ -516,8 +488,53 @@ public class CardManageViewModelTests
 
         // Assert
         _viewModel.NewlyRegisteredIdm.Should().Be(idm);
-        _viewModel.SelectedCard.Should().NotBeNull();
-        _viewModel.SelectedCard!.CardIdm.Should().Be(idm);
+    }
+
+    /// <summary>
+    /// 同じIDmで連続操作してもNewlyRegisteredIdmが再設定されること
+    /// </summary>
+    [Fact]
+    public async Task SaveAsync_SameIdmTwice_ShouldResetAndSetNewlyRegisteredIdm()
+    {
+        // Arrange
+        var idm = "0102030405060708";
+        _cardRepositoryMock.Setup(r => r.GetByIdmAsync(idm, true)).ReturnsAsync((IcCard?)null);
+        _cardRepositoryMock.Setup(r => r.InsertAsync(It.IsAny<IcCard>())).ReturnsAsync(true);
+        _cardRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<IcCard>
+        {
+            new() { CardIdm = idm, CardType = "はやかけん", CardNumber = "H-001" }
+        });
+
+        // Act: 1回目
+        _viewModel.StartNewCard();
+        _viewModel.EditCardIdm = idm;
+        _viewModel.EditCardType = "はやかけん";
+        _viewModel.EditCardNumber = "H-001";
+        await _viewModel.SaveAsync();
+
+        // PropertyChangedイベントの発火を確認するためトラッキング
+        var propertyChangedCount = 0;
+        _viewModel.PropertyChanged += (s, e) =>
+        {
+            if (e.PropertyName == nameof(CardManageViewModel.NewlyRegisteredIdm)
+                && _viewModel.NewlyRegisteredIdm != null)
+                propertyChangedCount++;
+        };
+
+        // Act: 2回目（同じIDm）— 更新として
+        var existingCard = new CardDto
+        {
+            CardIdm = idm, CardType = "はやかけん", CardNumber = "H-001", IsLent = false
+        };
+        _viewModel.SelectedCard = existingCard;
+        _viewModel.StartEdit();
+        _viewModel.EditNote = "更新後のメモ";
+        _cardRepositoryMock.Setup(r => r.UpdateAsync(It.IsAny<IcCard>())).ReturnsAsync(true);
+        await _viewModel.SaveAsync();
+
+        // Assert: 2回目でもPropertyChangedが発火していること
+        propertyChangedCount.Should().BeGreaterOrEqualTo(1);
+        _viewModel.NewlyRegisteredIdm.Should().Be(idm);
     }
 
     #endregion

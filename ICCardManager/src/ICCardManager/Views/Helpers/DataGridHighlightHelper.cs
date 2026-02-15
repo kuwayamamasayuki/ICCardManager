@@ -1,8 +1,10 @@
 using System;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
+using System.Windows.Threading;
 
 namespace ICCardManager.Views.Helpers
 {
@@ -25,12 +27,37 @@ namespace ICCardManager.Views.Helpers
         /// <param name="durationSeconds">フェードアウトの秒数（デフォルト2秒）</param>
         public static void HighlightRow(DataGrid dataGrid, object item, double durationSeconds = 2.0)
         {
+            // 選択を一旦解除して選択スタイルの干渉を防ぐ
+            dataGrid.SelectedItem = null;
+
             dataGrid.ScrollIntoView(item);
             dataGrid.UpdateLayout();
 
             var row = dataGrid.ItemContainerGenerator.ContainerFromItem(item) as DataGridRow;
-            if (row == null) return;
+            if (row == null)
+            {
+                // コンテナがまだ未生成の場合、低優先度で再試行
+                dataGrid.Dispatcher.InvokeAsync(() =>
+                {
+                    dataGrid.ScrollIntoView(item);
+                    dataGrid.UpdateLayout();
+                    var retryRow = dataGrid.ItemContainerGenerator.ContainerFromItem(item) as DataGridRow;
+                    if (retryRow != null)
+                    {
+                        AnimateRow(retryRow, durationSeconds);
+                    }
+                }, DispatcherPriority.ContextIdle);
+                return;
+            }
 
+            AnimateRow(row, durationSeconds);
+        }
+
+        /// <summary>
+        /// 行の背景色アニメーションを実行
+        /// </summary>
+        private static void AnimateRow(DataGridRow row, double durationSeconds)
+        {
             var brush = new SolidColorBrush(HighlightColor);
             row.Background = brush;
 

@@ -69,14 +69,16 @@ namespace ICCardManager.Views.Dialogs
             if (e.PropertyName == nameof(StaffManageViewModel.NewlyRegisteredIdm)
                 && _viewModel.NewlyRegisteredIdm != null)
             {
-                // レイアウト更新後にハイライトを実行
+                var idm = _viewModel.NewlyRegisteredIdm;
+                // DataGridの描画完了を待ってからハイライト実行
                 Dispatcher.InvokeAsync(() =>
                 {
-                    if (_viewModel.SelectedStaff != null)
+                    var item = _viewModel.StaffList.FirstOrDefault(s => s.StaffIdm == idm);
+                    if (item != null)
                     {
-                        DataGridHighlightHelper.HighlightRow(StaffDataGrid, _viewModel.SelectedStaff);
+                        DataGridHighlightHelper.HighlightRow(StaffDataGrid, item);
                     }
-                }, DispatcherPriority.Loaded);
+                }, DispatcherPriority.ContextIdle);
             }
         }
 
