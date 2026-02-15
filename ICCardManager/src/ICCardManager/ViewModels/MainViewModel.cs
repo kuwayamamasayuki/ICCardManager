@@ -509,10 +509,11 @@ public partial class MainViewModel : ViewModelBase
 
         await Task.WhenAll(settingsTask, cardsTask, balancesTask, staffTask);
 
-        var settings = settingsTask.Result;
-        var cards = cardsTask.Result;
-        var balances = balancesTask.Result;
-        var staffDict = staffTask.Result.ToDictionary(s => s.StaffIdm, s => s.Name);
+        // awaitを使用してデッドロックを防止（Task.WhenAll後でも.Resultは避ける）
+        var settings = await settingsTask;
+        var cards = await cardsTask;
+        var balances = await balancesTask;
+        var staffDict = (await staffTask).ToDictionary(s => s.StaffIdm, s => s.Name);
 
         var dashboardItems = new List<CardBalanceDashboardItem>();
 

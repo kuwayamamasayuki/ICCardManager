@@ -486,7 +486,7 @@ namespace ICCardManager
 
                 // VACUUM（月次実行）
                 var settingsRepository = ServiceProvider.GetRequiredService<ISettingsRepository>();
-                var settings = settingsRepository.GetAppSettingsAsync().Result;
+                var settings = settingsRepository.GetAppSettings();
 
                 var today = DateTime.Now;
                 if (today.Day >= 10)
