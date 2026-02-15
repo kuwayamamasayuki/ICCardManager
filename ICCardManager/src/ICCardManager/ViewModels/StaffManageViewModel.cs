@@ -59,6 +59,12 @@ namespace ICCardManager.ViewModels
         [ObservableProperty]
         private bool _isWaitingForCard;
 
+        /// <summary>
+        /// 新規登録・更新・復元後にハイライト表示する職員のIDm
+        /// </summary>
+        [ObservableProperty]
+        private string? _newlyRegisteredIdm;
+
         public StaffManageViewModel(
             IStaffRepository staffRepository,
             ICardReader cardReader,
@@ -285,10 +291,12 @@ namespace ICCardManager.ViewModels
                                             await _operationLogger.LogStaffRestoreAsync(null, restoredStaff);
                                         }
 
+                                        var restoredIdm = EditStaffIdm;
                                         StatusMessage = $"{identifier} を復元しました";
                                         IsStatusError = false;
                                         await LoadStaffAsync();
                                         CancelEdit();
+                                        SelectAndHighlight(restoredIdm);
                                     }
                                     else
                                     {
@@ -329,10 +337,12 @@ namespace ICCardManager.ViewModels
                             // 操作ログを記録
                             await _operationLogger.LogStaffInsertAsync(null, staff);
 
+                            var savedIdm = EditStaffIdm;
                             StatusMessage = "登録しました";
                             IsStatusError = false;
                             await LoadStaffAsync();
                             CancelEdit();
+                            SelectAndHighlight(savedIdm);
                         }
                         else
                         {
@@ -363,10 +373,12 @@ namespace ICCardManager.ViewModels
                                 await _operationLogger.LogStaffUpdateAsync(null, beforeStaff, staff);
                             }
 
+                            var updatedIdm = EditStaffIdm;
                             StatusMessage = "更新しました";
                             IsStatusError = false;
                             await LoadStaffAsync();
                             CancelEdit();
+                            SelectAndHighlight(updatedIdm);
                         }
                         else
                         {
@@ -499,10 +511,12 @@ namespace ICCardManager.ViewModels
                                     await _operationLogger.LogStaffRestoreAsync(null, restoredStaff);
                                 }
 
+                                var restoredIdm = e.Idm;
                                 StatusMessage = $"{identifier} を復元しました";
                                 IsStatusError = false;
                                 await LoadStaffAsync();
                                 CancelEdit();
+                                SelectAndHighlight(restoredIdm);
                             }
                             else
                             {
@@ -579,6 +593,20 @@ namespace ICCardManager.ViewModels
             }
         }
 #endif
+
+        /// <summary>
+        /// 保存・更新・復元後に該当行を選択しハイライト対象に設定する
+        /// </summary>
+        /// <param name="idm">ハイライト対象の職員IDm</param>
+        private void SelectAndHighlight(string idm)
+        {
+            var item = StaffList.FirstOrDefault(s => s.StaffIdm == idm);
+            if (item != null)
+            {
+                SelectedStaff = item;
+                NewlyRegisteredIdm = idm;
+            }
+        }
 
         /// <summary>
         /// クリーンアップ
