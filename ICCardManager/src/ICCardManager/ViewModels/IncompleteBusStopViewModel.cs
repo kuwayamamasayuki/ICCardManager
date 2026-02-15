@@ -120,6 +120,45 @@ namespace ICCardManager.ViewModels
             }
         }
 
+        /// <summary>
+        /// バス停名保存後にアイテムの摘要を更新する（Issue #709）
+        /// </summary>
+        /// <returns>更新後のアイテム。見つからない場合はnull</returns>
+        internal async Task<IncompleteBusStopItem> UpdateItemSummaryAsync(int ledgerId)
+        {
+            var ledger = await _ledgerRepository.GetByIdAsync(ledgerId);
+            if (ledger == null) return null;
+
+            // Items内の該当アイテムを検索
+            var index = -1;
+            for (int i = 0; i < Items.Count; i++)
+            {
+                if (Items[i].LedgerId == ledgerId) { index = i; break; }
+            }
+            if (index < 0) return null;
+
+            var oldItem = Items[index];
+            var newItem = new IncompleteBusStopItem
+            {
+                LedgerId = oldItem.LedgerId,
+                CardIdm = oldItem.CardIdm,
+                CardDisplayName = oldItem.CardDisplayName,
+                Date = oldItem.Date,
+                Summary = ledger.Summary,
+                Expense = oldItem.Expense,
+                StaffName = oldItem.StaffName
+            };
+
+            // ObservableCollection の要素差し替え → DataGrid が自動更新
+            Items[index] = newItem;
+
+            // _allItems も更新
+            var allIndex = _allItems.FindIndex(i => i.LedgerId == ledgerId);
+            if (allIndex >= 0) _allItems[allIndex] = newItem;
+
+            return newItem;
+        }
+
         partial void OnSelectedDateFilterChanged(string value) => ApplyFilter();
         partial void OnSelectedCardFilterChanged(string value) => ApplyFilter();
 

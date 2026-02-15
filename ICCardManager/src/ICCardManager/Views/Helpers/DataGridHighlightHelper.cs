@@ -25,7 +25,8 @@ namespace ICCardManager.Views.Helpers
         /// <param name="dataGrid">対象のDataGrid</param>
         /// <param name="item">ハイライト対象のアイテム</param>
         /// <param name="durationSeconds">フェードアウトの秒数（デフォルト2秒）</param>
-        public static void HighlightRow(DataGrid dataGrid, object item, double durationSeconds = 2.0)
+        /// <param name="onCompleted">アニメーション完了時のコールバック（省略可）</param>
+        public static void HighlightRow(DataGrid dataGrid, object item, double durationSeconds = 2.0, Action onCompleted = null)
         {
             // 選択を一旦解除して選択スタイルの干渉を防ぐ
             dataGrid.SelectedItem = null;
@@ -44,19 +45,19 @@ namespace ICCardManager.Views.Helpers
                     var retryRow = dataGrid.ItemContainerGenerator.ContainerFromItem(item) as DataGridRow;
                     if (retryRow != null)
                     {
-                        AnimateRow(retryRow, durationSeconds);
+                        AnimateRow(retryRow, durationSeconds, onCompleted);
                     }
                 }, DispatcherPriority.ContextIdle);
                 return;
             }
 
-            AnimateRow(row, durationSeconds);
+            AnimateRow(row, durationSeconds, onCompleted);
         }
 
         /// <summary>
         /// 行の背景色アニメーションを実行
         /// </summary>
-        private static void AnimateRow(DataGridRow row, double durationSeconds)
+        private static void AnimateRow(DataGridRow row, double durationSeconds, Action onCompleted = null)
         {
             var brush = new SolidColorBrush(HighlightColor);
             row.Background = brush;
@@ -68,7 +69,11 @@ namespace ICCardManager.Views.Helpers
                 Duration = new Duration(TimeSpan.FromSeconds(durationSeconds)),
                 EasingFunction = new QuadraticEase { EasingMode = EasingMode.EaseIn }
             };
-            animation.Completed += (s, e) => row.ClearValue(DataGridRow.BackgroundProperty);
+            animation.Completed += (s, e) =>
+            {
+                row.ClearValue(DataGridRow.BackgroundProperty);
+                onCompleted?.Invoke();
+            };
             brush.BeginAnimation(SolidColorBrush.ColorProperty, animation);
         }
     }
