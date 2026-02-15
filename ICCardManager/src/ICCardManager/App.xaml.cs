@@ -134,7 +134,11 @@ namespace ICCardManager
             }
             catch (Exception ex)
             {
+#if DEBUG
                 var errorMessage = $"起動エラー: {ex.Message}\n\n{ex.StackTrace}";
+#else
+                var errorMessage = $"起動エラーが発生しました。\n\n{ex.Message}\n\n詳細はログファイルを確認してください。";
+#endif
 
                 // クリップボードにコピー可能なエラーダイアログを表示
                 var result = MessageBox.Show(
