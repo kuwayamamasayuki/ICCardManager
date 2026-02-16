@@ -76,6 +76,17 @@ namespace ICCardManager.Services
     /// </remarks>
     public class SummaryGenerator
     {
+        private readonly DepartmentType _departmentType;
+
+        /// <summary>
+        /// コンストラクタ
+        /// </summary>
+        /// <param name="departmentType">部署種別（チャージ摘要の切替に使用）</param>
+        public SummaryGenerator(DepartmentType departmentType = DepartmentType.MayorOffice)
+        {
+            _departmentType = departmentType;
+        }
+
         /// <summary>
         /// 乗り継ぎ駅として同一視するグループ
         /// </summary>
@@ -137,7 +148,7 @@ namespace ICCardManager.Services
         /// </remarks>
         /// <example>
         /// <code>
-        /// var generator = new SummaryGenerator();
+        /// var generator = new SummaryGenerator(DepartmentType.MayorOffice);
         /// var summaries = generator.GenerateByDate(usageDetails);
         /// foreach (var summary in summaries)
         /// {
@@ -210,7 +221,7 @@ namespace ICCardManager.Services
                     summariesToAdd.Add((oldestIndex, new DailySummary
                     {
                         Date = date,
-                        Summary = GetChargeSummary(),
+                        Summary = GetChargeSummary(_departmentType),
                         IsCharge = true,
                         IsPointRedemption = false
                     }));
@@ -299,7 +310,7 @@ namespace ICCardManager.Services
             // チャージのみの場合
             if (detailList.All(d => d.IsCharge))
             {
-                return "役務費によりチャージ";
+                return GetChargeSummary(_departmentType);
             }
 
             // ポイント還元のみの場合
@@ -662,11 +673,23 @@ namespace ICCardManager.Services
         }
 
         /// <summary>
-        /// チャージの摘要を生成
+        /// チャージの摘要を生成（市長事務部局用デフォルト）
         /// </summary>
         public static string GetChargeSummary()
         {
-            return "役務費によりチャージ";
+            return GetChargeSummary(DepartmentType.MayorOffice);
+        }
+
+        /// <summary>
+        /// チャージの摘要を部署種別に応じて生成
+        /// </summary>
+        /// <param name="departmentType">部署種別</param>
+        /// <returns>市長事務部局:「役務費によりチャージ」、企業会計部局:「旅費によりチャージ」</returns>
+        public static string GetChargeSummary(DepartmentType departmentType)
+        {
+            return departmentType == DepartmentType.EnterpriseAccount
+                ? "旅費によりチャージ"
+                : "役務費によりチャージ";
         }
 
         /// <summary>

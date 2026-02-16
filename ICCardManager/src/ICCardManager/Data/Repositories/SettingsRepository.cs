@@ -35,6 +35,9 @@ namespace ICCardManager.Data.Repositories
         // トースト位置設定キー
         public const string KeyToastPosition = "toast_position";
 
+        // 部署種別設定キー
+        public const string KeyDepartmentType = "department_type";
+
         public SettingsRepository(DbContext dbContext, ICacheService cacheService)
         {
             _dbContext = dbContext;
@@ -135,6 +138,10 @@ ON CONFLICT(key) DO UPDATE SET value = @value";
             var toastPosition = Get(KeyToastPosition);
             settings.ToastPosition = ParseToastPosition(toastPosition);
 
+            // 部署種別設定
+            var departmentType = Get(KeyDepartmentType);
+            settings.DepartmentType = ParseDepartmentType(departmentType);
+
             return settings;
         }
 
@@ -230,6 +237,10 @@ ON CONFLICT(key) DO UPDATE SET value = @value";
             var toastPosition = await GetAsync(KeyToastPosition);
             settings.ToastPosition = ParseToastPosition(toastPosition);
 
+            // 部署種別設定
+            var departmentType = await GetAsync(KeyDepartmentType);
+            settings.DepartmentType = ParseDepartmentType(departmentType);
+
             return settings;
         }
 
@@ -292,6 +303,9 @@ ON CONFLICT(key) DO UPDATE SET value = @value";
 
             // トースト位置設定を保存
             success &= await SetAsync(KeyToastPosition, ToastPositionToString(settings.ToastPosition));
+
+            // 部署種別設定を保存
+            success &= await SetAsync(KeyDepartmentType, DepartmentTypeToString(settings.DepartmentType));
 
             // 設定保存後にキャッシュを無効化
             _cacheService.Invalidate(CacheKeys.AppSettings);
@@ -434,6 +448,32 @@ ON CONFLICT(key) DO UPDATE SET value = @value";
                 ToastPosition.BottomRight => "bottom_right",
                 ToastPosition.BottomLeft => "bottom_left",
                 _ => "top_right"
+            };
+        }
+
+        /// <summary>
+        /// 文字列からDepartmentTypeに変換
+        /// </summary>
+        internal static DepartmentType ParseDepartmentType(string value)
+        {
+            return value?.ToLowerInvariant() switch
+            {
+                "mayor_office" => DepartmentType.MayorOffice,
+                "enterprise_account" => DepartmentType.EnterpriseAccount,
+                _ => DepartmentType.MayorOffice
+            };
+        }
+
+        /// <summary>
+        /// DepartmentTypeを文字列に変換
+        /// </summary>
+        internal static string DepartmentTypeToString(DepartmentType departmentType)
+        {
+            return departmentType switch
+            {
+                DepartmentType.MayorOffice => "mayor_office",
+                DepartmentType.EnterpriseAccount => "enterprise_account",
+                _ => "mayor_office"
             };
         }
     }

@@ -20,6 +20,7 @@ namespace ICCardManager.ViewModels;
 public partial class BusStopInputViewModel : ViewModelBase
 {
     private readonly ILedgerRepository _ledgerRepository;
+    private readonly ISettingsRepository _settingsRepository;
 
     [ObservableProperty]
     private Ledger? _ledger;
@@ -45,9 +46,10 @@ public partial class BusStopInputViewModel : ViewModelBase
     [ObservableProperty]
     private bool _isSaved;
 
-    public BusStopInputViewModel(ILedgerRepository ledgerRepository)
+    public BusStopInputViewModel(ILedgerRepository ledgerRepository, ISettingsRepository settingsRepository)
     {
         _ledgerRepository = ledgerRepository;
+        _settingsRepository = settingsRepository;
     }
 
     /// <summary>
@@ -205,7 +207,8 @@ public partial class BusStopInputViewModel : ViewModelBase
             await _ledgerRepository.UpdateDetailBusStopsAsync(Ledger.Id, busStopUpdates);
 
             // 摘要を再生成（バス停名を反映）
-            var summaryGenerator = new SummaryGenerator();
+            var settings = await _settingsRepository.GetAppSettingsAsync();
+            var summaryGenerator = new SummaryGenerator(settings.DepartmentType);
             Ledger.Summary = summaryGenerator.Generate(Ledger.Details);
 
             // 履歴を更新
@@ -250,7 +253,8 @@ public partial class BusStopInputViewModel : ViewModelBase
             await _ledgerRepository.UpdateDetailBusStopsAsync(Ledger.Id, busStopUpdates);
 
             // 摘要を再生成（★マークを反映）
-            var summaryGenerator = new SummaryGenerator();
+            var skipSettings = await _settingsRepository.GetAppSettingsAsync();
+            var summaryGenerator = new SummaryGenerator(skipSettings.DepartmentType);
             Ledger.Summary = summaryGenerator.Generate(Ledger.Details);
 
             var success = await _ledgerRepository.UpdateAsync(Ledger);

@@ -22,6 +22,7 @@ public class ReportServiceTests : IDisposable
 {
     private readonly Mock<ICardRepository> _cardRepositoryMock;
     private readonly Mock<ILedgerRepository> _ledgerRepositoryMock;
+    private readonly Mock<ISettingsRepository> _settingsRepositoryMock;
     private readonly ReportService _reportService;
     private readonly List<string> _tempFiles = new();
 
@@ -29,9 +30,12 @@ public class ReportServiceTests : IDisposable
     {
         _cardRepositoryMock = new Mock<ICardRepository>();
         _ledgerRepositoryMock = new Mock<ILedgerRepository>();
+        _settingsRepositoryMock = new Mock<ISettingsRepository>();
+        _settingsRepositoryMock.Setup(s => s.GetAppSettings()).Returns(new AppSettings());
         _reportService = new ReportService(
             _cardRepositoryMock.Object,
-            _ledgerRepositoryMock.Object);
+            _ledgerRepositoryMock.Object,
+            _settingsRepositoryMock.Object);
     }
 
     public void Dispose()

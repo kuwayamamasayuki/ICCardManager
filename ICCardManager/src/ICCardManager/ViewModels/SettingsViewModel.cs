@@ -88,6 +88,18 @@ public partial class SettingsViewModel : ViewModelBase
     [ObservableProperty]
     private ToastPositionItem? _selectedToastPositionItem;
 
+    /// <summary>
+    /// 部署種別の選択肢
+    /// </summary>
+    public ObservableCollection<DepartmentTypeItem> DepartmentTypeOptions { get; } = new()
+    {
+        new DepartmentTypeItem { Value = DepartmentType.MayorOffice, DisplayName = "市長事務部局：役務費" },
+        new DepartmentTypeItem { Value = DepartmentType.EnterpriseAccount, DisplayName = "企業会計部局（水道局、交通局等）：旅費" }
+    };
+
+    [ObservableProperty]
+    private DepartmentTypeItem? _selectedDepartmentTypeItem;
+
     public SettingsViewModel(
         ISettingsRepository settingsRepository,
         IValidationService validationService,
@@ -132,6 +144,10 @@ public partial class SettingsViewModel : ViewModelBase
             SelectedToastPositionItem = ToastPositionOptions.FirstOrDefault(x => x.Value == settings.ToastPosition)
                                         ?? ToastPositionOptions[0]; // デフォルトは「右上」
 
+            // DepartmentTypeItemを選択
+            SelectedDepartmentTypeItem = DepartmentTypeOptions.FirstOrDefault(x => x.Value == settings.DepartmentType)
+                                          ?? DepartmentTypeOptions[0]; // デフォルトは「市長事務部局」
+
             HasChanges = false;
             StatusMessage = string.Empty;
         }
@@ -173,7 +189,8 @@ public partial class SettingsViewModel : ViewModelBase
                 BackupPath = validatedBackupPath,
                 FontSize = SelectedFontSizeItem?.Value ?? FontSizeOption.Medium,
                 SoundMode = SelectedSoundModeItem?.Value ?? SoundMode.Beep,
-                ToastPosition = SelectedToastPositionItem?.Value ?? ToastPosition.TopRight
+                ToastPosition = SelectedToastPositionItem?.Value ?? ToastPosition.TopRight,
+                DepartmentType = SelectedDepartmentTypeItem?.Value ?? DepartmentType.MayorOffice
             };
 
             var success = await _settingsRepository.SaveAppSettingsAsync(settings);
@@ -269,6 +286,11 @@ public partial class SettingsViewModel : ViewModelBase
     {
         HasChanges = true;
     }
+
+    partial void OnSelectedDepartmentTypeItemChanged(DepartmentTypeItem? value)
+    {
+        HasChanges = true;
+    }
 }
 
 /// <summary>
@@ -296,5 +318,14 @@ public class SoundModeItem
 public class ToastPositionItem
 {
     public ToastPosition Value { get; set; }
+    public string DisplayName { get; set; } = string.Empty;
+}
+
+/// <summary>
+/// 部署種別選択アイテム
+/// </summary>
+public class DepartmentTypeItem
+{
+    public DepartmentType Value { get; set; }
     public string DisplayName { get; set; } = string.Empty;
 }

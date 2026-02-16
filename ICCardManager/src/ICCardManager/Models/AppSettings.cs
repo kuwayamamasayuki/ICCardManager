@@ -44,6 +44,11 @@ namespace ICCardManager.Models
         /// トースト通知の表示位置
         /// </summary>
         public ToastPosition ToastPosition { get; set; } = ToastPosition.TopRight;
+
+        /// <summary>
+        /// 部署種別
+        /// </summary>
+        public DepartmentType DepartmentType { get; set; } = DepartmentType.MayorOffice;
     }
 
     /// <summary>
@@ -132,6 +137,22 @@ namespace ICCardManager.Models
         /// 無し
         /// </summary>
         None
+    }
+
+    /// <summary>
+    /// 部署種別オプション
+    /// </summary>
+    public enum DepartmentType
+    {
+        /// <summary>
+        /// 市長事務部局（チャージ摘要: 役務費によりチャージ）
+        /// </summary>
+        MayorOffice,
+
+        /// <summary>
+        /// 企業会計部局（チャージ摘要: 旅費によりチャージ）
+        /// </summary>
+        EnterpriseAccount
     }
 
     /// <summary>

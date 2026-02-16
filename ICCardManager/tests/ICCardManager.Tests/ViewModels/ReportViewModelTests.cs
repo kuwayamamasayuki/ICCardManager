@@ -23,6 +23,7 @@ public class ReportViewModelTests
 {
     private readonly Mock<ICardRepository> _cardRepositoryMock;
     private readonly Mock<ILedgerRepository> _ledgerRepositoryMock;
+    private readonly Mock<ISettingsRepository> _settingsRepositoryMock;
     private readonly ReportService _reportService;
     private readonly PrintService _printService;
     private readonly ReportViewModel _viewModel;
@@ -31,8 +32,10 @@ public class ReportViewModelTests
     {
         _cardRepositoryMock = new Mock<ICardRepository>();
         _ledgerRepositoryMock = new Mock<ILedgerRepository>();
+        _settingsRepositoryMock = new Mock<ISettingsRepository>();
+        _settingsRepositoryMock.Setup(s => s.GetAppSettings()).Returns(new AppSettings());
         // ReportServiceはコンクリートクラスのため、モックしたリポジトリで実インスタンスを作成
-        _reportService = new ReportService(_cardRepositoryMock.Object, _ledgerRepositoryMock.Object);
+        _reportService = new ReportService(_cardRepositoryMock.Object, _ledgerRepositoryMock.Object, _settingsRepositoryMock.Object);
         _printService = new PrintService(_cardRepositoryMock.Object, _ledgerRepositoryMock.Object);
 
         _viewModel = new ReportViewModel(

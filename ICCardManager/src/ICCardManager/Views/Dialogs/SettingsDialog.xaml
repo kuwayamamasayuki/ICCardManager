@@ -7,7 +7,7 @@
         mc:Ignorable="d"
         d:DataContext="{d:DesignInstance Type=vm:SettingsViewModel}"
         Title="設定"
-        Height="650"
+        Height="720"
         Width="550"
         WindowStartupLocation="CenterOwner"
         ResizeMode="NoResize"
@@ -122,7 +122,33 @@
                     </StackPanel>
                 </GroupBox>
 
-                <!-- 5. バックアップ -->
+                <!-- 5. 部署設定（Issue #659） -->
+                <GroupBox Header="部署設定" Margin="0,0,0,20" Padding="15">
+                    <StackPanel>
+                        <TextBlock Text="部署及び支出科目"
+                                   FontWeight="Bold"
+                                   Margin="0,0,0,10"/>
+                        <ComboBox ItemsSource="{Binding DepartmentTypeOptions}"
+                                  SelectedItem="{Binding SelectedDepartmentTypeItem}"
+                                  DisplayMemberPath="DisplayName"
+                                  Padding="8"
+                                  Width="350"
+                                  HorizontalAlignment="Left"
+                                  AutomationProperties.Name="部署種別選択"
+                                  AutomationProperties.HelpText="部署種別を選択します。チャージ時の摘要と帳票テンプレートが変わります"
+                                  ToolTip="市長事務部局（役務費）または企業会計部局（旅費）を選択"/>
+                        <TextBlock Text="※ チャージ時の摘要と帳票テンプレートが変わります"
+                                   FontSize="{DynamicResource SmallFontSize}"
+                                   Foreground="Gray"
+                                   Margin="0,5,0,0"/>
+                        <TextBlock Text="※ 借損料（駐車場代）や自動車借上料（タクシー料金）には対応していません"
+                                   FontSize="{DynamicResource SmallFontSize}"
+                                   Foreground="Gray"
+                                   Margin="0,2,0,0"/>
+                    </StackPanel>
+                </GroupBox>
+
+                <!-- 6. バックアップ -->
                 <GroupBox Header="バックアップ" Margin="0,0,0,20" Padding="15">
                     <StackPanel>
                         <TextBlock Text="データベースの自動バックアップ先フォルダ"
