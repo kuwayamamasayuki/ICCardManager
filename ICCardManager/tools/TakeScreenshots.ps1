@@ -90,6 +90,33 @@ public class Win32ApiDpi2 {
         return GetWindowRect(hWnd, out rect);
     }
 
+    // 指定プロセスの最前面ウィンドウのハンドルを取得（Z-order順）
+    public static IntPtr GetTopmostProcessWindow(int processId) {
+        IntPtr topWindow = IntPtr.Zero;
+
+        EnumWindows((hWnd, lParam) => {
+            if (!IsWindowVisible(hWnd)) return true;
+
+            uint pid;
+            GetWindowThreadProcessId(hWnd, out pid);
+
+            if (pid == processId) {
+                RECT rect;
+                if (GetWindowRectDpi(hWnd, out rect)) {
+                    if (rect.Right - rect.Left > 0 && rect.Bottom - rect.Top > 0) {
+                        // EnumWindowsはZ-order（前面→背面）で列挙するため最初のヒットが最前面
+                        if (topWindow == IntPtr.Zero) {
+                            topWindow = hWnd;
+                        }
+                    }
+                }
+            }
+            return true;
+        }, IntPtr.Zero);
+
+        return topWindow;
+    }
+
     // 指定プロセスの全ウィンドウを含む境界を取得
     public static RECT GetProcessWindowsBounds(int processId) {
         RECT bounds = new RECT();
@@ -175,11 +202,13 @@ $requiredScreens = @(
         Name = "card.png"
         Title = "カード管理画面"
         Instructions = "F3キーを押してカード管理画面が表示されたら"
+        ForegroundOnly = $true
     },
     @{
         Name = "staff.png"
         Title = "職員管理画面"
         Instructions = "F2キーを押して職員管理画面が表示されたら"
+        ForegroundOnly = $true
     }
 )
 
@@ -188,31 +217,37 @@ $optionalScreens = @(
         Name = "report.png"
         Title = "帳票出力画面"
         Instructions = "F1キーを押して帳票出力画面が表示されたら"
+        ForegroundOnly = $true
     },
     @{
         Name = "settings.png"
         Title = "設定画面"
         Instructions = "F5キーを押して設定画面が表示されたら"
+        ForegroundOnly = $true
     },
     @{
         Name = "system.png"
         Title = "システム管理画面"
         Instructions = "F6キーを押してシステム管理画面が表示されたら"
+        ForegroundOnly = $true
     },
     @{
         Name = "export.png"
         Title = "データ入出力画面"
         Instructions = "F4キーを押してデータ入出力画面が表示されたら"
+        ForegroundOnly = $true
     },
     @{
         Name = "busstop.png"
         Title = "バス停名入力ダイアログ"
         Instructions = "返却時にバス利用を検出させ、バス停名入力ダイアログが表示されたら"
+        ForegroundOnly = $true
     },
     @{
         Name = "ledger_detail_merge.png"
         Title = "履歴の統合分割（履歴詳細）"
         Instructions = "履歴照会画面で行をダブルクリックして詳細ダイアログが表示されたら"
+        ForegroundOnly = $true
     },
     @{
         Name = "history_merge.png"
@@ -223,6 +258,7 @@ $optionalScreens = @(
         Name = "print_preview.png"
         Title = "帳票プレビュー画面"
         Instructions = "帳票作成画面で「プレビュー」ボタンをクリックし、プレビューが表示されたら"
+        ForegroundOnly = $true
     },
     @{
         Name = "installer_options.png"
@@ -233,6 +269,7 @@ $optionalScreens = @(
         Name = "card_registration_mode.png"
         Title = "カード登録方法の選択画面"
         Instructions = "カード管理で新規登録後、カード登録方法の選択ダイアログが表示されたら"
+        ForegroundOnly = $true
     }
 )
 
@@ -245,7 +282,8 @@ if ($All) {
 
 function Take-Screenshot {
     param(
-        [string]$OutputPath
+        [string]$OutputPath,
+        [bool]$ForegroundOnly = $false
     )
 
     # ICCardManagerのプロセスを取得
@@ -269,8 +307,22 @@ function Take-Screenshot {
     [Win32ApiDpi2]::SetForegroundWindow($hwnd) | Out-Null
     Start-Sleep -Milliseconds 500
 
-    # プロセスの全ウィンドウ（メイン + トースト通知等）を含む境界を取得
-    $rect = [Win32ApiDpi2]::GetProcessWindowsBounds($process.Id)
+    if ($ForegroundOnly) {
+        # 前面ウィンドウ（ダイアログ等）のみをキャプチャ
+        $targetHwnd = [Win32ApiDpi2]::GetTopmostProcessWindow($process.Id)
+        if ($targetHwnd -eq [IntPtr]::Zero) {
+            Write-Host "    ! 前面ウィンドウが見つかりません" -ForegroundColor Red
+            return $false
+        }
+        $rect = New-Object Win32ApiDpi2+RECT
+        if (-not [Win32ApiDpi2]::GetWindowRectDpi($targetHwnd, [ref]$rect)) {
+            Write-Host "    ! ウィンドウ領域を取得できません" -ForegroundColor Red
+            return $false
+        }
+    } else {
+        # プロセスの全ウィンドウ（メイン + トースト通知等）を含む境界を取得
+        $rect = [Win32ApiDpi2]::GetProcessWindowsBounds($process.Id)
+    }
 
     $width = $rect.Right - $rect.Left
     $height = $rect.Bottom - $rect.Top
@@ -353,7 +405,8 @@ function Start-ScreenshotSession {
             continue
         }
 
-        if (Take-Screenshot -OutputPath $outputPath) {
+        $isForegroundOnly = $screen.ContainsKey("ForegroundOnly") -and $screen.ForegroundOnly
+        if (Take-Screenshot -OutputPath $outputPath -ForegroundOnly $isForegroundOnly) {
             Write-Host "    OK $($screen.Name) を保存しました" -ForegroundColor Green
         }
     }
