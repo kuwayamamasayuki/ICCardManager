@@ -57,11 +57,11 @@ namespace ICCardManager.Views.Dialogs
                 if (updatedItem != null && !updatedItem.Summary.Contains("★"))
                 {
                     // 摘要が完全に更新された場合：ハイライト→2秒後に一覧から削除
-                    Dispatcher.InvokeAsync(() =>
+                    await Dispatcher.InvokeAsync(() =>
                     {
                         DataGridHighlightHelper.HighlightRow(BusStopDataGrid, updatedItem, 2.0, () =>
                         {
-                            Dispatcher.InvokeAsync(async () => await _viewModel.InitializeAsync());
+                            _ = Dispatcher.InvokeAsync(async () => await _viewModel.InitializeAsync());
                         });
                     }, DispatcherPriority.ContextIdle);
                 }
