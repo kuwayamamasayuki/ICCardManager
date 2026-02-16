@@ -117,8 +117,10 @@ namespace ICCardManager.Services
             var random = new Random(42); // 再現性のためシード固定
             var today = DateTime.Now.Date;
 
-            // 各カードに対してサンプル履歴を登録（全カード）
-            foreach (var card in TestCardList)
+            // 各カードに対してサンプル履歴を登録
+            // Su-001は新規購入～払い戻しのライフサイクルで個別生成するため除外
+            var cardsForSampleHistory = TestCardList.Where(c => c.CardIdm != TestCardList[3].CardIdm);
+            foreach (var card in cardsForSampleHistory)
             {
                 // 既存の履歴があるかチェック
                 var existingHistory = await _ledgerRepository.GetByMonthAsync(card.CardIdm, today.Year, today.Month);
@@ -597,8 +599,13 @@ namespace ICCardManager.Services
         }
 
         /// <summary>
-        /// 新規購入・払い戻しパターンを登録
+        /// 新規購入・利用・払い戻しの一連のライフサイクルを登録
         /// </summary>
+        /// <remarks>
+        /// Su-001はRegisterSampleHistoryAsyncから除外されているため、
+        /// このメソッドで新規購入→通常利用→払い戻しの完全なライフサイクルを生成する。
+        /// 新規購入より前、払い戻しより後にはデータが存在しない。
+        /// </remarks>
         private async Task RegisterPurchaseAndRefundAsync(string cardIdm, DateTime today, string staffName)
         {
             // 既に新規購入パターンが登録済みかチェック
@@ -610,8 +617,11 @@ namespace ICCardManager.Services
                 return;
             }
 
+            var random = new Random(731); // 再現性のためシード固定
+            var purchaseAmount = 1500; // デポジット500円は含まない（カード残高として管理される額）
+
             // ── 170日前: 新規購入 ──
-            var purchaseAmount = 2000; // デポジット500円 + チャージ1500円
+            var balance = purchaseAmount;
             var purchaseLedger = new Ledger
             {
                 CardIdm = cardIdm,
@@ -619,33 +629,99 @@ namespace ICCardManager.Services
                 Summary = "新規購入",
                 Income = purchaseAmount,
                 Expense = 0,
-                Balance = purchaseAmount,
+                Balance = balance,
                 StaffName = staffName,
-                Note = "テストデータ（新規購入: デポジット500円＋チャージ1500円）"
+                Note = "テストデータ（新規購入: 2000円カード、デポジット500円を除く）"
             };
             await _ledgerRepository.InsertAsync(purchaseLedger);
 
-            // ── 2日前: 払い戻し ──
-            // 直近の残高を取得
-            var date2 = today.AddDays(-2);
-            var recentHistory = await _ledgerRepository.GetByMonthAsync(cardIdm, date2.Year, date2.Month);
-            var latestRecord = recentHistory.OrderByDescending(l => l.Date).ThenByDescending(l => l.Id).FirstOrDefault();
-            var currentBalance = latestRecord?.Balance ?? purchaseAmount;
+            // ── 170日前～3日前: 通常利用データ ──
+            for (int daysAgo = 169; daysAgo >= 3; daysAgo--)
+            {
+                var date = today.AddDays(-daysAgo);
 
+                // 土日はスキップ
+                if (date.DayOfWeek == DayOfWeek.Saturday || date.DayOfWeek == DayOfWeek.Sunday)
+                    continue;
+
+                // 残高が少ない場合はチャージ
+                if (balance < 3000)
+                {
+                    var chargeAmount = random.Next(3, 6) * 1000;
+                    balance += chargeAmount;
+
+                    var chargeLedger = new Ledger
+                    {
+                        CardIdm = cardIdm,
+                        Date = date,
+                        Summary = SummaryGenerator.GetChargeSummary(),
+                        Income = chargeAmount,
+                        Expense = 0,
+                        Balance = balance,
+                        StaffName = staffName,
+                        Note = "テストデータ"
+                    };
+                    var chargeLedgerId = await _ledgerRepository.InsertAsync(chargeLedger);
+
+                    await _ledgerRepository.InsertDetailAsync(new LedgerDetail
+                    {
+                        LedgerId = chargeLedgerId,
+                        UseDate = date.AddHours(7).AddMinutes(random.Next(60)),
+                        Amount = chargeAmount,
+                        Balance = balance,
+                        IsCharge = true,
+                        IsBus = false
+                    });
+                }
+
+                // 鉄道利用（片道）
+                var fromIdx = random.Next(SampleStations.Length);
+                var toIdx = (fromIdx + random.Next(1, 5)) % SampleStations.Length;
+                var fare = 200 + random.Next(10) * 30;
+                balance -= fare;
+
+                var usageLedger = new Ledger
+                {
+                    CardIdm = cardIdm,
+                    Date = date,
+                    Summary = $"鉄道（{SampleStations[fromIdx]}～{SampleStations[toIdx]}）",
+                    Income = 0,
+                    Expense = fare,
+                    Balance = balance,
+                    StaffName = staffName,
+                    Note = "テストデータ"
+                };
+                var usageLedgerId = await _ledgerRepository.InsertAsync(usageLedger);
+
+                await _ledgerRepository.InsertDetailAsync(new LedgerDetail
+                {
+                    LedgerId = usageLedgerId,
+                    UseDate = date.AddHours(8).AddMinutes(random.Next(60)),
+                    EntryStation = SampleStations[fromIdx],
+                    ExitStation = SampleStations[toIdx],
+                    Amount = fare,
+                    Balance = balance,
+                    IsCharge = false,
+                    IsBus = false
+                });
+            }
+
+            // ── 2日前: 払い戻し（残高全額を払出） ──
+            var date2 = today.AddDays(-2);
             var refundLedger = new Ledger
             {
                 CardIdm = cardIdm,
                 Date = date2,
                 Summary = SummaryGenerator.GetRefundSummary(),
                 Income = 0,
-                Expense = currentBalance,
+                Expense = balance,
                 Balance = 0,
                 StaffName = staffName,
                 Note = "テストデータ（払い戻し）"
             };
             await _ledgerRepository.InsertAsync(refundLedger);
 
-            System.Diagnostics.Debug.WriteLine("[DEBUG] 特殊パターン(Su-001: 新規購入・払い戻し)登録完了");
+            System.Diagnostics.Debug.WriteLine("[DEBUG] 特殊パターン(Su-001: 新規購入→利用→払い戻し)登録完了");
         }
 
         /// <summary>
