@@ -12,7 +12,7 @@
     必須画面（6枚）のみを取得します。
 
 .PARAMETER All
-    オプション画面も含むすべての画面（10枚）を取得します。
+    オプション画面も含むすべての画面（16枚）を取得します。
 
 .PARAMETER OutputDir
     出力先ディレクトリを指定します。デフォルトは docs/screenshots/ です。
@@ -41,13 +41,13 @@ Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 
 # Win32 API定義（DPI対応版・マルチウィンドウ対応）
-if (-not ([System.Management.Automation.PSTypeName]'Win32ApiDpi2').Type) {
+if (-not ([System.Management.Automation.PSTypeName]'Win32ApiDpi3').Type) {
     Add-Type -TypeDefinition @"
 using System;
 using System.Collections.Generic;
 using System.Runtime.InteropServices;
 
-public class Win32ApiDpi2 {
+public class Win32ApiDpi3 {
     [DllImport("user32.dll")]
     public static extern bool GetWindowRect(IntPtr hWnd, out RECT lpRect);
 
@@ -88,6 +88,33 @@ public class Win32ApiDpi2 {
             return true;
         }
         return GetWindowRect(hWnd, out rect);
+    }
+
+    // 指定プロセスの最前面ウィンドウのハンドルを取得（Z-order順）
+    public static IntPtr GetTopmostProcessWindow(int processId) {
+        IntPtr topWindow = IntPtr.Zero;
+
+        EnumWindows((hWnd, lParam) => {
+            if (!IsWindowVisible(hWnd)) return true;
+
+            uint pid;
+            GetWindowThreadProcessId(hWnd, out pid);
+
+            if (pid == processId) {
+                RECT rect;
+                if (GetWindowRectDpi(hWnd, out rect)) {
+                    if (rect.Right - rect.Left > 0 && rect.Bottom - rect.Top > 0) {
+                        // EnumWindowsはZ-order（前面→背面）で列挙するため最初のヒットが最前面
+                        if (topWindow == IntPtr.Zero) {
+                            topWindow = hWnd;
+                        }
+                    }
+                }
+            }
+            return true;
+        }, IntPtr.Zero);
+
+        return topWindow;
     }
 
     // 指定プロセスの全ウィンドウを含む境界を取得
@@ -132,7 +159,7 @@ public class Win32ApiDpi2 {
 }
 "@
     # プロセスをDPI対応にする
-    [Win32ApiDpi2]::SetProcessDPIAware() | Out-Null
+    [Win32ApiDpi3]::SetProcessDPIAware() | Out-Null
 }
 
 # スクリプトのディレクトリを取得
@@ -175,11 +202,13 @@ $requiredScreens = @(
         Name = "card.png"
         Title = "カード管理画面"
         Instructions = "F3キーを押してカード管理画面が表示されたら"
+        ForegroundOnly = $true
     },
     @{
         Name = "staff.png"
         Title = "職員管理画面"
         Instructions = "F2キーを押して職員管理画面が表示されたら"
+        ForegroundOnly = $true
     }
 )
 
@@ -188,21 +217,59 @@ $optionalScreens = @(
         Name = "report.png"
         Title = "帳票出力画面"
         Instructions = "F1キーを押して帳票出力画面が表示されたら"
+        ForegroundOnly = $true
     },
     @{
         Name = "settings.png"
         Title = "設定画面"
         Instructions = "F5キーを押して設定画面が表示されたら"
+        ForegroundOnly = $true
     },
     @{
         Name = "system.png"
         Title = "システム管理画面"
         Instructions = "F6キーを押してシステム管理画面が表示されたら"
+        ForegroundOnly = $true
     },
     @{
         Name = "export.png"
         Title = "データ入出力画面"
         Instructions = "F4キーを押してデータ入出力画面が表示されたら"
+        ForegroundOnly = $true
+    },
+    @{
+        Name = "busstop.png"
+        Title = "バス停名入力ダイアログ"
+        Instructions = "返却時にバス利用を検出させ、バス停名入力ダイアログが表示されたら"
+        ForegroundOnly = $true
+    },
+    @{
+        Name = "ledger_detail_merge.png"
+        Title = "履歴の統合分割（履歴詳細）"
+        Instructions = "履歴照会画面で行をダブルクリックして詳細ダイアログが表示されたら"
+        ForegroundOnly = $true
+    },
+    @{
+        Name = "history_merge.png"
+        Title = "履歴の統合（履歴一覧）"
+        Instructions = "履歴照会画面で複数行にチェックを入れた状態にしたら"
+    },
+    @{
+        Name = "print_preview.png"
+        Title = "帳票プレビュー画面"
+        Instructions = "帳票作成画面で「プレビュー」ボタンをクリックし、プレビューが表示されたら"
+        ForegroundOnly = $true
+    },
+    @{
+        Name = "installer_options.png"
+        Title = "インストーラーオプション選択画面"
+        Instructions = "インストーラーを実行し、オプション選択画面が表示されたら（※手動でPrtScで撮影してください）"
+    },
+    @{
+        Name = "card_registration_mode.png"
+        Title = "カード登録方法の選択画面"
+        Instructions = "カード管理で新規登録後、カード登録方法の選択ダイアログが表示されたら"
+        ForegroundOnly = $true
     }
 )
 
@@ -215,7 +282,8 @@ if ($All) {
 
 function Take-Screenshot {
     param(
-        [string]$OutputPath
+        [string]$OutputPath,
+        [bool]$ForegroundOnly = $false
     )
 
     # ICCardManagerのプロセスを取得
@@ -236,11 +304,25 @@ function Take-Screenshot {
     }
 
     # ウィンドウをフォアグラウンドに移動
-    [Win32ApiDpi2]::SetForegroundWindow($hwnd) | Out-Null
+    [Win32ApiDpi3]::SetForegroundWindow($hwnd) | Out-Null
     Start-Sleep -Milliseconds 500
 
-    # プロセスの全ウィンドウ（メイン + トースト通知等）を含む境界を取得
-    $rect = [Win32ApiDpi2]::GetProcessWindowsBounds($process.Id)
+    if ($ForegroundOnly) {
+        # 前面ウィンドウ（ダイアログ等）のみをキャプチャ
+        $targetHwnd = [Win32ApiDpi3]::GetTopmostProcessWindow($process.Id)
+        if ($targetHwnd -eq [IntPtr]::Zero) {
+            Write-Host "    ! 前面ウィンドウが見つかりません" -ForegroundColor Red
+            return $false
+        }
+        $rect = New-Object Win32ApiDpi3+RECT
+        if (-not [Win32ApiDpi3]::GetWindowRectDpi($targetHwnd, [ref]$rect)) {
+            Write-Host "    ! ウィンドウ領域を取得できません" -ForegroundColor Red
+            return $false
+        }
+    } else {
+        # プロセスの全ウィンドウ（メイン + トースト通知等）を含む境界を取得
+        $rect = [Win32ApiDpi3]::GetProcessWindowsBounds($process.Id)
+    }
 
     $width = $rect.Right - $rect.Left
     $height = $rect.Bottom - $rect.Top
@@ -323,7 +405,8 @@ function Start-ScreenshotSession {
             continue
         }
 
-        if (Take-Screenshot -OutputPath $outputPath) {
+        $isForegroundOnly = $screen.ContainsKey("ForegroundOnly") -and $screen.ForegroundOnly
+        if (Take-Screenshot -OutputPath $outputPath -ForegroundOnly $isForegroundOnly) {
             Write-Host "    OK $($screen.Name) を保存しました" -ForegroundColor Green
         }
     }
