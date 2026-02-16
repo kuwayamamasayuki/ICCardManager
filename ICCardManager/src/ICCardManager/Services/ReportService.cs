@@ -621,21 +621,6 @@ namespace ICCardManager.Services
         }
 
         /// <summary>
-        /// 月次帳票を作成（後方互換性のためのラッパー）
-        /// </summary>
-        /// <param name="cardIdm">対象カードIDm</param>
-        /// <param name="year">年</param>
-        /// <param name="month">月</param>
-        /// <param name="outputPath">出力先パス</param>
-        /// <returns>成功した場合true</returns>
-        [Obsolete("CreateMonthlyReportAsyncを使用してください。エラーメッセージが取得できます。")]
-        public async Task<bool> CreateMonthlyReportAsyncLegacy(string cardIdm, int year, int month, string outputPath)
-        {
-            var result = await CreateMonthlyReportAsync(cardIdm, year, month, outputPath);
-            return result.Success;
-        }
-
-        /// <summary>
         /// 複数カードの月次帳票を一括作成
         /// </summary>
         /// <param name="cardIdms">対象カードIDmのリスト</param>
