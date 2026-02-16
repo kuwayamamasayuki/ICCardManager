@@ -371,8 +371,13 @@ namespace ICCardManager
                 }
 
                 // 初回起動: 部署選択ダイアログを表示
+                // メインウィンドウ表示前にShowDialog()するため、ShutdownModeを一時的に変更
+                // （デフォルトのOnMainWindowCloseだとダイアログ閉じ時にアプリが終了してしまう）
+                var previousShutdownMode = ShutdownMode;
+                ShutdownMode = ShutdownMode.OnExplicitShutdown;
                 var dialog = new DepartmentSelectionDialog();
                 var result = dialog.ShowDialog();
+                ShutdownMode = previousShutdownMode;
 
                 if (result == true)
                 {
