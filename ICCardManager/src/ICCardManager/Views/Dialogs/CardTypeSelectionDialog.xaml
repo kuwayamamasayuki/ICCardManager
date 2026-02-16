@@ -20,7 +20,7 @@
 
         <!-- アイコンとメッセージ -->
         <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="0,0,0,20">
-            <TextBlock Text="❓" FontSize="32" VerticalAlignment="Center" Margin="0,0,15,0"/>
+            <TextBlock Text="❓" FontSize="{DynamicResource DialogIconFontSize}" VerticalAlignment="Center" Margin="0,0,15,0"/>
             <StackPanel VerticalAlignment="Center">
                 <TextBlock Text="未登録のカードです"
                            FontSize="{DynamicResource LargeFontSize}"

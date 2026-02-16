@@ -21,7 +21,7 @@
 
         <!-- アイコンとメッセージ -->
         <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="0,0,0,15">
-            <TextBlock Text="🗂" FontSize="32" VerticalAlignment="Center" Margin="0,0,15,0"/>
+            <TextBlock Text="🗂" FontSize="{DynamicResource DialogIconFontSize}" VerticalAlignment="Center" Margin="0,0,15,0"/>
             <StackPanel VerticalAlignment="Center">
                 <TextBlock Text="カード登録方法の選択"
                            FontSize="{DynamicResource LargeFontSize}"
