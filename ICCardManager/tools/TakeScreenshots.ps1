@@ -12,7 +12,7 @@
     必須画面（6枚）のみを取得します。
 
 .PARAMETER All
-    オプション画面も含むすべての画面（10枚）を取得します。
+    オプション画面も含むすべての画面（16枚）を取得します。
 
 .PARAMETER OutputDir
     出力先ディレクトリを指定します。デフォルトは docs/screenshots/ です。
@@ -203,6 +203,36 @@ $optionalScreens = @(
         Name = "export.png"
         Title = "データ入出力画面"
         Instructions = "F4キーを押してデータ入出力画面が表示されたら"
+    },
+    @{
+        Name = "busstop.png"
+        Title = "バス停名入力ダイアログ"
+        Instructions = "返却時にバス利用を検出させ、バス停名入力ダイアログが表示されたら"
+    },
+    @{
+        Name = "ledger_detail_merge.png"
+        Title = "履歴の統合分割（履歴詳細）"
+        Instructions = "履歴照会画面で行をダブルクリックして詳細ダイアログが表示されたら"
+    },
+    @{
+        Name = "history_merge.png"
+        Title = "履歴の統合（履歴一覧）"
+        Instructions = "履歴照会画面で複数行にチェックを入れた状態にしたら"
+    },
+    @{
+        Name = "print_preview.png"
+        Title = "帳票プレビュー画面"
+        Instructions = "帳票作成画面で「プレビュー」ボタンをクリックし、プレビューが表示されたら"
+    },
+    @{
+        Name = "installer_options.png"
+        Title = "インストーラーオプション選択画面"
+        Instructions = "インストーラーを実行し、オプション選択画面が表示されたら（※手動でPrtScで撮影してください）"
+    },
+    @{
+        Name = "card_registration_mode.png"
+        Title = "カード登録方法の選択画面"
+        Instructions = "カード管理で新規登録後、カード登録方法の選択ダイアログが表示されたら"
     }
 )
 
