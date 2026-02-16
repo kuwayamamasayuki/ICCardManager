@@ -41,13 +41,13 @@ Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 
 # Win32 API定義（DPI対応版・マルチウィンドウ対応）
-if (-not ([System.Management.Automation.PSTypeName]'Win32ApiDpi2').Type) {
+if (-not ([System.Management.Automation.PSTypeName]'Win32ApiDpi3').Type) {
     Add-Type -TypeDefinition @"
 using System;
 using System.Collections.Generic;
 using System.Runtime.InteropServices;
 
-public class Win32ApiDpi2 {
+public class Win32ApiDpi3 {
     [DllImport("user32.dll")]
     public static extern bool GetWindowRect(IntPtr hWnd, out RECT lpRect);
 
@@ -159,7 +159,7 @@ public class Win32ApiDpi2 {
 }
 "@
     # プロセスをDPI対応にする
-    [Win32ApiDpi2]::SetProcessDPIAware() | Out-Null
+    [Win32ApiDpi3]::SetProcessDPIAware() | Out-Null
 }
 
 # スクリプトのディレクトリを取得
@@ -304,24 +304,24 @@ function Take-Screenshot {
     }
 
     # ウィンドウをフォアグラウンドに移動
-    [Win32ApiDpi2]::SetForegroundWindow($hwnd) | Out-Null
+    [Win32ApiDpi3]::SetForegroundWindow($hwnd) | Out-Null
     Start-Sleep -Milliseconds 500
 
     if ($ForegroundOnly) {
         # 前面ウィンドウ（ダイアログ等）のみをキャプチャ
-        $targetHwnd = [Win32ApiDpi2]::GetTopmostProcessWindow($process.Id)
+        $targetHwnd = [Win32ApiDpi3]::GetTopmostProcessWindow($process.Id)
         if ($targetHwnd -eq [IntPtr]::Zero) {
             Write-Host "    ! 前面ウィンドウが見つかりません" -ForegroundColor Red
             return $false
         }
-        $rect = New-Object Win32ApiDpi2+RECT
-        if (-not [Win32ApiDpi2]::GetWindowRectDpi($targetHwnd, [ref]$rect)) {
+        $rect = New-Object Win32ApiDpi3+RECT
+        if (-not [Win32ApiDpi3]::GetWindowRectDpi($targetHwnd, [ref]$rect)) {
             Write-Host "    ! ウィンドウ領域を取得できません" -ForegroundColor Red
             return $false
         }
     } else {
         # プロセスの全ウィンドウ（メイン + トースト通知等）を含む境界を取得
-        $rect = [Win32ApiDpi2]::GetProcessWindowsBounds($process.Id)
+        $rect = [Win32ApiDpi3]::GetProcessWindowsBounds($process.Id)
     }
 
     $width = $rect.Right - $rect.Left
