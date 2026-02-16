@@ -504,32 +504,6 @@ namespace ICCardManager
                 _logger?.LogWarning(ex, "テストデータ登録エラー");
             }
         }
-
-        /// <summary>
-        /// デバッグ用: テストデータをリセット
-        /// </summary>
-        public async Task ResetTestDataAsync()
-        {
-            var debugDataService = ServiceProvider.GetRequiredService<DebugDataService>();
-            await debugDataService.ResetTestDataAsync();
-        }
-
-        /// <summary>
-        /// デバッグ用: 履歴データを生成
-        /// </summary>
-        public async Task GenerateHistoryAsync(string cardIdm, int days, string staffName)
-        {
-            var debugDataService = ServiceProvider.GetRequiredService<DebugDataService>();
-            await debugDataService.GenerateHistoryAsync(cardIdm, days, staffName);
-        }
-
-        /// <summary>
-        /// デバッグ用: テストデータ一覧を取得
-        /// </summary>
-        public static IEnumerable<(string Idm, string Description, bool IsStaff)> GetTestDataList()
-        {
-            return DebugDataService.GetAllTestIdms();
-        }
     #endif
 
         /// <summary>

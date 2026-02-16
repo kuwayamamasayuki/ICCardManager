@@ -96,22 +96,6 @@ namespace ICCardManager.Infrastructure.CardReader
             });
         }
 
-        /// <summary>
-        /// 特定カードの履歴データを設定（仮想タッチ用）
-        /// </summary>
-        public void SetCustomHistory(string idm, List<LedgerDetail> history)
-        {
-            _settings.CustomHistory[idm] = history;
-        }
-
-        /// <summary>
-        /// 特定カードの残高を設定（仮想タッチ用）
-        /// </summary>
-        public void SetCustomBalance(string idm, int balance)
-        {
-            _settings.CustomBalances[idm] = balance;
-        }
-
         /// <inheritdoc/>
         public void Dispose()
         {

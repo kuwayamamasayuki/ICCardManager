@@ -214,31 +214,6 @@ namespace ICCardManager.Infrastructure.CardReader
             }
         }
 
-        /// <summary>
-        /// 特定カードの履歴データを設定
-        /// </summary>
-        public void SetCustomHistory(string idm, List<LedgerDetail> history)
-        {
-            HistorySettings.CustomHistory[idm] = history;
-        }
-
-        /// <summary>
-        /// 特定カードの残高を設定
-        /// </summary>
-        public void SetCustomBalance(string idm, int balance)
-        {
-            HistorySettings.CustomBalances[idm] = balance;
-        }
-
-        /// <summary>
-        /// カスタム設定をリセット
-        /// </summary>
-        public void ResetCustomSettings()
-        {
-            HistorySettings = new MockHistorySettings();
-            MockBalance = 4980;
-        }
-
         /// <inheritdoc/>
         public Task<bool> CheckConnectionAsync()
         {
