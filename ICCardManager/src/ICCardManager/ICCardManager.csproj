@@ -108,8 +108,11 @@
       <LogicalName>ICCardManager.Resources.StationCode.csv</LogicalName>
     </EmbeddedResource>
     <!-- 埋め込みリソース（物品出納簿テンプレート）- フォールバック用 -->
-    <EmbeddedResource Include="Resources\Templates\物品出納簿テンプレート.xlsx">
-      <LogicalName>ICCardManager.Resources.Templates.物品出納簿テンプレート.xlsx</LogicalName>
+    <EmbeddedResource Include="Resources\Templates\物品出納簿テンプレート（市長事務部局）.xlsx">
+      <LogicalName>ICCardManager.Resources.Templates.物品出納簿テンプレート（市長事務部局）.xlsx</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="Resources\Templates\物品出納簿テンプレート（企業会計部局）.xlsx">
+      <LogicalName>ICCardManager.Resources.Templates.物品出納簿テンプレート（企業会計部局）.xlsx</LogicalName>
     </EmbeddedResource>
   </ItemGroup>
 

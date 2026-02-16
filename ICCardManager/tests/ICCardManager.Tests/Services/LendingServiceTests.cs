@@ -46,6 +46,7 @@ public class LendingServiceTests : IDisposable
         _staffRepositoryMock = new Mock<IStaffRepository>();
         _ledgerRepositoryMock = new Mock<ILedgerRepository>();
         _settingsRepositoryMock = new Mock<ISettingsRepository>();
+        _settingsRepositoryMock.Setup(s => s.GetAppSettings()).Returns(new AppSettings());
         _summaryGenerator = new SummaryGenerator();
         _lockManager = new CardLockManager(NullLogger<CardLockManager>.Instance);
 

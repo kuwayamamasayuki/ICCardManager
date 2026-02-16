@@ -16,6 +16,7 @@ using ICCardManager.Models;
 using ICCardManager.Services;
 using ICCardManager.ViewModels;
 using ICCardManager.Views;
+using ICCardManager.Views.Dialogs;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -190,7 +191,11 @@ namespace ICCardManager
             // Services層
             services.AddSingleton<IValidationService, ValidationService>();
             services.AddSingleton<CardTypeDetector>();
-            services.AddSingleton<SummaryGenerator>();
+            services.AddSingleton<SummaryGenerator>(sp =>
+            {
+                var settings = sp.GetRequiredService<ISettingsRepository>().GetAppSettings();
+                return new SummaryGenerator(settings.DepartmentType);
+            });
             services.AddSingleton<CardLockManager>();
             services.AddSingleton<LendingService>();
             services.AddSingleton<ReportService>();
@@ -336,11 +341,67 @@ namespace ICCardManager
             Task.Run(() => RegisterTestDataAsync()).GetAwaiter().GetResult();
     #endif
 
+            // 初回起動時の部署選択ダイアログ（Issue #659）
+            ShowDepartmentSelectionIfNeeded();
+
             // 保存済み設定を適用
             ApplySavedSettings();
 
             // 起動時処理
             PerformStartupTasks(dbContext);
+        }
+
+        /// <summary>
+        /// 初回起動時に部署選択ダイアログを表示（Issue #659）
+        /// </summary>
+        /// <remarks>
+        /// department_type 設定がDBに存在しない場合（初回起動時）にダイアログを表示し、
+        /// ユーザーが選択した部署種別を保存する。
+        /// </remarks>
+        private void ShowDepartmentSelectionIfNeeded()
+        {
+            try
+            {
+                var settingsRepository = ServiceProvider.GetRequiredService<ISettingsRepository>();
+                // department_type キーが既に存在するか確認（同期版）
+                var existingValue = Task.Run(() => settingsRepository.GetAsync(SettingsRepository.KeyDepartmentType)).GetAwaiter().GetResult();
+                if (!string.IsNullOrEmpty(existingValue))
+                {
+                    return; // 既に設定済み
+                }
+
+                // 初回起動: 部署選択ダイアログを表示
+                var dialog = new DepartmentSelectionDialog();
+                var result = dialog.ShowDialog();
+
+                if (result == true)
+                {
+                    var departmentType = dialog.SelectedDepartmentType;
+                    Task.Run(() => settingsRepository.SetAsync(
+                        SettingsRepository.KeyDepartmentType,
+                        SettingsRepository.DepartmentTypeToString(departmentType)
+                    )).GetAwaiter().GetResult();
+
+                    _logger?.LogInformation("初回起動: 部署種別を設定 DepartmentType={DepartmentType}", departmentType);
+                }
+                else
+                {
+                    // ダイアログが閉じられた場合はデフォルト（市長事務部局）を設定
+                    Task.Run(() => settingsRepository.SetAsync(
+                        SettingsRepository.KeyDepartmentType,
+                        SettingsRepository.DepartmentTypeToString(DepartmentType.MayorOffice)
+                    )).GetAwaiter().GetResult();
+                }
+
+                // キャッシュを無効化して再取得を強制
+                var cacheService = ServiceProvider.GetRequiredService<ICacheService>();
+                cacheService.Invalidate(CacheKeys.AppSettings);
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogWarning(ex, "部署選択ダイアログでエラー");
+                // エラーが発生してもアプリは起動させる（デフォルト値が使用される）
+            }
         }
 
         /// <summary>

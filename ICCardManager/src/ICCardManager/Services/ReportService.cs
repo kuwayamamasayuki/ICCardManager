@@ -186,13 +186,16 @@ namespace ICCardManager.Services
     {
         private readonly ICardRepository _cardRepository;
         private readonly ILedgerRepository _ledgerRepository;
+        private readonly ISettingsRepository _settingsRepository;
 
         public ReportService(
             ICardRepository cardRepository,
-            ILedgerRepository ledgerRepository)
+            ILedgerRepository ledgerRepository,
+            ISettingsRepository settingsRepository)
         {
             _cardRepository = cardRepository;
             _ledgerRepository = ledgerRepository;
+            _settingsRepository = settingsRepository;
         }
 
         /// <summary>
@@ -216,7 +219,8 @@ namespace ICCardManager.Services
                 // テンプレートパスを解決
                 try
                 {
-                    templatePath = TemplateResolver.ResolveTemplatePath();
+                    var settings = _settingsRepository.GetAppSettings();
+                    templatePath = TemplateResolver.ResolveTemplatePath(settings.DepartmentType);
                 }
                 catch (TemplateNotFoundException ex)
                 {
@@ -645,11 +649,12 @@ namespace ICCardManager.Services
             var results = new List<(string CardIdm, string CardName, ReportGenerationResult Result)>();
 
             // テンプレートの存在確認を先に行う
-            if (!TemplateResolver.TemplateExists())
+            var batchSettings = _settingsRepository.GetAppSettings();
+            if (!TemplateResolver.TemplateExists(batchSettings.DepartmentType))
             {
                 try
                 {
-                    TemplateResolver.ResolveTemplatePath();
+                    TemplateResolver.ResolveTemplatePath(batchSettings.DepartmentType);
                 }
                 catch (TemplateNotFoundException ex)
                 {

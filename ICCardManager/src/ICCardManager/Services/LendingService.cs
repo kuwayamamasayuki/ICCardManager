@@ -680,7 +680,7 @@ namespace ICCardManager.Services
                     {
                         CardIdm = cardIdm,
                         Date = charge.UseDate ?? date,
-                        Summary = SummaryGenerator.GetChargeSummary(),
+                        Summary = SummaryGenerator.GetChargeSummary(_settingsRepository.GetAppSettings().DepartmentType),
                         Income = income,
                         Expense = 0,
                         Balance = balance,

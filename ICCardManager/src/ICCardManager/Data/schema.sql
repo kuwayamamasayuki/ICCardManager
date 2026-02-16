@@ -129,3 +129,4 @@ CREATE INDEX IF NOT EXISTS idx_merge_history_target ON ledger_merge_history(targ
 -- ============================================
 INSERT OR IGNORE INTO settings (key, value) VALUES ('warning_balance', '10000');
 INSERT OR IGNORE INTO settings (key, value) VALUES ('font_size', 'medium');
+INSERT OR IGNORE INTO settings (key, value) VALUES ('department_type', 'mayor_office');

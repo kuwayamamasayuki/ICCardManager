@@ -4,6 +4,7 @@ using System.Linq;
 using System.Threading.Tasks;
 using System.IO;
 using System.Reflection;
+using ICCardManager.Models;
 
 namespace ICCardManager.Services
 {
@@ -17,14 +18,26 @@ namespace ICCardManager.Services
     public static class TemplateResolver
     {
         /// <summary>
-        /// 物品出納簿テンプレートの相対パス
+        /// 部署種別に応じた物品出納簿テンプレートの相対パスを取得
         /// </summary>
-        private const string TemplateRelativePath = "Resources/Templates/物品出納簿テンプレート.xlsx";
+        private static string GetTemplateRelativePath(DepartmentType departmentType)
+        {
+            var fileName = departmentType == DepartmentType.EnterpriseAccount
+                ? "物品出納簿テンプレート（企業会計部局）.xlsx"
+                : "物品出納簿テンプレート（市長事務部局）.xlsx";
+            return $"Resources/Templates/{fileName}";
+        }
 
         /// <summary>
-        /// 埋め込みリソース名
+        /// 部署種別に応じた埋め込みリソース名を取得
         /// </summary>
-        private const string EmbeddedResourceName = "ICCardManager.Resources.Templates.物品出納簿テンプレート.xlsx";
+        private static string GetEmbeddedResourceName(DepartmentType departmentType)
+        {
+            var fileName = departmentType == DepartmentType.EnterpriseAccount
+                ? "物品出納簿テンプレート（企業会計部局）.xlsx"
+                : "物品出納簿テンプレート（市長事務部局）.xlsx";
+            return $"ICCardManager.Resources.Templates.{fileName}";
+        }
 
         /// <summary>
         /// 一時ファイルのプレフィックス
@@ -32,16 +45,28 @@ namespace ICCardManager.Services
         private const string TempFilePrefix = "ICCardManager_Template_";
 
         /// <summary>
-        /// 物品出納簿テンプレートのパスを解決
+        /// 物品出納簿テンプレートのパスを解決（市長事務部局デフォルト）
         /// </summary>
         /// <returns>テンプレートファイルのパス</returns>
         /// <exception cref="TemplateNotFoundException">テンプレートが見つからない場合</exception>
         public static string ResolveTemplatePath()
         {
+            return ResolveTemplatePath(DepartmentType.MayorOffice);
+        }
+
+        /// <summary>
+        /// 部署種別に応じた物品出納簿テンプレートのパスを解決
+        /// </summary>
+        /// <param name="departmentType">部署種別</param>
+        /// <returns>テンプレートファイルのパス</returns>
+        /// <exception cref="TemplateNotFoundException">テンプレートが見つからない場合</exception>
+        public static string ResolveTemplatePath(DepartmentType departmentType)
+        {
+            var templateRelativePath = GetTemplateRelativePath(departmentType);
             var searchedPaths = new List<string>();
 
             // 1. AppContext.BaseDirectory からの相対パス（推奨）
-            var baseDirPath = Path.Combine(AppContext.BaseDirectory, TemplateRelativePath);
+            var baseDirPath = Path.Combine(AppContext.BaseDirectory, templateRelativePath);
             searchedPaths.Add(baseDirPath);
             if (File.Exists(baseDirPath))
             {
@@ -49,7 +74,7 @@ namespace ICCardManager.Services
             }
 
             // 2. AppDomain.CurrentDomain.BaseDirectory からの相対パス
-            var domainBasePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, TemplateRelativePath);
+            var domainBasePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, templateRelativePath);
             if (domainBasePath != baseDirPath)
             {
                 searchedPaths.Add(domainBasePath);
@@ -70,7 +95,7 @@ namespace ICCardManager.Services
                 var assemblyDir = Path.GetDirectoryName(assemblyLocation);
                 if (!string.IsNullOrEmpty(assemblyDir))
                 {
-                    var assemblyPath = Path.Combine(assemblyDir, TemplateRelativePath);
+                    var assemblyPath = Path.Combine(assemblyDir, templateRelativePath);
                     if (assemblyPath != baseDirPath && assemblyPath != domainBasePath)
                     {
                         searchedPaths.Add(assemblyPath);
@@ -90,7 +115,7 @@ namespace ICCardManager.Services
                 var processDir = Path.GetDirectoryName(processPath);
                 if (!string.IsNullOrEmpty(processDir))
                 {
-                    var processBasePath = Path.Combine(processDir, TemplateRelativePath);
+                    var processBasePath = Path.Combine(processDir, templateRelativePath);
                     if (!searchedPaths.Contains(processBasePath))
                     {
                         searchedPaths.Add(processBasePath);
@@ -103,7 +128,7 @@ namespace ICCardManager.Services
             }
 
             // 5. 埋め込みリソースから一時ファイルに展開
-            var tempPath = ExtractEmbeddedTemplate();
+            var tempPath = ExtractEmbeddedTemplate(departmentType);
             if (tempPath != null)
             {
                 return tempPath;
@@ -119,12 +144,14 @@ namespace ICCardManager.Services
         /// <summary>
         /// 埋め込みリソースからテンプレートを一時ファイルに展開
         /// </summary>
+        /// <param name="departmentType">部署種別</param>
         /// <returns>一時ファイルのパス。展開に失敗した場合はnull</returns>
-        private static string ExtractEmbeddedTemplate()
+        private static string ExtractEmbeddedTemplate(DepartmentType departmentType = DepartmentType.MayorOffice)
         {
             var assembly = Assembly.GetExecutingAssembly();
+            var embeddedResourceName = GetEmbeddedResourceName(departmentType);
 
-            using var stream = assembly.GetManifestResourceStream(EmbeddedResourceName);
+            using var stream = assembly.GetManifestResourceStream(embeddedResourceName);
             if (stream == null)
             {
                 return null;
@@ -143,14 +170,24 @@ namespace ICCardManager.Services
         }
 
         /// <summary>
-        /// テンプレートファイルが存在するかチェック
+        /// テンプレートファイルが存在するかチェック（市長事務部局デフォルト）
         /// </summary>
         /// <returns>存在する場合true</returns>
         public static bool TemplateExists()
         {
+            return TemplateExists(DepartmentType.MayorOffice);
+        }
+
+        /// <summary>
+        /// 部署種別に応じたテンプレートファイルが存在するかチェック
+        /// </summary>
+        /// <param name="departmentType">部署種別</param>
+        /// <returns>存在する場合true</returns>
+        public static bool TemplateExists(DepartmentType departmentType)
+        {
             try
             {
-                ResolveTemplatePath();
+                ResolveTemplatePath(departmentType);
                 return true;
             }
             catch (TemplateNotFoundException)
