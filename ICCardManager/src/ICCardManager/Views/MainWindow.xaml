@@ -337,7 +337,9 @@
                                        PlacementTarget="{Binding ElementName=HistoryOtherMonthButton}"
                                        Placement="Bottom"
                                        StaysOpen="False"
-                                       AllowsTransparency="True">
+                                       AllowsTransparency="True"
+                                       AutomationProperties.Name="月選択ポップアップ"
+                                       AutomationProperties.HelpText="年と月を選んで「適用」を押すと、その月の履歴が表示されます">
                                     <Border Background="White"
                                             BorderBrush="#CCCCCC"
                                             BorderThickness="1"
@@ -353,24 +355,28 @@
                                                 <ComboBox ItemsSource="{Binding HistoryAvailableYears}"
                                                           SelectedItem="{Binding HistorySelectedYear}"
                                                           Width="80"
-                                                          Padding="8"/>
+                                                          Padding="8"
+                                                          AutomationProperties.Name="年の選択"/>
                                                 <TextBlock Text="年" VerticalAlignment="Center" Margin="5,0,15,0"/>
                                                 <ComboBox ItemsSource="{Binding HistoryAvailableMonths}"
                                                           SelectedItem="{Binding HistorySelectedMonth}"
                                                           Width="60"
-                                                          Padding="8"/>
+                                                          Padding="8"
+                                                          AutomationProperties.Name="月の選択"/>
                                                 <TextBlock Text="月" VerticalAlignment="Center" Margin="5,0,0,0"/>
                                             </StackPanel>
                                             <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
                                                 <Button Content="キャンセル"
                                                         Command="{Binding HistoryCloseMonthSelectorCommand}"
                                                         Padding="10,5"
-                                                        Margin="0,0,10,0"/>
+                                                        Margin="0,0,10,0"
+                                                        AutomationProperties.Name="月選択をキャンセル"/>
                                                 <Button Content="適用"
                                                         Command="{Binding HistoryApplySelectedMonthCommand}"
                                                         Padding="15,5"
                                                         Background="#2196F3"
-                                                        Foreground="White"/>
+                                                        Foreground="White"
+                                                        AutomationProperties.Name="選択した月を適用"/>
                                             </StackPanel>
                                         </StackPanel>
                                     </Border>
