@@ -459,6 +459,8 @@ namespace ICCardManager
             var titleFontSize = Math.Round(baseFontSize * 1.6);      // タイトル用（約1.6倍）
             var statusFontSize = Math.Round(baseFontSize * 2.0);     // ステータスメッセージ用（約2倍）
             var iconFontSize = Math.Round(baseFontSize * 5.0);       // アイコン用（約5倍）
+            var dialogIconFontSize = Math.Round(baseFontSize * 2.3); // ダイアログアイコン用（約2.3倍）Issue #719
+            var dialogLargeIconFontSize = Math.Round(baseFontSize * 3.4); // ダイアログ大アイコン用（約3.4倍）Issue #719
 
             // Issue #542: サイドバー幅をフォントサイズに応じて調整
             // 基準: Medium (14) で 350px、差分 × 5 で調整
@@ -475,6 +477,8 @@ namespace ICCardManager
             resources["TitleFontSize"] = titleFontSize;
             resources["StatusFontSize"] = statusFontSize;
             resources["IconFontSize"] = iconFontSize;
+            resources["DialogIconFontSize"] = dialogIconFontSize;
+            resources["DialogLargeIconFontSize"] = dialogLargeIconFontSize;
             resources["SidebarWidth"] = sidebarWidth;
             resources["WindowMinWidth"] = windowMinWidth;
         }

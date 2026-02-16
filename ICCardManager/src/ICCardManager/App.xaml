@@ -22,6 +22,10 @@
             <sys:Double x:Key="IconFontSize">70</sys:Double>
             <!-- StatusFontSize: ステータスメッセージ用（BaseFontSizeの約2倍） -->
             <sys:Double x:Key="StatusFontSize">28</sys:Double>
+            <!-- DialogIconFontSize: ダイアログ内アイコン用（BaseFontSizeの約2.3倍）Issue #719 -->
+            <sys:Double x:Key="DialogIconFontSize">32</sys:Double>
+            <!-- DialogLargeIconFontSize: ダイアログ内大アイコン用（BaseFontSizeの約3.4倍）Issue #719 -->
+            <sys:Double x:Key="DialogLargeIconFontSize">48</sys:Double>
 
             <!-- Issue #542: サイドバー幅（フォントサイズに応じて動的に変更） -->
             <sys:Double x:Key="SidebarWidth">350</sys:Double>

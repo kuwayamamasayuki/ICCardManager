@@ -135,7 +135,7 @@
                         AutomationProperties.Name="使い方ガイド">
                     <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" MaxWidth="600">
                         <TextBlock Text="🚃"
-                                   FontSize="64"
+                                   FontSize="{DynamicResource IconFontSize}"
                                    HorizontalAlignment="Center"
                                    Margin="0,0,0,20"/>
                         <TextBlock Text="交通系ICカード管理システム"

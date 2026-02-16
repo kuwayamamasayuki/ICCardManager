@@ -337,7 +337,7 @@
                                                                     <!-- クリックヒント -->
                                                                     <TextBlock x:Name="HintText"
                                                                                Text="クリックして分割"
-                                                                               FontSize="10"
+                                                                               FontSize="{DynamicResource SmallFontSize}"
                                                                                Foreground="#757575"
                                                                                HorizontalAlignment="Center"
                                                                                VerticalAlignment="Center"

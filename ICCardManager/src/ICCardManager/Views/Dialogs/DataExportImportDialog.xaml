@@ -248,7 +248,7 @@
                                         <TextBlock Text=" " />
                                         <TextBlock Text="{Binding CardNumber}"/>
                                         <TextBlock Text=" (" Foreground="Gray"/>
-                                        <TextBlock Text="{Binding CardIdm}" Foreground="Gray" FontSize="11"/>
+                                        <TextBlock Text="{Binding CardIdm}" Foreground="Gray" FontSize="{DynamicResource SmallFontSize}"/>
                                         <TextBlock Text=")" Foreground="Gray"/>
                                     </StackPanel>
                                 </DataTemplate>

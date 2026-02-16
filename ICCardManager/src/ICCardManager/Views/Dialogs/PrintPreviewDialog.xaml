@@ -60,7 +60,7 @@
                             Command="{Binding ZoomOutCommand}"
                             Width="30"
                             Height="28"
-                            FontSize="16"
+                            FontSize="{DynamicResource BaseFontSize}"
                             FontWeight="Bold"
                             ToolTip="縮小"
                             AutomationProperties.Name="ズーム縮小"/>
@@ -81,7 +81,7 @@
                             Command="{Binding ZoomInCommand}"
                             Width="30"
                             Height="28"
-                            FontSize="16"
+                            FontSize="{DynamicResource BaseFontSize}"
                             FontWeight="Bold"
                             ToolTip="拡大"
                             AutomationProperties.Name="ズーム拡大"/>
@@ -103,14 +103,14 @@
                             Click="FirstPageButton_Click"
                             Width="30"
                             Height="28"
-                            FontSize="12"
+                            FontSize="{DynamicResource SmallFontSize}"
                             ToolTip="最初のページ"
                             AutomationProperties.Name="最初のページ"/>
                     <Button Content="◀"
                             Click="PreviousPageButton_Click"
                             Width="30"
                             Height="28"
-                            FontSize="12"
+                            FontSize="{DynamicResource SmallFontSize}"
                             Margin="2,0"
                             ToolTip="前のページ"
                             AutomationProperties.Name="前のページ"/>
@@ -128,7 +128,7 @@
                             Click="NextPageButton_Click"
                             Width="30"
                             Height="28"
-                            FontSize="12"
+                            FontSize="{DynamicResource SmallFontSize}"
                             Margin="2,0"
                             ToolTip="次のページ"
                             AutomationProperties.Name="次のページ"/>
@@ -136,7 +136,7 @@
                             Click="LastPageButton_Click"
                             Width="30"
                             Height="28"
-                            FontSize="12"
+                            FontSize="{DynamicResource SmallFontSize}"
                             ToolTip="最後のページ"
                             AutomationProperties.Name="最後のページ"/>
                 </StackPanel>
