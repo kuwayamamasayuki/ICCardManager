@@ -64,9 +64,9 @@ namespace ICCardManager.Services
         }
 
         /// <inheritdoc/>
-        public Views.Dialogs.CardRegistrationModeResult? ShowCardRegistrationModeDialog()
+        public Views.Dialogs.CardRegistrationModeResult? ShowCardRegistrationModeDialog(int? currentCardBalance = null)
         {
-            var dialog = new Views.Dialogs.CardRegistrationModeDialog();
+            var dialog = new Views.Dialogs.CardRegistrationModeDialog(currentCardBalance);
             dialog.Owner = Application.Current.MainWindow;
 
             var result = dialog.ShowDialog();

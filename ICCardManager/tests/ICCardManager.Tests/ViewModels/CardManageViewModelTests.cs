@@ -78,7 +78,7 @@ public class CardManageViewModelTests
         _dialogServiceMock.Setup(d => d.ShowWarningConfirmation(It.IsAny<string>(), It.IsAny<string>())).Returns(true);
 
         // カード登録モードダイアログはデフォルトで「新規購入」を返す（Issue #510）
-        _dialogServiceMock.Setup(d => d.ShowCardRegistrationModeDialog())
+        _dialogServiceMock.Setup(d => d.ShowCardRegistrationModeDialog(It.IsAny<int?>()))
             .Returns(new ICCardManager.Views.Dialogs.CardRegistrationModeResult
             {
                 IsNewPurchase = true,
@@ -932,6 +932,133 @@ public class CardManageViewModelTests
         // Assert
         // 事前読み取り履歴がないため、カードリーダーから直接読み取りを試みること
         _cardReaderMock.Verify(r => r.ReadHistoryAsync(idm), Times.Once);
+    }
+
+    #endregion
+
+    #region Issue #756: 繰越額のユーザー入力
+
+    /// <summary>
+    /// CarryoverBalanceが指定されている場合、その値が繰越レコードの残高として使用されること
+    /// </summary>
+    [Fact]
+    public async Task SaveAsync_CarryoverMode_WithCarryoverBalance_ShouldUseUserSpecifiedBalance()
+    {
+        // Arrange
+        var idm = "0102030405060708";
+        var preReadBalance = 4780; // カードの現在残高
+        var userSpecifiedBalance = 5000; // ユーザーが入力した月初め残高
+
+        _cardRepositoryMock.Setup(r => r.GetByIdmAsync(idm, true)).ReturnsAsync((IcCard?)null);
+        _cardRepositoryMock.Setup(r => r.InsertAsync(It.IsAny<IcCard>())).ReturnsAsync(true);
+
+        // 繰越モード + ユーザー指定の繰越額
+        _dialogServiceMock.Setup(d => d.ShowCardRegistrationModeDialog(It.IsAny<int?>()))
+            .Returns(new ICCardManager.Views.Dialogs.CardRegistrationModeResult
+            {
+                IsNewPurchase = false,
+                CarryoverMonth = 5,
+                StartingPageNumber = 1,
+                CarryoverBalance = userSpecifiedBalance
+            });
+
+        _viewModel.SetPreReadBalance(preReadBalance);
+
+        _viewModel.StartNewCard();
+        _viewModel.EditCardIdm = idm;
+        _viewModel.EditCardType = "はやかけん";
+        _viewModel.EditCardNumber = "H-001";
+
+        // Act
+        await _viewModel.SaveAsync();
+
+        // Assert: ユーザー指定の繰越額（5,000円）が使用され、カード読み取り残高（4,780円）ではないこと
+        _ledgerRepositoryMock.Verify(r => r.InsertAsync(It.Is<Ledger>(l =>
+            l.Income == userSpecifiedBalance &&
+            l.Balance == userSpecifiedBalance &&
+            l.Summary == "5月から繰越"
+        )), Times.Once);
+    }
+
+    /// <summary>
+    /// CarryoverBalanceがnullの場合、事前読み取り残高にフォールバックすること
+    /// </summary>
+    [Fact]
+    public async Task SaveAsync_CarryoverMode_WithoutCarryoverBalance_ShouldFallbackToPreReadBalance()
+    {
+        // Arrange
+        var idm = "0102030405060708";
+        var preReadBalance = 4780;
+
+        _cardRepositoryMock.Setup(r => r.GetByIdmAsync(idm, true)).ReturnsAsync((IcCard?)null);
+        _cardRepositoryMock.Setup(r => r.InsertAsync(It.IsAny<IcCard>())).ReturnsAsync(true);
+
+        // 繰越モード、CarryoverBalance は null（未指定）
+        _dialogServiceMock.Setup(d => d.ShowCardRegistrationModeDialog(It.IsAny<int?>()))
+            .Returns(new ICCardManager.Views.Dialogs.CardRegistrationModeResult
+            {
+                IsNewPurchase = false,
+                CarryoverMonth = 5,
+                StartingPageNumber = 1,
+                CarryoverBalance = null
+            });
+
+        _viewModel.SetPreReadBalance(preReadBalance);
+
+        _viewModel.StartNewCard();
+        _viewModel.EditCardIdm = idm;
+        _viewModel.EditCardType = "はやかけん";
+        _viewModel.EditCardNumber = "H-001";
+
+        // Act
+        await _viewModel.SaveAsync();
+
+        // Assert: CarryoverBalanceがnullなので、事前読み取り残高（4,780円）が使用されること
+        _ledgerRepositoryMock.Verify(r => r.InsertAsync(It.Is<Ledger>(l =>
+            l.Income == preReadBalance &&
+            l.Balance == preReadBalance &&
+            l.Summary == "5月から繰越"
+        )), Times.Once);
+    }
+
+    /// <summary>
+    /// ShowCardRegistrationModeDialogにカードの現在残高が渡されること
+    /// </summary>
+    [Fact]
+    public async Task SaveAsync_NewCard_ShouldPassPreReadBalanceToDialog()
+    {
+        // Arrange
+        var idm = "0102030405060708";
+        var preReadBalance = 3500;
+
+        _cardRepositoryMock.Setup(r => r.GetByIdmAsync(idm, true)).ReturnsAsync((IcCard?)null);
+        _cardRepositoryMock.Setup(r => r.InsertAsync(It.IsAny<IcCard>())).ReturnsAsync(true);
+
+        _viewModel.SetPreReadBalance(preReadBalance);
+
+        _viewModel.StartNewCard();
+        _viewModel.EditCardIdm = idm;
+        _viewModel.EditCardType = "はやかけん";
+        _viewModel.EditCardNumber = "H-001";
+
+        // Act
+        await _viewModel.SaveAsync();
+
+        // Assert: ダイアログにカードの現在残高が渡されていること
+        _dialogServiceMock.Verify(d => d.ShowCardRegistrationModeDialog(preReadBalance), Times.Once);
+    }
+
+    /// <summary>
+    /// CardRegistrationModeResultのCarryoverBalanceプロパティのデフォルト値がnullであること
+    /// </summary>
+    [Fact]
+    public void CardRegistrationModeResult_CarryoverBalance_DefaultShouldBeNull()
+    {
+        // Arrange & Act
+        var result = new ICCardManager.Views.Dialogs.CardRegistrationModeResult();
+
+        // Assert
+        result.CarryoverBalance.Should().BeNull();
     }
 
     #endregion
