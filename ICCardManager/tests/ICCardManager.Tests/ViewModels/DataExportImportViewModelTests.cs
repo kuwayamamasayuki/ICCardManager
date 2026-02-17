@@ -296,6 +296,119 @@ public class DataExportImportViewModelTests : IDisposable
             Times.Once);
     }
 
+    #region HasImported フラグ（Issue #744）
+
+    /// <summary>
+    /// 初期状態でHasImportedがfalseであること
+    /// </summary>
+    [Fact]
+    public void HasImported_Initially_ShouldBeFalse()
+    {
+        _viewModel.HasImported.Should().BeFalse();
+    }
+
+    /// <summary>
+    /// インポート成功時にHasImportedがtrueになること
+    /// </summary>
+    [Fact]
+    public async Task ExecuteImportAsync_OnSuccess_ShouldSetHasImportedTrue()
+    {
+        // Arrange
+        SetupValidPreview();
+        _importServiceMock
+            .Setup(s => s.ImportCardsAsync(It.IsAny<string>(), It.IsAny<bool>()))
+            .ReturnsAsync(new CsvImportResult
+            {
+                Success = true,
+                ImportedCount = 3
+            });
+
+        // Act
+        await _viewModel.ExecuteImportAsync();
+
+        // Assert
+        _viewModel.HasImported.Should().BeTrue("インポートが成功し登録件数が1件以上");
+    }
+
+    /// <summary>
+    /// インポート件数0の場合はHasImportedがfalseのままであること
+    /// </summary>
+    [Fact]
+    public async Task ExecuteImportAsync_ZeroImported_ShouldKeepHasImportedFalse()
+    {
+        // Arrange
+        SetupValidPreview();
+        _importServiceMock
+            .Setup(s => s.ImportCardsAsync(It.IsAny<string>(), It.IsAny<bool>()))
+            .ReturnsAsync(new CsvImportResult
+            {
+                Success = true,
+                ImportedCount = 0,
+                SkippedCount = 3
+            });
+
+        // Act
+        await _viewModel.ExecuteImportAsync();
+
+        // Assert
+        _viewModel.HasImported.Should().BeFalse("登録件数が0件のため");
+    }
+
+    /// <summary>
+    /// 一部エラーでも登録件数が1件以上ならHasImportedがtrueになること
+    /// </summary>
+    [Fact]
+    public async Task ExecuteImportAsync_PartialSuccess_ShouldSetHasImportedTrue()
+    {
+        // Arrange
+        SetupValidPreview();
+        _importServiceMock
+            .Setup(s => s.ImportCardsAsync(It.IsAny<string>(), It.IsAny<bool>()))
+            .ReturnsAsync(new CsvImportResult
+            {
+                Success = false,
+                ErrorMessage = null,
+                ImportedCount = 2,
+                ErrorCount = 1,
+                Errors = new List<CsvImportError>
+                {
+                    new CsvImportError { LineNumber = 3, Message = "エラー" }
+                }
+            });
+
+        // Act
+        await _viewModel.ExecuteImportAsync();
+
+        // Assert
+        _viewModel.HasImported.Should().BeTrue("一部エラーでも登録件数が1件以上");
+    }
+
+    /// <summary>
+    /// インポートエラー（全件失敗）でHasImportedがfalseのままであること
+    /// </summary>
+    [Fact]
+    public async Task ExecuteImportAsync_OnError_ShouldKeepHasImportedFalse()
+    {
+        // Arrange
+        SetupValidPreview();
+        _importServiceMock
+            .Setup(s => s.ImportCardsAsync(It.IsAny<string>(), It.IsAny<bool>()))
+            .ReturnsAsync(new CsvImportResult
+            {
+                Success = false,
+                ErrorMessage = "ファイル形式が不正です",
+                ImportedCount = 0
+            });
+
+        // Act
+        await _viewModel.ExecuteImportAsync();
+
+        // Assert
+        _viewModel.HasImported.Should().BeFalse("全件失敗のため");
+    }
+
+    #endregion
+
     /// <summary>
     /// テスト用にプレビュー状態をセットアップするヘルパー
     /// </summary>

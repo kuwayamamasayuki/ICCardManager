@@ -182,6 +182,11 @@ public partial class DataExportImportViewModel : ViewModelBase
     private bool _isWaitingForCardTouch;
 
     /// <summary>
+    /// インポートが実行されたか（Issue #744: ダイアログ閉じた後のリフレッシュ判定用）
+    /// </summary>
+    public bool HasImported { get; private set; }
+
+    /// <summary>
     /// エクスポート用データタイプの選択肢
     /// </summary>
     public DataType[] ExportDataTypes { get; } = { DataType.Cards, DataType.Staff, DataType.Ledgers };
@@ -512,6 +517,12 @@ public partial class DataExportImportViewModel : ViewModelBase
 
                 LastImportedFile = ImportPreviewFile;
 
+                // Issue #744: インポート実行済みフラグを設定（ダイアログ終了後のリフレッシュ用）
+                if (result.ImportedCount > 0)
+                {
+                    HasImported = true;
+                }
+
                 if (result.Success)
                 {
                     var message = $"インポート完了: {result.ImportedCount}件を登録しました";
@@ -633,6 +644,12 @@ public partial class DataExportImportViewModel : ViewModelBase
                 }
 
                 LastImportedFile = dialog.FileName;
+
+                // Issue #744: インポート実行済みフラグを設定（ダイアログ終了後のリフレッシュ用）
+                if (result.ImportedCount > 0)
+                {
+                    HasImported = true;
+                }
 
                 if (result.Success)
                 {
