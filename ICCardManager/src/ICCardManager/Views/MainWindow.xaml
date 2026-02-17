@@ -469,13 +469,16 @@
                                 </DataGridTemplateColumn>
                             </DataGrid.Columns>
 
-                            <!-- 貸出中レコードのスタイル -->
+                            <!-- 貸出中レコード・チェック済みレコードのスタイル -->
                             <DataGrid.RowStyle>
                                 <Style TargetType="DataGridRow">
                                     <Style.Triggers>
                                         <DataTrigger Binding="{Binding IsLentRecord}" Value="True">
                                             <Setter Property="Background" Value="{DynamicResource LendingBackgroundBrush}"/>
                                             <Setter Property="FontStyle" Value="Italic"/>
+                                        </DataTrigger>
+                                        <DataTrigger Binding="{Binding IsChecked}" Value="True">
+                                            <Setter Property="Background" Value="{DynamicResource CheckedRowBackgroundBrush}"/>
                                         </DataTrigger>
                                     </Style.Triggers>
                                 </Style>

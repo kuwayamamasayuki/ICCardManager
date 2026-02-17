@@ -44,6 +44,9 @@
     <SolidColorBrush x:Key="PrimaryDarkBrush" Color="#0D47A1"/>
     <SolidColorBrush x:Key="PrimaryLightBrush" Color="#BBDEFB"/>
 
+    <!-- 統合選択状態（チェック済み行） -->
+    <SolidColorBrush x:Key="CheckedRowBackgroundBrush" Color="#BBDEFB"/>
+
     <!-- ===== アプリケーション共通カラー（Issue #721） ===== -->
 
     <!-- ヘッダー・アクセントカラー -->
