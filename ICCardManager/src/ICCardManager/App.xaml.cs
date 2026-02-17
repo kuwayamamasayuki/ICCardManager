@@ -341,8 +341,8 @@ namespace ICCardManager
             Task.Run(() => RegisterTestDataAsync()).GetAwaiter().GetResult();
     #endif
 
-            // 初回起動時の部署選択ダイアログ（Issue #659）
-            ShowDepartmentSelectionIfNeeded();
+            // インストーラーからの部署設定を適用（Issue #742）
+            ApplyDepartmentConfigFromInstaller();
 
             // 保存済み設定を適用
             ApplySavedSettings();
@@ -352,60 +352,55 @@ namespace ICCardManager
         }
 
         /// <summary>
-        /// 初回起動時に部署選択ダイアログを表示（Issue #659）
+        /// インストーラーが書き出した部署設定ファイルを読み取り、DBに適用する（Issue #742）
         /// </summary>
         /// <remarks>
-        /// department_type 設定がDBに存在しない場合（初回起動時）にダイアログを表示し、
-        /// ユーザーが選択した部署種別を保存する。
+        /// インストーラーは %PROGRAMDATA%\ICCardManager\department_config.txt に
+        /// 選択された部署種別（"mayor_office" or "enterprise_account"）を書き出す。
+        /// アプリ初回起動時にこのファイルを読み取り、DB設定を上書きしてからファイルを削除する。
+        /// ファイルが存在しない場合（手動インストール等）はschema.sqlのデフォルト値が使用される。
         /// </remarks>
-        private void ShowDepartmentSelectionIfNeeded()
+        private void ApplyDepartmentConfigFromInstaller()
         {
             try
             {
+                var configPath = System.IO.Path.Combine(
+                    Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
+                    "ICCardManager", "department_config.txt");
+
+                if (!System.IO.File.Exists(configPath))
+                {
+                    return; // 設定ファイルなし（アップグレードまたは手動インストール）
+                }
+
+                var departmentValue = System.IO.File.ReadAllText(configPath).Trim();
+
+                // ファイルを削除（次回起動時に再適用しない）
+                try { System.IO.File.Delete(configPath); }
+                catch (Exception ex) { _logger?.LogWarning(ex, "部署設定ファイルの削除に失敗"); }
+
+                if (string.IsNullOrEmpty(departmentValue))
+                {
+                    return;
+                }
+
                 var settingsRepository = ServiceProvider.GetRequiredService<ISettingsRepository>();
-                // department_type キーが既に存在するか確認（同期版）
-                var existingValue = Task.Run(() => settingsRepository.GetAsync(SettingsRepository.KeyDepartmentType)).GetAwaiter().GetResult();
-                if (!string.IsNullOrEmpty(existingValue))
-                {
-                    return; // 既に設定済み
-                }
-
-                // 初回起動: 部署選択ダイアログを表示
-                // メインウィンドウ表示前にShowDialog()するため、ShutdownModeを一時的に変更
-                // （デフォルトのOnMainWindowCloseだとダイアログ閉じ時にアプリが終了してしまう）
-                var previousShutdownMode = ShutdownMode;
-                ShutdownMode = ShutdownMode.OnExplicitShutdown;
-                var dialog = new DepartmentSelectionDialog();
-                var result = dialog.ShowDialog();
-                ShutdownMode = previousShutdownMode;
-
-                if (result == true)
-                {
-                    var departmentType = dialog.SelectedDepartmentType;
-                    Task.Run(() => settingsRepository.SetAsync(
-                        SettingsRepository.KeyDepartmentType,
-                        SettingsRepository.DepartmentTypeToString(departmentType)
-                    )).GetAwaiter().GetResult();
-
-                    _logger?.LogInformation("初回起動: 部署種別を設定 DepartmentType={DepartmentType}", departmentType);
-                }
-                else
-                {
-                    // ダイアログが閉じられた場合はデフォルト（市長事務部局）を設定
-                    Task.Run(() => settingsRepository.SetAsync(
-                        SettingsRepository.KeyDepartmentType,
-                        SettingsRepository.DepartmentTypeToString(DepartmentType.MayorOffice)
-                    )).GetAwaiter().GetResult();
-                }
+                Task.Run(() => settingsRepository.SetAsync(
+                    SettingsRepository.KeyDepartmentType,
+                    departmentValue
+                )).GetAwaiter().GetResult();
 
                 // キャッシュを無効化して再取得を強制
                 var cacheService = ServiceProvider.GetRequiredService<ICacheService>();
                 cacheService.Invalidate(CacheKeys.AppSettings);
+
+                var departmentType = SettingsRepository.ParseDepartmentType(departmentValue);
+                _logger?.LogInformation("インストーラー設定: 部署種別を適用 DepartmentType={DepartmentType}", departmentType);
             }
             catch (Exception ex)
             {
-                _logger?.LogWarning(ex, "部署選択ダイアログでエラー");
-                // エラーが発生してもアプリは起動させる（デフォルト値が使用される）
+                _logger?.LogWarning(ex, "インストーラーからの部署設定の適用でエラー");
+                // エラーが発生してもアプリは起動させる（schema.sqlのデフォルト値が使用される）
             }
         }
 
