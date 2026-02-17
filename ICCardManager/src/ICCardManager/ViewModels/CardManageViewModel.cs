@@ -903,7 +903,7 @@ namespace ICCardManager.ViewModels
         /// <returns>選択結果。キャンセル時はnull</returns>
         private Views.Dialogs.CardRegistrationModeResult? ShowRegistrationModeDialog()
         {
-            return _dialogService.ShowCardRegistrationModeDialog();
+            return _dialogService.ShowCardRegistrationModeDialog(_preReadBalance);
         }
 
         /// <summary>
@@ -922,8 +922,9 @@ namespace ICCardManager.ViewModels
             try
             {
                 // Issue #596: overrideBalanceが指定された場合はそれを使用
-                // Issue #381対応: 事前に読み取った残高を優先的に使用
-                int? balance = overrideBalance ?? _preReadBalance;
+                // Issue #756: ユーザー指定の繰越額を次に優先
+                // Issue #381対応: 事前に読み取った残高を最後に使用
+                int? balance = overrideBalance ?? modeResult.CarryoverBalance ?? _preReadBalance;
 
                 // 事前読み取り残高がない場合のみ、カードから読み取りを試みる
                 // （手動で新規登録モードを開始した場合のフォールバック）

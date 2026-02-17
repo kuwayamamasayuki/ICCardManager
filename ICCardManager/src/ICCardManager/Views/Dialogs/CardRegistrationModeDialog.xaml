@@ -118,6 +118,29 @@
                                  TextAlignment="Right"
                                  AutomationProperties.Name="開始ページ番号"/>
                     </StackPanel>
+
+                    <!-- Issue #756: 繰越額入力 -->
+                    <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
+                        <TextBlock Text="繰越額:"
+                                   FontSize="{DynamicResource BaseFontSize}"
+                                   VerticalAlignment="Center"
+                                   Margin="0,0,8,0"/>
+                        <TextBox x:Name="CarryoverBalanceTextBox"
+                                 Width="120"
+                                 Padding="10,6"
+                                 FontSize="{DynamicResource BaseFontSize}"
+                                 TextAlignment="Right"
+                                 AutomationProperties.Name="繰越額"
+                                 ToolTip="紙の出納簿の前月末残高を入力してください"/>
+                        <TextBlock Text="円"
+                                   FontSize="{DynamicResource BaseFontSize}"
+                                   VerticalAlignment="Center"
+                                   Margin="5,0,0,0"/>
+                    </StackPanel>
+                    <TextBlock Text="※ 紙の出納簿の前月末残高を入力してください"
+                               FontSize="{DynamicResource SmallFontSize}"
+                               Foreground="#666"
+                               Margin="0,4,0,0"/>
                 </StackPanel>
             </StackPanel>
         </Border>

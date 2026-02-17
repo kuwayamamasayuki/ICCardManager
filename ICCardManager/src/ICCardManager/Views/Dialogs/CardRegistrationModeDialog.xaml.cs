@@ -28,6 +28,12 @@ namespace ICCardManager.Views.Dialogs
         /// 購入日（Issue #658）。新規購入モード時に指定可能。nullの場合は当日
         /// </summary>
         public DateTime? PurchaseDate { get; set; }
+
+        /// <summary>
+        /// 繰越額（Issue #756）。繰越モード時にユーザーが指定する月初め残高。
+        /// nullの場合はカード読み取り残高を使用。
+        /// </summary>
+        public int? CarryoverBalance { get; set; }
     }
 
     /// <summary>
@@ -63,17 +69,32 @@ namespace ICCardManager.Views.Dialogs
             new MonthItem(3, "3月")
         };
 
-        public CardRegistrationModeDialog()
+        /// <summary>
+        /// カードの現在残高（ダイアログ表示時に渡される参考値）
+        /// </summary>
+        private readonly int? _currentCardBalance;
+
+        public CardRegistrationModeDialog(int? currentCardBalance = null)
         {
+            _currentCardBalance = currentCardBalance;
             InitializeComponent();
             InitializeMonthComboBox();
             InitializePurchaseDatePicker();
+            InitializeCarryoverBalance();
         }
 
         private void InitializePurchaseDatePicker()
         {
             PurchaseDatePicker.SelectedDate = DateTime.Today;
             PurchaseDatePicker.DisplayDateEnd = DateTime.Today;
+        }
+
+        private void InitializeCarryoverBalance()
+        {
+            if (_currentCardBalance.HasValue)
+            {
+                CarryoverBalanceTextBox.Text = _currentCardBalance.Value.ToString();
+            }
         }
 
         private void InitializeMonthComboBox()
@@ -140,6 +161,23 @@ namespace ICCardManager.Views.Dialogs
                     return;
                 }
                 result.StartingPageNumber = startingPage;
+
+                // Issue #756: 繰越額のバリデーション
+                if (!string.IsNullOrWhiteSpace(CarryoverBalanceTextBox.Text))
+                {
+                    if (!int.TryParse(CarryoverBalanceTextBox.Text, out var carryoverBalance) || carryoverBalance < 0)
+                    {
+                        MessageBox.Show(
+                            "繰越額は0以上の整数を入力してください。",
+                            "入力エラー",
+                            MessageBoxButton.OK,
+                            MessageBoxImage.Warning);
+                        CarryoverBalanceTextBox.Focus();
+                        CarryoverBalanceTextBox.SelectAll();
+                        return;
+                    }
+                    result.CarryoverBalance = carryoverBalance;
+                }
             }
 
             Result = result;

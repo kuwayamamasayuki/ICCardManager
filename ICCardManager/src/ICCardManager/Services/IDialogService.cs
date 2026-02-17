@@ -52,7 +52,8 @@ namespace ICCardManager.Services
         /// <summary>
         /// カード登録モード選択ダイアログを表示（Issue #510）
         /// </summary>
+        /// <param name="currentCardBalance">カードの現在残高（繰越額のデフォルト値として使用）</param>
         /// <returns>選択結果。キャンセル時はnull</returns>
-        Views.Dialogs.CardRegistrationModeResult? ShowCardRegistrationModeDialog();
+        Views.Dialogs.CardRegistrationModeResult? ShowCardRegistrationModeDialog(int? currentCardBalance = null);
     }
 }
