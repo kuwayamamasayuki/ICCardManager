@@ -139,7 +139,7 @@ public class PrintServiceTests
 
         var carryoverRow = result.Rows.First();
         carryoverRow.Summary.Should().Be("5月より繰越");
-        carryoverRow.Income.Should().Be(4400); // 5月末残高
+        carryoverRow.Income.Should().BeNull(); // Issue #753: 月次繰越の受入金額は空欄
         carryoverRow.Balance.Should().Be(4400);
         carryoverRow.IsBold.Should().BeTrue();
     }
@@ -220,6 +220,51 @@ public class PrintServiceTests
         carryoverRow.Income.Should().Be(3000);
         carryoverRow.Balance.Should().Be(3000);
         carryoverRow.IsBold.Should().BeTrue();
+    }
+
+    #endregion
+
+    #region TC003b: 月次繰越の受入金額は空欄、前年度繰越のみ受入金額が表示されること（Issue #753）
+
+    /// <summary>
+    /// TC003b: 4月の前年度繰越はIncomeに値が設定され、
+    /// 4月以外の月次繰越はIncomeがnull（空欄）であること
+    /// </summary>
+    [Fact]
+    public async Task GetReportDataAsync_MonthlyCarryover_IncomeShouldBeNull()
+    {
+        // Arrange
+        SetupCard();
+
+        // 7月の前月データ（繰越用）
+        var julyLedgers = new List<Ledger>
+        {
+            CreateTestLedger(1, TestCardIdm, new DateTime(2024, 7, 15), "鉄道（博多～天神）", 0, 300, 2700, "田中太郎")
+        };
+        SetupMonthlyLedgers(TestCardIdm, 2024, 7, julyLedgers);
+
+        // 8月の履歴
+        var augLedgers = new List<Ledger>
+        {
+            CreateTestLedger(2, TestCardIdm, new DateTime(2024, 8, 10), "鉄道（天神～博多）", 0, 300, 2400, "鈴木花子")
+        };
+        SetupMonthlyLedgers(TestCardIdm, 2024, 8, augLedgers);
+
+        // 累計用
+        var yearlyLedgers = new List<Ledger>();
+        yearlyLedgers.AddRange(julyLedgers);
+        yearlyLedgers.AddRange(augLedgers);
+        SetupDateRangeLedgers(TestCardIdm, new DateTime(2024, 4, 1), new DateTime(2024, 8, 31), yearlyLedgers);
+
+        // Act
+        var result = await _printService.GetReportDataAsync(TestCardIdm, 2024, 8);
+
+        // Assert
+        result.Should().NotBeNull();
+        var carryoverRow = result.Rows.First();
+        carryoverRow.Summary.Should().Be("7月より繰越");
+        carryoverRow.Income.Should().BeNull("月次繰越の受入金額は空欄であるべき");
+        carryoverRow.Balance.Should().Be(2700, "残額には前月末残高が表示されるべき");
     }
 
     #endregion
