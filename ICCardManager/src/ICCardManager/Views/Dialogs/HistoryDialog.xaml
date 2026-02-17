@@ -112,7 +112,9 @@
                        PlacementTarget="{Binding ElementName=OtherMonthButton}"
                        Placement="Bottom"
                        StaysOpen="False"
-                       AllowsTransparency="True">
+                       AllowsTransparency="True"
+                       AutomationProperties.Name="月選択ポップアップ"
+                       AutomationProperties.HelpText="年と月を選んで「適用」を押すと、その月の履歴が表示されます">
                     <Border Background="White"
                             BorderBrush="{DynamicResource SubtleBorderBrush}"
                             BorderThickness="1"
@@ -130,14 +132,16 @@
                                 <ComboBox ItemsSource="{Binding AvailableYears}"
                                           SelectedItem="{Binding SelectedYear}"
                                           Width="80"
-                                          Padding="8"/>
+                                          Padding="8"
+                                          AutomationProperties.Name="年の選択"/>
                                 <TextBlock Text="年"
                                            VerticalAlignment="Center"
                                            Margin="5,0,15,0"/>
                                 <ComboBox ItemsSource="{Binding AvailableMonths}"
                                           SelectedItem="{Binding SelectedMonth}"
                                           Width="60"
-                                          Padding="8"/>
+                                          Padding="8"
+                                          AutomationProperties.Name="月の選択"/>
                                 <TextBlock Text="月"
                                            VerticalAlignment="Center"
                                            Margin="5,0,0,0"/>
@@ -146,12 +150,14 @@
                                 <Button Content="キャンセル"
                                         Command="{Binding CloseMonthSelectorCommand}"
                                         Padding="10,5"
-                                        Margin="0,0,10,0"/>
+                                        Margin="0,0,10,0"
+                                        AutomationProperties.Name="月選択をキャンセル"/>
                                 <Button Content="適用"
                                         Command="{Binding ApplySelectedMonthCommand}"
                                         Padding="15,5"
                                         Background="{DynamicResource HeaderBackgroundBrush}"
-                                        Foreground="{DynamicResource OnPrimaryBrush}"/>
+                                        Foreground="{DynamicResource OnPrimaryBrush}"
+                                        AutomationProperties.Name="選択した月を適用"/>
                             </StackPanel>
                         </StackPanel>
                     </Border>
