@@ -12,7 +12,7 @@
     必須画面（7枚）のみを取得します。
 
 .PARAMETER All
-    オプション画面も含むすべての画面（17枚）を取得します。
+    オプション画面も含むすべての画面（18枚）を取得します。
 
 .PARAMETER OutputDir
     出力先ディレクトリを指定します。デフォルトは docs/screenshots/ です。
@@ -264,6 +264,11 @@ $optionalScreens = @(
         Title = "帳票プレビュー画面"
         Instructions = "帳票作成画面で「プレビュー」ボタンをクリックし、プレビューが表示されたら"
         ForegroundOnly = $true
+    },
+    @{
+        Name = "report_excel.png"
+        Title = "物品出納簿（Excel出力例）"
+        Instructions = "帳票作成で出力したExcelファイルを開き、表示されたら（※手動でPrtScで撮影してください）"
     },
     @{
         Name = "installer_options.png"
