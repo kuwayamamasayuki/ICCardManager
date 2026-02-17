@@ -399,6 +399,13 @@
                                   AlternationCount="2"
                                   AutomationProperties.Name="利用履歴一覧"
                                   AutomationProperties.HelpText="チェックボックスで統合したい履歴を選択し、統合ボタンを押します">
+                            <!-- DataGrid組み込みの選択ハイライトを透明化（チェック済み行のスタイルと競合するため） -->
+                            <DataGrid.Resources>
+                                <SolidColorBrush x:Key="{x:Static SystemColors.HighlightBrushKey}" Color="Transparent"/>
+                                <SolidColorBrush x:Key="{x:Static SystemColors.InactiveSelectionHighlightBrushKey}" Color="Transparent"/>
+                                <SolidColorBrush x:Key="{x:Static SystemColors.HighlightTextBrushKey}" Color="Black"/>
+                                <SolidColorBrush x:Key="{x:Static SystemColors.InactiveSelectionHighlightTextBrushKey}" Color="Black"/>
+                            </DataGrid.Resources>
                             <DataGrid.Columns>
                                 <DataGridTemplateColumn Header="選択" Width="45">
                                     <DataGridTemplateColumn.CellTemplate>
