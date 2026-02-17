@@ -42,7 +42,7 @@
                            VerticalAlignment="Center"/>
                 <TextBlock Text="{Binding Cards.Count, StringFormat=' ({0}件)'}"
                            FontSize="{DynamicResource BaseFontSize}"
-                           Foreground="Gray"
+                           Foreground="{DynamicResource SecondaryTextBrush}"
                            VerticalAlignment="Center"
                            Margin="5,0,0,0"/>
             </StackPanel>
@@ -73,13 +73,13 @@
                                     <TextBlock.Style>
                                         <Style TargetType="TextBlock">
                                             <Setter Property="Text" Value="利用可"/>
-                                            <Setter Property="Foreground" Value="DarkGreen"/>
+                                            <Setter Property="Foreground" Value="{DynamicResource SuccessActionBrush}"/>
                                             <Setter Property="FontWeight" Value="Bold"/>
                                             <Style.Triggers>
                                                 <!-- Issue #530: 払戻済状態（最優先） -->
                                                 <DataTrigger Binding="{Binding IsRefunded}" Value="True">
                                                     <Setter Property="Text" Value="払戻済"/>
-                                                    <Setter Property="Foreground" Value="Gray"/>
+                                                    <Setter Property="Foreground" Value="{DynamicResource SecondaryTextBrush}"/>
                                                     <Setter Property="FontWeight" Value="Normal"/>
                                                 </DataTrigger>
                                                 <!-- 貸出中（払戻済でない場合のみ適用） -->
@@ -89,12 +89,12 @@
                                                         <Condition Binding="{Binding IsLent}" Value="True"/>
                                                     </MultiDataTrigger.Conditions>
                                                     <Setter Property="Text" Value="貸出中"/>
-                                                    <Setter Property="Foreground" Value="OrangeRed"/>
+                                                    <Setter Property="Foreground" Value="{DynamicResource WarningActionBrush}"/>
                                                     <Setter Property="FontWeight" Value="Bold"/>
                                                 </MultiDataTrigger>
                                                 <!-- 選択時は白文字に -->
                                                 <DataTrigger Binding="{Binding IsSelected, RelativeSource={RelativeSource AncestorType=DataGridRow}}" Value="True">
-                                                    <Setter Property="Foreground" Value="White"/>
+                                                    <Setter Property="Foreground" Value="{DynamicResource OnPrimaryBrush}"/>
                                                 </DataTrigger>
                                             </Style.Triggers>
                                         </Style>
@@ -135,7 +135,7 @@
                             Command="{Binding DeleteCommand}"
                             Padding="15,8"
                             Margin="0,0,10,5"
-                            Foreground="Red"
+                            Foreground="{DynamicResource ErrorBorderBrush}"
                             AutomationProperties.Name="カード削除"
                             AutomationProperties.HelpText="選択したカードを削除します。削除後も履歴は保持されます。"
                             ToolTip="選択したカードを削除"/>
@@ -143,7 +143,7 @@
                             Command="{Binding RefundCommand}"
                             Padding="15,8"
                             Margin="0,0,0,5"
-                            Foreground="DarkOrange"
+                            Foreground="{DynamicResource WarningActionBrush}"
                             AutomationProperties.Name="カード払い戻し"
                             AutomationProperties.HelpText="選択したカードを払い戻します。残高が払出金額として記録され、カードは「払戻済」状態になります。帳票作成は引き続き可能です。"
                             ToolTip="払い戻し処理を行い、カードを「払戻済」状態に設定"/>
@@ -153,7 +153,7 @@
 
         <!-- 右側: 編集フォーム -->
         <Border Grid.Column="1"
-                Background="#F5F5F5"
+                Background="{DynamicResource NeutralBackgroundBrush}"
                 CornerRadius="8"
                 Padding="20">
             <Grid>
@@ -187,13 +187,13 @@
                             Visibility="{Binding IsEditing, Converter={StaticResource BoolToVisibilityConverter}}">
 
                     <!-- カード読み取り待ち表示（新規登録時のみ） -->
-                    <Border Background="#FFF3E0"
+                    <Border Background="{DynamicResource LendingBackgroundBrush}"
                             CornerRadius="4"
                             Padding="10"
                             Margin="0,0,0,15"
                             Visibility="{Binding IsNewCard, Converter={StaticResource BoolToVisibilityConverter}}">
                         <StackPanel>
-                            <TextBlock FontWeight="Bold" Foreground="#E65100">
+                            <TextBlock FontWeight="Bold" Foreground="{DynamicResource LendingForegroundBrush}">
                                 <TextBlock.Style>
                                     <Style TargetType="TextBlock">
                                         <Setter Property="Text" Value="カードをタッチしてください"/>
@@ -248,7 +248,7 @@
                              ToolTip="管理番号（空欄で自動採番）"/>
                     <TextBlock Text="空欄の場合は自動採番されます"
                                FontSize="{DynamicResource SmallFontSize}"
-                               Foreground="Gray"
+                               Foreground="{DynamicResource SecondaryTextBrush}"
                                Margin="0,0,0,15"/>
 
                     <!-- 備考 -->
@@ -271,10 +271,10 @@
                                Margin="0,0,0,10">
                         <TextBlock.Style>
                             <Style TargetType="TextBlock">
-                                <Setter Property="Foreground" Value="#1976D2"/>
+                                <Setter Property="Foreground" Value="{DynamicResource PrimaryBrush}"/>
                                 <Style.Triggers>
                                     <DataTrigger Binding="{Binding IsStatusError}" Value="True">
-                                        <Setter Property="Foreground" Value="#D32F2F"/>
+                                        <Setter Property="Foreground" Value="{DynamicResource DangerTextBrush}"/>
                                     </DataTrigger>
                                 </Style.Triggers>
                             </Style>
@@ -302,11 +302,11 @@
                     </StackPanel.Style>
                     <TextBlock Text="カードを選択するか"
                                FontSize="{DynamicResource BaseFontSize}"
-                               Foreground="Gray"
+                               Foreground="{DynamicResource SecondaryTextBrush}"
                                HorizontalAlignment="Center"/>
                     <TextBlock Text="[新規登録]をクリックしてください"
                                FontSize="{DynamicResource BaseFontSize}"
-                               Foreground="Gray"
+                               Foreground="{DynamicResource SecondaryTextBrush}"
                                HorizontalAlignment="Center"
                                Margin="0,5,0,0"/>
                 </StackPanel>
@@ -323,20 +323,20 @@
                     <Button Content="保存"
                             Command="{Binding SaveCommand}"
                             Padding="15,8"
-                            Background="#2196F3"
-                            Foreground="White"/>
+                            Background="{DynamicResource HeaderBackgroundBrush}"
+                            Foreground="{DynamicResource OnPrimaryBrush}"/>
                 </StackPanel>
             </Grid>
         </Border>
 
         <!-- 処理中オーバーレイ -->
         <Border Grid.ColumnSpan="2"
-                Background="#80000000"
+                Background="{DynamicResource OverlayBrush}"
                 Visibility="{Binding IsBusy, Converter={StaticResource BoolToVisibilityConverter}}">
             <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
                 <ProgressBar IsIndeterminate="True" Width="200" Height="4"/>
                 <TextBlock Text="{Binding BusyMessage}"
-                           Foreground="White"
+                           Foreground="{DynamicResource OnPrimaryBrush}"
                            FontSize="{DynamicResource BaseFontSize}"
                            Margin="0,10,0,0"
                            HorizontalAlignment="Center"/>

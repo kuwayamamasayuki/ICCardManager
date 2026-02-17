@@ -19,12 +19,6 @@
     <Window.Resources>
         <BooleanToVisibilityConverter x:Key="BoolToVisibilityConverter"/>
         <common:FileSizeConverter x:Key="FileSizeConverter"/>
-
-        <!-- エラー用の背景色 -->
-        <SolidColorBrush x:Key="ErrorBackgroundBrush" Color="#FFEBEE"/>
-        <SolidColorBrush x:Key="ErrorForegroundBrush" Color="#C62828"/>
-        <SolidColorBrush x:Key="SuccessBackgroundBrush" Color="#E8F5E9"/>
-        <SolidColorBrush x:Key="SuccessForegroundBrush" Color="#2E7D32"/>
     </Window.Resources>
 
     <Grid Margin="20">
@@ -40,15 +34,15 @@
         <GroupBox Grid.Row="0" Header="操作ログ" Margin="0,0,0,15" Padding="15">
             <StackPanel>
                 <TextBlock Text="システムの操作履歴を確認できます。"
-                           Foreground="Gray"
+                           Foreground="{DynamicResource SecondaryTextBrush}"
                            FontSize="{DynamicResource SmallFontSize}"
                            Margin="0,0,0,10"/>
 
                 <Button Content="操作ログを表示"
                         Command="{Binding OpenOperationLogCommand}"
                         Padding="15,10"
-                        Background="#2196F3"
-                        Foreground="White"
+                        Background="{DynamicResource HeaderBackgroundBrush}"
+                        Foreground="{DynamicResource OnPrimaryBrush}"
                         HorizontalAlignment="Left"
                         AutomationProperties.Name="操作ログを表示"
                         ToolTip="操作履歴の検索・確認を行います"/>
@@ -59,7 +53,7 @@
         <GroupBox Grid.Row="1" Header="手動バックアップ" Margin="0,0,0,15" Padding="15">
             <StackPanel>
                 <TextBlock Text="任意のタイミングでデータベースのバックアップを作成できます。"
-                           Foreground="Gray"
+                           Foreground="{DynamicResource SecondaryTextBrush}"
                            FontSize="{DynamicResource SmallFontSize}"
                            Margin="0,0,0,10"/>
 
@@ -67,8 +61,8 @@
                     <Button Content="バックアップを作成"
                             Command="{Binding CreateBackupCommand}"
                             Padding="15,10"
-                            Background="#4CAF50"
-                            Foreground="White"
+                            Background="{DynamicResource SuccessActionBrush}"
+                            Foreground="{DynamicResource OnPrimaryBrush}"
                             AutomationProperties.Name="バックアップを作成"
                             ToolTip="現在のデータベースのバックアップを作成します"/>
 
@@ -82,7 +76,7 @@
 
                 <!-- 最後に作成したバックアップ -->
                 <TextBlock Text="{Binding LastBackupFile, StringFormat=作成先: {0}}"
-                           Foreground="Gray"
+                           Foreground="{DynamicResource SecondaryTextBrush}"
                            FontSize="{DynamicResource SmallFontSize}"
                            Margin="0,10,0,0"
                            TextTrimming="CharacterEllipsis"
@@ -101,12 +95,12 @@
 
                 <TextBlock Grid.Row="0"
                            Text="バックアップファイルを選択してデータを復元します。"
-                           Foreground="Gray"
+                           Foreground="{DynamicResource SecondaryTextBrush}"
                            FontSize="{DynamicResource SmallFontSize}"
                            Margin="0,0,0,10"/>
 
                 <!-- バックアップ一覧 -->
-                <Border Grid.Row="1" BorderBrush="#E0E0E0" BorderThickness="1" CornerRadius="4">
+                <Border Grid.Row="1" BorderBrush="{DynamicResource NeutralBorderBrush}" BorderThickness="1" CornerRadius="4">
                     <ListView ItemsSource="{Binding BackupFiles}"
                               SelectedItem="{Binding SelectedBackup}"
                               SelectionMode="Single"
@@ -140,8 +134,8 @@
                     <Button Content="選択したバックアップからリストア"
                             Command="{Binding RestoreCommand}"
                             Padding="15,10"
-                            Background="#FF9800"
-                            Foreground="White"
+                            Background="{DynamicResource WarningActionBrush}"
+                            Foreground="{DynamicResource OnPrimaryBrush}"
                             AutomationProperties.Name="選択したバックアップからリストア"
                             ToolTip="選択したバックアップファイルからデータを復元します"/>
 
@@ -170,10 +164,10 @@
                 Visibility="{Binding StatusMessage, Converter={StaticResource BoolToVisibilityConverter}}">
             <Border.Style>
                 <Style TargetType="Border">
-                    <Setter Property="Background" Value="{StaticResource SuccessBackgroundBrush}"/>
+                    <Setter Property="Background" Value="{DynamicResource SuccessBackgroundBrush}"/>
                     <Style.Triggers>
                         <DataTrigger Binding="{Binding IsStatusError}" Value="True">
-                            <Setter Property="Background" Value="{StaticResource ErrorBackgroundBrush}"/>
+                            <Setter Property="Background" Value="{DynamicResource ErrorBackgroundBrush}"/>
                         </DataTrigger>
                     </Style.Triggers>
                 </Style>
@@ -183,10 +177,10 @@
                        FontSize="{DynamicResource BaseFontSize}">
                 <TextBlock.Style>
                     <Style TargetType="TextBlock">
-                        <Setter Property="Foreground" Value="{StaticResource SuccessForegroundBrush}"/>
+                        <Setter Property="Foreground" Value="{DynamicResource SuccessForegroundBrush}"/>
                         <Style.Triggers>
                             <DataTrigger Binding="{Binding IsStatusError}" Value="True">
-                                <Setter Property="Foreground" Value="{StaticResource ErrorForegroundBrush}"/>
+                                <Setter Property="Foreground" Value="{DynamicResource DangerTextBrush}"/>
                             </DataTrigger>
                         </Style.Triggers>
                     </Style>
@@ -210,12 +204,12 @@
 
         <!-- 処理中オーバーレイ -->
         <Border Grid.RowSpan="5"
-                Background="#80000000"
+                Background="{DynamicResource OverlayBrush}"
                 Visibility="{Binding IsBusy, Converter={StaticResource BoolToVisibilityConverter}}">
             <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
                 <ProgressBar IsIndeterminate="True" Width="200" Height="4"/>
                 <TextBlock Text="{Binding BusyMessage}"
-                           Foreground="White"
+                           Foreground="{DynamicResource OnPrimaryBrush}"
                            FontSize="{DynamicResource BaseFontSize}"
                            Margin="0,10,0,0"
                            HorizontalAlignment="Center"/>

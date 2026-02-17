@@ -28,18 +28,18 @@
                            FontWeight="Bold"/>
                 <TextBlock Text="このカードはどのように登録しますか？"
                            FontSize="{DynamicResource BaseFontSize}"
-                           Foreground="#666"
+                           Foreground="{DynamicResource MutedTextBrush}"
                            Margin="0,5,0,0"/>
             </StackPanel>
         </StackPanel>
 
         <!-- オプション1: 新規購入 -->
         <Border Grid.Row="1"
-                Background="#F5F5F5"
+                Background="{DynamicResource NeutralBackgroundBrush}"
                 CornerRadius="4"
                 Padding="12"
                 Margin="0,0,0,10"
-                BorderBrush="#BDBDBD"
+                BorderBrush="{DynamicResource DividerBrush}"
                 BorderThickness="1">
             <StackPanel>
                 <RadioButton x:Name="NewPurchaseRadio"
@@ -52,7 +52,7 @@
                              AutomationProperties.Name="新規購入として登録"/>
                 <TextBlock Text="新しく購入したカードを登録します"
                            FontSize="{DynamicResource SmallFontSize}"
-                           Foreground="#666"
+                           Foreground="{DynamicResource MutedTextBrush}"
                            Margin="20,5,0,0"/>
 
                 <!-- 購入日選択（Issue #658） -->
@@ -74,11 +74,11 @@
 
         <!-- オプション2: 紙の出納簿からの繰越 -->
         <Border Grid.Row="2"
-                Background="#F5F5F5"
+                Background="{DynamicResource NeutralBackgroundBrush}"
                 CornerRadius="4"
                 Padding="12"
                 Margin="0,0,0,10"
-                BorderBrush="#BDBDBD"
+                BorderBrush="{DynamicResource DividerBrush}"
                 BorderThickness="1">
             <StackPanel>
                 <RadioButton x:Name="CarryoverRadio"
@@ -90,7 +90,7 @@
                              AutomationProperties.Name="紙の出納簿からの繰越として登録"/>
                 <TextBlock Text="年度途中から本アプリを使用する場合に選択します"
                            FontSize="{DynamicResource SmallFontSize}"
-                           Foreground="#666"
+                           Foreground="{DynamicResource MutedTextBrush}"
                            Margin="20,5,0,0"/>
 
                 <!-- 繰越設定 -->
@@ -139,7 +139,7 @@
                     </StackPanel>
                     <TextBlock Text="※ 紙の出納簿の前月末残高を入力してください"
                                FontSize="{DynamicResource SmallFontSize}"
-                               Foreground="#666"
+                               Foreground="{DynamicResource MutedTextBrush}"
                                Margin="0,4,0,0"/>
                 </StackPanel>
             </StackPanel>
@@ -147,14 +147,14 @@
 
         <!-- ヒント -->
         <Border Grid.Row="3"
-                Background="#E3F2FD"
+                Background="{DynamicResource ReturnBackgroundBrush}"
                 CornerRadius="4"
                 Padding="12"
                 Margin="0,0,0,10"
                 VerticalAlignment="Top">
             <TextBlock TextWrapping="Wrap"
                        FontSize="{DynamicResource SmallFontSize}"
-                       Foreground="#1565C0">
+                       Foreground="{DynamicResource InfoTextBrush}">
                 <Run Text="💡 ヒント: "/>
                 <Run Text="紙の出納簿からの繰越を選択した場合、月途中のデータは後からCSVインポートで取り込むことができます。"/>
             </TextBlock>
@@ -172,8 +172,8 @@
                     Margin="0,0,10,0"
                     FontSize="{DynamicResource BaseFontSize}"
                     FontWeight="Bold"
-                    Background="#4CAF50"
-                    Foreground="White"
+                    Background="{DynamicResource SuccessActionBrush}"
+                    Foreground="{DynamicResource OnPrimaryBrush}"
                     Click="OkButton_Click"
                     IsDefault="True"
                     AutomationProperties.Name="OK"

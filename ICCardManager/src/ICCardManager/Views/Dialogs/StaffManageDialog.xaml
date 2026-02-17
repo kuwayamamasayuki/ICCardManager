@@ -44,7 +44,7 @@
                            VerticalAlignment="Center"/>
                 <TextBlock Text="{Binding StaffList.Count, StringFormat=' ({0}名)'}"
                            FontSize="{DynamicResource BaseFontSize}"
-                           Foreground="Gray"
+                           Foreground="{DynamicResource SecondaryTextBrush}"
                            VerticalAlignment="Center"
                            Margin="5,0,0,0"/>
             </StackPanel>
@@ -102,7 +102,7 @@
                             IsEnabled="{Binding SelectedStaff, Converter={StaticResource NotNullToBoolConverter}}"
                             Padding="15,8"
                             Margin="0,0,0,5"
-                            Foreground="Red"
+                            Foreground="{DynamicResource ErrorBorderBrush}"
                             AutomationProperties.Name="職員削除"
                             AutomationProperties.HelpText="選択した職員を削除します。削除後も履歴は保持されます。"
                             ToolTip="選択した職員を削除"/>
@@ -112,7 +112,7 @@
 
         <!-- 右側: 編集フォーム -->
         <Border Grid.Column="1"
-                Background="#F5F5F5"
+                Background="{DynamicResource NeutralBackgroundBrush}"
                 CornerRadius="8"
                 Padding="20">
             <Grid>
@@ -146,13 +146,13 @@
                             Visibility="{Binding IsEditing, Converter={StaticResource BoolToVisibilityConverter}}">
 
                     <!-- 職員証読み取り待ち表示（新規登録時のみ） -->
-                    <Border Background="#E3F2FD"
+                    <Border Background="{DynamicResource ReturnBackgroundBrush}"
                             CornerRadius="4"
                             Padding="10"
                             Margin="0,0,0,15"
                             Visibility="{Binding IsNewStaff, Converter={StaticResource BoolToVisibilityConverter}}">
                         <StackPanel>
-                            <TextBlock FontWeight="Bold" Foreground="#1565C0">
+                            <TextBlock FontWeight="Bold" Foreground="{DynamicResource InfoTextBrush}">
                                 <TextBlock.Style>
                                     <Style TargetType="TextBlock">
                                         <Setter Property="Text" Value="職員証をタッチしてください"/>
@@ -225,10 +225,10 @@
                                Margin="0,0,0,10">
                         <TextBlock.Style>
                             <Style TargetType="TextBlock">
-                                <Setter Property="Foreground" Value="#1976D2"/>
+                                <Setter Property="Foreground" Value="{DynamicResource PrimaryBrush}"/>
                                 <Style.Triggers>
                                     <DataTrigger Binding="{Binding IsStatusError}" Value="True">
-                                        <Setter Property="Foreground" Value="#D32F2F"/>
+                                        <Setter Property="Foreground" Value="{DynamicResource DangerTextBrush}"/>
                                     </DataTrigger>
                                 </Style.Triggers>
                             </Style>
@@ -256,11 +256,11 @@
                     </StackPanel.Style>
                     <TextBlock Text="職員を選択するか"
                                FontSize="{DynamicResource BaseFontSize}"
-                               Foreground="Gray"
+                               Foreground="{DynamicResource SecondaryTextBrush}"
                                HorizontalAlignment="Center"/>
                     <TextBlock Text="[新規登録]をクリックしてください"
                                FontSize="{DynamicResource BaseFontSize}"
-                               Foreground="Gray"
+                               Foreground="{DynamicResource SecondaryTextBrush}"
                                HorizontalAlignment="Center"
                                Margin="0,5,0,0"/>
                 </StackPanel>
@@ -277,20 +277,20 @@
                     <Button Content="保存"
                             Command="{Binding SaveCommand}"
                             Padding="15,8"
-                            Background="#2196F3"
-                            Foreground="White"/>
+                            Background="{DynamicResource HeaderBackgroundBrush}"
+                            Foreground="{DynamicResource OnPrimaryBrush}"/>
                 </StackPanel>
             </Grid>
         </Border>
 
         <!-- 処理中オーバーレイ -->
         <Border Grid.ColumnSpan="2"
-                Background="#80000000"
+                Background="{DynamicResource OverlayBrush}"
                 Visibility="{Binding IsBusy, Converter={StaticResource BoolToVisibilityConverter}}">
             <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
                 <ProgressBar IsIndeterminate="True" Width="200" Height="4"/>
                 <TextBlock Text="{Binding BusyMessage}"
-                           Foreground="White"
+                           Foreground="{DynamicResource OnPrimaryBrush}"
                            FontSize="{DynamicResource BaseFontSize}"
                            Margin="0,10,0,0"
                            HorizontalAlignment="Center"/>

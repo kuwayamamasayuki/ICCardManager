@@ -44,7 +44,7 @@
                                   ToolTip="右上・左上・右下・左下から選択"/>
                         <TextBlock Text="※ 「いってらっしゃい！」「おかえりなさい！」の表示位置"
                                    FontSize="{DynamicResource SmallFontSize}"
-                                   Foreground="Gray"
+                                   Foreground="{DynamicResource SecondaryTextBrush}"
                                    Margin="0,5,0,0"/>
                     </StackPanel>
                 </GroupBox>
@@ -66,7 +66,7 @@
                                   ToolTip="小・中・大・特大から選択"/>
                         <TextBlock Text="※ 文字サイズの変更は保存後に反映されます"
                                    FontSize="{DynamicResource SmallFontSize}"
-                                   Foreground="Gray"
+                                   Foreground="{DynamicResource SecondaryTextBrush}"
                                    Margin="0,5,0,0"/>
                     </StackPanel>
                 </GroupBox>
@@ -75,7 +75,7 @@
                 <GroupBox Header="残額警告" Margin="0,0,0,20" Padding="15">
                     <StackPanel>
                         <TextBlock Text="残額がこの金額を下回った場合に警告を表示します"
-                                   Foreground="Gray"
+                                   Foreground="{DynamicResource SecondaryTextBrush}"
                                    Margin="0,0,0,10"/>
                         <StackPanel Orientation="Horizontal">
                             <TextBox Text="{Binding WarningBalance, UpdateSourceTrigger=PropertyChanged}"
@@ -91,7 +91,7 @@
                         </StackPanel>
                         <TextBlock Text="※ 0～20,000円の範囲で設定できます"
                                    FontSize="{DynamicResource SmallFontSize}"
-                                   Foreground="Gray"
+                                   Foreground="{DynamicResource SecondaryTextBrush}"
                                    Margin="0,5,0,0"/>
                     </StackPanel>
                 </GroupBox>
@@ -113,11 +113,11 @@
                                   ToolTip="効果音・音声（男性/女性）・無しから選択"/>
                         <TextBlock Text="※ 音声（男性）:「いってらっしゃい」「おかえりなさい」"
                                    FontSize="{DynamicResource SmallFontSize}"
-                                   Foreground="Gray"
+                                   Foreground="{DynamicResource SecondaryTextBrush}"
                                    Margin="0,5,0,0"/>
                         <TextBlock Text="※ 音声（女性）:「いってらっしゃい」「おかえりなさい」"
                                    FontSize="{DynamicResource SmallFontSize}"
-                                   Foreground="Gray"
+                                   Foreground="{DynamicResource SecondaryTextBrush}"
                                    Margin="0,2,0,0"/>
                     </StackPanel>
                 </GroupBox>
@@ -139,11 +139,11 @@
                                   ToolTip="市長事務部局（役務費）または企業会計部局（旅費）を選択"/>
                         <TextBlock Text="※ チャージ時の摘要と帳票テンプレートが変わります"
                                    FontSize="{DynamicResource SmallFontSize}"
-                                   Foreground="Gray"
+                                   Foreground="{DynamicResource SecondaryTextBrush}"
                                    Margin="0,5,0,0"/>
                         <TextBlock Text="※ 借損料（駐車場代）や自動車借上料（タクシー料金）には対応していません"
                                    FontSize="{DynamicResource SmallFontSize}"
-                                   Foreground="Gray"
+                                   Foreground="{DynamicResource SecondaryTextBrush}"
                                    Margin="0,2,0,0"/>
                     </StackPanel>
                 </GroupBox>
@@ -152,7 +152,7 @@
                 <GroupBox Header="バックアップ" Margin="0,0,0,20" Padding="15">
                     <StackPanel>
                         <TextBlock Text="データベースの自動バックアップ先フォルダ"
-                                   Foreground="Gray"
+                                   Foreground="{DynamicResource SecondaryTextBrush}"
                                    Margin="0,0,0,10"/>
                         <Grid>
                             <Grid.ColumnDefinitions>
@@ -163,7 +163,7 @@
                                      Text="{Binding BackupPath, UpdateSourceTrigger=PropertyChanged}"
                                      Padding="8"
                                      IsReadOnly="True"
-                                     Background="#F5F5F5"
+                                     Background="{DynamicResource NeutralBackgroundBrush}"
                                      AutomationProperties.Name="バックアップ先フォルダパス"/>
                             <Button Grid.Column="1"
                                     Content="参照..."
@@ -175,7 +175,7 @@
                         </Grid>
                         <TextBlock Text="※ 空欄の場合、アプリケーションフォルダにバックアップされます"
                                    FontSize="{DynamicResource SmallFontSize}"
-                                   Foreground="Gray"
+                                   Foreground="{DynamicResource SecondaryTextBrush}"
                                    Margin="0,5,0,0"/>
                     </StackPanel>
                 </GroupBox>
@@ -187,7 +187,7 @@
         <StackPanel Grid.Row="1" Margin="0,15,0,0">
             <!-- エラーメッセージ（常に表示領域内） -->
             <TextBlock Text="{Binding StatusMessage}"
-                       Foreground="#D32F2F"
+                       Foreground="{DynamicResource DangerTextBrush}"
                        FontWeight="Bold"
                        TextWrapping="Wrap"
                        Margin="0,0,0,10"
@@ -223,8 +223,8 @@
                         Click="SaveButton_Click"
                         Padding="20,10"
                         MinWidth="100"
-                        Background="#2196F3"
-                        Foreground="White"
+                        Background="{DynamicResource HeaderBackgroundBrush}"
+                        Foreground="{DynamicResource OnPrimaryBrush}"
                         IsDefault="True"
                         AutomationProperties.Name="設定を保存"
                         AutomationProperties.HelpText="変更を保存してダイアログを閉じます"
@@ -234,12 +234,12 @@
 
         <!-- 処理中オーバーレイ -->
         <Border Grid.RowSpan="2"
-                Background="#80000000"
+                Background="{DynamicResource OverlayBrush}"
                 Visibility="{Binding IsBusy, Converter={StaticResource BoolToVisibilityConverter}}">
             <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
                 <ProgressBar IsIndeterminate="True" Width="200" Height="4"/>
                 <TextBlock Text="{Binding BusyMessage}"
-                           Foreground="White"
+                           Foreground="{DynamicResource OnPrimaryBrush}"
                            FontSize="{DynamicResource BaseFontSize}"
                            Margin="0,10,0,0"
                            HorizontalAlignment="Center"/>

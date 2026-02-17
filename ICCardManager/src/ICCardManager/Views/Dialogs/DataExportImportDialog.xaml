@@ -48,7 +48,7 @@
         <GroupBox Header="エクスポート" Margin="0,0,0,15" Padding="15">
             <StackPanel>
                 <TextBlock Text="データをCSVファイルに出力します"
-                           Foreground="Gray"
+                           Foreground="{DynamicResource SecondaryTextBrush}"
                            FontSize="{DynamicResource SmallFontSize}"
                            Margin="0,0,0,10"/>
 
@@ -126,8 +126,8 @@
                         Command="{Binding ExportCommand}"
                         Padding="15,10"
                         HorizontalAlignment="Left"
-                        Background="#4CAF50"
-                        Foreground="White"
+                        Background="{DynamicResource SuccessActionBrush}"
+                        Foreground="{DynamicResource OnPrimaryBrush}"
                         AutomationProperties.Name="CSVエクスポート実行"
                         ToolTip="選択したデータをCSVファイルにエクスポートします"/>
 
@@ -136,11 +136,11 @@
                             Margin="0,10,0,0"
                             Visibility="{Binding LastExportedFile, Converter={StaticResource StringToVisibilityConverter}}">
                     <TextBlock Text="出力先: "
-                               Foreground="Gray"
+                               Foreground="{DynamicResource SecondaryTextBrush}"
                                FontSize="{DynamicResource SmallFontSize}"
                                VerticalAlignment="Center"/>
                     <TextBlock Text="{Binding LastExportedFile}"
-                               Foreground="Gray"
+                               Foreground="{DynamicResource SecondaryTextBrush}"
                                FontSize="{DynamicResource SmallFontSize}"
                                VerticalAlignment="Center"
                                TextTrimming="CharacterEllipsis"
@@ -163,7 +163,7 @@
         <GroupBox Header="インポート" Margin="0,0,0,15" Padding="15">
             <StackPanel>
                 <TextBlock Text="CSVファイルからデータを取り込みます"
-                           Foreground="Gray"
+                           Foreground="{DynamicResource SecondaryTextBrush}"
                            FontSize="{DynamicResource SmallFontSize}"
                            Margin="0,0,0,10"/>
 
@@ -207,12 +207,12 @@
                 </Grid>
 
                 <!-- Issue #511: カード指定セクション（利用履歴インポート時のみ表示） -->
-                <Border BorderBrush="#E0E0E0"
+                <Border BorderBrush="{DynamicResource NeutralBorderBrush}"
                         BorderThickness="1"
                         CornerRadius="4"
                         Padding="10"
                         Margin="0,0,0,10"
-                        Background="#FAFAFA"
+                        Background="{DynamicResource WaitingBackgroundBrush}"
                         Visibility="{Binding IsLedgerImportSelected, Converter={StaticResource BoolToVisibilityConverter}}">
                     <StackPanel>
                         <TextBlock Text="インポート先カード"
@@ -220,7 +220,7 @@
                                    FontSize="{DynamicResource BaseFontSize}"
                                    Margin="0,0,0,5"/>
                         <TextBlock Text="CSVにカードIDmが含まれない場合、ここで指定したカードの履歴としてインポートします"
-                                   Foreground="Gray"
+                                   Foreground="{DynamicResource SecondaryTextBrush}"
                                    FontSize="{DynamicResource SmallFontSize}"
                                    TextWrapping="Wrap"
                                    Margin="0,0,0,10"/>
@@ -247,9 +247,9 @@
                                         <TextBlock Text="{Binding CardType}" FontWeight="SemiBold"/>
                                         <TextBlock Text=" " />
                                         <TextBlock Text="{Binding CardNumber}"/>
-                                        <TextBlock Text=" (" Foreground="Gray"/>
-                                        <TextBlock Text="{Binding CardIdm}" Foreground="Gray" FontSize="{DynamicResource SmallFontSize}"/>
-                                        <TextBlock Text=")" Foreground="Gray"/>
+                                        <TextBlock Text=" (" Foreground="{DynamicResource SecondaryTextBrush}"/>
+                                        <TextBlock Text="{Binding CardIdm}" Foreground="{DynamicResource SecondaryTextBrush}" FontSize="{DynamicResource SmallFontSize}"/>
+                                        <TextBlock Text=")" Foreground="{DynamicResource SecondaryTextBrush}"/>
                                     </StackPanel>
                                 </DataTemplate>
                             </ComboBox.ItemTemplate>
@@ -267,7 +267,7 @@
                                 <Style TargetType="RadioButton">
                                     <Style.Triggers>
                                         <DataTrigger Binding="{Binding IsCardReaderAvailable}" Value="False">
-                                            <Setter Property="Foreground" Value="Gray"/>
+                                            <Setter Property="Foreground" Value="{DynamicResource SecondaryTextBrush}"/>
                                         </DataTrigger>
                                     </Style.Triggers>
                                 </Style>
@@ -277,8 +277,8 @@
                             <Button Content="カードをタッチ"
                                     Command="{Binding StartCardTouchCommand}"
                                     Padding="10,5"
-                                    Background="#2196F3"
-                                    Foreground="White"
+                                    Background="{DynamicResource HeaderBackgroundBrush}"
+                                    Foreground="{DynamicResource OnPrimaryBrush}"
                                     AutomationProperties.Name="カードタッチ開始"
                                     ToolTip="カードリーダーでカードを読み取ります">
                                 <Button.Style>
@@ -306,13 +306,13 @@
                                        FontSize="{DynamicResource BaseFontSize}">
                                 <TextBlock.Style>
                                     <Style TargetType="TextBlock">
-                                        <Setter Property="Foreground" Value="#1565C0"/>
+                                        <Setter Property="Foreground" Value="{DynamicResource InfoTextBrush}"/>
                                         <Style.Triggers>
                                             <DataTrigger Binding="{Binding TouchedCardInfo}" Value="未登録のカードです">
-                                                <Setter Property="Foreground" Value="#D32F2F"/>
+                                                <Setter Property="Foreground" Value="{DynamicResource DangerTextBrush}"/>
                                             </DataTrigger>
                                             <DataTrigger Binding="{Binding TouchedCardInfo}" Value="カードをタッチしてください...">
-                                                <Setter Property="Foreground" Value="Gray"/>
+                                                <Setter Property="Foreground" Value="{DynamicResource SecondaryTextBrush}"/>
                                                 <Setter Property="FontStyle" Value="Italic"/>
                                             </DataTrigger>
                                         </Style.Triggers>
@@ -323,7 +323,7 @@
 
                         <!-- カードリーダー未接続の場合の注意 -->
                         <TextBlock Text="※ カードリーダーが接続されていません"
-                                   Foreground="#D32F2F"
+                                   Foreground="{DynamicResource DangerTextBrush}"
                                    FontSize="{DynamicResource SmallFontSize}"
                                    Margin="20,5,0,0"
                                    Visibility="{Binding IsCardReaderAvailable, Converter={StaticResource InverseBoolToVisibilityConverter}, ConverterParameter=invert}"/>
@@ -342,7 +342,7 @@
 
                 <!-- 最後にインポートしたファイル -->
                 <TextBlock Text="{Binding LastImportedFile, StringFormat=インポート完了: {0}}"
-                           Foreground="Gray"
+                           Foreground="{DynamicResource SecondaryTextBrush}"
                            FontSize="{DynamicResource SmallFontSize}"
                            TextTrimming="CharacterEllipsis"
                            Visibility="{Binding LastImportedFile, Converter={StaticResource StringToVisibilityConverter}}"/>
@@ -357,16 +357,16 @@
             <Button Content="プレビュー"
                     Command="{Binding PreviewImportCommand}"
                     Padding="15,10"
-                    Background="#FF9800"
-                    Foreground="White"
+                    Background="{DynamicResource WarningActionBrush}"
+                    Foreground="{DynamicResource OnPrimaryBrush}"
                     AutomationProperties.Name="インポートプレビュー"
                     ToolTip="CSVファイルの内容をプレビューし、変更点を確認します"/>
             <Button Content="インポート実行"
                     Command="{Binding ExecuteImportCommand}"
                     Padding="15,10"
                     Margin="10,0,0,0"
-                    Background="#4CAF50"
-                    Foreground="White"
+                    Background="{DynamicResource SuccessActionBrush}"
+                    Foreground="{DynamicResource OnPrimaryBrush}"
                     IsEnabled="{Binding HasPreview}"
                     AutomationProperties.Name="インポート実行"
                     ToolTip="プレビュー済みのデータをインポートします"/>
@@ -374,21 +374,21 @@
                     Command="{Binding ImportCommand}"
                     Padding="15,10"
                     Margin="10,0,0,0"
-                    Background="#2196F3"
-                    Foreground="White"
+                    Background="{DynamicResource HeaderBackgroundBrush}"
+                    Foreground="{DynamicResource OnPrimaryBrush}"
                     AutomationProperties.Name="直接CSVインポート"
                     ToolTip="プレビューなしで直接インポートします"/>
         </StackPanel>
 
         <!-- ステータスメッセージ -->
         <Border Grid.Row="2"
-                Background="#E3F2FD"
+                Background="{DynamicResource ReturnBackgroundBrush}"
                 Padding="10"
                 Margin="0,0,0,10"
                 CornerRadius="5"
                 Visibility="{Binding StatusMessage, Converter={StaticResource StringToVisibilityConverter}}">
             <TextBlock Text="{Binding StatusMessage}"
-                       Foreground="#1565C0"
+                       Foreground="{DynamicResource InfoTextBrush}"
                        FontSize="{DynamicResource BaseFontSize}"
                        TextWrapping="Wrap"/>
         </Border>
@@ -402,14 +402,14 @@
             </Grid.RowDefinitions>
 
             <!-- プレビューサマリー -->
-            <Border Grid.Row="0" Background="#FFF3E0" Padding="10" CornerRadius="3" Margin="0,0,0,5">
+            <Border Grid.Row="0" Background="{DynamicResource LendingBackgroundBrush}" Padding="10" CornerRadius="3" Margin="0,0,0,5">
                 <StackPanel>
                     <TextBlock FontWeight="Bold" FontSize="{DynamicResource BaseFontSize}">
                         <Run Text="プレビュー結果: "/>
-                        <Run Text="{Binding PreviewSummary}" Foreground="#E65100"/>
+                        <Run Text="{Binding PreviewSummary}" Foreground="{DynamicResource LendingForegroundBrush}"/>
                     </TextBlock>
                     <TextBlock Text="{Binding ImportPreviewFile, StringFormat=ファイル: {0}}"
-                               Foreground="Gray"
+                               Foreground="{DynamicResource SecondaryTextBrush}"
                                FontSize="{DynamicResource SmallFontSize}"
                                Margin="0,5,0,0"
                                TextTrimming="CharacterEllipsis"/>
@@ -427,7 +427,7 @@
                       GridLinesVisibility="Horizontal"
                       HeadersVisibility="Column"
                       BorderThickness="1"
-                      BorderBrush="#DDD"
+                      BorderBrush="{DynamicResource SubtleBorderBrush}"
                       MinHeight="120"
                       AutomationProperties.Name="インポートプレビュー一覧">
                 <DataGrid.Columns>
@@ -444,18 +444,18 @@
                                         <Style TargetType="TextBlock">
                                             <Style.Triggers>
                                                 <DataTrigger Binding="{Binding Action}" Value="Insert">
-                                                    <Setter Property="Foreground" Value="#4CAF50"/>
+                                                    <Setter Property="Foreground" Value="{DynamicResource SuccessActionBrush}"/>
                                                     <Setter Property="FontWeight" Value="Bold"/>
                                                 </DataTrigger>
                                                 <DataTrigger Binding="{Binding Action}" Value="Update">
-                                                    <Setter Property="Foreground" Value="#FF9800"/>
+                                                    <Setter Property="Foreground" Value="{DynamicResource WarningActionBrush}"/>
                                                     <Setter Property="FontWeight" Value="Bold"/>
                                                 </DataTrigger>
                                                 <DataTrigger Binding="{Binding Action}" Value="Skip">
-                                                    <Setter Property="Foreground" Value="#9E9E9E"/>
+                                                    <Setter Property="Foreground" Value="{DynamicResource WaitingBorderBrush}"/>
                                                 </DataTrigger>
                                                 <DataTrigger Binding="{Binding Action}" Value="Restore">
-                                                    <Setter Property="Foreground" Value="#2196F3"/>
+                                                    <Setter Property="Foreground" Value="{DynamicResource HeaderBackgroundBrush}"/>
                                                     <Setter Property="FontWeight" Value="Bold"/>
                                                 </DataTrigger>
                                             </Style.Triggers>
@@ -469,7 +469,7 @@
                         <DataGridTemplateColumn.CellTemplate>
                             <DataTemplate>
                                 <TextBlock Text="{Binding ChangesSummary}"
-                                           Foreground="#E65100"
+                                           Foreground="{DynamicResource LendingForegroundBrush}"
                                            TextTrimming="CharacterEllipsis"
                                            ToolTip="{Binding ChangesSummary}"
                                            Padding="5,2">
@@ -489,7 +489,7 @@
                 </DataGrid.Columns>
                 <DataGrid.RowDetailsTemplate>
                     <DataTemplate>
-                        <Border Background="#FFF8E1" Padding="10" Margin="0,2"
+                        <Border Background="{DynamicResource WarningBackgroundBrush}" Padding="10" Margin="0,2"
                                 Visibility="{Binding HasChanges, Converter={StaticResource BoolToVisibilityConverter}}">
                             <StackPanel>
                                 <TextBlock Text="変更内容の詳細:" FontWeight="Bold" Margin="0,0,0,5"/>
@@ -510,19 +510,19 @@
         </Grid>
 
         <!-- エラー一覧セクション -->
-        <Border Grid.Row="4" Background="#FFF3E0" Padding="10" CornerRadius="3" Margin="0,0,0,10"
+        <Border Grid.Row="4" Background="{DynamicResource LendingBackgroundBrush}" Padding="10" CornerRadius="3" Margin="0,0,0,10"
                 Visibility="{Binding ImportErrors.Count, Converter={StaticResource IntToVisibilityConverter}}">
             <StackPanel>
                 <TextBlock Text="エラー詳細" FontWeight="Bold" FontSize="{DynamicResource BaseFontSize}" Margin="0,0,0,5"/>
                 <ListBox ItemsSource="{Binding ImportErrors}"
-                         Background="#FFF3E0"
+                         Background="{DynamicResource LendingBackgroundBrush}"
                          BorderThickness="0"
                          MaxHeight="150"
                          AutomationProperties.Name="インポートエラー一覧">
                     <ListBox.ItemTemplate>
                         <DataTemplate>
                             <TextBlock Text="{Binding}"
-                                       Foreground="#E65100"
+                                       Foreground="{DynamicResource LendingForegroundBrush}"
                                        FontSize="{DynamicResource SmallFontSize}"/>
                         </DataTemplate>
                     </ListBox.ItemTemplate>
@@ -546,12 +546,12 @@
 
         <!-- 処理中オーバーレイ -->
         <Border Grid.RowSpan="6"
-                Background="#80000000"
+                Background="{DynamicResource OverlayBrush}"
                 Visibility="{Binding IsBusy, Converter={StaticResource BoolToVisibilityConverter}}">
             <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
                 <ProgressBar IsIndeterminate="True" Width="200" Height="4"/>
                 <TextBlock Text="{Binding BusyMessage}"
-                           Foreground="White"
+                           Foreground="{DynamicResource OnPrimaryBrush}"
                            FontSize="{DynamicResource BaseFontSize}"
                            Margin="0,10,0,0"
                            HorizontalAlignment="Center"/>

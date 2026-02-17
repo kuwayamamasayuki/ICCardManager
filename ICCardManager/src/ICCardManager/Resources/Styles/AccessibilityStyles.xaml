@@ -44,6 +44,30 @@
     <SolidColorBrush x:Key="PrimaryDarkBrush" Color="#0D47A1"/>
     <SolidColorBrush x:Key="PrimaryLightBrush" Color="#BBDEFB"/>
 
+    <!-- ===== アプリケーション共通カラー（Issue #721） ===== -->
+
+    <!-- ヘッダー・アクセントカラー -->
+    <SolidColorBrush x:Key="HeaderBackgroundBrush" Color="#2196F3"/>
+    <SolidColorBrush x:Key="InfoTextBrush" Color="#1565C0"/>
+    <SolidColorBrush x:Key="OnPrimaryBrush" Color="White"/>
+
+    <!-- テキストカラー -->
+    <SolidColorBrush x:Key="SecondaryTextBrush" Color="Gray"/>
+    <SolidColorBrush x:Key="MutedTextBrush" Color="#666666"/>
+    <SolidColorBrush x:Key="DangerTextBrush" Color="#D32F2F"/>
+
+    <!-- 背景・ボーダー -->
+    <SolidColorBrush x:Key="NeutralBackgroundBrush" Color="#F5F5F5"/>
+    <SolidColorBrush x:Key="NeutralBorderBrush" Color="#E0E0E0"/>
+    <SolidColorBrush x:Key="DividerBrush" Color="#BDBDBD"/>
+    <SolidColorBrush x:Key="SubtleBorderBrush" Color="#CCCCCC"/>
+    <SolidColorBrush x:Key="AlternatingRowBrush" Color="#FAFAFA"/>
+
+    <!-- アクション・オーバーレイ -->
+    <SolidColorBrush x:Key="SuccessActionBrush" Color="#4CAF50"/>
+    <SolidColorBrush x:Key="WarningActionBrush" Color="#FF9800"/>
+    <SolidColorBrush x:Key="OverlayBrush" Color="#80000000"/>
+
     <!-- ===== フォーカス表示スタイル ===== -->
     <!-- キーボードナビゲーション用の明確なフォーカス表示 -->
 
@@ -114,7 +138,7 @@
     <!-- プライマリボタンスタイル -->
     <Style x:Key="PrimaryButtonStyle" TargetType="Button" BasedOn="{StaticResource AccessibleButtonStyle}">
         <Setter Property="Background" Value="{StaticResource PrimaryBrush}"/>
-        <Setter Property="Foreground" Value="White"/>
+        <Setter Property="Foreground" Value="{StaticResource OnPrimaryBrush}"/>
         <Setter Property="FontWeight" Value="SemiBold"/>
     </Style>
 
@@ -130,7 +154,7 @@
         <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
         <Setter Property="Padding" Value="10,8"/>
         <Setter Property="BorderThickness" Value="1"/>
-        <Setter Property="BorderBrush" Value="#BDBDBD"/>
+        <Setter Property="BorderBrush" Value="{StaticResource DividerBrush}"/>
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="TextBox">
@@ -148,7 +172,7 @@
                             <Setter TargetName="border" Property="BorderThickness" Value="2"/>
                         </Trigger>
                         <Trigger Property="IsEnabled" Value="False">
-                            <Setter TargetName="border" Property="Background" Value="#F5F5F5"/>
+                            <Setter TargetName="border" Property="Background" Value="{StaticResource NeutralBackgroundBrush}"/>
                             <Setter TargetName="border" Property="Opacity" Value="0.7"/>
                         </Trigger>
                     </ControlTemplate.Triggers>
@@ -173,10 +197,10 @@
     <!-- ===== データグリッドスタイル ===== -->
     <Style x:Key="AccessibleDataGridStyle" TargetType="DataGrid">
         <Setter Property="FocusVisualStyle" Value="{StaticResource AccessibleFocusVisual}"/>
-        <Setter Property="AlternatingRowBackground" Value="#FAFAFA"/>
+        <Setter Property="AlternatingRowBackground" Value="{StaticResource AlternatingRowBrush}"/>
         <Setter Property="RowHeaderWidth" Value="0"/>
         <Setter Property="GridLinesVisibility" Value="Horizontal"/>
-        <Setter Property="HorizontalGridLinesBrush" Value="#E0E0E0"/>
+        <Setter Property="HorizontalGridLinesBrush" Value="{StaticResource NeutralBorderBrush}"/>
     </Style>
 
     <Style x:Key="AccessibleDataGridRowStyle" TargetType="DataGridRow">
@@ -184,7 +208,7 @@
         <Style.Triggers>
             <Trigger Property="IsSelected" Value="True">
                 <Setter Property="Background" Value="{StaticResource PrimaryBrush}"/>
-                <Setter Property="Foreground" Value="White"/>
+                <Setter Property="Foreground" Value="{StaticResource OnPrimaryBrush}"/>
             </Trigger>
             <Trigger Property="IsFocused" Value="True">
                 <Setter Property="BorderBrush" Value="{StaticResource PrimaryDarkBrush}"/>
@@ -291,8 +315,8 @@
 
     <!-- ===== ツールチップスタイル ===== -->
     <Style x:Key="AccessibleToolTipStyle" TargetType="ToolTip">
-        <Setter Property="Background" Value="#424242"/>
-        <Setter Property="Foreground" Value="White"/>
+        <Setter Property="Background" Value="{StaticResource WaitingForegroundBrush}"/>
+        <Setter Property="Foreground" Value="{StaticResource OnPrimaryBrush}"/>
         <Setter Property="Padding" Value="12,8"/>
         <Setter Property="FontSize" Value="{DynamicResource BaseFontSize}"/>
         <Setter Property="HasDropShadow" Value="True"/>

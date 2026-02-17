@@ -27,12 +27,12 @@
         </Grid.RowDefinitions>
 
         <!-- 説明 -->
-        <Border Grid.Row="0" Background="#FFF3E0" CornerRadius="4" Padding="15" Margin="0,0,0,15">
+        <Border Grid.Row="0" Background="{DynamicResource LendingBackgroundBrush}" CornerRadius="4" Padding="15" Margin="0,0,0,15">
             <StackPanel>
                 <TextBlock Text="バス利用のバス停名を入力してください"
                            FontSize="{DynamicResource BaseFontSize}"
                            FontWeight="Bold"
-                           Foreground="#E65100"/>
+                           Foreground="{DynamicResource LendingForegroundBrush}"/>
                 <TextBlock FontSize="{DynamicResource SmallFontSize}"
                            Foreground="#795548"
                            Margin="0,5,0,0"
@@ -48,7 +48,7 @@
         <ListView Grid.Row="1"
                   ItemsSource="{Binding BusUsages}"
                   BorderThickness="1"
-                  BorderBrush="#DDDDDD"
+                  BorderBrush="{DynamicResource SubtleBorderBrush}"
                   ScrollViewer.CanContentScroll="False">
             <ListView.ItemTemplate>
                 <DataTemplate>
@@ -69,7 +69,7 @@
                         <TextBlock Grid.Column="1"
                                    Text="{Binding AmountDisplay}"
                                    VerticalAlignment="Center"
-                                   Foreground="OrangeRed"
+                                   Foreground="{DynamicResource LendingForegroundBrush}"
                                    FontWeight="Bold"
                                    FontSize="{DynamicResource SmallFontSize}"/>
 
@@ -90,8 +90,8 @@
                                    StaysOpen="False"
                                    AllowsTransparency="True"
                                    PopupAnimation="Fade">
-                                <Border Background="White"
-                                        BorderBrush="#2196F3"
+                                <Border Background="{DynamicResource OnPrimaryBrush}"
+                                        BorderBrush="{DynamicResource HeaderBackgroundBrush}"
                                         BorderThickness="1"
                                         CornerRadius="4"
                                         MaxHeight="200"
@@ -110,7 +110,7 @@
                                                             <Style TargetType="Border">
                                                                 <Style.Triggers>
                                                                     <Trigger Property="IsMouseOver" Value="True">
-                                                                        <Setter Property="Background" Value="#E3F2FD"/>
+                                                                        <Setter Property="Background" Value="{DynamicResource ReturnBackgroundBrush}"/>
                                                                     </Trigger>
                                                                 </Style.Triggers>
                                                             </Style>
@@ -122,7 +122,7 @@
                                                         </Border.InputBindings>
                                                         <TextBlock Text="{Binding}"
                                                                    FontSize="{DynamicResource BaseFontSize}"
-                                                                   Foreground="#333"/>
+                                                                   Foreground="{DynamicResource WaitingForegroundBrush}"/>
                                                     </Border>
                                                 </DataTemplate>
                                             </ItemsControl.ItemTemplate>
@@ -146,7 +146,7 @@
         <!-- ステータスメッセージ -->
         <TextBlock Grid.Row="2"
                    Text="{Binding StatusMessage}"
-                   Foreground="#1976D2"
+                   Foreground="{DynamicResource PrimaryBrush}"
                    FontWeight="Bold"
                    FontSize="{DynamicResource SmallFontSize}"
                    Margin="0,10,0,0"/>
@@ -168,8 +168,8 @@
             <Button Content="保存"
                     Command="{Binding SaveCommand}"
                     Padding="20,10"
-                    Background="#4CAF50"
-                    Foreground="White"
+                    Background="{DynamicResource SuccessActionBrush}"
+                    Foreground="{DynamicResource OnPrimaryBrush}"
                     IsDefault="True"
                     FontSize="{DynamicResource BaseFontSize}"
                     AutomationProperties.Name="バス停名を保存"
@@ -179,12 +179,12 @@
 
         <!-- 処理中オーバーレイ -->
         <Border Grid.RowSpan="4"
-                Background="#80000000"
+                Background="{DynamicResource OverlayBrush}"
                 Visibility="{Binding IsBusy, Converter={StaticResource BoolToVisibilityConverter}}">
             <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
                 <ProgressBar IsIndeterminate="True" Width="200" Height="4"/>
                 <TextBlock Text="{Binding BusyMessage}"
-                           Foreground="White"
+                           Foreground="{DynamicResource OnPrimaryBrush}"
                            FontSize="{DynamicResource BaseFontSize}"
                            Margin="0,10,0,0"
                            HorizontalAlignment="Center"/>

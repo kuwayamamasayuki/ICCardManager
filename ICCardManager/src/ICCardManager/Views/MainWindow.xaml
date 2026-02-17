@@ -45,14 +45,14 @@
         </Grid.RowDefinitions>
 
         <!-- ヘッダー -->
-        <Border Grid.Row="0" Background="#2196F3" Padding="15,10">
+        <Border Grid.Row="0" Background="{DynamicResource HeaderBackgroundBrush}" Padding="15,10">
             <DockPanel LastChildFill="False">
                 <!-- タイトル（左寄せ） -->
                 <TextBlock DockPanel.Dock="Left"
                            Text="交通系ICカード管理システム"
                            FontSize="{DynamicResource TitleFontSize}"
                            FontWeight="Bold"
-                           Foreground="White"
+                           Foreground="{DynamicResource OnPrimaryBrush}"
                            VerticalAlignment="Center"
                            Margin="0,0,30,0"/>
 
@@ -130,7 +130,7 @@
             <Grid Grid.Column="0">
                 <!-- 初期画面（使い方ガイド） -->
                 <Border Padding="40"
-                        Background="#FAFAFA"
+                        Background="{DynamicResource WaitingBackgroundBrush}"
                         Visibility="{Binding IsHistoryVisible, Converter={StaticResource BoolToVisibilityConverter}, ConverterParameter=invert}"
                         AutomationProperties.Name="使い方ガイド">
                     <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" MaxWidth="600">
@@ -191,7 +191,7 @@
                         </Border>
 
                         <!-- ショートカット -->
-                        <Border Background="#E3F2FD" CornerRadius="8" Padding="20">
+                        <Border Background="{DynamicResource ReturnBackgroundBrush}" CornerRadius="8" Padding="20">
                             <StackPanel>
                                 <TextBlock Text="⌨️ ショートカットキー"
                                            FontSize="{DynamicResource BaseFontSize}"
@@ -224,7 +224,7 @@
                         </Grid.RowDefinitions>
 
                         <!-- カード情報ヘッダー -->
-                        <Border Grid.Row="0" Background="#E3F2FD" CornerRadius="4" Padding="15" Margin="0,0,0,10">
+                        <Border Grid.Row="0" Background="{DynamicResource ReturnBackgroundBrush}" CornerRadius="4" Padding="15" Margin="0,0,0,10">
                             <Grid>
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="*"/>
@@ -243,7 +243,7 @@
                                                VerticalAlignment="Center"/>
                                     <TextBlock Text="{Binding HistoryCard.Note}"
                                                FontSize="{DynamicResource BaseFontSize}"
-                                               Foreground="Gray"
+                                               Foreground="{DynamicResource SecondaryTextBrush}"
                                                Margin="20,0,0,0"
                                                VerticalAlignment="Center"/>
                                 </StackPanel>
@@ -255,7 +255,7 @@
                                     <TextBlock Text="{Binding HistoryCurrentBalance, StringFormat={}{0:N0}円}"
                                                FontSize="{DynamicResource TitleFontSize}"
                                                FontWeight="Bold"
-                                               Foreground="#1565C0"
+                                               Foreground="{DynamicResource InfoTextBrush}"
                                                Margin="10,0,0,0"
                                                VerticalAlignment="Center"/>
                                 </StackPanel>
@@ -280,13 +280,13 @@
                                 <TextBlock Text="表示期間:"
                                            VerticalAlignment="Center"
                                            Margin="0,0,10,0"/>
-                                <Border Background="#E3F2FD"
+                                <Border Background="{DynamicResource ReturnBackgroundBrush}"
                                         CornerRadius="4"
                                         Padding="15,8">
                                     <TextBlock Text="{Binding HistoryPeriodDisplay}"
                                                FontSize="{DynamicResource LargeFontSize}"
                                                FontWeight="Bold"
-                                               Foreground="#1565C0"/>
+                                               Foreground="{DynamicResource InfoTextBrush}"/>
                                 </Border>
                             </StackPanel>
 
@@ -309,7 +309,7 @@
                                         ToolTip="任意の年月を選択"/>
 
                                 <!-- 行操作ボタン（Issue #635） -->
-                                <Border Width="1" Background="#BDBDBD" Margin="10,2"/>
+                                <Border Width="1" Background="{DynamicResource DividerBrush}" Margin="10,2"/>
                                 <Button Content="＋ 行を追加"
                                         Command="{Binding AddLedgerRowCommand}"
                                         Padding="12,6"
@@ -318,7 +318,7 @@
                                         AutomationProperties.HelpText="手動で履歴行を追加します（日付・摘要・金額等を入力）"/>
 
                                 <!-- 統合ボタン（Issue #548） -->
-                                <Border Width="1" Background="#BDBDBD" Margin="10,2"/>
+                                <Border Width="1" Background="{DynamicResource DividerBrush}" Margin="10,2"/>
                                 <Button Content="📦 チェックした履歴を統合"
                                         Command="{Binding MergeHistoryLedgersCommand}"
                                         Padding="12,6"
@@ -339,7 +339,7 @@
                                        StaysOpen="False"
                                        AllowsTransparency="True">
                                     <Border Background="White"
-                                            BorderBrush="#CCCCCC"
+                                            BorderBrush="{DynamicResource SubtleBorderBrush}"
                                             BorderThickness="1"
                                             CornerRadius="4"
                                             Padding="15"
@@ -369,8 +369,8 @@
                                                 <Button Content="適用"
                                                         Command="{Binding HistoryApplySelectedMonthCommand}"
                                                         Padding="15,5"
-                                                        Background="#2196F3"
-                                                        Foreground="White"/>
+                                                        Background="{DynamicResource HeaderBackgroundBrush}"
+                                                        Foreground="{DynamicResource OnPrimaryBrush}"/>
                                             </StackPanel>
                                         </StackPanel>
                                     </Border>
@@ -390,7 +390,7 @@
                                   GridLinesVisibility="Horizontal"
                                   HeadersVisibility="Column"
                                   RowHeaderWidth="0"
-                                  AlternatingRowBackground="#FAFAFA"
+                                  AlternatingRowBackground="{DynamicResource AlternatingRowBrush}"
                                   AutomationProperties.Name="利用履歴一覧"
                                   AutomationProperties.HelpText="チェックボックスで統合したい履歴を選択し、統合ボタンを押します">
                             <DataGrid.Columns>
@@ -468,7 +468,7 @@
                                 <Style TargetType="DataGridRow">
                                     <Style.Triggers>
                                         <DataTrigger Binding="{Binding IsLentRecord}" Value="True">
-                                            <Setter Property="Background" Value="#FFF3E0"/>
+                                            <Setter Property="Background" Value="{DynamicResource LendingBackgroundBrush}"/>
                                             <Setter Property="FontStyle" Value="Italic"/>
                                         </DataTrigger>
                                     </Style.Triggers>
@@ -478,7 +478,7 @@
 
                         <!-- フッター（ページネーション） -->
                         <Border Grid.Row="3"
-                                Background="#F5F5F5"
+                                Background="{DynamicResource NeutralBackgroundBrush}"
                                 CornerRadius="4"
                                 Padding="10,8"
                                 Margin="0,10,0,0">
@@ -507,7 +507,7 @@
                                                VerticalAlignment="Center"
                                                Margin="15,0,5,0"/>
                                     <Border Background="White"
-                                            BorderBrush="#CCCCCC"
+                                            BorderBrush="{DynamicResource SubtleBorderBrush}"
                                             BorderThickness="1"
                                             CornerRadius="2"
                                             Padding="10,4">
@@ -534,7 +534,7 @@
                                 <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
                                     <TextBlock Text="{Binding HistoryStatusMessage}"
                                                FontSize="{DynamicResource SmallFontSize}"
-                                               Foreground="Gray"
+                                               Foreground="{DynamicResource SecondaryTextBrush}"
                                                VerticalAlignment="Center"/>
                                 </StackPanel>
                             </Grid>
@@ -545,7 +545,7 @@
 
             <!-- 右サイドバー（カード残高ダッシュボード） -->
             <!-- Issue #542: サイドバー幅をフォントサイズに応じて動的調整 -->
-            <Border Grid.Column="1" Background="#F5F5F5" Padding="15"
+            <Border Grid.Column="1" Background="{DynamicResource NeutralBackgroundBrush}" Padding="15"
                     Width="{DynamicResource SidebarWidth}">
                 <Grid>
                     <Grid.RowDefinitions>
@@ -565,7 +565,7 @@
                                    VerticalAlignment="Center"/>
                         <TextBlock Text="{Binding CardBalanceDashboard.Count, StringFormat=' ({0}枚)'}"
                                    FontSize="{DynamicResource SmallFontSize}"
-                                   Foreground="Gray"
+                                   Foreground="{DynamicResource SecondaryTextBrush}"
                                    VerticalAlignment="Center"
                                    Margin="5,0,0,0"/>
                     </StackPanel>
@@ -618,10 +618,10 @@
                                             </Border>
                                             <ControlTemplate.Triggers>
                                                 <Trigger Property="IsKeyboardFocused" Value="True">
-                                                    <Setter TargetName="ItemBorder" Property="BorderBrush" Value="#2196F3"/>
+                                                    <Setter TargetName="ItemBorder" Property="BorderBrush" Value="{DynamicResource HeaderBackgroundBrush}"/>
                                                 </Trigger>
                                                 <Trigger Property="IsSelected" Value="True">
-                                                    <Setter TargetName="ItemBorder" Property="BorderBrush" Value="#1976D2"/>
+                                                    <Setter TargetName="ItemBorder" Property="BorderBrush" Value="{DynamicResource PrimaryBrush}"/>
                                                 </Trigger>
                                             </ControlTemplate.Triggers>
                                         </ControlTemplate>
@@ -649,10 +649,10 @@
                                             <Setter Property="Background" Value="White"/>
                                             <Style.Triggers>
                                                 <DataTrigger Binding="{Binding IsBalanceWarning}" Value="True">
-                                                    <Setter Property="Background" Value="#FFEBEE"/>
+                                                    <Setter Property="Background" Value="{DynamicResource ErrorBackgroundBrush}"/>
                                                 </DataTrigger>
                                                 <Trigger Property="IsMouseOver" Value="True">
-                                                    <Setter Property="BorderBrush" Value="#2196F3"/>
+                                                    <Setter Property="BorderBrush" Value="{DynamicResource HeaderBackgroundBrush}"/>
                                                     <Setter Property="BorderThickness" Value="1"/>
                                                 </Trigger>
                                             </Style.Triggers>
@@ -668,7 +668,7 @@
                                                        FontSize="{DynamicResource LargeFontSize}"
                                                        VerticalAlignment="Center"
                                                        Margin="0,0,8,0"
-                                                       Foreground="#F44336"
+                                                       Foreground="{DynamicResource ErrorBorderBrush}"
                                                        ToolTip="残高警告"
                                                        Visibility="{Binding IsBalanceWarning, Converter={StaticResource BoolToVisibilityConverter}}"/>
                                             <!-- 残高（右寄せ） -->
@@ -679,10 +679,10 @@
                                                        VerticalAlignment="Center">
                                                 <TextBlock.Style>
                                                     <Style TargetType="TextBlock">
-                                                        <Setter Property="Foreground" Value="#424242"/>
+                                                        <Setter Property="Foreground" Value="{DynamicResource WaitingForegroundBrush}"/>
                                                         <Style.Triggers>
                                                             <DataTrigger Binding="{Binding IsBalanceWarning}" Value="True">
-                                                                <Setter Property="Foreground" Value="#F44336"/>
+                                                                <Setter Property="Foreground" Value="{DynamicResource ErrorBorderBrush}"/>
                                                             </DataTrigger>
                                                         </Style.Triggers>
                                                     </Style>
@@ -706,10 +706,10 @@
                                                        Margin="5,0,0,0">
                                                 <TextBlock.Style>
                                                     <Style TargetType="TextBlock">
-                                                        <Setter Property="Foreground" Value="#4CAF50"/>
+                                                        <Setter Property="Foreground" Value="{DynamicResource SuccessActionBrush}"/>
                                                         <Style.Triggers>
                                                             <DataTrigger Binding="{Binding IsLent}" Value="True">
-                                                                <Setter Property="Foreground" Value="#FF9800"/>
+                                                                <Setter Property="Foreground" Value="{DynamicResource WarningActionBrush}"/>
                                                             </DataTrigger>
                                                         </Style.Triggers>
                                                     </Style>
@@ -720,7 +720,7 @@
                                             </TextBlock>
                                             <!-- 最終利用日（左寄せ、省略可能） -->
                                             <TextBlock FontSize="{DynamicResource SmallFontSize}"
-                                                       Foreground="Gray"
+                                                       Foreground="{DynamicResource SecondaryTextBrush}"
                                                        TextTrimming="CharacterEllipsis">
                                                 <Run Text="{Binding LastUsageDateDisplay, Mode=OneWay}"/>
                                             </TextBlock>
@@ -737,7 +737,7 @@
                                FontSize="{DynamicResource BaseFontSize}"
                                FontWeight="Bold"
                                Margin="0,15,0,10"
-                               Foreground="#F44336"
+                               Foreground="{DynamicResource ErrorBorderBrush}"
                                Visibility="{Binding WarningMessages.Count, Converter={StaticResource IntToVisibilityConverter}, Mode=OneWay}"/>
 
                     <!-- Issue #541: 警告エリアにスクロール機能を追加（高さ制限対応） -->
@@ -759,10 +759,10 @@
                                         </Border.InputBindings>
                                         <Border.Style>
                                             <Style TargetType="Border">
-                                                <Setter Property="Background" Value="#FFF3E0"/>
+                                                <Setter Property="Background" Value="{DynamicResource LendingBackgroundBrush}"/>
                                                 <Style.Triggers>
                                                     <Trigger Property="IsMouseOver" Value="True">
-                                                        <Setter Property="Background" Value="#FFE0B2"/>
+                                                        <Setter Property="Background" Value="{DynamicResource LendingBorderBrush}"/>
                                                     </Trigger>
                                                 </Style.Triggers>
                                             </Style>
@@ -780,12 +780,12 @@
         </Grid>
 
         <!-- 処理中オーバーレイ -->
-        <Border Grid.Row="1" Background="#80000000"
+        <Border Grid.Row="1" Background="{DynamicResource OverlayBrush}"
                 Visibility="{Binding IsBusy, Converter={StaticResource BoolToVisibilityConverter}}">
             <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
                 <ProgressBar IsIndeterminate="True" Width="200" Height="4"/>
                 <TextBlock Text="{Binding BusyMessage}"
-                           Foreground="White"
+                           Foreground="{DynamicResource OnPrimaryBrush}"
                            FontSize="{DynamicResource LargeFontSize}"
                            Margin="0,15,0,0"
                            HorizontalAlignment="Center"/>
@@ -793,14 +793,14 @@
         </Border>
 
         <!-- 操作ヒント + デバッグボタン -->
-        <Border Grid.Row="2" Background="#E3F2FD" Padding="15,10">
+        <Border Grid.Row="2" Background="{DynamicResource ReturnBackgroundBrush}" Padding="15,10">
             <Grid>
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*"/>
                     <ColumnDefinition Width="Auto"/>
                 </Grid.ColumnDefinitions>
 
-                <TextBlock Grid.Column="0" FontSize="{DynamicResource SmallFontSize}" Foreground="#1565C0" VerticalAlignment="Center">
+                <TextBlock Grid.Column="0" FontSize="{DynamicResource SmallFontSize}" Foreground="{DynamicResource InfoTextBrush}" VerticalAlignment="Center">
                     <Run Text="操作: "/>
                     <Run Text="職員証タッチ → 交通系ICカードタッチ で貸出/返却"/>
                     <Run Text=" | "/>
@@ -854,17 +854,17 @@
                         <TextBlock.Style>
                             <Style TargetType="TextBlock">
                                 <Setter Property="Text" Value="🔗"/>
-                                <Setter Property="Foreground" Value="#4CAF50"/>
+                                <Setter Property="Foreground" Value="{DynamicResource SuccessActionBrush}"/>
                                 <Setter Property="ToolTip" Value="カードリーダー接続中"/>
                                 <Style.Triggers>
                                     <DataTrigger Binding="{Binding CardReaderConnectionState}" Value="{x:Static cardReader:CardReaderConnectionState.Disconnected}">
                                         <Setter Property="Text" Value="🔌"/>
-                                        <Setter Property="Foreground" Value="#F44336"/>
+                                        <Setter Property="Foreground" Value="{DynamicResource ErrorBorderBrush}"/>
                                         <Setter Property="ToolTip" Value="カードリーダー切断"/>
                                     </DataTrigger>
                                     <DataTrigger Binding="{Binding CardReaderConnectionState}" Value="{x:Static cardReader:CardReaderConnectionState.Reconnecting}">
                                         <Setter Property="Text" Value="🔄"/>
-                                        <Setter Property="Foreground" Value="#FF9800"/>
+                                        <Setter Property="Foreground" Value="{DynamicResource WarningActionBrush}"/>
                                         <Setter Property="ToolTip" Value="再接続中..."/>
                                     </DataTrigger>
                                 </Style.Triggers>
@@ -876,11 +876,11 @@
                         <TextBlock.Style>
                             <Style TargetType="TextBlock">
                                 <Setter Property="Text" Value="リーダー: 接続中"/>
-                                <Setter Property="Foreground" Value="#4CAF50"/>
+                                <Setter Property="Foreground" Value="{DynamicResource SuccessActionBrush}"/>
                                 <Style.Triggers>
                                     <DataTrigger Binding="{Binding CardReaderConnectionState}" Value="{x:Static cardReader:CardReaderConnectionState.Disconnected}">
                                         <Setter Property="Text" Value="リーダー: 切断"/>
-                                        <Setter Property="Foreground" Value="#F44336"/>
+                                        <Setter Property="Foreground" Value="{DynamicResource ErrorBorderBrush}"/>
                                     </DataTrigger>
                                     <DataTrigger Binding="{Binding CardReaderConnectionState}" Value="{x:Static cardReader:CardReaderConnectionState.Reconnecting}">
                                         <Setter Property="Text">
@@ -888,7 +888,7 @@
                                                 <Binding Path="CardReaderReconnectAttempts" StringFormat="リーダー: 再接続中 ({0}/10)"/>
                                             </Setter.Value>
                                         </Setter>
-                                        <Setter Property="Foreground" Value="#FF9800"/>
+                                        <Setter Property="Foreground" Value="{DynamicResource WarningActionBrush}"/>
                                     </DataTrigger>
                                 </Style.Triggers>
                             </Style>
@@ -919,7 +919,7 @@
             <!-- バージョン表示（Issue #475） -->
             <StatusBarItem HorizontalAlignment="Right"
                            AutomationProperties.Name="アプリケーションバージョン">
-                <TextBlock Foreground="Gray"
+                <TextBlock Foreground="{DynamicResource SecondaryTextBrush}"
                            ToolTip="アプリケーションのバージョン番号">
                     <Run Text="Ver. "/>
                     <Run Text="{Binding Source={x:Static app:App.AppVersion}, Mode=OneTime}"/>

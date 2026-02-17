@@ -31,28 +31,28 @@
         </StackPanel>
 
         <!-- 操作内容の説明 -->
-        <Border Grid.Row="1" Background="#E3F2FD" CornerRadius="4" Padding="12" Margin="0,0,0,15">
+        <Border Grid.Row="1" Background="{DynamicResource ReturnBackgroundBrush}" CornerRadius="4" Padding="12" Margin="0,0,0,15">
             <StackPanel>
                 <TextBlock Text="操作内容:"
                            FontSize="{DynamicResource SmallFontSize}"
-                           Foreground="#666"
+                           Foreground="{DynamicResource MutedTextBrush}"
                            Margin="0,0,0,3"/>
                 <TextBlock x:Name="OperationDescriptionText"
                            Text="履歴の編集"
                            FontSize="{DynamicResource BaseFontSize}"
                            FontWeight="SemiBold"
-                           Foreground="#1565C0"/>
+                           Foreground="{DynamicResource InfoTextBrush}"/>
             </StackPanel>
         </Border>
 
         <!-- ステータスメッセージ -->
         <Border x:Name="StatusBorder" Grid.Row="2" CornerRadius="4" Padding="12" Margin="0,0,0,15"
-                Background="#FFF3E0" Visibility="Collapsed">
+                Background="{DynamicResource LendingBackgroundBrush}" Visibility="Collapsed">
             <TextBlock x:Name="StatusText"
                        Text=""
                        FontSize="{DynamicResource BaseFontSize}"
                        TextWrapping="Wrap"
-                       Foreground="#E65100"
+                       Foreground="{DynamicResource LendingForegroundBrush}"
                        HorizontalAlignment="Center"/>
         </Border>
 
@@ -60,13 +60,13 @@
         <StackPanel Grid.Row="3" HorizontalAlignment="Center" Margin="0,0,0,20">
             <TextBlock Text="残り時間:"
                        FontSize="{DynamicResource SmallFontSize}"
-                       Foreground="#666"
+                       Foreground="{DynamicResource MutedTextBrush}"
                        HorizontalAlignment="Center"/>
             <TextBlock x:Name="TimeoutText"
                        Text="60秒"
                        FontSize="{DynamicResource LargeFontSize}"
                        FontWeight="Bold"
-                       Foreground="#1976D2"
+                       Foreground="{DynamicResource PrimaryBrush}"
                        HorizontalAlignment="Center"/>
         </StackPanel>
 
@@ -92,8 +92,8 @@
                     Padding="16,0"
                     Margin="10,0,0,0"
                     FontSize="{DynamicResource BaseFontSize}"
-                    Background="#FFF3E0"
-                    Foreground="#E65100"
+                    Background="{DynamicResource LendingBackgroundBrush}"
+                    Foreground="{DynamicResource LendingForegroundBrush}"
                     Click="DebugVirtualTouchButton_Click"
                     Visibility="Collapsed"
                     AutomationProperties.Name="職員証仮想タッチ（デバッグ用）"

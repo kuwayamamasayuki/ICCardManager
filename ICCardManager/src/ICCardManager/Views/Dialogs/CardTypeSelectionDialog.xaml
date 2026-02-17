@@ -27,14 +27,14 @@
                            FontWeight="Bold"/>
                 <TextBlock Text="どのように登録しますか？"
                            FontSize="{DynamicResource BaseFontSize}"
-                           Foreground="#666"
+                           Foreground="{DynamicResource MutedTextBrush}"
                            Margin="0,5,0,0"/>
             </StackPanel>
         </StackPanel>
 
         <!-- 説明文 -->
         <StackPanel Grid.Row="1">
-            <Border Background="#FFF8E1" CornerRadius="4" Padding="12" Margin="0,0,0,10">
+            <Border Background="{DynamicResource WarningBackgroundBrush}" CornerRadius="4" Padding="12" Margin="0,0,0,10">
                 <TextBlock TextWrapping="Wrap"
                            FontSize="{DynamicResource SmallFontSize}"
                            Foreground="#795548">
@@ -43,10 +43,10 @@
                 </TextBlock>
             </Border>
             <!-- Issue #482: カードを離さないよう警告 -->
-            <Border Background="#FFEBEE" CornerRadius="4" Padding="12" Margin="0,0,0,10">
+            <Border Background="{DynamicResource ErrorBackgroundBrush}" CornerRadius="4" Padding="12" Margin="0,0,0,10">
                 <TextBlock TextWrapping="Wrap"
                            FontSize="{DynamicResource SmallFontSize}"
-                           Foreground="#C62828">
+                           Foreground="{DynamicResource DangerTextBrush}">
                     <Run Text="⚠ 注意: "/>
                     <Run Text="選択が完了するまでカードをリーダーから離さないでください。"/>
                 </TextBlock>
@@ -63,8 +63,8 @@
                     Margin="0,0,10,0"
                     FontSize="{DynamicResource BaseFontSize}"
                     FontWeight="Bold"
-                    Background="#2196F3"
-                    Foreground="White"
+                    Background="{DynamicResource HeaderBackgroundBrush}"
+                    Foreground="{DynamicResource OnPrimaryBrush}"
                     Click="StaffCardButton_Click"
                     AutomationProperties.Name="職員証として登録"
                     AutomationProperties.HelpText="このカードを職員証として登録します"
@@ -78,8 +78,8 @@
                     Margin="0,0,10,0"
                     FontSize="{DynamicResource BaseFontSize}"
                     FontWeight="Bold"
-                    Background="#4CAF50"
-                    Foreground="White"
+                    Background="{DynamicResource SuccessActionBrush}"
+                    Foreground="{DynamicResource OnPrimaryBrush}"
                     Click="IcCardButton_Click"
                     AutomationProperties.Name="交通系ICカードとして登録"
                     AutomationProperties.HelpText="このカードを交通系ICカードとして登録します"
