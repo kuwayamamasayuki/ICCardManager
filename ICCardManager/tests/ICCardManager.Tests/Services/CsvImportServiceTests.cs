@@ -1013,4 +1013,127 @@ FEDCBA9876543210,鈴木花子,002,テスト2";
     }
 
     #endregion
+
+    #region ImportLedgersAsync 残高整合性チェック (Issue #754)
+
+    /// <summary>
+    /// スキップされたレコードが間にある場合でも、残高整合性チェックが正しく動作することを確認（Issue #754）
+    /// バグ: 変更なしでスキップされたレコードが検証リストから除外され、
+    /// 前後関係が崩れて誤った「前回残高」でエラーになっていた
+    /// </summary>
+    [Fact]
+    public async Task ImportLedgersAsync_SkippedRecordsBetween_BalanceValidationCorrect()
+    {
+        // Arrange: 6行のCSV。行2,3,4は変更なし（スキップ）、行5は摘要変更（更新）、行6は新規
+        // 修正前: 行5の前回残高に行2の残高(7336)が使われ、不正なエラーになっていた
+        // 修正後: スキップ行を含む全レコードで検証するため、行5の前回残高は行4(6916)が正しく使われる
+        var csvContent = @"ID,日時,カードIDm,管理番号,摘要,受入金額,払出金額,残額,利用者,備考
+1,2025-01-01 00:00:00,0123456789ABCDEF,001,1月から繰越,7336,,7336,,
+2,2025-01-10 00:00:00,0123456789ABCDEF,001,鉄道（天神～博多）,,210,7126,,
+3,2025-01-10 00:00:00,0123456789ABCDEF,001,鉄道（博多～天神）,,210,6916,,
+4,2025-01-15 00:00:00,0123456789ABCDEF,001,鉄道（天神～六本松）,,420,6496,,
+5,2025-01-20 00:00:00,0123456789ABCDEF,001,鉄道（六本松～天神）修正,,420,6076,,出張";
+
+        var filePath = Path.Combine(_testDirectory, "ledgers_import_skipped_between.csv");
+        await Task.Run(() => File.WriteAllText(filePath, csvContent, CsvEncoding));
+
+        var cards = new List<IcCard>
+        {
+            new IcCard { CardIdm = "0123456789ABCDEF", CardType = "はやかけん", CardNumber = "001" }
+        };
+        _cardRepositoryMock.Setup(x => x.GetAllIncludingDeletedAsync()).ReturnsAsync(cards);
+
+        // 行2～4: 変更なし → スキップされる
+        _ledgerRepositoryMock.Setup(x => x.GetByIdAsync(1)).ReturnsAsync(new Ledger
+        {
+            Id = 1, CardIdm = "0123456789ABCDEF", Date = new DateTime(2025, 1, 1),
+            Summary = "1月から繰越", Income = 7336, Expense = 0, Balance = 7336
+        });
+        _ledgerRepositoryMock.Setup(x => x.GetByIdAsync(2)).ReturnsAsync(new Ledger
+        {
+            Id = 2, CardIdm = "0123456789ABCDEF", Date = new DateTime(2025, 1, 10),
+            Summary = "鉄道（天神～博多）", Income = 0, Expense = 210, Balance = 7126
+        });
+        _ledgerRepositoryMock.Setup(x => x.GetByIdAsync(3)).ReturnsAsync(new Ledger
+        {
+            Id = 3, CardIdm = "0123456789ABCDEF", Date = new DateTime(2025, 1, 10),
+            Summary = "鉄道（博多～天神）", Income = 0, Expense = 210, Balance = 6916
+        });
+        _ledgerRepositoryMock.Setup(x => x.GetByIdAsync(4)).ReturnsAsync(new Ledger
+        {
+            Id = 4, CardIdm = "0123456789ABCDEF", Date = new DateTime(2025, 1, 15),
+            Summary = "鉄道（天神～六本松）", Income = 0, Expense = 420, Balance = 6496
+        });
+        // 行5: 摘要が異なる → 更新対象
+        _ledgerRepositoryMock.Setup(x => x.GetByIdAsync(5)).ReturnsAsync(new Ledger
+        {
+            Id = 5, CardIdm = "0123456789ABCDEF", Date = new DateTime(2025, 1, 20),
+            Summary = "鉄道（六本松～天神）", Income = 0, Expense = 420, Balance = 6076,
+            Note = null
+        });
+        _ledgerRepositoryMock.Setup(x => x.UpdateAsync(It.IsAny<Ledger>())).ReturnsAsync(true);
+        _ledgerRepositoryMock.Setup(x => x.GetExistingLedgerKeysAsync(It.IsAny<IEnumerable<string>>()))
+            .ReturnsAsync(new HashSet<(string, DateTime, string, int, int, int)>());
+
+        // Act
+        var result = await _service.ImportLedgersAsync(filePath);
+
+        // Assert: 残高整合性エラーなし（スキップ行を含む全行で検証される）
+        result.Success.Should().BeTrue("残高は正しく連続しているためエラーにならないこと");
+        result.ImportedCount.Should().Be(1, "摘要変更の1件のみ更新");
+        result.SkippedCount.Should().Be(4, "変更なしの4件はスキップ");
+        result.ErrorCount.Should().Be(0);
+    }
+
+    /// <summary>
+    /// スキップ行を含む場合でも、本当に残高が不整合な行はエラーになることを確認（Issue #754）
+    /// </summary>
+    [Fact]
+    public async Task ImportLedgersAsync_SkippedRecords_RealInconsistency_DetectsError()
+    {
+        // Arrange: 行3の残高が不正（6916であるべきだが6900と記録）
+        var csvContent = @"ID,日時,カードIDm,管理番号,摘要,受入金額,払出金額,残額,利用者,備考
+1,2025-01-01 00:00:00,0123456789ABCDEF,001,1月から繰越,7336,,7336,,
+2,2025-01-10 00:00:00,0123456789ABCDEF,001,鉄道（天神～博多）,,210,7126,,
+3,2025-01-10 00:00:00,0123456789ABCDEF,001,鉄道（博多～天神）修正,,210,6900,,";
+
+        var filePath = Path.Combine(_testDirectory, "ledgers_import_real_inconsistency.csv");
+        await Task.Run(() => File.WriteAllText(filePath, csvContent, CsvEncoding));
+
+        var cards = new List<IcCard>
+        {
+            new IcCard { CardIdm = "0123456789ABCDEF", CardType = "はやかけん", CardNumber = "001" }
+        };
+        _cardRepositoryMock.Setup(x => x.GetAllIncludingDeletedAsync()).ReturnsAsync(cards);
+
+        // 行2,3は変更なし、行3だけ変更あり
+        _ledgerRepositoryMock.Setup(x => x.GetByIdAsync(1)).ReturnsAsync(new Ledger
+        {
+            Id = 1, CardIdm = "0123456789ABCDEF", Date = new DateTime(2025, 1, 1),
+            Summary = "1月から繰越", Income = 7336, Expense = 0, Balance = 7336
+        });
+        _ledgerRepositoryMock.Setup(x => x.GetByIdAsync(2)).ReturnsAsync(new Ledger
+        {
+            Id = 2, CardIdm = "0123456789ABCDEF", Date = new DateTime(2025, 1, 10),
+            Summary = "鉄道（天神～博多）", Income = 0, Expense = 210, Balance = 7126
+        });
+        // 行3: 摘要が異なる → 更新対象、かつ残高が不正
+        _ledgerRepositoryMock.Setup(x => x.GetByIdAsync(3)).ReturnsAsync(new Ledger
+        {
+            Id = 3, CardIdm = "0123456789ABCDEF", Date = new DateTime(2025, 1, 10),
+            Summary = "鉄道（博多～天神）", Income = 0, Expense = 210, Balance = 6916
+        });
+
+        // Act
+        var result = await _service.ImportLedgersAsync(filePath);
+
+        // Assert: 残高不整合が正しく検出される
+        result.Success.Should().BeFalse("残高不整合があるためエラー");
+        result.Errors.Should().Contain(e =>
+            e.Message.Contains("残高が一致しません") &&
+            e.Message.Contains("前回残高: 7126円"),
+            "前回残高は行2の7126円であること（スキップ行を含む正しい直前行）");
+    }
+
+    #endregion
 }
