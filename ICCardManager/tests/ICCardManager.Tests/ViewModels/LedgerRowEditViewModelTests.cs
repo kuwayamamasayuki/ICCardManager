@@ -361,6 +361,92 @@ public class LedgerRowEditViewModelTests
 
     #endregion
 
+    #region 削除機能（Issue #750）
+
+    [Fact]
+    public async Task AddMode_CanDelete_IsFalse()
+    {
+        // Arrange
+        var allLedgers = CreateTestLedgers();
+
+        // Act
+        await _viewModel.InitializeForAddAsync(TestCardIdm, allLedgers, TestOperatorIdm);
+
+        // Assert: 追加モードでは削除できない
+        _viewModel.CanDelete.Should().BeFalse();
+        _viewModel.IsDeleteRequested.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task EditMode_NormalRecord_CanDelete_IsTrue()
+    {
+        // Arrange: 通常の履歴（IsLentRecord = false）
+        var ledger = new Ledger
+        {
+            Id = 1, CardIdm = TestCardIdm,
+            Date = new DateTime(2026, 1, 10),
+            Summary = "鉄道（天神～博多）",
+            Income = 0, Expense = 210, Balance = 2300,
+            LenderIdm = _staffA.StaffIdm,
+            StaffName = _staffA.Name,
+            IsLentRecord = false
+        };
+        _ledgerRepoMock.Setup(r => r.GetByIdAsync(1)).ReturnsAsync(ledger);
+
+        var dto = new LedgerDto
+        {
+            Id = 1, CardIdm = TestCardIdm,
+            Date = new DateTime(2026, 1, 10), DateDisplay = "R8.1.10",
+            Summary = "鉄道（天神～博多）",
+            Income = 0, Expense = 210, Balance = 2300,
+            StaffName = _staffA.Name,
+            IsLentRecord = false
+        };
+
+        // Act
+        await _viewModel.InitializeForEditAsync(dto, TestOperatorIdm);
+
+        // Assert: 通常レコードは削除可能
+        _viewModel.CanDelete.Should().BeTrue();
+        _viewModel.IsDeleteRequested.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task EditMode_LentRecord_CanDelete_IsFalse()
+    {
+        // Arrange: 貸出中レコード（IsLentRecord = true）
+        var ledger = new Ledger
+        {
+            Id = 2, CardIdm = TestCardIdm,
+            Date = new DateTime(2026, 1, 15),
+            Summary = "（貸出中）",
+            Income = 0, Expense = 0, Balance = 2300,
+            LenderIdm = _staffA.StaffIdm,
+            StaffName = _staffA.Name,
+            IsLentRecord = true
+        };
+        _ledgerRepoMock.Setup(r => r.GetByIdAsync(2)).ReturnsAsync(ledger);
+
+        var dto = new LedgerDto
+        {
+            Id = 2, CardIdm = TestCardIdm,
+            Date = new DateTime(2026, 1, 15), DateDisplay = "R8.1.15",
+            Summary = "（貸出中）",
+            Income = 0, Expense = 0, Balance = 2300,
+            StaffName = _staffA.Name,
+            IsLentRecord = true
+        };
+
+        // Act
+        await _viewModel.InitializeForEditAsync(dto, TestOperatorIdm);
+
+        // Assert: 貸出中レコードは削除不可
+        _viewModel.CanDelete.Should().BeFalse();
+        _viewModel.IsDeleteRequested.Should().BeFalse();
+    }
+
+    #endregion
+
     #region 保存処理
 
     [Fact]

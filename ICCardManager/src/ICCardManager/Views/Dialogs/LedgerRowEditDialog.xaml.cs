@@ -30,8 +30,19 @@ namespace ICCardManager.Views.Dialogs
                     DialogResult = true;
                     Close();
                 }
+                // Issue #750: 削除要求時にダイアログを閉じる
+                if (e.PropertyName == nameof(LedgerRowEditViewModel.IsDeleteRequested) && _viewModel.IsDeleteRequested)
+                {
+                    DialogResult = false;
+                    Close();
+                }
             };
         }
+
+        /// <summary>
+        /// 削除が要求されたか（MainViewModelで参照）Issue #750
+        /// </summary>
+        public bool IsDeleteRequested => _viewModel.IsDeleteRequested;
 
         /// <summary>
         /// 追加モードで初期化
