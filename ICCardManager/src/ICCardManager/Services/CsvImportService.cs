@@ -918,6 +918,8 @@ namespace ICCardManager.Services
                 // バリデーションパス: まず全データをバリデーション
                 // IsUpdate: 既存レコードを更新する場合true
                 var validRecords = new List<(int LineNumber, Ledger Ledger, bool IsUpdate)>();
+                // Issue #754: 残高整合性チェック用に全レコードを保持（スキップ分を含む）
+                var allRecordsForValidation = new List<(int LineNumber, Ledger Ledger, bool IsUpdate)>();
                 var existingCardIdms = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
                 // 全カードのIDmをキャッシュ（パフォーマンス向上）
@@ -1097,7 +1099,19 @@ namespace ICCardManager.Services
                             }
                             else
                             {
-                                // 変更がない場合はスキップ
+                                // 変更がない場合はスキップ（DB操作は不要）
+                                // Issue #754: 残高整合性チェック用にはCSVの全レコードが必要
+                                var skippedLedger = new Ledger
+                                {
+                                    Id = ledgerId.Value,
+                                    CardIdm = cardIdm,
+                                    Date = date,
+                                    Summary = summary,
+                                    Income = income,
+                                    Expense = expense,
+                                    Balance = balance
+                                };
+                                allRecordsForValidation.Add((lineNumber, skippedLedger, false));
                                 skippedCount++;
                                 continue;
                             }
@@ -1124,10 +1138,12 @@ namespace ICCardManager.Services
                     };
 
                     validRecords.Add((lineNumber, ledger, isUpdate));
+                    allRecordsForValidation.Add((lineNumber, ledger, isUpdate));
                 }
 
-                // Issue #428: 金額の整合性チェック（カードごとに残高の連続性を検証）
-                ValidateBalanceConsistencyForLedgers(validRecords, errors);
+                // Issue #754: 残高整合性チェックはスキップ分を含む全レコードで実施
+                // （スキップされたレコードを除外すると前後関係が崩れ、誤った前回残高でエラーになる）
+                ValidateBalanceConsistencyForLedgers(allRecordsForValidation, errors);
 
                 // バリデーションエラーがあれば中断
                 if (errors.Count > 0)
