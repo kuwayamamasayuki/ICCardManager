@@ -27,7 +27,7 @@
         </Grid.RowDefinitions>
 
         <!-- カード情報ヘッダー -->
-        <Border Grid.Row="0" Background="#E3F2FD" CornerRadius="4" Padding="15" Margin="0,0,0,15">
+        <Border Grid.Row="0" Background="{DynamicResource ReturnBackgroundBrush}" CornerRadius="4" Padding="15" Margin="0,0,0,15">
             <Grid>
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*"/>
@@ -45,7 +45,7 @@
                                VerticalAlignment="Center"/>
                     <TextBlock Text="{Binding Card.Note}"
                                FontSize="{DynamicResource BaseFontSize}"
-                               Foreground="Gray"
+                               Foreground="{DynamicResource SecondaryTextBrush}"
                                Margin="20,0,0,0"
                                VerticalAlignment="Center"/>
                 </StackPanel>
@@ -57,7 +57,7 @@
                     <TextBlock Text="{Binding CurrentBalance, StringFormat={}{0:N0}円}"
                                FontSize="{DynamicResource TitleFontSize}"
                                FontWeight="Bold"
-                               Foreground="#1565C0"
+                               Foreground="{DynamicResource InfoTextBrush}"
                                Margin="10,0,0,0"
                                VerticalAlignment="Center"/>
                 </StackPanel>
@@ -76,13 +76,13 @@
                 <TextBlock Text="表示期間:"
                            VerticalAlignment="Center"
                            Margin="0,0,10,0"/>
-                <Border Background="#E3F2FD"
+                <Border Background="{DynamicResource ReturnBackgroundBrush}"
                         CornerRadius="4"
                         Padding="15,8">
                     <TextBlock Text="{Binding SelectedPeriodDisplay}"
                                FontSize="{DynamicResource LargeFontSize}"
                                FontWeight="Bold"
-                               Foreground="#1565C0"/>
+                               Foreground="{DynamicResource InfoTextBrush}"/>
                 </Border>
             </StackPanel>
 
@@ -116,7 +116,7 @@
                        AutomationProperties.Name="月選択ポップアップ"
                        AutomationProperties.HelpText="年と月を選んで「適用」を押すと、その月の履歴が表示されます">
                     <Border Background="White"
-                            BorderBrush="#CCCCCC"
+                            BorderBrush="{DynamicResource SubtleBorderBrush}"
                             BorderThickness="1"
                             CornerRadius="4"
                             Padding="15"
@@ -155,8 +155,8 @@
                                 <Button Content="適用"
                                         Command="{Binding ApplySelectedMonthCommand}"
                                         Padding="15,5"
-                                        Background="#2196F3"
-                                        Foreground="White"
+                                        Background="{DynamicResource HeaderBackgroundBrush}"
+                                        Foreground="{DynamicResource OnPrimaryBrush}"
                                         AutomationProperties.Name="選択した月を適用"/>
                             </StackPanel>
                         </StackPanel>
@@ -177,7 +177,7 @@
                   GridLinesVisibility="Horizontal"
                   HeadersVisibility="Column"
                   RowHeaderWidth="0"
-                  AlternatingRowBackground="#FAFAFA"
+                  AlternatingRowBackground="{DynamicResource AlternatingRowBrush}"
                   AutomationProperties.Name="利用履歴一覧"
                   AutomationProperties.HelpText="選択した期間のカード利用履歴です。貸出中のレコードはオレンジ背景で表示されます。">
             <DataGrid.Columns>
@@ -190,7 +190,7 @@
                     <DataGridTextColumn.ElementStyle>
                         <Style TargetType="TextBlock">
                             <Setter Property="HorizontalAlignment" Value="Right"/>
-                            <Setter Property="Foreground" Value="Green"/>
+                            <Setter Property="Foreground" Value="{DynamicResource SuccessActionBrush}"/>
                             <Setter Property="FontWeight" Value="Bold"/>
                         </Style>
                     </DataGridTextColumn.ElementStyle>
@@ -225,7 +225,7 @@
                 <Style TargetType="DataGridRow">
                     <Style.Triggers>
                         <DataTrigger Binding="{Binding IsLentRecord}" Value="True">
-                            <Setter Property="Background" Value="#FFF3E0"/>
+                            <Setter Property="Background" Value="{DynamicResource LendingBackgroundBrush}"/>
                             <Setter Property="FontStyle" Value="Italic"/>
                         </DataTrigger>
                     </Style.Triggers>
@@ -242,7 +242,7 @@
 
             <!-- ページネーション -->
             <Border Grid.Row="0"
-                    Background="#F5F5F5"
+                    Background="{DynamicResource NeutralBackgroundBrush}"
                     CornerRadius="4"
                     Padding="10,8"
                     Margin="0,0,0,10">
@@ -273,7 +273,7 @@
                                    VerticalAlignment="Center"
                                    Margin="15,0,5,0"/>
                         <Border Background="White"
-                                BorderBrush="#CCCCCC"
+                                BorderBrush="{DynamicResource SubtleBorderBrush}"
                                 BorderThickness="1"
                                 CornerRadius="2"
                                 Padding="10,4">
@@ -312,7 +312,7 @@
                                   AutomationProperties.Name="表示件数選択"/>
 
                         <TextBlock Text="|"
-                                   Foreground="#CCCCCC"
+                                   Foreground="{DynamicResource SubtleBorderBrush}"
                                    Margin="15,0"
                                    VerticalAlignment="Center"/>
 
@@ -326,7 +326,7 @@
             <!-- ステータスと閉じるボタン -->
             <Grid Grid.Row="1">
                 <TextBlock Text="{Binding StatusMessage}"
-                           Foreground="Gray"
+                           Foreground="{DynamicResource SecondaryTextBrush}"
                            VerticalAlignment="Center"
                            AutomationProperties.LiveSetting="Polite"/>
                 <Button Content="閉じる"
@@ -341,12 +341,12 @@
 
         <!-- 処理中オーバーレイ -->
         <Border Grid.RowSpan="4"
-                Background="#80000000"
+                Background="{DynamicResource OverlayBrush}"
                 Visibility="{Binding IsBusy, Converter={StaticResource BoolToVisibilityConverter}}">
             <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
                 <ProgressBar IsIndeterminate="True" Width="200" Height="4"/>
                 <TextBlock Text="{Binding BusyMessage}"
-                           Foreground="White"
+                           Foreground="{DynamicResource OnPrimaryBrush}"
                            FontSize="{DynamicResource BaseFontSize}"
                            Margin="0,10,0,0"
                            HorizontalAlignment="Center"/>

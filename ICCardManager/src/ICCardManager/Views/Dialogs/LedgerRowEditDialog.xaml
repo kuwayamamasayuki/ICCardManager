@@ -174,7 +174,7 @@
 
         <!-- 挿入位置プレビュー（Addモードのみ） -->
         <Border Grid.Row="1"
-                Background="#F5F5F5"
+                Background="{DynamicResource NeutralBackgroundBrush}"
                 CornerRadius="4"
                 Padding="10"
                 Margin="0,5,0,5"
@@ -202,9 +202,9 @@
                 </ItemsControl>
 
                 <!-- 挿入位置マーカー -->
-                <Border Background="#FFF3E0" CornerRadius="4" Padding="8,4" Margin="0,3">
+                <Border Background="{DynamicResource LendingBackgroundBrush}" CornerRadius="4" Padding="8,4" Margin="0,3">
                     <TextBlock Text="▶▶▶ ここに挿入 ◀◀◀"
-                               Foreground="#E65100"
+                               Foreground="{DynamicResource LendingForegroundBrush}"
                                FontWeight="Bold"
                                FontSize="{DynamicResource BaseFontSize}"
                                HorizontalAlignment="Center"/>
@@ -230,7 +230,7 @@
         <StackPanel Grid.Row="2" Margin="0,5,0,5">
             <!-- バリデーションエラー -->
             <TextBlock Text="{Binding ValidationMessage}"
-                       Foreground="#D32F2F"
+                       Foreground="{DynamicResource DangerTextBrush}"
                        FontSize="{DynamicResource SmallFontSize}"
                        FontWeight="Bold">
                 <TextBlock.Style>
@@ -246,12 +246,12 @@
             </TextBlock>
 
             <!-- 警告メッセージ -->
-            <Border Background="#FFF3E0"
+            <Border Background="{DynamicResource LendingBackgroundBrush}"
                     CornerRadius="4"
                     Padding="10,5"
                     Margin="0,3,0,0">
                 <TextBlock Text="{Binding WarningMessage}"
-                           Foreground="#E65100"
+                           Foreground="{DynamicResource LendingForegroundBrush}"
                            FontSize="{DynamicResource SmallFontSize}">
                     <TextBlock.Style>
                         <Style TargetType="TextBlock">
@@ -278,7 +278,7 @@
 
             <!-- ステータスメッセージ -->
             <TextBlock Text="{Binding StatusMessage}"
-                       Foreground="#D32F2F"
+                       Foreground="{DynamicResource DangerTextBrush}"
                        FontSize="{DynamicResource SmallFontSize}">
                 <TextBlock.Style>
                     <Style TargetType="TextBlock">
@@ -307,7 +307,7 @@
                     Command="{Binding RequestDeleteCommand}"
                     Visibility="{Binding CanDelete, Converter={StaticResource BoolToVisibilityConverter}}"
                     Padding="20,10"
-                    Foreground="#D32F2F"
+                    Foreground="{DynamicResource DangerTextBrush}"
                     FontSize="{DynamicResource BaseFontSize}"
                     AutomationProperties.Name="この履歴を削除"
                     ToolTip="この履歴を削除します"/>
@@ -328,8 +328,8 @@
                         Command="{Binding SaveCommand}"
                         IsEnabled="{Binding CanSave}"
                         Padding="25,10"
-                        Background="#4CAF50"
-                        Foreground="White"
+                        Background="{DynamicResource SuccessActionBrush}"
+                        Foreground="{DynamicResource OnPrimaryBrush}"
                         IsDefault="True"
                         FontSize="{DynamicResource BaseFontSize}"
                         AutomationProperties.Name="保存"
@@ -339,12 +339,12 @@
 
         <!-- 処理中オーバーレイ -->
         <Border Grid.RowSpan="5"
-                Background="#80000000"
+                Background="{DynamicResource OverlayBrush}"
                 Visibility="{Binding IsBusy, Converter={StaticResource BoolToVisibilityConverter}}">
             <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
                 <ProgressBar IsIndeterminate="True" Width="200" Height="4"/>
                 <TextBlock Text="{Binding BusyMessage}"
-                           Foreground="White"
+                           Foreground="{DynamicResource OnPrimaryBrush}"
                            FontSize="{DynamicResource BaseFontSize}"
                            Margin="0,10,0,0"
                            HorizontalAlignment="Center"/>

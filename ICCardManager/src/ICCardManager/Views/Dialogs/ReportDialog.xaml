@@ -43,15 +43,15 @@
                                 Command="{Binding SelectLastMonthCommand}"
                                 Padding="15,6"
                                 Margin="0,0,10,0"
-                                Background="#E3F2FD"
-                                BorderBrush="#2196F3"
+                                Background="{DynamicResource ReturnBackgroundBrush}"
+                                BorderBrush="{DynamicResource HeaderBackgroundBrush}"
                                 AutomationProperties.Name="先月を選択"
                                 ToolTip="対象年月を先月に設定"/>
                         <Button Content="今月"
                                 Command="{Binding SelectThisMonthCommand}"
                                 Padding="15,6"
-                                Background="#E3F2FD"
-                                BorderBrush="#2196F3"
+                                Background="{DynamicResource ReturnBackgroundBrush}"
+                                BorderBrush="{DynamicResource HeaderBackgroundBrush}"
                                 AutomationProperties.Name="今月を選択"
                                 ToolTip="対象年月を今月に設定"/>
                     </StackPanel>
@@ -91,7 +91,7 @@
                              Text="{Binding OutputFolder}"
                              IsReadOnly="True"
                              Padding="8"
-                             Background="#F5F5F5"
+                             Background="{DynamicResource NeutralBackgroundBrush}"
                              AutomationProperties.Name="出力先フォルダパス"/>
                     <Button Grid.Column="1"
                             Content="参照"
@@ -126,7 +126,7 @@
                 <ItemsControl Grid.Row="1"
                               ItemsSource="{Binding Cards}"
                               BorderThickness="1"
-                              BorderBrush="#DDDDDD"
+                              BorderBrush="{DynamicResource SubtleBorderBrush}"
                               Background="White">
                     <ItemsControl.ItemsPanel>
                         <ItemsPanelTemplate>
@@ -147,7 +147,7 @@
                     </ItemsControl.Template>
                     <ItemsControl.ItemTemplate>
                         <DataTemplate>
-                            <Border Padding="5" BorderThickness="0,0,0,1" BorderBrush="#EEEEEE">
+                            <Border Padding="5" BorderThickness="0,0,0,1" BorderBrush="{DynamicResource SubtleBorderBrush}">
                                 <CheckBox IsChecked="{Binding IsSelected, Mode=TwoWay}"
                                           Margin="5">
                                     <StackPanel Orientation="Horizontal">
@@ -157,7 +157,7 @@
                                         <TextBlock Text="{Binding CardNumber}"
                                                    Width="100"/>
                                         <TextBlock Text="{Binding Note}"
-                                                   Foreground="Gray"/>
+                                                   Foreground="{DynamicResource SecondaryTextBrush}"/>
                                     </StackPanel>
                                 </CheckBox>
                             </Border>
@@ -209,7 +209,7 @@
             <!-- ステータスメッセージ -->
             <TextBlock Grid.Column="0"
                        Text="{Binding StatusMessage}"
-                       Foreground="#1976D2"
+                       Foreground="{DynamicResource PrimaryBrush}"
                        FontWeight="Bold"
                        VerticalAlignment="Center"/>
 
@@ -230,8 +230,8 @@
                         Padding="20,10"
                         Margin="0,0,10,0"
                         MinWidth="100"
-                        Background="#2196F3"
-                        Foreground="White"
+                        Background="{DynamicResource HeaderBackgroundBrush}"
+                        Foreground="{DynamicResource OnPrimaryBrush}"
                         AutomationProperties.Name="印刷プレビュー"
                         AutomationProperties.HelpText="選択したカードの帳票をプレビュー表示します"
                         ToolTip="選択したカードの帳票をプレビュー"/>
@@ -239,8 +239,8 @@
                         Command="{Binding CreateReportCommand}"
                         Padding="20,10"
                         MinWidth="100"
-                        Background="#4CAF50"
-                        Foreground="White"
+                        Background="{DynamicResource SuccessActionBrush}"
+                        Foreground="{DynamicResource OnPrimaryBrush}"
                         AutomationProperties.Name="帳票を作成"
                         AutomationProperties.HelpText="選択したカードの帳票を作成します"
                         ToolTip="帳票を作成"/>
@@ -249,12 +249,12 @@
 
         <!-- 処理中オーバーレイ -->
         <Border Grid.RowSpan="4"
-                Background="#80000000"
+                Background="{DynamicResource OverlayBrush}"
                 Visibility="{Binding IsBusy, Converter={StaticResource BoolToVisibilityConverter}}">
             <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
                 <ProgressBar IsIndeterminate="True" Width="250" Height="4"/>
                 <TextBlock Text="{Binding BusyMessage}"
-                           Foreground="White"
+                           Foreground="{DynamicResource OnPrimaryBrush}"
                            FontSize="{DynamicResource BaseFontSize}"
                            Margin="0,10,0,0"
                            HorizontalAlignment="Center"/>

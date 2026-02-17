@@ -41,7 +41,7 @@
         </Grid.RowDefinitions>
 
         <!-- 親レコード情報ヘッダー -->
-        <Border Grid.Row="0" Background="#E3F2FD" CornerRadius="4" Padding="15" Margin="0,0,0,10">
+        <Border Grid.Row="0" Background="{DynamicResource ReturnBackgroundBrush}" CornerRadius="4" Padding="15" Margin="0,0,0,10">
             <Grid>
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto"/>
@@ -71,14 +71,14 @@
                     <TextBlock Text="{Binding IncomeDisplay}"
                                FontSize="{DynamicResource LargeFontSize}"
                                FontWeight="Bold"
-                               Foreground="Green"
+                               Foreground="{DynamicResource SuccessActionBrush}"
                                VerticalAlignment="Center"
                                Margin="0,0,15,0"
                                Visibility="{Binding IncomeDisplay, Converter={StaticResource BoolToVisibilityConverter}}"/>
                     <TextBlock Text="{Binding ExpenseDisplay}"
                                FontSize="{DynamicResource LargeFontSize}"
                                FontWeight="Bold"
-                               Foreground="OrangeRed"
+                               Foreground="{DynamicResource LendingForegroundBrush}"
                                VerticalAlignment="Center"
                                Margin="0,0,15,0"
                                Visibility="{Binding ExpenseDisplay, Converter={StaticResource BoolToVisibilityConverter}}"/>
@@ -88,7 +88,7 @@
                     <TextBlock Text="{Binding BalanceDisplay}"
                                FontSize="{DynamicResource LargeFontSize}"
                                FontWeight="Bold"
-                               Foreground="#1565C0"
+                               Foreground="{DynamicResource InfoTextBrush}"
                                Margin="5,0,0,0"
                                VerticalAlignment="Center"/>
                 </StackPanel>
@@ -97,7 +97,7 @@
                 <StackPanel Grid.Row="1" Grid.ColumnSpan="2" Orientation="Horizontal" Margin="0,8,0,0">
                     <TextBlock Text="利用者:"
                                FontSize="{DynamicResource SmallFontSize}"
-                               Foreground="Gray"
+                               Foreground="{DynamicResource SecondaryTextBrush}"
                                VerticalAlignment="Center"/>
                     <TextBlock Text="{Binding StaffName}"
                                FontSize="{DynamicResource SmallFontSize}"
@@ -105,7 +105,7 @@
                                VerticalAlignment="Center"/>
                     <TextBlock Text="備考:"
                                FontSize="{DynamicResource SmallFontSize}"
-                               Foreground="Gray"
+                               Foreground="{DynamicResource SecondaryTextBrush}"
                                VerticalAlignment="Center"/>
                     <TextBlock Text="{Binding Note}"
                                FontSize="{DynamicResource SmallFontSize}"
@@ -118,7 +118,7 @@
         </Border>
 
         <!-- ツールバー -->
-        <Border Grid.Row="1" Background="#F5F5F5" CornerRadius="4" Padding="10" Margin="0,0,0,10">
+        <Border Grid.Row="1" Background="{DynamicResource NeutralBackgroundBrush}" CornerRadius="4" Padding="10" Margin="0,0,0,10">
             <Grid>
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*"/>
@@ -147,14 +147,14 @@
 
                 <TextBlock Grid.Column="1"
                            Text="{Binding StatusMessage}"
-                           Foreground="#666666"
+                           Foreground="{DynamicResource MutedTextBrush}"
                            VerticalAlignment="Center"
                            FontSize="{DynamicResource SmallFontSize}"/>
             </Grid>
         </Border>
 
         <!-- 詳細一覧（カスタムリスト: 分割線クリック対応） -->
-        <Border Grid.Row="2" BorderBrush="#E0E0E0" BorderThickness="1" CornerRadius="4">
+        <Border Grid.Row="2" BorderBrush="{DynamicResource NeutralBorderBrush}" BorderThickness="1" CornerRadius="4">
             <Grid>
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto"/>
@@ -162,7 +162,7 @@
                 </Grid.RowDefinitions>
 
                 <!-- ヘッダー行 -->
-                <Border Grid.Row="0" Background="#F5F5F5" Padding="8,6">
+                <Border Grid.Row="0" Background="{DynamicResource NeutralBackgroundBrush}" Padding="8,6">
                     <Grid>
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="60"/>
@@ -248,10 +248,10 @@
                                                            FontSize="{DynamicResource SmallFontSize}">
                                                     <TextBlock.Style>
                                                         <Style TargetType="TextBlock">
-                                                            <Setter Property="Foreground" Value="White"/>
+                                                            <Setter Property="Foreground" Value="{DynamicResource OnPrimaryBrush}"/>
                                                             <Style.Triggers>
                                                                 <DataTrigger Binding="{Binding GroupColorIndex}" Value="0">
-                                                                    <Setter Property="Foreground" Value="Gray"/>
+                                                                    <Setter Property="Foreground" Value="{DynamicResource SecondaryTextBrush}"/>
                                                                 </DataTrigger>
                                                             </Style.Triggers>
                                                         </Style>
@@ -325,20 +325,20 @@
                                                                     <!-- 通常の薄い線（ホバー時に表示） -->
                                                                     <Border x:Name="HoverLine"
                                                                             Height="2"
-                                                                            Background="#BDBDBD"
+                                                                            Background="{DynamicResource DividerBrush}"
                                                                             Opacity="0"
                                                                             VerticalAlignment="Center"/>
                                                                     <!-- 分割線（表示時） -->
                                                                     <Border x:Name="DividerLine"
                                                                             Height="4"
-                                                                            Background="#424242"
+                                                                            Background="{DynamicResource WaitingForegroundBrush}"
                                                                             VerticalAlignment="Center"
                                                                             Visibility="Collapsed"/>
                                                                     <!-- クリックヒント -->
                                                                     <TextBlock x:Name="HintText"
                                                                                Text="クリックして分割"
                                                                                FontSize="{DynamicResource SmallFontSize}"
-                                                                               Foreground="#757575"
+                                                                               Foreground="{DynamicResource MutedTextBrush}"
                                                                                HorizontalAlignment="Center"
                                                                                VerticalAlignment="Center"
                                                                                Visibility="Collapsed"/>
@@ -356,7 +356,7 @@
                                                                         <Condition Property="IsMouseOver" Value="True"/>
                                                                     </MultiTrigger.Conditions>
                                                                     <Setter TargetName="HoverLine" Property="Opacity" Value="1"/>
-                                                                    <Setter TargetName="DividerBorder" Property="Background" Value="#F5F5F5"/>
+                                                                    <Setter TargetName="DividerBorder" Property="Background" Value="{DynamicResource NeutralBackgroundBrush}"/>
                                                                     <Setter TargetName="HintText" Property="Visibility" Value="Visible"/>
                                                                 </MultiTrigger>
                                                                 <!-- ホバー時（分割線あり） -->
@@ -366,7 +366,7 @@
                                                                         <Condition Binding="{Binding ShowDividerBelow}" Value="True"/>
                                                                     </MultiDataTrigger.Conditions>
                                                                     <Setter TargetName="HintText" Property="Text" Value="クリックして統合"/>
-                                                                    <Setter TargetName="DividerLine" Property="Background" Value="#D32F2F"/>
+                                                                    <Setter TargetName="DividerLine" Property="Background" Value="{DynamicResource DangerTextBrush}"/>
                                                                 </MultiDataTrigger>
                                                             </ControlTemplate.Triggers>
                                                         </ControlTemplate>
@@ -384,7 +384,7 @@
         </Border>
 
         <!-- 操作説明 -->
-        <Border Grid.Row="3" Background="#FFFDE7" CornerRadius="4" Padding="10" Margin="0,10,0,0">
+        <Border Grid.Row="3" Background="{DynamicResource WarningBackgroundBrush}" CornerRadius="4" Padding="10" Margin="0,10,0,0">
             <StackPanel>
                 <TextBlock TextWrapping="Wrap" FontSize="{DynamicResource SmallFontSize}">
                     <Run FontWeight="Bold">操作方法:</Run>
@@ -407,12 +407,12 @@
         <Grid Grid.Row="4" Margin="0,15,0,0">
             <StackPanel Orientation="Horizontal">
                 <TextBlock Text="{Binding DetailCountDisplay}"
-                           Foreground="Gray"
+                           Foreground="{DynamicResource SecondaryTextBrush}"
                            VerticalAlignment="Center"/>
-                <TextBlock Text=" | " Foreground="Gray" VerticalAlignment="Center"
+                <TextBlock Text=" | " Foreground="{DynamicResource SecondaryTextBrush}" VerticalAlignment="Center"
                            Visibility="{Binding HasChanges, Converter={StaticResource BoolToVisibilityConverter}}"/>
                 <TextBlock Text="未保存の変更があります"
-                           Foreground="#D32F2F"
+                           Foreground="{DynamicResource DangerTextBrush}"
                            FontWeight="Bold"
                            VerticalAlignment="Center"
                            Visibility="{Binding HasChanges, Converter={StaticResource BoolToVisibilityConverter}}"/>
@@ -423,8 +423,8 @@
                         Command="{Binding SaveCommand}"
                         Padding="15,8"
                         Margin="0,0,10,0"
-                        Background="#4CAF50"
-                        Foreground="White"
+                        Background="{DynamicResource SuccessActionBrush}"
+                        Foreground="{DynamicResource OnPrimaryBrush}"
                         AutomationProperties.Name="保存"
                         ToolTip="変更を保存します">
                     <Button.Style>
@@ -454,16 +454,16 @@
                             Command="{Binding SaveWithFullSplitCommand}"
                             Padding="15,8"
                             Margin="0,0,6,0"
-                            Background="#1565C0"
-                            Foreground="White"
+                            Background="{DynamicResource InfoTextBrush}"
+                            Foreground="{DynamicResource OnPrimaryBrush}"
                             AutomationProperties.Name="別々の履歴に分割"
                             ToolTip="グループごとに別の履歴レコードを作成します"/>
                     <Button Content="摘要のみ更新"
                             Command="{Binding SaveCommand}"
                             Padding="15,8"
                             Margin="0,0,10,0"
-                            Background="#4CAF50"
-                            Foreground="White"
+                            Background="{DynamicResource SuccessActionBrush}"
+                            Foreground="{DynamicResource OnPrimaryBrush}"
                             AutomationProperties.Name="摘要のみ更新"
                             ToolTip="1つの履歴レコードのまま摘要を変更します"/>
                 </StackPanel>
@@ -478,12 +478,12 @@
 
         <!-- 処理中オーバーレイ -->
         <Border Grid.RowSpan="5"
-                Background="#80000000"
+                Background="{DynamicResource OverlayBrush}"
                 Visibility="{Binding IsBusy, Converter={StaticResource BoolToVisibilityConverter}}">
             <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
                 <ProgressBar IsIndeterminate="True" Width="200" Height="4"/>
                 <TextBlock Text="保存中..."
-                           Foreground="White"
+                           Foreground="{DynamicResource OnPrimaryBrush}"
                            FontSize="{DynamicResource BaseFontSize}"
                            Margin="0,10,0,0"
                            HorizontalAlignment="Center"/>

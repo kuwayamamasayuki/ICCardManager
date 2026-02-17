@@ -18,7 +18,7 @@
 
         <!-- 説明 -->
         <TextBlock Grid.Row="0" Margin="0,0,0,12" TextWrapping="Wrap"
-                   Foreground="Red" FontWeight="Bold">
+                   Foreground="{DynamicResource ErrorBorderBrush}" FontWeight="Bold">
             [DEBUG専用] 仮想的にICカードをタッチします。最大20件の履歴を指定できます。
         </TextBlock>
 
@@ -100,7 +100,7 @@
                     CommandParameter="{Binding SelectedEntry}" Padding="16,4" Margin="0,0,8,0"
                     AutomationProperties.Name="履歴削除"
                     ToolTip="選択した利用履歴エントリを削除します"/>
-            <TextBlock VerticalAlignment="Center" Foreground="Gray">
+            <TextBlock VerticalAlignment="Center" Foreground="{DynamicResource SecondaryTextBrush}">
                 <Run Text="{Binding Entries.Count, Mode=OneWay}"/><Run Text=" / 20 件"/>
             </TextBlock>
         </StackPanel>
@@ -109,7 +109,7 @@
         <StackPanel Grid.Row="4" Orientation="Horizontal" HorizontalAlignment="Right">
             <Button Content="タッチ実行" Command="{Binding ApplyAndTouchCommand}"
                     Padding="24,8" Margin="0,0,8,0" FontWeight="Bold"
-                    Background="#4CAF50" Foreground="White"
+                    Background="{DynamicResource SuccessActionBrush}" Foreground="{DynamicResource OnPrimaryBrush}"
                     AutomationProperties.Name="タッチ実行"
                     ToolTip="指定した情報で仮想ICカードタッチをシミュレーション実行します"/>
             <Button Content="閉じる" Click="CloseButton_Click"

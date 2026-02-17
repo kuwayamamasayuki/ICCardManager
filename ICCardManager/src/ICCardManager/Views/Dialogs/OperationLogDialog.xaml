@@ -28,7 +28,7 @@
         </Grid.RowDefinitions>
 
         <!-- タイトルヘッダー -->
-        <Border Grid.Row="0" Background="#E8EAF6" CornerRadius="4" Padding="15" Margin="0,0,0,15">
+        <Border Grid.Row="0" Background="{DynamicResource ReturnBackgroundBrush}" CornerRadius="4" Padding="15" Margin="0,0,0,15">
             <Grid>
                 <StackPanel Orientation="Horizontal">
                     <TextBlock Text="&#x1F4DD;"
@@ -41,7 +41,7 @@
                                VerticalAlignment="Center"/>
                     <TextBlock Text="システムで行われた操作の履歴を確認できます"
                                FontSize="{DynamicResource SmallFontSize}"
-                               Foreground="Gray"
+                               Foreground="{DynamicResource SecondaryTextBrush}"
                                Margin="20,0,0,0"
                                VerticalAlignment="Center"/>
                 </StackPanel>
@@ -49,7 +49,7 @@
         </Border>
 
         <!-- 検索条件 -->
-        <Border Grid.Row="1" BorderBrush="#E0E0E0" BorderThickness="1" CornerRadius="4" Padding="15" Margin="0,0,0,10">
+        <Border Grid.Row="1" BorderBrush="{DynamicResource NeutralBorderBrush}" BorderThickness="1" CornerRadius="4" Padding="15" Margin="0,0,0,10">
             <Grid>
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto"/>
@@ -165,8 +165,8 @@
                             ToolTip="検索条件をクリア"/>
                     <Button Content="検索"
                             Command="{Binding SearchCommand}"
-                            Background="#3F51B5"
-                            Foreground="White"
+                            Background="{DynamicResource PrimaryBrush}"
+                            Foreground="{DynamicResource OnPrimaryBrush}"
                             Padding="20,6"
                             FontWeight="Bold"
                             ToolTip="条件に一致する操作ログを検索"/>
@@ -186,7 +186,7 @@
                   GridLinesVisibility="Horizontal"
                   HeadersVisibility="Column"
                   RowHeaderWidth="0"
-                  AlternatingRowBackground="#FAFAFA"
+                  AlternatingRowBackground="{DynamicResource AlternatingRowBrush}"
                   AutomationProperties.Name="操作ログ一覧"
                   AutomationProperties.HelpText="検索条件に一致する操作ログの一覧です。">
             <DataGrid.Columns>
@@ -197,15 +197,15 @@
                             <Setter Property="HorizontalAlignment" Value="Center"/>
                             <Style.Triggers>
                                 <DataTrigger Binding="{Binding Action}" Value="INSERT">
-                                    <Setter Property="Foreground" Value="Green"/>
+                                    <Setter Property="Foreground" Value="{DynamicResource SuccessActionBrush}"/>
                                     <Setter Property="FontWeight" Value="Bold"/>
                                 </DataTrigger>
                                 <DataTrigger Binding="{Binding Action}" Value="UPDATE">
-                                    <Setter Property="Foreground" Value="#FF8C00"/>
+                                    <Setter Property="Foreground" Value="{DynamicResource WarningActionBrush}"/>
                                     <Setter Property="FontWeight" Value="Bold"/>
                                 </DataTrigger>
                                 <DataTrigger Binding="{Binding Action}" Value="DELETE">
-                                    <Setter Property="Foreground" Value="Red"/>
+                                    <Setter Property="Foreground" Value="{DynamicResource ErrorBorderBrush}"/>
                                     <Setter Property="FontWeight" Value="Bold"/>
                                 </DataTrigger>
                             </Style.Triggers>
@@ -223,7 +223,7 @@
                 <Style TargetType="DataGridRow">
                     <Style.Triggers>
                         <DataTrigger Binding="{Binding Action}" Value="DELETE">
-                            <Setter Property="Background" Value="#FFEBEE"/>
+                            <Setter Property="Background" Value="{DynamicResource ErrorBackgroundBrush}"/>
                         </DataTrigger>
                     </Style.Triggers>
                 </Style>
@@ -242,10 +242,10 @@
                 <!-- ページ情報 -->
                 <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center">
                     <TextBlock Text="{Binding PageInfo}"
-                               Foreground="Gray"
+                               Foreground="{DynamicResource SecondaryTextBrush}"
                                VerticalAlignment="Center"/>
                     <TextBlock Text="  |  表示件数:"
-                               Foreground="Gray"
+                               Foreground="{DynamicResource SecondaryTextBrush}"
                                Margin="10,0,5,0"
                                VerticalAlignment="Center"/>
                     <ComboBox ItemsSource="{Binding PageSizeOptions}"
@@ -317,7 +317,7 @@
             <!-- ステータスメッセージ -->
             <TextBlock Grid.Column="1"
                        Text="{Binding StatusMessage}"
-                       Foreground="Gray"
+                       Foreground="{DynamicResource SecondaryTextBrush}"
                        VerticalAlignment="Center"
                        Margin="20,0"
                        AutomationProperties.LiveSetting="Polite"/>
@@ -334,12 +334,12 @@
 
         <!-- 処理中オーバーレイ -->
         <Border Grid.RowSpan="5"
-                Background="#80000000"
+                Background="{DynamicResource OverlayBrush}"
                 Visibility="{Binding IsBusy, Converter={StaticResource BoolToVisibilityConverter}}">
             <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
                 <ProgressBar IsIndeterminate="True" Width="200" Height="4"/>
                 <TextBlock Text="{Binding BusyMessage}"
-                           Foreground="White"
+                           Foreground="{DynamicResource OnPrimaryBrush}"
                            FontSize="{DynamicResource BaseFontSize}"
                            Margin="0,10,0,0"
                            HorizontalAlignment="Center"/>
