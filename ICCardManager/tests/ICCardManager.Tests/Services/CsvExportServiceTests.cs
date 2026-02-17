@@ -484,6 +484,321 @@ public class CsvExportServiceTests : IDisposable
 
     #endregion
 
+    #region ExportLedgerDetailsAsync テスト (Issue #751)
+
+    /// <summary>
+    /// 利用履歴詳細のエクスポートが正常に動作することを確認
+    /// </summary>
+    [Fact]
+    public async Task ExportLedgerDetailsAsync_正常データ_CSVが出力される()
+    {
+        // Arrange
+        var details = new List<LedgerDetail>
+        {
+            new LedgerDetail
+            {
+                LedgerId = 1,
+                UseDate = new DateTime(2024, 1, 15, 10, 30, 0),
+                EntryStation = "博多",
+                ExitStation = "天神",
+                Amount = 260,
+                Balance = 9740,
+                IsCharge = false,
+                IsPointRedemption = false,
+                IsBus = false,
+                SequenceNumber = 1
+            },
+            new LedgerDetail
+            {
+                LedgerId = 1,
+                UseDate = new DateTime(2024, 1, 15, 17, 0, 0),
+                EntryStation = "天神",
+                ExitStation = "博多",
+                Amount = 260,
+                Balance = 9480,
+                IsCharge = false,
+                IsPointRedemption = false,
+                IsBus = false,
+                SequenceNumber = 2
+            }
+        };
+
+        var ledgers = new List<Ledger>
+        {
+            new Ledger { Id = 1, CardIdm = "0123456789ABCDEF", Date = new DateTime(2024, 1, 15) }
+        };
+
+        var cards = new List<IcCard>
+        {
+            new IcCard { CardIdm = "0123456789ABCDEF", CardType = "はやかけん", CardNumber = "001" }
+        };
+
+        _ledgerRepositoryMock
+            .Setup(x => x.GetAllDetailsInDateRangeAsync(It.IsAny<DateTime>(), It.IsAny<DateTime>()))
+            .ReturnsAsync(details);
+        _ledgerRepositoryMock
+            .Setup(x => x.GetByDateRangeAsync(null, It.IsAny<DateTime>(), It.IsAny<DateTime>()))
+            .ReturnsAsync(ledgers);
+        _cardRepositoryMock
+            .Setup(x => x.GetAllIncludingDeletedAsync())
+            .ReturnsAsync(cards);
+
+        var filePath = Path.Combine(_testDirectory, "ledger_details_export.csv");
+
+        // Act
+        var result = await _service.ExportLedgerDetailsAsync(
+            filePath,
+            new DateTime(2024, 1, 1),
+            new DateTime(2024, 1, 31));
+
+        // Assert
+        result.Success.Should().BeTrue();
+        result.ExportedCount.Should().Be(2);
+        result.FilePath.Should().Be(filePath);
+
+        var lines = await Task.Run(() => File.ReadAllLines(filePath, Encoding.UTF8));
+        lines.Should().HaveCount(3); // ヘッダー + 2行
+        lines[0].Should().Be("利用履歴ID,利用日時,カードIDm,管理番号,乗車駅,降車駅,バス停,金額,残額,チャージ,ポイント還元,バス利用,グループID");
+
+        // 1行目のデータを検証
+        lines[1].Should().Contain("1,2024-01-15 10:30:00,0123456789ABCDEF,001,博多,天神,,260,9740,0,0,0,");
+    }
+
+    /// <summary>
+    /// 詳細が0件の場合、ヘッダーのみ出力されることを確認
+    /// </summary>
+    [Fact]
+    public async Task ExportLedgerDetailsAsync_詳細なしのledger_ヘッダーのみ()
+    {
+        // Arrange
+        _ledgerRepositoryMock
+            .Setup(x => x.GetAllDetailsInDateRangeAsync(It.IsAny<DateTime>(), It.IsAny<DateTime>()))
+            .ReturnsAsync(new List<LedgerDetail>());
+        _ledgerRepositoryMock
+            .Setup(x => x.GetByDateRangeAsync(null, It.IsAny<DateTime>(), It.IsAny<DateTime>()))
+            .ReturnsAsync(new List<Ledger>());
+        _cardRepositoryMock
+            .Setup(x => x.GetAllIncludingDeletedAsync())
+            .ReturnsAsync(new List<IcCard>());
+
+        var filePath = Path.Combine(_testDirectory, "ledger_details_empty.csv");
+
+        // Act
+        var result = await _service.ExportLedgerDetailsAsync(
+            filePath,
+            new DateTime(2024, 1, 1),
+            new DateTime(2024, 1, 31));
+
+        // Assert
+        result.Success.Should().BeTrue();
+        result.ExportedCount.Should().Be(0);
+
+        var lines = await Task.Run(() => File.ReadAllLines(filePath, Encoding.UTF8));
+        lines.Should().HaveCount(1); // ヘッダーのみ
+    }
+
+    /// <summary>
+    /// NULL値が空欄で出力されることを確認
+    /// </summary>
+    [Fact]
+    public async Task ExportLedgerDetailsAsync_NULL値_空欄で出力()
+    {
+        // Arrange
+        var details = new List<LedgerDetail>
+        {
+            new LedgerDetail
+            {
+                LedgerId = 1,
+                UseDate = null,
+                EntryStation = null,
+                ExitStation = null,
+                BusStops = null,
+                Amount = null,
+                Balance = null,
+                IsCharge = false,
+                IsPointRedemption = false,
+                IsBus = false,
+                GroupId = null,
+                SequenceNumber = 1
+            }
+        };
+
+        var ledgers = new List<Ledger>
+        {
+            new Ledger { Id = 1, CardIdm = "0123456789ABCDEF", Date = new DateTime(2024, 1, 15) }
+        };
+        var cards = new List<IcCard>
+        {
+            new IcCard { CardIdm = "0123456789ABCDEF", CardType = "はやかけん", CardNumber = "001" }
+        };
+
+        _ledgerRepositoryMock
+            .Setup(x => x.GetAllDetailsInDateRangeAsync(It.IsAny<DateTime>(), It.IsAny<DateTime>()))
+            .ReturnsAsync(details);
+        _ledgerRepositoryMock
+            .Setup(x => x.GetByDateRangeAsync(null, It.IsAny<DateTime>(), It.IsAny<DateTime>()))
+            .ReturnsAsync(ledgers);
+        _cardRepositoryMock
+            .Setup(x => x.GetAllIncludingDeletedAsync())
+            .ReturnsAsync(cards);
+
+        var filePath = Path.Combine(_testDirectory, "ledger_details_null.csv");
+
+        // Act
+        var result = await _service.ExportLedgerDetailsAsync(
+            filePath,
+            new DateTime(2024, 1, 1),
+            new DateTime(2024, 1, 31));
+
+        // Assert
+        result.Success.Should().BeTrue();
+
+        var lines = await Task.Run(() => File.ReadAllLines(filePath, Encoding.UTF8));
+        // 1,,0123456789ABCDEF,001,,,,,,,0,0,0,
+        lines[1].Should().Be("1,,0123456789ABCDEF,001,,,,,,0,0,0,");
+    }
+
+    /// <summary>
+    /// ブール値が0と1で出力されることを確認
+    /// </summary>
+    [Fact]
+    public async Task ExportLedgerDetailsAsync_ブール値_0と1で出力()
+    {
+        // Arrange
+        var details = new List<LedgerDetail>
+        {
+            new LedgerDetail
+            {
+                LedgerId = 1,
+                UseDate = new DateTime(2024, 1, 15),
+                Amount = 1000,
+                Balance = 11000,
+                IsCharge = true,
+                IsPointRedemption = false,
+                IsBus = false,
+                SequenceNumber = 1
+            },
+            new LedgerDetail
+            {
+                LedgerId = 1,
+                UseDate = new DateTime(2024, 1, 15),
+                IsCharge = false,
+                IsPointRedemption = true,
+                IsBus = false,
+                SequenceNumber = 2
+            },
+            new LedgerDetail
+            {
+                LedgerId = 1,
+                UseDate = new DateTime(2024, 1, 15),
+                BusStops = "天神",
+                IsCharge = false,
+                IsPointRedemption = false,
+                IsBus = true,
+                SequenceNumber = 3
+            }
+        };
+
+        var ledgers = new List<Ledger>
+        {
+            new Ledger { Id = 1, CardIdm = "0123456789ABCDEF", Date = new DateTime(2024, 1, 15) }
+        };
+        var cards = new List<IcCard>
+        {
+            new IcCard { CardIdm = "0123456789ABCDEF", CardType = "はやかけん", CardNumber = "001" }
+        };
+
+        _ledgerRepositoryMock
+            .Setup(x => x.GetAllDetailsInDateRangeAsync(It.IsAny<DateTime>(), It.IsAny<DateTime>()))
+            .ReturnsAsync(details);
+        _ledgerRepositoryMock
+            .Setup(x => x.GetByDateRangeAsync(null, It.IsAny<DateTime>(), It.IsAny<DateTime>()))
+            .ReturnsAsync(ledgers);
+        _cardRepositoryMock
+            .Setup(x => x.GetAllIncludingDeletedAsync())
+            .ReturnsAsync(cards);
+
+        var filePath = Path.Combine(_testDirectory, "ledger_details_bool.csv");
+
+        // Act
+        var result = await _service.ExportLedgerDetailsAsync(
+            filePath,
+            new DateTime(2024, 1, 1),
+            new DateTime(2024, 1, 31));
+
+        // Assert
+        result.Success.Should().BeTrue();
+
+        var lines = await Task.Run(() => File.ReadAllLines(filePath, Encoding.UTF8));
+        // IsCharge=true → "1"
+        lines[1].Should().Contain(",1,0,0,");
+        // IsPointRedemption=true → "1"
+        lines[2].Should().Contain(",0,1,0,");
+        // IsBus=true → "1"
+        lines[3].Should().Contain(",0,0,1,");
+    }
+
+    /// <summary>
+    /// 特殊文字を含む駅名が正しくエスケープされることを確認
+    /// </summary>
+    [Fact]
+    public async Task ExportLedgerDetailsAsync_特殊文字_エスケープされる()
+    {
+        // Arrange
+        var details = new List<LedgerDetail>
+        {
+            new LedgerDetail
+            {
+                LedgerId = 1,
+                UseDate = new DateTime(2024, 1, 15),
+                EntryStation = "新宿,東口",  // カンマを含む
+                ExitStation = "渋谷\"駅\"",  // ダブルクォートを含む
+                Amount = 200,
+                Balance = 800,
+                IsCharge = false,
+                IsPointRedemption = false,
+                IsBus = false,
+                SequenceNumber = 1
+            }
+        };
+
+        var ledgers = new List<Ledger>
+        {
+            new Ledger { Id = 1, CardIdm = "0123456789ABCDEF", Date = new DateTime(2024, 1, 15) }
+        };
+        var cards = new List<IcCard>
+        {
+            new IcCard { CardIdm = "0123456789ABCDEF", CardType = "はやかけん", CardNumber = "001" }
+        };
+
+        _ledgerRepositoryMock
+            .Setup(x => x.GetAllDetailsInDateRangeAsync(It.IsAny<DateTime>(), It.IsAny<DateTime>()))
+            .ReturnsAsync(details);
+        _ledgerRepositoryMock
+            .Setup(x => x.GetByDateRangeAsync(null, It.IsAny<DateTime>(), It.IsAny<DateTime>()))
+            .ReturnsAsync(ledgers);
+        _cardRepositoryMock
+            .Setup(x => x.GetAllIncludingDeletedAsync())
+            .ReturnsAsync(cards);
+
+        var filePath = Path.Combine(_testDirectory, "ledger_details_special.csv");
+
+        // Act
+        var result = await _service.ExportLedgerDetailsAsync(
+            filePath,
+            new DateTime(2024, 1, 1),
+            new DateTime(2024, 1, 31));
+
+        // Assert
+        result.Success.Should().BeTrue();
+
+        var content = await Task.Run(() => File.ReadAllText(filePath, Encoding.UTF8));
+        content.Should().Contain("\"新宿,東口\"");  // カンマはダブルクォートで囲む
+        content.Should().Contain("\"渋谷\"\"駅\"\"\"");  // ダブルクォートはエスケープ
+    }
+
+    #endregion
+
     #region エラーハンドリング テスト
 
     /// <summary>

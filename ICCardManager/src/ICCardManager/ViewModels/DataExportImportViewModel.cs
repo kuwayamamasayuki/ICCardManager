@@ -26,7 +26,8 @@ public enum DataType
 {
     Cards,
     Staff,
-    Ledgers
+    Ledgers,
+    LedgerDetails
 }
 
 /// <summary>
@@ -43,6 +44,7 @@ public class DataTypeToDisplayNameConverter : IValueConverter
                 DataType.Cards => "カード一覧",
                 DataType.Staff => "職員一覧",
                 DataType.Ledgers => "利用履歴",
+                DataType.LedgerDetails => "利用履歴詳細",
                 _ => dataType.ToString()
             };
         }
@@ -189,12 +191,12 @@ public partial class DataExportImportViewModel : ViewModelBase
     /// <summary>
     /// エクスポート用データタイプの選択肢
     /// </summary>
-    public DataType[] ExportDataTypes { get; } = { DataType.Cards, DataType.Staff, DataType.Ledgers };
+    public DataType[] ExportDataTypes { get; } = { DataType.Cards, DataType.Staff, DataType.Ledgers, DataType.LedgerDetails };
 
     /// <summary>
     /// インポート用データタイプの選択肢
     /// </summary>
-    public DataType[] ImportDataTypes { get; } = { DataType.Cards, DataType.Staff, DataType.Ledgers };
+    public DataType[] ImportDataTypes { get; } = { DataType.Cards, DataType.Staff, DataType.Ledgers, DataType.LedgerDetails };
 
     /// <summary>
     /// データタイプの表示名を取得
@@ -206,14 +208,15 @@ public partial class DataExportImportViewModel : ViewModelBase
             DataType.Cards => "カード一覧",
             DataType.Staff => "職員一覧",
             DataType.Ledgers => "利用履歴",
+            DataType.LedgerDetails => "利用履歴詳細",
             _ => dataType.ToString()
         };
     }
 
     /// <summary>
-    /// 履歴エクスポートが選択されているか
+    /// 履歴エクスポートが選択されているか（日付範囲UIの表示制御用）
     /// </summary>
-    public bool IsLedgerExportSelected => SelectedExportType == DataType.Ledgers;
+    public bool IsLedgerExportSelected => SelectedExportType == DataType.Ledgers || SelectedExportType == DataType.LedgerDetails;
 
     /// <summary>
     /// 利用履歴インポートが選択されているか（カード指定UIの表示制御用）
@@ -336,6 +339,10 @@ public partial class DataExportImportViewModel : ViewModelBase
                         result = await _exportService.ExportLedgersAsync(dialog.FileName, ExportStartDate, ExportEndDate);
                         break;
 
+                    case DataType.LedgerDetails:
+                        result = await _exportService.ExportLedgerDetailsAsync(dialog.FileName, ExportStartDate, ExportEndDate);
+                        break;
+
                     default:
                         StatusMessage = "不正なデータタイプです";
                         return;
@@ -406,6 +413,10 @@ public partial class DataExportImportViewModel : ViewModelBase
                     case DataType.Ledgers:
                         // Issue #511: ターゲットカードIDmを渡す
                         preview = await _importService.PreviewLedgersAsync(dialog.FileName, SkipExistingOnImport, GetTargetCardIdm());
+                        break;
+
+                    case DataType.LedgerDetails:
+                        preview = await _importService.PreviewLedgerDetailsAsync(dialog.FileName);
                         break;
 
                     default:
@@ -508,6 +519,10 @@ public partial class DataExportImportViewModel : ViewModelBase
                     case DataType.Ledgers:
                         // Issue #511: ターゲットカードIDmを渡す
                         result = await _importService.ImportLedgersAsync(ImportPreviewFile, SkipExistingOnImport, GetTargetCardIdm());
+                        break;
+
+                    case DataType.LedgerDetails:
+                        result = await _importService.ImportLedgerDetailsAsync(ImportPreviewFile);
                         break;
 
                     default:
@@ -638,6 +653,10 @@ public partial class DataExportImportViewModel : ViewModelBase
                         result = await _importService.ImportLedgersAsync(dialog.FileName, SkipExistingOnImport, GetTargetCardIdm());
                         break;
 
+                    case DataType.LedgerDetails:
+                        result = await _importService.ImportLedgerDetailsAsync(dialog.FileName);
+                        break;
+
                     default:
                         StatusMessage = "不正なデータタイプです";
                         return;
@@ -761,6 +780,7 @@ public partial class DataExportImportViewModel : ViewModelBase
             DataType.Cards => $"cards_{timestamp}.csv",
             DataType.Staff => $"staff_{timestamp}.csv",
             DataType.Ledgers => $"ledgers_{ExportStartDate:yyyyMMdd}_{ExportEndDate:yyyyMMdd}.csv",
+            DataType.LedgerDetails => $"ledger_details_{ExportStartDate:yyyyMMdd}_{ExportEndDate:yyyyMMdd}.csv",
             _ => $"export_{timestamp}.csv"
         };
     }

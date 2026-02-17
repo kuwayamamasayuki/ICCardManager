@@ -199,6 +199,18 @@ namespace ICCardManager.Data.Repositories
         Task MarkMergeHistoryUndoneAsync(int historyId);
 
         /// <summary>
+        /// 指定期間のledgerに紐づく全詳細を取得（CSVエクスポート用）
+        /// </summary>
+        /// <remarks>
+        /// Issue #751対応: 利用履歴詳細のCSVエクスポート/インポート機能。
+        /// ledger_detail と ledger をJOINし、ledger.dateで期間フィルタリングする。
+        /// </remarks>
+        /// <param name="fromDate">開始日</param>
+        /// <param name="toDate">終了日</param>
+        /// <returns>期間内のledgerに紐づく全LedgerDetail</returns>
+        Task<List<LedgerDetail>> GetAllDetailsInDateRangeAsync(DateTime fromDate, DateTime toDate);
+
+        /// <summary>
         /// 指定カードの新規購入日（または繰越日）を取得
         /// </summary>
         /// <remarks>
