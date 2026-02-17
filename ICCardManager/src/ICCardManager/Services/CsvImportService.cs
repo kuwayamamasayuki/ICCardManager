@@ -1620,6 +1620,7 @@ namespace ICCardManager.Services
         {
             var items = new List<CsvImportPreviewItem>();
             var updateCount = 0;
+            var skipCount = 0;
 
             var lines = await ReadCsvFileAsync(filePath);
             if (lines.Count < 2)
@@ -1633,6 +1634,8 @@ namespace ICCardManager.Services
 
             // パースされた詳細をledger_idごとにグループ化
             var detailsByLedgerId = new Dictionary<int, List<(int LineNumber, LedgerDetail Detail)>>();
+            // 既存の詳細をキャッシュ（比較用）
+            var existingDetailsByLedgerId = new Dictionary<int, List<LedgerDetail>>();
 
             for (var i = 1; i < lines.Count; i++)
             {
@@ -1659,16 +1662,20 @@ namespace ICCardManager.Services
                 }
 
                 // ledger_idの存在チェック
-                var ledger = await _ledgerRepository.GetByIdAsync(detail.LedgerId);
-                if (ledger == null)
+                if (!existingDetailsByLedgerId.ContainsKey(detail.LedgerId))
                 {
-                    errors.Add(new CsvImportError
+                    var ledger = await _ledgerRepository.GetByIdAsync(detail.LedgerId);
+                    if (ledger == null)
                     {
-                        LineNumber = lineNumber,
-                        Message = $"利用履歴ID {detail.LedgerId} が存在しません",
-                        Data = detail.LedgerId.ToString()
-                    });
-                    continue;
+                        errors.Add(new CsvImportError
+                        {
+                            LineNumber = lineNumber,
+                            Message = $"利用履歴ID {detail.LedgerId} が存在しません",
+                            Data = detail.LedgerId.ToString()
+                        });
+                        continue;
+                    }
+                    existingDetailsByLedgerId[detail.LedgerId] = ledger.Details ?? new List<LedgerDetail>();
                 }
 
                 if (!detailsByLedgerId.ContainsKey(detail.LedgerId))
@@ -1683,6 +1690,24 @@ namespace ICCardManager.Services
             {
                 var ledgerId = kvp.Key;
                 var detailRows = kvp.Value;
+                var newDetails = detailRows.Select(x => x.Detail).ToList();
+                var existingDetails = existingDetailsByLedgerId.TryGetValue(ledgerId, out var cached) ? cached : new List<LedgerDetail>();
+
+                // 既存データとの変更検出
+                var changes = new List<FieldChange>();
+                DetectLedgerDetailChanges(existingDetails, newDetails, changes);
+
+                ImportAction action;
+                if (changes.Count > 0)
+                {
+                    action = ImportAction.Update;
+                    updateCount++;
+                }
+                else
+                {
+                    action = ImportAction.Skip;
+                    skipCount++;
+                }
 
                 items.Add(new CsvImportPreviewItem
                 {
@@ -1690,9 +1715,9 @@ namespace ICCardManager.Services
                     Idm = ledgerId.ToString(),
                     Name = $"利用履歴ID {ledgerId}",
                     AdditionalInfo = $"{detailRows.Count}件の詳細",
-                    Action = ImportAction.Update // 全置換のためUpdate
+                    Action = action,
+                    Changes = changes
                 });
-                updateCount++;
             }
 
             return new CsvImportPreviewResult
@@ -1700,7 +1725,7 @@ namespace ICCardManager.Services
                 IsValid = errors.Count == 0,
                 NewCount = 0,
                 UpdateCount = updateCount,
-                SkipCount = 0,
+                SkipCount = skipCount,
                 ErrorCount = errors.Count,
                 Errors = errors,
                 Items = items
@@ -1743,6 +1768,8 @@ namespace ICCardManager.Services
 
             // パースされた詳細をledger_idごとにグループ化
             var detailsByLedgerId = new Dictionary<int, List<(int LineNumber, LedgerDetail Detail)>>();
+            // 既存の詳細をキャッシュ（変更検出用）
+            var existingDetailsByLedgerId = new Dictionary<int, List<LedgerDetail>>();
 
             for (var i = 1; i < lines.Count; i++)
             {
@@ -1769,16 +1796,20 @@ namespace ICCardManager.Services
                 }
 
                 // ledger_idの存在チェック
-                var ledger = await _ledgerRepository.GetByIdAsync(detail.LedgerId);
-                if (ledger == null)
+                if (!existingDetailsByLedgerId.ContainsKey(detail.LedgerId))
                 {
-                    errors.Add(new CsvImportError
+                    var ledger = await _ledgerRepository.GetByIdAsync(detail.LedgerId);
+                    if (ledger == null)
                     {
-                        LineNumber = lineNumber,
-                        Message = $"利用履歴ID {detail.LedgerId} が存在しません",
-                        Data = detail.LedgerId.ToString()
-                    });
-                    continue;
+                        errors.Add(new CsvImportError
+                        {
+                            LineNumber = lineNumber,
+                            Message = $"利用履歴ID {detail.LedgerId} が存在しません",
+                            Data = detail.LedgerId.ToString()
+                        });
+                        continue;
+                    }
+                    existingDetailsByLedgerId[detail.LedgerId] = ledger.Details ?? new List<LedgerDetail>();
                 }
 
                 if (!detailsByLedgerId.ContainsKey(detail.LedgerId))
@@ -1810,17 +1841,28 @@ namespace ICCardManager.Services
                 };
             }
 
-            // ledger_idごとにReplaceDetailsAsyncで全置換
+            // ledger_idごとにReplaceDetailsAsyncで全置換（変更がある場合のみ）
+            var skippedCount = 0;
             foreach (var kvp in detailsByLedgerId)
             {
                 var ledgerId = kvp.Key;
                 var detailRows = kvp.Value;
                 var firstLineNumber = detailRows.First().LineNumber;
 
+                // 変更検出：既存データと同一ならスキップ
+                var newDetails = detailRows.Select(r => r.Detail).ToList();
+                var existingDetails = existingDetailsByLedgerId.TryGetValue(ledgerId, out var cached) ? cached : new List<LedgerDetail>();
+                var changes = new List<FieldChange>();
+                DetectLedgerDetailChanges(existingDetails, newDetails, changes);
+                if (changes.Count == 0)
+                {
+                    skippedCount += detailRows.Count;
+                    continue;
+                }
+
                 try
                 {
-                    var details = detailRows.Select(r => r.Detail).ToList();
-                    var success = await _ledgerRepository.ReplaceDetailsAsync(ledgerId, details);
+                    var success = await _ledgerRepository.ReplaceDetailsAsync(ledgerId, newDetails);
 
                     if (success)
                     {
@@ -1851,6 +1893,7 @@ namespace ICCardManager.Services
             {
                 Success = errors.Count == 0,
                 ImportedCount = importedCount,
+                SkippedCount = skippedCount,
                 ErrorCount = errors.Count,
                 Errors = errors
             };
@@ -2454,6 +2497,134 @@ namespace ICCardManager.Services
                     OldValue = string.IsNullOrEmpty(existingNote) ? "(なし)" : existingNote,
                     NewValue = string.IsNullOrEmpty(newNote) ? "(なし)" : newNote
                 });
+            }
+        }
+
+        /// <summary>
+        /// 利用履歴詳細の変更検出
+        /// 既存の詳細リストとインポート対象の詳細リストを比較し、差分を検出する。
+        /// </summary>
+        private static void DetectLedgerDetailChanges(
+            List<LedgerDetail> existingDetails,
+            List<LedgerDetail> newDetails,
+            List<FieldChange> changes)
+        {
+            if (existingDetails.Count != newDetails.Count)
+            {
+                changes.Add(new FieldChange
+                {
+                    FieldName = "詳細件数",
+                    OldValue = $"{existingDetails.Count}件",
+                    NewValue = $"{newDetails.Count}件"
+                });
+                return;
+            }
+
+            for (var i = 0; i < existingDetails.Count; i++)
+            {
+                var existing = existingDetails[i];
+                var imported = newDetails[i];
+                var rowLabel = $"[{i + 1}行目]";
+
+                if (existing.UseDate != imported.UseDate)
+                {
+                    changes.Add(new FieldChange
+                    {
+                        FieldName = $"{rowLabel} 利用日時",
+                        OldValue = existing.UseDate?.ToString("yyyy-MM-dd HH:mm:ss") ?? "(なし)",
+                        NewValue = imported.UseDate?.ToString("yyyy-MM-dd HH:mm:ss") ?? "(なし)"
+                    });
+                }
+
+                if ((existing.EntryStation ?? "") != (imported.EntryStation ?? ""))
+                {
+                    changes.Add(new FieldChange
+                    {
+                        FieldName = $"{rowLabel} 乗車駅",
+                        OldValue = string.IsNullOrEmpty(existing.EntryStation) ? "(なし)" : existing.EntryStation,
+                        NewValue = string.IsNullOrEmpty(imported.EntryStation) ? "(なし)" : imported.EntryStation
+                    });
+                }
+
+                if ((existing.ExitStation ?? "") != (imported.ExitStation ?? ""))
+                {
+                    changes.Add(new FieldChange
+                    {
+                        FieldName = $"{rowLabel} 降車駅",
+                        OldValue = string.IsNullOrEmpty(existing.ExitStation) ? "(なし)" : existing.ExitStation,
+                        NewValue = string.IsNullOrEmpty(imported.ExitStation) ? "(なし)" : imported.ExitStation
+                    });
+                }
+
+                if ((existing.BusStops ?? "") != (imported.BusStops ?? ""))
+                {
+                    changes.Add(new FieldChange
+                    {
+                        FieldName = $"{rowLabel} バス停",
+                        OldValue = string.IsNullOrEmpty(existing.BusStops) ? "(なし)" : existing.BusStops,
+                        NewValue = string.IsNullOrEmpty(imported.BusStops) ? "(なし)" : imported.BusStops
+                    });
+                }
+
+                if (existing.Amount != imported.Amount)
+                {
+                    changes.Add(new FieldChange
+                    {
+                        FieldName = $"{rowLabel} 金額",
+                        OldValue = existing.Amount?.ToString() ?? "(なし)",
+                        NewValue = imported.Amount?.ToString() ?? "(なし)"
+                    });
+                }
+
+                if (existing.Balance != imported.Balance)
+                {
+                    changes.Add(new FieldChange
+                    {
+                        FieldName = $"{rowLabel} 残額",
+                        OldValue = existing.Balance?.ToString() ?? "(なし)",
+                        NewValue = imported.Balance?.ToString() ?? "(なし)"
+                    });
+                }
+
+                if (existing.IsCharge != imported.IsCharge)
+                {
+                    changes.Add(new FieldChange
+                    {
+                        FieldName = $"{rowLabel} チャージ",
+                        OldValue = existing.IsCharge ? "1" : "0",
+                        NewValue = imported.IsCharge ? "1" : "0"
+                    });
+                }
+
+                if (existing.IsPointRedemption != imported.IsPointRedemption)
+                {
+                    changes.Add(new FieldChange
+                    {
+                        FieldName = $"{rowLabel} ポイント還元",
+                        OldValue = existing.IsPointRedemption ? "1" : "0",
+                        NewValue = imported.IsPointRedemption ? "1" : "0"
+                    });
+                }
+
+                if (existing.IsBus != imported.IsBus)
+                {
+                    changes.Add(new FieldChange
+                    {
+                        FieldName = $"{rowLabel} バス利用",
+                        OldValue = existing.IsBus ? "1" : "0",
+                        NewValue = imported.IsBus ? "1" : "0"
+                    });
+                }
+
+                if (existing.GroupId != imported.GroupId)
+                {
+                    changes.Add(new FieldChange
+                    {
+                        FieldName = $"{rowLabel} グループID",
+                        OldValue = existing.GroupId?.ToString() ?? "(なし)",
+                        NewValue = imported.GroupId?.ToString() ?? "(なし)"
+                    });
+                }
             }
         }
 
