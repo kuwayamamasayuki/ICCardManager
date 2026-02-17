@@ -1136,4 +1136,228 @@ FEDCBA9876543210,鈴木花子,002,テスト2";
     }
 
     #endregion
+
+    #region PreviewLedgerDetailsAsync テスト (Issue #751)
+
+    /// <summary>
+    /// 利用履歴詳細のプレビューが正常に動作することを確認
+    /// </summary>
+    [Fact]
+    public async Task PreviewLedgerDetailsAsync_正常データ_プレビュー成功()
+    {
+        // Arrange
+        var csvContent = @"利用履歴ID,利用日時,カードIDm,管理番号,乗車駅,降車駅,バス停,金額,残額,チャージ,ポイント還元,バス利用,グループID
+1,2024-01-15 10:30:00,0123456789ABCDEF,001,博多,天神,,260,9740,0,0,0,
+1,2024-01-15 17:00:00,0123456789ABCDEF,001,天神,博多,,260,9480,0,0,0,";
+
+        var filePath = Path.Combine(_testDirectory, "details_preview.csv");
+        await Task.Run(() => File.WriteAllText(filePath, csvContent, CsvEncoding));
+
+        // ledger_id=1が存在するようにモック
+        _ledgerRepositoryMock.Setup(x => x.GetByIdAsync(1)).ReturnsAsync(new Ledger
+        {
+            Id = 1, CardIdm = "0123456789ABCDEF", Date = new DateTime(2024, 1, 15),
+            Summary = "鉄道（博多～天神 往復）", Income = 0, Expense = 520, Balance = 9480
+        });
+
+        // Act
+        var result = await _service.PreviewLedgerDetailsAsync(filePath);
+
+        // Assert
+        result.IsValid.Should().BeTrue();
+        result.UpdateCount.Should().Be(1); // ledger_id=1のグループ1件
+        result.Items.Should().HaveCount(1);
+        result.Items[0].Action.Should().Be(ImportAction.Update);
+        result.Items[0].AdditionalInfo.Should().Contain("2件");
+    }
+
+    /// <summary>
+    /// 存在しないledger_idがエラーになることを確認
+    /// </summary>
+    [Fact]
+    public async Task PreviewLedgerDetailsAsync_存在しないledger_id_エラー()
+    {
+        // Arrange
+        var csvContent = @"利用履歴ID,利用日時,カードIDm,管理番号,乗車駅,降車駅,バス停,金額,残額,チャージ,ポイント還元,バス利用,グループID
+999,2024-01-15 10:30:00,0123456789ABCDEF,001,博多,天神,,260,9740,0,0,0,";
+
+        var filePath = Path.Combine(_testDirectory, "details_missing_ledger.csv");
+        await Task.Run(() => File.WriteAllText(filePath, csvContent, CsvEncoding));
+
+        // ledger_id=999は存在しない
+        _ledgerRepositoryMock.Setup(x => x.GetByIdAsync(999)).ReturnsAsync((Ledger)null);
+
+        // Act
+        var result = await _service.PreviewLedgerDetailsAsync(filePath);
+
+        // Assert
+        result.IsValid.Should().BeFalse();
+        result.ErrorCount.Should().Be(1);
+        result.Errors.Should().Contain(e => e.Message.Contains("利用履歴ID 999 が存在しません"));
+    }
+
+    /// <summary>
+    /// 不正なブール値（0/1以外）がエラーになることを確認
+    /// </summary>
+    [Fact]
+    public async Task PreviewLedgerDetailsAsync_不正なブール値_エラー()
+    {
+        // Arrange
+        var csvContent = @"利用履歴ID,利用日時,カードIDm,管理番号,乗車駅,降車駅,バス停,金額,残額,チャージ,ポイント還元,バス利用,グループID
+1,2024-01-15 10:30:00,0123456789ABCDEF,001,博多,天神,,260,9740,2,0,0,";
+
+        var filePath = Path.Combine(_testDirectory, "details_invalid_bool.csv");
+        await Task.Run(() => File.WriteAllText(filePath, csvContent, CsvEncoding));
+
+        // Act
+        var result = await _service.PreviewLedgerDetailsAsync(filePath);
+
+        // Assert
+        result.IsValid.Should().BeFalse();
+        result.ErrorCount.Should().Be(1);
+        result.Errors.Should().Contain(e => e.Message.Contains("チャージは0または1で指定してください"));
+    }
+
+    #endregion
+
+    #region ImportLedgerDetailsAsync テスト (Issue #751)
+
+    /// <summary>
+    /// 利用履歴詳細のインポートが正常に動作することを確認
+    /// </summary>
+    [Fact]
+    public async Task ImportLedgerDetailsAsync_正常データ_インポート成功()
+    {
+        // Arrange
+        var csvContent = @"利用履歴ID,利用日時,カードIDm,管理番号,乗車駅,降車駅,バス停,金額,残額,チャージ,ポイント還元,バス利用,グループID
+1,2024-01-15 10:30:00,0123456789ABCDEF,001,博多,天神,,260,9740,0,0,0,
+1,2024-01-15 17:00:00,0123456789ABCDEF,001,天神,博多,,260,9480,0,0,0,";
+
+        var filePath = Path.Combine(_testDirectory, "details_import.csv");
+        await Task.Run(() => File.WriteAllText(filePath, csvContent, CsvEncoding));
+
+        _ledgerRepositoryMock.Setup(x => x.GetByIdAsync(1)).ReturnsAsync(new Ledger
+        {
+            Id = 1, CardIdm = "0123456789ABCDEF", Date = new DateTime(2024, 1, 15),
+            Summary = "鉄道", Income = 0, Expense = 520, Balance = 9480
+        });
+        _ledgerRepositoryMock.Setup(x => x.ReplaceDetailsAsync(1, It.IsAny<IEnumerable<LedgerDetail>>()))
+            .ReturnsAsync(true);
+
+        // Act
+        var result = await _service.ImportLedgerDetailsAsync(filePath);
+
+        // Assert
+        result.Success.Should().BeTrue();
+        result.ImportedCount.Should().Be(2);
+
+        // ReplaceDetailsAsyncが1回呼ばれ、2件の詳細が渡される
+        _ledgerRepositoryMock.Verify(x => x.ReplaceDetailsAsync(1,
+            It.Is<IEnumerable<LedgerDetail>>(d => d.Count() == 2)), Times.Once);
+    }
+
+    /// <summary>
+    /// ヘッダーのみのファイルでエラーになることを確認
+    /// </summary>
+    [Fact]
+    public async Task ImportLedgerDetailsAsync_ヘッダーのみ_エラー()
+    {
+        // Arrange
+        var csvContent = "利用履歴ID,利用日時,カードIDm,管理番号,乗車駅,降車駅,バス停,金額,残額,チャージ,ポイント還元,バス利用,グループID";
+
+        var filePath = Path.Combine(_testDirectory, "details_header_only.csv");
+        await Task.Run(() => File.WriteAllText(filePath, csvContent, CsvEncoding));
+
+        // Act
+        var result = await _service.ImportLedgerDetailsAsync(filePath);
+
+        // Assert
+        result.Success.Should().BeFalse();
+        result.ErrorMessage.Should().Contain("データがありません");
+    }
+
+    /// <summary>
+    /// 複数のledger_idがグループごとにReplaceDetailsAsyncで置換されることを確認
+    /// </summary>
+    [Fact]
+    public async Task ImportLedgerDetailsAsync_複数ledger_グループごとに置換()
+    {
+        // Arrange
+        var csvContent = @"利用履歴ID,利用日時,カードIDm,管理番号,乗車駅,降車駅,バス停,金額,残額,チャージ,ポイント還元,バス利用,グループID
+1,2024-01-15 10:30:00,0123456789ABCDEF,001,博多,天神,,260,9740,0,0,0,
+2,2024-01-16 09:00:00,0123456789ABCDEF,001,天神,博多,,260,9480,0,0,0,
+1,2024-01-15 17:00:00,0123456789ABCDEF,001,天神,博多,,260,9480,0,0,0,";
+
+        var filePath = Path.Combine(_testDirectory, "details_multi_ledger.csv");
+        await Task.Run(() => File.WriteAllText(filePath, csvContent, CsvEncoding));
+
+        _ledgerRepositoryMock.Setup(x => x.GetByIdAsync(1)).ReturnsAsync(new Ledger
+        {
+            Id = 1, CardIdm = "0123456789ABCDEF", Date = new DateTime(2024, 1, 15),
+            Summary = "鉄道", Income = 0, Expense = 520, Balance = 9480
+        });
+        _ledgerRepositoryMock.Setup(x => x.GetByIdAsync(2)).ReturnsAsync(new Ledger
+        {
+            Id = 2, CardIdm = "0123456789ABCDEF", Date = new DateTime(2024, 1, 16),
+            Summary = "鉄道", Income = 0, Expense = 260, Balance = 9220
+        });
+        _ledgerRepositoryMock.Setup(x => x.ReplaceDetailsAsync(It.IsAny<int>(), It.IsAny<IEnumerable<LedgerDetail>>()))
+            .ReturnsAsync(true);
+
+        // Act
+        var result = await _service.ImportLedgerDetailsAsync(filePath);
+
+        // Assert
+        result.Success.Should().BeTrue();
+        result.ImportedCount.Should().Be(3);
+
+        // ledger_id=1に2件、ledger_id=2に1件
+        _ledgerRepositoryMock.Verify(x => x.ReplaceDetailsAsync(1,
+            It.Is<IEnumerable<LedgerDetail>>(d => d.Count() == 2)), Times.Once);
+        _ledgerRepositoryMock.Verify(x => x.ReplaceDetailsAsync(2,
+            It.Is<IEnumerable<LedgerDetail>>(d => d.Count() == 1)), Times.Once);
+    }
+
+    /// <summary>
+    /// 空欄がnullとして正しくパースされることを確認
+    /// </summary>
+    [Fact]
+    public async Task ImportLedgerDetailsAsync_NULL値_正しくパース()
+    {
+        // Arrange: 駅名・バス停・金額・残額・グループIDが全て空欄
+        var csvContent = @"利用履歴ID,利用日時,カードIDm,管理番号,乗車駅,降車駅,バス停,金額,残額,チャージ,ポイント還元,バス利用,グループID
+1,,0123456789ABCDEF,001,,,,,,0,0,0,";
+
+        var filePath = Path.Combine(_testDirectory, "details_null_values.csv");
+        await Task.Run(() => File.WriteAllText(filePath, csvContent, CsvEncoding));
+
+        _ledgerRepositoryMock.Setup(x => x.GetByIdAsync(1)).ReturnsAsync(new Ledger
+        {
+            Id = 1, CardIdm = "0123456789ABCDEF", Date = new DateTime(2024, 1, 15),
+            Summary = "テスト", Income = 0, Expense = 0, Balance = 0
+        });
+        _ledgerRepositoryMock.Setup(x => x.ReplaceDetailsAsync(1, It.IsAny<IEnumerable<LedgerDetail>>()))
+            .ReturnsAsync(true);
+
+        // Act
+        var result = await _service.ImportLedgerDetailsAsync(filePath);
+
+        // Assert
+        result.Success.Should().BeTrue();
+        result.ImportedCount.Should().Be(1);
+
+        // ReplaceDetailsAsyncに渡された詳細のnull値を検証
+        _ledgerRepositoryMock.Verify(x => x.ReplaceDetailsAsync(1,
+            It.Is<IEnumerable<LedgerDetail>>(details =>
+                details.First().UseDate == null &&
+                details.First().EntryStation == null &&
+                details.First().ExitStation == null &&
+                details.First().BusStops == null &&
+                details.First().Amount == null &&
+                details.First().Balance == null &&
+                details.First().GroupId == null
+            )), Times.Once);
+    }
+
+    #endregion
 }

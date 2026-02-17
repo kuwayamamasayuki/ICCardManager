@@ -1596,6 +1596,449 @@ namespace ICCardManager.Services
         }
 
         /// <summary>
+        /// 利用履歴詳細CSVのインポートプレビューを取得
+        /// </summary>
+        /// <remarks>
+        /// Issue #751対応: ledger_detailのCSVインポート。
+        /// ledger_idごとにグループ化し、全置換（ReplaceDetailsAsync）で復元する。
+        /// </remarks>
+        /// <param name="filePath">CSVファイルパス</param>
+        public async Task<CsvImportPreviewResult> PreviewLedgerDetailsAsync(string filePath)
+        {
+            var errors = new List<CsvImportError>();
+            return await ExecutePreviewWithErrorHandlingAsync(
+                () => PreviewLedgerDetailsInternalAsync(filePath, errors),
+                errors);
+        }
+
+        /// <summary>
+        /// 利用履歴詳細CSVプレビューの内部処理
+        /// </summary>
+        private async Task<CsvImportPreviewResult> PreviewLedgerDetailsInternalAsync(
+            string filePath,
+            List<CsvImportError> errors)
+        {
+            var items = new List<CsvImportPreviewItem>();
+            var updateCount = 0;
+
+            var lines = await ReadCsvFileAsync(filePath);
+            if (lines.Count < 2)
+            {
+                return new CsvImportPreviewResult
+                {
+                    IsValid = false,
+                    ErrorMessage = "CSVファイルにデータがありません（ヘッダー行のみ）"
+                };
+            }
+
+            // パースされた詳細をledger_idごとにグループ化
+            var detailsByLedgerId = new Dictionary<int, List<(int LineNumber, LedgerDetail Detail)>>();
+
+            for (var i = 1; i < lines.Count; i++)
+            {
+                var lineNumber = i + 1;
+                var line = lines[i];
+
+                if (string.IsNullOrWhiteSpace(line))
+                {
+                    continue;
+                }
+
+                var fields = ParseCsvLine(line);
+
+                // 13列必要
+                if (!ValidateColumnCount(fields, 13, lineNumber, line, errors))
+                {
+                    continue;
+                }
+
+                var detail = ParseLedgerDetailFields(fields, lineNumber, line, errors);
+                if (detail == null)
+                {
+                    continue;
+                }
+
+                // ledger_idの存在チェック
+                var ledger = await _ledgerRepository.GetByIdAsync(detail.LedgerId);
+                if (ledger == null)
+                {
+                    errors.Add(new CsvImportError
+                    {
+                        LineNumber = lineNumber,
+                        Message = $"利用履歴ID {detail.LedgerId} が存在しません",
+                        Data = detail.LedgerId.ToString()
+                    });
+                    continue;
+                }
+
+                if (!detailsByLedgerId.ContainsKey(detail.LedgerId))
+                {
+                    detailsByLedgerId[detail.LedgerId] = new List<(int, LedgerDetail)>();
+                }
+                detailsByLedgerId[detail.LedgerId].Add((lineNumber, detail));
+            }
+
+            // ledger_idごとにプレビューアイテム生成
+            foreach (var kvp in detailsByLedgerId.OrderBy(x => x.Key))
+            {
+                var ledgerId = kvp.Key;
+                var detailRows = kvp.Value;
+
+                items.Add(new CsvImportPreviewItem
+                {
+                    LineNumber = detailRows.First().LineNumber,
+                    Idm = ledgerId.ToString(),
+                    Name = $"利用履歴ID {ledgerId}",
+                    AdditionalInfo = $"{detailRows.Count}件の詳細",
+                    Action = ImportAction.Update // 全置換のためUpdate
+                });
+                updateCount++;
+            }
+
+            return new CsvImportPreviewResult
+            {
+                IsValid = errors.Count == 0,
+                NewCount = 0,
+                UpdateCount = updateCount,
+                SkipCount = 0,
+                ErrorCount = errors.Count,
+                Errors = errors,
+                Items = items
+            };
+        }
+
+        /// <summary>
+        /// 利用履歴詳細CSVをインポート
+        /// </summary>
+        /// <remarks>
+        /// Issue #751対応: ledger_idごとにグループ化し、ReplaceDetailsAsyncで全置換する。
+        /// </remarks>
+        /// <param name="filePath">CSVファイルパス</param>
+        public virtual async Task<CsvImportResult> ImportLedgerDetailsAsync(string filePath)
+        {
+            var errors = new List<CsvImportError>();
+            return await ExecuteImportWithErrorHandlingAsync(
+                () => ImportLedgerDetailsInternalAsync(filePath, errors),
+                errors);
+        }
+
+        /// <summary>
+        /// 利用履歴詳細CSVインポートの内部処理
+        /// </summary>
+        private async Task<CsvImportResult> ImportLedgerDetailsInternalAsync(
+            string filePath,
+            List<CsvImportError> errors)
+        {
+            var importedCount = 0;
+
+            var lines = await ReadCsvFileAsync(filePath);
+            if (lines.Count < 2)
+            {
+                return new CsvImportResult
+                {
+                    Success = false,
+                    ErrorMessage = "CSVファイルにデータがありません（ヘッダー行のみ）"
+                };
+            }
+
+            // パースされた詳細をledger_idごとにグループ化
+            var detailsByLedgerId = new Dictionary<int, List<(int LineNumber, LedgerDetail Detail)>>();
+
+            for (var i = 1; i < lines.Count; i++)
+            {
+                var lineNumber = i + 1;
+                var line = lines[i];
+
+                if (string.IsNullOrWhiteSpace(line))
+                {
+                    continue;
+                }
+
+                var fields = ParseCsvLine(line);
+
+                // 13列必要
+                if (!ValidateColumnCount(fields, 13, lineNumber, line, errors))
+                {
+                    continue;
+                }
+
+                var detail = ParseLedgerDetailFields(fields, lineNumber, line, errors);
+                if (detail == null)
+                {
+                    continue;
+                }
+
+                // ledger_idの存在チェック
+                var ledger = await _ledgerRepository.GetByIdAsync(detail.LedgerId);
+                if (ledger == null)
+                {
+                    errors.Add(new CsvImportError
+                    {
+                        LineNumber = lineNumber,
+                        Message = $"利用履歴ID {detail.LedgerId} が存在しません",
+                        Data = detail.LedgerId.ToString()
+                    });
+                    continue;
+                }
+
+                if (!detailsByLedgerId.ContainsKey(detail.LedgerId))
+                {
+                    detailsByLedgerId[detail.LedgerId] = new List<(int, LedgerDetail)>();
+                }
+                detailsByLedgerId[detail.LedgerId].Add((lineNumber, detail));
+            }
+
+            // バリデーションエラーがあれば中断
+            if (errors.Count > 0)
+            {
+                return new CsvImportResult
+                {
+                    Success = false,
+                    ImportedCount = 0,
+                    ErrorCount = errors.Count,
+                    Errors = errors
+                };
+            }
+
+            // データがない場合
+            if (detailsByLedgerId.Count == 0)
+            {
+                return new CsvImportResult
+                {
+                    Success = false,
+                    ErrorMessage = "インポートするデータがありません"
+                };
+            }
+
+            // ledger_idごとにReplaceDetailsAsyncで全置換
+            foreach (var kvp in detailsByLedgerId)
+            {
+                var ledgerId = kvp.Key;
+                var detailRows = kvp.Value;
+                var firstLineNumber = detailRows.First().LineNumber;
+
+                try
+                {
+                    var details = detailRows.Select(r => r.Detail).ToList();
+                    var success = await _ledgerRepository.ReplaceDetailsAsync(ledgerId, details);
+
+                    if (success)
+                    {
+                        importedCount += detailRows.Count;
+                    }
+                    else
+                    {
+                        errors.Add(new CsvImportError
+                        {
+                            LineNumber = firstLineNumber,
+                            Message = $"利用履歴ID {ledgerId} の詳細の置換に失敗しました",
+                            Data = ledgerId.ToString()
+                        });
+                    }
+                }
+                catch (Exception ex)
+                {
+                    errors.Add(new CsvImportError
+                    {
+                        LineNumber = firstLineNumber,
+                        Message = $"利用履歴ID {ledgerId} の詳細の置換中にエラーが発生しました: {ex.Message}",
+                        Data = ledgerId.ToString()
+                    });
+                }
+            }
+
+            return new CsvImportResult
+            {
+                Success = errors.Count == 0,
+                ImportedCount = importedCount,
+                ErrorCount = errors.Count,
+                Errors = errors
+            };
+        }
+
+        /// <summary>
+        /// CSVフィールドからLedgerDetailをパース
+        /// </summary>
+        /// <param name="fields">パース済みフィールド（13列）</param>
+        /// <param name="lineNumber">行番号（エラー報告用）</param>
+        /// <param name="line">元の行データ（エラー報告用）</param>
+        /// <param name="errors">エラーリスト</param>
+        /// <returns>パース成功時はLedgerDetail、失敗時はnull</returns>
+        private static LedgerDetail ParseLedgerDetailFields(
+            List<string> fields,
+            int lineNumber,
+            string line,
+            List<CsvImportError> errors)
+        {
+            // [0]利用履歴ID [1]利用日時 [2]カードIDm [3]管理番号 [4]乗車駅 [5]降車駅
+            // [6]バス停 [7]金額 [8]残額 [9]チャージ [10]ポイント還元 [11]バス利用 [12]グループID
+
+            var ledgerIdStr = fields[0].Trim();
+            var useDateStr = fields[1].Trim();
+            // fields[2] カードIDm（参照用、インポート時は無視）
+            // fields[3] 管理番号（参照用、インポート時は無視）
+            var entryStation = fields[4].Trim();
+            var exitStation = fields[5].Trim();
+            var busStops = fields[6].Trim();
+            var amountStr = fields[7].Trim();
+            var balanceStr = fields[8].Trim();
+            var isChargeStr = fields[9].Trim();
+            var isPointRedemptionStr = fields[10].Trim();
+            var isBusStr = fields[11].Trim();
+            var groupIdStr = fields[12].Trim();
+
+            // 利用履歴ID: 必須、整数
+            if (!int.TryParse(ledgerIdStr, out var ledgerId))
+            {
+                errors.Add(new CsvImportError
+                {
+                    LineNumber = lineNumber,
+                    Message = "利用履歴IDの形式が不正です",
+                    Data = ledgerIdStr
+                });
+                return null;
+            }
+
+            // 利用日時: 任意（空欄=null）
+            DateTime? useDate = null;
+            if (!string.IsNullOrWhiteSpace(useDateStr))
+            {
+                if (!DateTime.TryParse(useDateStr, out var parsedDate))
+                {
+                    errors.Add(new CsvImportError
+                    {
+                        LineNumber = lineNumber,
+                        Message = "利用日時の形式が不正です",
+                        Data = useDateStr
+                    });
+                    return null;
+                }
+                useDate = parsedDate;
+            }
+
+            // 金額: 任意（空欄=null）
+            int? amount = null;
+            if (!string.IsNullOrWhiteSpace(amountStr))
+            {
+                if (!int.TryParse(amountStr, out var parsedAmount))
+                {
+                    errors.Add(new CsvImportError
+                    {
+                        LineNumber = lineNumber,
+                        Message = "金額の形式が不正です",
+                        Data = amountStr
+                    });
+                    return null;
+                }
+                amount = parsedAmount;
+            }
+
+            // 残額: 任意（空欄=null）
+            int? balance = null;
+            if (!string.IsNullOrWhiteSpace(balanceStr))
+            {
+                if (!int.TryParse(balanceStr, out var parsedBalance))
+                {
+                    errors.Add(new CsvImportError
+                    {
+                        LineNumber = lineNumber,
+                        Message = "残額の形式が不正です",
+                        Data = balanceStr
+                    });
+                    return null;
+                }
+                balance = parsedBalance;
+            }
+
+            // チャージ: 0 or 1
+            if (!ValidateBooleanField(isChargeStr, lineNumber, "チャージ", errors, out var isCharge))
+            {
+                return null;
+            }
+
+            // ポイント還元: 0 or 1
+            if (!ValidateBooleanField(isPointRedemptionStr, lineNumber, "ポイント還元", errors, out var isPointRedemption))
+            {
+                return null;
+            }
+
+            // バス利用: 0 or 1
+            if (!ValidateBooleanField(isBusStr, lineNumber, "バス利用", errors, out var isBus))
+            {
+                return null;
+            }
+
+            // グループID: 任意（空欄=null）
+            int? groupId = null;
+            if (!string.IsNullOrWhiteSpace(groupIdStr))
+            {
+                if (!int.TryParse(groupIdStr, out var parsedGroupId))
+                {
+                    errors.Add(new CsvImportError
+                    {
+                        LineNumber = lineNumber,
+                        Message = "グループIDの形式が不正です",
+                        Data = groupIdStr
+                    });
+                    return null;
+                }
+                groupId = parsedGroupId;
+            }
+
+            return new LedgerDetail
+            {
+                LedgerId = ledgerId,
+                UseDate = useDate,
+                EntryStation = string.IsNullOrWhiteSpace(entryStation) ? null : entryStation,
+                ExitStation = string.IsNullOrWhiteSpace(exitStation) ? null : exitStation,
+                BusStops = string.IsNullOrWhiteSpace(busStops) ? null : busStops,
+                Amount = amount,
+                Balance = balance,
+                IsCharge = isCharge,
+                IsPointRedemption = isPointRedemption,
+                IsBus = isBus,
+                GroupId = groupId
+            };
+        }
+
+        /// <summary>
+        /// ブール値フィールド（0/1）のバリデーション
+        /// </summary>
+        /// <param name="value">検証する値</param>
+        /// <param name="lineNumber">行番号</param>
+        /// <param name="fieldName">フィールド名</param>
+        /// <param name="errors">エラーリスト</param>
+        /// <param name="result">パース結果</param>
+        /// <returns>バリデーション成功の場合true</returns>
+        private static bool ValidateBooleanField(
+            string value,
+            int lineNumber,
+            string fieldName,
+            List<CsvImportError> errors,
+            out bool result)
+        {
+            result = false;
+            if (value == "0")
+            {
+                result = false;
+                return true;
+            }
+            if (value == "1")
+            {
+                result = true;
+                return true;
+            }
+
+            errors.Add(new CsvImportError
+            {
+                LineNumber = lineNumber,
+                Message = $"{fieldName}は0または1で指定してください",
+                Data = value
+            });
+            return false;
+        }
+
+        /// <summary>
         /// CSVファイルを読み込み（UTF-8 BOM対応）
         /// </summary>
         private static async Task<List<string>> ReadCsvFileAsync(string filePath)

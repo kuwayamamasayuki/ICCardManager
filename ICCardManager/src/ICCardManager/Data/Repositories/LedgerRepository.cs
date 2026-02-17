@@ -828,6 +828,32 @@ VALUES (@targetLedgerId, @description, @undoData)";
         }
 
         /// <inheritdoc/>
+        public async Task<List<LedgerDetail>> GetAllDetailsInDateRangeAsync(DateTime fromDate, DateTime toDate)
+        {
+            var connection = _dbContext.GetConnection();
+            var details = new List<LedgerDetail>();
+
+            using var command = connection.CreateCommand();
+            command.CommandText = @"SELECT d.ledger_id, d.use_date, d.entry_station, d.exit_station,
+       d.bus_stops, d.amount, d.balance, d.is_charge, d.is_point_redemption, d.is_bus, d.group_id, d.rowid
+FROM ledger_detail d
+INNER JOIN ledger l ON d.ledger_id = l.id
+WHERE l.date BETWEEN @fromDate AND @toDate
+ORDER BY l.card_idm, l.date, l.id, d.rowid";
+
+            command.Parameters.AddWithValue("@fromDate", fromDate.Date.ToString("yyyy-MM-dd HH:mm:ss"));
+            command.Parameters.AddWithValue("@toDate", toDate.Date.AddDays(1).AddSeconds(-1).ToString("yyyy-MM-dd HH:mm:ss"));
+
+            using var reader = await command.ExecuteReaderAsync();
+            while (await reader.ReadAsync())
+            {
+                details.Add(MapToLedgerDetail(reader));
+            }
+
+            return details;
+        }
+
+        /// <inheritdoc/>
         public async Task<DateTime?> GetPurchaseDateAsync(string cardIdm)
         {
             var connection = _dbContext.GetConnection();

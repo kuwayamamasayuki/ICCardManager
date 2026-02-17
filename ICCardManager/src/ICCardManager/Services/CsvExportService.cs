@@ -222,6 +222,96 @@ namespace ICCardManager.Services
         }
 
         /// <summary>
+        /// 利用履歴詳細をCSVエクスポート（期間指定）
+        /// </summary>
+        /// <remarks>
+        /// Issue #751対応: ledger_detailテーブルのデータをCSVに出力する。
+        /// カードIDm・管理番号はledger→ic_cardのJOINで参照用に付与する。
+        /// </remarks>
+        public async Task<CsvExportResult> ExportLedgerDetailsAsync(
+            string filePath,
+            DateTime startDate,
+            DateTime endDate)
+        {
+            try
+            {
+                // 期間内の全詳細を取得
+                var details = await _ledgerRepository.GetAllDetailsInDateRangeAsync(startDate, endDate);
+
+                // ledger_id→カードIDmマッピング用に期間内のledgerを取得
+                var ledgers = await _ledgerRepository.GetByDateRangeAsync(null, startDate, endDate);
+                var ledgerCardMap = ledgers.ToDictionary(l => l.Id, l => l.CardIdm);
+
+                // カードIDmから管理番号へのマッピング
+                var allCards = await _cardRepository.GetAllIncludingDeletedAsync();
+                var cardNumberMap = allCards.ToDictionary(c => c.CardIdm, c => c.CardNumber ?? "");
+
+                // ソートキー：カード種別・管理番号順
+                var cardSortKeyMap = allCards.ToDictionary(
+                    c => c.CardIdm,
+                    c => $"{c.CardType ?? ""}\t{c.CardNumber ?? ""}");
+
+                var lines = new List<string>
+                {
+                    // ヘッダー行
+                    "利用履歴ID,利用日時,カードIDm,管理番号,乗車駅,降車駅,バス停,金額,残額,チャージ,ポイント還元,バス利用,グループID"
+                };
+
+                // カード種別・管理番号 → 日付 → ledger_id → rowid 順でソート
+                foreach (var detail in details
+                    .OrderBy(d =>
+                    {
+                        if (ledgerCardMap.TryGetValue(d.LedgerId, out var idm) &&
+                            cardSortKeyMap.TryGetValue(idm, out var key))
+                            return key;
+                        return "";
+                    })
+                    .ThenBy(d => d.UseDate)
+                    .ThenBy(d => d.LedgerId)
+                    .ThenBy(d => d.SequenceNumber))
+                {
+                    // 参照用のカードIDmと管理番号を取得
+                    var cardIdm = ledgerCardMap.TryGetValue(detail.LedgerId, out var idmVal) ? idmVal : "";
+                    var cardNumber = !string.IsNullOrEmpty(cardIdm) && cardNumberMap.TryGetValue(cardIdm, out var num) ? num : "";
+
+                    lines.Add(string.Join(",",
+                        detail.LedgerId.ToString(),
+                        detail.UseDate.HasValue ? detail.UseDate.Value.ToString("yyyy-MM-dd HH:mm:ss") : "",
+                        EscapeCsvField(cardIdm),
+                        EscapeCsvField(cardNumber),
+                        EscapeCsvField(detail.EntryStation ?? ""),
+                        EscapeCsvField(detail.ExitStation ?? ""),
+                        EscapeCsvField(detail.BusStops ?? ""),
+                        detail.Amount.HasValue ? detail.Amount.Value.ToString() : "",
+                        detail.Balance.HasValue ? detail.Balance.Value.ToString() : "",
+                        detail.IsCharge ? "1" : "0",
+                        detail.IsPointRedemption ? "1" : "0",
+                        detail.IsBus ? "1" : "0",
+                        detail.GroupId.HasValue ? detail.GroupId.Value.ToString() : ""
+                    ));
+                }
+
+                await Task.Run(() => File.WriteAllLines(filePath, lines, CsvEncoding));
+
+                return new CsvExportResult
+                {
+                    Success = true,
+                    ExportedCount = details.Count,
+                    FilePath = filePath
+                };
+            }
+            catch (Exception ex)
+            {
+                return new CsvExportResult
+                {
+                    Success = false,
+                    ErrorMessage = ex.Message,
+                    FilePath = filePath
+                };
+            }
+        }
+
+        /// <summary>
         /// 履歴インポート用のCSVテンプレートを出力（Issue #510）
         /// </summary>
         /// <remarks>
