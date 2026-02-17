@@ -1358,7 +1358,25 @@ public partial class MainViewModel : ViewModelBase
         dialog.Owner = Application.Current.MainWindow;
         await dialog.InitializeForEditAsync(ledger, authResult.Idm);
 
-        if (dialog.ShowDialog() == true)
+        var dialogResult = dialog.ShowDialog();
+
+        // Issue #750: 削除がリクエストされた場合
+        if (dialog.IsDeleteRequested)
+        {
+            var fullLedger = await _ledgerRepository.GetByIdAsync(ledger.Id);
+            if (fullLedger != null)
+            {
+                await _ledgerRepository.DeleteAsync(ledger.Id);
+                var operationLogger = App.Current.ServiceProvider.GetRequiredService<OperationLogger>();
+                await operationLogger.LogLedgerDeleteAsync(authResult.Idm, fullLedger);
+            }
+
+            await CheckAndNotifyConsistencyAsync();
+            await LoadHistoryLedgersAsync();
+            await RefreshDashboardAsync();
+            await CheckWarningsAsync();
+        }
+        else if (dialogResult == true)
         {
             await CheckAndNotifyConsistencyAsync();
             await LoadHistoryLedgersAsync();

@@ -154,10 +154,22 @@ namespace ICCardManager.ViewModels
         private bool _isSaved;
 
         /// <summary>
+        /// 削除要求フラグ（ダイアログを閉じて呼び出し元で削除を実行する通知用）Issue #750
+        /// </summary>
+        [ObservableProperty]
+        private bool _isDeleteRequested;
+
+        /// <summary>
         /// 保存が可能か
         /// </summary>
         [ObservableProperty]
         private bool _canSave;
+
+        /// <summary>
+        /// 削除が可能か（Editモードかつ貸出中でない場合のみ）Issue #750
+        /// </summary>
+        [ObservableProperty]
+        private bool _canDelete;
 
         /// <summary>
         /// 全行リスト（挿入位置計算用）
@@ -231,6 +243,9 @@ namespace ICCardManager.ViewModels
 
             // 現在の利用者を選択
             SelectedStaff = StaffList.FirstOrDefault(s => s.StaffIdm == ledger.LenderIdm);
+
+            // Issue #750: 貸出中でなければ削除可能
+            CanDelete = !ledgerDto.IsLentRecord;
 
             Validate();
             OnPropertyChanged(nameof(IsAddMode));
@@ -586,6 +601,26 @@ namespace ICCardManager.ViewModels
             {
                 StatusMessage = "保存に失敗しました";
             }
+        }
+
+        /// <summary>
+        /// 削除を要求（Issue #750）
+        /// </summary>
+        /// <remarks>
+        /// 実際の削除は呼び出し元（MainViewModel）で行う。
+        /// ダイアログは確認後に閉じる。
+        /// </remarks>
+        [RelayCommand]
+        private void RequestDelete()
+        {
+            if (!CanDelete) return;
+
+            var result = System.Windows.MessageBox.Show(
+                "この履歴を削除してよろしいですか？\n\n削除した履歴は元に戻せません。",
+                "履歴の削除", System.Windows.MessageBoxButton.YesNo, System.Windows.MessageBoxImage.Warning);
+            if (result != System.Windows.MessageBoxResult.Yes) return;
+
+            IsDeleteRequested = true;
         }
 
         /// <summary>
