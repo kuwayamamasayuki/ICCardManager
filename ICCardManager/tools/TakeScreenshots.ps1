@@ -9,10 +9,10 @@
     アプリのウィンドウが撮影されます。
 
 .PARAMETER RequiredOnly
-    必須画面（6枚）のみを取得します。
+    必須画面（7枚）のみを取得します。
 
 .PARAMETER All
-    オプション画面も含むすべての画面（16枚）を取得します。
+    オプション画面も含むすべての画面（17枚）を取得します。
 
 .PARAMETER OutputDir
     出力先ディレクトリを指定します。デフォルトは docs/screenshots/ です。
@@ -184,9 +184,14 @@ $requiredScreens = @(
         Instructions = "アプリが起動し、待機状態になったら"
     },
     @{
+        Name = "staff_recognized.png"
+        Title = "職員証認識後の画面"
+        Instructions = "職員証をタッチし、「○○さん、交通系ICカードをタッチしてください」のポップアップが表示されたら"
+    },
+    @{
         Name = "lend.png"
         Title = "貸出完了画面"
-        Instructions = "職員証をタッチし、交通系ICカードをタッチして貸出完了画面が表示されたら"
+        Instructions = "続けて交通系ICカードをタッチして貸出完了画面が表示されたら"
     },
     @{
         Name = "return.png"
