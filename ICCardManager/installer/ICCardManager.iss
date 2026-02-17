@@ -119,6 +119,44 @@ Root: HKLM; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: 
 Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChange(MyAppName, '&', '&&')}}"; Flags: nowait postinstall skipifsilent
 
 [Code]
+// Issue #742: 部署選択ページ
+var
+  DepartmentPage: TInputOptionWizardPage;
+
+// インストールウィザードに部署選択ページを追加（Issue #742）
+procedure InitializeWizard();
+begin
+  DepartmentPage := CreateInputOptionPage(wpSelectTasks,
+    '部署の選択',
+    '使用する部署及び支出科目を選択してください。',
+    '選択した部署に応じて、チャージ時の摘要と帳票テンプレートが切り替わります。' + #13#10 + #13#10 +
+    '※ 本アプリは、現時点では、借損料（駐車場代）や自動車借上料（タクシー料金）には対応していません。' + #13#10 +
+    '※ この設定は後から「設定」画面（F5）で変更できます。',
+    True, False);
+  DepartmentPage.Add('市長事務部局：役務費');
+  DepartmentPage.Add('企業会計部局（水道局、交通局等）：旅費 - 乗車券購入費');
+  DepartmentPage.SelectedValueIndex := 0;
+end;
+
+// 部署選択結果を設定ファイルに書き出す（Issue #742）
+procedure WriteDepartmentConfig();
+var
+  ConfigDir: string;
+  ConfigFile: string;
+  DepartmentValue: string;
+begin
+  ConfigDir := ExpandConstant('{commonappdata}\ICCardManager');
+  ForceDirectories(ConfigDir);
+  ConfigFile := ConfigDir + '\department_config.txt';
+
+  if DepartmentPage.SelectedValueIndex = 1 then
+    DepartmentValue := 'enterprise_account'
+  else
+    DepartmentValue := 'mayor_office';
+
+  SaveStringToFile(ConfigFile, DepartmentValue, False);
+end;
+
 // Issue #506: アンインストーラーのファイル名を変更
 // unins000.exe/dat → Uninstall_ICCardManager.exe/dat
 const
@@ -166,6 +204,7 @@ begin
   if CurStep = ssPostInstall then
   begin
     RenameUninstaller();
+    WriteDepartmentConfig();
   end;
 end;
 
