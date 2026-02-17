@@ -415,6 +415,15 @@ namespace ICCardManager.Services
                     // Issue #457: 印刷範囲を設定（全データを含む）
                     SetPrintArea(worksheet, currentRow, rowsOnCurrentPage, RowsPerPage);
 
+                    // Issue #752: ドキュメントプロパティの日時を更新
+                    // ClosedXMLはSaveAs時にCreated/Modifiedを自動更新しないため、明示的に設定する
+                    var now = DateTime.Now;
+                    if (!isExistingFile)
+                    {
+                        workbook.Properties.Created = now;
+                    }
+                    workbook.Properties.Modified = now;
+
                     // ファイルを保存
                     workbook.SaveAs(outputPath);
                 }

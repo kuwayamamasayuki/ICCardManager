@@ -2576,4 +2576,102 @@ public class ReportServiceTests : IDisposable
     }
 
     #endregion
+
+    #region ドキュメントプロパティ（Issue #752）
+
+    /// <summary>
+    /// TC_752_01: 新規ファイル作成時にCreated/Modifiedが現在時刻に設定されること
+    /// </summary>
+    [Fact]
+    public async Task CreateMonthlyReportAsync_NewFile_ShouldSetDocumentProperties()
+    {
+        // Arrange
+        var cardIdm = "0102030405060708";
+        var card = CreateTestCard(cardIdm);
+        var year = 2024;
+        var month = 6;
+        var outputPath = CreateTempFilePath();
+
+        var ledgers = new List<Ledger>
+        {
+            CreateTestLedger(1, cardIdm, new DateTime(2024, 6, 5), "鉄道（博多～天神）", 0, 300, 4700)
+        };
+        var mayLedgers = new List<Ledger>
+        {
+            CreateTestLedger(0, cardIdm, new DateTime(2024, 5, 31), "前月末", 0, 0, 5000)
+        };
+
+        _cardRepositoryMock.Setup(r => r.GetByIdmAsync(cardIdm, true)).ReturnsAsync(card);
+        _ledgerRepositoryMock.Setup(r => r.GetByMonthAsync(cardIdm, year, month)).ReturnsAsync(ledgers);
+        _ledgerRepositoryMock.Setup(r => r.GetByMonthAsync(cardIdm, year, 5)).ReturnsAsync(mayLedgers);
+
+        var beforeGeneration = DateTime.Now.AddSeconds(-1);
+
+        // Act
+        var result = await _reportService.CreateMonthlyReportAsync(cardIdm, year, month, outputPath);
+
+        // Assert
+        result.Success.Should().BeTrue();
+
+        using var workbook = new XLWorkbook(outputPath);
+        workbook.Properties.Created.Should().BeAfter(beforeGeneration,
+            "新規ファイルのCreatedは現在時刻付近であるべき");
+        workbook.Properties.Modified.Should().BeAfter(beforeGeneration,
+            "新規ファイルのModifiedは現在時刻付近であるべき");
+    }
+
+    /// <summary>
+    /// TC_752_02: 既存ファイル再出力時にModifiedが現在時刻に更新されること
+    /// </summary>
+    [Fact]
+    public async Task CreateMonthlyReportAsync_ExistingFile_ShouldUpdateModifiedProperty()
+    {
+        // Arrange
+        var cardIdm = "0102030405060708";
+        var card = CreateTestCard(cardIdm);
+        var year = 2024;
+        var month = 6;
+        var outputPath = CreateTempFilePath();
+
+        var ledgers = new List<Ledger>
+        {
+            CreateTestLedger(1, cardIdm, new DateTime(2024, 6, 5), "鉄道（博多～天神）", 0, 300, 4700)
+        };
+        var mayLedgers = new List<Ledger>
+        {
+            CreateTestLedger(0, cardIdm, new DateTime(2024, 5, 31), "前月末", 0, 0, 5000)
+        };
+
+        _cardRepositoryMock.Setup(r => r.GetByIdmAsync(cardIdm, true)).ReturnsAsync(card);
+        _ledgerRepositoryMock.Setup(r => r.GetByMonthAsync(cardIdm, year, month)).ReturnsAsync(ledgers);
+        _ledgerRepositoryMock.Setup(r => r.GetByMonthAsync(cardIdm, year, 5)).ReturnsAsync(mayLedgers);
+
+        // 1回目の出力（既存ファイルを作る）
+        await _reportService.CreateMonthlyReportAsync(cardIdm, year, month, outputPath);
+
+        // ドキュメントプロパティの日時を意図的に古くする
+        using (var wb = new XLWorkbook(outputPath))
+        {
+            wb.Properties.Modified = new DateTime(2020, 1, 1);
+            wb.Properties.Created = new DateTime(2020, 1, 1);
+            wb.SaveAs(outputPath);
+        }
+
+        var beforeSecondGeneration = DateTime.Now.AddSeconds(-1);
+
+        // Act: 2回目の出力（既存ファイルを更新）
+        var result = await _reportService.CreateMonthlyReportAsync(cardIdm, year, month, outputPath);
+
+        // Assert
+        result.Success.Should().BeTrue();
+
+        using var workbook = new XLWorkbook(outputPath);
+        workbook.Properties.Modified.Should().BeAfter(beforeSecondGeneration,
+            "既存ファイル再出力時にModifiedが現在時刻に更新されるべき");
+        // Created は既存ファイルの場合は変更しない（元の作成日時を尊重）
+        workbook.Properties.Created.Should().Be(new DateTime(2020, 1, 1),
+            "既存ファイルのCreatedは変更しない");
+    }
+
+    #endregion
 }
