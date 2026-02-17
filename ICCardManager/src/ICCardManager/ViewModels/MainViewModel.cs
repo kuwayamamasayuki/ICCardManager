@@ -1914,11 +1914,22 @@ public partial class MainViewModel : ViewModelBase
     /// データエクスポート/インポート画面を開く
     /// </summary>
     [RelayCommand]
-    public void OpenDataExportImport()
+    public async Task OpenDataExportImportAsync()
     {
         var dialog = App.Current.ServiceProvider.GetRequiredService<Views.Dialogs.DataExportImportDialog>();
         dialog.Owner = System.Windows.Application.Current.MainWindow;
         dialog.ShowDialog();
+
+        // Issue #744: インポートが実行された場合、履歴一覧・ダッシュボードを即座に更新
+        var viewModel = (DataExportImportViewModel)dialog.DataContext;
+        if (viewModel.HasImported)
+        {
+            await RefreshDashboardAsync();
+            if (IsHistoryVisible)
+            {
+                await LoadHistoryLedgersAsync();
+            }
+        }
     }
 
     /// <summary>
