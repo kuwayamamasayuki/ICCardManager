@@ -396,7 +396,7 @@
                                   GridLinesVisibility="Horizontal"
                                   HeadersVisibility="Column"
                                   RowHeaderWidth="0"
-                                  AlternatingRowBackground="{DynamicResource AlternatingRowBrush}"
+                                  AlternationCount="2"
                                   AutomationProperties.Name="利用履歴一覧"
                                   AutomationProperties.HelpText="チェックボックスで統合したい履歴を選択し、統合ボタンを押します">
                             <DataGrid.Columns>
@@ -469,10 +469,14 @@
                                 </DataGridTemplateColumn>
                             </DataGrid.Columns>
 
-                            <!-- 貸出中レコード・チェック済みレコードのスタイル -->
+                            <!-- 交互背景・貸出中レコード・チェック済みレコードのスタイル -->
                             <DataGrid.RowStyle>
                                 <Style TargetType="DataGridRow">
                                     <Style.Triggers>
+                                        <!-- 交互背景（AlternatingRowBackgroundの代替：ローカル値ではなくTriggerで設定することでDataTriggerとの優先順位を統一） -->
+                                        <Trigger Property="AlternationIndex" Value="1">
+                                            <Setter Property="Background" Value="{DynamicResource AlternatingRowBrush}"/>
+                                        </Trigger>
                                         <DataTrigger Binding="{Binding IsLentRecord}" Value="True">
                                             <Setter Property="Background" Value="{DynamicResource LendingBackgroundBrush}"/>
                                             <Setter Property="FontStyle" Value="Italic"/>
