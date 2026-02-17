@@ -164,7 +164,7 @@ namespace ICCardManager.Services
                     {
                         DateDisplay = WarekiConverter.ToWareki(carryoverDate),
                         Summary = SummaryGenerator.GetCarryoverFromPreviousMonthSummary(previousMonth),
-                        Income = previousMonthBalance.Value,
+                        // Issue #753: 月次繰越の受入欄は空欄（受入金額を表示するのは4月の前年度繰越のみ）
                         Balance = previousMonthBalance.Value,
                         IsBold = true
                     });
