@@ -1,6 +1,5 @@
 using System.Collections.ObjectModel;
 using System.IO;
-using System.Text;
 using System.Text.Json;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -78,6 +77,7 @@ public partial class OperationLogSearchViewModel : ViewModelBase
 {
     private readonly IOperationLogRepository _operationLogRepository;
     private readonly IDialogService _dialogService;
+    private readonly OperationLogExcelExportService _excelExportService;
 
     // 検索条件
     [ObservableProperty]
@@ -167,10 +167,12 @@ public partial class OperationLogSearchViewModel : ViewModelBase
 
     public OperationLogSearchViewModel(
         IOperationLogRepository operationLogRepository,
-        IDialogService dialogService)
+        IDialogService dialogService,
+        OperationLogExcelExportService excelExportService)
     {
         _operationLogRepository = operationLogRepository;
         _dialogService = dialogService;
+        _excelExportService = excelExportService;
 
         // デフォルトは今月
         var today = DateTime.Today;
@@ -314,16 +316,16 @@ public partial class OperationLogSearchViewModel : ViewModelBase
     }
 
     /// <summary>
-    /// CSVエクスポート
+    /// Excelエクスポート（Issue #786）
     /// </summary>
     [RelayCommand]
-    public async Task ExportToCsvAsync()
+    public async Task ExportToExcelAsync()
     {
         var dialog = new SaveFileDialog
         {
-            Filter = "CSV ファイル (*.csv)|*.csv",
-            DefaultExt = ".csv",
-            FileName = $"operation_log_{DateTime.Now:yyyyMMdd_HHmmss}.csv"
+            Filter = "Excel ファイル (*.xlsx)|*.xlsx",
+            DefaultExt = ".xlsx",
+            FileName = $"操作ログ_{DateTime.Now:yyyyMMdd_HHmmss}.xlsx"
         };
 
         if (dialog.ShowDialog() != true)
@@ -338,35 +340,13 @@ public partial class OperationLogSearchViewModel : ViewModelBase
                 var criteria = BuildSearchCriteria();
                 var logs = await _operationLogRepository.SearchAllAsync(criteria);
 
-                var lines = new List<string>
-                {
-                    // ヘッダー行
-                    "日時,操作種別,対象,対象ID,操作者,変更前,変更後"
-                };
-
-                foreach (var log in logs)
-                {
-                    lines.Add(string.Join(",",
-                        EscapeCsvField(log.Timestamp.ToString("yyyy-MM-dd HH:mm:ss")),
-                        EscapeCsvField(log.Action ?? ""),
-                        EscapeCsvField(log.TargetTable ?? ""),
-                        EscapeCsvField(log.TargetId ?? ""),
-                        EscapeCsvField(log.OperatorName),
-                        EscapeCsvField(log.BeforeData ?? ""),
-                        EscapeCsvField(log.AfterData ?? "")
-                    ));
-                }
-
-                // UTF-8 with BOM (Excel対応)
-                // .NET Framework 4.8ではFile.WriteAllLinesAsyncがないためTask.Runで同期版を使用
-                await Task.Run(() => File.WriteAllLines(dialog.FileName, lines, new UTF8Encoding(true)));
+                await _excelExportService.ExportAsync(logs, dialog.FileName);
 
                 LastExportedFile = dialog.FileName;
                 StatusMessage = $"エクスポート完了: {logs.Count()}件を出力しました";
 
-                // Issue #512: 保存完了メッセージを表示
                 _dialogService.ShowInformation(
-                    $"CSVファイルを保存しました。\n\n出力先: {dialog.FileName}\n出力件数: {logs.Count()}件",
+                    $"Excelファイルを保存しました。\n\n出力先: {dialog.FileName}\n出力件数: {logs.Count()}件",
                     "エクスポート完了");
             }
             catch (Exception ex)
@@ -687,22 +667,4 @@ public partial class OperationLogSearchViewModel : ViewModelBase
         return null;
     }
 
-    /// <summary>
-    /// CSVフィールドをエスケープ
-    /// </summary>
-    private static string EscapeCsvField(string field)
-    {
-        if (string.IsNullOrEmpty(field))
-        {
-            return "";
-        }
-
-        // カンマ、ダブルクォート、改行が含まれる場合はダブルクォートで囲む
-        if (field.Contains(',') || field.Contains('"') || field.Contains('\n') || field.Contains('\r'))
-        {
-            return $"\"{field.Replace("\"", "\"\"")}\"";
-        }
-
-        return field;
-    }
 }

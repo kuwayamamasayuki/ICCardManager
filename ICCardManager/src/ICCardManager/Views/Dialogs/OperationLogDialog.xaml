@@ -303,16 +303,16 @@
 
             <!-- エクスポートボタン -->
             <StackPanel Grid.Column="0" Orientation="Horizontal">
-                <Button Content="CSVエクスポート"
-                        Command="{Binding ExportToCsvCommand}"
+                <Button Content="Excelエクスポート"
+                        Command="{Binding ExportToExcelCommand}"
                         Padding="15,8"
-                        ToolTip="検索結果をCSVファイルに出力"/>
+                        ToolTip="検索結果をExcelファイルに出力"/>
                 <Button Content="開く"
                         Command="{Binding OpenExportedFileCommand}"
                         Padding="10,8"
                         Margin="5,0,0,0"
                         Visibility="{Binding LastExportedFile, Converter={StaticResource BoolToVisibilityConverter}}"
-                        ToolTip="出力したCSVファイルを開く"/>
+                        ToolTip="出力したExcelファイルを開く"/>
             </StackPanel>
 
             <!-- ステータスメッセージ -->
