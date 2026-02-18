@@ -175,7 +175,8 @@
         </Border>
 
         <!-- 操作ログ一覧 -->
-        <DataGrid Grid.Row="2"
+        <DataGrid x:Name="LogsDataGrid"
+                  Grid.Row="2"
                   ItemsSource="{Binding Logs}"
                   SelectedItem="{Binding SelectedLog}"
                   AutoGenerateColumns="False"

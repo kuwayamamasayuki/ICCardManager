@@ -191,13 +191,21 @@ public partial class OperationLogSearchViewModel : ViewModelBase
     }
 
     /// <summary>
-    /// 検索を実行
+    /// 検索を実行（Issue #787: 最終ページ＝最新データを表示）
     /// </summary>
     [RelayCommand]
     public async Task SearchAsync()
     {
+        // まず1ページ目を取得して総ページ数を把握
         CurrentPage = 1;
         await LoadPageAsync();
+
+        // 複数ページある場合は最終ページ（最新データ）に移動
+        if (TotalPages > 1)
+        {
+            CurrentPage = TotalPages;
+            await LoadPageAsync();
+        }
     }
 
     /// <summary>
@@ -283,12 +291,11 @@ public partial class OperationLogSearchViewModel : ViewModelBase
     }
 
     /// <summary>
-    /// ページサイズ変更時
+    /// ページサイズ変更時（Issue #787: 最終ページに移動）
     /// </summary>
     partial void OnPageSizeChanged(int value)
     {
-        CurrentPage = 1;
-        _ = LoadPageAsync();
+        _ = SearchAsync();
     }
 
     /// <summary>
