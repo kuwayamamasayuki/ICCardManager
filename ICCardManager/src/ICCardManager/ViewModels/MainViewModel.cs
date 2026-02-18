@@ -1078,8 +1078,11 @@ public partial class MainViewModel : ViewModelBase
 
             // ページングされた履歴を取得
             // 注: 日付はyyyy-MM-dd形式で保存されているため、AddDays(1)は不要
-            var (ledgers, totalCount) = await _ledgerRepository.GetPagedAsync(
+            var (rawLedgers, totalCount) = await _ledgerRepository.GetPagedAsync(
                 HistoryCard.CardIdm, HistoryFromDate, HistoryToDate, HistoryCurrentPage, HistoryPageSize);
+
+            // Issue #784: 残高チェーンに基づいて同一日内の時系列順を復元
+            var ledgers = Services.LedgerOrderHelper.ReorderByBalanceChain(rawLedgers);
 
             foreach (var ledger in ledgers)
             {
