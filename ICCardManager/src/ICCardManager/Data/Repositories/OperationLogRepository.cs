@@ -56,7 +56,7 @@ SELECT last_insert_rowid();";
        target_id, action, before_data, after_data
 FROM operation_log
 WHERE date(timestamp) BETWEEN @fromDate AND @toDate
-ORDER BY timestamp DESC";
+ORDER BY timestamp ASC";
 
             command.Parameters.AddWithValue("@fromDate", fromDate.ToString("yyyy-MM-dd"));
             command.Parameters.AddWithValue("@toDate", toDate.ToString("yyyy-MM-dd"));
@@ -81,7 +81,7 @@ ORDER BY timestamp DESC";
        target_id, action, before_data, after_data
 FROM operation_log
 WHERE operator_idm = @operatorIdm
-ORDER BY timestamp DESC";
+ORDER BY timestamp ASC";
 
             command.Parameters.AddWithValue("@operatorIdm", operatorIdm);
 
@@ -105,7 +105,7 @@ ORDER BY timestamp DESC";
        target_id, action, before_data, after_data
 FROM operation_log
 WHERE target_table = @targetTable AND target_id = @targetId
-ORDER BY timestamp DESC";
+ORDER BY timestamp ASC";
 
             command.Parameters.AddWithValue("@targetTable", targetTable);
             command.Parameters.AddWithValue("@targetId", targetId);
@@ -145,7 +145,7 @@ ORDER BY timestamp DESC";
        target_id, action, before_data, after_data
 FROM operation_log
 {whereClause}
-ORDER BY timestamp DESC, id DESC
+ORDER BY timestamp ASC, id ASC
 LIMIT @pageSize OFFSET @offset";
 
             foreach (var param in parameters)
@@ -183,7 +183,7 @@ LIMIT @pageSize OFFSET @offset";
        target_id, action, before_data, after_data
 FROM operation_log
 {whereClause}
-ORDER BY timestamp DESC, id DESC";
+ORDER BY timestamp ASC, id ASC";
 
             foreach (var param in parameters)
             {

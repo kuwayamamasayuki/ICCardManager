@@ -121,6 +121,29 @@ public class OperationLogRepositoryTests : IDisposable
         result.Should().BeEmpty();
     }
 
+    [Fact]
+    public async Task GetByDateRangeAsync_ReturnsSortedByTimestampAscending()
+    {
+        // Arrange: 異なる時刻で3件登録（Issue #787: 古い順にソートされることを検証）
+        var log1 = CreateTestLog(timestamp: new DateTime(2024, 1, 20, 14, 0, 0));
+        var log2 = CreateTestLog(timestamp: new DateTime(2024, 1, 10, 9, 0, 0));
+        var log3 = CreateTestLog(timestamp: new DateTime(2024, 1, 15, 12, 0, 0));
+
+        await _repository.InsertAsync(log1);
+        await _repository.InsertAsync(log2);
+        await _repository.InsertAsync(log3);
+
+        // Act
+        var result = (await _repository.GetByDateRangeAsync(
+            new DateTime(2024, 1, 1), new DateTime(2024, 1, 31))).ToList();
+
+        // Assert: 古い順（ASC）で返ること
+        result.Should().HaveCount(3);
+        result[0].Timestamp.Should().Be(new DateTime(2024, 1, 10, 9, 0, 0));
+        result[1].Timestamp.Should().Be(new DateTime(2024, 1, 15, 12, 0, 0));
+        result[2].Timestamp.Should().Be(new DateTime(2024, 1, 20, 14, 0, 0));
+    }
+
     #endregion
 
     #region GetByOperatorAsync テスト
@@ -345,6 +368,27 @@ public class OperationLogRepositoryTests : IDisposable
         // Assert
         result.Items.Should().HaveCount(3);
         result.TotalCount.Should().Be(3);
+    }
+
+    [Fact]
+    public async Task SearchAsync_ReturnsSortedByTimestampAscending()
+    {
+        // Arrange: Issue #787 — 古い順にソートされることを検証
+        await _repository.InsertAsync(CreateTestLog(timestamp: new DateTime(2024, 1, 20, 14, 0, 0)));
+        await _repository.InsertAsync(CreateTestLog(timestamp: new DateTime(2024, 1, 10, 9, 0, 0)));
+        await _repository.InsertAsync(CreateTestLog(timestamp: new DateTime(2024, 1, 15, 12, 0, 0)));
+
+        var criteria = new OperationLogSearchCriteria();
+
+        // Act
+        var result = await _repository.SearchAsync(criteria);
+
+        // Assert: 古い順（ASC）で返ること — 最新ログが画面の下に表示される
+        var items = result.Items.ToList();
+        items.Should().HaveCount(3);
+        items[0].Timestamp.Should().Be(new DateTime(2024, 1, 10, 9, 0, 0));
+        items[1].Timestamp.Should().Be(new DateTime(2024, 1, 15, 12, 0, 0));
+        items[2].Timestamp.Should().Be(new DateTime(2024, 1, 20, 14, 0, 0));
     }
 
     #endregion

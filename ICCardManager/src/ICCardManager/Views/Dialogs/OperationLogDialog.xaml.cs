@@ -31,10 +31,24 @@ namespace ICCardManager.Views.Dialogs
             try
             {
                 await _viewModel.InitializeAsync();
+
+                // Issue #787: 最新のログが下に表示されるため、一番下までスクロール
+                ScrollDataGridToBottom();
             }
             catch (Exception ex)
             {
                 ErrorDialogHelper.ShowError(ex, "初期化エラー");
+            }
+        }
+
+        /// <summary>
+        /// DataGridを一番下までスクロール（Issue #787）
+        /// </summary>
+        private void ScrollDataGridToBottom()
+        {
+            if (LogsDataGrid.Items.Count > 0)
+            {
+                LogsDataGrid.ScrollIntoView(LogsDataGrid.Items[LogsDataGrid.Items.Count - 1]);
             }
         }
 
