@@ -39,6 +39,16 @@ namespace ICCardManager.Data.Repositories
         Task<Ledger> GetLentRecordAsync(string cardIdm);
 
         /// <summary>
+        /// 全カードの貸出中レコードを一括取得（整合性チェック用）
+        /// </summary>
+        /// <remarks>
+        /// Issue #790対応: 起動時にic_card.is_lentとledger.is_lent_recordの
+        /// 整合性をチェック・修復するために使用。
+        /// </remarks>
+        /// <returns>全カードの貸出中レコードのリスト</returns>
+        Task<List<Ledger>> GetAllLentRecordsAsync();
+
+        /// <summary>
         /// 利用履歴を登録
         /// </summary>
         Task<int> InsertAsync(Ledger ledger);
