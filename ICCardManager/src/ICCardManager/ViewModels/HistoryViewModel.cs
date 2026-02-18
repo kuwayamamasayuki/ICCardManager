@@ -204,8 +204,11 @@ public partial class HistoryViewModel : ViewModelBase
             Ledgers.Clear();
 
             // ページングされた履歴を取得
-            var (ledgers, totalCount) = await _ledgerRepository.GetPagedAsync(
+            var (rawLedgers, totalCount) = await _ledgerRepository.GetPagedAsync(
                 Card.CardIdm, FromDate, ToDate.AddDays(1), CurrentPage, PageSize);
+
+            // Issue #784: 残高チェーンに基づいて同一日内の時系列順を復元
+            var ledgers = Services.LedgerOrderHelper.ReorderByBalanceChain(rawLedgers);
 
             foreach (var ledger in ledgers)
             {

@@ -1024,10 +1024,11 @@ public class ReportServiceTests : IDisposable
     }
 
     /// <summary>
-    /// TC024: Issue #478 - 同一日ではチャージが利用より先に表示される
+    /// TC024: Issue #784 - 同一日のチャージと利用は残高チェーンに基づく時系列順で表示される
+    /// 残高チェーン: 10000 → (利用-300) → 9700 → (チャージ+5000) → 14700 → (利用-300) → 14400
     /// </summary>
     [Fact]
-    public async Task CreateMonthlyReportAsync_SameDayChargeAndUsage_ShouldShowChargeFirst()
+    public async Task CreateMonthlyReportAsync_SameDayChargeAndUsage_ShouldOrderByBalanceChain()
     {
         // Arrange
         var cardIdm = "0102030405060708";
@@ -1036,18 +1037,18 @@ public class ReportServiceTests : IDisposable
         var month = 6;
         var outputPath = CreateTempFilePath();
 
-        // 意図的に順番をバラバラにしたデータ（同一日にチャージと利用）
+        // 6月10日: 利用→チャージ→利用の順で実際に処理された
+        // 残高チェーン: 10000 → 9700 → 14700 → 14400
         var ledgers = new List<Ledger>
         {
-            // 6月10日: 利用→チャージ→利用の順でID付与（挿入順）
-            CreateTestLedger(1, cardIdm, new DateTime(2024, 6, 10), "鉄道（博多～天神）", 0, 300, 9700),   // 利用（ID:1）
-            CreateTestLedger(2, cardIdm, new DateTime(2024, 6, 10), "役務費によりチャージ", 5000, 0, 14700), // チャージ（ID:2）
-            CreateTestLedger(3, cardIdm, new DateTime(2024, 6, 10), "鉄道（天神～博多）", 0, 300, 14400),   // 利用（ID:3）
-            // 6月5日: チャージのみ
-            CreateTestLedger(4, cardIdm, new DateTime(2024, 6, 5), "役務費によりチャージ", 10000, 0, 10000), // チャージ（ID:4）
+            CreateTestLedger(1, cardIdm, new DateTime(2024, 6, 10), "鉄道（博多～天神）", 0, 300, 9700),   // 利用（balance_before=10000）
+            CreateTestLedger(2, cardIdm, new DateTime(2024, 6, 10), "役務費によりチャージ", 5000, 0, 14700), // チャージ（balance_before=9700）
+            CreateTestLedger(3, cardIdm, new DateTime(2024, 6, 10), "鉄道（天神～博多）", 0, 300, 14400),   // 利用（balance_before=14700）
+            // 6月5日: チャージのみ（balance_before=0）
+            CreateTestLedger(4, cardIdm, new DateTime(2024, 6, 5), "役務費によりチャージ", 10000, 0, 10000),
         };
 
-        // 5月の前月残高（繰越用）
+        // 5月の前月残高（繰越用: 残高0）
         var mayLedgers = new List<Ledger>
         {
             CreateTestLedger(0, cardIdm, new DateTime(2024, 5, 31), "前月末データ", 0, 0, 0)
@@ -1062,6 +1063,9 @@ public class ReportServiceTests : IDisposable
         _ledgerRepositoryMock
             .Setup(r => r.GetByMonthAsync(cardIdm, year, 5))  // 5月の前月残高
             .ReturnsAsync(mayLedgers);
+        _ledgerRepositoryMock
+            .Setup(r => r.GetByDateRangeAsync(cardIdm, It.IsAny<DateTime>(), It.IsAny<DateTime>()))
+            .ReturnsAsync(ledgers);  // 累計用（同じデータを返す）
 
         // Act
         var result = await _reportService.CreateMonthlyReportAsync(cardIdm, year, month, outputPath);
@@ -1075,14 +1079,13 @@ public class ReportServiceTests : IDisposable
         // 前月繰越行（行5）
         worksheet.Cell(5, 2).GetString().Should().Be("5月より繰越");
 
-        // Issue #478: 同一日ではチャージ（Income > 0）が利用（Expense > 0）より先
         // 6月5日: チャージ（行6）
         worksheet.Cell(6, 2).GetString().Should().Be("役務費によりチャージ");
 
-        // 6月10日: チャージ→利用→利用の順（Income DESC, Id ASCでソート）
-        worksheet.Cell(7, 2).GetString().Should().Be("役務費によりチャージ");    // チャージ（Income=5000）
-        worksheet.Cell(8, 2).GetString().Should().Be("鉄道（博多～天神）");       // 利用（ID:1）
-        worksheet.Cell(9, 2).GetString().Should().Be("鉄道（天神～博多）");       // 利用（ID:3）
+        // Issue #784: 残高チェーンに基づく順序（利用→チャージ→利用）
+        worksheet.Cell(7, 2).GetString().Should().Be("鉄道（博多～天神）");       // 利用（balance_before=10000）
+        worksheet.Cell(8, 2).GetString().Should().Be("役務費によりチャージ");    // チャージ（balance_before=9700）
+        worksheet.Cell(9, 2).GetString().Should().Be("鉄道（天神～博多）");       // 利用（balance_before=14700）
 
         // 月計行（行10）
         worksheet.Cell(10, 2).GetString().Should().Be("6月計");

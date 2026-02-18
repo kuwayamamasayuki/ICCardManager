@@ -251,14 +251,23 @@ namespace ICCardManager.Services
                     }
                 }
 
+                // 前月末残高を取得（履歴の並び替えにも使用）
+                int? precedingBalance = null;
+                if (month == 4)
+                {
+                    precedingBalance = await _ledgerRepository.GetCarryoverBalanceAsync(cardIdm, year - 1);
+                }
+                else
+                {
+                    precedingBalance = await GetPreviousMonthBalanceAsync(cardIdm, year, month);
+                }
+
                 // 履歴を取得
-                // Issue #478: 同一日ではチャージ（Income > 0）を利用より先に表示
-                var ledgers = (await _ledgerRepository.GetByMonthAsync(cardIdm, year, month))
-                    .Where(l => l.Summary != SummaryGenerator.GetLendingSummary()) // 貸出中レコードを除外
-                    .OrderBy(l => l.Date)
-                    .ThenByDescending(l => l.Income)
-                    .ThenBy(l => l.Id)
-                    .ToList();
+                // Issue #784: 残高チェーンに基づいて同一日内の時系列順を復元
+                var ledgers = LedgerOrderHelper.ReorderByBalanceChain(
+                    (await _ledgerRepository.GetByMonthAsync(cardIdm, year, month))
+                        .Where(l => l.Summary != SummaryGenerator.GetLendingSummary()),
+                    precedingBalance);
 
                 // Issue #477: 既存ファイルがあれば開く、なければテンプレートから新規作成
                 XLWorkbook workbook;
@@ -331,29 +340,28 @@ namespace ICCardManager.Services
                     var rowsOnCurrentPage = 0;
 
                     // 繰越行を追加（新規購入カードの場合は繰越行を出力しない）
+                    // precedingBalanceは既に上部で取得済み
                     if (month == 4)
                     {
                         // 4月の場合は前年度繰越のみ（月繰越は行わない）
-                        var carryover = await _ledgerRepository.GetCarryoverBalanceAsync(cardIdm, year - 1);
                         // 前年度のデータがある場合のみ繰越行を出力
-                        if (carryover.HasValue)
+                        if (precedingBalance.HasValue)
                         {
                             // Issue #457: 改ページチェック
                             (currentRow, rowsOnCurrentPage, currentPageNumber) = CheckAndInsertPageBreak(worksheet, currentRow, rowsOnCurrentPage, RowsPerPage, currentPageNumber);
-                            currentRow = WriteFiscalYearCarryoverRow(worksheet, currentRow, carryover.Value, year);
+                            currentRow = WriteFiscalYearCarryoverRow(worksheet, currentRow, precedingBalance.Value, year);
                             rowsOnCurrentPage++;
                         }
                     }
                     else
                     {
                         // 4月以外は前月繰越を追加
-                        var previousMonthBalance = await GetPreviousMonthBalanceAsync(cardIdm, year, month);
                         // 過去のデータがある場合のみ繰越行を出力
-                        if (previousMonthBalance.HasValue)
+                        if (precedingBalance.HasValue)
                         {
                             // Issue #457: 改ページチェック
                             (currentRow, rowsOnCurrentPage, currentPageNumber) = CheckAndInsertPageBreak(worksheet, currentRow, rowsOnCurrentPage, RowsPerPage, currentPageNumber);
-                            currentRow = WriteMonthlyCarryoverRow(worksheet, currentRow, previousMonthBalance.Value, year, month);
+                            currentRow = WriteMonthlyCarryoverRow(worksheet, currentRow, precedingBalance.Value, year, month);
                             rowsOnCurrentPage++;
                         }
                     }
@@ -383,12 +391,9 @@ namespace ICCardManager.Services
                     var fiscalYearStartYear = month >= 4 ? year : year - 1;
                     var fiscalYearStart = new DateTime(fiscalYearStartYear, 4, 1);
                     var fiscalYearEnd = new DateTime(year, month, DateTime.DaysInMonth(year, month));
-                    // Issue #478: 同一日ではチャージ（Income > 0）を利用より先に表示（一貫性のため）
-                    var yearlyLedgers = (await _ledgerRepository.GetByDateRangeAsync(cardIdm, fiscalYearStart, fiscalYearEnd))
-                        .OrderBy(l => l.Date)
-                        .ThenByDescending(l => l.Income)
-                        .ThenBy(l => l.Id)
-                        .ToList();
+                    // Issue #784: 残高チェーンに基づいて時系列順を復元
+                    var yearlyLedgers = LedgerOrderHelper.ReorderByBalanceChain(
+                        await _ledgerRepository.GetByDateRangeAsync(cardIdm, fiscalYearStart, fiscalYearEnd));
 
                     var yearlyIncome = yearlyLedgers.Sum(l => l.Income);
                     var yearlyExpense = yearlyLedgers.Sum(l => l.Expense);
@@ -864,13 +869,10 @@ namespace ICCardManager.Services
             }
 
             // 前月の履歴を取得し、最後の残高を返す
-            // Issue #478: 同一日ではチャージ（Income > 0）を利用より先に表示（一貫性のため）
-            var previousLedgers = (await _ledgerRepository.GetByMonthAsync(cardIdm, previousYear, previousMonth))
-                .Where(l => l.Summary != SummaryGenerator.GetLendingSummary())
-                .OrderBy(l => l.Date)
-                .ThenByDescending(l => l.Income)
-                .ThenBy(l => l.Id)
-                .ToList();
+            // Issue #784: 残高チェーンに基づいて時系列順を復元
+            var previousLedgers = LedgerOrderHelper.ReorderByBalanceChain(
+                (await _ledgerRepository.GetByMonthAsync(cardIdm, previousYear, previousMonth))
+                    .Where(l => l.Summary != SummaryGenerator.GetLendingSummary()));
 
             if (previousLedgers.Count > 0)
             {

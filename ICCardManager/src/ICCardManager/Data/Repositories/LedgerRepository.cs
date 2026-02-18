@@ -32,7 +32,7 @@ namespace ICCardManager.Data.Repositories
                 ? "WHERE card_idm = @cardIdm AND date BETWEEN @fromDate AND @toDate"
                 : "WHERE date BETWEEN @fromDate AND @toDate";
 
-            // Issue #478: 同一日ではチャージ（income > 0）を利用より先に表示
+            // Issue #784: 同一日内の順序はアプリケーション層で残高チェーンにより決定
             // Issue #590: 新規購入/繰越はsummaryベースで最優先（income額に依存しない）
             command.CommandText = $@"SELECT id, card_idm, lender_idm, date, summary, income, expense, balance,
        staff_name, note, returner_idm, lent_at, returned_at, is_lent_record
@@ -40,7 +40,7 @@ FROM ledger
 {whereClause}
 ORDER BY DATE(date) ASC,
   CASE WHEN summary = '新規購入' OR summary LIKE '%月から繰越' THEN 0 ELSE 1 END ASC,
-  income DESC, balance DESC, id ASC";
+  id ASC";
 
             if (cardIdm != null)
             {
@@ -412,7 +412,7 @@ FROM ledger
             var offset = (page - 1) * pageSize;
 
             using var command = connection.CreateCommand();
-            // Issue #478: 同一日ではチャージ（income > 0）を利用より先に表示
+            // Issue #784: 同一日内の順序はアプリケーション層で残高チェーンにより決定
             // Issue #590: 新規購入/繰越はsummaryベースで最優先（income額に依存しない）
             command.CommandText = $@"SELECT l.id, l.card_idm, l.lender_idm, l.date, l.summary, l.income, l.expense, l.balance,
        l.staff_name, l.note, l.returner_idm, l.lent_at, l.returned_at, l.is_lent_record,
@@ -421,7 +421,7 @@ FROM ledger l
 {whereClause.Replace("card_idm", "l.card_idm").Replace("date ", "l.date ")}
 ORDER BY DATE(l.date) ASC,
   CASE WHEN l.summary = '新規購入' OR l.summary LIKE '%月から繰越' THEN 0 ELSE 1 END ASC,
-  l.income DESC, l.balance DESC, l.id ASC
+  l.id ASC
 LIMIT @pageSize OFFSET @offset";
 
             if (cardIdm != null)
