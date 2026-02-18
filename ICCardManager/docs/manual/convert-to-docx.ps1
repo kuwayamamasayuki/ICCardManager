@@ -4,6 +4,7 @@
 #   .\convert-to-docx.ps1 -Force       # 全マニュアルを強制変換
 #   .\convert-to-docx.ps1 -Target user # ユーザーマニュアルのみ変換
 #   .\convert-to-docx.ps1 -NoMermaid   # Mermaidフィルターを使用しない
+#   .\convert-to-docx.ps1 -Version 1.13.0  # バージョン文字列を注入して変換
 # 前提条件:
 #   1. pandocがインストールされていること
 #      インストール: winget install pandoc または https://pandoc.org/installing.html
@@ -16,7 +17,8 @@ param(
     [ValidateSet("all", "intro", "user", "user-summary", "admin", "dev")]
     [string]$Target = "all",
     [switch]$Force,
-    [switch]$NoMermaid
+    [switch]$NoMermaid,
+    [string]$Version = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -106,6 +108,7 @@ $Manuals = @(
         Input = "はじめに.md"
         Output = "はじめに.docx"
         Title = "交通系ICカード管理システム はじめに"
+        VersionTracked = $false  # 固定バージョン（1.0）
     },
     @{
         Name = "ユーザーマニュアル"
@@ -113,6 +116,7 @@ $Manuals = @(
         Input = "ユーザーマニュアル.md"
         Output = "ユーザーマニュアル.docx"
         Title = "交通系ICカード管理システム ユーザーマニュアル"
+        VersionTracked = $true   # アプリバージョンに追従
     },
     @{
         Name = "ユーザーマニュアル概要版"
@@ -120,6 +124,7 @@ $Manuals = @(
         Input = "ユーザーマニュアル概要版.md"
         Output = "ユーザーマニュアル概要版.docx"
         Title = "交通系ICカード管理システム 操作ガイド（概要版）"
+        VersionTracked = $true   # アプリバージョンに追従
     },
     @{
         Name = "管理者マニュアル"
@@ -127,6 +132,7 @@ $Manuals = @(
         Input = "管理者マニュアル.md"
         Output = "管理者マニュアル.docx"
         Title = "交通系ICカード管理システム 管理者マニュアル"
+        VersionTracked = $true   # アプリバージョンに追従
     },
     @{
         Name = "開発者ガイド"
@@ -134,6 +140,7 @@ $Manuals = @(
         Input = "開発者ガイド.md"
         Output = "開発者ガイド.docx"
         Title = "交通系ICカード管理システム 開発者ガイド"
+        VersionTracked = $false  # 独自バージョン体系（1.1）
     }
 )
 
@@ -274,7 +281,17 @@ foreach ($Manual in $Manuals) {
     }
 
     try {
-        & $PandocExe $PandocArgs
+        # バージョン注入: -Version 指定時かつ VersionTracked なマニュアルは
+        # .mdの内容をメモリ上で置換し、stdinでpandocに渡す（元ファイルは変更しない）
+        if ($Manual.VersionTracked -and -not [string]::IsNullOrEmpty($Version)) {
+            $Content = Get-Content $InputPath -Raw -Encoding UTF8
+            $Content = $Content -replace '(?m)^\*\*バージョン\*\*: [\d.]+', "**バージョン**: $Version"
+            $PandocArgs[0] = "-"
+            Write-Host "    バージョン注入: $Version" -ForegroundColor Gray
+            $Content | & $PandocExe $PandocArgs
+        } else {
+            & $PandocExe $PandocArgs
+        }
         if ($LASTEXITCODE -ne 0) {
             throw "pandocがエラーコード $LASTEXITCODE を返しました"
         }

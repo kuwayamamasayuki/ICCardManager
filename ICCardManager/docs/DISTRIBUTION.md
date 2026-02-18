@@ -221,6 +221,35 @@ installer/output/ICCardManager_Setup_1.0.7.exe
 
 更新履歴は `README.md` の「更新履歴」セクションに記載します。
 
+## リリース手順
+
+リリースは2つのフェーズに分けて実施します。
+
+### Phase 1: ソース更新（Claude Code / WSL）
+
+以下の作業はClaude Code（WSL環境）から実行できます。
+
+1. `src/ICCardManager/ICCardManager.csproj` の `<Version>`、`<FileVersion>`、`<AssemblyVersion>` を更新
+2. `README.md` の「更新履歴」セクションに新バージョンのエントリを追加
+3. マニュアル `.md` ファイルの `**バージョン**: X.Y.Z` 行を更新（GitHub閲覧用）
+4. コミット・プッシュ → PR → mainにマージ
+5. タグ作成・プッシュ: `git tag vX.Y.Z && git push origin vX.Y.Z`
+6. `gh release create vX.Y.Z` でリリースノートを作成
+
+### Phase 2: インストーラービルド（Windows PowerShell）
+
+> **重要**: 以下は必ずWindowsネイティブのPowerShellから実行してください。
+> WSLから `powershell.exe` を呼び出すと日本語ファイル名が文字化けし、
+> マニュアル変換が失敗します。
+
+7. Windows PowerShell を開き、`installer/` ディレクトリに移動
+8. `.\build-installer.ps1` を実行（マニュアル変換 + インストーラー作成を自動実行）
+9. `gh release upload vX.Y.Z .\output\ICCardManager_Setup_X.Y.Z.exe` でインストーラーをアップロード
+
+> **補足**: `build-installer.ps1` は `.csproj` からバージョンを自動取得し、
+> マニュアルの `.docx` に正しいバージョンを注入します（`-Force -Version` オプション）。
+> マニュアル `.md` のバージョン文字列が未更新でも、`.docx` には正しいバージョンが反映されます。
+
 ## セキュリティに関する注意
 
 - データベース（`iccard.db`）には個人情報（職員名、ICカードIDm）が含まれます
