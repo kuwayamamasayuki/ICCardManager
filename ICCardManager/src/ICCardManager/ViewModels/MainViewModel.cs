@@ -402,6 +402,9 @@ public partial class MainViewModel : ViewModelBase
     {
         using (BeginBusy("初期化中..."))
         {
+            // Issue #790: 起動時に貸出状態の整合性をチェック・修復
+            await _lendingService.RepairLentStatusConsistencyAsync();
+
             // Issue #504: 初期化処理を並列化して高速化
             // 設定取得は他の処理と並列で実行可能
             var settingsTask = _settingsRepository.GetAppSettingsAsync();

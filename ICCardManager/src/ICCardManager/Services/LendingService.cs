@@ -190,6 +190,72 @@ namespace ICCardManager.Services
         }
 
         /// <summary>
+        /// 起動時にic_card.is_lentとledger.is_lent_recordの整合性をチェックし、
+        /// 不整合があれば修復します。
+        /// </summary>
+        /// <remarks>
+        /// <para>Issue #790対応: 何らかの原因でic_card.is_lentフラグと
+        /// ledgerテーブルの貸出中レコード（is_lent_record=1）が不整合になるケースへの対策。</para>
+        /// <para>貸出中レコードの有無を正（source of truth）として、is_lentフラグを修復する：</para>
+        /// <list type="bullet">
+        /// <item><description>貸出中レコードあり＋is_lent=0 → is_lent=1に修復</description></item>
+        /// <item><description>貸出中レコードなし＋is_lent=1 → is_lent=0に修復</description></item>
+        /// </list>
+        /// </remarks>
+        /// <returns>修復件数</returns>
+        public async Task<int> RepairLentStatusConsistencyAsync()
+        {
+            var cards = await _cardRepository.GetAllAsync();
+            var lentRecords = await _ledgerRepository.GetAllLentRecordsAsync();
+
+            // カードIDm → 貸出中レコードのマッピング
+            var lentRecordMap = new Dictionary<string, Ledger>();
+            foreach (var record in lentRecords)
+            {
+                // 同一カードに複数の貸出中レコードがある場合は最新を採用
+                if (!lentRecordMap.ContainsKey(record.CardIdm))
+                {
+                    lentRecordMap[record.CardIdm] = record;
+                }
+            }
+
+            var repairCount = 0;
+
+            foreach (var card in cards)
+            {
+                var hasLentRecord = lentRecordMap.TryGetValue(card.CardIdm, out var lentRecord);
+
+                if (hasLentRecord && !card.IsLent)
+                {
+                    // 貸出中レコードがあるのにis_lent=0 → is_lent=1に修復
+                    await _cardRepository.UpdateLentStatusAsync(
+                        card.CardIdm, true, lentRecord.LentAt, lentRecord.LenderIdm);
+                    _logger.LogWarning(
+                        "Issue #790: 貸出状態の不整合を修復しました（is_lent: 0→1）: CardIdm={CardIdm}, LentAt={LentAt}",
+                        card.CardIdm, lentRecord.LentAt);
+                    repairCount++;
+                }
+                else if (!hasLentRecord && card.IsLent)
+                {
+                    // 貸出中レコードがないのにis_lent=1 → is_lent=0に修復
+                    await _cardRepository.UpdateLentStatusAsync(
+                        card.CardIdm, false, null, null);
+                    _logger.LogWarning(
+                        "Issue #790: 貸出状態の不整合を修復しました（is_lent: 1→0）: CardIdm={CardIdm}",
+                        card.CardIdm);
+                    repairCount++;
+                }
+            }
+
+            if (repairCount > 0)
+            {
+                _logger.LogInformation("Issue #790: 貸出状態の整合性チェック完了: {Count}件修復", repairCount);
+            }
+
+            return repairCount;
+        }
+
+        /// <summary>
         /// ICカードの貸出処理を実行します。
         /// </summary>
         /// <param name="staffIdm">貸出者の職員証IDm（16桁の16進数文字列）</param>

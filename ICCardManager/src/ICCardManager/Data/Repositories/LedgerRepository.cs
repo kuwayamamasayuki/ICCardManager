@@ -120,6 +120,28 @@ LIMIT 1";
         }
 
         /// <inheritdoc/>
+        public async Task<List<Ledger>> GetAllLentRecordsAsync()
+        {
+            var connection = _dbContext.GetConnection();
+            var result = new List<Ledger>();
+
+            using var command = connection.CreateCommand();
+            command.CommandText = @"SELECT id, card_idm, lender_idm, date, summary, income, expense, balance,
+       staff_name, note, returner_idm, lent_at, returned_at, is_lent_record
+FROM ledger
+WHERE is_lent_record = 1
+ORDER BY lent_at DESC";
+
+            using var reader = await command.ExecuteReaderAsync();
+            while (await reader.ReadAsync())
+            {
+                result.Add(MapToLedger(reader));
+            }
+
+            return result;
+        }
+
+        /// <inheritdoc/>
         public async Task<int> InsertAsync(Ledger ledger)
         {
             var connection = _dbContext.GetConnection();
