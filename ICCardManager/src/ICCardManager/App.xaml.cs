@@ -206,6 +206,7 @@ namespace ICCardManager
             services.AddSingleton<LedgerSplitService>();
             services.AddSingleton<LedgerConsistencyChecker>();
             services.AddSingleton<CsvExportService>();
+            services.AddSingleton<OperationLogExcelExportService>();
             services.AddSingleton<CsvImportService>();
             services.AddSingleton<IToastNotificationService, ToastNotificationService>();
             services.AddSingleton<IDialogService, DialogService>();
