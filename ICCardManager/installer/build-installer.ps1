@@ -279,9 +279,11 @@ if (-not $PandocPath) {
     Write-Host "  警告: 変換スクリプトが見つかりません: $ConvertDocxScript" -ForegroundColor Yellow
 } else {
     # Issue #643: .mdが.docxより新しい場合に変換
+    # -Force: リリースビルドでは常に再変換（古い.docxの残存を防止）
+    # -Version: .csprojのバージョンを.docxに注入（Issue #789）
     Push-Location $ManualDir
     try {
-        & $ConvertDocxScript -NoMermaid
+        & $ConvertDocxScript -NoMermaid -Force -Version $Version
         if ($LASTEXITCODE -eq 0) {
             Write-Host "  docx変換完了" -ForegroundColor Green
         } else {
