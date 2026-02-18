@@ -18,6 +18,11 @@ namespace ICCardManager.Services
         private readonly ILedgerRepository _ledgerRepository;
 
         /// <summary>
+        /// テストデータの初期残高（全カード共通）
+        /// </summary>
+        internal const int InitialBalance = 50000;
+
+        /// <summary>
         /// テスト職員データ
         /// </summary>
         public static readonly Staff[] TestStaffList =
@@ -68,8 +73,8 @@ namespace ICCardManager.Services
         {
             await RegisterTestStaffAsync();
             await RegisterTestCardsAsync();
-            await RegisterSampleHistoryAsync();
-            await RegisterSpecialScenariosAsync();
+            var finalBalances = await RegisterSampleHistoryAsync();
+            await RegisterSpecialScenariosAsync(finalBalances);
         }
 
         /// <summary>
@@ -112,8 +117,10 @@ namespace ICCardManager.Services
         /// - 平日は毎日2-3件のレコードを生成
         /// - 約22平日/月 × 2-3件 = 50-70件/月
         /// </remarks>
-        public async Task RegisterSampleHistoryAsync()
+        /// <returns>各カードIDmをキーとした最終残高のDictionary</returns>
+        public async Task<Dictionary<string, int>> RegisterSampleHistoryAsync()
         {
+            var finalBalances = new Dictionary<string, int>();
             var random = new Random(42); // 再現性のためシード固定
             var today = DateTime.Now.Date;
 
@@ -130,8 +137,14 @@ namespace ICCardManager.Services
                     continue;
                 }
 
-                var balance = 50000; // 初期残高（長期間・大量データ用に増額）
+                var balance = InitialBalance; // 初期残高（長期間・大量データ用に増額）
                 var staffName = TestStaffList[random.Next(TestStaffList.Length)].Name;
+
+                // H-001（特殊シナリオ対象カード）の場合、特殊シナリオが配置される
+                // 週末日以降の通常データ生成を停止して残高チェーンの連続性を保つ
+                var cutoffDate = (card.CardIdm == TestCardList[0].CardIdm)
+                    ? FindNthWeekendDayBefore(today, 6) // 最古の特殊シナリオ日
+                    : (DateTime?)null;
 
                 // 過去180日分（約6ヶ月）のサンプル履歴を生成
                 // 各月50件以上のデータでページングテストが可能
@@ -142,6 +155,10 @@ namespace ICCardManager.Services
                     // 土日はスキップ（平日のみ利用）
                     if (date.DayOfWeek == DayOfWeek.Saturday || date.DayOfWeek == DayOfWeek.Sunday)
                         continue;
+
+                    // H-001: 特殊シナリオ日以降は生成停止（残高チェーン連続性のため）
+                    if (cutoffDate.HasValue && date >= cutoffDate.Value)
+                        break;
 
                     // 残高が少ない場合はチャージ
                     if (balance < 3000)
@@ -291,8 +308,11 @@ namespace ICCardManager.Services
                     }
                 }
 
-                System.Diagnostics.Debug.WriteLine($"[DEBUG] サンプル履歴登録完了: {card.CardNumber}");
+                finalBalances[card.CardIdm] = balance;
+                System.Diagnostics.Debug.WriteLine($"[DEBUG] サンプル履歴登録完了: {card.CardNumber} (残高: {balance})");
             }
+
+            return finalBalances;
         }
 
         /// <summary>
@@ -305,14 +325,19 @@ namespace ICCardManager.Services
         /// - 不足分のみチャージ
         /// - 年度繰越（前年度からの繰越 / 次年度への繰越）
         /// - 新規購入 / 払い戻し
+        ///
+        /// 通常データは平日のみ生成されるため、特殊シナリオは週末日に配置して
+        /// 日付重複による残高チェーン不整合を回避する。
         /// </remarks>
-        public async Task RegisterSpecialScenariosAsync()
+        /// <param name="finalBalances">RegisterSampleHistoryAsyncから受け取った各カードの最終残高</param>
+        public async Task RegisterSpecialScenariosAsync(Dictionary<string, int> finalBalances)
         {
             var today = DateTime.Now.Date;
             var staffName = TestStaffList[0].Name; // 山田太郎
 
             // ── カード H-001: 乗り継ぎ・ポイント還元・不足分チャージ ──
-            await RegisterTransferAndSpecialUsageAsync(TestCardList[0].CardIdm, today, staffName);
+            var h001Balance = finalBalances.TryGetValue(TestCardList[0].CardIdm, out var bal) ? bal : 10000;
+            await RegisterTransferAndSpecialUsageAsync(TestCardList[0].CardIdm, today, staffName, h001Balance);
 
             // ── カード N-002: 年度繰越パターン ──
             await RegisterFiscalYearCarryoverAsync(TestCardList[5].CardIdm, today, staffName);
@@ -326,22 +351,34 @@ namespace ICCardManager.Services
         /// <summary>
         /// 乗り継ぎ・ポイント還元・不足分チャージのパターンを登録
         /// </summary>
-        private async Task RegisterTransferAndSpecialUsageAsync(string cardIdm, DateTime today, string staffName)
+        /// <remarks>
+        /// 特殊シナリオは週末日に配置して通常データ（平日のみ）との日付重複を回避。
+        /// 残高チェーンは通常データの最終残高から連続するように構築する。
+        /// </remarks>
+        private async Task RegisterTransferAndSpecialUsageAsync(string cardIdm, DateTime today, string staffName, int currentBalance)
         {
             // 既に特殊パターンが登録済みかチェック（ポイント還元レコードの存在で判定）
+            // 当月と前月の両方をチェック（月跨ぎ対応）
             var recentHistory = await _ledgerRepository.GetByMonthAsync(cardIdm, today.Year, today.Month);
-            if (recentHistory.Any(l => l.Summary == SummaryGenerator.GetPointRedemptionSummary()))
+            var prevMonth = today.AddMonths(-1);
+            var prevHistory = await _ledgerRepository.GetByMonthAsync(cardIdm, prevMonth.Year, prevMonth.Month);
+            var allRecent = recentHistory.Concat(prevHistory);
+            if (allRecent.Any(l => l.Summary == SummaryGenerator.GetPointRedemptionSummary()))
             {
                 System.Diagnostics.Debug.WriteLine("[DEBUG] 特殊パターン(H-001)は登録済み");
                 return;
             }
 
-            // 現在の残高を取得（既存データの最新残高を使用）
-            var latestLedger = recentHistory.OrderByDescending(l => l.Date).ThenByDescending(l => l.Id).FirstOrDefault();
-            var balance = latestLedger?.Balance ?? 10000;
+            var balance = currentBalance;
 
-            // ── 10日前: 2線乗り継ぎ（博多→天神→薬院） ──
-            var date10 = today.AddDays(-10);
+            // 週末日を6つ取得（n=6が最古、n=1が最新）
+            var weekendDates = new DateTime[6];
+            for (int i = 0; i < 6; i++)
+            {
+                weekendDates[i] = FindNthWeekendDayBefore(today, 6 - i); // [0]=最古(n=6), [5]=最新(n=1)
+            }
+
+            // ── 週末日[0] (n=6): 2線乗り継ぎ（博多→天神→薬院） ──
             var transferFare1A = 210;
             var transferFare1B = 200;
             var transferTotal1 = transferFare1A + transferFare1B;
@@ -350,7 +387,7 @@ namespace ICCardManager.Services
             var transfer1Ledger = new Ledger
             {
                 CardIdm = cardIdm,
-                Date = date10,
+                Date = weekendDates[0],
                 Summary = "鉄道（博多～薬院）",
                 Income = 0,
                 Expense = transferTotal1,
@@ -363,7 +400,7 @@ namespace ICCardManager.Services
             await _ledgerRepository.InsertDetailAsync(new LedgerDetail
             {
                 LedgerId = transfer1Id,
-                UseDate = date10.AddHours(8).AddMinutes(30),
+                UseDate = weekendDates[0].AddHours(8).AddMinutes(30),
                 EntryStation = "博多",
                 ExitStation = "天神",
                 Amount = transferFare1A,
@@ -376,7 +413,7 @@ namespace ICCardManager.Services
             await _ledgerRepository.InsertDetailAsync(new LedgerDetail
             {
                 LedgerId = transfer1Id,
-                UseDate = date10.AddHours(8).AddMinutes(45),
+                UseDate = weekendDates[0].AddHours(8).AddMinutes(45),
                 EntryStation = "天神",
                 ExitStation = "薬院",
                 Amount = transferFare1B,
@@ -387,8 +424,7 @@ namespace ICCardManager.Services
                 SequenceNumber = 2
             });
 
-            // ── 9日前: 3線乗り継ぎ（博多→天神→薬院→大橋） ──
-            var date9 = today.AddDays(-9);
+            // ── 週末日[1] (n=5): 3線乗り継ぎ（博多→天神→薬院→大橋） ──
             var transferFare2A = 210;
             var transferFare2B = 200;
             var transferFare2C = 200;
@@ -398,7 +434,7 @@ namespace ICCardManager.Services
             var transfer2Ledger = new Ledger
             {
                 CardIdm = cardIdm,
-                Date = date9,
+                Date = weekendDates[1],
                 Summary = "鉄道（博多～大橋）",
                 Income = 0,
                 Expense = transferTotal2,
@@ -412,7 +448,7 @@ namespace ICCardManager.Services
             await _ledgerRepository.InsertDetailAsync(new LedgerDetail
             {
                 LedgerId = transfer2Id,
-                UseDate = date9.AddHours(9),
+                UseDate = weekendDates[1].AddHours(9),
                 EntryStation = "博多",
                 ExitStation = "天神",
                 Amount = transferFare2A,
@@ -426,7 +462,7 @@ namespace ICCardManager.Services
             await _ledgerRepository.InsertDetailAsync(new LedgerDetail
             {
                 LedgerId = transfer2Id,
-                UseDate = date9.AddHours(9).AddMinutes(15),
+                UseDate = weekendDates[1].AddHours(9).AddMinutes(15),
                 EntryStation = "天神",
                 ExitStation = "薬院",
                 Amount = transferFare2B,
@@ -440,7 +476,7 @@ namespace ICCardManager.Services
             await _ledgerRepository.InsertDetailAsync(new LedgerDetail
             {
                 LedgerId = transfer2Id,
-                UseDate = date9.AddHours(9).AddMinutes(30),
+                UseDate = weekendDates[1].AddHours(9).AddMinutes(30),
                 EntryStation = "薬院",
                 ExitStation = "大橋",
                 Amount = transferFare2C,
@@ -451,15 +487,14 @@ namespace ICCardManager.Services
                 SequenceNumber = 3
             });
 
-            // ── 8日前: ポイント還元 ──
-            var date8 = today.AddDays(-8);
+            // ── 週末日[2] (n=4): ポイント還元 ──
             var pointAmount = 500;
             balance += pointAmount;
 
             var pointLedger = new Ledger
             {
                 CardIdm = cardIdm,
-                Date = date8,
+                Date = weekendDates[2],
                 Summary = SummaryGenerator.GetPointRedemptionSummary(),
                 Income = pointAmount,
                 Expense = 0,
@@ -472,7 +507,7 @@ namespace ICCardManager.Services
             await _ledgerRepository.InsertDetailAsync(new LedgerDetail
             {
                 LedgerId = pointLedgerId,
-                UseDate = date8.AddHours(10),
+                UseDate = weekendDates[2].AddHours(10),
                 Amount = pointAmount,
                 Balance = balance,
                 IsCharge = false,
@@ -480,18 +515,48 @@ namespace ICCardManager.Services
                 IsBus = false
             });
 
-            // ── 7日前: 不足分のみチャージ（残高200円で340円の利用） ──
-            var date7 = today.AddDays(-7);
-            var originalBalance = 200;
+            // ── 週末日[3] (n=3): 残高調整（残高を200円まで消化） ──
+            var targetBalance = 200;
+            var drainExpense = balance - targetBalance;
+            if (drainExpense > 0)
+            {
+                balance = targetBalance;
+
+                var drainLedger = new Ledger
+                {
+                    CardIdm = cardIdm,
+                    Date = weekendDates[3],
+                    Summary = "鉄道（博多～久留米）",
+                    Income = 0,
+                    Expense = drainExpense,
+                    Balance = balance,
+                    StaffName = staffName,
+                    Note = "テストデータ（残高調整用）"
+                };
+                var drainLedgerId = await _ledgerRepository.InsertAsync(drainLedger);
+
+                await _ledgerRepository.InsertDetailAsync(new LedgerDetail
+                {
+                    LedgerId = drainLedgerId,
+                    UseDate = weekendDates[3].AddHours(11),
+                    EntryStation = "博多",
+                    ExitStation = "久留米",
+                    Amount = drainExpense,
+                    Balance = balance,
+                    IsCharge = false,
+                    IsBus = false
+                });
+            }
+
+            // ── 週末日[4] (n=2): 不足分のみチャージ（残高200円で340円の利用） ──
+            var originalBalance = balance; // 実際のrunning balance（200円）
             var totalFare = 340;
             var shortfall = totalFare - originalBalance;
 
-            // 残高を200に調整するため差額を使用（実際のアプリでは自然に発生する）
-            // ここでは直接Ledgerレコードを作成
             var insufficientLedger = new Ledger
             {
                 CardIdm = cardIdm,
-                Date = date7,
+                Date = weekendDates[4],
                 Summary = "鉄道（博多～春日）",
                 Income = 0,
                 Expense = originalBalance,
@@ -504,7 +569,7 @@ namespace ICCardManager.Services
             await _ledgerRepository.InsertDetailAsync(new LedgerDetail
             {
                 LedgerId = insufficientLedgerId,
-                UseDate = date7.AddHours(14),
+                UseDate = weekendDates[4].AddHours(14),
                 EntryStation = "博多",
                 ExitStation = "春日",
                 Amount = totalFare,
@@ -514,15 +579,14 @@ namespace ICCardManager.Services
             });
             balance = 0;
 
-            // ── 6日前: チャージして残高回復 ──
-            var date6 = today.AddDays(-6);
+            // ── 週末日[5] (n=1): チャージして残高回復 ──
             var chargeAmount = 5000;
             balance += chargeAmount;
 
             var recoveryCharge = new Ledger
             {
                 CardIdm = cardIdm,
-                Date = date6,
+                Date = weekendDates[5],
                 Summary = SummaryGenerator.GetChargeSummary(),
                 Income = chargeAmount,
                 Expense = 0,
@@ -535,7 +599,7 @@ namespace ICCardManager.Services
             await _ledgerRepository.InsertDetailAsync(new LedgerDetail
             {
                 LedgerId = recoveryChargeId,
-                UseDate = date6.AddHours(8),
+                UseDate = weekendDates[5].AddHours(8),
                 Amount = chargeAmount,
                 Balance = balance,
                 IsCharge = true,
@@ -565,7 +629,7 @@ namespace ICCardManager.Services
                 return;
             }
 
-            var carryoverAmount = 3500; // 繰越額
+            var carryoverAmount = InitialBalance; // 繰越額（通常データの初期残高と一致させる）
 
             // ── 3月31日: 次年度への繰越 ──
             var carryoverOut = new Ledger
@@ -722,6 +786,31 @@ namespace ICCardManager.Services
             await _ledgerRepository.InsertAsync(refundLedger);
 
             System.Diagnostics.Debug.WriteLine("[DEBUG] 特殊パターン(Su-001: 新規購入→利用→払い戻し)登録完了");
+        }
+
+        /// <summary>
+        /// 指定日より前の n 番目の土日を返す（n=1 が最も近い）
+        /// </summary>
+        /// <param name="today">基準日</param>
+        /// <param name="n">何番目の土日か（1以上）</param>
+        /// <returns>n 番目の土日の日付</returns>
+        internal static DateTime FindNthWeekendDayBefore(DateTime today, int n)
+        {
+            if (n <= 0)
+                throw new ArgumentOutOfRangeException(nameof(n), "n は1以上を指定してください");
+
+            var count = 0;
+            var date = today.Date.AddDays(-1); // today自体は含めない
+            while (true)
+            {
+                if (date.DayOfWeek == DayOfWeek.Saturday || date.DayOfWeek == DayOfWeek.Sunday)
+                {
+                    count++;
+                    if (count == n)
+                        return date;
+                }
+                date = date.AddDays(-1);
+            }
         }
     }
 }
