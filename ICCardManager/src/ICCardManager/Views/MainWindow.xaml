@@ -332,6 +332,15 @@
                                         AutomationProperties.Name="統合を元に戻す"
                                         AutomationProperties.HelpText="過去の統合操作を選んで取り消して元の状態に戻します"/>
 
+                                <!-- 残高修正undo（Issue #785） -->
+                                <Border Width="1" Background="{DynamicResource DividerBrush}" Margin="10,2"/>
+                                <Button Content="↩ 残高修正を元に戻す"
+                                        Command="{Binding UndoBalanceRecalculationCommand}"
+                                        Padding="12,6"
+                                        ToolTip="直前の残高再計算を元に戻します"
+                                        AutomationProperties.Name="残高修正を元に戻す"
+                                        AutomationProperties.HelpText="残高の自動修正を取り消して元の残高に戻します"/>
+
                                 <!-- 月選択ポップアップ -->
                                 <Popup IsOpen="{Binding IsHistoryMonthSelectorOpen}"
                                        PlacementTarget="{Binding ElementName=HistoryOtherMonthButton}"

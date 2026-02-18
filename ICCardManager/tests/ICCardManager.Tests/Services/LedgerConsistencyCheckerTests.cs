@@ -89,9 +89,9 @@ public class LedgerConsistencyCheckerTests
         // Arrange: 2行目の残高が不整合（期待値800だが750になっている）
         var ledgers = new List<Ledger>
         {
-            new Ledger { Id = 1, Income = 1000, Expense = 0, Balance = 1000, Date = new DateTime(2026, 1, 1) },
-            new Ledger { Id = 2, Income = 0, Expense = 200, Balance = 750, Date = new DateTime(2026, 1, 2) },
-            new Ledger { Id = 3, Income = 0, Expense = 220, Balance = 530, Date = new DateTime(2026, 1, 3) }
+            new Ledger { Id = 1, Income = 1000, Expense = 0, Balance = 1000, Date = new DateTime(2026, 1, 1), Summary = "チャージ" },
+            new Ledger { Id = 2, Income = 0, Expense = 200, Balance = 750, Date = new DateTime(2026, 1, 2), Summary = "鉄道（博多～天神）" },
+            new Ledger { Id = 3, Income = 0, Expense = 220, Balance = 530, Date = new DateTime(2026, 1, 3), Summary = "鉄道（天神～博多）" }
         };
 
         // Act
@@ -100,9 +100,12 @@ public class LedgerConsistencyCheckerTests
         // Assert
         result.IsConsistent.Should().BeFalse();
         result.Inconsistencies.Should().HaveCount(1);
-        result.Inconsistencies[0].LedgerId.Should().Be(2);
-        result.Inconsistencies[0].ExpectedBalance.Should().Be(800);
-        result.Inconsistencies[0].ActualBalance.Should().Be(750);
+        var correction = result.Inconsistencies[0];
+        correction.LedgerId.Should().Be(2);
+        correction.ExpectedBalance.Should().Be(800);
+        correction.ActualBalance.Should().Be(750);
+        correction.Date.Should().Be(new DateTime(2026, 1, 2));
+        correction.Summary.Should().Be("鉄道（博多～天神）");
     }
 
     [Fact]
@@ -149,7 +152,7 @@ public class LedgerConsistencyCheckerTests
     #region RecalculateBalancesAsync
 
     [Fact]
-    public async Task RecalculateBalancesAsync_FixesInconsistentBalances()
+    public async Task RecalculateBalancesAsync_FixesInconsistentBalances_ReturnsCorrections()
     {
         // Arrange
         var fromDate = new DateTime(2026, 1, 1);
@@ -162,8 +165,8 @@ public class LedgerConsistencyCheckerTests
         // 不整合のある行データ
         var ledgers = new List<Ledger>
         {
-            new Ledger { Id = 1, Income = 3000, Expense = 0, Balance = 3500, Date = new DateTime(2026, 1, 5) },
-            new Ledger { Id = 2, Income = 0, Expense = 210, Balance = 3000, Date = new DateTime(2026, 1, 10) }  // 期待値3290
+            new Ledger { Id = 1, Income = 3000, Expense = 0, Balance = 3500, Date = new DateTime(2026, 1, 5), Summary = "チャージ" },
+            new Ledger { Id = 2, Income = 0, Expense = 210, Balance = 3000, Date = new DateTime(2026, 1, 10), Summary = "鉄道（博多～天神）" }  // 期待値3290
         };
 
         _ledgerRepoMock.Setup(r => r.GetByDateRangeAsync(TestCardIdm, fromDate, toDate))
@@ -172,10 +175,15 @@ public class LedgerConsistencyCheckerTests
             .ReturnsAsync(true);
 
         // Act
-        var fixedCount = await _checker.RecalculateBalancesAsync(TestCardIdm, fromDate, toDate);
+        var corrections = await _checker.RecalculateBalancesAsync(TestCardIdm, fromDate, toDate);
 
         // Assert
-        fixedCount.Should().Be(1, "2行目の残高だけ不整合");
+        corrections.Should().HaveCount(1, "2行目の残高だけ不整合");
+        corrections[0].LedgerId.Should().Be(2);
+        corrections[0].ActualBalance.Should().Be(3000, "修正前の残高");
+        corrections[0].ExpectedBalance.Should().Be(3290, "修正後の残高");
+        corrections[0].Date.Should().Be(new DateTime(2026, 1, 10));
+        corrections[0].Summary.Should().Be("鉄道（博多～天神）");
         ledgers[1].Balance.Should().Be(3290);
         _ledgerRepoMock.Verify(r => r.UpdateAsync(It.Is<Ledger>(l => l.Id == 2)), Times.Once);
     }
@@ -192,7 +200,7 @@ public class LedgerConsistencyCheckerTests
 
         var ledgers = new List<Ledger>
         {
-            new Ledger { Id = 1, Income = 1000, Expense = 0, Balance = 999, Date = new DateTime(2026, 1, 1) }
+            new Ledger { Id = 1, Income = 1000, Expense = 0, Balance = 999, Date = new DateTime(2026, 1, 1), Summary = "チャージ" }
         };
 
         _ledgerRepoMock.Setup(r => r.GetByDateRangeAsync(TestCardIdm, fromDate, toDate))
@@ -201,15 +209,17 @@ public class LedgerConsistencyCheckerTests
             .ReturnsAsync(true);
 
         // Act
-        var fixedCount = await _checker.RecalculateBalancesAsync(TestCardIdm, fromDate, toDate);
+        var corrections = await _checker.RecalculateBalancesAsync(TestCardIdm, fromDate, toDate);
 
         // Assert
-        fixedCount.Should().Be(1);
-        ledgers[0].Balance.Should().Be(1000, "前残高0 + 1000 - 0 = 1000");
+        corrections.Should().HaveCount(1);
+        corrections[0].ActualBalance.Should().Be(999, "修正前の残高");
+        corrections[0].ExpectedBalance.Should().Be(1000, "前残高0 + 1000 - 0 = 1000");
+        ledgers[0].Balance.Should().Be(1000);
     }
 
     [Fact]
-    public async Task RecalculateBalancesAsync_EmptyList_ReturnsZero()
+    public async Task RecalculateBalancesAsync_EmptyList_ReturnsEmptyList()
     {
         // Arrange
         var fromDate = new DateTime(2026, 1, 1);
@@ -219,10 +229,86 @@ public class LedgerConsistencyCheckerTests
             .ReturnsAsync(new List<Ledger>());
 
         // Act
-        var fixedCount = await _checker.RecalculateBalancesAsync(TestCardIdm, fromDate, toDate);
+        var corrections = await _checker.RecalculateBalancesAsync(TestCardIdm, fromDate, toDate);
 
         // Assert
-        fixedCount.Should().Be(0);
+        corrections.Should().BeEmpty();
+    }
+
+    #endregion
+
+    #region UndoRecalculationAsync（Issue #785）
+
+    [Fact]
+    public async Task UndoRecalculationAsync_RestoresOriginalBalances()
+    {
+        // Arrange: 修正データ（ActualBalance=修正前の値に戻す）
+        var corrections = new List<BalanceCorrection>
+        {
+            new BalanceCorrection { LedgerId = 2, ActualBalance = 3000, ExpectedBalance = 3290 },
+            new BalanceCorrection { LedgerId = 3, ActualBalance = 2800, ExpectedBalance = 3090 }
+        };
+
+        var ledger2 = new Ledger { Id = 2, Balance = 3290 };
+        var ledger3 = new Ledger { Id = 3, Balance = 3090 };
+
+        _ledgerRepoMock.Setup(r => r.GetByIdAsync(2)).ReturnsAsync(ledger2);
+        _ledgerRepoMock.Setup(r => r.GetByIdAsync(3)).ReturnsAsync(ledger3);
+        _ledgerRepoMock.Setup(r => r.UpdateAsync(It.IsAny<Ledger>())).ReturnsAsync(true);
+
+        // Act
+        var undoCount = await _checker.UndoRecalculationAsync(corrections);
+
+        // Assert
+        undoCount.Should().Be(2);
+        ledger2.Balance.Should().Be(3000, "修正前の残高に戻す");
+        ledger3.Balance.Should().Be(2800, "修正前の残高に戻す");
+        _ledgerRepoMock.Verify(r => r.UpdateAsync(It.Is<Ledger>(l => l.Id == 2 && l.Balance == 3000)), Times.Once);
+        _ledgerRepoMock.Verify(r => r.UpdateAsync(It.Is<Ledger>(l => l.Id == 3 && l.Balance == 2800)), Times.Once);
+    }
+
+    [Fact]
+    public async Task UndoRecalculationAsync_EmptyCorrections_ReturnsZero()
+    {
+        // Act
+        var undoCount = await _checker.UndoRecalculationAsync(new List<BalanceCorrection>());
+
+        // Assert
+        undoCount.Should().Be(0);
+        _ledgerRepoMock.Verify(r => r.UpdateAsync(It.IsAny<Ledger>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task UndoRecalculationAsync_NullCorrections_ReturnsZero()
+    {
+        // Act
+        var undoCount = await _checker.UndoRecalculationAsync(null);
+
+        // Assert
+        undoCount.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task UndoRecalculationAsync_LedgerNotFound_SkipsAndContinues()
+    {
+        // Arrange: 1件目は見つからない、2件目は見つかる
+        var corrections = new List<BalanceCorrection>
+        {
+            new BalanceCorrection { LedgerId = 99, ActualBalance = 1000 },
+            new BalanceCorrection { LedgerId = 2, ActualBalance = 3000 }
+        };
+
+        _ledgerRepoMock.Setup(r => r.GetByIdAsync(99)).ReturnsAsync((Ledger)null);
+        var ledger2 = new Ledger { Id = 2, Balance = 3290 };
+        _ledgerRepoMock.Setup(r => r.GetByIdAsync(2)).ReturnsAsync(ledger2);
+        _ledgerRepoMock.Setup(r => r.UpdateAsync(It.IsAny<Ledger>())).ReturnsAsync(true);
+
+        // Act
+        var undoCount = await _checker.UndoRecalculationAsync(corrections);
+
+        // Assert
+        undoCount.Should().Be(1, "見つかった1件のみ元に戻す");
+        _ledgerRepoMock.Verify(r => r.UpdateAsync(It.IsAny<Ledger>()), Times.Once);
     }
 
     #endregion

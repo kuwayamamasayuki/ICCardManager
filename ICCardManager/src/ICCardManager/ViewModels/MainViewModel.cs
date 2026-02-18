@@ -1392,7 +1392,12 @@ public partial class MainViewModel : ViewModelBase
     }
 
     /// <summary>
-    /// 残高整合性チェック＆通知
+    /// 直近の残高修正データ（undo用、セッション中のみ保持）
+    /// </summary>
+    private List<BalanceCorrection> _lastBalanceCorrections;
+
+    /// <summary>
+    /// 残高整合性チェック＆通知（Issue #785: 詳細表示付き確認ダイアログ）
     /// </summary>
     private async Task CheckAndNotifyConsistencyAsync()
     {
@@ -1404,18 +1409,61 @@ public partial class MainViewModel : ViewModelBase
 
         if (!checkResult.IsConsistent)
         {
-            var fix = MessageBox.Show(
-                $"残高の整合性に問題が {checkResult.Inconsistencies.Count} 件見つかりました。\n自動的に残高を再計算しますか？",
+            // 修正内容の詳細を組み立て
+            var details = string.Join("\n", checkResult.Inconsistencies.Select(c =>
+                $"  {WarekiConverter.ToWareki(c.Date)}  {c.Summary}  {c.ActualBalance:N0}円 → {c.ExpectedBalance:N0}円"));
+
+            var message = $"残高の整合性に問題が {checkResult.Inconsistencies.Count} 件見つかりました。\n\n"
+                + $"  日付　　　　摘要　　　　　　　　　現在の残高 → 修正後残高\n{details}\n\n"
+                + "修正しますか？（修正後は「残高修正を元に戻す」で取り消せます）";
+
+            var fix = MessageBox.Show(message,
                 "残高の整合性チェック", MessageBoxButton.YesNo, MessageBoxImage.Question);
 
             if (fix == MessageBoxResult.Yes)
             {
-                var fixedCount = await checker.RecalculateBalancesAsync(
+                var corrections = await checker.RecalculateBalancesAsync(
                     HistoryCard.CardIdm, HistoryFromDate, HistoryToDate);
-                MessageBox.Show($"{fixedCount} 件の残高を修正しました。", "残高再計算完了",
+
+                _lastBalanceCorrections = corrections;
+                UndoBalanceRecalculationCommand.NotifyCanExecuteChanged();
+
+                MessageBox.Show($"{corrections.Count} 件の残高を修正しました。", "残高再計算完了",
                     MessageBoxButton.OK, MessageBoxImage.Information);
             }
         }
+    }
+
+    /// <summary>
+    /// 残高修正の取り消しが可能か（Issue #785）
+    /// </summary>
+    private bool CanUndoBalanceRecalculation() => _lastBalanceCorrections?.Count > 0;
+
+    /// <summary>
+    /// 残高修正を元に戻す（Issue #785）
+    /// </summary>
+    [RelayCommand(CanExecute = nameof(CanUndoBalanceRecalculation))]
+    public async Task UndoBalanceRecalculation()
+    {
+        if (_lastBalanceCorrections == null || _lastBalanceCorrections.Count == 0) return;
+
+        var confirm = MessageBox.Show(
+            $"直前の残高修正（{_lastBalanceCorrections.Count} 件）を元に戻しますか？",
+            "残高修正の取り消し", MessageBoxButton.YesNo, MessageBoxImage.Question);
+
+        if (confirm != MessageBoxResult.Yes) return;
+
+        var checker = App.Current.ServiceProvider.GetRequiredService<LedgerConsistencyChecker>();
+        var undoCount = await checker.UndoRecalculationAsync(_lastBalanceCorrections);
+
+        _lastBalanceCorrections = null;
+        UndoBalanceRecalculationCommand.NotifyCanExecuteChanged();
+
+        await LoadHistoryLedgersAsync();
+        await RefreshDashboardAsync();
+
+        MessageBox.Show($"{undoCount} 件の残高を元に戻しました。", "取り消し完了",
+            MessageBoxButton.OK, MessageBoxImage.Information);
     }
 
     #endregion
