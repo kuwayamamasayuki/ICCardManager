@@ -256,6 +256,24 @@ public class ReportViewModelTests
     #region バリデーションテスト
 
     /// <summary>
+    /// 帳票作成実行時、前回のStatusMessageがクリアされること（Issue #812）
+    /// </summary>
+    [Fact]
+    public async Task CreateReportAsync_ShouldClearPreviousStatusMessage()
+    {
+        // Arrange - 前回の結果メッセージが残っている状態
+        _viewModel.StatusMessage = "3件の帳票を作成しました";
+        _viewModel.SelectedCards.Clear();
+
+        // Act
+        await _viewModel.CreateReportAsync();
+
+        // Assert - 前回のメッセージではなく、バリデーションエラーに更新されていること
+        _viewModel.StatusMessage.Should().NotBe("3件の帳票を作成しました");
+        _viewModel.StatusMessage.Should().Contain("カードを1つ以上選択");
+    }
+
+    /// <summary>
     /// カード未選択時はエラーメッセージが表示されること
     /// </summary>
     [Fact]

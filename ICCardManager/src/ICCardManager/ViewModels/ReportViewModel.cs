@@ -305,6 +305,9 @@ public partial class ReportViewModel : ViewModelBase
     [RelayCommand]
     public async Task CreateReportAsync()
     {
+        // Issue #812: 前回の結果メッセージをすぐにクリアし、ボタン押下の応答を明確にする
+        StatusMessage = string.Empty;
+
         // バリデーション
         if (SelectedCards.Count == 0)
         {
@@ -372,7 +375,6 @@ public partial class ReportViewModel : ViewModelBase
         }
 
         CreatedFiles.Clear();
-        StatusMessage = string.Empty;
 
         // キャンセル可能な処理として開始
         using var busyScope = BeginCancellableBusy($"帳票を作成中... (0/{SelectedCards.Count})");
