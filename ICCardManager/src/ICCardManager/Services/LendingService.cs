@@ -750,7 +750,7 @@ namespace ICCardManager.Services
                         Income = income,
                         Expense = 0,
                         Balance = balance,
-                        StaffName = staffName
+                        StaffName = null  // チャージは機械操作のため氏名不要
                     };
 
                     var ledgerId = await _ledgerRepository.InsertAsync(chargeLedger);
@@ -817,7 +817,7 @@ namespace ICCardManager.Services
                         Income = 0,
                         Expense = expense,
                         Balance = balance,
-                        StaffName = staffName
+                        StaffName = usageDetails.All(d => d.IsPointRedemption) ? null : staffName
                     };
 
                     var ledgerId = await _ledgerRepository.InsertAsync(usageLedger);
