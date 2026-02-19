@@ -324,8 +324,8 @@ namespace ICCardManager.Services
                     // シートを月順に並び替え
                     ReorderWorksheetsByMonth(workbook);
 
-                    // Issue #510: ページ番号の初期値を取得
-                    var currentPageNumber = card.StartingPageNumber;
+                    // Issue #809: 前月シートの最終ページ番号を考慮してページ番号を決定
+                    var currentPageNumber = GetStartingPageNumberForMonth(workbook, card, month);
 
                     // ヘッダ情報を設定（Issue #510: ページ番号も設定）
                     SetHeaderInfo(worksheet, card, currentPageNumber);
@@ -767,6 +767,60 @@ namespace ICCardManager.Services
         {
             var row2 = headerStartRow + 1;  // ヘッダー情報は開始行+1
             worksheet.Cell(row2, 12).Value = pageNumber;  // L列: 頁の値
+        }
+
+        /// <summary>
+        /// ワークシート内の最終ページ番号を取得（Issue #809）
+        /// </summary>
+        /// <remarks>
+        /// CheckAndInsertPageBreak は改ページごとに AddHorizontalPageBreak と SetPageNumber を呼ぶため、
+        /// 「1ページ目のページ番号 + 改ページ数 = 最終ページ番号」が成り立つ。
+        /// </remarks>
+        internal static int GetLastPageNumberFromWorksheet(IXLWorksheet worksheet)
+        {
+            var firstPageCell = worksheet.Cell(2, 12);  // L2セル: 1ページ目のページ番号
+            if (firstPageCell.IsEmpty())
+                return 0;
+
+            if (!firstPageCell.TryGetValue<int>(out var firstPageNumber))
+                return 0;
+
+            var pageBreakCount = worksheet.PageSetup.RowBreaks.Count;
+            return firstPageNumber + pageBreakCount;
+        }
+
+        /// <summary>
+        /// 月の開始ページ番号を算出（Issue #809）
+        /// </summary>
+        /// <remarks>
+        /// 前月のシートが存在する場合はその最終ページ番号+1、
+        /// 存在しない場合は card.StartingPageNumber を使用する。
+        /// 年度内の月順序に従い、直近で存在するシートまで遡って検索する。
+        /// </remarks>
+        internal static int GetStartingPageNumberForMonth(XLWorkbook workbook, IcCard card, int month)
+        {
+            // 年度内の月順序（4月=先頭, 3月=末尾）
+            var fiscalMonthOrder = new[] { 4, 5, 6, 7, 8, 9, 10, 11, 12, 1, 2, 3 };
+            var currentIndex = Array.IndexOf(fiscalMonthOrder, month);
+
+            // 4月（年度最初の月）または不正な月 → StartingPageNumber をそのまま使用
+            if (currentIndex <= 0)
+                return card.StartingPageNumber;
+
+            // 直前の月から逆順に、存在するシートを探す
+            for (int i = currentIndex - 1; i >= 0; i--)
+            {
+                var prevMonthName = $"{fiscalMonthOrder[i]}月";
+                if (workbook.Worksheets.TryGetWorksheet(prevMonthName, out var prevSheet))
+                {
+                    var lastPage = GetLastPageNumberFromWorksheet(prevSheet);
+                    if (lastPage > 0)
+                        return lastPage + 1;
+                }
+            }
+
+            // どの月のシートも存在しない → StartingPageNumber を使用
+            return card.StartingPageNumber;
         }
 
         /// <summary>

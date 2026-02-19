@@ -2677,4 +2677,228 @@ public class ReportServiceTests : IDisposable
     }
 
     #endregion
+
+    #region ページ番号連続性テスト（Issue #809）
+
+    /// <summary>
+    /// Issue #809: 4月（年度最初の月）は StartingPageNumber をそのまま使用すること
+    /// </summary>
+    [Fact]
+    public async Task CreateMonthlyReportAsync_April_UsesStartingPageNumber()
+    {
+        // Arrange
+        var cardIdm = "0102030405060708";
+        var card = CreateTestCard(cardIdm);
+        card.StartingPageNumber = 5;
+        var outputPath = CreateTempFilePath();
+        var year = 2024;
+
+        var aprilLedgers = new List<Ledger>
+        {
+            CreateTestLedger(1, cardIdm, new DateTime(year, 4, 10), "鉄道（博多～天神）", 0, 300, 9700)
+        };
+
+        _cardRepositoryMock
+            .Setup(r => r.GetByIdmAsync(cardIdm, true))
+            .ReturnsAsync(card);
+        _ledgerRepositoryMock
+            .Setup(r => r.GetByMonthAsync(cardIdm, year, 4))
+            .ReturnsAsync(aprilLedgers);
+        _ledgerRepositoryMock
+            .Setup(r => r.GetCarryoverBalanceAsync(cardIdm, year - 1))
+            .ReturnsAsync(10000);
+        _ledgerRepositoryMock
+            .Setup(r => r.GetByDateRangeAsync(cardIdm, It.IsAny<DateTime>(), It.IsAny<DateTime>()))
+            .ReturnsAsync(aprilLedgers);
+
+        // Act
+        var result = await _reportService.CreateMonthlyReportAsync(cardIdm, year, 4, outputPath);
+
+        // Assert
+        result.Success.Should().BeTrue();
+
+        using var workbook = new XLWorkbook(outputPath);
+        var worksheet = workbook.Worksheets.First();
+        worksheet.Cell(2, 12).GetValue<int>().Should().Be(5, "4月は StartingPageNumber をそのまま使用");
+    }
+
+    /// <summary>
+    /// Issue #809: 5月のページ番号が4月の最終ページ+1から開始されること
+    /// </summary>
+    [Fact]
+    public async Task CreateMonthlyReportAsync_SecondMonth_PageNumberContinuesFromPreviousMonth()
+    {
+        // Arrange
+        var cardIdm = "0102030405060708";
+        var card = CreateTestCard(cardIdm);
+        card.StartingPageNumber = 5;
+        var outputPath = CreateTempFilePath();
+        var year = 2024;
+
+        var aprilLedgers = new List<Ledger>
+        {
+            CreateTestLedger(1, cardIdm, new DateTime(year, 4, 10), "鉄道（博多～天神）", 0, 300, 9700)
+        };
+        var mayLedgers = new List<Ledger>
+        {
+            CreateTestLedger(2, cardIdm, new DateTime(year, 5, 15), "鉄道（天神～博多）", 0, 200, 9500)
+        };
+
+        _cardRepositoryMock
+            .Setup(r => r.GetByIdmAsync(cardIdm, true))
+            .ReturnsAsync(card);
+        _ledgerRepositoryMock
+            .Setup(r => r.GetByMonthAsync(cardIdm, year, 4))
+            .ReturnsAsync(aprilLedgers);
+        _ledgerRepositoryMock
+            .Setup(r => r.GetByMonthAsync(cardIdm, year, 5))
+            .ReturnsAsync(mayLedgers);
+        _ledgerRepositoryMock
+            .Setup(r => r.GetCarryoverBalanceAsync(cardIdm, year - 1))
+            .ReturnsAsync(10000);
+        _ledgerRepositoryMock
+            .Setup(r => r.GetByDateRangeAsync(cardIdm, It.IsAny<DateTime>(), It.IsAny<DateTime>()))
+            .ReturnsAsync(aprilLedgers.Concat(mayLedgers).ToList());
+
+        // Act - 4月を生成
+        await _reportService.CreateMonthlyReportAsync(cardIdm, year, 4, outputPath);
+        // Act - 5月を同じファイルに追加
+        var result = await _reportService.CreateMonthlyReportAsync(cardIdm, year, 5, outputPath);
+
+        // Assert
+        result.Success.Should().BeTrue();
+
+        using var workbook = new XLWorkbook(outputPath);
+        var aprilSheet = workbook.Worksheet("4月");
+        var maySheet = workbook.Worksheet("5月");
+
+        aprilSheet.Cell(2, 12).GetValue<int>().Should().Be(5, "4月は StartingPageNumber=5 のまま");
+        maySheet.Cell(2, 12).GetValue<int>().Should().Be(6, "5月は4月の最終ページ(5)+1=6 から開始");
+    }
+
+    /// <summary>
+    /// Issue #809: 前月が複数ページの場合、翌月のページ番号が正しく継続すること
+    /// </summary>
+    [Fact]
+    public async Task CreateMonthlyReportAsync_PreviousMonthMultiPages_PageNumberContinuesCorrectly()
+    {
+        // Arrange
+        var cardIdm = "0102030405060708";
+        var card = CreateTestCard(cardIdm);
+        card.StartingPageNumber = 5;
+        var outputPath = CreateTempFilePath();
+        var year = 2024;
+
+        // 4月: 13件のデータ → 繰越1行+データ13行+月計1行+累計1行=16行 > 12行/ページ → 2ページ
+        var aprilLedgers = Enumerable.Range(1, 13)
+            .Select(i => CreateTestLedger(
+                i, cardIdm, new DateTime(year, 4, Math.Min(i, 28)),
+                $"鉄道（駅{i}～駅{i + 1}）", 0, 100, 10000 - i * 100))
+            .ToList();
+
+        var mayLedgers = new List<Ledger>
+        {
+            CreateTestLedger(20, cardIdm, new DateTime(year, 5, 10), "鉄道（博多～天神）", 0, 200, 8500)
+        };
+
+        _cardRepositoryMock
+            .Setup(r => r.GetByIdmAsync(cardIdm, true))
+            .ReturnsAsync(card);
+        _ledgerRepositoryMock
+            .Setup(r => r.GetByMonthAsync(cardIdm, year, 4))
+            .ReturnsAsync(aprilLedgers);
+        _ledgerRepositoryMock
+            .Setup(r => r.GetByMonthAsync(cardIdm, year, 5))
+            .ReturnsAsync(mayLedgers);
+        _ledgerRepositoryMock
+            .Setup(r => r.GetCarryoverBalanceAsync(cardIdm, year - 1))
+            .ReturnsAsync(10000);
+        _ledgerRepositoryMock
+            .Setup(r => r.GetByDateRangeAsync(cardIdm, It.IsAny<DateTime>(), It.IsAny<DateTime>()))
+            .ReturnsAsync(aprilLedgers.Concat(mayLedgers).ToList());
+
+        // Act - 4月を生成（複数ページ）
+        await _reportService.CreateMonthlyReportAsync(cardIdm, year, 4, outputPath);
+        // Act - 5月を同じファイルに追加
+        var result = await _reportService.CreateMonthlyReportAsync(cardIdm, year, 5, outputPath);
+
+        // Assert
+        result.Success.Should().BeTrue();
+
+        using var workbook = new XLWorkbook(outputPath);
+        var aprilSheet = workbook.Worksheet("4月");
+        var maySheet = workbook.Worksheet("5月");
+
+        // 4月: StartingPageNumber=5, 2ページ → 最終ページ=6
+        aprilSheet.Cell(2, 12).GetValue<int>().Should().Be(5, "4月1ページ目はStartingPageNumber=5");
+        aprilSheet.PageSetup.RowBreaks.Count.Should().BeGreaterThan(0, "4月は複数ページのため改ページあり");
+
+        var aprilLastPage = ReportService.GetLastPageNumberFromWorksheet(aprilSheet);
+        aprilLastPage.Should().Be(6, "4月は2ページ: 5, 6");
+
+        // 5月: 4月の最終ページ(6)+1=7 から開始
+        maySheet.Cell(2, 12).GetValue<int>().Should().Be(7, "5月は4月の最終ページ(6)+1=7 から開始");
+    }
+
+    /// <summary>
+    /// Issue #809: 月をスキップした場合でも、直近の既存シートから正しく継続すること
+    /// </summary>
+    [Fact]
+    public async Task CreateMonthlyReportAsync_SkippedMonths_PageNumberContinuesFromNearestPrevious()
+    {
+        // Arrange
+        var cardIdm = "0102030405060708";
+        var card = CreateTestCard(cardIdm);
+        card.StartingPageNumber = 3;
+        var outputPath = CreateTempFilePath();
+        var year = 2024;
+
+        var aprilLedgers = new List<Ledger>
+        {
+            CreateTestLedger(1, cardIdm, new DateTime(year, 4, 10), "鉄道（博多～天神）", 0, 300, 9700)
+        };
+        var julyLedgers = new List<Ledger>
+        {
+            CreateTestLedger(2, cardIdm, new DateTime(year, 7, 15), "鉄道（天神～博多）", 0, 200, 9500)
+        };
+
+        _cardRepositoryMock
+            .Setup(r => r.GetByIdmAsync(cardIdm, true))
+            .ReturnsAsync(card);
+        _ledgerRepositoryMock
+            .Setup(r => r.GetByMonthAsync(cardIdm, year, 4))
+            .ReturnsAsync(aprilLedgers);
+        _ledgerRepositoryMock
+            .Setup(r => r.GetByMonthAsync(cardIdm, year, 7))
+            .ReturnsAsync(julyLedgers);
+        _ledgerRepositoryMock
+            .Setup(r => r.GetByMonthAsync(cardIdm, year, 6))
+            .ReturnsAsync(new List<Ledger>
+            {
+                CreateTestLedger(0, cardIdm, new DateTime(year, 6, 30), "前月末データ", 0, 0, 9700)
+            });
+        _ledgerRepositoryMock
+            .Setup(r => r.GetCarryoverBalanceAsync(cardIdm, year - 1))
+            .ReturnsAsync(10000);
+        _ledgerRepositoryMock
+            .Setup(r => r.GetByDateRangeAsync(cardIdm, It.IsAny<DateTime>(), It.IsAny<DateTime>()))
+            .ReturnsAsync(aprilLedgers.Concat(julyLedgers).ToList());
+
+        // Act - 4月を生成、5月・6月はスキップして7月を生成
+        await _reportService.CreateMonthlyReportAsync(cardIdm, year, 4, outputPath);
+        var result = await _reportService.CreateMonthlyReportAsync(cardIdm, year, 7, outputPath);
+
+        // Assert
+        result.Success.Should().BeTrue();
+
+        using var workbook = new XLWorkbook(outputPath);
+        var aprilSheet = workbook.Worksheet("4月");
+        var julySheet = workbook.Worksheet("7月");
+
+        aprilSheet.Cell(2, 12).GetValue<int>().Should().Be(3, "4月は StartingPageNumber=3");
+        julySheet.Cell(2, 12).GetValue<int>().Should().Be(4,
+            "7月は5月・6月のシートがないため4月の最終ページ(3)+1=4 から開始");
+    }
+
+    #endregion
 }
