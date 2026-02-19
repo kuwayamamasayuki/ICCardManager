@@ -30,22 +30,17 @@
 
     <Grid Margin="20">
         <Grid.RowDefinitions>
-            <RowDefinition Height="Auto" MaxHeight="350"/>  <!-- Row 0: Export/Import設定（スクロール可能） -->
-            <RowDefinition Height="Auto"/>   <!-- Row 1: アクションボタン（常に表示） -->
-            <RowDefinition Height="Auto"/>   <!-- Row 2: Status message -->
-            <RowDefinition Height="*" MinHeight="150"/>  <!-- Row 3: プレビュー結果（サマリー + DataGrid） -->
-            <RowDefinition Height="Auto"/>   <!-- Row 4: エラー一覧 -->
-            <RowDefinition Height="Auto"/>   <!-- Row 5: Close button -->
+            <RowDefinition Height="Auto"/>   <!-- Row 0: エクスポート設定 -->
+            <RowDefinition Height="Auto"/>   <!-- Row 1: インポート設定（スクロール可能） -->
+            <RowDefinition Height="Auto"/>   <!-- Row 2: アクションボタン（常に表示） -->
+            <RowDefinition Height="Auto"/>   <!-- Row 3: Status message -->
+            <RowDefinition Height="*" MinHeight="150"/>  <!-- Row 4: プレビュー結果（サマリー + DataGrid） -->
+            <RowDefinition Height="Auto"/>   <!-- Row 5: エラー一覧 -->
+            <RowDefinition Height="Auto"/>   <!-- Row 6: Close button -->
         </Grid.RowDefinitions>
 
-        <!-- エクスポート/インポート設定（スクロール可能エリア） -->
-        <ScrollViewer Grid.Row="0"
-                      VerticalScrollBarVisibility="Auto"
-                      Margin="0,0,0,10">
-        <StackPanel>
-
-        <!-- エクスポート -->
-        <GroupBox Header="エクスポート" Margin="0,0,0,15" Padding="15">
+        <!-- エクスポート設定 -->
+        <GroupBox Grid.Row="0" Header="エクスポート" Margin="0,0,0,10" Padding="15">
             <StackPanel>
                 <TextBlock Text="データをCSVファイルに出力します"
                            Foreground="{DynamicResource SecondaryTextBrush}"
@@ -159,8 +154,12 @@
             </StackPanel>
         </GroupBox>
 
-        <!-- インポート -->
-        <GroupBox Header="インポート" Margin="0,0,0,15" Padding="15">
+        <!-- インポート設定（スクロール可能エリア） -->
+        <ScrollViewer Grid.Row="1"
+                      VerticalScrollBarVisibility="Auto"
+                      MaxHeight="250"
+                      Margin="0,0,0,10">
+        <GroupBox Header="インポート" Padding="15">
             <StackPanel>
                 <TextBlock Text="CSVファイルからデータを取り込みます"
                            Foreground="{DynamicResource SecondaryTextBrush}"
@@ -348,12 +347,10 @@
                            Visibility="{Binding LastImportedFile, Converter={StaticResource StringToVisibilityConverter}}"/>
             </StackPanel>
         </GroupBox>
-
-        </StackPanel>
         </ScrollViewer>
 
         <!-- アクションボタン（常に表示） -->
-        <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="0,0,0,10">
+        <StackPanel Grid.Row="2" Orientation="Horizontal" Margin="0,0,0,10">
             <Button Content="プレビュー"
                     Command="{Binding PreviewImportCommand}"
                     Padding="15,10"
@@ -381,7 +378,7 @@
         </StackPanel>
 
         <!-- ステータスメッセージ -->
-        <Border Grid.Row="2"
+        <Border Grid.Row="3"
                 Background="{DynamicResource ReturnBackgroundBrush}"
                 Padding="10"
                 Margin="0,0,0,10"
@@ -394,7 +391,7 @@
         </Border>
 
         <!-- プレビュー結果セクション -->
-        <Grid Grid.Row="3" Margin="0,0,0,10"
+        <Grid Grid.Row="4" Margin="0,0,0,10"
               Visibility="{Binding HasPreview, Converter={StaticResource BoolToVisibilityConverter}}">
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto"/>  <!-- サマリーバナー -->
@@ -510,7 +507,7 @@
         </Grid>
 
         <!-- エラー一覧セクション -->
-        <Border Grid.Row="4" Background="{DynamicResource LendingBackgroundBrush}" Padding="10" CornerRadius="3" Margin="0,0,0,10"
+        <Border Grid.Row="5" Background="{DynamicResource LendingBackgroundBrush}" Padding="10" CornerRadius="3" Margin="0,0,0,10"
                 Visibility="{Binding ImportErrors.Count, Converter={StaticResource IntToVisibilityConverter}}">
             <StackPanel>
                 <TextBlock Text="エラー詳細" FontWeight="Bold" FontSize="{DynamicResource BaseFontSize}" Margin="0,0,0,5"/>
@@ -531,7 +528,7 @@
         </Border>
 
         <!-- 閉じるボタン -->
-        <StackPanel Grid.Row="5"
+        <StackPanel Grid.Row="6"
                     Orientation="Horizontal"
                     HorizontalAlignment="Right"
                     Margin="0,15,0,0">
@@ -545,7 +542,7 @@
         </StackPanel>
 
         <!-- 処理中オーバーレイ -->
-        <Border Grid.RowSpan="6"
+        <Border Grid.RowSpan="7"
                 Background="{DynamicResource OverlayBrush}"
                 Visibility="{Binding IsBusy, Converter={StaticResource BoolToVisibilityConverter}}">
             <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
