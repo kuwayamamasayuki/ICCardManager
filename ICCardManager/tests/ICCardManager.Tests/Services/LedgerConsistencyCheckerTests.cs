@@ -89,9 +89,9 @@ public class LedgerConsistencyCheckerTests
         // Arrange: 2行目の残高が不整合（期待値800だが750になっている）
         var ledgers = new List<Ledger>
         {
-            new Ledger { Id = 1, Income = 1000, Expense = 0, Balance = 1000, Date = new DateTime(2026, 1, 1) },
-            new Ledger { Id = 2, Income = 0, Expense = 200, Balance = 750, Date = new DateTime(2026, 1, 2) },
-            new Ledger { Id = 3, Income = 0, Expense = 220, Balance = 530, Date = new DateTime(2026, 1, 3) }
+            new Ledger { Id = 1, Income = 1000, Expense = 0, Balance = 1000, Date = new DateTime(2026, 1, 1), Summary = "チャージ" },
+            new Ledger { Id = 2, Income = 0, Expense = 200, Balance = 750, Date = new DateTime(2026, 1, 2), Summary = "鉄道（博多～天神）" },
+            new Ledger { Id = 3, Income = 0, Expense = 220, Balance = 530, Date = new DateTime(2026, 1, 3), Summary = "鉄道（天神～博多）" }
         };
 
         // Act
@@ -100,9 +100,10 @@ public class LedgerConsistencyCheckerTests
         // Assert
         result.IsConsistent.Should().BeFalse();
         result.Inconsistencies.Should().HaveCount(1);
-        result.Inconsistencies[0].LedgerId.Should().Be(2);
-        result.Inconsistencies[0].ExpectedBalance.Should().Be(800);
-        result.Inconsistencies[0].ActualBalance.Should().Be(750);
+        var (ledgerId, expectedBalance, actualBalance) = result.Inconsistencies[0];
+        ledgerId.Should().Be(2);
+        expectedBalance.Should().Be(800);
+        actualBalance.Should().Be(750);
     }
 
     [Fact]
@@ -142,87 +143,6 @@ public class LedgerConsistencyCheckerTests
 
         // Assert
         result.IsConsistent.Should().BeTrue();
-    }
-
-    #endregion
-
-    #region RecalculateBalancesAsync
-
-    [Fact]
-    public async Task RecalculateBalancesAsync_FixesInconsistentBalances()
-    {
-        // Arrange
-        var fromDate = new DateTime(2026, 1, 1);
-        var toDate = new DateTime(2026, 1, 31);
-
-        // 前月残高
-        _ledgerRepoMock.Setup(r => r.GetLatestBeforeDateAsync(TestCardIdm, fromDate))
-            .ReturnsAsync(new Ledger { Balance = 500 });
-
-        // 不整合のある行データ
-        var ledgers = new List<Ledger>
-        {
-            new Ledger { Id = 1, Income = 3000, Expense = 0, Balance = 3500, Date = new DateTime(2026, 1, 5) },
-            new Ledger { Id = 2, Income = 0, Expense = 210, Balance = 3000, Date = new DateTime(2026, 1, 10) }  // 期待値3290
-        };
-
-        _ledgerRepoMock.Setup(r => r.GetByDateRangeAsync(TestCardIdm, fromDate, toDate))
-            .ReturnsAsync(ledgers);
-        _ledgerRepoMock.Setup(r => r.UpdateAsync(It.IsAny<Ledger>()))
-            .ReturnsAsync(true);
-
-        // Act
-        var fixedCount = await _checker.RecalculateBalancesAsync(TestCardIdm, fromDate, toDate);
-
-        // Assert
-        fixedCount.Should().Be(1, "2行目の残高だけ不整合");
-        ledgers[1].Balance.Should().Be(3290);
-        _ledgerRepoMock.Verify(r => r.UpdateAsync(It.Is<Ledger>(l => l.Id == 2)), Times.Once);
-    }
-
-    [Fact]
-    public async Task RecalculateBalancesAsync_NoPreviousLedger_StartsFromZero()
-    {
-        // Arrange: 前月データなし
-        var fromDate = new DateTime(2026, 1, 1);
-        var toDate = new DateTime(2026, 1, 31);
-
-        _ledgerRepoMock.Setup(r => r.GetLatestBeforeDateAsync(TestCardIdm, fromDate))
-            .ReturnsAsync((Ledger)null);
-
-        var ledgers = new List<Ledger>
-        {
-            new Ledger { Id = 1, Income = 1000, Expense = 0, Balance = 999, Date = new DateTime(2026, 1, 1) }
-        };
-
-        _ledgerRepoMock.Setup(r => r.GetByDateRangeAsync(TestCardIdm, fromDate, toDate))
-            .ReturnsAsync(ledgers);
-        _ledgerRepoMock.Setup(r => r.UpdateAsync(It.IsAny<Ledger>()))
-            .ReturnsAsync(true);
-
-        // Act
-        var fixedCount = await _checker.RecalculateBalancesAsync(TestCardIdm, fromDate, toDate);
-
-        // Assert
-        fixedCount.Should().Be(1);
-        ledgers[0].Balance.Should().Be(1000, "前残高0 + 1000 - 0 = 1000");
-    }
-
-    [Fact]
-    public async Task RecalculateBalancesAsync_EmptyList_ReturnsZero()
-    {
-        // Arrange
-        var fromDate = new DateTime(2026, 1, 1);
-        var toDate = new DateTime(2026, 1, 31);
-
-        _ledgerRepoMock.Setup(r => r.GetByDateRangeAsync(TestCardIdm, fromDate, toDate))
-            .ReturnsAsync(new List<Ledger>());
-
-        // Act
-        var fixedCount = await _checker.RecalculateBalancesAsync(TestCardIdm, fromDate, toDate);
-
-        // Assert
-        fixedCount.Should().Be(0);
     }
 
     #endregion

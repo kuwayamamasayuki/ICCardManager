@@ -8,11 +8,11 @@ using ICCardManager.Models;
 namespace ICCardManager.Services
 {
     /// <summary>
-    /// 残高チェーンの整合性をチェック・修正するサービス（Issue #635）
+    /// 残高チェーンの整合性をチェックするサービス（Issue #635）
     /// </summary>
     /// <remarks>
     /// 各行の残高が「前行の残高 + 受入 - 払出」と一致するかを検証します。
-    /// 行の追加・削除・修正後に呼び出し、不整合があれば自動修正を提案します。
+    /// 行の追加・削除・修正後に呼び出し、不整合があれば警告を表示します。
     /// </remarks>
     internal class LedgerConsistencyChecker
     {
@@ -39,45 +39,6 @@ namespace ICCardManager.Services
                 .ToList();
 
             return CheckConsistency(ledgers, cardIdm, fromDate);
-        }
-
-        /// <summary>
-        /// 指定期間の残高チェーンを再計算して修正
-        /// </summary>
-        /// <param name="cardIdm">カードIDm</param>
-        /// <param name="fromDate">開始日</param>
-        /// <param name="toDate">終了日</param>
-        /// <returns>修正した件数</returns>
-        public async Task<int> RecalculateBalancesAsync(
-            string cardIdm, DateTime fromDate, DateTime toDate)
-        {
-            var ledgers = (await _ledgerRepository.GetByDateRangeAsync(cardIdm, fromDate, toDate))
-                .OrderBy(l => l.Date)
-                .ThenBy(l => l.Id)
-                .ToList();
-
-            if (ledgers.Count == 0) return 0;
-
-            // 期間の直前のレコードから前残高を取得
-            var previousLedger = await _ledgerRepository.GetLatestBeforeDateAsync(cardIdm, fromDate);
-            var previousBalance = previousLedger?.Balance ?? 0;
-
-            var fixedCount = 0;
-            foreach (var ledger in ledgers)
-            {
-                var expectedBalance = previousBalance + ledger.Income - ledger.Expense;
-
-                if (ledger.Balance != expectedBalance)
-                {
-                    ledger.Balance = expectedBalance;
-                    await _ledgerRepository.UpdateAsync(ledger);
-                    fixedCount++;
-                }
-
-                previousBalance = ledger.Balance;
-            }
-
-            return fixedCount;
         }
 
         /// <summary>
@@ -150,7 +111,7 @@ namespace ICCardManager.Services
         public bool IsConsistent { get; set; }
 
         /// <summary>
-        /// 不整合箇所リスト（LedgerId, 期待される残高, 実際の残高）
+        /// 不整合箇所リスト（LedgerId, ExpectedBalance, ActualBalance）
         /// </summary>
         public List<(int LedgerId, int ExpectedBalance, int ActualBalance)> Inconsistencies { get; set; } = new();
     }

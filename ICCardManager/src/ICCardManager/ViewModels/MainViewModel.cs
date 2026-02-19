@@ -1303,10 +1303,10 @@ public partial class MainViewModel : ViewModelBase
 
         if (dialog.ShowDialog() == true)
         {
-            await CheckAndNotifyConsistencyAsync();
             await LoadHistoryLedgersAsync();
             await RefreshDashboardAsync();
             await CheckWarningsAsync();
+            await CheckAndNotifyConsistencyAsync();
         }
     }
 
@@ -1341,10 +1341,10 @@ public partial class MainViewModel : ViewModelBase
         var operationLogger = App.Current.ServiceProvider.GetRequiredService<OperationLogger>();
         await operationLogger.LogLedgerDeleteAsync(authResult.Idm, fullLedger);
 
-        await CheckAndNotifyConsistencyAsync();
         await LoadHistoryLedgersAsync();
         await RefreshDashboardAsync();
         await CheckWarningsAsync();
+        await CheckAndNotifyConsistencyAsync();
     }
 
     /// <summary>
@@ -1377,23 +1377,27 @@ public partial class MainViewModel : ViewModelBase
                 await operationLogger.LogLedgerDeleteAsync(authResult.Idm, fullLedger);
             }
 
-            await CheckAndNotifyConsistencyAsync();
             await LoadHistoryLedgersAsync();
             await RefreshDashboardAsync();
             await CheckWarningsAsync();
+            await CheckAndNotifyConsistencyAsync();
         }
         else if (dialogResult == true)
         {
-            await CheckAndNotifyConsistencyAsync();
             await LoadHistoryLedgersAsync();
             await RefreshDashboardAsync();
             await CheckWarningsAsync();
+            await CheckAndNotifyConsistencyAsync();
         }
     }
 
     /// <summary>
-    /// 残高整合性チェック＆通知
+    /// 残高整合性チェック＆警告表示
     /// </summary>
+    /// <remarks>
+    /// 不整合を検出した場合、メイン画面右下の警告エリアに警告を表示します。
+    /// 交通系ICカード内の履歴に記録されている残高が正であるため、自動修正は行いません。
+    /// </remarks>
     private async Task CheckAndNotifyConsistencyAsync()
     {
         if (HistoryCard == null) return;
@@ -1402,19 +1406,23 @@ public partial class MainViewModel : ViewModelBase
         var checkResult = await checker.CheckBalanceConsistencyAsync(
             HistoryCard.CardIdm, HistoryFromDate, HistoryToDate);
 
+        // 既存の同カードの残高不整合警告を削除（重複防止）
+        var existingWarnings = WarningMessages
+            .Where(w => w.Type == WarningType.BalanceInconsistency && w.CardIdm == HistoryCard.CardIdm)
+            .ToList();
+        foreach (var warning in existingWarnings)
+        {
+            WarningMessages.Remove(warning);
+        }
+
         if (!checkResult.IsConsistent)
         {
-            var fix = MessageBox.Show(
-                $"残高の整合性に問題が {checkResult.Inconsistencies.Count} 件見つかりました。\n自動的に残高を再計算しますか？",
-                "残高の整合性チェック", MessageBoxButton.YesNo, MessageBoxImage.Question);
-
-            if (fix == MessageBoxResult.Yes)
+            WarningMessages.Add(new WarningItem
             {
-                var fixedCount = await checker.RecalculateBalancesAsync(
-                    HistoryCard.CardIdm, HistoryFromDate, HistoryToDate);
-                MessageBox.Show($"{fixedCount} 件の残高を修正しました。", "残高再計算完了",
-                    MessageBoxButton.OK, MessageBoxImage.Information);
-            }
+                DisplayText = $"⚠️ 残高の不整合が{checkResult.Inconsistencies.Count}件あります（{HistoryCard.CardType} {HistoryCard.CardNumber}）",
+                Type = WarningType.BalanceInconsistency,
+                CardIdm = HistoryCard.CardIdm
+            });
         }
     }
 
@@ -2012,7 +2020,8 @@ public partial class MainViewModel : ViewModelBase
         switch (warning.Type)
         {
             case WarningType.LowBalance:
-                // 残額警告: 直接カード履歴を表示
+            case WarningType.BalanceInconsistency:
+                // 残額警告・残高不整合警告: 直接カード履歴を表示
                 var card = await _cardRepository.GetByIdmAsync(warning.CardIdm);
                 if (card != null)
                 {
