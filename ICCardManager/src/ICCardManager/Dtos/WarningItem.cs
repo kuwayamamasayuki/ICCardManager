@@ -15,7 +15,10 @@ namespace ICCardManager.Dtos
         CardReaderError,
 
         /// <summary>カードリーダー接続状態</summary>
-        CardReaderConnection
+        CardReaderConnection,
+
+        /// <summary>残高不整合警告（カード単位）</summary>
+        BalanceInconsistency
     }
 
     /// <summary>
