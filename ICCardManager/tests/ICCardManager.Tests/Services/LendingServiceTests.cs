@@ -941,6 +941,114 @@ public class LendingServiceTests : IDisposable
         _ledgerRepositoryMock.Verify(x => x.InsertAsync(It.Is<Ledger>(l => l.Expense > 0)), Times.Once);
     }
 
+    /// <summary>
+    /// Issue #807: チャージのLedgerはStaffName=null、利用のLedgerにはStaffNameが設定されること
+    /// </summary>
+    [Fact]
+    public async Task ReturnAsync_ChargeLedger_HasNullStaffName()
+    {
+        // Arrange
+        var card = CreateTestCard(isLent: true);
+        var staff = CreateTestStaff();
+        var lentRecord = CreateTestLentRecord(daysAgo: 1);
+
+        var today = DateTime.Today;
+        var usageDetails = new List<LedgerDetail>
+        {
+            new() { UseDate = today, IsCharge = true, Amount = 3000, Balance = 13000 },
+            new() { UseDate = today, EntryStation = "博多", ExitStation = "天神", Amount = 260, Balance = 12740 }
+        };
+
+        var capturedLedgers = new List<Ledger>();
+        SetupReturnMocks(card, staff, lentRecord);
+        _ledgerRepositoryMock.Setup(x => x.InsertAsync(It.IsAny<Ledger>()))
+            .Callback<Ledger>(l => capturedLedgers.Add(l))
+            .ReturnsAsync(1);
+
+        // Act
+        var result = await _service.ReturnAsync(TestStaffIdm, TestCardIdm, usageDetails);
+
+        // Assert
+        result.Success.Should().BeTrue();
+
+        var chargeLedger = capturedLedgers.FirstOrDefault(l => l.Income > 0);
+        chargeLedger.Should().NotBeNull();
+        chargeLedger!.StaffName.Should().BeNull("チャージは機械操作のため氏名不要");
+
+        var usageLedger = capturedLedgers.FirstOrDefault(l => l.Expense > 0 && !l.IsLentRecord);
+        usageLedger.Should().NotBeNull();
+        usageLedger!.StaffName.Should().Be(TestStaffName, "利用レコードには職員名が必要");
+    }
+
+    /// <summary>
+    /// Issue #807: ポイント還元のみの場合、StaffName=nullであること
+    /// </summary>
+    [Fact]
+    public async Task ReturnAsync_PointRedemptionOnly_HasNullStaffName()
+    {
+        // Arrange
+        var card = CreateTestCard(isLent: true);
+        var staff = CreateTestStaff();
+        var lentRecord = CreateTestLentRecord();
+
+        var usageDetails = new List<LedgerDetail>
+        {
+            new() { UseDate = DateTime.Today, IsPointRedemption = true, Amount = 500, Balance = 10500 }
+        };
+
+        var capturedLedgers = new List<Ledger>();
+        SetupReturnMocks(card, staff, lentRecord);
+        _ledgerRepositoryMock.Setup(x => x.InsertAsync(It.IsAny<Ledger>()))
+            .Callback<Ledger>(l => capturedLedgers.Add(l))
+            .ReturnsAsync(1);
+
+        // Act
+        var result = await _service.ReturnAsync(TestStaffIdm, TestCardIdm, usageDetails);
+
+        // Assert
+        result.Success.Should().BeTrue();
+
+        // ポイント還元のLedger（貸出レコード更新を除く）
+        var pointLedger = capturedLedgers.FirstOrDefault(l => !l.IsLentRecord);
+        pointLedger.Should().NotBeNull();
+        pointLedger!.StaffName.Should().BeNull("ポイント還元は機械操作のため氏名不要");
+    }
+
+    /// <summary>
+    /// Issue #807: ポイント還元＋通常利用が混在する場合、StaffNameに名前が入っていること
+    /// </summary>
+    [Fact]
+    public async Task ReturnAsync_UsageWithPointRedemption_HasStaffName()
+    {
+        // Arrange
+        var card = CreateTestCard(isLent: true);
+        var staff = CreateTestStaff();
+        var lentRecord = CreateTestLentRecord();
+
+        var usageDetails = new List<LedgerDetail>
+        {
+            new() { UseDate = DateTime.Today, IsPointRedemption = true, Amount = 500, Balance = 10500 },
+            new() { UseDate = DateTime.Today, EntryStation = "博多", ExitStation = "天神", Amount = 260, Balance = 10240 }
+        };
+
+        var capturedLedgers = new List<Ledger>();
+        SetupReturnMocks(card, staff, lentRecord);
+        _ledgerRepositoryMock.Setup(x => x.InsertAsync(It.IsAny<Ledger>()))
+            .Callback<Ledger>(l => capturedLedgers.Add(l))
+            .ReturnsAsync(1);
+
+        // Act
+        var result = await _service.ReturnAsync(TestStaffIdm, TestCardIdm, usageDetails);
+
+        // Assert
+        result.Success.Should().BeTrue();
+
+        // 利用とポイント還元が混在する場合はStaffNameが設定される
+        var usageLedger = capturedLedgers.FirstOrDefault(l => !l.IsLentRecord);
+        usageLedger.Should().NotBeNull();
+        usageLedger!.StaffName.Should().Be(TestStaffName, "通常利用が含まれるため職員名が必要");
+    }
+
     #endregion
 
     #region ヘルパーメソッド

@@ -174,7 +174,7 @@ namespace ICCardManager.Services
                             Income = chargeAmount,
                             Expense = 0,
                             Balance = balance,
-                            StaffName = staffName,
+                            StaffName = null,  // チャージは機械操作のため氏名不要
                             Note = "テストデータ"
                         };
                         var chargeLedgerId = await _ledgerRepository.InsertAsync(chargeLedger);
@@ -499,7 +499,7 @@ namespace ICCardManager.Services
                 Income = pointAmount,
                 Expense = 0,
                 Balance = balance,
-                StaffName = staffName,
+                StaffName = null,  // ポイント還元は機械操作のため氏名不要
                 Note = "テストデータ（ポイント還元）"
             };
             var pointLedgerId = await _ledgerRepository.InsertAsync(pointLedger);
@@ -591,7 +591,7 @@ namespace ICCardManager.Services
                 Income = chargeAmount,
                 Expense = 0,
                 Balance = balance,
-                StaffName = staffName,
+                StaffName = null,  // チャージは機械操作のため氏名不要
                 Note = "テストデータ（残高回復チャージ）"
             };
             var recoveryChargeId = await _ledgerRepository.InsertAsync(recoveryCharge);
@@ -694,7 +694,7 @@ namespace ICCardManager.Services
                 Income = purchaseAmount,
                 Expense = 0,
                 Balance = balance,
-                StaffName = staffName,
+                StaffName = null,  // 新規購入は機械操作のため氏名不要
                 Note = "テストデータ（新規購入: 2000円カード、デポジット500円を除く）"
             };
             await _ledgerRepository.InsertAsync(purchaseLedger);
@@ -722,7 +722,7 @@ namespace ICCardManager.Services
                         Income = chargeAmount,
                         Expense = 0,
                         Balance = balance,
-                        StaffName = staffName,
+                        StaffName = null,  // チャージは機械操作のため氏名不要
                         Note = "テストデータ"
                     };
                     var chargeLedgerId = await _ledgerRepository.InsertAsync(chargeLedger);
@@ -780,7 +780,7 @@ namespace ICCardManager.Services
                 Income = 0,
                 Expense = balance,
                 Balance = 0,
-                StaffName = staffName,
+                StaffName = null,  // 払戻しは機械操作のため氏名不要
                 Note = "テストデータ（払い戻し）"
             };
             await _ledgerRepository.InsertAsync(refundLedger);
