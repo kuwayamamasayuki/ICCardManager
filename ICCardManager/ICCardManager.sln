@@ -1,4 +1,4 @@
-
+﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 17
 VisualStudioVersion = 17.8.34330.188
@@ -8,6 +8,10 @@ EndProject
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "ICCardManager.Tests", "tests\ICCardManager.Tests\ICCardManager.Tests.csproj", "{B2C3D4E5-F6A7-8901-BCDE-F12345678901}"
 EndProject
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "DebugDataViewer", "tools\DebugDataViewer\DebugDataViewer.csproj", "{D3E4F5A6-B7C8-9012-DEF0-123456789ABC}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tests", "tests", "{86F93785-6D4C-4073-B86E-FFB4258C8090}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ICCardManager.UITests", "tests\ICCardManager.UITests\ICCardManager.UITests.csproj", "{1CE99C06-BAAF-43DE-B7C5-5C3B1926C55F}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -27,11 +31,18 @@ Global
 		{D3E4F5A6-B7C8-9012-DEF0-123456789ABC}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{D3E4F5A6-B7C8-9012-DEF0-123456789ABC}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{D3E4F5A6-B7C8-9012-DEF0-123456789ABC}.Release|Any CPU.Build.0 = Release|Any CPU
+		{1CE99C06-BAAF-43DE-B7C5-5C3B1926C55F}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{1CE99C06-BAAF-43DE-B7C5-5C3B1926C55F}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{1CE99C06-BAAF-43DE-B7C5-5C3B1926C55F}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{1CE99C06-BAAF-43DE-B7C5-5C3B1926C55F}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
 	EndGlobalSection
 	GlobalSection(ExtensibilityGlobals) = postSolution
 		SolutionGuid = {C3D4E5F6-A7B8-9012-CDEF-123456789012}
+	EndGlobalSection
+	GlobalSection(NestedProjects) = preSolution
+		{1CE99C06-BAAF-43DE-B7C5-5C3B1926C55F} = {86F93785-6D4C-4073-B86E-FFB4258C8090}
 	EndGlobalSection
 EndGlobal
