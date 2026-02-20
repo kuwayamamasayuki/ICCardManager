@@ -465,8 +465,10 @@ namespace ICCardManager.ViewModels
                         {
                             // 履歴がある場合: 初期残高を逆算してから初期レコード作成
                             var preHistoryBalance = CalculatePreHistoryBalance(filteredHistory);
+                            // Issue #819: ユーザーが繰越額を明示的に入力した場合はそちらを優先
+                            var initialBalance = modeResult.CarryoverBalance ?? preHistoryBalance;
                             await CreateInitialLedgerAsync(EditCardIdm, modeResult,
-                                overrideDate: importFromDate, overrideBalance: preHistoryBalance);
+                                overrideDate: importFromDate, overrideBalance: initialBalance);
 
                             // 履歴をインポート
                             var importResult = await _lendingService.ImportHistoryForRegistrationAsync(
