@@ -270,6 +270,11 @@ dotnet test --filter "FullyQualifiedName~SummaryGeneratorTests"
 
 ## 更新履歴
 
+### v1.13.2 (2026-02-20)
+
+**改善**
+- インストーラービルドスクリプト（.bat）にDebugDataViewerのクリーンビルドを追加（#816）
+
 ### v1.13.1 (2026-02-20)
 
 **バグ修正**
