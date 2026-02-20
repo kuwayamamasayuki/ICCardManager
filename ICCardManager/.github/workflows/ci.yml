@@ -2,70 +2,78 @@ name: CI
 
 on:
   push:
-    branches: [ main ]
-    paths:
-      - 'ICCardManager/**'
-      - '.github/workflows/ci.yml'
+    branches: [ main, develop ]
+    paths-ignore:
+      - 'docs/**'
+      - '**.md'
+      - '!CLAUDE.md'
   pull_request:
     branches: [ main ]
-    paths:
-      - 'ICCardManager/**'
-      - '.github/workflows/ci.yml'
+    paths-ignore:
+      - 'docs/**'
+      - '**.md'
+      - '!CLAUDE.md'
 
 env:
   DOTNET_VERSION: '8.0.x'
-  SOLUTION_PATH: 'ICCardManager/ICCardManager.sln'
+  DOTNET_NOLOGO: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
 
 jobs:
-  build:
-    name: Build and Test
+  build-and-test:
     runs-on: windows-latest
 
+    defaults:
+      run:
+        working-directory: ICCardManager
+
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+    - name: Checkout
+      uses: actions/checkout@v4
 
-      - name: Setup .NET
-        uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: ${{ env.DOTNET_VERSION }}
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: ${{ env.DOTNET_VERSION }}
 
-      - name: Restore dependencies
-        run: dotnet restore ${{ env.SOLUTION_PATH }}
+    - name: Restore dependencies
+      run: dotnet restore
 
-      - name: Build
-        run: dotnet build ${{ env.SOLUTION_PATH }} --configuration Release --no-restore
+    - name: Build
+      run: dotnet build --no-restore --configuration Release
 
-      - name: Run tests
-        run: dotnet test ${{ env.SOLUTION_PATH }} --configuration Release --no-build --verbosity normal --logger "trx;LogFileName=test-results.trx" --filter "Category!=UI"
+    - name: Run tests
+      run: dotnet test --no-build --configuration Release --verbosity normal --filter "Category!=UI" --collect:"XPlat Code Coverage" --results-directory ./coverage
 
-      - name: Upload test results
-        uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: test-results
-          path: '**/TestResults/*.trx'
-          retention-days: 30
+    - name: Upload coverage reports
+      uses: codecov/codecov-action@v4
+      with:
+        directory: ./ICCardManager/coverage
+        fail_ci_if_error: false
+      continue-on-error: true
 
   code-quality:
-    name: Code Quality
     runs-on: windows-latest
 
+    defaults:
+      run:
+        working-directory: ICCardManager
+
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+    - name: Checkout
+      uses: actions/checkout@v4
 
-      - name: Setup .NET
-        uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: ${{ env.DOTNET_VERSION }}
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: ${{ env.DOTNET_VERSION }}
 
-      - name: Restore dependencies
-        run: dotnet restore ${{ env.SOLUTION_PATH }}
+    - name: Restore dependencies
+      run: dotnet restore
 
-      - name: Check code formatting
-        run: dotnet format ${{ env.SOLUTION_PATH }} --verify-no-changes --verbosity diagnostic
-        continue-on-error: true
+    - name: Check code format
+      run: dotnet format --verify-no-changes --verbosity diagnostic
+      continue-on-error: true
 
-      - name: Build with warnings as errors
-        run: dotnet build ${{ env.SOLUTION_PATH }} --configuration Release --no-restore /p:TreatWarningsAsErrors=false /p:WarningLevel=4
+    - name: Build with analyzers
+      run: dotnet build --no-restore --configuration Release
