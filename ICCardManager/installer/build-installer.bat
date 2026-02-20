@@ -17,12 +17,16 @@ if not "%~1"=="" set "VERSION=%~1"
 set "SCRIPT_DIR=%~dp0"
 set "PROJECT_ROOT=%SCRIPT_DIR%.."
 set "SRC_DIR=%PROJECT_ROOT%\src\ICCardManager"
+set "DEBUG_TOOL_DIR=%PROJECT_ROOT%\tools\DebugDataViewer"
 set "PUBLISH_DIR=%PROJECT_ROOT%\publish"
+set "DEBUG_TOOL_PUBLISH_DIR=%PUBLISH_DIR%\Tools"
 set "OUTPUT_DIR=%SCRIPT_DIR%output"
 
 :: Inno Setup のパスを探す
 set "ISCC="
-if exist "%ProgramFiles(x86)%\Inno Setup 6\ISCC.exe" (
+if exist "%LOCALAPPDATA%\Programs\Inno Setup 6\ISCC.exe" (
+    set "ISCC=%LOCALAPPDATA%\Programs\Inno Setup 6\ISCC.exe"
+) else if exist "%ProgramFiles(x86)%\Inno Setup 6\ISCC.exe" (
     set "ISCC=%ProgramFiles(x86)%\Inno Setup 6\ISCC.exe"
 ) else if exist "%ProgramFiles%\Inno Setup 6\ISCC.exe" (
     set "ISCC=%ProgramFiles%\Inno Setup 6\ISCC.exe"
@@ -42,39 +46,91 @@ if "%ISCC%"=="" (
 echo バージョン: %VERSION%
 echo.
 
-echo [1/6] アプリケーションのビルド...
+echo [1/8] アプリケーションのクリーンビルド...
 pushd "%SRC_DIR%"
-dotnet publish -c Release -r win-x64 --self-contained true -o "%PUBLISH_DIR%" -v q
+:: obj/binフォルダを削除してクリーンな状態にする（バージョン不一致防止）
+if exist "obj" rmdir /s /q "obj"
+if exist "bin" rmdir /s /q "bin"
+dotnet publish -c Release -o "%PUBLISH_DIR%" -v q
 if errorlevel 1 (
-    echo エラー: ビルドに失敗しました。
+    echo エラー: アプリケーションのビルドに失敗しました。
     popd
     pause
     exit /b 1
 )
 popd
+:: PDBファイルを削除（リリースビルドでは不要）
+del /q "%PUBLISH_DIR%\*.pdb" 2>nul
 echo   ビルド完了
 
 echo.
-echo [2/6] リソースファイルのコピー...
+echo [2/8] デバッグツールのクリーンビルド...
+pushd "%DEBUG_TOOL_DIR%"
+:: obj/binフォルダを削除してクリーンな状態にする（バージョン不一致防止）
+if exist "obj" rmdir /s /q "obj"
+if exist "bin" rmdir /s /q "bin"
+dotnet publish -c Release -o "%DEBUG_TOOL_PUBLISH_DIR%" -v q
+if errorlevel 1 (
+    echo エラー: デバッグツールのビルドに失敗しました。
+    popd
+    pause
+    exit /b 1
+)
+popd
+:: PDBファイルを削除
+del /q "%DEBUG_TOOL_PUBLISH_DIR%\*.pdb" 2>nul
+
+:: ICCardManager.exe をToolsフォルダにコピー（依存関係として必要）
+if exist "%PUBLISH_DIR%\ICCardManager.exe" (
+    copy /y "%PUBLISH_DIR%\ICCardManager.exe" "%DEBUG_TOOL_PUBLISH_DIR%\" >nul
+    echo   ICCardManager.exe をToolsフォルダにコピー
+)
+
+:: SQLite.Interop.dll (x86) をToolsフォルダにコピー
+if exist "%DEBUG_TOOL_DIR%\bin\Release\net48\x86" (
+    if not exist "%DEBUG_TOOL_PUBLISH_DIR%\x86" mkdir "%DEBUG_TOOL_PUBLISH_DIR%\x86"
+    xcopy /Y /Q "%DEBUG_TOOL_DIR%\bin\Release\net48\x86\*" "%DEBUG_TOOL_PUBLISH_DIR%\x86\" >nul 2>&1
+    echo   SQLite.Interop.dll: x86 フォルダをコピー
+)
+:: SQLite.Interop.dll (x64) をToolsフォルダにコピー
+if exist "%DEBUG_TOOL_DIR%\bin\Release\net48\x64" (
+    if not exist "%DEBUG_TOOL_PUBLISH_DIR%\x64" mkdir "%DEBUG_TOOL_PUBLISH_DIR%\x64"
+    xcopy /Y /Q "%DEBUG_TOOL_DIR%\bin\Release\net48\x64\*" "%DEBUG_TOOL_PUBLISH_DIR%\x64\" >nul 2>&1
+    echo   SQLite.Interop.dll: x64 フォルダをコピー
+)
+echo   デバッグツール ビルド完了
+
+echo.
+echo [3/8] リソースファイルのコピー...
 :: Soundsフォルダのコピー
 if not exist "%PUBLISH_DIR%\Resources\Sounds" mkdir "%PUBLISH_DIR%\Resources\Sounds"
 xcopy /Y /Q "%SRC_DIR%\Resources\Sounds\*" "%PUBLISH_DIR%\Resources\Sounds\" >nul 2>&1
 :: Templatesフォルダのコピー
 if not exist "%PUBLISH_DIR%\Resources\Templates" mkdir "%PUBLISH_DIR%\Resources\Templates"
 xcopy /Y /Q "%SRC_DIR%\Resources\Templates\*" "%PUBLISH_DIR%\Resources\Templates\" >nul 2>&1
+:: SQLite.Interop.dll (x86) のコピー
+if exist "%SRC_DIR%\bin\Release\net48\x86" (
+    if not exist "%PUBLISH_DIR%\x86" mkdir "%PUBLISH_DIR%\x86"
+    xcopy /Y /Q "%SRC_DIR%\bin\Release\net48\x86\*" "%PUBLISH_DIR%\x86\" >nul 2>&1
+)
 echo   リソースコピー完了
 
 echo.
-echo [3/6] ファイルの確認...
+echo [4/8] ファイルの確認...
 if not exist "%PUBLISH_DIR%\ICCardManager.exe" (
     echo エラー: ICCardManager.exe が見つかりません。
     pause
     exit /b 1
 )
 echo   実行ファイル: OK
+if exist "%DEBUG_TOOL_PUBLISH_DIR%\DebugDataViewer.exe" (
+    echo   デバッグツール: OK
+) else (
+    echo   警告: DebugDataViewer.exe が見つかりません。
+)
 
 echo.
-echo [4/6] マニュアルの変換（docx形式）...
+echo [5/8] マニュアルの変換（docx形式）...
 :: pandocがインストールされているか確認
 where pandoc >nul 2>&1
 if errorlevel 1 (
@@ -95,7 +151,7 @@ echo   docx変換完了
 :skip_manual_docx
 
 echo.
-echo [5/6] マニュアルの変換（PDF形式）...
+echo [6/8] マニュアルの変換（PDF形式）...
 :: PDF変換スクリプトの存在確認
 if not exist "%PROJECT_ROOT%\docs\manual\convert-to-pdf.ps1" (
     echo   警告: PDF変換スクリプトが見つかりません。PDF変換をスキップします。
@@ -113,7 +169,7 @@ popd
 :skip_manual_pdf
 
 echo.
-echo [6/6] インストーラーの作成...
+echo [7/8] インストーラーの作成...
 if not exist "%OUTPUT_DIR%" mkdir "%OUTPUT_DIR%"
 "%ISCC%" /DMyAppVersion=%VERSION% "%SCRIPT_DIR%ICCardManager.iss"
 if errorlevel 1 (
@@ -122,6 +178,8 @@ if errorlevel 1 (
     exit /b 1
 )
 
+echo.
+echo [8/8] 完了確認...
 echo.
 echo ======================================
 echo  ビルド完了!
