@@ -1062,4 +1062,108 @@ public class CardManageViewModelTests
     }
 
     #endregion
+
+    #region Issue #819: 繰越額が履歴逆算値で上書きされるバグの修正
+
+    /// <summary>
+    /// 履歴がある場合でもユーザー指定の繰越額が優先されること
+    /// （履歴から逆算した初期残高で上書きされないこと）
+    /// </summary>
+    [Fact]
+    public async Task SaveAsync_CarryoverMode_WithHistoryAndCarryoverBalance_ShouldUseUserSpecifiedBalance()
+    {
+        // Arrange
+        var idm = "0102030405060708";
+        var userSpecifiedBalance = 8000; // ユーザーが入力した繰越額
+        var today = DateTime.Today;
+
+        // 履歴データ（この履歴から逆算すると 4790 + 210 = 5000 になるが、
+        // ユーザーが 8000 を指定しているのでそちらが優先されるべき）
+        var preReadHistory = new List<LedgerDetail>
+        {
+            new() { UseDate = today, EntryStation = "博多", ExitStation = "天神", Amount = 210, Balance = 4790 }
+        };
+
+        _cardRepositoryMock.Setup(r => r.GetByIdmAsync(idm, true)).ReturnsAsync((IcCard?)null);
+        _cardRepositoryMock.Setup(r => r.InsertAsync(It.IsAny<IcCard>())).ReturnsAsync(true);
+
+        // 繰越モード + ユーザー指定の繰越額
+        _dialogServiceMock.Setup(d => d.ShowCardRegistrationModeDialog(It.IsAny<int?>()))
+            .Returns(new ICCardManager.Views.Dialogs.CardRegistrationModeResult
+            {
+                IsNewPurchase = false,
+                CarryoverMonth = 1,
+                StartingPageNumber = 1,
+                CarryoverBalance = userSpecifiedBalance
+            });
+
+        _viewModel.SetPreReadBalance(4790);
+        _viewModel.SetPreReadHistory(preReadHistory);
+
+        _viewModel.StartNewCard();
+        _viewModel.EditCardIdm = idm;
+        _viewModel.EditCardType = "はやかけん";
+        _viewModel.EditCardNumber = "H-001";
+
+        // Act
+        await _viewModel.SaveAsync();
+
+        // Assert: ユーザー指定の繰越額（8,000円）が使用され、
+        // 履歴から逆算した値（5,000円）ではないこと
+        _ledgerRepositoryMock.Verify(r => r.InsertAsync(It.Is<Ledger>(l =>
+            l.Income == userSpecifiedBalance &&
+            l.Balance == userSpecifiedBalance &&
+            l.Summary == "1月から繰越"
+        )), Times.Once);
+    }
+
+    /// <summary>
+    /// 履歴があり繰越額が未指定の場合、従来通り履歴から逆算した値が使用されること
+    /// </summary>
+    [Fact]
+    public async Task SaveAsync_CarryoverMode_WithHistoryAndNoCarryoverBalance_ShouldUseCalculatedBalance()
+    {
+        // Arrange
+        var idm = "0102030405060708";
+        var today = DateTime.Today;
+
+        // 履歴データ: 利用 210円、残高 4790円 → 逆算すると 4790 + 210 = 5000
+        var preReadHistory = new List<LedgerDetail>
+        {
+            new() { UseDate = today, EntryStation = "博多", ExitStation = "天神", Amount = 210, Balance = 4790 }
+        };
+
+        _cardRepositoryMock.Setup(r => r.GetByIdmAsync(idm, true)).ReturnsAsync((IcCard?)null);
+        _cardRepositoryMock.Setup(r => r.InsertAsync(It.IsAny<IcCard>())).ReturnsAsync(true);
+
+        // 繰越モード、CarryoverBalance は null（未指定）
+        _dialogServiceMock.Setup(d => d.ShowCardRegistrationModeDialog(It.IsAny<int?>()))
+            .Returns(new ICCardManager.Views.Dialogs.CardRegistrationModeResult
+            {
+                IsNewPurchase = false,
+                CarryoverMonth = 1,
+                StartingPageNumber = 1,
+                CarryoverBalance = null
+            });
+
+        _viewModel.SetPreReadBalance(4790);
+        _viewModel.SetPreReadHistory(preReadHistory);
+
+        _viewModel.StartNewCard();
+        _viewModel.EditCardIdm = idm;
+        _viewModel.EditCardType = "はやかけん";
+        _viewModel.EditCardNumber = "H-001";
+
+        // Act
+        await _viewModel.SaveAsync();
+
+        // Assert: CarryoverBalanceがnullなので、履歴から逆算した値（5,000円）が使用されること
+        _ledgerRepositoryMock.Verify(r => r.InsertAsync(It.Is<Ledger>(l =>
+            l.Income == 5000 &&
+            l.Balance == 5000 &&
+            l.Summary == "1月から繰越"
+        )), Times.Once);
+    }
+
+    #endregion
 }
