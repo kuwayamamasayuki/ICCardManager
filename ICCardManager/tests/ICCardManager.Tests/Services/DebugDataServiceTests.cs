@@ -38,12 +38,12 @@ public class DebugDataServiceTests
 
         // 全職員・全カード未登録
         _staffRepoMock.Setup(r => r.GetByIdmAsync(It.IsAny<string>(), It.IsAny<bool>()))
-            .ReturnsAsync((Staff)null);
+            .ReturnsAsync((Staff?)null);
         _staffRepoMock.Setup(r => r.InsertAsync(It.IsAny<Staff>()))
             .ReturnsAsync(true);
 
         _cardRepoMock.Setup(r => r.GetByIdmAsync(It.IsAny<string>(), It.IsAny<bool>()))
-            .ReturnsAsync((IcCard)null);
+            .ReturnsAsync((IcCard?)null);
         _cardRepoMock.Setup(r => r.InsertAsync(It.IsAny<IcCard>()))
             .ReturnsAsync(true);
 

@@ -1959,7 +1959,7 @@ public class LendingServiceTests : IDisposable
             new() { UseDate = new DateTime(2026, 2, 5), Balance = 4790, Amount = 210, EntryStation = "天神", ExitStation = "博多" }
         };
 
-        Ledger capturedLedger = null;
+        Ledger? capturedLedger = null;
         _ledgerRepositoryMock.Setup(x => x.GetExistingDetailKeysAsync(TestCardIdm, It.IsAny<DateTime>()))
             .ReturnsAsync(new HashSet<(DateTime?, int?, bool)>());
         _ledgerRepositoryMock.Setup(x => x.GetLatestBeforeDateAsync(TestCardIdm, It.IsAny<DateTime>()))

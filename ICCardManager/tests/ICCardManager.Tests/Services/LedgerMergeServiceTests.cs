@@ -74,7 +74,7 @@ public class LedgerMergeServiceTests
         string summary,
         int expense,
         int balance,
-        List<LedgerDetail> details = null)
+        List<LedgerDetail>? details = null)
     {
         return new Ledger
         {
@@ -221,7 +221,7 @@ public class LedgerMergeServiceTests
         _ledgerRepositoryMock.Setup(x => x.GetByIdAsync(1))
             .ReturnsAsync(CreateTestLedger(1, TestCardIdm, DateTime.Now, "A", 200, 800));
         _ledgerRepositoryMock.Setup(x => x.GetByIdAsync(999))
-            .ReturnsAsync((Ledger)null);
+            .ReturnsAsync((Ledger?)null);
 
         // Act
         var result = await _service.MergeAsync(new List<int> { 1, 999 });
@@ -596,9 +596,9 @@ public class LedgerMergeServiceTests
         SetupGetByIdMocks(ledger1, ledger2);
         SetupMergeMockSuccess();
 
-        string capturedUndoJson = null;
+        string? capturedUndoJson = null;
         int capturedTargetId = 0;
-        string capturedDescription = null;
+        string? capturedDescription = null;
 
         _ledgerRepositoryMock
             .Setup(x => x.SaveMergeHistoryAsync(
@@ -647,7 +647,7 @@ public class LedgerMergeServiceTests
         SetupGetByIdMocks(ledger1, ledger2);
         SetupMergeMockSuccess();
 
-        string capturedUndoJson = null;
+        string? capturedUndoJson = null;
         _ledgerRepositoryMock
             .Setup(x => x.SaveMergeHistoryAsync(It.IsAny<int>(), It.IsAny<string>(), It.IsAny<string>()))
             .Callback<int, string, string>((_, _, json) => capturedUndoJson = json)

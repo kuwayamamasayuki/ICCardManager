@@ -1185,7 +1185,7 @@ FEDCBA9876543210,鈴木花子,002,テスト2";
         await Task.Run(() => File.WriteAllText(filePath, csvContent, CsvEncoding));
 
         // ledger_id=999は存在しない
-        _ledgerRepositoryMock.Setup(x => x.GetByIdAsync(999)).ReturnsAsync((Ledger)null);
+        _ledgerRepositoryMock.Setup(x => x.GetByIdAsync(999)).ReturnsAsync((Ledger?)null);
 
         // Act
         var result = await _service.PreviewLedgerDetailsAsync(filePath);
