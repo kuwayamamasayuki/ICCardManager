@@ -11,6 +11,7 @@
         Width="700"
         WindowStartupLocation="CenterOwner"
         ResizeMode="NoResize"
+        FontSize="{DynamicResource BaseFontSize}"
         AutomationProperties.Name="履歴行の追加・修正ダイアログ"
         AutomationProperties.HelpText="履歴の行を追加または全項目を修正できます。">
 

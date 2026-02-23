@@ -13,6 +13,7 @@
         MinWidth="600"
         WindowStartupLocation="CenterOwner"
         ResizeMode="CanResize"
+        FontSize="{DynamicResource BaseFontSize}"
         AutomationProperties.Name="バス停名未入力履歴一覧ダイアログ"
         AutomationProperties.HelpText="バス停名が未入力の利用履歴を確認できます。項目を選択してバス停名を入力ボタンを押すと、バス停名入力画面に遷移します。">
 

@@ -15,6 +15,7 @@
         ShowInTaskbar="False"
         ShowActivated="False"
         ResizeMode="NoResize"
+        FontSize="{DynamicResource BaseFontSize}"
         AutomationProperties.Name="通知ウィンドウ"
         AutomationProperties.LiveSetting="Assertive">
 

@@ -13,6 +13,7 @@
         WindowStartupLocation="CenterOwner"
         ResizeMode="CanResize"
         KeyDown="Window_KeyDown"
+        FontSize="{DynamicResource BaseFontSize}"
         AutomationProperties.Name="交通系ICカード管理ダイアログ"
         AutomationProperties.HelpText="交通系ICカードの登録・編集・削除ができます。カードをタッチして新規登録できます。Escキーで閉じます。">
 

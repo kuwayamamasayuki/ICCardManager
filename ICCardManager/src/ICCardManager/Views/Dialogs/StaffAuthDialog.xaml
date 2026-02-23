@@ -7,6 +7,7 @@
         WindowStartupLocation="CenterOwner"
         ResizeMode="NoResize"
         ShowInTaskbar="False"
+        FontSize="{DynamicResource BaseFontSize}"
         AutomationProperties.Name="職員証認証ダイアログ"
         AutomationProperties.HelpText="重要な操作を行うために職員証による認証が必要です">
 

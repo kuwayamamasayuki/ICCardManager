@@ -13,6 +13,7 @@
         ResizeMode="CanResize"
         MinHeight="600"
         MinWidth="700"
+        FontSize="{DynamicResource BaseFontSize}"
         AutomationProperties.Name="データエクスポート/インポートダイアログ"
         AutomationProperties.HelpText="カード、職員、履歴データのCSVエクスポート・インポートができます。Escapeキーで閉じます。">
 

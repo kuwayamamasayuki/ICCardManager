@@ -11,6 +11,7 @@
         Width="650"
         WindowStartupLocation="CenterOwner"
         ResizeMode="CanResize"
+        FontSize="{DynamicResource BaseFontSize}"
         AutomationProperties.Name="バス停名入力ダイアログ"
         AutomationProperties.HelpText="バス利用の乗車・降車バス停名を入力します。過去の入力履歴から候補が表示されます。">
 

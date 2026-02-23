@@ -7,6 +7,7 @@
         WindowStartupLocation="CenterOwner"
         ResizeMode="NoResize"
         ShowInTaskbar="False"
+        FontSize="{DynamicResource BaseFontSize}"
         AutomationProperties.Name="カード種別選択ダイアログ"
         AutomationProperties.HelpText="未登録カードを職員証または交通系ICカードとして登録するかを選択します">
 

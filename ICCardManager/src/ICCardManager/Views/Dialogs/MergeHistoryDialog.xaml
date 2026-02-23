@@ -8,6 +8,7 @@
         MinWidth="400"
         WindowStartupLocation="CenterOwner"
         ShowInTaskbar="False"
+        FontSize="{DynamicResource BaseFontSize}"
         AutomationProperties.Name="統合履歴選択ダイアログ"
         AutomationProperties.HelpText="元に戻したい統合履歴を選択して取り消しボタンを押します">
 

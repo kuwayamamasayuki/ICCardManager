@@ -7,6 +7,7 @@
         WindowStartupLocation="CenterOwner"
         ResizeMode="NoResize"
         ShowInTaskbar="False"
+        FontSize="{DynamicResource BaseFontSize}"
         AutomationProperties.Name="カード登録方法選択ダイアログ"
         AutomationProperties.HelpText="交通系ICカードを新規購入として登録するか、紙の出納簿からの繰越として登録するかを選択します">
 
