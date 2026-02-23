@@ -29,7 +29,13 @@ namespace ICCardManager.Infrastructure.Sound
         /// <summary>
         /// 警告時
         /// </summary>
-        Warning
+        Warning,
+
+        /// <summary>
+        /// 通知音（職員証認識など）。
+        /// 音声モードに関係なく常にビープ音（lend.wav）を再生する。
+        /// </summary>
+        Notify
     }
 
     /// <summary>
