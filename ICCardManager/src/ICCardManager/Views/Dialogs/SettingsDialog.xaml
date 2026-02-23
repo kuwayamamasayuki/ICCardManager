@@ -120,6 +120,11 @@
                                    FontSize="{DynamicResource SmallFontSize}"
                                    Foreground="{DynamicResource SecondaryTextBrush}"
                                    Margin="0,2,0,0"/>
+                        <TextBlock FontSize="{DynamicResource SmallFontSize}"
+                                   Foreground="{DynamicResource SecondaryTextBrush}"
+                                   Margin="0,10,0,0">
+                            <Run Text="音声クレジット: VOICEVOX:四国めたん / VOICEVOX:玄野武宏"/>
+                        </TextBlock>
                     </StackPanel>
                 </GroupBox>
 
