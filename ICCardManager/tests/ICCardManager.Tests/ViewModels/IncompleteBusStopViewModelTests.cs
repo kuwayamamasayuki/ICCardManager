@@ -538,7 +538,7 @@ public class IncompleteBusStopViewModelTests
     public void SelectedLedgerId_WithoutSelectedItem_ShouldReturnNull()
     {
         // Arrange
-        _viewModel.SelectedItem = null;
+        _viewModel.SelectedItem = null!;
 
         // Act & Assert
         _viewModel.SelectedLedgerId.Should().BeNull();
@@ -598,7 +598,7 @@ public class IncompleteBusStopViewModelTests
         // Arrange
         _ledgerRepositoryMock
             .Setup(r => r.GetByIdAsync(999))
-            .ReturnsAsync((Ledger)null);
+            .ReturnsAsync((Ledger?)null);
 
         // Act
         var result = await _viewModel.UpdateItemSummaryAsync(999);

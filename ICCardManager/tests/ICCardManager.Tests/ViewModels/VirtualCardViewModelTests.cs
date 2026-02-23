@@ -27,7 +27,7 @@ public class VirtualCardViewModelTests
     }
 
     private static VirtualCardViewModel CreateViewModel(
-        Mock<ILedgerRepository> mockLedgerRepo = null)
+        Mock<ILedgerRepository>? mockLedgerRepo = null)
     {
         mockLedgerRepo ??= CreateMockLedgerRepository();
 
@@ -336,7 +336,7 @@ public class VirtualCardViewModelTests
     public void ApplyAndTouch_NoSelection_DoesNotCreateResult()
     {
         var vm = CreateViewModel();
-        vm.SelectedCard = null;
+        vm.SelectedCard = null!;
 
         vm.ApplyAndTouch();
 

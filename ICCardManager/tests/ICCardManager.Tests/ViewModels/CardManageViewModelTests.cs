@@ -191,7 +191,7 @@ public class CardManageViewModelTests
         // Arrange
         var idm = "0102030405060708";
         // 未登録カード（既存カードなし）のシナリオ
-        _cardRepositoryMock.Setup(r => r.GetByIdmAsync(idm, true)).ReturnsAsync((IcCard)null);
+        _cardRepositoryMock.Setup(r => r.GetByIdmAsync(idm, true)).ReturnsAsync((IcCard?)null);
 
         // Act
         var completed = await _viewModel.StartNewCardWithIdmAsync(idm);

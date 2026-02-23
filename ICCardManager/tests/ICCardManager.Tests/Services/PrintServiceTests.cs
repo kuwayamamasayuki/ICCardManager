@@ -51,8 +51,8 @@ public class PrintServiceTests
         int income,
         int expense,
         int balance,
-        string staffName = null,
-        string note = null)
+        string? staffName = null,
+        string? note = null)
     {
         return new Ledger
         {
@@ -135,7 +135,7 @@ public class PrintServiceTests
 
         // Assert
         result.Should().NotBeNull();
-        result.Rows.Should().HaveCountGreaterOrEqualTo(2); // 繰越行 + データ行
+        result!.Rows.Should().HaveCountGreaterOrEqualTo(2); // 繰越行 + データ行
 
         var carryoverRow = result.Rows.First();
         carryoverRow.Summary.Should().Be("5月より繰越");
@@ -178,7 +178,7 @@ public class PrintServiceTests
         // Assert
         result.Should().NotBeNull();
         // 繰越行なし、データ行のみ
-        result.Rows.Should().HaveCount(1);
+        result!.Rows.Should().HaveCount(1);
         result.Rows.First().Summary.Should().Be("役務費によりチャージ");
     }
 
@@ -213,7 +213,7 @@ public class PrintServiceTests
 
         // Assert
         result.Should().NotBeNull();
-        result.Rows.Should().HaveCountGreaterOrEqualTo(2); // 前年度繰越 + データ行
+        result!.Rows.Should().HaveCountGreaterOrEqualTo(2); // 前年度繰越 + データ行
 
         var carryoverRow = result.Rows.First();
         carryoverRow.Summary.Should().Be("前年度より繰越");
@@ -261,7 +261,7 @@ public class PrintServiceTests
 
         // Assert
         result.Should().NotBeNull();
-        var carryoverRow = result.Rows.First();
+        var carryoverRow = result!.Rows.First();
         carryoverRow.Summary.Should().Be("7月より繰越");
         carryoverRow.Income.Should().BeNull("月次繰越の受入金額は空欄であるべき");
         carryoverRow.Balance.Should().Be(2700, "残額には前月末残高が表示されるべき");
@@ -305,8 +305,8 @@ public class PrintServiceTests
 
         // Assert
         result.Should().NotBeNull();
-        result.CumulativeTotal.Should().NotBeNull();
-        result.CumulativeTotal.Label.Should().Be("累計");
+        result!.CumulativeTotal.Should().NotBeNull();
+        result.CumulativeTotal!.Label.Should().Be("累計");
         result.CumulativeTotal.Income.Should().Be(5000);  // 5月チャージ
         result.CumulativeTotal.Expense.Should().Be(300);   // 6月利用
         result.CumulativeTotal.Balance.Should().Be(4700);  // 最終残高
@@ -354,8 +354,8 @@ public class PrintServiceTests
         result.Should().NotBeNull();
 
         // 累計行が存在する
-        result.CumulativeTotal.Should().NotBeNull();
-        result.CumulativeTotal.Label.Should().Be("累計");
+        result!.CumulativeTotal.Should().NotBeNull();
+        result.CumulativeTotal!.Label.Should().Be("累計");
         result.CumulativeTotal.Income.Should().Be(5000);   // 4月のチャージ
         result.CumulativeTotal.Expense.Should().Be(600);    // 2月300 + 3月300
         result.CumulativeTotal.Balance.Should().Be(2400);   // 最終残高
@@ -415,7 +415,7 @@ public class PrintServiceTests
 
         // Assert
         result.Should().NotBeNull();
-        result.MonthlyTotal.Balance.Should().BeNull($"月={month} の月計残額は常にnull（空欄）であるべき");
+        result!.MonthlyTotal.Balance.Should().BeNull($"月={month} の月計残額は常にnull（空欄）であるべき");
     }
 
     #endregion
@@ -462,8 +462,8 @@ public class PrintServiceTests
 
         // Assert
         result.Should().NotBeNull();
-        result.CumulativeTotal.Should().NotBeNull();
-        result.CumulativeTotal.Income.Should().Be(5000);   // 4月チャージのみ
+        result!.CumulativeTotal.Should().NotBeNull();
+        result.CumulativeTotal!.Income.Should().Be(5000);   // 4月チャージのみ
         result.CumulativeTotal.Expense.Should().Be(1200);   // 300×4回
         result.CumulativeTotal.Balance.Should().Be(3400);   // 最終残高
 
