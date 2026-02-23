@@ -54,6 +54,12 @@ public partial class ReportViewModel : ViewModelBase
     [ObservableProperty]
     private ObservableCollection<string> _createdFiles = new();
 
+    [ObservableProperty]
+    private bool _isLastMonthSelected;
+
+    [ObservableProperty]
+    private bool _isThisMonthSelected;
+
     /// <summary>
     /// 年の選択肢（過去5年分）
     /// </summary>
@@ -116,6 +122,34 @@ public partial class ReportViewModel : ViewModelBase
         var lastMonth = now.AddMonths(-1);
         SelectedYear = lastMonth.Year;
         SelectedMonth = lastMonth.Month;
+    }
+
+    /// <summary>
+    /// 選択年が変更されたときにボタンのハイライト状態を更新
+    /// </summary>
+    partial void OnSelectedYearChanged(int value)
+    {
+        UpdateMonthButtonHighlights();
+    }
+
+    /// <summary>
+    /// 選択月が変更されたときにボタンのハイライト状態を更新
+    /// </summary>
+    partial void OnSelectedMonthChanged(int value)
+    {
+        UpdateMonthButtonHighlights();
+    }
+
+    /// <summary>
+    /// 「先月」「今月」ボタンのハイライト状態を更新
+    /// </summary>
+    internal void UpdateMonthButtonHighlights()
+    {
+        var now = DateTime.Now;
+        var lastMonth = now.AddMonths(-1);
+
+        IsThisMonthSelected = (SelectedYear == now.Year && SelectedMonth == now.Month);
+        IsLastMonthSelected = (SelectedYear == lastMonth.Year && SelectedMonth == lastMonth.Month);
     }
 
     /// <summary>

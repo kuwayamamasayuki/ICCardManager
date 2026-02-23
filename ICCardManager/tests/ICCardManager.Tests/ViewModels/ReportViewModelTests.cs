@@ -408,6 +408,118 @@ public class ReportViewModelTests
 
     #endregion
 
+    #region Issue #825: 月ボタンハイライトテスト
+
+    /// <summary>
+    /// 初期状態（先月がデフォルト）でIsLastMonthSelectedがtrueであること
+    /// </summary>
+    [Fact]
+    public void Constructor_ShouldHighlightLastMonthButton()
+    {
+        // Assert
+        _viewModel.IsLastMonthSelected.Should().BeTrue();
+        _viewModel.IsThisMonthSelected.Should().BeFalse();
+    }
+
+    /// <summary>
+    /// 「今月」を選択するとIsThisMonthSelectedがtrue、IsLastMonthSelectedがfalseになること
+    /// </summary>
+    [Fact]
+    public void SelectThisMonth_ShouldHighlightThisMonthButton()
+    {
+        // Act
+        _viewModel.SelectThisMonth();
+
+        // Assert
+        _viewModel.IsThisMonthSelected.Should().BeTrue();
+        _viewModel.IsLastMonthSelected.Should().BeFalse();
+    }
+
+    /// <summary>
+    /// 「先月」を選択するとIsLastMonthSelectedがtrue、IsThisMonthSelectedがfalseになること
+    /// </summary>
+    [Fact]
+    public void SelectLastMonth_ShouldHighlightLastMonthButton()
+    {
+        // Arrange - 先に今月に切り替え
+        _viewModel.SelectThisMonth();
+        _viewModel.IsThisMonthSelected.Should().BeTrue();
+
+        // Act
+        _viewModel.SelectLastMonth();
+
+        // Assert
+        _viewModel.IsLastMonthSelected.Should().BeTrue();
+        _viewModel.IsThisMonthSelected.Should().BeFalse();
+    }
+
+    /// <summary>
+    /// 先月でも今月でもない年月を選択すると、両方のハイライトがfalseになること
+    /// </summary>
+    [Fact]
+    public void ManualSelection_OtherMonth_ShouldNotHighlightAnyButton()
+    {
+        // Arrange - 先月でも今月でもない月を設定
+        _viewModel.SelectedYear = 2020;
+        _viewModel.SelectedMonth = 6;
+
+        // Assert
+        _viewModel.IsLastMonthSelected.Should().BeFalse();
+        _viewModel.IsThisMonthSelected.Should().BeFalse();
+    }
+
+    /// <summary>
+    /// 年だけ変更して月が今月と同じでも、年が違えばハイライトされないこと
+    /// </summary>
+    [Fact]
+    public void ManualSelection_SameMonthDifferentYear_ShouldNotHighlight()
+    {
+        // Arrange
+        var now = DateTime.Now;
+        _viewModel.SelectedYear = now.Year - 1;
+        _viewModel.SelectedMonth = now.Month;
+
+        // Assert
+        _viewModel.IsThisMonthSelected.Should().BeFalse();
+    }
+
+    /// <summary>
+    /// コンボボックスで先月と同じ年月を手動選択してもハイライトされること
+    /// </summary>
+    [Fact]
+    public void ManualSelection_MatchingLastMonth_ShouldHighlight()
+    {
+        // Arrange - 一度別の月にする
+        _viewModel.SelectedYear = 2020;
+        _viewModel.SelectedMonth = 6;
+        _viewModel.IsLastMonthSelected.Should().BeFalse();
+
+        // Act - コンボボックスで先月と同じ値を手動設定
+        var lastMonth = DateTime.Now.AddMonths(-1);
+        _viewModel.SelectedYear = lastMonth.Year;
+        _viewModel.SelectedMonth = lastMonth.Month;
+
+        // Assert
+        _viewModel.IsLastMonthSelected.Should().BeTrue();
+    }
+
+    /// <summary>
+    /// コンボボックスで今月と同じ年月を手動選択してもハイライトされること
+    /// </summary>
+    [Fact]
+    public void ManualSelection_MatchingThisMonth_ShouldHighlight()
+    {
+        // Act - コンボボックスで今月と同じ値を手動設定
+        var now = DateTime.Now;
+        _viewModel.SelectedYear = now.Year;
+        _viewModel.SelectedMonth = now.Month;
+
+        // Assert
+        _viewModel.IsThisMonthSelected.Should().BeTrue();
+    }
+
+    #endregion
+
     #region 個別チェックボックス連動テスト
 
     /// <summary>
