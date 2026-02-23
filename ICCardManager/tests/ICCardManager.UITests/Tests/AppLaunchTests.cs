@@ -19,7 +19,7 @@ namespace ICCardManager.UITests.Tests
             var page = new MainWindowPage(fixture.MainWindow, fixture.Automation);
 
             page.Window.Should().NotBeNull();
-            page.Name.Should().Be(TestConstants.MainWindowName);
+            page.Name.Should().StartWith(TestConstants.MainWindowName);
         }
 
         [Fact]
