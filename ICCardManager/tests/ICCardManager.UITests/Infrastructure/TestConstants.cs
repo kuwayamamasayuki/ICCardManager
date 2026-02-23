@@ -7,8 +7,9 @@ namespace ICCardManager.UITests.Infrastructure
     internal static class TestConstants
     {
         // ── メインウィンドウ ──────────────────────────────
-        // MainWindow.xaml の AutomationProperties.Name と一致させる
-        public const string MainWindowName = "交通系ICカード管理システム メインウィンドウ";
+        // WPF Window の UIA Name は Title と AutomationProperties.Name のどちらかが返る場合がある。
+        // テストでは StartsWith で前方一致させるため、共通プレフィックス（= Title）を使う。
+        public const string MainWindowName = "交通系ICカード管理システム";
 
         // ── ツールバーボタン ──────────────────────────────
         public const string OpenReportButton = "帳票ダイアログを開く";
