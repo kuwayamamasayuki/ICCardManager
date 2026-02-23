@@ -647,8 +647,8 @@ public partial class MainViewModel : ViewModelBase
             _currentStaffIdm = idm;
             _currentStaffName = staff.Name;
 
-            // 認識音を再生（Issue #411）
-            _soundPlayer.Play(SoundType.Lend);
+            // 認識音を再生（Issue #411, #832: 音声モードでも常にビープ音）
+            _soundPlayer.Play(SoundType.Notify);
 
             // メイン画面は変更せず、ポップアップ通知のみ表示（Issue #186）
             // 「職員証をタッチしてください」のメッセージはクリアする

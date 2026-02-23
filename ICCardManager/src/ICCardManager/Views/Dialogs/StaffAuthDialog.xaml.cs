@@ -147,7 +147,7 @@ namespace ICCardManager.Views.Dialogs
                         AuthenticatedIdm = e.Idm;
                         AuthenticatedStaffName = staff.Name;
 
-                        _soundPlayer.Play(SoundType.Lend);
+                        _soundPlayer.Play(SoundType.Notify);
                         _timeoutTimer.Stop();
 
                         DialogResult = true;

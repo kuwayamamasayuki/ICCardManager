@@ -130,7 +130,7 @@ namespace ICCardManager.Infrastructure.Sound
         /// <summary>
         /// 現在のモードに応じた音声ファイル名を取得
         /// </summary>
-        private string GetSoundFileName(SoundType soundType)
+        internal string GetSoundFileName(SoundType soundType)
         {
             // Noneモードの場合は再生しない
             if (_soundMode == SoundMode.None)
@@ -156,6 +156,8 @@ namespace ICCardManager.Infrastructure.Sound
                 },
                 SoundType.Error => SoundFiles.Error,
                 SoundType.Warning => SoundFiles.Warning,
+                // 通知音は音声モードに関係なく常にビープ音
+                SoundType.Notify => SoundFiles.LendBeep,
                 _ => null
             };
         }
@@ -228,6 +230,11 @@ namespace ICCardManager.Infrastructure.Sound
                     case SoundType.Warning:
                         // 警告：中音
                         Console.Beep(750, 200);
+                        break;
+
+                    case SoundType.Notify:
+                        // 通知：短い高音（貸出と同じ）
+                        Console.Beep(1000, 100);
                         break;
                 }
             }
