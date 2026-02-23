@@ -16,6 +16,7 @@
         MinHeight="600"
         WindowStartupLocation="CenterScreen"
         AutomationProperties.Name="交通系ICカード管理システム メインウィンドウ"
+        FontSize="{DynamicResource BaseFontSize}"
         AutomationProperties.HelpText="職員証をタッチしてから交通系ICカードをタッチすると貸出または返却ができます">
 
     <Window.Resources>

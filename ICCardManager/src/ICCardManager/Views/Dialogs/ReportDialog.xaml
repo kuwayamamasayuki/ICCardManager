@@ -11,6 +11,7 @@
         Width="700"
         WindowStartupLocation="CenterOwner"
         ResizeMode="CanResize"
+        FontSize="{DynamicResource BaseFontSize}"
         AutomationProperties.Name="帳票作成ダイアログ"
         AutomationProperties.HelpText="物品出納簿をExcel形式で作成します。対象年月とカードを選択してください。">
 

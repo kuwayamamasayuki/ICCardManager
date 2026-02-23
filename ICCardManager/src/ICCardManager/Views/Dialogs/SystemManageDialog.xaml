@@ -13,6 +13,7 @@
         WindowStartupLocation="CenterOwner"
         ResizeMode="NoResize"
         Loaded="Window_Loaded"
+        FontSize="{DynamicResource BaseFontSize}"
         AutomationProperties.Name="システム管理ダイアログ"
         AutomationProperties.HelpText="操作ログの確認、データベースのバックアップとリストアを行います。Escapeキーで閉じます。">
 

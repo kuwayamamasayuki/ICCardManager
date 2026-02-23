@@ -13,6 +13,7 @@
         WindowStartupLocation="CenterOwner"
         ResizeMode="CanResize"
         PreviewKeyDown="Window_PreviewKeyDown"
+        FontSize="{DynamicResource BaseFontSize}"
         AutomationProperties.Name="印刷プレビューダイアログ"
         AutomationProperties.HelpText="帳票の印刷プレビューを表示します。ズームやページ送りができます。←→キーでページ移動できます。">
 

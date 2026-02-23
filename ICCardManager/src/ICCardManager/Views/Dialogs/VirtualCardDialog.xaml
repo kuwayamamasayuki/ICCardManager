@@ -5,6 +5,7 @@
         Width="700" Height="550"
         WindowStartupLocation="CenterOwner"
         ResizeMode="CanResizeWithGrip"
+        FontSize="{DynamicResource BaseFontSize}"
         AutomationProperties.Name="仮想交通系ICカード設定ダイアログ"
         AutomationProperties.HelpText="DEBUG専用。仮想的にICカードをタッチしてテストできます。最大20件の履歴を指定できます。">
     <Grid Margin="16">

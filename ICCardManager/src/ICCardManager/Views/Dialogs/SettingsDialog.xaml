@@ -11,6 +11,7 @@
         Width="550"
         WindowStartupLocation="CenterOwner"
         ResizeMode="NoResize"
+        FontSize="{DynamicResource BaseFontSize}"
         AutomationProperties.Name="設定ダイアログ"
         AutomationProperties.HelpText="アプリケーションの各種設定を変更できます。Escapeキーでキャンセルできます。">
 

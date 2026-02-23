@@ -11,6 +11,7 @@
         Width="1000"
         WindowStartupLocation="CenterOwner"
         ResizeMode="CanResize"
+        FontSize="{DynamicResource BaseFontSize}"
         AutomationProperties.Name="操作ログダイアログ"
         AutomationProperties.HelpText="システムの操作履歴を検索・表示します。">
 

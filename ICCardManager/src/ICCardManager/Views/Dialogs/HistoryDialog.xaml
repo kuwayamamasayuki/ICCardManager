@@ -11,6 +11,7 @@
         Width="900"
         WindowStartupLocation="CenterOwner"
         ResizeMode="CanResize"
+        FontSize="{DynamicResource BaseFontSize}"
         AutomationProperties.Name="利用履歴ダイアログ"
         AutomationProperties.HelpText="交通系ICカードの利用履歴を表示します。期間を選択して確認できます。">
 

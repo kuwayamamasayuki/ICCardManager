@@ -11,6 +11,7 @@
         Width="850"
         WindowStartupLocation="CenterOwner"
         ResizeMode="CanResize"
+        FontSize="{DynamicResource BaseFontSize}"
         AutomationProperties.Name="利用履歴詳細ダイアログ"
         AutomationProperties.HelpText="選択した履歴の詳細を表示・編集します。行の間をクリックして分割線を挿入/削除できます。">
 
