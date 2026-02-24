@@ -8,7 +8,7 @@
 
 | ファイル名 | 説明 |
 |------------|------|
-| `StationCode.csv` | 全国のJR各社の駅コードマスター |
+| `StationCode.csv` | 全国の鉄道・軌道の駅コードマスター |
 
 ## CSVフォーマット
 
@@ -28,12 +28,36 @@ AreaCode,LineCode,StationCode,CompanyName,LineName,StationName,Note
 
 ## 出典
 
-本データは以下のサイトで公開されている情報を基に作成されています。
+本データは以下の情報源を基に作成・統合されています。
+
+### 1. IC SFCard Fan（データの源流）
+
+> **IC SFCard Fan**
+> http://www.denno.net/SFCardFan/
+
+交通系ICカードの利用履歴を閲覧するフリーソフト。本ソフトに同梱されている線区駅順コードデータが、各種駅コードCSVの原典です。
+
+### 2. プロデルで交通系ICカード履歴ビューアを作る
 
 > **プロデルで交通系ICカード履歴ビューアを作る**
 > https://produ.irelang.jp/blog/2017/08/305/
 
-上記サイトにて線区駅順コードが公開されており、本プロジェクトではそのデータを利用させていただいています。
+上記サイトにてIC SFCard Fan由来の線区駅順コードがCSV形式で公開されており、本プロジェクトの初期データとして利用させていただきました。
+
+### 3. MasanoriYONO/StationCode（統合データ）
+
+> **MasanoriYONO/StationCode**
+> https://github.com/MasanoriYONO/StationCode
+
+IC SFCard Fan由来の駅コードデータをGitHub上でCSV公開しているリポジトリ。改名後の駅名（大阪難波、神戸三宮、とうきょうスカイツリー等）が反映されており、本プロジェクトではこのデータを統合して重複除去・駅名更新を行いました。
+
+### 統合について
+
+`tools/merge_station_codes.py` を実行することで、上記データソースの統合・重複除去を再実行できます。
+
+## エンコーディング
+
+UTF-8（BOMなし）
 
 ## 使用方法
 
