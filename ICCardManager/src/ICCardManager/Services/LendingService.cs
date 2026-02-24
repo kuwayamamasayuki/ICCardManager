@@ -766,67 +766,138 @@ namespace ICCardManager.Services
                 // 利用がある場合
                 if (usageDetails.Count > 0)
                 {
-                    int balance;
-                    int expense;
+                    // Issue #837: 同一カード・同一日の既存利用レコードがあれば統合する
+                    var existingLedgers = await _ledgerRepository.GetByDateRangeAsync(cardIdm, date, date);
+                    var existingUsageLedger = existingLedgers
+                        .FirstOrDefault(l => !l.IsLentRecord && l.Income == 0 && string.IsNullOrEmpty(l.Note));
 
-                    if (useCardBalance)
+                    if (existingUsageLedger != null)
                     {
-                        // カードから読み取った残高を使用（日付内の最新レコードの残高）
-                        // 利用履歴は時刻順にソートされていないので、残高が最小のものを選ぶ
-                        // （利用後なので残高は減っている）
-                        var latestDetail = usageDetails
-                            .Where(d => d.Balance.HasValue)
-                            .OrderBy(d => d.Balance)
-                            .FirstOrDefault();
+                        _logger.LogDebug("LendingService: 同一日の既存利用レコードを検出（LedgerId={Id}）、統合します", existingUsageLedger.Id);
 
-                        if (latestDetail?.Balance != null)
+                        // 1. 新しい詳細を既存レコードに追加
+                        await _ledgerRepository.InsertDetailsAsync(existingUsageLedger.Id, usageDetails);
+
+                        // 2. 全詳細を再読み込み
+                        var fullLedger = await _ledgerRepository.GetByIdAsync(existingUsageLedger.Id);
+                        var allUsageDetails = fullLedger.Details.Where(d => !d.IsCharge).ToList();
+
+                        // 3. 摘要を再生成（往復検出・乗継統合が全詳細に対して実行される）
+                        var summary = _summaryGenerator.Generate(allUsageDetails);
+
+                        // 4. 残高・支出を再計算
+                        int balance;
+                        int expense;
+
+                        if (useCardBalance)
                         {
-                            balance = latestDetail.Balance.Value;
-                            expense = usageDetails.Sum(d => d.Amount ?? 0);
-                            if (expense == 0)
+                            var latestDetail = allUsageDetails
+                                .Where(d => d.Balance.HasValue)
+                                .OrderBy(d => d.Balance)
+                                .FirstOrDefault();
+
+                            if (latestDetail?.Balance != null)
                             {
-                                // Amountが設定されていない場合、残高差から計算
-                                expense = lastBalance - balance;
-                                if (expense < 0) expense = 0;
+                                balance = latestDetail.Balance.Value;
+                                expense = allUsageDetails.Sum(d => d.Amount ?? 0);
+                                if (expense == 0)
+                                {
+                                    expense = lastBalance - balance;
+                                    if (expense < 0) expense = 0;
+                                }
+                                lastBalance = balance;
                             }
-                            lastBalance = balance;
+                            else
+                            {
+                                expense = allUsageDetails.Sum(d => d.Amount ?? 0);
+                                lastBalance -= expense;
+                                balance = lastBalance;
+                            }
                         }
                         else
                         {
-                            // フォールバック
+                            expense = allUsageDetails.Sum(d => d.Amount ?? 0);
+                            lastBalance -= (expense - existingUsageLedger.Expense);
+                            balance = lastBalance;
+                        }
+
+                        // 5. 既存レコードを更新
+                        fullLedger.Summary = summary;
+                        fullLedger.Expense = expense;
+                        fullLedger.Balance = balance;
+                        if (fullLedger.StaffName == null && staffName != null)
+                        {
+                            fullLedger.StaffName = staffName;
+                        }
+                        await _ledgerRepository.UpdateAsync(fullLedger);
+
+                        createdLedgers.Add(fullLedger);
+                    }
+                    else
+                    {
+                        // 既存の利用レコードがない場合は新規作成
+                        int balance;
+                        int expense;
+
+                        if (useCardBalance)
+                        {
+                            // カードから読み取った残高を使用（日付内の最新レコードの残高）
+                            // 利用履歴は時刻順にソートされていないので、残高が最小のものを選ぶ
+                            // （利用後なので残高は減っている）
+                            var latestDetail = usageDetails
+                                .Where(d => d.Balance.HasValue)
+                                .OrderBy(d => d.Balance)
+                                .FirstOrDefault();
+
+                            if (latestDetail?.Balance != null)
+                            {
+                                balance = latestDetail.Balance.Value;
+                                expense = usageDetails.Sum(d => d.Amount ?? 0);
+                                if (expense == 0)
+                                {
+                                    // Amountが設定されていない場合、残高差から計算
+                                    expense = lastBalance - balance;
+                                    if (expense < 0) expense = 0;
+                                }
+                                lastBalance = balance;
+                            }
+                            else
+                            {
+                                // フォールバック
+                                expense = usageDetails.Sum(d => d.Amount ?? 0);
+                                lastBalance -= expense;
+                                balance = lastBalance;
+                            }
+                        }
+                        else
+                        {
+                            // フォールバック: Amountから計算
                             expense = usageDetails.Sum(d => d.Amount ?? 0);
                             lastBalance -= expense;
                             balance = lastBalance;
                         }
+
+                        var summary = _summaryGenerator.Generate(usageDetails);
+
+                        var usageLedger = new Ledger
+                        {
+                            CardIdm = cardIdm,
+                            Date = usageDetails.FirstOrDefault()?.UseDate ?? date,
+                            Summary = summary,
+                            Income = 0,
+                            Expense = expense,
+                            Balance = balance,
+                            StaffName = usageDetails.All(d => d.IsPointRedemption) ? null : staffName
+                        };
+
+                        var ledgerId = await _ledgerRepository.InsertAsync(usageLedger);
+                        usageLedger.Id = ledgerId;
+
+                        // 詳細を登録
+                        await _ledgerRepository.InsertDetailsAsync(ledgerId, usageDetails);
+
+                        createdLedgers.Add(usageLedger);
                     }
-                    else
-                    {
-                        // フォールバック: Amountから計算
-                        expense = usageDetails.Sum(d => d.Amount ?? 0);
-                        lastBalance -= expense;
-                        balance = lastBalance;
-                    }
-
-                    var summary = _summaryGenerator.Generate(usageDetails);
-
-                    var usageLedger = new Ledger
-                    {
-                        CardIdm = cardIdm,
-                        Date = usageDetails.FirstOrDefault()?.UseDate ?? date,
-                        Summary = summary,
-                        Income = 0,
-                        Expense = expense,
-                        Balance = balance,
-                        StaffName = usageDetails.All(d => d.IsPointRedemption) ? null : staffName
-                    };
-
-                    var ledgerId = await _ledgerRepository.InsertAsync(usageLedger);
-                    usageLedger.Id = ledgerId;
-
-                    // 詳細を登録
-                    await _ledgerRepository.InsertDetailsAsync(ledgerId, usageDetails);
-
-                    createdLedgers.Add(usageLedger);
                 }
             }
 
