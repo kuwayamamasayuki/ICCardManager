@@ -198,6 +198,7 @@ namespace ICCardManager
             });
             services.AddSingleton<CardLockManager>();
             services.AddSingleton<LendingService>();
+            services.AddSingleton<IReportDataBuilder, ReportDataBuilder>();
             services.AddSingleton<ReportService>();
             services.AddSingleton<PrintService>();
             services.AddSingleton<BackupService>();

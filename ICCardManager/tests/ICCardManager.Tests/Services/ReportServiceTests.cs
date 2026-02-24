@@ -32,10 +32,14 @@ public class ReportServiceTests : IDisposable
         _ledgerRepositoryMock = new Mock<ILedgerRepository>();
         _settingsRepositoryMock = new Mock<ISettingsRepository>();
         _settingsRepositoryMock.Setup(s => s.GetAppSettings()).Returns(new AppSettings());
+        var reportDataBuilder = new ReportDataBuilder(
+            _cardRepositoryMock.Object,
+            _ledgerRepositoryMock.Object);
         _reportService = new ReportService(
             _cardRepositoryMock.Object,
             _ledgerRepositoryMock.Object,
-            _settingsRepositoryMock.Object);
+            _settingsRepositoryMock.Object,
+            reportDataBuilder);
     }
 
     public void Dispose()
