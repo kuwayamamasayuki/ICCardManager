@@ -743,8 +743,9 @@ namespace ICCardManager.Services
                 var monthlyRow = new TableRow { Background = new SolidColorBrush(Color.FromRgb(240, 240, 240)) };
                 monthlyRow.Cells.Add(CreateDataCell("", true, TextAlignment.Center));
                 monthlyRow.Cells.Add(CreateDataCell(data.MonthlyTotal.Label, true, TextAlignment.Left));
-                monthlyRow.Cells.Add(CreateDataCell(data.MonthlyTotal.Income > 0 ? data.MonthlyTotal.Income.ToString("N0") : "", true, TextAlignment.Right));
-                monthlyRow.Cells.Add(CreateDataCell(data.MonthlyTotal.Expense > 0 ? data.MonthlyTotal.Expense.ToString("N0") : "", true, TextAlignment.Right));
+                // Issue #842: 月計行は0も表示（Issue #451のExcel側と同様）
+                monthlyRow.Cells.Add(CreateDataCell(data.MonthlyTotal.Income.ToString("N0"), true, TextAlignment.Right));
+                monthlyRow.Cells.Add(CreateDataCell(data.MonthlyTotal.Expense.ToString("N0"), true, TextAlignment.Right));
                 monthlyRow.Cells.Add(CreateDataCell(data.MonthlyTotal.Balance?.ToString("N0") ?? "", true, TextAlignment.Right));
                 monthlyRow.Cells.Add(CreateDataCell("", true, TextAlignment.Left));
                 monthlyRow.Cells.Add(CreateDataCell("", true, TextAlignment.Left));
@@ -756,8 +757,9 @@ namespace ICCardManager.Services
                     var cumulativeRow = new TableRow { Background = new SolidColorBrush(Color.FromRgb(230, 230, 230)) };
                     cumulativeRow.Cells.Add(CreateDataCell("", true, TextAlignment.Center));
                     cumulativeRow.Cells.Add(CreateDataCell(data.CumulativeTotal.Label, true, TextAlignment.Left));
-                    cumulativeRow.Cells.Add(CreateDataCell(data.CumulativeTotal.Income > 0 ? data.CumulativeTotal.Income.ToString("N0") : "", true, TextAlignment.Right));
-                    cumulativeRow.Cells.Add(CreateDataCell(data.CumulativeTotal.Expense > 0 ? data.CumulativeTotal.Expense.ToString("N0") : "", true, TextAlignment.Right));
+                    // Issue #842: 累計行も0を表示（Issue #451のExcel側と同様）
+                    cumulativeRow.Cells.Add(CreateDataCell(data.CumulativeTotal.Income.ToString("N0"), true, TextAlignment.Right));
+                    cumulativeRow.Cells.Add(CreateDataCell(data.CumulativeTotal.Expense.ToString("N0"), true, TextAlignment.Right));
                     cumulativeRow.Cells.Add(CreateDataCell(data.CumulativeTotal.Balance?.ToString("N0") ?? "", true, TextAlignment.Right));
                     cumulativeRow.Cells.Add(CreateDataCell("", true, TextAlignment.Left));
                     cumulativeRow.Cells.Add(CreateDataCell("", true, TextAlignment.Left));

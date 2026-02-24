@@ -508,4 +508,82 @@ public class PrintServiceTests
     }
 
     #endregion
+
+    #region Issue #842: 月計の受入・払出が0でもデータとして保持されること
+
+    /// <summary>
+    /// Issue #842: データなし月の月計で、Income=0・Expense=0がnullではなく0として返されること
+    /// これによりFlowDocument描画時に「0」と表示される（> 0 条件の排除と合わせて）
+    /// </summary>
+    [Fact]
+    public async Task GetReportDataAsync_NoData_MonthlyTotalShouldHaveZeroNotNull()
+    {
+        // Arrange
+        SetupCard();
+
+        var year = 2024;
+        var month = 6;
+        SetupMonthlyLedgers(TestCardIdm, year, month, new List<Ledger>());
+
+        // 前月残高
+        var mayLedgers = new List<Ledger>
+        {
+            CreateTestLedger(1, TestCardIdm, new DateTime(2024, 5, 10), "役務費によりチャージ", 5000, 0, 5000)
+        };
+        SetupMonthlyLedgers(TestCardIdm, year, 5, mayLedgers);
+
+        // 累計用
+        SetupDateRangeLedgers(TestCardIdm,
+            new DateTime(2024, 4, 1), new DateTime(2024, 6, 30), mayLedgers);
+
+        // Act
+        var result = await _printService.GetReportDataAsync(TestCardIdm, year, month);
+
+        // Assert
+        result.Should().NotBeNull();
+
+        // 月計のIncome/Expenseは0（nullではない）
+        result!.MonthlyTotal.Income.Should().Be(0, "データなし月でも受入金額は0として保持される");
+        result.MonthlyTotal.Expense.Should().Be(0, "データなし月でも払出金額は0として保持される");
+    }
+
+    /// <summary>
+    /// Issue #842: 受入のみの月で払出が0の場合、MonthlyTotal.Expense=0であること
+    /// </summary>
+    [Fact]
+    public async Task GetReportDataAsync_ChargeOnly_MonthlyTotalExpenseShouldBeZero()
+    {
+        // Arrange
+        SetupCard();
+
+        var year = 2024;
+        var month = 6;
+        var ledgers = new List<Ledger>
+        {
+            CreateTestLedger(1, TestCardIdm, new DateTime(2024, 6, 5), "役務費によりチャージ", 5000, 0, 15000)
+        };
+        SetupMonthlyLedgers(TestCardIdm, year, month, ledgers);
+
+        // 前月残高
+        var mayLedgers = new List<Ledger>
+        {
+            CreateTestLedger(0, TestCardIdm, new DateTime(2024, 5, 10), "鉄道（博多～天神）", 0, 300, 10000)
+        };
+        SetupMonthlyLedgers(TestCardIdm, year, 5, mayLedgers);
+
+        // 累計用
+        SetupDateRangeLedgers(TestCardIdm,
+            new DateTime(2024, 4, 1), new DateTime(2024, 6, 30),
+            mayLedgers.Concat(ledgers).ToList());
+
+        // Act
+        var result = await _printService.GetReportDataAsync(TestCardIdm, year, month);
+
+        // Assert
+        result.Should().NotBeNull();
+        result!.MonthlyTotal.Income.Should().Be(5000);
+        result.MonthlyTotal.Expense.Should().Be(0, "チャージのみの月でも払出金額は0として保持される");
+    }
+
+    #endregion
 }
