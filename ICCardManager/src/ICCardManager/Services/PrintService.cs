@@ -198,24 +198,7 @@ namespace ICCardManager.Services
             var monthlyExpense = ledgers.Sum(l => l.Expense);
             var monthEndBalance = ledgers.LastOrDefault()?.Balance ?? 0;
 
-            var result = new ReportPrintData
-            {
-                CardType = card.CardType,
-                CardNumber = card.CardNumber,
-                Year = year,
-                Month = month,
-                WarekiYearMonth = warekiYearMonth,
-                Rows = rows,
-                MonthlyTotal = new ReportPrintTotal
-                {
-                    Label = SummaryGenerator.GetMonthlySummary(month),
-                    Income = monthlyIncome,
-                    Expense = monthlyExpense,
-                    Balance = null
-                }
-            };
-
-            // 累計を追加（全月で出力）
+            // 累計データを計算（4月の月計残額表示にも使用）
             var fiscalYearStartYear = month >= 4 ? year : year - 1;
             var fiscalYearStart = new DateTime(fiscalYearStartYear, 4, 1);
             var fiscalYearEnd = new DateTime(year, month, DateTime.DaysInMonth(year, month));
@@ -228,13 +211,49 @@ namespace ICCardManager.Services
             var yearlyExpense = yearlyLedgers.Sum(l => l.Expense);
             var currentBalance = yearlyLedgers.LastOrDefault()?.Balance ?? monthEndBalance;
 
-            result.CumulativeTotal = new ReportPrintTotal
+            var result = new ReportPrintData
             {
-                Label = SummaryGenerator.GetCumulativeSummary(),
-                Income = yearlyIncome,
-                Expense = yearlyExpense,
-                Balance = currentBalance
+                CardType = card.CardType,
+                CardNumber = card.CardNumber,
+                Year = year,
+                Month = month,
+                WarekiYearMonth = warekiYearMonth,
+                Rows = rows
             };
+
+            if (month == 4)
+            {
+                // Issue #813: 4月は月計と累計が同額のため累計行を省略し、月計行に残額を表示
+                var aprilBalance = yearlyLedgers.Any()
+                    ? currentBalance
+                    : (precedingBalance ?? 0);
+                result.MonthlyTotal = new ReportPrintTotal
+                {
+                    Label = SummaryGenerator.GetMonthlySummary(month),
+                    Income = monthlyIncome,
+                    Expense = monthlyExpense,
+                    Balance = aprilBalance
+                };
+                // CumulativeTotal = null → 累計行は出力されない
+            }
+            else
+            {
+                result.MonthlyTotal = new ReportPrintTotal
+                {
+                    Label = SummaryGenerator.GetMonthlySummary(month),
+                    Income = monthlyIncome,
+                    Expense = monthlyExpense,
+                    Balance = null
+                };
+
+                result.CumulativeTotal = new ReportPrintTotal
+                {
+                    Label = SummaryGenerator.GetCumulativeSummary(),
+                    Income = yearlyIncome,
+                    Expense = yearlyExpense,
+                    Balance = currentBalance
+                };
+            }
 
             // 3月のみ次年度繰越
             if (month == 3)

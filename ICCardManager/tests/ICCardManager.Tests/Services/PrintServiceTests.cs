@@ -369,16 +369,16 @@ public class PrintServiceTests
     #region TC006: 月計の残額が常にnull（空欄）であること
 
     /// <summary>
-    /// TC006: 月計行の残額はExcelと同様に常にnull（空欄）
+    /// TC006: 月計行の残額は4月以外はnull（空欄）
+    /// Issue #813: 4月は累計行省略のため月計行に残額を表示
     /// </summary>
     [Theory]
     [InlineData(1)]
     [InlineData(3)]
-    [InlineData(4)]
     [InlineData(6)]
     [InlineData(9)]
     [InlineData(12)]
-    public async Task GetReportDataAsync_MonthlyTotalBalance_ShouldAlwaysBeNull(int month)
+    public async Task GetReportDataAsync_MonthlyTotalBalance_ShouldBeNullExceptApril(int month)
     {
         // Arrange
         SetupCard();
@@ -415,7 +415,43 @@ public class PrintServiceTests
 
         // Assert
         result.Should().NotBeNull();
-        result!.MonthlyTotal.Balance.Should().BeNull($"月={month} の月計残額は常にnull（空欄）であるべき");
+        result!.MonthlyTotal.Balance.Should().BeNull($"月={month} の月計残額はnull（空欄）であるべき");
+    }
+
+    /// <summary>
+    /// Issue #813: 4月の月計行には残額が表示され、累計行は省略されること
+    /// </summary>
+    [Fact]
+    public async Task GetReportDataAsync_InApril_MonthlyTotalShouldHaveBalanceAndNoCumulative()
+    {
+        // Arrange
+        SetupCard();
+
+        var year = 2024;
+        var month = 4;
+        var ledgers = new List<Ledger>
+        {
+            CreateTestLedger(1, TestCardIdm, new DateTime(year, month, 10), "鉄道（博多～天神）", 0, 300, 4700, "田中太郎")
+        };
+        SetupMonthlyLedgers(TestCardIdm, year, month, ledgers);
+        SetupCarryoverBalance(TestCardIdm, year - 1, null);
+
+        // 累計用
+        var fiscalStart = new DateTime(year, 4, 1);
+        var fiscalEnd = new DateTime(year, 4, 30);
+        SetupDateRangeLedgers(TestCardIdm, fiscalStart, fiscalEnd, ledgers);
+
+        // Act
+        var result = await _printService.GetReportDataAsync(TestCardIdm, year, month);
+
+        // Assert
+        result.Should().NotBeNull();
+
+        // Issue #813: 4月の月計行には残額が表示される
+        result!.MonthlyTotal.Balance.Should().Be(4700, "4月は累計行省略のため月計行に残額を表示");
+
+        // Issue #813: 4月は累計行が省略される
+        result.CumulativeTotal.Should().BeNull("4月は月計と累計が同額のため累計行を省略");
     }
 
     #endregion

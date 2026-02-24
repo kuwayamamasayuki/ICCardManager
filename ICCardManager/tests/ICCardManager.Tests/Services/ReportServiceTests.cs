@@ -1339,10 +1339,14 @@ public class ReportServiceTests : IDisposable
         worksheet.Cell(5, 7).GetValue<int>().Should().Be(marchEndBalance);  // G列=残額
 
         // 月計行（行6、データなし）- Issue #451: 0も表示
+        // Issue #813: 4月は累計行を省略し、月計行に残額を表示
         worksheet.Cell(6, 2).GetString().Should().Be("4月計");
-        worksheet.Cell(6, 5).GetValue<int>().Should().Be(0);     // 受入0も表示 (E列)
-        worksheet.Cell(6, 6).GetValue<int>().Should().Be(0);     // 払出0も表示 (F列)
-        worksheet.Cell(6, 7).GetString().Should().BeEmpty();     // 残額は常に空欄 (G列)
+        worksheet.Cell(6, 5).GetValue<int>().Should().Be(0);              // 受入0も表示 (E列)
+        worksheet.Cell(6, 6).GetValue<int>().Should().Be(0);              // 払出0も表示 (F列)
+        worksheet.Cell(6, 7).GetValue<int>().Should().Be(marchEndBalance); // 残額=前年度繰越 (G列)
+
+        // 累計行が出力されていないことを確認（行7は空であるべき）
+        worksheet.Cell(7, 2).GetString().Should().NotBe("累計");
     }
 
     /// <summary>
@@ -2898,6 +2902,191 @@ public class ReportServiceTests : IDisposable
         aprilSheet.Cell(2, 12).GetValue<int>().Should().Be(3, "4月は StartingPageNumber=3");
         julySheet.Cell(2, 12).GetValue<int>().Should().Be(4,
             "7月は5月・6月のシートがないため4月の最終ページ(3)+1=4 から開始");
+    }
+
+    #endregion
+
+    #region 4月累計行省略テスト（Issue #813）
+
+    /// <summary>
+    /// Issue #813: 4月にデータがある場合、月計行に残額が表示され、累計行が出力されないこと
+    /// </summary>
+    [Fact]
+    public async Task CreateMonthlyReportAsync_InApril_WithData_ShouldShowBalanceOnMonthlyTotalAndSkipCumulative()
+    {
+        // Arrange
+        var cardIdm = "0102030405060708";
+        var card = CreateTestCard(cardIdm);
+        var year = 2024;
+        var month = 4;
+        var outputPath = CreateTempFilePath();
+        var carryoverBalance = 10000;
+
+        var ledgers = new List<Ledger>
+        {
+            CreateTestLedger(1, cardIdm, new DateTime(2024, 4, 5), "鉄道（博多～天神）", 0, 300, 9700, "田中太郎")
+        };
+
+        _cardRepositoryMock
+            .Setup(r => r.GetByIdmAsync(cardIdm, true))
+            .ReturnsAsync(card);
+        _ledgerRepositoryMock
+            .Setup(r => r.GetByMonthAsync(cardIdm, year, month))
+            .ReturnsAsync(ledgers);
+        _ledgerRepositoryMock
+            .Setup(r => r.GetCarryoverBalanceAsync(cardIdm, year - 1))
+            .ReturnsAsync(carryoverBalance);
+        _ledgerRepositoryMock
+            .Setup(r => r.GetByDateRangeAsync(cardIdm,
+                new DateTime(2024, 4, 1),
+                new DateTime(2024, 4, 30)))
+            .ReturnsAsync(ledgers);
+
+        // Act
+        var result = await _reportService.CreateMonthlyReportAsync(cardIdm, year, month, outputPath);
+
+        // Assert
+        result.Success.Should().BeTrue();
+
+        using var workbook = new XLWorkbook(outputPath);
+        var worksheet = workbook.Worksheets.First();
+
+        // 前年度繰越行（行5）
+        worksheet.Cell(5, 2).GetString().Should().Be("前年度より繰越");
+        worksheet.Cell(5, 5).GetValue<int>().Should().Be(carryoverBalance);
+
+        // データ行（行6）
+        worksheet.Cell(6, 2).GetString().Should().Be("鉄道（博多～天神）");
+
+        // 月計行（行7）- Issue #813: 4月は残額を表示
+        worksheet.Cell(7, 2).GetString().Should().Be("4月計");
+        worksheet.Cell(7, 5).GetValue<int>().Should().Be(0);     // 受入合計 (E列)
+        worksheet.Cell(7, 6).GetValue<int>().Should().Be(300);   // 払出合計 (F列)
+        worksheet.Cell(7, 7).GetValue<int>().Should().Be(9700);  // 残額 (G列) - 累計の代わりにここに表示
+        worksheet.Cell(7, 7).Style.NumberFormat.Format.Should().Be("#,##0");
+
+        // 累計行が出力されていないこと
+        worksheet.Cell(8, 2).GetString().Should().NotBe("累計");
+    }
+
+    /// <summary>
+    /// Issue #813: 5月以降は従来通り累計行が出力されること（回帰テスト）
+    /// </summary>
+    [Fact]
+    public async Task CreateMonthlyReportAsync_InNonAprilMonth_ShouldStillOutputCumulativeRow()
+    {
+        // Arrange
+        var cardIdm = "0102030405060708";
+        var card = CreateTestCard(cardIdm);
+        var year = 2024;
+        var month = 5;
+        var outputPath = CreateTempFilePath();
+
+        var ledgers = new List<Ledger>
+        {
+            CreateTestLedger(2, cardIdm, new DateTime(2024, 5, 10), "鉄道（博多～天神）", 0, 300, 9700, "田中太郎")
+        };
+
+        // 4月のデータ（前月残高用）
+        var aprilLedgers = new List<Ledger>
+        {
+            CreateTestLedger(1, cardIdm, new DateTime(2024, 4, 5), "役務費によりチャージ", 10000, 0, 10000)
+        };
+
+        // 年度データ（4月～5月）
+        var yearlyLedgers = new List<Ledger>
+        {
+            CreateTestLedger(1, cardIdm, new DateTime(2024, 4, 5), "役務費によりチャージ", 10000, 0, 10000),
+            CreateTestLedger(2, cardIdm, new DateTime(2024, 5, 10), "鉄道（博多～天神）", 0, 300, 9700)
+        };
+
+        _cardRepositoryMock
+            .Setup(r => r.GetByIdmAsync(cardIdm, true))
+            .ReturnsAsync(card);
+        _ledgerRepositoryMock
+            .Setup(r => r.GetByMonthAsync(cardIdm, year, month))
+            .ReturnsAsync(ledgers);
+        _ledgerRepositoryMock
+            .Setup(r => r.GetByMonthAsync(cardIdm, year, 4))  // 4月の前月残高
+            .ReturnsAsync(aprilLedgers);
+        _ledgerRepositoryMock
+            .Setup(r => r.GetByDateRangeAsync(cardIdm, It.IsAny<DateTime>(), It.IsAny<DateTime>()))
+            .ReturnsAsync(yearlyLedgers);
+
+        // Act
+        var result = await _reportService.CreateMonthlyReportAsync(cardIdm, year, month, outputPath);
+
+        // Assert
+        result.Success.Should().BeTrue();
+
+        using var workbook = new XLWorkbook(outputPath);
+        var worksheet = workbook.Worksheets.First();
+
+        // 前月繰越行（行5）
+        worksheet.Cell(5, 2).GetString().Should().Be("4月より繰越");
+
+        // データ行（行6）
+        worksheet.Cell(6, 2).GetString().Should().Be("鉄道（博多～天神）");
+
+        // 月計行（行7）- 残額は空欄（4月以外）
+        worksheet.Cell(7, 2).GetString().Should().Be("5月計");
+        worksheet.Cell(7, 5).GetValue<int>().Should().Be(0);    // 受入合計 (E列)
+        worksheet.Cell(7, 6).GetValue<int>().Should().Be(300);  // 払出合計 (F列)
+        worksheet.Cell(7, 7).GetString().Should().BeEmpty();    // 残額は空欄 (G列)
+
+        // 累計行（行8）- 4月以外では出力される
+        worksheet.Cell(8, 2).GetString().Should().Be("累計");
+        worksheet.Cell(8, 5).GetValue<int>().Should().Be(10000);  // 年度受入合計 (E列)
+        worksheet.Cell(8, 6).GetValue<int>().Should().Be(300);    // 年度払出合計 (F列)
+        worksheet.Cell(8, 7).GetValue<int>().Should().Be(9700);   // 残額 (G列)
+    }
+
+    /// <summary>
+    /// Issue #813: 4月の月計行が太字スタイルであること
+    /// </summary>
+    [Fact]
+    public async Task CreateMonthlyReportAsync_InApril_MonthlyTotalRowShouldBeBold()
+    {
+        // Arrange
+        var cardIdm = "0102030405060708";
+        var card = CreateTestCard(cardIdm);
+        var year = 2024;
+        var month = 4;
+        var outputPath = CreateTempFilePath();
+
+        var ledgers = new List<Ledger>
+        {
+            CreateTestLedger(1, cardIdm, new DateTime(2024, 4, 5), "鉄道（博多～天神）", 0, 300, 9700)
+        };
+
+        _cardRepositoryMock
+            .Setup(r => r.GetByIdmAsync(cardIdm, true))
+            .ReturnsAsync(card);
+        _ledgerRepositoryMock
+            .Setup(r => r.GetByMonthAsync(cardIdm, year, month))
+            .ReturnsAsync(ledgers);
+        _ledgerRepositoryMock
+            .Setup(r => r.GetCarryoverBalanceAsync(cardIdm, year - 1))
+            .ReturnsAsync(10000);
+        _ledgerRepositoryMock
+            .Setup(r => r.GetByDateRangeAsync(cardIdm, It.IsAny<DateTime>(), It.IsAny<DateTime>()))
+            .ReturnsAsync(ledgers);
+
+        // Act
+        var result = await _reportService.CreateMonthlyReportAsync(cardIdm, year, month, outputPath);
+
+        // Assert
+        result.Success.Should().BeTrue();
+
+        using var workbook = new XLWorkbook(outputPath);
+        var worksheet = workbook.Worksheets.First();
+
+        // 月計行（行7）はボールド - Issue #813: 累計行省略後も月計行のスタイルは維持
+        worksheet.Cell(7, 2).GetString().Should().Be("4月計");
+        worksheet.Cell(7, 2).Style.Font.Bold.Should().BeTrue();
+
+        // 累計行が存在しないこと
+        worksheet.Cell(8, 2).GetString().Should().NotBe("累計");
     }
 
     #endregion
