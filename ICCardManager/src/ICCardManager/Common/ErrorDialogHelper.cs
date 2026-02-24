@@ -93,7 +93,7 @@ namespace ICCardManager.Common
         /// <summary>
         /// 例外からエラー情報を取得
         /// </summary>
-        private static (string Message, string ErrorCode) GetErrorInfo(Exception exception)
+        internal static (string Message, string ErrorCode) GetErrorInfo(Exception exception)
         {
             if (exception is AppException appException)
             {
