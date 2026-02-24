@@ -89,6 +89,117 @@ public class AppExceptionTests
         exception.ErrorCode.Should().Be("CR005");
     }
 
+    [Fact]
+    public void CardReaderException_ServiceNotAvailable_ReturnsCorrectInfo()
+    {
+        // Act
+        var exception = CardReaderException.ServiceNotAvailable();
+
+        // Assert
+        exception.UserFriendlyMessage.Should().Contain("スマートカードサービス");
+        exception.ErrorCode.Should().Be("CR006");
+    }
+
+    [Fact]
+    public void CardReaderException_ServiceNotAvailable_WithInnerException_PreservesInnerException()
+    {
+        // Arrange
+        var innerException = new InvalidOperationException("Service stopped");
+
+        // Act
+        var exception = CardReaderException.ServiceNotAvailable(innerException);
+
+        // Assert
+        exception.InnerException.Should().BeSameAs(innerException);
+        exception.ErrorCode.Should().Be("CR006");
+    }
+
+    [Fact]
+    public void CardReaderException_MonitorError_ReturnsCorrectInfo()
+    {
+        // Act
+        var exception = CardReaderException.MonitorError();
+
+        // Assert
+        exception.UserFriendlyMessage.Should().Contain("監視中にエラー");
+        exception.ErrorCode.Should().Be("CR007");
+    }
+
+    [Fact]
+    public void CardReaderException_MonitorError_WithDetail_IncludesDetailInMessage()
+    {
+        // Act
+        var exception = CardReaderException.MonitorError("polling failed");
+
+        // Assert
+        exception.Message.Should().Contain("polling failed");
+        exception.ErrorCode.Should().Be("CR007");
+    }
+
+    [Fact]
+    public void CardReaderException_MonitorError_WithInnerException_PreservesInnerException()
+    {
+        // Arrange
+        var innerException = new TimeoutException("poll timeout");
+
+        // Act
+        var exception = CardReaderException.MonitorError("detail", innerException);
+
+        // Assert
+        exception.InnerException.Should().BeSameAs(innerException);
+    }
+
+    [Fact]
+    public void CardReaderException_ReconnectFailed_ReturnsCorrectInfo()
+    {
+        // Act
+        var exception = CardReaderException.ReconnectFailed(3);
+
+        // Assert
+        exception.UserFriendlyMessage.Should().Contain("再接続に失敗").And.Contain("3回");
+        exception.ErrorCode.Should().Be("CR008");
+        exception.Message.Should().Contain("3 attempts");
+    }
+
+    [Fact]
+    public void CardReaderException_ReconnectFailed_WithInnerException_PreservesInnerException()
+    {
+        // Arrange
+        var innerException = new IOException("Connection refused");
+
+        // Act
+        var exception = CardReaderException.ReconnectFailed(5, innerException);
+
+        // Assert
+        exception.InnerException.Should().BeSameAs(innerException);
+        exception.ErrorCode.Should().Be("CR008");
+    }
+
+    [Fact]
+    public void CardReaderException_CardRemoved_ReturnsCorrectInfo()
+    {
+        // Act
+        var exception = CardReaderException.CardRemoved();
+
+        // Assert
+        exception.UserFriendlyMessage.Should().Contain("カードが離されました");
+        exception.ErrorCode.Should().Be("CR009");
+    }
+
+    [Fact]
+    public void CardReaderException_CardRemoved_WithInnerException_PreservesInnerException()
+    {
+        // Arrange
+        var innerException = new IOException("Card removed");
+
+        // Act
+        var exception = CardReaderException.CardRemoved(innerException);
+
+        // Assert
+        exception.InnerException.Should().BeSameAs(innerException);
+        exception.ErrorCode.Should().Be("CR009");
+    }
+
     #endregion
 
     #region DatabaseException Tests
@@ -511,6 +622,304 @@ public class AppExceptionTests
 
     #endregion
 
+    #region FileOperationException Tests
+
+    [Fact]
+    public void FileOperationException_FileNotFound_ReturnsCorrectInfo()
+    {
+        // Act
+        var exception = FileOperationException.FileNotFound("/path/to/file.txt");
+
+        // Assert
+        exception.UserFriendlyMessage.Should().Contain("見つかりません");
+        exception.ErrorCode.Should().Be("FILE001");
+        exception.FilePath.Should().Be("/path/to/file.txt");
+        exception.Message.Should().Contain("/path/to/file.txt");
+    }
+
+    [Fact]
+    public void FileOperationException_FileNotFound_WithInnerException_PreservesInnerException()
+    {
+        // Arrange
+        var innerException = new FileNotFoundException("not found");
+
+        // Act
+        var exception = FileOperationException.FileNotFound("/path/to/file.txt", innerException);
+
+        // Assert
+        exception.InnerException.Should().BeSameAs(innerException);
+        exception.ErrorCode.Should().Be("FILE001");
+        exception.FilePath.Should().Be("/path/to/file.txt");
+    }
+
+    [Fact]
+    public void FileOperationException_ReadFailed_ReturnsCorrectInfo()
+    {
+        // Act
+        var exception = FileOperationException.ReadFailed("/path/to/file.xlsx");
+
+        // Assert
+        exception.UserFriendlyMessage.Should().Contain("読み込みに失敗");
+        exception.ErrorCode.Should().Be("FILE002");
+        exception.FilePath.Should().Be("/path/to/file.xlsx");
+        exception.Message.Should().Contain("/path/to/file.xlsx");
+    }
+
+    [Fact]
+    public void FileOperationException_ReadFailed_WithoutPath_ReturnsGenericMessage()
+    {
+        // Act
+        var exception = FileOperationException.ReadFailed();
+
+        // Assert
+        exception.ErrorCode.Should().Be("FILE002");
+        exception.Message.Should().Be("Failed to read file");
+    }
+
+    [Fact]
+    public void FileOperationException_ReadFailed_WithInnerException_PreservesInnerException()
+    {
+        // Arrange
+        var innerException = new IOException("file locked");
+
+        // Act
+        var exception = FileOperationException.ReadFailed("/path", innerException);
+
+        // Assert
+        exception.InnerException.Should().BeSameAs(innerException);
+    }
+
+    [Fact]
+    public void FileOperationException_WriteFailed_ReturnsCorrectInfo()
+    {
+        // Act
+        var exception = FileOperationException.WriteFailed("/output/report.xlsx");
+
+        // Assert
+        exception.UserFriendlyMessage.Should().Contain("書き込みに失敗");
+        exception.ErrorCode.Should().Be("FILE003");
+        exception.FilePath.Should().Be("/output/report.xlsx");
+    }
+
+    [Fact]
+    public void FileOperationException_WriteFailed_WithoutPath_ReturnsGenericMessage()
+    {
+        // Act
+        var exception = FileOperationException.WriteFailed();
+
+        // Assert
+        exception.ErrorCode.Should().Be("FILE003");
+        exception.Message.Should().Be("Failed to write file");
+    }
+
+    [Fact]
+    public void FileOperationException_WriteFailed_WithInnerException_PreservesInnerException()
+    {
+        // Arrange
+        var innerException = new UnauthorizedAccessException("read-only");
+
+        // Act
+        var exception = FileOperationException.WriteFailed("/path", innerException);
+
+        // Assert
+        exception.InnerException.Should().BeSameAs(innerException);
+    }
+
+    [Fact]
+    public void FileOperationException_AccessDenied_ReturnsCorrectInfo()
+    {
+        // Act
+        var exception = FileOperationException.AccessDenied("/protected/file.db");
+
+        // Assert
+        exception.UserFriendlyMessage.Should().Contain("アクセス権限");
+        exception.ErrorCode.Should().Be("FILE004");
+        exception.FilePath.Should().Be("/protected/file.db");
+    }
+
+    [Fact]
+    public void FileOperationException_AccessDenied_WithoutPath_ReturnsGenericMessage()
+    {
+        // Act
+        var exception = FileOperationException.AccessDenied();
+
+        // Assert
+        exception.ErrorCode.Should().Be("FILE004");
+        exception.Message.Should().Be("File access denied");
+    }
+
+    [Fact]
+    public void FileOperationException_AccessDenied_WithInnerException_PreservesInnerException()
+    {
+        // Arrange
+        var innerException = new UnauthorizedAccessException("denied");
+
+        // Act
+        var exception = FileOperationException.AccessDenied("/path", innerException);
+
+        // Assert
+        exception.InnerException.Should().BeSameAs(innerException);
+    }
+
+    [Fact]
+    public void FileOperationException_FileInUse_ReturnsCorrectInfo()
+    {
+        // Act
+        var exception = FileOperationException.FileInUse("/locked/file.xlsx");
+
+        // Assert
+        exception.UserFriendlyMessage.Should().Contain("使用中");
+        exception.ErrorCode.Should().Be("FILE005");
+        exception.FilePath.Should().Be("/locked/file.xlsx");
+    }
+
+    [Fact]
+    public void FileOperationException_FileInUse_WithoutPath_ReturnsGenericMessage()
+    {
+        // Act
+        var exception = FileOperationException.FileInUse();
+
+        // Assert
+        exception.ErrorCode.Should().Be("FILE005");
+        exception.Message.Should().Contain("in use");
+    }
+
+    [Fact]
+    public void FileOperationException_FileInUse_WithInnerException_PreservesInnerException()
+    {
+        // Arrange
+        var innerException = new IOException("sharing violation");
+
+        // Act
+        var exception = FileOperationException.FileInUse("/path", innerException);
+
+        // Assert
+        exception.InnerException.Should().BeSameAs(innerException);
+    }
+
+    [Fact]
+    public void FileOperationException_InvalidFormat_ReturnsCorrectInfo()
+    {
+        // Act
+        var exception = FileOperationException.InvalidFormat("/data/file.csv", "Excel (.xlsx)");
+
+        // Assert
+        exception.UserFriendlyMessage.Should().Contain("形式が正しくありません").And.Contain("Excel (.xlsx)");
+        exception.ErrorCode.Should().Be("FILE006");
+        exception.FilePath.Should().Be("/data/file.csv");
+    }
+
+    [Fact]
+    public void FileOperationException_InvalidFormat_WithoutExpectedFormat_ReturnsGenericMessage()
+    {
+        // Act
+        var exception = FileOperationException.InvalidFormat("/data/file.csv");
+
+        // Assert
+        exception.UserFriendlyMessage.Should().Be("ファイル形式が正しくありません。");
+        exception.ErrorCode.Should().Be("FILE006");
+    }
+
+    [Fact]
+    public void FileOperationException_InvalidFormat_WithInnerException_PreservesInnerException()
+    {
+        // Arrange
+        var innerException = new FormatException("bad format");
+
+        // Act
+        var exception = FileOperationException.InvalidFormat("/path", null, innerException);
+
+        // Assert
+        exception.InnerException.Should().BeSameAs(innerException);
+    }
+
+    [Fact]
+    public void FileOperationException_DirectoryCreationFailed_ReturnsCorrectInfo()
+    {
+        // Act
+        var exception = FileOperationException.DirectoryCreationFailed("/new/directory");
+
+        // Assert
+        exception.UserFriendlyMessage.Should().Contain("フォルダの作成に失敗");
+        exception.ErrorCode.Should().Be("FILE007");
+        exception.FilePath.Should().Be("/new/directory");
+    }
+
+    [Fact]
+    public void FileOperationException_DirectoryCreationFailed_WithoutPath_ReturnsGenericMessage()
+    {
+        // Act
+        var exception = FileOperationException.DirectoryCreationFailed();
+
+        // Assert
+        exception.ErrorCode.Should().Be("FILE007");
+        exception.Message.Should().Be("Failed to create directory");
+    }
+
+    [Fact]
+    public void FileOperationException_DirectoryCreationFailed_WithInnerException_PreservesInnerException()
+    {
+        // Arrange
+        var innerException = new UnauthorizedAccessException("no permissions");
+
+        // Act
+        var exception = FileOperationException.DirectoryCreationFailed("/path", innerException);
+
+        // Assert
+        exception.InnerException.Should().BeSameAs(innerException);
+    }
+
+    [Fact]
+    public void FileOperationException_AllInheritFromAppException()
+    {
+        // Arrange & Act
+        var exceptions = new AppException[]
+        {
+            FileOperationException.FileNotFound("/path"),
+            FileOperationException.ReadFailed("/path"),
+            FileOperationException.WriteFailed("/path"),
+            FileOperationException.AccessDenied("/path"),
+            FileOperationException.FileInUse("/path"),
+            FileOperationException.InvalidFormat("/path"),
+            FileOperationException.DirectoryCreationFailed("/path"),
+        };
+
+        // Assert
+        foreach (var exception in exceptions)
+        {
+            exception.Should().BeAssignableTo<AppException>();
+            exception.ErrorCode.Should().NotBeNullOrEmpty();
+            exception.UserFriendlyMessage.Should().NotBeNullOrEmpty();
+        }
+    }
+
+    [Fact]
+    public void FileOperationException_AllHaveFilePath()
+    {
+        // Arrange
+        const string path = "/test/path/file.txt";
+
+        // Act
+        var exceptions = new FileOperationException[]
+        {
+            FileOperationException.FileNotFound(path),
+            FileOperationException.ReadFailed(path),
+            FileOperationException.WriteFailed(path),
+            FileOperationException.AccessDenied(path),
+            FileOperationException.FileInUse(path),
+            FileOperationException.InvalidFormat(path),
+            FileOperationException.DirectoryCreationFailed(path),
+        };
+
+        // Assert
+        foreach (var exception in exceptions)
+        {
+            exception.FilePath.Should().Be(path);
+        }
+    }
+
+    #endregion
+
     #region Error Code Uniqueness Tests
 
     [Fact]
@@ -523,7 +932,11 @@ public class AppExceptionTests
             CardReaderException.ReadFailed().ErrorCode,
             CardReaderException.HistoryReadFailed().ErrorCode,
             CardReaderException.BalanceReadFailed().ErrorCode,
-            CardReaderException.Timeout().ErrorCode
+            CardReaderException.Timeout().ErrorCode,
+            CardReaderException.ServiceNotAvailable().ErrorCode,
+            CardReaderException.MonitorError().ErrorCode,
+            CardReaderException.ReconnectFailed(1).ErrorCode,
+            CardReaderException.CardRemoved().ErrorCode
         };
 
         cardReaderCodes.Should().OnlyHaveUniqueItems();
@@ -556,6 +969,20 @@ public class AppExceptionTests
 
         validationCodes.Should().OnlyHaveUniqueItems();
         validationCodes.Should().AllSatisfy(code => code.Should().StartWith("VAL"));
+
+        var fileOperationCodes = new[]
+        {
+            FileOperationException.FileNotFound("/p").ErrorCode,
+            FileOperationException.ReadFailed("/p").ErrorCode,
+            FileOperationException.WriteFailed("/p").ErrorCode,
+            FileOperationException.AccessDenied("/p").ErrorCode,
+            FileOperationException.FileInUse("/p").ErrorCode,
+            FileOperationException.InvalidFormat("/p").ErrorCode,
+            FileOperationException.DirectoryCreationFailed("/p").ErrorCode
+        };
+
+        fileOperationCodes.Should().OnlyHaveUniqueItems();
+        fileOperationCodes.Should().AllSatisfy(code => code.Should().StartWith("FILE"));
     }
 
     #endregion

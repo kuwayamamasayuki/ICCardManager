@@ -50,7 +50,7 @@ namespace ICCardManager.Services
         /// 自動バックアップを実行
         /// </summary>
         /// <returns>作成されたバックアップファイルのパス（失敗時はnull）</returns>
-        public async Task<string> ExecuteAutoBackupAsync()
+        public virtual async Task<string> ExecuteAutoBackupAsync()
         {
             string backupPath = null;
 
@@ -128,7 +128,7 @@ namespace ICCardManager.Services
         /// </summary>
         /// <param name="backupFilePath">バックアップファイルのパス</param>
         /// <returns>成功時はtrue、失敗時はfalse</returns>
-        public bool CreateBackup(string backupFilePath)
+        public virtual bool CreateBackup(string backupFilePath)
         {
             try
             {
@@ -191,7 +191,7 @@ namespace ICCardManager.Services
         /// バックアップからリストア
         /// </summary>
         /// <param name="backupFilePath">リストアするバックアップファイルのパス</param>
-        public bool RestoreFromBackup(string backupFilePath)
+        public virtual bool RestoreFromBackup(string backupFilePath)
         {
             var targetPath = _dbContext.DatabasePath;
             var tempPath = targetPath + ".temp";
@@ -290,7 +290,7 @@ namespace ICCardManager.Services
         /// <summary>
         /// バックアップファイル一覧を取得
         /// </summary>
-        public async Task<IEnumerable<BackupFileInfo>> GetBackupFilesAsync()
+        public virtual async Task<IEnumerable<BackupFileInfo>> GetBackupFilesAsync()
         {
             var settings = await _settingsRepository.GetAppSettingsAsync();
             var backupPath = settings.BackupPath;
