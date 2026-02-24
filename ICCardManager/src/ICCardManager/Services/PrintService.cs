@@ -8,7 +8,6 @@ using System.Windows.Controls;
 using System.Windows.Documents;
 using System.Windows.Media;
 using ICCardManager.Common;
-using ICCardManager.Data.Repositories;
 using ICCardManager.Models;
 
 namespace ICCardManager.Services
@@ -99,15 +98,12 @@ namespace ICCardManager.Services
     /// </summary>
     public class PrintService
     {
-        private readonly ICardRepository _cardRepository;
-        private readonly ILedgerRepository _ledgerRepository;
+        private readonly IReportDataBuilder _reportDataBuilder;
 
         public PrintService(
-            ICardRepository cardRepository,
-            ILedgerRepository ledgerRepository)
+            IReportDataBuilder reportDataBuilder)
         {
-            _cardRepository = cardRepository;
-            _ledgerRepository = ledgerRepository;
+            _reportDataBuilder = reportDataBuilder;
         }
 
         /// <summary>
@@ -115,72 +111,34 @@ namespace ICCardManager.Services
         /// </summary>
         public async Task<ReportPrintData?> GetReportDataAsync(string cardIdm, int year, int month)
         {
-            var card = await _cardRepository.GetByIdmAsync(cardIdm, includeDeleted: true);
-            if (card == null)
+            // Issue #841: データ準備を共通化されたReportDataBuilderに委譲
+            var data = await _reportDataBuilder.BuildAsync(cardIdm, year, month);
+            if (data == null)
             {
                 return null;
             }
 
-            // 前月末残高を取得（履歴の並び替えにも使用）
-            int? precedingBalance = null;
-            if (month == 4)
-            {
-                precedingBalance = await _ledgerRepository.GetCarryoverBalanceAsync(cardIdm, year - 1);
-            }
-            else
-            {
-                precedingBalance = await GetPreviousMonthBalanceAsync(cardIdm, year, month);
-            }
-
-            // Issue #784: 残高チェーンに基づいて同一日内の時系列順を復元
-            var ledgers = LedgerOrderHelper.ReorderByBalanceChain(
-                (await _ledgerRepository.GetByMonthAsync(cardIdm, year, month))
-                    .Where(l => l.Summary != SummaryGenerator.GetLendingSummary()),
-                precedingBalance);
-
             var targetDate = new DateTime(year, month, 1);
             var warekiYearMonth = WarekiConverter.ToWarekiYearMonth(targetDate);
 
+            // MonthlyReportData → ReportPrintData に変換
             var rows = new List<ReportPrintRow>();
 
-            // 4月の場合は前年度繰越を追加（新規購入カードの場合は繰越行を出力しない）
-            // precedingBalanceは既に上部で取得済み
-            if (month == 4)
+            // 繰越行
+            if (data.Carryover != null)
             {
-                // 前年度のデータがある場合のみ繰越行を追加
-                if (precedingBalance.HasValue)
+                rows.Add(new ReportPrintRow
                 {
-                    var carryoverDate = new DateTime(year, 4, 1);
-                    rows.Add(new ReportPrintRow
-                    {
-                        DateDisplay = WarekiConverter.ToWareki(carryoverDate),
-                        Summary = SummaryGenerator.GetCarryoverFromPreviousYearSummary(),
-                        Income = precedingBalance.Value,
-                        Balance = precedingBalance.Value,
-                        IsBold = true
-                    });
-                }
-            }
-            else
-            {
-                // 4月以外は前月繰越を追加
-                if (precedingBalance.HasValue)
-                {
-                    int previousMonth = month == 1 ? 12 : month - 1;
-                    var carryoverDate = new DateTime(year, month, 1);
-                    rows.Add(new ReportPrintRow
-                    {
-                        DateDisplay = WarekiConverter.ToWareki(carryoverDate),
-                        Summary = SummaryGenerator.GetCarryoverFromPreviousMonthSummary(previousMonth),
-                        // Issue #753: 月次繰越の受入欄は空欄（受入金額を表示するのは4月の前年度繰越のみ）
-                        Balance = precedingBalance.Value,
-                        IsBold = true
-                    });
-                }
+                    DateDisplay = WarekiConverter.ToWareki(data.Carryover.Date),
+                    Summary = data.Carryover.Summary,
+                    Income = data.Carryover.Income,
+                    Balance = data.Carryover.Balance,
+                    IsBold = true
+                });
             }
 
             // 各履歴行
-            foreach (var ledger in ledgers)
+            foreach (var ledger in data.Ledgers)
             {
                 rows.Add(new ReportPrintRow
                 {
@@ -194,71 +152,33 @@ namespace ICCardManager.Services
                 });
             }
 
-            var monthlyIncome = ledgers.Sum(l => l.Income);
-            var monthlyExpense = ledgers.Sum(l => l.Expense);
-            var monthEndBalance = ledgers.LastOrDefault()?.Balance ?? 0;
-
-            // 累計データを計算（4月の月計残額表示にも使用）
-            var fiscalYearStartYear = month >= 4 ? year : year - 1;
-            var fiscalYearStart = new DateTime(fiscalYearStartYear, 4, 1);
-            var fiscalYearEnd = new DateTime(year, month, DateTime.DaysInMonth(year, month));
-            // Issue #784: 残高チェーンに基づいて時系列順を復元
-            var yearlyLedgers = LedgerOrderHelper.ReorderByBalanceChain(
-                (await _ledgerRepository.GetByDateRangeAsync(cardIdm, fiscalYearStart, fiscalYearEnd))
-                    .Where(l => l.Summary != SummaryGenerator.GetLendingSummary()));
-
-            var yearlyIncome = yearlyLedgers.Sum(l => l.Income);
-            var yearlyExpense = yearlyLedgers.Sum(l => l.Expense);
-            var currentBalance = yearlyLedgers.LastOrDefault()?.Balance ?? monthEndBalance;
-
             var result = new ReportPrintData
             {
-                CardType = card.CardType,
-                CardNumber = card.CardNumber,
+                CardType = data.Card.CardType,
+                CardNumber = data.Card.CardNumber,
                 Year = year,
                 Month = month,
                 WarekiYearMonth = warekiYearMonth,
-                Rows = rows
+                Rows = rows,
+                MonthlyTotal = new ReportPrintTotal
+                {
+                    Label = data.MonthlyTotal.Label,
+                    Income = data.MonthlyTotal.Income,
+                    Expense = data.MonthlyTotal.Expense,
+                    Balance = data.MonthlyTotal.Balance
+                },
+                CarryoverToNextYear = data.CarryoverToNextYear
             };
 
-            if (month == 4)
+            if (data.CumulativeTotal != null)
             {
-                // Issue #813: 4月は月計と累計が同額のため累計行を省略し、月計行に残額を表示
-                var aprilBalance = yearlyLedgers.Any()
-                    ? currentBalance
-                    : (precedingBalance ?? 0);
-                result.MonthlyTotal = new ReportPrintTotal
-                {
-                    Label = SummaryGenerator.GetMonthlySummary(month),
-                    Income = monthlyIncome,
-                    Expense = monthlyExpense,
-                    Balance = aprilBalance
-                };
-                // CumulativeTotal = null → 累計行は出力されない
-            }
-            else
-            {
-                result.MonthlyTotal = new ReportPrintTotal
-                {
-                    Label = SummaryGenerator.GetMonthlySummary(month),
-                    Income = monthlyIncome,
-                    Expense = monthlyExpense,
-                    Balance = null
-                };
-
                 result.CumulativeTotal = new ReportPrintTotal
                 {
-                    Label = SummaryGenerator.GetCumulativeSummary(),
-                    Income = yearlyIncome,
-                    Expense = yearlyExpense,
-                    Balance = currentBalance
+                    Label = data.CumulativeTotal.Label,
+                    Income = data.CumulativeTotal.Income,
+                    Expense = data.CumulativeTotal.Expense,
+                    Balance = data.CumulativeTotal.Balance
                 };
-            }
-
-            // 3月のみ次年度繰越
-            if (month == 3)
-            {
-                result.CarryoverToNextYear = currentBalance;
             }
 
             return result;
@@ -830,46 +750,6 @@ namespace ICCardManager.Services
             }
 
             return false;
-        }
-
-        /// <summary>
-        /// 前月の残高を取得
-        /// </summary>
-        /// <param name="cardIdm">カードIDm</param>
-        /// <param name="year">年</param>
-        /// <param name="month">月</param>
-        /// <returns>前月残高。過去のデータがない場合はnull</returns>
-        private async Task<int?> GetPreviousMonthBalanceAsync(string cardIdm, int year, int month)
-        {
-            // 前月の年月を計算
-            int previousYear, previousMonth;
-            if (month == 1)
-            {
-                previousYear = year - 1;
-                previousMonth = 12;
-            }
-            else
-            {
-                previousYear = year;
-                previousMonth = month - 1;
-            }
-
-            // 前月の履歴を取得し、最後の残高を返す
-            // Issue #784: 残高チェーンに基づいて時系列順を復元
-            var previousLedgers = LedgerOrderHelper.ReorderByBalanceChain(
-                (await _ledgerRepository.GetByMonthAsync(cardIdm, previousYear, previousMonth))
-                    .Where(l => l.Summary != SummaryGenerator.GetLendingSummary()));
-
-            if (previousLedgers.Count > 0)
-            {
-                return previousLedgers.Last().Balance;
-            }
-
-            // 前月のデータがない場合は、さらに前の月から繰り越しを探す
-            // 年度開始月（4月）まで遡って繰越残高を取得
-            var fiscalYearStartYear = month >= 4 ? year : year - 1;
-            var carryover = await _ledgerRepository.GetCarryoverBalanceAsync(cardIdm, fiscalYearStartYear - 1);
-            return carryover;
         }
 
         /// <summary>

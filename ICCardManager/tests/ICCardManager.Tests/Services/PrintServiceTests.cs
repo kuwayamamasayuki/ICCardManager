@@ -26,9 +26,10 @@ public class PrintServiceTests
     {
         _cardRepositoryMock = new Mock<ICardRepository>();
         _ledgerRepositoryMock = new Mock<ILedgerRepository>();
-        _printService = new PrintService(
+        var reportDataBuilder = new ReportDataBuilder(
             _cardRepositoryMock.Object,
             _ledgerRepositoryMock.Object);
+        _printService = new PrintService(reportDataBuilder);
     }
 
     #region ヘルパーメソッド
