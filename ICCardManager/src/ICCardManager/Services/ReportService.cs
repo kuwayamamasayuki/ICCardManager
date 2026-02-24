@@ -380,13 +380,7 @@ namespace ICCardManager.Services
                     var monthlyExpense = ledgers.Sum(l => l.Expense);
                     var monthEndBalance = ledgers.LastOrDefault()?.Balance ?? 0;
 
-                    // Issue #457: 改ページチェック
-                    (currentRow, rowsOnCurrentPage, currentPageNumber) = CheckAndInsertPageBreak(worksheet, currentRow, rowsOnCurrentPage, RowsPerPage, currentPageNumber);
-                    // 月計行（残額欄は空欄、0も表示）
-                    currentRow = WriteMonthlyTotalRow(worksheet, currentRow, month, monthlyIncome, monthlyExpense);
-                    rowsOnCurrentPage++;
-
-                    // 累計行を追加（全月で出力）
+                    // 累計データを計算（4月の月計残額表示にも使用）
                     // 年度の範囲を計算（4月～翌年3月）
                     var fiscalYearStartYear = month >= 4 ? year : year - 1;
                     var fiscalYearStart = new DateTime(fiscalYearStartYear, 4, 1);
@@ -401,8 +395,29 @@ namespace ICCardManager.Services
 
                     // Issue #457: 改ページチェック
                     (currentRow, rowsOnCurrentPage, currentPageNumber) = CheckAndInsertPageBreak(worksheet, currentRow, rowsOnCurrentPage, RowsPerPage, currentPageNumber);
-                    currentRow = WriteCumulativeRow(worksheet, currentRow, yearlyIncome, yearlyExpense, currentBalance);
-                    rowsOnCurrentPage++;
+
+                    if (month == 4)
+                    {
+                        // Issue #813: 4月は月計と累計が同額のため累計行を省略し、月計行に残額を表示
+                        // データがない場合は前年度繰越額をフォールバックとして使用
+                        var aprilBalance = yearlyLedgers.Any()
+                            ? currentBalance
+                            : (precedingBalance ?? 0);
+                        currentRow = WriteMonthlyTotalRow(worksheet, currentRow, month, monthlyIncome, monthlyExpense, aprilBalance);
+                        rowsOnCurrentPage++;
+                    }
+                    else
+                    {
+                        // 月計行（残額欄は空欄、0も表示）
+                        currentRow = WriteMonthlyTotalRow(worksheet, currentRow, month, monthlyIncome, monthlyExpense);
+                        rowsOnCurrentPage++;
+
+                        // 累計行を追加（5月～3月で出力）
+                        // Issue #457: 改ページチェック
+                        (currentRow, rowsOnCurrentPage, currentPageNumber) = CheckAndInsertPageBreak(worksheet, currentRow, rowsOnCurrentPage, RowsPerPage, currentPageNumber);
+                        currentRow = WriteCumulativeRow(worksheet, currentRow, yearlyIncome, yearlyExpense, currentBalance);
+                        rowsOnCurrentPage++;
+                    }
 
                     // 3月の場合は次年度繰越を追加
                     if (month == 3)
@@ -977,19 +992,29 @@ namespace ICCardManager.Services
         /// <remarks>
         /// Issue #451対応:
         /// - 受入金額・払出金額は0も表示（空欄にしない）
-        /// - 残額は常に空欄
+        /// - 残額は通常空欄（Issue #813: 4月のみ累計行省略のため残額を表示）
         /// - 上下に太線罫線を追加
         /// </remarks>
         private int WriteMonthlyTotalRow(
             IXLWorksheet worksheet, int row, int month,
-            int income, int expense)
+            int income, int expense, int? balance = null)
         {
             // 列配置: A=出納年月日, B-D=摘要(結合), E=受入金額, F=払出金額, G=残額, H=氏名, I-L=備考(結合)
             worksheet.Cell(row, 1).Value = "";  // 出納年月日（空欄）(A列)
             worksheet.Cell(row, 2).Value = SummaryGenerator.GetMonthlySummary(month); // 摘要 (B-D列)
             worksheet.Cell(row, 5).Value = income;   // 受入金額 (E列) - 0も表示
             worksheet.Cell(row, 6).Value = expense;  // 払出金額 (F列) - 0も表示
-            worksheet.Cell(row, 7).Value = "";       // 残額（常に空欄）(G列)
+
+            // Issue #813: 4月は累計行を省略するため、月計行に残額を表示
+            if (balance.HasValue)
+            {
+                worksheet.Cell(row, 7).Value = balance.Value;
+                worksheet.Cell(row, 7).Style.NumberFormat.Format = "#,##0";
+            }
+            else
+            {
+                worksheet.Cell(row, 7).Value = "";  // 残額（空欄）(G列)
+            }
 
             // Issue #509: 金額セルの表示形式を明示的に数値に設定
             var incomeCell = worksheet.Cell(row, 5);
