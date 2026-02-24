@@ -35,4 +35,9 @@
     <ProjectReference Include="..\..\tools\DebugDataViewer\DebugDataViewer.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Reference Include="System.Printing" />
+    <Reference Include="ReachFramework" />
+  </ItemGroup>
+
 </Project>
