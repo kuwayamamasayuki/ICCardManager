@@ -6,6 +6,8 @@ using System.Collections.ObjectModel;
 using System.Windows;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using CommunityToolkit.Mvvm.Messaging;
+using ICCardManager.Common.Messages;
 using ICCardManager.Data.Repositories;
 using ICCardManager.Dtos;
 using ICCardManager.Infrastructure.CardReader;
@@ -25,6 +27,7 @@ namespace ICCardManager.ViewModels
         private readonly OperationLogger _operationLogger;
         private readonly IDialogService _dialogService;
         private readonly IStaffAuthService _staffAuthService;
+        private readonly IMessenger _messenger;
 
         [ObservableProperty]
         private ObservableCollection<StaffDto> _staffList = new();
@@ -71,7 +74,8 @@ namespace ICCardManager.ViewModels
             IValidationService validationService,
             OperationLogger operationLogger,
             IDialogService dialogService,
-            IStaffAuthService staffAuthService)
+            IStaffAuthService staffAuthService,
+            IMessenger messenger)
         {
             _staffRepository = staffRepository;
             _cardReader = cardReader;
@@ -79,6 +83,7 @@ namespace ICCardManager.ViewModels
             _operationLogger = operationLogger;
             _dialogService = dialogService;
             _staffAuthService = staffAuthService;
+            _messenger = messenger;
 
             // カード読み取りイベント
             _cardReader.CardRead += OnCardRead;
@@ -126,8 +131,8 @@ namespace ICCardManager.ViewModels
             IsStatusError = false;
             IsWaitingForCard = true;
 
-            // MainViewModelでの未登録カード処理を抑制
-            App.IsStaffCardRegistrationActive = true;
+            // MainViewModelでの未登録カード処理を抑制（Issue #852）
+            _messenger.Send(new CardReadingSuppressedMessage(true, CardReadingSource.StaffRegistration));
         }
 
         /// <summary>
@@ -467,8 +472,8 @@ namespace ICCardManager.ViewModels
             EditNote = string.Empty;
             StatusMessage = string.Empty;
 
-            // 職員証登録モードを解除
-            App.IsStaffCardRegistrationActive = false;
+            // 職員証登録モードを解除（Issue #852）
+            _messenger.Send(new CardReadingSuppressedMessage(false, CardReadingSource.StaffRegistration));
         }
 
         /// <summary>
@@ -542,8 +547,8 @@ namespace ICCardManager.ViewModels
                         // フォームはそのままにして、ユーザーが確認できるようにする
                     }
 
-                    // カード読み取り完了後、フラグを解除
-                    App.IsStaffCardRegistrationActive = false;
+                    // カード読み取り完了後、抑制を解除（Issue #852）
+                    _messenger.Send(new CardReadingSuppressedMessage(false, CardReadingSource.StaffRegistration));
                     return;
                 }
 
@@ -551,8 +556,8 @@ namespace ICCardManager.ViewModels
                 StatusMessage = "職員証を読み取りました";
                 IsStatusError = false;
 
-                // カード読み取り完了後、フラグを解除
-                App.IsStaffCardRegistrationActive = false;
+                // カード読み取り完了後、抑制を解除（Issue #852）
+                _messenger.Send(new CardReadingSuppressedMessage(false, CardReadingSource.StaffRegistration));
             });
         }
 
@@ -616,8 +621,8 @@ namespace ICCardManager.ViewModels
         {
             _cardReader.CardRead -= OnCardRead;
 
-            // ダイアログ終了時にフラグを解除
-            App.IsStaffCardRegistrationActive = false;
+            // ダイアログ終了時に抑制を解除（Issue #852）
+            _messenger.Send(new CardReadingSuppressedMessage(false, CardReadingSource.StaffRegistration));
         }
     }
 }

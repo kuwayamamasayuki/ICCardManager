@@ -7,7 +7,9 @@ using System.Windows;
 using System.Windows.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using CommunityToolkit.Mvvm.Messaging;
 using ICCardManager.Common;
+using ICCardManager.Common.Messages;
 using ICCardManager.Data.Repositories;
 using ICCardManager.Dtos;
 using ICCardManager.Infrastructure.CardReader;
@@ -100,6 +102,13 @@ public partial class MainViewModel : ViewModelBase
     private readonly IToastNotificationService _toastNotificationService;
     private readonly IStaffAuthService _staffAuthService;
     private readonly LedgerMergeService _ledgerMergeService;
+    private readonly IMessenger _messenger;
+    private readonly HashSet<CardReadingSource> _suppressionSources = new();
+
+    /// <summary>
+    /// カード読み取りが抑制されているかどうか（テスト用）
+    /// </summary>
+    internal bool IsCardReadingSuppressed => _suppressionSources.Count > 0;
 
     private DispatcherTimer? _timeoutTimer;
     private string? _currentStaffIdm;
@@ -349,7 +358,8 @@ public partial class MainViewModel : ViewModelBase
         LendingService lendingService,
         IToastNotificationService toastNotificationService,
         IStaffAuthService staffAuthService,
-        LedgerMergeService ledgerMergeService)
+        LedgerMergeService ledgerMergeService,
+        IMessenger messenger)
     {
         _cardReader = cardReader;
         _soundPlayer = soundPlayer;
@@ -361,6 +371,16 @@ public partial class MainViewModel : ViewModelBase
         _toastNotificationService = toastNotificationService;
         _staffAuthService = staffAuthService;
         _ledgerMergeService = ledgerMergeService;
+        _messenger = messenger;
+
+        // カード読み取り抑制メッセージの受信を登録（Issue #852）
+        _messenger.Register<CardReadingSuppressedMessage>(this, (recipient, message) =>
+        {
+            if (message.Value)
+                _suppressionSources.Add(message.Source);
+            else
+                _suppressionSources.Remove(message.Source);
+        });
 
         // イベント登録
         _cardReader.CardRead += OnCardRead;
@@ -604,11 +624,10 @@ public partial class MainViewModel : ViewModelBase
             return;
         }
 
-        // カード登録モード中は処理をスキップ（CardManageViewModelが処理する）
-        // 職員証登録モード中は処理をスキップ（StaffManageViewModelが処理する）
-        // 職員証認証モード中は処理をスキップ（StaffAuthDialogが処理する）Issue #429
+        // カード読み取り抑制中は処理をスキップ（Issue #852）
+        // ダイアログ側（CardManageViewModel / StaffManageViewModel / StaffAuthDialog）が処理する
         // ※登録済みカード/職員証も含め、すべてのカード読み取りを無視する
-        if (App.IsCardRegistrationActive || App.IsStaffCardRegistrationActive || App.IsAuthenticationActive)
+        if (_suppressionSources.Count > 0)
         {
             return;
         }
@@ -960,13 +979,13 @@ public partial class MainViewModel : ViewModelBase
     private async Task HandleUnregisteredCardAsync(string idm)
     {
         // 職員証登録モード中は処理をスキップ（StaffManageViewModelが処理する）
-        if (App.IsStaffCardRegistrationActive)
+        if (_suppressionSources.Contains(CardReadingSource.StaffRegistration))
         {
             return;
         }
 
         // ICカード登録モード中は処理をスキップ（CardManageViewModelが処理する）
-        if (App.IsCardRegistrationActive)
+        if (_suppressionSources.Contains(CardReadingSource.CardRegistration))
         {
             return;
         }

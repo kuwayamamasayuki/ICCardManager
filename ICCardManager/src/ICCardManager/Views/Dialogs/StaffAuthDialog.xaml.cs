@@ -2,6 +2,8 @@ using System;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Threading;
+using CommunityToolkit.Mvvm.Messaging;
+using ICCardManager.Common.Messages;
 using ICCardManager.Data.Repositories;
 using ICCardManager.Infrastructure.CardReader;
 using ICCardManager.Infrastructure.Sound;
@@ -19,6 +21,7 @@ namespace ICCardManager.Views.Dialogs
         private readonly IStaffRepository _staffRepository;
         private readonly ICardReader _cardReader;
         private readonly ISoundPlayer _soundPlayer;
+        private readonly IMessenger _messenger;
         private readonly DispatcherTimer _timeoutTimer;
         private int _remainingSeconds = 60;
 
@@ -49,13 +52,15 @@ namespace ICCardManager.Views.Dialogs
         public StaffAuthDialog(
             IStaffRepository staffRepository,
             ICardReader cardReader,
-            ISoundPlayer soundPlayer)
+            ISoundPlayer soundPlayer,
+            IMessenger messenger)
         {
             InitializeComponent();
 
             _staffRepository = staffRepository;
             _cardReader = cardReader;
             _soundPlayer = soundPlayer;
+            _messenger = messenger;
 
             // タイムアウトタイマーの設定
             _timeoutTimer = new DispatcherTimer
@@ -71,8 +76,8 @@ namespace ICCardManager.Views.Dialogs
 
         private void OnLoaded(object sender, RoutedEventArgs e)
         {
-            // 認証モードを有効化（MainViewModelのカード処理を抑制）
-            App.IsAuthenticationActive = true;
+            // 認証モードを有効化（MainViewModelのカード処理を抑制）Issue #852
+            _messenger.Send(new CardReadingSuppressedMessage(true, CardReadingSource.Authentication));
 
             // カード読み取りイベントを購読
             _cardReader.CardRead += OnCardRead;
@@ -97,8 +102,8 @@ namespace ICCardManager.Views.Dialogs
             // カード読み取りイベントを解除
             _cardReader.CardRead -= OnCardRead;
 
-            // 認証モードを解除
-            App.IsAuthenticationActive = false;
+            // 認証モードを解除（Issue #852）
+            _messenger.Send(new CardReadingSuppressedMessage(false, CardReadingSource.Authentication));
         }
 
         private void OnTimeoutTick(object? sender, EventArgs e)

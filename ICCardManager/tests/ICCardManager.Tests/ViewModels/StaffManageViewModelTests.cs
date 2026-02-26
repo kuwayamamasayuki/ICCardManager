@@ -1,3 +1,4 @@
+using CommunityToolkit.Mvvm.Messaging;
 using FluentAssertions;
 using ICCardManager.Data.Repositories;
 using ICCardManager.Dtos;
@@ -60,7 +61,8 @@ public class StaffManageViewModelTests
             _validationServiceMock.Object,
             _operationLoggerMock.Object,
             _dialogServiceMock.Object,
-            _staffAuthServiceMock.Object);
+            _staffAuthServiceMock.Object,
+            new WeakReferenceMessenger());
     }
 
     #region 職員一覧読み込みテスト
