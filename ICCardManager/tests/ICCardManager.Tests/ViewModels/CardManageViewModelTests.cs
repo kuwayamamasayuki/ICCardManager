@@ -1,3 +1,4 @@
+using CommunityToolkit.Mvvm.Messaging;
 using FluentAssertions;
 using ICCardManager.Data.Repositories;
 using ICCardManager.Dtos;
@@ -99,7 +100,8 @@ public class CardManageViewModelTests
             _operationLoggerMock.Object,
             _dialogServiceMock.Object,
             _staffAuthServiceMock.Object,
-            _lendingService);
+            _lendingService,
+            new WeakReferenceMessenger());
     }
 
     #region カード一覧読み込みテスト

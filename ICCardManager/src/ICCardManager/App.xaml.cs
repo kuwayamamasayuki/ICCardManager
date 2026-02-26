@@ -17,6 +17,7 @@ using ICCardManager.Services;
 using ICCardManager.ViewModels;
 using ICCardManager.Views;
 using ICCardManager.Views.Dialogs;
+using CommunityToolkit.Mvvm.Messaging;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -47,22 +48,6 @@ namespace ICCardManager
         /// 現在のアプリケーションインスタンス
         /// </summary>
         public static new App Current => (App)Application.Current;
-
-        /// <summary>
-        /// 職員証登録モードが有効かどうか（MainViewModelでの未登録カード処理を抑制するため）
-        /// </summary>
-        public static bool IsStaffCardRegistrationActive { get; set; }
-
-        /// <summary>
-        /// ICカード登録モードが有効かどうか（MainViewModelでの未登録カード処理を抑制するため）
-        /// </summary>
-        public static bool IsCardRegistrationActive { get; set; }
-
-        /// <summary>
-        /// 職員証認証モードが有効かどうか（MainViewModelでのカード処理を抑制するため）
-        /// Issue #429: 重要な操作の前に職員証タッチを必須とする
-        /// </summary>
-        public static bool IsAuthenticationActive { get; set; }
 
         /// <summary>
         /// DEBUGビルドかどうか（XAMLからデバッグ用UIの表示制御に使用: Issue #289）
@@ -176,6 +161,9 @@ namespace ICCardManager
                 builder.AddDebug();
                 builder.AddFile();
             });
+
+            // メッセージング（Issue #852: 静的フラグをWeakReferenceMessengerに置換）
+            services.AddSingleton<IMessenger>(WeakReferenceMessenger.Default);
 
             // Infrastructure層 - キャッシュ
             services.AddSingleton<ICacheService, CacheService>();

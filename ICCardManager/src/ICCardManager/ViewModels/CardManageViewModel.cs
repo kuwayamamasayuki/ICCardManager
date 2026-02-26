@@ -6,6 +6,8 @@ using System.Collections.ObjectModel;
 using System.Windows;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using CommunityToolkit.Mvvm.Messaging;
+using ICCardManager.Common.Messages;
 using ICCardManager.Data.Repositories;
 using ICCardManager.Dtos;
 using ICCardManager.Infrastructure.CardReader;
@@ -28,6 +30,7 @@ namespace ICCardManager.ViewModels
         private readonly IDialogService _dialogService;
         private readonly IStaffAuthService _staffAuthService;
         private readonly LendingService _lendingService;
+        private readonly IMessenger _messenger;
 
         [ObservableProperty]
         private ObservableCollection<CardDto> _cards = new();
@@ -124,7 +127,8 @@ namespace ICCardManager.ViewModels
             OperationLogger operationLogger,
             IDialogService dialogService,
             IStaffAuthService staffAuthService,
-            LendingService lendingService)
+            LendingService lendingService,
+            IMessenger messenger)
         {
             _cardRepository = cardRepository;
             _ledgerRepository = ledgerRepository;
@@ -135,6 +139,7 @@ namespace ICCardManager.ViewModels
             _dialogService = dialogService;
             _staffAuthService = staffAuthService;
             _lendingService = lendingService;
+            _messenger = messenger;
 
             // カード読み取りイベント
             _cardReader.CardRead += OnCardRead;
@@ -182,8 +187,8 @@ namespace ICCardManager.ViewModels
             IsStatusError = false;
             IsWaitingForCard = true;
 
-            // MainViewModelでの未登録カード処理を抑制
-            App.IsCardRegistrationActive = true;
+            // MainViewModelでの未登録カード処理を抑制（Issue #852）
+            _messenger.Send(new CardReadingSuppressedMessage(true, CardReadingSource.CardRegistration));
         }
 
         /// <summary>
@@ -745,8 +750,8 @@ namespace ICCardManager.ViewModels
             StatusMessage = string.Empty;
             IsStatusError = false;
 
-            // ICカード登録モードを解除
-            App.IsCardRegistrationActive = false;
+            // ICカード登録モードを解除（Issue #852）
+            _messenger.Send(new CardReadingSuppressedMessage(false, CardReadingSource.CardRegistration));
         }
 
         /// <summary>
@@ -850,8 +855,8 @@ namespace ICCardManager.ViewModels
                     _preReadHistory = null;
                 }
 
-                // 注意: App.IsCardRegistrationActive はここで解除しない
-                // ダイアログが開いている間は常にフラグを維持し、
+                // 注意: CardRegistration抑制はここで解除しない
+                // ダイアログが開いている間は常に抑制を維持し、
                 // CancelEdit() または Cleanup() でのみ解除する
             });
         }
@@ -1067,8 +1072,8 @@ namespace ICCardManager.ViewModels
         {
             _cardReader.CardRead -= OnCardRead;
 
-            // ダイアログ終了時にフラグを解除
-            App.IsCardRegistrationActive = false;
+            // ダイアログ終了時に抑制を解除（Issue #852）
+            _messenger.Send(new CardReadingSuppressedMessage(false, CardReadingSource.CardRegistration));
         }
     }
 }
