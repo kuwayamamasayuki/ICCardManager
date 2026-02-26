@@ -24,6 +24,7 @@ public class ReportViewModelTests
     private readonly Mock<ICardRepository> _cardRepositoryMock;
     private readonly Mock<ILedgerRepository> _ledgerRepositoryMock;
     private readonly Mock<ISettingsRepository> _settingsRepositoryMock;
+    private readonly Mock<INavigationService> _navigationServiceMock;
     private readonly ReportService _reportService;
     private readonly PrintService _printService;
     private readonly ReportViewModel _viewModel;
@@ -38,11 +39,13 @@ public class ReportViewModelTests
         var reportDataBuilder = new ReportDataBuilder(_cardRepositoryMock.Object, _ledgerRepositoryMock.Object);
         _reportService = new ReportService(_cardRepositoryMock.Object, _ledgerRepositoryMock.Object, _settingsRepositoryMock.Object, reportDataBuilder);
         _printService = new PrintService(reportDataBuilder);
+        _navigationServiceMock = new Mock<INavigationService>();
 
         _viewModel = new ReportViewModel(
             _reportService,
             _printService,
-            _cardRepositoryMock.Object);
+            _cardRepositoryMock.Object,
+            _navigationServiceMock.Object);
     }
 
     #region 初期化テスト

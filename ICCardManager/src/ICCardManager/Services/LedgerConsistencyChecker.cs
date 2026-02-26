@@ -14,7 +14,7 @@ namespace ICCardManager.Services
     /// 各行の残高が「前行の残高 + 受入 - 払出」と一致するかを検証します。
     /// 行の追加・削除・修正後に呼び出し、不整合があれば警告を表示します。
     /// </remarks>
-    internal class LedgerConsistencyChecker
+    public class LedgerConsistencyChecker
     {
         private readonly ILedgerRepository _ledgerRepository;
 
@@ -44,7 +44,7 @@ namespace ICCardManager.Services
         /// <summary>
         /// 残高チェーンの整合性をチェック（内部ロジック）
         /// </summary>
-        internal ConsistencyResult CheckConsistency(
+        public ConsistencyResult CheckConsistency(
             List<Ledger> ledgers, string cardIdm, DateTime fromDate)
         {
             var result = new ConsistencyResult { IsConsistent = true };
@@ -72,7 +72,7 @@ namespace ICCardManager.Services
         /// <summary>
         /// 前残高を含めた完全な整合性チェック（非同期版）
         /// </summary>
-        internal async Task<ConsistencyResult> CheckConsistencyWithPreviousAsync(
+        public async Task<ConsistencyResult> CheckConsistencyWithPreviousAsync(
             List<Ledger> ledgers, string cardIdm, DateTime fromDate)
         {
             var result = new ConsistencyResult { IsConsistent = true };
@@ -103,7 +103,7 @@ namespace ICCardManager.Services
     /// <summary>
     /// 残高整合性チェック結果
     /// </summary>
-    internal class ConsistencyResult
+    public class ConsistencyResult
     {
         /// <summary>
         /// 整合性があるかどうか

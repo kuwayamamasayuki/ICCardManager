@@ -7,7 +7,6 @@ using CommunityToolkit.Mvvm.Input;
 using ICCardManager.Common;
 using ICCardManager.Data.Repositories;
 using ICCardManager.Services;
-using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Win32;
 using System.Threading.Tasks;
 
@@ -20,6 +19,7 @@ public partial class SystemManageViewModel : ViewModelBase
 {
     private readonly BackupService _backupService;
     private readonly ISettingsRepository _settingsRepository;
+    private readonly INavigationService _navigationService;
 
     [ObservableProperty]
     private ObservableCollection<BackupFileInfo> _backupFiles = new();
@@ -41,10 +41,11 @@ public partial class SystemManageViewModel : ViewModelBase
     /// </summary>
     public bool HasSelectedBackup => SelectedBackup != null;
 
-    public SystemManageViewModel(BackupService backupService, ISettingsRepository settingsRepository)
+    public SystemManageViewModel(BackupService backupService, ISettingsRepository settingsRepository, INavigationService navigationService)
     {
         _backupService = backupService;
         _settingsRepository = settingsRepository;
+        _navigationService = navigationService;
     }
 
     partial void OnSelectedBackupChanged(BackupFileInfo? value)
@@ -367,8 +368,6 @@ public partial class SystemManageViewModel : ViewModelBase
     [RelayCommand]
     public void OpenOperationLog()
     {
-        var dialog = App.Current.ServiceProvider.GetRequiredService<Views.Dialogs.OperationLogDialog>();
-        dialog.Owner = Application.Current.MainWindow;
-        dialog.ShowDialog();
+        _navigationService.ShowDialog<Views.Dialogs.OperationLogDialog>();
     }
 }

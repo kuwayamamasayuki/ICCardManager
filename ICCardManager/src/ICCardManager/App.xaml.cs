@@ -198,7 +198,9 @@ namespace ICCardManager
             services.AddSingleton<OperationLogExcelExportService>();
             services.AddSingleton<CsvImportService>();
             services.AddSingleton<IToastNotificationService, ToastNotificationService>();
-            services.AddSingleton<IDialogService, DialogService>();
+            services.AddSingleton<NavigationService>();
+            services.AddSingleton<INavigationService>(sp => sp.GetRequiredService<NavigationService>());
+            services.AddSingleton<IDialogService>(sp => sp.GetRequiredService<NavigationService>());
             services.AddSingleton<IStaffAuthService, StaffAuthService>();
 
             // Infrastructure層
@@ -255,6 +257,7 @@ namespace ICCardManager
             services.AddTransient<Views.Dialogs.SystemManageDialog>();
             services.AddTransient<Views.Dialogs.IncompleteBusStopDialog>();
             services.AddTransient<Views.Dialogs.LedgerRowEditDialog>();
+            services.AddTransient<Views.Dialogs.CardTypeSelectionDialog>();
     #if DEBUG
             services.AddTransient<Views.Dialogs.VirtualCardDialog>();
     #endif

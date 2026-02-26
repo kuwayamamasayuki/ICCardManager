@@ -7,7 +7,6 @@ using CommunityToolkit.Mvvm.Input;
 using ICCardManager.Data.Repositories;
 using ICCardManager.Dtos;
 using ICCardManager.Services;
-using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Win32;
 
 using System;
@@ -26,6 +25,7 @@ public partial class ReportViewModel : ViewModelBase
     private readonly ReportService _reportService;
     private readonly PrintService _printService;
     private readonly ICardRepository _cardRepository;
+    private readonly INavigationService _navigationService;
 
     [ObservableProperty]
     private ObservableCollection<CardDto> _cards = new();
@@ -73,11 +73,13 @@ public partial class ReportViewModel : ViewModelBase
     public ReportViewModel(
         ReportService reportService,
         PrintService printService,
-        ICardRepository cardRepository)
+        ICardRepository cardRepository,
+        INavigationService navigationService)
     {
         _reportService = reportService;
         _printService = printService;
         _cardRepository = cardRepository;
+        _navigationService = navigationService;
 
         // 年の選択肢を初期化（過去5年分）
         var currentYear = DateTime.Now.Year;
@@ -554,11 +556,13 @@ public partial class ReportViewModel : ViewModelBase
             var documentTitle = $"物品出納簿_{card.CardType}_{card.CardNumber}_{SelectedYear}年{SelectedMonth}月";
 
             // プレビューダイアログを表示（ReportPrintDataを渡して用紙方向変更時に再生成可能に）
-            var previewDialog = App.Current.ServiceProvider.GetRequiredService<Views.Dialogs.PrintPreviewDialog>();
-            previewDialog.ViewModel.SetDocument(reportData, documentTitle);
-            previewDialog.Owner = Application.Current.Windows.OfType<Window>().FirstOrDefault(w => w.IsActive)
-                                   ?? Application.Current.MainWindow;
-            previewDialog.ShowDialog();
+            _navigationService.ShowDialog<Views.Dialogs.PrintPreviewDialog>(d =>
+            {
+                d.ViewModel.SetDocument(reportData, documentTitle);
+                // 印刷プレビューはアクティブウィンドウ（ReportDialog）をOwnerにする
+                d.Owner = Application.Current.Windows.OfType<Window>().FirstOrDefault(w => w.IsActive)
+                          ?? Application.Current.MainWindow;
+            });
         }
     }
 
@@ -610,11 +614,13 @@ public partial class ReportViewModel : ViewModelBase
                 : $"物品出納簿_{orderedSelectedCards.Count}件_{SelectedYear}年{SelectedMonth}月";
 
             // プレビューダイアログを表示（List<ReportPrintData>を渡して用紙方向変更時に再生成可能に）
-            var previewDialog = App.Current.ServiceProvider.GetRequiredService<Views.Dialogs.PrintPreviewDialog>();
-            previewDialog.ViewModel.SetDocument(reportDataList, documentTitle);
-            previewDialog.Owner = Application.Current.Windows.OfType<Window>().FirstOrDefault(w => w.IsActive)
-                                   ?? Application.Current.MainWindow;
-            previewDialog.ShowDialog();
+            _navigationService.ShowDialog<Views.Dialogs.PrintPreviewDialog>(d =>
+            {
+                d.ViewModel.SetDocument(reportDataList, documentTitle);
+                // 印刷プレビューはアクティブウィンドウ（ReportDialog）をOwnerにする
+                d.Owner = Application.Current.Windows.OfType<Window>().FirstOrDefault(w => w.IsActive)
+                          ?? Application.Current.MainWindow;
+            });
         }
     }
 

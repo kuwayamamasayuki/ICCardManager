@@ -16,7 +16,6 @@ using ICCardManager.Infrastructure.CardReader;
 using ICCardManager.Infrastructure.Sound;
 using ICCardManager.Models;
 using ICCardManager.Services;
-using Microsoft.Extensions.DependencyInjection;
 
 
 namespace ICCardManager.ViewModels;
@@ -103,6 +102,9 @@ public partial class MainViewModel : ViewModelBase
     private readonly IStaffAuthService _staffAuthService;
     private readonly LedgerMergeService _ledgerMergeService;
     private readonly IMessenger _messenger;
+    private readonly INavigationService _navigationService;
+    private readonly OperationLogger _operationLogger;
+    private readonly LedgerConsistencyChecker _ledgerConsistencyChecker;
     private readonly HashSet<CardReadingSource> _suppressionSources = new();
 
     /// <summary>
@@ -359,7 +361,10 @@ public partial class MainViewModel : ViewModelBase
         IToastNotificationService toastNotificationService,
         IStaffAuthService staffAuthService,
         LedgerMergeService ledgerMergeService,
-        IMessenger messenger)
+        IMessenger messenger,
+        INavigationService navigationService,
+        OperationLogger operationLogger,
+        LedgerConsistencyChecker ledgerConsistencyChecker)
     {
         _cardReader = cardReader;
         _soundPlayer = soundPlayer;
@@ -372,6 +377,9 @@ public partial class MainViewModel : ViewModelBase
         _staffAuthService = staffAuthService;
         _ledgerMergeService = ledgerMergeService;
         _messenger = messenger;
+        _navigationService = navigationService;
+        _operationLogger = operationLogger;
+        _ledgerConsistencyChecker = ledgerConsistencyChecker;
 
         // カード読み取り抑制メッセージの受信を登録（Issue #852）
         _messenger.Register<CardReadingSuppressedMessage>(this, (recipient, message) =>
@@ -925,10 +933,8 @@ public partial class MainViewModel : ViewModelBase
                 foreach (var busLedger in busLedgers)
                 {
                     // バス停入力ダイアログを表示
-                    var busDialog = App.Current.ServiceProvider.GetRequiredService<Views.Dialogs.BusStopInputDialog>();
-                    busDialog.Owner = System.Windows.Application.Current.MainWindow;
-                    await busDialog.InitializeWithLedgerIdAsync(busLedger.Id);
-                    busDialog.ShowDialog();
+                    await _navigationService.ShowDialogAsync<Views.Dialogs.BusStopInputDialog>(
+                        async d => await d.InitializeWithLedgerIdAsync(busLedger.Id));
                 }
 
                 // バス停名入力後に履歴が開いていれば再読み込み
@@ -1016,30 +1022,24 @@ public partial class MainViewModel : ViewModelBase
 
         // Issue #312: IDmからカード種別を判別することは技術的に不可能なため、
         // カスタムダイアログでユーザーに職員証か交通系ICカードかを選択させる
-        var selectionDialog = new Views.Dialogs.CardTypeSelectionDialog
-        {
-            Owner = System.Windows.Application.Current.MainWindow
-        };
-        selectionDialog.ShowDialog();
+        Views.Dialogs.CardTypeSelectionDialog capturedSelectionDialog = null;
+        _navigationService.ShowDialog<Views.Dialogs.CardTypeSelectionDialog>(
+            d => capturedSelectionDialog = d);
 
-        switch (selectionDialog.SelectionResult)
+        switch (capturedSelectionDialog?.SelectionResult)
         {
             case Views.Dialogs.CardTypeSelectionResult.StaffCard:
                 // 職員管理画面を開いて新規登録モードで開始
-                var staffDialog = App.Current.ServiceProvider.GetRequiredService<Views.Dialogs.StaffManageDialog>();
-                staffDialog.Owner = System.Windows.Application.Current.MainWindow;
-                staffDialog.InitializeWithIdm(idm);
-                staffDialog.ShowDialog();
+                _navigationService.ShowDialog<Views.Dialogs.StaffManageDialog>(
+                    d => d.InitializeWithIdm(idm));
                 break;
 
             case Views.Dialogs.CardTypeSelectionResult.IcCard:
                 // カード管理画面を開いて新規登録モードで開始
                 // Issue #482: 事前に読み取った残高を渡す
                 // Issue #596: 事前に読み取った履歴も渡す
-                var cardDialog = App.Current.ServiceProvider.GetRequiredService<Views.Dialogs.CardManageDialog>();
-                cardDialog.Owner = System.Windows.Application.Current.MainWindow;
-                cardDialog.InitializeWithIdmBalanceAndHistory(idm, preReadBalance, preReadHistory);
-                cardDialog.ShowDialog();
+                _navigationService.ShowDialog<Views.Dialogs.CardManageDialog>(
+                    d => d.InitializeWithIdmBalanceAndHistory(idm, preReadBalance, preReadHistory));
 
                 // ダイアログを閉じた後、貸出中カード一覧とダッシュボードを更新
                 // Issue #483: RefreshDashboardAsync を追加してカード一覧を更新
@@ -1282,13 +1282,15 @@ public partial class MainViewModel : ViewModelBase
         var detailDto = ledgerWithDetails.ToDto();
 
         // 詳細ダイアログを表示
-        var dialog = App.Current.ServiceProvider.GetRequiredService<Views.Dialogs.LedgerDetailDialog>();
-        dialog.Owner = System.Windows.Application.Current.MainWindow;
-        await dialog.InitializeAsync(detailDto.Id);
-        dialog.ShowDialog();
+        Views.Dialogs.LedgerDetailDialog capturedDialog = null;
+        await _navigationService.ShowDialogAsync<Views.Dialogs.LedgerDetailDialog>(async d =>
+        {
+            await d.InitializeAsync(detailDto.Id);
+            capturedDialog = d;
+        });
 
         // Issue #548: 保存が行われた場合は履歴を再読み込み
-        if (dialog.WasSaved)
+        if (capturedDialog?.WasSaved == true)
         {
             await LoadHistoryLedgersAsync();
             // Issue #660: 分割等で摘要が変わった場合に警告を更新
@@ -1313,14 +1315,11 @@ public partial class MainViewModel : ViewModelBase
         if (authResult == null) return;
 
         // ダイアログ表示
-        var dialog = App.Current.ServiceProvider.GetRequiredService<Views.Dialogs.LedgerRowEditDialog>();
-        dialog.Owner = Application.Current.MainWindow;
-
-        // 現在表示中の月の履歴を渡して初期化（挿入位置プレビュー用）
         var allLedgers = HistoryLedgers.ToList();
-        await dialog.InitializeForAddAsync(HistoryCard.CardIdm, allLedgers, authResult.Idm);
+        var result = await _navigationService.ShowDialogAsync<Views.Dialogs.LedgerRowEditDialog>(
+            async d => await d.InitializeForAddAsync(HistoryCard.CardIdm, allLedgers, authResult.Idm));
 
-        if (dialog.ShowDialog() == true)
+        if (result == true)
         {
             await LoadHistoryLedgersAsync();
             await RefreshDashboardAsync();
@@ -1357,8 +1356,7 @@ public partial class MainViewModel : ViewModelBase
         var fullLedger = await _ledgerRepository.GetByIdAsync(ledger.Id);
         if (fullLedger == null) return;
         await _ledgerRepository.DeleteAsync(ledger.Id);
-        var operationLogger = App.Current.ServiceProvider.GetRequiredService<OperationLogger>();
-        await operationLogger.LogLedgerDeleteAsync(authResult.Idm, fullLedger);
+        await _operationLogger.LogLedgerDeleteAsync(authResult.Idm, fullLedger);
 
         await LoadHistoryLedgersAsync();
         await RefreshDashboardAsync();
@@ -1379,21 +1377,22 @@ public partial class MainViewModel : ViewModelBase
         if (authResult == null) return;
 
         // 全項目編集ダイアログ表示
-        var dialog = App.Current.ServiceProvider.GetRequiredService<Views.Dialogs.LedgerRowEditDialog>();
-        dialog.Owner = Application.Current.MainWindow;
-        await dialog.InitializeForEditAsync(ledger, authResult.Idm);
-
-        var dialogResult = dialog.ShowDialog();
+        Views.Dialogs.LedgerRowEditDialog capturedEditDialog = null;
+        var dialogResult = await _navigationService.ShowDialogAsync<Views.Dialogs.LedgerRowEditDialog>(
+            async d =>
+            {
+                await d.InitializeForEditAsync(ledger, authResult.Idm);
+                capturedEditDialog = d;
+            });
 
         // Issue #750: 削除がリクエストされた場合
-        if (dialog.IsDeleteRequested)
+        if (capturedEditDialog?.IsDeleteRequested == true)
         {
             var fullLedger = await _ledgerRepository.GetByIdAsync(ledger.Id);
             if (fullLedger != null)
             {
                 await _ledgerRepository.DeleteAsync(ledger.Id);
-                var operationLogger = App.Current.ServiceProvider.GetRequiredService<OperationLogger>();
-                await operationLogger.LogLedgerDeleteAsync(authResult.Idm, fullLedger);
+                await _operationLogger.LogLedgerDeleteAsync(authResult.Idm, fullLedger);
             }
 
             await LoadHistoryLedgersAsync();
@@ -1421,8 +1420,7 @@ public partial class MainViewModel : ViewModelBase
     {
         if (HistoryCard == null) return;
 
-        var checker = App.Current.ServiceProvider.GetRequiredService<LedgerConsistencyChecker>();
-        var checkResult = await checker.CheckBalanceConsistencyAsync(
+        var checkResult = await _ledgerConsistencyChecker.CheckBalanceConsistencyAsync(
             HistoryCard.CardIdm, HistoryFromDate, HistoryToDate);
 
         // 既存の同カードの残高不整合警告を削除（重複防止）
@@ -1894,9 +1892,7 @@ public partial class MainViewModel : ViewModelBase
     [RelayCommand]
     public async Task OpenSettingsAsync()
     {
-        var dialog = App.Current.ServiceProvider.GetRequiredService<Views.Dialogs.SettingsDialog>();
-        dialog.Owner = System.Windows.Application.Current.MainWindow;
-        dialog.ShowDialog();
+        _navigationService.ShowDialog<Views.Dialogs.SettingsDialog>();
 
         // 設定変更後に音声モードを再適用し、カード一覧を更新（残額警告閾値の変更を反映）
         var settings = await _settingsRepository.GetAppSettingsAsync();
@@ -1912,9 +1908,7 @@ public partial class MainViewModel : ViewModelBase
     [RelayCommand]
     public void OpenReport()
     {
-        var dialog = App.Current.ServiceProvider.GetRequiredService<Views.Dialogs.ReportDialog>();
-        dialog.Owner = System.Windows.Application.Current.MainWindow;
-        dialog.ShowDialog();
+        _navigationService.ShowDialog<Views.Dialogs.ReportDialog>();
     }
 
     /// <summary>
@@ -1923,9 +1917,7 @@ public partial class MainViewModel : ViewModelBase
     [RelayCommand]
     public async Task OpenCardManageAsync()
     {
-        var dialog = App.Current.ServiceProvider.GetRequiredService<Views.Dialogs.CardManageDialog>();
-        dialog.Owner = System.Windows.Application.Current.MainWindow;
-        dialog.ShowDialog();
+        _navigationService.ShowDialog<Views.Dialogs.CardManageDialog>();
 
         // ダイアログを閉じた後、貸出中カード一覧とダッシュボードを更新
         await RefreshLentCardsAsync();
@@ -1938,9 +1930,7 @@ public partial class MainViewModel : ViewModelBase
     [RelayCommand]
     public void OpenStaffManage()
     {
-        var dialog = App.Current.ServiceProvider.GetRequiredService<Views.Dialogs.StaffManageDialog>();
-        dialog.Owner = System.Windows.Application.Current.MainWindow;
-        dialog.ShowDialog();
+        _navigationService.ShowDialog<Views.Dialogs.StaffManageDialog>();
     }
 
     /// <summary>
@@ -1949,13 +1939,13 @@ public partial class MainViewModel : ViewModelBase
     [RelayCommand]
     public async Task OpenDataExportImportAsync()
     {
-        var dialog = App.Current.ServiceProvider.GetRequiredService<Views.Dialogs.DataExportImportDialog>();
-        dialog.Owner = System.Windows.Application.Current.MainWindow;
-        dialog.ShowDialog();
+        Views.Dialogs.DataExportImportDialog capturedExportDialog = null;
+        _navigationService.ShowDialog<Views.Dialogs.DataExportImportDialog>(
+            d => capturedExportDialog = d);
 
         // Issue #744: インポートが実行された場合、履歴一覧・ダッシュボードを即座に更新
-        var viewModel = (DataExportImportViewModel)dialog.DataContext;
-        if (viewModel.HasImported)
+        var viewModel = capturedExportDialog?.DataContext as DataExportImportViewModel;
+        if (viewModel?.HasImported == true)
         {
             await RefreshDashboardAsync();
             if (IsHistoryVisible)
@@ -1971,9 +1961,7 @@ public partial class MainViewModel : ViewModelBase
     [RelayCommand]
     public void OpenOperationLog()
     {
-        var dialog = App.Current.ServiceProvider.GetRequiredService<Views.Dialogs.OperationLogDialog>();
-        dialog.Owner = System.Windows.Application.Current.MainWindow;
-        dialog.ShowDialog();
+        _navigationService.ShowDialog<Views.Dialogs.OperationLogDialog>();
     }
 
     /// <summary>
@@ -1982,9 +1970,7 @@ public partial class MainViewModel : ViewModelBase
     [RelayCommand]
     public void OpenSystemManage()
     {
-        var dialog = App.Current.ServiceProvider.GetRequiredService<Views.Dialogs.SystemManageDialog>();
-        dialog.Owner = System.Windows.Application.Current.MainWindow;
-        dialog.ShowDialog();
+        _navigationService.ShowDialog<Views.Dialogs.SystemManageDialog>();
     }
 
     /// <summary>
@@ -2050,10 +2036,7 @@ public partial class MainViewModel : ViewModelBase
 
             case WarningType.IncompleteBusStop:
                 // バス停未入力警告: 一覧ダイアログを表示（Issue #703: ダイアログ内で直接バス停名入力）
-                var dialog = App.Current.ServiceProvider
-                    .GetRequiredService<Views.Dialogs.IncompleteBusStopDialog>();
-                dialog.Owner = System.Windows.Application.Current.MainWindow;
-                dialog.ShowDialog();
+                _navigationService.ShowDialog<Views.Dialogs.IncompleteBusStopDialog>();
 
                 // ダイアログ内でバス停名が入力された可能性があるため、警告を更新
                 await CheckWarningsAsync();
@@ -2092,12 +2075,12 @@ public partial class MainViewModel : ViewModelBase
     [RelayCommand]
     public async Task OpenVirtualCardAsync()
     {
-        var dialog = App.Current.ServiceProvider.GetRequiredService<Views.Dialogs.VirtualCardDialog>();
-        dialog.Owner = System.Windows.Application.Current.MainWindow;
-        dialog.ShowDialog();
+        Views.Dialogs.VirtualCardDialog capturedVirtualDialog = null;
+        _navigationService.ShowDialog<Views.Dialogs.VirtualCardDialog>(
+            d => capturedVirtualDialog = d);
 
         // ダイアログを閉じた後、TouchResult を参照して処理を実行
-        if (dialog.DataContext is VirtualCardViewModel vm && vm.TouchResult != null)
+        if (capturedVirtualDialog?.DataContext is VirtualCardViewModel vm && vm.TouchResult != null)
         {
             await ProcessVirtualTouchAsync(vm.TouchResult);
         }
