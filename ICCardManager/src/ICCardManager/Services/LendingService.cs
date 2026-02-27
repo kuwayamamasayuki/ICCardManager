@@ -6,6 +6,7 @@ using ICCardManager.Data;
 using ICCardManager.Data.Repositories;
 using ICCardManager.Models;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
 namespace ICCardManager.Services
 {
@@ -162,12 +163,12 @@ namespace ICCardManager.Services
         /// <summary>
         /// 30秒ルール適用の時間（秒）
         /// </summary>
-        private const int RetouchTimeoutSeconds = 30;
+        private readonly int _retouchTimeoutSeconds;
 
         /// <summary>
         /// ロック取得のタイムアウト（ミリ秒）
         /// </summary>
-        private const int LockTimeoutMs = 5000;
+        private readonly int _lockTimeoutMs;
 
         public LendingService(
             DbContext dbContext,
@@ -177,6 +178,7 @@ namespace ICCardManager.Services
             ISettingsRepository settingsRepository,
             SummaryGenerator summaryGenerator,
             CardLockManager lockManager,
+            IOptions<AppOptions> appOptions,
             ILogger<LendingService> logger)
         {
             _dbContext = dbContext;
@@ -186,6 +188,8 @@ namespace ICCardManager.Services
             _settingsRepository = settingsRepository;
             _summaryGenerator = summaryGenerator;
             _lockManager = lockManager;
+            _retouchTimeoutSeconds = appOptions.Value.RetouchWindowSeconds;
+            _lockTimeoutMs = appOptions.Value.CardLockTimeoutSeconds * 1000;
             _logger = logger;
         }
 
@@ -1013,7 +1017,7 @@ namespace ICCardManager.Services
             }
 
             var elapsed = DateTime.Now - LastProcessedTime.Value;
-            return elapsed.TotalSeconds <= RetouchTimeoutSeconds;
+            return elapsed.TotalSeconds <= _retouchTimeoutSeconds;
         }
 
         /// <summary>
@@ -1101,7 +1105,7 @@ namespace ICCardManager.Services
         /// <summary>
         /// ロック取得のタイムアウト値を取得（テスト用にオーバーライド可能）
         /// </summary>
-        protected virtual int GetLockTimeoutMs() => LockTimeoutMs;
+        protected virtual int GetLockTimeoutMs() => _lockTimeoutMs;
 
         /// <summary>
         /// カードから読み取った履歴の完全性をチェック

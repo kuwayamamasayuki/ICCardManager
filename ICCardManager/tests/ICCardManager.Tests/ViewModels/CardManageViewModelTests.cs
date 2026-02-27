@@ -9,6 +9,7 @@ using ICCardManager.Services;
 using ICCardManager.ViewModels;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 using Moq;
 using Xunit;
 using IOperationLogRepository = ICCardManager.Data.Repositories.IOperationLogRepository;
@@ -67,6 +68,7 @@ public class CardManageViewModelTests
             settingsRepositoryMock.Object,
             summaryGenerator,
             lockManager,
+            Options.Create(new AppOptions()),
             NullLogger<LendingService>.Instance);
 
         // バリデーションはデフォルトで成功を返す

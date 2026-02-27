@@ -16,6 +16,7 @@ using ICCardManager.Infrastructure.CardReader;
 using ICCardManager.Infrastructure.Sound;
 using ICCardManager.Models;
 using ICCardManager.Services;
+using Microsoft.Extensions.Options;
 
 
 namespace ICCardManager.ViewModels;
@@ -129,7 +130,7 @@ public partial class MainViewModel : ViewModelBase
     /// <summary>
     /// タイムアウト時間（秒）
     /// </summary>
-    private const int TimeoutSeconds = 60;
+    private readonly int _timeoutSeconds;
 
     [ObservableProperty]
     private AppState _currentState = AppState.WaitingForStaffCard;
@@ -364,7 +365,8 @@ public partial class MainViewModel : ViewModelBase
         IMessenger messenger,
         INavigationService navigationService,
         OperationLogger operationLogger,
-        LedgerConsistencyChecker ledgerConsistencyChecker)
+        LedgerConsistencyChecker ledgerConsistencyChecker,
+        IOptions<AppOptions> appOptions)
     {
         _cardReader = cardReader;
         _soundPlayer = soundPlayer;
@@ -380,6 +382,7 @@ public partial class MainViewModel : ViewModelBase
         _navigationService = navigationService;
         _operationLogger = operationLogger;
         _ledgerConsistencyChecker = ledgerConsistencyChecker;
+        _timeoutSeconds = appOptions.Value.StaffCardTimeoutSeconds;
 
         // カード読み取り抑制メッセージの受信を登録（Issue #852）
         _messenger.Register<CardReadingSuppressedMessage>(this, (recipient, message) =>
@@ -1726,7 +1729,7 @@ public partial class MainViewModel : ViewModelBase
     /// </summary>
     private void StartTimeout()
     {
-        RemainingSeconds = TimeoutSeconds;
+        RemainingSeconds = _timeoutSeconds;
 
         _timeoutTimer = new DispatcherTimer
         {

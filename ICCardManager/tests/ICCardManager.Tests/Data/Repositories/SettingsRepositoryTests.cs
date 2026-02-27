@@ -4,6 +4,7 @@ using ICCardManager.Data.Repositories;
 using ICCardManager.Infrastructure.Caching;
 using ICCardManager.Models;
 using ICCardManager.Tests.Data;
+using Microsoft.Extensions.Options;
 using Moq;
 using Xunit;
 
@@ -36,7 +37,7 @@ public class SettingsRepositoryTests : IDisposable
             It.IsAny<TimeSpan>()))
             .Returns((string key, Func<Task<AppSettings>> factory, TimeSpan expiration) => factory());
 
-        _repository = new SettingsRepository(_dbContext, _cacheServiceMock.Object);
+        _repository = new SettingsRepository(_dbContext, _cacheServiceMock.Object, Options.Create(new CacheOptions()));
     }
 
     public void Dispose()

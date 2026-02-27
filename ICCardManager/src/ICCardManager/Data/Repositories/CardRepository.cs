@@ -4,6 +4,7 @@ using System.Linq;
 using System.Threading.Tasks;
 using ICCardManager.Infrastructure.Caching;
 using ICCardManager.Models;
+using Microsoft.Extensions.Options;
 using System.Data.Common;
 using System.Data.SQLite;
 
@@ -16,11 +17,13 @@ namespace ICCardManager.Data.Repositories
     {
         private readonly DbContext _dbContext;
         private readonly ICacheService _cacheService;
+        private readonly CacheOptions _cacheOptions;
 
-        public CardRepository(DbContext dbContext, ICacheService cacheService)
+        public CardRepository(DbContext dbContext, ICacheService cacheService, IOptions<CacheOptions> cacheOptions)
         {
             _dbContext = dbContext;
             _cacheService = cacheService;
+            _cacheOptions = cacheOptions.Value;
         }
 
         /// <inheritdoc/>
@@ -29,7 +32,7 @@ namespace ICCardManager.Data.Repositories
             return await _cacheService.GetOrCreateAsync(
                 CacheKeys.AllCards,
                 async () => await GetAllFromDbAsync(),
-                CacheDurations.CardList);
+                TimeSpan.FromSeconds(_cacheOptions.CardListSeconds));
         }
 
         /// <summary>
@@ -85,7 +88,7 @@ ORDER BY card_type, card_number";
             return await _cacheService.GetOrCreateAsync(
                 CacheKeys.AvailableCards,
                 async () => await GetAvailableFromDbAsync(),
-                CacheDurations.CardList);
+                TimeSpan.FromSeconds(_cacheOptions.CardListSeconds));
         }
 
         /// <summary>
@@ -125,7 +128,7 @@ ORDER BY card_type, card_number";
             return await _cacheService.GetOrCreateAsync(
                 CacheKeys.LentCards,
                 async () => await GetLentFromDbAsync(),
-                CacheDurations.LentCards);
+                TimeSpan.FromSeconds(_cacheOptions.LentCardsSeconds));
         }
 
         /// <summary>

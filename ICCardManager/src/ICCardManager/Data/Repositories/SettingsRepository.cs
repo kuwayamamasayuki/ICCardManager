@@ -5,6 +5,7 @@ using System.Threading.Tasks;
 using System.IO;
 using ICCardManager.Infrastructure.Caching;
 using ICCardManager.Models;
+using Microsoft.Extensions.Options;
 
 namespace ICCardManager.Data.Repositories
 {
@@ -15,6 +16,7 @@ namespace ICCardManager.Data.Repositories
     {
         private readonly DbContext _dbContext;
         private readonly ICacheService _cacheService;
+        private readonly CacheOptions _cacheOptions;
 
         // 設定キー定数
         public const string KeyWarningBalance = "warning_balance";
@@ -38,10 +40,11 @@ namespace ICCardManager.Data.Repositories
         // 部署種別設定キー
         public const string KeyDepartmentType = "department_type";
 
-        public SettingsRepository(DbContext dbContext, ICacheService cacheService)
+        public SettingsRepository(DbContext dbContext, ICacheService cacheService, IOptions<CacheOptions> cacheOptions)
         {
             _dbContext = dbContext;
             _cacheService = cacheService;
+            _cacheOptions = cacheOptions.Value;
         }
 
         /// <inheritdoc/>
@@ -79,7 +82,7 @@ ON CONFLICT(key) DO UPDATE SET value = @value";
             return await _cacheService.GetOrCreateAsync(
                 CacheKeys.AppSettings,
                 async () => await GetAppSettingsFromDbAsync(),
-                CacheDurations.Settings);
+                TimeSpan.FromMinutes(_cacheOptions.SettingsMinutes));
         }
 
         /// <inheritdoc/>
@@ -94,7 +97,7 @@ ON CONFLICT(key) DO UPDATE SET value = @value";
 
             // DBから同期的に取得
             var settings = GetAppSettingsFromDb();
-            _cacheService.Set(CacheKeys.AppSettings, settings, CacheDurations.Settings);
+            _cacheService.Set(CacheKeys.AppSettings, settings, TimeSpan.FromMinutes(_cacheOptions.SettingsMinutes));
             return settings;
         }
 

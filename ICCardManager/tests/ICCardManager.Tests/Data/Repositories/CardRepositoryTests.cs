@@ -4,6 +4,7 @@ using ICCardManager.Data.Repositories;
 using ICCardManager.Infrastructure.Caching;
 using ICCardManager.Models;
 using ICCardManager.Tests.Data;
+using Microsoft.Extensions.Options;
 using Moq;
 using Xunit;
 
@@ -47,8 +48,8 @@ public class CardRepositoryTests : IDisposable
             It.IsAny<TimeSpan>()))
             .Returns((string key, Func<Task<IEnumerable<Staff>>> factory, TimeSpan expiration) => factory());
 
-        _repository = new CardRepository(_dbContext, _cacheServiceMock.Object);
-        _staffRepository = new StaffRepository(_dbContext, _cacheServiceMock.Object);
+        _repository = new CardRepository(_dbContext, _cacheServiceMock.Object, Options.Create(new CacheOptions()));
+        _staffRepository = new StaffRepository(_dbContext, _cacheServiceMock.Object, Options.Create(new CacheOptions()));
     }
 
     public void Dispose()

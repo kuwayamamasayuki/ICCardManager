@@ -4,6 +4,7 @@ using ICCardManager.Data;
 using ICCardManager.Data.Repositories;
 using ICCardManager.Infrastructure.Caching;
 using ICCardManager.Models;
+using Microsoft.Extensions.Options;
 using Moq;
 using Xunit;
 
@@ -53,8 +54,8 @@ public class DbContextCleanupTests : IDisposable
             It.IsAny<TimeSpan>()))
             .Returns((string key, Func<Task<IEnumerable<Staff>>> factory, TimeSpan expiration) => factory());
 
-        _staffRepository = new StaffRepository(_dbContext, _cacheServiceMock.Object);
-        _cardRepository = new CardRepository(_dbContext, _cacheServiceMock.Object);
+        _staffRepository = new StaffRepository(_dbContext, _cacheServiceMock.Object, Options.Create(new CacheOptions()));
+        _cardRepository = new CardRepository(_dbContext, _cacheServiceMock.Object, Options.Create(new CacheOptions()));
         _ledgerRepository = new LedgerRepository(_dbContext);
 
         // テスト用の職員とカードを登録（FK制約対応）

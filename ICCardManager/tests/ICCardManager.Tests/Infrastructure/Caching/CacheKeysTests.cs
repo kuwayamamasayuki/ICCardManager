@@ -11,7 +11,7 @@ using System.Threading.Tasks;
 namespace ICCardManager.Tests.Infrastructure.Caching;
 
 /// <summary>
-/// CacheKeysとCacheDurationsのテスト
+/// CacheKeysのテスト
 /// </summary>
 public class CacheKeysTests
 {
@@ -73,46 +73,6 @@ public class CacheKeysTests
     {
         // Assert
         CacheKeys.AppSettings.Should().StartWith(CacheKeys.SettingsPrefixForInvalidation);
-    }
-
-    #endregion
-
-    #region CacheDurations Tests
-
-    [Fact]
-    public void CacheDurations_Settings_ShouldBeFiveMinutes()
-    {
-        // Assert
-        CacheDurations.Settings.Should().Be(TimeSpan.FromMinutes(5));
-    }
-
-    [Fact]
-    public void CacheDurations_CardList_ShouldBeOneMinute()
-    {
-        // Assert
-        CacheDurations.CardList.Should().Be(TimeSpan.FromMinutes(1));
-    }
-
-    [Fact]
-    public void CacheDurations_StaffList_ShouldBeOneMinute()
-    {
-        // Assert
-        CacheDurations.StaffList.Should().Be(TimeSpan.FromMinutes(1));
-    }
-
-    [Fact]
-    public void CacheDurations_LentCards_ShouldBeThirtySeconds()
-    {
-        // Assert
-        CacheDurations.LentCards.Should().Be(TimeSpan.FromSeconds(30));
-    }
-
-    [Fact]
-    public void CacheDurations_RelativeOrder_SettingsShouldBeLongestThenCardListThenLentCards()
-    {
-        // Assert - 設定は最も長く、貸出中カードは最も短い
-        CacheDurations.Settings.Should().BeGreaterThan(CacheDurations.CardList);
-        CacheDurations.CardList.Should().BeGreaterThan(CacheDurations.LentCards);
     }
 
     #endregion
