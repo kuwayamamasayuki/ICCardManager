@@ -12,7 +12,7 @@
     必須画面（7枚）のみを取得します。
 
 .PARAMETER All
-    オプション画面も含むすべての画面（18枚）を取得します。
+    オプション画面も含むすべての画面（24枚）を取得します。
 
 .PARAMETER OutputDir
     出力先ディレクトリを指定します。デフォルトは docs/screenshots/ です。
@@ -27,7 +27,7 @@
 
 .NOTES
     作成日: 2026-02-02
-    Issue: #427, #435
+    Issue: #427, #435, #849
 #>
 
 param(
@@ -279,6 +279,44 @@ $optionalScreens = @(
         Name = "card_registration_mode.png"
         Title = "カード登録方法の選択画面"
         Instructions = "カード管理で新規登録後、カード登録方法の選択ダイアログが表示されたら"
+        ForegroundOnly = $true
+    },
+    # Issue #849: マニュアル用スクリーンショット追加
+    # 優先度: 高（操作手順の説明があるのに画面イメージがない）
+    @{
+        Name = "ledger_row_edit.png"
+        Title = "履歴行の修正ダイアログ"
+        Instructions = "履歴照会画面で行の「変更」ボタンをクリックし、職員証で認証後、修正ダイアログが表示されたら"
+        ForegroundOnly = $true
+    },
+    @{
+        Name = "operation_log.png"
+        Title = "操作ログ画面"
+        Instructions = "F6キーでシステム管理画面を開き、「操作ログ」ボタンをクリックして操作ログ画面が表示されたら"
+        ForegroundOnly = $true
+    },
+    @{
+        Name = "import_preview.png"
+        Title = "インポートプレビュー画面"
+        Instructions = "F4キーでデータ入出力画面を開き、CSVファイルを選択して「プレビュー」ボタンをクリックし、プレビュー結果が表示されたら"
+        ForegroundOnly = $true
+    },
+    # 優先度: 中（あると理解が深まる）
+    @{
+        Name = "incomplete_busstop.png"
+        Title = "バス停名未入力一覧ダイアログ"
+        Instructions = "メイン画面右側の「バス停名未入力」警告をクリックし、一覧ダイアログが表示されたら"
+        ForegroundOnly = $true
+    },
+    @{
+        Name = "main_with_warnings.png"
+        Title = "メイン画面（システム警告表示時）"
+        Instructions = "バス停名未入力データがある状態でメイン画面に警告パネルが表示されたら"
+    },
+    @{
+        Name = "card_type_selection.png"
+        Title = "カード種別選択ダイアログ"
+        Instructions = "未登録カードをICカードリーダーにタッチし、「職員証」か「交通系ICカード」かを選択するダイアログが表示されたら"
         ForegroundOnly = $true
     }
 )
