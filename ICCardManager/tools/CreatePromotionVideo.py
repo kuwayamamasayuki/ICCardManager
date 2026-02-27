@@ -617,8 +617,8 @@ def main():
     # Scene 3:  3s  職員証認識画面
     # Scene 4:  4s  交通系ICカードタッチ
     # Scene 5:  3s  貸出完了画面
-    # Scene 6:  3s  帳票テキスト
-    # Scene 7:  3s  帳票画面
+    # Scene 6:  3s  物品出納簿テキスト
+    # Scene 7:  3s  物品出納簿画面
     # Scene 8:  4s  エンドカード
     # 合計:    27s
 
@@ -657,13 +657,13 @@ def main():
             tmpdir, idx
         )
 
-        print("[6/8] 帳票メッセージ (17-20s)...")
+        print("[6/8] 物品出納簿メッセージ (17-20s)...")
         idx = save_frames(
-            scene_text("帳票もボタン1つで自動作成", 3.0),
+            scene_text("物品出納簿もボタン1つで自動作成", 3.0),
             tmpdir, idx
         )
 
-        print("[7/8] 帳票出力画面 (20-23s)...")
+        print("[7/8] 物品出納簿出力画面 (20-23s)...")
         idx = save_frames(
             scene_screenshot(screenshots["report_excel"],
                              "物品出納簿をExcelで自動出力", 3.0),
