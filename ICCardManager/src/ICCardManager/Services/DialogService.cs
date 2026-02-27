@@ -1,4 +1,7 @@
+using System;
+using System.Threading.Tasks;
 using System.Windows;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace ICCardManager.Services
 {
@@ -76,6 +79,44 @@ namespace ICCardManager.Services
             }
 
             return null;
+        }
+    }
+
+    /// <summary>
+    /// ナビゲーションサービスの実装（Issue #853）
+    /// </summary>
+    /// <remarks>
+    /// DialogServiceを継承し、DIコンテナからダイアログを解決して表示する機能を追加する。
+    /// IDialogServiceとINavigationServiceの両方のインターフェースを実装する。
+    /// </remarks>
+    public class NavigationService : DialogService, INavigationService
+    {
+        private readonly IServiceProvider _serviceProvider;
+
+        public NavigationService(IServiceProvider serviceProvider)
+        {
+            _serviceProvider = serviceProvider;
+        }
+
+        /// <inheritdoc/>
+        public bool? ShowDialog<TDialog>(Action<TDialog> configure = null) where TDialog : Window
+        {
+            var dialog = _serviceProvider.GetRequiredService<TDialog>();
+            dialog.Owner = Application.Current.MainWindow;
+            configure?.Invoke(dialog);
+            return dialog.ShowDialog();
+        }
+
+        /// <inheritdoc/>
+        public async Task<bool?> ShowDialogAsync<TDialog>(Func<TDialog, Task> configure = null) where TDialog : Window
+        {
+            var dialog = _serviceProvider.GetRequiredService<TDialog>();
+            dialog.Owner = Application.Current.MainWindow;
+            if (configure != null)
+            {
+                await configure(dialog);
+            }
+            return dialog.ShowDialog();
         }
     }
 }

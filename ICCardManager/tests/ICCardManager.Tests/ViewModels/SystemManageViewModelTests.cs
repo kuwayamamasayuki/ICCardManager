@@ -24,6 +24,7 @@ public class SystemManageViewModelTests : IDisposable
     private readonly DbContext _dbContext;
     private readonly Mock<ISettingsRepository> _settingsRepositoryMock;
     private readonly Mock<BackupService> _backupServiceMock;
+    private readonly Mock<INavigationService> _navigationServiceMock;
     private readonly SystemManageViewModel _viewModel;
 
     public SystemManageViewModelTests()
@@ -36,10 +37,12 @@ public class SystemManageViewModelTests : IDisposable
             _dbContext,
             _settingsRepositoryMock.Object,
             loggerMock.Object);
+        _navigationServiceMock = new Mock<INavigationService>();
 
         _viewModel = new SystemManageViewModel(
             _backupServiceMock.Object,
-            _settingsRepositoryMock.Object);
+            _settingsRepositoryMock.Object,
+            _navigationServiceMock.Object);
     }
 
     public void Dispose()
