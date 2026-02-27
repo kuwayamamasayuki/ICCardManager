@@ -65,6 +65,7 @@ namespace ICCardManager.Views.Dialogs
             _soundPlayer = soundPlayer;
             _messenger = messenger;
             _remainingSeconds = appOptions.Value.StaffCardTimeoutSeconds;
+            TimeoutText.Text = $"{_remainingSeconds}秒";
 
             // タイムアウトタイマーの設定
             _timeoutTimer = new DispatcherTimer

@@ -64,7 +64,7 @@
                        Foreground="{DynamicResource MutedTextBrush}"
                        HorizontalAlignment="Center"/>
             <TextBlock x:Name="TimeoutText"
-                       Text="60秒"
+                       Text=""
                        FontSize="{DynamicResource LargeFontSize}"
                        FontWeight="Bold"
                        Foreground="{DynamicResource PrimaryBrush}"
