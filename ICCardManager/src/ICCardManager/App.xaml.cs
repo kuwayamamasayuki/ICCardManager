@@ -21,6 +21,7 @@ using CommunityToolkit.Mvvm.Messaging;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
 namespace ICCardManager
 {
@@ -154,6 +155,10 @@ namespace ICCardManager
         /// </summary>
         private void ConfigureServices(IServiceCollection services)
         {
+            // 設定オプション（Issue #854: ハードコード値の外部化）
+            services.Configure<AppOptions>(Configuration.GetSection("AppOptions"));
+            services.Configure<CacheOptions>(Configuration.GetSection("CacheOptions"));
+
             // ロギングの設定
             services.AddLogging(builder =>
             {

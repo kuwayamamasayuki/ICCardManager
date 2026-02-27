@@ -4,6 +4,7 @@ using ICCardManager.Data.Repositories;
 using ICCardManager.Infrastructure.Caching;
 using ICCardManager.Models;
 using ICCardManager.Tests.Data;
+using Microsoft.Extensions.Options;
 using Moq;
 using Xunit;
 
@@ -50,8 +51,8 @@ public class LedgerRepositoryTests : IDisposable
             .Returns((string key, Func<Task<IEnumerable<Staff>>> factory, TimeSpan expiration) => factory());
 
         _repository = new LedgerRepository(_dbContext);
-        _cardRepository = new CardRepository(_dbContext, _cacheServiceMock.Object);
-        _staffRepository = new StaffRepository(_dbContext, _cacheServiceMock.Object);
+        _cardRepository = new CardRepository(_dbContext, _cacheServiceMock.Object, Options.Create(new CacheOptions()));
+        _staffRepository = new StaffRepository(_dbContext, _cacheServiceMock.Object, Options.Create(new CacheOptions()));
 
         // テスト用データを事前登録（外部キー制約対応）
         SetupTestData().Wait();

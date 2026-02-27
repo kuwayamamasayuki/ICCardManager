@@ -7,6 +7,7 @@ using ICCardManager.Infrastructure.CardReader;
 using ICCardManager.Services;
 using ICCardManager.ViewModels;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 using Moq;
 using Xunit;
 using IOperationLogRepository = ICCardManager.Data.Repositories.IOperationLogRepository;
@@ -58,6 +59,7 @@ public class CardManageViewModelMessagingTests
             settingsRepositoryMock.Object,
             summaryGenerator,
             lockManager,
+            Options.Create(new AppOptions()),
             NullLogger<LendingService>.Instance);
 
         _messenger = new WeakReferenceMessenger();

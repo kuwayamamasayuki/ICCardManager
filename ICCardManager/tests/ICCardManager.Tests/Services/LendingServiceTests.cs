@@ -6,6 +6,7 @@ using ICCardManager.Services;
 using ICCardManager.ViewModels;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 using Moq;
 using Xunit;
 
@@ -58,6 +59,7 @@ public class LendingServiceTests : IDisposable
             _settingsRepositoryMock.Object,
             _summaryGenerator,
             _lockManager,
+            Options.Create(new AppOptions()),
             NullLogger<LendingService>.Instance);
     }
 
@@ -1299,6 +1301,7 @@ public class LendingServiceTests : IDisposable
             _settingsRepositoryMock.Object,
             _summaryGenerator,
             _lockManager,
+            Options.Create(new AppOptions()),
             NullLogger<LendingService>.Instance);
 
         // Act - 最初の処理を開始し、ロックを保持させる
@@ -1441,8 +1444,9 @@ public class LendingServiceTests : IDisposable
             ISettingsRepository settingsRepository,
             SummaryGenerator summaryGenerator,
             CardLockManager lockManager,
+            IOptions<AppOptions> appOptions,
             ILogger<LendingService> logger)
-            : base(dbContext, cardRepository, staffRepository, ledgerRepository, settingsRepository, summaryGenerator, lockManager, logger)
+            : base(dbContext, cardRepository, staffRepository, ledgerRepository, settingsRepository, summaryGenerator, lockManager, appOptions, logger)
         {
         }
 

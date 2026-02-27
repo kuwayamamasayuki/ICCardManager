@@ -40,30 +40,4 @@ namespace ICCardManager.Infrastructure.Caching
         /// </summary>
         public const string SettingsPrefixForInvalidation = SettingsPrefix;
     }
-
-    /// <summary>
-    /// キャッシュ有効期限定数
-    /// </summary>
-    public static class CacheDurations
-    {
-        /// <summary>
-        /// AppSettings: 5分
-        /// </summary>
-        public static readonly TimeSpan Settings = TimeSpan.FromMinutes(5);
-
-        /// <summary>
-        /// カード一覧: 1分
-        /// </summary>
-        public static readonly TimeSpan CardList = TimeSpan.FromMinutes(1);
-
-        /// <summary>
-        /// 職員一覧: 1分
-        /// </summary>
-        public static readonly TimeSpan StaffList = TimeSpan.FromMinutes(1);
-
-        /// <summary>
-        /// 貸出中カード: 30秒
-        /// </summary>
-        public static readonly TimeSpan LentCards = TimeSpan.FromSeconds(30);
-    }
 }

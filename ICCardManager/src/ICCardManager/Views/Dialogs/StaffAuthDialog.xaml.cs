@@ -7,6 +7,8 @@ using ICCardManager.Common.Messages;
 using ICCardManager.Data.Repositories;
 using ICCardManager.Infrastructure.CardReader;
 using ICCardManager.Infrastructure.Sound;
+using ICCardManager.Services;
+using Microsoft.Extensions.Options;
 
 namespace ICCardManager.Views.Dialogs
 {
@@ -23,7 +25,7 @@ namespace ICCardManager.Views.Dialogs
         private readonly ISoundPlayer _soundPlayer;
         private readonly IMessenger _messenger;
         private readonly DispatcherTimer _timeoutTimer;
-        private int _remainingSeconds = 60;
+        private int _remainingSeconds;
 
         /// <summary>
         /// 認証成功時の職員IDm
@@ -53,7 +55,8 @@ namespace ICCardManager.Views.Dialogs
             IStaffRepository staffRepository,
             ICardReader cardReader,
             ISoundPlayer soundPlayer,
-            IMessenger messenger)
+            IMessenger messenger,
+            IOptions<AppOptions> appOptions)
         {
             InitializeComponent();
 
@@ -61,6 +64,8 @@ namespace ICCardManager.Views.Dialogs
             _cardReader = cardReader;
             _soundPlayer = soundPlayer;
             _messenger = messenger;
+            _remainingSeconds = appOptions.Value.StaffCardTimeoutSeconds;
+            TimeoutText.Text = $"{_remainingSeconds}秒";
 
             // タイムアウトタイマーの設定
             _timeoutTimer = new DispatcherTimer
