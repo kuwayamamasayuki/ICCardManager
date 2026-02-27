@@ -3208,5 +3208,52 @@ public class ReportServiceTests : IDisposable
         }
     }
 
+    /// <summary>
+    /// Issue #858: ワークシートの表示倍率が100%に設定されること
+    /// </summary>
+    [Fact]
+    public async Task CreateMonthlyReportAsync_Worksheet_ShouldHaveZoomScale100()
+    {
+        // Arrange
+        var cardIdm = "0102030405060708";
+        var card = CreateTestCard(cardIdm);
+        var year = 2024;
+        var month = 6;
+        var outputPath = CreateTempFilePath();
+
+        var ledgers = new List<Ledger>
+        {
+            CreateTestLedger(1, cardIdm, new DateTime(2024, 6, 5), "鉄道（博多～天神）", 0, 300, 4700, "田中太郎", "出張")
+        };
+
+        var mayLedgers = new List<Ledger>
+        {
+            CreateTestLedger(0, cardIdm, new DateTime(2024, 5, 31), "前月末", 0, 0, 5000)
+        };
+
+        _cardRepositoryMock
+            .Setup(r => r.GetByIdmAsync(cardIdm, true))
+            .ReturnsAsync(card);
+        _ledgerRepositoryMock
+            .Setup(r => r.GetByMonthAsync(cardIdm, year, month))
+            .ReturnsAsync(ledgers);
+        _ledgerRepositoryMock
+            .Setup(r => r.GetByMonthAsync(cardIdm, year, 5))
+            .ReturnsAsync(mayLedgers);
+
+        // Act
+        var result = await _reportService.CreateMonthlyReportAsync(cardIdm, year, month, outputPath);
+
+        // Assert
+        result.Success.Should().BeTrue();
+
+        using var workbook = new XLWorkbook(outputPath);
+        var worksheet = workbook.Worksheets.First();
+
+        // 表示倍率が100%であること
+        worksheet.SheetView.ZoomScale.Should().Be(100,
+            "ワークシートの表示倍率は100%であるべき");
+    }
+
     #endregion
 }

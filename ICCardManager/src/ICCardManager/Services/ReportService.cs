@@ -322,6 +322,10 @@ namespace ICCardManager.Services
                     // Issue #457: ページ設定（印刷時に1-4行目をヘッダーとして各ページに繰り返す）
                     ConfigurePageSetup(worksheet);
 
+                    // Issue #858: 表示倍率を100%に統一
+                    // テンプレートの最初のシートを直接使う場合、テンプレートの表示倍率が引き継がれるため
+                    worksheet.SheetView.ZoomScale = 100;
+
                     // Issue #457: データ出力（5～16行に内容を記載、それを超える場合は改ページ）
                     const int DataStartRow = 5;      // データ開始行
                     const int RowsPerPage = 12;      // 1ページあたりの最大データ行数（5～16行目）
