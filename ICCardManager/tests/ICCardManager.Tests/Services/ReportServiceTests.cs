@@ -3093,5 +3093,167 @@ public class ReportServiceTests : IDisposable
         worksheet.Cell(8, 2).GetString().Should().NotBe("累計");
     }
 
+    /// <summary>
+    /// Issue #858: データ行の全列（A～L列）のフォントサイズが14ptに設定されること
+    /// </summary>
+    [Fact]
+    public async Task CreateMonthlyReportAsync_DataRows_ShouldHaveConsistentFontSize()
+    {
+        // Arrange
+        var cardIdm = "0102030405060708";
+        var card = CreateTestCard(cardIdm);
+        var year = 2024;
+        var month = 6;
+        var outputPath = CreateTempFilePath();
+
+        var ledgers = new List<Ledger>
+        {
+            CreateTestLedger(1, cardIdm, new DateTime(2024, 6, 5), "鉄道（博多～天神）", 0, 300, 4700, "田中太郎", "出張")
+        };
+
+        var mayLedgers = new List<Ledger>
+        {
+            CreateTestLedger(0, cardIdm, new DateTime(2024, 5, 31), "前月末", 0, 0, 5000)
+        };
+
+        _cardRepositoryMock
+            .Setup(r => r.GetByIdmAsync(cardIdm, true))
+            .ReturnsAsync(card);
+        _ledgerRepositoryMock
+            .Setup(r => r.GetByMonthAsync(cardIdm, year, month))
+            .ReturnsAsync(ledgers);
+        _ledgerRepositoryMock
+            .Setup(r => r.GetByMonthAsync(cardIdm, year, 5))
+            .ReturnsAsync(mayLedgers);
+
+        // Act
+        var result = await _reportService.CreateMonthlyReportAsync(cardIdm, year, month, outputPath);
+
+        // Assert
+        result.Success.Should().BeTrue();
+
+        using var workbook = new XLWorkbook(outputPath);
+        var worksheet = workbook.Worksheets.First();
+
+        // データ行（行6）の全列フォントサイズが14ptであること
+        const int dataRow = 6;
+        const double expectedFontSize = 14;
+        for (int col = 1; col <= 12; col++)
+        {
+            worksheet.Cell(dataRow, col).Style.Font.FontSize.Should().Be(expectedFontSize,
+                $"データ行の{col}列目のフォントサイズが14ptであるべき");
+        }
+    }
+
+    /// <summary>
+    /// Issue #858: 月計・累計行の全列（A～L列）のフォントサイズが14ptに設定されること
+    /// </summary>
+    [Fact]
+    public async Task CreateMonthlyReportAsync_SummaryRows_ShouldHaveConsistentFontSize()
+    {
+        // Arrange
+        var cardIdm = "0102030405060708";
+        var card = CreateTestCard(cardIdm);
+        var year = 2024;
+        var month = 6;
+        var outputPath = CreateTempFilePath();
+
+        var ledgers = new List<Ledger>
+        {
+            CreateTestLedger(1, cardIdm, new DateTime(2024, 6, 5), "鉄道（博多～天神）", 0, 300, 4700, "田中太郎", "出張")
+        };
+
+        var mayLedgers = new List<Ledger>
+        {
+            CreateTestLedger(0, cardIdm, new DateTime(2024, 5, 31), "前月末", 0, 0, 5000)
+        };
+
+        _cardRepositoryMock
+            .Setup(r => r.GetByIdmAsync(cardIdm, true))
+            .ReturnsAsync(card);
+        _ledgerRepositoryMock
+            .Setup(r => r.GetByMonthAsync(cardIdm, year, month))
+            .ReturnsAsync(ledgers);
+        _ledgerRepositoryMock
+            .Setup(r => r.GetByMonthAsync(cardIdm, year, 5))
+            .ReturnsAsync(mayLedgers);
+        _ledgerRepositoryMock
+            .Setup(r => r.GetByDateRangeAsync(cardIdm, It.IsAny<DateTime>(), It.IsAny<DateTime>()))
+            .ReturnsAsync(ledgers);
+
+        // Act
+        var result = await _reportService.CreateMonthlyReportAsync(cardIdm, year, month, outputPath);
+
+        // Assert
+        result.Success.Should().BeTrue();
+
+        using var workbook = new XLWorkbook(outputPath);
+        var worksheet = workbook.Worksheets.First();
+
+        // 月計行（行7）の全列フォントサイズが14ptであること
+        const int monthlyTotalRow = 7;
+        const double expectedFontSize = 14;
+        for (int col = 1; col <= 12; col++)
+        {
+            worksheet.Cell(monthlyTotalRow, col).Style.Font.FontSize.Should().Be(expectedFontSize,
+                $"月計行の{col}列目のフォントサイズが14ptであるべき");
+        }
+
+        // 累計行（行8）の全列フォントサイズが14ptであること
+        const int cumulativeRow = 8;
+        for (int col = 1; col <= 12; col++)
+        {
+            worksheet.Cell(cumulativeRow, col).Style.Font.FontSize.Should().Be(expectedFontSize,
+                $"累計行の{col}列目のフォントサイズが14ptであるべき");
+        }
+    }
+
+    /// <summary>
+    /// Issue #858: ワークシートの表示倍率が100%に設定されること
+    /// </summary>
+    [Fact]
+    public async Task CreateMonthlyReportAsync_Worksheet_ShouldHaveZoomScale100()
+    {
+        // Arrange
+        var cardIdm = "0102030405060708";
+        var card = CreateTestCard(cardIdm);
+        var year = 2024;
+        var month = 6;
+        var outputPath = CreateTempFilePath();
+
+        var ledgers = new List<Ledger>
+        {
+            CreateTestLedger(1, cardIdm, new DateTime(2024, 6, 5), "鉄道（博多～天神）", 0, 300, 4700, "田中太郎", "出張")
+        };
+
+        var mayLedgers = new List<Ledger>
+        {
+            CreateTestLedger(0, cardIdm, new DateTime(2024, 5, 31), "前月末", 0, 0, 5000)
+        };
+
+        _cardRepositoryMock
+            .Setup(r => r.GetByIdmAsync(cardIdm, true))
+            .ReturnsAsync(card);
+        _ledgerRepositoryMock
+            .Setup(r => r.GetByMonthAsync(cardIdm, year, month))
+            .ReturnsAsync(ledgers);
+        _ledgerRepositoryMock
+            .Setup(r => r.GetByMonthAsync(cardIdm, year, 5))
+            .ReturnsAsync(mayLedgers);
+
+        // Act
+        var result = await _reportService.CreateMonthlyReportAsync(cardIdm, year, month, outputPath);
+
+        // Assert
+        result.Success.Should().BeTrue();
+
+        using var workbook = new XLWorkbook(outputPath);
+        var worksheet = workbook.Worksheets.First();
+
+        // 表示倍率が100%であること
+        worksheet.SheetView.ZoomScale.Should().Be(100,
+            "ワークシートの表示倍率は100%であるべき");
+    }
+
     #endregion
 }

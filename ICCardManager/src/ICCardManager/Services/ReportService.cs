@@ -322,6 +322,10 @@ namespace ICCardManager.Services
                     // Issue #457: ページ設定（印刷時に1-4行目をヘッダーとして各ページに繰り返す）
                     ConfigurePageSetup(worksheet);
 
+                    // Issue #858: 表示倍率を100%に統一
+                    // テンプレートの最初のシートを直接使う場合、テンプレートの表示倍率が引き継がれるため
+                    worksheet.SheetView.ZoomScale = 100;
+
                     // Issue #457: データ出力（5～16行に内容を記載、それを超える場合は改ページ）
                     const int DataStartRow = 5;      // データ開始行
                     const int RowsPerPage = 12;      // 1ページあたりの最大データ行数（5～16行目）
@@ -1024,10 +1028,10 @@ namespace ICCardManager.Services
             var fullRange = worksheet.Range(row, 1, row, 12);
             fullRange.Style.Font.Bold = false;
 
-            // E〜G列（受入金額、払出金額、残額）のフォントサイズを14ptに設定
-            // 最大金額20,000円（6文字）を考慮し、列幅10に収まるサイズ
-            var amountRange = worksheet.Range(row, 5, row, 7);
-            amountRange.Style.Font.FontSize = 14;
+            // Issue #858: 全列のフォントサイズを14ptに明示的に設定
+            // テンプレートの最初のシートを直接使う場合とAdd()で新規作成する場合で
+            // デフォルトフォントサイズが異なるため、明示的に統一する
+            fullRange.Style.Font.FontSize = 14;
 
             // B列からD列を結合（摘要）
             var summaryRange = worksheet.Range(row, 2, row, 4);
@@ -1039,10 +1043,8 @@ namespace ICCardManager.Services
             noteRange.Merge();
             noteRange.Style.Alignment.WrapText = true; // 折り返して全体を表示
 
-            // A列（出納年月日）のフォントサイズを14ptに設定し、中央寄せ
-            // 文字が大きすぎる場合に備えて「縮小して全体を表示する」を設定
+            // A列（出納年月日）を中央寄せ、縮小して全体を表示する
             var dateCell = worksheet.Cell(row, 1);
-            dateCell.Style.Font.FontSize = 14;
             dateCell.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
             dateCell.Style.Alignment.ShrinkToFit = true;
 
@@ -1076,9 +1078,11 @@ namespace ICCardManager.Services
             // 行の高さを30に設定
             worksheet.Row(row).Height = 30;
 
-            // E〜G列（受入金額、払出金額、残額）のフォントサイズを14ptに設定
-            var amountRange = worksheet.Range(row, 5, row, 7);
-            amountRange.Style.Font.FontSize = 14;
+            // Issue #858: 全列のフォントサイズを14ptに明示的に設定
+            // テンプレートの最初のシートを直接使う場合とAdd()で新規作成する場合で
+            // デフォルトフォントサイズが異なるため、明示的に統一する
+            var fullRange = worksheet.Range(row, 1, row, 12);
+            fullRange.Style.Font.FontSize = 14;
 
             // B列からD列を結合（摘要）
             var summaryRange = worksheet.Range(row, 2, row, 4);
@@ -1090,9 +1094,8 @@ namespace ICCardManager.Services
             noteRange.Merge();
             noteRange.Style.Alignment.WrapText = true;
 
-            // A列（出納年月日）のフォントサイズを14ptに設定し、中央寄せ
+            // A列（出納年月日）を中央寄せ、縮小して全体を表示する
             var dateCell = worksheet.Cell(row, 1);
-            dateCell.Style.Font.FontSize = 14;
             dateCell.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
             dateCell.Style.Alignment.ShrinkToFit = true;
 
