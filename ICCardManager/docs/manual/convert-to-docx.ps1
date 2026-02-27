@@ -107,7 +107,7 @@ $Manuals = @(
         Key = "intro"
         Input = "はじめに.md"
         Output = "はじめに.docx"
-        Title = "交通系ICカード管理システム はじめに"
+        Title = "交通系ICカード管理システム：ピッすい はじめに"
         VersionTracked = $false  # 固定バージョン（1.0）
     },
     @{
@@ -115,7 +115,7 @@ $Manuals = @(
         Key = "user"
         Input = "ユーザーマニュアル.md"
         Output = "ユーザーマニュアル.docx"
-        Title = "交通系ICカード管理システム ユーザーマニュアル"
+        Title = "交通系ICカード管理システム：ピッすい ユーザーマニュアル"
         VersionTracked = $true   # アプリバージョンに追従
     },
     @{
@@ -123,7 +123,7 @@ $Manuals = @(
         Key = "user-summary"
         Input = "ユーザーマニュアル概要版.md"
         Output = "ユーザーマニュアル概要版.docx"
-        Title = "交通系ICカード管理システム 操作ガイド（概要版）"
+        Title = "交通系ICカード管理システム：ピッすい 操作ガイド（概要版）"
         VersionTracked = $true   # アプリバージョンに追従
     },
     @{
@@ -131,7 +131,7 @@ $Manuals = @(
         Key = "admin"
         Input = "管理者マニュアル.md"
         Output = "管理者マニュアル.docx"
-        Title = "交通系ICカード管理システム 管理者マニュアル"
+        Title = "交通系ICカード管理システム：ピッすい 管理者マニュアル"
         VersionTracked = $true   # アプリバージョンに追従
     },
     @{
@@ -139,7 +139,7 @@ $Manuals = @(
         Key = "dev"
         Input = "開発者ガイド.md"
         Output = "開発者ガイド.docx"
-        Title = "交通系ICカード管理システム 開発者ガイド"
+        Title = "交通系ICカード管理システム：ピッすい 開発者ガイド"
         VersionTracked = $false  # 独自バージョン体系（1.1）
     }
 )

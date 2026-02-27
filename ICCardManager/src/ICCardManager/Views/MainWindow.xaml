@@ -9,13 +9,13 @@
         xmlns:app="clr-namespace:ICCardManager"
         mc:Ignorable="d"
         d:DataContext="{d:DesignInstance Type=vm:MainViewModel}"
-        Title="交通系ICカード管理システム"
+        Title="{x:Static conv:AppConstants.SystemName}"
         Height="700"
         Width="1350"
         MinWidth="{DynamicResource WindowMinWidth}"
         MinHeight="600"
         WindowStartupLocation="CenterScreen"
-        AutomationProperties.Name="交通系ICカード管理システム メインウィンドウ"
+        AutomationProperties.Name="交通系ICカード管理システム：ピッすい メインウィンドウ"
         FontSize="{DynamicResource BaseFontSize}"
         AutomationProperties.HelpText="職員証をタッチしてから交通系ICカードをタッチすると貸出または返却ができます">
 
@@ -50,7 +50,7 @@
             <DockPanel LastChildFill="False">
                 <!-- タイトル（左寄せ） -->
                 <TextBlock DockPanel.Dock="Left"
-                           Text="交通系ICカード管理システム"
+                           Text="{x:Static conv:AppConstants.SystemName}"
                            FontSize="{DynamicResource TitleFontSize}"
                            FontWeight="Bold"
                            Foreground="{DynamicResource OnPrimaryBrush}"
@@ -139,7 +139,7 @@
                                    FontSize="{DynamicResource IconFontSize}"
                                    HorizontalAlignment="Center"
                                    Margin="0,0,0,20"/>
-                        <TextBlock Text="交通系ICカード管理システム"
+                        <TextBlock Text="{x:Static conv:AppConstants.SystemName}"
                                    FontSize="{DynamicResource TitleFontSize}"
                                    FontWeight="Bold"
                                    HorizontalAlignment="Center"
