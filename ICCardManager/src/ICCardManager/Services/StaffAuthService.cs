@@ -5,6 +5,7 @@ using ICCardManager.Data.Repositories;
 using ICCardManager.Infrastructure.CardReader;
 using ICCardManager.Infrastructure.Sound;
 using ICCardManager.Views.Dialogs;
+using Microsoft.Extensions.Options;
 
 namespace ICCardManager.Services
 {
@@ -20,23 +21,26 @@ namespace ICCardManager.Services
         private readonly ICardReader _cardReader;
         private readonly ISoundPlayer _soundPlayer;
         private readonly IMessenger _messenger;
+        private readonly IOptions<AppOptions> _appOptions;
 
         public StaffAuthService(
             IStaffRepository staffRepository,
             ICardReader cardReader,
             ISoundPlayer soundPlayer,
-            IMessenger messenger)
+            IMessenger messenger,
+            IOptions<AppOptions> appOptions)
         {
             _staffRepository = staffRepository;
             _cardReader = cardReader;
             _soundPlayer = soundPlayer;
             _messenger = messenger;
+            _appOptions = appOptions;
         }
 
         /// <inheritdoc/>
         public Task<StaffAuthResult?> RequestAuthenticationAsync(string operationDescription)
         {
-            var dialog = new StaffAuthDialog(_staffRepository, _cardReader, _soundPlayer, _messenger)
+            var dialog = new StaffAuthDialog(_staffRepository, _cardReader, _soundPlayer, _messenger, _appOptions)
             {
                 Owner = Application.Current.MainWindow,
                 OperationDescription = operationDescription
