@@ -15,7 +15,7 @@
     <Version>1.0.0</Version>
     <FileVersion>1.0.0.0</FileVersion>
     <AssemblyVersion>1.0.0.0</AssemblyVersion>
-    <Company>Your Organization</Company>
+    <Company>桑山雅行</Company>
     <Product>ICカード管理システム デバッグツール</Product>
     <Description>ICカードの生データおよびDBデータを確認するための開発者向けツール</Description>
 
