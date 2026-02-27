@@ -2,7 +2,7 @@
 ; Inno Setup 6.x 用
 ; バージョンはコマンドラインから /DMyAppVersion=x.y.z で指定可能
 
-#define MyAppName "交通系ICカード管理システム"
+#define MyAppName "交通系ICカード管理システム：ピッすい"
 #define MyAppNameEn "ICCardManager"
 ; コマンドラインでバージョンが指定されていない場合のデフォルト値
 #ifndef MyAppVersion

@@ -1,4 +1,4 @@
-# ICCardManager - 交通系ICカード管理システム
+# ICCardManager - 交通系ICカード管理システム：ピッすい
 
 複数の交通系ICカード（はやかけん、nimoca、SUGOCA等）を複数職員でシェア利用する際の出納記録を管理するWindowsデスクトップアプリケーションです。
 
@@ -259,7 +259,7 @@ dotnet test --filter "FullyQualifiedName~SummaryGeneratorTests"
 <details>
 <summary>アンインストール方法</summary>
 
-1. 「設定」→「アプリ」→「交通系ICカード管理システム」を選択
+1. 「設定」→「アプリ」→「交通系ICカード管理システム：ピッすい」を選択
 2. 「アンインストール」をクリック
 3. アンインストール完了時に、ユーザーデータ・バックアップ・ログの削除を選択可能
 

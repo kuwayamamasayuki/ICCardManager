@@ -74,20 +74,20 @@ if %NOMERMAID%==0 (
 )
 
 rem はじめに
-if "%TARGET%"=="all" call :convert_manual "はじめに" "はじめに.md" "はじめに.docx" "交通系ICカード管理システム はじめに"
-if "%TARGET%"=="intro" call :convert_manual "はじめに" "はじめに.md" "はじめに.docx" "交通系ICカード管理システム はじめに"
+if "%TARGET%"=="all" call :convert_manual "はじめに" "はじめに.md" "はじめに.docx" "交通系ICカード管理システム：ピッすい はじめに"
+if "%TARGET%"=="intro" call :convert_manual "はじめに" "はじめに.md" "はじめに.docx" "交通系ICカード管理システム：ピッすい はじめに"
 
 rem ユーザーマニュアル
-if "%TARGET%"=="all" call :convert_manual "ユーザーマニュアル" "ユーザーマニュアル.md" "ユーザーマニュアル.docx" "交通系ICカード管理システム ユーザーマニュアル"
-if "%TARGET%"=="user" call :convert_manual "ユーザーマニュアル" "ユーザーマニュアル.md" "ユーザーマニュアル.docx" "交通系ICカード管理システム ユーザーマニュアル"
+if "%TARGET%"=="all" call :convert_manual "ユーザーマニュアル" "ユーザーマニュアル.md" "ユーザーマニュアル.docx" "交通系ICカード管理システム：ピッすい ユーザーマニュアル"
+if "%TARGET%"=="user" call :convert_manual "ユーザーマニュアル" "ユーザーマニュアル.md" "ユーザーマニュアル.docx" "交通系ICカード管理システム：ピッすい ユーザーマニュアル"
 
 rem 管理者マニュアル
-if "%TARGET%"=="all" call :convert_manual "管理者マニュアル" "管理者マニュアル.md" "管理者マニュアル.docx" "交通系ICカード管理システム 管理者マニュアル"
-if "%TARGET%"=="admin" call :convert_manual "管理者マニュアル" "管理者マニュアル.md" "管理者マニュアル.docx" "交通系ICカード管理システム 管理者マニュアル"
+if "%TARGET%"=="all" call :convert_manual "管理者マニュアル" "管理者マニュアル.md" "管理者マニュアル.docx" "交通系ICカード管理システム：ピッすい 管理者マニュアル"
+if "%TARGET%"=="admin" call :convert_manual "管理者マニュアル" "管理者マニュアル.md" "管理者マニュアル.docx" "交通系ICカード管理システム：ピッすい 管理者マニュアル"
 
 rem 開発者ガイド
-if "%TARGET%"=="all" call :convert_manual "開発者ガイド" "開発者ガイド.md" "開発者ガイド.docx" "交通系ICカード管理システム 開発者ガイド"
-if "%TARGET%"=="dev" call :convert_manual "開発者ガイド" "開発者ガイド.md" "開発者ガイド.docx" "交通系ICカード管理システム 開発者ガイド"
+if "%TARGET%"=="all" call :convert_manual "開発者ガイド" "開発者ガイド.md" "開発者ガイド.docx" "交通系ICカード管理システム：ピッすい 開発者ガイド"
+if "%TARGET%"=="dev" call :convert_manual "開発者ガイド" "開発者ガイド.md" "開発者ガイド.docx" "交通系ICカード管理システム：ピッすい 開発者ガイド"
 
 rem 結果サマリ
 echo.
