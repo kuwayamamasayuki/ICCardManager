@@ -11,7 +11,7 @@
         d:DataContext="{d:DesignInstance Type=vm:MainViewModel}"
         Title="{x:Static conv:AppConstants.SystemName}"
         Height="700"
-        Width="1350"
+        Width="1450"
         MinWidth="{DynamicResource WindowMinWidth}"
         MinHeight="600"
         WindowStartupLocation="CenterScreen"

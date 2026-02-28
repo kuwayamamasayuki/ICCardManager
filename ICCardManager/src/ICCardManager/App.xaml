@@ -29,8 +29,8 @@
 
             <!-- Issue #542: サイドバー幅（フォントサイズに応じて動的に変更） -->
             <sys:Double x:Key="SidebarWidth">350</sys:Double>
-            <!-- Issue #542: ウィンドウ最小幅（固定値） Issue #663: ヘルプボタン追加に伴い拡大 -->
-            <sys:Double x:Key="WindowMinWidth">1300</sys:Double>
+            <!-- Issue #542: ウィンドウ最小幅（固定値） Issue #663: ヘルプボタン追加に伴い拡大 愛称追加に伴い再拡大 -->
+            <sys:Double x:Key="WindowMinWidth">1400</sys:Double>
         </ResourceDictionary>
     </Application.Resources>
 </Application>
