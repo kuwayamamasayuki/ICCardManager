@@ -35,13 +35,14 @@ except ImportError:
 # A4縦 300 DPI
 PAGE_WIDTH, PAGE_HEIGHT = 2480, 3508
 
-# カラーパレット（CreatePromotionVideo.py と統一）
+# カラーパレット
 MAIN_BLUE = (33, 150, 243)           # #2196F3 アプリのテーマカラー
-DARK_BLUE = (25, 118, 191)           # #1976BF ヘッダー下部グラデーション用
+DARK_BLUE = (25, 118, 191)           # #1976BF ヘッダー下部
 TEXT_DARK = (33, 33, 33)             # #212121
 TEXT_WHITE = (255, 255, 255)         # #FFFFFF
 TEXT_GRAY = (117, 117, 117)          # #757575
-SHADOW_COLOR = (200, 200, 200)       # スクリーンショットの影
+PROBLEM_RED = (211, 47, 47)          # #D32F2F 問題提起の赤
+SHADOW_COLOR = (180, 180, 180)       # SS影（少し濃くする）
 BORDER_COLOR = (224, 224, 224)       # #E0E0E0
 WHITE = (255, 255, 255)
 LIGHT_BLUE_BG = (237, 247, 255)     # セクション交互背景
@@ -72,6 +73,11 @@ PROMOTION_DIR = PROJECT_DIR / "docs" / "promotion"
 MARGIN = 80
 CONTENT_WIDTH = PAGE_WIDTH - MARGIN * 2
 
+# セクション共通余白
+SECTION_PAD_TOP = 30       # セクション上余白
+SECTION_PAD_BOTTOM = 25    # セクション下余白
+SS_CORNER_RADIUS = 16      # スクリーンショット角丸
+
 
 # ============================================================
 # フォントキャッシュ
@@ -93,10 +99,22 @@ def get_font(size: int) -> ImageFont.FreeTypeFont:
 # ============================================================
 # 描画ヘルパー
 # ============================================================
+def round_corner_mask(size: tuple, radius: int) -> Image.Image:
+    """角丸マスク画像（グレースケール L）を生成"""
+    w, h = size
+    mask = Image.new("L", (w, h), 255)
+    md = ImageDraw.Draw(mask)
+    # 四隅を黒で塗り、角丸矩形を白で描画
+    mask = Image.new("L", (w, h), 0)
+    md = ImageDraw.Draw(mask)
+    md.rounded_rectangle((0, 0, w - 1, h - 1), radius=radius, fill=255)
+    return mask
+
+
 def load_and_fit_screenshot(path: Path, max_w: int, max_h: int) -> Image.Image:
-    """スクリーンショットを読み込み、指定サイズ内にアスペクト比を維持してリサイズ"""
+    """スクリーンショットを読み込み、指定サイズ内にリサイズ（最大1.2倍）"""
     screenshot = Image.open(path)
-    ratio = min(max_w / screenshot.width, max_h / screenshot.height, 1.3)
+    ratio = min(max_w / screenshot.width, max_h / screenshot.height, 1.2)
     new_w = int(screenshot.width * ratio)
     new_h = int(screenshot.height * ratio)
     return screenshot.resize((new_w, new_h), Image.LANCZOS)
@@ -104,21 +122,27 @@ def load_and_fit_screenshot(path: Path, max_w: int, max_h: int) -> Image.Image:
 
 def draw_shadow_screenshot(img: Image.Image, screenshot: Image.Image,
                            x: int, y: int):
-    """影付きスクリーンショットを描画"""
-    draw = ImageDraw.Draw(img)
-    shadow_offset = 4
-    draw.rectangle(
-        (x + shadow_offset, y + shadow_offset,
-         x + screenshot.width + shadow_offset,
-         y + screenshot.height + shadow_offset),
-        fill=SHADOW_COLOR
+    """角丸＋影付きスクリーンショットを描画"""
+    sw, sh = screenshot.size
+    shadow_offset = 5
+
+    # 1) 影: 角丸グレー矩形を右下にオフセット
+    shadow_mask = round_corner_mask((sw, sh), SS_CORNER_RADIUS)
+    img.paste(
+        Image.new("RGB", (sw, sh), SHADOW_COLOR),
+        (x + shadow_offset, y + shadow_offset),
+        shadow_mask,
     )
-    img.paste(screenshot, (x, y))
-    draw.rectangle(
-        (x - 1, y - 1,
-         x + screenshot.width, y + screenshot.height),
-        outline=BORDER_COLOR, width=1
-    )
+
+    # 2) 白い角丸矩形でSSの領域を塗りつぶし
+    #    → 影がSSの角丸コーナーから透けるのを防ぐ
+    white_base = Image.new("RGB", (sw, sh), WHITE)
+    white_mask = round_corner_mask((sw, sh), SS_CORNER_RADIUS)
+    img.paste(white_base, (x, y), white_mask)
+
+    # 3) SSを角丸にクリップして貼り付け
+    ss_mask = round_corner_mask((sw, sh), SS_CORNER_RADIUS)
+    img.paste(screenshot.convert("RGB"), (x, y), ss_mask)
 
 
 # ============================================================
@@ -278,9 +302,9 @@ def draw_operation_section(img: Image.Image, y_start: int) -> int:
     bg_color = (255, 248, 240)
     draw.rectangle((0, y, PAGE_WIDTH, y + section_h), fill=bg_color)
 
-    inner_y = y + 40
+    inner_y = y + SECTION_PAD_TOP + 10
 
-    # 問題提起テキスト
+    # 問題提起テキスト 1行目（黒）
     problem_font = get_font(72)
     problem_text = "交通系ICカードの管理、"
     bbox = draw.textbbox((0, 0), problem_text, font=problem_font)
@@ -289,11 +313,12 @@ def draw_operation_section(img: Image.Image, y_start: int) -> int:
               fill=TEXT_DARK, font=problem_font)
     inner_y += 90
 
+    # 問題提起テキスト 2行目（赤：問題感を出す）
     problem_text2 = "まだ手書きですか？"
     bbox1b = draw.textbbox((0, 0), problem_text2, font=problem_font)
     tw1b = bbox1b[2] - bbox1b[0]
     draw.text(((PAGE_WIDTH - tw1b) // 2, inner_y), problem_text2,
-              fill=TEXT_DARK, font=problem_font)
+              fill=PROBLEM_RED, font=problem_font)
     inner_y += 100
 
     # サブテキスト
@@ -312,7 +337,7 @@ def draw_operation_section(img: Image.Image, y_start: int) -> int:
     illust = Image.new("RGBA", (illust_w, illust_h), (0, 0, 0, 0))
 
     tcx = illust_w // 2   # 一時画像の中心X
-    tcy = 155             # 一時画像の中心Y（上にピッ♪の余白を確保）
+    tcy = 155             # 一時画像の中心Y
 
     # リーダー（中央）
     draw_card_reader(illust, tcx, tcy + 20)
@@ -376,21 +401,43 @@ def draw_operation_section(img: Image.Image, y_start: int) -> int:
     paste_x = (PAGE_WIDTH - new_w) // 2
     img.paste(illust_scaled, (paste_x, inner_y), illust_scaled)
 
-    # 下部テキスト（強調）
-    bottom_y = y + section_h - 95
-    bottom_font = get_font(72)
-    bottom_text = "貸出時も返却時も、この2タッチだけ。"
-    bbox5 = draw.textbbox((0, 0), bottom_text, font=bottom_font)
-    bw = bbox5[2] - bbox5[0]
-    draw.text(((PAGE_WIDTH - bw) // 2, bottom_y), bottom_text,
-              fill=MAIN_BLUE, font=bottom_font)
+    # 下部テキスト（「2」だけ特大にする「ビッグナンバー」手法）
+    bottom_y = y + section_h - 110
+
+    # 各パーツのフォント
+    text_font = get_font(72)
+    big_num_font = get_font(140)
+
+    parts = [
+        ("貸出時も返却時も、この", text_font, MAIN_BLUE),
+        ("2", big_num_font, MAIN_BLUE),
+        ("タッチだけ。", text_font, MAIN_BLUE),
+    ]
+
+    # 全体幅を計算（anchor="ls" 用に textbbox も ls 基準で測る）
+    total_w = 0
+    part_widths = []
+    for text, font, color in parts:
+        bbox_p = draw.textbbox((0, 0), text, font=font, anchor="ls")
+        pw = bbox_p[2] - bbox_p[0]
+        part_widths.append(pw)
+        total_w += pw
+
+    # anchor="ls"（left-baseline）で描画:
+    # y座標がそのままベースライン位置になるため、
+    # フォントサイズが違っても全パーツのベースラインが完全に一致する。
+    cx = (PAGE_WIDTH - total_w) // 2
+    for i, (text, font, color) in enumerate(parts):
+        draw.text((cx, bottom_y), text, fill=color, font=font, anchor="ls")
+        cx += part_widths[i]
 
     return y + section_h
 
 
 def draw_result_section(img: Image.Image, y_start: int, section_h: int,
                         title: str, description: str,
-                        ss_path: Path, bg_color=None) -> int:
+                        ss_path: Path, bg_color=None,
+                        supplementary_lines=None) -> int:
     """③④ 結果セクション（全幅帯: 青バー付きタイトル + 説明 + SS中央配置）"""
     draw = ImageDraw.Draw(img)
     x = MARGIN
@@ -402,7 +449,7 @@ def draw_result_section(img: Image.Image, y_start: int, section_h: int,
 
     # セクション上部の区切り線
     draw.rectangle((MARGIN, y, PAGE_WIDTH - MARGIN, y + 3), fill=BORDER_COLOR)
-    y += 30
+    y += SECTION_PAD_TOP
 
     # 青バー + タイトル
     bar_w = 12
@@ -411,20 +458,30 @@ def draw_result_section(img: Image.Image, y_start: int, section_h: int,
     th = bbox[3] - bbox[1]
     draw.rectangle((x, y, x + bar_w, y + th + 10), fill=MAIN_BLUE)
     draw.text((x + bar_w + 22, y), title, fill=TEXT_DARK, font=title_font)
-    y += th + 28
+    y += th + 24
 
     # 説明テキスト
     desc_font = get_font(42)
     draw.text((x + bar_w + 22, y), description, fill=TEXT_GRAY, font=desc_font)
-    y += 65
+    y += 60
 
-    # スクリーンショット（全幅帯で中央配置）
+    # 補足テキスト（SS縮小で生まれたスペースを活用）
+    if supplementary_lines:
+        sup_font = get_font(36)
+        for line in supplementary_lines:
+            draw.text((x + bar_w + 22, y), line, fill=TEXT_GRAY, font=sup_font)
+            y += 48
+        y += 8
+
+    # スクリーンショット（角丸＋深い影で中央配置）
     if ss_path.exists():
-        ss_available_h = (y_start + section_h) - y - 20
-        ss_available_w = CONTENT_WIDTH - 80
+        ss_available_h = (y_start + section_h) - y - SECTION_PAD_BOTTOM
+        ss_available_w = CONTENT_WIDTH - 120
         ss = load_and_fit_screenshot(ss_path, ss_available_w, ss_available_h)
         ss_x = (PAGE_WIDTH - ss.width) // 2
-        draw_shadow_screenshot(img, ss, ss_x, y)
+        # SS上の余白を均等に配分
+        ss_space_above = max(0, ((y_start + section_h - SECTION_PAD_BOTTOM) - y - ss.height)) // 2
+        draw_shadow_screenshot(img, ss, ss_x, y + ss_space_above)
 
     return y_start + section_h
 
@@ -475,16 +532,11 @@ def main():
     img = Image.new("RGB", (PAGE_WIDTH, PAGE_HEIGHT), WHITE)
 
     # セクション高さの配分（A4縦: 3508px）
-    # ① ヘッダー: 290px
-    # ② 操作説明: 950px
-    # ③ 結果1(履歴): 残りの60%
-    # ④ 結果2(帳票): 残りの40%
-    # ⑤ フッター: 100px
     header_h = 290
     operation_h = 950
     footer_h = 100
     remaining = PAGE_HEIGHT - header_h - operation_h - footer_h
-    result1_h = remaining * 58 // 100
+    result1_h = remaining * 55 // 100
     result2_h = remaining - result1_h
 
     print("[1/5] ヘッダー...")
@@ -500,6 +552,9 @@ def main():
         title="タッチするだけで利用履歴を自動記録",
         description="残高・乗車駅・降車駅を自動で読み取り。手書き不要。",
         ss_path=return_ss,
+        supplementary_lines=[
+            "・ 返却時に履歴を自動取得。入力ミスの心配なし",
+        ],
     )
 
     print("[4/5] 物品出納簿セクション...")
@@ -509,6 +564,9 @@ def main():
         description="利用履歴から帳票を自動生成。庶務担当者の負担を軽減。",
         ss_path=report_path,
         bg_color=LIGHT_BLUE_BG,
+        supplementary_lines=[
+            "・ 月次の物品出納簿をワンクリックでExcel出力",
+        ],
     )
 
     print("[5/5] フッター...")
