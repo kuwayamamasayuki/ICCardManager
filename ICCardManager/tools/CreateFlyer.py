@@ -272,20 +272,29 @@ def draw_operation_section(img: Image.Image, y_start: int) -> int:
     y = y_start
 
     # 背景帯（薄いオレンジ）
-    section_h = 480
+    section_h = 560
     bg_color = (255, 248, 240)  # ごく薄いオレンジ
     draw.rectangle((0, y, PAGE_WIDTH, y + section_h), fill=bg_color)
 
     inner_y = y + 30
 
     # 問題提起テキスト
-    problem_font = get_font(38)
+    problem_font = get_font(40)
     problem_text = "交通系ICカードの管理、まだ手書きですか？"
     bbox = draw.textbbox((0, 0), problem_text, font=problem_font)
     tw = bbox[2] - bbox[0]
     draw.text(((PAGE_WIDTH - tw) // 2, inner_y), problem_text,
               fill=TEXT_DARK, font=problem_font)
-    inner_y += 70
+
+    # 問題提起とイラストの間にサブテキストを挟んで距離を作る
+    inner_y += 65
+    sub_font = get_font(28)
+    sub_text = "ピッすいなら、タッチするだけで記録完了！"
+    bbox_sub = draw.textbbox((0, 0), sub_text, font=sub_font)
+    sw = bbox_sub[2] - bbox_sub[0]
+    draw.text(((PAGE_WIDTH - sw) // 2, inner_y), sub_text,
+              fill=TEXT_GRAY, font=sub_font)
+    inner_y += 60
 
     # カードタッチイラスト: [職員証] ──→ [リーダー ピッ♪] ←── [ICカード ピッ♪]
     illust_cy = inner_y + CARD_HEIGHT // 2 + 10
@@ -335,7 +344,7 @@ def draw_operation_section(img: Image.Image, y_start: int) -> int:
               pip_text, fill=MAIN_BLUE, font=pip_font)
 
     # ラベル: 「① 職員証」「② 交通系ICカード」
-    label_font = get_font(24)
+    label_font = get_font(26)
     label1 = "① 職員証"
     bbox3 = draw.textbbox((0, 0), label1, font=label_font)
     lw1 = bbox3[2] - bbox3[0]
@@ -348,9 +357,9 @@ def draw_operation_section(img: Image.Image, y_start: int) -> int:
     draw.text((center_x + card_gap - lw2 // 2, illust_cy + CARD_HEIGHT // 2 + 15),
               label2, fill=TEXT_DARK, font=label_font)
 
-    # 下部テキスト
-    bottom_y = y + section_h - 60
-    bottom_font = get_font(32)
+    # 下部テキスト（強調）
+    bottom_y = y + section_h - 70
+    bottom_font = get_font(44)
     bottom_text = "貸出時も返却時も、この2タッチだけ。"
     bbox5 = draw.textbbox((0, 0), bottom_text, font=bottom_font)
     bw = bbox5[2] - bbox5[0]
@@ -361,7 +370,6 @@ def draw_operation_section(img: Image.Image, y_start: int) -> int:
 
 
 def draw_result_section(img: Image.Image, y_start: int, section_h: int,
-                        icon_char: str, icon_color: tuple,
                         title: str, description: str,
                         ss_path: Path) -> int:
     """③④ 結果セクション（全幅帯: タイトル + 説明 + スクリーンショット中央配置）"""
@@ -371,32 +379,17 @@ def draw_result_section(img: Image.Image, y_start: int, section_h: int,
 
     # セクション上部の区切り線
     draw.rectangle((MARGIN, y, PAGE_WIDTH - MARGIN, y + 2), fill=BORDER_COLOR)
-    y += 20
+    y += 25
 
-    # アイコン + タイトル行
-    icon_r = 28
-    icon_cx = x + icon_r
-    icon_cy = y + icon_r
-    draw.ellipse(
-        (icon_cx - icon_r, icon_cy - icon_r,
-         icon_cx + icon_r, icon_cy + icon_r),
-        fill=icon_color
-    )
-    icon_font = get_font(28)
-    bbox = draw.textbbox((0, 0), icon_char, font=icon_font)
-    iw, ih = bbox[2] - bbox[0], bbox[3] - bbox[1]
-    draw.text((icon_cx - iw // 2, icon_cy - ih // 2), icon_char,
-              fill=TEXT_WHITE, font=icon_font)
-
-    title_font = get_font(36)
-    draw.text((x + icon_r * 2 + 20, y + 2), title,
-              fill=TEXT_DARK, font=title_font)
-    y += 65
+    # タイトル
+    title_font = get_font(42)
+    draw.text((x, y), title, fill=TEXT_DARK, font=title_font)
+    y += 60
 
     # 説明テキスト
-    desc_font = get_font(24)
-    draw.text((x + 10, y), description, fill=TEXT_GRAY, font=desc_font)
-    y += 45
+    desc_font = get_font(28)
+    draw.text((x, y), description, fill=TEXT_GRAY, font=desc_font)
+    y += 50
 
     # スクリーンショット（全幅帯で中央配置）
     if ss_path.exists():
@@ -439,11 +432,11 @@ def main():
 
     # セクション高さの配分（A4縦: 3508px）
     # ① ヘッダー: 220px
-    # ② 操作説明: 480px
+    # ② 操作説明: 560px
     # ③ 結果1(履歴): 残りの60%（メインの訴求）
     # ④ 結果2(帳票): 残りの40%（サブの訴求）
     header_h = 220
-    operation_h = 480
+    operation_h = 560
     remaining = PAGE_HEIGHT - header_h - operation_h
     result1_h = remaining * 63 // 100  # 履歴セクションを大きく
     result2_h = remaining - result1_h
@@ -458,7 +451,6 @@ def main():
     return_ss = SCREENSHOTS_DIR / "return.png"
     y = draw_result_section(
         img, y, result1_h,
-        icon_char="履", icon_color=MAIN_BLUE,
         title="タッチするだけで利用履歴を自動記録",
         description="残高・乗車駅・降車駅を自動で読み取り。手書きの手間がなくなります。",
         ss_path=return_ss,
@@ -467,7 +459,6 @@ def main():
     print("[4/4] 物品出納簿セクション...")
     draw_result_section(
         img, y, result2_h,
-        icon_char="表", icon_color=(3, 169, 244),
         title="物品出納簿をExcelで自動出力",
         description="利用履歴から帳票を自動生成。庶務担当者の負担を軽減します。",
         ss_path=report_path,
