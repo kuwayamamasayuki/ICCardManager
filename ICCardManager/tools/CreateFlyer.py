@@ -18,6 +18,7 @@ Pillow で生成する。
     - Yu Gothic Bold フォント (Windows標準)
 """
 
+import math
 import sys
 from pathlib import Path
 
@@ -44,7 +45,17 @@ SHADOW_COLOR = (200, 200, 200)       # スクリーンショットの影
 BORDER_COLOR = (224, 224, 224)       # #E0E0E0
 WHITE = (255, 255, 255)
 ACCENT_ORANGE = (255, 152, 0)        # #FF9800 貸出カラー
-ACCENT_LIGHT_BLUE = (3, 169, 244)    # #03A9F4 返却カラー
+
+# カード・リーダーイラスト用（CreatePromotionVideo.py と統一）
+CARD_WIDTH = 300
+CARD_HEIGHT = 190
+CARD_SILVER_BASE = 192
+READER_WIDTH = 200
+READER_HEIGHT = 120
+READER_TOP_HEIGHT = 15
+READER_BLACK = (26, 26, 26)
+READER_TOP = (50, 50, 50)
+READER_LAMP_ON = (76, 175, 80)
 
 # フォント
 FONT_PATH = "/mnt/c/Windows/Fonts/YuGothB.ttc"
@@ -56,8 +67,7 @@ SCREENSHOTS_DIR = PROJECT_DIR / "docs" / "screenshots"
 PROMOTION_DIR = PROJECT_DIR / "docs" / "promotion"
 
 # レイアウト定数
-HEADER_HEIGHT = 260
-MARGIN = 90
+MARGIN = 80
 CONTENT_WIDTH = PAGE_WIDTH - MARGIN * 2
 
 
@@ -90,26 +100,6 @@ def load_and_fit_screenshot(path: Path, max_w: int, max_h: int) -> Image.Image:
     return screenshot.resize((new_w, new_h), Image.LANCZOS)
 
 
-def draw_rounded_rect(draw: ImageDraw.Draw, xy: tuple, radius: int,
-                      fill=None, outline=None, width: int = 1):
-    """角丸四角形を描画"""
-    draw.rounded_rectangle(xy, radius=radius, fill=fill,
-                           outline=outline, width=width)
-
-
-def draw_section_title(draw: ImageDraw.Draw, text: str, x: int, y: int,
-                       font_size: int = 40, color=TEXT_DARK):
-    """セクションタイトル（左揃え、下に青いアクセント線）を描画し、次のY座標を返す"""
-    font = get_font(font_size)
-    draw.text((x, y), text, fill=color, font=font)
-    bbox = draw.textbbox((0, 0), text, font=font)
-    tw = bbox[2] - bbox[0]
-    th = bbox[3] - bbox[1]
-    line_y = y + th + 6
-    draw.rectangle((x, line_y, x + tw, line_y + 4), fill=MAIN_BLUE)
-    return y + th + 20
-
-
 def draw_shadow_screenshot(img: Image.Image, screenshot: Image.Image,
                            x: int, y: int):
     """影付きスクリーンショットを描画"""
@@ -129,243 +119,294 @@ def draw_shadow_screenshot(img: Image.Image, screenshot: Image.Image,
     )
 
 
-def draw_icon_pencil(draw: ImageDraw.Draw, cx: int, cy: int, size: int = 20):
-    """鉛筆アイコン"""
-    draw.line((cx - size, cy + size, cx + size, cy - size),
-              fill=TEXT_WHITE, width=4)
-    draw.polygon([
-        (cx - size, cy + size),
-        (cx - size + 8, cy + size - 4),
-        (cx - size + 4, cy + size - 8),
-    ], fill=TEXT_WHITE)
-    draw.rectangle(
-        (cx + size - 6, cy - size - 2, cx + size + 2, cy - size + 6),
-        fill=TEXT_WHITE
+# ============================================================
+# カード・リーダーイラスト（CreatePromotionVideo.py から移植）
+# ============================================================
+def draw_staff_card(img: Image.Image, cx: int, cy: int):
+    """職員証を描画（白地＋青帯上部＋「職員証」テキスト）"""
+    card = Image.new("RGBA", (CARD_WIDTH, CARD_HEIGHT), (0, 0, 0, 0))
+    cd = ImageDraw.Draw(card)
+
+    cd.rounded_rectangle(
+        (0, 0, CARD_WIDTH - 1, CARD_HEIGHT - 1),
+        radius=12, fill=(255, 255, 255), outline=BORDER_COLOR
     )
 
-
-def draw_icon_clock(draw: ImageDraw.Draw, cx: int, cy: int, size: int = 20):
-    """時計アイコン"""
-    draw.ellipse(
-        (cx - size, cy - size, cx + size, cy + size),
-        outline=TEXT_WHITE, width=3
+    blue_h = CARD_HEIGHT // 5
+    cd.rounded_rectangle(
+        (0, 0, CARD_WIDTH - 1, blue_h + 12),
+        radius=12, fill=MAIN_BLUE
     )
-    draw.line((cx, cy, cx, cy - size + 6), fill=TEXT_WHITE, width=3)
-    draw.line((cx, cy, cx + size - 8, cy), fill=TEXT_WHITE, width=2)
+    cd.rectangle((0, blue_h, CARD_WIDTH - 1, blue_h + 12), fill=(255, 255, 255))
+
+    font = get_font(36)
+    text = "職員証"
+    bbox = cd.textbbox((0, 0), text, font=font)
+    tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
+    tx = (CARD_WIDTH - tw) // 2
+    ty = blue_h + (CARD_HEIGHT - blue_h - th) // 2
+    cd.text((tx, ty), text, fill=TEXT_DARK, font=font)
+
+    paste_x = cx - card.width // 2
+    paste_y = cy - card.height // 2
+    img.paste(card, (paste_x, paste_y), card)
+
+
+def draw_ic_card(img: Image.Image, cx: int, cy: int):
+    """交通系ICカードを描画（銀色グラデーション＋「交通系」テキスト）"""
+    card = Image.new("RGBA", (CARD_WIDTH, CARD_HEIGHT), (0, 0, 0, 0))
+    cd = ImageDraw.Draw(card)
+
+    mask = Image.new("L", (CARD_WIDTH, CARD_HEIGHT), 0)
+    md = ImageDraw.Draw(mask)
+    md.rounded_rectangle((0, 0, CARD_WIDTH - 1, CARD_HEIGHT - 1), radius=12, fill=255)
+
+    for y in range(CARD_HEIGHT):
+        brightness = CARD_SILVER_BASE + int(20 * math.sin(y / CARD_HEIGHT * math.pi))
+        color = (brightness, brightness, brightness + 5, 255)
+        cd.line([(0, y), (CARD_WIDTH - 1, y)], fill=color)
+
+    card.putalpha(mask)
+
+    cd = ImageDraw.Draw(card)
+    cd.rounded_rectangle(
+        (0, 0, CARD_WIDTH - 1, CARD_HEIGHT - 1),
+        radius=12, fill=None, outline=(170, 170, 170)
+    )
+
+    font = get_font(32)
+    text = "交通系"
+    bbox = cd.textbbox((0, 0), text, font=font)
+    tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
+    tx = (CARD_WIDTH - tw) // 2
+    ty = (CARD_HEIGHT - th) // 2
+    cd.text((tx, ty), text, fill=(80, 80, 80), font=font)
+
+    paste_x = cx - card.width // 2
+    paste_y = cy - card.height // 2
+    img.paste(card, (paste_x, paste_y), card)
+
+
+def draw_card_reader(img: Image.Image, cx: int, cy: int):
+    """カードリーダーを描画（黒い台形＋緑ランプ点灯）"""
+    margin = 20
+    total_w = READER_WIDTH + margin * 2
+    total_h = READER_HEIGHT + READER_TOP_HEIGHT + margin * 2
+    reader = Image.new("RGBA", (total_w, total_h), (0, 0, 0, 0))
+    rd = ImageDraw.Draw(reader)
+
+    ox, oy = margin, margin
+
+    body_pts = [
+        (ox + 10, oy + READER_TOP_HEIGHT),
+        (ox + READER_WIDTH - 10, oy + READER_TOP_HEIGHT),
+        (ox + READER_WIDTH, oy + READER_TOP_HEIGHT + READER_HEIGHT),
+        (ox, oy + READER_TOP_HEIGHT + READER_HEIGHT),
+    ]
+    rd.polygon(body_pts, fill=READER_BLACK)
+
+    top_pts = [
+        (ox + 15, oy),
+        (ox + READER_WIDTH - 15, oy),
+        (ox + READER_WIDTH - 10, oy + READER_TOP_HEIGHT),
+        (ox + 10, oy + READER_TOP_HEIGHT),
+    ]
+    rd.polygon(top_pts, fill=READER_TOP)
+
+    lamp_cx = ox + READER_WIDTH // 2
+    lamp_cy = oy + READER_TOP_HEIGHT + 15
+    rd.ellipse(
+        (lamp_cx - 6, lamp_cy - 6, lamp_cx + 6, lamp_cy + 6),
+        fill=READER_LAMP_ON
+    )
+
+    # 発光エフェクト
+    glow = Image.new("RGBA", reader.size, (0, 0, 0, 0))
+    gd = ImageDraw.Draw(glow)
+    for r in range(15, 3, -1):
+        alpha = int(40 * (1 - r / 15))
+        gd.ellipse(
+            (lamp_cx - r, lamp_cy - r, lamp_cx + r, lamp_cy + r),
+            fill=(76, 175, 80, alpha)
+        )
+    reader = Image.alpha_composite(reader, glow)
+
+    paste_x = cx - reader.width // 2
+    paste_y = cy - reader.height // 2
+    img.paste(reader, (paste_x, paste_y), reader)
 
 
 # ============================================================
 # セクション描画
 # ============================================================
-def draw_header(img: Image.Image):
-    """ヘッダー（青帯 + アプリ名 + キャッチコピー）"""
+def draw_header(img: Image.Image) -> int:
+    """① ヘッダー（青帯 + アプリ名 + キャッチコピー）"""
+    header_h = 220
     draw = ImageDraw.Draw(img)
 
-    draw.rectangle((0, 0, PAGE_WIDTH, HEADER_HEIGHT), fill=MAIN_BLUE)
-    draw.rectangle(
-        (0, HEADER_HEIGHT - 5, PAGE_WIDTH, HEADER_HEIGHT),
-        fill=DARK_BLUE
-    )
+    draw.rectangle((0, 0, PAGE_WIDTH, header_h), fill=MAIN_BLUE)
+    draw.rectangle((0, header_h - 4, PAGE_WIDTH, header_h), fill=DARK_BLUE)
 
-    subtitle_font = get_font(28)
-    draw.text((MARGIN + 10, 45), "交通系ICカード管理システム",
+    subtitle_font = get_font(26)
+    draw.text((MARGIN + 10, 35), "交通系ICカード管理システム",
               fill=TEXT_WHITE, font=subtitle_font)
 
-    title_font = get_font(76)
-    draw.text((MARGIN + 10, 90), "ピッすい",
+    title_font = get_font(72)
+    draw.text((MARGIN + 10, 75), "ピッすい",
               fill=TEXT_WHITE, font=title_font)
 
     tagline = "タッチ2回。帳簿は自動。"
-    tagline_font = get_font(44)
+    tagline_font = get_font(42)
     bbox = draw.textbbox((0, 0), tagline, font=tagline_font)
     tw = bbox[2] - bbox[0]
     th = bbox[3] - bbox[1]
-    draw.text((PAGE_WIDTH - MARGIN - tw - 10, (HEADER_HEIGHT - th) // 2),
+    draw.text((PAGE_WIDTH - MARGIN - tw - 10, (header_h - th) // 2),
               tagline, fill=TEXT_WHITE, font=tagline_font)
 
+    return header_h
 
-def draw_problem_section(img: Image.Image, y_start: int) -> int:
-    """課題提起セクション（全幅、2カード横並び）"""
+
+def draw_operation_section(img: Image.Image, y_start: int) -> int:
+    """② 問題提起 + カードタッチイラスト（全幅帯）"""
+    draw = ImageDraw.Draw(img)
+    y = y_start
+
+    # 背景帯（薄いオレンジ）
+    section_h = 480
+    bg_color = (255, 248, 240)  # ごく薄いオレンジ
+    draw.rectangle((0, y, PAGE_WIDTH, y + section_h), fill=bg_color)
+
+    inner_y = y + 30
+
+    # 問題提起テキスト
+    problem_font = get_font(38)
+    problem_text = "交通系ICカードの管理、まだ手書きですか？"
+    bbox = draw.textbbox((0, 0), problem_text, font=problem_font)
+    tw = bbox[2] - bbox[0]
+    draw.text(((PAGE_WIDTH - tw) // 2, inner_y), problem_text,
+              fill=TEXT_DARK, font=problem_font)
+    inner_y += 70
+
+    # カードタッチイラスト: [職員証] ──→ [リーダー ピッ♪] ←── [ICカード ピッ♪]
+    illust_cy = inner_y + CARD_HEIGHT // 2 + 10
+    center_x = PAGE_WIDTH // 2
+
+    # リーダーは中央
+    draw_card_reader(img, center_x, illust_cy + 20)
+
+    # 職員証は左側
+    card_gap = 420  # リーダーとカードの間隔
+    draw_staff_card(img, center_x - card_gap, illust_cy)
+
+    # ICカードは右側
+    draw_ic_card(img, center_x + card_gap, illust_cy)
+
+    # 矢印: 職員証 → リーダー
+    arrow_y = illust_cy + 5
+    arrow_l_start = center_x - card_gap + CARD_WIDTH // 2 + 20
+    arrow_l_end = center_x - READER_WIDTH // 2 - 40
+    draw.line((arrow_l_start, arrow_y, arrow_l_end, arrow_y),
+              fill=MAIN_BLUE, width=4)
+    # 矢じり（右向き）
+    draw.polygon([
+        (arrow_l_end, arrow_y),
+        (arrow_l_end - 16, arrow_y - 10),
+        (arrow_l_end - 16, arrow_y + 10),
+    ], fill=MAIN_BLUE)
+
+    # 矢印: ICカード → リーダー
+    arrow_r_start = center_x + card_gap - CARD_WIDTH // 2 - 20
+    arrow_r_end = center_x + READER_WIDTH // 2 + 40
+    draw.line((arrow_r_start, arrow_y, arrow_r_end, arrow_y),
+              fill=MAIN_BLUE, width=4)
+    # 矢じり（左向き）
+    draw.polygon([
+        (arrow_r_end, arrow_y),
+        (arrow_r_end + 16, arrow_y - 10),
+        (arrow_r_end + 16, arrow_y + 10),
+    ], fill=MAIN_BLUE)
+
+    # 「ピッ♪」テキスト（リーダーの上）
+    pip_font = get_font(28)
+    pip_text = "ピッ♪"
+    bbox2 = draw.textbbox((0, 0), pip_text, font=pip_font)
+    pw = bbox2[2] - bbox2[0]
+    draw.text((center_x - pw // 2, illust_cy - READER_HEIGHT // 2 - 50),
+              pip_text, fill=MAIN_BLUE, font=pip_font)
+
+    # ラベル: 「① 職員証」「② 交通系ICカード」
+    label_font = get_font(24)
+    label1 = "① 職員証"
+    bbox3 = draw.textbbox((0, 0), label1, font=label_font)
+    lw1 = bbox3[2] - bbox3[0]
+    draw.text((center_x - card_gap - lw1 // 2, illust_cy + CARD_HEIGHT // 2 + 15),
+              label1, fill=TEXT_DARK, font=label_font)
+
+    label2 = "② 交通系ICカード"
+    bbox4 = draw.textbbox((0, 0), label2, font=label_font)
+    lw2 = bbox4[2] - bbox4[0]
+    draw.text((center_x + card_gap - lw2 // 2, illust_cy + CARD_HEIGHT // 2 + 15),
+              label2, fill=TEXT_DARK, font=label_font)
+
+    # 下部テキスト
+    bottom_y = y + section_h - 60
+    bottom_font = get_font(32)
+    bottom_text = "貸出時も返却時も、この2タッチだけ。"
+    bbox5 = draw.textbbox((0, 0), bottom_text, font=bottom_font)
+    bw = bbox5[2] - bbox5[0]
+    draw.text(((PAGE_WIDTH - bw) // 2, bottom_y), bottom_text,
+              fill=MAIN_BLUE, font=bottom_font)
+
+    return y + section_h
+
+
+def draw_result_section(img: Image.Image, y_start: int, section_h: int,
+                        icon_char: str, icon_color: tuple,
+                        title: str, description: str,
+                        ss_path: Path) -> int:
+    """③④ 結果セクション（全幅帯: タイトル + 説明 + スクリーンショット中央配置）"""
     draw = ImageDraw.Draw(img)
     x = MARGIN
     y = y_start
 
-    y = draw_section_title(draw, "こんなお悩みありませんか？", x, y)
-    y += 8
+    # セクション上部の区切り線
+    draw.rectangle((MARGIN, y, PAGE_WIDTH - MARGIN, y + 2), fill=BORDER_COLOR)
+    y += 20
 
-    card_w = (CONTENT_WIDTH - 50) // 2
-    card_h = 120
-    problems = [
-        ("貸出・返却の記録が\n手書きで面倒...", draw_icon_pencil),
-        ("物品出納簿の作成に\n時間がかかる...", draw_icon_clock),
-    ]
-
-    for i, (desc, icon_func) in enumerate(problems):
-        cx = x + i * (card_w + 50)
-        card_bg = (255, 243, 224)  # #FFF3E0
-        draw_rounded_rect(draw, (cx, y, cx + card_w, y + card_h),
-                          radius=12, fill=card_bg, outline=(255, 204, 128))
-
-        icon_r = 28
-        icon_cx = cx + 50
-        icon_cy = y + card_h // 2
-        draw.ellipse(
-            (icon_cx - icon_r, icon_cy - icon_r,
-             icon_cx + icon_r, icon_cy + icon_r),
-            fill=ACCENT_ORANGE
-        )
-        icon_func(draw, icon_cx, icon_cy, size=16)
-
-        text_font = get_font(24)
-        lines = desc.split("\n")
-        text_y = y + 22
-        for line in lines:
-            draw.text((icon_cx + icon_r + 22, text_y), line,
-                      fill=TEXT_DARK, font=text_font)
-            text_y += 36
-
-    return y + card_h
-
-
-def draw_solution_section(img: Image.Image, y_start: int,
-                          max_ss_h: int) -> int:
-    """使い方セクション（全幅、貸出時も返却時もの2枚並び）"""
-    draw = ImageDraw.Draw(img)
-    x = MARGIN
-    y = y_start
-
-    y = draw_section_title(draw, "ピッすいなら、タッチ2回で完了！", x, y)
-    y += 2
-
-    desc_font = get_font(24)
-    draw.text((x, y),
-              "職員証 → 交通系ICカードの順にタッチするだけ。貸出も返却も同じ操作です。",
-              fill=TEXT_GRAY, font=desc_font)
-    y += 44
-
-    screenshots = [
-        (SCREENSHOTS_DIR / "lend.png", "貸出時も"),
-        (SCREENSHOTS_DIR / "return.png", "返却時も"),
-    ]
-
-    gap_between = 120
-    ss_w = (CONTENT_WIDTH - gap_between) // 2
-    ss_h = max_ss_h
-
-    actual_ss_h = 0
-    for i, (ss_path, label) in enumerate(screenshots):
-        step_x = x + i * (ss_w + gap_between)
-
-        # 「貸出時も」「返却時も」ラベル
-        label_font = get_font(34)
-        bbox = draw.textbbox((0, 0), label, font=label_font)
-        lw = bbox[2] - bbox[0]
-        draw.text((step_x + (ss_w - lw) // 2, y), label,
-                  fill=MAIN_BLUE, font=label_font)
-
-        # スクリーンショット
-        ss_top = y + 50
-        if ss_path.exists():
-            ss = load_and_fit_screenshot(ss_path, ss_w, ss_h)
-            actual_ss_h = ss.height
-            draw_shadow_screenshot(img, ss, step_x, ss_top)
-
-    # 「同じ操作！」縦書きテキスト（2つのSSの間）
-    center_x = x + ss_w + gap_between // 2
-    center_y = y + 50 + actual_ss_h // 2
-    emphasis_font = get_font(28)
-    chars = ["同", "じ", "操", "作", "！"]
-    char_h = 36
-    ey = center_y - len(chars) * char_h // 2
-    for ch in chars:
-        bbox3 = draw.textbbox((0, 0), ch, font=emphasis_font)
-        cw = bbox3[2] - bbox3[0]
-        draw.text((center_x - cw // 2, ey), ch,
-                  fill=MAIN_BLUE, font=emphasis_font)
-        ey += char_h
-
-    return y + 50 + actual_ss_h + 10
-
-
-def draw_features_section(img: Image.Image, y_start: int) -> int:
-    """特長セクション（全幅、3カラム: 特長1 + 特長2 + 帳票SS）"""
-    draw = ImageDraw.Draw(img)
-    x = MARGIN
-    y = y_start
-
-    y = draw_section_title(draw, "主な特長", x, y)
-    y += 8
-
-    # 3カラム: [特長カード1] [特長カード2] [帳票出力イメージ]
-    col_gap = 30
-    col_w = (CONTENT_WIDTH - col_gap * 2) // 3
-    card_h = 160
-
-    # 特長カード1: 利用履歴の自動記録
-    _draw_feature_card_full(
-        img, x, y, col_w, card_h,
-        "履", "利用履歴の自動記録",
-        "残高・乗車駅・降車駅を\n自動で読み取り記録。\n手書きの手間がなくなります。",
-        MAIN_BLUE
-    )
-
-    # 特長カード2: 物品出納簿を自動作成
-    _draw_feature_card_full(
-        img, x + col_w + col_gap, y, col_w, card_h,
-        "表", "物品出納簿を自動作成",
-        "利用履歴から帳票を\nExcelで自動出力。\n庶務担当者の負担を軽減。",
-        ACCENT_LIGHT_BLUE
-    )
-
-    # 帳票出力イメージ（3列目）
-    ss_x = x + (col_w + col_gap) * 2
-    desc_font = get_font(18)
-    draw.text((ss_x, y), "▼ 出力イメージ", fill=TEXT_GRAY, font=desc_font)
-
-    report_cropped = PROMOTION_DIR / "report_excel_cropped.png"
-    report_raw = SCREENSHOTS_DIR / "report_excel.png"
-    ss_path = report_cropped if report_cropped.exists() else report_raw
-
-    if ss_path.exists():
-        ss_top = y + 28
-        ss = load_and_fit_screenshot(ss_path, col_w, card_h - 28)
-        draw_shadow_screenshot(img, ss, ss_x, ss_top)
-
-    return y + card_h
-
-
-def _draw_feature_card_full(img: Image.Image, x: int, y: int,
-                            w: int, h: int, icon_char: str,
-                            title: str, description: str,
-                            icon_color=MAIN_BLUE):
-    """特長カード1枚を描画（アイコン + タイトル + 説明文）"""
-    draw = ImageDraw.Draw(img)
-    draw_rounded_rect(draw, (x, y, x + w, y + h), radius=12,
-                      fill=WHITE, outline=BORDER_COLOR)
-
-    icon_r = 32
-    icon_cx = x + 50
-    icon_cy = y + h // 2
+    # アイコン + タイトル行
+    icon_r = 28
+    icon_cx = x + icon_r
+    icon_cy = y + icon_r
     draw.ellipse(
         (icon_cx - icon_r, icon_cy - icon_r,
          icon_cx + icon_r, icon_cy + icon_r),
         fill=icon_color
     )
-    icon_font = get_font(30)
+    icon_font = get_font(28)
     bbox = draw.textbbox((0, 0), icon_char, font=icon_font)
     iw, ih = bbox[2] - bbox[0], bbox[3] - bbox[1]
     draw.text((icon_cx - iw // 2, icon_cy - ih // 2), icon_char,
               fill=TEXT_WHITE, font=icon_font)
 
-    text_x = icon_cx + icon_r + 24
-    title_font = get_font(28)
-    draw.text((text_x, y + 20), title, fill=TEXT_DARK, font=title_font)
+    title_font = get_font(36)
+    draw.text((x + icon_r * 2 + 20, y + 2), title,
+              fill=TEXT_DARK, font=title_font)
+    y += 65
 
-    desc_font = get_font(20)
-    desc_y = y + 56
-    for line in description.split("\n"):
-        draw.text((text_x, desc_y), line, fill=TEXT_GRAY, font=desc_font)
-        desc_y += 28
+    # 説明テキスト
+    desc_font = get_font(24)
+    draw.text((x + 10, y), description, fill=TEXT_GRAY, font=desc_font)
+    y += 45
+
+    # スクリーンショット（全幅帯で中央配置）
+    if ss_path.exists():
+        ss_available_h = (y_start + section_h) - y - 15
+        ss_available_w = CONTENT_WIDTH - 40
+        ss = load_and_fit_screenshot(ss_path, ss_available_w, ss_available_h)
+        ss_x = (PAGE_WIDTH - ss.width) // 2
+        draw_shadow_screenshot(img, ss, ss_x, y)
+
+    return y_start + section_h
 
 
 # ============================================================
@@ -379,10 +420,12 @@ def main():
     PROMOTION_DIR.mkdir(parents=True, exist_ok=True)
 
     # スクリーンショットの存在確認
-    required_screenshots = [
-        SCREENSHOTS_DIR / "lend.png",
-        SCREENSHOTS_DIR / "return.png",
-    ]
+    required_screenshots = [SCREENSHOTS_DIR / "return.png"]
+    report_cropped = PROMOTION_DIR / "report_excel_cropped.png"
+    report_raw = SCREENSHOTS_DIR / "report_excel.png"
+    report_path = report_cropped if report_cropped.exists() else report_raw
+    required_screenshots.append(report_path)
+
     missing = [p for p in required_screenshots if not p.exists()]
     if missing:
         print("警告: 以下のスクリーンショットが見つかりません:")
@@ -394,34 +437,54 @@ def main():
     print("\nページを生成中...")
     img = Image.new("RGB", (PAGE_WIDTH, PAGE_HEIGHT), WHITE)
 
+    # セクション高さの配分
+    # ① ヘッダー: 220px
+    # ② 操作説明: 480px
+    # ③ 結果1(履歴): 残りの約半分
+    # ④ 結果2(帳票): 残りの約半分
+    header_h = 220
+    operation_h = 480
+    remaining = PAGE_HEIGHT - header_h - operation_h
+    result1_h = remaining * 55 // 100  # 履歴セクションをやや大きく
+    result2_h = remaining - result1_h
+
     print("[1/4] ヘッダー...")
-    draw_header(img)
+    y = draw_header(img)
 
-    # 各セクションの高さから、スクリーンショットに使える高さを逆算
-    # ヘッダー=260, 問題≈200, 問題後余白, 使い方固定部≈120, 特長≈240, 余白
-    fixed_height = 260 + 200 + 120 + 240  # ≈820
-    gaps = 40 * 3 + 30  # セクション間余白3つ + 上部余白
-    max_ss_h = PAGE_HEIGHT - fixed_height - gaps - 20  # 残りをSSに割当
+    print("[2/4] 操作説明セクション...")
+    y = draw_operation_section(img, y)
 
-    y = HEADER_HEIGHT + 30
+    print("[3/4] 利用履歴セクション...")
+    return_ss = SCREENSHOTS_DIR / "return.png"
+    y = draw_result_section(
+        img, y, result1_h,
+        icon_char="履", icon_color=MAIN_BLUE,
+        title="タッチするだけで利用履歴を自動記録",
+        description="残高・乗車駅・降車駅を自動で読み取り。手書きの手間がなくなります。",
+        ss_path=return_ss,
+    )
 
-    print("[2/4] 課題提起セクション...")
-    y = draw_problem_section(img, y)
-    y += 40
-
-    print("[3/4] 使い方セクション...")
-    y = draw_solution_section(img, y, max_ss_h)
-    y += 40
-
-    print("[4/4] 特長セクション...")
-    draw_features_section(img, y)
+    print("[4/4] 物品出納簿セクション...")
+    draw_result_section(
+        img, y, result2_h,
+        icon_char="表", icon_color=(3, 169, 244),
+        title="物品出納簿をExcelで自動出力",
+        description="利用履歴から帳票を自動生成。庶務担当者の負担を軽減します。",
+        ss_path=report_path,
+    )
 
     # PDF保存
     output_path = PROMOTION_DIR / "チラシ.pdf"
     img.save(str(output_path), "PDF", resolution=300.0)
 
+    # PNG プレビューも保存（確認用）
+    preview_path = PROMOTION_DIR / "チラシ_preview.png"
+    preview = img.resize((PAGE_WIDTH // 3, PAGE_HEIGHT // 3), Image.LANCZOS)
+    preview.save(str(preview_path))
+
     print(f"\nチラシを生成しました: {output_path}")
     print(f"  サイズ: A4横 ({PAGE_WIDTH}x{PAGE_HEIGHT}px, 300 DPI)")
+    print(f"  プレビュー: {preview_path}")
 
 
 if __name__ == "__main__":
