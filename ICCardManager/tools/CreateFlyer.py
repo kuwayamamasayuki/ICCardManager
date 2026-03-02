@@ -243,22 +243,22 @@ def draw_card_reader(img: Image.Image, cx: int, cy: int):
 # ============================================================
 def draw_header(img: Image.Image) -> int:
     """① ヘッダー（青帯 + アプリ名 + キャッチコピー）"""
-    header_h = 220
+    header_h = 240
     draw = ImageDraw.Draw(img)
 
     draw.rectangle((0, 0, PAGE_WIDTH, header_h), fill=MAIN_BLUE)
     draw.rectangle((0, header_h - 4, PAGE_WIDTH, header_h), fill=DARK_BLUE)
 
-    subtitle_font = get_font(26)
-    draw.text((MARGIN + 10, 35), "交通系ICカード管理システム",
+    subtitle_font = get_font(30)
+    draw.text((MARGIN + 10, 30), "交通系ICカード管理システム",
               fill=TEXT_WHITE, font=subtitle_font)
 
-    title_font = get_font(72)
-    draw.text((MARGIN + 10, 75), "ピッすい",
+    title_font = get_font(88)
+    draw.text((MARGIN + 10, 72), "ピッすい",
               fill=TEXT_WHITE, font=title_font)
 
     tagline = "タッチ2回。帳簿は自動。"
-    tagline_font = get_font(42)
+    tagline_font = get_font(50)
     bbox = draw.textbbox((0, 0), tagline, font=tagline_font)
     tw = bbox[2] - bbox[0]
     th = bbox[3] - bbox[1]
@@ -274,14 +274,14 @@ def draw_operation_section(img: Image.Image, y_start: int) -> int:
     y = y_start
 
     # 背景帯（薄いオレンジ）
-    section_h = 780
+    section_h = 830
     bg_color = (255, 248, 240)
     draw.rectangle((0, y, PAGE_WIDTH, y + section_h), fill=bg_color)
 
     inner_y = y + 35
 
     # 問題提起テキスト
-    problem_font = get_font(42)
+    problem_font = get_font(50)
     problem_text = "交通系ICカードの管理、まだ手書きですか？"
     bbox = draw.textbbox((0, 0), problem_text, font=problem_font)
     tw = bbox[2] - bbox[0]
@@ -289,8 +289,8 @@ def draw_operation_section(img: Image.Image, y_start: int) -> int:
               fill=TEXT_DARK, font=problem_font)
 
     # サブテキスト（問題提起とイラストを分離）
-    inner_y += 70
-    sub_font = get_font(30)
+    inner_y += 75
+    sub_font = get_font(36)
     sub_text = "ピッすいなら、タッチするだけで記録完了！"
     bbox_sub = draw.textbbox((0, 0), sub_text, font=sub_font)
     sw = bbox_sub[2] - bbox_sub[0]
@@ -340,7 +340,7 @@ def draw_operation_section(img: Image.Image, y_start: int) -> int:
     ], fill=MAIN_BLUE)
 
     # 「ピッ♪」テキスト（リーダーの上、大きめ）
-    pip_font = get_font(34)
+    pip_font = get_font(38)
     pip_text = "ピッ♪"
     bbox2 = td.textbbox((0, 0), pip_text, font=pip_font)
     pw = bbox2[2] - bbox2[0]
@@ -348,7 +348,7 @@ def draw_operation_section(img: Image.Image, y_start: int) -> int:
             pip_text, fill=MAIN_BLUE, font=pip_font)
 
     # ラベル
-    label_font = get_font(24)
+    label_font = get_font(28)
     label1 = "① 職員証"
     bbox3 = td.textbbox((0, 0), label1, font=label_font)
     lw1 = bbox3[2] - bbox3[0]
@@ -370,8 +370,8 @@ def draw_operation_section(img: Image.Image, y_start: int) -> int:
     img.paste(illust_scaled, (paste_x, inner_y), illust_scaled)
 
     # 下部テキスト（強調）
-    bottom_y = y + section_h - 80
-    bottom_font = get_font(46)
+    bottom_y = y + section_h - 85
+    bottom_font = get_font(56)
     bottom_text = "貸出時も返却時も、この2タッチだけ。"
     bbox5 = draw.textbbox((0, 0), bottom_text, font=bottom_font)
     bw = bbox5[2] - bbox5[0]
@@ -398,18 +398,18 @@ def draw_result_section(img: Image.Image, y_start: int, section_h: int,
     y += 30
 
     # 青バー + タイトル
-    bar_w = 8
-    title_font = get_font(42)
+    bar_w = 10
+    title_font = get_font(50)
     bbox = draw.textbbox((0, 0), title, font=title_font)
     th = bbox[3] - bbox[1]
-    draw.rectangle((x, y, x + bar_w, y + th + 6), fill=MAIN_BLUE)
-    draw.text((x + bar_w + 18, y), title, fill=TEXT_DARK, font=title_font)
-    y += th + 22
+    draw.rectangle((x, y, x + bar_w, y + th + 8), fill=MAIN_BLUE)
+    draw.text((x + bar_w + 20, y), title, fill=TEXT_DARK, font=title_font)
+    y += th + 24
 
     # 説明テキスト
-    desc_font = get_font(28)
-    draw.text((x + bar_w + 18, y), description, fill=TEXT_GRAY, font=desc_font)
-    y += 50
+    desc_font = get_font(34)
+    draw.text((x + bar_w + 20, y), description, fill=TEXT_GRAY, font=desc_font)
+    y += 58
 
     # スクリーンショット（全幅帯で中央配置）
     if ss_path.exists():
@@ -424,13 +424,13 @@ def draw_result_section(img: Image.Image, y_start: int, section_h: int,
 
 def draw_footer(img: Image.Image):
     """⑤ フッター: CTA（行動喚起）バー"""
-    footer_h = 80
+    footer_h = 90
     footer_y = PAGE_HEIGHT - footer_h
     draw = ImageDraw.Draw(img)
 
     draw.rectangle((0, footer_y, PAGE_WIDTH, PAGE_HEIGHT), fill=MAIN_BLUE)
 
-    font = get_font(32)
+    font = get_font(40)
     text = "ピッすい を使ってみませんか？"
     bbox = draw.textbbox((0, 0), text, font=font)
     tw = bbox[2] - bbox[0]
@@ -468,14 +468,14 @@ def main():
     img = Image.new("RGB", (PAGE_WIDTH, PAGE_HEIGHT), WHITE)
 
     # セクション高さの配分（A4縦: 3508px）
-    # ① ヘッダー: 220px
-    # ② 操作説明: 780px（カードイラスト拡大のため増加）
+    # ① ヘッダー: 240px
+    # ② 操作説明: 830px（カードイラスト拡大＋フォント拡大）
     # ③ 結果1(履歴): 残りの60%
     # ④ 結果2(帳票): 残りの40%
-    # ⑤ フッター: 80px
-    header_h = 220
-    operation_h = 780
-    footer_h = 80
+    # ⑤ フッター: 90px
+    header_h = 240
+    operation_h = 830
+    footer_h = 90
     remaining = PAGE_HEIGHT - header_h - operation_h - footer_h
     result1_h = remaining * 60 // 100
     result2_h = remaining - result1_h
