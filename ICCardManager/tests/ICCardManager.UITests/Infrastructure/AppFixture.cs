@@ -155,21 +155,49 @@ namespace ICCardManager.UITests.Infrastructure
         }
 
         /// <summary>
-        /// Debug ビルドの既定 exe パスを解決する。
+        /// 既定の exe パスを解決する。
+        /// テスト DLL と同じビルド構成（Release/Debug）を優先し、
+        /// 見つからなければもう一方の構成にフォールバックする。
         /// </summary>
         private static string ResolveDefaultExePath()
         {
-            // テスト DLL の場所から相対パスで exe を探す
             var testAssemblyDir = AppDomain.CurrentDomain.BaseDirectory;
+            var (primaryPath, fallbackPath) = ResolveExePathCandidates(testAssemblyDir);
 
-            // tests/ICCardManager.UITests/bin/Debug/net48/
-            //   → src/ICCardManager/bin/Debug/net48/ICCardManager.exe
+            if (File.Exists(primaryPath))
+                return primaryPath;
+
+            return File.Exists(fallbackPath) ? fallbackPath : primaryPath;
+        }
+
+        /// <summary>
+        /// テスト DLL のディレクトリから exe パスの候補を算出する（純粋なパス計算、I/O なし）。
+        /// </summary>
+        /// <param name="testAssemblyDir">テスト DLL の BaseDirectory（末尾セパレータあり/なし両対応）。</param>
+        /// <returns>primaryPath（テスト構成と同じ）と fallbackPath（もう一方の構成）のタプル。</returns>
+        internal static (string primaryPath, string fallbackPath) ResolveExePathCandidates(string testAssemblyDir)
+        {
+            // tests/ICCardManager.UITests/bin/{Config}/net48/
+            //   → src/ICCardManager/bin/{Config}/net48/ICCardManager.exe
             var projectRoot = Path.GetFullPath(
                 Path.Combine(testAssemblyDir, "..", "..", "..", "..", ".."));
-            var exePath = Path.Combine(
-                projectRoot, "src", "ICCardManager", "bin", "Debug", "net48", "ICCardManager.exe");
 
-            return exePath;
+            // テスト DLL 自身のパスからビルド構成を推定する
+            // testAssemblyDir は …/bin/Debug/net48/ または …/bin/Release/net48/ の形式
+            var parentOfNet48 = Path.GetFullPath(Path.Combine(testAssemblyDir, ".."));
+            var configDir = Path.GetFileName(parentOfNet48);
+
+            var primaryConfig = configDir;
+            var fallbackConfig = string.Equals(configDir, "Release", StringComparison.OrdinalIgnoreCase)
+                ? "Debug"
+                : "Release";
+
+            var primaryPath = Path.Combine(
+                projectRoot, "src", "ICCardManager", "bin", primaryConfig, "net48", "ICCardManager.exe");
+            var fallbackPath = Path.Combine(
+                projectRoot, "src", "ICCardManager", "bin", fallbackConfig, "net48", "ICCardManager.exe");
+
+            return (primaryPath, fallbackPath);
         }
     }
 }
