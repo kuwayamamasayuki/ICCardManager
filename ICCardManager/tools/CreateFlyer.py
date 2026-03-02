@@ -37,7 +37,6 @@ PAGE_WIDTH, PAGE_HEIGHT = 3508, 2480
 # カラーパレット（CreatePromotionVideo.py と統一）
 MAIN_BLUE = (33, 150, 243)           # #2196F3 アプリのテーマカラー
 DARK_BLUE = (25, 118, 191)           # #1976BF ヘッダー下部グラデーション用
-LIGHT_BLUE_BG = (237, 247, 255)      # 薄い青背景
 TEXT_DARK = (33, 33, 33)             # #212121
 TEXT_WHITE = (255, 255, 255)         # #FFFFFF
 TEXT_GRAY = (117, 117, 117)          # #757575
@@ -57,9 +56,8 @@ SCREENSHOTS_DIR = PROJECT_DIR / "docs" / "screenshots"
 PROMOTION_DIR = PROJECT_DIR / "docs" / "promotion"
 
 # レイアウト定数
-HEADER_HEIGHT = 280
-FOOTER_HEIGHT = 120
-MARGIN = 100
+HEADER_HEIGHT = 260
+MARGIN = 90
 CONTENT_WIDTH = PAGE_WIDTH - MARGIN * 2
 
 
@@ -107,16 +105,16 @@ def draw_section_title(draw: ImageDraw.Draw, text: str, x: int, y: int,
     bbox = draw.textbbox((0, 0), text, font=font)
     tw = bbox[2] - bbox[0]
     th = bbox[3] - bbox[1]
-    line_y = y + th + 8
+    line_y = y + th + 6
     draw.rectangle((x, line_y, x + tw, line_y + 4), fill=MAIN_BLUE)
-    return y + th + 24
+    return y + th + 20
 
 
 def draw_shadow_screenshot(img: Image.Image, screenshot: Image.Image,
                            x: int, y: int):
     """影付きスクリーンショットを描画"""
     draw = ImageDraw.Draw(img)
-    shadow_offset = 5
+    shadow_offset = 4
     draw.rectangle(
         (x + shadow_offset, y + shadow_offset,
          x + screenshot.width + shadow_offset,
@@ -132,7 +130,7 @@ def draw_shadow_screenshot(img: Image.Image, screenshot: Image.Image,
 
 
 def draw_icon_pencil(draw: ImageDraw.Draw, cx: int, cy: int, size: int = 20):
-    """鉛筆アイコン（手書きの象徴）"""
+    """鉛筆アイコン"""
     draw.line((cx - size, cy + size, cx + size, cy - size),
               fill=TEXT_WHITE, width=4)
     draw.polygon([
@@ -147,46 +145,13 @@ def draw_icon_pencil(draw: ImageDraw.Draw, cx: int, cy: int, size: int = 20):
 
 
 def draw_icon_clock(draw: ImageDraw.Draw, cx: int, cy: int, size: int = 20):
-    """時計アイコン（時間がかかるの象徴）"""
+    """時計アイコン"""
     draw.ellipse(
         (cx - size, cy - size, cx + size, cy + size),
         outline=TEXT_WHITE, width=3
     )
     draw.line((cx, cy, cx, cy - size + 6), fill=TEXT_WHITE, width=3)
     draw.line((cx, cy, cx + size - 8, cy), fill=TEXT_WHITE, width=2)
-
-
-def draw_feature_card(img: Image.Image, x: int, y: int, w: int, h: int,
-                      icon_char: str, title: str, description: str,
-                      icon_color=MAIN_BLUE):
-    """特長カード1枚を描画（アイコン + タイトル + 説明文）"""
-    draw = ImageDraw.Draw(img)
-    draw_rounded_rect(draw, (x, y, x + w, y + h), radius=12,
-                      fill=WHITE, outline=BORDER_COLOR)
-
-    icon_r = 34
-    icon_cx = x + 55
-    icon_cy = y + h // 2
-    draw.ellipse(
-        (icon_cx - icon_r, icon_cy - icon_r,
-         icon_cx + icon_r, icon_cy + icon_r),
-        fill=icon_color
-    )
-    icon_font = get_font(32)
-    bbox = draw.textbbox((0, 0), icon_char, font=icon_font)
-    iw, ih = bbox[2] - bbox[0], bbox[3] - bbox[1]
-    draw.text((icon_cx - iw // 2, icon_cy - ih // 2), icon_char,
-              fill=TEXT_WHITE, font=icon_font)
-
-    text_x = icon_cx + icon_r + 28
-    title_font = get_font(30)
-    draw.text((text_x, y + 24), title, fill=TEXT_DARK, font=title_font)
-
-    desc_font = get_font(22)
-    desc_y = y + 64
-    for line in description.split("\n"):
-        draw.text((text_x, desc_y), line, fill=TEXT_GRAY, font=desc_font)
-        desc_y += 30
 
 
 # ============================================================
@@ -198,16 +163,16 @@ def draw_header(img: Image.Image):
 
     draw.rectangle((0, 0, PAGE_WIDTH, HEADER_HEIGHT), fill=MAIN_BLUE)
     draw.rectangle(
-        (0, HEADER_HEIGHT - 6, PAGE_WIDTH, HEADER_HEIGHT),
+        (0, HEADER_HEIGHT - 5, PAGE_WIDTH, HEADER_HEIGHT),
         fill=DARK_BLUE
     )
 
-    subtitle_font = get_font(30)
-    draw.text((MARGIN + 10, 50), "交通系ICカード管理システム",
+    subtitle_font = get_font(28)
+    draw.text((MARGIN + 10, 45), "交通系ICカード管理システム",
               fill=TEXT_WHITE, font=subtitle_font)
 
-    title_font = get_font(80)
-    draw.text((MARGIN + 10, 100), "ピッすい",
+    title_font = get_font(76)
+    draw.text((MARGIN + 10, 90), "ピッすい",
               fill=TEXT_WHITE, font=title_font)
 
     tagline = "タッチ2回。帳簿は自動。"
@@ -226,173 +191,181 @@ def draw_problem_section(img: Image.Image, y_start: int) -> int:
     y = y_start
 
     y = draw_section_title(draw, "こんなお悩みありませんか？", x, y)
-    y += 12
+    y += 8
 
-    card_w = (CONTENT_WIDTH - 40) // 2
-    card_h = 140
+    card_w = (CONTENT_WIDTH - 50) // 2
+    card_h = 120
     problems = [
         ("貸出・返却の記録が\n手書きで面倒...", draw_icon_pencil),
         ("物品出納簿の作成に\n時間がかかる...", draw_icon_clock),
     ]
 
     for i, (desc, icon_func) in enumerate(problems):
-        cx = x + i * (card_w + 40)
+        cx = x + i * (card_w + 50)
         card_bg = (255, 243, 224)  # #FFF3E0
         draw_rounded_rect(draw, (cx, y, cx + card_w, y + card_h),
                           radius=12, fill=card_bg, outline=(255, 204, 128))
 
-        icon_r = 30
-        icon_cx = cx + 55
+        icon_r = 28
+        icon_cx = cx + 50
         icon_cy = y + card_h // 2
         draw.ellipse(
             (icon_cx - icon_r, icon_cy - icon_r,
              icon_cx + icon_r, icon_cy + icon_r),
             fill=ACCENT_ORANGE
         )
-        icon_func(draw, icon_cx, icon_cy, size=18)
+        icon_func(draw, icon_cx, icon_cy, size=16)
 
-        text_font = get_font(26)
+        text_font = get_font(24)
         lines = desc.split("\n")
-        text_y = y + 30
+        text_y = y + 22
         for line in lines:
-            draw.text((icon_cx + icon_r + 24, text_y), line,
+            draw.text((icon_cx + icon_r + 22, text_y), line,
                       fill=TEXT_DARK, font=text_font)
-            text_y += 38
+            text_y += 36
 
-    return y + card_h + 16
+    return y + card_h
 
 
-def draw_solution_section(img: Image.Image, y_start: int) -> int:
+def draw_solution_section(img: Image.Image, y_start: int,
+                          max_ss_h: int) -> int:
     """使い方セクション（全幅、貸出時も返却時もの2枚並び）"""
     draw = ImageDraw.Draw(img)
     x = MARGIN
     y = y_start
 
     y = draw_section_title(draw, "ピッすいなら、タッチ2回で完了！", x, y)
-    y += 4
+    y += 2
 
     desc_font = get_font(24)
     draw.text((x, y),
               "職員証 → 交通系ICカードの順にタッチするだけ。貸出も返却も同じ操作です。",
               fill=TEXT_GRAY, font=desc_font)
-    y += 48
+    y += 44
 
     screenshots = [
         (SCREENSHOTS_DIR / "lend.png", "貸出時も"),
         (SCREENSHOTS_DIR / "return.png", "返却時も"),
     ]
 
-    # 2つのスクリーンショットの間に「同じ操作！」テキストを配置
-    gap_between = 140  # SS間のスペース
+    gap_between = 120
     ss_w = (CONTENT_WIDTH - gap_between) // 2
-    ss_h = min(int(ss_w * 0.7), 700)  # 高さ上限を設定して下部セクション確保
+    ss_h = max_ss_h
 
-    actual_ss_h = 0  # 実際に描画したSSの高さを記録
+    actual_ss_h = 0
     for i, (ss_path, label) in enumerate(screenshots):
         step_x = x + i * (ss_w + gap_between)
 
         # 「貸出時も」「返却時も」ラベル
-        label_font = get_font(36)
+        label_font = get_font(34)
         bbox = draw.textbbox((0, 0), label, font=label_font)
         lw = bbox[2] - bbox[0]
         draw.text((step_x + (ss_w - lw) // 2, y), label,
                   fill=MAIN_BLUE, font=label_font)
 
         # スクリーンショット
-        ss_top = y + 54
+        ss_top = y + 50
         if ss_path.exists():
             ss = load_and_fit_screenshot(ss_path, ss_w, ss_h)
             actual_ss_h = ss.height
             draw_shadow_screenshot(img, ss, step_x, ss_top)
 
-        # 操作説明ラベル
-        step_label = "職員証 → 交通系ICカード"
-        step_font = get_font(20)
-        bbox2 = draw.textbbox((0, 0), step_label, font=step_font)
-        slw = bbox2[2] - bbox2[0]
-        draw.text((step_x + (ss_w - slw) // 2, ss_top + actual_ss_h + 12),
-                  step_label, fill=TEXT_GRAY, font=step_font)
-
-    # 「同じ操作！」テキスト（2つのスクリーンショットの間に縦書き風に配置）
+    # 「同じ操作！」縦書きテキスト（2つのSSの間）
     center_x = x + ss_w + gap_between // 2
-    center_y = y + 54 + actual_ss_h // 2
-    emphasis_font = get_font(30)
-    for j, ch in enumerate(["同", "じ", "操", "作", "！"]):
+    center_y = y + 50 + actual_ss_h // 2
+    emphasis_font = get_font(28)
+    chars = ["同", "じ", "操", "作", "！"]
+    char_h = 36
+    ey = center_y - len(chars) * char_h // 2
+    for ch in chars:
         bbox3 = draw.textbbox((0, 0), ch, font=emphasis_font)
         cw = bbox3[2] - bbox3[0]
-        ch_y = center_y - 80 + j * 38
-        draw.text((center_x - cw // 2, ch_y), ch,
+        draw.text((center_x - cw // 2, ey), ch,
                   fill=MAIN_BLUE, font=emphasis_font)
+        ey += char_h
 
-    return y + 54 + actual_ss_h + 44
+    return y + 50 + actual_ss_h + 10
 
 
-def draw_bottom_section(img: Image.Image, y_start: int) -> int:
-    """下部セクション（全幅: 左に特長カード2枚、右に物品出納簿SS）"""
+def draw_features_section(img: Image.Image, y_start: int) -> int:
+    """特長セクション（全幅、3カラム: 特長1 + 特長2 + 帳票SS）"""
     draw = ImageDraw.Draw(img)
     x = MARGIN
     y = y_start
 
-    # 左側：特長カード
     y = draw_section_title(draw, "主な特長", x, y)
-    features_y = y + 12
+    y += 8
 
-    left_w = int(CONTENT_WIDTH * 0.48)
-    card_w = left_w
-    card_h = 150
-    gap = 20
+    # 3カラム: [特長カード1] [特長カード2] [帳票出力イメージ]
+    col_gap = 30
+    col_w = (CONTENT_WIDTH - col_gap * 2) // 3
+    card_h = 160
 
-    features = [
-        ("履", "利用履歴の自動記録",
-         "残高・乗車駅・降車駅を自動で読み取り記録。\n手書きの手間がなくなります。",
-         MAIN_BLUE),
-        ("表", "物品出納簿を自動作成",
-         "利用履歴から帳票をExcelで自動出力。\n庶務担当者の負担を軽減します。",
-         ACCENT_LIGHT_BLUE),
-    ]
+    # 特長カード1: 利用履歴の自動記録
+    _draw_feature_card_full(
+        img, x, y, col_w, card_h,
+        "履", "利用履歴の自動記録",
+        "残高・乗車駅・降車駅を\n自動で読み取り記録。\n手書きの手間がなくなります。",
+        MAIN_BLUE
+    )
 
-    for i, (icon, title, desc, color) in enumerate(features):
-        fy = features_y + i * (card_h + gap)
-        draw_feature_card(img, x, fy, card_w, card_h,
-                          icon, title, desc, icon_color=color)
+    # 特長カード2: 物品出納簿を自動作成
+    _draw_feature_card_full(
+        img, x + col_w + col_gap, y, col_w, card_h,
+        "表", "物品出納簿を自動作成",
+        "利用履歴から帳票を\nExcelで自動出力。\n庶務担当者の負担を軽減。",
+        ACCENT_LIGHT_BLUE
+    )
 
-    # 右側：物品出納簿スクリーンショット
-    right_x = x + left_w + 60
-    right_w = CONTENT_WIDTH - left_w - 60
-
-    desc_font = get_font(20)
-    draw.text((right_x, features_y),
-              "▼ 物品出納簿の出力イメージ",
-              fill=TEXT_GRAY, font=desc_font)
+    # 帳票出力イメージ（3列目）
+    ss_x = x + (col_w + col_gap) * 2
+    desc_font = get_font(18)
+    draw.text((ss_x, y), "▼ 出力イメージ", fill=TEXT_GRAY, font=desc_font)
 
     report_cropped = PROMOTION_DIR / "report_excel_cropped.png"
     report_raw = SCREENSHOTS_DIR / "report_excel.png"
     ss_path = report_cropped if report_cropped.exists() else report_raw
 
     if ss_path.exists():
-        ss_top = features_y + 36
-        available_h = 2 * card_h + gap - 36
-        ss = load_and_fit_screenshot(ss_path, right_w, available_h)
-        draw_shadow_screenshot(img, ss, right_x, ss_top)
+        ss_top = y + 28
+        ss = load_and_fit_screenshot(ss_path, col_w, card_h - 28)
+        draw_shadow_screenshot(img, ss, ss_x, ss_top)
 
-    return features_y + 2 * card_h + gap + 20
+    return y + card_h
 
 
-def draw_footer(img: Image.Image):
-    """フッター（青帯 + アプリ名）"""
+def _draw_feature_card_full(img: Image.Image, x: int, y: int,
+                            w: int, h: int, icon_char: str,
+                            title: str, description: str,
+                            icon_color=MAIN_BLUE):
+    """特長カード1枚を描画（アイコン + タイトル + 説明文）"""
     draw = ImageDraw.Draw(img)
-    footer_y = PAGE_HEIGHT - FOOTER_HEIGHT
+    draw_rounded_rect(draw, (x, y, x + w, y + h), radius=12,
+                      fill=WHITE, outline=BORDER_COLOR)
 
-    draw.rectangle((0, footer_y, PAGE_WIDTH, PAGE_HEIGHT), fill=MAIN_BLUE)
-    draw.rectangle((0, footer_y, PAGE_WIDTH, footer_y + 4), fill=DARK_BLUE)
+    icon_r = 32
+    icon_cx = x + 50
+    icon_cy = y + h // 2
+    draw.ellipse(
+        (icon_cx - icon_r, icon_cy - icon_r,
+         icon_cx + icon_r, icon_cy + icon_r),
+        fill=icon_color
+    )
+    icon_font = get_font(30)
+    bbox = draw.textbbox((0, 0), icon_char, font=icon_font)
+    iw, ih = bbox[2] - bbox[0], bbox[3] - bbox[1]
+    draw.text((icon_cx - iw // 2, icon_cy - ih // 2), icon_char,
+              fill=TEXT_WHITE, font=icon_font)
 
-    app_name = "交通系ICカード管理システム：ピッすい"
-    app_font = get_font(28)
-    bbox = draw.textbbox((0, 0), app_name, font=app_font)
-    tw = bbox[2] - bbox[0]
-    th = bbox[3] - bbox[1]
-    draw.text(((PAGE_WIDTH - tw) // 2, footer_y + (FOOTER_HEIGHT - th) // 2),
-              app_name, fill=TEXT_WHITE, font=app_font)
+    text_x = icon_cx + icon_r + 24
+    title_font = get_font(28)
+    draw.text((text_x, y + 20), title, fill=TEXT_DARK, font=title_font)
+
+    desc_font = get_font(20)
+    desc_y = y + 56
+    for line in description.split("\n"):
+        draw.text((text_x, desc_y), line, fill=TEXT_GRAY, font=desc_font)
+        desc_y += 28
 
 
 # ============================================================
@@ -421,42 +394,27 @@ def main():
     print("\nページを生成中...")
     img = Image.new("RGB", (PAGE_WIDTH, PAGE_HEIGHT), WHITE)
 
-    # コンテンツ領域
-    content_top = HEADER_HEIGHT + 40
-    content_bottom = PAGE_HEIGHT - FOOTER_HEIGHT
-
-    # 各セクションの高さを仮計算（セクション間の余白を均等に分配）
-    # おおよその高さ: 問題=230, 使い方=870, 下部=430 → 合計≈1530
-    available = content_bottom - content_top
-    total_content = 1530  # 概算
-    section_gap = (available - total_content) // 4  # 3セクション間 + 上下
-    section_gap = max(20, min(section_gap, 80))  # 20〜80の範囲に制限
-
-    print("[1/5] ヘッダー...")
+    print("[1/4] ヘッダー...")
     draw_header(img)
 
-    # 背景色帯（使い方セクション用の薄い青帯）
-    # 正確な位置はセクション描画後に決まるので、先に描画
-    y = content_top + section_gap
+    # 各セクションの高さから、スクリーンショットに使える高さを逆算
+    # ヘッダー=260, 問題≈200, 問題後余白, 使い方固定部≈120, 特長≈240, 余白
+    fixed_height = 260 + 200 + 120 + 240  # ≈820
+    gaps = 40 * 3 + 30  # セクション間余白3つ + 上部余白
+    max_ss_h = PAGE_HEIGHT - fixed_height - gaps - 20  # 残りをSSに割当
 
-    print("[2/5] 課題提起セクション...")
+    y = HEADER_HEIGHT + 30
+
+    print("[2/4] 課題提起セクション...")
     y = draw_problem_section(img, y)
-    y += section_gap
+    y += 40
 
-    # 使い方セクションの背景帯
-    solution_bg_y = y - 10
-    print("[3/5] 使い方セクション...")
-    y = draw_solution_section(img, y)
-    y += section_gap
+    print("[3/4] 使い方セクション...")
+    y = draw_solution_section(img, y, max_ss_h)
+    y += 40
 
-    # 使い方セクション背景を後から描画（コンテンツの裏に薄い青帯）
-    draw = ImageDraw.Draw(img)
-
-    print("[4/5] 特長・帳票セクション...")
-    draw_bottom_section(img, y)
-
-    print("[5/5] フッター...")
-    draw_footer(img)
+    print("[4/4] 特長セクション...")
+    draw_features_section(img, y)
 
     # PDF保存
     output_path = PROMOTION_DIR / "チラシ.pdf"
