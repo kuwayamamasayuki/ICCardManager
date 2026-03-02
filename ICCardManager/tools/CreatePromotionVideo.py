@@ -2,7 +2,7 @@
 """
 プロモーション動画生成スクリプト
 
-交通系ICカード管理システムの庁内プロモーション用動画（約27秒）を
+交通系ICカード管理システム：ピッすいの庁内プロモーション用動画（約24.5秒）を
 Pillow + ffmpeg で生成する。
 
 使い方:
@@ -320,6 +320,59 @@ def draw_caption_bar(img: Image.Image, text: str, y: int):
     draw.text(((WIDTH - tw) // 2, y + 18), text, fill=TEXT_WHITE, font=font)
 
 
+def draw_message_panel(img: Image.Image, text: str, cy: int,
+                       font_size: int = 48, alpha: float = 1.0):
+    """半透明の青パネル付きメッセージを描画（タッチ後の反応表示用）"""
+    font = get_font(font_size)
+    draw_tmp = ImageDraw.Draw(img)
+    lines = text.split("\n")
+
+    # 各行のサイズを計測
+    line_sizes = []
+    for line in lines:
+        bbox = draw_tmp.textbbox((0, 0), line, font=font)
+        line_sizes.append((bbox[2] - bbox[0], bbox[3] - bbox[1]))
+
+    max_w = max(w for w, h in line_sizes)
+    line_spacing = 12
+    total_h = sum(h for _, h in line_sizes) + line_spacing * (len(lines) - 1)
+
+    # パネルサイズ（テキスト + パディング）
+    pad_x, pad_y = 60, 30
+    panel_w = max_w + pad_x * 2
+    panel_h = total_h + pad_y * 2
+    panel_x = (WIDTH - panel_w) // 2
+    panel_y = cy - panel_h // 2
+
+    # 半透明の青パネル（角丸）
+    panel = Image.new("RGBA", (panel_w, panel_h), (0, 0, 0, 0))
+    pd = ImageDraw.Draw(panel)
+    panel_alpha = int(200 * max(0.0, min(1.0, alpha)))
+    pd.rounded_rectangle(
+        (0, 0, panel_w - 1, panel_h - 1),
+        radius=16, fill=(*MAIN_BLUE, panel_alpha)
+    )
+
+    # パネルを合成
+    img_rgba = img.convert("RGBA")
+    img_rgba.paste(panel, (panel_x, panel_y), panel)
+
+    # テキスト描画
+    text_alpha = int(255 * max(0.0, min(1.0, alpha)))
+    text_overlay = Image.new("RGBA", (WIDTH, HEIGHT), (0, 0, 0, 0))
+    td = ImageDraw.Draw(text_overlay)
+    current_y = panel_y + pad_y
+    for i, line in enumerate(lines):
+        lw, lh = line_sizes[i]
+        lx = (WIDTH - lw) // 2
+        td.text((lx, current_y), line,
+                fill=(*TEXT_WHITE, text_alpha), font=font)
+        current_y += lh + line_spacing
+
+    result = Image.alpha_composite(img_rgba, text_overlay)
+    img.paste(result.convert("RGB"))
+
+
 # ============================================================
 # シーン生成
 # ============================================================
@@ -345,79 +398,161 @@ def scene_text(text: str, duration_sec: float,
     return frames
 
 
-def scene_card_touch(card_type: str, duration_sec: float = 4.0) -> list:
+class _FrameList(list):
+    """touch_times 属性を持てるリスト"""
+    touch_times: tuple = (0.0, 0.0)
+
+
+def scene_double_touch(label: str, ic_sound: str = "ピッ♪",
+                       duration_sec: float = 4.5,
+                       label_offset_x: int = 0,
+                       toast_img: "Image.Image | None" = None) -> "_FrameList":
     """
-    カードがリーダーに近づいてタッチするアニメーション
-    card_type: "staff" (職員証) or "ic" (交通系ICカード)
+    職員証 → 交通系ICカードの連続タッチシーン
+    label: "貸出時も" or "返却時も"（画面上部に表示）
+    ic_sound: ICカードタッチ時の音テキスト（"ピッ♪" or "ピピッ♪"）
+    label_offset_x: ラベルの水平オフセット（負=左、正=右）
+    toast_img: ICカードタッチ後に表示するトースト通知画像
+
+    戻り値の .touch_times 属性にタッチ時刻（秒）のタプルを付与:
+        (staff_touch_sec, ic_touch_sec)
     """
-    frames = []
+    frames = _FrameList()
     total = int(duration_sec * FPS)
 
-    # タイミング
-    slide_end = int(total * 0.5)      # カードスライド完了
-    touch_frame = slide_end           # タッチ瞬間
-    ripple_dur = int(0.8 * FPS)       # 波紋持続フレーム数
-    text_dur = int(1.2 * FPS)         # テキスト表示フレーム数
+    # タイミング（フレーム数）
+    staff_slide_dur = int(0.8 * FPS)         # 職員証スライド時間
+    staff_touch = staff_slide_dur            # 職員証タッチ瞬間
+    gap_start = staff_touch + int(0.6 * FPS) # 職員証退場開始
+    gap_dur = int(0.4 * FPS)                 # 退場時間
+    ic_slide_start = gap_start + gap_dur     # ICカードスライド開始
+    ic_slide_dur = int(0.8 * FPS)            # ICカードスライド時間
+    ic_touch = ic_slide_start + ic_slide_dur # ICカードタッチ瞬間
+    ripple_dur = int(0.6 * FPS)
+    sound_text_dur = int(0.8 * FPS)
+    toast_delay = int(0.3 * FPS)         # トースト表示開始（ICタッチ後）
+    toast_slide_dur = int(0.3 * FPS)     # トーストスライドイン時間
 
     # 位置
     reader_cx = WIDTH // 2
-    reader_cy = HEIGHT // 2 + 40
-    card_start_x = WIDTH + CARD_WIDTH     # 画面外右
-    card_end_x = reader_cx + 20           # リーダーの少し右上
+    reader_cy = HEIGHT // 2 + 60
+    card_start_x = WIDTH + CARD_WIDTH
+    card_end_x = reader_cx + 20
+    card_exit_x = -CARD_WIDTH
     card_base_y = reader_cy - 100
+
+    # ラベル描画用
+    label_font = get_font(44)
 
     for i in range(total):
         img = new_frame()
 
-        # リーダー描画（タッチ後にランプ点灯）
-        draw_card_reader(img, reader_cx, reader_cy, lit=(i >= touch_frame))
+        # ラベル描画（画面上部に「貸出時も」or「返却時も」）
+        draw = ImageDraw.Draw(img)
+        bbox = draw.textbbox((0, 0), label, font=label_font)
+        lw = bbox[2] - bbox[0]
+        draw.text(((WIDTH - lw) // 2 + label_offset_x, 80), label,
+                  fill=MAIN_BLUE, font=label_font)
 
-        # カード位置計算（ease-out cubic + 弧を描く軌道）
-        if i < slide_end:
-            t = i / slide_end
-            t_ease = 1 - (1 - t) ** 3
-            card_x = int(card_start_x + (card_end_x - card_start_x) * t_ease)
-            card_y = card_base_y - int(30 * math.sin(t * math.pi))
-            angle = -5 * (1 - t)
-        else:
-            card_x = card_end_x
-            card_y = card_base_y
-            angle = 0
+        # リーダーのランプ状態
+        lamp_on = (staff_touch <= i < gap_start) or (i >= ic_touch)
+        draw_card_reader(img, reader_cx, reader_cy, lit=lamp_on)
 
-        # カード描画
-        if card_type == "staff":
-            draw_staff_card(img, card_x, card_y, angle)
-        else:
-            draw_ic_card(img, card_x, card_y, angle)
+        # --- 職員証アニメーション ---
+        if i < gap_start + gap_dur:
+            if i < staff_slide_dur:
+                # スライドイン
+                t = i / staff_slide_dur
+                t_ease = 1 - (1 - t) ** 3
+                sx = int(card_start_x + (card_end_x - card_start_x) * t_ease)
+                sy = card_base_y - int(20 * math.sin(t * math.pi))
+                sa = -4 * (1 - t)
+            elif i < gap_start:
+                # タッチ後、静止
+                sx, sy, sa = card_end_x, card_base_y, 0
+            else:
+                # 退場（左へスライドアウト）
+                t = (i - gap_start) / gap_dur
+                t_ease = t ** 2
+                sx = int(card_end_x + (card_exit_x - card_end_x) * t_ease)
+                sy = card_base_y
+                sa = 3 * t
+            draw_staff_card(img, sx, sy, sa)
 
-        # 波紋エフェクト
-        if touch_frame <= i < touch_frame + ripple_dur:
-            rt = (i - touch_frame) / ripple_dur
-            r_radius = int(20 + 80 * rt)
-            r_alpha = int(100 * (1 - rt))
-            draw_ripple(img, reader_cx, reader_cy - 30, r_radius, r_alpha)
+        # --- 交通系ICカードアニメーション ---
+        if i >= ic_slide_start:
+            if i < ic_touch:
+                # スライドイン
+                t = (i - ic_slide_start) / ic_slide_dur
+                t_ease = 1 - (1 - t) ** 3
+                ix = int(card_start_x + (card_end_x - card_start_x) * t_ease)
+                iy = card_base_y - int(20 * math.sin(t * math.pi))
+                ia = -4 * (1 - t)
+            else:
+                ix, iy, ia = card_end_x, card_base_y, 0
+            draw_ic_card(img, ix, iy, ia)
 
-        # 「ピッ♪」/ 「ピピッ♪」テキスト（タッチ後に上へ浮かぶ）
-        if touch_frame <= i < touch_frame + text_dur:
-            tt = (i - touch_frame) / text_dur
-            text_alpha = 1.0 if tt < 0.7 else max(0, (1 - tt) / 0.3)
-            text_y = int(reader_cy - 180 - 30 * tt)
+        # --- 職員証タッチ時の波紋 + 音テキスト ---
+        if staff_touch <= i < staff_touch + ripple_dur:
+            rt = (i - staff_touch) / ripple_dur
+            draw_ripple(img, reader_cx, reader_cy - 30,
+                        int(20 + 60 * rt), int(80 * (1 - rt)))
 
-            sound_text = "ピッ♪" if card_type == "staff" else "ピピッ♪"
-            overlay = Image.new("RGBA", (WIDTH, HEIGHT), (0, 0, 0, 0))
-            td = ImageDraw.Draw(overlay)
-            font = get_font(40)
-            bbox = td.textbbox((0, 0), sound_text, font=font)
-            tw = bbox[2] - bbox[0]
-            a = int(255 * max(0.0, min(1.0, text_alpha)))
-            td.text(((WIDTH - tw) // 2, text_y), sound_text,
-                    fill=(*MAIN_BLUE, a), font=font)
+        if staff_touch <= i < staff_touch + sound_text_dur:
+            tt = (i - staff_touch) / sound_text_dur
+            _draw_float_text(img, "ピッ♪", reader_cy - 160, tt)
 
-            img_rgba = img.convert("RGBA")
-            img = Image.alpha_composite(img_rgba, overlay).convert("RGB")
+        # --- ICカードタッチ時の波紋 + 音テキスト ---
+        if ic_touch <= i < ic_touch + ripple_dur:
+            rt = (i - ic_touch) / ripple_dur
+            draw_ripple(img, reader_cx, reader_cy - 30,
+                        int(20 + 60 * rt), int(80 * (1 - rt)))
+
+        if ic_touch <= i < ic_touch + sound_text_dur:
+            tt = (i - ic_touch) / sound_text_dur
+            _draw_float_text(img, ic_sound, reader_cy - 160, tt)
+
+        # --- トースト表示（ICカードタッチ後にスライドイン） ---
+        if toast_img is not None and i >= ic_touch + toast_delay:
+            toast_target_x = WIDTH - toast_img.width - 40
+            toast_y = 30
+            elapsed = i - ic_touch - toast_delay
+            if elapsed < toast_slide_dur:
+                t = elapsed / toast_slide_dur
+                t_ease = 1 - (1 - t) ** 3
+                toast_x = int(WIDTH + (toast_target_x - WIDTH) * t_ease)
+            else:
+                toast_x = toast_target_x
+            # 背景色で角丸外の隙間を隠す
+            draw_bg = ImageDraw.Draw(img)
+            draw_bg.rectangle(
+                (toast_x - 2, toast_y - 2,
+                 toast_x + toast_img.width + 2, toast_y + toast_img.height + 2),
+                fill=BG_COLOR
+            )
+            img.paste(toast_img, (toast_x, toast_y))
 
         frames.append(img)
+
+    # タッチ時刻（秒）を属性として付与（効果音同期用）
+    frames.touch_times = (staff_touch / FPS, ic_touch / FPS)
     return frames
+
+
+def _draw_float_text(img: Image.Image, text: str, base_y: int, progress: float):
+    """上へ浮かびながらフェードする音テキストを描画"""
+    alpha = 1.0 if progress < 0.6 else max(0, (1 - progress) / 0.4)
+    y = int(base_y - 25 * progress)
+    overlay = Image.new("RGBA", (WIDTH, HEIGHT), (0, 0, 0, 0))
+    td = ImageDraw.Draw(overlay)
+    font = get_font(36)
+    bbox = td.textbbox((0, 0), text, font=font)
+    tw = bbox[2] - bbox[0]
+    a = int(255 * max(0.0, min(1.0, alpha)))
+    td.text(((WIDTH - tw) // 2, y), text, fill=(*MAIN_BLUE, a), font=font)
+    img_rgba = img.convert("RGBA")
+    result = Image.alpha_composite(img_rgba, overlay)
+    img.paste(result.convert("RGB"))
 
 
 def scene_screenshot(screenshot_path: Path, caption: str,
@@ -503,7 +638,7 @@ def scene_end_card(duration_sec: float = 4.0) -> list:
         )
 
         # アプリ名
-        app_text = "交通系ICカード管理システム"
+        app_text = "交通系ICカード管理システム：ピッすい"
         font_app = get_font(36)
         bbox = draw.textbbox((0, 0), app_text, font=font_app)
         tw = bbox[2] - bbox[0]
@@ -531,11 +666,11 @@ def save_frames(frames: list, tmpdir: Path, start_idx: int) -> int:
 
 def build_ffmpeg_command(tmpdir: Path, output_path: Path,
                          total_duration: float,
-                         touch1_time: float, touch2_time: float) -> list:
-    """ffmpegコマンドを構築（映像 + 効果音）"""
-    lend_wav = SOUNDS_DIR / "lend.wav"
-    return_wav = SOUNDS_DIR / "return.wav"
+                         sound_events: list) -> list:
+    """ffmpegコマンドを構築（映像 + 効果音）
 
+    sound_events: [(time_sec, wav_path), ...] 効果音のリスト
+    """
     cmd = [
         "ffmpeg", "-y",
         "-framerate", str(FPS),
@@ -543,28 +678,19 @@ def build_ffmpeg_command(tmpdir: Path, output_path: Path,
     ]
 
     # 音声入力と遅延フィルター
-    audio_inputs = []
     filter_parts = []
     audio_labels = []
     input_idx = 1
 
-    if lend_wav.exists():
-        cmd.extend(["-i", str(lend_wav)])
-        delay_ms = int(touch1_time * 1000)
-        filter_parts.append(
-            f"[{input_idx}:a]adelay={delay_ms}|{delay_ms}[a{input_idx}]"
-        )
-        audio_labels.append(f"[a{input_idx}]")
-        input_idx += 1
-
-    if return_wav.exists():
-        cmd.extend(["-i", str(return_wav)])
-        delay_ms = int(touch2_time * 1000)
-        filter_parts.append(
-            f"[{input_idx}:a]adelay={delay_ms}|{delay_ms}[a{input_idx}]"
-        )
-        audio_labels.append(f"[a{input_idx}]")
-        input_idx += 1
+    for time_sec, wav_path in sound_events:
+        if wav_path.exists():
+            cmd.extend(["-i", str(wav_path)])
+            delay_ms = int(time_sec * 1000)
+            filter_parts.append(
+                f"[{input_idx}:a]adelay={delay_ms}|{delay_ms}[a{input_idx}]"
+            )
+            audio_labels.append(f"[a{input_idx}]")
+            input_idx += 1
 
     if audio_labels:
         n = len(audio_labels)
@@ -587,7 +713,7 @@ def build_ffmpeg_command(tmpdir: Path, output_path: Path,
 
 def main():
     print("=" * 60)
-    print("  交通系ICカード管理システム プロモーション動画生成")
+    print("  交通系ICカード管理システム：ピッすい プロモーション動画生成")
     print("=" * 60)
 
     # 依存チェック
@@ -600,77 +726,93 @@ def main():
     # 出力ディレクトリ作成
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
-    # スクリーンショット存在確認
-    screenshots = {
-        "staff_recognized": SCREENSHOTS_DIR / "staff_recognized.png",
-        "lend": SCREENSHOTS_DIR / "lend.png",
-        "report_excel": SCREENSHOTS_DIR / "report_excel.png",
-    }
-    for name, path in screenshots.items():
-        if not path.exists():
-            print(f"エラー: スクリーンショットが見つかりません: {path}")
-            sys.exit(1)
+    # 物品出納簿のトリミング済み画像を生成（テーブル本体のみ）
+    screenshot_raw = SCREENSHOTS_DIR / "report_excel.png"
+    screenshot_report = OUTPUT_DIR / "report_excel_cropped.png"
+    if not screenshot_raw.exists():
+        print(f"エラー: スクリーンショットが見つかりません: {screenshot_raw}")
+        sys.exit(1)
+    raw = Image.open(screenshot_raw)
+    cropped = raw.crop((30, 230, 1200, 830))
+    # 備考欄の「テストデータ」テキストを消去（プロモーション用）
+    # 罫線(y=149,200,251,...,557) の間のセル内部のみ白で塗りつぶし
+    cd = ImageDraw.Draw(cropped)
+    for row_top in [200, 251, 302, 353, 404, 455, 506, 557]:
+        cd.rectangle((900, row_top + 1, 990, row_top + 50), fill=(255, 255, 255))
+    cropped.save(screenshot_report)
+    print(f"物品出納簿画像をトリミング: {screenshot_report}")
+
+    # トースト通知画像をクロップ（貸出・返却時の通知表示）
+    toast_crop_box = (1474, 3, 2007, 216)
+    toast_w = 480
+    lend_full = Image.open(SCREENSHOTS_DIR / "lend.png")
+    toast_lend = lend_full.crop(toast_crop_box)
+    toast_h = int(toast_w * toast_lend.height / toast_lend.width)
+    toast_lend = toast_lend.resize((toast_w, toast_h), Image.LANCZOS)
+
+    ret_full = Image.open(SCREENSHOTS_DIR / "return.png")
+    toast_return = ret_full.crop(toast_crop_box)
+    toast_return = toast_return.resize((toast_w, toast_h), Image.LANCZOS)
+    print(f"トースト画像をクロップ: {toast_w}x{toast_h}px")
 
     # シーンタイミング（各シーンの秒数）
-    # Scene 1:  3s  キャッチコピー
-    # Scene 2:  4s  職員証タッチ
-    # Scene 3:  3s  職員証認識画面
-    # Scene 4:  4s  交通系ICカードタッチ
-    # Scene 5:  3s  貸出完了画面
-    # Scene 6:  3s  物品出納簿テキスト
-    # Scene 7:  3s  物品出納簿画面
-    # Scene 8:  4s  エンドカード
-    # 合計:    27s
+    # Scene 1:  3.0s  キャッチコピー
+    # Scene 2:  2.5s  ブリッジ（ピッすいなら…）
+    # Scene 3:  4.5s  貸出（職員証→ICカード連続タッチ）
+    # Scene 4:  4.5s  返却（職員証→ICカード連続タッチ）
+    # Scene 5:  3.0s  物品出納簿テキスト
+    # Scene 6:  3.0s  物品出納簿画面
+    # Scene 7:  4.0s  エンドカード
+    # 合計:    24.5s
+
+    lend_wav = SOUNDS_DIR / "lend.wav"
+    return_wav = SOUNDS_DIR / "return.wav"
 
     with tempfile.TemporaryDirectory(prefix="promo_") as tmpdir:
         tmpdir = Path(tmpdir)
         idx = 0
 
-        print("\n[1/8] キャッチコピー (0-3s)...")
+        print("\n[1/7] キャッチコピー (0-3s)...")
         idx = save_frames(
             scene_text("交通系ICカードの管理、\nまだ手書きですか？", 3.0),
             tmpdir, idx
         )
 
-        print("[2/8] 職員証タッチ (3-7s)...")
+        print("[2/7] ブリッジ (3-5.5s)...")
         idx = save_frames(
-            scene_card_touch("staff", 4.0),
+            scene_text("ピッすいなら、\nピッとタッチするだけ", 2.5),
             tmpdir, idx
         )
 
-        print("[3/8] 職員証認識画面 (7-10s)...")
+        scene3_start = 5.5
+        print(f"[3/7] 貸出シーン ({scene3_start}-{scene3_start + 4.5}s)...")
+        lend_frames = scene_double_touch("貸出時も", "ピッ♪", 4.5,
+                                         label_offset_x=-200,
+                                         toast_img=toast_lend)
+        idx = save_frames(lend_frames, tmpdir, idx)
+
+        scene4_start = scene3_start + 4.5
+        print(f"[4/7] 返却シーン ({scene4_start}-{scene4_start + 4.5}s)...")
+        return_frames = scene_double_touch("返却時も", "ピピッ♪", 4.5,
+                                           label_offset_x=200,
+                                           toast_img=toast_return)
+        idx = save_frames(return_frames, tmpdir, idx)
+
+        print("[5/7] 物品出納簿メッセージ (14.5-17.5s)...")
         idx = save_frames(
-            scene_screenshot(screenshots["staff_recognized"], "職員証をタッチ", 3.0),
+            scene_text("貸出も返却も\n2回タッチするだけで\n物品出納簿を自動作成！",
+                        3.0, font_size=48),
             tmpdir, idx
         )
 
-        print("[4/8] 交通系ICカードタッチ (10-14s)...")
+        print("[6/7] 物品出納簿出力画面 (17.5-20.5s)...")
         idx = save_frames(
-            scene_card_touch("ic", 4.0),
-            tmpdir, idx
-        )
-
-        print("[5/8] 貸出完了画面 (14-17s)...")
-        idx = save_frames(
-            scene_screenshot(screenshots["lend"],
-                             "交通系ICカードをタッチ → 貸出完了", 3.0),
-            tmpdir, idx
-        )
-
-        print("[6/8] 物品出納簿メッセージ (17-20s)...")
-        idx = save_frames(
-            scene_text("物品出納簿もボタン1つで自動作成", 3.0),
-            tmpdir, idx
-        )
-
-        print("[7/8] 物品出納簿出力画面 (20-23s)...")
-        idx = save_frames(
-            scene_screenshot(screenshots["report_excel"],
+            scene_screenshot(screenshot_report,
                              "物品出納簿をExcelで自動出力", 3.0),
             tmpdir, idx
         )
 
-        print("[8/8] エンドカード (23-27s)...")
+        print("[7/7] エンドカード (20.5-24.5s)...")
         idx = save_frames(
             scene_end_card(4.0),
             tmpdir, idx
@@ -679,11 +821,18 @@ def main():
         total_duration = idx / FPS
         print(f"\n全 {idx} フレーム生成完了（約 {total_duration:.1f} 秒）")
 
-        # 効果音のタイミング
-        # Scene 2: 3.0s開始、タッチはduration_sec*0.5=2.0s後 → 5.0s
-        # Scene 4: 10.0s開始、タッチは2.0s後 → 12.0s
-        touch1_time = 3.0 + 2.0   # 職員証タッチ
-        touch2_time = 10.0 + 2.0  # 交通系ICカードタッチ
+        # 効果音イベントを構築
+        # 各 scene_double_touch は .touch_times = (staff_sec, ic_sec)
+        # これはシーン開始からの相対時刻
+        lend_staff_t, lend_ic_t = lend_frames.touch_times
+        ret_staff_t, ret_ic_t = return_frames.touch_times
+
+        sound_events = [
+            (scene3_start + lend_staff_t, lend_wav),    # 貸出: 職員証タッチ
+            (scene3_start + lend_ic_t, lend_wav),        # 貸出: ICカードタッチ
+            (scene4_start + ret_staff_t, lend_wav),      # 返却: 職員証タッチ
+            (scene4_start + ret_ic_t, return_wav),       # 返却: ICカードタッチ
+        ]
 
         # MP4エンコード
         print("\nffmpegでMP4エンコード中...")
@@ -691,7 +840,7 @@ def main():
 
         cmd = build_ffmpeg_command(
             tmpdir, output_path, total_duration,
-            touch1_time, touch2_time
+            sound_events
         )
 
         result = subprocess.run(cmd, capture_output=True, text=True)
