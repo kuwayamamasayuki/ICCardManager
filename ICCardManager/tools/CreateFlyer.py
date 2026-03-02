@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-プロモーション用チラシ（A4横 PDF）生成スクリプト
+プロモーション用チラシ（A4縦 PDF）生成スクリプト
 
 交通系ICカード管理システム：ピッすいの庁内プロモーション用チラシを
 Pillow で生成する。
@@ -32,8 +32,8 @@ except ImportError:
 # ============================================================
 # 定数
 # ============================================================
-# A4横 300 DPI
-PAGE_WIDTH, PAGE_HEIGHT = 3508, 2480
+# A4縦 300 DPI
+PAGE_WIDTH, PAGE_HEIGHT = 2480, 3508
 
 # カラーパレット（CreatePromotionVideo.py と統一）
 MAIN_BLUE = (33, 150, 243)           # #2196F3 アプリのテーマカラー
@@ -94,7 +94,7 @@ def get_font(size: int) -> ImageFont.FreeTypeFont:
 def load_and_fit_screenshot(path: Path, max_w: int, max_h: int) -> Image.Image:
     """スクリーンショットを読み込み、指定サイズ内にアスペクト比を維持してリサイズ"""
     screenshot = Image.open(path)
-    ratio = min(max_w / screenshot.width, max_h / screenshot.height)
+    ratio = min(max_w / screenshot.width, max_h / screenshot.height, 1.3)
     new_w = int(screenshot.width * ratio)
     new_h = int(screenshot.height * ratio)
     return screenshot.resize((new_w, new_h), Image.LANCZOS)
@@ -295,7 +295,7 @@ def draw_operation_section(img: Image.Image, y_start: int) -> int:
     draw_card_reader(img, center_x, illust_cy + 20)
 
     # 職員証は左側
-    card_gap = 420  # リーダーとカードの間隔
+    card_gap = 380  # リーダーとカードの間隔
     draw_staff_card(img, center_x - card_gap, illust_cy)
 
     # ICカードは右側
@@ -437,15 +437,15 @@ def main():
     print("\nページを生成中...")
     img = Image.new("RGB", (PAGE_WIDTH, PAGE_HEIGHT), WHITE)
 
-    # セクション高さの配分
+    # セクション高さの配分（A4縦: 3508px）
     # ① ヘッダー: 220px
     # ② 操作説明: 480px
-    # ③ 結果1(履歴): 残りの約半分
-    # ④ 結果2(帳票): 残りの約半分
+    # ③ 結果1(履歴): 残りの60%（メインの訴求）
+    # ④ 結果2(帳票): 残りの40%（サブの訴求）
     header_h = 220
     operation_h = 480
     remaining = PAGE_HEIGHT - header_h - operation_h
-    result1_h = remaining * 55 // 100  # 履歴セクションをやや大きく
+    result1_h = remaining * 63 // 100  # 履歴セクションを大きく
     result2_h = remaining - result1_h
 
     print("[1/4] ヘッダー...")
@@ -483,7 +483,7 @@ def main():
     preview.save(str(preview_path))
 
     print(f"\nチラシを生成しました: {output_path}")
-    print(f"  サイズ: A4横 ({PAGE_WIDTH}x{PAGE_HEIGHT}px, 300 DPI)")
+    print(f"  サイズ: A4縦 ({PAGE_WIDTH}x{PAGE_HEIGHT}px, 300 DPI)")
     print(f"  プレビュー: {preview_path}")
 
 
