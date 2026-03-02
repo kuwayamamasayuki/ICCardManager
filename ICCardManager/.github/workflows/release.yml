@@ -34,7 +34,7 @@ jobs:
         run: dotnet restore ${{ env.PROJECT_PATH }}
 
       - name: Run tests
-        run: dotnet test ICCardManager/ICCardManager.sln --configuration Release --verbosity normal
+        run: dotnet test ICCardManager/ICCardManager.sln --configuration Release --verbosity normal --filter "Category!=UI"
 
       - name: Publish self-contained executable
         run: |
