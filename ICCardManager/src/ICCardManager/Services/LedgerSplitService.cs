@@ -177,10 +177,15 @@ namespace ICCardManager.Services
                 .Sum(d => d.Amount!.Value);
 
             // Balance = グループ内の最後のdetailの残高（時系列順）
+            // Issue #880: DBの表示順と同じ時系列順でソート
+            // FeliCaカードリーダーは新しい順に履歴を返すため、小さいrowidほど新しい
+            // rowid DESC（大きいrowid＝古い順）で時系列順にし、最後（最新）の残高を取得
             var lastDetail = groupDetails
                 .Where(d => d.Balance.HasValue)
-                .OrderBy(d => d.SequenceNumber > 0 ? d.SequenceNumber : int.MaxValue)
-                .ThenBy(d => d.UseDate ?? DateTime.MaxValue)
+                .OrderBy(d => d.UseDate ?? DateTime.MaxValue)
+                .ThenByDescending(d => d.IsCharge)
+                .ThenByDescending(d => d.IsPointRedemption)
+                .ThenByDescending(d => d.SequenceNumber > 0 ? d.SequenceNumber : int.MinValue)
                 .LastOrDefault();
 
             int balance = lastDetail?.Balance ?? 0;
@@ -193,10 +198,13 @@ namespace ICCardManager.Services
         /// </summary>
         private static DateTime GetGroupDate(List<LedgerDetail> groupDetails, DateTime originalDate)
         {
+            // Issue #880: DBの表示順と同じ時系列順でソートし、最初（最古）の日付を取得
             var firstDate = groupDetails
                 .Where(d => d.UseDate.HasValue)
-                .OrderBy(d => d.SequenceNumber > 0 ? d.SequenceNumber : int.MaxValue)
-                .ThenBy(d => d.UseDate)
+                .OrderBy(d => d.UseDate ?? DateTime.MaxValue)
+                .ThenByDescending(d => d.IsCharge)
+                .ThenByDescending(d => d.IsPointRedemption)
+                .ThenByDescending(d => d.SequenceNumber > 0 ? d.SequenceNumber : int.MinValue)
                 .FirstOrDefault()
                 ?.UseDate;
 

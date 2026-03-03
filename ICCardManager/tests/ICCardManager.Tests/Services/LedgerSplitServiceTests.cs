@@ -351,10 +351,13 @@ public class LedgerSplitServiceTests
     public void CalculateGroupFinancials_ExpenseOnly_CorrectValues()
     {
         // Arrange: 鉄道利用のみ（Expense）
+        // FeliCa順: 小さいSequenceNumberほど新しい
         var details = new List<LedgerDetail>
         {
-            CreateRailDetail("博多", "天神", 260, 740, 1),
-            CreateRailDetail("天神", "赤坂", 200, 540, 2)
+            CreateRailDetail("博多", "天神", 260, 740, 2,
+                useDate: new DateTime(2026, 2, 3, 10, 0, 0)),
+            CreateRailDetail("天神", "赤坂", 200, 540, 1,
+                useDate: new DateTime(2026, 2, 3, 14, 0, 0))
         };
 
         // Act
@@ -363,7 +366,7 @@ public class LedgerSplitServiceTests
         // Assert
         income.Should().Be(0, "鉄道利用のみなのでIncome=0");
         expense.Should().Be(460, "260+200=460");
-        balance.Should().Be(540, "最後のdetailの残高");
+        balance.Should().Be(540, "時系列で最後のdetailの残高");
     }
 
     [Fact]
@@ -660,6 +663,125 @@ public class LedgerSplitServiceTests
         insertedLedger!.Expense.Should().Be(200, "グループ2は天神→赤坂の200円");
         insertedLedger.Income.Should().Be(0);
         insertedLedger.Balance.Should().Be(540, "グループ2の最後の残高");
+    }
+
+    #endregion
+
+    #region Issue #880: FeliCa順序での残高計算テスト
+
+    [Fact]
+    public void CalculateGroupFinancials_FeliCaOrder_ReturnsChronologicallyLastBalance()
+    {
+        // Arrange: FeliCaカードリーダーは新しい順に履歴を返すため、
+        // 小さいSequenceNumber（=rowid）ほど新しい（後に利用した）エントリ
+        // SequenceNumber=1が最新（14:00）、SequenceNumber=3が最古（10:00）
+        var details = new List<LedgerDetail>
+        {
+            CreateRailDetail("博多", "天神", 260, 740, 3,
+                useDate: new DateTime(2026, 2, 3, 10, 0, 0)),
+            CreateRailDetail("天神", "赤坂", 200, 540, 2,
+                useDate: new DateTime(2026, 2, 3, 12, 0, 0)),
+            CreateRailDetail("赤坂", "薬院", 200, 340, 1,
+                useDate: new DateTime(2026, 2, 3, 14, 0, 0))
+        };
+
+        // Act
+        var (_, _, balance) = LedgerSplitService.CalculateGroupFinancials(details);
+
+        // Assert: 時系列順で最後（14:00の赤坂→薬院）の残高340を取得すべき
+        balance.Should().Be(340, "時系列で最後のエントリの残高を返すべき");
+    }
+
+    [Fact]
+    public void CalculateGroupFinancials_SameDateFeliCaOrder_ReturnsCorrectBalance()
+    {
+        // Arrange: 同一日付でSequenceNumberのみが異なるケース
+        // FeliCa順: SequenceNumber=1が最新、SequenceNumber=3が最古
+        var sameDate = new DateTime(2026, 2, 3, 10, 0, 0);
+        var details = new List<LedgerDetail>
+        {
+            CreateRailDetail("博多", "天神", 260, 740, 3, useDate: sameDate),
+            CreateRailDetail("天神", "赤坂", 200, 540, 2, useDate: sameDate),
+            CreateRailDetail("赤坂", "薬院", 200, 340, 1, useDate: sameDate)
+        };
+
+        // Act
+        var (_, _, balance) = LedgerSplitService.CalculateGroupFinancials(details);
+
+        // Assert: rowid DESC順で最後（SequenceNumber=1、最新）の残高340を取得すべき
+        balance.Should().Be(340,
+            "同一日の場合、SequenceNumber（rowid）のDESC順で最後の残高を返すべき");
+    }
+
+    [Fact]
+    public async Task SplitAsync_FeliCaOrder_CorrectBalanceForBothGroups()
+    {
+        // Arrange: FeliCa順のSequenceNumberで分割した場合の残高の整合性検証
+        // 初期残高1000円からの3区間利用をFeliCa順で記録
+        // SequenceNumber=3: 博多→天神 260円 (10:00, 最古) 残高740
+        // SequenceNumber=2: 天神→赤坂 200円 (12:00)        残高540
+        // SequenceNumber=1: 赤坂→薬院 200円 (14:00, 最新)  残高340
+        // グループ1（博多→天神）とグループ2（天神→赤坂、赤坂→薬院）に分割
+        var originalLedger = CreateTestLedger(
+            id: 1,
+            date: new DateTime(2026, 2, 3),
+            summary: "鉄道（博多～薬院）",
+            income: 0,
+            expense: 660,
+            balance: 340);
+
+        SetupDefaultMocks(originalLedger, nextInsertId: 100);
+
+        Ledger? insertedLedger = null;
+        _ledgerRepositoryMock
+            .Setup(x => x.InsertAsync(It.IsAny<Ledger>()))
+            .Callback<Ledger>(l => insertedLedger = l)
+            .ReturnsAsync(100);
+
+        var details = new List<LedgerDetail>
+        {
+            CreateRailDetail("博多", "天神", 260, 740, 3,
+                useDate: new DateTime(2026, 2, 3, 10, 0, 0), groupId: 1),
+            CreateRailDetail("天神", "赤坂", 200, 540, 2,
+                useDate: new DateTime(2026, 2, 3, 12, 0, 0), groupId: 2),
+            CreateRailDetail("赤坂", "薬院", 200, 340, 1,
+                useDate: new DateTime(2026, 2, 3, 14, 0, 0), groupId: 2)
+        };
+
+        // Act
+        await _service.SplitAsync(1, details);
+
+        // Assert: グループ1の残高 = 博多→天神後の740円
+        originalLedger.Balance.Should().Be(740,
+            "グループ1は博多→天神の1件のみなので残高740");
+
+        // Assert: グループ2の残高 = 赤坂→薬院後の340円（時系列で最後のエントリ）
+        insertedLedger.Should().NotBeNull();
+        insertedLedger!.Balance.Should().Be(340,
+            "グループ2は天神→赤坂→薬院の2件で、時系列最後の残高340");
+    }
+
+    [Fact]
+    public void CalculateGroupFinancials_ChargeAndUsageSameDate_ChargeBeforeUsage()
+    {
+        // Arrange: 同一日にチャージと利用がある場合、
+        // DBの表示順ではチャージが先（is_charge DESC）なので、
+        // 利用の残高が時系列で最後
+        var sameDate = new DateTime(2026, 2, 3, 10, 0, 0);
+        var details = new List<LedgerDetail>
+        {
+            CreateChargeDetail(3000, 3500, 2, useDate: sameDate),
+            CreateRailDetail("博多", "天神", 260, 3240, 1, useDate: sameDate)
+        };
+
+        // Act
+        var (income, expense, balance) = LedgerSplitService.CalculateGroupFinancials(details);
+
+        // Assert: チャージ→利用の順で、最後の残高は利用後の3240
+        income.Should().Be(3000);
+        expense.Should().Be(260);
+        balance.Should().Be(3240,
+            "時系列ではチャージ→利用の順なので、利用後の残高が最終残高");
     }
 
     #endregion
