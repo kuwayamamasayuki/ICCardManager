@@ -97,7 +97,8 @@ namespace ICCardManager.Services
         private static readonly List<HashSet<string>> TransferStationGroups = new()
         {
             // 天神グループ（福岡市地下鉄・西鉄）
-            new HashSet<string> { "天神", "福岡（天神）" },
+            // Issue #878: CSVの駅名マスタに合わせて半角括弧・「西鉄」プレフィックス付きに修正
+            new HashSet<string> { "天神", "西鉄福岡(天神)" },
 
             // 千早グループ（JR・西鉄）
             new HashSet<string> { "千早", "西鉄千早" }
@@ -458,14 +459,20 @@ namespace ICCardManager.Services
                 return string.Empty;
             }
 
-            // 往復判定
-            if (routes.Count >= 2)
+            // Issue #878: 乗り継ぎ統合を往復判定より先に行う
+            // これにより、天神↔西鉄福岡(天神)のような乗り継ぎ駅を経由した往復が正しく検出される
+            var consolidatedRoutes = ConsolidateRoutes(routes);
+            var consolidatedAsPairs = consolidatedRoutes
+                .Select(r => (Entry: r.Start, Exit: r.End)).ToList();
+
+            // 往復判定（統合後の経路で判定）
+            if (consolidatedAsPairs.Count >= 2)
             {
-                var roundTrips = DetectRoundTrips(routes);
+                var roundTrips = DetectRoundTrips(consolidatedAsPairs);
                 if (roundTrips.Count > 0)
                 {
                     var roundTripStrings = roundTrips.Select(rt => $"{rt.Start}～{rt.End} 往復");
-                    var remainingRoutes = GetRemainingRoutes(routes, roundTrips);
+                    var remainingRoutes = GetRemainingRoutes(consolidatedAsPairs, roundTrips);
 
                     var allRoutes = roundTripStrings.Concat(
                         remainingRoutes.Select(r => $"{r.Entry}～{r.Exit}"));
@@ -474,9 +481,7 @@ namespace ICCardManager.Services
                 }
             }
 
-            // 乗継判定（連続する駅の場合は始発～終着をまとめる）
-            var consolidatedRoutes = ConsolidateRoutes(routes);
-
+            // 往復なしの場合は統合済みの経路を表示
             return string.Join("、", consolidatedRoutes.Select(r => $"{r.Start}～{r.End}"));
         }
 
@@ -629,12 +634,40 @@ namespace ICCardManager.Services
             string consolidatedStart,
             string consolidatedEnd)
         {
-            // 起点と終点が同じ場合（循環移動）は、統合せずに個別の経路を追加
-            if (consolidatedStart == consolidatedEnd && chainEnd > chainStart)
+            // 起点と終点が同じ場合（循環移動）
+            // Issue #878: 乗り継ぎ駅も考慮して循環判定
+            if (AreTransferStations(consolidatedStart, consolidatedEnd) && chainEnd > chainStart)
             {
-                for (int i = chainStart; i <= chainEnd; i++)
+                var chainLength = chainEnd - chainStart + 1;
+
+                // Issue #878: 偶数長の循環チェーンは往復の可能性が高い
+                // 中間点で分割して各半分を再統合し、往復判定に渡す
+                if (chainLength % 2 == 0 && chainLength >= 4)
                 {
-                    result.Add((routes[i].Entry, routes[i].Exit));
+                    int mid = chainStart + chainLength / 2 - 1;
+
+                    var firstHalf = new List<(string Entry, string Exit)>();
+                    for (int i = chainStart; i <= mid; i++)
+                    {
+                        firstHalf.Add(routes[i]);
+                    }
+
+                    var secondHalf = new List<(string Entry, string Exit)>();
+                    for (int i = mid + 1; i <= chainEnd; i++)
+                    {
+                        secondHalf.Add(routes[i]);
+                    }
+
+                    result.AddRange(ConsolidateRoutes(firstHalf));
+                    result.AddRange(ConsolidateRoutes(secondHalf));
+                }
+                else
+                {
+                    // 奇数長または2経路の循環は個別の経路として追加
+                    for (int i = chainStart; i <= chainEnd; i++)
+                    {
+                        result.Add((routes[i].Entry, routes[i].Exit));
+                    }
                 }
             }
             else
