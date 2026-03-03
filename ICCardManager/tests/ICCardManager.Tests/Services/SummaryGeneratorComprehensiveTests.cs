@@ -1104,5 +1104,32 @@ public class SummaryGeneratorComprehensiveTests
         OutputInputAndResult(details, results);
     }
 
+    /// <summary>
+    /// Issue #878: 地下鉄天神駅と西鉄福岡(天神)駅が乗り継ぎ駅として同一視されることを確認
+    /// </summary>
+    [Fact]
+    public void TC038_天神駅と西鉄福岡天神駅の乗り継ぎ()
+    {
+        // Arrange: 地下鉄空港線→西鉄天神大牟田線の乗り継ぎ（往復）
+        // 行き: 博多→天神（地下鉄）→西鉄福岡(天神)→西鉄二日市（西鉄）
+        // 帰り: 西鉄二日市→西鉄福岡(天神)（西鉄）→天神→博多（地下鉄）
+        // ICカード履歴は新しい順
+        var details = new List<LedgerDetail>
+        {
+            CreateRailwayUsage(new DateTime(2024, 12, 9), "天神", "博多", 210, 4410),      // 帰り地下鉄
+            CreateRailwayUsage(new DateTime(2024, 12, 9), "西鉄二日市", "西鉄福岡(天神)", 380, 4620), // 帰り西鉄
+            CreateRailwayUsage(new DateTime(2024, 12, 9), "西鉄福岡(天神)", "西鉄二日市", 380, 5000), // 行き西鉄
+            CreateRailwayUsage(new DateTime(2024, 12, 9), "博多", "天神", 210, 5380)       // 行き地下鉄
+        };
+
+        // Act
+        var results = _generator.GenerateByDate(details);
+
+        // Assert: 天神と西鉄福岡(天神)が同一駅とみなされ、乗り継ぎとして連結される
+        results.Should().HaveCount(1);
+        results[0].Summary.Should().Be("鉄道（博多～西鉄二日市 往復）");
+        OutputInputAndResult(details, results);
+    }
+
     #endregion
 }
