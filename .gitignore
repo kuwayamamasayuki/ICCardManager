@@ -88,6 +88,9 @@ appsettings.Local.json
 # Generated files
 *.Generated.cs
 
+# Python
+__pycache__/
+
 # 一時ファイル
 タイトルなし.txt
 プロンプト問題点.md
