@@ -745,6 +745,89 @@ public class LedgerRepositoryTests : IDisposable
         ledgerWithDetails.Details[0].IsCharge.Should().BeTrue();
     }
 
+    /// <summary>
+    /// Issue #876: 詳細レコードがカードリーダーと同じ「新しい順」で挿入されても、
+    /// GetByIdAsyncで取得すると「古い順」（時系列順）で返されることを確認
+    /// </summary>
+    [Fact]
+    public async Task GetByIdAsync_Details_ReturnedInChronologicalOrder()
+    {
+        // Arrange: カードリーダーと同じく新しい順（rowid小=新しい）で挿入
+        var ledger = CreateTestLedger(TestCardIdm, DateTime.Today, "複数利用", expense: 520);
+        var ledgerId = await _repository.InsertAsync(ledger);
+
+        // 新しい方を先に挿入（FeliCaカードリーダーの動作をシミュレート）
+        var newerDetail = new LedgerDetail
+        {
+            UseDate = DateTime.Today,
+            EntryStation = "天神",
+            ExitStation = "博多",
+            Amount = 260,
+            Balance = 9480
+        };
+        var olderDetail = new LedgerDetail
+        {
+            UseDate = DateTime.Today,
+            EntryStation = "博多",
+            ExitStation = "天神",
+            Amount = 260,
+            Balance = 9740
+        };
+
+        // 新しい順で挿入（newerDetailが先＝小さいrowid）
+        await _repository.InsertDetailsAsync(ledgerId, new[] { newerDetail, olderDetail });
+
+        // Act
+        var result = await _repository.GetByIdAsync(ledgerId);
+
+        // Assert: 古い順（時系列順）で返されること
+        result!.Details.Should().HaveCount(2);
+        result.Details[0].EntryStation.Should().Be("博多");    // 古い方（博多→天神）が先
+        result.Details[0].ExitStation.Should().Be("天神");
+        result.Details[1].EntryStation.Should().Be("天神");    // 新しい方（天神→博多）が後
+        result.Details[1].ExitStation.Should().Be("博多");
+    }
+
+    /// <summary>
+    /// Issue #876: 同一日でチャージと利用がある場合、チャージが先に表示されることを確認
+    /// </summary>
+    [Fact]
+    public async Task GetByIdAsync_Details_ChargeBeforeUsageOnSameDay()
+    {
+        // Arrange
+        var ledger = CreateTestLedger(TestCardIdm, DateTime.Today, "チャージ＋利用", income: 3000, expense: 260);
+        var ledgerId = await _repository.InsertAsync(ledger);
+
+        // カードリーダーは新しい順で返すため、利用（後）→チャージ（先）の順で挿入
+        var usageDetail = new LedgerDetail
+        {
+            UseDate = DateTime.Today,
+            EntryStation = "博多",
+            ExitStation = "天神",
+            Amount = 260,
+            Balance = 12740,
+            IsCharge = false
+        };
+        var chargeDetail = new LedgerDetail
+        {
+            UseDate = DateTime.Today,
+            Amount = 3000,
+            Balance = 13000,
+            IsCharge = true
+        };
+
+        // 新しい順で挿入（利用が先＝小さいrowid）
+        await _repository.InsertDetailsAsync(ledgerId, new[] { usageDetail, chargeDetail });
+
+        // Act
+        var result = await _repository.GetByIdAsync(ledgerId);
+
+        // Assert: チャージが利用より先に表示されること（is_charge DESC）
+        result!.Details.Should().HaveCount(2);
+        result.Details[0].IsCharge.Should().BeTrue();   // チャージが先
+        result.Details[1].IsCharge.Should().BeFalse();  // 利用が後
+    }
+
     #endregion
 
     #region GetPagedAsync テスト
