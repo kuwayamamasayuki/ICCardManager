@@ -784,5 +784,130 @@ public class LedgerSplitServiceTests
             "時系列ではチャージ→利用の順なので、利用後の残高が最終残高");
     }
 
+    [Fact]
+    public async Task SplitAsync_InsertsDetailsInReverseOrder_ForFeliCaRowidCompatibility()
+    {
+        // Arrange: 3件の明細を2グループに分割し、挿入順序が逆順であることを検証
+        // UI（GetDetailsAsync）からは時系列順（古い順）で渡される:
+        //   博多→天神(10:00) → 天神→赤坂(12:00) → 赤坂→薬院(14:00)
+        // 挿入時は逆順（新しい順）にして、FeliCa互換のrowid順序を維持すべき
+        var originalLedger = CreateTestLedger(
+            id: 1,
+            date: new DateTime(2026, 2, 3),
+            summary: "鉄道（博多～薬院）",
+            income: 0,
+            expense: 660,
+            balance: 340);
+
+        _ledgerRepositoryMock
+            .Setup(x => x.GetByIdAsync(1))
+            .ReturnsAsync(originalLedger);
+        _ledgerRepositoryMock
+            .Setup(x => x.UpdateAsync(It.IsAny<Ledger>()))
+            .ReturnsAsync(true);
+
+        var insertCallCount = 0;
+        _ledgerRepositoryMock
+            .Setup(x => x.InsertAsync(It.IsAny<Ledger>()))
+            .ReturnsAsync(() => 100 + (++insertCallCount));
+
+        // ReplaceDetailsAsync（グループ1）のキャプチャ
+        List<LedgerDetail>? replacedDetails = null;
+        _ledgerRepositoryMock
+            .Setup(x => x.ReplaceDetailsAsync(1, It.IsAny<IEnumerable<LedgerDetail>>()))
+            .Callback<int, IEnumerable<LedgerDetail>>((id, d) => replacedDetails = d.ToList())
+            .ReturnsAsync(true);
+
+        // InsertDetailsAsync（グループ2）のキャプチャ
+        List<LedgerDetail>? insertedDetails = null;
+        _ledgerRepositoryMock
+            .Setup(x => x.InsertDetailsAsync(It.IsAny<int>(), It.IsAny<IEnumerable<LedgerDetail>>()))
+            .Callback<int, IEnumerable<LedgerDetail>>((id, d) => insertedDetails = d.ToList())
+            .ReturnsAsync(true);
+
+        // UIからは時系列順（古い→新しい）で渡される
+        var details = new List<LedgerDetail>
+        {
+            CreateRailDetail("博多", "天神", 260, 740, 3,
+                useDate: new DateTime(2026, 2, 3, 10, 0, 0), groupId: 1),
+            CreateRailDetail("天神", "赤坂", 200, 540, 2,
+                useDate: new DateTime(2026, 2, 3, 12, 0, 0), groupId: 2),
+            CreateRailDetail("赤坂", "薬院", 200, 340, 1,
+                useDate: new DateTime(2026, 2, 3, 14, 0, 0), groupId: 2)
+        };
+
+        // Act
+        await _service.SplitAsync(1, details);
+
+        // Assert: グループ1（ReplaceDetailsAsync）は1件のみなので順序は関係ない
+        replacedDetails.Should().NotBeNull();
+        replacedDetails.Should().HaveCount(1);
+
+        // Assert: グループ2（InsertDetailsAsync）は新しい順で挿入されるべき
+        // （赤坂→薬院(14:00)が先、天神→赤坂(12:00)が後）
+        insertedDetails.Should().NotBeNull();
+        insertedDetails.Should().HaveCount(2);
+        insertedDetails![0].ExitStation.Should().Be("薬院",
+            "新しい明細（14:00の赤坂→薬院）が先に挿入されるべき");
+        insertedDetails[1].ExitStation.Should().Be("赤坂",
+            "古い明細（12:00の天神→赤坂）が後に挿入されるべき");
+    }
+
+    [Fact]
+    public async Task SplitAsync_ReplaceDetailsAsync_InsertsInReverseOrder()
+    {
+        // Arrange: グループ1に複数の明細がある場合の挿入順序を検証
+        var originalLedger = CreateTestLedger(
+            id: 1,
+            date: new DateTime(2026, 2, 3),
+            summary: "鉄道（博多～薬院）",
+            income: 0,
+            expense: 660,
+            balance: 340);
+
+        _ledgerRepositoryMock
+            .Setup(x => x.GetByIdAsync(1))
+            .ReturnsAsync(originalLedger);
+        _ledgerRepositoryMock
+            .Setup(x => x.UpdateAsync(It.IsAny<Ledger>()))
+            .ReturnsAsync(true);
+        _ledgerRepositoryMock
+            .Setup(x => x.InsertAsync(It.IsAny<Ledger>()))
+            .ReturnsAsync(100);
+        _ledgerRepositoryMock
+            .Setup(x => x.InsertDetailsAsync(It.IsAny<int>(), It.IsAny<IEnumerable<LedgerDetail>>()))
+            .ReturnsAsync(true);
+
+        // ReplaceDetailsAsync（グループ1）のキャプチャ
+        List<LedgerDetail>? replacedDetails = null;
+        _ledgerRepositoryMock
+            .Setup(x => x.ReplaceDetailsAsync(1, It.IsAny<IEnumerable<LedgerDetail>>()))
+            .Callback<int, IEnumerable<LedgerDetail>>((id, d) => replacedDetails = d.ToList())
+            .ReturnsAsync(true);
+
+        // UIからは時系列順（古い→新しい）: 博多→天神(10:00)、天神→赤坂(12:00)
+        var details = new List<LedgerDetail>
+        {
+            CreateRailDetail("博多", "天神", 260, 740, 3,
+                useDate: new DateTime(2026, 2, 3, 10, 0, 0), groupId: 1),
+            CreateRailDetail("天神", "赤坂", 200, 540, 2,
+                useDate: new DateTime(2026, 2, 3, 12, 0, 0), groupId: 1),
+            CreateRailDetail("赤坂", "薬院", 200, 340, 1,
+                useDate: new DateTime(2026, 2, 3, 14, 0, 0), groupId: 2)
+        };
+
+        // Act
+        await _service.SplitAsync(1, details);
+
+        // Assert: グループ1（ReplaceDetailsAsync）も新しい順で挿入されるべき
+        // （天神→赤坂(12:00)が先、博多→天神(10:00)が後）
+        replacedDetails.Should().NotBeNull();
+        replacedDetails.Should().HaveCount(2);
+        replacedDetails![0].ExitStation.Should().Be("赤坂",
+            "新しい明細（12:00の天神→赤坂）が先に挿入されるべき");
+        replacedDetails[1].ExitStation.Should().Be("天神",
+            "古い明細（10:00の博多→天神）が後に挿入されるべき");
+    }
+
     #endregion
 }

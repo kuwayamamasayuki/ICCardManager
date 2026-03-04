@@ -99,7 +99,11 @@ namespace ICCardManager.Services
                 originalLedger.Expense = firstExpense;
                 originalLedger.Balance = firstBalance;
 
-                await _ledgerRepository.ReplaceDetailsAsync(originalLedger.Id, firstGroup);
+                // Issue #880: 挿入順を逆にして、FeliCa互換のrowid順序を維持
+                // ReplaceDetailsAsync はDELETE+INSERTのため、rowidが再採番される
+                // DBは rowid DESC で時系列表示（大きいrowid＝古い＝先に表示）するので、
+                // 新しい明細から先に挿入して小さいrowidを割り当てる必要がある
+                await _ledgerRepository.ReplaceDetailsAsync(originalLedger.Id, firstGroup.AsEnumerable().Reverse());
                 await _ledgerRepository.UpdateAsync(originalLedger);
                 allSplitLedgers.Add(originalLedger);
 
@@ -132,7 +136,8 @@ namespace ICCardManager.Services
 
                     var newId = await _ledgerRepository.InsertAsync(newLedger);
                     newLedger.Id = newId;
-                    await _ledgerRepository.InsertDetailsAsync(newId, groupDetails);
+                    // Issue #880: 挿入順を逆にしてFeliCa互換のrowid順序を維持（上記コメント参照）
+                    await _ledgerRepository.InsertDetailsAsync(newId, groupDetails.AsEnumerable().Reverse());
 
                     createdIds.Add(newId);
                     allSplitLedgers.Add(newLedger);
