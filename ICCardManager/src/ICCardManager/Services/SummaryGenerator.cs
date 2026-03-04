@@ -366,11 +366,12 @@ namespace ICCardManager.Services
                 return string.Empty;
             }
 
-            // Issue #548: SequenceNumberを使って正しい時系列順にソート
-            // rowid（=SequenceNumber）が小さいほど古い（先に利用した）
+            // Issue #548, #880: SequenceNumberを使って正しい時系列順（古い順）にソート
+            // FeliCa互換: rowid（=SequenceNumber）が小さいほど新しい（後に利用した）
+            // → DESCで大きいrowid（古い）を先にして時系列順に
             // SequenceNumberが0（未設定）の場合は従来のBalance降順を使用
             var sortedTrips = trips
-                .OrderBy(t => t.SequenceNumber > 0 ? t.SequenceNumber : int.MaxValue)
+                .OrderByDescending(t => t.SequenceNumber > 0 ? t.SequenceNumber : int.MinValue)
                 .ThenBy(t => t.UseDate ?? DateTime.MaxValue)
                 .ThenByDescending(t => t.Balance ?? 0)
                 .ToList();
@@ -407,10 +408,10 @@ namespace ICCardManager.Services
             // グループ化された経路を処理
             foreach (var group in groupedTrips)
             {
-                // Issue #548: SequenceNumberを使って正しい時系列順にソート
-                // rowid（=SequenceNumber）が小さいほど古い（先に利用した）
+                // Issue #548, #880: SequenceNumberを使って正しい時系列順（古い順）にソート
+                // FeliCa互換: rowid（=SequenceNumber）が小さいほど新しい（後に利用した）
                 var groupTrips = group
-                    .OrderBy(t => t.SequenceNumber > 0 ? t.SequenceNumber : int.MaxValue)
+                    .OrderByDescending(t => t.SequenceNumber > 0 ? t.SequenceNumber : int.MinValue)
                     .ThenBy(t => t.UseDate ?? DateTime.MaxValue)
                     .ThenByDescending(t => t.Balance ?? 0)
                     .ToList();

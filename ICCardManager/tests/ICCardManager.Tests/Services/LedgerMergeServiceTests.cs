@@ -378,12 +378,13 @@ public class LedgerMergeServiceTests
     public async Task MergeAsync_TransferTrips_RegeneratesSummaryWithTransfer()
     {
         // Arrange: 福岡空港→天神、天神→箱崎宮前 → 乗継として「福岡空港～箱崎宮前」
+        // FeliCa互換: 小さいSequenceNumber = 新しい（後に利用した）
         var date = new DateTime(2026, 2, 3);
         var ledger1 = CreateTestLedger(1, TestCardIdm, date, "鉄道（福岡空港～天神）", 200, 800);
-        ledger1.Details.Add(CreateRailDetail(1, "福岡空港", "天神", 200, 800, 1, date));
+        ledger1.Details.Add(CreateRailDetail(1, "福岡空港", "天神", 200, 800, 2, date));
 
         var ledger2 = CreateTestLedger(2, TestCardIdm, date, "鉄道（天神～箱崎宮前）", 210, 590);
-        ledger2.Details.Add(CreateRailDetail(2, "天神", "箱崎宮前", 210, 590, 2, date));
+        ledger2.Details.Add(CreateRailDetail(2, "天神", "箱崎宮前", 210, 590, 1, date));
 
         SetupGetByIdMocks(ledger1, ledger2);
         SetupMergeMockSuccess();
