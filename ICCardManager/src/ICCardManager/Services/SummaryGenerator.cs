@@ -185,26 +185,68 @@ namespace ICCardManager.Services
                 var date = dateGroup.Key;
                 var dayItems = dateGroup.ToList();
 
-                // 利用（鉄道・バス）、チャージ、ポイント還元を分離
-                var usageItems = dayItems.Where(x => !x.Detail.IsCharge && !x.Detail.IsPointRedemption).ToList();
-                var chargeItems = dayItems.Where(x => x.Detail.IsCharge).ToList();
+                // ポイント還元を先に分離（ポイント還元は個別DailySummaryだがチャージ境界にはしない）
                 var pointRedemptionItems = dayItems.Where(x => x.Detail.IsPointRedemption).ToList();
+
+                // 残りの項目（利用+チャージ）を時系列順（古い順＝インデックス降順）にソート
+                var usageAndChargeItems = dayItems
+                    .Where(x => !x.Detail.IsPointRedemption)
+                    .OrderByDescending(x => x.Index)
+                    .ToList();
 
                 // 出力候補を作成（最古のインデックスと共に）
                 var summariesToAdd = new List<(int OldestIndex, DailySummary Summary)>();
 
-                // 利用がある場合は利用摘要を追加
-                if (usageItems.Count > 0)
+                // チャージ境界で利用グループを分割しながら摘要を生成
+                var currentUsageGroup = new List<(LedgerDetail Detail, int Index)>();
+
+                foreach (var item in usageAndChargeItems)
                 {
-                    // 古い順（インデックス降順）にソートして摘要生成
-                    var usageDetails = usageItems
-                        .OrderByDescending(x => x.Index)
-                        .Select(x => x.Detail)
-                        .ToList();
+                    if (item.Detail.IsCharge)
+                    {
+                        // 溜まった利用グループを先に出力
+                        if (currentUsageGroup.Count > 0)
+                        {
+                            var usageDetails = currentUsageGroup.Select(x => x.Detail).ToList();
+                            var usageSummary = GenerateUsageSummary(usageDetails);
+                            if (!string.IsNullOrEmpty(usageSummary))
+                            {
+                                var oldestIndex = currentUsageGroup.Max(x => x.Index);
+                                summariesToAdd.Add((oldestIndex, new DailySummary
+                                {
+                                    Date = date,
+                                    Summary = usageSummary,
+                                    IsCharge = false,
+                                    IsPointRedemption = false
+                                }));
+                            }
+                            currentUsageGroup.Clear();
+                        }
+
+                        // チャージを出力
+                        summariesToAdd.Add((item.Index, new DailySummary
+                        {
+                            Date = date,
+                            Summary = GetChargeSummary(_departmentType),
+                            IsCharge = true,
+                            IsPointRedemption = false
+                        }));
+                    }
+                    else
+                    {
+                        // 利用: グループに追加
+                        currentUsageGroup.Add(item);
+                    }
+                }
+
+                // 残りの利用グループを出力
+                if (currentUsageGroup.Count > 0)
+                {
+                    var usageDetails = currentUsageGroup.Select(x => x.Detail).ToList();
                     var usageSummary = GenerateUsageSummary(usageDetails);
                     if (!string.IsNullOrEmpty(usageSummary))
                     {
-                        var oldestIndex = usageItems.Max(x => x.Index);
+                        var oldestIndex = currentUsageGroup.Max(x => x.Index);
                         summariesToAdd.Add((oldestIndex, new DailySummary
                         {
                             Date = date,
@@ -213,19 +255,6 @@ namespace ICCardManager.Services
                             IsPointRedemption = false
                         }));
                     }
-                }
-
-                // チャージがある場合はチャージ摘要を追加
-                if (chargeItems.Count > 0)
-                {
-                    var oldestIndex = chargeItems.Max(x => x.Index);
-                    summariesToAdd.Add((oldestIndex, new DailySummary
-                    {
-                        Date = date,
-                        Summary = GetChargeSummary(_departmentType),
-                        IsCharge = true,
-                        IsPointRedemption = false
-                    }));
                 }
 
                 // ポイント還元がある場合はポイント還元摘要を追加

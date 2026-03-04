@@ -1132,4 +1132,109 @@ public class SummaryGeneratorComprehensiveTests
     }
 
     #endregion
+
+    #region カテゴリ8: GenerateByDate - チャージ境界分割
+
+    /// <summary>
+    /// チャージが往復の間に挟まる場合、利用が分割されて往復にならないことを確認
+    /// </summary>
+    [Fact]
+    public void TC039_チャージが往復の間に挟まる場合_利用が分割される()
+    {
+        // Arrange: 薬院→博多, チャージ, 博多→薬院（同一日）
+        // ICカード履歴は新しい順
+        var details = new List<LedgerDetail>
+        {
+            CreateRailwayUsage(new DateTime(2024, 12, 9), "博多", "薬院", 310, 1380),   // 帰り（新しい）
+            CreateCharge(new DateTime(2024, 12, 9), 1000, 1690),                        // チャージ
+            CreateRailwayUsage(new DateTime(2024, 12, 9), "薬院", "博多", 310, 690),    // 行き（古い）
+        };
+
+        // Act
+        var results = _generator.GenerateByDate(details);
+
+        // Assert: 3件（利用1, チャージ, 利用2）- 往復にならない
+        results.Should().HaveCount(3);
+        OutputInputAndResult(details, results);
+
+        // 古い順: 利用（薬院→博多）→ チャージ → 利用（博多→薬院）
+        results[0].IsCharge.Should().BeFalse();
+        results[0].Summary.Should().Be("鉄道（薬院～博多）");
+
+        results[1].IsCharge.Should().BeTrue();
+
+        results[2].IsCharge.Should().BeFalse();
+        results[2].Summary.Should().Be("鉄道（博多～薬院）");
+    }
+
+    /// <summary>
+    /// チャージが利用の前にある場合（挟まっていない）、利用は従来通り統合されることを確認
+    /// </summary>
+    [Fact]
+    public void TC040_チャージが利用の前にある場合_利用は統合される()
+    {
+        // Arrange: チャージ→天神→博多→博多→天神（同一日）
+        // TC012の12/4と同じパターン
+        // ICカード履歴は新しい順
+        var details = new List<LedgerDetail>
+        {
+            CreateRailwayUsage(new DateTime(2024, 12, 9), "博多", "天神", 210, 1580),  // 帰り（新しい）
+            CreateRailwayUsage(new DateTime(2024, 12, 9), "天神", "博多", 210, 1790),  // 行き
+            CreateCharge(new DateTime(2024, 12, 9), 1000, 2000),                       // チャージ（古い）
+        };
+
+        // Act
+        var results = _generator.GenerateByDate(details);
+
+        // Assert: 2件（チャージ, 往復利用）
+        results.Should().HaveCount(2);
+        OutputInputAndResult(details, results);
+
+        results[0].IsCharge.Should().BeTrue();
+
+        results[1].IsCharge.Should().BeFalse();
+        results[1].Summary.Should().Be("鉄道（天神～博多 往復）");
+    }
+
+    /// <summary>
+    /// 複数日にまたがるケースでチャージ境界分割が正しく動作することを確認
+    /// </summary>
+    [Fact]
+    public void TC041_複数日_チャージ挟み込みのある日とない日の混在()
+    {
+        // Arrange: 12/8はチャージなし往復、12/9はチャージ挟み
+        var details = new List<LedgerDetail>
+        {
+            // 12/9: 博多→薬院(新), チャージ, 薬院→博多(古)
+            CreateRailwayUsage(new DateTime(2024, 12, 9), "博多", "薬院", 310, 1380),
+            CreateCharge(new DateTime(2024, 12, 9), 1000, 1690),
+            CreateRailwayUsage(new DateTime(2024, 12, 9), "薬院", "博多", 310, 690),
+            // 12/8: 博多→天神(新), 天神→博多(古) - チャージなし
+            CreateRailwayUsage(new DateTime(2024, 12, 8), "博多", "天神", 210, 1000),
+            CreateRailwayUsage(new DateTime(2024, 12, 8), "天神", "博多", 210, 1210),
+        };
+
+        // Act
+        var results = _generator.GenerateByDate(details);
+
+        // Assert: 12/8は1件（往復）、12/9は3件（分割）
+        results.Should().HaveCount(4);
+        OutputInputAndResult(details, results);
+
+        // 12/8: 往復
+        results[0].Date.Should().Be(new DateTime(2024, 12, 8));
+        results[0].Summary.Should().Be("鉄道（天神～博多 往復）");
+
+        // 12/9: 分割
+        results[1].Date.Should().Be(new DateTime(2024, 12, 9));
+        results[1].Summary.Should().Be("鉄道（薬院～博多）");
+
+        results[2].Date.Should().Be(new DateTime(2024, 12, 9));
+        results[2].IsCharge.Should().BeTrue();
+
+        results[3].Date.Should().Be(new DateTime(2024, 12, 9));
+        results[3].Summary.Should().Be("鉄道（博多～薬院）");
+    }
+
+    #endregion
 }
