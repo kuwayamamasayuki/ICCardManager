@@ -2652,4 +2652,264 @@ public class LendingServiceTests : IDisposable
     }
 
     #endregion
+
+    #region SplitAtChargeBoundaries テスト
+
+    [Fact]
+    public void SplitAtChargeBoundaries_NoCharge_ReturnsSingleUsageGroup()
+    {
+        // Arrange: 2つの利用のみ（チャージなし）
+        var details = new List<LedgerDetail>
+        {
+            new() { UseDate = DateTime.Today, EntryStation = "博多", ExitStation = "天神", Amount = 210, Balance = 790, IsCharge = false },
+            new() { UseDate = DateTime.Today, EntryStation = "天神", ExitStation = "博多", Amount = 210, Balance = 1000, IsCharge = false },
+        };
+
+        // Act
+        var segments = LendingService.SplitAtChargeBoundaries(details);
+
+        // Assert: 1つの利用グループ
+        segments.Should().HaveCount(1);
+        segments[0].IsCharge.Should().BeFalse();
+        segments[0].Details.Should().HaveCount(2);
+    }
+
+    [Fact]
+    public void SplitAtChargeBoundaries_ChargeBetweenTrips_ReturnsSplitGroups()
+    {
+        // Arrange: 利用→チャージ→利用（チャージが間に挟まる）
+        // 時系列順: 天神→博多(1000→790), チャージ(790→1790), 博多→天神(1790→1580)
+        // ICカード履歴は新しい順なので逆順で入力
+        var details = new List<LedgerDetail>
+        {
+            new() { UseDate = DateTime.Today, EntryStation = "博多", ExitStation = "天神", Amount = 210, Balance = 1580, IsCharge = false },
+            new() { UseDate = DateTime.Today, Amount = 1000, Balance = 1790, IsCharge = true },
+            new() { UseDate = DateTime.Today, EntryStation = "天神", ExitStation = "博多", Amount = 210, Balance = 790, IsCharge = false },
+        };
+
+        // Act
+        var segments = LendingService.SplitAtChargeBoundaries(details);
+
+        // Assert: 利用グループ1, チャージ, 利用グループ2
+        segments.Should().HaveCount(3);
+
+        segments[0].IsCharge.Should().BeFalse();
+        segments[0].Details.Should().HaveCount(1);
+        segments[0].Details[0].ExitStation.Should().Be("博多");  // 天神→博多（古い方）
+
+        segments[1].IsCharge.Should().BeTrue();
+        segments[1].Details.Should().HaveCount(1);
+
+        segments[2].IsCharge.Should().BeFalse();
+        segments[2].Details.Should().HaveCount(1);
+        segments[2].Details[0].ExitStation.Should().Be("天神");  // 博多→天神（新しい方）
+    }
+
+    [Fact]
+    public void SplitAtChargeBoundaries_ChargeAtStart_ReturnsChargeFirst()
+    {
+        // Arrange: チャージ→利用→利用
+        // 時系列順: チャージ(500→1500), 天神→博多(1500→1290), 博多→天神(1290→1080)
+        var details = new List<LedgerDetail>
+        {
+            new() { UseDate = DateTime.Today, EntryStation = "博多", ExitStation = "天神", Amount = 210, Balance = 1080, IsCharge = false },
+            new() { UseDate = DateTime.Today, EntryStation = "天神", ExitStation = "博多", Amount = 210, Balance = 1290, IsCharge = false },
+            new() { UseDate = DateTime.Today, Amount = 1000, Balance = 1500, IsCharge = true },
+        };
+
+        // Act
+        var segments = LendingService.SplitAtChargeBoundaries(details);
+
+        // Assert: チャージが先、利用グループが後（2件まとめて）
+        segments.Should().HaveCount(2);
+        segments[0].IsCharge.Should().BeTrue();
+        segments[1].IsCharge.Should().BeFalse();
+        segments[1].Details.Should().HaveCount(2);
+    }
+
+    [Fact]
+    public void SplitAtChargeBoundaries_ChargeAtEnd_ReturnsChargeAtEnd()
+    {
+        // Arrange: 利用→利用→チャージ
+        // 時系列順: 天神→博多(1500→1290), 博多→天神(1290→1080), チャージ(1080→2080)
+        var details = new List<LedgerDetail>
+        {
+            new() { UseDate = DateTime.Today, Amount = 1000, Balance = 2080, IsCharge = true },
+            new() { UseDate = DateTime.Today, EntryStation = "博多", ExitStation = "天神", Amount = 210, Balance = 1080, IsCharge = false },
+            new() { UseDate = DateTime.Today, EntryStation = "天神", ExitStation = "博多", Amount = 210, Balance = 1290, IsCharge = false },
+        };
+
+        // Act
+        var segments = LendingService.SplitAtChargeBoundaries(details);
+
+        // Assert: 利用グループが先、チャージが後
+        segments.Should().HaveCount(2);
+        segments[0].IsCharge.Should().BeFalse();
+        segments[0].Details.Should().HaveCount(2);
+        segments[1].IsCharge.Should().BeTrue();
+    }
+
+    [Fact]
+    public void SplitAtChargeBoundaries_MultipleCharges_ReturnsMultipleGroups()
+    {
+        // Arrange: 利用→チャージ→利用→チャージ→利用
+        // 時系列順: trip1(2000→1790), charge1(1790→2790), trip2(2790→2580), charge2(2580→3580), trip3(3580→3370)
+        var details = new List<LedgerDetail>
+        {
+            new() { UseDate = DateTime.Today, EntryStation = "A", ExitStation = "B", Amount = 210, Balance = 3370, IsCharge = false },
+            new() { UseDate = DateTime.Today, Amount = 1000, Balance = 3580, IsCharge = true },
+            new() { UseDate = DateTime.Today, EntryStation = "C", ExitStation = "D", Amount = 210, Balance = 2580, IsCharge = false },
+            new() { UseDate = DateTime.Today, Amount = 1000, Balance = 2790, IsCharge = true },
+            new() { UseDate = DateTime.Today, EntryStation = "E", ExitStation = "F", Amount = 210, Balance = 1790, IsCharge = false },
+        };
+
+        // Act
+        var segments = LendingService.SplitAtChargeBoundaries(details);
+
+        // Assert: 5セグメント（利用, チャージ, 利用, チャージ, 利用）
+        segments.Should().HaveCount(5);
+        segments[0].IsCharge.Should().BeFalse();
+        segments[1].IsCharge.Should().BeTrue();
+        segments[2].IsCharge.Should().BeFalse();
+        segments[3].IsCharge.Should().BeTrue();
+        segments[4].IsCharge.Should().BeFalse();
+    }
+
+    [Fact]
+    public void SplitAtChargeBoundaries_EmptyList_ReturnsEmpty()
+    {
+        var segments = LendingService.SplitAtChargeBoundaries(new List<LedgerDetail>());
+        segments.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void SortChronologically_ChargeBetweenTrips_ReturnsCorrectOrder()
+    {
+        // Arrange: ICカード履歴順（新しい順）: 博多→天神, チャージ, 天神→博多
+        // 期待する時系列順（古い順）: 天神→博多, チャージ, 博多→天神
+        var details = new List<LedgerDetail>
+        {
+            new() { UseDate = DateTime.Today, EntryStation = "博多", ExitStation = "天神", Amount = 210, Balance = 1580, IsCharge = false },
+            new() { UseDate = DateTime.Today, Amount = 1000, Balance = 1790, IsCharge = true },
+            new() { UseDate = DateTime.Today, EntryStation = "天神", ExitStation = "博多", Amount = 210, Balance = 790, IsCharge = false },
+        };
+
+        // Act
+        var sorted = LendingService.SortChronologically(details);
+
+        // Assert: 古い順（残高チェーンの開始点から辿る）
+        sorted.Should().HaveCount(3);
+        sorted[0].Balance.Should().Be(790);   // 天神→博多（最古）
+        sorted[1].Balance.Should().Be(1790);  // チャージ
+        sorted[2].Balance.Should().Be(1580);  // 博多→天神（最新）
+    }
+
+    [Fact]
+    public void SortChronologically_NoBalanceInfo_FallsBackToReverseOrder()
+    {
+        // Arrange: Balance情報なし
+        var details = new List<LedgerDetail>
+        {
+            new() { UseDate = DateTime.Today, EntryStation = "A", ExitStation = "B", IsCharge = false },
+            new() { UseDate = DateTime.Today, Amount = 1000, IsCharge = true },
+            new() { UseDate = DateTime.Today, EntryStation = "C", ExitStation = "D", IsCharge = false },
+        };
+
+        // Act
+        var sorted = LendingService.SortChronologically(details);
+
+        // Assert: フォールバック（逆順=古い順）
+        sorted.Should().HaveCount(3);
+        sorted[0].EntryStation.Should().Be("C");  // 元のリストの最後=古い
+        sorted[1].IsCharge.Should().BeTrue();
+        sorted[2].EntryStation.Should().Be("A");  // 元のリストの最初=新しい
+    }
+
+    #endregion
+
+    #region チャージ境界分割 統合テスト
+
+    [Fact]
+    public async Task ReturnAsync_ChargeBetweenRoundTrip_CreatesSeparateLedgers()
+    {
+        // Arrange: 薬院→博多(-310,残高690), チャージ(+1000,残高1690), 博多→薬院(-310,残高1380)
+        var card = CreateTestCard(isLent: true);
+        var staff = CreateTestStaff();
+        var lentRecord = CreateTestLentRecord();
+
+        var usageDetails = new List<LedgerDetail>
+        {
+            // ICカード履歴は新しい順
+            new() { UseDate = DateTime.Today, EntryStation = "博多", ExitStation = "薬院", Amount = 310, Balance = 1380, IsCharge = false },
+            new() { UseDate = DateTime.Today, Amount = 1000, Balance = 1690, IsCharge = true },
+            new() { UseDate = DateTime.Today, EntryStation = "薬院", ExitStation = "博多", Amount = 310, Balance = 690, IsCharge = false },
+        };
+
+        SetupReturnMocks(card, staff, lentRecord);
+
+        var createdLedgers = new List<Ledger>();
+        _ledgerRepositoryMock.Setup(x => x.InsertAsync(It.IsAny<Ledger>()))
+            .Callback<Ledger>(l => createdLedgers.Add(l))
+            .ReturnsAsync(1);
+
+        // Act
+        await _service.ReturnAsync(TestStaffIdm, TestCardIdm, usageDetails);
+
+        // Assert: 3つのLedgerが作成される（利用1 + チャージ + 利用2）
+        var nonLentLedgers = createdLedgers.Where(l => !l.IsLentRecord && l.Summary != "（貸出中）").ToList();
+        nonLentLedgers.Should().HaveCount(3);
+
+        // 時系列順: 利用(薬院→博多), チャージ, 利用(博多→薬院)
+        var usageLedger1 = nonLentLedgers.FirstOrDefault(l => l.Expense == 310 && l.Balance == 690);
+        var chargeLedger = nonLentLedgers.FirstOrDefault(l => l.Income > 0);
+        var usageLedger2 = nonLentLedgers.FirstOrDefault(l => l.Expense == 310 && l.Balance == 1380);
+
+        usageLedger1.Should().NotBeNull();
+        usageLedger1!.Summary.Should().Contain("薬院");
+        usageLedger1.Summary.Should().NotContain("往復");  // 往復にならないこと
+
+        chargeLedger.Should().NotBeNull();
+        chargeLedger!.Income.Should().Be(1000);
+        chargeLedger.Balance.Should().Be(1690);
+
+        usageLedger2.Should().NotBeNull();
+        usageLedger2!.Summary.Should().Contain("博多");
+        usageLedger2.Summary.Should().NotContain("往復");  // 往復にならないこと
+    }
+
+    [Fact]
+    public async Task ReturnAsync_NoChargeBetweenTrips_CreatesSingleUsageLedger()
+    {
+        // Arrange: チャージなしの往復（天神→博多, 博多→天神）
+        var card = CreateTestCard(isLent: true);
+        var staff = CreateTestStaff();
+        var lentRecord = CreateTestLentRecord();
+
+        var usageDetails = new List<LedgerDetail>
+        {
+            // ICカード履歴は新しい順
+            new() { UseDate = DateTime.Today, EntryStation = "博多", ExitStation = "天神", Amount = 210, Balance = 580, IsCharge = false },
+            new() { UseDate = DateTime.Today, EntryStation = "天神", ExitStation = "博多", Amount = 210, Balance = 790, IsCharge = false },
+        };
+
+        SetupReturnMocks(card, staff, lentRecord);
+
+        var createdLedgers = new List<Ledger>();
+        _ledgerRepositoryMock.Setup(x => x.InsertAsync(It.IsAny<Ledger>()))
+            .Callback<Ledger>(l => createdLedgers.Add(l))
+            .ReturnsAsync(1);
+
+        // Act
+        await _service.ReturnAsync(TestStaffIdm, TestCardIdm, usageDetails);
+
+        // Assert: 1つの利用Ledger（往復として統合）
+        var nonLentLedgers = createdLedgers.Where(l => !l.IsLentRecord && l.Summary != "（貸出中）").ToList();
+        var usageLedgers = nonLentLedgers.Where(l => l.Expense > 0).ToList();
+
+        usageLedgers.Should().HaveCount(1);
+        usageLedgers[0].Expense.Should().Be(420);  // 210 + 210
+        usageLedgers[0].Summary.Should().Contain("往復");  // 往復であること
+    }
+
+    #endregion
 }
