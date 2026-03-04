@@ -506,9 +506,10 @@ public class SummaryGeneratorTests
     {
         // Arrange
         // GroupIdなし（自動検出モード）の場合は従来通り往復検出される
+        // FeliCa互換: 小さいSequenceNumber = 新しい（後に利用した）
         var details = new List<LedgerDetail>
         {
-            // 帰り（新しい）: 天神→博多
+            // 帰り（新しい）: 天神→博多（小さいseq = 新しい）
             new LedgerDetail
             {
                 EntryStation = "天神",
@@ -518,10 +519,10 @@ public class SummaryGeneratorTests
                 Amount = 260,
                 UseDate = new DateTime(2026, 2, 10, 15, 0, 0),
                 Balance = 740,
-                SequenceNumber = 2,
+                SequenceNumber = 1,
                 GroupId = null
             },
-            // 行き（古い）: 博多→天神
+            // 行き（古い）: 博多→天神（大きいseq = 古い）
             new LedgerDetail
             {
                 EntryStation = "博多",
@@ -531,7 +532,7 @@ public class SummaryGeneratorTests
                 Amount = 260,
                 UseDate = new DateTime(2026, 2, 10, 10, 0, 0),
                 Balance = 1000,
-                SequenceNumber = 1,
+                SequenceNumber = 2,
                 GroupId = null
             }
         };
