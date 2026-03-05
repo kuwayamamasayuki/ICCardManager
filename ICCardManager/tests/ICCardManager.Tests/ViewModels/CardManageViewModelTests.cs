@@ -176,7 +176,7 @@ public class CardManageViewModelTests
         _viewModel.IsWaitingForCard.Should().BeTrue();
         _viewModel.SelectedCard.Should().BeNull();
         _viewModel.EditCardIdm.Should().BeEmpty();
-        _viewModel.EditCardType.Should().Be("はやかけん");
+        _viewModel.EditCardType.Should().Be("nimoca");
         _viewModel.EditCardNumber.Should().BeEmpty();
         _viewModel.EditNote.Should().BeEmpty();
         _viewModel.StatusMessage.Should().Contain("タッチ");
