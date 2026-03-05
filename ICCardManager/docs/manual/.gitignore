@@ -1,4 +1,6 @@
 # 生成されるWord文書（Markdownから都度生成）
 *.docx
+# reference.docxはpandocのテンプレートなのでリポジトリに含める
+!reference.docx
 # 生成されるPDF文書（Markdownから都度生成）
 *.pdf

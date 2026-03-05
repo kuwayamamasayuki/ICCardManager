@@ -5,6 +5,7 @@
 #   - 余白: やや狭い (上下左右 1.27cm / 0.5インチ)
 #   - ページ番号: フッター中央に表示
 #   - 用紙サイズ: A4横 (ランドスケープ)
+#   - 見出し2 (##): 段落前で改ページ（章ごとにページを分ける）
 #   - テーブルスタイル: 黒・単線・0.5ptの罫線（Issue #600: 印刷時に罫線が消えないようにする）
 #
 # 使用方法:
@@ -74,6 +75,19 @@ try {
     $Footer.PageNumbers.Add(1, $true) | Out-Null  # 第1引数: 配置(1=中央), 第2引数: 最初のページにも表示
 
     Write-Host "  ページ番号: フッター中央" -ForegroundColor Gray
+
+    # 見出しスタイルに「段落前で改ページ」を設定
+    # Markdown の ## (Heading 2) が章の区切りに相当するため、章ごとに改ページする
+    Write-Host "[設定] 見出しスタイルの改ページ設定..." -ForegroundColor Yellow
+    try {
+        # wdStyleHeading2 = -3
+        $Heading2Style = $Doc.Styles.Item(-3)
+        $Heading2Style.ParagraphFormat.PageBreakBefore = $true
+        Write-Host "  Heading 2 (##): 段落前で改ページ" -ForegroundColor Gray
+    }
+    catch {
+        Write-Host "  警告: Heading 2 スタイルの設定をスキップ: $($_.Exception.Message)" -ForegroundColor Yellow
+    }
 
     # サンプルテキストを追加（pandocがスタイルを認識するため）
     Write-Host "[設定] サンプルスタイルを追加中..." -ForegroundColor Yellow
