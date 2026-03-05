@@ -922,6 +922,13 @@ public partial class MainViewModel : ViewModelBase
 
             await RefreshLentCardsAsync();
             await RefreshDashboardAsync();
+
+            // 履歴が開いていれば再読み込み（Issue #889）
+            if (IsHistoryVisible)
+            {
+                await LoadHistoryLedgersAsync();
+            }
+
             await CheckWarningsAsync();
 
             // バス利用がある場合はバス停入力画面を表示
