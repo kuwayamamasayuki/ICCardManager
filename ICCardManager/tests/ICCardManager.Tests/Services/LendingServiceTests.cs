@@ -2911,5 +2911,79 @@ public class LendingServiceTests : IDisposable
         usageLedgers[0].Summary.Should().Contain("往復");  // 往復であること
     }
 
+    [Fact]
+    public async Task ReturnAsync_ChargeBetweenTrips_InsertsDetailsInFeliCaOrder()
+    {
+        // Arrange: チャージが利用の間に挟まるケース
+        // ICカード履歴（新しい順）: 博多→薬院(1380), チャージ(1690), 薬院→博多(690)
+        // 時系列順（古い順）: 薬院→博多(690), チャージ(1690), 博多→薬院(1380)
+        var card = CreateTestCard(isLent: true);
+        var staff = CreateTestStaff();
+        var lentRecord = CreateTestLentRecord();
+
+        var usageDetails = new List<LedgerDetail>
+        {
+            // ICカード履歴は新しい順
+            new() { UseDate = DateTime.Today, EntryStation = "博多", ExitStation = "薬院", Amount = 310, Balance = 1380, IsCharge = false },
+            new() { UseDate = DateTime.Today, Amount = 1000, Balance = 1690, IsCharge = true },
+            new() { UseDate = DateTime.Today, EntryStation = "薬院", ExitStation = "博多", Amount = 310, Balance = 690, IsCharge = false },
+        };
+
+        SetupReturnMocks(card, staff, lentRecord);
+
+        // InsertDetailsAsyncに渡される詳細をキャプチャ
+        var capturedDetailsByLedger = new List<List<LedgerDetail>>();
+        _ledgerRepositoryMock.Setup(x => x.InsertDetailsAsync(It.IsAny<int>(), It.IsAny<IEnumerable<LedgerDetail>>()))
+            .Callback<int, IEnumerable<LedgerDetail>>((_, details) =>
+                capturedDetailsByLedger.Add(details.ToList()))
+            .ReturnsAsync(true);
+
+        // Act
+        await _service.ReturnAsync(TestStaffIdm, TestCardIdm, usageDetails);
+
+        // Assert: 利用セグメントごとのInsertDetailsAsyncでFeliCa順（新しい→古い）で挿入されること
+        // チャージが間に挟まるため、利用1（薬院→博多）と利用2（博多→薬院）は別セグメント
+        // 各セグメントは1件のみなので順序検証は利用+チャージなしの別テストで行う
+        capturedDetailsByLedger.Should().HaveCount(2); // 利用セグメント2つ
+    }
+
+    [Fact]
+    public async Task ReturnAsync_MultipleTripsNoCharge_InsertsDetailsInFeliCaOrder()
+    {
+        // Arrange: チャージなしの複数利用（往復）
+        // ICカード履歴（新しい順）: 博多→天神(580), 天神→博多(790)
+        // 時系列順（古い順）: 天神→博多(790), 博多→天神(580)
+        // FeliCa互換の挿入順（新しい→古い）: 博多→天神(580), 天神→博多(790)
+        var card = CreateTestCard(isLent: true);
+        var staff = CreateTestStaff();
+        var lentRecord = CreateTestLentRecord();
+
+        var usageDetails = new List<LedgerDetail>
+        {
+            // ICカード履歴は新しい順
+            new() { UseDate = DateTime.Today, EntryStation = "博多", ExitStation = "天神", Amount = 210, Balance = 580, IsCharge = false },
+            new() { UseDate = DateTime.Today, EntryStation = "天神", ExitStation = "博多", Amount = 210, Balance = 790, IsCharge = false },
+        };
+
+        SetupReturnMocks(card, staff, lentRecord);
+
+        // InsertDetailsAsyncに渡される詳細をキャプチャ
+        List<LedgerDetail> capturedDetails = null;
+        _ledgerRepositoryMock.Setup(x => x.InsertDetailsAsync(It.IsAny<int>(), It.IsAny<IEnumerable<LedgerDetail>>()))
+            .Callback<int, IEnumerable<LedgerDetail>>((_, details) =>
+                capturedDetails = details.ToList())
+            .ReturnsAsync(true);
+
+        // Act
+        await _service.ReturnAsync(TestStaffIdm, TestCardIdm, usageDetails);
+
+        // Assert: InsertDetailsAsyncに渡される詳細はFeliCa順（新しい→古い＝残高が小さい→大きい）
+        // SortChronologicallyが古い順に並べ替えた後、Reverse()でFeliCa順に戻されること
+        capturedDetails.Should().NotBeNull();
+        capturedDetails.Should().HaveCount(2);
+        capturedDetails[0].Balance.Should().Be(580);  // 博多→天神（新しい＝先に挿入）
+        capturedDetails[1].Balance.Should().Be(790);  // 天神→博多（古い＝後に挿入）
+    }
+
     #endregion
 }
