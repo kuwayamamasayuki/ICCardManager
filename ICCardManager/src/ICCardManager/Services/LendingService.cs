@@ -797,7 +797,9 @@ namespace ICCardManager.Services
                             _logger.LogDebug("LendingService: 同一日の既存利用レコードを検出（LedgerId={Id}）、統合します", existingUsageLedger.Id);
 
                             // 1. 新しい詳細を既存レコードに追加
-                            await _ledgerRepository.InsertDetailsAsync(existingUsageLedger.Id, usageDetails);
+                            // Issue #880互換: SplitAtChargeBoundariesが時系列順（古い順）で返すため、
+                            // 逆順にしてFeliCa互換のrowid順序を維持（小さいrowid＝新しい）
+                            await _ledgerRepository.InsertDetailsAsync(existingUsageLedger.Id, usageDetails.AsEnumerable().Reverse());
 
                             // 2. 全詳細を再読み込み
                             var fullLedger = await _ledgerRepository.GetByIdAsync(existingUsageLedger.Id);
@@ -908,7 +910,8 @@ namespace ICCardManager.Services
                             var ledgerId = await _ledgerRepository.InsertAsync(usageLedger);
                             usageLedger.Id = ledgerId;
 
-                            await _ledgerRepository.InsertDetailsAsync(ledgerId, usageDetails);
+                            // Issue #880互換: 挿入順を逆にしてFeliCa互換のrowid順序を維持
+                            await _ledgerRepository.InsertDetailsAsync(ledgerId, usageDetails.AsEnumerable().Reverse());
 
                             createdLedgers.Add(usageLedger);
                         }
