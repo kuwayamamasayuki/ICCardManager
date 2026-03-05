@@ -180,7 +180,7 @@ namespace ICCardManager.ViewModels
             IsEditing = true;
             IsNewCard = true;
             EditCardIdm = string.Empty;
-            EditCardType = "はやかけん";
+            EditCardType = "nimoca";
             EditCardNumber = string.Empty;
             EditNote = string.Empty;
             StatusMessage = "カードをタッチするとIDmを読み取ります";
