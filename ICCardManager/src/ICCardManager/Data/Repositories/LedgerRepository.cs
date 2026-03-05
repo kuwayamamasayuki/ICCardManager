@@ -468,6 +468,12 @@ LIMIT @pageSize OFFSET @offset";
         /// <summary>
         /// 利用履歴詳細を取得
         /// </summary>
+        /// <remarks>
+        /// 残高チェーンで時系列順（古い→新しい）にソートして返す。
+        /// SQLのORDER BYはフォールバック用の初期順序として使用し、
+        /// 読み取り後に残高チェーンで正しい時系列順を決定する。
+        /// これにより、挿入順序（rowid）に依存しない安定した表示順が保証される。
+        /// </remarks>
         private async Task<IEnumerable<LedgerDetail>> GetDetailsAsync(int ledgerId)
         {
             var connection = _dbContext.GetConnection();
@@ -476,8 +482,7 @@ LIMIT @pageSize OFFSET @offset";
             using var command = connection.CreateCommand();
             // Issue #393: 履歴詳細を古い順（時系列順）で表示
             // Issue #478: 同一日ではチャージ（is_charge=1）を利用より先に表示
-            // Issue #876: rowid DESCで古い順に
-            // （FeliCaカードリーダーは新しい順に履歴を返すため、小さいrowidほど新しい＝後に利用）
+            // SQL ORDER BYはフォールバック用（残高チェーン構築失敗時に使用される）
             command.CommandText = @"SELECT ledger_id, use_date, entry_station, exit_station,
        bus_stops, amount, balance, is_charge, is_point_redemption, is_bus, group_id, rowid
 FROM ledger_detail
@@ -492,7 +497,9 @@ ORDER BY use_date ASC, is_charge DESC, is_point_redemption DESC, rowid DESC";
                 details.Add(MapToLedgerDetail(reader));
             }
 
-            return details;
+            // 残高チェーンで時系列順にソート（挿入順序に依存しない）
+            // フォールバック時はSQL ORDER BY結果（上記）を維持する
+            return Common.LedgerDetailChronologicalSorter.Sort(details, preserveOrderOnFailure: true);
         }
 
         /// <summary>
