@@ -190,7 +190,9 @@ begin
       RenameFile(OldDat, NewDat);
 
     // レジストリのUninstallStringを更新
-    UninstallKey := 'Software\Microsoft\Windows\CurrentVersion\Uninstall\{#SetupSetting("AppId")}_is1';
+    // 注: SetupSetting("AppId") は "{{GUID}" を返す（Inno Setup の記法で {{ は { のエスケープ）
+    // Pascal Script ではそのまま展開されるため、StringChange で {{ → { に変換が必要
+    UninstallKey := 'Software\Microsoft\Windows\CurrentVersion\Uninstall\{#StringChange(SetupSetting("AppId"), "{{", "{")}_is1';
     if RegKeyExists(HKLM, UninstallKey) then
     begin
       RegWriteStringValue(HKLM, UninstallKey, 'UninstallString', '"' + NewExe + '"');
