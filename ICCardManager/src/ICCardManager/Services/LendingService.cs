@@ -1083,70 +1083,12 @@ namespace ICCardManager.Services
         /// 残高チェーンに基づいて詳細を時系列順（古い順）に並べ替える。
         /// </summary>
         /// <remarks>
-        /// LedgerOrderHelper.ReconstructChainと同じアルゴリズムで、
-        /// balance_before（処理前残高）を逆算してチェーンを辿る。
-        /// チェーン構築に失敗した場合はリスト逆順（ICカード履歴は新しい順→逆順で古い順）にフォールバック。
+        /// LedgerDetailChronologicalSorterに委譲。
+        /// FeliCa入力（新しい→古い）を想定し、チェーン構築失敗時はリスト逆順にフォールバック。
         /// </remarks>
         internal static List<LedgerDetail> SortChronologically(List<LedgerDetail> details)
         {
-            if (details.Count <= 1)
-                return new List<LedgerDetail>(details);
-
-            // balance_before を計算:
-            // 利用（expense）: balance_before = Balance + Amount
-            // チャージ（income）: balance_before = Balance - Amount
-            var items = details
-                .Where(d => d.Balance.HasValue && d.Amount.HasValue)
-                .Select(d =>
-                {
-                    var balanceBefore = d.IsCharge
-                        ? d.Balance!.Value - d.Amount!.Value
-                        : d.Balance!.Value + d.Amount!.Value;
-                    return (Detail: d, BalanceBefore: balanceBefore);
-                })
-                .ToList();
-
-            // Balance/Amount情報が不十分な場合はリスト逆順にフォールバック
-            if (items.Count < details.Count)
-            {
-                var fallback = new List<LedgerDetail>(details);
-                fallback.Reverse();
-                return fallback;
-            }
-
-            // チェーン構築: balance_before が他のどのdetailの Balance にも一致しないものが先頭
-            var balanceSet = new HashSet<int>(items.Select(i => i.Detail.Balance!.Value));
-            var remaining = new List<(LedgerDetail Detail, int BalanceBefore)>(items);
-
-            var start = remaining.FirstOrDefault(r => !balanceSet.Contains(r.BalanceBefore));
-            if (start.Detail == null)
-            {
-                // チェーン構築失敗: フォールバック（逆順）
-                var fallback = new List<LedgerDetail>(details);
-                fallback.Reverse();
-                return fallback;
-            }
-
-            var ordered = new List<LedgerDetail> { start.Detail };
-            remaining.Remove(start);
-            var currentBalance = start.Detail.Balance!.Value;
-
-            while (remaining.Count > 0)
-            {
-                var next = remaining.FirstOrDefault(r => r.BalanceBefore == currentBalance);
-                if (next.Detail == null)
-                {
-                    // チェーン途切れ: 残りをBalance降順で追加
-                    ordered.AddRange(remaining.OrderByDescending(r => r.BalanceBefore).Select(r => r.Detail));
-                    break;
-                }
-
-                ordered.Add(next.Detail);
-                currentBalance = next.Detail.Balance!.Value;
-                remaining.Remove(next);
-            }
-
-            return ordered;
+            return Common.LedgerDetailChronologicalSorter.Sort(details, preserveOrderOnFailure: false);
         }
 
         /// <summary>
