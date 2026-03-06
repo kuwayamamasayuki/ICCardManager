@@ -1097,9 +1097,9 @@ namespace ICCardManager.Services
                                 isUpdate = true;
                                 existingLedgerForUpdate = existingLedger;
                             }
-                            else
+                            else if (skipExisting)
                             {
-                                // 変更がない場合はスキップ（DB操作は不要）
+                                // Issue #903: skipExisting=trueの場合のみ、変更がないレコードをスキップ
                                 // Issue #754: 残高整合性チェック用にはCSVの全レコードが必要
                                 var skippedLedger = new Ledger
                                 {
@@ -1114,6 +1114,12 @@ namespace ICCardManager.Services
                                 allRecordsForValidation.Add((lineNumber, skippedLedger, false));
                                 skippedCount++;
                                 continue;
+                            }
+                            else
+                            {
+                                // Issue #903: skipExisting=falseの場合、変更がなくても更新扱い
+                                isUpdate = true;
+                                existingLedgerForUpdate = existingLedger;
                             }
                         }
                     }
@@ -1511,11 +1517,17 @@ namespace ICCardManager.Services
                                 action = ImportAction.Update;
                                 updateCount++;
                             }
-                            else
+                            else if (skipExisting)
                             {
-                                // 変更点がない場合はスキップ
+                                // Issue #903: skipExisting=trueの場合のみスキップ
                                 action = ImportAction.Skip;
                                 skipCount++;
+                            }
+                            else
+                            {
+                                // Issue #903: skipExisting=falseの場合、変更がなくても更新扱い
+                                action = ImportAction.Update;
+                                updateCount++;
                             }
                         }
                         else

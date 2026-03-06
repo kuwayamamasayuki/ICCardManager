@@ -1239,6 +1239,131 @@ FEDCBA9876543210,鈴木花子,002,テスト2";
         _ledgerRepositoryMock.Verify(x => x.GetExistingLedgerKeysAsync(It.IsAny<IEnumerable<string>>()), Times.Never);
     }
 
+    /// <summary>
+    /// ID列ありCSVで変更がないレコードでも、skipExisting=falseならUpdateAsyncが呼ばれること（Issue #903）
+    /// </summary>
+    [Fact]
+    public async Task ImportLedgersAsync_IdBased_SkipExistingFalse_変更なしでもUpdateが呼ばれること()
+    {
+        // Arrange: ID付きCSVで完全に同一のデータ
+        var csvContent = @"ID,日時,カードIDm,管理番号,摘要,受入金額,払出金額,残額,利用者,備考
+1,2025-02-01 00:00:00,0123456789ABCDEF,001,12月から繰越,8806,,8806,,";
+
+        var filePath = Path.Combine(_testDirectory, "ledgers_id_skip_false.csv");
+        await Task.Run(() => File.WriteAllText(filePath, csvContent, CsvEncoding));
+
+        var cards = new List<IcCard>
+        {
+            new IcCard { CardIdm = "0123456789ABCDEF", CardType = "はやかけん", CardNumber = "001" }
+        };
+        _cardRepositoryMock.Setup(x => x.GetAllIncludingDeletedAsync()).ReturnsAsync(cards);
+
+        var existingLedger = new Ledger
+        {
+            Id = 1,
+            CardIdm = "0123456789ABCDEF",
+            Date = new DateTime(2025, 2, 1),
+            Summary = "12月から繰越",
+            Income = 8806,
+            Expense = 0,
+            Balance = 8806
+        };
+        _ledgerRepositoryMock.Setup(x => x.GetByIdAsync(1)).ReturnsAsync(existingLedger);
+        _ledgerRepositoryMock.Setup(x => x.UpdateAsync(It.IsAny<Ledger>())).ReturnsAsync(true);
+
+        // Act: skipExisting=false
+        var result = await _service.ImportLedgersAsync(filePath, skipExisting: false);
+
+        // Assert: 変更がなくても更新される（スキップされない）
+        result.Success.Should().BeTrue();
+        result.SkippedCount.Should().Be(0);
+        result.ImportedCount.Should().Be(1);
+        _ledgerRepositoryMock.Verify(x => x.UpdateAsync(It.IsAny<Ledger>()), Times.Once);
+    }
+
+    /// <summary>
+    /// ID列ありCSVで変更がないレコードで、skipExisting=trueならスキップされること（Issue #903）
+    /// </summary>
+    [Fact]
+    public async Task ImportLedgersAsync_IdBased_SkipExistingTrue_変更なしならスキップされること()
+    {
+        // Arrange: ID付きCSVで完全に同一のデータ
+        var csvContent = @"ID,日時,カードIDm,管理番号,摘要,受入金額,払出金額,残額,利用者,備考
+1,2025-02-01 00:00:00,0123456789ABCDEF,001,12月から繰越,8806,,8806,,";
+
+        var filePath = Path.Combine(_testDirectory, "ledgers_id_skip_true.csv");
+        await Task.Run(() => File.WriteAllText(filePath, csvContent, CsvEncoding));
+
+        var cards = new List<IcCard>
+        {
+            new IcCard { CardIdm = "0123456789ABCDEF", CardType = "はやかけん", CardNumber = "001" }
+        };
+        _cardRepositoryMock.Setup(x => x.GetAllIncludingDeletedAsync()).ReturnsAsync(cards);
+
+        var existingLedger = new Ledger
+        {
+            Id = 1,
+            CardIdm = "0123456789ABCDEF",
+            Date = new DateTime(2025, 2, 1),
+            Summary = "12月から繰越",
+            Income = 8806,
+            Expense = 0,
+            Balance = 8806
+        };
+        _ledgerRepositoryMock.Setup(x => x.GetByIdAsync(1)).ReturnsAsync(existingLedger);
+
+        // Act: skipExisting=true（デフォルト）
+        var result = await _service.ImportLedgersAsync(filePath, skipExisting: true);
+
+        // Assert: 変更がないのでスキップされる
+        result.Success.Should().BeTrue();
+        result.SkippedCount.Should().Be(1);
+        _ledgerRepositoryMock.Verify(x => x.UpdateAsync(It.IsAny<Ledger>()), Times.Never);
+        _ledgerRepositoryMock.Verify(x => x.InsertAsync(It.IsAny<Ledger>()), Times.Never);
+    }
+
+    /// <summary>
+    /// プレビュー時、ID列ありCSVで変更がないレコードでもskipExisting=falseならUpdate扱いになること（Issue #903）
+    /// </summary>
+    [Fact]
+    public async Task PreviewLedgersAsync_IdBased_SkipExistingFalse_変更なしでもUpdate扱いになること()
+    {
+        // Arrange: ID付きCSVで完全に同一のデータ
+        var csvContent = @"ID,日時,カードIDm,管理番号,摘要,受入金額,払出金額,残額,利用者,備考
+1,2025-02-01 00:00:00,0123456789ABCDEF,001,12月から繰越,8806,,8806,,";
+
+        var filePath = Path.Combine(_testDirectory, "ledgers_id_preview_skip_false.csv");
+        await Task.Run(() => File.WriteAllText(filePath, csvContent, CsvEncoding));
+
+        var cards = new List<IcCard>
+        {
+            new IcCard { CardIdm = "0123456789ABCDEF", CardType = "はやかけん", CardNumber = "001" }
+        };
+        _cardRepositoryMock.Setup(x => x.GetAllIncludingDeletedAsync()).ReturnsAsync(cards);
+
+        var existingLedger = new Ledger
+        {
+            Id = 1,
+            CardIdm = "0123456789ABCDEF",
+            Date = new DateTime(2025, 2, 1),
+            Summary = "12月から繰越",
+            Income = 8806,
+            Expense = 0,
+            Balance = 8806
+        };
+        _ledgerRepositoryMock.Setup(x => x.GetByIdAsync(1)).ReturnsAsync(existingLedger);
+
+        // Act: skipExisting=false
+        var result = await _service.PreviewLedgersAsync(filePath, skipExisting: false);
+
+        // Assert: Update扱い（Skipではない）
+        result.IsValid.Should().BeTrue();
+        result.SkipCount.Should().Be(0);
+        result.UpdateCount.Should().Be(1);
+        result.Items.Should().HaveCount(1);
+        result.Items[0].Action.Should().Be(ImportAction.Update);
+    }
+
     #endregion
 
     #region PreviewLedgerDetailsAsync テスト (Issue #751)
