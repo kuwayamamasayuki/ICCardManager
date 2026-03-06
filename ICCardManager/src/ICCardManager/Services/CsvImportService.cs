@@ -1637,6 +1637,7 @@ namespace ICCardManager.Services
             List<CsvImportError> errors)
         {
             var items = new List<CsvImportPreviewItem>();
+            var newCount = 0;
             var updateCount = 0;
             var skipCount = 0;
 
@@ -1650,12 +1651,14 @@ namespace ICCardManager.Services
                 };
             }
 
-            // パースされた詳細をledger_idごとにグループ化
+            // パースされた詳細をledger_idごとにグループ化（既存ledger向け）
             var detailsByLedgerId = new Dictionary<int, List<(int LineNumber, LedgerDetail Detail)>>();
             // 既存の詳細をキャッシュ（比較用）
             var existingDetailsByLedgerId = new Dictionary<int, List<LedgerDetail>>();
             // ledger_idからカードIDmへのマッピング（プレビュー表示用）
             var ledgerCardIdmMap = new Dictionary<int, string>();
+            // Issue #906: 利用履歴ID空欄の新規詳細をカードIDmごとにグループ化
+            var newDetailsByCardIdm = new Dictionary<string, List<(int LineNumber, LedgerDetail Detail)>>();
 
             for (var i = 1; i < lines.Count; i++)
             {
@@ -1681,7 +1684,43 @@ namespace ICCardManager.Services
                     continue;
                 }
 
-                // ledger_idの存在チェック
+                // Issue #906: 利用履歴ID空欄（LedgerId == 0）の場合は新規作成
+                if (detail.LedgerId == 0)
+                {
+                    var cardIdm = fields[2].Trim().ToUpperInvariant();
+                    if (string.IsNullOrWhiteSpace(cardIdm))
+                    {
+                        errors.Add(new CsvImportError
+                        {
+                            LineNumber = lineNumber,
+                            Message = "利用履歴IDが空欄の場合、カードIDmは必須です",
+                            Data = line
+                        });
+                        continue;
+                    }
+
+                    // カード存在チェック
+                    var card = await _cardRepository.GetByIdmAsync(cardIdm, includeDeleted: true);
+                    if (card == null)
+                    {
+                        errors.Add(new CsvImportError
+                        {
+                            LineNumber = lineNumber,
+                            Message = $"カードIDm {cardIdm} が登録されていません",
+                            Data = cardIdm
+                        });
+                        continue;
+                    }
+
+                    if (!newDetailsByCardIdm.ContainsKey(cardIdm))
+                    {
+                        newDetailsByCardIdm[cardIdm] = new List<(int, LedgerDetail)>();
+                    }
+                    newDetailsByCardIdm[cardIdm].Add((lineNumber, detail));
+                    continue;
+                }
+
+                // 既存ledger_idの存在チェック
                 if (!existingDetailsByLedgerId.ContainsKey(detail.LedgerId))
                 {
                     var ledger = await _ledgerRepository.GetByIdAsync(detail.LedgerId);
@@ -1706,7 +1745,25 @@ namespace ICCardManager.Services
                 detailsByLedgerId[detail.LedgerId].Add((lineNumber, detail));
             }
 
-            // ledger_idごとにプレビューアイテム生成
+            // Issue #906: 新規詳細（利用履歴ID空欄）のプレビューアイテム生成
+            foreach (var kvp in newDetailsByCardIdm.OrderBy(x => x.Key))
+            {
+                var cardIdm = kvp.Key;
+                var detailRows = kvp.Value;
+
+                items.Add(new CsvImportPreviewItem
+                {
+                    LineNumber = detailRows.First().LineNumber,
+                    Idm = "(自動付与)",
+                    Name = cardIdm,
+                    AdditionalInfo = $"{detailRows.Count}件",
+                    Action = ImportAction.Insert,
+                    Changes = new List<FieldChange>()
+                });
+                newCount++;
+            }
+
+            // 既存ledger_idごとにプレビューアイテム生成
             foreach (var kvp in detailsByLedgerId.OrderBy(x => x.Key))
             {
                 var ledgerId = kvp.Key;
@@ -1746,7 +1803,7 @@ namespace ICCardManager.Services
             return new CsvImportPreviewResult
             {
                 IsValid = errors.Count == 0,
-                NewCount = 0,
+                NewCount = newCount,
                 UpdateCount = updateCount,
                 SkipCount = skipCount,
                 ErrorCount = errors.Count,
@@ -1789,10 +1846,12 @@ namespace ICCardManager.Services
                 };
             }
 
-            // パースされた詳細をledger_idごとにグループ化
+            // パースされた詳細をledger_idごとにグループ化（既存ledger向け）
             var detailsByLedgerId = new Dictionary<int, List<(int LineNumber, LedgerDetail Detail)>>();
             // 既存の詳細をキャッシュ（変更検出用）
             var existingDetailsByLedgerId = new Dictionary<int, List<LedgerDetail>>();
+            // Issue #906: 利用履歴ID空欄の新規詳細をカードIDmごとにグループ化
+            var newDetailsByCardIdm = new Dictionary<string, List<(int LineNumber, LedgerDetail Detail)>>();
 
             for (var i = 1; i < lines.Count; i++)
             {
@@ -1818,7 +1877,43 @@ namespace ICCardManager.Services
                     continue;
                 }
 
-                // ledger_idの存在チェック
+                // Issue #906: 利用履歴ID空欄（LedgerId == 0）の場合は新規作成
+                if (detail.LedgerId == 0)
+                {
+                    var cardIdm = fields[2].Trim().ToUpperInvariant();
+                    if (string.IsNullOrWhiteSpace(cardIdm))
+                    {
+                        errors.Add(new CsvImportError
+                        {
+                            LineNumber = lineNumber,
+                            Message = "利用履歴IDが空欄の場合、カードIDmは必須です",
+                            Data = line
+                        });
+                        continue;
+                    }
+
+                    // カード存在チェック
+                    var card = await _cardRepository.GetByIdmAsync(cardIdm, includeDeleted: true);
+                    if (card == null)
+                    {
+                        errors.Add(new CsvImportError
+                        {
+                            LineNumber = lineNumber,
+                            Message = $"カードIDm {cardIdm} が登録されていません",
+                            Data = cardIdm
+                        });
+                        continue;
+                    }
+
+                    if (!newDetailsByCardIdm.ContainsKey(cardIdm))
+                    {
+                        newDetailsByCardIdm[cardIdm] = new List<(int, LedgerDetail)>();
+                    }
+                    newDetailsByCardIdm[cardIdm].Add((lineNumber, detail));
+                    continue;
+                }
+
+                // 既存ledger_idの存在チェック
                 if (!existingDetailsByLedgerId.ContainsKey(detail.LedgerId))
                 {
                     var ledger = await _ledgerRepository.GetByIdAsync(detail.LedgerId);
@@ -1855,7 +1950,7 @@ namespace ICCardManager.Services
             }
 
             // データがない場合
-            if (detailsByLedgerId.Count == 0)
+            if (detailsByLedgerId.Count == 0 && newDetailsByCardIdm.Count == 0)
             {
                 return new CsvImportResult
                 {
@@ -1864,7 +1959,80 @@ namespace ICCardManager.Services
                 };
             }
 
-            // ledger_idごとにReplaceDetailsAsyncで全置換（変更がある場合のみ）
+            // Issue #906: 新規詳細（利用履歴ID空欄）のLedger自動作成とインポート
+            foreach (var kvp in newDetailsByCardIdm)
+            {
+                var cardIdm = kvp.Key;
+                var detailRows = kvp.Value;
+                var firstLineNumber = detailRows.First().LineNumber;
+                var detailList = detailRows.Select(r => r.Detail).ToList();
+
+                try
+                {
+                    // SummaryGeneratorで摘要を自動生成
+                    var summaryGenerator = new SummaryGenerator();
+                    var summary = summaryGenerator.Generate(detailList);
+                    if (string.IsNullOrEmpty(summary))
+                    {
+                        summary = "CSVインポート";
+                    }
+
+                    // LedgerSplitServiceと同じロジックで収支・残高を計算
+                    var (income, expense, balance) = LedgerSplitService.CalculateGroupFinancials(detailList);
+
+                    // 日付は最も古い利用日時、なければ現在日時
+                    var date = detailList
+                        .Where(d => d.UseDate.HasValue)
+                        .OrderBy(d => d.UseDate!.Value)
+                        .Select(d => d.UseDate!.Value)
+                        .FirstOrDefault();
+                    if (date == default)
+                    {
+                        date = DateTime.Now;
+                    }
+
+                    // Ledgerレコードを自動作成
+                    var newLedger = new Ledger
+                    {
+                        CardIdm = cardIdm,
+                        Date = date,
+                        Summary = summary,
+                        Income = income,
+                        Expense = expense,
+                        Balance = balance
+                    };
+
+                    var newLedgerId = await _ledgerRepository.InsertAsync(newLedger);
+
+                    // 詳細をインサート
+                    var success = await _ledgerRepository.InsertDetailsAsync(newLedgerId, detailList);
+
+                    if (success)
+                    {
+                        importedCount += detailRows.Count;
+                    }
+                    else
+                    {
+                        errors.Add(new CsvImportError
+                        {
+                            LineNumber = firstLineNumber,
+                            Message = $"カード {cardIdm} の新規詳細の挿入に失敗しました",
+                            Data = cardIdm
+                        });
+                    }
+                }
+                catch (Exception ex)
+                {
+                    errors.Add(new CsvImportError
+                    {
+                        LineNumber = firstLineNumber,
+                        Message = $"カード {cardIdm} の利用履歴自動作成中にエラーが発生しました: {ex.Message}",
+                        Data = cardIdm
+                    });
+                }
+            }
+
+            // 既存ledger_idごとにReplaceDetailsAsyncで全置換（変更がある場合のみ）
             var skippedCount = 0;
             foreach (var kvp in detailsByLedgerId)
             {
@@ -1941,8 +2109,8 @@ namespace ICCardManager.Services
 
             var ledgerIdStr = fields[0].Trim();
             var useDateStr = fields[1].Trim();
-            // fields[2] カードIDm（参照用、インポート時は無視）
-            // fields[3] 管理番号（参照用、インポート時は無視）
+            // fields[2] カードIDm（利用履歴ID空欄時の自動作成で使用）
+            // fields[3] 管理番号（参照用）
             var entryStation = fields[4].Trim();
             var exitStation = fields[5].Trim();
             var busStops = fields[6].Trim();
@@ -1953,16 +2121,20 @@ namespace ICCardManager.Services
             var isBusStr = fields[11].Trim();
             var groupIdStr = fields[12].Trim();
 
-            // 利用履歴ID: 必須、整数
-            if (!int.TryParse(ledgerIdStr, out var ledgerId))
+            // 利用履歴ID: 空欄の場合は0（自動付与）、それ以外は整数
+            int ledgerId = 0;
+            if (!string.IsNullOrWhiteSpace(ledgerIdStr))
             {
-                errors.Add(new CsvImportError
+                if (!int.TryParse(ledgerIdStr, out ledgerId))
                 {
-                    LineNumber = lineNumber,
-                    Message = "利用履歴IDの形式が不正です",
-                    Data = ledgerIdStr
-                });
-                return null;
+                    errors.Add(new CsvImportError
+                    {
+                        LineNumber = lineNumber,
+                        Message = "利用履歴IDの形式が不正です",
+                        Data = ledgerIdStr
+                    });
+                    return null;
+                }
             }
 
             // 利用日時: 任意（空欄=null）
