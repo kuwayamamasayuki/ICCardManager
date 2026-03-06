@@ -1137,6 +1137,110 @@ FEDCBA9876543210,鈴木花子,002,テスト2";
 
     #endregion
 
+    #region ImportLedgersAsync skipExisting テスト (Issue #903)
+
+    /// <summary>
+    /// skipExisting=trueの場合、既存の重複レコードはスキップされること
+    /// </summary>
+    [Fact]
+    public async Task ImportLedgersAsync_SkipExistingTrue_既存レコードはスキップされること()
+    {
+        // Arrange: ID列なしのCSV（旧フォーマット）
+        var csvContent = @"日時,カードIDm,管理番号,摘要,受入金額,払出金額,残額,利用者,備考
+2025-01-10 00:00:00,0123456789ABCDEF,001,鉄道（天神～博多）,,210,7126,,";
+
+        var filePath = Path.Combine(_testDirectory, "ledgers_skip_existing_true.csv");
+        await Task.Run(() => File.WriteAllText(filePath, csvContent, CsvEncoding));
+
+        var cards = new List<IcCard>
+        {
+            new IcCard { CardIdm = "0123456789ABCDEF", CardType = "はやかけん", CardNumber = "001" }
+        };
+        _cardRepositoryMock.Setup(x => x.GetAllIncludingDeletedAsync()).ReturnsAsync(cards);
+
+        // 既存データとして同一キーが存在するようモック
+        var existingKeys = new HashSet<(string, DateTime, string, int, int, int)>
+        {
+            ("0123456789ABCDEF", new DateTime(2025, 1, 10), "鉄道（天神～博多）", 0, 210, 7126)
+        };
+        _ledgerRepositoryMock.Setup(x => x.GetExistingLedgerKeysAsync(It.IsAny<IEnumerable<string>>()))
+            .ReturnsAsync(existingKeys);
+
+        // Act: skipExisting=true（デフォルト）
+        var result = await _service.ImportLedgersAsync(filePath, skipExisting: true);
+
+        // Assert: 重複レコードはスキップされ、InsertAsyncは呼ばれない
+        result.Success.Should().BeTrue();
+        result.ImportedCount.Should().Be(0);
+        result.SkippedCount.Should().Be(1);
+        _ledgerRepositoryMock.Verify(x => x.InsertAsync(It.IsAny<Ledger>()), Times.Never);
+    }
+
+    /// <summary>
+    /// skipExisting=falseの場合、既存の重複レコードもスキップせず新規登録されること（Issue #903）
+    /// </summary>
+    [Fact]
+    public async Task ImportLedgersAsync_SkipExistingFalse_既存レコードもインポートされること()
+    {
+        // Arrange: ID列なしのCSV（旧フォーマット）
+        var csvContent = @"日時,カードIDm,管理番号,摘要,受入金額,払出金額,残額,利用者,備考
+2025-01-10 00:00:00,0123456789ABCDEF,001,鉄道（天神～博多）,,210,7126,,";
+
+        var filePath = Path.Combine(_testDirectory, "ledgers_skip_existing_false.csv");
+        await Task.Run(() => File.WriteAllText(filePath, csvContent, CsvEncoding));
+
+        var cards = new List<IcCard>
+        {
+            new IcCard { CardIdm = "0123456789ABCDEF", CardType = "はやかけん", CardNumber = "001" }
+        };
+        _cardRepositoryMock.Setup(x => x.GetAllIncludingDeletedAsync()).ReturnsAsync(cards);
+        _ledgerRepositoryMock.Setup(x => x.InsertAsync(It.IsAny<Ledger>())).ReturnsAsync(1);
+
+        // Act: skipExisting=false
+        var result = await _service.ImportLedgersAsync(filePath, skipExisting: false);
+
+        // Assert: 重複チェックせず新規登録される
+        result.Success.Should().BeTrue();
+        result.ImportedCount.Should().Be(1);
+        result.SkippedCount.Should().Be(0);
+        _ledgerRepositoryMock.Verify(x => x.InsertAsync(It.IsAny<Ledger>()), Times.Once);
+        // GetExistingLedgerKeysAsync は呼ばれないこと
+        _ledgerRepositoryMock.Verify(x => x.GetExistingLedgerKeysAsync(It.IsAny<IEnumerable<string>>()), Times.Never);
+    }
+
+    /// <summary>
+    /// プレビュー時もskipExisting=falseの場合、重複レコードはInsert扱いになること（Issue #903）
+    /// </summary>
+    [Fact]
+    public async Task PreviewLedgersAsync_SkipExistingFalse_重複レコードはInsert扱いになること()
+    {
+        // Arrange: ID列なしのCSV（旧フォーマット）
+        var csvContent = @"日時,カードIDm,管理番号,摘要,受入金額,払出金額,残額,利用者,備考
+2025-01-10 00:00:00,0123456789ABCDEF,001,鉄道（天神～博多）,,210,7126,,";
+
+        var filePath = Path.Combine(_testDirectory, "ledgers_preview_skip_false.csv");
+        await Task.Run(() => File.WriteAllText(filePath, csvContent, CsvEncoding));
+
+        var cards = new List<IcCard>
+        {
+            new IcCard { CardIdm = "0123456789ABCDEF", CardType = "はやかけん", CardNumber = "001" }
+        };
+        _cardRepositoryMock.Setup(x => x.GetAllIncludingDeletedAsync()).ReturnsAsync(cards);
+
+        // Act: skipExisting=false
+        var result = await _service.PreviewLedgersAsync(filePath, skipExisting: false);
+
+        // Assert: Insert扱い（Skipではない）
+        result.Items.Should().HaveCount(1);
+        result.Items[0].Action.Should().Be(ImportAction.Insert);
+        result.NewCount.Should().Be(1);
+        result.SkipCount.Should().Be(0);
+        // GetExistingLedgerKeysAsync は呼ばれないこと
+        _ledgerRepositoryMock.Verify(x => x.GetExistingLedgerKeysAsync(It.IsAny<IEnumerable<string>>()), Times.Never);
+    }
+
+    #endregion
+
     #region PreviewLedgerDetailsAsync テスト (Issue #751)
 
     /// <summary>

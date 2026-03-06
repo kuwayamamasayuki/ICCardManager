@@ -1171,9 +1171,12 @@ namespace ICCardManager.Services
                 }
 
                 // Issue #334: 新規追加分のみ既存履歴の重複チェック用キーを取得
+                // Issue #903: skipExisting=falseの場合は重複チェックを行わず全レコードを登録する
                 var newRecords = validRecords.Where(r => !r.IsUpdate).ToList();
                 var uniqueCardIdms = newRecords.Select(r => r.Ledger.CardIdm).Distinct();
-                var existingLedgerKeys = await _ledgerRepository.GetExistingLedgerKeysAsync(uniqueCardIdms);
+                var existingLedgerKeys = skipExisting
+                    ? await _ledgerRepository.GetExistingLedgerKeysAsync(uniqueCardIdms)
+                    : new HashSet<(string CardIdm, DateTime Date, string Summary, int Income, int Expense, int Balance)>();
 
                 // インポート実行（履歴はトランザクションなしで直接インポート）
                 foreach (var (lineNumber, ledger, isUpdate) in validRecords)
@@ -1200,7 +1203,7 @@ namespace ICCardManager.Services
                         }
                         else
                         {
-                            // 重複チェック: 同じ履歴が既に存在する場合はスキップ
+                            // 重複チェック: skipExisting=trueの場合、同じ履歴が既に存在すればスキップ
                             var ledgerKey = (ledger.CardIdm, ledger.Date, ledger.Summary, ledger.Income, ledger.Expense, ledger.Balance);
                             if (existingLedgerKeys.Contains(ledgerKey))
                             {
@@ -1483,7 +1486,10 @@ namespace ICCardManager.Services
                 ValidateBalanceConsistency(validatedRecords, errors);
 
                 // Issue #334: 既存履歴の重複チェック用キーを取得（新規追加分のみ）
-                var existingLedgerKeys = await _ledgerRepository.GetExistingLedgerKeysAsync(cardIdmsInFile);
+                // Issue #903: skipExisting=falseの場合は重複チェックを行わない
+                var existingLedgerKeys = skipExisting
+                    ? await _ledgerRepository.GetExistingLedgerKeysAsync(cardIdmsInFile)
+                    : new HashSet<(string CardIdm, DateTime Date, string Summary, int Income, int Expense, int Balance)>();
 
                 // プレビューアイテムを生成
                 foreach (var (lineNumber, ledgerId, cardIdm, date, summary, income, expense, balance, staffName, note) in validatedRecords)
