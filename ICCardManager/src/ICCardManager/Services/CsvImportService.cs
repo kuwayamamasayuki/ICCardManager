@@ -1654,6 +1654,8 @@ namespace ICCardManager.Services
             var detailsByLedgerId = new Dictionary<int, List<(int LineNumber, LedgerDetail Detail)>>();
             // 既存の詳細をキャッシュ（比較用）
             var existingDetailsByLedgerId = new Dictionary<int, List<LedgerDetail>>();
+            // ledger_idからカードIDmへのマッピング（プレビュー表示用）
+            var ledgerCardIdmMap = new Dictionary<int, string>();
 
             for (var i = 1; i < lines.Count; i++)
             {
@@ -1694,6 +1696,7 @@ namespace ICCardManager.Services
                         continue;
                     }
                     existingDetailsByLedgerId[detail.LedgerId] = ledger.Details ?? new List<LedgerDetail>();
+                    ledgerCardIdmMap[detail.LedgerId] = ledger.CardIdm ?? "";
                 }
 
                 if (!detailsByLedgerId.ContainsKey(detail.LedgerId))
@@ -1727,12 +1730,14 @@ namespace ICCardManager.Services
                     skipCount++;
                 }
 
+                var cardIdm = ledgerCardIdmMap.TryGetValue(ledgerId, out var idm) ? idm : "";
+
                 items.Add(new CsvImportPreviewItem
                 {
                     LineNumber = detailRows.First().LineNumber,
                     Idm = ledgerId.ToString(),
-                    Name = $"利用履歴ID {ledgerId}",
-                    AdditionalInfo = $"{detailRows.Count}件の詳細",
+                    Name = cardIdm,
+                    AdditionalInfo = $"{detailRows.Count}件",
                     Action = action,
                     Changes = changes
                 });

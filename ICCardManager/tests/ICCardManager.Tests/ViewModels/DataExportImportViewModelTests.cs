@@ -409,6 +409,43 @@ public class DataExportImportViewModelTests : IDisposable
 
     #endregion
 
+    #region Issue #905: プレビュー列ヘッダーの動的切り替え
+
+    [Theory]
+    [InlineData(DataType.Cards, "IDm", "カード種別", "管理番号")]
+    [InlineData(DataType.Staff, "IDm", "氏名", "職員番号")]
+    [InlineData(DataType.Ledgers, "カードIDm", "摘要", "日付")]
+    [InlineData(DataType.LedgerDetails, "利用履歴ID", "カードIDm", "詳細件数")]
+    public void PreviewColumnHeaders_データ種別に応じて正しいヘッダーが返される(
+        DataType dataType, string expectedCol1, string expectedCol2, string expectedCol3)
+    {
+        // Act
+        _viewModel.SelectedImportType = dataType;
+
+        // Assert
+        _viewModel.PreviewColumn1Header.Should().Be(expectedCol1);
+        _viewModel.PreviewColumn2Header.Should().Be(expectedCol2);
+        _viewModel.PreviewColumn3Header.Should().Be(expectedCol3);
+    }
+
+    [Fact]
+    public void PreviewColumnHeaders_種別変更時にPropertyChangedが発火する()
+    {
+        // Arrange
+        var changedProperties = new List<string>();
+        _viewModel.PropertyChanged += (_, e) => changedProperties.Add(e.PropertyName);
+
+        // Act
+        _viewModel.SelectedImportType = DataType.LedgerDetails;
+
+        // Assert
+        changedProperties.Should().Contain(nameof(DataExportImportViewModel.PreviewColumn1Header));
+        changedProperties.Should().Contain(nameof(DataExportImportViewModel.PreviewColumn2Header));
+        changedProperties.Should().Contain(nameof(DataExportImportViewModel.PreviewColumn3Header));
+    }
+
+    #endregion
+
     /// <summary>
     /// テスト用にプレビュー状態をセットアップするヘルパー
     /// </summary>

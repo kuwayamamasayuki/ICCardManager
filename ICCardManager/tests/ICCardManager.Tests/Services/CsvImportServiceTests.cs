@@ -1398,6 +1398,48 @@ FEDCBA9876543210,鈴木花子,002,テスト2";
         result.Items.Should().HaveCount(1);
         result.Items[0].Action.Should().Be(ImportAction.Update);
         result.Items[0].AdditionalInfo.Should().Contain("2件");
+        // Issue #905: プレビューアイテムに利用履歴IDとカードIDmが正しく設定されること
+        result.Items[0].Idm.Should().Be("1");
+        result.Items[0].Name.Should().Be("0123456789ABCDEF");
+    }
+
+    /// <summary>
+    /// Issue #905: 複数のledger_idを含むCSVのプレビューで各アイテムに正しいカードIDmが表示されること
+    /// </summary>
+    [Fact]
+    public async Task PreviewLedgerDetailsAsync_複数LedgerId_各アイテムにカードIDmが表示される()
+    {
+        // Arrange
+        var csvContent = @"利用履歴ID,利用日時,カードIDm,管理番号,乗車駅,降車駅,バス停,金額,残額,チャージ,ポイント還元,バス利用,グループID
+1,2024-01-15 10:30:00,AAAA456789ABCDEF,001,博多,天神,,260,9740,0,0,0,
+2,2024-01-16 09:00:00,BBBB456789ABCDEF,002,天神,博多,,260,9480,0,0,0,";
+
+        var filePath = Path.Combine(_testDirectory, "details_multi_ledger.csv");
+        await Task.Run(() => File.WriteAllText(filePath, csvContent, CsvEncoding));
+
+        _ledgerRepositoryMock.Setup(x => x.GetByIdAsync(1)).ReturnsAsync(new Ledger
+        {
+            Id = 1, CardIdm = "AAAA456789ABCDEF", Date = new DateTime(2024, 1, 15),
+            Summary = "鉄道（博多～天神）", Income = 0, Expense = 260, Balance = 9740
+        });
+        _ledgerRepositoryMock.Setup(x => x.GetByIdAsync(2)).ReturnsAsync(new Ledger
+        {
+            Id = 2, CardIdm = "BBBB456789ABCDEF", Date = new DateTime(2024, 1, 16),
+            Summary = "鉄道（天神～博多）", Income = 0, Expense = 260, Balance = 9480
+        });
+
+        // Act
+        var result = await _service.PreviewLedgerDetailsAsync(filePath);
+
+        // Assert
+        result.IsValid.Should().BeTrue();
+        result.Items.Should().HaveCount(2);
+        result.Items[0].Idm.Should().Be("1");
+        result.Items[0].Name.Should().Be("AAAA456789ABCDEF");
+        result.Items[0].AdditionalInfo.Should().Be("1件");
+        result.Items[1].Idm.Should().Be("2");
+        result.Items[1].Name.Should().Be("BBBB456789ABCDEF");
+        result.Items[1].AdditionalInfo.Should().Be("1件");
     }
 
     /// <summary>
