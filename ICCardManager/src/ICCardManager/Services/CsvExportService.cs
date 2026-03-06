@@ -268,7 +268,8 @@ namespace ICCardManager.Services
                     })
                     .ThenBy(d => d.UseDate)
                     .ThenBy(d => d.LedgerId)
-                    .ThenBy(d => d.SequenceNumber))
+                    // Issue #904: SequenceNumber降順で古い取引から順に出力（FeliCa互換: 小さいrowid=新しい取引）
+                    .ThenByDescending(d => d.SequenceNumber))
                 {
                     // 参照用のカードIDmと管理番号を取得
                     var cardIdm = ledgerCardMap.TryGetValue(detail.LedgerId, out var idmVal) ? idmVal : "";
