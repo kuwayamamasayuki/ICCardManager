@@ -1360,4 +1360,57 @@ FEDCBA9876543210,鈴木花子,002,テスト2";
     }
 
     #endregion
+
+    #region ReadCsvFileAsync - ファイル共有読み取りテスト
+
+    [Fact]
+    public async Task ReadCsvFileAsync_他プロセスが書き込みロック中でも読み取りできること()
+    {
+        // Arrange: CSVファイルを作成し、書き込みロックを保持したまま読み取りを試みる
+        var filePath = Path.Combine(_testDirectory, "locked_file.csv");
+        File.WriteAllText(filePath, "ヘッダー1,ヘッダー2\nデータ1,データ2\n", Encoding.UTF8);
+
+        // 他プロセスが書き込みモードで開いている状態をシミュレート
+        using var lockStream = new FileStream(filePath, FileMode.Open, FileAccess.ReadWrite, FileShare.ReadWrite);
+
+        // Act: ロック中のファイルを読み取り
+        var lines = await CsvImportService.ReadCsvFileAsync(filePath);
+
+        // Assert
+        lines.Should().HaveCount(2);
+        lines[0].Should().Be("ヘッダー1,ヘッダー2");
+        lines[1].Should().Be("データ1,データ2");
+    }
+
+    [Fact]
+    public async Task ReadCsvFileAsync_UTF8_BOM付きファイルを正しく読み取れること()
+    {
+        // Arrange
+        var filePath = Path.Combine(_testDirectory, "bom_file.csv");
+        var utf8Bom = new UTF8Encoding(encoderShouldEmitUTF8Identifier: true);
+        File.WriteAllText(filePath, "名前,値\nテスト,123\n", utf8Bom);
+
+        // Act
+        var lines = await CsvImportService.ReadCsvFileAsync(filePath);
+
+        // Assert
+        lines.Should().HaveCount(2);
+        lines[0].Should().Be("名前,値");
+    }
+
+    [Fact]
+    public async Task ReadCsvFileAsync_空ファイルの場合は空リストを返すこと()
+    {
+        // Arrange
+        var filePath = Path.Combine(_testDirectory, "empty_file.csv");
+        File.WriteAllText(filePath, "", Encoding.UTF8);
+
+        // Act
+        var lines = await CsvImportService.ReadCsvFileAsync(filePath);
+
+        // Assert
+        lines.Should().BeEmpty();
+    }
+
+    #endregion
 }
