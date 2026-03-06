@@ -2084,10 +2084,12 @@ namespace ICCardManager.Services
         /// <summary>
         /// CSVファイルを読み込み（UTF-8 BOM対応）
         /// </summary>
-        private static async Task<List<string>> ReadCsvFileAsync(string filePath)
+        internal static async Task<List<string>> ReadCsvFileAsync(string filePath)
         {
             // UTF-8 with BOMに対応
-            using var reader = new StreamReader(filePath, Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
+            // FileShare.ReadWrite で開くことで、他プロセス（Excel等）がファイルを使用中でも読み込み可能にする
+            var fileStream = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+            using var reader = new StreamReader(fileStream, Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
             var lines = new List<string>();
 
             while (!reader.EndOfStream)
