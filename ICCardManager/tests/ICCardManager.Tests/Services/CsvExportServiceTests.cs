@@ -495,6 +495,7 @@ public class CsvExportServiceTests : IDisposable
         // Arrange
         var details = new List<LedgerDetail>
         {
+            // Issue #904: FeliCa互換のSequenceNumber（小さいほど新しい）
             new LedgerDetail
             {
                 LedgerId = 1,
@@ -506,7 +507,7 @@ public class CsvExportServiceTests : IDisposable
                 IsCharge = false,
                 IsPointRedemption = false,
                 IsBus = false,
-                SequenceNumber = 1
+                SequenceNumber = 2 // 古い取引 → 大きいrowid
             },
             new LedgerDetail
             {
@@ -519,7 +520,7 @@ public class CsvExportServiceTests : IDisposable
                 IsCharge = false,
                 IsPointRedemption = false,
                 IsBus = false,
-                SequenceNumber = 2
+                SequenceNumber = 1 // 新しい取引 → 小さいrowid
             }
         };
 
@@ -667,6 +668,7 @@ public class CsvExportServiceTests : IDisposable
         // Arrange
         var details = new List<LedgerDetail>
         {
+            // Issue #904: FeliCa互換のSequenceNumber（小さいほど新しい）
             new LedgerDetail
             {
                 LedgerId = 1,
@@ -676,7 +678,7 @@ public class CsvExportServiceTests : IDisposable
                 IsCharge = true,
                 IsPointRedemption = false,
                 IsBus = false,
-                SequenceNumber = 1
+                SequenceNumber = 3 // 最古
             },
             new LedgerDetail
             {
@@ -685,7 +687,7 @@ public class CsvExportServiceTests : IDisposable
                 IsCharge = false,
                 IsPointRedemption = true,
                 IsBus = false,
-                SequenceNumber = 2
+                SequenceNumber = 2 // 中間
             },
             new LedgerDetail
             {
@@ -695,7 +697,7 @@ public class CsvExportServiceTests : IDisposable
                 IsCharge = false,
                 IsPointRedemption = false,
                 IsBus = true,
-                SequenceNumber = 3
+                SequenceNumber = 1 // 最新
             }
         };
 
@@ -795,6 +797,85 @@ public class CsvExportServiceTests : IDisposable
         var content = await Task.Run(() => File.ReadAllText(filePath, Encoding.UTF8));
         content.Should().Contain("\"新宿,東口\"");  // カンマはダブルクォートで囲む
         content.Should().Contain("\"渋谷\"\"駅\"\"\"");  // ダブルクォートはエスケープ
+    }
+
+    /// <summary>
+    /// 利用履歴詳細エクスポート時のSequenceNumber順序が残高整合性を保つことを確認（Issue #904）
+    /// FeliCa互換: SequenceNumber降順（大→小）で古い取引から順に出力される
+    /// </summary>
+    [Fact]
+    public async Task ExportLedgerDetailsAsync_SequenceNumber降順で時系列順に出力される()
+    {
+        // Arrange: SequenceNumberがFeliCa互換（小さいほど新しい）のデータ
+        // 時系列: 10:30(古,SeqNum=3) → 12:00(中,SeqNum=2) → 17:00(新,SeqNum=1)
+        var details = new List<LedgerDetail>
+        {
+            new LedgerDetail
+            {
+                LedgerId = 1,
+                UseDate = new DateTime(2024, 1, 15, 17, 0, 0),
+                EntryStation = "天神",
+                ExitStation = "博多",
+                Amount = 260,
+                Balance = 9220,
+                SequenceNumber = 1 // 最新
+            },
+            new LedgerDetail
+            {
+                LedgerId = 1,
+                UseDate = new DateTime(2024, 1, 15, 10, 30, 0),
+                EntryStation = "博多",
+                ExitStation = "天神",
+                Amount = 260,
+                Balance = 9740,
+                SequenceNumber = 3 // 最古
+            },
+            new LedgerDetail
+            {
+                LedgerId = 1,
+                UseDate = new DateTime(2024, 1, 15, 12, 0, 0),
+                EntryStation = "天神",
+                ExitStation = "薬院",
+                Amount = 260,
+                Balance = 9480,
+                SequenceNumber = 2 // 中間
+            }
+        };
+
+        var ledgers = new List<Ledger>
+        {
+            new Ledger { Id = 1, CardIdm = "0123456789ABCDEF", Date = new DateTime(2024, 1, 15) }
+        };
+        var cards = new List<IcCard>
+        {
+            new IcCard { CardIdm = "0123456789ABCDEF", CardType = "はやかけん", CardNumber = "001" }
+        };
+
+        _ledgerRepositoryMock.Setup(x => x.GetAllDetailsInDateRangeAsync(It.IsAny<DateTime>(), It.IsAny<DateTime>())).ReturnsAsync(details);
+        _ledgerRepositoryMock.Setup(x => x.GetByDateRangeAsync(null, It.IsAny<DateTime>(), It.IsAny<DateTime>())).ReturnsAsync(ledgers);
+        _cardRepositoryMock.Setup(x => x.GetAllIncludingDeletedAsync()).ReturnsAsync(cards);
+
+        var filePath = Path.Combine(_testDirectory, "ledger_details_order.csv");
+
+        // Act
+        var result = await _service.ExportLedgerDetailsAsync(filePath, new DateTime(2024, 1, 1), new DateTime(2024, 1, 31));
+
+        // Assert: 残高が降順（9740→9480→9220）＝時系列順になること
+        result.Success.Should().BeTrue();
+        var lines = await Task.Run(() => File.ReadAllLines(filePath, Encoding.UTF8));
+        lines.Should().HaveCount(4); // ヘッダー + 3行
+
+        // SequenceNumber=3（最古、10:30、残高9740）が最初
+        lines[1].Should().Contain("2024-01-15 10:30:00");
+        lines[1].Should().Contain(",9740,");
+
+        // SequenceNumber=2（中間、12:00、残高9480）が2番目
+        lines[2].Should().Contain("2024-01-15 12:00:00");
+        lines[2].Should().Contain(",9480,");
+
+        // SequenceNumber=1（最新、17:00、残高9220）が最後
+        lines[3].Should().Contain("2024-01-15 17:00:00");
+        lines[3].Should().Contain(",9220,");
     }
 
     #endregion
