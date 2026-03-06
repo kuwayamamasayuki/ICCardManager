@@ -672,6 +672,177 @@ FEDCBA9876543210,鈴木花子,002,テスト2";
 
     #endregion
 
+    #region Issue #907: 最初の行のDB直前残高との整合性チェック
+
+    /// <summary>
+    /// DB上に直前残高がある場合、最初の行の残高がDB直前残高と整合すればOK
+    /// </summary>
+    [Fact]
+    public async Task PreviewLedgersAsync_最初の行がDB直前残高と整合_正常()
+    {
+        // Arrange: DB上の直前残高は1200円
+        // CSV1行目: 受入=0, 払出=200, 残額=1000 → 期待: 1200 + 0 - 200 = 1000 ✓
+        var csvContent = @"日時,カードIDm,管理番号,摘要,受入金額,払出金額,残額,利用者,備考
+2024-01-15 10:00:00,0123456789ABCDEF,001,鉄道（A駅～B駅）,,200,1000,山田太郎,";
+
+        var filePath = Path.Combine(_testDirectory, "ledgers_first_row_db_valid.csv");
+        await Task.Run(() => File.WriteAllText(filePath, csvContent, CsvEncoding));
+
+        var cards = new List<IcCard>
+        {
+            new IcCard { CardIdm = "0123456789ABCDEF", CardType = "Suica", CardNumber = "001" }
+        };
+        _cardRepositoryMock.Setup(x => x.GetAllIncludingDeletedAsync()).ReturnsAsync(cards);
+        _ledgerRepositoryMock.Setup(x => x.GetExistingLedgerKeysAsync(It.IsAny<IEnumerable<string>>()))
+            .ReturnsAsync(new HashSet<(string, DateTime, string, int, int, int)>());
+
+        // DB上の直前残高: 1200円
+        _ledgerRepositoryMock.Setup(x => x.GetLatestBeforeDateAsync("0123456789ABCDEF", It.IsAny<DateTime>()))
+            .ReturnsAsync(new Ledger { CardIdm = "0123456789ABCDEF", Balance = 1200, Date = new DateTime(2024, 1, 14) });
+
+        // Act
+        var result = await _service.PreviewLedgersAsync(filePath);
+
+        // Assert
+        result.IsValid.Should().BeTrue();
+        result.ErrorCount.Should().Be(0);
+    }
+
+    /// <summary>
+    /// DB上に直前残高がある場合、最初の行の残高がDB直前残高と不整合ならエラー
+    /// </summary>
+    [Fact]
+    public async Task PreviewLedgersAsync_最初の行がDB直前残高と不整合_エラー()
+    {
+        // Arrange: DB上の直前残高は1200円
+        // CSV1行目: 受入=0, 払出=200, 残額=900 → 期待: 1200 + 0 - 200 = 1000 ≠ 900 ✗
+        var csvContent = @"日時,カードIDm,管理番号,摘要,受入金額,払出金額,残額,利用者,備考
+2024-01-15 10:00:00,0123456789ABCDEF,001,鉄道（A駅～B駅）,,200,900,山田太郎,";
+
+        var filePath = Path.Combine(_testDirectory, "ledgers_first_row_db_invalid.csv");
+        await Task.Run(() => File.WriteAllText(filePath, csvContent, CsvEncoding));
+
+        var cards = new List<IcCard>
+        {
+            new IcCard { CardIdm = "0123456789ABCDEF", CardType = "Suica", CardNumber = "001" }
+        };
+        _cardRepositoryMock.Setup(x => x.GetAllIncludingDeletedAsync()).ReturnsAsync(cards);
+        _ledgerRepositoryMock.Setup(x => x.GetExistingLedgerKeysAsync(It.IsAny<IEnumerable<string>>()))
+            .ReturnsAsync(new HashSet<(string, DateTime, string, int, int, int)>());
+
+        // DB上の直前残高: 1200円
+        _ledgerRepositoryMock.Setup(x => x.GetLatestBeforeDateAsync("0123456789ABCDEF", It.IsAny<DateTime>()))
+            .ReturnsAsync(new Ledger { CardIdm = "0123456789ABCDEF", Balance = 1200, Date = new DateTime(2024, 1, 14) });
+
+        // Act
+        var result = await _service.PreviewLedgersAsync(filePath);
+
+        // Assert
+        result.IsValid.Should().BeFalse();
+        result.ErrorCount.Should().Be(1);
+        result.Errors.Should().Contain(e => e.Message.Contains("残高が一致しません"));
+        result.Errors.Should().Contain(e => e.Message.Contains("期待値: 1000円"));
+        result.Errors.Should().Contain(e => e.Message.Contains("前回残高（DB）: 1200円"));
+    }
+
+    /// <summary>
+    /// DB上に直前レコードがない場合（新規カード）、最初の行はチェックしない
+    /// </summary>
+    [Fact]
+    public async Task PreviewLedgersAsync_DB直前レコードなし_最初の行スキップ()
+    {
+        // Arrange: DBに直前残高なし → 最初の行は検証不可
+        var csvContent = @"日時,カードIDm,管理番号,摘要,受入金額,払出金額,残額,利用者,備考
+2024-01-15 10:00:00,0123456789ABCDEF,001,鉄道（A駅～B駅）,,200,999,山田太郎,
+2024-01-16 10:00:00,0123456789ABCDEF,001,鉄道（B駅～C駅）,,100,899,山田太郎,";
+
+        var filePath = Path.Combine(_testDirectory, "ledgers_first_row_no_db.csv");
+        await Task.Run(() => File.WriteAllText(filePath, csvContent, CsvEncoding));
+
+        var cards = new List<IcCard>
+        {
+            new IcCard { CardIdm = "0123456789ABCDEF", CardType = "Suica", CardNumber = "001" }
+        };
+        _cardRepositoryMock.Setup(x => x.GetAllIncludingDeletedAsync()).ReturnsAsync(cards);
+        _ledgerRepositoryMock.Setup(x => x.GetExistingLedgerKeysAsync(It.IsAny<IEnumerable<string>>()))
+            .ReturnsAsync(new HashSet<(string, DateTime, string, int, int, int)>());
+
+        // DB上に直前レコードなし（デフォルトでnullを返す）
+
+        // Act
+        var result = await _service.PreviewLedgersAsync(filePath);
+
+        // Assert: 2行目のチェーンは正しいのでOK（999 - 100 = 899）
+        result.IsValid.Should().BeTrue();
+        result.ErrorCount.Should().Be(0);
+    }
+
+    /// <summary>
+    /// チャージ（受入金額あり）の最初の行がDB直前残高と整合すること
+    /// </summary>
+    [Fact]
+    public async Task PreviewLedgersAsync_チャージの最初の行がDB直前残高と整合()
+    {
+        // Arrange: DB上の直前残高は200円
+        // CSV1行目: 受入=1000(チャージ), 払出=0, 残額=1200 → 期待: 200 + 1000 - 0 = 1200 ✓
+        var csvContent = @"日時,カードIDm,管理番号,摘要,受入金額,払出金額,残額,利用者,備考
+2024-01-15 10:00:00,0123456789ABCDEF,001,役務費によりチャージ,1000,,1200,山田太郎,";
+
+        var filePath = Path.Combine(_testDirectory, "ledgers_first_row_charge.csv");
+        await Task.Run(() => File.WriteAllText(filePath, csvContent, CsvEncoding));
+
+        var cards = new List<IcCard>
+        {
+            new IcCard { CardIdm = "0123456789ABCDEF", CardType = "Suica", CardNumber = "001" }
+        };
+        _cardRepositoryMock.Setup(x => x.GetAllIncludingDeletedAsync()).ReturnsAsync(cards);
+        _ledgerRepositoryMock.Setup(x => x.GetExistingLedgerKeysAsync(It.IsAny<IEnumerable<string>>()))
+            .ReturnsAsync(new HashSet<(string, DateTime, string, int, int, int)>());
+
+        _ledgerRepositoryMock.Setup(x => x.GetLatestBeforeDateAsync("0123456789ABCDEF", It.IsAny<DateTime>()))
+            .ReturnsAsync(new Ledger { CardIdm = "0123456789ABCDEF", Balance = 200, Date = new DateTime(2024, 1, 14) });
+
+        // Act
+        var result = await _service.PreviewLedgersAsync(filePath);
+
+        // Assert
+        result.IsValid.Should().BeTrue();
+    }
+
+    /// <summary>
+    /// インポート時にも最初の行のDB直前残高チェックが動作すること
+    /// </summary>
+    [Fact]
+    public async Task ImportLedgersAsync_最初の行がDB直前残高と不整合_エラー()
+    {
+        // Arrange: DB上の直前残高は5000円
+        // CSV1行目: 受入=0, 払出=260, 残額=4000 → 期待: 5000 + 0 - 260 = 4740 ≠ 4000 ✗
+        var csvContent = @"日時,カードIDm,管理番号,摘要,受入金額,払出金額,残額,利用者,備考
+2024-01-15 10:00:00,0123456789ABCDEF,001,鉄道（博多～天神）,,260,4000,山田太郎,";
+
+        var filePath = Path.Combine(_testDirectory, "import_first_row_db_invalid.csv");
+        await Task.Run(() => File.WriteAllText(filePath, csvContent, CsvEncoding));
+
+        var cards = new List<IcCard>
+        {
+            new IcCard { CardIdm = "0123456789ABCDEF", CardType = "はやかけん", CardNumber = "001" }
+        };
+        _cardRepositoryMock.Setup(x => x.GetAllIncludingDeletedAsync()).ReturnsAsync(cards);
+
+        _ledgerRepositoryMock.Setup(x => x.GetLatestBeforeDateAsync("0123456789ABCDEF", It.IsAny<DateTime>()))
+            .ReturnsAsync(new Ledger { CardIdm = "0123456789ABCDEF", Balance = 5000, Date = new DateTime(2024, 1, 14) });
+
+        // Act
+        var result = await _service.ImportLedgersAsync(filePath);
+
+        // Assert
+        result.Success.Should().BeFalse();
+        result.Errors.Should().Contain(e => e.Message.Contains("残高が一致しません"));
+        result.Errors.Should().Contain(e => e.Message.Contains("前回残高（DB）: 5000円"));
+    }
+
+    #endregion
+
     #region Issue #639: 繰越レコードの金額変更インポートテスト
 
     /// <summary>

@@ -1147,9 +1147,17 @@ namespace ICCardManager.Services
                     allRecordsForValidation.Add((lineNumber, ledger, isUpdate));
                 }
 
+                // Issue #907: カードごとにDB上の直前残高を取得（最初の行の整合性チェック用）
+                var previousBalanceByCard = await GetPreviousBalanceByCardAsync(allRecordsForValidation
+                    .GroupBy(r => r.Ledger.CardIdm, StringComparer.OrdinalIgnoreCase)
+                    .ToDictionary(
+                        g => g.Key,
+                        g => g.Min(r => r.Ledger.Date)));
+
                 // Issue #754: 残高整合性チェックはスキップ分を含む全レコードで実施
                 // （スキップされたレコードを除外すると前後関係が崩れ、誤った前回残高でエラーになる）
-                ValidateBalanceConsistencyForLedgers(allRecordsForValidation, errors);
+                // Issue #907: 最初の行もDB上の直前残高と照合
+                ValidateBalanceConsistencyForLedgers(allRecordsForValidation, errors, previousBalanceByCard);
 
                 // バリデーションエラーがあれば中断
                 if (errors.Count > 0)
@@ -1488,8 +1496,16 @@ namespace ICCardManager.Services
                     validatedRecords.Add((lineNumber, ledgerId, cardIdm, date, summary, income, expense, balance, staffName, note));
                 }
 
+                // Issue #907: カードごとにDB上の直前残高を取得（最初の行の整合性チェック用）
+                var previousBalanceByCard = await GetPreviousBalanceByCardAsync(validatedRecords
+                    .GroupBy(r => r.CardIdm, StringComparer.OrdinalIgnoreCase)
+                    .ToDictionary(
+                        g => g.Key,
+                        g => g.Min(r => r.Date)));
+
                 // Issue #428: 金額の整合性チェック（カードごとに残高の連続性を検証）
-                ValidateBalanceConsistency(validatedRecords, errors);
+                // Issue #907: 最初の行もDB上の直前残高と照合
+                ValidateBalanceConsistency(validatedRecords, errors, previousBalanceByCard);
 
                 // Issue #334: 既存履歴の重複チェック用キーを取得（新規追加分のみ）
                 // Issue #903: skipExisting=falseの場合は重複チェックを行わない
@@ -2829,12 +2845,15 @@ namespace ICCardManager.Services
         /// 残高整合性チェック（プレビュー用）
         /// カードごとに日時順で残高の連続性を検証します。
         /// 計算式: 前の残高 + 受入金額 - 払出金額 = 今回の残高
+        /// Issue #907: 最初の行もDB上の直前残高と照合します。
         /// </summary>
         /// <param name="records">検証対象レコード（LineNumber, LedgerId, CardIdm, Date, Summary, Income, Expense, Balance, StaffName, Note）</param>
         /// <param name="errors">エラーリスト</param>
-        private static void ValidateBalanceConsistency(
+        /// <param name="previousBalanceByCard">カードIDmごとのDB上の直前残高（存在しない場合はキーなし）</param>
+        internal static void ValidateBalanceConsistency(
             List<(int LineNumber, int? LedgerId, string CardIdm, DateTime Date, string Summary, int Income, int Expense, int Balance, string StaffName, string Note)> records,
-            List<CsvImportError> errors)
+            List<CsvImportError> errors,
+            Dictionary<string, int> previousBalanceByCard = null)
         {
             if (records.Count == 0) return;
 
@@ -2847,6 +2866,24 @@ namespace ICCardManager.Services
             {
                 var cardIdm = kvp.Key;
                 var cardRecords = kvp.Value;
+
+                // Issue #907: 最初の行をDB上の直前残高と照合
+                if (cardRecords.Count > 0 && previousBalanceByCard != null &&
+                    previousBalanceByCard.TryGetValue(cardIdm.ToUpperInvariant(), out var prevDbBalance))
+                {
+                    var firstRecord = cardRecords[0];
+                    var expectedBalance = prevDbBalance + firstRecord.Income - firstRecord.Expense;
+                    if (expectedBalance != firstRecord.Balance)
+                    {
+                        errors.Add(new CsvImportError
+                        {
+                            LineNumber = firstRecord.LineNumber,
+                            Message = $"残高が一致しません（期待値: {expectedBalance}円、実際: {firstRecord.Balance}円）。" +
+                                      $"前回残高（DB）: {prevDbBalance}円 + 受入: {firstRecord.Income}円 - 払出: {firstRecord.Expense}円",
+                            Data = cardIdm
+                        });
+                    }
+                }
 
                 for (var i = 1; i < cardRecords.Count; i++)
                 {
@@ -2874,12 +2911,15 @@ namespace ICCardManager.Services
         /// 残高整合性チェック（インポート用）
         /// カードごとに日時順で残高の連続性を検証します。
         /// 計算式: 前の残高 + 受入金額 - 払出金額 = 今回の残高
+        /// Issue #907: 最初の行もDB上の直前残高と照合します。
         /// </summary>
         /// <param name="records">検証対象レコード（LineNumber, Ledger, IsUpdate）</param>
         /// <param name="errors">エラーリスト</param>
-        private static void ValidateBalanceConsistencyForLedgers(
+        /// <param name="previousBalanceByCard">カードIDmごとのDB上の直前残高（存在しない場合はキーなし）</param>
+        internal static void ValidateBalanceConsistencyForLedgers(
             List<(int LineNumber, Ledger Ledger, bool IsUpdate)> records,
-            List<CsvImportError> errors)
+            List<CsvImportError> errors,
+            Dictionary<string, int> previousBalanceByCard = null)
         {
             if (records.Count == 0) return;
 
@@ -2892,6 +2932,24 @@ namespace ICCardManager.Services
             {
                 var cardIdm = kvp.Key;
                 var cardRecords = kvp.Value;
+
+                // Issue #907: 最初の行をDB上の直前残高と照合
+                if (cardRecords.Count > 0 && previousBalanceByCard != null &&
+                    previousBalanceByCard.TryGetValue(cardIdm.ToUpperInvariant(), out var prevDbBalance))
+                {
+                    var firstRecord = cardRecords[0];
+                    var expectedBalance = prevDbBalance + firstRecord.Ledger.Income - firstRecord.Ledger.Expense;
+                    if (expectedBalance != firstRecord.Ledger.Balance)
+                    {
+                        errors.Add(new CsvImportError
+                        {
+                            LineNumber = firstRecord.LineNumber,
+                            Message = $"残高が一致しません（期待値: {expectedBalance}円、実際: {firstRecord.Ledger.Balance}円）。" +
+                                      $"前回残高（DB）: {prevDbBalance}円 + 受入: {firstRecord.Ledger.Income}円 - 払出: {firstRecord.Ledger.Expense}円",
+                            Data = cardIdm
+                        });
+                    }
+                }
 
                 for (var i = 1; i < cardRecords.Count; i++)
                 {
@@ -2913,6 +2971,33 @@ namespace ICCardManager.Services
                     }
                 }
             }
+        }
+
+        /// <summary>
+        /// Issue #907: カードごとにDB上の直前残高を取得する
+        /// CSVの各カードの最も古い日付より前のledgerレコードの残高を返します。
+        /// DB上に該当レコードがない場合はキーに含まれません。
+        /// </summary>
+        /// <param name="earliestDateByCard">カードIDmごとのCSV内の最小日付</param>
+        /// <returns>カードIDm（大文字）→直前残高のディクショナリ</returns>
+        private async Task<Dictionary<string, int>> GetPreviousBalanceByCardAsync(
+            Dictionary<string, DateTime> earliestDateByCard)
+        {
+            var result = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var kvp in earliestDateByCard)
+            {
+                var cardIdm = kvp.Key;
+                var earliestDate = kvp.Value;
+
+                var previousLedger = await _ledgerRepository.GetLatestBeforeDateAsync(cardIdm, earliestDate);
+                if (previousLedger != null)
+                {
+                    result[cardIdm.ToUpperInvariant()] = previousLedger.Balance;
+                }
+            }
+
+            return result;
         }
 
         #endregion
