@@ -1684,4 +1684,242 @@ FEDCBA9876543210,鈴木花子,002,テスト2";
     }
 
     #endregion
+
+    #region Issue #906: 利用履歴詳細の利用履歴ID自動付与
+
+    /// <summary>
+    /// 利用履歴ID空欄のCSVでプレビューが新規作成として表示されること
+    /// </summary>
+    [Fact]
+    public async Task PreviewLedgerDetailsAsync_利用履歴ID空欄_新規作成としてプレビュー()
+    {
+        // Arrange
+        var csvContent = @"利用履歴ID,利用日時,カードIDm,管理番号,乗車駅,降車駅,バス停,金額,残額,チャージ,ポイント還元,バス利用,グループID
+,2024-01-15 10:30:00,0123456789ABCDEF,001,博多,天神,,260,9740,0,0,0,
+,2024-01-15 17:00:00,0123456789ABCDEF,001,天神,博多,,260,9480,0,0,0,";
+
+        var filePath = Path.Combine(_testDirectory, "details_auto_id_preview.csv");
+        await Task.Run(() => File.WriteAllText(filePath, csvContent, CsvEncoding));
+
+        _cardRepositoryMock.Setup(x => x.GetByIdmAsync("0123456789ABCDEF", true))
+            .ReturnsAsync(new IcCard { CardIdm = "0123456789ABCDEF", CardType = "はやかけん" });
+
+        // Act
+        var result = await _service.PreviewLedgerDetailsAsync(filePath);
+
+        // Assert
+        result.IsValid.Should().BeTrue();
+        result.NewCount.Should().Be(1);
+        result.Items.Should().HaveCount(1);
+        result.Items[0].Action.Should().Be(ImportAction.Insert);
+        result.Items[0].Idm.Should().Be("(自動付与)");
+        result.Items[0].Name.Should().Be("0123456789ABCDEF");
+        result.Items[0].AdditionalInfo.Should().Contain("2件");
+    }
+
+    /// <summary>
+    /// 利用履歴ID空欄でカードIDmも空欄の場合エラーになること
+    /// </summary>
+    [Fact]
+    public async Task PreviewLedgerDetailsAsync_利用履歴ID空欄_カードIDm空欄_エラー()
+    {
+        // Arrange
+        var csvContent = @"利用履歴ID,利用日時,カードIDm,管理番号,乗車駅,降車駅,バス停,金額,残額,チャージ,ポイント還元,バス利用,グループID
+,2024-01-15 10:30:00,,001,博多,天神,,260,9740,0,0,0,";
+
+        var filePath = Path.Combine(_testDirectory, "details_auto_id_no_card.csv");
+        await Task.Run(() => File.WriteAllText(filePath, csvContent, CsvEncoding));
+
+        // Act
+        var result = await _service.PreviewLedgerDetailsAsync(filePath);
+
+        // Assert
+        result.IsValid.Should().BeFalse();
+        result.Errors.Should().Contain(e => e.Message.Contains("カードIDmは必須です"));
+    }
+
+    /// <summary>
+    /// 利用履歴ID空欄で未登録カードIDmの場合エラーになること
+    /// </summary>
+    [Fact]
+    public async Task PreviewLedgerDetailsAsync_利用履歴ID空欄_未登録カード_エラー()
+    {
+        // Arrange
+        var csvContent = @"利用履歴ID,利用日時,カードIDm,管理番号,乗車駅,降車駅,バス停,金額,残額,チャージ,ポイント還元,バス利用,グループID
+,2024-01-15 10:30:00,FFFF456789ABCDEF,001,博多,天神,,260,9740,0,0,0,";
+
+        var filePath = Path.Combine(_testDirectory, "details_auto_id_unknown_card.csv");
+        await Task.Run(() => File.WriteAllText(filePath, csvContent, CsvEncoding));
+
+        _cardRepositoryMock.Setup(x => x.GetByIdmAsync("FFFF456789ABCDEF", true))
+            .ReturnsAsync((IcCard?)null);
+
+        // Act
+        var result = await _service.PreviewLedgerDetailsAsync(filePath);
+
+        // Assert
+        result.IsValid.Should().BeFalse();
+        result.Errors.Should().Contain(e => e.Message.Contains("登録されていません"));
+    }
+
+    /// <summary>
+    /// 利用履歴ID空欄のCSVでLedgerが自動作成されてインポートが成功すること
+    /// </summary>
+    [Fact]
+    public async Task ImportLedgerDetailsAsync_利用履歴ID空欄_Ledger自動作成()
+    {
+        // Arrange
+        var csvContent = @"利用履歴ID,利用日時,カードIDm,管理番号,乗車駅,降車駅,バス停,金額,残額,チャージ,ポイント還元,バス利用,グループID
+,2024-01-15 10:30:00,0123456789ABCDEF,001,博多,天神,,260,9740,0,0,0,
+,2024-01-15 17:00:00,0123456789ABCDEF,001,天神,博多,,260,9480,0,0,0,";
+
+        var filePath = Path.Combine(_testDirectory, "details_auto_id_import.csv");
+        await Task.Run(() => File.WriteAllText(filePath, csvContent, CsvEncoding));
+
+        _cardRepositoryMock.Setup(x => x.GetByIdmAsync("0123456789ABCDEF", true))
+            .ReturnsAsync(new IcCard { CardIdm = "0123456789ABCDEF", CardType = "はやかけん" });
+
+        // InsertAsyncで新しいledger IDとして100を返す
+        _ledgerRepositoryMock.Setup(x => x.InsertAsync(It.IsAny<Ledger>()))
+            .ReturnsAsync(100);
+        _ledgerRepositoryMock.Setup(x => x.InsertDetailsAsync(100, It.IsAny<IEnumerable<LedgerDetail>>()))
+            .ReturnsAsync(true);
+
+        // Act
+        var result = await _service.ImportLedgerDetailsAsync(filePath);
+
+        // Assert
+        result.Success.Should().BeTrue();
+        result.ImportedCount.Should().Be(2);
+
+        // Ledgerが自動作成されること
+        _ledgerRepositoryMock.Verify(x => x.InsertAsync(It.Is<Ledger>(l =>
+            l.CardIdm == "0123456789ABCDEF" &&
+            l.Expense == 520 &&
+            l.Balance == 9480)), Times.Once);
+
+        // 詳細が新しいledger IDで挿入されること
+        _ledgerRepositoryMock.Verify(x => x.InsertDetailsAsync(100,
+            It.Is<IEnumerable<LedgerDetail>>(d => d.Count() == 2)), Times.Once);
+    }
+
+    /// <summary>
+    /// 利用履歴ID空欄と既存IDの混在CSVが正しく処理されること
+    /// </summary>
+    [Fact]
+    public async Task ImportLedgerDetailsAsync_空欄IDと既存ID混在_両方処理()
+    {
+        // Arrange
+        var csvContent = @"利用履歴ID,利用日時,カードIDm,管理番号,乗車駅,降車駅,バス停,金額,残額,チャージ,ポイント還元,バス利用,グループID
+1,2024-01-15 10:30:00,0123456789ABCDEF,001,博多,天神,,260,9740,0,0,0,
+,2024-01-16 09:00:00,AAAA456789ABCDEF,002,天神,博多,,260,9480,0,0,0,";
+
+        var filePath = Path.Combine(_testDirectory, "details_mixed_ids.csv");
+        await Task.Run(() => File.WriteAllText(filePath, csvContent, CsvEncoding));
+
+        // 既存ledger
+        _ledgerRepositoryMock.Setup(x => x.GetByIdAsync(1)).ReturnsAsync(new Ledger
+        {
+            Id = 1, CardIdm = "0123456789ABCDEF", Date = new DateTime(2024, 1, 15),
+            Summary = "鉄道", Income = 0, Expense = 260, Balance = 9740
+        });
+        _ledgerRepositoryMock.Setup(x => x.ReplaceDetailsAsync(1, It.IsAny<IEnumerable<LedgerDetail>>()))
+            .ReturnsAsync(true);
+
+        // 新規カード
+        _cardRepositoryMock.Setup(x => x.GetByIdmAsync("AAAA456789ABCDEF", true))
+            .ReturnsAsync(new IcCard { CardIdm = "AAAA456789ABCDEF", CardType = "nimoca" });
+        _ledgerRepositoryMock.Setup(x => x.InsertAsync(It.IsAny<Ledger>()))
+            .ReturnsAsync(200);
+        _ledgerRepositoryMock.Setup(x => x.InsertDetailsAsync(200, It.IsAny<IEnumerable<LedgerDetail>>()))
+            .ReturnsAsync(true);
+
+        // Act
+        var result = await _service.ImportLedgerDetailsAsync(filePath);
+
+        // Assert
+        result.Success.Should().BeTrue();
+        result.ImportedCount.Should().Be(2);
+
+        // 既存ledgerは置換
+        _ledgerRepositoryMock.Verify(x => x.ReplaceDetailsAsync(1,
+            It.Is<IEnumerable<LedgerDetail>>(d => d.Count() == 1)), Times.Once);
+        // 新規ledgerは作成+挿入
+        _ledgerRepositoryMock.Verify(x => x.InsertAsync(It.Is<Ledger>(l =>
+            l.CardIdm == "AAAA456789ABCDEF")), Times.Once);
+        _ledgerRepositoryMock.Verify(x => x.InsertDetailsAsync(200,
+            It.Is<IEnumerable<LedgerDetail>>(d => d.Count() == 1)), Times.Once);
+    }
+
+    /// <summary>
+    /// 自動作成されるLedgerの摘要がSummaryGeneratorで生成されること
+    /// </summary>
+    [Fact]
+    public async Task ImportLedgerDetailsAsync_自動作成Ledgerの摘要が正しく生成される()
+    {
+        // Arrange: 博多→天神の片道利用
+        var csvContent = @"利用履歴ID,利用日時,カードIDm,管理番号,乗車駅,降車駅,バス停,金額,残額,チャージ,ポイント還元,バス利用,グループID
+,2024-01-15 10:30:00,0123456789ABCDEF,001,博多,天神,,260,9740,0,0,0,";
+
+        var filePath = Path.Combine(_testDirectory, "details_auto_summary.csv");
+        await Task.Run(() => File.WriteAllText(filePath, csvContent, CsvEncoding));
+
+        _cardRepositoryMock.Setup(x => x.GetByIdmAsync("0123456789ABCDEF", true))
+            .ReturnsAsync(new IcCard { CardIdm = "0123456789ABCDEF", CardType = "はやかけん" });
+
+        Ledger? capturedLedger = null;
+        _ledgerRepositoryMock.Setup(x => x.InsertAsync(It.IsAny<Ledger>()))
+            .Callback<Ledger>(l => capturedLedger = l)
+            .ReturnsAsync(100);
+        _ledgerRepositoryMock.Setup(x => x.InsertDetailsAsync(100, It.IsAny<IEnumerable<LedgerDetail>>()))
+            .ReturnsAsync(true);
+
+        // Act
+        var result = await _service.ImportLedgerDetailsAsync(filePath);
+
+        // Assert
+        result.Success.Should().BeTrue();
+        capturedLedger.Should().NotBeNull();
+        capturedLedger!.Summary.Should().Contain("鉄道");
+        capturedLedger.Summary.Should().Contain("博多");
+        capturedLedger.Summary.Should().Contain("天神");
+        capturedLedger.Date.Should().Be(new DateTime(2024, 1, 15, 10, 30, 0));
+    }
+
+    /// <summary>
+    /// チャージ行の利用履歴ID空欄でincomeが正しく計算されること
+    /// </summary>
+    [Fact]
+    public async Task ImportLedgerDetailsAsync_チャージ行_incomeが正しく計算()
+    {
+        // Arrange
+        var csvContent = @"利用履歴ID,利用日時,カードIDm,管理番号,乗車駅,降車駅,バス停,金額,残額,チャージ,ポイント還元,バス利用,グループID
+,2024-01-15 10:00:00,0123456789ABCDEF,001,,,,,10000,1,0,0,";
+
+        var filePath = Path.Combine(_testDirectory, "details_auto_charge.csv");
+        await Task.Run(() => File.WriteAllText(filePath, csvContent, CsvEncoding));
+
+        _cardRepositoryMock.Setup(x => x.GetByIdmAsync("0123456789ABCDEF", true))
+            .ReturnsAsync(new IcCard { CardIdm = "0123456789ABCDEF", CardType = "はやかけん" });
+
+        Ledger? capturedLedger = null;
+        _ledgerRepositoryMock.Setup(x => x.InsertAsync(It.IsAny<Ledger>()))
+            .Callback<Ledger>(l => capturedLedger = l)
+            .ReturnsAsync(100);
+        _ledgerRepositoryMock.Setup(x => x.InsertDetailsAsync(100, It.IsAny<IEnumerable<LedgerDetail>>()))
+            .ReturnsAsync(true);
+
+        // Act
+        var result = await _service.ImportLedgerDetailsAsync(filePath);
+
+        // Assert
+        result.Success.Should().BeTrue();
+        capturedLedger.Should().NotBeNull();
+        // チャージ行はAmountが空でBalanceが10000、IsCharge=1
+        // CalculateGroupFinancialsでチャージのAmountがnull→income=0
+        // ただしBalanceは10000
+        capturedLedger!.Balance.Should().Be(10000);
+    }
+
+    #endregion
 }
