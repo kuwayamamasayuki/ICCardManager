@@ -224,6 +224,40 @@ public partial class DataExportImportViewModel : ViewModelBase
     public bool IsLedgerImportSelected => SelectedImportType == DataType.Ledgers;
 
     /// <summary>
+    /// プレビューDataGridの列1ヘッダー（データ種別に応じて変化）
+    /// </summary>
+    public string PreviewColumn1Header => SelectedImportType switch
+    {
+        DataType.LedgerDetails => "利用履歴ID",
+        DataType.Ledgers => "カードIDm",
+        _ => "IDm"
+    };
+
+    /// <summary>
+    /// プレビューDataGridの列2ヘッダー（データ種別に応じて変化）
+    /// </summary>
+    public string PreviewColumn2Header => SelectedImportType switch
+    {
+        DataType.LedgerDetails => "カードIDm",
+        DataType.Ledgers => "摘要",
+        DataType.Cards => "カード種別",
+        DataType.Staff => "氏名",
+        _ => "名前"
+    };
+
+    /// <summary>
+    /// プレビューDataGridの列3ヘッダー（データ種別に応じて変化）
+    /// </summary>
+    public string PreviewColumn3Header => SelectedImportType switch
+    {
+        DataType.LedgerDetails => "詳細件数",
+        DataType.Ledgers => "日付",
+        DataType.Cards => "管理番号",
+        DataType.Staff => "職員番号",
+        _ => "追加情報"
+    };
+
+    /// <summary>
     /// インポート時に使用するターゲットカードIDmを取得
     /// </summary>
     /// <returns>選択またはタッチされたカードのIDm。未選択の場合はnull</returns>
@@ -290,6 +324,9 @@ public partial class DataExportImportViewModel : ViewModelBase
     partial void OnSelectedImportTypeChanged(DataType value)
     {
         OnPropertyChanged(nameof(IsLedgerImportSelected));
+        OnPropertyChanged(nameof(PreviewColumn1Header));
+        OnPropertyChanged(nameof(PreviewColumn2Header));
+        OnPropertyChanged(nameof(PreviewColumn3Header));
 
         // 利用履歴以外が選択された場合、カード指定をクリア
         if (value != DataType.Ledgers)

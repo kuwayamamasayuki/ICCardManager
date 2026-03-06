@@ -430,9 +430,27 @@
                       AutomationProperties.Name="インポートプレビュー一覧">
                 <DataGrid.Columns>
                     <DataGridTextColumn Header="行" Binding="{Binding LineNumber}" Width="50"/>
-                    <DataGridTextColumn Header="IDm" Binding="{Binding Idm}" Width="140"/>
-                    <DataGridTextColumn Header="名前" Binding="{Binding Name}" Width="120"/>
-                    <DataGridTextColumn Header="追加情報" Binding="{Binding AdditionalInfo}" Width="100"/>
+                    <DataGridTextColumn Binding="{Binding Idm}" Width="140">
+                        <DataGridTextColumn.HeaderTemplate>
+                            <DataTemplate>
+                                <TextBlock Text="{Binding DataContext.PreviewColumn1Header, RelativeSource={RelativeSource AncestorType=DataGrid}}"/>
+                            </DataTemplate>
+                        </DataGridTextColumn.HeaderTemplate>
+                    </DataGridTextColumn>
+                    <DataGridTextColumn Binding="{Binding Name}" Width="120">
+                        <DataGridTextColumn.HeaderTemplate>
+                            <DataTemplate>
+                                <TextBlock Text="{Binding DataContext.PreviewColumn2Header, RelativeSource={RelativeSource AncestorType=DataGrid}}"/>
+                            </DataTemplate>
+                        </DataGridTextColumn.HeaderTemplate>
+                    </DataGridTextColumn>
+                    <DataGridTextColumn Binding="{Binding AdditionalInfo}" Width="100">
+                        <DataGridTextColumn.HeaderTemplate>
+                            <DataTemplate>
+                                <TextBlock Text="{Binding DataContext.PreviewColumn3Header, RelativeSource={RelativeSource AncestorType=DataGrid}}"/>
+                            </DataTemplate>
+                        </DataGridTextColumn.HeaderTemplate>
+                    </DataGridTextColumn>
                     <DataGridTemplateColumn Header="アクション" Width="80">
                         <DataGridTemplateColumn.CellTemplate>
                             <DataTemplate>
