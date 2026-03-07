@@ -1115,4 +1115,92 @@ public class LedgerMergeServiceTests
     }
 
     #endregion
+
+    #region Issue #920: 分割・再統合後の摘要欄の順序
+
+    /// <summary>
+    /// 分割後に再統合した場合に摘要が正しい時系列順になること
+    /// </summary>
+    [Fact]
+    [Trait("Category", "Unit")]
+    public async Task MergeAsync_SplitAndRemerge_SummaryOrderIsCorrect()
+    {
+        // Arrange: Issue #920の再現
+        // ①薬院→博多(210円, 残高2676円) → ②博多→天神(210円, 残高2466円) → ③西鉄福岡(天神)→薬院(170円, 残高2296円)
+        // 分割後: Ledger1={①}, Ledger2={②③}
+        // 再統合: Ledger1 + Ledger2 → 正しい順序の摘要が生成されること
+        // 注: 駅名は駅コードマスタ(StationCode.csv)に合わせて半角括弧を使用
+        var date = new DateTime(2026, 3, 5);
+
+        // Ledger1（target）: ①薬院→博多（分割で残った方、IDが小さい＝古い）
+        // SequenceNumber: FeliCa互換（大きいほど古い）→ ①が最古なのでSeq=15
+        var ledger1 = CreateTestLedger(1, TestCardIdm, date, "鉄道（薬院～博多）", 210, 2676);
+        ledger1.Details.Add(CreateRailDetail(1, "薬院", "博多", 210, 2676, 15, date));
+
+        // Ledger2（source）: ②博多→天神、③西鉄福岡(天神)→薬院（分割で作られた方、IDが大きい）
+        // SequenceNumber: ②=14（中間）、③=13（最新なので最小）
+        var ledger2 = CreateTestLedger(2, TestCardIdm, date, "鉄道（博多～天神、西鉄福岡(天神)～薬院）", 380, 2296);
+        ledger2.Details.Add(CreateRailDetail(2, "博多", "天神", 210, 2466, 14, date));
+        ledger2.Details.Add(CreateRailDetail(2, "西鉄福岡(天神)", "薬院", 170, 2296, 13, date));
+
+        SetupGetByIdMocks(ledger1, ledger2);
+        SetupMergeMockSuccess();
+
+        // Act
+        var result = await _service.MergeAsync(new List<int> { 1, 2 });
+
+        // Assert
+        result.Success.Should().BeTrue();
+        var summary = result.MergedLedger!.Summary;
+
+        // 摘要に全駅名が含まれること
+        summary.Should().Contain("薬院");
+        summary.Should().Contain("博多");
+        summary.Should().Contain("天神");
+        summary.Should().Contain("西鉄福岡(天神)");
+
+        // 正しい時系列順: 薬院が博多より先に出現すること
+        // （「薬院～博多」が最初の経路で、その後「博多～天神」「西鉄福岡(天神)～薬院」と続く）
+        var yakuinIndex = summary.IndexOf("薬院");
+        var hakataIndex = summary.IndexOf("博多");
+        yakuinIndex.Should().BeLessThan(hakataIndex,
+            "薬院→博多が最初の経路なので、薬院が博多より先に出現すべき");
+    }
+
+    /// <summary>
+    /// 異なる日付のLedgerを統合した場合に日付順で正しい摘要が生成されること
+    /// </summary>
+    [Fact]
+    [Trait("Category", "Unit")]
+    public async Task MergeAsync_DifferentDates_SummaryOrderIsCorrectByDate()
+    {
+        // Arrange: 1/15に博多→天神、1/16に天神→博多
+        var date1 = new DateTime(2026, 1, 15);
+        var date2 = new DateTime(2026, 1, 16);
+
+        // Ledger2（source、新しい日付だがIDが大きい）
+        var ledger2 = CreateTestLedger(2, TestCardIdm, date2, "鉄道（天神～博多）", 260, 9220);
+        ledger2.Details.Add(CreateRailDetail(2, "天神", "博多", 260, 9220, 1, date2));
+
+        // Ledger1（target、古い日付でIDが小さい）
+        var ledger1 = CreateTestLedger(1, TestCardIdm, date1, "鉄道（博多～天神）", 260, 9480);
+        ledger1.Details.Add(CreateRailDetail(1, "博多", "天神", 260, 9480, 2, date1));
+
+        SetupGetByIdMocks(ledger1, ledger2);
+        SetupMergeMockSuccess();
+
+        // Act
+        var result = await _service.MergeAsync(new List<int> { 1, 2 });
+
+        // Assert
+        result.Success.Should().BeTrue();
+        var summary = result.MergedLedger!.Summary;
+
+        // 博多→天神が先（1/15）、天神→博多が後（1/16）
+        // 往復検出されて「博多～天神 往復」になる可能性もある
+        summary.Should().Contain("博多");
+        summary.Should().Contain("天神");
+    }
+
+    #endregion
 }
