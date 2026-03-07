@@ -2089,6 +2089,21 @@ namespace ICCardManager.Services
 
                     if (success)
                     {
+                        // Issue #918: 詳細置換後、親Ledgerの金額を再計算して更新
+                        var ledger = await _ledgerRepository.GetByIdAsync(ledgerId);
+                        if (ledger != null)
+                        {
+                            var summaryGenerator = new SummaryGenerator();
+                            var summary = summaryGenerator.Generate(newDetails);
+                            var (income, expense, balance) = LedgerSplitService.CalculateGroupFinancials(newDetails);
+
+                            ledger.Summary = !string.IsNullOrEmpty(summary) ? summary : ledger.Summary;
+                            ledger.Income = income;
+                            ledger.Expense = expense;
+                            ledger.Balance = balance;
+                            await _ledgerRepository.UpdateAsync(ledger);
+                        }
+
                         importedCount += detailRows.Count;
                     }
                     else
