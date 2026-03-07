@@ -1673,8 +1673,9 @@ namespace ICCardManager.Services
             var existingDetailsByLedgerId = new Dictionary<int, List<LedgerDetail>>();
             // ledger_idからカードIDmへのマッピング（プレビュー表示用）
             var ledgerCardIdmMap = new Dictionary<int, string>();
-            // Issue #906: 利用履歴ID空欄の新規詳細をカードIDmごとにグループ化
-            var newDetailsByCardIdm = new Dictionary<string, List<(int LineNumber, LedgerDetail Detail)>>();
+            // Issue #906: 利用履歴ID空欄の新規詳細をカードIDm＋日付ごとにグループ化
+            // Issue #918: カードIDmだけでなく日付でもグループ化し、日付ごとに個別のLedgerを作成
+            var newDetailsByCardIdmAndDate = new Dictionary<(string CardIdm, DateTime Date), List<(int LineNumber, LedgerDetail Detail)>>();
 
             for (var i = 1; i < lines.Count; i++)
             {
@@ -1728,11 +1729,14 @@ namespace ICCardManager.Services
                         continue;
                     }
 
-                    if (!newDetailsByCardIdm.ContainsKey(cardIdm))
+                    // Issue #918: 日付でもグループ化（日付がない場合はDateTime.MinValueをキーにする）
+                    var dateKey = detail.UseDate?.Date ?? DateTime.MinValue;
+                    var groupKey = (cardIdm, dateKey);
+                    if (!newDetailsByCardIdmAndDate.ContainsKey(groupKey))
                     {
-                        newDetailsByCardIdm[cardIdm] = new List<(int, LedgerDetail)>();
+                        newDetailsByCardIdmAndDate[groupKey] = new List<(int, LedgerDetail)>();
                     }
-                    newDetailsByCardIdm[cardIdm].Add((lineNumber, detail));
+                    newDetailsByCardIdmAndDate[groupKey].Add((lineNumber, detail));
                     continue;
                 }
 
@@ -1762,17 +1766,20 @@ namespace ICCardManager.Services
             }
 
             // Issue #906: 新規詳細（利用履歴ID空欄）のプレビューアイテム生成
-            foreach (var kvp in newDetailsByCardIdm.OrderBy(x => x.Key))
+            // Issue #918: カードIDm＋日付ごとにグループ化して表示
+            foreach (var kvp in newDetailsByCardIdmAndDate.OrderBy(x => x.Key.CardIdm).ThenBy(x => x.Key.Date))
             {
-                var cardIdm = kvp.Key;
+                var cardIdm = kvp.Key.CardIdm;
+                var date = kvp.Key.Date;
                 var detailRows = kvp.Value;
+                var dateStr = date == DateTime.MinValue ? "" : $" ({date:yyyy-MM-dd})";
 
                 items.Add(new CsvImportPreviewItem
                 {
                     LineNumber = detailRows.First().LineNumber,
                     Idm = "(自動付与)",
                     Name = cardIdm,
-                    AdditionalInfo = $"{detailRows.Count}件",
+                    AdditionalInfo = $"{detailRows.Count}件{dateStr}",
                     Action = ImportAction.Insert,
                     Changes = new List<FieldChange>()
                 });
@@ -1866,8 +1873,9 @@ namespace ICCardManager.Services
             var detailsByLedgerId = new Dictionary<int, List<(int LineNumber, LedgerDetail Detail)>>();
             // 既存の詳細をキャッシュ（変更検出用）
             var existingDetailsByLedgerId = new Dictionary<int, List<LedgerDetail>>();
-            // Issue #906: 利用履歴ID空欄の新規詳細をカードIDmごとにグループ化
-            var newDetailsByCardIdm = new Dictionary<string, List<(int LineNumber, LedgerDetail Detail)>>();
+            // Issue #906: 利用履歴ID空欄の新規詳細をカードIDm＋日付ごとにグループ化
+            // Issue #918: カードIDmだけでなく日付でもグループ化し、日付ごとに個別のLedgerを作成
+            var newDetailsByCardIdmAndDate = new Dictionary<(string CardIdm, DateTime Date), List<(int LineNumber, LedgerDetail Detail)>>();
 
             for (var i = 1; i < lines.Count; i++)
             {
@@ -1921,11 +1929,14 @@ namespace ICCardManager.Services
                         continue;
                     }
 
-                    if (!newDetailsByCardIdm.ContainsKey(cardIdm))
+                    // Issue #918: 日付でもグループ化（日付がない場合はDateTime.MinValueをキーにする）
+                    var dateKey = detail.UseDate?.Date ?? DateTime.MinValue;
+                    var groupKey = (cardIdm, dateKey);
+                    if (!newDetailsByCardIdmAndDate.ContainsKey(groupKey))
                     {
-                        newDetailsByCardIdm[cardIdm] = new List<(int, LedgerDetail)>();
+                        newDetailsByCardIdmAndDate[groupKey] = new List<(int, LedgerDetail)>();
                     }
-                    newDetailsByCardIdm[cardIdm].Add((lineNumber, detail));
+                    newDetailsByCardIdmAndDate[groupKey].Add((lineNumber, detail));
                     continue;
                 }
 
@@ -1966,7 +1977,7 @@ namespace ICCardManager.Services
             }
 
             // データがない場合
-            if (detailsByLedgerId.Count == 0 && newDetailsByCardIdm.Count == 0)
+            if (detailsByLedgerId.Count == 0 && newDetailsByCardIdmAndDate.Count == 0)
             {
                 return new CsvImportResult
                 {
@@ -1976,9 +1987,10 @@ namespace ICCardManager.Services
             }
 
             // Issue #906: 新規詳細（利用履歴ID空欄）のLedger自動作成とインポート
-            foreach (var kvp in newDetailsByCardIdm)
+            // Issue #918: カードIDm＋日付ごとにグループ化して個別のLedgerを作成
+            foreach (var kvp in newDetailsByCardIdmAndDate)
             {
-                var cardIdm = kvp.Key;
+                var cardIdm = kvp.Key.CardIdm;
                 var detailRows = kvp.Value;
                 var firstLineNumber = detailRows.First().LineNumber;
                 var detailList = detailRows.Select(r => r.Detail).ToList();
@@ -1996,15 +2008,19 @@ namespace ICCardManager.Services
                     // LedgerSplitServiceと同じロジックで収支・残高を計算
                     var (income, expense, balance) = LedgerSplitService.CalculateGroupFinancials(detailList);
 
-                    // 日付は最も古い利用日時、なければ現在日時
-                    var date = detailList
-                        .Where(d => d.UseDate.HasValue)
-                        .OrderBy(d => d.UseDate!.Value)
-                        .Select(d => d.UseDate!.Value)
-                        .FirstOrDefault();
-                    if (date == default)
+                    // 日付はグループのキーから取得、DateTime.MinValueの場合は最も古い利用日時、なければ現在日時
+                    var date = kvp.Key.Date;
+                    if (date == DateTime.MinValue)
                     {
-                        date = DateTime.Now;
+                        date = detailList
+                            .Where(d => d.UseDate.HasValue)
+                            .OrderBy(d => d.UseDate!.Value)
+                            .Select(d => d.UseDate!.Value)
+                            .FirstOrDefault();
+                        if (date == default)
+                        {
+                            date = DateTime.Now;
+                        }
                     }
 
                     // Ledgerレコードを自動作成
