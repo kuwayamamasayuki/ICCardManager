@@ -1886,6 +1886,8 @@ FEDCBA9876543210,鈴木花子,002,テスト2";
         result.Items[0].Idm.Should().Be("(自動付与)");
         result.Items[0].Name.Should().Be("0123456789ABCDEF");
         result.Items[0].AdditionalInfo.Should().Contain("2件");
+        // Issue #918: 日付情報も表示される
+        result.Items[0].AdditionalInfo.Should().Contain("2024-01-15");
     }
 
     /// <summary>
@@ -2054,7 +2056,8 @@ FEDCBA9876543210,鈴木花子,002,テスト2";
         capturedLedger!.Summary.Should().Contain("鉄道");
         capturedLedger.Summary.Should().Contain("博多");
         capturedLedger.Summary.Should().Contain("天神");
-        capturedLedger.Date.Should().Be(new DateTime(2024, 1, 15, 10, 30, 0));
+        // Issue #918: 日付でグループ化するため、Date部分のみ（時刻なし）
+        capturedLedger.Date.Date.Should().Be(new DateTime(2024, 1, 15));
     }
 
     /// <summary>
@@ -2090,6 +2093,176 @@ FEDCBA9876543210,鈴木花子,002,テスト2";
         // CalculateGroupFinancialsでチャージのAmountがnull→income=0
         // ただしBalanceは10000
         capturedLedger!.Balance.Should().Be(10000);
+    }
+
+    #endregion
+
+    #region Issue #918: 利用履歴詳細インポート時の日付グループ化・金額更新
+
+    /// <summary>
+    /// 既存Ledgerの詳細を置換した際に親Ledgerの金額が再計算されること
+    /// </summary>
+    [Fact]
+    public async Task ImportLedgerDetailsAsync_既存Ledger詳細置換_親Ledgerの金額が再計算される()
+    {
+        // Arrange: 既存Ledgerの詳細を金額変更して再インポート
+        var csvContent = @"利用履歴ID,利用日時,カードIDm,管理番号,乗車駅,降車駅,バス停,金額,残額,チャージ,ポイント還元,バス利用,グループID
+1,2024-01-15 10:30:00,0123456789ABCDEF,001,博多,天神,,300,9700,0,0,0,
+1,2024-01-15 17:00:00,0123456789ABCDEF,001,天神,博多,,300,9400,0,0,0,";
+
+        var filePath = Path.Combine(_testDirectory, "details_update_ledger_amounts.csv");
+        await Task.Run(() => File.WriteAllText(filePath, csvContent, CsvEncoding));
+
+        // 既存Ledger（元は260円×2=520円）
+        var existingLedger = new Ledger
+        {
+            Id = 1, CardIdm = "0123456789ABCDEF", Date = new DateTime(2024, 1, 15),
+            Summary = "鉄道（博多～天神 往復）", Income = 0, Expense = 520, Balance = 9480
+        };
+        _ledgerRepositoryMock.Setup(x => x.GetByIdAsync(1)).ReturnsAsync(existingLedger);
+        _ledgerRepositoryMock.Setup(x => x.ReplaceDetailsAsync(1, It.IsAny<IEnumerable<LedgerDetail>>()))
+            .ReturnsAsync(true);
+        _ledgerRepositoryMock.Setup(x => x.UpdateAsync(It.IsAny<Ledger>()))
+            .ReturnsAsync(true);
+
+        // Act
+        var result = await _service.ImportLedgerDetailsAsync(filePath);
+
+        // Assert
+        result.Success.Should().BeTrue();
+        result.ImportedCount.Should().Be(2);
+
+        // 親Ledgerが更新され、金額が300×2=600に再計算されること
+        _ledgerRepositoryMock.Verify(x => x.UpdateAsync(It.Is<Ledger>(l =>
+            l.Id == 1 &&
+            l.Expense == 600 &&
+            l.Balance == 9400)), Times.Once);
+    }
+
+    /// <summary>
+    /// 異なる日付の利用履歴ID空欄行が日付ごとに別のプレビューアイテムとして表示されること
+    /// </summary>
+    [Fact]
+    public async Task PreviewLedgerDetailsAsync_異なる日付の空欄ID行_日付ごとに別プレビュー()
+    {
+        // Arrange: 同一カードで3日分の履歴（利用履歴ID空欄）
+        var csvContent = @"利用履歴ID,利用日時,カードIDm,管理番号,乗車駅,降車駅,バス停,金額,残額,チャージ,ポイント還元,バス利用,グループID
+,2024-01-15 10:30:00,0123456789ABCDEF,001,博多,天神,,260,9740,0,0,0,
+,2024-01-15 17:00:00,0123456789ABCDEF,001,天神,博多,,260,9480,0,0,0,
+,2024-01-16 08:30:00,0123456789ABCDEF,001,博多,天神,,260,9220,0,0,0,
+,2024-01-17 09:00:00,0123456789ABCDEF,001,博多,天神,,260,8960,0,0,0,
+,2024-01-17 18:00:00,0123456789ABCDEF,001,天神,博多,,260,8700,0,0,0,";
+
+        var filePath = Path.Combine(_testDirectory, "details_multi_date_preview.csv");
+        await Task.Run(() => File.WriteAllText(filePath, csvContent, CsvEncoding));
+
+        _cardRepositoryMock.Setup(x => x.GetByIdmAsync("0123456789ABCDEF", true))
+            .ReturnsAsync(new IcCard { CardIdm = "0123456789ABCDEF", CardType = "はやかけん" });
+
+        // Act
+        var result = await _service.PreviewLedgerDetailsAsync(filePath);
+
+        // Assert
+        result.IsValid.Should().BeTrue();
+        // 3日分なので3つのプレビューアイテム
+        result.NewCount.Should().Be(3);
+        result.Items.Should().HaveCount(3);
+
+        // 日付順にソートされていること
+        result.Items[0].AdditionalInfo.Should().Contain("2件").And.Contain("2024-01-15");
+        result.Items[1].AdditionalInfo.Should().Contain("1件").And.Contain("2024-01-16");
+        result.Items[2].AdditionalInfo.Should().Contain("2件").And.Contain("2024-01-17");
+    }
+
+    /// <summary>
+    /// 異なる日付の利用履歴ID空欄行が日付ごとに別のLedgerとして作成されること
+    /// </summary>
+    [Fact]
+    public async Task ImportLedgerDetailsAsync_異なる日付の空欄ID行_日付ごとに別Ledger作成()
+    {
+        // Arrange: 同一カードで2日分の履歴（利用履歴ID空欄）
+        var csvContent = @"利用履歴ID,利用日時,カードIDm,管理番号,乗車駅,降車駅,バス停,金額,残額,チャージ,ポイント還元,バス利用,グループID
+,2024-01-15 10:30:00,0123456789ABCDEF,001,博多,天神,,260,9740,0,0,0,
+,2024-01-15 17:00:00,0123456789ABCDEF,001,天神,博多,,260,9480,0,0,0,
+,2024-01-16 08:30:00,0123456789ABCDEF,001,博多,天神,,260,9220,0,0,0,";
+
+        var filePath = Path.Combine(_testDirectory, "details_multi_date_import.csv");
+        await Task.Run(() => File.WriteAllText(filePath, csvContent, CsvEncoding));
+
+        _cardRepositoryMock.Setup(x => x.GetByIdmAsync("0123456789ABCDEF", true))
+            .ReturnsAsync(new IcCard { CardIdm = "0123456789ABCDEF", CardType = "はやかけん" });
+
+        var capturedLedgers = new List<Ledger>();
+        var ledgerIdCounter = 100;
+        _ledgerRepositoryMock.Setup(x => x.InsertAsync(It.IsAny<Ledger>()))
+            .Callback<Ledger>(l => capturedLedgers.Add(l))
+            .ReturnsAsync(() => ledgerIdCounter++);
+        _ledgerRepositoryMock.Setup(x => x.InsertDetailsAsync(It.IsAny<int>(), It.IsAny<IEnumerable<LedgerDetail>>()))
+            .ReturnsAsync(true);
+
+        // Act
+        var result = await _service.ImportLedgerDetailsAsync(filePath);
+
+        // Assert
+        result.Success.Should().BeTrue();
+        result.ImportedCount.Should().Be(3);
+
+        // 2日分なのでLedgerが2つ作成されること
+        capturedLedgers.Should().HaveCount(2);
+
+        // 1日目: 2024-01-15（2件）
+        var day1 = capturedLedgers.FirstOrDefault(l => l.Date.Date == new DateTime(2024, 1, 15));
+        day1.Should().NotBeNull();
+        day1!.Expense.Should().Be(520); // 260 + 260
+
+        // 2日目: 2024-01-16（1件）
+        var day2 = capturedLedgers.FirstOrDefault(l => l.Date.Date == new DateTime(2024, 1, 16));
+        day2.Should().NotBeNull();
+        day2!.Expense.Should().Be(260);
+
+        // InsertDetailsAsyncが2回呼ばれること（日付ごとに1回）
+        _ledgerRepositoryMock.Verify(x => x.InsertDetailsAsync(It.IsAny<int>(),
+            It.IsAny<IEnumerable<LedgerDetail>>()), Times.Exactly(2));
+    }
+
+    /// <summary>
+    /// 異なるカードIDmの利用履歴ID空欄行が別々のLedgerとして作成されること（日付が同じでも）
+    /// </summary>
+    [Fact]
+    public async Task ImportLedgerDetailsAsync_異なるカードの同日空欄ID行_カードごとに別Ledger作成()
+    {
+        // Arrange: 2枚のカードの同日履歴（利用履歴ID空欄）
+        var csvContent = @"利用履歴ID,利用日時,カードIDm,管理番号,乗車駅,降車駅,バス停,金額,残額,チャージ,ポイント還元,バス利用,グループID
+,2024-01-15 10:30:00,0123456789ABCDEF,001,博多,天神,,260,9740,0,0,0,
+,2024-01-15 10:30:00,AAAA456789ABCDEF,002,博多,天神,,260,4740,0,0,0,";
+
+        var filePath = Path.Combine(_testDirectory, "details_multi_card_same_date.csv");
+        await Task.Run(() => File.WriteAllText(filePath, csvContent, CsvEncoding));
+
+        _cardRepositoryMock.Setup(x => x.GetByIdmAsync("0123456789ABCDEF", true))
+            .ReturnsAsync(new IcCard { CardIdm = "0123456789ABCDEF", CardType = "はやかけん" });
+        _cardRepositoryMock.Setup(x => x.GetByIdmAsync("AAAA456789ABCDEF", true))
+            .ReturnsAsync(new IcCard { CardIdm = "AAAA456789ABCDEF", CardType = "nimoca" });
+
+        var capturedLedgers = new List<Ledger>();
+        var ledgerIdCounter = 100;
+        _ledgerRepositoryMock.Setup(x => x.InsertAsync(It.IsAny<Ledger>()))
+            .Callback<Ledger>(l => capturedLedgers.Add(l))
+            .ReturnsAsync(() => ledgerIdCounter++);
+        _ledgerRepositoryMock.Setup(x => x.InsertDetailsAsync(It.IsAny<int>(), It.IsAny<IEnumerable<LedgerDetail>>()))
+            .ReturnsAsync(true);
+
+        // Act
+        var result = await _service.ImportLedgerDetailsAsync(filePath);
+
+        // Assert
+        result.Success.Should().BeTrue();
+        result.ImportedCount.Should().Be(2);
+
+        // 2枚のカードなのでLedgerが2つ作成されること
+        capturedLedgers.Should().HaveCount(2);
+        capturedLedgers.Should().Contain(l => l.CardIdm == "0123456789ABCDEF");
+        capturedLedgers.Should().Contain(l => l.CardIdm == "AAAA456789ABCDEF");
     }
 
     #endregion
