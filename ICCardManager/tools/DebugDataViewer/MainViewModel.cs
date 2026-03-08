@@ -428,7 +428,8 @@ namespace DebugDataViewer
                     }
 
                     using var command = connection.CreateCommand();
-                    command.CommandText = $"SELECT * FROM {SelectedTableName} ORDER BY 1";
+                    // rowidは SELECT * に含まれないため明示的に取得
+                    command.CommandText = $"SELECT rowid, * FROM {SelectedTableName} ORDER BY 1";
 
                     using var adapter = new System.Data.SQLite.SQLiteDataAdapter(command);
                     var dataTable = new DataTable();
