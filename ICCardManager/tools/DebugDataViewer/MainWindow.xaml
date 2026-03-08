@@ -130,6 +130,8 @@
                                       VerticalScrollBarVisibility="Auto">
                                 <DataGrid.Columns>
                                     <DataGridTextColumn Header="#" Binding="{Binding Index}" Width="30"/>
+                                    <DataGridTextColumn Header="Seq" Binding="{Binding SequenceNumber}" Width="35"
+                                                        ToolTipService.ToolTip="FeliCaブロック番号（0=最新）"/>
                                     <DataGridTextColumn Header="利用日時" Binding="{Binding UseDate, StringFormat=yyyy/MM/dd HH:mm}" Width="120"/>
                                     <DataGridTextColumn Header="乗車駅" Binding="{Binding EntryStation}" Width="100"/>
                                     <DataGridTextColumn Header="降車駅" Binding="{Binding ExitStation}" Width="100"/>
