@@ -23,6 +23,7 @@ namespace DebugDataViewer
     public class CardHistoryItem
     {
         public int Index { get; set; }
+        public int SequenceNumber { get; set; }
         public DateTime? UseDate { get; set; }
         public string EntryStation { get; set; }
         public string ExitStation { get; set; }
@@ -322,9 +323,12 @@ namespace DebugDataViewer
                 var index = 1;
                 foreach (var detail in historyList)
                 {
+                    // FeliCaブロック番号: 0始まり（ブロック0=最新、ブロック1=次に新しい…）
+                    var blockIndex = index - 1;
                     CardHistoryItems.Add(new CardHistoryItem
                     {
                         Index = index++,
+                        SequenceNumber = blockIndex,
                         UseDate = detail.UseDate,
                         EntryStation = detail.EntryStation ?? "-",
                         ExitStation = detail.ExitStation ?? "-",
