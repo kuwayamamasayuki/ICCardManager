@@ -246,8 +246,25 @@ namespace ICCardManager.Services
                 target.Balance = latestDetail.Balance!.Value;
             }
 
-            // 摘要を再生成
-            target.Summary = _summaryGenerator.Generate(allDetails);
+            // Issue #920: 摘要を再生成（詳細を新しい順にソートしてからGenerateに渡す）
+            // Generate()はICカードの読み取り順（新しい順）を前提に.Reverse()するため、
+            // DB由来の詳細はUseDate降順・Balance昇順で新しい順に並べ替える必要がある。
+            // 同一日付内ではBalance昇順（低残高＝最新の利用）で時系列の逆順を再現する。
+            var sortedDetailsForSummary = allDetails
+                .OrderByDescending(d => d.UseDate ?? DateTime.MinValue)
+                .ThenBy(d => d.Balance ?? 0)
+                .ToList();
+
+            // GenerateRailwaySummary内部でSequenceNumber DESCに再ソートされるため、
+            // ここで正しい順序に対応するSequenceNumberを一時的に再採番する。
+            // FeliCa互換: 小さい値=新しい → sortedDetailsForSummary[0]=最新にSeq=1を割り当て
+            // ※この変更はインメモリのみでDB永続化されない
+            for (int i = 0; i < sortedDetailsForSummary.Count; i++)
+            {
+                sortedDetailsForSummary[i].SequenceNumber = i + 1;
+            }
+
+            target.Summary = _summaryGenerator.Generate(sortedDetailsForSummary);
 
             // Noteの統合（非空のものを連結）
             var notes = ledgers
