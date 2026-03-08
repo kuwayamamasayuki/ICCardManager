@@ -1202,5 +1202,50 @@ public class LedgerMergeServiceTests
         summary.Should().Contain("天神");
     }
 
+    /// <summary>
+    /// SequenceNumberがFeliCa規約と逆順（大きい=新しい）でも正しい摘要が生成されること
+    /// </summary>
+    /// <remarks>
+    /// 実際のDB上のrowidは、INSERTの順序に依存するため、分割・再統合を経ると
+    /// FeliCa規約（小さい=新しい）とは異なる順序になることがある。
+    /// MergeAsyncはUseDate/Balanceで正しい順序を判定し、SequenceNumberを再採番して
+    /// GenerateRailwaySummary内部の再ソートでも正しい順序が維持されることを検証する。
+    /// </remarks>
+    [Fact]
+    [Trait("Category", "Unit")]
+    public async Task MergeAsync_SplitAndRemerge_WrongSequenceNumber_SummaryOrderIsCorrect()
+    {
+        // Arrange: SequenceNumberがFeliCa規約と逆順のケース
+        // ①薬院→博多(最古) Seq=10（最小） ②博多→天神 Seq=20 ③西鉄福岡(天神)→薬院(最新) Seq=30（最大）
+        // FeliCa規約では最新が最小のはずだが、分割・再統合後にこの順序が崩れることがある
+        var date = new DateTime(2026, 3, 5);
+
+        var ledger1 = CreateTestLedger(1, TestCardIdm, date, "鉄道（薬院～博多）", 210, 2676);
+        ledger1.Details.Add(CreateRailDetail(1, "薬院", "博多", 210, 2676, 10, date));
+
+        var ledger2 = CreateTestLedger(2, TestCardIdm, date, "鉄道（博多～天神、西鉄福岡(天神)～薬院）", 380, 2296);
+        ledger2.Details.Add(CreateRailDetail(2, "博多", "天神", 210, 2466, 20, date));
+        ledger2.Details.Add(CreateRailDetail(2, "西鉄福岡(天神)", "薬院", 170, 2296, 30, date));
+
+        SetupGetByIdMocks(ledger1, ledger2);
+        SetupMergeMockSuccess();
+
+        // Act
+        var result = await _service.MergeAsync(new List<int> { 1, 2 });
+
+        // Assert
+        result.Success.Should().BeTrue();
+        var summary = result.MergedLedger!.Summary;
+
+        // SequenceNumberが逆順でも、Balance（残高）で正しい時系列順を判定できること
+        summary.Should().Contain("薬院");
+        summary.Should().Contain("博多");
+
+        var yakuinIndex = summary.IndexOf("薬院");
+        var hakataIndex = summary.IndexOf("博多");
+        yakuinIndex.Should().BeLessThan(hakataIndex,
+            "SequenceNumberが逆順でも、薬院→博多が最初の経路として摘要に出現すべき");
+    }
+
     #endregion
 }

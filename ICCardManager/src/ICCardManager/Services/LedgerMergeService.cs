@@ -254,6 +254,16 @@ namespace ICCardManager.Services
                 .OrderByDescending(d => d.UseDate ?? DateTime.MinValue)
                 .ThenBy(d => d.Balance ?? 0)
                 .ToList();
+
+            // GenerateRailwaySummary内部でSequenceNumber DESCに再ソートされるため、
+            // ここで正しい順序に対応するSequenceNumberを一時的に再採番する。
+            // FeliCa互換: 小さい値=新しい → sortedDetailsForSummary[0]=最新にSeq=1を割り当て
+            // ※この変更はインメモリのみでDB永続化されない
+            for (int i = 0; i < sortedDetailsForSummary.Count; i++)
+            {
+                sortedDetailsForSummary[i].SequenceNumber = i + 1;
+            }
+
             target.Summary = _summaryGenerator.Generate(sortedDetailsForSummary);
 
             // Noteの統合（非空のものを連結）
