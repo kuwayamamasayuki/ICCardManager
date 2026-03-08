@@ -10,52 +10,18 @@ namespace ICCardManager.Tests.Infrastructure.Caching;
 public class CacheOptionsTests
 {
     [Fact]
-    public void デフォルト値でSettingsMinutesが5であること()
+    public void デフォルト値が期待通りであること()
     {
         // Arrange & Act
         var options = new CacheOptions();
 
         // Assert
         options.SettingsMinutes.Should().Be(5);
-    }
-
-    [Fact]
-    public void デフォルト値でCardListSecondsが60であること()
-    {
-        // Arrange & Act
-        var options = new CacheOptions();
-
-        // Assert
         options.CardListSeconds.Should().Be(60);
-    }
-
-    [Fact]
-    public void デフォルト値でStaffListSecondsが60であること()
-    {
-        // Arrange & Act
-        var options = new CacheOptions();
-
-        // Assert
         options.StaffListSeconds.Should().Be(60);
-    }
-
-    [Fact]
-    public void デフォルト値でLentCardsSecondsが30であること()
-    {
-        // Arrange & Act
-        var options = new CacheOptions();
-
-        // Assert
         options.LentCardsSeconds.Should().Be(30);
-    }
 
-    [Fact]
-    public void 相対順序_SettingsがCardListより長くCardListがLentCardsより長いこと()
-    {
-        // Arrange
-        var options = new CacheOptions();
-
-        // Assert - 設定キャッシュ（分単位→秒換算）> カード一覧 > 貸出中カード
+        // 相対順序: 設定キャッシュ > カード一覧 > 貸出中カード
         (options.SettingsMinutes * 60).Should().BeGreaterThan(options.CardListSeconds);
         options.CardListSeconds.Should().BeGreaterThan(options.LentCardsSeconds);
     }
