@@ -46,7 +46,7 @@ public class ReportDataBuilderTests
     private static Ledger CreateTestLedger(
         int id, string cardIdm, DateTime date,
         string summary, int income, int expense, int balance,
-        string staffName = null, string note = null)
+        string? staffName = null, string? note = null)
     {
         return new Ledger
         {

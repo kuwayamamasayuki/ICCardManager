@@ -180,7 +180,7 @@ public class OperationLogSearchViewModelTests
     public async Task SearchAsync_リポジトリに検索条件を渡すこと()
     {
         // Arrange
-        OperationLogSearchCriteria capturedCriteria = null;
+        OperationLogSearchCriteria? capturedCriteria = null;
         _repoMock.Setup(r => r.SearchAsync(
                 It.IsAny<OperationLogSearchCriteria>(),
                 It.IsAny<int>(),
@@ -214,7 +214,7 @@ public class OperationLogSearchViewModelTests
     public async Task SearchAsync_全件選択時にnullが渡されること()
     {
         // Arrange
-        OperationLogSearchCriteria capturedCriteria = null;
+        OperationLogSearchCriteria? capturedCriteria = null;
         _repoMock.Setup(r => r.SearchAsync(
                 It.IsAny<OperationLogSearchCriteria>(),
                 It.IsAny<int>(),

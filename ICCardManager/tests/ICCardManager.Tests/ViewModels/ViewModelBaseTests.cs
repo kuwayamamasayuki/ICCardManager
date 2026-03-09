@@ -20,24 +20,24 @@ public class ViewModelBaseTests
     /// </summary>
     private class TestViewModel : ViewModelBase
     {
-        private BusyScope _currentScope;
+        private BusyScope? _currentScope;
 
-        public new void SetBusy(bool isBusy, string message = null)
+        public new void SetBusy(bool isBusy, string? message = null)
             => base.SetBusy(isBusy, message);
 
         public new void ResetProgress()
             => base.ResetProgress();
 
-        public new void SetProgress(double value, double max, string message = null)
+        public new void SetProgress(double value, double max, string? message = null)
             => base.SetProgress(value, max, message);
 
-        public new IDisposable BeginBusy(string message = null)
+        public new IDisposable BeginBusy(string? message = null)
             => base.BeginBusy(message);
 
         /// <summary>
         /// BeginCancellableBusyのラッパー（BusyScopeをフィールドに保持）
         /// </summary>
-        public IDisposable StartCancellableBusy(string message = null)
+        public IDisposable StartCancellableBusy(string? message = null)
         {
             _currentScope = base.BeginCancellableBusy(message);
             return _currentScope;
@@ -58,7 +58,7 @@ public class ViewModelBaseTests
         /// <summary>
         /// 現在のスコープでReportProgressを呼び出す
         /// </summary>
-        public void ScopeReportProgress(double value, double max, string message = null)
+        public void ScopeReportProgress(double value, double max, string? message = null)
             => _currentScope?.ReportProgress(value, max, message);
     }
 
