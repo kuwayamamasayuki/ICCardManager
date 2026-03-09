@@ -349,7 +349,7 @@ public class BusStopInputViewModelTests
 /// </summary>
 public class BusStopInputItemTests
 {
-    private BusStopInputItem CreateItem(string busStops = "", List<string> suggestions = null)
+    private BusStopInputItem CreateItem(string busStops = "", List<string>? suggestions = null)
     {
         var detail = new LedgerDetail
         {

@@ -28,6 +28,13 @@
     <PackageReference Include="FlaUI.UIA3" Version="5.0.0" />
   </ItemGroup>
 
+  <!-- dotnet test のソリューション全体実行から除外する。
+       UIテストはGUI環境+ビルド済みexeが必要なため、明示的に実行すること:
+       dotnet test tests/ICCardManager.UITests/ICCardManager.UITests.csproj -->
+  <PropertyGroup Condition="'$(BuildingSolutionFile)' == 'true'">
+    <IsTestProject>false</IsTestProject>
+  </PropertyGroup>
+
   <!-- メインプロジェクトへの ProjectReference は意図的に付けない。
        UIテストはビルド済み exe を外部プロセスとして起動し、
        エンドユーザーと同じ条件でテストする。 -->

@@ -2968,7 +2968,7 @@ public class LendingServiceTests : IDisposable
         SetupReturnMocks(card, staff, lentRecord);
 
         // InsertDetailsAsyncに渡される詳細をキャプチャ
-        List<LedgerDetail> capturedDetails = null;
+        List<LedgerDetail>? capturedDetails = null;
         _ledgerRepositoryMock.Setup(x => x.InsertDetailsAsync(It.IsAny<int>(), It.IsAny<IEnumerable<LedgerDetail>>()))
             .Callback<int, IEnumerable<LedgerDetail>>((_, details) =>
                 capturedDetails = details.ToList())
@@ -2980,8 +2980,8 @@ public class LendingServiceTests : IDisposable
         // Assert: InsertDetailsAsyncに渡される詳細はFeliCa順（新しい→古い＝残高が小さい→大きい）
         // SortChronologicallyが古い順に並べ替えた後、Reverse()でFeliCa順に戻されること
         capturedDetails.Should().NotBeNull();
-        capturedDetails.Should().HaveCount(2);
-        capturedDetails[0].Balance.Should().Be(580);  // 博多→天神（新しい＝先に挿入）
+        capturedDetails!.Should().HaveCount(2);
+        capturedDetails![0].Balance.Should().Be(580);  // 博多→天神（新しい＝先に挿入）
         capturedDetails[1].Balance.Should().Be(790);  // 天神→博多（古い＝後に挿入）
     }
 
