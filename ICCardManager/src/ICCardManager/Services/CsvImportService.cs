@@ -1335,10 +1335,12 @@ namespace ICCardManager.Services
 
                 // 全カードのIDmをキャッシュ
                 var existingCardIdms = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                var cardNameMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
                 var allCards = await _cardRepository.GetAllIncludingDeletedAsync();
                 foreach (var card in allCards)
                 {
                     existingCardIdms.Add(card.CardIdm);
+                    cardNameMap[card.CardIdm] = $"{card.CardType} {card.CardNumber}".Trim();
                 }
 
                 // 仮バリデーションでカードIDmを収集（重複チェック用）
@@ -1569,10 +1571,15 @@ namespace ICCardManager.Services
                         }
                     }
 
+                    // Issue #937: カード名も表示する
+                    var cardDisplayIdm = cardNameMap.TryGetValue(cardIdm, out var displayName) && !string.IsNullOrEmpty(displayName)
+                        ? $"{displayName} ({cardIdm})"
+                        : cardIdm;
+
                     items.Add(new CsvImportPreviewItem
                     {
                         LineNumber = lineNumber,
-                        Idm = cardIdm,
+                        Idm = cardDisplayIdm,
                         Name = summary,
                         AdditionalInfo = date.ToString("yyyy-MM-dd HH:mm:ss"),
                         Action = action,
@@ -1665,6 +1672,14 @@ namespace ICCardManager.Services
                     IsValid = false,
                     ErrorMessage = "CSVファイルにデータがありません（ヘッダー行のみ）"
                 };
+            }
+
+            // Issue #937: カード名表示のためにカード情報を取得
+            var allCards = await _cardRepository.GetAllIncludingDeletedAsync();
+            var cardNameMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var c in allCards)
+            {
+                cardNameMap[c.CardIdm] = $"{c.CardType} {c.CardNumber}".Trim();
             }
 
             // パースされた詳細をledger_idごとにグループ化（既存ledger向け）
@@ -1774,11 +1789,16 @@ namespace ICCardManager.Services
                 var detailRows = kvp.Value;
                 var dateStr = date == DateTime.MinValue ? "" : $" ({date:yyyy-MM-dd})";
 
+                // Issue #937: カード名も表示する
+                var cardDisplayName = cardNameMap.TryGetValue(cardIdm, out var newDetailCardName) && !string.IsNullOrEmpty(newDetailCardName)
+                    ? $"{newDetailCardName} ({cardIdm})"
+                    : cardIdm;
+
                 items.Add(new CsvImportPreviewItem
                 {
                     LineNumber = detailRows.First().LineNumber,
                     Idm = "(自動付与)",
-                    Name = cardIdm,
+                    Name = cardDisplayName,
                     AdditionalInfo = $"{detailRows.Count}件{dateStr}",
                     Action = ImportAction.Insert,
                     Changes = new List<FieldChange>()
@@ -1812,11 +1832,16 @@ namespace ICCardManager.Services
 
                 var cardIdm = ledgerCardIdmMap.TryGetValue(ledgerId, out var idm) ? idm : "";
 
+                // Issue #937: カード名も表示する
+                var existingCardDisplayName = cardNameMap.TryGetValue(cardIdm, out var existingCardName) && !string.IsNullOrEmpty(existingCardName)
+                    ? $"{existingCardName} ({cardIdm})"
+                    : cardIdm;
+
                 items.Add(new CsvImportPreviewItem
                 {
                     LineNumber = detailRows.First().LineNumber,
                     Idm = ledgerId.ToString(),
-                    Name = cardIdm,
+                    Name = existingCardDisplayName,
                     AdditionalInfo = $"{detailRows.Count}件",
                     Action = action,
                     Changes = changes

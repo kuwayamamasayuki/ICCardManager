@@ -2266,4 +2266,170 @@ FEDCBA9876543210,鈴木花子,002,テスト2";
     }
 
     #endregion
+
+    #region Issue #937: プレビュー時にカード名も表示
+
+    /// <summary>
+    /// 利用履歴プレビューでカード名がIDmと一緒に表示されること
+    /// </summary>
+    [Fact]
+    public async Task PreviewLedgersAsync_カード名がIdmと共に表示される()
+    {
+        // Arrange
+        var csvContent = @"日時,カードIDm,管理番号,摘要,受入金額,払出金額,残額,利用者,備考
+2024-01-01 10:00:00,0123456789ABCDEF,001,鉄道（A駅～B駅）,,200,1000,山田太郎,";
+
+        var filePath = Path.Combine(_testDirectory, "ledgers_card_name.csv");
+        await Task.Run(() => File.WriteAllText(filePath, csvContent, CsvEncoding));
+
+        var cards = new List<IcCard>
+        {
+            new IcCard { CardIdm = "0123456789ABCDEF", CardType = "はやかけん", CardNumber = "001" }
+        };
+        _cardRepositoryMock.Setup(x => x.GetAllIncludingDeletedAsync()).ReturnsAsync(cards);
+        _ledgerRepositoryMock.Setup(x => x.GetExistingLedgerKeysAsync(It.IsAny<IEnumerable<string>>()))
+            .ReturnsAsync(new HashSet<(string, DateTime, string, int, int, int)>());
+
+        // Act
+        var result = await _service.PreviewLedgersAsync(filePath);
+
+        // Assert
+        result.IsValid.Should().BeTrue();
+        result.Items.Should().HaveCount(1);
+        result.Items[0].Idm.Should().Be("はやかけん 001 (0123456789ABCDEF)");
+    }
+
+    /// <summary>
+    /// 複数カードの利用履歴プレビューで各カード名が正しく表示されること
+    /// </summary>
+    [Fact]
+    public async Task PreviewLedgersAsync_複数カードでそれぞれのカード名が表示される()
+    {
+        // Arrange
+        var csvContent = @"日時,カードIDm,管理番号,摘要,受入金額,払出金額,残額,利用者,備考
+2024-01-01 10:00:00,AAAA456789ABCDEF,001,鉄道（A駅～B駅）,,200,1000,山田太郎,
+2024-01-02 10:00:00,BBBB456789ABCDEF,002,鉄道（C駅～D駅）,,300,700,山田太郎,";
+
+        var filePath = Path.Combine(_testDirectory, "ledgers_multi_card_name.csv");
+        await Task.Run(() => File.WriteAllText(filePath, csvContent, CsvEncoding));
+
+        var cards = new List<IcCard>
+        {
+            new IcCard { CardIdm = "AAAA456789ABCDEF", CardType = "はやかけん", CardNumber = "001" },
+            new IcCard { CardIdm = "BBBB456789ABCDEF", CardType = "nimoca", CardNumber = "002" }
+        };
+        _cardRepositoryMock.Setup(x => x.GetAllIncludingDeletedAsync()).ReturnsAsync(cards);
+        _ledgerRepositoryMock.Setup(x => x.GetExistingLedgerKeysAsync(It.IsAny<IEnumerable<string>>()))
+            .ReturnsAsync(new HashSet<(string, DateTime, string, int, int, int)>());
+
+        // Act
+        var result = await _service.PreviewLedgersAsync(filePath);
+
+        // Assert
+        result.IsValid.Should().BeTrue();
+        result.Items.Should().HaveCount(2);
+        result.Items[0].Idm.Should().Be("はやかけん 001 (AAAA456789ABCDEF)");
+        result.Items[1].Idm.Should().Be("nimoca 002 (BBBB456789ABCDEF)");
+    }
+
+    /// <summary>
+    /// カード情報が取得できない場合はIDmのみが表示されること（フォールバック）
+    /// </summary>
+    [Fact]
+    public async Task PreviewLedgersAsync_カード情報なしの場合はIdmのみ表示()
+    {
+        // Arrange
+        var csvContent = @"日時,カードIDm,管理番号,摘要,受入金額,払出金額,残額,利用者,備考
+2024-01-01 10:00:00,0123456789ABCDEF,001,鉄道（A駅～B駅）,,200,1000,山田太郎,";
+
+        var filePath = Path.Combine(_testDirectory, "ledgers_no_card_info.csv");
+        await Task.Run(() => File.WriteAllText(filePath, csvContent, CsvEncoding));
+
+        // カードは存在するがカード名情報が空
+        var cards = new List<IcCard>
+        {
+            new IcCard { CardIdm = "0123456789ABCDEF", CardType = "", CardNumber = "" }
+        };
+        _cardRepositoryMock.Setup(x => x.GetAllIncludingDeletedAsync()).ReturnsAsync(cards);
+        _ledgerRepositoryMock.Setup(x => x.GetExistingLedgerKeysAsync(It.IsAny<IEnumerable<string>>()))
+            .ReturnsAsync(new HashSet<(string, DateTime, string, int, int, int)>());
+
+        // Act
+        var result = await _service.PreviewLedgersAsync(filePath);
+
+        // Assert
+        result.IsValid.Should().BeTrue();
+        result.Items.Should().HaveCount(1);
+        // カード名が空の場合はIDmのみ表示
+        result.Items[0].Idm.Should().Be("0123456789ABCDEF");
+    }
+
+    /// <summary>
+    /// 利用履歴詳細プレビュー（既存LedgerID）でカード名がカードIDm列に表示されること
+    /// </summary>
+    [Fact]
+    public async Task PreviewLedgerDetailsAsync_既存LedgerIdでカード名が表示される()
+    {
+        // Arrange
+        var csvContent = @"利用履歴ID,利用日時,カードIDm,管理番号,乗車駅,降車駅,バス停,金額,残額,チャージ,ポイント還元,バス利用,グループID
+1,2024-01-15 10:30:00,0123456789ABCDEF,001,博多,天神,,260,9740,0,0,0,";
+
+        var filePath = Path.Combine(_testDirectory, "details_card_name.csv");
+        await Task.Run(() => File.WriteAllText(filePath, csvContent, CsvEncoding));
+
+        // カード情報を設定
+        var cards = new List<IcCard>
+        {
+            new IcCard { CardIdm = "0123456789ABCDEF", CardType = "SUGOCA", CardNumber = "003" }
+        };
+        _cardRepositoryMock.Setup(x => x.GetAllIncludingDeletedAsync()).ReturnsAsync(cards);
+
+        _ledgerRepositoryMock.Setup(x => x.GetByIdAsync(1)).ReturnsAsync(new Ledger
+        {
+            Id = 1, CardIdm = "0123456789ABCDEF", Date = new DateTime(2024, 1, 15),
+            Summary = "鉄道（博多～天神）", Income = 0, Expense = 260, Balance = 9740
+        });
+
+        // Act
+        var result = await _service.PreviewLedgerDetailsAsync(filePath);
+
+        // Assert
+        result.IsValid.Should().BeTrue();
+        result.Items.Should().HaveCount(1);
+        result.Items[0].Name.Should().Be("SUGOCA 003 (0123456789ABCDEF)");
+    }
+
+    /// <summary>
+    /// 利用履歴詳細プレビュー（利用履歴ID空欄・新規作成）でカード名が表示されること
+    /// </summary>
+    [Fact]
+    public async Task PreviewLedgerDetailsAsync_新規作成でカード名が表示される()
+    {
+        // Arrange
+        var csvContent = @"利用履歴ID,利用日時,カードIDm,管理番号,乗車駅,降車駅,バス停,金額,残額,チャージ,ポイント還元,バス利用,グループID
+,2024-01-15 10:30:00,0123456789ABCDEF,001,博多,天神,,260,9740,0,0,0,";
+
+        var filePath = Path.Combine(_testDirectory, "details_card_name_new.csv");
+        await Task.Run(() => File.WriteAllText(filePath, csvContent, CsvEncoding));
+
+        // カード情報を設定（GetByIdmAsync と GetAllIncludingDeletedAsync 両方必要）
+        var cards = new List<IcCard>
+        {
+            new IcCard { CardIdm = "0123456789ABCDEF", CardType = "はやかけん", CardNumber = "001" }
+        };
+        _cardRepositoryMock.Setup(x => x.GetAllIncludingDeletedAsync()).ReturnsAsync(cards);
+        _cardRepositoryMock.Setup(x => x.GetByIdmAsync("0123456789ABCDEF", true))
+            .ReturnsAsync(new IcCard { CardIdm = "0123456789ABCDEF", CardType = "はやかけん", CardNumber = "001" });
+
+        // Act
+        var result = await _service.PreviewLedgerDetailsAsync(filePath);
+
+        // Assert
+        result.IsValid.Should().BeTrue();
+        result.Items.Should().HaveCount(1);
+        result.Items[0].Idm.Should().Be("(自動付与)");
+        result.Items[0].Name.Should().Be("はやかけん 001 (0123456789ABCDEF)");
+    }
+
+    #endregion
 }
