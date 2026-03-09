@@ -508,7 +508,7 @@
                         <Border Background="{DynamicResource WarningBackgroundBrush}" Padding="10" Margin="0,2"
                                 Visibility="{Binding HasChanges, Converter={StaticResource BoolToVisibilityConverter}}">
                             <StackPanel>
-                                <TextBlock Text="変更内容の詳細:" FontWeight="Bold" Margin="0,0,0,5"/>
+                                <TextBlock Text="{Binding ChangesHeader}" FontWeight="Bold" Margin="0,0,0,5"/>
                                 <ItemsControl ItemsSource="{Binding Changes}">
                                     <ItemsControl.ItemTemplate>
                                         <DataTemplate>

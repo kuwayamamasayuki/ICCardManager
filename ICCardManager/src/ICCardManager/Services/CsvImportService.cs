@@ -104,7 +104,7 @@ namespace ICCardManager.Services
         /// <summary>アクション（新規/更新/スキップ）</summary>
         public ImportAction Action { get; set; }
 
-        /// <summary>変更点リスト（更新時のみ）</summary>
+        /// <summary>変更点リスト（更新時および新規追加時）</summary>
         public List<FieldChange> Changes { get; set; } = new();
 
         /// <summary>変更点があるか</summary>
@@ -114,6 +114,9 @@ namespace ICCardManager.Services
         public string ChangesSummary => HasChanges
             ? string.Join("、", Changes.Select(c => c.FieldName))
             : string.Empty;
+
+        /// <summary>詳細セクションのヘッダー（アクションに応じて変化）</summary>
+        public string ChangesHeader => Action == ImportAction.Insert ? "追加する内容:" : "変更内容の詳細:";
     }
 
     /// <summary>
@@ -1794,6 +1797,10 @@ namespace ICCardManager.Services
                     ? $"{newDetailCardName} ({cardIdm})"
                     : cardIdm;
 
+                // Issue #938: 追加する内容の詳細を表示
+                var insertDetails = detailRows.Select(x => x.Detail).ToList();
+                var insertChanges = CreateInsertDetailChanges(insertDetails);
+
                 items.Add(new CsvImportPreviewItem
                 {
                     LineNumber = detailRows.First().LineNumber,
@@ -1801,7 +1808,7 @@ namespace ICCardManager.Services
                     Name = cardDisplayName,
                     AdditionalInfo = $"{detailRows.Count}件{dateStr}",
                     Action = ImportAction.Insert,
-                    Changes = new List<FieldChange>()
+                    Changes = insertChanges
                 });
                 newCount++;
             }
@@ -2895,6 +2902,83 @@ namespace ICCardManager.Services
                     });
                 }
             }
+        }
+
+        /// <summary>
+        /// Issue #938: 新規追加する利用履歴詳細の内容をFieldChangeリストとして生成する。
+        /// Insert行の詳細表示用。
+        /// </summary>
+        internal static List<FieldChange> CreateInsertDetailChanges(List<LedgerDetail> details)
+        {
+            var changes = new List<FieldChange>();
+
+            for (var i = 0; i < details.Count; i++)
+            {
+                var detail = details[i];
+                var rowLabel = $"[{i + 1}行目]";
+
+                // 利用内容を組み立て
+                var description = FormatDetailDescription(detail);
+
+                changes.Add(new FieldChange
+                {
+                    FieldName = rowLabel,
+                    OldValue = "(新規追加)",
+                    NewValue = description
+                });
+            }
+
+            return changes;
+        }
+
+        /// <summary>
+        /// 利用履歴詳細1件の内容を表示用の文字列にフォーマットする。
+        /// </summary>
+        internal static string FormatDetailDescription(LedgerDetail detail)
+        {
+            var parts = new List<string>();
+
+            // 利用日時
+            if (detail.UseDate.HasValue)
+            {
+                parts.Add(detail.UseDate.Value.ToString("yyyy-MM-dd HH:mm"));
+            }
+
+            // 区間情報
+            if (detail.IsCharge)
+            {
+                parts.Add("チャージ");
+            }
+            else if (detail.IsPointRedemption)
+            {
+                parts.Add("ポイント還元");
+            }
+            else if (detail.IsBus)
+            {
+                var busStop = !string.IsNullOrEmpty(detail.BusStops) ? $"バス（{detail.BusStops}）" : "バス";
+                parts.Add(busStop);
+            }
+            else
+            {
+                var entry = !string.IsNullOrEmpty(detail.EntryStation) ? detail.EntryStation : "?";
+                var exit = !string.IsNullOrEmpty(detail.ExitStation) ? detail.ExitStation : "?";
+                if (!string.IsNullOrEmpty(detail.EntryStation) || !string.IsNullOrEmpty(detail.ExitStation))
+                {
+                    parts.Add($"{entry}→{exit}");
+                }
+            }
+
+            // 金額・残額
+            if (detail.Amount.HasValue)
+            {
+                parts.Add($"{detail.Amount.Value}円");
+            }
+            if (detail.Balance.HasValue)
+            {
+                parts.Add($"残額{detail.Balance.Value}円");
+            }
+
+            return string.Join(" ", parts);
         }
 
         /// <summary>
