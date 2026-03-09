@@ -2432,4 +2432,136 @@ FEDCBA9876543210,鈴木花子,002,テスト2";
     }
 
     #endregion
+
+    #region Issue #938: 追加行の詳細表示
+
+    /// <summary>
+    /// 新規追加する利用履歴詳細の内容がChangesに格納されること
+    /// </summary>
+    [Fact]
+    public async Task PreviewLedgerDetailsAsync_Insert行に追加内容の詳細が表示される()
+    {
+        // Arrange
+        var csvContent = @"利用履歴ID,利用日時,カードIDm,管理番号,乗車駅,降車駅,バス停,金額,残額,チャージ,ポイント還元,バス利用,グループID
+,2024-01-15 10:30:00,0123456789ABCDEF,001,博多,天神,,260,9740,0,0,0,
+,2024-01-15 17:00:00,0123456789ABCDEF,001,天神,博多,,260,9480,0,0,0,";
+
+        var filePath = Path.Combine(_testDirectory, "details_insert_changes.csv");
+        await Task.Run(() => File.WriteAllText(filePath, csvContent, CsvEncoding));
+
+        _cardRepositoryMock.Setup(x => x.GetByIdmAsync("0123456789ABCDEF", true))
+            .ReturnsAsync(new IcCard { CardIdm = "0123456789ABCDEF", CardType = "はやかけん", CardNumber = "001" });
+
+        // Act
+        var result = await _service.PreviewLedgerDetailsAsync(filePath);
+
+        // Assert
+        result.IsValid.Should().BeTrue();
+        result.Items.Should().HaveCount(1);
+        result.Items[0].Action.Should().Be(ImportAction.Insert);
+        result.Items[0].HasChanges.Should().BeTrue("追加行にも詳細が表示されるべき");
+        result.Items[0].Changes.Should().HaveCount(2);
+        result.Items[0].Changes[0].FieldName.Should().Be("[1行目]");
+        result.Items[0].Changes[0].OldValue.Should().Be("(新規追加)");
+        result.Items[0].Changes[0].NewValue.Should().Contain("博多→天神");
+        result.Items[0].Changes[0].NewValue.Should().Contain("260円");
+        result.Items[0].Changes[1].FieldName.Should().Be("[2行目]");
+        result.Items[0].Changes[1].NewValue.Should().Contain("天神→博多");
+    }
+
+    /// <summary>
+    /// ChangesHeaderがアクションに応じて変化すること
+    /// </summary>
+    [Fact]
+    public void ChangesHeader_Insertの場合は追加する内容()
+    {
+        var insertItem = new CsvImportPreviewItem { Action = ImportAction.Insert };
+        insertItem.ChangesHeader.Should().Be("追加する内容:");
+
+        var updateItem = new CsvImportPreviewItem { Action = ImportAction.Update };
+        updateItem.ChangesHeader.Should().Be("変更内容の詳細:");
+
+        var skipItem = new CsvImportPreviewItem { Action = ImportAction.Skip };
+        skipItem.ChangesHeader.Should().Be("変更内容の詳細:");
+    }
+
+    /// <summary>
+    /// FormatDetailDescriptionで鉄道利用の説明が正しく生成されること
+    /// </summary>
+    [Fact]
+    public void FormatDetailDescription_鉄道利用()
+    {
+        var detail = new LedgerDetail
+        {
+            UseDate = new DateTime(2024, 1, 15, 10, 30, 0),
+            EntryStation = "博多",
+            ExitStation = "天神",
+            Amount = 260,
+            Balance = 9740
+        };
+
+        var result = CsvImportService.FormatDetailDescription(detail);
+
+        result.Should().Be("2024-01-15 10:30 博多→天神 260円 残額9740円");
+    }
+
+    /// <summary>
+    /// FormatDetailDescriptionでチャージの説明が正しく生成されること
+    /// </summary>
+    [Fact]
+    public void FormatDetailDescription_チャージ()
+    {
+        var detail = new LedgerDetail
+        {
+            UseDate = new DateTime(2024, 1, 15, 12, 0, 0),
+            IsCharge = true,
+            Amount = 1000,
+            Balance = 10740
+        };
+
+        var result = CsvImportService.FormatDetailDescription(detail);
+
+        result.Should().Be("2024-01-15 12:00 チャージ 1000円 残額10740円");
+    }
+
+    /// <summary>
+    /// FormatDetailDescriptionでバス利用の説明が正しく生成されること
+    /// </summary>
+    [Fact]
+    public void FormatDetailDescription_バス利用()
+    {
+        var detail = new LedgerDetail
+        {
+            UseDate = new DateTime(2024, 1, 15, 14, 0, 0),
+            IsBus = true,
+            BusStops = "天神バス停",
+            Amount = 200,
+            Balance = 9540
+        };
+
+        var result = CsvImportService.FormatDetailDescription(detail);
+
+        result.Should().Be("2024-01-15 14:00 バス（天神バス停） 200円 残額9540円");
+    }
+
+    /// <summary>
+    /// FormatDetailDescriptionでポイント還元の説明が正しく生成されること
+    /// </summary>
+    [Fact]
+    public void FormatDetailDescription_ポイント還元()
+    {
+        var detail = new LedgerDetail
+        {
+            UseDate = new DateTime(2024, 1, 15, 16, 0, 0),
+            IsPointRedemption = true,
+            Amount = 50,
+            Balance = 9590
+        };
+
+        var result = CsvImportService.FormatDetailDescription(detail);
+
+        result.Should().Be("2024-01-15 16:00 ポイント還元 50円 残額9590円");
+    }
+
+    #endregion
 }
