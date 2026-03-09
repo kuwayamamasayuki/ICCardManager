@@ -430,7 +430,7 @@
                       AutomationProperties.Name="インポートプレビュー一覧">
                 <DataGrid.Columns>
                     <DataGridTextColumn Header="行" Binding="{Binding LineNumber}" Width="50"/>
-                    <DataGridTextColumn Binding="{Binding Idm}" Width="140">
+                    <DataGridTextColumn Binding="{Binding Idm}" Width="220">
                         <DataGridTextColumn.HeaderTemplate>
                             <DataTemplate>
                                 <TextBlock Text="{Binding DataContext.PreviewColumn1Header, RelativeSource={RelativeSource AncestorType=DataGrid}}"/>

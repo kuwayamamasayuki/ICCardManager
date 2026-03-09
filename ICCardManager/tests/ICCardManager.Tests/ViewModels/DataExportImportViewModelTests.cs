@@ -414,8 +414,8 @@ public class DataExportImportViewModelTests : IDisposable
     [Theory]
     [InlineData(DataType.Cards, "IDm", "カード種別", "管理番号")]
     [InlineData(DataType.Staff, "IDm", "氏名", "職員番号")]
-    [InlineData(DataType.Ledgers, "カードIDm", "摘要", "日付")]
-    [InlineData(DataType.LedgerDetails, "利用履歴ID", "カードIDm", "詳細件数")]
+    [InlineData(DataType.Ledgers, "カード", "摘要", "日付")]
+    [InlineData(DataType.LedgerDetails, "利用履歴ID", "カード", "詳細件数")]
     public void PreviewColumnHeaders_データ種別に応じて正しいヘッダーが返される(
         DataType dataType, string expectedCol1, string expectedCol2, string expectedCol3)
     {

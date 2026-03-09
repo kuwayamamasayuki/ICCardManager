@@ -229,7 +229,7 @@ public partial class DataExportImportViewModel : ViewModelBase
     public string PreviewColumn1Header => SelectedImportType switch
     {
         DataType.LedgerDetails => "利用履歴ID",
-        DataType.Ledgers => "カードIDm",
+        DataType.Ledgers => "カード",
         _ => "IDm"
     };
 
@@ -238,7 +238,7 @@ public partial class DataExportImportViewModel : ViewModelBase
     /// </summary>
     public string PreviewColumn2Header => SelectedImportType switch
     {
-        DataType.LedgerDetails => "カードIDm",
+        DataType.LedgerDetails => "カード",
         DataType.Ledgers => "摘要",
         DataType.Cards => "カード種別",
         DataType.Staff => "氏名",
