@@ -31,10 +31,13 @@ jobs:
         run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
 
       - name: Restore dependencies
-        run: dotnet restore ${{ env.PROJECT_PATH }}
+        run: dotnet restore ICCardManager/ICCardManager.sln
+
+      - name: Build
+        run: dotnet build ICCardManager/ICCardManager.sln --no-restore --configuration Release
 
       - name: Run tests
-        run: dotnet test ICCardManager/tests/ICCardManager.Tests/ICCardManager.Tests.csproj --configuration Release --verbosity normal
+        run: dotnet test ICCardManager/tests/ICCardManager.Tests/ICCardManager.Tests.csproj --no-build --configuration Release --verbosity normal
 
       - name: Publish self-contained executable
         run: |
