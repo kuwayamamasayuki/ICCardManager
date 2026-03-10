@@ -3135,13 +3135,14 @@ public class ReportServiceTests : IDisposable
         using var workbook = new XLWorkbook(outputPath);
         var worksheet = workbook.Worksheets.First();
 
-        // データ行（行6）の全列フォントサイズが14ptであること
+        // データ行（行6）の各列フォントサイズが正しいこと
+        // Issue #947: 金額列（E=5, F=6, G=7）は16pt、その他は14pt
         const int dataRow = 6;
-        const double expectedFontSize = 14;
         for (int col = 1; col <= 12; col++)
         {
-            worksheet.Cell(dataRow, col).Style.Font.FontSize.Should().Be(expectedFontSize,
-                $"データ行の{col}列目のフォントサイズが14ptであるべき");
+            var expected = (col >= 5 && col <= 7) ? 16.0 : 14.0;
+            worksheet.Cell(dataRow, col).Style.Font.FontSize.Should().Be(expected,
+                $"データ行の{col}列目のフォントサイズが{expected}ptであるべき");
         }
     }
 
@@ -3190,21 +3191,23 @@ public class ReportServiceTests : IDisposable
         using var workbook = new XLWorkbook(outputPath);
         var worksheet = workbook.Worksheets.First();
 
-        // 月計行（行7）の全列フォントサイズが14ptであること
+        // 月計行（行7）の各列フォントサイズが正しいこと
+        // Issue #947: 金額列（E=5, F=6, G=7）は16pt、その他は14pt
         const int monthlyTotalRow = 7;
-        const double expectedFontSize = 14;
         for (int col = 1; col <= 12; col++)
         {
-            worksheet.Cell(monthlyTotalRow, col).Style.Font.FontSize.Should().Be(expectedFontSize,
-                $"月計行の{col}列目のフォントサイズが14ptであるべき");
+            var expected = (col >= 5 && col <= 7) ? 16.0 : 14.0;
+            worksheet.Cell(monthlyTotalRow, col).Style.Font.FontSize.Should().Be(expected,
+                $"月計行の{col}列目のフォントサイズが{expected}ptであるべき");
         }
 
-        // 累計行（行8）の全列フォントサイズが14ptであること
+        // 累計行（行8）の各列フォントサイズが正しいこと
         const int cumulativeRow = 8;
         for (int col = 1; col <= 12; col++)
         {
-            worksheet.Cell(cumulativeRow, col).Style.Font.FontSize.Should().Be(expectedFontSize,
-                $"累計行の{col}列目のフォントサイズが14ptであるべき");
+            var expected = (col >= 5 && col <= 7) ? 16.0 : 14.0;
+            worksheet.Cell(cumulativeRow, col).Style.Font.FontSize.Should().Be(expected,
+                $"累計行の{col}列目のフォントサイズが{expected}ptであるべき");
         }
     }
 
@@ -3291,6 +3294,73 @@ public class ReportServiceTests : IDisposable
         var result = ReportService.GetSummaryFontSize(summary);
         result.Should().Be(expectedFontSize,
             $"{length}文字の摘要に対して{expectedFontSize}ptが期待される");
+    }
+
+    #endregion
+
+    #region 金額列フォントサイズ - Issue #947
+
+    /// <summary>
+    /// Issue #947: データ行の金額列（受入E・払出F・残額G）のフォントサイズが16ptであること
+    /// </summary>
+    [Fact]
+    public async Task CreateMonthlyReportAsync_金額列のフォントサイズが16ptである()
+    {
+        // Arrange
+        var cardIdm = "0102030405060708";
+        var card = CreateTestCard(cardIdm);
+        var year = 2024;
+        var month = 6;
+        var outputPath = CreateTempFilePath();
+
+        var ledgers = new List<Ledger>
+        {
+            CreateTestLedger(1, cardIdm, new DateTime(2024, 6, 5), "鉄道（博多～天神）", 0, 300, 4700, "田中太郎"),
+            CreateTestLedger(2, cardIdm, new DateTime(2024, 6, 10), "役務費によりチャージ", 5000, 0, 9700, "田中太郎"),
+        };
+
+        var mayLedgers = new List<Ledger>
+        {
+            CreateTestLedger(0, cardIdm, new DateTime(2024, 5, 31), "前月末データ", 0, 0, 5000)
+        };
+
+        _cardRepositoryMock
+            .Setup(r => r.GetByIdmAsync(cardIdm, true))
+            .ReturnsAsync(card);
+        _ledgerRepositoryMock
+            .Setup(r => r.GetByMonthAsync(cardIdm, year, month))
+            .ReturnsAsync(ledgers);
+        _ledgerRepositoryMock
+            .Setup(r => r.GetByMonthAsync(cardIdm, year, 5))
+            .ReturnsAsync(mayLedgers);
+
+        // Act
+        var result = await _reportService.CreateMonthlyReportAsync(cardIdm, year, month, outputPath);
+
+        // Assert
+        result.Success.Should().BeTrue();
+
+        using var workbook = new XLWorkbook(outputPath);
+        var worksheet = workbook.Worksheets.First();
+
+        // 前月繰越行（行5）の金額列フォントサイズ
+        worksheet.Cell(5, 5).Style.Font.FontSize.Should().Be(16, "繰越行の受入金額(E列)は16pt");
+        worksheet.Cell(5, 6).Style.Font.FontSize.Should().Be(16, "繰越行の払出金額(F列)は16pt");
+        worksheet.Cell(5, 7).Style.Font.FontSize.Should().Be(16, "繰越行の残額(G列)は16pt");
+
+        // データ行（行6）の金額列フォントサイズ
+        worksheet.Cell(6, 5).Style.Font.FontSize.Should().Be(16, "データ行の受入金額(E列)は16pt");
+        worksheet.Cell(6, 6).Style.Font.FontSize.Should().Be(16, "データ行の払出金額(F列)は16pt");
+        worksheet.Cell(6, 7).Style.Font.FontSize.Should().Be(16, "データ行の残額(G列)は16pt");
+
+        // データ行（行6）の他の列は14pt（金額列のみ16ptであること）
+        worksheet.Cell(6, 1).Style.Font.FontSize.Should().Be(14, "出納年月日(A列)は14pt");
+        worksheet.Cell(6, 8).Style.Font.FontSize.Should().Be(14, "氏名(H列)は14pt");
+
+        // 月計行（行8）の金額列フォントサイズ
+        worksheet.Cell(8, 5).Style.Font.FontSize.Should().Be(16, "月計行の受入金額(E列)は16pt");
+        worksheet.Cell(8, 6).Style.Font.FontSize.Should().Be(16, "月計行の払出金額(F列)は16pt");
+        worksheet.Cell(8, 7).Style.Font.FontSize.Should().Be(16, "月計行の残額(G列)は16pt");
     }
 
     #endregion
