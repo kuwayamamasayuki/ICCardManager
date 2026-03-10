@@ -46,28 +46,34 @@ namespace ICCardManager.Common
             // balance_before を計算:
             // 利用（expense）: balance_before = Balance + Amount
             // チャージ（income）: balance_before = Balance - Amount
+            // Issue #964: Amount が null の場合は 0 として扱う（FeliCa最古レコード等で発生）
             var items = detailList
-                .Where(d => d.Balance.HasValue && d.Amount.HasValue)
+                .Where(d => d.Balance.HasValue)
                 .Select(d =>
                 {
+                    var amount = d.Amount ?? 0;
                     var balanceBefore = d.IsCharge
-                        ? d.Balance!.Value - d.Amount!.Value
-                        : d.Balance!.Value + d.Amount!.Value;
+                        ? d.Balance!.Value - amount
+                        : d.Balance!.Value + amount;
                     return (Detail: d, BalanceBefore: balanceBefore);
                 })
                 .ToList();
 
-            // Balance/Amount情報が不十分な場合はフォールバック
+            // Balance情報が不十分な場合はフォールバック
             if (items.Count < detailList.Count)
             {
                 return Fallback(detailList, preserveOrderOnFailure);
             }
 
             // チェーン構築: balance_before が他のどのdetailの Balance にも一致しないものが先頭
-            var balanceSet = new HashSet<int>(items.Select(i => i.Detail.Balance!.Value));
+            // Issue #964: Amount=null/0の場合 balance_before == Balance となるため、
+            // 自分自身のBalanceではなく他のエントリのBalanceとのみ比較する
             var remaining = new List<(LedgerDetail Detail, int BalanceBefore)>(items);
 
-            var start = remaining.FirstOrDefault(r => !balanceSet.Contains(r.BalanceBefore));
+            var start = remaining.FirstOrDefault(r =>
+                !remaining.Any(other =>
+                    !ReferenceEquals(other.Detail, r.Detail) &&
+                    other.Detail.Balance!.Value == r.BalanceBefore));
             if (start.Detail == null)
             {
                 // チェーン構築失敗: フォールバック
