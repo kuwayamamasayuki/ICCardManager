@@ -77,14 +77,24 @@
                 <TextBlock Text="表示期間:"
                            VerticalAlignment="Center"
                            Margin="0,0,10,0"/>
-                <Border Background="{DynamicResource ReturnBackgroundBrush}"
-                        CornerRadius="4"
-                        Padding="15,8">
-                    <TextBlock Text="{Binding SelectedPeriodDisplay}"
-                               FontSize="{DynamicResource LargeFontSize}"
-                               FontWeight="Bold"
-                               Foreground="{DynamicResource InfoTextBrush}"/>
-                </Border>
+                <Button x:Name="PeriodDisplayButton"
+                        Command="{Binding OpenMonthSelectorCommand}"
+                        Cursor="Hand"
+                        AutomationProperties.Name="表示期間をクリックして月を選択"
+                        ToolTip="クリックして表示月を変更">
+                    <Button.Template>
+                        <ControlTemplate TargetType="Button">
+                            <Border Background="{DynamicResource ReturnBackgroundBrush}"
+                                    CornerRadius="4"
+                                    Padding="15,8">
+                                <TextBlock Text="{Binding SelectedPeriodDisplay}"
+                                           FontSize="{DynamicResource LargeFontSize}"
+                                           FontWeight="Bold"
+                                           Foreground="{DynamicResource InfoTextBrush}"/>
+                            </Border>
+                        </ControlTemplate>
+                    </Button.Template>
+                </Button>
             </StackPanel>
 
             <!-- 月選択ボタン（使用頻度順: 先月 > 今月。帳票画面と同じ順序） -->
@@ -110,7 +120,7 @@
 
                 <!-- 月選択ポップアップ -->
                 <Popup IsOpen="{Binding IsMonthSelectorOpen}"
-                       PlacementTarget="{Binding ElementName=OtherMonthButton}"
+                       PlacementTarget="{Binding ElementName=PeriodDisplayButton}"
                        Placement="Bottom"
                        StaysOpen="False"
                        AllowsTransparency="True"
