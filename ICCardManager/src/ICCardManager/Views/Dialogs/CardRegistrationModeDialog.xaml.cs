@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Windows;
+using System.Windows.Input;
 
 namespace ICCardManager.Views.Dialogs
 {
@@ -183,6 +184,36 @@ namespace ICCardManager.Views.Dialogs
             Result = result;
             DialogResult = true;
             Close();
+        }
+
+        /// <summary>
+        /// 新規購入セクションのBorderクリック時（Issue #944）
+        /// </summary>
+        /// <remarks>
+        /// Border全体をクリック可能にすることで、無効化された購入日入力欄の
+        /// クリックでも自動的に「新規購入」モードに切り替わる。
+        /// </remarks>
+        private void NewPurchaseBorder_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+        {
+            if (NewPurchaseRadio.IsChecked != true)
+            {
+                NewPurchaseRadio.IsChecked = true;
+            }
+        }
+
+        /// <summary>
+        /// 繰越セクションのBorderクリック時（Issue #944）
+        /// </summary>
+        /// <remarks>
+        /// Border全体をクリック可能にすることで、無効化された繰越月・開始ページ・
+        /// 繰越額の入力欄のクリックでも自動的に「紙の出納簿からの繰越」モードに切り替わる。
+        /// </remarks>
+        private void CarryoverBorder_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+        {
+            if (CarryoverRadio.IsChecked != true)
+            {
+                CarryoverRadio.IsChecked = true;
+            }
         }
 
         private void CancelButton_Click(object sender, RoutedEventArgs e)

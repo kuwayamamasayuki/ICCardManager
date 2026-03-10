@@ -41,7 +41,8 @@
                 Padding="12"
                 Margin="0,0,0,10"
                 BorderBrush="{DynamicResource DividerBrush}"
-                BorderThickness="1">
+                BorderThickness="1"
+                PreviewMouseLeftButtonDown="NewPurchaseBorder_PreviewMouseLeftButtonDown">
             <StackPanel>
                 <RadioButton x:Name="NewPurchaseRadio"
                              GroupName="RegistrationMode"
@@ -80,7 +81,8 @@
                 Padding="12"
                 Margin="0,0,0,10"
                 BorderBrush="{DynamicResource DividerBrush}"
-                BorderThickness="1">
+                BorderThickness="1"
+                PreviewMouseLeftButtonDown="CarryoverBorder_PreviewMouseLeftButtonDown">
             <StackPanel>
                 <RadioButton x:Name="CarryoverRadio"
                              GroupName="RegistrationMode"
