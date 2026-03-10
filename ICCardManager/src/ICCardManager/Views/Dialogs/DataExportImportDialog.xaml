@@ -31,13 +31,20 @@
 
     <Grid Margin="20">
         <Grid.RowDefinitions>
+            <RowDefinition Height="*"/>      <!-- Row 0: スクロール可能なコンテンツ -->
+            <RowDefinition Height="Auto"/>   <!-- Row 1: Close button（常に表示） -->
+        </Grid.RowDefinitions>
+
+        <!-- スクロール可能なコンテンツ領域 -->
+        <ScrollViewer Grid.Row="0" VerticalScrollBarVisibility="Auto">
+        <Grid>
+        <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>   <!-- Row 0: エクスポート設定 -->
             <RowDefinition Height="Auto"/>   <!-- Row 1: インポート設定（スクロール可能） -->
             <RowDefinition Height="Auto"/>   <!-- Row 2: アクションボタン（常に表示） -->
             <RowDefinition Height="Auto"/>   <!-- Row 3: Status message -->
-            <RowDefinition Height="*" MinHeight="150"/>  <!-- Row 4: プレビュー結果（サマリー + DataGrid） -->
+            <RowDefinition Height="Auto"/>   <!-- Row 4: プレビュー結果（サマリー + DataGrid） -->
             <RowDefinition Height="Auto"/>   <!-- Row 5: エラー一覧 -->
-            <RowDefinition Height="Auto"/>   <!-- Row 6: Close button -->
         </Grid.RowDefinitions>
 
         <!-- エクスポート設定 -->
@@ -396,7 +403,7 @@
               Visibility="{Binding HasPreview, Converter={StaticResource BoolToVisibilityConverter}}">
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto"/>  <!-- サマリーバナー -->
-                <RowDefinition Height="*"/>     <!-- DataGrid -->
+                <RowDefinition Height="Auto"/>  <!-- DataGrid -->
             </Grid.RowDefinitions>
 
             <!-- プレビューサマリー -->
@@ -427,6 +434,7 @@
                       BorderThickness="1"
                       BorderBrush="{DynamicResource SubtleBorderBrush}"
                       MinHeight="120"
+                      MaxHeight="300"
                       AutomationProperties.Name="インポートプレビュー一覧">
                 <DataGrid.Columns>
                     <DataGridTextColumn Header="行" Binding="{Binding LineNumber}" Width="50"/>
@@ -546,8 +554,11 @@
             </StackPanel>
         </Border>
 
-        <!-- 閉じるボタン -->
-        <StackPanel Grid.Row="6"
+        </Grid>
+        </ScrollViewer>
+
+        <!-- 閉じるボタン（常に画面下部に表示） -->
+        <StackPanel Grid.Row="1"
                     Orientation="Horizontal"
                     HorizontalAlignment="Right"
                     Margin="0,15,0,0">
@@ -561,7 +572,7 @@
         </StackPanel>
 
         <!-- 処理中オーバーレイ -->
-        <Border Grid.RowSpan="7"
+        <Border Grid.RowSpan="2"
                 Background="{DynamicResource OverlayBrush}"
                 Visibility="{Binding IsBusy, Converter={StaticResource BoolToVisibilityConverter}}">
             <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
