@@ -7,7 +7,7 @@
         mc:Ignorable="d"
         d:DataContext="{d:DesignInstance Type=vm:DataExportImportViewModel}"
         Title="データエクスポート/インポート"
-        Height="750"
+        Height="800"
         Width="800"
         WindowStartupLocation="CenterOwner"
         ResizeMode="CanResize"
@@ -37,7 +37,7 @@
         </Grid.RowDefinitions>
 
         <!-- 設定エリア（スクロール可能） -->
-        <ScrollViewer Grid.Row="0" VerticalScrollBarVisibility="Auto" MaxHeight="400">
+        <ScrollViewer Grid.Row="0" VerticalScrollBarVisibility="Auto" MaxHeight="500">
         <Grid>
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>   <!-- Row 0: エクスポート設定 -->
