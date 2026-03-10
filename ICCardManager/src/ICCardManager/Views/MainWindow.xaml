@@ -283,7 +283,10 @@
                                            Margin="0,0,10,0"/>
                                 <Border Background="{DynamicResource ReturnBackgroundBrush}"
                                         CornerRadius="4"
-                                        Padding="15,8">
+                                        Padding="15,8"
+                                        Cursor="Hand"
+                                        ToolTip="クリックして表示月を変更"
+                                        MouseLeftButtonUp="HistoryPeriodDisplay_MouseLeftButtonUp">
                                     <TextBlock Text="{Binding HistoryPeriodDisplay}"
                                                FontSize="{DynamicResource LargeFontSize}"
                                                FontWeight="Bold"

@@ -4,6 +4,7 @@ using System.Linq;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Input;
 using System.Windows.Interop;
 using ICCardManager.Common;
 using ICCardManager.Data.Repositories;
@@ -46,6 +47,19 @@ namespace ICCardManager.Views
             {
                 ErrorDialogHelper.ShowError(ex, "初期化エラー");
             }
+        }
+
+        /// <summary>
+        /// 表示期間テキストクリック → 月選択ポップアップを開く (Issue #945)
+        /// </summary>
+        /// <remarks>
+        /// MouseLeftButtonUp（リリース時）で処理する。
+        /// MouseLeftButtonDownだとPopupのStaysOpen="False"が
+        /// 押下中のマウスを外部クリックと判定し即座にPopupを閉じてしまうため。
+        /// </remarks>
+        private void HistoryPeriodDisplay_MouseLeftButtonUp(object sender, MouseButtonEventArgs e)
+        {
+            _viewModel.HistoryOpenMonthSelector();
         }
 
         private async void MainWindow_Closing(object sender, System.ComponentModel.CancelEventArgs e)
