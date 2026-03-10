@@ -731,6 +731,18 @@ namespace ICCardManager.Infrastructure.CardReader
                     }
                 }
 
+                // Issue #942: 利用種別バイトが0x0D以外でも残高が増加している場合はポイント還元とみなす
+                // FeliCaカードの利用種別はカード/リーダーによってバリエーションがあるため、
+                // 金額の符号（残高増減の方向）を最終的な判断基準とする
+                if (amount.HasValue && amount.Value < 0 && !isCharge && !isPointRedemption)
+                {
+                    _logger.LogDebug(
+                        "FelicaCardReader: 利用種別0x{UsageType:X2}で残高増加を検出、ポイント還元として処理（金額: {Amount}円）",
+                        usageType, amount.Value);
+                    isPointRedemption = true;
+                    amount = -amount.Value;  // 正の金額（入金額）に変換
+                }
+
                 // 生データを保持（デバッグ・診断用）
                 var rawBytes = new byte[16];
                 Array.Copy(currentData, 0, rawBytes, 0, Math.Min(currentData.Length, 16));

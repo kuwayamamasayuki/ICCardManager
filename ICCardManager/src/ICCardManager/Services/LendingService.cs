@@ -780,6 +780,47 @@ namespace ICCardManager.Services
 
                         createdLedgers.Add(chargeLedger);
                     }
+                    else if (segment.IsPointRedemption)
+                    {
+                        // Issue #942: ポイント還元Ledger作成（チャージと同様に個別レコード）
+                        var pointDetail = segment.Details[0];
+                        int balance;
+                        int income;
+
+                        // ポイント還元の金額は負値（カードへの入金）なので絶対値をIncomeとする
+                        var rawAmount = pointDetail.Amount ?? 0;
+                        income = Math.Abs(rawAmount);
+
+                        if (useCardBalance && pointDetail.Balance.HasValue)
+                        {
+                            balance = pointDetail.Balance.Value;
+                            lastBalance = balance;
+                        }
+                        else
+                        {
+                            lastBalance += income;
+                            balance = lastBalance;
+                        }
+
+                        var pointLedger = new Ledger
+                        {
+                            CardIdm = cardIdm,
+                            Date = pointDetail.UseDate ?? date,
+                            Summary = SummaryGenerator.GetPointRedemptionSummary(),
+                            Income = income,
+                            Expense = 0,
+                            Balance = balance,
+                            StaffName = null  // ポイント還元は自動処理のため氏名不要
+                        };
+
+                        var ledgerId = await _ledgerRepository.InsertAsync(pointLedger);
+                        pointLedger.Id = ledgerId;
+
+                        pointDetail.LedgerId = ledgerId;
+                        await _ledgerRepository.InsertDetailAsync(pointDetail);
+
+                        createdLedgers.Add(pointLedger);
+                    }
                     else
                     {
                         // 利用グループLedger作成
@@ -1006,7 +1047,10 @@ namespace ICCardManager.Services
             /// <summary>チャージセグメントかどうか</summary>
             public bool IsCharge { get; init; }
 
-            /// <summary>セグメント内の詳細リスト（利用グループの場合は複数、チャージの場合は1件）</summary>
+            /// <summary>ポイント還元セグメントかどうか（Issue #942）</summary>
+            public bool IsPointRedemption { get; init; }
+
+            /// <summary>セグメント内の詳細リスト（利用グループの場合は複数、チャージ/ポイント還元の場合は1件）</summary>
             public List<LedgerDetail> Details { get; init; } = new();
         }
 
@@ -1057,6 +1101,25 @@ namespace ICCardManager.Services
                     segments.Add(new DailySegment
                     {
                         IsCharge = true,
+                        Details = new List<LedgerDetail> { detail }
+                    });
+                }
+                else if (detail.IsPointRedemption || SummaryGenerator.IsImplicitPointRedemption(detail))
+                {
+                    // Issue #942: ポイント還元（明示的・暗黙的）も個別セグメントとして分離
+                    if (currentUsageGroup.Count > 0)
+                    {
+                        segments.Add(new DailySegment
+                        {
+                            IsCharge = false,
+                            Details = new List<LedgerDetail>(currentUsageGroup)
+                        });
+                        currentUsageGroup.Clear();
+                    }
+
+                    segments.Add(new DailySegment
+                    {
+                        IsPointRedemption = true,
                         Details = new List<LedgerDetail> { detail }
                     });
                 }
