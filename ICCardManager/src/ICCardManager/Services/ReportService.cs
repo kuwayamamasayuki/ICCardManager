@@ -1058,6 +1058,10 @@ namespace ICCardManager.Services
             // デフォルトフォントサイズが異なるため、明示的に統一する
             fullRange.Style.Font.FontSize = 14;
 
+            // Issue #947: 金額列（受入E・払出F・残額G）のフォントサイズを16ptに設定
+            var amountRange = worksheet.Range(row, 5, row, 7);
+            amountRange.Style.Font.FontSize = 16;
+
             // B列からD列を結合（摘要）
             var summaryRange = worksheet.Range(row, 2, row, 4);
             summaryRange.Merge();
@@ -1108,6 +1112,10 @@ namespace ICCardManager.Services
             // デフォルトフォントサイズが異なるため、明示的に統一する
             var fullRange = worksheet.Range(row, 1, row, 12);
             fullRange.Style.Font.FontSize = 14;
+
+            // Issue #947: 金額列（受入E・払出F・残額G）のフォントサイズを16ptに設定
+            var amountRange = worksheet.Range(row, 5, row, 7);
+            amountRange.Style.Font.FontSize = 16;
 
             // B列からD列を結合（摘要）
             var summaryRange = worksheet.Range(row, 2, row, 4);
