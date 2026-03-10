@@ -889,7 +889,32 @@ namespace ICCardManager.Services
             // 罫線を適用
             ApplyDataRowBorder(worksheet, row);
 
+            // Issue #946: 摘要欄のフォントサイズを文字列長に応じて調整
+            // ApplyDataRowBorder後に設定して14ptの一括設定を上書きする
+            var summaryCell = worksheet.Cell(row, 2);
+            summaryCell.Style.Font.FontSize = GetSummaryFontSize(ledger.Summary);
+
             return row + 1;
+        }
+
+        /// <summary>
+        /// 摘要欄のフォントサイズを文字列の長さに応じて決定
+        /// </summary>
+        /// <remarks>
+        /// Issue #946: B-D列結合セルの幅に収まるよう、文字数が多いほどフォントサイズを小さくする。
+        /// </remarks>
+        /// <param name="summary">摘要文字列</param>
+        /// <returns>適切なフォントサイズ（ポイント）</returns>
+        internal static double GetSummaryFontSize(string summary)
+        {
+            var length = summary?.Length ?? 0;
+
+            if (length < 15)  return 14;
+            if (length < 32)  return 12;
+            if (length < 38)  return 10;
+            if (length < 93)  return 8;
+            if (length < 108) return 7;
+            return 6;
         }
 
         /// <summary>
