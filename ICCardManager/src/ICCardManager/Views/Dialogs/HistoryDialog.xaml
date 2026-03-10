@@ -77,24 +77,22 @@
                 <TextBlock Text="表示期間:"
                            VerticalAlignment="Center"
                            Margin="0,0,10,0"/>
-                <Button x:Name="PeriodDisplayButton"
-                        Command="{Binding OpenMonthSelectorCommand}"
+                <Border x:Name="PeriodDisplayButton"
+                        Background="{DynamicResource ReturnBackgroundBrush}"
+                        CornerRadius="4"
+                        Padding="15,8"
                         Cursor="Hand"
-                        AutomationProperties.Name="表示期間をクリックして月を選択"
                         ToolTip="クリックして表示月を変更">
-                    <Button.Template>
-                        <ControlTemplate TargetType="Button">
-                            <Border Background="{DynamicResource ReturnBackgroundBrush}"
-                                    CornerRadius="4"
-                                    Padding="15,8">
-                                <TextBlock Text="{Binding SelectedPeriodDisplay}"
-                                           FontSize="{DynamicResource LargeFontSize}"
-                                           FontWeight="Bold"
-                                           Foreground="{DynamicResource InfoTextBrush}"/>
-                            </Border>
-                        </ControlTemplate>
-                    </Button.Template>
-                </Button>
+                    <Border.InputBindings>
+                        <MouseBinding MouseAction="LeftClick"
+                                      Command="{Binding OpenMonthSelectorCommand}"/>
+                    </Border.InputBindings>
+                    <TextBlock Text="{Binding SelectedPeriodDisplay}"
+                               FontSize="{DynamicResource LargeFontSize}"
+                               FontWeight="Bold"
+                               Foreground="{DynamicResource InfoTextBrush}"
+                               AutomationProperties.Name="表示期間をクリックして月を選択"/>
+                </Border>
             </StackPanel>
 
             <!-- 月選択ボタン（使用頻度順: 先月 > 今月。帳票画面と同じ順序） -->
