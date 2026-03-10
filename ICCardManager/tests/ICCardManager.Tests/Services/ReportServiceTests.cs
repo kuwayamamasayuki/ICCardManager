@@ -3135,13 +3135,14 @@ public class ReportServiceTests : IDisposable
         using var workbook = new XLWorkbook(outputPath);
         var worksheet = workbook.Worksheets.First();
 
-        // データ行（行6）の全列フォントサイズが14ptであること
+        // データ行（行6）の各列フォントサイズが正しいこと
+        // Issue #947: 金額列（E=5, F=6, G=7）は16pt、その他は14pt
         const int dataRow = 6;
-        const double expectedFontSize = 14;
         for (int col = 1; col <= 12; col++)
         {
-            worksheet.Cell(dataRow, col).Style.Font.FontSize.Should().Be(expectedFontSize,
-                $"データ行の{col}列目のフォントサイズが14ptであるべき");
+            var expected = (col >= 5 && col <= 7) ? 16.0 : 14.0;
+            worksheet.Cell(dataRow, col).Style.Font.FontSize.Should().Be(expected,
+                $"データ行の{col}列目のフォントサイズが{expected}ptであるべき");
         }
     }
 
@@ -3190,21 +3191,23 @@ public class ReportServiceTests : IDisposable
         using var workbook = new XLWorkbook(outputPath);
         var worksheet = workbook.Worksheets.First();
 
-        // 月計行（行7）の全列フォントサイズが14ptであること
+        // 月計行（行7）の各列フォントサイズが正しいこと
+        // Issue #947: 金額列（E=5, F=6, G=7）は16pt、その他は14pt
         const int monthlyTotalRow = 7;
-        const double expectedFontSize = 14;
         for (int col = 1; col <= 12; col++)
         {
-            worksheet.Cell(monthlyTotalRow, col).Style.Font.FontSize.Should().Be(expectedFontSize,
-                $"月計行の{col}列目のフォントサイズが14ptであるべき");
+            var expected = (col >= 5 && col <= 7) ? 16.0 : 14.0;
+            worksheet.Cell(monthlyTotalRow, col).Style.Font.FontSize.Should().Be(expected,
+                $"月計行の{col}列目のフォントサイズが{expected}ptであるべき");
         }
 
-        // 累計行（行8）の全列フォントサイズが14ptであること
+        // 累計行（行8）の各列フォントサイズが正しいこと
         const int cumulativeRow = 8;
         for (int col = 1; col <= 12; col++)
         {
-            worksheet.Cell(cumulativeRow, col).Style.Font.FontSize.Should().Be(expectedFontSize,
-                $"累計行の{col}列目のフォントサイズが14ptであるべき");
+            var expected = (col >= 5 && col <= 7) ? 16.0 : 14.0;
+            worksheet.Cell(cumulativeRow, col).Style.Font.FontSize.Should().Be(expected,
+                $"累計行の{col}列目のフォントサイズが{expected}ptであるべき");
         }
     }
 
