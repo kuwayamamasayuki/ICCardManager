@@ -35,7 +35,12 @@ namespace ICCardManager.Views.Dialogs
         /// <summary>
         /// 表示期間テキストクリック → 月選択ポップアップを開く (Issue #945)
         /// </summary>
-        private void PeriodDisplayButton_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+        /// <remarks>
+        /// MouseLeftButtonUp（リリース時）で処理する必要がある。
+        /// MouseLeftButtonDown（押下時）だとPopupのStaysOpen="False"が
+        /// 押下中のマウスを外部クリックと判定し即座にPopupを閉じてしまうため。
+        /// </remarks>
+        private void PeriodDisplayButton_MouseLeftButtonUp(object sender, MouseButtonEventArgs e)
         {
             _viewModel.OpenMonthSelector();
         }

@@ -83,7 +83,7 @@
                         Padding="15,8"
                         Cursor="Hand"
                         ToolTip="クリックして表示月を変更"
-                        MouseLeftButtonDown="PeriodDisplayButton_MouseLeftButtonDown">
+                        MouseLeftButtonUp="PeriodDisplayButton_MouseLeftButtonUp">
                     <TextBlock Text="{Binding SelectedPeriodDisplay}"
                                FontSize="{DynamicResource LargeFontSize}"
                                FontWeight="Bold"
