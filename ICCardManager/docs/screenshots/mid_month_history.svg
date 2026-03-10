@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 310" width="900" height="310" font-family="'Meiryo', 'Yu Gothic', sans-serif">
+  <!-- 背景 -->
+  <rect width="900" height="300" fill="#fff"/>
+
+  <!-- ヘッダ行 -->
+  <rect x="200" y="10" width="250" height="50" rx="4" fill="#e8e8e8" stroke="#333" stroke-width="1"/>
+  <text x="325" y="42" text-anchor="middle" font-size="22" fill="#333">先月</text>
+  <rect x="450" y="10" width="440" height="50" rx="4" fill="#e8e8e8" stroke="#333" stroke-width="1"/>
+  <text x="670" y="42" text-anchor="middle" font-size="22" fill="#333">今月</text>
+
+  <!-- ケース① ラベル -->
+  <rect x="10" y="80" width="190" height="70" rx="4" fill="#f5f5f5" stroke="#333" stroke-width="1"/>
+  <text x="105" y="108" text-anchor="middle" font-size="18" fill="#333">① 前月の履歴を</text>
+  <text x="105" y="133" text-anchor="middle" font-size="18" fill="#333">含む場合</text>
+
+  <!-- ケース① カード内履歴の帯（先月途中～今月途中） -->
+  <rect x="320" y="80" width="520" height="70" rx="6" fill="#4A90D9"/>
+  <text x="580" y="122" text-anchor="middle" font-size="18" font-weight="bold" fill="#fff">カード内履歴 20件（前月分を含む）</text>
+
+  <!-- ケース② ラベル -->
+  <rect x="10" y="180" width="190" height="70" rx="4" fill="#f5f5f5" stroke="#333" stroke-width="1"/>
+  <text x="105" y="208" text-anchor="middle" font-size="18" fill="#333">② 今月の履歴</text>
+  <text x="105" y="233" text-anchor="middle" font-size="18" fill="#333">のみの場合</text>
+
+  <!-- ケース② 要手動追加（赤帯、今月の左端に揃える） -->
+  <rect x="450" y="180" width="150" height="70" rx="6" fill="#E74C3C"/>
+  <text x="525" y="222" text-anchor="middle" font-size="17" font-weight="bold" fill="#fff">要手動追加</text>
+
+  <!-- ケース② カード内履歴の帯（右端をケース①と揃える） -->
+  <rect x="600" y="180" width="240" height="70" rx="6" fill="#4A90D9"/>
+  <text x="720" y="222" text-anchor="middle" font-size="17" font-weight="bold" fill="#fff">カード内履歴 20件</text>
+
+  <!-- 注釈：カード登録日の縦線 -->
+  <line x1="840" y1="60" x2="840" y2="270" stroke="#666" stroke-width="1.5" stroke-dasharray="6,4"/>
+  <text x="840" y="286" text-anchor="middle" font-size="14" fill="#666">▲</text>
+  <text x="840" y="300" text-anchor="middle" font-size="13" fill="#666">カード登録日</text>
+</svg>
