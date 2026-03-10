@@ -1017,7 +1017,8 @@ public class LendingServiceTests : IDisposable
     }
 
     /// <summary>
-    /// Issue #807: ポイント還元＋通常利用が混在する場合、StaffNameに名前が入っていること
+    /// Issue #807, #942: ポイント還元＋通常利用が混在する場合、
+    /// ポイント還元は個別Ledger（StaffName=null）、利用Ledgerには職員名が入ること
     /// </summary>
     [Fact]
     public async Task ReturnAsync_UsageWithPointRedemption_HasStaffName()
@@ -1045,10 +1046,17 @@ public class LendingServiceTests : IDisposable
         // Assert
         result.Success.Should().BeTrue();
 
-        // 利用とポイント還元が混在する場合はStaffNameが設定される
-        var usageLedger = capturedLedgers.FirstOrDefault(l => !l.IsLentRecord);
+        // Issue #942: ポイント還元は個別Ledgerに分離される
+        var nonLentLedgers = capturedLedgers.Where(l => !l.IsLentRecord).ToList();
+        nonLentLedgers.Should().HaveCount(2, "利用とポイント還元が別々のLedgerになる");
+
+        var usageLedger = nonLentLedgers.FirstOrDefault(l => l.Summary != "ポイント還元");
         usageLedger.Should().NotBeNull();
         usageLedger!.StaffName.Should().Be(TestStaffName, "通常利用が含まれるため職員名が必要");
+
+        var pointLedger = nonLentLedgers.FirstOrDefault(l => l.Summary == "ポイント還元");
+        pointLedger.Should().NotBeNull();
+        pointLedger!.StaffName.Should().BeNull("ポイント還元は自動処理のため氏名不要");
     }
 
     #endregion
@@ -2780,6 +2788,96 @@ public class LendingServiceTests : IDisposable
     {
         var segments = LendingService.SplitAtChargeBoundaries(new List<LedgerDetail>());
         segments.Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// Issue #942再現: 往復利用+暗黙ポイント還元がポイント還元境界で分割されること
+    /// </summary>
+    [Fact]
+    public void SplitAtChargeBoundaries_ImplicitPointRedemption_SplitsAsIndividualSegment()
+    {
+        // Arrange: ICカード履歴順（新しい順）→ SortChronologicallyで古い順に並ぶ
+        // 古い順: 薬院→博多(210), 博多→薬院(210), ポイント還元(-240)
+        var details = new List<LedgerDetail>
+        {
+            // 暗黙のポイント還元（金額負、乗車駅あり、IsPointRedemption=false）
+            new() { UseDate = DateTime.Today, EntryStation = "薬院", Amount = -240, Balance = 1696, IsCharge = false, IsPointRedemption = false, IsBus = false },
+            // 復路
+            new() { UseDate = DateTime.Today, EntryStation = "博多", ExitStation = "薬院", Amount = 210, Balance = 1456, IsCharge = false },
+            // 往路
+            new() { UseDate = DateTime.Today, EntryStation = "薬院", ExitStation = "博多", Amount = 210, Balance = 1666, IsCharge = false },
+        };
+
+        // Act
+        var segments = LendingService.SplitAtChargeBoundaries(details);
+
+        // Assert: 利用グループ(2件) + ポイント還元(1件) に分割
+        segments.Should().HaveCount(2);
+        segments[0].IsCharge.Should().BeFalse();
+        segments[0].IsPointRedemption.Should().BeFalse();
+        segments[0].Details.Should().HaveCount(2);
+
+        segments[1].IsPointRedemption.Should().BeTrue();
+        segments[1].Details.Should().HaveCount(1);
+        segments[1].Details[0].Amount.Should().Be(-240);
+    }
+
+    /// <summary>
+    /// Issue #942: 明示的ポイント還元（IsPointRedemption=true）も分割されること
+    /// </summary>
+    [Fact]
+    public void SplitAtChargeBoundaries_ExplicitPointRedemption_SplitsAsIndividualSegment()
+    {
+        var details = new List<LedgerDetail>
+        {
+            new() { UseDate = DateTime.Today, Amount = -100, Balance = 1500, IsCharge = false, IsPointRedemption = true },
+            new() { UseDate = DateTime.Today, EntryStation = "博多", ExitStation = "薬院", Amount = 210, Balance = 1400, IsCharge = false },
+        };
+
+        var segments = LendingService.SplitAtChargeBoundaries(details);
+
+        segments.Should().HaveCount(2);
+        segments[0].IsCharge.Should().BeFalse();
+        segments[0].IsPointRedemption.Should().BeFalse();
+        segments[0].Details.Should().HaveCount(1);
+        segments[0].Details[0].Amount.Should().Be(210);
+
+        segments[1].IsPointRedemption.Should().BeTrue();
+        segments[1].Details.Should().HaveCount(1);
+        segments[1].Details[0].Amount.Should().Be(-100);
+    }
+
+    /// <summary>
+    /// Issue #942: チャージ + 利用 + ポイント還元が混在する場合
+    /// </summary>
+    [Fact]
+    public void SplitAtChargeBoundaries_MixedChargeUsagePointRedemption_AllSplitCorrectly()
+    {
+        var details = new List<LedgerDetail>
+        {
+            // 新しい順: ポイント還元, 利用, チャージ, 利用
+            new() { UseDate = DateTime.Today, EntryStation = "薬院", Amount = -240, Balance = 1696, IsCharge = false, IsPointRedemption = false, IsBus = false },
+            new() { UseDate = DateTime.Today, EntryStation = "博多", ExitStation = "薬院", Amount = 210, Balance = 1456, IsCharge = false },
+            new() { UseDate = DateTime.Today, Amount = 1000, Balance = 1666, IsCharge = true },
+            new() { UseDate = DateTime.Today, EntryStation = "薬院", ExitStation = "博多", Amount = 210, Balance = 666, IsCharge = false },
+        };
+
+        var segments = LendingService.SplitAtChargeBoundaries(details);
+
+        // 古い順: 利用(薬院→博多), チャージ, 利用(博多→薬院), ポイント還元
+        segments.Should().HaveCount(4);
+        segments[0].IsCharge.Should().BeFalse();
+        segments[0].IsPointRedemption.Should().BeFalse();
+        segments[0].Details[0].EntryStation.Should().Be("薬院");
+
+        segments[1].IsCharge.Should().BeTrue();
+
+        segments[2].IsCharge.Should().BeFalse();
+        segments[2].IsPointRedemption.Should().BeFalse();
+        segments[2].Details[0].EntryStation.Should().Be("博多");
+
+        segments[3].IsPointRedemption.Should().BeTrue();
+        segments[3].Details[0].Amount.Should().Be(-240);
     }
 
     [Fact]
