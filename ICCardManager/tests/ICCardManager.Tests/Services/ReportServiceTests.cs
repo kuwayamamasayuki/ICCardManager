@@ -3256,4 +3256,42 @@ public class ReportServiceTests : IDisposable
     }
 
     #endregion
+
+    #region GetSummaryFontSize - Issue #946
+
+    [Theory]
+    [InlineData(null, 14)]       // null → 14pt
+    [InlineData("", 14)]         // 空文字 → 14pt
+    [InlineData("鉄道（A駅～B駅）", 14)]  // 8文字 < 15 → 14pt
+    [InlineData("鉄道（博多駅～天神駅 往復）", 14)] // 14文字 < 15 → 14pt
+    [InlineData("鉄道（博多駅～天神駅）往復です", 12)] // 15文字 → 12pt
+    [InlineData("鉄道（博多駅～天神駅、香椎駅～箱崎駅）あいうえおか", 12)] // 22文字 → 12pt
+    public void GetSummaryFontSize_文字数に応じたフォントサイズを返す(string summary, double expectedFontSize)
+    {
+        var result = ReportService.GetSummaryFontSize(summary);
+        result.Should().Be(expectedFontSize);
+    }
+
+    [Theory]
+    [InlineData(0, 14)]    // 0文字 → 14pt
+    [InlineData(14, 14)]   // 14文字 → 14pt（境界: 15未満）
+    [InlineData(15, 12)]   // 15文字 → 12pt（境界: 15以上）
+    [InlineData(31, 12)]   // 31文字 → 12pt（境界: 32未満）
+    [InlineData(32, 10)]   // 32文字 → 10pt（境界: 32以上）
+    [InlineData(37, 10)]   // 37文字 → 10pt（境界: 38未満）
+    [InlineData(38, 8)]    // 38文字 → 8pt（境界: 38以上）
+    [InlineData(92, 8)]    // 92文字 → 8pt（境界: 93未満）
+    [InlineData(93, 7)]    // 93文字 → 7pt（境界: 93以上）
+    [InlineData(107, 7)]   // 107文字 → 7pt（境界: 108未満）
+    [InlineData(108, 6)]   // 108文字 → 6pt（境界: 108以上）
+    [InlineData(200, 6)]   // 200文字 → 6pt（最小サイズ）
+    public void GetSummaryFontSize_境界値で正しいフォントサイズを返す(int length, double expectedFontSize)
+    {
+        var summary = new string('あ', length);
+        var result = ReportService.GetSummaryFontSize(summary);
+        result.Should().Be(expectedFontSize,
+            $"{length}文字の摘要に対して{expectedFontSize}ptが期待される");
+    }
+
+    #endregion
 }
