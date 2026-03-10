@@ -281,7 +281,8 @@
                                 <TextBlock Text="表示期間:"
                                            VerticalAlignment="Center"
                                            Margin="0,0,10,0"/>
-                                <Border Background="{DynamicResource ReturnBackgroundBrush}"
+                                <Border x:Name="HistoryPeriodDisplayBorder"
+                                        Background="{DynamicResource ReturnBackgroundBrush}"
                                         CornerRadius="4"
                                         Padding="15,8"
                                         Cursor="Hand"
@@ -338,7 +339,7 @@
 
                                 <!-- 月選択ポップアップ -->
                                 <Popup IsOpen="{Binding IsHistoryMonthSelectorOpen}"
-                                       PlacementTarget="{Binding ElementName=HistoryOtherMonthButton}"
+                                       PlacementTarget="{Binding ElementName=HistoryPeriodDisplayBorder}"
                                        Placement="Bottom"
                                        StaysOpen="False"
                                        AllowsTransparency="True"
