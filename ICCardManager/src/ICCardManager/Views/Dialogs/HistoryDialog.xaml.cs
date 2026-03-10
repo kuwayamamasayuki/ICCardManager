@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 using System.Windows;
+using System.Windows.Input;
 using ICCardManager.Models;
 using ICCardManager.ViewModels;
 
@@ -29,6 +30,14 @@ namespace ICCardManager.Views.Dialogs
         public async Task InitializeWithCardAsync(IcCard card)
         {
             await _viewModel.InitializeAsync(card);
+        }
+
+        /// <summary>
+        /// 表示期間テキストクリック → 月選択ポップアップを開く (Issue #945)
+        /// </summary>
+        private void PeriodDisplayButton_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+        {
+            _viewModel.OpenMonthSelector();
         }
 
         /// <summary>

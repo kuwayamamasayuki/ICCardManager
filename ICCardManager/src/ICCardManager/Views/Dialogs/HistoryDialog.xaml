@@ -82,11 +82,8 @@
                         CornerRadius="4"
                         Padding="15,8"
                         Cursor="Hand"
-                        ToolTip="クリックして表示月を変更">
-                    <Border.InputBindings>
-                        <MouseBinding MouseAction="LeftClick"
-                                      Command="{Binding OpenMonthSelectorCommand}"/>
-                    </Border.InputBindings>
+                        ToolTip="クリックして表示月を変更"
+                        MouseLeftButtonDown="PeriodDisplayButton_MouseLeftButtonDown">
                     <TextBlock Text="{Binding SelectedPeriodDisplay}"
                                FontSize="{DynamicResource LargeFontSize}"
                                FontWeight="Bold"
