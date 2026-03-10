@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 300" width="900" height="300" font-family="'Meiryo', 'Yu Gothic', sans-serif">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 310" width="900" height="310" font-family="'Meiryo', 'Yu Gothic', sans-serif">
   <!-- 背景 -->
   <rect width="900" height="300" fill="#fff"/>
 
@@ -32,5 +32,6 @@
 
   <!-- 注釈：カード登録日の縦線 -->
   <line x1="840" y1="60" x2="840" y2="270" stroke="#666" stroke-width="1.5" stroke-dasharray="6,4"/>
-  <text x="840" y="290" text-anchor="middle" font-size="14" fill="#666">▲ カード登録日</text>
+  <text x="840" y="286" text-anchor="middle" font-size="14" fill="#666">▲</text>
+  <text x="840" y="300" text-anchor="middle" font-size="13" fill="#666">カード登録日</text>
 </svg>
