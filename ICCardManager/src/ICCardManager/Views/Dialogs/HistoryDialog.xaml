@@ -77,13 +77,18 @@
                 <TextBlock Text="表示期間:"
                            VerticalAlignment="Center"
                            Margin="0,0,10,0"/>
-                <Border Background="{DynamicResource ReturnBackgroundBrush}"
+                <Border x:Name="PeriodDisplayButton"
+                        Background="{DynamicResource ReturnBackgroundBrush}"
                         CornerRadius="4"
-                        Padding="15,8">
+                        Padding="15,8"
+                        Cursor="Hand"
+                        ToolTip="クリックして表示月を変更"
+                        MouseLeftButtonUp="PeriodDisplayButton_MouseLeftButtonUp">
                     <TextBlock Text="{Binding SelectedPeriodDisplay}"
                                FontSize="{DynamicResource LargeFontSize}"
                                FontWeight="Bold"
-                               Foreground="{DynamicResource InfoTextBrush}"/>
+                               Foreground="{DynamicResource InfoTextBrush}"
+                               AutomationProperties.Name="表示期間をクリックして月を選択"/>
                 </Border>
             </StackPanel>
 
@@ -110,7 +115,7 @@
 
                 <!-- 月選択ポップアップ -->
                 <Popup IsOpen="{Binding IsMonthSelectorOpen}"
-                       PlacementTarget="{Binding ElementName=OtherMonthButton}"
+                       PlacementTarget="{Binding ElementName=PeriodDisplayButton}"
                        Placement="Bottom"
                        StaysOpen="False"
                        AllowsTransparency="True"
