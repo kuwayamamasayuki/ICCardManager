@@ -878,6 +878,79 @@ public class CsvExportServiceTests : IDisposable
         lines[3].Should().Contain(",9220,");
     }
 
+    /// <summary>
+    /// Issue #964: SequenceNumber順と残高チェーン順が異なる場合でも
+    /// 残高チェーンに基づく正しい時系列順で出力されることを確認
+    /// （FeliCa循環バッファ境界の最古部分で発生）
+    /// </summary>
+    [Fact]
+    public async Task ExportLedgerDetailsAsync_SequenceNumber順が残高チェーンと異なる場合_残高チェーン順で出力される()
+    {
+        // Arrange: Issue #964の再現データ
+        // 正しい時系列: 薬院→博多(1526) → 博多→薬院(210円支払い, 1316)
+        // だがSequenceNumberは逆順（FeliCa循環バッファ境界で発生）
+        var details = new List<LedgerDetail>
+        {
+            new LedgerDetail
+            {
+                LedgerId = 2,
+                UseDate = new DateTime(2026, 3, 2),
+                EntryStation = "博多",
+                ExitStation = "薬院",
+                Amount = 210,
+                Balance = 1316,
+                IsCharge = false,
+                IsPointRedemption = false,
+                IsBus = false,
+                SequenceNumber = 20 // FeliCa上では大きいrowid（古いはず）だが実際は新しい
+            },
+            new LedgerDetail
+            {
+                LedgerId = 2,
+                UseDate = new DateTime(2026, 3, 2),
+                EntryStation = "薬院",
+                ExitStation = "博多",
+                Amount = 0,
+                Balance = 1526,
+                IsCharge = false,
+                IsPointRedemption = false,
+                IsBus = false,
+                SequenceNumber = 1 // FeliCa上では小さいrowid（新しいはず）だが実際は古い
+            }
+        };
+
+        var ledgers = new List<Ledger>
+        {
+            new Ledger { Id = 2, CardIdm = "01010212CC0C2A1F", Date = new DateTime(2026, 3, 2) }
+        };
+        var cards = new List<IcCard>
+        {
+            new IcCard { CardIdm = "01010212CC0C2A1F", CardType = "nimoca", CardNumber = "5042" }
+        };
+
+        _ledgerRepositoryMock.Setup(x => x.GetAllDetailsInDateRangeAsync(It.IsAny<DateTime>(), It.IsAny<DateTime>())).ReturnsAsync(details);
+        _ledgerRepositoryMock.Setup(x => x.GetByDateRangeAsync(null, It.IsAny<DateTime>(), It.IsAny<DateTime>())).ReturnsAsync(ledgers);
+        _cardRepositoryMock.Setup(x => x.GetAllIncludingDeletedAsync()).ReturnsAsync(cards);
+
+        var filePath = Path.Combine(_testDirectory, "ledger_details_964.csv");
+
+        // Act
+        var result = await _service.ExportLedgerDetailsAsync(filePath, new DateTime(2026, 3, 1), new DateTime(2026, 3, 31));
+
+        // Assert: 残高チェーン順（1526→1316）で出力される
+        result.Success.Should().BeTrue();
+        var lines = await Task.Run(() => File.ReadAllLines(filePath, Encoding.UTF8));
+        lines.Should().HaveCount(3); // ヘッダー + 2行
+
+        // 1行目: 薬院→博多（残額1526、時系列的に先）
+        lines[1].Should().Contain(",薬院,博多,");
+        lines[1].Should().Contain(",1526,");
+
+        // 2行目: 博多→薬院（残額1316、時系列的に後）
+        lines[2].Should().Contain(",博多,薬院,");
+        lines[2].Should().Contain(",1316,");
+    }
+
     #endregion
 
     #region エラーハンドリング テスト

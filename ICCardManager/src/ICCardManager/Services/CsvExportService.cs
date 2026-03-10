@@ -4,6 +4,7 @@ using System.Linq;
 using System.Threading.Tasks;
 using System.IO;
 using System.Text;
+using ICCardManager.Common;
 using ICCardManager.Data.Repositories;
 using ICCardManager.Models;
 
@@ -257,19 +258,31 @@ namespace ICCardManager.Services
                     "利用履歴ID,利用日時,カードIDm,管理番号,乗車駅,降車駅,バス停,金額,残額,チャージ,ポイント還元,バス利用,グループID"
                 };
 
-                // カード種別・管理番号 → 日付 → ledger_id → rowid 順でソート
-                foreach (var detail in details
-                    .OrderBy(d =>
+                // Issue #964: LedgerId単位で残高チェーンによる時系列ソートを適用
+                // SequenceNumber（rowid）順はFeliCa循環バッファの境界で不正確になるため、
+                // 残高チェーンで確実な時系列順を得る
+                var sortedDetails = details
+                    .GroupBy(d => d.LedgerId)
+                    .SelectMany(g => LedgerDetailChronologicalSorter.Sort(g.ToList())
+                        .Select(d => d))
+                    .ToList();
+
+                // カード種別・管理番号 → 日付 → ledger_id 順でソート（グループ内は残高チェーン順を維持）
+                var orderedDetails = sortedDetails
+                    .Select((d, idx) => new { Detail = d, ChainOrder = idx })
+                    .OrderBy(x =>
                     {
-                        if (ledgerCardMap.TryGetValue(d.LedgerId, out var idm) &&
+                        if (ledgerCardMap.TryGetValue(x.Detail.LedgerId, out var idm) &&
                             cardSortKeyMap.TryGetValue(idm, out var key))
                             return key;
                         return "";
                     })
-                    .ThenBy(d => d.UseDate)
-                    .ThenBy(d => d.LedgerId)
-                    // Issue #904: SequenceNumber降順で古い取引から順に出力（FeliCa互換: 小さいrowid=新しい取引）
-                    .ThenByDescending(d => d.SequenceNumber))
+                    .ThenBy(x => x.Detail.UseDate)
+                    .ThenBy(x => x.Detail.LedgerId)
+                    .ThenBy(x => x.ChainOrder)
+                    .Select(x => x.Detail);
+
+                foreach (var detail in orderedDetails)
                 {
                     // 参照用のカードIDmと管理番号を取得
                     var cardIdm = ledgerCardMap.TryGetValue(detail.LedgerId, out var idmVal) ? idmVal : "";
