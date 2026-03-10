@@ -59,6 +59,13 @@ namespace ICCardManager.Views
         /// </remarks>
         private void HistoryPeriodDisplay_MouseLeftButtonUp(object sender, MouseButtonEventArgs e)
         {
+            HistoryMonthSelectorPopup.PlacementTarget = HistoryPeriodDisplayBorder;
+            _viewModel.HistoryOpenMonthSelector();
+        }
+
+        private void HistoryOtherMonthButton_Click(object sender, RoutedEventArgs e)
+        {
+            HistoryMonthSelectorPopup.PlacementTarget = HistoryOtherMonthButton;
             _viewModel.HistoryOpenMonthSelector();
         }
 
