@@ -1237,4 +1237,196 @@ public class SummaryGeneratorComprehensiveTests
     }
 
     #endregion
+
+    #region Issue #942: 暗黙のポイント還元の判定
+
+    /// <summary>
+    /// Issue #942再現: 往復利用の後にポイント還元（金額が負、IsPointRedemption=false）があると
+    /// 全てまとめられてしまう問題
+    /// </summary>
+    [Fact]
+    public void TC042_GenerateByDate_暗黙のポイント還元が鉄道利用と分離される()
+    {
+        // Arrange: Issue #942の再現データ（新しい順）
+        var details = new List<LedgerDetail>
+        {
+            // 最新: ポイント還元（金額が負、乗車駅あり・降車駅なし、IsPointRedemption=false）
+            new LedgerDetail
+            {
+                UseDate = new DateTime(2026, 3, 10),
+                EntryStation = "薬院",
+                ExitStation = null,
+                Amount = -240,
+                Balance = 1696,
+                IsCharge = false,
+                IsPointRedemption = false,
+                IsBus = false
+            },
+            // 博多→薬院（復路）
+            CreateRailwayUsage(new DateTime(2026, 3, 10), "博多", "薬院", 210, 1456),
+            // 薬院→博多（往路）
+            CreateRailwayUsage(new DateTime(2026, 3, 10), "薬院", "博多", 210, 1666),
+        };
+
+        // Act
+        var results = _generator.GenerateByDate(details);
+
+        // Assert: 鉄道往復とポイント還元が別行になること
+        OutputInputAndResult(details, results);
+        results.Should().HaveCount(2);
+
+        results[0].Summary.Should().Be("鉄道（薬院～博多 往復）");
+        results[0].IsPointRedemption.Should().BeFalse();
+
+        results[1].Summary.Should().Be("ポイント還元");
+        results[1].IsPointRedemption.Should().BeTrue();
+    }
+
+    /// <summary>
+    /// Issue #942: Generate（レガシーAPI）でも暗黙のポイント還元が分離されること
+    /// </summary>
+    [Fact]
+    public void TC043_Generate_暗黙のポイント還元が鉄道利用と分離される()
+    {
+        // Arrange: 往復 + 暗黙ポイント還元（新しい順）
+        var details = new List<LedgerDetail>
+        {
+            new LedgerDetail
+            {
+                UseDate = new DateTime(2026, 3, 10),
+                EntryStation = "薬院",
+                ExitStation = null,
+                Amount = -240,
+                Balance = 1696,
+                IsCharge = false,
+                IsPointRedemption = false,
+                IsBus = false
+            },
+            CreateRailwayUsage(new DateTime(2026, 3, 10), "博多", "薬院", 210, 1456),
+            CreateRailwayUsage(new DateTime(2026, 3, 10), "薬院", "博多", 210, 1666),
+        };
+
+        // Act
+        var result = _generator.Generate(details);
+
+        // Assert: 鉄道の往復のみが摘要に含まれ、ポイント還元は含まれない
+        // （Generate()は利用のみを生成するため、暗黙ポイント還元は除外される）
+        result.Should().Be("鉄道（薬院～博多 往復）");
+    }
+
+    /// <summary>
+    /// Issue #942: 暗黙のポイント還元のみの場合
+    /// </summary>
+    [Fact]
+    public void TC044_Generate_暗黙のポイント還元のみの場合はポイント還元を返す()
+    {
+        var details = new List<LedgerDetail>
+        {
+            new LedgerDetail
+            {
+                UseDate = new DateTime(2026, 3, 10),
+                EntryStation = "薬院",
+                ExitStation = null,
+                Amount = -240,
+                Balance = 1696,
+                IsCharge = false,
+                IsPointRedemption = false,
+                IsBus = false
+            }
+        };
+
+        var result = _generator.Generate(details);
+        result.Should().Be("ポイント還元");
+    }
+
+    /// <summary>
+    /// Issue #942: IsImplicitPointRedemption の判定ロジック
+    /// </summary>
+    [Fact]
+    public void TC045_IsImplicitPointRedemption_各パターンの判定()
+    {
+        // 暗黙のポイント還元: 金額が負、チャージでもポイント還元フラグでもない
+        SummaryGenerator.IsImplicitPointRedemption(new LedgerDetail
+        {
+            Amount = -240, IsCharge = false, IsPointRedemption = false
+        }).Should().BeTrue();
+
+        // 正の金額 → false
+        SummaryGenerator.IsImplicitPointRedemption(new LedgerDetail
+        {
+            Amount = 210, IsCharge = false, IsPointRedemption = false
+        }).Should().BeFalse();
+
+        // チャージ → false（チャージは別処理）
+        SummaryGenerator.IsImplicitPointRedemption(new LedgerDetail
+        {
+            Amount = -1000, IsCharge = true, IsPointRedemption = false
+        }).Should().BeFalse();
+
+        // 既にポイント還元フラグあり → false（明示的なので暗黙ではない）
+        SummaryGenerator.IsImplicitPointRedemption(new LedgerDetail
+        {
+            Amount = -240, IsCharge = false, IsPointRedemption = true
+        }).Should().BeFalse();
+
+        // 金額がnull → false
+        SummaryGenerator.IsImplicitPointRedemption(new LedgerDetail
+        {
+            Amount = null, IsCharge = false, IsPointRedemption = false
+        }).Should().BeFalse();
+
+        // 金額が0 → false
+        SummaryGenerator.IsImplicitPointRedemption(new LedgerDetail
+        {
+            Amount = 0, IsCharge = false, IsPointRedemption = false
+        }).Should().BeFalse();
+    }
+
+    /// <summary>
+    /// Issue #942: 明示的ポイント還元と暗黙ポイント還元が混在する場合
+    /// </summary>
+    [Fact]
+    public void TC046_GenerateByDate_明示的と暗黙のポイント還元が混在()
+    {
+        var details = new List<LedgerDetail>
+        {
+            // 暗黙のポイント還元
+            new LedgerDetail
+            {
+                UseDate = new DateTime(2026, 3, 10),
+                EntryStation = "薬院",
+                ExitStation = null,
+                Amount = -240,
+                Balance = 1696,
+                IsCharge = false,
+                IsPointRedemption = false,
+                IsBus = false
+            },
+            // 明示的ポイント還元
+            new LedgerDetail
+            {
+                UseDate = new DateTime(2026, 3, 10),
+                Amount = -100,
+                Balance = 1456,
+                IsCharge = false,
+                IsPointRedemption = true,
+                IsBus = false
+            },
+            // 鉄道利用
+            CreateRailwayUsage(new DateTime(2026, 3, 10), "薬院", "博多", 210, 1356),
+        };
+
+        var results = _generator.GenerateByDate(details);
+
+        OutputInputAndResult(details, results);
+        results.Should().HaveCount(2);
+
+        results[0].Summary.Should().Be("鉄道（薬院～博多）");
+        results[0].IsPointRedemption.Should().BeFalse();
+
+        results[1].Summary.Should().Be("ポイント還元");
+        results[1].IsPointRedemption.Should().BeTrue();
+    }
+
+    #endregion
 }

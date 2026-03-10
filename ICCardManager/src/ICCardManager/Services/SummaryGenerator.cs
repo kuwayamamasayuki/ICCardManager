@@ -94,6 +94,23 @@ namespace ICCardManager.Services
         /// 異なる事業者間で駅名が異なるが、物理的に近接する駅のグループ。
         /// 同一グループ内の駅間の移動は乗り継ぎとして判定される。
         /// </remarks>
+        /// <summary>
+        /// 金額が負でチャージでもポイント還元フラグでもないレコードを暗黙のポイント還元として判定
+        /// </summary>
+        /// <remarks>
+        /// Issue #942: ICカードの生データでは、ポイント還元が乗車駅ありの負金額レコードとして
+        /// 記録されることがある（IsPointRedemption=falseのまま）。
+        /// 金額が負＝カードに入金されている＝チャージまたはポイント還元であるため、
+        /// IsCharge=falseかつIsPointRedemption=falseで金額が負のレコードはポイント還元とみなす。
+        /// </remarks>
+        internal static bool IsImplicitPointRedemption(LedgerDetail detail)
+        {
+            return detail.Amount.HasValue
+                && detail.Amount.Value < 0
+                && !detail.IsCharge
+                && !detail.IsPointRedemption;
+        }
+
         private static readonly List<HashSet<string>> TransferStationGroups = new()
         {
             // 天神グループ（福岡市地下鉄・西鉄）
@@ -186,11 +203,13 @@ namespace ICCardManager.Services
                 var dayItems = dateGroup.ToList();
 
                 // ポイント還元を先に分離（ポイント還元は個別DailySummaryだがチャージ境界にはしない）
-                var pointRedemptionItems = dayItems.Where(x => x.Detail.IsPointRedemption).ToList();
+                // Issue #942: 明示的フラグ + 暗黙のポイント還元（金額が負でチャージでもない）を両方分離
+                var pointRedemptionItems = dayItems
+                    .Where(x => x.Detail.IsPointRedemption || IsImplicitPointRedemption(x.Detail)).ToList();
 
                 // 残りの項目（利用+チャージ）を時系列順（古い順＝インデックス降順）にソート
                 var usageAndChargeItems = dayItems
-                    .Where(x => !x.Detail.IsPointRedemption)
+                    .Where(x => !x.Detail.IsPointRedemption && !IsImplicitPointRedemption(x.Detail))
                     .OrderByDescending(x => x.Index)
                     .ToList();
 
@@ -344,13 +363,14 @@ namespace ICCardManager.Services
             }
 
             // ポイント還元のみの場合
-            if (detailList.All(d => d.IsPointRedemption))
+            // Issue #942: 暗黙のポイント還元（金額が負でチャージでもない）も含めて判定
+            if (detailList.All(d => d.IsPointRedemption || IsImplicitPointRedemption(d)))
             {
                 return "ポイント還元";
             }
 
-            var railwayTrips = detailList.Where(d => !d.IsCharge && !d.IsPointRedemption && !d.IsBus).ToList();
-            var busTrips = detailList.Where(d => !d.IsCharge && !d.IsPointRedemption && d.IsBus).ToList();
+            var railwayTrips = detailList.Where(d => !d.IsCharge && !d.IsPointRedemption && !IsImplicitPointRedemption(d) && !d.IsBus).ToList();
+            var busTrips = detailList.Where(d => !d.IsCharge && !d.IsPointRedemption && !IsImplicitPointRedemption(d) && d.IsBus).ToList();
 
             var summaryParts = new List<string>();
 
