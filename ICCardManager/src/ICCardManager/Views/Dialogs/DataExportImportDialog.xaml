@@ -31,20 +31,19 @@
 
     <Grid Margin="20">
         <Grid.RowDefinitions>
-            <RowDefinition Height="*"/>      <!-- Row 0: スクロール可能なコンテンツ -->
-            <RowDefinition Height="Auto"/>   <!-- Row 1: Close button（常に表示） -->
+            <RowDefinition Height="Auto"/>   <!-- Row 0: 設定エリア（ScrollViewer） -->
+            <RowDefinition Height="*" MinHeight="0"/>  <!-- Row 1: プレビュー結果＋エラー（リサイズ可能） -->
+            <RowDefinition Height="Auto"/>   <!-- Row 2: Close button（常に表示） -->
         </Grid.RowDefinitions>
 
-        <!-- スクロール可能なコンテンツ領域 -->
-        <ScrollViewer Grid.Row="0" VerticalScrollBarVisibility="Auto">
+        <!-- 設定エリア（スクロール可能） -->
+        <ScrollViewer Grid.Row="0" VerticalScrollBarVisibility="Auto" MaxHeight="400">
         <Grid>
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>   <!-- Row 0: エクスポート設定 -->
             <RowDefinition Height="Auto"/>   <!-- Row 1: インポート設定（スクロール可能） -->
-            <RowDefinition Height="Auto"/>   <!-- Row 2: アクションボタン（常に表示） -->
+            <RowDefinition Height="Auto"/>   <!-- Row 2: アクションボタン -->
             <RowDefinition Height="Auto"/>   <!-- Row 3: Status message -->
-            <RowDefinition Height="Auto"/>   <!-- Row 4: プレビュー結果（サマリー + DataGrid） -->
-            <RowDefinition Height="Auto"/>   <!-- Row 5: エラー一覧 -->
         </Grid.RowDefinitions>
 
         <!-- エクスポート設定 -->
@@ -398,167 +397,190 @@
                        TextWrapping="Wrap"/>
         </Border>
 
-        <!-- プレビュー結果セクション -->
-        <Grid Grid.Row="4" Margin="0,0,0,10"
-              Visibility="{Binding HasPreview, Converter={StaticResource BoolToVisibilityConverter}}">
-            <Grid.RowDefinitions>
-                <RowDefinition Height="Auto"/>  <!-- サマリーバナー -->
-                <RowDefinition Height="Auto"/>  <!-- DataGrid -->
-            </Grid.RowDefinitions>
-
-            <!-- プレビューサマリー -->
-            <Border Grid.Row="0" Background="{DynamicResource LendingBackgroundBrush}" Padding="10" CornerRadius="3" Margin="0,0,0,5">
-                <StackPanel>
-                    <TextBlock FontWeight="Bold" FontSize="{DynamicResource BaseFontSize}">
-                        <Run Text="プレビュー結果: "/>
-                        <Run Text="{Binding PreviewSummary}" Foreground="{DynamicResource LendingForegroundBrush}"/>
-                    </TextBlock>
-                    <TextBlock Text="{Binding ImportPreviewFile, StringFormat=ファイル: {0}}"
-                               Foreground="{DynamicResource SecondaryTextBrush}"
-                               FontSize="{DynamicResource SmallFontSize}"
-                               Margin="0,5,0,0"
-                               TextTrimming="CharacterEllipsis"/>
-                </StackPanel>
-            </Border>
-
-            <!-- プレビューDataGrid -->
-            <DataGrid Grid.Row="1"
-                      ItemsSource="{Binding PreviewItems}"
-                      AutoGenerateColumns="False"
-                      IsReadOnly="True"
-                      CanUserAddRows="False"
-                      CanUserDeleteRows="False"
-                      SelectionMode="Single"
-                      GridLinesVisibility="Horizontal"
-                      HeadersVisibility="Column"
-                      BorderThickness="1"
-                      BorderBrush="{DynamicResource SubtleBorderBrush}"
-                      MinHeight="120"
-                      MaxHeight="300"
-                      AutomationProperties.Name="インポートプレビュー一覧">
-                <DataGrid.Columns>
-                    <DataGridTextColumn Header="行" Binding="{Binding LineNumber}" Width="50"/>
-                    <DataGridTextColumn Binding="{Binding Idm}" Width="220">
-                        <DataGridTextColumn.HeaderTemplate>
-                            <DataTemplate>
-                                <TextBlock Text="{Binding DataContext.PreviewColumn1Header, RelativeSource={RelativeSource AncestorType=DataGrid}}"/>
-                            </DataTemplate>
-                        </DataGridTextColumn.HeaderTemplate>
-                    </DataGridTextColumn>
-                    <DataGridTextColumn Binding="{Binding Name}" Width="120">
-                        <DataGridTextColumn.HeaderTemplate>
-                            <DataTemplate>
-                                <TextBlock Text="{Binding DataContext.PreviewColumn2Header, RelativeSource={RelativeSource AncestorType=DataGrid}}"/>
-                            </DataTemplate>
-                        </DataGridTextColumn.HeaderTemplate>
-                    </DataGridTextColumn>
-                    <DataGridTextColumn Binding="{Binding AdditionalInfo}" Width="100">
-                        <DataGridTextColumn.HeaderTemplate>
-                            <DataTemplate>
-                                <TextBlock Text="{Binding DataContext.PreviewColumn3Header, RelativeSource={RelativeSource AncestorType=DataGrid}}"/>
-                            </DataTemplate>
-                        </DataGridTextColumn.HeaderTemplate>
-                    </DataGridTextColumn>
-                    <DataGridTemplateColumn Header="アクション" Width="80">
-                        <DataGridTemplateColumn.CellTemplate>
-                            <DataTemplate>
-                                <TextBlock Text="{Binding Action, Converter={StaticResource ImportActionConverter}}"
-                                           Padding="5,2">
-                                    <TextBlock.Style>
-                                        <Style TargetType="TextBlock">
-                                            <Style.Triggers>
-                                                <DataTrigger Binding="{Binding Action}" Value="Insert">
-                                                    <Setter Property="Foreground" Value="{DynamicResource SuccessActionBrush}"/>
-                                                    <Setter Property="FontWeight" Value="Bold"/>
-                                                </DataTrigger>
-                                                <DataTrigger Binding="{Binding Action}" Value="Update">
-                                                    <Setter Property="Foreground" Value="{DynamicResource WarningActionBrush}"/>
-                                                    <Setter Property="FontWeight" Value="Bold"/>
-                                                </DataTrigger>
-                                                <DataTrigger Binding="{Binding Action}" Value="Skip">
-                                                    <Setter Property="Foreground" Value="{DynamicResource WaitingBorderBrush}"/>
-                                                </DataTrigger>
-                                                <DataTrigger Binding="{Binding Action}" Value="Restore">
-                                                    <Setter Property="Foreground" Value="{DynamicResource HeaderBackgroundBrush}"/>
-                                                    <Setter Property="FontWeight" Value="Bold"/>
-                                                </DataTrigger>
-                                            </Style.Triggers>
-                                        </Style>
-                                    </TextBlock.Style>
-                                </TextBlock>
-                            </DataTemplate>
-                        </DataGridTemplateColumn.CellTemplate>
-                    </DataGridTemplateColumn>
-                    <DataGridTemplateColumn Header="変更点" Width="*">
-                        <DataGridTemplateColumn.CellTemplate>
-                            <DataTemplate>
-                                <TextBlock Text="{Binding ChangesSummary}"
-                                           Foreground="{DynamicResource LendingForegroundBrush}"
-                                           TextTrimming="CharacterEllipsis"
-                                           ToolTip="{Binding ChangesSummary}"
-                                           Padding="5,2">
-                                    <TextBlock.Style>
-                                        <Style TargetType="TextBlock">
-                                            <Style.Triggers>
-                                                <DataTrigger Binding="{Binding HasChanges}" Value="True">
-                                                    <Setter Property="FontStyle" Value="Italic"/>
-                                                </DataTrigger>
-                                            </Style.Triggers>
-                                        </Style>
-                                    </TextBlock.Style>
-                                </TextBlock>
-                            </DataTemplate>
-                        </DataGridTemplateColumn.CellTemplate>
-                    </DataGridTemplateColumn>
-                </DataGrid.Columns>
-                <DataGrid.RowDetailsTemplate>
-                    <DataTemplate>
-                        <Border Background="{DynamicResource WarningBackgroundBrush}" Padding="10" Margin="0,2"
-                                Visibility="{Binding HasChanges, Converter={StaticResource BoolToVisibilityConverter}}">
-                            <StackPanel>
-                                <TextBlock Text="{Binding ChangesHeader}" FontWeight="Bold" Margin="0,0,0,5"/>
-                                <ItemsControl ItemsSource="{Binding Changes}">
-                                    <ItemsControl.ItemTemplate>
-                                        <DataTemplate>
-                                            <TextBlock Text="{Binding DisplayText}"
-                                                       Foreground="#795548"
-                                                       Margin="10,2,0,2"/>
-                                        </DataTemplate>
-                                    </ItemsControl.ItemTemplate>
-                                </ItemsControl>
-                            </StackPanel>
-                        </Border>
-                    </DataTemplate>
-                </DataGrid.RowDetailsTemplate>
-            </DataGrid>
-        </Grid>
-
-        <!-- エラー一覧セクション -->
-        <Border Grid.Row="5" Background="{DynamicResource LendingBackgroundBrush}" Padding="10" CornerRadius="3" Margin="0,0,0,10"
-                Visibility="{Binding ImportErrors.Count, Converter={StaticResource IntToVisibilityConverter}}">
-            <StackPanel>
-                <TextBlock Text="エラー詳細" FontWeight="Bold" FontSize="{DynamicResource BaseFontSize}" Margin="0,0,0,5"/>
-                <ListBox ItemsSource="{Binding ImportErrors}"
-                         Background="{DynamicResource LendingBackgroundBrush}"
-                         BorderThickness="0"
-                         MaxHeight="150"
-                         AutomationProperties.Name="インポートエラー一覧">
-                    <ListBox.ItemTemplate>
-                        <DataTemplate>
-                            <TextBlock Text="{Binding}"
-                                       Foreground="{DynamicResource LendingForegroundBrush}"
-                                       FontSize="{DynamicResource SmallFontSize}"/>
-                        </DataTemplate>
-                    </ListBox.ItemTemplate>
-                </ListBox>
-            </StackPanel>
-        </Border>
-
         </Grid>
         </ScrollViewer>
 
+        <!-- プレビュー結果＋エラー一覧（リサイズ可能エリア） -->
+        <Grid Grid.Row="1" Margin="0,5,0,0">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="3*" MinHeight="80"/>  <!-- プレビュー結果 -->
+                <RowDefinition Height="Auto"/>                <!-- GridSplitter -->
+                <RowDefinition Height="*" MinHeight="50"/>   <!-- エラー一覧 -->
+            </Grid.RowDefinitions>
+
+            <!-- プレビュー結果セクション -->
+            <Grid Grid.Row="0"
+                  Visibility="{Binding HasPreview, Converter={StaticResource BoolToVisibilityConverter}}">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>  <!-- サマリーバナー -->
+                    <RowDefinition Height="*"/>     <!-- DataGrid -->
+                </Grid.RowDefinitions>
+
+                <!-- プレビューサマリー -->
+                <Border Grid.Row="0" Background="{DynamicResource LendingBackgroundBrush}" Padding="10" CornerRadius="3" Margin="0,0,0,5">
+                    <StackPanel>
+                        <TextBlock FontWeight="Bold" FontSize="{DynamicResource BaseFontSize}">
+                            <Run Text="プレビュー結果: "/>
+                            <Run Text="{Binding PreviewSummary}" Foreground="{DynamicResource LendingForegroundBrush}"/>
+                        </TextBlock>
+                        <TextBlock Text="{Binding ImportPreviewFile, StringFormat=ファイル: {0}}"
+                                   Foreground="{DynamicResource SecondaryTextBrush}"
+                                   FontSize="{DynamicResource SmallFontSize}"
+                                   Margin="0,5,0,0"
+                                   TextTrimming="CharacterEllipsis"/>
+                    </StackPanel>
+                </Border>
+
+                <!-- プレビューDataGrid -->
+                <DataGrid Grid.Row="1"
+                          ItemsSource="{Binding PreviewItems}"
+                          AutoGenerateColumns="False"
+                          IsReadOnly="True"
+                          CanUserAddRows="False"
+                          CanUserDeleteRows="False"
+                          SelectionMode="Single"
+                          GridLinesVisibility="Horizontal"
+                          HeadersVisibility="Column"
+                          BorderThickness="1"
+                          BorderBrush="{DynamicResource SubtleBorderBrush}"
+                          AutomationProperties.Name="インポートプレビュー一覧">
+                    <DataGrid.Columns>
+                        <DataGridTextColumn Header="行" Binding="{Binding LineNumber}" Width="50"/>
+                        <DataGridTextColumn Binding="{Binding Idm}" Width="220">
+                            <DataGridTextColumn.HeaderTemplate>
+                                <DataTemplate>
+                                    <TextBlock Text="{Binding DataContext.PreviewColumn1Header, RelativeSource={RelativeSource AncestorType=DataGrid}}"/>
+                                </DataTemplate>
+                            </DataGridTextColumn.HeaderTemplate>
+                        </DataGridTextColumn>
+                        <DataGridTextColumn Binding="{Binding Name}" Width="120">
+                            <DataGridTextColumn.HeaderTemplate>
+                                <DataTemplate>
+                                    <TextBlock Text="{Binding DataContext.PreviewColumn2Header, RelativeSource={RelativeSource AncestorType=DataGrid}}"/>
+                                </DataTemplate>
+                            </DataGridTextColumn.HeaderTemplate>
+                        </DataGridTextColumn>
+                        <DataGridTextColumn Binding="{Binding AdditionalInfo}" Width="100">
+                            <DataGridTextColumn.HeaderTemplate>
+                                <DataTemplate>
+                                    <TextBlock Text="{Binding DataContext.PreviewColumn3Header, RelativeSource={RelativeSource AncestorType=DataGrid}}"/>
+                                </DataTemplate>
+                            </DataGridTextColumn.HeaderTemplate>
+                        </DataGridTextColumn>
+                        <DataGridTemplateColumn Header="アクション" Width="80">
+                            <DataGridTemplateColumn.CellTemplate>
+                                <DataTemplate>
+                                    <TextBlock Text="{Binding Action, Converter={StaticResource ImportActionConverter}}"
+                                               Padding="5,2">
+                                        <TextBlock.Style>
+                                            <Style TargetType="TextBlock">
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding Action}" Value="Insert">
+                                                        <Setter Property="Foreground" Value="{DynamicResource SuccessActionBrush}"/>
+                                                        <Setter Property="FontWeight" Value="Bold"/>
+                                                    </DataTrigger>
+                                                    <DataTrigger Binding="{Binding Action}" Value="Update">
+                                                        <Setter Property="Foreground" Value="{DynamicResource WarningActionBrush}"/>
+                                                        <Setter Property="FontWeight" Value="Bold"/>
+                                                    </DataTrigger>
+                                                    <DataTrigger Binding="{Binding Action}" Value="Skip">
+                                                        <Setter Property="Foreground" Value="{DynamicResource WaitingBorderBrush}"/>
+                                                    </DataTrigger>
+                                                    <DataTrigger Binding="{Binding Action}" Value="Restore">
+                                                        <Setter Property="Foreground" Value="{DynamicResource HeaderBackgroundBrush}"/>
+                                                        <Setter Property="FontWeight" Value="Bold"/>
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </TextBlock.Style>
+                                    </TextBlock>
+                                </DataTemplate>
+                            </DataGridTemplateColumn.CellTemplate>
+                        </DataGridTemplateColumn>
+                        <DataGridTemplateColumn Header="変更点" Width="*">
+                            <DataGridTemplateColumn.CellTemplate>
+                                <DataTemplate>
+                                    <TextBlock Text="{Binding ChangesSummary}"
+                                               Foreground="{DynamicResource LendingForegroundBrush}"
+                                               TextTrimming="CharacterEllipsis"
+                                               ToolTip="{Binding ChangesSummary}"
+                                               Padding="5,2">
+                                        <TextBlock.Style>
+                                            <Style TargetType="TextBlock">
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding HasChanges}" Value="True">
+                                                        <Setter Property="FontStyle" Value="Italic"/>
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </TextBlock.Style>
+                                    </TextBlock>
+                                </DataTemplate>
+                            </DataGridTemplateColumn.CellTemplate>
+                        </DataGridTemplateColumn>
+                    </DataGrid.Columns>
+                    <DataGrid.RowDetailsTemplate>
+                        <DataTemplate>
+                            <Border Background="{DynamicResource WarningBackgroundBrush}" Padding="10" Margin="0,2"
+                                    Visibility="{Binding HasChanges, Converter={StaticResource BoolToVisibilityConverter}}">
+                                <StackPanel>
+                                    <TextBlock Text="{Binding ChangesHeader}" FontWeight="Bold" Margin="0,0,0,5"/>
+                                    <ItemsControl ItemsSource="{Binding Changes}">
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate>
+                                                <TextBlock Text="{Binding DisplayText}"
+                                                           Foreground="#795548"
+                                                           Margin="10,2,0,2"/>
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+                                </StackPanel>
+                            </Border>
+                        </DataTemplate>
+                    </DataGrid.RowDetailsTemplate>
+                </DataGrid>
+            </Grid>
+
+            <!-- リサイズ用スプリッター -->
+            <GridSplitter Grid.Row="1"
+                          Height="5"
+                          HorizontalAlignment="Stretch"
+                          VerticalAlignment="Center"
+                          Background="{DynamicResource NeutralBorderBrush}"
+                          Margin="0,3"
+                          Cursor="SizeNS"
+                          Visibility="{Binding HasPreview, Converter={StaticResource BoolToVisibilityConverter}}"
+                          AutomationProperties.Name="プレビューとエラー一覧の境界をドラッグしてリサイズ"
+                          ToolTip="ドラッグしてプレビュー結果とエラー一覧の高さを調整"/>
+
+            <!-- エラー一覧セクション -->
+            <Border Grid.Row="2" Background="{DynamicResource LendingBackgroundBrush}" Padding="10" CornerRadius="3"
+                    Visibility="{Binding ImportErrors.Count, Converter={StaticResource IntToVisibilityConverter}}">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                    </Grid.RowDefinitions>
+                    <TextBlock Grid.Row="0" Text="エラー詳細" FontWeight="Bold" FontSize="{DynamicResource BaseFontSize}" Margin="0,0,0,5"/>
+                    <ListBox Grid.Row="1"
+                             ItemsSource="{Binding ImportErrors}"
+                             Background="{DynamicResource LendingBackgroundBrush}"
+                             BorderThickness="0"
+                             AutomationProperties.Name="インポートエラー一覧">
+                        <ListBox.ItemTemplate>
+                            <DataTemplate>
+                                <TextBlock Text="{Binding}"
+                                           Foreground="{DynamicResource LendingForegroundBrush}"
+                                           FontSize="{DynamicResource SmallFontSize}"/>
+                            </DataTemplate>
+                        </ListBox.ItemTemplate>
+                    </ListBox>
+                </Grid>
+            </Border>
+        </Grid>
+
         <!-- 閉じるボタン（常に画面下部に表示） -->
-        <StackPanel Grid.Row="1"
+        <StackPanel Grid.Row="2"
                     Orientation="Horizontal"
                     HorizontalAlignment="Right"
                     Margin="0,15,0,0">
@@ -572,7 +594,7 @@
         </StackPanel>
 
         <!-- 処理中オーバーレイ -->
-        <Border Grid.RowSpan="2"
+        <Border Grid.RowSpan="3"
                 Background="{DynamicResource OverlayBrush}"
                 Visibility="{Binding IsBusy, Converter={StaticResource BoolToVisibilityConverter}}">
             <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
