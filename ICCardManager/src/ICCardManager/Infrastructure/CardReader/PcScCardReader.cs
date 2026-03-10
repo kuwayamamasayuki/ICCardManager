@@ -1054,6 +1054,15 @@ namespace ICCardManager.Infrastructure.CardReader
                     }
                 }
 
+                // Issue #942: 利用種別バイトが0x0D以外でも残高が増加している場合はポイント還元とみなす
+                // FeliCaカードの利用種別はカード/リーダーによってバリエーションがあるため、
+                // 金額の符号（残高増減の方向）を最終的な判断基準とする
+                if (amount.HasValue && amount.Value < 0 && !isCharge && !isPointRedemption)
+                {
+                    isPointRedemption = true;
+                    amount = -amount.Value;  // 正の金額（入金額）に変換
+                }
+
 #if DEBUG
                 System.Diagnostics.Debug.WriteLine(
                     $"履歴: 日付={useDate:yyyy/MM/dd}, 入場={entryStationCode:X4}, 出場={exitStationCode:X4}, " +
