@@ -180,17 +180,13 @@ function New-VoiceWav {
     $audioQuery.postPhonemeLength = $PostPhonemeLength
     Write-Host " OK (速度:$SpeedScale ピッチ:$PitchScale 抑揚:$IntonationScale 音量:$VolumeScale)" -ForegroundColor Green
 
-    # 3. 音声合成を実行してWAVデータを取得
+    # 3. 音声合成を実行してWAVファイルとして直接保存
     Write-Host "  [$fileName] 音声合成中..." -NoNewline
     $synthesisUrl = "$BaseUrl/synthesis?speaker=$SpeakerId"
     $queryJson = $audioQuery | ConvertTo-Json -Depth 10
-    $wavData = Invoke-WebRequest -Uri $synthesisUrl -Method Post -ContentType "application/json" -Body $queryJson
-    Write-Host " OK" -ForegroundColor Green
-
-    # 4. WAVファイルとして保存
-    [System.IO.File]::WriteAllBytes($OutputPath, $wavData.Content)
+    Invoke-WebRequest -Uri $synthesisUrl -Method Post -ContentType "application/json" -Body $queryJson -OutFile $OutputPath
     $fileSize = (Get-Item $OutputPath).Length
-    Write-Host "  [$fileName] 保存完了 ($fileSize bytes)" -ForegroundColor Green
+    Write-Host " OK ($fileSize bytes)" -ForegroundColor Green
 }
 
 # =============================================
