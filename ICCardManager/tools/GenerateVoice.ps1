@@ -23,12 +23,36 @@
     WAV ファイルの出力先ディレクトリ
     デフォルト: src/ICCardManager/Resources/Sounds/
 
+.PARAMETER SpeedScale
+    話速（デフォルト: 1.15 … やや速めで元気な印象に）
+    1.0 = 標準速度
+
+.PARAMETER PitchScale
+    ピッチ（デフォルト: 0.06 … やや高めで明るい印象に）
+    0.0 = 標準ピッチ、正の値で高く、負の値で低く
+
+.PARAMETER IntonationScale
+    抑揚（デフォルト: 1.6 … 大きく抑揚をつけて元気よく）
+    1.0 = 標準抑揚、大きいほど表情豊か
+
+.PARAMETER VolumeScale
+    音量（デフォルト: 1.0 … 標準音量）
+    1.0 = 標準音量
+
+.PARAMETER PrePhonemeLength
+    音声前の無音時間（秒）（デフォルト: 0.0 … 無音なしで即座に発声）
+    VOICEVOXのデフォルトは 0.15
+
+.PARAMETER PostPhonemeLength
+    音声後の無音時間（秒）（デフォルト: 0.0 … 無音なしで即座に終了）
+    VOICEVOXのデフォルトは 0.15
+
 .PARAMETER ListSpeakers
     利用可能なスピーカー一覧を表示して終了します
 
 .EXAMPLE
     .\GenerateVoice.ps1
-    デフォルト設定で4つのWAVファイルを生成します。
+    デフォルト設定（元気よい声）で4つのWAVファイルを生成します。
 
 .EXAMPLE
     .\GenerateVoice.ps1 -ListSpeakers
@@ -37,6 +61,10 @@
 .EXAMPLE
     .\GenerateVoice.ps1 -FemaleSpeakerId 2 -MaleSpeakerId 11
     スピーカーIDを指定して生成します。
+
+.EXAMPLE
+    .\GenerateVoice.ps1 -SpeedScale 1.0 -PitchScale 0.0 -IntonationScale 1.0
+    すべてのパラメータを標準値にリセットして生成します。
 
 .NOTES
     作成日: 2026-02-23
@@ -52,6 +80,12 @@ param(
     [int]$MaleSpeakerId = 11,
     [int]$Port = 50021,
     [string]$OutputDir = "",
+    [double]$SpeedScale = 1.15,
+    [double]$PitchScale = 0.06,
+    [double]$IntonationScale = 1.6,
+    [double]$VolumeScale = 1.0,
+    [double]$PrePhonemeLength = 0.0,
+    [double]$PostPhonemeLength = 0.0,
     [switch]$ListSpeakers
 )
 
@@ -136,14 +170,24 @@ function New-VoiceWav {
     $audioQuery = Invoke-RestMethod -Uri $queryUrl -Method Post -ContentType "application/json"
     Write-Host " OK" -ForegroundColor Green
 
-    # 2. 音声合成を実行してWAVデータを取得
+    # 2. 音声パラメータを調整（元気よい声に）
+    Write-Host "  [$fileName] パラメータ調整中..." -NoNewline
+    $audioQuery.speedScale = $SpeedScale
+    $audioQuery.pitchScale = $PitchScale
+    $audioQuery.intonationScale = $IntonationScale
+    $audioQuery.volumeScale = $VolumeScale
+    $audioQuery.prePhonemeLength = $PrePhonemeLength
+    $audioQuery.postPhonemeLength = $PostPhonemeLength
+    Write-Host " OK (速度:$SpeedScale ピッチ:$PitchScale 抑揚:$IntonationScale 音量:$VolumeScale)" -ForegroundColor Green
+
+    # 3. 音声合成を実行してWAVデータを取得
     Write-Host "  [$fileName] 音声合成中..." -NoNewline
     $synthesisUrl = "$BaseUrl/synthesis?speaker=$SpeakerId"
     $queryJson = $audioQuery | ConvertTo-Json -Depth 10
     $wavData = Invoke-WebRequest -Uri $synthesisUrl -Method Post -ContentType "application/json" -Body $queryJson
     Write-Host " OK" -ForegroundColor Green
 
-    # 3. WAVファイルとして保存
+    # 4. WAVファイルとして保存
     [System.IO.File]::WriteAllBytes($OutputPath, $wavData.Content)
     $fileSize = (Get-Item $OutputPath).Length
     Write-Host "  [$fileName] 保存完了 ($fileSize bytes)" -ForegroundColor Green
@@ -185,6 +229,14 @@ Write-Host "設定:" -ForegroundColor Yellow
 Write-Host "  女性ボイス: $femaleName (ID: $FemaleSpeakerId)"
 Write-Host "  男性ボイス: $maleName (ID: $MaleSpeakerId)"
 Write-Host "  出力先:     $OutputDir"
+Write-Host ""
+Write-Host "音声パラメータ:" -ForegroundColor Yellow
+Write-Host "  話速:       $SpeedScale (標準: 1.0)"
+Write-Host "  ピッチ:     $PitchScale (標準: 0.0)"
+Write-Host "  抑揚:       $IntonationScale (標準: 1.0)"
+Write-Host "  音量:       $VolumeScale (標準: 1.0)"
+Write-Host "  前無音:     $PrePhonemeLength 秒 (VOICEVOX既定: 0.15)"
+Write-Host "  後無音:     $PostPhonemeLength 秒 (VOICEVOX既定: 0.15)"
 Write-Host ""
 
 # 生成する音声の定義
