@@ -2482,7 +2482,7 @@ FEDCBA9876543210,鈴木花子,002,テスト2";
         updateItem.ChangesHeader.Should().Be("変更内容の詳細:");
 
         var skipItem = new CsvImportPreviewItem { Action = ImportAction.Skip };
-        skipItem.ChangesHeader.Should().Be("変更内容の詳細:");
+        skipItem.ChangesHeader.Should().Be("スキップするデータ:");
     }
 
     /// <summary>
@@ -2561,6 +2561,247 @@ FEDCBA9876543210,鈴木花子,002,テスト2";
         var result = CsvImportService.FormatDetailDescription(detail);
 
         result.Should().Be("2024-01-15 16:00 ポイント還元 50円 残額9590円");
+    }
+
+    #endregion
+
+    #region Issue #969: 追加・スキップ時もクリックで詳細表示
+
+    /// <summary>
+    /// FieldChangeのIsDisplayOnlyがtrueの場合、矢印なしの表示になること
+    /// </summary>
+    [Fact]
+    public void FieldChange_IsDisplayOnly_矢印なしの表示()
+    {
+        var normalChange = new FieldChange
+        {
+            FieldName = "日付",
+            OldValue = "2024-01-01",
+            NewValue = "2024-01-02",
+            IsDisplayOnly = false
+        };
+        normalChange.DisplayText.Should().Be("日付: 2024-01-01 → 2024-01-02");
+
+        var displayOnlyChange = new FieldChange
+        {
+            FieldName = "日付",
+            NewValue = "2024-01-01 09:30:00",
+            IsDisplayOnly = true
+        };
+        displayOnlyChange.DisplayText.Should().Be("日付: 2024-01-01 09:30:00");
+    }
+
+    /// <summary>
+    /// ChangesHeaderがSkipの場合に「スキップするデータ:」を返すこと
+    /// </summary>
+    [Fact]
+    public void ChangesHeader_Skipの場合はスキップするデータ()
+    {
+        var skipItem = new CsvImportPreviewItem { Action = ImportAction.Skip };
+        skipItem.ChangesHeader.Should().Be("スキップするデータ:");
+
+        var restoreItem = new CsvImportPreviewItem { Action = ImportAction.Restore };
+        restoreItem.ChangesHeader.Should().Be("変更内容の詳細:");
+    }
+
+    /// <summary>
+    /// CreateLedgerDisplayChangesが正しくフィールドを生成すること
+    /// </summary>
+    [Fact]
+    public void CreateLedgerDisplayChanges_全フィールドが正しく生成される()
+    {
+        var date = new DateTime(2024, 1, 15, 9, 30, 0);
+        var result = CsvImportService.CreateLedgerDisplayChanges(
+            date, "鉄道（博多～天神）", 0, 260, 9740, "田中太郎", "出張");
+
+        result.Should().HaveCount(6); // 日付、摘要、払出金額、残高、職員名、備考（受入金額は0なので含まない）
+        result[0].FieldName.Should().Be("日付");
+        result[0].NewValue.Should().Be("2024-01-15 09:30:00");
+        result[0].IsDisplayOnly.Should().BeTrue();
+        result[1].FieldName.Should().Be("摘要");
+        result[1].NewValue.Should().Be("鉄道（博多～天神）");
+        result[2].FieldName.Should().Be("払出金額");
+        result[2].NewValue.Should().Be("260円");
+        result[3].FieldName.Should().Be("残高");
+        result[3].NewValue.Should().Be("9,740円");
+        result[4].FieldName.Should().Be("職員名");
+        result[4].NewValue.Should().Be("田中太郎");
+        result[5].FieldName.Should().Be("備考");
+        result[5].NewValue.Should().Be("出張");
+    }
+
+    /// <summary>
+    /// CreateLedgerDisplayChangesで受入金額のみの場合（チャージ等）
+    /// </summary>
+    [Fact]
+    public void CreateLedgerDisplayChanges_受入金額のみ()
+    {
+        var date = new DateTime(2024, 1, 15, 10, 0, 0);
+        var result = CsvImportService.CreateLedgerDisplayChanges(
+            date, "役務費によりチャージ", 3000, 0, 12740, null, null);
+
+        result.Should().HaveCount(4); // 日付、摘要、受入金額、残高
+        result[2].FieldName.Should().Be("受入金額");
+        result[2].NewValue.Should().Be("3,000円");
+    }
+
+    /// <summary>
+    /// CreateSkipDetailChangesが正しく既存データを表示すること
+    /// </summary>
+    [Fact]
+    public void CreateSkipDetailChanges_既存データの表示()
+    {
+        var details = new List<LedgerDetail>
+        {
+            new LedgerDetail
+            {
+                UseDate = new DateTime(2024, 1, 15, 10, 30, 0),
+                EntryStation = "博多",
+                ExitStation = "天神",
+                Amount = 260,
+                Balance = 9740
+            },
+            new LedgerDetail
+            {
+                UseDate = new DateTime(2024, 1, 15, 17, 0, 0),
+                EntryStation = "天神",
+                ExitStation = "博多",
+                Amount = 260,
+                Balance = 9480
+            }
+        };
+
+        var result = CsvImportService.CreateSkipDetailChanges(details);
+
+        result.Should().HaveCount(2);
+        result[0].FieldName.Should().Be("[1行目]");
+        result[0].NewValue.Should().Contain("博多→天神");
+        result[0].NewValue.Should().Contain("260円");
+        result[0].IsDisplayOnly.Should().BeTrue();
+        result[1].FieldName.Should().Be("[2行目]");
+        result[1].NewValue.Should().Contain("天神→博多");
+    }
+
+    /// <summary>
+    /// 利用履歴プレビューでInsert行にデータ内容が表示されること
+    /// </summary>
+    [Fact]
+    public async Task PreviewLedgersAsync_Insert行にデータ内容が表示される()
+    {
+        // Arrange
+        var csvContent = @"日時,カードIDm,管理番号,摘要,受入金額,払出金額,残額,利用者,備考
+2024-06-01 09:00:00,0123456789ABCDEF,001,鉄道（博多～天神）,,260,9740,,";
+
+        var filePath = Path.Combine(_testDirectory, "ledger_insert_display.csv");
+        await Task.Run(() => File.WriteAllText(filePath, csvContent, CsvEncoding));
+
+        var cards = new List<IcCard>
+        {
+            new IcCard { CardIdm = "0123456789ABCDEF", CardType = "はやかけん", CardNumber = "001" }
+        };
+        _cardRepositoryMock.Setup(x => x.GetAllIncludingDeletedAsync()).ReturnsAsync(cards);
+        _ledgerRepositoryMock.Setup(x => x.GetExistingLedgerKeysAsync(It.IsAny<IEnumerable<string>>()))
+            .ReturnsAsync(new HashSet<(string, DateTime, string, int, int, int)>());
+
+        // Act
+        var result = await _service.PreviewLedgersAsync(filePath);
+
+        // Assert
+        result.Items.Should().HaveCount(1);
+        result.Items[0].Action.Should().Be(ImportAction.Insert);
+        result.Items[0].HasChanges.Should().BeTrue("追加行にもデータ内容が表示されるべき");
+        result.Items[0].Changes.Should().Contain(c => c.FieldName == "日付" && c.IsDisplayOnly);
+        result.Items[0].Changes.Should().Contain(c => c.FieldName == "摘要" && c.NewValue == "鉄道（博多～天神）");
+        result.Items[0].ChangesHeader.Should().Be("追加する内容:");
+    }
+
+    /// <summary>
+    /// 利用履歴プレビューでSkip行（重複）にデータ内容が表示されること
+    /// </summary>
+    [Fact]
+    public async Task PreviewLedgersAsync_Skip行にデータ内容が表示される()
+    {
+        // Arrange: 既存データと同じ内容のCSV
+        var csvContent = @"日時,カードIDm,管理番号,摘要,受入金額,払出金額,残額,利用者,備考
+2024-06-01 09:00:00,0123456789ABCDEF,001,鉄道（博多～天神）,,260,9740,,";
+
+        var filePath = Path.Combine(_testDirectory, "ledger_skip_display.csv");
+        await Task.Run(() => File.WriteAllText(filePath, csvContent, CsvEncoding));
+
+        var cards = new List<IcCard>
+        {
+            new IcCard { CardIdm = "0123456789ABCDEF", CardType = "はやかけん", CardNumber = "001" }
+        };
+        _cardRepositoryMock.Setup(x => x.GetAllIncludingDeletedAsync()).ReturnsAsync(cards);
+
+        // 同じキーの既存データ
+        var existingKeys = new HashSet<(string, DateTime, string, int, int, int)>
+        {
+            ("0123456789ABCDEF", new DateTime(2024, 6, 1, 9, 0, 0), "鉄道（博多～天神）", 0, 260, 9740)
+        };
+        _ledgerRepositoryMock.Setup(x => x.GetExistingLedgerKeysAsync(It.IsAny<IEnumerable<string>>()))
+            .ReturnsAsync(existingKeys);
+
+        // Act
+        var result = await _service.PreviewLedgersAsync(filePath);
+
+        // Assert
+        result.Items.Should().HaveCount(1);
+        result.Items[0].Action.Should().Be(ImportAction.Skip);
+        result.Items[0].HasChanges.Should().BeTrue("スキップ行にもデータ内容が表示されるべき");
+        result.Items[0].Changes.Should().Contain(c => c.FieldName == "摘要" && c.IsDisplayOnly);
+        result.Items[0].ChangesHeader.Should().Be("スキップするデータ:");
+    }
+
+    /// <summary>
+    /// 利用履歴詳細プレビューでSkip行に既存データの内容が表示されること
+    /// </summary>
+    [Fact]
+    public async Task PreviewLedgerDetailsAsync_Skip行に既存データの内容が表示される()
+    {
+        // Arrange: 既存と同一の詳細データ
+        var csvContent = @"利用履歴ID,利用日時,カードIDm,管理番号,乗車駅,降車駅,バス停,金額,残額,チャージ,ポイント還元,バス利用,グループID
+1,2024-01-15 10:30:00,0123456789ABCDEF,001,博多,天神,,260,9740,0,0,0,";
+
+        var filePath = Path.Combine(_testDirectory, "details_skip_display.csv");
+        await Task.Run(() => File.WriteAllText(filePath, csvContent, CsvEncoding));
+
+        _cardRepositoryMock.Setup(x => x.GetByIdmAsync("0123456789ABCDEF", true))
+            .ReturnsAsync(new IcCard { CardIdm = "0123456789ABCDEF", CardType = "はやかけん", CardNumber = "001" });
+
+        // 既存の利用履歴（Detailsに同一内容を含む）
+        _ledgerRepositoryMock.Setup(x => x.GetByIdAsync(1))
+            .ReturnsAsync(new Ledger
+            {
+                Id = 1,
+                CardIdm = "0123456789ABCDEF",
+                Details = new List<LedgerDetail>
+                {
+                    new LedgerDetail
+                    {
+                        LedgerId = 1,
+                        UseDate = new DateTime(2024, 1, 15, 10, 30, 0),
+                        EntryStation = "博多",
+                        ExitStation = "天神",
+                        Amount = 260,
+                        Balance = 9740,
+                        IsCharge = false,
+                        IsPointRedemption = false,
+                        IsBus = false
+                    }
+                }
+            });
+
+        // Act
+        var result = await _service.PreviewLedgerDetailsAsync(filePath);
+
+        // Assert
+        result.Items.Should().HaveCount(1);
+        result.Items[0].Action.Should().Be(ImportAction.Skip);
+        result.Items[0].HasChanges.Should().BeTrue("スキップ行にも既存データの内容が表示されるべき");
+        result.Items[0].Changes.Should().Contain(c => c.FieldName == "[1行目]" && c.IsDisplayOnly);
+        result.Items[0].Changes[0].NewValue.Should().Contain("博多→天神");
+        result.Items[0].ChangesHeader.Should().Be("スキップするデータ:");
     }
 
     #endregion

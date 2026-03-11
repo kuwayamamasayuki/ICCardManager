@@ -116,7 +116,11 @@ namespace ICCardManager.Services
             : string.Empty;
 
         /// <summary>詳細セクションのヘッダー（アクションに応じて変化）</summary>
-        public string ChangesHeader => Action == ImportAction.Insert ? "追加する内容:" : "変更内容の詳細:";
+        public string ChangesHeader => Action == ImportAction.Insert
+            ? "追加する内容:"
+            : Action == ImportAction.Skip
+                ? "スキップするデータ:"
+                : "変更内容の詳細:";
     }
 
     /// <summary>
@@ -133,8 +137,13 @@ namespace ICCardManager.Services
         /// <summary>変更後の値</summary>
         public string NewValue { get; set; } = string.Empty;
 
+        /// <summary>表示専用フラグ（追加・スキップ時のデータ表示用）</summary>
+        public bool IsDisplayOnly { get; set; }
+
         /// <summary>変更内容の表示文字列</summary>
-        public string DisplayText => $"{FieldName}: {OldValue ?? "(なし)"} → {NewValue ?? "(なし)"}";
+        public string DisplayText => IsDisplayOnly
+            ? $"{FieldName}: {NewValue ?? "(なし)"}"
+            : $"{FieldName}: {OldValue ?? "(なし)"} → {NewValue ?? "(なし)"}";
     }
 
     /// <summary>
@@ -1543,6 +1552,8 @@ namespace ICCardManager.Services
                                 // Issue #903: skipExisting=trueの場合のみスキップ
                                 action = ImportAction.Skip;
                                 skipCount++;
+                                // Issue #969: スキップ時もデータ内容を表示
+                                changes = CreateLedgerDisplayChanges(date, summary, income, expense, balance, staffName, note);
                             }
                             else
                             {
@@ -1556,6 +1567,8 @@ namespace ICCardManager.Services
                             // IDが指定されているがレコードが見つからない場合は新規追加
                             action = ImportAction.Insert;
                             newCount++;
+                            // Issue #969: 追加時もデータ内容を表示
+                            changes = CreateLedgerDisplayChanges(date, summary, income, expense, balance, staffName, note);
                         }
                     }
                     else
@@ -1566,11 +1579,15 @@ namespace ICCardManager.Services
                         {
                             action = ImportAction.Skip;
                             skipCount++;
+                            // Issue #969: スキップ時もデータ内容を表示
+                            changes = CreateLedgerDisplayChanges(date, summary, income, expense, balance, staffName, note);
                         }
                         else
                         {
                             action = ImportAction.Insert;
                             newCount++;
+                            // Issue #969: 追加時もデータ内容を表示
+                            changes = CreateLedgerDisplayChanges(date, summary, income, expense, balance, staffName, note);
                         }
                     }
 
@@ -1835,6 +1852,8 @@ namespace ICCardManager.Services
                 {
                     action = ImportAction.Skip;
                     skipCount++;
+                    // Issue #969: スキップ時も既存データの内容を表示
+                    changes = CreateSkipDetailChanges(existingDetails);
                 }
 
                 var cardIdm = ledgerCardIdmMap.TryGetValue(ledgerId, out var idm) ? idm : "";
@@ -2928,6 +2947,51 @@ namespace ICCardManager.Services
                 });
             }
 
+            return changes;
+        }
+
+        /// <summary>
+        /// 利用履歴の追加・スキップ時に表示する内容を生成する。
+        /// Issue #969対応。
+        /// </summary>
+        internal static List<FieldChange> CreateLedgerDisplayChanges(
+            DateTime date, string summary, int income, int expense, int balance, string staffName, string note)
+        {
+            var changes = new List<FieldChange>
+            {
+                new FieldChange { FieldName = "日付", NewValue = date.ToString("yyyy-MM-dd HH:mm:ss"), IsDisplayOnly = true },
+                new FieldChange { FieldName = "摘要", NewValue = summary, IsDisplayOnly = true }
+            };
+            if (income > 0)
+                changes.Add(new FieldChange { FieldName = "受入金額", NewValue = $"{income:#,0}円", IsDisplayOnly = true });
+            if (expense > 0)
+                changes.Add(new FieldChange { FieldName = "払出金額", NewValue = $"{expense:#,0}円", IsDisplayOnly = true });
+            changes.Add(new FieldChange { FieldName = "残高", NewValue = $"{balance:#,0}円", IsDisplayOnly = true });
+            if (!string.IsNullOrEmpty(staffName))
+                changes.Add(new FieldChange { FieldName = "職員名", NewValue = staffName, IsDisplayOnly = true });
+            if (!string.IsNullOrEmpty(note))
+                changes.Add(new FieldChange { FieldName = "備考", NewValue = note, IsDisplayOnly = true });
+            return changes;
+        }
+
+        /// <summary>
+        /// 利用履歴詳細のスキップ時に既存データの内容を表示する。
+        /// Issue #969対応。
+        /// </summary>
+        internal static List<FieldChange> CreateSkipDetailChanges(List<LedgerDetail> existingDetails)
+        {
+            var changes = new List<FieldChange>();
+            for (var i = 0; i < existingDetails.Count; i++)
+            {
+                var detail = existingDetails[i];
+                var description = FormatDetailDescription(detail);
+                changes.Add(new FieldChange
+                {
+                    FieldName = $"[{i + 1}行目]",
+                    NewValue = description,
+                    IsDisplayOnly = true
+                });
+            }
             return changes;
         }
 
