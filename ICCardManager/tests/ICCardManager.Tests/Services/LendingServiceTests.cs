@@ -1663,6 +1663,106 @@ public class LendingServiceTests : IDisposable
         result.Should().BeEmpty();
     }
 
+    /// <summary>
+    /// Issue #978: 端数チャージ（不足額より多めにチャージ）でも正しく検出されること
+    /// </summary>
+    /// <remarks>
+    /// シナリオ: 残高76円、運賃210円
+    /// - 不足額134円だが精算機が10円単位のため140円チャージ
+    /// - チャージ後残高: 216円
+    /// - 利用後残高: 6円（端数が残る）
+    /// </remarks>
+    [Fact]
+    public void DetectInsufficientBalancePattern_ExcessCharge_ReturnsMatchedPair()
+    {
+        // Arrange
+        var today = DateTime.Today;
+        var details = new List<LedgerDetail>
+        {
+            new()
+            {
+                UseDate = today,
+                IsCharge = true,
+                Amount = 140,      // 不足額134円より多い（10円単位で切り上げ）
+                Balance = 216      // チャージ後残高（76 + 140）
+            },
+            new()
+            {
+                UseDate = today,
+                IsCharge = false,
+                EntryStation = "渡辺通",
+                ExitStation = "薬院",
+                Amount = 210,      // 運賃
+                Balance = 6        // 利用後残高（216 - 210 = 6、0ではない）
+            }
+        };
+
+        // Act
+        var result = LendingService.DetectInsufficientBalancePattern(details);
+
+        // Assert
+        result.Should().HaveCount(1);
+        result[0].Charge.Amount.Should().Be(140);
+        result[0].Usage.Amount.Should().Be(210);
+    }
+
+    /// <summary>
+    /// Issue #978: 端数チャージ時のマージで正しい払出額・残高・備考が生成されること
+    /// </summary>
+    [Fact]
+    public async Task ReturnAsync_InsufficientBalance_ExcessCharge_MergesCorrectly()
+    {
+        // Arrange
+        var card = CreateTestCard(isLent: true);
+        var staff = CreateTestStaff();
+        var lentRecord = CreateTestLentRecord(daysAgo: 1);
+
+        var today = DateTime.Today;
+        // 残高76円、運賃210円、140円チャージ（端数あり）
+        var usageDetails = new List<LedgerDetail>
+        {
+            new()
+            {
+                UseDate = today,
+                EntryStation = "渡辺通",
+                ExitStation = "薬院",
+                Amount = 210,
+                Balance = 6,       // 利用後残高（端数が残る）
+                IsCharge = false
+            },
+            new()
+            {
+                UseDate = today,
+                Amount = 140,
+                Balance = 216,     // チャージ後残高
+                IsCharge = true
+            }
+        };
+
+        SetupReturnMocks(card, staff, lentRecord);
+
+        var insertedLedgers = new List<Ledger>();
+        _ledgerRepositoryMock.Setup(x => x.InsertAsync(It.IsAny<Ledger>()))
+            .Callback<Ledger>(l => insertedLedgers.Add(l))
+            .ReturnsAsync((Ledger l) => insertedLedgers.Count);
+
+        // Act
+        var result = await _service.ReturnAsync(TestStaffIdm, TestCardIdm, usageDetails);
+
+        // Assert
+        result.Success.Should().BeTrue();
+
+        var nonLentLedgers = insertedLedgers.Where(l => !l.IsLentRecord).ToList();
+        nonLentLedgers.Should().HaveCount(1, "チャージと利用がマージされて1件になるべき");
+
+        var merged = nonLentLedgers[0];
+        merged.Income.Should().Be(0, "チャージの受入は記載しない");
+        merged.Expense.Should().Be(76, "元残高（216-140）が払出額");
+        merged.Balance.Should().Be(6, "利用後の実残高");
+        merged.Note.Should().Contain("不足額134円", "不足額は運賃-元残高（210-76）");
+        merged.Note.Should().Contain("支払額210円");
+    }
+
     #endregion
 
     #region 履歴完全性チェックテスト（Issue #596）
