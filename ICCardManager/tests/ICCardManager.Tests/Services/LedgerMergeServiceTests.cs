@@ -1248,4 +1248,216 @@ public class LedgerMergeServiceTests
     }
 
     #endregion
+
+    #region SyncBusStopsFromSummary - Issue #983
+
+    /// <summary>
+    /// 摘要が手動編集された場合、BusStopsが摘要から同期されること
+    /// </summary>
+    [Fact]
+    public void SyncBusStopsFromSummary_単一バス利用_摘要からBusStopsを同期()
+    {
+        // Arrange: 分割後に摘要が「バス（qq）」→「バス（薬院大通～西鉄平尾駅）」に編集されたが
+        // Detail.BusStopsは「qq」のまま
+        var ledgers = new List<Ledger>
+        {
+            new()
+            {
+                Id = 1,
+                Summary = "バス（薬院大通～西鉄平尾駅）",
+                Details = new List<LedgerDetail>
+                {
+                    new() { IsBus = true, BusStops = "qq", Amount = 210, Balance = 500 }
+                }
+            }
+        };
+
+        // Act
+        LedgerMergeService.SyncBusStopsFromSummary(ledgers);
+
+        // Assert
+        ledgers[0].Details[0].BusStops.Should().Be("薬院大通～西鉄平尾駅");
+    }
+
+    /// <summary>
+    /// 複数Ledgerでそれぞれバス停名が同期されること（分割→編集→統合シナリオ）
+    /// </summary>
+    [Fact]
+    public void SyncBusStopsFromSummary_分割後の複数Ledger_それぞれ同期()
+    {
+        // Arrange
+        var ledgers = new List<Ledger>
+        {
+            new()
+            {
+                Id = 1,
+                Summary = "バス（薬院大通～西鉄平尾駅）",
+                Details = new List<LedgerDetail>
+                {
+                    new() { IsBus = true, BusStops = "qq", Amount = 210, Balance = 500 }
+                }
+            },
+            new()
+            {
+                Id = 2,
+                Summary = "バス（那の川～渡辺通一丁目）",
+                Details = new List<LedgerDetail>
+                {
+                    new() { IsBus = true, BusStops = "aa", Amount = 210, Balance = 290 }
+                }
+            }
+        };
+
+        // Act
+        LedgerMergeService.SyncBusStopsFromSummary(ledgers);
+
+        // Assert
+        ledgers[0].Details[0].BusStops.Should().Be("薬院大通～西鉄平尾駅");
+        ledgers[1].Details[0].BusStops.Should().Be("那の川～渡辺通一丁目");
+    }
+
+    /// <summary>
+    /// 複数バス利用が1つのLedgerにある場合、「、」で分割して対応付けること
+    /// </summary>
+    [Fact]
+    public void SyncBusStopsFromSummary_複数バス利用の1Ledger_分割して対応付け()
+    {
+        // Arrange
+        var ledgers = new List<Ledger>
+        {
+            new()
+            {
+                Id = 1,
+                Summary = "バス（薬院大通～天神、博多～吉塚）",
+                Details = new List<LedgerDetail>
+                {
+                    new() { IsBus = true, BusStops = "★", Amount = 210, Balance = 500 },
+                    new() { IsBus = true, BusStops = "★", Amount = 210, Balance = 290 }
+                }
+            }
+        };
+
+        // Act
+        LedgerMergeService.SyncBusStopsFromSummary(ledgers);
+
+        // Assert
+        ledgers[0].Details[0].BusStops.Should().Be("薬院大通～天神");
+        ledgers[0].Details[1].BusStops.Should().Be("博多～吉塚");
+    }
+
+    /// <summary>
+    /// バス利用がないLedgerでは何も変更されないこと
+    /// </summary>
+    [Fact]
+    public void SyncBusStopsFromSummary_鉄道のみ_変更なし()
+    {
+        // Arrange
+        var ledgers = new List<Ledger>
+        {
+            new()
+            {
+                Id = 1,
+                Summary = "鉄道（博多～天神）",
+                Details = new List<LedgerDetail>
+                {
+                    new() { IsBus = false, EntryStation = "博多", ExitStation = "天神", Amount = 260, Balance = 500 }
+                }
+            }
+        };
+
+        // Act
+        LedgerMergeService.SyncBusStopsFromSummary(ledgers);
+
+        // Assert: 変更なし
+        ledgers[0].Details[0].BusStops.Should().BeNull();
+    }
+
+    /// <summary>
+    /// 鉄道+バス混在の摘要からバス部分のみ抽出されること
+    /// </summary>
+    [Fact]
+    public void SyncBusStopsFromSummary_鉄道とバス混在_バス部分のみ同期()
+    {
+        // Arrange
+        var ledgers = new List<Ledger>
+        {
+            new()
+            {
+                Id = 1,
+                Summary = "鉄道（博多～天神）、バス（渡辺通～薬院）",
+                Details = new List<LedgerDetail>
+                {
+                    new() { IsBus = false, EntryStation = "博多", ExitStation = "天神", Amount = 260, Balance = 500 },
+                    new() { IsBus = true, BusStops = "★", Amount = 210, Balance = 240 }
+                }
+            }
+        };
+
+        // Act
+        LedgerMergeService.SyncBusStopsFromSummary(ledgers);
+
+        // Assert
+        ledgers[0].Details.First(d => d.IsBus).BusStops.Should().Be("渡辺通～薬院");
+        ledgers[0].Details.First(d => !d.IsBus).EntryStation.Should().Be("博多", "鉄道Detailは変更されない");
+    }
+
+    /// <summary>
+    /// BusStopsが既に正しい場合も上書きされるが実害なし
+    /// </summary>
+    [Fact]
+    public void SyncBusStopsFromSummary_既に同期済み_変更なし()
+    {
+        // Arrange
+        var ledgers = new List<Ledger>
+        {
+            new()
+            {
+                Id = 1,
+                Summary = "バス（薬院）",
+                Details = new List<LedgerDetail>
+                {
+                    new() { IsBus = true, BusStops = "薬院", Amount = 210, Balance = 500 }
+                }
+            }
+        };
+
+        // Act
+        LedgerMergeService.SyncBusStopsFromSummary(ledgers);
+
+        // Assert
+        ledgers[0].Details[0].BusStops.Should().Be("薬院");
+    }
+
+    /// <summary>
+    /// バス利用数と「、」分割数が一致しない場合は変更しないこと
+    /// </summary>
+    [Fact]
+    public void SyncBusStopsFromSummary_バス件数不一致_変更しない()
+    {
+        // Arrange: 3件のバスDetailがあるが、摘要には2件分しかない
+        var ledgers = new List<Ledger>
+        {
+            new()
+            {
+                Id = 1,
+                Summary = "バス（薬院、天神）",
+                Details = new List<LedgerDetail>
+                {
+                    new() { IsBus = true, BusStops = "a", Amount = 210, Balance = 500 },
+                    new() { IsBus = true, BusStops = "b", Amount = 210, Balance = 290 },
+                    new() { IsBus = true, BusStops = "c", Amount = 210, Balance = 80 }
+                }
+            }
+        };
+
+        // Act
+        LedgerMergeService.SyncBusStopsFromSummary(ledgers);
+
+        // Assert: 件数不一致のため変更なし
+        ledgers[0].Details[0].BusStops.Should().Be("a");
+        ledgers[0].Details[1].BusStops.Should().Be("b");
+        ledgers[0].Details[2].BusStops.Should().Be("c");
+    }
+
+    #endregion
 }

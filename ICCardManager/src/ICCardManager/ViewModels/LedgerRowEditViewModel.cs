@@ -594,12 +594,63 @@ namespace ICCardManager.ViewModels
             var result = await _ledgerRepository.UpdateAsync(ledger);
             if (result)
             {
+                // Issue #983: 摘要編集時にバス停名をDetailに同期
+                // 摘要を直接編集するとLedger.Summaryは更新されるがDetail.BusStopsは更新されない。
+                // この不整合を放置すると、統合時にSummaryGenerator.Generate()が
+                // Detail.BusStopsから摘要を再生成し、修正前のバス停名に戻ってしまう。
+                if (beforeLedger.Summary != ledger.Summary)
+                {
+                    await SyncBusStopsFromSummaryAsync(ledger);
+                }
+
                 await _operationLogger.LogLedgerUpdateAsync(_operatorIdm, beforeLedger, ledger);
                 IsSaved = true;
             }
             else
             {
                 StatusMessage = "保存に失敗しました";
+            }
+        }
+
+        /// <summary>
+        /// 摘要からバス停名を抽出してDetail.BusStopsに同期する（Issue #983）
+        /// </summary>
+        /// <remarks>
+        /// 摘要の直接編集ではLedger.Summaryのみ更新されDetail.BusStopsは未更新のため、
+        /// 統合時の摘要再生成で修正前のバス停名に戻る問題を防止する。
+        /// </remarks>
+        private async Task SyncBusStopsFromSummaryAsync(Ledger ledger)
+        {
+            var busDetails = ledger.Details.Where(d => d.IsBus).ToList();
+            if (busDetails.Count == 0) return;
+
+            var match = System.Text.RegularExpressions.Regex.Match(
+                ledger.Summary ?? "", @"バス（(.+?)）");
+            if (!match.Success) return;
+
+            var busStopText = match.Groups[1].Value;
+            var busStopUpdates = new List<(int SequenceNumber, string BusStops)>();
+
+            if (busDetails.Count == 1)
+            {
+                busStopUpdates.Add((busDetails[0].SequenceNumber, busStopText));
+            }
+            else
+            {
+                // 複数件のバス利用: 「、」で分割してDetailに対応付け
+                var parts = busStopText.Split('、');
+                if (parts.Length == busDetails.Count)
+                {
+                    for (int i = 0; i < parts.Length; i++)
+                    {
+                        busStopUpdates.Add((busDetails[i].SequenceNumber, parts[i]));
+                    }
+                }
+            }
+
+            if (busStopUpdates.Count > 0)
+            {
+                await _ledgerRepository.UpdateDetailBusStopsAsync(ledger.Id, busStopUpdates);
             }
         }
 
