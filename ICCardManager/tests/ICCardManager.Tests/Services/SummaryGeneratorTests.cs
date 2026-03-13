@@ -248,4 +248,140 @@ public class SummaryGeneratorTests
     }
 
     #endregion
+
+    #region バス往復検出 - Issue #985
+
+    /// <summary>
+    /// バスの往復利用（A～B、B～A）が「A～B 往復」として表示されること
+    /// </summary>
+    [Fact]
+    public void Generate_バス往復_往復と表示される()
+    {
+        // Arrange: FeliCa順（新しい順）で入力
+        // 時系列: 薬院大通→西鉄平尾駅（往路）→ 西鉄平尾駅→薬院大通（復路）
+        var details = new List<LedgerDetail>
+        {
+            new()
+            {
+                IsBus = true,
+                BusStops = "西鉄平尾駅～薬院大通",  // 復路（新しい）
+                Amount = 210,
+                Balance = 290
+            },
+            new()
+            {
+                IsBus = true,
+                BusStops = "薬院大通～西鉄平尾駅",  // 往路（古い）
+                Amount = 210,
+                Balance = 500
+            }
+        };
+
+        // Act
+        var result = _generator.Generate(details);
+
+        // Assert
+        result.Should().Be("バス（薬院大通～西鉄平尾駅 往復）");
+    }
+
+    /// <summary>
+    /// バスの片道利用では往復と表示されないこと
+    /// </summary>
+    [Fact]
+    public void Generate_バス片道_往復とならない()
+    {
+        var details = new List<LedgerDetail>
+        {
+            new()
+            {
+                IsBus = true,
+                BusStops = "薬院大通～西鉄平尾駅",
+                Amount = 210,
+                Balance = 500
+            }
+        };
+
+        var result = _generator.Generate(details);
+
+        result.Should().Be("バス（薬院大通～西鉄平尾駅）");
+    }
+
+    /// <summary>
+    /// バス停名が「A～B」形式でない場合は往復検出されず連結されること
+    /// </summary>
+    [Fact]
+    public void Generate_バス停名に経路区切りなし_連結される()
+    {
+        // FeliCa順（新しい順）: 博多(新)、天神(古)
+        var details = new List<LedgerDetail>
+        {
+            new() { IsBus = true, BusStops = "博多", Amount = 210, Balance = 290 },
+            new() { IsBus = true, BusStops = "天神", Amount = 210, Balance = 500 }
+        };
+
+        var result = _generator.Generate(details);
+
+        // Reverse後: 天神(古)→博多(新) の順
+        result.Should().Be("バス（天神、博多）");
+    }
+
+    /// <summary>
+    /// バス往復＋残りの片道がある場合の表示
+    /// </summary>
+    [Fact]
+    public void Generate_バス往復と片道混在_正しく表示される()
+    {
+        // FeliCa順（新しい順）: 博多→吉塚(片道)、天神→薬院(復路)、薬院→天神(往路)
+        var details = new List<LedgerDetail>
+        {
+            new() { IsBus = true, BusStops = "博多～吉塚", Amount = 170, Balance = 320 },
+            new() { IsBus = true, BusStops = "天神～薬院", Amount = 210, Balance = 490 },
+            new() { IsBus = true, BusStops = "薬院～天神", Amount = 210, Balance = 700 }
+        };
+
+        var result = _generator.Generate(details);
+
+        result.Should().Contain("薬院～天神 往復");
+        result.Should().Contain("博多～吉塚");
+    }
+
+    /// <summary>
+    /// 鉄道とバス往復が混在する場合
+    /// </summary>
+    [Fact]
+    public void Generate_鉄道とバス往復混在_正しく表示される()
+    {
+        // FeliCa順（新しい順）: 渡辺通→天神(復路)、天神→渡辺通(往路)、博多→天神(鉄道)
+        var details = new List<LedgerDetail>
+        {
+            new() { IsBus = true, BusStops = "渡辺通～天神", Amount = 210, Balance = 530 },
+            new() { IsBus = true, BusStops = "天神～渡辺通", Amount = 210, Balance = 740 },
+            new() { IsBus = false, EntryStation = "博多", ExitStation = "天神", Amount = 260, Balance = 1000 }
+        };
+
+        var result = _generator.Generate(details);
+
+        result.Should().Contain("鉄道（博多～天神）");
+        result.Should().Contain("バス（天神～渡辺通 往復）");
+    }
+
+    /// <summary>
+    /// バス停名が★（未入力）の場合は往復検出されないこと
+    /// </summary>
+    [Fact]
+    public void Generate_バス停名が未入力_往復検出されない()
+    {
+        var details = new List<LedgerDetail>
+        {
+            new() { IsBus = true, BusStops = "★", Amount = 210, Balance = 500 },
+            new() { IsBus = true, BusStops = "★", Amount = 210, Balance = 290 }
+        };
+
+        var result = _generator.Generate(details);
+
+        // ★はDistinctで1つになるので「バス（★）」
+        result.Should().Be("バス（★）");
+    }
+
+    #endregion
 }
