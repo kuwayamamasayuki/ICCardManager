@@ -3084,4 +3084,198 @@ public class LendingServiceTests : IDisposable
     }
 
     #endregion
+
+    #region 残高不足パターン: チャージ詳細の重複チェック（Issue #978）
+
+    /// <summary>
+    /// 残高不足パターンで作成されたLedgerにチャージ詳細も登録されること
+    /// </summary>
+    /// <remarks>
+    /// Issue #978: チャージ詳細が登録されないと、次回返却時の重複チェック（GetExistingDetailKeysAsync）で
+    /// チャージが検出されず、別途「役務費によりチャージ」として二重登録されてしまう。
+    /// </remarks>
+    [Fact]
+    public async Task ReturnAsync_InsufficientBalance_StoresBothChargeAndUsageDetails()
+    {
+        // Arrange
+        var card = CreateTestCard(isLent: true);
+        var staff = CreateTestStaff();
+        var lentRecord = CreateTestLentRecord(daysAgo: 1);
+
+        var today = DateTime.Today;
+        // 残高200円、運賃210円: 10円チャージ → 210円支払い → 残高0円
+        var usageDetails = new List<LedgerDetail>
+        {
+            new()
+            {
+                UseDate = today,
+                EntryStation = "天神",
+                ExitStation = "赤坂",
+                Amount = 210,
+                Balance = 0,
+                IsCharge = false
+            },
+            new()
+            {
+                UseDate = today,
+                Amount = 10,
+                Balance = 210,
+                IsCharge = true
+            }
+        };
+
+        SetupReturnMocks(card, staff, lentRecord);
+
+        var insertedDetails = new List<LedgerDetail>();
+        _ledgerRepositoryMock.Setup(x => x.InsertDetailAsync(It.IsAny<LedgerDetail>()))
+            .Callback<LedgerDetail>(d => insertedDetails.Add(d))
+            .ReturnsAsync(true);
+
+        // Act
+        var result = await _service.ReturnAsync(TestStaffIdm, TestCardIdm, usageDetails);
+
+        // Assert
+        result.Success.Should().BeTrue();
+
+        // チャージ詳細と利用詳細の両方が登録されること
+        insertedDetails.Should().HaveCount(2);
+        insertedDetails.Should().Contain(d => d.IsCharge && d.Balance == 210);
+        insertedDetails.Should().Contain(d => !d.IsCharge && d.Balance == 0);
+
+        // チャージが先に挿入され（SequenceNumber小）、利用が後に挿入される（SequenceNumber大）こと
+        var chargeIndex = insertedDetails.FindIndex(d => d.IsCharge);
+        var usageIndex = insertedDetails.FindIndex(d => !d.IsCharge);
+        chargeIndex.Should().BeLessThan(usageIndex, "チャージ詳細が先に挿入されるべき");
+
+        // マージされたLedgerが1件だけ作成されること（チャージとして別のLedgerが作成されないこと）
+        _ledgerRepositoryMock.Verify(
+            x => x.InsertAsync(It.Is<Ledger>(l => !l.IsLentRecord)),
+            Times.Once);
+
+        // マージされたLedgerの内容を検証
+        _ledgerRepositoryMock.Verify(
+            x => x.InsertAsync(It.Is<Ledger>(l =>
+                l.Income == 0 &&
+                l.Expense == 200 &&  // 元の残高（210-10=200）
+                l.Balance == 0 &&
+                !string.IsNullOrEmpty(l.Note) &&
+                l.Note.Contains("不足額10円"))),
+            Times.Once);
+    }
+
+    /// <summary>
+    /// 残高不足パターン: 2回目の返却時にチャージが重複チェックで除外されること
+    /// </summary>
+    /// <remarks>
+    /// Issue #978: 1回目の返却でチャージ詳細がDBに登録されていれば、
+    /// 2回目の返却時に重複チェックでチャージが除外され、二重登録が防がれる。
+    /// </remarks>
+    [Fact]
+    public async Task ReturnAsync_SecondReturn_InsufficientBalanceChargeIsDeduped()
+    {
+        // Arrange
+        var card = CreateTestCard(isLent: true);
+        var staff = CreateTestStaff();
+        var lentRecord = CreateTestLentRecord(daysAgo: 1);
+
+        var today = DateTime.Today;
+        // 同じ履歴データ（カードに残っている）
+        var usageDetails = new List<LedgerDetail>
+        {
+            new()
+            {
+                UseDate = today,
+                EntryStation = "天神",
+                ExitStation = "赤坂",
+                Amount = 210,
+                Balance = 0,
+                IsCharge = false
+            },
+            new()
+            {
+                UseDate = today,
+                Amount = 10,
+                Balance = 210,
+                IsCharge = true
+            }
+        };
+
+        SetupReturnMocks(card, staff, lentRecord);
+
+        // 2回目の返却: 前回チャージ詳細と利用詳細がDBに登録済み
+        var existingKeys = new HashSet<(DateTime?, int?, bool)>
+        {
+            (today, 210, true),   // チャージ詳細（Balance=210, IsCharge=true）
+            (today, 0, false)     // 利用詳細（Balance=0, IsCharge=false）
+        };
+        _ledgerRepositoryMock.Setup(x => x.GetExistingDetailKeysAsync(TestCardIdm, It.IsAny<DateTime>()))
+            .ReturnsAsync(existingKeys);
+
+        // Act
+        var result = await _service.ReturnAsync(TestStaffIdm, TestCardIdm, usageDetails);
+
+        // Assert
+        result.Success.Should().BeTrue();
+
+        // 全ての履歴が重複除外されるので、新しいLedgerは作成されないこと
+        // （貸出レコード削除のDeleteAsyncは呼ばれるが、InsertAsyncはLedger作成なし）
+        _ledgerRepositoryMock.Verify(
+            x => x.InsertAsync(It.Is<Ledger>(l => !l.IsLentRecord)),
+            Times.Never);
+    }
+
+    /// <summary>
+    /// 残高不足パターン: 複数の利用がある日でも正しく検出・マージされること
+    /// </summary>
+    /// <remarks>
+    /// 実際の利用パターン: 鉄道A→B、バス、不足分チャージ、鉄道B→A
+    /// チャージと直後の利用（B→A）がマージされ、残りの利用（A→B、バス）は別のLedgerに
+    /// </remarks>
+    [Fact]
+    public async Task ReturnAsync_InsufficientBalance_WithMultipleTrips_MergesCorrectly()
+    {
+        // Arrange
+        var card = CreateTestCard(isLent: true);
+        var staff = CreateTestStaff();
+        var lentRecord = CreateTestLentRecord(daysAgo: 1);
+
+        var today = DateTime.Today;
+        // 残高640円の日の行動:
+        // 1. 鉄道A→B: 260円 (残高380)
+        // 2. バス: 210円 (残高170)
+        // 3. チャージ140円 (残高310) ← 不足分チャージ
+        // 4. 鉄道B→A: 310円 (残高0) ← これとチャージがマージされるべき
+        // FeliCa順（新しい→古い）
+        var usageDetails = new List<LedgerDetail>
+        {
+            new() { UseDate = today, EntryStation = "博多", ExitStation = "赤坂", Amount = 310, Balance = 0 },
+            new() { UseDate = today, Amount = 140, Balance = 310, IsCharge = true },
+            new() { UseDate = today, IsBus = true, Amount = 210, Balance = 170 },
+            new() { UseDate = today, EntryStation = "赤坂", ExitStation = "博多", Amount = 260, Balance = 380 }
+        };
+
+        SetupReturnMocks(card, staff, lentRecord);
+
+        var insertedLedgers = new List<Ledger>();
+        _ledgerRepositoryMock.Setup(x => x.InsertAsync(It.IsAny<Ledger>()))
+            .Callback<Ledger>(l => insertedLedgers.Add(l))
+            .ReturnsAsync((Ledger l) => insertedLedgers.Count);
+
+        // Act
+        var result = await _service.ReturnAsync(TestStaffIdm, TestCardIdm, usageDetails);
+
+        // Assert
+        result.Success.Should().BeTrue();
+
+        // マージされたLedger（不足分）と通常の利用Ledgerの合計で複数Ledger
+        var nonLentLedgers = insertedLedgers.Where(l => !l.IsLentRecord).ToList();
+        nonLentLedgers.Should().HaveCountGreaterOrEqualTo(2, "不足分マージ + 残りの利用で少なくとも2件");
+
+        // 不足分マージのLedger: Expense=170（元残高）, Balance=0, Note付き
+        nonLentLedgers.Should().Contain(l =>
+            l.Expense == 170 && l.Balance == 0 && !string.IsNullOrEmpty(l.Note) &&
+            l.Note.Contains("不足額140円"));
+    }
+
+    #endregion
 }

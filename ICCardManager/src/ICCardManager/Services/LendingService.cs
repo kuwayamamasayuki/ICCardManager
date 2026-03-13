@@ -707,7 +707,14 @@ namespace ICCardManager.Services
                     var ledgerId = await _ledgerRepository.InsertAsync(mergedLedger);
                     mergedLedger.Id = ledgerId;
 
-                    // 利用詳細のみを登録（チャージ詳細はスキップ）
+                    // Issue #978: チャージ詳細と利用詳細の両方を登録
+                    // チャージ詳細も登録しないと重複チェック（GetExistingDetailKeysAsync）で
+                    // 検出されず、次回返却時にチャージが再処理されてしまう
+                    // チャージを先に挿入し、利用を後に挿入することで
+                    // rowidベースのSequenceNumberが利用側で大きくなり、
+                    // LedgerMergeService等の「最新Detail＝最大SequenceNumber」ロジックと整合する
+                    charge.LedgerId = ledgerId;
+                    await _ledgerRepository.InsertDetailAsync(charge);
                     usage.LedgerId = ledgerId;
                     await _ledgerRepository.InsertDetailAsync(usage);
 
