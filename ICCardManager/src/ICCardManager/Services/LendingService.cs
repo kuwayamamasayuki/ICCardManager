@@ -687,7 +687,7 @@ namespace ICCardManager.Services
                     // 運賃210円 = カードから払出(70円) + 現金で支払(140円=チャージ額)
                     // 不足額 = チャージ額（実際に現金で支払った金額）
                     // 払出額 = 運賃 - チャージ額（カードの元残高から充当した金額）
-                    // 残額 = 0（会計上、この運賃は清算済み。端数はカードに残るが次回取引で反映）
+                    // 残額 = 利用後の実残高（ぴったりチャージなら0、端数チャージなら端数が残る）
                     var shortfall = chargeAmount;
                     var expense = totalFare - chargeAmount;
 
@@ -705,7 +705,7 @@ namespace ICCardManager.Services
                         Summary = summary,
                         Income = 0,
                         Expense = expense,   // 運賃 - チャージ額（カードから充当した金額）
-                        Balance = 0,         // 会計上は常に0（端数はカードに残るが次回反映）
+                        Balance = usage.Balance ?? 0,  // 利用後の実残高（端数チャージの場合は端数が残る）
                         StaffName = staffName,
                         Note = note
                     };
@@ -730,8 +730,8 @@ namespace ICCardManager.Services
                     dailyDetails.Remove(charge);
                     dailyDetails.Remove(usage);
 
-                    // lastBalanceを更新（会計上は常に0）
-                    lastBalance = 0;
+                    // lastBalanceを更新（利用後の実残高）
+                    lastBalance = usage.Balance ?? 0;
                 }
 
                 // チャージ境界で利用グループを分割（残高不足パターンで処理済みのものは除外されている）
