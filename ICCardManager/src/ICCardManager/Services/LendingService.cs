@@ -681,15 +681,18 @@ namespace ICCardManager.Services
                 {
                     var charge = pair.Charge;
                     var usage = pair.Usage;
-                    var originalBalance = (charge.Balance ?? 0) - (charge.Amount ?? 0);
+                    var chargeAmount = charge.Amount ?? 0;
                     var totalFare = usage.Amount ?? 0;
-                    // Issue #978: 不足額は「運賃 - 元残高」で算出（チャージ額とは異なる場合がある）
-                    // 例: 残高76円、運賃210円 → 不足額134円（チャージ額は140円の場合あり）
-                    var shortfall = totalFare - originalBalance;
-                    var usageAfterBalance = usage.Balance ?? 0;
+                    // Issue #978: 会計上の処理
+                    // 運賃210円 = カードから払出(70円) + 現金で支払(140円=チャージ額)
+                    // 不足額 = チャージ額（実際に現金で支払った金額）
+                    // 払出額 = 運賃 - チャージ額（カードの元残高から充当した金額）
+                    // 残額 = 0（会計上、この運賃は清算済み。端数はカードに残るが次回取引で反映）
+                    var shortfall = chargeAmount;
+                    var expense = totalFare - chargeAmount;
 
-                    _logger.LogDebug("LendingService: 残高不足パターン検出 - 元残高={OriginalBalance}, 不足額={Shortfall}, 運賃={Fare}, 利用後残高={AfterBalance}",
-                        originalBalance, shortfall, totalFare, usageAfterBalance);
+                    _logger.LogDebug("LendingService: 残高不足パターン検出 - 払出額={Expense}, 不足額={Shortfall}, 運賃={Fare}, チャージ額={ChargeAmount}",
+                        expense, shortfall, totalFare, chargeAmount);
 
                     // マージしたLedgerを作成
                     var summary = _summaryGenerator.Generate(new List<LedgerDetail> { usage });
@@ -701,8 +704,8 @@ namespace ICCardManager.Services
                         Date = usage.UseDate ?? date,
                         Summary = summary,
                         Income = 0,
-                        Expense = originalBalance,  // 実際にカードから支払った金額（元の残高）
-                        Balance = usageAfterBalance,  // Issue #978: 利用後の実残高（端数チャージ時は0でない場合あり）
+                        Expense = expense,   // 運賃 - チャージ額（カードから充当した金額）
+                        Balance = 0,         // 会計上は常に0（端数はカードに残るが次回反映）
                         StaffName = staffName,
                         Note = note
                     };
@@ -727,8 +730,8 @@ namespace ICCardManager.Services
                     dailyDetails.Remove(charge);
                     dailyDetails.Remove(usage);
 
-                    // lastBalanceを更新（端数チャージ時は0でない場合あり）
-                    lastBalance = usageAfterBalance;
+                    // lastBalanceを更新（会計上は常に0）
+                    lastBalance = 0;
                 }
 
                 // チャージ境界で利用グループを分割（残高不足パターンで処理済みのものは除外されている）

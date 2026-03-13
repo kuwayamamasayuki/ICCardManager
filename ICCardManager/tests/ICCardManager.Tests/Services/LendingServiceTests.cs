@@ -1757,9 +1757,9 @@ public class LendingServiceTests : IDisposable
 
         var merged = nonLentLedgers[0];
         merged.Income.Should().Be(0, "チャージの受入は記載しない");
-        merged.Expense.Should().Be(76, "元残高（216-140）が払出額");
-        merged.Balance.Should().Be(6, "利用後の実残高");
-        merged.Note.Should().Contain("不足額134円", "不足額は運賃-元残高（210-76）");
+        merged.Expense.Should().Be(70, "運賃210円 - チャージ額140円 = カードから充当した70円");
+        merged.Balance.Should().Be(0, "会計上は常に0（端数6円はカードに残るが次回取引で反映）");
+        merged.Note.Should().Contain("不足額140円", "不足額=チャージ額（実際に現金で支払った金額）");
         merged.Note.Should().Contain("支払額210円");
     }
 
