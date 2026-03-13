@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using ICCardManager.Data.Repositories;
 using ICCardManager.Models;
@@ -246,6 +247,10 @@ namespace ICCardManager.Services
                 target.Balance = latestDetail.Balance!.Value;
             }
 
+            // Issue #983: 摘要が手動編集されている場合、Detail.BusStopsが未同期の
+            // 可能性があるため、各Ledgerの摘要からバス停名を抽出してDetailに反映する
+            SyncBusStopsFromSummary(ledgers);
+
             // Issue #920: 摘要を再生成（詳細を新しい順にソートしてからGenerateに渡す）
             // Generate()はICカードの読み取り順（新しい順）を前提に.Reverse()するため、
             // DB由来の詳細はUseDate降順・Balance昇順で新しい順に並べ替える必要がある。
@@ -450,6 +455,45 @@ namespace ICCardManager.Services
             }
 
             return null;
+        }
+
+        /// <summary>
+        /// 各Ledgerの摘要からバス停名を抽出してDetail.BusStopsに反映する（Issue #983）
+        /// </summary>
+        /// <remarks>
+        /// 摘要の直接編集（LedgerRowEditViewModel）ではDetail.BusStopsが更新されないため、
+        /// 統合時にSummaryGenerator.Generate()が古いBusStopsから摘要を再生成してしまう。
+        /// この処理で摘要とDetailの整合性を回復する。
+        /// </remarks>
+        internal static void SyncBusStopsFromSummary(List<Ledger> ledgers)
+        {
+            foreach (var ledger in ledgers)
+            {
+                var busDetails = ledger.Details.Where(d => d.IsBus).ToList();
+                if (busDetails.Count == 0) continue;
+
+                var match = Regex.Match(ledger.Summary ?? "", @"バス（(.+?)）");
+                if (!match.Success) continue;
+
+                var busStopText = match.Groups[1].Value;
+
+                if (busDetails.Count == 1)
+                {
+                    busDetails[0].BusStops = busStopText;
+                }
+                else
+                {
+                    // 複数件のバス利用: 「、」で分割してDetailに対応付け
+                    var parts = busStopText.Split('、');
+                    if (parts.Length == busDetails.Count)
+                    {
+                        for (int i = 0; i < parts.Length; i++)
+                        {
+                            busDetails[i].BusStops = parts[i];
+                        }
+                    }
+                }
+            }
         }
     }
 }
