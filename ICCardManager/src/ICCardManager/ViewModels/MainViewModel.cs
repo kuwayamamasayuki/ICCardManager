@@ -934,28 +934,34 @@ public partial class MainViewModel : ViewModelBase
             // バス利用がある場合はバス停入力画面を表示
             if (result.HasBusUsage && result.CreatedLedgers.Count > 0)
             {
-                // Issue #593: バス利用を含むLedgerをすべて取得（Summaryで判定）
-                // LastOrDefaultでは最後のLedgerのみ取得されるため、バス利用が別日にある場合に空ダイアログになる
-                var busLedgers = result.CreatedLedgers
-                    .Where(l => !l.IsLentRecord && l.Summary != null && l.Summary.Contains("バス"))
-                    .ToList();
+                var settings = await _settingsRepository.GetAppSettingsAsync();
 
-                foreach (var busLedger in busLedgers)
+                if (!settings.SkipBusStopInputOnReturn)
                 {
-                    // バス停入力ダイアログを表示
-                    await _navigationService.ShowDialogAsync<Views.Dialogs.BusStopInputDialog>(
-                        async d => await d.InitializeWithLedgerIdAsync(busLedger.Id));
-                }
+                    // Issue #593: バス利用を含むLedgerをすべて取得（Summaryで判定）
+                    // LastOrDefaultでは最後のLedgerのみ取得されるため、バス利用が別日にある場合に空ダイアログになる
+                    var busLedgers = result.CreatedLedgers
+                        .Where(l => !l.IsLentRecord && l.Summary != null && l.Summary.Contains("バス"))
+                        .ToList();
 
-                // バス停名入力後に履歴が開いていれば再読み込み
-                if (busLedgers.Count > 0 && IsHistoryVisible)
-                {
-                    await LoadHistoryLedgersAsync();
-                }
+                    foreach (var busLedger in busLedgers)
+                    {
+                        // バス停入力ダイアログを表示
+                        await _navigationService.ShowDialogAsync<Views.Dialogs.BusStopInputDialog>(
+                            async d => await d.InitializeWithLedgerIdAsync(busLedger.Id));
+                    }
 
-                // Issue #660: バス停名入力後に警告メッセージを再チェック
-                // バス停名の入力により★が消えた場合、件数を更新し、0件なら非表示にする
-                await CheckWarningsAsync();
+                    // バス停名入力後に履歴が開いていれば再読み込み
+                    if (busLedgers.Count > 0 && IsHistoryVisible)
+                    {
+                        await LoadHistoryLedgersAsync();
+                    }
+
+                    // Issue #660: バス停名入力後に警告メッセージを再チェック
+                    // バス停名の入力により★が消えた場合、件数を更新し、0件なら非表示にする
+                    await CheckWarningsAsync();
+                }
+                // スキップ時は★マークがSummaryGenerator側で自動付与されるため追加処理不要
             }
 
             // Issue #596: 今月の履歴が不完全な可能性がある場合に通知

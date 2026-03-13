@@ -40,6 +40,9 @@ namespace ICCardManager.Data.Repositories
         // 部署種別設定キー
         public const string KeyDepartmentType = "department_type";
 
+        // バス停入力スキップ設定キー
+        public const string KeySkipBusStopInputOnReturn = "skip_bus_stop_input_on_return";
+
         public SettingsRepository(DbContext dbContext, ICacheService cacheService, IOptions<CacheOptions> cacheOptions)
         {
             _dbContext = dbContext;
@@ -145,6 +148,10 @@ ON CONFLICT(key) DO UPDATE SET value = @value";
             var departmentType = Get(KeyDepartmentType);
             settings.DepartmentType = ParseDepartmentType(departmentType);
 
+            // バス停入力スキップ設定
+            var skipBusStopInput = Get(KeySkipBusStopInputOnReturn);
+            settings.SkipBusStopInputOnReturn = skipBusStopInput?.ToLowerInvariant() == "true";
+
             return settings;
         }
 
@@ -244,6 +251,10 @@ ON CONFLICT(key) DO UPDATE SET value = @value";
             var departmentType = await GetAsync(KeyDepartmentType);
             settings.DepartmentType = ParseDepartmentType(departmentType);
 
+            // バス停入力スキップ設定
+            var skipBusStopInput = await GetAsync(KeySkipBusStopInputOnReturn);
+            settings.SkipBusStopInputOnReturn = skipBusStopInput?.ToLowerInvariant() == "true";
+
             return settings;
         }
 
@@ -309,6 +320,9 @@ ON CONFLICT(key) DO UPDATE SET value = @value";
 
             // 部署種別設定を保存
             success &= await SetAsync(KeyDepartmentType, DepartmentTypeToString(settings.DepartmentType));
+
+            // バス停入力スキップ設定を保存
+            success &= await SetAsync(KeySkipBusStopInputOnReturn, settings.SkipBusStopInputOnReturn.ToString().ToLowerInvariant());
 
             // 設定保存後にキャッシュを無効化
             _cacheService.Invalidate(CacheKeys.AppSettings);

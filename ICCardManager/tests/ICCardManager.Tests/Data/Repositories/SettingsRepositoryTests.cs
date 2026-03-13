@@ -366,6 +366,93 @@ public class SettingsRepositoryTests : IDisposable
 
     #endregion
 
+    #region SkipBusStopInputOnReturn テスト
+
+    /// <summary>
+    /// SkipBusStopInputOnReturnのデフォルト値がfalseであることを確認
+    /// </summary>
+    [Fact]
+    public async Task GetAppSettingsAsync_Default_SkipBusStopInputOnReturnIsFalse()
+    {
+        // Act
+        var result = await _repository.GetAppSettingsAsync();
+
+        // Assert
+        result.SkipBusStopInputOnReturn.Should().BeFalse();
+    }
+
+    /// <summary>
+    /// SkipBusStopInputOnReturnをtrueに保存して読み込めることを確認
+    /// </summary>
+    [Fact]
+    public async Task SaveAndLoadAppSettings_SkipBusStopInputOnReturn_RoundTrip()
+    {
+        // Arrange
+        var settings = new AppSettings
+        {
+            WarningBalance = 10000,
+            BackupPath = @"C:\Backup",
+            SkipBusStopInputOnReturn = true
+        };
+
+        // Act
+        await _repository.SaveAppSettingsAsync(settings);
+        var loaded = await _repository.GetAppSettingsAsync();
+
+        // Assert
+        loaded.SkipBusStopInputOnReturn.Should().BeTrue();
+    }
+
+    /// <summary>
+    /// SkipBusStopInputOnReturnをfalseに保存して読み込めることを確認
+    /// </summary>
+    [Fact]
+    public async Task SaveAndLoadAppSettings_SkipBusStopInputOnReturnFalse_RoundTrip()
+    {
+        // Arrange
+        var settings = new AppSettings
+        {
+            WarningBalance = 10000,
+            BackupPath = @"C:\Backup",
+            SkipBusStopInputOnReturn = false
+        };
+
+        // Act
+        await _repository.SaveAppSettingsAsync(settings);
+        var loaded = await _repository.GetAppSettingsAsync();
+
+        // Assert
+        loaded.SkipBusStopInputOnReturn.Should().BeFalse();
+    }
+
+    /// <summary>
+    /// 不正な値の場合はfalse（デフォルト）になることを確認
+    /// </summary>
+    [Theory]
+    [InlineData("invalid")]
+    [InlineData("")]
+    [InlineData("TRUE")] // 大文字→ToLowerInvariantで"true"になるのでtrueを期待
+    public async Task GetAppSettingsAsync_SkipBusStopInputOnReturn_ParsesCorrectly(string value)
+    {
+        // Arrange
+        await _repository.SetAsync(SettingsRepository.KeySkipBusStopInputOnReturn, value);
+
+        // Act
+        var result = await _repository.GetAppSettingsAsync();
+
+        // Assert
+        if (value.ToLowerInvariant() == "true")
+        {
+            result.SkipBusStopInputOnReturn.Should().BeTrue();
+        }
+        else
+        {
+            result.SkipBusStopInputOnReturn.Should().BeFalse();
+        }
+    }
+
+    #endregion
+
     #region 設定キー定数テスト
 
     /// <summary>

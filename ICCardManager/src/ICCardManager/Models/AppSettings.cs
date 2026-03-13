@@ -49,6 +49,11 @@ namespace ICCardManager.Models
         /// 部署種別
         /// </summary>
         public DepartmentType DepartmentType { get; set; } = DepartmentType.MayorOffice;
+
+        /// <summary>
+        /// 返却時にバス停名入力ダイアログを自動的にスキップするかどうか
+        /// </summary>
+        public bool SkipBusStopInputOnReturn { get; set; } = false;
     }
 
     /// <summary>
