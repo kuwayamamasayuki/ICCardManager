@@ -681,12 +681,18 @@ namespace ICCardManager.Services
                 {
                     var charge = pair.Charge;
                     var usage = pair.Usage;
-                    var originalBalance = (charge.Balance ?? 0) - (charge.Amount ?? 0);
-                    var shortfall = charge.Amount ?? 0;
+                    var chargeAmount = charge.Amount ?? 0;
                     var totalFare = usage.Amount ?? 0;
+                    // Issue #978: 会計上の処理
+                    // 運賃210円 = カードから払出(70円) + 現金で支払(140円=チャージ額)
+                    // 不足額 = チャージ額（実際に現金で支払った金額）
+                    // 払出額 = 運賃 - チャージ額（カードの元残高から充当した金額）
+                    // 残額 = 利用後の実残高（ぴったりチャージなら0、端数チャージなら端数が残る）
+                    var shortfall = chargeAmount;
+                    var expense = totalFare - chargeAmount;
 
-                    _logger.LogDebug("LendingService: 残高不足パターン検出 - 元残高={OriginalBalance}, 不足額={Shortfall}, 運賃={Fare}",
-                        originalBalance, shortfall, totalFare);
+                    _logger.LogDebug("LendingService: 残高不足パターン検出 - 払出額={Expense}, 不足額={Shortfall}, 運賃={Fare}, チャージ額={ChargeAmount}",
+                        expense, shortfall, totalFare, chargeAmount);
 
                     // マージしたLedgerを作成
                     var summary = _summaryGenerator.Generate(new List<LedgerDetail> { usage });
@@ -698,8 +704,8 @@ namespace ICCardManager.Services
                         Date = usage.UseDate ?? date,
                         Summary = summary,
                         Income = 0,
-                        Expense = originalBalance,  // 実際にカードから支払った金額（元の残高）
-                        Balance = 0,
+                        Expense = expense,   // 運賃 - チャージ額（カードから充当した金額）
+                        Balance = usage.Balance ?? 0,  // 利用後の実残高（端数チャージの場合は端数が残る）
                         StaffName = staffName,
                         Note = note
                     };
@@ -707,7 +713,14 @@ namespace ICCardManager.Services
                     var ledgerId = await _ledgerRepository.InsertAsync(mergedLedger);
                     mergedLedger.Id = ledgerId;
 
-                    // 利用詳細のみを登録（チャージ詳細はスキップ）
+                    // Issue #978: チャージ詳細と利用詳細の両方を登録
+                    // チャージ詳細も登録しないと重複チェック（GetExistingDetailKeysAsync）で
+                    // 検出されず、次回返却時にチャージが再処理されてしまう
+                    // チャージを先に挿入し、利用を後に挿入することで
+                    // rowidベースのSequenceNumberが利用側で大きくなり、
+                    // LedgerMergeService等の「最新Detail＝最大SequenceNumber」ロジックと整合する
+                    charge.LedgerId = ledgerId;
+                    await _ledgerRepository.InsertDetailAsync(charge);
                     usage.LedgerId = ledgerId;
                     await _ledgerRepository.InsertDetailAsync(usage);
 
@@ -717,8 +730,8 @@ namespace ICCardManager.Services
                     dailyDetails.Remove(charge);
                     dailyDetails.Remove(usage);
 
-                    // lastBalanceを更新
-                    lastBalance = 0;
+                    // lastBalanceを更新（利用後の実残高）
+                    lastBalance = usage.Balance ?? 0;
                 }
 
                 // チャージ境界で利用グループを分割（残高不足パターンで処理済みのものは除外されている）
@@ -976,17 +989,30 @@ namespace ICCardManager.Services
         /// 残高不足パターンを検出
         /// </summary>
         /// <remarks>
-        /// Issue #380対応: 残高が不足して不足分だけを現金でチャージした場合のパターンを検出。
-        ///
+        /// <para>
+        /// Issue #380対応: 残高が不足して不足分を現金でチャージした場合のパターンを検出。
+        /// </para>
+        /// <para>
+        /// Issue #978対応: 精算機が10円単位等でしかチャージできない場合、不足額より
+        /// 多めにチャージされることがある（例: 不足134円に対し140円チャージ）。
+        /// このケースでも検出できるよう条件を緩和。
+        /// </para>
+        /// <para>
         /// パターン:
-        /// 1. 小額のチャージ（不足分）
-        /// 2. 直後の利用（運賃）で残高が0になる
-        /// 3. チャージ後の残高 = 利用額（運賃）
-        ///
-        /// 例: 残高200円、運賃210円の場合
+        /// 1. チャージ前の残高が運賃未満（残高不足）
+        /// 2. チャージ後の残高で運賃を支払っている（チャージ→利用の連続性）
+        ///    つまり: チャージ後残高 = 利用額 + 利用後残高
+        /// </para>
+        /// <para>
+        /// 例1（ぴったりチャージ）: 残高200円、運賃210円
         /// - チャージ: 10円（残高 → 210円）
         /// - 利用: 210円（残高 → 0円）
-        /// この場合、チャージ後残高(210) = 利用額(210) となる。
+        /// </para>
+        /// <para>
+        /// 例2（端数あり）: 残高76円、運賃210円
+        /// - チャージ: 140円（残高 → 216円）※不足134円だが10円単位で140円チャージ
+        /// - 利用: 210円（残高 → 6円）
+        /// </para>
         /// </remarks>
         /// <param name="dailyDetails">日付グループ内の履歴詳細リスト</param>
         /// <returns>検出されたペアのリスト</returns>
@@ -1006,6 +1032,10 @@ namespace ICCardManager.Services
                 if (!current.IsCharge) continue;
                 if (!current.Balance.HasValue || !current.Amount.HasValue) continue;
 
+                var chargeAfterBalance = current.Balance.Value;
+                var chargeAmount = current.Amount.Value;
+                var originalBalance = chargeAfterBalance - chargeAmount;
+
                 // 対応する利用レコードを探す
                 for (int j = 0; j < dailyDetails.Count; j++)
                 {
@@ -1017,14 +1047,15 @@ namespace ICCardManager.Services
                     if (candidate.IsCharge || candidate.IsPointRedemption) continue;
                     if (!candidate.Balance.HasValue || !candidate.Amount.HasValue) continue;
 
-                    // パターン検出条件:
-                    // 1. チャージ後の残高 = 利用額（運賃）
-                    // 2. 利用後の残高 = 0
-                    var chargeAfterBalance = current.Balance.Value;
                     var usageAmount = candidate.Amount.Value;
                     var usageAfterBalance = candidate.Balance.Value;
 
-                    if (chargeAfterBalance == usageAmount && usageAfterBalance == 0)
+                    // パターン検出条件:
+                    // 1. チャージ前の残高が運賃未満（残高不足だった）
+                    // 2. チャージ後残高 = 利用額 + 利用後残高（チャージ→利用の連続性）
+                    //    これは「チャージ直後の残高から運賃を支払った」ことを意味する
+                    if (originalBalance < usageAmount &&
+                        chargeAfterBalance == usageAmount + usageAfterBalance)
                     {
                         // パターン検出！
                         result.Add((current, candidate));
