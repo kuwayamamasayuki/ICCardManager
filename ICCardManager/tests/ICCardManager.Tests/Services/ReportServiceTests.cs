@@ -3364,4 +3364,40 @@ public class ReportServiceTests : IDisposable
     }
 
     #endregion
+
+    #region GetNoteFontSize - Issue #980
+
+    [Theory]
+    [InlineData(null, 14)]       // null → 14pt
+    [InlineData("", 14)]         // 空文字 → 14pt
+    [InlineData("支払額210円のうち不足額10円は現金で支払（旅費支給）", 12)]  // 27文字 → 12pt（< 43）
+    [InlineData("支払額210円のうち不足額140円は現金で支払（旅費支給）", 12)] // 28文字 → 12pt（< 43）
+    public void GetNoteFontSize_文字数に応じたフォントサイズを返す(string note, double expectedFontSize)
+    {
+        var result = ReportService.GetNoteFontSize(note);
+        result.Should().Be(expectedFontSize);
+    }
+
+    [Theory]
+    [InlineData(0, 14)]    // 0文字 → 14pt（境界: 20未満）
+    [InlineData(19, 14)]   // 19文字 → 14pt（境界: 20未満）
+    [InlineData(20, 12)]   // 20文字 → 12pt（境界: 20以上）
+    [InlineData(42, 12)]   // 42文字 → 12pt（境界: 43未満）
+    [InlineData(43, 10)]   // 43文字 → 10pt（境界: 43以上）
+    [InlineData(50, 10)]   // 50文字 → 10pt（境界: 51未満）
+    [InlineData(51, 8)]    // 51文字 → 8pt（境界: 51以上）
+    [InlineData(123, 8)]   // 123文字 → 8pt（境界: 124未満）
+    [InlineData(124, 7)]   // 124文字 → 7pt（境界: 124以上）
+    [InlineData(143, 7)]   // 143文字 → 7pt（境界: 144未満）
+    [InlineData(144, 6)]   // 144文字 → 6pt（境界: 144以上）
+    [InlineData(200, 6)]   // 200文字 → 6pt（最小サイズ）
+    public void GetNoteFontSize_境界値で正しいフォントサイズを返す(int length, double expectedFontSize)
+    {
+        var note = new string('あ', length);
+        var result = ReportService.GetNoteFontSize(note);
+        result.Should().Be(expectedFontSize,
+            $"{length}文字の備考に対して{expectedFontSize}ptが期待される");
+    }
+
+    #endregion
 }

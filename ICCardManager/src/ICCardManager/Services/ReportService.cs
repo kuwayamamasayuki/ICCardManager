@@ -894,6 +894,10 @@ namespace ICCardManager.Services
             var summaryCell = worksheet.Cell(row, 2);
             summaryCell.Style.Font.FontSize = GetSummaryFontSize(ledger.Summary);
 
+            // Issue #980: 備考欄のフォントサイズを文字列長に応じて調整
+            var noteCell = worksheet.Cell(row, 9);
+            noteCell.Style.Font.FontSize = GetNoteFontSize(ledger.Note);
+
             return row + 1;
         }
 
@@ -914,6 +918,28 @@ namespace ICCardManager.Services
             if (length < 38)  return 10;
             if (length < 93)  return 8;
             if (length < 108) return 7;
+            return 6;
+        }
+
+        /// <summary>
+        /// 備考欄のフォントサイズを文字列の長さに応じて決定
+        /// </summary>
+        /// <remarks>
+        /// Issue #980: I-L列結合セル（4列、摘要のB-D列3列より約1.33倍広い）の幅に収まるよう、
+        /// 文字数が多いほどフォントサイズを小さくする。
+        /// しきい値は摘要欄（GetSummaryFontSize）の約1.33倍。
+        /// </remarks>
+        /// <param name="note">備考文字列</param>
+        /// <returns>適切なフォントサイズ（ポイント）</returns>
+        internal static double GetNoteFontSize(string note)
+        {
+            var length = note?.Length ?? 0;
+
+            if (length < 20)  return 14;
+            if (length < 43)  return 12;
+            if (length < 51)  return 10;
+            if (length < 124) return 8;
+            if (length < 144) return 7;
             return 6;
         }
 
