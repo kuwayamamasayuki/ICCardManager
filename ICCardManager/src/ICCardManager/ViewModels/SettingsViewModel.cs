@@ -100,6 +100,12 @@ public partial class SettingsViewModel : ViewModelBase
     [ObservableProperty]
     private DepartmentTypeItem? _selectedDepartmentTypeItem;
 
+    /// <summary>
+    /// 返却時にバス停名入力ダイアログを自動スキップするかどうか
+    /// </summary>
+    [ObservableProperty]
+    private bool _skipBusStopInputOnReturn;
+
     public SettingsViewModel(
         ISettingsRepository settingsRepository,
         IValidationService validationService,
@@ -148,6 +154,9 @@ public partial class SettingsViewModel : ViewModelBase
             SelectedDepartmentTypeItem = DepartmentTypeOptions.FirstOrDefault(x => x.Value == settings.DepartmentType)
                                           ?? DepartmentTypeOptions[0]; // デフォルトは「市長事務部局」
 
+            // バス停入力スキップ設定
+            SkipBusStopInputOnReturn = settings.SkipBusStopInputOnReturn;
+
             HasChanges = false;
             StatusMessage = string.Empty;
         }
@@ -190,7 +199,8 @@ public partial class SettingsViewModel : ViewModelBase
                 FontSize = SelectedFontSizeItem?.Value ?? FontSizeOption.Medium,
                 SoundMode = SelectedSoundModeItem?.Value ?? SoundMode.Beep,
                 ToastPosition = SelectedToastPositionItem?.Value ?? ToastPosition.TopRight,
-                DepartmentType = SelectedDepartmentTypeItem?.Value ?? DepartmentType.MayorOffice
+                DepartmentType = SelectedDepartmentTypeItem?.Value ?? DepartmentType.MayorOffice,
+                SkipBusStopInputOnReturn = SkipBusStopInputOnReturn
             };
 
             var success = await _settingsRepository.SaveAppSettingsAsync(settings);
@@ -288,6 +298,11 @@ public partial class SettingsViewModel : ViewModelBase
     }
 
     partial void OnSelectedDepartmentTypeItemChanged(DepartmentTypeItem? value)
+    {
+        HasChanges = true;
+    }
+
+    partial void OnSkipBusStopInputOnReturnChanged(bool value)
     {
         HasChanges = true;
     }

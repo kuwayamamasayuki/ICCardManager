@@ -154,7 +154,24 @@
                     </StackPanel>
                 </GroupBox>
 
-                <!-- 6. バックアップ -->
+                <!-- 6. 運用設定 -->
+                <GroupBox Header="運用設定" Margin="0,0,0,20" Padding="15">
+                    <StackPanel>
+                        <CheckBox IsChecked="{Binding SkipBusStopInputOnReturn}"
+                                  Content="返却時のバス停名入力をスキップする"
+                                  Padding="5,0,0,0"
+                                  AutomationProperties.Name="バス停名入力スキップ設定"
+                                  AutomationProperties.HelpText="有効にすると、返却時にバス停名入力ダイアログを表示しません"
+                                  ToolTip="有効にすると、返却時にバス停名入力ダイアログを表示せず、後から「バス停名未入力一覧」で入力できます"/>
+                        <TextBlock Text="※ 有効にすると、返却時にバス停名入力ダイアログを表示せず、後から「バス停名未入力一覧」で入力できます"
+                                   FontSize="{DynamicResource SmallFontSize}"
+                                   Foreground="{DynamicResource SecondaryTextBrush}"
+                                   TextWrapping="Wrap"
+                                   Margin="0,5,0,0"/>
+                    </StackPanel>
+                </GroupBox>
+
+                <!-- 7. バックアップ -->
                 <GroupBox Header="バックアップ" Margin="0,0,0,20" Padding="15">
                     <StackPanel>
                         <TextBlock Text="データベースの自動バックアップ先フォルダ"

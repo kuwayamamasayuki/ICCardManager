@@ -428,4 +428,74 @@ public class SettingsViewModelTests
     }
 
     #endregion
+
+    #region SkipBusStopInputOnReturnテスト
+
+    /// <summary>
+    /// 設定読み込み時にSkipBusStopInputOnReturnが正しく設定されること
+    /// </summary>
+    [Fact]
+    public async Task LoadSettingsAsync_ShouldLoadSkipBusStopInputOnReturnCorrectly()
+    {
+        // Arrange
+        var settings = new AppSettings
+        {
+            WarningBalance = 1000,
+            BackupPath = "",
+            FontSize = FontSizeOption.Medium,
+            SkipBusStopInputOnReturn = true
+        };
+        _settingsRepositoryMock
+            .Setup(r => r.GetAppSettingsAsync())
+            .ReturnsAsync(settings);
+
+        // Act
+        await _viewModel.LoadSettingsAsync();
+
+        // Assert
+        _viewModel.SkipBusStopInputOnReturn.Should().BeTrue();
+        _viewModel.HasChanges.Should().BeFalse();
+    }
+
+    /// <summary>
+    /// 設定保存時にSkipBusStopInputOnReturnがリポジトリに正しく渡されること
+    /// </summary>
+    [Fact]
+    public async Task SaveAsync_ShouldSaveSkipBusStopInputOnReturnCorrectly()
+    {
+        // Arrange
+        _viewModel.WarningBalance = 1000;
+        _viewModel.BackupPath = "";
+        _viewModel.SkipBusStopInputOnReturn = true;
+
+        _settingsRepositoryMock
+            .Setup(r => r.SaveAppSettingsAsync(It.IsAny<AppSettings>()))
+            .ReturnsAsync(false); // WPF依存のApplyFontSizeを回避するためfalseを返す
+
+        // Act
+        await _viewModel.SaveAsync();
+
+        // Assert - リポジトリが正しいSkipBusStopInputOnReturnで呼ばれたことを検証
+        _settingsRepositoryMock.Verify(r => r.SaveAppSettingsAsync(It.Is<AppSettings>(s =>
+            s.SkipBusStopInputOnReturn == true
+        )), Times.Once);
+    }
+
+    /// <summary>
+    /// SkipBusStopInputOnReturnを変更するとHasChangesがtrueになること
+    /// </summary>
+    [Fact]
+    public void OnSkipBusStopInputOnReturnChanged_ShouldSetHasChangesToTrue()
+    {
+        // Arrange
+        _viewModel.HasChanges = false;
+
+        // Act
+        _viewModel.SkipBusStopInputOnReturn = true;
+
+        // Assert
+        _viewModel.HasChanges.Should().BeTrue();
+    }
+
+    #endregion
 }
