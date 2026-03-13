@@ -731,20 +731,67 @@ namespace ICCardManager.Services
         /// </summary>
         private string GenerateBusSummary(List<LedgerDetail> trips)
         {
-            // バス停名が入力されている場合はそれを使用
-            var busStops = trips
+            // バス停名が入力されているものを時系列順（古い→新しい）で取得
+            // ※tripsはGenerate()でReverse済みのため既に時系列順
+            var allBusStops = trips
                 .Where(t => !string.IsNullOrEmpty(t.BusStops))
                 .Select(t => t.BusStops!)
-                .Distinct()
                 .ToList();
 
-            if (busStops.Count > 0)
+            if (allBusStops.Count == 0)
             {
-                return string.Join("、", busStops);
+                // 未入力の場合は★マーク
+                return "★";
             }
 
-            // 未入力の場合は★マーク
-            return "★";
+            // Issue #985: 「A～B」形式のバス停名から往復パターンを検出
+            // 鉄道のDetectRoundTripsと同じロジックを適用する
+            // 往復検出は時系列順のまま行う（Distinctすると順序が崩れ往復の方向が逆になる）
+            var parsedRoutes = allBusStops
+                .Select(ParseBusRoute)
+                .Where(r => r.HasValue)
+                .Select(r => r!.Value)
+                .ToList();
+
+            if (parsedRoutes.Count >= 2)
+            {
+                var roundTrips = DetectRoundTrips(parsedRoutes);
+                if (roundTrips.Count > 0)
+                {
+                    var roundTripStrings = roundTrips.Select(rt => $"{rt.Start}～{rt.End} 往復");
+                    var remaining = GetRemainingRoutes(parsedRoutes, roundTrips);
+
+                    // 往復 + 残りの経路 + 解析できなかったバス停名
+                    var unparsed = allBusStops
+                        .Where(bs => !ParseBusRoute(bs).HasValue)
+                        .Distinct()
+                        .ToList();
+                    var remainingStrings = remaining.Select(r => $"{r.Entry}～{r.Exit}");
+
+                    return string.Join("、", roundTripStrings
+                        .Concat(remainingStrings)
+                        .Concat(unparsed));
+                }
+            }
+
+            // 往復なし: 重複除去して連結
+            return string.Join("、", allBusStops.Distinct());
+        }
+
+        /// <summary>
+        /// バス停名を「A～B」形式として解析（Issue #985）
+        /// </summary>
+        /// <returns>解析成功時は(Entry, Exit)のタプル、失敗時はnull</returns>
+        private static (string Entry, string Exit)? ParseBusRoute(string busStops)
+        {
+            var parts = busStops.Split('～');
+            if (parts.Length == 2 &&
+                !string.IsNullOrWhiteSpace(parts[0]) &&
+                !string.IsNullOrWhiteSpace(parts[1]))
+            {
+                return (parts[0], parts[1]);
+            }
+            return null;
         }
 
         /// <summary>
