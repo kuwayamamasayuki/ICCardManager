@@ -744,37 +744,49 @@ namespace ICCardManager.Services
                 return "★";
             }
 
-            // Issue #985: 「A～B」形式のバス停名から往復パターンを検出
-            // 鉄道のDetectRoundTripsと同じロジックを適用する
-            // 往復検出は時系列順のまま行う（Distinctすると順序が崩れ往復の方向が逆になる）
+            // Issue #985: 「A～B」形式のバス停名から乗り継ぎ統合・往復検出を行う
+            // 鉄道のGenerateRailwaySummaryAutomatic()と同じパイプライン:
+            //   1. ConsolidateRoutes（乗り継ぎ統合）
+            //   2. DetectRoundTrips（往復検出）
             var parsedRoutes = allBusStops
                 .Select(ParseBusRoute)
                 .Where(r => r.HasValue)
                 .Select(r => r!.Value)
                 .ToList();
 
+            // 解析できなかったバス停名（「A～B」形式でないもの）
+            var unparsed = allBusStops
+                .Where(bs => !ParseBusRoute(bs).HasValue)
+                .Distinct()
+                .ToList();
+
             if (parsedRoutes.Count >= 2)
             {
-                var roundTrips = DetectRoundTrips(parsedRoutes);
+                // 乗り継ぎ統合を往復判定より先に行う（鉄道と同じ方式）
+                var consolidatedRoutes = ConsolidateRoutes(parsedRoutes);
+                var consolidatedAsPairs = consolidatedRoutes
+                    .Select(r => (Entry: r.Start, Exit: r.End)).ToList();
+
+                // 往復判定（統合後の経路で判定）
+                var roundTrips = DetectRoundTrips(consolidatedAsPairs);
                 if (roundTrips.Count > 0)
                 {
                     var roundTripStrings = roundTrips.Select(rt => $"{rt.Start}～{rt.End} 往復");
-                    var remaining = GetRemainingRoutes(parsedRoutes, roundTrips);
-
-                    // 往復 + 残りの経路 + 解析できなかったバス停名
-                    var unparsed = allBusStops
-                        .Where(bs => !ParseBusRoute(bs).HasValue)
-                        .Distinct()
-                        .ToList();
+                    var remaining = GetRemainingRoutes(consolidatedAsPairs, roundTrips);
                     var remainingStrings = remaining.Select(r => $"{r.Entry}～{r.Exit}");
 
                     return string.Join("、", roundTripStrings
                         .Concat(remainingStrings)
                         .Concat(unparsed));
                 }
+
+                // 往復なしでも統合結果があれば使用
+                return string.Join("、",
+                    consolidatedRoutes.Select(r => $"{r.Start}～{r.End}")
+                        .Concat(unparsed));
             }
 
-            // 往復なし: 重複除去して連結
+            // 経路が1件以下の場合: 重複除去して連結
             return string.Join("、", allBusStops.Distinct());
         }
 

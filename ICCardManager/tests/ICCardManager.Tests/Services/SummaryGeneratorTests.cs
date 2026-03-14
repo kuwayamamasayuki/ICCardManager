@@ -384,4 +384,105 @@ public class SummaryGeneratorTests
     }
 
     #endregion
+
+    #region バス乗り継ぎ統合 - Issue #985
+
+    /// <summary>
+    /// バスの乗り継ぎ（A～B、B～C）が「A～C」として統合されること
+    /// </summary>
+    [Fact]
+    public void Generate_バス乗り継ぎ_統合される()
+    {
+        // Arrange: FeliCa順（新しい順）で入力
+        // 時系列: 薬院大通→天神（1区間目）→ 天神→博多駅（2区間目）
+        var details = new List<LedgerDetail>
+        {
+            new() { IsBus = true, BusStops = "天神～博多駅", Amount = 210, Balance = 290 },  // 新しい
+            new() { IsBus = true, BusStops = "薬院大通～天神", Amount = 210, Balance = 500 }  // 古い
+        };
+
+        var result = _generator.Generate(details);
+
+        result.Should().Be("バス（薬院大通～博多駅）");
+    }
+
+    /// <summary>
+    /// バスの3区間乗り継ぎ（A～B、B～C、C～D）が「A～D」として統合されること
+    /// </summary>
+    [Fact]
+    public void Generate_バス3区間乗り継ぎ_統合される()
+    {
+        // FeliCa順（新しい順）
+        var details = new List<LedgerDetail>
+        {
+            new() { IsBus = true, BusStops = "西新～藤崎", Amount = 170, Balance = 120 },      // 3区間目（新）
+            new() { IsBus = true, BusStops = "天神～西新", Amount = 210, Balance = 290 },       // 2区間目
+            new() { IsBus = true, BusStops = "薬院大通～天神", Amount = 210, Balance = 500 }    // 1区間目（古）
+        };
+
+        var result = _generator.Generate(details);
+
+        result.Should().Be("バス（薬院大通～藤崎）");
+    }
+
+    /// <summary>
+    /// バス乗り継ぎ＋往復（A～B、B～C、C～B、B～A）が正しく検出されること
+    /// </summary>
+    [Fact]
+    public void Generate_バス乗り継ぎ往復_統合される()
+    {
+        // 時系列: 薬院→天神（往路1）、天神→博多（往路2）、博多→天神（復路1）、天神→薬院（復路2）
+        // FeliCa順は逆
+        var details = new List<LedgerDetail>
+        {
+            new() { IsBus = true, BusStops = "天神～薬院", Amount = 210, Balance = 160 },      // 復路2（最新）
+            new() { IsBus = true, BusStops = "博多～天神", Amount = 260, Balance = 370 },      // 復路1
+            new() { IsBus = true, BusStops = "天神～博多", Amount = 260, Balance = 630 },      // 往路2
+            new() { IsBus = true, BusStops = "薬院～天神", Amount = 210, Balance = 890 }       // 往路1（最古）
+        };
+
+        var result = _generator.Generate(details);
+
+        result.Should().Be("バス（薬院～博多 往復）");
+    }
+
+    /// <summary>
+    /// 乗り継ぎにならないバス（降車停と次の乗車停が異なる）は個別表示されること
+    /// </summary>
+    [Fact]
+    public void Generate_バス乗り継ぎにならない_個別表示()
+    {
+        // 時系列: 薬院大通→天神、博多→吉塚（天神≠博多なので乗り継ぎにならない）
+        var details = new List<LedgerDetail>
+        {
+            new() { IsBus = true, BusStops = "博多～吉塚", Amount = 170, Balance = 330 },     // 新しい
+            new() { IsBus = true, BusStops = "薬院大通～天神", Amount = 210, Balance = 500 }   // 古い
+        };
+
+        var result = _generator.Generate(details);
+
+        result.Should().Be("バス（薬院大通～天神、博多～吉塚）");
+    }
+
+    /// <summary>
+    /// 鉄道とバス乗り継ぎが混在する場合
+    /// </summary>
+    [Fact]
+    public void Generate_鉄道とバス乗り継ぎ混在_正しく表示される()
+    {
+        // FeliCa順（新しい順）: 天神→博多(バス2区間目)、薬院→天神(バス1区間目)、博多→天神(鉄道)
+        var details = new List<LedgerDetail>
+        {
+            new() { IsBus = true, BusStops = "天神～博多駅", Amount = 210, Balance = 530 },
+            new() { IsBus = true, BusStops = "薬院～天神", Amount = 210, Balance = 740 },
+            new() { IsBus = false, EntryStation = "博多", ExitStation = "天神", Amount = 260, Balance = 1000 }
+        };
+
+        var result = _generator.Generate(details);
+
+        result.Should().Contain("鉄道（博多～天神）");
+        result.Should().Contain("バス（薬院～博多駅）");
+    }
+
+    #endregion
 }
