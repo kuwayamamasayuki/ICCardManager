@@ -535,10 +535,10 @@ public class SummaryGeneratorComprehensiveTests
         // Act
         var results = _generator.GenerateByDate(details);
 
-        // Assert: 乗継は統合、バスは古い順に表示
+        // Assert: 鉄道は乗継統合、バスも乗り継ぎ統合される
         results.Should().HaveCount(1);
         results[0].Date.Should().Be(new DateTime(2024, 12, 9));
-        results[0].Summary.Should().Be("鉄道（天神～箱崎宮前）、バス（箱崎駅前～九大キャンパス、九大キャンパス～博多駅）");
+        results[0].Summary.Should().Be("鉄道（天神～箱崎宮前）、バス（箱崎駅前～博多駅）");
         OutputInputAndResult(details, results);
     }
 
@@ -676,9 +676,9 @@ public class SummaryGeneratorComprehensiveTests
         // Act
         var results = _generator.GenerateByDate(details);
 
-        // Assert: 古い順に出力
+        // Assert: 乗り継ぎ統合される（博多駅で乗り継ぎ）
         results.Should().HaveCount(1);
-        results[0].Summary.Should().Be("バス（天神バスセンター～博多駅、博多駅～キャナルシティ前）");
+        results[0].Summary.Should().Be("バス（天神バスセンター～キャナルシティ前）");
         OutputInputAndResult(details, results);
     }
 
