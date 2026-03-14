@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using ICCardManager.Models;
 
@@ -79,6 +80,44 @@ namespace ICCardManager.Services
         private readonly DepartmentType _departmentType;
 
         /// <summary>
+        /// 組織固有設定（Issue #974）
+        /// </summary>
+        private static OrganizationOptions _options = new();
+
+        /// <summary>
+        /// TransferStationGroups のHashSet版キャッシュ
+        /// </summary>
+        private static List<HashSet<string>> _transferStationGroups = BuildTransferStationGroups(new OrganizationOptions());
+
+        /// <summary>
+        /// 組織固有設定を注入（起動時に1回だけ呼ぶ）
+        /// </summary>
+        public static void Configure(OrganizationOptions options)
+        {
+            _options = options ?? new OrganizationOptions();
+            _transferStationGroups = BuildTransferStationGroups(_options);
+        }
+
+        /// <summary>
+        /// 設定をデフォルトにリセット（テスト用）
+        /// </summary>
+        internal static void ResetToDefaults()
+        {
+            _options = new OrganizationOptions();
+            _transferStationGroups = BuildTransferStationGroups(_options);
+        }
+
+        /// <summary>
+        /// TransferStationGroups を List&lt;List&lt;string&gt;&gt; から List&lt;HashSet&lt;string&gt;&gt; に変換
+        /// </summary>
+        private static List<HashSet<string>> BuildTransferStationGroups(OrganizationOptions options)
+        {
+            return options.SummaryRules.TransferStationGroups
+                .Select(g => new HashSet<string>(g))
+                .ToList();
+        }
+
+        /// <summary>
         /// コンストラクタ
         /// </summary>
         /// <param name="departmentType">部署種別（チャージ摘要の切替に使用）</param>
@@ -87,13 +126,6 @@ namespace ICCardManager.Services
             _departmentType = departmentType;
         }
 
-        /// <summary>
-        /// 乗り継ぎ駅として同一視するグループ
-        /// </summary>
-        /// <remarks>
-        /// 異なる事業者間で駅名が異なるが、物理的に近接する駅のグループ。
-        /// 同一グループ内の駅間の移動は乗り継ぎとして判定される。
-        /// </remarks>
         /// <summary>
         /// 金額が負でチャージでもポイント還元フラグでもないレコードを暗黙のポイント還元として判定
         /// </summary>
@@ -111,16 +143,6 @@ namespace ICCardManager.Services
                 && !detail.IsPointRedemption;
         }
 
-        private static readonly List<HashSet<string>> TransferStationGroups = new()
-        {
-            // 天神グループ（福岡市地下鉄・西鉄）
-            // Issue #878: CSVの駅名マスタに合わせて半角括弧・「西鉄」プレフィックス付きに修正
-            new HashSet<string> { "天神", "西鉄福岡(天神)" },
-
-            // 千早グループ（JR・西鉄）
-            new HashSet<string> { "千早", "西鉄千早" }
-        };
-
         /// <summary>
         /// 2つの駅が乗り継ぎ駅として同一かどうかを判定
         /// </summary>
@@ -136,7 +158,7 @@ namespace ICCardManager.Services
             }
 
             // 同一グループ内かチェック
-            foreach (var group in TransferStationGroups)
+            foreach (var group in _transferStationGroups)
             {
                 if (group.Contains(station1) && group.Contains(station2))
                 {
@@ -315,7 +337,7 @@ namespace ICCardManager.Services
                 var railwaySummary = GenerateRailwaySummary(railwayTrips);
                 if (!string.IsNullOrEmpty(railwaySummary))
                 {
-                    summaryParts.Add($"鉄道（{railwaySummary}）");
+                    summaryParts.Add($"{_options.SummaryText.RailwayLabel}（{railwaySummary}）");
                 }
             }
 
@@ -323,7 +345,7 @@ namespace ICCardManager.Services
             if (busTrips.Count > 0)
             {
                 var busSummary = GenerateBusSummary(busTrips);
-                summaryParts.Add($"バス（{busSummary}）");
+                summaryParts.Add($"{_options.SummaryText.BusLabel}（{busSummary}）");
             }
 
             return string.Join("、", summaryParts);
@@ -366,7 +388,7 @@ namespace ICCardManager.Services
             // Issue #942: 暗黙のポイント還元（金額が負でチャージでもない）も含めて判定
             if (detailList.All(d => d.IsPointRedemption || IsImplicitPointRedemption(d)))
             {
-                return "ポイント還元";
+                return _options.SummaryText.PointRedemption;
             }
 
             var railwayTrips = detailList.Where(d => !d.IsCharge && !d.IsPointRedemption && !IsImplicitPointRedemption(d) && !d.IsBus).ToList();
@@ -380,7 +402,7 @@ namespace ICCardManager.Services
                 var railwaySummary = GenerateRailwaySummary(railwayTrips);
                 if (!string.IsNullOrEmpty(railwaySummary))
                 {
-                    summaryParts.Add($"鉄道（{railwaySummary}）");
+                    summaryParts.Add($"{_options.SummaryText.RailwayLabel}（{railwaySummary}）");
                 }
             }
 
@@ -388,7 +410,7 @@ namespace ICCardManager.Services
             if (busTrips.Count > 0)
             {
                 var busSummary = GenerateBusSummary(busTrips);
-                summaryParts.Add($"バス（{busSummary}）");
+                summaryParts.Add($"{_options.SummaryText.BusLabel}（{busSummary}）");
             }
 
             return string.Join("、", summaryParts);
@@ -510,18 +532,28 @@ namespace ICCardManager.Services
             }
 
             // Issue #878: 乗り継ぎ統合を往復判定より先に行う
-            // これにより、天神↔西鉄福岡(天神)のような乗り継ぎ駅を経由した往復が正しく検出される
-            var consolidatedRoutes = ConsolidateRoutes(routes);
-            var consolidatedAsPairs = consolidatedRoutes
-                .Select(r => (Entry: r.Start, Exit: r.End)).ToList();
+            // Issue #974: EnableTransferConsolidation で ON/OFF 可能
+            var consolidatedAsPairs = routes;
+            List<(string Start, string End)> consolidatedRoutes;
+            if (_options.SummaryRules.EnableTransferConsolidation)
+            {
+                consolidatedRoutes = ConsolidateRoutes(routes);
+                consolidatedAsPairs = consolidatedRoutes
+                    .Select(r => (Entry: r.Start, Exit: r.End)).ToList();
+            }
+            else
+            {
+                consolidatedRoutes = routes.Select(r => (Start: r.Entry, End: r.Exit)).ToList();
+            }
 
             // 往復判定（統合後の経路で判定）
-            if (consolidatedAsPairs.Count >= 2)
+            // Issue #974: EnableRoundTripDetection で ON/OFF 可能
+            if (_options.SummaryRules.EnableRoundTripDetection && consolidatedAsPairs.Count >= 2)
             {
                 var roundTrips = DetectRoundTrips(consolidatedAsPairs);
                 if (roundTrips.Count > 0)
                 {
-                    var roundTripStrings = roundTrips.Select(rt => $"{rt.Start}～{rt.End} 往復");
+                    var roundTripStrings = roundTrips.Select(rt => $"{rt.Start}～{rt.End}{_options.SummaryText.RoundTripSuffix}");
                     var remainingRoutes = GetRemainingRoutes(consolidatedAsPairs, roundTrips);
 
                     var allRoutes = roundTripStrings.Concat(
@@ -740,8 +772,8 @@ namespace ICCardManager.Services
 
             if (allBusStops.Count == 0)
             {
-                // 未入力の場合は★マーク
-                return "★";
+                // 未入力の場合はプレースホルダ
+                return _options.SummaryText.BusPlaceholder;
             }
 
             // Issue #985: 「A～B」形式のバス停名から乗り継ぎ統合・往復検出を行う
@@ -762,25 +794,37 @@ namespace ICCardManager.Services
 
             if (parsedRoutes.Count >= 2)
             {
-                // 乗り継ぎ統合を往復判定より先に行う（鉄道と同じ方式）
-                var consolidatedRoutes = ConsolidateRoutes(parsedRoutes);
-                var consolidatedAsPairs = consolidatedRoutes
-                    .Select(r => (Entry: r.Start, Exit: r.End)).ToList();
-
-                // 往復判定（統合後の経路で判定）
-                var roundTrips = DetectRoundTrips(consolidatedAsPairs);
-                if (roundTrips.Count > 0)
+                // Issue #974: 乗り継ぎ統合と往復検出の ON/OFF 制御
+                var consolidatedAsPairs = parsedRoutes;
+                List<(string Start, string End)> consolidatedRoutes;
+                if (_options.SummaryRules.EnableTransferConsolidation)
                 {
-                    var roundTripStrings = roundTrips.Select(rt => $"{rt.Start}～{rt.End} 往復");
-                    var remaining = GetRemainingRoutes(consolidatedAsPairs, roundTrips);
-                    var remainingStrings = remaining.Select(r => $"{r.Entry}～{r.Exit}");
-
-                    return string.Join("、", roundTripStrings
-                        .Concat(remainingStrings)
-                        .Concat(unparsed));
+                    consolidatedRoutes = ConsolidateRoutes(parsedRoutes);
+                    consolidatedAsPairs = consolidatedRoutes
+                        .Select(r => (Entry: r.Start, Exit: r.End)).ToList();
+                }
+                else
+                {
+                    consolidatedRoutes = parsedRoutes.Select(r => (Start: r.Entry, End: r.Exit)).ToList();
                 }
 
-                // 往復なしでも統合結果があれば使用
+                // 往復判定（統合後の経路で判定）
+                if (_options.SummaryRules.EnableRoundTripDetection)
+                {
+                    var roundTrips = DetectRoundTrips(consolidatedAsPairs);
+                    if (roundTrips.Count > 0)
+                    {
+                        var roundTripStrings = roundTrips.Select(rt => $"{rt.Start}～{rt.End}{_options.SummaryText.RoundTripSuffix}");
+                        var remaining = GetRemainingRoutes(consolidatedAsPairs, roundTrips);
+                        var remainingStrings = remaining.Select(r => $"{r.Entry}～{r.Exit}");
+
+                        return string.Join("、", roundTripStrings
+                            .Concat(remainingStrings)
+                            .Concat(unparsed));
+                    }
+                }
+
+                // 統合結果があれば使用
                 return string.Join("、",
                     consolidatedRoutes.Select(r => $"{r.Start}～{r.End}")
                         .Concat(unparsed));
@@ -811,7 +855,7 @@ namespace ICCardManager.Services
         /// </summary>
         public static string GetLendingSummary()
         {
-            return "（貸出中）";
+            return _options.SummaryText.LendingSummary;
         }
 
         /// <summary>
@@ -830,8 +874,8 @@ namespace ICCardManager.Services
         public static string GetChargeSummary(DepartmentType departmentType)
         {
             return departmentType == DepartmentType.EnterpriseAccount
-                ? "旅費によりチャージ"
-                : "役務費によりチャージ";
+                ? _options.SummaryText.ChargeSummaryEnterprise
+                : _options.SummaryText.ChargeSummaryMayorOffice;
         }
 
         /// <summary>
@@ -839,7 +883,7 @@ namespace ICCardManager.Services
         /// </summary>
         public static string GetPointRedemptionSummary()
         {
-            return "ポイント還元";
+            return _options.SummaryText.PointRedemption;
         }
 
         /// <summary>
@@ -847,7 +891,7 @@ namespace ICCardManager.Services
         /// </summary>
         public static string GetRefundSummary()
         {
-            return "払戻しによる払出";
+            return _options.SummaryText.RefundSummary;
         }
 
         /// <summary>
@@ -862,7 +906,7 @@ namespace ICCardManager.Services
         /// <returns>備考テキスト</returns>
         public static string GetInsufficientBalanceNote(int totalFare, int shortfall)
         {
-            return $"支払額{totalFare}円のうち不足額{shortfall}円は現金で支払（旅費支給）";
+            return string.Format(_options.SummaryText.InsufficientBalanceNoteFormat, totalFare, shortfall);
         }
 
         /// <summary>
@@ -870,7 +914,7 @@ namespace ICCardManager.Services
         /// </summary>
         public static string GetCarryoverFromPreviousYearSummary()
         {
-            return "前年度より繰越";
+            return _options.SummaryText.CarryoverFromPreviousYear;
         }
 
         /// <summary>
@@ -879,7 +923,7 @@ namespace ICCardManager.Services
         /// <param name="previousMonth">前月の月番号（1-12）</param>
         public static string GetCarryoverFromPreviousMonthSummary(int previousMonth)
         {
-            return $"{previousMonth}月より繰越";
+            return string.Format(_options.SummaryText.CarryoverFromMonthFormat, previousMonth);
         }
 
         /// <summary>
@@ -887,7 +931,7 @@ namespace ICCardManager.Services
         /// </summary>
         public static string GetCarryoverToNextYearSummary()
         {
-            return "次年度へ繰越";
+            return _options.SummaryText.CarryoverToNextYear;
         }
 
         /// <summary>
@@ -901,7 +945,7 @@ namespace ICCardManager.Services
         /// </remarks>
         public static string GetMidYearCarryoverSummary(int carryoverMonth)
         {
-            return $"{carryoverMonth}月から繰越";
+            return string.Format(_options.SummaryText.MidYearCarryoverFormat, carryoverMonth);
         }
 
         /// <summary>
@@ -941,9 +985,16 @@ namespace ICCardManager.Services
             {
                 return false;
             }
-            // "1月から繰越" ～ "12月から繰越" のパターンにマッチ
-            return System.Text.RegularExpressions.Regex.IsMatch(
-                summary, @"^(1[0-2]|[1-9])月から繰越$");
+
+            try
+            {
+                return Regex.IsMatch(summary, _options.SummaryText.MidYearCarryoverPattern);
+            }
+            catch (ArgumentException)
+            {
+                // 不正な正規表現の場合はデフォルトパターンにフォールバック
+                return Regex.IsMatch(summary, @"^(1[0-2]|[1-9])月から繰越$");
+            }
         }
 
         /// <summary>
@@ -951,7 +1002,7 @@ namespace ICCardManager.Services
         /// </summary>
         public static string GetMonthlySummary(int month)
         {
-            return $"{month}月計";
+            return string.Format(_options.SummaryText.MonthlySummaryFormat, month);
         }
 
         /// <summary>
@@ -959,7 +1010,7 @@ namespace ICCardManager.Services
         /// </summary>
         public static string GetCumulativeSummary()
         {
-            return "累計";
+            return _options.SummaryText.CumulativeSummary;
         }
     }
 }

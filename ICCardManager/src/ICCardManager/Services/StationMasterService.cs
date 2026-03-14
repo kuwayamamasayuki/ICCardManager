@@ -66,7 +66,7 @@ namespace ICCardManager.Services
         /// 2 = JR東海・中部圏
         /// 3 = JR九州・九州圏
         /// </remarks>
-        private static readonly Dictionary<CardType, int[]> CardTypeAreaPriority = new()
+        private static readonly Dictionary<CardType, int[]> DefaultCardTypeAreaPriority = new()
         {
             { CardType.Hayakaken, new[] { 3, 0, 1, 2 } },  // はやかけん: 九州優先
             { CardType.SUGOCA, new[] { 3, 0, 1, 2 } },     // SUGOCA: 九州優先
@@ -80,6 +80,19 @@ namespace ICCardManager.Services
             { CardType.Manaca, new[] { 2, 0, 1, 3 } },     // manaca: 中部優先
             { CardType.Unknown, new[] { 3, 0, 1, 2 } },    // 不明: 九州優先（福岡での使用を考慮）
         };
+
+        /// <summary>
+        /// 組織固有設定から上書きされたエリア優先順位（Issue #974）
+        /// </summary>
+        private static OrganizationOptions _orgOptions = new();
+
+        /// <summary>
+        /// 組織固有設定を注入（起動時に1回だけ呼ぶ）
+        /// </summary>
+        public static void Configure(OrganizationOptions options)
+        {
+            _orgOptions = options ?? new OrganizationOptions();
+        }
 
         private StationMasterService()
         {
@@ -247,11 +260,19 @@ namespace ICCardManager.Services
         /// </summary>
         private static int[] GetAreaPriority(CardType cardType)
         {
-            if (CardTypeAreaPriority.TryGetValue(cardType, out var priority))
+            // Issue #974: 組織設定で上書きされた優先順位を優先
+            var cardTypeName = cardType.ToString();
+            if (_orgOptions.AreaPriority.CardTypePriorities.TryGetValue(cardTypeName, out var customPriority))
+            {
+                return customPriority;
+            }
+
+            // デフォルトのハードコード値を使用
+            if (DefaultCardTypeAreaPriority.TryGetValue(cardType, out var priority))
             {
                 return priority;
             }
-            return CardTypeAreaPriority[CardType.Unknown];
+            return _orgOptions.AreaPriority.DefaultPriority;
         }
 
         /// <summary>

@@ -9,6 +9,7 @@ using System.Windows.Documents;
 using System.Windows.Media;
 using ICCardManager.Common;
 using ICCardManager.Models;
+using Microsoft.Extensions.Options;
 
 namespace ICCardManager.Services
 {
@@ -99,11 +100,14 @@ namespace ICCardManager.Services
     public class PrintService
     {
         private readonly IReportDataBuilder _reportDataBuilder;
+        private readonly OrganizationOptions _orgOptions;
 
         public PrintService(
-            IReportDataBuilder reportDataBuilder)
+            IReportDataBuilder reportDataBuilder,
+            IOptions<OrganizationOptions> orgOptions = null)
         {
             _reportDataBuilder = reportDataBuilder;
+            _orgOptions = orgOptions?.Value ?? new OrganizationOptions();
         }
 
         /// <summary>
@@ -228,7 +232,7 @@ namespace ICCardManager.Services
                 combinedDoc.Blocks.Add(pageBreak);
 
                 // タイトル
-                var titlePara = new Paragraph(new Run("物品出納簿"))
+                var titlePara = new Paragraph(new Run(_orgOptions.ReportLayout.TitleText))
                 {
                     FontSize = 18,
                     FontWeight = FontWeights.Bold,
@@ -499,7 +503,7 @@ namespace ICCardManager.Services
             }
 
             // タイトル
-            var titlePara = new Paragraph(new Run("物品出納簿"))
+            var titlePara = new Paragraph(new Run(_orgOptions.ReportLayout.TitleText))
             {
                 FontSize = 18,
                 FontWeight = FontWeights.Bold,
@@ -560,11 +564,11 @@ namespace ICCardManager.Services
             // 設計書に合わせて1行に収める
             // 物品の分類: 雑品（金券類）  品名: はやかけん  規格: H001  単位: 円
             row.Cells.Add(CreateHeaderCell("物品分類:", false));
-            row.Cells.Add(CreateHeaderCell("雑品（金券類）", true));
+            row.Cells.Add(CreateHeaderCell(_orgOptions.ReportLayout.ClassificationText, true));
             row.Cells.Add(CreateHeaderCell("品名:", false));
             row.Cells.Add(CreateHeaderCell(data.CardType, true));
             row.Cells.Add(CreateHeaderCell("規格:", false));
-            row.Cells.Add(CreateHeaderCell($"{data.CardNumber}  単位: 円", true));
+            row.Cells.Add(CreateHeaderCell($"{data.CardNumber}  単位: {_orgOptions.ReportLayout.UnitText}", true));
 
             rowGroup.Rows.Add(row);
             table.RowGroups.Add(rowGroup);
