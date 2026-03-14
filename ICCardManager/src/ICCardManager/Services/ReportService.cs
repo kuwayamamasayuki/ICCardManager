@@ -7,6 +7,7 @@ using ClosedXML.Excel;
 using ICCardManager.Common;
 using ICCardManager.Data.Repositories;
 using ICCardManager.Models;
+using Microsoft.Extensions.Options;
 
 namespace ICCardManager.Services
 {
@@ -188,17 +189,20 @@ namespace ICCardManager.Services
         private readonly ILedgerRepository _ledgerRepository;
         private readonly ISettingsRepository _settingsRepository;
         private readonly IReportDataBuilder _reportDataBuilder;
+        private readonly OrganizationOptions _orgOptions;
 
         public ReportService(
             ICardRepository cardRepository,
             ILedgerRepository ledgerRepository,
             ISettingsRepository settingsRepository,
-            IReportDataBuilder reportDataBuilder)
+            IReportDataBuilder reportDataBuilder,
+            IOptions<OrganizationOptions> orgOptions = null)
         {
             _cardRepository = cardRepository;
             _ledgerRepository = ledgerRepository;
             _settingsRepository = settingsRepository;
             _reportDataBuilder = reportDataBuilder;
+            _orgOptions = orgOptions?.Value ?? new OrganizationOptions();
         }
 
         /// <summary>
@@ -690,7 +694,9 @@ namespace ICCardManager.Services
         /// <returns>ファイル名（例: 物品出納簿_はやかけん_H001_2024年度.xlsx）</returns>
         public static string GetFiscalYearFileName(string cardType, string cardNumber, int fiscalYear)
         {
-            return $"物品出納簿_{cardType}_{cardNumber}_{fiscalYear}年度.xlsx";
+            return string.Format(
+                new OrganizationOptions().ReportLayout.FileNameFormat,
+                cardType, cardNumber, fiscalYear);
         }
 
         /// <summary>
@@ -704,15 +710,15 @@ namespace ICCardManager.Services
         {
             // ヘッダ情報を設定（指定された開始行からの相対位置）
             var row2 = headerStartRow + 1;  // 2行目（テンプレートでは2行目にヘッダー情報）
-            worksheet.Cell(row2, 2).Value = "雑品（金券類）";   // B列: 物品の分類の値（固定）
-            worksheet.Cell(row2, 5).Value = card.CardType;      // E列: 品名の値
-            worksheet.Cell(row2, 8).Value = card.CardNumber;    // H列: 規格の値
-            worksheet.Cell(row2, 10).Value = "円";              // J列: 単位の値（固定）
+            worksheet.Cell(row2, _orgOptions.TemplateMapping.ClassificationColumn).Value = _orgOptions.ReportLayout.ClassificationText;
+            worksheet.Cell(row2, _orgOptions.TemplateMapping.CardTypeColumn).Value = card.CardType;
+            worksheet.Cell(row2, _orgOptions.TemplateMapping.CardNumberColumn).Value = card.CardNumber;
+            worksheet.Cell(row2, _orgOptions.TemplateMapping.UnitColumn).Value = _orgOptions.ReportLayout.UnitText;
 
             // Issue #510: ページ番号を設定
             if (pageNumber.HasValue)
             {
-                worksheet.Cell(row2, 12).Value = pageNumber.Value;  // L列: 頁の値
+                worksheet.Cell(row2, _orgOptions.TemplateMapping.PageNumberColumn).Value = pageNumber.Value;
             }
 
             // ヘッダ行のフォントサイズを調整して1行に収める（1ページ目のみ）
