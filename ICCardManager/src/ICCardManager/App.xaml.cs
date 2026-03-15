@@ -107,6 +107,11 @@ namespace ICCardManager
 
                 _logger.LogDebug("DIコンテナ構築完了");
 
+                // Issue #974: 組織固有設定を静的サービスに注入
+                var orgOptions = ServiceProvider.GetRequiredService<IOptions<OrganizationOptions>>().Value;
+                SummaryGenerator.Configure(orgOptions);
+                StationMasterService.Configure(orgOptions);
+
                 // データベース初期化
                 InitializeDatabase();
 
@@ -158,6 +163,8 @@ namespace ICCardManager
             // 設定オプション（Issue #854: ハードコード値の外部化）
             services.Configure<AppOptions>(Configuration.GetSection("AppOptions"));
             services.Configure<CacheOptions>(Configuration.GetSection("CacheOptions"));
+            // Issue #974: 組織固有設定の外部化
+            services.Configure<OrganizationOptions>(Configuration.GetSection("OrganizationOptions"));
 
             // ロギングの設定
             services.AddLogging(builder =>
