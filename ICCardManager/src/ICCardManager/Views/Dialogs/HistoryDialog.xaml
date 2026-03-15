@@ -188,7 +188,7 @@
                   AutomationProperties.HelpText="選択した期間のカード利用履歴です。貸出中のレコードはオレンジ背景で表示されます。">
             <DataGrid.Columns>
                 <DataGridTextColumn Header="日付" Binding="{Binding DateDisplay}" Width="120"/>
-                <DataGridTextColumn Header="摘要" Binding="{Binding Summary}" Width="*"/>
+                <DataGridTextColumn Header="摘要" Binding="{Binding Summary}" Width="*" MinWidth="150"/>
                 <DataGridTextColumn Header="受入" Width="90">
                     <DataGridTextColumn.Binding>
                         <Binding Path="IncomeDisplay"/>
