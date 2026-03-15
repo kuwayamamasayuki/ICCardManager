@@ -214,34 +214,6 @@ namespace ICCardManager.Services
         }
 
         /// <summary>
-        /// バス停名をサニタイズ
-        /// </summary>
-        /// <param name="busStops">バス停名</param>
-        /// <returns>サニタイズされたバス停名</returns>
-        /// <remarks>
-        /// 許可文字: 日本語、英数字、記号
-        /// 最大長: 100文字
-        /// </remarks>
-        public static string SanitizeBusStops(string busStops)
-        {
-            if (string.IsNullOrEmpty(busStops))
-            {
-                return string.Empty;
-            }
-
-            // 標準サニタイズを適用
-            var sanitized = Sanitize(busStops, SanitizeOptions.Standard);
-
-            // 最大長で切り詰め
-            if (sanitized.Length > 100)
-            {
-                sanitized = sanitized.Substring(0, 100);
-            }
-
-            return sanitized;
-        }
-
-        /// <summary>
         /// カード管理番号をサニタイズ
         /// </summary>
         /// <param name="cardNumber">カード管理番号</param>

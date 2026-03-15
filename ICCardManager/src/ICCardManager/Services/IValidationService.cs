@@ -87,12 +87,5 @@ namespace ICCardManager.Services
         /// <param name="balance">残額警告閾値</param>
         /// <returns>バリデーション結果</returns>
         ValidationResult ValidateWarningBalance(int balance);
-
-        /// <summary>
-        /// バス停名を検証
-        /// </summary>
-        /// <param name="busStops">バス停名</param>
-        /// <returns>バリデーション結果</returns>
-        ValidationResult ValidateBusStops(string busStops);
     }
 }

@@ -33,11 +33,6 @@ namespace ICCardManager.Services
         private const int StaffNameMaxLength = 50;
 
         /// <summary>
-        /// バス停名の最大長
-        /// </summary>
-        private const int BusStopsMaxLength = 100;
-
-        /// <summary>
         /// 残額警告閾値の最小値
         /// </summary>
         private const int WarningBalanceMin = 0;
@@ -175,27 +170,6 @@ namespace ICCardManager.Services
             if (balance > WarningBalanceMax)
             {
                 return ValidationResult.Failure($"残額警告閾値は{WarningBalanceMax:N0}円以下で設定してください");
-            }
-
-            return ValidationResult.Success();
-        }
-
-        #endregion
-
-        #region バス停関連バリデーション
-
-        /// <inheritdoc/>
-        public ValidationResult ValidateBusStops(string busStops)
-        {
-            // バス停名は空でも可（★マークが付く）
-            if (string.IsNullOrWhiteSpace(busStops))
-            {
-                return ValidationResult.Success();
-            }
-
-            if (busStops.Length > BusStopsMaxLength)
-            {
-                return ValidationResult.Failure($"バス停名は{BusStopsMaxLength}文字以内で入力してください");
             }
 
             return ValidationResult.Success();

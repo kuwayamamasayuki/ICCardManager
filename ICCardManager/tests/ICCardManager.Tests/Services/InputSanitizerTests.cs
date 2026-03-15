@@ -425,58 +425,6 @@ public class InputSanitizerTests
 
     #endregion
 
-    #region SanitizeBusStops メソッドテスト
-
-    /// <summary>
-    /// バス停名が正しくサニタイズされること
-    /// </summary>
-    [Fact]
-    public void SanitizeBusStops_ValidBusStops_ReturnsSanitized()
-    {
-        // Arrange
-        var input = "  天神→博多駅  ";
-
-        // Act
-        var result = InputSanitizer.SanitizeBusStops(input);
-
-        // Assert
-        result.Should().Be("天神→博多駅");
-    }
-
-    /// <summary>
-    /// 100文字を超えるバス停名が切り詰められること
-    /// </summary>
-    [Fact]
-    public void SanitizeBusStops_LongBusStops_TruncatesTo100Characters()
-    {
-        // Arrange
-        var input = new string('あ', 120);
-
-        // Act
-        var result = InputSanitizer.SanitizeBusStops(input);
-
-        // Assert
-        result.Should().HaveLength(100);
-    }
-
-    /// <summary>
-    /// バス停名の記号が保持されること
-    /// </summary>
-    [Fact]
-    public void SanitizeBusStops_WithSymbols_KeepsThem()
-    {
-        // Arrange
-        var input = "天神（北）→博多駅・筑紫口";
-
-        // Act
-        var result = InputSanitizer.SanitizeBusStops(input);
-
-        // Assert
-        result.Should().Be("天神（北）→博多駅・筑紫口");
-    }
-
-    #endregion
-
     #region SanitizeCardNumber メソッドテスト
 
     /// <summary>
