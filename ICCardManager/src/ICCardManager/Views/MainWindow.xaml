@@ -424,7 +424,7 @@
                                     </DataGridTemplateColumn.CellTemplate>
                                 </DataGridTemplateColumn>
                                 <DataGridTextColumn Header="日付" Binding="{Binding DateDisplay}" Width="90"/>
-                                <DataGridTextColumn Header="摘要" Binding="{Binding Summary}" Width="*"/>
+                                <DataGridTextColumn Header="摘要" Binding="{Binding Summary}" Width="*" MinWidth="150"/>
                                 <DataGridTextColumn Header="受入" Width="75">
                                     <DataGridTextColumn.Binding>
                                         <Binding Path="IncomeDisplay"/>
