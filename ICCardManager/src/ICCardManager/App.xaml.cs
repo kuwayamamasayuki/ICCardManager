@@ -190,7 +190,6 @@ namespace ICCardManager
 
             // Services層
             services.AddSingleton<IValidationService, ValidationService>();
-            services.AddSingleton<CardTypeDetector>();
             services.AddSingleton<SummaryGenerator>(sp =>
             {
                 var settings = sp.GetRequiredService<ISettingsRepository>().GetAppSettings();

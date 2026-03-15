@@ -24,7 +24,6 @@ namespace ICCardManager.ViewModels
         private readonly ICardRepository _cardRepository;
         private readonly ILedgerRepository _ledgerRepository;
         private readonly ICardReader _cardReader;
-        private readonly CardTypeDetector _cardTypeDetector;
         private readonly IValidationService _validationService;
         private readonly OperationLogger _operationLogger;
         private readonly IDialogService _dialogService;
@@ -122,7 +121,6 @@ namespace ICCardManager.ViewModels
             ICardRepository cardRepository,
             ILedgerRepository ledgerRepository,
             ICardReader cardReader,
-            CardTypeDetector cardTypeDetector,
             IValidationService validationService,
             OperationLogger operationLogger,
             IDialogService dialogService,
@@ -133,7 +131,6 @@ namespace ICCardManager.ViewModels
             _cardRepository = cardRepository;
             _ledgerRepository = ledgerRepository;
             _cardReader = cardReader;
-            _cardTypeDetector = cardTypeDetector;
             _validationService = validationService;
             _operationLogger = operationLogger;
             _dialogService = dialogService;

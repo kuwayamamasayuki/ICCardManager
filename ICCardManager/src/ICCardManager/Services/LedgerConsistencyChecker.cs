@@ -44,7 +44,7 @@ namespace ICCardManager.Services
         /// <summary>
         /// 残高チェーンの整合性をチェック（内部ロジック）
         /// </summary>
-        public ConsistencyResult CheckConsistency(
+        internal ConsistencyResult CheckConsistency(
             List<Ledger> ledgers, string cardIdm, DateTime fromDate)
         {
             var result = new ConsistencyResult { IsConsistent = true };
@@ -69,35 +69,6 @@ namespace ICCardManager.Services
             return result;
         }
 
-        /// <summary>
-        /// 前残高を含めた完全な整合性チェック（非同期版）
-        /// </summary>
-        public async Task<ConsistencyResult> CheckConsistencyWithPreviousAsync(
-            List<Ledger> ledgers, string cardIdm, DateTime fromDate)
-        {
-            var result = new ConsistencyResult { IsConsistent = true };
-
-            if (ledgers.Count == 0) return result;
-
-            // 期間の直前のレコードから前残高を取得
-            var previousLedger = await _ledgerRepository.GetLatestBeforeDateAsync(cardIdm, fromDate);
-            var previousBalance = previousLedger?.Balance ?? 0;
-
-            foreach (var ledger in ledgers)
-            {
-                var expectedBalance = previousBalance + ledger.Income - ledger.Expense;
-
-                if (ledger.Balance != expectedBalance)
-                {
-                    result.IsConsistent = false;
-                    result.Inconsistencies.Add((ledger.Id, expectedBalance, ledger.Balance));
-                }
-
-                previousBalance = ledger.Balance;
-            }
-
-            return result;
-        }
     }
 
     /// <summary>

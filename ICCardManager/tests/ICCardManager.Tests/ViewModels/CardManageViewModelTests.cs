@@ -35,7 +35,6 @@ public class CardManageViewModelTests
     private readonly Mock<OperationLogger> _operationLoggerMock;
     private readonly Mock<IDialogService> _dialogServiceMock;
     private readonly Mock<IStaffAuthService> _staffAuthServiceMock;
-    private readonly CardTypeDetector _cardTypeDetector;
     private readonly LendingService _lendingService;
     private readonly CardManageViewModel _viewModel;
 
@@ -48,7 +47,6 @@ public class CardManageViewModelTests
         _staffRepositoryMock = new Mock<IStaffRepository>();
         _dialogServiceMock = new Mock<IDialogService>();
         _staffAuthServiceMock = new Mock<IStaffAuthService>();
-        _cardTypeDetector = new CardTypeDetector();
 
         // OperationLoggerのモック（コンストラクタ引数が必要なためMock.Ofで作成）
         var operationLogRepositoryMock = new Mock<IOperationLogRepository>();
@@ -97,7 +95,6 @@ public class CardManageViewModelTests
             _cardRepositoryMock.Object,
             _ledgerRepositoryMock.Object,
             _cardReaderMock.Object,
-            _cardTypeDetector,
             _validationServiceMock.Object,
             _operationLoggerMock.Object,
             _dialogServiceMock.Object,

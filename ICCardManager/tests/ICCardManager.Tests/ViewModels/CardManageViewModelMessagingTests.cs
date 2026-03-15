@@ -27,7 +27,6 @@ public class CardManageViewModelMessagingTests
     private readonly Mock<OperationLogger> _operationLoggerMock;
     private readonly Mock<IDialogService> _dialogServiceMock;
     private readonly Mock<IStaffAuthService> _staffAuthServiceMock;
-    private readonly CardTypeDetector _cardTypeDetector;
     private readonly LendingService _lendingService;
     private readonly WeakReferenceMessenger _messenger;
     private readonly CardManageViewModel _viewModel;
@@ -41,7 +40,6 @@ public class CardManageViewModelMessagingTests
         _staffRepositoryMock = new Mock<IStaffRepository>();
         _dialogServiceMock = new Mock<IDialogService>();
         _staffAuthServiceMock = new Mock<IStaffAuthService>();
-        _cardTypeDetector = new CardTypeDetector();
 
         var operationLogRepositoryMock = new Mock<IOperationLogRepository>();
         _operationLoggerMock = new Mock<OperationLogger>(operationLogRepositoryMock.Object, _staffRepositoryMock.Object);
@@ -68,7 +66,6 @@ public class CardManageViewModelMessagingTests
             _cardRepositoryMock.Object,
             _ledgerRepositoryMock.Object,
             _cardReaderMock.Object,
-            _cardTypeDetector,
             _validationServiceMock.Object,
             _operationLoggerMock.Object,
             _dialogServiceMock.Object,
