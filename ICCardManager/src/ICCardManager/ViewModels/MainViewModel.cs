@@ -2054,6 +2054,12 @@ public partial class MainViewModel : ViewModelBase
                 // バス停未入力警告: 一覧ダイアログを表示（Issue #703: ダイアログ内で直接バス停名入力）
                 _navigationService.ShowDialog<Views.Dialogs.IncompleteBusStopDialog>();
 
+                // Issue #1010: バス停名入力後に履歴画面を即時反映
+                if (IsHistoryVisible)
+                {
+                    await LoadHistoryLedgersAsync();
+                }
+
                 // ダイアログ内でバス停名が入力された可能性があるため、警告を更新
                 await CheckWarningsAsync();
                 break;
