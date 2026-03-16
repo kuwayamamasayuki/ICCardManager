@@ -433,6 +433,47 @@ public class LedgerSplitServiceTests
         balance.Should().Be(600);
     }
 
+    /// <summary>
+    /// Issue #1004: ポイント還元と利用が混在するグループで、
+    /// 残高チェーン順の最終残高（ポイント還元後）が正しく取得されること
+    /// </summary>
+    [Fact]
+    public void CalculateGroupFinancials_UsageAndPointRedemption_ReturnsPointRedemptionBalance()
+    {
+        // Arrange - 利用(1876→1456)→ポイント還元(1456→1696)
+        // 時系列で最後のdetailはポイント還元（残高1696）
+        var sameDate = new DateTime(2026, 3, 10, 10, 0, 0);
+        var details = new List<LedgerDetail>
+        {
+            new LedgerDetail
+            {
+                IsCharge = false,
+                IsPointRedemption = true,
+                Amount = 240,
+                Balance = 1696,
+                UseDate = sameDate
+            },
+            new LedgerDetail
+            {
+                IsCharge = false,
+                IsPointRedemption = false,
+                Amount = 420,
+                Balance = 1456,
+                EntryStation = "薬院",
+                ExitStation = "博多",
+                UseDate = sameDate
+            }
+        };
+
+        // Act
+        var (income, expense, balance) = LedgerSplitService.CalculateGroupFinancials(details);
+
+        // Assert
+        income.Should().Be(0, "ポイント還元はIncomeに含まない");
+        expense.Should().Be(420, "利用の420円のみ");
+        balance.Should().Be(1696, "時系列で最後のポイント還元後の残高が最終残高");
+    }
+
     #endregion
 
     #region メタデータコピーテスト

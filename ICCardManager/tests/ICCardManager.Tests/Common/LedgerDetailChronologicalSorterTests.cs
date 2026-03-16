@@ -308,4 +308,97 @@ public class LedgerDetailChronologicalSorterTests
     }
 
     #endregion
+
+    #region ポイント還元の残高チェーン (Issue #1004)
+
+    /// <summary>
+    /// Issue #1004: ポイント還元を含む詳細が残高チェーン順で正しくソートされることを確認
+    /// ポイント還元は残高増加（チャージと同じ方向）なので、balance_before = Balance - Amount
+    /// </summary>
+    [Fact]
+    public void Sort_WithPointRedemption_OrderedByBalanceChain()
+    {
+        // Arrange - 利用(1876→1456)→ ポイント還元(1456→1696)
+        var details = new List<LedgerDetail>
+        {
+            // ポイント還元が先に入っている（バグだとこの順のまま出力される）
+            new LedgerDetail
+            {
+                Balance = 1696,
+                Amount = 240,
+                IsCharge = false,
+                IsPointRedemption = true,
+                UseDate = new DateTime(2026, 3, 10)
+            },
+            new LedgerDetail
+            {
+                Balance = 1456,
+                Amount = 420,
+                IsCharge = false,
+                IsPointRedemption = false,
+                EntryStation = "薬院",
+                ExitStation = "博多",
+                UseDate = new DateTime(2026, 3, 10)
+            }
+        };
+
+        // Act
+        var result = LedgerDetailChronologicalSorter.Sort(details);
+
+        // Assert - 利用(balance=1456)が先、ポイント還元(balance=1696)が後
+        result.Should().HaveCount(2);
+        result[0].Balance.Should().Be(1456, "利用が先（残高が減少）");
+        result[0].IsPointRedemption.Should().BeFalse();
+        result[1].Balance.Should().Be(1696, "ポイント還元が後（残高が増加）");
+        result[1].IsPointRedemption.Should().BeTrue();
+    }
+
+    /// <summary>
+    /// チャージ→利用→ポイント還元の3件が正しく並ぶことを確認
+    /// </summary>
+    [Fact]
+    public void Sort_ChargeUsageAndPointRedemption_CorrectOrder()
+    {
+        // Arrange - チャージ(500→1500)→利用(1500→1080)→ポイント還元(1080→1320)
+        var details = new List<LedgerDetail>
+        {
+            new LedgerDetail
+            {
+                Balance = 1320,
+                Amount = 240,
+                IsCharge = false,
+                IsPointRedemption = true,
+                UseDate = new DateTime(2026, 3, 10)
+            },
+            new LedgerDetail
+            {
+                Balance = 1500,
+                Amount = 1000,
+                IsCharge = true,
+                UseDate = new DateTime(2026, 3, 10)
+            },
+            new LedgerDetail
+            {
+                Balance = 1080,
+                Amount = 420,
+                IsCharge = false,
+                IsPointRedemption = false,
+                UseDate = new DateTime(2026, 3, 10)
+            }
+        };
+
+        // Act
+        var result = LedgerDetailChronologicalSorter.Sort(details);
+
+        // Assert - チャージ→利用→ポイント還元
+        result.Should().HaveCount(3);
+        result[0].Balance.Should().Be(1500, "チャージが最初（500→1500）");
+        result[0].IsCharge.Should().BeTrue();
+        result[1].Balance.Should().Be(1080, "利用が2番目（1500→1080）");
+        result[1].IsPointRedemption.Should().BeFalse();
+        result[2].Balance.Should().Be(1320, "ポイント還元が最後（1080→1320）");
+        result[2].IsPointRedemption.Should().BeTrue();
+    }
+
+    #endregion
 }

@@ -3151,9 +3151,11 @@ public class LendingServiceTests : IDisposable
     [Fact]
     public void SplitAtChargeBoundaries_ExplicitPointRedemption_SplitsAsIndividualSegment()
     {
+        // Issue #1004: 明示的ポイント還元のAmountは正の値
+        // （FelicaCardReader: amount = balance - previousBalance で残高増加分）
         var details = new List<LedgerDetail>
         {
-            new() { UseDate = DateTime.Today, Amount = -100, Balance = 1500, IsCharge = false, IsPointRedemption = true },
+            new() { UseDate = DateTime.Today, Amount = 100, Balance = 1500, IsCharge = false, IsPointRedemption = true },
             new() { UseDate = DateTime.Today, EntryStation = "博多", ExitStation = "薬院", Amount = 210, Balance = 1400, IsCharge = false },
         };
 
@@ -3167,7 +3169,7 @@ public class LendingServiceTests : IDisposable
 
         segments[1].IsPointRedemption.Should().BeTrue();
         segments[1].Details.Should().HaveCount(1);
-        segments[1].Details[0].Amount.Should().Be(-100);
+        segments[1].Details[0].Amount.Should().Be(100);
     }
 
     /// <summary>
