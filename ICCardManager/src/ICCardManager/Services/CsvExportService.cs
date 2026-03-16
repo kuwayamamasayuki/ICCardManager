@@ -270,7 +270,19 @@ namespace ICCardManager.Services
                         .Select(d => d))
                     .ToList();
 
-                // カード種別・管理番号 → 日付 → ledger_id 順でソート（グループ内は残高チェーン順を維持）
+                // Issue #1004: 親Ledgerの残高チェーン順を取得し、LedgerId→順序のマッピングを作成
+                // 同一日内でLedgerId順と残高チェーン順が異なる場合（ポイント還元等）に対応
+                var ledgerOrderMap = new Dictionary<int, int>();
+                foreach (var cardGroup in ledgers.GroupBy(l => l.CardIdm))
+                {
+                    var ordered = LedgerOrderHelper.ReorderByBalanceChain(cardGroup);
+                    for (int i = 0; i < ordered.Count; i++)
+                    {
+                        ledgerOrderMap[ordered[i].Id] = i;
+                    }
+                }
+
+                // カード種別・管理番号 → 日付 → 残高チェーン順でソート（グループ内は残高チェーン順を維持）
                 var orderedDetails = sortedDetails
                     .Select((d, idx) => new { Detail = d, ChainOrder = idx })
                     .OrderBy(x =>
@@ -281,7 +293,7 @@ namespace ICCardManager.Services
                         return "";
                     })
                     .ThenBy(x => x.Detail.UseDate)
-                    .ThenBy(x => x.Detail.LedgerId)
+                    .ThenBy(x => ledgerOrderMap.TryGetValue(x.Detail.LedgerId, out var order) ? order : x.Detail.LedgerId)
                     .ThenBy(x => x.ChainOrder)
                     .Select(x => x.Detail);
 

@@ -1077,6 +1077,67 @@ public class CsvExportServiceTests : IDisposable
         lines[2].Should().Contain(",1316,");
     }
 
+    /// <summary>
+    /// Issue #1004: 同一日内の異なるLedgerIdの詳細が残高チェーン順で出力されることを確認
+    /// （LedgerId順ではなく、親Ledgerの残高チェーン順を使用）
+    /// </summary>
+    [Fact]
+    public async Task ExportLedgerDetailsAsync_SameDateDifferentLedgerIds_OrderedByLedgerBalanceChain()
+    {
+        // Arrange - 3/13: LedgerId=9(残高856→76)が先、LedgerId=8(残高76→6)が後
+        // だがIDは8<9なのでID順だと逆になる
+        var details = new List<LedgerDetail>
+        {
+            // LedgerId=8の詳細（残高不足パターン: チャージ→利用）
+            new LedgerDetail { LedgerId = 8, UseDate = new DateTime(2026, 3, 13), Amount = 140, Balance = 216, IsCharge = true },
+            new LedgerDetail { LedgerId = 8, UseDate = new DateTime(2026, 3, 13), EntryStation = "渡辺通", ExitStation = "薬院", Amount = 210, Balance = 6, IsCharge = false },
+            // LedgerId=9の詳細（通常利用）
+            new LedgerDetail { LedgerId = 9, UseDate = new DateTime(2026, 3, 13), EntryStation = "薬院", ExitStation = "博多", Amount = 210, Balance = 646, IsCharge = false },
+            new LedgerDetail { LedgerId = 9, UseDate = new DateTime(2026, 3, 13), EntryStation = "博多", ExitStation = "薬院", Amount = 210, Balance = 436, IsCharge = false },
+        };
+
+        // 親Ledgerレコード（残高チェーン順を決定するために必要）
+        var ledgers = new List<Ledger>
+        {
+            new Ledger { Id = 7, CardIdm = "01010212CC0C2A1F", Date = new DateTime(2026, 3, 12),
+                Summary = "鉄道", Income = 0, Expense = 420, Balance = 856 },
+            new Ledger { Id = 8, CardIdm = "01010212CC0C2A1F", Date = new DateTime(2026, 3, 13),
+                Summary = "鉄道", Income = 0, Expense = 70, Balance = 6 },
+            new Ledger { Id = 9, CardIdm = "01010212CC0C2A1F", Date = new DateTime(2026, 3, 13),
+                Summary = "鉄道", Income = 0, Expense = 780, Balance = 76 },
+        };
+
+        _ledgerRepositoryMock
+            .Setup(x => x.GetAllDetailsInDateRangeAsync(It.IsAny<DateTime>(), It.IsAny<DateTime>()))
+            .ReturnsAsync(details);
+        _ledgerRepositoryMock
+            .Setup(x => x.GetByDateRangeAsync(null, It.IsAny<DateTime>(), It.IsAny<DateTime>()))
+            .ReturnsAsync(ledgers);
+
+        var filePath = Path.Combine(_testDirectory, "details_ledger_order.csv");
+
+        // Act
+        var result = await _service.ExportLedgerDetailsAsync(filePath, new DateTime(2026, 3, 1), new DateTime(2026, 3, 31));
+
+        // Assert
+        result.Success.Should().BeTrue();
+
+        var lines = await Task.Run(() => File.ReadAllLines(filePath, Encoding.UTF8));
+        // ヘッダー + 4行（LedgerId=9が先、LedgerId=8が後）
+        lines.Should().HaveCount(5);
+
+        // LedgerId=9（残高チェーンで先: 856→646→436→...→76）が先に出力
+        lines[1].Should().Contain(",薬院,博多,");
+        lines[1].Should().Contain(",646,");
+        lines[2].Should().Contain(",博多,薬院,");
+        lines[2].Should().Contain(",436,");
+
+        // LedgerId=8（残高チェーンで後: 76→216→6）が後に出力
+        lines[3].Should().Contain(",216,");  // チャージ
+        lines[4].Should().Contain(",渡辺通,薬院,");
+        lines[4].Should().Contain(",6,");
+    }
+
     #endregion
 
     #region エラーハンドリング テスト
