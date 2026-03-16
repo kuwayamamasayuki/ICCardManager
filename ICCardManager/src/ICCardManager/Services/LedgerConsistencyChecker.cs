@@ -33,10 +33,11 @@ namespace ICCardManager.Services
         public async Task<ConsistencyResult> CheckBalanceConsistencyAsync(
             string cardIdm, DateTime fromDate, DateTime toDate)
         {
-            var ledgers = (await _ledgerRepository.GetByDateRangeAsync(cardIdm, fromDate, toDate))
-                .OrderBy(l => l.Date)
-                .ThenBy(l => l.Id)
-                .ToList();
+            // Issue #1004: 同一日内の順序を残高チェーンで決定する
+            // ID順だとポイント還元と利用の順序が残高推移と一致せず、
+            // 偽の不整合が報告される場合がある
+            var ledgers = LedgerOrderHelper.ReorderByBalanceChain(
+                await _ledgerRepository.GetByDateRangeAsync(cardIdm, fromDate, toDate));
 
             return CheckConsistency(ledgers, cardIdm, fromDate);
         }
