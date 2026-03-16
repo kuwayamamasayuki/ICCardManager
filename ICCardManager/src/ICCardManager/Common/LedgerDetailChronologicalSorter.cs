@@ -44,15 +44,18 @@ namespace ICCardManager.Common
                 return new List<LedgerDetail>(detailList);
 
             // balance_before を計算:
-            // 利用（expense）: balance_before = Balance + Amount
-            // チャージ（income）: balance_before = Balance - Amount
+            // 残高増加（チャージ・ポイント還元）: balance_before = Balance - Amount
+            // 残高減少（利用）: balance_before = Balance + Amount
             // Issue #964: Amount が null の場合は 0 として扱う（FeliCa最古レコード等で発生）
+            // Issue #1004: IsPointRedemption もチャージと同様に残高が増加するため、
+            //   Balance - Amount で計算する（FelicaCardReader.ParseHistoryData と同じ判定）
             var items = detailList
                 .Where(d => d.Balance.HasValue)
                 .Select(d =>
                 {
                     var amount = d.Amount ?? 0;
-                    var balanceBefore = d.IsCharge
+                    var isIncomeTransaction = d.IsCharge || d.IsPointRedemption;
+                    var balanceBefore = isIncomeTransaction
                         ? d.Balance!.Value - amount
                         : d.Balance!.Value + amount;
                     return (Detail: d, BalanceBefore: balanceBefore);

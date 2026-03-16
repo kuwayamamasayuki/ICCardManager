@@ -146,4 +146,41 @@ public class LedgerConsistencyCheckerTests
     }
 
     #endregion
+
+    #region CheckBalanceConsistencyAsync（非同期版・残高チェーン順序）
+
+    /// <summary>
+    /// Issue #1004: 同一日内のポイント還元と利用がID順で残高チェーンと逆の場合でも、
+    /// 残高チェーン順で並び替えられるため偽の不整合が報告されないことを確認
+    /// </summary>
+    [Fact]
+    public async Task CheckBalanceConsistencyAsync_SameDatePointRedemptionAndUsage_NoFalseInconsistency()
+    {
+        // Arrange - 3/10に利用(1876→1456)、ポイント還元(1456→1696)
+        // IDはポイント還元(16)が利用(17)より小さい（ID順だと残高チェーンが壊れる）
+        var ledgers = new List<Ledger>
+        {
+            new Ledger { Id = 15, CardIdm = TestCardIdm, Date = new DateTime(2026, 3, 9),
+                Summary = "鉄道（薬院～博多 往復）", Income = 0, Expense = 420, Balance = 1876 },
+            new Ledger { Id = 16, CardIdm = TestCardIdm, Date = new DateTime(2026, 3, 10),
+                Summary = "ポイント還元", Income = 240, Expense = 0, Balance = 1696 },
+            new Ledger { Id = 17, CardIdm = TestCardIdm, Date = new DateTime(2026, 3, 10),
+                Summary = "鉄道（薬院～博多 往復）", Income = 0, Expense = 420, Balance = 1456,
+                StaffName = "桑山　雅行" }
+        };
+
+        _ledgerRepoMock
+            .Setup(x => x.GetByDateRangeAsync(TestCardIdm, It.IsAny<DateTime>(), It.IsAny<DateTime>()))
+            .ReturnsAsync(ledgers);
+
+        // Act
+        var result = await _checker.CheckBalanceConsistencyAsync(
+            TestCardIdm, new DateTime(2026, 3, 1), new DateTime(2026, 3, 31));
+
+        // Assert - 残高チェーン順（利用→還元）で検証されるため不整合はない
+        result.IsConsistent.Should().BeTrue("残高チェーン順に並び替えれば整合する: 1876→1456(利用)→1696(還元)");
+        result.Inconsistencies.Should().BeEmpty();
+    }
+
+    #endregion
 }

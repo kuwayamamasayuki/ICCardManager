@@ -1,0 +1,3 @@
+・Ubuntu起動
+・cd /mnt/d/OneDrive/交通系/src/
+・claude -c

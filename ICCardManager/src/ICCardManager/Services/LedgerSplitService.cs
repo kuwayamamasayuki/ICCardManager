@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
+using ICCardManager.Common;
 using ICCardManager.Data.Repositories;
 using ICCardManager.Models;
 using Microsoft.Extensions.Logging;
@@ -182,16 +183,11 @@ namespace ICCardManager.Services
                 .Sum(d => d.Amount!.Value);
 
             // Balance = グループ内の最後のdetailの残高（時系列順）
-            // Issue #880: DBの表示順と同じ時系列順でソート
-            // FeliCaカードリーダーは新しい順に履歴を返すため、小さいrowidほど新しい
-            // rowid DESC（大きいrowid＝古い順）で時系列順にし、最後（最新）の残高を取得
-            var lastDetail = groupDetails
-                .Where(d => d.Balance.HasValue)
-                .OrderBy(d => d.UseDate ?? DateTime.MaxValue)
-                .ThenByDescending(d => d.IsCharge)
-                .ThenByDescending(d => d.IsPointRedemption)
-                .ThenByDescending(d => d.SequenceNumber > 0 ? d.SequenceNumber : int.MinValue)
-                .LastOrDefault();
+            // Issue #1004: 残高チェーンで正しい時系列順を決定し、最新（最後）の残高を取得
+            // カスタムソート（SequenceNumber DESC等）ではポイント還元と利用の順序が
+            // 正しくない場合がある
+            var sorted = LedgerDetailChronologicalSorter.Sort(groupDetails);
+            var lastDetail = sorted.LastOrDefault(d => d.Balance.HasValue);
 
             int balance = lastDetail?.Balance ?? 0;
 
@@ -203,14 +199,9 @@ namespace ICCardManager.Services
         /// </summary>
         private static DateTime GetGroupDate(List<LedgerDetail> groupDetails, DateTime originalDate)
         {
-            // Issue #880: DBの表示順と同じ時系列順でソートし、最初（最古）の日付を取得
-            var firstDate = groupDetails
-                .Where(d => d.UseDate.HasValue)
-                .OrderBy(d => d.UseDate ?? DateTime.MaxValue)
-                .ThenByDescending(d => d.IsCharge)
-                .ThenByDescending(d => d.IsPointRedemption)
-                .ThenByDescending(d => d.SequenceNumber > 0 ? d.SequenceNumber : int.MinValue)
-                .FirstOrDefault()
+            // Issue #1004: 残高チェーンで正しい時系列順を決定し、最古の日付を取得
+            var firstDate = LedgerDetailChronologicalSorter.Sort(groupDetails)
+                .FirstOrDefault(d => d.UseDate.HasValue)
                 ?.UseDate;
 
             return firstDate ?? originalDate;
