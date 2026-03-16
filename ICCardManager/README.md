@@ -271,6 +271,6 @@ dotnet test --filter "FullyQualifiedName~SummaryGeneratorTests"
 
 ## 更新履歴
 
-最新バージョン: **v1.22.1** (2026-03-16)
+最新バージョン: **v1.22.2** (2026-03-16)
 
 過去の更新履歴は [CHANGELOG.md](CHANGELOG.md) を参照してください。
