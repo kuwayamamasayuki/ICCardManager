@@ -1819,6 +1819,117 @@ public class LendingServiceTests : IDisposable
     }
 
     /// <summary>
+    /// Issue #1001: チャージ額が運賃以下でも、利用後残高が大きい場合は
+    /// 残高不足パターンとして検出されないことを確認（通常チャージの誤検出防止）
+    /// </summary>
+    [Fact]
+    public void DetectInsufficientBalancePattern_NormalChargeUnderFare_ReturnsEmpty()
+    {
+        // Arrange - 残高200円で500円チャージ後に590円利用
+        // chargeAmount(500) <= usageAmount(590) だが、
+        // usageAfterBalance(110) が大きい → 通常のチャージ
+        // 精算機なら不足額390円ちょうどか端数切り上げでチャージするはず
+        var today = DateTime.Today;
+        var details = new List<LedgerDetail>
+        {
+            new()
+            {
+                UseDate = today,
+                IsCharge = true,
+                Amount = 500,
+                Balance = 700      // 200 + 500
+            },
+            new()
+            {
+                UseDate = today,
+                IsCharge = false,
+                EntryStation = "賀茂",
+                ExitStation = "天神",
+                Amount = 590,
+                Balance = 110      // 700 - 590（残高が大きい = 精算チャージではない）
+            }
+        };
+
+        // Act
+        var result = LendingService.DetectInsufficientBalancePattern(details);
+
+        // Assert
+        result.Should().BeEmpty("利用後残高が閾値以上の場合は通常チャージであり残高不足パターンではない");
+    }
+
+    /// <summary>
+    /// Issue #1001: チャージ超過額の閾値が正しく適用されることを確認
+    /// （閾値ぎりぎりの99円は許容、100円は拒否）
+    /// </summary>
+    [Fact]
+    public void DetectInsufficientBalancePattern_ExcessAtThresholdBoundary_ReturnsEmpty()
+    {
+        // Arrange - usageAfterBalance = 100（ちょうど閾値 → 拒否されるべき）
+        var today = DateTime.Today;
+        var details = new List<LedgerDetail>
+        {
+            new()
+            {
+                UseDate = today,
+                IsCharge = true,
+                Amount = 420,      // shortfall(310) + 110
+                Balance = 520      // 100 + 420
+            },
+            new()
+            {
+                UseDate = today,
+                IsCharge = false,
+                EntryStation = "博多",
+                ExitStation = "天神",
+                Amount = 420,
+                Balance = 100      // 520 - 420 = 100（閾値ちょうど）
+            }
+        };
+
+        // Act
+        var result = LendingService.DetectInsufficientBalancePattern(details);
+
+        // Assert
+        result.Should().BeEmpty("利用後残高が閾値(100)以上の場合は残高不足パターンとして検出されない");
+    }
+
+    /// <summary>
+    /// 閾値ぎりぎり（99円）の場合は残高不足パターンとして検出されることを確認
+    /// </summary>
+    [Fact]
+    public void DetectInsufficientBalancePattern_ExcessJustUnderThreshold_ReturnsMatchedPair()
+    {
+        // Arrange - usageAfterBalance = 99（閾値未満 → 検出されるべき）
+        // 不足額301円に対して400円チャージ（100円単位の端数切り上げ想定）
+        var today = DateTime.Today;
+        var details = new List<LedgerDetail>
+        {
+            new()
+            {
+                UseDate = today,
+                IsCharge = true,
+                Amount = 400,
+                Balance = 499      // 99 + 400
+            },
+            new()
+            {
+                UseDate = today,
+                IsCharge = false,
+                EntryStation = "博多",
+                ExitStation = "天神",
+                Amount = 400,
+                Balance = 99       // 499 - 400
+            }
+        };
+
+        // Act
+        var result = LendingService.DetectInsufficientBalancePattern(details);
+
+        // Assert
+        result.Should().HaveCount(1, "利用後残高が閾値(100)未満であれば残高不足パターンとして検出される");
+    }
+
+    /// <summary>
     /// Issue #978: 端数チャージ時のマージで正しい払出額・残高・備考が生成されること
     /// </summary>
     [Fact]

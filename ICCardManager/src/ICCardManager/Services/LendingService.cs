@@ -136,6 +136,13 @@ namespace ICCardManager.Services
     /// </remarks>
     public class LendingService
     {
+        /// <summary>
+        /// 残高不足パターン検出時に許容するチャージ超過額の閾値（円）。
+        /// 精算機でのチャージは不足額ちょうどか10円単位の端数切り上げのため、
+        /// 利用後残高（= チャージ額 - 不足額）がこの値未満であれば残高不足パターンとみなす。
+        /// </summary>
+        internal const int InsufficientBalanceExcessThreshold = 100;
+
         private readonly DbContext _dbContext;
         private readonly ICardRepository _cardRepository;
         private readonly IStaffRepository _staffRepository;
@@ -1053,13 +1060,17 @@ namespace ICCardManager.Services
                     // パターン検出条件:
                     // 1. チャージ前の残高が運賃未満（残高不足だった）
                     // 2. チャージ後残高 = 利用額 + 利用後残高（チャージ→利用の連続性）
-                    //    これは「チャージ直後の残高から運賃を支払った」ことを意味する
+                    //    ※隣接取引では常にTRUEだが、間に別取引がある場合の除外に有効
                     // 3. チャージ額が運賃以下（不足分を補うためのチャージであること）
-                    //    Issue #1001: 通常の大額チャージ（1000円等）が残高不足パターンと
-                    //    誤検出されるのを防止する
+                    //    通常の大額チャージ（1000円等）を除外する
+                    // 4. 利用後の残高が少額（チャージ額 ≈ 不足額であること）
+                    //    精算機でのチャージは不足額ちょうどか10円単位の端数切り上げのため、
+                    //    利用後の残高（= チャージ額 - 不足額）は小さい値になる
+                    //    Issue #1001: 通常チャージ（500円等）が運賃以下でも誤検出されるのを防止
                     if (originalBalance < usageAmount &&
                         chargeAfterBalance == usageAmount + usageAfterBalance &&
-                        chargeAmount <= usageAmount)
+                        chargeAmount <= usageAmount &&
+                        usageAfterBalance < InsufficientBalanceExcessThreshold)
                     {
                         // パターン検出！
                         result.Add((current, candidate));
