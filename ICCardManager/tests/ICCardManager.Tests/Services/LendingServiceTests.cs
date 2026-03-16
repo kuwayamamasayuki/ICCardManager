@@ -1707,6 +1707,118 @@ public class LendingServiceTests : IDisposable
     }
 
     /// <summary>
+    /// Issue #1001: 残高が少ない状態で通常の大額チャージ後に利用した場合、
+    /// 残高不足パターンとして誤検出されないことを確認
+    /// </summary>
+    [Fact]
+    public void DetectInsufficientBalancePattern_LargeNormalChargeWithLowBalance_ReturnsEmpty()
+    {
+        // Arrange - 残高50円で3000円チャージ後に210円利用
+        // originalBalance(50) < usageAmount(210) が成立するが、
+        // chargeAmount(3000) > usageAmount(210) なので通常のチャージ
+        var today = DateTime.Today;
+        var details = new List<LedgerDetail>
+        {
+            new()
+            {
+                UseDate = today,
+                IsCharge = true,
+                Amount = 3000,
+                Balance = 3050     // 50 + 3000
+            },
+            new()
+            {
+                UseDate = today,
+                IsCharge = false,
+                EntryStation = "博多",
+                ExitStation = "天神",
+                Amount = 210,
+                Balance = 2840     // 3050 - 210
+            }
+        };
+
+        // Act
+        var result = LendingService.DetectInsufficientBalancePattern(details);
+
+        // Assert
+        result.Should().BeEmpty("通常のチャージは残高不足パターンとして検出されるべきではない");
+    }
+
+    /// <summary>
+    /// Issue #1001: 残高0で1000円チャージ後に260円利用した場合も、
+    /// 大額チャージなので残高不足パターンとして検出されないことを確認
+    /// </summary>
+    [Fact]
+    public void DetectInsufficientBalancePattern_LargeChargeFromZeroBalance_ReturnsEmpty()
+    {
+        // Arrange - 残高0円で1000円チャージ後に260円利用
+        var today = DateTime.Today;
+        var details = new List<LedgerDetail>
+        {
+            new()
+            {
+                UseDate = today,
+                IsCharge = true,
+                Amount = 1000,
+                Balance = 1000     // 0 + 1000
+            },
+            new()
+            {
+                UseDate = today,
+                IsCharge = false,
+                EntryStation = "博多",
+                ExitStation = "天神",
+                Amount = 260,
+                Balance = 740      // 1000 - 260
+            }
+        };
+
+        // Act
+        var result = LendingService.DetectInsufficientBalancePattern(details);
+
+        // Assert
+        result.Should().BeEmpty("大額チャージ（1000円）は運賃（260円）より大きいため残高不足パターンではない");
+    }
+
+    /// <summary>
+    /// チャージ額が運賃と同額の場合（残高0で不足分全額チャージ）は
+    /// 残高不足パターンとして正しく検出されることを確認
+    /// </summary>
+    [Fact]
+    public void DetectInsufficientBalancePattern_ChargeEqualsUsage_ReturnsMatchedPair()
+    {
+        // Arrange - 残高0円で運賃分ちょうどをチャージ
+        var today = DateTime.Today;
+        var details = new List<LedgerDetail>
+        {
+            new()
+            {
+                UseDate = today,
+                IsCharge = true,
+                Amount = 210,
+                Balance = 210      // 0 + 210
+            },
+            new()
+            {
+                UseDate = today,
+                IsCharge = false,
+                EntryStation = "博多",
+                ExitStation = "天神",
+                Amount = 210,
+                Balance = 0        // 210 - 210
+            }
+        };
+
+        // Act
+        var result = LendingService.DetectInsufficientBalancePattern(details);
+
+        // Assert
+        result.Should().HaveCount(1, "チャージ額=運賃額の場合は残高不足パターンとして検出されるべき");
+        result[0].Charge.Amount.Should().Be(210);
+        result[0].Usage.Amount.Should().Be(210);
+    }
+
+    /// <summary>
     /// Issue #978: 端数チャージ時のマージで正しい払出額・残高・備考が生成されること
     /// </summary>
     [Fact]

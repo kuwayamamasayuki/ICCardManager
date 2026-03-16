@@ -1054,8 +1054,12 @@ namespace ICCardManager.Services
                     // 1. チャージ前の残高が運賃未満（残高不足だった）
                     // 2. チャージ後残高 = 利用額 + 利用後残高（チャージ→利用の連続性）
                     //    これは「チャージ直後の残高から運賃を支払った」ことを意味する
+                    // 3. チャージ額が運賃以下（不足分を補うためのチャージであること）
+                    //    Issue #1001: 通常の大額チャージ（1000円等）が残高不足パターンと
+                    //    誤検出されるのを防止する
                     if (originalBalance < usageAmount &&
-                        chargeAfterBalance == usageAmount + usageAfterBalance)
+                        chargeAfterBalance == usageAmount + usageAfterBalance &&
+                        chargeAmount <= usageAmount)
                     {
                         // パターン検出！
                         result.Add((current, candidate));
