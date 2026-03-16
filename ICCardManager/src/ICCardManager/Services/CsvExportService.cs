@@ -178,11 +178,14 @@ namespace ICCardManager.Services
                 };
 
                 // Issue #592: 同一カードの履歴をまとめて出力
-                // カード種別・管理番号順でグループ化し、各カード内は日付順・ID順を維持
-                foreach (var ledger in ledgers
-                    .OrderBy(l => cardSortKeyMap.TryGetValue(l.CardIdm, out var key) ? key : l.CardIdm)
-                    .ThenBy(l => l.Date)
-                    .ThenBy(l => l.Id))
+                // Issue #1004: カード内はLedgerOrderHelperで残高チェーン順に並び替え
+                // ID順だと同一日内のポイント還元と利用の順序が残高推移と一致しない場合がある
+                var orderedLedgers = ledgers
+                    .GroupBy(l => l.CardIdm)
+                    .OrderBy(g => cardSortKeyMap.TryGetValue(g.Key, out var key) ? key : g.Key)
+                    .SelectMany(g => LedgerOrderHelper.ReorderByBalanceChain(g));
+
+                foreach (var ledger in orderedLedgers)
                 {
                     // 管理番号を取得（見つからない場合は空文字）
                     var cardNumber = cardNumberMap.TryGetValue(ledger.CardIdm, out var num) ? num : "";

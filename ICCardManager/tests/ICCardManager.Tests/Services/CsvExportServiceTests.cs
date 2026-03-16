@@ -482,6 +482,132 @@ public class CsvExportServiceTests : IDisposable
         lines[3].Should().Contain("C-利用");
     }
 
+    /// <summary>
+    /// Issue #1004: 同一日内のポイント還元と利用が残高チェーン順で出力されることを確認
+    /// </summary>
+    [Fact]
+    public async Task ExportLedgersAsync_SameDatePointRedemptionAndUsage_OrderedByBalanceChain()
+    {
+        // Arrange - 3/10に利用(1876→1456)、その後ポイント還元(1456→1696)
+        // IDはポイント還元が先（小さい）だが、残高チェーンでは利用が先
+        var ledgers = new List<Ledger>
+        {
+            new Ledger
+            {
+                Id = 15,
+                CardIdm = "01010212CC0C2A1F",
+                Date = new DateTime(2026, 3, 9),
+                Summary = "鉄道（薬院～博多 往復）",
+                Income = 0,
+                Expense = 420,
+                Balance = 1876,
+                StaffName = "桑山　雅行"
+            },
+            new Ledger
+            {
+                Id = 16,
+                CardIdm = "01010212CC0C2A1F",
+                Date = new DateTime(2026, 3, 10),
+                Summary = "ポイント還元",
+                Income = 240,
+                Expense = 0,
+                Balance = 1696
+            },
+            new Ledger
+            {
+                Id = 17,
+                CardIdm = "01010212CC0C2A1F",
+                Date = new DateTime(2026, 3, 10),
+                Summary = "鉄道（薬院～博多 往復）",
+                Income = 0,
+                Expense = 420,
+                Balance = 1456,
+                StaffName = "桑山　雅行"
+            }
+        };
+
+        _ledgerRepositoryMock
+            .Setup(x => x.GetByDateRangeAsync(null, It.IsAny<DateTime>(), It.IsAny<DateTime>()))
+            .ReturnsAsync(ledgers);
+
+        var filePath = Path.Combine(_testDirectory, "ledgers_balance_chain.csv");
+
+        // Act
+        var result = await _service.ExportLedgersAsync(
+            filePath,
+            new DateTime(2026, 3, 1),
+            new DateTime(2026, 3, 31));
+
+        // Assert
+        result.Success.Should().BeTrue();
+
+        var lines = await Task.Run(() => File.ReadAllLines(filePath, Encoding.UTF8));
+        lines.Should().HaveCount(4); // ヘッダー + 3行
+
+        // 3/10のデータ: 利用(ID:17)が先、ポイント還元(ID:16)が後
+        // 残高チェーン: 1876 → 1456(利用-420) → 1696(還元+240)
+        lines[2].Should().Contain("鉄道（薬院～博多 往復）", "利用がポイント還元より先に出力されるべき");
+        lines[3].Should().Contain("ポイント還元", "ポイント還元は利用の後に出力されるべき");
+
+        // 残高順も確認
+        lines[2].Should().Contain(",1456,", "利用後の残高は1456円");
+        lines[3].Should().Contain(",1696,", "ポイント還元後の残高は1696円");
+    }
+
+    /// <summary>
+    /// Issue #1004: 同一日内のチャージと利用も残高チェーン順で出力されることを確認
+    /// </summary>
+    [Fact]
+    public async Task ExportLedgersAsync_SameDateChargeAndUsage_OrderedByBalanceChain()
+    {
+        // Arrange - 3/4にチャージ(1726→2726)、その後利用(2726→2306)
+        var ledgers = new List<Ledger>
+        {
+            new Ledger
+            {
+                Id = 8,
+                CardIdm = "01010212CC0C2A1F",
+                Date = new DateTime(2026, 3, 4),
+                Summary = "役務費によりチャージ",
+                Income = 1000,
+                Expense = 0,
+                Balance = 2726
+            },
+            new Ledger
+            {
+                Id = 9,
+                CardIdm = "01010212CC0C2A1F",
+                Date = new DateTime(2026, 3, 4),
+                Summary = "鉄道（薬院～博多 往復）",
+                Income = 0,
+                Expense = 420,
+                Balance = 2306
+            }
+        };
+
+        _ledgerRepositoryMock
+            .Setup(x => x.GetByDateRangeAsync(null, It.IsAny<DateTime>(), It.IsAny<DateTime>()))
+            .ReturnsAsync(ledgers);
+
+        var filePath = Path.Combine(_testDirectory, "ledgers_charge_usage.csv");
+
+        // Act
+        var result = await _service.ExportLedgersAsync(
+            filePath,
+            new DateTime(2026, 3, 1),
+            new DateTime(2026, 3, 31));
+
+        // Assert
+        result.Success.Should().BeTrue();
+
+        var lines = await Task.Run(() => File.ReadAllLines(filePath, Encoding.UTF8));
+        lines.Should().HaveCount(3); // ヘッダー + 2行
+
+        // チャージが先、利用が後（残高チェーン: 1726→2726→2306）
+        lines[1].Should().Contain("役務費によりチャージ");
+        lines[2].Should().Contain("鉄道（薬院～博多 往復）");
+    }
+
     #endregion
 
     #region ExportLedgerDetailsAsync テスト (Issue #751)
