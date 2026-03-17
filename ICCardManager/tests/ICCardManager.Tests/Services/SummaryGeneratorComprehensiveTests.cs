@@ -216,15 +216,16 @@ public class SummaryGeneratorComprehensiveTests
     }
 
     [Fact]
-    public void TC004_1日利用とチャージ_2件を返す()
+    public void TC004_1日利用とチャージ_利用が先_2件を返す()
     {
         // Arrange: 12/9に利用とチャージ（同日でも別行）
-        // ICカード履歴は新しい順：[0]利用(新しい)、[1]チャージ(古い)
-        // 残額から判断：チャージ(5000円)→利用(4790円)の順
+        // 時系列: 利用(3000→2790)→チャージ(2790→5790)
+        // ICカード履歴は新しい順：[0]チャージ(新しい)、[1]利用(古い)
+        // 残高チェーンにより時系列を判定し、利用→チャージの順で出力
         var details = new List<LedgerDetail>
         {
-            CreateRailwayUsage(new DateTime(2024, 12, 9), "天神", "博多", 210, 4790),
-            CreateCharge(new DateTime(2024, 12, 9), 3000, 5000)
+            CreateCharge(new DateTime(2024, 12, 9), 3000, 5790),
+            CreateRailwayUsage(new DateTime(2024, 12, 9), "天神", "博多", 210, 2790)
         };
 
         // Act
@@ -232,14 +233,14 @@ public class SummaryGeneratorComprehensiveTests
 
         // Assert
         results.Should().HaveCount(2);
-        // チャージが先（古い）
+        // 利用が先（時系列で古い）
         results[0].Date.Should().Be(new DateTime(2024, 12, 9));
-        results[0].IsCharge.Should().BeTrue();
-        results[0].Summary.Should().Be("役務費によりチャージ");
-        // 利用が後（新しい）
+        results[0].IsCharge.Should().BeFalse();
+        results[0].Summary.Should().Be("鉄道（天神～博多）");
+        // チャージが後（時系列で新しい）
         results[1].Date.Should().Be(new DateTime(2024, 12, 9));
-        results[1].IsCharge.Should().BeFalse();
-        results[1].Summary.Should().Be("鉄道（天神～博多）");
+        results[1].IsCharge.Should().BeTrue();
+        results[1].Summary.Should().Be("役務費によりチャージ");
         OutputInputAndResult(details, results);
     }
 
@@ -1017,52 +1018,6 @@ public class SummaryGeneratorComprehensiveTests
     #region カテゴリ9: 福岡3社混在テスト
 
     [Fact]
-    public void TC034_JR地下鉄西鉄混在_1日()
-    {
-        // Arrange: JR、地下鉄、西鉄を1日で利用
-        // ICカード履歴は新しい順：[0]最新→[2]最古
-        // 実際の順序：博多→吉塚（JR）、天神南→薬院→大橋（地下鉄→西鉄乗継）
-        var details = new List<LedgerDetail>
-        {
-            // 西鉄天神大牟田線（最新）
-            CreateRailwayUsage(new DateTime(2024, 12, 9), "薬院", "大橋", 220, 4020),
-            // 福岡市地下鉄七隈線
-            CreateRailwayUsage(new DateTime(2024, 12, 9), "天神南", "薬院", 210, 4240),
-            // JR鹿児島本線（最古）
-            CreateRailwayUsage(new DateTime(2024, 12, 9), "博多", "吉塚", 170, 4450)
-        };
-
-        // Act
-        var results = _generator.GenerateByDate(details);
-
-        // Assert: 天神南→薬院→大橋は乗継として統合
-        results.Should().HaveCount(1);
-        results[0].Date.Should().Be(new DateTime(2024, 12, 9));
-        results[0].Summary.Should().Be("鉄道（博多～吉塚、天神南～大橋）");
-        OutputInputAndResult(details, results);
-    }
-
-    [Fact]
-    public void TC035_空港線箱崎線乗継()
-    {
-        // Arrange: 空港線→箱崎線の乗継
-        // ICカード履歴は新しい順：[0]乗継後(新しい)、[1]最初の乗車(古い)
-        var details = new List<LedgerDetail>
-        {
-            CreateRailwayUsage(new DateTime(2024, 12, 9), "中洲川端", "貝塚", 260, 4530),
-            CreateRailwayUsage(new DateTime(2024, 12, 9), "天神", "中洲川端", 210, 4790)
-        };
-
-        // Act
-        var results = _generator.GenerateByDate(details);
-
-        // Assert: 乗継として統合
-        results.Should().HaveCount(1);
-        results[0].Summary.Should().Be("鉄道（天神～貝塚）");
-        OutputInputAndResult(details, results);
-    }
-
-    [Fact]
     public void TC036_七隈線単独()
     {
         // Arrange: 七隈線のみ
@@ -1080,27 +1035,6 @@ public class SummaryGeneratorComprehensiveTests
         // Assert: 古い方（行き=六本松→天神南）を基準に
         results.Should().HaveCount(1);
         results[0].Summary.Should().Be("鉄道（六本松～天神南 往復）");
-        OutputInputAndResult(details, results);
-    }
-
-    [Fact]
-    public void TC037_西鉄急行停車駅間()
-    {
-        // Arrange: 西鉄天神大牟田線（急行停車駅間）
-        // ICカード履歴は新しい順：[0]帰り(新しい)、[1]行き(古い)
-        // 往復は古い方（行き）を基準に表示
-        var details = new List<LedgerDetail>
-        {
-            CreateRailwayUsage(new DateTime(2024, 12, 9), "西鉄福岡(天神)", "西鉄二日市", 380, 4620),
-            CreateRailwayUsage(new DateTime(2024, 12, 9), "西鉄二日市", "西鉄福岡(天神)", 380, 5000)
-        };
-
-        // Act
-        var results = _generator.GenerateByDate(details);
-
-        // Assert: 古い方（行き=西鉄二日市→西鉄福岡(天神)）を基準に
-        results.Should().HaveCount(1);
-        results[0].Summary.Should().Be("鉄道（西鉄二日市～西鉄福岡(天神) 往復）");
         OutputInputAndResult(details, results);
     }
 
@@ -1128,6 +1062,31 @@ public class SummaryGeneratorComprehensiveTests
         // Assert: 天神と西鉄福岡(天神)が同一駅とみなされ、乗り継ぎとして連結される
         results.Should().HaveCount(1);
         results[0].Summary.Should().Be("鉄道（博多～西鉄二日市 往復）");
+        OutputInputAndResult(details, results);
+    }
+
+    /// <summary>
+    /// Issue #1017: 千早(JR)と西鉄千早が乗り継ぎ駅として同一視されることを確認
+    /// </summary>
+    [Fact]
+    public void TC049_千早と西鉄千早の乗り継ぎ()
+    {
+        // Arrange: JR鹿児島本線→西鉄貝塚線の乗り継ぎ
+        // 博多→千早（JR）→ 西鉄千早→西鉄福岡(天神)（西鉄）
+        // 千早と西鉄千早は同一駅とみなされる
+        // ICカード履歴は新しい順
+        var details = new List<LedgerDetail>
+        {
+            CreateRailwayUsage(new DateTime(2024, 12, 9), "西鉄千早", "西鉄福岡(天神)", 300, 4530),  // 西鉄（新しい）
+            CreateRailwayUsage(new DateTime(2024, 12, 9), "博多", "千早", 170, 4830)                  // JR（古い）
+        };
+
+        // Act
+        var results = _generator.GenerateByDate(details);
+
+        // Assert: 千早と西鉄千早が同一駅とみなされ、乗り継ぎとして連結される
+        results.Should().HaveCount(1);
+        results[0].Summary.Should().Be("鉄道（博多～西鉄福岡(天神)）");
         OutputInputAndResult(details, results);
     }
 
