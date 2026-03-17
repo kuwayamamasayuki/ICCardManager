@@ -1150,6 +1150,33 @@ public class LedgerRepositoryTests : IDisposable
 
     #endregion
 
+    #region Issue #1014: 統合履歴の時刻がローカル時刻で保存される
+
+    [Fact]
+    public async Task SaveMergeHistoryAsync_MergedAtはローカル時刻で保存される_Issue1014()
+    {
+        // Arrange
+        var beforeSave = DateTime.Now;
+
+        // Act
+        await _repository.SaveMergeHistoryAsync(1, "テスト統合", "{}");
+
+        var afterSave = DateTime.Now;
+
+        // Assert: 保存された時刻を取得して検証
+        var histories = await _repository.GetMergeHistoriesAsync(undoneOnly: false);
+        histories.Should().HaveCount(1);
+
+        var mergedAt = histories[0].MergedAt;
+
+        // ローカル時刻の前後範囲内であることを検証
+        // UTCで保存されていた場合、JST環境では9時間ずれるためこの範囲に入らない
+        mergedAt.Should().BeOnOrAfter(beforeSave.AddSeconds(-1));
+        mergedAt.Should().BeOnOrBefore(afterSave.AddSeconds(1));
+    }
+
+    #endregion
+
     #region ヘルパーメソッド
 
     private static Ledger CreateTestLedger(string cardIdm, DateTime date, string summary, int income = 0, int expense = 0)

@@ -809,8 +809,10 @@ WHERE id = @id";
             var connection = _dbContext.GetConnection();
 
             using var command = connection.CreateCommand();
-            command.CommandText = @"INSERT INTO ledger_merge_history (target_ledger_id, description, undo_data)
-VALUES (@targetLedgerId, @description, @undoData)";
+            // Issue #1014: CURRENT_TIMESTAMPはUTCのため、ローカル時刻を明示的に保存する
+            command.CommandText = @"INSERT INTO ledger_merge_history (merged_at, target_ledger_id, description, undo_data)
+VALUES (@mergedAt, @targetLedgerId, @description, @undoData)";
+            command.Parameters.AddWithValue("@mergedAt", DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"));
             command.Parameters.AddWithValue("@targetLedgerId", targetLedgerId);
             command.Parameters.AddWithValue("@description", description);
             command.Parameters.AddWithValue("@undoData", undoDataJson);
