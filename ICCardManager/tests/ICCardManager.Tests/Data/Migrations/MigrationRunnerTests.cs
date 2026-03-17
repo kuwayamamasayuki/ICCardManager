@@ -432,6 +432,51 @@ public class MigrationRunnerTests : IDisposable
         runner.GetCurrentVersion().Should().Be(1);
     }
 
+    [Fact]
+    [Trait("Category", "Unit")]
+    public void MigrateToLatest_OperationLogのtimestampがローカル時刻で記録される_Issue1014()
+    {
+        // Arrange - operation_logテーブルを事前に作成
+        using (var cmd = _connection.CreateCommand())
+        {
+            cmd.CommandText = @"CREATE TABLE operation_log (
+                id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp     TEXT DEFAULT CURRENT_TIMESTAMP,
+                operator_idm  TEXT NOT NULL,
+                operator_name TEXT NOT NULL,
+                target_table  TEXT,
+                target_id     TEXT,
+                action        TEXT,
+                before_data   TEXT,
+                after_data    TEXT
+            )";
+            cmd.ExecuteNonQuery();
+        }
+
+        var beforeMigrate = DateTime.Now;
+
+        var migration = new TestMigration(1, "タイムスタンプテスト");
+        var runner = new MigrationRunner(_connection, new[] { migration });
+
+        // Act
+        runner.MigrateToLatest();
+
+        var afterMigrate = DateTime.Now;
+
+        // Assert: operation_logに記録されたtimestampを検証
+        using var selectCmd = _connection.CreateCommand();
+        selectCmd.CommandText = "SELECT timestamp FROM operation_log WHERE operator_name = 'MigrationRunner' LIMIT 1";
+        var timestampStr = (string)selectCmd.ExecuteScalar();
+
+        timestampStr.Should().NotBeNull();
+        var timestamp = DateTime.Parse(timestampStr);
+
+        // ローカル時刻の前後範囲内であることを検証
+        // UTCで保存されていた場合、JST環境では9時間ずれるためこの範囲に入らない
+        timestamp.Should().BeOnOrAfter(beforeMigrate.AddSeconds(-1));
+        timestamp.Should().BeOnOrBefore(afterMigrate.AddSeconds(1));
+    }
+
     /// <summary>
     /// テスト用マイグレーション
     /// </summary>

@@ -334,8 +334,10 @@ namespace ICCardManager.Data.Migrations
                     : $"{{\"version\":{migration.Version},\"description\":\"{migration.Description}\",\"status\":\"failed\",\"error\":\"{errorMessage?.Replace("\"", "\\\"") ?? ""}\"}}";
 
                 using var command = _connection.CreateCommand();
-                command.CommandText = @"INSERT INTO operation_log (operator_idm, operator_name, target_table, target_id, action, after_data)
-VALUES (@operator_idm, @operator_name, @target_table, @target_id, @action, @after_data)";
+                // Issue #1014: CURRENT_TIMESTAMPはUTCのため、ローカル時刻を明示的に保存する
+                command.CommandText = @"INSERT INTO operation_log (timestamp, operator_idm, operator_name, target_table, target_id, action, after_data)
+VALUES (@timestamp, @operator_idm, @operator_name, @target_table, @target_id, @action, @after_data)";
+                command.Parameters.AddWithValue("@timestamp", DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"));
                 command.Parameters.AddWithValue("@operator_idm", "SYSTEM");
                 command.Parameters.AddWithValue("@operator_name", "MigrationRunner");
                 command.Parameters.AddWithValue("@target_table", "schema_migrations");
