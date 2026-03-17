@@ -485,4 +485,86 @@ public class SummaryGeneratorTests
     }
 
     #endregion
+
+    #region バスGroupIdサポート
+
+    /// <summary>
+    /// バスのGroupIdが設定されている場合、グループごとに摘要が生成されること
+    /// （鉄道のGenerateRailwaySummaryWithGroupIdと同等の動作）
+    /// </summary>
+    [Fact]
+    public void Generate_バスGroupId別グループ_往復抑制される()
+    {
+        // Arrange: 往復だがGroupIdが別 → 往復検出されず個別表示
+        // FeliCa順（新しい順）: 小さいSequenceNumber = 新しい
+        var details = new List<LedgerDetail>
+        {
+            // 復路（新しい）: 天神→薬院 GroupId=2
+            new()
+            {
+                IsBus = true,
+                BusStops = "天神～薬院",
+                Amount = 210,
+                UseDate = new DateTime(2026, 2, 10, 15, 0, 0),
+                Balance = 290,
+                SequenceNumber = 1,
+                GroupId = 2
+            },
+            // 往路（古い）: 薬院→天神 GroupId=1
+            new()
+            {
+                IsBus = true,
+                BusStops = "薬院～天神",
+                Amount = 210,
+                UseDate = new DateTime(2026, 2, 10, 10, 0, 0),
+                Balance = 500,
+                SequenceNumber = 2,
+                GroupId = 1
+            }
+        };
+
+        // Act
+        var result = _generator.Generate(details);
+
+        // Assert: GroupIdが異なるため往復検出されず個別表示
+        result.Should().Be("バス（薬院～天神、天神～薬院）");
+    }
+
+    /// <summary>
+    /// バスのGroupIdなし（自動検出）の場合は従来通り往復検出されること
+    /// </summary>
+    [Fact]
+    public void Generate_バスGroupIdなし_従来通り往復検出()
+    {
+        // Arrange: GroupId=nullで往復 → 自動検出で往復判定
+        var details = new List<LedgerDetail>
+        {
+            new()
+            {
+                IsBus = true,
+                BusStops = "天神～薬院",
+                Amount = 210,
+                UseDate = new DateTime(2026, 2, 10, 15, 0, 0),
+                Balance = 290,
+                SequenceNumber = 1,
+                GroupId = null
+            },
+            new()
+            {
+                IsBus = true,
+                BusStops = "薬院～天神",
+                Amount = 210,
+                UseDate = new DateTime(2026, 2, 10, 10, 0, 0),
+                Balance = 500,
+                SequenceNumber = 2,
+                GroupId = null
+            }
+        };
+
+        var result = _generator.Generate(details);
+
+        result.Should().Be("バス（薬院～天神 往復）");
+    }
+
+    #endregion
 }
