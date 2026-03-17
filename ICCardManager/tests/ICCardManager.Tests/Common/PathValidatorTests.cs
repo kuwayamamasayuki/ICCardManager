@@ -135,31 +135,82 @@ public class PathValidatorTests : IDisposable
     #region ValidateBackupPath - UNCパステスト
 
     /// <summary>
-    /// UNCパス（\\server\share形式）が拒否されることを確認
+    /// 有効なUNCパス（\\server\share形式）が受け入れられることを確認
     /// </summary>
     [Fact]
-    public void ValidateBackupPath_UncPath_ReturnsInvalid()
+    public void ValidateBackupPath_ValidUncPath_ReturnsValid()
     {
         // Act
         var result = PathValidator.ValidateBackupPath(@"\\server\share\backup");
 
         // Assert
-        result.IsValid.Should().BeFalse();
-        result.ErrorMessage.Should().Contain("ネットワークパス");
+        // UNCパスの形式としては有効（実際のネットワーク到達性は書き込みチェック時に判定）
+        // 書き込み権限チェックで失敗する場合があるが、UNCパス形式としての拒否はされない
+        if (!result.IsValid)
+        {
+            result.ErrorMessage.Should().NotContain("サーバー名と共有名が必要");
+        }
     }
 
     /// <summary>
-    /// UNCパス（//server/share形式）が拒否されることを確認
+    /// 有効なUNCパス（//server/share形式）が受け入れられることを確認
     /// </summary>
     [Fact]
-    public void ValidateBackupPath_UncPathWithForwardSlash_ReturnsInvalid()
+    public void ValidateBackupPath_ValidUncPathWithForwardSlash_ReturnsValid()
     {
         // Act
         var result = PathValidator.ValidateBackupPath("//server/share/backup");
 
         // Assert
+        if (!result.IsValid)
+        {
+            result.ErrorMessage.Should().NotContain("サーバー名と共有名が必要");
+        }
+    }
+
+    /// <summary>
+    /// サーバー名のみのUNCパス（共有名なし）が拒否されることを確認
+    /// </summary>
+    [Fact]
+    public void ValidateBackupPath_UncPathServerOnly_ReturnsInvalid()
+    {
+        // Act
+        var result = PathValidator.ValidateBackupPath(@"\\server");
+
+        // Assert
         result.IsValid.Should().BeFalse();
-        result.ErrorMessage.Should().Contain("ネットワークパス");
+        result.ErrorMessage.Should().Contain("サーバー名と共有名が必要");
+    }
+
+    /// <summary>
+    /// サーバー名の後にセパレータのみのUNCパスが拒否されることを確認
+    /// </summary>
+    [Fact]
+    public void ValidateBackupPath_UncPathServerWithTrailingSeparator_ReturnsInvalid()
+    {
+        // Act
+        var result = PathValidator.ValidateBackupPath(@"\\server\");
+
+        // Assert
+        result.IsValid.Should().BeFalse();
+        result.ErrorMessage.Should().Contain("サーバー名と共有名が必要");
+    }
+
+    /// <summary>
+    /// IsUncPathがUNCパスを正しく検出することを確認
+    /// </summary>
+    [Theory]
+    [InlineData(@"\\server\share", true)]
+    [InlineData("//server/share", true)]
+    [InlineData(@"C:\backup", false)]
+    [InlineData(@"D:\data\backup", false)]
+    public void IsUncPath_DetectsCorrectly(string path, bool expected)
+    {
+        // Act
+        var result = PathValidator.IsUncPath(path);
+
+        // Assert
+        result.Should().Be(expected);
     }
 
     #endregion

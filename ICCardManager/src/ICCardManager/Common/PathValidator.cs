@@ -73,10 +73,14 @@ namespace ICCardManager.Common
                 return ValidationResult.Failure("パスに使用できない文字が含まれています");
             }
 
-            // 4. UNCパスでないこと（オフライン環境のため）
+            // 4. UNCパスの形式チェック（UNCの場合はサーバー名と共有名が必要）
             if (IsUncPath(path))
             {
-                return ValidationResult.Failure("ネットワークパス（UNCパス）は使用できません");
+                var uncValidation = ValidateUncPathFormat(path);
+                if (!uncValidation.IsValid)
+                {
+                    return uncValidation;
+                }
             }
 
             // 5. 絶対パスであること
@@ -91,8 +95,9 @@ namespace ICCardManager.Common
                 return ValidationResult.Failure("パスに不正な文字列（..）が含まれています");
             }
 
-            // 7. ドライブが存在すること（Windowsの場合）
-            // NOTE: このアプリはWindowsのみで動作するため常にtrue
+            // 7. ドライブが存在すること（ローカルパスの場合のみ）
+            // UNCパスにはドライブの概念がないためスキップ
+            if (!IsUncPath(path))
             {
                 var root = Path.GetPathRoot(path);
                 if (!string.IsNullOrEmpty(root))
@@ -118,10 +123,45 @@ namespace ICCardManager.Common
         /// <summary>
         /// UNCパスかどうかを判定
         /// </summary>
-        private static bool IsUncPath(string path)
+        internal static bool IsUncPath(string path)
         {
             // UNCパス: \\server\share または //server/share
             return path.StartsWith(@"\\") || path.StartsWith("//");
+        }
+
+        /// <summary>
+        /// UNCパスの形式を検証（\\server\share の最低限の構造があるか）
+        /// </summary>
+        private static ValidationResult ValidateUncPathFormat(string path)
+        {
+            // \\ または // のプレフィックスを除去してサーバー名・共有名を検証
+            var withoutPrefix = path.StartsWith(@"\\")
+                ? path.Substring(2)
+                : path.Substring(2); // "//" の場合
+
+            // セパレータで分割
+            var separators = new[] { '\\', '/' };
+            var parts = withoutPrefix.Split(separators, StringSplitOptions.RemoveEmptyEntries);
+
+            // サーバー名と共有名の最低2つが必要
+            if (parts.Length < 2)
+            {
+                return ValidationResult.Failure("ネットワークパスにはサーバー名と共有名が必要です（例: \\\\server\\share）");
+            }
+
+            // サーバー名が空でないこと
+            if (string.IsNullOrWhiteSpace(parts[0]))
+            {
+                return ValidationResult.Failure("ネットワークパスのサーバー名が不正です");
+            }
+
+            // 共有名が空でないこと
+            if (string.IsNullOrWhiteSpace(parts[1]))
+            {
+                return ValidationResult.Failure("ネットワークパスの共有名が不正です");
+            }
+
+            return ValidationResult.Success();
         }
 
         /// <summary>
