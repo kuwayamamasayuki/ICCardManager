@@ -763,9 +763,18 @@ namespace ICCardManager.Services
         /// </summary>
         private string GenerateBusSummary(List<LedgerDetail> trips)
         {
+            // Issue #1012: 鉄道と同様にSequenceNumber/Balanceで時系列順（古い順）にソート
+            // FeliCa互換: rowid（=SequenceNumber）が小さいほど新しい（後に利用した）
+            // → DESCで大きいrowid（古い）を先にして時系列順に
+            // SequenceNumberが0（未設定）の場合はBalance降順を使用
+            var sortedTrips = trips
+                .OrderByDescending(t => t.SequenceNumber > 0 ? t.SequenceNumber : int.MinValue)
+                .ThenBy(t => t.UseDate ?? DateTime.MaxValue)
+                .ThenByDescending(t => t.Balance ?? 0)
+                .ToList();
+
             // バス停名が入力されているものを時系列順（古い→新しい）で取得
-            // ※tripsはGenerate()でReverse済みのため既に時系列順
-            var allBusStops = trips
+            var allBusStops = sortedTrips
                 .Where(t => !string.IsNullOrEmpty(t.BusStops))
                 .Select(t => t.BusStops!)
                 .ToList();
