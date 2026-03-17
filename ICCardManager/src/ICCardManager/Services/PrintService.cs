@@ -10,12 +10,17 @@ using System.Windows.Media;
 using ICCardManager.Common;
 using ICCardManager.Models;
 using Microsoft.Extensions.Options;
+// Issue #1023: ReportRow, ReportTotal は Models/ReportRow.cs で定義
 
 namespace ICCardManager.Services
 {
 /// <summary>
-    /// 帳票印刷用データ
+    /// 帳票印刷用データ（プレビュー画面で使用）
     /// </summary>
+    /// <remarks>
+    /// Issue #1023: 行データ・合計データは共通モデル（ReportRow/ReportTotal）を使用。
+    /// カード情報・和暦年月などプレビュー固有の情報はこのクラスに保持。
+    /// </remarks>
     public class ReportPrintData
     {
         /// <summary>カード種別</summary>
@@ -34,64 +39,16 @@ namespace ICCardManager.Services
         public string WarekiYearMonth { get; set; } = string.Empty;
 
         /// <summary>履歴データ</summary>
-        public List<ReportPrintRow> Rows { get; set; } = new();
+        public List<ReportRow> Rows { get; set; } = new();
 
         /// <summary>月計</summary>
-        public ReportPrintTotal MonthlyTotal { get; set; } = new();
+        public ReportTotal MonthlyTotal { get; set; } = new();
 
         /// <summary>累計</summary>
-        public ReportPrintTotal? CumulativeTotal { get; set; }
+        public ReportTotal CumulativeTotal { get; set; }
 
         /// <summary>次年度繰越（3月のみ）</summary>
         public int? CarryoverToNextYear { get; set; }
-    }
-
-    /// <summary>
-    /// 帳票印刷用行データ
-    /// </summary>
-    public class ReportPrintRow
-    {
-        /// <summary>日付表示</summary>
-        public string DateDisplay { get; set; } = string.Empty;
-
-        /// <summary>摘要</summary>
-        public string Summary { get; set; } = string.Empty;
-
-        /// <summary>受入金額</summary>
-        public int? Income { get; set; }
-
-        /// <summary>払出金額</summary>
-        public int? Expense { get; set; }
-
-        /// <summary>残額</summary>
-        public int? Balance { get; set; }
-
-        /// <summary>利用者</summary>
-        public string StaffName { get; set; }
-
-        /// <summary>備考</summary>
-        public string Note { get; set; }
-
-        /// <summary>太字表示するか</summary>
-        public bool IsBold { get; set; }
-    }
-
-    /// <summary>
-    /// 帳票印刷用合計データ
-    /// </summary>
-    public class ReportPrintTotal
-    {
-        /// <summary>ラベル</summary>
-        public string Label { get; set; } = string.Empty;
-
-        /// <summary>受入合計</summary>
-        public int Income { get; set; }
-
-        /// <summary>払出合計</summary>
-        public int Expense { get; set; }
-
-        /// <summary>残高</summary>
-        public int? Balance { get; set; }
     }
 
     /// <summary>
@@ -125,36 +82,8 @@ namespace ICCardManager.Services
             var targetDate = new DateTime(year, month, 1);
             var warekiYearMonth = WarekiConverter.ToWarekiYearMonth(targetDate);
 
-            // MonthlyReportData → ReportPrintData に変換
-            var rows = new List<ReportPrintRow>();
-
-            // 繰越行
-            if (data.Carryover != null)
-            {
-                rows.Add(new ReportPrintRow
-                {
-                    DateDisplay = WarekiConverter.ToWareki(data.Carryover.Date),
-                    Summary = data.Carryover.Summary,
-                    Income = data.Carryover.Income,
-                    Balance = data.Carryover.Balance,
-                    IsBold = true
-                });
-            }
-
-            // 各履歴行
-            foreach (var ledger in data.Ledgers)
-            {
-                rows.Add(new ReportPrintRow
-                {
-                    DateDisplay = WarekiConverter.ToWareki(ledger.Date),
-                    Summary = ledger.Summary,
-                    Income = ledger.Income > 0 ? ledger.Income : null,
-                    Expense = ledger.Expense > 0 ? ledger.Expense : null,
-                    Balance = ledger.Balance,
-                    StaffName = ledger.StaffName,
-                    Note = ledger.Note
-                });
-            }
+            // Issue #1023: MonthlyReportData → 行データの変換を ReportRowBuilder に委譲
+            var rowSet = ReportRowBuilder.Build(data);
 
             var result = new ReportPrintData
             {
@@ -163,27 +92,11 @@ namespace ICCardManager.Services
                 Year = year,
                 Month = month,
                 WarekiYearMonth = warekiYearMonth,
-                Rows = rows,
-                MonthlyTotal = new ReportPrintTotal
-                {
-                    Label = data.MonthlyTotal.Label,
-                    Income = data.MonthlyTotal.Income,
-                    Expense = data.MonthlyTotal.Expense,
-                    Balance = data.MonthlyTotal.Balance
-                },
-                CarryoverToNextYear = data.CarryoverToNextYear
+                Rows = rowSet.DataRows,
+                MonthlyTotal = rowSet.MonthlyTotal,
+                CumulativeTotal = rowSet.CumulativeTotal,
+                CarryoverToNextYear = rowSet.CarryoverToNextYear
             };
-
-            if (data.CumulativeTotal != null)
-            {
-                result.CumulativeTotal = new ReportPrintTotal
-                {
-                    Label = data.CumulativeTotal.Label,
-                    Income = data.CumulativeTotal.Income,
-                    Expense = data.CumulativeTotal.Expense,
-                    Balance = data.CumulativeTotal.Balance
-                };
-            }
 
             return result;
         }
@@ -341,7 +254,7 @@ namespace ICCardManager.Services
         /// <summary>
         /// データ行の高さを取得（摘要欄の文字数に基づく）
         /// </summary>
-        private double GetDataRowHeight(ReportPrintRow row, bool isLandscape)
+        private double GetDataRowHeight(ReportRow row, bool isLandscape)
         {
             if (string.IsNullOrEmpty(row.Summary))
                 return DataRowHeight;
@@ -362,8 +275,8 @@ namespace ICCardManager.Services
         /// <summary>
         /// 行をページごとにグループ化（高さを積み上げて改ページ位置を決定）
         /// </summary>
-        private List<List<ReportPrintRow>> GroupRowsByPage(
-            List<ReportPrintRow> rows,
+        private List<List<ReportRow>> GroupRowsByPage(
+            List<ReportRow> rows,
             double pageWidth,
             double pageHeight,
             int summaryRowCount,
@@ -373,8 +286,8 @@ namespace ICCardManager.Services
             var availableHeight = GetAvailableDataHeight(pageHeight);
             var summaryTotalHeight = summaryRowCount * SummaryRowHeight;
 
-            var pages = new List<List<ReportPrintRow>>();
-            var currentPage = new List<ReportPrintRow>();
+            var pages = new List<List<ReportRow>>();
+            var currentPage = new List<ReportRow>();
             double accumulatedHeight = 0;
 
             for (int i = 0; i < rows.Count; i++)
@@ -400,7 +313,7 @@ namespace ICCardManager.Services
                 {
                     // 現在のページを確定して新しいページを開始
                     pages.Add(currentPage);
-                    currentPage = new List<ReportPrintRow>();
+                    currentPage = new List<ReportRow>();
                     accumulatedHeight = 0;
                 }
 
@@ -489,7 +402,7 @@ namespace ICCardManager.Services
         private void AddPageContent(
             FlowDocument doc,
             ReportPrintData data,
-            List<ReportPrintRow> rows,
+            List<ReportRow> rows,
             bool addPageBreakBefore,
             bool hideSummary)
         {
