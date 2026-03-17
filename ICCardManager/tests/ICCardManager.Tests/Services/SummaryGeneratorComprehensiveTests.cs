@@ -1429,4 +1429,56 @@ public class SummaryGeneratorComprehensiveTests
     }
 
     #endregion
+
+    #region Issue #1012: バス利用の摘要順序
+
+    [Fact]
+    public void TC047_バス複数_順序が時系列通り_Issue1012()
+    {
+        // Arrange
+        // ICカード履歴は新しい順：[0]が最新、[3]が最古
+        // 実際の時系列：薬院→博多(646)→博多→薬院(436)→薬院大通→西鉄平尾駅(286)→那の川→渡辺通一丁目(76)
+        var details = new List<LedgerDetail>
+        {
+            // [0] 鉄道：薬院→博多（最新・残額646円）
+            CreateRailwayUsage(new DateTime(2024, 12, 9), "薬院", "博多", 210, 646),
+            // [1] 鉄道：博多→薬院（残額436円）
+            CreateRailwayUsage(new DateTime(2024, 12, 9), "博多", "薬院", 210, 436),
+            // [2] バス：薬院大通→西鉄平尾駅（残額286円）
+            CreateBusUsage(new DateTime(2024, 12, 9), 150, 286, busStops: "薬院大通～西鉄平尾駅"),
+            // [3] バス：那の川→渡辺通一丁目（最古・残額76円）
+            CreateBusUsage(new DateTime(2024, 12, 9), 210, 76, busStops: "那の川～渡辺通一丁目"),
+        };
+
+        // Act
+        var results = _generator.GenerateByDate(details);
+
+        // Assert: バスも時系列順（薬院大通→西鉄平尾駅 が先、那の川→渡辺通一丁目 が後）
+        results.Should().HaveCount(1);
+        results[0].Summary.Should().Be("鉄道（薬院～博多 往復）、バス（薬院大通～西鉄平尾駅、那の川～渡辺通一丁目）");
+        OutputInputAndResult(details, results);
+    }
+
+    [Fact]
+    public void TC048_バス複数_Generate経由でも順序が正しい_Issue1012()
+    {
+        // Arrange
+        // Generate()メソッドでもバスの順序が正しいことを確認
+        var details = new List<LedgerDetail>
+        {
+            // ICカード履歴は新しい順
+            CreateBusUsage(new DateTime(2024, 12, 9), 190, 200, busStops: "博多駅～天神"),
+            CreateBusUsage(new DateTime(2024, 12, 9), 230, 390, busStops: "薬院大通～博多駅"),
+            CreateBusUsage(new DateTime(2024, 12, 9), 150, 620, busStops: "西鉄平尾駅～薬院大通"),
+        };
+
+        // Act
+        var result = _generator.Generate(details);
+
+        // Assert: 時系列順（古い→新しい）で乗り継ぎ統合
+        // 西鉄平尾駅→薬院大通→博多駅→天神 の乗り継ぎ
+        result.Should().Be("バス（西鉄平尾駅～天神）");
+    }
+
+    #endregion
 }
