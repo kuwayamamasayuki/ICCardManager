@@ -22,6 +22,7 @@ public class OperationLogExcelExportService
     private static readonly XLColor ColorRed = XLColor.FromHtml("#C62828");
     private static readonly XLColor ColorBlue = XLColor.FromHtml("#1565C0");
 
+
     /// <summary>
     /// 操作ログをExcelファイルにエクスポート
     /// </summary>
@@ -100,13 +101,149 @@ public class OperationLogExcelExportService
         worksheet.Cell(row, 6).Value = GetChangeSummary(
             log.TargetTable, log.BeforeData, log.AfterData);
 
-        // G: 変更前
-        worksheet.Cell(row, 7).Value = FormatJsonToReadable(
-            log.TargetTable, log.BeforeData);
+        // G: 変更前、H: 変更後（変更箇所をハイライト表示）
+        var changedFields = GetChangedFields(log.TargetTable, log.BeforeData, log.AfterData);
 
-        // H: 変更後
-        worksheet.Cell(row, 8).Value = FormatJsonToReadable(
-            log.TargetTable, log.AfterData);
+        if (log.Action == "DELETE")
+        {
+            // 削除: 変更前データに取り消し線
+            WriteHighlightedJsonCell(worksheet, worksheet.Cell(row, 7), log.TargetTable, log.BeforeData, null, strikethrough: true);
+            worksheet.Cell(row, 8).Value = FormatJsonToReadable(log.TargetTable, log.AfterData);
+        }
+        else if (changedFields.Count > 0)
+        {
+            // 更新: 変更フィールドの値を太字+赤文字でハイライト
+            WriteHighlightedJsonCell(worksheet, worksheet.Cell(row, 7), log.TargetTable, log.BeforeData, changedFields, strikethrough: false);
+            WriteHighlightedJsonCell(worksheet, worksheet.Cell(row, 8), log.TargetTable, log.AfterData, changedFields, strikethrough: false);
+        }
+        else
+        {
+            // 登録・復元等: 通常表示
+            worksheet.Cell(row, 7).Value = FormatJsonToReadable(log.TargetTable, log.BeforeData);
+            worksheet.Cell(row, 8).Value = FormatJsonToReadable(log.TargetTable, log.AfterData);
+        }
+    }
+
+    /// <summary>
+    /// JSONデータをRichTextでセルに書き込み、変更フィールドをハイライト表示する。
+    /// 全てのRichTextランに明示的にフォント属性を設定し、Excelの修復警告を回避する。
+    /// </summary>
+    private static void WriteHighlightedJsonCell(IXLWorksheet worksheet, IXLCell cell, string? targetTable, string? json, ISet<string>? changedFields, bool strikethrough)
+    {
+        if (string.IsNullOrEmpty(json))
+            return;
+
+        try
+        {
+            var trimmed = json.TrimStart();
+            if (trimmed.StartsWith("["))
+            {
+                cell.Value = FormatJsonArrayToReadable(targetTable, json);
+                if (strikethrough)
+                    cell.Style.Font.Strikethrough = true;
+                return;
+            }
+
+            var doc = JsonDocument.Parse(json);
+            var fieldNameMap = GetFieldNameMap(targetTable);
+
+            // ワークシートのデフォルトフォント情報を取得（全ランに明示設定する）
+            var defaultFontName = worksheet.Style.Font.FontName;
+            var defaultFontSize = worksheet.Style.Font.FontSize;
+
+            var richText = cell.GetRichText();
+            var isFirst = true;
+
+            foreach (var property in doc.RootElement.EnumerateObject())
+            {
+                if (!fieldNameMap.TryGetValue(property.Name, out var displayName))
+                    continue;
+
+                var value = FormatPropertyValue(property.Value);
+                var isChanged = changedFields != null && changedFields.Contains(property.Name);
+
+                // 改行（先頭以外）— ラベルに含めることで独立した改行ランを避ける
+                var prefix = isFirst ? "" : "\n";
+                isFirst = false;
+
+                if (isChanged && !strikethrough && !string.IsNullOrEmpty(value))
+                {
+                    // 変更フィールド: ラベルは通常スタイル、値は太字+赤文字
+                    var labelRun = richText.AddText($"{prefix}{displayName}: ");
+                    labelRun.SetFontName(defaultFontName);
+                    labelRun.SetFontSize(defaultFontSize);
+
+                    var valueRun = richText.AddText(value);
+                    valueRun.SetFontName(defaultFontName);
+                    valueRun.SetFontSize(defaultFontSize);
+                    valueRun.SetBold();
+                    valueRun.SetFontColor(ColorRed);
+                }
+                else
+                {
+                    // 非変更フィールドまたは取り消し線: ラベル+値を1つのランにまとめる
+                    var text = string.IsNullOrEmpty(value)
+                        ? $"{prefix}{displayName}: "
+                        : $"{prefix}{displayName}: {value}";
+                    var run = richText.AddText(text);
+                    run.SetFontName(defaultFontName);
+                    run.SetFontSize(defaultFontSize);
+                    if (strikethrough)
+                        run.SetStrikethrough();
+                }
+            }
+        }
+        catch
+        {
+            cell.Value = json;
+            if (strikethrough)
+                cell.Style.Font.Strikethrough = true;
+        }
+    }
+
+    /// <summary>
+    /// 変更前と変更後のJSONを比較し、変更されたフィールド名のセットを返す
+    /// </summary>
+    internal static ISet<string> GetChangedFields(string? targetTable, string? beforeJson, string? afterJson)
+    {
+        var result = new HashSet<string>();
+
+        if (string.IsNullOrEmpty(beforeJson) || string.IsNullOrEmpty(afterJson))
+            return result;
+
+        try
+        {
+            var beforeDoc = JsonDocument.Parse(beforeJson);
+            var afterDoc = JsonDocument.Parse(afterJson);
+
+            // 配列JSONの場合は比較しない
+            if (beforeDoc.RootElement.ValueKind == JsonValueKind.Array ||
+                afterDoc.RootElement.ValueKind == JsonValueKind.Array)
+                return result;
+
+            var fieldNameMap = GetFieldNameMap(targetTable);
+
+            foreach (var kvp in fieldNameMap)
+            {
+                var propertyName = kvp.Key;
+                string? beforeValue = null;
+                string? afterValue = null;
+
+                if (beforeDoc.RootElement.TryGetProperty(propertyName, out var beforeProp))
+                    beforeValue = FormatPropertyValue(beforeProp);
+                if (afterDoc.RootElement.TryGetProperty(propertyName, out var afterProp))
+                    afterValue = FormatPropertyValue(afterProp);
+
+                if (beforeValue != afterValue)
+                    result.Add(propertyName);
+            }
+        }
+        catch
+        {
+            // JSONパースエラー時は空セットを返す
+        }
+
+        return result;
     }
 
     /// <summary>
