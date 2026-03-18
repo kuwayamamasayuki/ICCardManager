@@ -54,6 +54,11 @@ namespace ICCardManager.Models
         /// 返却時にバス停名入力ダイアログを自動的にスキップするかどうか
         /// </summary>
         public bool SkipBusStopInputOnReturn { get; set; } = false;
+
+        /// <summary>
+        /// 帳票出力先フォルダパス
+        /// </summary>
+        public string ReportOutputFolder { get; set; } = string.Empty;
     }
 
     /// <summary>

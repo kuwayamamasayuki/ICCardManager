@@ -43,6 +43,9 @@ namespace ICCardManager.Data.Repositories
         // バス停入力スキップ設定キー
         public const string KeySkipBusStopInputOnReturn = "skip_bus_stop_input_on_return";
 
+        // 帳票出力先フォルダ設定キー
+        public const string KeyReportOutputFolder = "report_output_folder";
+
         public SettingsRepository(DbContext dbContext, ICacheService cacheService, IOptions<CacheOptions> cacheOptions)
         {
             _dbContext = dbContext;
@@ -152,6 +155,10 @@ ON CONFLICT(key) DO UPDATE SET value = @value";
             var skipBusStopInput = Get(KeySkipBusStopInputOnReturn);
             settings.SkipBusStopInputOnReturn = skipBusStopInput?.ToLowerInvariant() == "true";
 
+            // 帳票出力先フォルダ設定
+            var reportOutputFolder = Get(KeyReportOutputFolder);
+            settings.ReportOutputFolder = reportOutputFolder ?? string.Empty;
+
             return settings;
         }
 
@@ -255,6 +262,10 @@ ON CONFLICT(key) DO UPDATE SET value = @value";
             var skipBusStopInput = await GetAsync(KeySkipBusStopInputOnReturn);
             settings.SkipBusStopInputOnReturn = skipBusStopInput?.ToLowerInvariant() == "true";
 
+            // 帳票出力先フォルダ設定
+            var reportOutputFolder = await GetAsync(KeyReportOutputFolder);
+            settings.ReportOutputFolder = reportOutputFolder ?? string.Empty;
+
             return settings;
         }
 
@@ -323,6 +334,9 @@ ON CONFLICT(key) DO UPDATE SET value = @value";
 
             // バス停入力スキップ設定を保存
             success &= await SetAsync(KeySkipBusStopInputOnReturn, settings.SkipBusStopInputOnReturn.ToString().ToLowerInvariant());
+
+            // 帳票出力先フォルダ設定を保存
+            success &= await SetAsync(KeyReportOutputFolder, settings.ReportOutputFolder ?? string.Empty);
 
             // 設定保存後にキャッシュを無効化
             _cacheService.Invalidate(CacheKeys.AppSettings);

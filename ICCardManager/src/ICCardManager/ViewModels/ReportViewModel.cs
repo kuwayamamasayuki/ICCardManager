@@ -26,6 +26,7 @@ public partial class ReportViewModel : ViewModelBase
     private readonly PrintService _printService;
     private readonly ICardRepository _cardRepository;
     private readonly INavigationService _navigationService;
+    private readonly ISettingsRepository _settingsRepository;
 
     [ObservableProperty]
     private ObservableCollection<CardDto> _cards = new();
@@ -74,12 +75,14 @@ public partial class ReportViewModel : ViewModelBase
         ReportService reportService,
         PrintService printService,
         ICardRepository cardRepository,
-        INavigationService navigationService)
+        INavigationService navigationService,
+        ISettingsRepository settingsRepository)
     {
         _reportService = reportService;
         _printService = printService;
         _cardRepository = cardRepository;
         _navigationService = navigationService;
+        _settingsRepository = settingsRepository;
 
         // 年の選択肢を初期化（過去5年分）
         var currentYear = DateTime.Now.Year;
@@ -101,6 +104,29 @@ public partial class ReportViewModel : ViewModelBase
     public async Task InitializeAsync()
     {
         await LoadCardsAsync();
+        await LoadOutputFolderAsync();
+    }
+
+    /// <summary>
+    /// 保存された出力先フォルダを読み込み
+    /// </summary>
+    private async Task LoadOutputFolderAsync()
+    {
+        var settings = await _settingsRepository.GetAppSettingsAsync();
+        if (!string.IsNullOrEmpty(settings.ReportOutputFolder))
+        {
+            OutputFolder = settings.ReportOutputFolder;
+        }
+    }
+
+    /// <summary>
+    /// 出力先フォルダを保存
+    /// </summary>
+    private async Task SaveOutputFolderAsync()
+    {
+        var settings = await _settingsRepository.GetAppSettingsAsync();
+        settings.ReportOutputFolder = OutputFolder;
+        await _settingsRepository.SaveAppSettingsAsync(settings);
     }
 
     /// <summary>
@@ -316,7 +342,7 @@ public partial class ReportViewModel : ViewModelBase
     /// 出力フォルダを選択
     /// </summary>
     [RelayCommand]
-    public void BrowseOutputFolder()
+    public async Task BrowseOutputFolderAsync()
     {
         // .NET Framework 4.8ではOpenFolderDialogがないためFolderBrowserDialogを使用
         using (var dialog = new System.Windows.Forms.FolderBrowserDialog
@@ -331,6 +357,7 @@ public partial class ReportViewModel : ViewModelBase
             if (dialog.ShowDialog() == System.Windows.Forms.DialogResult.OK)
             {
                 OutputFolder = dialog.SelectedPath;
+                await SaveOutputFolderAsync();
             }
         }
     }

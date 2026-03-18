@@ -41,11 +41,14 @@ public class ReportViewModelTests
         _printService = new PrintService(reportDataBuilder);
         _navigationServiceMock = new Mock<INavigationService>();
 
+        _settingsRepositoryMock.Setup(s => s.GetAppSettingsAsync()).ReturnsAsync(new AppSettings());
+
         _viewModel = new ReportViewModel(
             _reportService,
             _printService,
             _cardRepositoryMock.Object,
-            _navigationServiceMock.Object);
+            _navigationServiceMock.Object,
+            _settingsRepositoryMock.Object);
     }
 
     #region 初期化テスト
@@ -653,6 +656,67 @@ public class ReportViewModelTests
 
         // Assert
         _cardRepositoryMock.Verify(r => r.GetAllAsync(), Times.Once);
+    }
+
+    #endregion
+
+    #region Issue #1029: 出力先フォルダ永続化テスト
+
+    /// <summary>
+    /// InitializeAsync時に保存済みの出力先フォルダが読み込まれること
+    /// </summary>
+    [Fact]
+    public async Task InitializeAsync_WithSavedOutputFolder_ShouldLoadSavedFolder()
+    {
+        // Arrange
+        var savedFolder = @"D:\Reports\Monthly";
+        _settingsRepositoryMock.Setup(s => s.GetAppSettingsAsync())
+            .ReturnsAsync(new AppSettings { ReportOutputFolder = savedFolder });
+        _cardRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<IcCard>());
+
+        // Act
+        await _viewModel.InitializeAsync();
+
+        // Assert
+        _viewModel.OutputFolder.Should().Be(savedFolder);
+    }
+
+    /// <summary>
+    /// 保存済みフォルダが空の場合はデフォルト値（マイドキュメント）のままであること
+    /// </summary>
+    [Fact]
+    public async Task InitializeAsync_WithEmptyOutputFolder_ShouldKeepDefault()
+    {
+        // Arrange
+        _settingsRepositoryMock.Setup(s => s.GetAppSettingsAsync())
+            .ReturnsAsync(new AppSettings { ReportOutputFolder = string.Empty });
+        _cardRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<IcCard>());
+
+        // Act
+        await _viewModel.InitializeAsync();
+
+        // Assert
+        var myDocuments = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
+        _viewModel.OutputFolder.Should().Be(myDocuments);
+    }
+
+    /// <summary>
+    /// 保存済みフォルダがnull（未設定）の場合はデフォルト値のままであること
+    /// </summary>
+    [Fact]
+    public async Task InitializeAsync_WithNullOutputFolder_ShouldKeepDefault()
+    {
+        // Arrange - ReportOutputFolderのデフォルトはstring.Empty
+        _settingsRepositoryMock.Setup(s => s.GetAppSettingsAsync())
+            .ReturnsAsync(new AppSettings());
+        _cardRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<IcCard>());
+
+        // Act
+        await _viewModel.InitializeAsync();
+
+        // Assert
+        var myDocuments = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
+        _viewModel.OutputFolder.Should().Be(myDocuments);
     }
 
     #endregion
