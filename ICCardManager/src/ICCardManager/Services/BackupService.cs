@@ -94,6 +94,9 @@ namespace ICCardManager.Services
                 var sourcePath = _dbContext.DatabasePath;
                 File.Copy(sourcePath, backupFilePath, overwrite: true);
 
+                // File.Copyは更新日時をコピー元から引き継ぐため、現在時刻に更新する
+                File.SetLastWriteTime(backupFilePath, DateTime.Now);
+
                 _logger.LogInformation("バックアップを作成しました: {Path}", backupFilePath);
 
                 // 古いバックアップを削除
@@ -151,6 +154,9 @@ namespace ICCardManager.Services
 
                 var sourcePath = _dbContext.DatabasePath;
                 File.Copy(sourcePath, backupFilePath, overwrite: true);
+
+                // File.Copyは更新日時をコピー元から引き継ぐため、現在時刻に更新する
+                File.SetLastWriteTime(backupFilePath, DateTime.Now);
 
                 _logger.LogInformation("バックアップを作成しました: {Path}", backupFilePath);
                 return true;

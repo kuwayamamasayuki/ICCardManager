@@ -203,6 +203,33 @@ public class BackupServiceTests : IDisposable
         Directory.Exists(newBackupPath).Should().BeTrue();
     }
 
+    /// <summary>
+    /// Issue #1028: バックアップファイルの更新日時が作成時の現在時刻に設定されることを確認
+    /// </summary>
+    /// <remarks>
+    /// File.Copyはコピー元の更新日時を引き継ぐため、明示的にSetLastWriteTimeで現在時刻を設定する。
+    /// </remarks>
+    [Fact]
+    public async Task ExecuteAutoBackupAsync_BackupFile_HasCurrentLastWriteTime()
+    {
+        // Arrange
+        // ソースDBの更新日時を意図的に古い時刻にする
+        var oldTime = DateTime.Now.AddHours(-2);
+        File.SetLastWriteTime(_testDbPath, oldTime);
+
+        // Act
+        var beforeBackup = DateTime.Now;
+        var result = await _service.ExecuteAutoBackupAsync();
+        var afterBackup = DateTime.Now;
+
+        // Assert
+        result.Should().NotBeNull();
+        var backupLastWriteTime = File.GetLastWriteTime(result!);
+        // バックアップファイルの更新日時はバックアップ実行時の時刻であるべき
+        backupLastWriteTime.Should().BeOnOrAfter(beforeBackup.AddSeconds(-1));
+        backupLastWriteTime.Should().BeOnOrBefore(afterBackup.AddSeconds(1));
+    }
+
     #endregion
 
     #region CreateBackup テスト
@@ -259,6 +286,30 @@ public class BackupServiceTests : IDisposable
         result.Should().BeTrue();
         var newSize = new FileInfo(backupPath).Length;
         newSize.Should().NotBe(originalSize);
+    }
+
+    /// <summary>
+    /// Issue #1028: CreateBackupでも更新日時が現在時刻に設定されることを確認
+    /// </summary>
+    [Fact]
+    public void CreateBackup_BackupFile_HasCurrentLastWriteTime()
+    {
+        // Arrange
+        var backupPath = Path.Combine(_backupDirectory, "manual_backup_time_test.db");
+        // ソースDBの更新日時を意図的に古い時刻にする
+        var oldTime = DateTime.Now.AddHours(-2);
+        File.SetLastWriteTime(_testDbPath, oldTime);
+
+        // Act
+        var beforeBackup = DateTime.Now;
+        var result = _service.CreateBackup(backupPath);
+        var afterBackup = DateTime.Now;
+
+        // Assert
+        result.Should().BeTrue();
+        var backupLastWriteTime = File.GetLastWriteTime(backupPath);
+        backupLastWriteTime.Should().BeOnOrAfter(beforeBackup.AddSeconds(-1));
+        backupLastWriteTime.Should().BeOnOrBefore(afterBackup.AddSeconds(1));
     }
 
     /// <summary>
