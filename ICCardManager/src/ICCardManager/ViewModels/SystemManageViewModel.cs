@@ -153,7 +153,7 @@ public partial class SystemManageViewModel : ViewModelBase
         var result = MessageBox.Show(
             $"以下のバックアップからデータを復元します。\n\n" +
             $"ファイル: {SelectedBackup.FileName}\n" +
-            $"作成日時: {SelectedBackup.CreatedAt:yyyy/MM/dd HH:mm:ss}\n\n" +
+            $"作成日時: {DisplayFormatters.FormatTimestamp(SelectedBackup.CreatedAt)}\n\n" +
             $"現在のデータは上書きされます。\n" +
             $"（復元前に現在のデータは自動バックアップされます）\n\n" +
             $"続行しますか？",

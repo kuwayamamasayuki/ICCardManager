@@ -4,6 +4,7 @@ using System.Linq;
 using System.Text.Json;
 using System.Threading.Tasks;
 using ClosedXML.Excel;
+using ICCardManager.Common;
 using ICCardManager.Models;
 
 namespace ICCardManager.Services;
@@ -74,7 +75,7 @@ public class OperationLogExcelExportService
     private static void WriteDataRow(IXLWorksheet worksheet, int row, OperationLog log)
     {
         // A: 日時
-        worksheet.Cell(row, 1).Value = log.Timestamp.ToString("yyyy/MM/dd HH:mm:ss");
+        worksheet.Cell(row, 1).Value = DisplayFormatters.FormatTimestamp(log.Timestamp);
 
         // B: 操作種別
         var actionDisplay = GetActionDisplayName(log.Action);

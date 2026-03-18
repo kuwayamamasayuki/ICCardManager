@@ -1,4 +1,5 @@
 using System;
+using ICCardManager.Common;
 
 namespace ICCardManager.Dtos
 {
@@ -30,7 +31,7 @@ namespace ICCardManager.Dtos
         /// <summary>
         /// 表示用: 利用日
         /// </summary>
-        public string DateDisplay => Date.ToString("yyyy/MM/dd");
+        public string DateDisplay => DisplayFormatters.FormatDate(Date);
 
         /// <summary>
         /// 摘要
@@ -45,7 +46,7 @@ namespace ICCardManager.Dtos
         /// <summary>
         /// 表示用: 金額
         /// </summary>
-        public string ExpenseDisplay => Expense > 0 ? $"{Expense:N0}円" : "";
+        public string ExpenseDisplay => DisplayFormatters.FormatAmountWithUnitOrEmpty(Expense);
 
         /// <summary>
         /// 利用者名

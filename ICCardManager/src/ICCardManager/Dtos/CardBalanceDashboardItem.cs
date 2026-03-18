@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
+using ICCardManager.Common;
 namespace ICCardManager.Dtos
 {
 /// <summary>
@@ -60,7 +61,7 @@ namespace ICCardManager.Dtos
         /// <summary>
         /// 表示用: 残高（円単位、3桁区切り）
         /// </summary>
-        public string BalanceDisplay => $"¥{CurrentBalance:N0}";
+        public string BalanceDisplay => DisplayFormatters.FormatBalanceWithYenPrefix(CurrentBalance);
 
         /// <summary>
         /// 表示用: 警告アイコン（⚠）
@@ -87,7 +88,7 @@ namespace ICCardManager.Dtos
         /// <summary>
         /// 表示用: 最終利用日
         /// </summary>
-        public string LastUsageDateDisplay => LastUsageDate?.ToString("yyyy/MM/dd") ?? "-";
+        public string LastUsageDateDisplay => DisplayFormatters.FormatDate(LastUsageDate);
 
         /// <summary>
         /// 表示用: 行の背景色（警告時は薄い赤）

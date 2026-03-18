@@ -488,7 +488,7 @@ public partial class MainViewModel : ViewModelBase
             {
                 WarningMessages.Add(new WarningItem
                 {
-                    DisplayText = $"⚠️ {item.CardType} {item.CardNumber}: 残額 {item.CurrentBalance:N0}円",
+                    DisplayText = $"⚠️ {item.CardType} {item.CardNumber}: 残額 {DisplayFormatters.FormatBalanceWithUnit(item.CurrentBalance)}",
                     Type = WarningType.LowBalance,
                     CardIdm = item.CardIdm
                 });
@@ -591,10 +591,10 @@ public partial class MainViewModel : ViewModelBase
     {
         return DashboardSortOrder switch
         {
-            DashboardSortOrder.CardName => items.OrderBy(x => x.CardType).ThenBy(x => x.CardNumber),
-            DashboardSortOrder.BalanceAscending => items.OrderBy(x => x.CurrentBalance).ThenBy(x => x.CardType).ThenBy(x => x.CardNumber),
-            DashboardSortOrder.BalanceDescending => items.OrderByDescending(x => x.CurrentBalance).ThenBy(x => x.CardType).ThenBy(x => x.CardNumber),
-            DashboardSortOrder.LastUsageDate => items.OrderByDescending(x => x.LastUsageDate ?? DateTime.MinValue).ThenBy(x => x.CardType).ThenBy(x => x.CardNumber),
+            DashboardSortOrder.CardName => items.OrderByCardDefault(x => x.CardType, x => x.CardNumber),
+            DashboardSortOrder.BalanceAscending => items.OrderBy(x => x.CurrentBalance).ThenByCardDefault(x => x.CardType, x => x.CardNumber),
+            DashboardSortOrder.BalanceDescending => items.OrderByDescending(x => x.CurrentBalance).ThenByCardDefault(x => x.CardType, x => x.CardNumber),
+            DashboardSortOrder.LastUsageDate => items.OrderByDescending(x => x.LastUsageDate ?? DateTime.MinValue).ThenByCardDefault(x => x.CardType, x => x.CardNumber),
             _ => items
         };
     }
@@ -1624,7 +1624,7 @@ public partial class MainViewModel : ViewModelBase
             .Select(h => new Views.Dialogs.MergeHistoryItem
             {
                 Id = h.Id,
-                MergedAtDisplay = h.MergedAt.ToString("yyyy/MM/dd HH:mm"),
+                MergedAtDisplay = DisplayFormatters.FormatDateTime(h.MergedAt),
                 Description = h.Description
             })
             .ToList();

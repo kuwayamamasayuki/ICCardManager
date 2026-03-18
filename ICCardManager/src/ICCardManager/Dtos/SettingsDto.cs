@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
+using ICCardManager.Common;
 using ICCardManager.Models;
 
 namespace ICCardManager.Dtos
@@ -32,7 +33,7 @@ namespace ICCardManager.Dtos
         /// <summary>
         /// 表示用: 残額警告閾値
         /// </summary>
-        public string WarningBalanceDisplay => $"{WarningBalance:N0}円";
+        public string WarningBalanceDisplay => DisplayFormatters.FormatBalanceWithUnit(WarningBalance);
 
         /// <summary>
         /// 表示用: 文字サイズ

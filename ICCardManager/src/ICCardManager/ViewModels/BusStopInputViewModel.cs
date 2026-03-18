@@ -304,7 +304,7 @@ public partial class BusStopInputItem : ObservableObject
         ? WarekiConverter.ToWareki(Detail.UseDate.Value)
         : "不明";
     public int? Amount => Detail.Amount;
-    public string AmountDisplay => Amount.HasValue ? $"{Amount:N0}円" : "";
+    public string AmountDisplay => DisplayFormatters.FormatAmountWithUnit(Amount);
 
     public BusStopInputItem(LedgerDetail detail)
     {
