@@ -50,29 +50,17 @@ namespace ICCardManager.ViewModels
         /// <summary>
         /// 区間表示
         /// </summary>
-        public string RouteDisplay
-        {
-            get
-            {
-                if (Detail.IsCharge)
-                {
-                    return "チャージ";
-                }
-                if (Detail.IsPointRedemption)
-                {
-                    return "ポイント還元";
-                }
-                if (Detail.IsBus)
-                {
-                    return $"バス（{Detail.BusStops ?? "★"}）";
-                }
-                if (!string.IsNullOrEmpty(Detail.EntryStation) && !string.IsNullOrEmpty(Detail.ExitStation))
-                {
-                    return $"{Detail.EntryStation} → {Detail.ExitStation}";
-                }
-                return "-";
-            }
-        }
+        /// <remarks>
+        /// Issue #1023: RouteDisplayFormatter に委譲して LedgerDetailDto との重複を解消。
+        /// 詳細表示用: 駅名区切り「 → 」、片方のみは非表示、フォールバック「-」
+        /// </remarks>
+        public string RouteDisplay =>
+            RouteDisplayFormatter.Format(
+                Detail.IsCharge, Detail.IsPointRedemption, Detail.IsBus, Detail.BusStops,
+                Detail.EntryStation, Detail.ExitStation,
+                stationSeparator: " → ",
+                showPartialStations: false,
+                fallback: "-");
 
         /// <summary>
         /// 金額表示

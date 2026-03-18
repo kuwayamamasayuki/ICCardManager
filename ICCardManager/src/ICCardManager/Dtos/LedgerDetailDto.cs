@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
+using ICCardManager.Common;
 namespace ICCardManager.Dtos
 {
 /// <summary>
@@ -70,43 +71,17 @@ namespace ICCardManager.Dtos
         /// <summary>
         /// 表示用: 利用区間（駅名またはバス停）
         /// </summary>
-        public string RouteDisplay
-        {
-            get
-            {
-                if (IsCharge)
-                {
-                    return "チャージ";
-                }
-
-                if (IsPointRedemption)
-                {
-                    return "ポイント還元";
-                }
-
-                if (IsBus)
-                {
-                    return string.IsNullOrEmpty(BusStops) ? "バス（★）" : $"バス（{BusStops}）";
-                }
-
-                if (!string.IsNullOrEmpty(EntryStation) && !string.IsNullOrEmpty(ExitStation))
-                {
-                    return $"{EntryStation}～{ExitStation}";
-                }
-
-                if (!string.IsNullOrEmpty(EntryStation))
-                {
-                    return $"{EntryStation}～";
-                }
-
-                if (!string.IsNullOrEmpty(ExitStation))
-                {
-                    return $"～{ExitStation}";
-                }
-
-                return "不明";
-            }
-        }
+        /// <remarks>
+        /// Issue #1023: RouteDisplayFormatter に委譲して LedgerDetailItemViewModel との重複を解消。
+        /// 一覧表示用: 駅名区切り「～」、片方のみも表示、フォールバック「不明」
+        /// </remarks>
+        public string RouteDisplay =>
+            RouteDisplayFormatter.Format(
+                IsCharge, IsPointRedemption, IsBus, BusStops,
+                EntryStation, ExitStation,
+                stationSeparator: "～",
+                showPartialStations: true,
+                fallback: "不明");
 
         /// <summary>
         /// 表示用: 金額

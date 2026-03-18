@@ -259,8 +259,6 @@ namespace ICCardManager.Services
                 }
 
                 var card = data.Card;
-                var precedingBalance = data.PrecedingBalance;
-                var ledgers = data.Ledgers;
 
                 // Issue #477: 既存ファイルがあれば開く、なければテンプレートから新規作成
                 XLWorkbook workbook;
@@ -336,49 +334,37 @@ namespace ICCardManager.Services
                     var currentRow = DataStartRow;
                     var rowsOnCurrentPage = 0;
 
-                    // Issue #841: 繰越行の出力（ReportDataBuilderが生成した繰越データを使用）
-                    if (data.Carryover != null)
+                    // Issue #1023: MonthlyReportData → 行データの変換を ReportRowBuilder に委譲
+                    var rowSet = ReportRowBuilder.Build(data);
+
+                    // 繰越行 + 各履歴行を出力
+                    foreach (var row in rowSet.DataRows)
                     {
                         (currentRow, rowsOnCurrentPage, currentPageNumber) = CheckAndInsertPageBreak(worksheet, currentRow, rowsOnCurrentPage, RowsPerPage, currentPageNumber);
-                        if (month == 4)
-                        {
-                            currentRow = WriteFiscalYearCarryoverRow(worksheet, currentRow, data.Carryover.Balance, year);
-                        }
-                        else
-                        {
-                            currentRow = WriteMonthlyCarryoverRow(worksheet, currentRow, data.Carryover.Balance, year, month);
-                        }
+                        currentRow = WriteReportRow(worksheet, currentRow, row);
                         rowsOnCurrentPage++;
                     }
 
-                    // 各履歴行を出力
-                    foreach (var ledger in ledgers)
-                    {
-                        // Issue #457: 改ページチェック
-                        (currentRow, rowsOnCurrentPage, currentPageNumber) = CheckAndInsertPageBreak(worksheet, currentRow, rowsOnCurrentPage, RowsPerPage, currentPageNumber);
-                        currentRow = WriteDataRow(worksheet, currentRow, ledger);
-                        rowsOnCurrentPage++;
-                    }
-
-                    // Issue #841: 月計・累計の出力（ReportDataBuilderが計算した値を使用）
+                    // 月計行
                     (currentRow, rowsOnCurrentPage, currentPageNumber) = CheckAndInsertPageBreak(worksheet, currentRow, rowsOnCurrentPage, RowsPerPage, currentPageNumber);
-                    currentRow = WriteMonthlyTotalRow(worksheet, currentRow, month,
-                        data.MonthlyTotal.Income, data.MonthlyTotal.Expense, data.MonthlyTotal.Balance);
+                    currentRow = WriteMonthlyTotalRow(worksheet, currentRow,
+                        rowSet.MonthlyTotal);
                     rowsOnCurrentPage++;
 
-                    if (data.CumulativeTotal != null)
+                    // 累計行
+                    if (rowSet.CumulativeTotal != null)
                     {
                         (currentRow, rowsOnCurrentPage, currentPageNumber) = CheckAndInsertPageBreak(worksheet, currentRow, rowsOnCurrentPage, RowsPerPage, currentPageNumber);
                         currentRow = WriteCumulativeRow(worksheet, currentRow,
-                            data.CumulativeTotal.Income, data.CumulativeTotal.Expense, data.CumulativeTotal.Balance.Value);
+                            rowSet.CumulativeTotal);
                         rowsOnCurrentPage++;
                     }
 
                     // 3月の場合は次年度繰越を追加
-                    if (data.CarryoverToNextYear.HasValue)
+                    if (rowSet.CarryoverToNextYear.HasValue)
                     {
                         (currentRow, rowsOnCurrentPage, currentPageNumber) = CheckAndInsertPageBreak(worksheet, currentRow, rowsOnCurrentPage, RowsPerPage, currentPageNumber);
-                        WriteCarryoverToNextYearRow(worksheet, currentRow, data.CarryoverToNextYear.Value);
+                        WriteCarryoverToNextYearRow(worksheet, currentRow, rowSet.CarryoverToNextYear.Value);
                         currentRow++;
                         rowsOnCurrentPage++;
                     }
@@ -812,97 +798,77 @@ namespace ICCardManager.Services
         }
 
         /// <summary>
-        /// 前年度繰越行を出力（4月用）
+        /// ReportRow（繰越行・データ行）を出力
         /// </summary>
-        private int WriteFiscalYearCarryoverRow(IXLWorksheet worksheet, int row, int balance, int year)
+        /// <remarks>
+        /// Issue #1023: WriteFiscalYearCarryoverRow, WriteMonthlyCarryoverRow, WriteDataRow を統合。
+        /// 行種別（繰越/データ）に関わらず、ReportRow の値をそのまま出力する。
+        /// データ差異（4月の受入金額あり/なし等）は ReportRowBuilder が解決済み。
+        /// </remarks>
+        private int WriteReportRow(IXLWorksheet worksheet, int row, ReportRow reportRow)
         {
             // 列配置: A=出納年月日, B-D=摘要(結合), E=受入金額, F=払出金額, G=残額, H=氏名, I-L=備考(結合)
-            var carryoverDate = new DateTime(year, 4, 1);
-            worksheet.Cell(row, 1).Value = WarekiConverter.ToWareki(carryoverDate); // 出納年月日 (A列)
-            worksheet.Cell(row, 2).Value = SummaryGenerator.GetCarryoverFromPreviousYearSummary(); // 摘要 (B-D列)
-            worksheet.Cell(row, 5).Value = balance; // 受入金額 (E列)
-            worksheet.Cell(row, 6).Value = "";      // 払出金額 (F列)
-            worksheet.Cell(row, 7).Value = balance; // 残額 (G列)
+            worksheet.Cell(row, 1).Value = reportRow.DateDisplay;  // 出納年月日 (A列)
+            worksheet.Cell(row, 2).Value = reportRow.Summary;      // 摘要 (B-D列)
 
-            // Issue #509: 金額セルの表示形式を明示的に数値に設定
-            var incomeCell = worksheet.Cell(row, 5);
-            var balanceCell = worksheet.Cell(row, 7);
-            incomeCell.Style.NumberFormat.Format = "#,##0";  // 会計形式（3桁カンマ区切り）
-            balanceCell.Style.NumberFormat.Format = "#,##0";
+            // 受入金額 (E列)
+            if (reportRow.Income.HasValue)
+            {
+                worksheet.Cell(row, 5).Value = reportRow.Income.Value;
+                worksheet.Cell(row, 5).Style.NumberFormat.Format = "#,##0";
+            }
+            else
+            {
+                worksheet.Cell(row, 5).Value = "";
+            }
+
+            // 払出金額 (F列)
+            if (reportRow.Expense.HasValue)
+            {
+                worksheet.Cell(row, 6).Value = reportRow.Expense.Value;
+                worksheet.Cell(row, 6).Style.NumberFormat.Format = "#,##0";
+            }
+            else
+            {
+                worksheet.Cell(row, 6).Value = "";
+            }
+
+            // 残額 (G列)
+            if (reportRow.Balance.HasValue)
+            {
+                worksheet.Cell(row, 7).Value = reportRow.Balance.Value;
+                worksheet.Cell(row, 7).Style.NumberFormat.Format = "#,##0";
+            }
+            else
+            {
+                worksheet.Cell(row, 7).Value = "";
+            }
+
+            // 氏名 (H列) / 備考 (I-L列)
+            worksheet.Cell(row, 8).Value = reportRow.StaffName ?? "";
+            worksheet.Cell(row, 9).Value = reportRow.Note ?? "";
 
             // 罫線を適用
             ApplyDataRowBorder(worksheet, row);
 
-            return row + 1;
-        }
+            // 繰越行: 摘要を中央揃え
+            if (reportRow.RowType == ReportRowType.Carryover)
+            {
+                var summaryCell = worksheet.Cell(row, 2);
+                summaryCell.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
+                summaryCell.Style.Font.FontSize = 14;
+            }
+            else
+            {
+                // Issue #946: 摘要欄のフォントサイズを文字列長に応じて調整
+                // ApplyDataRowBorder後に設定して14ptの一括設定を上書きする
+                var summaryCell = worksheet.Cell(row, 2);
+                summaryCell.Style.Font.FontSize = GetSummaryFontSize(reportRow.Summary);
 
-        /// <summary>
-        /// 前月繰越行を出力（4月以外用）
-        /// </summary>
-        private int WriteMonthlyCarryoverRow(IXLWorksheet worksheet, int row, int balance, int year, int month)
-        {
-            // 前月の月番号を計算
-            var previousMonth = month == 1 ? 12 : month - 1;
-
-            // 列配置: A=出納年月日, B-D=摘要(結合), E=受入金額, F=払出金額, G=残額, H=氏名, I-L=備考(結合)
-            // Issue #481: 月次繰越の受入欄は記載しない（年度繰越のみ受入欄に記載）
-            var carryoverDate = new DateTime(year, month, 1);
-            worksheet.Cell(row, 1).Value = WarekiConverter.ToWareki(carryoverDate); // 出納年月日 (A列)
-            worksheet.Cell(row, 2).Value = SummaryGenerator.GetCarryoverFromPreviousMonthSummary(previousMonth); // 摘要 (B-D列)
-            worksheet.Cell(row, 5).Value = "";      // 受入金額 (E列) - 月次繰越は空欄
-            worksheet.Cell(row, 6).Value = "";      // 払出金額 (F列)
-            worksheet.Cell(row, 7).Value = balance; // 残額 (G列)
-
-            // Issue #509: 金額セルの表示形式を明示的に数値に設定
-            var balanceCell = worksheet.Cell(row, 7);
-            balanceCell.Style.NumberFormat.Format = "#,##0";  // 会計形式（3桁カンマ区切り）
-
-            // 繰越テキスト（B列）を中央揃え・14ptに設定
-            var summaryCell = worksheet.Cell(row, 2);
-            summaryCell.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
-            summaryCell.Style.Font.FontSize = 14;
-
-            // 罫線を適用
-            ApplyDataRowBorder(worksheet, row);
-
-            return row + 1;
-        }
-
-        /// <summary>
-        /// データ行を出力
-        /// </summary>
-        private int WriteDataRow(IXLWorksheet worksheet, int row, Ledger ledger)
-        {
-            var dateStr = WarekiConverter.ToWareki(ledger.Date);
-
-            // 列配置: A=出納年月日, B-D=摘要(結合), E=受入金額, F=払出金額, G=残額, H=氏名, I-L=備考(結合)
-            worksheet.Cell(row, 1).Value = dateStr;           // 出納年月日 (A列)
-            worksheet.Cell(row, 2).Value = ledger.Summary;    // 摘要 (B-D列)
-            worksheet.Cell(row, 5).Value = ledger.Income > 0 ? ledger.Income : Blank.Value;  // 受入金額 (E列)
-            worksheet.Cell(row, 6).Value = ledger.Expense > 0 ? ledger.Expense : Blank.Value; // 払出金額 (F列)
-            worksheet.Cell(row, 7).Value = ledger.Balance;    // 残額 (G列)
-            worksheet.Cell(row, 8).Value = ledger.StaffName;  // 氏名 (H列)
-            worksheet.Cell(row, 9).Value = ledger.Note;       // 備考 (I-L列)
-
-            // Issue #509: 金額セルの表示形式を明示的に数値に設定
-            var incomeCell = worksheet.Cell(row, 5);
-            var expenseCell = worksheet.Cell(row, 6);
-            var balanceCell = worksheet.Cell(row, 7);
-            incomeCell.Style.NumberFormat.Format = "#,##0";  // 会計形式（3桁カンマ区切り）
-            expenseCell.Style.NumberFormat.Format = "#,##0";
-            balanceCell.Style.NumberFormat.Format = "#,##0";
-
-            // 罫線を適用
-            ApplyDataRowBorder(worksheet, row);
-
-            // Issue #946: 摘要欄のフォントサイズを文字列長に応じて調整
-            // ApplyDataRowBorder後に設定して14ptの一括設定を上書きする
-            var summaryCell = worksheet.Cell(row, 2);
-            summaryCell.Style.Font.FontSize = GetSummaryFontSize(ledger.Summary);
-
-            // Issue #980: 備考欄のフォントサイズを文字列長に応じて調整
-            var noteCell = worksheet.Cell(row, 9);
-            noteCell.Style.Font.FontSize = GetNoteFontSize(ledger.Note);
+                // Issue #980: 備考欄のフォントサイズを文字列長に応じて調整
+                var noteCell = worksheet.Cell(row, 9);
+                noteCell.Style.Font.FontSize = GetNoteFontSize(reportRow.Note);
+            }
 
             return row + 1;
         }
@@ -953,46 +919,13 @@ namespace ICCardManager.Services
         /// 月計行を出力
         /// </summary>
         /// <remarks>
-        /// Issue #451対応:
-        /// - 受入金額・払出金額は0も表示（空欄にしない）
-        /// - 残額は通常空欄（Issue #813: 4月のみ累計行省略のため残額を表示）
-        /// - 上下に太線罫線を追加
+        /// Issue #451対応: 受入金額・払出金額は0も表示（空欄にしない）
+        /// Issue #813: 4月のみ累計行省略のため残額を表示
+        /// Issue #1023: ReportTotal を受け取るように変更
         /// </remarks>
-        private int WriteMonthlyTotalRow(
-            IXLWorksheet worksheet, int row, int month,
-            int income, int expense, int? balance = null)
+        private int WriteMonthlyTotalRow(IXLWorksheet worksheet, int row, ReportTotal total)
         {
-            // 列配置: A=出納年月日, B-D=摘要(結合), E=受入金額, F=払出金額, G=残額, H=氏名, I-L=備考(結合)
-            worksheet.Cell(row, 1).Value = "";  // 出納年月日（空欄）(A列)
-            worksheet.Cell(row, 2).Value = SummaryGenerator.GetMonthlySummary(month); // 摘要 (B-D列)
-            worksheet.Cell(row, 5).Value = income;   // 受入金額 (E列) - 0も表示
-            worksheet.Cell(row, 6).Value = expense;  // 払出金額 (F列) - 0も表示
-
-            // Issue #813: 4月は累計行を省略するため、月計行に残額を表示
-            if (balance.HasValue)
-            {
-                worksheet.Cell(row, 7).Value = balance.Value;
-                worksheet.Cell(row, 7).Style.NumberFormat.Format = "#,##0";
-            }
-            else
-            {
-                worksheet.Cell(row, 7).Value = "";  // 残額（空欄）(G列)
-            }
-
-            // Issue #509: 金額セルの表示形式を明示的に数値に設定
-            var incomeCell = worksheet.Cell(row, 5);
-            var expenseCell = worksheet.Cell(row, 6);
-            incomeCell.Style.NumberFormat.Format = "#,##0";  // 会計形式（3桁カンマ区切り）
-            expenseCell.Style.NumberFormat.Format = "#,##0";
-
-            // 月計行にスタイルを適用
-            var range = worksheet.Range(row, 1, row, 12);
-            range.Style.Font.Bold = true;
-
-            // 月計テキスト（B列）を中央揃え・14ptに設定
-            var summaryCell = worksheet.Cell(row, 2);
-            summaryCell.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
-            summaryCell.Style.Font.FontSize = 14;
+            WriteTotalRowCore(worksheet, row, total);
 
             // 罫線を適用（月計行は上下を太線に）
             ApplySummaryRowBorder(worksheet, row);
@@ -1004,44 +937,53 @@ namespace ICCardManager.Services
         /// 累計行を出力
         /// </summary>
         /// <remarks>
-        /// Issue #451対応:
-        /// - 受入金額・払出金額は0も表示（空欄にしない）
-        /// - 上下に太線罫線を追加
-        /// - 累計テキストを中央揃え・14ptに設定
+        /// Issue #451対応: 受入金額・払出金額は0も表示（空欄にしない）
+        /// Issue #1023: ReportTotal を受け取るように変更
         /// </remarks>
-        private int WriteCumulativeRow(
-            IXLWorksheet worksheet, int row,
-            int income, int expense, int balance)
+        private int WriteCumulativeRow(IXLWorksheet worksheet, int row, ReportTotal total)
         {
-            // 列配置: A=出納年月日, B-D=摘要(結合), E=受入金額, F=払出金額, G=残額, H=氏名, I-L=備考(結合)
-            worksheet.Cell(row, 1).Value = "";  // 出納年月日（空欄）(A列)
-            worksheet.Cell(row, 2).Value = SummaryGenerator.GetCumulativeSummary(); // 摘要 (B-D列)
-            worksheet.Cell(row, 5).Value = income;   // 受入金額 (E列) - 0も表示
-            worksheet.Cell(row, 6).Value = expense;  // 払出金額 (F列) - 0も表示
-            worksheet.Cell(row, 7).Value = balance; // 残額 (G列)
-
-            // Issue #509: 金額セルの表示形式を明示的に数値に設定
-            // テンプレートのセル書式が「文字列」になっている場合に備えて
-            var incomeCell = worksheet.Cell(row, 5);
-            var expenseCell = worksheet.Cell(row, 6);
-            var balanceCell = worksheet.Cell(row, 7);
-            incomeCell.Style.NumberFormat.Format = "#,##0";  // 会計形式（3桁カンマ区切り）
-            expenseCell.Style.NumberFormat.Format = "#,##0";
-            balanceCell.Style.NumberFormat.Format = "#,##0";
-
-            // 累計行にスタイルを適用
-            var range = worksheet.Range(row, 1, row, 12);
-            range.Style.Font.Bold = true;
-
-            // 累計テキスト（B列）を中央揃え・14ptに設定
-            var summaryCell = worksheet.Cell(row, 2);
-            summaryCell.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
-            summaryCell.Style.Font.FontSize = 14;
+            WriteTotalRowCore(worksheet, row, total);
 
             // 罫線を適用（累計行は上下を太線に）
             ApplySummaryRowBorder(worksheet, row);
 
             return row + 1;
+        }
+
+        /// <summary>
+        /// 月計行・累計行の共通出力処理
+        /// </summary>
+        private void WriteTotalRowCore(IXLWorksheet worksheet, int row, ReportTotal total)
+        {
+            // 列配置: A=出納年月日, B-D=摘要(結合), E=受入金額, F=払出金額, G=残額, H=氏名, I-L=備考(結合)
+            worksheet.Cell(row, 1).Value = "";           // 出納年月日（空欄）(A列)
+            worksheet.Cell(row, 2).Value = total.Label;  // 摘要 (B-D列)
+            worksheet.Cell(row, 5).Value = total.Income;  // 受入金額 (E列) - 0も表示
+            worksheet.Cell(row, 6).Value = total.Expense; // 払出金額 (F列) - 0も表示
+
+            // Issue #813: 残額が設定されている場合のみ表示（4月の月計、すべての累計）
+            if (total.Balance.HasValue)
+            {
+                worksheet.Cell(row, 7).Value = total.Balance.Value;
+                worksheet.Cell(row, 7).Style.NumberFormat.Format = "#,##0";
+            }
+            else
+            {
+                worksheet.Cell(row, 7).Value = "";  // 残額（空欄）(G列)
+            }
+
+            // Issue #509: 金額セルの表示形式を明示的に数値に設定
+            worksheet.Cell(row, 5).Style.NumberFormat.Format = "#,##0";
+            worksheet.Cell(row, 6).Style.NumberFormat.Format = "#,##0";
+
+            // 合計行にスタイルを適用
+            var range = worksheet.Range(row, 1, row, 12);
+            range.Style.Font.Bold = true;
+
+            // ラベル（B列）を中央揃え・14ptに設定
+            var summaryCell = worksheet.Cell(row, 2);
+            summaryCell.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
+            summaryCell.Style.Font.FontSize = 14;
         }
 
         /// <summary>
