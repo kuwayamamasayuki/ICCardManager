@@ -27,6 +27,7 @@ public partial class ReportViewModel : ViewModelBase
     private readonly ICardRepository _cardRepository;
     private readonly INavigationService _navigationService;
     private readonly ISettingsRepository _settingsRepository;
+    private bool _isInitialized;
 
     [ObservableProperty]
     private ObservableCollection<CardDto> _cards = new();
@@ -105,6 +106,17 @@ public partial class ReportViewModel : ViewModelBase
     {
         await LoadCardsAsync();
         await LoadOutputFolderAsync();
+        _isInitialized = true;
+    }
+
+    /// <summary>
+    /// 出力先フォルダが変更されたときに設定を保存
+    /// </summary>
+    partial void OnOutputFolderChanged(string value)
+    {
+        // 初期化完了前（コンストラクタやLoadOutputFolderAsyncでの設定）は保存しない
+        if (!_isInitialized) return;
+        _ = SaveOutputFolderAsync();
     }
 
     /// <summary>
@@ -342,7 +354,7 @@ public partial class ReportViewModel : ViewModelBase
     /// 出力フォルダを選択
     /// </summary>
     [RelayCommand]
-    public async Task BrowseOutputFolderAsync()
+    public void BrowseOutputFolder()
     {
         // .NET Framework 4.8ではOpenFolderDialogがないためFolderBrowserDialogを使用
         using (var dialog = new System.Windows.Forms.FolderBrowserDialog
@@ -357,7 +369,6 @@ public partial class ReportViewModel : ViewModelBase
             if (dialog.ShowDialog() == System.Windows.Forms.DialogResult.OK)
             {
                 OutputFolder = dialog.SelectedPath;
-                await SaveOutputFolderAsync();
             }
         }
     }

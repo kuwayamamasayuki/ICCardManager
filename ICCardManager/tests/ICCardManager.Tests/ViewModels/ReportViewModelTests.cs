@@ -720,4 +720,67 @@ public class ReportViewModelTests
     }
 
     #endregion
+
+    #region Issue #1026: 出力先フォルダ直接入力テスト
+
+    /// <summary>
+    /// 初期化完了後にOutputFolderを変更すると設定が保存されること
+    /// </summary>
+    [Fact]
+    public async Task OutputFolder_AfterInitialize_WhenChanged_ShouldSaveToSettings()
+    {
+        // Arrange
+        _cardRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<IcCard>());
+        _settingsRepositoryMock.Setup(s => s.SaveAppSettingsAsync(It.IsAny<AppSettings>())).ReturnsAsync(true);
+        await _viewModel.InitializeAsync();
+
+        // Act - ユーザーがテキストボックスに直接入力した場合をシミュレート
+        _viewModel.OutputFolder = @"\\server\share\reports";
+
+        // Assert - 設定が保存されること
+        // fire-and-forgetのため少し待つ
+        await Task.Delay(100);
+        _settingsRepositoryMock.Verify(
+            s => s.SaveAppSettingsAsync(It.Is<AppSettings>(a => a.ReportOutputFolder == @"\\server\share\reports")),
+            Times.AtLeastOnce);
+    }
+
+    /// <summary>
+    /// 初期化完了前にOutputFolderを変更しても設定が保存されないこと
+    /// </summary>
+    [Fact]
+    public void OutputFolder_BeforeInitialize_WhenChanged_ShouldNotSave()
+    {
+        // Act - コンストラクタ後（InitializeAsync前）にフォルダを変更
+        _viewModel.OutputFolder = @"D:\SomeFolder";
+
+        // Assert - SaveAppSettingsAsyncが呼ばれないこと
+        _settingsRepositoryMock.Verify(
+            s => s.SaveAppSettingsAsync(It.IsAny<AppSettings>()),
+            Times.Never);
+    }
+
+    /// <summary>
+    /// UNCパスを出力先フォルダに設定できること
+    /// </summary>
+    [Fact]
+    public async Task OutputFolder_WithUncPath_ShouldAcceptAndSave()
+    {
+        // Arrange
+        _cardRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<IcCard>());
+        _settingsRepositoryMock.Setup(s => s.SaveAppSettingsAsync(It.IsAny<AppSettings>())).ReturnsAsync(true);
+        await _viewModel.InitializeAsync();
+
+        // Act
+        _viewModel.OutputFolder = @"\\192.168.1.100\共有フォルダ\帳票";
+
+        // Assert
+        _viewModel.OutputFolder.Should().Be(@"\\192.168.1.100\共有フォルダ\帳票");
+        await Task.Delay(100);
+        _settingsRepositoryMock.Verify(
+            s => s.SaveAppSettingsAsync(It.Is<AppSettings>(a => a.ReportOutputFolder == @"\\192.168.1.100\共有フォルダ\帳票")),
+            Times.AtLeastOnce);
+    }
+
+    #endregion
 }
