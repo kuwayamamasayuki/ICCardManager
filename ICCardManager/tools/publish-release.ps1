@@ -47,6 +47,40 @@ function Write-Fail {
     Write-Host "  ✗ $Message" -ForegroundColor Red
 }
 
+# gh コマンドのWSL2対応ラッパー
+$script:UseWslGh = $false
+
+function Initialize-GhCommand {
+    if (Get-Command gh -ErrorAction SilentlyContinue) {
+        return
+    }
+    $null = & wsl.exe which gh 2>$null
+    if ($LASTEXITCODE -eq 0) {
+        $script:UseWslGh = $true
+    } else {
+        Write-Fail "gh コマンドが見つかりません（Windows/WSL両方で未検出）"
+        exit 1
+    }
+}
+
+function Invoke-Gh {
+    if ($script:UseWslGh) {
+        & wsl.exe gh @args
+    } else {
+        & gh @args
+    }
+}
+
+# Windowsパス → WSLパス変換（wsl.exe gh にファイルパスを渡す場合に必要）
+function ConvertTo-WslPath {
+    param([string]$WindowsPath)
+    if ($script:UseWslGh) {
+        $result = & wsl.exe wslpath -u "$WindowsPath" 2>$null
+        return $result.Trim()
+    }
+    return $WindowsPath
+}
+
 function Get-ChangelogSection {
     param([string]$Path, [string]$Ver)
     $content = Get-Content $Path -Encoding UTF8
@@ -77,14 +111,19 @@ function Get-ChangelogSection {
 
 Write-Step "前提条件チェック"
 
-# git / gh コマンド存在チェック
-foreach ($cmd in @("git", "gh")) {
-    if (-not (Get-Command $cmd -ErrorAction SilentlyContinue)) {
-        Write-Fail "$cmd コマンドが見つかりません"
-        exit 1
-    }
+# git コマンド存在チェック
+if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
+    Write-Fail "git コマンドが見つかりません"
+    exit 1
 }
-Write-Success "git / gh コマンド確認済み"
+
+# gh コマンド検出（WSL2フォールバック付き）
+Initialize-GhCommand
+if ($script:UseWslGh) {
+    Write-Success "git 確認済み / gh 確認済み（WSL経由）"
+} else {
+    Write-Success "git / gh コマンド確認済み"
+}
 
 # mainブランチ上か
 $currentBranch = git -C $ProjectRoot rev-parse --abbrev-ref HEAD
@@ -200,7 +239,7 @@ $elapsed = 0
 Write-Host "  GitHub Actionのリリース作成を待機中..." -ForegroundColor Gray
 
 while ($elapsed -lt $maxWaitSeconds) {
-    $releaseExists = gh release view $TagName 2>$null
+    $releaseExists = Invoke-Gh release view $TagName 2>$null
     if ($LASTEXITCODE -eq 0) {
         Write-Success "GitHub Release ${TagName} を検出"
         break
@@ -247,7 +286,7 @@ ${releaseNotes}
 "@
 
 # gh release edit でリリースノートを更新
-$fullReleaseNotes | gh release edit $TagName --notes-file -
+$fullReleaseNotes | Invoke-Gh release edit $TagName --notes-file -
 if ($LASTEXITCODE -ne 0) {
     Write-Fail "リリースノートの更新に失敗しました"
     exit 1
@@ -255,7 +294,7 @@ if ($LASTEXITCODE -ne 0) {
 Write-Success "リリースノート更新完了"
 
 # インストーラーexeをアップロード（--clobber で上書き対応）
-gh release upload $TagName $InstallerOutput --clobber
+Invoke-Gh release upload $TagName (ConvertTo-WslPath $InstallerOutput) --clobber
 if ($LASTEXITCODE -ne 0) {
     Write-Fail "インストーラーのアップロードに失敗しました"
     exit 1
@@ -268,7 +307,7 @@ Write-Success "インストーラーアップロード完了"
 
 Write-Step "リリース完了"
 
-$repoUrl = gh repo view --json url -q ".url" 2>$null
+$repoUrl = Invoke-Gh repo view --json url -q ".url" 2>$null
 if ($repoUrl) {
     $releaseUrl = "${repoUrl}/releases/tag/${TagName}"
     Write-Host "`n  リリースURL: $releaseUrl" -ForegroundColor Green

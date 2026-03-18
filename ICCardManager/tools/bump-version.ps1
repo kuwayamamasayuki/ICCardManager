@@ -48,20 +48,52 @@ function Write-Fail {
     Write-Host "  ✗ $Message" -ForegroundColor Red
 }
 
+# gh コマンドのWSL2対応ラッパー
+# pwsh.exe（Windowsプロセス）からはWSL側の /usr/bin/gh が見えないため、
+# Windows側に gh が無ければ wsl.exe 経由で呼び出す
+$script:UseWslGh = $false
+
+function Initialize-GhCommand {
+    if (Get-Command gh -ErrorAction SilentlyContinue) {
+        return  # Windows側にghあり
+    }
+    # WSL側のghを確認
+    $null = & wsl.exe which gh 2>$null
+    if ($LASTEXITCODE -eq 0) {
+        $script:UseWslGh = $true
+    } else {
+        Write-Fail "gh コマンドが見つかりません（Windows/WSL両方で未検出）"
+        exit 1
+    }
+}
+
+function Invoke-Gh {
+    if ($script:UseWslGh) {
+        & wsl.exe gh @args
+    } else {
+        & gh @args
+    }
+}
+
 # ─────────────────────────────────────────────────
 # 1. 前提チェック
 # ─────────────────────────────────────────────────
 
 Write-Step "前提条件チェック"
 
-# git / gh コマンド存在チェック
-foreach ($cmd in @("git", "gh")) {
-    if (-not (Get-Command $cmd -ErrorAction SilentlyContinue)) {
-        Write-Fail "$cmd コマンドが見つかりません"
-        exit 1
-    }
+# git コマンド存在チェック
+if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
+    Write-Fail "git コマンドが見つかりません"
+    exit 1
 }
-Write-Success "git / gh コマンド確認済み"
+
+# gh コマンド検出（WSL2フォールバック付き）
+Initialize-GhCommand
+if ($script:UseWslGh) {
+    Write-Success "git 確認済み / gh 確認済み（WSL経由）"
+} else {
+    Write-Success "git / gh コマンド確認済み"
+}
 
 # 作業ツリーがcleanか
 $gitStatus = git -C $ProjectRoot status --porcelain
@@ -303,7 +335,7 @@ $prBody = @"
 - ``docs/manual/管理者マニュアル.md``
 "@
 
-$prUrl = gh pr create `
+$prUrl = Invoke-Gh pr create `
     --title $commitMessage `
     --body $prBody `
     --base main `
@@ -334,7 +366,7 @@ if ($NoMerge) {
 
     while ($elapsed -lt $maxWaitSeconds) {
         # チェックのステータスを取得
-        $checksOutput = gh pr checks $branchName --repo (git -C $ProjectRoot remote get-url origin) 2>&1
+        $checksOutput = Invoke-Gh pr checks $branchName --repo (git -C $ProjectRoot remote get-url origin) 2>&1
         $checksExitCode = $LASTEXITCODE
 
         if ($checksExitCode -eq 0) {
@@ -364,7 +396,7 @@ if ($NoMerge) {
     }
 
     # squashマージ + ブランチ削除
-    gh pr merge $branchName --squash --delete-branch
+    Invoke-Gh pr merge $branchName --squash --delete-branch
     if ($LASTEXITCODE -ne 0) {
         Write-Fail "PRのマージに失敗しました"
         Write-Host "  手動でマージしてください: gh pr merge $branchName --squash --delete-branch" -ForegroundColor Yellow
