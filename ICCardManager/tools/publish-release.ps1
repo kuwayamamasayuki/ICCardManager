@@ -76,11 +76,18 @@ function Invoke-Gh {
 }
 
 # Windowsパス → WSLパス変換（wsl.exe gh にファイルパスを渡す場合に必要）
+# wsl.exe wslpath は日本語パスでエンコーディング問題が起きるため、文字列変換で対応
 function ConvertTo-WslPath {
     param([string]$WindowsPath)
     if ($script:UseWslGh) {
-        $result = & wsl.exe wslpath -u "$WindowsPath" 2>$null
-        return $result.Trim()
+        # D:\OneDrive\交通系\... → /mnt/d/OneDrive/交通系/...
+        $wslPath = $WindowsPath -replace '\\', '/'
+        if ($wslPath -match '^([A-Za-z]):(.*)$') {
+            $drive = $Matches[1].ToLower()
+            $rest = $Matches[2]
+            $wslPath = "/mnt/${drive}${rest}"
+        }
+        return $wslPath
     }
     return $WindowsPath
 }
