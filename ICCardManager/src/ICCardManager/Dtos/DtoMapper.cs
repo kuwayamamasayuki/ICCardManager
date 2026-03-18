@@ -124,7 +124,7 @@ namespace ICCardManager.Dtos
             {
                 LedgerId = detail.LedgerId,
                 UseDate = detail.UseDate,
-                UseDateDisplay = detail.UseDate?.ToString("yyyy/MM/dd HH:mm"),
+                UseDateDisplay = DisplayFormatters.FormatDateTime(detail.UseDate, null),
                 EntryStation = detail.EntryStation,
                 ExitStation = detail.ExitStation,
                 BusStops = detail.BusStops,

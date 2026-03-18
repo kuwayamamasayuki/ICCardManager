@@ -42,7 +42,7 @@ public class OperationLogDisplayItem
 {
     public int Id { get; init; }
     public DateTime Timestamp { get; init; }
-    public string TimestampDisplay => Timestamp.ToString("yyyy/MM/dd HH:mm:ss");
+    public string TimestampDisplay => DisplayFormatters.FormatTimestamp(Timestamp);
     public string Action { get; init; } = string.Empty;
     public string ActionDisplay => Action switch
     {

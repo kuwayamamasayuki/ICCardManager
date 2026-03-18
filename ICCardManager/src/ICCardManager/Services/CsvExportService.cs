@@ -67,7 +67,7 @@ namespace ICCardManager.Services
                     "カードIDm,カード種別,管理番号,備考,削除済み"
                 };
 
-                foreach (var card in cards.OrderBy(c => c.CardType).ThenBy(c => c.CardNumber))
+                foreach (var card in cards.OrderByCardDefault(c => c.CardType, c => c.CardNumber))
                 {
                     lines.Add(string.Join(",",
                         EscapeCsvField(card.CardIdm),

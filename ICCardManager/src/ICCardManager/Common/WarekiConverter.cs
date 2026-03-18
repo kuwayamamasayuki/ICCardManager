@@ -134,7 +134,7 @@ namespace ICCardManager.Common
         /// <returns>年度（4月始まり）</returns>
         public static int GetFiscalYear(DateTime date)
         {
-            return date.Month >= 4 ? date.Year : date.Year - 1;
+            return FiscalYearHelper.GetFiscalYear(date);
         }
 
         /// <summary>
@@ -144,7 +144,7 @@ namespace ICCardManager.Common
         /// <returns>年度開始日（4月1日）</returns>
         public static DateTime GetFiscalYearStart(int fiscalYear)
         {
-            return new DateTime(fiscalYear, 4, 1);
+            return FiscalYearHelper.GetFiscalYearStart(fiscalYear);
         }
 
         /// <summary>
@@ -154,7 +154,7 @@ namespace ICCardManager.Common
         /// <returns>年度終了日（翌年3月31日）</returns>
         public static DateTime GetFiscalYearEnd(int fiscalYear)
         {
-            return new DateTime(fiscalYear + 1, 3, 31);
+            return FiscalYearHelper.GetFiscalYearEnd(fiscalYear);
         }
     }
 }

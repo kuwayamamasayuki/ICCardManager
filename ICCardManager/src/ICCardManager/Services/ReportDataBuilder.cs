@@ -1,6 +1,7 @@
 using System;
 using System.Linq;
 using System.Threading.Tasks;
+using ICCardManager.Common;
 using ICCardManager.Data.Repositories;
 using ICCardManager.Models;
 
@@ -87,8 +88,8 @@ namespace ICCardManager.Services
             var monthEndBalance = ledgers.LastOrDefault()?.Balance ?? 0;
 
             // 累計データを計算（4月の月計残額表示にも使用）
-            var fiscalYearStartYear = month >= 4 ? year : year - 1;
-            var fiscalYearStart = new DateTime(fiscalYearStartYear, 4, 1);
+            var fiscalYearStartYear = FiscalYearHelper.GetFiscalYear(year, month);
+            var fiscalYearStart = FiscalYearHelper.GetFiscalYearStart(fiscalYearStartYear);
             var fiscalYearEnd = new DateTime(year, month, DateTime.DaysInMonth(year, month));
             // Issue #784: 残高チェーンに基づいて時系列順を復元
             var yearlyLedgers = LedgerOrderHelper.ReorderByBalanceChain(
@@ -163,17 +164,7 @@ namespace ICCardManager.Services
         private async Task<int?> GetPreviousMonthBalanceAsync(string cardIdm, int year, int month)
         {
             // 前月の年月を計算
-            int previousYear, previousMonth;
-            if (month == 1)
-            {
-                previousYear = year - 1;
-                previousMonth = 12;
-            }
-            else
-            {
-                previousYear = year;
-                previousMonth = month - 1;
-            }
+            var (previousYear, previousMonth) = FiscalYearHelper.GetPreviousMonth(year, month);
 
             // 前月の履歴を取得し、最後の残高を返す
             // Issue #784: 残高チェーンに基づいて時系列順を復元
@@ -188,7 +179,7 @@ namespace ICCardManager.Services
 
             // 前月のデータがない場合は、さらに前の月から繰り越しを探す
             // 年度開始月（4月）まで遡って繰越残高を取得
-            var fiscalYearStartYear = month >= 4 ? year : year - 1;
+            var fiscalYearStartYear = FiscalYearHelper.GetFiscalYear(year, month);
             var carryover = await _ledgerRepository.GetCarryoverBalanceAsync(cardIdm, fiscalYearStartYear - 1);
             return carryover;
         }

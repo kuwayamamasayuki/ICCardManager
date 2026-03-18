@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 #if DEBUG
+using ICCardManager.Common;
 using ICCardManager.Data.Repositories;
 using ICCardManager.Models;
 
@@ -615,9 +616,7 @@ namespace ICCardManager.Services
         private async Task RegisterFiscalYearCarryoverAsync(string cardIdm, DateTime today, string staffName)
         {
             // 直近の年度境界を計算（日本の会計年度: 4月～翌年3月）
-            var fiscalYearStart = today.Month >= 4
-                ? new DateTime(today.Year, 4, 1)
-                : new DateTime(today.Year - 1, 4, 1);
+            var fiscalYearStart = FiscalYearHelper.GetFiscalYearStart(FiscalYearHelper.GetFiscalYear(today));
             var previousFiscalYearEnd = fiscalYearStart.AddDays(-1); // 3月31日
 
             // 既に繰越パターンが登録済みかチェック

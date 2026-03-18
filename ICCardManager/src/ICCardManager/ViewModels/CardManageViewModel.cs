@@ -7,6 +7,7 @@ using System.Windows;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using CommunityToolkit.Mvvm.Messaging;
+using ICCardManager.Common;
 using ICCardManager.Common.Messages;
 using ICCardManager.Data.Repositories;
 using ICCardManager.Dtos;
@@ -160,7 +161,7 @@ namespace ICCardManager.ViewModels
             {
                 var cards = await _cardRepository.GetAllAsync();
                 Cards.Clear();
-                foreach (var card in cards.OrderBy(c => c.CardType).ThenBy(c => c.CardNumber))
+                foreach (var card in cards.OrderByCardDefault(c => c.CardType, c => c.CardNumber))
                 {
                     Cards.Add(card.ToDto());
                 }

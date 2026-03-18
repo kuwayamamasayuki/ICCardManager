@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.ComponentModel;
 using System.Linq;
 using System.Threading.Tasks;
+using ICCardManager.Common;
 namespace ICCardManager.Dtos
 {
 /// <summary>
@@ -95,17 +96,17 @@ namespace ICCardManager.Dtos
         /// <summary>
         /// 表示用: 受入金額（金額がある場合のみ表示）
         /// </summary>
-        public string IncomeDisplay => Income > 0 ? $"{Income:N0}" : "";
+        public string IncomeDisplay => DisplayFormatters.FormatAmountOrEmpty(Income);
 
         /// <summary>
         /// 表示用: 払出金額（金額がある場合のみ表示）
         /// </summary>
-        public string ExpenseDisplay => Expense > 0 ? $"{Expense:N0}" : "";
+        public string ExpenseDisplay => DisplayFormatters.FormatAmountOrEmpty(Expense);
 
         /// <summary>
         /// 表示用: 残額
         /// </summary>
-        public string BalanceDisplay => $"{Balance:N0}";
+        public string BalanceDisplay => DisplayFormatters.FormatBalance(Balance);
 
         /// <summary>
         /// 受入金額があるかどうか

@@ -45,7 +45,7 @@ namespace ICCardManager.ViewModels
         /// <summary>
         /// 利用日時表示
         /// </summary>
-        public string UseDateDisplay => Detail.UseDate?.ToString("yyyy/MM/dd HH:mm") ?? "-";
+        public string UseDateDisplay => DisplayFormatters.FormatDateTime(Detail.UseDate);
 
         /// <summary>
         /// 区間表示
@@ -65,12 +65,12 @@ namespace ICCardManager.ViewModels
         /// <summary>
         /// 金額表示
         /// </summary>
-        public string AmountDisplay => Detail.Amount.HasValue ? $"{Detail.Amount:N0}円" : "-";
+        public string AmountDisplay => DisplayFormatters.FormatAmountWithUnit(Detail.Amount, "-");
 
         /// <summary>
         /// 残高表示
         /// </summary>
-        public string BalanceDisplay => Detail.Balance.HasValue ? $"{Detail.Balance:N0}円" : "-";
+        public string BalanceDisplay => DisplayFormatters.FormatAmountWithUnit(Detail.Balance, "-");
 
         /// <summary>
         /// チャージフラグ
@@ -241,9 +241,9 @@ namespace ICCardManager.ViewModels
             // ヘッダー情報を設定
             DateDisplay = WarekiConverter.ToWareki(_ledger.Date);
             SummaryDisplay = _ledger.Summary;
-            IncomeDisplay = _ledger.Income > 0 ? $"{_ledger.Income:N0}円" : string.Empty;
-            ExpenseDisplay = _ledger.Expense > 0 ? $"{_ledger.Expense:N0}円" : string.Empty;
-            BalanceDisplay = $"{_ledger.Balance:N0}円";
+            IncomeDisplay = DisplayFormatters.FormatAmountWithUnitOrEmpty(_ledger.Income);
+            ExpenseDisplay = DisplayFormatters.FormatAmountWithUnitOrEmpty(_ledger.Expense);
+            BalanceDisplay = DisplayFormatters.FormatBalanceWithUnit(_ledger.Balance);
             StaffName = _ledger.StaffName ?? "-";
             Note = _ledger.Note ?? string.Empty;
 

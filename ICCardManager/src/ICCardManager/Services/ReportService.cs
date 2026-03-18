@@ -668,7 +668,7 @@ namespace ICCardManager.Services
         /// <returns>年度（例: 2024年4月〜2025年3月 → 2024）</returns>
         public static int GetFiscalYear(int year, int month)
         {
-            return month >= 4 ? year : year - 1;
+            return FiscalYearHelper.GetFiscalYear(year, month);
         }
 
         /// <summary>

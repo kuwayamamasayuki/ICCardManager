@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 using CommunityToolkit.Mvvm.ComponentModel;
+using ICCardManager.Common;
 
 namespace ICCardManager.Dtos
 {
@@ -87,7 +88,7 @@ namespace ICCardManager.Dtos
         /// <summary>
         /// 表示用: 貸出日時
         /// </summary>
-        public string LentAtDisplay => LentAt?.ToString("yyyy/MM/dd HH:mm");
+        public string LentAtDisplay => DisplayFormatters.FormatDateTime(LentAt, null);
 
         /// <summary>
         /// 開始ページ番号（Issue #510: 年度途中導入対応）

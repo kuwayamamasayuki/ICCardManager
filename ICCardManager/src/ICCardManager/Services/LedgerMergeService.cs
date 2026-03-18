@@ -4,6 +4,7 @@ using System.Linq;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
+using ICCardManager.Common;
 using ICCardManager.Data.Repositories;
 using ICCardManager.Models;
 using Microsoft.Extensions.Logging;
@@ -280,7 +281,7 @@ namespace ICCardManager.Services
             target.Note = notes.Count > 0 ? string.Join("、", notes) : null;
 
             // 説明テキスト（UI表示用）
-            var description = $"{beforeLedgers[0].Date:yyyy/MM/dd} {string.Join(" + ", originalSummaryTexts)}";
+            var description = $"{DisplayFormatters.FormatDate(beforeLedgers[0].Date)} {string.Join(" + ", originalSummaryTexts)}";
 
             try
             {

@@ -86,12 +86,12 @@ namespace ICCardManager.Dtos
         /// <summary>
         /// 表示用: 金額
         /// </summary>
-        public string AmountDisplay => Amount.HasValue ? $"{Amount:N0}円" : "";
+        public string AmountDisplay => DisplayFormatters.FormatAmountWithUnit(Amount);
 
         /// <summary>
         /// 表示用: 残額
         /// </summary>
-        public string BalanceDisplay => Balance.HasValue ? $"{Balance:N0}円" : "";
+        public string BalanceDisplay => DisplayFormatters.FormatAmountWithUnit(Balance);
 
         #endregion
     }

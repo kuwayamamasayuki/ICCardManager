@@ -4,6 +4,7 @@ using System.IO;
 using System.Windows.Data;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using ICCardManager.Common;
 using ICCardManager.Data.Repositories;
 using ICCardManager.Dtos;
 using ICCardManager.Infrastructure.CardReader;
@@ -306,7 +307,7 @@ public partial class DataExportImportViewModel : ViewModelBase
         // 登録済みカード一覧を取得
         var cards = await _cardRepository.GetAllAsync();
         AvailableCards.Clear();
-        foreach (var card in cards.OrderBy(c => c.CardType).ThenBy(c => c.CardNumber))
+        foreach (var card in cards.OrderByCardDefault(c => c.CardType, c => c.CardNumber))
         {
             AvailableCards.Add(card.ToDto());
         }
