@@ -150,6 +150,18 @@ public class OperationLogExcelExportService
 
             var doc = JsonDocument.Parse(json);
             var fieldNameMap = GetFieldNameMap(targetTable);
+
+            // RichTextランに空文字列を含めるとExcelが修復を要求するため、
+            // 変更フィールドがある場合のみRichTextを使い、それ以外は通常テキストで書き込む
+            var isHighlightNeeded = !strikethrough && changedFields != null && changedFields.Count > 0;
+
+            if (!isHighlightNeeded && !strikethrough)
+            {
+                // ハイライトも取り消し線も不要なら通常テキスト
+                cell.Value = FormatJsonToReadable(targetTable, json);
+                return;
+            }
+
             var richText = cell.GetRichText();
             var isFirst = true;
 
@@ -159,6 +171,13 @@ public class OperationLogExcelExportService
                     continue;
 
                 var value = FormatPropertyValue(property.Value);
+                var isChanged = changedFields != null && changedFields.Contains(property.Name);
+
+                // 値が空の場合はラベルに含めて1つのランにする（空ランを回避）
+                var labelText = string.IsNullOrEmpty(value)
+                    ? $"{displayName}: "
+                    : $"{displayName}: ";
+                var valueText = string.IsNullOrEmpty(value) ? "" : value;
 
                 // 改行（先頭以外）
                 if (!isFirst)
@@ -169,21 +188,27 @@ public class OperationLogExcelExportService
                 }
                 isFirst = false;
 
-                // フィールド名部分
-                var labelRun = richText.AddText($"{displayName}: ");
-                if (strikethrough)
-                    labelRun.SetStrikethrough();
-
-                // 値部分（変更フィールドは太字+赤文字）
-                var valueRun = richText.AddText(value);
-                if (strikethrough)
+                if (string.IsNullOrEmpty(valueText))
                 {
-                    valueRun.SetStrikethrough();
+                    // 値が空の場合はラベルだけを1つのランで書く
+                    var singleRun = richText.AddText(labelText);
+                    if (strikethrough)
+                        singleRun.SetStrikethrough();
                 }
-                else if (changedFields != null && changedFields.Contains(property.Name))
+                else if (isChanged && !strikethrough)
                 {
+                    // 変更フィールド: ラベルは通常、値は太字+赤文字
+                    richText.AddText(labelText);
+                    var valueRun = richText.AddText(valueText);
                     valueRun.SetBold();
                     valueRun.SetFontColor(ColorRed);
+                }
+                else
+                {
+                    // 通常フィールドまたは取り消し線
+                    var fullRun = richText.AddText(labelText + valueText);
+                    if (strikethrough)
+                        fullRun.SetStrikethrough();
                 }
             }
         }

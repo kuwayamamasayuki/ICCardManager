@@ -463,8 +463,8 @@ public class OperationLogExcelExportServiceTests : IDisposable
         boldRedRuns.Should().NotBeEmpty();
         boldRedRuns.Any(r => r.Text == "田中次郎").Should().BeTrue();
 
-        // 変更されていないフィールドの値部分は太字でないこと
-        var normalRuns = richText.Where(r => !r.Bold && r.Text == "001").ToList();
+        // 変更されていないフィールドは太字でないこと（ラベル+値が1つのランに結合）
+        var normalRuns = richText.Where(r => !r.Bold && r.Text.Contains("001")).ToList();
         normalRuns.Should().NotBeEmpty();
     }
 
