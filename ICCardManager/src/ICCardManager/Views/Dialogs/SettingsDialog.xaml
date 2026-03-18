@@ -185,9 +185,8 @@
                             <TextBox Grid.Column="0"
                                      Text="{Binding BackupPath, UpdateSourceTrigger=PropertyChanged}"
                                      Padding="8"
-                                     IsReadOnly="True"
-                                     Background="{DynamicResource NeutralBackgroundBrush}"
-                                     AutomationProperties.Name="バックアップ先フォルダパス"/>
+                                     AutomationProperties.Name="バックアップ先フォルダパス"
+                                     ToolTip="フォルダパスを直接入力できます（UNCパスも可）"/>
                             <Button Grid.Column="1"
                                     Content="参照..."
                                     Command="{Binding BrowseBackupPathCommand}"

@@ -115,11 +115,10 @@
                         <ColumnDefinition Width="Auto"/>
                     </Grid.ColumnDefinitions>
                     <TextBox Grid.Column="0"
-                             Text="{Binding OutputFolder}"
-                             IsReadOnly="True"
+                             Text="{Binding OutputFolder, UpdateSourceTrigger=LostFocus}"
                              Padding="8"
-                             Background="{DynamicResource NeutralBackgroundBrush}"
-                             AutomationProperties.Name="出力先フォルダパス"/>
+                             AutomationProperties.Name="出力先フォルダパス"
+                             ToolTip="フォルダパスを直接入力できます（UNCパスも可）"/>
                     <Button Grid.Column="1"
                             Content="参照"
                             Command="{Binding BrowseOutputFolderCommand}"
