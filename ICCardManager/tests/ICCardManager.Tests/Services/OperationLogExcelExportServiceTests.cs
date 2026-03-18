@@ -443,7 +443,7 @@ public class OperationLogExcelExportServiceTests : IDisposable
     #region ExportAsync_ハイライト表示
 
     [Fact]
-    public async Task ExportAsync_UPDATE行で変更内容が太字赤文字になる()
+    public async Task ExportAsync_UPDATE行で変更フィールドが太字赤文字になる()
     {
         var filePath = Path.Combine(_testDirectory, "update_highlight.xlsx");
         var logs = new List<OperationLog>
@@ -467,17 +467,22 @@ public class OperationLogExcelExportServiceTests : IDisposable
         using var workbook = new XLWorkbook(filePath);
         var worksheet = workbook.Worksheets.First();
 
-        // 変更内容（F列）が太字+赤文字であること
-        var changeSummaryCell = worksheet.Cell(2, 6);
-        changeSummaryCell.Value.ToString().Should().Contain("氏名: 田中太郎 → 田中次郎");
-        changeSummaryCell.Style.Font.Bold.Should().BeTrue();
-        changeSummaryCell.Style.Font.FontColor.Should().Be(XLColor.FromHtml("#C62828"));
+        // 変更後（H列）のRichTextに太字+赤文字のランがあること
+        var afterCell = worksheet.Cell(2, 8);
+        var richText = afterCell.GetRichText();
+        var boldRedRuns = richText.Where(r => r.Bold && r.FontColor == XLColor.FromHtml("#C62828")).ToList();
+        boldRedRuns.Should().NotBeEmpty("変更されたフィールドの値が太字+赤文字でハイライトされるべき");
+        boldRedRuns.Any(r => r.Text == "田中次郎").Should().BeTrue();
 
-        // 変更前（G列）に薄いオレンジ背景が付くこと
-        worksheet.Cell(2, 7).Style.Fill.BackgroundColor.Should().Be(XLColor.FromHtml("#FFF3E0"));
+        // 変更前（G列）のRichTextにも太字+赤文字のランがあること
+        var beforeCell = worksheet.Cell(2, 7);
+        var beforeRichText = beforeCell.GetRichText();
+        var beforeBoldRedRuns = beforeRichText.Where(r => r.Bold && r.FontColor == XLColor.FromHtml("#C62828")).ToList();
+        beforeBoldRedRuns.Any(r => r.Text == "田中太郎").Should().BeTrue();
 
-        // 変更後（H列）に薄いグリーン背景が付くこと
-        worksheet.Cell(2, 8).Style.Fill.BackgroundColor.Should().Be(XLColor.FromHtml("#E8F5E9"));
+        // 変更されていないフィールドは太字でないこと
+        var normalRuns = richText.Where(r => !r.Bold && r.Text.Contains("001")).ToList();
+        normalRuns.Should().NotBeEmpty();
     }
 
     [Fact]
@@ -505,10 +510,11 @@ public class OperationLogExcelExportServiceTests : IDisposable
         using var workbook = new XLWorkbook(filePath);
         var worksheet = workbook.Worksheets.First();
 
-        // 変更前（G列）にセルレベルの取り消し線が付くこと
+        // 変更前（G列）のRichTextに取り消し線があること
         var beforeCell = worksheet.Cell(2, 7);
-        beforeCell.Value.ToString().Should().Contain("田中太郎");
-        beforeCell.Style.Font.Strikethrough.Should().BeTrue("削除行の変更前データには取り消し線が付くべき");
+        var richText = beforeCell.GetRichText();
+        richText.Should().NotBeEmpty();
+        richText.Should().AllSatisfy(r => r.Strikethrough.Should().BeTrue("削除行の変更前データには取り消し線が付くべき"));
     }
 
     [Fact]
@@ -536,41 +542,9 @@ public class OperationLogExcelExportServiceTests : IDisposable
         using var workbook = new XLWorkbook(filePath);
         var worksheet = workbook.Worksheets.First();
 
-        // INSERT行の変更後データにはハイライトがないこと
+        // INSERT行の変更後データは通常テキストであること
         var afterCell = worksheet.Cell(2, 8);
         afterCell.Value.ToString().Should().Contain("田中太郎");
-        // 背景色がハイライト色でないこと
-        afterCell.Style.Fill.BackgroundColor.Should().NotBe(XLColor.FromHtml("#E8F5E9"));
-    }
-
-    [Fact]
-    public async Task ExportAsync_UPDATE行で変更なしの場合はハイライトなし()
-    {
-        var filePath = Path.Combine(_testDirectory, "update_no_changes.xlsx");
-        var logs = new List<OperationLog>
-        {
-            new OperationLog
-            {
-                Id = 1,
-                Timestamp = new DateTime(2025, 7, 1, 10, 0, 0),
-                Action = "UPDATE",
-                TargetTable = "staff",
-                TargetId = "ABC123",
-                OperatorName = "管理者",
-                OperatorIdm = "OP001",
-                BeforeData = @"{""StaffIdm"":""ABC123"",""Name"":""田中太郎""}",
-                AfterData = @"{""StaffIdm"":""ABC123"",""Name"":""田中太郎""}"
-            }
-        };
-
-        await _service.ExportAsync(logs, filePath);
-
-        using var workbook = new XLWorkbook(filePath);
-        var worksheet = workbook.Worksheets.First();
-
-        // 変更がない場合はハイライト背景色が付かないこと
-        worksheet.Cell(2, 7).Style.Fill.BackgroundColor.Should().NotBe(XLColor.FromHtml("#FFF3E0"));
-        worksheet.Cell(2, 8).Style.Fill.BackgroundColor.Should().NotBe(XLColor.FromHtml("#E8F5E9"));
     }
 
     #endregion
