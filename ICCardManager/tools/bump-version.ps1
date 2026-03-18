@@ -96,10 +96,11 @@ if ($script:UseWslGh) {
 }
 
 # 作業ツリーがcleanか
-$gitStatus = git -C $ProjectRoot status --porcelain
+# プロジェクトディレクトリ配下のみチェック（gitリポジトリルートが親にある場合に対応）
+$gitStatus = git -C $ProjectRoot status --porcelain -- .
 if ($gitStatus) {
     Write-Fail "作業ツリーにコミットされていない変更があります"
-    git -C $ProjectRoot status --short
+    git -C $ProjectRoot status --short -- .
     exit 1
 }
 Write-Success "作業ツリーはクリーン"
