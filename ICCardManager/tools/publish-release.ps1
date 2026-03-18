@@ -13,6 +13,10 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+# UTF-8出力を強制（日本語文字化け防止）
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+$OutputEncoding = [System.Text.Encoding]::UTF8
+
 # パスの設定
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $ProjectRoot = Split-Path -Parent $ScriptDir

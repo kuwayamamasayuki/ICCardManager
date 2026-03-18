@@ -12,6 +12,10 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+# UTF-8出力を強制（git log等の日本語文字化け防止）
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+$OutputEncoding = [System.Text.Encoding]::UTF8
+
 # パスの設定
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $ProjectRoot = Split-Path -Parent $ScriptDir
@@ -273,7 +277,8 @@ if ($DryRun) {
     foreach ($file in $files) {
         $relativePath = [System.IO.Path]::GetRelativePath($ProjectRoot, $file.Path)
         $tempFile = Join-Path $tempDir (Split-Path -Leaf $file.Path)
-        [System.IO.File]::WriteAllText($tempFile, $file.Content, [System.Text.Encoding]::UTF8)
+        $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+        [System.IO.File]::WriteAllText($tempFile, $file.Content, $utf8NoBom)
         Write-Host "`n--- $relativePath ---" -ForegroundColor Yellow
         git diff --no-index -- $file.Path $tempFile 2>$null
         if ($LASTEXITCODE -eq 0) {
