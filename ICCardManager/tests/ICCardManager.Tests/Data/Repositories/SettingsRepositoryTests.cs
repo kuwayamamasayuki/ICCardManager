@@ -453,6 +453,67 @@ public class SettingsRepositoryTests : IDisposable
 
     #endregion
 
+    #region ReportOutputFolder テスト
+
+    /// <summary>
+    /// ReportOutputFolderのデフォルト値が空文字であることを確認
+    /// </summary>
+    [Fact]
+    public async Task GetAppSettingsAsync_Default_ReportOutputFolderIsEmpty()
+    {
+        // Act
+        var result = await _repository.GetAppSettingsAsync();
+
+        // Assert
+        result.ReportOutputFolder.Should().Be(string.Empty);
+    }
+
+    /// <summary>
+    /// ReportOutputFolderを保存して読み込めることを確認
+    /// </summary>
+    [Fact]
+    public async Task SaveAndLoadAppSettings_ReportOutputFolder_RoundTrip()
+    {
+        // Arrange
+        var settings = new AppSettings
+        {
+            WarningBalance = 10000,
+            BackupPath = @"C:\Backup",
+            ReportOutputFolder = @"D:\Reports\Monthly"
+        };
+
+        // Act
+        await _repository.SaveAppSettingsAsync(settings);
+        var loaded = await _repository.GetAppSettingsAsync();
+
+        // Assert
+        loaded.ReportOutputFolder.Should().Be(@"D:\Reports\Monthly");
+    }
+
+    /// <summary>
+    /// ReportOutputFolderを空文字で保存して読み込めることを確認
+    /// </summary>
+    [Fact]
+    public async Task SaveAndLoadAppSettings_EmptyReportOutputFolder_RoundTrip()
+    {
+        // Arrange
+        var settings = new AppSettings
+        {
+            WarningBalance = 10000,
+            BackupPath = @"C:\Backup",
+            ReportOutputFolder = string.Empty
+        };
+
+        // Act
+        await _repository.SaveAppSettingsAsync(settings);
+        var loaded = await _repository.GetAppSettingsAsync();
+
+        // Assert
+        loaded.ReportOutputFolder.Should().Be(string.Empty);
+    }
+
+    #endregion
+
     #region 設定キー定数テスト
 
     /// <summary>
