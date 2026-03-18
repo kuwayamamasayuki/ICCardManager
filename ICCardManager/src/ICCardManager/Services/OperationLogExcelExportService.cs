@@ -22,6 +22,10 @@ public class OperationLogExcelExportService
     private static readonly XLColor ColorRed = XLColor.FromHtml("#C62828");
     private static readonly XLColor ColorBlue = XLColor.FromHtml("#1565C0");
 
+    // 変更ハイライト用背景色
+    private static readonly XLColor HighlightBeforeBackground = XLColor.FromHtml("#FFF3E0"); // 薄いオレンジ
+    private static readonly XLColor HighlightAfterBackground = XLColor.FromHtml("#E8F5E9");  // 薄いグリーン
+
     /// <summary>
     /// 操作ログをExcelファイルにエクスポート
     /// </summary>
@@ -96,127 +100,32 @@ public class OperationLogExcelExportService
         // E: 操作者
         worksheet.Cell(row, 5).Value = log.OperatorName;
 
-        // F: 変更内容
-        worksheet.Cell(row, 6).Value = GetChangeSummary(
-            log.TargetTable, log.BeforeData, log.AfterData);
-
-        // G: 変更前、H: 変更後（変更箇所をハイライト表示）
-        var changedFields = GetChangedFields(log.TargetTable, log.BeforeData, log.AfterData);
-
-        if (log.Action == "DELETE")
+        // F: 変更内容（変更箇所を太字・赤文字で強調）
+        var changeSummary = GetChangeSummary(log.TargetTable, log.BeforeData, log.AfterData);
+        worksheet.Cell(row, 6).Value = changeSummary;
+        if (!string.IsNullOrEmpty(changeSummary))
         {
-            // 削除: 変更前データに取り消し線
-            WriteFormattedJsonCell(worksheet.Cell(row, 7), log.TargetTable, log.BeforeData, null, strikethrough: true);
-            worksheet.Cell(row, 8).Value = FormatJsonToReadable(log.TargetTable, log.AfterData);
+            worksheet.Cell(row, 6).Style.Font.Bold = true;
+            worksheet.Cell(row, 6).Style.Font.FontColor = ColorRed;
         }
-        else if (changedFields.Count > 0)
+
+        // G: 変更前
+        worksheet.Cell(row, 7).Value = FormatJsonToReadable(log.TargetTable, log.BeforeData);
+
+        // H: 変更後
+        worksheet.Cell(row, 8).Value = FormatJsonToReadable(log.TargetTable, log.AfterData);
+
+        // DELETE: 変更前データに取り消し線
+        if (log.Action == "DELETE" && !string.IsNullOrEmpty(log.BeforeData))
         {
-            // 更新: 変更フィールドの値を太字+赤文字でハイライト
-            WriteFormattedJsonCell(worksheet.Cell(row, 7), log.TargetTable, log.BeforeData, changedFields, strikethrough: false);
-            WriteFormattedJsonCell(worksheet.Cell(row, 8), log.TargetTable, log.AfterData, changedFields, strikethrough: false);
+            worksheet.Cell(row, 7).Style.Font.Strikethrough = true;
         }
-        else
+
+        // UPDATE: 変更前/変更後セルに薄い背景色を付けて変更を示す
+        if (log.Action == "UPDATE" && !string.IsNullOrEmpty(changeSummary))
         {
-            // 登録・復元等: 通常表示
-            worksheet.Cell(row, 7).Value = FormatJsonToReadable(log.TargetTable, log.BeforeData);
-            worksheet.Cell(row, 8).Value = FormatJsonToReadable(log.TargetTable, log.AfterData);
-        }
-    }
-
-    /// <summary>
-    /// JSONデータをRichTextでセルに書き込み、変更フィールドをハイライト表示する
-    /// </summary>
-    /// <param name="cell">書き込み先のセル</param>
-    /// <param name="targetTable">対象テーブル名</param>
-    /// <param name="json">JSONデータ</param>
-    /// <param name="changedFields">変更されたフィールド名のセット（nullの場合はハイライトなし）</param>
-    /// <param name="strikethrough">trueの場合、全テキストに取り消し線を付す</param>
-    internal static void WriteFormattedJsonCell(IXLCell cell, string? targetTable, string? json, ISet<string>? changedFields, bool strikethrough)
-    {
-        if (string.IsNullOrEmpty(json))
-            return;
-
-        try
-        {
-            var trimmed = json.TrimStart();
-            if (trimmed.StartsWith("["))
-            {
-                // 配列JSONの場合は通常表示（MERGE/SPLIT用）
-                cell.Value = FormatJsonArrayToReadable(targetTable, json);
-                if (strikethrough)
-                    cell.Style.Font.Strikethrough = true;
-                return;
-            }
-
-            var doc = JsonDocument.Parse(json);
-            var fieldNameMap = GetFieldNameMap(targetTable);
-
-            // RichTextランに空文字列を含めるとExcelが修復を要求するため、
-            // 変更フィールドがある場合のみRichTextを使い、それ以外は通常テキストで書き込む
-            var isHighlightNeeded = !strikethrough && changedFields != null && changedFields.Count > 0;
-
-            if (!isHighlightNeeded && !strikethrough)
-            {
-                // ハイライトも取り消し線も不要なら通常テキスト
-                cell.Value = FormatJsonToReadable(targetTable, json);
-                return;
-            }
-
-            var richText = cell.GetRichText();
-            var isFirst = true;
-
-            foreach (var property in doc.RootElement.EnumerateObject())
-            {
-                if (!fieldNameMap.TryGetValue(property.Name, out var displayName))
-                    continue;
-
-                var value = FormatPropertyValue(property.Value);
-                var isChanged = changedFields != null && changedFields.Contains(property.Name);
-
-                // 値が空の場合はラベルに含めて1つのランにする（空ランを回避）
-                var labelText = string.IsNullOrEmpty(value)
-                    ? $"{displayName}: "
-                    : $"{displayName}: ";
-                var valueText = string.IsNullOrEmpty(value) ? "" : value;
-
-                // 改行（先頭以外）
-                if (!isFirst)
-                {
-                    var newlineRun = richText.AddText("\n");
-                    if (strikethrough)
-                        newlineRun.SetStrikethrough();
-                }
-                isFirst = false;
-
-                if (string.IsNullOrEmpty(valueText))
-                {
-                    // 値が空の場合はラベルだけを1つのランで書く
-                    var singleRun = richText.AddText(labelText);
-                    if (strikethrough)
-                        singleRun.SetStrikethrough();
-                }
-                else if (isChanged && !strikethrough)
-                {
-                    // 変更フィールド: ラベルは通常、値は太字+赤文字
-                    richText.AddText(labelText);
-                    var valueRun = richText.AddText(valueText);
-                    valueRun.SetBold();
-                    valueRun.SetFontColor(ColorRed);
-                }
-                else
-                {
-                    // 通常フィールドまたは取り消し線
-                    var fullRun = richText.AddText(labelText + valueText);
-                    if (strikethrough)
-                        fullRun.SetStrikethrough();
-                }
-            }
-        }
-        catch
-        {
-            cell.Value = json;
-            if (strikethrough)
-                cell.Style.Font.Strikethrough = true;
+            worksheet.Cell(row, 7).Style.Fill.BackgroundColor = HighlightBeforeBackground;
+            worksheet.Cell(row, 8).Style.Fill.BackgroundColor = HighlightAfterBackground;
         }
     }
 
