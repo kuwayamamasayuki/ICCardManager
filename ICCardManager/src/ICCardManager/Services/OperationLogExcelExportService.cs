@@ -100,13 +100,144 @@ public class OperationLogExcelExportService
         worksheet.Cell(row, 6).Value = GetChangeSummary(
             log.TargetTable, log.BeforeData, log.AfterData);
 
-        // G: 変更前
-        worksheet.Cell(row, 7).Value = FormatJsonToReadable(
-            log.TargetTable, log.BeforeData);
+        // G: 変更前、H: 変更後（変更箇所をハイライト表示）
+        var changedFields = GetChangedFields(log.TargetTable, log.BeforeData, log.AfterData);
 
-        // H: 変更後
-        worksheet.Cell(row, 8).Value = FormatJsonToReadable(
-            log.TargetTable, log.AfterData);
+        if (log.Action == "DELETE")
+        {
+            // 削除: 変更前データに取り消し線
+            WriteFormattedJsonCell(worksheet.Cell(row, 7), log.TargetTable, log.BeforeData, null, strikethrough: true);
+            worksheet.Cell(row, 8).Value = FormatJsonToReadable(log.TargetTable, log.AfterData);
+        }
+        else if (changedFields.Count > 0)
+        {
+            // 更新: 変更フィールドの値を太字+赤文字でハイライト
+            WriteFormattedJsonCell(worksheet.Cell(row, 7), log.TargetTable, log.BeforeData, changedFields, strikethrough: false);
+            WriteFormattedJsonCell(worksheet.Cell(row, 8), log.TargetTable, log.AfterData, changedFields, strikethrough: false);
+        }
+        else
+        {
+            // 登録・復元等: 通常表示
+            worksheet.Cell(row, 7).Value = FormatJsonToReadable(log.TargetTable, log.BeforeData);
+            worksheet.Cell(row, 8).Value = FormatJsonToReadable(log.TargetTable, log.AfterData);
+        }
+    }
+
+    /// <summary>
+    /// JSONデータをRichTextでセルに書き込み、変更フィールドをハイライト表示する
+    /// </summary>
+    /// <param name="cell">書き込み先のセル</param>
+    /// <param name="targetTable">対象テーブル名</param>
+    /// <param name="json">JSONデータ</param>
+    /// <param name="changedFields">変更されたフィールド名のセット（nullの場合はハイライトなし）</param>
+    /// <param name="strikethrough">trueの場合、全テキストに取り消し線を付す</param>
+    internal static void WriteFormattedJsonCell(IXLCell cell, string? targetTable, string? json, ISet<string>? changedFields, bool strikethrough)
+    {
+        if (string.IsNullOrEmpty(json))
+            return;
+
+        try
+        {
+            var trimmed = json.TrimStart();
+            if (trimmed.StartsWith("["))
+            {
+                // 配列JSONの場合は通常表示（MERGE/SPLIT用）
+                cell.Value = FormatJsonArrayToReadable(targetTable, json);
+                if (strikethrough)
+                    cell.Style.Font.Strikethrough = true;
+                return;
+            }
+
+            var doc = JsonDocument.Parse(json);
+            var fieldNameMap = GetFieldNameMap(targetTable);
+            var richText = cell.GetRichText();
+            var isFirst = true;
+
+            foreach (var property in doc.RootElement.EnumerateObject())
+            {
+                if (!fieldNameMap.TryGetValue(property.Name, out var displayName))
+                    continue;
+
+                var value = FormatPropertyValue(property.Value);
+
+                // 改行（先頭以外）
+                if (!isFirst)
+                {
+                    var newlineRun = richText.AddText("\n");
+                    if (strikethrough)
+                        newlineRun.SetStrikethrough();
+                }
+                isFirst = false;
+
+                // フィールド名部分
+                var labelRun = richText.AddText($"{displayName}: ");
+                if (strikethrough)
+                    labelRun.SetStrikethrough();
+
+                // 値部分（変更フィールドは太字+赤文字）
+                var valueRun = richText.AddText(value);
+                if (strikethrough)
+                {
+                    valueRun.SetStrikethrough();
+                }
+                else if (changedFields != null && changedFields.Contains(property.Name))
+                {
+                    valueRun.SetBold();
+                    valueRun.SetFontColor(ColorRed);
+                }
+            }
+        }
+        catch
+        {
+            cell.Value = json;
+            if (strikethrough)
+                cell.Style.Font.Strikethrough = true;
+        }
+    }
+
+    /// <summary>
+    /// 変更前と変更後のJSONを比較し、変更されたフィールド名のセットを返す
+    /// </summary>
+    internal static ISet<string> GetChangedFields(string? targetTable, string? beforeJson, string? afterJson)
+    {
+        var result = new HashSet<string>();
+
+        if (string.IsNullOrEmpty(beforeJson) || string.IsNullOrEmpty(afterJson))
+            return result;
+
+        try
+        {
+            var beforeDoc = JsonDocument.Parse(beforeJson);
+            var afterDoc = JsonDocument.Parse(afterJson);
+
+            // 配列JSONの場合は比較しない
+            if (beforeDoc.RootElement.ValueKind == JsonValueKind.Array ||
+                afterDoc.RootElement.ValueKind == JsonValueKind.Array)
+                return result;
+
+            var fieldNameMap = GetFieldNameMap(targetTable);
+
+            foreach (var kvp in fieldNameMap)
+            {
+                var propertyName = kvp.Key;
+                string? beforeValue = null;
+                string? afterValue = null;
+
+                if (beforeDoc.RootElement.TryGetProperty(propertyName, out var beforeProp))
+                    beforeValue = FormatPropertyValue(beforeProp);
+                if (afterDoc.RootElement.TryGetProperty(propertyName, out var afterProp))
+                    afterValue = FormatPropertyValue(afterProp);
+
+                if (beforeValue != afterValue)
+                    result.Add(propertyName);
+            }
+        }
+        catch
+        {
+            // JSONパースエラー時は空セットを返す
+        }
+
+        return result;
     }
 
     /// <summary>
