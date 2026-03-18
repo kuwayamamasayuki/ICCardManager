@@ -108,20 +108,29 @@ Write-Success "作業ツリーはクリーン"
 # mainブランチ上か
 $currentBranch = git -C $ProjectRoot rev-parse --abbrev-ref HEAD
 if ($currentBranch -ne "main") {
-    Write-Fail "mainブランチ上で実行してください（現在: $currentBranch）"
-    exit 1
+    if ($DryRun) {
+        Write-Warn "mainブランチ上ではありません（現在: $currentBranch）— DryRunのため続行"
+    } else {
+        Write-Fail "mainブランチ上で実行してください（現在: $currentBranch）"
+        exit 1
+    }
+} else {
+    Write-Success "mainブランチ上"
 }
-Write-Success "mainブランチ上"
 
 # origin/mainと同期済みか
-git -C $ProjectRoot fetch origin main --quiet 2>$null
-$localHead = git -C $ProjectRoot rev-parse HEAD
-$remoteHead = git -C $ProjectRoot rev-parse origin/main
-if ($localHead -ne $remoteHead) {
-    Write-Fail "ローカルのmainがorigin/mainと同期していません。git pullを実行してください"
-    exit 1
+if (-not $DryRun) {
+    git -C $ProjectRoot fetch origin main --quiet 2>$null
+    $localHead = git -C $ProjectRoot rev-parse HEAD
+    $remoteHead = git -C $ProjectRoot rev-parse origin/main
+    if ($localHead -ne $remoteHead) {
+        Write-Fail "ローカルのmainがorigin/mainと同期していません。git pullを実行してください"
+        exit 1
+    }
+    Write-Success "origin/main と同期済み"
+} else {
+    Write-Warn "origin/main同期チェックをスキップ — DryRunのため"
 }
-Write-Success "origin/main と同期済み"
 
 # ─────────────────────────────────────────────────
 # 2. 前回タグ取得 & CHANGELOG自動生成
