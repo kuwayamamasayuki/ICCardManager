@@ -260,7 +260,7 @@ namespace ICCardManager.Services
                 return DataRowHeight;
 
             var maxChars = isLandscape ? SummaryCharsLandscape : SummaryCharsPortrait;
-            return row.Summary.Length <= maxChars ? DataRowHeight : DataRowHeightDouble;
+            return (row.Summary?.Length ?? 0) <= maxChars ? DataRowHeight : DataRowHeightDouble;
         }
 
         /// <summary>

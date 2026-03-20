@@ -80,7 +80,7 @@ namespace ICCardManager.ViewModels
 
                 var ledgers = await _ledgerRepository.GetByDateRangeAsync(
                     null, DateTime.Now.AddYears(-1), DateTime.Now);
-                var incompleteLedgers = ledgers.Where(l => l.Summary.Contains("★")).ToList();
+                var incompleteLedgers = ledgers.Where(l => l.Summary?.Contains("★") == true).ToList();
 
                 var cards = await _cardRepository.GetAllAsync();
                 var cardMap = cards.ToDictionary(c => c.CardIdm, c => $"{c.CardType} {c.CardNumber}");

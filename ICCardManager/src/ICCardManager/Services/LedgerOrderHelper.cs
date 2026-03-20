@@ -124,7 +124,7 @@ namespace ICCardManager.Services
         /// 新規購入または繰越レコードかどうかを判定する。
         /// </summary>
         private static bool IsSpecialRecord(Ledger l) =>
-            l.Summary == "新規購入" || l.Summary.EndsWith("月から繰越");
+            l.Summary == "新規購入" || l.Summary?.EndsWith("月から繰越") == true;
 
         /// <summary>
         /// チェーン構築用の内部データ構造。

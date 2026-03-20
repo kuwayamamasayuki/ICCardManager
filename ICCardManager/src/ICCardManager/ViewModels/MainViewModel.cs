@@ -505,7 +505,7 @@ public partial class MainViewModel : ViewModelBase
         var ledgers = await _ledgerRepository.GetByDateRangeAsync(
             null, DateTime.Now.AddYears(-1), DateTime.Now);
 
-        var incompleteCount = ledgers.Count(l => l.Summary.Contains("★"));
+        var incompleteCount = ledgers.Count(l => l.Summary?.Contains("★") == true);
         if (incompleteCount > 0)
         {
             WarningMessages.Add(new WarningItem
