@@ -1,5 +1,5 @@
 # バージョンバンプ + PR作成 + 自動マージスクリプト
-# 使用方法: pwsh.exe -File tools/bump-version.ps1 -NewVersion 1.25.0 [-DryRun] [-NoMerge]
+# 使用方法: pwsh.exe -File tools/bump-version.ps1 -NewVersion 1.25.1 [-DryRun] [-NoMerge]
 
 param(
     [Parameter(Mandatory = $true)]

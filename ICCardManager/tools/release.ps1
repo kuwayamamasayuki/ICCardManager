@@ -1,5 +1,5 @@
 # リリース一括実行スクリプト
-# 使用方法: pwsh.exe -File tools/release.ps1 -Version 1.25.0 [-DryRun] [-Force]
+# 使用方法: pwsh.exe -File tools/release.ps1 -Version 1.25.1 [-DryRun] [-Force]
 #
 # バージョンバンプ → PR作成 → CIチェック待ち → マージ → タグ → ビルド → GitHub Release を一括実行
 

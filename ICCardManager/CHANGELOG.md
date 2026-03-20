@@ -1,5 +1,14 @@
 # 更新履歴
 
+### v1.25.1 (2026-03-20)
+
+**バグ修正**
+- Ledger.Summaryがnullの場合に発生する潜在的NullReferenceExceptionを修正（#1042）
+  - LedgerOrderHelper、MainViewModel、IncompleteBusStopViewModel、PrintService、IncompleteBusStopDialogの5箇所
+
+**テスト**
+- テストカバレッジギャップを検出するエッジケーステスト101件を追加（#1041）
+
 ### v1.25.0 (2026-03-19)
 
 **新機能**
