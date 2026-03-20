@@ -1,5 +1,5 @@
 # タグ付け + ビルド + GitHub Release公開スクリプト
-# 使用方法: pwsh.exe -File tools/publish-release.ps1 -Version 1.25.0 [-SkipBuild] [-SkipTag] [-Force]
+# 使用方法: pwsh.exe -File tools/publish-release.ps1 -Version 1.25.1 [-SkipBuild] [-SkipTag] [-Force]
 
 param(
     [Parameter(Mandatory = $true)]
