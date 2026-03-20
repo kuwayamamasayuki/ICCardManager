@@ -11,6 +11,8 @@
         Title="職員管理"
         Height="550"
         Width="850"
+        MinHeight="440"
+        MinWidth="680"
         WindowStartupLocation="CenterOwner"
         ResizeMode="CanResize"
         KeyDown="Window_KeyDown"

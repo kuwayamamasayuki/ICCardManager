@@ -10,6 +10,8 @@
         Title="システム管理"
         Height="620"
         Width="650"
+        MinHeight="496"
+        MinWidth="520"
         WindowStartupLocation="CenterOwner"
         ResizeMode="NoResize"
         Loaded="Window_Loaded"
@@ -208,7 +210,10 @@
                 Background="{DynamicResource OverlayBrush}"
                 Visibility="{Binding IsBusy, Converter={StaticResource BoolToVisibilityConverter}}">
             <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
-                <ProgressBar IsIndeterminate="True" Width="200" Height="4"/>
+                <ProgressBar IsIndeterminate="{Binding IsIndeterminate}"
+                             Value="{Binding ProgressValue}"
+                             Maximum="{Binding ProgressMax}"
+                             Width="200" Height="4"/>
                 <TextBlock Text="{Binding BusyMessage}"
                            Foreground="{DynamicResource OnPrimaryBrush}"
                            FontSize="{DynamicResource BaseFontSize}"

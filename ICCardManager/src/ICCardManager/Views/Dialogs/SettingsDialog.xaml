@@ -9,6 +9,8 @@
         Title="設定"
         Height="720"
         Width="550"
+        MinHeight="576"
+        MinWidth="440"
         WindowStartupLocation="CenterOwner"
         ResizeMode="NoResize"
         FontSize="{DynamicResource BaseFontSize}"
@@ -209,13 +211,13 @@
         <StackPanel Grid.Row="1" Margin="0,15,0,0">
             <!-- エラーメッセージ（常に表示領域内） -->
             <TextBlock Text="{Binding StatusMessage}"
-                       Foreground="{DynamicResource DangerTextBrush}"
                        FontWeight="Bold"
                        TextWrapping="Wrap"
                        Margin="0,0,0,10"
                        AutomationProperties.LiveSetting="Assertive">
                 <TextBlock.Style>
                     <Style TargetType="TextBlock">
+                        <Setter Property="Foreground" Value="{DynamicResource PrimaryBrush}"/>
                         <Setter Property="Visibility" Value="Visible"/>
                         <Style.Triggers>
                             <DataTrigger Binding="{Binding StatusMessage}" Value="">
@@ -223,6 +225,9 @@
                             </DataTrigger>
                             <DataTrigger Binding="{Binding StatusMessage}" Value="{x:Null}">
                                 <Setter Property="Visibility" Value="Collapsed"/>
+                            </DataTrigger>
+                            <DataTrigger Binding="{Binding IsStatusError}" Value="True">
+                                <Setter Property="Foreground" Value="{DynamicResource DangerTextBrush}"/>
                             </DataTrigger>
                         </Style.Triggers>
                     </Style>

@@ -127,6 +127,19 @@ namespace ICCardManager.Services
         }
 
         /// <summary>
+        /// DI用コンストラクタ。組織固有設定と部署種別をコンストラクタで注入します。
+        /// </summary>
+        /// <param name="departmentType">部署種別（チャージ摘要の切替に使用）</param>
+        /// <param name="options">組織固有設定</param>
+        public SummaryGenerator(DepartmentType departmentType, OrganizationOptions options)
+            : this(departmentType)
+        {
+            // DI経由で生成された場合、静的フィールドも設定する
+            // （静的メソッドが参照するため、DI経由の初期化でも静的状態を更新）
+            Configure(options);
+        }
+
+        /// <summary>
         /// 金額が負でチャージでもポイント還元フラグでもないレコードを暗黙のポイント還元として判定
         /// </summary>
         /// <remarks>

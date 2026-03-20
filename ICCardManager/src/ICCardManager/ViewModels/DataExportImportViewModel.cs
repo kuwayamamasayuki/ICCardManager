@@ -118,6 +118,9 @@ public partial class DataExportImportViewModel : ViewModelBase
     private string _statusMessage = string.Empty;
 
     [ObservableProperty]
+    private bool _isStatusError;
+
+    [ObservableProperty]
     private ObservableCollection<string> _importErrors = new();
 
     [ObservableProperty]
@@ -382,14 +385,14 @@ public partial class DataExportImportViewModel : ViewModelBase
                         break;
 
                     default:
-                        StatusMessage = "不正なデータタイプです";
+                        SetStatus("不正なデータタイプです", true);
                         return;
                 }
 
                 if (result.Success)
                 {
                     LastExportedFile = result.FilePath;
-                    StatusMessage = $"エクスポート完了: {result.ExportedCount}件を出力しました";
+                    SetStatus($"エクスポート完了: {result.ExportedCount}件を出力しました", false);
 
                     // Issue #512: 保存完了メッセージを表示
                     _dialogService.ShowInformation(
@@ -398,13 +401,13 @@ public partial class DataExportImportViewModel : ViewModelBase
                 }
                 else
                 {
-                    StatusMessage = $"エクスポートエラー: {result.ErrorMessage}";
+                    SetStatus($"エクスポートエラー: {result.ErrorMessage}", true);
                     _dialogService.ShowError($"エクスポートに失敗しました。\n\n{result.ErrorMessage}", "エクスポートエラー");
                 }
             }
             catch (Exception ex)
             {
-                StatusMessage = $"エクスポートエラー: {ex.Message}";
+                SetStatus($"エクスポートエラー: {ex.Message}", true);
 #if DEBUG
                 System.Diagnostics.Debug.WriteLine($"[Export Error] {ex.GetType().Name}: {ex.Message}");
 #endif
@@ -458,7 +461,7 @@ public partial class DataExportImportViewModel : ViewModelBase
                         break;
 
                     default:
-                        StatusMessage = "不正なデータタイプです";
+                        SetStatus("不正なデータタイプです", true);
                         return;
                 }
 
@@ -467,7 +470,7 @@ public partial class DataExportImportViewModel : ViewModelBase
 
                 if (!string.IsNullOrEmpty(preview.ErrorMessage))
                 {
-                    StatusMessage = $"プレビューエラー: {preview.ErrorMessage}";
+                    SetStatus($"プレビューエラー: {preview.ErrorMessage}", true);
                     return;
                 }
 
@@ -501,16 +504,16 @@ public partial class DataExportImportViewModel : ViewModelBase
 
                 if (preview.IsValid)
                 {
-                    StatusMessage = "プレビューを確認して「インポート実行」ボタンを押してください";
+                    SetStatus("プレビューを確認して「インポート実行」ボタンを押してください", false);
                 }
                 else
                 {
-                    StatusMessage = $"バリデーションエラーがあります。{preview.ErrorCount}件のエラーを修正してください";
+                    SetStatus($"バリデーションエラーがあります。{preview.ErrorCount}件のエラーを修正してください", true);
                 }
             }
             catch (Exception ex)
             {
-                StatusMessage = $"プレビューエラー: {ex.Message}";
+                SetStatus($"プレビューエラー: {ex.Message}", true);
 #if DEBUG
                 System.Diagnostics.Debug.WriteLine($"[Preview Error] {ex.GetType().Name}: {ex.Message}");
 #endif
@@ -526,13 +529,13 @@ public partial class DataExportImportViewModel : ViewModelBase
     {
         if (ImportPreview == null || string.IsNullOrEmpty(ImportPreviewFile))
         {
-            StatusMessage = "先にプレビューを実行してください";
+            SetStatus("先にプレビューを実行してください", true);
             return;
         }
 
         if (!ImportPreview.IsValid)
         {
-            StatusMessage = "バリデーションエラーがあります。修正後に再度プレビューしてください";
+            SetStatus("バリデーションエラーがあります。修正後に再度プレビューしてください", true);
             return;
         }
 
@@ -564,7 +567,7 @@ public partial class DataExportImportViewModel : ViewModelBase
                         break;
 
                     default:
-                        StatusMessage = "不正なデータタイプです";
+                        SetStatus("不正なデータタイプです", true);
                         return;
                 }
 
@@ -583,7 +586,7 @@ public partial class DataExportImportViewModel : ViewModelBase
                     {
                         message += $"（{result.SkippedCount}件はスキップ）";
                     }
-                    StatusMessage = message;
+                    SetStatus(message, false);
                     ClearPreview();
 
                     _dialogService.ShowInformation(
@@ -593,7 +596,7 @@ public partial class DataExportImportViewModel : ViewModelBase
                 }
                 else if (!string.IsNullOrEmpty(result.ErrorMessage))
                 {
-                    StatusMessage = $"インポートエラー: {result.ErrorMessage}";
+                    SetStatus($"インポートエラー: {result.ErrorMessage}", true);
                     _dialogService.ShowError(
                         $"インポートに失敗しました。\n\n{result.ErrorMessage}",
                         "インポートエラー");
@@ -605,7 +608,7 @@ public partial class DataExportImportViewModel : ViewModelBase
                     {
                         message += $"、{result.SkippedCount}件はスキップ";
                     }
-                    StatusMessage = message;
+                    SetStatus(message, false);
 
                     // エラー詳細を追加
                     foreach (var error in result.Errors.Take(10))
@@ -627,7 +630,7 @@ public partial class DataExportImportViewModel : ViewModelBase
             }
             catch (Exception ex)
             {
-                StatusMessage = $"インポートエラー: {ex.Message}";
+                SetStatus($"インポートエラー: {ex.Message}", true);
                 _dialogService.ShowError(
                     $"インポート中にエラーが発生しました。\n\n{ex.Message}",
                     "インポートエラー");
@@ -696,7 +699,7 @@ public partial class DataExportImportViewModel : ViewModelBase
                         break;
 
                     default:
-                        StatusMessage = "不正なデータタイプです";
+                        SetStatus("不正なデータタイプです", true);
                         return;
                 }
 
@@ -715,7 +718,7 @@ public partial class DataExportImportViewModel : ViewModelBase
                     {
                         message += $"（{result.SkippedCount}件はスキップ）";
                     }
-                    StatusMessage = message;
+                    SetStatus(message, false);
 
                     _dialogService.ShowInformation(
                         $"インポートが完了しました。\n\n登録件数: {result.ImportedCount}件"
@@ -724,7 +727,7 @@ public partial class DataExportImportViewModel : ViewModelBase
                 }
                 else if (!string.IsNullOrEmpty(result.ErrorMessage))
                 {
-                    StatusMessage = $"インポートエラー: {result.ErrorMessage}";
+                    SetStatus($"インポートエラー: {result.ErrorMessage}", true);
                     _dialogService.ShowError(
                         $"インポートに失敗しました。\n\n{result.ErrorMessage}",
                         "インポートエラー");
@@ -736,7 +739,7 @@ public partial class DataExportImportViewModel : ViewModelBase
                     {
                         message += $"、{result.SkippedCount}件はスキップ";
                     }
-                    StatusMessage = message;
+                    SetStatus(message, false);
 
                     // エラー詳細を追加
                     foreach (var error in result.Errors.Take(10))
@@ -758,7 +761,7 @@ public partial class DataExportImportViewModel : ViewModelBase
             }
             catch (Exception ex)
             {
-                StatusMessage = $"インポートエラー: {ex.Message}";
+                SetStatus($"インポートエラー: {ex.Message}", true);
                 _dialogService.ShowError(
                     $"インポート中にエラーが発生しました。\n\n{ex.Message}",
                     "インポートエラー");
@@ -833,7 +836,7 @@ public partial class DataExportImportViewModel : ViewModelBase
     {
         if (_cardReader == null)
         {
-            StatusMessage = "カードリーダーが利用できません";
+            SetStatus("カードリーダーが利用できません", true);
             return;
         }
 
@@ -841,7 +844,7 @@ public partial class DataExportImportViewModel : ViewModelBase
         IsCardReaderAvailable = _cardReader.ConnectionState == CardReaderConnectionState.Connected;
         if (!IsCardReaderAvailable)
         {
-            StatusMessage = "カードリーダーが接続されていません";
+            SetStatus("カードリーダーが接続されていません", true);
             return;
         }
 
@@ -849,7 +852,7 @@ public partial class DataExportImportViewModel : ViewModelBase
         IsWaitingForCardTouch = true;
         TouchedCardIdm = string.Empty;
         TouchedCardInfo = "カードをタッチしてください...";
-        StatusMessage = "カードをタッチしてください";
+        SetStatus("カードをタッチしてください", false);
 
         // 読み取りを開始（既に開始されている場合は何もしない）
         try
@@ -863,7 +866,7 @@ public partial class DataExportImportViewModel : ViewModelBase
         {
             IsWaitingForCardTouch = false;
             TouchedCardInfo = string.Empty;
-            StatusMessage = $"カードリーダーの開始に失敗しました: {ex.Message}";
+            SetStatus($"カードリーダーの開始に失敗しました: {ex.Message}", true);
         }
     }
 
@@ -877,7 +880,7 @@ public partial class DataExportImportViewModel : ViewModelBase
         TouchedCardInfo = string.IsNullOrWhiteSpace(TouchedCardIdm)
             ? string.Empty
             : TouchedCardInfo; // 既にカードが読み取られていれば情報を維持
-        StatusMessage = string.Empty;
+        SetStatus(string.Empty, false);
     }
 
     /// <summary>
@@ -906,14 +909,14 @@ public partial class DataExportImportViewModel : ViewModelBase
                     ? card.CardIdm.Substring(0, 8) + "..."
                     : card.CardIdm;
                 TouchedCardInfo = $"{card.CardType} {card.CardNumber} ({shortIdm})";
-                StatusMessage = $"カードを読み取りました: {card.CardType} {card.CardNumber}";
+                SetStatus($"カードを読み取りました: {card.CardType} {card.CardNumber}", false);
             }
             else
             {
                 // 未登録カード
                 TouchedCardIdm = string.Empty;
                 TouchedCardInfo = "未登録のカードです";
-                StatusMessage = "このカードはシステムに登録されていません。先にカード管理で登録してください。";
+                SetStatus("このカードはシステムに登録されていません。先にカード管理で登録してください。", true);
                 _dialogService.ShowWarning(
                     "タッチされたカードはシステムに登録されていません。\n\n利用履歴をインポートするには、先にカード管理で対象のICカードを登録してください。",
                     "未登録カード");
@@ -946,4 +949,10 @@ public partial class DataExportImportViewModel : ViewModelBase
     }
 
     #endregion
+
+    private void SetStatus(string message, bool isError)
+    {
+        StatusMessage = message;
+        IsStatusError = isError;
+    }
 }

@@ -51,6 +51,7 @@ namespace ICCardManager.Infrastructure.CardReader
     {
         private readonly IPcScProvider _provider;
         private readonly ILogger<PcScCardReader> _logger;
+        private readonly IStationMasterService _stationMasterService;
         private ISCardMonitor _monitor;
         private System.Timers.Timer _healthCheckTimer;
         private System.Timers.Timer _reconnectTimer;
@@ -112,7 +113,17 @@ namespace ICCardManager.Infrastructure.CardReader
         /// </summary>
         /// <param name="logger">ロガー</param>
         public PcScCardReader(ILogger<PcScCardReader> logger)
-            : this(logger, new DefaultPcScProvider())
+            : this(logger, new DefaultPcScProvider(), StationMasterService.Instance)
+        {
+        }
+
+        /// <summary>
+        /// DI用コンストラクタ
+        /// </summary>
+        /// <param name="logger">ロガー</param>
+        /// <param name="stationMasterService">駅マスタサービス</param>
+        public PcScCardReader(ILogger<PcScCardReader> logger, IStationMasterService stationMasterService)
+            : this(logger, new DefaultPcScProvider(), stationMasterService)
         {
         }
 
@@ -121,10 +132,12 @@ namespace ICCardManager.Infrastructure.CardReader
         /// </summary>
         /// <param name="logger">ロガー</param>
         /// <param name="provider">PC/SCプロバイダー（テスト時はモックを注入）</param>
-        internal PcScCardReader(ILogger<PcScCardReader> logger, IPcScProvider provider)
+        /// <param name="stationMasterService">駅マスタサービス</param>
+        internal PcScCardReader(ILogger<PcScCardReader> logger, IPcScProvider provider, IStationMasterService stationMasterService = null)
         {
             _logger = logger;
             _provider = provider;
+            _stationMasterService = stationMasterService ?? StationMasterService.Instance;
         }
 
         /// <summary>
@@ -1021,13 +1034,13 @@ namespace ICCardManager.Infrastructure.CardReader
                 {
                     var lineCode = (entryStationCode >> 8) & 0xFF;
                     var stationNum = entryStationCode & 0xFF;
-                    entryStationName = StationMasterService.Instance.GetStationNameOrNull(lineCode, stationNum, cardType);
+                    entryStationName = _stationMasterService.GetStationNameOrNull(lineCode, stationNum, cardType);
                 }
                 if (exitStationCode > 0)
                 {
                     var lineCode = (exitStationCode >> 8) & 0xFF;
                     var stationNum = exitStationCode & 0xFF;
-                    exitStationName = StationMasterService.Instance.GetStationNameOrNull(lineCode, stationNum, cardType);
+                    exitStationName = _stationMasterService.GetStationNameOrNull(lineCode, stationNum, cardType);
                 }
 
                 // バス利用の判定:
@@ -1106,9 +1119,9 @@ namespace ICCardManager.Infrastructure.CardReader
         /// </remarks>
         /// <param name="stationCode">駅コード（上位バイト:路線コード, 下位バイト:駅番号）</param>
         /// <param name="cardType">カード種別（優先エリアの決定に使用）</param>
-        private static string GetStationName(int stationCode, CardType cardType)
+        private string GetStationName(int stationCode, CardType cardType)
         {
-            return StationMasterService.Instance.GetStationName(stationCode, cardType);
+            return _stationMasterService.GetStationName(stationCode, cardType);
         }
 
         /// <summary>

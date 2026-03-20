@@ -378,15 +378,34 @@
 
         <!-- ステータスメッセージ -->
         <Border Grid.Row="3"
-                Background="{DynamicResource ReturnBackgroundBrush}"
                 Padding="10"
                 Margin="0,0,0,10"
                 CornerRadius="5"
                 Visibility="{Binding StatusMessage, Converter={StaticResource StringToVisibilityConverter}}">
+            <Border.Style>
+                <Style TargetType="Border">
+                    <Setter Property="Background" Value="{DynamicResource ReturnBackgroundBrush}"/>
+                    <Style.Triggers>
+                        <DataTrigger Binding="{Binding IsStatusError}" Value="True">
+                            <Setter Property="Background" Value="{DynamicResource ErrorBackgroundBrush}"/>
+                        </DataTrigger>
+                    </Style.Triggers>
+                </Style>
+            </Border.Style>
             <TextBlock Text="{Binding StatusMessage}"
-                       Foreground="{DynamicResource InfoTextBrush}"
                        FontSize="{DynamicResource BaseFontSize}"
-                       TextWrapping="Wrap"/>
+                       TextWrapping="Wrap">
+                <TextBlock.Style>
+                    <Style TargetType="TextBlock">
+                        <Setter Property="Foreground" Value="{DynamicResource InfoTextBrush}"/>
+                        <Style.Triggers>
+                            <DataTrigger Binding="{Binding IsStatusError}" Value="True">
+                                <Setter Property="Foreground" Value="{DynamicResource DangerTextBrush}"/>
+                            </DataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </TextBlock.Style>
+            </TextBlock>
         </Border>
 
         <!-- プレビュー結果＋エラー一覧（リサイズ可能エリア） -->
@@ -587,7 +606,10 @@
                 Background="{DynamicResource OverlayBrush}"
                 Visibility="{Binding IsBusy, Converter={StaticResource BoolToVisibilityConverter}}">
             <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
-                <ProgressBar IsIndeterminate="True" Width="200" Height="4"/>
+                <ProgressBar IsIndeterminate="{Binding IsIndeterminate}"
+                             Value="{Binding ProgressValue}"
+                             Maximum="{Binding ProgressMax}"
+                             Width="200" Height="4"/>
                 <TextBlock Text="{Binding BusyMessage}"
                            Foreground="{DynamicResource OnPrimaryBrush}"
                            FontSize="{DynamicResource BaseFontSize}"

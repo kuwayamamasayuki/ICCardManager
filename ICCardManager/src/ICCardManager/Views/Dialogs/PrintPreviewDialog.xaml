@@ -10,6 +10,8 @@
         Title="{Binding DocumentTitle, StringFormat='印刷プレビュー - {0}'}"
         Height="700"
         Width="950"
+        MinHeight="560"
+        MinWidth="760"
         WindowStartupLocation="CenterOwner"
         ResizeMode="CanResize"
         PreviewKeyDown="Window_PreviewKeyDown"

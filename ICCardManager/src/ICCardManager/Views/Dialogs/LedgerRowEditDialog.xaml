@@ -9,6 +9,8 @@
         Title="{Binding DialogTitle}"
         Height="620"
         Width="700"
+        MinHeight="496"
+        MinWidth="560"
         WindowStartupLocation="CenterOwner"
         ResizeMode="NoResize"
         FontSize="{DynamicResource BaseFontSize}"

@@ -108,8 +108,9 @@ namespace ICCardManager
                 _logger.LogDebug("DIコンテナ構築完了");
 
                 // Issue #974: 組織固有設定を静的サービスに注入
+                // SummaryGeneratorはDIコンストラクタ経由でConfigureされる（即時解決で静的状態を初期化）
+                ServiceProvider.GetRequiredService<SummaryGenerator>();
                 var orgOptions = ServiceProvider.GetRequiredService<IOptions<OrganizationOptions>>().Value;
-                SummaryGenerator.Configure(orgOptions);
                 StationMasterService.Configure(orgOptions);
 
                 // データベース初期化
@@ -193,7 +194,8 @@ namespace ICCardManager
             services.AddSingleton<SummaryGenerator>(sp =>
             {
                 var settings = sp.GetRequiredService<ISettingsRepository>().GetAppSettings();
-                return new SummaryGenerator(settings.DepartmentType);
+                var orgOptions = sp.GetRequiredService<IOptions<OrganizationOptions>>().Value;
+                return new SummaryGenerator(settings.DepartmentType, orgOptions);
             });
             services.AddSingleton<CardLockManager>();
             services.AddSingleton<LendingService>();
@@ -213,6 +215,7 @@ namespace ICCardManager
             services.AddSingleton<INavigationService>(sp => sp.GetRequiredService<NavigationService>());
             services.AddSingleton<IDialogService>(sp => sp.GetRequiredService<NavigationService>());
             services.AddSingleton<IStaffAuthService, StaffAuthService>();
+            services.AddSingleton<IStationMasterService>(sp => StationMasterService.Instance);
 
             // Infrastructure層
     #if DEBUG
@@ -232,6 +235,8 @@ namespace ICCardManager
             services.AddSingleton<ICardReader>(sp => CreateCardReader(sp));
     #endif
             services.AddSingleton<ISoundPlayer, SoundPlayer>();
+            services.AddSingleton<Infrastructure.Timing.ITimerFactory, Infrastructure.Timing.DispatcherTimerFactory>();
+            services.AddSingleton<Infrastructure.Timing.IDispatcherService, Infrastructure.Timing.WpfDispatcherService>();
 
             // ViewModels
             services.AddTransient<MainViewModel>();
@@ -292,20 +297,21 @@ namespace ICCardManager
         private static ICardReader CreateCardReader(IServiceProvider sp)
         {
             var loggerFactory = sp.GetRequiredService<ILoggerFactory>();
+            var stationMasterService = sp.GetRequiredService<IStationMasterService>();
 
             // felicalib.dll の存在を確認
             if (IsFelicaLibAvailable())
             {
                 var logger = loggerFactory.CreateLogger<FelicaCardReader>();
                 logger.LogInformation("FelicaCardReader を使用します（残高・履歴読み取り可能）");
-                return new FelicaCardReader(logger);
+                return new FelicaCardReader(logger, stationMasterService);
             }
 
             // フォールバック: PcScCardReader
             {
                 var logger = loggerFactory.CreateLogger<PcScCardReader>();
                 logger.LogInformation("PcScCardReader を使用します（IDm読み取りのみ、残高・履歴は読み取れません）");
-                return new PcScCardReader(logger);
+                return new PcScCardReader(logger, stationMasterService);
             }
         }
 

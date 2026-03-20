@@ -23,7 +23,7 @@ namespace ICCardManager.Services
     /// https://produ.irelang.jp/blog/2017/08/305/
     /// </para>
     /// </remarks>
-    public class StationMasterService
+    public class StationMasterService : IStationMasterService
     {
         private static readonly Lazy<StationMasterService> _instance = new(() => new StationMasterService());
 

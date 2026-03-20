@@ -42,8 +42,29 @@ jobs:
     - name: Build
       run: dotnet build --no-restore --configuration Release
 
-    - name: Run tests
-      run: dotnet test tests/ICCardManager.Tests/ICCardManager.Tests.csproj --no-build --configuration Release --verbosity normal --collect:"XPlat Code Coverage" --results-directory ./coverage
+    - name: Run tests with coverage
+      run: dotnet test tests/ICCardManager.Tests/ICCardManager.Tests.csproj --no-build --configuration Release --verbosity normal --collect:"XPlat Code Coverage" --settings tests/ICCardManager.Tests/coverlet.runsettings --results-directory ./coverage
+
+    - name: Check coverage threshold
+      shell: pwsh
+      run: |
+        $coverageFile = Get-ChildItem -Path ./coverage -Recurse -Filter "coverage.cobertura.xml" | Select-Object -First 1
+        if (-not $coverageFile) {
+          Write-Host "::warning::Coverage report not found, skipping threshold check"
+          exit 0
+        }
+        [xml]$xml = Get-Content $coverageFile.FullName
+        $lineRate = [double]$xml.coverage.'line-rate' * 100
+        $branchRate = [double]$xml.coverage.'branch-rate' * 100
+        Write-Host "Line coverage: $([math]::Round($lineRate, 2))%"
+        Write-Host "Branch coverage: $([math]::Round($branchRate, 2))%"
+
+        $threshold = 70
+        if ($lineRate -lt $threshold) {
+          Write-Host "::error::Line coverage ($([math]::Round($lineRate, 2))%) is below threshold ($threshold%)"
+          exit 1
+        }
+        Write-Host "Coverage threshold check passed (>= $threshold%)"
 
     - name: Upload coverage reports
       uses: codecov/codecov-action@v4
@@ -77,3 +98,43 @@ jobs:
 
     - name: Build with analyzers
       run: dotnet build --no-restore --configuration Release
+
+  security-scan:
+    runs-on: windows-latest
+
+    defaults:
+      run:
+        working-directory: ICCardManager
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: ${{ env.DOTNET_VERSION }}
+
+    - name: Restore dependencies
+      run: dotnet restore
+
+    - name: Check for vulnerable NuGet packages
+      run: |
+        dotnet list src/ICCardManager/ICCardManager.csproj package --vulnerable --include-transitive 2>&1 | tee vuln-report.txt
+        if (Select-String -Path vuln-report.txt -Pattern "has the following vulnerable packages" -Quiet) {
+          Write-Host "::error::Vulnerable NuGet packages detected! Review vuln-report.txt for details."
+          exit 1
+        }
+        Write-Host "No vulnerable packages found."
+      shell: pwsh
+
+    - name: Check for deprecated NuGet packages
+      run: |
+        dotnet list src/ICCardManager/ICCardManager.csproj package --deprecated 2>&1 | tee deprecated-report.txt
+        if (Select-String -Path deprecated-report.txt -Pattern "has the following deprecated packages" -Quiet) {
+          Write-Host "::warning::Deprecated NuGet packages detected. Consider updating."
+        } else {
+          Write-Host "No deprecated packages found."
+        }
+      shell: pwsh
+      continue-on-error: true

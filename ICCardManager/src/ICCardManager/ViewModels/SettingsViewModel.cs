@@ -38,6 +38,9 @@ public partial class SettingsViewModel : ViewModelBase
     private string _statusMessage = string.Empty;
 
     [ObservableProperty]
+    private bool _isStatusError;
+
+    [ObservableProperty]
     private bool _hasChanges;
 
     /// <summary>
@@ -158,7 +161,7 @@ public partial class SettingsViewModel : ViewModelBase
             SkipBusStopInputOnReturn = settings.SkipBusStopInputOnReturn;
 
             HasChanges = false;
-            StatusMessage = string.Empty;
+            SetStatus(string.Empty, false);
         }
     }
 
@@ -172,7 +175,7 @@ public partial class SettingsViewModel : ViewModelBase
         var balanceResult = _validationService.ValidateWarningBalance(WarningBalance);
         if (!balanceResult)
         {
-            StatusMessage = balanceResult.ErrorMessage!;
+            SetStatus(balanceResult.ErrorMessage!, true);
             return;
         }
 
@@ -183,7 +186,7 @@ public partial class SettingsViewModel : ViewModelBase
             var pathResult = PathValidator.ValidateBackupPath(BackupPath);
             if (!pathResult.IsValid)
             {
-                StatusMessage = $"バックアップパスが無効です: {pathResult.ErrorMessage}";
+                SetStatus($"バックアップパスが無効です: {pathResult.ErrorMessage}", true);
                 return;
             }
             // パスを正規化
@@ -207,7 +210,7 @@ public partial class SettingsViewModel : ViewModelBase
 
             if (success)
             {
-                StatusMessage = "設定を保存しました";
+                SetStatus("設定を保存しました", false);
                 HasChanges = false;
 
                 // 正規化されたパスをUIに反映
@@ -230,7 +233,7 @@ public partial class SettingsViewModel : ViewModelBase
             }
             else
             {
-                StatusMessage = "設定の保存に失敗しました";
+                SetStatus("設定の保存に失敗しました", true);
             }
         }
     }
@@ -305,6 +308,12 @@ public partial class SettingsViewModel : ViewModelBase
     partial void OnSkipBusStopInputOnReturnChanged(bool value)
     {
         HasChanges = true;
+    }
+
+    private void SetStatus(string message, bool isError)
+    {
+        StatusMessage = message;
+        IsStatusError = isError;
     }
 }
 

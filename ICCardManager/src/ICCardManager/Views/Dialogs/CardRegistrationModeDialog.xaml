@@ -4,6 +4,8 @@
         Title="カード登録方法の選択"
         SizeToContent="Height"
         Width="450"
+        MinHeight="300"
+        MinWidth="400"
         WindowStartupLocation="CenterOwner"
         ResizeMode="NoResize"
         ShowInTaskbar="False"

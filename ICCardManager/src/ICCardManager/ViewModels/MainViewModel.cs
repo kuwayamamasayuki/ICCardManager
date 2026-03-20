@@ -4,7 +4,6 @@ using System.Collections.ObjectModel;
 using System.Linq;
 using System.Threading.Tasks;
 using System.Windows;
-using System.Windows.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using CommunityToolkit.Mvvm.Messaging;
@@ -14,6 +13,7 @@ using ICCardManager.Data.Repositories;
 using ICCardManager.Dtos;
 using ICCardManager.Infrastructure.CardReader;
 using ICCardManager.Infrastructure.Sound;
+using ICCardManager.Infrastructure.Timing;
 using ICCardManager.Models;
 using ICCardManager.Services;
 using Microsoft.Extensions.Options;
@@ -106,6 +106,8 @@ public partial class MainViewModel : ViewModelBase
     private readonly INavigationService _navigationService;
     private readonly OperationLogger _operationLogger;
     private readonly LedgerConsistencyChecker _ledgerConsistencyChecker;
+    private readonly ITimerFactory _timerFactory;
+    private readonly IDispatcherService _dispatcherService;
     private readonly HashSet<CardReadingSource> _suppressionSources = new();
 
     /// <summary>
@@ -113,7 +115,7 @@ public partial class MainViewModel : ViewModelBase
     /// </summary>
     internal bool IsCardReadingSuppressed => _suppressionSources.Count > 0;
 
-    private DispatcherTimer? _timeoutTimer;
+    private ITimer? _timeoutTimer;
     private string? _currentStaffIdm;
     private string? _currentStaffName;
 
@@ -366,7 +368,9 @@ public partial class MainViewModel : ViewModelBase
         INavigationService navigationService,
         OperationLogger operationLogger,
         LedgerConsistencyChecker ledgerConsistencyChecker,
-        IOptions<AppOptions> appOptions)
+        IOptions<AppOptions> appOptions,
+        ITimerFactory timerFactory,
+        IDispatcherService dispatcherService)
     {
         _cardReader = cardReader;
         _soundPlayer = soundPlayer;
@@ -383,6 +387,8 @@ public partial class MainViewModel : ViewModelBase
         _operationLogger = operationLogger;
         _ledgerConsistencyChecker = ledgerConsistencyChecker;
         _timeoutSeconds = appOptions.Value.StaffCardTimeoutSeconds;
+        _timerFactory = timerFactory;
+        _dispatcherService = dispatcherService;
 
         // カード読み取り抑制メッセージの受信を登録（Issue #852）
         _messenger.Register<CardReadingSuppressedMessage>(this, (recipient, message) =>
@@ -618,7 +624,7 @@ public partial class MainViewModel : ViewModelBase
     private void OnCardRead(object? sender, CardReadEventArgs e)
     {
         // UIスレッドで処理を実行（即時応答のため）
-        System.Windows.Application.Current.Dispatcher.InvokeAsync(async () =>
+        _dispatcherService.InvokeAsync(async () =>
         {
             await HandleCardReadAsync(e.Idm);
         });
@@ -1744,10 +1750,8 @@ public partial class MainViewModel : ViewModelBase
     {
         RemainingSeconds = _timeoutSeconds;
 
-        _timeoutTimer = new DispatcherTimer
-        {
-            Interval = TimeSpan.FromSeconds(1)
-        };
+        _timeoutTimer = _timerFactory.Create();
+        _timeoutTimer.Interval = TimeSpan.FromSeconds(1);
         _timeoutTimer.Tick += OnTimeoutTick;
         _timeoutTimer.Start();
     }
@@ -1785,7 +1789,7 @@ public partial class MainViewModel : ViewModelBase
     /// </summary>
     private void OnCardReaderError(object? sender, Exception e)
     {
-        System.Windows.Application.Current.Dispatcher.InvokeAsync(() =>
+        _dispatcherService.InvokeAsync(() =>
         {
             WarningMessages.Add(new WarningItem
             {
@@ -1800,7 +1804,7 @@ public partial class MainViewModel : ViewModelBase
     /// </summary>
     private void OnCardReaderConnectionStateChanged(object? sender, ConnectionStateChangedEventArgs e)
     {
-        System.Windows.Application.Current.Dispatcher.InvokeAsync(() =>
+        _dispatcherService.InvokeAsync(() =>
         {
             CardReaderConnectionState = e.State;
             CardReaderConnectionMessage = e.Message ?? string.Empty;
@@ -1862,7 +1866,7 @@ public partial class MainViewModel : ViewModelBase
                     // 3秒後にメッセージを削除
                     _ = Task.Delay(3000).ContinueWith(_ =>
                     {
-                        System.Windows.Application.Current.Dispatcher.InvokeAsync(() =>
+                        _dispatcherService.InvokeAsync(() =>
                         {
                             WarningMessages.Remove(successWarning);
                         });
