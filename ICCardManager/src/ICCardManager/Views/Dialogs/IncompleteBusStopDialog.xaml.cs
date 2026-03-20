@@ -54,7 +54,7 @@ namespace ICCardManager.Views.Dialogs
             {
                 // Issue #709: 更新済み摘要を表示してからハイライト→削除
                 var updatedItem = await _viewModel.UpdateItemSummaryAsync(ledgerId);
-                if (updatedItem != null && !updatedItem.Summary.Contains("★"))
+                if (updatedItem != null && updatedItem.Summary?.Contains("★") != true)
                 {
                     // 摘要が完全に更新された場合：ハイライト→2秒後に一覧から削除
                     await Dispatcher.InvokeAsync(() =>
