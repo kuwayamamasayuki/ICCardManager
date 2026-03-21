@@ -609,7 +609,8 @@
                 <ProgressBar IsIndeterminate="{Binding IsIndeterminate}"
                              Value="{Binding ProgressValue}"
                              Maximum="{Binding ProgressMax}"
-                             Width="200" Height="4"/>
+                             Width="200" Height="20"
+                             Foreground="{DynamicResource PrimaryBrush}"/>
                 <TextBlock Text="{Binding BusyMessage}"
                            Foreground="{DynamicResource OnPrimaryBrush}"
                            FontSize="{DynamicResource BaseFontSize}"

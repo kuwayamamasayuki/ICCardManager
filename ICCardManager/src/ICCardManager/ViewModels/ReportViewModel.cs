@@ -484,7 +484,7 @@ public partial class ReportViewModel : ViewModelBase
                     $"帳票を作成中... ({i + 1}/{totalCount}) {card.CardType} {card.CardNumber}");
 
                 var result = await _reportService.CreateMonthlyReportAsync(
-                    cardIdm, SelectedYear, SelectedMonth, outputPath).ConfigureAwait(false);
+                    cardIdm, SelectedYear, SelectedMonth, outputPath);
 
                 if (result.Success)
                 {
