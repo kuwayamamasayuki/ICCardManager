@@ -1003,28 +1003,12 @@ namespace ICCardManager.Services
             => LendingHistoryAnalyzer.DetectInsufficientBalancePattern(dailyDetails);
 
         /// <summary>
-        /// 同一日の時系列セグメント（利用グループまたは単一チャージ）。
-        /// チャージ境界で利用を分割するために使用する。
-        /// </summary>
-        internal class DailySegment
-        {
-            /// <summary>チャージセグメントかどうか</summary>
-            public bool IsCharge { get; init; }
-
-            /// <summary>ポイント還元セグメントかどうか（Issue #942）</summary>
-            public bool IsPointRedemption { get; init; }
-
-            /// <summary>セグメント内の詳細リスト（利用グループの場合は複数、チャージ/ポイント還元の場合は1件）</summary>
-            public List<LedgerDetail> Details { get; init; } = new();
-        }
-
-        /// <summary>
         /// 同一日の履歴を時系列順に並べ、チャージの位置で利用グループを分割する。
         /// </summary>
         /// <remarks>
         /// <see cref="LendingHistoryAnalyzer.SplitAtChargeBoundaries"/> に委譲。
         /// </remarks>
-        internal static List<DailySegment> SplitAtChargeBoundaries(List<LedgerDetail> dailyDetails)
+        internal static List<LendingHistoryAnalyzer.DailySegment> SplitAtChargeBoundaries(List<LedgerDetail> dailyDetails)
             => LendingHistoryAnalyzer.SplitAtChargeBoundaries(dailyDetails);
 
         /// <summary>
