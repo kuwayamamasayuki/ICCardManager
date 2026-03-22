@@ -9,6 +9,8 @@
         Title="操作ログ"
         Height="700"
         Width="1000"
+        MinHeight="560"
+        MinWidth="800"
         WindowStartupLocation="CenterOwner"
         ResizeMode="CanResize"
         FontSize="{DynamicResource BaseFontSize}"
@@ -319,10 +321,20 @@
             <!-- ステータスメッセージ -->
             <TextBlock Grid.Column="1"
                        Text="{Binding StatusMessage}"
-                       Foreground="{DynamicResource SecondaryTextBrush}"
                        VerticalAlignment="Center"
                        Margin="20,0"
-                       AutomationProperties.LiveSetting="Polite"/>
+                       AutomationProperties.LiveSetting="Polite">
+                <TextBlock.Style>
+                    <Style TargetType="TextBlock">
+                        <Setter Property="Foreground" Value="{DynamicResource SecondaryTextBrush}"/>
+                        <Style.Triggers>
+                            <DataTrigger Binding="{Binding IsStatusError}" Value="True">
+                                <Setter Property="Foreground" Value="{DynamicResource DangerTextBrush}"/>
+                            </DataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </TextBlock.Style>
+            </TextBlock>
 
             <!-- 閉じるボタン -->
             <Button Grid.Column="2"

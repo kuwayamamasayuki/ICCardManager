@@ -1,5 +1,19 @@
+using CommunityToolkit.Mvvm.Messaging;
 using FluentAssertions;
+using ICCardManager.Data;
+using ICCardManager.Data.Repositories;
+using ICCardManager.Dtos;
+using ICCardManager.Infrastructure.CardReader;
+using ICCardManager.Infrastructure.Sound;
+using ICCardManager.Infrastructure.Timing;
+using ICCardManager.Models;
+using ICCardManager.Services;
+using ICCardManager.Tests.Infrastructure.Timing;
 using ICCardManager.ViewModels;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
+using Moq;
 using Xunit;
 
 using System;
@@ -15,27 +29,99 @@ namespace ICCardManager.Tests.ViewModels;
 /// </summary>
 /// <remarks>
 /// <para>
-/// MainViewModelはWPF依存（DispatcherTimer）が強いため、
-/// コンストラクタ内でDispatcherTimerを直接生成しており、WPFコンテキスト外では
-/// インスタンス化できません。
-/// </para>
-/// <para>
-/// このテストファイルでは、テスト可能な部分（AppState列挙型）のみをテストしています。
-/// </para>
-/// <para>
-/// MainViewModelを完全にテスト可能にするには、以下のリファクタリングが必要です:
-/// <list type="bullet">
-///   <item><description>タイマー機能をITimerインターフェースとして抽象化</description></item>
-///   <item><description>コンストラクタ経由でタイマーを注入可能にする</description></item>
-///   <item><description>テスト時はモックタイマーを使用</description></item>
-/// </list>
-/// </para>
-/// <para>
-/// 状態遷移の仕様については、このファイル末尾の「MainViewModel仕様書」セクションを参照してください。
+/// ITimerFactory注入により、WPFコンテキスト外でもMainViewModelをインスタンス化し、
+/// 状態遷移・タイムアウト・30秒ルールなどの中核ロジックをテストできます。
 /// </para>
 /// </remarks>
 public class MainViewModelTests
 {
+    private readonly Mock<ICardReader> _cardReaderMock;
+    private readonly Mock<ISoundPlayer> _soundPlayerMock;
+    private readonly Mock<IStaffRepository> _staffRepositoryMock;
+    private readonly Mock<ICardRepository> _cardRepositoryMock;
+    private readonly Mock<ILedgerRepository> _ledgerRepositoryMock;
+    private readonly Mock<ISettingsRepository> _settingsRepositoryMock;
+    private readonly Mock<IToastNotificationService> _toastMock;
+    private readonly Mock<IStaffAuthService> _staffAuthServiceMock;
+    private readonly Mock<IMessenger> _messengerMock;
+    private readonly Mock<INavigationService> _navigationServiceMock;
+    private readonly Mock<OperationLogger> _operationLoggerMock;
+    private readonly LendingService _lendingService;
+    private readonly LedgerMergeService _ledgerMergeService;
+    private readonly LedgerConsistencyChecker _ledgerConsistencyChecker;
+    private readonly TestTimerFactory _timerFactory;
+    private readonly SynchronousDispatcherService _dispatcherService;
+    private readonly MainViewModel _viewModel;
+
+    public MainViewModelTests()
+    {
+        _cardReaderMock = new Mock<ICardReader>();
+        _soundPlayerMock = new Mock<ISoundPlayer>();
+        _staffRepositoryMock = new Mock<IStaffRepository>();
+        _cardRepositoryMock = new Mock<ICardRepository>();
+        _ledgerRepositoryMock = new Mock<ILedgerRepository>();
+        _settingsRepositoryMock = new Mock<ISettingsRepository>();
+        _toastMock = new Mock<IToastNotificationService>();
+        _staffAuthServiceMock = new Mock<IStaffAuthService>();
+        _messengerMock = new Mock<IMessenger>();
+        _navigationServiceMock = new Mock<INavigationService>();
+
+        var operationLogRepositoryMock = new Mock<IOperationLogRepository>();
+        _operationLoggerMock = new Mock<OperationLogger>(
+            operationLogRepositoryMock.Object, _staffRepositoryMock.Object);
+
+        var summaryGenerator = new SummaryGenerator();
+        var lockManager = new CardLockManager(NullLogger<CardLockManager>.Instance);
+        var dbContext = new DbContext(":memory:");
+        dbContext.InitializeDatabase();
+
+        _lendingService = new LendingService(
+            dbContext,
+            _cardRepositoryMock.Object,
+            _staffRepositoryMock.Object,
+            _ledgerRepositoryMock.Object,
+            _settingsRepositoryMock.Object,
+            summaryGenerator,
+            lockManager,
+            Options.Create(new AppOptions()),
+            NullLogger<LendingService>.Instance);
+
+        _ledgerConsistencyChecker = new LedgerConsistencyChecker(_ledgerRepositoryMock.Object);
+
+        _ledgerMergeService = new LedgerMergeService(
+            _ledgerRepositoryMock.Object,
+            summaryGenerator,
+            _operationLoggerMock.Object,
+            NullLogger<LedgerMergeService>.Instance);
+
+        _timerFactory = new TestTimerFactory();
+        _dispatcherService = new SynchronousDispatcherService();
+
+        _viewModel = CreateViewModel();
+    }
+
+    private MainViewModel CreateViewModel(int timeoutSeconds = 60)
+    {
+        return new MainViewModel(
+            _cardReaderMock.Object,
+            _soundPlayerMock.Object,
+            _staffRepositoryMock.Object,
+            _cardRepositoryMock.Object,
+            _ledgerRepositoryMock.Object,
+            _settingsRepositoryMock.Object,
+            _lendingService,
+            _toastMock.Object,
+            _staffAuthServiceMock.Object,
+            _ledgerMergeService,
+            _messengerMock.Object,
+            _navigationServiceMock.Object,
+            _operationLoggerMock.Object,
+            _ledgerConsistencyChecker,
+            Options.Create(new AppOptions { StaffCardTimeoutSeconds = timeoutSeconds }),
+            _timerFactory,
+            _dispatcherService);
+    }
+
     #region AppState列挙型テスト
 
     /// <summary>
@@ -90,6 +176,454 @@ public class MainViewModelTests
     }
 
     #endregion
+
+    #region 初期状態テスト
+
+    /// <summary>
+    /// 初期状態がWaitingForStaffCardであること
+    /// </summary>
+    [Fact]
+    public void Constructor_ShouldSetInitialState_ToWaitingForStaffCard()
+    {
+        _viewModel.CurrentState.Should().Be(AppState.WaitingForStaffCard);
+    }
+
+    /// <summary>
+    /// 初期メッセージが「職員証をタッチしてください」であること
+    /// </summary>
+    [Fact]
+    public void Constructor_ShouldSetInitialStatusMessage()
+    {
+        _viewModel.StatusMessage.Should().Be("職員証をタッチしてください");
+    }
+
+    /// <summary>
+    /// 初期アイコンが👤であること
+    /// </summary>
+    [Fact]
+    public void Constructor_ShouldSetInitialIcon()
+    {
+        _viewModel.StatusIcon.Should().Be("👤");
+    }
+
+    /// <summary>
+    /// 初期背景色が白であること
+    /// </summary>
+    [Fact]
+    public void Constructor_ShouldSetInitialBackgroundColor()
+    {
+        _viewModel.StatusBackgroundColor.Should().Be("#FFFFFF");
+    }
+
+    /// <summary>
+    /// 初期のRemainingSecondsが0であること
+    /// </summary>
+    [Fact]
+    public void Constructor_ShouldSetRemainingSeconds_ToZero()
+    {
+        _viewModel.RemainingSeconds.Should().Be(0);
+    }
+
+    /// <summary>
+    /// カードリーダーのカード読み取りイベントが購読されていること（カードタッチに反応する）
+    /// </summary>
+    [Fact]
+    public async Task Constructor_ShouldSubscribeToCardReadEvent()
+    {
+        // Arrange - 職員をセットアップ
+        var staffIdm = "0102030405060708";
+        _staffRepositoryMock.Setup(r => r.GetByIdmAsync(staffIdm, It.IsAny<bool>()))
+            .ReturnsAsync(new Staff { StaffIdm = staffIdm, Name = "テスト職員" });
+
+        // Act - カードイベントを発火して反応するか確認
+        _cardReaderMock.Raise(r => r.CardRead += null,
+            _cardReaderMock.Object, new CardReadEventArgs { Idm = staffIdm });
+        await Task.Delay(100);
+
+        // Assert - イベント処理された（状態が変化した）ことで購読を確認
+        _viewModel.CurrentState.Should().Be(AppState.WaitingForIcCard);
+    }
+
+    #endregion
+
+    #region 状態遷移テスト（職員証タッチ）
+
+    /// <summary>
+    /// 職員証タッチでWaitingForIcCardに遷移すること
+    /// </summary>
+    [Fact]
+    public async Task StaffCardTouch_ShouldTransition_ToWaitingForIcCard()
+    {
+        // Arrange
+        var staffIdm = "0102030405060708";
+        _staffRepositoryMock.Setup(r => r.GetByIdmAsync(staffIdm, It.IsAny<bool>()))
+            .ReturnsAsync(new Staff { StaffIdm = staffIdm, Name = "テスト職員" });
+
+        // Act
+        _cardReaderMock.Raise(r => r.CardRead += null,
+            _cardReaderMock.Object, new CardReadEventArgs { Idm = staffIdm });
+
+        // 非同期処理を待つ
+        await Task.Delay(100);
+
+        // Assert
+        _viewModel.CurrentState.Should().Be(AppState.WaitingForIcCard);
+    }
+
+    /// <summary>
+    /// 職員証タッチでタイムアウトタイマーが開始されること
+    /// </summary>
+    [Fact]
+    public async Task StaffCardTouch_ShouldStartTimeoutTimer()
+    {
+        // Arrange
+        var staffIdm = "0102030405060708";
+        _staffRepositoryMock.Setup(r => r.GetByIdmAsync(staffIdm, It.IsAny<bool>()))
+            .ReturnsAsync(new Staff { StaffIdm = staffIdm, Name = "テスト職員" });
+
+        // Act
+        _cardReaderMock.Raise(r => r.CardRead += null,
+            _cardReaderMock.Object, new CardReadEventArgs { Idm = staffIdm });
+        await Task.Delay(100);
+
+        // Assert
+        _timerFactory.LastCreatedTimer.Should().NotBeNull();
+        _timerFactory.LastCreatedTimer.IsRunning.Should().BeTrue();
+        _timerFactory.LastCreatedTimer.Interval.Should().Be(TimeSpan.FromSeconds(1));
+    }
+
+    /// <summary>
+    /// 職員証タッチでRemainingSecondsがタイムアウト秒数に設定されること
+    /// </summary>
+    [Fact]
+    public async Task StaffCardTouch_ShouldSetRemainingSeconds()
+    {
+        // Arrange
+        var staffIdm = "0102030405060708";
+        _staffRepositoryMock.Setup(r => r.GetByIdmAsync(staffIdm, It.IsAny<bool>()))
+            .ReturnsAsync(new Staff { StaffIdm = staffIdm, Name = "テスト職員" });
+
+        // Act
+        _cardReaderMock.Raise(r => r.CardRead += null,
+            _cardReaderMock.Object, new CardReadEventArgs { Idm = staffIdm });
+        await Task.Delay(100);
+
+        // Assert
+        _viewModel.RemainingSeconds.Should().Be(60);
+    }
+
+    /// <summary>
+    /// 職員証タッチでトースト通知が表示されること
+    /// </summary>
+    [Fact]
+    public async Task StaffCardTouch_ShouldShowToastNotification()
+    {
+        // Arrange
+        var staffIdm = "0102030405060708";
+        _staffRepositoryMock.Setup(r => r.GetByIdmAsync(staffIdm, It.IsAny<bool>()))
+            .ReturnsAsync(new Staff { StaffIdm = staffIdm, Name = "テスト職員" });
+
+        // Act
+        _cardReaderMock.Raise(r => r.CardRead += null,
+            _cardReaderMock.Object, new CardReadEventArgs { Idm = staffIdm });
+        await Task.Delay(100);
+
+        // Assert
+        _toastMock.Verify(t => t.ShowStaffRecognizedNotification("テスト職員"), Times.Once);
+    }
+
+    /// <summary>
+    /// 職員証タッチでNotify音が再生されること
+    /// </summary>
+    [Fact]
+    public async Task StaffCardTouch_ShouldPlayNotifySound()
+    {
+        // Arrange
+        var staffIdm = "0102030405060708";
+        _staffRepositoryMock.Setup(r => r.GetByIdmAsync(staffIdm, It.IsAny<bool>()))
+            .ReturnsAsync(new Staff { StaffIdm = staffIdm, Name = "テスト職員" });
+
+        // Act
+        _cardReaderMock.Raise(r => r.CardRead += null,
+            _cardReaderMock.Object, new CardReadEventArgs { Idm = staffIdm });
+        await Task.Delay(100);
+
+        // Assert
+        _soundPlayerMock.Verify(s => s.Play(SoundType.Notify), Times.Once);
+    }
+
+    #endregion
+
+    #region タイムアウトテスト
+
+    /// <summary>
+    /// タイマーTickごとにRemainingSecondsが減少すること
+    /// </summary>
+    [Fact]
+    public async Task TimeoutTick_ShouldDecrementRemainingSeconds()
+    {
+        // Arrange - 職員証タッチでICカード待ち状態にする
+        var staffIdm = "0102030405060708";
+        _staffRepositoryMock.Setup(r => r.GetByIdmAsync(staffIdm, It.IsAny<bool>()))
+            .ReturnsAsync(new Staff { StaffIdm = staffIdm, Name = "テスト職員" });
+
+        _cardReaderMock.Raise(r => r.CardRead += null,
+            _cardReaderMock.Object, new CardReadEventArgs { Idm = staffIdm });
+        await Task.Delay(100);
+
+        var timer = _timerFactory.LastCreatedTimer;
+        _viewModel.RemainingSeconds.Should().Be(60);
+
+        // Act - 5回Tickを発火
+        timer.SimulateTicks(5);
+
+        // Assert
+        _viewModel.RemainingSeconds.Should().Be(55);
+    }
+
+    /// <summary>
+    /// タイムアウト（60秒経過）でWaitingForStaffCardに戻ること
+    /// </summary>
+    [Fact]
+    public async Task Timeout_ShouldResetToWaitingForStaffCard()
+    {
+        // Arrange
+        var staffIdm = "0102030405060708";
+        _staffRepositoryMock.Setup(r => r.GetByIdmAsync(staffIdm, It.IsAny<bool>()))
+            .ReturnsAsync(new Staff { StaffIdm = staffIdm, Name = "テスト職員" });
+
+        _cardReaderMock.Raise(r => r.CardRead += null,
+            _cardReaderMock.Object, new CardReadEventArgs { Idm = staffIdm });
+        await Task.Delay(100);
+
+        var timer = _timerFactory.LastCreatedTimer;
+
+        // Act - 60回Tick（タイムアウト）
+        timer.SimulateTicks(60);
+
+        // Assert
+        _viewModel.CurrentState.Should().Be(AppState.WaitingForStaffCard);
+        _viewModel.StatusMessage.Should().Be("職員証をタッチしてください");
+        _viewModel.RemainingSeconds.Should().Be(0);
+    }
+
+    /// <summary>
+    /// タイムアウト時にエラー音が再生されること
+    /// </summary>
+    [Fact]
+    public async Task Timeout_ShouldPlayErrorSound()
+    {
+        // Arrange
+        var staffIdm = "0102030405060708";
+        _staffRepositoryMock.Setup(r => r.GetByIdmAsync(staffIdm, It.IsAny<bool>()))
+            .ReturnsAsync(new Staff { StaffIdm = staffIdm, Name = "テスト職員" });
+
+        _cardReaderMock.Raise(r => r.CardRead += null,
+            _cardReaderMock.Object, new CardReadEventArgs { Idm = staffIdm });
+        await Task.Delay(100);
+
+        var timer = _timerFactory.LastCreatedTimer;
+
+        // Act
+        timer.SimulateTicks(60);
+
+        // Assert
+        _soundPlayerMock.Verify(s => s.Play(SoundType.Error), Times.Once);
+    }
+
+    /// <summary>
+    /// タイムアウト後にタイマーが停止されること
+    /// </summary>
+    [Fact]
+    public async Task Timeout_ShouldStopTimer()
+    {
+        // Arrange
+        var staffIdm = "0102030405060708";
+        _staffRepositoryMock.Setup(r => r.GetByIdmAsync(staffIdm, It.IsAny<bool>()))
+            .ReturnsAsync(new Staff { StaffIdm = staffIdm, Name = "テスト職員" });
+
+        _cardReaderMock.Raise(r => r.CardRead += null,
+            _cardReaderMock.Object, new CardReadEventArgs { Idm = staffIdm });
+        await Task.Delay(100);
+
+        var timer = _timerFactory.LastCreatedTimer;
+
+        // Act
+        timer.SimulateTicks(60);
+
+        // Assert
+        timer.IsRunning.Should().BeFalse();
+    }
+
+    /// <summary>
+    /// カスタムタイムアウト秒数が反映されること
+    /// </summary>
+    [Fact]
+    public async Task CustomTimeoutSeconds_ShouldBeRespected()
+    {
+        // Arrange - 専用のモックを使い30秒タイムアウトのVMを分離して作成
+        var isolatedCardReaderMock = new Mock<ICardReader>();
+        var isolatedTimerFactory = new TestTimerFactory();
+        var customVm = new MainViewModel(
+            isolatedCardReaderMock.Object,
+            _soundPlayerMock.Object,
+            _staffRepositoryMock.Object,
+            _cardRepositoryMock.Object,
+            _ledgerRepositoryMock.Object,
+            _settingsRepositoryMock.Object,
+            _lendingService,
+            _toastMock.Object,
+            _staffAuthServiceMock.Object,
+            _ledgerMergeService,
+            _messengerMock.Object,
+            _navigationServiceMock.Object,
+            _operationLoggerMock.Object,
+            _ledgerConsistencyChecker,
+            Options.Create(new AppOptions { StaffCardTimeoutSeconds = 30 }),
+            isolatedTimerFactory,
+            _dispatcherService);
+
+        var staffIdm = "0102030405060708";
+        _staffRepositoryMock.Setup(r => r.GetByIdmAsync(staffIdm, It.IsAny<bool>()))
+            .ReturnsAsync(new Staff { StaffIdm = staffIdm, Name = "テスト職員" });
+
+        // Act - 分離されたカードリーダーでイベント発火
+        isolatedCardReaderMock.Raise(r => r.CardRead += null,
+            isolatedCardReaderMock.Object, new CardReadEventArgs { Idm = staffIdm });
+        await Task.Delay(100);
+
+        // Assert
+        customVm.RemainingSeconds.Should().Be(30);
+    }
+
+    /// <summary>
+    /// タイムアウト59秒ではまだリセットされないこと
+    /// </summary>
+    [Fact]
+    public async Task BeforeTimeout_ShouldNotResetState()
+    {
+        // Arrange
+        var staffIdm = "0102030405060708";
+        _staffRepositoryMock.Setup(r => r.GetByIdmAsync(staffIdm, It.IsAny<bool>()))
+            .ReturnsAsync(new Staff { StaffIdm = staffIdm, Name = "テスト職員" });
+
+        _cardReaderMock.Raise(r => r.CardRead += null,
+            _cardReaderMock.Object, new CardReadEventArgs { Idm = staffIdm });
+        await Task.Delay(100);
+
+        var timer = _timerFactory.LastCreatedTimer;
+
+        // Act - 59回Tick（タイムアウト手前）
+        timer.SimulateTicks(59);
+
+        // Assert
+        _viewModel.CurrentState.Should().Be(AppState.WaitingForIcCard);
+        _viewModel.RemainingSeconds.Should().Be(1);
+    }
+
+    #endregion
+
+    #region ICカード待ち状態での職員証タッチ（エラーケース）
+
+    /// <summary>
+    /// ICカード待ち状態で職員証をタッチするとエラー音が鳴ること
+    /// </summary>
+    [Fact]
+    public async Task IcCardWaiting_StaffCardTouch_ShouldPlayErrorSound()
+    {
+        // Arrange - まず職員証タッチでICカード待ちにする
+        var staffIdm = "0102030405060708";
+        var anotherStaffIdm = "0807060504030201";
+        _staffRepositoryMock.Setup(r => r.GetByIdmAsync(staffIdm, It.IsAny<bool>()))
+            .ReturnsAsync(new Staff { StaffIdm = staffIdm, Name = "テスト職員" });
+        _staffRepositoryMock.Setup(r => r.GetByIdmAsync(anotherStaffIdm, It.IsAny<bool>()))
+            .ReturnsAsync(new Staff { StaffIdm = anotherStaffIdm, Name = "別の職員" });
+
+        _cardReaderMock.Raise(r => r.CardRead += null,
+            _cardReaderMock.Object, new CardReadEventArgs { Idm = staffIdm });
+        await Task.Delay(100);
+
+        _viewModel.CurrentState.Should().Be(AppState.WaitingForIcCard);
+        _soundPlayerMock.Reset();
+
+        // Act - ICカード待ちなのに別の職員証をタッチ
+        _cardReaderMock.Raise(r => r.CardRead += null,
+            _cardReaderMock.Object, new CardReadEventArgs { Idm = anotherStaffIdm });
+        await Task.Delay(100);
+
+        // Assert
+        _soundPlayerMock.Verify(s => s.Play(SoundType.Error), Times.Once);
+    }
+
+    /// <summary>
+    /// ICカード待ち状態で職員証をタッチしても状態は変わらないこと
+    /// </summary>
+    [Fact]
+    public async Task IcCardWaiting_StaffCardTouch_ShouldRemainInIcCardWaiting()
+    {
+        // Arrange
+        var staffIdm = "0102030405060708";
+        var anotherStaffIdm = "0807060504030201";
+        _staffRepositoryMock.Setup(r => r.GetByIdmAsync(staffIdm, It.IsAny<bool>()))
+            .ReturnsAsync(new Staff { StaffIdm = staffIdm, Name = "テスト職員" });
+        _staffRepositoryMock.Setup(r => r.GetByIdmAsync(anotherStaffIdm, It.IsAny<bool>()))
+            .ReturnsAsync(new Staff { StaffIdm = anotherStaffIdm, Name = "別の職員" });
+
+        _cardReaderMock.Raise(r => r.CardRead += null,
+            _cardReaderMock.Object, new CardReadEventArgs { Idm = staffIdm });
+        await Task.Delay(100);
+
+        // Act
+        _cardReaderMock.Raise(r => r.CardRead += null,
+            _cardReaderMock.Object, new CardReadEventArgs { Idm = anotherStaffIdm });
+        await Task.Delay(100);
+
+        // Assert - 状態はICカード待ちのまま
+        _viewModel.CurrentState.Should().Be(AppState.WaitingForIcCard);
+    }
+
+    /// <summary>
+    /// ICカード待ち状態で職員証をタッチすると警告通知が表示されること
+    /// </summary>
+    [Fact]
+    public async Task IcCardWaiting_StaffCardTouch_ShouldShowWarningToast()
+    {
+        // Arrange
+        var staffIdm = "0102030405060708";
+        var anotherStaffIdm = "0807060504030201";
+        _staffRepositoryMock.Setup(r => r.GetByIdmAsync(staffIdm, It.IsAny<bool>()))
+            .ReturnsAsync(new Staff { StaffIdm = staffIdm, Name = "テスト職員" });
+        _staffRepositoryMock.Setup(r => r.GetByIdmAsync(anotherStaffIdm, It.IsAny<bool>()))
+            .ReturnsAsync(new Staff { StaffIdm = anotherStaffIdm, Name = "別の職員" });
+
+        _cardReaderMock.Raise(r => r.CardRead += null,
+            _cardReaderMock.Object, new CardReadEventArgs { Idm = staffIdm });
+        await Task.Delay(100);
+
+        // Act
+        _cardReaderMock.Raise(r => r.CardRead += null,
+            _cardReaderMock.Object, new CardReadEventArgs { Idm = anotherStaffIdm });
+        await Task.Delay(100);
+
+        // Assert
+        _toastMock.Verify(t => t.ShowWarning("職員証です", "交通系ICカードをタッチしてください"), Times.Once);
+    }
+
+    #endregion
+
+    #region カード読み取り抑制テスト
+
+    /// <summary>
+    /// カード読み取り抑制状態を正しく管理できること
+    /// </summary>
+    [Fact]
+    public void CardReadingSuppression_ShouldTrackSources()
+    {
+        // Assert - 初期状態では抑制されていない
+        _viewModel.IsCardReadingSuppressed.Should().BeFalse();
+    }
+
+    #endregion
 }
 
 /*
@@ -98,7 +632,6 @@ MainViewModel 仕様書
 ================================================================================
 
 このセクションはMainViewModelの動作仕様を文書化したものです。
-WPF依存によりユニットテストが困難なため、仕様として記録しています。
 
 --------------------------------------------------------------------------------
 1. 状態遷移仕様

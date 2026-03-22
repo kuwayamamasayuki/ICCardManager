@@ -190,6 +190,15 @@ public partial class BusStopInputViewModel : ViewModelBase
             // 未入力でも保存は可能（★マークが付く）
         }
 
+        // ソフトバリデーション: 「～」区切りの形式チェック
+        var missingTildeCount = BusUsages.Count(b =>
+            !string.IsNullOrWhiteSpace(b.BusStops) && !b.BusStops.Contains("～"));
+        if (missingTildeCount > 0)
+        {
+            StatusMessage = "「○○～△△」の形式での入力を推奨します";
+            // 警告のみ — 保存はブロックしない
+        }
+
         using (BeginBusy("保存中..."))
         {
             // 各バス利用のバス停名を更新

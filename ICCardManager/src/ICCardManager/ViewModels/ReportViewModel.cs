@@ -52,6 +52,9 @@ public partial class ReportViewModel : ViewModelBase
     private string _statusMessage = string.Empty;
 
     [ObservableProperty]
+    private bool _isStatusError;
+
+    [ObservableProperty]
     private bool _isAllSelected;
 
     [ObservableProperty]
@@ -381,24 +384,24 @@ public partial class ReportViewModel : ViewModelBase
     public async Task CreateReportAsync()
     {
         // Issue #812: 前回の結果メッセージをすぐにクリアし、ボタン押下の応答を明確にする
-        StatusMessage = string.Empty;
+        SetStatus(string.Empty, false);
 
         // バリデーション
         if (SelectedCards.Count == 0)
         {
-            StatusMessage = "カードを1つ以上選択してください";
+            SetStatus("カードを1つ以上選択してください", true);
             return;
         }
 
         if (string.IsNullOrWhiteSpace(OutputFolder))
         {
-            StatusMessage = "出力先フォルダを選択してください";
+            SetStatus("出力先フォルダを選択してください", true);
             return;
         }
 
         if (!Directory.Exists(OutputFolder))
         {
-            StatusMessage = "出力先フォルダが存在しません";
+            SetStatus("出力先フォルダが存在しません", true);
             return;
         }
 
@@ -442,7 +445,7 @@ public partial class ReportViewModel : ViewModelBase
 
             if (result == MessageBoxResult.Cancel)
             {
-                StatusMessage = "帳票作成をキャンセルしました";
+                SetStatus("帳票作成をキャンセルしました", false);
                 return;
             }
 
@@ -480,8 +483,11 @@ public partial class ReportViewModel : ViewModelBase
                 busyScope.ReportProgress(i, totalCount,
                     $"帳票を作成中... ({i + 1}/{totalCount}) {card.CardType} {card.CardNumber}");
 
-                var result = await _reportService.CreateMonthlyReportAsync(
-                    cardIdm, SelectedYear, SelectedMonth, outputPath).ConfigureAwait(false);
+                // Excel生成は同期的なCPU/IO処理のため、Task.RunでバックグラウンドスレッドにオフロードしUIスレッドを解放する
+                var capturedCardIdm = cardIdm;
+                var capturedOutputPath = outputPath;
+                var result = await Task.Run(() =>
+                    _reportService.CreateMonthlyReportAsync(capturedCardIdm, SelectedYear, SelectedMonth, capturedOutputPath));
 
                 if (result.Success)
                 {
@@ -500,7 +506,7 @@ public partial class ReportViewModel : ViewModelBase
                             "テンプレートエラー",
                             MessageBoxButton.OK,
                             MessageBoxImage.Error);
-                        StatusMessage = "テンプレートエラーにより中断しました";
+                        SetStatus("テンプレートエラーにより中断しました", true);
                         return;
                     }
                 }
@@ -511,11 +517,11 @@ public partial class ReportViewModel : ViewModelBase
 
             if (successCount == SelectedCards.Count)
             {
-                StatusMessage = $"{successCount}件の帳票を作成しました";
+                SetStatus($"{successCount}件の帳票を作成しました", false);
             }
             else
             {
-                StatusMessage = $"{successCount}/{SelectedCards.Count}件の帳票を作成しました（一部失敗）";
+                SetStatus($"{successCount}/{SelectedCards.Count}件の帳票を作成しました（一部失敗）", true);
 
                 // 失敗したカードの詳細を表示
                 if (failedCards.Count > 0)
@@ -531,7 +537,7 @@ public partial class ReportViewModel : ViewModelBase
         }
         catch (OperationCanceledException)
         {
-            StatusMessage = "帳票作成がキャンセルされました";
+            SetStatus("帳票作成がキャンセルされました", false);
 #if DEBUG
             System.Diagnostics.Debug.WriteLine("[ReportVM] 帳票作成がキャンセルされました");
 #endif
@@ -578,7 +584,7 @@ public partial class ReportViewModel : ViewModelBase
     {
         if (card == null)
         {
-            StatusMessage = "プレビューするカードを選択してください";
+            SetStatus("プレビューするカードを選択してください", true);
             return;
         }
 
@@ -588,7 +594,7 @@ public partial class ReportViewModel : ViewModelBase
             var reportData = await _printService.GetReportDataAsync(card.CardIdm, SelectedYear, SelectedMonth);
             if (reportData == null)
             {
-                StatusMessage = "帳票データを取得できませんでした";
+                SetStatus("帳票データを取得できませんでした", true);
                 return;
             }
 
@@ -613,7 +619,7 @@ public partial class ReportViewModel : ViewModelBase
     {
         if (SelectedCards.Count == 0)
         {
-            StatusMessage = "プレビューするカードを選択してください";
+            SetStatus("プレビューするカードを選択してください", true);
             return;
         }
 
@@ -643,7 +649,7 @@ public partial class ReportViewModel : ViewModelBase
 
             if (reportDataList.Count == 0)
             {
-                StatusMessage = "帳票データを取得できませんでした";
+                SetStatus("帳票データを取得できませんでした", true);
                 return;
             }
 
@@ -689,5 +695,11 @@ public partial class ReportViewModel : ViewModelBase
         }
 
         return newPath;
+    }
+
+    private void SetStatus(string message, bool isError)
+    {
+        StatusMessage = message;
+        IsStatusError = isError;
     }
 }

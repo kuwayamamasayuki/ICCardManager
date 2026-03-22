@@ -9,6 +9,8 @@
         Title="利用履歴詳細"
         Height="550"
         Width="850"
+        MinHeight="440"
+        MinWidth="680"
         WindowStartupLocation="CenterOwner"
         ResizeMode="CanResize"
         FontSize="{DynamicResource BaseFontSize}"

@@ -20,6 +20,7 @@
     <Window.Resources>
         <BooleanToVisibilityConverter x:Key="BoolToVisibilityConverter"/>
         <common:FileSizeConverter x:Key="FileSizeConverter"/>
+        <common:StringToVisibilityConverter x:Key="StringToVisibilityConverter"/>
     </Window.Resources>
 
     <Grid Margin="20">
@@ -162,7 +163,7 @@
                 Padding="10"
                 Margin="0,15,0,0"
                 CornerRadius="5"
-                Visibility="{Binding StatusMessage, Converter={StaticResource BoolToVisibilityConverter}}">
+                Visibility="{Binding StatusMessage, Converter={StaticResource StringToVisibilityConverter}}">
             <Border.Style>
                 <Style TargetType="Border">
                     <Setter Property="Background" Value="{DynamicResource SuccessBackgroundBrush}"/>
@@ -208,7 +209,11 @@
                 Background="{DynamicResource OverlayBrush}"
                 Visibility="{Binding IsBusy, Converter={StaticResource BoolToVisibilityConverter}}">
             <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
-                <ProgressBar IsIndeterminate="True" Width="200" Height="4"/>
+                <ProgressBar IsIndeterminate="{Binding IsIndeterminate}"
+                             Value="{Binding ProgressValue}"
+                             Maximum="{Binding ProgressMax}"
+                             Width="200" Height="20"
+                             Foreground="{DynamicResource PrimaryBrush}"/>
                 <TextBlock Text="{Binding BusyMessage}"
                            Foreground="{DynamicResource OnPrimaryBrush}"
                            FontSize="{DynamicResource BaseFontSize}"

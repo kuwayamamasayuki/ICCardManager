@@ -129,6 +129,9 @@ public partial class OperationLogSearchViewModel : ViewModelBase
     private string _statusMessage = string.Empty;
 
     [ObservableProperty]
+    private bool _isStatusError;
+
+    [ObservableProperty]
     private string _lastExportedFile = string.Empty;
 
     /// <summary>
@@ -234,9 +237,9 @@ public partial class OperationLogSearchViewModel : ViewModelBase
 
             OnPropertyChanged(nameof(PageInfo));
 
-            StatusMessage = TotalCount > 0
+            SetStatus(TotalCount > 0
                 ? $"{TotalCount}件の操作ログが見つかりました"
-                : "条件に一致する操作ログはありません";
+                : "条件に一致する操作ログはありません", false);
         }
     }
 
@@ -343,7 +346,7 @@ public partial class OperationLogSearchViewModel : ViewModelBase
                 await _excelExportService.ExportAsync(logs, dialog.FileName);
 
                 LastExportedFile = dialog.FileName;
-                StatusMessage = $"エクスポート完了: {logs.Count()}件を出力しました";
+                SetStatus($"エクスポート完了: {logs.Count()}件を出力しました", false);
 
                 _dialogService.ShowInformation(
                     $"Excelファイルを保存しました。\n\n出力先: {dialog.FileName}\n出力件数: {logs.Count()}件",
@@ -351,7 +354,7 @@ public partial class OperationLogSearchViewModel : ViewModelBase
             }
             catch (Exception ex)
             {
-                StatusMessage = $"エクスポートエラー: {ex.Message}";
+                SetStatus($"エクスポートエラー: {ex.Message}", true);
                 _dialogService.ShowError($"エクスポートに失敗しました。\n\n{ex.Message}", "エクスポートエラー");
             }
         }
@@ -665,6 +668,12 @@ public partial class OperationLogSearchViewModel : ViewModelBase
             return prop.ToString();
         }
         return null;
+    }
+
+    private void SetStatus(string message, bool isError)
+    {
+        StatusMessage = message;
+        IsStatusError = isError;
     }
 
 }

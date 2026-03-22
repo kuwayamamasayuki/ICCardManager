@@ -10,6 +10,8 @@
         Title="交通系ICカード管理"
         Height="600"
         Width="900"
+        MinHeight="480"
+        MinWidth="720"
         WindowStartupLocation="CenterOwner"
         ResizeMode="CanResize"
         KeyDown="Window_KeyDown"

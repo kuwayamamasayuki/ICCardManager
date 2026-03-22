@@ -9,6 +9,8 @@
         Title="帳票作成"
         Height="600"
         Width="700"
+        MinHeight="480"
+        MinWidth="560"
         WindowStartupLocation="CenterOwner"
         ResizeMode="CanResize"
         FontSize="{DynamicResource BaseFontSize}"
@@ -235,9 +237,19 @@
             <!-- ステータスメッセージ -->
             <TextBlock Grid.Column="0"
                        Text="{Binding StatusMessage}"
-                       Foreground="{DynamicResource PrimaryBrush}"
                        FontWeight="Bold"
-                       VerticalAlignment="Center"/>
+                       VerticalAlignment="Center">
+                <TextBlock.Style>
+                    <Style TargetType="TextBlock">
+                        <Setter Property="Foreground" Value="{DynamicResource PrimaryBrush}"/>
+                        <Style.Triggers>
+                            <DataTrigger Binding="{Binding IsStatusError}" Value="True">
+                                <Setter Property="Foreground" Value="{DynamicResource DangerTextBrush}"/>
+                            </DataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </TextBlock.Style>
+            </TextBlock>
 
             <!-- ボタン -->
             <StackPanel Grid.Column="1"
@@ -278,12 +290,22 @@
                 Background="{DynamicResource OverlayBrush}"
                 Visibility="{Binding IsBusy, Converter={StaticResource BoolToVisibilityConverter}}">
             <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
-                <ProgressBar IsIndeterminate="True" Width="250" Height="4"/>
+                <ProgressBar IsIndeterminate="{Binding IsIndeterminate}"
+                             Value="{Binding ProgressValue}"
+                             Maximum="{Binding ProgressMax}"
+                             Width="250" Height="20"
+                             Foreground="{DynamicResource PrimaryBrush}"/>
                 <TextBlock Text="{Binding BusyMessage}"
                            Foreground="{DynamicResource OnPrimaryBrush}"
                            FontSize="{DynamicResource BaseFontSize}"
                            Margin="0,10,0,0"
                            HorizontalAlignment="Center"/>
+                <Button Content="キャンセル"
+                        Command="{Binding CancelOperationCommand}"
+                        Visibility="{Binding CanCancel, Converter={StaticResource BoolToVisibilityConverter}}"
+                        Margin="0,10,0,0"
+                        Padding="20,5"
+                        HorizontalAlignment="Center"/>
             </StackPanel>
         </Border>
     </Grid>
