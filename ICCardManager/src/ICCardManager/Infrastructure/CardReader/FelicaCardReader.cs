@@ -126,20 +126,11 @@ namespace ICCardManager.Infrastructure.CardReader
         /// FelicaCardReader の新しいインスタンスを初期化します。
         /// </summary>
         /// <param name="logger">ロガー</param>
-        public FelicaCardReader(ILogger<FelicaCardReader> logger)
-            : this(logger, StationMasterService.Instance)
-        {
-        }
-
-        /// <summary>
-        /// DI用コンストラクタ
-        /// </summary>
-        /// <param name="logger">ロガー</param>
         /// <param name="stationMasterService">駅マスタサービス</param>
         public FelicaCardReader(ILogger<FelicaCardReader> logger, IStationMasterService stationMasterService)
         {
             _logger = logger;
-            _stationMasterService = stationMasterService ?? StationMasterService.Instance;
+            _stationMasterService = stationMasterService ?? throw new ArgumentNullException(nameof(stationMasterService));
         }
 
         /// <summary>

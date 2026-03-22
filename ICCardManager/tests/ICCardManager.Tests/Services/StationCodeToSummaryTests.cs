@@ -43,7 +43,7 @@ public class StationCodeToSummaryTests
     public StationCodeToSummaryTests(ITestOutputHelper output)
     {
         _output = output;
-        _stationService = StationMasterService.Instance;
+        _stationService = new StationMasterService();
         _summaryGenerator = new SummaryGenerator();
     }
 

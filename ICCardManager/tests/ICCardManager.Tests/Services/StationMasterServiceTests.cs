@@ -38,7 +38,7 @@ public class StationMasterServiceTests
     public void GetStationName_AirportLine_WithHayakaken_ReturnsCorrectName(int stationCode, string expectedName)
     {
         // Arrange
-        var service = StationMasterService.Instance;
+        var service = new StationMasterService();
 
         // Act
         var result = service.GetStationName(stationCode, CardType.Hayakaken);
@@ -61,7 +61,7 @@ public class StationMasterServiceTests
     public void GetStationName_HakozakiLine_WithHayakaken_ReturnsCorrectName(int stationCode, string expectedName)
     {
         // Arrange
-        var service = StationMasterService.Instance;
+        var service = new StationMasterService();
 
         // Act
         var result = service.GetStationName(stationCode, CardType.Hayakaken);
@@ -85,7 +85,7 @@ public class StationMasterServiceTests
     public void GetStationName_NanakumaLine_WithHayakaken_ReturnsCorrectName(int stationCode, string expectedName)
     {
         // Arrange
-        var service = StationMasterService.Instance;
+        var service = new StationMasterService();
 
         // Act
         var result = service.GetStationName(stationCode, CardType.Hayakaken);
@@ -116,7 +116,7 @@ public class StationMasterServiceTests
     public void GetStationName_KagoshimaLine_WithHayakaken_ReturnsCorrectName(int stationCode, string expectedName)
     {
         // Arrange
-        var service = StationMasterService.Instance;
+        var service = new StationMasterService();
 
         // Act
         var result = service.GetStationName(stationCode, CardType.Hayakaken);
@@ -142,7 +142,7 @@ public class StationMasterServiceTests
     public void GetStationName_YamanoteLine_WithSuica_ReturnsCorrectName(int stationCode, string expectedName)
     {
         // Arrange
-        var service = StationMasterService.Instance;
+        var service = new StationMasterService();
 
         // Act
         var result = service.GetStationName(stationCode, CardType.Suica);
@@ -162,7 +162,7 @@ public class StationMasterServiceTests
     public void GetStationName_TokaidoLine_Kanto_WithSuica_ReturnsCorrectName(int stationCode, string expectedName)
     {
         // Arrange
-        var service = StationMasterService.Instance;
+        var service = new StationMasterService();
 
         // Act
         var result = service.GetStationName(stationCode, CardType.Suica);
@@ -182,7 +182,7 @@ public class StationMasterServiceTests
     public void GetStationName_SameLineCode_DifferentCardType_ReturnsDifferentStations()
     {
         // Arrange
-        var service = StationMasterService.Instance;
+        var service = new StationMasterService();
 
         // 路線コード231は関東と九州で異なる路線
         // Area 0 (関東): 231 = 東京メトロ副都心線など
@@ -202,7 +202,7 @@ public class StationMasterServiceTests
     public void GetStationName_WithoutCardType_ReturnsStationName()
     {
         // Arrange
-        var service = StationMasterService.Instance;
+        var service = new StationMasterService();
 
         // Act - カード種別指定なし（デフォルトは関東優先）
         // JR東海道本線 東京駅 (Line 1, Station 1)
@@ -226,7 +226,7 @@ public class StationMasterServiceTests
     public void GetStationName_UnknownCode_ReturnsFallbackFormat(int stationCode)
     {
         // Arrange
-        var service = StationMasterService.Instance;
+        var service = new StationMasterService();
         var lineCode = (stationCode >> 8) & 0xFF;
         var stationNum = stationCode & 0xFF;
         var expectedFallback = $"駅{lineCode:X2}-{stationNum:X2}";
@@ -245,7 +245,7 @@ public class StationMasterServiceTests
     public void GetStationNameOrNull_UnknownCode_ReturnsNull()
     {
         // Arrange
-        var service = StationMasterService.Instance;
+        var service = new StationMasterService();
 
         // Act
         var result = service.GetStationNameOrNull(0xFF, 0x01);
@@ -261,7 +261,7 @@ public class StationMasterServiceTests
     public void GetStationNameOrNull_KnownCode_ReturnsStationName()
     {
         // Arrange
-        var service = StationMasterService.Instance;
+        var service = new StationMasterService();
 
         // Act - 福岡市地下鉄空港線 天神（九州優先で検索）
         var result = service.GetStationNameOrNull(231, 15, CardType.Hayakaken);
@@ -277,7 +277,7 @@ public class StationMasterServiceTests
     public void GetStationNameByArea_SpecificArea_ReturnsCorrectStation()
     {
         // Arrange
-        var service = StationMasterService.Instance;
+        var service = new StationMasterService();
 
         // Act - 九州エリア（3）の空港線（231）天神（15）
         var result = service.GetStationNameByArea(3, 231, 15);
@@ -301,7 +301,7 @@ public class StationMasterServiceTests
     public void GetLineName_WithHayakaken_ReturnsLineName(int lineCode, string expectedLineName)
     {
         // Arrange
-        var service = StationMasterService.Instance;
+        var service = new StationMasterService();
 
         // Act
         var result = service.GetLineName(lineCode, CardType.Hayakaken);
@@ -318,7 +318,7 @@ public class StationMasterServiceTests
     public void GetLineName_UnknownLine_ReturnsNull()
     {
         // Arrange
-        var service = StationMasterService.Instance;
+        var service = new StationMasterService();
 
         // Act
         var result = service.GetLineName(999);
@@ -329,20 +329,20 @@ public class StationMasterServiceTests
 
     #endregion
 
-    #region シングルトンとデータロードのテスト
+    #region インスタンス生成とデータロードのテスト
 
     /// <summary>
-    /// シングルトンインスタンスの同一性確認
+    /// コンストラクタで正常にインスタンスが生成できること
     /// </summary>
     [Fact]
-    public void Instance_AlwaysReturnsSameInstance()
+    public void Constructor_ShouldCreateInstance()
     {
         // Act
-        var instance1 = StationMasterService.Instance;
-        var instance2 = StationMasterService.Instance;
+        var service = new StationMasterService();
 
         // Assert
-        instance1.Should().BeSameAs(instance2);
+        service.Should().NotBeNull();
+        service.Should().BeAssignableTo<IStationMasterService>();
     }
 
     /// <summary>
@@ -352,7 +352,7 @@ public class StationMasterServiceTests
     public void StationCount_AfterLoad_IsGreaterThanZero()
     {
         // Arrange
-        var service = StationMasterService.Instance;
+        var service = new StationMasterService();
 
         // Act
         var count = service.StationCount;
@@ -368,7 +368,7 @@ public class StationMasterServiceTests
     public void LineCount_AfterLoad_IsGreaterThanZero()
     {
         // Arrange
-        var service = StationMasterService.Instance;
+        var service = new StationMasterService();
 
         // Act
         var count = service.LineCount;
@@ -388,7 +388,7 @@ public class StationMasterServiceTests
     public void GetStationCountByArea_AllAreas_HaveStations(int areaCode)
     {
         // Arrange
-        var service = StationMasterService.Instance;
+        var service = new StationMasterService();
 
         // Act
         var count = service.GetStationCountByArea(areaCode);
@@ -408,7 +408,7 @@ public class StationMasterServiceTests
     public void GetStationName_HayakakenInTokyo_CanFindTokyoStations()
     {
         // Arrange
-        var service = StationMasterService.Instance;
+        var service = new StationMasterService();
 
         // Act - はやかけんで東京の駅コードを検索
         // 九州優先だが、見つからなければ関東も検索
@@ -428,7 +428,7 @@ public class StationMasterServiceTests
     public void GetStationName_SuicaInFukuoka_CanFindFukuokaStations()
     {
         // Arrange
-        var service = StationMasterService.Instance;
+        var service = new StationMasterService();
 
         // Act - Suicaで福岡の駅コードを検索
         // 関東優先だが、見つからなければ九州も検索
