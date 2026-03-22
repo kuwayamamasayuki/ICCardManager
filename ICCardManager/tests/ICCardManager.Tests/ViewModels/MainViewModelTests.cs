@@ -238,7 +238,7 @@ public class MainViewModelTests
         // Act - カードイベントを発火して反応するか確認
         _cardReaderMock.Raise(r => r.CardRead += null,
             _cardReaderMock.Object, new CardReadEventArgs { Idm = staffIdm });
-        await Task.Delay(100);
+        await _dispatcherService.WaitForPendingAsync();
 
         // Assert - イベント処理された（状態が変化した）ことで購読を確認
         _viewModel.CurrentState.Should().Be(AppState.WaitingForIcCard);
@@ -264,7 +264,7 @@ public class MainViewModelTests
             _cardReaderMock.Object, new CardReadEventArgs { Idm = staffIdm });
 
         // 非同期処理を待つ
-        await Task.Delay(100);
+        await _dispatcherService.WaitForPendingAsync();
 
         // Assert
         _viewModel.CurrentState.Should().Be(AppState.WaitingForIcCard);
@@ -284,7 +284,7 @@ public class MainViewModelTests
         // Act
         _cardReaderMock.Raise(r => r.CardRead += null,
             _cardReaderMock.Object, new CardReadEventArgs { Idm = staffIdm });
-        await Task.Delay(100);
+        await _dispatcherService.WaitForPendingAsync();
 
         // Assert
         _timerFactory.LastCreatedTimer.Should().NotBeNull();
@@ -306,7 +306,7 @@ public class MainViewModelTests
         // Act
         _cardReaderMock.Raise(r => r.CardRead += null,
             _cardReaderMock.Object, new CardReadEventArgs { Idm = staffIdm });
-        await Task.Delay(100);
+        await _dispatcherService.WaitForPendingAsync();
 
         // Assert
         _viewModel.RemainingSeconds.Should().Be(60);
@@ -326,7 +326,7 @@ public class MainViewModelTests
         // Act
         _cardReaderMock.Raise(r => r.CardRead += null,
             _cardReaderMock.Object, new CardReadEventArgs { Idm = staffIdm });
-        await Task.Delay(100);
+        await _dispatcherService.WaitForPendingAsync();
 
         // Assert
         _toastMock.Verify(t => t.ShowStaffRecognizedNotification("テスト職員"), Times.Once);
@@ -346,7 +346,7 @@ public class MainViewModelTests
         // Act
         _cardReaderMock.Raise(r => r.CardRead += null,
             _cardReaderMock.Object, new CardReadEventArgs { Idm = staffIdm });
-        await Task.Delay(100);
+        await _dispatcherService.WaitForPendingAsync();
 
         // Assert
         _soundPlayerMock.Verify(s => s.Play(SoundType.Notify), Times.Once);
@@ -369,7 +369,7 @@ public class MainViewModelTests
 
         _cardReaderMock.Raise(r => r.CardRead += null,
             _cardReaderMock.Object, new CardReadEventArgs { Idm = staffIdm });
-        await Task.Delay(100);
+        await _dispatcherService.WaitForPendingAsync();
 
         var timer = _timerFactory.LastCreatedTimer;
         _viewModel.RemainingSeconds.Should().Be(60);
@@ -394,7 +394,7 @@ public class MainViewModelTests
 
         _cardReaderMock.Raise(r => r.CardRead += null,
             _cardReaderMock.Object, new CardReadEventArgs { Idm = staffIdm });
-        await Task.Delay(100);
+        await _dispatcherService.WaitForPendingAsync();
 
         var timer = _timerFactory.LastCreatedTimer;
 
@@ -420,7 +420,7 @@ public class MainViewModelTests
 
         _cardReaderMock.Raise(r => r.CardRead += null,
             _cardReaderMock.Object, new CardReadEventArgs { Idm = staffIdm });
-        await Task.Delay(100);
+        await _dispatcherService.WaitForPendingAsync();
 
         var timer = _timerFactory.LastCreatedTimer;
 
@@ -444,7 +444,7 @@ public class MainViewModelTests
 
         _cardReaderMock.Raise(r => r.CardRead += null,
             _cardReaderMock.Object, new CardReadEventArgs { Idm = staffIdm });
-        await Task.Delay(100);
+        await _dispatcherService.WaitForPendingAsync();
 
         var timer = _timerFactory.LastCreatedTimer;
 
@@ -490,7 +490,7 @@ public class MainViewModelTests
         // Act - 分離されたカードリーダーでイベント発火
         isolatedCardReaderMock.Raise(r => r.CardRead += null,
             isolatedCardReaderMock.Object, new CardReadEventArgs { Idm = staffIdm });
-        await Task.Delay(100);
+        await _dispatcherService.WaitForPendingAsync();
 
         // Assert
         customVm.RemainingSeconds.Should().Be(30);
@@ -509,7 +509,7 @@ public class MainViewModelTests
 
         _cardReaderMock.Raise(r => r.CardRead += null,
             _cardReaderMock.Object, new CardReadEventArgs { Idm = staffIdm });
-        await Task.Delay(100);
+        await _dispatcherService.WaitForPendingAsync();
 
         var timer = _timerFactory.LastCreatedTimer;
 
@@ -541,7 +541,7 @@ public class MainViewModelTests
 
         _cardReaderMock.Raise(r => r.CardRead += null,
             _cardReaderMock.Object, new CardReadEventArgs { Idm = staffIdm });
-        await Task.Delay(100);
+        await _dispatcherService.WaitForPendingAsync();
 
         _viewModel.CurrentState.Should().Be(AppState.WaitingForIcCard);
         _soundPlayerMock.Reset();
@@ -549,7 +549,7 @@ public class MainViewModelTests
         // Act - ICカード待ちなのに別の職員証をタッチ
         _cardReaderMock.Raise(r => r.CardRead += null,
             _cardReaderMock.Object, new CardReadEventArgs { Idm = anotherStaffIdm });
-        await Task.Delay(100);
+        await _dispatcherService.WaitForPendingAsync();
 
         // Assert
         _soundPlayerMock.Verify(s => s.Play(SoundType.Error), Times.Once);
@@ -571,12 +571,12 @@ public class MainViewModelTests
 
         _cardReaderMock.Raise(r => r.CardRead += null,
             _cardReaderMock.Object, new CardReadEventArgs { Idm = staffIdm });
-        await Task.Delay(100);
+        await _dispatcherService.WaitForPendingAsync();
 
         // Act
         _cardReaderMock.Raise(r => r.CardRead += null,
             _cardReaderMock.Object, new CardReadEventArgs { Idm = anotherStaffIdm });
-        await Task.Delay(100);
+        await _dispatcherService.WaitForPendingAsync();
 
         // Assert - 状態はICカード待ちのまま
         _viewModel.CurrentState.Should().Be(AppState.WaitingForIcCard);
@@ -598,12 +598,12 @@ public class MainViewModelTests
 
         _cardReaderMock.Raise(r => r.CardRead += null,
             _cardReaderMock.Object, new CardReadEventArgs { Idm = staffIdm });
-        await Task.Delay(100);
+        await _dispatcherService.WaitForPendingAsync();
 
         // Act
         _cardReaderMock.Raise(r => r.CardRead += null,
             _cardReaderMock.Object, new CardReadEventArgs { Idm = anotherStaffIdm });
-        await Task.Delay(100);
+        await _dispatcherService.WaitForPendingAsync();
 
         // Assert
         _toastMock.Verify(t => t.ShowWarning("職員証です", "交通系ICカードをタッチしてください"), Times.Once);
