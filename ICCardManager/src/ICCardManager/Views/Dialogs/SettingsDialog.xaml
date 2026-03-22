@@ -9,8 +9,6 @@
         Title="設定"
         Height="720"
         Width="550"
-        MinHeight="576"
-        MinWidth="440"
         WindowStartupLocation="CenterOwner"
         ResizeMode="NoResize"
         FontSize="{DynamicResource BaseFontSize}"

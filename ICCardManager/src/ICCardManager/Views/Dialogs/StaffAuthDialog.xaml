@@ -4,8 +4,6 @@
         Title="職員証による認証"
         SizeToContent="Height"
         Width="450"
-        MinHeight="300"
-        MinWidth="400"
         WindowStartupLocation="CenterOwner"
         ResizeMode="NoResize"
         ShowInTaskbar="False"
