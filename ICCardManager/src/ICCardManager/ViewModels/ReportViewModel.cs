@@ -483,8 +483,11 @@ public partial class ReportViewModel : ViewModelBase
                 busyScope.ReportProgress(i, totalCount,
                     $"帳票を作成中... ({i + 1}/{totalCount}) {card.CardType} {card.CardNumber}");
 
-                var result = await _reportService.CreateMonthlyReportAsync(
-                    cardIdm, SelectedYear, SelectedMonth, outputPath);
+                // Excel生成は同期的なCPU/IO処理のため、Task.RunでバックグラウンドスレッドにオフロードしUIスレッドを解放する
+                var capturedCardIdm = cardIdm;
+                var capturedOutputPath = outputPath;
+                var result = await Task.Run(() =>
+                    _reportService.CreateMonthlyReportAsync(capturedCardIdm, SelectedYear, SelectedMonth, capturedOutputPath));
 
                 if (result.Success)
                 {
