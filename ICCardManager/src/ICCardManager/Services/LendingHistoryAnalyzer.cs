@@ -26,6 +26,22 @@ namespace ICCardManager.Services
     internal static class LendingHistoryAnalyzer
     {
         /// <summary>
+        /// 同一日の時系列セグメント（利用グループまたは単一チャージ）。
+        /// チャージ境界で利用を分割するために使用する。
+        /// </summary>
+        internal class DailySegment
+        {
+            /// <summary>チャージセグメントかどうか</summary>
+            public bool IsCharge { get; init; }
+
+            /// <summary>ポイント還元セグメントかどうか（Issue #942）</summary>
+            public bool IsPointRedemption { get; init; }
+
+            /// <summary>セグメント内の詳細リスト（利用グループの場合は複数、チャージ/ポイント還元の場合は1件）</summary>
+            public List<LedgerDetail> Details { get; init; } = new();
+        }
+
+        /// <summary>
         /// 残高不足パターン検出時に許容するチャージ超過額の閾値（円）。
         /// 精算機でのチャージは不足額ちょうどか10円単位の端数切り上げのため、
         /// 利用後残高（= チャージ額 - 不足額）がこの値未満であれば残高不足パターンとみなす。
@@ -141,15 +157,15 @@ namespace ICCardManager.Services
         /// </remarks>
         /// <param name="dailyDetails">同一日内の全詳細（残高不足パターン処理済み）</param>
         /// <returns>時系列順のセグメントリスト</returns>
-        internal static List<LendingService.DailySegment> SplitAtChargeBoundaries(List<LedgerDetail> dailyDetails)
+        internal static List<DailySegment> SplitAtChargeBoundaries(List<LedgerDetail> dailyDetails)
         {
             if (dailyDetails.Count == 0)
-                return new List<LendingService.DailySegment>();
+                return new List<DailySegment>();
 
             // 時系列順（古い順）に並べ替え
             var chronological = SortChronologically(dailyDetails);
 
-            var segments = new List<LendingService.DailySegment>();
+            var segments = new List<DailySegment>();
             var currentUsageGroup = new List<LedgerDetail>();
 
             foreach (var detail in chronological)
@@ -159,7 +175,7 @@ namespace ICCardManager.Services
                     // 溜まった利用グループを先に出力
                     if (currentUsageGroup.Count > 0)
                     {
-                        segments.Add(new LendingService.DailySegment
+                        segments.Add(new DailySegment
                         {
                             IsCharge = false,
                             Details = new List<LedgerDetail>(currentUsageGroup)
@@ -168,7 +184,7 @@ namespace ICCardManager.Services
                     }
 
                     // チャージを出力
-                    segments.Add(new LendingService.DailySegment
+                    segments.Add(new DailySegment
                     {
                         IsCharge = true,
                         Details = new List<LedgerDetail> { detail }
@@ -179,7 +195,7 @@ namespace ICCardManager.Services
                     // Issue #942: ポイント還元（明示的・暗黙的）も個別セグメントとして分離
                     if (currentUsageGroup.Count > 0)
                     {
-                        segments.Add(new LendingService.DailySegment
+                        segments.Add(new DailySegment
                         {
                             IsCharge = false,
                             Details = new List<LedgerDetail>(currentUsageGroup)
@@ -187,7 +203,7 @@ namespace ICCardManager.Services
                         currentUsageGroup.Clear();
                     }
 
-                    segments.Add(new LendingService.DailySegment
+                    segments.Add(new DailySegment
                     {
                         IsPointRedemption = true,
                         Details = new List<LedgerDetail> { detail }
@@ -202,7 +218,7 @@ namespace ICCardManager.Services
             // 残りの利用グループを出力
             if (currentUsageGroup.Count > 0)
             {
-                segments.Add(new LendingService.DailySegment
+                segments.Add(new DailySegment
                 {
                     IsCharge = false,
                     Details = new List<LedgerDetail>(currentUsageGroup)
