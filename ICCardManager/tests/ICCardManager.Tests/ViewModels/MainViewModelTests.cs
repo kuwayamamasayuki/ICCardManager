@@ -461,14 +461,35 @@ public class MainViewModelTests
     [Fact]
     public async Task CustomTimeoutSeconds_ShouldBeRespected()
     {
-        // Arrange - タイムアウト30秒のViewModelを作成
-        var customVm = CreateViewModel(timeoutSeconds: 30);
+        // Arrange - 専用のモックを使い30秒タイムアウトのVMを分離して作成
+        var isolatedCardReaderMock = new Mock<ICardReader>();
+        var isolatedTimerFactory = new TestTimerFactory();
+        var customVm = new MainViewModel(
+            isolatedCardReaderMock.Object,
+            _soundPlayerMock.Object,
+            _staffRepositoryMock.Object,
+            _cardRepositoryMock.Object,
+            _ledgerRepositoryMock.Object,
+            _settingsRepositoryMock.Object,
+            _lendingService,
+            _toastMock.Object,
+            _staffAuthServiceMock.Object,
+            _ledgerMergeService,
+            _messengerMock.Object,
+            _navigationServiceMock.Object,
+            _operationLoggerMock.Object,
+            _ledgerConsistencyChecker,
+            Options.Create(new AppOptions { StaffCardTimeoutSeconds = 30 }),
+            isolatedTimerFactory,
+            _dispatcherService);
+
         var staffIdm = "0102030405060708";
         _staffRepositoryMock.Setup(r => r.GetByIdmAsync(staffIdm, It.IsAny<bool>()))
             .ReturnsAsync(new Staff { StaffIdm = staffIdm, Name = "テスト職員" });
 
-        _cardReaderMock.Raise(r => r.CardRead += null,
-            _cardReaderMock.Object, new CardReadEventArgs { Idm = staffIdm });
+        // Act - 分離されたカードリーダーでイベント発火
+        isolatedCardReaderMock.Raise(r => r.CardRead += null,
+            isolatedCardReaderMock.Object, new CardReadEventArgs { Idm = staffIdm });
         await Task.Delay(100);
 
         // Assert

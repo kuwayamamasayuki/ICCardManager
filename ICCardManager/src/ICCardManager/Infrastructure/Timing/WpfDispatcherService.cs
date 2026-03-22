@@ -1,4 +1,5 @@
 using System;
+using System.Threading.Tasks;
 
 namespace ICCardManager.Infrastructure.Timing
 {
@@ -11,7 +12,15 @@ namespace ICCardManager.Infrastructure.Timing
         /// <inheritdoc/>
         public void InvokeAsync(Action action)
         {
-            System.Windows.Application.Current.Dispatcher.InvokeAsync(action);
+            var app = System.Windows.Application.Current;
+            app?.Dispatcher.InvokeAsync(action);
+        }
+
+        /// <inheritdoc/>
+        public void InvokeAsync(Func<Task> asyncAction)
+        {
+            var app = System.Windows.Application.Current;
+            app?.Dispatcher.InvokeAsync(asyncAction);
         }
     }
 }

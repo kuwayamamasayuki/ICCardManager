@@ -28,12 +28,12 @@ namespace ICCardManager.Common
         /// <summary>
         /// 操作が成功したかどうか
         /// </summary>
-        public bool Success { get; set; }
+        public bool Success { get; protected set; }
 
         /// <summary>
         /// エラーメッセージ（失敗時）
         /// </summary>
-        public string ErrorMessage { get; set; }
+        public string ErrorMessage { get; protected set; }
 
         /// <summary>
         /// 成功結果を作成
@@ -46,9 +46,10 @@ namespace ICCardManager.Common
         public static ServiceResult Fail(string errorMessage) => new() { Success = false, ErrorMessage = errorMessage };
 
         /// <summary>
-        /// bool演算子（if文で直接使用可能）
+        /// bool演算子（if文で直接使用可能）。
+        /// nullの場合はfalseを返します。
         /// </summary>
-        public static implicit operator bool(ServiceResult result) => result.Success;
+        public static implicit operator bool(ServiceResult result) => result?.Success ?? false;
     }
 
     /// <summary>
@@ -60,7 +61,7 @@ namespace ICCardManager.Common
         /// <summary>
         /// 結果データ（成功時）
         /// </summary>
-        public T Data { get; set; }
+        public T Data { get; protected set; }
 
         /// <summary>
         /// データ付き成功結果を作成

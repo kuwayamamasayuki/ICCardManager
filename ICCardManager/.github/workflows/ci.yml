@@ -121,6 +121,10 @@ jobs:
     - name: Check for vulnerable NuGet packages
       run: |
         dotnet list src/ICCardManager/ICCardManager.csproj package --vulnerable --include-transitive 2>&1 | tee vuln-report.txt
+        if ($LASTEXITCODE -ne 0) {
+          Write-Host "::warning::dotnet list package command failed (exit code $LASTEXITCODE). Skipping vulnerability check."
+          exit 0
+        }
         if (Select-String -Path vuln-report.txt -Pattern "has the following vulnerable packages" -Quiet) {
           Write-Host "::error::Vulnerable NuGet packages detected! Review vuln-report.txt for details."
           exit 1

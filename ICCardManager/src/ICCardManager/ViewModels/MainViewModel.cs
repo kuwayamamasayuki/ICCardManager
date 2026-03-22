@@ -624,10 +624,8 @@ public partial class MainViewModel : ViewModelBase
     private void OnCardRead(object? sender, CardReadEventArgs e)
     {
         // UIスレッドで処理を実行（即時応答のため）
-        _dispatcherService.InvokeAsync(async () =>
-        {
-            await HandleCardReadAsync(e.Idm);
-        });
+        // Func<Task>オーバーロードを使用し、async void化を防止
+        _dispatcherService.InvokeAsync(() => HandleCardReadAsync(e.Idm));
     }
 
     /// <summary>
@@ -1748,6 +1746,7 @@ public partial class MainViewModel : ViewModelBase
     /// </summary>
     private void StartTimeout()
     {
+        StopTimeout(); // 前回のタイマーが残っている場合に備えた防御的クリーンアップ
         RemainingSeconds = _timeoutSeconds;
 
         _timeoutTimer = _timerFactory.Create();

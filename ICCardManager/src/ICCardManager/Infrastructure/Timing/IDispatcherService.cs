@@ -1,4 +1,5 @@
 using System;
+using System.Threading.Tasks;
 
 namespace ICCardManager.Infrastructure.Timing
 {
@@ -10,8 +11,16 @@ namespace ICCardManager.Infrastructure.Timing
     public interface IDispatcherService
     {
         /// <summary>
-        /// UIスレッドで非同期にアクションを実行
+        /// UIスレッドで非同期にアクションを実行（fire-and-forget）
         /// </summary>
         void InvokeAsync(Action action);
+
+        /// <summary>
+        /// UIスレッドで非同期タスクを実行（fire-and-forget）。
+        /// async lambdaを渡す場合はこちらを使用してください。
+        /// Actionオーバーロードにasync lambdaを渡すとasync voidになり、
+        /// 例外がスワローされる危険があります。
+        /// </summary>
+        void InvokeAsync(Func<Task> asyncAction);
     }
 }

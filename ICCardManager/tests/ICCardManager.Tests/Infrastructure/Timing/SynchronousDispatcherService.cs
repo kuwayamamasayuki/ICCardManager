@@ -1,4 +1,5 @@
 using System;
+using System.Threading.Tasks;
 using ICCardManager.Infrastructure.Timing;
 
 namespace ICCardManager.Tests.Infrastructure.Timing
@@ -13,6 +14,12 @@ namespace ICCardManager.Tests.Infrastructure.Timing
         public void InvokeAsync(Action action)
         {
             action();
+        }
+
+        /// <inheritdoc/>
+        public void InvokeAsync(Func<Task> asyncAction)
+        {
+            asyncAction().GetAwaiter().GetResult();
         }
     }
 }
