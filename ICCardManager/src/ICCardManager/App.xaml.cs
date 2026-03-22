@@ -110,8 +110,6 @@ namespace ICCardManager
                 // Issue #974: 組織固有設定を静的サービスに注入
                 // SummaryGeneratorはDIコンストラクタ経由でConfigureされる（即時解決で静的状態を初期化）
                 ServiceProvider.GetRequiredService<SummaryGenerator>();
-                var orgOptions = ServiceProvider.GetRequiredService<IOptions<OrganizationOptions>>().Value;
-                StationMasterService.Configure(orgOptions);
 
                 // データベース初期化
                 InitializeDatabase();
@@ -215,7 +213,7 @@ namespace ICCardManager
             services.AddSingleton<INavigationService>(sp => sp.GetRequiredService<NavigationService>());
             services.AddSingleton<IDialogService>(sp => sp.GetRequiredService<NavigationService>());
             services.AddSingleton<IStaffAuthService, StaffAuthService>();
-            services.AddSingleton<IStationMasterService>(sp => StationMasterService.Instance);
+            services.AddSingleton<IStationMasterService, StationMasterService>();
 
             // Infrastructure層
     #if DEBUG

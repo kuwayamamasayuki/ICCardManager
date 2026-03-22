@@ -109,15 +109,6 @@ namespace ICCardManager.Infrastructure.CardReader
         public CardReaderConnectionState ConnectionState => _connectionState;
 
         /// <summary>
-        /// PcScCardReaderの新しいインスタンスを初期化します。
-        /// </summary>
-        /// <param name="logger">ロガー</param>
-        public PcScCardReader(ILogger<PcScCardReader> logger)
-            : this(logger, new DefaultPcScProvider(), StationMasterService.Instance)
-        {
-        }
-
-        /// <summary>
         /// DI用コンストラクタ
         /// </summary>
         /// <param name="logger">ロガー</param>
@@ -133,11 +124,11 @@ namespace ICCardManager.Infrastructure.CardReader
         /// <param name="logger">ロガー</param>
         /// <param name="provider">PC/SCプロバイダー（テスト時はモックを注入）</param>
         /// <param name="stationMasterService">駅マスタサービス</param>
-        internal PcScCardReader(ILogger<PcScCardReader> logger, IPcScProvider provider, IStationMasterService stationMasterService = null)
+        internal PcScCardReader(ILogger<PcScCardReader> logger, IPcScProvider provider, IStationMasterService stationMasterService)
         {
             _logger = logger;
             _provider = provider;
-            _stationMasterService = stationMasterService ?? StationMasterService.Instance;
+            _stationMasterService = stationMasterService ?? throw new ArgumentNullException(nameof(stationMasterService));
         }
 
         /// <summary>

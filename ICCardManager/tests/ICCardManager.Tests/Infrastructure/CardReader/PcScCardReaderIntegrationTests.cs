@@ -1,5 +1,6 @@
 using FluentAssertions;
 using ICCardManager.Infrastructure.CardReader;
+using ICCardManager.Services;
 using Microsoft.Extensions.Logging;
 using Moq;
 using PCSC;
@@ -104,7 +105,8 @@ public class PcScCardReaderIntegrationTests : IDisposable
     /// </summary>
     private PcScCardReader CreateReader()
     {
-        _reader = new PcScCardReader(_loggerMock.Object);
+        var stationMasterService = new StationMasterService();
+        _reader = new PcScCardReader(_loggerMock.Object, stationMasterService);
         return _reader;
     }
 

@@ -1,6 +1,7 @@
 using FluentAssertions;
 using ICCardManager.Common.Exceptions;
 using ICCardManager.Infrastructure.CardReader;
+using ICCardManager.Services;
 using Microsoft.Extensions.Logging;
 using Moq;
 using PCSC;
@@ -35,6 +36,7 @@ public class PcScCardReaderTests : IDisposable
     private readonly Mock<ILogger<PcScCardReader>> _loggerMock;
     private readonly Mock<IPcScProvider> _providerMock;
     private readonly Mock<ISCardMonitor> _monitorMock;
+    private readonly Mock<IStationMasterService> _stationMasterServiceMock;
     private PcScCardReader? _reader;
 
     public PcScCardReaderTests()
@@ -42,6 +44,7 @@ public class PcScCardReaderTests : IDisposable
         _loggerMock = new Mock<ILogger<PcScCardReader>>();
         _providerMock = new Mock<IPcScProvider>();
         _monitorMock = new Mock<ISCardMonitor>();
+        _stationMasterServiceMock = new Mock<IStationMasterService>();
 
         // デフォルトのモニターモック設定
         _providerMock.Setup(p => p.CreateMonitor()).Returns(_monitorMock.Object);
@@ -57,7 +60,7 @@ public class PcScCardReaderTests : IDisposable
     /// </summary>
     private PcScCardReader CreateReader()
     {
-        _reader = new PcScCardReader(_loggerMock.Object, _providerMock.Object);
+        _reader = new PcScCardReader(_loggerMock.Object, _providerMock.Object, _stationMasterServiceMock.Object);
         return _reader;
     }
 

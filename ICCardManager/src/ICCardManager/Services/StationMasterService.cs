@@ -5,6 +5,7 @@ using System.Threading.Tasks;
 using System.IO;
 using System.Reflection;
 using ICCardManager.Common;
+using Microsoft.Extensions.Options;
 
 namespace ICCardManager.Services
 {
@@ -18,6 +19,10 @@ namespace ICCardManager.Services
     /// カード種別に応じて適切なエリアを優先的に検索する。
     /// </para>
     /// <para>
+    /// DIコンテナに<c>AddSingleton&lt;IStationMasterService, StationMasterService&gt;()</c>で登録し、
+    /// <see cref="IOptions{OrganizationOptions}"/>経由で組織固有設定を受け取る。
+    /// </para>
+    /// <para>
     /// 駅コードデータの出典:
     /// 「プロデルで交通系ICカード履歴ビューアを作る」
     /// https://produ.irelang.jp/blog/2017/08/305/
@@ -25,13 +30,6 @@ namespace ICCardManager.Services
     /// </remarks>
     public class StationMasterService : IStationMasterService
     {
-        private static readonly Lazy<StationMasterService> _instance = new(() => new StationMasterService());
-
-        /// <summary>
-        /// シングルトンインスタンス
-        /// </summary>
-        public static StationMasterService Instance => _instance.Value;
-
         /// <summary>
         /// 駅データのディクショナリ
         /// キー: (areaCode, lineCode, stationCode), 値: 駅名
@@ -82,21 +80,26 @@ namespace ICCardManager.Services
         };
 
         /// <summary>
-        /// 組織固有設定から上書きされたエリア優先順位（Issue #974）
+        /// 組織固有設定（Issue #974）
         /// </summary>
-        private static OrganizationOptions _orgOptions = new();
+        private readonly OrganizationOptions _orgOptions;
 
         /// <summary>
-        /// 組織固有設定を注入（起動時に1回だけ呼ぶ）
+        /// DI用コンストラクタ
         /// </summary>
-        public static void Configure(OrganizationOptions options)
+        /// <param name="orgOptions">組織固有設定</param>
+        public StationMasterService(IOptions<OrganizationOptions> orgOptions)
+            : this(orgOptions?.Value ?? new OrganizationOptions())
         {
-            _orgOptions = options ?? new OrganizationOptions();
         }
 
-        private StationMasterService()
+        /// <summary>
+        /// テスト・直接利用向けコンストラクタ（デフォルト設定で初期化）
+        /// </summary>
+        /// <param name="orgOptions">組織固有設定（nullの場合はデフォルト設定を使用）</param>
+        internal StationMasterService(OrganizationOptions orgOptions = null)
         {
-            // 遅延初期化のためコンストラクタでは読み込まない
+            _orgOptions = orgOptions ?? new OrganizationOptions();
         }
 
         /// <summary>
@@ -258,7 +261,7 @@ namespace ICCardManager.Services
         /// <summary>
         /// カード種別から優先エリアコードの配列を取得
         /// </summary>
-        private static int[] GetAreaPriority(CardType cardType)
+        private int[] GetAreaPriority(CardType cardType)
         {
             // Issue #974: 組織設定で上書きされた優先順位を優先
             var cardTypeName = cardType.ToString();

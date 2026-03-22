@@ -5,6 +5,8 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using ICCardManager.Data;
 using ICCardManager.Infrastructure.CardReader;
+using ICCardManager.Services;
+using Microsoft.Extensions.Options;
 
 namespace DebugDataViewer
 {
@@ -111,20 +113,21 @@ namespace DebugDataViewer
         private static ICardReader CreateCardReader(IServiceProvider sp)
         {
             var loggerFactory = sp.GetRequiredService<ILoggerFactory>();
+            var stationMasterService = new StationMasterService(Options.Create(new OrganizationOptions()));
 
             // felicalib.dll の存在を確認
             if (IsFelicaLibAvailable())
             {
                 var logger = loggerFactory.CreateLogger<FelicaCardReader>();
                 System.Diagnostics.Debug.WriteLine("[DebugDataViewer] FelicaCardReader を使用します（残高・履歴読み取り可能）");
-                return new FelicaCardReader(logger);
+                return new FelicaCardReader(logger, stationMasterService);
             }
 
             // フォールバック: PcScCardReader
             {
                 var logger = loggerFactory.CreateLogger<PcScCardReader>();
                 System.Diagnostics.Debug.WriteLine("[DebugDataViewer] PcScCardReader を使用します（IDm読み取りのみ、残高・履歴は読み取れません）");
-                return new PcScCardReader(logger);
+                return new PcScCardReader(logger, stationMasterService);
             }
         }
 
