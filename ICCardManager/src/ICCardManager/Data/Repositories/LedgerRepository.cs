@@ -502,6 +502,47 @@ ORDER BY use_date ASC, is_charge DESC, is_point_redemption DESC, rowid DESC";
             return Common.LedgerDetailChronologicalSorter.Sort(details, preserveOrderOnFailure: true);
         }
 
+        /// <inheritdoc/>
+        public async Task<Dictionary<int, List<LedgerDetail>>> GetDetailsByLedgerIdsAsync(IEnumerable<int> ledgerIds)
+        {
+            var result = new Dictionary<int, List<LedgerDetail>>();
+            var idList = ledgerIds.ToList();
+            if (idList.Count == 0) return result;
+
+            var connection = _dbContext.GetConnection();
+
+            using var command = connection.CreateCommand();
+            // パラメータプレースホルダーを動的生成
+            var paramNames = idList.Select((_, i) => $"@id{i}").ToList();
+            command.CommandText = $@"SELECT ledger_id, use_date, entry_station, exit_station,
+       bus_stops, amount, balance, is_charge, is_point_redemption, is_bus, group_id, rowid
+FROM ledger_detail
+WHERE ledger_id IN ({string.Join(", ", paramNames)})
+ORDER BY ledger_id, use_date ASC, is_charge DESC, is_point_redemption DESC, rowid DESC";
+
+            for (int i = 0; i < idList.Count; i++)
+            {
+                command.Parameters.AddWithValue(paramNames[i], idList[i]);
+            }
+
+            var allDetails = new List<LedgerDetail>();
+            using var reader = await command.ExecuteReaderAsync();
+            while (await reader.ReadAsync())
+            {
+                allDetails.Add(MapToLedgerDetail(reader));
+            }
+
+            // LedgerIdごとにグループ化し、残高チェーンでソート
+            foreach (var group in allDetails.GroupBy(d => d.LedgerId))
+            {
+                var sorted = Common.LedgerDetailChronologicalSorter.Sort(
+                    group.ToList(), preserveOrderOnFailure: true);
+                result[group.Key] = sorted.ToList();
+            }
+
+            return result;
+        }
+
         /// <summary>
         /// DataReaderからLedgerオブジェクトにマッピング
         /// </summary>

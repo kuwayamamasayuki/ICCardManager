@@ -25,6 +25,9 @@ public class LedgerConsistencyCheckerTests
     public LedgerConsistencyCheckerTests()
     {
         _ledgerRepoMock = new Mock<ILedgerRepository>();
+        // Issue #1059: GetDetailsByLedgerIdsAsyncのデフォルト戻り値を設定
+        _ledgerRepoMock.Setup(x => x.GetDetailsByLedgerIdsAsync(It.IsAny<IEnumerable<int>>()))
+            .ReturnsAsync(new Dictionary<int, List<LedgerDetail>>());
         _checker = new LedgerConsistencyChecker(_ledgerRepoMock.Object);
     }
 
