@@ -362,6 +362,8 @@ public partial class DataExportImportViewModel : ViewModelBase
 
         using (BeginBusy("エクスポート中..."))
         {
+            // Issue #1062: UIスレッドにプログレスバー描画の機会を与える
+            await Task.Yield();
             try
             {
                 CsvExportResult result;
@@ -437,6 +439,8 @@ public partial class DataExportImportViewModel : ViewModelBase
 
         using (BeginBusy("プレビュー読み込み中..."))
         {
+            // Issue #1062: UIスレッドにプログレスバー描画の機会を与える
+            await Task.Yield();
             try
             {
                 CsvImportPreviewResult preview;
@@ -543,6 +547,8 @@ public partial class DataExportImportViewModel : ViewModelBase
 
         using (BeginBusy("インポート中..."))
         {
+            // Issue #1062: UIスレッドにプログレスバー描画の機会を与える
+            await Task.Yield();
             try
             {
                 CsvImportResult result;
@@ -675,6 +681,8 @@ public partial class DataExportImportViewModel : ViewModelBase
 
         using (BeginBusy("インポート中..."))
         {
+            // Issue #1062: UIスレッドにプログレスバー描画の機会を与える
+            await Task.Yield();
             try
             {
                 CsvImportResult result;
