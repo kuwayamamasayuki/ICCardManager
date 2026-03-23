@@ -1177,6 +1177,131 @@ public class LedgerRepositoryTests : IDisposable
 
     #endregion
 
+    #region GetAllLatestBalancesAsync テスト
+
+    /// <summary>
+    /// 通常のレコードで最新残高と最終利用日が取得できることを確認
+    /// </summary>
+    [Fact]
+    public async Task GetAllLatestBalancesAsync_ReturnsLatestBalanceAndDate()
+    {
+        // Arrange - 日付順に3件登録
+        var ledger1 = CreateTestLedger(TestCardIdm, new DateTime(2026, 3, 1), "チャージ", income: 3000);
+        ledger1.Balance = 13000;
+        await _repository.InsertAsync(ledger1);
+
+        var ledger2 = CreateTestLedger(TestCardIdm, new DateTime(2026, 3, 10), "鉄道（博多～天神）", expense: 260);
+        ledger2.Balance = 12740;
+        await _repository.InsertAsync(ledger2);
+
+        var ledger3 = CreateTestLedger(TestCardIdm, new DateTime(2026, 3, 20), "鉄道（天神～博多）", expense: 260);
+        ledger3.Balance = 12480;
+        await _repository.InsertAsync(ledger3);
+
+        // Act
+        var result = await _repository.GetAllLatestBalancesAsync();
+
+        // Assert
+        result.Should().ContainKey(TestCardIdm);
+        var (balance, lastUsageDate) = result[TestCardIdm];
+        balance.Should().Be(12480);
+        lastUsageDate.Should().Be(new DateTime(2026, 3, 20));
+    }
+
+    /// <summary>
+    /// Issue #1068: データインポートで古い日付のレコードが後からINSERTされても
+    /// 最終利用日は日付基準で最新のものが返されることを確認
+    /// </summary>
+    [Fact]
+    public async Task GetAllLatestBalancesAsync_AfterImportOlderData_ReturnsDateBasedLatest()
+    {
+        // Arrange - 先に新しい日付のレコードを登録（通常の利用）
+        var recentLedger = CreateTestLedger(TestCardIdm, new DateTime(2026, 3, 23), "鉄道（天神～博多）", expense: 260);
+        recentLedger.Balance = 9740;
+        await _repository.InsertAsync(recentLedger);
+
+        // 後から古い日付のレコードをINSERT（データインポートを模擬）
+        // IDは後のINSERTの方が大きくなるが、日付は古い
+        var importedLedger1 = CreateTestLedger(TestCardIdm, new DateTime(2026, 3, 10), "チャージ", income: 3000);
+        importedLedger1.Balance = 12000;
+        await _repository.InsertAsync(importedLedger1);
+
+        var importedLedger2 = CreateTestLedger(TestCardIdm, new DateTime(2026, 3, 13), "鉄道（博多～天神）", expense: 260);
+        importedLedger2.Balance = 11740;
+        await _repository.InsertAsync(importedLedger2);
+
+        // Act
+        var result = await _repository.GetAllLatestBalancesAsync();
+
+        // Assert - 日付が最も新しい3/23のレコードが返されるべき（IDが最大の3/13ではなく）
+        result.Should().ContainKey(TestCardIdm);
+        var (balance, lastUsageDate) = result[TestCardIdm];
+        lastUsageDate.Should().Be(new DateTime(2026, 3, 23), "最終利用日はIDではなく日付基準で最新のものを返すべき");
+        balance.Should().Be(9740, "残高も日付が最も新しいレコードのものを返すべき");
+    }
+
+    /// <summary>
+    /// 同一日付のレコードが複数ある場合、ID降順で最新のものが返されることを確認
+    /// </summary>
+    [Fact]
+    public async Task GetAllLatestBalancesAsync_SameDateMultipleRecords_ReturnsHighestId()
+    {
+        // Arrange - 同日に2件登録（チャージと利用）
+        var ledger1 = CreateTestLedger(TestCardIdm, new DateTime(2026, 3, 15), "チャージ", income: 3000);
+        ledger1.Balance = 13000;
+        await _repository.InsertAsync(ledger1);
+
+        var ledger2 = CreateTestLedger(TestCardIdm, new DateTime(2026, 3, 15), "鉄道（博多～天神）", expense: 260);
+        ledger2.Balance = 12740;
+        await _repository.InsertAsync(ledger2);
+
+        // Act
+        var result = await _repository.GetAllLatestBalancesAsync();
+
+        // Assert - 同日ならIDが大きい方（後にINSERTされた方）が返される
+        result.Should().ContainKey(TestCardIdm);
+        var (balance, _) = result[TestCardIdm];
+        balance.Should().Be(12740, "同日の場合はIDが大きいレコードの残高が返されるべき");
+    }
+
+    /// <summary>
+    /// 複数カードの最新残高が正しく返されることを確認
+    /// </summary>
+    [Fact]
+    public async Task GetAllLatestBalancesAsync_MultipleCards_ReturnsEachCardLatest()
+    {
+        // Arrange - 2枚目のカードを登録
+        const string card2Idm = "0807060504030201";
+        await _cardRepository.InsertAsync(new Models.IcCard
+        {
+            CardIdm = card2Idm,
+            CardType = "nimoca",
+            CardNumber = "N001"
+        });
+
+        // カード1: 3/20が最新
+        var ledger1 = CreateTestLedger(TestCardIdm, new DateTime(2026, 3, 20), "鉄道（博多～天神）", expense: 260);
+        ledger1.Balance = 9740;
+        await _repository.InsertAsync(ledger1);
+
+        // カード2: 3/25が最新
+        var ledger2 = CreateTestLedger(card2Idm, new DateTime(2026, 3, 25), "チャージ", income: 5000);
+        ledger2.Balance = 15000;
+        await _repository.InsertAsync(ledger2);
+
+        // Act
+        var result = await _repository.GetAllLatestBalancesAsync();
+
+        // Assert
+        result.Should().HaveCount(2);
+        result[TestCardIdm].Balance.Should().Be(9740);
+        result[TestCardIdm].LastUsageDate.Should().Be(new DateTime(2026, 3, 20));
+        result[card2Idm].Balance.Should().Be(15000);
+        result[card2Idm].LastUsageDate.Should().Be(new DateTime(2026, 3, 25));
+    }
+
+    #endregion
+
     #region ヘルパーメソッド
 
     private static Ledger CreateTestLedger(string cardIdm, DateTime date, string summary, int income = 0, int expense = 0)

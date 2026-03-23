@@ -329,14 +329,16 @@ LIMIT 1";
             var result = new Dictionary<string, (int Balance, DateTime? LastUsageDate)>();
 
             using var command = connection.CreateCommand();
-            // サブクエリで各カードの最新レコードIDを取得し、JOINで残高情報を取得
+            // 各カードについて日付が最も新しいレコード（同日の場合はID降順）から残高と最終利用日を取得
+            // ※ MAX(id) ではなく日付基準にすることで、データインポート後も正しい最終利用日・残高が表示される (Issue #1068)
             command.CommandText = @"SELECT l.card_idm, l.balance, l.date
 FROM ledger l
-INNER JOIN (
-    SELECT card_idm, MAX(id) as max_id
-    FROM ledger
-    GROUP BY card_idm
-) latest ON l.card_idm = latest.card_idm AND l.id = latest.max_id";
+WHERE l.id = (
+    SELECT l2.id FROM ledger l2
+    WHERE l2.card_idm = l.card_idm
+    ORDER BY l2.date DESC, l2.id DESC
+    LIMIT 1
+)";
 
             using var reader = await command.ExecuteReaderAsync();
             while (await reader.ReadAsync())
