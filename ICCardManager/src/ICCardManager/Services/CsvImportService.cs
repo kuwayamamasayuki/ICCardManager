@@ -1823,8 +1823,7 @@ namespace ICCardManager.Services
                 {
                     // 分割不要：従来通り1アイテムとして表示
                     // Issue #938: 追加する内容の詳細を表示
-                    var insertDetails = detailRows.Select(x => x.Detail).ToList();
-                    var insertChanges = CreateInsertDetailChanges(insertDetails);
+                    var insertChanges = CreateInsertDetailChanges(detailList);
 
                     items.Add(new CsvImportPreviewItem
                     {
@@ -2097,12 +2096,14 @@ namespace ICCardManager.Services
                         };
                     }
 
+                    var summaryGenerator = new SummaryGenerator();
+                    var segmentFailed = false;
+
                     foreach (var segment in segments)
                     {
                         var segmentDetails = segment.Details;
 
                         // SummaryGeneratorで摘要を自動生成
-                        var summaryGenerator = new SummaryGenerator();
                         var summary = summaryGenerator.Generate(segmentDetails);
                         if (string.IsNullOrEmpty(summary))
                         {
@@ -2145,6 +2146,7 @@ namespace ICCardManager.Services
 
                         if (!success)
                         {
+                            segmentFailed = true;
                             errors.Add(new CsvImportError
                             {
                                 LineNumber = firstLineNumber,
@@ -2154,7 +2156,10 @@ namespace ICCardManager.Services
                         }
                     }
 
-                    importedCount += detailRows.Count;
+                    if (!segmentFailed)
+                    {
+                        importedCount += detailRows.Count;
+                    }
                 }
                 catch (Exception ex)
                 {
