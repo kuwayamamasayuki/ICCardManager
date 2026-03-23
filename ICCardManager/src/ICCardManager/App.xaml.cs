@@ -107,12 +107,12 @@ namespace ICCardManager
 
                 _logger.LogDebug("DIコンテナ構築完了");
 
+                // データベース初期化（SummaryGenerator等がsettingsテーブルを参照するため、DI解決より先に実行）
+                InitializeDatabase();
+
                 // Issue #974: 組織固有設定を静的サービスに注入
                 // SummaryGeneratorはDIコンストラクタ経由でConfigureされる（即時解決で静的状態を初期化）
                 ServiceProvider.GetRequiredService<SummaryGenerator>();
-
-                // データベース初期化
-                InitializeDatabase();
 
                 _logger.LogDebug("データベース初期化完了");
 
