@@ -693,6 +693,28 @@ public class MainViewModelTests
     }
 
     [Fact]
+    public void ApplyBalanceInconsistencyMarkers_不整合解消時にフラグがリセットされること()
+    {
+        // Arrange: 事前にハイライトが適用されている状態
+        _viewModel.HistoryLedgers.Add(new LedgerDto { Id = 1, Balance = 1000, HasBalanceInconsistency = true,
+            BalanceInconsistencyMessage = "残高不整合: 期待値 1,100円 / 実際 1,000円" });
+        _viewModel.HistoryLedgers.Add(new LedgerDto { Id = 2, Balance = 800 });
+
+        // _balanceInconsistenciesを空にして（不整合が解消された状態を模擬）
+        var field = typeof(MainViewModel).GetField("_balanceInconsistencies",
+            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+        field.SetValue(_viewModel, new Dictionary<int, (int ExpectedBalance, int ActualBalance)>());
+
+        // Act
+        _viewModel.ApplyBalanceInconsistencyMarkers();
+
+        // Assert: フラグがリセットされていること
+        _viewModel.HistoryLedgers[0].HasBalanceInconsistency.Should().BeFalse();
+        _viewModel.HistoryLedgers[0].BalanceInconsistencyMessage.Should().BeEmpty();
+        _viewModel.HistoryLedgers[1].HasBalanceInconsistency.Should().BeFalse();
+    }
+
+    [Fact]
     public void CloseHistory_残高不整合ハイライトデータがクリアされること()
     {
         // Arrange

@@ -1175,8 +1175,6 @@ public partial class MainViewModel : ViewModelBase
     /// </summary>
     internal void ApplyBalanceInconsistencyMarkers()
     {
-        if (_balanceInconsistencies.Count == 0) return;
-
         foreach (var dto in HistoryLedgers)
         {
             if (_balanceInconsistencies.TryGetValue(dto.Id, out var info))
@@ -1184,6 +1182,11 @@ public partial class MainViewModel : ViewModelBase
                 dto.HasBalanceInconsistency = true;
                 dto.BalanceInconsistencyMessage =
                     $"残高不整合: 期待値 {info.ExpectedBalance:N0}円 / 実際 {info.ActualBalance:N0}円";
+            }
+            else
+            {
+                dto.HasBalanceInconsistency = false;
+                dto.BalanceInconsistencyMessage = string.Empty;
             }
         }
     }
@@ -1257,6 +1260,7 @@ public partial class MainViewModel : ViewModelBase
         HistorySelectedYear = year;
         HistorySelectedMonth = month;
         HistoryCurrentPage = 1;
+        _balanceInconsistencies.Clear(); // Issue #1052: 期間変更時にハイライトをクリア
         UpdateHistoryPeriodDisplay();
         await LoadHistoryLedgersAsync();
     }
@@ -1488,6 +1492,15 @@ public partial class MainViewModel : ViewModelBase
                 Type = WarningType.BalanceInconsistency,
                 CardIdm = HistoryCard.CardIdm
             });
+        }
+
+        // Issue #1052: ハイライトデータを最新の整合性チェック結果で同期更新
+        // レコード編集・削除後にもハイライトが正しく反映される
+        if (_balanceInconsistencies.Count > 0 || !checkResult.IsConsistent)
+        {
+            _balanceInconsistencies = checkResult.Inconsistencies
+                .ToDictionary(i => i.LedgerId, i => (i.ExpectedBalance, i.ActualBalance));
+            ApplyBalanceInconsistencyMarkers();
         }
     }
 
@@ -2088,12 +2101,9 @@ public partial class MainViewModel : ViewModelBase
                 if (card != null)
                 {
                     await ShowHistoryAsync(card);
-                    // ShowHistoryAsync後に期間が確定するため、ここで整合性チェックを実行
-                    var checkResult = await _ledgerConsistencyChecker.CheckBalanceConsistencyAsync(
-                        card.CardIdm, HistoryFromDate, HistoryToDate);
-                    _balanceInconsistencies = checkResult.Inconsistencies
-                        .ToDictionary(i => i.LedgerId, i => (i.ExpectedBalance, i.ActualBalance));
-                    ApplyBalanceInconsistencyMarkers();
+                    // ShowHistoryAsync後に期間が確定するため、ここで整合性チェック＆ハイライト適用
+                    // CheckAndNotifyConsistencyAsync内で_balanceInconsistenciesの更新とマーキングを行う
+                    await CheckAndNotifyConsistencyAsync();
                 }
                 break;
 
