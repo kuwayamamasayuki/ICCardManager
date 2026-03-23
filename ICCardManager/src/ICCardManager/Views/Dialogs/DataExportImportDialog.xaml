@@ -408,12 +408,12 @@
             </TextBlock>
         </Border>
 
-        <!-- プレビュー結果＋エラー一覧（リサイズ可能エリア） -->
+        <!-- Issue #1063: プレビュー結果＋エラー一覧 -->
+        <!-- エラー行をAutoにし、エラーがない時はプレビューが全領域を使用 -->
         <Grid Grid.Row="4" Margin="0,5,0,0">
             <Grid.RowDefinitions>
-                <RowDefinition Height="3*" MinHeight="80"/>  <!-- プレビュー結果 -->
-                <RowDefinition Height="Auto"/>                <!-- GridSplitter -->
-                <RowDefinition Height="*" MinHeight="50"/>   <!-- エラー一覧 -->
+                <RowDefinition Height="*"/>     <!-- プレビュー結果（残り全領域を使用） -->
+                <RowDefinition Height="Auto"/>  <!-- エラー一覧（内容に応じてサイズ変動） -->
             </Grid.RowDefinitions>
 
             <!-- プレビュー結果セクション -->
@@ -440,6 +440,8 @@
                 </Border>
 
                 <!-- プレビューDataGrid -->
+                <!-- Issue #1063: CanContentScroll=Falseでピクセル単位スクロールに切替え、
+                     RowDetails展開時に最下行の内容が切れないようにする -->
                 <DataGrid Grid.Row="1"
                           ItemsSource="{Binding PreviewItems}"
                           AutoGenerateColumns="False"
@@ -451,6 +453,7 @@
                           HeadersVisibility="Column"
                           BorderThickness="1"
                           BorderBrush="{DynamicResource SubtleBorderBrush}"
+                          ScrollViewer.CanContentScroll="False"
                           AutomationProperties.Name="インポートプレビュー一覧">
                     <DataGrid.Columns>
                         <DataGridTextColumn Header="行" Binding="{Binding LineNumber}" Width="50"/>
@@ -549,20 +552,9 @@
                 </DataGrid>
             </Grid>
 
-            <!-- リサイズ用スプリッター -->
-            <GridSplitter Grid.Row="1"
-                          Height="5"
-                          HorizontalAlignment="Stretch"
-                          VerticalAlignment="Center"
-                          Background="{DynamicResource NeutralBorderBrush}"
-                          Margin="0,3"
-                          Cursor="SizeNS"
-                          Visibility="{Binding HasPreview, Converter={StaticResource BoolToVisibilityConverter}}"
-                          AutomationProperties.Name="プレビューとエラー一覧の境界をドラッグしてリサイズ"
-                          ToolTip="ドラッグしてプレビュー結果とエラー一覧の高さを調整"/>
-
             <!-- エラー一覧セクション -->
-            <Border Grid.Row="2" Background="{DynamicResource LendingBackgroundBrush}" Padding="10" CornerRadius="3"
+            <Border Grid.Row="1" Background="{DynamicResource LendingBackgroundBrush}" Padding="10" CornerRadius="3"
+                    MaxHeight="200"
                     Visibility="{Binding ImportErrors.Count, Converter={StaticResource IntToVisibilityConverter}}">
                 <Grid>
                     <Grid.RowDefinitions>
