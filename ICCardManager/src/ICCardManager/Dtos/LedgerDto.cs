@@ -87,6 +87,28 @@ namespace ICCardManager.Dtos
         public bool IsLentRecord { get; set; }
 
         /// <summary>
+        /// 残高不整合フラグ（Issue #1052: 警告クリック時のハイライト表示用）
+        /// </summary>
+        private bool _hasBalanceInconsistency;
+        public bool HasBalanceInconsistency
+        {
+            get => _hasBalanceInconsistency;
+            set
+            {
+                if (_hasBalanceInconsistency != value)
+                {
+                    _hasBalanceInconsistency = value;
+                    PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(HasBalanceInconsistency)));
+                }
+            }
+        }
+
+        /// <summary>
+        /// 残高不整合時のツールチップメッセージ（Issue #1052）
+        /// </summary>
+        public string BalanceInconsistencyMessage { get; set; } = string.Empty;
+
+        /// <summary>
         /// 利用履歴詳細
         /// </summary>
         public List<LedgerDetailDto> Details { get; set; } = new();

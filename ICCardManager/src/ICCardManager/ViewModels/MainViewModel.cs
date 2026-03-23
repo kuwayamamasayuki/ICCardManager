@@ -224,6 +224,11 @@ public partial class MainViewModel : ViewModelBase
     private bool _isHistoryVisible;
 
     /// <summary>
+    /// 残高不整合のあるLedgerIdとその期待残高・実際残高のマップ（Issue #1052）
+    /// </summary>
+    private Dictionary<int, (int ExpectedBalance, int ActualBalance)> _balanceInconsistencies = new();
+
+    /// <summary>
     /// 履歴表示中のカードの現在残高
     /// </summary>
     [ObservableProperty]
@@ -704,6 +709,7 @@ public partial class MainViewModel : ViewModelBase
             }
 
             // 履歴表示画面を開く
+            _balanceInconsistencies.Clear();
             await ShowHistoryAsync(card);
             return;
         }
@@ -1105,6 +1111,7 @@ public partial class MainViewModel : ViewModelBase
         IsHistoryVisible = false;
         HistoryCard = null;
         HistoryLedgers.Clear();
+        _balanceInconsistencies.Clear();
     }
 
     /// <summary>
@@ -1157,6 +1164,27 @@ public partial class MainViewModel : ViewModelBase
 
             // 統合取り消しボタンの有効/無効を更新
             await RefreshUndoMergeAvailabilityAsync();
+
+            // Issue #1052: 残高不整合ハイライトの適用（ページ遷移時にも再適用される）
+            ApplyBalanceInconsistencyMarkers();
+        }
+    }
+
+    /// <summary>
+    /// Issue #1052: 残高不整合のある行にハイライトマーカーを適用
+    /// </summary>
+    internal void ApplyBalanceInconsistencyMarkers()
+    {
+        if (_balanceInconsistencies.Count == 0) return;
+
+        foreach (var dto in HistoryLedgers)
+        {
+            if (_balanceInconsistencies.TryGetValue(dto.Id, out var info))
+            {
+                dto.HasBalanceInconsistency = true;
+                dto.BalanceInconsistencyMessage =
+                    $"残高不整合: 期待値 {info.ExpectedBalance:N0}円 / 実際 {info.ActualBalance:N0}円";
+            }
         }
     }
 
@@ -2026,6 +2054,7 @@ public partial class MainViewModel : ViewModelBase
     {
         if (item == null) return;
 
+        _balanceInconsistencies.Clear();
         var card = await _cardRepository.GetByIdmAsync(item.CardIdm);
         if (card != null)
         {
@@ -2044,12 +2073,27 @@ public partial class MainViewModel : ViewModelBase
         switch (warning.Type)
         {
             case WarningType.LowBalance:
+                // 残額警告: 直接カード履歴を表示
+                _balanceInconsistencies.Clear();
+                var lowBalanceCard = await _cardRepository.GetByIdmAsync(warning.CardIdm);
+                if (lowBalanceCard != null)
+                {
+                    await ShowHistoryAsync(lowBalanceCard);
+                }
+                break;
+
             case WarningType.BalanceInconsistency:
-                // 残額警告・残高不整合警告: 直接カード履歴を表示
+                // Issue #1052: 残高不整合警告: カード履歴を表示し、不整合行をハイライト
                 var card = await _cardRepository.GetByIdmAsync(warning.CardIdm);
                 if (card != null)
                 {
                     await ShowHistoryAsync(card);
+                    // ShowHistoryAsync後に期間が確定するため、ここで整合性チェックを実行
+                    var checkResult = await _ledgerConsistencyChecker.CheckBalanceConsistencyAsync(
+                        card.CardIdm, HistoryFromDate, HistoryToDate);
+                    _balanceInconsistencies = checkResult.Inconsistencies
+                        .ToDictionary(i => i.LedgerId, i => (i.ExpectedBalance, i.ActualBalance));
+                    ApplyBalanceInconsistencyMarkers();
                 }
                 break;
 
