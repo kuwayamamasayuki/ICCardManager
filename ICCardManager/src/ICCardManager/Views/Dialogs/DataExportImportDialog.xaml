@@ -440,6 +440,8 @@
                 </Border>
 
                 <!-- プレビューDataGrid -->
+                <!-- Issue #1063: CanContentScroll=Falseでピクセル単位スクロールに切替え、
+                     RowDetails展開時に最下行の内容が切れないようにする -->
                 <DataGrid Grid.Row="1"
                           ItemsSource="{Binding PreviewItems}"
                           AutoGenerateColumns="False"
@@ -451,6 +453,7 @@
                           HeadersVisibility="Column"
                           BorderThickness="1"
                           BorderBrush="{DynamicResource SubtleBorderBrush}"
+                          ScrollViewer.CanContentScroll="False"
                           AutomationProperties.Name="インポートプレビュー一覧">
                     <DataGrid.Columns>
                         <DataGridTextColumn Header="行" Binding="{Binding LineNumber}" Width="50"/>
