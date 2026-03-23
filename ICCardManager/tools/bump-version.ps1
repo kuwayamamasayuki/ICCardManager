@@ -341,11 +341,22 @@ $prBody = @"
 - ``docs/manual/管理者マニュアル.md``
 "@
 
-$prUrl = Invoke-Gh pr create `
-    --title $commitMessage `
-    --body $prBody `
-    --base main `
-    --head $branchName
+# WSL経由の場合、--body に複数行文字列を渡すとbashがバッククォート内の
+# ファイルパスをコマンド置換として解釈してしまうため、--body-file - で
+# stdin経由で渡す
+if ($script:UseWslGh) {
+    $prUrl = $prBody | & wsl.exe gh pr create `
+        --title $commitMessage `
+        --body-file - `
+        --base main `
+        --head $branchName
+} else {
+    $prUrl = Invoke-Gh pr create `
+        --title $commitMessage `
+        --body $prBody `
+        --base main `
+        --head $branchName
+}
 
 Write-Host ""
 Write-Success "PR作成完了: $prUrl"
