@@ -37,7 +37,7 @@ namespace ICCardManager.Dtos
         public WarningType Type { get; set; }
 
         /// <summary>
-        /// 対象カードIDm（LowBalance時のみ使用）
+        /// 対象カードIDm（LowBalance・BalanceInconsistency時に使用）
         /// </summary>
         public string CardIdm { get; set; }
     }

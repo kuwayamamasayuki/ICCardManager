@@ -214,4 +214,55 @@ public class LedgerDtoTests
     }
 
     #endregion
+
+    #region HasBalanceInconsistency (PropertyChanged) — Issue #1052
+
+    [Fact]
+    public void HasBalanceInconsistency_変更時にPropertyChangedイベントが発火すること()
+    {
+        var dto = new LedgerDto();
+        var propertyChanged = false;
+        dto.PropertyChanged += (_, args) =>
+        {
+            if (args.PropertyName == nameof(LedgerDto.HasBalanceInconsistency))
+                propertyChanged = true;
+        };
+
+        dto.HasBalanceInconsistency = true;
+
+        propertyChanged.Should().BeTrue();
+    }
+
+    [Fact]
+    public void HasBalanceInconsistency_同じ値を設定した場合にPropertyChangedイベントが発火しないこと()
+    {
+        var dto = new LedgerDto { HasBalanceInconsistency = false };
+        var propertyChanged = false;
+        dto.PropertyChanged += (_, _) => propertyChanged = true;
+
+        dto.HasBalanceInconsistency = false;
+
+        propertyChanged.Should().BeFalse();
+    }
+
+    [Fact]
+    public void BalanceInconsistencyMessage_初期値は空文字であること()
+    {
+        var dto = new LedgerDto();
+
+        dto.BalanceInconsistencyMessage.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void BalanceInconsistencyMessage_設定した値が取得できること()
+    {
+        var dto = new LedgerDto
+        {
+            BalanceInconsistencyMessage = "残高不整合: 期待値 1,000円 / 実際 800円"
+        };
+
+        dto.BalanceInconsistencyMessage.Should().Be("残高不整合: 期待値 1,000円 / 実際 800円");
+    }
+
+    #endregion
 }

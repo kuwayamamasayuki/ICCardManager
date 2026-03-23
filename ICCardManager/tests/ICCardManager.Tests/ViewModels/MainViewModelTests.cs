@@ -624,6 +624,116 @@ public class MainViewModelTests
     }
 
     #endregion
+
+    #region 残高不整合ハイライト（Issue #1052）
+
+    [Fact]
+    public void ApplyBalanceInconsistencyMarkers_不整合IDに一致するDtoにフラグとメッセージが設定されること()
+    {
+        // Arrange
+        _viewModel.HistoryLedgers.Add(new LedgerDto { Id = 1, Balance = 1000 });
+        _viewModel.HistoryLedgers.Add(new LedgerDto { Id = 2, Balance = 800 });
+        _viewModel.HistoryLedgers.Add(new LedgerDto { Id = 3, Balance = 600 });
+
+        // internalフィールドへ直接アクセスできないため、リフレクションで設定
+        var field = typeof(MainViewModel).GetField("_balanceInconsistencies",
+            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+        field.SetValue(_viewModel, new Dictionary<int, (int ExpectedBalance, int ActualBalance)>
+        {
+            { 2, (900, 800) }
+        });
+
+        // Act
+        _viewModel.ApplyBalanceInconsistencyMarkers();
+
+        // Assert
+        _viewModel.HistoryLedgers[0].HasBalanceInconsistency.Should().BeFalse();
+        _viewModel.HistoryLedgers[1].HasBalanceInconsistency.Should().BeTrue();
+        _viewModel.HistoryLedgers[1].BalanceInconsistencyMessage.Should().Contain("期待値 900円");
+        _viewModel.HistoryLedgers[1].BalanceInconsistencyMessage.Should().Contain("実際 800円");
+        _viewModel.HistoryLedgers[2].HasBalanceInconsistency.Should().BeFalse();
+    }
+
+    [Fact]
+    public void ApplyBalanceInconsistencyMarkers_空のDictionaryでは何も変更されないこと()
+    {
+        // Arrange
+        _viewModel.HistoryLedgers.Add(new LedgerDto { Id = 1, Balance = 1000 });
+
+        // Act（_balanceInconsistenciesは初期状態で空）
+        _viewModel.ApplyBalanceInconsistencyMarkers();
+
+        // Assert
+        _viewModel.HistoryLedgers[0].HasBalanceInconsistency.Should().BeFalse();
+    }
+
+    [Fact]
+    public void ApplyBalanceInconsistencyMarkers_複数の不整合がある場合にすべてマーキングされること()
+    {
+        // Arrange
+        _viewModel.HistoryLedgers.Add(new LedgerDto { Id = 1, Balance = 1000 });
+        _viewModel.HistoryLedgers.Add(new LedgerDto { Id = 2, Balance = 800 });
+        _viewModel.HistoryLedgers.Add(new LedgerDto { Id = 3, Balance = 500 });
+
+        var field = typeof(MainViewModel).GetField("_balanceInconsistencies",
+            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+        field.SetValue(_viewModel, new Dictionary<int, (int ExpectedBalance, int ActualBalance)>
+        {
+            { 1, (1100, 1000) },
+            { 3, (600, 500) }
+        });
+
+        // Act
+        _viewModel.ApplyBalanceInconsistencyMarkers();
+
+        // Assert
+        _viewModel.HistoryLedgers[0].HasBalanceInconsistency.Should().BeTrue();
+        _viewModel.HistoryLedgers[1].HasBalanceInconsistency.Should().BeFalse();
+        _viewModel.HistoryLedgers[2].HasBalanceInconsistency.Should().BeTrue();
+    }
+
+    [Fact]
+    public void ApplyBalanceInconsistencyMarkers_不整合解消時にフラグがリセットされること()
+    {
+        // Arrange: 事前にハイライトが適用されている状態
+        _viewModel.HistoryLedgers.Add(new LedgerDto { Id = 1, Balance = 1000, HasBalanceInconsistency = true,
+            BalanceInconsistencyMessage = "残高不整合: 期待値 1,100円 / 実際 1,000円" });
+        _viewModel.HistoryLedgers.Add(new LedgerDto { Id = 2, Balance = 800 });
+
+        // _balanceInconsistenciesを空にして（不整合が解消された状態を模擬）
+        var field = typeof(MainViewModel).GetField("_balanceInconsistencies",
+            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+        field.SetValue(_viewModel, new Dictionary<int, (int ExpectedBalance, int ActualBalance)>());
+
+        // Act
+        _viewModel.ApplyBalanceInconsistencyMarkers();
+
+        // Assert: フラグがリセットされていること
+        _viewModel.HistoryLedgers[0].HasBalanceInconsistency.Should().BeFalse();
+        _viewModel.HistoryLedgers[0].BalanceInconsistencyMessage.Should().BeEmpty();
+        _viewModel.HistoryLedgers[1].HasBalanceInconsistency.Should().BeFalse();
+    }
+
+    [Fact]
+    public void CloseHistory_残高不整合ハイライトデータがクリアされること()
+    {
+        // Arrange
+        var field = typeof(MainViewModel).GetField("_balanceInconsistencies",
+            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+        field.SetValue(_viewModel, new Dictionary<int, (int ExpectedBalance, int ActualBalance)>
+        {
+            { 1, (1000, 900) }
+        });
+
+        // Act
+        _viewModel.CloseHistory();
+
+        // Assert
+        var value = (Dictionary<int, (int, int)>)field.GetValue(_viewModel);
+        value.Should().BeEmpty();
+    }
+
+    #endregion
 }
 
 /*
