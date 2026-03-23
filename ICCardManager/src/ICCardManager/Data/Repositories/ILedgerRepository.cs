@@ -221,6 +221,17 @@ namespace ICCardManager.Data.Repositories
         Task<List<LedgerDetail>> GetAllDetailsInDateRangeAsync(DateTime fromDate, DateTime toDate);
 
         /// <summary>
+        /// 複数Ledgerの詳細を一括取得（残高整合性チェック用）
+        /// </summary>
+        /// <remarks>
+        /// Issue #1059対応: 詳細レベルの残高チェーン検証のために、
+        /// 対象LedgerのDetailを効率的に一括取得する。
+        /// </remarks>
+        /// <param name="ledgerIds">取得対象のLedger IDリスト</param>
+        /// <returns>LedgerIdをキーとしたDetail辞書</returns>
+        Task<Dictionary<int, List<LedgerDetail>>> GetDetailsByLedgerIdsAsync(IEnumerable<int> ledgerIds);
+
+        /// <summary>
         /// 指定カードの新規購入日（または繰越日）を取得
         /// </summary>
         /// <remarks>

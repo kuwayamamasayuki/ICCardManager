@@ -86,6 +86,10 @@ public class MainViewModelTests
             Options.Create(new AppOptions()),
             NullLogger<LendingService>.Instance);
 
+        // Issue #1059: GetDetailsByLedgerIdsAsyncのデフォルト戻り値を設定
+        _ledgerRepositoryMock.Setup(r => r.GetDetailsByLedgerIdsAsync(It.IsAny<IEnumerable<int>>()))
+            .ReturnsAsync(new Dictionary<int, List<LedgerDetail>>());
+
         _ledgerConsistencyChecker = new LedgerConsistencyChecker(_ledgerRepositoryMock.Object);
 
         _ledgerMergeService = new LedgerMergeService(

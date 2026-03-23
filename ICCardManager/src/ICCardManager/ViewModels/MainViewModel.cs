@@ -1486,9 +1486,10 @@ public partial class MainViewModel : ViewModelBase
 
         if (!checkResult.IsConsistent)
         {
+            var totalCount = checkResult.Inconsistencies.Count + checkResult.DetailInconsistencies.Count;
             WarningMessages.Add(new WarningItem
             {
-                DisplayText = $"⚠️ 残高の不整合が{checkResult.Inconsistencies.Count}件あります（{HistoryCard.CardType} {HistoryCard.CardNumber}）",
+                DisplayText = $"⚠️ 残高の不整合が{totalCount}件あります（{HistoryCard.CardType} {HistoryCard.CardNumber}）",
                 Type = WarningType.BalanceInconsistency,
                 CardIdm = HistoryCard.CardIdm
             });
@@ -1498,8 +1499,19 @@ public partial class MainViewModel : ViewModelBase
         // レコード編集・削除後にもハイライトが正しく反映される
         if (_balanceInconsistencies.Count > 0 || !checkResult.IsConsistent)
         {
+            // 親レコード不整合 + 詳細レベル不整合（詳細の親LedgerId単位で集約）
             _balanceInconsistencies = checkResult.Inconsistencies
                 .ToDictionary(i => i.LedgerId, i => (i.ExpectedBalance, i.ActualBalance));
+
+            // Issue #1059: 詳細レベル不整合がある親Ledgerもハイライト対象に追加
+            foreach (var detailGroup in checkResult.DetailInconsistencies.GroupBy(d => d.LedgerId))
+            {
+                if (!_balanceInconsistencies.ContainsKey(detailGroup.Key))
+                {
+                    var first = detailGroup.First();
+                    _balanceInconsistencies[detailGroup.Key] = (first.ExpectedBalance, first.ActualBalance);
+                }
+            }
             ApplyBalanceInconsistencyMarkers();
         }
     }
@@ -1535,9 +1547,10 @@ public partial class MainViewModel : ViewModelBase
 
             if (!checkResult.IsConsistent)
             {
+                var totalCount = checkResult.Inconsistencies.Count + checkResult.DetailInconsistencies.Count;
                 WarningMessages.Add(new WarningItem
                 {
-                    DisplayText = $"⚠️ 残高の不整合が{checkResult.Inconsistencies.Count}件あります（{card.CardType} {card.CardNumber}）",
+                    DisplayText = $"⚠️ 残高の不整合が{totalCount}件あります（{card.CardType} {card.CardNumber}）",
                     Type = WarningType.BalanceInconsistency,
                     CardIdm = card.CardIdm
                 });
