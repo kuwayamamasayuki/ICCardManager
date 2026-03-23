@@ -174,12 +174,23 @@ namespace ICCardManager.Services
         internal static (int Income, int Expense, int Balance) CalculateGroupFinancials(
             List<LedgerDetail> groupDetails)
         {
-            int income = groupDetails
+            // チャージの受入金額
+            int chargeIncome = groupDetails
                 .Where(d => d.IsCharge && d.Amount.HasValue)
                 .Sum(d => d.Amount!.Value);
 
+            // Issue #1053: ポイント還元の受入金額（金額は負値なので絶対値をIncomeとする）
+            int pointRedemptionIncome = groupDetails
+                .Where(d => (d.IsPointRedemption || SummaryGenerator.IsImplicitPointRedemption(d)) && d.Amount.HasValue)
+                .Sum(d => Math.Abs(d.Amount!.Value));
+
+            int income = chargeIncome + pointRedemptionIncome;
+
+            // Issue #1053: 暗黙的ポイント還元もExpenseから除外
             int expense = groupDetails
-                .Where(d => !d.IsCharge && !d.IsPointRedemption && d.Amount.HasValue)
+                .Where(d => !d.IsCharge && !d.IsPointRedemption
+                            && !SummaryGenerator.IsImplicitPointRedemption(d)
+                            && d.Amount.HasValue)
                 .Sum(d => d.Amount!.Value);
 
             // Balance = グループ内の最後のdetailの残高（時系列順）

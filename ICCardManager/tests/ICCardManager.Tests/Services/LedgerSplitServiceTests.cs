@@ -409,9 +409,9 @@ public class LedgerSplitServiceTests
     }
 
     [Fact]
-    public void CalculateGroupFinancials_PointRedemption_NotCountedAsExpense()
+    public void CalculateGroupFinancials_PointRedemption_CountedAsIncome()
     {
-        // Arrange: ポイント還元はExpenseに含まない
+        // Arrange: ポイント還元はIncomeに含まれ、Expenseには含まない
         var details = new List<LedgerDetail>
         {
             new LedgerDetail
@@ -428,9 +428,69 @@ public class LedgerSplitServiceTests
         var (income, expense, balance) = LedgerSplitService.CalculateGroupFinancials(details);
 
         // Assert
-        income.Should().Be(0, "ポイント還元はIncomeではない");
+        // Issue #1053: ポイント還元はIncomeとして計上（受入金額に記載）
+        income.Should().Be(100, "ポイント還元の金額がIncomeとして計上される");
         expense.Should().Be(0, "ポイント還元はExpenseに含まない");
         balance.Should().Be(600);
+    }
+
+    /// <summary>
+    /// Issue #1053: ポイント還元が負の金額の場合（FeliCa生データ）でも
+    /// 絶対値がIncomeとして計上されること
+    /// </summary>
+    [Fact]
+    public void CalculateGroupFinancials_PointRedemption_NegativeAmount_AbsValueAsIncome()
+    {
+        // Arrange: FeliCaカードではポイント還元が負値で記録される
+        var details = new List<LedgerDetail>
+        {
+            new LedgerDetail
+            {
+                IsPointRedemption = true,
+                Amount = -240,
+                Balance = 1696,
+                SequenceNumber = 1,
+                UseDate = new DateTime(2026, 2, 3, 10, 0, 0)
+            }
+        };
+
+        // Act
+        var (income, expense, balance) = LedgerSplitService.CalculateGroupFinancials(details);
+
+        // Assert
+        income.Should().Be(240, "負の金額でも絶対値がIncomeとして計上される");
+        expense.Should().Be(0, "ポイント還元はExpenseに含まない");
+        balance.Should().Be(1696);
+    }
+
+    /// <summary>
+    /// Issue #1053: 暗黙的ポイント還元（IsPointRedemption=false, Amount&lt;0）でも
+    /// Incomeとして計上されること
+    /// </summary>
+    [Fact]
+    public void CalculateGroupFinancials_ImplicitPointRedemption_CountedAsIncome()
+    {
+        // Arrange: IsPointRedemption=falseだが金額が負 → 暗黙的ポイント還元
+        var details = new List<LedgerDetail>
+        {
+            new LedgerDetail
+            {
+                IsCharge = false,
+                IsPointRedemption = false,
+                Amount = -150,
+                Balance = 650,
+                SequenceNumber = 1,
+                UseDate = new DateTime(2026, 2, 3, 10, 0, 0)
+            }
+        };
+
+        // Act
+        var (income, expense, balance) = LedgerSplitService.CalculateGroupFinancials(details);
+
+        // Assert
+        income.Should().Be(150, "暗黙的ポイント還元（Amount<0, IsCharge=false, IsPointRedemption=false）はIncomeとして計上");
+        expense.Should().Be(0, "暗黙的ポイント還元はExpenseに含まない");
+        balance.Should().Be(650);
     }
 
     /// <summary>
@@ -469,7 +529,8 @@ public class LedgerSplitServiceTests
         var (income, expense, balance) = LedgerSplitService.CalculateGroupFinancials(details);
 
         // Assert
-        income.Should().Be(0, "ポイント還元はIncomeに含まない");
+        // Issue #1053: ポイント還元はIncomeとして計上
+        income.Should().Be(240, "ポイント還元の240円がIncomeとして計上される");
         expense.Should().Be(420, "利用の420円のみ");
         balance.Should().Be(1696, "時系列で最後のポイント還元後の残高が最終残高");
     }
