@@ -1802,6 +1802,7 @@ namespace ICCardManager.Services
 
             // Issue #906: 新規詳細（利用履歴ID空欄）のプレビューアイテム生成
             // Issue #918: カードIDm＋日付ごとにグループ化して表示
+            // Issue #1053: チャージ/ポイント還元境界で分割してセグメントごとに表示
             foreach (var kvp in newDetailsByCardIdmAndDate.OrderBy(x => x.Key.CardIdm).ThenBy(x => x.Key.Date))
             {
                 var cardIdm = kvp.Key.CardIdm;
@@ -1814,20 +1815,50 @@ namespace ICCardManager.Services
                     ? $"{newDetailCardName} ({cardIdm})"
                     : cardIdm;
 
-                // Issue #938: 追加する内容の詳細を表示
-                var insertDetails = detailRows.Select(x => x.Detail).ToList();
-                var insertChanges = CreateInsertDetailChanges(insertDetails);
+                // チャージ/ポイント還元境界で分割
+                var detailList = detailRows.Select(x => x.Detail).ToList();
+                var segments = LendingHistoryAnalyzer.SplitAtChargeBoundaries(detailList);
 
-                items.Add(new CsvImportPreviewItem
+                if (segments.Count <= 1)
                 {
-                    LineNumber = detailRows.First().LineNumber,
-                    Idm = "(自動付与)",
-                    Name = cardDisplayName,
-                    AdditionalInfo = $"{detailRows.Count}件{dateStr}",
-                    Action = ImportAction.Insert,
-                    Changes = insertChanges
-                });
-                newCount++;
+                    // 分割不要：従来通り1アイテムとして表示
+                    // Issue #938: 追加する内容の詳細を表示
+                    var insertDetails = detailRows.Select(x => x.Detail).ToList();
+                    var insertChanges = CreateInsertDetailChanges(insertDetails);
+
+                    items.Add(new CsvImportPreviewItem
+                    {
+                        LineNumber = detailRows.First().LineNumber,
+                        Idm = "(自動付与)",
+                        Name = cardDisplayName,
+                        AdditionalInfo = $"{detailRows.Count}件{dateStr}",
+                        Action = ImportAction.Insert,
+                        Changes = insertChanges
+                    });
+                    newCount++;
+                }
+                else
+                {
+                    // 分割あり：セグメントごとにプレビューアイテムを生成
+                    foreach (var segment in segments)
+                    {
+                        var segmentChanges = CreateInsertDetailChanges(segment.Details);
+                        var segmentType = segment.IsCharge ? "チャージ"
+                            : segment.IsPointRedemption ? "ポイント還元"
+                            : "利用";
+
+                        items.Add(new CsvImportPreviewItem
+                        {
+                            LineNumber = detailRows.First().LineNumber,
+                            Idm = "(自動付与)",
+                            Name = cardDisplayName,
+                            AdditionalInfo = $"{segmentType} {segment.Details.Count}件{dateStr}",
+                            Action = ImportAction.Insert,
+                            Changes = segmentChanges
+                        });
+                        newCount++;
+                    }
+                }
             }
 
             // 既存ledger_idごとにプレビューアイテム生成
@@ -2039,6 +2070,7 @@ namespace ICCardManager.Services
 
             // Issue #906: 新規詳細（利用履歴ID空欄）のLedger自動作成とインポート
             // Issue #918: カードIDm＋日付ごとにグループ化して個別のLedgerを作成
+            // Issue #1053: チャージ/ポイント還元境界で分割し、セグメントごとにLedgerを作成
             foreach (var kvp in newDetailsByCardIdmAndDate)
             {
                 var cardIdm = kvp.Key.CardIdm;
@@ -2048,61 +2080,81 @@ namespace ICCardManager.Services
 
                 try
                 {
-                    // SummaryGeneratorで摘要を自動生成
-                    var summaryGenerator = new SummaryGenerator();
-                    var summary = summaryGenerator.Generate(detailList);
-                    if (string.IsNullOrEmpty(summary))
+                    // チャージ/ポイント還元の位置で利用グループを分割
+                    var segments = LendingHistoryAnalyzer.SplitAtChargeBoundaries(detailList);
+
+                    // セグメントがない場合（空リスト対策）は元のリストで1セグメントとして扱う
+                    if (segments.Count == 0)
                     {
-                        summary = "CSVインポート";
+                        segments = new List<LendingHistoryAnalyzer.DailySegment>
+                        {
+                            new LendingHistoryAnalyzer.DailySegment
+                            {
+                                IsCharge = false,
+                                IsPointRedemption = false,
+                                Details = detailList
+                            }
+                        };
                     }
 
-                    // LedgerSplitServiceと同じロジックで収支・残高を計算
-                    var (income, expense, balance) = LedgerSplitService.CalculateGroupFinancials(detailList);
-
-                    // 日付はグループのキーから取得、DateTime.MinValueの場合は最も古い利用日時、なければ現在日時
-                    var date = kvp.Key.Date;
-                    if (date == DateTime.MinValue)
+                    foreach (var segment in segments)
                     {
-                        date = detailList
-                            .Where(d => d.UseDate.HasValue)
-                            .OrderBy(d => d.UseDate!.Value)
-                            .Select(d => d.UseDate!.Value)
-                            .FirstOrDefault();
-                        if (date == default)
+                        var segmentDetails = segment.Details;
+
+                        // SummaryGeneratorで摘要を自動生成
+                        var summaryGenerator = new SummaryGenerator();
+                        var summary = summaryGenerator.Generate(segmentDetails);
+                        if (string.IsNullOrEmpty(summary))
                         {
-                            date = DateTime.Now;
+                            summary = "CSVインポート";
+                        }
+
+                        // LedgerSplitServiceと同じロジックで収支・残高を計算
+                        var (income, expense, balance) = LedgerSplitService.CalculateGroupFinancials(segmentDetails);
+
+                        // 日付はグループのキーから取得、DateTime.MinValueの場合は最も古い利用日時、なければ現在日時
+                        var date = kvp.Key.Date;
+                        if (date == DateTime.MinValue)
+                        {
+                            date = segmentDetails
+                                .Where(d => d.UseDate.HasValue)
+                                .OrderBy(d => d.UseDate!.Value)
+                                .Select(d => d.UseDate!.Value)
+                                .FirstOrDefault();
+                            if (date == default)
+                            {
+                                date = DateTime.Now;
+                            }
+                        }
+
+                        // Ledgerレコードを自動作成
+                        var newLedger = new Ledger
+                        {
+                            CardIdm = cardIdm,
+                            Date = date,
+                            Summary = summary,
+                            Income = income,
+                            Expense = expense,
+                            Balance = balance
+                        };
+
+                        var newLedgerId = await _ledgerRepository.InsertAsync(newLedger);
+
+                        // 詳細をインサート
+                        var success = await _ledgerRepository.InsertDetailsAsync(newLedgerId, segmentDetails);
+
+                        if (!success)
+                        {
+                            errors.Add(new CsvImportError
+                            {
+                                LineNumber = firstLineNumber,
+                                Message = $"カード {cardIdm} の新規詳細の挿入に失敗しました",
+                                Data = cardIdm
+                            });
                         }
                     }
 
-                    // Ledgerレコードを自動作成
-                    var newLedger = new Ledger
-                    {
-                        CardIdm = cardIdm,
-                        Date = date,
-                        Summary = summary,
-                        Income = income,
-                        Expense = expense,
-                        Balance = balance
-                    };
-
-                    var newLedgerId = await _ledgerRepository.InsertAsync(newLedger);
-
-                    // 詳細をインサート
-                    var success = await _ledgerRepository.InsertDetailsAsync(newLedgerId, detailList);
-
-                    if (success)
-                    {
-                        importedCount += detailRows.Count;
-                    }
-                    else
-                    {
-                        errors.Add(new CsvImportError
-                        {
-                            LineNumber = firstLineNumber,
-                            Message = $"カード {cardIdm} の新規詳細の挿入に失敗しました",
-                            Data = cardIdm
-                        });
-                    }
+                    importedCount += detailRows.Count;
                 }
                 catch (Exception ex)
                 {
