@@ -734,6 +734,138 @@ public class MainViewModelTests
     }
 
     #endregion
+
+    #region 全カード残高整合性チェック（Issue #1058）
+
+    [Fact]
+    public async Task CheckAllCardsConsistencyAsync_不整合のあるカードに警告が追加されること()
+    {
+        // Arrange: カード1件を返す
+        var card = new IcCard
+        {
+            CardIdm = "0101020304050607",
+            CardType = "はやかけん",
+            CardNumber = "5042",
+            IsDeleted = false
+        };
+        _cardRepositoryMock.Setup(r => r.GetAllAsync())
+            .ReturnsAsync(new List<IcCard> { card });
+
+        // 不整合のあるLedgerデータ: 2件目の残高が不正
+        var ledgers = new List<Ledger>
+        {
+            new Ledger { Id = 1, CardIdm = card.CardIdm, Date = new DateTime(2026, 2, 27), Income = 0, Expense = 210, Balance = 1736 },
+            new Ledger { Id = 2, CardIdm = card.CardIdm, Date = new DateTime(2026, 3, 2), Income = 0, Expense = 210, Balance = 1426 }
+            // 期待値: 1736 - 210 = 1526 ≠ 1426
+        };
+        _ledgerRepositoryMock.Setup(r => r.GetByDateRangeAsync(
+                card.CardIdm, It.IsAny<DateTime>(), It.IsAny<DateTime>()))
+            .ReturnsAsync(ledgers);
+
+        // Act
+        await _viewModel.CheckAllCardsConsistencyAsync();
+
+        // Assert
+        _viewModel.WarningMessages.Should().ContainSingle(w =>
+            w.Type == WarningType.BalanceInconsistency &&
+            w.CardIdm == card.CardIdm);
+        _viewModel.WarningMessages.First(w => w.Type == WarningType.BalanceInconsistency)
+            .DisplayText.Should().Contain("1件");
+    }
+
+    [Fact]
+    public async Task CheckAllCardsConsistencyAsync_整合性のあるカードには警告が追加されないこと()
+    {
+        // Arrange
+        var card = new IcCard
+        {
+            CardIdm = "0101020304050607",
+            CardType = "はやかけん",
+            CardNumber = "5042",
+            IsDeleted = false
+        };
+        _cardRepositoryMock.Setup(r => r.GetAllAsync())
+            .ReturnsAsync(new List<IcCard> { card });
+
+        // 整合性のあるLedgerデータ
+        var ledgers = new List<Ledger>
+        {
+            new Ledger { Id = 1, CardIdm = card.CardIdm, Date = new DateTime(2026, 2, 27), Income = 0, Expense = 210, Balance = 1736 },
+            new Ledger { Id = 2, CardIdm = card.CardIdm, Date = new DateTime(2026, 3, 2), Income = 0, Expense = 210, Balance = 1526 }
+            // 期待値: 1736 - 210 = 1526 ✓
+        };
+        _ledgerRepositoryMock.Setup(r => r.GetByDateRangeAsync(
+                card.CardIdm, It.IsAny<DateTime>(), It.IsAny<DateTime>()))
+            .ReturnsAsync(ledgers);
+
+        // Act
+        await _viewModel.CheckAllCardsConsistencyAsync();
+
+        // Assert
+        _viewModel.WarningMessages.Should().NotContain(w =>
+            w.Type == WarningType.BalanceInconsistency);
+    }
+
+    [Fact]
+    public async Task CheckAllCardsConsistencyAsync_削除済みカードはスキップされること()
+    {
+        // Arrange
+        var deletedCard = new IcCard
+        {
+            CardIdm = "0101020304050607",
+            CardType = "はやかけん",
+            CardNumber = "5042",
+            IsDeleted = true
+        };
+        _cardRepositoryMock.Setup(r => r.GetAllAsync())
+            .ReturnsAsync(new List<IcCard> { deletedCard });
+
+        // Act
+        await _viewModel.CheckAllCardsConsistencyAsync();
+
+        // Assert: 削除済みカードに対してはチェックが実行されない
+        _ledgerRepositoryMock.Verify(
+            r => r.GetByDateRangeAsync(It.IsAny<string>(), It.IsAny<DateTime>(), It.IsAny<DateTime>()),
+            Times.Never);
+        _viewModel.WarningMessages.Should().NotContain(w =>
+            w.Type == WarningType.BalanceInconsistency);
+    }
+
+    [Fact]
+    public async Task CheckAllCardsConsistencyAsync_既存の不整合警告が更新されること()
+    {
+        // Arrange: 既存の警告がある状態
+        _viewModel.WarningMessages.Add(new WarningItem
+        {
+            DisplayText = "⚠️ 残高の不整合が3件あります（はやかけん 5042）",
+            Type = WarningType.BalanceInconsistency,
+            CardIdm = "0101020304050607"
+        });
+
+        var card = new IcCard
+        {
+            CardIdm = "0101020304050607",
+            CardType = "はやかけん",
+            CardNumber = "5042",
+            IsDeleted = false
+        };
+        _cardRepositoryMock.Setup(r => r.GetAllAsync())
+            .ReturnsAsync(new List<IcCard> { card });
+
+        // 整合性が取れているデータ（不整合が解消された状態）
+        _ledgerRepositoryMock.Setup(r => r.GetByDateRangeAsync(
+                card.CardIdm, It.IsAny<DateTime>(), It.IsAny<DateTime>()))
+            .ReturnsAsync(new List<Ledger>());
+
+        // Act
+        await _viewModel.CheckAllCardsConsistencyAsync();
+
+        // Assert: 既存の警告が削除されていること
+        _viewModel.WarningMessages.Should().NotContain(w =>
+            w.Type == WarningType.BalanceInconsistency);
+    }
+
+    #endregion
 }
 
 /*

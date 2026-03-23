@@ -1504,6 +1504,53 @@ public partial class MainViewModel : ViewModelBase
         }
     }
 
+    /// <summary>
+    /// Issue #1058: 全カードの残高整合性をチェックし、不整合があれば警告を表示
+    /// </summary>
+    /// <remarks>
+    /// インポート後など、特定のカード・期間に限定できない場合に使用します。
+    /// CheckAndNotifyConsistencyAsyncはHistoryCard・HistoryFromDate/ToDateに依存するため、
+    /// 履歴画面が開いていない場合や、インポート対象が表示期間外の場合に対応できません。
+    /// </remarks>
+    internal async Task CheckAllCardsConsistencyAsync()
+    {
+        var cards = await _cardRepository.GetAllAsync();
+
+        foreach (var card in cards)
+        {
+            if (card.IsDeleted) continue;
+
+            // 全期間をチェック（SQLiteのdate型互換の範囲を使用）
+            var checkResult = await _ledgerConsistencyChecker.CheckBalanceConsistencyAsync(
+                card.CardIdm, new DateTime(2000, 1, 1), new DateTime(2099, 12, 31));
+
+            // 既存の同カードの残高不整合警告を削除（重複防止）
+            var existingWarnings = WarningMessages
+                .Where(w => w.Type == WarningType.BalanceInconsistency && w.CardIdm == card.CardIdm)
+                .ToList();
+            foreach (var warning in existingWarnings)
+            {
+                WarningMessages.Remove(warning);
+            }
+
+            if (!checkResult.IsConsistent)
+            {
+                WarningMessages.Add(new WarningItem
+                {
+                    DisplayText = $"⚠️ 残高の不整合が{checkResult.Inconsistencies.Count}件あります（{card.CardType} {card.CardNumber}）",
+                    Type = WarningType.BalanceInconsistency,
+                    CardIdm = card.CardIdm
+                });
+            }
+        }
+
+        // 現在表示中のカードのハイライトも更新
+        if (HistoryCard != null)
+        {
+            await CheckAndNotifyConsistencyAsync();
+        }
+    }
+
     #endregion
 
     #region 履歴統合（Issue #548）
@@ -2012,6 +2059,10 @@ public partial class MainViewModel : ViewModelBase
             {
                 await LoadHistoryLedgersAsync();
             }
+            // Issue #1058: インポート後に警告・残高整合性チェックを実行
+            // CheckAndNotifyConsistencyAsyncはHistoryCard依存のため、全カード対象チェックを使用
+            await CheckWarningsAsync();
+            await CheckAllCardsConsistencyAsync();
         }
     }
 
