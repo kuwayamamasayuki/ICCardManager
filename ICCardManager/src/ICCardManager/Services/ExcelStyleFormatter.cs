@@ -111,6 +111,10 @@ namespace ICCardManager.Services
             var amountRange = worksheet.Range(row, 5, row, 7);
             amountRange.Style.Font.FontSize = 16;
 
+            // Issue #1071: 金額列（受入E・払出F・残額G）は6桁以上になりうるため、
+            // 縮小して全体を表示する
+            amountRange.Style.Alignment.ShrinkToFit = true;
+
             // B列からD列を結合（摘要）
             var summaryRange = worksheet.Range(row, 2, row, 4);
             summaryRange.Merge();
