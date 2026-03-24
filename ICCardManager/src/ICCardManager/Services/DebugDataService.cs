@@ -4,6 +4,7 @@ using System.Linq;
 using System.Threading.Tasks;
 #if DEBUG
 using ICCardManager.Common;
+using ICCardManager.Data;
 using ICCardManager.Data.Repositories;
 using ICCardManager.Models;
 
@@ -14,6 +15,7 @@ namespace ICCardManager.Services
     /// </summary>
     public class DebugDataService
     {
+        private readonly DbContext _dbContext;
         private readonly IStaffRepository _staffRepository;
         private readonly ICardRepository _cardRepository;
         private readonly ILedgerRepository _ledgerRepository;
@@ -58,10 +60,12 @@ namespace ICCardManager.Services
         };
 
         public DebugDataService(
+            DbContext dbContext,
             IStaffRepository staffRepository,
             ICardRepository cardRepository,
             ILedgerRepository ledgerRepository)
         {
+            _dbContext = dbContext;
             _staffRepository = staffRepository;
             _cardRepository = cardRepository;
             _ledgerRepository = ledgerRepository;
@@ -70,12 +74,28 @@ namespace ICCardManager.Services
         /// <summary>
         /// 全テストデータを登録
         /// </summary>
+        /// <remarks>
+        /// Issue #1074: 全INSERT操作を単一トランザクションで囲むことで高速化。
+        /// SQLiteではトランザクションなしの場合、各INSERTごとに暗黙的トランザクション+
+        /// fsyncが発生するため、約12,000件のINSERTが非常に遅くなる。
+        /// 単一トランザクションで囲むことで fsync を1回に削減し、50-100倍高速化する。
+        /// </remarks>
         public async Task RegisterAllTestDataAsync()
         {
-            await RegisterTestStaffAsync();
-            await RegisterTestCardsAsync();
-            var finalBalances = await RegisterSampleHistoryAsync();
-            await RegisterSpecialScenariosAsync(finalBalances);
+            using var transaction = _dbContext.BeginTransaction();
+            try
+            {
+                await RegisterTestStaffAsync();
+                await RegisterTestCardsAsync();
+                var finalBalances = await RegisterSampleHistoryAsync();
+                await RegisterSpecialScenariosAsync(finalBalances);
+                transaction.Commit();
+            }
+            catch
+            {
+                transaction.Rollback();
+                throw;
+            }
         }
 
         /// <summary>

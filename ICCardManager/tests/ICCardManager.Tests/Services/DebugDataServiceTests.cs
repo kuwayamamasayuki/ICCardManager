@@ -1,5 +1,7 @@
 #if DEBUG
+using System.Data.SQLite;
 using FluentAssertions;
+using ICCardManager.Data;
 using ICCardManager.Data.Repositories;
 using ICCardManager.Models;
 using ICCardManager.Services;
@@ -17,8 +19,10 @@ namespace ICCardManager.Tests.Services;
 /// DebugDataServiceの単体テスト（Issue #803）
 /// テストデータの残高チェーン整合性を検証する。
 /// </summary>
-public class DebugDataServiceTests
+public class DebugDataServiceTests : IDisposable
 {
+    private readonly SQLiteConnection _connection;
+    private readonly Mock<DbContext> _dbContextMock;
     private readonly Mock<IStaffRepository> _staffRepoMock;
     private readonly Mock<ICardRepository> _cardRepoMock;
     private readonly Mock<ILedgerRepository> _ledgerRepoMock;
@@ -32,9 +36,18 @@ public class DebugDataServiceTests
 
     public DebugDataServiceTests()
     {
+        _dbContextMock = new Mock<DbContext>();
         _staffRepoMock = new Mock<IStaffRepository>();
         _cardRepoMock = new Mock<ICardRepository>();
         _ledgerRepoMock = new Mock<ILedgerRepository>();
+
+        // トランザクションのモック（Issue #1074: 全操作をトランザクションで囲む対応）
+        // SQLiteTransactionはパラメータなしコンストラクタがないためMoqでモック不可。
+        // 実際のインメモリ接続からトランザクションを取得する。
+        _connection = new SQLiteConnection("Data Source=:memory:");
+        _connection.Open();
+        var transaction = _connection.BeginTransaction();
+        _dbContextMock.Setup(x => x.BeginTransaction()).Returns(transaction);
 
         // 全職員・全カード未登録
         _staffRepoMock.Setup(r => r.GetByIdmAsync(It.IsAny<string>(), It.IsAny<bool>()))
@@ -65,6 +78,7 @@ public class DebugDataServiceTests
             .ReturnsAsync(true);
 
         _service = new DebugDataService(
+            _dbContextMock.Object,
             _staffRepoMock.Object,
             _cardRepoMock.Object,
             _ledgerRepoMock.Object);
@@ -257,5 +271,10 @@ public class DebugDataServiceTests
     }
 
     #endregion
+
+    public void Dispose()
+    {
+        _connection?.Dispose();
+    }
 }
 #endif
