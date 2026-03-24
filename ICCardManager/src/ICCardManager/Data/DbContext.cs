@@ -105,7 +105,7 @@ namespace ICCardManager.Data
         /// <summary>
         /// データベース接続を取得
         /// </summary>
-        public SQLiteConnection GetConnection()
+        public virtual SQLiteConnection GetConnection()
         {
             if (_connection == null)
             {

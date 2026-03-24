@@ -76,19 +76,20 @@ namespace ICCardManager.Services
         /// </summary>
         /// <remarks>
         /// Issue #1074: 全INSERT操作を単一トランザクションで囲むことで高速化。
-        /// SQLiteではトランザクションなしの場合、各INSERTごとに暗黙的トランザクション+
-        /// fsyncが発生するため、約12,000件のINSERTが非常に遅くなる。
-        /// 単一トランザクションで囲むことで fsync を1回に削減し、50-100倍高速化する。
+        /// Issue #1075: 毎回クリーンに再生成することで残高チェーンの整合性を保証。
+        /// 以前の「継ぎ足し」方式（既存データがあればスキップ）では、
+        /// 日付の経過に伴い重複レコードが生成され残高チェーンが壊れていた。
         /// </remarks>
         public async Task RegisterAllTestDataAsync()
         {
             using var transaction = _dbContext.BeginTransaction();
             try
             {
+                await CleanExistingTestDataAsync();
                 await RegisterTestStaffAsync();
                 await RegisterTestCardsAsync();
-                var finalBalances = await RegisterSampleHistoryAsync();
-                await RegisterSpecialScenariosAsync(finalBalances);
+                var (finalBalances, fiscalYearBoundaryBalances) = await RegisterSampleHistoryAsync();
+                await RegisterSpecialScenariosAsync(finalBalances, fiscalYearBoundaryBalances);
                 transaction.Commit();
             }
             catch
@@ -99,18 +100,60 @@ namespace ICCardManager.Services
         }
 
         /// <summary>
+        /// 既存のテストデータを削除
+        /// </summary>
+        /// <remarks>
+        /// Issue #1075: 継ぎ足しによる残高不整合を防ぐため、毎回クリーンに再生成する。
+        /// テストカード・テスト職員のIDmで特定されるデータのみを削除し、
+        /// 本番データには影響を与えない。
+        /// </remarks>
+        internal async Task CleanExistingTestDataAsync()
+        {
+            var connection = _dbContext.GetConnection();
+
+            var testCardIdms = string.Join(",", TestCardList.Select(c => $"'{c.CardIdm}'"));
+            var testStaffIdms = string.Join(",", TestStaffList.Select(s => $"'{s.StaffIdm}'"));
+
+            // 台帳詳細を削除（外部キー制約のため先に削除）
+            using (var cmd = connection.CreateCommand())
+            {
+                cmd.CommandText = $"DELETE FROM ledger_detail WHERE ledger_id IN (SELECT id FROM ledger WHERE card_idm IN ({testCardIdms}))";
+                await cmd.ExecuteNonQueryAsync();
+            }
+
+            // 台帳を削除
+            using (var cmd = connection.CreateCommand())
+            {
+                cmd.CommandText = $"DELETE FROM ledger WHERE card_idm IN ({testCardIdms})";
+                await cmd.ExecuteNonQueryAsync();
+            }
+
+            // テストカードを削除
+            using (var cmd = connection.CreateCommand())
+            {
+                cmd.CommandText = $"DELETE FROM ic_card WHERE card_idm IN ({testCardIdms})";
+                await cmd.ExecuteNonQueryAsync();
+            }
+
+            // テスト職員を削除
+            using (var cmd = connection.CreateCommand())
+            {
+                cmd.CommandText = $"DELETE FROM staff WHERE staff_idm IN ({testStaffIdms})";
+                await cmd.ExecuteNonQueryAsync();
+            }
+
+            System.Diagnostics.Debug.WriteLine("[DEBUG] 既存テストデータを削除しました");
+        }
+
+        /// <summary>
         /// テスト職員を登録
         /// </summary>
         public async Task RegisterTestStaffAsync()
         {
             foreach (var staff in TestStaffList)
             {
-                var existing = await _staffRepository.GetByIdmAsync(staff.StaffIdm);
-                if (existing == null)
-                {
-                    await _staffRepository.InsertAsync(staff);
-                    System.Diagnostics.Debug.WriteLine($"[DEBUG] テスト職員登録: {staff.Name} ({staff.StaffIdm})");
-                }
+                await _staffRepository.InsertAsync(staff);
+                System.Diagnostics.Debug.WriteLine($"[DEBUG] テスト職員登録: {staff.Name} ({staff.StaffIdm})");
             }
         }
 
@@ -121,12 +164,8 @@ namespace ICCardManager.Services
         {
             foreach (var card in TestCardList)
             {
-                var existing = await _cardRepository.GetByIdmAsync(card.CardIdm);
-                if (existing == null)
-                {
-                    await _cardRepository.InsertAsync(card);
-                    System.Diagnostics.Debug.WriteLine($"[DEBUG] テストカード登録: {card.CardType} {card.CardNumber} ({card.CardIdm})");
-                }
+                await _cardRepository.InsertAsync(card);
+                System.Diagnostics.Debug.WriteLine($"[DEBUG] テストカード登録: {card.CardType} {card.CardNumber} ({card.CardIdm})");
             }
         }
 
@@ -137,27 +176,31 @@ namespace ICCardManager.Services
         /// 各月50件以上のレコードを生成（ページングテスト用）
         /// - 平日は毎日2-3件のレコードを生成
         /// - 約22平日/月 × 2-3件 = 50-70件/月
+        ///
+        /// Issue #1075: N-002（年度繰越カード）は年度境界日（3/31, 4/1）をスキップし、
+        /// 繰越レコードとの日付重複を回避する。境界時点の残高を別途返却する。
         /// </remarks>
-        /// <returns>各カードIDmをキーとした最終残高のDictionary</returns>
-        public async Task<Dictionary<string, int>> RegisterSampleHistoryAsync()
+        /// <returns>
+        /// finalBalances: 各カードIDmをキーとした最終残高のDictionary。
+        /// fiscalYearBoundaryBalances: 年度境界時点の残高（N-002のみ）。
+        /// </returns>
+        public async Task<(Dictionary<string, int> finalBalances, Dictionary<string, int> fiscalYearBoundaryBalances)> RegisterSampleHistoryAsync()
         {
             var finalBalances = new Dictionary<string, int>();
+            var fiscalYearBoundaryBalances = new Dictionary<string, int>();
             var random = new Random(42); // 再現性のためシード固定
             var today = DateTime.Now.Date;
+
+            // N-002の年度境界日を計算
+            var fiscalYear = FiscalYearHelper.GetFiscalYear(today);
+            var fiscalYearStart = FiscalYearHelper.GetFiscalYearStart(fiscalYear);
+            var previousFiscalYearEnd = fiscalYearStart.AddDays(-1); // 3月31日
 
             // 各カードに対してサンプル履歴を登録
             // Su-001は新規購入～払い戻しのライフサイクルで個別生成するため除外
             var cardsForSampleHistory = TestCardList.Where(c => c.CardIdm != TestCardList[3].CardIdm);
             foreach (var card in cardsForSampleHistory)
             {
-                // 既存の履歴があるかチェック
-                var existingHistory = await _ledgerRepository.GetByMonthAsync(card.CardIdm, today.Year, today.Month);
-                if (existingHistory.Any())
-                {
-                    System.Diagnostics.Debug.WriteLine($"[DEBUG] 履歴が既に存在: {card.CardNumber}");
-                    continue;
-                }
-
                 var balance = InitialBalance; // 初期残高（長期間・大量データ用に増額）
                 var staffName = TestStaffList[random.Next(TestStaffList.Length)].Name;
 
@@ -166,6 +209,10 @@ namespace ICCardManager.Services
                 var cutoffDate = (card.CardIdm == TestCardList[0].CardIdm)
                     ? FindNthWeekendDayBefore(today, 6) // 最古の特殊シナリオ日
                     : (DateTime?)null;
+
+                // N-002（年度繰越カード）の判定
+                var isN002 = card.CardIdm == TestCardList[5].CardIdm;
+                bool boundaryBalanceCaptured = false;
 
                 // 過去180日分（約6ヶ月）のサンプル履歴を生成
                 // 各月50件以上のデータでページングテストが可能
@@ -180,6 +227,19 @@ namespace ICCardManager.Services
                     // H-001: 特殊シナリオ日以降は生成停止（残高チェーン連続性のため）
                     if (cutoffDate.HasValue && date >= cutoffDate.Value)
                         break;
+
+                    // N-002: 年度境界日（3/31, 4/1）をスキップ（繰越レコードとの重複回避）
+                    if (isN002)
+                    {
+                        // 境界に到達したら現在の残高をキャプチャ
+                        if (!boundaryBalanceCaptured && date >= previousFiscalYearEnd)
+                        {
+                            fiscalYearBoundaryBalances[card.CardIdm] = balance;
+                            boundaryBalanceCaptured = true;
+                        }
+                        if (date.Date == previousFiscalYearEnd.Date || date.Date == fiscalYearStart.Date)
+                            continue;
+                    }
 
                     // 残高が少ない場合はチャージ
                     if (balance < 3000)
@@ -333,7 +393,7 @@ namespace ICCardManager.Services
                 System.Diagnostics.Debug.WriteLine($"[DEBUG] サンプル履歴登録完了: {card.CardNumber} (残高: {balance})");
             }
 
-            return finalBalances;
+            return (finalBalances, fiscalYearBoundaryBalances);
         }
 
         /// <summary>
@@ -351,7 +411,10 @@ namespace ICCardManager.Services
         /// 日付重複による残高チェーン不整合を回避する。
         /// </remarks>
         /// <param name="finalBalances">RegisterSampleHistoryAsyncから受け取った各カードの最終残高</param>
-        public async Task RegisterSpecialScenariosAsync(Dictionary<string, int> finalBalances)
+        /// <param name="fiscalYearBoundaryBalances">年度境界時点の残高（N-002用）</param>
+        public async Task RegisterSpecialScenariosAsync(
+            Dictionary<string, int> finalBalances,
+            Dictionary<string, int> fiscalYearBoundaryBalances)
         {
             var today = DateTime.Now.Date;
             var staffName = TestStaffList[0].Name; // 山田太郎
@@ -361,7 +424,11 @@ namespace ICCardManager.Services
             await RegisterTransferAndSpecialUsageAsync(TestCardList[0].CardIdm, today, staffName, h001Balance);
 
             // ── カード N-002: 年度繰越パターン ──
-            await RegisterFiscalYearCarryoverAsync(TestCardList[5].CardIdm, today, staffName);
+            // Issue #1075: サンプル履歴の年度境界時点の残高を使用（固定値ではなく実際の残高）
+            var n002CarryoverBalance = fiscalYearBoundaryBalances.TryGetValue(TestCardList[5].CardIdm, out var n002Bal)
+                ? n002Bal
+                : InitialBalance;
+            await RegisterFiscalYearCarryoverAsync(TestCardList[5].CardIdm, today, staffName, n002CarryoverBalance);
 
             // ── カード Su-001: 新規購入・払い戻し ──
             await RegisterPurchaseAndRefundAsync(TestCardList[3].CardIdm, today, staffName);
@@ -378,18 +445,6 @@ namespace ICCardManager.Services
         /// </remarks>
         private async Task RegisterTransferAndSpecialUsageAsync(string cardIdm, DateTime today, string staffName, int currentBalance)
         {
-            // 既に特殊パターンが登録済みかチェック（ポイント還元レコードの存在で判定）
-            // 当月と前月の両方をチェック（月跨ぎ対応）
-            var recentHistory = await _ledgerRepository.GetByMonthAsync(cardIdm, today.Year, today.Month);
-            var prevMonth = today.AddMonths(-1);
-            var prevHistory = await _ledgerRepository.GetByMonthAsync(cardIdm, prevMonth.Year, prevMonth.Month);
-            var allRecent = recentHistory.Concat(prevHistory);
-            if (allRecent.Any(l => l.Summary == SummaryGenerator.GetPointRedemptionSummary()))
-            {
-                System.Diagnostics.Debug.WriteLine("[DEBUG] 特殊パターン(H-001)は登録済み");
-                return;
-            }
-
             var balance = currentBalance;
 
             // 週末日を6つ取得（n=6が最古、n=1が最新）
@@ -633,22 +688,19 @@ namespace ICCardManager.Services
         /// <summary>
         /// 年度繰越パターンを登録
         /// </summary>
-        private async Task RegisterFiscalYearCarryoverAsync(string cardIdm, DateTime today, string staffName)
+        /// <remarks>
+        /// Issue #1075: 繰越額はサンプル履歴の年度境界時点の実際の残高を使用し、
+        /// 残高チェーンの整合性を保証する。
+        /// </remarks>
+        /// <param name="cardIdm">カードIDm</param>
+        /// <param name="today">基準日</param>
+        /// <param name="staffName">職員名</param>
+        /// <param name="carryoverAmount">繰越額（サンプル履歴の年度境界時点の残高）</param>
+        private async Task RegisterFiscalYearCarryoverAsync(string cardIdm, DateTime today, string staffName, int carryoverAmount)
         {
             // 直近の年度境界を計算（日本の会計年度: 4月～翌年3月）
             var fiscalYearStart = FiscalYearHelper.GetFiscalYearStart(FiscalYearHelper.GetFiscalYear(today));
             var previousFiscalYearEnd = fiscalYearStart.AddDays(-1); // 3月31日
-
-            // 既に繰越パターンが登録済みかチェック
-            var marchHistory = await _ledgerRepository.GetByMonthAsync(
-                cardIdm, previousFiscalYearEnd.Year, previousFiscalYearEnd.Month);
-            if (marchHistory.Any(l => l.Summary == SummaryGenerator.GetCarryoverToNextYearSummary()))
-            {
-                System.Diagnostics.Debug.WriteLine("[DEBUG] 特殊パターン(N-002: 年度繰越)は登録済み");
-                return;
-            }
-
-            var carryoverAmount = InitialBalance; // 繰越額（通常データの初期残高と一致させる）
 
             // ── 3月31日: 次年度への繰越 ──
             var carryoverOut = new Ledger
@@ -678,7 +730,7 @@ namespace ICCardManager.Services
             };
             await _ledgerRepository.InsertAsync(carryoverIn);
 
-            System.Diagnostics.Debug.WriteLine("[DEBUG] 特殊パターン(N-002: 年度繰越)登録完了");
+            System.Diagnostics.Debug.WriteLine($"[DEBUG] 特殊パターン(N-002: 年度繰越)登録完了 (繰越額: {carryoverAmount})");
         }
 
         /// <summary>
@@ -691,19 +743,11 @@ namespace ICCardManager.Services
         /// </remarks>
         private async Task RegisterPurchaseAndRefundAsync(string cardIdm, DateTime today, string staffName)
         {
-            // 既に新規購入パターンが登録済みかチェック
-            var date170 = today.AddDays(-170);
-            var oldHistory = await _ledgerRepository.GetByMonthAsync(cardIdm, date170.Year, date170.Month);
-            if (oldHistory.Any(l => l.Summary == "新規購入"))
-            {
-                System.Diagnostics.Debug.WriteLine("[DEBUG] 特殊パターン(Su-001: 新規購入・払い戻し)は登録済み");
-                return;
-            }
-
             var random = new Random(731); // 再現性のためシード固定
             var purchaseAmount = 1500; // デポジット500円は含まない（カード残高として管理される額）
 
             // ── 170日前: 新規購入 ──
+            var date170 = today.AddDays(-170);
             var balance = purchaseAmount;
             var purchaseLedger = new Ledger
             {

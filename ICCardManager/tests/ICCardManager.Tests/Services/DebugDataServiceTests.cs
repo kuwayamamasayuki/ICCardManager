@@ -1,6 +1,7 @@
 #if DEBUG
 using System.Data.SQLite;
 using FluentAssertions;
+using ICCardManager.Common;
 using ICCardManager.Data;
 using ICCardManager.Data.Repositories;
 using ICCardManager.Models;
@@ -16,7 +17,7 @@ using System.Threading.Tasks;
 namespace ICCardManager.Tests.Services;
 
 /// <summary>
-/// DebugDataServiceの単体テスト（Issue #803）
+/// DebugDataServiceの単体テスト（Issue #803, #1075）
 /// テストデータの残高チェーン整合性を検証する。
 /// </summary>
 public class DebugDataServiceTests : IDisposable
@@ -41,22 +42,28 @@ public class DebugDataServiceTests : IDisposable
         _cardRepoMock = new Mock<ICardRepository>();
         _ledgerRepoMock = new Mock<ILedgerRepository>();
 
-        // トランザクションのモック（Issue #1074: 全操作をトランザクションで囲む対応）
-        // SQLiteTransactionはパラメータなしコンストラクタがないためMoqでモック不可。
-        // 実際のインメモリ接続からトランザクションを取得する。
+        // トランザクションとコネクションのモック
         _connection = new SQLiteConnection("Data Source=:memory:");
         _connection.Open();
+
+        // CleanExistingTestDataAsyncのDELETE文が実行できるよう最低限のテーブルを作成
+        using (var cmd = _connection.CreateCommand())
+        {
+            cmd.CommandText = @"
+                CREATE TABLE IF NOT EXISTS staff (staff_idm TEXT PRIMARY KEY);
+                CREATE TABLE IF NOT EXISTS ic_card (card_idm TEXT PRIMARY KEY);
+                CREATE TABLE IF NOT EXISTS ledger (id INTEGER PRIMARY KEY, card_idm TEXT);
+                CREATE TABLE IF NOT EXISTS ledger_detail (ledger_id INTEGER);";
+            cmd.ExecuteNonQuery();
+        }
+
         var transaction = _connection.BeginTransaction();
         _dbContextMock.Setup(x => x.BeginTransaction()).Returns(transaction);
+        _dbContextMock.Setup(x => x.GetConnection()).Returns(_connection);
 
-        // 全職員・全カード未登録
-        _staffRepoMock.Setup(r => r.GetByIdmAsync(It.IsAny<string>(), It.IsAny<bool>()))
-            .ReturnsAsync((Staff?)null);
+        // 職員・カード挿入は常に成功
         _staffRepoMock.Setup(r => r.InsertAsync(It.IsAny<Staff>()))
             .ReturnsAsync(true);
-
-        _cardRepoMock.Setup(r => r.GetByIdmAsync(It.IsAny<string>(), It.IsAny<bool>()))
-            .ReturnsAsync((IcCard?)null);
         _cardRepoMock.Setup(r => r.InsertAsync(It.IsAny<IcCard>()))
             .ReturnsAsync(true);
 
@@ -68,10 +75,6 @@ public class DebugDataServiceTests : IDisposable
                 _capturedLedgers.Add(l);
                 return Task.FromResult(l.Id);
             });
-
-        // 既存履歴なし（初回実行想定）
-        _ledgerRepoMock.Setup(r => r.GetByMonthAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<int>()))
-            .ReturnsAsync(new List<Ledger>());
 
         // 詳細挿入は常に成功
         _ledgerRepoMock.Setup(r => r.InsertDetailAsync(It.IsAny<LedgerDetail>()))
@@ -221,30 +224,70 @@ public class DebugDataServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task RegisterAllTestDataAsync_CarryoverMatchesInitialBalance()
+    public async Task RegisterAllTestDataAsync_CarryoverBalanceChainIsConsistent()
     {
         // Act
         await _service.RegisterAllTestDataAsync();
 
-        // Assert: N-002の年度繰越額がInitialBalanceと一致
+        // Assert: N-002の年度繰越レコードが存在し、残高チェーンが整合していること
         var n002Idm = DebugDataService.TestCardList[5].CardIdm;
         var carryoverIn = _capturedLedgers
             .FirstOrDefault(l => l.CardIdm == n002Idm &&
                                  l.Summary == SummaryGenerator.GetCarryoverFromPreviousYearSummary());
 
         carryoverIn.Should().NotBeNull("前年度からの繰越レコードが存在するべき");
-        carryoverIn!.Income.Should().Be(DebugDataService.InitialBalance,
-            $"繰越額はInitialBalance({DebugDataService.InitialBalance})と一致するべき");
-        carryoverIn.Balance.Should().Be(DebugDataService.InitialBalance,
-            $"繰越後の残高はInitialBalance({DebugDataService.InitialBalance})と一致するべき");
 
         var carryoverOut = _capturedLedgers
             .FirstOrDefault(l => l.CardIdm == n002Idm &&
                                  l.Summary == SummaryGenerator.GetCarryoverToNextYearSummary());
 
         carryoverOut.Should().NotBeNull("次年度への繰越レコードが存在するべき");
-        carryoverOut!.Expense.Should().Be(DebugDataService.InitialBalance,
-            $"繰越払出額はInitialBalance({DebugDataService.InitialBalance})と一致するべき");
+
+        // 繰越OUT/INの金額が一致すること
+        carryoverOut!.Expense.Should().Be(carryoverIn!.Income,
+            "繰越OUTの払出額と繰越INの受入額は一致するべき");
+
+        // 繰越OUTの残高は0であること
+        carryoverOut.Balance.Should().Be(0, "次年度への繰越後の残高は0であるべき");
+
+        // 繰越INの残高は受入額と一致すること
+        carryoverIn.Balance.Should().Be(carryoverIn.Income,
+            "前年度からの繰越後の残高は受入額と一致するべき");
+
+        // 繰越レコードの前後のサンプル履歴と残高が連続していること
+        // （RegisterAllTestDataAsync_BalanceChainsAreConsistent で全体チェック済み）
+    }
+
+    [Fact]
+    public async Task RegisterAllTestDataAsync_N002CarryoverDoesNotCollideWithSampleHistory()
+    {
+        // Act
+        await _service.RegisterAllTestDataAsync();
+
+        // Assert: N-002の年度境界日（3/31, 4/1）にサンプル履歴レコードが存在しないこと
+        var n002Idm = DebugDataService.TestCardList[5].CardIdm;
+        var today = DateTime.Now.Date;
+        var fiscalYear = FiscalYearHelper.GetFiscalYear(today);
+        var fiscalYearStart = FiscalYearHelper.GetFiscalYearStart(fiscalYear);
+        var previousFiscalYearEnd = fiscalYearStart.AddDays(-1);
+
+        var n002Ledgers = _capturedLedgers.Where(l => l.CardIdm == n002Idm).ToList();
+
+        // 3/31のレコードは繰越OUTのみであること
+        var march31Records = n002Ledgers.Where(l => l.Date.Date == previousFiscalYearEnd.Date).ToList();
+        foreach (var record in march31Records)
+        {
+            record.Summary.Should().Be(SummaryGenerator.GetCarryoverToNextYearSummary(),
+                $"3/31のレコードは繰越OUTのみであるべき（実際: {record.Summary}）");
+        }
+
+        // 4/1のレコードは繰越INのみであること
+        var april1Records = n002Ledgers.Where(l => l.Date.Date == fiscalYearStart.Date).ToList();
+        foreach (var record in april1Records)
+        {
+            record.Summary.Should().Be(SummaryGenerator.GetCarryoverFromPreviousYearSummary(),
+                $"4/1のレコードは繰越INのみであるべき（実際: {record.Summary}）");
+        }
     }
 
     [Fact]
