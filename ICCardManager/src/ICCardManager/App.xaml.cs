@@ -384,8 +384,9 @@ namespace ICCardManager
                 var departmentValue = System.IO.File.ReadAllText(configPath).Trim();
 
                 // ファイルを削除（次回起動時に再適用しない）
-                try { System.IO.File.Delete(configPath); }
-                catch (Exception ex) { _logger?.LogWarning(ex, "部署設定ファイルの削除に失敗"); }
+                // インストーラー（管理者権限）が作成したファイルのため、
+                // 一般ユーザーでは削除できない場合がある（Issue #1080）
+                DeleteOrClearFile(configPath, _logger);
 
                 if (string.IsNullOrEmpty(departmentValue))
                 {
@@ -409,6 +410,47 @@ namespace ICCardManager
             {
                 _logger?.LogWarning(ex, "インストーラーからの部署設定の適用でエラー");
                 // エラーが発生してもアプリは起動させる（schema.sqlのデフォルト値が使用される）
+            }
+        }
+
+        /// <summary>
+        /// ファイルを削除する。削除できない場合はファイルの内容をクリアする（Issue #1080）
+        /// </summary>
+        /// <remarks>
+        /// インストーラー（管理者権限）が作成したファイルは、一般ユーザーでは
+        /// 削除権限がない場合がある。その場合、ファイル内容を空にすることで
+        /// 次回起動時の再適用を防ぐ。内容クリアも失敗した場合は警告ログを出力するが、
+        /// 同じ設定値の再適用は実害がないため処理を継続する。
+        /// </remarks>
+        /// <param name="filePath">削除対象のファイルパス</param>
+        /// <param name="logger">ロガー（省略可能）</param>
+        /// <returns>削除またはクリアに成功した場合true、両方失敗した場合false</returns>
+        internal static bool DeleteOrClearFile(string filePath, ILogger logger = null)
+        {
+            try
+            {
+                System.IO.File.Delete(filePath);
+                return true;
+            }
+            catch (UnauthorizedAccessException)
+            {
+                // 削除権限がない場合、内容をクリアして次回の再適用を防ぐ
+                try
+                {
+                    System.IO.File.WriteAllText(filePath, string.Empty);
+                    logger?.LogInformation("ファイルの削除権限がないため内容をクリアしました: {FilePath}", filePath);
+                    return true;
+                }
+                catch (Exception ex)
+                {
+                    logger?.LogWarning(ex, "ファイルの削除・クリアに失敗（同一設定の再適用のため実害なし）: {FilePath}", filePath);
+                    return false;
+                }
+            }
+            catch (Exception ex)
+            {
+                logger?.LogWarning(ex, "ファイルの削除に失敗: {FilePath}", filePath);
+                return false;
             }
         }
 
