@@ -3,6 +3,8 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 using System.IO;
+using System.Security.AccessControl;
+using System.Security.Principal;
 using System.Windows;
 using ICCardManager.Common.Exceptions;
 
@@ -176,7 +178,7 @@ namespace ICCardManager.Common
         {
             try
             {
-                Directory.CreateDirectory(LogDirectory);
+                EnsureLogDirectoryWithPermissions();
 
                 var logFileName = $"error_{DateTime.Now:yyyyMMdd}.log";
                 var logFilePath = Path.Combine(LogDirectory, logFileName);
@@ -232,6 +234,34 @@ namespace ICCardManager.Common
             catch
             {
                 // クリーンアップに失敗しても無視
+            }
+        }
+
+        /// <summary>
+        /// ログディレクトリを作成し、全ユーザーがアクセスできるように権限を設定
+        /// </summary>
+        private static void EnsureLogDirectoryWithPermissions()
+        {
+            try
+            {
+                Directory.CreateDirectory(LogDirectory);
+
+                var directoryInfo = new DirectoryInfo(LogDirectory);
+                var directorySecurity = directoryInfo.GetAccessControl();
+                var usersIdentity = new SecurityIdentifier(WellKnownSidType.BuiltinUsersSid, null);
+                var accessRule = new FileSystemAccessRule(
+                    usersIdentity,
+                    FileSystemRights.FullControl,
+                    InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit,
+                    PropagationFlags.None,
+                    AccessControlType.Allow);
+                directorySecurity.AddAccessRule(accessRule);
+                directoryInfo.SetAccessControl(directorySecurity);
+            }
+            catch
+            {
+                // 権限設定に失敗してもディレクトリ作成は試みる
+                Directory.CreateDirectory(LogDirectory);
             }
         }
     }

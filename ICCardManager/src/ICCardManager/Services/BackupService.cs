@@ -4,6 +4,8 @@ using System.Linq;
 using System.Threading.Tasks;
 using System.IO;
 using System.Security;
+using System.Security.AccessControl;
+using System.Security.Principal;
 using ICCardManager.Common;
 using ICCardManager.Common.Exceptions;
 using ICCardManager.Data;
@@ -82,8 +84,8 @@ namespace ICCardManager.Services
                 // パスを正規化
                 backupPath = PathValidator.NormalizePath(backupPath) ?? PathValidator.GetDefaultBackupPath();
 
-                // バックアップフォルダを作成
-                Directory.CreateDirectory(backupPath);
+                // バックアップフォルダを作成（全ユーザーがアクセスできるように権限を設定）
+                EnsureDirectoryWithPermissions(backupPath);
 
                 // バックアップファイル名を生成
                 var timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
@@ -149,7 +151,7 @@ namespace ICCardManager.Services
                         return false;
                     }
 
-                    Directory.CreateDirectory(directory);
+                    EnsureDirectoryWithPermissions(directory);
                 }
 
                 var sourcePath = _dbContext.DatabasePath;
@@ -383,6 +385,35 @@ namespace ICCardManager.Services
                     }
                 }
             });
+        }
+
+        /// <summary>
+        /// ディレクトリを作成し、全ユーザーがアクセスできるように権限を設定
+        /// </summary>
+        /// <param name="directoryPath">ディレクトリパス</param>
+        private static void EnsureDirectoryWithPermissions(string directoryPath)
+        {
+            try
+            {
+                Directory.CreateDirectory(directoryPath);
+
+                var directoryInfo = new DirectoryInfo(directoryPath);
+                var directorySecurity = directoryInfo.GetAccessControl();
+                var usersIdentity = new SecurityIdentifier(WellKnownSidType.BuiltinUsersSid, null);
+                var accessRule = new FileSystemAccessRule(
+                    usersIdentity,
+                    FileSystemRights.FullControl,
+                    InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit,
+                    PropagationFlags.None,
+                    AccessControlType.Allow);
+                directorySecurity.AddAccessRule(accessRule);
+                directoryInfo.SetAccessControl(directorySecurity);
+            }
+            catch
+            {
+                // 権限設定に失敗してもディレクトリ作成は試みる
+                Directory.CreateDirectory(directoryPath);
+            }
         }
 
     }
