@@ -65,31 +65,35 @@ namespace ICCardManager.Data
         /// <summary>
         /// ディレクトリを作成し、全ユーザーがアクセスできるように権限を設定
         /// </summary>
+        /// <remarks>
+        /// 既存ディレクトリに対しても権限を確認・修正する。
+        /// AddAccessRuleは同一ルールが既にあれば何もしないため、
+        /// 毎回呼んでも安全（冪等）。
+        /// </remarks>
         /// <param name="directoryPath">ディレクトリパス</param>
-        private static void EnsureDirectoryWithPermissions(string directoryPath)
+        internal static void EnsureDirectoryWithPermissions(string directoryPath)
         {
             try
             {
-                if (!Directory.Exists(directoryPath))
-                {
-                    var directoryInfo = Directory.CreateDirectory(directoryPath);
+                // Directory.CreateDirectoryは既存ディレクトリに対しても安全（冪等）
+                Directory.CreateDirectory(directoryPath);
 
-                    // Usersグループにフルコントロール権限を付与
-                    var directorySecurity = directoryInfo.GetAccessControl();
-                    var usersIdentity = new SecurityIdentifier(WellKnownSidType.BuiltinUsersSid, null);
-                    var accessRule = new FileSystemAccessRule(
-                        usersIdentity,
-                        FileSystemRights.FullControl,
-                        InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit,
-                        PropagationFlags.None,
-                        AccessControlType.Allow);
-                    directorySecurity.AddAccessRule(accessRule);
-                    directoryInfo.SetAccessControl(directorySecurity);
+                // 新規・既存問わず、Usersグループにフルコントロール権限を付与
+                var directoryInfo = new DirectoryInfo(directoryPath);
+                var directorySecurity = directoryInfo.GetAccessControl();
+                var usersIdentity = new SecurityIdentifier(WellKnownSidType.BuiltinUsersSid, null);
+                var accessRule = new FileSystemAccessRule(
+                    usersIdentity,
+                    FileSystemRights.FullControl,
+                    InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit,
+                    PropagationFlags.None,
+                    AccessControlType.Allow);
+                directorySecurity.AddAccessRule(accessRule);
+                directoryInfo.SetAccessControl(directorySecurity);
 
 #if DEBUG
-                    System.Diagnostics.Debug.WriteLine($"[DbContext] ディレクトリを作成し権限を設定: {directoryPath}");
+                System.Diagnostics.Debug.WriteLine($"[DbContext] ディレクトリ権限を確認・設定: {directoryPath}");
 #endif
-                }
             }
             catch (Exception ex)
             {
@@ -147,10 +151,13 @@ namespace ICCardManager.Data
         /// </summary>
         public void InitializeDatabase()
         {
+            // 既存DBのアクセス権限を接続前に修正（旧バージョンで単一ユーザーに制限されている場合の対応）
+            SetDatabaseFilePermissions(DatabasePath);
+
             var connection = GetConnection();
 
-            // データベースファイルのアクセス権限を制限
-            RestrictDatabaseFilePermissions(DatabasePath);
+            // 新規作成されたDBファイルにもアクセス権限を設定
+            SetDatabaseFilePermissions(DatabasePath);
 
             // 既存のDBがある場合（マイグレーション導入前）の対応
             HandleLegacyDatabase(connection);
@@ -217,53 +224,69 @@ namespace ICCardManager.Data
         }
 
         /// <summary>
-        /// データベースファイルのアクセス権限を現在のユーザーのみに制限
+        /// データベースファイルのアクセス権限を設定（親ディレクトリからの継承を有効化）
         /// </summary>
+        /// <remarks>
+        /// 旧バージョンでは継承を無効化し現在のユーザーのみにACLを設定していたため、
+        /// 他のWindowsユーザーがDBにアクセスできなかった。
+        /// 本メソッドは継承を再有効化し、明示的ACLを削除することで、
+        /// 親ディレクトリ（EnsureDirectoryWithPermissionsでUsers FullControlを設定済み）
+        /// からの権限継承によりアクセス制御を行う。
+        ///
+        /// SQLiteの関連ファイル（-wal, -shm, -journal）も同様に処理する。
+        /// </remarks>
         /// <param name="dbPath">データベースファイルのパス</param>
-        private static void RestrictDatabaseFilePermissions(string dbPath)
+        internal static void SetDatabaseFilePermissions(string dbPath)
+        {
+            // メインDBファイルとSQLite関連ファイルの権限を修正
+            EnableInheritance(dbPath);
+            EnableInheritance(dbPath + "-wal");
+            EnableInheritance(dbPath + "-shm");
+            EnableInheritance(dbPath + "-journal");
+        }
+
+        /// <summary>
+        /// 指定ファイルの継承を有効化し、明示的ACLを削除する
+        /// </summary>
+        /// <param name="filePath">ファイルパス</param>
+        private static void EnableInheritance(string filePath)
         {
             try
             {
-                if (!File.Exists(dbPath))
+                if (!File.Exists(filePath))
                 {
                     return;
                 }
 
-                var fileInfo = new FileInfo(dbPath);
+                var fileInfo = new FileInfo(filePath);
                 var fileSecurity = fileInfo.GetAccessControl();
 
-                // 継承を無効化し、既存のルールを保持しない
-                fileSecurity.SetAccessRuleProtection(isProtected: true, preserveInheritance: false);
-
-                // 既存のアクセスルールをすべて削除
-                var rules = fileSecurity.GetAccessRules(true, true, typeof(SecurityIdentifier));
-                foreach (FileSystemAccessRule rule in rules)
+                // 既に継承が有効なら何もしない
+                if (!fileSecurity.AreAccessRulesProtected)
                 {
-                    fileSecurity.RemoveAccessRule(rule);
+                    return;
                 }
 
-                // 現在のユーザーにフルコントロール権限を付与
-                var currentUser = WindowsIdentity.GetCurrent().User;
-                if (currentUser != null)
+                // 継承を有効化（親ディレクトリからの権限を継承する）
+                fileSecurity.SetAccessRuleProtection(isProtected: false, preserveInheritance: false);
+
+                // 明示的ACLを削除（継承ルールに任せる）
+                var rules = fileSecurity.GetAccessRules(true, false, typeof(SecurityIdentifier));
+                foreach (FileSystemAccessRule rule in rules)
                 {
-                    var accessRule = new FileSystemAccessRule(
-                        currentUser,
-                        FileSystemRights.FullControl,
-                        AccessControlType.Allow);
-                    fileSecurity.AddAccessRule(accessRule);
+                    fileSecurity.PurgeAccessRules(rule.IdentityReference);
                 }
 
                 fileInfo.SetAccessControl(fileSecurity);
 #if DEBUG
-                System.Diagnostics.Debug.WriteLine("[DbContext] データベースファイルのアクセス権限を制限しました");
+                System.Diagnostics.Debug.WriteLine($"[DbContext] ファイルの継承を有効化: {filePath}");
 #endif
             }
             catch (Exception ex)
             {
                 _ = ex; // 警告抑制（DEBUGビルドでのみ使用）
-                // アクセス権限の設定に失敗してもアプリケーションは続行
 #if DEBUG
-                System.Diagnostics.Debug.WriteLine($"[DbContext] アクセス権限の設定に失敗: {ex.Message}");
+                System.Diagnostics.Debug.WriteLine($"[DbContext] ファイル権限設定に失敗: {filePath} - {ex.Message}");
 #endif
             }
         }
