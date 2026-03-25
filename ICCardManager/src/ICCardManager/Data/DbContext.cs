@@ -149,8 +149,8 @@ namespace ICCardManager.Data
         {
             var connection = GetConnection();
 
-            // データベースファイルのアクセス権限を制限
-            RestrictDatabaseFilePermissions(DatabasePath);
+            // データベースファイルのアクセス権限を設定（全ユーザーがアクセス可能に）
+            SetDatabaseFilePermissions(DatabasePath);
 
             // 既存のDBがある場合（マイグレーション導入前）の対応
             HandleLegacyDatabase(connection);
@@ -217,10 +217,16 @@ namespace ICCardManager.Data
         }
 
         /// <summary>
-        /// データベースファイルのアクセス権限を現在のユーザーのみに制限
+        /// データベースファイルのアクセス権限を設定
         /// </summary>
+        /// <remarks>
+        /// 複数の職員（Windowsユーザー）が同一PCで利用するため、
+        /// Usersグループにフルコントロール権限を付与する。
+        /// 外部からの不正アクセスを防ぐため、Everyoneではなく
+        /// BuiltinUsersとSYSTEMのみに権限を限定する。
+        /// </remarks>
         /// <param name="dbPath">データベースファイルのパス</param>
-        private static void RestrictDatabaseFilePermissions(string dbPath)
+        internal static void SetDatabaseFilePermissions(string dbPath)
         {
             try
             {
@@ -242,20 +248,33 @@ namespace ICCardManager.Data
                     fileSecurity.RemoveAccessRule(rule);
                 }
 
-                // 現在のユーザーにフルコントロール権限を付与
-                var currentUser = WindowsIdentity.GetCurrent().User;
-                if (currentUser != null)
-                {
-                    var accessRule = new FileSystemAccessRule(
-                        currentUser,
-                        FileSystemRights.FullControl,
-                        AccessControlType.Allow);
-                    fileSecurity.AddAccessRule(accessRule);
-                }
+                // Usersグループにフルコントロール権限を付与（複数職員でのシェア利用に対応）
+                var usersIdentity = new SecurityIdentifier(WellKnownSidType.BuiltinUsersSid, null);
+                var usersRule = new FileSystemAccessRule(
+                    usersIdentity,
+                    FileSystemRights.FullControl,
+                    AccessControlType.Allow);
+                fileSecurity.AddAccessRule(usersRule);
+
+                // SYSTEMにもフルコントロール権限を付与（バックアップサービス等のため）
+                var systemIdentity = new SecurityIdentifier(WellKnownSidType.LocalSystemSid, null);
+                var systemRule = new FileSystemAccessRule(
+                    systemIdentity,
+                    FileSystemRights.FullControl,
+                    AccessControlType.Allow);
+                fileSecurity.AddAccessRule(systemRule);
+
+                // Administratorsにもフルコントロール権限を付与（管理者によるメンテナンスのため）
+                var adminsIdentity = new SecurityIdentifier(WellKnownSidType.BuiltinAdministratorsSid, null);
+                var adminsRule = new FileSystemAccessRule(
+                    adminsIdentity,
+                    FileSystemRights.FullControl,
+                    AccessControlType.Allow);
+                fileSecurity.AddAccessRule(adminsRule);
 
                 fileInfo.SetAccessControl(fileSecurity);
 #if DEBUG
-                System.Diagnostics.Debug.WriteLine("[DbContext] データベースファイルのアクセス権限を制限しました");
+                System.Diagnostics.Debug.WriteLine("[DbContext] データベースファイルのアクセス権限を設定しました（Users/SYSTEM/Administrators）");
 #endif
             }
             catch (Exception ex)
