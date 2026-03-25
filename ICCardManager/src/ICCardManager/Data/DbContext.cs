@@ -147,9 +147,12 @@ namespace ICCardManager.Data
         /// </summary>
         public void InitializeDatabase()
         {
+            // 既存DBのアクセス権限を接続前に修正（旧バージョンで単一ユーザーに制限されている場合の対応）
+            SetDatabaseFilePermissions(DatabasePath);
+
             var connection = GetConnection();
 
-            // データベースファイルのアクセス権限を設定（全ユーザーがアクセス可能に）
+            // 新規作成されたDBファイルにもアクセス権限を設定
             SetDatabaseFilePermissions(DatabasePath);
 
             // 既存のDBがある場合（マイグレーション導入前）の対応
