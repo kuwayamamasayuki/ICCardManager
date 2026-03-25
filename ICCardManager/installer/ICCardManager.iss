@@ -58,6 +58,13 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
 Name: "autostart"; Description: "Auto-start at Windows login"; GroupDescription: "{cm:AdditionalIcons}"
 
+[Dirs]
+; データディレクトリ（C:\ProgramData\ICCardManager）にUsersフルコントロールを設定
+; 複数の職員（Windowsユーザー）が同一PCで利用するため全ユーザーにアクセスを許可
+Name: "{commonappdata}\ICCardManager"; Permissions: users-full
+Name: "{commonappdata}\ICCardManager\backup"; Permissions: users-full
+Name: "{commonappdata}\ICCardManager\Logs"; Permissions: users-full
+
 [Files]
 ; メインアプリケーションと依存DLL（すべてのDLL/EXE/config/pdbを含める）
 Source: "..\publish\*.exe"; DestDir: "{app}"; Flags: ignoreversion
