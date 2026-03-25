@@ -154,21 +154,32 @@ namespace ICCardManager.Infrastructure.Logging
             if (fileInfo.Length >= maxSizeBytes)
             {
                 // ローテーション: ファイル名に番号を付けて新しいファイルを作成
-                var baseName = Path.GetFileNameWithoutExtension(_currentLogFilePath);
-                var extension = Path.GetExtension(_currentLogFilePath);
-                var counter = 1;
-
-                string newPath;
-                do
+                try
                 {
-                    newPath = Path.Combine(_logDirectory, $"{baseName}_{counter}{extension}");
-                    counter++;
-                } while (File.Exists(newPath));
+                    var baseName = Path.GetFileNameWithoutExtension(_currentLogFilePath);
+                    var extension = Path.GetExtension(_currentLogFilePath);
+                    var counter = 1;
 
-                // 現在のファイルをリネーム
-                File.Move(_currentLogFilePath, newPath);
+                    string newPath;
+                    do
+                    {
+                        newPath = Path.Combine(_logDirectory, $"{baseName}_{counter}{extension}");
+                        counter++;
+                    } while (File.Exists(newPath));
 
-                // 新しいファイルを作成（次のWriteToFile呼び出しで作成される）
+                    // 現在のファイルをリネーム
+                    File.Move(_currentLogFilePath, newPath);
+
+                    // 新しいファイルを作成（次のWriteToFile呼び出しで作成される）
+                }
+                catch (Exception ex)
+                {
+                    _ = ex; // 警告抑制（DEBUGビルドでのみ使用）
+                    // ローテーション失敗時は既存ファイルに追記を継続
+#if DEBUG
+                    System.Diagnostics.Debug.WriteLine($"[FileLogger] Log rotation failed: {ex.Message}");
+#endif
+                }
             }
         }
 
