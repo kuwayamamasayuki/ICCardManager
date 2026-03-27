@@ -40,6 +40,7 @@ public class WarningItemTests
     [InlineData(WarningType.CardReaderError)]
     [InlineData(WarningType.CardReaderConnection)]
     [InlineData(WarningType.BalanceInconsistency)]
+    [InlineData(WarningType.DatabaseConnectionLost)]
     public void WarningType_すべての種別が定義されていること(WarningType type)
     {
         // WarningTypeの各値が存在し、一意であることを確認
@@ -47,9 +48,9 @@ public class WarningItemTests
     }
 
     [Fact]
-    public void WarningType_5種類定義されていること()
+    public void WarningType_6種類定義されていること()
     {
         var values = System.Enum.GetValues(typeof(WarningType));
-        values.Length.Should().Be(5);
+        values.Length.Should().Be(6);
     }
 }

@@ -18,7 +18,10 @@ namespace ICCardManager.Dtos
         CardReaderConnection,
 
         /// <summary>残高不整合警告（カード単位）</summary>
-        BalanceInconsistency
+        BalanceInconsistency,
+
+        /// <summary>データベース接続断（共有モード時のネットワーク切断）</summary>
+        DatabaseConnectionLost
     }
 
     /// <summary>

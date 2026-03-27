@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Data.SQLite;
 using System.Linq;
 using System.Threading.Tasks;
 using System.IO;
@@ -92,12 +93,8 @@ namespace ICCardManager.Services
                 var backupFileName = $"{BackupFilePrefix}{timestamp}{BackupFileExtension}";
                 var backupFilePath = Path.Combine(backupPath, backupFileName);
 
-                // DBファイルをコピー
-                var sourcePath = _dbContext.DatabasePath;
-                File.Copy(sourcePath, backupFilePath, overwrite: true);
-
-                // File.Copyは更新日時をコピー元から引き継ぐため、現在時刻に更新する
-                File.SetLastWriteTime(backupFilePath, DateTime.Now);
+                // SQLite Backup APIでバックアップ（他PCが書き込み中でも安全）
+                BackupDatabaseTo(backupFilePath);
 
                 _logger.LogInformation("バックアップを作成しました: {Path}", backupFilePath);
 
@@ -154,11 +151,8 @@ namespace ICCardManager.Services
                     EnsureDirectoryWithPermissions(directory);
                 }
 
-                var sourcePath = _dbContext.DatabasePath;
-                File.Copy(sourcePath, backupFilePath, overwrite: true);
-
-                // File.Copyは更新日時をコピー元から引き継ぐため、現在時刻に更新する
-                File.SetLastWriteTime(backupFilePath, DateTime.Now);
+                // SQLite Backup APIでバックアップ（他PCが書き込み中でも安全）
+                BackupDatabaseTo(backupFilePath);
 
                 _logger.LogInformation("バックアップを作成しました: {Path}", backupFilePath);
                 return true;
@@ -212,6 +206,13 @@ namespace ICCardManager.Services
                         "リストア対象のバックアップファイルが存在しません: {Path}",
                         backupFilePath);
                     return false;
+                }
+
+                // 共有モード時は警告（他PCの接続が残っているとリストアが失敗する可能性がある）
+                if (_dbContext.IsSharedMode)
+                {
+                    _logger.LogWarning(
+                        "共有モードでリストアを実行します。他のPCでアプリケーションが起動している場合、リストアが失敗する可能性があります。");
                 }
 
                 // Issue #508: DBファイルを置き換える前に接続を閉じる
@@ -336,6 +337,27 @@ namespace ICCardManager.Services
                     CreatedAt = f.CreationTime,
                     FileSize = f.Length
                 });
+        }
+
+        /// <summary>
+        /// SQLite Backup APIを使用してデータベースをバックアップ
+        /// </summary>
+        /// <remarks>
+        /// File.Copyと異なり、他のプロセスが書き込み中でも整合性のあるコピーが作成される。
+        /// 既存の非SQLiteファイルが存在する場合は削除してから作成する。
+        /// </remarks>
+        private void BackupDatabaseTo(string destinationPath)
+        {
+            // 既存ファイルが非SQLite形式の場合Open()が失敗するため、事前に削除
+            if (File.Exists(destinationPath))
+            {
+                File.Delete(destinationPath);
+            }
+
+            var sourceConnection = _dbContext.GetConnection();
+            using var destinationConnection = new SQLiteConnection($"Data Source={destinationPath}");
+            destinationConnection.Open();
+            sourceConnection.BackupDatabase(destinationConnection, "main", "main", -1, null, 0);
         }
 
         /// <summary>

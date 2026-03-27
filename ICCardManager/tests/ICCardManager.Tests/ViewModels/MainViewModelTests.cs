@@ -123,7 +123,8 @@ public class MainViewModelTests
             _ledgerConsistencyChecker,
             Options.Create(new AppOptions { StaffCardTimeoutSeconds = timeoutSeconds }),
             _timerFactory,
-            _dispatcherService);
+            _dispatcherService,
+            new Mock<DbContext>().Object);
     }
 
     #region AppState列挙型テスト
@@ -485,7 +486,8 @@ public class MainViewModelTests
             _ledgerConsistencyChecker,
             Options.Create(new AppOptions { StaffCardTimeoutSeconds = 30 }),
             isolatedTimerFactory,
-            _dispatcherService);
+            _dispatcherService,
+            new Mock<DbContext>().Object);
 
         var staffIdm = "0102030405060708";
         _staffRepositoryMock.Setup(r => r.GetByIdmAsync(staffIdm, It.IsAny<bool>()))
