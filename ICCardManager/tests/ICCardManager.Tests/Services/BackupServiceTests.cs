@@ -386,10 +386,10 @@ public class BackupServiceTests : IDisposable
     }
 
     /// <summary>
-    /// 空ファイルからのリストアでもファイルコピーは成功することを確認
+    /// 無効なSQLiteファイル（空ファイル）からのリストアが拒否されることを確認
     /// </summary>
     [Fact]
-    public void RestoreFromBackup_EmptyFile_CopiesFile()
+    public void RestoreFromBackup_EmptyFile_ReturnsFalse()
     {
         // Arrange
         var emptyFilePath = Path.Combine(_backupDirectory, "empty.db");
@@ -398,6 +398,7 @@ public class BackupServiceTests : IDisposable
         // リストア先として別のファイルを使用
         var restoreTargetPath = Path.Combine(_testDirectory, "restore_empty_target.db");
         File.WriteAllText(restoreTargetPath, "original content");
+        var originalSize = new FileInfo(restoreTargetPath).Length;
 
         // DbContextを作成して即座に破棄
         var restoreDbContext = new DbContext(restoreTargetPath);
@@ -410,10 +411,27 @@ public class BackupServiceTests : IDisposable
         // Act
         var result = restoreService.RestoreFromBackup(emptyFilePath);
 
+        // Assert - 無効なSQLiteファイルはリストアを拒否
+        result.Should().BeFalse();
+        // 元のファイルは変更されていないこと
+        new FileInfo(restoreTargetPath).Length.Should().Be(originalSize);
+    }
+
+    /// <summary>
+    /// 非SQLiteファイルからのリストアが拒否されることを確認
+    /// </summary>
+    [Fact]
+    public void RestoreFromBackup_NonSqliteFile_ReturnsFalse()
+    {
+        // Arrange
+        var textFilePath = Path.Combine(_backupDirectory, "not_a_database.db");
+        File.WriteAllText(textFilePath, "This is not a SQLite database file");
+
+        // Act
+        var result = _service.RestoreFromBackup(textFilePath);
+
         // Assert
-        result.Should().BeTrue();
-        // 空ファイルがコピーされたことを確認
-        new FileInfo(restoreTargetPath).Length.Should().Be(0);
+        result.Should().BeFalse();
     }
 
     /// <summary>

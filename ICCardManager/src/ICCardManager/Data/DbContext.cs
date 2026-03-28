@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
+using System.Data;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using System.IO;
 using System.Security.AccessControl;
@@ -16,8 +18,24 @@ namespace ICCardManager.Data
     public class DbContext : IDisposable
     {
         private readonly string _connectionString;
+        private readonly object _connectionLock = new object();
         private SQLiteConnection _connection;
         private bool _disposed;
+
+        /// <summary>
+        /// 共有モード（ネットワーク共有フォルダ上のDB）かどうか
+        /// </summary>
+        public bool IsSharedMode { get; }
+
+        /// <summary>
+        /// busy_timeout値（ミリ秒）。共有モードでは他PCのロック待ちが必要
+        /// </summary>
+        internal const int BusyTimeoutMs = 5000;
+
+        /// <summary>
+        /// データベースファイル名
+        /// </summary>
+        public const string DatabaseFileName = "iccard.db";
 
         /// <summary>
         /// データベースファイルのパス
@@ -40,7 +58,29 @@ namespace ICCardManager.Data
         public DbContext(string databasePath = null)
         {
             DatabasePath = databasePath ?? GetDefaultDatabasePath();
-            _connectionString = $"Data Source={DatabasePath}";
+            // SQLiteConnectionStringBuilderでエスケープし、接続文字列インジェクションを防止
+            var builder = new SQLiteConnectionStringBuilder { DataSource = DatabasePath };
+            _connectionString = builder.ToString();
+            IsSharedMode = IsUncPath(DatabasePath);
+        }
+
+        /// <summary>
+        /// UNCパス（ネットワーク共有）かどうかを判定
+        /// </summary>
+        internal static bool IsUncPath(string path)
+        {
+            if (string.IsNullOrEmpty(path))
+                return false;
+
+            try
+            {
+                return new Uri(path).IsUnc;
+            }
+            catch (UriFormatException)
+            {
+                // パスがURI形式でない場合は \\で始まるかを直接チェック
+                return path.StartsWith(@"\\", StringComparison.Ordinal);
+            }
         }
 
         /// <summary>
@@ -59,7 +99,7 @@ namespace ICCardManager.Data
             // ディレクトリを作成し、全ユーザーがアクセスできるように権限を設定
             EnsureDirectoryWithPermissions(appDataPath);
 
-            return Path.Combine(appDataPath, "iccard.db");
+            return Path.Combine(appDataPath, DatabaseFileName);
         }
 
         /// <summary>
@@ -109,20 +149,56 @@ namespace ICCardManager.Data
         /// <summary>
         /// データベース接続を取得
         /// </summary>
+        /// <remarks>
+        /// 接続が切断されている場合は自動的に再接続する。
+        /// 共有モード時はネットワーク切断からの復帰に対応。
+        /// </remarks>
         public virtual SQLiteConnection GetConnection()
         {
-            if (_connection == null)
+            lock (_connectionLock)
             {
-                _connection = new SQLiteConnection(_connectionString);
-                _connection.Open();
+                if (_connection != null && _connection.State != ConnectionState.Open)
+                {
+                    // 接続が切断された場合（ネットワーク共有時の瞬断等）は再接続
+#if DEBUG
+                    System.Diagnostics.Debug.WriteLine("[DbContext] 接続が切断されています。再接続します。");
+#endif
+                    CloseConnectionInternal();
+                }
 
-                // 外部キー制約を有効化
-                using var command = _connection.CreateCommand();
-                command.CommandText = "PRAGMA foreign_keys = ON;";
-                command.ExecuteNonQuery();
+                if (_connection == null)
+                {
+                    _connection = new SQLiteConnection(_connectionString);
+                    _connection.Open();
+                    ConfigurePragmas(_connection);
+                }
+
+                return _connection;
             }
+        }
 
-            return _connection;
+        /// <summary>
+        /// 接続に対してPRAGMA設定を適用
+        /// </summary>
+        private void ConfigurePragmas(SQLiteConnection connection)
+        {
+            // foreign_keysとbusy_timeoutは1コマンドにまとめてラウンドトリップを削減
+            // ローカルモードでもbusy_timeoutを設定する（実害なし、コードパス統一）
+            using var pragmaCommand = connection.CreateCommand();
+            pragmaCommand.CommandText = $"PRAGMA foreign_keys = ON; PRAGMA busy_timeout = {BusyTimeoutMs};";
+            pragmaCommand.ExecuteNonQuery();
+
+            // journal_modeは戻り値を確認するため別コマンド
+            using var jmCommand = connection.CreateCommand();
+            jmCommand.CommandText = "PRAGMA journal_mode = DELETE;";
+            var journalMode = jmCommand.ExecuteScalar()?.ToString();
+            if (journalMode != "delete")
+            {
+#if DEBUG
+                System.Diagnostics.Debug.WriteLine(
+                    $"[DbContext] 警告: journal_modeがDELETEに設定できませんでした（現在: {journalMode}）");
+#endif
+            }
         }
 
         /// <summary>
@@ -135,13 +211,24 @@ namespace ICCardManager.Data
         /// </remarks>
         public void CloseConnection()
         {
+            lock (_connectionLock)
+            {
+                CloseConnectionInternal();
+            }
+        }
+
+        /// <summary>
+        /// 接続を閉じる内部実装（ロック取得済みの状態で呼び出すこと）
+        /// </summary>
+        private void CloseConnectionInternal()
+        {
             if (_connection != null)
             {
                 _connection.Close();
                 _connection.Dispose();
                 _connection = null;
 #if DEBUG
-                System.Diagnostics.Debug.WriteLine("[DbContext] 接続を閉じました（リストア準備）");
+                System.Diagnostics.Debug.WriteLine("[DbContext] 接続を閉じました");
 #endif
             }
         }
@@ -151,6 +238,18 @@ namespace ICCardManager.Data
         /// </summary>
         public void InitializeDatabase()
         {
+            // 共有モード時: ネットワーク共有フォルダの存在確認
+            if (IsSharedMode)
+            {
+                var directory = Path.GetDirectoryName(DatabasePath);
+                if (!string.IsNullOrEmpty(directory) && !Directory.Exists(directory))
+                {
+                    throw new IOException(
+                        $"データベース保存先のネットワーク共有フォルダにアクセスできません: {directory}\n" +
+                        "ネットワーク接続を確認するか、設定画面でデータベース保存先を変更してください。");
+                }
+            }
+
             // 既存DBのアクセス権限を接続前に修正（旧バージョンで単一ユーザーに制限されている場合の対応）
             SetDatabaseFilePermissions(DatabasePath);
 
@@ -159,10 +258,26 @@ namespace ICCardManager.Data
             // 新規作成されたDBファイルにもアクセス権限を設定
             SetDatabaseFilePermissions(DatabasePath);
 
-            // 既存のDBがある場合（マイグレーション導入前）の対応
-            HandleLegacyDatabase(connection);
+            // HandleLegacyDatabaseはトランザクションを持たないため、
+            // BEGIN IMMEDIATEで排他ロックを取得し、複数PCの同時初期化を直列化する。
+            // MigrateToLatestは各マイグレーションが独自にトランザクションを持つため外に出す。
+            using (var transaction = connection.BeginTransaction(IsolationLevel.Serializable))
+            {
+                try
+                {
+                    HandleLegacyDatabase(connection);
+                    transaction.Commit();
+                }
+                catch
+                {
+                    transaction.Rollback();
+                    throw;
+                }
+            }
 
-            // マイグレーションを実行
+            // マイグレーションを実行（各マイグレーションが独自にトランザクションを管理）
+            // 複数PCが同時にマイグレーションを実行しても、schema_migrationsの
+            // PRIMARY KEY制約により重複適用が防止される。
             var runner = new MigrationRunner(connection);
             var appliedCount = runner.MigrateToLatest();
 
@@ -330,12 +445,70 @@ namespace ICCardManager.Data
         /// <summary>
         /// VACUUMを実行してデータベースを最適化
         /// </summary>
-        public void Vacuum()
+        /// <remarks>
+        /// 共有モードでは他PCが接続中の場合、排他ロックを取得できず失敗する可能性がある。
+        /// その場合はfalseを返し、次回起動時にリトライする。
+        /// </remarks>
+        /// <returns>VACUUMが成功した場合true</returns>
+        public bool Vacuum()
         {
-            var connection = GetConnection();
-            using var command = connection.CreateCommand();
-            command.CommandText = "VACUUM";
-            command.ExecuteNonQuery();
+            try
+            {
+                var connection = GetConnection();
+                using var command = connection.CreateCommand();
+                command.CommandText = "VACUUM";
+                command.ExecuteNonQuery();
+                return true;
+            }
+            catch (SQLiteException ex) when (ex.ResultCode == SQLiteErrorCode.Busy || ex.ResultCode == SQLiteErrorCode.Locked)
+            {
+#if DEBUG
+                System.Diagnostics.Debug.WriteLine($"[DbContext] VACUUM失敗（他の接続がアクティブ）: {ex.Message}");
+#endif
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// SQLITE_BUSY/SQLITE_LOCKED時にリトライ付きで非同期操作を実行
+        /// </summary>
+        /// <remarks>
+        /// busy_timeout PRAGMAでカバーできないケース（接続レベルのロック等）に対するセーフティネット。
+        /// 最大3回リトライし、指数バックオフ（100ms, 500ms, 2000ms）で待機する。
+        /// </remarks>
+        public async Task<T> ExecuteWithRetryAsync<T>(Func<Task<T>> operation, CancellationToken cancellationToken = default)
+        {
+            var delays = new[] { 100, 500, 2000 };
+
+            for (int attempt = 0; ; attempt++)
+            {
+                try
+                {
+                    return await operation();
+                }
+                catch (SQLiteException ex) when (
+                    attempt < delays.Length &&
+                    (ex.ResultCode == SQLiteErrorCode.Busy || ex.ResultCode == SQLiteErrorCode.Locked))
+                {
+#if DEBUG
+                    System.Diagnostics.Debug.WriteLine(
+                        $"[DbContext] DB操作リトライ（{attempt + 1}/{delays.Length}回目、{delays[attempt]}ms待機）: {ex.ResultCode}");
+#endif
+                    await Task.Delay(delays[attempt], cancellationToken);
+                }
+            }
+        }
+
+        /// <summary>
+        /// SQLITE_BUSY/SQLITE_LOCKED時にリトライ付きで非同期操作を実行（戻り値なし）
+        /// </summary>
+        public async Task ExecuteWithRetryAsync(Func<Task> operation, CancellationToken cancellationToken = default)
+        {
+            await ExecuteWithRetryAsync(async () =>
+            {
+                await operation();
+                return 0;
+            }, cancellationToken);
         }
 
         /// <summary>

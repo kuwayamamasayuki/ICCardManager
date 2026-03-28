@@ -164,6 +164,23 @@ namespace ICCardManager
             services.Configure<CacheOptions>(Configuration.GetSection("CacheOptions"));
             // Issue #974: 組織固有設定の外部化
             services.Configure<OrganizationOptions>(Configuration.GetSection("OrganizationOptions"));
+            services.Configure<DatabaseOptions>(Configuration.GetSection("DatabaseOptions"));
+
+            // 共有モード時はキャッシュTTLを短縮（他PCの変更を素早く反映するため）
+            // ※ ローカル操作ではキャッシュが即座に無効化されるため、
+            //   TTLは「他PCの操作結果が見えるまでの遅延」のみに影響する。
+            //   20台同時接続での負荷を考慮し、過度に短くしない。
+            services.PostConfigure<CacheOptions>(cacheOptions =>
+            {
+                var dbPath = Configuration.GetSection("DatabaseOptions")?.GetValue<string>("Path");
+                if (!string.IsNullOrWhiteSpace(dbPath) && Data.DbContext.IsUncPath(dbPath))
+                {
+                    cacheOptions.CardListSeconds = 15;
+                    cacheOptions.LentCardsSeconds = 10;
+                    cacheOptions.StaffListSeconds = 30;
+                    cacheOptions.SettingsMinutes = 3;
+                }
+            });
 
             // ロギングの設定
             services.AddLogging(builder =>
@@ -180,7 +197,12 @@ namespace ICCardManager
             services.AddSingleton<ICacheService, CacheService>();
 
             // Data層
-            services.AddSingleton<DbContext>();
+            services.AddSingleton<DbContext>(sp =>
+            {
+                var dbOptions = sp.GetRequiredService<IOptions<DatabaseOptions>>().Value;
+                var path = string.IsNullOrWhiteSpace(dbOptions.Path) ? null : dbOptions.Path;
+                return new DbContext(path);
+            });
             services.AddSingleton<IStaffRepository, StaffRepository>();
             services.AddSingleton<ICardRepository, CardRepository>();
             services.AddSingleton<ILedgerRepository, LedgerRepository>();
@@ -585,10 +607,16 @@ namespace ICCardManager
                         lastVacuum.Value.Year != today.Year ||
                         lastVacuum.Value.Month != today.Month)
                     {
-                        dbContext.Vacuum();
-                        settings.LastVacuumDate = today;
-                        _ = settingsRepository.SaveAppSettingsAsync(settings);
-                        _logger?.LogInformation("VACUUM実行完了");
+                        if (dbContext.Vacuum())
+                        {
+                            settings.LastVacuumDate = today;
+                            _ = settingsRepository.SaveAppSettingsAsync(settings);
+                            _logger?.LogInformation("VACUUM実行完了");
+                        }
+                        else
+                        {
+                            _logger?.LogWarning("VACUUM失敗（他の接続がアクティブ）。次回起動時にリトライします。");
+                        }
                     }
                 }
             }

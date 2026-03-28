@@ -15,6 +15,7 @@ using ICCardManager.Infrastructure.CardReader;
 using ICCardManager.Infrastructure.Sound;
 using ICCardManager.Infrastructure.Timing;
 using ICCardManager.Models;
+using ICCardManager.Data;
 using ICCardManager.Services;
 using Microsoft.Extensions.Options;
 
@@ -108,12 +109,19 @@ public partial class MainViewModel : ViewModelBase
     private readonly LedgerConsistencyChecker _ledgerConsistencyChecker;
     private readonly ITimerFactory _timerFactory;
     private readonly IDispatcherService _dispatcherService;
+    private readonly DbContext _dbContext;
     private readonly HashSet<CardReadingSource> _suppressionSources = new();
+    private ITimer? _dbHealthCheckTimer;
 
     /// <summary>
     /// カード読み取りが抑制されているかどうか（テスト用）
     /// </summary>
     internal bool IsCardReadingSuppressed => _suppressionSources.Count > 0;
+
+    /// <summary>
+    /// 共有モード（ネットワーク共有フォルダ上のDB）かどうか
+    /// </summary>
+    public bool IsSharedMode => _dbContext.IsSharedMode;
 
     private ITimer? _timeoutTimer;
     private string? _currentStaffIdm;
@@ -375,7 +383,8 @@ public partial class MainViewModel : ViewModelBase
         LedgerConsistencyChecker ledgerConsistencyChecker,
         IOptions<AppOptions> appOptions,
         ITimerFactory timerFactory,
-        IDispatcherService dispatcherService)
+        IDispatcherService dispatcherService,
+        DbContext dbContext)
     {
         _cardReader = cardReader;
         _soundPlayer = soundPlayer;
@@ -394,6 +403,7 @@ public partial class MainViewModel : ViewModelBase
         _timeoutSeconds = appOptions.Value.StaffCardTimeoutSeconds;
         _timerFactory = timerFactory;
         _dispatcherService = dispatcherService;
+        _dbContext = dbContext;
 
         // カード読み取り抑制メッセージの受信を登録（Issue #852）
         _messenger.Register<CardReadingSuppressedMessage>(this, (recipient, message) =>
@@ -469,6 +479,100 @@ public partial class MainViewModel : ViewModelBase
 
             // Issue #504: バス停未入力チェックはバックグラウンドで実行（起動を遅延させない）
             _ = CheckIncompleteBusStopsAsync();
+
+            // 共有モード時はDB接続の定期ヘルスチェックを開始
+            if (IsSharedMode)
+            {
+                StartDatabaseHealthCheck();
+            }
+        }
+    }
+
+    /// <summary>
+    /// 共有モード時のDB接続ヘルスチェックタイマーを開始
+    /// </summary>
+    private void StartDatabaseHealthCheck()
+    {
+        StopDatabaseHealthCheck();
+        _dbHealthCheckTimer = _timerFactory.Create();
+        _dbHealthCheckTimer.Interval = TimeSpan.FromSeconds(30);
+        _dbHealthCheckTimer.Tick += OnDatabaseHealthCheckTick;
+        _dbHealthCheckTimer.Start();
+    }
+
+    /// <summary>
+    /// DB接続ヘルスチェックタイマーを停止
+    /// </summary>
+    internal void StopDatabaseHealthCheck()
+    {
+        if (_dbHealthCheckTimer != null)
+        {
+            _dbHealthCheckTimer.Stop();
+            _dbHealthCheckTimer.Tick -= OnDatabaseHealthCheckTick;
+            _dbHealthCheckTimer = null;
+        }
+    }
+
+    private bool _isHealthCheckRunning;
+
+    private async void OnDatabaseHealthCheckTick(object sender, EventArgs e)
+    {
+        if (_isHealthCheckRunning)
+            return;
+
+        _isHealthCheckRunning = true;
+        try
+        {
+            await CheckDatabaseConnectionAsync();
+        }
+        finally
+        {
+            _isHealthCheckRunning = false;
+        }
+    }
+
+    /// <summary>
+    /// DB接続状態をバックグラウンドでチェックし、結果をUIスレッドに反映
+    /// </summary>
+    private async Task CheckDatabaseConnectionAsync()
+    {
+        // バックグラウンドスレッドでDBクエリを実行（UIフリーズ防止）
+        var isConnected = await Task.Run(() =>
+        {
+            try
+            {
+                var connection = _dbContext.GetConnection();
+                using var command = connection.CreateCommand();
+                command.CommandText = "SELECT 1";
+                command.ExecuteScalar();
+                return true;
+            }
+            catch (Exception)
+            {
+                return false;
+            }
+        });
+
+        // UIスレッドで警告を更新
+        if (isConnected)
+        {
+            var existing = WarningMessages
+                .FirstOrDefault(w => w.Type == WarningType.DatabaseConnectionLost);
+            if (existing != null)
+            {
+                WarningMessages.Remove(existing);
+            }
+        }
+        else
+        {
+            if (!WarningMessages.Any(w => w.Type == WarningType.DatabaseConnectionLost))
+            {
+                WarningMessages.Add(new WarningItem
+                {
+                    Type = WarningType.DatabaseConnectionLost,
+                    DisplayText = "ネットワーク共有フォルダへの接続が切断されています。ネットワーク接続を確認してください。"
+                });
+            }
         }
     }
 
@@ -490,7 +594,17 @@ public partial class MainViewModel : ViewModelBase
     /// </remarks>
     private void CheckWarningsFromDashboard(int warningBalance)
     {
+        // インフラ系の警告（接続断・カードリーダー）は保持し、データ系の警告のみクリア
+        var infraWarnings = WarningMessages
+            .Where(w => w.Type == WarningType.DatabaseConnectionLost ||
+                        w.Type == WarningType.CardReaderConnection ||
+                        w.Type == WarningType.CardReaderError)
+            .ToList();
         WarningMessages.Clear();
+        foreach (var warning in infraWarnings)
+        {
+            WarningMessages.Add(warning);
+        }
 
         // 残額警告チェック（ダッシュボードから取得済みのデータを使用）
         foreach (var item in CardBalanceDashboard)

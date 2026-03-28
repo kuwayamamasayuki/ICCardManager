@@ -7,7 +7,7 @@
         mc:Ignorable="d"
         d:DataContext="{d:DesignInstance Type=vm:SettingsViewModel}"
         Title="設定"
-        Height="720"
+        Height="820"
         Width="550"
         WindowStartupLocation="CenterOwner"
         ResizeMode="NoResize"
@@ -199,6 +199,49 @@
                                    FontSize="{DynamicResource SmallFontSize}"
                                    Foreground="{DynamicResource SecondaryTextBrush}"
                                    Margin="0,5,0,0"/>
+                    </StackPanel>
+                </GroupBox>
+
+                <!-- 8. データベース保存先 -->
+                <GroupBox Header="データベース保存先" Margin="0,0,0,20" Padding="15">
+                    <StackPanel>
+                        <TextBlock Text="データベースの保存先フォルダを指定します。共有フォルダを指定すると、複数のPCから同時に利用できます。"
+                                   Foreground="{DynamicResource SecondaryTextBrush}"
+                                   TextWrapping="Wrap"
+                                   Margin="0,0,0,10"/>
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBox Grid.Column="0"
+                                     Text="{Binding DatabasePath, UpdateSourceTrigger=PropertyChanged}"
+                                     Padding="8"
+                                     AutomationProperties.Name="データベース保存先フォルダパス"
+                                     ToolTip="共有フォルダのUNCパス（例: \\server\share\ICCardManager）を指定できます。参照ボタンで選択するか、直接入力してください。"/>
+                            <Button Grid.Column="1"
+                                    Content="参照..."
+                                    Command="{Binding BrowseDatabasePathCommand}"
+                                    Padding="15,8"
+                                    Margin="10,0,0,0"
+                                    AutomationProperties.Name="データベース保存先フォルダを選択"
+                                    ToolTip="データベース保存先フォルダを選択します"/>
+                        </Grid>
+                        <TextBlock Text="※ 空欄の場合、このPCのローカルフォルダ（C:\ProgramData\ICCardManager\）に保存されます"
+                                   FontSize="{DynamicResource SmallFontSize}"
+                                   Foreground="{DynamicResource SecondaryTextBrush}"
+                                   TextWrapping="Wrap"
+                                   Margin="0,5,0,0"/>
+                        <TextBlock Text="※ 共有フォルダのパスは「参照」ボタンで選択するか、テキスト欄に直接入力できます"
+                                   FontSize="{DynamicResource SmallFontSize}"
+                                   Foreground="{DynamicResource SecondaryTextBrush}"
+                                   Margin="0,2,0,0"/>
+                        <TextBlock Text="※ 変更後はアプリケーションの再起動が必要です"
+                                   FontSize="{DynamicResource SmallFontSize}"
+                                   Foreground="{DynamicResource DangerTextBrush}"
+                                   Visibility="{Binding IsDatabasePathChanged, Converter={StaticResource BoolToVisibilityConverter}}"
+                                   FontWeight="Bold"
+                                   Margin="0,3,0,0"/>
                     </StackPanel>
                 </GroupBox>
 

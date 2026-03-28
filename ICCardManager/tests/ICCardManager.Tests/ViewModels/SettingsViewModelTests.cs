@@ -8,6 +8,8 @@ using ICCardManager.ViewModels;
 using Moq;
 using Xunit;
 
+using ICCardManager.Common;
+using Microsoft.Extensions.Options;
 using System;
 using System.Linq;
 using System.Threading.Tasks;
@@ -37,7 +39,8 @@ public class SettingsViewModelTests
         _viewModel = new SettingsViewModel(
             _settingsRepositoryMock.Object,
             _validationServiceMock.Object,
-            _soundPlayerMock.Object);
+            _soundPlayerMock.Object,
+            Options.Create(new DatabaseOptions()));
     }
 
     #region 設定読み込みテスト

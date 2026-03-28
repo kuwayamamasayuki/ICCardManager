@@ -329,60 +329,65 @@ namespace ICCardManager.Services
 
                 var now = DateTime.Now;
 
-                // トランザクション開始
-                using var transaction = _dbContext.BeginTransaction();
-
-                try
+                // Issue #656: カードから残高を読み取れなかった場合、直近の履歴から残高を取得
+                // READ操作はリトライ範囲の外で実行（不要な再クエリを防止）
+                var currentBalance = balance ?? 0;
+                if (!balance.HasValue)
                 {
-                    // 貸出レコードを作成
-                    // Issue #656: カードから残高を読み取れなかった場合、直近の履歴から残高を取得
-                    var currentBalance = balance ?? 0;
-                    if (!balance.HasValue)
+                    var latestLedger = await _ledgerRepository.GetLatestLedgerAsync(cardIdm);
+                    if (latestLedger != null)
                     {
-                        var latestLedger = await _ledgerRepository.GetLatestLedgerAsync(cardIdm);
-                        if (latestLedger != null)
-                        {
-                            currentBalance = latestLedger.Balance;
-                            _logger.LogInformation(
-                                "LendAsync: カード残高を読み取れなかったため、直近の履歴残高を使用: {Balance}円", currentBalance);
-                        }
+                        currentBalance = latestLedger.Balance;
+                        _logger.LogInformation(
+                            "LendAsync: カード残高を読み取れなかったため、直近の履歴残高を使用: {Balance}円", currentBalance);
                     }
-                    var ledger = new Ledger
-                    {
-                        CardIdm = cardIdm,
-                        LenderIdm = staffIdm,
-                        Date = now,
-                        Summary = SummaryGenerator.GetLendingSummary(),
-                        Income = 0,
-                        Expense = 0,
-                        Balance = currentBalance,
-                        StaffName = staff.Name,
-                        LentAt = now,
-                        IsLentRecord = true
-                    };
-
-                    var ledgerId = await _ledgerRepository.InsertAsync(ledger);
-                    ledger.Id = ledgerId;
-                    result.CreatedLedgers.Add(ledger);
-
-                    // カードの貸出状態を更新
-                    await _cardRepository.UpdateLentStatusAsync(cardIdm, true, now, staffIdm);
-
-                    transaction.Commit();
-
-                    // 処理情報を記録
-                    LastProcessedCardIdm = cardIdm;
-                    LastProcessedTime = now;
-                    LastOperationType = LendingOperationType.Lend;
-
-                    result.Success = true;
-                    result.Balance = currentBalance;
                 }
-                catch
+
+                // トランザクション開始
+                // 共有モード時のSQLITE_BUSY対策としてリトライでラップ（WRITE操作のみ）
+                await _dbContext.ExecuteWithRetryAsync(async () =>
                 {
-                    transaction.Rollback();
-                    throw;
-                }
+                    using var transaction = _dbContext.BeginTransaction();
+
+                    try
+                    {
+                        var ledger = new Ledger
+                        {
+                            CardIdm = cardIdm,
+                            LenderIdm = staffIdm,
+                            Date = now,
+                            Summary = SummaryGenerator.GetLendingSummary(),
+                            Income = 0,
+                            Expense = 0,
+                            Balance = currentBalance,
+                            StaffName = staff.Name,
+                            LentAt = now,
+                            IsLentRecord = true
+                        };
+
+                        var ledgerId = await _ledgerRepository.InsertAsync(ledger);
+                        ledger.Id = ledgerId;
+                        result.CreatedLedgers.Add(ledger);
+
+                        // カードの貸出状態を更新
+                        await _cardRepository.UpdateLentStatusAsync(cardIdm, true, now, staffIdm);
+
+                        transaction.Commit();
+                    }
+                    catch
+                    {
+                        transaction.Rollback();
+                        throw;
+                    }
+                });
+
+                // 処理情報を記録
+                LastProcessedCardIdm = cardIdm;
+                LastProcessedTime = now;
+                LastOperationType = LendingOperationType.Lend;
+
+                result.Success = true;
+                result.Balance = currentBalance;
             }
             catch (Exception ex)
             {
@@ -508,70 +513,72 @@ namespace ICCardManager.Services
                     .Any(l => !l.IsLentRecord);
 
                 // トランザクション開始
-                using var transaction = _dbContext.BeginTransaction();
-
-                try
+                // 共有モード時のSQLITE_BUSY対策としてリトライでラップ
+                await _dbContext.ExecuteWithRetryAsync(async () =>
                 {
-                    // 利用日ごとにグループ化して履歴を作成
-                    var createdLedgers = await CreateUsageLedgersAsync(
-                        cardIdm, lentRecord.StaffName ?? string.Empty, usageSinceLent, skipDuplicateCheck);
+                    using var transaction = _dbContext.BeginTransaction();
 
-                    result.CreatedLedgers.AddRange(createdLedgers);
-
-                    // バス利用の有無をチェック
-                    result.HasBusUsage = usageSinceLent.Any(d => d.IsBus);
-
-                    // 貸出レコードを削除（履歴に「（貸出中）」が残らないようにする）
-                    await _ledgerRepository.DeleteAsync(lentRecord.Id);
-
-                    // カードの貸出状態を更新
-                    await _cardRepository.UpdateLentStatusAsync(cardIdm, false, null, null);
-
-                    transaction.Commit();
-
-                    // 残額チェック
-                    // カードから直接読み取った残高を優先（履歴の先頭が最新）
-                    // FelicaCardReaderで読み取った場合、各LedgerDetail.Balanceには実際の残高が設定されている
-                    var cardBalance = detailList.FirstOrDefault()?.Balance;
-                    if (cardBalance.HasValue && cardBalance.Value > 0)
+                    try
                     {
-                        result.Balance = cardBalance.Value;
-                        _logger.LogDebug("LendingService: カードから直接読み取った残高を使用: {Balance}円", result.Balance);
+                        // 利用日ごとにグループ化して履歴を作成
+                        var createdLedgers = await CreateUsageLedgersAsync(
+                            cardIdm, lentRecord.StaffName ?? string.Empty, usageSinceLent, skipDuplicateCheck);
+
+                        result.CreatedLedgers.AddRange(createdLedgers);
+
+                        // バス利用の有無をチェック
+                        result.HasBusUsage = usageSinceLent.Any(d => d.IsBus);
+
+                        // 貸出レコードを削除（履歴に「（貸出中）」が残らないようにする）
+                        await _ledgerRepository.DeleteAsync(lentRecord.Id);
+
+                        // カードの貸出状態を更新
+                        await _cardRepository.UpdateLentStatusAsync(cardIdm, false, null, null);
+
+                        transaction.Commit();
                     }
-                    else
+                    catch
                     {
-                        // フォールバック: 作成したledgerレコードの残高を使用
-                        var latestLedger = createdLedgers.LastOrDefault();
-                        if (latestLedger != null)
-                        {
-                            result.Balance = latestLedger.Balance;
-                            _logger.LogDebug("LendingService: ledgerレコードの残高を使用: {Balance}円", result.Balance);
-                        }
+                        transaction.Rollback();
+                        throw;
                     }
+                });
 
-                    // 低残高チェック
-                    var settings = await _settingsRepository.GetAppSettingsAsync();
-                    result.IsLowBalance = result.Balance < settings.WarningBalance;
-
-                    // 処理情報を記録
-                    LastProcessedCardIdm = cardIdm;
-                    LastProcessedTime = now;
-                    LastOperationType = LendingOperationType.Return;
-
-                    result.Success = true;
-
-                    // Issue #596: 今月の履歴が不完全な可能性をチェック
-                    // 条件: このカードの今月の既存レコードがなく（月途中導入の可能性）、
-                    //       かつカード内に20件の履歴があり、すべて今月以降の場合
-                    if (!hadExistingCurrentMonthRecords)
+                // 残額チェック（トランザクション外）
+                // カードから直接読み取った残高を優先（履歴の先頭が最新）
+                // FelicaCardReaderで読み取った場合、各LedgerDetail.Balanceには実際の残高が設定されている
+                var cardBalance = detailList.FirstOrDefault()?.Balance;
+                if (cardBalance.HasValue && cardBalance.Value > 0)
+                {
+                    result.Balance = cardBalance.Value;
+                    _logger.LogDebug("LendingService: カードから直接読み取った残高を使用: {Balance}円", result.Balance);
+                }
+                else
+                {
+                    // フォールバック: 作成したledgerレコードの残高を使用
+                    var latestLedger = result.CreatedLedgers.LastOrDefault();
+                    if (latestLedger != null)
                     {
-                        result.MayHaveIncompleteHistory = CheckHistoryCompleteness(detailList, currentMonthStart);
+                        result.Balance = latestLedger.Balance;
+                        _logger.LogDebug("LendingService: ledgerレコードの残高を使用: {Balance}円", result.Balance);
                     }
                 }
-                catch
+
+                // 低残高チェック
+                var settings = await _settingsRepository.GetAppSettingsAsync();
+                result.IsLowBalance = result.Balance < settings.WarningBalance;
+
+                // 処理情報を記録
+                LastProcessedCardIdm = cardIdm;
+                LastProcessedTime = now;
+                LastOperationType = LendingOperationType.Return;
+
+                result.Success = true;
+
+                // Issue #596: 今月の履歴が不完全な可能性をチェック
+                if (!hadExistingCurrentMonthRecords)
                 {
-                    transaction.Rollback();
-                    throw;
+                    result.MayHaveIncompleteHistory = CheckHistoryCompleteness(detailList, currentMonthStart);
                 }
             }
             catch (Exception ex)
