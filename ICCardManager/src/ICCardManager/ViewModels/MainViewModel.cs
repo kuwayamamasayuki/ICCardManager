@@ -570,7 +570,17 @@ public partial class MainViewModel : ViewModelBase
     /// </remarks>
     private void CheckWarningsFromDashboard(int warningBalance)
     {
+        // インフラ系の警告（接続断・カードリーダー）は保持し、データ系の警告のみクリア
+        var infraWarnings = WarningMessages
+            .Where(w => w.Type == WarningType.DatabaseConnectionLost ||
+                        w.Type == WarningType.CardReaderConnection ||
+                        w.Type == WarningType.CardReaderError)
+            .ToList();
         WarningMessages.Clear();
+        foreach (var warning in infraWarnings)
+        {
+            WarningMessages.Add(warning);
+        }
 
         // 残額警告チェック（ダッシュボードから取得済みのデータを使用）
         foreach (var item in CardBalanceDashboard)

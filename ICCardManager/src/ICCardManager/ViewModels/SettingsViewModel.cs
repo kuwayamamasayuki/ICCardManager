@@ -113,7 +113,7 @@ public partial class SettingsViewModel : ViewModelBase
     private bool _skipBusStopInputOnReturn;
 
     /// <summary>
-    /// データベースの保存先パス
+    /// データベースの保存先フォルダパス（UI表示用。ファイル名は内部で自動付与）
     /// </summary>
     [ObservableProperty]
     private string _databasePath = string.Empty;
@@ -135,8 +135,25 @@ public partial class SettingsViewModel : ViewModelBase
         _settingsRepository = settingsRepository;
         _validationService = validationService;
         _soundPlayer = soundPlayer;
-        _originalDatabasePath = databaseOptions.Value.Path ?? string.Empty;
+        // appsettings.jsonのPathはファイルパスなので、フォルダ部分のみをUI用に保持
+        var fullPath = databaseOptions.Value.Path ?? string.Empty;
+        _originalDatabasePath = ExtractDirectoryPath(fullPath);
         _databasePath = _originalDatabasePath;
+    }
+
+    /// <summary>
+    /// ファイルパスからフォルダパスを抽出（空文字・フォルダパスはそのまま返す）
+    /// </summary>
+    private static string ExtractDirectoryPath(string path)
+    {
+        if (string.IsNullOrEmpty(path))
+            return string.Empty;
+
+        // 既にフォルダパス（ファイル名なし）の場合はそのまま
+        if (!Path.HasExtension(path))
+            return path;
+
+        return Path.GetDirectoryName(path) ?? string.Empty;
     }
 
     /// <summary>
@@ -180,7 +197,7 @@ public partial class SettingsViewModel : ViewModelBase
             // バス停入力スキップ設定
             SkipBusStopInputOnReturn = settings.SkipBusStopInputOnReturn;
 
-            // DBパス設定（appsettings.jsonから読み込み済み）
+            // DBフォルダパス設定（appsettings.jsonから読み込み済み）
             DatabasePath = _originalDatabasePath;
             IsDatabasePathChanged = false;
 
@@ -255,18 +272,12 @@ public partial class SettingsViewModel : ViewModelBase
                 // DBパスが変更された場合、appsettings.jsonに保存
                 if (IsDatabasePathChanged)
                 {
-                    // DBパスの検証（空の場合はデフォルトに戻すためスキップ）
-                    var validatedDatabasePath = DatabasePath;
+                    // DBフォルダパスの検証（空の場合はデフォルトに戻すためスキップ）
+                    var validatedFolderPath = DatabasePath;
+                    string fullDbPath = string.Empty; // appsettings.jsonに保存するファイルパス
                     if (!string.IsNullOrWhiteSpace(DatabasePath))
                     {
-                        var dbDir = Path.GetDirectoryName(DatabasePath);
-                        if (string.IsNullOrEmpty(dbDir))
-                        {
-                            SetStatus("データベース保存先のパスが無効です", true);
-                            return;
-                        }
-
-                        var dbPathResult = PathValidator.ValidateBackupPath(dbDir);
+                        var dbPathResult = PathValidator.ValidateBackupPath(DatabasePath);
                         if (!dbPathResult.IsValid)
                         {
                             SetStatus($"データベース保存先が無効です: {dbPathResult.ErrorMessage}", true);
@@ -274,26 +285,33 @@ public partial class SettingsViewModel : ViewModelBase
                         }
 
                         // パスを正規化
-                        var normalizedDir = PathValidator.NormalizePath(dbDir);
+                        var normalizedDir = PathValidator.NormalizePath(DatabasePath);
                         if (normalizedDir == null)
                         {
                             SetStatus("データベース保存先のパスを正規化できません", true);
                             return;
                         }
-                        validatedDatabasePath = Path.Combine(normalizedDir, Data.DbContext.DatabaseFileName);
+                        validatedFolderPath = normalizedDir;
+                        fullDbPath = Path.Combine(normalizedDir, Data.DbContext.DatabaseFileName);
                     }
 
                     try
                     {
-                        SaveDatabasePathToAppSettings(validatedDatabasePath);
-                        DatabasePath = validatedDatabasePath;
-                        SetStatus("設定を保存しました。データベース保存先の変更を反映するにはアプリケーションを再起動してください。", false);
+                        SaveDatabasePathToAppSettings(fullDbPath);
+                        DatabasePath = validatedFolderPath;
+                        _originalDatabasePath = validatedFolderPath;
+                        IsDatabasePathChanged = false;
                     }
                     catch (Exception ex)
                     {
                         SetStatus($"データベース保存先の設定ファイル（appsettings.json）の保存に失敗しました: {ex.Message}", true);
                         return;
                     }
+
+                    // DBパス変更時はダイアログを閉じず、再起動を案内
+                    HasChanges = false;
+                    SetStatus("データベース保存先を変更しました。変更を反映するにはアプリケーションを再起動してください。", false);
+                    return;
                 }
 
                 // 保存完了フラグを立てる（ダイアログを閉じるトリガー）
@@ -341,13 +359,13 @@ public partial class SettingsViewModel : ViewModelBase
             Description = "データベース保存先フォルダを選択（共有フォルダのUNCパスも使用可能）",
             SelectedPath = string.IsNullOrEmpty(DatabasePath)
                 ? Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData)
-                : Path.GetDirectoryName(DatabasePath) ?? string.Empty,
+                : DatabasePath,
             ShowNewFolderButton = true
         })
         {
             if (dialog.ShowDialog() == System.Windows.Forms.DialogResult.OK)
             {
-                DatabasePath = Path.Combine(dialog.SelectedPath, Data.DbContext.DatabaseFileName);
+                DatabasePath = dialog.SelectedPath;
                 HasChanges = true;
             }
         }

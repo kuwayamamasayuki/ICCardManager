@@ -948,10 +948,12 @@
             <!-- 共有モード表示 -->
             <StatusBarItem AutomationProperties.Name="共有モード表示"
                            Visibility="{Binding IsSharedMode, Converter={StaticResource BoolToVisibilityConverter}}">
-                <TextBlock Text="共有モード"
-                           Foreground="{DynamicResource PrimaryBrush}"
+                <TextBlock Foreground="{DynamicResource PrimaryBrush}"
                            FontWeight="Bold"
-                           ToolTip="共有フォルダ上のデータベースを使用しています（複数PC同時利用）"/>
+                           ToolTip="共有フォルダ上のデータベースを使用しています（複数PC同時利用）">
+                    <Run Text="🔗"/>
+                    <Run Text=" 共有モード"/>
+                </TextBlock>
             </StatusBarItem>
             <Separator Visibility="{Binding IsSharedMode, Converter={StaticResource BoolToVisibilityConverter}}"/>
             <!-- バージョン表示（Issue #475） -->
