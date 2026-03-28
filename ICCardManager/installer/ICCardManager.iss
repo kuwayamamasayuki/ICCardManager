@@ -141,6 +141,35 @@ var
   DatabasePathEdit: TNewEdit;
   DatabasePathLabel: TNewStaticText;
   DatabaseNoteLabel: TNewStaticText;
+  DatabaseBrowseButton: TNewButton;
+  // ページ遷移時に値を保存（ssPostInstall時にコントロールが無効な場合の対策）
+  DatabaseUseSharedFolder: Boolean;
+  DatabaseSharedPath: string;
+
+// パス入力時に自動的に「共有フォルダ」ラジオボタンを選択
+procedure DatabasePathEditChange(Sender: TObject);
+begin
+  if Trim(DatabasePathEdit.Text) <> '' then
+  begin
+    DatabaseSharedRadio.Checked := True;
+    DatabaseLocalRadio.Checked := False;
+  end;
+end;
+
+// DB保存先の「参照」ボタンクリック
+procedure DatabaseBrowseButtonClick(Sender: TObject);
+var
+  Dir: string;
+begin
+  Dir := DatabasePathEdit.Text;
+  if BrowseForFolder('共有フォルダを選択してください。', Dir, False) then
+  begin
+    DatabasePathEdit.Text := Dir;
+    // 選択したら自動的に「共有フォルダ」に切替
+    DatabaseSharedRadio.Checked := True;
+    DatabaseLocalRadio.Checked := False;
+  end;
+end;
 
 // インストールウィザードにページを追加
 procedure InitializeWizard();
@@ -160,50 +189,54 @@ begin
   // DB保存先選択ページ（部署選択の次に表示）
   DatabasePage := CreateCustomPage(DepartmentPage.ID,
     'データベースの保存先',
-    '複数のPCから同時に利用する場合は、共有フォルダを指定してください。');
+    '複数のPCから同時に利用する場合は、共有フォルダを指定してください。' + #13#10 +
+    'この設定は後から「設定」画面（F5）で変更できます。');
 
   DatabaseLocalRadio := TNewRadioButton.Create(DatabasePage);
   DatabaseLocalRadio.Parent := DatabasePage.Surface;
-  DatabaseLocalRadio.Caption := 'このPCのみで使用（従来どおり）';
-  DatabaseLocalRadio.Top := 10;
+  DatabaseLocalRadio.Caption := 'このPCのみで使用';
+  DatabaseLocalRadio.Top := 0;
   DatabaseLocalRadio.Left := 0;
   DatabaseLocalRadio.Width := DatabasePage.SurfaceWidth;
+  DatabaseLocalRadio.Height := 20;
   DatabaseLocalRadio.Checked := True;
-  DatabaseLocalRadio.Font.Style := [fsBold];
 
   DatabaseSharedRadio := TNewRadioButton.Create(DatabasePage);
   DatabaseSharedRadio.Parent := DatabasePage.Surface;
-  DatabaseSharedRadio.Caption := '共有フォルダで複数のPCから使用';
-  DatabaseSharedRadio.Top := DatabaseLocalRadio.Top + DatabaseLocalRadio.Height + 20;
+  DatabaseSharedRadio.Caption := '共有フォルダで複数PCから使用';
+  DatabaseSharedRadio.Top := DatabaseLocalRadio.Top + DatabaseLocalRadio.Height + 8;
   DatabaseSharedRadio.Left := 0;
   DatabaseSharedRadio.Width := DatabasePage.SurfaceWidth;
-  DatabaseSharedRadio.Font.Style := [fsBold];
+  DatabaseSharedRadio.Height := 20;
 
   DatabasePathLabel := TNewStaticText.Create(DatabasePage);
   DatabasePathLabel.Parent := DatabasePage.Surface;
   DatabasePathLabel.Caption := '共有フォルダのパス:';
-  DatabasePathLabel.Top := DatabaseSharedRadio.Top + DatabaseSharedRadio.Height + 12;
+  DatabasePathLabel.Top := DatabaseSharedRadio.Top + DatabaseSharedRadio.Height + 10;
   DatabasePathLabel.Left := 20;
 
   DatabasePathEdit := TNewEdit.Create(DatabasePage);
   DatabasePathEdit.Parent := DatabasePage.Surface;
   DatabasePathEdit.Top := DatabasePathLabel.Top + DatabasePathLabel.Height + 4;
   DatabasePathEdit.Left := 20;
-  DatabasePathEdit.Width := DatabasePage.SurfaceWidth - 40;
+  DatabasePathEdit.Width := DatabasePage.SurfaceWidth - 100;
   DatabasePathEdit.Text := '';
+  DatabasePathEdit.OnChange := @DatabasePathEditChange;
+
+  DatabaseBrowseButton := TNewButton.Create(DatabasePage);
+  DatabaseBrowseButton.Parent := DatabasePage.Surface;
+  DatabaseBrowseButton.Caption := '参照...';
+  DatabaseBrowseButton.Top := DatabasePathEdit.Top - 1;
+  DatabaseBrowseButton.Left := DatabasePathEdit.Left + DatabasePathEdit.Width + 8;
+  DatabaseBrowseButton.Width := 70;
+  DatabaseBrowseButton.Height := DatabasePathEdit.Height + 2;
+  DatabaseBrowseButton.OnClick := @DatabaseBrowseButtonClick;
 
   DatabaseNoteLabel := TNewStaticText.Create(DatabasePage);
   DatabaseNoteLabel.Parent := DatabasePage.Surface;
-  DatabaseNoteLabel.Caption :=
-    '例: \\server\share\ICCardManager' + #13#10 +
-    '' + #13#10 +
-    '※ 共有フォルダは事前に作成しておく必要があります' + #13#10 +
-    '※ この設定は後から「設定」画面（F5）で変更できます';
-  DatabaseNoteLabel.Top := DatabasePathEdit.Top + DatabasePathEdit.Height + 10;
+  DatabaseNoteLabel.Caption := '例: \\server\share\ICCardManager  D:\share\ICCardManager';
+  DatabaseNoteLabel.Top := DatabasePathEdit.Top + DatabasePathEdit.Height + 4;
   DatabaseNoteLabel.Left := 20;
-  DatabaseNoteLabel.Width := DatabasePage.SurfaceWidth - 40;
-  DatabaseNoteLabel.AutoSize := False;
-  DatabaseNoteLabel.Height := 80;
   DatabaseNoteLabel.Font.Color := clGray;
 end;
 
@@ -231,14 +264,24 @@ procedure WriteDatabaseConfig();
 var
   ConfigDir: string;
   ConfigFile: string;
-  SharedPath: string;
   FullDbPath: string;
+  SharedPath: string;
+  IsShared: Boolean;
 begin
-  // 「このPCのみ」が選択された場合、設定ファイルは作成しない（デフォルト動作）
-  if DatabaseLocalRadio.Checked then
+  // まず保存済み変数を使う。未保存ならコントロールから直接読む（フォールバック）
+  IsShared := DatabaseUseSharedFolder;
+  SharedPath := DatabaseSharedPath;
+
+  if (not IsShared) and (DatabaseSharedRadio <> nil) then
+  begin
+    IsShared := DatabaseSharedRadio.Checked;
+    if IsShared and (DatabasePathEdit <> nil) then
+      SharedPath := Trim(DatabasePathEdit.Text);
+  end;
+
+  if not IsShared then
     Exit;
 
-  SharedPath := Trim(DatabasePathEdit.Text);
   if SharedPath = '' then
     Exit;
 
@@ -249,7 +292,8 @@ begin
   ForceDirectories(ConfigDir);
   ConfigFile := ConfigDir + '\database_config.txt';
 
-  SaveStringToFile(ConfigFile, FullDbPath, False);
+  if not SaveStringToFile(ConfigFile, FullDbPath, False) then
+    MsgBox('データベース設定ファイルの書き込みに失敗しました: ' + ConfigFile, mbError, MB_OK);
 end;
 
 // DB保存先ページのバリデーション（「次へ」ボタン押下時に呼ばれる）
@@ -272,14 +316,23 @@ begin
         Exit;
       end;
 
-      // UNCパス形式のチェック（\\で始まるか）
-      if (Length(SharedPath) < 3) or (SharedPath[1] <> '\') or (SharedPath[2] <> '\') then
+      // パス形式のチェック（UNCパスまたはドライブレター付き絶対パス）
+      if not ((Length(SharedPath) >= 3) and (((SharedPath[1] = '\') and (SharedPath[2] = '\')) or (SharedPath[2] = ':'))) then
       begin
-        MsgBox('共有フォルダのパスは \\サーバー名\共有名 の形式で入力してください。' + #13#10 +
-               '例: \\server\share\ICCardManager', mbError, MB_OK);
+        MsgBox('共有フォルダのパスを正しく入力してください。' + #13#10 +
+               '例: \\server\share\ICCardManager または D:\share\ICCardManager', mbError, MB_OK);
         Result := False;
         Exit;
       end;
+
+      // バリデーション通過: 値を変数に保存
+      DatabaseUseSharedFolder := True;
+      DatabaseSharedPath := SharedPath;
+    end
+    else
+    begin
+      DatabaseUseSharedFolder := False;
+      DatabaseSharedPath := '';
     end;
   end;
 end;
@@ -334,6 +387,16 @@ begin
   begin
     RenameUninstaller();
     WriteDepartmentConfig();
+
+    // DB保存先: ssPostInstall時にコントロールから直接読み取って書き込む
+    if (DatabaseSharedRadio <> nil) and DatabaseSharedRadio.Checked then
+    begin
+      if (DatabasePathEdit <> nil) and (Trim(DatabasePathEdit.Text) <> '') then
+      begin
+        DatabaseUseSharedFolder := True;
+        DatabaseSharedPath := Trim(DatabasePathEdit.Text);
+      end;
+    end;
     WriteDatabaseConfig();
   end;
 end;

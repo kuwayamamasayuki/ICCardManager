@@ -134,8 +134,12 @@ public partial class SettingsViewModel : ViewModelBase
         _settingsRepository = settingsRepository;
         _validationService = validationService;
         _soundPlayer = soundPlayer;
-        // appsettings.jsonのPathはファイルパスなので、フォルダ部分のみをUI用に保持
+        // DatabaseOptionsから読み込み、空ならdatabase_config.txtから直接読む（フォールバック）
         var fullPath = databaseOptions.Value.Path ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(fullPath))
+        {
+            fullPath = LoadDatabasePathFromConfigFile();
+        }
         _originalDatabasePath = ExtractDirectoryPath(fullPath);
         _databasePath = _originalDatabasePath;
     }
