@@ -166,13 +166,24 @@ namespace ICCardManager
             services.Configure<OrganizationOptions>(Configuration.GetSection("OrganizationOptions"));
             services.Configure<DatabaseOptions>(Configuration.GetSection("DatabaseOptions"));
 
+            // ProgramData配下の設定ファイルからDBパスを読み込み、DatabaseOptionsを上書き
+            // （appsettings.jsonはProgram Files内で書き込み不可のため、別ファイルで管理）
+            services.PostConfigure<DatabaseOptions>(dbOptions =>
+            {
+                var configPath = ViewModels.SettingsViewModel.LoadDatabasePathFromConfigFile();
+                if (!string.IsNullOrWhiteSpace(configPath))
+                {
+                    dbOptions.Path = configPath;
+                }
+            });
+
             // 共有モード時はキャッシュTTLを短縮（他PCの変更を素早く反映するため）
             // ※ ローカル操作ではキャッシュが即座に無効化されるため、
             //   TTLは「他PCの操作結果が見えるまでの遅延」のみに影響する。
             //   20台同時接続での負荷を考慮し、過度に短くしない。
             services.PostConfigure<CacheOptions>(cacheOptions =>
             {
-                var dbPath = Configuration.GetSection("DatabaseOptions")?.GetValue<string>("Path");
+                var dbPath = ViewModels.SettingsViewModel.LoadDatabasePathFromConfigFile();
                 if (!string.IsNullOrWhiteSpace(dbPath) && Data.DbContext.IsUncPath(dbPath))
                 {
                     cacheOptions.CardListSeconds = 15;
