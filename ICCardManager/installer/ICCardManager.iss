@@ -168,42 +168,42 @@ begin
   DatabaseLocalRadio.Top := 10;
   DatabaseLocalRadio.Left := 0;
   DatabaseLocalRadio.Width := DatabasePage.SurfaceWidth;
+  DatabaseLocalRadio.Height := 20;
   DatabaseLocalRadio.Checked := True;
-  DatabaseLocalRadio.Font.Style := [fsBold];
 
   DatabaseSharedRadio := TNewRadioButton.Create(DatabasePage);
   DatabaseSharedRadio.Parent := DatabasePage.Surface;
   DatabaseSharedRadio.Caption := '共有フォルダで複数のPCから使用';
-  DatabaseSharedRadio.Top := DatabaseLocalRadio.Top + DatabaseLocalRadio.Height + 20;
+  DatabaseSharedRadio.Top := DatabaseLocalRadio.Top + DatabaseLocalRadio.Height + 16;
   DatabaseSharedRadio.Left := 0;
   DatabaseSharedRadio.Width := DatabasePage.SurfaceWidth;
-  DatabaseSharedRadio.Font.Style := [fsBold];
+  DatabaseSharedRadio.Height := 20;
 
   DatabasePathLabel := TNewStaticText.Create(DatabasePage);
   DatabasePathLabel.Parent := DatabasePage.Surface;
-  DatabasePathLabel.Caption := '共有フォルダのパス:';
-  DatabasePathLabel.Top := DatabaseSharedRadio.Top + DatabaseSharedRadio.Height + 12;
-  DatabasePathLabel.Left := 20;
+  DatabasePathLabel.Caption := '共有フォルダのパス（例: \\server\share\ICCardManager）:';
+  DatabasePathLabel.Top := DatabaseSharedRadio.Top + DatabaseSharedRadio.Height + 14;
+  DatabasePathLabel.Left := 24;
+  DatabasePathLabel.Width := DatabasePage.SurfaceWidth - 24;
 
   DatabasePathEdit := TNewEdit.Create(DatabasePage);
   DatabasePathEdit.Parent := DatabasePage.Surface;
-  DatabasePathEdit.Top := DatabasePathLabel.Top + DatabasePathLabel.Height + 4;
-  DatabasePathEdit.Left := 20;
-  DatabasePathEdit.Width := DatabasePage.SurfaceWidth - 40;
+  DatabasePathEdit.Top := DatabasePathLabel.Top + DatabasePathLabel.Height + 6;
+  DatabasePathEdit.Left := 24;
+  DatabasePathEdit.Width := DatabasePage.SurfaceWidth - 48;
   DatabasePathEdit.Text := '';
 
   DatabaseNoteLabel := TNewStaticText.Create(DatabasePage);
   DatabaseNoteLabel.Parent := DatabasePage.Surface;
   DatabaseNoteLabel.Caption :=
-    '例: \\server\share\ICCardManager' + #13#10 +
-    '' + #13#10 +
-    '※ 共有フォルダは事前に作成しておく必要があります' + #13#10 +
+    '※ 共有フォルダは事前に作成し、利用するPCからアクセスできる' + #13#10 +
+    '  状態にしておく必要があります' + #13#10 +
     '※ この設定は後から「設定」画面（F5）で変更できます';
-  DatabaseNoteLabel.Top := DatabasePathEdit.Top + DatabasePathEdit.Height + 10;
-  DatabaseNoteLabel.Left := 20;
-  DatabaseNoteLabel.Width := DatabasePage.SurfaceWidth - 40;
+  DatabaseNoteLabel.Top := DatabasePathEdit.Top + DatabasePathEdit.Height + 12;
+  DatabaseNoteLabel.Left := 24;
+  DatabaseNoteLabel.Width := DatabasePage.SurfaceWidth - 48;
   DatabaseNoteLabel.AutoSize := False;
-  DatabaseNoteLabel.Height := 80;
+  DatabaseNoteLabel.Height := 60;
   DatabaseNoteLabel.Font.Color := clGray;
 end;
 
