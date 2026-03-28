@@ -12,7 +12,6 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using System.Text.Json;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Options;
 
@@ -297,14 +296,14 @@ public partial class SettingsViewModel : ViewModelBase
 
                     try
                     {
-                        SaveDatabasePathToAppSettings(fullDbPath);
+                        SaveDatabasePathToConfigFile(fullDbPath);
                         DatabasePath = validatedFolderPath;
                         _originalDatabasePath = validatedFolderPath;
                         IsDatabasePathChanged = false;
                     }
                     catch (Exception ex)
                     {
-                        SetStatus($"データベース保存先の設定ファイル（appsettings.json）の保存に失敗しました: {ex.Message}", true);
+                        SetStatus($"データベース保存先の設定ファイルの保存に失敗しました: {ex.Message}", true);
                         return;
                     }
 
@@ -372,56 +371,62 @@ public partial class SettingsViewModel : ViewModelBase
     }
 
     /// <summary>
-    /// データベースパスをappsettings.jsonに保存
+    /// データベースパスを設定ファイルに保存
     /// </summary>
-    private static void SaveDatabasePathToAppSettings(string databasePath)
+    /// <remarks>
+    /// appsettings.jsonはProgram Files内にあり一般ユーザーには書き込めないため、
+    /// C:\ProgramData\ICCardManager\database_config.txt に保存する。
+    /// department_config.txt と同じパターン。
+    /// </remarks>
+    internal static void SaveDatabasePathToConfigFile(string databasePath)
     {
-        var appSettingsPath = Path.Combine(
-            AppDomain.CurrentDomain.BaseDirectory, "appsettings.json");
-
-        var json = File.Exists(appSettingsPath)
-            ? File.ReadAllText(appSettingsPath)
-            : "{}";
-
-        using var doc = JsonDocument.Parse(json);
-        using var stream = new MemoryStream();
-        using (var writer = new Utf8JsonWriter(stream, new JsonWriterOptions { Indented = true }))
+        var configPath = GetDatabaseConfigPath();
+        var directory = Path.GetDirectoryName(configPath);
+        if (!string.IsNullOrEmpty(directory))
         {
-            writer.WriteStartObject();
-            foreach (var property in doc.RootElement.EnumerateObject())
-            {
-                if (property.Name == "DatabaseOptions")
-                {
-                    writer.WriteStartObject("DatabaseOptions");
-                    writer.WriteString("Path", databasePath ?? string.Empty);
-                    writer.WriteEndObject();
-                }
-                else
-                {
-                    property.WriteTo(writer);
-                }
-            }
-
-            // DatabaseOptionsが存在しなかった場合
-            if (!doc.RootElement.TryGetProperty("DatabaseOptions", out _))
-            {
-                writer.WriteStartObject("DatabaseOptions");
-                writer.WriteString("Path", databasePath ?? string.Empty);
-                writer.WriteEndObject();
-            }
-
-            writer.WriteEndObject();
+            Directory.CreateDirectory(directory);
         }
 
         // アトミック書き込み: 一時ファイルに書き出してからリネーム（破損防止）
-        var tempPath = appSettingsPath + ".tmp";
-        File.WriteAllBytes(tempPath, stream.ToArray());
-        // .NET Framework 4.8ではFile.Moveにoverwrite引数がないため手動で置き換え
-        if (File.Exists(appSettingsPath))
+        var tempPath = configPath + ".tmp";
+        File.WriteAllText(tempPath, databasePath ?? string.Empty);
+        if (File.Exists(configPath))
         {
-            File.Delete(appSettingsPath);
+            File.Delete(configPath);
         }
-        File.Move(tempPath, appSettingsPath);
+        File.Move(tempPath, configPath);
+    }
+
+    /// <summary>
+    /// データベース設定ファイルのパスを取得
+    /// </summary>
+    internal static string GetDatabaseConfigPath()
+    {
+        return Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
+            "ICCardManager", "database_config.txt");
+    }
+
+    /// <summary>
+    /// データベース設定ファイルからパスを読み込み
+    /// </summary>
+    internal static string LoadDatabasePathFromConfigFile()
+    {
+        var configPath = GetDatabaseConfigPath();
+        if (!File.Exists(configPath))
+        {
+            return string.Empty;
+        }
+
+        try
+        {
+            var path = File.ReadAllText(configPath).Trim();
+            return path;
+        }
+        catch
+        {
+            return string.Empty;
+        }
     }
 
     /// <summary>

@@ -202,7 +202,7 @@ THEN
 | 払い戻し | 払戻しによる払出 |
 
 ### 共有フォルダモード（複数PC共有DB）
-- DBパスは `appsettings.json` の `DatabaseOptions.Path` またはDB内設定で指定（空欄=ローカルデフォルト）
+- DBパスは `C:\ProgramData\ICCardManager\database_config.txt` で指定（空欄/未作成=ローカルデフォルト）。インストーラーの「データベースの保存先」ページまたは設定画面（F5）から設定
 - UNCパス（`\\server\share\iccard.db`）指定時に自動的に共有モードとして動作
 - 共有モード時: journal_mode=DELETE（WALはネットワーク非推奨）、busy_timeout=5000ms
 - キャッシュTTLを短縮し他PCの変更を早期反映

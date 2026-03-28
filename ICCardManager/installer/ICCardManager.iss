@@ -133,9 +133,19 @@ Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChang
 var
   DepartmentPage: TInputOptionWizardPage;
 
-// インストールウィザードに部署選択ページを追加（Issue #742）
+// DB保存先選択ページ
+var
+  DatabasePage: TWizardPage;
+  DatabaseLocalRadio: TNewRadioButton;
+  DatabaseSharedRadio: TNewRadioButton;
+  DatabasePathEdit: TNewEdit;
+  DatabasePathLabel: TNewStaticText;
+  DatabaseNoteLabel: TNewStaticText;
+
+// インストールウィザードにページを追加
 procedure InitializeWizard();
 begin
+  // 部署選択ページ（Issue #742）
   DepartmentPage := CreateInputOptionPage(wpSelectTasks,
     '部署の選択',
     '使用する部署及び支出科目を選択してください。',
@@ -146,6 +156,55 @@ begin
   DepartmentPage.Add('市長事務部局：役務費');
   DepartmentPage.Add('企業会計部局（水道局、交通局等）：旅費 - 乗車券購入費');
   DepartmentPage.SelectedValueIndex := 0;
+
+  // DB保存先選択ページ（部署選択の次に表示）
+  DatabasePage := CreateCustomPage(DepartmentPage.ID,
+    'データベースの保存先',
+    '複数のPCから同時に利用する場合は、共有フォルダを指定してください。');
+
+  DatabaseLocalRadio := TNewRadioButton.Create(DatabasePage);
+  DatabaseLocalRadio.Parent := DatabasePage.Surface;
+  DatabaseLocalRadio.Caption := 'このPCのみで使用（従来どおり）';
+  DatabaseLocalRadio.Top := 10;
+  DatabaseLocalRadio.Left := 0;
+  DatabaseLocalRadio.Width := DatabasePage.SurfaceWidth;
+  DatabaseLocalRadio.Checked := True;
+  DatabaseLocalRadio.Font.Style := [fsBold];
+
+  DatabaseSharedRadio := TNewRadioButton.Create(DatabasePage);
+  DatabaseSharedRadio.Parent := DatabasePage.Surface;
+  DatabaseSharedRadio.Caption := '共有フォルダで複数のPCから使用';
+  DatabaseSharedRadio.Top := DatabaseLocalRadio.Top + DatabaseLocalRadio.Height + 20;
+  DatabaseSharedRadio.Left := 0;
+  DatabaseSharedRadio.Width := DatabasePage.SurfaceWidth;
+  DatabaseSharedRadio.Font.Style := [fsBold];
+
+  DatabasePathLabel := TNewStaticText.Create(DatabasePage);
+  DatabasePathLabel.Parent := DatabasePage.Surface;
+  DatabasePathLabel.Caption := '共有フォルダのパス:';
+  DatabasePathLabel.Top := DatabaseSharedRadio.Top + DatabaseSharedRadio.Height + 12;
+  DatabasePathLabel.Left := 20;
+
+  DatabasePathEdit := TNewEdit.Create(DatabasePage);
+  DatabasePathEdit.Parent := DatabasePage.Surface;
+  DatabasePathEdit.Top := DatabasePathLabel.Top + DatabasePathLabel.Height + 4;
+  DatabasePathEdit.Left := 20;
+  DatabasePathEdit.Width := DatabasePage.SurfaceWidth - 40;
+  DatabasePathEdit.Text := '';
+
+  DatabaseNoteLabel := TNewStaticText.Create(DatabasePage);
+  DatabaseNoteLabel.Parent := DatabasePage.Surface;
+  DatabaseNoteLabel.Caption :=
+    '例: \\server\share\ICCardManager' + #13#10 +
+    '' + #13#10 +
+    '※ 共有フォルダは事前に作成しておく必要があります' + #13#10 +
+    '※ この設定は後から「設定」画面（F5）で変更できます';
+  DatabaseNoteLabel.Top := DatabasePathEdit.Top + DatabasePathEdit.Height + 10;
+  DatabaseNoteLabel.Left := 20;
+  DatabaseNoteLabel.Width := DatabasePage.SurfaceWidth - 40;
+  DatabaseNoteLabel.AutoSize := False;
+  DatabaseNoteLabel.Height := 80;
+  DatabaseNoteLabel.Font.Color := clGray;
 end;
 
 // 部署選択結果を設定ファイルに書き出す（Issue #742）
@@ -165,6 +224,64 @@ begin
     DepartmentValue := 'mayor_office';
 
   SaveStringToFile(ConfigFile, DepartmentValue, False);
+end;
+
+// DB保存先選択結果を設定ファイルに書き出す
+procedure WriteDatabaseConfig();
+var
+  ConfigDir: string;
+  ConfigFile: string;
+  SharedPath: string;
+  FullDbPath: string;
+begin
+  // 「このPCのみ」が選択された場合、設定ファイルは作成しない（デフォルト動作）
+  if DatabaseLocalRadio.Checked then
+    Exit;
+
+  SharedPath := Trim(DatabasePathEdit.Text);
+  if SharedPath = '' then
+    Exit;
+
+  // フォルダパス + ファイル名
+  FullDbPath := AddBackslash(SharedPath) + 'iccard.db';
+
+  ConfigDir := ExpandConstant('{commonappdata}\ICCardManager');
+  ForceDirectories(ConfigDir);
+  ConfigFile := ConfigDir + '\database_config.txt';
+
+  SaveStringToFile(ConfigFile, FullDbPath, False);
+end;
+
+// DB保存先ページのバリデーション（「次へ」ボタン押下時に呼ばれる）
+function NextButtonClick(CurPageID: Integer): Boolean;
+var
+  SharedPath: string;
+begin
+  Result := True;
+
+  if CurPageID = DatabasePage.ID then
+  begin
+    // 「共有フォルダ」が選択されている場合、パスが入力されているかチェック
+    if DatabaseSharedRadio.Checked then
+    begin
+      SharedPath := Trim(DatabasePathEdit.Text);
+      if SharedPath = '' then
+      begin
+        MsgBox('共有フォルダのパスを入力してください。', mbError, MB_OK);
+        Result := False;
+        Exit;
+      end;
+
+      // UNCパス形式のチェック（\\で始まるか）
+      if (Length(SharedPath) < 3) or (SharedPath[1] <> '\') or (SharedPath[2] <> '\') then
+      begin
+        MsgBox('共有フォルダのパスは \\サーバー名\共有名 の形式で入力してください。' + #13#10 +
+               '例: \\server\share\ICCardManager', mbError, MB_OK);
+        Result := False;
+        Exit;
+      end;
+    end;
+  end;
 end;
 
 // Issue #506: アンインストーラーのファイル名を変更
@@ -217,6 +334,7 @@ begin
   begin
     RenameUninstaller();
     WriteDepartmentConfig();
+    WriteDatabaseConfig();
   end;
 end;
 
