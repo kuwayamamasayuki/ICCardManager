@@ -255,8 +255,16 @@ public partial class SettingsViewModel : ViewModelBase
                 // DBパスが変更された場合、appsettings.jsonに保存
                 if (IsDatabasePathChanged)
                 {
-                    SaveDatabasePathToAppSettings(DatabasePath);
-                    SetStatus("設定を保存しました。データベース保存先の変更を反映するにはアプリケーションを再起動してください。", false);
+                    try
+                    {
+                        SaveDatabasePathToAppSettings(DatabasePath);
+                        SetStatus("設定を保存しました。データベース保存先の変更を反映するにはアプリケーションを再起動してください。", false);
+                    }
+                    catch (Exception ex)
+                    {
+                        SetStatus($"データベース保存先の設定ファイル（appsettings.json）の保存に失敗しました: {ex.Message}", true);
+                        return;
+                    }
                 }
 
                 // 保存完了フラグを立てる（ダイアログを閉じるトリガー）
@@ -310,7 +318,7 @@ public partial class SettingsViewModel : ViewModelBase
         {
             if (dialog.ShowDialog() == System.Windows.Forms.DialogResult.OK)
             {
-                DatabasePath = Path.Combine(dialog.SelectedPath, "iccard.db");
+                DatabasePath = Path.Combine(dialog.SelectedPath, Data.DbContext.DatabaseFileName);
                 HasChanges = true;
             }
         }

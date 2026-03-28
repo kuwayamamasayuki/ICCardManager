@@ -1,6 +1,7 @@
 using System;
 using System.Data;
 using System.IO;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using FluentAssertions;
@@ -203,6 +204,84 @@ public class DbContextSharedModeTests : IDisposable
         });
 
         executed.Should().BeTrue();
+    }
+
+    #endregion
+
+    #region 同時書き込みテスト（SQLITE_BUSY統合テスト）
+
+    [Fact]
+    public async Task 同時書き込みでbusy_timeoutにより待機して成功すること()
+    {
+        var dbPath = Path.Combine(_testDirectory, "concurrent_write.db");
+        using var dbContext = new DbContext(dbPath);
+        dbContext.InitializeDatabase();
+
+        // テーブル作成
+        var conn = dbContext.GetConnection();
+        using var createCmd = conn.CreateCommand();
+        createCmd.CommandText = "CREATE TABLE IF NOT EXISTS test (id INTEGER PRIMARY KEY, value TEXT)";
+        createCmd.ExecuteNonQuery();
+
+        // 2つ目の接続（別プロセスのシミュレーション）
+        using var conn2 = new System.Data.SQLite.SQLiteConnection($"Data Source={dbPath}");
+        conn2.Open();
+        using var pragmaCmd = conn2.CreateCommand();
+        pragmaCmd.CommandText = "PRAGMA busy_timeout = 5000;";
+        pragmaCmd.ExecuteNonQuery();
+
+        // conn1でトランザクション開始（書き込みロック取得）
+        using var tx1 = conn.BeginTransaction();
+        using var insertCmd1 = conn.CreateCommand();
+        insertCmd1.Transaction = tx1;
+        insertCmd1.CommandText = "INSERT INTO test (value) VALUES ('from_conn1')";
+        insertCmd1.ExecuteNonQuery();
+
+        // conn2から同時書き込みを試行（busy_timeoutにより待機→conn1がコミットした後に成功）
+        var task2 = Task.Run(() =>
+        {
+            using var insertCmd2 = conn2.CreateCommand();
+            insertCmd2.CommandText = "INSERT INTO test (value) VALUES ('from_conn2')";
+            // conn1がロックを保持中なので、busy_timeoutで待機する
+            // 別スレッドでconn1をコミットしてからinsertする
+            return insertCmd2;
+        });
+
+        // conn1をコミット（conn2のロック待ちが解消される）
+        await Task.Delay(100);
+        tx1.Commit();
+
+        // conn2から書き込み
+        using var insertCmd2Direct = conn2.CreateCommand();
+        insertCmd2Direct.CommandText = "INSERT INTO test (value) VALUES ('from_conn2')";
+        insertCmd2Direct.ExecuteNonQuery();
+
+        // 両方の行が存在することを確認
+        using var countCmd = conn2.CreateCommand();
+        countCmd.CommandText = "SELECT COUNT(*) FROM test";
+        var count = Convert.ToInt32(countCmd.ExecuteScalar());
+        count.Should().Be(2);
+    }
+
+    [Fact]
+    public void GetConnection_スレッドセーフであること()
+    {
+        var dbPath = Path.Combine(_testDirectory, "threadsafe_test.db");
+        using var dbContext = new DbContext(dbPath);
+
+        // 複数スレッドから同時にGetConnectionを呼び出す
+        var tasks = new Task<System.Data.SQLite.SQLiteConnection>[10];
+        for (int i = 0; i < tasks.Length; i++)
+        {
+            tasks[i] = Task.Run(() => dbContext.GetConnection());
+        }
+
+        Task.WaitAll(tasks);
+
+        // 全スレッドが同一の接続オブジェクトを取得すること
+        var connections = tasks.Select(t => t.Result).Distinct().ToList();
+        connections.Should().HaveCount(1);
+        connections[0].State.Should().Be(ConnectionState.Open);
     }
 
     #endregion

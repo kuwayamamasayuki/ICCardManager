@@ -493,10 +493,29 @@ public partial class MainViewModel : ViewModelBase
     /// </summary>
     private void StartDatabaseHealthCheck()
     {
+        StopDatabaseHealthCheck();
         _dbHealthCheckTimer = _timerFactory.Create();
         _dbHealthCheckTimer.Interval = TimeSpan.FromSeconds(30);
-        _dbHealthCheckTimer.Tick += (s, e) => CheckDatabaseConnection();
+        _dbHealthCheckTimer.Tick += OnDatabaseHealthCheckTick;
         _dbHealthCheckTimer.Start();
+    }
+
+    /// <summary>
+    /// DB接続ヘルスチェックタイマーを停止
+    /// </summary>
+    internal void StopDatabaseHealthCheck()
+    {
+        if (_dbHealthCheckTimer != null)
+        {
+            _dbHealthCheckTimer.Stop();
+            _dbHealthCheckTimer.Tick -= OnDatabaseHealthCheckTick;
+            _dbHealthCheckTimer = null;
+        }
+    }
+
+    private void OnDatabaseHealthCheckTick(object sender, EventArgs e)
+    {
+        CheckDatabaseConnection();
     }
 
     /// <summary>
@@ -519,7 +538,7 @@ public partial class MainViewModel : ViewModelBase
                 WarningMessages.Remove(existing);
             }
         }
-        catch
+        catch (Exception)
         {
             // 接続失敗 → 警告を表示（既に表示中でなければ）
             if (!WarningMessages.Any(w => w.Type == WarningType.DatabaseConnectionLost))

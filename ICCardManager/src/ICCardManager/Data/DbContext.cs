@@ -18,6 +18,7 @@ namespace ICCardManager.Data
     public class DbContext : IDisposable
     {
         private readonly string _connectionString;
+        private readonly object _connectionLock = new object();
         private SQLiteConnection _connection;
         private bool _disposed;
 
@@ -30,6 +31,11 @@ namespace ICCardManager.Data
         /// busy_timeout値（ミリ秒）。共有モードでは他PCのロック待ちが必要
         /// </summary>
         internal const int BusyTimeoutMs = 5000;
+
+        /// <summary>
+        /// データベースファイル名
+        /// </summary>
+        public const string DatabaseFileName = "iccard.db";
 
         /// <summary>
         /// データベースファイルのパス
@@ -91,7 +97,7 @@ namespace ICCardManager.Data
             // ディレクトリを作成し、全ユーザーがアクセスできるように権限を設定
             EnsureDirectoryWithPermissions(appDataPath);
 
-            return Path.Combine(appDataPath, "iccard.db");
+            return Path.Combine(appDataPath, DatabaseFileName);
         }
 
         /// <summary>
@@ -147,23 +153,26 @@ namespace ICCardManager.Data
         /// </remarks>
         public virtual SQLiteConnection GetConnection()
         {
-            if (_connection != null && _connection.State != ConnectionState.Open)
+            lock (_connectionLock)
             {
-                // 接続が切断された場合（ネットワーク共有時の瞬断等）は再接続
+                if (_connection != null && _connection.State != ConnectionState.Open)
+                {
+                    // 接続が切断された場合（ネットワーク共有時の瞬断等）は再接続
 #if DEBUG
-                System.Diagnostics.Debug.WriteLine("[DbContext] 接続が切断されています。再接続します。");
+                    System.Diagnostics.Debug.WriteLine("[DbContext] 接続が切断されています。再接続します。");
 #endif
-                CloseConnection();
-            }
+                    CloseConnectionInternal();
+                }
 
-            if (_connection == null)
-            {
-                _connection = new SQLiteConnection(_connectionString);
-                _connection.Open();
-                ConfigurePragmas(_connection);
-            }
+                if (_connection == null)
+                {
+                    _connection = new SQLiteConnection(_connectionString);
+                    _connection.Open();
+                    ConfigurePragmas(_connection);
+                }
 
-            return _connection;
+                return _connection;
+            }
         }
 
         /// <summary>
@@ -171,12 +180,25 @@ namespace ICCardManager.Data
         /// </summary>
         private void ConfigurePragmas(SQLiteConnection connection)
         {
-            using var command = connection.CreateCommand();
-            command.CommandText = @"
-PRAGMA foreign_keys = ON;
-PRAGMA busy_timeout = 5000;
-PRAGMA journal_mode = DELETE;";
-            command.ExecuteNonQuery();
+            using var fkCommand = connection.CreateCommand();
+            fkCommand.CommandText = "PRAGMA foreign_keys = ON;";
+            fkCommand.ExecuteNonQuery();
+
+            using var btCommand = connection.CreateCommand();
+            // ローカルモードでも設定する。実害はなく、コードパスを統一できる。
+            btCommand.CommandText = $"PRAGMA busy_timeout = {BusyTimeoutMs};";
+            btCommand.ExecuteNonQuery();
+
+            using var jmCommand = connection.CreateCommand();
+            jmCommand.CommandText = "PRAGMA journal_mode = DELETE;";
+            var journalMode = jmCommand.ExecuteScalar()?.ToString();
+            if (journalMode != "delete")
+            {
+#if DEBUG
+                System.Diagnostics.Debug.WriteLine(
+                    $"[DbContext] 警告: journal_modeがDELETEに設定できませんでした（現在: {journalMode}）");
+#endif
+            }
         }
 
         /// <summary>
@@ -189,13 +211,24 @@ PRAGMA journal_mode = DELETE;";
         /// </remarks>
         public void CloseConnection()
         {
+            lock (_connectionLock)
+            {
+                CloseConnectionInternal();
+            }
+        }
+
+        /// <summary>
+        /// 接続を閉じる内部実装（ロック取得済みの状態で呼び出すこと）
+        /// </summary>
+        private void CloseConnectionInternal()
+        {
             if (_connection != null)
             {
                 _connection.Close();
                 _connection.Dispose();
                 _connection = null;
 #if DEBUG
-                System.Diagnostics.Debug.WriteLine("[DbContext] 接続を閉じました（リストア準備）");
+                System.Diagnostics.Debug.WriteLine("[DbContext] 接続を閉じました");
 #endif
             }
         }
@@ -225,10 +258,26 @@ PRAGMA journal_mode = DELETE;";
             // 新規作成されたDBファイルにもアクセス権限を設定
             SetDatabaseFilePermissions(DatabasePath);
 
-            // 既存のDBがある場合（マイグレーション導入前）の対応
-            HandleLegacyDatabase(connection);
+            // HandleLegacyDatabaseはトランザクションを持たないため、
+            // BEGIN IMMEDIATEで排他ロックを取得し、複数PCの同時初期化を直列化する。
+            // MigrateToLatestは各マイグレーションが独自にトランザクションを持つため外に出す。
+            using (var transaction = connection.BeginTransaction(IsolationLevel.Serializable))
+            {
+                try
+                {
+                    HandleLegacyDatabase(connection);
+                    transaction.Commit();
+                }
+                catch
+                {
+                    transaction.Rollback();
+                    throw;
+                }
+            }
 
-            // マイグレーションを実行
+            // マイグレーションを実行（各マイグレーションが独自にトランザクションを管理）
+            // 複数PCが同時にマイグレーションを実行しても、schema_migrationsの
+            // PRIMARY KEY制約により重複適用が防止される。
             var runner = new MigrationRunner(connection);
             var appliedCount = runner.MigrateToLatest();
 
