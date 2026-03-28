@@ -58,7 +58,9 @@ namespace ICCardManager.Data
         public DbContext(string databasePath = null)
         {
             DatabasePath = databasePath ?? GetDefaultDatabasePath();
-            _connectionString = $"Data Source={DatabasePath}";
+            // SQLiteConnectionStringBuilderでエスケープし、接続文字列インジェクションを防止
+            var builder = new SQLiteConnectionStringBuilder { DataSource = DatabasePath };
+            _connectionString = builder.ToString();
             IsSharedMode = IsUncPath(DatabasePath);
         }
 

@@ -208,6 +208,16 @@ namespace ICCardManager.Services
                     return false;
                 }
 
+                // バックアップファイルがSQLiteデータベースとして有効か簡易検証
+                // SQLiteファイルの先頭16バイトは "SQLite format 3\0" というマジックヘッダ
+                if (!IsValidSqliteFile(backupFilePath))
+                {
+                    _logger.LogWarning(
+                        "リストア対象のファイルはSQLiteデータベースではありません: {Path}",
+                        backupFilePath);
+                    return false;
+                }
+
                 // 共有モード時は警告（他PCの接続が残っているとリストアが失敗する可能性がある）
                 if (_dbContext.IsSharedMode)
                 {
@@ -358,6 +368,37 @@ namespace ICCardManager.Services
             using var destinationConnection = new SQLiteConnection($"Data Source={destinationPath}");
             destinationConnection.Open();
             sourceConnection.BackupDatabase(destinationConnection, "main", "main", -1, null, 0);
+        }
+
+        /// <summary>
+        /// ファイルが有効なSQLiteデータベースかどうかを簡易検証
+        /// </summary>
+        /// <remarks>
+        /// SQLiteファイルの先頭16バイトは "SQLite format 3\0" というマジックヘッダ。
+        /// 不正なファイルのリストアによるデータ破壊を防止する。
+        /// </remarks>
+        private static bool IsValidSqliteFile(string filePath)
+        {
+            try
+            {
+                var header = new byte[16];
+                using var stream = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.Read);
+                if (stream.Read(header, 0, 16) < 16)
+                    return false;
+
+                // "SQLite format 3\0" (ASCII)
+                var expected = System.Text.Encoding.ASCII.GetBytes("SQLite format 3\0");
+                for (int i = 0; i < expected.Length; i++)
+                {
+                    if (header[i] != expected[i])
+                        return false;
+                }
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
         }
 
         /// <summary>

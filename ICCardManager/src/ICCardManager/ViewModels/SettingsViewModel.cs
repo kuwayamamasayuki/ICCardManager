@@ -255,9 +255,38 @@ public partial class SettingsViewModel : ViewModelBase
                 // DBパスが変更された場合、appsettings.jsonに保存
                 if (IsDatabasePathChanged)
                 {
+                    // DBパスの検証（空の場合はデフォルトに戻すためスキップ）
+                    var validatedDatabasePath = DatabasePath;
+                    if (!string.IsNullOrWhiteSpace(DatabasePath))
+                    {
+                        var dbDir = Path.GetDirectoryName(DatabasePath);
+                        if (string.IsNullOrEmpty(dbDir))
+                        {
+                            SetStatus("データベース保存先のパスが無効です", true);
+                            return;
+                        }
+
+                        var dbPathResult = PathValidator.ValidateBackupPath(dbDir);
+                        if (!dbPathResult.IsValid)
+                        {
+                            SetStatus($"データベース保存先が無効です: {dbPathResult.ErrorMessage}", true);
+                            return;
+                        }
+
+                        // パスを正規化
+                        var normalizedDir = PathValidator.NormalizePath(dbDir);
+                        if (normalizedDir == null)
+                        {
+                            SetStatus("データベース保存先のパスを正規化できません", true);
+                            return;
+                        }
+                        validatedDatabasePath = Path.Combine(normalizedDir, Data.DbContext.DatabaseFileName);
+                    }
+
                     try
                     {
-                        SaveDatabasePathToAppSettings(DatabasePath);
+                        SaveDatabasePathToAppSettings(validatedDatabasePath);
+                        DatabasePath = validatedDatabasePath;
                         SetStatus("設定を保存しました。データベース保存先の変更を反映するにはアプリケーションを再起動してください。", false);
                     }
                     catch (Exception ex)
@@ -366,7 +395,15 @@ public partial class SettingsViewModel : ViewModelBase
             writer.WriteEndObject();
         }
 
-        File.WriteAllBytes(appSettingsPath, stream.ToArray());
+        // アトミック書き込み: 一時ファイルに書き出してからリネーム（破損防止）
+        var tempPath = appSettingsPath + ".tmp";
+        File.WriteAllBytes(tempPath, stream.ToArray());
+        // .NET Framework 4.8ではFile.Moveにoverwrite引数がないため手動で置き換え
+        if (File.Exists(appSettingsPath))
+        {
+            File.Delete(appSettingsPath);
+        }
+        File.Move(tempPath, appSettingsPath);
     }
 
     /// <summary>
