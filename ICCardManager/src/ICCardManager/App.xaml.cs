@@ -211,8 +211,13 @@ namespace ICCardManager
             services.AddSingleton<DbContext>(sp =>
             {
                 var dbOptions = sp.GetRequiredService<IOptions<DatabaseOptions>>().Value;
-                var path = string.IsNullOrWhiteSpace(dbOptions.Path) ? null : dbOptions.Path;
-                return new DbContext(path);
+                var path = dbOptions.Path;
+                // PostConfigureで設定されなかった場合、database_config.txtから直接読む（フォールバック）
+                if (string.IsNullOrWhiteSpace(path))
+                {
+                    path = ViewModels.SettingsViewModel.LoadDatabasePathFromConfigFile();
+                }
+                return new DbContext(string.IsNullOrWhiteSpace(path) ? null : path);
             });
             services.AddSingleton<IStaffRepository, StaffRepository>();
             services.AddSingleton<ICardRepository, CardRepository>();
