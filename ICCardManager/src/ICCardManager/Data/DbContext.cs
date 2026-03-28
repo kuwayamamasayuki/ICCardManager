@@ -251,12 +251,19 @@ namespace ICCardManager.Data
             }
 
             // 既存DBのアクセス権限を接続前に修正（旧バージョンで単一ユーザーに制限されている場合の対応）
-            SetDatabaseFilePermissions(DatabasePath);
+            // 共有モード時はスキップ（共有フォルダの権限はファイルサーバー側で管理される）
+            if (!IsSharedMode)
+            {
+                SetDatabaseFilePermissions(DatabasePath);
+            }
 
             var connection = GetConnection();
 
             // 新規作成されたDBファイルにもアクセス権限を設定
-            SetDatabaseFilePermissions(DatabasePath);
+            if (!IsSharedMode)
+            {
+                SetDatabaseFilePermissions(DatabasePath);
+            }
 
             // HandleLegacyDatabaseはトランザクションを持たないため、
             // BEGIN IMMEDIATEで排他ロックを取得し、複数PCの同時初期化を直列化する。
