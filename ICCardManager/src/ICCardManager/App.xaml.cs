@@ -167,15 +167,18 @@ namespace ICCardManager
             services.Configure<DatabaseOptions>(Configuration.GetSection("DatabaseOptions"));
 
             // 共有モード時はキャッシュTTLを短縮（他PCの変更を素早く反映するため）
+            // ※ ローカル操作ではキャッシュが即座に無効化されるため、
+            //   TTLは「他PCの操作結果が見えるまでの遅延」のみに影響する。
+            //   20台同時接続での負荷を考慮し、過度に短くしない。
             services.PostConfigure<CacheOptions>(cacheOptions =>
             {
                 var dbPath = Configuration.GetSection("DatabaseOptions")?.GetValue<string>("Path");
                 if (!string.IsNullOrWhiteSpace(dbPath) && Data.DbContext.IsUncPath(dbPath))
                 {
-                    cacheOptions.CardListSeconds = 5;
-                    cacheOptions.LentCardsSeconds = 3;
-                    cacheOptions.StaffListSeconds = 10;
-                    cacheOptions.SettingsMinutes = 1;
+                    cacheOptions.CardListSeconds = 15;
+                    cacheOptions.LentCardsSeconds = 10;
+                    cacheOptions.StaffListSeconds = 30;
+                    cacheOptions.SettingsMinutes = 3;
                 }
             });
 

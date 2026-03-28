@@ -182,15 +182,13 @@ namespace ICCardManager.Data
         /// </summary>
         private void ConfigurePragmas(SQLiteConnection connection)
         {
-            using var fkCommand = connection.CreateCommand();
-            fkCommand.CommandText = "PRAGMA foreign_keys = ON;";
-            fkCommand.ExecuteNonQuery();
+            // foreign_keysとbusy_timeoutは1コマンドにまとめてラウンドトリップを削減
+            // ローカルモードでもbusy_timeoutを設定する（実害なし、コードパス統一）
+            using var pragmaCommand = connection.CreateCommand();
+            pragmaCommand.CommandText = $"PRAGMA foreign_keys = ON; PRAGMA busy_timeout = {BusyTimeoutMs};";
+            pragmaCommand.ExecuteNonQuery();
 
-            using var btCommand = connection.CreateCommand();
-            // ローカルモードでも設定する。実害はなく、コードパスを統一できる。
-            btCommand.CommandText = $"PRAGMA busy_timeout = {BusyTimeoutMs};";
-            btCommand.ExecuteNonQuery();
-
+            // journal_modeは戻り値を確認するため別コマンド
             using var jmCommand = connection.CreateCommand();
             jmCommand.CommandText = "PRAGMA journal_mode = DELETE;";
             var journalMode = jmCommand.ExecuteScalar()?.ToString();

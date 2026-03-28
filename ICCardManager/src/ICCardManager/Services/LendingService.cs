@@ -329,27 +329,28 @@ namespace ICCardManager.Services
 
                 var now = DateTime.Now;
 
+                // Issue #656: カードから残高を読み取れなかった場合、直近の履歴から残高を取得
+                // READ操作はリトライ範囲の外で実行（不要な再クエリを防止）
+                var currentBalance = balance ?? 0;
+                if (!balance.HasValue)
+                {
+                    var latestLedger = await _ledgerRepository.GetLatestLedgerAsync(cardIdm);
+                    if (latestLedger != null)
+                    {
+                        currentBalance = latestLedger.Balance;
+                        _logger.LogInformation(
+                            "LendAsync: カード残高を読み取れなかったため、直近の履歴残高を使用: {Balance}円", currentBalance);
+                    }
+                }
+
                 // トランザクション開始
-                // 共有モード時のSQLITE_BUSY対策としてリトライでラップ
-                var currentBalance = await _dbContext.ExecuteWithRetryAsync(async () =>
+                // 共有モード時のSQLITE_BUSY対策としてリトライでラップ（WRITE操作のみ）
+                await _dbContext.ExecuteWithRetryAsync(async () =>
                 {
                     using var transaction = _dbContext.BeginTransaction();
 
                     try
                     {
-                        // 貸出レコードを作成
-                        // Issue #656: カードから残高を読み取れなかった場合、直近の履歴から残高を取得
-                        var bal = balance ?? 0;
-                        if (!balance.HasValue)
-                        {
-                            var latestLedger = await _ledgerRepository.GetLatestLedgerAsync(cardIdm);
-                            if (latestLedger != null)
-                            {
-                                bal = latestLedger.Balance;
-                                _logger.LogInformation(
-                                    "LendAsync: カード残高を読み取れなかったため、直近の履歴残高を使用: {Balance}円", bal);
-                            }
-                        }
                         var ledger = new Ledger
                         {
                             CardIdm = cardIdm,
@@ -358,7 +359,7 @@ namespace ICCardManager.Services
                             Summary = SummaryGenerator.GetLendingSummary(),
                             Income = 0,
                             Expense = 0,
-                            Balance = bal,
+                            Balance = currentBalance,
                             StaffName = staff.Name,
                             LentAt = now,
                             IsLentRecord = true
@@ -372,7 +373,6 @@ namespace ICCardManager.Services
                         await _cardRepository.UpdateLentStatusAsync(cardIdm, true, now, staffIdm);
 
                         transaction.Commit();
-                        return bal;
                     }
                     catch
                     {

@@ -513,24 +513,49 @@ public partial class MainViewModel : ViewModelBase
         }
     }
 
-    private void OnDatabaseHealthCheckTick(object sender, EventArgs e)
+    private bool _isHealthCheckRunning;
+
+    private async void OnDatabaseHealthCheckTick(object sender, EventArgs e)
     {
-        CheckDatabaseConnection();
+        if (_isHealthCheckRunning)
+            return;
+
+        _isHealthCheckRunning = true;
+        try
+        {
+            await CheckDatabaseConnectionAsync();
+        }
+        finally
+        {
+            _isHealthCheckRunning = false;
+        }
     }
 
     /// <summary>
-    /// DB接続状態をチェックし、切断時は警告を表示
+    /// DB接続状態をバックグラウンドでチェックし、結果をUIスレッドに反映
     /// </summary>
-    private void CheckDatabaseConnection()
+    private async Task CheckDatabaseConnectionAsync()
     {
-        try
+        // バックグラウンドスレッドでDBクエリを実行（UIフリーズ防止）
+        var isConnected = await Task.Run(() =>
         {
-            var connection = _dbContext.GetConnection();
-            using var command = connection.CreateCommand();
-            command.CommandText = "SELECT 1";
-            command.ExecuteScalar();
+            try
+            {
+                var connection = _dbContext.GetConnection();
+                using var command = connection.CreateCommand();
+                command.CommandText = "SELECT 1";
+                command.ExecuteScalar();
+                return true;
+            }
+            catch (Exception)
+            {
+                return false;
+            }
+        });
 
-            // 接続OK → 警告を除去
+        // UIスレッドで警告を更新
+        if (isConnected)
+        {
             var existing = WarningMessages
                 .FirstOrDefault(w => w.Type == WarningType.DatabaseConnectionLost);
             if (existing != null)
@@ -538,9 +563,8 @@ public partial class MainViewModel : ViewModelBase
                 WarningMessages.Remove(existing);
             }
         }
-        catch (Exception)
+        else
         {
-            // 接続失敗 → 警告を表示（既に表示中でなければ）
             if (!WarningMessages.Any(w => w.Type == WarningType.DatabaseConnectionLost))
             {
                 WarningMessages.Add(new WarningItem
