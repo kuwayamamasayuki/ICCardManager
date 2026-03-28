@@ -15,9 +15,22 @@ namespace ICCardManager.Tests.Services;
 /// SummaryGenerator の固有機能テスト
 /// 基本的な Generate/GenerateByDate のテストは SummaryGeneratorComprehensiveTests を参照
 /// </summary>
-public class SummaryGeneratorTests
+public class SummaryGeneratorTests : IDisposable
 {
-    private readonly SummaryGenerator _generator = new();
+    private readonly SummaryGenerator _generator;
+
+    public SummaryGeneratorTests()
+    {
+        // テスト間の静的状態汚染を防止（OrganizationOptionsTests等との並列実行対策）
+        SummaryGenerator.ResetToDefaults();
+        _generator = new SummaryGenerator();
+    }
+
+    public void Dispose()
+    {
+        SummaryGenerator.ResetToDefaults();
+        GC.SuppressFinalize(this);
+    }
 
     #region Issue #510: 年度途中導入対応
 
