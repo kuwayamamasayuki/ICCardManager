@@ -524,10 +524,33 @@ public partial class MainViewModel : ViewModelBase
         try
         {
             await CheckDatabaseConnectionAsync();
+
+            // 共有モード: 他PCの変更を反映するためダッシュボードと貸出中カードを定期リフレッシュ
+            await RefreshSharedDataAsync();
         }
         finally
         {
             _isHealthCheckRunning = false;
+        }
+    }
+
+    /// <summary>
+    /// 共有モードでの定期データリフレッシュ（他PCの変更を反映）
+    /// </summary>
+    private async Task RefreshSharedDataAsync()
+    {
+        try
+        {
+            // 処理中（カードタッチ対応中）はリフレッシュをスキップ
+            if (CurrentState == AppState.Processing)
+                return;
+
+            await RefreshLentCardsAsync();
+            await RefreshDashboardAsync();
+        }
+        catch (Exception)
+        {
+            // リフレッシュ失敗は無視（接続断の場合はCheckDatabaseConnectionAsyncが警告を出す）
         }
     }
 
