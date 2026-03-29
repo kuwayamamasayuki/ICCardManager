@@ -89,6 +89,16 @@ namespace ICCardManager.Infrastructure.CardReader
         private volatile bool _cardWasLifted = true;
 
         /// <summary>
+        /// 前回のポーリングで検出されたIDm（デバウンス用）
+        /// </summary>
+        /// <remarks>
+        /// ゴーストIDm防止: カードを離した直後にリーダー内蔵チップ等の偽IDmが
+        /// 1回だけ検出されることがある。2回連続で同じIDmが検出されたときのみ
+        /// イベントを発火することで、単発のゴーストを排除する。
+        /// </remarks>
+        private string _previousPolledIdm;
+
+        /// <summary>
         /// カード検出のポーリング間隔（ミリ秒）
         /// </summary>
         /// <remarks>
@@ -481,6 +491,7 @@ namespace ICCardManager.Infrastructure.CardReader
                         // カードが検出されない = カードが離された
                         // Issue #323: 次回同じカードが検出されたときにイベントを発火するためフラグを立てる
                         _cardWasLifted = true;
+                        _previousPolledIdm = null;
                         return;
                     }
 
@@ -490,8 +501,21 @@ namespace ICCardManager.Infrastructure.CardReader
                 if (string.IsNullOrEmpty(idm))
                 {
                     _cardWasLifted = true;
+                    _previousPolledIdm = null;
                     return;
                 }
+
+                // デバウンス: 2回連続で同じIDmが検出されたときのみ処理する
+                // ゴーストIDm（リーダー内蔵チップ等）は1回だけ検出されてすぐ消えるため、
+                // この仕組みで排除できる。正規のカードは置いている間ずっと検出される。
+                if (idm != _previousPolledIdm)
+                {
+                    // 初回検出: まだ確定しない。次のポーリングで同じIDmが来れば確定する。
+                    _previousPolledIdm = idm;
+                    return;
+                }
+
+                // 2回連続で同じIDm → 確定。以降は通常のイベント発火判定に進む。
 
                 // 同一カードの連続読み取りを防止（スレッドセーフ）
                 // Issue #323: カードを置きっぱなしにした場合の連続読み取りを防止
@@ -541,6 +565,7 @@ namespace ICCardManager.Infrastructure.CardReader
                 // 例外をスローすることもある（ライブラリの実装による）
                 // どちらの場合でもカードが離された状態として扱う
                 _cardWasLifted = true;
+                _previousPolledIdm = null;
             }
             finally
             {
