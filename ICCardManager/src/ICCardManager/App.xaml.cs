@@ -125,10 +125,20 @@ namespace ICCardManager
             }
             catch (Exception ex)
             {
+                // DB関連のエラーの場合、パス情報も含めて表示（トラブルシューティング用）
+                var dbPathInfo = "";
+                try
+                {
+                    var configPath = ViewModels.SettingsViewModel.LoadDatabasePathFromConfigFile();
+                    if (!string.IsNullOrWhiteSpace(configPath))
+                        dbPathInfo = $"\n\nデータベースパス: {configPath}";
+                }
+                catch { }
+
 #if DEBUG
-                var errorMessage = $"起動エラー: {ex.Message}\n\n{ex.StackTrace}";
+                var errorMessage = $"起動エラー: {ex.Message}{dbPathInfo}\n\n{ex.StackTrace}";
 #else
-                var errorMessage = $"起動エラーが発生しました。\n\n{ex.Message}\n\n詳細はログファイルを確認してください。";
+                var errorMessage = $"起動エラーが発生しました。\n\n{ex.Message}{dbPathInfo}\n\n詳細はログファイルを確認してください。";
 #endif
 
                 // クリップボードにコピー可能なエラーダイアログを表示
@@ -184,7 +194,7 @@ namespace ICCardManager
             services.PostConfigure<CacheOptions>(cacheOptions =>
             {
                 var dbPath = ViewModels.SettingsViewModel.LoadDatabasePathFromConfigFile();
-                if (!string.IsNullOrWhiteSpace(dbPath) && Data.DbContext.IsUncPath(dbPath))
+                if (!string.IsNullOrWhiteSpace(dbPath))
                 {
                     cacheOptions.CardListSeconds = 15;
                     cacheOptions.LentCardsSeconds = 10;

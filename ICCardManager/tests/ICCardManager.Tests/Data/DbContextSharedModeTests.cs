@@ -53,12 +53,12 @@ public class DbContextSharedModeTests : IDisposable
     #region IsSharedMode テスト
 
     [Fact]
-    public void IsSharedMode_ローカルパスの場合falseであること()
+    public void IsSharedMode_パスを明示指定した場合trueであること()
     {
         var dbPath = Path.Combine(_testDirectory, "local.db");
         using var dbContext = new DbContext(dbPath);
 
-        dbContext.IsSharedMode.Should().BeFalse();
+        dbContext.IsSharedMode.Should().BeTrue();
     }
 
     [Fact]
@@ -282,6 +282,71 @@ public class DbContextSharedModeTests : IDisposable
         var connections = tasks.Select(t => t.Result).Distinct().ToList();
         connections.Should().HaveCount(1);
         connections[0].State.Should().Be(ConnectionState.Open);
+    }
+
+    #endregion
+
+    #region UNCパス接続テスト
+
+    [Fact]
+    public void UNCパス経由でSQLite接続が可能であること()
+    {
+        var uncPath = @"\\MASAYUKI-COM\share\iccard.db";
+        if (!System.IO.File.Exists(uncPath))
+            return;
+
+        var results = new System.Collections.Generic.List<string>();
+
+        // 方式1: 直接UNCパス（\\server\share\file）
+        try
+        {
+            using var c1 = new System.Data.SQLite.SQLiteConnection($"Data Source={uncPath}");
+            c1.Open();
+            results.Add("方式1(直接UNC): OK");
+            c1.Close();
+        }
+        catch (Exception ex) { results.Add($"方式1(直接UNC): NG - {ex.Message}"); }
+
+        // 方式2: バックスラッシュ4つ（\\\\server\share\file）
+        var fourSlash = @"\\\\" + uncPath.Substring(2);
+        try
+        {
+            using var c2 = new System.Data.SQLite.SQLiteConnection($"Data Source={fourSlash}");
+            c2.Open();
+            results.Add("方式2(4バックスラッシュ): OK");
+            c2.Close();
+        }
+        catch (Exception ex) { results.Add($"方式2(4バックスラッシュ): NG - {ex.Message}"); }
+
+        // 方式3: フォワードスラッシュ（//server/share/file）
+        var fwdSlash = uncPath.Replace('\\', '/');
+        try
+        {
+            using var c3 = new System.Data.SQLite.SQLiteConnection($"Data Source={fwdSlash}");
+            c3.Open();
+            results.Add("方式3(フォワードスラッシュ): OK");
+            c3.Close();
+        }
+        catch (Exception ex) { results.Add($"方式3(フォワードスラッシュ): NG - {ex.Message}"); }
+
+        // 方式4: DefineDosDeviceでドライブマッピング
+        try
+        {
+            using var dbContext = new DbContext(uncPath);
+            var c4 = dbContext.GetConnection();
+            results.Add("方式4(DefineDosDevice): OK");
+        }
+        catch (Exception ex) { results.Add($"方式4(DefineDosDevice): NG - {ex.Message}"); }
+
+        // 結果をコンソールに出力
+        var report = string.Join("\n", results);
+        System.Console.WriteLine("=== UNCパステスト結果 ===");
+        System.Console.WriteLine(report);
+        System.Console.WriteLine("========================");
+
+        // 少なくとも1つの方式が成功すること
+        results.Any(r => r.Contains("OK")).Should().BeTrue(
+            $"いずれかの方式でUNCパス接続が成功するべき:\n{report}");
     }
 
     #endregion

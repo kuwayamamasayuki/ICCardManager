@@ -22,9 +22,14 @@ namespace ICCardManager.Data
         private SQLiteConnection _connection;
         private bool _disposed;
 
+
         /// <summary>
-        /// 共有モード（ネットワーク共有フォルダ上のDB）かどうか
+        /// 共有モード（ユーザーがDB保存先を明示的に指定した場合）かどうか
         /// </summary>
+        /// <remarks>
+        /// UNCパス（\\server\share）だけでなく、ドライブレター形式（D:\share）の
+        /// マップドドライブも含む。デフォルトパス以外が指定された場合にtrueとなる。
+        /// </remarks>
         public bool IsSharedMode { get; }
 
         /// <summary>
@@ -58,10 +63,18 @@ namespace ICCardManager.Data
         public DbContext(string databasePath = null)
         {
             DatabasePath = databasePath ?? GetDefaultDatabasePath();
+
+            // SQLiteはバックスラッシュのUNCパス（\\server\share）を開けないため、
+            // フォワードスラッシュ（//server/share）に変換する
+            var effectivePath = IsUncPath(DatabasePath)
+                ? DatabasePath.Replace('\\', '/')
+                : DatabasePath;
+
             // SQLiteConnectionStringBuilderでエスケープし、接続文字列インジェクションを防止
-            var builder = new SQLiteConnectionStringBuilder { DataSource = DatabasePath };
+            var builder = new SQLiteConnectionStringBuilder { DataSource = effectivePath };
             _connectionString = builder.ToString();
-            IsSharedMode = IsUncPath(DatabasePath);
+            // ユーザーが明示的にパスを指定した場合（databasePathがnull以外）は共有モード
+            IsSharedMode = databasePath != null;
         }
 
         /// <summary>
@@ -251,12 +264,19 @@ namespace ICCardManager.Data
             }
 
             // 既存DBのアクセス権限を接続前に修正（旧バージョンで単一ユーザーに制限されている場合の対応）
-            SetDatabaseFilePermissions(DatabasePath);
+            // 共有モード時はスキップ（共有フォルダの権限はファイルサーバー側で管理される）
+            if (!IsSharedMode)
+            {
+                SetDatabaseFilePermissions(DatabasePath);
+            }
 
             var connection = GetConnection();
 
             // 新規作成されたDBファイルにもアクセス権限を設定
-            SetDatabaseFilePermissions(DatabasePath);
+            if (!IsSharedMode)
+            {
+                SetDatabaseFilePermissions(DatabasePath);
+            }
 
             // HandleLegacyDatabaseはトランザクションを持たないため、
             // BEGIN IMMEDIATEで排他ロックを取得し、複数PCの同時初期化を直列化する。
