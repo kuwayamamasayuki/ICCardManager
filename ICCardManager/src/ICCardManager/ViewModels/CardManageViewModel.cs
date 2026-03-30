@@ -581,7 +581,13 @@ namespace ICCardManager.ViewModels
         /// <remarks>
         /// Issue #530: 払戻済カードは既に運用から除外されているため削除不可
         /// </remarks>
-        private bool CanDelete() => SelectedCard != null && !SelectedCard.IsLent && !SelectedCard.IsRefunded;
+        /// <remarks>
+        /// Issue #1109: IsLentチェックをここから除外。
+        /// 共有モードで他PCがカードを貸出中にすると、ヘルスチェックでSelectedCard.IsLentが
+        /// trueに更新されボタンがサイレントに無効化される。ユーザーにフィードバックがないため、
+        /// ボタンは有効のまま、DeleteAsync内で即時エラーメッセージを表示する。
+        /// </remarks>
+        private bool CanDelete() => SelectedCard != null && !SelectedCard.IsRefunded;
 
         /// <summary>
         /// 削除
@@ -656,7 +662,10 @@ namespace ICCardManager.ViewModels
         /// <remarks>
         /// Issue #530: 既に払戻済のカードは再度払い戻しできない
         /// </remarks>
-        private bool CanRefund() => SelectedCard != null && !SelectedCard.IsLent && !SelectedCard.IsRefunded;
+        /// <remarks>
+        /// Issue #1109: IsLentチェックをここから除外（CanDeleteと同じ理由）。
+        /// </remarks>
+        private bool CanRefund() => SelectedCard != null && !SelectedCard.IsRefunded;
 
         /// <summary>
         /// 払い戻し処理
