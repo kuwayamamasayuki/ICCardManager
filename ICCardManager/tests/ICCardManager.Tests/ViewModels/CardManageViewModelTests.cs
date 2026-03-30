@@ -562,7 +562,7 @@ public class CardManageViewModelTests
         };
         _viewModel.SelectedCard = card;
 
-        _cardRepositoryMock.Setup(r => r.DeleteAsync("0102030405060708")).ReturnsAsync(true);
+        _cardRepositoryMock.Setup(r => r.DeleteAsync("0102030405060708")).ReturnsAsync(ICCardManager.Data.Repositories.CardOperationResult.Success);
         _cardRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<IcCard>());
 
         // Act

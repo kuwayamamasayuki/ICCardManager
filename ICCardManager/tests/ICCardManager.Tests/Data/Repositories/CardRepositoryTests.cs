@@ -434,7 +434,7 @@ public class CardRepositoryTests : IDisposable
         var result = await _repository.DeleteAsync(card.CardIdm);
 
         // Assert
-        result.Should().BeTrue();
+        result.Should().Be(ICCardManager.Data.Repositories.CardOperationResult.Success);
 
         var deleted = await _repository.GetByIdmAsync(card.CardIdm, includeDeleted: true);
         deleted!.IsDeleted.Should().BeTrue();
@@ -445,7 +445,7 @@ public class CardRepositoryTests : IDisposable
     /// 貸出中のカードは削除できないことを確認
     /// </summary>
     [Fact]
-    public async Task DeleteAsync_LentCard_ReturnsFalse()
+    public async Task DeleteAsync_LentCard_ReturnsCardIsLent()
     {
         // Arrange
         var card = CreateTestCard("0102030405060708", "はやかけん", "H001");
@@ -456,7 +456,7 @@ public class CardRepositoryTests : IDisposable
         var result = await _repository.DeleteAsync(card.CardIdm);
 
         // Assert
-        result.Should().BeFalse();
+        result.Should().Be(ICCardManager.Data.Repositories.CardOperationResult.CardIsLent);
 
         var notDeleted = await _repository.GetByIdmAsync(card.CardIdm);
         notDeleted.Should().NotBeNull();
@@ -464,16 +464,87 @@ public class CardRepositoryTests : IDisposable
     }
 
     /// <summary>
-    /// 存在しないカードの削除はfalseを返すことを確認
+    /// 存在しないカードの削除はNotFoundを返すことを確認
     /// </summary>
     [Fact]
-    public async Task DeleteAsync_NonExistingCard_ReturnsFalse()
+    public async Task DeleteAsync_NonExistingCard_ReturnsNotFound()
     {
         // Act
         var result = await _repository.DeleteAsync("NOTEXISTINGIDM00");
 
         // Assert
-        result.Should().BeFalse();
+        result.Should().Be(ICCardManager.Data.Repositories.CardOperationResult.NotFound);
+    }
+
+    /// <summary>
+    /// 既に削除済みのカードを再度削除するとConflictを返すことを確認
+    /// </summary>
+    [Fact]
+    public async Task DeleteAsync_AlreadyDeletedCard_ReturnsConflict()
+    {
+        // Arrange
+        var card = CreateTestCard("0102030405060708", "はやかけん", "H001");
+        await _repository.InsertAsync(card);
+        await _repository.DeleteAsync(card.CardIdm); // 1回目の削除
+
+        // Act
+        var result = await _repository.DeleteAsync(card.CardIdm); // 2回目の削除
+
+        // Assert
+        result.Should().Be(ICCardManager.Data.Repositories.CardOperationResult.Conflict);
+    }
+
+    /// <summary>
+    /// 払戻済のカードを削除するとConflictを返すことを確認
+    /// </summary>
+    [Fact]
+    public async Task SetRefundedAsync_Success_ReturnsSuccess()
+    {
+        // Arrange
+        var card = CreateTestCard("0102030405060708", "はやかけん", "H001");
+        await _repository.InsertAsync(card);
+
+        // Act
+        var result = await _repository.SetRefundedAsync(card.CardIdm);
+
+        // Assert
+        result.Should().Be(ICCardManager.Data.Repositories.CardOperationResult.Success);
+    }
+
+    /// <summary>
+    /// 貸出中のカードを払い戻すとCardIsLentを返すことを確認
+    /// </summary>
+    [Fact]
+    public async Task SetRefundedAsync_LentCard_ReturnsCardIsLent()
+    {
+        // Arrange
+        var card = CreateTestCard("0102030405060708", "はやかけん", "H001");
+        await _repository.InsertAsync(card);
+        await _repository.UpdateLentStatusAsync(card.CardIdm, true, DateTime.Now, null);
+
+        // Act
+        var result = await _repository.SetRefundedAsync(card.CardIdm);
+
+        // Assert
+        result.Should().Be(ICCardManager.Data.Repositories.CardOperationResult.CardIsLent);
+    }
+
+    /// <summary>
+    /// 既に払戻済のカードを再度払い戻すとConflictを返すことを確認
+    /// </summary>
+    [Fact]
+    public async Task SetRefundedAsync_AlreadyRefunded_ReturnsConflict()
+    {
+        // Arrange
+        var card = CreateTestCard("0102030405060708", "はやかけん", "H001");
+        await _repository.InsertAsync(card);
+        await _repository.SetRefundedAsync(card.CardIdm);
+
+        // Act
+        var result = await _repository.SetRefundedAsync(card.CardIdm);
+
+        // Assert
+        result.Should().Be(ICCardManager.Data.Repositories.CardOperationResult.Conflict);
     }
 
     #endregion

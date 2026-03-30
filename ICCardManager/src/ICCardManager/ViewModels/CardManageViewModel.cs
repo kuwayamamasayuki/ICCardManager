@@ -621,8 +621,8 @@ namespace ICCardManager.ViewModels
                 // 削除前のデータを取得（操作ログ用）
                 var card = await _cardRepository.GetByIdmAsync(SelectedCard.CardIdm);
 
-                var success = await _cardRepository.DeleteAsync(SelectedCard.CardIdm);
-                if (success)
+                var deleteResult = await _cardRepository.DeleteAsync(SelectedCard.CardIdm);
+                if (deleteResult == CardOperationResult.Success)
                 {
                     // 操作ログを記録（Issue #429: 認証済み職員のIDmを使用）
                     if (card != null)
@@ -637,8 +637,10 @@ namespace ICCardManager.ViewModels
                 }
                 else
                 {
-                    StatusMessage = "削除に失敗しました";
+                    // Issue #1109: 失敗原因に応じた具体的なメッセージを表示
+                    StatusMessage = GetOperationFailureMessage(deleteResult, "削除");
                     IsStatusError = true;
+                    await LoadCardsAsync();
                 }
             }
         }
@@ -722,9 +724,9 @@ namespace ICCardManager.ViewModels
                     var beforeCard = await _cardRepository.GetByIdmAsync(SelectedCard.CardIdm);
 
                     // Issue #530: カードを「払戻済」状態に設定（論理削除ではない）
-                    var refundSuccess = await _cardRepository.SetRefundedAsync(SelectedCard.CardIdm);
+                    var refundResult = await _cardRepository.SetRefundedAsync(SelectedCard.CardIdm);
 
-                    if (refundSuccess)
+                    if (refundResult == CardOperationResult.Success)
                     {
                         // 払い戻し後のデータを取得（操作ログ用）
                         var afterCard = await _cardRepository.GetByIdmAsync(SelectedCard.CardIdm);
@@ -744,8 +746,10 @@ namespace ICCardManager.ViewModels
                     }
                     else
                     {
-                        StatusMessage = "払戻済状態への変更に失敗しました";
+                        // Issue #1109: 失敗原因に応じた具体的なメッセージを表示
+                        StatusMessage = GetOperationFailureMessage(refundResult, "払い戻し");
                         IsStatusError = true;
+                        await LoadCardsAsync();
                     }
                 }
                 else
@@ -754,6 +758,22 @@ namespace ICCardManager.ViewModels
                     IsStatusError = true;
                 }
             }
+        }
+
+        /// <summary>
+        /// カード操作の失敗原因に応じたエラーメッセージを返す
+        /// </summary>
+        /// <param name="result">操作結果</param>
+        /// <param name="operationName">操作名（「削除」「払い戻し」等）</param>
+        private static string GetOperationFailureMessage(CardOperationResult result, string operationName)
+        {
+            return result switch
+            {
+                CardOperationResult.NotFound => $"{operationName}対象のカードが見つかりませんでした。画面を更新してください。",
+                CardOperationResult.CardIsLent => $"このカードは貸出中のため{operationName}できません。",
+                CardOperationResult.Conflict => $"他のPCでカードの状態が変更されたため{operationName}できませんでした。画面を更新してから再度お試しください。",
+                _ => $"{operationName}に失敗しました。",
+            };
         }
 
         /// <summary>
