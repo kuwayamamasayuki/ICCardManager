@@ -391,7 +391,8 @@ namespace ICCardManager.Services
             }
             catch (Exception ex)
             {
-                result.ErrorMessage = $"貸出処理でエラーが発生しました: {ex.Message}";
+                // Issue #1110: SQLiteエラーをユーザー向けメッセージに変換
+                result.ErrorMessage = GetUserFriendlyErrorMessage(ex, "貸出");
             }
             finally
             {
@@ -583,7 +584,8 @@ namespace ICCardManager.Services
             }
             catch (Exception ex)
             {
-                result.ErrorMessage = $"返却処理でエラーが発生しました: {ex.Message}";
+                // Issue #1110: SQLiteエラーをユーザー向けメッセージに変換
+                result.ErrorMessage = GetUserFriendlyErrorMessage(ex, "返却");
             }
             finally
             {
@@ -1150,6 +1152,36 @@ namespace ICCardManager.Services
         /// ロック取得のタイムアウト値を取得（テスト用にオーバーライド可能）
         /// </summary>
         protected virtual int GetLockTimeoutMs() => _lockTimeoutMs;
+
+        /// <summary>
+        /// Issue #1110: 例外をユーザー向けエラーメッセージに変換
+        /// </summary>
+        /// <remarks>
+        /// SQLiteの技術的なエラーメッセージ（SQLITE_BUSY等）をユーザーが理解できる
+        /// メッセージに変換する。共有モードでの一般的なエラーシナリオをカバーする。
+        /// </remarks>
+        internal static string GetUserFriendlyErrorMessage(Exception ex, string operationName)
+        {
+            if (ex is System.Data.SQLite.SQLiteException sqliteEx)
+            {
+                switch (sqliteEx.ResultCode)
+                {
+                    case System.Data.SQLite.SQLiteErrorCode.Busy:
+                        return $"他のPCと処理が競合しています。しばらく待ってから再度{operationName}をお試しください。";
+                    case System.Data.SQLite.SQLiteErrorCode.Locked:
+                        return $"データベースがロックされています。しばらく待ってから再度{operationName}をお試しください。";
+                    case System.Data.SQLite.SQLiteErrorCode.IoErr:
+                        return $"ネットワーク共有フォルダへの接続に失敗しました。ネットワーク接続を確認してください。";
+                }
+            }
+
+            if (ex is System.IO.IOException)
+            {
+                return $"ネットワーク共有フォルダへの接続に失敗しました。ネットワーク接続を確認してください。";
+            }
+
+            return $"{operationName}処理でエラーが発生しました: {ex.Message}";
+        }
 
         /// <summary>
         /// カードから読み取った履歴の完全性をチェック
