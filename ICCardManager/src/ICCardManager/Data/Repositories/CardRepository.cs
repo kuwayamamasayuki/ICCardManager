@@ -200,6 +200,9 @@ WHERE card_idm = @cardIdm AND is_deleted = 0";
         /// <summary>
         /// カード登録の内部実装
         /// </summary>
+        /// <exception cref="DuplicateCardNumberException">
+        /// 同一種別で同一管理番号のカードが既に存在する場合（UNIQUE制約違反）
+        /// </exception>
         private async Task<bool> InsertAsyncInternal(IcCard card, SQLiteTransaction? transaction)
         {
             var connection = _dbContext.GetConnection();
@@ -226,10 +229,28 @@ VALUES (@cardIdm, @cardType, @cardNumber, @note, 0, NULL, 0, NULL, NULL, @starti
                 }
                 return result > 0;
             }
+            catch (SQLiteException ex) when (IsDuplicateCardNumberError(ex))
+            {
+                throw new DuplicateCardNumberException(card.CardType, card.CardNumber, ex);
+            }
             catch (SQLiteException)
             {
                 return false;
             }
+        }
+
+        /// <summary>
+        /// SQLiteExceptionがカード種別＋管理番号のUNIQUE制約違反かどうかを判定
+        /// </summary>
+        private static bool IsDuplicateCardNumberError(SQLiteException ex)
+        {
+            // SQLiteのUNIQUE制約違反はConstraintで報告される
+            // メッセージに "ic_card.card_type, ic_card.card_number" が含まれるかで判別
+            if (ex.ResultCode != SQLiteErrorCode.Constraint || ex.Message == null)
+                return false;
+
+            return ex.Message.Contains("ic_card.card_type") &&
+                   ex.Message.Contains("ic_card.card_number");
         }
 
         /// <inheritdoc/>
