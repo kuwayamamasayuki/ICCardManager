@@ -200,6 +200,12 @@ public partial class MainViewModel : ViewModelBase
     private int _cardReaderReconnectAttempts;
 
     /// <summary>
+    /// Issue #1110: 共有モードでのデータ最終更新時刻
+    /// </summary>
+    [ObservableProperty]
+    private string _lastRefreshText = string.Empty;
+
+    /// <summary>
     /// ダッシュボードのソート順
     /// </summary>
     [ObservableProperty]
@@ -547,6 +553,9 @@ public partial class MainViewModel : ViewModelBase
 
             await RefreshLentCardsAsync();
             await RefreshDashboardAsync();
+
+            // Issue #1110: 最終更新時刻を記録
+            LastRefreshText = $"最終更新: {DateTime.Now:HH:mm:ss}";
         }
         catch (Exception)
         {
@@ -2321,6 +2330,25 @@ public partial class MainViewModel : ViewModelBase
                 // ダイアログ内でバス停名が入力された可能性があるため、警告を更新
                 await CheckWarningsAsync();
                 break;
+
+            case WarningType.DatabaseConnectionLost:
+                // Issue #1110: 接続断警告クリックで手動再接続を試行
+                await RetryDatabaseConnectionAsync();
+                break;
+        }
+    }
+
+    /// <summary>
+    /// Issue #1110: データベース接続の手動再接続を試行
+    /// </summary>
+    internal async Task RetryDatabaseConnectionAsync()
+    {
+        await CheckDatabaseConnectionAsync();
+
+        // 接続が復旧した場合はデータもリフレッシュ
+        if (!WarningMessages.Any(w => w.Type == WarningType.DatabaseConnectionLost))
+        {
+            await RefreshSharedDataAsync();
         }
     }
 

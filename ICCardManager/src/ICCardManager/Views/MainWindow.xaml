@@ -793,12 +793,36 @@
                                                     <Trigger Property="IsMouseOver" Value="True">
                                                         <Setter Property="Background" Value="{DynamicResource LendingBorderBrush}"/>
                                                     </Trigger>
+                                                    <!-- Issue #1110: DB接続断は赤色で表示（致命的状態を強調） -->
+                                                    <DataTrigger Binding="{Binding Type}" Value="DatabaseConnectionLost">
+                                                        <Setter Property="Background" Value="{DynamicResource ErrorBackgroundBrush}"/>
+                                                        <Setter Property="BorderBrush" Value="{DynamicResource ErrorBorderBrush}"/>
+                                                        <Setter Property="BorderThickness" Value="1"/>
+                                                    </DataTrigger>
                                                 </Style.Triggers>
                                             </Style>
                                         </Border.Style>
-                                        <TextBlock Text="{Binding DisplayText}"
-                                                   TextWrapping="Wrap"
-                                                   FontSize="{DynamicResource SmallFontSize}"/>
+                                        <StackPanel Orientation="Horizontal">
+                                            <TextBlock Text="{Binding DisplayText}"
+                                                       TextWrapping="Wrap"
+                                                       FontSize="{DynamicResource SmallFontSize}"/>
+                                            <!-- Issue #1110: DB接続断時に「クリックして再接続」ヒントを表示 -->
+                                            <TextBlock Text="（クリックして再接続）"
+                                                       FontSize="{DynamicResource SmallFontSize}"
+                                                       Foreground="{DynamicResource SecondaryTextBrush}"
+                                                       Margin="8,0,0,0">
+                                                <TextBlock.Style>
+                                                    <Style TargetType="TextBlock">
+                                                        <Setter Property="Visibility" Value="Collapsed"/>
+                                                        <Style.Triggers>
+                                                            <DataTrigger Binding="{Binding Type}" Value="DatabaseConnectionLost">
+                                                                <Setter Property="Visibility" Value="Visible"/>
+                                                            </DataTrigger>
+                                                        </Style.Triggers>
+                                                    </Style>
+                                                </TextBlock.Style>
+                                            </TextBlock>
+                                        </StackPanel>
                                     </Border>
                                 </DataTemplate>
                             </ItemsControl.ItemTemplate>
@@ -954,6 +978,14 @@
                     <Run Text="🔗"/>
                     <Run Text=" 共有モード"/>
                 </TextBlock>
+            </StatusBarItem>
+            <!-- Issue #1110: 最終更新時刻（共有モード時のみ） -->
+            <StatusBarItem AutomationProperties.Name="最終更新時刻"
+                           Visibility="{Binding IsSharedMode, Converter={StaticResource BoolToVisibilityConverter}}">
+                <TextBlock Text="{Binding LastRefreshText}"
+                           Foreground="{DynamicResource SecondaryTextBrush}"
+                           FontSize="{DynamicResource SmallFontSize}"
+                           ToolTip="他のPCの変更が反映された最終時刻です。データは約30秒ごとに自動更新されます。"/>
             </StatusBarItem>
             <Separator Visibility="{Binding IsSharedMode, Converter={StaticResource BoolToVisibilityConverter}}"/>
             <!-- バージョン表示（Issue #475） -->
