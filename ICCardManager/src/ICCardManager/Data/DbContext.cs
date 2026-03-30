@@ -8,6 +8,7 @@ using System.IO;
 using System.Security.AccessControl;
 using System.Security.Principal;
 using ICCardManager.Data.Migrations;
+using Microsoft.Extensions.Logging;
 using System.Data.SQLite;
 
 namespace ICCardManager.Data
@@ -19,9 +20,14 @@ namespace ICCardManager.Data
     {
         private readonly string _connectionString;
         private readonly object _connectionLock = new object();
+        private readonly ILogger _logger;
         private SQLiteConnection _connection;
         private bool _disposed;
 
+        /// <summary>
+        /// ジッター生成用の乱数。thundering herd問題を防止するためリトライ待機に使用
+        /// </summary>
+        private static readonly Random _jitterRandom = new Random();
 
         /// <summary>
         /// 共有モード（ユーザーがDB保存先を明示的に指定した場合）かどうか
@@ -33,9 +39,20 @@ namespace ICCardManager.Data
         public bool IsSharedMode { get; }
 
         /// <summary>
-        /// busy_timeout値（ミリ秒）。共有モードでは他PCのロック待ちが必要
+        /// ローカルモードのbusy_timeout値（ミリ秒）
         /// </summary>
-        internal const int BusyTimeoutMs = 5000;
+        internal const int LocalBusyTimeoutMs = 5000;
+
+        /// <summary>
+        /// 共有モードのbusy_timeout値（ミリ秒）。
+        /// SMBのネットワーク遅延と最大約20台の同時アクセスを考慮し、ローカルモードより長く設定
+        /// </summary>
+        internal const int SharedBusyTimeoutMs = 15000;
+
+        /// <summary>
+        /// busy_timeout値（ミリ秒）。モードに応じた値を返す
+        /// </summary>
+        internal int BusyTimeoutMs => IsSharedMode ? SharedBusyTimeoutMs : LocalBusyTimeoutMs;
 
         /// <summary>
         /// データベースファイル名
@@ -60,8 +77,10 @@ namespace ICCardManager.Data
         /// コンストラクタ
         /// </summary>
         /// <param name="databasePath">データベースファイルのパス（省略時はアプリフォルダ内）</param>
-        public DbContext(string databasePath = null)
+        /// <param name="logger">ロガー（省略時はログ出力なし）</param>
+        public DbContext(string databasePath = null, ILogger<DbContext> logger = null)
         {
+            _logger = logger;
             DatabasePath = databasePath ?? GetDefaultDatabasePath();
 
             // SQLiteはバックスラッシュのUNCパス（\\server\share）を開けないため、
@@ -197,21 +216,65 @@ namespace ICCardManager.Data
         {
             // foreign_keysとbusy_timeoutは1コマンドにまとめてラウンドトリップを削減
             // ローカルモードでもbusy_timeoutを設定する（実害なし、コードパス統一）
+            var timeout = BusyTimeoutMs;
             using var pragmaCommand = connection.CreateCommand();
-            pragmaCommand.CommandText = $"PRAGMA foreign_keys = ON; PRAGMA busy_timeout = {BusyTimeoutMs};";
+            pragmaCommand.CommandText = $"PRAGMA foreign_keys = ON; PRAGMA busy_timeout = {timeout};";
             pragmaCommand.ExecuteNonQuery();
 
-            // journal_modeは戻り値を確認するため別コマンド
-            using var jmCommand = connection.CreateCommand();
-            jmCommand.CommandText = "PRAGMA journal_mode = DELETE;";
-            var journalMode = jmCommand.ExecuteScalar()?.ToString();
-            if (journalMode != "delete")
+            // journal_modeは優先順位順にフォールバック試行
+            // DELETE: 共有モード推奨。TRUNCATE/PERSIST: DELETEが使えない場合の代替
+            // OFF: データ保護なし（絶対に避けたい）
+            ConfigureJournalMode(connection);
+        }
+
+        /// <summary>
+        /// journal_modeを設定（フォールバック付き）
+        /// </summary>
+        /// <remarks>
+        /// Issue #1107: SMB上でDELETEモードが設定できない場合がある（NASの設定等による）。
+        /// DELETE → TRUNCATE → PERSIST の順にフォールバックし、
+        /// いずれも失敗した場合は警告をログに記録する。
+        /// OFFモードはクラッシュ時のデータ保護がないため使用しない。
+        /// </remarks>
+        internal string ConfigureJournalMode(SQLiteConnection connection)
+        {
+            // 優先順位: DELETE（推奨）→ TRUNCATE → PERSIST
+            var preferredModes = new[] { "DELETE", "TRUNCATE", "PERSIST" };
+
+            foreach (var mode in preferredModes)
             {
+                using var cmd = connection.CreateCommand();
+                cmd.CommandText = $"PRAGMA journal_mode = {mode};";
+                var result = cmd.ExecuteScalar()?.ToString()?.ToLowerInvariant();
+
+                if (result == mode.ToLowerInvariant())
+                {
+                    if (mode != "DELETE")
+                    {
+                        // DELETE以外にフォールバックした場合は警告
+                        var message = $"journal_modeをDELETEに設定できなかったため、{mode}を使用します";
+                        _logger?.LogWarning(message);
 #if DEBUG
-                System.Diagnostics.Debug.WriteLine(
-                    $"[DbContext] 警告: journal_modeがDELETEに設定できませんでした（現在: {journalMode}）");
+                        System.Diagnostics.Debug.WriteLine($"[DbContext] 警告: {message}");
 #endif
+                    }
+                    return result;
+                }
             }
+
+            // すべて失敗 — 現在の設定を確認
+            using var checkCmd = connection.CreateCommand();
+            checkCmd.CommandText = "PRAGMA journal_mode;";
+            var currentMode = checkCmd.ExecuteScalar()?.ToString()?.ToLowerInvariant() ?? "unknown";
+
+            var warningMessage = $"journal_modeの設定に失敗しました（現在: {currentMode}）。" +
+                                 "データベースのクラッシュ耐性が低下している可能性があります。";
+            _logger?.LogWarning(warningMessage);
+#if DEBUG
+            System.Diagnostics.Debug.WriteLine($"[DbContext] 警告: {warningMessage}");
+#endif
+
+            return currentMode;
         }
 
         /// <summary>
@@ -490,15 +553,29 @@ namespace ICCardManager.Data
         }
 
         /// <summary>
+        /// ローカルモードのリトライ待機時間（ミリ秒）
+        /// </summary>
+        internal static readonly int[] LocalRetryDelays = { 100, 500, 2000 };
+
+        /// <summary>
+        /// 共有モードのリトライ待機時間（ミリ秒）。
+        /// SMBのネットワーク遅延と最大約20台の同時アクセスを考慮し、回数と待機時間を増加
+        /// </summary>
+        internal static readonly int[] SharedRetryDelays = { 200, 500, 1000, 2000, 5000 };
+
+        /// <summary>
         /// SQLITE_BUSY/SQLITE_LOCKED時にリトライ付きで非同期操作を実行
         /// </summary>
         /// <remarks>
         /// busy_timeout PRAGMAでカバーできないケース（接続レベルのロック等）に対するセーフティネット。
-        /// 最大3回リトライし、指数バックオフ（100ms, 500ms, 2000ms）で待機する。
+        /// リトライ回数と待機時間はモードに応じて異なる:
+        /// - ローカルモード: 最大3回（100ms, 500ms, 2000ms）
+        /// - 共有モード: 最大5回（200ms, 500ms, 1000ms, 2000ms, 5000ms）+ ジッター
+        /// ジッターにより、複数PCが同時にリトライするthundering herd問題を緩和する。
         /// </remarks>
         public async Task<T> ExecuteWithRetryAsync<T>(Func<Task<T>> operation, CancellationToken cancellationToken = default)
         {
-            var delays = new[] { 100, 500, 2000 };
+            var delays = IsSharedMode ? SharedRetryDelays : LocalRetryDelays;
 
             for (int attempt = 0; ; attempt++)
             {
@@ -510,11 +587,19 @@ namespace ICCardManager.Data
                     attempt < delays.Length &&
                     (ex.ResultCode == SQLiteErrorCode.Busy || ex.ResultCode == SQLiteErrorCode.Locked))
                 {
+                    // 基本待機時間 + ジッター（0〜50%の追加遅延）で thundering herd を緩和
+                    var baseDelay = delays[attempt];
+                    var jitter = IsSharedMode ? _jitterRandom.Next(0, baseDelay / 2) : 0;
+                    var totalDelay = baseDelay + jitter;
+
+                    _logger?.LogWarning(
+                        "DB操作リトライ（{Attempt}/{MaxRetries}回目、{Delay}ms待機）: {ResultCode}",
+                        attempt + 1, delays.Length, totalDelay, ex.ResultCode);
 #if DEBUG
                     System.Diagnostics.Debug.WriteLine(
-                        $"[DbContext] DB操作リトライ（{attempt + 1}/{delays.Length}回目、{delays[attempt]}ms待機）: {ex.ResultCode}");
+                        $"[DbContext] DB操作リトライ（{attempt + 1}/{delays.Length}回目、{totalDelay}ms待機）: {ex.ResultCode}");
 #endif
-                    await Task.Delay(delays[attempt], cancellationToken);
+                    await Task.Delay(totalDelay, cancellationToken);
                 }
             }
         }

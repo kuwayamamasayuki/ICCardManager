@@ -227,7 +227,8 @@ namespace ICCardManager
                 {
                     path = ViewModels.SettingsViewModel.LoadDatabasePathFromConfigFile();
                 }
-                return new DbContext(string.IsNullOrWhiteSpace(path) ? null : path);
+                var logger = sp.GetService<ILogger<DbContext>>();
+                return new DbContext(string.IsNullOrWhiteSpace(path) ? null : path, logger);
             });
             services.AddSingleton<IStaffRepository, StaffRepository>();
             services.AddSingleton<ICardRepository, CardRepository>();

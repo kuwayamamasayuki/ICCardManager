@@ -84,7 +84,8 @@ public class DbContextSharedModeTests : IDisposable
         command.CommandText = "PRAGMA busy_timeout;";
         var result = command.ExecuteScalar();
 
-        Convert.ToInt32(result).Should().Be(DbContext.BusyTimeoutMs);
+        // 明示的にパスを指定しているため共有モード扱い
+        Convert.ToInt32(result).Should().Be(dbContext.BusyTimeoutMs);
     }
 
     [Fact]
