@@ -129,7 +129,7 @@ public partial class SettingsViewModel : ViewModelBase
         ISettingsRepository settingsRepository,
         IValidationService validationService,
         ISoundPlayer soundPlayer,
-        IOptions<DatabaseOptions> databaseOptions)
+        IOptions<DatabaseOptions> databaseOptions) // DI互換のため引数を維持（本体では未使用）
     {
         _settingsRepository = settingsRepository;
         _validationService = validationService;

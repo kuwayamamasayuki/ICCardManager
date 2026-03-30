@@ -386,11 +386,26 @@ public class DbContextConcurrentAccessTests : IDisposable
     }
 
     /// <summary>
+    /// Vacuum: 単独接続時に成功すること
+    /// </summary>
+    [Fact]
+    [Trait("Category", "Integration")]
+    public void Vacuum_単独接続時に成功すること()
+    {
+        using var dbContext = new DbContext(_dbPath);
+        dbContext.InitializeDatabase();
+
+        var result = dbContext.Vacuum();
+
+        result.Should().BeTrue("他の接続がなければVACUUMは成功するべき");
+    }
+
+    /// <summary>
     /// Vacuum失敗時にfalseを返すこと（例外をスローしない）
     /// </summary>
     [Fact]
     [Trait("Category", "Integration")]
-    public async Task Vacuum_他接続がアクティブな場合にfalseを返すこと()
+    public void Vacuum_他接続がアクティブでも例外をスローしないこと()
     {
         using var dbContext1 = new DbContext(_dbPath);
         dbContext1.InitializeDatabase();
@@ -404,11 +419,9 @@ public class DbContextConcurrentAccessTests : IDisposable
         cmd.CommandText = "SELECT COUNT(*) FROM sqlite_master";
         cmd.ExecuteScalar();
 
-        // VACUUMはBUSYで失敗するが、例外ではなくfalseを返す
-        // 注: SQLiteのVACUUM中のBUSY検出はタイミングに依存するため、
-        // true/falseどちらの結果もありうる。例外がスローされないことが重要
-        var result = dbContext1.Vacuum();
-        (result == true || result == false).Should().BeTrue("Vacuumは例外ではなくbool値を返すべき");
+        // 例外がスローされないことを確認（VACUUMの成否はタイミング依存）
+        var act = () => dbContext1.Vacuum();
+        act.Should().NotThrow("Vacuumは他接続がアクティブでも例外ではなくboolを返すべき");
     }
 
     #endregion

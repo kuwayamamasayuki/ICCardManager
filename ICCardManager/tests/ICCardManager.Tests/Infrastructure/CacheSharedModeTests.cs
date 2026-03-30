@@ -84,7 +84,7 @@ public class CacheSharedModeTests : IDisposable
 
         shared.CardListSeconds.Should().BeLessThan(standalone.CardListSeconds);
         shared.LentCardsSeconds.Should().BeLessThan(standalone.LentCardsSeconds);
-        shared.StaffListSeconds.Should().BeLessThanOrEqualTo(standalone.StaffListSeconds);
+        shared.StaffListSeconds.Should().BeLessThan(standalone.StaffListSeconds);
         shared.SettingsMinutes.Should().BeLessThan(standalone.SettingsMinutes);
     }
 
