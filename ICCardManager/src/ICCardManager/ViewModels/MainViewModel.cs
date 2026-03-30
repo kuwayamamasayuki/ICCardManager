@@ -577,9 +577,12 @@ public partial class MainViewModel : ViewModelBase
         {
             try
             {
+                // Issue #1110: SELECT 1 はSQLiteの定数式でファイルI/Oが発生しないため
+                // ネットワーク切断を検出できない。sqlite_masterからの読み取りで
+                // 実際のファイルアクセスを強制する。
                 var connection = _dbContext.GetConnection();
                 using var command = connection.CreateCommand();
-                command.CommandText = "SELECT 1";
+                command.CommandText = "SELECT COUNT(*) FROM sqlite_master";
                 command.ExecuteScalar();
                 return true;
             }
