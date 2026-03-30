@@ -562,7 +562,7 @@ public class CardManageViewModelTests
         };
         _viewModel.SelectedCard = card;
 
-        _cardRepositoryMock.Setup(r => r.DeleteAsync("0102030405060708")).ReturnsAsync(true);
+        _cardRepositoryMock.Setup(r => r.DeleteAsync("0102030405060708")).ReturnsAsync(ICCardManager.Data.Repositories.CardOperationResult.Success);
         _cardRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<IcCard>());
 
         // Act
@@ -593,8 +593,10 @@ public class CardManageViewModelTests
         // Act
         await _viewModel.DeleteAsync();
 
-        // Assert
-        _viewModel.StatusMessage.Should().Contain("貸出中");
+        // Assert - ダイアログでエラーが表示されること
+        _dialogServiceMock.Verify(d => d.ShowError(
+            It.Is<string>(s => s.Contains("貸出中")),
+            It.IsAny<string>()), Times.Once);
         _cardRepositoryMock.Verify(r => r.DeleteAsync(It.IsAny<string>()), Times.Never);
     }
 

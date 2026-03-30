@@ -318,17 +318,12 @@ WHERE card_idm = @cardIdm AND is_deleted = 0";
         }
 
         /// <inheritdoc/>
-        public async Task<bool> DeleteAsync(string cardIdm)
+        public async Task<CardOperationResult> DeleteAsync(string cardIdm)
         {
             var connection = _dbContext.GetConnection();
 
-            // 貸出中は削除不可
-            var card = await GetByIdmAsync(cardIdm);
-            if (card == null || card.IsLent)
-            {
-                return false;
-            }
-
+            // Issue #1109: check-then-act を排除し、WHERE句のDBガードに一元化。
+            // affected rows = 0 の場合は事後診断で原因を特定する。
             using var command = connection.CreateCommand();
             command.CommandText = @"UPDATE ic_card
 SET is_deleted = 1, deleted_at = datetime('now', 'localtime')
@@ -340,8 +335,11 @@ WHERE card_idm = @cardIdm AND is_deleted = 0 AND is_lent = 0";
             if (result > 0)
             {
                 InvalidateCardCache();
+                return CardOperationResult.Success;
             }
-            return result > 0;
+
+            // 失敗原因を特定するためDBから最新状態を取得（キャッシュバイパス）
+            return await DiagnoseFailureAsync(cardIdm);
         }
 
         /// <inheritdoc/>
@@ -378,6 +376,29 @@ WHERE card_idm = @cardIdm AND is_deleted = 1";
                 InvalidateCardCache();
             }
             return result > 0;
+        }
+
+        /// <summary>
+        /// 操作失敗の原因をDBの最新状態から診断する
+        /// </summary>
+        /// <remarks>
+        /// Issue #1109: affected rows = 0 の場合、キャッシュをバイパスして
+        /// DBから直接カード状態を読み取り、失敗原因を特定する。
+        /// </remarks>
+        private async Task<CardOperationResult> DiagnoseFailureAsync(string cardIdm)
+        {
+            // キャッシュを無効化してからDBから直接取得
+            InvalidateCardCache();
+            var currentCard = await GetByIdmAsync(cardIdm, includeDeleted: true);
+
+            if (currentCard == null)
+                return CardOperationResult.NotFound;
+
+            if (currentCard.IsLent)
+                return CardOperationResult.CardIsLent;
+
+            // カードは存在するが操作条件を満たさない（他PCで状態変更済み）
+            return CardOperationResult.Conflict;
         }
 
         /// <summary>
@@ -442,17 +463,11 @@ WHERE card_type = @cardType";
         }
 
         /// <inheritdoc/>
-        public async Task<bool> SetRefundedAsync(string cardIdm)
+        public async Task<CardOperationResult> SetRefundedAsync(string cardIdm)
         {
             var connection = _dbContext.GetConnection();
 
-            // 貸出中は払戻不可
-            var card = await GetByIdmAsync(cardIdm);
-            if (card == null || card.IsLent)
-            {
-                return false;
-            }
-
+            // Issue #1109: check-then-act を排除し、WHERE句のDBガードに一元化。
             using var command = connection.CreateCommand();
             command.CommandText = @"UPDATE ic_card
 SET is_refunded = 1, refunded_at = datetime('now', 'localtime')
@@ -464,8 +479,11 @@ WHERE card_idm = @cardIdm AND is_deleted = 0 AND is_refunded = 0 AND is_lent = 0
             if (result > 0)
             {
                 InvalidateCardCache();
+                return CardOperationResult.Success;
             }
-            return result > 0;
+
+            // 失敗原因を特定するためDBから最新状態を取得（キャッシュバイパス）
+            return await DiagnoseFailureAsync(cardIdm);
         }
     }
 }

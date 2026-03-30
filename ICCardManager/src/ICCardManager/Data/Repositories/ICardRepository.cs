@@ -72,7 +72,8 @@ namespace ICCardManager.Data.Repositories
         /// ICカードを論理削除
         /// </summary>
         /// <param name="cardIdm">ICカードIDm</param>
-        Task<bool> DeleteAsync(string cardIdm);
+        /// <returns>操作結果（成功/未存在/貸出中/競合）</returns>
+        Task<CardOperationResult> DeleteAsync(string cardIdm);
 
         /// <summary>
         /// 論理削除されたICカードを復元
@@ -106,6 +107,7 @@ namespace ICCardManager.Data.Repositories
         /// ただし、貸出対象からは除外される。
         /// </remarks>
         /// <param name="cardIdm">ICカードIDm</param>
-        Task<bool> SetRefundedAsync(string cardIdm);
+        /// <returns>操作結果（成功/未存在/貸出中/競合）</returns>
+        Task<CardOperationResult> SetRefundedAsync(string cardIdm);
     }
 }

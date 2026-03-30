@@ -581,7 +581,13 @@ namespace ICCardManager.ViewModels
         /// <remarks>
         /// Issue #530: 払戻済カードは既に運用から除外されているため削除不可
         /// </remarks>
-        private bool CanDelete() => SelectedCard != null && !SelectedCard.IsLent && !SelectedCard.IsRefunded;
+        /// <remarks>
+        /// Issue #1109: IsLentチェックをここから除外。
+        /// 共有モードで他PCがカードを貸出中にすると、ヘルスチェックでSelectedCard.IsLentが
+        /// trueに更新されボタンがサイレントに無効化される。ユーザーにフィードバックがないため、
+        /// ボタンは有効のまま、DeleteAsync内で即時エラーメッセージを表示する。
+        /// </remarks>
+        private bool CanDelete() => SelectedCard != null && !SelectedCard.IsRefunded;
 
         /// <summary>
         /// 削除
@@ -593,8 +599,8 @@ namespace ICCardManager.ViewModels
 
             if (SelectedCard.IsLent)
             {
-                StatusMessage = "貸出中のカードは削除できません";
-                IsStatusError = true;
+                // Issue #1109: 編集フォーム非表示時でもユーザーにフィードバックするためダイアログで通知
+                _dialogService.ShowError("このカードは貸出中のため削除できません。", "削除できません");
                 return;
             }
 
@@ -621,8 +627,8 @@ namespace ICCardManager.ViewModels
                 // 削除前のデータを取得（操作ログ用）
                 var card = await _cardRepository.GetByIdmAsync(SelectedCard.CardIdm);
 
-                var success = await _cardRepository.DeleteAsync(SelectedCard.CardIdm);
-                if (success)
+                var deleteResult = await _cardRepository.DeleteAsync(SelectedCard.CardIdm);
+                if (deleteResult == CardOperationResult.Success)
                 {
                     // 操作ログを記録（Issue #429: 認証済み職員のIDmを使用）
                     if (card != null)
@@ -637,8 +643,11 @@ namespace ICCardManager.ViewModels
                 }
                 else
                 {
-                    StatusMessage = "削除に失敗しました";
-                    IsStatusError = true;
+                    // Issue #1109: 失敗原因に応じた具体的なメッセージをダイアログで表示
+                    // （編集フォーム非表示時はStatusMessageが見えないため）
+                    var failureMessage = GetOperationFailureMessage(deleteResult, "削除");
+                    _dialogService.ShowError(failureMessage, "削除できません");
+                    await LoadCardsAsync();
                 }
             }
         }
@@ -654,7 +663,10 @@ namespace ICCardManager.ViewModels
         /// <remarks>
         /// Issue #530: 既に払戻済のカードは再度払い戻しできない
         /// </remarks>
-        private bool CanRefund() => SelectedCard != null && !SelectedCard.IsLent && !SelectedCard.IsRefunded;
+        /// <remarks>
+        /// Issue #1109: IsLentチェックをここから除外（CanDeleteと同じ理由）。
+        /// </remarks>
+        private bool CanRefund() => SelectedCard != null && !SelectedCard.IsRefunded;
 
         /// <summary>
         /// 払い戻し処理
@@ -672,8 +684,8 @@ namespace ICCardManager.ViewModels
 
             if (SelectedCard.IsLent)
             {
-                StatusMessage = "貸出中のカードは払い戻しできません";
-                IsStatusError = true;
+                // Issue #1109: 編集フォーム非表示時でもユーザーにフィードバックするためダイアログで通知
+                _dialogService.ShowError("このカードは貸出中のため払い戻しできません。", "払い戻しできません");
                 return;
             }
 
@@ -722,9 +734,9 @@ namespace ICCardManager.ViewModels
                     var beforeCard = await _cardRepository.GetByIdmAsync(SelectedCard.CardIdm);
 
                     // Issue #530: カードを「払戻済」状態に設定（論理削除ではない）
-                    var refundSuccess = await _cardRepository.SetRefundedAsync(SelectedCard.CardIdm);
+                    var refundResult = await _cardRepository.SetRefundedAsync(SelectedCard.CardIdm);
 
-                    if (refundSuccess)
+                    if (refundResult == CardOperationResult.Success)
                     {
                         // 払い戻し後のデータを取得（操作ログ用）
                         var afterCard = await _cardRepository.GetByIdmAsync(SelectedCard.CardIdm);
@@ -744,8 +756,10 @@ namespace ICCardManager.ViewModels
                     }
                     else
                     {
-                        StatusMessage = "払戻済状態への変更に失敗しました";
-                        IsStatusError = true;
+                        // Issue #1109: 失敗原因に応じた具体的なメッセージをダイアログで表示
+                        var failureMessage = GetOperationFailureMessage(refundResult, "払い戻し");
+                        _dialogService.ShowError(failureMessage, "払い戻しできません");
+                        await LoadCardsAsync();
                     }
                 }
                 else
@@ -754,6 +768,22 @@ namespace ICCardManager.ViewModels
                     IsStatusError = true;
                 }
             }
+        }
+
+        /// <summary>
+        /// カード操作の失敗原因に応じたエラーメッセージを返す
+        /// </summary>
+        /// <param name="result">操作結果</param>
+        /// <param name="operationName">操作名（「削除」「払い戻し」等）</param>
+        private static string GetOperationFailureMessage(CardOperationResult result, string operationName)
+        {
+            return result switch
+            {
+                CardOperationResult.NotFound => $"{operationName}対象のカードが見つかりませんでした。画面を更新してください。",
+                CardOperationResult.CardIsLent => $"このカードは貸出中のため{operationName}できません。",
+                CardOperationResult.Conflict => $"他のPCでカードの状態が変更されたため{operationName}できませんでした。画面を更新してから再度お試しください。",
+                _ => $"{operationName}に失敗しました。",
+            };
         }
 
         /// <summary>
