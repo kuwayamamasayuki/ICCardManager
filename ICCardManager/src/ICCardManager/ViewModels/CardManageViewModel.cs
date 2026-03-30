@@ -357,7 +357,8 @@ namespace ICCardManager.ViewModels
                 return;
             }
 
-            if (string.IsNullOrWhiteSpace(sanitizedCardNumber))
+            var isAutoNumbered = string.IsNullOrWhiteSpace(sanitizedCardNumber);
+            if (isAutoNumbered)
             {
                 // 自動採番
                 sanitizedCardNumber = await _cardRepository.GetNextCardNumberAsync(EditCardType);
@@ -442,7 +443,30 @@ namespace ICCardManager.ViewModels
                         StartingPageNumber = modeResult.StartingPageNumber
                     };
 
-                    var success = await _cardRepository.InsertAsync(card);
+                    bool success;
+                    try
+                    {
+                        success = await _cardRepository.InsertAsync(card);
+                    }
+                    catch (DuplicateCardNumberException)
+                    {
+                        if (isAutoNumbered)
+                        {
+                            // Issue #1106: 自動採番で番号が競合した場合、再採番してリトライ
+                            sanitizedCardNumber = await _cardRepository.GetNextCardNumberAsync(EditCardType);
+                            card.CardNumber = sanitizedCardNumber;
+                            success = await _cardRepository.InsertAsync(card);
+                        }
+                        else
+                        {
+                            // 手動指定の番号が重複
+                            StatusMessage = $"管理番号 {sanitizedCardNumber} は同じ種別で既に使用されています。別の番号を指定してください。";
+                            IsStatusError = true;
+                            _registrationModeResult = null;
+                            return;
+                        }
+                    }
+
                     if (success)
                     {
                         // 操作ログを記録
