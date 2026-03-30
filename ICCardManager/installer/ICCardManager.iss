@@ -292,8 +292,7 @@ begin
   ForceDirectories(ConfigDir);
   ConfigFile := ConfigDir + '\database_config.txt';
 
-  if not SaveStringToFile(ConfigFile, FullDbPath, False) then
-    MsgBox('データベース設定ファイルの書き込みに失敗しました: ' + ConfigFile, mbError, MB_OK);
+  SaveStringToFile(ConfigFile, FullDbPath, False);
 end;
 
 // DB保存先ページのバリデーション（「次へ」ボタン押下時に呼ばれる）
