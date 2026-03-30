@@ -134,12 +134,9 @@ public partial class SettingsViewModel : ViewModelBase
         _settingsRepository = settingsRepository;
         _validationService = validationService;
         _soundPlayer = soundPlayer;
-        // DatabaseOptionsから読み込み、空ならdatabase_config.txtから直接読む（フォールバック）
-        var fullPath = databaseOptions.Value.Path ?? string.Empty;
-        if (string.IsNullOrWhiteSpace(fullPath))
-        {
-            fullPath = LoadDatabasePathFromConfigFile();
-        }
+        // database_config.txtから直接読む（設定ファイルが正。DI経由のDatabaseOptionsは
+        // アプリ起動時に固定されるため、同一セッション中に設定変更しても反映されない）
+        var fullPath = LoadDatabasePathFromConfigFile();
         _originalDatabasePath = ExtractDirectoryPath(fullPath);
         _databasePath = _originalDatabasePath;
     }
