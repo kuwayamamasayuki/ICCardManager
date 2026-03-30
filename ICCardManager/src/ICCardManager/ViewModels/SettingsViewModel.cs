@@ -393,7 +393,7 @@ public partial class SettingsViewModel : ViewModelBase
 
         // アトミック書き込み: 一時ファイルに書き出してからリネーム（破損防止）
         var tempPath = configPath + ".tmp";
-        File.WriteAllText(tempPath, databasePath ?? string.Empty);
+        File.WriteAllText(tempPath, databasePath ?? string.Empty, System.Text.Encoding.UTF8);
         if (File.Exists(configPath))
         {
             File.Delete(configPath);
@@ -424,8 +424,27 @@ public partial class SettingsViewModel : ViewModelBase
 
         try
         {
-            var path = File.ReadAllText(configPath).Trim();
-            return path;
+            // Inno SetupのSaveStringToFileはShift_JIS（ANSI）で書き込むが、
+            // 設定画面のFile.WriteAllTextはUTF-8 BOM付きで書き込む。
+            // どちらでも正しく読めるよう、BOMで判定する。
+            var bytes = File.ReadAllBytes(configPath);
+            string path;
+            if (bytes.Length >= 3 && bytes[0] == 0xEF && bytes[1] == 0xBB && bytes[2] == 0xBF)
+            {
+                // UTF-8 BOM
+                path = System.Text.Encoding.UTF8.GetString(bytes, 3, bytes.Length - 3);
+            }
+            else if (bytes.Length >= 2 && bytes[0] == 0xFF && bytes[1] == 0xFE)
+            {
+                // UTF-16 LE BOM
+                path = System.Text.Encoding.Unicode.GetString(bytes, 2, bytes.Length - 2);
+            }
+            else
+            {
+                // BOMなし: Shift_JIS（Inno Setupが書いた場合）として読む
+                path = System.Text.Encoding.GetEncoding(932).GetString(bytes);
+            }
+            return path.Trim();
         }
         catch
         {
