@@ -531,6 +531,10 @@ public partial class MainViewModel : ViewModelBase
         {
             await CheckDatabaseConnectionAsync();
 
+            // 接続断の場合はリフレッシュをスキップ（キャッシュからの古いデータで更新時刻を記録しない）
+            if (WarningMessages.Any(w => w.Type == WarningType.DatabaseConnectionLost))
+                return;
+
             // 共有モード: 他PCの変更を反映するためダッシュボードと貸出中カードを定期リフレッシュ
             await RefreshSharedDataAsync();
         }
