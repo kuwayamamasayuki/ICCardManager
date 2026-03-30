@@ -593,8 +593,10 @@ public class CardManageViewModelTests
         // Act
         await _viewModel.DeleteAsync();
 
-        // Assert
-        _viewModel.StatusMessage.Should().Contain("貸出中");
+        // Assert - ダイアログでエラーが表示されること
+        _dialogServiceMock.Verify(d => d.ShowError(
+            It.Is<string>(s => s.Contains("貸出中")),
+            It.IsAny<string>()), Times.Once);
         _cardRepositoryMock.Verify(r => r.DeleteAsync(It.IsAny<string>()), Times.Never);
     }
 

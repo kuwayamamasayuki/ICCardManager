@@ -599,8 +599,8 @@ namespace ICCardManager.ViewModels
 
             if (SelectedCard.IsLent)
             {
-                StatusMessage = "貸出中のカードは削除できません";
-                IsStatusError = true;
+                // Issue #1109: 編集フォーム非表示時でもユーザーにフィードバックするためダイアログで通知
+                _dialogService.ShowError("このカードは貸出中のため削除できません。", "削除できません");
                 return;
             }
 
@@ -643,9 +643,10 @@ namespace ICCardManager.ViewModels
                 }
                 else
                 {
-                    // Issue #1109: 失敗原因に応じた具体的なメッセージを表示
-                    StatusMessage = GetOperationFailureMessage(deleteResult, "削除");
-                    IsStatusError = true;
+                    // Issue #1109: 失敗原因に応じた具体的なメッセージをダイアログで表示
+                    // （編集フォーム非表示時はStatusMessageが見えないため）
+                    var failureMessage = GetOperationFailureMessage(deleteResult, "削除");
+                    _dialogService.ShowError(failureMessage, "削除できません");
                     await LoadCardsAsync();
                 }
             }
@@ -683,8 +684,8 @@ namespace ICCardManager.ViewModels
 
             if (SelectedCard.IsLent)
             {
-                StatusMessage = "貸出中のカードは払い戻しできません";
-                IsStatusError = true;
+                // Issue #1109: 編集フォーム非表示時でもユーザーにフィードバックするためダイアログで通知
+                _dialogService.ShowError("このカードは貸出中のため払い戻しできません。", "払い戻しできません");
                 return;
             }
 
@@ -755,9 +756,9 @@ namespace ICCardManager.ViewModels
                     }
                     else
                     {
-                        // Issue #1109: 失敗原因に応じた具体的なメッセージを表示
-                        StatusMessage = GetOperationFailureMessage(refundResult, "払い戻し");
-                        IsStatusError = true;
+                        // Issue #1109: 失敗原因に応じた具体的なメッセージをダイアログで表示
+                        var failureMessage = GetOperationFailureMessage(refundResult, "払い戻し");
+                        _dialogService.ShowError(failureMessage, "払い戻しできません");
                         await LoadCardsAsync();
                     }
                 }
