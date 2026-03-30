@@ -150,10 +150,17 @@ public partial class SystemManageViewModel : ViewModelBase
         }
 
         // 確認ダイアログ
+        // Issue #1108: 共有モード時は他PCの終了を促す警告を追加
+        var sharedModeWarning = _backupService.IsSharedMode
+            ? "【重要】共有モードで使用中のため、リストア前にすべてのPCでアプリケーションを終了してください。\n" +
+              "他のPCが接続中の場合、リストアは実行できません。\n\n"
+            : "";
+
         var result = MessageBox.Show(
             $"以下のバックアップからデータを復元します。\n\n" +
             $"ファイル: {SelectedBackup.FileName}\n" +
             $"作成日時: {DisplayFormatters.FormatTimestamp(SelectedBackup.CreatedAt)}\n\n" +
+            sharedModeWarning +
             $"現在のデータは上書きされます。\n" +
             $"（復元前に現在のデータは自動バックアップされます）\n\n" +
             $"続行しますか？",
@@ -207,7 +214,12 @@ public partial class SystemManageViewModel : ViewModelBase
                 }
                 else
                 {
-                    SetStatus("リストアに失敗しました", true);
+                    // Issue #1108: 共有モード時は他PC接続が原因の可能性を示唆
+                    var errorMessage = _backupService.IsSharedMode
+                        ? "リストアに失敗しました。他のPCでアプリケーションが起動中の可能性があります。" +
+                          "すべてのPCでアプリケーションを終了してから再度お試しください。"
+                        : "リストアに失敗しました";
+                    SetStatus(errorMessage, true);
                 }
             }
             catch (Exception ex)
@@ -262,9 +274,16 @@ public partial class SystemManageViewModel : ViewModelBase
         }
 
         // 確認ダイアログ
+        // Issue #1108: 共有モード時は他PCの終了を促す警告を追加
+        var sharedModeWarning2 = _backupService.IsSharedMode
+            ? "【重要】共有モードで使用中のため、リストア前にすべてのPCでアプリケーションを終了してください。\n" +
+              "他のPCが接続中の場合、リストアは実行できません。\n\n"
+            : "";
+
         var result = MessageBox.Show(
             $"以下のファイルからデータを復元します。\n\n" +
             $"ファイル: {Path.GetFileName(dialog.FileName)}\n\n" +
+            sharedModeWarning2 +
             $"現在のデータは上書きされます。\n" +
             $"（復元前に現在のデータは自動バックアップされます）\n\n" +
             $"続行しますか？",
@@ -321,7 +340,12 @@ public partial class SystemManageViewModel : ViewModelBase
                 }
                 else
                 {
-                    SetStatus("リストアに失敗しました", true);
+                    // Issue #1108: 共有モード時は他PC接続が原因の可能性を示唆
+                    var errorMessage2 = _backupService.IsSharedMode
+                        ? "リストアに失敗しました。他のPCでアプリケーションが起動中の可能性があります。" +
+                          "すべてのPCでアプリケーションを終了してから再度お試しください。"
+                        : "リストアに失敗しました";
+                    SetStatus(errorMessage2, true);
                 }
             }
             catch (Exception ex)

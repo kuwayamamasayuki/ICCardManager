@@ -50,6 +50,11 @@ namespace ICCardManager.Services
         }
 
         /// <summary>
+        /// 共有モードかどうか（DbContextの状態を公開）
+        /// </summary>
+        public bool IsSharedMode => _dbContext.IsSharedMode;
+
+        /// <summary>
         /// 自動バックアップを実行
         /// </summary>
         /// <returns>作成されたバックアップファイルのパス（失敗時はnull）</returns>
@@ -218,17 +223,19 @@ namespace ICCardManager.Services
                     return false;
                 }
 
-                // 共有モード時は警告（他PCの接続が残っているとリストアが失敗する可能性がある）
-                if (_dbContext.IsSharedMode)
-                {
-                    _logger.LogWarning(
-                        "共有モードでリストアを実行します。他のPCでアプリケーションが起動している場合、リストアが失敗する可能性があります。");
-                }
-
                 // Issue #508: DBファイルを置き換える前に接続を閉じる
                 // SQLite接続が開いているとファイルがロックされ、置き換えに失敗する
                 _dbContext.CloseConnection();
                 _logger.LogDebug("リストア準備: DB接続を閉じました");
+
+                // Issue #1108: 共有モード時は他PCの接続を検出し、接続があればリストアを拒否する
+                if (_dbContext.IsSharedMode && !CanAcquireExclusiveLock(targetPath))
+                {
+                    _logger.LogWarning(
+                        "共有モードでリストアが拒否されました: 他のPCがデータベースに接続中です。" +
+                        "すべてのPCでアプリケーションを終了してから再度お試しください。");
+                    return false;
+                }
 
                 // 現在のDBを退避
                 if (File.Exists(targetPath))
@@ -244,6 +251,12 @@ namespace ICCardManager.Services
                 try
                 {
                     File.Copy(backupFilePath, targetPath, overwrite: true);
+
+                    // Issue #1108: ジャーナルファイルを清掃
+                    // リストア前のジャーナルが残っていると、次回接続時にジャーナルリカバリが
+                    // 実行され、リストアした内容が上書きされる可能性がある
+                    CleanupJournalFiles(targetPath);
+
                     // 成功したら退避ファイルを削除
                     if (File.Exists(tempPath))
                     {
@@ -398,6 +411,74 @@ namespace ICCardManager.Services
             catch
             {
                 return false;
+            }
+        }
+
+        /// <summary>
+        /// データベースファイルの排他ロックを取得できるか確認する
+        /// </summary>
+        /// <remarks>
+        /// Issue #1108: 共有モードでリストア前に、他PCがDBに接続中かどうかを検出する。
+        /// FileShare.Noneで排他的にファイルを開き、成功すれば他の接続がないと判断する。
+        /// SMB越しでもWindowsのファイルロックが機能するため、この方法で検出可能。
+        /// </remarks>
+        /// <param name="dbPath">データベースファイルのパス</param>
+        /// <returns>排他ロックが取得できた場合true（他接続なし）</returns>
+        internal static bool CanAcquireExclusiveLock(string dbPath)
+        {
+            if (!File.Exists(dbPath))
+                return true;
+
+            try
+            {
+                // FileShare.Noneで開くことで排他ロックを試行
+                using var stream = new FileStream(dbPath, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
+                return true;
+            }
+            catch (IOException)
+            {
+                // 他プロセスがファイルを使用中
+                return false;
+            }
+            catch (UnauthorizedAccessException)
+            {
+                // アクセス権限がない場合も安全のためfalse
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// SQLiteのジャーナルファイルを清掃する
+        /// </summary>
+        /// <remarks>
+        /// Issue #1108: リストア後に古いジャーナルファイルが残っていると、
+        /// 次回接続時にSQLiteがジャーナルリカバリを実行し、
+        /// リストアした内容が上書きされる可能性がある。
+        /// </remarks>
+        /// <param name="dbPath">データベースファイルのパス</param>
+        internal void CleanupJournalFiles(string dbPath)
+        {
+            var journalFiles = new[]
+            {
+                dbPath + "-journal",
+                dbPath + "-wal",
+                dbPath + "-shm"
+            };
+
+            foreach (var file in journalFiles)
+            {
+                try
+                {
+                    if (File.Exists(file))
+                    {
+                        File.Delete(file);
+                        _logger.LogDebug("ジャーナルファイルを削除しました: {Path}", file);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "ジャーナルファイルの削除に失敗しました: {Path}", file);
+                }
             }
         }
 
