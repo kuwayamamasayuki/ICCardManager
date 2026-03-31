@@ -743,7 +743,7 @@ public partial class MainViewModel : ViewModelBase
             {
                 WarningMessages.Add(new WarningItem
                 {
-                    DisplayText = $"⚠️ {item.CardType} {item.CardNumber}: 残額 {DisplayFormatters.FormatBalanceWithUnit(item.CurrentBalance)}（警告しきい値: {warningBalance:N0}円以下）",
+                    DisplayText = $"⚠️ {item.CardType} {item.CardNumber}: 残額 {DisplayFormatters.FormatBalanceWithUnit(item.CurrentBalance)}（しきい値: {warningBalance:N0}円）",
                     Type = WarningType.LowBalance,
                     CardIdm = item.CardIdm
                 });
