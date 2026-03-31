@@ -2,6 +2,7 @@ using CommunityToolkit.Mvvm.Messaging;
 using FluentAssertions;
 using ICCardManager.Data;
 using ICCardManager.Data.Repositories;
+using ICCardManager.Infrastructure.Caching;
 using ICCardManager.Dtos;
 using ICCardManager.Infrastructure.CardReader;
 using ICCardManager.Infrastructure.Sound;
@@ -124,7 +125,8 @@ public class MainViewModelTests
             Options.Create(new AppOptions { StaffCardTimeoutSeconds = timeoutSeconds }),
             _timerFactory,
             _dispatcherService,
-            new Mock<DbContext>().Object);
+            new Mock<DbContext>().Object,
+            new Mock<ICacheService>().Object);
     }
 
     #region AppState列挙型テスト
@@ -487,7 +489,8 @@ public class MainViewModelTests
             Options.Create(new AppOptions { StaffCardTimeoutSeconds = 30 }),
             isolatedTimerFactory,
             _dispatcherService,
-            new Mock<DbContext>().Object);
+            new Mock<DbContext>().Object,
+            new Mock<ICacheService>().Object);
 
         var staffIdm = "0102030405060708";
         _staffRepositoryMock.Setup(r => r.GetByIdmAsync(staffIdm, It.IsAny<bool>()))
