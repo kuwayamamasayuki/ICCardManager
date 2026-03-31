@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "deny": [
+      "Bash(git add -A*)",
+      "Bash(git add .)",
+      "Bash(git push * --force*)",
+      "Bash(git push origin main*)",
+      "Bash(git push -u origin main*)"
+    ]
+  }
+}
