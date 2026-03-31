@@ -13,6 +13,7 @@ using ICCardManager.Data.Repositories;
 using ICCardManager.Dtos;
 using ICCardManager.Infrastructure.CardReader;
 using ICCardManager.Infrastructure.Sound;
+using ICCardManager.Infrastructure.Caching;
 using ICCardManager.Infrastructure.Timing;
 using ICCardManager.Models;
 using ICCardManager.Data;
@@ -110,8 +111,16 @@ public partial class MainViewModel : ViewModelBase
     private readonly ITimerFactory _timerFactory;
     private readonly IDispatcherService _dispatcherService;
     private readonly DbContext _dbContext;
+    private readonly ICacheService _cacheService;
     private readonly HashSet<CardReadingSource> _suppressionSources = new();
     private ITimer? _dbHealthCheckTimer;
+    private ITimer? _syncDisplayTimer;
+    private DateTime? _lastRefreshTime;
+
+    /// <summary>
+    /// Issue #1131: データの鮮度が低い（最終同期から15秒以上経過）かどうか
+    /// </summary>
+    internal const int StaleThresholdSeconds = 15;
 
     /// <summary>
     /// カード読み取りが抑制されているかどうか（テスト用）
@@ -200,10 +209,16 @@ public partial class MainViewModel : ViewModelBase
     private int _cardReaderReconnectAttempts;
 
     /// <summary>
-    /// Issue #1110: 共有モードでのデータ最終更新時刻
+    /// Issue #1110, #1131: 共有モードでのデータ最終同期の経過時間テキスト
     /// </summary>
     [ObservableProperty]
     private string _lastRefreshText = string.Empty;
+
+    /// <summary>
+    /// Issue #1131: データの鮮度が低い（最終同期から一定時間経過）かどうか
+    /// </summary>
+    [ObservableProperty]
+    private bool _isRefreshStale;
 
     /// <summary>
     /// ダッシュボードのソート順
@@ -390,7 +405,8 @@ public partial class MainViewModel : ViewModelBase
         IOptions<AppOptions> appOptions,
         ITimerFactory timerFactory,
         IDispatcherService dispatcherService,
-        DbContext dbContext)
+        DbContext dbContext,
+        ICacheService cacheService)
     {
         _cardReader = cardReader;
         _soundPlayer = soundPlayer;
@@ -410,6 +426,7 @@ public partial class MainViewModel : ViewModelBase
         _timerFactory = timerFactory;
         _dispatcherService = dispatcherService;
         _dbContext = dbContext;
+        _cacheService = cacheService;
 
         // カード読み取り抑制メッセージの受信を登録（Issue #852）
         _messenger.Register<CardReadingSuppressedMessage>(this, (recipient, message) =>
@@ -504,6 +521,12 @@ public partial class MainViewModel : ViewModelBase
         _dbHealthCheckTimer.Interval = TimeSpan.FromSeconds(30);
         _dbHealthCheckTimer.Tick += OnDatabaseHealthCheckTick;
         _dbHealthCheckTimer.Start();
+
+        // Issue #1131: 同期経過時間の表示更新用タイマー（1秒間隔）
+        _syncDisplayTimer = _timerFactory.Create();
+        _syncDisplayTimer.Interval = TimeSpan.FromSeconds(1);
+        _syncDisplayTimer.Tick += OnSyncDisplayTimerTick;
+        _syncDisplayTimer.Start();
     }
 
     /// <summary>
@@ -517,6 +540,51 @@ public partial class MainViewModel : ViewModelBase
             _dbHealthCheckTimer.Tick -= OnDatabaseHealthCheckTick;
             _dbHealthCheckTimer = null;
         }
+
+        if (_syncDisplayTimer != null)
+        {
+            _syncDisplayTimer.Stop();
+            _syncDisplayTimer.Tick -= OnSyncDisplayTimerTick;
+            _syncDisplayTimer = null;
+        }
+    }
+
+    /// <summary>
+    /// Issue #1131: 同期経過時間の表示を1秒ごとに更新
+    /// </summary>
+    private void OnSyncDisplayTimerTick(object sender, EventArgs e)
+    {
+        UpdateSyncDisplayText();
+    }
+
+    /// <summary>
+    /// Issue #1131: 最終同期からの経過時間をテキストとして更新
+    /// </summary>
+    internal void UpdateSyncDisplayText()
+    {
+        if (_lastRefreshTime == null)
+        {
+            LastRefreshText = "同期待ち...";
+            IsRefreshStale = false;
+            return;
+        }
+
+        var elapsed = (int)(DateTime.Now - _lastRefreshTime.Value).TotalSeconds;
+        if (elapsed < 5)
+        {
+            LastRefreshText = "最終同期: たった今";
+        }
+        else if (elapsed < 60)
+        {
+            LastRefreshText = $"最終同期: {elapsed}秒前";
+        }
+        else
+        {
+            var minutes = elapsed / 60;
+            LastRefreshText = $"最終同期: {minutes}分前";
+        }
+
+        IsRefreshStale = elapsed >= StaleThresholdSeconds;
     }
 
     private bool _isHealthCheckRunning;
@@ -558,12 +626,35 @@ public partial class MainViewModel : ViewModelBase
             await RefreshLentCardsAsync();
             await RefreshDashboardAsync();
 
-            // Issue #1110: 最終更新時刻を記録
-            LastRefreshText = $"最終更新: {DateTime.Now:HH:mm:ss}";
+            // Issue #1110, #1131: 最終同期時刻を記録（表示はタイマーで更新）
+            _lastRefreshTime = DateTime.Now;
+            UpdateSyncDisplayText();
         }
         catch (Exception)
         {
             // リフレッシュ失敗は無視（接続断の場合はCheckDatabaseConnectionAsyncが警告を出す）
+        }
+    }
+
+    /// <summary>
+    /// Issue #1131: 手動でデータを即時同期する
+    /// </summary>
+    [RelayCommand]
+    private async Task ManualRefreshAsync()
+    {
+        if (!IsSharedMode || _isHealthCheckRunning)
+            return;
+
+        _isHealthCheckRunning = true;
+        try
+        {
+            // キャッシュを全クリアして最新データを取得
+            _cacheService.Clear();
+            await RefreshSharedDataAsync();
+        }
+        finally
+        {
+            _isHealthCheckRunning = false;
         }
     }
 

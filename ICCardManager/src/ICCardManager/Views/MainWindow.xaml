@@ -979,13 +979,43 @@
                     <Run Text=" 共有モード"/>
                 </TextBlock>
             </StatusBarItem>
-            <!-- Issue #1110: 最終更新時刻（共有モード時のみ） -->
-            <StatusBarItem AutomationProperties.Name="最終更新時刻"
+            <!-- Issue #1110, #1131: 最終同期経過時間（共有モード時のみ） -->
+            <StatusBarItem AutomationProperties.Name="最終同期時刻"
                            Visibility="{Binding IsSharedMode, Converter={StaticResource BoolToVisibilityConverter}}">
-                <TextBlock Text="{Binding LastRefreshText}"
-                           Foreground="{DynamicResource SecondaryTextBrush}"
-                           FontSize="{DynamicResource SmallFontSize}"
-                           ToolTip="他のPCの変更が反映された最終時刻です。データは約30秒ごとに自動更新されます。"/>
+                <StackPanel Orientation="Horizontal">
+                    <TextBlock Text="{Binding LastRefreshText}"
+                               FontSize="{DynamicResource SmallFontSize}"
+                               ToolTip="他のPCの変更が反映された最終時刻です。データは約30秒ごとに自動更新されます。">
+                        <TextBlock.Style>
+                            <Style TargetType="TextBlock">
+                                <Setter Property="Foreground" Value="{DynamicResource SecondaryTextBrush}"/>
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding IsRefreshStale}" Value="True">
+                                        <Setter Property="Foreground" Value="{DynamicResource WarningActionBrush}"/>
+                                        <Setter Property="FontWeight" Value="Bold"/>
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </TextBlock.Style>
+                    </TextBlock>
+                    <Button Command="{Binding ManualRefreshCommand}"
+                            Content="⟳"
+                            FontSize="{DynamicResource SmallFontSize}"
+                            Margin="6,0,0,0"
+                            Padding="4,0"
+                            VerticalAlignment="Center"
+                            ToolTip="今すぐデータを同期します"
+                            AutomationProperties.Name="手動同期ボタン"
+                            AutomationProperties.HelpText="クリックすると他のPCの変更を即座に反映します">
+                        <Button.Style>
+                            <Style TargetType="Button">
+                                <Setter Property="Background" Value="Transparent"/>
+                                <Setter Property="BorderThickness" Value="0"/>
+                                <Setter Property="Cursor" Value="Hand"/>
+                            </Style>
+                        </Button.Style>
+                    </Button>
+                </StackPanel>
             </StatusBarItem>
             <Separator Visibility="{Binding IsSharedMode, Converter={StaticResource BoolToVisibilityConverter}}"/>
             <!-- バージョン表示（Issue #475） -->
