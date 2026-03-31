@@ -10,6 +10,7 @@
 [Dd]ebug/
 [Dd]ebugPublic/
 [Rr]elease/
+!.claude/skills/release/
 [Rr]eleases/
 x64/
 x86/
@@ -91,6 +92,10 @@ appsettings.Local.json
 # Python
 __pycache__/
 
+# Claude Code（個人設定）
+.claude/settings.local.json
+
 # 一時ファイル
 タイトルなし.txt
 プロンプト問題点.md
+CLI操作.txt
