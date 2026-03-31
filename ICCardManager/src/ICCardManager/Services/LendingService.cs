@@ -556,12 +556,24 @@ namespace ICCardManager.Services
                 }
                 else
                 {
-                    // フォールバック: 作成したledgerレコードの残高を使用
-                    var latestLedger = result.CreatedLedgers.LastOrDefault();
-                    if (latestLedger != null)
+                    // フォールバック1: 作成したledgerレコードの残高を使用
+                    var latestCreatedLedger = result.CreatedLedgers.LastOrDefault();
+                    if (latestCreatedLedger != null)
                     {
-                        result.Balance = latestLedger.Balance;
+                        result.Balance = latestCreatedLedger.Balance;
                         _logger.LogDebug("LendingService: ledgerレコードの残高を使用: {Balance}円", result.Balance);
+                    }
+                    else
+                    {
+                        // Issue #1139: フォールバック2: DB内の直近の履歴残高を使用
+                        // LendAsync側のIssue #656修正と同等のフォールバック
+                        var latestLedger = await _ledgerRepository.GetLatestLedgerAsync(cardIdm);
+                        if (latestLedger != null)
+                        {
+                            result.Balance = latestLedger.Balance;
+                            _logger.LogInformation(
+                                "ReturnAsync: カード残高を読み取れなかったため、直近の履歴残高を使用: {Balance}円", result.Balance);
+                        }
                     }
                 }
 

@@ -3603,4 +3603,98 @@ public class LendingServiceTests : IDisposable
     }
 
     #endregion
+
+    #region Issue #1139: 返却時の残額フォールバックテスト
+
+    /// <summary>
+    /// Issue #1139: 返却時にカード残高が読み取れず、CreatedLedgersも空の場合、
+    /// DBの直近履歴からフォールバックで残高を取得すること
+    /// </summary>
+    [Fact]
+    public async Task ReturnAsync_WithNullBalanceAndNoCreatedLedgers_FallsBackToDbHistory()
+    {
+        // Arrange
+        var card = CreateTestCard(isLent: true);
+        var staff = CreateTestStaff();
+        var lentRecord = CreateTestLentRecord();
+
+        // 利用履歴なし（Balance=null相当）
+        var usageDetails = new List<LedgerDetail>();
+
+        SetupReturnMocks(card, staff, lentRecord);
+
+        // DBの直近履歴に残高5000円があるとする
+        _ledgerRepositoryMock.Setup(x => x.GetLatestLedgerAsync(TestCardIdm))
+            .ReturnsAsync(new Ledger { Balance = 5000 });
+
+        // Act
+        var result = await _service.ReturnAsync(TestStaffIdm, TestCardIdm, usageDetails);
+
+        // Assert
+        result.Success.Should().BeTrue();
+        result.Balance.Should().Be(5000, "DB直近履歴の残高がフォールバックとして使用される");
+    }
+
+    /// <summary>
+    /// Issue #1139: 返却時にカード残高が読み取れず、DB履歴もない場合、残高0になること
+    /// </summary>
+    [Fact]
+    public async Task ReturnAsync_WithNullBalanceAndNoDbHistory_DefaultsToZero()
+    {
+        // Arrange
+        var card = CreateTestCard(isLent: true);
+        var staff = CreateTestStaff();
+        var lentRecord = CreateTestLentRecord();
+
+        var usageDetails = new List<LedgerDetail>();
+
+        SetupReturnMocks(card, staff, lentRecord);
+
+        // DB履歴もなし
+        _ledgerRepositoryMock.Setup(x => x.GetLatestLedgerAsync(TestCardIdm))
+            .ReturnsAsync((Ledger?)null);
+
+        // Act
+        var result = await _service.ReturnAsync(TestStaffIdm, TestCardIdm, usageDetails);
+
+        // Assert
+        result.Success.Should().BeTrue();
+        result.Balance.Should().Be(0, "DB履歴もない場合はデフォルトの0");
+    }
+
+    /// <summary>
+    /// Issue #1139: 返却時にカード残高が正常に読み取れた場合、フォールバックは使わないこと
+    /// </summary>
+    [Fact]
+    public async Task ReturnAsync_WithValidBalance_DoesNotUseFallback()
+    {
+        // Arrange
+        var card = CreateTestCard(isLent: true);
+        var staff = CreateTestStaff();
+        var lentRecord = CreateTestLentRecord();
+        var usageDetails = new List<LedgerDetail>
+        {
+            new()
+            {
+                UseDate = DateTime.Now,
+                EntryStation = "博多",
+                ExitStation = "天神",
+                Amount = 210,
+                Balance = 3000  // カードから正常に読み取った残高
+            }
+        };
+
+        SetupReturnMocks(card, staff, lentRecord);
+
+        // Act
+        var result = await _service.ReturnAsync(TestStaffIdm, TestCardIdm, usageDetails);
+
+        // Assert
+        result.Success.Should().BeTrue();
+        result.Balance.Should().Be(3000, "カードから直接読み取った残高が使用される");
+        _ledgerRepositoryMock.Verify(x => x.GetLatestLedgerAsync(It.IsAny<string>()), Times.Never,
+            "正常読み取り時はDBフォールバックを呼ばない");
+    }
+
+    #endregion
 }
