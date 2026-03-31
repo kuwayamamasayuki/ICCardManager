@@ -18,7 +18,7 @@ namespace ICCardManager.Tests.Data;
 
 /// <summary>
 /// DbContext.CleanupOldData()のテスト
-/// 6年経過データの自動削除機能を検証
+/// 6年経過データの自動削除機能を検証（ledger + operation_log）
 /// </summary>
 public class DbContextCleanupTests : IDisposable
 {
@@ -27,6 +27,7 @@ public class DbContextCleanupTests : IDisposable
     private readonly StaffRepository _staffRepository;
     private readonly CardRepository _cardRepository;
     private readonly LedgerRepository _ledgerRepository;
+    private readonly OperationLogRepository _operationLogRepository;
 
     // テスト用定数
     private const string TestStaffIdm = "STAFF00000000001";
@@ -57,6 +58,7 @@ public class DbContextCleanupTests : IDisposable
         _staffRepository = new StaffRepository(_dbContext, _cacheServiceMock.Object, Options.Create(new CacheOptions()));
         _cardRepository = new CardRepository(_dbContext, _cacheServiceMock.Object, Options.Create(new CacheOptions()));
         _ledgerRepository = new LedgerRepository(_dbContext);
+        _operationLogRepository = new OperationLogRepository(_dbContext);
 
         // テスト用の職員とカードを登録（FK制約対応）
         SetupTestData().Wait();
@@ -88,13 +90,13 @@ public class DbContextCleanupTests : IDisposable
         GC.SuppressFinalize(this);
     }
 
-    #region 基本機能テスト
+    #region Ledger基本機能テスト
 
     /// <summary>
-    /// 6年以上前のデータが削除されることを確認
+    /// 6年以上前のledgerデータが削除されることを確認
     /// </summary>
     [Fact]
-    public async Task CleanupOldData_DataOlderThan6Years_DeletesRecords()
+    public async Task CleanupOldData_LedgerOlderThan6Years_DeletesRecords()
     {
         // Arrange - 7年前のデータを作成
         var sevenYearsAgo = DateTime.Now.AddYears(-7);
@@ -109,10 +111,10 @@ public class DbContextCleanupTests : IDisposable
         beforeCleanup.Should().HaveCount(1);
 
         // Act
-        var deletedCount = _dbContext.CleanupOldData();
+        var (ledgerCount, _) = _dbContext.CleanupOldData();
 
         // Assert
-        deletedCount.Should().Be(1);
+        ledgerCount.Should().Be(1);
 
         var afterCleanup = await _ledgerRepository.GetByDateRangeAsync(
             TestCardIdm,
@@ -122,10 +124,10 @@ public class DbContextCleanupTests : IDisposable
     }
 
     /// <summary>
-    /// 6年未満のデータが保持されることを確認
+    /// 6年未満のledgerデータが保持されることを確認
     /// </summary>
     [Fact]
-    public async Task CleanupOldData_DataLessThan6Years_KeepsRecords()
+    public async Task CleanupOldData_LedgerLessThan6Years_KeepsRecords()
     {
         // Arrange - 5年前のデータを作成
         var fiveYearsAgo = DateTime.Now.AddYears(-5);
@@ -133,10 +135,10 @@ public class DbContextCleanupTests : IDisposable
         await _ledgerRepository.InsertAsync(ledger);
 
         // Act
-        var deletedCount = _dbContext.CleanupOldData();
+        var (ledgerCount, _) = _dbContext.CleanupOldData();
 
         // Assert
-        deletedCount.Should().Be(0);
+        ledgerCount.Should().Be(0);
 
         var afterCleanup = await _ledgerRepository.GetByDateRangeAsync(
             TestCardIdm,
@@ -157,10 +159,11 @@ public class DbContextCleanupTests : IDisposable
         await _ledgerRepository.InsertAsync(ledger);
 
         // Act
-        var deletedCount = _dbContext.CleanupOldData();
+        var (ledgerCount, logCount) = _dbContext.CleanupOldData();
 
         // Assert
-        deletedCount.Should().Be(0);
+        ledgerCount.Should().Be(0);
+        logCount.Should().Be(0);
     }
 
     /// <summary>
@@ -170,22 +173,23 @@ public class DbContextCleanupTests : IDisposable
     public void CleanupOldData_EmptyTable_ReturnsZero()
     {
         // Act - データなしで実行
-        var deletedCount = _dbContext.CleanupOldData();
+        var (ledgerCount, logCount) = _dbContext.CleanupOldData();
 
         // Assert
-        deletedCount.Should().Be(0);
+        ledgerCount.Should().Be(0);
+        logCount.Should().Be(0);
     }
 
     #endregion
 
-    #region 境界値テスト
+    #region Ledger境界値テスト
 
     /// <summary>
-    /// ちょうど6年前のデータは保持されることを確認
+    /// ちょうど6年前のledgerデータは保持されることを確認
     /// （date < date('now', '-6 years') なので、ちょうど6年前は削除対象外）
     /// </summary>
     [Fact]
-    public async Task CleanupOldData_Exactly6YearsAgo_KeepsRecord()
+    public async Task CleanupOldData_LedgerExactly6YearsAgo_KeepsRecord()
     {
         // Arrange - ちょうど6年前のデータを作成
         var sixYearsAgo = DateTime.Now.AddYears(-6);
@@ -193,12 +197,12 @@ public class DbContextCleanupTests : IDisposable
         await _ledgerRepository.InsertAsync(ledger);
 
         // Act
-        var deletedCount = _dbContext.CleanupOldData();
+        var (ledgerCount, _) = _dbContext.CleanupOldData();
 
         // Assert
         // SQLiteのdate('now', '-6 years')との比較で、ちょうど6年前は保持される
         // （< なので、6年ちょうどは削除対象外）
-        deletedCount.Should().Be(0);
+        ledgerCount.Should().Be(0);
 
         var afterCleanup = await _ledgerRepository.GetByDateRangeAsync(
             TestCardIdm,
@@ -208,10 +212,10 @@ public class DbContextCleanupTests : IDisposable
     }
 
     /// <summary>
-    /// 6年マイナス1日のデータは保持されることを確認
+    /// 6年マイナス1日のledgerデータは保持されることを確認
     /// </summary>
     [Fact]
-    public async Task CleanupOldData_6YearsMinus1Day_KeepsRecord()
+    public async Task CleanupOldData_Ledger6YearsMinus1Day_KeepsRecord()
     {
         // Arrange - 6年前から1日少ないデータを作成
         var justUnder6Years = DateTime.Now.AddYears(-6).AddDays(1);
@@ -219,10 +223,10 @@ public class DbContextCleanupTests : IDisposable
         await _ledgerRepository.InsertAsync(ledger);
 
         // Act
-        var deletedCount = _dbContext.CleanupOldData();
+        var (ledgerCount, _) = _dbContext.CleanupOldData();
 
         // Assert
-        deletedCount.Should().Be(0);
+        ledgerCount.Should().Be(0);
 
         var afterCleanup = await _ledgerRepository.GetByDateRangeAsync(
             TestCardIdm,
@@ -232,10 +236,10 @@ public class DbContextCleanupTests : IDisposable
     }
 
     /// <summary>
-    /// 6年プラス1日のデータは削除されることを確認
+    /// 6年プラス1日のledgerデータは削除されることを確認
     /// </summary>
     [Fact]
-    public async Task CleanupOldData_6YearsPlus1Day_DeletesRecord()
+    public async Task CleanupOldData_Ledger6YearsPlus1Day_DeletesRecord()
     {
         // Arrange - 6年より1日古いデータを作成
         var justOver6Years = DateTime.Now.AddYears(-6).AddDays(-1);
@@ -243,21 +247,21 @@ public class DbContextCleanupTests : IDisposable
         await _ledgerRepository.InsertAsync(ledger);
 
         // Act
-        var deletedCount = _dbContext.CleanupOldData();
+        var (ledgerCount, _) = _dbContext.CleanupOldData();
 
         // Assert
-        deletedCount.Should().Be(1);
+        ledgerCount.Should().Be(1);
     }
 
     #endregion
 
-    #region 複合テスト
+    #region Ledger複合テスト
 
     /// <summary>
     /// 混在データで正しく削除されることを確認
     /// </summary>
     [Fact]
-    public async Task CleanupOldData_MixedData_DeletesOnlyOldRecords()
+    public async Task CleanupOldData_MixedLedgerData_DeletesOnlyOldRecords()
     {
         // Arrange - 様々な日付のデータを作成
         var testData = new[]
@@ -279,11 +283,11 @@ public class DbContextCleanupTests : IDisposable
         }
 
         // Act
-        var deletedCount = _dbContext.CleanupOldData();
+        var (ledgerCount, _) = _dbContext.CleanupOldData();
 
         // Assert
         var expectedDeleted = testData.Count(t => t.Item3);
-        deletedCount.Should().Be(expectedDeleted);
+        ledgerCount.Should().Be(expectedDeleted);
 
         // 保持されるべきデータを確認
         var allData = await _ledgerRepository.GetByDateRangeAsync(
@@ -305,19 +309,19 @@ public class DbContextCleanupTests : IDisposable
         await _ledgerRepository.InsertAsync(ledger);
 
         // Act - 複数回実行
-        var firstRun = _dbContext.CleanupOldData();
-        var secondRun = _dbContext.CleanupOldData();
-        var thirdRun = _dbContext.CleanupOldData();
+        var (firstLedger, _) = _dbContext.CleanupOldData();
+        var (secondLedger, _) = _dbContext.CleanupOldData();
+        var (thirdLedger, _) = _dbContext.CleanupOldData();
 
         // Assert
-        firstRun.Should().Be(1);
-        secondRun.Should().Be(0);
-        thirdRun.Should().Be(0);
+        firstLedger.Should().Be(1);
+        secondLedger.Should().Be(0);
+        thirdLedger.Should().Be(0);
     }
 
     #endregion
 
-    #region パフォーマンステスト
+    #region Ledgerパフォーマンステスト
 
     /// <summary>
     /// 大量データ削除時のパフォーマンスを確認
@@ -337,11 +341,11 @@ public class DbContextCleanupTests : IDisposable
 
         // Act
         var stopwatch = Stopwatch.StartNew();
-        var deletedCount = _dbContext.CleanupOldData();
+        var (ledgerCount, _) = _dbContext.CleanupOldData();
         stopwatch.Stop();
 
         // Assert
-        deletedCount.Should().Be(recordCount);
+        ledgerCount.Should().Be(recordCount);
         // 1000件の削除が5秒以内に完了すること
         stopwatch.ElapsedMilliseconds.Should().BeLessThan(5000);
     }
@@ -375,11 +379,11 @@ public class DbContextCleanupTests : IDisposable
 
         // Act
         var stopwatch = Stopwatch.StartNew();
-        var deletedCount = _dbContext.CleanupOldData();
+        var (ledgerCount, _) = _dbContext.CleanupOldData();
         stopwatch.Stop();
 
         // Assert
-        deletedCount.Should().Be(oldRecordCount);
+        ledgerCount.Should().Be(oldRecordCount);
         stopwatch.ElapsedMilliseconds.Should().BeLessThan(5000);
 
         // 新しいデータは保持されていることを確認
@@ -392,7 +396,7 @@ public class DbContextCleanupTests : IDisposable
 
     #endregion
 
-    #region 関連データテスト
+    #region Ledger関連データテスト
 
     /// <summary>
     /// ledger_detailも一緒に削除されることを確認（CASCADE）
@@ -420,14 +424,150 @@ public class DbContextCleanupTests : IDisposable
         await _ledgerRepository.InsertDetailAsync(detail);
 
         // Act
-        var deletedCount = _dbContext.CleanupOldData();
+        var (ledgerCount, _) = _dbContext.CleanupOldData();
 
         // Assert
-        deletedCount.Should().Be(1);
+        ledgerCount.Should().Be(1);
 
         // 詳細データも削除されていることを確認（親レコード削除によるCASCADE）
         var ledgerAfterCleanup = await _ledgerRepository.GetByIdAsync(ledgerId);
         ledgerAfterCleanup.Should().BeNull();
+    }
+
+    #endregion
+
+    #region OperationLog基本機能テスト
+
+    /// <summary>
+    /// 6年以上前のoperation_logが削除されることを確認
+    /// </summary>
+    [Fact]
+    public async Task CleanupOldData_OperationLogOlderThan6Years_DeletesRecords()
+    {
+        // Arrange - 7年前の操作ログを作成
+        var sevenYearsAgo = DateTime.Now.AddYears(-7);
+        var log = CreateTestOperationLog(sevenYearsAgo, "INSERT");
+        await _operationLogRepository.InsertAsync(log);
+
+        // Act
+        var (_, logCount) = _dbContext.CleanupOldData();
+
+        // Assert
+        logCount.Should().Be(1);
+    }
+
+    /// <summary>
+    /// 6年未満のoperation_logが保持されることを確認
+    /// </summary>
+    [Fact]
+    public async Task CleanupOldData_OperationLogLessThan6Years_KeepsRecords()
+    {
+        // Arrange - 5年前の操作ログを作成
+        var fiveYearsAgo = DateTime.Now.AddYears(-5);
+        var log = CreateTestOperationLog(fiveYearsAgo, "INSERT");
+        await _operationLogRepository.InsertAsync(log);
+
+        // Act
+        var (_, logCount) = _dbContext.CleanupOldData();
+
+        // Assert
+        logCount.Should().Be(0);
+    }
+
+    /// <summary>
+    /// ちょうど6年前のoperation_logは保持されることを確認
+    /// </summary>
+    [Fact]
+    public async Task CleanupOldData_OperationLogExactly6YearsAgo_KeepsRecord()
+    {
+        // Arrange
+        var sixYearsAgo = DateTime.Now.AddYears(-6);
+        var log = CreateTestOperationLog(sixYearsAgo, "UPDATE");
+        await _operationLogRepository.InsertAsync(log);
+
+        // Act
+        var (_, logCount) = _dbContext.CleanupOldData();
+
+        // Assert
+        logCount.Should().Be(0);
+    }
+
+    /// <summary>
+    /// 6年プラス1日のoperation_logは削除されることを確認
+    /// </summary>
+    [Fact]
+    public async Task CleanupOldData_OperationLog6YearsPlus1Day_DeletesRecord()
+    {
+        // Arrange
+        var justOver6Years = DateTime.Now.AddYears(-6).AddDays(-1);
+        var log = CreateTestOperationLog(justOver6Years, "DELETE");
+        await _operationLogRepository.InsertAsync(log);
+
+        // Act
+        var (_, logCount) = _dbContext.CleanupOldData();
+
+        // Assert
+        logCount.Should().Be(1);
+    }
+
+    #endregion
+
+    #region OperationLog複合テスト
+
+    /// <summary>
+    /// 混在する操作ログで正しく削除されることを確認
+    /// </summary>
+    [Fact]
+    public async Task CleanupOldData_MixedOperationLogData_DeletesOnlyOldRecords()
+    {
+        // Arrange
+        var testData = new[]
+        {
+            (DateTime.Now.AddYears(-10), true),   // 削除対象
+            (DateTime.Now.AddYears(-7), true),    // 削除対象
+            (DateTime.Now.AddYears(-6).AddDays(-1), true), // 削除対象
+            (DateTime.Now.AddYears(-6).AddDays(1), false), // 保持
+            (DateTime.Now.AddYears(-3), false),   // 保持
+            (DateTime.Now, false),                 // 保持
+        };
+
+        foreach (var (date, _) in testData)
+        {
+            var log = CreateTestOperationLog(date, "INSERT");
+            await _operationLogRepository.InsertAsync(log);
+        }
+
+        // Act
+        var (_, logCount) = _dbContext.CleanupOldData();
+
+        // Assert
+        var expectedDeleted = testData.Count(t => t.Item2);
+        logCount.Should().Be(expectedDeleted);
+    }
+
+    /// <summary>
+    /// ledgerとoperation_logの両方が同時に削除されることを確認
+    /// </summary>
+    [Fact]
+    public async Task CleanupOldData_BothTablesHaveOldData_DeletesBoth()
+    {
+        // Arrange - 7年前のledgerとoperation_logを作成
+        var sevenYearsAgo = DateTime.Now.AddYears(-7);
+
+        var ledger = CreateTestLedger(sevenYearsAgo, "7年前のデータ");
+        await _ledgerRepository.InsertAsync(ledger);
+
+        var log1 = CreateTestOperationLog(sevenYearsAgo, "INSERT");
+        await _operationLogRepository.InsertAsync(log1);
+        var log2 = CreateTestOperationLog(sevenYearsAgo.AddDays(-1), "UPDATE");
+        await _operationLogRepository.InsertAsync(log2);
+
+        // Act
+        var (ledgerCount, logCount) = _dbContext.CleanupOldData();
+
+        // Assert
+        ledgerCount.Should().Be(1);
+        logCount.Should().Be(2);
     }
 
     #endregion
@@ -450,6 +590,24 @@ public class DbContextCleanupTests : IDisposable
             Balance = 10000,
             StaffName = TestStaffName,
             IsLentRecord = false
+        };
+    }
+
+    /// <summary>
+    /// テスト用のOperationLogを作成
+    /// </summary>
+    private OperationLog CreateTestOperationLog(DateTime timestamp, string action)
+    {
+        return new OperationLog
+        {
+            Timestamp = timestamp,
+            OperatorIdm = TestStaffIdm,
+            OperatorName = TestStaffName,
+            TargetTable = "ledger",
+            TargetId = "1",
+            Action = action,
+            BeforeData = null,
+            AfterData = "{\"test\": true}"
         };
     }
 

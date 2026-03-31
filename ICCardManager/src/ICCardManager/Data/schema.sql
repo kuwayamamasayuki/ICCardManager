@@ -72,7 +72,7 @@ CREATE TABLE IF NOT EXISTS ledger_detail (
 );
 
 -- ============================================
--- 操作ログ（監査証跡）
+-- 操作ログ（6年経過後に自動削除）
 -- ============================================
 CREATE TABLE IF NOT EXISTS operation_log (
     id            INTEGER PRIMARY KEY AUTOINCREMENT,

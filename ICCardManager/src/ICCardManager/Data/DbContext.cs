@@ -510,19 +510,27 @@ namespace ICCardManager.Data
         }
 
         /// <summary>
-        /// 6年経過したデータを削除
+        /// 6年経過したデータを削除（ledger + operation_log）
         /// </summary>
         /// <remarks>
-        /// dateカラムは 'YYYY-MM-DD HH:MM:SS' 形式で保存されているため、
+        /// 各カラムは 'YYYY-MM-DD HH:MM:SS' 形式で保存されているため、
         /// date()関数で日付部分のみを抽出して比較する必要があります。
         /// また、'localtime'を指定することでローカルタイムゾーンで比較します。
         /// </remarks>
-        public int CleanupOldData()
+        /// <returns>削除件数（ledger件数, operation_log件数）</returns>
+        public (int LedgerCount, int OperationLogCount) CleanupOldData()
         {
             var connection = GetConnection();
-            using var command = connection.CreateCommand();
-            command.CommandText = "DELETE FROM ledger WHERE date(date) < date('now', '-6 years', 'localtime')";
-            return command.ExecuteNonQuery();
+
+            using var ledgerCommand = connection.CreateCommand();
+            ledgerCommand.CommandText = "DELETE FROM ledger WHERE date(date) < date('now', '-6 years', 'localtime')";
+            var ledgerCount = ledgerCommand.ExecuteNonQuery();
+
+            using var logCommand = connection.CreateCommand();
+            logCommand.CommandText = "DELETE FROM operation_log WHERE date(timestamp) < date('now', '-6 years', 'localtime')";
+            var logCount = logCommand.ExecuteNonQuery();
+
+            return (ledgerCount, logCount);
         }
 
         /// <summary>

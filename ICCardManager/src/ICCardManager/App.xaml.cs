@@ -615,11 +615,15 @@ namespace ICCardManager
                 var backupService = ServiceProvider.GetRequiredService<BackupService>();
                 _ = backupService.ExecuteAutoBackupAsync();
 
-                // 古いデータの削除
-                var deletedCount = dbContext.CleanupOldData();
-                if (deletedCount > 0)
+                // 古いデータの削除（6年経過分）
+                var (ledgerDeleted, logDeleted) = dbContext.CleanupOldData();
+                if (ledgerDeleted > 0)
                 {
-                    _logger?.LogInformation("古いデータを{DeletedCount}件削除しました", deletedCount);
+                    _logger?.LogInformation("古い利用履歴を{DeletedCount}件削除しました", ledgerDeleted);
+                }
+                if (logDeleted > 0)
+                {
+                    _logger?.LogInformation("古い操作ログを{DeletedCount}件削除しました", logDeleted);
                 }
 
                 // VACUUM（月次実行）
