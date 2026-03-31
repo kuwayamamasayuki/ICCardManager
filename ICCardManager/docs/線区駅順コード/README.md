@@ -51,6 +51,13 @@ AreaCode,LineCode,StationCode,CompanyName,LineName,StationName,Note
 
 IC SFCard Fan由来の駅コードデータをGitHub上でCSV公開しているリポジトリ。改名後の駅名（大阪難波、神戸三宮、とうきょうスカイツリー等）が反映されており、本プロジェクトではこのデータを統合して重複除去・駅名更新を行いました。
 
+### 4. 自動改札機の研究（新駅コードの参照）
+
+> **自動改札機の研究 — 駅コード**
+> https://ja.ysrl.org/atc/station-code.html
+
+2023年以降の新駅・延伸区間の駅コード確認に使用。北陸新幹線金沢延伸、相鉄新横浜線、東急新横浜線、北大阪急行箕面延伸の駅コードを本サイトから参照しました。
+
 ### 統合について
 
 `tools/merge_station_codes.py` を実行することで、上記データソースの統合・重複除去を再実行できます。

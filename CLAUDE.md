@@ -247,6 +247,7 @@ THEN
 
 - **線区駅順コード**: 駅コードから駅名を解決するためのマスターデータ
   - 出典: [プロデルで交通系ICカード履歴ビューアを作る](https://produ.irelang.jp/blog/2017/08/305/)
+  - 新駅コード参照: [自動改札機の研究 — 駅コード](https://ja.ysrl.org/atc/station-code.html)
   - ファイル: `docs/線区駅順コード/StationCode.csv`
 
 # テストコード作成時の厳守事項
