@@ -6,272 +6,63 @@
 
 ## 技術スタック
 
-- **言語**: C# 10
-- **フレームワーク**: .NET Framework 4.8 + WPF
-- **アーキテクチャ**: MVVM
+- **言語**: C# 10 / .NET Framework 4.8 + WPF（MVVM）
 - **DB**: SQLite3
 - **ICカードリーダー**: PaSoRi（PC/SC API経由）
 - **帳票出力**: ClosedXML
+- **テスト**: xUnit + FluentAssertions + Moq
 
 ## ディレクトリ構成
 
 ```
 ICCardManager/
-├── ICCardManager.sln
-├── src/
-│   └── ICCardManager/
-│       ├── App.xaml                    # アプリケーションエントリポイント
-│       ├── Views/                      # View (XAML)
-│       │   ├── MainWindow.xaml
-│       │   ├── HistoryView.xaml
-│       │   ├── Dialogs/
-│       │   │   ├── SettingsDialog.xaml
-│       │   │   ├── ReportDialog.xaml
-│       │   │   └── ...
-│       │   └── Converters/             # WPF値コンバーター
-│       │       └── VisibilityConverters.cs
-│       ├── ViewModels/                 # ViewModel
-│       │   ├── ViewModelBase.cs
-│       │   ├── MainViewModel.cs
-│       │   └── ...
-│       ├── Dtos/                       # DTOクラス
-│       │   ├── CardDto.cs
-│       │   ├── StaffDto.cs
-│       │   ├── LedgerDto.cs
-│       │   └── ...
-│       ├── Models/                     # エンティティ
-│       │   ├── Staff.cs
-│       │   ├── IcCard.cs
-│       │   ├── Ledger.cs
-│       │   └── ...
-│       ├── Services/                   # ビジネスロジック
-│       │   ├── LendingService.cs
-│       │   ├── ReportService.cs
-│       │   ├── SummaryGenerator.cs
-│       │   ├── CardTypeDetector.cs     # カード種別選択肢の提供
-│       │   └── ...
-│       ├── Data/                       # データアクセス層
-│       │   ├── DbContext.cs
-│       │   ├── Repositories/
-│       │   └── schema.sql
-│       ├── Infrastructure/             # インフラ
-│       │   ├── CardReader/
-│       │   │   ├── ICardReader.cs
-│       │   │   └── PcScCardReader.cs
-│       │   ├── Sound/
-│       │   │   └── SoundPlayer.cs
-│       │   ├── Caching/                # キャッシング機能
-│       │   │   ├── ICacheService.cs
-│       │   │   └── CacheService.cs
-│       │   └── Logging/                # ログ機能
-│       │       ├── FileLogger.cs
-│       │       └── FileLoggerProvider.cs
-│       ├── Common/                     # 共通ユーティリティ
-│       │   ├── WarekiConverter.cs
-│       │   ├── Enums.cs
-│       │   ├── Converters.cs           # WPF値コンバーター
-│       │   └── Exceptions/             # カスタム例外クラス
-│       │       ├── AppException.cs
-│       │       ├── BusinessException.cs
-│       │       └── ...
-│       └── Resources/
-│           ├── Sounds/
-│           ├── Styles/                 # WPF用スタイル定義
-│           │   └── AccessibilityStyles.xaml
-│           └── Templates/
-│               └── 物品出納簿テンプレート.xlsx
-├── tests/                              # テストプロジェクト
-│   ├── ICCardManager.Tests/            # ユニットテスト
-│   └── ICCardManager.UITests/          # UIテスト
-├── tools/                              # 開発支援ツール・スクリプト
-│   └── DebugDataViewer/                # デバッグ用データビューア
-├── installer/                          # InnoSetupインストーラー
-│   └── ICCardManager.iss
-├── .github/                            # CI/CDワークフロー
-│   └── workflows/
-└── docs/                               # ドキュメント
-    ├── design/                         # 設計書
-    │   ├── 01_システム概要設計書.md
-    │   ├── 02_DB設計書.md
-    │   ├── 03_画面設計書.md
-    │   ├── 04_機能設計書.md
-    │   ├── 05_クラス設計書.md
-    │   ├── 06_シーケンス図.md
-    │   ├── 07_テスト設計書.md
-    │   └── 08_ドキュメント設計書.md
-    └── manual/                         # マニュアル
-        ├── ユーザーマニュアル.md
-        ├── 管理者マニュアル.md
-        └── 開発者ガイド.md             # 開発者向けガイド
+├── src/ICCardManager/      # 本体（Views, ViewModels, Models, Services, Data, Infrastructure, Common）
+├── tests/                  # ユニットテスト・UIテスト
+├── tools/                  # 開発支援ツール・スクリプト
+├── installer/              # InnoSetupインストーラー
+├── docs/design/            # 設計書（01〜08）
+└── docs/manual/            # ユーザー・管理者・開発者マニュアル
 ```
-
-## 開発時の注意事項
-
-### Gitワークフロー（厳守）
-- **mainブランチへの直接コミットは禁止**（バージョン更新等の軽微な変更も含む）
-- すべての変更は必ずブランチを作成し、PRを経由してマージすること
-- ブランチ命名規則: `fix/issue-XXX-短い説明`、`feat/issue-XXX-短い説明`、`docs/issue-XXX-短い説明`、`chore/短い説明`
-
-### 環境制約
-- インターネット非接続環境で動作する（クラウドサービス利用不可）
-- Microsoft 365 E3のみ例外的に利用可能
-- Windows 10/11対応（クロスプラットフォーム対応不要）
-- 自己完結型ビルド（single-file publish）で配布
-- **共有フォルダモード**: SMB共有フォルダ上にDBを配置し、複数PC（最大約20台）で共有可能。UNCパスで指定時に自動判定
-
-### DB設計原則
-- 日付はTEXT型（ISO 8601形式: YYYY-MM-DD HH:MM:SS）で保存
-- 表示時に和暦変換（WarekiConverter使用）
-- IDmは16進数文字列（16文字）として保存
-- 外部キー制約を有効化
-- 削除方式はテーブルごとに異なる（→「論理削除の方針」参照）
-
-### UI/UX原則
-- 色・アイコン・テキスト・音の4要素で状態を伝達（色や音のみに依存しない）
-- 色覚多様性対応: 暖色（貸出）vs 寒色（返却）で色相差を明確に
-- コントラスト: 背景色は彩度を確保しつつ、テキストとの可読性を維持
-- 文字サイズは設定で変更可能（小/中/大/特大）
-- 貸出時: 薄いオレンジ背景(#FFE0B2) + 🚃→アイコン + 「ピッ」
-- 返却時: 薄い水色背景(#B3E5FC) + 🏠←アイコン + 「ピピッ」
-- エラー時: 薄い赤背景(#FFEBEE) + 「ピー」
-
-### ICカード関連
-- **用語の使い分け（重要）**: 本システムでは「職員証」と「交通系ICカード」の2種類のICカードを扱う。UI文言・マニュアル・コード内のユーザー向けメッセージでは、交通系ICカードを指す場合は必ず**「交通系ICカード」**と記載し、単に「ICカード」とは書かないこと。「ICカード」だけでは職員証と区別がつかずユーザーが混乱する。ただし「ICカードリーダー」等のハードウェア名称はそのままでよい
-- 履歴は最大20件まで取得可能
-- **カード種別の判別について**: IDmからカード種別（Suica/PASMO等）を自動判別することは技術的に不可能
-  - IDmの先頭2バイトは「製造者コード」（カードを製造した会社）であり「カード種別」ではない
-  - 同じSuicaでも製造会社が異なれば先頭2バイトは異なる
-  - カード種別はユーザーが登録時に手動で選択する
-- **未登録カードの処理**: 職員証か交通系ICカードかをユーザーに選択させる
 
 ## よく使うコマンド
 
 > **注**: WSL2環境では `dotnet` の代わりに `"/mnt/c/Program Files/dotnet/dotnet.exe"` を使用すること。
 
 ```bash
-# ビルド
-dotnet build
-
-# 実行
-dotnet run --project src/ICCardManager
-
-# テスト実行
-dotnet test
-
-# リリースビルド（配布用）
-dotnet publish -c Release
-
-# DB初期化（開発時）
-# DbContext.InitializeDatabase() を呼び出す
+dotnet build                                # ビルド
+dotnet test                                 # テスト実行
+dotnet run --project src/ICCardManager      # 実行
+dotnet publish -c Release                   # リリースビルド
 ```
 
-## 主要な業務ロジック
+## 最重要ルール
 
-### 状態遷移
-1. **職員証タッチ待ち** → 職員証タッチ → **交通系ICカードタッチ待ち**
-2. **交通系ICカードタッチ待ち** → 交通系ICカードタッチ → 貸出or返却処理 → **職員証タッチ待ち**
-3. タイムアウト（60秒） → **職員証タッチ待ち**
+<important if="editing UI text, dialogs, or user-facing strings">
+交通系ICカードを指す場合は必ず「交通系ICカード」と記載し、単に「ICカード」とは書かないこと。
+「ICカード」だけでは職員証と区別がつかずユーザーが混乱する。ただし「ICカードリーダー」等のハードウェア名称はそのまま。
+</important>
 
-### 貸出・返却フロー
-1. 職員証タッチ → IDm記録、状態遷移
-2. 交通系ICカードタッチ → 状態判定
-   - 未貸出(is_lent=0) → 貸出処理
-   - 貸出中(is_lent=1) → 返却処理
-3. 30秒以内に同一カード再タッチ → 逆処理（貸出→返却、返却→貸出）
+<important if="modifying deletion logic, cleanup, or database maintenance">
+論理削除の方針はテーブルごとに異なる（staff/ic_card=論理削除、ledger/operation_log=6年後物理削除）。
+詳細は .claude/rules/development-conventions.md を参照。
+</important>
 
-### バス利用判別ロジック
-```
-IF entry_station（乗車駅）が空欄 AND
-   exit_station（降車駅）が空欄 AND
-   is_charge = false AND
-   is_point_redemption = false
-THEN
-   → バス利用（is_bus = true）
-```
+<important if="running dotnet, build, or test commands in WSL2">
+WSL2では "/mnt/c/Program Files/dotnet/dotnet.exe" を使用すること。
+</important>
 
-### 摘要文字列生成ルール（SummaryGenerator）
-| パターン | 生成例 |
-|----------|--------|
-| 単純片道 | 鉄道（A駅～B駅） |
-| 往復 | 鉄道（A駅～B駅 往復） |
-| 乗継 | 鉄道（A駅～C駅） ※途中駅省略 |
-| 複数区間 | 鉄道（A駅～B駅、C駅～D駅） |
-| バス混在 | 鉄道（A駅～B駅）、バス（★） |
-| チャージ | 役務費によりチャージ |
-| ポイント還元 | ポイント還元 |
-| 払い戻し | 払戻しによる払出 |
+## 詳細ルール（`.claude/rules/` に一元化）
 
-### 共有フォルダモード（複数PC共有DB）
-- DBパスは `C:\ProgramData\ICCardManager\database_config.txt` で指定（空欄/未作成=ローカルデフォルト）。インストーラーの「データベースの保存先」ページまたは設定画面（F5）から設定
-- UNCパス（`\\server\share\iccard.db`）指定時に自動的に共有モードとして動作
-- 共有モード時: journal_mode=DELETE（WALはネットワーク非推奨）、busy_timeout=5000ms
-- キャッシュTTLを短縮し他PCの変更を早期反映
-- 30秒ごとの接続ヘルスチェック＋自動再接続
-- ステータスバーに「共有モード」表示、ネットワーク切断時は警告表示
-- DBパス変更後はアプリ再起動が必要
-- VACUUM: 共有モードでは失敗する場合あり（次回起動時に再試行）
-- バックアップ: SQLite Backup API使用（同時アクセス中でも安全）
-- リストア: 他のPC全てがアプリ終了後に実行する必要あり
-- セットアップ: 1台目がDB初期化 → 2台目以降は同じパスを設定するだけ
-
-### 残高不足時の特殊処理
-残高が不足して不足分を現金でチャージした場合の処理：
-- **通常の考え方**: 「チャージ140円」+「鉄道210円」の2行
-- **実際の処理**: 1行にまとめる
-  - 払出金額: 運賃 - チャージ額（カードの元残高から充当した金額。例: 210-140=70円）
-  - 残額: 利用後の実残高（ぴったりチャージなら0円、端数チャージなら端数が残る。例: 6円）
-  - 備考: 「支払額210円のうち不足額140円は現金で支払（旅費支給）」
-  - ※不足額 = チャージ額（実際に現金で支払った金額）
-
-### 月次帳票（物品出納簿）
-- 利用日ごとに1行（チャージと利用は別行）
-- summary=「（貸出中）」は出力しない
-- 年度末（3月）: 月計 → 累計 → 次年度繰越
-- 年度初め（4月）: 前年度繰越 → 通常データ
-
-### 論理削除の方針
-| テーブル | 削除方式 | 理由 |
-|----------|----------|------|
-| staff | 論理削除 | 履歴参照時に氏名を表示するため |
-| ic_card | 論理削除 | 履歴参照時にカード情報を表示するため |
-| ledger | 物理削除（6年後自動） | 監査対応の保存期間経過後は不要 |
-| operation_log | 削除しない | 監査証跡として永続保存 |
+| ファイル | 内容 |
+|---------|------|
+| `development-conventions.md` | 環境制約、DB設計原則、UI/UX原則、ICカード関連、論理削除の方針 |
+| `business-logic.md` | 状態遷移、貸出/返却フロー、バス判別、摘要生成、共有モード、残高不足処理、月次帳票 |
+| `git-workflow.md` | ブランチルール、ステージング規約 |
+| `testing.md` | テスト品質、ハードコーディング禁止、テスト実装原則 |
 
 ## 参照ドキュメント
 
-- `docs/design/` - 設計書一式
-- `docs/manual/` - マニュアル（ユーザー・管理者・開発者）
-- `Resources/Templates/物品出納簿テンプレート.xlsx` - 月次帳票テンプレート
-
-### 外部データソース
-
-- **線区駅順コード**: 駅コードから駅名を解決するためのマスターデータ
-  - 出典: [プロデルで交通系ICカード履歴ビューアを作る](https://produ.irelang.jp/blog/2017/08/305/)
-  - 新駅コード参照: [自動改札機の研究 — 駅コード](https://ja.ysrl.org/atc/station-code.html)
-  - ファイル: `docs/線区駅順コード/StationCode.csv`
-
-# テストコード作成時の厳守事項
-
-## 絶対に守ってください！
-
-### テストコードの品質
-- テストは必ず実際の機能を検証すること
-- `true.Should().BeTrue()` のような意味のないアサーションは絶対に書かない
-- 各テストケースは具体的な入力と期待される出力を検証すること
-- モックは必要最小限に留め、実際の動作に近い形でテストすること
-
-### ハードコーディングの禁止
-- テストを通すためだけのハードコードは絶対に禁止
-- 本番コードに `if (testMode)` のような条件分岐を入れない
-- テスト用の特別な値（マジックナンバー）を本番コードに埋め込まない
-- 環境変数や設定ファイルを使用して、テスト環境と本番環境を適切に分離すること
-
-### テスト実装の原則
-- テストが失敗する状態から始めること（Red-Green-Refactor）
-- 境界値、異常系、エラーケースも必ずテストすること
-- カバレッジだけでなく、実際の品質を重視すること
-- テストケース名は何をテストしているか明確に記述すること
-
-### 実装前の確認
-- 機能の仕様を正しく理解してからテストを書くこと
-- 不明な点があれば、仮の実装ではなく、ユーザーに確認すること
+- `docs/design/` — 設計書一式（01〜08）
+- `docs/manual/` — マニュアル（ユーザー・管理者・開発者）
+- `Resources/Templates/物品出納簿テンプレート.xlsx` — 月次帳票テンプレート
+- `docs/線区駅順コード/StationCode.csv` — 駅コード→駅名マスター（[出典](https://produ.irelang.jp/blog/2017/08/305/)、[新駅参照](https://ja.ysrl.org/atc/station-code.html)）

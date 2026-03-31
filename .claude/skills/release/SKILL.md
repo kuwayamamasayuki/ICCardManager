@@ -83,3 +83,10 @@ gh release upload vX.Y.Z "installer/output/ICCardManager_Setup_X.Y.Z.exe" --clob
 - `build-installer.ps1` はクリーンビルド、dotnet publish、マニュアル変換(-NoMermaid)、Inno Setupを一括実行
 - `release.yml` GitHub Action は `v*` タグpushでRelease + ZIPを自動作成
 - 順序: Version bump PR → マージ → Tag → Build → GitHub Release
+
+## Gotchas
+- **PowerShell バージョン**: `pwsh.exe`（7系）を使用。`powershell.exe`（5.1）では構文エラーになる
+- **WSL2 パス**: スクリプト呼び出しは `./tools/release.ps1` 形式で。bare path だと Windows 側で解決できない
+- **タグ重複**: 失敗リトライ時、タグ `vX.Y.Z` が既に存在する場合は `-SkipTag` で既存タグをスキップ
+- **ISCC.exe パス**: `settings.local.json` の許可パスと実際のインストール先が一致していること
+- **CHANGELOG.md**: リリーススクリプトが自動生成するため、手動で先に編集すると内容が重複する可能性がある
