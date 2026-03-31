@@ -171,6 +171,93 @@ public class StationMasterServiceTests
         result.Should().Be(expectedName);
     }
 
+    /// <summary>
+    /// 北陸新幹線 金沢延伸区間の駅名取得テスト（Issue #1120）
+    /// CSVデータ: Area=0, Line=73 (0x49)
+    /// </summary>
+    [Theory]
+    [InlineData(0x4915, "飯山")]
+    [InlineData(0x4917, "上越妙高")]
+    [InlineData(0x4919, "糸魚川")]
+    [InlineData(0x491B, "黒部宇奈月温泉")]
+    [InlineData(0x491D, "富山")]
+    [InlineData(0x491F, "新高岡")]
+    [InlineData(0x4921, "金沢")]
+    public void GetStationName_HokurikuShinkansen_Extension_ReturnsCorrectName(int stationCode, string expectedName)
+    {
+        // Arrange
+        var service = new StationMasterService();
+
+        // Act
+        var result = service.GetStationName(stationCode, CardType.Suica);
+
+        // Assert
+        result.Should().Be(expectedName);
+    }
+
+    /// <summary>
+    /// 相鉄新横浜線の駅名取得テスト（Issue #1120）
+    /// CSVデータ: Area=0, Line=147 (0x93)
+    /// </summary>
+    [Theory]
+    [InlineData(0x9383, "羽沢横浜国大")]
+    [InlineData(0x9385, "新横浜")]
+    public void GetStationName_SotetsuShinYokohamaLine_ReturnsCorrectName(int stationCode, string expectedName)
+    {
+        // Arrange
+        var service = new StationMasterService();
+
+        // Act
+        var result = service.GetStationName(stationCode, CardType.PASMO);
+
+        // Assert
+        result.Should().Be(expectedName);
+    }
+
+    /// <summary>
+    /// 東急新横浜線の駅名取得テスト（Issue #1120）
+    /// CSVデータ: Area=0, Line=209 (0xD1)
+    /// </summary>
+    [Theory]
+    [InlineData(0xD185, "新綱島")]
+    [InlineData(0xD189, "新横浜")]
+    public void GetStationName_TokyuShinYokohamaLine_ReturnsCorrectName(int stationCode, string expectedName)
+    {
+        // Arrange
+        var service = new StationMasterService();
+
+        // Act
+        var result = service.GetStationName(stationCode, CardType.PASMO);
+
+        // Assert
+        result.Should().Be(expectedName);
+    }
+
+    #endregion
+
+    #region 中部エリア（TOICA/manaca）のテスト
+
+    /// <summary>
+    /// 北大阪急行 箕面延伸区間の駅名取得テスト（Issue #1120）
+    /// CSVデータ: Area=2, Line=222 (0xDE)
+    /// 注: LineCode 222 は Area 0 に小田急多摩線も存在するため、
+    /// Area 2 優先の TOICA/manaca で検索する必要がある。
+    /// </summary>
+    [Theory]
+    [InlineData(0xDE06, "箕面船場阪大前")]
+    [InlineData(0xDE07, "箕面萱野")]
+    public void GetStationName_KitaOsakaKyuko_Extension_ReturnsCorrectName(int stationCode, string expectedName)
+    {
+        // Arrange
+        var service = new StationMasterService();
+
+        // Act — TOICA（中部優先: Area 2→0→1→3）で Area 2 が最優先検索される
+        var result = service.GetStationName(stationCode, CardType.TOICA);
+
+        // Assert
+        result.Should().Be(expectedName);
+    }
+
     #endregion
 
     #region カード種別による優先エリア切り替えテスト

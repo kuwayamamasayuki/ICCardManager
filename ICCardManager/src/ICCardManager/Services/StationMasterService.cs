@@ -26,6 +26,8 @@ namespace ICCardManager.Services
     /// 駅コードデータの出典:
     /// 「プロデルで交通系ICカード履歴ビューアを作る」
     /// https://produ.irelang.jp/blog/2017/08/305/
+    /// 新駅コード参照: 「自動改札機の研究 — 駅コード」
+    /// https://ja.ysrl.org/atc/station-code.html
     /// </para>
     /// </remarks>
     public class StationMasterService : IStationMasterService
