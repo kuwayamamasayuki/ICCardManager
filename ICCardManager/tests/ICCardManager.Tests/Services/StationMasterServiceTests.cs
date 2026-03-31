@@ -81,7 +81,8 @@ public class StationMasterServiceTests
     [InlineData(0xE915, "六本松")]
     [InlineData(0xE91B, "薬院")]      // 主要駅
     [InlineData(0xE91D, "渡辺通")]
-    [InlineData(0xE91F, "天神南")]    // 七隈線 終点
+    [InlineData(0xE91F, "天神南")]
+    [InlineData(0xE921, "櫛田神社前")]  // 2023年延伸開業（Issue #1120）
     public void GetStationName_NanakumaLine_WithHayakaken_ReturnsCorrectName(int stationCode, string expectedName)
     {
         // Arrange
