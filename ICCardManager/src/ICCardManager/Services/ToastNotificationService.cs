@@ -27,10 +27,10 @@ namespace ICCardManager.Services
         /// <summary>
         /// 返却通知を表示
         /// </summary>
-        public void ShowReturnNotification(string cardType, string cardNumber, int balance, bool isLowBalance = false)
+        public void ShowReturnNotification(string cardType, string cardNumber, int balance, bool isLowBalance = false, int warningBalance = 0)
         {
             var cardInfo = $"{cardType} {cardNumber}";
-            ToastNotificationWindow.ShowReturn(cardInfo, balance, isLowBalance);
+            ToastNotificationWindow.ShowReturn(cardInfo, balance, isLowBalance, warningBalance);
         }
 
         /// <summary>

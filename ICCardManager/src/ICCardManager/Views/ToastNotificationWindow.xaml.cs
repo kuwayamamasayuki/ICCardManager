@@ -167,9 +167,11 @@ namespace ICCardManager.Views
         /// <param name="cardInfo">カード情報（例: "はやかけん H-001"）</param>
         /// <param name="balance">残額</param>
         /// <param name="isLowBalance">残額警告フラグ</param>
-        public static void ShowReturn(string cardInfo, int balance, bool isLowBalance = false)
+        public static void ShowReturn(string cardInfo, int balance, bool isLowBalance = false, int warningBalance = 0)
         {
-            var subMessage = isLowBalance ? "⚠️ 残額が少なくなっています" : null;
+            var subMessage = isLowBalance
+                ? $"⚠️ 残額が少なくなっています（警告しきい値: {warningBalance:N0}円以下）"
+                : null;
             Show(ToastType.Return, "おかえりなさい！", cardInfo, $"残額: {balance:N0}円", subMessage);
         }
 

@@ -28,7 +28,8 @@ namespace ICCardManager.Services
         /// <param name="cardNumber">カード番号</param>
         /// <param name="balance">残額</param>
         /// <param name="isLowBalance">残額警告フラグ</param>
-        void ShowReturnNotification(string cardType, string cardNumber, int balance, bool isLowBalance = false);
+        /// <param name="warningBalance">残額警告しきい値（isLowBalance=trueの場合に表示用）</param>
+        void ShowReturnNotification(string cardType, string cardNumber, int balance, bool isLowBalance = false, int warningBalance = 0);
 
         /// <summary>
         /// 職員証認識通知を表示
