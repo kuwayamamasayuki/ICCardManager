@@ -3697,4 +3697,68 @@ public class LendingServiceTests : IDisposable
     }
 
     #endregion
+
+    #region Issue #1132: 返却結果にWarningBalanceが含まれるテスト
+
+    /// <summary>
+    /// Issue #1132: 返却結果にWarningBalance（しきい値）が含まれること
+    /// </summary>
+    [Fact]
+    public async Task ReturnAsync_ResultContainsWarningBalance()
+    {
+        // Arrange
+        var card = CreateTestCard(isLent: true);
+        var staff = CreateTestStaff();
+        var lentRecord = CreateTestLentRecord();
+        var usageDetails = new List<LedgerDetail>();
+
+        SetupReturnMocks(card, staff, lentRecord);
+        _settingsRepositoryMock.Setup(x => x.GetAppSettingsAsync())
+            .ReturnsAsync(new AppSettings { WarningBalance = 5000 });
+
+        // Act
+        var result = await _service.ReturnAsync(TestStaffIdm, TestCardIdm, usageDetails);
+
+        // Assert
+        result.Success.Should().BeTrue();
+        result.WarningBalance.Should().Be(5000, "設定の警告しきい値が結果に含まれる");
+    }
+
+    /// <summary>
+    /// Issue #1132: 残高が低い場合、IsLowBalanceとWarningBalanceが一貫していること
+    /// </summary>
+    [Fact]
+    public async Task ReturnAsync_LowBalance_WarningBalanceAndIsLowBalanceConsistent()
+    {
+        // Arrange
+        var card = CreateTestCard(isLent: true);
+        var staff = CreateTestStaff();
+        var lentRecord = CreateTestLentRecord();
+        var usageDetails = new List<LedgerDetail>
+        {
+            new()
+            {
+                UseDate = DateTime.Now,
+                EntryStation = "博多",
+                ExitStation = "天神",
+                Amount = 210,
+                Balance = 800
+            }
+        };
+
+        SetupReturnMocks(card, staff, lentRecord);
+        _settingsRepositoryMock.Setup(x => x.GetAppSettingsAsync())
+            .ReturnsAsync(new AppSettings { WarningBalance = 3000 });
+
+        // Act
+        var result = await _service.ReturnAsync(TestStaffIdm, TestCardIdm, usageDetails);
+
+        // Assert
+        result.Success.Should().BeTrue();
+        result.Balance.Should().Be(800);
+        result.IsLowBalance.Should().BeTrue("800 < 3000");
+        result.WarningBalance.Should().Be(3000, "しきい値が結果に含まれる");
+    }
+
+    #endregion
 }

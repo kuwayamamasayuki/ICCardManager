@@ -41,6 +41,11 @@ namespace ICCardManager.Services
         public bool IsLowBalance { get; set; }
 
         /// <summary>
+        /// Issue #1132: 残額警告しきい値（設定値）
+        /// </summary>
+        public int WarningBalance { get; set; }
+
+        /// <summary>
         /// バス利用があったかどうか（返却時のみ）
         /// </summary>
         public bool HasBusUsage { get; set; }
@@ -579,6 +584,7 @@ namespace ICCardManager.Services
 
                 // 低残高チェック
                 var settings = await _settingsRepository.GetAppSettingsAsync();
+                result.WarningBalance = settings.WarningBalance;
                 result.IsLowBalance = result.Balance < settings.WarningBalance;
 
                 // 処理情報を記録

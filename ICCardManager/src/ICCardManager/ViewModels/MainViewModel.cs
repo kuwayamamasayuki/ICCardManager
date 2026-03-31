@@ -743,7 +743,7 @@ public partial class MainViewModel : ViewModelBase
             {
                 WarningMessages.Add(new WarningItem
                 {
-                    DisplayText = $"⚠️ {item.CardType} {item.CardNumber}: 残額 {DisplayFormatters.FormatBalanceWithUnit(item.CurrentBalance)}",
+                    DisplayText = $"⚠️ {item.CardType} {item.CardNumber}: 残額 {DisplayFormatters.FormatBalanceWithUnit(item.CurrentBalance)}（しきい値: {warningBalance:N0}円）",
                     Type = WarningType.LowBalance,
                     CardIdm = item.CardIdm
                 });
@@ -1170,7 +1170,7 @@ public partial class MainViewModel : ViewModelBase
             _soundPlayer.Play(SoundType.Return);
 
             // トースト通知を表示（画面右上、フォーカスを奪わない）
-            _toastNotificationService.ShowReturnNotification(card.CardType, card.CardNumber, result.Balance, result.IsLowBalance);
+            _toastNotificationService.ShowReturnNotification(card.CardType, card.CardNumber, result.Balance, result.IsLowBalance, result.WarningBalance);
 
             // メイン画面は変更しない（Issue #186: 職員の操作を妨げない）
 
@@ -2539,7 +2539,7 @@ public partial class MainViewModel : ViewModelBase
 
                 // 返却成功: 通常の返却と同じUI通知を表示
                 _soundPlayer.Play(SoundType.Return);
-                _toastNotificationService.ShowReturnNotification(card.CardType, card.CardNumber, returnResult.Balance, returnResult.IsLowBalance);
+                _toastNotificationService.ShowReturnNotification(card.CardType, card.CardNumber, returnResult.Balance, returnResult.IsLowBalance, returnResult.WarningBalance);
             }
             else
             {
