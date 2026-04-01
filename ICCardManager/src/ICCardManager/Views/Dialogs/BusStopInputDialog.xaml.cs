@@ -62,5 +62,16 @@ namespace ICCardManager.Views.Dialogs
         /// 保存されたかどうか
         /// </summary>
         public bool IsSaved => _viewModel.IsSaved;
+
+        /// <summary>
+        /// Issue #1133: テキストボックスフォーカス時にサジェスト候補を表示
+        /// </summary>
+        private void BusStopTextBox_GotFocus(object sender, RoutedEventArgs e)
+        {
+            if (sender is System.Windows.Controls.TextBox textBox && textBox.DataContext is BusStopInputItem item)
+            {
+                item.OnTextBoxGotFocus();
+            }
+        }
     }
 }

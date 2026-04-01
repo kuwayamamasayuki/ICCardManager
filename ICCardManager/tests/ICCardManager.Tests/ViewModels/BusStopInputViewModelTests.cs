@@ -29,7 +29,7 @@ public class BusStopInputViewModelTests
 
         // バス停サジェストのデフォルト: 空
         _ledgerRepoMock.Setup(r => r.GetBusStopSuggestionsAsync())
-            .ReturnsAsync(Enumerable.Empty<(string BusStops, int UsageCount)>());
+            .ReturnsAsync(Enumerable.Empty<(string BusStops, int UsageCount, DateTime? LastUsedDate)>());
 
         _viewModel = new BusStopInputViewModel(
             _ledgerRepoMock.Object,
@@ -135,10 +135,10 @@ public class BusStopInputViewModelTests
     public async Task InitializeWithDetailsAsync_サジェスト候補が読み込まれること()
     {
         // Arrange
-        var suggestions = new List<(string BusStops, int UsageCount)>
+        var suggestions = new List<(string BusStops, int UsageCount, DateTime? LastUsedDate)>
         {
-            ("天神バス停～博多駅前", 5),
-            ("薬院駅前～大橋駅前", 3),
+            ("天神バス停～博多駅前", 5, DateTime.Today),
+            ("薬院駅前～大橋駅前", 3, DateTime.Today.AddDays(-10)),
         };
         _ledgerRepoMock.Setup(r => r.GetBusStopSuggestionsAsync())
             .ReturnsAsync(suggestions);
@@ -161,10 +161,10 @@ public class BusStopInputViewModelTests
     public async Task InitializeWithDetailsAsync_サジェスト件数がステータスに表示されること()
     {
         // Arrange
-        var suggestions = new List<(string BusStops, int UsageCount)>
+        var suggestions = new List<(string BusStops, int UsageCount, DateTime? LastUsedDate)>
         {
-            ("天神バス停～博多駅前", 5),
-            ("薬院駅前～大橋駅前", 3),
+            ("天神バス停～博多駅前", 5, DateTime.Today),
+            ("薬院駅前～大橋駅前", 3, DateTime.Today.AddDays(-10)),
         };
         _ledgerRepoMock.Setup(r => r.GetBusStopSuggestionsAsync())
             .ReturnsAsync(suggestions);
@@ -553,4 +553,124 @@ public class BusStopInputItemTests
         // Assert
         item.AmountDisplay.Should().BeEmpty();
     }
+
+    #region Issue #1133: 空入力時のサジェスト表示
+
+    [Fact]
+    public void UpdateFilteredSuggestions_空入力で直近利用候補が表示されること()
+    {
+        // Arrange
+        var suggestions = new List<string> { "天神～博多", "薬院～大橋", "福岡空港～天神" };
+        var item = CreateItem(suggestions: suggestions);
+
+        // Act - 空文字列でフィルター
+        item.UpdateFilteredSuggestions(string.Empty);
+
+        // Assert
+        item.ShowSuggestions.Should().BeTrue("空入力でも直近利用候補を表示する");
+        item.FilteredSuggestions.Should().HaveCount(3);
+    }
+
+    [Fact]
+    public void UpdateFilteredSuggestions_空入力で最大8件表示されること()
+    {
+        // Arrange
+        var suggestions = Enumerable.Range(1, 15).Select(i => $"バス停{i}～バス停{i + 100}").ToList();
+        var item = CreateItem(suggestions: suggestions);
+
+        // Act
+        item.UpdateFilteredSuggestions(string.Empty);
+
+        // Assert
+        item.FilteredSuggestions.Should().HaveCount(8, "空入力時は最大8件まで");
+    }
+
+    [Fact]
+    public void OnTextBoxGotFocus_サジェストが表示されること()
+    {
+        // Arrange
+        var suggestions = new List<string> { "天神～博多" };
+        var item = CreateItem(suggestions: suggestions);
+
+        // Act
+        item.OnTextBoxGotFocus();
+
+        // Assert
+        item.ShowSuggestions.Should().BeTrue();
+    }
+
+    #endregion
+
+    #region Issue #1133: 類似バス停名検出
+
+    [Fact]
+    public void IsSimilar_一方が他方を含む場合はtrue()
+    {
+        BusStopInputViewModel.IsSimilar("天神", "天神南").Should().BeTrue();
+        BusStopInputViewModel.IsSimilar("博多駅前", "博多駅").Should().BeTrue();
+    }
+
+    [Fact]
+    public void IsSimilar_乗降が逆の場合はtrue()
+    {
+        BusStopInputViewModel.IsSimilar("天神～博多", "博多～天神").Should().BeTrue();
+    }
+
+    [Fact]
+    public void IsSimilar_無関係な名前はfalse()
+    {
+        BusStopInputViewModel.IsSimilar("天神～博多", "薬院～大橋").Should().BeFalse();
+    }
+
+    [Fact]
+    public void IsSimilar_空文字やnullはfalse()
+    {
+        BusStopInputViewModel.IsSimilar("", "天神").Should().BeFalse();
+        BusStopInputViewModel.IsSimilar(null, "天神").Should().BeFalse();
+    }
+
+    [Fact]
+    public void DetectSimilarBusStops_類似する既存エントリを検出すること()
+    {
+        // Arrange
+        var existing = new List<string> { "天神バス停～博多駅", "薬院～大橋" };
+        var newEntries = new List<string> { "天神バス停～博多駅前" }; // 「天神バス停～博多駅」を含む
+
+        // Act
+        var warnings = BusStopInputViewModel.DetectSimilarBusStops(existing, newEntries);
+
+        // Assert
+        warnings.Should().HaveCount(1);
+        warnings[0].Should().Contain("天神バス停～博多駅前").And.Contain("天神バス停～博多駅");
+    }
+
+    [Fact]
+    public void DetectSimilarBusStops_完全一致は検出しないこと()
+    {
+        // Arrange
+        var existing = new List<string> { "天神～博多" };
+        var newEntries = new List<string> { "天神～博多" }; // 完全一致
+
+        // Act
+        var warnings = BusStopInputViewModel.DetectSimilarBusStops(existing, newEntries);
+
+        // Assert
+        warnings.Should().BeEmpty("完全一致は類似警告の対象外");
+    }
+
+    [Fact]
+    public void DetectSimilarBusStops_星マークは無視すること()
+    {
+        // Arrange
+        var existing = new List<string> { "天神～博多" };
+        var newEntries = new List<string> { "★" };
+
+        // Act
+        var warnings = BusStopInputViewModel.DetectSimilarBusStops(existing, newEntries);
+
+        // Assert
+        warnings.Should().BeEmpty();
+    }
+
+    #endregion
 }

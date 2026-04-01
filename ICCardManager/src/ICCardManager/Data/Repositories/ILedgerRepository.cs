@@ -102,10 +102,10 @@ namespace ICCardManager.Data.Repositories
         Task<Dictionary<string, (int Balance, DateTime? LastUsageDate)>> GetAllLatestBalancesAsync();
 
         /// <summary>
-        /// 過去に入力されたバス停名を使用頻度順で取得（オートコンプリート用）
+        /// 過去に入力されたバス停名をスコア順で取得（オートコンプリート用）
         /// </summary>
-        /// <returns>バス停名と使用回数のリスト（使用頻度順）</returns>
-        Task<IEnumerable<(string BusStops, int UsageCount)>> GetBusStopSuggestionsAsync();
+        /// <returns>バス停名・使用回数・直近利用日のリスト（スコア順）</returns>
+        Task<IEnumerable<(string BusStops, int UsageCount, DateTime? LastUsedDate)>> GetBusStopSuggestionsAsync();
 
         /// <summary>
         /// バス利用詳細のバス停名を更新
