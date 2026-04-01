@@ -11,7 +11,6 @@ using ICCardManager.Data.Repositories;
 using ICCardManager.Dtos;
 using ICCardManager.Models;
 using ICCardManager.Services;
-using ICCardManager.Views.Dialogs;
 using Microsoft.Extensions.Logging;
 
 namespace ICCardManager.ViewModels
@@ -120,15 +119,8 @@ namespace ICCardManager.ViewModels
         private readonly SummaryGenerator _summaryGenerator;
         private readonly OperationLogger _operationLogger;
         private readonly ILogger<LedgerDetailViewModel> _logger;
-        private readonly INavigationService _navigationService;
-        private readonly IStaffAuthService _staffAuthService;
 
         private Ledger _ledger = null!;
-
-        /// <summary>
-        /// 認証キャッシュ（詳細画面セッション中に再認証を不要にする）Issue #1134
-        /// </summary>
-        private string? _cachedAuthIdm;
 
         /// <summary>
         /// カード名（パンくず表示用）
@@ -228,11 +220,6 @@ namespace ICCardManager.ViewModels
         [ObservableProperty]
         private string _breadcrumbText = string.Empty;
 
-        /// <summary>
-        /// 行編集が行われたか（呼び出し元のリフレッシュ判定用）Issue #1134
-        /// </summary>
-        public bool WasRowEdited { get; private set; }
-
         private readonly LedgerSplitService _ledgerSplitService;
 
         public LedgerDetailViewModel(
@@ -240,16 +227,12 @@ namespace ICCardManager.ViewModels
             SummaryGenerator summaryGenerator,
             OperationLogger operationLogger,
             LedgerSplitService ledgerSplitService,
-            INavigationService navigationService,
-            IStaffAuthService staffAuthService,
             ILogger<LedgerDetailViewModel> logger)
         {
             _ledgerRepository = ledgerRepository;
             _summaryGenerator = summaryGenerator;
             _operationLogger = operationLogger;
             _ledgerSplitService = ledgerSplitService;
-            _navigationService = navigationService;
-            _staffAuthService = staffAuthService;
             _logger = logger;
         }
 
@@ -675,56 +658,6 @@ namespace ICCardManager.ViewModels
             }
         }
 
-        /// <summary>
-        /// この履歴行を編集ダイアログで開く（Issue #1134: 詳細画面からの直接編集）
-        /// </summary>
-        [RelayCommand]
-        private async Task EditRowAsync()
-        {
-            // 認証（セッション内キャッシュ）
-            if (string.IsNullOrEmpty(_cachedAuthIdm))
-            {
-                var authResult = await _staffAuthService.RequestAuthenticationAsync("履歴の変更");
-                if (authResult == null) return;
-                _cachedAuthIdm = authResult.Idm;
-            }
-
-            // LedgerDto を構築して編集ダイアログを開く
-            var ledgerDto = _ledger.ToDto();
-            LedgerRowEditDialog capturedEditDialog = null;
-            var dialogResult = await _navigationService.ShowDialogAsync<LedgerRowEditDialog>(
-                async d =>
-                {
-                    await d.InitializeForEditAsync(ledgerDto, _cachedAuthIdm);
-                    // パンくず設定
-                    d.SetBreadcrumb(!string.IsNullOrEmpty(_cardName)
-                        ? $"{_cardName} > 履歴詳細 > 行修正"
-                        : "履歴詳細 > 行修正");
-                    capturedEditDialog = d;
-                });
-
-            if (dialogResult == true)
-            {
-                // データを再読み込み
-                await InitializeAsync(_ledger.Id, _operatorIdm, _cardName);
-                WasRowEdited = true;
-                _logger.LogInformation("Row edited from detail dialog for ledger {LedgerId}", _ledger.Id);
-            }
-
-            // 削除がリクエストされた場合も再読み込み
-            if (capturedEditDialog?.IsDeleteRequested == true)
-            {
-                var fullLedger = await _ledgerRepository.GetByIdAsync(_ledger.Id);
-                if (fullLedger != null)
-                {
-                    await _ledgerRepository.DeleteAsync(_ledger.Id);
-                    await _operationLogger.LogLedgerDeleteAsync(_cachedAuthIdm, fullLedger);
-                }
-                WasRowEdited = true;
-                // 削除された場合はダイアログを閉じる
-                OnSaveCompleted?.Invoke();
-            }
-        }
 
     }
 }

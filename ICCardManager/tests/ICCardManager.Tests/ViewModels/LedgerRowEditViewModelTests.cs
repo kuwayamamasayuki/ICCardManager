@@ -659,16 +659,49 @@ public class LedgerRowEditViewModelTests
     }
 
     [Fact]
-    public void SkipToNext_IsSkipToNextRequestedがtrueになること()
+    public void Back_IsBackRequestedがtrueになること()
     {
         // Arrange
-        _viewModel.IsSkipToNextRequested.Should().BeFalse("初期値はfalse");
+        _viewModel.IsBackRequested.Should().BeFalse("初期値はfalse");
 
         // Act
-        _viewModel.SkipToNextCommand.Execute(null);
+        _viewModel.BackCommand.Execute(null);
 
         // Assert
-        _viewModel.IsSkipToNextRequested.Should().BeTrue("次へスキップが要求された");
+        _viewModel.IsBackRequested.Should().BeTrue("戻るが要求された");
+    }
+
+    [Fact]
+    public async Task HasUnsavedChanges_Editモード初期化直後はfalseであること()
+    {
+        // Arrange
+        var existingLedger = new Ledger
+        {
+            Id = 1, CardIdm = TestCardIdm,
+            Date = new DateTime(2026, 1, 10),
+            Summary = "鉄道（天神～博多）",
+            Income = 0, Expense = 210, Balance = 2300,
+            Details = new List<LedgerDetail>()
+        };
+        _ledgerRepoMock.Setup(r => r.GetByIdAsync(1)).ReturnsAsync(existingLedger);
+
+        var dto = new LedgerDto
+        {
+            Id = 1, CardIdm = TestCardIdm,
+            Date = new DateTime(2026, 1, 10),
+            Summary = "鉄道（天神～博多）",
+            Income = 0, Expense = 210, Balance = 2300
+        };
+        await _viewModel.InitializeForEditAsync(dto, TestOperatorIdm);
+
+        // ShowSaveAndNextButton を有効にして「次へ」ボタンを使えるようにする
+        _viewModel.ShowSaveAndNextButton = true;
+
+        // Act: 変更なしで「戻る」を押す（確認ダイアログなしで戻れるはず）
+        _viewModel.BackCommand.Execute(null);
+
+        // Assert: 確認なしで戻れた
+        _viewModel.IsBackRequested.Should().BeTrue("未変更時は確認なしで戻れる");
     }
 
     #endregion

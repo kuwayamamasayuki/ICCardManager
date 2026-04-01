@@ -1587,17 +1587,11 @@ public partial class MainViewModel : ViewModelBase
         });
 
         // Issue #548: 保存が行われた場合は履歴を再読み込み
-        // Issue #1134: 行編集が行われた場合もリフレッシュ
-        if (capturedDialog?.WasSaved == true || capturedDialog?.WasRowEdited == true)
+        if (capturedDialog?.WasSaved == true)
         {
             await LoadHistoryLedgersAsync();
+            // Issue #660: 分割等で摘要が変わった場合に警告を更新
             await CheckWarningsAsync();
-
-            if (capturedDialog.WasRowEdited)
-            {
-                await RefreshDashboardAsync();
-                await CheckAndNotifyConsistencyAsync();
-            }
         }
     }
 
@@ -1747,6 +1741,16 @@ public partial class MainViewModel : ViewModelBase
             {
                 var nextLedger = HistoryLedgers[currentIndex + 1];
                 await EditLedgerWithAuthAsync(nextLedger, operatorIdm, showSaveAndNext: true);
+            }
+        }
+        // Issue #1134: 「戻る」が要求された場合
+        else if (capturedEditDialog?.IsBackRequested == true)
+        {
+            var currentIndex = HistoryLedgers.ToList().FindIndex(l => l.Id == ledger.Id);
+            if (currentIndex > 0)
+            {
+                var prevLedger = HistoryLedgers[currentIndex - 1];
+                await EditLedgerWithAuthAsync(prevLedger, operatorIdm, showSaveAndNext: true);
             }
         }
     }

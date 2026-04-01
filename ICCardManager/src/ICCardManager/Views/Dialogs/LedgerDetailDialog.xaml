@@ -107,41 +107,27 @@
                                VerticalAlignment="Center"/>
                 </StackPanel>
 
-                <!-- 利用者と備考、編集ボタン -->
-                <Grid Grid.Row="1" Grid.ColumnSpan="2" Margin="0,8,0,0">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="*"/>
-                        <ColumnDefinition Width="Auto"/>
-                    </Grid.ColumnDefinitions>
-                    <StackPanel Grid.Column="0" Orientation="Horizontal">
-                        <TextBlock Text="利用者:"
-                                   FontSize="{DynamicResource SmallFontSize}"
-                                   Foreground="{DynamicResource SecondaryTextBrush}"
-                                   VerticalAlignment="Center"/>
-                        <TextBlock Text="{Binding StaffName}"
-                                   FontSize="{DynamicResource SmallFontSize}"
-                                   Margin="5,0,20,0"
-                                   VerticalAlignment="Center"/>
-                        <TextBlock Text="備考:"
-                                   FontSize="{DynamicResource SmallFontSize}"
-                                   Foreground="{DynamicResource SecondaryTextBrush}"
-                                   VerticalAlignment="Center"/>
-                        <TextBlock Text="{Binding Note}"
-                                   FontSize="{DynamicResource SmallFontSize}"
-                                   Margin="5,0,0,0"
-                                   VerticalAlignment="Center"
-                                   TextTrimming="CharacterEllipsis"
-                                   MaxWidth="300"/>
-                    </StackPanel>
-                    <!-- 編集ボタン（Issue #1134: 詳細画面からの直接編集） -->
-                    <Button Grid.Column="1"
-                            Content="✏ 編集"
-                            Command="{Binding EditRowCommand}"
-                            Padding="12,4"
-                            VerticalAlignment="Center"
-                            ToolTip="この履歴の全項目を編集します"
-                            AutomationProperties.Name="この履歴を編集"/>
-                </Grid>
+                <!-- 利用者と備考 -->
+                <StackPanel Grid.Row="1" Grid.ColumnSpan="2" Orientation="Horizontal" Margin="0,8,0,0">
+                    <TextBlock Text="利用者:"
+                               FontSize="{DynamicResource SmallFontSize}"
+                               Foreground="{DynamicResource SecondaryTextBrush}"
+                               VerticalAlignment="Center"/>
+                    <TextBlock Text="{Binding StaffName}"
+                               FontSize="{DynamicResource SmallFontSize}"
+                               Margin="5,0,20,0"
+                               VerticalAlignment="Center"/>
+                    <TextBlock Text="備考:"
+                               FontSize="{DynamicResource SmallFontSize}"
+                               Foreground="{DynamicResource SecondaryTextBrush}"
+                               VerticalAlignment="Center"/>
+                    <TextBlock Text="{Binding Note}"
+                               FontSize="{DynamicResource SmallFontSize}"
+                               Margin="5,0,0,0"
+                               VerticalAlignment="Center"
+                               TextTrimming="CharacterEllipsis"
+                               MaxWidth="300"/>
+                </StackPanel>
             </Grid>
         </Border>
 

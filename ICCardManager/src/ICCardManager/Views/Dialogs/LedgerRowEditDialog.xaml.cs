@@ -48,6 +48,12 @@ namespace ICCardManager.Views.Dialogs
                     DialogResult = false;
                     Close();
                 }
+                // Issue #1134: 「戻る」要求時にダイアログを閉じる
+                if (e.PropertyName == nameof(LedgerRowEditViewModel.IsBackRequested) && _viewModel.IsBackRequested)
+                {
+                    DialogResult = false;
+                    Close();
+                }
             };
         }
 
@@ -65,6 +71,11 @@ namespace ICCardManager.Views.Dialogs
         /// 「次へ（保存しない）」が要求されたか（Issue #1134）
         /// </summary>
         public bool IsSkipToNextRequested => _viewModel.IsSkipToNextRequested;
+
+        /// <summary>
+        /// 「戻る」が要求されたか（Issue #1134）
+        /// </summary>
+        public bool IsBackRequested => _viewModel.IsBackRequested;
 
         /// <summary>
         /// 追加モードで初期化

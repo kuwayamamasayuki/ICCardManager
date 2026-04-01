@@ -25,11 +25,6 @@ namespace ICCardManager.Views.Dialogs
         /// </summary>
         public bool WasSaved { get; private set; }
 
-        /// <summary>
-        /// 行編集が行われたかどうか（Issue #1134: 詳細画面からの直接編集）
-        /// </summary>
-        public bool WasRowEdited => _viewModel?.WasRowEdited ?? false;
-
         public LedgerDetailDialog()
         {
             InitializeComponent();

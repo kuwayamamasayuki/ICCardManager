@@ -18,13 +18,11 @@ namespace ICCardManager.Tests.ViewModels;
 /// <summary>
 /// LedgerDetailViewModelの単体テスト
 /// Issue #633: 分割操作でGroupIdが正しく設定されることを検証
-/// Issue #1134: 詳細画面からの直接編集機能を検証
+/// Issue #1134: パンくず表示を検証
 /// </summary>
 public class LedgerDetailViewModelTests
 {
     private readonly LedgerDetailViewModel _viewModel;
-    private readonly Mock<INavigationService> _navigationServiceMock;
-    private readonly Mock<IStaffAuthService> _staffAuthServiceMock;
     private readonly Mock<ILedgerRepository> _ledgerRepoMock;
 
     public LedgerDetailViewModelTests()
@@ -42,8 +40,6 @@ public class LedgerDetailViewModelTests
             summaryGenerator,
             operationLogger,
             splitServiceLogger);
-        _navigationServiceMock = new Mock<INavigationService>();
-        _staffAuthServiceMock = new Mock<IStaffAuthService>();
         var logger = NullLogger<LedgerDetailViewModel>.Instance;
 
         _viewModel = new LedgerDetailViewModel(
@@ -51,8 +47,6 @@ public class LedgerDetailViewModelTests
             summaryGenerator,
             operationLogger,
             ledgerSplitService,
-            _navigationServiceMock.Object,
-            _staffAuthServiceMock.Object,
             logger);
     }
 
@@ -252,7 +246,7 @@ public class LedgerDetailViewModelTests
 
     #endregion
 
-    #region Issue #1134: パンくず・認証キャッシュ・WasRowEdited テスト
+    #region Issue #1134: パンくず表示テスト
 
     [Fact]
     public async Task InitializeAsync_カード名ありの場合パンくずが設定されること()
@@ -299,113 +293,6 @@ public class LedgerDetailViewModelTests
 
         // Assert
         _viewModel.BreadcrumbText.Should().Be("履歴詳細");
-    }
-
-    [Fact]
-    public async Task EditRowAsync_認証キャンセル時にWasRowEditedがfalseのままであること()
-    {
-        // Arrange: 認証をキャンセル（null返却）
-        _staffAuthServiceMock
-            .Setup(s => s.RequestAuthenticationAsync(It.IsAny<string>()))
-            .ReturnsAsync((StaffAuthResult?)null);
-
-        // InitializeAsync用のLedgerを設定
-        var testLedger = new Ledger
-        {
-            Id = 1,
-            CardIdm = "0102030405060708",
-            Date = new DateTime(2026, 3, 15),
-            Summary = "テスト",
-            Balance = 500,
-            Details = new List<LedgerDetail>()
-        };
-        _ledgerRepoMock.Setup(r => r.GetByIdAsync(1)).ReturnsAsync(testLedger);
-        await _viewModel.InitializeAsync(1);
-
-        // Act
-        await _viewModel.EditRowCommand.ExecuteAsync(null);
-
-        // Assert
-        _viewModel.WasRowEdited.Should().BeFalse("認証がキャンセルされた場合は編集されない");
-        _staffAuthServiceMock.Verify(
-            s => s.RequestAuthenticationAsync("履歴の変更"), Times.Once);
-    }
-
-    [Fact]
-    public async Task EditRowAsync_初回呼び出しで認証が行われること()
-    {
-        // Arrange
-        var authResult = new StaffAuthResult { Idm = "AUTH1234", StaffName = "テスト職員" };
-        _staffAuthServiceMock
-            .Setup(s => s.RequestAuthenticationAsync("履歴の変更"))
-            .ReturnsAsync(authResult);
-
-        var testLedger = new Ledger
-        {
-            Id = 1,
-            CardIdm = "0102030405060708",
-            Date = new DateTime(2026, 3, 15),
-            Summary = "テスト",
-            Balance = 500,
-            Details = new List<LedgerDetail>()
-        };
-        _ledgerRepoMock.Setup(r => r.GetByIdAsync(1)).ReturnsAsync(testLedger);
-        await _viewModel.InitializeAsync(1);
-
-        // NavigationService はnull（ダイアログなし）を返す → dialogResult = null
-        _navigationServiceMock
-            .Setup(n => n.ShowDialogAsync<ICCardManager.Views.Dialogs.LedgerRowEditDialog>(
-                It.IsAny<Func<ICCardManager.Views.Dialogs.LedgerRowEditDialog, Task>>()))
-            .ReturnsAsync((bool?)null);
-
-        // Act
-        await _viewModel.EditRowCommand.ExecuteAsync(null);
-
-        // Assert: 認証が呼ばれたことを確認
-        _staffAuthServiceMock.Verify(
-            s => s.RequestAuthenticationAsync("履歴の変更"), Times.Once);
-    }
-
-    [Fact]
-    public async Task EditRowAsync_2回目呼び出しで認証がキャッシュされること()
-    {
-        // Arrange
-        var authResult = new StaffAuthResult { Idm = "AUTH1234", StaffName = "テスト職員" };
-        _staffAuthServiceMock
-            .Setup(s => s.RequestAuthenticationAsync("履歴の変更"))
-            .ReturnsAsync(authResult);
-
-        var testLedger = new Ledger
-        {
-            Id = 1,
-            CardIdm = "0102030405060708",
-            Date = new DateTime(2026, 3, 15),
-            Summary = "テスト",
-            Balance = 500,
-            Details = new List<LedgerDetail>()
-        };
-        _ledgerRepoMock.Setup(r => r.GetByIdAsync(1)).ReturnsAsync(testLedger);
-        await _viewModel.InitializeAsync(1);
-
-        _navigationServiceMock
-            .Setup(n => n.ShowDialogAsync<ICCardManager.Views.Dialogs.LedgerRowEditDialog>(
-                It.IsAny<Func<ICCardManager.Views.Dialogs.LedgerRowEditDialog, Task>>()))
-            .ReturnsAsync((bool?)null);
-
-        // Act: 2回呼び出す
-        await _viewModel.EditRowCommand.ExecuteAsync(null);
-        await _viewModel.EditRowCommand.ExecuteAsync(null);
-
-        // Assert: 認証は1回だけ呼ばれる（2回目はキャッシュ使用）
-        _staffAuthServiceMock.Verify(
-            s => s.RequestAuthenticationAsync("履歴の変更"), Times.Once,
-            "2回目の呼び出しではキャッシュされた認証が使われるべき");
-    }
-
-    [Fact]
-    public void WasRowEdited_初期状態でfalseであること()
-    {
-        _viewModel.WasRowEdited.Should().BeFalse();
     }
 
     #endregion

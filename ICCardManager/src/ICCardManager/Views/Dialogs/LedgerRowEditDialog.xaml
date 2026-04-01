@@ -336,8 +336,17 @@
                         FontSize="{DynamicResource BaseFontSize}"
                         AutomationProperties.Name="キャンセル"
                         ToolTip="変更を破棄してダイアログを閉じる (Escape)"/>
+                <!-- 戻る（Issue #1134） -->
+                <Button Content="◀ 戻る"
+                        Command="{Binding BackCommand}"
+                        Visibility="{Binding ShowSaveAndNextButton, Converter={StaticResource BoolToVisibilityConverter}}"
+                        Padding="16,10"
+                        Margin="0,0,6,0"
+                        FontSize="{DynamicResource BaseFontSize}"
+                        AutomationProperties.Name="前の履歴へ戻る"
+                        ToolTip="前の履歴を開きます"/>
                 <!-- 次へ（保存しない）（Issue #1134） -->
-                <Button Content="次へ"
+                <Button Content="次へ ▶"
                         Command="{Binding SkipToNextCommand}"
                         Visibility="{Binding ShowSaveAndNextButton, Converter={StaticResource BoolToVisibilityConverter}}"
                         Padding="16,10"
