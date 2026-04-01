@@ -25,6 +25,11 @@ namespace ICCardManager.Views.Dialogs
         /// </summary>
         public bool WasSaved { get; private set; }
 
+        /// <summary>
+        /// 行編集が行われたかどうか（Issue #1134: 詳細画面からの直接編集）
+        /// </summary>
+        public bool WasRowEdited => _viewModel?.WasRowEdited ?? false;
+
         public LedgerDetailDialog()
         {
             InitializeComponent();
@@ -35,7 +40,8 @@ namespace ICCardManager.Views.Dialogs
         /// </summary>
         /// <param name="ledgerId">利用履歴ID</param>
         /// <param name="operatorIdm">操作者IDm（ログ記録用、オプション）</param>
-        public async Task InitializeAsync(int ledgerId, string? operatorIdm = null)
+        /// <param name="cardName">カード名（パンくず表示用、オプション）Issue #1134</param>
+        public async Task InitializeAsync(int ledgerId, string? operatorIdm = null, string? cardName = null)
         {
             _viewModel = App.Current.ServiceProvider.GetRequiredService<LedgerDetailViewModel>();
             DataContext = _viewModel;
@@ -52,7 +58,7 @@ namespace ICCardManager.Views.Dialogs
                 }
             };
 
-            await _viewModel.InitializeAsync(ledgerId, operatorIdm);
+            await _viewModel.InitializeAsync(ledgerId, operatorIdm, cardName);
         }
 
         /// <summary>

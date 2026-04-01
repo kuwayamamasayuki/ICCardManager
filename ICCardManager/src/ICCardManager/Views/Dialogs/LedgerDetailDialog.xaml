@@ -38,13 +38,23 @@
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
 
+        <!-- パンくずナビゲーション（Issue #1134） -->
+        <TextBlock Grid.Row="0"
+                   Text="{Binding BreadcrumbText}"
+                   FontSize="{DynamicResource SmallFontSize}"
+                   Foreground="{DynamicResource SecondaryTextBrush}"
+                   Margin="0,0,0,6"
+                   Visibility="{Binding BreadcrumbText, Converter={StaticResource BoolToVisibilityConverter}}"
+                   AutomationProperties.Name="パンくずナビゲーション"/>
+
         <!-- 親レコード情報ヘッダー -->
-        <Border Grid.Row="0" Background="{DynamicResource ReturnBackgroundBrush}" CornerRadius="4" Padding="15" Margin="0,0,0,10">
+        <Border Grid.Row="1" Background="{DynamicResource ReturnBackgroundBrush}" CornerRadius="4" Padding="15" Margin="0,0,0,10">
             <Grid>
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto"/>
@@ -96,32 +106,46 @@
                                VerticalAlignment="Center"/>
                 </StackPanel>
 
-                <!-- 利用者と備考 -->
-                <StackPanel Grid.Row="1" Grid.ColumnSpan="2" Orientation="Horizontal" Margin="0,8,0,0">
-                    <TextBlock Text="利用者:"
-                               FontSize="{DynamicResource SmallFontSize}"
-                               Foreground="{DynamicResource SecondaryTextBrush}"
-                               VerticalAlignment="Center"/>
-                    <TextBlock Text="{Binding StaffName}"
-                               FontSize="{DynamicResource SmallFontSize}"
-                               Margin="5,0,20,0"
-                               VerticalAlignment="Center"/>
-                    <TextBlock Text="備考:"
-                               FontSize="{DynamicResource SmallFontSize}"
-                               Foreground="{DynamicResource SecondaryTextBrush}"
-                               VerticalAlignment="Center"/>
-                    <TextBlock Text="{Binding Note}"
-                               FontSize="{DynamicResource SmallFontSize}"
-                               Margin="5,0,0,0"
-                               VerticalAlignment="Center"
-                               TextTrimming="CharacterEllipsis"
-                               MaxWidth="300"/>
-                </StackPanel>
+                <!-- 利用者と備考、編集ボタン -->
+                <Grid Grid.Row="1" Grid.ColumnSpan="2" Margin="0,8,0,0">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <StackPanel Grid.Column="0" Orientation="Horizontal">
+                        <TextBlock Text="利用者:"
+                                   FontSize="{DynamicResource SmallFontSize}"
+                                   Foreground="{DynamicResource SecondaryTextBrush}"
+                                   VerticalAlignment="Center"/>
+                        <TextBlock Text="{Binding StaffName}"
+                                   FontSize="{DynamicResource SmallFontSize}"
+                                   Margin="5,0,20,0"
+                                   VerticalAlignment="Center"/>
+                        <TextBlock Text="備考:"
+                                   FontSize="{DynamicResource SmallFontSize}"
+                                   Foreground="{DynamicResource SecondaryTextBrush}"
+                                   VerticalAlignment="Center"/>
+                        <TextBlock Text="{Binding Note}"
+                                   FontSize="{DynamicResource SmallFontSize}"
+                                   Margin="5,0,0,0"
+                                   VerticalAlignment="Center"
+                                   TextTrimming="CharacterEllipsis"
+                                   MaxWidth="300"/>
+                    </StackPanel>
+                    <!-- 編集ボタン（Issue #1134: 詳細画面からの直接編集） -->
+                    <Button Grid.Column="1"
+                            Content="✏ 編集"
+                            Command="{Binding EditRowCommand}"
+                            Padding="12,4"
+                            VerticalAlignment="Center"
+                            ToolTip="この履歴の全項目を編集します"
+                            AutomationProperties.Name="この履歴を編集"/>
+                </Grid>
             </Grid>
         </Border>
 
         <!-- ツールバー -->
-        <Border Grid.Row="1" Background="{DynamicResource NeutralBackgroundBrush}" CornerRadius="4" Padding="10" Margin="0,0,0,10">
+        <Border Grid.Row="2" Background="{DynamicResource NeutralBackgroundBrush}" CornerRadius="4" Padding="10" Margin="0,0,0,10">
             <Grid>
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*"/>
@@ -157,7 +181,7 @@
         </Border>
 
         <!-- 詳細一覧（カスタムリスト: 分割線クリック対応） -->
-        <Border Grid.Row="2" BorderBrush="{DynamicResource NeutralBorderBrush}" BorderThickness="1" CornerRadius="4">
+        <Border Grid.Row="3" BorderBrush="{DynamicResource NeutralBorderBrush}" BorderThickness="1" CornerRadius="4">
             <Grid>
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto"/>
@@ -387,7 +411,7 @@
         </Border>
 
         <!-- 操作説明 -->
-        <Border Grid.Row="3" Background="{DynamicResource WarningBackgroundBrush}" CornerRadius="4" Padding="10" Margin="0,10,0,0">
+        <Border Grid.Row="4" Background="{DynamicResource WarningBackgroundBrush}" CornerRadius="4" Padding="10" Margin="0,10,0,0">
             <StackPanel>
                 <TextBlock TextWrapping="Wrap" FontSize="{DynamicResource SmallFontSize}">
                     <Run FontWeight="Bold">操作方法:</Run>
@@ -407,7 +431,7 @@
         </Border>
 
         <!-- フッター -->
-        <Grid Grid.Row="4" Margin="0,15,0,0">
+        <Grid Grid.Row="5" Margin="0,15,0,0">
             <StackPanel Orientation="Horizontal">
                 <TextBlock Text="{Binding DetailCountDisplay}"
                            Foreground="{DynamicResource SecondaryTextBrush}"
@@ -480,7 +504,7 @@
         </Grid>
 
         <!-- 処理中オーバーレイ -->
-        <Border Grid.RowSpan="5"
+        <Border Grid.RowSpan="6"
                 Background="{DynamicResource OverlayBrush}"
                 Visibility="{Binding IsBusy, Converter={StaticResource BoolToVisibilityConverter}}">
             <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">

@@ -172,6 +172,24 @@ namespace ICCardManager.ViewModels
         private bool _canDelete;
 
         /// <summary>
+        /// パンくずテキスト（Issue #1134）
+        /// </summary>
+        [ObservableProperty]
+        private string _breadcrumbText = string.Empty;
+
+        /// <summary>
+        /// 「保存して次へ」ボタンを表示するか（Issue #1134）
+        /// </summary>
+        [ObservableProperty]
+        private bool _showSaveAndNextButton;
+
+        /// <summary>
+        /// 「保存して次へ」が要求されたか（Issue #1134）
+        /// </summary>
+        [ObservableProperty]
+        private bool _isSaveAndEditNextRequested;
+
+        /// <summary>
         /// 全行リスト（挿入位置計算用）
         /// </summary>
         private List<LedgerDto> _allLedgers = new();
@@ -681,6 +699,54 @@ namespace ICCardManager.ViewModels
         private void Cancel()
         {
             // 何もせずに閉じる（IsSavedはfalseのまま）
+        }
+
+        /// <summary>
+        /// 保存して次の履歴を編集（Issue #1134）
+        /// </summary>
+        [RelayCommand]
+        private async Task SaveAndEditNext()
+        {
+            if (!CanSave) return;
+
+            IsBusy = true;
+            BusyMessage = "保存中...";
+            StatusMessage = string.Empty;
+
+            try
+            {
+                if (Mode == LedgerRowEditMode.Add)
+                {
+                    await SaveAddAsync();
+                }
+                else
+                {
+                    await SaveEditAsync();
+                }
+
+                // IsSavedがtrueになった場合、代わりにIsSaveAndEditNextRequestedを設定
+                if (IsSaved)
+                {
+                    IsSaved = false;
+                    IsSaveAndEditNextRequested = true;
+                }
+            }
+            catch (Exception ex)
+            {
+                StatusMessage = $"エラー: {ex.Message}";
+            }
+            finally
+            {
+                IsBusy = false;
+            }
+        }
+
+        /// <summary>
+        /// パンくずテキストを設定（Issue #1134: 詳細画面から開かれた場合用）
+        /// </summary>
+        public void SetBreadcrumb(string text)
+        {
+            BreadcrumbText = text;
         }
     }
 }

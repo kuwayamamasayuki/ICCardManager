@@ -36,6 +36,12 @@ namespace ICCardManager.Views.Dialogs
                     DialogResult = false;
                     Close();
                 }
+                // Issue #1134: 「保存して次へ」要求時にダイアログを閉じる
+                if (e.PropertyName == nameof(LedgerRowEditViewModel.IsSaveAndEditNextRequested) && _viewModel.IsSaveAndEditNextRequested)
+                {
+                    DialogResult = true;
+                    Close();
+                }
             };
         }
 
@@ -43,6 +49,11 @@ namespace ICCardManager.Views.Dialogs
         /// 削除が要求されたか（MainViewModelで参照）Issue #750
         /// </summary>
         public bool IsDeleteRequested => _viewModel.IsDeleteRequested;
+
+        /// <summary>
+        /// 「保存して次へ」が要求されたか（Issue #1134）
+        /// </summary>
+        public bool IsSaveAndEditNextRequested => _viewModel.IsSaveAndEditNextRequested;
 
         /// <summary>
         /// 追加モードで初期化
@@ -63,6 +74,22 @@ namespace ICCardManager.Views.Dialogs
         public async Task InitializeForEditAsync(LedgerDto ledgerDto, string operatorIdm)
         {
             await _viewModel.InitializeForEditAsync(ledgerDto, operatorIdm);
+        }
+
+        /// <summary>
+        /// パンくずテキストを設定（Issue #1134: 詳細画面から開かれた場合用）
+        /// </summary>
+        public void SetBreadcrumb(string text)
+        {
+            _viewModel.SetBreadcrumb(text);
+        }
+
+        /// <summary>
+        /// 「保存して次へ」ボタンの表示を設定（Issue #1134）
+        /// </summary>
+        public void SetShowSaveAndNextButton(bool show)
+        {
+            _viewModel.ShowSaveAndNextButton = show;
         }
 
         /// <summary>
