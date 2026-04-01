@@ -24,6 +24,7 @@
 
     <Window.Resources>
         <BooleanToVisibilityConverter x:Key="BoolToVisibilityConverter"/>
+        <common:StringToVisibilityConverter x:Key="StringToVisibilityConverter" xmlns:common="clr-namespace:ICCardManager.Common"/>
 
         <!-- グループ色のブラシ -->
         <SolidColorBrush x:Key="GroupColor0" Color="Transparent"/>
@@ -38,13 +39,23 @@
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
 
+        <!-- パンくずナビゲーション（Issue #1134） -->
+        <TextBlock Grid.Row="0"
+                   Text="{Binding BreadcrumbText}"
+                   FontSize="{DynamicResource SmallFontSize}"
+                   Foreground="{DynamicResource SecondaryTextBrush}"
+                   Margin="0,0,0,6"
+                   Visibility="{Binding BreadcrumbText, Converter={StaticResource StringToVisibilityConverter}}"
+                   AutomationProperties.Name="パンくずナビゲーション"/>
+
         <!-- 親レコード情報ヘッダー -->
-        <Border Grid.Row="0" Background="{DynamicResource ReturnBackgroundBrush}" CornerRadius="4" Padding="15" Margin="0,0,0,10">
+        <Border Grid.Row="1" Background="{DynamicResource ReturnBackgroundBrush}" CornerRadius="4" Padding="15" Margin="0,0,0,10">
             <Grid>
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto"/>
@@ -121,7 +132,7 @@
         </Border>
 
         <!-- ツールバー -->
-        <Border Grid.Row="1" Background="{DynamicResource NeutralBackgroundBrush}" CornerRadius="4" Padding="10" Margin="0,0,0,10">
+        <Border Grid.Row="2" Background="{DynamicResource NeutralBackgroundBrush}" CornerRadius="4" Padding="10" Margin="0,0,0,10">
             <Grid>
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*"/>
@@ -157,7 +168,7 @@
         </Border>
 
         <!-- 詳細一覧（カスタムリスト: 分割線クリック対応） -->
-        <Border Grid.Row="2" BorderBrush="{DynamicResource NeutralBorderBrush}" BorderThickness="1" CornerRadius="4">
+        <Border Grid.Row="3" BorderBrush="{DynamicResource NeutralBorderBrush}" BorderThickness="1" CornerRadius="4">
             <Grid>
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto"/>
@@ -387,7 +398,7 @@
         </Border>
 
         <!-- 操作説明 -->
-        <Border Grid.Row="3" Background="{DynamicResource WarningBackgroundBrush}" CornerRadius="4" Padding="10" Margin="0,10,0,0">
+        <Border Grid.Row="4" Background="{DynamicResource WarningBackgroundBrush}" CornerRadius="4" Padding="10" Margin="0,10,0,0">
             <StackPanel>
                 <TextBlock TextWrapping="Wrap" FontSize="{DynamicResource SmallFontSize}">
                     <Run FontWeight="Bold">操作方法:</Run>
@@ -407,7 +418,7 @@
         </Border>
 
         <!-- フッター -->
-        <Grid Grid.Row="4" Margin="0,15,0,0">
+        <Grid Grid.Row="5" Margin="0,15,0,0">
             <StackPanel Orientation="Horizontal">
                 <TextBlock Text="{Binding DetailCountDisplay}"
                            Foreground="{DynamicResource SecondaryTextBrush}"
@@ -480,7 +491,7 @@
         </Grid>
 
         <!-- 処理中オーバーレイ -->
-        <Border Grid.RowSpan="5"
+        <Border Grid.RowSpan="6"
                 Background="{DynamicResource OverlayBrush}"
                 Visibility="{Binding IsBusy, Converter={StaticResource BoolToVisibilityConverter}}">
             <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">

@@ -172,6 +172,36 @@ namespace ICCardManager.ViewModels
         private bool _canDelete;
 
         /// <summary>
+        /// パンくずテキスト（Issue #1134）
+        /// </summary>
+        [ObservableProperty]
+        private string _breadcrumbText = string.Empty;
+
+        /// <summary>
+        /// 「保存して次へ」ボタンを表示するか（Issue #1134）
+        /// </summary>
+        [ObservableProperty]
+        private bool _showSaveAndNextButton;
+
+        /// <summary>
+        /// 「保存して次へ」が要求されたか（Issue #1134）
+        /// </summary>
+        [ObservableProperty]
+        private bool _isSaveAndEditNextRequested;
+
+        /// <summary>
+        /// 「次へ（保存しない）」が要求されたか（Issue #1134）
+        /// </summary>
+        [ObservableProperty]
+        private bool _isSkipToNextRequested;
+
+        /// <summary>
+        /// 「戻る」が要求されたか（Issue #1134）
+        /// </summary>
+        [ObservableProperty]
+        private bool _isBackRequested;
+
+        /// <summary>
         /// 全行リスト（挿入位置計算用）
         /// </summary>
         private List<LedgerDto> _allLedgers = new();
@@ -249,6 +279,10 @@ namespace ICCardManager.ViewModels
 
             Validate();
             OnPropertyChanged(nameof(IsAddMode));
+
+            // Issue #1134: 初期化完了後から変更追跡を開始
+            _hasFieldChanges = false;
+            _trackChanges = true;
         }
 
         /// <summary>
@@ -269,6 +303,7 @@ namespace ICCardManager.ViewModels
         /// </summary>
         partial void OnIncomeChanged(int value)
         {
+            TrackFieldChange();
             RecalculateBalance();
             Validate();
         }
@@ -278,6 +313,7 @@ namespace ICCardManager.ViewModels
         /// </summary>
         partial void OnExpenseChanged(int value)
         {
+            TrackFieldChange();
             RecalculateBalance();
             Validate();
         }
@@ -299,6 +335,7 @@ namespace ICCardManager.ViewModels
         /// </summary>
         partial void OnBalanceChanged(int value)
         {
+            TrackFieldChange();
             Validate();
         }
 
@@ -307,14 +344,21 @@ namespace ICCardManager.ViewModels
         /// </summary>
         partial void OnSummaryChanged(string value)
         {
+            TrackFieldChange();
             Validate();
         }
 
         /// <summary>
         /// EditDate変更時のコールバック
         /// </summary>
+        partial void OnNoteChanged(string value)
+        {
+            TrackFieldChange();
+        }
+
         partial void OnEditDateChanged(DateTime value)
         {
+            TrackFieldChange();
             if (Mode == LedgerRowEditMode.Add && _allLedgers.Count > 0)
             {
                 // 日付に基づいて挿入位置を自動調整
@@ -681,6 +725,121 @@ namespace ICCardManager.ViewModels
         private void Cancel()
         {
             // 何もせずに閉じる（IsSavedはfalseのまま）
+        }
+
+        /// <summary>
+        /// 保存して次の履歴を編集（Issue #1134）
+        /// </summary>
+        [RelayCommand]
+        private async Task SaveAndEditNext()
+        {
+            if (!CanSave) return;
+
+            IsBusy = true;
+            BusyMessage = "保存中...";
+            StatusMessage = string.Empty;
+
+            try
+            {
+                if (Mode == LedgerRowEditMode.Add)
+                {
+                    await SaveAddAsync();
+                }
+                else
+                {
+                    await SaveEditAsync();
+                }
+
+                // IsSavedがtrueになった場合、代わりにIsSaveAndEditNextRequestedを設定
+                if (IsSaved)
+                {
+                    IsSaved = false;
+                    IsSaveAndEditNextRequested = true;
+                }
+            }
+            catch (Exception ex)
+            {
+                StatusMessage = $"エラー: {ex.Message}";
+            }
+            finally
+            {
+                IsBusy = false;
+            }
+        }
+
+        /// <summary>
+        /// パンくずテキストを設定（Issue #1134: 詳細画面から開かれた場合用）
+        /// </summary>
+        public void SetBreadcrumb(string text)
+        {
+            BreadcrumbText = text;
+        }
+
+        /// <summary>
+        /// 保存せず次の履歴へ（Issue #1134）
+        /// </summary>
+        [RelayCommand]
+        private void SkipToNext()
+        {
+            if (HasUnsavedChanges())
+            {
+                var result = System.Windows.MessageBox.Show(
+                    "変更が保存されていません。破棄して次へ進みますか？",
+                    "確認", System.Windows.MessageBoxButton.YesNo, System.Windows.MessageBoxImage.Warning);
+                if (result != System.Windows.MessageBoxResult.Yes) return;
+            }
+            IsSkipToNextRequested = true;
+        }
+
+        /// <summary>
+        /// 前の履歴へ戻る（Issue #1134）
+        /// </summary>
+        [RelayCommand]
+        private void Back()
+        {
+            if (HasUnsavedChanges())
+            {
+                var result = System.Windows.MessageBox.Show(
+                    "変更が保存されていません。破棄して前へ戻りますか？",
+                    "確認", System.Windows.MessageBoxButton.YesNo, System.Windows.MessageBoxImage.Warning);
+                if (result != System.Windows.MessageBoxResult.Yes) return;
+            }
+            IsBackRequested = true;
+        }
+
+        /// <summary>
+        /// 未保存の変更があるか判定（Issue #1134）
+        /// </summary>
+        /// <remarks>
+        /// Editモードで初期値と現在値を比較。Addモードではフィールドに入力があれば変更ありとする。
+        /// </remarks>
+        private bool HasUnsavedChanges()
+        {
+            if (Mode == LedgerRowEditMode.Add)
+            {
+                return !string.IsNullOrWhiteSpace(Summary) || Income != 0 || Expense != 0;
+            }
+
+            // Editモード: 初期値が設定されていれば比較
+            return _hasFieldChanges;
+        }
+
+        /// <summary>
+        /// フィールド変更フラグ（Editモード用）
+        /// </summary>
+        private bool _hasFieldChanges;
+
+        /// <summary>
+        /// 初期化完了後に変更追跡を開始するフラグ
+        /// </summary>
+        private bool _trackChanges;
+
+        /// <summary>
+        /// フィールド変更を追跡する
+        /// </summary>
+        private void TrackFieldChange()
+        {
+            if (_trackChanges) _hasFieldChanges = true;
         }
     }
 }

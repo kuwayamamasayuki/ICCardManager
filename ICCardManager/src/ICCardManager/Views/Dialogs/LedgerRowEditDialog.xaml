@@ -17,6 +17,7 @@
 
     <Window.Resources>
         <BooleanToVisibilityConverter x:Key="BoolToVisibilityConverter"/>
+        <common:StringToVisibilityConverter x:Key="StringToVisibilityConverter" xmlns:common="clr-namespace:ICCardManager.Common"/>
         <conv:InverseBoolConverter x:Key="InvertBoolConverter"
                                     xmlns:conv="clr-namespace:ICCardManager.Views.Converters"/>
     </Window.Resources>
@@ -28,10 +29,20 @@
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
 
+        <!-- パンくずナビゲーション（Issue #1134） -->
+        <TextBlock Grid.Row="0"
+                   Text="{Binding BreadcrumbText}"
+                   FontSize="{DynamicResource SmallFontSize}"
+                   Foreground="{DynamicResource SecondaryTextBrush}"
+                   Margin="0,0,0,6"
+                   Visibility="{Binding BreadcrumbText, Converter={StaticResource StringToVisibilityConverter}}"
+                   AutomationProperties.Name="パンくずナビゲーション"/>
+
         <!-- 入力フィールド -->
-        <Grid Grid.Row="0" Margin="0,0,0,10">
+        <Grid Grid.Row="1" Margin="0,0,0,10">
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto"/>
                 <RowDefinition Height="Auto"/>
@@ -174,7 +185,7 @@
         </Grid>
 
         <!-- 挿入位置プレビュー（Addモードのみ） -->
-        <Border Grid.Row="1"
+        <Border Grid.Row="2"
                 Background="{DynamicResource NeutralBackgroundBrush}"
                 CornerRadius="4"
                 Padding="10"
@@ -228,7 +239,7 @@
         </Border>
 
         <!-- 警告表示エリア -->
-        <StackPanel Grid.Row="2" Margin="0,5,0,5">
+        <StackPanel Grid.Row="3" Margin="0,5,0,5">
             <!-- バリデーションエラー -->
             <TextBlock Text="{Binding ValidationMessage}"
                        Foreground="{DynamicResource DangerTextBrush}"
@@ -295,7 +306,7 @@
         </StackPanel>
 
         <!-- ボタン -->
-        <Grid Grid.Row="3" Margin="0,10,0,0">
+        <Grid Grid.Row="4" Margin="0,10,0,0">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="Auto"/>
                 <ColumnDefinition Width="*"/>
@@ -325,6 +336,36 @@
                         FontSize="{DynamicResource BaseFontSize}"
                         AutomationProperties.Name="キャンセル"
                         ToolTip="変更を破棄してダイアログを閉じる (Escape)"/>
+                <!-- 戻る（Issue #1134） -->
+                <Button Content="◀ 戻る"
+                        Command="{Binding BackCommand}"
+                        Visibility="{Binding ShowSaveAndNextButton, Converter={StaticResource BoolToVisibilityConverter}}"
+                        Padding="16,10"
+                        Margin="0,0,6,0"
+                        FontSize="{DynamicResource BaseFontSize}"
+                        AutomationProperties.Name="前の履歴へ戻る"
+                        ToolTip="前の履歴を開きます"/>
+                <!-- 次へ（保存しない）（Issue #1134） -->
+                <Button Content="次へ ▶"
+                        Command="{Binding SkipToNextCommand}"
+                        Visibility="{Binding ShowSaveAndNextButton, Converter={StaticResource BoolToVisibilityConverter}}"
+                        Padding="16,10"
+                        Margin="0,0,6,0"
+                        FontSize="{DynamicResource BaseFontSize}"
+                        AutomationProperties.Name="保存せず次の履歴へ"
+                        ToolTip="保存せずに次の履歴を開きます"/>
+                <!-- 保存して次へ（Issue #1134） -->
+                <Button Content="保存して次へ"
+                        Command="{Binding SaveAndEditNextCommand}"
+                        IsEnabled="{Binding CanSave}"
+                        Visibility="{Binding ShowSaveAndNextButton, Converter={StaticResource BoolToVisibilityConverter}}"
+                        Padding="20,10"
+                        Margin="0,0,10,0"
+                        Background="{DynamicResource InfoTextBrush}"
+                        Foreground="{DynamicResource OnPrimaryBrush}"
+                        FontSize="{DynamicResource BaseFontSize}"
+                        AutomationProperties.Name="保存して次の履歴を編集"
+                        ToolTip="保存して次の履歴を開きます"/>
                 <Button Content="保存"
                         Command="{Binding SaveCommand}"
                         IsEnabled="{Binding CanSave}"
@@ -339,7 +380,7 @@
         </Grid>
 
         <!-- 処理中オーバーレイ -->
-        <Border Grid.RowSpan="5"
+        <Border Grid.RowSpan="6"
                 Background="{DynamicResource OverlayBrush}"
                 Visibility="{Binding IsBusy, Converter={StaticResource BoolToVisibilityConverter}}">
             <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">

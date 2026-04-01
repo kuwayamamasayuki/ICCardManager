@@ -1578,10 +1578,11 @@ public partial class MainViewModel : ViewModelBase
         var detailDto = ledgerWithDetails.ToDto();
 
         // 詳細ダイアログを表示
+        var cardName = HistoryCard?.DisplayName;
         Views.Dialogs.LedgerDetailDialog capturedDialog = null;
         await _navigationService.ShowDialogAsync<Views.Dialogs.LedgerDetailDialog>(async d =>
         {
-            await d.InitializeAsync(detailDto.Id);
+            await d.InitializeAsync(detailDto.Id, cardName: cardName);
             capturedDialog = d;
         });
 
@@ -1672,12 +1673,30 @@ public partial class MainViewModel : ViewModelBase
         var authResult = await _staffAuthService.RequestAuthenticationAsync("履歴の変更");
         if (authResult == null) return;
 
+        await EditLedgerWithAuthAsync(ledger, authResult.Idm, showSaveAndNext: true);
+    }
+
+    /// <summary>
+    /// 認証済みの状態で履歴を編集（Issue #1134: 「保存して次へ」ループ対応）
+    /// </summary>
+    private async Task EditLedgerWithAuthAsync(LedgerDto ledger, string operatorIdm, bool showSaveAndNext = false)
+    {
+        var cardName = HistoryCard?.DisplayName;
+
         // 全項目編集ダイアログ表示
         Views.Dialogs.LedgerRowEditDialog capturedEditDialog = null;
         var dialogResult = await _navigationService.ShowDialogAsync<Views.Dialogs.LedgerRowEditDialog>(
             async d =>
             {
-                await d.InitializeForEditAsync(ledger, authResult.Idm);
+                await d.InitializeForEditAsync(ledger, operatorIdm);
+                if (showSaveAndNext)
+                {
+                    d.SetShowSaveAndNextButton(true);
+                }
+                if (!string.IsNullOrEmpty(cardName))
+                {
+                    d.SetBreadcrumb($"{cardName} > 行修正");
+                }
                 capturedEditDialog = d;
             });
 
@@ -1688,7 +1707,7 @@ public partial class MainViewModel : ViewModelBase
             if (fullLedger != null)
             {
                 await _ledgerRepository.DeleteAsync(ledger.Id);
-                await _operationLogger.LogLedgerDeleteAsync(authResult.Idm, fullLedger);
+                await _operationLogger.LogLedgerDeleteAsync(operatorIdm, fullLedger);
             }
 
             await LoadHistoryLedgersAsync();
@@ -1702,6 +1721,37 @@ public partial class MainViewModel : ViewModelBase
             await RefreshDashboardAsync();
             await CheckWarningsAsync();
             await CheckAndNotifyConsistencyAsync();
+
+            // Issue #1134: 「保存して次へ」が要求された場合、次の行を開く
+            if (capturedEditDialog?.IsSaveAndEditNextRequested == true)
+            {
+                var currentIndex = HistoryLedgers.ToList().FindIndex(l => l.Id == ledger.Id);
+                if (currentIndex >= 0 && currentIndex < HistoryLedgers.Count - 1)
+                {
+                    var nextLedger = HistoryLedgers[currentIndex + 1];
+                    await EditLedgerWithAuthAsync(nextLedger, operatorIdm, showSaveAndNext: true);
+                }
+            }
+        }
+        // Issue #1134: 「次へ（保存しない）」が要求された場合
+        else if (capturedEditDialog?.IsSkipToNextRequested == true)
+        {
+            var currentIndex = HistoryLedgers.ToList().FindIndex(l => l.Id == ledger.Id);
+            if (currentIndex >= 0 && currentIndex < HistoryLedgers.Count - 1)
+            {
+                var nextLedger = HistoryLedgers[currentIndex + 1];
+                await EditLedgerWithAuthAsync(nextLedger, operatorIdm, showSaveAndNext: true);
+            }
+        }
+        // Issue #1134: 「戻る」が要求された場合
+        else if (capturedEditDialog?.IsBackRequested == true)
+        {
+            var currentIndex = HistoryLedgers.ToList().FindIndex(l => l.Id == ledger.Id);
+            if (currentIndex > 0)
+            {
+                var prevLedger = HistoryLedgers[currentIndex - 1];
+                await EditLedgerWithAuthAsync(prevLedger, operatorIdm, showSaveAndNext: true);
+            }
         }
     }
 

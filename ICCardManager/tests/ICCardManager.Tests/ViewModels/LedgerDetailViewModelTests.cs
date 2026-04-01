@@ -11,20 +11,23 @@ using Xunit;
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading.Tasks;
 
 namespace ICCardManager.Tests.ViewModels;
 
 /// <summary>
 /// LedgerDetailViewModelの単体テスト
 /// Issue #633: 分割操作でGroupIdが正しく設定されることを検証
+/// Issue #1134: パンくず表示を検証
 /// </summary>
 public class LedgerDetailViewModelTests
 {
     private readonly LedgerDetailViewModel _viewModel;
+    private readonly Mock<ILedgerRepository> _ledgerRepoMock;
 
     public LedgerDetailViewModelTests()
     {
-        var ledgerRepoMock = new Mock<ILedgerRepository>();
+        _ledgerRepoMock = new Mock<ILedgerRepository>();
         var summaryGenerator = new SummaryGenerator();
         var operationLogRepoMock = new Mock<IOperationLogRepository>();
         var staffRepoMock = new Mock<IStaffRepository>();
@@ -33,14 +36,14 @@ public class LedgerDetailViewModelTests
             staffRepoMock.Object);
         var splitServiceLogger = NullLogger<LedgerSplitService>.Instance;
         var ledgerSplitService = new LedgerSplitService(
-            ledgerRepoMock.Object,
+            _ledgerRepoMock.Object,
             summaryGenerator,
             operationLogger,
             splitServiceLogger);
         var logger = NullLogger<LedgerDetailViewModel>.Instance;
 
         _viewModel = new LedgerDetailViewModel(
-            ledgerRepoMock.Object,
+            _ledgerRepoMock.Object,
             summaryGenerator,
             operationLogger,
             ledgerSplitService,
@@ -239,6 +242,57 @@ public class LedgerDetailViewModelTests
 
         // Assert
         _viewModel.HasMultipleGroups.Should().BeFalse("分割線を外すとfalseに戻る");
+    }
+
+    #endregion
+
+    #region Issue #1134: パンくず表示テスト
+
+    [Fact]
+    public async Task InitializeAsync_カード名ありの場合パンくずが設定されること()
+    {
+        // Arrange
+        var testLedger = new Ledger
+        {
+            Id = 1,
+            CardIdm = "0102030405060708",
+            Date = new DateTime(2026, 3, 15),
+            Summary = "鉄道（博多駅～天神駅）",
+            Balance = 500,
+            Details = new List<LedgerDetail>
+            {
+                new LedgerDetail { SequenceNumber = 1, EntryStation = "博多", ExitStation = "天神", Amount = 260, Balance = 500 }
+            }
+        };
+        _ledgerRepoMock.Setup(r => r.GetByIdAsync(1)).ReturnsAsync(testLedger);
+
+        // Act
+        await _viewModel.InitializeAsync(1, cardName: "nimoca N-002");
+
+        // Assert
+        _viewModel.BreadcrumbText.Should().Be("nimoca N-002 > 履歴詳細");
+    }
+
+    [Fact]
+    public async Task InitializeAsync_カード名なしの場合パンくずがデフォルト設定されること()
+    {
+        // Arrange
+        var testLedger = new Ledger
+        {
+            Id = 1,
+            CardIdm = "0102030405060708",
+            Date = new DateTime(2026, 3, 15),
+            Summary = "テスト",
+            Balance = 500,
+            Details = new List<LedgerDetail>()
+        };
+        _ledgerRepoMock.Setup(r => r.GetByIdAsync(1)).ReturnsAsync(testLedger);
+
+        // Act
+        await _viewModel.InitializeAsync(1);
+
+        // Assert
+        _viewModel.BreadcrumbText.Should().Be("履歴詳細");
     }
 
     #endregion

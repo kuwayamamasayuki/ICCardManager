@@ -123,6 +123,11 @@ namespace ICCardManager.ViewModels
         private Ledger _ledger = null!;
 
         /// <summary>
+        /// カード名（パンくず表示用）
+        /// </summary>
+        private string? _cardName;
+
+        /// <summary>
         /// 詳細アイテムリスト
         /// </summary>
         public ObservableCollection<LedgerDetailItemViewModel> Items { get; } = new();
@@ -209,6 +214,12 @@ namespace ICCardManager.ViewModels
         /// </summary>
         private string? _operatorIdm;
 
+        /// <summary>
+        /// パンくずテキスト（Issue #1134）
+        /// </summary>
+        [ObservableProperty]
+        private string _breadcrumbText = string.Empty;
+
         private readonly LedgerSplitService _ledgerSplitService;
 
         public LedgerDetailViewModel(
@@ -228,15 +239,27 @@ namespace ICCardManager.ViewModels
         /// <summary>
         /// 初期化
         /// </summary>
-        public async Task InitializeAsync(int ledgerId, string? operatorIdm = null)
+        /// <param name="ledgerId">利用履歴ID</param>
+        /// <param name="operatorIdm">操作者IDm（ログ記録用、オプション）</param>
+        /// <param name="cardName">カード名（パンくず表示用、オプション）Issue #1134</param>
+        public async Task InitializeAsync(int ledgerId, string? operatorIdm = null, string? cardName = null)
         {
             _operatorIdm = operatorIdm;
+            if (cardName != null)
+            {
+                _cardName = cardName;
+            }
             _ledger = await _ledgerRepository.GetByIdAsync(ledgerId);
 
             if (_ledger == null)
             {
                 throw new InvalidOperationException($"Ledger ID {ledgerId} が見つかりません");
             }
+
+            // パンくず設定（Issue #1134）
+            BreadcrumbText = !string.IsNullOrEmpty(_cardName)
+                ? $"{_cardName} > 履歴詳細"
+                : "履歴詳細";
 
             // ヘッダー情報を設定
             DateDisplay = WarekiConverter.ToWareki(_ledger.Date);
@@ -634,6 +657,7 @@ namespace ICCardManager.ViewModels
                 IsBusy = false;
             }
         }
+
 
     }
 }

@@ -562,4 +562,147 @@ public class LedgerRowEditViewModelTests
     }
 
     #endregion
+
+    #region Issue #1134: パンくず・保存して次へ
+
+    [Fact]
+    public void BreadcrumbText_SetBreadcrumbで設定値が保持されること()
+    {
+        // Act
+        _viewModel.SetBreadcrumb("nimoca N-002 > 履歴詳細 > 行修正");
+
+        // Assert
+        _viewModel.BreadcrumbText.Should().Be("nimoca N-002 > 履歴詳細 > 行修正");
+    }
+
+    [Fact]
+    public void ShowSaveAndNextButton_設定値が保持されること()
+    {
+        // Arrange
+        _viewModel.ShowSaveAndNextButton.Should().BeFalse("初期値はfalse");
+
+        // Act
+        _viewModel.ShowSaveAndNextButton = true;
+
+        // Assert
+        _viewModel.ShowSaveAndNextButton.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task SaveAndEditNext_Addモード保存後にIsSaveAndEditNextRequestedがtrueになること()
+    {
+        // Arrange
+        _ledgerRepoMock.Setup(r => r.InsertAsync(It.IsAny<Ledger>()))
+            .ReturnsAsync(100);
+        _operationLogRepoMock.Setup(r => r.InsertAsync(It.IsAny<OperationLog>()))
+            .ReturnsAsync(1);
+
+        await _viewModel.InitializeForAddAsync(TestCardIdm, CreateTestLedgers(), TestOperatorIdm);
+        _viewModel.Summary = "テスト摘要";
+        _viewModel.Expense = 210;
+
+        // Act
+        await _viewModel.SaveAndEditNextCommand.ExecuteAsync(null);
+
+        // Assert
+        _viewModel.IsSaveAndEditNextRequested.Should().BeTrue("保存して次へが要求された");
+        _viewModel.IsSaved.Should().BeFalse("IsSavedはfalseにリセットされる");
+    }
+
+    [Fact]
+    public async Task SaveAndEditNext_Editモード保存後にIsSaveAndEditNextRequestedがtrueになること()
+    {
+        // Arrange
+        var existingLedger = new Ledger
+        {
+            Id = 1, CardIdm = TestCardIdm,
+            Date = new DateTime(2026, 1, 10),
+            Summary = "鉄道（天神～博多）",
+            Income = 0, Expense = 210, Balance = 2300,
+            Details = new List<LedgerDetail>()
+        };
+        _ledgerRepoMock.Setup(r => r.GetByIdAsync(1)).ReturnsAsync(existingLedger);
+        _ledgerRepoMock.Setup(r => r.UpdateAsync(It.IsAny<Ledger>())).ReturnsAsync(true);
+        _operationLogRepoMock.Setup(r => r.InsertAsync(It.IsAny<OperationLog>()))
+            .ReturnsAsync(1);
+
+        var dto = new LedgerDto
+        {
+            Id = 1, CardIdm = TestCardIdm,
+            Date = new DateTime(2026, 1, 10),
+            Summary = "鉄道（天神～博多）",
+            Income = 0, Expense = 210, Balance = 2300
+        };
+        await _viewModel.InitializeForEditAsync(dto, TestOperatorIdm);
+
+        // Act
+        await _viewModel.SaveAndEditNextCommand.ExecuteAsync(null);
+
+        // Assert
+        _viewModel.IsSaveAndEditNextRequested.Should().BeTrue("保存して次へが要求された");
+        _viewModel.IsSaved.Should().BeFalse("IsSavedはfalseにリセットされる");
+    }
+
+    [Fact]
+    public async Task SaveAndEditNext_CanSaveがfalseの場合何もしないこと()
+    {
+        // Arrange: 摘要を空にしてCanSave=falseにする
+        await _viewModel.InitializeForAddAsync(TestCardIdm, CreateTestLedgers(), TestOperatorIdm);
+        _viewModel.Summary = string.Empty; // バリデーションエラー
+        _viewModel.CanSave.Should().BeFalse();
+
+        // Act
+        await _viewModel.SaveAndEditNextCommand.ExecuteAsync(null);
+
+        // Assert
+        _viewModel.IsSaveAndEditNextRequested.Should().BeFalse("保存できない場合は要求されない");
+    }
+
+    [Fact]
+    public void Back_IsBackRequestedがtrueになること()
+    {
+        // Arrange
+        _viewModel.IsBackRequested.Should().BeFalse("初期値はfalse");
+
+        // Act
+        _viewModel.BackCommand.Execute(null);
+
+        // Assert
+        _viewModel.IsBackRequested.Should().BeTrue("戻るが要求された");
+    }
+
+    [Fact]
+    public async Task HasUnsavedChanges_Editモード初期化直後はfalseであること()
+    {
+        // Arrange
+        var existingLedger = new Ledger
+        {
+            Id = 1, CardIdm = TestCardIdm,
+            Date = new DateTime(2026, 1, 10),
+            Summary = "鉄道（天神～博多）",
+            Income = 0, Expense = 210, Balance = 2300,
+            Details = new List<LedgerDetail>()
+        };
+        _ledgerRepoMock.Setup(r => r.GetByIdAsync(1)).ReturnsAsync(existingLedger);
+
+        var dto = new LedgerDto
+        {
+            Id = 1, CardIdm = TestCardIdm,
+            Date = new DateTime(2026, 1, 10),
+            Summary = "鉄道（天神～博多）",
+            Income = 0, Expense = 210, Balance = 2300
+        };
+        await _viewModel.InitializeForEditAsync(dto, TestOperatorIdm);
+
+        // ShowSaveAndNextButton を有効にして「次へ」ボタンを使えるようにする
+        _viewModel.ShowSaveAndNextButton = true;
+
+        // Act: 変更なしで「戻る」を押す（確認ダイアログなしで戻れるはず）
+        _viewModel.BackCommand.Execute(null);
+
+        // Assert: 確認なしで戻れた
+        _viewModel.IsBackRequested.Should().BeTrue("未変更時は確認なしで戻れる");
+    }
+
+    #endregion
 }
