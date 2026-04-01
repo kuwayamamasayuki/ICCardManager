@@ -658,5 +658,18 @@ public class LedgerRowEditViewModelTests
         _viewModel.IsSaveAndEditNextRequested.Should().BeFalse("保存できない場合は要求されない");
     }
 
+    [Fact]
+    public void SkipToNext_IsSkipToNextRequestedがtrueになること()
+    {
+        // Arrange
+        _viewModel.IsSkipToNextRequested.Should().BeFalse("初期値はfalse");
+
+        // Act
+        _viewModel.SkipToNextCommand.Execute(null);
+
+        // Assert
+        _viewModel.IsSkipToNextRequested.Should().BeTrue("次へスキップが要求された");
+    }
+
     #endregion
 }

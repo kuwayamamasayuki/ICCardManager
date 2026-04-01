@@ -42,6 +42,12 @@ namespace ICCardManager.Views.Dialogs
                     DialogResult = true;
                     Close();
                 }
+                // Issue #1134: 「次へ（保存しない）」要求時にダイアログを閉じる
+                if (e.PropertyName == nameof(LedgerRowEditViewModel.IsSkipToNextRequested) && _viewModel.IsSkipToNextRequested)
+                {
+                    DialogResult = false;
+                    Close();
+                }
             };
         }
 
@@ -54,6 +60,11 @@ namespace ICCardManager.Views.Dialogs
         /// 「保存して次へ」が要求されたか（Issue #1134）
         /// </summary>
         public bool IsSaveAndEditNextRequested => _viewModel.IsSaveAndEditNextRequested;
+
+        /// <summary>
+        /// 「次へ（保存しない）」が要求されたか（Issue #1134）
+        /// </summary>
+        public bool IsSkipToNextRequested => _viewModel.IsSkipToNextRequested;
 
         /// <summary>
         /// 追加モードで初期化

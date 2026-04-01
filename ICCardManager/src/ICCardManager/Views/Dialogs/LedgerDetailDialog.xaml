@@ -24,6 +24,7 @@
 
     <Window.Resources>
         <BooleanToVisibilityConverter x:Key="BoolToVisibilityConverter"/>
+        <common:StringToVisibilityConverter x:Key="StringToVisibilityConverter" xmlns:common="clr-namespace:ICCardManager.Common"/>
 
         <!-- グループ色のブラシ -->
         <SolidColorBrush x:Key="GroupColor0" Color="Transparent"/>
@@ -50,7 +51,7 @@
                    FontSize="{DynamicResource SmallFontSize}"
                    Foreground="{DynamicResource SecondaryTextBrush}"
                    Margin="0,0,0,6"
-                   Visibility="{Binding BreadcrumbText, Converter={StaticResource BoolToVisibilityConverter}}"
+                   Visibility="{Binding BreadcrumbText, Converter={StaticResource StringToVisibilityConverter}}"
                    AutomationProperties.Name="パンくずナビゲーション"/>
 
         <!-- 親レコード情報ヘッダー -->

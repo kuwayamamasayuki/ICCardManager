@@ -17,6 +17,7 @@
 
     <Window.Resources>
         <BooleanToVisibilityConverter x:Key="BoolToVisibilityConverter"/>
+        <common:StringToVisibilityConverter x:Key="StringToVisibilityConverter" xmlns:common="clr-namespace:ICCardManager.Common"/>
         <conv:InverseBoolConverter x:Key="InvertBoolConverter"
                                     xmlns:conv="clr-namespace:ICCardManager.Views.Converters"/>
     </Window.Resources>
@@ -37,7 +38,7 @@
                    FontSize="{DynamicResource SmallFontSize}"
                    Foreground="{DynamicResource SecondaryTextBrush}"
                    Margin="0,0,0,6"
-                   Visibility="{Binding BreadcrumbText, Converter={StaticResource BoolToVisibilityConverter}}"
+                   Visibility="{Binding BreadcrumbText, Converter={StaticResource StringToVisibilityConverter}}"
                    AutomationProperties.Name="パンくずナビゲーション"/>
 
         <!-- 入力フィールド -->
@@ -335,6 +336,15 @@
                         FontSize="{DynamicResource BaseFontSize}"
                         AutomationProperties.Name="キャンセル"
                         ToolTip="変更を破棄してダイアログを閉じる (Escape)"/>
+                <!-- 次へ（保存しない）（Issue #1134） -->
+                <Button Content="次へ"
+                        Command="{Binding SkipToNextCommand}"
+                        Visibility="{Binding ShowSaveAndNextButton, Converter={StaticResource BoolToVisibilityConverter}}"
+                        Padding="16,10"
+                        Margin="0,0,6,0"
+                        FontSize="{DynamicResource BaseFontSize}"
+                        AutomationProperties.Name="保存せず次の履歴へ"
+                        ToolTip="保存せずに次の履歴を開きます"/>
                 <!-- 保存して次へ（Issue #1134） -->
                 <Button Content="保存して次へ"
                         Command="{Binding SaveAndEditNextCommand}"

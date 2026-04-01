@@ -1739,6 +1739,16 @@ public partial class MainViewModel : ViewModelBase
                 }
             }
         }
+        // Issue #1134: 「次へ（保存しない）」が要求された場合
+        else if (capturedEditDialog?.IsSkipToNextRequested == true)
+        {
+            var currentIndex = HistoryLedgers.ToList().FindIndex(l => l.Id == ledger.Id);
+            if (currentIndex >= 0 && currentIndex < HistoryLedgers.Count - 1)
+            {
+                var nextLedger = HistoryLedgers[currentIndex + 1];
+                await EditLedgerWithAuthAsync(nextLedger, operatorIdm, showSaveAndNext: true);
+            }
+        }
     }
 
     /// <summary>

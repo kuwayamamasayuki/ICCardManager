@@ -190,6 +190,12 @@ namespace ICCardManager.ViewModels
         private bool _isSaveAndEditNextRequested;
 
         /// <summary>
+        /// 「次へ（保存しない）」が要求されたか（Issue #1134）
+        /// </summary>
+        [ObservableProperty]
+        private bool _isSkipToNextRequested;
+
+        /// <summary>
         /// 全行リスト（挿入位置計算用）
         /// </summary>
         private List<LedgerDto> _allLedgers = new();
@@ -747,6 +753,15 @@ namespace ICCardManager.ViewModels
         public void SetBreadcrumb(string text)
         {
             BreadcrumbText = text;
+        }
+
+        /// <summary>
+        /// 保存せず次の履歴へ（Issue #1134）
+        /// </summary>
+        [RelayCommand]
+        private void SkipToNext()
+        {
+            IsSkipToNextRequested = true;
         }
     }
 }
