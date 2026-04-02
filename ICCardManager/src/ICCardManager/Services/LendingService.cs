@@ -773,13 +773,16 @@ namespace ICCardManager.Services
 
                 // Issue #837: 同一カード・同一日の既存利用レコードを取得（統合用）
                 // 最初の利用セグメント処理時に既存レコードとの統合を試みる
+                // Issue #1147: 利用者（StaffName）が一致するレコードのみ統合対象とする
+                //   異なる職員が同日に同じカードを使った場合は別レコードとして作成
                 List<Ledger> existingUsageLedgers = null;
                 var hasUsageSegment = segments.Any(s => !s.IsCharge);
                 if (hasUsageSegment)
                 {
                     var existingLedgers = await _ledgerRepository.GetByDateRangeAsync(cardIdm, date, date);
                     existingUsageLedgers = existingLedgers
-                        .Where(l => !l.IsLentRecord && l.Income == 0 && string.IsNullOrEmpty(l.Note))
+                        .Where(l => !l.IsLentRecord && l.Income == 0 && string.IsNullOrEmpty(l.Note)
+                                    && l.StaffName == staffName)  // Issue #1147: 同一利用者のみ統合
                         .OrderByDescending(l => l.Balance)  // 残高降順（高い=古い）
                         .ToList();
                 }

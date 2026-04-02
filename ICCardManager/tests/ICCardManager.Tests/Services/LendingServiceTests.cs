@@ -2982,6 +2982,142 @@ public class LendingServiceTests : IDisposable
         updatedLedger.Balance.Should().Be(9480);
     }
 
+    /// <summary>
+    /// Issue #1147: 同一日でも利用者が異なる既存Ledgerとは統合せず、新規作成されること
+    /// </summary>
+    [Fact]
+    public async Task ReturnAsync_SameDayDifferentStaff_DoesNotConsolidate()
+    {
+        // Arrange
+        var card = CreateTestCard(isLent: true);
+        var staff = CreateTestStaff();
+        // 貸出レコードの職員名は TestStaffName（= "テスト太郎"）
+        var lentRecord = CreateTestLentRecord(daysAgo: 0);
+
+        var today = DateTime.Today;
+
+        // 今回の返却で読み取られた履歴（天神→薬院）
+        var usageDetails = new List<LedgerDetail>
+        {
+            new() { UseDate = today, EntryStation = "天神", ExitStation = "薬院", Amount = 170, Balance = 9570 }
+        };
+
+        // 既存のLedger（同日だが別の職員「山田花子」が利用）
+        var existingLedgerOfOtherStaff = new Ledger
+        {
+            Id = 500,
+            CardIdm = TestCardIdm,
+            Date = today,
+            Summary = "鉄道（博多～天神）",
+            Income = 0,
+            Expense = 260,
+            Balance = 9740,
+            StaffName = "山田花子",  // 異なる職員
+            IsLentRecord = false,
+            Note = null
+        };
+
+        SetupReturnMocks(card, staff, lentRecord);
+
+        // 同一日の既存Ledger（別の職員）を返す
+        _ledgerRepositoryMock.Setup(x => x.GetByDateRangeAsync(TestCardIdm, today, today))
+            .ReturnsAsync(new List<Ledger> { existingLedgerOfOtherStaff });
+
+        Ledger? insertedLedger = null;
+        _ledgerRepositoryMock.Setup(x => x.InsertAsync(It.Is<Ledger>(l => !l.IsLentRecord && l.Income == 0)))
+            .Callback<Ledger>(l => insertedLedger = l)
+            .ReturnsAsync(2);
+
+        // Act
+        var result = await _service.ReturnAsync(TestStaffIdm, TestCardIdm, usageDetails);
+
+        // Assert
+        result.Success.Should().BeTrue();
+
+        // 既存Ledger(Id=500)にInsertDetailsAsyncが呼ばれないこと（統合しない）
+        _ledgerRepositoryMock.Verify(
+            x => x.InsertDetailsAsync(500, It.IsAny<IEnumerable<LedgerDetail>>()),
+            Times.Never,
+            "異なる職員のLedgerには統合しない");
+
+        // 新規Ledgerが作成されること
+        insertedLedger.Should().NotBeNull("別の職員の利用なので新規Ledgerが作成される");
+        insertedLedger!.StaffName.Should().Be(TestStaffName, "新規Ledgerにはテスト太郎が設定される");
+        insertedLedger.Expense.Should().Be(170);
+    }
+
+    /// <summary>
+    /// Issue #1147: 同一日で利用者も同一の既存Ledgerがある場合は従来通り統合されること（回帰テスト）
+    /// </summary>
+    [Fact]
+    public async Task ReturnAsync_SameDaySameStaff_ConsolidatesCorrectly()
+    {
+        // Arrange
+        var card = CreateTestCard(isLent: true);
+        var staff = CreateTestStaff();
+        var lentRecord = CreateTestLentRecord(daysAgo: 1);
+
+        var today = DateTime.Today;
+
+        // 今回の返却で読み取られた履歴（博多→天神）
+        var usageDetails = new List<LedgerDetail>
+        {
+            new() { UseDate = today, EntryStation = "博多", ExitStation = "天神", Amount = 260, Balance = 9480 }
+        };
+
+        // 既存のLedger（同日・同一職員: テスト太郎が利用）
+        var existingLedger = new Ledger
+        {
+            Id = 600,
+            CardIdm = TestCardIdm,
+            Date = today,
+            Summary = "鉄道（天神～博多）",
+            Income = 0,
+            Expense = 260,
+            Balance = 9740,
+            StaffName = TestStaffName,  // 同一職員
+            IsLentRecord = false,
+            Note = null
+        };
+
+        // 統合後の全詳細
+        var fullLedger = new Ledger
+        {
+            Id = 600,
+            CardIdm = TestCardIdm,
+            Date = today,
+            Summary = "鉄道（天神～博多）",
+            Income = 0,
+            Expense = 260,
+            Balance = 9740,
+            StaffName = TestStaffName,
+            IsLentRecord = false,
+            Details = new List<LedgerDetail>
+            {
+                new() { UseDate = today, EntryStation = "天神", ExitStation = "博多", Amount = 260, Balance = 9740, SequenceNumber = 1 },
+                new() { UseDate = today, EntryStation = "博多", ExitStation = "天神", Amount = 260, Balance = 9480, SequenceNumber = 2 }
+            }
+        };
+
+        SetupReturnMocks(card, staff, lentRecord);
+        _ledgerRepositoryMock.Setup(x => x.GetByDateRangeAsync(TestCardIdm, today, today))
+            .ReturnsAsync(new List<Ledger> { existingLedger });
+        _ledgerRepositoryMock.Setup(x => x.GetByIdAsync(600))
+            .ReturnsAsync(fullLedger);
+
+        // Act
+        var result = await _service.ReturnAsync(TestStaffIdm, TestCardIdm, usageDetails);
+
+        // Assert
+        result.Success.Should().BeTrue();
+
+        // 同一職員の既存Ledger(Id=600)にInsertDetailsAsyncが呼ばれること（統合される）
+        _ledgerRepositoryMock.Verify(
+            x => x.InsertDetailsAsync(600, It.IsAny<IEnumerable<LedgerDetail>>()),
+            Times.Once,
+            "同一職員のLedgerには統合される");
+    }
+
     #endregion
 
     #region SplitAtChargeBoundaries テスト
