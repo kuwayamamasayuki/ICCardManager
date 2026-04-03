@@ -246,13 +246,11 @@ public partial class BusStopInputViewModel : ViewModelBase
 
         using (BeginBusy("保存中..."))
         {
-            // 未入力のバス停に★マークを付ける
+            // Issue #1156: スキップ時は入力済みの内容も破棄し、すべて★マークにする
             foreach (var item in BusUsages)
             {
-                if (string.IsNullOrWhiteSpace(item.BusStops))
-                {
-                    item.Detail.BusStops = "★";
-                }
+                item.BusStops = "★";
+                item.Detail.BusStops = "★";
             }
 
             // Issue #593: バス停名をledger_detailに保存

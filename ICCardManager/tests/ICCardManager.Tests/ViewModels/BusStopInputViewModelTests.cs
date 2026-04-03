@@ -311,15 +311,14 @@ public class BusStopInputViewModelTests
     #region SkipAsync
 
     [Fact]
-    public async Task SkipAsync_未入力のバス停のみに星マークが付くこと()
+    public async Task SkipAsync_未入力のバス停に星マークが付くこと()
     {
         // Arrange
         var detail1 = new LedgerDetail { IsBus = true, BusStops = null, Amount = 200, SequenceNumber = 1 };
-        var detail2 = new LedgerDetail { IsBus = true, BusStops = "天神バス停", Amount = 150, SequenceNumber = 2 };
         var ledger = new Ledger
         {
             Id = 1,
-            Details = new List<LedgerDetail> { detail1, detail2 }
+            Details = new List<LedgerDetail> { detail1 }
         };
 
         _settingsRepoMock.Setup(s => s.GetAppSettingsAsync())
@@ -337,8 +336,54 @@ public class BusStopInputViewModelTests
 
         // Assert
         detail1.BusStops.Should().Be("★");
-        detail2.BusStops.Should().Be("天神バス停"); // 入力済みは変更なし
         _viewModel.IsSaved.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task SkipAsync_入力済みのバス停も星マークにリセットされること()
+    {
+        // Arrange: Issue #1156 — スキップ時は入力済みの内容も破棄する
+        var detail1 = new LedgerDetail { IsBus = true, BusStops = null, Amount = 200, SequenceNumber = 1 };
+        var detail2 = new LedgerDetail { IsBus = true, BusStops = "天神バス停～博多駅前", Amount = 150, SequenceNumber = 2 };
+        var ledger = new Ledger
+        {
+            Id = 1,
+            Details = new List<LedgerDetail> { detail1, detail2 }
+        };
+
+        _settingsRepoMock.Setup(s => s.GetAppSettingsAsync())
+            .ReturnsAsync(new AppSettings());
+        _ledgerRepoMock.Setup(r => r.UpdateDetailBusStopsAsync(
+                It.IsAny<int>(), It.IsAny<List<(int, string)>>()))
+            .Returns(Task.CompletedTask);
+        _ledgerRepoMock.Setup(r => r.UpdateAsync(It.IsAny<Ledger>()))
+            .ReturnsAsync(true);
+
+        _viewModel.InitializeWithDetails(ledger, ledger.Details);
+
+        // ユーザーがバス停名を入力した状態をシミュレート
+        _viewModel.BusUsages[0].BusStops = "薬院大通～六本松三丁目";
+
+        // Act: スキップを実行
+        await _viewModel.SkipAsync();
+
+        // Assert: 入力済みの内容も含め、すべて★にリセットされる
+        detail1.BusStops.Should().Be("★");
+        detail2.BusStops.Should().Be("★");
+        _viewModel.BusUsages[0].BusStops.Should().Be("★");
+        _viewModel.BusUsages[1].BusStops.Should().Be("★");
+        _viewModel.IsSaved.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task SkipAsync_Ledgerがnullの場合は何もしないこと()
+    {
+        // Act（Ledgerを設定せずにスキップ）
+        await _viewModel.SkipAsync();
+
+        // Assert: リポジトリは呼ばれない
+        _ledgerRepoMock.Verify(
+            r => r.UpdateAsync(It.IsAny<Ledger>()), Times.Never);
     }
 
     #endregion
