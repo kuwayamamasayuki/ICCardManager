@@ -3,6 +3,8 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Media;
 using ICCardManager.Models;
 using ICCardManager.ViewModels;
 
@@ -30,6 +32,16 @@ namespace ICCardManager.Views.Dialogs
                     DialogResult = true;
                     Close();
                 }
+            };
+
+            // Issue #1133: ダイアログ表示完了後に最初のテキストボックスにフォーカスを設定し
+            // 直近利用のバス停候補を表示する（GotFocusイベント経由で候補表示）
+            ContentRendered += async (s, e) =>
+            {
+                // ウィンドウのアクティベーション完了後にPopupが安定して表示できるよう待機
+                await Task.Delay(100);
+                var firstTextBox = FindFirstBusStopTextBox();
+                firstTextBox?.Focus();
             };
         }
 
@@ -72,6 +84,28 @@ namespace ICCardManager.Views.Dialogs
             {
                 item.OnTextBoxGotFocus();
             }
+        }
+
+        /// <summary>
+        /// VisualTree を走査して最初のバス停名テキストボックスを取得
+        /// </summary>
+        private TextBox FindFirstBusStopTextBox()
+        {
+            return FindVisualChild<TextBox>(this);
+        }
+
+        private static T FindVisualChild<T>(DependencyObject parent) where T : DependencyObject
+        {
+            for (int i = 0; i < VisualTreeHelper.GetChildrenCount(parent); i++)
+            {
+                var child = VisualTreeHelper.GetChild(parent, i);
+                if (child is T found)
+                    return found;
+                var result = FindVisualChild<T>(child);
+                if (result != null)
+                    return result;
+            }
+            return null;
         }
     }
 }
