@@ -85,8 +85,9 @@
                                          VerticalAlignment="Center"
                                          FontSize="{DynamicResource BaseFontSize}"
                                          AutomationProperties.Name="バス停名"
-                                         AutomationProperties.HelpText="乗車バス停～降車バス停の形式で入力。過去の履歴から候補が表示されます。"
-                                         ToolTip="乗車バス停～降車バス停（例: 天神～博多駅）"/>
+                                         AutomationProperties.HelpText="乗車バス停～降車バス停の形式で入力。過去の履歴から候補が表示されます。フォーカス時に直近利用のバス停が表示されます。"
+                                         ToolTip="乗車バス停～降車バス停（例: 天神～博多駅）"
+                                         GotFocus="BusStopTextBox_GotFocus"/>
                                 <TextBlock Text="入力例: ○○バス停～△△バス停" Foreground="{DynamicResource SecondaryTextBrush}" FontSize="11" Margin="0,2,0,0"/>
                             </StackPanel>
 

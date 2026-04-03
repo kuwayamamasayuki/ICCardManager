@@ -353,22 +353,28 @@ WHERE l.id = (
         }
 
         /// <inheritdoc/>
-        public async Task<IEnumerable<(string BusStops, int UsageCount)>> GetBusStopSuggestionsAsync()
+        public async Task<IEnumerable<(string BusStops, int UsageCount, DateTime? LastUsedDate)>> GetBusStopSuggestionsAsync()
         {
             var connection = _dbContext.GetConnection();
-            var result = new List<(string BusStops, int UsageCount)>();
+            var result = new List<(string BusStops, int UsageCount, DateTime? LastUsedDate)>();
 
             using var command = connection.CreateCommand();
-            // バス停名を重複排除し、使用頻度順でソート
+            // Issue #1133: バス停名を重複排除し、頻度＋直近利用のスコア順でソート
             // ★マークや空文字は除外
-            command.CommandText = @"SELECT bus_stops, COUNT(*) as usage_count
+            // スコア = 使用回数 + 直近30日以内の利用で+50ボーナス + 直近7日以内で+100ボーナス
+            command.CommandText = @"SELECT bus_stops, COUNT(*) as usage_count, MAX(use_date) as last_used_date,
+  COUNT(*) +
+  CASE WHEN MAX(use_date) >= date('now', '-7 days') THEN 100
+       WHEN MAX(use_date) >= date('now', '-30 days') THEN 50
+       ELSE 0
+  END as score
 FROM ledger_detail
 WHERE is_bus = 1
   AND bus_stops IS NOT NULL
   AND bus_stops != ''
   AND bus_stops != '★'
 GROUP BY bus_stops
-ORDER BY usage_count DESC, bus_stops
+ORDER BY score DESC, usage_count DESC, bus_stops
 LIMIT 100";
 
             using var reader = await command.ExecuteReaderAsync();
@@ -376,7 +382,15 @@ LIMIT 100";
             {
                 var busStops = reader.GetString(0);
                 var usageCount = reader.GetInt32(1);
-                result.Add((busStops, usageCount));
+                DateTime? lastUsedDate = null;
+                if (!reader.IsDBNull(2))
+                {
+                    if (DateTime.TryParse(reader.GetString(2), out var parsed))
+                    {
+                        lastUsedDate = parsed;
+                    }
+                }
+                result.Add((busStops, usageCount, lastUsedDate));
             }
 
             return result;
