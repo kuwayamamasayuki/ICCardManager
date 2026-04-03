@@ -8,10 +8,11 @@
         mc:Ignorable="d"
         d:DataContext="{d:DesignInstance Type=vm:SystemManageViewModel}"
         Title="システム管理"
-        Height="620"
+        Height="750"
         Width="650"
+        MinHeight="620"
         WindowStartupLocation="CenterOwner"
-        ResizeMode="NoResize"
+        ResizeMode="CanResize"
         Loaded="Window_Loaded"
         FontSize="{DynamicResource BaseFontSize}"
         AutomationProperties.Name="システム管理ダイアログ"
@@ -102,7 +103,8 @@
                            Margin="0,0,0,10"/>
 
                 <!-- バックアップ一覧 -->
-                <Border Grid.Row="1" BorderBrush="{DynamicResource NeutralBorderBrush}" BorderThickness="1" CornerRadius="4">
+                <Border Grid.Row="1" BorderBrush="{DynamicResource NeutralBorderBrush}" BorderThickness="1" CornerRadius="4"
+                        MinHeight="120">
                     <ListView ItemsSource="{Binding BackupFiles}"
                               SelectedItem="{Binding SelectedBackup}"
                               SelectionMode="Single"
