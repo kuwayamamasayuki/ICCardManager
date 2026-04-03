@@ -1377,6 +1377,17 @@ public partial class MainViewModel : ViewModelBase
             // Issue #784: 残高チェーンに基づいて同一日内の時系列順を復元
             var ledgers = Services.LedgerOrderHelper.ReorderByBalanceChain(rawLedgers);
 
+            // Issue #1155: 1ページ目の先頭に繰越行を挿入（帳票と同じ表示）
+            if (HistoryCurrentPage == 1)
+            {
+                var carryoverDto = await BuildCarryoverRowAsync(
+                    HistoryCard.CardIdm, HistoryFromDate.Year, HistoryFromDate.Month);
+                if (carryoverDto != null)
+                {
+                    HistoryLedgers.Add(carryoverDto);
+                }
+            }
+
             foreach (var ledger in ledgers)
             {
                 var dto = ledger.ToDto();
@@ -1412,6 +1423,62 @@ public partial class MainViewModel : ViewModelBase
             // Issue #1052: 残高不整合ハイライトの適用（ページ遷移時にも再適用される）
             ApplyBalanceInconsistencyMarkers();
         }
+    }
+
+    /// <summary>
+    /// Issue #1155: 繰越行のDTOを生成する
+    /// ReportDataBuilderと同じロジックで、4月は前年度繰越、それ以外は前月繰越を生成
+    /// </summary>
+    internal async Task<LedgerDto> BuildCarryoverRowAsync(string cardIdm, int year, int month)
+    {
+        int? precedingBalance;
+        if (month == 4)
+        {
+            precedingBalance = await _ledgerRepository.GetCarryoverBalanceAsync(cardIdm, year - 1);
+        }
+        else
+        {
+            // 前月末の最新残高を取得
+            var firstDayOfMonth = new DateTime(year, month, 1);
+            var lastLedger = await _ledgerRepository.GetLatestBeforeDateAsync(cardIdm, firstDayOfMonth);
+            precedingBalance = lastLedger?.Balance;
+        }
+
+        if (!precedingBalance.HasValue)
+        {
+            return null;
+        }
+
+        string summary;
+        int income;
+        if (month == 4)
+        {
+            summary = SummaryGenerator.GetCarryoverFromPreviousYearSummary();
+            income = precedingBalance.Value;
+        }
+        else
+        {
+            int previousMonth = month == 1 ? 12 : month - 1;
+            summary = SummaryGenerator.GetCarryoverFromPreviousMonthSummary(previousMonth);
+            // 月次繰越の受入欄は空欄（受入金額を表示するのは4月の前年度繰越のみ）
+            income = 0;
+        }
+
+        return new LedgerDto
+        {
+            Id = 0,
+            CardIdm = cardIdm,
+            Date = new DateTime(year, month, 1),
+            DateDisplay = WarekiConverter.ToWareki(new DateTime(year, month, 1)),
+            Summary = summary,
+            Income = income,
+            Expense = 0,
+            Balance = precedingBalance.Value,
+            StaffName = null,
+            Note = null,
+            IsLentRecord = false,
+            IsCarryoverRow = true
+        };
     }
 
     /// <summary>

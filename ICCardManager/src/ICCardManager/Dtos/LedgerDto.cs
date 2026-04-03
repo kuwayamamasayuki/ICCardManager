@@ -87,6 +87,11 @@ namespace ICCardManager.Dtos
         public bool IsLentRecord { get; set; }
 
         /// <summary>
+        /// 繰越行フラグ（前年度繰越・前月繰越など、合成的に表示する行）
+        /// </summary>
+        public bool IsCarryoverRow { get; set; }
+
+        /// <summary>
         /// 残高不整合フラグ（Issue #1052: 警告クリック時のハイライト表示用）
         /// </summary>
         private bool _hasBalanceInconsistency;

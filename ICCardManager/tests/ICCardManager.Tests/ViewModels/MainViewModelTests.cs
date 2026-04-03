@@ -875,6 +875,101 @@ public class MainViewModelTests
     }
 
     #endregion
+
+    #region 繰越行表示テスト（Issue #1155）
+
+    [Fact]
+    public async Task BuildCarryoverRowAsync_4月_前年度繰越行が生成されること()
+    {
+        // Arrange
+        var cardIdm = "0102030405060708";
+        _ledgerRepositoryMock.Setup(r => r.GetCarryoverBalanceAsync(cardIdm, 2025))
+            .ReturnsAsync(5000);
+
+        // Act
+        var result = await _viewModel.BuildCarryoverRowAsync(cardIdm, 2026, 4);
+
+        // Assert
+        result.Should().NotBeNull();
+        result.IsCarryoverRow.Should().BeTrue();
+        result.Summary.Should().Be(SummaryGenerator.GetCarryoverFromPreviousYearSummary());
+        result.Income.Should().Be(5000);
+        result.Balance.Should().Be(5000);
+        result.Expense.Should().Be(0);
+        result.Date.Should().Be(new DateTime(2026, 4, 1));
+        result.StaffName.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task BuildCarryoverRowAsync_4月以外_前月繰越行が生成されること()
+    {
+        // Arrange
+        var cardIdm = "0102030405060708";
+        var previousLedger = new Ledger { Balance = 3000 };
+        _ledgerRepositoryMock.Setup(r => r.GetLatestBeforeDateAsync(cardIdm, new DateTime(2026, 7, 1)))
+            .ReturnsAsync(previousLedger);
+
+        // Act
+        var result = await _viewModel.BuildCarryoverRowAsync(cardIdm, 2026, 7);
+
+        // Assert
+        result.Should().NotBeNull();
+        result.IsCarryoverRow.Should().BeTrue();
+        result.Summary.Should().Be(SummaryGenerator.GetCarryoverFromPreviousMonthSummary(6));
+        result.Income.Should().Be(0, "月次繰越の受入欄は空欄");
+        result.Balance.Should().Be(3000);
+        result.Date.Should().Be(new DateTime(2026, 7, 1));
+    }
+
+    [Fact]
+    public async Task BuildCarryoverRowAsync_前年度データなし_nullが返ること()
+    {
+        // Arrange
+        var cardIdm = "0102030405060708";
+        _ledgerRepositoryMock.Setup(r => r.GetCarryoverBalanceAsync(cardIdm, 2025))
+            .ReturnsAsync((int?)null);
+
+        // Act
+        var result = await _viewModel.BuildCarryoverRowAsync(cardIdm, 2026, 4);
+
+        // Assert
+        result.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task BuildCarryoverRowAsync_前月データなし_nullが返ること()
+    {
+        // Arrange
+        var cardIdm = "0102030405060708";
+        _ledgerRepositoryMock.Setup(r => r.GetLatestBeforeDateAsync(cardIdm, new DateTime(2026, 6, 1)))
+            .ReturnsAsync((Ledger)null);
+
+        // Act
+        var result = await _viewModel.BuildCarryoverRowAsync(cardIdm, 2026, 6);
+
+        // Assert
+        result.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task BuildCarryoverRowAsync_1月_前月は12月であること()
+    {
+        // Arrange
+        var cardIdm = "0102030405060708";
+        var previousLedger = new Ledger { Balance = 2000 };
+        _ledgerRepositoryMock.Setup(r => r.GetLatestBeforeDateAsync(cardIdm, new DateTime(2026, 1, 1)))
+            .ReturnsAsync(previousLedger);
+
+        // Act
+        var result = await _viewModel.BuildCarryoverRowAsync(cardIdm, 2026, 1);
+
+        // Assert
+        result.Should().NotBeNull();
+        result.Summary.Should().Be(SummaryGenerator.GetCarryoverFromPreviousMonthSummary(12));
+        result.Balance.Should().Be(2000);
+    }
+
+    #endregion
 }
 
 /*

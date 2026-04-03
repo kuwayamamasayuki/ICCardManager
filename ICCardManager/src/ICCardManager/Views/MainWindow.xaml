@@ -419,7 +419,8 @@
                                             <CheckBox IsChecked="{Binding IsChecked, UpdateSourceTrigger=PropertyChanged}"
                                                       HorizontalAlignment="Center"
                                                       VerticalAlignment="Center"
-                                                      AutomationProperties.Name="統合対象として選択"/>
+                                                      AutomationProperties.Name="統合対象として選択"
+                                                      Visibility="{Binding IsCarryoverRow, Converter={StaticResource BoolToVisibilityConverter}, ConverterParameter=invert}"/>
                                         </DataTemplate>
                                     </DataGridTemplateColumn.CellTemplate>
                                 </DataGridTemplateColumn>
@@ -461,7 +462,8 @@
                                 <DataGridTemplateColumn Header="操作" Width="130">
                                     <DataGridTemplateColumn.CellTemplate>
                                         <DataTemplate>
-                                            <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
+                                            <StackPanel Orientation="Horizontal" HorizontalAlignment="Center"
+                                                        Visibility="{Binding IsCarryoverRow, Converter={StaticResource BoolToVisibilityConverter}, ConverterParameter=invert}">
                                                 <Button Content="詳細"
                                                         Command="{Binding DataContext.ShowLedgerDetailCommand, RelativeSource={RelativeSource AncestorType=DataGrid}}"
                                                         CommandParameter="{Binding}"
@@ -488,6 +490,10 @@
                                         <Trigger Property="AlternationIndex" Value="1">
                                             <Setter Property="Background" Value="{DynamicResource AlternatingRowBrush}"/>
                                         </Trigger>
+                                        <!-- Issue #1155: 繰越行は太字で表示 -->
+                                        <DataTrigger Binding="{Binding IsCarryoverRow}" Value="True">
+                                            <Setter Property="FontWeight" Value="Bold"/>
+                                        </DataTrigger>
                                         <DataTrigger Binding="{Binding IsLentRecord}" Value="True">
                                             <Setter Property="Background" Value="{DynamicResource LendingBackgroundBrush}"/>
                                             <Setter Property="FontStyle" Value="Italic"/>
