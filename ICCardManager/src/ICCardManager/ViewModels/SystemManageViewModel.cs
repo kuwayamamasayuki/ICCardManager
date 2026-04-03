@@ -173,6 +173,8 @@ public partial class SystemManageViewModel : ViewModelBase
             return;
         }
 
+        bool restoreSuccess = false;
+
         using (BeginBusy("リストア中..."))
         {
             try
@@ -199,18 +201,10 @@ public partial class SystemManageViewModel : ViewModelBase
                 }
 
                 // リストア実行
-                var success = _backupService.RestoreFromBackup(SelectedBackup.FilePath);
-                if (success)
+                restoreSuccess = _backupService.RestoreFromBackup(SelectedBackup.FilePath);
+                if (restoreSuccess)
                 {
                     SetStatus("リストアが完了しました。アプリケーションを再起動してください。", false);
-
-                    // 再起動を促すダイアログ
-                    MessageBox.Show(
-                        "リストアが完了しました。\n\n" +
-                        "変更を反映するには、アプリケーションを再起動してください。",
-                        "リストア完了",
-                        MessageBoxButton.OK,
-                        MessageBoxImage.Information);
                 }
                 else
                 {
@@ -226,6 +220,17 @@ public partial class SystemManageViewModel : ViewModelBase
             {
                 SetStatus($"リストアに失敗しました: {ex.Message}", true);
             }
+        }
+
+        // プログレスバーを非表示にしてから再起動を促すダイアログを表示
+        if (restoreSuccess)
+        {
+            MessageBox.Show(
+                "リストアが完了しました。\n\n" +
+                "変更を反映するには、アプリケーションを再起動してください。",
+                "リストア完了",
+                MessageBoxButton.OK,
+                MessageBoxImage.Information);
         }
     }
 
@@ -296,6 +301,8 @@ public partial class SystemManageViewModel : ViewModelBase
             return;
         }
 
+        bool restoreFromFileSuccess = false;
+
         using (BeginBusy("リストア中..."))
         {
             try
@@ -322,21 +329,10 @@ public partial class SystemManageViewModel : ViewModelBase
                 }
 
                 // リストア実行
-                var success = _backupService.RestoreFromBackup(dialog.FileName);
-                if (success)
+                restoreFromFileSuccess = _backupService.RestoreFromBackup(dialog.FileName);
+                if (restoreFromFileSuccess)
                 {
                     SetStatus("リストアが完了しました。アプリケーションを再起動してください。", false);
-
-                    // 再起動を促すダイアログ
-                    MessageBox.Show(
-                        "リストアが完了しました。\n\n" +
-                        "変更を反映するには、アプリケーションを再起動してください。",
-                        "リストア完了",
-                        MessageBoxButton.OK,
-                        MessageBoxImage.Information);
-
-                    // バックアップ一覧を更新
-                    await LoadBackupsAsync();
                 }
                 else
                 {
@@ -352,6 +348,20 @@ public partial class SystemManageViewModel : ViewModelBase
             {
                 SetStatus($"リストアに失敗しました: {ex.Message}", true);
             }
+        }
+
+        // プログレスバーを非表示にしてから再起動を促すダイアログを表示
+        if (restoreFromFileSuccess)
+        {
+            MessageBox.Show(
+                "リストアが完了しました。\n\n" +
+                "変更を反映するには、アプリケーションを再起動してください。",
+                "リストア完了",
+                MessageBoxButton.OK,
+                MessageBoxImage.Information);
+
+            // バックアップ一覧を更新
+            await LoadBackupsAsync();
         }
     }
 
