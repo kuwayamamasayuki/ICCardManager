@@ -37,14 +37,14 @@
 
   <ItemGroup>
     <!-- SQLite (.NET Framework対応版) -->
-    <PackageReference Include="System.Data.SQLite.Core" Version="1.0.118" />
+    <PackageReference Include="System.Data.SQLite.Core" Version="1.0.119" />
 
-    <!-- DI Container (.NET Framework対応版) -->
-    <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="3.1.32" />
+    <!-- DI Container (netstandard2.0対応、.NET Framework 4.8で動作) -->
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="8.0.1" />
 
-    <!-- Logging (.NET Framework対応版) -->
-    <PackageReference Include="Microsoft.Extensions.Logging" Version="3.1.32" />
-    <PackageReference Include="Microsoft.Extensions.Logging.Debug" Version="3.1.32" />
+    <!-- Logging (netstandard2.0対応、.NET Framework 4.8で動作) -->
+    <PackageReference Include="Microsoft.Extensions.Logging" Version="8.0.1" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Debug" Version="8.0.1" />
 
     <!-- MVVM Toolkit -->
     <PackageReference Include="CommunityToolkit.Mvvm" Version="8.2.2" />

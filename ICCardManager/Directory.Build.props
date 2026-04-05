@@ -3,5 +3,7 @@
     <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
     <!-- C# 9.0を使用してCommunityToolkit.Mvvmのソースジェネレータを有効化 -->
     <LangVersion>10.0</LangVersion>
+    <!-- NuGet推移的依存のバージョンをロックファイルで固定（サプライチェーン攻撃対策） -->
+    <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
   </PropertyGroup>
 </Project>

@@ -1,0 +1,15 @@
+version: 2
+updates:
+  # NuGetパッケージの週次セキュリティチェック
+  - package-ecosystem: "nuget"
+    directory: "/ICCardManager"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+
+  # GitHub Actionsの週次セキュリティチェック（SHAピン留めの自動更新）
+  - package-ecosystem: "github-actions"
+    directory: "/ICCardManager"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 3

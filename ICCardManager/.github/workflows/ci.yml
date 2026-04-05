@@ -29,15 +29,15 @@ jobs:
 
     steps:
     - name: Checkout
-      uses: actions/checkout@v4
+      uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
 
     - name: Setup .NET
-      uses: actions/setup-dotnet@v4
+      uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4.3.1
       with:
         dotnet-version: ${{ env.DOTNET_VERSION }}
 
-    - name: Restore dependencies
-      run: dotnet restore
+    - name: Restore dependencies (locked mode)
+      run: dotnet restore --locked-mode
 
     - name: Build
       run: dotnet build --no-restore --configuration Release
@@ -67,7 +67,7 @@ jobs:
         Write-Host "Coverage threshold check passed (>= $threshold%)"
 
     - name: Upload coverage reports
-      uses: codecov/codecov-action@v4
+      uses: codecov/codecov-action@b9fd7d16f6d7d1b5d2bec1a2887e65ceed900238 # v4.6.0
       with:
         directory: ./ICCardManager/coverage
         fail_ci_if_error: false
@@ -82,15 +82,15 @@ jobs:
 
     steps:
     - name: Checkout
-      uses: actions/checkout@v4
+      uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
 
     - name: Setup .NET
-      uses: actions/setup-dotnet@v4
+      uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4.3.1
       with:
         dotnet-version: ${{ env.DOTNET_VERSION }}
 
-    - name: Restore dependencies
-      run: dotnet restore
+    - name: Restore dependencies (locked mode)
+      run: dotnet restore --locked-mode
 
     - name: Check code format
       run: dotnet format --verify-no-changes --verbosity diagnostic
@@ -108,15 +108,15 @@ jobs:
 
     steps:
     - name: Checkout
-      uses: actions/checkout@v4
+      uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
 
     - name: Setup .NET
-      uses: actions/setup-dotnet@v4
+      uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4.3.1
       with:
         dotnet-version: ${{ env.DOTNET_VERSION }}
 
-    - name: Restore dependencies
-      run: dotnet restore
+    - name: Restore dependencies (locked mode)
+      run: dotnet restore --locked-mode
 
     - name: Check for vulnerable NuGet packages
       run: |
@@ -140,5 +140,12 @@ jobs:
         } else {
           Write-Host "No deprecated packages found."
         }
+      shell: pwsh
+      continue-on-error: true
+
+    - name: Check for outdated NuGet packages
+      run: |
+        Write-Host "=== Outdated NuGet packages ==="
+        dotnet list src/ICCardManager/ICCardManager.csproj package --outdated
       shell: pwsh
       continue-on-error: true
