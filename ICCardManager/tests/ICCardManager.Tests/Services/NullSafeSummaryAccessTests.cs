@@ -40,8 +40,8 @@ public class NullSafeSummaryAccessTests
         var date = new DateTime(2024, 6, 10);
         var ledgers = new[]
         {
-            CreateLedger(1, date, null, 0, 300, 9700),   // Summary=null
-            CreateLedger(2, date, null, 0, 200, 9500),   // Summary=null
+            CreateLedger(1, date, null!, 0, 300, 9700),   // Summary=null
+            CreateLedger(2, date, null!, 0, 200, 9500),   // Summary=null
         };
 
         // Act - NullReferenceExceptionが発生しないこと
@@ -60,7 +60,7 @@ public class NullSafeSummaryAccessTests
         var ledgers = new[]
         {
             CreateLedger(1, date, "新規購入", 5000, 0, 5000),    // 特殊レコード
-            CreateLedger(2, date, null, 0, 300, 4700),           // Summary=null（通常レコード扱い）
+            CreateLedger(2, date, null!, 0, 300, 4700),           // Summary=null（通常レコード扱い）
         };
 
         var result = LedgerOrderHelper.ReorderByBalanceChain(ledgers);
@@ -79,7 +79,7 @@ public class NullSafeSummaryAccessTests
         var date = new DateTime(2024, 4, 1);
         var ledgers = new[]
         {
-            CreateLedger(2, date, null, 0, 200, 4800),            // Summary=null
+            CreateLedger(2, date, null!, 0, 200, 4800),            // Summary=null
             CreateLedger(1, date, "3月から繰越", 0, 0, 5000),     // 特殊レコード
         };
 

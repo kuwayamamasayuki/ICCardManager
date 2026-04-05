@@ -70,7 +70,7 @@ public class ServiceResultTests
     [Fact]
     public void ImplicitBoolConversion_Null_ShouldBeFalse()
     {
-        ServiceResult result = null;
+        ServiceResult? result = null;
 
         bool boolValue = result;
 
@@ -128,7 +128,7 @@ public class ServiceResultTests
     [Fact]
     public void GenericOk_WithNullData_ShouldReturnSuccessWithNullData()
     {
-        var result = ServiceResult<string>.Ok(null);
+        var result = ServiceResult<string>.Ok(null!);
 
         result.Success.Should().BeTrue();
         result.Data.Should().BeNull();

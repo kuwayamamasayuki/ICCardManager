@@ -10,7 +10,7 @@ namespace ICCardManager.Tests.Infrastructure.Timing
     {
         public TimeSpan Interval { get; set; }
         public bool IsRunning { get; private set; }
-        public event EventHandler Tick;
+        public event EventHandler? Tick;
 
         public void Start() => IsRunning = true;
 
@@ -48,7 +48,7 @@ namespace ICCardManager.Tests.Infrastructure.Timing
         /// <summary>
         /// 最後に生成されたタイマー
         /// </summary>
-        public TestTimer LastCreatedTimer { get; private set; }
+        public TestTimer? LastCreatedTimer { get; private set; }
 
         public ITimer Create()
         {
