@@ -77,7 +77,7 @@ public class OrganizationOptionsTests : IDisposable
     public void JSON設定からバインドできる()
     {
         var config = new ConfigurationBuilder()
-            .AddInMemoryCollection(new Dictionary<string, string>
+            .AddInMemoryCollection(new Dictionary<string, string?>
             {
                 ["OrganizationOptions:SummaryText:ChargeSummaryMayorOffice"] = "需用費によりチャージ",
                 ["OrganizationOptions:SummaryText:RailwayLabel"] = "電車",
@@ -110,7 +110,7 @@ public class OrganizationOptionsTests : IDisposable
     public void セクションが存在しない場合はデフォルト値が使用される()
     {
         var config = new ConfigurationBuilder()
-            .AddInMemoryCollection(new Dictionary<string, string>())
+            .AddInMemoryCollection(new Dictionary<string, string?>())
             .Build();
 
         var services = new ServiceCollection();

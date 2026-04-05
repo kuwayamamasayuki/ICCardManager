@@ -295,8 +295,8 @@ public class MainViewModelTests
 
         // Assert
         _timerFactory.LastCreatedTimer.Should().NotBeNull();
-        _timerFactory.LastCreatedTimer.IsRunning.Should().BeTrue();
-        _timerFactory.LastCreatedTimer.Interval.Should().Be(TimeSpan.FromSeconds(1));
+        _timerFactory.LastCreatedTimer!.IsRunning.Should().BeTrue();
+        _timerFactory.LastCreatedTimer!.Interval.Should().Be(TimeSpan.FromSeconds(1));
     }
 
     /// <summary>
@@ -378,7 +378,7 @@ public class MainViewModelTests
             _cardReaderMock.Object, new CardReadEventArgs { Idm = staffIdm });
         await _dispatcherService.WaitForPendingAsync();
 
-        var timer = _timerFactory.LastCreatedTimer;
+        var timer = _timerFactory.LastCreatedTimer!;
         _viewModel.RemainingSeconds.Should().Be(60);
 
         // Act - 5回Tickを発火
@@ -403,7 +403,7 @@ public class MainViewModelTests
             _cardReaderMock.Object, new CardReadEventArgs { Idm = staffIdm });
         await _dispatcherService.WaitForPendingAsync();
 
-        var timer = _timerFactory.LastCreatedTimer;
+        var timer = _timerFactory.LastCreatedTimer!;
 
         // Act - 60回Tick（タイムアウト）
         timer.SimulateTicks(60);
@@ -429,7 +429,7 @@ public class MainViewModelTests
             _cardReaderMock.Object, new CardReadEventArgs { Idm = staffIdm });
         await _dispatcherService.WaitForPendingAsync();
 
-        var timer = _timerFactory.LastCreatedTimer;
+        var timer = _timerFactory.LastCreatedTimer!;
 
         // Act
         timer.SimulateTicks(60);
@@ -453,7 +453,7 @@ public class MainViewModelTests
             _cardReaderMock.Object, new CardReadEventArgs { Idm = staffIdm });
         await _dispatcherService.WaitForPendingAsync();
 
-        var timer = _timerFactory.LastCreatedTimer;
+        var timer = _timerFactory.LastCreatedTimer!;
 
         // Act
         timer.SimulateTicks(60);
@@ -520,7 +520,7 @@ public class MainViewModelTests
             _cardReaderMock.Object, new CardReadEventArgs { Idm = staffIdm });
         await _dispatcherService.WaitForPendingAsync();
 
-        var timer = _timerFactory.LastCreatedTimer;
+        var timer = _timerFactory.LastCreatedTimer!;
 
         // Act - 59回Tick（タイムアウト手前）
         timer.SimulateTicks(59);
@@ -942,7 +942,7 @@ public class MainViewModelTests
         // Arrange
         var cardIdm = "0102030405060708";
         _ledgerRepositoryMock.Setup(r => r.GetLatestBeforeDateAsync(cardIdm, new DateTime(2026, 6, 1)))
-            .ReturnsAsync((Ledger)null);
+            .ReturnsAsync((Ledger?)null);
 
         // Act
         var result = await _viewModel.BuildCarryoverRowAsync(cardIdm, 2026, 6);

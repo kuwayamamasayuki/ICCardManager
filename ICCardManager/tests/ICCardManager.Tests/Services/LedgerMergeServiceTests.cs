@@ -623,7 +623,7 @@ public class LedgerMergeServiceTests
         capturedDescription.Should().Contain("鉄道（C～D）");
 
         // UndoデータのJSONがデシリアライズ可能であること
-        var undoData = JsonSerializer.Deserialize<LedgerMergeUndoData>(capturedUndoJson, JsonOptions);
+        var undoData = JsonSerializer.Deserialize<LedgerMergeUndoData>(capturedUndoJson!, JsonOptions);
         undoData.Should().NotBeNull();
         undoData!.OriginalTarget.Id.Should().Be(1);
         undoData.DeletedSources.Should().HaveCount(1);
@@ -658,7 +658,7 @@ public class LedgerMergeServiceTests
         await _service.MergeAsync(new List<int> { 1, 2 });
 
         // Assert
-        var undoData = JsonSerializer.Deserialize<LedgerMergeUndoData>(capturedUndoJson, JsonOptions);
+        var undoData = JsonSerializer.Deserialize<LedgerMergeUndoData>(capturedUndoJson!, JsonOptions);
         undoData!.DetailOriginalLedgerMap.Should().ContainKey("10");
         undoData.DetailOriginalLedgerMap["10"].Should().Be(1);
         undoData.DetailOriginalLedgerMap.Should().ContainKey("20");
