@@ -45,22 +45,22 @@
 
   <ItemGroup>
     <!-- SQLite (.NET Framework対応版) -->
-    <PackageReference Include="System.Data.SQLite.Core" Version="1.0.118" />
+    <PackageReference Include="System.Data.SQLite.Core" Version="1.0.119" />
 
     <!-- Excel操作 -->
-    <PackageReference Include="ClosedXML" Version="0.102.2" />
+    <PackageReference Include="ClosedXML" Version="0.105.0" />
 
-    <!-- DI Container (.NET Framework対応版) -->
-    <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="3.1.32" />
-    <PackageReference Include="Microsoft.Extensions.Hosting" Version="3.1.32" />
+    <!-- DI Container (netstandard2.0対応、.NET Framework 4.8で動作) -->
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="8.0.1" />
+    <PackageReference Include="Microsoft.Extensions.Hosting" Version="8.0.1" />
 
-    <!-- Logging (.NET Framework対応版) -->
-    <PackageReference Include="Microsoft.Extensions.Logging" Version="3.1.32" />
-    <PackageReference Include="Microsoft.Extensions.Logging.Debug" Version="3.1.32" />
-    <PackageReference Include="Microsoft.Extensions.Configuration.Json" Version="3.1.32" />
+    <!-- Logging (netstandard2.0対応、.NET Framework 4.8で動作) -->
+    <PackageReference Include="Microsoft.Extensions.Logging" Version="8.0.1" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Debug" Version="8.0.1" />
+    <PackageReference Include="Microsoft.Extensions.Configuration.Json" Version="8.0.1" />
 
-    <!-- Memory Cache (.NET Framework対応版) -->
-    <PackageReference Include="Microsoft.Extensions.Caching.Memory" Version="3.1.32" />
+    <!-- Memory Cache (netstandard2.0対応、CVE-2024-43485修正済み) -->
+    <PackageReference Include="Microsoft.Extensions.Caching.Memory" Version="8.0.1" />
 
     <!-- MVVM Toolkit -->
     <PackageReference Include="CommunityToolkit.Mvvm" Version="8.2.2" />
@@ -92,7 +92,10 @@
     <None Update="appsettings.json">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
-    <!-- FeliCa ネイティブライブラリ (Sony PaSoRi用) -->
+    <!-- FeliCa ネイティブライブラリ (Sony PaSoRi用)
+         出自: https://github.com/tmurakam/felicalib (MIT License)
+         SHA-256: f49c3af37dadf3d8a309492a2eb7fcded8c66dd3bb1bec855597bd65f9d9460d
+         x86ネイティブDLL。NuGetパッケージ管理外のため、ハッシュで整合性を管理 -->
     <None Include="felicalib.dll">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>

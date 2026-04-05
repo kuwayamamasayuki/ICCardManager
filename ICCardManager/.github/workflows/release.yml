@@ -18,10 +18,10 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
 
       - name: Setup .NET
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4.3.1
         with:
           dotnet-version: ${{ env.DOTNET_VERSION }}
 
@@ -30,8 +30,8 @@ jobs:
         shell: bash
         run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
 
-      - name: Restore dependencies
-        run: dotnet restore ICCardManager/ICCardManager.sln
+      - name: Restore dependencies (locked mode)
+        run: dotnet restore ICCardManager/ICCardManager.sln --locked-mode
 
       - name: Build
         run: dotnet build ICCardManager/ICCardManager.sln --no-restore --configuration Release
@@ -88,8 +88,15 @@ jobs:
           echo "\`\`\`" >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
 
+      - name: Generate checksums
+        shell: pwsh
+        run: |
+          $zipFile = "./ICCardManager_v${{ steps.get_version.outputs.VERSION }}.zip"
+          $hash = (Get-FileHash -Path $zipFile -Algorithm SHA256).Hash
+          "$hash  ICCardManager_v${{ steps.get_version.outputs.VERSION }}.zip" | Out-File -FilePath "./SHA256SUMS.txt" -Encoding utf8
+
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@153bb8e04406b158c6c84fc1615b65b24149a1fe # v2.6.1
         with:
           name: ICCardManager v${{ steps.get_version.outputs.VERSION }}
           body: ${{ steps.release_notes.outputs.NOTES }}
@@ -97,11 +104,12 @@ jobs:
           prerelease: ${{ contains(github.ref, 'alpha') || contains(github.ref, 'beta') || contains(github.ref, 'rc') }}
           files: |
             ./ICCardManager_v${{ steps.get_version.outputs.VERSION }}.zip
+            ./SHA256SUMS.txt
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Upload build artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: ICCardManager-v${{ steps.get_version.outputs.VERSION }}
           path: ./release/
