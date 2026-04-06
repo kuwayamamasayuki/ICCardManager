@@ -66,6 +66,17 @@ namespace ICCardManager.Data.Repositories
         Task<bool> DeleteAsync(int id);
 
         /// <summary>
+        /// 指定カードの貸出中レコードをすべて削除
+        /// </summary>
+        /// <remarks>
+        /// 共有モードで複数PCから同時に貸出された場合に重複する貸出中レコードを
+        /// すべてクリーンアップするための防御的削除メソッド。
+        /// </remarks>
+        /// <param name="cardIdm">カードIDm</param>
+        /// <returns>削除した件数</returns>
+        Task<int> DeleteAllLentRecordsAsync(string cardIdm);
+
+        /// <summary>
         /// 利用履歴詳細を登録
         /// </summary>
         Task<bool> InsertDetailAsync(LedgerDetail detail);
