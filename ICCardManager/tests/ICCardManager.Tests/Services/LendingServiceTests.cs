@@ -48,6 +48,11 @@ public class LendingServiceTests : IDisposable
         _ledgerRepositoryMock = new Mock<ILedgerRepository>();
         _settingsRepositoryMock = new Mock<ISettingsRepository>();
         _settingsRepositoryMock.Setup(s => s.GetAppSettings()).Returns(new AppSettings());
+
+        // デフォルトのモック設定（個別テストでオーバーライド可能）
+        _ledgerRepositoryMock.Setup(x => x.DeleteAllLentRecordsAsync(It.IsAny<string>()))
+            .ReturnsAsync(1);
+
         _summaryGenerator = new SummaryGenerator();
         _lockManager = new CardLockManager(NullLogger<CardLockManager>.Instance);
 
@@ -838,8 +843,8 @@ public class LendingServiceTests : IDisposable
             .ReturnsAsync(true);
         _ledgerRepositoryMock.Setup(x => x.GetLentRecordAsync(TestCardIdm))
             .ReturnsAsync(CreateTestLentRecord());
-        _ledgerRepositoryMock.Setup(x => x.DeleteAsync(It.IsAny<int>()))
-            .ReturnsAsync(true);
+        _ledgerRepositoryMock.Setup(x => x.DeleteAllLentRecordsAsync(It.IsAny<string>()))
+            .ReturnsAsync(1);
         _ledgerRepositoryMock.Setup(x => x.GetLatestBeforeDateAsync(TestCardIdm, It.IsAny<DateTime>()))
             .ReturnsAsync(new Ledger { Balance = 5000 });
         _settingsRepositoryMock.Setup(x => x.GetAppSettingsAsync())
@@ -1112,8 +1117,8 @@ public class LendingServiceTests : IDisposable
             .ReturnsAsync(1);
         _ledgerRepositoryMock.Setup(x => x.UpdateAsync(It.IsAny<Ledger>()))
             .ReturnsAsync(true);
-        _ledgerRepositoryMock.Setup(x => x.DeleteAsync(It.IsAny<int>()))
-            .ReturnsAsync(true);
+        _ledgerRepositoryMock.Setup(x => x.DeleteAllLentRecordsAsync(TestCardIdm))
+            .ReturnsAsync(1);
         _ledgerRepositoryMock.Setup(x => x.InsertDetailAsync(It.IsAny<LedgerDetail>()))
             .ReturnsAsync(true);
         _ledgerRepositoryMock.Setup(x => x.InsertDetailsAsync(It.IsAny<int>(), It.IsAny<IEnumerable<LedgerDetail>>()))
@@ -1254,7 +1259,7 @@ public class LendingServiceTests : IDisposable
                     return returnCount == 0 ? lentRecord : null;
                 }
             });
-        _ledgerRepositoryMock.Setup(x => x.DeleteAsync(It.IsAny<int>()))
+        _ledgerRepositoryMock.Setup(x => x.DeleteAllLentRecordsAsync(TestCardIdm))
             .Callback(() =>
             {
                 lock (lockObj)
@@ -1262,7 +1267,7 @@ public class LendingServiceTests : IDisposable
                     returnCount++;
                 }
             })
-            .ReturnsAsync(true);
+            .ReturnsAsync(1);
         _cardRepositoryMock.Setup(x => x.UpdateLentStatusAsync(TestCardIdm, false, null, null))
             .ReturnsAsync(true);
         _settingsRepositoryMock.Setup(x => x.GetAppSettingsAsync())
@@ -1408,7 +1413,7 @@ public class LendingServiceTests : IDisposable
             });
         _ledgerRepositoryMock.Setup(x => x.InsertAsync(It.IsAny<Ledger>()))
             .ReturnsAsync(1);
-        _ledgerRepositoryMock.Setup(x => x.DeleteAsync(It.IsAny<int>()))
+        _ledgerRepositoryMock.Setup(x => x.DeleteAllLentRecordsAsync(TestCardIdm))
             .Callback(() =>
             {
                 lock (lockObj)
@@ -1416,7 +1421,7 @@ public class LendingServiceTests : IDisposable
                     cardLent = false;
                 }
             })
-            .ReturnsAsync(true);
+            .ReturnsAsync(1);
         _cardRepositoryMock.Setup(x => x.UpdateLentStatusAsync(It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<DateTime?>(), It.IsAny<string?>()))
             .ReturnsAsync(true);
         _settingsRepositoryMock.Setup(x => x.GetAppSettingsAsync())

@@ -223,6 +223,26 @@ WHERE id = @id";
         }
 
         /// <inheritdoc/>
+        public async Task<int> DeleteAllLentRecordsAsync(string cardIdm)
+        {
+            var connection = _dbContext.GetConnection();
+
+            // 貸出中レコードに紐づく詳細レコードを先に削除
+            using var deleteDetailCommand = connection.CreateCommand();
+            deleteDetailCommand.CommandText = @"DELETE FROM ledger_detail
+WHERE ledger_id IN (SELECT id FROM ledger WHERE card_idm = @cardIdm AND is_lent_record = 1)";
+            deleteDetailCommand.Parameters.AddWithValue("@cardIdm", cardIdm);
+            await deleteDetailCommand.ExecuteNonQueryAsync();
+
+            // 貸出中レコードをすべて削除
+            using var command = connection.CreateCommand();
+            command.CommandText = "DELETE FROM ledger WHERE card_idm = @cardIdm AND is_lent_record = 1";
+            command.Parameters.AddWithValue("@cardIdm", cardIdm);
+
+            return await command.ExecuteNonQueryAsync();
+        }
+
+        /// <inheritdoc/>
         public async Task<bool> InsertDetailAsync(LedgerDetail detail)
         {
             var connection = _dbContext.GetConnection();

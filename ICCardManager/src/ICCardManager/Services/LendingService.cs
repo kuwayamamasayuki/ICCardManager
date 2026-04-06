@@ -535,8 +535,9 @@ namespace ICCardManager.Services
                         // バス利用の有無をチェック
                         result.HasBusUsage = usageSinceLent.Any(d => d.IsBus);
 
-                        // 貸出レコードを削除（履歴に「（貸出中）」が残らないようにする）
-                        await _ledgerRepository.DeleteAsync(lentRecord.Id);
+                        // 貸出レコードをすべて削除（履歴に「（貸出中）」が残らないようにする）
+                        // 共有モードで重複した貸出中レコードがある場合にも対応
+                        await _ledgerRepository.DeleteAllLentRecordsAsync(cardIdm);
 
                         // カードの貸出状態を更新
                         await _cardRepository.UpdateLentStatusAsync(cardIdm, false, null, null);
