@@ -97,9 +97,21 @@ namespace ICCardManager.Infrastructure.CardReader
         internal const int ReconnectIntervalMs = 3000;
 
         /// <summary>
-        /// 最大再接続試行回数
+        /// 最大再接続試行回数（高速リトライフェーズ）
         /// </summary>
         internal const int MaxReconnectAttempts = 10;
+
+        /// <summary>
+        /// Issue #1168: 高速リトライ上限到達後の低頻度リトライ間隔（ミリ秒）。
+        /// 速いリトライ（3秒×10回=約30秒）が失敗した後も、この間隔でリトライを継続することで、
+        /// リーダーが物理的に再接続された際に最大60秒で自動回復できるようにする。
+        /// </summary>
+        internal const int SlowReconnectIntervalMs = 60000;
+
+        /// <summary>
+        /// Issue #1168: 低頻度リトライフェーズに移行したかどうか
+        /// </summary>
+        private bool _isInSlowRetryPhase;
 
         public event EventHandler<CardReadEventArgs> CardRead;
         public event EventHandler<Exception> Error;
@@ -644,6 +656,7 @@ namespace ICCardManager.Infrastructure.CardReader
             StopHealthCheckTimer(); // 再接続中はヘルスチェックを停止
 
             _reconnectAttempts = 0;
+            _isInSlowRetryPhase = false;
             _reconnectTimer = new System.Timers.Timer(ReconnectIntervalMs);
             _reconnectTimer.Elapsed += async (s, e) => await OnReconnectAttemptAsync();
             _reconnectTimer.AutoReset = true;
@@ -665,12 +678,28 @@ namespace ICCardManager.Infrastructure.CardReader
                 _reconnectTimer.Dispose();
                 _reconnectTimer = null;
             }
+            _isInSlowRetryPhase = false; // Issue #1168
         }
+
+        /// <summary>
+        /// Issue #1168: テスト用 — 現在低頻度リトライフェーズかどうか
+        /// </summary>
+        internal bool IsInSlowRetryPhase => _isInSlowRetryPhase;
+
+        /// <summary>
+        /// Issue #1168: テスト用 — 現在の再接続タイマー間隔（ミリ秒）。タイマー未起動時は0。
+        /// </summary>
+        internal double CurrentReconnectIntervalMs => _reconnectTimer?.Interval ?? 0;
+
+        /// <summary>
+        /// Issue #1168: テスト用 — 再接続タイマーが稼働中かどうか
+        /// </summary>
+        internal bool IsReconnectTimerRunning => _reconnectTimer?.Enabled ?? false;
 
         /// <summary>
         /// 再接続試行
         /// </summary>
-        private Task OnReconnectAttemptAsync()
+        internal Task OnReconnectAttemptAsync()
         {
             _reconnectAttempts++;
 #if DEBUG
@@ -679,12 +708,23 @@ namespace ICCardManager.Infrastructure.CardReader
 
             SetConnectionState(CardReaderConnectionState.Reconnecting, null, _reconnectAttempts);
 
-            if (_reconnectAttempts > MaxReconnectAttempts)
+            // Issue #1168: 高速リトライ上限到達時、タイマーを停止せず低頻度リトライに切り替える。
+            // これによりリーダー物理再接続後の自動回復パスを維持する。
+            if (_reconnectAttempts > MaxReconnectAttempts && !_isInSlowRetryPhase)
             {
 #if DEBUG
-                System.Diagnostics.Debug.WriteLine("再接続失敗: 最大試行回数に達しました");
+                System.Diagnostics.Debug.WriteLine(
+                    $"高速再接続試行回数上限に到達。低頻度リトライ（{SlowReconnectIntervalMs / 1000}秒間隔）に移行します");
 #endif
-                StopReconnectTimer();
+                _isInSlowRetryPhase = true;
+
+                // タイマー間隔を低頻度に切り替え（タイマーは継続稼働）
+                if (_reconnectTimer != null)
+                {
+                    _reconnectTimer.Interval = SlowReconnectIntervalMs;
+                }
+
+                // ユーザーに「自動再試行継続中」を通知（タイマーは止めない）
                 var reconnectException = CardReaderException.ReconnectFailed(MaxReconnectAttempts);
                 SetConnectionState(CardReaderConnectionState.Disconnected, reconnectException.UserFriendlyMessage);
                 Error?.Invoke(this, reconnectException);
@@ -724,6 +764,7 @@ namespace ICCardManager.Infrastructure.CardReader
 
                 _isReading = true;
                 _reconnectAttempts = 0;
+                _isInSlowRetryPhase = false; // Issue #1168: 成功時はフェーズをリセット
 
 #if DEBUG
                 System.Diagnostics.Debug.WriteLine("再接続成功");
