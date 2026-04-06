@@ -40,7 +40,8 @@ public class OperationLogRepositoryTests : IDisposable
     /// </remarks>
     private void ClearTestData()
     {
-        var connection = _dbContext.GetConnection();
+        using var lease = _dbContext.LeaseConnection();
+        var connection = lease.Connection;
         using var command = connection.CreateCommand();
         command.CommandText = "DELETE FROM operation_log";
         command.ExecuteNonQuery();

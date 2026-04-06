@@ -40,7 +40,8 @@ namespace ICCardManager.Data.Repositories
         /// </summary>
         private async Task<IEnumerable<Staff>> GetAllFromDbAsync()
         {
-            var connection = _dbContext.GetConnection();
+            using var lease = await _dbContext.LeaseConnectionAsync();
+            var connection = lease.Connection;
             var staffList = new List<Staff>();
 
             using var command = connection.CreateCommand();
@@ -61,7 +62,8 @@ ORDER BY name";
         /// <inheritdoc/>
         public async Task<IEnumerable<Staff>> GetAllIncludingDeletedAsync()
         {
-            var connection = _dbContext.GetConnection();
+            using var lease = await _dbContext.LeaseConnectionAsync();
+            var connection = lease.Connection;
             var staffList = new List<Staff>();
 
             using var command = connection.CreateCommand();
@@ -81,7 +83,8 @@ ORDER BY name";
         /// <inheritdoc/>
         public async Task<Staff> GetByIdmAsync(string staffIdm, bool includeDeleted = false)
         {
-            var connection = _dbContext.GetConnection();
+            using var lease = await _dbContext.LeaseConnectionAsync();
+            var connection = lease.Connection;
 
             using var command = connection.CreateCommand();
             command.CommandText = includeDeleted
@@ -120,7 +123,8 @@ WHERE staff_idm = @staffIdm AND is_deleted = 0";
         /// </summary>
         private async Task<bool> InsertAsyncInternal(Staff staff, SQLiteTransaction? transaction)
         {
-            var connection = _dbContext.GetConnection();
+            using var lease = await _dbContext.LeaseConnectionAsync();
+            var connection = lease.Connection;
 
             using var command = connection.CreateCommand();
             command.Transaction = transaction;
@@ -165,7 +169,8 @@ VALUES (@staffIdm, @name, @number, @note, 0, NULL)";
         /// </summary>
         private async Task<bool> UpdateAsyncInternal(Staff staff, SQLiteTransaction? transaction)
         {
-            var connection = _dbContext.GetConnection();
+            using var lease = await _dbContext.LeaseConnectionAsync();
+            var connection = lease.Connection;
 
             using var command = connection.CreateCommand();
             command.Transaction = transaction;
@@ -190,7 +195,8 @@ WHERE staff_idm = @staffIdm AND is_deleted = 0";
         /// <inheritdoc/>
         public async Task<bool> DeleteAsync(string staffIdm)
         {
-            var connection = _dbContext.GetConnection();
+            using var lease = await _dbContext.LeaseConnectionAsync();
+            var connection = lease.Connection;
 
             using var command = connection.CreateCommand();
             command.CommandText = @"UPDATE staff
@@ -224,7 +230,8 @@ WHERE staff_idm = @staffIdm AND is_deleted = 0";
         /// </summary>
         private async Task<bool> RestoreAsyncInternal(string staffIdm, SQLiteTransaction? transaction)
         {
-            var connection = _dbContext.GetConnection();
+            using var lease = await _dbContext.LeaseConnectionAsync();
+            var connection = lease.Connection;
 
             using var command = connection.CreateCommand();
             command.Transaction = transaction;
@@ -254,7 +261,8 @@ WHERE staff_idm = @staffIdm AND is_deleted = 1";
         /// <inheritdoc/>
         public async Task<bool> ExistsAsync(string staffIdm)
         {
-            var connection = _dbContext.GetConnection();
+            using var lease = await _dbContext.LeaseConnectionAsync();
+            var connection = lease.Connection;
 
             using var command = connection.CreateCommand();
             command.CommandText = "SELECT COUNT(1) FROM staff WHERE staff_idm = @staffIdm";

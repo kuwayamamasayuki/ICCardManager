@@ -31,6 +31,7 @@ public class CsvImportServiceTests : IDisposable
     private readonly Mock<DbContext> _dbContextMock;
     private readonly Mock<ICacheService> _cacheServiceMock;
     private readonly SQLiteConnection _connection;
+    private readonly DbContext _realDbContext;
     private readonly CsvImportService _service;
 
     // UTF-8 with BOM (Excel対応)
@@ -56,13 +57,18 @@ public class CsvImportServiceTests : IDisposable
         _validationServiceMock.Setup(x => x.ValidateStaffIdm(It.IsAny<string>()))
             .Returns(ValidationResult.Success());
 
-        // トランザクションのモック（実際のトランザクションは使用しない）
+        // トランザクションのモック
+        // セマフォを保持しないConnectionLease/TransactionScopeを使用
+        // （テスト内でLeaseConnectionAsyncが呼ばれてもデッドロックしないように）
         var connectionString = "Data Source=:memory:";
         _connection = new SQLiteConnection(connectionString);
         _connection.Open();
-        var transaction = _connection.BeginTransaction();
-
-        _dbContextMock.Setup(x => x.BeginTransaction()).Returns(transaction);
+        _realDbContext = new DbContext(":memory:");
+        var noOpLease = new ConnectionLease(_connection, () => { });
+        var noOpTransaction = _connection.BeginTransaction();
+        var transactionScope = new ICCardManager.Data.TransactionScope(noOpLease, noOpTransaction);
+        _dbContextMock.Setup(x => x.BeginTransactionAsync(It.IsAny<System.Threading.CancellationToken>()))
+            .ReturnsAsync(transactionScope);
 
         _service = new CsvImportService(
             _cardRepositoryMock.Object,
@@ -77,6 +83,7 @@ public class CsvImportServiceTests : IDisposable
     {
         // SQLite接続を閉じる
         _connection?.Dispose();
+        _realDbContext?.Dispose();
 
         // テスト用ディレクトリを削除
         try

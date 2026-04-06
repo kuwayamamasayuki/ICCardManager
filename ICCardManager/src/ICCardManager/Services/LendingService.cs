@@ -352,7 +352,7 @@ namespace ICCardManager.Services
                 // 共有モード時のSQLITE_BUSY対策としてリトライでラップ（WRITE操作のみ）
                 await _dbContext.ExecuteWithRetryAsync(async () =>
                 {
-                    using var transaction = _dbContext.BeginTransaction();
+                    using var scope = await _dbContext.BeginTransactionAsync();
 
                     try
                     {
@@ -377,11 +377,11 @@ namespace ICCardManager.Services
                         // カードの貸出状態を更新
                         await _cardRepository.UpdateLentStatusAsync(cardIdm, true, now, staffIdm);
 
-                        transaction.Commit();
+                        scope.Commit();
                     }
                     catch
                     {
-                        transaction.Rollback();
+                        scope.Rollback();
                         throw;
                     }
                 });
@@ -522,7 +522,7 @@ namespace ICCardManager.Services
                 // 共有モード時のSQLITE_BUSY対策としてリトライでラップ
                 await _dbContext.ExecuteWithRetryAsync(async () =>
                 {
-                    using var transaction = _dbContext.BeginTransaction();
+                    using var scope = await _dbContext.BeginTransactionAsync();
 
                     try
                     {
@@ -542,11 +542,11 @@ namespace ICCardManager.Services
                         // カードの貸出状態を更新
                         await _cardRepository.UpdateLentStatusAsync(cardIdm, false, null, null);
 
-                        transaction.Commit();
+                        scope.Commit();
                     }
                     catch
                     {
-                        transaction.Rollback();
+                        scope.Rollback();
                         throw;
                     }
                 });
@@ -1132,14 +1132,14 @@ namespace ICCardManager.Services
                 }
 
                 // トランザクション開始
-                using var transaction = _dbContext.BeginTransaction();
+                using var scope = await _dbContext.BeginTransactionAsync();
 
                 try
                 {
                     // 既存のCreateUsageLedgersAsyncを利用（staffNameはnull: 登録時には利用者情報がないため）
                     var createdLedgers = await CreateUsageLedgersAsync(cardIdm, null, filtered);
 
-                    transaction.Commit();
+                    scope.Commit();
 
                     result.Success = true;
                     result.ImportedCount = createdLedgers.Count;
@@ -1157,7 +1157,7 @@ namespace ICCardManager.Services
                 }
                 catch
                 {
-                    transaction.Rollback();
+                    scope.Rollback();
                     throw;
                 }
             }

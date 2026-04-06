@@ -78,7 +78,8 @@ public class DbContextSharedModeTests : IDisposable
     {
         var dbPath = Path.Combine(_testDirectory, "pragma_test.db");
         using var dbContext = new DbContext(dbPath);
-        var connection = dbContext.GetConnection();
+        using var lease = dbContext.LeaseConnection();
+        var connection = lease.Connection;
 
         using var command = connection.CreateCommand();
         command.CommandText = "PRAGMA busy_timeout;";
@@ -93,7 +94,8 @@ public class DbContextSharedModeTests : IDisposable
     {
         var dbPath = Path.Combine(_testDirectory, "journal_test.db");
         using var dbContext = new DbContext(dbPath);
-        var connection = dbContext.GetConnection();
+        using var lease = dbContext.LeaseConnection();
+        var connection = lease.Connection;
 
         using var command = connection.CreateCommand();
         command.CommandText = "PRAGMA journal_mode;";
@@ -107,7 +109,8 @@ public class DbContextSharedModeTests : IDisposable
     {
         var dbPath = Path.Combine(_testDirectory, "fk_test.db");
         using var dbContext = new DbContext(dbPath);
-        var connection = dbContext.GetConnection();
+        using var lease = dbContext.LeaseConnection();
+        var connection = lease.Connection;
 
         using var command = connection.CreateCommand();
         command.CommandText = "PRAGMA foreign_keys;";
@@ -127,15 +130,17 @@ public class DbContextSharedModeTests : IDisposable
         using var dbContext = new DbContext(dbPath);
 
         // 最初の接続
-        var conn1 = dbContext.GetConnection();
-        conn1.State.Should().Be(ConnectionState.Open);
+        using (var lease1 = dbContext.LeaseConnection())
+        {
+            lease1.Connection.State.Should().Be(ConnectionState.Open);
+        }
 
         // 接続を閉じる（ネットワーク切断のシミュレーション）
         dbContext.CloseConnection();
 
         // 再接続
-        var conn2 = dbContext.GetConnection();
-        conn2.State.Should().Be(ConnectionState.Open);
+        using var lease2 = dbContext.LeaseConnection();
+        lease2.Connection.State.Should().Be(ConnectionState.Open);
     }
 
     #endregion
@@ -219,7 +224,8 @@ public class DbContextSharedModeTests : IDisposable
         dbContext.InitializeDatabase();
 
         // テーブル作成
-        var conn = dbContext.GetConnection();
+        using var lease = dbContext.LeaseConnection();
+        var conn = lease.Connection;
         using var createCmd = conn.CreateCommand();
         createCmd.CommandText = "CREATE TABLE IF NOT EXISTS test (id INTEGER PRIMARY KEY, value TEXT)";
         createCmd.ExecuteNonQuery();
@@ -270,11 +276,15 @@ public class DbContextSharedModeTests : IDisposable
         var dbPath = Path.Combine(_testDirectory, "threadsafe_test.db");
         using var dbContext = new DbContext(dbPath);
 
-        // 複数スレッドから同時にGetConnectionを呼び出す
+        // 複数スレッドから同時にLeaseConnectionを呼び出す
         var tasks = new Task<System.Data.SQLite.SQLiteConnection>[10];
         for (int i = 0; i < tasks.Length; i++)
         {
-            tasks[i] = Task.Run(() => dbContext.GetConnection());
+            tasks[i] = Task.Run(() =>
+            {
+                using var lease = dbContext.LeaseConnection();
+                return lease.Connection;
+            });
         }
 
         Task.WaitAll(tasks);
@@ -334,7 +344,8 @@ public class DbContextSharedModeTests : IDisposable
         try
         {
             using var dbContext = new DbContext(uncPath);
-            var c4 = dbContext.GetConnection();
+            using var lease4 = dbContext.LeaseConnection();
+            var c4 = lease4.Connection;
             results.Add("方式4(DefineDosDevice): OK");
         }
         catch (Exception ex) { results.Add($"方式4(DefineDosDevice): NG - {ex.Message}"); }

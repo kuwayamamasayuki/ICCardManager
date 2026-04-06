@@ -23,7 +23,8 @@ namespace ICCardManager.Data.Repositories
         /// <inheritdoc/>
         public async Task<int> InsertAsync(OperationLog log)
         {
-            var connection = _dbContext.GetConnection();
+            using var lease = await _dbContext.LeaseConnectionAsync();
+            var connection = lease.Connection;
 
             using var command = connection.CreateCommand();
             command.CommandText = @"INSERT INTO operation_log (timestamp, operator_idm, operator_name, target_table,
@@ -48,7 +49,8 @@ SELECT last_insert_rowid();";
         /// <inheritdoc/>
         public async Task<IEnumerable<OperationLog>> GetByDateRangeAsync(DateTime fromDate, DateTime toDate)
         {
-            var connection = _dbContext.GetConnection();
+            using var lease = await _dbContext.LeaseConnectionAsync();
+            var connection = lease.Connection;
             var logs = new List<OperationLog>();
 
             using var command = connection.CreateCommand();
@@ -73,7 +75,8 @@ ORDER BY timestamp ASC";
         /// <inheritdoc/>
         public async Task<IEnumerable<OperationLog>> GetByOperatorAsync(string operatorIdm)
         {
-            var connection = _dbContext.GetConnection();
+            using var lease = await _dbContext.LeaseConnectionAsync();
+            var connection = lease.Connection;
             var logs = new List<OperationLog>();
 
             using var command = connection.CreateCommand();
@@ -97,7 +100,8 @@ ORDER BY timestamp ASC";
         /// <inheritdoc/>
         public async Task<IEnumerable<OperationLog>> GetByTargetAsync(string targetTable, string targetId)
         {
-            var connection = _dbContext.GetConnection();
+            using var lease = await _dbContext.LeaseConnectionAsync();
+            var connection = lease.Connection;
             var logs = new List<OperationLog>();
 
             using var command = connection.CreateCommand();
@@ -122,7 +126,8 @@ ORDER BY timestamp ASC";
         /// <inheritdoc/>
         public async Task<OperationLogSearchResult> SearchAsync(OperationLogSearchCriteria criteria, int page = 1, int pageSize = 50)
         {
-            var connection = _dbContext.GetConnection();
+            using var lease = await _dbContext.LeaseConnectionAsync();
+            var connection = lease.Connection;
 
             // WHERE句とパラメータを構築
             var (whereClause, parameters) = BuildWhereClause(criteria);
@@ -173,7 +178,8 @@ LIMIT @pageSize OFFSET @offset";
         /// <inheritdoc/>
         public async Task<IEnumerable<OperationLog>> SearchAllAsync(OperationLogSearchCriteria criteria)
         {
-            var connection = _dbContext.GetConnection();
+            using var lease = await _dbContext.LeaseConnectionAsync();
+            var connection = lease.Connection;
             var logs = new List<OperationLog>();
 
             var (whereClause, parameters) = BuildWhereClause(criteria);

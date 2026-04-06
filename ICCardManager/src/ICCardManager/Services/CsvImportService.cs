@@ -325,7 +325,7 @@ namespace ICCardManager.Services
             }
 
             // トランザクション内でインポート実行
-            using var transaction = _dbContext.BeginTransaction();
+            using var scope = await _dbContext.BeginTransactionAsync();
             try
             {
                 foreach (var (lineNumber, card, isUpdate, isRestore) in validRecords)
@@ -334,19 +334,19 @@ namespace ICCardManager.Services
                     if (isRestore)
                     {
                         // 削除済みカードを復元してから更新（トランザクション内）
-                        success = await _cardRepository.RestoreAsync(card.CardIdm, transaction);
+                        success = await _cardRepository.RestoreAsync(card.CardIdm, scope.Transaction);
                         if (success)
                         {
-                            success = await _cardRepository.UpdateAsync(card, transaction);
+                            success = await _cardRepository.UpdateAsync(card, scope.Transaction);
                         }
                     }
                     else if (isUpdate)
                     {
-                        success = await _cardRepository.UpdateAsync(card, transaction);
+                        success = await _cardRepository.UpdateAsync(card, scope.Transaction);
                     }
                     else
                     {
-                        success = await _cardRepository.InsertAsync(card, transaction);
+                        success = await _cardRepository.InsertAsync(card, scope.Transaction);
                     }
 
                     if (success)
@@ -370,24 +370,24 @@ namespace ICCardManager.Services
                 // すべて成功したらコミット
                 if (errors.Count == 0)
                 {
-                    transaction.Commit();
+                    scope.Commit();
                     // コミット後にキャッシュを無効化
                     _cacheService.InvalidateByPrefix(CacheKeys.CardPrefixForInvalidation);
                 }
                 else
                 {
-                    transaction.Rollback();
+                    scope.Rollback();
                     importedCount = 0;
                 }
             }
             catch (SQLiteException ex)
             {
-                transaction.Rollback();
+                scope.Rollback();
                 throw DatabaseException.QueryFailed("CSV import transaction", ex);
             }
             catch (Exception)
             {
-                transaction.Rollback();
+                scope.Rollback();
                 throw;
             }
 
@@ -529,7 +529,7 @@ namespace ICCardManager.Services
             }
 
             // トランザクション内でインポート実行
-            using var transaction = _dbContext.BeginTransaction();
+            using var scope = await _dbContext.BeginTransactionAsync();
             try
             {
                 foreach (var (lineNumber, staff, isUpdate, isRestore) in validRecords)
@@ -538,19 +538,19 @@ namespace ICCardManager.Services
                     if (isRestore)
                     {
                         // 削除済み職員を復元してから更新（トランザクション内）
-                        success = await _staffRepository.RestoreAsync(staff.StaffIdm, transaction);
+                        success = await _staffRepository.RestoreAsync(staff.StaffIdm, scope.Transaction);
                         if (success)
                         {
-                            success = await _staffRepository.UpdateAsync(staff, transaction);
+                            success = await _staffRepository.UpdateAsync(staff, scope.Transaction);
                         }
                     }
                     else if (isUpdate)
                     {
-                        success = await _staffRepository.UpdateAsync(staff, transaction);
+                        success = await _staffRepository.UpdateAsync(staff, scope.Transaction);
                     }
                     else
                     {
-                        success = await _staffRepository.InsertAsync(staff, transaction);
+                        success = await _staffRepository.InsertAsync(staff, scope.Transaction);
                     }
 
                     if (success)
@@ -574,24 +574,24 @@ namespace ICCardManager.Services
                 // すべて成功したらコミット
                 if (errors.Count == 0)
                 {
-                    transaction.Commit();
+                    scope.Commit();
                     // コミット後にキャッシュを無効化
                     _cacheService.InvalidateByPrefix(CacheKeys.StaffPrefixForInvalidation);
                 }
                 else
                 {
-                    transaction.Rollback();
+                    scope.Rollback();
                     importedCount = 0;
                 }
             }
             catch (SQLiteException ex)
             {
-                transaction.Rollback();
+                scope.Rollback();
                 throw DatabaseException.QueryFailed("CSV import transaction", ex);
             }
             catch (Exception)
             {
-                transaction.Rollback();
+                scope.Rollback();
                 throw;
             }
 

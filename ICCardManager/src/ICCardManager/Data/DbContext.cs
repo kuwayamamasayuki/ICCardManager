@@ -13,6 +13,73 @@ using System.Data.SQLite;
 
 namespace ICCardManager.Data
 {
+    /// <summary>
+    /// 接続リース。Disposeでセマフォを解放する。
+    /// using文で使用することで、DB操作の直列化を保証する。
+    /// </summary>
+    public sealed class ConnectionLease : IDisposable
+    {
+        /// <summary>リースされた接続</summary>
+        public SQLiteConnection Connection { get; }
+
+        private readonly Action _onDispose;
+        private bool _disposed;
+
+        internal ConnectionLease(SQLiteConnection connection, Action onDispose)
+        {
+            Connection = connection;
+            _onDispose = onDispose;
+        }
+
+        /// <summary>リースを解放し、セマフォを返却する</summary>
+        public void Dispose()
+        {
+            if (!_disposed)
+            {
+                _disposed = true;
+                _onDispose?.Invoke();
+            }
+        }
+    }
+
+    /// <summary>
+    /// トランザクションスコープ。リースとトランザクションを束ね、
+    /// Disposeで両方を適切な順序で解放する。
+    /// </summary>
+    public sealed class TransactionScope : IDisposable
+    {
+        /// <summary>接続リース</summary>
+        public ConnectionLease Lease { get; }
+
+        /// <summary>トランザクション</summary>
+        public SQLiteTransaction Transaction { get; }
+
+        private bool _disposed;
+
+        internal TransactionScope(ConnectionLease lease, SQLiteTransaction transaction)
+        {
+            Lease = lease;
+            Transaction = transaction;
+        }
+
+        /// <summary>トランザクションをコミットする</summary>
+        public void Commit() => Transaction.Commit();
+
+        /// <summary>トランザクションをロールバックする</summary>
+        public void Rollback() => Transaction.Rollback();
+
+        /// <summary>トランザクション→リースの順に解放する</summary>
+        public void Dispose()
+        {
+            if (!_disposed)
+            {
+                _disposed = true;
+                Transaction?.Dispose();
+                Lease?.Dispose();
+            }
+        }
+    }
+
 /// <summary>
     /// SQLiteデータベース接続管理クラス
     /// </summary>
@@ -23,6 +90,16 @@ namespace ICCardManager.Data
         private readonly ILogger _logger;
         private SQLiteConnection _connection;
         private bool _disposed;
+
+        /// <summary>
+        /// DB操作の直列化用セマフォ。同一接続への並行アクセスを防止する。
+        /// </summary>
+        private readonly SemaphoreSlim _semaphore = new SemaphoreSlim(1, 1);
+
+        /// <summary>
+        /// リエントラントカウント。同一非同期フロー内のネスト呼び出しでセマフォ再取得をスキップする。
+        /// </summary>
+        private readonly AsyncLocal<int> _reentrancyCount = new AsyncLocal<int>();
 
         /// <summary>
         /// ジッター生成用の乱数。thundering herd問題を防止するためリトライ待機に使用
@@ -179,13 +256,90 @@ namespace ICCardManager.Data
         }
 
         /// <summary>
-        /// データベース接続を取得
+        /// 接続リースを非同期で取得する。using文で使用すること。
         /// </summary>
         /// <remarks>
-        /// 接続が切断されている場合は自動的に再接続する。
-        /// 共有モード時はネットワーク切断からの復帰に対応。
+        /// セマフォは取得しない。WPFのUIスレッドでは全ての非同期操作がDispatcherで
+        /// 直列化されるため、非同期コード間の競合は発生しない。
+        /// バックグラウンドスレッドからのDBアクセスにはLeaseConnection()（同期版）を使用すること。
+        /// 書き込み操作はBeginTransactionAsync()でセマフォ保護される。
         /// </remarks>
+        public virtual Task<ConnectionLease> LeaseConnectionAsync(CancellationToken ct = default)
+        {
+            ct.ThrowIfCancellationRequested();
+            var lease = new ConnectionLease(GetConnectionInternal(), () => { });
+            return Task.FromResult(lease);
+        }
+
+        /// <summary>
+        /// 接続リースを同期で取得する。using文で使用すること。
+        /// </summary>
+        /// <remarks>
+        /// 同期メソッド（InitializeDatabase, CleanupOldData等）で使用する。
+        /// 同一スレッド内ではリエントラント。
+        /// </remarks>
+        public ConnectionLease LeaseConnection()
+        {
+            if (_reentrancyCount.Value > 0)
+            {
+                _reentrancyCount.Value++;
+                return new ConnectionLease(GetConnectionInternal(), () => _reentrancyCount.Value--);
+            }
+
+            _semaphore.Wait();
+            _reentrancyCount.Value = 1;
+            return new ConnectionLease(GetConnectionInternal(), () =>
+            {
+                _reentrancyCount.Value--;
+                if (_reentrancyCount.Value == 0)
+                {
+                    try { _semaphore.Release(); }
+                    catch (ObjectDisposedException) { /* DbContext.Dispose()後のリース解放 */ }
+                }
+            });
+        }
+
+        /// <summary>
+        /// リース付きトランザクションを非同期で開始する。using文で使用すること。
+        /// </summary>
+        /// <remarks>
+        /// TransactionScope.Dispose時にトランザクション→リースの順で解放される。
+        /// Commit/Rollbackを呼ばずにDisposeした場合、トランザクションは自動ロールバックされる。
+        /// </remarks>
+        public virtual async Task<TransactionScope> BeginTransactionAsync(CancellationToken ct = default)
+        {
+            await _semaphore.WaitAsync(ct).ConfigureAwait(false);
+            try
+            {
+                var connection = GetConnectionInternal();
+                var lease = new ConnectionLease(connection, () =>
+                {
+                    try { _semaphore.Release(); }
+                    catch (ObjectDisposedException) { /* DbContext.Dispose()後のリース解放 */ }
+                });
+                var transaction = connection.BeginTransaction();
+                return new TransactionScope(lease, transaction);
+            }
+            catch
+            {
+                _semaphore.Release();
+                throw;
+            }
+        }
+
+        /// <summary>
+        /// データベース接続を取得（非推奨）
+        /// </summary>
+        [Obsolete("スレッドセーフな LeaseConnectionAsync() または LeaseConnection() を使用してください")]
         public virtual SQLiteConnection GetConnection()
+        {
+            return GetConnectionInternal();
+        }
+
+        /// <summary>
+        /// 接続の初期化・再接続ロジック（内部用）
+        /// </summary>
+        private SQLiteConnection GetConnectionInternal()
         {
             lock (_connectionLock)
             {
@@ -333,7 +487,8 @@ namespace ICCardManager.Data
                 SetDatabaseFilePermissions(DatabasePath);
             }
 
-            var connection = GetConnection();
+            using var lease = LeaseConnection();
+            var connection = lease.Connection;
 
             // 新規作成されたDBファイルにもアクセス権限を設定
             if (!IsSharedMode)
@@ -494,8 +649,8 @@ namespace ICCardManager.Data
         /// </summary>
         public int GetDatabaseVersion()
         {
-            var connection = GetConnection();
-            var runner = new MigrationRunner(connection);
+            using var lease = LeaseConnection();
+            var runner = new MigrationRunner(lease.Connection);
             return runner.GetCurrentVersion();
         }
 
@@ -504,8 +659,8 @@ namespace ICCardManager.Data
         /// </summary>
         public bool HasPendingMigrations()
         {
-            var connection = GetConnection();
-            var runner = new MigrationRunner(connection);
+            using var lease = LeaseConnection();
+            var runner = new MigrationRunner(lease.Connection);
             return runner.HasPendingMigrations();
         }
 
@@ -520,7 +675,8 @@ namespace ICCardManager.Data
         /// <returns>削除件数（ledger件数, operation_log件数）</returns>
         public (int LedgerCount, int OperationLogCount) CleanupOldData()
         {
-            var connection = GetConnection();
+            using var lease = LeaseConnection();
+            var connection = lease.Connection;
 
             using var ledgerCommand = connection.CreateCommand();
             ledgerCommand.CommandText = "DELETE FROM ledger WHERE date(date) < date('now', '-6 years', 'localtime')";
@@ -545,8 +701,8 @@ namespace ICCardManager.Data
         {
             try
             {
-                var connection = GetConnection();
-                using var command = connection.CreateCommand();
+                using var lease = LeaseConnection();
+                using var command = lease.Connection.CreateCommand();
                 command.CommandText = "VACUUM";
                 command.ExecuteNonQuery();
                 return true;
@@ -625,11 +781,14 @@ namespace ICCardManager.Data
         }
 
         /// <summary>
-        /// トランザクションを開始
+        /// トランザクションを開始（非推奨）
         /// </summary>
+        [Obsolete("スレッドセーフな BeginTransactionAsync() を使用してください")]
         public virtual SQLiteTransaction BeginTransaction()
         {
+#pragma warning disable CS0618 // Obsolete
             return GetConnection().BeginTransaction();
+#pragma warning restore CS0618
         }
 
         /// <summary>
@@ -651,6 +810,7 @@ namespace ICCardManager.Data
                 if (disposing)
                 {
                     _connection?.Dispose();
+                    _semaphore?.Dispose();
                 }
                 _disposed = true;
             }

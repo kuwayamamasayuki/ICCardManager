@@ -377,7 +377,8 @@ namespace ICCardManager.Services
                 File.Delete(destinationPath);
             }
 
-            var sourceConnection = _dbContext.GetConnection();
+            using var lease = _dbContext.LeaseConnection();
+            var sourceConnection = lease.Connection;
             using var destinationConnection = new SQLiteConnection($"Data Source={destinationPath}");
             destinationConnection.Open();
             sourceConnection.BackupDatabase(destinationConnection, "main", "main", -1, null, 0);

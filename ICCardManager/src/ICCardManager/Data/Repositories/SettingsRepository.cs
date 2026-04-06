@@ -56,7 +56,8 @@ namespace ICCardManager.Data.Repositories
         /// <inheritdoc/>
         public async Task<string> GetAsync(string key)
         {
-            var connection = _dbContext.GetConnection();
+            using var lease = await _dbContext.LeaseConnectionAsync();
+            var connection = lease.Connection;
 
             using var command = connection.CreateCommand();
             command.CommandText = "SELECT value FROM settings WHERE key = @key";
@@ -69,7 +70,8 @@ namespace ICCardManager.Data.Repositories
         /// <inheritdoc/>
         public async Task<bool> SetAsync(string key, string value)
         {
-            var connection = _dbContext.GetConnection();
+            using var lease = await _dbContext.LeaseConnectionAsync();
+            var connection = lease.Connection;
 
             using var command = connection.CreateCommand();
             command.CommandText = @"INSERT INTO settings (key, value) VALUES (@key, @value)
@@ -167,7 +169,8 @@ ON CONFLICT(key) DO UPDATE SET value = @value";
         /// </summary>
         private string Get(string key)
         {
-            var connection = _dbContext.GetConnection();
+            using var lease = _dbContext.LeaseConnection();
+            var connection = lease.Connection;
 
             using var command = connection.CreateCommand();
             command.CommandText = "SELECT value FROM settings WHERE key = @key";

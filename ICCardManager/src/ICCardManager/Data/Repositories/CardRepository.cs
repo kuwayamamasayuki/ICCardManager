@@ -40,7 +40,8 @@ namespace ICCardManager.Data.Repositories
         /// </summary>
         private async Task<IEnumerable<IcCard>> GetAllFromDbAsync()
         {
-            var connection = _dbContext.GetConnection();
+            using var lease = await _dbContext.LeaseConnectionAsync();
+            var connection = lease.Connection;
             var cardList = new List<IcCard>();
 
             using var command = connection.CreateCommand();
@@ -63,7 +64,8 @@ ORDER BY card_type, card_number";
         /// <inheritdoc/>
         public async Task<IEnumerable<IcCard>> GetAllIncludingDeletedAsync()
         {
-            var connection = _dbContext.GetConnection();
+            using var lease = await _dbContext.LeaseConnectionAsync();
+            var connection = lease.Connection;
             var cardList = new List<IcCard>();
 
             using var command = connection.CreateCommand();
@@ -102,7 +104,8 @@ ORDER BY card_type, card_number";
         /// </remarks>
         private async Task<IEnumerable<IcCard>> GetAvailableFromDbAsync()
         {
-            var connection = _dbContext.GetConnection();
+            using var lease = await _dbContext.LeaseConnectionAsync();
+            var connection = lease.Connection;
             var cardList = new List<IcCard>();
 
             using var command = connection.CreateCommand();
@@ -136,7 +139,8 @@ ORDER BY card_type, card_number";
         /// </summary>
         private async Task<IEnumerable<IcCard>> GetLentFromDbAsync()
         {
-            var connection = _dbContext.GetConnection();
+            using var lease = await _dbContext.LeaseConnectionAsync();
+            var connection = lease.Connection;
             var cardList = new List<IcCard>();
 
             using var command = connection.CreateCommand();
@@ -159,7 +163,8 @@ ORDER BY last_lent_at DESC";
         /// <inheritdoc/>
         public async Task<IcCard> GetByIdmAsync(string cardIdm, bool includeDeleted = false)
         {
-            var connection = _dbContext.GetConnection();
+            using var lease = await _dbContext.LeaseConnectionAsync();
+            var connection = lease.Connection;
 
             using var command = connection.CreateCommand();
             command.CommandText = includeDeleted
@@ -205,7 +210,8 @@ WHERE card_idm = @cardIdm AND is_deleted = 0";
         /// </exception>
         private async Task<bool> InsertAsyncInternal(IcCard card, SQLiteTransaction? transaction)
         {
-            var connection = _dbContext.GetConnection();
+            using var lease = await _dbContext.LeaseConnectionAsync();
+            var connection = lease.Connection;
 
             using var command = connection.CreateCommand();
             command.Transaction = transaction;
@@ -270,7 +276,8 @@ VALUES (@cardIdm, @cardType, @cardNumber, @note, 0, NULL, 0, NULL, NULL, @starti
         /// </summary>
         private async Task<bool> UpdateAsyncInternal(IcCard card, SQLiteTransaction? transaction)
         {
-            var connection = _dbContext.GetConnection();
+            using var lease = await _dbContext.LeaseConnectionAsync();
+            var connection = lease.Connection;
 
             using var command = connection.CreateCommand();
             command.Transaction = transaction;
@@ -296,7 +303,8 @@ WHERE card_idm = @cardIdm AND is_deleted = 0";
         /// <inheritdoc/>
         public async Task<bool> UpdateLentStatusAsync(string cardIdm, bool isLent, DateTime? lentAt, string staffIdm)
         {
-            var connection = _dbContext.GetConnection();
+            using var lease = await _dbContext.LeaseConnectionAsync();
+            var connection = lease.Connection;
 
             using var command = connection.CreateCommand();
             command.CommandText = @"UPDATE ic_card
@@ -320,7 +328,8 @@ WHERE card_idm = @cardIdm AND is_deleted = 0";
         /// <inheritdoc/>
         public async Task<CardOperationResult> DeleteAsync(string cardIdm)
         {
-            var connection = _dbContext.GetConnection();
+            using var lease = await _dbContext.LeaseConnectionAsync();
+            var connection = lease.Connection;
 
             // Issue #1109: check-then-act を排除し、WHERE句のDBガードに一元化。
             // affected rows = 0 の場合は事後診断で原因を特定する。
@@ -359,7 +368,8 @@ WHERE card_idm = @cardIdm AND is_deleted = 0 AND is_lent = 0";
         /// </summary>
         private async Task<bool> RestoreAsyncInternal(string cardIdm, SQLiteTransaction? transaction)
         {
-            var connection = _dbContext.GetConnection();
+            using var lease = await _dbContext.LeaseConnectionAsync();
+            var connection = lease.Connection;
 
             using var command = connection.CreateCommand();
             command.Transaction = transaction;
@@ -412,7 +422,8 @@ WHERE card_idm = @cardIdm AND is_deleted = 1";
         /// <inheritdoc/>
         public async Task<bool> ExistsAsync(string cardIdm)
         {
-            var connection = _dbContext.GetConnection();
+            using var lease = await _dbContext.LeaseConnectionAsync();
+            var connection = lease.Connection;
 
             using var command = connection.CreateCommand();
             command.CommandText = "SELECT COUNT(1) FROM ic_card WHERE card_idm = @cardIdm";
@@ -425,7 +436,8 @@ WHERE card_idm = @cardIdm AND is_deleted = 1";
         /// <inheritdoc/>
         public async Task<string> GetNextCardNumberAsync(string cardType)
         {
-            var connection = _dbContext.GetConnection();
+            using var lease = await _dbContext.LeaseConnectionAsync();
+            var connection = lease.Connection;
 
             using var command = connection.CreateCommand();
             command.CommandText = @"SELECT MAX(CAST(card_number AS INTEGER))
@@ -465,7 +477,8 @@ WHERE card_type = @cardType";
         /// <inheritdoc/>
         public async Task<CardOperationResult> SetRefundedAsync(string cardIdm)
         {
-            var connection = _dbContext.GetConnection();
+            using var lease = await _dbContext.LeaseConnectionAsync();
+            var connection = lease.Connection;
 
             // Issue #1109: check-then-act を排除し、WHERE句のDBガードに一元化。
             using var command = connection.CreateCommand();
