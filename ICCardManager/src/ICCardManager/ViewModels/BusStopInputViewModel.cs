@@ -175,6 +175,59 @@ public partial class BusStopInputViewModel : ViewModelBase
     }
 
     /// <summary>
+    /// Issue #1133: 保存時に類似バス停名を検出して警告メッセージを返す
+    /// </summary>
+    internal static List<string> DetectSimilarBusStops(IEnumerable<string> existingSuggestions, IEnumerable<string> newEntries)
+    {
+        var warnings = new List<string>();
+        var existing = existingSuggestions.ToList();
+
+        foreach (var entry in newEntries)
+        {
+            if (string.IsNullOrWhiteSpace(entry) || entry == "★")
+                continue;
+
+            // 完全一致は除外（既存エントリと同じなら問題なし）
+            var similar = existing
+                .Where(s => !s.Equals(entry, StringComparison.Ordinal))
+                .Where(s => IsSimilar(entry, s))
+                .ToList();
+
+            foreach (var s in similar)
+            {
+                warnings.Add($"「{entry}」は既存の「{s}」と類似しています");
+            }
+        }
+
+        return warnings;
+    }
+
+    /// <summary>
+    /// Issue #1133: 2つのバス停名が類似しているか判定
+    /// </summary>
+    internal static bool IsSimilar(string a, string b)
+    {
+        if (string.IsNullOrEmpty(a) || string.IsNullOrEmpty(b))
+            return false;
+
+        // 一方が他方を含む場合（「天神」vs「天神南」、「博多駅」vs「博多駅前」等）
+        if (a.Contains(b) || b.Contains(a))
+            return true;
+
+        // 「～」区切りの場合、乗車・降車バス停をそれぞれ比較
+        var aParts = a.Split('～');
+        var bParts = b.Split('～');
+        if (aParts.Length == 2 && bParts.Length == 2)
+        {
+            // 乗車と降車が入れ替わっている場合（「天神～博多」vs「博多～天神」）
+            if (aParts[0].Trim() == bParts[1].Trim() && aParts[1].Trim() == bParts[0].Trim())
+                return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>
     /// 保存
     /// </summary>
     [RelayCommand]
@@ -196,6 +249,18 @@ public partial class BusStopInputViewModel : ViewModelBase
         if (missingTildeCount > 0)
         {
             StatusMessage = "「○○～△△」の形式での入力を推奨します";
+            // 警告のみ — 保存はブロックしない
+        }
+
+        // Issue #1133: 類似バス停名の検出（警告のみ）
+        var newEntries = BusUsages
+            .Where(b => !string.IsNullOrWhiteSpace(b.BusStops) && b.BusStops != "★")
+            .Select(b => b.BusStops)
+            .ToList();
+        var similarWarnings = DetectSimilarBusStops(BusStopSuggestions, newEntries);
+        if (similarWarnings.Count > 0)
+        {
+            StatusMessage = similarWarnings.First();
             // 警告のみ — 保存はブロックしない
         }
 
@@ -336,31 +401,51 @@ public partial class BusStopInputItem : ObservableObject
     /// <summary>
     /// 入力値でサジェストをフィルター
     /// </summary>
-    private void UpdateFilteredSuggestions(string input)
+    /// <remarks>
+    /// Issue #1133: 空入力時も直近利用のバス停を表示（ワンタッチ入力対応）
+    /// </remarks>
+    internal void UpdateFilteredSuggestions(string input)
     {
         FilteredSuggestions.Clear();
 
-        if (string.IsNullOrWhiteSpace(input) || _allSuggestions.Count == 0)
+        if (_allSuggestions.Count == 0)
         {
             ShowSuggestions = false;
             return;
         }
 
-        // 入力文字列を含む候補を抽出（先頭一致優先、次に部分一致）
-        var inputLower = input.ToLowerInvariant();
+        List<string> matches;
 
-        var startsWithMatches = _allSuggestions
-            .Where(s => s.ToLowerInvariant().StartsWith(inputLower))
-            .Take(5);
+        if (string.IsNullOrWhiteSpace(input))
+        {
+            // Issue #1133: 空入力時は直近利用順（=スコア順）のトップ候補を表示
+            matches = _allSuggestions.Take(8).ToList();
+        }
+        else
+        {
+            // 入力文字列を含む候補を抽出（先頭一致優先、次に部分一致）
+            var inputLower = input.ToLowerInvariant();
 
-        var containsMatches = _allSuggestions
-            .Where(s => !s.ToLowerInvariant().StartsWith(inputLower) &&
-                        s.ToLowerInvariant().Contains(inputLower))
-            .Take(5);
+            var startsWithMatches = _allSuggestions
+                .Where(s => s.ToLowerInvariant().StartsWith(inputLower))
+                .Take(5);
 
-        var matches = startsWithMatches.Concat(containsMatches).Take(8).ToList();
+            var containsMatches = _allSuggestions
+                .Where(s => !s.ToLowerInvariant().StartsWith(inputLower) &&
+                            s.ToLowerInvariant().Contains(inputLower))
+                .Take(5);
 
-        if (matches.Count > 0 && !matches.Any(m => m.Equals(input, StringComparison.OrdinalIgnoreCase)))
+            matches = startsWithMatches.Concat(containsMatches).Take(8).ToList();
+
+            // 入力値と完全一致する候補のみの場合は表示しない
+            if (matches.Count > 0 && matches.All(m => m.Equals(input, StringComparison.OrdinalIgnoreCase)))
+            {
+                ShowSuggestions = false;
+                return;
+            }
+        }
+
+        if (matches.Count > 0)
         {
             foreach (var match in matches)
             {
@@ -391,5 +476,13 @@ public partial class BusStopInputItem : ObservableObject
     public void HideSuggestions()
     {
         ShowSuggestions = false;
+    }
+
+    /// <summary>
+    /// Issue #1133: テキストボックスフォーカス時にサジェスト候補を表示
+    /// </summary>
+    public void OnTextBoxGotFocus()
+    {
+        UpdateFilteredSuggestions(BusStops);
     }
 }
