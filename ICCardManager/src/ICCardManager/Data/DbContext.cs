@@ -13,6 +13,31 @@ using System.Data.SQLite;
 
 namespace ICCardManager.Data
 {
+    /// <summary>
+    /// Issue #1166: 接続一時停止スコープ。
+    /// リストア中にバックグラウンドタスクが接続を再オープンすることを防止する。
+    /// Disposeで自動的に停止を解除する。
+    /// </summary>
+    public sealed class ConnectionSuspensionScope : IDisposable
+    {
+        private readonly DbContext _dbContext;
+        private bool _disposed;
+
+        internal ConnectionSuspensionScope(DbContext dbContext)
+        {
+            _dbContext = dbContext;
+        }
+
+        public void Dispose()
+        {
+            if (!_disposed)
+            {
+                _disposed = true;
+                _dbContext.ResumeConnections();
+            }
+        }
+    }
+
 /// <summary>
     /// SQLiteデータベース接続管理クラス
     /// </summary>
@@ -23,6 +48,12 @@ namespace ICCardManager.Data
         private readonly ILogger _logger;
         private SQLiteConnection _connection;
         private bool _disposed;
+
+        /// <summary>
+        /// Issue #1166: 接続一時停止フラグ。
+        /// リストア中にバックグラウンドタスクが接続を再オープンすることを防止する。
+        /// </summary>
+        private volatile bool _isSuspended;
 
         /// <summary>
         /// ジッター生成用の乱数。thundering herd問題を防止するためリトライ待機に使用
@@ -187,8 +218,23 @@ namespace ICCardManager.Data
         /// </remarks>
         public virtual SQLiteConnection GetConnection()
         {
+            // Issue #1166: 接続一時停止中は新規接続を拒否
+            // リストア中にバックグラウンドタスクが接続を再オープンすることを防止
+            if (_isSuspended)
+            {
+                throw new InvalidOperationException(
+                    "データベース接続は一時停止中です（リストア処理中）。");
+            }
+
             lock (_connectionLock)
             {
+                // ロック取得後に再チェック（ロック待ち中にSuspendされた可能性）
+                if (_isSuspended)
+                {
+                    throw new InvalidOperationException(
+                        "データベース接続は一時停止中です（リストア処理中）。");
+                }
+
                 if (_connection != null && _connection.State != ConnectionState.Open)
                 {
                     // 接続が切断された場合（ネットワーク共有時の瞬断等）は再接続
@@ -292,6 +338,41 @@ namespace ICCardManager.Data
                 CloseConnectionInternal();
             }
         }
+
+        /// <summary>
+        /// Issue #1166: 接続を一時停止し、停止中は新規接続の取得を拒否する。
+        /// リストア処理でDBファイルを安全に置き換えるために使用する。
+        /// </summary>
+        /// <remarks>
+        /// 戻り値のConnectionSuspensionScopeをDisposeすると停止が解除される。
+        /// using文で使用することで、例外発生時も確実に解除される。
+        /// 停止中にGetConnection()を呼ぶとInvalidOperationExceptionがスローされる。
+        /// </remarks>
+        /// <returns>停止スコープ（Disposeで停止解除）</returns>
+        public ConnectionSuspensionScope SuspendConnections()
+        {
+            lock (_connectionLock)
+            {
+                _isSuspended = true;
+                CloseConnectionInternal();
+            }
+            _logger?.LogDebug("Issue #1166: DB接続を一時停止しました");
+            return new ConnectionSuspensionScope(this);
+        }
+
+        /// <summary>
+        /// Issue #1166: 接続の一時停止を解除する（ConnectionSuspensionScope.Disposeから呼び出される）
+        /// </summary>
+        internal void ResumeConnections()
+        {
+            _isSuspended = false;
+            _logger?.LogDebug("Issue #1166: DB接続の一時停止を解除しました");
+        }
+
+        /// <summary>
+        /// Issue #1166: 接続が一時停止中かどうか
+        /// </summary>
+        public bool IsConnectionSuspended => _isSuspended;
 
         /// <summary>
         /// 接続を閉じる内部実装（ロック取得済みの状態で呼び出すこと）

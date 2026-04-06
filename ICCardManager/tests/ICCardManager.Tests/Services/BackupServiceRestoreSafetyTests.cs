@@ -262,6 +262,111 @@ public class BackupServiceRestoreSafetyTests : IDisposable
 
     #endregion
 
+    #region Issue #1166: 接続一時停止テスト
+
+    /// <summary>
+    /// SuspendConnections中にGetConnectionがInvalidOperationExceptionをスローすること
+    /// </summary>
+    [Fact]
+    [Trait("Category", "Unit")]
+    public void SuspendConnections_GetConnectionが例外をスローすること()
+    {
+        var dbPath = Path.Combine(_testDirectory, "suspend_test.db");
+        using var dbContext = new DbContext(dbPath);
+        dbContext.InitializeDatabase();
+
+        // Act: 接続を一時停止
+        using (dbContext.SuspendConnections())
+        {
+            // Assert: GetConnectionが例外をスロー
+            dbContext.IsConnectionSuspended.Should().BeTrue();
+            var act = () => dbContext.GetConnection();
+            act.Should().Throw<InvalidOperationException>()
+                .WithMessage("*一時停止中*");
+        }
+
+        // スコープ終了後は接続可能に復帰
+        dbContext.IsConnectionSuspended.Should().BeFalse();
+        var connection = dbContext.GetConnection();
+        connection.Should().NotBeNull();
+        connection.State.Should().Be(System.Data.ConnectionState.Open);
+    }
+
+    /// <summary>
+    /// SuspendConnectionsのDisposeで接続が再許可されること
+    /// </summary>
+    [Fact]
+    [Trait("Category", "Unit")]
+    public void SuspendConnections_Dispose後にGetConnectionが成功すること()
+    {
+        var dbPath = Path.Combine(_testDirectory, "suspend_resume.db");
+        using var dbContext = new DbContext(dbPath);
+        dbContext.InitializeDatabase();
+
+        var scope = dbContext.SuspendConnections();
+        dbContext.IsConnectionSuspended.Should().BeTrue();
+
+        scope.Dispose();
+        dbContext.IsConnectionSuspended.Should().BeFalse();
+
+        // 再接続が正常に動作すること
+        var connection = dbContext.GetConnection();
+        connection.State.Should().Be(System.Data.ConnectionState.Open);
+    }
+
+    /// <summary>
+    /// リストア中にバックグラウンドからの接続取得が拒否され、リストアが安全に完了すること
+    /// </summary>
+    [Fact]
+    [Trait("Category", "Unit")]
+    public void RestoreFromBackup_リストア中はGetConnectionが拒否されること()
+    {
+        var dbPath = Path.Combine(_testDirectory, "restore_guard.db");
+        using var dbContext = new DbContext(dbPath);
+        dbContext.InitializeDatabase();
+
+        // バックアップを作成
+        var backupPath = Path.Combine(_backupDirectory, "backup_guard.db");
+        File.Copy(dbPath, backupPath);
+
+        var service = new BackupService(
+            dbContext,
+            CreateSettingsRepositoryMock().Object,
+            NullLogger<BackupService>.Instance);
+
+        // Act: リストア実行（内部でSuspendConnectionsが使われる）
+        var result = service.RestoreFromBackup(backupPath);
+
+        // Assert
+        result.Should().BeTrue();
+        // リストア完了後は接続が可能に復帰していること
+        dbContext.IsConnectionSuspended.Should().BeFalse();
+        var connection = dbContext.GetConnection();
+        connection.State.Should().Be(System.Data.ConnectionState.Open);
+    }
+
+    /// <summary>
+    /// SuspendConnectionsを複数回Disposeしてもエラーにならないこと
+    /// </summary>
+    [Fact]
+    [Trait("Category", "Unit")]
+    public void SuspendConnections_複数回Disposeしてもエラーにならないこと()
+    {
+        var dbPath = Path.Combine(_testDirectory, "double_dispose.db");
+        using var dbContext = new DbContext(dbPath);
+        dbContext.InitializeDatabase();
+
+        var scope = dbContext.SuspendConnections();
+        scope.Dispose();
+        var act = () => scope.Dispose();
+        act.Should().NotThrow();
+
+        // 接続は可能に復帰していること
+        dbContext.IsConnectionSuspended.Should().BeFalse();
+    }
+
+    #endregion
+
     #region ヘルパーメソッド
 
     private BackupService CreateService(string dbPath)
