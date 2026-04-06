@@ -25,12 +25,20 @@ namespace ICCardManager.Data.Repositories
         /// <summary>
         /// 貸出可能なICカードを取得
         /// </summary>
-        Task<IEnumerable<IcCard>> GetAvailableAsync();
+        /// <param name="bypassCache">
+        /// Issue #1167: trueの場合、キャッシュをバイパスしてDBから直接読み取る。
+        /// 共有モード時に他PCの最新の貸出状態を反映する必要がある場合に使用する。
+        /// </param>
+        Task<IEnumerable<IcCard>> GetAvailableAsync(bool bypassCache = false);
 
         /// <summary>
         /// 貸出中のICカードを取得
         /// </summary>
-        Task<IEnumerable<IcCard>> GetLentAsync();
+        /// <param name="bypassCache">
+        /// Issue #1167: trueの場合、キャッシュをバイパスしてDBから直接読み取る。
+        /// 共有モード時に他PCの最新の貸出状態を反映する必要がある場合に使用する。
+        /// </param>
+        Task<IEnumerable<IcCard>> GetLentAsync(bool bypassCache = false);
 
         /// <summary>
         /// IDmでICカードを取得
