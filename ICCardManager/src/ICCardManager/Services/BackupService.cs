@@ -223,69 +223,74 @@ namespace ICCardManager.Services
                     return false;
                 }
 
-                // Issue #508: DBファイルを置き換える前に接続を閉じる
-                // SQLite接続が開いているとファイルがロックされ、置き換えに失敗する
-                _dbContext.CloseConnection();
-                _logger.LogDebug("リストア準備: DB接続を閉じました");
-
-                // Issue #1108: 共有モード時は他PCの接続を検出し、接続があればリストアを拒否する
-                if (_dbContext.IsSharedMode && !CanAcquireExclusiveLock(targetPath))
+                // Issue #1166: 接続を一時停止し、バックグラウンドタスクによる再オープンを防止
+                // SuspendConnections()は接続を閉じた上で、スコープ終了まで新規接続を拒否する。
+                // これにより、ヘルスチェック等がFile.Move中に接続を再オープンしてDBファイルを
+                // ロックする問題を防止する（Issue #508のCloseConnection()を置き換え）
+                using (_dbContext.SuspendConnections())
                 {
-                    _logger.LogWarning(
-                        "共有モードでリストアが拒否されました: 他のPCがデータベースに接続中です。" +
-                        "すべてのPCでアプリケーションを終了してから再度お試しください。");
-                    return false;
-                }
+                    _logger.LogDebug("リストア準備: DB接続を一時停止しました");
 
-                // 現在のDBを退避
-                if (File.Exists(targetPath))
-                {
-                    // .NET Framework 4.8ではFile.Moveにoverwriteパラメータがないため手動で削除
-                    if (File.Exists(tempPath))
+                    // Issue #1108: 共有モード時は他PCの接続を検出し、接続があればリストアを拒否する
+                    if (_dbContext.IsSharedMode && !CanAcquireExclusiveLock(targetPath))
                     {
-                        File.Delete(tempPath);
+                        _logger.LogWarning(
+                            "共有モードでリストアが拒否されました: 他のPCがデータベースに接続中です。" +
+                            "すべてのPCでアプリケーションを終了してから再度お試しください。");
+                        return false;
                     }
-                    File.Move(targetPath, tempPath);
-                }
 
-                try
-                {
-                    File.Copy(backupFilePath, targetPath, overwrite: true);
-
-                    // Issue #1108: ジャーナルファイルを清掃
-                    // リストア前のジャーナルが残っていると、次回接続時にジャーナルリカバリが
-                    // 実行され、リストアした内容が上書きされる可能性がある
-                    CleanupJournalFiles(targetPath);
-
-                    // 成功したら退避ファイルを削除
-                    if (File.Exists(tempPath))
-                    {
-                        File.Delete(tempPath);
-                    }
-                    _logger.LogInformation(
-                        "バックアップからリストアしました: {BackupPath} -> {TargetPath}",
-                        backupFilePath,
-                        targetPath);
-                    return true;
-                }
-                catch (Exception ex)
-                {
-                    // 失敗したら退避ファイルを戻す
-                    _logger.LogWarning(ex,
-                        "リストアに失敗したため、元のデータベースを復元します: {TempPath} -> {TargetPath}",
-                        tempPath,
-                        targetPath);
-                    if (File.Exists(tempPath))
+                    // 現在のDBを退避
+                    if (File.Exists(targetPath))
                     {
                         // .NET Framework 4.8ではFile.Moveにoverwriteパラメータがないため手動で削除
-                        if (File.Exists(targetPath))
+                        if (File.Exists(tempPath))
                         {
-                            File.Delete(targetPath);
+                            File.Delete(tempPath);
                         }
-                        File.Move(tempPath, targetPath);
+                        File.Move(targetPath, tempPath);
                     }
-                    throw;
+
+                    try
+                    {
+                        File.Copy(backupFilePath, targetPath, overwrite: true);
+
+                        // Issue #1108: ジャーナルファイルを清掃
+                        // リストア前のジャーナルが残っていると、次回接続時にジャーナルリカバリが
+                        // 実行され、リストアした内容が上書きされる可能性がある
+                        CleanupJournalFiles(targetPath);
+
+                        // 成功したら退避ファイルを削除
+                        if (File.Exists(tempPath))
+                        {
+                            File.Delete(tempPath);
+                        }
+                        _logger.LogInformation(
+                            "バックアップからリストアしました: {BackupPath} -> {TargetPath}",
+                            backupFilePath,
+                            targetPath);
+                        return true;
+                    }
+                    catch (Exception ex)
+                    {
+                        // 失敗したら退避ファイルを戻す
+                        _logger.LogWarning(ex,
+                            "リストアに失敗したため、元のデータベースを復元します: {TempPath} -> {TargetPath}",
+                            tempPath,
+                            targetPath);
+                        if (File.Exists(tempPath))
+                        {
+                            // .NET Framework 4.8ではFile.Moveにoverwriteパラメータがないため手動で削除
+                            if (File.Exists(targetPath))
+                            {
+                                File.Delete(targetPath);
+                            }
+                            File.Move(tempPath, targetPath);
+                        }
+                        throw;
+                    }
                 }
+                // using終了で接続の一時停止が自動解除される
             }
             catch (UnauthorizedAccessException ex)
             {

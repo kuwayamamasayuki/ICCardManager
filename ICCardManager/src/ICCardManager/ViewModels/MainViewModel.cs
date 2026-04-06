@@ -663,11 +663,21 @@ public partial class MainViewModel : ViewModelBase
     /// </summary>
     private async Task CheckDatabaseConnectionAsync()
     {
+        // Issue #1166: 接続一時停止中（リストア中）はヘルスチェックをスキップ
+        // 停止中にGetConnection()を呼ぶと例外が発生し、誤ってネットワーク切断と判定されるため
+        if (_dbContext.IsConnectionSuspended)
+            return;
+
         // バックグラウンドスレッドでDBクエリを実行（UIフリーズ防止）
         var isConnected = await Task.Run(() =>
         {
             try
             {
+                // Issue #1166: Task.Run内でも停止状態を再チェック
+                // （タスクのスケジューリング遅延で停止が開始された可能性）
+                if (_dbContext.IsConnectionSuspended)
+                    return true;
+
                 // Issue #1110: SELECT 1 はSQLiteの定数式でファイルI/Oが発生しないため
                 // ネットワーク切断を検出できない。sqlite_masterからの読み取りで
                 // 実際のファイルアクセスを強制する。
@@ -675,6 +685,11 @@ public partial class MainViewModel : ViewModelBase
                 using var command = connection.CreateCommand();
                 command.CommandText = "SELECT COUNT(*) FROM sqlite_master";
                 command.ExecuteScalar();
+                return true;
+            }
+            catch (InvalidOperationException)
+            {
+                // Issue #1166: 接続一時停止中 — ネットワーク切断ではないのでtrueを返す
                 return true;
             }
             catch (Exception)
