@@ -138,8 +138,22 @@ public partial class BusStopInputViewModel : ViewModelBase
     {
         await LoadBusStopSuggestionsAsync();
 
-        _ledgers = ledgers?.ToList() ?? new List<Ledger>();
-        // UI 表示互換のため Ledger プロパティには先頭を設定（日付等の表示に使われる可能性がある）
+        // 入力された Ledger は LendingService から返される in-memory インスタンスで
+        // Details コレクションが populate されていない場合があるため、ID で DB から再取得する。
+        // Id が 0（永続化前）または GetByIdAsync が null を返す場合は入力インスタンスをそのまま使う。
+        var loaded = new List<Ledger>();
+        foreach (var src in ledgers ?? Enumerable.Empty<Ledger>())
+        {
+            Ledger? full = null;
+            if (src.Id > 0)
+            {
+                full = await _ledgerRepository.GetByIdAsync(src.Id);
+            }
+            loaded.Add(full ?? src);
+        }
+
+        _ledgers = loaded;
+        // UI 表示互換のため Ledger プロパティには先頭を設定
         Ledger = _ledgers.FirstOrDefault();
 
         BusUsages.Clear();

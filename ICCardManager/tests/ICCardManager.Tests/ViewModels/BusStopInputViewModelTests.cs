@@ -424,6 +424,41 @@ public class BusStopInputViewModelTests
     }
 
     [Fact]
+    public async Task InitializeWithLedgersAsync_DetailsがemptyでもリポジトリからロードしてUseDate金額が取得されること()
+    {
+        // Arrange: LendingService が返す in-memory Ledger は Details が空のことがあるため、
+        // ID 経由で repository から再ロードされることを検証する（Issue #1203 回帰）
+        var inMemoryLedger = new Ledger { Id = 99, Details = new List<LedgerDetail>() };
+
+        var loadedLedger = new Ledger
+        {
+            Id = 99,
+            Details = new List<LedgerDetail>
+            {
+                new LedgerDetail
+                {
+                    LedgerId = 99,
+                    IsBus = true,
+                    SequenceNumber = 1,
+                    UseDate = new DateTime(2026, 4, 3),
+                    Amount = 230,
+                },
+            },
+        };
+
+        _ledgerRepoMock.Setup(r => r.GetByIdAsync(99)).ReturnsAsync(loadedLedger);
+
+        // Act
+        await _viewModel.InitializeWithLedgersAsync(new[] { inMemoryLedger });
+
+        // Assert: 再ロードされた Ledger の Details がバス停入力項目に反映される
+        _viewModel.BusUsages.Should().HaveCount(1);
+        _viewModel.BusUsages[0].UseDate.Should().Be(new DateTime(2026, 4, 3));
+        _viewModel.BusUsages[0].Amount.Should().Be(230);
+        _ledgerRepoMock.Verify(r => r.GetByIdAsync(99), Times.Once);
+    }
+
+    [Fact]
     public async Task InitializeWithLedgersAsync_バス利用がゼロ件の場合はメッセージが設定されること()
     {
         var ledger = new Ledger
