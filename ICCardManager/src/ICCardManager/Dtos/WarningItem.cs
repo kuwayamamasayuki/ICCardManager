@@ -21,7 +21,10 @@ namespace ICCardManager.Dtos
         BalanceInconsistency,
 
         /// <summary>データベース接続断（共有モード時のネットワーク切断）</summary>
-        DatabaseConnectionLost
+        DatabaseConnectionLost,
+
+        /// <summary>データベースのジャーナルモードがDELETEに設定できず、クラッシュ耐性が低下している警告（Issue #1172）</summary>
+        DatabaseJournalModeDegraded
     }
 
     /// <summary>

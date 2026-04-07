@@ -96,6 +96,23 @@ namespace ICCardManager.Data
         public string DatabasePath { get; }
 
         /// <summary>
+        /// Issue #1172: 最後に設定/確認されたSQLiteジャーナルモード（小文字、例: "delete", "truncate", "persist", "unknown"）。
+        /// 接続初期化前はnull。ConfigureJournalModeが呼ばれた際にセットされる。
+        /// </summary>
+        public virtual string CurrentJournalMode { get; private set; }
+
+        /// <summary>
+        /// Issue #1172: ジャーナルモードがDELETE以外（クラッシュ耐性が低下した状態）かどうか。
+        /// nullまたは"delete"の場合はfalse、それ以外（truncate/persist/unknown等）はtrue。
+        /// </summary>
+        /// <remarks>
+        /// この値がtrueの場合、UI側で警告を表示することを推奨する。
+        /// MainViewModel.InitializeAsyncで起動時にチェックされる。
+        /// </remarks>
+        public virtual bool IsJournalModeDegraded =>
+            !string.IsNullOrEmpty(CurrentJournalMode) && CurrentJournalMode != "delete";
+
+        /// <summary>
         /// テスト用のprotectedコンストラクタ
         /// </summary>
         protected DbContext()
@@ -304,6 +321,8 @@ namespace ICCardManager.Data
                         System.Diagnostics.Debug.WriteLine($"[DbContext] 警告: {message}");
 #endif
                     }
+                    // Issue #1172: 上位レイヤがdegraded状態をチェックできるようプロパティに保存
+                    CurrentJournalMode = result;
                     return result;
                 }
             }
@@ -320,6 +339,8 @@ namespace ICCardManager.Data
             System.Diagnostics.Debug.WriteLine($"[DbContext] 警告: {warningMessage}");
 #endif
 
+            // Issue #1172: 失敗時もプロパティに保存（degraded状態として検出される）
+            CurrentJournalMode = currentMode;
             return currentMode;
         }
 

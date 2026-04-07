@@ -41,6 +41,7 @@ public class WarningItemTests
     [InlineData(WarningType.CardReaderConnection)]
     [InlineData(WarningType.BalanceInconsistency)]
     [InlineData(WarningType.DatabaseConnectionLost)]
+    [InlineData(WarningType.DatabaseJournalModeDegraded)]
     public void WarningType_すべての種別が定義されていること(WarningType type)
     {
         // WarningTypeの各値が存在し、一意であることを確認
@@ -48,9 +49,10 @@ public class WarningItemTests
     }
 
     [Fact]
-    public void WarningType_6種類定義されていること()
+    public void WarningType_7種類定義されていること()
     {
+        // Issue #1172: DatabaseJournalModeDegradedを追加して6→7種類
         var values = System.Enum.GetValues(typeof(WarningType));
-        values.Length.Should().Be(6);
+        values.Length.Should().Be(7);
     }
 }
