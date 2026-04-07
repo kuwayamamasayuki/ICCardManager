@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using System.Collections.Concurrent;
 using Microsoft.Extensions.Caching.Memory;
@@ -19,6 +20,12 @@ namespace ICCardManager.Infrastructure.Caching
         private readonly object _lock = new();
         private bool _disposed;
 
+        /// <summary>
+        /// Issue #1167: GetOrCreateAsyncのキーごとの排他制御用セマフォ。
+        /// ダブルチェックロッキングで factory() の多重実行を防止する。
+        /// </summary>
+        private readonly ConcurrentDictionary<string, SemaphoreSlim> _keyLocks = new();
+
         public CacheService(ILogger<CacheService> logger)
         {
             _logger = logger;
@@ -33,19 +40,41 @@ namespace ICCardManager.Infrastructure.Caching
         /// <inheritdoc/>
         public async Task<T> GetOrCreateAsync<T>(string key, Func<Task<T>> factory, TimeSpan absoluteExpiration)
         {
+            // 1段目チェック（ロック取得前の高速パス）
             if (_cache.TryGetValue(key, out T? cachedValue) && cachedValue is not null)
             {
                 _logger.LogTrace("キャッシュヒット: {Key}", key);
                 return cachedValue;
             }
 
-            // キャッシュミス - ファクトリを実行
-            _logger.LogTrace("キャッシュミス: {Key}", key);
-            var value = await factory();
+            // Issue #1167: ダブルチェックロッキング
+            // キーごとのセマフォで factory() の多重実行を防止する。
+            // 複数の並行呼び出しが同時にキャッシュミスした場合、最初の1回だけ
+            // factory() を実行し、残りはキャッシュ済みの結果を取得する。
+            var keyLock = _keyLocks.GetOrAdd(key, _ => new SemaphoreSlim(1, 1));
 
-            Set(key, value, absoluteExpiration);
+            await keyLock.WaitAsync();
+            try
+            {
+                // 2段目チェック（ロック取得後）
+                if (_cache.TryGetValue(key, out T? doubleCheckedValue) && doubleCheckedValue is not null)
+                {
+                    _logger.LogTrace("キャッシュヒット（ロック後）: {Key}", key);
+                    return doubleCheckedValue;
+                }
 
-            return value;
+                // キャッシュミス - ファクトリを実行
+                _logger.LogTrace("キャッシュミス: {Key}", key);
+                var value = await factory();
+
+                Set(key, value, absoluteExpiration);
+
+                return value;
+            }
+            finally
+            {
+                keyLock.Release();
+            }
         }
 
         /// <inheritdoc/>
@@ -143,6 +172,12 @@ namespace ICCardManager.Infrastructure.Caching
             if (disposing)
             {
                 _cache.Dispose();
+                // Issue #1167: キーごとのセマフォを破棄
+                foreach (var keyLock in _keyLocks.Values)
+                {
+                    keyLock.Dispose();
+                }
+                _keyLocks.Clear();
             }
 
             _disposed = true;

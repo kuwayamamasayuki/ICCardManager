@@ -477,6 +477,10 @@ public partial class MainViewModel : ViewModelBase
     {
         using (BeginBusy("初期化中..."))
         {
+            // Issue #1172: ジャーナルモードがDELETE以外（degraded）の場合、UI警告を追加
+            // クラッシュ耐性が低下している可能性をユーザーに通知する
+            CheckJournalModeWarning();
+
             // Issue #790: 起動時に貸出状態の整合性をチェック・修復
             await _lendingService.RepairLentStatusConsistencyAsync();
 
@@ -509,6 +513,31 @@ public partial class MainViewModel : ViewModelBase
                 StartDatabaseHealthCheck();
             }
         }
+    }
+
+    /// <summary>
+    /// Issue #1172: ジャーナルモード状態をチェックし、degradedの場合は警告を追加する。
+    /// internal: テストから直接呼び出して挙動を検証するため。
+    /// </summary>
+    /// <remarks>
+    /// DbContext.IsJournalModeDegraded がtrueの場合、警告メッセージエリアに
+    /// クラッシュ耐性低下の警告を表示する。重複追加は防止する。
+    /// </remarks>
+    internal void CheckJournalModeWarning()
+    {
+        if (!_dbContext.IsJournalModeDegraded)
+            return;
+
+        // 重複防止
+        if (WarningMessages.Any(w => w.Type == WarningType.DatabaseJournalModeDegraded))
+            return;
+
+        WarningMessages.Add(new WarningItem
+        {
+            Type = WarningType.DatabaseJournalModeDegraded,
+            DisplayText = $"⚠️ データベースのクラッシュ耐性が低下しています（journal_mode={_dbContext.CurrentJournalMode}）。" +
+                          "ファイルサーバ管理者にご相談ください。"
+        });
     }
 
     /// <summary>
@@ -663,11 +692,21 @@ public partial class MainViewModel : ViewModelBase
     /// </summary>
     private async Task CheckDatabaseConnectionAsync()
     {
+        // Issue #1166: 接続一時停止中（リストア中）はヘルスチェックをスキップ
+        // 停止中にGetConnection()を呼ぶと例外が発生し、誤ってネットワーク切断と判定されるため
+        if (_dbContext.IsConnectionSuspended)
+            return;
+
         // バックグラウンドスレッドでDBクエリを実行（UIフリーズ防止）
         var isConnected = await Task.Run(() =>
         {
             try
             {
+                // Issue #1166: Task.Run内でも停止状態を再チェック
+                // （タスクのスケジューリング遅延で停止が開始された可能性）
+                if (_dbContext.IsConnectionSuspended)
+                    return true;
+
                 // Issue #1110: SELECT 1 はSQLiteの定数式でファイルI/Oが発生しないため
                 // ネットワーク切断を検出できない。sqlite_masterからの読み取りで
                 // 実際のファイルアクセスを強制する。
@@ -675,6 +714,11 @@ public partial class MainViewModel : ViewModelBase
                 using var command = lease.Connection.CreateCommand();
                 command.CommandText = "SELECT COUNT(*) FROM sqlite_master";
                 command.ExecuteScalar();
+                return true;
+            }
+            catch (InvalidOperationException)
+            {
+                // Issue #1166: 接続一時停止中 — ネットワーク切断ではないのでtrueを返す
                 return true;
             }
             catch (Exception)
@@ -1158,9 +1202,19 @@ public partial class MainViewModel : ViewModelBase
         // メイン画面は変更せず、内部状態のみ更新（Issue #186）
         SetInternalState(AppState.Processing);
 
-        // カードから履歴を読み取る
-        var usageDetails = await _cardReader.ReadHistoryAsync(card.CardIdm);
-        var usageDetailsList = usageDetails.ToList();
+        // Issue #1169: カードから履歴を読み取る（リーダーエラーと履歴ゼロ件を区別）
+        var historyResult = await _cardReader.TryReadHistoryAsync(card.CardIdm);
+        if (!historyResult.Success)
+        {
+            // リーダーエラー: 不正確なデータをDBに記録しないため返却処理を中断
+            _soundPlayer.Play(SoundType.Error);
+            _toastNotificationService.ShowError(
+                "カードリーダーエラー",
+                "履歴の読み取りに失敗しました。カードを再度タッチしてください。");
+            ResetState();
+            return;
+        }
+        var usageDetailsList = historyResult.Value.ToList();
 
         var result = await _lendingService.ReturnAsync(_currentStaffIdm!, card.CardIdm, usageDetailsList);
 

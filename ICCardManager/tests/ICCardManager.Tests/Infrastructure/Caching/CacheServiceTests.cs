@@ -384,6 +384,113 @@ public class CacheServiceTests : IDisposable
 
     #endregion
 
+    #region Issue #1167: ダブルチェックロッキング テスト
+
+    /// <summary>
+    /// Issue #1167: 並行呼び出しでもfactoryが1回だけ実行されること（ダブルチェックロッキング）
+    /// </summary>
+    [Fact]
+    public async Task GetOrCreateAsync_ConcurrentCalls_FactoryExecutedOnce()
+    {
+        // Arrange
+        const string key = "concurrent:key";
+        var factoryCallCount = 0;
+        var factoryStartedEvent = new System.Threading.ManualResetEventSlim(false);
+        var factoryReleaseEvent = new System.Threading.ManualResetEventSlim(false);
+
+        async Task<string> SlowFactory()
+        {
+            System.Threading.Interlocked.Increment(ref factoryCallCount);
+            factoryStartedEvent.Set();
+            // 並行呼び出し側がロック待ちに入る時間を確保
+            await Task.Run(() => factoryReleaseEvent.Wait(TimeSpan.FromSeconds(5)));
+            return "factory-result";
+        }
+
+        // Act: 並行で10個のGetOrCreateAsyncを呼び出す
+        var tasks = Enumerable.Range(0, 10)
+            .Select(_ => _sut.GetOrCreateAsync(key, SlowFactory, TimeSpan.FromMinutes(1)))
+            .ToArray();
+
+        // 最初のfactoryが開始されるまで待つ
+        factoryStartedEvent.Wait(TimeSpan.FromSeconds(5));
+        // 残りの呼び出しはロック待ちに入る → factory完了を許可
+        await Task.Delay(100);
+        factoryReleaseEvent.Set();
+
+        var results = await Task.WhenAll(tasks);
+
+        // Assert: factoryは1回だけ実行され、全ての呼び出しが同じ値を取得
+        factoryCallCount.Should().Be(1, "ダブルチェックロッキングによりfactoryは1回のみ実行されるべき");
+        results.Should().AllSatisfy(r => r.Should().Be("factory-result"));
+    }
+
+    /// <summary>
+    /// Issue #1167: 異なるキーは互いをブロックしないこと
+    /// </summary>
+    [Fact]
+    public async Task GetOrCreateAsync_DifferentKeys_DoNotBlockEachOther()
+    {
+        // Arrange
+        var key1Started = new System.Threading.ManualResetEventSlim(false);
+        var key2Started = new System.Threading.ManualResetEventSlim(false);
+
+        async Task<string> Factory1()
+        {
+            key1Started.Set();
+            await Task.Run(() => key2Started.Wait(TimeSpan.FromSeconds(5)));
+            return "value1";
+        }
+
+        async Task<string> Factory2()
+        {
+            key2Started.Set();
+            await Task.CompletedTask;
+            return "value2";
+        }
+
+        // Act: key1のfactoryを開始してブロックしている間にkey2を呼ぶ
+        var task1 = _sut.GetOrCreateAsync("key1", Factory1, TimeSpan.FromMinutes(1));
+        key1Started.Wait(TimeSpan.FromSeconds(5));
+
+        var task2 = _sut.GetOrCreateAsync("key2", Factory2, TimeSpan.FromMinutes(1));
+
+        var result2 = await task2; // key2はブロックされずに完了
+        var result1 = await task1;
+
+        // Assert
+        result1.Should().Be("value1");
+        result2.Should().Be("value2");
+    }
+
+    /// <summary>
+    /// Issue #1167: ロック取得後にキャッシュにヒットした場合factoryが実行されないこと
+    /// </summary>
+    [Fact]
+    public async Task GetOrCreateAsync_DoubleCheckHit_FactoryNotCalled()
+    {
+        // Arrange
+        const string key = "double:check:key";
+        // 先にキャッシュに値を入れておく
+        _sut.Set(key, "preset-value", TimeSpan.FromMinutes(1));
+
+        var factoryCalled = false;
+        Task<string> Factory()
+        {
+            factoryCalled = true;
+            return Task.FromResult("factory-value");
+        }
+
+        // Act
+        var result = await _sut.GetOrCreateAsync(key, Factory, TimeSpan.FromMinutes(1));
+
+        // Assert
+        result.Should().Be("preset-value");
+        factoryCalled.Should().BeFalse("キャッシュヒット時はfactoryが呼ばれないべき");
+    }
+
+    #endregion
+
     #region Helper Classes
 
     private class TestObject

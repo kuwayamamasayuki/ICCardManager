@@ -572,6 +572,111 @@ public class DbContextCleanupTests : IDisposable
 
     #endregion
 
+    #region Issue #1170: トランザクション一貫性テスト
+
+    /// <summary>
+    /// Issue #1170: 両テーブルの削除がアトミックに実行されることを確認。
+    /// 古いデータのみ削除され、新しいデータは残る。
+    /// </summary>
+    [Fact]
+    public async Task CleanupOldData_BothTables_AtomicDelete()
+    {
+        // Arrange: 7年前のデータを両テーブルに登録
+        var sevenYearsAgo = DateTime.Now.AddYears(-7);
+        await _ledgerRepository.InsertAsync(CreateTestLedger(sevenYearsAgo, "古い履歴1"));
+        await _ledgerRepository.InsertAsync(CreateTestLedger(sevenYearsAgo.AddDays(-10), "古い履歴2"));
+        await _operationLogRepository.InsertAsync(CreateTestOperationLog(sevenYearsAgo, "INSERT"));
+        await _operationLogRepository.InsertAsync(CreateTestOperationLog(sevenYearsAgo, "UPDATE"));
+        await _operationLogRepository.InsertAsync(CreateTestOperationLog(sevenYearsAgo, "DELETE"));
+
+        // 1年前のデータ（残るべき）
+        await _ledgerRepository.InsertAsync(CreateTestLedger(DateTime.Now.AddYears(-1), "新しい履歴"));
+        await _operationLogRepository.InsertAsync(CreateTestOperationLog(DateTime.Now.AddYears(-1), "RECENT"));
+
+        // Act
+        var (ledgerCount, logCount) = _dbContext.CleanupOldData();
+
+        // Assert: 古いデータの削除件数を検証
+        ledgerCount.Should().Be(2, "7年前のledgerは2件削除されるべき");
+        logCount.Should().BeGreaterOrEqualTo(3, "7年前のoperation_logは3件以上削除されるべき");
+
+        // DBの状態を直接確認 - 新しいデータが残っていることを確認
+        var connection = _dbContext.GetConnection();
+        using var ledgerCheck = connection.CreateCommand();
+        ledgerCheck.CommandText = "SELECT COUNT(*) FROM ledger WHERE summary = '新しい履歴'";
+        var ledgerRemaining = Convert.ToInt32(ledgerCheck.ExecuteScalar());
+        ledgerRemaining.Should().Be(1, "新しいledgerは残っているべき");
+
+        // 古いledgerは消えていること
+        using var oldLedgerCheck = connection.CreateCommand();
+        oldLedgerCheck.CommandText = "SELECT COUNT(*) FROM ledger WHERE summary LIKE '古い履歴%'";
+        Convert.ToInt32(oldLedgerCheck.ExecuteScalar()).Should().Be(0, "古いledgerは削除されているべき");
+    }
+
+    /// <summary>
+    /// Issue #1170: トランザクションがコミットされていることを確認。
+    /// CleanupOldData完了後、別接続でも削除が反映されている。
+    /// </summary>
+    [Fact]
+    public async Task CleanupOldData_AfterCommit_ChangesAreVisible()
+    {
+        // Arrange
+        var sevenYearsAgo = DateTime.Now.AddYears(-7);
+        await _ledgerRepository.InsertAsync(CreateTestLedger(sevenYearsAgo, "古い履歴"));
+
+        // Act
+        var (ledgerCount, _) = _dbContext.CleanupOldData();
+
+        // Assert: コミット後、SELECTでデータが消えていること
+        ledgerCount.Should().Be(1);
+        var connection = _dbContext.GetConnection();
+        using var cmd = connection.CreateCommand();
+        cmd.CommandText = "SELECT COUNT(*) FROM ledger WHERE summary = '古い履歴'";
+        var remaining = Convert.ToInt32(cmd.ExecuteScalar());
+        remaining.Should().Be(0, "コミット済みなので削除が反映されているべき");
+    }
+
+    /// <summary>
+    /// Issue #1170: 両テーブル空でも例外が発生しないこと（トランザクション境界の正常性確認）
+    /// </summary>
+    [Fact]
+    public void CleanupOldData_EmptyBothTables_DoesNotThrow()
+    {
+        // Act
+        var act = () => _dbContext.CleanupOldData();
+
+        // Assert
+        act.Should().NotThrow();
+    }
+
+    /// <summary>
+    /// Issue #1170: 複数回連続実行しても整合性が維持されること
+    /// </summary>
+    [Fact]
+    public async Task CleanupOldData_RunMultipleTimes_Consistent()
+    {
+        // Arrange
+        var sevenYearsAgo = DateTime.Now.AddYears(-7);
+        await _ledgerRepository.InsertAsync(CreateTestLedger(sevenYearsAgo, "古い"));
+        await _operationLogRepository.InsertAsync(CreateTestOperationLog(sevenYearsAgo, "OLD"));
+
+        // Act: 3回連続実行
+        var first = _dbContext.CleanupOldData();
+        var second = _dbContext.CleanupOldData();
+        var third = _dbContext.CleanupOldData();
+
+        // Assert
+        first.LedgerCount.Should().Be(1);
+        first.OperationLogCount.Should().Be(1);
+        // 2回目以降は0件（既に削除済み）
+        second.LedgerCount.Should().Be(0);
+        second.OperationLogCount.Should().Be(0);
+        third.LedgerCount.Should().Be(0);
+        third.OperationLogCount.Should().Be(0);
+    }
+
+    #endregion
+
     #region ヘルパーメソッド
 
     /// <summary>

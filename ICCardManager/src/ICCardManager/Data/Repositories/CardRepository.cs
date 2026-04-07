@@ -85,8 +85,16 @@ ORDER BY card_type, card_number";
         }
 
         /// <inheritdoc/>
-        public async Task<IEnumerable<IcCard>> GetAvailableAsync()
+        public async Task<IEnumerable<IcCard>> GetAvailableAsync(bool bypassCache = false)
         {
+            // Issue #1167: bypassCache=trueの場合はキャッシュを無効化してから取得
+            // これにより共有モードで他PCの貸出操作を即座に反映できる
+            if (bypassCache)
+            {
+                _cacheService.Invalidate(CacheKeys.AvailableCards);
+                return await GetAvailableFromDbAsync();
+            }
+
             return await _cacheService.GetOrCreateAsync(
                 CacheKeys.AvailableCards,
                 async () => await GetAvailableFromDbAsync(),
@@ -126,8 +134,15 @@ ORDER BY card_type, card_number";
         }
 
         /// <inheritdoc/>
-        public async Task<IEnumerable<IcCard>> GetLentAsync()
+        public async Task<IEnumerable<IcCard>> GetLentAsync(bool bypassCache = false)
         {
+            // Issue #1167: bypassCache=trueの場合はキャッシュを無効化してから取得
+            if (bypassCache)
+            {
+                _cacheService.Invalidate(CacheKeys.LentCards);
+                return await GetLentFromDbAsync();
+            }
+
             return await _cacheService.GetOrCreateAsync(
                 CacheKeys.LentCards,
                 async () => await GetLentFromDbAsync(),

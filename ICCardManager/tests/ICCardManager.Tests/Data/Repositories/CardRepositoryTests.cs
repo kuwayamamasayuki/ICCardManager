@@ -685,4 +685,101 @@ public class CardRepositoryTests : IDisposable
     }
 
     #endregion
+
+    #region Issue #1167: bypassCache テスト
+
+    /// <summary>
+    /// Issue #1167: GetAvailableAsync(bypassCache=true)はキャッシュを無効化してから取得すること
+    /// </summary>
+    [Fact]
+    public async Task GetAvailableAsync_BypassCacheTrue_InvalidatesCacheAndQueriesDb()
+    {
+        // Arrange
+        var card = CreateTestCard("0102030405060710", "はやかけん", "H100");
+        await _repository.InsertAsync(card);
+
+        // Act
+        var result = await _repository.GetAvailableAsync(bypassCache: true);
+
+        // Assert
+        result.Should().HaveCount(1);
+        // bypassCache=trueの場合はInvalidateが呼ばれること
+        _cacheServiceMock.Verify(c => c.Invalidate(CacheKeys.AvailableCards), Times.Once);
+        // GetOrCreateAsyncは呼ばれないこと
+        _cacheServiceMock.Verify(c => c.GetOrCreateAsync(
+            CacheKeys.AvailableCards,
+            It.IsAny<Func<Task<IEnumerable<IcCard>>>>(),
+            It.IsAny<TimeSpan>()), Times.Never);
+    }
+
+    /// <summary>
+    /// Issue #1167: GetAvailableAsync(bypassCache=false)は通常のキャッシュ経路を使うこと
+    /// </summary>
+    [Fact]
+    public async Task GetAvailableAsync_BypassCacheFalse_UsesCache()
+    {
+        // Arrange
+        var card = CreateTestCard("0102030405060711", "nimoca", "N100");
+        await _repository.InsertAsync(card);
+
+        // Act
+        var result = await _repository.GetAvailableAsync(bypassCache: false);
+
+        // Assert
+        result.Should().HaveCount(1);
+        _cacheServiceMock.Verify(c => c.Invalidate(CacheKeys.AvailableCards), Times.Never);
+        _cacheServiceMock.Verify(c => c.GetOrCreateAsync(
+            CacheKeys.AvailableCards,
+            It.IsAny<Func<Task<IEnumerable<IcCard>>>>(),
+            It.IsAny<TimeSpan>()), Times.Once);
+    }
+
+    /// <summary>
+    /// Issue #1167: GetLentAsync(bypassCache=true)はキャッシュを無効化してから取得すること
+    /// </summary>
+    [Fact]
+    public async Task GetLentAsync_BypassCacheTrue_InvalidatesCacheAndQueriesDb()
+    {
+        // Arrange
+        var card = CreateTestCard("0102030405060712", "SUGOCA", "S100");
+        await _repository.InsertAsync(card);
+        await _staffRepository.InsertAsync(CreateTestStaff());
+        await _repository.UpdateLentStatusAsync(card.CardIdm, true, DateTime.Now, TestStaffIdm);
+
+        // Act
+        var result = await _repository.GetLentAsync(bypassCache: true);
+
+        // Assert
+        result.Should().HaveCount(1);
+        result.First().IsLent.Should().BeTrue();
+        _cacheServiceMock.Verify(c => c.Invalidate(CacheKeys.LentCards), Times.Once);
+        _cacheServiceMock.Verify(c => c.GetOrCreateAsync(
+            CacheKeys.LentCards,
+            It.IsAny<Func<Task<IEnumerable<IcCard>>>>(),
+            It.IsAny<TimeSpan>()), Times.Never);
+    }
+
+    /// <summary>
+    /// Issue #1167: bypassCacheのデフォルト値はfalseであること（後方互換性）
+    /// </summary>
+    [Fact]
+    public async Task GetAvailableAsync_DefaultBypassCache_UsesCache()
+    {
+        // Arrange
+        var card = CreateTestCard("0102030405060713", "はやかけん", "H101");
+        await _repository.InsertAsync(card);
+
+        // Act: bypassCacheパラメータを指定せずに呼び出す
+        var result = await _repository.GetAvailableAsync();
+
+        // Assert
+        result.Should().HaveCount(1);
+        _cacheServiceMock.Verify(c => c.Invalidate(CacheKeys.AvailableCards), Times.Never);
+        _cacheServiceMock.Verify(c => c.GetOrCreateAsync(
+            CacheKeys.AvailableCards,
+            It.IsAny<Func<Task<IEnumerable<IcCard>>>>(),
+            It.IsAny<TimeSpan>()), Times.Once);
+    }
+
+    #endregion
 }

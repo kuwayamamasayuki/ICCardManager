@@ -20,7 +20,13 @@ namespace ICCardManager.Infrastructure.Logging
     public class FileLoggerProvider : ILoggerProvider
     {
         private readonly ConcurrentDictionary<string, FileLogger> _loggers = new();
-        private readonly BlockingCollection<string> _logQueue = new(1000);
+
+        /// <summary>
+        /// Issue #1173: ログキューのキャパシティ。1000→5000に増加し、高負荷時のドロップを軽減。
+        /// </summary>
+        internal const int LogQueueCapacity = 5000;
+
+        private readonly BlockingCollection<string> _logQueue = new(LogQueueCapacity);
         private readonly Task _outputTask;
         private readonly CancellationTokenSource _cancellationTokenSource = new();
 
@@ -28,6 +34,30 @@ namespace ICCardManager.Infrastructure.Logging
         private string _currentLogFilePath = string.Empty;
         private DateTime _currentLogDate;
         private readonly object _fileLock = new();
+
+        /// <summary>
+        /// Issue #1173: キュー溢れによりドロップされたログメッセージの累積件数
+        /// </summary>
+        private long _droppedLogCount;
+
+        /// <summary>
+        /// Issue #1173: 最後にドロップ件数を自己ログ出力した時点での累積件数。
+        /// 増分の検出と「直近Nミリ秒のドロップ件数」のレポートに使用。
+        /// </summary>
+        private long _lastReportedDroppedCount;
+
+        /// <summary>
+        /// Issue #1173: ドロップ発生レポートの最小間隔（ミリ秒）。
+        /// この間隔より頻繁にレポートしないことで、自己ログ自体がキューを溢れさせる事態を防止。
+        /// </summary>
+        internal const int DropReportMinIntervalMs = 5000;
+
+        private DateTime _lastDropReportTime = DateTime.MinValue;
+
+        /// <summary>
+        /// Issue #1173: キュー溢れによりドロップされたログメッセージの累積件数（テスト・診断用）
+        /// </summary>
+        public long DroppedLogCount => Interlocked.Read(ref _droppedLogCount);
 
         public FileLoggerOptions Options { get; }
 
@@ -73,13 +103,29 @@ namespace ICCardManager.Infrastructure.Logging
                 return;
             }
 
-            // キューがいっぱいの場合は古いエントリを破棄
-            if (!_logQueue.TryAdd(message))
+            // キューがいっぱいの場合はメッセージを破棄してドロップカウンタをインクリメント
+            try
             {
-                // キューがいっぱい - ログを破棄
+                if (!_logQueue.TryAdd(message))
+                {
+                    // Issue #1173: ドロップカウンタを原子的にインクリメント
+                    Interlocked.Increment(ref _droppedLogCount);
 #if DEBUG
-                System.Diagnostics.Debug.WriteLine("[FileLogger] Log queue full, message dropped");
+                    System.Diagnostics.Debug.WriteLine("[FileLogger] Log queue full, message dropped");
 #endif
+                }
+            }
+            catch (ObjectDisposedException)
+            {
+                // Issue #1173: Dispose後の呼び出しもドロップとしてカウント
+                // (ObjectDisposedExceptionはInvalidOperationExceptionの派生型なので先に捕捉)
+                Interlocked.Increment(ref _droppedLogCount);
+            }
+            catch (InvalidOperationException)
+            {
+                // Issue #1173: CompleteAddingが呼ばれた後（シャットダウン中）はTryAddがスローする
+                // この場合もドロップとしてカウントし、例外を呑み込む
+                Interlocked.Increment(ref _droppedLogCount);
             }
         }
 
@@ -90,12 +136,44 @@ namespace ICCardManager.Infrastructure.Logging
                 foreach (var message in _logQueue.GetConsumingEnumerable(_cancellationTokenSource.Token))
                 {
                     WriteToFile(message);
+
+                    // Issue #1173: 各書き込み後にドロップ発生をチェックし、必要なら自己ログを書き込む
+                    ReportDroppedLogsIfNeeded();
                 }
             }
             catch (OperationCanceledException)
             {
                 // 正常終了
             }
+        }
+
+        /// <summary>
+        /// Issue #1173: 前回レポート以降にドロップが発生していれば、ログファイルに自己レポートを書き込む。
+        /// 最小間隔（DropReportMinIntervalMs）より頻繁にはレポートしない。
+        /// </summary>
+        private void ReportDroppedLogsIfNeeded()
+        {
+            var currentDropped = Interlocked.Read(ref _droppedLogCount);
+            var increment = currentDropped - _lastReportedDroppedCount;
+            if (increment <= 0)
+            {
+                return;
+            }
+
+            var now = DateTime.UtcNow;
+            if ((now - _lastDropReportTime).TotalMilliseconds < DropReportMinIntervalMs)
+            {
+                return;
+            }
+
+            _lastReportedDroppedCount = currentDropped;
+            _lastDropReportTime = now;
+
+            // 自己レポートを書き込む（このメッセージはキューを通さず直接ファイルへ）
+            var report = $"{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff} [WARN] [FileLogger] " +
+                         $"Issue #1173: ログキュー溢れにより直近 {increment} 件のログメッセージが破棄されました " +
+                         $"(累計: {currentDropped} 件、キャパシティ: {LogQueueCapacity})";
+            WriteToFile(report);
         }
 
         private void WriteToFile(string message)
@@ -263,6 +341,24 @@ namespace ICCardManager.Infrastructure.Logging
             catch (AggregateException)
             {
                 // タスクがキャンセルされた
+            }
+
+            // Issue #1173: 終了時に未レポートのドロップ件数があれば最終レポートを書き込む
+            try
+            {
+                var totalDropped = Interlocked.Read(ref _droppedLogCount);
+                var unreported = totalDropped - _lastReportedDroppedCount;
+                if (unreported > 0 && Options.Enabled)
+                {
+                    var report = $"{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff} [WARN] [FileLogger] " +
+                                 $"Issue #1173: シャットダウン時、未レポートだった {unreported} 件のログドロップがありました " +
+                                 $"(累計: {totalDropped} 件)";
+                    WriteToFile(report);
+                }
+            }
+            catch
+            {
+                // シャットダウン時の自己レポート失敗は無視
             }
 
             _cancellationTokenSource.Dispose();

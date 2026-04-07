@@ -272,4 +272,111 @@ public class FileLoggerProviderTests : IDisposable
     }
 
     #endregion
+
+    #region Issue #1173: キュー溢れドロップカウンタ テスト
+
+    /// <summary>
+    /// Issue #1173: キャパシティ定数が5000であること
+    /// </summary>
+    [Fact]
+    public void LogQueueCapacity_Is5000()
+    {
+        FileLoggerProvider.LogQueueCapacity.Should().Be(5000, "Issue #1173で1000→5000に増加");
+    }
+
+    /// <summary>
+    /// Issue #1173: 通常書き込みではDroppedLogCountは0であること
+    /// </summary>
+    [Fact]
+    public void DroppedLogCount_NormalUsage_IsZero()
+    {
+        // Arrange
+        using var provider = CreateProvider(enabled: true);
+
+        // Act: 少量のログを書き込み（キャパシティ未満）
+        for (int i = 0; i < 10; i++)
+        {
+            provider.WriteLog($"通常メッセージ{i}");
+        }
+        Thread.Sleep(300); // 書き込み完了を待つ
+
+        // Assert
+        provider.DroppedLogCount.Should().Be(0, "通常使用ではドロップは発生しない");
+    }
+
+    /// <summary>
+    /// Issue #1173: 無効状態のproviderはWriteLogでドロップカウントが増えないこと
+    /// </summary>
+    [Fact]
+    public void DroppedLogCount_DisabledProvider_StaysZero()
+    {
+        // Arrange
+        using var provider = CreateProvider(enabled: false);
+
+        // Act
+        for (int i = 0; i < 100; i++)
+        {
+            provider.WriteLog($"無効テスト{i}");
+        }
+
+        // Assert: 無効状態ではWriteLogが即座にreturnするためドロップは発生しない
+        provider.DroppedLogCount.Should().Be(0);
+    }
+
+    /// <summary>
+    /// Issue #1173: キュー溢れ時にDroppedLogCountがインクリメントされること
+    /// </summary>
+    /// <remarks>
+    /// Disposeしたproviderの_logQueueは閉じられているためTryAddに失敗する。
+    /// この性質を利用してドロップ経路を検証する。
+    /// </remarks>
+    [Fact]
+    public void DroppedLogCount_QueueOverflow_Increments()
+    {
+        // Arrange: providerを作成してすぐDispose（_logQueue.CompleteAddingが呼ばれる）
+        var provider = CreateProvider(enabled: true);
+        provider.Dispose();
+
+        var droppedBefore = provider.DroppedLogCount;
+
+        // Act: Dispose後にWriteLogを呼ぶ → TryAddが失敗してドロップカウンタ増加
+        for (int i = 0; i < 10; i++)
+        {
+            provider.WriteLog($"溢れテスト{i}");
+        }
+
+        // Assert
+        provider.DroppedLogCount.Should().BeGreaterThan(droppedBefore,
+            "キューが受け付けない状態ではドロップカウントが増加するべき");
+        provider.DroppedLogCount.Should().Be(droppedBefore + 10);
+    }
+
+    /// <summary>
+    /// Issue #1173: DroppedLogCountは複数スレッドからインクリメントされてもアトミックに集計されること
+    /// </summary>
+    [Fact]
+    public void DroppedLogCount_MultiThreaded_AtomicIncrement()
+    {
+        // Arrange
+        var provider = CreateProvider(enabled: true);
+        provider.Dispose(); // キューを閉じてドロップ経路に誘導
+
+        const int threadCount = 10;
+        const int messagesPerThread = 100;
+
+        // Act
+        var tasks = Enumerable.Range(0, threadCount).Select(_ => System.Threading.Tasks.Task.Run(() =>
+        {
+            for (int i = 0; i < messagesPerThread; i++)
+            {
+                provider.WriteLog($"並行テスト");
+            }
+        })).ToArray();
+        System.Threading.Tasks.Task.WaitAll(tasks);
+
+        // Assert: 全ドロップが原子的にカウントされていること
+        provider.DroppedLogCount.Should().Be(threadCount * messagesPerThread);
+    }
+
+    #endregion
 }

@@ -214,6 +214,53 @@ public class DbContextResilienceTests : IDisposable
         result.Should().Be("memory");
     }
 
+    /// <summary>
+    /// Issue #1172: ファイルDBでDELETE設定成功時、CurrentJournalMode/IsJournalModeDegradedが正しい値を返すこと
+    /// </summary>
+    [Fact]
+    [Trait("Category", "Unit")]
+    public void Issue1172_ConfigureJournalMode_DELETE成功時にプロパティが正しいこと()
+    {
+        var dbPath = Path.Combine(_testDirectory, "jm_props.db");
+        using var dbContext = new DbContext(dbPath);
+        // GetConnection内でConfigurePragmas→ConfigureJournalModeが呼ばれる
+        var _ = dbContext.GetConnection();
+
+        dbContext.CurrentJournalMode.Should().Be("delete");
+        dbContext.IsJournalModeDegraded.Should().BeFalse("DELETEが設定されている場合はdegradedではない");
+    }
+
+    /// <summary>
+    /// Issue #1172: インメモリDBでDELETE/TRUNCATE/PERSISTすべてが失敗した場合、IsJournalModeDegradedがtrueになること
+    /// </summary>
+    [Fact]
+    [Trait("Category", "Unit")]
+    public void Issue1172_ConfigureJournalMode_全失敗時にdegradedフラグがtrueになること()
+    {
+        // インメモリDBではDELETE/TRUNCATE/PERSISTいずれも設定できないため
+        // CurrentJournalModeは"memory"となり、degraded判定がtrueになる
+        using var dbContext = new DbContext(":memory:");
+        var _ = dbContext.GetConnection();
+
+        dbContext.CurrentJournalMode.Should().Be("memory");
+        dbContext.IsJournalModeDegraded.Should().BeTrue("DELETE以外のモードはdegraded扱い");
+    }
+
+    /// <summary>
+    /// Issue #1172: 接続初期化前はIsJournalModeDegradedがfalseであること（誤検出防止）
+    /// </summary>
+    [Fact]
+    [Trait("Category", "Unit")]
+    public void Issue1172_接続初期化前はdegradedではないこと()
+    {
+        var dbPath = Path.Combine(_testDirectory, "jm_init.db");
+        using var dbContext = new DbContext(dbPath);
+        // GetConnectionを呼ばない
+
+        dbContext.CurrentJournalMode.Should().BeNull();
+        dbContext.IsJournalModeDegraded.Should().BeFalse("初期化前はdegradedとして扱わないこと");
+    }
+
     #endregion
 
     #region 定数の整合性テスト

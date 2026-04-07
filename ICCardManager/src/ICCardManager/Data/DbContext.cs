@@ -80,6 +80,31 @@ namespace ICCardManager.Data
         }
     }
 
+    /// <summary>
+    /// Issue #1166: 接続一時停止スコープ。
+    /// リストア中にバックグラウンドタスクが接続を再オープンすることを防止する。
+    /// Disposeで自動的に停止を解除する。
+    /// </summary>
+    public sealed class ConnectionSuspensionScope : IDisposable
+    {
+        private readonly DbContext _dbContext;
+        private bool _disposed;
+
+        internal ConnectionSuspensionScope(DbContext dbContext)
+        {
+            _dbContext = dbContext;
+        }
+
+        public void Dispose()
+        {
+            if (!_disposed)
+            {
+                _disposed = true;
+                _dbContext.ResumeConnections();
+            }
+        }
+    }
+
 /// <summary>
     /// SQLiteデータベース接続管理クラス
     /// </summary>
@@ -100,6 +125,12 @@ namespace ICCardManager.Data
         /// リエントラントカウント。同一非同期フロー内のネスト呼び出しでセマフォ再取得をスキップする。
         /// </summary>
         private readonly AsyncLocal<int> _reentrancyCount = new AsyncLocal<int>();
+
+        /// <summary>
+        /// Issue #1166: 接続一時停止フラグ。
+        /// リストア中にバックグラウンドタスクが接続を再オープンすることを防止する。
+        /// </summary>
+        private volatile bool _isSuspended;
 
         /// <summary>
         /// ジッター生成用の乱数。thundering herd問題を防止するためリトライ待機に使用
@@ -140,6 +171,23 @@ namespace ICCardManager.Data
         /// データベースファイルのパス
         /// </summary>
         public string DatabasePath { get; }
+
+        /// <summary>
+        /// Issue #1172: 最後に設定/確認されたSQLiteジャーナルモード（小文字、例: "delete", "truncate", "persist", "unknown"）。
+        /// 接続初期化前はnull。ConfigureJournalModeが呼ばれた際にセットされる。
+        /// </summary>
+        public virtual string CurrentJournalMode { get; private set; }
+
+        /// <summary>
+        /// Issue #1172: ジャーナルモードがDELETE以外（クラッシュ耐性が低下した状態）かどうか。
+        /// nullまたは"delete"の場合はfalse、それ以外（truncate/persist/unknown等）はtrue。
+        /// </summary>
+        /// <remarks>
+        /// この値がtrueの場合、UI側で警告を表示することを推奨する。
+        /// MainViewModel.InitializeAsyncで起動時にチェックされる。
+        /// </remarks>
+        public virtual bool IsJournalModeDegraded =>
+            !string.IsNullOrEmpty(CurrentJournalMode) && CurrentJournalMode != "delete";
 
         /// <summary>
         /// テスト用のprotectedコンストラクタ
@@ -341,8 +389,23 @@ namespace ICCardManager.Data
         /// </summary>
         private SQLiteConnection GetConnectionInternal()
         {
+            // Issue #1166: 接続一時停止中は新規接続を拒否
+            // リストア中にバックグラウンドタスクが接続を再オープンすることを防止
+            if (_isSuspended)
+            {
+                throw new InvalidOperationException(
+                    "データベース接続は一時停止中です（リストア処理中）。");
+            }
+
             lock (_connectionLock)
             {
+                // ロック取得後に再チェック（ロック待ち中にSuspendされた可能性）
+                if (_isSuspended)
+                {
+                    throw new InvalidOperationException(
+                        "データベース接続は一時停止中です（リストア処理中）。");
+                }
+
                 if (_connection != null && _connection.State != ConnectionState.Open)
                 {
                     // 接続が切断された場合（ネットワーク共有時の瞬断等）は再接続
@@ -412,6 +475,8 @@ namespace ICCardManager.Data
                         System.Diagnostics.Debug.WriteLine($"[DbContext] 警告: {message}");
 #endif
                     }
+                    // Issue #1172: 上位レイヤがdegraded状態をチェックできるようプロパティに保存
+                    CurrentJournalMode = result;
                     return result;
                 }
             }
@@ -428,6 +493,8 @@ namespace ICCardManager.Data
             System.Diagnostics.Debug.WriteLine($"[DbContext] 警告: {warningMessage}");
 #endif
 
+            // Issue #1172: 失敗時もプロパティに保存（degraded状態として検出される）
+            CurrentJournalMode = currentMode;
             return currentMode;
         }
 
@@ -446,6 +513,41 @@ namespace ICCardManager.Data
                 CloseConnectionInternal();
             }
         }
+
+        /// <summary>
+        /// Issue #1166: 接続を一時停止し、停止中は新規接続の取得を拒否する。
+        /// リストア処理でDBファイルを安全に置き換えるために使用する。
+        /// </summary>
+        /// <remarks>
+        /// 戻り値のConnectionSuspensionScopeをDisposeすると停止が解除される。
+        /// using文で使用することで、例外発生時も確実に解除される。
+        /// 停止中にGetConnection()を呼ぶとInvalidOperationExceptionがスローされる。
+        /// </remarks>
+        /// <returns>停止スコープ（Disposeで停止解除）</returns>
+        public ConnectionSuspensionScope SuspendConnections()
+        {
+            lock (_connectionLock)
+            {
+                _isSuspended = true;
+                CloseConnectionInternal();
+            }
+            _logger?.LogDebug("Issue #1166: DB接続を一時停止しました");
+            return new ConnectionSuspensionScope(this);
+        }
+
+        /// <summary>
+        /// Issue #1166: 接続の一時停止を解除する（ConnectionSuspensionScope.Disposeから呼び出される）
+        /// </summary>
+        internal void ResumeConnections()
+        {
+            _isSuspended = false;
+            _logger?.LogDebug("Issue #1166: DB接続の一時停止を解除しました");
+        }
+
+        /// <summary>
+        /// Issue #1166: 接続が一時停止中かどうか
+        /// </summary>
+        public bool IsConnectionSuspended => _isSuspended;
 
         /// <summary>
         /// 接続を閉じる内部実装（ロック取得済みの状態で呼び出すこと）
@@ -671,22 +773,73 @@ namespace ICCardManager.Data
         /// 各カラムは 'YYYY-MM-DD HH:MM:SS' 形式で保存されているため、
         /// date()関数で日付部分のみを抽出して比較する必要があります。
         /// また、'localtime'を指定することでローカルタイムゾーンで比較します。
+        ///
+        /// Issue #1170: 両テーブルの削除を単一トランザクションで実行し、
+        /// 片方の削除が成功した直後に SQLITE_BUSY 等が発生してもテーブル間の
+        /// 不整合（保存期間の不一致）が発生しないようにする。
+        /// SQLITE_BUSY/SQLITE_LOCKED時はリトライする。
         /// </remarks>
         /// <returns>削除件数（ledger件数, operation_log件数）</returns>
         public (int LedgerCount, int OperationLogCount) CleanupOldData()
         {
+            // Issue #1170: SQLITE_BUSY/SQLITE_LOCKED時の同期リトライ
+            var delays = IsSharedMode ? SharedRetryDelays : LocalRetryDelays;
+            for (int attempt = 0; ; attempt++)
+            {
+                try
+                {
+                    return CleanupOldDataInternal();
+                }
+                catch (SQLiteException ex) when (
+                    attempt < delays.Length &&
+                    (ex.ResultCode == SQLiteErrorCode.Busy || ex.ResultCode == SQLiteErrorCode.Locked))
+                {
+                    var baseDelay = delays[attempt];
+                    var jitter = IsSharedMode ? _jitterRandom.Next(0, baseDelay / 2) : 0;
+                    var totalDelay = baseDelay + jitter;
+
+                    _logger?.LogWarning(
+                        "CleanupOldDataリトライ（{Attempt}/{MaxRetries}回目、{Delay}ms待機）: {ResultCode}",
+                        attempt + 1, delays.Length, totalDelay, ex.ResultCode);
+#if DEBUG
+                    System.Diagnostics.Debug.WriteLine(
+                        $"[DbContext] CleanupOldDataリトライ（{attempt + 1}/{delays.Length}回目、{totalDelay}ms待機）: {ex.ResultCode}");
+#endif
+                    Thread.Sleep(totalDelay);
+                }
+            }
+        }
+
+        /// <summary>
+        /// Issue #1170: CleanupOldDataの実体。両テーブルの削除を単一トランザクションで実行する。
+        /// </summary>
+        private (int LedgerCount, int OperationLogCount) CleanupOldDataInternal()
+        {
             using var lease = LeaseConnection();
             var connection = lease.Connection;
 
-            using var ledgerCommand = connection.CreateCommand();
-            ledgerCommand.CommandText = "DELETE FROM ledger WHERE date(date) < date('now', '-6 years', 'localtime')";
-            var ledgerCount = ledgerCommand.ExecuteNonQuery();
+            using var transaction = connection.BeginTransaction();
+            try
+            {
+                using var ledgerCommand = connection.CreateCommand();
+                ledgerCommand.Transaction = transaction;
+                ledgerCommand.CommandText = "DELETE FROM ledger WHERE date(date) < date('now', '-6 years', 'localtime')";
+                var ledgerCount = ledgerCommand.ExecuteNonQuery();
 
-            using var logCommand = connection.CreateCommand();
-            logCommand.CommandText = "DELETE FROM operation_log WHERE date(timestamp) < date('now', '-6 years', 'localtime')";
-            var logCount = logCommand.ExecuteNonQuery();
+                using var logCommand = connection.CreateCommand();
+                logCommand.Transaction = transaction;
+                logCommand.CommandText = "DELETE FROM operation_log WHERE date(timestamp) < date('now', '-6 years', 'localtime')";
+                var logCount = logCommand.ExecuteNonQuery();
 
-            return (ledgerCount, logCount);
+                transaction.Commit();
+                return (ledgerCount, logCount);
+            }
+            catch
+            {
+                // Issue #1170: 片方が失敗したら両方ロールバックして整合性を維持
+                try { transaction.Rollback(); } catch { /* ロールバック失敗は無視 */ }
+                throw;
+            }
         }
 
         /// <summary>

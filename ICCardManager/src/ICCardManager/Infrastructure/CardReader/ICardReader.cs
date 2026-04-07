@@ -112,11 +112,25 @@ namespace ICCardManager.Infrastructure.CardReader
         CardReaderConnectionState ConnectionState { get; }
 
         /// <summary>
-        /// カードから履歴を読み取る
+        /// カードから履歴を読み取る（後方互換用）
+        /// </summary>
+        /// <remarks>
+        /// Issue #1169: このメソッドは例外を飲み込んで空リストを返すため、
+        /// リーダーエラーと「履歴ゼロ件」を区別できない。
+        /// 区別が必要な場合は <see cref="TryReadHistoryAsync"/> を使用すること。
+        /// </remarks>
+        /// <param name="idm">カードのIDm</param>
+        /// <returns>利用履歴詳細のリスト（エラー時は空リスト）</returns>
+        Task<IEnumerable<LedgerDetail>> ReadHistoryAsync(string idm);
+
+        /// <summary>
+        /// Issue #1169: カードから履歴を読み取る（Result型版）。
+        /// リーダーエラー発生時はFailを返し、呼び出し元でリーダーエラーと
+        /// 「履歴ゼロ件（正常）」を明確に区別できる。
         /// </summary>
         /// <param name="idm">カードのIDm</param>
-        /// <returns>利用履歴詳細のリスト</returns>
-        Task<IEnumerable<LedgerDetail>> ReadHistoryAsync(string idm);
+        /// <returns>成功時は利用履歴詳細のリスト、失敗時はエラー情報</returns>
+        Task<CardReadResult<IReadOnlyList<LedgerDetail>>> TryReadHistoryAsync(string idm);
 
         /// <summary>
         /// カードの残高を読み取る
