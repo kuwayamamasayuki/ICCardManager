@@ -1173,9 +1173,19 @@ public partial class MainViewModel : ViewModelBase
         // メイン画面は変更せず、内部状態のみ更新（Issue #186）
         SetInternalState(AppState.Processing);
 
-        // カードから履歴を読み取る
-        var usageDetails = await _cardReader.ReadHistoryAsync(card.CardIdm);
-        var usageDetailsList = usageDetails.ToList();
+        // Issue #1169: カードから履歴を読み取る（リーダーエラーと履歴ゼロ件を区別）
+        var historyResult = await _cardReader.TryReadHistoryAsync(card.CardIdm);
+        if (!historyResult.Success)
+        {
+            // リーダーエラー: 不正確なデータをDBに記録しないため返却処理を中断
+            _soundPlayer.Play(SoundType.Error);
+            _toastNotificationService.ShowError(
+                "カードリーダーエラー",
+                "履歴の読み取りに失敗しました。カードを再度タッチしてください。");
+            ResetState();
+            return;
+        }
+        var usageDetailsList = historyResult.Value.ToList();
 
         var result = await _lendingService.ReturnAsync(_currentStaffIdm!, card.CardIdm, usageDetailsList);
 

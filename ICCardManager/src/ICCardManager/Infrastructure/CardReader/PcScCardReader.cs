@@ -279,10 +279,18 @@ namespace ICCardManager.Infrastructure.CardReader
         /// </remarks>
         public async Task<IEnumerable<LedgerDetail>> ReadHistoryAsync(string idm)
         {
-            var details = new List<LedgerDetail>();
+            // Issue #1169: 後方互換のため、Result型版を呼び出して値を取り出す。
+            // エラー時は空リストを返す（既存の挙動を維持）
+            var result = await TryReadHistoryAsync(idm);
+            return result.Success ? (IEnumerable<LedgerDetail>)result.Value : new List<LedgerDetail>();
+        }
 
-            await Task.Run(() =>
+        /// <inheritdoc/>
+        public async Task<CardReadResult<IReadOnlyList<LedgerDetail>>> TryReadHistoryAsync(string idm)
+        {
+            return await Task.Run<CardReadResult<IReadOnlyList<LedgerDetail>>>(() =>
             {
+                var details = new List<LedgerDetail>();
                 try
                 {
                     var readerNames = _provider.GetReaders();
@@ -291,7 +299,10 @@ namespace ICCardManager.Infrastructure.CardReader
 #if DEBUG
                         System.Diagnostics.Debug.WriteLine("履歴読み取り: カードリーダーが見つかりません");
 #endif
-                        return;
+                        // Issue #1169: リーダー未接続は明確なエラーとして返す
+                        var notConnectedException = CardReaderException.NotConnected();
+                        Error?.Invoke(this, notConnectedException);
+                        return CardReadResult<IReadOnlyList<LedgerDetail>>.Fail(notConnectedException);
                     }
 
                     using var reader = _provider.ConnectReader(readerNames[0], SCardShareMode.Shared, SCardProtocol.Any);
@@ -318,9 +329,6 @@ namespace ICCardManager.Infrastructure.CardReader
 #endif
 
                     // 駅名解決にはCardType.Unknownを使用
-                    // 注: IDmの先頭2バイトは製造者コードであり、カード種別ではないため、
-                    //     CardTypeDetector.DetectFromIdmは信頼できない
-                    //     StationMasterServiceのUnknown優先順位（九州優先）が使用される
                     var cardType = CardType.Unknown;
 
                     // 履歴データをパースして金額を計算
@@ -335,6 +343,9 @@ namespace ICCardManager.Infrastructure.CardReader
                             details.Add(detail);
                         }
                     }
+
+                    // Issue #1169: 成功（履歴ゼロ件も成功として扱う）
+                    return CardReadResult<IReadOnlyList<LedgerDetail>>.Ok(details);
                 }
                 catch (PCSCException ex)
                 {
@@ -347,6 +358,7 @@ namespace ICCardManager.Infrastructure.CardReader
                         _ => CardReaderException.HistoryReadFailed(ex.Message, ex)
                     };
                     Error?.Invoke(this, cardReaderException);
+                    return CardReadResult<IReadOnlyList<LedgerDetail>>.Fail(cardReaderException);
                 }
                 catch (Exception ex)
                 {
@@ -355,10 +367,9 @@ namespace ICCardManager.Infrastructure.CardReader
 #endif
                     var cardReaderException = CardReaderException.HistoryReadFailed(ex.Message, ex);
                     Error?.Invoke(this, cardReaderException);
+                    return CardReadResult<IReadOnlyList<LedgerDetail>>.Fail(cardReaderException);
                 }
             });
-
-            return details;
         }
 
         /// <summary>
