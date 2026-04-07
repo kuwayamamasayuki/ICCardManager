@@ -2660,18 +2660,18 @@ public class LendingServiceTests : IDisposable
     }
 
     /// <summary>
-    /// 同一カードに複数の貸出中レコードが存在する場合、リポジトリ側の
-    /// ORDER BY lent_at DESC 順を前提に、最初に出現したレコード（=最新）が
-    /// 修復に使用される。修復は1回のみ呼ばれる（重複呼び出しなし）。
+    /// 同一カードに複数の貸出中レコードが存在する場合、最新の LentAt を持つ
+    /// レコードが修復に使用される。修復は1回のみ呼ばれる（重複呼び出しなし）。
     /// </summary>
     /// <remarks>
-    /// LedgerRepository.GetAllLentRecordsAsync の SQL は ORDER BY lent_at DESC
-    /// であり、サービス側は Dictionary の ContainsKey ファーストヒット採用方式。
-    /// この組み合わせで「最新を採用」のセマンティクスが成立する暗黙の契約を
-    /// テストで明示的に固定する。
+    /// Issue #1196 修正後: サービス層自身が OrderByDescending(LentAt) で並び順を
+    /// 保証するため、リポジトリの返却順に依存しない。本テストは「DESC 順で渡された
+    /// 場合の振る舞い」を固定する。リポジトリ並び順非依存の保証は別テスト
+    /// <see cref="RepairLentStatusConsistencyAsync_MultipleLentRecordsForSameCard_RepositoryOrderIndependent"/>
+    /// で担保する。
     /// </remarks>
     [Fact]
-    public async Task RepairLentStatusConsistencyAsync_MultipleLentRecordsForSameCard_UsesFirstOccurrence()
+    public async Task RepairLentStatusConsistencyAsync_MultipleLentRecordsForSameCard_UsesLatestByLentAt()
     {
         // Arrange: 同一カードに2件の貸出中レコード（DESC順=最新が先頭）
         var card = CreateTestCard(isLent: false);
@@ -2719,6 +2719,86 @@ public class LendingServiceTests : IDisposable
         // 古いレコードの値で呼ばれていないこと
         _cardRepositoryMock.Verify(
             x => x.UpdateLentStatusAsync(TestCardIdm, true, older.LentAt, "BBBB000000000002"),
+            Times.Never);
+        // 修復は合計1回のみ
+        _cardRepositoryMock.Verify(
+            x => x.UpdateLentStatusAsync(TestCardIdm, It.IsAny<bool>(), It.IsAny<DateTime?>(), It.IsAny<string>()),
+            Times.Once);
+    }
+
+    /// <summary>
+    /// Issue #1196: サービス層がリポジトリの返却順に依存せず、自身で最新レコードを
+    /// 選択することを担保する。リポジトリモックを「古い順 (ASC)」で返すように設定し、
+    /// それでも最新の LentAt を持つレコードが修復に使われることを検証する。
+    /// </summary>
+    /// <remarks>
+    /// 修正前は Dictionary.ContainsKey ファーストヒット採用方式だったため、
+    /// リポジトリが ASC 順で返した場合は誤って「最古」が選ばれていた。本テストは
+    /// その不具合を防止するため、明示的に逆順入力での挙動を固定する。
+    /// </remarks>
+    [Fact]
+    public async Task RepairLentStatusConsistencyAsync_MultipleLentRecordsForSameCard_RepositoryOrderIndependent()
+    {
+        // Arrange
+        var card = CreateTestCard(isLent: false);
+        var oldest = new Ledger
+        {
+            Id = 30,
+            CardIdm = TestCardIdm,
+            LenderIdm = "OOOO000000000001",
+            StaffName = "最古貸出者",
+            Date = DateTime.Today.AddDays(-3),
+            IsLentRecord = true,
+            LentAt = DateTime.Today.AddDays(-3),
+            Summary = "（貸出中）"
+        };
+        var middle = new Ledger
+        {
+            Id = 60,
+            CardIdm = TestCardIdm,
+            LenderIdm = "MMMM000000000002",
+            StaffName = "中間貸出者",
+            Date = DateTime.Today.AddDays(-1),
+            IsLentRecord = true,
+            LentAt = DateTime.Today.AddDays(-1),
+            Summary = "（貸出中）"
+        };
+        var newest = new Ledger
+        {
+            Id = 90,
+            CardIdm = TestCardIdm,
+            LenderIdm = "NNNN000000000003",
+            StaffName = "最新貸出者",
+            Date = DateTime.Today,
+            IsLentRecord = true,
+            LentAt = DateTime.Today.AddHours(-1),
+            Summary = "（貸出中）"
+        };
+
+        _cardRepositoryMock.Setup(x => x.GetAllAsync())
+            .ReturnsAsync(new List<IcCard> { card });
+        // 意図的に「古い順 (ASC)」で返す: リポジトリの SQL が変わったケースを模倣
+        _ledgerRepositoryMock.Setup(x => x.GetAllLentRecordsAsync())
+            .ReturnsAsync(new List<Ledger> { oldest, middle, newest });
+        _cardRepositoryMock.Setup(x => x.UpdateLentStatusAsync(
+                It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<DateTime?>(), It.IsAny<string>()))
+            .ReturnsAsync(true);
+
+        // Act
+        var repairCount = await _service.RepairLentStatusConsistencyAsync();
+
+        // Assert
+        repairCount.Should().Be(1);
+        // 入力が ASC 順でも、最新（newest）の LentAt と LenderIdm が使われること
+        _cardRepositoryMock.Verify(
+            x => x.UpdateLentStatusAsync(TestCardIdm, true, newest.LentAt, "NNNN000000000003"),
+            Times.Once);
+        // 古い／中間レコードの値で呼ばれていないこと
+        _cardRepositoryMock.Verify(
+            x => x.UpdateLentStatusAsync(TestCardIdm, true, oldest.LentAt, "OOOO000000000001"),
+            Times.Never);
+        _cardRepositoryMock.Verify(
+            x => x.UpdateLentStatusAsync(TestCardIdm, true, middle.LentAt, "MMMM000000000002"),
             Times.Never);
         // 修復は合計1回のみ
         _cardRepositoryMock.Verify(
