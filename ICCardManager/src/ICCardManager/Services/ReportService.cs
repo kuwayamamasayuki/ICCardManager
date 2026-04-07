@@ -730,8 +730,15 @@ namespace ICCardManager.Services
         /// ワークシート内の最終ページ番号を取得（Issue #809）
         /// </summary>
         /// <remarks>
+        /// <para>
         /// CheckAndInsertPageBreak は改ページごとに AddHorizontalPageBreak と SetPageNumber を呼ぶため、
         /// 「1ページ目のページ番号 + 改ページ数 = 最終ページ番号」が成り立つ。
+        /// </para>
+        /// <para>
+        /// L2 セル（1ページ目のページ番号）が空または整数として読めない場合は <c>0</c> を返す。
+        /// 0 は「ページ情報を持たない（無効な）シート」を示すセンチネル値であり、呼び出し側
+        /// （<see cref="FindNearestPreviousMonthLastPage"/>）はこの 0 を見て当該シートをスキップする。
+        /// </para>
         /// </remarks>
         internal static int GetLastPageNumberFromWorksheet(IXLWorksheet worksheet)
         {
@@ -750,9 +757,16 @@ namespace ICCardManager.Services
         /// 月の開始ページ番号を算出（Issue #809）
         /// </summary>
         /// <remarks>
-        /// 前月のシートが存在する場合はその最終ページ番号+1、
-        /// 存在しない場合は card.StartingPageNumber を使用する。
-        /// 年度内の月順序に従い、直近で存在するシートまで遡って検索する。
+        /// <para>
+        /// 直近の前月シートが存在し、かつそのシートが有効なページ番号情報を持つ場合は
+        /// その最終ページ番号+1 を返す。それ以外（前月シートなし、もしくはあっても L2 が
+        /// 空/非整数）の場合は <see cref="IcCard.StartingPageNumber"/> を使用する。
+        /// </para>
+        /// <para>
+        /// 「直近の前月シートを探す」処理は <see cref="FindNearestPreviousMonthLastPage"/> に
+        /// 委譲しており、L2 が空/非整数のシートはスキップしてさらに過去のシートを探索する
+        /// 振る舞いはそちらに集約されている。
+        /// </para>
         /// </remarks>
         internal static int GetStartingPageNumberForMonth(XLWorkbook workbook, IcCard card, int month)
         {
@@ -764,7 +778,38 @@ namespace ICCardManager.Services
             if (currentIndex <= 0)
                 return card.StartingPageNumber;
 
-            // 直前の月から逆順に、存在するシートを探す
+            var nearestPreviousLastPage = FindNearestPreviousMonthLastPage(workbook, fiscalMonthOrder, currentIndex);
+            return nearestPreviousLastPage > 0
+                ? nearestPreviousLastPage + 1
+                : card.StartingPageNumber;
+        }
+
+        /// <summary>
+        /// 直近で「有効なページ情報を持つ前月シート」を逆順検索し、その最終ページ番号を返す。
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// 年度内の月順序（4月→5月→…→3月）を基準に、現在月の1つ前から先頭（4月）に向かって
+        /// シートを探索する。シートが存在しても <see cref="GetLastPageNumberFromWorksheet"/> が
+        /// 0 を返す場合（L2 が空または非整数の異常状態）はそのシートをスキップしてさらに過去の
+        /// シートを探索する。
+        /// </para>
+        /// <para>
+        /// この「L2 空シートのスキップ」は本メソッドの中核的な責務であり、メソッド名と本コメントで
+        /// 明示している。Issue #1197: 以前は <see cref="GetStartingPageNumberForMonth"/> 内に
+        /// 直接ループが書かれており、L2 空シートをスキップする動作が暗黙の前提として埋もれていた。
+        /// </para>
+        /// </remarks>
+        /// <param name="workbook">対象ワークブック</param>
+        /// <param name="fiscalMonthOrder">年度内の月順序配列（4月始まり3月終わり）</param>
+        /// <param name="currentIndex">現在月の <paramref name="fiscalMonthOrder"/> 内インデックス</param>
+        /// <returns>
+        /// 直近の有効な前月シートの最終ページ番号。
+        /// どの前月シートも存在しないか、すべて L2 が空/非整数の場合は 0。
+        /// </returns>
+        internal static int FindNearestPreviousMonthLastPage(
+            XLWorkbook workbook, int[] fiscalMonthOrder, int currentIndex)
+        {
             for (int i = currentIndex - 1; i >= 0; i--)
             {
                 var prevMonthName = $"{fiscalMonthOrder[i]}月";
@@ -772,12 +817,10 @@ namespace ICCardManager.Services
                 {
                     var lastPage = GetLastPageNumberFromWorksheet(prevSheet);
                     if (lastPage > 0)
-                        return lastPage + 1;
+                        return lastPage;
                 }
             }
-
-            // どの月のシートも存在しない → StartingPageNumber を使用
-            return card.StartingPageNumber;
+            return 0;
         }
 
         /// <summary>

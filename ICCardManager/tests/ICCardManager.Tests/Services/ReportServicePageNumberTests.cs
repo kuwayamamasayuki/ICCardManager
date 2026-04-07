@@ -298,4 +298,74 @@ public class ReportServicePageNumberTests
     }
 
     #endregion
+
+    #region FindNearestPreviousMonthLastPage（Issue #1197）
+
+    /// <summary>
+    /// Issue #1197: 抽出されたヘルパーメソッドに対する直接単体テスト。
+    /// 4月始まり3月終わりの月順序配列を渡し、直近の有効前月シートが見つかれば
+    /// その最終ページ番号を返すこと。
+    /// </summary>
+    [Fact]
+    public void FindNearestPreviousMonthLastPage_PreviousSheetExists_ReturnsLastPage()
+    {
+        using var workbook = new XLWorkbook();
+        CreateSheetWithPageInfo(workbook, "4月", firstPageNumber: 5, pageBreakCount: 2);
+        var fiscalMonthOrder = new[] { 4, 5, 6, 7, 8, 9, 10, 11, 12, 1, 2, 3 };
+        // 5月（インデックス1）から直前を探す
+        var result = ReportService.FindNearestPreviousMonthLastPage(workbook, fiscalMonthOrder, currentIndex: 1);
+
+        // 4月の最終ページ = 5+2 = 7
+        result.Should().Be(7);
+    }
+
+    /// <summary>
+    /// Issue #1197: ヘルパーは L2 空のシートをスキップしてさらに過去を探索する
+    /// （これが本ヘルパーの中核責務）。
+    /// </summary>
+    [Fact]
+    public void FindNearestPreviousMonthLastPage_SkipsEmptyL2AndFindsOlder()
+    {
+        using var workbook = new XLWorkbook();
+        // 4月: 有効
+        CreateSheetWithPageInfo(workbook, "4月", firstPageNumber: 10);
+        // 5月: シートはあるが L2 空 → スキップ対象
+        workbook.AddWorksheet("5月");
+        var fiscalMonthOrder = new[] { 4, 5, 6, 7, 8, 9, 10, 11, 12, 1, 2, 3 };
+        // 6月（インデックス2）から探索 → 5月スキップ → 4月に到達
+        var result = ReportService.FindNearestPreviousMonthLastPage(workbook, fiscalMonthOrder, currentIndex: 2);
+
+        result.Should().Be(10);
+    }
+
+    /// <summary>
+    /// Issue #1197: どの前月シートも存在しない場合は 0 を返す
+    /// </summary>
+    [Fact]
+    public void FindNearestPreviousMonthLastPage_NoPreviousSheets_ReturnsZero()
+    {
+        using var workbook = new XLWorkbook();
+        var fiscalMonthOrder = new[] { 4, 5, 6, 7, 8, 9, 10, 11, 12, 1, 2, 3 };
+        var result = ReportService.FindNearestPreviousMonthLastPage(workbook, fiscalMonthOrder, currentIndex: 5);
+
+        result.Should().Be(0);
+    }
+
+    /// <summary>
+    /// Issue #1197: 前月シートはあるが全て L2 空の場合は 0 を返す
+    /// （フォールバック判定の境界）
+    /// </summary>
+    [Fact]
+    public void FindNearestPreviousMonthLastPage_AllPreviousSheetsHaveEmptyL2_ReturnsZero()
+    {
+        using var workbook = new XLWorkbook();
+        workbook.AddWorksheet("4月");
+        workbook.AddWorksheet("5月");
+        var fiscalMonthOrder = new[] { 4, 5, 6, 7, 8, 9, 10, 11, 12, 1, 2, 3 };
+        var result = ReportService.FindNearestPreviousMonthLastPage(workbook, fiscalMonthOrder, currentIndex: 2);
+
+        result.Should().Be(0);
+    }
+
+    #endregion
 }
