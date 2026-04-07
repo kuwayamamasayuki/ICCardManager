@@ -225,10 +225,13 @@ namespace ICCardManager.Services
             var lentRecords = await _ledgerRepository.GetAllLentRecordsAsync();
 
             // カードIDm → 貸出中レコードのマッピング
+            // Issue #1196: 同一カードに複数の貸出中レコードがある場合は明示的に最新を採用する。
+            // 以前はリポジトリ側 ORDER BY lent_at DESC に依存していたが、層間の暗黙契約を排除し、
+            // サービス層自身が並び順を保証する。LentAt が null のレコードは末尾に並ぶ
+            // （Comparer<DateTime?>.Default は null を最小値として扱うため）。
             var lentRecordMap = new Dictionary<string, Ledger>();
-            foreach (var record in lentRecords)
+            foreach (var record in lentRecords.OrderByDescending(r => r.LentAt))
             {
-                // 同一カードに複数の貸出中レコードがある場合は最新を採用
                 if (!lentRecordMap.ContainsKey(record.CardIdm))
                 {
                     lentRecordMap[record.CardIdm] = record;
