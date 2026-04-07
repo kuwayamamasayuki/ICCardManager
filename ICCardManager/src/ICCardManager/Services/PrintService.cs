@@ -536,8 +536,179 @@ namespace ICCardManager.Services
         }
 
         /// <summary>
+        /// データテーブルの行種別（背景色の判定に使用）
+        /// </summary>
+        internal enum PrintRowKind
+        {
+            Header,
+            Data,
+            MonthlyTotal,
+            CumulativeTotal,
+            CarryoverToNextYear,
+        }
+
+        /// <summary>
+        /// 帳票テーブルの1行を表す純粋データ（UI 知識を持たない）。
+        /// </summary>
+        /// <remarks>
+        /// <see cref="BuildPrintTableRows"/> が出力し、<see cref="CreateDataTableInternal"/>
+        /// が WPF <see cref="TableRow"/> に変換する。
+        /// </remarks>
+        internal sealed class PrintTableRowDescriptor
+        {
+            /// <summary>7列のセル文字列（出納日, 摘要, 受入金額, 払出金額, 残額, 氏名, 備考）</summary>
+            public IReadOnlyList<string> Cells { get; }
+
+            /// <summary>太字フラグ（合計行・繰越行・データ行で個別指定可）</summary>
+            public bool IsBold { get; }
+
+            /// <summary>行種別</summary>
+            public PrintRowKind Kind { get; }
+
+            public PrintTableRowDescriptor(IReadOnlyList<string> cells, bool isBold, PrintRowKind kind)
+            {
+                Cells = cells;
+                IsBold = isBold;
+                Kind = kind;
+            }
+        }
+
+        /// <summary>
+        /// 帳票テーブルの行データを純粋関数として組み立てる。
+        /// </summary>
+        /// <remarks>
+        /// 副作用なし、WPF依存なし。<see cref="CreateDataTableInternal"/> から呼ばれ、
+        /// 各 descriptor は1対1で <see cref="TableRow"/> に変換される。
+        /// 出力順: ヘッダ → データ行 → (includeSummary時) 月計 → (累計あれば) 累計 → (繰越あれば) 次年度繰越
+        /// </remarks>
+        internal static IReadOnlyList<PrintTableRowDescriptor> BuildPrintTableRows(
+            ReportPrintData data, bool includeSummary)
+        {
+            var rows = new List<PrintTableRowDescriptor>();
+
+            // ヘッダ行
+            rows.Add(new PrintTableRowDescriptor(
+                new[] { "出納日", "摘要", "受入金額", "払出金額", "残額", "氏名", "備考" },
+                isBold: true,
+                kind: PrintRowKind.Header));
+
+            // データ行
+            foreach (var row in data.Rows)
+            {
+                rows.Add(new PrintTableRowDescriptor(
+                    new[]
+                    {
+                        row.DateDisplay,
+                        row.Summary,
+                        row.Income?.ToString("N0") ?? "",
+                        row.Expense?.ToString("N0") ?? "",
+                        row.Balance?.ToString("N0") ?? "",
+                        row.StaffName ?? "",
+                        row.Note ?? "",
+                    },
+                    isBold: row.IsBold,
+                    kind: PrintRowKind.Data));
+            }
+
+            if (!includeSummary)
+            {
+                return rows;
+            }
+
+            // 月計行（Issue #842: 0 も表示）
+            rows.Add(new PrintTableRowDescriptor(
+                new[]
+                {
+                    "",
+                    data.MonthlyTotal.Label,
+                    data.MonthlyTotal.Income.ToString("N0"),
+                    data.MonthlyTotal.Expense.ToString("N0"),
+                    data.MonthlyTotal.Balance?.ToString("N0") ?? "",
+                    "",
+                    "",
+                },
+                isBold: true,
+                kind: PrintRowKind.MonthlyTotal));
+
+            // 累計行
+            if (data.CumulativeTotal != null)
+            {
+                rows.Add(new PrintTableRowDescriptor(
+                    new[]
+                    {
+                        "",
+                        data.CumulativeTotal.Label,
+                        data.CumulativeTotal.Income.ToString("N0"),
+                        data.CumulativeTotal.Expense.ToString("N0"),
+                        data.CumulativeTotal.Balance?.ToString("N0") ?? "",
+                        "",
+                        "",
+                    },
+                    isBold: true,
+                    kind: PrintRowKind.CumulativeTotal));
+            }
+
+            // 次年度繰越行（3月のみ）
+            if (data.CarryoverToNextYear.HasValue)
+            {
+                rows.Add(new PrintTableRowDescriptor(
+                    new[]
+                    {
+                        "",
+                        SummaryGenerator.GetCarryoverToNextYearSummary(),
+                        "",
+                        data.CarryoverToNextYear.Value.ToString("N0"),
+                        "0",
+                        "",
+                        "",
+                    },
+                    isBold: true,
+                    kind: PrintRowKind.CarryoverToNextYear));
+            }
+
+            return rows;
+        }
+
+        // 列ごとのテキスト整列（純粋関数からは UI 知識を排除しているため WPF 側に保持）
+        private static readonly TextAlignment[] CellAlignments =
+        {
+            TextAlignment.Center, // 出納日
+            TextAlignment.Left,   // 摘要
+            TextAlignment.Right,  // 受入金額
+            TextAlignment.Right,  // 払出金額
+            TextAlignment.Right,  // 残額
+            TextAlignment.Left,   // 氏名
+            TextAlignment.Left,   // 備考
+        };
+
+        /// <summary>
+        /// 行種別から WPF 背景ブラシを取得
+        /// </summary>
+        private static Brush GetRowBackground(PrintRowKind kind)
+        {
+            switch (kind)
+            {
+                case PrintRowKind.Header:
+                    return Brushes.LightGray;
+                case PrintRowKind.MonthlyTotal:
+                    return new SolidColorBrush(Color.FromRgb(240, 240, 240));
+                case PrintRowKind.CumulativeTotal:
+                    return new SolidColorBrush(Color.FromRgb(230, 230, 230));
+                case PrintRowKind.CarryoverToNextYear:
+                    return new SolidColorBrush(Color.FromRgb(220, 220, 220));
+                case PrintRowKind.Data:
+                default:
+                    return null;
+            }
+        }
+
+        /// <summary>
         /// データテーブルを作成（内部実装）
         /// </summary>
+        /// <remarks>
+        /// 純粋データ構築は <see cref="BuildPrintTableRows"/> に委譲し、
+        /// このメソッドは WPF <see cref="Table"/> オブジェクトの組み立てに専念する。
+        /// </remarks>
         private Table CreateDataTableInternal(ReportPrintData data, bool includeSummary)
         {
             var table = new Table
@@ -560,74 +731,21 @@ namespace ICCardManager.Services
 
             var rowGroup = new TableRowGroup();
 
-            // ヘッダ行
-            var headerRow = new TableRow { Background = Brushes.LightGray };
-            headerRow.Cells.Add(CreateDataCell("出納日", true, TextAlignment.Center));
-            headerRow.Cells.Add(CreateDataCell("摘要", true, TextAlignment.Center));
-            headerRow.Cells.Add(CreateDataCell("受入金額", true, TextAlignment.Center));
-            headerRow.Cells.Add(CreateDataCell("払出金額", true, TextAlignment.Center));
-            headerRow.Cells.Add(CreateDataCell("残額", true, TextAlignment.Center));
-            headerRow.Cells.Add(CreateDataCell("氏名", true, TextAlignment.Center));
-            headerRow.Cells.Add(CreateDataCell("備考", true, TextAlignment.Center));
-            rowGroup.Rows.Add(headerRow);
-
-            // データ行
-            foreach (var row in data.Rows)
+            foreach (var descriptor in BuildPrintTableRows(data, includeSummary))
             {
-                var dataRow = new TableRow();
-                dataRow.Cells.Add(CreateDataCell(row.DateDisplay, row.IsBold, TextAlignment.Center));
-                dataRow.Cells.Add(CreateDataCell(row.Summary, row.IsBold, TextAlignment.Left));
-                dataRow.Cells.Add(CreateDataCell(row.Income?.ToString("N0") ?? "", row.IsBold, TextAlignment.Right));
-                dataRow.Cells.Add(CreateDataCell(row.Expense?.ToString("N0") ?? "", row.IsBold, TextAlignment.Right));
-                dataRow.Cells.Add(CreateDataCell(row.Balance?.ToString("N0") ?? "", row.IsBold, TextAlignment.Right));
-                dataRow.Cells.Add(CreateDataCell(row.StaffName ?? "", row.IsBold, TextAlignment.Left));
-                dataRow.Cells.Add(CreateDataCell(row.Note ?? "", row.IsBold, TextAlignment.Left));
-                rowGroup.Rows.Add(dataRow);
-            }
-
-            // 合計行を含める場合のみ追加
-            if (includeSummary)
-            {
-                // 月計行
-                var monthlyRow = new TableRow { Background = new SolidColorBrush(Color.FromRgb(240, 240, 240)) };
-                monthlyRow.Cells.Add(CreateDataCell("", true, TextAlignment.Center));
-                monthlyRow.Cells.Add(CreateDataCell(data.MonthlyTotal.Label, true, TextAlignment.Left));
-                // Issue #842: 月計行は0も表示（Issue #451のExcel側と同様）
-                monthlyRow.Cells.Add(CreateDataCell(data.MonthlyTotal.Income.ToString("N0"), true, TextAlignment.Right));
-                monthlyRow.Cells.Add(CreateDataCell(data.MonthlyTotal.Expense.ToString("N0"), true, TextAlignment.Right));
-                monthlyRow.Cells.Add(CreateDataCell(data.MonthlyTotal.Balance?.ToString("N0") ?? "", true, TextAlignment.Right));
-                monthlyRow.Cells.Add(CreateDataCell("", true, TextAlignment.Left));
-                monthlyRow.Cells.Add(CreateDataCell("", true, TextAlignment.Left));
-                rowGroup.Rows.Add(monthlyRow);
-
-                // 累計行
-                if (data.CumulativeTotal != null)
+                var tableRow = new TableRow();
+                var background = GetRowBackground(descriptor.Kind);
+                if (background != null)
                 {
-                    var cumulativeRow = new TableRow { Background = new SolidColorBrush(Color.FromRgb(230, 230, 230)) };
-                    cumulativeRow.Cells.Add(CreateDataCell("", true, TextAlignment.Center));
-                    cumulativeRow.Cells.Add(CreateDataCell(data.CumulativeTotal.Label, true, TextAlignment.Left));
-                    // Issue #842: 累計行も0を表示（Issue #451のExcel側と同様）
-                    cumulativeRow.Cells.Add(CreateDataCell(data.CumulativeTotal.Income.ToString("N0"), true, TextAlignment.Right));
-                    cumulativeRow.Cells.Add(CreateDataCell(data.CumulativeTotal.Expense.ToString("N0"), true, TextAlignment.Right));
-                    cumulativeRow.Cells.Add(CreateDataCell(data.CumulativeTotal.Balance?.ToString("N0") ?? "", true, TextAlignment.Right));
-                    cumulativeRow.Cells.Add(CreateDataCell("", true, TextAlignment.Left));
-                    cumulativeRow.Cells.Add(CreateDataCell("", true, TextAlignment.Left));
-                    rowGroup.Rows.Add(cumulativeRow);
+                    tableRow.Background = background;
                 }
 
-                // 次年度繰越行（3月のみ）
-                if (data.CarryoverToNextYear.HasValue)
+                for (int i = 0; i < descriptor.Cells.Count; i++)
                 {
-                    var carryoverRow = new TableRow { Background = new SolidColorBrush(Color.FromRgb(220, 220, 220)) };
-                    carryoverRow.Cells.Add(CreateDataCell("", true, TextAlignment.Center));
-                    carryoverRow.Cells.Add(CreateDataCell(SummaryGenerator.GetCarryoverToNextYearSummary(), true, TextAlignment.Left));
-                    carryoverRow.Cells.Add(CreateDataCell("", true, TextAlignment.Right));
-                    carryoverRow.Cells.Add(CreateDataCell(data.CarryoverToNextYear.Value.ToString("N0"), true, TextAlignment.Right));
-                    carryoverRow.Cells.Add(CreateDataCell("0", true, TextAlignment.Right));
-                    carryoverRow.Cells.Add(CreateDataCell("", true, TextAlignment.Left));
-                    carryoverRow.Cells.Add(CreateDataCell("", true, TextAlignment.Left));
-                    rowGroup.Rows.Add(carryoverRow);
+                    tableRow.Cells.Add(CreateDataCell(descriptor.Cells[i], descriptor.IsBold, CellAlignments[i]));
                 }
+
+                rowGroup.Rows.Add(tableRow);
             }
 
             table.RowGroups.Add(rowGroup);
