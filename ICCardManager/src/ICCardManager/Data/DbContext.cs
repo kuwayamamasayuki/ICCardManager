@@ -597,21 +597,72 @@ namespace ICCardManager.Data
         /// 各カラムは 'YYYY-MM-DD HH:MM:SS' 形式で保存されているため、
         /// date()関数で日付部分のみを抽出して比較する必要があります。
         /// また、'localtime'を指定することでローカルタイムゾーンで比較します。
+        ///
+        /// Issue #1170: 両テーブルの削除を単一トランザクションで実行し、
+        /// 片方の削除が成功した直後に SQLITE_BUSY 等が発生してもテーブル間の
+        /// 不整合（保存期間の不一致）が発生しないようにする。
+        /// SQLITE_BUSY/SQLITE_LOCKED時はリトライする。
         /// </remarks>
         /// <returns>削除件数（ledger件数, operation_log件数）</returns>
         public (int LedgerCount, int OperationLogCount) CleanupOldData()
         {
+            // Issue #1170: SQLITE_BUSY/SQLITE_LOCKED時の同期リトライ
+            var delays = IsSharedMode ? SharedRetryDelays : LocalRetryDelays;
+            for (int attempt = 0; ; attempt++)
+            {
+                try
+                {
+                    return CleanupOldDataInternal();
+                }
+                catch (SQLiteException ex) when (
+                    attempt < delays.Length &&
+                    (ex.ResultCode == SQLiteErrorCode.Busy || ex.ResultCode == SQLiteErrorCode.Locked))
+                {
+                    var baseDelay = delays[attempt];
+                    var jitter = IsSharedMode ? _jitterRandom.Next(0, baseDelay / 2) : 0;
+                    var totalDelay = baseDelay + jitter;
+
+                    _logger?.LogWarning(
+                        "CleanupOldDataリトライ（{Attempt}/{MaxRetries}回目、{Delay}ms待機）: {ResultCode}",
+                        attempt + 1, delays.Length, totalDelay, ex.ResultCode);
+#if DEBUG
+                    System.Diagnostics.Debug.WriteLine(
+                        $"[DbContext] CleanupOldDataリトライ（{attempt + 1}/{delays.Length}回目、{totalDelay}ms待機）: {ex.ResultCode}");
+#endif
+                    Thread.Sleep(totalDelay);
+                }
+            }
+        }
+
+        /// <summary>
+        /// Issue #1170: CleanupOldDataの実体。両テーブルの削除を単一トランザクションで実行する。
+        /// </summary>
+        private (int LedgerCount, int OperationLogCount) CleanupOldDataInternal()
+        {
             var connection = GetConnection();
 
-            using var ledgerCommand = connection.CreateCommand();
-            ledgerCommand.CommandText = "DELETE FROM ledger WHERE date(date) < date('now', '-6 years', 'localtime')";
-            var ledgerCount = ledgerCommand.ExecuteNonQuery();
+            using var transaction = connection.BeginTransaction();
+            try
+            {
+                using var ledgerCommand = connection.CreateCommand();
+                ledgerCommand.Transaction = transaction;
+                ledgerCommand.CommandText = "DELETE FROM ledger WHERE date(date) < date('now', '-6 years', 'localtime')";
+                var ledgerCount = ledgerCommand.ExecuteNonQuery();
 
-            using var logCommand = connection.CreateCommand();
-            logCommand.CommandText = "DELETE FROM operation_log WHERE date(timestamp) < date('now', '-6 years', 'localtime')";
-            var logCount = logCommand.ExecuteNonQuery();
+                using var logCommand = connection.CreateCommand();
+                logCommand.Transaction = transaction;
+                logCommand.CommandText = "DELETE FROM operation_log WHERE date(timestamp) < date('now', '-6 years', 'localtime')";
+                var logCount = logCommand.ExecuteNonQuery();
 
-            return (ledgerCount, logCount);
+                transaction.Commit();
+                return (ledgerCount, logCount);
+            }
+            catch
+            {
+                // Issue #1170: 片方が失敗したら両方ロールバックして整合性を維持
+                try { transaction.Rollback(); } catch { /* ロールバック失敗は無視 */ }
+                throw;
+            }
         }
 
         /// <summary>
