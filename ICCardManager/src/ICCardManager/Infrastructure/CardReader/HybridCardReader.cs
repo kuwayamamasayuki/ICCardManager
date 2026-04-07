@@ -12,7 +12,7 @@ namespace ICCardManager.Infrastructure.CardReader
     /// </summary>
     /// <remarks>
     /// <para>
-    /// 実際のカードリーダー（FelicaCardReader/PcScCardReader）をラップし、
+    /// 実際のカードリーダー（FelicaCardReader）をラップし、
     /// 物理カードの読み取りはそのまま委譲しつつ、仮想タッチ（SimulateCardRead）や
     /// カスタム履歴・残高の設定機能を追加します。
     /// </para>

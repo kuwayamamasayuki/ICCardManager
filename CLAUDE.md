@@ -8,7 +8,7 @@
 
 - **言語**: C# 10 / .NET Framework 4.8 + WPF（MVVM）
 - **DB**: SQLite3
-- **ICカードリーダー**: PaSoRi（PC/SC API経由）
+- **ICカードリーダー**: PaSoRi（felicalib 経由）
 - **帳票出力**: ClosedXML
 - **テスト**: xUnit + FluentAssertions + Moq
 

@@ -698,7 +698,7 @@ namespace ICCardManager.Services
 
             // カードから読み取った残高を優先的に使用
             // 履歴データには各取引後の残高が含まれているため、これを直接使用する
-            // フォールバック: データベースの最終残高（PcScCardReader等、残高が読めない場合用）
+            // フォールバック: データベースの最終残高（履歴が取得できなかった場合用）
             var useCardBalance = details.Any(d => d.Balance.HasValue && d.Balance.Value > 0);
             _logger.LogDebug("LendingService: カード残高使用={UseCardBalance}", useCardBalance);
 

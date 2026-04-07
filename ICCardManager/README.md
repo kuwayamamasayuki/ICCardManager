@@ -136,7 +136,7 @@
 | UI | WPF | - |
 | アーキテクチャ | MVVM | - |
 | データベース | SQLite | 3.x |
-| ICカード | PC/SC API | - |
+| ICカード | FelicaLib.DotNet | 1.2.x |
 | Excel出力 | ClosedXML | 0.102.x |
 | MVVMツールキット | CommunityToolkit.Mvvm | 8.x |
 

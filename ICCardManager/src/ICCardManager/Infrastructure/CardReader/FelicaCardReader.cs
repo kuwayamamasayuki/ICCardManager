@@ -20,7 +20,7 @@ namespace ICCardManager.Infrastructure.CardReader
     /// <remarks>
     /// <para>
     /// このクラスは Sony PaSoRi (RC-S380 等) での FeliCa カード読み取りに特化しています。
-    /// PC/SC API では読み取れない残高・履歴データを、FelicaLib.DotNet 経由で取得します。
+    /// 残高・履歴データを FelicaLib.DotNet 経由で取得します。
     /// </para>
     /// <para>
     /// <strong>対応カード:</strong>

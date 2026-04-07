@@ -271,14 +271,12 @@ namespace ICCardManager
     #endif
 
     #if DEBUG
-            // Issue #640: HybridCardReader で物理カードリーダーをラップ
-            // 物理カードリーダー（PaSoRi）も使いつつ、仮想タッチ機能も利用可能にする
+            // Issue #640: HybridCardReader で物理カードリーダー（PaSoRi + felicalib）をラップし、
+            // 仮想タッチ機能も利用可能にする
             services.AddSingleton<HybridCardReader>(sp => new HybridCardReader(CreateCardReader(sp)));
             services.AddSingleton<ICardReader>(sp => sp.GetRequiredService<HybridCardReader>());
     #else
-            // カードリーダーの自動選択:
-            // 1. felicalib.dll が存在する場合: FelicaCardReader（残高・履歴読み取り可能）
-            // 2. それ以外: PcScCardReader（IDm読み取りのみ）
+            // 物理カードリーダー（PaSoRi + felicalib）で FelicaCardReader を使用
             services.AddSingleton<ICardReader>(sp => CreateCardReader(sp));
     #endif
             services.AddSingleton<ISoundPlayer, SoundPlayer>();
@@ -327,39 +325,27 @@ namespace ICCardManager
         }
 
         /// <summary>
-        /// 利用可能なカードリーダーを自動選択して作成します。
+        /// FelicaCardReader を作成します。
         /// </summary>
         /// <remarks>
-        /// <para>
-        /// 以下の優先順位でカードリーダーを選択します：
-        /// </para>
-        /// <list type="number">
-        /// <item><description>FelicaCardReader: felicalib.dll が利用可能な場合（残高・履歴読み取り可能）</description></item>
-        /// <item><description>PcScCardReader: PC/SC API が利用可能な場合（IDm読み取りのみ）</description></item>
-        /// </list>
-        /// <para>
-        /// FelicaCardReader を使用するには、Sony NFCポートソフトウェアがインストールされている必要があります。
-        /// </para>
+        /// 本システムは PaSoRi + felicalib.dll 前提です（交通系ICカードの残高・履歴は
+        /// felicalib 経由でしか読み取れないため）。felicalib.dll が存在しない場合は
+        /// <see cref="InvalidOperationException"/> を送出します。
         /// </remarks>
         private static ICardReader CreateCardReader(IServiceProvider sp)
         {
             var loggerFactory = sp.GetRequiredService<ILoggerFactory>();
             var stationMasterService = sp.GetRequiredService<IStationMasterService>();
 
-            // felicalib.dll の存在を確認
-            if (IsFelicaLibAvailable())
+            if (!IsFelicaLibAvailable())
             {
-                var logger = loggerFactory.CreateLogger<FelicaCardReader>();
-                logger.LogInformation("FelicaCardReader を使用します（残高・履歴読み取り可能）");
-                return new FelicaCardReader(logger, stationMasterService);
+                throw new InvalidOperationException(
+                    "felicalib.dll が見つかりません。PaSoRi + felicalib 環境でのみ動作します。");
             }
 
-            // フォールバック: PcScCardReader
-            {
-                var logger = loggerFactory.CreateLogger<PcScCardReader>();
-                logger.LogInformation("PcScCardReader を使用します（IDm読み取りのみ、残高・履歴は読み取れません）");
-                return new PcScCardReader(logger, stationMasterService);
-            }
+            var logger = loggerFactory.CreateLogger<FelicaCardReader>();
+            logger.LogInformation("FelicaCardReader を使用します（残高・履歴読み取り可能）");
+            return new FelicaCardReader(logger, stationMasterService);
         }
 
         /// <summary>
