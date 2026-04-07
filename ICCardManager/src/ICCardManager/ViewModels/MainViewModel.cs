@@ -477,6 +477,10 @@ public partial class MainViewModel : ViewModelBase
     {
         using (BeginBusy("初期化中..."))
         {
+            // Issue #1172: ジャーナルモードがDELETE以外（degraded）の場合、UI警告を追加
+            // クラッシュ耐性が低下している可能性をユーザーに通知する
+            CheckJournalModeWarning();
+
             // Issue #790: 起動時に貸出状態の整合性をチェック・修復
             await _lendingService.RepairLentStatusConsistencyAsync();
 
@@ -509,6 +513,31 @@ public partial class MainViewModel : ViewModelBase
                 StartDatabaseHealthCheck();
             }
         }
+    }
+
+    /// <summary>
+    /// Issue #1172: ジャーナルモード状態をチェックし、degradedの場合は警告を追加する。
+    /// internal: テストから直接呼び出して挙動を検証するため。
+    /// </summary>
+    /// <remarks>
+    /// DbContext.IsJournalModeDegraded がtrueの場合、警告メッセージエリアに
+    /// クラッシュ耐性低下の警告を表示する。重複追加は防止する。
+    /// </remarks>
+    internal void CheckJournalModeWarning()
+    {
+        if (!_dbContext.IsJournalModeDegraded)
+            return;
+
+        // 重複防止
+        if (WarningMessages.Any(w => w.Type == WarningType.DatabaseJournalModeDegraded))
+            return;
+
+        WarningMessages.Add(new WarningItem
+        {
+            Type = WarningType.DatabaseJournalModeDegraded,
+            DisplayText = $"⚠️ データベースのクラッシュ耐性が低下しています（journal_mode={_dbContext.CurrentJournalMode}）。" +
+                          "ファイルサーバ管理者にご相談ください。"
+        });
     }
 
     /// <summary>

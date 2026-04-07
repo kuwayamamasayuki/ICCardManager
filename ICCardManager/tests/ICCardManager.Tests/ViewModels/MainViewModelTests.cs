@@ -970,6 +970,99 @@ public class MainViewModelTests
     }
 
     #endregion
+
+    #region Issue #1172: ジャーナルモード警告テスト
+
+    /// <summary>
+    /// Issue #1172: DbContextがdegraded状態の場合、CheckJournalModeWarningで警告が追加される
+    /// </summary>
+    [Fact]
+    public void CheckJournalModeWarning_WhenDegraded_AddsWarning()
+    {
+        // Arrange
+        var dbContextMock = new Mock<DbContext>();
+        dbContextMock.SetupGet(d => d.IsJournalModeDegraded).Returns(true);
+        dbContextMock.SetupGet(d => d.CurrentJournalMode).Returns("truncate");
+        var vm = CreateViewModelWithDbContext(dbContextMock.Object);
+
+        // Act
+        vm.CheckJournalModeWarning();
+
+        // Assert
+        vm.WarningMessages.Should().ContainSingle(w => w.Type == WarningType.DatabaseJournalModeDegraded);
+        var warning = vm.WarningMessages.First(w => w.Type == WarningType.DatabaseJournalModeDegraded);
+        warning.DisplayText.Should().Contain("truncate");
+        warning.DisplayText.Should().Contain("クラッシュ耐性");
+    }
+
+    /// <summary>
+    /// Issue #1172: DbContextが正常状態の場合、警告は追加されない
+    /// </summary>
+    [Fact]
+    public void CheckJournalModeWarning_WhenNotDegraded_DoesNotAddWarning()
+    {
+        // Arrange
+        var dbContextMock = new Mock<DbContext>();
+        dbContextMock.SetupGet(d => d.IsJournalModeDegraded).Returns(false);
+        dbContextMock.SetupGet(d => d.CurrentJournalMode).Returns("delete");
+        var vm = CreateViewModelWithDbContext(dbContextMock.Object);
+
+        // Act
+        vm.CheckJournalModeWarning();
+
+        // Assert
+        vm.WarningMessages.Should().NotContain(w => w.Type == WarningType.DatabaseJournalModeDegraded);
+    }
+
+    /// <summary>
+    /// Issue #1172: 複数回呼んでも警告は重複追加されない
+    /// </summary>
+    [Fact]
+    public void CheckJournalModeWarning_CalledTwice_DoesNotDuplicate()
+    {
+        // Arrange
+        var dbContextMock = new Mock<DbContext>();
+        dbContextMock.SetupGet(d => d.IsJournalModeDegraded).Returns(true);
+        dbContextMock.SetupGet(d => d.CurrentJournalMode).Returns("persist");
+        var vm = CreateViewModelWithDbContext(dbContextMock.Object);
+
+        // Act
+        vm.CheckJournalModeWarning();
+        vm.CheckJournalModeWarning();
+        vm.CheckJournalModeWarning();
+
+        // Assert
+        vm.WarningMessages.Count(w => w.Type == WarningType.DatabaseJournalModeDegraded).Should().Be(1);
+    }
+
+    /// <summary>
+    /// テスト用: 任意のDbContextを注入してViewModelを生成
+    /// </summary>
+    private MainViewModel CreateViewModelWithDbContext(DbContext dbContext)
+    {
+        return new MainViewModel(
+            _cardReaderMock.Object,
+            _soundPlayerMock.Object,
+            _staffRepositoryMock.Object,
+            _cardRepositoryMock.Object,
+            _ledgerRepositoryMock.Object,
+            _settingsRepositoryMock.Object,
+            _lendingService,
+            _toastMock.Object,
+            _staffAuthServiceMock.Object,
+            _ledgerMergeService,
+            _messengerMock.Object,
+            _navigationServiceMock.Object,
+            _operationLoggerMock.Object,
+            _ledgerConsistencyChecker,
+            Options.Create(new AppOptions { StaffCardTimeoutSeconds = 60 }),
+            _timerFactory,
+            _dispatcherService,
+            dbContext,
+            new Mock<ICacheService>().Object);
+    }
+
+    #endregion
 }
 
 /*
