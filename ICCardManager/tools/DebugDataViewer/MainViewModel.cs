@@ -418,14 +418,17 @@ namespace DebugDataViewer
 
                 await Task.Run(() =>
                 {
-                    var connection = _dbContext.GetConnection();
-
                     // テーブル名をサニタイズ（SQLインジェクション対策）
                     var validTables = new[] { "staff", "ic_card", "ledger", "ledger_detail", "operation_log", "settings" };
                     if (!validTables.Contains(SelectedTableName))
                     {
                         throw new ArgumentException($"無効なテーブル名: {SelectedTableName}");
                     }
+
+                    // Issue #1209: ConnectionLease パターンに移行（#1174 の並行アクセス保護追従）
+                    // Task.Run 内（バックグラウンドスレッド）のため同期版 LeaseConnection() を使用
+                    using var lease = _dbContext.LeaseConnection();
+                    var connection = lease.Connection;
 
                     using var command = connection.CreateCommand();
                     // rowidは SELECT * に含まれないため明示的に取得
