@@ -1252,11 +1252,11 @@ public partial class MainViewModel : ViewModelBase
                         .Where(l => !l.IsLentRecord && l.Summary != null && l.Summary.Contains("バス"))
                         .ToList();
 
-                    foreach (var busLedger in busLedgers)
+                    // Issue #1203: 複数のバス利用がある場合でも1つのダイアログでまとめて入力できるようにする
+                    if (busLedgers.Count > 0)
                     {
-                        // バス停入力ダイアログを表示
                         await _navigationService.ShowDialogAsync<Views.Dialogs.BusStopInputDialog>(
-                            async d => await d.InitializeWithLedgerIdAsync(busLedger.Id));
+                            async d => await d.InitializeWithLedgersAsync(busLedgers));
                     }
 
                     // バス停名入力後に履歴が開いていれば再読み込み

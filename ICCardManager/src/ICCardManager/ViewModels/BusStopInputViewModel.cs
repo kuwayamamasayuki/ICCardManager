@@ -25,6 +25,12 @@ public partial class BusStopInputViewModel : ViewModelBase
     [ObservableProperty]
     private Ledger? _ledger;
 
+    /// <summary>
+    /// Issue #1203: 複数 Ledger を一括で扱う場合の対象 Ledger リスト。
+    /// 単一 Ledger 初期化時は null のまま（<see cref="Ledger"/> を使用）。
+    /// </summary>
+    private List<Ledger>? _ledgers;
+
     [ObservableProperty]
     private ObservableCollection<BusStopInputItem> _busUsages = new();
 
@@ -108,6 +114,62 @@ public partial class BusStopInputViewModel : ViewModelBase
             var item = new BusStopInputItem(detail);
             item.SetSuggestions(BusStopSuggestions);
             BusUsages.Add(item);
+        }
+
+        if (BusUsages.Count == 0)
+        {
+            StatusMessage = "バス利用の履歴がありません";
+        }
+        else
+        {
+            var suggestionCount = BusStopSuggestions.Count;
+            var suggestionInfo = suggestionCount > 0 ? $"（{suggestionCount}件の候補あり）" : "";
+            StatusMessage = $"{BusUsages.Count}件のバス利用があります。バス停名を入力してください。{suggestionInfo}";
+        }
+
+        HasUnsavedChanges = false;
+    }
+
+    /// <summary>
+    /// Issue #1203: 複数の Ledger のバス利用をまとめて1つのダイアログで編集するための初期化。
+    /// 返却処理でバス利用が複数日にまたがる場合に、1件ずつダイアログを出さずまとめて入力させる用途。
+    /// </summary>
+    public async Task InitializeWithLedgersAsync(IEnumerable<Ledger> ledgers)
+    {
+        await LoadBusStopSuggestionsAsync();
+
+        // 入力された Ledger は LendingService から返される in-memory インスタンスで
+        // Details コレクションが populate されていない場合があるため、ID で DB から再取得する。
+        // Id が 0（永続化前）または GetByIdAsync が null を返す場合は入力インスタンスをそのまま使う。
+        var loaded = new List<Ledger>();
+        foreach (var src in ledgers ?? Enumerable.Empty<Ledger>())
+        {
+            Ledger? full = null;
+            if (src.Id > 0)
+            {
+                full = await _ledgerRepository.GetByIdAsync(src.Id);
+            }
+            loaded.Add(full ?? src);
+        }
+
+        _ledgers = loaded;
+        // UI 表示互換のため Ledger プロパティには先頭を設定
+        Ledger = _ledgers.FirstOrDefault();
+
+        BusUsages.Clear();
+        foreach (var ledger in _ledgers)
+        {
+            foreach (var detail in ledger.Details.Where(d => d.IsBus))
+            {
+                // LedgerId が未設定の場合は親 Ledger を参照できるよう補完
+                if (detail.LedgerId == 0)
+                {
+                    detail.LedgerId = ledger.Id;
+                }
+                var item = new BusStopInputItem(detail);
+                item.SetSuggestions(BusStopSuggestions);
+                BusUsages.Add(item);
+            }
         }
 
         if (BusUsages.Count == 0)
@@ -274,19 +336,7 @@ public partial class BusStopInputViewModel : ViewModelBase
                     : item.BusStops;
             }
 
-            // Issue #593: バス停名をledger_detailに保存（サジェスト候補の蓄積に必要）
-            var busStopUpdates = BusUsages
-                .Select(item => (item.Detail.SequenceNumber, item.Detail.BusStops))
-                .ToList();
-            await _ledgerRepository.UpdateDetailBusStopsAsync(Ledger.Id, busStopUpdates);
-
-            // 摘要を再生成（バス停名を反映）
-            var settings = await _settingsRepository.GetAppSettingsAsync();
-            var summaryGenerator = new SummaryGenerator(settings.DepartmentType);
-            Ledger.Summary = summaryGenerator.Generate(Ledger.Details);
-
-            // 履歴を更新
-            var success = await _ledgerRepository.UpdateAsync(Ledger);
+            var success = await PersistBusStopsAsync();
 
             if (success)
             {
@@ -299,6 +349,42 @@ public partial class BusStopInputViewModel : ViewModelBase
                 StatusMessage = "保存に失敗しました";
             }
         }
+    }
+
+    /// <summary>
+    /// Issue #1203: 単一 Ledger / 複数 Ledger の両モードに対応した保存処理。
+    /// <see cref="_ledgers"/> が設定されていれば Ledger ごとにグルーピングして更新する。
+    /// </summary>
+    private async Task<bool> PersistBusStopsAsync()
+    {
+        var settings = await _settingsRepository.GetAppSettingsAsync();
+        var summaryGenerator = new SummaryGenerator(settings.DepartmentType);
+
+        var targetLedgers = _ledgers != null && _ledgers.Count > 0
+            ? _ledgers
+            : (Ledger != null ? new List<Ledger> { Ledger } : new List<Ledger>());
+
+        if (targetLedgers.Count == 0) return false;
+
+        var itemsByLedgerId = BusUsages.GroupBy(i => i.Detail.LedgerId).ToDictionary(g => g.Key, g => g.ToList());
+
+        var allSuccess = true;
+        foreach (var ledger in targetLedgers)
+        {
+            if (itemsByLedgerId.TryGetValue(ledger.Id, out var items))
+            {
+                var updates = items
+                    .Select(item => (item.Detail.SequenceNumber, item.Detail.BusStops))
+                    .ToList();
+                await _ledgerRepository.UpdateDetailBusStopsAsync(ledger.Id, updates);
+            }
+
+            ledger.Summary = summaryGenerator.Generate(ledger.Details);
+            var ok = await _ledgerRepository.UpdateAsync(ledger);
+            if (!ok) allSuccess = false;
+        }
+
+        return allSuccess;
     }
 
     /// <summary>
@@ -318,18 +404,7 @@ public partial class BusStopInputViewModel : ViewModelBase
                 item.Detail.BusStops = "★";
             }
 
-            // Issue #593: バス停名をledger_detailに保存
-            var busStopUpdates = BusUsages
-                .Select(item => (item.Detail.SequenceNumber, item.Detail.BusStops))
-                .ToList();
-            await _ledgerRepository.UpdateDetailBusStopsAsync(Ledger.Id, busStopUpdates);
-
-            // 摘要を再生成（★マークを反映）
-            var skipSettings = await _settingsRepository.GetAppSettingsAsync();
-            var summaryGenerator = new SummaryGenerator(skipSettings.DepartmentType);
-            Ledger.Summary = summaryGenerator.Generate(Ledger.Details);
-
-            var success = await _ledgerRepository.UpdateAsync(Ledger);
+            var success = await PersistBusStopsAsync();
 
             if (success)
             {
