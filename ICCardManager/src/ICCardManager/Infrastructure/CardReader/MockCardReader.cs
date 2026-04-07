@@ -114,6 +114,19 @@ namespace ICCardManager.Infrastructure.CardReader
             return Task.FromResult<IEnumerable<LedgerDetail>>(details);
         }
 
+        /// <inheritdoc/>
+        public Task<CardReadResult<IReadOnlyList<LedgerDetail>>> TryReadHistoryAsync(string idm)
+        {
+            // Issue #1169: モック実装は常に成功を返す
+            if (HistorySettings.CustomHistory.TryGetValue(idm, out var customHistory))
+            {
+                return Task.FromResult(CardReadResult<IReadOnlyList<LedgerDetail>>.Ok((IReadOnlyList<LedgerDetail>)customHistory.ToList()));
+            }
+
+            var details = GenerateMockHistory(HistorySettings.Days, HistorySettings.IncludeBus, HistorySettings.IncludeCharge);
+            return Task.FromResult(CardReadResult<IReadOnlyList<LedgerDetail>>.Ok((IReadOnlyList<LedgerDetail>)details));
+        }
+
         /// <summary>
         /// モック履歴データを生成
         /// </summary>

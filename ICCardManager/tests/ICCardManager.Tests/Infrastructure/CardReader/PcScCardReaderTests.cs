@@ -1,6 +1,7 @@
 using FluentAssertions;
 using ICCardManager.Common.Exceptions;
 using ICCardManager.Infrastructure.CardReader;
+using ICCardManager.Models;
 using ICCardManager.Services;
 using Microsoft.Extensions.Logging;
 using Moq;
@@ -707,6 +708,108 @@ public class PcScCardReaderTests : IDisposable
 
         // Assert
         _monitorMock.Verify(m => m.Cancel(), Times.Once);
+    }
+
+    #endregion
+
+    #region Issue #1169: TryReadHistoryAsync テスト
+
+    /// <summary>
+    /// Issue #1169: リーダー未接続時はFailを返すこと
+    /// </summary>
+    [Fact]
+    [Trait("Category", "Unit")]
+    public async Task TryReadHistoryAsync_WhenNoReaderAvailable_ReturnsFail()
+    {
+        // Arrange
+        _providerMock.Setup(p => p.GetReaders()).Returns((string[]?)null!);
+        var reader = CreateReader();
+
+        // Act
+        var result = await reader.TryReadHistoryAsync("0123456789ABCDEF");
+
+        // Assert
+        result.Should().NotBeNull();
+        result.Success.Should().BeFalse("リーダー未接続はFailであるべき");
+        result.Error.Should().NotBeNull("エラー情報が設定されるべき");
+    }
+
+    /// <summary>
+    /// Issue #1169: リーダー未接続時にErrorイベントが発火すること
+    /// </summary>
+    [Fact]
+    [Trait("Category", "Unit")]
+    public async Task TryReadHistoryAsync_WhenNoReaderAvailable_FiresErrorEvent()
+    {
+        // Arrange
+        _providerMock.Setup(p => p.GetReaders()).Returns((string[]?)null!);
+        var reader = CreateReader();
+        Exception? capturedError = null;
+        reader.Error += (s, e) => capturedError = e;
+
+        // Act
+        await reader.TryReadHistoryAsync("0123456789ABCDEF");
+
+        // Assert
+        capturedError.Should().NotBeNull();
+        capturedError.Should().BeOfType<CardReaderException>();
+    }
+
+    /// <summary>
+    /// Issue #1169: 旧APIのReadHistoryAsyncはエラー時に空リストを返すこと（後方互換）
+    /// </summary>
+    [Fact]
+    [Trait("Category", "Unit")]
+    public async Task ReadHistoryAsync_WhenNoReaderAvailable_ReturnsEmptyList()
+    {
+        // Arrange
+        _providerMock.Setup(p => p.GetReaders()).Returns((string[]?)null!);
+        var reader = CreateReader();
+
+        // Act
+        var result = await reader.ReadHistoryAsync("0123456789ABCDEF");
+
+        // Assert
+        result.Should().NotBeNull();
+        result.Should().BeEmpty("後方互換のため、エラー時は空リストを返すべき");
+    }
+
+    /// <summary>
+    /// Issue #1169: CardReadResult.Okの基本動作
+    /// </summary>
+    [Fact]
+    [Trait("Category", "Unit")]
+    public void CardReadResult_Ok_HasSuccessTrueAndValue()
+    {
+        // Arrange
+        var details = new List<LedgerDetail> { new LedgerDetail() };
+
+        // Act
+        var result = CardReadResult<IReadOnlyList<LedgerDetail>>.Ok(details);
+
+        // Assert
+        result.Success.Should().BeTrue();
+        result.Value.Should().BeSameAs(details);
+        result.Error.Should().BeNull();
+    }
+
+    /// <summary>
+    /// Issue #1169: CardReadResult.Failの基本動作
+    /// </summary>
+    [Fact]
+    [Trait("Category", "Unit")]
+    public void CardReadResult_Fail_HasSuccessFalseAndError()
+    {
+        // Arrange
+        var error = CardReaderException.NotConnected();
+
+        // Act
+        var result = CardReadResult<IReadOnlyList<LedgerDetail>>.Fail(error);
+
+        // Assert
+        result.Success.Should().BeFalse();
+        result.Value.Should().BeNull();
+        result.Error.Should().BeSameAs(error);
     }
 
     #endregion

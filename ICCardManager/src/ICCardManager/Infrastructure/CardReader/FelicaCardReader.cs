@@ -282,6 +282,34 @@ namespace ICCardManager.Infrastructure.CardReader
             return details;
         }
 
+        /// <inheritdoc/>
+        public async Task<CardReadResult<IReadOnlyList<LedgerDetail>>> TryReadHistoryAsync(string idm)
+        {
+            // Issue #1169: 既存ReadHistoryAsyncに委譲しつつ、エラー判定を加味する。
+            // FelicaCardReader.ReadHistoryAsyncは内部でtry/catchして空リストを返すため、
+            // ここでは「IDmが一致しない」「全く読み取れなかった」場合をエラー扱いにはしない
+            // （既存挙動の維持を優先）。実装の主目的はインターフェース遵守。
+            CardReaderException capturedError = null;
+            EventHandler<System.Exception> handler = (s, e) =>
+            {
+                if (e is CardReaderException cre) capturedError = cre;
+            };
+            Error += handler;
+            try
+            {
+                var details = (await ReadHistoryAsync(idm)).ToList();
+                if (capturedError != null)
+                {
+                    return CardReadResult<IReadOnlyList<LedgerDetail>>.Fail(capturedError);
+                }
+                return CardReadResult<IReadOnlyList<LedgerDetail>>.Ok(details);
+            }
+            finally
+            {
+                Error -= handler;
+            }
+        }
+
         /// <summary>
         /// カードの残高を読み取ります。
         /// </summary>

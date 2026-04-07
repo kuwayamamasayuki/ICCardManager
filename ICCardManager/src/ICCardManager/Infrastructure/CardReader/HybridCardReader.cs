@@ -1,6 +1,7 @@
 #if DEBUG
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading.Tasks;
 using ICCardManager.Models;
 
@@ -62,6 +63,18 @@ namespace ICCardManager.Infrastructure.CardReader
 
             // カスタムデータがなければ実カードリーダーに委譲
             return await _realReader.ReadHistoryAsync(idm);
+        }
+
+        /// <inheritdoc/>
+        public async Task<CardReadResult<IReadOnlyList<LedgerDetail>>> TryReadHistoryAsync(string idm)
+        {
+            // Issue #1169: カスタム履歴データがあれば成功として返す
+            if (_settings.CustomHistory.TryGetValue(idm, out var customHistory))
+            {
+                return CardReadResult<IReadOnlyList<LedgerDetail>>.Ok(customHistory.ToList());
+            }
+
+            return await _realReader.TryReadHistoryAsync(idm);
         }
 
         /// <inheritdoc/>
