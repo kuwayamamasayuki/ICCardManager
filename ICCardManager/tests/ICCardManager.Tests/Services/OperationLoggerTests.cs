@@ -385,8 +385,13 @@ public class OperationLoggerTests : IDisposable
 
     /// <summary>
     /// LogLedgerDeleteAsync: 有効な operatorIdm を渡すと正しく記録される。
-    /// （他のメソッドと異なり null は許容されないシグネチャ）
     /// </summary>
+    /// <remarks>
+    /// Issue #1188 で他の Log 系メソッドとシグネチャが統一され、operatorIdm が
+    /// nullable になった。本テストは「有効な operatorIdm を渡した場合の振る舞い」を固定する。
+    /// null / 空文字列ケースは別途下記の <c>LogLedgerDeleteAsync_WithNullOperatorIdm_*</c>
+    /// および <c>LogLedgerDeleteAsync_WithEmptyOperatorIdm_*</c> で検証する。
+    /// </remarks>
     [Fact]
     public async Task LogLedgerDeleteAsync_WithValidOperator_RecordsBeforeOnly()
     {
@@ -407,6 +412,54 @@ public class OperationLoggerTests : IDisposable
         log.OperatorName.Should().Be("削除者");
         log.BeforeData.Should().Contain("削除対象");
         log.AfterData.Should().BeNull();
+    }
+
+    /// <summary>
+    /// Issue #1188: LogLedgerDeleteAsync に null operatorIdm を渡すと
+    /// GUI 操作識別子（Idm/Name）にフォールバックして記録される
+    /// </summary>
+    [Fact]
+    public async Task LogLedgerDeleteAsync_WithNullOperatorIdm_UsesGuiIdentifier()
+    {
+        var ledger = CreateTestLedger(id: 77, summary: "GUI削除対象");
+
+        await _logger.LogLedgerDeleteAsync(null, ledger);
+
+        var logs = await _operationLogRepository.GetByTargetAsync(
+            OperationLogger.Tables.Ledger, "77");
+        logs.Should().HaveCount(1);
+        var log = logs.First();
+        log.Action.Should().Be(OperationLogger.Actions.Delete);
+        log.OperatorIdm.Should().Be(OperationLogger.GuiOperator.Idm);
+        log.OperatorName.Should().Be(OperationLogger.GuiOperator.Name);
+        log.BeforeData.Should().Contain("GUI削除対象");
+        log.AfterData.Should().BeNull();
+        // null が渡された場合、StaffRepository は照会されない
+        _staffRepositoryMock.Verify(
+            x => x.GetByIdmAsync(It.IsAny<string>(), It.IsAny<bool>()),
+            Times.Never);
+    }
+
+    /// <summary>
+    /// Issue #1188: LogLedgerDeleteAsync に空文字列の operatorIdm を渡すと
+    /// GUI 操作識別子にフォールバックする（他の Log 系メソッドと同等の振る舞い）
+    /// </summary>
+    [Fact]
+    public async Task LogLedgerDeleteAsync_WithEmptyOperatorIdm_UsesGuiIdentifier()
+    {
+        var ledger = CreateTestLedger(id: 78, summary: "空文字列削除対象");
+
+        await _logger.LogLedgerDeleteAsync(string.Empty, ledger);
+
+        var logs = await _operationLogRepository.GetByTargetAsync(
+            OperationLogger.Tables.Ledger, "78");
+        logs.Should().HaveCount(1);
+        var log = logs.First();
+        log.OperatorIdm.Should().Be(OperationLogger.GuiOperator.Idm);
+        log.OperatorName.Should().Be(OperationLogger.GuiOperator.Name);
+        _staffRepositoryMock.Verify(
+            x => x.GetByIdmAsync(It.IsAny<string>(), It.IsAny<bool>()),
+            Times.Never);
     }
 
     /// <summary>

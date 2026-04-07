@@ -330,14 +330,22 @@ namespace ICCardManager.Services
         /// <summary>
         /// 履歴削除のログを記録
         /// </summary>
-        public async Task LogLedgerDeleteAsync(string operatorIdm, Ledger ledger)
+        /// <param name="operatorIdm">操作者IDm（nullまたは空文字列の場合はGUI操作として記録）</param>
+        /// <param name="ledger">削除する履歴データ</param>
+        /// <remarks>
+        /// Issue #1188: 他の Log 系メソッドとシグネチャを統一し、operatorIdm を nullable に変更。
+        /// nullまたは空文字列が渡された場合は GUI 操作としてフォールバックする。
+        /// </remarks>
+        public async Task LogLedgerDeleteAsync(string? operatorIdm, Ledger ledger)
         {
-            var operatorName = await GetOperatorNameAsync(operatorIdm);
+            var isGuiOperation = string.IsNullOrEmpty(operatorIdm);
+            var actualIdm = isGuiOperation ? GuiOperator.Idm : operatorIdm;
+            var operatorName = isGuiOperation ? GuiOperator.Name : await GetOperatorNameAsync(operatorIdm!);
 
             var log = new OperationLog
             {
                 Timestamp = DateTime.Now,
-                OperatorIdm = operatorIdm,
+                OperatorIdm = actualIdm,
                 OperatorName = operatorName,
                 TargetTable = Tables.Ledger,
                 TargetId = ledger.Id.ToString(),
