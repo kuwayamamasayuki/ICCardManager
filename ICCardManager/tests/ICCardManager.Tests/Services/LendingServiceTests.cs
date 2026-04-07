@@ -2660,6 +2660,187 @@ public class LendingServiceTests : IDisposable
     }
 
     /// <summary>
+    /// 同一カードに複数の貸出中レコードが存在する場合、リポジトリ側の
+    /// ORDER BY lent_at DESC 順を前提に、最初に出現したレコード（=最新）が
+    /// 修復に使用される。修復は1回のみ呼ばれる（重複呼び出しなし）。
+    /// </summary>
+    /// <remarks>
+    /// LedgerRepository.GetAllLentRecordsAsync の SQL は ORDER BY lent_at DESC
+    /// であり、サービス側は Dictionary の ContainsKey ファーストヒット採用方式。
+    /// この組み合わせで「最新を採用」のセマンティクスが成立する暗黙の契約を
+    /// テストで明示的に固定する。
+    /// </remarks>
+    [Fact]
+    public async Task RepairLentStatusConsistencyAsync_MultipleLentRecordsForSameCard_UsesFirstOccurrence()
+    {
+        // Arrange: 同一カードに2件の貸出中レコード（DESC順=最新が先頭）
+        var card = CreateTestCard(isLent: false);
+        var newest = new Ledger
+        {
+            Id = 100,
+            CardIdm = TestCardIdm,
+            LenderIdm = "AAAA000000000001", // 最新の貸出者
+            StaffName = "新貸出者",
+            Date = DateTime.Today,
+            IsLentRecord = true,
+            LentAt = DateTime.Today.AddHours(-1), // 1時間前
+            Summary = "（貸出中）"
+        };
+        var older = new Ledger
+        {
+            Id = 50,
+            CardIdm = TestCardIdm,
+            LenderIdm = "BBBB000000000002", // 古い貸出者
+            StaffName = "旧貸出者",
+            Date = DateTime.Today.AddDays(-1),
+            IsLentRecord = true,
+            LentAt = DateTime.Today.AddDays(-1), // 1日前
+            Summary = "（貸出中）"
+        };
+
+        _cardRepositoryMock.Setup(x => x.GetAllAsync())
+            .ReturnsAsync(new List<IcCard> { card });
+        // リポジトリの ORDER BY lent_at DESC を模倣（最新が先頭）
+        _ledgerRepositoryMock.Setup(x => x.GetAllLentRecordsAsync())
+            .ReturnsAsync(new List<Ledger> { newest, older });
+        _cardRepositoryMock.Setup(x => x.UpdateLentStatusAsync(
+                It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<DateTime?>(), It.IsAny<string>()))
+            .ReturnsAsync(true);
+
+        // Act
+        var repairCount = await _service.RepairLentStatusConsistencyAsync();
+
+        // Assert
+        repairCount.Should().Be(1);
+        // 最新レコード（newest）の LentAt と LenderIdm が使われる
+        _cardRepositoryMock.Verify(
+            x => x.UpdateLentStatusAsync(TestCardIdm, true, newest.LentAt, "AAAA000000000001"),
+            Times.Once);
+        // 古いレコードの値で呼ばれていないこと
+        _cardRepositoryMock.Verify(
+            x => x.UpdateLentStatusAsync(TestCardIdm, true, older.LentAt, "BBBB000000000002"),
+            Times.Never);
+        // 修復は合計1回のみ
+        _cardRepositoryMock.Verify(
+            x => x.UpdateLentStatusAsync(TestCardIdm, It.IsAny<bool>(), It.IsAny<DateTime?>(), It.IsAny<string>()),
+            Times.Once);
+    }
+
+    /// <summary>
+    /// 貸出中レコードの LenderIdm が null の場合でも、null のまま
+    /// UpdateLentStatusAsync に伝播して修復されること（DB制約上は許容される）
+    /// </summary>
+    [Fact]
+    public async Task RepairLentStatusConsistencyAsync_LentRecordWithNullLenderIdm_PropagatesNull()
+    {
+        // Arrange
+        var card = CreateTestCard(isLent: false);
+        var lentRecord = new Ledger
+        {
+            Id = 1,
+            CardIdm = TestCardIdm,
+            LenderIdm = null, // LenderIdm が null
+            StaffName = "不明",
+            Date = DateTime.Today,
+            IsLentRecord = true,
+            LentAt = DateTime.Today,
+            Summary = "（貸出中）"
+        };
+
+        _cardRepositoryMock.Setup(x => x.GetAllAsync())
+            .ReturnsAsync(new List<IcCard> { card });
+        _ledgerRepositoryMock.Setup(x => x.GetAllLentRecordsAsync())
+            .ReturnsAsync(new List<Ledger> { lentRecord });
+        _cardRepositoryMock.Setup(x => x.UpdateLentStatusAsync(
+                TestCardIdm, true, lentRecord.LentAt, null))
+            .ReturnsAsync(true);
+
+        // Act
+        var repairCount = await _service.RepairLentStatusConsistencyAsync();
+
+        // Assert
+        repairCount.Should().Be(1);
+        _cardRepositoryMock.Verify(
+            x => x.UpdateLentStatusAsync(TestCardIdm, true, lentRecord.LentAt, null),
+            Times.Once);
+    }
+
+    /// <summary>
+    /// 貸出中レコードの LentAt が null の場合でも、null のまま
+    /// UpdateLentStatusAsync に伝播して修復されること
+    /// </summary>
+    [Fact]
+    public async Task RepairLentStatusConsistencyAsync_LentRecordWithNullLentAt_PropagatesNull()
+    {
+        // Arrange
+        var card = CreateTestCard(isLent: false);
+        var lentRecord = new Ledger
+        {
+            Id = 1,
+            CardIdm = TestCardIdm,
+            LenderIdm = TestStaffIdm,
+            StaffName = TestStaffName,
+            Date = DateTime.Today,
+            IsLentRecord = true,
+            LentAt = null, // LentAt が null
+            Summary = "（貸出中）"
+        };
+
+        _cardRepositoryMock.Setup(x => x.GetAllAsync())
+            .ReturnsAsync(new List<IcCard> { card });
+        _ledgerRepositoryMock.Setup(x => x.GetAllLentRecordsAsync())
+            .ReturnsAsync(new List<Ledger> { lentRecord });
+        _cardRepositoryMock.Setup(x => x.UpdateLentStatusAsync(
+                TestCardIdm, true, null, TestStaffIdm))
+            .ReturnsAsync(true);
+
+        // Act
+        var repairCount = await _service.RepairLentStatusConsistencyAsync();
+
+        // Assert
+        repairCount.Should().Be(1);
+        _cardRepositoryMock.Verify(
+            x => x.UpdateLentStatusAsync(TestCardIdm, true, null, TestStaffIdm),
+            Times.Once);
+    }
+
+    /// <summary>
+    /// 削除済みカード（IsDeleted=true）であっても、貸出状態の不整合があれば修復対象になる。
+    /// （論理削除されたカードでも貸出履歴は残るため、整合性チェックは全カード対象）
+    /// </summary>
+    [Fact]
+    public async Task RepairLentStatusConsistencyAsync_DeletedCardWithInconsistency_StillRepaired()
+    {
+        // Arrange: 削除済みカードで is_lent=1 だが貸出中レコードなし
+        var deletedCard = new IcCard
+        {
+            CardIdm = TestCardIdm,
+            CardType = "はやかけん",
+            CardNumber = "H001",
+            IsLent = true,
+            IsDeleted = true,
+            DeletedAt = DateTime.Today.AddDays(-30)
+        };
+
+        _cardRepositoryMock.Setup(x => x.GetAllAsync())
+            .ReturnsAsync(new List<IcCard> { deletedCard });
+        _ledgerRepositoryMock.Setup(x => x.GetAllLentRecordsAsync())
+            .ReturnsAsync(new List<Ledger>());
+        _cardRepositoryMock.Setup(x => x.UpdateLentStatusAsync(
+                TestCardIdm, false, null, null))
+            .ReturnsAsync(true);
+
+        // Act
+        var repairCount = await _service.RepairLentStatusConsistencyAsync();
+
+        // Assert
+        repairCount.Should().Be(1);
+        _cardRepositoryMock.Verify(
+            x => x.UpdateLentStatusAsync(TestCardIdm, false, null, null),
+            Times.Once);
+    }
+
+    /// <summary>
     /// 在庫カードと貸出中レコードなしが一致している場合、修復不要であること
     /// </summary>
     [Fact]
