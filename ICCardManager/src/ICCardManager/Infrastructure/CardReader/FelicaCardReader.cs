@@ -668,129 +668,29 @@ namespace ICCardManager.Infrastructure.CardReader
         /// <param name="currentData">現在のレコードデータ</param>
         /// <param name="previousData">前回のレコードデータ（金額計算用）</param>
         /// <param name="cardType">カード種別</param>
+        /// <remarks>
+        /// 純粋関数部分は <see cref="FelicaHistoryBlockDecoder.Decode"/> に抽出されている。
+        /// このメソッドは駅名解決サービスとロガー（Issue #942 のフォールバック診断）の責務を保持する。
+        /// </remarks>
         private LedgerDetail ParseHistoryData(byte[] currentData, byte[] previousData, CardType cardType)
         {
-            if (currentData == null || currentData.Length < 16)
-            {
-                return null;
-            }
-
             try
             {
-                // バイト0: 機器種別
-                // バイト1: 利用種別
-                var usageType = currentData[1];
+                var detail = FelicaHistoryBlockDecoder.Decode(
+                    currentData,
+                    previousData,
+                    (lineCode, stationNum) => _stationMasterService.GetStationNameOrNull(lineCode, stationNum, cardType),
+                    out var pointRedemptionFallbackTriggered);
 
-                // バイト4-5: 日付（年月日、2000年起点のビットフィールド）
-                var dateValue = (currentData[4] << 8) | currentData[5];
-                var year = 2000 + ((dateValue >> 9) & 0x7F);
-                var month = (dateValue >> 5) & 0x0F;
-                var day = dateValue & 0x1F;
-
-                DateTime? useDate = null;
-                if (year >= 2000 && month >= 1 && month <= 12 && day >= 1 && day <= 31)
-                {
-                    try
-                    {
-                        useDate = new DateTime(year, month, day);
-                    }
-                    catch
-                    {
-                        // 無効な日付は無視
-                    }
-                }
-
-                // バイト6-7: 入場駅コード
-                var entryStationCode = (currentData[6] << 8) | currentData[7];
-
-                // バイト8-9: 出場駅コード
-                var exitStationCode = (currentData[8] << 8) | currentData[9];
-
-                // バイト10-11: 残額（リトルエンディアン）
-                var balance = currentData[10] + (currentData[11] << 8);
-
-                // 前回の残高を取得（金額計算用）
-                int? previousBalance = null;
-                if (previousData != null && previousData.Length >= 12)
-                {
-                    previousBalance = previousData[10] + (previousData[11] << 8);
-                }
-
-                // 利用種別の判定
-                // 0x02: チャージ（現金入金）
-                // 0x0D: ポイント還元
-                // 0x14: オートチャージ（チャージとして扱う）
-                var isCharge = usageType == 0x02 || usageType == 0x14;
-                var isPointRedemption = usageType == 0x0D;
-
-                // 駅名の解決を試みる（バス判定に使用）
-                string entryStationName = null;
-                string exitStationName = null;
-                if (entryStationCode > 0)
-                {
-                    var lineCode = (entryStationCode >> 8) & 0xFF;
-                    var stationNum = entryStationCode & 0xFF;
-                    entryStationName = _stationMasterService.GetStationNameOrNull(lineCode, stationNum, cardType);
-                }
-                if (exitStationCode > 0)
-                {
-                    var lineCode = (exitStationCode >> 8) & 0xFF;
-                    var stationNum = exitStationCode & 0xFF;
-                    exitStationName = _stationMasterService.GetStationNameOrNull(lineCode, stationNum, cardType);
-                }
-
-                // バス利用の判定:
-                // 1. 駅コードが両方0の場合（従来のバス判定）
-                // 2. 駅コードはあるが駅名が両方とも解決できなかった場合（西鉄バス等）
-                // かつ、チャージでもポイント還元でもない場合
-                var isBus = !isCharge && !isPointRedemption &&
-                           ((entryStationCode == 0 && exitStationCode == 0) ||
-                            (entryStationName == null && exitStationName == null));
-
-                // 金額の計算
-                int? amount = null;
-                if (previousBalance.HasValue)
-                {
-                    if (isCharge || isPointRedemption)
-                    {
-                        // チャージまたはポイント還元は残高が増加する
-                        amount = balance - previousBalance.Value;
-                    }
-                    else
-                    {
-                        amount = previousBalance.Value - balance;
-                    }
-                }
-
-                // Issue #942: 利用種別バイトが0x0D以外でも残高が増加している場合はポイント還元とみなす
-                // FeliCaカードの利用種別はカード/リーダーによってバリエーションがあるため、
-                // 金額の符号（残高増減の方向）を最終的な判断基準とする
-                if (amount.HasValue && amount.Value < 0 && !isCharge && !isPointRedemption)
+                // Issue #942: フォールバック判定が発生した場合は診断ログを出力
+                if (pointRedemptionFallbackTriggered && detail != null)
                 {
                     _logger.LogDebug(
                         "FelicaCardReader: 利用種別0x{UsageType:X2}で残高増加を検出、ポイント還元として処理（金額: {Amount}円）",
-                        usageType, amount.Value);
-                    isPointRedemption = true;
-                    amount = -amount.Value;  // 正の金額（入金額）に変換
+                        currentData[1], detail.Amount);
                 }
 
-                // 生データを保持（デバッグ・診断用）
-                var rawBytes = new byte[16];
-                Array.Copy(currentData, 0, rawBytes, 0, Math.Min(currentData.Length, 16));
-
-                return new LedgerDetail
-                {
-                    UseDate = useDate,
-                    // バス利用の場合はnullを設定（バス停名入力ダイアログを表示するため）
-                    EntryStation = isBus ? null : entryStationName,
-                    ExitStation = isBus ? null : exitStationName,
-                    Amount = amount,
-                    Balance = balance,
-                    IsCharge = isCharge,
-                    IsPointRedemption = isPointRedemption,
-                    IsBus = isBus,
-                    RawBytes = rawBytes
-                };
+                return detail;
             }
             catch (Exception ex)
             {
