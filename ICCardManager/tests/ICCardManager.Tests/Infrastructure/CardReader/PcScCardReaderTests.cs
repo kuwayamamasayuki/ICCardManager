@@ -308,6 +308,131 @@ public class PcScCardReaderTests : IDisposable
 
     #endregion
 
+    #region Issue #1168: 低頻度リトライフェーズテスト
+
+    /// <summary>
+    /// Issue #1168: 低頻度リトライ間隔は60秒であること
+    /// </summary>
+    [Fact]
+    [Trait("Category", "Unit")]
+    public void SlowReconnectIntervalMs_Is60000()
+    {
+        PcScCardReader.SlowReconnectIntervalMs.Should().Be(60000, "低頻度リトライ間隔は60秒であるべき");
+    }
+
+    /// <summary>
+    /// Issue #1168: 高速リトライ上限到達後もタイマーが停止しないこと
+    /// </summary>
+    [Fact]
+    [Trait("Category", "Unit")]
+    public async Task OnReconnectAttempt_ExceedsMaxAttempts_TimerStaysRunning()
+    {
+        // Arrange: リーダーが見つからない状態
+        _providerMock.Setup(p => p.GetReaders()).Returns((string[]?)null!);
+        var reader = CreateReader();
+
+        // Act: 自動再接続を起動（タイマー稼働開始）
+        await reader.ReconnectAsync();
+
+        // 最大試行回数を超えるまでOnReconnectAttemptAsyncを直接呼び出す
+        for (int i = 0; i <= PcScCardReader.MaxReconnectAttempts; i++)
+        {
+            await reader.OnReconnectAttemptAsync();
+        }
+
+        // Assert: タイマーは継続稼働、低頻度フェーズに移行
+        reader.IsInSlowRetryPhase.Should().BeTrue("上限到達後は低頻度リトライフェーズに入るべき");
+        reader.IsReconnectTimerRunning.Should().BeTrue("タイマーは停止せず稼働継続するべき");
+        reader.CurrentReconnectIntervalMs.Should().Be(PcScCardReader.SlowReconnectIntervalMs,
+            "タイマー間隔が低頻度に切り替わっているべき");
+    }
+
+    /// <summary>
+    /// Issue #1168: 高速リトライ上限到達時にError通知が1回だけ発火されること
+    /// </summary>
+    [Fact]
+    [Trait("Category", "Unit")]
+    public async Task OnReconnectAttempt_ExceedsMaxAttempts_FiresErrorEventOnce()
+    {
+        // Arrange
+        _providerMock.Setup(p => p.GetReaders()).Returns((string[]?)null!);
+        var reader = CreateReader();
+        var errorCount = 0;
+        reader.Error += (s, e) => errorCount++;
+
+        // Act
+        await reader.ReconnectAsync();
+        for (int i = 0; i <= PcScCardReader.MaxReconnectAttempts; i++)
+        {
+            await reader.OnReconnectAttemptAsync();
+        }
+
+        // Assert
+        errorCount.Should().Be(1, "フェーズ遷移時に1回だけErrorイベントが発火するべき");
+    }
+
+    /// <summary>
+    /// Issue #1168: 低頻度リトライフェーズ中の追加呼び出しでErrorイベントが重複発火しないこと
+    /// </summary>
+    [Fact]
+    [Trait("Category", "Unit")]
+    public async Task OnReconnectAttempt_InSlowRetryPhase_DoesNotRefireError()
+    {
+        // Arrange
+        _providerMock.Setup(p => p.GetReaders()).Returns((string[]?)null!);
+        var reader = CreateReader();
+        var errorCount = 0;
+        reader.Error += (s, e) => errorCount++;
+
+        // Act: フェーズ遷移を発生させる
+        await reader.ReconnectAsync();
+        for (int i = 0; i <= PcScCardReader.MaxReconnectAttempts; i++)
+        {
+            await reader.OnReconnectAttemptAsync();
+        }
+
+        // 低頻度フェーズに入った後、さらに呼び出してもErrorは発火しない
+        for (int i = 0; i < 5; i++)
+        {
+            await reader.OnReconnectAttemptAsync();
+        }
+
+        // Assert
+        errorCount.Should().Be(1, "低頻度フェーズ中の追加リトライではErrorイベントは発火しないべき");
+        reader.IsInSlowRetryPhase.Should().BeTrue();
+        reader.IsReconnectTimerRunning.Should().BeTrue();
+    }
+
+    /// <summary>
+    /// Issue #1168: 低頻度フェーズ中にリーダーが復活したら自動回復し、フェーズフラグがリセットされること
+    /// </summary>
+    [Fact]
+    [Trait("Category", "Unit")]
+    public async Task OnReconnectAttempt_InSlowRetryPhase_RecoversWhenReaderReturns()
+    {
+        // Arrange
+        _providerMock.Setup(p => p.GetReaders()).Returns((string[]?)null!);
+        var reader = CreateReader();
+
+        // 低頻度フェーズに入れる
+        await reader.ReconnectAsync();
+        for (int i = 0; i <= PcScCardReader.MaxReconnectAttempts; i++)
+        {
+            await reader.OnReconnectAttemptAsync();
+        }
+        reader.IsInSlowRetryPhase.Should().BeTrue();
+
+        // Act: リーダーが復活
+        _providerMock.Setup(p => p.GetReaders()).Returns(new[] { "Test Reader" });
+        await reader.OnReconnectAttemptAsync();
+
+        // Assert: 接続復帰、フェーズリセット
+        reader.ConnectionState.Should().Be(CardReaderConnectionState.Connected, "接続が復帰するべき");
+        reader.IsInSlowRetryPhase.Should().BeFalse("成功時にフェーズフラグがリセットされるべき");
+    }
+
+    #endregion
+
     #region イベント発火テスト
 
     /// <summary>
