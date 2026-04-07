@@ -597,6 +597,19 @@ public class BusStopInputItemTests
     }
 
     [Fact]
+    public void Constructor_星マークのみのBusStopsは空文字として初期化されること()
+    {
+        // Issue #1205: ユーザーが★を削除する手間を省くため、★のみは空欄として扱う
+        var detail = new LedgerDetail { IsBus = true, BusStops = "★" };
+
+        var item = new BusStopInputItem(detail);
+
+        item.BusStops.Should().BeEmpty();
+        // Detail 側の永続値は変えない（保存時の空欄→★変換で元に戻る）
+        detail.BusStops.Should().Be("★");
+    }
+
+    [Fact]
     public void Constructor_nullのBusStopsが空文字になること()
     {
         // Arrange

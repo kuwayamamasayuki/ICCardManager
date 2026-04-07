@@ -456,7 +456,12 @@ public partial class BusStopInputItem : ObservableObject
     public BusStopInputItem(LedgerDetail detail)
     {
         Detail = detail;
-        _busStops = detail.BusStops ?? string.Empty;
+        // Issue #1205: 既存値が "★"（未入力プレースホルダー）のみの場合は、
+        // ユーザーがわざわざ★を削除しなくても入力できるよう空欄として初期化する。
+        // backing field への直接代入のため Detail.BusStops には書き戻さず、
+        // 保存時の「空欄→★」変換ロジック（SaveAsync）で元の★状態が維持される。
+        var initial = detail.BusStops ?? string.Empty;
+        _busStops = initial == "★" ? string.Empty : initial;
     }
 
     /// <summary>
