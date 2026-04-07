@@ -246,7 +246,10 @@ namespace ICCardManager.Services
         /// <summary>
         /// ヘッダー部分の合計高さを取得（タイトル + カード情報 + 列ヘッダー + テーブル罫線）
         /// </summary>
-        private double GetHeaderTotalHeight()
+        /// <remarks>
+        /// 純粋関数（インスタンス状態に依存しない）。テスト容易性のため internal static として公開。
+        /// </remarks>
+        internal static double GetHeaderTotalHeight()
         {
             return TitleHeight + CardInfoTableHeight + ColumnHeaderHeight + TableBorderHeight;
         }
@@ -254,7 +257,11 @@ namespace ICCardManager.Services
         /// <summary>
         /// データ行の高さを取得（摘要欄の文字数に基づく）
         /// </summary>
-        private double GetDataRowHeight(ReportRow row, bool isLandscape)
+        /// <remarks>
+        /// 純粋関数。摘要が空または1行に収まる場合は <see cref="DataRowHeight"/>、
+        /// 折り返す場合は <see cref="DataRowHeightDouble"/> を返す。
+        /// </remarks>
+        internal static double GetDataRowHeight(ReportRow row, bool isLandscape)
         {
             if (string.IsNullOrEmpty(row.Summary))
                 return DataRowHeight;
@@ -266,7 +273,8 @@ namespace ICCardManager.Services
         /// <summary>
         /// データ領域の利用可能な高さを計算
         /// </summary>
-        private double GetAvailableDataHeight(double pageHeight)
+        /// <remarks>純粋関数。</remarks>
+        internal static double GetAvailableDataHeight(double pageHeight)
         {
             // ページ高さ - 上下余白 - ヘッダー部分
             return pageHeight - (PagePaddingSize * 2) - GetHeaderTotalHeight();
@@ -275,7 +283,11 @@ namespace ICCardManager.Services
         /// <summary>
         /// 行をページごとにグループ化（高さを積み上げて改ページ位置を決定）
         /// </summary>
-        private List<List<ReportRow>> GroupRowsByPage(
+        /// <remarks>
+        /// 純粋関数。ページ寸法・行データ・合計行数を入力として、改ページ位置を確定する。
+        /// インスタンス状態に依存しない。
+        /// </remarks>
+        internal static List<List<ReportRow>> GroupRowsByPage(
             List<ReportRow> rows,
             double pageWidth,
             double pageHeight,
