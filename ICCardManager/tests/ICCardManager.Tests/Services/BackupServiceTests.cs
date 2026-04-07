@@ -520,7 +520,10 @@ public class BackupServiceTests : IDisposable
         // 本番環境のシミュレーション: DbContextを作成し、接続を開いたまま保持
         var restoreDbContext = new DbContext(restoreTargetPath);
         restoreDbContext.InitializeDatabase(); // これにより接続が開かれる
-        var connection = restoreDbContext.GetConnection(); // 接続を取得して開いた状態を確認
+        using (var lease = restoreDbContext.LeaseConnection())
+        {
+            var connection = lease.Connection; // 接続を取得して開いた状態を確認
+        }
 
         var restoreService = new BackupService(
             restoreDbContext,
@@ -535,9 +538,9 @@ public class BackupServiceTests : IDisposable
         File.Exists(restoreTargetPath).Should().BeTrue();
         new FileInfo(restoreTargetPath).Length.Should().Be(backupSize);
 
-        // 接続を再度取得できることを確認（GetConnectionで自動再接続される）
-        var newConnection = restoreDbContext.GetConnection();
-        newConnection.State.Should().Be(System.Data.ConnectionState.Open);
+        // 接続を再度取得できることを確認（LeaseConnectionで自動再接続される）
+        using var newLease = restoreDbContext.LeaseConnection();
+        newLease.Connection.State.Should().Be(System.Data.ConnectionState.Open);
 
         restoreDbContext.Dispose();
     }

@@ -23,7 +23,8 @@ namespace ICCardManager.Data.Repositories
         /// <inheritdoc/>
         public async Task<IEnumerable<Ledger>> GetByDateRangeAsync(string cardIdm, DateTime fromDate, DateTime toDate)
         {
-            var connection = _dbContext.GetConnection();
+            using var lease = await _dbContext.LeaseConnectionAsync();
+            var connection = lease.Connection;
             var ledgerList = new List<Ledger>();
 
             using var command = connection.CreateCommand();
@@ -72,7 +73,8 @@ ORDER BY DATE(date) ASC,
         /// <inheritdoc/>
         public async Task<Ledger> GetByIdAsync(int id)
         {
-            var connection = _dbContext.GetConnection();
+            using var lease = await _dbContext.LeaseConnectionAsync();
+            var connection = lease.Connection;
 
             using var command = connection.CreateCommand();
             command.CommandText = @"SELECT id, card_idm, lender_idm, date, summary, income, expense, balance,
@@ -96,7 +98,8 @@ WHERE id = @id";
         /// <inheritdoc/>
         public async Task<Ledger> GetLentRecordAsync(string cardIdm)
         {
-            var connection = _dbContext.GetConnection();
+            using var lease = await _dbContext.LeaseConnectionAsync();
+            var connection = lease.Connection;
 
             using var command = connection.CreateCommand();
             command.CommandText = @"SELECT id, card_idm, lender_idm, date, summary, income, expense, balance,
@@ -122,7 +125,8 @@ LIMIT 1";
         /// <inheritdoc/>
         public async Task<List<Ledger>> GetAllLentRecordsAsync()
         {
-            var connection = _dbContext.GetConnection();
+            using var lease = await _dbContext.LeaseConnectionAsync();
+            var connection = lease.Connection;
             var result = new List<Ledger>();
 
             using var command = connection.CreateCommand();
@@ -144,7 +148,8 @@ ORDER BY lent_at DESC";
         /// <inheritdoc/>
         public async Task<int> InsertAsync(Ledger ledger)
         {
-            var connection = _dbContext.GetConnection();
+            using var lease = await _dbContext.LeaseConnectionAsync();
+            var connection = lease.Connection;
 
             using var command = connection.CreateCommand();
             command.CommandText = @"INSERT INTO ledger (card_idm, lender_idm, date, summary, income, expense, balance,
@@ -174,7 +179,8 @@ SELECT last_insert_rowid();";
         /// <inheritdoc/>
         public async Task<bool> UpdateAsync(Ledger ledger)
         {
-            var connection = _dbContext.GetConnection();
+            using var lease = await _dbContext.LeaseConnectionAsync();
+            var connection = lease.Connection;
 
             using var command = connection.CreateCommand();
             command.CommandText = @"UPDATE ledger
@@ -205,7 +211,8 @@ WHERE id = @id";
         /// <inheritdoc/>
         public async Task<bool> DeleteAsync(int id)
         {
-            var connection = _dbContext.GetConnection();
+            using var lease = await _dbContext.LeaseConnectionAsync();
+            var connection = lease.Connection;
 
             // 詳細レコードを先に削除
             using var deleteDetailCommand = connection.CreateCommand();
@@ -225,7 +232,8 @@ WHERE id = @id";
         /// <inheritdoc/>
         public async Task<int> DeleteAllLentRecordsAsync(string cardIdm)
         {
-            var connection = _dbContext.GetConnection();
+            using var lease = await _dbContext.LeaseConnectionAsync();
+            var connection = lease.Connection;
 
             // 貸出中レコードに紐づく詳細レコードを先に削除
             using var deleteDetailCommand = connection.CreateCommand();
@@ -245,7 +253,8 @@ WHERE ledger_id IN (SELECT id FROM ledger WHERE card_idm = @cardIdm AND is_lent_
         /// <inheritdoc/>
         public async Task<bool> InsertDetailAsync(LedgerDetail detail)
         {
-            var connection = _dbContext.GetConnection();
+            using var lease = await _dbContext.LeaseConnectionAsync();
+            var connection = lease.Connection;
 
             using var command = connection.CreateCommand();
             command.CommandText = @"INSERT INTO ledger_detail (ledger_id, use_date, entry_station, exit_station,
@@ -286,7 +295,8 @@ VALUES (@ledgerId, @useDate, @entryStation, @exitStation,
         /// <inheritdoc/>
         public async Task<Ledger> GetLatestBeforeDateAsync(string cardIdm, DateTime beforeDate)
         {
-            var connection = _dbContext.GetConnection();
+            using var lease = await _dbContext.LeaseConnectionAsync();
+            var connection = lease.Connection;
 
             using var command = connection.CreateCommand();
             command.CommandText = @"SELECT id, card_idm, lender_idm, date, summary, income, expense, balance,
@@ -321,7 +331,8 @@ LIMIT 1";
         /// <inheritdoc/>
         public async Task<Ledger> GetLatestLedgerAsync(string cardIdm)
         {
-            var connection = _dbContext.GetConnection();
+            using var lease = await _dbContext.LeaseConnectionAsync();
+            var connection = lease.Connection;
 
             using var command = connection.CreateCommand();
             command.CommandText = @"SELECT id, card_idm, lender_idm, date, summary, income, expense, balance,
@@ -345,7 +356,8 @@ LIMIT 1";
         /// <inheritdoc/>
         public async Task<Dictionary<string, (int Balance, DateTime? LastUsageDate)>> GetAllLatestBalancesAsync()
         {
-            var connection = _dbContext.GetConnection();
+            using var lease = await _dbContext.LeaseConnectionAsync();
+            var connection = lease.Connection;
             var result = new Dictionary<string, (int Balance, DateTime? LastUsageDate)>();
 
             using var command = connection.CreateCommand();
@@ -375,7 +387,8 @@ WHERE l.id = (
         /// <inheritdoc/>
         public async Task<IEnumerable<(string BusStops, int UsageCount, DateTime? LastUsedDate)>> GetBusStopSuggestionsAsync()
         {
-            var connection = _dbContext.GetConnection();
+            using var lease = await _dbContext.LeaseConnectionAsync();
+            var connection = lease.Connection;
             var result = new List<(string BusStops, int UsageCount, DateTime? LastUsedDate)>();
 
             using var command = connection.CreateCommand();
@@ -419,7 +432,8 @@ LIMIT 100";
         /// <inheritdoc/>
         public async Task UpdateDetailBusStopsAsync(int ledgerId, IEnumerable<(int SequenceNumber, string BusStops)> updates)
         {
-            var connection = _dbContext.GetConnection();
+            using var lease = await _dbContext.LeaseConnectionAsync();
+            var connection = lease.Connection;
 
             foreach (var (sequenceNumber, busStops) in updates)
             {
@@ -443,7 +457,8 @@ WHERE ledger_id = @ledgerId AND rowid = @rowid";
             int page,
             int pageSize)
         {
-            var connection = _dbContext.GetConnection();
+            using var lease = await _dbContext.LeaseConnectionAsync();
+            var connection = lease.Connection;
 
             var whereClause = cardIdm != null
                 ? "WHERE card_idm = @cardIdm AND date BETWEEN @fromDate AND @toDate"
@@ -512,7 +527,8 @@ LIMIT @pageSize OFFSET @offset";
         /// </remarks>
         private async Task<IEnumerable<LedgerDetail>> GetDetailsAsync(int ledgerId)
         {
-            var connection = _dbContext.GetConnection();
+            using var lease = await _dbContext.LeaseConnectionAsync();
+            var connection = lease.Connection;
             var details = new List<LedgerDetail>();
 
             using var command = connection.CreateCommand();
@@ -545,7 +561,8 @@ ORDER BY use_date ASC, is_charge DESC, is_point_redemption DESC, rowid DESC";
             var idList = ledgerIds.ToList();
             if (idList.Count == 0) return result;
 
-            var connection = _dbContext.GetConnection();
+            using var lease = await _dbContext.LeaseConnectionAsync();
+            var connection = lease.Connection;
 
             using var command = connection.CreateCommand();
             // パラメータプレースホルダーを動的生成
@@ -659,7 +676,8 @@ ORDER BY ledger_id, use_date ASC, is_charge DESC, is_point_redemption DESC, rowi
         public async Task<HashSet<(DateTime? UseDate, int? Balance, bool IsCharge)>> GetExistingDetailKeysAsync(
             string cardIdm, DateTime fromDate)
         {
-            var connection = _dbContext.GetConnection();
+            using var lease = await _dbContext.LeaseConnectionAsync();
+            var connection = lease.Connection;
             var result = new HashSet<(DateTime? UseDate, int? Balance, bool IsCharge)>();
 
             using var command = connection.CreateCommand();
@@ -697,7 +715,8 @@ WHERE l.card_idm = @cardIdm AND l.date >= @fromDate";
                 return result;
             }
 
-            var connection = _dbContext.GetConnection();
+            using var lease = await _dbContext.LeaseConnectionAsync();
+            var connection = lease.Connection;
 
             using var command = connection.CreateCommand();
 
@@ -733,7 +752,8 @@ WHERE card_idm IN ({string.Join(", ", parameters)})";
         /// <inheritdoc/>
         public async Task<bool> ReplaceDetailsAsync(int ledgerId, IEnumerable<LedgerDetail> details)
         {
-            var connection = _dbContext.GetConnection();
+            using var lease = await _dbContext.LeaseConnectionAsync();
+            var connection = lease.Connection;
 
             // 既存の詳細をすべて削除
             using var deleteCommand = connection.CreateCommand();
@@ -748,10 +768,11 @@ WHERE card_idm IN ({string.Join(", ", parameters)})";
         /// <inheritdoc/>
         public async Task<bool> MergeLedgersAsync(int targetLedgerId, IEnumerable<int> sourceLedgerIds, Ledger updatedTarget)
         {
-            var connection = _dbContext.GetConnection();
             var sourceIds = sourceLedgerIds.ToList();
 
-            using var transaction = _dbContext.BeginTransaction();
+            using var scope = await _dbContext.BeginTransactionAsync();
+            var connection = scope.Lease.Connection;
+            var transaction = scope.Transaction;
             try
             {
                 // 1. ソースの詳細をターゲットに移動（UPDATEでrowid保持）
@@ -787,12 +808,12 @@ WHERE id = @id";
                     await deleteCommand.ExecuteNonQueryAsync();
                 }
 
-                transaction.Commit();
+                scope.Commit();
                 return true;
             }
             catch
             {
-                transaction.Rollback();
+                scope.Rollback();
                 throw;
             }
         }
@@ -800,9 +821,9 @@ WHERE id = @id";
         /// <inheritdoc/>
         public async Task<bool> UnmergeLedgersAsync(Services.LedgerMergeUndoData undoData)
         {
-            var connection = _dbContext.GetConnection();
-
-            using var transaction = _dbContext.BeginTransaction();
+            using var scope = await _dbContext.BeginTransactionAsync();
+            var connection = scope.Lease.Connection;
+            var transaction = scope.Transaction;
             try
             {
                 // 1. ソースLedgerを再作成し、新IDを取得
@@ -870,12 +891,12 @@ WHERE id = @id";
                 updateCommand.Parameters.AddWithValue("@id", original.Id);
                 await updateCommand.ExecuteNonQueryAsync();
 
-                transaction.Commit();
+                scope.Commit();
                 return true;
             }
             catch
             {
-                transaction.Rollback();
+                scope.Rollback();
                 throw;
             }
         }
@@ -883,7 +904,8 @@ WHERE id = @id";
         /// <inheritdoc/>
         public async Task SaveMergeHistoryAsync(int targetLedgerId, string description, string undoDataJson)
         {
-            var connection = _dbContext.GetConnection();
+            using var lease = await _dbContext.LeaseConnectionAsync();
+            var connection = lease.Connection;
 
             using var command = connection.CreateCommand();
             // Issue #1014: CURRENT_TIMESTAMPはUTCのため、ローカル時刻を明示的に保存する
@@ -900,7 +922,8 @@ VALUES (@mergedAt, @targetLedgerId, @description, @undoData)";
         /// <inheritdoc/>
         public async Task<List<(int Id, DateTime MergedAt, int TargetLedgerId, string Description, string UndoDataJson, bool IsUndone)>> GetMergeHistoriesAsync(bool undoneOnly)
         {
-            var connection = _dbContext.GetConnection();
+            using var lease = await _dbContext.LeaseConnectionAsync();
+            var connection = lease.Connection;
             var result = new List<(int, DateTime, int, string, string, bool)>();
 
             using var command = connection.CreateCommand();
@@ -927,7 +950,8 @@ VALUES (@mergedAt, @targetLedgerId, @description, @undoData)";
         /// <inheritdoc/>
         public async Task MarkMergeHistoryUndoneAsync(int historyId)
         {
-            var connection = _dbContext.GetConnection();
+            using var lease = await _dbContext.LeaseConnectionAsync();
+            var connection = lease.Connection;
 
             using var command = connection.CreateCommand();
             command.CommandText = "UPDATE ledger_merge_history SET is_undone = 1 WHERE id = @id";
@@ -939,7 +963,8 @@ VALUES (@mergedAt, @targetLedgerId, @description, @undoData)";
         /// <inheritdoc/>
         public async Task<List<LedgerDetail>> GetAllDetailsInDateRangeAsync(DateTime fromDate, DateTime toDate)
         {
-            var connection = _dbContext.GetConnection();
+            using var lease = await _dbContext.LeaseConnectionAsync();
+            var connection = lease.Connection;
             var details = new List<LedgerDetail>();
 
             using var command = connection.CreateCommand();
@@ -965,7 +990,8 @@ ORDER BY l.card_idm, l.date, l.id, d.rowid";
         /// <inheritdoc/>
         public async Task<DateTime?> GetPurchaseDateAsync(string cardIdm)
         {
-            var connection = _dbContext.GetConnection();
+            using var lease = await _dbContext.LeaseConnectionAsync();
+            var connection = lease.Connection;
 
             using var command = connection.CreateCommand();
             // Issue #501: 新規購入レコードの最初の日付を取得

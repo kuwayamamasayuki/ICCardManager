@@ -23,6 +23,7 @@ namespace ICCardManager.Tests.Services;
 public class DebugDataServiceTests : IDisposable
 {
     private readonly SQLiteConnection _connection;
+    private readonly DbContext _realDbContext;
     private readonly Mock<DbContext> _dbContextMock;
     private readonly Mock<IStaffRepository> _staffRepoMock;
     private readonly Mock<ICardRepository> _cardRepoMock;
@@ -42,11 +43,9 @@ public class DebugDataServiceTests : IDisposable
         _cardRepoMock = new Mock<ICardRepository>();
         _ledgerRepoMock = new Mock<ILedgerRepository>();
 
-        // トランザクションとコネクションのモック
+        // CleanExistingTestDataAsyncのDELETE文が実行できるよう最低限のテーブルを作成
         _connection = new SQLiteConnection("Data Source=:memory:");
         _connection.Open();
-
-        // CleanExistingTestDataAsyncのDELETE文が実行できるよう最低限のテーブルを作成
         using (var cmd = _connection.CreateCommand())
         {
             cmd.CommandText = @"
@@ -57,9 +56,30 @@ public class DebugDataServiceTests : IDisposable
             cmd.ExecuteNonQuery();
         }
 
-        var transaction = _connection.BeginTransaction();
-        _dbContextMock.Setup(x => x.BeginTransaction()).Returns(transaction);
-        _dbContextMock.Setup(x => x.GetConnection()).Returns(_connection);
+        // 実際のDbContext（インメモリ）を使ってテーブル作成
+        _realDbContext = new DbContext(":memory:");
+        using (var realLease = _realDbContext.LeaseConnection())
+        {
+            using var cmd = realLease.Connection.CreateCommand();
+            cmd.CommandText = @"
+                CREATE TABLE IF NOT EXISTS staff (staff_idm TEXT PRIMARY KEY);
+                CREATE TABLE IF NOT EXISTS ic_card (card_idm TEXT PRIMARY KEY);
+                CREATE TABLE IF NOT EXISTS ledger (id INTEGER PRIMARY KEY, card_idm TEXT);
+                CREATE TABLE IF NOT EXISTS ledger_detail (ledger_id INTEGER);";
+            cmd.ExecuteNonQuery();
+        }
+
+        // セマフォを保持しないConnectionLease/TransactionScopeを使用
+        // （テスト内でLeaseConnectionAsyncが呼ばれてもデッドロックしないように）
+        var noOpLease = new ConnectionLease(_connection, () => { });
+        var noOpTransaction = _connection.BeginTransaction();
+        var transactionScope = new ICCardManager.Data.TransactionScope(noOpLease, noOpTransaction);
+        _dbContextMock.Setup(x => x.BeginTransactionAsync(It.IsAny<System.Threading.CancellationToken>()))
+            .ReturnsAsync(transactionScope);
+
+        // LeaseConnectionAsyncもセマフォを保持しないリースを返す
+        _dbContextMock.Setup(x => x.LeaseConnectionAsync(It.IsAny<System.Threading.CancellationToken>()))
+            .ReturnsAsync(new ConnectionLease(_connection, () => { }));
 
         // 職員・カード挿入は常に成功
         _staffRepoMock.Setup(r => r.InsertAsync(It.IsAny<Staff>()))
@@ -318,6 +338,7 @@ public class DebugDataServiceTests : IDisposable
     public void Dispose()
     {
         _connection?.Dispose();
+        _realDbContext?.Dispose();
     }
 }
 #endif

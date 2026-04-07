@@ -82,7 +82,7 @@ namespace ICCardManager.Services
         /// </remarks>
         public async Task RegisterAllTestDataAsync()
         {
-            using var transaction = _dbContext.BeginTransaction();
+            using var scope = await _dbContext.BeginTransactionAsync();
             try
             {
                 await CleanExistingTestDataAsync();
@@ -90,11 +90,11 @@ namespace ICCardManager.Services
                 await RegisterTestCardsAsync();
                 var (finalBalances, fiscalYearBoundaryBalances) = await RegisterSampleHistoryAsync();
                 await RegisterSpecialScenariosAsync(finalBalances, fiscalYearBoundaryBalances);
-                transaction.Commit();
+                scope.Commit();
             }
             catch
             {
-                transaction.Rollback();
+                scope.Rollback();
                 throw;
             }
         }
@@ -109,7 +109,8 @@ namespace ICCardManager.Services
         /// </remarks>
         internal async Task CleanExistingTestDataAsync()
         {
-            var connection = _dbContext.GetConnection();
+            using var lease = await _dbContext.LeaseConnectionAsync();
+            var connection = lease.Connection;
 
             var testCardIdms = string.Join(",", TestCardList.Select(c => $"'{c.CardIdm}'"));
             var testStaffIdms = string.Join(",", TestStaffList.Select(s => $"'{s.StaffIdm}'"));

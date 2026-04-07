@@ -75,7 +75,8 @@ public class DbContextResilienceTests : IDisposable
     {
         var dbPath = Path.Combine(_testDirectory, "pragma_shared.db");
         using var dbContext = new DbContext(dbPath);
-        var connection = dbContext.GetConnection();
+        using var lease = dbContext.LeaseConnection();
+        var connection = lease.Connection;
 
         using var command = connection.CreateCommand();
         command.CommandText = "PRAGMA busy_timeout;";
@@ -164,7 +165,8 @@ public class DbContextResilienceTests : IDisposable
     {
         var dbPath = Path.Combine(_testDirectory, "jm_test.db");
         using var dbContext = new DbContext(dbPath);
-        var connection = dbContext.GetConnection();
+        using var lease = dbContext.LeaseConnection();
+        var connection = lease.Connection;
 
         // ConfigurePragmasで既に設定されているので、現在の値を確認
         using var cmd = connection.CreateCommand();
@@ -184,7 +186,8 @@ public class DbContextResilienceTests : IDisposable
     {
         var dbPath = Path.Combine(_testDirectory, "jm_result.db");
         using var dbContext = new DbContext(dbPath);
-        var connection = dbContext.GetConnection();
+        using var lease = dbContext.LeaseConnection();
+        var connection = lease.Connection;
 
         // 再度呼び出して結果を確認
         var result = dbContext.ConfigureJournalMode(connection);
@@ -204,7 +207,8 @@ public class DbContextResilienceTests : IDisposable
         connection.Open();
 
         using var dbContext = new DbContext(":memory:");
-        var result = dbContext.ConfigureJournalMode(dbContext.GetConnection());
+        using var lease = dbContext.LeaseConnection();
+        var result = dbContext.ConfigureJournalMode(lease.Connection);
 
         // インメモリDBでは journal_mode = memory が返る
         result.Should().Be("memory");

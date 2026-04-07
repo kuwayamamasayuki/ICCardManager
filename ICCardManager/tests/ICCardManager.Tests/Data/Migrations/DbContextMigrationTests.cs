@@ -49,7 +49,8 @@ public class DbContextMigrationTests : IDisposable
         _dbContext.InitializeDatabase();
 
         // Assert
-        var connection = _dbContext.GetConnection();
+        using var lease = _dbContext.LeaseConnection();
+        var connection = lease.Connection;
         TableShouldExist(connection, "staff");
         TableShouldExist(connection, "ic_card");
         TableShouldExist(connection, "ledger");
@@ -65,13 +66,15 @@ public class DbContextMigrationTests : IDisposable
     {
         // Arrange - 既存DBをシミュレート（schema_migrationsなしでstaffテーブルあり）
         _dbContext = new DbContext(":memory:");
-        var connection = _dbContext.GetConnection();
 
         // 既存DBの状態を作成（マイグレーション前の形式）
         // Note: レガシーDBでも ledger_detail と operation_log は存在していた
-        using (var cmd = connection.CreateCommand())
+        using (var setupLease = _dbContext.LeaseConnection())
         {
-            cmd.CommandText = @"CREATE TABLE staff (
+            var connection = setupLease.Connection;
+            using (var cmd = connection.CreateCommand())
+            {
+                cmd.CommandText = @"CREATE TABLE staff (
     staff_idm TEXT PRIMARY KEY,
     name TEXT NOT NULL
 );
@@ -113,19 +116,22 @@ CREATE TABLE settings (
     key TEXT PRIMARY KEY,
     value TEXT
 );";
-            cmd.ExecuteNonQuery();
+                cmd.ExecuteNonQuery();
+            }
         }
 
         // Act
         _dbContext.InitializeDatabase();
 
         // Assert
+        using var lease = _dbContext.LeaseConnection();
+        var conn = lease.Connection;
         // レガシーDBはバージョン1として認識され、その後Migration_002〜008も適用されるので最終バージョンは8
         _dbContext.GetDatabaseVersion().Should().Be(8);
-        TableShouldExist(connection, "schema_migrations");
+        TableShouldExist(conn, "schema_migrations");
 
         // バージョン1（既存DB認識）の記録が存在することを確認
-        using var checkCmd = connection.CreateCommand();
+        using var checkCmd = conn.CreateCommand();
         checkCmd.CommandText = "SELECT description FROM schema_migrations WHERE version = 1";
         var description = checkCmd.ExecuteScalar()?.ToString();
         description.Should().Contain("既存DB");
@@ -143,7 +149,8 @@ CREATE TABLE settings (
         _dbContext.InitializeDatabase(); // 2回目
 
         // Assert
-        var connection = _dbContext.GetConnection();
+        using var lease = _dbContext.LeaseConnection();
+        var connection = lease.Connection;
         using var cmd = connection.CreateCommand();
         cmd.CommandText = "SELECT COUNT(*) FROM schema_migrations";
         var count = Convert.ToInt32(cmd.ExecuteScalar());
@@ -192,7 +199,8 @@ CREATE TABLE settings (
         _dbContext.InitializeDatabase();
 
         // Assert
-        var connection = _dbContext.GetConnection();
+        using var lease = _dbContext.LeaseConnection();
+        var connection = lease.Connection;
         GetSettingValue(connection, "warning_balance").Should().Be("10000");
         GetSettingValue(connection, "font_size").Should().Be("medium");
     }

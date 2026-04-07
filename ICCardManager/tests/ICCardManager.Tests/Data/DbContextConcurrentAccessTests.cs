@@ -53,7 +53,8 @@ public class DbContextConcurrentAccessTests : IDisposable
         // Arrange: 1つ目のDbContextでDB初期化＋テーブル作成
         using var dbContext1 = new DbContext(_dbPath);
         dbContext1.InitializeDatabase();
-        var conn1 = dbContext1.GetConnection();
+        using var lease1 = dbContext1.LeaseConnection();
+        var conn1 = lease1.Connection;
         using var createCmd = conn1.CreateCommand();
         createCmd.CommandText = @"CREATE TABLE IF NOT EXISTS test_lending (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -69,7 +70,7 @@ public class DbContextConcurrentAccessTests : IDisposable
         // Act: 2つのDbContextから同時にINSERT
         var task1 = dbContext1.ExecuteWithRetryAsync(async () =>
         {
-            using var tx = dbContext1.BeginTransaction();
+            using var tx = conn1.BeginTransaction();
             using var cmd = conn1.CreateCommand();
             cmd.Transaction = tx;
             cmd.CommandText = "INSERT INTO test_lending (card_idm, staff_idm, lent_at) VALUES ('CARD_A', 'STAFF_1', datetime('now'))";
@@ -80,8 +81,9 @@ public class DbContextConcurrentAccessTests : IDisposable
 
         var task2 = dbContext2.ExecuteWithRetryAsync(async () =>
         {
-            var conn2 = dbContext2.GetConnection();
-            using var tx = dbContext2.BeginTransaction();
+            using var lease2 = dbContext2.LeaseConnection();
+            var conn2 = lease2.Connection;
+            using var tx = conn2.BeginTransaction();
             using var cmd = conn2.CreateCommand();
             cmd.Transaction = tx;
             cmd.CommandText = "INSERT INTO test_lending (card_idm, staff_idm, lent_at) VALUES ('CARD_B', 'STAFF_2', datetime('now'))";
@@ -117,7 +119,8 @@ public class DbContextConcurrentAccessTests : IDisposable
         // Arrange
         using var dbContext = new DbContext(_dbPath);
         dbContext.InitializeDatabase();
-        var conn = dbContext.GetConnection();
+        using var lease = dbContext.LeaseConnection();
+        var conn = lease.Connection;
         using var createCmd = conn.CreateCommand();
         createCmd.CommandText = "CREATE TABLE IF NOT EXISTS test_concurrent (id INTEGER PRIMARY KEY AUTOINCREMENT, value TEXT)";
         createCmd.ExecuteNonQuery();
@@ -132,8 +135,9 @@ public class DbContextConcurrentAccessTests : IDisposable
                 using var ctx = new DbContext(_dbPath);
                 await ctx.ExecuteWithRetryAsync(async () =>
                 {
-                    var c = ctx.GetConnection();
-                    using var tx = ctx.BeginTransaction();
+                    using var ctxLease = ctx.LeaseConnection();
+                    var c = ctxLease.Connection;
+                    using var tx = c.BeginTransaction();
                     using var cmd = c.CreateCommand();
                     cmd.Transaction = tx;
                     cmd.CommandText = $"INSERT INTO test_concurrent (value) VALUES ('thread_{i}')";
@@ -163,7 +167,8 @@ public class DbContextConcurrentAccessTests : IDisposable
         // Arrange
         using var dbContext = new DbContext(_dbPath);
         dbContext.InitializeDatabase();
-        var conn = dbContext.GetConnection();
+        using var lease = dbContext.LeaseConnection();
+        var conn = lease.Connection;
         using var createCmd = conn.CreateCommand();
         createCmd.CommandText = "CREATE TABLE IF NOT EXISTS test_update (id INTEGER PRIMARY KEY, counter INTEGER)";
         createCmd.ExecuteNonQuery();
@@ -181,8 +186,9 @@ public class DbContextConcurrentAccessTests : IDisposable
                 using var ctx = new DbContext(_dbPath);
                 await ctx.ExecuteWithRetryAsync(async () =>
                 {
-                    var c = ctx.GetConnection();
-                    using var tx = ctx.BeginTransaction();
+                    using var ctxLease = ctx.LeaseConnection();
+                    var c = ctxLease.Connection;
+                    using var tx = c.BeginTransaction();
                     using var cmd = c.CreateCommand();
                     cmd.Transaction = tx;
                     cmd.CommandText = "UPDATE test_update SET counter = counter + 1 WHERE id = 1";
@@ -216,7 +222,8 @@ public class DbContextConcurrentAccessTests : IDisposable
         // Arrange
         using var dbContext = new DbContext(_dbPath);
         dbContext.InitializeDatabase();
-        var conn = dbContext.GetConnection();
+        using var lease = dbContext.LeaseConnection();
+        var conn = lease.Connection;
         using var createCmd = conn.CreateCommand();
         createCmd.CommandText = "CREATE TABLE IF NOT EXISTS test_retry (id INTEGER PRIMARY KEY, value TEXT)";
         createCmd.ExecuteNonQuery();
@@ -352,14 +359,17 @@ public class DbContextConcurrentAccessTests : IDisposable
         dbContext.InitializeDatabase();
 
         // 正常な接続を確認
-        var conn1 = dbContext.GetConnection();
-        conn1.State.Should().Be(ConnectionState.Open);
+        using (var lease1 = dbContext.LeaseConnection())
+        {
+            lease1.Connection.State.Should().Be(ConnectionState.Open);
+        }
 
         // ネットワーク切断をシミュレーション（接続を閉じる）
         dbContext.CloseConnection();
 
         // 再接続
-        var conn2 = dbContext.GetConnection();
+        using var lease2 = dbContext.LeaseConnection();
+        var conn2 = lease2.Connection;
         conn2.State.Should().Be(ConnectionState.Open);
 
         // 再接続後にクエリが実行できること

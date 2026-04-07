@@ -34,6 +34,7 @@ public class DataExportImportViewModelTests : IDisposable
     private readonly Mock<CsvImportService> _importServiceMock;
     private readonly Mock<CsvExportService> _exportServiceMock;
     private readonly SQLiteConnection _connection;
+    private readonly DbContext _realDbContext;
     private readonly DataExportImportViewModel _viewModel;
 
     public DataExportImportViewModelTests()
@@ -47,10 +48,15 @@ public class DataExportImportViewModelTests : IDisposable
         _dialogServiceMock = new Mock<IDialogService>();
 
         // SQLiteインメモリ接続（DbContextモックのトランザクション用）
+        // セマフォを保持しないConnectionLease/TransactionScopeを使用
         _connection = new SQLiteConnection("Data Source=:memory:");
         _connection.Open();
-        var transaction = _connection.BeginTransaction();
-        _dbContextMock.Setup(x => x.BeginTransaction()).Returns(transaction);
+        _realDbContext = new DbContext(":memory:");
+        var noOpLease = new ConnectionLease(_connection, () => { });
+        var noOpTransaction = _connection.BeginTransaction();
+        var transactionScope = new ICCardManager.Data.TransactionScope(noOpLease, noOpTransaction);
+        _dbContextMock.Setup(x => x.BeginTransactionAsync(It.IsAny<System.Threading.CancellationToken>()))
+            .ReturnsAsync(transactionScope);
 
         // CsvExportService（コンストラクタで必要だが、テスト対象ではない）
         _exportServiceMock = new Mock<CsvExportService>(
@@ -77,6 +83,7 @@ public class DataExportImportViewModelTests : IDisposable
     public void Dispose()
     {
         _connection?.Dispose();
+        _realDbContext?.Dispose();
     }
 
     /// <summary>
