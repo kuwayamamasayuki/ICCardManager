@@ -543,4 +543,174 @@ public class CardLockManagerTests : IDisposable
     }
 
     #endregion
+
+    #region Issue #1171: TOCTOU競合テスト
+
+    /// <summary>
+    /// Issue #1171: クリーンアップ直後にGetLockを呼んでもObjectDisposedExceptionが発生しないこと
+    /// </summary>
+    [Fact]
+    public async Task GetLock_AfterCleanup_DoesNotThrowObjectDisposedException()
+    {
+        // Arrange: 非常に短い有効期限でクリーンアップ可能にする
+        var lockManager = new CardLockManager(NullLogger<CardLockManager>.Instance)
+        {
+            LockExpiration = TimeSpan.FromMilliseconds(1)
+        };
+        try
+        {
+            // 1. ロックを取得して解放（参照カウント0、すぐ期限切れ）
+            var sem = lockManager.GetLock("card1");
+            lockManager.ReleaseLockReference("card1");
+            await Task.Delay(50); // 期限を経過させる
+
+            // 2. クリーンアップ実行（card1のセマフォはDisposeされる）
+            lockManager.CleanupExpiredLocks();
+
+            // 3. 同じキーでGetLock → 新しいエントリが返るべき
+            var newSem = lockManager.GetLock("card1");
+
+            // Assert: 取得した新セマフォは有効（WaitAsyncが例外を投げない）
+            var act = async () => await newSem.WaitAsync(100);
+            await act.Should().NotThrowAsync();
+            newSem.Release();
+        }
+        finally
+        {
+            lockManager.Dispose();
+        }
+    }
+
+    /// <summary>
+    /// Issue #1171: クリーンアップとGetLockの並行実行でObjectDisposedExceptionが発生しないこと
+    /// </summary>
+    [Fact]
+    public async Task GetLockAndCleanup_Concurrent_DoesNotThrowObjectDisposedException()
+    {
+        // Arrange
+        var lockManager = new CardLockManager(NullLogger<CardLockManager>.Instance)
+        {
+            LockExpiration = TimeSpan.FromMilliseconds(1)
+        };
+        try
+        {
+            // 大量の使用済みロックを準備
+            for (int i = 0; i < 100; i++)
+            {
+                lockManager.GetLock($"card{i}");
+                lockManager.ReleaseLockReference($"card{i}");
+            }
+            await Task.Delay(20); // 期限切れにする
+
+            var exceptions = new System.Collections.Concurrent.ConcurrentBag<Exception>();
+
+            // Act: クリーンアップとGetLockを並行実行
+            var cleanupTasks = Enumerable.Range(0, 5).Select(_ => Task.Run(() =>
+            {
+                try
+                {
+                    for (int j = 0; j < 20; j++)
+                    {
+                        lockManager.CleanupExpiredLocks();
+                    }
+                }
+                catch (Exception ex) { exceptions.Add(ex); }
+            }));
+
+            var getLockTasks = Enumerable.Range(0, 5).Select(workerIdx => Task.Run(async () =>
+            {
+                try
+                {
+                    for (int j = 0; j < 100; j++)
+                    {
+                        var key = $"card{j % 100}";
+                        var sem = lockManager.GetLock(key);
+                        // セマフォを実際に使う（ObjectDisposedExceptionが出ないこと）
+                        await sem.WaitAsync(50);
+                        sem.Release();
+                        lockManager.ReleaseLockReference(key);
+                    }
+                }
+                catch (Exception ex) { exceptions.Add(ex); }
+            }));
+
+            await Task.WhenAll(cleanupTasks.Concat(getLockTasks));
+
+            // Assert: ObjectDisposedExceptionが一度も発生していないこと
+            exceptions.OfType<ObjectDisposedException>().Should().BeEmpty(
+                "TOCTOU修正によりObjectDisposedExceptionは発生しないべき");
+        }
+        finally
+        {
+            lockManager.Dispose();
+        }
+    }
+
+    /// <summary>
+    /// Issue #1171: クリーンアップ後の同一キー再取得で新しいセマフォインスタンスが返ること
+    /// </summary>
+    [Fact]
+    public async Task GetLock_AfterCleanup_ReturnsNewSemaphoreInstance()
+    {
+        // Arrange
+        var lockManager = new CardLockManager(NullLogger<CardLockManager>.Instance)
+        {
+            LockExpiration = TimeSpan.FromMilliseconds(1)
+        };
+        try
+        {
+            var oldSem = lockManager.GetLock("card1");
+            lockManager.ReleaseLockReference("card1");
+            await Task.Delay(50);
+
+            lockManager.CleanupExpiredLocks();
+
+            // Act
+            var newSem = lockManager.GetLock("card1");
+
+            // Assert: 新しいインスタンスのはず
+            ReferenceEquals(oldSem, newSem).Should().BeFalse(
+                "クリーンアップ後の取得は新インスタンスを返すべき");
+        }
+        finally
+        {
+            lockManager.Dispose();
+        }
+    }
+
+    /// <summary>
+    /// Issue #1171: 参照カウントが残っているエントリはクリーンアップ対象外
+    /// </summary>
+    [Fact]
+    public async Task CleanupExpiredLocks_WithActiveReferences_DoesNotRemove()
+    {
+        // Arrange
+        var lockManager = new CardLockManager(NullLogger<CardLockManager>.Instance)
+        {
+            LockExpiration = TimeSpan.FromMilliseconds(1)
+        };
+        try
+        {
+            var sem = lockManager.GetLock("card1");
+            // ReleaseLockReference を呼ばない → 参照カウント=1のまま
+
+            await Task.Delay(50); // 期限経過
+
+            // Act
+            lockManager.CleanupExpiredLocks();
+
+            // Assert: 残っていること
+            lockManager.HasLock("card1").Should().BeTrue("参照カウント>0なら削除されないべき");
+
+            // 同じセマフォインスタンスが返ること
+            var sem2 = lockManager.GetLock("card1");
+            ReferenceEquals(sem, sem2).Should().BeTrue();
+        }
+        finally
+        {
+            lockManager.Dispose();
+        }
+    }
+
+    #endregion
 }
