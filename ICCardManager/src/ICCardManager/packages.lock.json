@@ -140,21 +140,6 @@
           "Microsoft.NETFramework.ReferenceAssemblies.net48": "1.0.3"
         }
       },
-      "PCSC": {
-        "type": "Direct",
-        "requested": "[6.1.3, )",
-        "resolved": "6.1.3",
-        "contentHash": "Owbrhae5DAFUgg1gKiRNPjoG3Lr8FdsmlZl6RZnqs+QlWjZQr/2gzY6zYOiBa3L9H1UhMCqxL4I/yvaldelP/g=="
-      },
-      "PCSC.Iso7816": {
-        "type": "Direct",
-        "requested": "[6.1.3, )",
-        "resolved": "6.1.3",
-        "contentHash": "fT9Jy+gNOOvZW1Gbyg38gc0pXNxaqachH2ssUvwkCocppQZONyiFrUkrezIokzDnVIZQWAiLEQzlrxFLNVU7mA==",
-        "dependencies": {
-          "PCSC": "6.1.3"
-        }
-      },
       "System.Data.SQLite.Core": {
         "type": "Direct",
         "requested": "[1.0.119, )",

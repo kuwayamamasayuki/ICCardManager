@@ -90,9 +90,7 @@ namespace DebugDataViewer
             var dbPath = FindDatabasePath();
             services.AddSingleton(sp => new DbContext(dbPath));
 
-            // カードリーダーの自動選択:
-            // 1. felicalib.dll が存在する場合: FelicaCardReader（残高・履歴読み取り可能）
-            // 2. それ以外: PcScCardReader（IDm読み取りのみ）
+            // 物理カードリーダー（PaSoRi + felicalib）で FelicaCardReader を使用
             services.AddSingleton<ICardReader>(sp => CreateCardReader(sp));
 
             // ViewModel
@@ -103,32 +101,22 @@ namespace DebugDataViewer
         }
 
         /// <summary>
-        /// 利用可能なカードリーダーを自動選択して作成します。
+        /// FelicaCardReader を作成します（felicalib.dll 必須）。
         /// </summary>
-        /// <remarks>
-        /// 以下の優先順位でカードリーダーを選択します：
-        /// 1. FelicaCardReader: felicalib.dll が利用可能な場合（残高・履歴読み取り可能）
-        /// 2. PcScCardReader: PC/SC API が利用可能な場合（IDm読み取りのみ）
-        /// </remarks>
         private static ICardReader CreateCardReader(IServiceProvider sp)
         {
             var loggerFactory = sp.GetRequiredService<ILoggerFactory>();
             var stationMasterService = new StationMasterService(Options.Create(new OrganizationOptions()));
 
-            // felicalib.dll の存在を確認
-            if (IsFelicaLibAvailable())
+            if (!IsFelicaLibAvailable())
             {
-                var logger = loggerFactory.CreateLogger<FelicaCardReader>();
-                System.Diagnostics.Debug.WriteLine("[DebugDataViewer] FelicaCardReader を使用します（残高・履歴読み取り可能）");
-                return new FelicaCardReader(logger, stationMasterService);
+                throw new InvalidOperationException(
+                    "felicalib.dll が見つかりません。PaSoRi + felicalib 環境でのみ動作します。");
             }
 
-            // フォールバック: PcScCardReader
-            {
-                var logger = loggerFactory.CreateLogger<PcScCardReader>();
-                System.Diagnostics.Debug.WriteLine("[DebugDataViewer] PcScCardReader を使用します（IDm読み取りのみ、残高・履歴は読み取れません）");
-                return new PcScCardReader(logger, stationMasterService);
-            }
+            var logger = loggerFactory.CreateLogger<FelicaCardReader>();
+            System.Diagnostics.Debug.WriteLine("[DebugDataViewer] FelicaCardReader を使用します（残高・履歴読み取り可能）");
+            return new FelicaCardReader(logger, stationMasterService);
         }
 
         /// <summary>

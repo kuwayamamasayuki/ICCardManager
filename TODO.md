@@ -50,8 +50,7 @@
 
 ### Phase 5: Infrastructure層の実装
 - [x] ICardReader.cs（インターフェース）
-- [x] PcScCardReader.cs（PaSoRi連携）
-- [x] FelicaCardReader.cs（FeliCa読み取り）
+- [x] FelicaCardReader.cs（PaSoRi + felicalib 経由でのFeliCa読み取り）
 - [x] HybridCardReader.cs（ハイブリッドリーダー）
 - [x] MockCardReader.cs（テスト用モック）
 - [x] ISoundPlayer.cs（インターフェース）

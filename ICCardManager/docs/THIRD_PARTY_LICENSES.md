@@ -13,8 +13,6 @@
 | [System.Data.SQLite.Core](https://system.data.sqlite.org/) | 1.0.118 | Public Domain | SQLiteデータベースアクセス |
 | [ClosedXML](https://github.com/ClosedXML/ClosedXML) | 0.102.2 | MIT | Excel帳票（物品出納簿）の生成 |
 | [CommunityToolkit.Mvvm](https://github.com/CommunityToolkit/dotnet) | 8.2.2 | MIT | MVVMパターン実装（ObservableProperty、RelayCommand等） |
-| [PCSC](https://github.com/danm-de/pcsc-sharp) | 6.1.3 | BSD-2-Clause | PC/SC APIによるICカードリーダー制御 |
-| [PCSC.Iso7816](https://github.com/danm-de/pcsc-sharp) | 6.1.3 | BSD-2-Clause | ISO 7816スマートカード通信プロトコル |
 | [FelicaLib.DotNet](https://github.com/sakapon/felicalib-remodeled) | 1.2.67 | MIT + BSD-3-Clause | FeliCa（Sony PaSoRi）カード読み取り ※1 |
 | [Microsoft.Extensions.DependencyInjection](https://github.com/dotnet/runtime) | 3.1.32 | Apache-2.0 | 依存性注入（DIコンテナ） |
 | [Microsoft.Extensions.Hosting](https://github.com/dotnet/runtime) | 3.1.32 | Apache-2.0 | アプリケーションホスティング |
@@ -44,7 +42,7 @@
 
 以下のライブラリはデバッグ用ツール（DebugDataViewer）で使用され、配布されるアプリケーションには含まれません。
 
-アプリケーション本体と共通のライブラリ（System.Data.SQLite.Core、CommunityToolkit.Mvvm、PCSC、PCSC.Iso7816、FelicaLib.DotNet、Microsoft.Extensions.*）を使用しています。詳細は「1. アプリケーション本体の依存ライブラリ」を参照してください。
+アプリケーション本体と共通のライブラリ（System.Data.SQLite.Core、CommunityToolkit.Mvvm、FelicaLib.DotNet、Microsoft.Extensions.*）を使用しています。詳細は「1. アプリケーション本体の依存ライブラリ」を参照してください。
 
 ## 4. ライセンス種別の概要
 
