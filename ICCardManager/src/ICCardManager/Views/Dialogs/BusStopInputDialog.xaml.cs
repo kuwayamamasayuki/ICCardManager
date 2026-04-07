@@ -62,6 +62,14 @@ namespace ICCardManager.Views.Dialogs
         }
 
         /// <summary>
+        /// Issue #1203: 複数 Ledger のバス利用を一括で1つのダイアログで編集（返却時用）
+        /// </summary>
+        public async Task InitializeWithLedgersAsync(IEnumerable<Ledger> ledgers)
+        {
+            await _viewModel.InitializeWithLedgersAsync(ledgers);
+        }
+
+        /// <summary>
         /// バス利用詳細を直接指定して初期化（返却時用・同期版 - 後方互換性のため）
         /// </summary>
         public void InitializeWithDetails(Ledger ledger, IEnumerable<LedgerDetail> busDetails)

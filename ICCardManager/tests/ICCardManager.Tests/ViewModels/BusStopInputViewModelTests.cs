@@ -387,6 +387,146 @@ public class BusStopInputViewModelTests
     }
 
     #endregion
+
+    #region InitializeWithLedgersAsync (Issue #1203)
+
+    [Fact]
+    public async Task InitializeWithLedgersAsync_複数Ledgerの全バス利用が1つのリストに集約されること()
+    {
+        // Arrange: 2日分の Ledger、各々にバス利用と非バス利用が混在
+        var ledger1 = new Ledger
+        {
+            Id = 10,
+            Details = new List<LedgerDetail>
+            {
+                new LedgerDetail { LedgerId = 10, IsBus = true,  SequenceNumber = 1, UseDate = new DateTime(2026, 4, 1), Amount = 210 },
+                new LedgerDetail { LedgerId = 10, IsBus = false, SequenceNumber = 2, EntryStation = "博多", ExitStation = "天神", Amount = 210 },
+            },
+        };
+        var ledger2 = new Ledger
+        {
+            Id = 11,
+            Details = new List<LedgerDetail>
+            {
+                new LedgerDetail { LedgerId = 11, IsBus = true, SequenceNumber = 1, UseDate = new DateTime(2026, 4, 2), Amount = 150 },
+                new LedgerDetail { LedgerId = 11, IsBus = true, SequenceNumber = 2, UseDate = new DateTime(2026, 4, 2), Amount = 180 },
+            },
+        };
+
+        // Act
+        await _viewModel.InitializeWithLedgersAsync(new[] { ledger1, ledger2 });
+
+        // Assert: 合計3件のバス利用が1つの BusUsages に集約される
+        _viewModel.BusUsages.Should().HaveCount(3);
+        _viewModel.StatusMessage.Should().Contain("3件");
+        // 先頭 Ledger が Ledger プロパティに設定される（UI 表示互換）
+        _viewModel.Ledger.Should().Be(ledger1);
+    }
+
+    [Fact]
+    public async Task InitializeWithLedgersAsync_バス利用がゼロ件の場合はメッセージが設定されること()
+    {
+        var ledger = new Ledger
+        {
+            Id = 20,
+            Details = new List<LedgerDetail>
+            {
+                new LedgerDetail { LedgerId = 20, IsBus = false, EntryStation = "A", ExitStation = "B" },
+            },
+        };
+
+        await _viewModel.InitializeWithLedgersAsync(new[] { ledger });
+
+        _viewModel.BusUsages.Should().BeEmpty();
+        _viewModel.StatusMessage.Should().Contain("バス利用の履歴がありません");
+    }
+
+    [Fact]
+    public async Task SaveAsync_複数Ledgerの場合はLedgerごとに更新が呼ばれること()
+    {
+        // Arrange
+        var ledger1 = new Ledger
+        {
+            Id = 10,
+            Details = new List<LedgerDetail>
+            {
+                new LedgerDetail { LedgerId = 10, IsBus = true, SequenceNumber = 1, Amount = 210 },
+            },
+        };
+        var ledger2 = new Ledger
+        {
+            Id = 11,
+            Details = new List<LedgerDetail>
+            {
+                new LedgerDetail { LedgerId = 11, IsBus = true, SequenceNumber = 1, Amount = 150 },
+                new LedgerDetail { LedgerId = 11, IsBus = true, SequenceNumber = 2, Amount = 180 },
+            },
+        };
+
+        _settingsRepoMock.Setup(s => s.GetAppSettingsAsync()).ReturnsAsync(new AppSettings());
+        _ledgerRepoMock.Setup(r => r.UpdateDetailBusStopsAsync(It.IsAny<int>(), It.IsAny<IEnumerable<(int, string)>>()))
+            .Returns(Task.CompletedTask);
+        _ledgerRepoMock.Setup(r => r.UpdateAsync(It.IsAny<Ledger>())).ReturnsAsync(true);
+
+        await _viewModel.InitializeWithLedgersAsync(new[] { ledger1, ledger2 });
+
+        // ユーザー入力を反映
+        _viewModel.BusUsages[0].BusStops = "A～B";
+        _viewModel.BusUsages[1].BusStops = "C～D";
+        _viewModel.BusUsages[2].BusStops = "E～F";
+
+        // Act
+        await _viewModel.SaveAsync();
+
+        // Assert: 両 Ledger に対して UpdateDetailBusStopsAsync と UpdateAsync が1回ずつ呼ばれる
+        _ledgerRepoMock.Verify(
+            r => r.UpdateDetailBusStopsAsync(10, It.Is<IEnumerable<(int, string)>>(u => u.Count() == 1)),
+            Times.Once);
+        _ledgerRepoMock.Verify(
+            r => r.UpdateDetailBusStopsAsync(11, It.Is<IEnumerable<(int, string)>>(u => u.Count() == 2)),
+            Times.Once);
+        _ledgerRepoMock.Verify(r => r.UpdateAsync(ledger1), Times.Once);
+        _ledgerRepoMock.Verify(r => r.UpdateAsync(ledger2), Times.Once);
+        _viewModel.IsSaved.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task SkipAsync_複数Ledgerの場合は全ての明細が星マークになりLedgerごとに更新されること()
+    {
+        var ledger1 = new Ledger
+        {
+            Id = 30,
+            Details = new List<LedgerDetail>
+            {
+                new LedgerDetail { LedgerId = 30, IsBus = true, SequenceNumber = 1, BusStops = "入力済" },
+            },
+        };
+        var ledger2 = new Ledger
+        {
+            Id = 31,
+            Details = new List<LedgerDetail>
+            {
+                new LedgerDetail { LedgerId = 31, IsBus = true, SequenceNumber = 1 },
+            },
+        };
+
+        _settingsRepoMock.Setup(s => s.GetAppSettingsAsync()).ReturnsAsync(new AppSettings());
+        _ledgerRepoMock.Setup(r => r.UpdateDetailBusStopsAsync(It.IsAny<int>(), It.IsAny<IEnumerable<(int, string)>>()))
+            .Returns(Task.CompletedTask);
+        _ledgerRepoMock.Setup(r => r.UpdateAsync(It.IsAny<Ledger>())).ReturnsAsync(true);
+
+        await _viewModel.InitializeWithLedgersAsync(new[] { ledger1, ledger2 });
+
+        await _viewModel.SkipAsync();
+
+        ledger1.Details[0].BusStops.Should().Be("★");
+        ledger2.Details[0].BusStops.Should().Be("★");
+        _ledgerRepoMock.Verify(r => r.UpdateAsync(ledger1), Times.Once);
+        _ledgerRepoMock.Verify(r => r.UpdateAsync(ledger2), Times.Once);
+        _viewModel.IsSaved.Should().BeTrue();
+    }
+
+    #endregion
 }
 
 /// <summary>
