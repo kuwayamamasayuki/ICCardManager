@@ -570,11 +570,12 @@ public class MainViewModelTests
     }
 
     /// <summary>
-    /// Issue #1211: ICカード待ち状態で別の職員証をタッチしても、
-    /// 音は一切鳴らないこと（操作ノイズ抑制）
+    /// Issue #1211: ICカード待ち状態で別の職員証をタッチすると、
+    /// 音は鳴らないが、新しい職員名で通常の職員認識トースト
+    /// （「〇〇 さん / 交通系ICカードをタッチしてください」）が再表示されること
     /// </summary>
     [Fact]
-    public async Task IcCardWaiting_DifferentStaffCardTouch_ShouldBeSilent()
+    public async Task IcCardWaiting_DifferentStaffCardTouch_ShouldShowStaffRecognizedToastSilently()
     {
         // Arrange
         var staffAIdm = "0102030405060708";
@@ -596,9 +597,9 @@ public class MainViewModelTests
             _cardReaderMock.Object, new CardReadEventArgs { Idm = staffBIdm });
         await _dispatcherService.WaitForPendingAsync();
 
-        // Assert - 音・通知ともに一切出ない
+        // Assert - 音は鳴らないが、通常の職員認識トーストが新しい職員名で表示される
         _soundPlayerMock.Verify(s => s.Play(It.IsAny<SoundType>()), Times.Never);
-        _toastMock.Verify(t => t.ShowStaffRecognizedNotification(It.IsAny<string>()), Times.Never);
+        _toastMock.Verify(t => t.ShowStaffRecognizedNotification("Bさん"), Times.Once);
         _toastMock.Verify(t => t.ShowWarning(It.IsAny<string>(), It.IsAny<string>()), Times.Never);
     }
 
