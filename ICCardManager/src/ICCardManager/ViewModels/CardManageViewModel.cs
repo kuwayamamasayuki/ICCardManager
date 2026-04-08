@@ -443,6 +443,17 @@ namespace ICCardManager.ViewModels
                         StartingPageNumber = modeResult.StartingPageNumber
                     };
 
+                    // Issue #1215: 紙の出納簿からの繰越時は累計受入・払出の初期値を保存
+                    if (!modeResult.IsNewPurchase && modeResult.CarryoverMonth.HasValue)
+                    {
+                        var carryoverDate = SummaryGenerator.GetMidYearCarryoverDate(
+                            modeResult.CarryoverMonth.Value, DateTime.Now);
+                        card.CarryoverIncomeTotal = modeResult.CarryoverIncomeTotal;
+                        card.CarryoverExpenseTotal = modeResult.CarryoverExpenseTotal;
+                        card.CarryoverFiscalYear = FiscalYearHelper.GetFiscalYear(
+                            carryoverDate.Year, carryoverDate.Month);
+                    }
+
                     bool success;
                     try
                     {

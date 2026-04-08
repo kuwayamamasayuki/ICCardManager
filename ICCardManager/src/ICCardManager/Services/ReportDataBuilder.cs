@@ -100,6 +100,14 @@ namespace ICCardManager.Services
             var yearlyExpense = yearlyLedgers.Sum(l => l.Expense);
             var currentBalance = yearlyLedgers.LastOrDefault()?.Balance ?? monthEndBalance;
 
+            // Issue #1215: 紙の出納簿から年度途中で移行した場合、
+            // 該当年度の累計には紙の出納簿時代の累計を加算する
+            if (card.CarryoverFiscalYear.HasValue && card.CarryoverFiscalYear.Value == fiscalYearStartYear)
+            {
+                yearlyIncome += card.CarryoverIncomeTotal;
+                yearlyExpense += card.CarryoverExpenseTotal;
+            }
+
             // 月計・累計の組み立て
             ReportTotalData monthlyTotal;
             ReportTotalData cumulativeTotal;

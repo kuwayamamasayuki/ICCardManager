@@ -144,6 +144,48 @@
                                FontSize="{DynamicResource SmallFontSize}"
                                Foreground="{DynamicResource MutedTextBrush}"
                                Margin="0,4,0,0"/>
+
+                    <!-- Issue #1215: 紙の出納簿の累計受入・累計払出入力 -->
+                    <StackPanel Orientation="Horizontal" Margin="0,10,0,0">
+                        <TextBlock Text="累計受入:"
+                                   FontSize="{DynamicResource BaseFontSize}"
+                                   VerticalAlignment="Center"
+                                   Margin="0,0,8,0"/>
+                        <TextBox x:Name="CarryoverIncomeTotalTextBox"
+                                 Width="120"
+                                 Text="0"
+                                 Padding="10,6"
+                                 FontSize="{DynamicResource BaseFontSize}"
+                                 TextAlignment="Right"
+                                 AutomationProperties.Name="累計受入金額"
+                                 ToolTip="紙の出納簿の前月末時点の累計受入金額を入力してください"/>
+                        <TextBlock Text="円"
+                                   FontSize="{DynamicResource BaseFontSize}"
+                                   VerticalAlignment="Center"
+                                   Margin="5,0,0,0"/>
+                    </StackPanel>
+                    <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
+                        <TextBlock Text="累計払出:"
+                                   FontSize="{DynamicResource BaseFontSize}"
+                                   VerticalAlignment="Center"
+                                   Margin="0,0,8,0"/>
+                        <TextBox x:Name="CarryoverExpenseTotalTextBox"
+                                 Width="120"
+                                 Text="0"
+                                 Padding="10,6"
+                                 FontSize="{DynamicResource BaseFontSize}"
+                                 TextAlignment="Right"
+                                 AutomationProperties.Name="累計払出金額"
+                                 ToolTip="紙の出納簿の前月末時点の累計払出金額を入力してください"/>
+                        <TextBlock Text="円"
+                                   FontSize="{DynamicResource BaseFontSize}"
+                                   VerticalAlignment="Center"
+                                   Margin="5,0,0,0"/>
+                    </StackPanel>
+                    <TextBlock Text="※ 月次帳票の「累計」欄に加算されます（当該年度のみ）"
+                               FontSize="{DynamicResource SmallFontSize}"
+                               Foreground="{DynamicResource MutedTextBrush}"
+                               Margin="0,4,0,0"/>
                 </StackPanel>
             </StackPanel>
         </Border>

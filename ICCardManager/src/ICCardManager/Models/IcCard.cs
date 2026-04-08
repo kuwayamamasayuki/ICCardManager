@@ -76,5 +76,36 @@ namespace ICCardManager.Models
         /// デフォルトは1。
         /// </remarks>
         public int StartingPageNumber { get; set; } = 1;
+
+        /// <summary>
+        /// 紙の出納簿からの繰越時の累計受入金額（Issue #1215）
+        /// </summary>
+        /// <remarks>
+        /// 年度途中から本アプリに移行する場合、紙の出納簿時代の
+        /// 前月末時点での累計受入金額。月次帳票の「累計」欄の初期値として使用する。
+        /// <see cref="CarryoverFiscalYear"/> と同じ年度の帳票にのみ加算される。
+        /// </remarks>
+        public int CarryoverIncomeTotal { get; set; }
+
+        /// <summary>
+        /// 紙の出納簿からの繰越時の累計払出金額（Issue #1215）
+        /// </summary>
+        /// <remarks>
+        /// 年度途中から本アプリに移行する場合、紙の出納簿時代の
+        /// 前月末時点での累計払出金額。月次帳票の「累計」欄の初期値として使用する。
+        /// <see cref="CarryoverFiscalYear"/> と同じ年度の帳票にのみ加算される。
+        /// </remarks>
+        public int CarryoverExpenseTotal { get; set; }
+
+        /// <summary>
+        /// 繰越累計が有効な会計年度（Issue #1215）
+        /// </summary>
+        /// <remarks>
+        /// <see cref="CarryoverIncomeTotal"/> / <see cref="CarryoverExpenseTotal"/> が
+        /// 有効な会計年度（4月始まり）。この年度の月次帳票のみ累計初期値として加算する。
+        /// 翌年度以降は通常の累計計算のみが使用される。
+        /// 新規購入や移行情報がない場合は null。
+        /// </remarks>
+        public int? CarryoverFiscalYear { get; set; }
     }
 }
