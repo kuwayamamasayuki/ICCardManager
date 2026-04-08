@@ -1016,15 +1016,17 @@ public partial class MainViewModel : ViewModelBase
         // Issue #1211: ICカード待ち状態で職員証がタッチされた場合の処理。
         // 運用上、ICカードリーダー上に職員証を置きっぱなしにしている職員がおり、
         // 他の職員が操作しようとすると置きっぱなしの職員証が先に反応してしまう。
-        // このため「別の職員証」が来たら静かに操作者を上書きする（持ち替え扱い）。
-        // 音・通知は出さず、操作ノイズを抑制する。
+        // そのため、ICカード待ち中の職員証タッチは初回タッチと完全に同じ挙動で
+        // 扱い、操作者を上書きする（Notify 音 + 認識トースト）。同一/別職員の
+        // 区別はせず、毎回通常の職員証認識フローを通す。
         var staff = await _staffRepository.GetByIdmAsync(idm);
         if (staff != null)
         {
-            // 同一職員の再タッチも別職員の持ち替えも扱いは同じ:
-            // 操作者情報を(上書き)設定し、タイムアウトのみリセットして静かに待機継続
             _currentStaffIdm = idm;
             _currentStaffName = staff.Name;
+
+            _soundPlayer.Play(SoundType.Notify);
+            _toastNotificationService.ShowStaffRecognizedNotification(staff.Name);
             StartTimeout();
             return;
         }
