@@ -35,6 +35,18 @@ namespace ICCardManager.Views.Dialogs
         /// nullの場合はカード読み取り残高を使用。
         /// </summary>
         public int? CarryoverBalance { get; set; }
+
+        /// <summary>
+        /// 繰越時点の累計受入金額（Issue #1215）。
+        /// 紙の出納簿で管理していた際の、前月末時点での累計受入金額。
+        /// </summary>
+        public int CarryoverIncomeTotal { get; set; }
+
+        /// <summary>
+        /// 繰越時点の累計払出金額（Issue #1215）。
+        /// 紙の出納簿で管理していた際の、前月末時点での累計払出金額。
+        /// </summary>
+        public int CarryoverExpenseTotal { get; set; }
     }
 
     /// <summary>
@@ -179,6 +191,34 @@ namespace ICCardManager.Views.Dialogs
                     }
                     result.CarryoverBalance = carryoverBalance;
                 }
+
+                // Issue #1215: 累計受入金額
+                if (!int.TryParse(CarryoverIncomeTotalTextBox.Text, out var carryoverIncomeTotal) || carryoverIncomeTotal < 0)
+                {
+                    MessageBox.Show(
+                        "累計受入は0以上の整数を入力してください。",
+                        "入力エラー",
+                        MessageBoxButton.OK,
+                        MessageBoxImage.Warning);
+                    CarryoverIncomeTotalTextBox.Focus();
+                    CarryoverIncomeTotalTextBox.SelectAll();
+                    return;
+                }
+                result.CarryoverIncomeTotal = carryoverIncomeTotal;
+
+                // Issue #1215: 累計払出金額
+                if (!int.TryParse(CarryoverExpenseTotalTextBox.Text, out var carryoverExpenseTotal) || carryoverExpenseTotal < 0)
+                {
+                    MessageBox.Show(
+                        "累計払出は0以上の整数を入力してください。",
+                        "入力エラー",
+                        MessageBoxButton.OK,
+                        MessageBoxImage.Warning);
+                    CarryoverExpenseTotalTextBox.Focus();
+                    CarryoverExpenseTotalTextBox.SelectAll();
+                    return;
+                }
+                result.CarryoverExpenseTotal = carryoverExpenseTotal;
             }
 
             Result = result;

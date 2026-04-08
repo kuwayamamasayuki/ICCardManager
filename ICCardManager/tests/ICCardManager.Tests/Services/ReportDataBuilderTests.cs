@@ -275,6 +275,136 @@ public class ReportDataBuilderTests
 
     #endregion
 
+    #region Issue #1215: 年度途中導入の累計初期値テスト
+
+    [Fact]
+    public async Task BuildAsync_MidYearCarryover_AddsCarryoverTotalsToCumulative()
+    {
+        // Arrange: 2025年8月登録（7月までは紙の出納簿）、10月の帳票を作成
+        // 紙の出納簿時代の累計: 受入 10000円、払出 3200円
+        var card = new IcCard
+        {
+            CardIdm = TestCardIdm,
+            CardType = "はやかけん",
+            CardNumber = "001",
+            CarryoverIncomeTotal = 10000,
+            CarryoverExpenseTotal = 3200,
+            CarryoverFiscalYear = 2025
+        };
+        _cardRepositoryMock
+            .Setup(r => r.GetByIdmAsync(TestCardIdm, true))
+            .ReturnsAsync(card);
+
+        var octoberLedgers = new List<Ledger>
+        {
+            CreateTestLedger(50, TestCardIdm, new DateTime(2025, 10, 3),
+                "鉄道（天神～博多）", 0, 210, 6590)
+        };
+
+        // 前月(9月)の残高
+        SetupMonthlyLedgers(TestCardIdm, 2025, 9,
+            new List<Ledger>
+            {
+                CreateTestLedger(49, TestCardIdm, new DateTime(2025, 9, 28),
+                    "鉄道", 0, 200, 6800)
+            });
+        SetupMonthlyLedgers(TestCardIdm, 2025, 10, octoberLedgers);
+
+        // アプリ移行後の年度累計データ（8月繰越レコード含む）
+        var yearlyLedgers = new List<Ledger>
+        {
+            CreateTestLedger(1, TestCardIdm, new DateTime(2025, 8, 1),
+                "7月から繰越", 7000, 0, 7000),
+            CreateTestLedger(2, TestCardIdm, new DateTime(2025, 9, 28),
+                "鉄道", 0, 200, 6800),
+            CreateTestLedger(50, TestCardIdm, new DateTime(2025, 10, 3),
+                "鉄道", 0, 210, 6590)
+        };
+        SetupDateRangeLedgers(TestCardIdm,
+            new DateTime(2025, 4, 1), new DateTime(2025, 10, 31), yearlyLedgers);
+
+        // Act
+        var result = await _builder.BuildAsync(TestCardIdm, 2025, 10);
+
+        // Assert: 累計に紙の出納簿時代の値が加算されている
+        result.CumulativeTotal.Should().NotBeNull();
+        result.CumulativeTotal.Income.Should().Be(7000 + 10000);   // アプリ記録7000 + 紙10000
+        result.CumulativeTotal.Expense.Should().Be(410 + 3200);    // アプリ記録410 + 紙3200
+        result.CumulativeTotal.Balance.Should().Be(6590);           // 残高は加算されない
+    }
+
+    [Fact]
+    public async Task BuildAsync_MidYearCarryover_NextFiscalYear_DoesNotAddCarryoverTotals()
+    {
+        // Arrange: 繰越年度(2025)を超えた翌年度(2026)の帳票では累計初期値は加算しない
+        var card = new IcCard
+        {
+            CardIdm = TestCardIdm,
+            CardType = "はやかけん",
+            CardNumber = "001",
+            CarryoverIncomeTotal = 10000,
+            CarryoverExpenseTotal = 3200,
+            CarryoverFiscalYear = 2025
+        };
+        _cardRepositoryMock
+            .Setup(r => r.GetByIdmAsync(TestCardIdm, true))
+            .ReturnsAsync(card);
+
+        var mayLedgers = new List<Ledger>
+        {
+            CreateTestLedger(100, TestCardIdm, new DateTime(2026, 5, 10),
+                "鉄道", 0, 300, 5000)
+        };
+        // 前月(4月)の残高
+        SetupMonthlyLedgers(TestCardIdm, 2026, 4,
+            new List<Ledger>
+            {
+                CreateTestLedger(99, TestCardIdm, new DateTime(2026, 4, 15),
+                    "鉄道", 0, 100, 5300)
+            });
+        SetupMonthlyLedgers(TestCardIdm, 2026, 5, mayLedgers);
+
+        var yearlyLedgers = new List<Ledger>
+        {
+            CreateTestLedger(99, TestCardIdm, new DateTime(2026, 4, 15), "鉄道", 0, 100, 5300),
+            CreateTestLedger(100, TestCardIdm, new DateTime(2026, 5, 10), "鉄道", 0, 300, 5000)
+        };
+        SetupDateRangeLedgers(TestCardIdm,
+            new DateTime(2026, 4, 1), new DateTime(2026, 5, 31), yearlyLedgers);
+
+        // Act
+        var result = await _builder.BuildAsync(TestCardIdm, 2026, 5);
+
+        // Assert: 2026年度は繰越累計を加算しない
+        result.CumulativeTotal.Should().NotBeNull();
+        result.CumulativeTotal.Income.Should().Be(0);
+        result.CumulativeTotal.Expense.Should().Be(400);
+    }
+
+    [Fact]
+    public async Task BuildAsync_NoCarryover_DoesNotChangeCumulative()
+    {
+        // Arrange: 新規購入カード（CarryoverFiscalYear=null）
+        SetupCard();
+        var julyLedgers = new List<Ledger>
+        {
+            CreateTestLedger(10, TestCardIdm, new DateTime(2025, 7, 3),
+                "鉄道", 0, 210, 3790)
+        };
+        SetupBasicMonth(2025, 7, 4000, julyLedgers);
+        SetupDateRangeLedgers(TestCardIdm,
+            new DateTime(2025, 4, 1), new DateTime(2025, 7, 31), julyLedgers);
+
+        // Act
+        var result = await _builder.BuildAsync(TestCardIdm, 2025, 7);
+
+        // Assert: 繰越初期値の加算はない
+        result.CumulativeTotal.Income.Should().Be(0);
+        result.CumulativeTotal.Expense.Should().Be(210);
+    }
+
+    #endregion
+
     #region 3月テスト（次年度繰越）
 
     [Fact]

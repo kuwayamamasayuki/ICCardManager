@@ -98,5 +98,20 @@ namespace ICCardManager.Dtos
         /// デフォルトは1。
         /// </remarks>
         public int StartingPageNumber { get; set; } = 1;
+
+        /// <summary>
+        /// 繰越累計受入金額（Issue #1215）
+        /// </summary>
+        public int CarryoverIncomeTotal { get; set; }
+
+        /// <summary>
+        /// 繰越累計払出金額（Issue #1215）
+        /// </summary>
+        public int CarryoverExpenseTotal { get; set; }
+
+        /// <summary>
+        /// 繰越累計が有効な会計年度（Issue #1215）
+        /// </summary>
+        public int? CarryoverFiscalYear { get; set; }
     }
 }

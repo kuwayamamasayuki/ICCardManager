@@ -33,6 +33,9 @@ namespace ICCardManager.Dtos
                 LentStaffName = staffName,
                 LentAt = card.LastLentAt,
                 StartingPageNumber = card.StartingPageNumber,
+                CarryoverIncomeTotal = card.CarryoverIncomeTotal,
+                CarryoverExpenseTotal = card.CarryoverExpenseTotal,
+                CarryoverFiscalYear = card.CarryoverFiscalYear,
                 IsRefunded = card.IsRefunded,
                 RefundedAt = card.RefundedAt
             };
@@ -180,6 +183,9 @@ namespace ICCardManager.Dtos
                 LastLentStaff = dto.LastLentStaff,
                 LastLentAt = dto.LentAt,
                 StartingPageNumber = dto.StartingPageNumber,
+                CarryoverIncomeTotal = dto.CarryoverIncomeTotal,
+                CarryoverExpenseTotal = dto.CarryoverExpenseTotal,
+                CarryoverFiscalYear = dto.CarryoverFiscalYear,
                 IsRefunded = dto.IsRefunded,
                 RefundedAt = dto.RefundedAt
             };
