@@ -570,11 +570,11 @@ public class MainViewModelTests
     }
 
     /// <summary>
-    /// Issue #1211: ICカード待ち状態で別の職員証をタッチすると、
-    /// 職員証認識音（Notify）が鳴ること（エラー音ではない）
+    /// Issue #1211: ICカード待ち状態で別の職員証をタッチしても、
+    /// 音は一切鳴らないこと（操作ノイズ抑制）
     /// </summary>
     [Fact]
-    public async Task IcCardWaiting_DifferentStaffCardTouch_ShouldPlayNotifySound()
+    public async Task IcCardWaiting_DifferentStaffCardTouch_ShouldBeSilent()
     {
         // Arrange
         var staffAIdm = "0102030405060708";
@@ -589,46 +589,16 @@ public class MainViewModelTests
         await _dispatcherService.WaitForPendingAsync();
 
         _soundPlayerMock.Reset();
-
-        // Act
-        _cardReaderMock.Raise(r => r.CardRead += null,
-            _cardReaderMock.Object, new CardReadEventArgs { Idm = staffBIdm });
-        await _dispatcherService.WaitForPendingAsync();
-
-        // Assert
-        _soundPlayerMock.Verify(s => s.Play(SoundType.Notify), Times.Once);
-        _soundPlayerMock.Verify(s => s.Play(SoundType.Error), Times.Never);
-    }
-
-    /// <summary>
-    /// Issue #1211: ICカード待ち状態で別の職員証をタッチすると、
-    /// 新しい職員名で「認識しました」トーストが表示されること
-    /// </summary>
-    [Fact]
-    public async Task IcCardWaiting_DifferentStaffCardTouch_ShouldShowStaffRecognizedToast()
-    {
-        // Arrange
-        var staffAIdm = "0102030405060708";
-        var staffBIdm = "0807060504030201";
-        _staffRepositoryMock.Setup(r => r.GetByIdmAsync(staffAIdm, It.IsAny<bool>()))
-            .ReturnsAsync(new Staff { StaffIdm = staffAIdm, Name = "Aさん" });
-        _staffRepositoryMock.Setup(r => r.GetByIdmAsync(staffBIdm, It.IsAny<bool>()))
-            .ReturnsAsync(new Staff { StaffIdm = staffBIdm, Name = "Bさん" });
-
-        _cardReaderMock.Raise(r => r.CardRead += null,
-            _cardReaderMock.Object, new CardReadEventArgs { Idm = staffAIdm });
-        await _dispatcherService.WaitForPendingAsync();
-
         _toastMock.Reset();
 
-        // Act
+        // Act - 別の職員証をタッチ（持ち替え）
         _cardReaderMock.Raise(r => r.CardRead += null,
             _cardReaderMock.Object, new CardReadEventArgs { Idm = staffBIdm });
         await _dispatcherService.WaitForPendingAsync();
 
-        // Assert
-        _toastMock.Verify(t => t.ShowStaffRecognizedNotification("Bさん"), Times.Once);
-        // 旧仕様の警告トーストは出ない
+        // Assert - 音・通知ともに一切出ない
+        _soundPlayerMock.Verify(s => s.Play(It.IsAny<SoundType>()), Times.Never);
+        _toastMock.Verify(t => t.ShowStaffRecognizedNotification(It.IsAny<string>()), Times.Never);
         _toastMock.Verify(t => t.ShowWarning(It.IsAny<string>(), It.IsAny<string>()), Times.Never);
     }
 
