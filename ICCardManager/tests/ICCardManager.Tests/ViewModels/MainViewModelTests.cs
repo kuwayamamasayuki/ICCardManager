@@ -571,11 +571,10 @@ public class MainViewModelTests
 
     /// <summary>
     /// Issue #1211: ICカード待ち状態で別の職員証をタッチすると、
-    /// 音は鳴らないが、新しい職員名で通常の職員認識トースト
-    /// （「〇〇 さん / 交通系ICカードをタッチしてください」）が再表示されること
+    /// 通常の初回職員証タッチと完全に同じ動作（Notify 音 + 認識トースト）を行うこと
     /// </summary>
     [Fact]
-    public async Task IcCardWaiting_DifferentStaffCardTouch_ShouldShowStaffRecognizedToastSilently()
+    public async Task IcCardWaiting_DifferentStaffCardTouch_ShouldBehaveLikeNormalStaffTouch()
     {
         // Arrange
         var staffAIdm = "0102030405060708";
@@ -597,10 +596,59 @@ public class MainViewModelTests
             _cardReaderMock.Object, new CardReadEventArgs { Idm = staffBIdm });
         await _dispatcherService.WaitForPendingAsync();
 
-        // Assert - 音は鳴らないが、通常の職員認識トーストが新しい職員名で表示される
-        _soundPlayerMock.Verify(s => s.Play(It.IsAny<SoundType>()), Times.Never);
+        // Assert - Notify 音 + 「Bさん」認識トースト（初回タッチと同等）
+        _soundPlayerMock.Verify(s => s.Play(SoundType.Notify), Times.Once);
+        _soundPlayerMock.Verify(s => s.Play(SoundType.Error), Times.Never);
         _toastMock.Verify(t => t.ShowStaffRecognizedNotification("Bさん"), Times.Once);
         _toastMock.Verify(t => t.ShowWarning(It.IsAny<string>(), It.IsAny<string>()), Times.Never);
+    }
+
+    /// <summary>
+    /// Issue #1211: ICカード待ち状態で 3人目の職員証が連続してタッチされても、
+    /// 毎回通常のタッチと同じ動作（Notify 音 + 認識トースト）が行われ、
+    /// 最終的に最後にタッチした職員で操作者が上書きされること
+    /// </summary>
+    [Fact]
+    public async Task IcCardWaiting_ThirdStaffCardTouch_ShouldAlsoBehaveLikeNormalTouch()
+    {
+        // Arrange
+        var staffAIdm = "0102030405060708";
+        var staffBIdm = "0807060504030201";
+        var staffCIdm = "1111222233334444";
+        _staffRepositoryMock.Setup(r => r.GetByIdmAsync(staffAIdm, It.IsAny<bool>()))
+            .ReturnsAsync(new Staff { StaffIdm = staffAIdm, Name = "Aさん" });
+        _staffRepositoryMock.Setup(r => r.GetByIdmAsync(staffBIdm, It.IsAny<bool>()))
+            .ReturnsAsync(new Staff { StaffIdm = staffBIdm, Name = "Bさん" });
+        _staffRepositoryMock.Setup(r => r.GetByIdmAsync(staffCIdm, It.IsAny<bool>()))
+            .ReturnsAsync(new Staff { StaffIdm = staffCIdm, Name = "Cさん" });
+
+        // A → B とタッチしてICカード待ち状態に持ち替え済み
+        _cardReaderMock.Raise(r => r.CardRead += null,
+            _cardReaderMock.Object, new CardReadEventArgs { Idm = staffAIdm });
+        await _dispatcherService.WaitForPendingAsync();
+        _cardReaderMock.Raise(r => r.CardRead += null,
+            _cardReaderMock.Object, new CardReadEventArgs { Idm = staffBIdm });
+        await _dispatcherService.WaitForPendingAsync();
+
+        _soundPlayerMock.Reset();
+        _toastMock.Reset();
+
+        // Act - 3人目 Cさんの職員証
+        _cardReaderMock.Raise(r => r.CardRead += null,
+            _cardReaderMock.Object, new CardReadEventArgs { Idm = staffCIdm });
+        await _dispatcherService.WaitForPendingAsync();
+
+        // Assert - 3人目のタッチも Notify + 認識トースト
+        _soundPlayerMock.Verify(s => s.Play(SoundType.Notify), Times.Once);
+        _toastMock.Verify(t => t.ShowStaffRecognizedNotification("Cさん"), Times.Once);
+
+        // 操作者が C に上書きされていること
+        var idmField = typeof(MainViewModel).GetField("_currentStaffIdm",
+            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+        var nameField = typeof(MainViewModel).GetField("_currentStaffName",
+            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+        idmField!.GetValue(_viewModel).Should().Be(staffCIdm);
+        nameField!.GetValue(_viewModel).Should().Be("Cさん");
     }
 
     /// <summary>
@@ -632,11 +680,12 @@ public class MainViewModelTests
     }
 
     /// <summary>
-    /// Issue #1211: ICカード待ち状態で同一職員の職員証を再タッチしても、
-    /// 音や通知が発生せず静かに無視されること（操作ノイズ抑制）
+    /// Issue #1211: ICカード待ち状態で同一職員の職員証を再タッチした場合も、
+    /// 通常のタッチと同じ動作（Notify 音 + 認識トースト）を行うこと
+    /// （同一/別職員の区別はせず、毎回同じ挙動）
     /// </summary>
     [Fact]
-    public async Task IcCardWaiting_SameStaffCardRetouch_ShouldBeSilent()
+    public async Task IcCardWaiting_SameStaffCardRetouch_ShouldBehaveLikeNormalStaffTouch()
     {
         // Arrange - Aさんで ICカード待ちに
         var staffAIdm = "0102030405060708";
@@ -655,10 +704,9 @@ public class MainViewModelTests
             _cardReaderMock.Object, new CardReadEventArgs { Idm = staffAIdm });
         await _dispatcherService.WaitForPendingAsync();
 
-        // Assert - 無音・無通知・状態維持
-        _soundPlayerMock.Verify(s => s.Play(It.IsAny<SoundType>()), Times.Never);
-        _toastMock.Verify(t => t.ShowStaffRecognizedNotification(It.IsAny<string>()), Times.Never);
-        _toastMock.Verify(t => t.ShowWarning(It.IsAny<string>(), It.IsAny<string>()), Times.Never);
+        // Assert - Notify 音 + 認識トースト（通常タッチと同等）
+        _soundPlayerMock.Verify(s => s.Play(SoundType.Notify), Times.Once);
+        _toastMock.Verify(t => t.ShowStaffRecognizedNotification("Aさん"), Times.Once);
         _viewModel.CurrentState.Should().Be(AppState.WaitingForIcCard);
     }
 
