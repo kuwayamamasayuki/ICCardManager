@@ -984,6 +984,47 @@ public class CardManageViewModelTests
     }
 
     /// <summary>
+    /// 3月からの繰越は「前年度より繰越」として扱い、受入金額に残高を記録すること
+    /// </summary>
+    [Fact]
+    public async Task SaveAsync_CarryoverMode_March_ShouldBeFiscalYearCarryover()
+    {
+        // Arrange
+        var idm = "0102030405060708";
+        var carryoverBalance = 6000;
+
+        _cardRepositoryMock.Setup(r => r.GetByIdmAsync(idm, true)).ReturnsAsync((IcCard?)null);
+        _cardRepositoryMock.Setup(r => r.InsertAsync(It.IsAny<IcCard>())).ReturnsAsync(true);
+
+        // 繰越モード、3月を選択
+        _dialogServiceMock.Setup(d => d.ShowCardRegistrationModeDialog(It.IsAny<int?>()))
+            .Returns(new ICCardManager.Views.Dialogs.CardRegistrationModeResult
+            {
+                IsNewPurchase = false,
+                CarryoverMonth = 3,
+                StartingPageNumber = 1,
+                CarryoverBalance = carryoverBalance
+            });
+
+        _viewModel.SetPreReadBalance(carryoverBalance);
+
+        _viewModel.StartNewCard();
+        _viewModel.EditCardIdm = idm;
+        _viewModel.EditCardType = "はやかけん";
+        _viewModel.EditCardNumber = "H-001";
+
+        // Act
+        await _viewModel.SaveAsync();
+
+        // Assert: 3月繰越は「前年度より繰越」となり、受入金額に残高が入ること
+        _ledgerRepositoryMock.Verify(r => r.InsertAsync(It.Is<Ledger>(l =>
+            l.Income == carryoverBalance &&
+            l.Balance == carryoverBalance &&
+            l.Summary.Contains("前年度")
+        )), Times.Once);
+    }
+
+    /// <summary>
     /// CarryoverBalanceがnullの場合、事前読み取り残高にフォールバックすること
     /// </summary>
     [Fact]
