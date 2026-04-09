@@ -44,11 +44,14 @@ namespace ICCardManager.Services
             // 各履歴行
             foreach (var ledger in data.Ledgers)
             {
+                // 年度途中の「○月から繰越」行は残高引継ぎのみなので受入欄は空欄にする
+                // （既存データで受入に値が残っていても表示しないための防御的処理）
+                var isMidYearCarryoverRow = SummaryGenerator.IsMidYearCarryoverSummary(ledger.Summary);
                 result.DataRows.Add(new ReportRow
                 {
                     DateDisplay = WarekiConverter.ToWareki(ledger.Date),
                     Summary = ledger.Summary,
-                    Income = ledger.Income > 0 ? ledger.Income : null,
+                    Income = (!isMidYearCarryoverRow && ledger.Income > 0) ? (int?)ledger.Income : null,
                     Expense = ledger.Expense > 0 ? ledger.Expense : null,
                     Balance = ledger.Balance,
                     StaffName = ledger.StaffName,

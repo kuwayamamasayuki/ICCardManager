@@ -1009,10 +1009,19 @@ namespace ICCardManager.ViewModels
                     var now = DateTime.Now;
 
                     // Issue #510: 登録モードに応じて摘要を決定
+                    // 繰越月が3月の場合は年度末＝前年度繰越と同義なので、
+                    // 「前年度より繰越」として扱い受入金額にも残高を記録する。
+                    var isFiscalYearCarryover = !modeResult.IsNewPurchase
+                        && modeResult.CarryoverMonth!.Value == 3;
                     string summary;
                     if (modeResult.IsNewPurchase)
                     {
                         summary = "新規購入";
+                    }
+                    else if (isFiscalYearCarryover)
+                    {
+                        // 3月から繰越 = 前年度より繰越
+                        summary = SummaryGenerator.GetCarryoverFromPreviousYearSummary();
                     }
                     else
                     {
@@ -1034,16 +1043,21 @@ namespace ICCardManager.ViewModels
                     else
                     {
                         // Issue #599: 繰越モードの場合は繰越月の翌月1日をレコード日付とする
+                        // 3月の場合は4月1日＝新年度初日になる
                         recordDate = SummaryGenerator.GetMidYearCarryoverDate(modeResult.CarryoverMonth!.Value, now);
                     }
 
+                    // 年度途中導入の繰越（「○月から繰越」）の場合、受入金額は空欄にする。
+                    // ただし3月（前年度繰越）と新規購入は受入金額に残高を記録する。
+                    // 月次帳票のルール: 受入欄に金額が入るのは4月の前年度繰越と新規購入のみ。
+                    var hasIncome = modeResult.IsNewPurchase || isFiscalYearCarryover;
                     var ledger = new Ledger
                     {
                         CardIdm = cardIdm,
                         LenderIdm = null,  // 新規購入/繰越時は貸出者なし
                         Date = recordDate,
                         Summary = summary,
-                        Income = balance.Value,  // 受入金額 = カード残額
+                        Income = hasIncome ? balance.Value : 0,
                         Expense = 0,
                         Balance = balance.Value,
                         StaffName = null,  // 利用者なし
