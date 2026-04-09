@@ -1037,13 +1037,18 @@ namespace ICCardManager.ViewModels
                         recordDate = SummaryGenerator.GetMidYearCarryoverDate(modeResult.CarryoverMonth!.Value, now);
                     }
 
+                    // 年度途中導入の繰越（「○月から繰越」）の場合、受入金額は空欄にする。
+                    // 紙の出納簿から残高を引き継ぐだけで実際の受入ではないため、
+                    // 月次帳票の受入欄および月計・累計の受入に加算してはならない。
+                    // 4月の前年度繰越行のみが受入金額欄に値を持つ、というルールに準拠する。
+                    var isMidYearCarryover = !modeResult.IsNewPurchase;
                     var ledger = new Ledger
                     {
                         CardIdm = cardIdm,
                         LenderIdm = null,  // 新規購入/繰越時は貸出者なし
                         Date = recordDate,
                         Summary = summary,
-                        Income = balance.Value,  // 受入金額 = カード残額
+                        Income = isMidYearCarryover ? 0 : balance.Value,  // 繰越は受入欄を空欄にする
                         Expense = 0,
                         Balance = balance.Value,
                         StaffName = null,  // 利用者なし

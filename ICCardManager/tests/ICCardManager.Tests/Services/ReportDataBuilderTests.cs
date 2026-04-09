@@ -310,11 +310,11 @@ public class ReportDataBuilderTests
             });
         SetupMonthlyLedgers(TestCardIdm, 2025, 10, octoberLedgers);
 
-        // アプリ移行後の年度累計データ（8月繰越レコード含む）
+        // アプリ移行後の年度累計データ（8月繰越レコード含む。繰越は Income=0 で保存される）
         var yearlyLedgers = new List<Ledger>
         {
             CreateTestLedger(1, TestCardIdm, new DateTime(2025, 8, 1),
-                "7月から繰越", 7000, 0, 7000),
+                "7月から繰越", 0, 0, 7000),
             CreateTestLedger(2, TestCardIdm, new DateTime(2025, 9, 28),
                 "鉄道", 0, 200, 6800),
             CreateTestLedger(50, TestCardIdm, new DateTime(2025, 10, 3),
@@ -326,9 +326,9 @@ public class ReportDataBuilderTests
         // Act
         var result = await _builder.BuildAsync(TestCardIdm, 2025, 10);
 
-        // Assert: 累計に紙の出納簿時代の値が加算されている
+        // Assert: 累計に紙の出納簿時代の値が加算されている（繰越ledgerの受入は除外）
         result.CumulativeTotal.Should().NotBeNull();
-        result.CumulativeTotal.Income.Should().Be(7000 + 10000);   // アプリ記録7000 + 紙10000
+        result.CumulativeTotal.Income.Should().Be(10000);           // 紙10000のみ
         result.CumulativeTotal.Expense.Should().Be(410 + 3200);    // アプリ記録410 + 紙3200
         result.CumulativeTotal.Balance.Should().Be(6590);           // 残高は加算されない
     }
@@ -379,6 +379,36 @@ public class ReportDataBuilderTests
         result.CumulativeTotal.Should().NotBeNull();
         result.CumulativeTotal.Income.Should().Be(0);
         result.CumulativeTotal.Expense.Should().Be(400);
+    }
+
+    [Fact]
+    public async Task BuildAsync_MidYearCarryoverLedger_ExcludedFromMonthlyIncome()
+    {
+        // Arrange: 登録月(8月)の月次帳票。既存データで Income に残高が入っていたケースも想定。
+        SetupCard();
+        var augustLedgers = new List<Ledger>
+        {
+            CreateTestLedger(1, TestCardIdm, new DateTime(2025, 8, 1),
+                "7月から繰越", 5000, 0, 5000),   // 既存データで income が入っているケース
+            CreateTestLedger(2, TestCardIdm, new DateTime(2025, 8, 10),
+                "鉄道（天神～博多）", 0, 210, 4790)
+        };
+        // 前月(7月)は未登録
+        SetupMonthlyLedgers(TestCardIdm, 2025, 7, new List<Ledger>());
+        SetupCarryoverBalance(TestCardIdm, 2024, null);
+        SetupMonthlyLedgers(TestCardIdm, 2025, 8, augustLedgers);
+        SetupDateRangeLedgers(TestCardIdm,
+            new DateTime(2025, 4, 1), new DateTime(2025, 8, 31), augustLedgers);
+
+        // Act
+        var result = await _builder.BuildAsync(TestCardIdm, 2025, 8);
+
+        // Assert: 月次・年度累計とも繰越ledgerの受入は集計されない
+        result.MonthlyTotal.Income.Should().Be(0);
+        result.MonthlyTotal.Expense.Should().Be(210);
+        result.CumulativeTotal.Should().NotBeNull();
+        result.CumulativeTotal.Income.Should().Be(0);
+        result.CumulativeTotal.Expense.Should().Be(210);
     }
 
     [Fact]

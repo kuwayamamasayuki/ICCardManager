@@ -29,6 +29,38 @@ public class ReportRowBuilderTests
 
     #endregion
 
+    #region 年度途中繰越ledgerの受入欄ブランク化テスト
+
+    [Fact]
+    public void Build_年度途中繰越ledgerの受入欄は空欄になること()
+    {
+        // 既存データで「○月から繰越」行の Income に金額が入っていても
+        // 月次帳票の受入欄には表示しない（前年度繰越のみが受入欄を持つ）
+        var data = CreateBaseData(2025, 8);
+        data.Ledgers = new List<Ledger>
+        {
+            new Ledger
+            {
+                Id = 1,
+                CardIdm = "0102030405060708",
+                Date = new DateTime(2025, 8, 1),
+                Summary = "7月から繰越",
+                Income = 5000,   // 既存データで残っているケース
+                Expense = 0,
+                Balance = 5000
+            }
+        };
+
+        var result = ReportRowBuilder.Build(data);
+
+        result.DataRows.Should().HaveCount(1);
+        result.DataRows[0].Summary.Should().Be("7月から繰越");
+        result.DataRows[0].Income.Should().BeNull();   // 空欄
+        result.DataRows[0].Balance.Should().Be(5000);
+    }
+
+    #endregion
+
     #region 繰越行テスト
 
     [Fact]

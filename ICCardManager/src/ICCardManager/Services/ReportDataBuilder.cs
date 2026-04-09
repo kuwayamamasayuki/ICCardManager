@@ -83,7 +83,11 @@ namespace ICCardManager.Services
             }
 
             // 月計を計算
-            var monthlyIncome = ledgers.Sum(l => l.Income);
+            // 年度途中の「○月から繰越」ledgerは残高引継ぎのため受入欄に金額を持たせず集計からも除外する
+            // （既存データで受入に値が入っていても安全に除外するための防御的フィルタ）
+            var monthlyIncome = ledgers
+                .Where(l => !SummaryGenerator.IsMidYearCarryoverSummary(l.Summary))
+                .Sum(l => l.Income);
             var monthlyExpense = ledgers.Sum(l => l.Expense);
             var monthEndBalance = ledgers.LastOrDefault()?.Balance ?? 0;
 
@@ -96,7 +100,10 @@ namespace ICCardManager.Services
                 (await _ledgerRepository.GetByDateRangeAsync(cardIdm, fiscalYearStart, fiscalYearEnd))
                     .Where(l => l.Summary != SummaryGenerator.GetLendingSummary()));
 
-            var yearlyIncome = yearlyLedgers.Sum(l => l.Income);
+            // 年度途中の繰越ledgerは受入金額扱いしないため累計から除外する
+            var yearlyIncome = yearlyLedgers
+                .Where(l => !SummaryGenerator.IsMidYearCarryoverSummary(l.Summary))
+                .Sum(l => l.Income);
             var yearlyExpense = yearlyLedgers.Sum(l => l.Expense);
             var currentBalance = yearlyLedgers.LastOrDefault()?.Balance ?? monthEndBalance;
 

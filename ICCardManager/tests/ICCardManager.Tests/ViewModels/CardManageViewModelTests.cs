@@ -975,9 +975,9 @@ public class CardManageViewModelTests
         // Act
         await _viewModel.SaveAsync();
 
-        // Assert: ユーザー指定の繰越額（5,000円）が使用され、カード読み取り残高（4,780円）ではないこと
+        // Assert: ユーザー指定の繰越額（5,000円）が残額に反映され、受入金額は0（空欄）であること
         _ledgerRepositoryMock.Verify(r => r.InsertAsync(It.Is<Ledger>(l =>
-            l.Income == userSpecifiedBalance &&
+            l.Income == 0 &&
             l.Balance == userSpecifiedBalance &&
             l.Summary == "5月から繰越"
         )), Times.Once);
@@ -1016,9 +1016,9 @@ public class CardManageViewModelTests
         // Act
         await _viewModel.SaveAsync();
 
-        // Assert: CarryoverBalanceがnullなので、事前読み取り残高（4,780円）が使用されること
+        // Assert: CarryoverBalanceがnullなので、事前読み取り残高（4,780円）が残額として使用され、受入は0
         _ledgerRepositoryMock.Verify(r => r.InsertAsync(It.Is<Ledger>(l =>
-            l.Income == preReadBalance &&
+            l.Income == 0 &&
             l.Balance == preReadBalance &&
             l.Summary == "5月から繰越"
         )), Times.Once);
@@ -1114,7 +1114,7 @@ public class CardManageViewModelTests
         // Assert: ユーザー指定の繰越額（8,000円）が使用され、
         // 履歴から逆算した値（5,000円）ではないこと
         _ledgerRepositoryMock.Verify(r => r.InsertAsync(It.Is<Ledger>(l =>
-            l.Income == userSpecifiedBalance &&
+            l.Income == 0 &&
             l.Balance == userSpecifiedBalance &&
             l.Summary == "1月から繰越"
         )), Times.Once);
@@ -1162,7 +1162,7 @@ public class CardManageViewModelTests
 
         // Assert: CarryoverBalanceがnullなので、履歴から逆算した値（5,000円）が使用されること
         _ledgerRepositoryMock.Verify(r => r.InsertAsync(It.Is<Ledger>(l =>
-            l.Income == 5000 &&
+            l.Income == 0 &&
             l.Balance == 5000 &&
             l.Summary == "1月から繰越"
         )), Times.Once);
