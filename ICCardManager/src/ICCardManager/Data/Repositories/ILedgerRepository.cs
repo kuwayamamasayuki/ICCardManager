@@ -6,46 +6,26 @@ using ICCardManager.Models;
 
 namespace ICCardManager.Data.Repositories
 {
-/// <summary>
-    /// 利用履歴リポジトリインターフェース
+    /// <summary>
+    /// 利用履歴リポジトリインターフェース（CRUD + クエリ + 統合の統合インターフェース）
     /// </summary>
-    public interface ILedgerRepository
+    /// <remarks>
+    /// ILedgerQueryService（読み取り専用）と ILedgerMergeRepository（統合操作）を継承し、
+    /// CRUD操作を直接定義する。既存コードはこのインターフェースを通じて全機能にアクセスでき、
+    /// 新規コードは必要な狭いインターフェースのみに依存できる。
+    /// </remarks>
+    public interface ILedgerRepository : ILedgerQueryService, ILedgerMergeRepository
     {
-        /// <summary>
-        /// 指定期間の利用履歴を取得
-        /// </summary>
-        /// <param name="cardIdm">ICカードIDm（nullの場合は全カード）</param>
-        /// <param name="fromDate">開始日</param>
-        /// <param name="toDate">終了日</param>
-        Task<IEnumerable<Ledger>> GetByDateRangeAsync(string cardIdm, DateTime fromDate, DateTime toDate);
-
-        /// <summary>
-        /// 指定月の利用履歴を取得（帳票用）
-        /// </summary>
-        /// <param name="cardIdm">ICカードIDm</param>
-        /// <param name="year">年</param>
-        /// <param name="month">月</param>
-        Task<IEnumerable<Ledger>> GetByMonthAsync(string cardIdm, int year, int month);
-
-        /// <summary>
-        /// IDで利用履歴を取得（詳細含む）
-        /// </summary>
-        Task<Ledger> GetByIdAsync(int id);
+        // === CRUD操作（ILedgerRepository固有） ===
 
         /// <summary>
         /// ICカードの貸出中レコードを取得
         /// </summary>
-        /// <param name="cardIdm">ICカードIDm</param>
         Task<Ledger> GetLentRecordAsync(string cardIdm);
 
         /// <summary>
         /// 全カードの貸出中レコードを一括取得（整合性チェック用）
         /// </summary>
-        /// <remarks>
-        /// Issue #790対応: 起動時にic_card.is_lentとledger.is_lent_recordの
-        /// 整合性をチェック・修復するために使用。
-        /// </remarks>
-        /// <returns>全カードの貸出中レコードのリスト</returns>
         Task<List<Ledger>> GetAllLentRecordsAsync();
 
         /// <summary>
@@ -61,19 +41,11 @@ namespace ICCardManager.Data.Repositories
         /// <summary>
         /// 利用履歴を削除
         /// </summary>
-        /// <param name="id">利用履歴ID</param>
-        /// <returns>削除成功の場合true</returns>
         Task<bool> DeleteAsync(int id);
 
         /// <summary>
         /// 指定カードの貸出中レコードをすべて削除
         /// </summary>
-        /// <remarks>
-        /// 共有モードで複数PCから同時に貸出された場合に重複する貸出中レコードを
-        /// すべてクリーンアップするための防御的削除メソッド。
-        /// </remarks>
-        /// <param name="cardIdm">カードIDm</param>
-        /// <returns>削除した件数</returns>
         Task<int> DeleteAllLentRecordsAsync(string cardIdm);
 
         /// <summary>
@@ -87,171 +59,8 @@ namespace ICCardManager.Data.Repositories
         Task<bool> InsertDetailsAsync(int ledgerId, IEnumerable<LedgerDetail> details);
 
         /// <summary>
-        /// 指定日以前の利用履歴を取得（残額計算用）
-        /// </summary>
-        /// <param name="cardIdm">ICカードIDm</param>
-        /// <param name="beforeDate">基準日</param>
-        Task<Ledger> GetLatestBeforeDateAsync(string cardIdm, DateTime beforeDate);
-
-        /// <summary>
-        /// 年度繰越残高を取得
-        /// </summary>
-        /// <param name="cardIdm">ICカードIDm</param>
-        /// <param name="fiscalYear">年度</param>
-        Task<int?> GetCarryoverBalanceAsync(string cardIdm, int fiscalYear);
-
-        /// <summary>
-        /// 指定カードの最新利用履歴を取得
-        /// </summary>
-        /// <param name="cardIdm">ICカードIDm</param>
-        Task<Ledger> GetLatestLedgerAsync(string cardIdm);
-
-        /// <summary>
-        /// 全カードの最新残高情報を一括取得（ダッシュボード用）
-        /// </summary>
-        /// <returns>カードIDmをキーとした最新残高のディクショナリ</returns>
-        Task<Dictionary<string, (int Balance, DateTime? LastUsageDate)>> GetAllLatestBalancesAsync();
-
-        /// <summary>
-        /// 過去に入力されたバス停名をスコア順で取得（オートコンプリート用）
-        /// </summary>
-        /// <returns>バス停名・使用回数・直近利用日のリスト（スコア順）</returns>
-        Task<IEnumerable<(string BusStops, int UsageCount, DateTime? LastUsedDate)>> GetBusStopSuggestionsAsync();
-
-        /// <summary>
         /// バス利用詳細のバス停名を更新
         /// </summary>
-        /// <param name="ledgerId">利用履歴ID</param>
-        /// <param name="updates">更新対象（SequenceNumber=rowid, BusStops=バス停名）のリスト</param>
         Task UpdateDetailBusStopsAsync(int ledgerId, IEnumerable<(int SequenceNumber, string BusStops)> updates);
-
-        /// <summary>
-        /// 指定期間の利用履歴をページング付きで取得
-        /// </summary>
-        /// <param name="cardIdm">ICカードIDm（nullの場合は全カード）</param>
-        /// <param name="fromDate">開始日</param>
-        /// <param name="toDate">終了日</param>
-        /// <param name="page">ページ番号（1から開始）</param>
-        /// <param name="pageSize">1ページあたりの件数</param>
-        /// <returns>履歴リストと総件数のタプル</returns>
-        Task<(IEnumerable<Ledger> Items, int TotalCount)> GetPagedAsync(
-            string cardIdm,
-            DateTime fromDate,
-            DateTime toDate,
-            int page,
-            int pageSize);
-
-        /// <summary>
-        /// 指定カードの既存の履歴詳細キーを取得（重複チェック用）
-        /// </summary>
-        /// <remarks>
-        /// Issue #326対応: 同じ履歴を二回以上登録しないための重複チェックに使用。
-        /// キーは use_date + balance + is_charge の組み合わせ。
-        /// FeliCa履歴では取引ごとに残高が変化するため、この組み合わせで一意に識別可能。
-        /// </remarks>
-        /// <param name="cardIdm">ICカードIDm</param>
-        /// <param name="fromDate">検索開始日</param>
-        /// <returns>既存の履歴詳細キーのセット</returns>
-        Task<HashSet<(DateTime? UseDate, int? Balance, bool IsCharge)>> GetExistingDetailKeysAsync(
-            string cardIdm, DateTime fromDate);
-
-        /// <summary>
-        /// 指定カードの既存の履歴キーを取得（CSVインポート重複チェック用）
-        /// </summary>
-        /// <remarks>
-        /// Issue #334対応: CSVインポート時に既存の履歴をスキップするための重複チェックに使用。
-        /// キーは card_idm + date + summary + income + expense + balance の組み合わせ。
-        /// </remarks>
-        /// <param name="cardIdms">チェック対象のカードIDmリスト</param>
-        /// <returns>既存の履歴キーのセット</returns>
-        Task<HashSet<(string CardIdm, DateTime Date, string Summary, int Income, int Expense, int Balance)>> GetExistingLedgerKeysAsync(
-            IEnumerable<string> cardIdms);
-
-        /// <summary>
-        /// 利用履歴詳細を置き換え（全削除後に再登録）
-        /// </summary>
-        /// <remarks>
-        /// Issue #484対応: 乗車履歴の統合・分割機能で、グループIDを更新する際に使用。
-        /// 既存の詳細をすべて削除してから新しい詳細リストを登録する。
-        /// </remarks>
-        /// <param name="ledgerId">利用履歴ID</param>
-        /// <param name="details">新しい詳細リスト</param>
-        /// <returns>成功した場合true</returns>
-        Task<bool> ReplaceDetailsAsync(int ledgerId, IEnumerable<LedgerDetail> details);
-
-        /// <summary>
-        /// 複数のLedgerレコードを1つに統合する
-        /// </summary>
-        /// <remarks>
-        /// Issue #548対応: 履歴一覧から複数のエントリを統合する機能。
-        /// トランザクション内で、ソースのdetailsをターゲットに移動し、ソースを削除する。
-        /// </remarks>
-        /// <param name="targetLedgerId">統合先のLedger ID</param>
-        /// <param name="sourceLedgerIds">統合元のLedger IDリスト（削除される）</param>
-        /// <param name="updatedTarget">更新後のターゲットLedger</param>
-        /// <returns>成功した場合true</returns>
-        Task<bool> MergeLedgersAsync(int targetLedgerId, IEnumerable<int> sourceLedgerIds, Ledger updatedTarget);
-
-        /// <summary>
-        /// 統合を元に戻す（ソースLedgerを再作成し、Detailsを元のLedgerに戻す）
-        /// </summary>
-        /// <remarks>
-        /// Issue #548対応: 統合操作のUndoを実現する。
-        /// トランザクション内で、ソースLedgerを再作成し、DetailのledgerIdを元に戻す。
-        /// </remarks>
-        /// <param name="undoData">統合時に保存されたUndoデータ</param>
-        /// <returns>成功した場合true</returns>
-        Task<bool> UnmergeLedgersAsync(Services.LedgerMergeUndoData undoData);
-
-        /// <summary>
-        /// 統合履歴をDBに保存
-        /// </summary>
-        Task SaveMergeHistoryAsync(int targetLedgerId, string description, string undoDataJson);
-
-        /// <summary>
-        /// 統合履歴一覧を取得
-        /// </summary>
-        /// <param name="undoneOnly">取り消し済みのみを取得するか</param>
-        Task<List<(int Id, DateTime MergedAt, int TargetLedgerId, string Description, string UndoDataJson, bool IsUndone)>> GetMergeHistoriesAsync(bool undoneOnly);
-
-        /// <summary>
-        /// 統合履歴を取り消し済みにマーク
-        /// </summary>
-        Task MarkMergeHistoryUndoneAsync(int historyId);
-
-        /// <summary>
-        /// 指定期間のledgerに紐づく全詳細を取得（CSVエクスポート用）
-        /// </summary>
-        /// <remarks>
-        /// Issue #751対応: 利用履歴詳細のCSVエクスポート/インポート機能。
-        /// ledger_detail と ledger をJOINし、ledger.dateで期間フィルタリングする。
-        /// </remarks>
-        /// <param name="fromDate">開始日</param>
-        /// <param name="toDate">終了日</param>
-        /// <returns>期間内のledgerに紐づく全LedgerDetail</returns>
-        Task<List<LedgerDetail>> GetAllDetailsInDateRangeAsync(DateTime fromDate, DateTime toDate);
-
-        /// <summary>
-        /// 複数Ledgerの詳細を一括取得（残高整合性チェック用）
-        /// </summary>
-        /// <remarks>
-        /// Issue #1059対応: 詳細レベルの残高チェーン検証のために、
-        /// 対象LedgerのDetailを効率的に一括取得する。
-        /// </remarks>
-        /// <param name="ledgerIds">取得対象のLedger IDリスト</param>
-        /// <returns>LedgerIdをキーとしたDetail辞書</returns>
-        Task<Dictionary<int, List<LedgerDetail>>> GetDetailsByLedgerIdsAsync(IEnumerable<int> ledgerIds);
-
-        /// <summary>
-        /// 指定カードの新規購入日（または繰越日）を取得
-        /// </summary>
-        /// <remarks>
-        /// Issue #501対応: 物品出納簿の作成時に、新規購入より前の月をスキップするために使用。
-        /// Issue #510対応: 年度途中導入の繰越レコード（「○月から繰越」）も認識する。
-        /// summary = "新規購入" または "○月から繰越" の最初のレコードの日付を返す。
-        /// </remarks>
-        /// <param name="cardIdm">ICカードIDm</param>
-        /// <returns>新規購入日または繰越日、存在しない場合はnull</returns>
-        Task<DateTime?> GetPurchaseDateAsync(string cardIdm);
     }
 }
