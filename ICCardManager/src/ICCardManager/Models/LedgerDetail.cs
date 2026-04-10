@@ -97,5 +97,41 @@ namespace ICCardManager.Models
         /// 親レコードへの参照（ナビゲーションプロパティ）
         /// </summary>
         public Ledger Ledger { get; set; }
+
+        // === ドメインロジック ===
+
+        /// <summary>
+        /// バス利用かどうかの自動判定
+        /// </summary>
+        /// <remarks>
+        /// 乗車駅・降車駅がともに空欄で、チャージでもポイント還元でもない場合はバス利用。
+        /// IsBusフラグはDB上の値であり、このメソッドはICカード生データからの判定ロジック。
+        /// </remarks>
+        public bool DetermineIsBusUsage() =>
+            string.IsNullOrEmpty(EntryStation)
+            && string.IsNullOrEmpty(ExitStation)
+            && !IsCharge
+            && !IsPointRedemption;
+
+        /// <summary>
+        /// 鉄道利用（駅情報がある通常の交通利用）かどうか
+        /// </summary>
+        public bool IsTransitUsage =>
+            !IsBus && !IsCharge && !IsPointRedemption && !IsImplicitPointRedemption;
+
+        /// <summary>
+        /// 暗黙のポイント還元かどうか
+        /// </summary>
+        /// <remarks>
+        /// Issue #942: ICカードの生データでは、ポイント還元が乗車駅ありの負金額レコードとして
+        /// 記録されることがある（IsPointRedemption=falseのまま）。
+        /// 金額が負＝カードに入金されている＝チャージまたはポイント還元であるため、
+        /// IsCharge=falseかつIsPointRedemption=falseで金額が負のレコードはポイント還元とみなす。
+        /// </remarks>
+        public bool IsImplicitPointRedemption =>
+            Amount.HasValue
+            && Amount.Value < 0
+            && !IsCharge
+            && !IsPointRedemption;
     }
 }

@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 namespace ICCardManager.Models
 {
@@ -89,5 +90,26 @@ namespace ICCardManager.Models
         /// 詳細件数（クエリで取得）
         /// </summary>
         public int DetailCount { get; set; }
+
+        // === ドメインロジック ===
+
+        private static readonly Regex MidYearCarryoverPattern =
+            new Regex(@"^(1[0-2]|[1-9])月から繰越$", RegexOptions.Compiled);
+
+        /// <summary>
+        /// 繰越レコード（新規購入または年度途中繰越）かどうか
+        /// </summary>
+        /// <remarks>
+        /// 帳票のソート順や日次集計で特別扱いされるレコードの判定。
+        /// SQL内の「summary = '新規購入' OR summary LIKE '%月から繰越'」と同等。
+        /// </remarks>
+        public bool IsCarryover =>
+            Summary == "新規購入" || IsMidYearCarryover;
+
+        /// <summary>
+        /// 年度途中導入の繰越レコード（「○月から繰越」）かどうか
+        /// </summary>
+        public bool IsMidYearCarryover =>
+            !string.IsNullOrEmpty(Summary) && MidYearCarryoverPattern.IsMatch(Summary);
     }
 }

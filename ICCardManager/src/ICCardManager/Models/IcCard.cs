@@ -107,5 +107,23 @@ namespace ICCardManager.Models
         /// 新規購入や移行情報がない場合は null。
         /// </remarks>
         public int? CarryoverFiscalYear { get; set; }
+
+        // === ドメインロジック ===
+
+        /// <summary>
+        /// 貸出可能な状態かどうか（未削除 かつ 未払戻 かつ 未貸出）
+        /// </summary>
+        public bool IsAvailableForLending => !IsDeleted && !IsRefunded && !IsLent;
+
+        /// <summary>
+        /// 帳票作成可能な状態かどうか（未削除であれば払戻済でも作成可能）
+        /// </summary>
+        public bool CanCreateReport => !IsDeleted;
+
+        /// <summary>
+        /// 表示用のカード名（例: "はやかけん 001"）
+        /// </summary>
+        public string DisplayName =>
+            string.IsNullOrEmpty(CardNumber) ? CardType : $"{CardType} {CardNumber}";
     }
 }
