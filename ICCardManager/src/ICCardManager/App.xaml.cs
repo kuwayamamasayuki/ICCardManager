@@ -263,6 +263,10 @@ namespace ICCardManager
             services.AddSingleton<IDialogService>(sp => sp.GetRequiredService<NavigationService>());
             services.AddSingleton<IStaffAuthService, StaffAuthService>();
             services.AddSingleton<IStationMasterService, StationMasterService>();
+            services.AddSingleton<IDatabaseInfo>(sp => sp.GetRequiredService<DbContext>());
+            services.AddSingleton<SharedModeMonitor>();
+            services.AddSingleton<WarningService>();
+            services.AddSingleton<DashboardService>();
 
             // Infrastructure層
     #if DEBUG

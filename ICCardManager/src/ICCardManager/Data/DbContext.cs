@@ -8,6 +8,7 @@ using System.IO;
 using System.Security.AccessControl;
 using System.Security.Principal;
 using ICCardManager.Data.Migrations;
+using ICCardManager.Services;
 using Microsoft.Extensions.Logging;
 using System.Data.SQLite;
 
@@ -108,7 +109,7 @@ namespace ICCardManager.Data
 /// <summary>
     /// SQLiteデータベース接続管理クラス
     /// </summary>
-    public class DbContext : IDisposable
+    public class DbContext : IDisposable, IDatabaseInfo
     {
         private readonly string _connectionString;
         private readonly object _connectionLock = new object();
@@ -942,6 +943,35 @@ namespace ICCardManager.Data
 #pragma warning disable CS0618 // Obsolete
             return GetConnection().BeginTransaction();
 #pragma warning restore CS0618
+        }
+
+        /// <summary>
+        /// DB接続の疎通確認（IDatabaseInfo実装）
+        /// </summary>
+        /// <returns>接続可能な場合true</returns>
+        public bool CheckConnection()
+        {
+            if (IsConnectionSuspended)
+                return true;
+
+            try
+            {
+                using var lease = LeaseConnection();
+                using var command = lease.Connection.CreateCommand();
+                // Issue #1110: sqlite_masterからの読み取りで実際のファイルアクセスを強制
+                command.CommandText = "SELECT COUNT(*) FROM sqlite_master";
+                command.ExecuteScalar();
+                return true;
+            }
+            catch (InvalidOperationException)
+            {
+                // 接続一時停止中 — ネットワーク切断ではない
+                return true;
+            }
+            catch (Exception)
+            {
+                return false;
+            }
         }
 
         /// <summary>

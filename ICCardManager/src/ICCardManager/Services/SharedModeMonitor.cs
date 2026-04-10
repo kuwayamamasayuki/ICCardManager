@@ -1,0 +1,189 @@
+using System;
+using System.Threading.Tasks;
+using ICCardManager.Infrastructure.Timing;
+
+namespace ICCardManager.Services
+{
+    /// <summary>
+    /// 共有フォルダモードでのDB接続監視と同期表示を担当するサービス
+    /// </summary>
+    /// <remarks>
+    /// MainViewModelから抽出。30秒ごとのDB接続ヘルスチェックと
+    /// 1秒ごとの同期経過時間表示を管理する。
+    /// </remarks>
+    public class SharedModeMonitor
+    {
+        private readonly IDatabaseInfo _databaseInfo;
+        private readonly ITimerFactory _timerFactory;
+
+        private ITimer _healthCheckTimer;
+        private ITimer _syncDisplayTimer;
+        private DateTime? _lastRefreshTime;
+        private bool _isHealthCheckRunning;
+
+        /// <summary>
+        /// 最終同期からの経過がしきい値を超えた場合にstaleとみなす秒数
+        /// </summary>
+        internal const int StaleThresholdSeconds = 15;
+
+        /// <summary>
+        /// DB接続チェック結果のイベント
+        /// </summary>
+        public event EventHandler<DatabaseHealthEventArgs> HealthCheckCompleted;
+
+        /// <summary>
+        /// 同期表示テキストが更新されたときのイベント
+        /// </summary>
+        public event EventHandler<SyncDisplayEventArgs> SyncDisplayUpdated;
+
+        public SharedModeMonitor(IDatabaseInfo databaseInfo, ITimerFactory timerFactory)
+        {
+            _databaseInfo = databaseInfo;
+            _timerFactory = timerFactory;
+        }
+
+        /// <summary>
+        /// 監視を開始する
+        /// </summary>
+        public void Start()
+        {
+            Stop();
+
+            _healthCheckTimer = _timerFactory.Create();
+            _healthCheckTimer.Interval = TimeSpan.FromSeconds(30);
+            _healthCheckTimer.Tick += OnHealthCheckTick;
+            _healthCheckTimer.Start();
+
+            // Issue #1131: 同期経過時間の表示更新用タイマー（1秒間隔）
+            _syncDisplayTimer = _timerFactory.Create();
+            _syncDisplayTimer.Interval = TimeSpan.FromSeconds(1);
+            _syncDisplayTimer.Tick += OnSyncDisplayTick;
+            _syncDisplayTimer.Start();
+        }
+
+        /// <summary>
+        /// 監視を停止する
+        /// </summary>
+        public void Stop()
+        {
+            if (_healthCheckTimer != null)
+            {
+                _healthCheckTimer.Stop();
+                _healthCheckTimer.Tick -= OnHealthCheckTick;
+                _healthCheckTimer = null;
+            }
+
+            if (_syncDisplayTimer != null)
+            {
+                _syncDisplayTimer.Stop();
+                _syncDisplayTimer.Tick -= OnSyncDisplayTick;
+                _syncDisplayTimer = null;
+            }
+        }
+
+        /// <summary>
+        /// データの同期が完了したことを記録する
+        /// </summary>
+        public void RecordRefresh()
+        {
+            _lastRefreshTime = DateTime.Now;
+            UpdateSyncDisplayText();
+        }
+
+        /// <summary>
+        /// ヘルスチェックが実行中かどうか
+        /// </summary>
+        public bool IsHealthCheckRunning => _isHealthCheckRunning;
+
+        /// <summary>
+        /// ヘルスチェックの実行中フラグを設定する（手動リフレッシュ時に使用）
+        /// </summary>
+        internal void SetHealthCheckRunning(bool value)
+        {
+            _isHealthCheckRunning = value;
+        }
+
+        /// <summary>
+        /// DB接続の疎通確認をバックグラウンドで実行する
+        /// </summary>
+        public async Task<bool> CheckConnectionAsync()
+        {
+            return await Task.Run(() => _databaseInfo.CheckConnection());
+        }
+
+        /// <summary>
+        /// Issue #1131: 最終同期からの経過時間をテキストとして更新
+        /// </summary>
+        internal void UpdateSyncDisplayText()
+        {
+            if (_lastRefreshTime == null)
+            {
+                SyncDisplayUpdated?.Invoke(this, new SyncDisplayEventArgs("同期待ち...", false));
+                return;
+            }
+
+            var elapsed = (int)(DateTime.Now - _lastRefreshTime.Value).TotalSeconds;
+            string text;
+            if (elapsed < 5)
+            {
+                text = "最終同期: たった今";
+            }
+            else if (elapsed < 60)
+            {
+                text = $"最終同期: {elapsed}秒前";
+            }
+            else
+            {
+                var minutes = elapsed / 60;
+                text = $"最終同期: {minutes}分前";
+            }
+
+            SyncDisplayUpdated?.Invoke(this, new SyncDisplayEventArgs(text, elapsed >= StaleThresholdSeconds));
+        }
+
+        private async void OnHealthCheckTick(object sender, EventArgs e)
+        {
+            if (_isHealthCheckRunning)
+                return;
+
+            _isHealthCheckRunning = true;
+            try
+            {
+                var isConnected = await CheckConnectionAsync();
+                HealthCheckCompleted?.Invoke(this, new DatabaseHealthEventArgs(isConnected));
+            }
+            finally
+            {
+                _isHealthCheckRunning = false;
+            }
+        }
+
+        private void OnSyncDisplayTick(object sender, EventArgs e)
+        {
+            UpdateSyncDisplayText();
+        }
+    }
+
+    /// <summary>
+    /// DB接続ヘルスチェック結果のイベント引数
+    /// </summary>
+    public class DatabaseHealthEventArgs : EventArgs
+    {
+        public bool IsConnected { get; }
+        public DatabaseHealthEventArgs(bool isConnected) => IsConnected = isConnected;
+    }
+
+    /// <summary>
+    /// 同期表示更新のイベント引数
+    /// </summary>
+    public class SyncDisplayEventArgs : EventArgs
+    {
+        public string Text { get; }
+        public bool IsStale { get; }
+        public SyncDisplayEventArgs(string text, bool isStale)
+        {
+            Text = text;
+            IsStale = isStale;
+        }
+    }
+}

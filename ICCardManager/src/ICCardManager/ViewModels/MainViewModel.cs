@@ -16,7 +16,6 @@ using ICCardManager.Infrastructure.Sound;
 using ICCardManager.Infrastructure.Caching;
 using ICCardManager.Infrastructure.Timing;
 using ICCardManager.Models;
-using ICCardManager.Data;
 using ICCardManager.Services;
 using Microsoft.Extensions.Options;
 
@@ -110,17 +109,12 @@ public partial class MainViewModel : ViewModelBase
     private readonly LedgerConsistencyChecker _ledgerConsistencyChecker;
     private readonly ITimerFactory _timerFactory;
     private readonly IDispatcherService _dispatcherService;
-    private readonly DbContext _dbContext;
+    private readonly IDatabaseInfo _databaseInfo;
     private readonly ICacheService _cacheService;
+    private readonly SharedModeMonitor _sharedModeMonitor;
+    private readonly WarningService _warningService;
+    private readonly DashboardService _dashboardService;
     private readonly HashSet<CardReadingSource> _suppressionSources = new();
-    private ITimer? _dbHealthCheckTimer;
-    private ITimer? _syncDisplayTimer;
-    private DateTime? _lastRefreshTime;
-
-    /// <summary>
-    /// Issue #1131: データの鮮度が低い（最終同期から15秒以上経過）かどうか
-    /// </summary>
-    internal const int StaleThresholdSeconds = 15;
 
     /// <summary>
     /// カード読み取りが抑制されているかどうか（テスト用）
@@ -130,7 +124,7 @@ public partial class MainViewModel : ViewModelBase
     /// <summary>
     /// 共有モード（ネットワーク共有フォルダ上のDB）かどうか
     /// </summary>
-    public bool IsSharedMode => _dbContext.IsSharedMode;
+    public bool IsSharedMode => _databaseInfo.IsSharedMode;
 
     private ITimer? _timeoutTimer;
     private string? _currentStaffIdm;
@@ -405,8 +399,11 @@ public partial class MainViewModel : ViewModelBase
         IOptions<AppOptions> appOptions,
         ITimerFactory timerFactory,
         IDispatcherService dispatcherService,
-        DbContext dbContext,
-        ICacheService cacheService)
+        IDatabaseInfo databaseInfo,
+        ICacheService cacheService,
+        SharedModeMonitor sharedModeMonitor,
+        WarningService warningService,
+        DashboardService dashboardService)
     {
         _cardReader = cardReader;
         _soundPlayer = soundPlayer;
@@ -425,8 +422,11 @@ public partial class MainViewModel : ViewModelBase
         _timeoutSeconds = appOptions.Value.StaffCardTimeoutSeconds;
         _timerFactory = timerFactory;
         _dispatcherService = dispatcherService;
-        _dbContext = dbContext;
+        _databaseInfo = databaseInfo;
         _cacheService = cacheService;
+        _sharedModeMonitor = sharedModeMonitor;
+        _warningService = warningService;
+        _dashboardService = dashboardService;
 
         // カード読み取り抑制メッセージの受信を登録（Issue #852）
         _messenger.Register<CardReadingSuppressedMessage>(this, (recipient, message) =>
@@ -441,6 +441,10 @@ public partial class MainViewModel : ViewModelBase
         _cardReader.CardRead += OnCardRead;
         _cardReader.Error += OnCardReaderError;
         _cardReader.ConnectionStateChanged += OnCardReaderConnectionStateChanged;
+
+        // SharedModeMonitorのイベント登録
+        _sharedModeMonitor.HealthCheckCompleted += OnSharedModeHealthCheckCompleted;
+        _sharedModeMonitor.SyncDisplayUpdated += OnSyncDisplayUpdated;
 
         // 履歴表示用の年リストを初期化（今年度から過去6年分）
         var currentYear = DateTime.Today.Year;
@@ -478,28 +482,25 @@ public partial class MainViewModel : ViewModelBase
         using (BeginBusy("初期化中..."))
         {
             // Issue #1172: ジャーナルモードがDELETE以外（degraded）の場合、UI警告を追加
-            // クラッシュ耐性が低下している可能性をユーザーに通知する
-            CheckJournalModeWarning();
+            var journalWarning = _warningService.CheckJournalModeWarning();
+            if (journalWarning != null)
+                WarningMessages.Add(journalWarning);
 
             // Issue #790: 起動時に貸出状態の整合性をチェック・修復
             await _lendingService.RepairLentStatusConsistencyAsync();
 
-            // Issue #504: 初期化処理を並列化して高速化
-            // 設定取得は他の処理と並列で実行可能
-            var settingsTask = _settingsRepository.GetAppSettingsAsync();
-
             // ダッシュボード更新（カード情報・残高を取得）
             await RefreshDashboardAsync();
 
-            // 設定を待機
-            var settings = await settingsTask;
+            // 設定を取得してサウンドモードを適用
+            var settings = await _settingsRepository.GetAppSettingsAsync();
             _soundPlayer.SoundMode = settings.SoundMode;
 
             // 貸出中カードを取得
             await RefreshLentCardsAsync();
 
             // 警告チェック（ダッシュボードデータを使用して高速化）
-            CheckWarningsFromDashboard(settings.WarningBalance);
+            ApplyDataWarnings(settings.WarningBalance);
 
             // カード読み取り開始
             await _cardReader.StartReadingAsync();
@@ -510,7 +511,7 @@ public partial class MainViewModel : ViewModelBase
             // 共有モード時はDB接続の定期ヘルスチェックを開始
             if (IsSharedMode)
             {
-                StartDatabaseHealthCheck();
+                _sharedModeMonitor.Start();
             }
         }
     }
@@ -523,121 +524,65 @@ public partial class MainViewModel : ViewModelBase
     /// DbContext.IsJournalModeDegraded がtrueの場合、警告メッセージエリアに
     /// クラッシュ耐性低下の警告を表示する。重複追加は防止する。
     /// </remarks>
+    /// <summary>
+    /// Issue #1172: ジャーナルモード警告チェック（WarningServiceに委譲）
+    /// </summary>
     internal void CheckJournalModeWarning()
     {
-        if (!_dbContext.IsJournalModeDegraded)
-            return;
-
-        // 重複防止
         if (WarningMessages.Any(w => w.Type == WarningType.DatabaseJournalModeDegraded))
             return;
 
-        WarningMessages.Add(new WarningItem
-        {
-            Type = WarningType.DatabaseJournalModeDegraded,
-            DisplayText = $"⚠️ データベースのクラッシュ耐性が低下しています（journal_mode={_dbContext.CurrentJournalMode}）。" +
-                          "ファイルサーバ管理者にご相談ください。"
-        });
+        var warning = _warningService.CheckJournalModeWarning();
+        if (warning != null)
+            WarningMessages.Add(warning);
     }
 
     /// <summary>
-    /// 共有モード時のDB接続ヘルスチェックタイマーを開始
+    /// SharedModeMonitorからのヘルスチェック結果を受けてUI警告を更新
     /// </summary>
-    private void StartDatabaseHealthCheck()
+    private async void OnSharedModeHealthCheckCompleted(object sender, DatabaseHealthEventArgs e)
     {
-        StopDatabaseHealthCheck();
-        _dbHealthCheckTimer = _timerFactory.Create();
-        _dbHealthCheckTimer.Interval = TimeSpan.FromSeconds(30);
-        _dbHealthCheckTimer.Tick += OnDatabaseHealthCheckTick;
-        _dbHealthCheckTimer.Start();
+        UpdateConnectionWarning(e.IsConnected);
 
-        // Issue #1131: 同期経過時間の表示更新用タイマー（1秒間隔）
-        _syncDisplayTimer = _timerFactory.Create();
-        _syncDisplayTimer.Interval = TimeSpan.FromSeconds(1);
-        _syncDisplayTimer.Tick += OnSyncDisplayTimerTick;
-        _syncDisplayTimer.Start();
-    }
-
-    /// <summary>
-    /// DB接続ヘルスチェックタイマーを停止
-    /// </summary>
-    internal void StopDatabaseHealthCheck()
-    {
-        if (_dbHealthCheckTimer != null)
-        {
-            _dbHealthCheckTimer.Stop();
-            _dbHealthCheckTimer.Tick -= OnDatabaseHealthCheckTick;
-            _dbHealthCheckTimer = null;
-        }
-
-        if (_syncDisplayTimer != null)
-        {
-            _syncDisplayTimer.Stop();
-            _syncDisplayTimer.Tick -= OnSyncDisplayTimerTick;
-            _syncDisplayTimer = null;
-        }
-    }
-
-    /// <summary>
-    /// Issue #1131: 同期経過時間の表示を1秒ごとに更新
-    /// </summary>
-    private void OnSyncDisplayTimerTick(object sender, EventArgs e)
-    {
-        UpdateSyncDisplayText();
-    }
-
-    /// <summary>
-    /// Issue #1131: 最終同期からの経過時間をテキストとして更新
-    /// </summary>
-    internal void UpdateSyncDisplayText()
-    {
-        if (_lastRefreshTime == null)
-        {
-            LastRefreshText = "同期待ち...";
-            IsRefreshStale = false;
+        // 接続断の場合はリフレッシュをスキップ
+        if (!e.IsConnected)
             return;
-        }
 
-        var elapsed = (int)(DateTime.Now - _lastRefreshTime.Value).TotalSeconds;
-        if (elapsed < 5)
+        // 共有モード: 他PCの変更を反映するためダッシュボードと貸出中カードを定期リフレッシュ
+        await RefreshSharedDataAsync();
+    }
+
+    /// <summary>
+    /// SharedModeMonitorからの同期表示更新を受けてUIプロパティを更新
+    /// </summary>
+    private void OnSyncDisplayUpdated(object sender, SyncDisplayEventArgs e)
+    {
+        LastRefreshText = e.Text;
+        IsRefreshStale = e.IsStale;
+    }
+
+    /// <summary>
+    /// DB接続警告のUI表示を更新
+    /// </summary>
+    private void UpdateConnectionWarning(bool isConnected)
+    {
+        if (isConnected)
         {
-            LastRefreshText = "最終同期: たった今";
-        }
-        else if (elapsed < 60)
-        {
-            LastRefreshText = $"最終同期: {elapsed}秒前";
+            var existing = WarningMessages
+                .FirstOrDefault(w => w.Type == WarningType.DatabaseConnectionLost);
+            if (existing != null)
+                WarningMessages.Remove(existing);
         }
         else
         {
-            var minutes = elapsed / 60;
-            LastRefreshText = $"最終同期: {minutes}分前";
-        }
-
-        IsRefreshStale = elapsed >= StaleThresholdSeconds;
-    }
-
-    private bool _isHealthCheckRunning;
-
-    private async void OnDatabaseHealthCheckTick(object sender, EventArgs e)
-    {
-        if (_isHealthCheckRunning)
-            return;
-
-        _isHealthCheckRunning = true;
-        try
-        {
-            await CheckDatabaseConnectionAsync();
-
-            // 接続断の場合はリフレッシュをスキップ（キャッシュからの古いデータで更新時刻を記録しない）
-            if (WarningMessages.Any(w => w.Type == WarningType.DatabaseConnectionLost))
-                return;
-
-            // 共有モード: 他PCの変更を反映するためダッシュボードと貸出中カードを定期リフレッシュ
-            await RefreshSharedDataAsync();
-        }
-        finally
-        {
-            _isHealthCheckRunning = false;
+            if (!WarningMessages.Any(w => w.Type == WarningType.DatabaseConnectionLost))
+            {
+                WarningMessages.Add(new WarningItem
+                {
+                    Type = WarningType.DatabaseConnectionLost,
+                    DisplayText = "ネットワーク共有フォルダへの接続が切断されています。ネットワーク接続を確認してください。"
+                });
+            }
         }
     }
 
@@ -655,13 +600,12 @@ public partial class MainViewModel : ViewModelBase
             await RefreshLentCardsAsync();
             await RefreshDashboardAsync();
 
-            // Issue #1110, #1131: 最終同期時刻を記録（表示はタイマーで更新）
-            _lastRefreshTime = DateTime.Now;
-            UpdateSyncDisplayText();
+            // Issue #1110, #1131: 最終同期時刻を記録
+            _sharedModeMonitor.RecordRefresh();
         }
         catch (Exception)
         {
-            // リフレッシュ失敗は無視（接続断の場合はCheckDatabaseConnectionAsyncが警告を出す）
+            // リフレッシュ失敗は無視
         }
     }
 
@@ -671,10 +615,10 @@ public partial class MainViewModel : ViewModelBase
     [RelayCommand]
     private async Task ManualRefreshAsync()
     {
-        if (!IsSharedMode || _isHealthCheckRunning)
+        if (!IsSharedMode || _sharedModeMonitor.IsHealthCheckRunning)
             return;
 
-        _isHealthCheckRunning = true;
+        _sharedModeMonitor.SetHealthCheckRunning(true);
         try
         {
             // キャッシュを全クリアして最新データを取得
@@ -683,70 +627,7 @@ public partial class MainViewModel : ViewModelBase
         }
         finally
         {
-            _isHealthCheckRunning = false;
-        }
-    }
-
-    /// <summary>
-    /// DB接続状態をバックグラウンドでチェックし、結果をUIスレッドに反映
-    /// </summary>
-    private async Task CheckDatabaseConnectionAsync()
-    {
-        // Issue #1166: 接続一時停止中（リストア中）はヘルスチェックをスキップ
-        // 停止中にGetConnection()を呼ぶと例外が発生し、誤ってネットワーク切断と判定されるため
-        if (_dbContext.IsConnectionSuspended)
-            return;
-
-        // バックグラウンドスレッドでDBクエリを実行（UIフリーズ防止）
-        var isConnected = await Task.Run(() =>
-        {
-            try
-            {
-                // Issue #1166: Task.Run内でも停止状態を再チェック
-                // （タスクのスケジューリング遅延で停止が開始された可能性）
-                if (_dbContext.IsConnectionSuspended)
-                    return true;
-
-                // Issue #1110: SELECT 1 はSQLiteの定数式でファイルI/Oが発生しないため
-                // ネットワーク切断を検出できない。sqlite_masterからの読み取りで
-                // 実際のファイルアクセスを強制する。
-                using var lease = _dbContext.LeaseConnection();
-                using var command = lease.Connection.CreateCommand();
-                command.CommandText = "SELECT COUNT(*) FROM sqlite_master";
-                command.ExecuteScalar();
-                return true;
-            }
-            catch (InvalidOperationException)
-            {
-                // Issue #1166: 接続一時停止中 — ネットワーク切断ではないのでtrueを返す
-                return true;
-            }
-            catch (Exception)
-            {
-                return false;
-            }
-        });
-
-        // UIスレッドで警告を更新
-        if (isConnected)
-        {
-            var existing = WarningMessages
-                .FirstOrDefault(w => w.Type == WarningType.DatabaseConnectionLost);
-            if (existing != null)
-            {
-                WarningMessages.Remove(existing);
-            }
-        }
-        else
-        {
-            if (!WarningMessages.Any(w => w.Type == WarningType.DatabaseConnectionLost))
-            {
-                WarningMessages.Add(new WarningItem
-                {
-                    Type = WarningType.DatabaseConnectionLost,
-                    DisplayText = "ネットワーク共有フォルダへの接続が切断されています。ネットワーク接続を確認してください。"
-                });
-            }
+            _sharedModeMonitor.SetHealthCheckRunning(false);
         }
     }
 
@@ -756,23 +637,21 @@ public partial class MainViewModel : ViewModelBase
     private async Task CheckWarningsAsync()
     {
         var settings = await _settingsRepository.GetAppSettingsAsync();
-        CheckWarningsFromDashboard(settings.WarningBalance);
+        ApplyDataWarnings(settings.WarningBalance);
         await CheckIncompleteBusStopsAsync();
     }
 
     /// <summary>
-    /// Issue #504: ダッシュボードデータから警告をチェック（高速版）
+    /// Issue #504: ダッシュボードデータからデータ系の警告を生成・適用（WarningServiceに委譲）
     /// </summary>
-    /// <remarks>
-    /// 既に読み込み済みのダッシュボードデータを使用して、追加のDBクエリなしで警告をチェック。
-    /// </remarks>
-    private void CheckWarningsFromDashboard(int warningBalance)
+    private void ApplyDataWarnings(int warningBalance)
     {
         // インフラ系の警告（接続断・カードリーダー）は保持し、データ系の警告のみクリア
         var infraWarnings = WarningMessages
             .Where(w => w.Type == WarningType.DatabaseConnectionLost ||
                         w.Type == WarningType.CardReaderConnection ||
-                        w.Type == WarningType.CardReaderError)
+                        w.Type == WarningType.CardReaderError ||
+                        w.Type == WarningType.DatabaseJournalModeDegraded)
             .ToList();
         WarningMessages.Clear();
         foreach (var warning in infraWarnings)
@@ -780,38 +659,23 @@ public partial class MainViewModel : ViewModelBase
             WarningMessages.Add(warning);
         }
 
-        // 残額警告チェック（ダッシュボードから取得済みのデータを使用）
-        foreach (var item in CardBalanceDashboard)
+        // WarningServiceに委譲して残額警告を生成
+        var lowBalanceWarnings = _warningService.CheckLowBalanceWarnings(CardBalanceDashboard, warningBalance);
+        foreach (var warning in lowBalanceWarnings)
         {
-            if (item.CurrentBalance < warningBalance)
-            {
-                WarningMessages.Add(new WarningItem
-                {
-                    DisplayText = $"⚠️ {item.CardType} {item.CardNumber}: 残額 {DisplayFormatters.FormatBalanceWithUnit(item.CurrentBalance)}（しきい値: {warningBalance:N0}円）",
-                    Type = WarningType.LowBalance,
-                    CardIdm = item.CardIdm
-                });
-            }
+            WarningMessages.Add(warning);
         }
     }
 
     /// <summary>
-    /// バス停名未入力チェック（バックグラウンドで実行）
+    /// バス停名未入力チェック（WarningServiceに委譲）
     /// </summary>
     private async Task CheckIncompleteBusStopsAsync()
     {
-        // バス停名未入力チェックはバックグラウンドで実行
-        var ledgers = await _ledgerRepository.GetByDateRangeAsync(
-            null, DateTime.Now.AddYears(-1), DateTime.Now);
-
-        var incompleteCount = ledgers.Count(l => l.Summary?.Contains("★") == true);
-        if (incompleteCount > 0)
+        var warning = await _warningService.CheckIncompleteBusStopsAsync();
+        if (warning != null)
         {
-            WarningMessages.Add(new WarningItem
-            {
-                DisplayText = $"⚠️ バス停名が未入力の履歴が{incompleteCount}件あります",
-                Type = WarningType.IncompleteBusStop
-            });
+            WarningMessages.Add(warning);
         }
     }
 
@@ -830,80 +694,24 @@ public partial class MainViewModel : ViewModelBase
     }
 
     /// <summary>
-    /// カード残高ダッシュボードを更新
+    /// カード残高ダッシュボードを更新（DashboardServiceに委譲）
     /// </summary>
     private async Task RefreshDashboardAsync()
     {
-        // Issue #504: データ取得を並列化して高速化
-        var settingsTask = _settingsRepository.GetAppSettingsAsync();
-        var cardsTask = _cardRepository.GetAllAsync();
-        var balancesTask = _ledgerRepository.GetAllLatestBalancesAsync();
-        var staffTask = _staffRepository.GetAllAsync();
-
-        await Task.WhenAll(settingsTask, cardsTask, balancesTask, staffTask);
-
-        // awaitを使用してデッドロックを防止（Task.WhenAll後でも.Resultは避ける）
-        var settings = await settingsTask;
-        var cards = await cardsTask;
-        var balances = await balancesTask;
-        var staffDict = (await staffTask).ToDictionary(s => s.StaffIdm, s => s.Name);
-
-        var dashboardItems = new List<CardBalanceDashboardItem>();
-
-        foreach (var card in cards)
-        {
-            var (balance, lastUsageDate) = balances.TryGetValue(card.CardIdm, out var info)
-                ? info
-                : (0, (DateTime?)null);
-
-            var staffName = card.IsLent && card.LastLentStaff != null && staffDict.TryGetValue(card.LastLentStaff, out var name)
-                ? name
-                : null;
-
-            dashboardItems.Add(new CardBalanceDashboardItem
-            {
-                CardIdm = card.CardIdm,
-                CardType = card.CardType,
-                CardNumber = card.CardNumber,
-                CurrentBalance = balance,
-                IsBalanceWarning = balance <= settings.WarningBalance,
-                LastUsageDate = lastUsageDate,
-                IsLent = card.IsLent,
-                LentStaffName = staffName
-            });
-        }
-
-        // ソート適用
-        var sortedItems = SortDashboardItems(dashboardItems);
-
+        var result = await _dashboardService.BuildDashboardAsync(DashboardSortOrder);
         CardBalanceDashboard.Clear();
-        foreach (var item in sortedItems)
+        foreach (var item in result.Items)
         {
             CardBalanceDashboard.Add(item);
         }
     }
 
     /// <summary>
-    /// ダッシュボードアイテムをソート
-    /// </summary>
-    private IEnumerable<CardBalanceDashboardItem> SortDashboardItems(IEnumerable<CardBalanceDashboardItem> items)
-    {
-        return DashboardSortOrder switch
-        {
-            DashboardSortOrder.CardName => items.OrderByCardDefault(x => x.CardType, x => x.CardNumber),
-            DashboardSortOrder.BalanceAscending => items.OrderBy(x => x.CurrentBalance).ThenByCardDefault(x => x.CardType, x => x.CardNumber),
-            DashboardSortOrder.BalanceDescending => items.OrderByDescending(x => x.CurrentBalance).ThenByCardDefault(x => x.CardType, x => x.CardNumber),
-            DashboardSortOrder.LastUsageDate => items.OrderByDescending(x => x.LastUsageDate ?? DateTime.MinValue).ThenByCardDefault(x => x.CardType, x => x.CardNumber),
-            _ => items
-        };
-    }
-
-    /// <summary>
-    /// ソート順変更時にダッシュボードを再ソート
+    /// ソート順変更時にダッシュボードを再ソート（DashboardServiceに委譲）
     /// </summary>
     partial void OnDashboardSortOrderChanged(DashboardSortOrder value)
     {
-        var sortedItems = SortDashboardItems(CardBalanceDashboard.ToList());
+        var sortedItems = _dashboardService.SortItems(CardBalanceDashboard.ToList(), value);
         CardBalanceDashboard.Clear();
         foreach (var item in sortedItems)
         {
@@ -2619,10 +2427,11 @@ public partial class MainViewModel : ViewModelBase
     /// </summary>
     internal async Task RetryDatabaseConnectionAsync()
     {
-        await CheckDatabaseConnectionAsync();
+        var isConnected = await _sharedModeMonitor.CheckConnectionAsync();
+        UpdateConnectionWarning(isConnected);
 
         // 接続が復旧した場合はデータもリフレッシュ
-        if (!WarningMessages.Any(w => w.Type == WarningType.DatabaseConnectionLost))
+        if (isConnected)
         {
             await RefreshSharedDataAsync();
         }
