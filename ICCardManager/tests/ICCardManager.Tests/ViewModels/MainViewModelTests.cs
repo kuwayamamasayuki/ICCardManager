@@ -107,6 +107,7 @@ public class MainViewModelTests
 
     private MainViewModel CreateViewModel(int timeoutSeconds = 60)
     {
+        var databaseInfoMock = new Mock<IDatabaseInfo>();
         return new MainViewModel(
             _cardReaderMock.Object,
             _soundPlayerMock.Object,
@@ -125,8 +126,12 @@ public class MainViewModelTests
             Options.Create(new AppOptions { StaffCardTimeoutSeconds = timeoutSeconds }),
             _timerFactory,
             _dispatcherService,
-            new Mock<DbContext>().Object,
-            new Mock<ICacheService>().Object);
+            databaseInfoMock.Object,
+            new Mock<ICacheService>().Object,
+            new SharedModeMonitor(databaseInfoMock.Object, _timerFactory),
+            new WarningService(_ledgerRepositoryMock.Object, databaseInfoMock.Object),
+            new DashboardService(_cardRepositoryMock.Object, _ledgerRepositoryMock.Object,
+                _staffRepositoryMock.Object, _settingsRepositoryMock.Object));
     }
 
     #region AppState列挙型テスト
@@ -471,6 +476,7 @@ public class MainViewModelTests
         // Arrange - 専用のモックを使い30秒タイムアウトのVMを分離して作成
         var isolatedCardReaderMock = new Mock<ICardReader>();
         var isolatedTimerFactory = new TestTimerFactory();
+        var isolatedDbInfoMock = new Mock<IDatabaseInfo>();
         var customVm = new MainViewModel(
             isolatedCardReaderMock.Object,
             _soundPlayerMock.Object,
@@ -489,8 +495,12 @@ public class MainViewModelTests
             Options.Create(new AppOptions { StaffCardTimeoutSeconds = 30 }),
             isolatedTimerFactory,
             _dispatcherService,
-            new Mock<DbContext>().Object,
-            new Mock<ICacheService>().Object);
+            isolatedDbInfoMock.Object,
+            new Mock<ICacheService>().Object,
+            new SharedModeMonitor(isolatedDbInfoMock.Object, isolatedTimerFactory),
+            new WarningService(_ledgerRepositoryMock.Object, isolatedDbInfoMock.Object),
+            new DashboardService(_cardRepositoryMock.Object, _ledgerRepositoryMock.Object,
+                _staffRepositoryMock.Object, _settingsRepositoryMock.Object));
 
         var staffIdm = "0102030405060708";
         _staffRepositoryMock.Setup(r => r.GetByIdmAsync(staffIdm, It.IsAny<bool>()))
@@ -1072,10 +1082,10 @@ public class MainViewModelTests
     public void CheckJournalModeWarning_WhenDegraded_AddsWarning()
     {
         // Arrange
-        var dbContextMock = new Mock<DbContext>();
-        dbContextMock.SetupGet(d => d.IsJournalModeDegraded).Returns(true);
-        dbContextMock.SetupGet(d => d.CurrentJournalMode).Returns("truncate");
-        var vm = CreateViewModelWithDbContext(dbContextMock.Object);
+        var databaseInfoMock = new Mock<IDatabaseInfo>();
+        databaseInfoMock.SetupGet(d => d.IsJournalModeDegraded).Returns(true);
+        databaseInfoMock.SetupGet(d => d.CurrentJournalMode).Returns("truncate");
+        var vm = CreateViewModelWithDatabaseInfo(databaseInfoMock.Object);
 
         // Act
         vm.CheckJournalModeWarning();
@@ -1094,10 +1104,10 @@ public class MainViewModelTests
     public void CheckJournalModeWarning_WhenNotDegraded_DoesNotAddWarning()
     {
         // Arrange
-        var dbContextMock = new Mock<DbContext>();
-        dbContextMock.SetupGet(d => d.IsJournalModeDegraded).Returns(false);
-        dbContextMock.SetupGet(d => d.CurrentJournalMode).Returns("delete");
-        var vm = CreateViewModelWithDbContext(dbContextMock.Object);
+        var databaseInfoMock = new Mock<IDatabaseInfo>();
+        databaseInfoMock.SetupGet(d => d.IsJournalModeDegraded).Returns(false);
+        databaseInfoMock.SetupGet(d => d.CurrentJournalMode).Returns("delete");
+        var vm = CreateViewModelWithDatabaseInfo(databaseInfoMock.Object);
 
         // Act
         vm.CheckJournalModeWarning();
@@ -1113,10 +1123,10 @@ public class MainViewModelTests
     public void CheckJournalModeWarning_CalledTwice_DoesNotDuplicate()
     {
         // Arrange
-        var dbContextMock = new Mock<DbContext>();
-        dbContextMock.SetupGet(d => d.IsJournalModeDegraded).Returns(true);
-        dbContextMock.SetupGet(d => d.CurrentJournalMode).Returns("persist");
-        var vm = CreateViewModelWithDbContext(dbContextMock.Object);
+        var databaseInfoMock = new Mock<IDatabaseInfo>();
+        databaseInfoMock.SetupGet(d => d.IsJournalModeDegraded).Returns(true);
+        databaseInfoMock.SetupGet(d => d.CurrentJournalMode).Returns("persist");
+        var vm = CreateViewModelWithDatabaseInfo(databaseInfoMock.Object);
 
         // Act
         vm.CheckJournalModeWarning();
@@ -1128,9 +1138,9 @@ public class MainViewModelTests
     }
 
     /// <summary>
-    /// テスト用: 任意のDbContextを注入してViewModelを生成
+    /// テスト用: 任意のIDatabaseInfoを注入してViewModelを生成
     /// </summary>
-    private MainViewModel CreateViewModelWithDbContext(DbContext dbContext)
+    private MainViewModel CreateViewModelWithDatabaseInfo(IDatabaseInfo databaseInfo)
     {
         return new MainViewModel(
             _cardReaderMock.Object,
@@ -1150,8 +1160,12 @@ public class MainViewModelTests
             Options.Create(new AppOptions { StaffCardTimeoutSeconds = 60 }),
             _timerFactory,
             _dispatcherService,
-            dbContext,
-            new Mock<ICacheService>().Object);
+            databaseInfo,
+            new Mock<ICacheService>().Object,
+            new SharedModeMonitor(databaseInfo, _timerFactory),
+            new WarningService(_ledgerRepositoryMock.Object, databaseInfo),
+            new DashboardService(_cardRepositoryMock.Object, _ledgerRepositoryMock.Object,
+                _staffRepositoryMock.Object, _settingsRepositoryMock.Object));
     }
 
     #endregion
