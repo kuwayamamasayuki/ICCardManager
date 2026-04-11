@@ -575,6 +575,128 @@ public class LedgerMergeServiceTests
         result.MergedLedger!.Date.Should().Be(date1, "統合先は最古のエントリ");
     }
 
+    /// <summary>
+    /// 鉄道+バスの混在マージで、Summaryに両方が含まれること（バスは★マーク付き）
+    /// </summary>
+    [Fact]
+    [Trait("Category", "Unit")]
+    public async Task MergeAsync_RailAndBus_RegeneratesSummaryWithBoth()
+    {
+        // Arrange
+        var date = new DateTime(2026, 2, 3);
+
+        var railLedger = CreateTestLedger(1, TestCardIdm, date, "鉄道（博多～天神）", 260, 9740);
+        railLedger.Details.Add(CreateRailDetail(1, "博多", "天神", 260, 9740, 1, date));
+
+        var busLedger = CreateTestLedger(2, TestCardIdm, date, "バス（★）", 230, 9510);
+        busLedger.Details.Add(new LedgerDetail
+        {
+            LedgerId = 2,
+            IsBus = true,
+            Amount = 230,
+            Balance = 9510,
+            SequenceNumber = 2,
+            UseDate = date
+        });
+
+        SetupGetByIdMocks(railLedger, busLedger);
+        SetupMergeMockSuccess();
+
+        // Act
+        var result = await _service.MergeAsync(new List<int> { 1, 2 });
+
+        // Assert
+        result.Success.Should().BeTrue();
+        result.MergedLedger!.Expense.Should().Be(490, "260 + 230 = 490");
+        result.MergedLedger.Summary.Should().Contain("鉄道", "鉄道部分が含まれる");
+        result.MergedLedger.Summary.Should().Contain("バス", "バス部分も含まれる");
+    }
+
+    /// <summary>
+    /// ポイント還元のみ2件のマージ（Income合算、Expenseは0、Balanceは最新）
+    /// </summary>
+    [Fact]
+    [Trait("Category", "Unit")]
+    public async Task MergeAsync_TwoPointRedemptions_SumsIncomeCorrectly()
+    {
+        // Arrange
+        var date = new DateTime(2026, 2, 3);
+
+        var ledger1 = new Ledger
+        {
+            Id = 1,
+            CardIdm = TestCardIdm,
+            Date = date,
+            Summary = "ポイント還元",
+            Income = 100,
+            Expense = 0,
+            Balance = 5100,
+            Details = new List<LedgerDetail>
+            {
+                new() { LedgerId = 1, IsPointRedemption = true, Amount = 100, Balance = 5100, SequenceNumber = 1, UseDate = date }
+            }
+        };
+        var ledger2 = new Ledger
+        {
+            Id = 2,
+            CardIdm = TestCardIdm,
+            Date = date,
+            Summary = "ポイント還元",
+            Income = 200,
+            Expense = 0,
+            Balance = 5300,
+            Details = new List<LedgerDetail>
+            {
+                new() { LedgerId = 2, IsPointRedemption = true, Amount = 200, Balance = 5300, SequenceNumber = 2, UseDate = date }
+            }
+        };
+
+        SetupGetByIdMocks(ledger1, ledger2);
+        SetupMergeMockSuccess();
+
+        // Act
+        var result = await _service.MergeAsync(new List<int> { 1, 2 });
+
+        // Assert
+        result.Success.Should().BeTrue();
+        result.MergedLedger!.Income.Should().Be(300, "100 + 200 = 300");
+        result.MergedLedger.Expense.Should().Be(0, "ポイント還元はExpenseなし");
+        result.MergedLedger.Balance.Should().Be(5300, "最新Detailの残高");
+    }
+
+    /// <summary>
+    /// 3件以上の鉄道利用で、Income/Expense/Balanceが正しく計算されること
+    /// (既存テストはMergedLedger.Idのみ確認しているため、計算検証を補強)
+    /// </summary>
+    [Fact]
+    [Trait("Category", "Unit")]
+    public async Task MergeAsync_ThreeRailTrips_CalculatesFinancialsCorrectly()
+    {
+        // Arrange
+        var date = new DateTime(2026, 2, 3);
+
+        var ledger1 = CreateTestLedger(1, TestCardIdm, date, "鉄道（A～B）", 100, 900);
+        ledger1.Details.Add(CreateRailDetail(1, "A", "B", 100, 900, 1, date));
+
+        var ledger2 = CreateTestLedger(2, TestCardIdm, date, "鉄道（C～D）", 150, 750);
+        ledger2.Details.Add(CreateRailDetail(2, "C", "D", 150, 750, 2, date));
+
+        var ledger3 = CreateTestLedger(3, TestCardIdm, date, "鉄道（E～F）", 200, 550);
+        ledger3.Details.Add(CreateRailDetail(3, "E", "F", 200, 550, 3, date));
+
+        SetupGetByIdMocks(ledger1, ledger2, ledger3);
+        SetupMergeMockSuccess();
+
+        // Act
+        var result = await _service.MergeAsync(new List<int> { 1, 2, 3 });
+
+        // Assert
+        result.Success.Should().BeTrue();
+        result.MergedLedger!.Income.Should().Be(0);
+        result.MergedLedger.Expense.Should().Be(450, "100 + 150 + 200 = 450");
+        result.MergedLedger.Balance.Should().Be(550, "最新Detail(SequenceNumber=3)の残高");
+    }
+
     #endregion
 
     #region MergeAsync UndoデータとDB永続化テスト
