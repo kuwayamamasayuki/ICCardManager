@@ -45,16 +45,7 @@ public class ValidationServiceEdgeCaseTests
         result.IsValid.Should().BeTrue();
     }
 
-    /// <summary>
-    /// 全てFのIDmは形式としては有効。
-    /// </summary>
-    [Fact]
-    public void ValidateCardIdm_AllFs_ShouldReturnSuccess()
-    {
-        var result = _service.ValidateCardIdm("FFFFFFFFFFFFFFFF");
-
-        result.IsValid.Should().BeTrue();
-    }
+    // 注: AllFs(FFFFFFFFFFFFFFFF) は ValidationServiceTests でカバー済みのため削除
 
     /// <summary>
     /// タブ文字を含むIDmは不正として検出されること。
@@ -152,16 +143,7 @@ public class ValidationServiceEdgeCaseTests
         result.IsValid.Should().BeFalse();
     }
 
-    /// <summary>
-    /// アンダースコアは不可。
-    /// </summary>
-    [Fact]
-    public void ValidateCardNumber_WithUnderscore_ShouldReturnError()
-    {
-        var result = _service.ValidateCardNumber("H_001");
-
-        result.IsValid.Should().BeFalse();
-    }
+    // 注: WithUnderscore("H_001") は ValidationServiceTests の WithInvalidCharacters でカバー済みのため削除
 
     #endregion
 
@@ -210,24 +192,6 @@ public class ValidationServiceEdgeCaseTests
 
     #endregion
 
-    #region 残額警告閾値 — 境界値
-
-    /// <summary>
-    /// 残額警告閾値の境界値テスト。
-    /// </summary>
-    [Theory]
-    [InlineData(0, true)]       // 最小値
-    [InlineData(1, true)]       // 最小値+1
-    [InlineData(19999, true)]   // 最大値-1
-    [InlineData(20000, true)]   // 最大値
-    [InlineData(-1, false)]     // 最小値-1
-    [InlineData(20001, false)]  // 最大値+1
-    public void ValidateWarningBalance_BoundaryValues(int balance, bool expectedValid)
-    {
-        var result = _service.ValidateWarningBalance(balance);
-
-        result.IsValid.Should().Be(expectedValid);
-    }
-
-    #endregion
+    // 注: ValidateWarningBalance の境界値テストは ValidationServiceTests で
+    // 正常系(0/1000/15000/20000)・負数(-1/-100/-50000)・超過(20001/30000/50000)がカバー済みのため削除
 }
