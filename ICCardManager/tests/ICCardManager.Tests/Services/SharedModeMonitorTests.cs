@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Reflection;
 using FluentAssertions;
 using ICCardManager.Infrastructure.Timing;
 using ICCardManager.Services;
@@ -12,46 +11,56 @@ using Xunit;
 namespace ICCardManager.Tests.Services;
 
 /// <summary>
-/// SharedModeMonitorはタイマーを2つ生成するため、両方を捕捉できるテスト用Factory。
-/// </summary>
-internal class CapturingTimerFactory : ITimerFactory
-{
-    public List<TestTimer> CreatedTimers { get; } = new();
-
-    public ITimer Create()
-    {
-        var timer = new TestTimer();
-        CreatedTimers.Add(timer);
-        return timer;
-    }
-}
-
-/// <summary>
 /// SharedModeMonitorの単体テスト
-/// 経過時間表示・stale判定・ヘルスチェック排他制御・ライフサイクルを検証する。
+/// 経過時間表示・stale判定・ライフサイクルを検証する。
+/// ISystemClock注入により時間を固定化し、フレーク性を排除している。
 /// </summary>
 public class SharedModeMonitorTests
 {
+    /// <summary>
+    /// SharedModeMonitorはタイマーを2つ生成するため、両方を捕捉できるテスト用Factory。
+    /// 名前空間汚染を避けるためテストクラス内のprivate nested classとして定義。
+    /// </summary>
+    private class CapturingTimerFactory : ITimerFactory
+    {
+        public List<TestTimer> CreatedTimers { get; } = new();
+
+        public ITimer Create()
+        {
+            var timer = new TestTimer();
+            CreatedTimers.Add(timer);
+            return timer;
+        }
+    }
+
+    /// <summary>
+    /// テスト用の時計。NowプロパティをテストごとにSetでき、フレーク性を完全に排除。
+    /// </summary>
+    private class FakeClock : ISystemClock
+    {
+        public DateTime Now { get; set; } = new DateTime(2026, 4, 12, 10, 0, 0);
+    }
+
     private readonly Mock<IDatabaseInfo> _databaseInfoMock;
     private readonly CapturingTimerFactory _timerFactory;
+    private readonly FakeClock _clock;
     private readonly SharedModeMonitor _monitor;
 
     public SharedModeMonitorTests()
     {
         _databaseInfoMock = new Mock<IDatabaseInfo>();
         _timerFactory = new CapturingTimerFactory();
-        _monitor = new SharedModeMonitor(_databaseInfoMock.Object, _timerFactory);
+        _clock = new FakeClock();
+        _monitor = new SharedModeMonitor(_databaseInfoMock.Object, _timerFactory, _clock);
     }
 
     /// <summary>
-    /// _lastRefreshTime をリフレクションで設定するヘルパー
-    /// （UpdateSyncDisplayText の経過時間計算をテストするため、過去の時刻を設定する）
+    /// テストヘルパ: 最終同期を「現在から指定秒数前」に設定する。
+    /// FakeClockを使っているので時間依存なし。
     /// </summary>
-    private void SetLastRefreshTime(DateTime? value)
+    private void SetLastRefreshAgo(int secondsAgo)
     {
-        var field = typeof(SharedModeMonitor).GetField("_lastRefreshTime",
-            BindingFlags.Instance | BindingFlags.NonPublic);
-        field!.SetValue(_monitor, value);
+        _monitor.SetLastRefreshTimeForTesting(_clock.Now.AddSeconds(-secondsAgo));
     }
 
     #region UpdateSyncDisplayText — 経過時間表示
@@ -73,13 +82,13 @@ public class SharedModeMonitorTests
     }
 
     [Theory]
-    [InlineData(0, "たった今")]   // 経過0秒
-    [InlineData(2, "たった今")]   // 経過2秒（< 5）
-    [InlineData(4, "たった今")]   // 経過4秒（< 5の境界）
-    public void UpdateSyncDisplayText_5秒未満はたった今と表示されること(int elapsedSeconds, string expectedFragment)
+    [InlineData(0)]   // 経過0秒
+    [InlineData(2)]   // 経過2秒（< 5）
+    [InlineData(4)]   // 経過4秒（< 5の境界）
+    public void UpdateSyncDisplayText_5秒未満はたった今と表示されること(int elapsedSeconds)
     {
         // Arrange
-        SetLastRefreshTime(DateTime.Now.AddSeconds(-elapsedSeconds));
+        SetLastRefreshAgo(elapsedSeconds);
         SyncDisplayEventArgs? captured = null;
         _monitor.SyncDisplayUpdated += (_, e) => captured = e;
 
@@ -88,18 +97,18 @@ public class SharedModeMonitorTests
 
         // Assert
         captured.Should().NotBeNull();
-        captured!.Text.Should().Contain(expectedFragment);
+        captured!.Text.Should().Be("最終同期: たった今");
     }
 
     [Theory]
-    [InlineData(5)]
-    [InlineData(15)]
-    [InlineData(30)]
-    [InlineData(59)]
-    public void UpdateSyncDisplayText_5秒以上60秒未満はN秒前と表示されること(int elapsedSeconds)
+    [InlineData(5, "最終同期: 5秒前")]
+    [InlineData(15, "最終同期: 15秒前")]
+    [InlineData(30, "最終同期: 30秒前")]
+    [InlineData(59, "最終同期: 59秒前")]
+    public void UpdateSyncDisplayText_5秒以上60秒未満はN秒前と表示されること(int elapsedSeconds, string expectedText)
     {
         // Arrange
-        SetLastRefreshTime(DateTime.Now.AddSeconds(-elapsedSeconds));
+        SetLastRefreshAgo(elapsedSeconds);
         SyncDisplayEventArgs? captured = null;
         _monitor.SyncDisplayUpdated += (_, e) => captured = e;
 
@@ -108,17 +117,17 @@ public class SharedModeMonitorTests
 
         // Assert
         captured.Should().NotBeNull();
-        captured!.Text.Should().MatchRegex(@"\d+秒前");
+        captured!.Text.Should().Be(expectedText);
     }
 
     [Theory]
-    [InlineData(60, "1分前")]
-    [InlineData(120, "2分前")]
-    [InlineData(3599, "59分前")]
-    public void UpdateSyncDisplayText_60秒以上はN分前と表示されること(int elapsedSeconds, string expectedFragment)
+    [InlineData(60, "最終同期: 1分前")]
+    [InlineData(120, "最終同期: 2分前")]
+    [InlineData(3599, "最終同期: 59分前")]
+    public void UpdateSyncDisplayText_60秒以上はN分前と表示されること(int elapsedSeconds, string expectedText)
     {
         // Arrange
-        SetLastRefreshTime(DateTime.Now.AddSeconds(-elapsedSeconds));
+        SetLastRefreshAgo(elapsedSeconds);
         SyncDisplayEventArgs? captured = null;
         _monitor.SyncDisplayUpdated += (_, e) => captured = e;
 
@@ -127,7 +136,7 @@ public class SharedModeMonitorTests
 
         // Assert
         captured.Should().NotBeNull();
-        captured!.Text.Should().Contain(expectedFragment);
+        captured!.Text.Should().Be(expectedText);
     }
 
     #endregion
@@ -142,7 +151,7 @@ public class SharedModeMonitorTests
     public void UpdateSyncDisplayText_経過時間がStaleThresholdSeconds以上ならIsStaleがtrueになること(int elapsedSeconds, bool expectedStale)
     {
         // Arrange
-        SetLastRefreshTime(DateTime.Now.AddSeconds(-elapsedSeconds));
+        SetLastRefreshAgo(elapsedSeconds);
         SyncDisplayEventArgs? captured = null;
         _monitor.SyncDisplayUpdated += (_, e) => captured = e;
 
@@ -170,8 +179,26 @@ public class SharedModeMonitorTests
 
         // Assert
         captured.Should().NotBeNull();
-        captured!.Text.Should().Contain("たった今");
+        captured!.Text.Should().Be("最終同期: たった今");
         captured.IsStale.Should().BeFalse();
+    }
+
+    [Fact]
+    public void RecordRefresh_その後時計を進めるとstaleになること()
+    {
+        // Arrange
+        _monitor.RecordRefresh();
+        SyncDisplayEventArgs? captured = null;
+        _monitor.SyncDisplayUpdated += (_, e) => captured = e;
+
+        // Act: 時計を20秒進める（staleしきい値15秒を超過）
+        _clock.Now = _clock.Now.AddSeconds(20);
+        _monitor.UpdateSyncDisplayText();
+
+        // Assert
+        captured.Should().NotBeNull();
+        captured!.IsStale.Should().BeTrue("20秒経過はstale");
+        captured.Text.Should().Contain("20秒前");
     }
 
     #endregion
@@ -239,26 +266,8 @@ public class SharedModeMonitorTests
 
     #endregion
 
-    #region ヘルスチェック排他制御
-
-    [Fact]
-    public void IsHealthCheckRunning_初期状態はfalse()
-    {
-        _monitor.IsHealthCheckRunning.Should().BeFalse();
-    }
-
-    [Fact]
-    public void SetHealthCheckRunning_フラグが反映されること()
-    {
-        // Act
-        _monitor.SetHealthCheckRunning(true);
-
-        // Assert
-        _monitor.IsHealthCheckRunning.Should().BeTrue();
-
-        _monitor.SetHealthCheckRunning(false);
-        _monitor.IsHealthCheckRunning.Should().BeFalse();
-    }
-
-    #endregion
+    // 注: IsHealthCheckRunning 初期値 / SetHealthCheckRunning のgetter/setterテストは
+    // トリビアルなのため追加しない（PR1のgetter/setterテスト削除方針と一貫）。
+    // OnHealthCheckTick の排他制御は実際の async 実行タイミングに依存するため、
+    // 単体テストでは検証せず結合テストの範囲とする。
 }

@@ -1118,14 +1118,18 @@ public class LendingServiceTests : IDisposable
     }
 
     /// <summary>
-    /// Issue #380, #978: 残高不足パターン（端数チャージ）
-    /// 残高70円→140円チャージ(不足額140円)→210円利用→残高0円ではなく、
-    /// 例えば 残高6円→140円チャージ→210円利用→残高6円（端数が残るパターン）
+    /// Issue #380, #978: 残高不足パターン（端数チャージでチャージ額 &lt; 運賃の場合）
+    /// 残高40円 → 100円チャージ(→残高140円) → 134円利用(→残高6円)
+    /// - チャージ額100 &lt; 運賃134 なので不足分をチャージで補ったパターン
+    /// - 利用後残高6 &lt; 閾値100 なので検出される
+    /// - shortfall = チャージ額 = 100
+    /// - 払出(expense) = 運賃134 - チャージ額100 = 34
+    /// - 残高 = 6（端数）
     /// </summary>
     [Fact]
-    public async Task ReturnAsync_InsufficientBalancePattern_RoundedCharge_KeepsRemainder()
+    public async Task ReturnAsync_InsufficientBalancePattern_PartialCharge_MergesWithRemainder()
     {
-        // Arrange — 端数チャージ(140円, 不足額140円, 余り端数あり)
+        // Arrange
         var card = CreateTestCard(isLent: true);
         var staff = CreateTestStaff();
         var lentRecord = CreateTestLentRecord();
@@ -1133,11 +1137,10 @@ public class LendingServiceTests : IDisposable
         var today = DateTime.Today;
         var usageDetails = new List<LedgerDetail>
         {
-            // 140円チャージ → チャージ後残高 216円（既存6円 + 140円 + 元残額70）
-            // 単純化のため: 残高70円 → 140円チャージ → 残高210円 → 210円利用 → 残高0円
-            // 別パターン: 残高6円 → 140円チャージ → 残高146円 → 140円利用 → 残高6円
-            new() { UseDate = today, IsCharge = true, Amount = 140, Balance = 146 },
-            new() { UseDate = today, EntryStation = "博多", ExitStation = "天神", Amount = 140, Balance = 6 }
+            // 100円チャージ（元残高40 → チャージ後140）
+            new() { UseDate = today, IsCharge = true, Amount = 100, Balance = 140 },
+            // 134円の運賃 → 残高6円
+            new() { UseDate = today, EntryStation = "博多", ExitStation = "天神", Amount = 134, Balance = 6 }
         };
 
         var capturedLedgers = new List<Ledger>();
@@ -1149,15 +1152,19 @@ public class LendingServiceTests : IDisposable
         // Act
         var result = await _service.ReturnAsync(TestStaffIdm, TestCardIdm, usageDetails);
 
-        // Assert
+        // Assert — 確定的な期待値
         result.Success.Should().BeTrue();
 
-        // 残高不足パターンとして検出されない場合は別Ledgerになる
-        // 検出される条件: 利用後残高 < InsufficientBalanceExcessThreshold
         var nonLentLedgers = capturedLedgers.Where(l => !l.IsLentRecord).ToList();
-        nonLentLedgers.Should().NotBeEmpty();
-        // 残高6円は閾値未満なので検出される想定
-        // (検出されない場合は2件、検出されると1件になる)
+        nonLentLedgers.Should().HaveCount(1, "不足パターン検出により1件にマージされる");
+
+        var merged = nonLentLedgers[0];
+        merged.Income.Should().Be(0);
+        merged.Expense.Should().Be(34, "払出 = 運賃134 - チャージ額100 = 34");
+        merged.Balance.Should().Be(6, "端数チャージなので残高に端数が残る");
+        merged.Note.Should().Contain("134", "支払額134円が記載される");
+        merged.Note.Should().Contain("100", "不足額100円（=チャージ額）が記載される");
+        merged.Note.Should().Contain("現金");
     }
 
     // 注: 同一日・同一利用者の既存レコードとの統合フロー（Issue #837, #1147）の

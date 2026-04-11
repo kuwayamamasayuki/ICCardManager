@@ -427,6 +427,7 @@ public class LedgerMergeServiceTests
         // Assert
         result.Success.Should().BeTrue();
         result.MergedLedger!.Id.Should().Be(1);
+        result.MergedLedger.Income.Should().Be(0, "鉄道利用のみなのでIncome=0");
         result.MergedLedger.Expense.Should().Be(450, "100 + 150 + 200");
         result.MergedLedger.Balance.Should().Be(550, "最新Detailの残高");
 
@@ -664,38 +665,9 @@ public class LedgerMergeServiceTests
         result.MergedLedger.Balance.Should().Be(5300, "最新Detailの残高");
     }
 
-    /// <summary>
-    /// 3件以上の鉄道利用で、Income/Expense/Balanceが正しく計算されること
-    /// (既存テストはMergedLedger.Idのみ確認しているため、計算検証を補強)
-    /// </summary>
-    [Fact]
-    [Trait("Category", "Unit")]
-    public async Task MergeAsync_ThreeRailTrips_CalculatesFinancialsCorrectly()
-    {
-        // Arrange
-        var date = new DateTime(2026, 2, 3);
-
-        var ledger1 = CreateTestLedger(1, TestCardIdm, date, "鉄道（A～B）", 100, 900);
-        ledger1.Details.Add(CreateRailDetail(1, "A", "B", 100, 900, 1, date));
-
-        var ledger2 = CreateTestLedger(2, TestCardIdm, date, "鉄道（C～D）", 150, 750);
-        ledger2.Details.Add(CreateRailDetail(2, "C", "D", 150, 750, 2, date));
-
-        var ledger3 = CreateTestLedger(3, TestCardIdm, date, "鉄道（E～F）", 200, 550);
-        ledger3.Details.Add(CreateRailDetail(3, "E", "F", 200, 550, 3, date));
-
-        SetupGetByIdMocks(ledger1, ledger2, ledger3);
-        SetupMergeMockSuccess();
-
-        // Act
-        var result = await _service.MergeAsync(new List<int> { 1, 2, 3 });
-
-        // Assert
-        result.Success.Should().BeTrue();
-        result.MergedLedger!.Income.Should().Be(0);
-        result.MergedLedger.Expense.Should().Be(450, "100 + 150 + 200 = 450");
-        result.MergedLedger.Balance.Should().Be(550, "最新Detail(SequenceNumber=3)の残高");
-    }
+    // 注: MergeAsync_ThreeRailTrips_CalculatesFinancialsCorrectly は
+    // 既存の MergeAsync_ThreeLedgers_MergesAllIntoFirst と完全重複のため追加しない
+    // (既存テストにIncome=0のアサーションを追加するに留めた)
 
     #endregion
 

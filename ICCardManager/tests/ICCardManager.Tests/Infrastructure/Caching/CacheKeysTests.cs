@@ -97,6 +97,35 @@ public class CacheKeysTests
 
     #endregion
 
-    // 注: キーの具体値テスト(AllCards.Should().Be("card:all") 等)は定数リテラルの二重管理に
-    // 過ぎないため削除。プレフィックス規則と一意性で十分な保証が得られる。
+    #region 識別子含有テスト
+
+    // プレフィックス規則+一意性だけでは「AllCardsとLentCardsの値が入れ替わる」誤編集を
+    // 検出できないため、各キーがその意味を表す識別子を含むことを検証する。
+    // (リテラル値そのものの検証ではなく、意味的整合性の検証)
+
+    [Fact]
+    public void AllCards_キー名にallを含むこと()
+    {
+        CacheKeys.AllCards.Should().Contain("all", "全カード一覧のキーなのでallを含むべき");
+    }
+
+    [Fact]
+    public void LentCards_キー名にlentを含むこと()
+    {
+        CacheKeys.LentCards.Should().Contain("lent", "貸出中カードのキーなのでlentを含むべき");
+    }
+
+    [Fact]
+    public void AvailableCards_キー名にavailableを含むこと()
+    {
+        CacheKeys.AvailableCards.Should().Contain("available", "利用可能カードのキーなのでavailableを含むべき");
+    }
+
+    [Fact]
+    public void AllStaff_キー名にallを含むこと()
+    {
+        CacheKeys.AllStaff.Should().Contain("all");
+    }
+
+    #endregion
 }

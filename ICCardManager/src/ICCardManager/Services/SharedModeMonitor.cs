@@ -15,6 +15,7 @@ namespace ICCardManager.Services
     {
         private readonly IDatabaseInfo _databaseInfo;
         private readonly ITimerFactory _timerFactory;
+        private readonly ISystemClock _clock;
 
         private ITimer _healthCheckTimer;
         private ITimer _syncDisplayTimer;
@@ -36,10 +37,20 @@ namespace ICCardManager.Services
         /// </summary>
         public event EventHandler<SyncDisplayEventArgs> SyncDisplayUpdated;
 
-        public SharedModeMonitor(IDatabaseInfo databaseInfo, ITimerFactory timerFactory)
+        public SharedModeMonitor(IDatabaseInfo databaseInfo, ITimerFactory timerFactory, ISystemClock clock = null)
         {
             _databaseInfo = databaseInfo;
             _timerFactory = timerFactory;
+            // DI未登録のコードパスでも動作するようデフォルト値を提供
+            _clock = clock ?? new SystemClock();
+        }
+
+        /// <summary>
+        /// テスト用: 最終同期時刻を直接設定する。本番コードから呼ばないこと。
+        /// </summary>
+        internal void SetLastRefreshTimeForTesting(DateTime? value)
+        {
+            _lastRefreshTime = value;
         }
 
         /// <summary>
@@ -86,7 +97,7 @@ namespace ICCardManager.Services
         /// </summary>
         public void RecordRefresh()
         {
-            _lastRefreshTime = DateTime.Now;
+            _lastRefreshTime = _clock.Now;
             UpdateSyncDisplayText();
         }
 
@@ -122,7 +133,7 @@ namespace ICCardManager.Services
                 return;
             }
 
-            var elapsed = (int)(DateTime.Now - _lastRefreshTime.Value).TotalSeconds;
+            var elapsed = (int)(_clock.Now - _lastRefreshTime.Value).TotalSeconds;
             string text;
             if (elapsed < 5)
             {

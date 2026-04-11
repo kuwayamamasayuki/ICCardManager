@@ -264,6 +264,7 @@ namespace ICCardManager
             services.AddSingleton<IStaffAuthService, StaffAuthService>();
             services.AddSingleton<IStationMasterService, StationMasterService>();
             services.AddSingleton<IDatabaseInfo>(sp => sp.GetRequiredService<DbContext>());
+            services.AddSingleton<ICCardManager.Infrastructure.Timing.ISystemClock, ICCardManager.Infrastructure.Timing.SystemClock>();
             services.AddSingleton<SharedModeMonitor>();
             services.AddSingleton<WarningService>();
             services.AddSingleton<DashboardService>();

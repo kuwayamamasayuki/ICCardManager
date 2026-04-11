@@ -31,13 +31,14 @@ public class WarningServiceTests
     #region CheckLowBalanceWarnings — 残額警告境界値
 
     [Fact]
-    public void CheckLowBalanceWarnings_残高が閾値未満の場合のみ警告対象となる()
+    public void CheckLowBalanceWarnings_残高が閾値以下の場合に警告対象となる()
     {
         // Arrange — 閾値1000で残高999/1000/1001/0を準備
+        // DashboardServiceのIsBalanceWarning判定(<=)と一貫させるため、境界値ちょうども警告対象
         var items = new[]
         {
             new CardBalanceDashboardItem { CardIdm = "A", CardType = "はやかけん", CardNumber = "H-001", CurrentBalance = 999 },  // 警告
-            new CardBalanceDashboardItem { CardIdm = "B", CardType = "nimoca",   CardNumber = "N-001", CurrentBalance = 1000 }, // 境界値: 警告対象外（< のみ）
+            new CardBalanceDashboardItem { CardIdm = "B", CardType = "nimoca",   CardNumber = "N-001", CurrentBalance = 1000 }, // 境界値: 警告対象（<=）
             new CardBalanceDashboardItem { CardIdm = "C", CardType = "SUGOCA",   CardNumber = "S-001", CurrentBalance = 1001 }, // 警告対象外
             new CardBalanceDashboardItem { CardIdm = "D", CardType = "PASMO",    CardNumber = "P-001", CurrentBalance = 0 },    // 警告
         };
@@ -46,11 +47,11 @@ public class WarningServiceTests
         var warnings = _service.CheckLowBalanceWarnings(items, warningBalance: 1000);
 
         // Assert
-        warnings.Should().HaveCount(2, "残高999と0のみが警告対象");
+        warnings.Should().HaveCount(3, "残高999/1000/0が警告対象（閾値ちょうども含む）");
         warnings.Should().Contain(w => w.CardIdm == "A");
+        warnings.Should().Contain(w => w.CardIdm == "B", "閾値ちょうどは<=なので警告対象");
         warnings.Should().Contain(w => w.CardIdm == "D");
-        warnings.Should().NotContain(w => w.CardIdm == "B", "閾値ちょうどは < ではないため警告対象外");
-        warnings.Should().NotContain(w => w.CardIdm == "C");
+        warnings.Should().NotContain(w => w.CardIdm == "C", "閾値超過は警告対象外");
     }
 
     [Fact]
@@ -150,7 +151,7 @@ public class WarningServiceTests
     [Fact]
     public async Task CheckIncompleteBusStopsAsync_Summaryがnullのレコードを安全に扱うこと()
     {
-        // Arrange
+        // Arrange: null/空/有効な★の混在パターン
         var ledgers = new List<Ledger>
         {
             new() { Summary = null },
@@ -161,13 +162,12 @@ public class WarningServiceTests
             .Setup(r => r.GetByDateRangeAsync(null, It.IsAny<DateTime>(), It.IsAny<DateTime>()))
             .ReturnsAsync(ledgers);
 
-        // Act
-        var act = async () => await _service.CheckIncompleteBusStopsAsync();
+        // Act: null混在でも例外は発生せず、★を含む1件のみカウントされる
+        var warning = await _service.CheckIncompleteBusStopsAsync();
 
         // Assert
-        await act.Should().NotThrowAsync("Summary=nullで例外が出ないこと");
-        var warning = await _service.CheckIncompleteBusStopsAsync();
-        warning.Should().NotBeNull("★を含む1件は検出される");
+        warning.Should().NotBeNull("★を含む1件は検出される（null/空はnull安全に無視）");
+        warning!.DisplayText.Should().Contain("1", "カウントは1件");
     }
 
     [Fact]
