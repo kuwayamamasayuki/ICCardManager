@@ -163,22 +163,5 @@ public class FileLoggerOptionsTests
         options.MaxFileSizeMB.Should().Be(10);
     }
 
-    [Fact]
-    public void 設定値を変更できること()
-    {
-        // Arrange & Act
-        var options = new FileLoggerOptions
-        {
-            Enabled = false,
-            Path = "CustomLogs",
-            RetentionDays = 7,
-            MaxFileSizeMB = 50
-        };
-
-        // Assert
-        options.Enabled.Should().BeFalse();
-        options.Path.Should().Be("CustomLogs");
-        options.RetentionDays.Should().Be(7);
-        options.MaxFileSizeMB.Should().Be(50);
-    }
+    // 注: 「設定値を変更できること」はgetter/setterのテストに過ぎないため削除
 }

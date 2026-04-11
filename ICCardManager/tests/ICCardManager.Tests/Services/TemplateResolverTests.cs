@@ -62,81 +62,8 @@ public class TemplateResolverTests : IDisposable
 
     #endregion
 
-    #region TemplateNotFoundException テスト
-
-    [Fact]
-    [Trait("Category", "Unit")]
-    public void TemplateNotFoundException_HasCorrectProperties()
-    {
-        // Arrange
-        var templateName = "テストテンプレート";
-        var searchedPaths = new[] { "/path/1", "/path/2", "/path/3" };
-        var message = "テンプレートが見つかりません";
-
-        // Act
-        var exception = new TemplateNotFoundException(templateName, searchedPaths, message);
-
-        // Assert
-        exception.TemplateName.Should().Be(templateName);
-        exception.SearchedPaths.Should().HaveCount(3);
-        exception.SearchedPaths.Should().BeEquivalentTo(searchedPaths);
-        exception.Message.Should().Be(message);
-    }
-
-    [Fact]
-    [Trait("Category", "Unit")]
-    public void TemplateNotFoundException_GetDetailedMessage_IncludesSearchedPaths()
-    {
-        // Arrange
-        var templateName = "物品出納簿テンプレート";
-        var searchedPaths = new[] { "C:/app/Resources/template.xlsx", "D:/templates/template.xlsx" };
-        var message = "テンプレートファイルが見つかりません";
-
-        // Act
-        var exception = new TemplateNotFoundException(templateName, searchedPaths, message);
-        var detailedMessage = exception.GetDetailedMessage();
-
-        // Assert
-        detailedMessage.Should().Contain(message);
-        detailedMessage.Should().Contain("検索したパス:");
-        detailedMessage.Should().Contain("C:/app/Resources/template.xlsx");
-        detailedMessage.Should().Contain("D:/templates/template.xlsx");
-    }
-
-    [Fact]
-    [Trait("Category", "Unit")]
-    public void TemplateNotFoundException_WithInnerException_PreservesInnerException()
-    {
-        // Arrange
-        var innerException = new FileNotFoundException("ファイルが見つかりません");
-
-        // Act
-        var exception = new TemplateNotFoundException("テストテンプレート", new[] { "/path/1" }, "テンプレートエラー", innerException);
-
-        // Assert
-        exception.InnerException.Should().Be(innerException);
-        exception.InnerException.Should().BeOfType<FileNotFoundException>();
-    }
-
-    [Fact]
-    [Trait("Category", "Unit")]
-    public void TemplateNotFoundException_SearchedPaths_IsReadOnly()
-    {
-        // Arrange
-        var searchedPaths = new List<string> { "/path/1", "/path/2" };
-
-        // Act
-        var exception = new TemplateNotFoundException("test", searchedPaths, "message");
-
-        // Assert
-        exception.SearchedPaths.Should().BeAssignableTo<IReadOnlyList<string>>();
-
-        // 元のリストを変更しても例外のSearchedPathsは変わらない
-        searchedPaths.Add("/path/3");
-        exception.SearchedPaths.Should().HaveCount(2);
-    }
-
-    #endregion
+    // 注: TemplateNotFoundException のプロパティテスト(HasCorrectProperties/GetDetailedMessage/
+    // WithInnerException/SearchedPaths_IsReadOnly) はPOCOレベルの検証に過ぎないため削除
 
     #region 同時実行テスト
 

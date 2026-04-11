@@ -97,37 +97,6 @@ public class CacheKeysTests
 
     #endregion
 
-    #region 具体値テスト
-
-    [Fact]
-    public void AllCards_期待される値であること()
-    {
-        CacheKeys.AllCards.Should().Be("card:all");
-    }
-
-    [Fact]
-    public void LentCards_期待される値であること()
-    {
-        CacheKeys.LentCards.Should().Be("card:lent");
-    }
-
-    [Fact]
-    public void AvailableCards_期待される値であること()
-    {
-        CacheKeys.AvailableCards.Should().Be("card:available");
-    }
-
-    [Fact]
-    public void AllStaff_期待される値であること()
-    {
-        CacheKeys.AllStaff.Should().Be("staff:all");
-    }
-
-    [Fact]
-    public void AppSettings_期待される値であること()
-    {
-        CacheKeys.AppSettings.Should().Be("settings:app");
-    }
-
-    #endregion
+    // 注: キーの具体値テスト(AllCards.Should().Be("card:all") 等)は定数リテラルの二重管理に
+    // 過ぎないため削除。プレフィックス規則と一意性で十分な保証が得られる。
 }

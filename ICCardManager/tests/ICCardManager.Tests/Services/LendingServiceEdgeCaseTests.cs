@@ -15,7 +15,8 @@ namespace ICCardManager.Tests.Services;
 
 /// <summary>
 /// LendingServiceのエッジケーステスト
-/// 既存テストで検出できない30秒ルール境界値・null引数・タイムアウト境界パターンを検証する。
+/// LendingServiceTestsでカバーされない真のエッジケース
+/// (null安全性、削除済みカード、ゼロ秒ウィンドウ、ClearHistory) のみを扱う。
 /// </summary>
 public class LendingServiceEdgeCaseTests : IDisposable
 {
@@ -77,39 +78,6 @@ public class LendingServiceEdgeCaseTests : IDisposable
         _ledgerRepositoryMock.Setup(r => r.InsertAsync(It.IsAny<Ledger>())).ReturnsAsync(1);
     }
 
-    #region IsRetouchWithinTimeout — 境界値テスト
-
-    /// <summary>
-    /// 初期状態（ClearHistory後）ではIsRetouchWithinTimeoutはfalseを返すこと。
-    /// </summary>
-    [Fact]
-    public void IsRetouchWithinTimeout_AfterClearHistory_ReturnsFalse()
-    {
-        var service = CreateService();
-        service.ClearHistory();
-
-        var result = service.IsRetouchWithinTimeout("0102030405060708");
-
-        result.Should().BeFalse("履歴がクリアされた状態なので常にfalse");
-    }
-
-    /// <summary>
-    /// 異なるカードIDmの場合はfalseを返すこと。
-    /// </summary>
-    [Fact]
-    public async Task IsRetouchWithinTimeout_DifferentCardIdm_ReturnsFalse()
-    {
-        var service = CreateService();
-        SetupCardAndStaff();
-
-        await service.LendAsync("STAFF00000000001", "0102030405060708");
-
-        // 別のカードIDmで確認
-        var result = service.IsRetouchWithinTimeout("DIFFERENT_CARD_IDM");
-
-        result.Should().BeFalse("異なるカードIDmなのでfalse");
-    }
-
     /// <summary>
     /// null引数の場合はfalseを返すこと（例外を投げない）。
     /// </summary>
@@ -122,10 +90,6 @@ public class LendingServiceEdgeCaseTests : IDisposable
 
         result.Should().BeFalse();
     }
-
-    #endregion
-
-    #region ClearHistory — 状態リセット
 
     /// <summary>
     /// ClearHistoryが全てのフィールドをリセットすること。
@@ -140,24 +104,6 @@ public class LendingServiceEdgeCaseTests : IDisposable
         service.LastProcessedCardIdm.Should().BeNull();
         service.LastProcessedTime.Should().BeNull();
         service.LastOperationType.Should().BeNull();
-    }
-
-    #endregion
-
-    #region LendAsync — 未登録カード
-
-    /// <summary>
-    /// 未登録カード（GetByIdmAsyncがnull）の場合、エラーメッセージが返ること。
-    /// </summary>
-    [Fact]
-    public async Task LendAsync_UnregisteredCard_ReturnsError()
-    {
-        var service = CreateService();
-        _cardRepositoryMock.Setup(r => r.GetByIdmAsync(It.IsAny<string>(), false)).ReturnsAsync((IcCard?)null);
-
-        var result = await service.LendAsync("STAFF00000000001", "UNREGISTERED_CARD");
-
-        result.Success.Should().BeFalse();
     }
 
     /// <summary>
@@ -176,44 +122,6 @@ public class LendingServiceEdgeCaseTests : IDisposable
     }
 
     /// <summary>
-    /// すでに貸出中のカードを貸出しようとした場合、エラーが返ること。
-    /// </summary>
-    [Fact]
-    public async Task LendAsync_AlreadyLentCard_ReturnsError()
-    {
-        var service = CreateService();
-        var lentCard = new IcCard { CardIdm = "0102030405060708", IsLent = true, CardType = "はやかけん" };
-        _cardRepositoryMock.Setup(r => r.GetByIdmAsync("0102030405060708", It.IsAny<bool>())).ReturnsAsync(lentCard);
-
-        var result = await service.LendAsync("STAFF00000000001", "0102030405060708");
-
-        result.Success.Should().BeFalse();
-    }
-
-    #endregion
-
-    #region LendAsync — 正常系
-
-    /// <summary>
-    /// 正常な貸出フローが成功すること。
-    /// </summary>
-    [Fact]
-    public async Task LendAsync_ValidCard_ReturnsSuccess()
-    {
-        var service = CreateService();
-        SetupCardAndStaff();
-
-        var result = await service.LendAsync("STAFF00000000001", "0102030405060708");
-
-        result.Success.Should().BeTrue();
-        result.OperationType.Should().Be(LendingOperationType.Lend);
-    }
-
-    #endregion
-
-    #region RetouchWindowSeconds=0 のエッジケース
-
-    /// <summary>
     /// RetouchWindowSecondsが0の場合でも例外が発生しないこと。
     /// </summary>
     [Fact]
@@ -229,42 +137,4 @@ public class LendingServiceEdgeCaseTests : IDisposable
         var act = () => service.IsRetouchWithinTimeout("0102030405060708");
         act.Should().NotThrow("RetouchWindowSeconds=0でも例外は発生しない");
     }
-
-    #endregion
-
-    #region LendAsync後の状態更新
-
-    /// <summary>
-    /// 貸出成功後にLastProcessedCardIdmが正しく設定されること。
-    /// </summary>
-    [Fact]
-    public async Task LendAsync_Success_SetsLastProcessedCardIdm()
-    {
-        var service = CreateService();
-        SetupCardAndStaff();
-
-        await service.LendAsync("STAFF00000000001", "0102030405060708");
-
-        service.LastProcessedCardIdm.Should().Be("0102030405060708");
-        service.LastProcessedTime.Should().NotBeNull();
-        service.LastOperationType.Should().Be(LendingOperationType.Lend);
-    }
-
-    /// <summary>
-    /// 貸出成功直後はIsRetouchWithinTimeoutがtrueを返すこと。
-    /// </summary>
-    [Fact]
-    public async Task LendAsync_Success_IsRetouchWithinTimeout_ReturnsTrue()
-    {
-        var service = CreateService();
-        SetupCardAndStaff();
-
-        await service.LendAsync("STAFF00000000001", "0102030405060708");
-
-        var result = service.IsRetouchWithinTimeout("0102030405060708");
-
-        result.Should().BeTrue("貸出直後なのでタイムアウト内");
-    }
-
-    #endregion
 }

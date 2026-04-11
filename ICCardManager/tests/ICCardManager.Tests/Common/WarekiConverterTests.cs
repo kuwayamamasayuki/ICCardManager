@@ -89,40 +89,6 @@ public class WarekiConverterTests
         result.Should().BeNull();
     }
 
-    [Theory]
-    [InlineData(2025, 4, 1, 2025)]   // 4月は同年度
-    [InlineData(2025, 3, 31, 2024)]  // 3月は前年度
-    [InlineData(2025, 1, 1, 2024)]   // 1月は前年度
-    [InlineData(2025, 12, 31, 2025)] // 12月は同年度
-    public void GetFiscalYear_ReturnsCorrectFiscalYear(int year, int month, int day, int expectedFiscalYear)
-    {
-        // Arrange
-        var date = new DateTime(year, month, day);
-
-        // Act
-        var result = WarekiConverter.GetFiscalYear(date);
-
-        // Assert
-        result.Should().Be(expectedFiscalYear);
-    }
-
-    [Fact]
-    public void GetFiscalYearStart_ReturnsApril1st()
-    {
-        // Act
-        var result = WarekiConverter.GetFiscalYearStart(2025);
-
-        // Assert
-        result.Should().Be(new DateTime(2025, 4, 1));
-    }
-
-    [Fact]
-    public void GetFiscalYearEnd_ReturnsMarch31stNextYear()
-    {
-        // Act
-        var result = WarekiConverter.GetFiscalYearEnd(2025);
-
-        // Assert
-        result.Should().Be(new DateTime(2026, 3, 31));
-    }
+    // 注: GetFiscalYear / GetFiscalYearStart / GetFiscalYearEnd のテストは
+    // FiscalYearHelperTests および FiscalYearTests でカバー済みのため削除
 }

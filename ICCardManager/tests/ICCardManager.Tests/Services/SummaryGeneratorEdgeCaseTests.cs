@@ -374,39 +374,6 @@ public class SummaryGeneratorEdgeCaseTests : IDisposable
 
     #endregion
 
-    #region 静的メソッドの出力検証
-
-    /// <summary>
-    /// GetMidYearCarryoverSummaryが正しいフォーマットで返すことを検証。
-    /// </summary>
-    [Theory]
-    [InlineData(4, "4月から繰越")]
-    [InlineData(10, "10月から繰越")]
-    [InlineData(12, "12月から繰越")]
-    public void GetMidYearCarryoverSummary_ReturnsCorrectFormat(int month, string expected)
-    {
-        var result = SummaryGenerator.GetMidYearCarryoverSummary(month);
-
-        result.Should().Be(expected);
-    }
-
-    /// <summary>
-    /// IsMidYearCarryoverSummaryがnullや空文字でfalseを返すこと。
-    /// </summary>
-    [Theory]
-    [InlineData(null, false)]
-    [InlineData("", false)]
-    [InlineData("通常の摘要", false)]
-    [InlineData("4月から繰越", true)]
-    [InlineData("12月から繰越", true)]
-    [InlineData("13月から繰越", false)]
-    [InlineData("0月から繰越", false)]
-    public void IsMidYearCarryoverSummary_VariousInputs(string? summary, bool expected)
-    {
-        var result = SummaryGenerator.IsMidYearCarryoverSummary(summary);
-
-        result.Should().Be(expected);
-    }
-
-    #endregion
+    // 注: GetMidYearCarryoverSummary / IsMidYearCarryoverSummary の静的メソッドテストは
+    // SummaryGeneratorTests.cs でカバー済みのためこのファイルからは削除
 }
