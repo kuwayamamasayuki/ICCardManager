@@ -97,34 +97,52 @@ public class CacheKeysTests
 
     #endregion
 
-    #region 識別子含有テスト
+    #region プレフィックス除去後の識別子マッチテスト
 
     // プレフィックス規則+一意性だけでは「AllCardsとLentCardsの値が入れ替わる」誤編集を
-    // 検出できないため、各キーがその意味を表す識別子を含むことを検証する。
-    // (リテラル値そのものの検証ではなく、意味的整合性の検証)
+    // 検出できないため、各キーがプレフィックスを除いた部分で期待される識別子と
+    // 一致することを厳密に検証する。
+    // (単純な Contain("all") だと "card:hall" のような誤編集を検出できない)
 
-    [Fact]
-    public void AllCards_キー名にallを含むこと()
+    private static string SuffixAfter(string key, string prefix)
     {
-        CacheKeys.AllCards.Should().Contain("all", "全カード一覧のキーなのでallを含むべき");
+        key.Should().StartWith(prefix, "プレフィックスで始まることが前提");
+        return key.Substring(prefix.Length);
     }
 
     [Fact]
-    public void LentCards_キー名にlentを含むこと()
+    public void AllCards_プレフィックス除去後はallと完全一致すること()
     {
-        CacheKeys.LentCards.Should().Contain("lent", "貸出中カードのキーなのでlentを含むべき");
+        var suffix = SuffixAfter(CacheKeys.AllCards, CacheKeys.CardPrefixForInvalidation);
+        suffix.Should().Be("all", "全カード一覧のキーはプレフィックス直後にallが続く");
     }
 
     [Fact]
-    public void AvailableCards_キー名にavailableを含むこと()
+    public void LentCards_プレフィックス除去後はlentと完全一致すること()
     {
-        CacheKeys.AvailableCards.Should().Contain("available", "利用可能カードのキーなのでavailableを含むべき");
+        var suffix = SuffixAfter(CacheKeys.LentCards, CacheKeys.CardPrefixForInvalidation);
+        suffix.Should().Be("lent");
     }
 
     [Fact]
-    public void AllStaff_キー名にallを含むこと()
+    public void AvailableCards_プレフィックス除去後はavailableと完全一致すること()
     {
-        CacheKeys.AllStaff.Should().Contain("all");
+        var suffix = SuffixAfter(CacheKeys.AvailableCards, CacheKeys.CardPrefixForInvalidation);
+        suffix.Should().Be("available");
+    }
+
+    [Fact]
+    public void AllStaff_プレフィックス除去後はallと完全一致すること()
+    {
+        var suffix = SuffixAfter(CacheKeys.AllStaff, CacheKeys.StaffPrefixForInvalidation);
+        suffix.Should().Be("all");
+    }
+
+    [Fact]
+    public void AppSettings_プレフィックス除去後はappと完全一致すること()
+    {
+        var suffix = SuffixAfter(CacheKeys.AppSettings, CacheKeys.SettingsPrefixForInvalidation);
+        suffix.Should().Be("app");
     }
 
     #endregion

@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading.Tasks;
 using FluentAssertions;
 using ICCardManager.Infrastructure.Timing;
 using ICCardManager.Services;
@@ -12,7 +13,7 @@ namespace ICCardManager.Tests.Services;
 
 /// <summary>
 /// SharedModeMonitorの単体テスト
-/// 経過時間表示・stale判定・ライフサイクルを検証する。
+/// 経過時間表示・stale判定・ライフサイクル・排他制御を検証する。
 /// ISystemClock注入により時間を固定化し、フレーク性を排除している。
 /// </summary>
 public class SharedModeMonitorTests
@@ -41,6 +42,9 @@ public class SharedModeMonitorTests
         public DateTime Now { get; set; } = new DateTime(2026, 4, 12, 10, 0, 0);
     }
 
+    // 全テストで共通の基準時刻（FakeClockの初期値と一致）
+    private static readonly DateTime BaseTime = new DateTime(2026, 4, 12, 10, 0, 0);
+
     private readonly Mock<IDatabaseInfo> _databaseInfoMock;
     private readonly CapturingTimerFactory _timerFactory;
     private readonly FakeClock _clock;
@@ -55,13 +59,44 @@ public class SharedModeMonitorTests
     }
 
     /// <summary>
-    /// テストヘルパ: 最終同期を「現在から指定秒数前」に設定する。
-    /// FakeClockを使っているので時間依存なし。
+    /// テストヘルパ: 「基準時刻の secondsAgo 秒前」を最終同期時刻として記録する。
+    /// 時計を一時的に過去に戻してRecordRefreshを呼ぶことで、本番コードに
+    /// テスト用バックドアを持ち込まずに状態をセットアップできる。
     /// </summary>
     private void SetLastRefreshAgo(int secondsAgo)
     {
-        _monitor.SetLastRefreshTimeForTesting(_clock.Now.AddSeconds(-secondsAgo));
+        _clock.Now = BaseTime.AddSeconds(-secondsAgo);
+        _monitor.RecordRefresh();
+        _clock.Now = BaseTime;
     }
+
+    #region コンストラクタ
+
+    [Fact]
+    public void Constructor_ClockがnullならArgumentNullException()
+    {
+        var act = () => new SharedModeMonitor(_databaseInfoMock.Object, _timerFactory, null);
+
+        act.Should().Throw<ArgumentNullException>().WithParameterName("clock");
+    }
+
+    [Fact]
+    public void Constructor_TimerFactoryがnullならArgumentNullException()
+    {
+        var act = () => new SharedModeMonitor(_databaseInfoMock.Object, null, _clock);
+
+        act.Should().Throw<ArgumentNullException>().WithParameterName("timerFactory");
+    }
+
+    [Fact]
+    public void Constructor_DatabaseInfoがnullならArgumentNullException()
+    {
+        var act = () => new SharedModeMonitor(null, _timerFactory, _clock);
+
+        act.Should().Throw<ArgumentNullException>().WithParameterName("databaseInfo");
+    }
+
+    #endregion
 
     #region UpdateSyncDisplayText — 経過時間表示
 
@@ -266,8 +301,92 @@ public class SharedModeMonitorTests
 
     #endregion
 
-    // 注: IsHealthCheckRunning 初期値 / SetHealthCheckRunning のgetter/setterテストは
-    // トリビアルなのため追加しない（PR1のgetter/setterテスト削除方針と一貫）。
-    // OnHealthCheckTick の排他制御は実際の async 実行タイミングに依存するため、
-    // 単体テストでは検証せず結合テストの範囲とする。
+    #region ExecuteHealthCheckAsync — 排他制御
+
+    [Fact]
+    public async Task ExecuteHealthCheckAsync_成功時にHealthCheckCompletedが発火すること()
+    {
+        // Arrange
+        _databaseInfoMock.Setup(d => d.CheckConnection()).Returns(true);
+        DatabaseHealthEventArgs? captured = null;
+        _monitor.HealthCheckCompleted += (_, e) => captured = e;
+
+        // Act
+        var executed = await _monitor.ExecuteHealthCheckAsync();
+
+        // Assert
+        executed.Should().BeTrue("排他制御に引っかからないので実行される");
+        captured.Should().NotBeNull("HealthCheckCompletedが発火する");
+        captured!.IsConnected.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task ExecuteHealthCheckAsync_接続失敗時もイベントは発火するがIsConnectedはfalse()
+    {
+        // Arrange
+        _databaseInfoMock.Setup(d => d.CheckConnection()).Returns(false);
+        DatabaseHealthEventArgs? captured = null;
+        _monitor.HealthCheckCompleted += (_, e) => captured = e;
+
+        // Act
+        var executed = await _monitor.ExecuteHealthCheckAsync();
+
+        // Assert
+        executed.Should().BeTrue();
+        captured.Should().NotBeNull();
+        captured!.IsConnected.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task ExecuteHealthCheckAsync_手動リフレッシュ中フラグがtrueならスキップされること()
+    {
+        // Arrange: ManualRefreshAsync と同じシナリオで、フラグを立てた状態にする
+        // (SetHealthCheckRunning(true) 相当)
+        _databaseInfoMock.Setup(d => d.CheckConnection()).Returns(true);
+        var eventFiredCount = 0;
+        _monitor.HealthCheckCompleted += (_, _) => eventFiredCount++;
+        _monitor.SetHealthCheckRunning(true);
+
+        // Act
+        var executed = await _monitor.ExecuteHealthCheckAsync();
+
+        // Assert
+        executed.Should().BeFalse("既に実行中フラグが立っているのでスキップ");
+        eventFiredCount.Should().Be(0, "スキップ時はイベントが発火しない");
+        _databaseInfoMock.Verify(d => d.CheckConnection(), Times.Never,
+            "スキップ時はCheckConnectionも呼ばれない");
+    }
+
+    [Fact]
+    public async Task ExecuteHealthCheckAsync_完了後は_isHealthCheckRunningがリセットされること()
+    {
+        // Arrange
+        _databaseInfoMock.Setup(d => d.CheckConnection()).Returns(true);
+
+        // Act
+        await _monitor.ExecuteHealthCheckAsync();
+
+        // Assert — 2回目も実行できる(=フラグがリセットされている)
+        _monitor.IsHealthCheckRunning.Should().BeFalse();
+        var secondExecution = await _monitor.ExecuteHealthCheckAsync();
+        secondExecution.Should().BeTrue("1回目完了後は2回目も実行可能");
+    }
+
+    [Fact]
+    public async Task ExecuteHealthCheckAsync_CheckConnection例外時もフラグがリセットされること()
+    {
+        // Arrange: CheckConnection が例外を投げるケース
+        _databaseInfoMock.Setup(d => d.CheckConnection())
+            .Throws(new InvalidOperationException("接続失敗"));
+
+        // Act & Assert
+        var act = async () => await _monitor.ExecuteHealthCheckAsync();
+        await act.Should().ThrowAsync<InvalidOperationException>();
+
+        // finally ブロックによりフラグはリセットされているはず
+        _monitor.IsHealthCheckRunning.Should().BeFalse(
+            "例外発生時も _isHealthCheckRunning は finally でリセットされる");
+    }
+
+    #endregion
 }

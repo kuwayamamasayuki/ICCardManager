@@ -36,7 +36,7 @@ public class MainViewModelSyncDisplayTests
 
     private SharedModeMonitor CreateMonitor()
     {
-        return new SharedModeMonitor(_databaseInfoMock.Object, _timerFactory);
+        return new SharedModeMonitor(_databaseInfoMock.Object, _timerFactory, new SystemClock());
     }
 
     private static void SetLastRefreshTime(SharedModeMonitor monitor, DateTime? time)
@@ -209,7 +209,7 @@ public class MainViewModelSyncDisplayTests
         var ledgerConsistencyChecker = new LedgerConsistencyChecker(ledgerRepositoryMock.Object);
 
         // dbContextはIDatabaseInfoを実装しているので直接使用可能
-        var sharedModeMonitor = new SharedModeMonitor(dbContext, timerFactory);
+        var sharedModeMonitor = new SharedModeMonitor(dbContext, timerFactory, new SystemClock());
         var warningService = new WarningService(ledgerRepositoryMock.Object, dbContext);
         var dashboardService = new DashboardService(cardRepositoryMock.Object, ledgerRepositoryMock.Object,
             staffRepositoryMock.Object, settingsRepositoryMock.Object);
