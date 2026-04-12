@@ -22,28 +22,46 @@ namespace ICCardManager.Tests.ViewModels;
 /// <summary>
 /// Issue #1131: 共有モードでの同期経過時間表示テスト
 /// SharedModeMonitorに抽出されたロジックのテスト
+/// Issue #1228: リフレクション依存を ISystemClock 注入に移行済み
 /// </summary>
 public class MainViewModelSyncDisplayTests
 {
+    /// <summary>
+    /// テスト用の時計。Nowプロパティを自由に操作でき、時間依存テストのフレーク性を排除。
+    /// </summary>
+    private class FakeClock : ISystemClock
+    {
+        public DateTime Now { get; set; } = BaseTime;
+    }
+
+    private static readonly DateTime BaseTime = new DateTime(2026, 4, 12, 10, 0, 0);
+
     private readonly Mock<IDatabaseInfo> _databaseInfoMock;
     private readonly TestTimerFactory _timerFactory;
+    private readonly FakeClock _clock;
 
     public MainViewModelSyncDisplayTests()
     {
         _databaseInfoMock = new Mock<IDatabaseInfo>();
         _timerFactory = new TestTimerFactory();
+        _clock = new FakeClock();
     }
 
     private SharedModeMonitor CreateMonitor()
     {
-        return new SharedModeMonitor(_databaseInfoMock.Object, _timerFactory, new SystemClock());
+        return new SharedModeMonitor(_databaseInfoMock.Object, _timerFactory, _clock);
     }
 
-    private static void SetLastRefreshTime(SharedModeMonitor monitor, DateTime? time)
+    /// <summary>
+    /// テストヘルパ: 「基準時刻の secondsAgo 秒前」を最終同期時刻として記録する。
+    /// 時計を一時的に過去に戻してRecordRefreshを呼び、基準時刻に戻すことで
+    /// リフレクションなしに状態をセットアップできる。
+    /// </summary>
+    private void SetLastRefreshAgo(SharedModeMonitor monitor, int secondsAgo)
     {
-        var field = typeof(SharedModeMonitor).GetField("_lastRefreshTime",
-            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-        field!.SetValue(monitor, time);
+        _clock.Now = BaseTime.AddSeconds(-secondsAgo);
+        monitor.RecordRefresh();
+        _clock.Now = BaseTime;
     }
 
     #region UpdateSyncDisplayText テスト
@@ -70,7 +88,7 @@ public class MainViewModelSyncDisplayTests
     {
         // Arrange
         var monitor = CreateMonitor();
-        SetLastRefreshTime(monitor, DateTime.Now);
+        SetLastRefreshAgo(monitor, 0);
         string receivedText = null;
         bool? receivedStale = null;
         monitor.SyncDisplayUpdated += (s, e) => { receivedText = e.Text; receivedStale = e.IsStale; };
@@ -88,7 +106,7 @@ public class MainViewModelSyncDisplayTests
     {
         // Arrange
         var monitor = CreateMonitor();
-        SetLastRefreshTime(monitor, DateTime.Now.AddSeconds(-10));
+        SetLastRefreshAgo(monitor, 10);
         string receivedText = null;
         bool? receivedStale = null;
         monitor.SyncDisplayUpdated += (s, e) => { receivedText = e.Text; receivedStale = e.IsStale; };
@@ -106,7 +124,7 @@ public class MainViewModelSyncDisplayTests
     {
         // Arrange
         var monitor = CreateMonitor();
-        SetLastRefreshTime(monitor, DateTime.Now.AddSeconds(-20));
+        SetLastRefreshAgo(monitor, 20);
         string receivedText = null;
         bool? receivedStale = null;
         monitor.SyncDisplayUpdated += (s, e) => { receivedText = e.Text; receivedStale = e.IsStale; };
@@ -124,7 +142,7 @@ public class MainViewModelSyncDisplayTests
     {
         // Arrange
         var monitor = CreateMonitor();
-        SetLastRefreshTime(monitor, DateTime.Now.AddSeconds(-90));
+        SetLastRefreshAgo(monitor, 90);
         string receivedText = null;
         bool? receivedStale = null;
         monitor.SyncDisplayUpdated += (s, e) => { receivedText = e.Text; receivedStale = e.IsStale; };
@@ -142,7 +160,7 @@ public class MainViewModelSyncDisplayTests
     {
         // Arrange
         var monitor = CreateMonitor();
-        SetLastRefreshTime(monitor, DateTime.Now.AddSeconds(-15));
+        SetLastRefreshAgo(monitor, 15);
         string receivedText = null;
         bool? receivedStale = null;
         monitor.SyncDisplayUpdated += (s, e) => { receivedText = e.Text; receivedStale = e.IsStale; };
@@ -151,7 +169,7 @@ public class MainViewModelSyncDisplayTests
         monitor.UpdateSyncDisplayText();
 
         // Assert
-        receivedText.Should().Contain("15秒前");
+        receivedText.Should().Be("最終同期: 15秒前");
         receivedStale.Should().BeTrue("ちょうど15秒で鮮度低下の閾値");
     }
 
@@ -209,7 +227,7 @@ public class MainViewModelSyncDisplayTests
         var ledgerConsistencyChecker = new LedgerConsistencyChecker(ledgerRepositoryMock.Object);
 
         // dbContextはIDatabaseInfoを実装しているので直接使用可能
-        var sharedModeMonitor = new SharedModeMonitor(dbContext, timerFactory, new SystemClock());
+        var sharedModeMonitor = new SharedModeMonitor(dbContext, timerFactory, _clock);
         var warningService = new WarningService(ledgerRepositoryMock.Object, dbContext);
         var dashboardService = new DashboardService(cardRepositoryMock.Object, ledgerRepositoryMock.Object,
             staffRepositoryMock.Object, settingsRepositoryMock.Object);
