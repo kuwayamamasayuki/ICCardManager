@@ -39,7 +39,11 @@ namespace ICCardManager.Services
             var warnings = new List<WarningItem>();
             foreach (var item in dashboardItems)
             {
-                if (item.CurrentBalance < warningBalance)
+                // Issue: DashboardService.BuildDashboardAsync と判定条件を統一する。
+                // DashboardService側は IsBalanceWarning = balance <= warningBalance (≤) で
+                // 警告アイコンを出しているため、警告一覧も同じ条件 (≤) でないと
+                // 「アイコンは出るが一覧に載らない」という不整合が発生する。
+                if (item.CurrentBalance <= warningBalance)
                 {
                     warnings.Add(new WarningItem
                     {

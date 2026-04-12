@@ -62,8 +62,34 @@ public class TemplateResolverTests : IDisposable
 
     #endregion
 
-    // 注: TemplateNotFoundException のプロパティテスト(HasCorrectProperties/GetDetailedMessage/
-    // WithInnerException/SearchedPaths_IsReadOnly) はPOCOレベルの検証に過ぎないため削除
+    #region TemplateNotFoundException の文字列生成ロジック
+
+    // 注: HasCorrectProperties / WithInnerException / SearchedPaths_IsReadOnly は
+    // POCOレベルのgetter検証に過ぎないため削除済み。
+    // GetDetailedMessage は単なるプロパティアクセスではなく string.Join を使った
+    // 文字列生成ロジックを含むため、これのみ残す。
+
+    [Fact]
+    [Trait("Category", "Unit")]
+    public void TemplateNotFoundException_GetDetailedMessage_IncludesSearchedPaths()
+    {
+        // Arrange
+        var templateName = "物品出納簿テンプレート";
+        var searchedPaths = new[] { "C:/app/Resources/template.xlsx", "D:/templates/template.xlsx" };
+        var message = "テンプレートファイルが見つかりません";
+
+        // Act
+        var exception = new TemplateNotFoundException(templateName, searchedPaths, message);
+        var detailedMessage = exception.GetDetailedMessage();
+
+        // Assert — メッセージ本文・ラベル・全パスが含まれること（文字列生成ロジックの検証）
+        detailedMessage.Should().Contain(message);
+        detailedMessage.Should().Contain("検索したパス:");
+        detailedMessage.Should().Contain("C:/app/Resources/template.xlsx");
+        detailedMessage.Should().Contain("D:/templates/template.xlsx");
+    }
+
+    #endregion
 
     #region 同時実行テスト
 

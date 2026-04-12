@@ -128,7 +128,7 @@ public class MainViewModelTests
             _dispatcherService,
             databaseInfoMock.Object,
             new Mock<ICacheService>().Object,
-            new SharedModeMonitor(databaseInfoMock.Object, _timerFactory),
+            new SharedModeMonitor(databaseInfoMock.Object, _timerFactory, new SystemClock()),
             new WarningService(_ledgerRepositoryMock.Object, databaseInfoMock.Object),
             new DashboardService(_cardRepositoryMock.Object, _ledgerRepositoryMock.Object,
                 _staffRepositoryMock.Object, _settingsRepositoryMock.Object));
@@ -497,7 +497,7 @@ public class MainViewModelTests
             _dispatcherService,
             isolatedDbInfoMock.Object,
             new Mock<ICacheService>().Object,
-            new SharedModeMonitor(isolatedDbInfoMock.Object, isolatedTimerFactory),
+            new SharedModeMonitor(isolatedDbInfoMock.Object, isolatedTimerFactory, new SystemClock()),
             new WarningService(_ledgerRepositoryMock.Object, isolatedDbInfoMock.Object),
             new DashboardService(_cardRepositoryMock.Object, _ledgerRepositoryMock.Object,
                 _staffRepositoryMock.Object, _settingsRepositoryMock.Object));
@@ -1162,7 +1162,7 @@ public class MainViewModelTests
             _dispatcherService,
             databaseInfo,
             new Mock<ICacheService>().Object,
-            new SharedModeMonitor(databaseInfo, _timerFactory),
+            new SharedModeMonitor(databaseInfo, _timerFactory, new SystemClock()),
             new WarningService(_ledgerRepositoryMock.Object, databaseInfo),
             new DashboardService(_cardRepositoryMock.Object, _ledgerRepositoryMock.Object,
                 _staffRepositoryMock.Object, _settingsRepositoryMock.Object));

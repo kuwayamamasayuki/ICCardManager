@@ -1064,6 +1064,164 @@ public class LendingServiceTests : IDisposable
         pointLedger!.StaffName.Should().BeNull("ポイント還元は自動処理のため氏名不要");
     }
 
+    /// <summary>
+    /// Issue #380, #978: 残高不足パターンの統合E2Eテスト（ぴったりチャージ）
+    /// 残高200円のカードで210円の運賃を支払う場合：
+    /// - 10円チャージ → 残高210円
+    /// - 210円利用 → 残高0円
+    /// 上記2件は1行にマージされる:
+    /// - shortfall(不足額) = チャージ額 = 10円
+    /// - expense(払出) = 運賃210 - チャージ額10 = 200円
+    /// - balance(残高) = 0円（ぴったりチャージ）
+    /// - Note = 「支払額210円のうち不足額10円は現金で支払」
+    /// 端数チャージのパターンは次のテストで検証。
+    /// </summary>
+    [Fact]
+    public async Task ReturnAsync_InsufficientBalancePattern_MergesChargeAndUsageIntoSingleLedger()
+    {
+        // Arrange — 残高200円→10円チャージ→210円利用(残高0)
+        var card = CreateTestCard(isLent: true);
+        var staff = CreateTestStaff();
+        var lentRecord = CreateTestLentRecord();
+
+        var today = DateTime.Today;
+        var usageDetails = new List<LedgerDetail>
+        {
+            // 10円のぴったりチャージ → チャージ後残高 210円
+            new() { UseDate = today, IsCharge = true, Amount = 10, Balance = 210 },
+            // 210円の運賃 → 残高0円（残高不足パターン）
+            new() { UseDate = today, EntryStation = "博多", ExitStation = "天神", Amount = 210, Balance = 0 }
+        };
+
+        var capturedLedgers = new List<Ledger>();
+        SetupReturnMocks(card, staff, lentRecord);
+        _ledgerRepositoryMock.Setup(x => x.InsertAsync(It.IsAny<Ledger>()))
+            .Callback<Ledger>(l => capturedLedgers.Add(l))
+            .ReturnsAsync(1);
+
+        // Act
+        var result = await _service.ReturnAsync(TestStaffIdm, TestCardIdm, usageDetails);
+
+        // Assert
+        result.Success.Should().BeTrue();
+
+        // 貸出レコード以外で作成されたLedgerを確認 — 1件にマージされる
+        var nonLentLedgers = capturedLedgers.Where(l => !l.IsLentRecord).ToList();
+        nonLentLedgers.Should().HaveCount(1, "残高不足パターンはチャージと利用が1行にマージされる");
+
+        var merged = nonLentLedgers[0];
+        merged.Income.Should().Be(0, "マージ後はIncome=0");
+        merged.Expense.Should().Be(200, "払出 = 運賃210 - チャージ額10 = 200円");
+        merged.Balance.Should().Be(0, "ぴったりチャージのため残高0");
+        merged.Note.Should().NotBeNullOrEmpty("不足額の説明Noteが付与される");
+        merged.Note.Should().Contain("210", "支払額210円が記載される");
+        merged.Note.Should().Contain("10", "不足額10円(=チャージ額)が記載される");
+        merged.Note.Should().Contain("現金", "現金で支払った旨が記載される");
+        merged.StaffName.Should().Be(TestStaffName, "マージ後は利用者の名前が設定される");
+    }
+
+    /// <summary>
+    /// Issue #380, #978: 残高不足パターン（端数チャージでチャージ額 &lt; 運賃の場合）
+    /// 残高40円 → 100円チャージ(→残高140円) → 134円利用(→残高6円)
+    /// - チャージ額100 &lt; 運賃134 なので不足分をチャージで補ったパターン
+    /// - 利用後残高6 &lt; 閾値100 なので検出される
+    /// - shortfall = チャージ額 = 100
+    /// - 払出(expense) = 運賃134 - チャージ額100 = 34
+    /// - 残高 = 6（端数）
+    /// </summary>
+    [Fact]
+    public async Task ReturnAsync_InsufficientBalancePattern_PartialCharge_MergesWithRemainder()
+    {
+        // Arrange
+        var card = CreateTestCard(isLent: true);
+        var staff = CreateTestStaff();
+        var lentRecord = CreateTestLentRecord();
+
+        var today = DateTime.Today;
+        var usageDetails = new List<LedgerDetail>
+        {
+            // 100円チャージ（元残高40 → チャージ後140）
+            new() { UseDate = today, IsCharge = true, Amount = 100, Balance = 140 },
+            // 134円の運賃 → 残高6円
+            new() { UseDate = today, EntryStation = "博多", ExitStation = "天神", Amount = 134, Balance = 6 }
+        };
+
+        var capturedLedgers = new List<Ledger>();
+        SetupReturnMocks(card, staff, lentRecord);
+        _ledgerRepositoryMock.Setup(x => x.InsertAsync(It.IsAny<Ledger>()))
+            .Callback<Ledger>(l => capturedLedgers.Add(l))
+            .ReturnsAsync(1);
+
+        // Act
+        var result = await _service.ReturnAsync(TestStaffIdm, TestCardIdm, usageDetails);
+
+        // Assert — 確定的な期待値
+        result.Success.Should().BeTrue();
+
+        var nonLentLedgers = capturedLedgers.Where(l => !l.IsLentRecord).ToList();
+        nonLentLedgers.Should().HaveCount(1, "不足パターン検出により1件にマージされる");
+
+        var merged = nonLentLedgers[0];
+        merged.Income.Should().Be(0);
+        merged.Expense.Should().Be(34, "払出 = 運賃134 - チャージ額100 = 34");
+        merged.Balance.Should().Be(6, "端数チャージなので残高に端数が残る");
+        merged.Note.Should().Contain("134", "支払額134円が記載される");
+        merged.Note.Should().Contain("100", "不足額100円（=チャージ額）が記載される");
+        merged.Note.Should().Contain("現金");
+    }
+
+    // 注: 同一日・同一利用者の既存レコードとの統合フロー（Issue #837, #1147）の
+    // E2Eテストは内部実装が複雑（残高チェーン再計算・Detail挿入順序等）で安定したテストが
+    // 困難なため、ここでは追加せず別Issueで取り扱う。
+    // 一方、異なる利用者の場合に統合されないことは比較的単純なため、以下のテストでカバーする。
+
+    /// <summary>
+    /// Issue #1147: 異なる利用者の既存レコードがある場合は統合されず別Ledgerになること
+    /// </summary>
+    [Fact]
+    public async Task ReturnAsync_SameDayDifferentStaff_DoesNotIntegrate()
+    {
+        // Arrange
+        var card = CreateTestCard(isLent: true);
+        var staff = CreateTestStaff();
+        var lentRecord = CreateTestLentRecord();
+
+        var today = DateTime.Today;
+        var existingLedger = new Ledger
+        {
+            Id = 200,
+            CardIdm = TestCardIdm,
+            Date = today,
+            Summary = "鉄道（博多～天神）",
+            Expense = 260,
+            Balance = 9740,
+            StaffName = "別の人",  // 異なる利用者
+            IsLentRecord = false
+        };
+
+        var usageDetails = new List<LedgerDetail>
+        {
+            new() { UseDate = today, EntryStation = "天神", ExitStation = "薬院", Amount = 200, Balance = 9540 }
+        };
+
+        var capturedInserts = new List<Ledger>();
+        SetupReturnMocks(card, staff, lentRecord);
+        _ledgerRepositoryMock.Setup(x => x.GetByDateRangeAsync(TestCardIdm, It.IsAny<DateTime>(), It.IsAny<DateTime>()))
+            .ReturnsAsync(new List<Ledger> { existingLedger });
+        _ledgerRepositoryMock.Setup(x => x.InsertAsync(It.IsAny<Ledger>()))
+            .Callback<Ledger>(l => capturedInserts.Add(l))
+            .ReturnsAsync(1);
+
+        // Act
+        var result = await _service.ReturnAsync(TestStaffIdm, TestCardIdm, usageDetails);
+
+        // Assert
+        result.Success.Should().BeTrue();
+        var newLedger = capturedInserts.FirstOrDefault(l => !l.IsLentRecord);
+        newLedger.Should().NotBeNull("異なる利用者の場合は新規レコードとしてInsertされる");
+        newLedger!.StaffName.Should().Be(TestStaffName);
+    }
+
     #endregion
 
     #region ヘルパーメソッド

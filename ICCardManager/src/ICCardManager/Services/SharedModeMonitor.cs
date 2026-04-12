@@ -15,6 +15,7 @@ namespace ICCardManager.Services
     {
         private readonly IDatabaseInfo _databaseInfo;
         private readonly ITimerFactory _timerFactory;
+        private readonly ISystemClock _clock;
 
         private ITimer _healthCheckTimer;
         private ITimer _syncDisplayTimer;
@@ -36,10 +37,11 @@ namespace ICCardManager.Services
         /// </summary>
         public event EventHandler<SyncDisplayEventArgs> SyncDisplayUpdated;
 
-        public SharedModeMonitor(IDatabaseInfo databaseInfo, ITimerFactory timerFactory)
+        public SharedModeMonitor(IDatabaseInfo databaseInfo, ITimerFactory timerFactory, ISystemClock clock)
         {
-            _databaseInfo = databaseInfo;
-            _timerFactory = timerFactory;
+            _databaseInfo = databaseInfo ?? throw new ArgumentNullException(nameof(databaseInfo));
+            _timerFactory = timerFactory ?? throw new ArgumentNullException(nameof(timerFactory));
+            _clock = clock ?? throw new ArgumentNullException(nameof(clock));
         }
 
         /// <summary>
@@ -86,7 +88,7 @@ namespace ICCardManager.Services
         /// </summary>
         public void RecordRefresh()
         {
-            _lastRefreshTime = DateTime.Now;
+            _lastRefreshTime = _clock.Now;
             UpdateSyncDisplayText();
         }
 
@@ -122,7 +124,7 @@ namespace ICCardManager.Services
                 return;
             }
 
-            var elapsed = (int)(DateTime.Now - _lastRefreshTime.Value).TotalSeconds;
+            var elapsed = (int)(_clock.Now - _lastRefreshTime.Value).TotalSeconds;
             string text;
             if (elapsed < 5)
             {
@@ -141,21 +143,36 @@ namespace ICCardManager.Services
             SyncDisplayUpdated?.Invoke(this, new SyncDisplayEventArgs(text, elapsed >= StaleThresholdSeconds));
         }
 
-        private async void OnHealthCheckTick(object sender, EventArgs e)
+        /// <summary>
+        /// ヘルスチェックを実行する。排他制御により、実行中の場合は何もせず終了する。
+        /// Timer Tick から呼ばれるほか、テストから同期的に排他制御を検証できるよう internal 公開。
+        /// </summary>
+        /// <returns>
+        /// 実行された場合は true、既に実行中(または手動リフレッシュ中)で
+        /// スキップされた場合は false。
+        /// </returns>
+        internal async Task<bool> ExecuteHealthCheckAsync()
         {
             if (_isHealthCheckRunning)
-                return;
+                return false;
 
             _isHealthCheckRunning = true;
             try
             {
                 var isConnected = await CheckConnectionAsync();
                 HealthCheckCompleted?.Invoke(this, new DatabaseHealthEventArgs(isConnected));
+                return true;
             }
             finally
             {
                 _isHealthCheckRunning = false;
             }
+        }
+
+        private async void OnHealthCheckTick(object sender, EventArgs e)
+        {
+            // async void は例外が伝播しないため、排他制御ロジックは ExecuteHealthCheckAsync に集約
+            await ExecuteHealthCheckAsync();
         }
 
         private void OnSyncDisplayTick(object sender, EventArgs e)

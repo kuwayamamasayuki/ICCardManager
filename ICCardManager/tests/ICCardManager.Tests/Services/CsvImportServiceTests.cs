@@ -130,6 +130,72 @@ FEDCBA9876543210,PASMO,002,テスト2";
     }
 
     /// <summary>
+    /// 削除済みカードが復元（RestoreAsync→UpdateAsync）されることを確認。
+    /// プレビューだけでなく実際のインポートでも復元フローが動作するべき。
+    /// </summary>
+    [Fact]
+    public async Task ImportCardsAsync_DeletedCard_RestoresAndUpdates()
+    {
+        // Arrange — 削除済みカードが既存
+        var csvContent = @"カードIDm,カード種別,管理番号,備考
+0123456789ABCDEF,Suica,001,復元したい";
+
+        var filePath = Path.Combine(_testDirectory, "cards_restore.csv");
+        await Task.Run(() => File.WriteAllText(filePath, csvContent, CsvEncoding));
+
+        var deletedCard = new IcCard
+        {
+            CardIdm = "0123456789ABCDEF",
+            CardType = "Suica",
+            CardNumber = "001",
+            IsDeleted = true
+        };
+        _cardRepositoryMock.Setup(x => x.GetByIdmAsync("0123456789ABCDEF", true)).ReturnsAsync(deletedCard);
+        _cardRepositoryMock.Setup(x => x.RestoreAsync("0123456789ABCDEF", It.IsAny<SQLiteTransaction>())).ReturnsAsync(true);
+        _cardRepositoryMock.Setup(x => x.UpdateAsync(It.IsAny<IcCard>(), It.IsAny<SQLiteTransaction>())).ReturnsAsync(true);
+
+        // Act — skipExisting=true でも削除済みは復元されること
+        var result = await _service.ImportCardsAsync(filePath, skipExisting: true);
+
+        // Assert
+        result.Success.Should().BeTrue();
+        result.ImportedCount.Should().Be(1, "削除済みカードは復元+更新されてカウントに含まれる");
+        result.SkippedCount.Should().Be(0, "削除済みはスキップされない");
+        _cardRepositoryMock.Verify(x => x.RestoreAsync("0123456789ABCDEF", It.IsAny<SQLiteTransaction>()), Times.Once,
+            "RestoreAsyncが呼ばれる");
+        _cardRepositoryMock.Verify(x => x.UpdateAsync(It.IsAny<IcCard>(), It.IsAny<SQLiteTransaction>()), Times.Once,
+            "Restore後にUpdateAsyncが呼ばれる");
+    }
+
+    /// <summary>
+    /// 削除済みカードのRestoreAsyncが失敗した場合、エラー件数がカウントされロールバックされること
+    /// </summary>
+    [Fact]
+    public async Task ImportCardsAsync_DeletedCard_RestoreFailure_RollsBack()
+    {
+        // Arrange
+        var csvContent = @"カードIDm,カード種別,管理番号,備考
+0123456789ABCDEF,Suica,001,復元失敗";
+
+        var filePath = Path.Combine(_testDirectory, "cards_restore_fail.csv");
+        await Task.Run(() => File.WriteAllText(filePath, csvContent, CsvEncoding));
+
+        var deletedCard = new IcCard { CardIdm = "0123456789ABCDEF", IsDeleted = true };
+        _cardRepositoryMock.Setup(x => x.GetByIdmAsync("0123456789ABCDEF", true)).ReturnsAsync(deletedCard);
+        _cardRepositoryMock.Setup(x => x.RestoreAsync("0123456789ABCDEF", It.IsAny<SQLiteTransaction>())).ReturnsAsync(false);
+
+        // Act
+        var result = await _service.ImportCardsAsync(filePath);
+
+        // Assert
+        result.Success.Should().BeFalse();
+        result.ImportedCount.Should().Be(0, "失敗時はロールバックされる");
+        result.ErrorCount.Should().BeGreaterThan(0);
+        // 復元失敗時はUpdateAsyncは呼ばれない
+        _cardRepositoryMock.Verify(x => x.UpdateAsync(It.IsAny<IcCard>(), It.IsAny<SQLiteTransaction>()), Times.Never);
+    }
+
+    /// <summary>
     /// 既存カードがスキップされることを確認
     /// </summary>
     [Fact]
