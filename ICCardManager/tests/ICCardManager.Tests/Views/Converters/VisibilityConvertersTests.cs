@@ -9,43 +9,9 @@ namespace ICCardManager.Tests.Views.Converters;
 /// <summary>
 /// Views/Converters/VisibilityConverters.cs に定義された WPF 値コンバーターの単体テスト
 ///
-/// 注: Common/Converters.cs にも同名のクラスが存在するが振る舞いが異なる：
-///  - Common.IntToVisibilityConverter: intValue > 0 のときVisible（正の値のみ）
-///  - Views.Converters.IntToVisibilityConverter: intValue != 0 のときVisible（負も含む非ゼロ）
+/// 注: IntToVisibilityConverter は Issue #1227 で Common/Converters.cs に統合済み。
+/// テストは Common/ConvertersTests.cs の IntToVisibilityConverterTests を参照。
 /// </summary>
-public class ViewsIntToVisibilityConverterTests
-{
-    private readonly IntToVisibilityConverter _converter = new();
-
-    [Theory]
-    [InlineData(1, "Visible")]
-    [InlineData(100, "Visible")]
-    [InlineData(-1, "Visible")]   // Common版とは異なり、負の値もVisible
-    [InlineData(-100, "Visible")]
-    [InlineData(0, "Collapsed")]
-    public void Convert_整数値に対して非ゼロならVisible_ゼロならCollapsedを返すこと(int input, string expected)
-    {
-        var result = _converter.Convert(input, typeof(Visibility), null, CultureInfo.InvariantCulture);
-
-        var expectedVisibility = expected == "Visible" ? Visibility.Visible : Visibility.Collapsed;
-        result.Should().Be(expectedVisibility);
-    }
-
-    [Fact]
-    public void Convert_nullの場合はCollapsedを返すこと()
-    {
-        var result = _converter.Convert(null, typeof(Visibility), null, CultureInfo.InvariantCulture);
-        result.Should().Be(Visibility.Collapsed);
-    }
-
-    [Fact]
-    public void Convert_整数以外の型はCollapsedを返すこと()
-    {
-        var result = _converter.Convert("hello", typeof(Visibility), null, CultureInfo.InvariantCulture);
-        result.Should().Be(Visibility.Collapsed);
-    }
-}
-
 public class InverseBoolConverterTests
 {
     private readonly InverseBoolConverter _converter = new();
