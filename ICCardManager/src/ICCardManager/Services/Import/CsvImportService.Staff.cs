@@ -360,19 +360,12 @@ namespace ICCardManager.Services
         }
 
         /// <summary>
-        /// 履歴CSVをインポート
+        /// 職員データの変更点を検出
         /// </summary>
-        /// <param name="filePath">CSVファイルパス</param>
-        /// <param name="skipExisting">既存データをスキップするか（falseの場合は更新）</param>
-        /// <param name="targetCardIdm">CSV内のIDmが空の場合に使用するカードIDm（オプション）</param>
-        /// <remarks>
-        /// 新フォーマット: ID,日時,カードIDm,管理番号,摘要,受入金額,払出金額,残額,利用者,備考
-        /// 旧フォーマット: 日時,カードIDm,管理番号,摘要,受入金額,払出金額,残額,利用者,備考
-        /// 注意: LedgerDetailはインポートされません（エクスポート時に含まれないため）
-        /// 注意: 管理番号は参照用で、実際のデータ識別はカードIDmで行います
-        /// Issue #511: CSVのIDm列が空の場合、targetCardIdmが指定されていればそのIDmを使用
-        /// </remarks>
-
+        /// <param name="existingStaff">既存の職員</param>
+        /// <param name="newName">新しい氏名</param>
+        /// <param name="newNumber">新しい職員番号</param>
+        /// <param name="changes">変更点リスト（検出結果が追加される）</param>
         private static void DetectStaffChanges(
             Staff existingStaff,
             string newName,
@@ -399,18 +392,5 @@ namespace ICCardManager.Services
                 });
             }
         }
-
-        /// <summary>
-        /// 履歴データの変更点を検出
-        /// </summary>
-        /// <param name="existingLedger">既存の履歴</param>
-        /// <param name="newDate">新しい日付</param>
-        /// <param name="newSummary">新しい摘要</param>
-        /// <param name="newIncome">新しい受入金額</param>
-        /// <param name="newExpense">新しい払出金額</param>
-        /// <param name="newBalance">新しい残高</param>
-        /// <param name="newStaffName">新しい利用者名</param>
-        /// <param name="newNote">新しい備考</param>
-        /// <param name="changes">変更点リスト（検出結果が追加される）</param>
     }
 }

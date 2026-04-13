@@ -1036,15 +1036,5 @@ namespace ICCardManager.Services
 
             return string.Join(" ", parts);
         }
-
-        /// <summary>
-        /// 残高整合性チェック（プレビュー用）
-        /// カードごとに日時順で残高の連続性を検証します。
-        /// 計算式: 前の残高 + 受入金額 - 払出金額 = 今回の残高
-        /// Issue #907: 最初の行もDB上の直前残高と照合します。
-        /// </summary>
-        /// <param name="records">検証対象レコード（LineNumber, LedgerId, CardIdm, Date, Summary, Income, Expense, Balance, StaffName, Note）</param>
-        /// <param name="errors">エラーリスト</param>
-        /// <param name="previousBalanceByCard">カードIDmごとのDB上の直前残高（存在しない場合はキーなし）</param>
     }
 }

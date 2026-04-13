@@ -192,14 +192,12 @@ namespace ICCardManager.Services
             _cacheService = cacheService;
         }
 
-        /// <summary>
-        /// カードCSVをインポート
-        /// </summary>
-        /// <param name="filePath">CSVファイルパス</param>
-        /// <param name="skipExisting">既存データをスキップするか（falseの場合は更新）</param>
-
         // === 共通ユーティリティ ===
 
+        /// <summary>
+        /// CSVファイルを読み込み、行のリストとして返す
+        /// </summary>
+        /// <param name="filePath">CSVファイルパス</param>
         internal static async Task<List<string>> ReadCsvFileAsync(string filePath)
         {
             // UTF-8 with BOMに対応
@@ -454,13 +452,9 @@ namespace ICCardManager.Services
         }
 
         /// <summary>
-        /// カードデータの変更点を検出
+        /// CSV行をパースし、フィールドのリストとして返す（ダブルクォート対応）
         /// </summary>
-        /// <param name="existingCard">既存のカード</param>
-        /// <param name="newCardType">新しいカード種別</param>
-        /// <param name="newCardNumber">新しい管理番号</param>
-        /// <param name="changes">変更点リスト（検出結果が追加される）</param>
-
+        /// <param name="line">CSV行文字列</param>
         private static List<string> ParseCsvLine(string line)
         {
             var fields = new List<string>();
