@@ -25,10 +25,10 @@
     省略時は docs/design/ 配下のすべての .md を変換します（README.md を除く）。
 
 .EXAMPLE
-    .\tools\convert-docs.ps1
-    .\tools\convert-docs.ps1 -Format docx
-    .\tools\convert-docs.ps1 -File "01_*.md"
-    .\tools\convert-docs.ps1 -Format pdf -File "06_シーケンス図.md"
+    .\docs\design\convert-docs.ps1
+    .\docs\design\convert-docs.ps1 -Format docx
+    .\docs\design\convert-docs.ps1 -File "01_*.md"
+    .\docs\design\convert-docs.ps1 -Format pdf -File "06_シーケンス図.md"
 #>
 param(
     [ValidateSet("all", "docx", "pdf")]
@@ -41,10 +41,9 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
 # ============================================================
-# パス設定
+# パス設定（スクリプトは docs/design/ に配置されている前提）
 # ============================================================
-$ProjectRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
-$DesignDir   = Join-Path $ProjectRoot "docs\design"
+$DesignDir   = $PSScriptRoot
 $OutputDir   = Join-Path $DesignDir "output"
 $TempDir     = Join-Path $OutputDir ".temp"
 $ImageDir    = Join-Path $TempDir "images"
