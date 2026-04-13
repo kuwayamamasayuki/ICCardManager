@@ -17,6 +17,9 @@ TestResults/
 # インストーラー出力
 installer/output/
 
+# ドキュメント変換出力（convert-docs.ps1 で生成）
+docs/design/output/
+
 # ユーザー固有ファイル
 *.db
 appsettings.Development.json
