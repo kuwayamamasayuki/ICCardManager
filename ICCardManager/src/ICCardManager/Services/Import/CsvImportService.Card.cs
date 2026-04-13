@@ -364,11 +364,12 @@ namespace ICCardManager.Services
         }
 
         /// <summary>
-        /// 職員CSVのインポートプレビューを取得
+        /// カードデータの変更点を検出
         /// </summary>
-        /// <param name="filePath">CSVファイルパス</param>
-        /// <param name="skipExisting">既存データをスキップするか（falseの場合は更新）</param>
-
+        /// <param name="existingCard">既存のカード</param>
+        /// <param name="newCardType">新しいカード種別</param>
+        /// <param name="newCardNumber">新しい管理番号</param>
+        /// <param name="changes">変更点リスト（検出結果が追加される）</param>
         private static void DetectCardChanges(
             IcCard existingCard,
             string newCardType,
@@ -395,13 +396,5 @@ namespace ICCardManager.Services
                 });
             }
         }
-
-        /// <summary>
-        /// 職員データの変更点を検出
-        /// </summary>
-        /// <param name="existingStaff">既存の職員</param>
-        /// <param name="newName">新しい氏名</param>
-        /// <param name="newNumber">新しい職員番号</param>
-        /// <param name="changes">変更点リスト（検出結果が追加される）</param>
     }
 }
