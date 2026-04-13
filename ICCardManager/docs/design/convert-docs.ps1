@@ -24,17 +24,24 @@
     特定のファイルのみ変換する場合にファイル名を指定します（例: "01_*.md"）。
     省略時は docs/design/ 配下のすべての .md を変換します（README.md を除く）。
 
+.PARAMETER Force
+    タイムスタンプに関係なく、すべてのファイルを強制的に再変換します。
+    省略時は .md が .docx/.pdf より新しい場合のみ変換します。
+
 .EXAMPLE
     .\docs\design\convert-docs.ps1
     .\docs\design\convert-docs.ps1 -Format docx
     .\docs\design\convert-docs.ps1 -File "01_*.md"
     .\docs\design\convert-docs.ps1 -Format pdf -File "06_シーケンス図.md"
+    .\docs\design\convert-docs.ps1 -Force
 #>
 param(
     [ValidateSet("all", "docx", "pdf")]
     [string]$Format = "all",
 
-    [string]$File = ""
+    [string]$File = "",
+
+    [switch]$Force
 )
 
 Set-StrictMode -Version Latest
@@ -431,8 +438,8 @@ Write-Step 4 $totalSteps "ファイル変換"
 Write-Host ""
 
 $results = @{
-    DocxSuccess = 0; DocxFail = 0
-    PdfSuccess  = 0; PdfFail  = 0
+    DocxSuccess = 0; DocxFail = 0; DocxSkipped = 0
+    PdfSuccess  = 0; PdfFail  = 0; PdfSkipped  = 0
     MermaidConverted = 0; MermaidFailed = 0
 }
 
@@ -443,7 +450,37 @@ foreach ($mdFile in $mdFiles) {
 
     Write-Host "  [$fileIndex/$($mdFiles.Count)] $($mdFile.Name)" -ForegroundColor White
 
-    # --- Mermaid 前処理 ---
+    # --- タイムスタンプ比較: 変換が必要なフォーマットを判定 ---
+    $mdLastWrite = $mdFile.LastWriteTime
+    $needDocx = $false
+    $needPdf  = $false
+
+    if ($Format -in @("all", "docx")) {
+        $docxFile = Join-Path $OutputDir "$name.docx"
+        if ($Force -or -not (Test-Path $docxFile) -or (Get-Item $docxFile).LastWriteTime -lt $mdLastWrite) {
+            $needDocx = $true
+        }
+        else {
+            Write-Detail "$name.docx: 最新のためスキップ"
+            $results.DocxSkipped++
+        }
+    }
+
+    if ($Format -in @("all", "pdf")) {
+        $pdfFile = Join-Path $OutputDir "$name.pdf"
+        if ($Force -or -not (Test-Path $pdfFile) -or (Get-Item $pdfFile).LastWriteTime -lt $mdLastWrite) {
+            $needPdf = $true
+        }
+        else {
+            Write-Detail "$name.pdf: 最新のためスキップ"
+            $results.PdfSkipped++
+        }
+    }
+
+    # docx も pdf も不要ならこのファイルは完全にスキップ
+    if (-not $needDocx -and -not $needPdf) { continue }
+
+    # --- Mermaid 前処理（変換が必要な場合のみ） ---
     $processedMd = Join-Path $TempDir "$($name)_processed.md"
     $mermaidResult = Convert-MermaidToImages `
         -InputFile $mdFile.FullName `
@@ -458,7 +495,7 @@ foreach ($mdFile in $mdFiles) {
     }
 
     # --- docx 変換 ---
-    if ($Format -in @("all", "docx")) {
+    if ($needDocx) {
         $docxFile = Join-Path $OutputDir "$name.docx"
         try {
             & pandoc $processedMd `
@@ -480,7 +517,7 @@ foreach ($mdFile in $mdFiles) {
     }
 
     # --- PDF 変換 (Markdown → HTML → Chrome headless → PDF) ---
-    if ($Format -in @("all", "pdf")) {
+    if ($needPdf) {
         $htmlFile = Join-Path $TempDir "$name.html"
         $pdfFile  = Join-Path $OutputDir "$name.pdf"
         try {
@@ -532,11 +569,13 @@ Write-Host ""
 
 if ($Format -in @("all", "docx")) {
     $color = if ($results.DocxFail -eq 0) { "Green" } else { "Yellow" }
-    Write-Host "  docx    : 成功 $($results.DocxSuccess) / 失敗 $($results.DocxFail)" -ForegroundColor $color
+    $skipText = if ($results.DocxSkipped -gt 0) { " / スキップ $($results.DocxSkipped)" } else { "" }
+    Write-Host "  docx    : 成功 $($results.DocxSuccess) / 失敗 $($results.DocxFail)$skipText" -ForegroundColor $color
 }
 if ($Format -in @("all", "pdf")) {
     $color = if ($results.PdfFail -eq 0) { "Green" } else { "Yellow" }
-    Write-Host "  pdf     : 成功 $($results.PdfSuccess) / 失敗 $($results.PdfFail)" -ForegroundColor $color
+    $skipText = if ($results.PdfSkipped -gt 0) { " / スキップ $($results.PdfSkipped)" } else { "" }
+    Write-Host "  pdf     : 成功 $($results.PdfSuccess) / 失敗 $($results.PdfFail)$skipText" -ForegroundColor $color
 }
 if ($results.MermaidConverted -gt 0 -or $results.MermaidFailed -gt 0) {
     $color = if ($results.MermaidFailed -eq 0) { "Green" } else { "Yellow" }
