@@ -269,6 +269,17 @@ public partial class SettingsViewModel : ViewModelBase
                 // トースト位置の変更を反映
                 App.ApplyToastPosition(settings.ToastPosition);
 
+                // 部署種別を設定ファイルに保存（インストーラーがアップグレード時に読み込む）
+                try
+                {
+                    SaveDepartmentConfigToFile(
+                        SettingsRepository.DepartmentTypeToString(settings.DepartmentType));
+                }
+                catch
+                {
+                    // 非致命的: DBが正なので設定ファイルの書き込み失敗は無視
+                }
+
                 // DBパスが変更された場合、appsettings.jsonに保存
                 if (IsDatabasePathChanged)
                 {
@@ -371,31 +382,103 @@ public partial class SettingsViewModel : ViewModelBase
         }
     }
 
+    // =========================================================================
+    // 設定ファイル共通ヘルパー
+    // =========================================================================
+    // C:\ProgramData\ICCardManager\ 配下のテキストファイルを読み書きする共通処理。
+    // インストーラー（Inno Setup）はShift_JIS、アプリはUTF-8 BOMで書き込むため、
+    // 読み取り時はBOMで自動判定する。
+
+    /// <summary>
+    /// ProgramData配下の設定ファイルのフルパスを取得
+    /// </summary>
+    private static string GetConfigFilePath(string fileName)
+    {
+        return Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
+            "ICCardManager", fileName);
+    }
+
+    /// <summary>
+    /// 設定ファイルからテキストを読み込む（BOM自動判定）
+    /// </summary>
+    /// <remarks>
+    /// Inno SetupのSaveStringToFileはShift_JIS（ANSI）で書き込むが、
+    /// アプリのFile.WriteAllTextはUTF-8 BOM付きで書き込む。
+    /// どちらでも正しく読めるよう、BOMで判定する。
+    /// </remarks>
+    private static string LoadConfigFile(string filePath)
+    {
+        if (!File.Exists(filePath))
+        {
+            return string.Empty;
+        }
+
+        try
+        {
+            var bytes = File.ReadAllBytes(filePath);
+            string value;
+            if (bytes.Length >= 3 && bytes[0] == 0xEF && bytes[1] == 0xBB && bytes[2] == 0xBF)
+            {
+                // UTF-8 BOM
+                value = System.Text.Encoding.UTF8.GetString(bytes, 3, bytes.Length - 3);
+            }
+            else if (bytes.Length >= 2 && bytes[0] == 0xFF && bytes[1] == 0xFE)
+            {
+                // UTF-16 LE BOM
+                value = System.Text.Encoding.Unicode.GetString(bytes, 2, bytes.Length - 2);
+            }
+            else
+            {
+                // BOMなし: Shift_JIS（Inno Setupが書いた場合）として読む
+                value = System.Text.Encoding.GetEncoding(932).GetString(bytes);
+            }
+            return value.Trim();
+        }
+        catch
+        {
+            return string.Empty;
+        }
+    }
+
+    /// <summary>
+    /// 設定ファイルにテキストを書き込む（アトミック書き込み）
+    /// </summary>
+    /// <remarks>
+    /// 一時ファイルに書き出してからリネームすることで、書き込み途中のクラッシュによる
+    /// ファイル破損を防止する。
+    /// </remarks>
+    private static void SaveConfigFile(string filePath, string value)
+    {
+        var directory = Path.GetDirectoryName(filePath);
+        if (!string.IsNullOrEmpty(directory))
+        {
+            Directory.CreateDirectory(directory);
+        }
+
+        var tempPath = filePath + ".tmp";
+        File.WriteAllText(tempPath, value ?? string.Empty, System.Text.Encoding.UTF8);
+        if (File.Exists(filePath))
+        {
+            File.Delete(filePath);
+        }
+        File.Move(tempPath, filePath);
+    }
+
+    // =========================================================================
+    // データベース設定ファイル
+    // =========================================================================
+
     /// <summary>
     /// データベースパスを設定ファイルに保存
     /// </summary>
     /// <remarks>
     /// appsettings.jsonはProgram Files内にあり一般ユーザーには書き込めないため、
     /// C:\ProgramData\ICCardManager\database_config.txt に保存する。
-    /// department_config.txt と同じパターン。
     /// </remarks>
     internal static void SaveDatabasePathToConfigFile(string databasePath)
     {
-        var configPath = GetDatabaseConfigPath();
-        var directory = Path.GetDirectoryName(configPath);
-        if (!string.IsNullOrEmpty(directory))
-        {
-            Directory.CreateDirectory(directory);
-        }
-
-        // アトミック書き込み: 一時ファイルに書き出してからリネーム（破損防止）
-        var tempPath = configPath + ".tmp";
-        File.WriteAllText(tempPath, databasePath ?? string.Empty, System.Text.Encoding.UTF8);
-        if (File.Exists(configPath))
-        {
-            File.Delete(configPath);
-        }
-        File.Move(tempPath, configPath);
+        SaveConfigFile(GetDatabaseConfigPath(), databasePath);
     }
 
     /// <summary>
@@ -403,9 +486,7 @@ public partial class SettingsViewModel : ViewModelBase
     /// </summary>
     internal static string GetDatabaseConfigPath()
     {
-        return Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
-            "ICCardManager", "database_config.txt");
+        return GetConfigFilePath("database_config.txt");
     }
 
     /// <summary>
@@ -413,40 +494,63 @@ public partial class SettingsViewModel : ViewModelBase
     /// </summary>
     internal static string LoadDatabasePathFromConfigFile()
     {
-        var configPath = GetDatabaseConfigPath();
-        if (!File.Exists(configPath))
-        {
-            return string.Empty;
-        }
+        return LoadConfigFile(GetDatabaseConfigPath());
+    }
 
-        try
-        {
-            // Inno SetupのSaveStringToFileはShift_JIS（ANSI）で書き込むが、
-            // 設定画面のFile.WriteAllTextはUTF-8 BOM付きで書き込む。
-            // どちらでも正しく読めるよう、BOMで判定する。
-            var bytes = File.ReadAllBytes(configPath);
-            string path;
-            if (bytes.Length >= 3 && bytes[0] == 0xEF && bytes[1] == 0xBB && bytes[2] == 0xBF)
-            {
-                // UTF-8 BOM
-                path = System.Text.Encoding.UTF8.GetString(bytes, 3, bytes.Length - 3);
-            }
-            else if (bytes.Length >= 2 && bytes[0] == 0xFF && bytes[1] == 0xFE)
-            {
-                // UTF-16 LE BOM
-                path = System.Text.Encoding.Unicode.GetString(bytes, 2, bytes.Length - 2);
-            }
-            else
-            {
-                // BOMなし: Shift_JIS（Inno Setupが書いた場合）として読む
-                path = System.Text.Encoding.GetEncoding(932).GetString(bytes);
-            }
-            return path.Trim();
-        }
-        catch
-        {
-            return string.Empty;
-        }
+    // =========================================================================
+    // 部署種別設定ファイル
+    // =========================================================================
+
+    /// <summary>
+    /// 部署種別設定ファイルのパスを取得
+    /// </summary>
+    internal static string GetDepartmentConfigPath()
+    {
+        return GetConfigFilePath("department_config.txt");
+    }
+
+    /// <summary>
+    /// 部署種別設定ファイルから値を読み込み
+    /// </summary>
+    internal static string LoadDepartmentConfigFromFile()
+    {
+        return LoadConfigFile(GetDepartmentConfigPath());
+    }
+
+    /// <summary>
+    /// 部署種別を設定ファイルに保存（インストーラーがアップグレード時に読み込む）
+    /// </summary>
+    internal static void SaveDepartmentConfigToFile(string departmentValue)
+    {
+        SaveConfigFile(GetDepartmentConfigPath(), departmentValue);
+    }
+
+    // =========================================================================
+    // 帳票出力先設定ファイル
+    // =========================================================================
+
+    /// <summary>
+    /// 帳票出力先設定ファイルのパスを取得
+    /// </summary>
+    internal static string GetReportOutputConfigPath()
+    {
+        return GetConfigFilePath("report_output_config.txt");
+    }
+
+    /// <summary>
+    /// 帳票出力先設定ファイルから値を読み込み
+    /// </summary>
+    internal static string LoadReportOutputConfigFromFile()
+    {
+        return LoadConfigFile(GetReportOutputConfigPath());
+    }
+
+    /// <summary>
+    /// 帳票出力先を設定ファイルに保存（インストーラーがアップグレード時に読み込む）
+    /// </summary>
+    internal static void SaveReportOutputConfigToFile(string outputFolder)
+    {
+        SaveConfigFile(GetReportOutputConfigPath(), outputFolder);
     }
 
     /// <summary>
