@@ -94,6 +94,7 @@ __pycache__/
 
 # Claude Code（個人設定）
 .claude/settings.local.json
+.claude/agents/
 
 # 一時ファイル
 タイトルなし.txt
