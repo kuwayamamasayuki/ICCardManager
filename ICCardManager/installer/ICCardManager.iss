@@ -146,6 +146,34 @@ var
   DatabaseUseSharedFolder: Boolean;
   DatabaseSharedPath: string;
 
+// 帳票出力先選択ページ
+var
+  ReportOutputPage: TWizardPage;
+  ReportOutputPathEdit: TNewEdit;
+  ReportOutputPathLabel: TNewStaticText;
+  ReportOutputNoteLabel: TNewStaticText;
+  ReportOutputBrowseButton: TNewButton;
+
+// 既存の設定ファイルを読み込む（アップグレード時のデフォルト値として使用）
+// LoadStringsFromFile（TArrayOfString版）は内部でTStringList.LoadFromFileを使い、
+// UTF-8 BOM を自動検出してUnicodeにデコードする。BOMなしはANSI（Shift_JIS）として読む。
+function ReadConfigFile(FileName: string): string;
+var
+  ConfigPath: string;
+  Lines: TArrayOfString;
+begin
+  Result := '';
+  ConfigPath := ExpandConstant('{commonappdata}\ICCardManager\') + FileName;
+  if FileExists(ConfigPath) then
+  begin
+    if LoadStringsFromFile(ConfigPath, Lines) then
+    begin
+      if GetArrayLength(Lines) > 0 then
+        Result := Trim(Lines[0]);
+    end;
+  end;
+end;
+
 // パス入力時に自動的に「共有フォルダ」ラジオボタンを選択
 procedure DatabasePathEditChange(Sender: TObject);
 begin
@@ -171,10 +199,28 @@ begin
   end;
 end;
 
+// 帳票出力先の「参照」ボタンクリック
+procedure ReportOutputBrowseButtonClick(Sender: TObject);
+var
+  Dir: string;
+begin
+  Dir := ReportOutputPathEdit.Text;
+  if BrowseForFolder('帳票出力先フォルダを選択してください。', Dir, False) then
+  begin
+    ReportOutputPathEdit.Text := Dir;
+  end;
+end;
+
 // インストールウィザードにページを追加
 procedure InitializeWizard();
+var
+  ExistingDepartment: string;
+  ExistingDbPath: string;
+  ExistingReportOutput: string;
 begin
+  // =============================================
   // 部署選択ページ（Issue #742）
+  // =============================================
   DepartmentPage := CreateInputOptionPage(wpSelectTasks,
     '部署の選択',
     '使用する部署及び支出科目を選択してください。',
@@ -186,7 +232,14 @@ begin
   DepartmentPage.Add('企業会計部局（水道局、交通局等）：旅費 - 乗車券購入費');
   DepartmentPage.SelectedValueIndex := 0;
 
+  // 既存の部署設定を読み込んでデフォルト値として表示（アップグレード時）
+  ExistingDepartment := ReadConfigFile('department_config.txt');
+  if ExistingDepartment = 'enterprise_account' then
+    DepartmentPage.SelectedValueIndex := 1;
+
+  // =============================================
   // DB保存先選択ページ（部署選択の次に表示）
+  // =============================================
   DatabasePage := CreateCustomPage(DepartmentPage.ID,
     'データベースの保存先',
     '複数のPCから同時に利用する場合は、共有フォルダを指定してください。' + #13#10 +
@@ -238,6 +291,59 @@ begin
   DatabaseNoteLabel.Top := DatabasePathEdit.Top + DatabasePathEdit.Height + 4;
   DatabaseNoteLabel.Left := 20;
   DatabaseNoteLabel.Font.Color := clGray;
+
+  // 既存のDB設定を読み込んでデフォルト値として表示（アップグレード時）
+  ExistingDbPath := ReadConfigFile('database_config.txt');
+  if ExistingDbPath <> '' then
+  begin
+    DatabasePathEdit.Text := ExtractFileDir(ExistingDbPath);
+    DatabaseSharedRadio.Checked := True;
+    DatabaseLocalRadio.Checked := False;
+  end;
+
+  // =============================================
+  // 帳票出力先選択ページ（DB保存先の次に表示）
+  // =============================================
+  ReportOutputPage := CreateCustomPage(DatabasePage.ID,
+    '帳票出力先フォルダ',
+    '帳票（Excel）の出力先フォルダを指定してください。' + #13#10 +
+    'この設定は後から帳票作成画面で変更できます。');
+
+  ReportOutputPathLabel := TNewStaticText.Create(ReportOutputPage);
+  ReportOutputPathLabel.Parent := ReportOutputPage.Surface;
+  ReportOutputPathLabel.Caption := '出力先フォルダ:';
+  ReportOutputPathLabel.Top := 0;
+  ReportOutputPathLabel.Left := 0;
+
+  ReportOutputPathEdit := TNewEdit.Create(ReportOutputPage);
+  ReportOutputPathEdit.Parent := ReportOutputPage.Surface;
+  ReportOutputPathEdit.Top := ReportOutputPathLabel.Top + ReportOutputPathLabel.Height + 4;
+  ReportOutputPathEdit.Left := 0;
+  ReportOutputPathEdit.Width := ReportOutputPage.SurfaceWidth - 100;
+
+  ReportOutputBrowseButton := TNewButton.Create(ReportOutputPage);
+  ReportOutputBrowseButton.Parent := ReportOutputPage.Surface;
+  ReportOutputBrowseButton.Caption := '参照...';
+  ReportOutputBrowseButton.Top := ReportOutputPathEdit.Top - 1;
+  ReportOutputBrowseButton.Left := ReportOutputPathEdit.Left + ReportOutputPathEdit.Width + 8;
+  ReportOutputBrowseButton.Width := 70;
+  ReportOutputBrowseButton.Height := ReportOutputPathEdit.Height + 2;
+  ReportOutputBrowseButton.OnClick := @ReportOutputBrowseButtonClick;
+
+  ReportOutputNoteLabel := TNewStaticText.Create(ReportOutputPage);
+  ReportOutputNoteLabel.Parent := ReportOutputPage.Surface;
+  ReportOutputNoteLabel.Caption := '例: C:\Users\username\Documents';
+  ReportOutputNoteLabel.Top := ReportOutputPathEdit.Top + ReportOutputPathEdit.Height + 4;
+  ReportOutputNoteLabel.Left := 0;
+  ReportOutputNoteLabel.Font.Color := clGray;
+
+  // 既存の帳票出力先設定を読み込んでデフォルト値として表示（アップグレード時）
+  // 設定がなければマイドキュメントをデフォルトにする
+  ExistingReportOutput := ReadConfigFile('report_output_config.txt');
+  if ExistingReportOutput <> '' then
+    ReportOutputPathEdit.Text := ExistingReportOutput
+  else
+    ReportOutputPathEdit.Text := ExpandConstant('{userdocs}');
 end;
 
 // 部署選択結果を設定ファイルに書き出す（Issue #742）
@@ -293,6 +399,27 @@ begin
   ConfigFile := ConfigDir + '\database_config.txt';
 
   SaveStringToFile(ConfigFile, FullDbPath, False);
+end;
+
+// 帳票出力先選択結果を設定ファイルに書き出す
+procedure WriteReportOutputConfig();
+var
+  ConfigDir: string;
+  ConfigFile: string;
+  OutputPath: string;
+begin
+  if ReportOutputPathEdit = nil then
+    Exit;
+
+  OutputPath := Trim(ReportOutputPathEdit.Text);
+  if OutputPath = '' then
+    Exit;
+
+  ConfigDir := ExpandConstant('{commonappdata}\ICCardManager');
+  ForceDirectories(ConfigDir);
+  ConfigFile := ConfigDir + '\report_output_config.txt';
+
+  SaveStringToFile(ConfigFile, OutputPath, False);
 end;
 
 // DB保存先ページのバリデーション（「次へ」ボタン押下時に呼ばれる）
@@ -397,6 +524,7 @@ begin
       end;
     end;
     WriteDatabaseConfig();
+    WriteReportOutputConfig();
   end;
 end;
 

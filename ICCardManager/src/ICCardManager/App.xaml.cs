@@ -389,8 +389,9 @@ namespace ICCardManager
             Task.Run(() => RegisterTestDataAsync()).GetAwaiter().GetResult();
     #endif
 
-            // インストーラーからの部署設定を適用（Issue #742）
-            ApplyDepartmentConfigFromInstaller();
+            // 設定ファイルからの設定を適用（Issue #742）
+            ApplyDepartmentConfigFromFile();
+            ApplyReportOutputConfigFromFile();
 
             // 保存済み設定を適用
             ApplySavedSettings();
@@ -400,33 +401,20 @@ namespace ICCardManager
         }
 
         /// <summary>
-        /// インストーラーが書き出した部署設定ファイルを読み取り、DBに適用する（Issue #742）
+        /// 部署設定ファイルを読み取り、DBに適用する（Issue #742）
         /// </summary>
         /// <remarks>
-        /// インストーラーは %PROGRAMDATA%\ICCardManager\department_config.txt に
-        /// 選択された部署種別（"mayor_office" or "enterprise_account"）を書き出す。
-        /// アプリ初回起動時にこのファイルを読み取り、DB設定を上書きしてからファイルを削除する。
+        /// インストーラーまたはアプリの設定画面が %PROGRAMDATA%\ICCardManager\department_config.txt に
+        /// 部署種別（"mayor_office" or "enterprise_account"）を書き出す。
+        /// 起動時にこのファイルを読み取り、DB設定に適用する。
+        /// ファイルは削除せず永続的に保持する（インストーラーがアップグレード時にデフォルト値として使用）。
         /// ファイルが存在しない場合（手動インストール等）はschema.sqlのデフォルト値が使用される。
         /// </remarks>
-        private void ApplyDepartmentConfigFromInstaller()
+        private void ApplyDepartmentConfigFromFile()
         {
             try
             {
-                var configPath = System.IO.Path.Combine(
-                    Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
-                    "ICCardManager", "department_config.txt");
-
-                if (!System.IO.File.Exists(configPath))
-                {
-                    return; // 設定ファイルなし（アップグレードまたは手動インストール）
-                }
-
-                var departmentValue = System.IO.File.ReadAllText(configPath).Trim();
-
-                // ファイルを削除（次回起動時に再適用しない）
-                // インストーラー（管理者権限）が作成したファイルのため、
-                // 一般ユーザーでは削除できない場合がある（Issue #1080）
-                DeleteOrClearFile(configPath, _logger);
+                var departmentValue = ViewModels.SettingsViewModel.LoadDepartmentConfigFromFile();
 
                 if (string.IsNullOrEmpty(departmentValue))
                 {
@@ -444,12 +432,50 @@ namespace ICCardManager
                 cacheService.Invalidate(CacheKeys.AppSettings);
 
                 var departmentType = SettingsRepository.ParseDepartmentType(departmentValue);
-                _logger?.LogInformation("インストーラー設定: 部署種別を適用 DepartmentType={DepartmentType}", departmentType);
+                _logger?.LogInformation("設定ファイル: 部署種別を適用 DepartmentType={DepartmentType}", departmentType);
             }
             catch (Exception ex)
             {
-                _logger?.LogWarning(ex, "インストーラーからの部署設定の適用でエラー");
+                _logger?.LogWarning(ex, "部署設定ファイルの適用でエラー");
                 // エラーが発生してもアプリは起動させる（schema.sqlのデフォルト値が使用される）
+            }
+        }
+
+        /// <summary>
+        /// 帳票出力先設定ファイルを読み取り、DBに適用する
+        /// </summary>
+        /// <remarks>
+        /// インストーラーまたは帳票作成画面が %PROGRAMDATA%\ICCardManager\report_output_config.txt に
+        /// 帳票出力先フォルダパスを書き出す。
+        /// 起動時にこのファイルを読み取り、DB設定に適用する。
+        /// ファイルが存在しない場合は何もしない。
+        /// </remarks>
+        private void ApplyReportOutputConfigFromFile()
+        {
+            try
+            {
+                var outputFolder = ViewModels.SettingsViewModel.LoadReportOutputConfigFromFile();
+
+                if (string.IsNullOrEmpty(outputFolder))
+                {
+                    return;
+                }
+
+                var settingsRepository = ServiceProvider.GetRequiredService<ISettingsRepository>();
+                Task.Run(() => settingsRepository.SetAsync(
+                    SettingsRepository.KeyReportOutputFolder,
+                    outputFolder
+                )).GetAwaiter().GetResult();
+
+                // キャッシュを無効化して再取得を強制
+                var cacheService = ServiceProvider.GetRequiredService<ICacheService>();
+                cacheService.Invalidate(CacheKeys.AppSettings);
+
+                _logger?.LogInformation("設定ファイル: 帳票出力先を適用 OutputFolder={OutputFolder}", outputFolder);
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogWarning(ex, "帳票出力先設定ファイルの適用でエラー");
             }
         }
 

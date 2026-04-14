@@ -143,6 +143,16 @@ public partial class ReportViewModel : ViewModelBase
         var settings = await _settingsRepository.GetAppSettingsAsync();
         settings.ReportOutputFolder = OutputFolder;
         await _settingsRepository.SaveAppSettingsAsync(settings);
+
+        // 設定ファイルにも保存（インストーラーがアップグレード時に読み込む）
+        try
+        {
+            SettingsViewModel.SaveReportOutputConfigToFile(OutputFolder);
+        }
+        catch
+        {
+            // 非致命的: DBが正なので設定ファイルの書き込み失敗は無視
+        }
     }
 
     /// <summary>
