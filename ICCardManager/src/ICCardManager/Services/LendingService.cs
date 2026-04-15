@@ -221,50 +221,70 @@ namespace ICCardManager.Services
         /// <returns>修復件数</returns>
         public async Task<int> RepairLentStatusConsistencyAsync()
         {
-            var cards = await _cardRepository.GetAllAsync();
-            var lentRecords = await _ledgerRepository.GetAllLentRecordsAsync();
-
-            // カードIDm → 貸出中レコードのマッピング
-            // Issue #1196: 同一カードに複数の貸出中レコードがある場合は明示的に最新を採用する。
-            // 以前はリポジトリ側 ORDER BY lent_at DESC に依存していたが、層間の暗黙契約を排除し、
-            // サービス層自身が並び順を保証する。LentAt が null のレコードは末尾に並ぶ
-            // （Comparer<DateTime?>.Default は null を最小値として扱うため）。
-            var lentRecordMap = new Dictionary<string, Ledger>();
-            foreach (var record in lentRecords.OrderByDescending(r => r.LentAt))
-            {
-                if (!lentRecordMap.ContainsKey(record.CardIdm))
-                {
-                    lentRecordMap[record.CardIdm] = record;
-                }
-            }
-
+            // Issue #1239: 共有モードで他PCの同時操作と競合しないよう、
+            // READ（カード一覧 + 貸出レコード）と UPDATE を同一トランザクション内で実行する。
+            // トランザクション内ではSQLiteのスナップショット分離により一貫した状態が読める。
             var repairCount = 0;
 
-            foreach (var card in cards)
+            await _dbContext.ExecuteWithRetryAsync(async () =>
             {
-                var hasLentRecord = lentRecordMap.TryGetValue(card.CardIdm, out var lentRecord);
+                using var scope = await _dbContext.BeginTransactionAsync();
 
-                if (hasLentRecord && !card.IsLent)
+                try
                 {
-                    // 貸出中レコードがあるのにis_lent=0 → is_lent=1に修復
-                    await _cardRepository.UpdateLentStatusAsync(
-                        card.CardIdm, true, lentRecord.LentAt, lentRecord.LenderIdm);
-                    _logger.LogWarning(
-                        "Issue #790: 貸出状態の不整合を修復しました（is_lent: 0→1）: CardIdm={CardIdm}, LentAt={LentAt}",
-                        card.CardIdm, lentRecord.LentAt);
-                    repairCount++;
+                    var cards = await _cardRepository.GetAllAsync();
+                    var lentRecords = await _ledgerRepository.GetAllLentRecordsAsync();
+
+                    // カードIDm → 貸出中レコードのマッピング
+                    // Issue #1196: 同一カードに複数の貸出中レコードがある場合は明示的に最新を採用する。
+                    // 以前はリポジトリ側 ORDER BY lent_at DESC に依存していたが、層間の暗黙契約を排除し、
+                    // サービス層自身が並び順を保証する。LentAt が null のレコードは末尾に並ぶ
+                    // （Comparer<DateTime?>.Default は null を最小値として扱うため）。
+                    var lentRecordMap = new Dictionary<string, Ledger>();
+                    foreach (var record in lentRecords.OrderByDescending(r => r.LentAt))
+                    {
+                        if (!lentRecordMap.ContainsKey(record.CardIdm))
+                        {
+                            lentRecordMap[record.CardIdm] = record;
+                        }
+                    }
+
+                    repairCount = 0;
+
+                    foreach (var card in cards)
+                    {
+                        var hasLentRecord = lentRecordMap.TryGetValue(card.CardIdm, out var lentRecord);
+
+                        if (hasLentRecord && !card.IsLent)
+                        {
+                            // 貸出中レコードがあるのにis_lent=0 → is_lent=1に修復
+                            await _cardRepository.UpdateLentStatusAsync(
+                                card.CardIdm, true, lentRecord.LentAt, lentRecord.LenderIdm);
+                            _logger.LogWarning(
+                                "Issue #790: 貸出状態の不整合を修復しました（is_lent: 0→1）: CardIdm={CardIdm}, LentAt={LentAt}",
+                                card.CardIdm, lentRecord.LentAt);
+                            repairCount++;
+                        }
+                        else if (!hasLentRecord && card.IsLent)
+                        {
+                            // 貸出中レコードがないのにis_lent=1 → is_lent=0に修復
+                            await _cardRepository.UpdateLentStatusAsync(
+                                card.CardIdm, false, null, null);
+                            _logger.LogWarning(
+                                "Issue #790: 貸出状態の不整合を修復しました（is_lent: 1→0）: CardIdm={CardIdm}",
+                                card.CardIdm);
+                            repairCount++;
+                        }
+                    }
+
+                    scope.Commit();
                 }
-                else if (!hasLentRecord && card.IsLent)
+                catch
                 {
-                    // 貸出中レコードがないのにis_lent=1 → is_lent=0に修復
-                    await _cardRepository.UpdateLentStatusAsync(
-                        card.CardIdm, false, null, null);
-                    _logger.LogWarning(
-                        "Issue #790: 貸出状態の不整合を修復しました（is_lent: 1→0）: CardIdm={CardIdm}",
-                        card.CardIdm);
-                    repairCount++;
+                    scope.Rollback();
+                    throw;
                 }
-            }
+            });
 
             if (repairCount > 0)
             {
