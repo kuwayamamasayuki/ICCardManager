@@ -48,7 +48,7 @@ public class LedgerMergeServiceTests
         // OperationLoggerは実物を使用（メソッドがvirtualでないため）
         _operationLogger = new OperationLogger(
             _operationLogRepositoryMock.Object,
-            _staffRepositoryMock.Object);
+            Mock.Of<ICurrentOperatorContext>());
 
         _service = new LedgerMergeService(
             _ledgerRepositoryMock.Object,

@@ -33,7 +33,7 @@ public class LedgerDetailViewModelTests
         var staffRepoMock = new Mock<IStaffRepository>();
         var operationLogger = new OperationLogger(
             operationLogRepoMock.Object,
-            staffRepoMock.Object);
+            Mock.Of<ICurrentOperatorContext>());
         var splitServiceLogger = NullLogger<LedgerSplitService>.Instance;
         var ledgerSplitService = new LedgerSplitService(
             _ledgerRepoMock.Object,

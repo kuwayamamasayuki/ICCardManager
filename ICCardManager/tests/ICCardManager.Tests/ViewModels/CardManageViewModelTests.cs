@@ -50,7 +50,7 @@ public class CardManageViewModelTests
 
         // OperationLoggerのモック（コンストラクタ引数が必要なためMock.Ofで作成）
         var operationLogRepositoryMock = new Mock<IOperationLogRepository>();
-        _operationLoggerMock = new Mock<OperationLogger>(operationLogRepositoryMock.Object, _staffRepositoryMock.Object);
+        _operationLoggerMock = new Mock<OperationLogger>(operationLogRepositoryMock.Object, Mock.Of<ICurrentOperatorContext>());
 
         // LendingServiceの作成（Issue #596対応）
         var settingsRepositoryMock = new Mock<ISettingsRepository>();

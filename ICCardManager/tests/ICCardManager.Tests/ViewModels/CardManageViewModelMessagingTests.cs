@@ -42,7 +42,7 @@ public class CardManageViewModelMessagingTests
         _staffAuthServiceMock = new Mock<IStaffAuthService>();
 
         var operationLogRepositoryMock = new Mock<IOperationLogRepository>();
-        _operationLoggerMock = new Mock<OperationLogger>(operationLogRepositoryMock.Object, _staffRepositoryMock.Object);
+        _operationLoggerMock = new Mock<OperationLogger>(operationLogRepositoryMock.Object, Mock.Of<ICurrentOperatorContext>());
 
         var settingsRepositoryMock = new Mock<ISettingsRepository>();
         var summaryGenerator = new SummaryGenerator();
