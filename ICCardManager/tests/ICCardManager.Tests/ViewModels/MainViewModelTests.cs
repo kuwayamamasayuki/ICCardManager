@@ -69,7 +69,7 @@ public class MainViewModelTests
 
         var operationLogRepositoryMock = new Mock<IOperationLogRepository>();
         _operationLoggerMock = new Mock<OperationLogger>(
-            operationLogRepositoryMock.Object, _staffRepositoryMock.Object);
+            operationLogRepositoryMock.Object, Mock.Of<ICurrentOperatorContext>());
 
         var summaryGenerator = new SummaryGenerator();
         var lockManager = new CardLockManager(NullLogger<CardLockManager>.Instance);

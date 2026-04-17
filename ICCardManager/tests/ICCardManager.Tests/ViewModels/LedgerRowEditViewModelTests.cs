@@ -38,7 +38,7 @@ public class LedgerRowEditViewModelTests
         _operationLogRepoMock = new Mock<IOperationLogRepository>();
         _operationLogger = new OperationLogger(
             _operationLogRepoMock.Object,
-            _staffRepoMock.Object);
+            Mock.Of<ICurrentOperatorContext>());
 
         _staffRepoMock.Setup(r => r.GetAllAsync())
             .ReturnsAsync(new List<Staff> { _staffA, _staffB });

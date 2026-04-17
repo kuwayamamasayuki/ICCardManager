@@ -265,6 +265,8 @@ namespace ICCardManager
             services.AddSingleton<IStationMasterService, StationMasterService>();
             services.AddSingleton<IDatabaseInfo>(sp => sp.GetRequiredService<DbContext>());
             services.AddSingleton<ICCardManager.Infrastructure.Timing.ISystemClock, ICCardManager.Infrastructure.Timing.SystemClock>();
+            // Issue #1265: 監査ログなりすまし防止のため、操作者コンテキストを一元管理する
+            services.AddSingleton<ICurrentOperatorContext, CurrentOperatorContext>();
             services.AddSingleton<SharedModeMonitor>();
             services.AddSingleton<WarningService>();
             services.AddSingleton<DashboardService>();

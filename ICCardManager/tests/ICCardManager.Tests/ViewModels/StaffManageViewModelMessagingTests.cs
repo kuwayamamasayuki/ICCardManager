@@ -34,7 +34,7 @@ public class StaffManageViewModelMessagingTests
         _staffAuthServiceMock = new Mock<IStaffAuthService>();
 
         var operationLogRepositoryMock = new Mock<IOperationLogRepository>();
-        _operationLoggerMock = new Mock<OperationLogger>(operationLogRepositoryMock.Object, _staffRepositoryMock.Object);
+        _operationLoggerMock = new Mock<OperationLogger>(operationLogRepositoryMock.Object, Mock.Of<ICurrentOperatorContext>());
 
         _messenger = new WeakReferenceMessenger();
 

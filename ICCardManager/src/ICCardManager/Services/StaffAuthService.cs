@@ -22,19 +22,22 @@ namespace ICCardManager.Services
         private readonly ISoundPlayer _soundPlayer;
         private readonly IMessenger _messenger;
         private readonly IOptions<AppOptions> _appOptions;
+        private readonly ICurrentOperatorContext _operatorContext;
 
         public StaffAuthService(
             IStaffRepository staffRepository,
             ICardReader cardReader,
             ISoundPlayer soundPlayer,
             IMessenger messenger,
-            IOptions<AppOptions> appOptions)
+            IOptions<AppOptions> appOptions,
+            ICurrentOperatorContext operatorContext)
         {
             _staffRepository = staffRepository;
             _cardReader = cardReader;
             _soundPlayer = soundPlayer;
             _messenger = messenger;
             _appOptions = appOptions;
+            _operatorContext = operatorContext;
         }
 
         /// <inheritdoc/>
@@ -48,6 +51,10 @@ namespace ICCardManager.Services
 
             if (dialog.ShowDialog() == true && dialog.IsAuthenticated)
             {
+                // Issue #1265: 認証成功時に操作者コンテキストを更新し、
+                // 後続の OperationLogger によるログ記録で使用する。
+                _operatorContext.BeginSession(dialog.AuthenticatedIdm!, dialog.AuthenticatedStaffName!);
+
                 return Task.FromResult<StaffAuthResult?>(new StaffAuthResult
                 {
                     Idm = dialog.AuthenticatedIdm!,

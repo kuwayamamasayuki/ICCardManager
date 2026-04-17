@@ -1,5 +1,10 @@
 # 更新履歴
 
+### Unreleased
+
+**セキュリティ修正**
+- 監査ログ（operation_log）への操作者なりすましを防止。`OperationLogger` の operator_idm / operator_name は `ICurrentOperatorContext`（職員証タッチ成功時に `StaffAuthService` が自動設定）からのみ解決される。旧 API（`operatorIdm` 引数付き）は `[Obsolete]` となり、渡された引数は無視される（#1265）
+
 ### v2.7.0 (2026-04-15)
 
 **新機能**
