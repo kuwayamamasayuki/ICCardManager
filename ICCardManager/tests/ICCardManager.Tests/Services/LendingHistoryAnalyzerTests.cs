@@ -195,6 +195,216 @@ public class LendingHistoryAnalyzerTests
             .Should().BeEmpty();
     }
 
+    // -------------------------------------------------------------------
+    // Issue #1256: 残高不足検出・マージ処理テスト拡充
+    // -------------------------------------------------------------------
+
+    /// <summary>
+    /// Issue #1256 例1: 残高76円 → 140円チャージ → 210円利用 → 残額6円 が検出されること。
+    /// </summary>
+    /// <remarks>
+    /// チャージ額(140) ≦ 運賃(210) かつ 利用後残高(6) &lt; 閾値(100) のため検出される。
+    /// </remarks>
+    [Fact]
+    public void DetectInsufficientBalancePattern_Issue1256_76to140to210_Detected()
+    {
+        var charge = Detail(DateTime.Today, amount: 140, balance: 216, isCharge: true);
+        var usage = Detail(DateTime.Today, amount: 210, balance: 6);
+
+        var result = LendingHistoryAnalyzer.DetectInsufficientBalancePattern(
+            new List<LedgerDetail> { charge, usage });
+
+        result.Should().HaveCount(1);
+        result[0].Charge.Amount.Should().Be(140);
+        result[0].Usage.Amount.Should().Be(210);
+    }
+
+    /// <summary>
+    /// Issue #1256 例2: 残高10円 → 200円ぴったりチャージ → 210円利用 → 残額0円 が検出されること。
+    /// </summary>
+    /// <remarks>
+    /// 不足額200円に対し精算機で200円ちょうどチャージしたケース。
+    /// 既存 ExactCharge_Detected は "残高200 → 10円チャージ" の向きしか検証していないため、
+    /// "残高10 → 200円チャージ" という逆向きのチャージ額大のパターンを本テストで補う。
+    /// </remarks>
+    [Fact]
+    public void DetectInsufficientBalancePattern_Issue1256_10to200to210_Detected()
+    {
+        var charge = Detail(DateTime.Today, amount: 200, balance: 210, isCharge: true);
+        var usage = Detail(DateTime.Today, amount: 210, balance: 0);
+
+        var result = LendingHistoryAnalyzer.DetectInsufficientBalancePattern(
+            new List<LedgerDetail> { charge, usage });
+
+        result.Should().HaveCount(1);
+        result[0].Charge.Amount.Should().Be(200);
+        result[0].Usage.Amount.Should().Be(210);
+    }
+
+    /// <summary>
+    /// 端数チャージで利用後残高が残る様々なパターンが検出されること（Issue #1256）。
+    /// </summary>
+    /// <remarks>
+    /// 精算機は10円単位等でチャージするため、不足額より多くチャージされ端数が残る。
+    /// 端数の値（1, 4, 9, 50, 99）を問わず閾値100円未満なら検出される。
+    /// </remarks>
+    [Theory]
+    [InlineData(1)]
+    [InlineData(4)]
+    [InlineData(9)]
+    [InlineData(50)]
+    [InlineData(99)]
+    public void DetectInsufficientBalancePattern_VariousRemainders_Detected(int remainder)
+    {
+        // 運賃210, 元残高100, チャージ額 = 110 + remainder
+        // チャージ後残高 = 100 + (110+r) = 210 + r, 利用後残高 = r
+        // 制約: chargeAmount(110+r) <= fare(210), つまり r <= 100 を常に満たす（r は [1,99]）
+        const int fare = 210;
+        const int originalBalance = 100;
+        var chargeAmount = fare - originalBalance + remainder;  // 110 + remainder
+        var chargeAfterBalance = originalBalance + chargeAmount; // 210 + remainder
+
+        var charge = Detail(DateTime.Today, amount: chargeAmount, balance: chargeAfterBalance, isCharge: true);
+        var usage = Detail(DateTime.Today, amount: fare, balance: remainder);
+
+        var result = LendingHistoryAnalyzer.DetectInsufficientBalancePattern(
+            new List<LedgerDetail> { charge, usage });
+
+        result.Should().HaveCount(1,
+            $"端数{remainder}円は閾値100円未満のため残高不足パターンとして検出される");
+    }
+
+    /// <summary>
+    /// 利用後残高の閾値境界を網羅検証（Issue #1256）。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 現実装 <see cref="LendingHistoryAnalyzer.InsufficientBalanceExcessThreshold"/>=100 に基づく：
+    /// </para>
+    /// <list type="bullet">
+    /// <item>0, 1, 50, 99 → 検出される（閾値未満）</item>
+    /// <item>100, 101, 150 → 検出されない（閾値以上）</item>
+    /// </list>
+    /// </remarks>
+    [Theory]
+    [InlineData(0, true)]
+    [InlineData(1, true)]
+    [InlineData(50, true)]
+    [InlineData(99, true)]
+    [InlineData(100, false)]
+    [InlineData(101, false)]
+    [InlineData(150, false)]
+    public void DetectInsufficientBalancePattern_ThresholdBoundary_Theory(
+        int usageAfterBalance, bool shouldDetect)
+    {
+        // 運賃500, チャージ額 = 500 + usageAfterBalance - 元残高
+        // 元残高は usage 未満にする必要があり（originalBalance < usageAmount）、
+        // かつ chargeAmount <= usageAmount（= 500）を満たす必要がある。
+        // 設計: 元残高を 0 に固定し、チャージ額 = 500 + usageAfterBalance にする。
+        //   → ただし chargeAmount <= 500 を満たすには usageAfterBalance <= 0
+        //   が必要となってしまう。そこで代わりに元残高を usageAfterBalance 分確保する。
+        // 元残高 = usageAfterBalance, チャージ額 = 500 とし、
+        // チャージ後残高 = usageAfterBalance + 500, 利用後残高 = usageAfterBalance
+        const int fare = 500;
+        var chargeAmount = fare;
+        var originalBalance = usageAfterBalance;
+        var chargeAfterBalance = originalBalance + chargeAmount;
+
+        var charge = Detail(DateTime.Today, amount: chargeAmount, balance: chargeAfterBalance, isCharge: true);
+        var usage = Detail(DateTime.Today, amount: fare, balance: usageAfterBalance);
+
+        var result = LendingHistoryAnalyzer.DetectInsufficientBalancePattern(
+            new List<LedgerDetail> { charge, usage });
+
+        if (shouldDetect)
+        {
+            result.Should().HaveCount(1,
+                $"利用後残高{usageAfterBalance}は閾値100未満のため検出される");
+        }
+        else
+        {
+            result.Should().BeEmpty(
+                $"利用後残高{usageAfterBalance}は閾値100以上のため検出されない");
+        }
+    }
+
+    /// <summary>
+    /// 通常利用とポイント還元が同日に混在する場合、
+    /// ポイント還元はスキップされ通常利用のみがチャージとペアリングされること（Issue #1256）。
+    /// </summary>
+    [Fact]
+    public void DetectInsufficientBalancePattern_PointRedemptionAndUsageMixed_OnlyUsageMatched()
+    {
+        // 残高不足パターン: チャージ140 → 運賃210利用 (残6)
+        // 別に同日にポイント還元(+50) が存在
+        var charge = Detail(DateTime.Today, amount: 140, balance: 216, isCharge: true);
+        var usage = Detail(DateTime.Today, amount: 210, balance: 6);
+        // ポイント還元（isPointRedemption=true）は候補から除外される
+        var redemption = Detail(DateTime.Today, amount: 50, balance: 56, isPointRedemption: true);
+
+        var result = LendingHistoryAnalyzer.DetectInsufficientBalancePattern(
+            new List<LedgerDetail> { charge, usage, redemption });
+
+        result.Should().HaveCount(1);
+        result[0].Charge.Should().BeSameAs(charge);
+        result[0].Usage.Should().BeSameAs(usage,
+            "ポイント還元は候補から除外され、通常利用のみがペアリングされる");
+    }
+
+    /// <summary>
+    /// チャージとポイント還元のみ（通常利用なし）の日では、
+    /// 残高不足パターンは検出されないこと（Issue #1256）。
+    /// </summary>
+    [Fact]
+    public void DetectInsufficientBalancePattern_ChargeAndPointRedemptionOnly_NotDetected()
+    {
+        var charge = Detail(DateTime.Today, amount: 100, balance: 100, isCharge: true);
+        var redemption = Detail(DateTime.Today, amount: 100, balance: 0, isPointRedemption: true);
+
+        var result = LendingHistoryAnalyzer.DetectInsufficientBalancePattern(
+            new List<LedgerDetail> { charge, redemption });
+
+        result.Should().BeEmpty(
+            "ポイント還元は利用候補から除外されるため、残高不足パターンは成立しない");
+    }
+
+    /// <summary>
+    /// 連続する端数チャージが複数ある場合、残高チェーンが成立する最後の1件のみが
+    /// 利用とペアリングされること（Issue #1256）。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// シナリオ:
+    /// </para>
+    /// <list type="bullet">
+    /// <item>元残高: 0円</item>
+    /// <item>1回目チャージ: 100円 → 残高100</item>
+    /// <item>2回目チャージ: 150円 → 残高250</item>
+    /// <item>利用: 240円 → 残高10</item>
+    /// </list>
+    /// <para>
+    /// 1回目チャージは chargeAfterBalance(100) が usageAmount(240) + usageAfterBalance(10) = 250
+    /// と一致しないため、残高チェーン条件により除外される。
+    /// 2回目チャージのみ chargeAfterBalance(250) == 250 を満たし、ペアリングされる。
+    /// これにより「最後の1件のみマージ」が実現される。
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void DetectInsufficientBalancePattern_MultipleConsecutiveCharges_OnlyLastMatched()
+    {
+        var firstCharge = Detail(DateTime.Today, amount: 100, balance: 100, isCharge: true);
+        var secondCharge = Detail(DateTime.Today, amount: 150, balance: 250, isCharge: true);
+        var usage = Detail(DateTime.Today, amount: 240, balance: 10);
+
+        var result = LendingHistoryAnalyzer.DetectInsufficientBalancePattern(
+            new List<LedgerDetail> { firstCharge, secondCharge, usage });
+
+        result.Should().HaveCount(1, "残高チェーンが成立するチャージは1件のみ");
+        result[0].Charge.Should().BeSameAs(secondCharge,
+            "最後のチャージのみが利用とペアリングされる");
+        result[0].Usage.Should().BeSameAs(usage);
+    }
+
     #endregion
 
     #region SplitAtChargeBoundaries
