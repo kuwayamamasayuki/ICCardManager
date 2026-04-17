@@ -15,6 +15,11 @@ namespace ICCardManager.Tests.Services;
 /// SummaryGenerator の固有機能テスト
 /// 基本的な Generate/GenerateByDate のテストは SummaryGeneratorComprehensiveTests を参照
 /// </summary>
+/// <remarks>
+/// Issue #1307: SummaryGenerator の静的状態共有による並列実行時の偶発的失敗を防ぐため、
+/// <see cref="SummaryGeneratorCollection"/> に属させてシリアル実行する。
+/// </remarks>
+[Collection(SummaryGeneratorCollection.Name)]
 public class SummaryGeneratorTests : IDisposable
 {
     private readonly SummaryGenerator _generator;
