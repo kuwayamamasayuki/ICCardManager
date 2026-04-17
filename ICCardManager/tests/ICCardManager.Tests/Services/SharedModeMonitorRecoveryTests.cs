@@ -125,8 +125,14 @@ public class SharedModeMonitorRecoveryTests
     /// <summary>
     /// ヘルスチェックタイマーの Tick が発火 → CheckConnection が呼ばれ HealthCheckCompleted が発火すること。
     /// </summary>
+    /// <remarks>
+    /// Issue #1307: 以前は 2 秒ポーリングで待機していたが、CI 負荷下で threadpool が
+    /// <c>Task.Run(() =&gt; _databaseInfo.CheckConnection())</c> の継続を拾うのが遅れ、
+    /// 偶発的なタイムアウト失敗を引き起こしていた。<see cref="TaskCompletionSource"/> で
+    /// 決定論的に待機しつつ、CI負荷を考慮して十分長い上限 (30秒) を設ける。
+    /// </remarks>
     [Fact]
-    public void Issue1257_HealthCheckTimerTick_InvokesCheckConnectionAndFiresEvent()
+    public async Task Issue1257_HealthCheckTimerTick_InvokesCheckConnectionAndFiresEvent()
     {
         // Arrange
         _databaseInfoMock.Setup(d => d.CheckConnection()).Returns(true);
@@ -137,22 +143,23 @@ public class SharedModeMonitorRecoveryTests
         healthCheckTimer.Interval.Should().Be(TimeSpan.FromSeconds(30),
             "ヘルスチェックは30秒間隔で発火");
 
-        DatabaseHealthEventArgs? captured = null;
-        _monitor.HealthCheckCompleted += (_, e) => captured = e;
+        // OnHealthCheckTick は async void のため、TaskCompletionSource で完了を待機する
+        var tcs = new TaskCompletionSource<DatabaseHealthEventArgs>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        _monitor.HealthCheckCompleted += (_, e) => tcs.TrySetResult(e);
 
         // Act: Tick を手動発火
         healthCheckTimer.SimulateTick();
 
-        // OnHealthCheckTick は async void のため、完了待ち用に短時間ポーリング
-        var timeout = DateTime.UtcNow.AddSeconds(2);
-        while (captured == null && DateTime.UtcNow < timeout)
-        {
-            System.Threading.Thread.Sleep(10);
-        }
+        // 完了を待機（CI負荷を考慮して上限30秒。正常時は<100msで完了）
+        var completedTask = await Task.WhenAny(tcs.Task, Task.Delay(TimeSpan.FromSeconds(30)));
+        completedTask.Should().BeSameAs(tcs.Task,
+            "Tick から30秒以内に HealthCheckCompleted が発火する必要がある");
 
         // Assert
+        var captured = await tcs.Task;
         captured.Should().NotBeNull("Tick でヘルスチェックが実行される");
-        captured!.IsConnected.Should().BeTrue();
+        captured.IsConnected.Should().BeTrue();
         _databaseInfoMock.Verify(d => d.CheckConnection(), Times.Once);
     }
 
