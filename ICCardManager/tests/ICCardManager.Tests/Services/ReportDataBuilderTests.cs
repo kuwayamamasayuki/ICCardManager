@@ -653,6 +653,159 @@ public class ReportDataBuilderTests
         result.CumulativeTotal.Expense.Should().Be(6500);
     }
 
+    [Fact]
+    public async Task BuildAsync_MidYearCarryover_CalendarYearMatchesButFiscalYearDiffers_DoesNotAddCarryoverTotals()
+    {
+        // Arrange: Issue #1258 境界テスト — calendar年 と CarryoverFiscalYear が等しいが、
+        // 対象月が 1-3月 のため fiscal year が別という境界ケース。
+        // calendar 2025 年 3 月 → FY2024 （GetFiscalYear(2025, 3) = 2024）のため、
+        // CarryoverFiscalYear=2025 とは不一致 → 紙累計は加算されない。
+        // ユーザーが「CarryoverFiscalYear=2025 は 2025年の帳票に効く」と誤解して設定した場合でも、
+        // 1-3月は前年度扱いとなり誤加算が起きないことを保証する。
+        var card = new IcCard
+        {
+            CardIdm = TestCardIdm,
+            CardType = "はやかけん",
+            CardNumber = "001",
+            CarryoverIncomeTotal = 20000,
+            CarryoverExpenseTotal = 8000,
+            CarryoverFiscalYear = 2025
+        };
+        _cardRepositoryMock
+            .Setup(r => r.GetByIdmAsync(TestCardIdm, true))
+            .ReturnsAsync(card);
+
+        var marchLedgers = new List<Ledger>
+        {
+            CreateTestLedger(1, TestCardIdm, new DateTime(2025, 3, 15),
+                "鉄道", 0, 280, 4720)
+        };
+        SetupMonthlyLedgers(TestCardIdm, 2025, 2,
+            new List<Ledger>
+            {
+                CreateTestLedger(0, TestCardIdm, new DateTime(2025, 2, 20), "鉄道", 0, 100, 5000)
+            });
+        SetupMonthlyLedgers(TestCardIdm, 2025, 3, marchLedgers);
+        // 年度=2024（4月=2024/4/1〜2025/3/31）
+        SetupDateRangeLedgers(TestCardIdm,
+            new DateTime(2024, 4, 1), new DateTime(2025, 3, 31),
+            new List<Ledger>
+            {
+                CreateTestLedger(0, TestCardIdm, new DateTime(2025, 2, 20), "鉄道", 0, 100, 5000),
+                CreateTestLedger(1, TestCardIdm, new DateTime(2025, 3, 15), "鉄道", 0, 280, 4720)
+            });
+
+        // Act
+        var result = await _builder.BuildAsync(TestCardIdm, 2025, 3);
+
+        // Assert: calendar=2025 だが fiscal=2024 のため CarryoverFiscalYear=2025 とは不一致 → 加算されない
+        result.CumulativeTotal.Should().NotBeNull();
+        result.CumulativeTotal.Income.Should().Be(0,
+            "calendar year 一致でも fiscal year が異なる場合は紙累計は加算されない");
+        result.CumulativeTotal.Expense.Should().Be(380,
+            "加算は当年度(FY2024)実績の 100+280 のみ、紙累計8000は加算されない");
+    }
+
+    [Fact]
+    public async Task BuildAsync_MidYearCarryover_JanuaryOfCalendarYearMatchingCarryover_DoesNotAdd()
+    {
+        // Arrange: Issue #1258 境界テスト — 1月の fiscal year 境界。
+        // calendar 2025 年 1 月 → FY2024（GetFiscalYear(2025, 1) = 2024）。
+        // CarryoverFiscalYear=2025 とは不一致 → 加算されない。
+        var card = new IcCard
+        {
+            CardIdm = TestCardIdm,
+            CardType = "はやかけん",
+            CardNumber = "001",
+            CarryoverIncomeTotal = 30000,
+            CarryoverExpenseTotal = 9000,
+            CarryoverFiscalYear = 2025
+        };
+        _cardRepositoryMock
+            .Setup(r => r.GetByIdmAsync(TestCardIdm, true))
+            .ReturnsAsync(card);
+
+        var januaryLedgers = new List<Ledger>
+        {
+            CreateTestLedger(1, TestCardIdm, new DateTime(2025, 1, 8),
+                "鉄道", 0, 210, 5290)
+        };
+        // 前月（2024年12月）の残高
+        SetupMonthlyLedgers(TestCardIdm, 2024, 12,
+            new List<Ledger>
+            {
+                CreateTestLedger(0, TestCardIdm, new DateTime(2024, 12, 20), "鉄道", 0, 150, 5500)
+            });
+        SetupMonthlyLedgers(TestCardIdm, 2025, 1, januaryLedgers);
+        // 年度=2024（4月=2024/4/1〜2025/3/31）、対象月は 1月時点
+        SetupDateRangeLedgers(TestCardIdm,
+            new DateTime(2024, 4, 1), new DateTime(2025, 1, 31),
+            new List<Ledger>
+            {
+                CreateTestLedger(0, TestCardIdm, new DateTime(2024, 12, 20), "鉄道", 0, 150, 5500),
+                CreateTestLedger(1, TestCardIdm, new DateTime(2025, 1, 8), "鉄道", 0, 210, 5290)
+            });
+
+        // Act
+        var result = await _builder.BuildAsync(TestCardIdm, 2025, 1);
+
+        // Assert
+        result.CumulativeTotal.Should().NotBeNull();
+        result.CumulativeTotal.Income.Should().Be(0,
+            "1月は FY=2024 のため CarryoverFiscalYear=2025 と不一致 → 加算されない");
+        result.CumulativeTotal.Expense.Should().Be(360,
+            "加算は FY2024 実績の 150+210 のみ、紙累計9000は加算されない");
+    }
+
+    [Fact]
+    public async Task BuildAsync_MidYearCarryover_FutureFiscalYearSetting_DoesNotAddToCurrentYear()
+    {
+        // Arrange: Issue #1258 境界テスト — CarryoverFiscalYear に未来年度が設定されている場合、
+        // 現在年度の帳票には加算されない。将来リセット後に効かせる運用や、誤設定への防御として
+        // 「FY一致」条件が厳密に機能していることを検証する。
+        var card = new IcCard
+        {
+            CardIdm = TestCardIdm,
+            CardType = "はやかけん",
+            CardNumber = "001",
+            CarryoverIncomeTotal = 50000,
+            CarryoverExpenseTotal = 20000,
+            CarryoverFiscalYear = 2030  // 未来年度
+        };
+        _cardRepositoryMock
+            .Setup(r => r.GetByIdmAsync(TestCardIdm, true))
+            .ReturnsAsync(card);
+
+        var octoberLedgers = new List<Ledger>
+        {
+            CreateTestLedger(1, TestCardIdm, new DateTime(2025, 10, 5),
+                "鉄道", 0, 300, 4700)
+        };
+        SetupMonthlyLedgers(TestCardIdm, 2025, 9,
+            new List<Ledger>
+            {
+                CreateTestLedger(0, TestCardIdm, new DateTime(2025, 9, 30), "鉄道", 0, 100, 5000)
+            });
+        SetupMonthlyLedgers(TestCardIdm, 2025, 10, octoberLedgers);
+        SetupDateRangeLedgers(TestCardIdm,
+            new DateTime(2025, 4, 1), new DateTime(2025, 10, 31),
+            new List<Ledger>
+            {
+                CreateTestLedger(0, TestCardIdm, new DateTime(2025, 9, 30), "鉄道", 0, 100, 5000),
+                CreateTestLedger(1, TestCardIdm, new DateTime(2025, 10, 5), "鉄道", 0, 300, 4700)
+            });
+
+        // Act
+        var result = await _builder.BuildAsync(TestCardIdm, 2025, 10);
+
+        // Assert: FY2025 と CarryoverFiscalYear=2030 は不一致 → 加算されない
+        result.CumulativeTotal.Should().NotBeNull();
+        result.CumulativeTotal.Income.Should().Be(0,
+            "未来年度設定は現年度に効かない（厳密な年度一致のみ加算）");
+        result.CumulativeTotal.Expense.Should().Be(400,
+            "加算は当年度実績の 100+300 のみ、紙累計20000は加算されない");
+    }
+
     #endregion
 
     #region 3月テスト（次年度繰越）
