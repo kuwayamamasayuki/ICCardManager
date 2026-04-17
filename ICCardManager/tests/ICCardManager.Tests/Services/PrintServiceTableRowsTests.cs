@@ -349,6 +349,56 @@ public class PrintServiceTableRowsTests
         result.Should().NotContain(r => r.Kind == PrintService.PrintRowKind.CumulativeTotal);
     }
 
+    /// <summary>
+    /// Issue #1258: 累計行の金額が大きくても桁区切り（カンマ）で表示され、
+    /// 小数点や不要な記号が付与されない（整数円表示）
+    /// </summary>
+    [Fact]
+    public void BuildPrintTableRows_LargeCumulativeAmounts_FormattedWithThousandsSeparatorNoDecimal()
+    {
+        var data = BuildData(cumulativeTotal: new ReportTotal
+        {
+            Label = "累計",
+            Income = 1234567,
+            Expense = 987654,
+            Balance = 246913,
+        });
+
+        var result = PrintService.BuildPrintTableRows(data, includeSummary: true);
+
+        var cumulative = result.Single(r => r.Kind == PrintService.PrintRowKind.CumulativeTotal);
+        cumulative.Cells[ColIncome].Should().Be("1,234,567", "3桁ごとにカンマ区切り");
+        cumulative.Cells[ColExpense].Should().Be("987,654");
+        cumulative.Cells[ColBalance].Should().Be("246,913");
+        // 小数点や通貨記号が付与されないこと（整数円表示）
+        cumulative.Cells[ColIncome].Should().NotContain(".").And.NotContain("円").And.NotContain("¥");
+        cumulative.Cells[ColExpense].Should().NotContain(".");
+        cumulative.Cells[ColBalance].Should().NotContain(".");
+    }
+
+    /// <summary>
+    /// Issue #1258: 累計行の金額が3桁以下（カンマ不要の値）でも
+    /// 小数点なしで表示され、整数として扱われる
+    /// </summary>
+    [Fact]
+    public void BuildPrintTableRows_SmallCumulativeAmounts_NoDecimalPoint()
+    {
+        var data = BuildData(cumulativeTotal: new ReportTotal
+        {
+            Label = "累計",
+            Income = 500,
+            Expense = 210,
+            Balance = 290,
+        });
+
+        var result = PrintService.BuildPrintTableRows(data, includeSummary: true);
+
+        var cumulative = result.Single(r => r.Kind == PrintService.PrintRowKind.CumulativeTotal);
+        cumulative.Cells[ColIncome].Should().Be("500").And.NotContain(".");
+        cumulative.Cells[ColExpense].Should().Be("210").And.NotContain(".");
+        cumulative.Cells[ColBalance].Should().Be("290").And.NotContain(".");
+    }
+
     #endregion
 
     #region 次年度繰越行（3月のみ）
