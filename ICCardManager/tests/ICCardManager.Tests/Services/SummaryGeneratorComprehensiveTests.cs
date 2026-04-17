@@ -1440,4 +1440,393 @@ public class SummaryGeneratorComprehensiveTests
     }
 
     #endregion
+
+    #region Issue #1254: 摘要生成の複雑パターンテスト拡充
+
+    /// <summary>
+    /// 同日バス往復（A→BとB→A）が「A～B 往復」として検出されることを確認。
+    /// </summary>
+    [Fact]
+    public void TC050_同日バス往復_往復として検出される()
+    {
+        // Arrange: バスで天神→博多駅（往路）と博多駅→天神（復路）
+        // ICカード履歴は新しい順：[0]復路(新しい・残額低)、[1]往路(古い・残額高)
+        var details = new List<LedgerDetail>
+        {
+            CreateBusUsage(new DateTime(2024, 12, 9), 230, 770, busStops: "博多駅～天神"),
+            CreateBusUsage(new DateTime(2024, 12, 9), 230, 1000, busStops: "天神～博多駅"),
+        };
+
+        // Act
+        var results = _generator.GenerateByDate(details);
+
+        // Assert: 「天神～博多駅」の往復として統合される
+        results.Should().HaveCount(1);
+        results[0].Summary.Should().Be("バス（天神～博多駅 往復）");
+        OutputInputAndResult(details, results);
+    }
+
+    /// <summary>
+    /// 同日に2つの独立した往復ペアがある場合、それぞれが「往復」として検出されることを確認。
+    /// </summary>
+    [Fact]
+    public void TC051_同日2往復ペア_それぞれ往復として検出される()
+    {
+        // Arrange: 薬院～大橋 往復 と 天神～博多 往復
+        // 時系列（古い→新しい）：
+        //   薬院→大橋(4600) → 大橋→薬院(4400) → 天神→博多(4190) → 博多→天神(3980)
+        var details = new List<LedgerDetail>
+        {
+            // 新しい順
+            CreateRailwayUsage(new DateTime(2024, 12, 9), "博多", "天神", 210, 3980),  // [0]
+            CreateRailwayUsage(new DateTime(2024, 12, 9), "天神", "博多", 210, 4190),  // [1]
+            CreateRailwayUsage(new DateTime(2024, 12, 9), "大橋", "薬院", 220, 4400),  // [2]
+            CreateRailwayUsage(new DateTime(2024, 12, 9), "薬院", "大橋", 220, 4600),  // [3]
+        };
+
+        // Act
+        var results = _generator.GenerateByDate(details);
+
+        // Assert: 2つの独立した往復（時系列順）
+        results.Should().HaveCount(1);
+        results[0].Summary.Should().Be("鉄道（薬院～大橋 往復、天神～博多 往復）");
+        OutputInputAndResult(details, results);
+    }
+
+    /// <summary>
+    /// チャージが乗継往復の間に挟まる場合、各乗継経路が分離されることを確認（TC039の拡張）。
+    /// </summary>
+    [Fact]
+    public void TC052_チャージが乗継往復の間に挟まる_分割される()
+    {
+        // Arrange: 乗継（天神→中洲川端→箱崎宮前）, チャージ, 乗継（箱崎宮前→中洲川端→天神）
+        // 時系列（古い→新しい、残高降順）：
+        //   天神→中洲川端(4790) → 中洲川端→箱崎宮前(4530) → チャージ(5530) →
+        //   箱崎宮前→中洲川端(5270) → 中洲川端→天神(5060)
+        var details = new List<LedgerDetail>
+        {
+            // 新しい順
+            CreateRailwayUsage(new DateTime(2024, 12, 9), "中洲川端", "天神", 210, 5060),   // [0] 帰り乗継後半
+            CreateRailwayUsage(new DateTime(2024, 12, 9), "箱崎宮前", "中洲川端", 260, 5270), // [1] 帰り乗継前半
+            CreateCharge(new DateTime(2024, 12, 9), 1000, 5530),                             // [2] チャージ
+            CreateRailwayUsage(new DateTime(2024, 12, 9), "中洲川端", "箱崎宮前", 260, 4530), // [3] 行き乗継後半
+            CreateRailwayUsage(new DateTime(2024, 12, 9), "天神", "中洲川端", 210, 4790),    // [4] 行き乗継前半
+        };
+
+        // Act
+        var results = _generator.GenerateByDate(details);
+
+        // Assert: 3件（行き乗継、チャージ、帰り乗継）- 往復にならず分割される
+        results.Should().HaveCount(3);
+        OutputInputAndResult(details, results);
+
+        results[0].IsCharge.Should().BeFalse();
+        results[0].Summary.Should().Be("鉄道（天神～箱崎宮前）");
+
+        results[1].IsCharge.Should().BeTrue();
+
+        results[2].IsCharge.Should().BeFalse();
+        results[2].Summary.Should().Be("鉄道（箱崎宮前～天神）");
+    }
+
+    /// <summary>
+    /// 1日に2回チャージが挟まる場合、利用が3つに分割されること。
+    /// </summary>
+    [Fact]
+    public void TC053_複数チャージ挟み_利用が3分割される()
+    {
+        // Arrange: 利用1 → チャージ1 → 利用2 → チャージ2 → 利用3
+        // 時系列（古い→新しい、残高降順）：
+        //   天神→博多(200) → チャージ(1200) → 博多→天神(990) →
+        //   チャージ(1990) → 天神→博多(1780)
+        var details = new List<LedgerDetail>
+        {
+            // 新しい順
+            CreateRailwayUsage(new DateTime(2024, 12, 9), "天神", "博多", 210, 1780),   // [0] 利用3
+            CreateCharge(new DateTime(2024, 12, 9), 1000, 1990),                         // [1] チャージ2
+            CreateRailwayUsage(new DateTime(2024, 12, 9), "博多", "天神", 210, 990),    // [2] 利用2
+            CreateCharge(new DateTime(2024, 12, 9), 1000, 1200),                         // [3] チャージ1
+            CreateRailwayUsage(new DateTime(2024, 12, 9), "天神", "博多", 210, 200),    // [4] 利用1
+        };
+
+        // Act
+        var results = _generator.GenerateByDate(details);
+
+        // Assert: 5件（利用1、チャージ1、利用2、チャージ2、利用3）
+        results.Should().HaveCount(5);
+        OutputInputAndResult(details, results);
+
+        results[0].IsCharge.Should().BeFalse();
+        results[0].Summary.Should().Be("鉄道（天神～博多）");
+
+        results[1].IsCharge.Should().BeTrue();
+
+        results[2].IsCharge.Should().BeFalse();
+        results[2].Summary.Should().Be("鉄道（博多～天神）");
+
+        results[3].IsCharge.Should().BeTrue();
+
+        results[4].IsCharge.Should().BeFalse();
+        results[4].Summary.Should().Be("鉄道（天神～博多）");
+    }
+
+    /// <summary>
+    /// GenerateByDate経由でバス3区間が時系列順に乗継統合されることを確認（TC048のGenerateByDate版）。
+    /// </summary>
+    [Fact]
+    public void TC054_GenerateByDate_バス3区間乗継統合()
+    {
+        // Arrange: バス3区間の乗継 西鉄平尾駅→薬院大通→博多駅→天神
+        // 時系列（古い→新しい、残高降順）：
+        //   西鉄平尾駅→薬院大通(620) → 薬院大通→博多駅(390) → 博多駅→天神(200)
+        var details = new List<LedgerDetail>
+        {
+            // 新しい順
+            CreateBusUsage(new DateTime(2024, 12, 9), 190, 200, busStops: "博多駅～天神"),
+            CreateBusUsage(new DateTime(2024, 12, 9), 230, 390, busStops: "薬院大通～博多駅"),
+            CreateBusUsage(new DateTime(2024, 12, 9), 150, 620, busStops: "西鉄平尾駅～薬院大通"),
+        };
+
+        // Act
+        var results = _generator.GenerateByDate(details);
+
+        // Assert: 3区間が1つの乗継経路に統合される
+        results.Should().HaveCount(1);
+        results[0].Summary.Should().Be("バス（西鉄平尾駅～天神）");
+        OutputInputAndResult(details, results);
+    }
+
+    /// <summary>
+    /// 暗黙還元・明示還元・鉄道利用・バス利用が混在する場合、
+    /// 利用と還元が別行に分離されることを確認（TC046のバス追加版）。
+    /// </summary>
+    [Fact]
+    public void TC055_暗黙還元_明示還元_鉄道_バス混在()
+    {
+        // Arrange: 暗黙還元 + 明示還元 + 鉄道往復 + バス利用
+        var details = new List<LedgerDetail>
+        {
+            // [0] 暗黙還元: Amount<0, IsPointRedemption=false
+            new LedgerDetail
+            {
+                UseDate = new DateTime(2026, 3, 10),
+                EntryStation = "博多",
+                ExitStation = null,
+                Amount = -200,
+                Balance = 2000,
+                IsCharge = false,
+                IsPointRedemption = false,
+                IsBus = false
+            },
+            // [1] 明示還元
+            new LedgerDetail
+            {
+                UseDate = new DateTime(2026, 3, 10),
+                Amount = -100,
+                Balance = 1800,
+                IsCharge = false,
+                IsPointRedemption = true,
+                IsBus = false
+            },
+            // [2] バス
+            CreateBusUsage(new DateTime(2026, 3, 10), 230, 1700, busStops: "天神～博多駅"),
+            // [3] 鉄道帰り
+            CreateRailwayUsage(new DateTime(2026, 3, 10), "博多", "天神", 210, 1930),
+            // [4] 鉄道行き
+            CreateRailwayUsage(new DateTime(2026, 3, 10), "天神", "博多", 210, 2140),
+        };
+
+        // Act
+        var results = _generator.GenerateByDate(details);
+
+        // Assert: 2件（利用と還元）
+        OutputInputAndResult(details, results);
+        results.Should().HaveCount(2);
+
+        results[0].IsCharge.Should().BeFalse();
+        results[0].IsPointRedemption.Should().BeFalse();
+        results[0].Summary.Should().Be("鉄道（天神～博多 往復）、バス（天神～博多駅）");
+
+        results[1].IsPointRedemption.Should().BeTrue();
+        results[1].Summary.Should().Be("ポイント還元");
+    }
+
+    /// <summary>
+    /// GenerateByDate でも GroupId が異なる場合は往復検出されず個別表示されること（仕様 TC1-TD2）。
+    /// </summary>
+    [Fact]
+    public void TC056_GenerateByDate_GroupId異なると往復検出されない()
+    {
+        // Arrange: 往復（博多→天神、天神→博多）を個別GroupIdで分割
+        // FeliCa順（新しい順）：小さいSequenceNumber = 新しい
+        var details = new List<LedgerDetail>
+        {
+            // 帰り（新しい）: 天神→博多 GroupId=2
+            new LedgerDetail
+            {
+                UseDate = new DateTime(2024, 12, 9),
+                EntryStation = "天神",
+                ExitStation = "博多",
+                Amount = 210,
+                Balance = 740,
+                SequenceNumber = 1,
+                GroupId = 2
+            },
+            // 行き（古い）: 博多→天神 GroupId=1
+            new LedgerDetail
+            {
+                UseDate = new DateTime(2024, 12, 9),
+                EntryStation = "博多",
+                ExitStation = "天神",
+                Amount = 210,
+                Balance = 1000,
+                SequenceNumber = 2,
+                GroupId = 1
+            }
+        };
+
+        // Act
+        var results = _generator.GenerateByDate(details);
+
+        // Assert: GroupIdが異なるため、往復検出されず個別表示
+        results.Should().HaveCount(1);
+        results[0].Summary.Should().Be("鉄道（博多～天神、天神～博多）");
+        OutputInputAndResult(details, results);
+    }
+
+    /// <summary>
+    /// GenerateByDate でも GroupId が異なる場合は乗継統合されず個別表示されること（仕様 TC1-TD2）。
+    /// </summary>
+    [Fact]
+    public void TC057_GenerateByDate_GroupId異なると乗継検出されない()
+    {
+        // Arrange: 乗継（博多→天神、天神→薬院）を個別GroupIdで分割
+        var details = new List<LedgerDetail>
+        {
+            // 2区間目（新しい）: 天神→薬院 GroupId=2
+            new LedgerDetail
+            {
+                UseDate = new DateTime(2024, 12, 9),
+                EntryStation = "天神",
+                ExitStation = "薬院",
+                Amount = 210,
+                Balance = 530,
+                SequenceNumber = 1,
+                GroupId = 2
+            },
+            // 1区間目（古い）: 博多→天神 GroupId=1
+            new LedgerDetail
+            {
+                UseDate = new DateTime(2024, 12, 9),
+                EntryStation = "博多",
+                ExitStation = "天神",
+                Amount = 210,
+                Balance = 740,
+                SequenceNumber = 2,
+                GroupId = 1
+            }
+        };
+
+        // Act
+        var results = _generator.GenerateByDate(details);
+
+        // Assert: GroupIdが異なるため、乗継統合されず個別表示
+        results.Should().HaveCount(1);
+        results[0].Summary.Should().Be("鉄道（博多～天神、天神～薬院）");
+        OutputInputAndResult(details, results);
+    }
+
+    /// <summary>
+    /// 鉄道の複数区間（往復）とバスの往復が同日に混在する場合、
+    /// それぞれ独立して往復検出され、鉄道・バスの順で連結されること。
+    /// </summary>
+    [Fact]
+    public void TC058_複数区間_鉄道往復とバス往復の混在()
+    {
+        // Arrange: 鉄道往復（天神↔博多）とバス往復（天神バスセンター↔キャナルシティ前）
+        // 時系列（古い→新しい）：
+        //   天神→博多(5000) → 博多→天神(4790) → バス天神→キャナル(4560) → バスキャナル→天神(4330)
+        var details = new List<LedgerDetail>
+        {
+            // 新しい順
+            CreateBusUsage(new DateTime(2024, 12, 9), 230, 4330, busStops: "キャナルシティ前～天神バスセンター"),
+            CreateBusUsage(new DateTime(2024, 12, 9), 230, 4560, busStops: "天神バスセンター～キャナルシティ前"),
+            CreateRailwayUsage(new DateTime(2024, 12, 9), "博多", "天神", 210, 4790),
+            CreateRailwayUsage(new DateTime(2024, 12, 9), "天神", "博多", 210, 5000),
+        };
+
+        // Act
+        var results = _generator.GenerateByDate(details);
+
+        // Assert: 鉄道往復とバス往復が独立して検出される
+        results.Should().HaveCount(1);
+        results[0].Summary.Should().Be("鉄道（天神～博多 往復）、バス（天神バスセンター～キャナルシティ前 往復）");
+        OutputInputAndResult(details, results);
+    }
+
+    /// <summary>
+    /// 複雑な実務シナリオ：鉄道乗継＋バス乗継＋チャージ＋暗黙還元の組み合わせ。
+    /// </summary>
+    [Fact]
+    public void TC059_複雑複合シナリオ_乗継_バス_チャージ_暗黙還元()
+    {
+        // Arrange: 同日に以下が発生
+        //   1. 鉄道乗継（天神→中洲川端→貝塚）
+        //   2. チャージ
+        //   3. バス乗継（博多駅～キャナルシティ前、キャナルシティ前～薬院大通）
+        //   4. 暗黙還元（駅入場あり、Amount<0、IsPointRedemption=false）
+        // 時系列（古い→新しい、残高降順）：
+        //   天神→中洲川端(4790) → 中洲川端→貝塚(4530) → チャージ(5530) →
+        //   バス1(5340) → バス2(5110) → 暗黙還元(5310)
+        var details = new List<LedgerDetail>
+        {
+            // 新しい順
+            new LedgerDetail
+            {
+                UseDate = new DateTime(2024, 12, 9),
+                EntryStation = "天神",
+                ExitStation = null,
+                Amount = -200,
+                Balance = 5310,
+                IsCharge = false,
+                IsPointRedemption = false,
+                IsBus = false
+            },  // [0] 暗黙還元
+            CreateBusUsage(new DateTime(2024, 12, 9), 230, 5110, busStops: "キャナルシティ前～薬院大通"),  // [1]
+            CreateBusUsage(new DateTime(2024, 12, 9), 190, 5340, busStops: "博多駅～キャナルシティ前"),    // [2]
+            CreateCharge(new DateTime(2024, 12, 9), 1000, 5530),                                           // [3] チャージ
+            CreateRailwayUsage(new DateTime(2024, 12, 9), "中洲川端", "貝塚", 260, 4530),                  // [4] 乗継後半
+            CreateRailwayUsage(new DateTime(2024, 12, 9), "天神", "中洲川端", 210, 4790),                 // [5] 乗継前半
+        };
+
+        // Act
+        var results = _generator.GenerateByDate(details);
+
+        // Assert:
+        //   - 鉄道乗継は1件に統合される
+        //   - チャージを挟んでバスは別行
+        //   - 暗黙還元はポイント還元として別行
+        OutputInputAndResult(details, results);
+        results.Should().HaveCount(4);
+
+        // 時系列順に並ぶ（古い → 新しい）
+        // [0] 鉄道乗継
+        results[0].IsCharge.Should().BeFalse();
+        results[0].IsPointRedemption.Should().BeFalse();
+        results[0].Summary.Should().Be("鉄道（天神～貝塚）");
+
+        // [1] チャージ
+        results[1].IsCharge.Should().BeTrue();
+
+        // [2] バス乗継
+        results[2].IsCharge.Should().BeFalse();
+        results[2].IsPointRedemption.Should().BeFalse();
+        results[2].Summary.Should().Be("バス（博多駅～薬院大通）");
+
+        // [3] ポイント還元
+        results[3].IsPointRedemption.Should().BeTrue();
+        results[3].Summary.Should().Be("ポイント還元");
+    }
+
+    #endregion
 }
