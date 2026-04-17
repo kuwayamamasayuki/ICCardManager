@@ -62,7 +62,12 @@ WSL2では "/mnt/c/Program Files/dotnet/dotnet.exe" を使用すること。
 
 ## 参照ドキュメント
 
+- `ICCardManager/CHANGELOG.md` — **バージョン履歴・変更内容の Single Source of Truth**（TODO.md より優先）
 - `docs/design/` — 設計書一式（01〜08）
 - `docs/manual/` — マニュアル（ユーザー・管理者・開発者）
 - `Resources/Templates/物品出納簿テンプレート.xlsx` — 月次帳票テンプレート
 - `docs/線区駅順コード/StationCode.csv` — 駅コード→駅名マスター（[出典](https://produ.irelang.jp/blog/2017/08/305/)、[新駅参照](https://ja.ysrl.org/atc/station-code.html)）
+
+## 非推奨ドキュメント
+
+- `TODO.md`（リポジトリ直下） — v2.2.0 時点の初期実装タスクアーカイブ。**deprecated**（Issue #1249）。以降の進捗・要望管理は GitHub Issues と `CHANGELOG.md` を使用する。新規作業の優先度判断には使用しないこと。
