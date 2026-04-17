@@ -491,6 +491,155 @@ public class CacheServiceTests : IDisposable
 
     #endregion
 
+    #region Issue #1257: キャッシュクリアと再取得の整合性
+
+    /// <summary>
+    /// Issue #1257: Invalidate 後の GetOrCreateAsync では factory が再実行され、最新値が返ること。
+    /// </summary>
+    /// <remarks>
+    /// 共有モードで他PCがDB更新 → 自PCで Invalidate → 次回 GetOrCreateAsync で
+    /// 最新値が取得される流れを検証。二重貸出リスク回避の基礎契約。
+    /// </remarks>
+    [Fact]
+    public async Task Issue1257_GetOrCreateAsync_AfterInvalidate_ReExecutesFactoryWithFreshValue()
+    {
+        // Arrange: 初期値をキャッシュ
+        const string key = "card:status";
+        var factoryCallCount = 0;
+        var currentValue = "lent";
+        Task<string> Factory()
+        {
+            factoryCallCount++;
+            return Task.FromResult(currentValue);
+        }
+
+        var first = await _sut.GetOrCreateAsync(key, Factory, TimeSpan.FromMinutes(1));
+        first.Should().Be("lent");
+        factoryCallCount.Should().Be(1);
+
+        // Act: DB が他PCで更新された想定 → Invalidate → 新値を factory に返させる
+        currentValue = "returned";
+        _sut.Invalidate(key);
+        var second = await _sut.GetOrCreateAsync(key, Factory, TimeSpan.FromMinutes(1));
+
+        // Assert
+        second.Should().Be("returned", "Invalidate後は factory が再実行され最新値が反映される");
+        factoryCallCount.Should().Be(2, "Invalidate で TTL 未満でも factory が再実行される");
+    }
+
+    /// <summary>
+    /// Issue #1257: InvalidateByPrefix 後、一致するキーのみ factory が再実行される。
+    /// </summary>
+    [Fact]
+    public async Task Issue1257_GetOrCreateAsync_AfterInvalidateByPrefix_OnlyMatchingKeysReExecute()
+    {
+        // Arrange: 3種類のキーをキャッシュ
+        var factoryCounts = new Dictionary<string, int>
+        {
+            ["card:1"] = 0,
+            ["card:2"] = 0,
+            ["staff:1"] = 0,
+        };
+
+        async Task<string> FactoryFor(string k)
+        {
+            factoryCounts[k]++;
+            await Task.CompletedTask;
+            return $"{k}=v{factoryCounts[k]}";
+        }
+
+        await _sut.GetOrCreateAsync("card:1", () => FactoryFor("card:1"), TimeSpan.FromMinutes(1));
+        await _sut.GetOrCreateAsync("card:2", () => FactoryFor("card:2"), TimeSpan.FromMinutes(1));
+        await _sut.GetOrCreateAsync("staff:1", () => FactoryFor("staff:1"), TimeSpan.FromMinutes(1));
+
+        // Act: card: プレフィックスのみ無効化
+        _sut.InvalidateByPrefix("card:");
+
+        var card1Again = await _sut.GetOrCreateAsync("card:1", () => FactoryFor("card:1"), TimeSpan.FromMinutes(1));
+        var card2Again = await _sut.GetOrCreateAsync("card:2", () => FactoryFor("card:2"), TimeSpan.FromMinutes(1));
+        var staff1Again = await _sut.GetOrCreateAsync("staff:1", () => FactoryFor("staff:1"), TimeSpan.FromMinutes(1));
+
+        // Assert: card:系のみ factory 再実行、staff:はキャッシュヒット維持
+        factoryCounts["card:1"].Should().Be(2, "card:1 は無効化されたので factory 再実行");
+        factoryCounts["card:2"].Should().Be(2, "card:2 も無効化対象");
+        factoryCounts["staff:1"].Should().Be(1, "staff:1 は無効化対象外のためキャッシュヒット維持");
+
+        card1Again.Should().Be("card:1=v2");
+        card2Again.Should().Be("card:2=v2");
+        staff1Again.Should().Be("staff:1=v1");
+    }
+
+    /// <summary>
+    /// Issue #1257: Clear 後は全キーが再取得される（全面無効化）。
+    /// </summary>
+    [Fact]
+    public async Task Issue1257_GetOrCreateAsync_AfterClear_AllKeysReExecuteFactory()
+    {
+        // Arrange
+        var counts = new Dictionary<string, int> { ["k1"] = 0, ["k2"] = 0 };
+        async Task<int> Factory(string k)
+        {
+            counts[k]++;
+            await Task.CompletedTask;
+            return counts[k];
+        }
+
+        await _sut.GetOrCreateAsync("k1", () => Factory("k1"), TimeSpan.FromMinutes(1));
+        await _sut.GetOrCreateAsync("k2", () => Factory("k2"), TimeSpan.FromMinutes(1));
+
+        // Act
+        _sut.Clear();
+        var v1Again = await _sut.GetOrCreateAsync("k1", () => Factory("k1"), TimeSpan.FromMinutes(1));
+        var v2Again = await _sut.GetOrCreateAsync("k2", () => Factory("k2"), TimeSpan.FromMinutes(1));
+
+        // Assert
+        counts["k1"].Should().Be(2, "Clear 後は k1 の factory が再実行");
+        counts["k2"].Should().Be(2, "Clear 後は k2 の factory も再実行");
+        v1Again.Should().Be(2);
+        v2Again.Should().Be(2);
+    }
+
+    /// <summary>
+    /// Issue #1257: Invalidate と GetOrCreateAsync の並行実行で整合性が崩れないこと。
+    /// </summary>
+    /// <remarks>
+    /// 並行下でも:
+    /// - 例外が発生しない
+    /// - 最終状態は factory が少なくとも1回は実行されている
+    /// - 最終値は factory の戻り値（= 最新値）として読み出せる
+    /// を検証する。ダブルチェックロッキングの副作用として、Invalidate タイミング次第で
+    /// factory 実行回数は 1 〜 N 回のいずれも許容される（順序非決定）。
+    /// </remarks>
+    [Fact]
+    public async Task Issue1257_ConcurrentInvalidateAndGetOrCreate_RemainsConsistent()
+    {
+        // Arrange
+        const string key = "concurrent:integrity";
+        var factoryCallCount = 0;
+        Task<int> Factory()
+        {
+            return Task.FromResult(System.Threading.Interlocked.Increment(ref factoryCallCount));
+        }
+
+        // Act: 20回のGetOrCreateAsync と 20回のInvalidate を並行実行
+        var tasks = new List<Task>();
+        for (int i = 0; i < 20; i++)
+        {
+            tasks.Add(Task.Run(() => _sut.GetOrCreateAsync(key, Factory, TimeSpan.FromMinutes(1))));
+            tasks.Add(Task.Run(() => _sut.Invalidate(key)));
+        }
+
+        var act = async () => await Task.WhenAll(tasks);
+        await act.Should().NotThrowAsync("並行実行でも例外は発生しない");
+
+        // Assert: 最終状態でキャッシュから値が取得できるか、再取得でfactoryが呼ばれる
+        var finalValue = await _sut.GetOrCreateAsync(key, Factory, TimeSpan.FromMinutes(1));
+        finalValue.Should().BeGreaterThan(0, "最終的に factory が実行され有効な値が得られる");
+        factoryCallCount.Should().BeGreaterThan(0, "少なくとも1回は factory が実行された");
+    }
+
+    #endregion
+
     #region Helper Classes
 
     private class TestObject

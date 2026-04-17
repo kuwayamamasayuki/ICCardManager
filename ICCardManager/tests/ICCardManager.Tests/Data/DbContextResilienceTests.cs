@@ -152,6 +152,112 @@ public class DbContextResilienceTests : IDisposable
         await act.Should().ThrowAsync<InvalidOperationException>();
     }
 
+    // -------------------------------------------------------------------
+    // Issue #1257: ネットワーク障害・タイムアウトのリトライ方針テスト拡充
+    // -------------------------------------------------------------------
+
+    /// <summary>
+    /// Issue #1257: TimeoutException は SQLITE_BUSY/LOCKED と異なりリトライされず即時スローされること。
+    /// </summary>
+    /// <remarks>
+    /// ネットワークドライブ切断時に発生し得る TimeoutException は、ExecuteWithRetryAsync の
+    /// catch 句 (SQLiteException のみ対象) にヒットせず、初回試行で即スローされる。
+    /// この振る舞いを固定化し、将来の仕様変更（TimeoutException もリトライ対象にする等）を
+    /// 検出できるようにする。
+    /// </remarks>
+    [Fact]
+    [Trait("Category", "Unit")]
+    public async Task Issue1257_ExecuteWithRetryAsync_TimeoutExceptionはリトライされず即時スローされること()
+    {
+        var dbPath = Path.Combine(_testDirectory, "retry_timeout.db");
+        using var dbContext = new DbContext(dbPath);
+        var attemptCount = 0;
+
+        var act = () => dbContext.ExecuteWithRetryAsync<int>(async () =>
+        {
+            attemptCount++;
+            await Task.CompletedTask;
+            throw new TimeoutException("ネットワーク応答なし");
+        });
+
+        await act.Should().ThrowAsync<TimeoutException>();
+        attemptCount.Should().Be(1,
+            "TimeoutException は SQLITE_BUSY/LOCKED 以外のためリトライされない");
+    }
+
+    /// <summary>
+    /// Issue #1257: IOException（ネットワーク切断相当）もリトライ対象外で即スローされること。
+    /// </summary>
+    [Fact]
+    [Trait("Category", "Unit")]
+    public async Task Issue1257_ExecuteWithRetryAsync_IOExceptionはリトライされず即時スローされること()
+    {
+        var dbPath = Path.Combine(_testDirectory, "retry_io.db");
+        using var dbContext = new DbContext(dbPath);
+        var attemptCount = 0;
+
+        var act = () => dbContext.ExecuteWithRetryAsync<int>(async () =>
+        {
+            attemptCount++;
+            await Task.CompletedTask;
+            throw new IOException("ネットワーク共有へのアクセス失敗");
+        });
+
+        await act.Should().ThrowAsync<IOException>();
+        attemptCount.Should().Be(1, "IOException は SQLiteException ではないためリトライされない");
+    }
+
+    /// <summary>
+    /// Issue #1257: Vacuum は BUSY/LOCKED 時に例外でも true でもなく false を返すこと（リトライなし）。
+    /// </summary>
+    /// <remarks>
+    /// 既存テスト `Vacuum_他接続がアクティブでも例外をスローしないこと` は "例外を投げない" のみを
+    /// 検証していた。本テストでは BUSY 時の戻り値が false であることまで固定化する。
+    ///
+    /// シミュレーション: 別プロセスの代わりに、BeginTransaction で排他ロック相当の状態を作り、
+    /// 同時に VACUUM を実行する。VACUUM は他の接続/トランザクションが存在する間は
+    /// SQLITE_BUSY/SQLITE_LOCKED を返し、Vacuum() メソッドは false で返る。
+    /// </remarks>
+    [Fact]
+    [Trait("Category", "Integration")]
+    public void Issue1257_Vacuum_BUSY時は例外ではなくfalseを返すこと()
+    {
+        var dbPath = Path.Combine(_testDirectory, "vacuum_busy.db");
+        using var dbContext = new DbContext(dbPath);
+        dbContext.InitializeDatabase();
+
+        // 別接続で EXCLUSIVE トランザクションを開き VACUUM のロック取得を阻害する
+        using var externalConn = new SQLiteConnection($"Data Source={dbPath}");
+        externalConn.Open();
+        // 共有モードは busy_timeout=15000ms あるため、テスト高速化のため 0 に設定
+        using (var pragmaCmd = externalConn.CreateCommand())
+        {
+            pragmaCmd.CommandText = "PRAGMA busy_timeout = 0";
+            pragmaCmd.ExecuteNonQuery();
+        }
+        using var externalTx = externalConn.BeginTransaction(IsolationLevel.Serializable);
+        using var writeCmd = externalConn.CreateCommand();
+        writeCmd.Transaction = externalTx;
+        // 書き込みトランザクションを発生させるためテーブル作成を試みる
+        writeCmd.CommandText = "CREATE TABLE IF NOT EXISTS vacuum_probe (id INTEGER)";
+        writeCmd.ExecuteNonQuery();
+
+        // dbContext 側の busy_timeout も一時的に 0 に（VACUUM が即BUSYで返るように）
+        using (var lease = dbContext.LeaseConnection())
+        using (var tuneCmd = lease.Connection.CreateCommand())
+        {
+            tuneCmd.CommandText = "PRAGMA busy_timeout = 0";
+            tuneCmd.ExecuteNonQuery();
+        }
+
+        // Act
+        var result = dbContext.Vacuum();
+
+        // Assert: 例外ではなく false が返る（Vacuum の契約）
+        result.Should().BeFalse(
+            "他接続が排他的トランザクションを保持中は Vacuum は BUSY で false を返す");
+    }
+
     #endregion
 
     #region journal_mode フォールバックテスト
