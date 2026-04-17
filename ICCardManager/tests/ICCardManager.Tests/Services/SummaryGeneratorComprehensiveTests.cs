@@ -44,14 +44,23 @@ namespace ICCardManager.Tests.Services;
 /// - 西鉄福岡(天神)(101), 薬院(103), 西鉄平尾(105), 高宮(107), 大橋(109), 井尻(111),
 ///   雑餉隈(113), 春日原(115), 白木原(117), 下大利(119), 都府楼前(121), 西鉄二日市(123)
 /// </summary>
-public class SummaryGeneratorComprehensiveTests
+[Collection(SummaryGeneratorCollection.Name)]
+public class SummaryGeneratorComprehensiveTests : IDisposable
 {
     private readonly SummaryGenerator _generator = new();
     private readonly ITestOutputHelper _output;
 
     public SummaryGeneratorComprehensiveTests(ITestOutputHelper output)
     {
+        // Issue #1307: 並列実行で他テストが Configure した静的状態を初期化
+        SummaryGenerator.ResetToDefaults();
         _output = output;
+    }
+
+    public void Dispose()
+    {
+        SummaryGenerator.ResetToDefaults();
+        GC.SuppressFinalize(this);
     }
 
     #region ヘルパーメソッド

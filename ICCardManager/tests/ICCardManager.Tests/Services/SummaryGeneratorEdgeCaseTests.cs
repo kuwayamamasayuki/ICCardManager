@@ -12,6 +12,11 @@ namespace ICCardManager.Tests.Services;
 /// SummaryGeneratorのエッジケーステスト
 /// 既存テストで検出できない設定オプション・組み合わせパターンを検証する。
 /// </summary>
+/// <remarks>
+/// Issue #1307: 本クラスは <c>SummaryGenerator.Configure</c> で静的状態を変更する。
+/// 並列実行時の他テストへの波及を避けるため <see cref="SummaryGeneratorCollection"/> に属させる。
+/// </remarks>
+[Collection(SummaryGeneratorCollection.Name)]
 public class SummaryGeneratorEdgeCaseTests : IDisposable
 {
     private readonly SummaryGenerator _generator = new();

@@ -15,6 +15,11 @@ namespace ICCardManager.Tests.Services;
 /// <summary>
 /// OrganizationOptions のテスト
 /// </summary>
+/// <remarks>
+/// Issue #1307: 本クラスは <c>SummaryGenerator.Configure</c> で静的状態を変更する。
+/// 並列実行時の他テストへの波及を避けるため <see cref="SummaryGeneratorCollection"/> に属させる。
+/// </remarks>
+[Collection(SummaryGeneratorCollection.Name)]
 public class OrganizationOptionsTests : IDisposable
 {
     public OrganizationOptionsTests()
