@@ -16,6 +16,9 @@
 - トースト通知が文字サイズ「大/特大」設定時に画面外へはみ出したり読み切れなくなる問題を修正。(1) ウィンドウサイズを固定 360px から `MinWidth`/`MaxWidth=520`/`MaxHeight` の動的制約に変更、(2) フォントサイズに応じて MinWidth と MaxHeight を線形スケール（Medium 360×220 → ExtraLarge 468×292）、(3) タイトルは `TextTrimming=CharacterEllipsis` で単一行に収め高さ暴走を防止、(4) 低残高警告文を簡潔化（「残額が少なくなっています（しきい値: 10,000円）」→「残額不足（<10,000円）」）。計算ロジックは `Common/ToastLayoutCalculator` に抽出して単体テスト可能化（#1273）
 - 色覚多様性対応: 貸出/返却/払戻済状態を「色＋アイコン＋テキスト＋スクリーンリーダー用説明文」の4要素で統一。`Common/LendingStatusPresenter` 新規実装で、状態表示の三点セット（アイコン `📤`/`📥`/`🚫`、短ラベル、完全説明文）を一元管理。`CardBalanceDashboardItem` / `CardDto` に `LentStatusAccessibilityText` を追加し、MainWindow ダッシュボード・カード管理ダイアログの `AutomationProperties.Name` にバインド。カード管理ダイアログでは従来テキストのみだった状態列にアイコンを追加（#1274）
 
+**ユーザー体験改善**
+- エラーメッセージを「何が / なぜ / どうすれば」の3要素を含む具体的な文言に改善。`ValidationService` の全バリデーター（CardIdm/CardNumber/CardType/StaffIdm/StaffName/WarningBalance）と `LedgerRowEditViewModel.Validate` の7種のメッセージを、実際の入力値・期待値・解決アクションを明示する形に統一。例: 「カード種別を選択してください」→「カード種別が未選択です。ドロップダウンから「はやかけん」「nimoca」等を選択してください」。`.claude/rules/error-messages.md` に品質ガイドライン（3要素構成・禁止パターン・行動指示型語尾・最小文字数基準）を追加し、`ValidationServiceErrorMessageQualityTests` で自動検証（#1275）
+
 ### v2.7.0 (2026-04-15)
 
 **新機能**

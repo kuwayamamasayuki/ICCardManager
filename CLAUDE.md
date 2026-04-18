@@ -59,6 +59,7 @@ WSL2では "/mnt/c/Program Files/dotnet/dotnet.exe" を使用すること。
 | `business-logic.md` | 状態遷移、貸出/返却フロー、バス判別、摘要生成、共有モード、残高不足処理、月次帳票 |
 | `git-workflow.md` | ブランチルール、ステージング規約 |
 | `testing.md` | テスト品質、ハードコーディング禁止、テスト実装原則 |
+| `error-messages.md` | エラーメッセージ品質（「何が/なぜ/どうすれば」3要素、禁止パターン、Issue #1275） |
 
 ## 参照ドキュメント
 
