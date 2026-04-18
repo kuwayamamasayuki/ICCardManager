@@ -12,6 +12,9 @@
 **開発基盤**
 - 依存パッケージの既知 CVE 継続監視の仕組みを導入。(1) GitHub Actions `vulnerability-scan.yml` が週次 + csproj 更新時に `dotnet list package --vulnerable --include-transitive` を自動実行し、検出時にジョブ失敗で通知、(2) Dependabot 設定で本体/テスト/UIテスト/github-actions の4エコシステムを週次監視・PR自動作成、(3) 開発者ガイド §5.7 に重大度別 SLA（Critical/High は24時間以内）と対応手順を明記、(4) リリーススキル (`/release`) に Phase 1 前のセキュリティチェック項目を追加（#1272）
 
+**アクセシビリティ改善**
+- トースト通知が文字サイズ「大/特大」設定時に画面外へはみ出したり読み切れなくなる問題を修正。(1) ウィンドウサイズを固定 360px から `MinWidth`/`MaxWidth=520`/`MaxHeight` の動的制約に変更、(2) フォントサイズに応じて MinWidth と MaxHeight を線形スケール（Medium 360×220 → ExtraLarge 468×292）、(3) タイトルは `TextTrimming=CharacterEllipsis` で単一行に収め高さ暴走を防止、(4) 低残高警告文を簡潔化（「残額が少なくなっています（しきい値: 10,000円）」→「残額不足（<10,000円）」）。計算ロジックは `Common/ToastLayoutCalculator` に抽出して単体テスト可能化（#1273）
+
 ### v2.7.0 (2026-04-15)
 
 **新機能**

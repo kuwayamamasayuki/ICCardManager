@@ -170,8 +170,11 @@ namespace ICCardManager.Views
         /// <param name="warningBalance">残額警告しきい値</param>
         public static void ShowReturn(string cardInfo, int balance, bool isLowBalance = false, int warningBalance = 0)
         {
+            // Issue #1273: 文字サイズ「大/特大」でも折返しが増えないよう、警告文を簡潔化。
+            //  旧: "⚠️ 残額が少なくなっています（しきい値: 10,000円）"（約26文字）
+            //  新: "⚠️ 残額不足（<10,000円）"（約14文字）
             var subMessage = isLowBalance
-                ? $"⚠️ 残額が少なくなっています（しきい値: {warningBalance:N0}円）"
+                ? $"⚠️ 残額不足（<{warningBalance:N0}円）"
                 : null;
             Show(ToastType.Return, "おかえりなさい！", cardInfo, $"残額: {balance:N0}円", subMessage);
         }

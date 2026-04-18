@@ -5,9 +5,10 @@
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         mc:Ignorable="d"
         Title="通知"
-        Width="360"
-        Height="Auto"
-        SizeToContent="Height"
+        MinWidth="{DynamicResource ToastMinWidth}"
+        MaxWidth="{DynamicResource ToastMaxWidth}"
+        MaxHeight="{DynamicResource ToastMaxHeight}"
+        SizeToContent="WidthAndHeight"
         WindowStyle="None"
         AllowsTransparency="True"
         Background="Transparent"
@@ -55,11 +56,14 @@
                        AutomationProperties.Name="通知アイコン"/>
 
             <!-- メッセージ -->
+            <!-- Issue #1273: タイトルは単一行＋省略（CharacterEllipsis）でトースト高さ暴走を防止。
+                 メッセージとサブメッセージは Wrap を維持しつつ Window.MaxHeight 内に収める。 -->
             <StackPanel Grid.Column="1" VerticalAlignment="Center">
                 <TextBlock x:Name="TitleText"
                            FontSize="{DynamicResource TitleFontSize}"
                            FontWeight="Bold"
-                           TextWrapping="Wrap"
+                           TextWrapping="NoWrap"
+                           TextTrimming="CharacterEllipsis"
                            AutomationProperties.Name="通知タイトル"/>
                 <TextBlock x:Name="MessageText"
                            FontSize="{DynamicResource BaseFontSize}"

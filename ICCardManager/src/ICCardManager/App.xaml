@@ -31,6 +31,14 @@
             <sys:Double x:Key="SidebarWidth">350</sys:Double>
             <!-- Issue #542: ウィンドウ最小幅（固定値） Issue #663: ヘルプボタン追加に伴い拡大 愛称追加に伴い再拡大 -->
             <sys:Double x:Key="WindowMinWidth">1400</sys:Double>
+
+            <!-- Issue #1273: トースト通知のサイズ制約（フォントサイズに応じて動的変更） -->
+            <!-- ToastMinWidth: 通常時の最小幅。大きいフォント時に横方向に広げて折返しを抑制 -->
+            <sys:Double x:Key="ToastMinWidth">360</sys:Double>
+            <!-- ToastMaxWidth: デスクトップ側に過度に張り出さないための上限 -->
+            <sys:Double x:Key="ToastMaxWidth">520</sys:Double>
+            <!-- ToastMaxHeight: 縦方向に伸びすぎて画面外にはみ出るのを防ぐ上限 -->
+            <sys:Double x:Key="ToastMaxHeight">260</sys:Double>
         </ResourceDictionary>
     </Application.Resources>
 </Application>
