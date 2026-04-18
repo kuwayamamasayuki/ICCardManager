@@ -10,8 +10,10 @@
         Title="{Binding DialogTitle}"
         Height="620"
         Width="700"
+        MinHeight="400"
+        MinWidth="500"
         WindowStartupLocation="CenterOwner"
-        ResizeMode="NoResize"
+        ResizeMode="CanResize"
         FontSize="{DynamicResource BaseFontSize}"
         FocusManager.FocusedElement="{Binding ElementName=EditDatePicker}"
         AutomationProperties.Name="履歴行の追加・修正ダイアログ"
@@ -24,10 +26,13 @@
                                     xmlns:conv="clr-namespace:ICCardManager.Views.Converters"/>
     </Window.Resources>
 
+    <!-- Issue #1280: 下部ボタンエリアを画面底部に固定し、上部の入力フォームのみ縮小可能にするため
+         Row 1 を * にし、フォーム部分を ScrollViewer で囲む。これにより低解像度環境でも
+         キャンセル/保存ボタンが常にアクセス可能になる。 -->
     <Grid Margin="20">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
-            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
@@ -44,7 +49,11 @@
                    AutomationProperties.Name="パンくずナビゲーション"/>
 
         <!-- 入力フィールド -->
-        <Grid Grid.Row="1" Margin="0,0,0,10">
+        <!-- Issue #1280: ScrollViewer で囲み、低解像度でフォームが縦方向にスクロール可能にする -->
+        <ScrollViewer Grid.Row="1" Margin="0,0,0,10"
+                      VerticalScrollBarVisibility="Auto"
+                      HorizontalScrollBarVisibility="Disabled">
+        <Grid>
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto"/>
                 <RowDefinition Height="Auto"/>
@@ -226,6 +235,7 @@
                      AutomationProperties.Name="備考"
                      ToolTip="備考（任意）（アクセスキー: Alt+N）"/>
         </Grid>
+        </ScrollViewer>
 
         <!-- 挿入位置プレビュー（Addモードのみ） -->
         <Border Grid.Row="2"
