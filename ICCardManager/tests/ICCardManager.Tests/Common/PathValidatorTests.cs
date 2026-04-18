@@ -428,6 +428,161 @@ public class PathValidatorTests : IDisposable
 
     #endregion
 
+    #region Issue #1269: UNC 到達性チェック
+
+    /// <summary>
+    /// Issue #1269: UNC パスで到達不可の場合、「ネットワーク共有に到達できません」エラー。
+    /// </summary>
+    /// <remarks>
+    /// 本プロジェクト内部の static API をリフレクション経由で呼び出し、
+    /// UNC 到達性チェッカーをテスト用スタブに差し替えて検証する。
+    /// </remarks>
+    [Fact]
+    public void ValidateBackupPath_UnreachableUnc_ReturnsUnreachableError()
+    {
+        // Arrange: UNC到達性チェッカーは常に false を返す
+        var result = InvokeValidateWithStub(@"\\nonexistent-test-server\share",
+            reachabilityStub: (_, _) => false, timeoutMs: 5000);
+
+        // Assert
+        result.IsValid.Should().BeFalse();
+        result.ErrorMessage.Should().Contain("ネットワーク共有に到達できません");
+        result.ErrorMessage.Should().Contain("5秒");
+    }
+
+    /// <summary>
+    /// Issue #1269: UNC パスで到達可能な場合、書き込み権限チェックに進む。
+    /// </summary>
+    [Fact]
+    public void ValidateBackupPath_ReachableUnc_PassesReachabilityCheck()
+    {
+        // Arrange: 到達性 OK を返すスタブ。書き込み権限チェックでは実ディスクに触るため、
+        //         ここではエラーメッセージに "到達できません" が含まれないことだけ検証する。
+        var result = InvokeValidateWithStub(@"\\test-server\share",
+            reachabilityStub: (_, _) => true, timeoutMs: 5000);
+
+        // Assert: 到達性エラーは出ないこと（他の理由で IsValid=false になる可能性は許容）
+        if (!result.IsValid)
+        {
+            result.ErrorMessage.Should().NotContain("到達できません");
+        }
+    }
+
+    /// <summary>
+    /// Issue #1269: 到達性チェッカーに渡されるタイムアウト値が呼び出し時のそれと一致する。
+    /// </summary>
+    [Fact]
+    public void ValidateBackupPath_ReachabilityChecker_ReceivesConfiguredTimeout()
+    {
+        // Arrange: タイムアウト値を捕捉するスタブ
+        int capturedTimeoutMs = -1;
+        InvokeValidateWithStub(@"\\server\share",
+            reachabilityStub: (_, t) => { capturedTimeoutMs = t; return true; },
+            timeoutMs: 3000);
+
+        // Assert
+        capturedTimeoutMs.Should().Be(3000, "呼び出し時のタイムアウト引数がチェッカーに渡される");
+    }
+
+    /// <summary>
+    /// Issue #1269: 非UNCパスでは到達性チェッカーは呼ばれない。
+    /// </summary>
+    [Fact]
+    public void ValidateBackupPath_NonUncPath_DoesNotCallReachabilityChecker()
+    {
+        // Arrange
+        var called = false;
+        var localPath = Path.Combine(_testDirectory, "backup");
+        Directory.CreateDirectory(localPath);
+
+        // Act
+        InvokeValidateWithStub(localPath,
+            reachabilityStub: (_, _) => { called = true; return true; },
+            timeoutMs: 5000);
+
+        // Assert
+        called.Should().BeFalse("ローカルパスでは UNC 到達性チェッカーは呼ばれない");
+    }
+
+    /// <summary>
+    /// Issue #1269: ValidateBackupPathAsync は sync 版と同じ結果を返す。
+    /// </summary>
+    [Fact]
+    public async Task ValidateBackupPathAsync_ValidLocalPath_ReturnsSameAsSync()
+    {
+        // Arrange
+        var localPath = Path.Combine(_testDirectory, "backup");
+        Directory.CreateDirectory(localPath);
+
+        // Act
+        var syncResult = PathValidator.ValidateBackupPath(localPath);
+        var asyncResult = await PathValidator.ValidateBackupPathAsync(localPath);
+
+        // Assert
+        asyncResult.IsValid.Should().Be(syncResult.IsValid);
+        asyncResult.ErrorMessage.Should().Be(syncResult.ErrorMessage);
+    }
+
+    /// <summary>
+    /// Issue #1269: ValidateBackupPathAsync は CancellationToken でキャンセル可能。
+    /// </summary>
+    [Fact]
+    public async Task ValidateBackupPathAsync_Cancellation_Throws()
+    {
+        using var cts = new System.Threading.CancellationTokenSource();
+        cts.Cancel();
+
+        var act = async () => await PathValidator.ValidateBackupPathAsync(@"C:\", cts.Token);
+        await act.Should().ThrowAsync<OperationCanceledException>();
+    }
+
+    /// <summary>
+    /// Issue #1269: DefaultUncReachabilityChecker は明らかに到達不可なUNC（RFC 5737 TEST-NET-1）に
+    /// 対してもタイムアウト以内に false を返すこと（ハング防止）。
+    /// </summary>
+    /// <remarks>
+    /// 実ネットワーク環境に依存するが、192.0.2.1 は RFC で文書化用の予約アドレス。
+    /// CI 環境でもルーティング不可で接続拒否される想定。
+    /// 万一ネットワーク設定で疎通する環境の場合は `Skip` される可能性があるため、
+    /// 厳密な "到達不可" ではなく "タイムアウト以内に結果が返る" ことのみ検証する。
+    /// </remarks>
+    [Fact]
+    public void DefaultUncReachabilityChecker_UnreachableAddress_ReturnsWithinTimeout()
+    {
+        // Arrange
+        var unreachablePath = @"\\192.0.2.1\share"; // RFC 5737 TEST-NET-1
+        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+
+        // Act: 6秒以内で結果が返ること（5秒タイムアウト + 少しのマージン）
+        var reachable = PathValidator.DefaultUncReachabilityChecker(unreachablePath, 5000);
+        stopwatch.Stop();
+
+        // Assert
+        stopwatch.ElapsedMilliseconds.Should().BeLessThan(7000,
+            "タイムアウト(5秒) + 処理オーバーヘッドで7秒以内に確実に return すべき");
+        // reachable の値は環境依存（多くの場合 false）のため厳密に検証しない
+    }
+
+    /// <summary>
+    /// Issue #1269 テスト用ヘルパー: internal オーバーロードをリフレクションで呼び出し、
+    /// 到達性チェッカーをスタブに差し替えた検証を行う。
+    /// </summary>
+    private static PathValidator.ValidationResult InvokeValidateWithStub(
+        string path, Func<string, int, bool> reachabilityStub, int timeoutMs)
+    {
+        var method = typeof(PathValidator).GetMethod(
+            "ValidateBackupPath",
+            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static,
+            binder: null,
+            types: new[] { typeof(string), typeof(Func<string, int, bool>), typeof(int) },
+            modifiers: null);
+
+        method.Should().NotBeNull("internal テスト用オーバーロードが存在するべき");
+        return (PathValidator.ValidationResult)method!.Invoke(null, new object[] { path, reachabilityStub, timeoutMs });
+    }
+
+    #endregion
+
     #region ValidateBackupPath - 有効なパステスト
 
     /// <summary>

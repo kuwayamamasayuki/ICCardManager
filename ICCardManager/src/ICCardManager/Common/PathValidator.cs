@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using System.IO;
 using System.Text.RegularExpressions;
@@ -16,6 +17,12 @@ namespace ICCardManager.Common
         /// Windows のパス最大長
         /// </summary>
         private const int MaxPathLength = 260;
+
+        /// <summary>
+        /// Issue #1269: UNC パス到達性チェックのデフォルトタイムアウト（ミリ秒）。
+        /// SMB ハンドシェイクが通常 1-3 秒、ネットワーク不安定時でも 5 秒以内に結論を出す。
+        /// </summary>
+        public const int DefaultUncTimeoutMs = 5000;
 
         /// <summary>
         /// パス検証結果
@@ -48,11 +55,40 @@ namespace ICCardManager.Common
         }
 
         /// <summary>
-        /// バックアップパスとして有効かどうかを検証
+        /// バックアップパスとして有効かどうかを検証（Issue #1269: UNC到達性チェック統合）
         /// </summary>
         /// <param name="path">検証するパス</param>
         /// <returns>検証結果</returns>
+        /// <remarks>
+        /// UNC パスの場合、<see cref="DefaultUncTimeoutMs"/> の内部タイムアウトで到達性を
+        /// 確認する。ハングを防ぐため <see cref="Task.Run"/> 内で <see cref="Directory.Exists"/>
+        /// を実行し、タイムアウト超過時は到達不可として扱う。UI スレッドから呼ぶ場合は
+        /// <see cref="ValidateBackupPathAsync"/> の利用を検討すること。
+        /// </remarks>
         public static ValidationResult ValidateBackupPath(string path)
+            => ValidateBackupPath(path, DefaultUncReachabilityChecker, DefaultUncTimeoutMs);
+
+        /// <summary>
+        /// バックアップパスの非同期検証（Issue #1269）。UI スレッドをブロックせず、
+        /// UNC パスの到達性を <paramref name="cancellationToken"/> でキャンセル可能に検証する。
+        /// </summary>
+        public static async Task<ValidationResult> ValidateBackupPathAsync(
+            string path, CancellationToken cancellationToken = default)
+        {
+            // 非UNC部分の検証は高速なのでインラインで実行し、到達性チェックのみ非同期化
+            return await Task.Run(
+                () => ValidateBackupPath(path, DefaultUncReachabilityChecker, DefaultUncTimeoutMs),
+                cancellationToken);
+        }
+
+        /// <summary>
+        /// テスト容易性のための内部 API。UNC 到達性チェック関数とタイムアウトを
+        /// 外部から注入できる。
+        /// </summary>
+        internal static ValidationResult ValidateBackupPath(
+            string path,
+            Func<string, int, bool> uncReachabilityChecker,
+            int uncTimeoutMs)
         {
             // 1. null または空でないこと
             if (string.IsNullOrWhiteSpace(path))
@@ -97,7 +133,22 @@ namespace ICCardManager.Common
                     "意図したフォルダ以外への書き込みを防ぐため拒否しました。");
             }
 
-            // 7. ドライブが存在すること（ローカルパスの場合のみ）
+            // 7. UNCパスの到達性チェック（Issue #1269）
+            //    CheckWritePermission より前に実行することで、到達不可時に素早く失敗させる。
+            //    Directory.Exists が SMB ハンドシェイクで長時間ハングするのを防ぐため、
+            //    5秒タイムアウトの Task.Run で包んで検査する。
+            if (IsUncPath(path))
+            {
+                var reachable = (uncReachabilityChecker ?? DefaultUncReachabilityChecker)(path, uncTimeoutMs);
+                if (!reachable)
+                {
+                    return ValidationResult.Failure(
+                        "ネットワーク共有に到達できません。ネットワーク接続を確認してください。" +
+                        "（タイムアウト: " + (uncTimeoutMs / 1000) + "秒以内に応答がありませんでした）");
+                }
+            }
+
+            // 8. ドライブが存在すること（ローカルパスの場合のみ）
             // UNCパスにはドライブの概念がないためスキップ
             if (!IsUncPath(path))
             {
@@ -277,6 +328,38 @@ namespace ICCardManager.Common
 
             return false;
         }
+
+        /// <summary>
+        /// Issue #1269: UNC パスの到達性をタイムアウト付きで検査する既定実装。
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// <see cref="Directory.Exists"/> はネットワーク不安定時に数十秒ハングし得るため、
+        /// <see cref="Task.Run"/> + <see cref="Task.Wait(int)"/> で明示的なタイムアウトを設ける。
+        /// </para>
+        /// <para>
+        /// 戻り値 <c>true</c> は「指定されたUNCパスまで到達できて、かつディレクトリが存在する」を意味する。
+        /// タイムアウト・例外・ディレクトリ非存在のいずれかなら <c>false</c>。
+        /// </para>
+        /// </remarks>
+        internal static readonly Func<string, int, bool> DefaultUncReachabilityChecker =
+            (path, timeoutMs) =>
+            {
+                try
+                {
+                    var existsTask = Task.Run(() =>
+                    {
+                        try { return Directory.Exists(path); }
+                        catch { return false; }
+                    });
+                    return existsTask.Wait(timeoutMs) && existsTask.Result;
+                }
+                catch
+                {
+                    // Wait 中の AggregateException や TaskCanceledException は到達不可として扱う
+                    return false;
+                }
+            };
 
         /// <summary>
         /// UNC パスから <c>\\server\share</c> 形式のルート部分を抽出する。
