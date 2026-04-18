@@ -165,7 +165,8 @@
                     Orientation="Horizontal"
                     HorizontalAlignment="Right"
                     Margin="0,15,0,0">
-            <Button Content="後で入力（スキップ）"
+            <!-- Issue #1276: アクセスキー（Alt+K/Alt+S）を追加 -->
+            <Button Content="後で入力（スキップ）(_K)"
                     Command="{Binding SkipCommand}"
                     Padding="15,10"
                     Margin="0,0,10,0"
@@ -173,8 +174,8 @@
                     FontSize="{DynamicResource BaseFontSize}"
                     AutomationProperties.Name="スキップ"
                     AutomationProperties.HelpText="バス停名を入力せずにダイアログを閉じます。後で入力できます。"
-                    ToolTip="後で入力する場合はスキップ (Escape)"/>
-            <Button Content="保存"
+                    ToolTip="後で入力する場合はスキップ (Escape / Alt+K)"/>
+            <Button Content="保存(_S)"
                     Command="{Binding SaveCommand}"
                     Padding="20,10"
                     Background="{DynamicResource SuccessActionBrush}"
@@ -183,7 +184,7 @@
                     FontSize="{DynamicResource BaseFontSize}"
                     AutomationProperties.Name="バス停名を保存"
                     AutomationProperties.HelpText="入力したバス停名を保存します"
-                    ToolTip="バス停名を保存 (Enter)"/>
+                    ToolTip="バス停名を保存 (Enter / Alt+S)"/>
         </StackPanel>
 
         <!-- 処理中オーバーレイ -->
