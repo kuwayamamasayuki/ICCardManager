@@ -14,6 +14,7 @@
 
 **アクセシビリティ改善**
 - トースト通知が文字サイズ「大/特大」設定時に画面外へはみ出したり読み切れなくなる問題を修正。(1) ウィンドウサイズを固定 360px から `MinWidth`/`MaxWidth=520`/`MaxHeight` の動的制約に変更、(2) フォントサイズに応じて MinWidth と MaxHeight を線形スケール（Medium 360×220 → ExtraLarge 468×292）、(3) タイトルは `TextTrimming=CharacterEllipsis` で単一行に収め高さ暴走を防止、(4) 低残高警告文を簡潔化（「残額が少なくなっています（しきい値: 10,000円）」→「残額不足（<10,000円）」）。計算ロジックは `Common/ToastLayoutCalculator` に抽出して単体テスト可能化（#1273）
+- 色覚多様性対応: 貸出/返却/払戻済状態を「色＋アイコン＋テキスト＋スクリーンリーダー用説明文」の4要素で統一。`Common/LendingStatusPresenter` 新規実装で、状態表示の三点セット（アイコン `📤`/`📥`/`🚫`、短ラベル、完全説明文）を一元管理。`CardBalanceDashboardItem` / `CardDto` に `LentStatusAccessibilityText` を追加し、MainWindow ダッシュボード・カード管理ダイアログの `AutomationProperties.Name` にバインド。カード管理ダイアログでは従来テキストのみだった状態列にアイコンを追加（#1274）
 
 ### v2.7.0 (2026-04-15)
 

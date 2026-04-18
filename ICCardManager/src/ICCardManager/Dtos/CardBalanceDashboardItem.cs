@@ -71,19 +71,31 @@ namespace ICCardManager.Dtos
         /// <summary>
         /// 表示用: 貸出状態アイコン
         /// </summary>
-        public string LentStatusIcon => IsLent ? "📤" : "📥";
+        /// <remarks>
+        /// Issue #1274: <see cref="LendingStatusPresenter"/> で一元管理。
+        /// </remarks>
+        public string LentStatusIcon => LendingStatusPresenter.Resolve(IsLent, isRefunded: false).Icon;
 
         /// <summary>
-        /// 表示用: 貸出状態テキスト
+        /// 表示用: 貸出状態テキスト（貸出者名なしの短いラベル）
         /// </summary>
-        public string LentStatusDisplay => IsLent ? "貸出中" : "在庫";
+        /// <remarks>
+        /// 貸出者名を含むバージョンは <see cref="LentInfoDisplay"/> を使用。
+        /// </remarks>
+        public string LentStatusDisplay => LendingStatusPresenter.Resolve(IsLent, isRefunded: false).ShortText;
 
         /// <summary>
         /// 表示用: 貸出情報（貸出中の場合は貸出者名を表示）
         /// </summary>
-        public string LentInfoDisplay => IsLent && !string.IsNullOrEmpty(LentStaffName)
-            ? $"貸出中（{LentStaffName}）"
-            : LentStatusDisplay;
+        public string LentInfoDisplay => LendingStatusPresenter.Resolve(IsLent, isRefunded: false, LentStaffName).ShortText;
+
+        /// <summary>
+        /// Issue #1274: アクセシビリティ用の完全な説明文。
+        /// スクリーンリーダーでの状態読み上げに使用する
+        /// （<c>AutomationProperties.Name</c> へのバインド対象）。
+        /// </summary>
+        public string LentStatusAccessibilityText =>
+            LendingStatusPresenter.Resolve(IsLent, isRefunded: false, LentStaffName).AccessibilityText;
 
         /// <summary>
         /// 表示用: 最終利用日
