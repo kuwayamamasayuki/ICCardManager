@@ -133,7 +133,8 @@
                 <Border Padding="40"
                         Background="{DynamicResource WaitingBackgroundBrush}"
                         Visibility="{Binding IsHistoryVisible, Converter={StaticResource BoolToVisibilityConverter}, ConverterParameter=invert}"
-                        AutomationProperties.Name="使い方ガイド">
+                        AutomationProperties.Name="使い方ガイド"
+                        AutomationProperties.HelpText="初期画面の使い方ガイドです。職員証を ICカードリーダー にタッチすると操作を開始できます。この領域は履歴表示時には非表示になります。">
                     <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" MaxWidth="600">
                         <TextBlock Text="🚃"
                                    FontSize="{DynamicResource IconFontSize}"

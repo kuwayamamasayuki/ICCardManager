@@ -22,6 +22,9 @@
 
     <Window.Resources>
         <BooleanToVisibilityConverter x:Key="BoolToVisibilityConverter"/>
+        <!-- Issue #1278: スクリーンリーダー向けの件数読み上げテキスト生成 -->
+        <common:CountToAccessibilityTextConverter x:Key="CountAccessibilityConverter"
+                                                   xmlns:common="clr-namespace:ICCardManager.Common"/>
     </Window.Resources>
 
     <Grid Margin="15">
@@ -39,6 +42,7 @@
             </Grid.RowDefinitions>
 
             <!-- ヘッダー -->
+            <!-- Issue #1278: 件数表示にスクリーンリーダー向けの自然言語テキストを付与 -->
             <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="0,0,0,10">
                 <TextBlock Text="登録済み交通系ICカード一覧"
                            FontSize="{DynamicResource LargeFontSize}"
@@ -48,7 +52,10 @@
                            FontSize="{DynamicResource BaseFontSize}"
                            Foreground="{DynamicResource SecondaryTextBrush}"
                            VerticalAlignment="Center"
-                           Margin="5,0,0,0"/>
+                           Margin="5,0,0,0"
+                           AutomationProperties.Name="{Binding Cards.Count, Converter={StaticResource CountAccessibilityConverter}, ConverterParameter=登録カード}"
+                           AutomationProperties.HelpText="登録済み交通系ICカードの件数です。0件の場合は新規登録が必要です。"
+                           AutomationProperties.LiveSetting="Polite"/>
             </StackPanel>
 
             <!-- カード一覧 -->
