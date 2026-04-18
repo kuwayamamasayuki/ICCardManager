@@ -6,6 +6,7 @@ using System.IO;
 using System.Text;
 using ICCardManager.Common;
 using ICCardManager.Data.Repositories;
+using ICCardManager.Infrastructure.Security;
 using ICCardManager.Models;
 
 namespace ICCardManager.Services
@@ -402,12 +403,20 @@ namespace ICCardManager.Services
         /// <summary>
         /// CSVフィールドをエスケープ
         /// </summary>
+        /// <remarks>
+        /// Issue #1267: 式インジェクション対策として <see cref="FormulaInjectionSanitizer.Sanitize"/>
+        /// を適用し、<c>=</c> / <c>+</c> / <c>-</c> / <c>@</c> / タブ / CR で始まる文字列の先頭に
+        /// シングルクォートを付与する。Excel でCSVを開いた際に数式として評価されることを防ぐ。
+        /// </remarks>
         private static string EscapeCsvField(string field)
         {
             if (string.IsNullOrEmpty(field))
             {
                 return "";
             }
+
+            // Issue #1267: 式インジェクション対策を最初に適用
+            field = FormulaInjectionSanitizer.Sanitize(field);
 
             // カンマ、ダブルクォート、改行が含まれる場合はダブルクォートで囲む
             if (field.Contains(',') || field.Contains('"') || field.Contains('\n') || field.Contains('\r'))

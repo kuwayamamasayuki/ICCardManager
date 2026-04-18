@@ -622,9 +622,11 @@ namespace ICCardManager.Services
             var useDateStr = fields[1].Trim();
             // fields[2] カードIDm（利用履歴ID空欄時の自動作成で使用）
             // fields[3] 管理番号（参照用）
-            var entryStation = fields[4].Trim();
-            var exitStation = fields[5].Trim();
-            var busStops = fields[6].Trim();
+            // Issue #1267: entry_station / exit_station / bus_stops は
+            // ユーザー編集可能テキストのため式インジェクション対策を適用
+            var entryStation = Infrastructure.Security.FormulaInjectionSanitizer.Sanitize(fields[4].Trim());
+            var exitStation = Infrastructure.Security.FormulaInjectionSanitizer.Sanitize(fields[5].Trim());
+            var busStops = Infrastructure.Security.FormulaInjectionSanitizer.Sanitize(fields[6].Trim());
             var amountStr = fields[7].Trim();
             var balanceStr = fields[8].Trim();
             var isChargeStr = fields[9].Trim();

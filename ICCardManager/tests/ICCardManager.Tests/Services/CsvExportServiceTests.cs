@@ -176,6 +176,71 @@ public class CsvExportServiceTests : IDisposable
         content.Should().Contain("\"テスト\"\"備考\"\"\""); // ダブルクォートはエスケープ
     }
 
+    /// <summary>
+    /// Issue #1267: 先頭が式インジェクション危険文字のフィールドは <c>'</c> がプリペンドされること。
+    /// </summary>
+    [Theory]
+    [InlineData("=SUM(1,2)", "'=SUM(1,2)")]
+    [InlineData("+1+1", "'+1+1")]
+    [InlineData("-3", "'-3")]
+    [InlineData("@foo", "'@foo")]
+    public async Task ExportCardsAsync_DangerousNote_PrependsSingleQuote(string note, string expected)
+    {
+        // Arrange
+        var cards = new List<IcCard>
+        {
+            new IcCard
+            {
+                CardIdm = "0123456789ABCDEF",
+                CardType = "Suica",
+                CardNumber = "001",
+                Note = note
+            }
+        };
+        _cardRepositoryMock.Setup(x => x.GetAllAsync()).ReturnsAsync(cards);
+
+        var filePath = Path.Combine(_testDirectory, $"cards_inj_{note.GetHashCode():X}.csv");
+
+        // Act
+        var result = await _service.ExportCardsAsync(filePath);
+
+        // Assert
+        result.Success.Should().BeTrue();
+        var content = await Task.Run(() => File.ReadAllText(filePath, Encoding.UTF8));
+        content.Should().Contain(expected, "式インジェクション対策で先頭に ' が付与される");
+    }
+
+    /// <summary>
+    /// Issue #1267: 既にサニタイズ済み (<c>'=</c>) の値を再度エクスポートしても二重付与されない。
+    /// </summary>
+    [Fact]
+    public async Task ExportCardsAsync_AlreadySanitizedNote_NotDoubleSanitized()
+    {
+        // Arrange: DB に既に '=foo で保存されている（CSV再インポート後の状態等）
+        var cards = new List<IcCard>
+        {
+            new IcCard
+            {
+                CardIdm = "0123456789ABCDEF",
+                CardType = "Suica",
+                CardNumber = "001",
+                Note = "'=foo"  // 既にサニタイズ済み
+            }
+        };
+        _cardRepositoryMock.Setup(x => x.GetAllAsync()).ReturnsAsync(cards);
+
+        var filePath = Path.Combine(_testDirectory, "cards_sanitized.csv");
+
+        // Act
+        var result = await _service.ExportCardsAsync(filePath);
+
+        // Assert
+        result.Success.Should().BeTrue();
+        var content = await Task.Run(() => File.ReadAllText(filePath, Encoding.UTF8));
+        content.Should().Contain("'=foo", "サニタイズ済み値はそのまま出力");
+        content.Should().NotContain("''=foo", "二重サニタイズされない");
+    }
+
     #endregion
 
     #region ExportStaffAsync テスト

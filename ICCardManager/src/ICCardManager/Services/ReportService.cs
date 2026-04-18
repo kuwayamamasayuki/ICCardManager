@@ -6,6 +6,7 @@ using System.IO;
 using ClosedXML.Excel;
 using ICCardManager.Common;
 using ICCardManager.Data.Repositories;
+using ICCardManager.Infrastructure.Security;
 using ICCardManager.Models;
 using Microsoft.Extensions.Options;
 
@@ -697,8 +698,9 @@ namespace ICCardManager.Services
             // ヘッダ情報を設定（指定された開始行からの相対位置）
             var row2 = headerStartRow + 1;  // 2行目（テンプレートでは2行目にヘッダー情報）
             worksheet.Cell(row2, _orgOptions.TemplateMapping.ClassificationColumn).Value = _orgOptions.ReportLayout.ClassificationText;
-            worksheet.Cell(row2, _orgOptions.TemplateMapping.CardTypeColumn).Value = card.CardType;
-            worksheet.Cell(row2, _orgOptions.TemplateMapping.CardNumberColumn).Value = card.CardNumber;
+            // Issue #1267: CardType / CardNumber はユーザー入力（CSV/UI登録）由来のため式インジェクション対策を施す
+            worksheet.Cell(row2, _orgOptions.TemplateMapping.CardTypeColumn).Value = FormulaInjectionSanitizer.SanitizeOrEmpty(card.CardType);
+            worksheet.Cell(row2, _orgOptions.TemplateMapping.CardNumberColumn).Value = FormulaInjectionSanitizer.SanitizeOrEmpty(card.CardNumber);
             worksheet.Cell(row2, _orgOptions.TemplateMapping.UnitColumn).Value = _orgOptions.ReportLayout.UnitText;
 
             // Issue #510: ページ番号を設定
@@ -851,8 +853,10 @@ namespace ICCardManager.Services
         private int WriteReportRow(IXLWorksheet worksheet, int row, ReportRow reportRow)
         {
             // 列配置: A=出納年月日, B-D=摘要(結合), E=受入金額, F=払出金額, G=残額, H=氏名, I-L=備考(結合)
+            // Issue #1267: 式インジェクション対策として、ユーザー入力由来のテキスト列は
+            // FormulaInjectionSanitizer.Sanitize で先頭危険文字に ' プレフィクスを付与する。
             worksheet.Cell(row, 1).Value = reportRow.DateDisplay;  // 出納年月日 (A列)
-            worksheet.Cell(row, 2).Value = reportRow.Summary;      // 摘要 (B-D列)
+            worksheet.Cell(row, 2).Value = FormulaInjectionSanitizer.SanitizeOrEmpty(reportRow.Summary);  // 摘要 (B-D列)
 
             // 受入金額 (E列)
             if (reportRow.Income.HasValue)
@@ -888,8 +892,9 @@ namespace ICCardManager.Services
             }
 
             // 氏名 (H列) / 備考 (I-L列)
-            worksheet.Cell(row, 8).Value = reportRow.StaffName ?? "";
-            worksheet.Cell(row, 9).Value = reportRow.Note ?? "";
+            // Issue #1267: 式インジェクション対策
+            worksheet.Cell(row, 8).Value = FormulaInjectionSanitizer.SanitizeOrEmpty(reportRow.StaffName);
+            worksheet.Cell(row, 9).Value = FormulaInjectionSanitizer.SanitizeOrEmpty(reportRow.Note);
 
             // 罫線を適用
             ApplyDataRowBorder(worksheet, row);

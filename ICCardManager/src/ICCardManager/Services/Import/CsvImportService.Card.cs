@@ -73,7 +73,10 @@ namespace ICCardManager.Services
                 var cardIdm = fields[0].Trim().ToUpperInvariant(); // IDmは大文字に正規化
                 var cardType = fields[1].Trim();
                 var cardNumber = fields[2].Trim();
-                var note = fields.Count > 3 ? fields[3].Trim() : "";
+                // Issue #1267: note はユーザー自由記述のため式インジェクション対策を適用
+                var note = fields.Count > 3
+                    ? Infrastructure.Security.FormulaInjectionSanitizer.Sanitize(fields[3].Trim())
+                    : "";
 
                 // バリデーション（共通メソッドを使用）
                 if (!ValidateIdm(cardIdm, lineNumber, "カードIDm", line, errors))

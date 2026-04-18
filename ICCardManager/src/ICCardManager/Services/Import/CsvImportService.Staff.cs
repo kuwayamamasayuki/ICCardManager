@@ -73,7 +73,10 @@ namespace ICCardManager.Services
                 var staffIdm = fields[0].Trim().ToUpperInvariant(); // IDmは大文字に正規化
                 var name = fields[1].Trim();
                 var number = fields.Count > 2 ? fields[2].Trim() : "";
-                var note = fields.Count > 3 ? fields[3].Trim() : "";
+                // Issue #1267: note はユーザー自由記述のため式インジェクション対策を適用
+                var note = fields.Count > 3
+                    ? Infrastructure.Security.FormulaInjectionSanitizer.Sanitize(fields[3].Trim())
+                    : "";
 
                 // バリデーション（共通メソッドを使用）
                 if (!ValidateIdm(staffIdm, lineNumber, "職員IDm", line, errors, isStaff: true))
