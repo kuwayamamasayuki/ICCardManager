@@ -5,6 +5,7 @@ using System.Text.Json;
 using System.Threading.Tasks;
 using ClosedXML.Excel;
 using ICCardManager.Common;
+using ICCardManager.Infrastructure.Security;
 using ICCardManager.Models;
 
 namespace ICCardManager.Services;
@@ -93,14 +94,17 @@ public class OperationLogExcelExportService
         worksheet.Cell(row, 3).Value = GetTargetTableDisplayName(log.TargetTable);
 
         // D: 対象ID
-        worksheet.Cell(row, 4).Value = log.TargetId ?? "";
+        // Issue #1267: TargetId は職員IDm等で通常16進数文字列だが、念のため式インジェクション対策
+        worksheet.Cell(row, 4).Value = FormulaInjectionSanitizer.SanitizeOrEmpty(log.TargetId);
 
         // E: 操作者
-        worksheet.Cell(row, 5).Value = log.OperatorName;
+        // Issue #1267: OperatorName はユーザー入力（Staff.Name）由来のためサニタイズ
+        worksheet.Cell(row, 5).Value = FormulaInjectionSanitizer.SanitizeOrEmpty(log.OperatorName);
 
         // F: 変更内容
-        worksheet.Cell(row, 6).Value = GetChangeSummary(
-            log.TargetTable, log.BeforeData, log.AfterData);
+        // Issue #1267: 変更サマリは before/after JSON 由来でユーザー入力値を含むためサニタイズ
+        worksheet.Cell(row, 6).Value = FormulaInjectionSanitizer.SanitizeOrEmpty(GetChangeSummary(
+            log.TargetTable, log.BeforeData, log.AfterData));
 
         // G: 変更前、H: 変更後（変更箇所をハイライト表示）
         var changedFields = GetChangedFields(log.TargetTable, log.BeforeData, log.AfterData);

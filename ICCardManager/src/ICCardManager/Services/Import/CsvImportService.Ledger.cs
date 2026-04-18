@@ -86,12 +86,13 @@ namespace ICCardManager.Services
                     var dateStr = fields[0 + offset].Trim();
                     var cardIdm = fields[1 + offset].Trim().ToUpperInvariant(); // IDmは大文字に正規化
                     // fields[2 + offset] は管理番号（参照用、インポート時は使用しない）
-                    var summary = fields[3 + offset].Trim();
+                    // Issue #1267: summary / note はユーザー自由記述のため式インジェクション対策を適用
+                    var summary = Infrastructure.Security.FormulaInjectionSanitizer.Sanitize(fields[3 + offset].Trim());
                     var incomeStr = fields[4 + offset].Trim();
                     var expenseStr = fields[5 + offset].Trim();
                     var balanceStr = fields[6 + offset].Trim();
                     var staffName = fields[7 + offset].Trim();
-                    var note = fields[8 + offset].Trim();
+                    var note = Infrastructure.Security.FormulaInjectionSanitizer.Sanitize(fields[8 + offset].Trim());
 
                     // ID列がある場合、IDを解析
                     int? ledgerId = null;
@@ -505,12 +506,13 @@ namespace ICCardManager.Services
                     var dateStr = fields[0 + offset].Trim();
                     var cardIdm = fields[1 + offset].Trim().ToUpperInvariant(); // IDmは大文字に正規化
                     // fields[2 + offset] は管理番号（参照用）
-                    var summary = fields[3 + offset].Trim();
+                    // Issue #1267: summary / note はユーザー自由記述のため式インジェクション対策を適用
+                    var summary = Infrastructure.Security.FormulaInjectionSanitizer.Sanitize(fields[3 + offset].Trim());
                     var incomeStr = fields[4 + offset].Trim();
                     var expenseStr = fields[5 + offset].Trim();
                     var balanceStr = fields[6 + offset].Trim();
                     var staffName = fields[7 + offset].Trim();
-                    var note = fields[8 + offset].Trim();
+                    var note = Infrastructure.Security.FormulaInjectionSanitizer.Sanitize(fields[8 + offset].Trim());
 
                     // ID列がある場合、IDを解析
                     int? ledgerId = null;
