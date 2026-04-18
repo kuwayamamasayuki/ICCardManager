@@ -63,19 +63,26 @@ namespace ICCardManager.Services
         /// <inheritdoc/>
         public ValidationResult ValidateCardIdm(string idm)
         {
+            // Issue #1275: エラーメッセージに「何が/なぜ/どうすれば」の3要素を含める
             if (string.IsNullOrWhiteSpace(idm))
             {
-                return ValidationResult.Failure("カードIDmが入力されていません");
+                return ValidationResult.Failure(
+                    "カードIDmが入力されていません。" +
+                    "カードリーダーでICカードをタッチするか、16桁の16進数を直接入力してください。");
             }
 
             if (idm.Length != IdmLength)
             {
-                return ValidationResult.Failure($"IDmは{IdmLength}桁の16進数文字列で入力してください");
+                return ValidationResult.Failure(
+                    $"IDmの長さが{idm.Length}桁です。" +
+                    $"FeliCa規格に従い{IdmLength}桁の16進数（0-9, A-F）で入力してください。");
             }
 
             if (!HexPatternRegex.IsMatch(idm))
             {
-                return ValidationResult.Failure($"IDmは{IdmLength}桁の16進数文字列で入力してください");
+                return ValidationResult.Failure(
+                    "IDmに16進数以外の文字が含まれています。" +
+                    $"{IdmLength}桁の16進数（0-9, A-F の組み合わせ）で入力してください。");
             }
 
             return ValidationResult.Success();
@@ -92,12 +99,16 @@ namespace ICCardManager.Services
 
             if (cardNumber.Length > CardNumberMaxLength)
             {
-                return ValidationResult.Failure($"管理番号は{CardNumberMaxLength}文字以内で入力してください");
+                return ValidationResult.Failure(
+                    $"管理番号が{cardNumber.Length}文字で上限を超えています。" +
+                    $"{CardNumberMaxLength}文字以内の略称で入力してください。");
             }
 
             if (!AlphanumericPatternRegex.IsMatch(cardNumber))
             {
-                return ValidationResult.Failure("管理番号は英数字とハイフンのみ使用できます");
+                return ValidationResult.Failure(
+                    "管理番号に使用できない文字が含まれています。" +
+                    "英数字（A-Z, 0-9）とハイフン（-）のみで入力してください。");
             }
 
             return ValidationResult.Success();
@@ -108,7 +119,9 @@ namespace ICCardManager.Services
         {
             if (string.IsNullOrWhiteSpace(cardType))
             {
-                return ValidationResult.Failure("カード種別を選択してください");
+                return ValidationResult.Failure(
+                    "カード種別が未選択です。" +
+                    "ドロップダウンから「はやかけん」「nimoca」「SUGOCA」等のカード種別を選択してください。");
             }
 
             return ValidationResult.Success();
@@ -121,19 +134,26 @@ namespace ICCardManager.Services
         /// <inheritdoc/>
         public ValidationResult ValidateStaffIdm(string idm)
         {
+            // Issue #1275: エラーメッセージに「何が/なぜ/どうすれば」の3要素を含める
             if (string.IsNullOrWhiteSpace(idm))
             {
-                return ValidationResult.Failure("職員証IDmが入力されていません");
+                return ValidationResult.Failure(
+                    "職員証IDmが入力されていません。" +
+                    "職員証をカードリーダーでタッチするか、16桁の16進数を直接入力してください。");
             }
 
             if (idm.Length != IdmLength)
             {
-                return ValidationResult.Failure($"IDmは{IdmLength}桁の16進数文字列で入力してください");
+                return ValidationResult.Failure(
+                    $"職員証IDmの長さが{idm.Length}桁です。" +
+                    $"FeliCa規格に従い{IdmLength}桁の16進数（0-9, A-F）で入力してください。");
             }
 
             if (!HexPatternRegex.IsMatch(idm))
             {
-                return ValidationResult.Failure($"IDmは{IdmLength}桁の16進数文字列で入力してください");
+                return ValidationResult.Failure(
+                    "職員証IDmに16進数以外の文字が含まれています。" +
+                    $"{IdmLength}桁の16進数（0-9, A-F の組み合わせ）で入力してください。");
             }
 
             return ValidationResult.Success();
@@ -144,12 +164,16 @@ namespace ICCardManager.Services
         {
             if (string.IsNullOrWhiteSpace(name))
             {
-                return ValidationResult.Failure("職員名は必須です");
+                return ValidationResult.Failure(
+                    "職員名が入力されていません。" +
+                    "監査ログ・帳票で識別するために氏名を入力してください。");
             }
 
             if (name.Length > StaffNameMaxLength)
             {
-                return ValidationResult.Failure($"職員名は{StaffNameMaxLength}文字以内で入力してください");
+                return ValidationResult.Failure(
+                    $"職員名が{name.Length}文字で上限を超えています。" +
+                    $"{StaffNameMaxLength}文字以内で入力してください。");
             }
 
             return ValidationResult.Success();
@@ -162,14 +186,19 @@ namespace ICCardManager.Services
         /// <inheritdoc/>
         public ValidationResult ValidateWarningBalance(int balance)
         {
+            // Issue #1275: エラーメッセージに「何が/なぜ/どうすれば」の3要素を含める
             if (balance < WarningBalanceMin)
             {
-                return ValidationResult.Failure($"残額警告閾値は{WarningBalanceMin:N0}円以上で設定してください");
+                return ValidationResult.Failure(
+                    $"残額警告閾値が{balance:N0}円で下限を下回っています。" +
+                    $"{WarningBalanceMin:N0}円以上の値を設定してください。");
             }
 
             if (balance > WarningBalanceMax)
             {
-                return ValidationResult.Failure($"残額警告閾値は{WarningBalanceMax:N0}円以下で設定してください");
+                return ValidationResult.Failure(
+                    $"残額警告閾値が{balance:N0}円で上限を超えています。" +
+                    $"{WarningBalanceMax:N0}円以下の値を設定してください。");
             }
 
             return ValidationResult.Success();

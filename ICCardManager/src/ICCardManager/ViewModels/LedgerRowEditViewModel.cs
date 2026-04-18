@@ -457,10 +457,12 @@ namespace ICCardManager.ViewModels
             WarningMessage = string.Empty;
             CanSave = true;
 
+            // Issue #1275: エラーメッセージに「何が/なぜ/どうすれば」の3要素を含める
+
             // 摘要が空かチェック
             if (string.IsNullOrWhiteSpace(Summary))
             {
-                ValidationMessage = "摘要を入力してください";
+                ValidationMessage = "摘要が空です。鉄道、バス、チャージ等の取引内容を入力してください。";
                 CanSave = false;
                 return;
             }
@@ -477,7 +479,9 @@ namespace ICCardManager.ViewModels
             // 残高が負になるチェック
             if (Balance < 0)
             {
-                ValidationMessage = "残高がマイナスになります";
+                ValidationMessage =
+                    $"計算後の残高が {Balance:N0}円（マイナス）になります。" +
+                    "受入金額を増やすか、払出金額を減らしてください。";
                 CanSave = false;
                 return;
             }
@@ -485,13 +489,17 @@ namespace ICCardManager.ViewModels
             // Income/Expenseが負かチェック
             if (Income < 0)
             {
-                ValidationMessage = "受入金額は0以上にしてください";
+                ValidationMessage =
+                    $"受入金額に負の値（{Income:N0}円）が設定されています。" +
+                    "0以上の金額を入力してください。";
                 CanSave = false;
                 return;
             }
             if (Expense < 0)
             {
-                ValidationMessage = "払出金額は0以上にしてください";
+                ValidationMessage =
+                    $"払出金額に負の値（{Expense:N0}円）が設定されています。" +
+                    "0以上の金額を入力してください。";
                 CanSave = false;
                 return;
             }
