@@ -293,6 +293,141 @@ public class PathValidatorTests : IDisposable
 
     #endregion
 
+    #region Issue #1268: 強化されたパストラバーサル検出
+
+    /// <summary>
+    /// Issue #1268: UNC パスに埋め込まれたトラバーサルを検出する。
+    /// <c>\\server\share\..\admin</c> は <c>\\server\admin</c> に正規化され、
+    /// 意図した共有境界を逸脱する。
+    /// </summary>
+    [Fact]
+    public void ValidateBackupPath_UncPathWithTraversal_ReturnsInvalid()
+    {
+        // Act
+        var result = PathValidator.ValidateBackupPath(@"\\server\share\..\admin\iccard.db");
+
+        // Assert
+        result.IsValid.Should().BeFalse();
+        result.ErrorMessage.Should().Contain("..");
+    }
+
+    /// <summary>
+    /// Issue #1268: UNC パスで共有境界を逸脱する深いトラバーサル。
+    /// </summary>
+    [Fact]
+    public void ValidateBackupPath_UncPathDeepTraversal_ReturnsInvalid()
+    {
+        // Act: \\server\share\..\..\admin\iccard.db
+        var result = PathValidator.ValidateBackupPath(@"\\server\share\..\..\admin\iccard.db");
+
+        // Assert
+        result.IsValid.Should().BeFalse();
+        result.ErrorMessage.Should().Contain("..");
+    }
+
+    /// <summary>
+    /// Issue #1268: URL エンコードされたトラバーサル (<c>%2E%2E</c>) を検出する。
+    /// </summary>
+    [Fact]
+    public void ValidateBackupPath_UrlEncodedTraversal_ReturnsInvalid()
+    {
+        // Act: C:\backup\%2E%2E\Windows （%2E%2E は .. の URL エンコード）
+        var result = PathValidator.ValidateBackupPath(@"C:\backup\%2E%2E\Windows\System32");
+
+        // Assert
+        result.IsValid.Should().BeFalse();
+        result.ErrorMessage.Should().Contain("..");
+    }
+
+    /// <summary>
+    /// Issue #1268: 混合区切り文字 (<c>/</c> と <c>\</c>) のパストラバーサル検出。
+    /// </summary>
+    [Theory]
+    [InlineData(@"C:\backup/../Windows")]
+    [InlineData(@"C:/backup\..\Windows")]
+    [InlineData(@"C:\backup/..\..\Windows")]
+    public void ValidateBackupPath_MixedSeparatorTraversal_ReturnsInvalid(string path)
+    {
+        var result = PathValidator.ValidateBackupPath(path);
+        result.IsValid.Should().BeFalse();
+        result.ErrorMessage.Should().Contain("..");
+    }
+
+    /// <summary>
+    /// Issue #1268: 末尾空白パターン。
+    /// Windows は末尾の空白を無視するため <c>.. </c> は <c>..</c> として解釈されうる。
+    /// </summary>
+    [Theory]
+    [InlineData(@"C:\backup\.. \Windows")]     // ".. " （末尾空白1つ）
+    [InlineData(@"C:\backup\..  \Windows")]    // "..  "（末尾空白2つ）
+    public void ValidateBackupPath_DotSpaceTraversal_ReturnsInvalid(string path)
+    {
+        var result = PathValidator.ValidateBackupPath(path);
+        result.IsValid.Should().BeFalse();
+        result.ErrorMessage.Should().Contain("..");
+    }
+
+    /// <summary>
+    /// Issue #1268: 通常の有効なパスにはトラバーサル検出が誤反応しないこと（false positive 防止）。
+    /// traversal エラーメッセージの特徴的キーワード「URL エンコード」の非出現を確認する
+    /// （一般的な書き込み権限エラーと区別するため）。
+    /// </summary>
+    [Theory]
+    [InlineData(@"C:\Users\test\backup")]
+    [InlineData(@"C:\ProgramData\ICCardManager")]
+    [InlineData(@"C:\Users\test\.config")]          // 先頭ドットのファイル名
+    [InlineData(@"C:\Users\test\file.bak")]          // ドットは中間に
+    [InlineData(@"C:\backup\...\abc")]               // 3つドットは通常のディレクトリ名
+    public void ValidateBackupPath_SafeLookalikePaths_NotFlaggedAsTraversal(string path)
+    {
+        var result = PathValidator.ValidateBackupPath(path);
+
+        // IsValid は書き込み権限次第だが、traversal 固有のエラーが含まれないことを検証
+        if (!result.IsValid)
+        {
+            // 強化版エラーメッセージ特有の語彙
+            result.ErrorMessage.Should().NotContain("URL エンコード",
+                $"「{path}」は通常のパスで traversal と誤判定されるべきでない");
+            result.ErrorMessage.Should().NotContain("不正な文字列（..）",
+                $"「{path}」は旧エラーメッセージでも traversal と判定されるべきでない");
+        }
+    }
+
+    /// <summary>
+    /// Issue #1268: ContainsTraversalSegment の個別パターン検証。
+    /// </summary>
+    [Theory]
+    [InlineData(@"C:\..\Windows", true)]
+    [InlineData(@"C:\backup\..\Windows", true)]
+    [InlineData(@"C:\backup\.\current", false)]          // . 単独は traversal ではない
+    [InlineData(@"C:\backup\...\Windows", false)]         // ... は通常のディレクトリ名
+    [InlineData(@"\\server\share\..\admin", true)]
+    [InlineData(@"C:/backup/../Windows", true)]
+    [InlineData(@"C:\backup\subdir\file.txt", false)]
+    [InlineData("", false)]
+    public void ContainsTraversalSegment_DetectsCorrectly(string path, bool expected)
+    {
+        PathValidator.ContainsTraversalSegment(path).Should().Be(expected);
+    }
+
+    /// <summary>
+    /// Issue #1268: ExtractUncRoot の動作検証。
+    /// </summary>
+    [Theory]
+    [InlineData(@"\\server\share", @"\\server\share")]
+    [InlineData(@"\\server\share\subdir", @"\\server\share")]
+    [InlineData(@"\\server\share\..\other", @"\\server\share")]     // 元の入力のルートを抽出
+    [InlineData(@"//server/share/subdir", @"\\server\share")]
+    [InlineData(@"C:\backup", null)]                                 // 非UNC
+    [InlineData(@"\\server", null)]                                  // 共有名なし
+    [InlineData(@"\\", null)]                                        // 空
+    public void ExtractUncRoot_ReturnsNormalizedUncRoot(string input, string expected)
+    {
+        PathValidator.ExtractUncRoot(input).Should().Be(expected);
+    }
+
+    #endregion
+
     #region ValidateBackupPath - 有効なパステスト
 
     /// <summary>
