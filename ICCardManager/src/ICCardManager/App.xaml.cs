@@ -350,6 +350,30 @@ namespace ICCardManager
                     "felicalib.dll が見つかりません。PaSoRi + felicalib 環境でのみ動作します。");
             }
 
+            // Issue #1266: felicalib.dll のハッシュ検証（DLL Hijacking 対策）
+            var guard = new Infrastructure.Security.FelicalibIntegrityGuard();
+            var integrityReport = guard.VerifyInBaseDirectory();
+            var integrityLogger = loggerFactory.CreateLogger("FelicalibIntegrity");
+            if (!integrityReport.IsVerified)
+            {
+                integrityLogger.LogError(
+                    "felicalib.dll の整合性検証に失敗: Result={Result}, Expected={Expected}, Actual={Actual}, File={File}, Error={Error}",
+                    integrityReport.Result,
+                    integrityReport.ExpectedSha256,
+                    integrityReport.ActualSha256 ?? "(未計算)",
+                    integrityReport.FilePath,
+                    integrityReport.ErrorMessage ?? "(なし)");
+                throw new InvalidOperationException(
+                    "felicalib.dll の整合性チェックに失敗しました " +
+                    $"（種別: {integrityReport.Result}）。\n" +
+                    "偽造または改変された DLL の可能性があります。\n" +
+                    "公式リリースから取得した正しい felicalib.dll を配置してください。\n" +
+                    $"期待ハッシュ (SHA-256): {integrityReport.ExpectedSha256}\n" +
+                    $"実ハッシュ (SHA-256):   {integrityReport.ActualSha256 ?? "(未計算)"}");
+            }
+            integrityLogger.LogInformation(
+                "felicalib.dll の整合性検証に成功: SHA-256={Sha256}", integrityReport.ActualSha256);
+
             var logger = loggerFactory.CreateLogger<FelicaCardReader>();
             logger.LogInformation("FelicaCardReader を使用します（残高・履歴読み取り可能）");
             return new FelicaCardReader(logger, stationMasterService);

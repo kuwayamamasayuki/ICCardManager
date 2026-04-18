@@ -4,6 +4,7 @@
 
 **セキュリティ修正**
 - 監査ログ（operation_log）への操作者なりすましを防止。`OperationLogger` の operator_idm / operator_name は `ICurrentOperatorContext`（職員証タッチ成功時に `StaffAuthService` が自動設定）からのみ解決される。旧 API（`operatorIdm` 引数付き）は `[Obsolete]` となり、渡された引数は無視される（#1265）
+- `felicalib.dll` の完全性検証を起動時に実行（DLL Hijacking 対策）。既知の SHA-256 ハッシュと不一致の場合はエラーダイアログを表示してアプリを終了する。内部者が偽造 DLL を配置して IDm を盗聴・改ざんする攻撃を防止（#1266）
 
 ### v2.7.0 (2026-04-15)
 
