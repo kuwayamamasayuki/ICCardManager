@@ -52,6 +52,14 @@ public partial class SettingsViewModel : ViewModelBase
     private bool _isSaved;
 
     /// <summary>
+    /// Issue #1279: 最初にエラーが発生したフィールドのプロパティ名。
+    /// Dialog のコードビハインドがこの値を参照し、該当コントロールへフォーカスを移動する。
+    /// エラーなしの場合は null。
+    /// </summary>
+    [ObservableProperty]
+    private string? _firstErrorField;
+
+    /// <summary>
     /// 文字サイズの選択肢
     /// </summary>
     public ObservableCollection<FontSizeItem> FontSizeOptions { get; } = new()
@@ -212,11 +220,16 @@ public partial class SettingsViewModel : ViewModelBase
     [RelayCommand]
     public async Task SaveAsync()
     {
+        // Issue #1279: 検証前にエラーフィールド情報をリセット
+        FirstErrorField = null;
+
         // バリデーション
         var balanceResult = _validationService.ValidateWarningBalance(WarningBalance);
         if (!balanceResult)
         {
             SetStatus(balanceResult.ErrorMessage!, true);
+            // Issue #1279: 検証失敗フィールドを通知してフォーカス移動を促す
+            FirstErrorField = nameof(WarningBalance);
             return;
         }
 
@@ -229,6 +242,8 @@ public partial class SettingsViewModel : ViewModelBase
             if (!pathResult.IsValid)
             {
                 SetStatus($"バックアップパスが無効です: {pathResult.ErrorMessage}", true);
+                // Issue #1279
+                FirstErrorField = nameof(BackupPath);
                 return;
             }
             // パスを正規化
@@ -294,6 +309,8 @@ public partial class SettingsViewModel : ViewModelBase
                         if (!dbPathResult.IsValid)
                         {
                             SetStatus($"データベース保存先が無効です: {dbPathResult.ErrorMessage}", true);
+                            // Issue #1279
+                            FirstErrorField = nameof(DatabasePath);
                             return;
                         }
 
@@ -302,6 +319,8 @@ public partial class SettingsViewModel : ViewModelBase
                         if (normalizedDir == null)
                         {
                             SetStatus("データベース保存先のパスを正規化できません", true);
+                            // Issue #1279
+                            FirstErrorField = nameof(DatabasePath);
                             return;
                         }
                         validatedFolderPath = normalizedDir;

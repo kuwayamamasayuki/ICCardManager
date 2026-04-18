@@ -4,6 +4,7 @@
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:vm="clr-namespace:ICCardManager.ViewModels"
+        xmlns:validation="clr-namespace:ICCardManager.Common.Validation"
         mc:Ignorable="d"
         d:DataContext="{d:DesignInstance Type=vm:SettingsViewModel}"
         Title="設定"
@@ -92,14 +93,25 @@
                                    Foreground="{DynamicResource SecondaryTextBrush}"
                                    Margin="0,0,0,10"/>
                         <StackPanel Orientation="Horizontal">
+                            <!-- Issue #1279: 数値範囲の ValidationRule を追加し、入力エラー時に赤枠表示 -->
                             <TextBox x:Name="WarningBalanceTextBox"
-                                     Text="{Binding WarningBalance, UpdateSourceTrigger=PropertyChanged}"
                                      Width="120"
                                      Padding="8"
                                      VerticalAlignment="Center"
                                      AutomationProperties.Name="残額警告しきい値"
                                      AutomationProperties.HelpText="この金額を下回ると警告が表示されます"
-                                     ToolTip="0～20,000円の範囲で設定（アクセスキー: Alt+W）"/>
+                                     ToolTip="0～20,000円の範囲で設定（アクセスキー: Alt+W）">
+                                <TextBox.Text>
+                                    <Binding Path="WarningBalance" UpdateSourceTrigger="PropertyChanged">
+                                        <Binding.ValidationRules>
+                                            <validation:NumericRangeValidationRule
+                                                Min="0"
+                                                Max="20000"
+                                                FieldName="残額警告しきい値"/>
+                                        </Binding.ValidationRules>
+                                    </Binding>
+                                </TextBox.Text>
+                            </TextBox>
                             <TextBlock Text="円"
                                        VerticalAlignment="Center"
                                        Margin="10,0,0,0"/>

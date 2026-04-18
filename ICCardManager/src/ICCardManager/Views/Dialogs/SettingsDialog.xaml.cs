@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 using System.Windows;
+using System.Windows.Controls;
 using ICCardManager.Common;
 using ICCardManager.ViewModels;
 
@@ -52,10 +53,35 @@ namespace ICCardManager.Views.Dialogs
                     DialogResult = true;
                     Close();
                 }
+                else
+                {
+                    // Issue #1279: 保存失敗時は検証エラーのあるフィールドにフォーカス移動
+                    FocusFirstErrorField();
+                }
             }
             catch (Exception ex)
             {
                 ErrorDialogHelper.ShowError(ex, "保存エラー");
+            }
+        }
+
+        /// <summary>
+        /// Issue #1279: ViewModel の FirstErrorField プロパティに対応する
+        /// 入力コントロールへフォーカスを移動する。
+        /// </summary>
+        private void FocusFirstErrorField()
+        {
+            Control? target = _viewModel.FirstErrorField switch
+            {
+                nameof(SettingsViewModel.WarningBalance) => WarningBalanceTextBox,
+                nameof(SettingsViewModel.BackupPath) => BackupPathTextBox,
+                nameof(SettingsViewModel.DatabasePath) => DatabasePathTextBox,
+                _ => null
+            };
+            target?.Focus();
+            if (target is TextBox tb)
+            {
+                tb.SelectAll();
             }
         }
 
