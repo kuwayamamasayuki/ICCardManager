@@ -82,8 +82,23 @@ namespace ICCardManager.Dtos
         /// </summary>
         /// <remarks>
         /// Issue #530対応: 払戻済の場合は「払戻済」と表示
+        /// Issue #1274: Presenter で一元管理
         /// </remarks>
-        public string LentStatusDisplay => IsRefunded ? "払戻済" : (IsLent ? "貸出中" : "在庫");
+        public string LentStatusDisplay =>
+            ICCardManager.Common.LendingStatusPresenter.Resolve(IsLent, IsRefunded, LentStaffName).ShortText;
+
+        /// <summary>
+        /// Issue #1274: 表示用の貸出状態アイコン（アイコン＋テキスト併記用）。
+        /// </summary>
+        public string LentStatusIcon =>
+            ICCardManager.Common.LendingStatusPresenter.Resolve(IsLent, IsRefunded, LentStaffName).Icon;
+
+        /// <summary>
+        /// Issue #1274: スクリーンリーダー向けの完全な状態説明文。
+        /// <c>AutomationProperties.Name</c> にバインドして使用する。
+        /// </summary>
+        public string LentStatusAccessibilityText =>
+            ICCardManager.Common.LendingStatusPresenter.Resolve(IsLent, IsRefunded, LentStaffName).AccessibilityText;
 
         /// <summary>
         /// 表示用: 貸出日時
