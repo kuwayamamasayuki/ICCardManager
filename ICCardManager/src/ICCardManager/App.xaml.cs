@@ -606,6 +606,12 @@ namespace ICCardManager
             // Issue #663: ウィンドウ最小幅はフォントサイズに関係なく固定 愛称追加に伴い拡大（1400px）
             const double windowMinWidth = 1400;
 
+            // Issue #1273: トースト通知のサイズをフォントサイズに応じて動的計算。
+            // 計算ロジックは ToastLayoutCalculator（純粋関数）に集約してテスト容易性を確保。
+            var toastMinWidth = ToastLayoutCalculator.ComputeMinWidth(baseFontSize);
+            const double toastMaxWidth = ToastLayoutCalculator.MaxWidth;
+            var toastMaxHeight = ToastLayoutCalculator.ComputeMaxHeight(baseFontSize);
+
             // アプリケーションリソースを更新
             var resources = Application.Current.Resources;
             resources["BaseFontSize"] = baseFontSize;
@@ -618,6 +624,9 @@ namespace ICCardManager
             resources["DialogLargeIconFontSize"] = dialogLargeIconFontSize;
             resources["SidebarWidth"] = sidebarWidth;
             resources["WindowMinWidth"] = windowMinWidth;
+            resources["ToastMinWidth"] = toastMinWidth;
+            resources["ToastMaxWidth"] = toastMaxWidth;
+            resources["ToastMaxHeight"] = toastMaxHeight;
         }
 
         /// <summary>
