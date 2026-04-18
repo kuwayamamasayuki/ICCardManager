@@ -11,6 +11,7 @@
         Height="750"
         Width="650"
         MinHeight="620"
+        MinWidth="520"
         WindowStartupLocation="CenterOwner"
         ResizeMode="CanResize"
         Loaded="Window_Loaded"
