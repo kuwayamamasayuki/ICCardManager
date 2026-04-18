@@ -29,12 +29,16 @@
         <ScrollViewer Grid.Row="0" VerticalScrollBarVisibility="Auto">
             <StackPanel>
                 <!-- 1. 通知設定 -->
+                <!-- Issue #1276: TextBlock → Label + Target でアクセスキーとスクリーンリーダー連携を実装 -->
                 <GroupBox Header="通知設定" Margin="0,0,0,20" Padding="15">
                     <StackPanel>
-                        <TextBlock Text="トースト通知の表示位置"
-                                   FontWeight="Bold"
-                                   Margin="0,0,0,10"/>
-                        <ComboBox ItemsSource="{Binding ToastPositionOptions}"
+                        <Label Content="トースト通知の表示位置(_T)"
+                               Target="{Binding ElementName=ToastPositionComboBox}"
+                               FontWeight="Bold"
+                               Padding="0"
+                               Margin="0,0,0,10"/>
+                        <ComboBox x:Name="ToastPositionComboBox"
+                                  ItemsSource="{Binding ToastPositionOptions}"
                                   SelectedItem="{Binding SelectedToastPositionItem}"
                                   DisplayMemberPath="DisplayName"
                                   Padding="8"
@@ -42,7 +46,7 @@
                                   HorizontalAlignment="Left"
                                   AutomationProperties.Name="トースト通知位置選択"
                                   AutomationProperties.HelpText="貸出・返却時の通知が表示される画面の位置を選択します"
-                                  ToolTip="右上・左上・右下・左下から選択"/>
+                                  ToolTip="右上・左上・右下・左下から選択（アクセスキー: Alt+T）"/>
                         <TextBlock Text="※ 「いってらっしゃい！」「おかえりなさい！」の表示位置"
                                    FontSize="{DynamicResource SmallFontSize}"
                                    Foreground="{DynamicResource SecondaryTextBrush}"
@@ -53,10 +57,13 @@
                 <!-- 2. 表示設定 -->
                 <GroupBox Header="表示設定" Margin="0,0,0,20" Padding="15">
                     <StackPanel>
-                        <TextBlock Text="文字サイズ"
-                                   FontWeight="Bold"
-                                   Margin="0,0,0,10"/>
-                        <ComboBox ItemsSource="{Binding FontSizeOptions}"
+                        <Label Content="文字サイズ(_F)"
+                               Target="{Binding ElementName=FontSizeComboBox}"
+                               FontWeight="Bold"
+                               Padding="0"
+                               Margin="0,0,0,10"/>
+                        <ComboBox x:Name="FontSizeComboBox"
+                                  ItemsSource="{Binding FontSizeOptions}"
                                   SelectedItem="{Binding SelectedFontSizeItem}"
                                   DisplayMemberPath="DisplayName"
                                   Padding="8"
@@ -64,7 +71,7 @@
                                   HorizontalAlignment="Left"
                                   AutomationProperties.Name="文字サイズ選択"
                                   AutomationProperties.HelpText="画面に表示される文字のサイズを選択します"
-                                  ToolTip="小・中・大・特大から選択"/>
+                                  ToolTip="小・中・大・特大から選択（アクセスキー: Alt+F）"/>
                         <TextBlock Text="※ 文字サイズの変更は保存後に反映されます"
                                    FontSize="{DynamicResource SmallFontSize}"
                                    Foreground="{DynamicResource SecondaryTextBrush}"
@@ -75,17 +82,23 @@
                 <!-- 3. 残額警告 -->
                 <GroupBox Header="残額警告" Margin="0,0,0,20" Padding="15">
                     <StackPanel>
+                        <Label Content="残額警告しきい値(_W)"
+                               Target="{Binding ElementName=WarningBalanceTextBox}"
+                               FontWeight="Bold"
+                               Padding="0"
+                               Margin="0,0,0,5"/>
                         <TextBlock Text="残額がこの金額を下回った場合に警告を表示します"
                                    Foreground="{DynamicResource SecondaryTextBrush}"
                                    Margin="0,0,0,10"/>
                         <StackPanel Orientation="Horizontal">
-                            <TextBox Text="{Binding WarningBalance, UpdateSourceTrigger=PropertyChanged}"
+                            <TextBox x:Name="WarningBalanceTextBox"
+                                     Text="{Binding WarningBalance, UpdateSourceTrigger=PropertyChanged}"
                                      Width="120"
                                      Padding="8"
                                      VerticalAlignment="Center"
                                      AutomationProperties.Name="残額警告しきい値"
                                      AutomationProperties.HelpText="この金額を下回ると警告が表示されます"
-                                     ToolTip="0～20,000円の範囲で設定"/>
+                                     ToolTip="0～20,000円の範囲で設定（アクセスキー: Alt+W）"/>
                             <TextBlock Text="円"
                                        VerticalAlignment="Center"
                                        Margin="10,0,0,0"/>
@@ -100,10 +113,13 @@
                 <!-- 4. 音声設定 -->
                 <GroupBox Header="音声設定" Margin="0,0,0,20" Padding="15">
                     <StackPanel>
-                        <TextBlock Text="貸出・返却時の音声"
-                                   FontWeight="Bold"
-                                   Margin="0,0,0,10"/>
-                        <ComboBox ItemsSource="{Binding SoundModeOptions}"
+                        <Label Content="貸出・返却時の音声(_O)"
+                               Target="{Binding ElementName=SoundModeComboBox}"
+                               FontWeight="Bold"
+                               Padding="0"
+                               Margin="0,0,0,10"/>
+                        <ComboBox x:Name="SoundModeComboBox"
+                                  ItemsSource="{Binding SoundModeOptions}"
                                   SelectedItem="{Binding SelectedSoundModeItem}"
                                   DisplayMemberPath="DisplayName"
                                   Padding="8"
@@ -111,7 +127,7 @@
                                   HorizontalAlignment="Left"
                                   AutomationProperties.Name="音声モード選択"
                                   AutomationProperties.HelpText="貸出・返却時に再生される音声を選択します"
-                                  ToolTip="効果音・音声（男性/女性）・無しから選択"/>
+                                  ToolTip="効果音・音声（男性/女性）・無しから選択（アクセスキー: Alt+O）"/>
                         <TextBlock Text="※ 音声（男性）:「いってらっしゃい」「おかえりなさい」"
                                    FontSize="{DynamicResource SmallFontSize}"
                                    Foreground="{DynamicResource SecondaryTextBrush}"
@@ -131,10 +147,13 @@
                 <!-- 5. 部署設定（Issue #659） -->
                 <GroupBox Header="部署設定" Margin="0,0,0,20" Padding="15">
                     <StackPanel>
-                        <TextBlock Text="部署及び支出科目"
-                                   FontWeight="Bold"
-                                   Margin="0,0,0,10"/>
-                        <ComboBox ItemsSource="{Binding DepartmentTypeOptions}"
+                        <Label Content="部署及び支出科目(_P)"
+                               Target="{Binding ElementName=DepartmentTypeComboBox}"
+                               FontWeight="Bold"
+                               Padding="0"
+                               Margin="0,0,0,10"/>
+                        <ComboBox x:Name="DepartmentTypeComboBox"
+                                  ItemsSource="{Binding DepartmentTypeOptions}"
                                   SelectedItem="{Binding SelectedDepartmentTypeItem}"
                                   DisplayMemberPath="DisplayName"
                                   Padding="8"
@@ -142,7 +161,7 @@
                                   HorizontalAlignment="Left"
                                   AutomationProperties.Name="部署種別選択"
                                   AutomationProperties.HelpText="部署種別を選択します。チャージ時の摘要と帳票テンプレートが変わります"
-                                  ToolTip="市長事務部局（役務費）または企業会計部局（旅費）を選択"/>
+                                  ToolTip="市長事務部局（役務費）または企業会計部局（旅費）を選択（アクセスキー: Alt+P）"/>
                         <TextBlock Text="※ チャージ時の摘要と帳票テンプレートが変わります"
                                    FontSize="{DynamicResource SmallFontSize}"
                                    Foreground="{DynamicResource SecondaryTextBrush}"
@@ -158,11 +177,11 @@
                 <GroupBox Header="運用設定" Margin="0,0,0,20" Padding="15">
                     <StackPanel>
                         <CheckBox IsChecked="{Binding SkipBusStopInputOnReturn}"
-                                  Content="返却時のバス停名入力をスキップする"
+                                  Content="返却時のバス停名入力をスキップする(_K)"
                                   Padding="5,0,0,0"
                                   AutomationProperties.Name="バス停名入力スキップ設定"
                                   AutomationProperties.HelpText="有効にすると、返却時にバス停名入力ダイアログを表示しません"
-                                  ToolTip="有効にすると、返却時にバス停名入力ダイアログを表示せず、後から「バス停名未入力一覧」で入力できます"/>
+                                  ToolTip="有効にすると、返却時にバス停名入力ダイアログを表示せず、後から「バス停名未入力一覧」で入力できます（アクセスキー: Alt+K）"/>
                         <TextBlock Text="※ 有効にすると、返却時にバス停名入力ダイアログを表示せず、後から「バス停名未入力一覧」で入力できます"
                                    FontSize="{DynamicResource SmallFontSize}"
                                    Foreground="{DynamicResource SecondaryTextBrush}"
@@ -174,26 +193,29 @@
                 <!-- 7. バックアップ -->
                 <GroupBox Header="バックアップ" Margin="0,0,0,20" Padding="15">
                     <StackPanel>
-                        <TextBlock Text="データベースの自動バックアップ先フォルダ"
-                                   Foreground="{DynamicResource SecondaryTextBrush}"
-                                   Margin="0,0,0,10"/>
+                        <Label Content="データベースの自動バックアップ先フォルダ(_B)"
+                               Target="{Binding ElementName=BackupPathTextBox}"
+                               FontWeight="Bold"
+                               Padding="0"
+                               Margin="0,0,0,10"/>
                         <Grid>
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="*"/>
                                 <ColumnDefinition Width="Auto"/>
                             </Grid.ColumnDefinitions>
-                            <TextBox Grid.Column="0"
+                            <TextBox x:Name="BackupPathTextBox"
+                                     Grid.Column="0"
                                      Text="{Binding BackupPath, UpdateSourceTrigger=PropertyChanged}"
                                      Padding="8"
                                      AutomationProperties.Name="バックアップ先フォルダパス"
-                                     ToolTip="フォルダパスを直接入力できます（UNCパスも可）"/>
+                                     ToolTip="フォルダパスを直接入力できます（UNCパスも可）（アクセスキー: Alt+B）"/>
                             <Button Grid.Column="1"
-                                    Content="参照..."
+                                    Content="参照...(_R)"
                                     Command="{Binding BrowseBackupPathCommand}"
                                     Padding="15,8"
                                     Margin="10,0,0,0"
                                     AutomationProperties.Name="バックアップフォルダを選択"
-                                    ToolTip="バックアップ先フォルダを選択します"/>
+                                    ToolTip="バックアップ先フォルダを選択します（アクセスキー: Alt+R）"/>
                         </Grid>
                         <TextBlock Text="※ 空欄の場合、アプリケーションフォルダにバックアップされます"
                                    FontSize="{DynamicResource SmallFontSize}"
@@ -205,6 +227,11 @@
                 <!-- 8. データベース保存先 -->
                 <GroupBox Header="データベース保存先" Margin="0,0,0,20" Padding="15">
                     <StackPanel>
+                        <Label Content="データベース保存先フォルダ(_D)"
+                               Target="{Binding ElementName=DatabasePathTextBox}"
+                               FontWeight="Bold"
+                               Padding="0"
+                               Margin="0,0,0,5"/>
                         <TextBlock Text="データベースの保存先フォルダを指定します。共有フォルダを指定すると、複数のPCから同時に利用できます。"
                                    Foreground="{DynamicResource SecondaryTextBrush}"
                                    TextWrapping="Wrap"
@@ -214,18 +241,19 @@
                                 <ColumnDefinition Width="*"/>
                                 <ColumnDefinition Width="Auto"/>
                             </Grid.ColumnDefinitions>
-                            <TextBox Grid.Column="0"
+                            <TextBox x:Name="DatabasePathTextBox"
+                                     Grid.Column="0"
                                      Text="{Binding DatabasePath, UpdateSourceTrigger=PropertyChanged}"
                                      Padding="8"
                                      AutomationProperties.Name="データベース保存先フォルダパス"
-                                     ToolTip="共有フォルダのUNCパス（例: \\server\share\ICCardManager）を指定できます。参照ボタンで選択するか、直接入力してください。"/>
+                                     ToolTip="共有フォルダのUNCパス（例: \\server\share\ICCardManager）を指定できます。参照ボタンで選択するか、直接入力してください。（アクセスキー: Alt+D）"/>
                             <Button Grid.Column="1"
-                                    Content="参照..."
+                                    Content="参照...(_E)"
                                     Command="{Binding BrowseDatabasePathCommand}"
                                     Padding="15,8"
                                     Margin="10,0,0,0"
                                     AutomationProperties.Name="データベース保存先フォルダを選択"
-                                    ToolTip="データベース保存先フォルダを選択します"/>
+                                    ToolTip="データベース保存先フォルダを選択します（アクセスキー: Alt+E）"/>
                         </Grid>
                         <TextBlock Text="※ 空欄の場合、このPCのローカルフォルダ（C:\ProgramData\ICCardManager\）に保存されます"
                                    FontSize="{DynamicResource SmallFontSize}"
@@ -278,7 +306,7 @@
             <!-- ボタン -->
             <StackPanel Orientation="Horizontal"
                         HorizontalAlignment="Right">
-                <Button Content="キャンセル"
+                <Button Content="キャンセル(_C)"
                         Click="CancelButton_Click"
                         Padding="20,10"
                         Margin="0,0,10,0"
@@ -286,8 +314,8 @@
                         IsCancel="True"
                         AutomationProperties.Name="キャンセル"
                         AutomationProperties.HelpText="変更を保存せずにダイアログを閉じます"
-                        ToolTip="変更を破棄 (Escape)"/>
-                <Button Content="保存"
+                        ToolTip="変更を破棄 (Escape / Alt+C)"/>
+                <Button Content="保存(_S)"
                         Click="SaveButton_Click"
                         Padding="20,10"
                         MinWidth="100"
@@ -296,7 +324,7 @@
                         IsDefault="True"
                         AutomationProperties.Name="設定を保存"
                         AutomationProperties.HelpText="変更を保存してダイアログを閉じます"
-                        ToolTip="設定を保存 (Enter)"/>
+                        ToolTip="設定を保存 (Enter / Alt+S)"/>
             </StackPanel>
         </StackPanel>
 

@@ -57,106 +57,125 @@
                 <ColumnDefinition Width="*"/>
             </Grid.ColumnDefinitions>
 
-            <!-- 日付 -->
-            <TextBlock Grid.Row="0" Grid.Column="0"
-                       Text="日付:"
-                       FontSize="{DynamicResource BaseFontSize}"
-                       VerticalAlignment="Center"
-                       Margin="0,0,0,8"/>
-            <DatePicker Grid.Row="0" Grid.Column="1"
+            <!-- Issue #1276: TextBlock → Label + Target でアクセスキーとスクリーンリーダー連携を実装 -->
+            <!-- 日付 (_D) -->
+            <Label Grid.Row="0" Grid.Column="0"
+                   Content="日付(_D):"
+                   Target="{Binding ElementName=EditDatePicker}"
+                   FontSize="{DynamicResource BaseFontSize}"
+                   VerticalAlignment="Center"
+                   Padding="0"
+                   Margin="0,0,0,8"/>
+            <DatePicker x:Name="EditDatePicker"
+                        Grid.Row="0" Grid.Column="1"
                         SelectedDate="{Binding EditDate}"
                         FontSize="{DynamicResource BaseFontSize}"
                         Margin="0,0,0,8"
                         AutomationProperties.Name="出納日付"
-                        ToolTip="出納年月日を選択してください"/>
+                        ToolTip="出納年月日を選択してください（アクセスキー: Alt+D）"/>
 
-            <!-- 摘要 -->
-            <TextBlock Grid.Row="1" Grid.Column="0"
-                       Text="摘要:"
-                       FontSize="{DynamicResource BaseFontSize}"
-                       VerticalAlignment="Center"
-                       Margin="0,0,0,8"/>
-            <TextBox Grid.Row="1" Grid.Column="1"
+            <!-- 摘要 (_S) -->
+            <Label Grid.Row="1" Grid.Column="0"
+                   Content="摘要(_S):"
+                   Target="{Binding ElementName=SummaryTextBox}"
+                   FontSize="{DynamicResource BaseFontSize}"
+                   VerticalAlignment="Center"
+                   Padding="0"
+                   Margin="0,0,0,8"/>
+            <TextBox x:Name="SummaryTextBox"
+                     Grid.Row="1" Grid.Column="1"
                      Text="{Binding Summary, UpdateSourceTrigger=PropertyChanged}"
                      FontSize="{DynamicResource BaseFontSize}"
                      Padding="10,6"
                      Margin="0,0,0,8"
                      AutomationProperties.Name="摘要"
-                     ToolTip="摘要（例: 鉄道（博多駅～天神）、役務費によりチャージ）"/>
+                     ToolTip="摘要（例: 鉄道（博多駅～天神）、役務費によりチャージ）（アクセスキー: Alt+S）"/>
 
-            <!-- 受入金額 -->
-            <TextBlock Grid.Row="2" Grid.Column="0"
-                       Text="受入:"
-                       FontSize="{DynamicResource BaseFontSize}"
-                       VerticalAlignment="Center"
-                       Margin="0,0,0,8"/>
+            <!-- 受入金額 (_I) -->
+            <Label Grid.Row="2" Grid.Column="0"
+                   Content="受入(_I):"
+                   Target="{Binding ElementName=IncomeTextBox}"
+                   FontSize="{DynamicResource BaseFontSize}"
+                   VerticalAlignment="Center"
+                   Padding="0"
+                   Margin="0,0,0,8"/>
             <StackPanel Grid.Row="2" Grid.Column="1" Orientation="Horizontal" Margin="0,0,0,8">
-                <TextBox Text="{Binding Income, UpdateSourceTrigger=PropertyChanged}"
+                <TextBox x:Name="IncomeTextBox"
+                         Text="{Binding Income, UpdateSourceTrigger=PropertyChanged}"
                          FontSize="{DynamicResource BaseFontSize}"
                          Padding="10,6"
                          Width="120"
                          AutomationProperties.Name="受入金額"
-                         ToolTip="チャージ額（受入金額）"/>
+                         ToolTip="チャージ額（受入金額）（アクセスキー: Alt+I）"/>
                 <TextBlock Text="円" VerticalAlignment="Center" Margin="5,0,0,0"
                            FontSize="{DynamicResource BaseFontSize}"/>
             </StackPanel>
 
-            <!-- 払出金額 -->
-            <TextBlock Grid.Row="3" Grid.Column="0"
-                       Text="払出:"
-                       FontSize="{DynamicResource BaseFontSize}"
-                       VerticalAlignment="Center"
-                       Margin="0,0,0,8"/>
+            <!-- 払出金額 (_E) -->
+            <Label Grid.Row="3" Grid.Column="0"
+                   Content="払出(_E):"
+                   Target="{Binding ElementName=ExpenseTextBox}"
+                   FontSize="{DynamicResource BaseFontSize}"
+                   VerticalAlignment="Center"
+                   Padding="0"
+                   Margin="0,0,0,8"/>
             <StackPanel Grid.Row="3" Grid.Column="1" Orientation="Horizontal" Margin="0,0,0,8">
-                <TextBox Text="{Binding Expense, UpdateSourceTrigger=PropertyChanged}"
+                <TextBox x:Name="ExpenseTextBox"
+                         Text="{Binding Expense, UpdateSourceTrigger=PropertyChanged}"
                          FontSize="{DynamicResource BaseFontSize}"
                          Padding="10,6"
                          Width="120"
                          AutomationProperties.Name="払出金額"
-                         ToolTip="利用額（払出金額）"/>
+                         ToolTip="利用額（払出金額）（アクセスキー: Alt+E）"/>
                 <TextBlock Text="円" VerticalAlignment="Center" Margin="5,0,0,0"
                            FontSize="{DynamicResource BaseFontSize}"/>
             </StackPanel>
 
-            <!-- 残高 -->
-            <TextBlock Grid.Row="4" Grid.Column="0"
-                       Text="残高:"
-                       FontSize="{DynamicResource BaseFontSize}"
-                       VerticalAlignment="Center"
-                       Margin="0,0,0,8"/>
+            <!-- 残高 (_B) -->
+            <Label Grid.Row="4" Grid.Column="0"
+                   Content="残高(_B):"
+                   Target="{Binding ElementName=BalanceTextBox}"
+                   FontSize="{DynamicResource BaseFontSize}"
+                   VerticalAlignment="Center"
+                   Padding="0"
+                   Margin="0,0,0,8"/>
             <StackPanel Grid.Row="4" Grid.Column="1" Orientation="Horizontal" Margin="0,0,0,8">
-                <TextBox Text="{Binding Balance, UpdateSourceTrigger=PropertyChanged}"
+                <TextBox x:Name="BalanceTextBox"
+                         Text="{Binding Balance, UpdateSourceTrigger=PropertyChanged}"
                          FontSize="{DynamicResource BaseFontSize}"
                          Padding="10,6"
                          Width="120"
                          IsEnabled="{Binding IsAutoBalance, Converter={StaticResource InvertBoolConverter}}"
                          AutomationProperties.Name="残高"
-                         ToolTip="残高（自動計算ONの場合は自動で計算されます）"/>
+                         ToolTip="残高（自動計算ONの場合は自動で計算されます）（アクセスキー: Alt+B）"/>
                 <TextBlock Text="円" VerticalAlignment="Center" Margin="5,0,0,0"
                            FontSize="{DynamicResource BaseFontSize}"/>
-                <CheckBox Content="自動計算"
+                <CheckBox Content="自動計算(_A)"
                           IsChecked="{Binding IsAutoBalance}"
                           VerticalAlignment="Center"
                           Margin="15,0,0,0"
                           FontSize="{DynamicResource BaseFontSize}"
                           AutomationProperties.Name="残高を自動計算"
-                          ToolTip="ONにすると、前行の残高 + 受入 - 払出 で自動計算されます"/>
+                          ToolTip="ONにすると、前行の残高 + 受入 - 払出 で自動計算されます（アクセスキー: Alt+A）"/>
             </StackPanel>
 
-            <!-- 利用者 -->
-            <TextBlock Grid.Row="5" Grid.Column="0"
-                       Text="利用者:"
-                       FontSize="{DynamicResource BaseFontSize}"
-                       VerticalAlignment="Center"
-                       Margin="0,0,0,8"/>
+            <!-- 利用者 (_U) -->
+            <Label Grid.Row="5" Grid.Column="0"
+                   Content="利用者(_U):"
+                   Target="{Binding ElementName=StaffComboBox}"
+                   FontSize="{DynamicResource BaseFontSize}"
+                   VerticalAlignment="Center"
+                   Padding="0"
+                   Margin="0,0,0,8"/>
             <StackPanel Grid.Row="5" Grid.Column="1" Orientation="Horizontal" Margin="0,0,0,8">
-                <ComboBox ItemsSource="{Binding StaffList}"
+                <ComboBox x:Name="StaffComboBox"
+                          ItemsSource="{Binding StaffList}"
                           SelectedItem="{Binding SelectedStaff}"
                           DisplayMemberPath="Name"
                           FontSize="{DynamicResource BaseFontSize}"
                           MinWidth="150"
                           AutomationProperties.Name="利用者を選択"
-                          ToolTip="利用者を選択（任意）"/>
+                          ToolTip="利用者を選択（任意）（アクセスキー: Alt+U）"/>
                 <Button Content="×"
                         Command="{Binding ClearStaffCommand}"
                         FontSize="{DynamicResource BaseFontSize}"
@@ -167,13 +186,16 @@
                         ToolTip="利用者の選択を解除して空欄にします"/>
             </StackPanel>
 
-            <!-- 備考 -->
-            <TextBlock Grid.Row="6" Grid.Column="0"
-                       Text="備考:"
-                       FontSize="{DynamicResource BaseFontSize}"
-                       VerticalAlignment="Top"
-                       Margin="0,6,0,0"/>
-            <TextBox Grid.Row="6" Grid.Column="1"
+            <!-- 備考 (_N) -->
+            <Label Grid.Row="6" Grid.Column="0"
+                   Content="備考(_N):"
+                   Target="{Binding ElementName=NoteTextBox}"
+                   FontSize="{DynamicResource BaseFontSize}"
+                   VerticalAlignment="Top"
+                   Padding="0"
+                   Margin="0,6,0,0"/>
+            <TextBox x:Name="NoteTextBox"
+                     Grid.Row="6" Grid.Column="1"
                      Text="{Binding Note, UpdateSourceTrigger=PropertyChanged}"
                      FontSize="{DynamicResource BaseFontSize}"
                      Padding="10,6"
@@ -181,7 +203,7 @@
                      AcceptsReturn="True"
                      MinHeight="50"
                      AutomationProperties.Name="備考"
-                     ToolTip="備考（任意）"/>
+                     ToolTip="備考（任意）（アクセスキー: Alt+N）"/>
         </Grid>
 
         <!-- 挿入位置プレビュー（Addモードのみ） -->
@@ -314,20 +336,21 @@
             </Grid.ColumnDefinitions>
 
             <!-- Issue #750: 削除ボタン（左下に配置し、保存/キャンセルと離す） -->
+            <!-- Issue #1276: アクセスキー _X -->
             <Button Grid.Column="0"
-                    Content="削除"
+                    Content="削除(_X)"
                     Command="{Binding RequestDeleteCommand}"
                     Visibility="{Binding CanDelete, Converter={StaticResource BoolToVisibilityConverter}}"
                     Padding="20,10"
                     Foreground="{DynamicResource DangerTextBrush}"
                     FontSize="{DynamicResource BaseFontSize}"
                     AutomationProperties.Name="この履歴を削除"
-                    ToolTip="この履歴を削除します"/>
+                    ToolTip="この履歴を削除します（アクセスキー: Alt+X）"/>
 
             <!-- 保存/キャンセルボタン（右下） -->
             <StackPanel Grid.Column="2"
                         Orientation="Horizontal">
-                <Button Content="キャンセル"
+                <Button Content="キャンセル(_C)"
                         Command="{Binding CancelCommand}"
                         Click="CancelButton_Click"
                         Padding="20,10"
@@ -335,7 +358,7 @@
                         IsCancel="True"
                         FontSize="{DynamicResource BaseFontSize}"
                         AutomationProperties.Name="キャンセル"
-                        ToolTip="変更を破棄してダイアログを閉じる (Escape)"/>
+                        ToolTip="変更を破棄してダイアログを閉じる (Escape / Alt+C)"/>
                 <!-- 戻る（Issue #1134） -->
                 <Button Content="◀ 戻る"
                         Command="{Binding BackCommand}"
