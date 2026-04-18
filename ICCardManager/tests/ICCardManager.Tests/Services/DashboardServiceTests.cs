@@ -265,4 +265,286 @@ public class DashboardServiceTests
     }
 
     #endregion
+
+    #region Issue #1261: 集計ロジック拡充テスト
+
+    /// <summary>
+    /// Issue #1261: 貸出中と在庫カードが混在する場合、各カードの IsLent / LentStaffName が
+    /// 個別に正しく設定されること。
+    /// </summary>
+    [Fact]
+    public async Task BuildDashboardAsync_貸出中と在庫の混在_各カードの状態が個別に反映されること()
+    {
+        // Arrange: 3枚貸出中 + 2枚在庫 の混合
+        var cards = new[]
+        {
+            new IcCard { CardIdm = "AAAA000000000001", CardType = "はやかけん", CardNumber = "H-001", IsLent = true,  LastLentStaff = "STAFF00000000001" },
+            new IcCard { CardIdm = "AAAA000000000002", CardType = "はやかけん", CardNumber = "H-002", IsLent = false, LastLentStaff = null },
+            new IcCard { CardIdm = "AAAA000000000003", CardType = "nimoca",   CardNumber = "N-001", IsLent = true,  LastLentStaff = "STAFF00000000002" },
+            new IcCard { CardIdm = "AAAA000000000004", CardType = "nimoca",   CardNumber = "N-002", IsLent = false, LastLentStaff = "STAFF00000000001" /* 履歴値のみ */ },
+            new IcCard { CardIdm = "AAAA000000000005", CardType = "SUGOCA",   CardNumber = "S-001", IsLent = true,  LastLentStaff = "STAFF00000000003" },
+        };
+        var staff = new[]
+        {
+            new Staff { StaffIdm = "STAFF00000000001", Name = "田中一郎" },
+            new Staff { StaffIdm = "STAFF00000000002", Name = "佐藤花子" },
+            new Staff { StaffIdm = "STAFF00000000003", Name = "鈴木次郎" },
+        };
+        SetupRepositories(cards, staff: staff);
+
+        // Act
+        var result = await _service.BuildDashboardAsync(DashboardSortOrder.CardName);
+
+        // Assert: 5件すべて返る
+        result.Items.Should().HaveCount(5);
+
+        // 貸出中カード: IsLent=true + LentStaffName が解決される
+        var lent = result.Items.Where(i => i.IsLent).ToList();
+        lent.Should().HaveCount(3);
+        lent.Select(i => i.LentStaffName).Should().BeEquivalentTo(
+            new[] { "田中一郎", "佐藤花子", "鈴木次郎" });
+
+        // 在庫カード: IsLent=false かつ LentStaffName=null（履歴値があっても表示しない）
+        var available = result.Items.Where(i => !i.IsLent).ToList();
+        available.Should().HaveCount(2);
+        available.Should().OnlyContain(i => i.LentStaffName == null,
+            "在庫中は LastLentStaff に値があっても LentStaffName は表示しない");
+    }
+
+    /// <summary>
+    /// Issue #1261: 複数カードが警告残高を超過・未超過の混合状態のとき、
+    /// 各カードで IsBalanceWarning が個別に判定されること。
+    /// </summary>
+    [Fact]
+    public async Task BuildDashboardAsync_警告残高判定_複数カード混在でカードごとに独立判定()
+    {
+        // Arrange: 警告閾値=1000、残高500/1000/1500/100/2000 の5枚
+        var cards = new[]
+        {
+            new IcCard { CardIdm = "BBBB000000000001", CardType = "はやかけん", CardNumber = "H-001" },
+            new IcCard { CardIdm = "BBBB000000000002", CardType = "はやかけん", CardNumber = "H-002" },
+            new IcCard { CardIdm = "BBBB000000000003", CardType = "はやかけん", CardNumber = "H-003" },
+            new IcCard { CardIdm = "BBBB000000000004", CardType = "はやかけん", CardNumber = "H-004" },
+            new IcCard { CardIdm = "BBBB000000000005", CardType = "はやかけん", CardNumber = "H-005" },
+        };
+        var balances = new Dictionary<string, (int, DateTime?)>
+        {
+            ["BBBB000000000001"] = (500,  null),
+            ["BBBB000000000002"] = (1000, null),
+            ["BBBB000000000003"] = (1500, null),
+            ["BBBB000000000004"] = (100,  null),
+            ["BBBB000000000005"] = (2000, null),
+        };
+        SetupRepositories(cards, balances, warningBalance: 1000);
+
+        // Act
+        var result = await _service.BuildDashboardAsync(DashboardSortOrder.CardName);
+
+        // Assert: balance ≤ 1000 のカードのみ警告、それ以外は警告なし
+        var warnings = result.Items.Where(i => i.IsBalanceWarning).ToList();
+        warnings.Should().HaveCount(3, "500/1000/100 の3枚が警告対象");
+        warnings.Select(i => i.CardNumber).Should().BeEquivalentTo(new[] { "H-001", "H-002", "H-004" });
+
+        var safe = result.Items.Where(i => !i.IsBalanceWarning).ToList();
+        safe.Should().HaveCount(2, "1500/2000 の2枚は警告対象外");
+        safe.Select(i => i.CardNumber).Should().BeEquivalentTo(new[] { "H-003", "H-005" });
+    }
+
+    /// <summary>
+    /// Issue #1261: DashboardService は論理削除除外を Repository 層 (GetAllAsync) に委譲し、
+    /// 自身で GetAllIncludingDeletedAsync を呼ばないこと。
+    /// </summary>
+    /// <remarks>
+    /// CardRepository.GetAllAsync は SQL で <c>WHERE is_deleted = 0</c> を適用する。
+    /// DashboardService がこの契約を崩して GetAllIncludingDeletedAsync を呼ぶと、
+    /// 論理削除済みカードがダッシュボードに表示されてしまう。
+    /// </remarks>
+    [Fact]
+    public async Task BuildDashboardAsync_論理削除除外はRepositoryに委譲する契約()
+    {
+        // Arrange
+        SetupRepositories(Array.Empty<IcCard>());
+
+        // Act
+        await _service.BuildDashboardAsync(DashboardSortOrder.CardName);
+
+        // Assert
+        _cardRepositoryMock.Verify(r => r.GetAllAsync(), Times.Once,
+            "DashboardService は必ず GetAllAsync を呼ぶ（論理削除フィルタ適用済）");
+        _cardRepositoryMock.Verify(r => r.GetAllIncludingDeletedAsync(), Times.Never,
+            "DashboardService は GetAllIncludingDeletedAsync を呼ばない");
+    }
+
+    /// <summary>
+    /// Issue #1261: 残高取得は GetAllLatestBalancesAsync への一本化で行い、
+    /// 生の Ledger クエリ（GetByDateRangeAsync/GetByMonthAsync 等）は呼ばないこと。
+    /// </summary>
+    /// <remarks>
+    /// GetAllLatestBalancesAsync は SQL 側で各カードの最新 Ledger のみを取得するため、
+    /// IsLentRecord=true の貸出中レコードが紛れていても最新の balance/date として
+    /// 扱われる。DashboardService はこの契約を前提にしており、自身で Ledger を
+    /// フィルタリングする責務を持たない。
+    /// </remarks>
+    [Fact]
+    public async Task BuildDashboardAsync_残高取得は集計APIに一本化しLedgerを直接取得しない()
+    {
+        // Arrange
+        SetupRepositories(Array.Empty<IcCard>());
+
+        // Act
+        await _service.BuildDashboardAsync(DashboardSortOrder.CardName);
+
+        // Assert
+        _ledgerRepositoryMock.Verify(r => r.GetAllLatestBalancesAsync(), Times.Once,
+            "最新残高は集計API経由で取得");
+        _ledgerRepositoryMock.Verify(
+            r => r.GetByDateRangeAsync(It.IsAny<string>(), It.IsAny<DateTime>(), It.IsAny<DateTime>()),
+            Times.Never,
+            "DashboardService は Ledger を直接日付範囲で取得しない（IsLentRecord フィルタは Repository の責務）");
+        _ledgerRepositoryMock.Verify(
+            r => r.GetByMonthAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<int>()),
+            Times.Never,
+            "DashboardService は月次Ledger取得もしない");
+    }
+
+    /// <summary>
+    /// Issue #1261: LastUsageDate はカードごとに独立して balances 辞書から引き継がれること。
+    /// 他カードの日付が混入したり、最新一枚に集約されたりしない。
+    /// </summary>
+    [Fact]
+    public async Task BuildDashboardAsync_LastUsageDate_カードごとに独立して反映される()
+    {
+        // Arrange
+        var cards = new[]
+        {
+            new IcCard { CardIdm = "CCCC000000000001", CardType = "はやかけん", CardNumber = "H-001" },
+            new IcCard { CardIdm = "CCCC000000000002", CardType = "はやかけん", CardNumber = "H-002" },
+            new IcCard { CardIdm = "CCCC000000000003", CardType = "はやかけん", CardNumber = "H-003" },
+        };
+        var balances = new Dictionary<string, (int, DateTime?)>
+        {
+            ["CCCC000000000001"] = (1000, new DateTime(2026, 1, 15)),
+            ["CCCC000000000002"] = (2000, new DateTime(2026, 4, 1)),
+            ["CCCC000000000003"] = (3000, null), // 履歴なし
+        };
+        SetupRepositories(cards, balances);
+
+        // Act
+        var result = await _service.BuildDashboardAsync(DashboardSortOrder.CardName);
+
+        // Assert: 各カードの LastUsageDate が個別に保持される
+        var byCard = result.Items.ToDictionary(i => i.CardIdm);
+        byCard["CCCC000000000001"].LastUsageDate.Should().Be(new DateTime(2026, 1, 15));
+        byCard["CCCC000000000002"].LastUsageDate.Should().Be(new DateTime(2026, 4, 1));
+        byCard["CCCC000000000003"].LastUsageDate.Should().BeNull("履歴なしのカードは null");
+    }
+
+    /// <summary>
+    /// Issue #1261: balances 辞書が完全に空の場合、全カードが FallbackBalance=0 + null で
+    /// 構築され、0 は警告対象（<c>balance ≤ warningBalance</c>）となること。
+    /// </summary>
+    [Fact]
+    public async Task BuildDashboardAsync_空balances辞書_全カードが0警告対象になる()
+    {
+        // Arrange: 3枚のカードがあるが balances 辞書は空
+        var cards = new[]
+        {
+            new IcCard { CardIdm = "DDDD000000000001", CardType = "はやかけん", CardNumber = "H-001" },
+            new IcCard { CardIdm = "DDDD000000000002", CardType = "はやかけん", CardNumber = "H-002" },
+            new IcCard { CardIdm = "DDDD000000000003", CardType = "はやかけん", CardNumber = "H-003" },
+        };
+        SetupRepositories(cards, balances: new Dictionary<string, (int, DateTime?)>(), warningBalance: 1000);
+
+        // Act
+        var result = await _service.BuildDashboardAsync(DashboardSortOrder.CardName);
+
+        // Assert
+        result.Items.Should().HaveCount(3);
+        result.Items.Should().OnlyContain(i => i.CurrentBalance == 0);
+        result.Items.Should().OnlyContain(i => i.LastUsageDate == null);
+        result.Items.Should().OnlyContain(i => i.IsBalanceWarning,
+            "残高0は警告閾値1000以下のため全件警告対象");
+    }
+
+    /// <summary>
+    /// Issue #1261: 警告残高=0 の境界動作。残高0 のみ警告となり、残高1以上は警告されない。
+    /// （`balance &lt;= 0` の判定で 0 のみマッチ）
+    /// </summary>
+    [Fact]
+    public async Task BuildDashboardAsync_警告残高ゼロ境界_残高0のみ警告対象()
+    {
+        // Arrange
+        var cards = new[]
+        {
+            new IcCard { CardIdm = "EEEE000000000001", CardType = "はやかけん", CardNumber = "H-001" },
+            new IcCard { CardIdm = "EEEE000000000002", CardType = "はやかけん", CardNumber = "H-002" },
+            new IcCard { CardIdm = "EEEE000000000003", CardType = "はやかけん", CardNumber = "H-003" },
+        };
+        var balances = new Dictionary<string, (int, DateTime?)>
+        {
+            ["EEEE000000000001"] = (0, null),
+            ["EEEE000000000002"] = (1, null),
+            ["EEEE000000000003"] = (1000, null),
+        };
+        SetupRepositories(cards, balances, warningBalance: 0);
+
+        // Act
+        var result = await _service.BuildDashboardAsync(DashboardSortOrder.CardName);
+
+        // Assert
+        var byCard = result.Items.ToDictionary(i => i.CardIdm);
+        byCard["EEEE000000000001"].IsBalanceWarning.Should().BeTrue(
+            "0 ≤ 0 なので警告対象");
+        byCard["EEEE000000000002"].IsBalanceWarning.Should().BeFalse(
+            "1 > 0 なので警告対象外");
+        byCard["EEEE000000000003"].IsBalanceWarning.Should().BeFalse(
+            "1000 > 0 なので警告対象外");
+    }
+
+    /// <summary>
+    /// Issue #1261: 長期貸出中カード（返却期限超過の実運用ケース）も、
+    /// IsLent=true + LentStaffName + LastUsageDate が正しく表示されて可視化されること。
+    /// </summary>
+    /// <remarks>
+    /// DashboardService は明示的な「返却期限超過フラグ」を持たないが、
+    /// 貸出中カードはダッシュボード上で IsLent=true かつ LentStaffName 付きで
+    /// 常に表示され、ユーザーが長期貸出を目視確認できる設計になっている。
+    /// 本テストは「長期貸出でもカードが消えない／LentStaffName が復元される」ことを保証する。
+    /// </remarks>
+    [Fact]
+    public async Task BuildDashboardAsync_長期貸出中カードもLentStaffName付きで可視化される()
+    {
+        // Arrange: 60日前から貸出中のカード（返却期限超過相当）
+        var cards = new[]
+        {
+            new IcCard
+            {
+                CardIdm = "FFFF000000000001",
+                CardType = "はやかけん",
+                CardNumber = "H-001",
+                IsLent = true,
+                LastLentAt = DateTime.Now.AddDays(-60),
+                LastLentStaff = "STAFF00000000001"
+            }
+        };
+        var balances = new Dictionary<string, (int, DateTime?)>
+        {
+            ["FFFF000000000001"] = (1500, DateTime.Now.AddDays(-60))
+        };
+        var staff = new[] { new Staff { StaffIdm = "STAFF00000000001", Name = "長期利用者" } };
+        SetupRepositories(cards, balances, staff);
+
+        // Act
+        var result = await _service.BuildDashboardAsync(DashboardSortOrder.CardName);
+
+        // Assert
+        result.Items.Should().HaveCount(1, "長期貸出でもカードは消えず表示される");
+        var item = result.Items[0];
+        item.IsLent.Should().BeTrue();
+        item.LentStaffName.Should().Be("長期利用者",
+            "長期貸出中でも職員名が解決されて表示される（返却期限超過の可視化）");
+        item.LastUsageDate.Should().NotBeNull("最終利用日が表示される");
+    }
+
+    #endregion
 }
