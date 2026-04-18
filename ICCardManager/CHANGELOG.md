@@ -7,6 +7,7 @@
 - `felicalib.dll` の完全性検証を起動時に実行（DLL Hijacking 対策）。既知の SHA-256 ハッシュと不一致の場合はエラーダイアログを表示してアプリを終了する。内部者が偽造 DLL を配置して IDm を盗聴・改ざんする攻撃を防止（#1266）
 - CSV/Excel 式インジェクション (CSV Injection / Formula Injection) 対策。セル先頭が `=` / `+` / `-` / `@` / タブ / CR で始まる文字列にシングルクォート `'` を付与してテキスト・リテラルとして扱わせる。CSV インポート時の `note` / `summary` / `entry_station` / `exit_station` / `bus_stops` と、CSV/Excel エクスポート時の全ユーザー入力由来テキスト列に適用（#1267）
 - `PathValidator.ContainsPathTraversal` のパストラバーサル検出を強化。従来の `path.Contains("..")` 単純検査を多段階検出に置き換え、(1) URL エンコード (`%2E%2E`) のデコード再検査、(2) セグメント単位の `..` 判定（混合区切り `/` と `\` 対応）、(3) 末尾空白を考慮した `".. "` の正規化判定、(4) UNC パスで `Path.GetFullPath` 後に元の `\\server\share` プレフィクスが保持されるかの境界チェック、を実施。エラーメッセージもユーザー向けに明瞭化（#1268）
+- `PathValidator.ValidateBackupPath` に UNC パス到達性チェック（5秒タイムアウト）を追加。`Directory.Exists` がネットワーク不安定時に数十秒ハングする問題を解決。到達不可時は「ネットワーク共有に到達できません。ネットワーク接続を確認してください」と明確なエラーを表示。非同期版 `ValidateBackupPathAsync` も提供し、設定画面等 UI スレッドからの呼び出しでブロックしないように `SettingsViewModel.SaveAsync` を更新（#1269）
 
 ### v2.7.0 (2026-04-15)
 

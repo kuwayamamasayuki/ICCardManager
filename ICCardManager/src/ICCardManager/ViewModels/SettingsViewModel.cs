@@ -221,10 +221,11 @@ public partial class SettingsViewModel : ViewModelBase
         }
 
         // バックアップパスの検証（空の場合はデフォルトを使用するのでスキップ）
+        // Issue #1269: UNC到達性チェックをUIブロックせず非同期実行
         var validatedBackupPath = BackupPath;
         if (!string.IsNullOrWhiteSpace(BackupPath))
         {
-            var pathResult = PathValidator.ValidateBackupPath(BackupPath);
+            var pathResult = await PathValidator.ValidateBackupPathAsync(BackupPath);
             if (!pathResult.IsValid)
             {
                 SetStatus($"バックアップパスが無効です: {pathResult.ErrorMessage}", true);
@@ -288,7 +289,8 @@ public partial class SettingsViewModel : ViewModelBase
                     string fullDbPath = string.Empty; // appsettings.jsonに保存するファイルパス
                     if (!string.IsNullOrWhiteSpace(DatabasePath))
                     {
-                        var dbPathResult = PathValidator.ValidateBackupPath(DatabasePath);
+                        // Issue #1269: UNC到達性をUIブロックせず非同期検証
+                        var dbPathResult = await PathValidator.ValidateBackupPathAsync(DatabasePath);
                         if (!dbPathResult.IsValid)
                         {
                             SetStatus($"データベース保存先が無効です: {dbPathResult.ErrorMessage}", true);
