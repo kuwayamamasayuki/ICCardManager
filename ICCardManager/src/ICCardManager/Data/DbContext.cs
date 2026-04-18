@@ -324,11 +324,23 @@ namespace ICCardManager.Data
         /// 接続リースを同期で取得する。using文で使用すること。
         /// </summary>
         /// <remarks>
-        /// 同期メソッド（InitializeDatabase, CleanupOldData等）で使用する。
-        /// 同一スレッド内ではリエントラント。
+        /// <para>同期メソッド（InitializeDatabase, CleanupOldData等）で使用する。
+        /// 同一スレッド内ではリエントラント。</para>
+        /// <para>
+        /// <b>重要（Issue #1281）:</b> このメソッドは WPF の UI スレッドから呼び出してはならない。
+        /// 内部で <c>_semaphore.Wait()</c> により UI スレッドがブロックされるため、
+        /// 別スレッドで進行中の非同期トランザクション継続が Dispatcher 経由で UI スレッドに
+        /// 戻ろうとする際にデッドロックが発生する。UI 層からは <see cref="LeaseConnectionAsync"/>
+        /// を使うか、<c>Task.Run</c> でバックグラウンドスレッドにオフロードすること。
+        /// 違反を検出した場合は <see cref="InvalidOperationException"/> をスローする。
+        /// </para>
         /// </remarks>
+        /// <exception cref="InvalidOperationException">WPF の UI スレッドから呼び出された場合</exception>
         public ConnectionLease LeaseConnection()
         {
+            // Issue #1281: UI スレッドからの呼び出しを検出して拒否する
+            ThrowIfOnUiThread();
+
             if (_reentrancyCount.Value > 0)
             {
                 _reentrancyCount.Value++;
@@ -346,6 +358,41 @@ namespace ICCardManager.Data
                     catch (ObjectDisposedException) { /* DbContext.Dispose()後のリース解放 */ }
                 }
             });
+        }
+
+        /// <summary>
+        /// Issue #1281: UI スレッド検出用のフック。
+        /// 既定は WPF の <c>DispatcherSynchronizationContext</c> を検出する。
+        /// テストから差し替え可能（内部 API）。
+        /// </summary>
+        internal static Func<bool> IsOnUiThread { get; set; } = DefaultIsOnUiThread;
+
+        /// <summary>
+        /// 既定の UI スレッド検出: <see cref="SynchronizationContext.Current"/> の型名で判定する。
+        /// System.Windows を直接参照せずに WPF Dispatcher スレッドを検出できる。
+        /// </summary>
+        private static bool DefaultIsOnUiThread()
+        {
+            var context = SynchronizationContext.Current;
+            return context != null &&
+                   context.GetType().FullName == "System.Windows.Threading.DispatcherSynchronizationContext";
+        }
+
+        /// <summary>
+        /// UI スレッドから呼び出されていた場合に <see cref="InvalidOperationException"/> をスローする。
+        /// </summary>
+        private static void ThrowIfOnUiThread()
+        {
+            if (IsOnUiThread())
+            {
+                throw new InvalidOperationException(
+                    "DbContext.LeaseConnection() は WPF UI スレッドから呼び出せません。" +
+                    "内部の SemaphoreSlim.Wait() が UI スレッドをブロックし、" +
+                    "バックグラウンドで進行中の非同期トランザクション継続が Dispatcher 経由で " +
+                    "UI スレッドに戻ろうとした際にデッドロックを引き起こす危険があります。" +
+                    "UI 層からは LeaseConnectionAsync() を使用するか、" +
+                    "Task.Run でバックグラウンドスレッドにオフロードしてから呼び出してください。");
+            }
         }
 
         /// <summary>

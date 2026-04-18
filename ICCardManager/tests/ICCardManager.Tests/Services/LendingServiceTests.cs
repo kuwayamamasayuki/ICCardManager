@@ -48,6 +48,8 @@ public class LendingServiceTests : IDisposable
         _ledgerRepositoryMock = new Mock<ILedgerRepository>();
         _settingsRepositoryMock = new Mock<ISettingsRepository>();
         _settingsRepositoryMock.Setup(s => s.GetAppSettings()).Returns(new AppSettings());
+        // Issue #1281: LendingService がチャージ摘要生成で非同期版を使うようになったため同モックも追加
+        _settingsRepositoryMock.Setup(s => s.GetAppSettingsAsync()).ReturnsAsync(new AppSettings());
 
         // デフォルトのモック設定（個別テストでオーバーライド可能）
         _ledgerRepositoryMock.Setup(x => x.DeleteAllLentRecordsAsync(It.IsAny<string>()))

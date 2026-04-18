@@ -240,7 +240,12 @@ namespace ICCardManager
             services.AddSingleton<IValidationService, ValidationService>();
             services.AddSingleton<SummaryGenerator>(sp =>
             {
-                var settings = sp.GetRequiredService<ISettingsRepository>().GetAppSettings();
+                // Issue #1281: この DI 初期化は UI スレッド（OnStartup）で実行されるため、
+                // SettingsRepository.GetAppSettings() 内の DbContext.LeaseConnection() が
+                // UI スレッド検出で例外を投げる。Task.Run でバックグラウンドスレッドに
+                // オフロードしてから取得する。
+                var repo = sp.GetRequiredService<ISettingsRepository>();
+                var settings = Task.Run(() => repo.GetAppSettings()).GetAwaiter().GetResult();
                 var orgOptions = sp.GetRequiredService<IOptions<OrganizationOptions>>().Value;
                 return new SummaryGenerator(settings.DepartmentType, orgOptions);
             });
@@ -554,8 +559,10 @@ namespace ICCardManager
             try
             {
                 var settingsRepository = ServiceProvider.GetRequiredService<ISettingsRepository>();
-                // 同期版メソッドを使用してデッドロックを防止
-                var settings = settingsRepository.GetAppSettings();
+                // Issue #1281: UI スレッドから DbContext.LeaseConnection() を直接呼ぶと
+                // 例外になるため、Task.Run でバックグラウンドスレッドにオフロードしてから
+                // 同期取得する。起動時は競合する非同期操作がないため安全。
+                var settings = Task.Run(() => settingsRepository.GetAppSettings()).GetAwaiter().GetResult();
 
                 // 文字サイズを適用
                 ApplyFontSize(settings.FontSize);
@@ -680,7 +687,8 @@ namespace ICCardManager
 
                 // VACUUM（月次実行）
                 var settingsRepository = ServiceProvider.GetRequiredService<ISettingsRepository>();
-                var settings = settingsRepository.GetAppSettings();
+                // Issue #1281: UI スレッドから同期版を呼ばないよう Task.Run でオフロード
+                var settings = Task.Run(() => settingsRepository.GetAppSettings()).GetAwaiter().GetResult();
 
                 var today = DateTime.Now;
                 if (today.Day >= 10)
