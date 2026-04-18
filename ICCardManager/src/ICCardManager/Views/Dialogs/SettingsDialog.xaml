@@ -12,6 +12,7 @@
         WindowStartupLocation="CenterOwner"
         ResizeMode="NoResize"
         FontSize="{DynamicResource BaseFontSize}"
+        FocusManager.FocusedElement="{Binding ElementName=ToastPositionComboBox}"
         AutomationProperties.Name="設定ダイアログ"
         AutomationProperties.HelpText="アプリケーションの各種設定を変更できます。Escapeキーでキャンセルできます。">
 
