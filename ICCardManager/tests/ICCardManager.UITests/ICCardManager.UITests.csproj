@@ -21,7 +21,7 @@
     </PackageReference>
 
     <!-- テストヘルパー -->
-    <PackageReference Include="FluentAssertions" Version="6.12.0" />
+    <PackageReference Include="FluentAssertions" Version="6.12.2" />
 
     <!-- FlaUI - WPF UIテスト自動化 -->
     <PackageReference Include="FlaUI.Core" Version="5.0.0" />
