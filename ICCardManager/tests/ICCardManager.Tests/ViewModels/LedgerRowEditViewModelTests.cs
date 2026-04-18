@@ -361,6 +361,85 @@ public class LedgerRowEditViewModelTests
 
     #endregion
 
+    #region Issue #1279: FirstErrorField によるフォーカス情報
+
+    [Fact]
+    public async Task Validation_摘要空_FirstErrorFieldにSummaryが設定されること()
+    {
+        var allLedgers = CreateTestLedgers();
+        await _viewModel.InitializeForAddAsync(TestCardIdm, allLedgers, TestOperatorIdm);
+
+        _viewModel.Summary = "";
+
+        _viewModel.CanSave.Should().BeFalse();
+        _viewModel.FirstErrorField.Should().Be(nameof(LedgerRowEditViewModel.Summary),
+            "摘要空エラー時は Dialog 側が Summary フィールドへフォーカス移動できるよう FirstErrorField を設定すべき");
+    }
+
+    [Fact]
+    public async Task Validation_残高マイナス_FirstErrorFieldにBalanceが設定されること()
+    {
+        var allLedgers = new List<LedgerDto>
+        {
+            new LedgerDto { Id = 1, Date = new DateTime(2026, 1, 1), Balance = 100 }
+        };
+        await _viewModel.InitializeForAddAsync(TestCardIdm, allLedgers, TestOperatorIdm);
+
+        _viewModel.Summary = "テスト";
+        _viewModel.Income = 0;
+        _viewModel.Expense = 200;
+
+        _viewModel.CanSave.Should().BeFalse();
+        _viewModel.FirstErrorField.Should().Be(nameof(LedgerRowEditViewModel.Balance));
+    }
+
+    [Fact]
+    public async Task Validation_受入金額負_FirstErrorFieldにIncomeが設定されること()
+    {
+        var allLedgers = CreateTestLedgers();
+        await _viewModel.InitializeForAddAsync(TestCardIdm, allLedgers, TestOperatorIdm);
+
+        _viewModel.Summary = "テスト";
+        _viewModel.Income = -100;
+
+        _viewModel.CanSave.Should().BeFalse();
+        _viewModel.FirstErrorField.Should().Be(nameof(LedgerRowEditViewModel.Income));
+    }
+
+    [Fact]
+    public async Task Validation_払出金額負_FirstErrorFieldにExpenseが設定されること()
+    {
+        var allLedgers = CreateTestLedgers();
+        await _viewModel.InitializeForAddAsync(TestCardIdm, allLedgers, TestOperatorIdm);
+
+        _viewModel.Summary = "テスト";
+        _viewModel.Income = 1000;  // 残高をプラスに保つ
+        _viewModel.Expense = -50;
+
+        _viewModel.CanSave.Should().BeFalse();
+        _viewModel.FirstErrorField.Should().Be(nameof(LedgerRowEditViewModel.Expense));
+    }
+
+    [Fact]
+    public async Task Validation_エラー解消後_FirstErrorFieldがnullに戻ること()
+    {
+        var allLedgers = CreateTestLedgers();
+        await _viewModel.InitializeForAddAsync(TestCardIdm, allLedgers, TestOperatorIdm);
+
+        _viewModel.Summary = "";
+        _viewModel.FirstErrorField.Should().Be(nameof(LedgerRowEditViewModel.Summary));
+
+        _viewModel.Summary = "鉄道（天神～博多）";
+        _viewModel.Income = 1000;
+        _viewModel.Expense = 0;
+
+        _viewModel.CanSave.Should().BeTrue();
+        _viewModel.FirstErrorField.Should().BeNull(
+            "全ての検証が通過した場合、FirstErrorField は null に戻るべき");
+    }
+
+    #endregion
+
     #region 削除機能（Issue #750）
 
     [Fact]

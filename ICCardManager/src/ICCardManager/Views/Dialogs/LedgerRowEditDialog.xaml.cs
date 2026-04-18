@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 using System.Windows;
+using System.Windows.Controls;
 using ICCardManager.Dtos;
 using ICCardManager.ViewModels;
 
@@ -55,6 +56,39 @@ namespace ICCardManager.Views.Dialogs
                     Close();
                 }
             };
+
+            // Issue #1279: ダイアログ表示完了時に既にエラーがある場合は該当フィールドにフォーカス
+            ContentRendered += (s, e) =>
+            {
+                FocusFirstErrorField();
+            };
+        }
+
+        /// <summary>
+        /// Issue #1279: ViewModel の FirstErrorField プロパティに対応する
+        /// 入力コントロールへフォーカスを移動する。
+        /// </summary>
+        /// <remarks>
+        /// ViewModel は Validate() のたびに FirstErrorField を更新するが、
+        /// この処理はユーザー入力中ではなく「ダイアログ初期表示時」および
+        /// 「保存ボタン押下時に CanSave=false だった場合」にのみ呼び出す
+        /// ことで、入力途中でフォーカスが勝手に戻るストレスを避ける。
+        /// </remarks>
+        private void FocusFirstErrorField()
+        {
+            Control? target = _viewModel.FirstErrorField switch
+            {
+                nameof(LedgerRowEditViewModel.Summary) => SummaryTextBox,
+                nameof(LedgerRowEditViewModel.Income) => IncomeTextBox,
+                nameof(LedgerRowEditViewModel.Expense) => ExpenseTextBox,
+                nameof(LedgerRowEditViewModel.Balance) => BalanceTextBox,
+                _ => null
+            };
+            target?.Focus();
+            if (target is TextBox tb)
+            {
+                tb.SelectAll();
+            }
         }
 
         /// <summary>

@@ -166,6 +166,14 @@ namespace ICCardManager.ViewModels
         private bool _canSave;
 
         /// <summary>
+        /// Issue #1279: 最初のエラーが発生しているフィールドのプロパティ名。
+        /// Dialog のコードビハインドがこの値を監視し、該当 TextBox にフォーカスを移動する。
+        /// エラーなしの場合は null。
+        /// </summary>
+        [ObservableProperty]
+        private string? _firstErrorField;
+
+        /// <summary>
         /// 削除が可能か（Editモードかつ貸出中でない場合のみ）Issue #750
         /// </summary>
         [ObservableProperty]
@@ -456,6 +464,8 @@ namespace ICCardManager.ViewModels
             ValidationMessage = string.Empty;
             WarningMessage = string.Empty;
             CanSave = true;
+            // Issue #1279: 最初のエラーフィールドをリセット
+            FirstErrorField = null;
 
             // Issue #1275: エラーメッセージに「何が/なぜ/どうすれば」の3要素を含める
 
@@ -464,6 +474,7 @@ namespace ICCardManager.ViewModels
             {
                 ValidationMessage = "摘要が空です。鉄道、バス、チャージ等の取引内容を入力してください。";
                 CanSave = false;
+                FirstErrorField = nameof(Summary);
                 return;
             }
 
@@ -483,6 +494,7 @@ namespace ICCardManager.ViewModels
                     $"計算後の残高が {Balance:N0}円（マイナス）になります。" +
                     "受入金額を増やすか、払出金額を減らしてください。";
                 CanSave = false;
+                FirstErrorField = nameof(Balance);
                 return;
             }
 
@@ -493,6 +505,7 @@ namespace ICCardManager.ViewModels
                     $"受入金額に負の値（{Income:N0}円）が設定されています。" +
                     "0以上の金額を入力してください。";
                 CanSave = false;
+                FirstErrorField = nameof(Income);
                 return;
             }
             if (Expense < 0)
@@ -501,6 +514,7 @@ namespace ICCardManager.ViewModels
                     $"払出金額に負の値（{Expense:N0}円）が設定されています。" +
                     "0以上の金額を入力してください。";
                 CanSave = false;
+                FirstErrorField = nameof(Expense);
                 return;
             }
 
