@@ -1,0 +1,86 @@
+# Issue #1272: 依存パッケージの既知 CVE 監視
+#
+# 本プロジェクトはインターネット非接続環境で動作するため、セキュリティ更新は
+# 開発マシンで検証・手動適用する運用。Dependabot は PR を作成するが、
+# マージは開発者が動作確認後に実施する。
+#
+# 戦略:
+# - セキュリティ更新（vulnerability alert 対応）は別ルートで開き、即座に対処
+# - 通常アップデートは週次で確認、意図せぬ破壊的変更を避けるため
+#   メジャーバージョンアップはデフォルトで無視
+version: 2
+
+updates:
+  # NuGet パッケージ（本体プロジェクト）
+  - package-ecosystem: "nuget"
+    directory: "/ICCardManager/src/ICCardManager"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+      timezone: "Asia/Tokyo"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "security"
+    commit-message:
+      prefix: "chore(deps)"
+      include: "scope"
+    # メジャーバージョンアップは破壊的変更を含むため手動確認を必須とする
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+
+  # NuGet パッケージ（テストプロジェクト）
+  - package-ecosystem: "nuget"
+    directory: "/ICCardManager/tests/ICCardManager.Tests"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+      timezone: "Asia/Tokyo"
+    open-pull-requests-limit: 3
+    labels:
+      - "dependencies"
+      - "tests"
+    commit-message:
+      prefix: "chore(deps-test)"
+      include: "scope"
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+
+  # NuGet パッケージ（UIテストプロジェクト）
+  - package-ecosystem: "nuget"
+    directory: "/ICCardManager/tests/ICCardManager.UITests"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+      timezone: "Asia/Tokyo"
+    open-pull-requests-limit: 3
+    labels:
+      - "dependencies"
+      - "tests"
+    commit-message:
+      prefix: "chore(deps-uitest)"
+      include: "scope"
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+
+  # GitHub Actions 本体（actions/checkout 等）
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+      timezone: "Asia/Tokyo"
+    open-pull-requests-limit: 3
+    labels:
+      - "dependencies"
+      - "ci"
+    commit-message:
+      prefix: "chore(ci)"
+      include: "scope"

@@ -15,6 +15,25 @@ user-invocable: true
 - **PowerShell 7 (`pwsh.exe`) を使用すること**（`powershell.exe` は5.1なので不可）
 - WSL2から呼ぶ際、`-File` の引数は必ず `./` 付きで指定すること（例: `./tools/release.ps1`）
 
+## リリース前のセキュリティチェック（Issue #1272）
+
+Phase 1 を開始する前に、依存パッケージの既知 CVE を必ず確認する。
+
+```bash
+# 作業ディレクトリ: ICCardManager
+"/mnt/c/Program Files/dotnet/dotnet.exe" restore
+"/mnt/c/Program Files/dotnet/dotnet.exe" list package --vulnerable --include-transitive
+```
+
+### 判定基準
+| 結果 | 対応 |
+|------|------|
+| `No vulnerable packages` | リリース続行 |
+| Critical / High 検出 | **リリース保留**。修正版にアップグレードしてから再開（[開発者ガイド §5.7](../../ICCardManager/docs/manual/開発者ガイド.md) 参照） |
+| Moderate / Low 検出 | リリースノートに記載、計画的対応 |
+
+CVE スキャンの詳細プロセスは `docs/manual/開発者ガイド.md` §5.7 を参照。
+
 ## 自動リリース（推奨）
 
 ### 1コマンドリリース

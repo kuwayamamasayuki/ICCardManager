@@ -9,6 +9,9 @@
 - `PathValidator.ContainsPathTraversal` のパストラバーサル検出を強化。従来の `path.Contains("..")` 単純検査を多段階検出に置き換え、(1) URL エンコード (`%2E%2E`) のデコード再検査、(2) セグメント単位の `..` 判定（混合区切り `/` と `\` 対応）、(3) 末尾空白を考慮した `".. "` の正規化判定、(4) UNC パスで `Path.GetFullPath` 後に元の `\\server\share` プレフィクスが保持されるかの境界チェック、を実施。エラーメッセージもユーザー向けに明瞭化（#1268）
 - `PathValidator.ValidateBackupPath` に UNC パス到達性チェック（5秒タイムアウト）を追加。`Directory.Exists` がネットワーク不安定時に数十秒ハングする問題を解決。到達不可時は「ネットワーク共有に到達できません。ネットワーク接続を確認してください」と明確なエラーを表示。非同期版 `ValidateBackupPathAsync` も提供し、設定画面等 UI スレッドからの呼び出しでブロックしないように `SettingsViewModel.SaveAsync` を更新（#1269）
 
+**開発基盤**
+- 依存パッケージの既知 CVE 継続監視の仕組みを導入。(1) GitHub Actions `vulnerability-scan.yml` が週次 + csproj 更新時に `dotnet list package --vulnerable --include-transitive` を自動実行し、検出時にジョブ失敗で通知、(2) Dependabot 設定で本体/テスト/UIテスト/github-actions の4エコシステムを週次監視・PR自動作成、(3) 開発者ガイド §5.7 に重大度別 SLA（Critical/High は24時間以内）と対応手順を明記、(4) リリーススキル (`/release`) に Phase 1 前のセキュリティチェック項目を追加（#1272）
+
 ### v2.7.0 (2026-04-15)
 
 **新機能**
