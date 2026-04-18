@@ -1554,4 +1554,438 @@ public class LedgerMergeServiceTests
     }
 
     #endregion
+
+    #region Issue #1260: Undo・復旧の完全性テスト
+
+    /// <summary>
+    /// Issue #1260: 統合 → Undo の際に、UndoData から元の状態を完全復元できること。
+    /// OriginalTarget と DeletedSources の全フィールドが JSON ラウンドトリップ後も
+    /// 元のLedgerに戻せることを保証する。
+    /// </summary>
+    [Fact]
+    [Trait("Category", "Unit")]
+    public async Task MergeAsync_UndoData_FullyRestoresOriginalState()
+    {
+        // Arrange: 詳細な元Ledger（全フィールドに意味のある値）
+        var date1 = new DateTime(2026, 2, 3, 10, 15, 30);
+        var date2 = new DateTime(2026, 2, 3, 14, 45, 0);
+        var ledger1 = new Ledger
+        {
+            Id = 100,
+            CardIdm = TestCardIdm,
+            LenderIdm = "1111111111111111",
+            Date = date1,
+            Summary = "鉄道（博多～天神）",
+            Income = 0,
+            Expense = 260,
+            Balance = 740,
+            StaffName = "職員A",
+            Note = "備考1",
+            LentAt = date1.AddHours(-2),
+            ReturnedAt = date1.AddHours(1),
+            IsLentRecord = false,
+            Details = { CreateRailDetail(100, "博多", "天神", 260, 740, 1, date1) }
+        };
+        var ledger2 = new Ledger
+        {
+            Id = 200,
+            CardIdm = TestCardIdm,
+            LenderIdm = "1111111111111111",
+            Date = date2,
+            Summary = "鉄道（薬院～赤坂）",
+            Income = 0,
+            Expense = 210,
+            Balance = 530,
+            StaffName = "職員A",
+            Note = "備考2",
+            IsLentRecord = false,
+            Details = { CreateRailDetail(200, "薬院", "赤坂", 210, 530, 2, date2) }
+        };
+
+        SetupGetByIdMocks(ledger1, ledger2);
+        SetupMergeMockSuccess();
+
+        string? capturedUndoJson = null;
+        _ledgerRepositoryMock
+            .Setup(x => x.SaveMergeHistoryAsync(It.IsAny<int>(), It.IsAny<string>(), It.IsAny<string>()))
+            .Callback<int, string, string>((_, _, json) => capturedUndoJson = json)
+            .Returns(Task.CompletedTask);
+
+        // Act: 統合
+        await _service.MergeAsync(new List<int> { 100, 200 });
+
+        // Assert: UndoデータJSONから元の2件のLedgerを完全復元できる
+        var undoData = JsonSerializer.Deserialize<LedgerMergeUndoData>(capturedUndoJson!, JsonOptions);
+        undoData.Should().NotBeNull();
+
+        var restoredTarget = undoData!.OriginalTarget.ToLedger();
+        restoredTarget.Id.Should().Be(100);
+        restoredTarget.Summary.Should().Be("鉄道（博多～天神）");
+        restoredTarget.Expense.Should().Be(260);
+        restoredTarget.Balance.Should().Be(740);
+        restoredTarget.StaffName.Should().Be("職員A");
+        restoredTarget.Note.Should().Be("備考1");
+        restoredTarget.LenderIdm.Should().Be("1111111111111111");
+        restoredTarget.LentAt.Should().Be(date1.AddHours(-2));
+        restoredTarget.ReturnedAt.Should().Be(date1.AddHours(1));
+
+        undoData.DeletedSources.Should().HaveCount(1);
+        var restoredSource = undoData.DeletedSources[0].ToLedger();
+        restoredSource.Id.Should().Be(200);
+        restoredSource.Summary.Should().Be("鉄道（薬院～赤坂）");
+        restoredSource.Expense.Should().Be(210);
+        restoredSource.Balance.Should().Be(530);
+        restoredSource.Note.Should().Be("備考2");
+    }
+
+    /// <summary>
+    /// Issue #1260: UndoData JSON シリアライズで日時フォーマットが
+    /// ISO 8601 (yyyy-MM-dd HH:mm:ss) で出力されること。
+    /// </summary>
+    /// <remarks>
+    /// LedgerSnapshot は DateText/LentAtText/ReturnedAtText を string で保持しており、
+    /// FromLedger でこのフォーマットで書き出す。JSON 文字列にもそのまま埋め込まれる。
+    /// 他システム連携やデバッグ時の可読性を保証する。
+    /// </remarks>
+    [Fact]
+    [Trait("Category", "Unit")]
+    public async Task MergeAsync_UndoDataJson_UsesIsoDateFormat()
+    {
+        // Arrange
+        var date = new DateTime(2026, 2, 3, 14, 30, 45);
+        var ledger1 = CreateTestLedger(1, TestCardIdm, date, "鉄道（A～B）", 200, 800);
+        ledger1.LentAt = date.AddHours(-1);
+        ledger1.ReturnedAt = date.AddMinutes(15);
+        ledger1.Details.Add(CreateRailDetail(1, "A", "B", 200, 800, 1, date));
+
+        var ledger2 = CreateTestLedger(2, TestCardIdm, date, "鉄道（C～D）", 210, 590);
+        ledger2.Details.Add(CreateRailDetail(2, "C", "D", 210, 590, 2, date));
+
+        SetupGetByIdMocks(ledger1, ledger2);
+        SetupMergeMockSuccess();
+
+        string? capturedJson = null;
+        _ledgerRepositoryMock
+            .Setup(x => x.SaveMergeHistoryAsync(It.IsAny<int>(), It.IsAny<string>(), It.IsAny<string>()))
+            .Callback<int, string, string>((_, _, json) => capturedJson = json)
+            .Returns(Task.CompletedTask);
+
+        // Act
+        await _service.MergeAsync(new List<int> { 1, 2 });
+
+        // Assert: JSON に ISO 形式の日時文字列がそのまま含まれる
+        capturedJson.Should().NotBeNull();
+        capturedJson.Should().Contain("\"DateText\":\"2026-02-03 14:30:45\"",
+            "Date は yyyy-MM-dd HH:mm:ss 形式でJSONに書き出される");
+        capturedJson.Should().Contain("\"LentAtText\":\"2026-02-03 13:30:45\"",
+            "LentAt も同形式で書き出される");
+        capturedJson.Should().Contain("\"ReturnedAtText\":\"2026-02-03 14:45:45\"",
+            "ReturnedAt も同形式で書き出される");
+
+        // 往復デシリアライズで DateTime 値が完全一致する
+        var undoData = JsonSerializer.Deserialize<LedgerMergeUndoData>(capturedJson!, JsonOptions);
+        var restored = undoData!.OriginalTarget.ToLedger();
+        restored.Date.Should().Be(date);
+        restored.LentAt.Should().Be(date.AddHours(-1));
+        restored.ReturnedAt.Should().Be(date.AddMinutes(15));
+    }
+
+    /// <summary>
+    /// Issue #1260: DetailOriginalLedgerMap（SequenceNumber→元LedgerID）が
+    /// JSON 往復後も完全に保持されること。
+    /// </summary>
+    /// <remarks>
+    /// .NET Framework 4.8 の System.Text.Json v4.7 は Dictionary&lt;int,int&gt; を
+    /// シリアライズできないため、キーは string 型で保持する。本テストは
+    /// この実装契約が将来の変更で壊れないことを保証する。
+    /// </remarks>
+    [Fact]
+    [Trait("Category", "Unit")]
+    public async Task MergeAsync_DetailOriginalLedgerMap_SurvivesJsonRoundTrip()
+    {
+        // Arrange: 複数カードにまたがる Detail を持つ3件を統合
+        var date = new DateTime(2026, 2, 3);
+        var ledger1 = CreateTestLedger(10, TestCardIdm, date, "鉄道（A）", 100, 900);
+        ledger1.Details.Add(CreateRailDetail(10, "A", "B", 100, 900, 11, date));
+        ledger1.Details.Add(CreateRailDetail(10, "B", "C", 100, 800, 12, date));
+
+        var ledger2 = CreateTestLedger(20, TestCardIdm, date, "鉄道（D）", 200, 700);
+        ledger2.Details.Add(CreateRailDetail(20, "D", "E", 200, 700, 21, date));
+
+        var ledger3 = CreateTestLedger(30, TestCardIdm, date, "鉄道（F）", 150, 550);
+        ledger3.Details.Add(CreateRailDetail(30, "F", "G", 150, 550, 31, date));
+
+        SetupGetByIdMocks(ledger1, ledger2, ledger3);
+        SetupMergeMockSuccess();
+
+        string? capturedJson = null;
+        _ledgerRepositoryMock
+            .Setup(x => x.SaveMergeHistoryAsync(It.IsAny<int>(), It.IsAny<string>(), It.IsAny<string>()))
+            .Callback<int, string, string>((_, _, json) => capturedJson = json)
+            .Returns(Task.CompletedTask);
+
+        // Act
+        await _service.MergeAsync(new List<int> { 10, 20, 30 });
+
+        // Assert: JSON からデシリアライズしたマップが全 SequenceNumber を正しく保持
+        var undoData = JsonSerializer.Deserialize<LedgerMergeUndoData>(capturedJson!, JsonOptions);
+        undoData.Should().NotBeNull();
+        undoData!.DetailOriginalLedgerMap.Should().HaveCount(4, "全4件のDetailがマップに登録される");
+        undoData.DetailOriginalLedgerMap["11"].Should().Be(10);
+        undoData.DetailOriginalLedgerMap["12"].Should().Be(10, "同一Ledger内の複数Detailも個別マップ化");
+        undoData.DetailOriginalLedgerMap["21"].Should().Be(20);
+        undoData.DetailOriginalLedgerMap["31"].Should().Be(30);
+    }
+
+    /// <summary>
+    /// Issue #1260: Unmerge 後に同じ Ledger を再度 Merge できること（可逆性）。
+    /// Undo が永続副作用を残さず、再統合フローを阻害しないことを保証する。
+    /// </summary>
+    [Fact]
+    [Trait("Category", "Unit")]
+    public async Task MergeAsync_AfterUnmerge_CanMergeAgain()
+    {
+        // Arrange: 初回マージ用のLedger
+        var date = new DateTime(2026, 2, 3);
+        var ledger1 = CreateTestLedger(1, TestCardIdm, date, "鉄道（A～B）", 200, 800);
+        ledger1.Details.Add(CreateRailDetail(1, "A", "B", 200, 800, 1, date));
+        var ledger2 = CreateTestLedger(2, TestCardIdm, date, "鉄道（C～D）", 210, 590);
+        ledger2.Details.Add(CreateRailDetail(2, "C", "D", 210, 590, 2, date));
+
+        SetupGetByIdMocks(ledger1, ledger2);
+        SetupMergeMockSuccess();
+
+        string? firstMergeJson = null;
+        _ledgerRepositoryMock
+            .Setup(x => x.SaveMergeHistoryAsync(It.IsAny<int>(), It.IsAny<string>(), It.IsAny<string>()))
+            .Callback<int, string, string>((_, _, json) => firstMergeJson = json)
+            .Returns(Task.CompletedTask);
+
+        // Act-1: 初回マージ
+        var firstMerge = await _service.MergeAsync(new List<int> { 1, 2 });
+        firstMerge.Success.Should().BeTrue();
+
+        // Act-2: Unmerge
+        _ledgerRepositoryMock
+            .Setup(x => x.GetMergeHistoriesAsync(false))
+            .ReturnsAsync(new List<(int, DateTime, int, string, string, bool)>
+            {
+                (1, DateTime.Now, 1, "初回統合", firstMergeJson!, false)
+            });
+        _ledgerRepositoryMock
+            .Setup(x => x.UnmergeLedgersAsync(It.IsAny<LedgerMergeUndoData>()))
+            .ReturnsAsync(true);
+        _ledgerRepositoryMock
+            .Setup(x => x.MarkMergeHistoryUndoneAsync(1))
+            .Returns(Task.CompletedTask);
+
+        var unmergeResult = await _service.UnmergeAsync(1);
+        unmergeResult.Success.Should().BeTrue();
+
+        // Act-3: 再度マージ（Undo 後は元に戻っている想定で、同じ ID を再指定）
+        // 2回目の SaveMergeHistoryAsync は新しい JSON を受け取る
+        var secondMerge = await _service.MergeAsync(new List<int> { 1, 2 });
+
+        // Assert: 再マージも成功する（Undo に永続副作用がない）
+        secondMerge.Success.Should().BeTrue("Undo後も同じLedgerを再統合できる");
+        _ledgerRepositoryMock.Verify(
+            x => x.MergeLedgersAsync(It.IsAny<int>(), It.IsAny<IEnumerable<int>>(), It.IsAny<Ledger>()),
+            Times.Exactly(2),
+            "MergeLedgersAsync が再マージ時にも呼ばれる");
+    }
+
+    /// <summary>
+    /// Issue #1260: 統合時に UndoData.OriginalTarget.Summary が「統合前の元Summary」で
+    /// 保持されること。これにより Unmerge 時に摘要が元通りに再生成できる。
+    /// </summary>
+    /// <remarks>
+    /// 統合処理は Target.Summary を「統合後の摘要」に書き換えるが、UndoData 構築は
+    /// 書き換え前に行う必要がある。本テストはこのタイミングの契約を保証する。
+    /// </remarks>
+    [Fact]
+    [Trait("Category", "Unit")]
+    public async Task MergeAsync_UndoData_PreservesOriginalSummaryBeforeRegeneration()
+    {
+        // Arrange
+        var date = new DateTime(2026, 2, 3);
+        var originalSummary1 = "鉄道（博多～天神）";
+        var originalSummary2 = "鉄道（天神～薬院）";
+        var ledger1 = CreateTestLedger(1, TestCardIdm, date, originalSummary1, 210, 790);
+        ledger1.Details.Add(CreateRailDetail(1, "博多", "天神", 210, 790, 1, date));
+        var ledger2 = CreateTestLedger(2, TestCardIdm, date, originalSummary2, 180, 610);
+        ledger2.Details.Add(CreateRailDetail(2, "天神", "薬院", 180, 610, 2, date));
+
+        SetupGetByIdMocks(ledger1, ledger2);
+        SetupMergeMockSuccess();
+
+        string? capturedJson = null;
+        _ledgerRepositoryMock
+            .Setup(x => x.SaveMergeHistoryAsync(It.IsAny<int>(), It.IsAny<string>(), It.IsAny<string>()))
+            .Callback<int, string, string>((_, _, json) => capturedJson = json)
+            .Returns(Task.CompletedTask);
+
+        // Act
+        var result = await _service.MergeAsync(new List<int> { 1, 2 });
+
+        // Assert: 統合後の Summary は乗継統合で書き換わる
+        result.Success.Should().BeTrue();
+        result.MergedLedger!.Summary.Should().NotBe(originalSummary1,
+            "統合後の Summary は再生成されて元の Summary とは異なる");
+
+        // UndoData には書き換え前の Summary が保持されている
+        var undoData = JsonSerializer.Deserialize<LedgerMergeUndoData>(capturedJson!, JsonOptions);
+        undoData!.OriginalTarget.Summary.Should().Be(originalSummary1,
+            "OriginalTarget は統合前の元Summaryを保持する（Unmerge 時に復元するため）");
+        undoData.DeletedSources[0].Summary.Should().Be(originalSummary2,
+            "DeletedSources も統合前の各元Summaryを保持する");
+    }
+
+    /// <summary>
+    /// Issue #1260: UnmergeLedgersAsync が false を返した場合、
+    /// MarkMergeHistoryUndoneAsync は呼ばれない（部分的な復旧を残さない）。
+    /// </summary>
+    [Fact]
+    [Trait("Category", "Unit")]
+    public async Task UnmergeAsync_RepositoryReturnsFalse_DoesNotMarkHistoryUndone()
+    {
+        // Arrange
+        var undoData = new LedgerMergeUndoData
+        {
+            OriginalTarget = new LedgerSnapshot { Id = 1, CardIdm = TestCardIdm, DateText = "2026-02-03 00:00:00" },
+            DeletedSources = new List<LedgerSnapshot>()
+        };
+        _ledgerRepositoryMock
+            .Setup(x => x.GetMergeHistoriesAsync(false))
+            .ReturnsAsync(new List<(int, DateTime, int, string, string, bool)>
+            {
+                (1, DateTime.Now, 1, "テスト", JsonSerializer.Serialize(undoData, JsonOptions), false)
+            });
+        _ledgerRepositoryMock
+            .Setup(x => x.UnmergeLedgersAsync(It.IsAny<LedgerMergeUndoData>()))
+            .ReturnsAsync(false);
+
+        // Act
+        var result = await _service.UnmergeAsync(1);
+
+        // Assert
+        result.Success.Should().BeFalse();
+        _ledgerRepositoryMock.Verify(
+            x => x.MarkMergeHistoryUndoneAsync(It.IsAny<int>()),
+            Times.Never,
+            "復旧失敗時は履歴を取消済みマークしない（再試行可能に保つ）");
+    }
+
+    /// <summary>
+    /// Issue #1260: UnmergeLedgersAsync が例外を投げた場合、
+    /// MarkMergeHistoryUndoneAsync は呼ばれない。
+    /// </summary>
+    [Fact]
+    [Trait("Category", "Unit")]
+    public async Task UnmergeAsync_RepositoryThrows_DoesNotMarkHistoryUndone()
+    {
+        // Arrange
+        var undoData = new LedgerMergeUndoData
+        {
+            OriginalTarget = new LedgerSnapshot { Id = 1, CardIdm = TestCardIdm, DateText = "2026-02-03 00:00:00" },
+            DeletedSources = new List<LedgerSnapshot>()
+        };
+        _ledgerRepositoryMock
+            .Setup(x => x.GetMergeHistoriesAsync(false))
+            .ReturnsAsync(new List<(int, DateTime, int, string, string, bool)>
+            {
+                (1, DateTime.Now, 1, "テスト", JsonSerializer.Serialize(undoData, JsonOptions), false)
+            });
+        _ledgerRepositoryMock
+            .Setup(x => x.UnmergeLedgersAsync(It.IsAny<LedgerMergeUndoData>()))
+            .ThrowsAsync(new Exception("Transaction rollback"));
+
+        // Act
+        var result = await _service.UnmergeAsync(1);
+
+        // Assert
+        result.Success.Should().BeFalse();
+        _ledgerRepositoryMock.Verify(
+            x => x.MarkMergeHistoryUndoneAsync(It.IsAny<int>()),
+            Times.Never,
+            "例外発生時も履歴マーク更新は呼ばれず、再試行に備える");
+    }
+
+    /// <summary>
+    /// Issue #1260: Unmerge 成功時に渡される UndoData が、Merge 時に保存したものと
+    /// バイト単位で完全一致すること（JSON 往復後もデータが保持される）。
+    /// </summary>
+    [Fact]
+    [Trait("Category", "Unit")]
+    public async Task UnmergeAsync_ReceivesExactUndoDataFromMergeSave()
+    {
+        // Arrange: Merge時と同じUndoDataを構築
+        var originalUndoData = new LedgerMergeUndoData
+        {
+            OriginalTarget = new LedgerSnapshot
+            {
+                Id = 42,
+                CardIdm = TestCardIdm,
+                LenderIdm = "9999",
+                DateText = "2026-02-03 10:15:30",
+                Summary = "鉄道（博多～天神）",
+                Income = 0,
+                Expense = 260,
+                Balance = 740,
+                StaffName = "職員A",
+                Note = "備考",
+                LentAtText = "2026-02-03 08:00:00",
+                ReturnedAtText = "2026-02-03 18:00:00",
+                IsLentRecord = false
+            },
+            DeletedSources = new List<LedgerSnapshot>
+            {
+                new LedgerSnapshot
+                {
+                    Id = 43,
+                    CardIdm = TestCardIdm,
+                    DateText = "2026-02-03 14:45:00",
+                    Summary = "鉄道（薬院～赤坂）",
+                    Expense = 210,
+                    Balance = 530
+                }
+            },
+            DetailOriginalLedgerMap = new Dictionary<string, int> { { "10", 42 }, { "20", 43 } }
+        };
+        var storedJson = JsonSerializer.Serialize(originalUndoData, JsonOptions);
+
+        _ledgerRepositoryMock
+            .Setup(x => x.GetMergeHistoriesAsync(false))
+            .ReturnsAsync(new List<(int, DateTime, int, string, string, bool)>
+            {
+                (1, DateTime.Now, 42, "テスト", storedJson, false)
+            });
+
+        LedgerMergeUndoData? receivedUndoData = null;
+        _ledgerRepositoryMock
+            .Setup(x => x.UnmergeLedgersAsync(It.IsAny<LedgerMergeUndoData>()))
+            .Callback<LedgerMergeUndoData>(d => receivedUndoData = d)
+            .ReturnsAsync(true);
+        _ledgerRepositoryMock
+            .Setup(x => x.MarkMergeHistoryUndoneAsync(1))
+            .Returns(Task.CompletedTask);
+
+        // Act
+        var result = await _service.UnmergeAsync(1);
+
+        // Assert: Repositoryに渡されたUndoDataが元と完全一致
+        result.Success.Should().BeTrue();
+        receivedUndoData.Should().NotBeNull();
+        receivedUndoData!.OriginalTarget.Id.Should().Be(42);
+        receivedUndoData.OriginalTarget.Summary.Should().Be("鉄道（博多～天神）");
+        receivedUndoData.OriginalTarget.LenderIdm.Should().Be("9999");
+        receivedUndoData.OriginalTarget.LentAtText.Should().Be("2026-02-03 08:00:00");
+        receivedUndoData.OriginalTarget.ReturnedAtText.Should().Be("2026-02-03 18:00:00");
+        receivedUndoData.DeletedSources.Should().HaveCount(1);
+        receivedUndoData.DeletedSources[0].Id.Should().Be(43);
+        receivedUndoData.DetailOriginalLedgerMap.Should().HaveCount(2);
+        receivedUndoData.DetailOriginalLedgerMap["10"].Should().Be(42);
+        receivedUndoData.DetailOriginalLedgerMap["20"].Should().Be(43);
+    }
+
+    #endregion
 }
