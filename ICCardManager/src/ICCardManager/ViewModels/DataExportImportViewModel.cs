@@ -95,6 +95,7 @@ public partial class DataExportImportViewModel : ViewModelBase
     private readonly IDialogService _dialogService;
     private readonly ICardRepository _cardRepository;
     private readonly ICardReader? _cardReader;
+    private readonly OperationLogger _operationLogger;
 
     [ObservableProperty]
     private DataType _selectedExportType = DataType.Cards;
@@ -262,6 +263,18 @@ public partial class DataExportImportViewModel : ViewModelBase
     };
 
     /// <summary>
+    /// Issue #1302: 監査ログ用に DataType を operation_log.target_table の値へ変換
+    /// </summary>
+    private static string MapDataTypeToTableName(DataType dataType) => dataType switch
+    {
+        DataType.Cards => OperationLogger.Tables.IcCard,
+        DataType.Staff => OperationLogger.Tables.Staff,
+        DataType.Ledgers => OperationLogger.Tables.Ledger,
+        DataType.LedgerDetails => OperationLogger.Tables.LedgerDetail,
+        _ => "unknown"
+    };
+
+    /// <summary>
     /// インポート時に使用するターゲットカードIDmを取得
     /// </summary>
     /// <returns>選択またはタッチされたカードのIDm。未選択の場合はnull</returns>
@@ -287,12 +300,14 @@ public partial class DataExportImportViewModel : ViewModelBase
         CsvImportService importService,
         IDialogService dialogService,
         ICardRepository cardRepository,
+        OperationLogger operationLogger,
         ICardReader? cardReader = null)
     {
         _exportService = exportService;
         _importService = importService;
         _dialogService = dialogService;
         _cardRepository = cardRepository;
+        _operationLogger = operationLogger;
         _cardReader = cardReader;
 
         // カードリーダーイベント購読
@@ -395,6 +410,12 @@ public partial class DataExportImportViewModel : ViewModelBase
                 {
                     LastExportedFile = result.FilePath;
                     SetStatus($"エクスポート完了: {result.ExportedCount}件を出力しました", false);
+
+                    // Issue #1302: 監査ログ記録
+                    await _operationLogger.LogExportAsync(
+                        MapDataTypeToTableName(SelectedExportType),
+                        result.FilePath,
+                        result.ExportedCount);
 
                     // Issue #512: 保存完了メッセージを表示
                     _dialogService.ShowInformation(
@@ -595,6 +616,14 @@ public partial class DataExportImportViewModel : ViewModelBase
                     SetStatus(message, false);
                     ClearPreview();
 
+                    // Issue #1302: 監査ログ記録
+                    await _operationLogger.LogImportAsync(
+                        MapDataTypeToTableName(SelectedImportType),
+                        ImportPreviewFile,
+                        result.ImportedCount,
+                        result.SkippedCount,
+                        result.ErrorCount);
+
                     _dialogService.ShowInformation(
                         $"インポートが完了しました。\n\n登録件数: {result.ImportedCount}件"
                         + (result.SkippedCount > 0 ? $"\nスキップ: {result.SkippedCount}件" : ""),
@@ -625,6 +654,17 @@ public partial class DataExportImportViewModel : ViewModelBase
                     if (result.Errors.Count > 10)
                     {
                         ImportErrors.Add($"... 他 {result.Errors.Count - 10}件のエラー");
+                    }
+
+                    // Issue #1302: 部分成功でもデータは書き込まれたため監査ログ記録
+                    if (result.ImportedCount > 0)
+                    {
+                        await _operationLogger.LogImportAsync(
+                            MapDataTypeToTableName(SelectedImportType),
+                            ImportPreviewFile,
+                            result.ImportedCount,
+                            result.SkippedCount,
+                            result.ErrorCount);
                     }
 
                     _dialogService.ShowWarning(
@@ -728,6 +768,14 @@ public partial class DataExportImportViewModel : ViewModelBase
                     }
                     SetStatus(message, false);
 
+                    // Issue #1302: 監査ログ記録
+                    await _operationLogger.LogImportAsync(
+                        MapDataTypeToTableName(SelectedImportType),
+                        dialog.FileName,
+                        result.ImportedCount,
+                        result.SkippedCount,
+                        result.ErrorCount);
+
                     _dialogService.ShowInformation(
                         $"インポートが完了しました。\n\n登録件数: {result.ImportedCount}件"
                         + (result.SkippedCount > 0 ? $"\nスキップ: {result.SkippedCount}件" : ""),
@@ -758,6 +806,17 @@ public partial class DataExportImportViewModel : ViewModelBase
                     if (result.Errors.Count > 10)
                     {
                         ImportErrors.Add($"... 他 {result.Errors.Count - 10}件のエラー");
+                    }
+
+                    // Issue #1302: 部分成功でもデータは書き込まれたため監査ログ記録
+                    if (result.ImportedCount > 0)
+                    {
+                        await _operationLogger.LogImportAsync(
+                            MapDataTypeToTableName(SelectedImportType),
+                            dialog.FileName,
+                            result.ImportedCount,
+                            result.SkippedCount,
+                            result.ErrorCount);
                     }
 
                     _dialogService.ShowWarning(
