@@ -4,6 +4,7 @@ using FluentAssertions;
 using ICCardManager.Data;
 using ICCardManager.Data.Repositories;
 using ICCardManager.Infrastructure.Caching;
+using ICCardManager.Infrastructure.Timing;
 using ICCardManager.Services;
 using ICCardManager.ViewModels;
 using Moq;
@@ -52,6 +53,7 @@ public class DataExportImportViewModelTests : IDisposable
         _connection = new SQLiteConnection("Data Source=:memory:");
         _connection.Open();
         _realDbContext = new DbContext(":memory:");
+        _realDbContext.InitializeDatabase();
         var noOpLease = new ConnectionLease(_connection, () => { });
         var noOpTransaction = _connection.BeginTransaction();
         var transactionScope = new ICCardManager.Data.TransactionScope(noOpLease, noOpTransaction);
@@ -73,11 +75,17 @@ public class DataExportImportViewModelTests : IDisposable
             _dbContextMock.Object,
             _cacheServiceMock.Object);
 
+        // OperationLogger (Issue #1302): 実DB + 実Contextを使う（ログ書き込みは副作用のみでテスト対象外）
+        var operationLogRepository = new OperationLogRepository(_realDbContext);
+        var operatorContext = new CurrentOperatorContext(new SystemClock());
+        var operationLogger = new OperationLogger(operationLogRepository, operatorContext);
+
         _viewModel = new DataExportImportViewModel(
             _exportServiceMock.Object,
             _importServiceMock.Object,
             _dialogServiceMock.Object,
-            _cardRepositoryMock.Object);
+            _cardRepositoryMock.Object,
+            operationLogger);
     }
 
     public void Dispose()

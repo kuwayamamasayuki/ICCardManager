@@ -20,6 +20,7 @@ public partial class SystemManageViewModel : ViewModelBase
     private readonly BackupService _backupService;
     private readonly ISettingsRepository _settingsRepository;
     private readonly INavigationService _navigationService;
+    private readonly OperationLogger _operationLogger;
 
     [ObservableProperty]
     private ObservableCollection<BackupFileInfo> _backupFiles = new();
@@ -41,11 +42,16 @@ public partial class SystemManageViewModel : ViewModelBase
     /// </summary>
     public bool HasSelectedBackup => SelectedBackup != null;
 
-    public SystemManageViewModel(BackupService backupService, ISettingsRepository settingsRepository, INavigationService navigationService)
+    public SystemManageViewModel(
+        BackupService backupService,
+        ISettingsRepository settingsRepository,
+        INavigationService navigationService,
+        OperationLogger operationLogger)
     {
         _backupService = backupService;
         _settingsRepository = settingsRepository;
         _navigationService = navigationService;
+        _operationLogger = operationLogger;
     }
 
     partial void OnSelectedBackupChanged(BackupFileInfo? value)
@@ -122,6 +128,10 @@ public partial class SystemManageViewModel : ViewModelBase
                 {
                     LastBackupFile = dialog.FileName;
                     SetStatus($"バックアップを作成しました: {Path.GetFileName(dialog.FileName)}", false);
+
+                    // Issue #1302: 監査ログ記録
+                    await _operationLogger.LogBackupAsync(dialog.FileName);
+
                     // バックアップ一覧を更新
                     await LoadBackupsAsync();
                 }
@@ -205,6 +215,9 @@ public partial class SystemManageViewModel : ViewModelBase
                 if (restoreSuccess)
                 {
                     SetStatus("リストアが完了しました。アプリケーションを再起動してください。", false);
+
+                    // Issue #1302: 監査ログ記録 (リストア後の新DB上に痕跡を残す)
+                    await _operationLogger.LogRestoreAsync(SelectedBackup.FilePath);
                 }
                 else
                 {
@@ -333,6 +346,9 @@ public partial class SystemManageViewModel : ViewModelBase
                 if (restoreFromFileSuccess)
                 {
                     SetStatus("リストアが完了しました。アプリケーションを再起動してください。", false);
+
+                    // Issue #1302: 監査ログ記録 (リストア後の新DB上に痕跡を残す)
+                    await _operationLogger.LogRestoreAsync(dialog.FileName);
                 }
                 else
                 {

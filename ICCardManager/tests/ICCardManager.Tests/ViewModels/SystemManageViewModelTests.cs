@@ -6,6 +6,7 @@ using System.Threading.Tasks;
 using FluentAssertions;
 using ICCardManager.Data;
 using ICCardManager.Data.Repositories;
+using ICCardManager.Infrastructure.Timing;
 using ICCardManager.Models;
 using ICCardManager.Services;
 using ICCardManager.ViewModels;
@@ -30,6 +31,7 @@ public class SystemManageViewModelTests : IDisposable
     public SystemManageViewModelTests()
     {
         _dbContext = new DbContext(":memory:");
+        _dbContext.InitializeDatabase();
         _settingsRepositoryMock = new Mock<ISettingsRepository>();
         var loggerMock = new Mock<ILogger<BackupService>>();
 
@@ -39,10 +41,16 @@ public class SystemManageViewModelTests : IDisposable
             loggerMock.Object);
         _navigationServiceMock = new Mock<INavigationService>();
 
+        // OperationLogger (Issue #1302): 実DB + 実Context でログ書き込みを副作用として許容
+        var operationLogRepository = new OperationLogRepository(_dbContext);
+        var operatorContext = new CurrentOperatorContext(new SystemClock());
+        var operationLogger = new OperationLogger(operationLogRepository, operatorContext);
+
         _viewModel = new SystemManageViewModel(
             _backupServiceMock.Object,
             _settingsRepositoryMock.Object,
-            _navigationServiceMock.Object);
+            _navigationServiceMock.Object,
+            operationLogger);
     }
 
     public void Dispose()
