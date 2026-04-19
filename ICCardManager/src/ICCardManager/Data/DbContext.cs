@@ -958,7 +958,7 @@ namespace ICCardManager.Data
             {
                 try
                 {
-                    return await operation();
+                    return await operation().ConfigureAwait(false);
                 }
                 catch (SQLiteException ex) when (
                     attempt < delays.Length &&
@@ -976,7 +976,7 @@ namespace ICCardManager.Data
                     System.Diagnostics.Debug.WriteLine(
                         $"[DbContext] DB操作リトライ（{attempt + 1}/{delays.Length}回目、{totalDelay}ms待機）: {ex.ResultCode}");
 #endif
-                    await Task.Delay(totalDelay, cancellationToken);
+                    await Task.Delay(totalDelay, cancellationToken).ConfigureAwait(false);
                 }
             }
         }
@@ -988,9 +988,9 @@ namespace ICCardManager.Data
         {
             await ExecuteWithRetryAsync(async () =>
             {
-                await operation();
+                await operation().ConfigureAwait(false);
                 return 0;
-            }, cancellationToken);
+            }, cancellationToken).ConfigureAwait(false);
         }
 
         /// <summary>
