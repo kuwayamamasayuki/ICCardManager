@@ -99,7 +99,12 @@ namespace ICCardManager.Services
                 var backupFilePath = Path.Combine(backupPath, backupFileName);
 
                 // SQLite Backup APIでバックアップ（他PCが書き込み中でも安全）
-                BackupDatabaseTo(backupFilePath);
+                // Issue #1361: 呼び出し元（App.PerformStartupTasksAsync）が UI スレッドで
+                // fire-and-forget する経路があり、GetAppSettingsAsync がキャッシュヒット時に
+                // 同期完了すると ConfigureAwait(false) があっても UI スレッドに留まる。
+                // LeaseConnection() の UI スレッドガード (#1281) に抵触しないよう、
+                // BackupDatabaseTo を Task.Run でバックグラウンドにオフロードする。
+                await Task.Run(() => BackupDatabaseTo(backupFilePath)).ConfigureAwait(false);
 
                 _logger.LogInformation("バックアップを作成しました: {Path}", backupFilePath);
 
@@ -192,6 +197,24 @@ namespace ICCardManager.Services
                     backupFilePath);
                 return false;
             }
+        }
+
+        /// <summary>
+        /// 指定したパスにバックアップを作成（非同期版）
+        /// </summary>
+        /// <param name="backupFilePath">バックアップファイルのパス</param>
+        /// <returns>成功時はtrue、失敗時はfalse</returns>
+        /// <remarks>
+        /// Issue #1361: UI スレッドから呼ぶ場合は必ずこちらを使用すること。
+        /// 同期版 <see cref="CreateBackup"/> は内部で <see cref="DbContext.LeaseConnection"/>
+        /// を呼ぶため、UI スレッドから呼ぶと Issue #1281 のガードで失敗する。
+        /// 本メソッドは <c>Task.Run</c> で既存 sync 実装をバックグラウンドスレッドへ委譲する。
+        /// sync 版はテスト経路（xUnit は <c>DispatcherSynchronizationContext</c> を持たない）での
+        /// 継続利用のため残置している。
+        /// </remarks>
+        public virtual Task<bool> CreateBackupAsync(string backupFilePath)
+        {
+            return Task.Run(() => CreateBackup(backupFilePath));
         }
 
         /// <summary>
