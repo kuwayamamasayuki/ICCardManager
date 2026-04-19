@@ -64,8 +64,8 @@
                             Command="{Binding OpenReportCommand}"
                             TabIndex="1"
                             AutomationProperties.Name="帳票ダイアログを開く"
-                            AutomationProperties.HelpText="物品出納簿を作成します。ショートカット: F1"
-                            ToolTip="帳票を開く (F1)"/>
+                            AutomationProperties.HelpText="物品出納簿を作成します。ショートカット: F1 (本アプリではヘルプは F7 です)"
+                            ToolTip="帳票を開く (F1)&#x0a;※ヘルプは F7 です"/>
                     <Button Content="職員管理 (F2)" Margin="5,3"
                             Style="{StaticResource AccessibleButtonStyle}"
                             Command="{Binding OpenStaffManageCommand}"
@@ -106,8 +106,8 @@
                             Command="{Binding OpenHelpCommand}"
                             TabIndex="7"
                             AutomationProperties.Name="ヘルプを開く"
-                            AutomationProperties.HelpText="ユーザーマニュアル等のドキュメントフォルダを開きます。ショートカット: F7"
-                            ToolTip="ヘルプを開く (F7)"/>
+                            AutomationProperties.HelpText="ユーザーマニュアル等のドキュメントフォルダを開きます。ショートカット: F7 (F1 ではありません。F1 は帳票です)"
+                            ToolTip="ヘルプを開く (F7)&#x0a;※F1 ではありません"/>
                     <Button Content="終了" Margin="15,3,5,3"
                             Style="{StaticResource AccessibleButtonStyle}"
                             Command="{Binding ExitCommand}"
