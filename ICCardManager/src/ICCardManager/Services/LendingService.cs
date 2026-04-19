@@ -312,26 +312,10 @@ namespace ICCardManager.Services
                     return result;
                 }
 
-                // カードを取得
-                var card = await _cardRepository.GetByIdmAsync(cardIdm);
-                if (card == null)
+                var (card, staff, validationError) = await ValidateLendPreconditionsAsync(staffIdm, cardIdm);
+                if (validationError != null)
                 {
-                    result.ErrorMessage = "カードが登録されていません。";
-                    return result;
-                }
-
-                // 貸出中チェック
-                if (card.IsLent)
-                {
-                    result.ErrorMessage = "このカードは既に貸出中です。";
-                    return result;
-                }
-
-                // 職員を取得
-                var staff = await _staffRepository.GetByIdmAsync(staffIdm);
-                if (staff == null)
-                {
-                    result.ErrorMessage = "職員証が登録されていません。";
+                    result.ErrorMessage = validationError;
                     return result;
                 }
 
@@ -339,55 +323,12 @@ namespace ICCardManager.Services
 
                 // Issue #656: カードから残高を読み取れなかった場合、直近の履歴から残高を取得
                 // READ操作はリトライ範囲の外で実行（不要な再クエリを防止）
-                var currentBalance = balance ?? 0;
-                if (!balance.HasValue)
-                {
-                    var latestLedger = await _ledgerRepository.GetLatestLedgerAsync(cardIdm);
-                    if (latestLedger != null)
-                    {
-                        currentBalance = latestLedger.Balance;
-                        _logger.LogInformation(
-                            "LendAsync: カード残高を読み取れなかったため、直近の履歴残高を使用: {Balance}円", currentBalance);
-                    }
-                }
+                var currentBalance = await ResolveInitialBalanceAsync(cardIdm, balance);
 
-                // トランザクション開始
+                // トランザクション内で貸出ledger作成 + カード状態更新
                 // 共有モード時のSQLITE_BUSY対策としてリトライでラップ（WRITE操作のみ）
-                await _dbContext.ExecuteWithRetryAsync(async () =>
-                {
-                    using var scope = await _dbContext.BeginTransactionAsync();
-
-                    try
-                    {
-                        var ledger = new Ledger
-                        {
-                            CardIdm = cardIdm,
-                            LenderIdm = staffIdm,
-                            Date = now,
-                            Summary = SummaryGenerator.GetLendingSummary(),
-                            Income = 0,
-                            Expense = 0,
-                            Balance = currentBalance,
-                            StaffName = staff.Name,
-                            LentAt = now,
-                            IsLentRecord = true
-                        };
-
-                        var ledgerId = await _ledgerRepository.InsertAsync(ledger);
-                        ledger.Id = ledgerId;
-                        result.CreatedLedgers.Add(ledger);
-
-                        // カードの貸出状態を更新
-                        await _cardRepository.UpdateLentStatusAsync(cardIdm, true, now, staffIdm);
-
-                        scope.Commit();
-                    }
-                    catch
-                    {
-                        scope.Rollback();
-                        throw;
-                    }
-                });
+                var ledger = await InsertLendLedgerAsync(cardIdm, staffIdm, staff.Name, currentBalance, now);
+                result.CreatedLedgers.Add(ledger);
 
                 // 処理情報を記録
                 LastProcessedCardIdm = cardIdm;
@@ -414,6 +355,239 @@ namespace ICCardManager.Services
             }
 
             return result;
+        }
+
+        /// <summary>
+        /// 貸出ledgerレコードを作成し、カードの貸出状態を更新する。
+        /// 共有モード時のSQLITE_BUSY対策として ExecuteWithRetryAsync でラップ。
+        /// </summary>
+        internal async Task<Ledger> InsertLendLedgerAsync(
+            string cardIdm, string staffIdm, string staffName, int balance, DateTime now)
+        {
+            Ledger createdLedger = null;
+
+            await _dbContext.ExecuteWithRetryAsync(async () =>
+            {
+                using var scope = await _dbContext.BeginTransactionAsync();
+
+                try
+                {
+                    var ledger = new Ledger
+                    {
+                        CardIdm = cardIdm,
+                        LenderIdm = staffIdm,
+                        Date = now,
+                        Summary = SummaryGenerator.GetLendingSummary(),
+                        Income = 0,
+                        Expense = 0,
+                        Balance = balance,
+                        StaffName = staffName,
+                        LentAt = now,
+                        IsLentRecord = true
+                    };
+
+                    var ledgerId = await _ledgerRepository.InsertAsync(ledger);
+                    ledger.Id = ledgerId;
+
+                    await _cardRepository.UpdateLentStatusAsync(cardIdm, true, now, staffIdm);
+
+                    scope.Commit();
+                    createdLedger = ledger;
+                }
+                catch
+                {
+                    scope.Rollback();
+                    throw;
+                }
+            });
+
+            return createdLedger;
+        }
+
+        /// <summary>
+        /// Issue #656: カードから残高を読み取れなかった場合、直近の ledger 残高を fallback として使用。
+        /// </summary>
+        internal async Task<int> ResolveInitialBalanceAsync(string cardIdm, int? balance)
+        {
+            if (balance.HasValue)
+            {
+                return balance.Value;
+            }
+
+            var latestLedger = await _ledgerRepository.GetLatestLedgerAsync(cardIdm);
+            if (latestLedger != null)
+            {
+                _logger.LogInformation(
+                    "LendAsync: カード残高を読み取れなかったため、直近の履歴残高を使用: {Balance}円", latestLedger.Balance);
+                return latestLedger.Balance;
+            }
+
+            return 0;
+        }
+
+        /// <summary>
+        /// 貸出処理の事前検証。カード・貸出状態・職員の存在を順次チェックする。
+        /// </summary>
+        /// <returns>(Card, Staff, ErrorMessage)。ErrorMessage が非 null の場合は検証失敗。</returns>
+        internal async Task<(IcCard Card, Staff Staff, string ErrorMessage)> ValidateLendPreconditionsAsync(
+            string staffIdm, string cardIdm)
+        {
+            var card = await _cardRepository.GetByIdmAsync(cardIdm);
+            if (card == null)
+            {
+                return (null, null, "カードが登録されていません。");
+            }
+
+            if (card.IsLent)
+            {
+                return (card, null, "このカードは既に貸出中です。");
+            }
+
+            var staff = await _staffRepository.GetByIdmAsync(staffIdm);
+            if (staff == null)
+            {
+                return (card, null, "職員証が登録されていません。");
+            }
+
+            return (card, staff, null);
+        }
+
+        /// <summary>
+        /// 返却時のトランザクション内処理: 履歴ledger作成 + 貸出レコード削除 + カード状態解除。
+        /// 共有モード時のSQLITE_BUSY対策として ExecuteWithRetryAsync でラップ。
+        /// </summary>
+        internal async Task PersistReturnAsync(
+            string cardIdm,
+            Ledger lentRecord,
+            List<LedgerDetail> usageSinceLent,
+            bool skipDuplicateCheck,
+            LendingResult result)
+        {
+            await _dbContext.ExecuteWithRetryAsync(async () =>
+            {
+                using var scope = await _dbContext.BeginTransactionAsync();
+
+                try
+                {
+                    var createdLedgers = await CreateUsageLedgersAsync(
+                        cardIdm, lentRecord.StaffName ?? string.Empty, usageSinceLent, skipDuplicateCheck);
+
+                    result.CreatedLedgers.AddRange(createdLedgers);
+
+                    result.HasBusUsage = usageSinceLent.Any(d => d.IsBus);
+
+                    // 貸出レコードをすべて削除（履歴に「（貸出中）」が残らないようにする）
+                    // 共有モードで重複した貸出中レコードがある場合にも対応
+                    await _ledgerRepository.DeleteAllLentRecordsAsync(cardIdm);
+
+                    await _cardRepository.UpdateLentStatusAsync(cardIdm, false, null, null);
+
+                    scope.Commit();
+                }
+                catch
+                {
+                    scope.Rollback();
+                    throw;
+                }
+            });
+        }
+
+        /// <summary>
+        /// 低残高警告情報を result にセットする。
+        /// </summary>
+        internal async Task ApplyBalanceWarningAsync(LendingResult result)
+        {
+            var settings = await _settingsRepository.GetAppSettingsAsync();
+            result.WarningBalance = settings.WarningBalance;
+            result.IsLowBalance = result.Balance < settings.WarningBalance;
+        }
+
+        /// <summary>
+        /// 返却時の残高解決カスケード。
+        /// 優先順位: (1)カード直接読取値 > (2)作成ledger末尾 > (3)DB 直近 ledger(Issue #1139)。
+        /// </summary>
+        internal async Task<int> ResolveReturnBalanceAsync(
+            List<LedgerDetail> detailList, List<Ledger> createdLedgers, string cardIdm)
+        {
+            var cardBalance = detailList.FirstOrDefault()?.Balance;
+            if (cardBalance.HasValue && cardBalance.Value > 0)
+            {
+                _logger.LogDebug("LendingService: カードから直接読み取った残高を使用: {Balance}円", cardBalance.Value);
+                return cardBalance.Value;
+            }
+
+            var latestCreatedLedger = createdLedgers.LastOrDefault();
+            if (latestCreatedLedger != null)
+            {
+                _logger.LogDebug("LendingService: ledgerレコードの残高を使用: {Balance}円", latestCreatedLedger.Balance);
+                return latestCreatedLedger.Balance;
+            }
+
+            var latestLedger = await _ledgerRepository.GetLatestLedgerAsync(cardIdm);
+            if (latestLedger != null)
+            {
+                _logger.LogInformation(
+                    "ReturnAsync: カード残高を読み取れなかったため、直近の履歴残高を使用: {Balance}円", latestLedger.Balance);
+                return latestLedger.Balance;
+            }
+
+            return 0;
+        }
+
+        /// <summary>
+        /// 貸出日以降の履歴を抽出する。貸出タッチ忘れに備え貸出日の1週間前から遡る。
+        /// 注意: FeliCa履歴の日付は時刻を含まないため、日付部分のみで比較する。
+        /// </summary>
+        internal static List<LedgerDetail> FilterUsageSinceLent(
+            List<LedgerDetail> detailList, Ledger lentRecord, DateTime now)
+        {
+            var lentAt = lentRecord.LentAt ?? now.AddDays(-1);
+            var lentDate = lentAt.Date;
+            var filterStartDate = lentDate.AddDays(-7);
+            return detailList
+                .Where(d => d.UseDate == null || d.UseDate.Value.Date >= filterStartDate)
+                .ToList();
+        }
+
+        /// <summary>
+        /// 貸出レコードを取得。見つからない場合はエラーメッセージを返す。
+        /// </summary>
+        /// <returns>(LentRecord, ErrorMessage)。ErrorMessage が非 null の場合は失敗。</returns>
+        internal async Task<(Ledger LentRecord, string ErrorMessage)> ResolveLentRecordAsync(string cardIdm)
+        {
+            var lentRecord = await _ledgerRepository.GetLentRecordAsync(cardIdm);
+            if (lentRecord == null)
+            {
+                return (null, "貸出レコードが見つかりません。");
+            }
+            return (lentRecord, null);
+        }
+
+        /// <summary>
+        /// 返却処理の事前検証。カード・貸出状態・職員の存在を順次チェックする。
+        /// </summary>
+        /// <returns>(Card, Returner, ErrorMessage)。ErrorMessage が非 null の場合は検証失敗。</returns>
+        internal async Task<(IcCard Card, Staff Returner, string ErrorMessage)> ValidateReturnPreconditionsAsync(
+            string staffIdm, string cardIdm)
+        {
+            var card = await _cardRepository.GetByIdmAsync(cardIdm);
+            if (card == null)
+            {
+                return (null, null, "カードが登録されていません。");
+            }
+
+            if (!card.IsLent)
+            {
+                return (card, null, "このカードは貸出されていません。");
+            }
+
+            var returner = await _staffRepository.GetByIdmAsync(staffIdm);
+            if (returner == null)
+            {
+                return (card, null, "職員証が登録されていません。");
+            }
+
+            return (card, returner, null);
         }
 
         /// <summary>
@@ -458,34 +632,17 @@ namespace ICCardManager.Services
                     return result;
                 }
 
-                // カードを取得
-                var card = await _cardRepository.GetByIdmAsync(cardIdm);
-                if (card == null)
+                var (card, returner, validationError) = await ValidateReturnPreconditionsAsync(staffIdm, cardIdm);
+                if (validationError != null)
                 {
-                    result.ErrorMessage = "カードが登録されていません。";
+                    result.ErrorMessage = validationError;
                     return result;
                 }
 
-                // 貸出中チェック
-                if (!card.IsLent)
+                var (lentRecord, lentRecordError) = await ResolveLentRecordAsync(cardIdm);
+                if (lentRecordError != null)
                 {
-                    result.ErrorMessage = "このカードは貸出されていません。";
-                    return result;
-                }
-
-                // 返却者を取得
-                var returner = await _staffRepository.GetByIdmAsync(staffIdm);
-                if (returner == null)
-                {
-                    result.ErrorMessage = "職員証が登録されていません。";
-                    return result;
-                }
-
-                // 貸出レコードを取得
-                var lentRecord = await _ledgerRepository.GetLentRecordAsync(cardIdm);
-                if (lentRecord == null)
-                {
-                    result.ErrorMessage = "貸出レコードが見つかりません。";
+                    result.ErrorMessage = lentRecordError;
                     return result;
                 }
 
@@ -496,17 +653,11 @@ namespace ICCardManager.Services
 
                 // 貸出タッチを忘れた場合でも履歴が正しく記録されるよう、日付フィルタを緩和
                 // 重複チェックは CreateUsageLedgersAsync 内の既存履歴照合（Issue #326）で行う
-                // 注意: FeliCa履歴の日付は時刻を含まないため、日付部分のみで比較する
-                var lentAt = lentRecord.LentAt ?? now.AddDays(-1);
-                var lentDate = lentAt.Date;  // 時刻を切り捨てて日付のみにする
-                // 貸出日の1週間前までの履歴を対象とする（貸出タッチ忘れへの対応）
-                var filterStartDate = lentDate.AddDays(-7);
-                var usageSinceLent = detailList
-                    .Where(d => d.UseDate == null || d.UseDate.Value.Date >= filterStartDate)
-                    .ToList();
+                var usageSinceLent = FilterUsageSinceLent(detailList, lentRecord, now);
 
+                var lentAt = lentRecord.LentAt ?? now.AddDays(-1);
                 _logger.LogDebug("LendingService: 貸出時刻={LentAt}, フィルタ開始日={FilterStart}, 抽出後の履歴件数={Count}",
-                    lentAt.ToString("yyyy-MM-dd HH:mm:ss"), filterStartDate.ToString("yyyy-MM-dd"), usageSinceLent.Count);
+                    lentAt.ToString("yyyy-MM-dd HH:mm:ss"), lentAt.Date.AddDays(-7).ToString("yyyy-MM-dd"), usageSinceLent.Count);
 
                 // 履歴データの詳細をログ出力
                 foreach (var detail in usageSinceLent.Take(5))
@@ -521,75 +672,15 @@ namespace ICCardManager.Services
                 var hadExistingCurrentMonthRecords = existingMonthRecords
                     .Any(l => !l.IsLentRecord);
 
-                // トランザクション開始
-                // 共有モード時のSQLITE_BUSY対策としてリトライでラップ
-                await _dbContext.ExecuteWithRetryAsync(async () =>
-                {
-                    using var scope = await _dbContext.BeginTransactionAsync();
-
-                    try
-                    {
-                        // 利用日ごとにグループ化して履歴を作成
-                        var createdLedgers = await CreateUsageLedgersAsync(
-                            cardIdm, lentRecord.StaffName ?? string.Empty, usageSinceLent, skipDuplicateCheck);
-
-                        result.CreatedLedgers.AddRange(createdLedgers);
-
-                        // バス利用の有無をチェック
-                        result.HasBusUsage = usageSinceLent.Any(d => d.IsBus);
-
-                        // 貸出レコードをすべて削除（履歴に「（貸出中）」が残らないようにする）
-                        // 共有モードで重複した貸出中レコードがある場合にも対応
-                        await _ledgerRepository.DeleteAllLentRecordsAsync(cardIdm);
-
-                        // カードの貸出状態を更新
-                        await _cardRepository.UpdateLentStatusAsync(cardIdm, false, null, null);
-
-                        scope.Commit();
-                    }
-                    catch
-                    {
-                        scope.Rollback();
-                        throw;
-                    }
-                });
+                // トランザクション内で履歴作成 + 貸出レコード削除 + カード状態更新
+                await PersistReturnAsync(cardIdm, lentRecord, usageSinceLent, skipDuplicateCheck, result);
 
                 // 残額チェック（トランザクション外）
                 // カードから直接読み取った残高を優先（履歴の先頭が最新）
                 // FelicaCardReaderで読み取った場合、各LedgerDetail.Balanceには実際の残高が設定されている
-                var cardBalance = detailList.FirstOrDefault()?.Balance;
-                if (cardBalance.HasValue && cardBalance.Value > 0)
-                {
-                    result.Balance = cardBalance.Value;
-                    _logger.LogDebug("LendingService: カードから直接読み取った残高を使用: {Balance}円", result.Balance);
-                }
-                else
-                {
-                    // フォールバック1: 作成したledgerレコードの残高を使用
-                    var latestCreatedLedger = result.CreatedLedgers.LastOrDefault();
-                    if (latestCreatedLedger != null)
-                    {
-                        result.Balance = latestCreatedLedger.Balance;
-                        _logger.LogDebug("LendingService: ledgerレコードの残高を使用: {Balance}円", result.Balance);
-                    }
-                    else
-                    {
-                        // Issue #1139: フォールバック2: DB内の直近の履歴残高を使用
-                        // LendAsync側のIssue #656修正と同等のフォールバック
-                        var latestLedger = await _ledgerRepository.GetLatestLedgerAsync(cardIdm);
-                        if (latestLedger != null)
-                        {
-                            result.Balance = latestLedger.Balance;
-                            _logger.LogInformation(
-                                "ReturnAsync: カード残高を読み取れなかったため、直近の履歴残高を使用: {Balance}円", result.Balance);
-                        }
-                    }
-                }
+                result.Balance = await ResolveReturnBalanceAsync(detailList, result.CreatedLedgers, cardIdm);
 
-                // 低残高チェック
-                var settings = await _settingsRepository.GetAppSettingsAsync();
-                result.WarningBalance = settings.WarningBalance;
-                result.IsLowBalance = result.Balance < settings.WarningBalance;
+                await ApplyBalanceWarningAsync(result);
 
                 // 処理情報を記録
                 LastProcessedCardIdm = cardIdm;
