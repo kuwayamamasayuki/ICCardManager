@@ -544,16 +544,25 @@ public partial class MainViewModel : ViewModelBase
     /// <summary>
     /// SharedModeMonitorからのヘルスチェック結果を受けてUI警告を更新
     /// </summary>
-    private async void OnSharedModeHealthCheckCompleted(object sender, DatabaseHealthEventArgs e)
+    /// <remarks>
+    /// Issue #1359: SharedModeMonitor.ExecuteHealthCheckAsync が ConfigureAwait(false) を使用するため
+    /// 本イベントは thread pool スレッドから発火される。UI バインドされた ObservableCollection
+    /// (WarningMessages / LentCards / CardBalanceDashboard) を安全に更新するため、
+    /// IDispatcherService で UI スレッドへ明示的にマーシャリングする（OnCardRead と同一パターン）。
+    /// </remarks>
+    private void OnSharedModeHealthCheckCompleted(object sender, DatabaseHealthEventArgs e)
     {
-        UpdateConnectionWarning(e.IsConnected);
+        _dispatcherService.InvokeAsync(async () =>
+        {
+            UpdateConnectionWarning(e.IsConnected);
 
-        // 接続断の場合はリフレッシュをスキップ
-        if (!e.IsConnected)
-            return;
+            // 接続断の場合はリフレッシュをスキップ
+            if (!e.IsConnected)
+                return;
 
-        // 共有モード: 他PCの変更を反映するためダッシュボードと貸出中カードを定期リフレッシュ
-        await RefreshSharedDataAsync();
+            // 共有モード: 他PCの変更を反映するためダッシュボードと貸出中カードを定期リフレッシュ
+            await RefreshSharedDataAsync();
+        });
     }
 
     /// <summary>
