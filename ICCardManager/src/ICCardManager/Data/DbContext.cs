@@ -361,11 +361,23 @@ namespace ICCardManager.Data
         }
 
         /// <summary>
-        /// Issue #1281: UI スレッド検出用のフック。
-        /// 既定は WPF の <c>DispatcherSynchronizationContext</c> を検出する。
+        /// Issue #1281: UI スレッド検出用のフック（AsyncLocal）。
+        /// AsyncLocal のため並列に動くテスト間で状態が干渉しない。
+        /// 値が null のとき既定検出（<see cref="DefaultIsOnUiThread"/>）を使用する。
         /// テストから差し替え可能（内部 API）。
         /// </summary>
-        internal static Func<bool> IsOnUiThread { get; set; } = DefaultIsOnUiThread;
+        private static readonly AsyncLocal<Func<bool>?> _isOnUiThreadOverride = new();
+
+        /// <summary>
+        /// UI スレッド検出のオーバーライド用プロパティ（テスト専用）。
+        /// null 代入で既定検出に戻る。<see cref="AsyncLocal{T}"/> ベースのため
+        /// xUnit が並列実行するテスト間で状態が漏れない。
+        /// </summary>
+        internal static Func<bool> IsOnUiThread
+        {
+            get => _isOnUiThreadOverride.Value ?? DefaultIsOnUiThread;
+            set => _isOnUiThreadOverride.Value = value;
+        }
 
         /// <summary>
         /// 既定の UI スレッド検出: <see cref="SynchronizationContext.Current"/> の型名で判定する。
@@ -1015,8 +1027,14 @@ namespace ICCardManager.Data
                 // 接続一時停止中 — ネットワーク切断ではない
                 return true;
             }
-            catch (Exception)
+            catch (Exception ex)
             {
+                // Issue #1282: 疎通確認なので「失敗=未到達」を戻り値で通知するのが仕様。
+                // ただしサイレント握りつぶしはトラブル時のデバッグを困難にするため、
+                // LogDebug で失敗理由を残す。接続断は運用上頻繁に起きる想定のため
+                // LogWarning ではなく LogDebug を選択（ログファイルの肥大化を避ける）。
+                _logger?.LogDebug(ex,
+                    "DB接続疎通確認に失敗。呼び出し元には false を返す（ネットワーク断または読み取りエラー）");
                 return false;
             }
         }

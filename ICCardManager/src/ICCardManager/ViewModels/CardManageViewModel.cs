@@ -14,6 +14,7 @@ using ICCardManager.Dtos;
 using ICCardManager.Infrastructure.CardReader;
 using ICCardManager.Models;
 using ICCardManager.Services;
+using Microsoft.Extensions.Logging;
 
 namespace ICCardManager.ViewModels
 {
@@ -31,6 +32,7 @@ namespace ICCardManager.ViewModels
         private readonly IStaffAuthService _staffAuthService;
         private readonly LendingService _lendingService;
         private readonly IMessenger _messenger;
+        private readonly ILogger<CardManageViewModel>? _logger;
 
         [ObservableProperty]
         private ObservableCollection<CardDto> _cards = new();
@@ -127,7 +129,8 @@ namespace ICCardManager.ViewModels
             IDialogService dialogService,
             IStaffAuthService staffAuthService,
             LendingService lendingService,
-            IMessenger messenger)
+            IMessenger messenger,
+            ILogger<CardManageViewModel>? logger = null)
         {
             _cardRepository = cardRepository;
             _ledgerRepository = ledgerRepository;
@@ -138,6 +141,7 @@ namespace ICCardManager.ViewModels
             _staffAuthService = staffAuthService;
             _lendingService = lendingService;
             _messenger = messenger;
+            _logger = logger;
 
             // カード読み取りイベント
             _cardReader.CardRead += OnCardRead;
@@ -1073,10 +1077,14 @@ namespace ICCardManager.ViewModels
                 // 残額が取得できなかった場合は、初期レコードは作成しない
                 // （カードがタッチされていない、または読み取りエラー）
             }
-            catch (Exception)
+            catch (Exception ex)
             {
-                // 残額読み取りエラーの場合は、カード登録自体は成功させる
-                // 初期レコードは後から手動で追加可能
+                // Issue #1282: 残額読み取りエラーの場合は、カード登録自体は成功させる
+                // 初期レコードは後から手動で追加可能。ただし原因追跡のため
+                // 警告レベルで記録する（カード登録フローの一部なので失敗は稀な想定）。
+                _logger?.LogWarning(ex,
+                    "カード登録後の初期残額レコード作成に失敗しました。" +
+                    "カード登録自体は成功しており、初期レコードは後から手動で追加できます。");
             }
             finally
             {

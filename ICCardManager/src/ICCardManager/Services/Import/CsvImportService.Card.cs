@@ -11,6 +11,7 @@ using ICCardManager.Data;
 using ICCardManager.Data.Repositories;
 using ICCardManager.Infrastructure.Caching;
 using ICCardManager.Models;
+using Microsoft.Extensions.Logging;
 using System.Data.SQLite;
 
 namespace ICCardManager.Services
@@ -208,11 +209,17 @@ namespace ICCardManager.Services
             catch (SQLiteException ex)
             {
                 scope.Rollback();
+                // Issue #1282: SQLiteException は DatabaseException へラップして詳細を保持
+                _logger?.LogError(ex,
+                    "カードCSVインポートのトランザクション中に SQLite エラーが発生しロールバック");
                 throw DatabaseException.QueryFailed("CSV import transaction", ex);
             }
-            catch (Exception)
+            catch (Exception ex)
             {
                 scope.Rollback();
+                // Issue #1282: 想定外の例外も握りつぶさずログに記録してから再スロー
+                _logger?.LogError(ex,
+                    "カードCSVインポートのトランザクション中に想定外の例外が発生しロールバック");
                 throw;
             }
 
