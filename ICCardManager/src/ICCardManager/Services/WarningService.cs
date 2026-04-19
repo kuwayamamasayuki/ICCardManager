@@ -63,7 +63,7 @@ namespace ICCardManager.Services
         public async Task<WarningItem> CheckIncompleteBusStopsAsync()
         {
             var ledgers = await _ledgerRepository.GetByDateRangeAsync(
-                null, DateTime.Now.AddYears(-1), DateTime.Now);
+                null, DateTime.Now.AddYears(-1), DateTime.Now).ConfigureAwait(false);
 
             var incompleteCount = ledgers.Count(l => l.Summary?.Contains("★") == true);
             if (incompleteCount > 0)

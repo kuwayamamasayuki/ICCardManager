@@ -47,12 +47,12 @@ namespace ICCardManager.Services
             var balancesTask = _ledgerRepository.GetAllLatestBalancesAsync();
             var staffTask = _staffRepository.GetAllAsync();
 
-            await Task.WhenAll(settingsTask, cardsTask, balancesTask, staffTask);
+            await Task.WhenAll(settingsTask, cardsTask, balancesTask, staffTask).ConfigureAwait(false);
 
-            var settings = await settingsTask;
-            var cards = await cardsTask;
-            var balances = await balancesTask;
-            var staffDict = (await staffTask).ToDictionary(s => s.StaffIdm, s => s.Name);
+            var settings = await settingsTask.ConfigureAwait(false);
+            var cards = await cardsTask.ConfigureAwait(false);
+            var balances = await balancesTask.ConfigureAwait(false);
+            var staffDict = (await staffTask.ConfigureAwait(false)).ToDictionary(s => s.StaffIdm, s => s.Name);
 
             var dashboardItems = new List<CardBalanceDashboardItem>();
 

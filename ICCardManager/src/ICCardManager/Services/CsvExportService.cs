@@ -60,7 +60,7 @@ namespace ICCardManager.Services
             {
                 var cards = includeDeleted
                     ? await _cardRepository.GetAllIncludingDeletedAsync()
-                    : await _cardRepository.GetAllAsync();
+                    : await _cardRepository.GetAllAsync().ConfigureAwait(false);
 
                 var lines = new List<string>
                 {
@@ -80,7 +80,7 @@ namespace ICCardManager.Services
                 }
 
                 // .NET Framework 4.8ではFile.WriteAllLinesAsyncがないためTask.Runで同期版を使用
-                await Task.Run(() => File.WriteAllLines(filePath, lines, CsvEncoding));
+                await Task.Run(() => File.WriteAllLines(filePath, lines, CsvEncoding)).ConfigureAwait(false);
 
                 return new CsvExportResult
                 {
@@ -109,7 +109,7 @@ namespace ICCardManager.Services
             {
                 var staffList = includeDeleted
                     ? await _staffRepository.GetAllIncludingDeletedAsync()
-                    : await _staffRepository.GetAllAsync();
+                    : await _staffRepository.GetAllAsync().ConfigureAwait(false);
 
                 var lines = new List<string>
                 {
@@ -129,7 +129,7 @@ namespace ICCardManager.Services
                 }
 
                 // .NET Framework 4.8ではFile.WriteAllLinesAsyncがないためTask.Runで同期版を使用
-                await Task.Run(() => File.WriteAllLines(filePath, lines, CsvEncoding));
+                await Task.Run(() => File.WriteAllLines(filePath, lines, CsvEncoding)).ConfigureAwait(false);
 
                 return new CsvExportResult
                 {
@@ -161,10 +161,10 @@ namespace ICCardManager.Services
             try
             {
                 // cardIdmがnullの場合は全カードの履歴を取得
-                var ledgers = await _ledgerRepository.GetByDateRangeAsync(cardIdm, startDate, endDate);
+                var ledgers = await _ledgerRepository.GetByDateRangeAsync(cardIdm, startDate, endDate).ConfigureAwait(false);
 
                 // カードIDmから管理番号へのマッピングを作成
-                var allCards = await _cardRepository.GetAllIncludingDeletedAsync();
+                var allCards = await _cardRepository.GetAllIncludingDeletedAsync().ConfigureAwait(false);
                 var cardNumberMap = allCards.ToDictionary(c => c.CardIdm, c => c.CardNumber ?? "");
 
                 // Issue #592: カード種別・管理番号順のソートキーを作成（同一カードの履歴をまとめる）
@@ -206,7 +206,7 @@ namespace ICCardManager.Services
                 }
 
                 // .NET Framework 4.8ではFile.WriteAllLinesAsyncがないためTask.Runで同期版を使用
-                await Task.Run(() => File.WriteAllLines(filePath, lines, CsvEncoding));
+                await Task.Run(() => File.WriteAllLines(filePath, lines, CsvEncoding)).ConfigureAwait(false);
 
                 return new CsvExportResult
                 {
@@ -241,14 +241,14 @@ namespace ICCardManager.Services
             try
             {
                 // 期間内の全詳細を取得
-                var details = await _ledgerRepository.GetAllDetailsInDateRangeAsync(startDate, endDate);
+                var details = await _ledgerRepository.GetAllDetailsInDateRangeAsync(startDate, endDate).ConfigureAwait(false);
 
                 // ledger_id→カードIDmマッピング用に期間内のledgerを取得
-                var ledgers = await _ledgerRepository.GetByDateRangeAsync(null, startDate, endDate);
+                var ledgers = await _ledgerRepository.GetByDateRangeAsync(null, startDate, endDate).ConfigureAwait(false);
                 var ledgerCardMap = ledgers.ToDictionary(l => l.Id, l => l.CardIdm);
 
                 // カードIDmから管理番号へのマッピング
-                var allCards = await _cardRepository.GetAllIncludingDeletedAsync();
+                var allCards = await _cardRepository.GetAllIncludingDeletedAsync().ConfigureAwait(false);
                 var cardNumberMap = allCards.ToDictionary(c => c.CardIdm, c => c.CardNumber ?? "");
 
                 // ソートキー：カード種別・管理番号順
@@ -321,7 +321,7 @@ namespace ICCardManager.Services
                     ));
                 }
 
-                await Task.Run(() => File.WriteAllLines(filePath, lines, CsvEncoding));
+                await Task.Run(() => File.WriteAllLines(filePath, lines, CsvEncoding)).ConfigureAwait(false);
 
                 return new CsvExportResult
                 {
@@ -380,7 +380,7 @@ namespace ICCardManager.Services
                 };
 
                 // .NET Framework 4.8ではFile.WriteAllLinesAsyncがないためTask.Runで同期版を使用
-                await Task.Run(() => File.WriteAllLines(filePath, lines, CsvEncoding));
+                await Task.Run(() => File.WriteAllLines(filePath, lines, CsvEncoding)).ConfigureAwait(false);
 
                 return new CsvExportResult
                 {
