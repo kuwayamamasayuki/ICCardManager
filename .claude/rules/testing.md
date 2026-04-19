@@ -24,3 +24,4 @@
 
 ## テスト追加・修正時
 - テスト設計書（`docs/design/07_テスト設計書.md`）も同期更新すること
+- 本ルールは Claude Code の Stop hook（`.claude/hooks/check-doc-sync.sh`）で機械的に検証される。テスト変更があるのに設計書未更新のまま Claude が応答を終えようとすると警告が出て作業継続が促される。意図的にスキップしたい場合は環境変数 `SKIP_DOC_SYNC_CHECK=1` を設定する
