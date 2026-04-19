@@ -453,6 +453,20 @@ namespace ICCardManager.Services
         }
 
         /// <summary>
+        /// 貸出レコードを取得。見つからない場合はエラーメッセージを返す。
+        /// </summary>
+        /// <returns>(LentRecord, ErrorMessage)。ErrorMessage が非 null の場合は失敗。</returns>
+        internal async Task<(Ledger LentRecord, string ErrorMessage)> ResolveLentRecordAsync(string cardIdm)
+        {
+            var lentRecord = await _ledgerRepository.GetLentRecordAsync(cardIdm);
+            if (lentRecord == null)
+            {
+                return (null, "貸出レコードが見つかりません。");
+            }
+            return (lentRecord, null);
+        }
+
+        /// <summary>
         /// 返却処理の事前検証。カード・貸出状態・職員の存在を順次チェックする。
         /// </summary>
         /// <returns>(Card, Returner, ErrorMessage)。ErrorMessage が非 null の場合は検証失敗。</returns>
@@ -528,11 +542,10 @@ namespace ICCardManager.Services
                     return result;
                 }
 
-                // 貸出レコードを取得
-                var lentRecord = await _ledgerRepository.GetLentRecordAsync(cardIdm);
-                if (lentRecord == null)
+                var (lentRecord, lentRecordError) = await ResolveLentRecordAsync(cardIdm);
+                if (lentRecordError != null)
                 {
-                    result.ErrorMessage = "貸出レコードが見つかりません。";
+                    result.ErrorMessage = lentRecordError;
                     return result;
                 }
 
