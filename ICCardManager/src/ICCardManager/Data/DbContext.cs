@@ -690,6 +690,14 @@ namespace ICCardManager.Data
         }
 
         /// <summary>
+        /// データベースを初期化（非同期版）。UI スレッドから呼び出しても Issue #1281 の
+        /// <see cref="LeaseConnection"/> ガードで例外にならないよう、<see cref="Task.Run(Action)"/>
+        /// でバックグラウンドスレッドに確実にオフロードする。
+        /// </summary>
+        public Task InitializeDatabaseAsync(CancellationToken cancellationToken = default)
+            => Task.Run((Action)InitializeDatabase, cancellationToken);
+
+        /// <summary>
         /// マイグレーション導入前の既存DBを処理
         /// </summary>
         /// <remarks>
@@ -871,6 +879,14 @@ namespace ICCardManager.Data
         }
 
         /// <summary>
+        /// 6年経過データ削除の非同期版。UI スレッドから呼び出しても Issue #1281 の
+        /// <see cref="LeaseConnection"/> ガードで例外にならないよう、<see cref="Task.Run{TResult}(Func{TResult})"/>
+        /// でバックグラウンドスレッドに確実にオフロードする。
+        /// </summary>
+        public Task<(int LedgerCount, int OperationLogCount)> CleanupOldDataAsync(CancellationToken cancellationToken = default)
+            => Task.Run(CleanupOldData, cancellationToken);
+
+        /// <summary>
         /// Issue #1170: CleanupOldDataの実体。両テーブルの削除を単一トランザクションで実行する。
         /// </summary>
         private (int LedgerCount, int OperationLogCount) CleanupOldDataInternal()
@@ -928,6 +944,14 @@ namespace ICCardManager.Data
                 return false;
             }
         }
+
+        /// <summary>
+        /// VACUUM 実行の非同期版。UI スレッドから呼び出しても Issue #1281 の
+        /// <see cref="LeaseConnection"/> ガードで例外にならないよう、<see cref="Task.Run{TResult}(Func{TResult})"/>
+        /// でバックグラウンドスレッドに確実にオフロードする。
+        /// </summary>
+        public Task<bool> VacuumAsync(CancellationToken cancellationToken = default)
+            => Task.Run(Vacuum, cancellationToken);
 
         /// <summary>
         /// ローカルモードのリトライ待機時間（ミリ秒）
