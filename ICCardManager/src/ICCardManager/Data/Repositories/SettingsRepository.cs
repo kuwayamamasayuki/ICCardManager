@@ -312,36 +312,55 @@ ON CONFLICT(key) DO UPDATE SET value = @value";
         /// <inheritdoc/>
         public async Task<bool> SaveAppSettingsAsync(AppSettings settings)
         {
+            // Issue #1240: 共有モードで他PCが更新途中の中間状態を読み取らないよう、
+            // すべての設定キーの更新を単一トランザクション内で実行する。
             var success = true;
 
-            success &= await SetAsync(KeyWarningBalance, settings.WarningBalance.ToString());
-            success &= await SetAsync(KeyBackupPath, settings.BackupPath);
-            success &= await SetAsync(KeyFontSize, FontSizeToString(settings.FontSize));
-
-            if (settings.LastVacuumDate.HasValue)
+            await _dbContext.ExecuteWithRetryAsync(async () =>
             {
-                success &= await SetAsync(KeyLastVacuumDate, settings.LastVacuumDate.Value.ToString("yyyy-MM-dd"));
-            }
+                using var scope = await _dbContext.BeginTransactionAsync();
 
-            // ウィンドウ設定を保存
-            success &= await SaveWindowSettingsToDbAsync(settings.MainWindowSettings);
+                try
+                {
+                    success = true;
 
-            // 音声モード設定を保存
-            success &= await SetAsync(KeySoundMode, SoundModeToString(settings.SoundMode));
+                    success &= await SetAsync(KeyWarningBalance, settings.WarningBalance.ToString());
+                    success &= await SetAsync(KeyBackupPath, settings.BackupPath);
+                    success &= await SetAsync(KeyFontSize, FontSizeToString(settings.FontSize));
 
-            // トースト位置設定を保存
-            success &= await SetAsync(KeyToastPosition, ToastPositionToString(settings.ToastPosition));
+                    if (settings.LastVacuumDate.HasValue)
+                    {
+                        success &= await SetAsync(KeyLastVacuumDate, settings.LastVacuumDate.Value.ToString("yyyy-MM-dd"));
+                    }
 
-            // 部署種別設定を保存
-            success &= await SetAsync(KeyDepartmentType, DepartmentTypeToString(settings.DepartmentType));
+                    // ウィンドウ設定を保存
+                    success &= await SaveWindowSettingsToDbAsync(settings.MainWindowSettings);
 
-            // バス停入力スキップ設定を保存
-            success &= await SetAsync(KeySkipBusStopInputOnReturn, settings.SkipBusStopInputOnReturn.ToString().ToLowerInvariant());
+                    // 音声モード設定を保存
+                    success &= await SetAsync(KeySoundMode, SoundModeToString(settings.SoundMode));
 
-            // 帳票出力先フォルダ設定を保存
-            success &= await SetAsync(KeyReportOutputFolder, settings.ReportOutputFolder ?? string.Empty);
+                    // トースト位置設定を保存
+                    success &= await SetAsync(KeyToastPosition, ToastPositionToString(settings.ToastPosition));
 
-            // 設定保存後にキャッシュを無効化
+                    // 部署種別設定を保存
+                    success &= await SetAsync(KeyDepartmentType, DepartmentTypeToString(settings.DepartmentType));
+
+                    // バス停入力スキップ設定を保存
+                    success &= await SetAsync(KeySkipBusStopInputOnReturn, settings.SkipBusStopInputOnReturn.ToString().ToLowerInvariant());
+
+                    // 帳票出力先フォルダ設定を保存
+                    success &= await SetAsync(KeyReportOutputFolder, settings.ReportOutputFolder ?? string.Empty);
+
+                    scope.Commit();
+                }
+                catch
+                {
+                    scope.Rollback();
+                    throw;
+                }
+            });
+
+            // トランザクション完了後にキャッシュを無効化
             _cacheService.Invalidate(CacheKeys.AppSettings);
 
             return success;
