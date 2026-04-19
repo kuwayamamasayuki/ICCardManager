@@ -1,0 +1,16 @@
+root = true
+
+# Issue #1287: Service 層では ConfigureAwait(false) を推奨
+[ICCardManager/src/ICCardManager/**/*.cs]
+dotnet_diagnostic.CA2007.severity = suggestion
+
+# ViewModels は UI 文脈を維持するため CA2007 を無効化
+[ICCardManager/src/ICCardManager/ViewModels/**/*.cs]
+dotnet_diagnostic.CA2007.severity = none
+
+[ICCardManager/src/ICCardManager/Views/**/*.cs]
+dotnet_diagnostic.CA2007.severity = none
+
+# テストコードでも無効化
+[ICCardManager/tests/**/*.cs]
+dotnet_diagnostic.CA2007.severity = none
