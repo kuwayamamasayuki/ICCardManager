@@ -11,6 +11,7 @@ using ICCardManager.Data;
 using ICCardManager.Data.Repositories;
 using ICCardManager.Infrastructure.Caching;
 using ICCardManager.Models;
+using ICCardManager.Services.Import.Builders;
 using ICCardManager.Services.Import.Parsers;
 using System.Data.SQLite;
 
@@ -424,109 +425,18 @@ namespace ICCardManager.Services
                 };
             }
 
-            // Issue #906: 新規詳細（利用履歴ID空欄）のLedger自動作成とインポート
-            // Issue #918: カードIDm＋日付ごとにグループ化して個別のLedgerを作成
-            // Issue #1053: チャージ/ポイント還元境界で分割し、セグメントごとにLedgerを作成
+            // Issue #906: 新規詳細（利用履歴ID空欄）の Ledger 自動作成とインポート
+            // Issue #918: カードIDm＋日付ごとにグループ化して個別の Ledger を作成
+            // Issue #1053: チャージ/ポイント還元境界で分割し、セグメントごとに Ledger を作成
+            // Issue #1284: NewLedgerFromSegmentsBuilder に責務分離
+            var newLedgerBuilder = new NewLedgerFromSegmentsBuilder(_ledgerRepository);
             foreach (var kvp in newDetailsByCardIdmAndDate)
             {
-                var cardIdm = kvp.Key.CardIdm;
-                var detailRows = kvp.Value;
-                var firstLineNumber = detailRows.First().LineNumber;
-                var detailList = detailRows.Select(r => r.Detail).ToList();
-
-                try
-                {
-                    // チャージ/ポイント還元の位置で利用グループを分割
-                    var segments = LendingHistoryAnalyzer.SplitAtChargeBoundaries(detailList);
-
-                    // セグメントがない場合（空リスト対策）は元のリストで1セグメントとして扱う
-                    if (segments.Count == 0)
-                    {
-                        segments = new List<LendingHistoryAnalyzer.DailySegment>
-                        {
-                            new LendingHistoryAnalyzer.DailySegment
-                            {
-                                IsCharge = false,
-                                IsPointRedemption = false,
-                                Details = detailList
-                            }
-                        };
-                    }
-
-                    var summaryGenerator = new SummaryGenerator();
-                    var segmentFailed = false;
-
-                    foreach (var segment in segments)
-                    {
-                        var segmentDetails = segment.Details;
-
-                        // SummaryGeneratorで摘要を自動生成
-                        var summary = summaryGenerator.Generate(segmentDetails);
-                        if (string.IsNullOrEmpty(summary))
-                        {
-                            summary = "CSVインポート";
-                        }
-
-                        // LedgerSplitServiceと同じロジックで収支・残高を計算
-                        var (income, expense, balance) = LedgerSplitService.CalculateGroupFinancials(segmentDetails);
-
-                        // 日付はグループのキーから取得、DateTime.MinValueの場合は最も古い利用日時、なければ現在日時
-                        var date = kvp.Key.Date;
-                        if (date == DateTime.MinValue)
-                        {
-                            date = segmentDetails
-                                .Where(d => d.UseDate.HasValue)
-                                .OrderBy(d => d.UseDate!.Value)
-                                .Select(d => d.UseDate!.Value)
-                                .FirstOrDefault();
-                            if (date == default)
-                            {
-                                date = DateTime.Now;
-                            }
-                        }
-
-                        // Ledgerレコードを自動作成
-                        var newLedger = new Ledger
-                        {
-                            CardIdm = cardIdm,
-                            Date = date,
-                            Summary = summary,
-                            Income = income,
-                            Expense = expense,
-                            Balance = balance
-                        };
-
-                        var newLedgerId = await _ledgerRepository.InsertAsync(newLedger);
-
-                        // 詳細をインサート
-                        var success = await _ledgerRepository.InsertDetailsAsync(newLedgerId, segmentDetails);
-
-                        if (!success)
-                        {
-                            segmentFailed = true;
-                            errors.Add(new CsvImportError
-                            {
-                                LineNumber = firstLineNumber,
-                                Message = $"カード {cardIdm} の新規詳細の挿入に失敗しました",
-                                Data = cardIdm
-                            });
-                        }
-                    }
-
-                    if (!segmentFailed)
-                    {
-                        importedCount += detailRows.Count;
-                    }
-                }
-                catch (Exception ex)
-                {
-                    errors.Add(new CsvImportError
-                    {
-                        LineNumber = firstLineNumber,
-                        Message = $"カード {cardIdm} の利用履歴自動作成中にエラーが発生しました: {ex.Message}",
-                        Data = cardIdm
-                    });
-                }
+                importedCount += await newLedgerBuilder.BuildAndInsertAsync(
+                    kvp.Key.CardIdm,
+                    kvp.Key.Date,
+                    kvp.Value,
+                    errors);
             }
 
             // 既存ledger_idごとにReplaceDetailsAsyncで全置換（変更がある場合のみ）
