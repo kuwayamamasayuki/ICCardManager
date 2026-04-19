@@ -85,7 +85,7 @@ namespace ICCardManager.Services
                 Action = Actions.Insert,
                 BeforeData = null,
                 AfterData = SerializeToJson(staff)
-            });
+            }).ConfigureAwait(false);
         }
 
         /// <summary>
@@ -104,7 +104,7 @@ namespace ICCardManager.Services
                 Action = Actions.Update,
                 BeforeData = SerializeToJson(beforeStaff),
                 AfterData = SerializeToJson(afterStaff)
-            });
+            }).ConfigureAwait(false);
         }
 
         /// <summary>
@@ -123,7 +123,7 @@ namespace ICCardManager.Services
                 Action = Actions.Delete,
                 BeforeData = SerializeToJson(staff),
                 AfterData = null
-            });
+            }).ConfigureAwait(false);
         }
 
         /// <summary>
@@ -142,7 +142,7 @@ namespace ICCardManager.Services
                 Action = Actions.Restore,
                 BeforeData = null,
                 AfterData = SerializeToJson(staff)
-            });
+            }).ConfigureAwait(false);
         }
 
         /// <summary>
@@ -161,7 +161,7 @@ namespace ICCardManager.Services
                 Action = Actions.Insert,
                 BeforeData = null,
                 AfterData = SerializeToJson(card)
-            });
+            }).ConfigureAwait(false);
         }
 
         /// <summary>
@@ -180,7 +180,7 @@ namespace ICCardManager.Services
                 Action = Actions.Update,
                 BeforeData = SerializeToJson(beforeCard),
                 AfterData = SerializeToJson(afterCard)
-            });
+            }).ConfigureAwait(false);
         }
 
         /// <summary>
@@ -199,7 +199,7 @@ namespace ICCardManager.Services
                 Action = Actions.Delete,
                 BeforeData = SerializeToJson(card),
                 AfterData = null
-            });
+            }).ConfigureAwait(false);
         }
 
         /// <summary>
@@ -218,7 +218,7 @@ namespace ICCardManager.Services
                 Action = Actions.Restore,
                 BeforeData = null,
                 AfterData = SerializeToJson(card)
-            });
+            }).ConfigureAwait(false);
         }
 
         /// <summary>
@@ -237,7 +237,7 @@ namespace ICCardManager.Services
                 Action = Actions.Update,
                 BeforeData = SerializeToJson(beforeLedger),
                 AfterData = SerializeToJson(afterLedger)
-            });
+            }).ConfigureAwait(false);
         }
 
         /// <summary>
@@ -256,7 +256,7 @@ namespace ICCardManager.Services
                 Action = Actions.Insert,
                 BeforeData = null,
                 AfterData = SerializeToJson(ledger)
-            });
+            }).ConfigureAwait(false);
         }
 
         /// <summary>
@@ -275,7 +275,7 @@ namespace ICCardManager.Services
                 Action = Actions.Delete,
                 BeforeData = SerializeToJson(ledger),
                 AfterData = null
-            });
+            }).ConfigureAwait(false);
         }
 
         /// <summary>
@@ -294,7 +294,7 @@ namespace ICCardManager.Services
                 Action = Actions.Merge,
                 BeforeData = SerializeToJson(sourceLedgers),
                 AfterData = SerializeToJson(mergedLedger)
-            });
+            }).ConfigureAwait(false);
         }
 
         /// <summary>
@@ -313,7 +313,7 @@ namespace ICCardManager.Services
                 Action = Actions.Split,
                 BeforeData = SerializeToJson(originalLedger),
                 AfterData = SerializeToJson(splitLedgers)
-            });
+            }).ConfigureAwait(false);
         }
 
         #endregion
