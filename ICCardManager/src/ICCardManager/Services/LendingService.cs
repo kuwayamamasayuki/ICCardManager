@@ -312,26 +312,10 @@ namespace ICCardManager.Services
                     return result;
                 }
 
-                // カードを取得
-                var card = await _cardRepository.GetByIdmAsync(cardIdm);
-                if (card == null)
+                var (card, staff, validationError) = await ValidateLendPreconditionsAsync(staffIdm, cardIdm);
+                if (validationError != null)
                 {
-                    result.ErrorMessage = "カードが登録されていません。";
-                    return result;
-                }
-
-                // 貸出中チェック
-                if (card.IsLent)
-                {
-                    result.ErrorMessage = "このカードは既に貸出中です。";
-                    return result;
-                }
-
-                // 職員を取得
-                var staff = await _staffRepository.GetByIdmAsync(staffIdm);
-                if (staff == null)
-                {
-                    result.ErrorMessage = "職員証が登録されていません。";
+                    result.ErrorMessage = validationError;
                     return result;
                 }
 
@@ -414,6 +398,33 @@ namespace ICCardManager.Services
             }
 
             return result;
+        }
+
+        /// <summary>
+        /// 貸出処理の事前検証。カード・貸出状態・職員の存在を順次チェックする。
+        /// </summary>
+        /// <returns>(Card, Staff, ErrorMessage)。ErrorMessage が非 null の場合は検証失敗。</returns>
+        internal async Task<(IcCard Card, Staff Staff, string ErrorMessage)> ValidateLendPreconditionsAsync(
+            string staffIdm, string cardIdm)
+        {
+            var card = await _cardRepository.GetByIdmAsync(cardIdm);
+            if (card == null)
+            {
+                return (null, null, "カードが登録されていません。");
+            }
+
+            if (card.IsLent)
+            {
+                return (card, null, "このカードは既に貸出中です。");
+            }
+
+            var staff = await _staffRepository.GetByIdmAsync(staffIdm);
+            if (staff == null)
+            {
+                return (card, null, "職員証が登録されていません。");
+            }
+
+            return (card, staff, null);
         }
 
         /// <summary>
