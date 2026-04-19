@@ -453,6 +453,16 @@ namespace ICCardManager.Services
         }
 
         /// <summary>
+        /// 低残高警告情報を result にセットする。
+        /// </summary>
+        internal async Task ApplyBalanceWarningAsync(LendingResult result)
+        {
+            var settings = await _settingsRepository.GetAppSettingsAsync();
+            result.WarningBalance = settings.WarningBalance;
+            result.IsLowBalance = result.Balance < settings.WarningBalance;
+        }
+
+        /// <summary>
         /// 返却時の残高解決カスケード。
         /// 優先順位: (1)カード直接読取値 > (2)作成ledger末尾 > (3)DB 直近 ledger(Issue #1139)。
         /// </summary>
@@ -660,10 +670,7 @@ namespace ICCardManager.Services
                 // FelicaCardReaderで読み取った場合、各LedgerDetail.Balanceには実際の残高が設定されている
                 result.Balance = await ResolveReturnBalanceAsync(detailList, result.CreatedLedgers, cardIdm);
 
-                // 低残高チェック
-                var settings = await _settingsRepository.GetAppSettingsAsync();
-                result.WarningBalance = settings.WarningBalance;
-                result.IsLowBalance = result.Balance < settings.WarningBalance;
+                await ApplyBalanceWarningAsync(result);
 
                 // 処理情報を記録
                 LastProcessedCardIdm = cardIdm;
