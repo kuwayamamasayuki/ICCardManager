@@ -78,7 +78,11 @@ namespace ICCardManager
             }
         }
 
-        protected override void OnStartup(StartupEventArgs e)
+        // Issue #1356: OnStartup を async void 化し、Issue #1281 の UI スレッドガードに抵触する
+        // DbContext 同期 API 呼び出し (InitializeDatabase / CleanupOldData / Vacuum) を
+        // Task.Run ベースの *Async 版で await するようにした。async void は WPF イベントハンドラ
+        // として許容されるパターンで、下記 try/catch が async 例外も捕捉する。
+        protected override async void OnStartup(StartupEventArgs e)
         {
             base.OnStartup(e);
 
@@ -108,7 +112,7 @@ namespace ICCardManager
                 _logger.LogDebug("DIコンテナ構築完了");
 
                 // データベース初期化（SummaryGenerator等がsettingsテーブルを参照するため、DI解決より先に実行）
-                InitializeDatabase();
+                await InitializeDatabaseAsync();
 
                 // Issue #974: 組織固有設定を静的サービスに注入
                 // SummaryGeneratorはDIコンストラクタ経由でConfigureされる（即時解決で静的状態を初期化）
@@ -407,17 +411,20 @@ namespace ICCardManager
         }
 
         /// <summary>
-        /// データベースを初期化
+        /// データベースを初期化（Issue #1356 で async 化）
         /// </summary>
-        private void InitializeDatabase()
+        /// <remarks>
+        /// Issue #1281 の UI スレッドガード対応として、DbContext の同期 API を
+        /// <see cref="DbContext.InitializeDatabaseAsync"/> 経由で呼び出す。
+        /// </remarks>
+        private async Task InitializeDatabaseAsync()
         {
             var dbContext = ServiceProvider.GetRequiredService<DbContext>();
-            dbContext.InitializeDatabase();
+            await dbContext.InitializeDatabaseAsync();
 
     #if DEBUG
             // デバッグ時はテストデータを登録
-            // Task.Runで別スレッドに移動し、UIスレッドのデッドロックを防止
-            Task.Run(() => RegisterTestDataAsync()).GetAwaiter().GetResult();
+            await RegisterTestDataAsync();
     #endif
 
             // 設定ファイルからの設定を適用（Issue #742）
@@ -428,7 +435,7 @@ namespace ICCardManager
             ApplySavedSettings();
 
             // 起動時処理
-            PerformStartupTasks(dbContext);
+            await PerformStartupTasksAsync(dbContext);
         }
 
         /// <summary>
@@ -664,9 +671,14 @@ namespace ICCardManager
     #endif
 
         /// <summary>
-        /// 起動時タスクを実行
+        /// 起動時タスクを実行（Issue #1356 で async 化）
         /// </summary>
-        private void PerformStartupTasks(DbContext dbContext)
+        /// <remarks>
+        /// Issue #1281 の UI スレッドガード対応として、DbContext の同期 API
+        /// (<see cref="DbContext.CleanupOldData"/> / <see cref="DbContext.Vacuum"/>) と
+        /// <see cref="ISettingsRepository.GetAppSettings"/> を async 版で呼ぶ。
+        /// </remarks>
+        private async Task PerformStartupTasksAsync(DbContext dbContext)
         {
             try
             {
@@ -675,7 +687,7 @@ namespace ICCardManager
                 _ = backupService.ExecuteAutoBackupAsync();
 
                 // 古いデータの削除（6年経過分）
-                var (ledgerDeleted, logDeleted) = dbContext.CleanupOldData();
+                var (ledgerDeleted, logDeleted) = await dbContext.CleanupOldDataAsync();
                 if (ledgerDeleted > 0)
                 {
                     _logger?.LogInformation("古い利用履歴を{DeletedCount}件削除しました", ledgerDeleted);
@@ -687,8 +699,7 @@ namespace ICCardManager
 
                 // VACUUM（月次実行）
                 var settingsRepository = ServiceProvider.GetRequiredService<ISettingsRepository>();
-                // Issue #1281: UI スレッドから同期版を呼ばないよう Task.Run でオフロード
-                var settings = Task.Run(() => settingsRepository.GetAppSettings()).GetAwaiter().GetResult();
+                var settings = await settingsRepository.GetAppSettingsAsync();
 
                 var today = DateTime.Now;
                 if (today.Day >= 10)
@@ -698,7 +709,7 @@ namespace ICCardManager
                         lastVacuum.Value.Year != today.Year ||
                         lastVacuum.Value.Month != today.Month)
                     {
-                        if (dbContext.Vacuum())
+                        if (await dbContext.VacuumAsync())
                         {
                             settings.LastVacuumDate = today;
                             _ = settingsRepository.SaveAppSettingsAsync(settings);
