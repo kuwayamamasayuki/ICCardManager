@@ -815,11 +815,13 @@ namespace ICCardManager.Services
                             balance = lastBalance;
                         }
 
+                        // Issue #1281: 非同期版を使い UI スレッドブロックを回避
+                        var appSettings = await _settingsRepository.GetAppSettingsAsync();
                         var chargeLedger = new Ledger
                         {
                             CardIdm = cardIdm,
                             Date = charge.UseDate ?? date,
-                            Summary = SummaryGenerator.GetChargeSummary(_settingsRepository.GetAppSettings().DepartmentType),
+                            Summary = SummaryGenerator.GetChargeSummary(appSettings.DepartmentType),
                             Income = income,
                             Expense = 0,
                             Balance = balance,

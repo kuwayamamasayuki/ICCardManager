@@ -227,7 +227,8 @@ namespace ICCardManager.Services
                 // テンプレートパスを解決
                 try
                 {
-                    var settings = _settingsRepository.GetAppSettings();
+                    // Issue #1281: 非同期版を使い UI スレッドブロックを回避
+                    var settings = await _settingsRepository.GetAppSettingsAsync();
                     templatePath = TemplateResolver.ResolveTemplatePath(settings.DepartmentType);
                 }
                 catch (TemplateNotFoundException ex)
@@ -604,7 +605,8 @@ namespace ICCardManager.Services
             var results = new List<(string CardIdm, string CardName, ReportGenerationResult Result)>();
 
             // テンプレートの存在確認を先に行う
-            var batchSettings = _settingsRepository.GetAppSettings();
+            // Issue #1281: 非同期版を使い UI スレッドブロックを回避
+            var batchSettings = await _settingsRepository.GetAppSettingsAsync();
             if (!TemplateResolver.TemplateExists(batchSettings.DepartmentType))
             {
                 try
