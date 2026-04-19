@@ -323,17 +323,7 @@ namespace ICCardManager.Services
 
                 // Issue #656: カードから残高を読み取れなかった場合、直近の履歴から残高を取得
                 // READ操作はリトライ範囲の外で実行（不要な再クエリを防止）
-                var currentBalance = balance ?? 0;
-                if (!balance.HasValue)
-                {
-                    var latestLedger = await _ledgerRepository.GetLatestLedgerAsync(cardIdm);
-                    if (latestLedger != null)
-                    {
-                        currentBalance = latestLedger.Balance;
-                        _logger.LogInformation(
-                            "LendAsync: カード残高を読み取れなかったため、直近の履歴残高を使用: {Balance}円", currentBalance);
-                    }
-                }
+                var currentBalance = await ResolveInitialBalanceAsync(cardIdm, balance);
 
                 // トランザクション開始
                 // 共有モード時のSQLITE_BUSY対策としてリトライでラップ（WRITE操作のみ）
@@ -398,6 +388,27 @@ namespace ICCardManager.Services
             }
 
             return result;
+        }
+
+        /// <summary>
+        /// Issue #656: カードから残高を読み取れなかった場合、直近の ledger 残高を fallback として使用。
+        /// </summary>
+        internal async Task<int> ResolveInitialBalanceAsync(string cardIdm, int? balance)
+        {
+            if (balance.HasValue)
+            {
+                return balance.Value;
+            }
+
+            var latestLedger = await _ledgerRepository.GetLatestLedgerAsync(cardIdm);
+            if (latestLedger != null)
+            {
+                _logger.LogInformation(
+                    "LendAsync: カード残高を読み取れなかったため、直近の履歴残高を使用: {Balance}円", latestLedger.Balance);
+                return latestLedger.Balance;
+            }
+
+            return 0;
         }
 
         /// <summary>
