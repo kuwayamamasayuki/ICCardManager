@@ -17,10 +17,11 @@ namespace ICCardManager.Data.Migrations
 
         public void Up(SQLiteConnection connection, SQLiteTransaction transaction)
         {
-            // ic_cardテーブルに starting_page_number カラムを追加
+            // Issue #1285: AddColumnIfNotExists で冪等化
             // デフォルト値は1
-            ExecuteNonQuery(connection, transaction,
-                "ALTER TABLE ic_card ADD COLUMN starting_page_number INTEGER DEFAULT 1");
+            MigrationHelpers.AddColumnIfNotExists(
+                connection, transaction,
+                "ic_card", "starting_page_number", "INTEGER DEFAULT 1");
         }
 
         public void Down(SQLiteConnection connection, SQLiteTransaction transaction)

@@ -18,13 +18,13 @@ namespace ICCardManager.Data.Migrations
 
         public void Up(SQLiteConnection connection, SQLiteTransaction transaction)
         {
-            // ic_cardテーブルに is_refunded カラムを追加（デフォルト: 0 = 未払戻）
-            ExecuteNonQuery(connection, transaction,
-                "ALTER TABLE ic_card ADD COLUMN is_refunded INTEGER DEFAULT 0");
-
-            // ic_cardテーブルに refunded_at カラムを追加（払戻日時）
-            ExecuteNonQuery(connection, transaction,
-                "ALTER TABLE ic_card ADD COLUMN refunded_at TEXT");
+            // Issue #1285: AddColumnIfNotExists で冪等化
+            MigrationHelpers.AddColumnIfNotExists(
+                connection, transaction,
+                "ic_card", "is_refunded", "INTEGER DEFAULT 0");
+            MigrationHelpers.AddColumnIfNotExists(
+                connection, transaction,
+                "ic_card", "refunded_at", "TEXT");
         }
 
         public void Down(SQLiteConnection connection, SQLiteTransaction transaction)
