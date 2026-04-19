@@ -229,7 +229,7 @@ namespace ICCardManager.Services
 
             while (!reader.EndOfStream)
             {
-                var line = await reader.ReadLineAsync();
+                var line = await reader.ReadLineAsync().ConfigureAwait(false);
                 if (line != null)
                 {
                     lines.Add(line);
@@ -255,7 +255,7 @@ namespace ICCardManager.Services
 
             try
             {
-                return await operation();
+                return await operation().ConfigureAwait(false);
             }
             catch (FileNotFoundException)
             {
@@ -318,7 +318,7 @@ namespace ICCardManager.Services
 
             try
             {
-                return await operation();
+                return await operation().ConfigureAwait(false);
             }
             catch (FileNotFoundException)
             {

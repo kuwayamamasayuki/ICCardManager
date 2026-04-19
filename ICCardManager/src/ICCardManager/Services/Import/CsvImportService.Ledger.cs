@@ -29,7 +29,7 @@ namespace ICCardManager.Services
 
             try
             {
-                var lines = await ReadCsvFileAsync(filePath);
+                var lines = await ReadCsvFileAsync(filePath).ConfigureAwait(false);
                 if (lines.Count < 2)
                 {
                     return new CsvImportResult
@@ -52,7 +52,7 @@ namespace ICCardManager.Services
                 var existingCardIdms = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
                 // 全カードのIDmをキャッシュ（パフォーマンス向上）
-                var allCards = await _cardRepository.GetAllIncludingDeletedAsync();
+                var allCards = await _cardRepository.GetAllIncludingDeletedAsync().ConfigureAwait(false);
                 foreach (var card in allCards)
                 {
                     existingCardIdms.Add(card.CardIdm);
@@ -82,7 +82,7 @@ namespace ICCardManager.Services
                     Ledger existingLedgerForUpdate = null;
                     if (parsed.LedgerId.HasValue)
                     {
-                        var existingLedger = await _ledgerRepository.GetByIdAsync(parsed.LedgerId.Value);
+                        var existingLedger = await _ledgerRepository.GetByIdAsync(parsed.LedgerId.Value).ConfigureAwait(false);
                         if (existingLedger != null)
                         {
                             var hasChanges = existingLedger.Summary != parsed.Summary ||
@@ -148,7 +148,7 @@ namespace ICCardManager.Services
                     .GroupBy(r => r.Ledger.CardIdm, StringComparer.OrdinalIgnoreCase)
                     .ToDictionary(
                         g => g.Key,
-                        g => g.Min(r => r.Ledger.Date)));
+                        g => g.Min(r => r.Ledger.Date))).ConfigureAwait(false);
 
                 // Issue #754: 残高整合性チェックはスキップ分を含む全レコードで実施
                 // （スキップされたレコードを除外すると前後関係が崩れ、誤った前回残高でエラーになる）
@@ -185,7 +185,7 @@ namespace ICCardManager.Services
                 var newRecords = validRecords.Where(r => !r.IsUpdate).ToList();
                 var uniqueCardIdms = newRecords.Select(r => r.Ledger.CardIdm).Distinct();
                 var existingLedgerKeys = skipExisting
-                    ? await _ledgerRepository.GetExistingLedgerKeysAsync(uniqueCardIdms)
+                    ? await _ledgerRepository.GetExistingLedgerKeysAsync(uniqueCardIdms).ConfigureAwait(false)
                     : new HashSet<(string CardIdm, DateTime Date, string Summary, int Income, int Expense, int Balance)>();
 
                 // インポート実行（履歴はトランザクションなしで直接インポート）
@@ -196,7 +196,7 @@ namespace ICCardManager.Services
                         if (isUpdate)
                         {
                             // 既存レコードを更新
-                            var success = await _ledgerRepository.UpdateAsync(ledger);
+                            var success = await _ledgerRepository.UpdateAsync(ledger).ConfigureAwait(false);
                             if (success)
                             {
                                 updatedCount++;
@@ -222,7 +222,7 @@ namespace ICCardManager.Services
                             }
 
                             // 新規登録
-                            var id = await _ledgerRepository.InsertAsync(ledger);
+                            var id = await _ledgerRepository.InsertAsync(ledger).ConfigureAwait(false);
                             if (id > 0)
                             {
                                 importedCount++;
@@ -315,7 +315,7 @@ namespace ICCardManager.Services
 
             try
             {
-                var lines = await ReadCsvFileAsync(filePath);
+                var lines = await ReadCsvFileAsync(filePath).ConfigureAwait(false);
                 if (lines.Count < 2)
                 {
                     return new CsvImportPreviewResult
@@ -333,7 +333,7 @@ namespace ICCardManager.Services
                 // 全カードのIDmをキャッシュ
                 var existingCardIdms = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                 var cardNameMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-                var allCards = await _cardRepository.GetAllIncludingDeletedAsync();
+                var allCards = await _cardRepository.GetAllIncludingDeletedAsync().ConfigureAwait(false);
                 foreach (var card in allCards)
                 {
                     existingCardIdms.Add(card.CardIdm);
@@ -375,7 +375,7 @@ namespace ICCardManager.Services
                     .GroupBy(r => r.CardIdm, StringComparer.OrdinalIgnoreCase)
                     .ToDictionary(
                         g => g.Key,
-                        g => g.Min(r => r.Date)));
+                        g => g.Min(r => r.Date))).ConfigureAwait(false);
 
                 // Issue #428: 金額の整合性チェック（カードごとに残高の連続性を検証）
                 // Issue #907: 最初の行もDB上の直前残高と照合
@@ -384,7 +384,7 @@ namespace ICCardManager.Services
                 // Issue #334: 既存履歴の重複チェック用キーを取得（新規追加分のみ）
                 // Issue #903: skipExisting=falseの場合は重複チェックを行わない
                 var existingLedgerKeys = skipExisting
-                    ? await _ledgerRepository.GetExistingLedgerKeysAsync(cardIdmsInFile)
+                    ? await _ledgerRepository.GetExistingLedgerKeysAsync(cardIdmsInFile).ConfigureAwait(false)
                     : new HashSet<(string CardIdm, DateTime Date, string Summary, int Income, int Expense, int Balance)>();
 
                 // プレビューアイテムを生成
@@ -396,7 +396,7 @@ namespace ICCardManager.Services
                     if (ledgerId.HasValue)
                     {
                         // IDがある場合は既存レコードを検索
-                        var existingLedger = await _ledgerRepository.GetByIdAsync(ledgerId.Value);
+                        var existingLedger = await _ledgerRepository.GetByIdAsync(ledgerId.Value).ConfigureAwait(false);
                         if (existingLedger != null)
                         {
                             // Issue #639: 金額・日付を含む全フィールドで変更点を検出

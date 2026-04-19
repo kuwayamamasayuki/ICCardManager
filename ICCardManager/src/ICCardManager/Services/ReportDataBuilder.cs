@@ -31,7 +31,7 @@ namespace ICCardManager.Services
         public async Task<MonthlyReportData> BuildAsync(string cardIdm, int year, int month)
         {
             // カード情報を取得
-            var card = await _cardRepository.GetByIdmAsync(cardIdm, includeDeleted: true);
+            var card = await _cardRepository.GetByIdmAsync(cardIdm, includeDeleted: true).ConfigureAwait(false);
             if (card == null)
             {
                 return null;
@@ -41,16 +41,16 @@ namespace ICCardManager.Services
             int? precedingBalance;
             if (month == 4)
             {
-                precedingBalance = await _ledgerRepository.GetCarryoverBalanceAsync(cardIdm, year - 1);
+                precedingBalance = await _ledgerRepository.GetCarryoverBalanceAsync(cardIdm, year - 1).ConfigureAwait(false);
             }
             else
             {
-                precedingBalance = await GetPreviousMonthBalanceAsync(cardIdm, year, month);
+                precedingBalance = await GetPreviousMonthBalanceAsync(cardIdm, year, month).ConfigureAwait(false);
             }
 
             // Issue #784: 残高チェーンに基づいて同一日内の時系列順を復元
             var ledgers = LedgerOrderHelper.ReorderByBalanceChain(
-                (await _ledgerRepository.GetByMonthAsync(cardIdm, year, month))
+                (await _ledgerRepository.GetByMonthAsync(cardIdm, year, month).ConfigureAwait(false))
                     .Where(l => l.Summary != SummaryGenerator.GetLendingSummary()),
                 precedingBalance);
 
@@ -97,7 +97,7 @@ namespace ICCardManager.Services
             var fiscalYearEnd = new DateTime(year, month, DateTime.DaysInMonth(year, month));
             // Issue #784: 残高チェーンに基づいて時系列順を復元
             var yearlyLedgers = LedgerOrderHelper.ReorderByBalanceChain(
-                (await _ledgerRepository.GetByDateRangeAsync(cardIdm, fiscalYearStart, fiscalYearEnd))
+                (await _ledgerRepository.GetByDateRangeAsync(cardIdm, fiscalYearStart, fiscalYearEnd).ConfigureAwait(false))
                     .Where(l => l.Summary != SummaryGenerator.GetLendingSummary()));
 
             // 年度途中の繰越ledgerは受入金額扱いしないため累計から除外する
@@ -184,7 +184,7 @@ namespace ICCardManager.Services
             // 前月の履歴を取得し、最後の残高を返す
             // Issue #784: 残高チェーンに基づいて時系列順を復元
             var previousLedgers = LedgerOrderHelper.ReorderByBalanceChain(
-                (await _ledgerRepository.GetByMonthAsync(cardIdm, previousYear, previousMonth))
+                (await _ledgerRepository.GetByMonthAsync(cardIdm, previousYear, previousMonth).ConfigureAwait(false))
                     .Where(l => l.Summary != SummaryGenerator.GetLendingSummary()));
 
             if (previousLedgers.Count > 0)
@@ -195,7 +195,7 @@ namespace ICCardManager.Services
             // 前月のデータがない場合は、さらに前の月から繰り越しを探す
             // 年度開始月（4月）まで遡って繰越残高を取得
             var fiscalYearStartYear = FiscalYearHelper.GetFiscalYear(year, month);
-            var carryover = await _ledgerRepository.GetCarryoverBalanceAsync(cardIdm, fiscalYearStartYear - 1);
+            var carryover = await _ledgerRepository.GetCarryoverBalanceAsync(cardIdm, fiscalYearStartYear - 1).ConfigureAwait(false);
             return carryover;
         }
     }

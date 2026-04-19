@@ -228,7 +228,7 @@ namespace ICCardManager.Services
                 try
                 {
                     // Issue #1281: 非同期版を使い UI スレッドブロックを回避
-                    var settings = await _settingsRepository.GetAppSettingsAsync();
+                    var settings = await _settingsRepository.GetAppSettingsAsync().ConfigureAwait(false);
                     templatePath = TemplateResolver.ResolveTemplatePath(settings.DepartmentType);
                 }
                 catch (TemplateNotFoundException ex)
@@ -239,7 +239,7 @@ namespace ICCardManager.Services
                 }
 
                 // Issue #501: 新規購入より前の月はスキップ
-                var purchaseDate = await _ledgerRepository.GetPurchaseDateAsync(cardIdm);
+                var purchaseDate = await _ledgerRepository.GetPurchaseDateAsync(cardIdm).ConfigureAwait(false);
                 if (purchaseDate.HasValue)
                 {
                     var requestedMonth = new DateTime(year, month, 1);
@@ -252,7 +252,7 @@ namespace ICCardManager.Services
                 }
 
                 // Issue #841: データ準備を共通化されたReportDataBuilderに委譲
-                var data = await _reportDataBuilder.BuildAsync(cardIdm, year, month);
+                var data = await _reportDataBuilder.BuildAsync(cardIdm, year, month).ConfigureAwait(false);
                 if (data == null)
                 {
                     return ReportGenerationResult.FailureResult(
@@ -606,7 +606,7 @@ namespace ICCardManager.Services
 
             // テンプレートの存在確認を先に行う
             // Issue #1281: 非同期版を使い UI スレッドブロックを回避
-            var batchSettings = await _settingsRepository.GetAppSettingsAsync();
+            var batchSettings = await _settingsRepository.GetAppSettingsAsync().ConfigureAwait(false);
             if (!TemplateResolver.TemplateExists(batchSettings.DepartmentType))
             {
                 try
@@ -641,7 +641,7 @@ namespace ICCardManager.Services
 
             foreach (var cardIdm in cardIdms)
             {
-                var card = await _cardRepository.GetByIdmAsync(cardIdm, includeDeleted: true);
+                var card = await _cardRepository.GetByIdmAsync(cardIdm, includeDeleted: true).ConfigureAwait(false);
                 if (card == null)
                 {
                     results.Add((cardIdm, null, ReportGenerationResult.FailureResult(
@@ -656,7 +656,7 @@ namespace ICCardManager.Services
                 var fileName = GetFiscalYearFileName(card.CardType, card.CardNumber, fiscalYear);
                 var outputPath = Path.Combine(outputFolder, fileName);
 
-                var result = await CreateMonthlyReportAsync(cardIdm, year, month, outputPath);
+                var result = await CreateMonthlyReportAsync(cardIdm, year, month, outputPath).ConfigureAwait(false);
                 results.Add((cardIdm, cardName, result));
             }
 
