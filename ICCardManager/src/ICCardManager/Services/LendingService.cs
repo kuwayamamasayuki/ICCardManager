@@ -453,6 +453,21 @@ namespace ICCardManager.Services
         }
 
         /// <summary>
+        /// 貸出日以降の履歴を抽出する。貸出タッチ忘れに備え貸出日の1週間前から遡る。
+        /// 注意: FeliCa履歴の日付は時刻を含まないため、日付部分のみで比較する。
+        /// </summary>
+        internal static List<LedgerDetail> FilterUsageSinceLent(
+            List<LedgerDetail> detailList, Ledger lentRecord, DateTime now)
+        {
+            var lentAt = lentRecord.LentAt ?? now.AddDays(-1);
+            var lentDate = lentAt.Date;
+            var filterStartDate = lentDate.AddDays(-7);
+            return detailList
+                .Where(d => d.UseDate == null || d.UseDate.Value.Date >= filterStartDate)
+                .ToList();
+        }
+
+        /// <summary>
         /// 貸出レコードを取得。見つからない場合はエラーメッセージを返す。
         /// </summary>
         /// <returns>(LentRecord, ErrorMessage)。ErrorMessage が非 null の場合は失敗。</returns>
@@ -556,17 +571,11 @@ namespace ICCardManager.Services
 
                 // 貸出タッチを忘れた場合でも履歴が正しく記録されるよう、日付フィルタを緩和
                 // 重複チェックは CreateUsageLedgersAsync 内の既存履歴照合（Issue #326）で行う
-                // 注意: FeliCa履歴の日付は時刻を含まないため、日付部分のみで比較する
-                var lentAt = lentRecord.LentAt ?? now.AddDays(-1);
-                var lentDate = lentAt.Date;  // 時刻を切り捨てて日付のみにする
-                // 貸出日の1週間前までの履歴を対象とする（貸出タッチ忘れへの対応）
-                var filterStartDate = lentDate.AddDays(-7);
-                var usageSinceLent = detailList
-                    .Where(d => d.UseDate == null || d.UseDate.Value.Date >= filterStartDate)
-                    .ToList();
+                var usageSinceLent = FilterUsageSinceLent(detailList, lentRecord, now);
 
+                var lentAt = lentRecord.LentAt ?? now.AddDays(-1);
                 _logger.LogDebug("LendingService: 貸出時刻={LentAt}, フィルタ開始日={FilterStart}, 抽出後の履歴件数={Count}",
-                    lentAt.ToString("yyyy-MM-dd HH:mm:ss"), filterStartDate.ToString("yyyy-MM-dd"), usageSinceLent.Count);
+                    lentAt.ToString("yyyy-MM-dd HH:mm:ss"), lentAt.Date.AddDays(-7).ToString("yyyy-MM-dd"), usageSinceLent.Count);
 
                 // 履歴データの詳細をログ出力
                 foreach (var detail in usageSinceLent.Take(5))
