@@ -453,6 +453,38 @@ namespace ICCardManager.Services
         }
 
         /// <summary>
+        /// 返却時の残高解決カスケード。
+        /// 優先順位: (1)カード直接読取値 > (2)作成ledger末尾 > (3)DB 直近 ledger(Issue #1139)。
+        /// </summary>
+        internal async Task<int> ResolveReturnBalanceAsync(
+            List<LedgerDetail> detailList, List<Ledger> createdLedgers, string cardIdm)
+        {
+            var cardBalance = detailList.FirstOrDefault()?.Balance;
+            if (cardBalance.HasValue && cardBalance.Value > 0)
+            {
+                _logger.LogDebug("LendingService: カードから直接読み取った残高を使用: {Balance}円", cardBalance.Value);
+                return cardBalance.Value;
+            }
+
+            var latestCreatedLedger = createdLedgers.LastOrDefault();
+            if (latestCreatedLedger != null)
+            {
+                _logger.LogDebug("LendingService: ledgerレコードの残高を使用: {Balance}円", latestCreatedLedger.Balance);
+                return latestCreatedLedger.Balance;
+            }
+
+            var latestLedger = await _ledgerRepository.GetLatestLedgerAsync(cardIdm);
+            if (latestLedger != null)
+            {
+                _logger.LogInformation(
+                    "ReturnAsync: カード残高を読み取れなかったため、直近の履歴残高を使用: {Balance}円", latestLedger.Balance);
+                return latestLedger.Balance;
+            }
+
+            return 0;
+        }
+
+        /// <summary>
         /// 貸出日以降の履歴を抽出する。貸出タッチ忘れに備え貸出日の1週間前から遡る。
         /// 注意: FeliCa履歴の日付は時刻を含まないため、日付部分のみで比較する。
         /// </summary>
@@ -626,34 +658,7 @@ namespace ICCardManager.Services
                 // 残額チェック（トランザクション外）
                 // カードから直接読み取った残高を優先（履歴の先頭が最新）
                 // FelicaCardReaderで読み取った場合、各LedgerDetail.Balanceには実際の残高が設定されている
-                var cardBalance = detailList.FirstOrDefault()?.Balance;
-                if (cardBalance.HasValue && cardBalance.Value > 0)
-                {
-                    result.Balance = cardBalance.Value;
-                    _logger.LogDebug("LendingService: カードから直接読み取った残高を使用: {Balance}円", result.Balance);
-                }
-                else
-                {
-                    // フォールバック1: 作成したledgerレコードの残高を使用
-                    var latestCreatedLedger = result.CreatedLedgers.LastOrDefault();
-                    if (latestCreatedLedger != null)
-                    {
-                        result.Balance = latestCreatedLedger.Balance;
-                        _logger.LogDebug("LendingService: ledgerレコードの残高を使用: {Balance}円", result.Balance);
-                    }
-                    else
-                    {
-                        // Issue #1139: フォールバック2: DB内の直近の履歴残高を使用
-                        // LendAsync側のIssue #656修正と同等のフォールバック
-                        var latestLedger = await _ledgerRepository.GetLatestLedgerAsync(cardIdm);
-                        if (latestLedger != null)
-                        {
-                            result.Balance = latestLedger.Balance;
-                            _logger.LogInformation(
-                                "ReturnAsync: カード残高を読み取れなかったため、直近の履歴残高を使用: {Balance}円", result.Balance);
-                        }
-                    }
-                }
+                result.Balance = await ResolveReturnBalanceAsync(detailList, result.CreatedLedgers, cardIdm);
 
                 // 低残高チェック
                 var settings = await _settingsRepository.GetAppSettingsAsync();
