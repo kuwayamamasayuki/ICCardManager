@@ -453,6 +453,46 @@ namespace ICCardManager.Services
         }
 
         /// <summary>
+        /// 返却時のトランザクション内処理: 履歴ledger作成 + 貸出レコード削除 + カード状態解除。
+        /// 共有モード時のSQLITE_BUSY対策として ExecuteWithRetryAsync でラップ。
+        /// </summary>
+        internal async Task PersistReturnAsync(
+            string cardIdm,
+            Ledger lentRecord,
+            List<LedgerDetail> usageSinceLent,
+            bool skipDuplicateCheck,
+            LendingResult result)
+        {
+            await _dbContext.ExecuteWithRetryAsync(async () =>
+            {
+                using var scope = await _dbContext.BeginTransactionAsync();
+
+                try
+                {
+                    var createdLedgers = await CreateUsageLedgersAsync(
+                        cardIdm, lentRecord.StaffName ?? string.Empty, usageSinceLent, skipDuplicateCheck);
+
+                    result.CreatedLedgers.AddRange(createdLedgers);
+
+                    result.HasBusUsage = usageSinceLent.Any(d => d.IsBus);
+
+                    // 貸出レコードをすべて削除（履歴に「（貸出中）」が残らないようにする）
+                    // 共有モードで重複した貸出中レコードがある場合にも対応
+                    await _ledgerRepository.DeleteAllLentRecordsAsync(cardIdm);
+
+                    await _cardRepository.UpdateLentStatusAsync(cardIdm, false, null, null);
+
+                    scope.Commit();
+                }
+                catch
+                {
+                    scope.Rollback();
+                    throw;
+                }
+            });
+        }
+
+        /// <summary>
         /// 低残高警告情報を result にセットする。
         /// </summary>
         internal async Task ApplyBalanceWarningAsync(LendingResult result)
@@ -632,38 +672,8 @@ namespace ICCardManager.Services
                 var hadExistingCurrentMonthRecords = existingMonthRecords
                     .Any(l => !l.IsLentRecord);
 
-                // トランザクション開始
-                // 共有モード時のSQLITE_BUSY対策としてリトライでラップ
-                await _dbContext.ExecuteWithRetryAsync(async () =>
-                {
-                    using var scope = await _dbContext.BeginTransactionAsync();
-
-                    try
-                    {
-                        // 利用日ごとにグループ化して履歴を作成
-                        var createdLedgers = await CreateUsageLedgersAsync(
-                            cardIdm, lentRecord.StaffName ?? string.Empty, usageSinceLent, skipDuplicateCheck);
-
-                        result.CreatedLedgers.AddRange(createdLedgers);
-
-                        // バス利用の有無をチェック
-                        result.HasBusUsage = usageSinceLent.Any(d => d.IsBus);
-
-                        // 貸出レコードをすべて削除（履歴に「（貸出中）」が残らないようにする）
-                        // 共有モードで重複した貸出中レコードがある場合にも対応
-                        await _ledgerRepository.DeleteAllLentRecordsAsync(cardIdm);
-
-                        // カードの貸出状態を更新
-                        await _cardRepository.UpdateLentStatusAsync(cardIdm, false, null, null);
-
-                        scope.Commit();
-                    }
-                    catch
-                    {
-                        scope.Rollback();
-                        throw;
-                    }
-                });
+                // トランザクション内で履歴作成 + 貸出レコード削除 + カード状態更新
+                await PersistReturnAsync(cardIdm, lentRecord, usageSinceLent, skipDuplicateCheck, result);
 
                 // 残額チェック（トランザクション外）
                 // カードから直接読み取った残高を優先（履歴の先頭が最新）
