@@ -30,6 +30,7 @@
 
 **リファクタリング**
 - `LendingService.LendAsync` / `ReturnAsync` を責務ごとに internal ヘルパーメソッドへ分割し、可読性とテスト容易性を向上（`LendAsync` 121行 → 62行、`ReturnAsync` 182行 → 99行）。抽出したヘルパー: `ValidateLendPreconditionsAsync` / `ValidateReturnPreconditionsAsync` / `ResolveLentRecordAsync` / `ResolveInitialBalanceAsync` / `InsertLendLedgerAsync` / `FilterUsageSinceLent` / `ResolveReturnBalanceAsync` / `ApplyBalanceWarningAsync` / `PersistReturnAsync`。public API は一切変更せず、既存テストは全件 pass。抽出ヘルパー向けの `LendingServiceHelperTests`（23件）を追加（#1283）
+- `CsvImportService.Ledger.cs`（1031行 → 520行）と `Detail.cs`（1042行 → 761行）を責務分割。(1) Import/Preview 間で重複していた利用履歴行パース ~200 行を `LedgerCsvRowParser` に共通化、(2) 利用履歴詳細の 13 列パースを `LedgerDetailCsvRowParser` に抽出、(3) Detail の「履歴ID空欄→新規 Ledger 自動作成」ロジックを `NewLedgerFromSegmentsBuilder` に責務分離（Issue #906/#918/#1053 関連のロジック）、(4) 検証系 helper 4 メソッドを `CsvImportService.LedgerValidation.cs` partial に分離。public API は一切変更せず、既存 94 件のテストは全件 pass。抽出クラス向けの単体テスト 21 件を追加（`LedgerCsvRowParserTests` / `LedgerDetailCsvRowParserTests` / `NewLedgerFromSegmentsBuilderTests`）（#1284）
 
 ### v2.7.0 (2026-04-15)
 
