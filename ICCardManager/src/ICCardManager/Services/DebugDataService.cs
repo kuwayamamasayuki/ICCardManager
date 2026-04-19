@@ -82,14 +82,14 @@ namespace ICCardManager.Services
         /// </remarks>
         public async Task RegisterAllTestDataAsync()
         {
-            using var scope = await _dbContext.BeginTransactionAsync();
+            using var scope = await _dbContext.BeginTransactionAsync().ConfigureAwait(false);
             try
             {
-                await CleanExistingTestDataAsync();
-                await RegisterTestStaffAsync();
-                await RegisterTestCardsAsync();
-                var (finalBalances, fiscalYearBoundaryBalances) = await RegisterSampleHistoryAsync();
-                await RegisterSpecialScenariosAsync(finalBalances, fiscalYearBoundaryBalances);
+                await CleanExistingTestDataAsync().ConfigureAwait(false);
+                await RegisterTestStaffAsync().ConfigureAwait(false);
+                await RegisterTestCardsAsync().ConfigureAwait(false);
+                var (finalBalances, fiscalYearBoundaryBalances) = await RegisterSampleHistoryAsync().ConfigureAwait(false);
+                await RegisterSpecialScenariosAsync(finalBalances, fiscalYearBoundaryBalances).ConfigureAwait(false);
                 scope.Commit();
             }
             catch
@@ -109,7 +109,7 @@ namespace ICCardManager.Services
         /// </remarks>
         internal async Task CleanExistingTestDataAsync()
         {
-            using var lease = await _dbContext.LeaseConnectionAsync();
+            using var lease = await _dbContext.LeaseConnectionAsync().ConfigureAwait(false);
             var connection = lease.Connection;
 
             var testCardIdms = string.Join(",", TestCardList.Select(c => $"'{c.CardIdm}'"));
@@ -119,28 +119,28 @@ namespace ICCardManager.Services
             using (var cmd = connection.CreateCommand())
             {
                 cmd.CommandText = $"DELETE FROM ledger_detail WHERE ledger_id IN (SELECT id FROM ledger WHERE card_idm IN ({testCardIdms}))";
-                await cmd.ExecuteNonQueryAsync();
+                await cmd.ExecuteNonQueryAsync().ConfigureAwait(false);
             }
 
             // 台帳を削除
             using (var cmd = connection.CreateCommand())
             {
                 cmd.CommandText = $"DELETE FROM ledger WHERE card_idm IN ({testCardIdms})";
-                await cmd.ExecuteNonQueryAsync();
+                await cmd.ExecuteNonQueryAsync().ConfigureAwait(false);
             }
 
             // テストカードを削除
             using (var cmd = connection.CreateCommand())
             {
                 cmd.CommandText = $"DELETE FROM ic_card WHERE card_idm IN ({testCardIdms})";
-                await cmd.ExecuteNonQueryAsync();
+                await cmd.ExecuteNonQueryAsync().ConfigureAwait(false);
             }
 
             // テスト職員を削除
             using (var cmd = connection.CreateCommand())
             {
                 cmd.CommandText = $"DELETE FROM staff WHERE staff_idm IN ({testStaffIdms})";
-                await cmd.ExecuteNonQueryAsync();
+                await cmd.ExecuteNonQueryAsync().ConfigureAwait(false);
             }
 
             System.Diagnostics.Debug.WriteLine("[DEBUG] 既存テストデータを削除しました");
@@ -153,7 +153,7 @@ namespace ICCardManager.Services
         {
             foreach (var staff in TestStaffList)
             {
-                await _staffRepository.InsertAsync(staff);
+                await _staffRepository.InsertAsync(staff).ConfigureAwait(false);
                 System.Diagnostics.Debug.WriteLine($"[DEBUG] テスト職員登録: {staff.Name} ({staff.StaffIdm})");
             }
         }
@@ -165,7 +165,7 @@ namespace ICCardManager.Services
         {
             foreach (var card in TestCardList)
             {
-                await _cardRepository.InsertAsync(card);
+                await _cardRepository.InsertAsync(card).ConfigureAwait(false);
                 System.Diagnostics.Debug.WriteLine($"[DEBUG] テストカード登録: {card.CardType} {card.CardNumber} ({card.CardIdm})");
             }
         }
@@ -259,7 +259,7 @@ namespace ICCardManager.Services
                             StaffName = null,  // チャージは機械操作のため氏名不要
                             Note = "テストデータ"
                         };
-                        var chargeLedgerId = await _ledgerRepository.InsertAsync(chargeLedger);
+                        var chargeLedgerId = await _ledgerRepository.InsertAsync(chargeLedger).ConfigureAwait(false);
 
                         // チャージの詳細レコードを作成
                         var chargeDetail = new LedgerDetail
@@ -271,7 +271,7 @@ namespace ICCardManager.Services
                             IsCharge = true,
                             IsBus = false
                         };
-                        await _ledgerRepository.InsertDetailAsync(chargeDetail);
+                        await _ledgerRepository.InsertDetailAsync(chargeDetail).ConfigureAwait(false);
                     }
 
                     // 1件目: 朝の通勤（往復）
@@ -292,7 +292,7 @@ namespace ICCardManager.Services
                         StaffName = staffName,
                         Note = "テストデータ"
                     };
-                    var usageLedgerId1 = await _ledgerRepository.InsertAsync(usageLedger1);
+                    var usageLedgerId1 = await _ledgerRepository.InsertAsync(usageLedger1).ConfigureAwait(false);
 
                     // 往路の詳細レコード
                     var outboundBalance1 = balance + fare1;
@@ -307,7 +307,7 @@ namespace ICCardManager.Services
                         IsCharge = false,
                         IsBus = false
                     };
-                    await _ledgerRepository.InsertDetailAsync(outboundDetail1);
+                    await _ledgerRepository.InsertDetailAsync(outboundDetail1).ConfigureAwait(false);
 
                     // 復路の詳細レコード
                     var returnDetail1 = new LedgerDetail
@@ -321,7 +321,7 @@ namespace ICCardManager.Services
                         IsCharge = false,
                         IsBus = false
                     };
-                    await _ledgerRepository.InsertDetailAsync(returnDetail1);
+                    await _ledgerRepository.InsertDetailAsync(returnDetail1).ConfigureAwait(false);
 
                     // 2件目: 昼の外出（片道）
                     var fromIdx2 = random.Next(SampleStations.Length);
@@ -341,7 +341,7 @@ namespace ICCardManager.Services
                         StaffName = staffName,
                         Note = "テストデータ"
                     };
-                    var usageLedgerId2 = await _ledgerRepository.InsertAsync(usageLedger2);
+                    var usageLedgerId2 = await _ledgerRepository.InsertAsync(usageLedger2).ConfigureAwait(false);
 
                     // 片道の詳細レコード
                     var onewayDetail = new LedgerDetail
@@ -355,7 +355,7 @@ namespace ICCardManager.Services
                         IsCharge = false,
                         IsBus = false
                     };
-                    await _ledgerRepository.InsertDetailAsync(onewayDetail);
+                    await _ledgerRepository.InsertDetailAsync(onewayDetail).ConfigureAwait(false);
 
                     // 3件目: 50%の確率でバス利用も追加
                     if (random.Next(100) < 50)
@@ -374,7 +374,7 @@ namespace ICCardManager.Services
                             StaffName = staffName,
                             Note = "テストデータ"
                         };
-                        var busLedgerId = await _ledgerRepository.InsertAsync(busLedger);
+                        var busLedgerId = await _ledgerRepository.InsertAsync(busLedger).ConfigureAwait(false);
 
                         // バス利用の詳細レコード
                         var busDetail = new LedgerDetail
@@ -386,7 +386,7 @@ namespace ICCardManager.Services
                             IsCharge = false,
                             IsBus = true
                         };
-                        await _ledgerRepository.InsertDetailAsync(busDetail);
+                        await _ledgerRepository.InsertDetailAsync(busDetail).ConfigureAwait(false);
                     }
                 }
 
@@ -422,17 +422,17 @@ namespace ICCardManager.Services
 
             // ── カード H-001: 乗り継ぎ・ポイント還元・不足分チャージ ──
             var h001Balance = finalBalances.TryGetValue(TestCardList[0].CardIdm, out var bal) ? bal : 10000;
-            await RegisterTransferAndSpecialUsageAsync(TestCardList[0].CardIdm, today, staffName, h001Balance);
+            await RegisterTransferAndSpecialUsageAsync(TestCardList[0].CardIdm, today, staffName, h001Balance).ConfigureAwait(false);
 
             // ── カード N-002: 年度繰越パターン ──
             // Issue #1075: サンプル履歴の年度境界時点の残高を使用（固定値ではなく実際の残高）
             var n002CarryoverBalance = fiscalYearBoundaryBalances.TryGetValue(TestCardList[5].CardIdm, out var n002Bal)
                 ? n002Bal
                 : InitialBalance;
-            await RegisterFiscalYearCarryoverAsync(TestCardList[5].CardIdm, today, staffName, n002CarryoverBalance);
+            await RegisterFiscalYearCarryoverAsync(TestCardList[5].CardIdm, today, staffName, n002CarryoverBalance).ConfigureAwait(false);
 
             // ── カード Su-001: 新規購入・払い戻し ──
-            await RegisterPurchaseAndRefundAsync(TestCardList[3].CardIdm, today, staffName);
+            await RegisterPurchaseAndRefundAsync(TestCardList[3].CardIdm, today, staffName).ConfigureAwait(false);
 
             System.Diagnostics.Debug.WriteLine("[DEBUG] 特殊パターンテストデータ登録完了");
         }
@@ -472,7 +472,7 @@ namespace ICCardManager.Services
                 StaffName = staffName,
                 Note = "テストデータ（2線乗り継ぎ）"
             };
-            var transfer1Id = await _ledgerRepository.InsertAsync(transfer1Ledger);
+            var transfer1Id = await _ledgerRepository.InsertAsync(transfer1Ledger).ConfigureAwait(false);
 
             await _ledgerRepository.InsertDetailAsync(new LedgerDetail
             {
@@ -486,7 +486,7 @@ namespace ICCardManager.Services
                 IsBus = false,
                 GroupId = 1,
                 SequenceNumber = 1
-            });
+            }).ConfigureAwait(false);
             await _ledgerRepository.InsertDetailAsync(new LedgerDetail
             {
                 LedgerId = transfer1Id,
@@ -499,7 +499,7 @@ namespace ICCardManager.Services
                 IsBus = false,
                 GroupId = 1,
                 SequenceNumber = 2
-            });
+            }).ConfigureAwait(false);
 
             // ── 週末日[1] (n=5): 3線乗り継ぎ（博多→天神→薬院→大橋） ──
             var transferFare2A = 210;
@@ -519,7 +519,7 @@ namespace ICCardManager.Services
                 StaffName = staffName,
                 Note = "テストデータ（3線乗り継ぎ）"
             };
-            var transfer2Id = await _ledgerRepository.InsertAsync(transfer2Ledger);
+            var transfer2Id = await _ledgerRepository.InsertAsync(transfer2Ledger).ConfigureAwait(false);
 
             var runningBalance2 = balance + transferFare2B + transferFare2C;
             await _ledgerRepository.InsertDetailAsync(new LedgerDetail
@@ -534,7 +534,7 @@ namespace ICCardManager.Services
                 IsBus = false,
                 GroupId = 2,
                 SequenceNumber = 1
-            });
+            }).ConfigureAwait(false);
             runningBalance2 -= transferFare2B;
             await _ledgerRepository.InsertDetailAsync(new LedgerDetail
             {
@@ -548,7 +548,7 @@ namespace ICCardManager.Services
                 IsBus = false,
                 GroupId = 2,
                 SequenceNumber = 2
-            });
+            }).ConfigureAwait(false);
             runningBalance2 -= transferFare2C;
             await _ledgerRepository.InsertDetailAsync(new LedgerDetail
             {
@@ -562,7 +562,7 @@ namespace ICCardManager.Services
                 IsBus = false,
                 GroupId = 2,
                 SequenceNumber = 3
-            });
+            }).ConfigureAwait(false);
 
             // ── 週末日[2] (n=4): ポイント還元 ──
             var pointAmount = 500;
@@ -579,7 +579,7 @@ namespace ICCardManager.Services
                 StaffName = null,  // ポイント還元は機械操作のため氏名不要
                 Note = "テストデータ（ポイント還元）"
             };
-            var pointLedgerId = await _ledgerRepository.InsertAsync(pointLedger);
+            var pointLedgerId = await _ledgerRepository.InsertAsync(pointLedger).ConfigureAwait(false);
 
             await _ledgerRepository.InsertDetailAsync(new LedgerDetail
             {
@@ -590,7 +590,7 @@ namespace ICCardManager.Services
                 IsCharge = false,
                 IsPointRedemption = true,
                 IsBus = false
-            });
+            }).ConfigureAwait(false);
 
             // ── 週末日[3] (n=3): 残高調整（残高を200円まで消化） ──
             var targetBalance = 200;
@@ -610,7 +610,7 @@ namespace ICCardManager.Services
                     StaffName = staffName,
                     Note = "テストデータ（残高調整用）"
                 };
-                var drainLedgerId = await _ledgerRepository.InsertAsync(drainLedger);
+                var drainLedgerId = await _ledgerRepository.InsertAsync(drainLedger).ConfigureAwait(false);
 
                 await _ledgerRepository.InsertDetailAsync(new LedgerDetail
                 {
@@ -622,7 +622,7 @@ namespace ICCardManager.Services
                     Balance = balance,
                     IsCharge = false,
                     IsBus = false
-                });
+                }).ConfigureAwait(false);
             }
 
             // ── 週末日[4] (n=2): 不足分のみチャージ（残高200円で340円の利用） ──
@@ -641,7 +641,7 @@ namespace ICCardManager.Services
                 StaffName = staffName,
                 Note = SummaryGenerator.GetInsufficientBalanceNote(totalFare, shortfall)
             };
-            var insufficientLedgerId = await _ledgerRepository.InsertAsync(insufficientLedger);
+            var insufficientLedgerId = await _ledgerRepository.InsertAsync(insufficientLedger).ConfigureAwait(false);
 
             await _ledgerRepository.InsertDetailAsync(new LedgerDetail
             {
@@ -653,7 +653,7 @@ namespace ICCardManager.Services
                 Balance = 0,
                 IsCharge = false,
                 IsBus = false
-            });
+            }).ConfigureAwait(false);
             balance = 0;
 
             // ── 週末日[5] (n=1): チャージして残高回復 ──
@@ -671,7 +671,7 @@ namespace ICCardManager.Services
                 StaffName = null,  // チャージは機械操作のため氏名不要
                 Note = "テストデータ（残高回復チャージ）"
             };
-            var recoveryChargeId = await _ledgerRepository.InsertAsync(recoveryCharge);
+            var recoveryChargeId = await _ledgerRepository.InsertAsync(recoveryCharge).ConfigureAwait(false);
 
             await _ledgerRepository.InsertDetailAsync(new LedgerDetail
             {
@@ -681,7 +681,7 @@ namespace ICCardManager.Services
                 Balance = balance,
                 IsCharge = true,
                 IsBus = false
-            });
+            }).ConfigureAwait(false);
 
             System.Diagnostics.Debug.WriteLine("[DEBUG] 特殊パターン(H-001: 乗り継ぎ・ポイント還元・不足分チャージ)登録完了");
         }
@@ -715,7 +715,7 @@ namespace ICCardManager.Services
                 StaffName = staffName,
                 Note = "テストデータ（次年度への繰越）"
             };
-            await _ledgerRepository.InsertAsync(carryoverOut);
+            await _ledgerRepository.InsertAsync(carryoverOut).ConfigureAwait(false);
 
             // ── 4月1日: 前年度からの繰越 ──
             var carryoverIn = new Ledger
@@ -729,7 +729,7 @@ namespace ICCardManager.Services
                 StaffName = staffName,
                 Note = "テストデータ（前年度からの繰越）"
             };
-            await _ledgerRepository.InsertAsync(carryoverIn);
+            await _ledgerRepository.InsertAsync(carryoverIn).ConfigureAwait(false);
 
             System.Diagnostics.Debug.WriteLine($"[DEBUG] 特殊パターン(N-002: 年度繰越)登録完了 (繰越額: {carryoverAmount})");
         }
@@ -761,7 +761,7 @@ namespace ICCardManager.Services
                 StaffName = null,  // 新規購入は機械操作のため氏名不要
                 Note = "テストデータ（新規購入: 2000円カード、デポジット500円を除く）"
             };
-            await _ledgerRepository.InsertAsync(purchaseLedger);
+            await _ledgerRepository.InsertAsync(purchaseLedger).ConfigureAwait(false);
 
             // ── 170日前～3日前: 通常利用データ ──
             for (int daysAgo = 169; daysAgo >= 3; daysAgo--)
@@ -789,7 +789,7 @@ namespace ICCardManager.Services
                         StaffName = null,  // チャージは機械操作のため氏名不要
                         Note = "テストデータ"
                     };
-                    var chargeLedgerId = await _ledgerRepository.InsertAsync(chargeLedger);
+                    var chargeLedgerId = await _ledgerRepository.InsertAsync(chargeLedger).ConfigureAwait(false);
 
                     await _ledgerRepository.InsertDetailAsync(new LedgerDetail
                     {
@@ -799,7 +799,7 @@ namespace ICCardManager.Services
                         Balance = balance,
                         IsCharge = true,
                         IsBus = false
-                    });
+                    }).ConfigureAwait(false);
                 }
 
                 // 鉄道利用（片道）
@@ -819,7 +819,7 @@ namespace ICCardManager.Services
                     StaffName = staffName,
                     Note = "テストデータ"
                 };
-                var usageLedgerId = await _ledgerRepository.InsertAsync(usageLedger);
+                var usageLedgerId = await _ledgerRepository.InsertAsync(usageLedger).ConfigureAwait(false);
 
                 await _ledgerRepository.InsertDetailAsync(new LedgerDetail
                 {
@@ -831,7 +831,7 @@ namespace ICCardManager.Services
                     Balance = balance,
                     IsCharge = false,
                     IsBus = false
-                });
+                }).ConfigureAwait(false);
             }
 
             // ── 2日前: 払い戻し（残高全額を払出） ──
@@ -847,7 +847,7 @@ namespace ICCardManager.Services
                 StaffName = null,  // 払戻しは機械操作のため氏名不要
                 Note = "テストデータ（払い戻し）"
             };
-            await _ledgerRepository.InsertAsync(refundLedger);
+            await _ledgerRepository.InsertAsync(refundLedger).ConfigureAwait(false);
 
             System.Diagnostics.Debug.WriteLine("[DEBUG] 特殊パターン(Su-001: 新規購入→利用→払い戻し)登録完了");
         }

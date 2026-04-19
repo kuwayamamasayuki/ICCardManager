@@ -11,7 +11,7 @@ namespace ICCardManager.Services
     /// MainViewModelから抽出。30秒ごとのDB接続ヘルスチェックと
     /// 1秒ごとの同期経過時間表示を管理する。
     /// </remarks>
-    public class SharedModeMonitor
+    public class SharedModeMonitor : IDisposable
     {
         private readonly IDatabaseInfo _databaseInfo;
         private readonly ITimerFactory _timerFactory;
@@ -21,6 +21,7 @@ namespace ICCardManager.Services
         private ITimer _syncDisplayTimer;
         private DateTime? _lastRefreshTime;
         private bool _isHealthCheckRunning;
+        private bool _disposed;
 
         /// <summary>
         /// 最終同期からの経過がしきい値を超えた場合にstaleとみなす秒数
@@ -49,6 +50,11 @@ namespace ICCardManager.Services
         /// </summary>
         public void Start()
         {
+            if (_disposed)
+            {
+                throw new ObjectDisposedException(nameof(SharedModeMonitor));
+            }
+
             Stop();
 
             _healthCheckTimer = _timerFactory.Create();
@@ -84,6 +90,26 @@ namespace ICCardManager.Services
         }
 
         /// <summary>
+        /// タイマーを停止してインスタンスを破棄する（Issue #1286）。
+        /// 複数回呼び出しても安全（冪等）。Dispose 後の <see cref="Start"/> は
+        /// <see cref="ObjectDisposedException"/> を投げる。
+        /// </summary>
+        /// <remarks>
+        /// 通常のライフサイクル内の停止は <see cref="Stop"/> を使い、
+        /// アプリ終了などの破棄時のみ Dispose を呼ぶこと。
+        /// </remarks>
+        public void Dispose()
+        {
+            if (_disposed)
+            {
+                return;
+            }
+
+            Stop();
+            _disposed = true;
+        }
+
+        /// <summary>
         /// データの同期が完了したことを記録する
         /// </summary>
         public void RecordRefresh()
@@ -110,7 +136,7 @@ namespace ICCardManager.Services
         /// </summary>
         public async Task<bool> CheckConnectionAsync()
         {
-            return await Task.Run(() => _databaseInfo.CheckConnection());
+            return await Task.Run(() => _databaseInfo.CheckConnection()).ConfigureAwait(false);
         }
 
         /// <summary>
@@ -159,7 +185,7 @@ namespace ICCardManager.Services
             _isHealthCheckRunning = true;
             try
             {
-                var isConnected = await CheckConnectionAsync();
+                var isConnected = await CheckConnectionAsync().ConfigureAwait(false);
                 HealthCheckCompleted?.Invoke(this, new DatabaseHealthEventArgs(isConnected));
                 return true;
             }
@@ -172,7 +198,7 @@ namespace ICCardManager.Services
         private async void OnHealthCheckTick(object sender, EventArgs e)
         {
             // async void は例外が伝播しないため、排他制御ロジックは ExecuteHealthCheckAsync に集約
-            await ExecuteHealthCheckAsync();
+            await ExecuteHealthCheckAsync().ConfigureAwait(false);
         }
 
         private void OnSyncDisplayTick(object sender, EventArgs e)

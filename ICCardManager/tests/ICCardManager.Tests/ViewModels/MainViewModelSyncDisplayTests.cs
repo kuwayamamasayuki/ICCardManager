@@ -208,7 +208,7 @@ public class MainViewModelSyncDisplayTests
         var summaryGenerator = new SummaryGenerator();
         var lockManager = new CardLockManager(NullLogger<CardLockManager>.Instance);
         var operationLoggerMock = new Mock<OperationLogger>(
-            new Mock<IOperationLogRepository>().Object, staffRepositoryMock.Object);
+            new Mock<IOperationLogRepository>().Object, Mock.Of<ICurrentOperatorContext>());
         var lendingService = new LendingService(
             dbContext,
             cardRepositoryMock.Object,

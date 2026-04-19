@@ -14,6 +14,7 @@
         MinHeight="600"
         MinWidth="700"
         FontSize="{DynamicResource BaseFontSize}"
+        FocusManager.FocusedElement="{Binding ElementName=ExportDataTypeComboBox}"
         AutomationProperties.Name="データエクスポート/インポートダイアログ"
         AutomationProperties.HelpText="カード、職員、履歴データのCSVエクスポート・インポートができます。Escapeキーで閉じます。">
 
@@ -48,22 +49,26 @@
                            Margin="0,0,0,10"/>
 
                 <!-- データタイプ選択 -->
+                <!-- Issue #1276: TextBlock → Label + Target でアクセスキーとスクリーンリーダー連携を実装 -->
                 <Grid Margin="0,0,0,10">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="120"/>
                         <ColumnDefinition Width="*"/>
                     </Grid.ColumnDefinitions>
-                    <TextBlock Text="データ種別:"
-                               VerticalAlignment="Center"
-                               FontSize="{DynamicResource BaseFontSize}"/>
-                    <ComboBox Grid.Column="1"
+                    <Label Content="データ種別(_T):"
+                           Target="{Binding ElementName=ExportDataTypeComboBox}"
+                           VerticalAlignment="Center"
+                           Padding="0"
+                           FontSize="{DynamicResource BaseFontSize}"/>
+                    <ComboBox x:Name="ExportDataTypeComboBox"
+                              Grid.Column="1"
                               ItemsSource="{Binding ExportDataTypes}"
                               SelectedItem="{Binding SelectedExportType}"
                               Padding="8"
                               HorizontalAlignment="Left"
                               Width="200"
                               AutomationProperties.Name="エクスポートするデータ種別"
-                              ToolTip="エクスポートするデータの種類を選択します">
+                              ToolTip="エクスポートするデータの種類を選択します（アクセスキー: Alt+T）">
                         <ComboBox.ItemTemplate>
                             <DataTemplate>
                                 <TextBlock Text="{Binding Converter={StaticResource DataTypeConverter}}"/>
@@ -81,20 +86,24 @@
                         <ColumnDefinition Width="Auto"/>
                         <ColumnDefinition Width="Auto"/>
                     </Grid.ColumnDefinitions>
-                    <TextBlock Text="対象期間:"
-                               VerticalAlignment="Center"
-                               FontSize="{DynamicResource BaseFontSize}"/>
-                    <DatePicker Grid.Column="1"
+                    <Label Content="対象期間(_S):"
+                           Target="{Binding ElementName=ExportStartDatePicker}"
+                           VerticalAlignment="Center"
+                           Padding="0"
+                           FontSize="{DynamicResource BaseFontSize}"/>
+                    <DatePicker x:Name="ExportStartDatePicker"
+                                Grid.Column="1"
                                 SelectedDate="{Binding ExportStartDate}"
                                 Padding="5"
                                 Width="130"
                                 AutomationProperties.Name="開始日"
-                                ToolTip="エクスポート対象期間の開始日"/>
+                                ToolTip="エクスポート対象期間の開始日（アクセスキー: Alt+S）"/>
                     <TextBlock Grid.Column="2"
                                Text=" ～ "
                                VerticalAlignment="Center"
                                Margin="5,0"/>
-                    <DatePicker Grid.Column="3"
+                    <DatePicker x:Name="ExportEndDatePicker"
+                                Grid.Column="3"
                                 SelectedDate="{Binding ExportEndDate}"
                                 Padding="5"
                                 Width="130"
@@ -109,22 +118,22 @@
                         <ColumnDefinition Width="*"/>
                     </Grid.ColumnDefinitions>
                     <CheckBox Grid.Column="1"
-                              Content="削除済みデータを含める"
+                              Content="削除済みデータを含める(_D)"
                               IsChecked="{Binding IncludeDeletedInExport}"
                               VerticalAlignment="Center"
                               AutomationProperties.Name="削除済みデータを含める"
-                              ToolTip="論理削除されたデータもエクスポートに含めます"/>
+                              ToolTip="論理削除されたデータもエクスポートに含めます（アクセスキー: Alt+D）"/>
                 </Grid>
 
                 <!-- エクスポートボタン -->
-                <Button Content="CSVエクスポート"
+                <Button Content="CSVエクスポート(_X)"
                         Command="{Binding ExportCommand}"
                         Padding="15,10"
                         HorizontalAlignment="Left"
                         Background="{DynamicResource SuccessActionBrush}"
                         Foreground="{DynamicResource OnPrimaryBrush}"
                         AutomationProperties.Name="CSVエクスポート実行"
-                        ToolTip="選択したデータをCSVファイルにエクスポートします"/>
+                        ToolTip="選択したデータをCSVファイルにエクスポートします（アクセスキー: Alt+X）"/>
 
                 <!-- 最後にエクスポートしたファイル -->
                 <StackPanel Orientation="Horizontal"
@@ -171,17 +180,20 @@
                         <ColumnDefinition Width="120"/>
                         <ColumnDefinition Width="*"/>
                     </Grid.ColumnDefinitions>
-                    <TextBlock Text="データ種別:"
-                               VerticalAlignment="Center"
-                               FontSize="{DynamicResource BaseFontSize}"/>
-                    <ComboBox Grid.Column="1"
+                    <Label Content="データ種別(_I):"
+                           Target="{Binding ElementName=ImportDataTypeComboBox}"
+                           VerticalAlignment="Center"
+                           Padding="0"
+                           FontSize="{DynamicResource BaseFontSize}"/>
+                    <ComboBox x:Name="ImportDataTypeComboBox"
+                              Grid.Column="1"
                               ItemsSource="{Binding ImportDataTypes}"
                               SelectedItem="{Binding SelectedImportType}"
                               Padding="8"
                               HorizontalAlignment="Left"
                               Width="200"
                               AutomationProperties.Name="インポートするデータ種別"
-                              ToolTip="インポートするデータの種類を選択します">
+                              ToolTip="インポートするデータの種類を選択します（アクセスキー: Alt+I）">
                         <ComboBox.ItemTemplate>
                             <DataTemplate>
                                 <TextBlock Text="{Binding Converter={StaticResource DataTypeConverter}}"/>
@@ -197,11 +209,11 @@
                         <ColumnDefinition Width="*"/>
                     </Grid.ColumnDefinitions>
                     <CheckBox Grid.Column="1"
-                              Content="既存データはスキップする"
+                              Content="既存データはスキップする(_K)"
                               IsChecked="{Binding SkipExistingOnImport}"
                               VerticalAlignment="Center"
                               AutomationProperties.Name="既存データをスキップ"
-                              ToolTip="同じIDmのデータが既に存在する場合はスキップします（オフの場合は上書き更新）"/>
+                              ToolTip="同じIDmのデータが既に存在する場合はスキップします（オフの場合は上書き更新）（アクセスキー: Alt+K）"/>
                 </Grid>
 
                 <!-- Issue #511: カード指定セクション（利用履歴インポート時のみ表示） -->
@@ -350,14 +362,14 @@
 
         <!-- アクションボタン（常に表示） -->
         <StackPanel Grid.Row="2" Orientation="Horizontal" Margin="0,0,0,10">
-            <Button Content="プレビュー"
+            <Button Content="プレビュー(_P)"
                     Command="{Binding PreviewImportCommand}"
                     Padding="15,10"
                     Background="{DynamicResource WarningActionBrush}"
                     Foreground="{DynamicResource OnPrimaryBrush}"
                     AutomationProperties.Name="インポートプレビュー"
-                    ToolTip="CSVファイルの内容をプレビューし、変更点を確認します"/>
-            <Button Content="インポート実行"
+                    ToolTip="CSVファイルの内容をプレビューし、変更点を確認します（アクセスキー: Alt+P）"/>
+            <Button Content="インポート実行(_M)"
                     Command="{Binding ExecuteImportCommand}"
                     Padding="15,10"
                     Margin="10,0,0,0"
@@ -365,15 +377,15 @@
                     Foreground="{DynamicResource OnPrimaryBrush}"
                     IsEnabled="{Binding HasPreview}"
                     AutomationProperties.Name="インポート実行"
-                    ToolTip="プレビュー済みのデータをインポートします"/>
-            <Button Content="直接インポート"
+                    ToolTip="プレビュー済みのデータをインポートします（アクセスキー: Alt+M）"/>
+            <Button Content="直接インポート(_R)"
                     Command="{Binding ImportCommand}"
                     Padding="15,10"
                     Margin="10,0,0,0"
                     Background="{DynamicResource HeaderBackgroundBrush}"
                     Foreground="{DynamicResource OnPrimaryBrush}"
                     AutomationProperties.Name="直接CSVインポート"
-                    ToolTip="プレビューなしで直接インポートします"/>
+                    ToolTip="プレビューなしで直接インポートします（アクセスキー: Alt+R）"/>
         </StackPanel>
 
         <!-- ステータスメッセージ -->
@@ -584,13 +596,13 @@
                     Orientation="Horizontal"
                     HorizontalAlignment="Right"
                     Margin="0,15,0,0">
-            <Button Content="閉じる"
+            <Button Content="閉じる(_C)"
                     Click="CloseButton_Click"
                     Padding="20,10"
                     MinWidth="100"
                     IsCancel="True"
                     AutomationProperties.Name="ダイアログを閉じる"
-                    ToolTip="ダイアログを閉じます (Escape)"/>
+                    ToolTip="ダイアログを閉じます (Escape / Alt+C)"/>
         </StackPanel>
 
         <!-- 処理中オーバーレイ -->

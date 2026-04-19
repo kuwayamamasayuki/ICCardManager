@@ -324,11 +324,23 @@ namespace ICCardManager.Data
         /// 接続リースを同期で取得する。using文で使用すること。
         /// </summary>
         /// <remarks>
-        /// 同期メソッド（InitializeDatabase, CleanupOldData等）で使用する。
-        /// 同一スレッド内ではリエントラント。
+        /// <para>同期メソッド（InitializeDatabase, CleanupOldData等）で使用する。
+        /// 同一スレッド内ではリエントラント。</para>
+        /// <para>
+        /// <b>重要（Issue #1281）:</b> このメソッドは WPF の UI スレッドから呼び出してはならない。
+        /// 内部で <c>_semaphore.Wait()</c> により UI スレッドがブロックされるため、
+        /// 別スレッドで進行中の非同期トランザクション継続が Dispatcher 経由で UI スレッドに
+        /// 戻ろうとする際にデッドロックが発生する。UI 層からは <see cref="LeaseConnectionAsync"/>
+        /// を使うか、<c>Task.Run</c> でバックグラウンドスレッドにオフロードすること。
+        /// 違反を検出した場合は <see cref="InvalidOperationException"/> をスローする。
+        /// </para>
         /// </remarks>
+        /// <exception cref="InvalidOperationException">WPF の UI スレッドから呼び出された場合</exception>
         public ConnectionLease LeaseConnection()
         {
+            // Issue #1281: UI スレッドからの呼び出しを検出して拒否する
+            ThrowIfOnUiThread();
+
             if (_reentrancyCount.Value > 0)
             {
                 _reentrancyCount.Value++;
@@ -346,6 +358,53 @@ namespace ICCardManager.Data
                     catch (ObjectDisposedException) { /* DbContext.Dispose()後のリース解放 */ }
                 }
             });
+        }
+
+        /// <summary>
+        /// Issue #1281: UI スレッド検出用のフック（AsyncLocal）。
+        /// AsyncLocal のため並列に動くテスト間で状態が干渉しない。
+        /// 値が null のとき既定検出（<see cref="DefaultIsOnUiThread"/>）を使用する。
+        /// テストから差し替え可能（内部 API）。
+        /// </summary>
+        private static readonly AsyncLocal<Func<bool>?> _isOnUiThreadOverride = new();
+
+        /// <summary>
+        /// UI スレッド検出のオーバーライド用プロパティ（テスト専用）。
+        /// null 代入で既定検出に戻る。<see cref="AsyncLocal{T}"/> ベースのため
+        /// xUnit が並列実行するテスト間で状態が漏れない。
+        /// </summary>
+        internal static Func<bool> IsOnUiThread
+        {
+            get => _isOnUiThreadOverride.Value ?? DefaultIsOnUiThread;
+            set => _isOnUiThreadOverride.Value = value;
+        }
+
+        /// <summary>
+        /// 既定の UI スレッド検出: <see cref="SynchronizationContext.Current"/> の型名で判定する。
+        /// System.Windows を直接参照せずに WPF Dispatcher スレッドを検出できる。
+        /// </summary>
+        private static bool DefaultIsOnUiThread()
+        {
+            var context = SynchronizationContext.Current;
+            return context != null &&
+                   context.GetType().FullName == "System.Windows.Threading.DispatcherSynchronizationContext";
+        }
+
+        /// <summary>
+        /// UI スレッドから呼び出されていた場合に <see cref="InvalidOperationException"/> をスローする。
+        /// </summary>
+        private static void ThrowIfOnUiThread()
+        {
+            if (IsOnUiThread())
+            {
+                throw new InvalidOperationException(
+                    "DbContext.LeaseConnection() は WPF UI スレッドから呼び出せません。" +
+                    "内部の SemaphoreSlim.Wait() が UI スレッドをブロックし、" +
+                    "バックグラウンドで進行中の非同期トランザクション継続が Dispatcher 経由で " +
+                    "UI スレッドに戻ろうとした際にデッドロックを引き起こす危険があります。" +
+                    "UI 層からは LeaseConnectionAsync() を使用するか、" +
+                    "Task.Run でバックグラウンドスレッドにオフロードしてから呼び出してください。");
+            }
         }
 
         /// <summary>
@@ -899,7 +958,7 @@ namespace ICCardManager.Data
             {
                 try
                 {
-                    return await operation();
+                    return await operation().ConfigureAwait(false);
                 }
                 catch (SQLiteException ex) when (
                     attempt < delays.Length &&
@@ -917,7 +976,7 @@ namespace ICCardManager.Data
                     System.Diagnostics.Debug.WriteLine(
                         $"[DbContext] DB操作リトライ（{attempt + 1}/{delays.Length}回目、{totalDelay}ms待機）: {ex.ResultCode}");
 #endif
-                    await Task.Delay(totalDelay, cancellationToken);
+                    await Task.Delay(totalDelay, cancellationToken).ConfigureAwait(false);
                 }
             }
         }
@@ -929,9 +988,9 @@ namespace ICCardManager.Data
         {
             await ExecuteWithRetryAsync(async () =>
             {
-                await operation();
+                await operation().ConfigureAwait(false);
                 return 0;
-            }, cancellationToken);
+            }, cancellationToken).ConfigureAwait(false);
         }
 
         /// <summary>
@@ -968,8 +1027,14 @@ namespace ICCardManager.Data
                 // 接続一時停止中 — ネットワーク切断ではない
                 return true;
             }
-            catch (Exception)
+            catch (Exception ex)
             {
+                // Issue #1282: 疎通確認なので「失敗=未到達」を戻り値で通知するのが仕様。
+                // ただしサイレント握りつぶしはトラブル時のデバッグを困難にするため、
+                // LogDebug で失敗理由を残す。接続断は運用上頻繁に起きる想定のため
+                // LogWarning ではなく LogDebug を選択（ログファイルの肥大化を避ける）。
+                _logger?.LogDebug(ex,
+                    "DB接続疎通確認に失敗。呼び出し元には false を返す（ネットワーク断または読み取りエラー）");
                 return false;
             }
         }

@@ -19,12 +19,16 @@ namespace ICCardManager.Data.Migrations
 
         public void Up(SQLiteConnection connection, SQLiteTransaction transaction)
         {
-            ExecuteNonQuery(connection, transaction,
-                "ALTER TABLE ic_card ADD COLUMN carryover_income_total INTEGER DEFAULT 0");
-            ExecuteNonQuery(connection, transaction,
-                "ALTER TABLE ic_card ADD COLUMN carryover_expense_total INTEGER DEFAULT 0");
-            ExecuteNonQuery(connection, transaction,
-                "ALTER TABLE ic_card ADD COLUMN carryover_fiscal_year INTEGER");
+            // Issue #1285: AddColumnIfNotExists で冪等化
+            MigrationHelpers.AddColumnIfNotExists(
+                connection, transaction,
+                "ic_card", "carryover_income_total", "INTEGER DEFAULT 0");
+            MigrationHelpers.AddColumnIfNotExists(
+                connection, transaction,
+                "ic_card", "carryover_expense_total", "INTEGER DEFAULT 0");
+            MigrationHelpers.AddColumnIfNotExists(
+                connection, transaction,
+                "ic_card", "carryover_fiscal_year", "INTEGER");
         }
 
         public void Down(SQLiteConnection connection, SQLiteTransaction transaction)

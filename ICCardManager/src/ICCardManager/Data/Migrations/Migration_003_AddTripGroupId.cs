@@ -22,10 +22,11 @@ namespace ICCardManager.Data.Migrations
 
         public void Up(SQLiteConnection connection, SQLiteTransaction transaction)
         {
-            // ledger_detailテーブルにgroup_idカラムを追加
+            // Issue #1285: AddColumnIfNotExists で冪等化
             // NULL = 自動判定、同じ値 = 同一グループ（乗り継ぎ）として扱う
-            ExecuteNonQuery(connection, transaction,
-                "ALTER TABLE ledger_detail ADD COLUMN group_id INTEGER");
+            MigrationHelpers.AddColumnIfNotExists(
+                connection, transaction,
+                "ledger_detail", "group_id", "INTEGER");
         }
 
         public void Down(SQLiteConnection connection, SQLiteTransaction transaction)

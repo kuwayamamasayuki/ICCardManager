@@ -1,6 +1,7 @@
 using FluentAssertions;
 using ICCardManager.Data;
 using ICCardManager.Data.Repositories;
+using ICCardManager.Infrastructure.Timing;
 using ICCardManager.Models;
 using ICCardManager.Services;
 using Moq;
@@ -16,22 +17,30 @@ namespace ICCardManager.Tests.Services;
 
 /// <summary>
 /// OperationLoggerの単体テスト
+/// Issue #1265: 操作者情報は ICurrentOperatorContext から一元的に解決される。
+/// 旧シグネチャに渡された operatorIdm は無視される（監査ログなりすまし防止）。
 /// </summary>
 public class OperationLoggerTests : IDisposable
 {
     private readonly DbContext _dbContext;
     private readonly OperationLogRepository _operationLogRepository;
-    private readonly Mock<IStaffRepository> _staffRepositoryMock;
+    private readonly Mock<ISystemClock> _clockMock;
+    private readonly CurrentOperatorContext _operatorContext;
     private readonly OperationLogger _logger;
+    private DateTime _now;
 
     public OperationLoggerTests()
     {
         _dbContext = new DbContext(":memory:");
         _dbContext.InitializeDatabase();
         _operationLogRepository = new OperationLogRepository(_dbContext);
-        _staffRepositoryMock = new Mock<IStaffRepository>();
 
-        _logger = new OperationLogger(_operationLogRepository, _staffRepositoryMock.Object);
+        _now = new DateTime(2026, 4, 17, 10, 0, 0);
+        _clockMock = new Mock<ISystemClock>();
+        _clockMock.Setup(c => c.Now).Returns(() => _now);
+        _operatorContext = new CurrentOperatorContext(_clockMock.Object);
+
+        _logger = new OperationLogger(_operationLogRepository, _operatorContext);
     }
 
     public void Dispose()
@@ -40,25 +49,34 @@ public class OperationLoggerTests : IDisposable
         GC.SuppressFinalize(this);
     }
 
-    #region LogLedgerUpdateAsync GUI操作テスト
+    #region GuiOperator 定数テスト
 
-    /// <summary>
-    /// operatorIdmがnullの場合、GUI操作用識別子が使用されること
-    /// </summary>
+    /// <summary>GUI操作用識別子の値が正しいことを確認</summary>
     [Fact]
-    public async Task LogLedgerUpdateAsync_WithNullOperatorIdm_UsesGuiIdentifier()
+    public void GuiOperator_HasCorrectValues()
     {
-        // Arrange
+        OperationLogger.GuiOperator.Idm.Should().Be("0000000000000000");
+        OperationLogger.GuiOperator.Idm.Should().HaveLength(16);
+        OperationLogger.GuiOperator.Name.Should().Be("GUI操作");
+    }
+
+    #endregion
+
+    #region 新API: context なし → GuiOperator フォールバック
+
+    [Fact]
+    public async Task LogLedgerUpdateAsync_WithoutContext_UsesGuiIdentifier()
+    {
+        // Arrange: context 未設定
         var beforeLedger = CreateTestLedger(summary: "変更前");
         var afterLedger = CreateTestLedger(summary: "変更後");
 
-        // Act
-        await _logger.LogLedgerUpdateAsync(null, beforeLedger, afterLedger);
+        // Act: 新 API（operator 引数なし）
+        await _logger.LogLedgerUpdateAsync(beforeLedger, afterLedger);
 
         // Assert
         var logs = await _operationLogRepository.GetByOperatorAsync(OperationLogger.GuiOperator.Idm);
         logs.Should().HaveCount(1);
-
         var log = logs.First();
         log.OperatorIdm.Should().Be(OperationLogger.GuiOperator.Idm);
         log.OperatorName.Should().Be(OperationLogger.GuiOperator.Name);
@@ -66,405 +84,308 @@ public class OperationLoggerTests : IDisposable
         log.Action.Should().Be(OperationLogger.Actions.Update);
     }
 
-    /// <summary>
-    /// operatorIdmが空文字列の場合、GUI操作用識別子が使用されること
-    /// </summary>
     [Fact]
-    public async Task LogLedgerUpdateAsync_WithEmptyOperatorIdm_UsesGuiIdentifier()
+    public async Task LogStaffInsertAsync_WithoutContext_UsesGuiIdentifier()
     {
-        // Arrange
-        var beforeLedger = CreateTestLedger(summary: "変更前");
-        var afterLedger = CreateTestLedger(summary: "変更後");
+        var staff = CreateTestStaff();
 
-        // Act
-        await _logger.LogLedgerUpdateAsync(string.Empty, beforeLedger, afterLedger);
+        await _logger.LogStaffInsertAsync(staff);
 
-        // Assert
-        var logs = await _operationLogRepository.GetByOperatorAsync(OperationLogger.GuiOperator.Idm);
+        var logs = await _operationLogRepository.GetByTargetAsync(OperationLogger.Tables.Staff, staff.StaffIdm);
         logs.Should().HaveCount(1);
-
         var log = logs.First();
         log.OperatorIdm.Should().Be(OperationLogger.GuiOperator.Idm);
         log.OperatorName.Should().Be(OperationLogger.GuiOperator.Name);
-    }
-
-    /// <summary>
-    /// 有効なoperatorIdmが渡された場合、そのIDmが使用されること
-    /// </summary>
-    [Fact]
-    public async Task LogLedgerUpdateAsync_WithValidOperatorIdm_UsesProvidedIdm()
-    {
-        // Arrange
-        const string operatorIdm = "FFFF000000000001";
-        const string operatorName = "テスト職員";
-        var staff = new Staff { StaffIdm = operatorIdm, Name = operatorName };
-
-        _staffRepositoryMock
-            .Setup(x => x.GetByIdmAsync(operatorIdm, true))
-            .ReturnsAsync(staff);
-
-        var beforeLedger = CreateTestLedger(summary: "変更前");
-        var afterLedger = CreateTestLedger(summary: "変更後");
-
-        // Act
-        await _logger.LogLedgerUpdateAsync(operatorIdm, beforeLedger, afterLedger);
-
-        // Assert
-        var logs = await _operationLogRepository.GetByOperatorAsync(operatorIdm);
-        logs.Should().HaveCount(1);
-
-        var log = logs.First();
-        log.OperatorIdm.Should().Be(operatorIdm);
-        log.OperatorName.Should().Be(operatorName);
-    }
-
-    /// <summary>
-    /// GUI操作用識別子の値が正しいことを確認
-    /// </summary>
-    [Fact]
-    public void GuiOperator_HasCorrectValues()
-    {
-        // Assert
-        OperationLogger.GuiOperator.Idm.Should().Be("0000000000000000");
-        OperationLogger.GuiOperator.Idm.Should().HaveLength(16);
-        OperationLogger.GuiOperator.Name.Should().Be("GUI操作");
-    }
-
-    /// <summary>
-    /// GUI操作のログに変更前・変更後のデータが正しく記録されること
-    /// </summary>
-    [Fact]
-    public async Task LogLedgerUpdateAsync_WithGuiOperation_RecordsBeforeAndAfterData()
-    {
-        // Arrange
-        var beforeLedger = CreateTestLedger(id: 1, summary: "バス（★）");
-        var afterLedger = CreateTestLedger(id: 1, summary: "バス（天神～博多）");
-
-        // Act
-        await _logger.LogLedgerUpdateAsync(null, beforeLedger, afterLedger);
-
-        // Assert
-        var logs = await _operationLogRepository.GetByTargetAsync(
-            OperationLogger.Tables.Ledger,
-            afterLedger.Id.ToString());
-        logs.Should().HaveCount(1);
-
-        var log = logs.First();
-        log.BeforeData.Should().Contain("バス（★）");
-        log.AfterData.Should().Contain("バス（天神～博多）");
+        log.Action.Should().Be(OperationLogger.Actions.Insert);
     }
 
     #endregion
 
-    #region Staff ログ
+    #region 新API: context あり → context 値を使用
+
+    [Fact]
+    public async Task LogLedgerDeleteAsync_WithContext_RecordsContextOperator()
+    {
+        // Arrange: 認証済み operator を context に設定
+        const string authIdm = "AAAA000000000001";
+        const string authName = "認証済み職員";
+        _operatorContext.BeginSession(authIdm, authName);
+
+        var ledger = CreateTestLedger(id: 99, summary: "削除対象");
+
+        // Act
+        await _logger.LogLedgerDeleteAsync(ledger);
+
+        // Assert
+        var logs = await _operationLogRepository.GetByTargetAsync(OperationLogger.Tables.Ledger, "99");
+        var log = logs.Single();
+        log.OperatorIdm.Should().Be(authIdm);
+        log.OperatorName.Should().Be(authName);
+        log.Action.Should().Be(OperationLogger.Actions.Delete);
+    }
+
+    [Fact]
+    public async Task LogStaffInsertAsync_WithContext_RecordsContextOperator()
+    {
+        _operatorContext.BeginSession("BBBB000000000002", "山田 花子");
+
+        var staff = CreateTestStaff();
+        await _logger.LogStaffInsertAsync(staff);
+
+        var log = (await _operationLogRepository.GetByTargetAsync(OperationLogger.Tables.Staff, staff.StaffIdm)).Single();
+        log.OperatorIdm.Should().Be("BBBB000000000002");
+        log.OperatorName.Should().Be("山田 花子");
+    }
+
+    #endregion
+
+    #region Issue #1265: 監査ログなりすまし防止
 
     /// <summary>
-    /// LogStaffInsertAsync: GUI操作で staff テーブル・INSERT・After のみが記録される
+    /// 旧 API に操作者 IDm を渡しても、context が設定されている場合は
+    /// context の値が優先される（呼び出し側は他人の IDm でなりすますことができない）。
     /// </summary>
     [Fact]
-    public async Task LogStaffInsertAsync_GuiOperation_RecordsCorrectly()
+    public async Task ObsoleteApi_WithContext_IgnoresPassedOperatorIdm_AntiSpoofing()
     {
-        var staff = CreateTestStaff();
+        // Arrange: 実際の認証操作者は AAAA...
+        const string authenticatedIdm = "AAAA000000000001";
+        const string authenticatedName = "認証済み職員";
+        _operatorContext.BeginSession(authenticatedIdm, authenticatedName);
 
-        await _logger.LogStaffInsertAsync(null, staff);
+        // 攻撃者が悪意を持って他の職員の IDm を渡す
+        const string spoofedIdm = "FFFF000000000002";
+        var ledger = CreateTestLedger(id: 50, summary: "なりすましターゲット");
 
-        var logs = await _operationLogRepository.GetByTargetAsync(
-            OperationLogger.Tables.Staff, staff.StaffIdm);
-        logs.Should().HaveCount(1);
-        var log = logs.First();
-        log.Action.Should().Be(OperationLogger.Actions.Insert);
-        log.OperatorIdm.Should().Be(OperationLogger.GuiOperator.Idm);
-        log.OperatorName.Should().Be(OperationLogger.GuiOperator.Name);
-        log.BeforeData.Should().BeNull();
-        log.AfterData.Should().NotBeNullOrEmpty();
-        log.AfterData.Should().Contain(staff.Name);
+        // Act: [Obsolete] な旧 API に偽の IDm を渡す
+#pragma warning disable CS0618 // Obsolete 警告を抑制（このテストこそが非推奨 API の振る舞いを検証）
+        await _logger.LogLedgerDeleteAsync(spoofedIdm, ledger);
+#pragma warning restore CS0618
+
+        // Assert: 記録は context の認証済み操作者で行われ、偽IDm は記録されない
+        var spoofedLogs = await _operationLogRepository.GetByOperatorAsync(spoofedIdm);
+        spoofedLogs.Should().BeEmpty("なりすまし IDm でのログは一切記録されてはならない");
+
+        var authenticatedLogs = await _operationLogRepository.GetByOperatorAsync(authenticatedIdm);
+        authenticatedLogs.Should().HaveCount(1);
+        authenticatedLogs.Single().OperatorName.Should().Be(authenticatedName);
     }
 
     /// <summary>
-    /// LogStaffUpdateAsync: Before/After 両方が記録される
+    /// context が未設定のときに旧 API に操作者 IDm を渡しても、
+    /// それは無視され GUI 操作としてフォールバックする（引数経由でのなりすましを防ぐ）。
     /// </summary>
+    [Fact]
+    public async Task ObsoleteApi_WithoutContext_IgnoresPassedOperatorIdm_FallsBackToGui()
+    {
+        // Arrange: context 未設定
+        const string spoofedIdm = "FFFF000000000003";
+        var ledger = CreateTestLedger(id: 51, summary: "context未設定の偽称ターゲット");
+
+        // Act: 悪意ある呼び出し側が他の職員の IDm を渡す
+#pragma warning disable CS0618
+        await _logger.LogLedgerDeleteAsync(spoofedIdm, ledger);
+#pragma warning restore CS0618
+
+        // Assert: 偽 IDm のログは一切作られず、GUI 操作として記録される
+        var spoofedLogs = await _operationLogRepository.GetByOperatorAsync(spoofedIdm);
+        spoofedLogs.Should().BeEmpty();
+
+        var guiLogs = await _operationLogRepository.GetByOperatorAsync(OperationLogger.GuiOperator.Idm);
+        guiLogs.Should().HaveCount(1);
+        guiLogs.Single().OperatorName.Should().Be(OperationLogger.GuiOperator.Name);
+    }
+
+    /// <summary>
+    /// セッション失効後は、旧 API 経由の操作者 IDm も context も使われず GUI 操作扱い。
+    /// </summary>
+    [Fact]
+    public async Task ObsoleteApi_AfterContextExpiration_UsesGuiIdentifier()
+    {
+        // Arrange: 短い有効期間の context
+        var shortLived = new CurrentOperatorContext(_clockMock.Object, TimeSpan.FromSeconds(10));
+        shortLived.BeginSession("CCCC000000000003", "期限切れ予定職員");
+        var logger = new OperationLogger(_operationLogRepository, shortLived);
+
+        // 11 秒経過 → セッション失効
+        _now = _now.AddSeconds(11);
+
+        var ledger = CreateTestLedger(id: 52, summary: "失効後ターゲット");
+
+        // Act
+#pragma warning disable CS0618
+        await logger.LogLedgerDeleteAsync("FFFF000000000004", ledger);
+#pragma warning restore CS0618
+
+        // Assert: GUI 操作としてフォールバック
+        var logs = await _operationLogRepository.GetByTargetAsync(OperationLogger.Tables.Ledger, "52");
+        var log = logs.Single();
+        log.OperatorIdm.Should().Be(OperationLogger.GuiOperator.Idm);
+        log.OperatorName.Should().Be(OperationLogger.GuiOperator.Name);
+    }
+
+    #endregion
+
+    #region 後方互換: 旧 API は新 API と同じ結果を返す
+
+    [Fact]
+    public async Task ObsoleteLogStaffInsertAsync_DelegatesToNewApi()
+    {
+        var staff = CreateTestStaff();
+
+#pragma warning disable CS0618
+        await _logger.LogStaffInsertAsync(null, staff);
+#pragma warning restore CS0618
+
+        var log = (await _operationLogRepository.GetByTargetAsync(OperationLogger.Tables.Staff, staff.StaffIdm)).Single();
+        log.Action.Should().Be(OperationLogger.Actions.Insert);
+        log.OperatorIdm.Should().Be(OperationLogger.GuiOperator.Idm);
+        log.BeforeData.Should().BeNull();
+        log.AfterData.Should().NotBeNullOrEmpty();
+    }
+
+    [Fact]
+    public async Task ObsoleteLogLedgerMergeAsync_DelegatesToNewApi()
+    {
+        var src1 = CreateTestLedger(id: 1, summary: "元1");
+        var src2 = CreateTestLedger(id: 2, summary: "元2");
+        var merged = CreateTestLedger(id: 3, summary: "統合後");
+
+#pragma warning disable CS0618
+        await _logger.LogLedgerMergeAsync(null, new List<Ledger> { src1, src2 }, merged);
+#pragma warning restore CS0618
+
+        var log = (await _operationLogRepository.GetByTargetAsync(OperationLogger.Tables.Ledger, "3")).Single();
+        log.Action.Should().Be(OperationLogger.Actions.Merge);
+        log.BeforeData.Should().Contain("元1").And.Contain("元2");
+        log.AfterData.Should().Contain("統合後");
+    }
+
+    #endregion
+
+    #region 各テーブルのログ記録 (新 API)
+
     [Fact]
     public async Task LogStaffUpdateAsync_RecordsBeforeAndAfter()
     {
         var before = CreateTestStaff(name: "旧氏名");
         var after = CreateTestStaff(name: "新氏名");
 
-        await _logger.LogStaffUpdateAsync(null, before, after);
+        await _logger.LogStaffUpdateAsync(before, after);
 
-        var logs = await _operationLogRepository.GetByTargetAsync(
-            OperationLogger.Tables.Staff, after.StaffIdm);
-        logs.Should().HaveCount(1);
-        var log = logs.First();
+        var log = (await _operationLogRepository.GetByTargetAsync(OperationLogger.Tables.Staff, after.StaffIdm)).Single();
         log.Action.Should().Be(OperationLogger.Actions.Update);
         log.BeforeData.Should().Contain("旧氏名");
         log.AfterData.Should().Contain("新氏名");
     }
 
-    /// <summary>
-    /// LogStaffDeleteAsync: Before のみ記録、After は null
-    /// </summary>
     [Fact]
     public async Task LogStaffDeleteAsync_RecordsBeforeOnly()
     {
         var staff = CreateTestStaff();
 
-        await _logger.LogStaffDeleteAsync(null, staff);
+        await _logger.LogStaffDeleteAsync(staff);
 
-        var logs = await _operationLogRepository.GetByTargetAsync(
-            OperationLogger.Tables.Staff, staff.StaffIdm);
-        logs.Should().HaveCount(1);
-        var log = logs.First();
+        var log = (await _operationLogRepository.GetByTargetAsync(OperationLogger.Tables.Staff, staff.StaffIdm)).Single();
         log.Action.Should().Be(OperationLogger.Actions.Delete);
         log.BeforeData.Should().NotBeNullOrEmpty();
         log.AfterData.Should().BeNull();
     }
 
-    /// <summary>
-    /// LogStaffRestoreAsync: After のみ記録、Before は null
-    /// </summary>
     [Fact]
     public async Task LogStaffRestoreAsync_RecordsAfterOnly()
     {
         var staff = CreateTestStaff();
 
-        await _logger.LogStaffRestoreAsync(null, staff);
+        await _logger.LogStaffRestoreAsync(staff);
 
-        var logs = await _operationLogRepository.GetByTargetAsync(
-            OperationLogger.Tables.Staff, staff.StaffIdm);
-        logs.Should().HaveCount(1);
-        var log = logs.First();
+        var log = (await _operationLogRepository.GetByTargetAsync(OperationLogger.Tables.Staff, staff.StaffIdm)).Single();
         log.Action.Should().Be(OperationLogger.Actions.Restore);
         log.BeforeData.Should().BeNull();
         log.AfterData.Should().NotBeNullOrEmpty();
     }
 
-    /// <summary>
-    /// 有効な操作者IDmが渡された場合、StaffRepositoryから氏名を取得して記録する
-    /// </summary>
-    [Fact]
-    public async Task LogStaffInsertAsync_WithValidOperator_LooksUpName()
-    {
-        const string operatorIdm = "0102030405060708";
-        _staffRepositoryMock
-            .Setup(x => x.GetByIdmAsync(operatorIdm, true))
-            .ReturnsAsync(new Staff { StaffIdm = operatorIdm, Name = "操作者A" });
-
-        var target = CreateTestStaff(idm: "AAAA000000000001", name: "対象者");
-
-        await _logger.LogStaffInsertAsync(operatorIdm, target);
-
-        var logs = await _operationLogRepository.GetByOperatorAsync(operatorIdm);
-        logs.Should().HaveCount(1);
-        logs.First().OperatorName.Should().Be("操作者A");
-    }
-
-    /// <summary>
-    /// 操作者がStaffRepositoryに存在しない場合は「不明」と記録される
-    /// </summary>
-    [Fact]
-    public async Task LogStaffInsertAsync_WithUnknownOperator_RecordsAsUnknown()
-    {
-        const string operatorIdm = "DEADBEEF00000001";
-        _staffRepositoryMock
-            .Setup(x => x.GetByIdmAsync(operatorIdm, true))
-            .ReturnsAsync((Staff)null);
-
-        var target = CreateTestStaff();
-
-        await _logger.LogStaffInsertAsync(operatorIdm, target);
-
-        var logs = await _operationLogRepository.GetByOperatorAsync(operatorIdm);
-        logs.Should().HaveCount(1);
-        logs.First().OperatorName.Should().Be("不明");
-    }
-
-    #endregion
-
-    #region IcCard ログ
-
-    /// <summary>
-    /// LogCardInsertAsync: ic_card テーブル・INSERT・After のみ
-    /// </summary>
     [Fact]
     public async Task LogCardInsertAsync_RecordsCorrectly()
     {
         var card = CreateTestCard();
 
-        await _logger.LogCardInsertAsync(null, card);
+        await _logger.LogCardInsertAsync(card);
 
-        var logs = await _operationLogRepository.GetByTargetAsync(
-            OperationLogger.Tables.IcCard, card.CardIdm);
-        logs.Should().HaveCount(1);
-        var log = logs.First();
+        var log = (await _operationLogRepository.GetByTargetAsync(OperationLogger.Tables.IcCard, card.CardIdm)).Single();
         log.Action.Should().Be(OperationLogger.Actions.Insert);
-        log.TargetTable.Should().Be(OperationLogger.Tables.IcCard);
         log.BeforeData.Should().BeNull();
         log.AfterData.Should().NotBeNullOrEmpty();
     }
 
-    /// <summary>
-    /// LogCardUpdateAsync: Before/After 両方
-    /// </summary>
     [Fact]
     public async Task LogCardUpdateAsync_RecordsBeforeAndAfter()
     {
         var before = CreateTestCard(cardNumber: "OLD-001");
         var after = CreateTestCard(cardNumber: "NEW-001");
 
-        await _logger.LogCardUpdateAsync(null, before, after);
+        await _logger.LogCardUpdateAsync(before, after);
 
-        var logs = await _operationLogRepository.GetByTargetAsync(
-            OperationLogger.Tables.IcCard, after.CardIdm);
-        logs.Should().HaveCount(1);
-        var log = logs.First();
+        var log = (await _operationLogRepository.GetByTargetAsync(OperationLogger.Tables.IcCard, after.CardIdm)).Single();
         log.Action.Should().Be(OperationLogger.Actions.Update);
         log.BeforeData.Should().Contain("OLD-001");
         log.AfterData.Should().Contain("NEW-001");
     }
 
-    /// <summary>
-    /// LogCardDeleteAsync: Before のみ
-    /// </summary>
     [Fact]
     public async Task LogCardDeleteAsync_RecordsBeforeOnly()
     {
         var card = CreateTestCard();
 
-        await _logger.LogCardDeleteAsync(null, card);
+        await _logger.LogCardDeleteAsync(card);
 
-        var logs = await _operationLogRepository.GetByTargetAsync(
-            OperationLogger.Tables.IcCard, card.CardIdm);
-        logs.Should().HaveCount(1);
-        var log = logs.First();
+        var log = (await _operationLogRepository.GetByTargetAsync(OperationLogger.Tables.IcCard, card.CardIdm)).Single();
         log.Action.Should().Be(OperationLogger.Actions.Delete);
         log.BeforeData.Should().NotBeNullOrEmpty();
         log.AfterData.Should().BeNull();
     }
 
-    /// <summary>
-    /// LogCardRestoreAsync: After のみ
-    /// </summary>
     [Fact]
     public async Task LogCardRestoreAsync_RecordsAfterOnly()
     {
         var card = CreateTestCard();
 
-        await _logger.LogCardRestoreAsync(null, card);
+        await _logger.LogCardRestoreAsync(card);
 
-        var logs = await _operationLogRepository.GetByTargetAsync(
-            OperationLogger.Tables.IcCard, card.CardIdm);
-        logs.Should().HaveCount(1);
-        var log = logs.First();
+        var log = (await _operationLogRepository.GetByTargetAsync(OperationLogger.Tables.IcCard, card.CardIdm)).Single();
         log.Action.Should().Be(OperationLogger.Actions.Restore);
         log.BeforeData.Should().BeNull();
         log.AfterData.Should().NotBeNullOrEmpty();
     }
 
-    #endregion
-
-    #region Ledger ログ（Insert/Delete/Merge/Split）
-
-    /// <summary>
-    /// LogLedgerInsertAsync: ledger テーブル・INSERT・After のみ
-    /// </summary>
     [Fact]
     public async Task LogLedgerInsertAsync_RecordsCorrectly()
     {
         var ledger = CreateTestLedger(id: 42, summary: "新規行");
 
-        await _logger.LogLedgerInsertAsync(null, ledger);
+        await _logger.LogLedgerInsertAsync(ledger);
 
-        var logs = await _operationLogRepository.GetByTargetAsync(
-            OperationLogger.Tables.Ledger, "42");
-        logs.Should().HaveCount(1);
-        var log = logs.First();
+        var log = (await _operationLogRepository.GetByTargetAsync(OperationLogger.Tables.Ledger, "42")).Single();
         log.Action.Should().Be(OperationLogger.Actions.Insert);
         log.BeforeData.Should().BeNull();
         log.AfterData.Should().Contain("新規行");
     }
 
-    /// <summary>
-    /// LogLedgerDeleteAsync: 有効な operatorIdm を渡すと正しく記録される。
-    /// </summary>
-    /// <remarks>
-    /// Issue #1188 で他の Log 系メソッドとシグネチャが統一され、operatorIdm が
-    /// nullable になった。本テストは「有効な operatorIdm を渡した場合の振る舞い」を固定する。
-    /// null / 空文字列ケースは別途下記の <c>LogLedgerDeleteAsync_WithNullOperatorIdm_*</c>
-    /// および <c>LogLedgerDeleteAsync_WithEmptyOperatorIdm_*</c> で検証する。
-    /// </remarks>
     [Fact]
-    public async Task LogLedgerDeleteAsync_WithValidOperator_RecordsBeforeOnly()
-    {
-        const string operatorIdm = "BEEF000000000001";
-        _staffRepositoryMock
-            .Setup(x => x.GetByIdmAsync(operatorIdm, true))
-            .ReturnsAsync(new Staff { StaffIdm = operatorIdm, Name = "削除者" });
-
-        var ledger = CreateTestLedger(id: 99, summary: "削除対象");
-
-        await _logger.LogLedgerDeleteAsync(operatorIdm, ledger);
-
-        var logs = await _operationLogRepository.GetByTargetAsync(
-            OperationLogger.Tables.Ledger, "99");
-        logs.Should().HaveCount(1);
-        var log = logs.First();
-        log.Action.Should().Be(OperationLogger.Actions.Delete);
-        log.OperatorName.Should().Be("削除者");
-        log.BeforeData.Should().Contain("削除対象");
-        log.AfterData.Should().BeNull();
-    }
-
-    /// <summary>
-    /// Issue #1188: LogLedgerDeleteAsync に null operatorIdm を渡すと
-    /// GUI 操作識別子（Idm/Name）にフォールバックして記録される
-    /// </summary>
-    [Fact]
-    public async Task LogLedgerDeleteAsync_WithNullOperatorIdm_UsesGuiIdentifier()
+    public async Task LogLedgerDeleteAsync_WithoutContext_RecordsBeforeOnlyAsGui()
     {
         var ledger = CreateTestLedger(id: 77, summary: "GUI削除対象");
 
-        await _logger.LogLedgerDeleteAsync(null, ledger);
+        await _logger.LogLedgerDeleteAsync(ledger);
 
-        var logs = await _operationLogRepository.GetByTargetAsync(
-            OperationLogger.Tables.Ledger, "77");
-        logs.Should().HaveCount(1);
-        var log = logs.First();
+        var log = (await _operationLogRepository.GetByTargetAsync(OperationLogger.Tables.Ledger, "77")).Single();
         log.Action.Should().Be(OperationLogger.Actions.Delete);
         log.OperatorIdm.Should().Be(OperationLogger.GuiOperator.Idm);
         log.OperatorName.Should().Be(OperationLogger.GuiOperator.Name);
         log.BeforeData.Should().Contain("GUI削除対象");
         log.AfterData.Should().BeNull();
-        // null が渡された場合、StaffRepository は照会されない
-        _staffRepositoryMock.Verify(
-            x => x.GetByIdmAsync(It.IsAny<string>(), It.IsAny<bool>()),
-            Times.Never);
     }
 
-    /// <summary>
-    /// Issue #1188: LogLedgerDeleteAsync に空文字列の operatorIdm を渡すと
-    /// GUI 操作識別子にフォールバックする（他の Log 系メソッドと同等の振る舞い）
-    /// </summary>
-    [Fact]
-    public async Task LogLedgerDeleteAsync_WithEmptyOperatorIdm_UsesGuiIdentifier()
-    {
-        var ledger = CreateTestLedger(id: 78, summary: "空文字列削除対象");
-
-        await _logger.LogLedgerDeleteAsync(string.Empty, ledger);
-
-        var logs = await _operationLogRepository.GetByTargetAsync(
-            OperationLogger.Tables.Ledger, "78");
-        logs.Should().HaveCount(1);
-        var log = logs.First();
-        log.OperatorIdm.Should().Be(OperationLogger.GuiOperator.Idm);
-        log.OperatorName.Should().Be(OperationLogger.GuiOperator.Name);
-        _staffRepositoryMock.Verify(
-            x => x.GetByIdmAsync(It.IsAny<string>(), It.IsAny<bool>()),
-            Times.Never);
-    }
-
-    /// <summary>
-    /// LogLedgerMergeAsync: BeforeData に元レコード配列、AfterData に統合後レコードが入る
-    /// </summary>
     [Fact]
     public async Task LogLedgerMergeAsync_RecordsSourcesAndMerged()
     {
@@ -472,20 +393,14 @@ public class OperationLoggerTests : IDisposable
         var src2 = CreateTestLedger(id: 2, summary: "元2");
         var merged = CreateTestLedger(id: 3, summary: "統合後");
 
-        await _logger.LogLedgerMergeAsync(null, new List<Ledger> { src1, src2 }, merged);
+        await _logger.LogLedgerMergeAsync(new List<Ledger> { src1, src2 }, merged);
 
-        var logs = await _operationLogRepository.GetByTargetAsync(
-            OperationLogger.Tables.Ledger, "3");
-        logs.Should().HaveCount(1);
-        var log = logs.First();
+        var log = (await _operationLogRepository.GetByTargetAsync(OperationLogger.Tables.Ledger, "3")).Single();
         log.Action.Should().Be(OperationLogger.Actions.Merge);
         log.BeforeData.Should().Contain("元1").And.Contain("元2");
         log.AfterData.Should().Contain("統合後");
     }
 
-    /// <summary>
-    /// LogLedgerSplitAsync: BeforeData に元レコード、AfterData に分割後配列が入る。TargetId は元レコードの ID
-    /// </summary>
     [Fact]
     public async Task LogLedgerSplitAsync_RecordsOriginalAndSplits()
     {
@@ -493,12 +408,9 @@ public class OperationLoggerTests : IDisposable
         var split1 = CreateTestLedger(id: 11, summary: "分割1");
         var split2 = CreateTestLedger(id: 12, summary: "分割2");
 
-        await _logger.LogLedgerSplitAsync(null, original, new List<Ledger> { split1, split2 });
+        await _logger.LogLedgerSplitAsync(original, new List<Ledger> { split1, split2 });
 
-        var logs = await _operationLogRepository.GetByTargetAsync(
-            OperationLogger.Tables.Ledger, "10");
-        logs.Should().HaveCount(1);
-        var log = logs.First();
+        var log = (await _operationLogRepository.GetByTargetAsync(OperationLogger.Tables.Ledger, "10")).Single();
         log.Action.Should().Be(OperationLogger.Actions.Split);
         log.BeforeData.Should().Contain("元");
         log.AfterData.Should().Contain("分割1").And.Contain("分割2");
@@ -508,21 +420,15 @@ public class OperationLoggerTests : IDisposable
 
     #region JSONシリアライズ
 
-    /// <summary>
-    /// 日本語・特殊文字（&, ", '）を含むデータがエスケープを最小限にして読みやすく記録される
-    /// （JavaScriptEncoder.UnsafeRelaxedJsonEscaping の振る舞い）
-    /// </summary>
+    /// <summary>日本語・特殊文字を含むデータが読みやすく記録される</summary>
     [Fact]
     public async Task LogStaffInsertAsync_PreservesJapaneseAndSpecialChars()
     {
         var staff = CreateTestStaff(name: "山田 \"太郎\" & 花子");
 
-        await _logger.LogStaffInsertAsync(null, staff);
+        await _logger.LogStaffInsertAsync(staff);
 
-        var logs = await _operationLogRepository.GetByTargetAsync(
-            OperationLogger.Tables.Staff, staff.StaffIdm);
-        var log = logs.First();
-        // 日本語はエスケープされず生のまま記録される
+        var log = (await _operationLogRepository.GetByTargetAsync(OperationLogger.Tables.Staff, staff.StaffIdm)).Single();
         log.AfterData.Should().Contain("山田");
         log.AfterData.Should().Contain("花子");
     }

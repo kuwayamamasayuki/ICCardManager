@@ -4,6 +4,8 @@
         Title="カード種別の選択"
         SizeToContent="Height"
         Width="450"
+        MinWidth="380"
+        MinHeight="220"
         WindowStartupLocation="CenterOwner"
         ResizeMode="NoResize"
         ShowInTaskbar="False"

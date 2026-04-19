@@ -11,6 +11,7 @@ using ICCardManager.Data;
 using ICCardManager.Data.Repositories;
 using ICCardManager.Infrastructure.Caching;
 using ICCardManager.Models;
+using Microsoft.Extensions.Logging;
 using System.Data.SQLite;
 
 namespace ICCardManager.Services
@@ -24,7 +25,7 @@ namespace ICCardManager.Services
             var errors = new List<CsvImportError>();
             return await ExecuteImportWithErrorHandlingAsync(
                 () => ImportCardsInternalAsync(filePath, skipExisting, errors),
-                errors);
+                errors).ConfigureAwait(false);
         }
 
         /// <summary>
@@ -38,7 +39,7 @@ namespace ICCardManager.Services
             var importedCount = 0;
             var skippedCount = 0;
 
-            var lines = await ReadCsvFileAsync(filePath);
+            var lines = await ReadCsvFileAsync(filePath).ConfigureAwait(false);
             if (lines.Count < 2)
             {
                 return new CsvImportResult
@@ -73,7 +74,10 @@ namespace ICCardManager.Services
                 var cardIdm = fields[0].Trim().ToUpperInvariant(); // IDmは大文字に正規化
                 var cardType = fields[1].Trim();
                 var cardNumber = fields[2].Trim();
-                var note = fields.Count > 3 ? fields[3].Trim() : "";
+                // Issue #1267: note はユーザー自由記述のため式インジェクション対策を適用
+                var note = fields.Count > 3
+                    ? Infrastructure.Security.FormulaInjectionSanitizer.Sanitize(fields[3].Trim())
+                    : "";
 
                 // バリデーション（共通メソッドを使用）
                 if (!ValidateIdm(cardIdm, lineNumber, "カードIDm", line, errors))
@@ -92,7 +96,7 @@ namespace ICCardManager.Services
                 }
 
                 // 既存チェック（削除済みも含めて検索）
-                var existingCard = await _cardRepository.GetByIdmAsync(cardIdm, includeDeleted: true);
+                var existingCard = await _cardRepository.GetByIdmAsync(cardIdm, includeDeleted: true).ConfigureAwait(false);
                 if (existingCard != null)
                 {
                     // 削除済みカードの場合は復元対象として扱う
@@ -147,7 +151,7 @@ namespace ICCardManager.Services
             }
 
             // トランザクション内でインポート実行
-            using var scope = await _dbContext.BeginTransactionAsync();
+            using var scope = await _dbContext.BeginTransactionAsync().ConfigureAwait(false);
             try
             {
                 foreach (var (lineNumber, card, isUpdate, isRestore) in validRecords)
@@ -156,19 +160,19 @@ namespace ICCardManager.Services
                     if (isRestore)
                     {
                         // 削除済みカードを復元してから更新（トランザクション内）
-                        success = await _cardRepository.RestoreAsync(card.CardIdm, scope.Transaction);
+                        success = await _cardRepository.RestoreAsync(card.CardIdm, scope.Transaction).ConfigureAwait(false);
                         if (success)
                         {
-                            success = await _cardRepository.UpdateAsync(card, scope.Transaction);
+                            success = await _cardRepository.UpdateAsync(card, scope.Transaction).ConfigureAwait(false);
                         }
                     }
                     else if (isUpdate)
                     {
-                        success = await _cardRepository.UpdateAsync(card, scope.Transaction);
+                        success = await _cardRepository.UpdateAsync(card, scope.Transaction).ConfigureAwait(false);
                     }
                     else
                     {
-                        success = await _cardRepository.InsertAsync(card, scope.Transaction);
+                        success = await _cardRepository.InsertAsync(card, scope.Transaction).ConfigureAwait(false);
                     }
 
                     if (success)
@@ -205,11 +209,17 @@ namespace ICCardManager.Services
             catch (SQLiteException ex)
             {
                 scope.Rollback();
+                // Issue #1282: SQLiteException は DatabaseException へラップして詳細を保持
+                _logger?.LogError(ex,
+                    "カードCSVインポートのトランザクション中に SQLite エラーが発生しロールバック");
                 throw DatabaseException.QueryFailed("CSV import transaction", ex);
             }
-            catch (Exception)
+            catch (Exception ex)
             {
                 scope.Rollback();
+                // Issue #1282: 想定外の例外も握りつぶさずログに記録してから再スロー
+                _logger?.LogError(ex,
+                    "カードCSVインポートのトランザクション中に想定外の例外が発生しロールバック");
                 throw;
             }
 
@@ -228,7 +238,7 @@ namespace ICCardManager.Services
             var errors = new List<CsvImportError>();
             return await ExecutePreviewWithErrorHandlingAsync(
                 () => PreviewCardsInternalAsync(filePath, skipExisting, errors),
-                errors);
+                errors).ConfigureAwait(false);
         }
 
         /// <summary>
@@ -244,7 +254,7 @@ namespace ICCardManager.Services
             var updateCount = 0;
             var skipCount = 0;
 
-            var lines = await ReadCsvFileAsync(filePath);
+            var lines = await ReadCsvFileAsync(filePath).ConfigureAwait(false);
             if (lines.Count < 2)
             {
                 return new CsvImportPreviewResult
@@ -292,7 +302,7 @@ namespace ICCardManager.Services
                 }
 
                 // 既存チェック（削除済みも含めて検索）
-                var existingCard = await _cardRepository.GetByIdmAsync(cardIdm, includeDeleted: true);
+                var existingCard = await _cardRepository.GetByIdmAsync(cardIdm, includeDeleted: true).ConfigureAwait(false);
                 ImportAction action;
                 var changes = new List<FieldChange>();
 

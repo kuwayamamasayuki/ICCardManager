@@ -287,6 +287,288 @@ INVALID_IDM,Suica,001,テスト";
         result.ErrorMessage.Should().Contain("データがありません");
     }
 
+    /// <summary>
+    /// Issue #1264: 既に復元済み（IsDeleted=false）のカードを skipExisting=true で再インポート
+    /// → Restore は呼ばれず通常のスキップとして扱われる。
+    /// </summary>
+    [Fact]
+    public async Task ImportCardsAsync_AlreadyRestoredCard_SkipExistingTrue_Skipped()
+    {
+        // Arrange: IsDeleted=false（以前復元された後の状態）
+        var csvContent = @"カードIDm,カード種別,管理番号,備考
+0123456789ABCDEF,Suica,001,テスト";
+        var filePath = Path.Combine(_testDirectory, "cards_already_restored_skip.csv");
+        await Task.Run(() => File.WriteAllText(filePath, csvContent, CsvEncoding));
+
+        var restoredCard = new IcCard
+        {
+            CardIdm = "0123456789ABCDEF",
+            CardType = "Suica",
+            CardNumber = "001",
+            IsDeleted = false
+        };
+        _cardRepositoryMock.Setup(x => x.GetByIdmAsync("0123456789ABCDEF", true)).ReturnsAsync(restoredCard);
+
+        // Act
+        var result = await _service.ImportCardsAsync(filePath, skipExisting: true);
+
+        // Assert: 通常のスキップ扱い。Restore / Update は呼ばれない
+        result.Success.Should().BeTrue();
+        result.ImportedCount.Should().Be(0);
+        result.SkippedCount.Should().Be(1, "復元済みの既存カードは通常のスキップとして扱われる");
+        _cardRepositoryMock.Verify(
+            x => x.RestoreAsync(It.IsAny<string>(), It.IsAny<SQLiteTransaction>()),
+            Times.Never,
+            "IsDeleted=false のカードに対して Restore は呼ばれない");
+        _cardRepositoryMock.Verify(
+            x => x.UpdateAsync(It.IsAny<IcCard>(), It.IsAny<SQLiteTransaction>()),
+            Times.Never,
+            "skipExisting=true では Update も呼ばれない");
+    }
+
+    /// <summary>
+    /// Issue #1264: 既に復元済み（IsDeleted=false）のカードを skipExisting=false で再インポート
+    /// → Restore は呼ばれず、通常の Update のみが行われる。
+    /// </summary>
+    [Fact]
+    public async Task ImportCardsAsync_AlreadyRestoredCard_SkipExistingFalse_UpdatesOnly()
+    {
+        // Arrange
+        var csvContent = @"カードIDm,カード種別,管理番号,備考
+0123456789ABCDEF,Suica,NEW_NUMBER,更新内容";
+        var filePath = Path.Combine(_testDirectory, "cards_already_restored_update.csv");
+        await Task.Run(() => File.WriteAllText(filePath, csvContent, CsvEncoding));
+
+        var restoredCard = new IcCard
+        {
+            CardIdm = "0123456789ABCDEF",
+            CardType = "Suica",
+            CardNumber = "OLD_NUMBER",
+            IsDeleted = false
+        };
+        _cardRepositoryMock.Setup(x => x.GetByIdmAsync("0123456789ABCDEF", true)).ReturnsAsync(restoredCard);
+        _cardRepositoryMock.Setup(x => x.UpdateAsync(It.IsAny<IcCard>(), It.IsAny<SQLiteTransaction>())).ReturnsAsync(true);
+
+        // Act
+        var result = await _service.ImportCardsAsync(filePath, skipExisting: false);
+
+        // Assert: 通常の Update のみ。Restore は呼ばれない
+        result.Success.Should().BeTrue();
+        result.ImportedCount.Should().Be(1);
+        _cardRepositoryMock.Verify(
+            x => x.RestoreAsync(It.IsAny<string>(), It.IsAny<SQLiteTransaction>()),
+            Times.Never,
+            "IsDeleted=false のカードでは Restore は呼ばれない");
+        _cardRepositoryMock.Verify(
+            x => x.UpdateAsync(
+                It.Is<IcCard>(c => c.CardIdm == "0123456789ABCDEF" && c.CardNumber == "NEW_NUMBER"),
+                It.IsAny<SQLiteTransaction>()),
+            Times.Once,
+            "CSV の新しい値で Update される");
+    }
+
+    /// <summary>
+    /// Issue #1264: 復元 → 再度削除 → 再度復元のサイクル。
+    /// 複数回インポートを繰り返しても、削除済み判定が毎回正しく動作し、
+    /// Restore→Update が適切に呼ばれる。
+    /// </summary>
+    /// <remarks>
+    /// ImportCardsAsync は各呼び出しで独立したトランザクションを使用するため、
+    /// <c>BeginTransactionAsync</c> のモックを「呼び出しごとに新しい TransactionScope を
+    /// 返す」Func 形式に上書きする必要がある（コンストラクタのデフォルト設定は単一scope）。
+    /// </remarks>
+    [Fact]
+    public async Task ImportCardsAsync_RestoreCycle_WorksRepeatedly()
+    {
+        // Arrange
+        var csvContent = @"カードIDm,カード種別,管理番号,備考
+0123456789ABCDEF,Suica,001,サイクル";
+        var filePath = Path.Combine(_testDirectory, "cards_restore_cycle.csv");
+        await Task.Run(() => File.WriteAllText(filePath, csvContent, CsvEncoding));
+
+        // 呼び出しごとに新しいトランザクションスコープを返すよう上書き
+        _dbContextMock.Setup(x => x.BeginTransactionAsync(It.IsAny<System.Threading.CancellationToken>()))
+            .Returns(() =>
+            {
+                var tx = _connection.BeginTransaction();
+                var lease = new ConnectionLease(_connection, () => { });
+                var scope = new ICCardManager.Data.TransactionScope(lease, tx);
+                return Task.FromResult(scope);
+            });
+
+        // 1周目: 削除済みカードが存在 → Restore + Update
+        _cardRepositoryMock.Setup(x => x.GetByIdmAsync("0123456789ABCDEF", true))
+            .ReturnsAsync(new IcCard { CardIdm = "0123456789ABCDEF", IsDeleted = true });
+        _cardRepositoryMock.Setup(x => x.RestoreAsync("0123456789ABCDEF", It.IsAny<SQLiteTransaction>())).ReturnsAsync(true);
+        _cardRepositoryMock.Setup(x => x.UpdateAsync(It.IsAny<IcCard>(), It.IsAny<SQLiteTransaction>())).ReturnsAsync(true);
+        var result1 = await _service.ImportCardsAsync(filePath);
+
+        // 2周目: 外部で再度削除された想定で、同じ削除済みカードが返される
+        var result2 = await _service.ImportCardsAsync(filePath);
+
+        // Assert: 両サイクルとも成功し、Restore が2回呼ばれる
+        result1.Success.Should().BeTrue();
+        result1.ImportedCount.Should().Be(1);
+        result2.Success.Should().BeTrue();
+        result2.ImportedCount.Should().Be(1);
+        _cardRepositoryMock.Verify(
+            x => x.RestoreAsync("0123456789ABCDEF", It.IsAny<SQLiteTransaction>()),
+            Times.Exactly(2),
+            "2周目のインポートでも Restore が再度呼ばれる（サイクル動作）");
+        _cardRepositoryMock.Verify(
+            x => x.UpdateAsync(It.IsAny<IcCard>(), It.IsAny<SQLiteTransaction>()),
+            Times.Exactly(2),
+            "2周目のインポートでも Update が再度呼ばれる");
+    }
+
+    /// <summary>
+    /// Issue #1264: RestoreAsync は成功するが UpdateAsync が失敗するケース。
+    /// 部分的な DB 変更（IsDeleted=false）がコミットされず、
+    /// 全体としてトランザクションロールバック（ImportedCount=0）となる。
+    /// </summary>
+    [Fact]
+    public async Task ImportCardsAsync_RestoreSucceedsButUpdateFails_RollsBack()
+    {
+        // Arrange
+        var csvContent = @"カードIDm,カード種別,管理番号,備考
+0123456789ABCDEF,Suica,001,復元できたがUpdate失敗";
+        var filePath = Path.Combine(_testDirectory, "cards_restore_update_fail.csv");
+        await Task.Run(() => File.WriteAllText(filePath, csvContent, CsvEncoding));
+
+        var deletedCard = new IcCard { CardIdm = "0123456789ABCDEF", IsDeleted = true };
+        _cardRepositoryMock.Setup(x => x.GetByIdmAsync("0123456789ABCDEF", true)).ReturnsAsync(deletedCard);
+        // Restoreは成功
+        _cardRepositoryMock.Setup(x => x.RestoreAsync("0123456789ABCDEF", It.IsAny<SQLiteTransaction>())).ReturnsAsync(true);
+        // Updateは失敗
+        _cardRepositoryMock.Setup(x => x.UpdateAsync(It.IsAny<IcCard>(), It.IsAny<SQLiteTransaction>())).ReturnsAsync(false);
+
+        // Act
+        var result = await _service.ImportCardsAsync(filePath);
+
+        // Assert: 全体失敗でロールバックされる
+        result.Success.Should().BeFalse();
+        result.ImportedCount.Should().Be(0, "Restore後Update失敗でロールバック");
+        result.ErrorCount.Should().BeGreaterThan(0);
+        // Restoreは1回呼ばれ、Updateも1回呼ばれる（成功判定の結合AND）
+        _cardRepositoryMock.Verify(
+            x => x.RestoreAsync("0123456789ABCDEF", It.IsAny<SQLiteTransaction>()),
+            Times.Once);
+        _cardRepositoryMock.Verify(
+            x => x.UpdateAsync(It.IsAny<IcCard>(), It.IsAny<SQLiteTransaction>()),
+            Times.Once,
+            "Restore成功後にUpdateが試行される");
+    }
+
+    /// <summary>
+    /// Issue #1264: 1件の通常新規カード + 1件の削除済みカード復元の混合インポート。
+    /// 両方とも成功してコミットされる（トランザクション原子性）。
+    /// </summary>
+    [Fact]
+    public async Task ImportCardsAsync_MixedNewAndDeletedCard_BothSucceed()
+    {
+        // Arrange
+        var csvContent = @"カードIDm,カード種別,管理番号,備考
+0123456789ABCDEF,Suica,001,新規
+FEDCBA9876543210,PASMO,002,削除済み復元";
+        var filePath = Path.Combine(_testDirectory, "cards_mixed.csv");
+        await Task.Run(() => File.WriteAllText(filePath, csvContent, CsvEncoding));
+
+        // 1件目: 未登録（新規）
+        _cardRepositoryMock.Setup(x => x.GetByIdmAsync("0123456789ABCDEF", true)).ReturnsAsync((IcCard?)null);
+        _cardRepositoryMock.Setup(x => x.InsertAsync(It.IsAny<IcCard>(), It.IsAny<SQLiteTransaction>())).ReturnsAsync(true);
+        // 2件目: 削除済み
+        _cardRepositoryMock.Setup(x => x.GetByIdmAsync("FEDCBA9876543210", true))
+            .ReturnsAsync(new IcCard { CardIdm = "FEDCBA9876543210", IsDeleted = true });
+        _cardRepositoryMock.Setup(x => x.RestoreAsync("FEDCBA9876543210", It.IsAny<SQLiteTransaction>())).ReturnsAsync(true);
+        _cardRepositoryMock.Setup(x => x.UpdateAsync(It.IsAny<IcCard>(), It.IsAny<SQLiteTransaction>())).ReturnsAsync(true);
+
+        // Act
+        var result = await _service.ImportCardsAsync(filePath);
+
+        // Assert: 両方成功
+        result.Success.Should().BeTrue();
+        result.ImportedCount.Should().Be(2, "新規1 + 復元1 の合計2件がカウントされる");
+        _cardRepositoryMock.Verify(
+            x => x.InsertAsync(It.IsAny<IcCard>(), It.IsAny<SQLiteTransaction>()),
+            Times.Once,
+            "新規カードは Insert");
+        _cardRepositoryMock.Verify(
+            x => x.RestoreAsync("FEDCBA9876543210", It.IsAny<SQLiteTransaction>()),
+            Times.Once,
+            "削除済みカードは Restore");
+    }
+
+    /// <summary>
+    /// Issue #1264: 混合インポートで1件でも Restore が失敗すると、
+    /// 正常な新規カードの登録も含めて全体がロールバックされる（トランザクション原子性）。
+    /// </summary>
+    [Fact]
+    public async Task ImportCardsAsync_MixedWithRestoreFailure_AllRollback()
+    {
+        // Arrange
+        var csvContent = @"カードIDm,カード種別,管理番号,備考
+0123456789ABCDEF,Suica,001,新規成功
+FEDCBA9876543210,PASMO,002,削除済みで復元失敗";
+        var filePath = Path.Combine(_testDirectory, "cards_mixed_fail.csv");
+        await Task.Run(() => File.WriteAllText(filePath, csvContent, CsvEncoding));
+
+        // 1件目: 新規成功
+        _cardRepositoryMock.Setup(x => x.GetByIdmAsync("0123456789ABCDEF", true)).ReturnsAsync((IcCard?)null);
+        _cardRepositoryMock.Setup(x => x.InsertAsync(It.IsAny<IcCard>(), It.IsAny<SQLiteTransaction>())).ReturnsAsync(true);
+        // 2件目: 削除済み → RestoreAsync失敗
+        _cardRepositoryMock.Setup(x => x.GetByIdmAsync("FEDCBA9876543210", true))
+            .ReturnsAsync(new IcCard { CardIdm = "FEDCBA9876543210", IsDeleted = true });
+        _cardRepositoryMock.Setup(x => x.RestoreAsync("FEDCBA9876543210", It.IsAny<SQLiteTransaction>())).ReturnsAsync(false);
+
+        // Act
+        var result = await _service.ImportCardsAsync(filePath);
+
+        // Assert: 全体ロールバック
+        result.Success.Should().BeFalse();
+        result.ImportedCount.Should().Be(0,
+            "トランザクション原子性: Restore失敗で新規カードの登録もロールバック");
+        result.ErrorCount.Should().Be(1);
+    }
+
+    /// <summary>
+    /// Issue #1264: プレビューで削除済みカードは Restore アクションとして表示され、
+    /// 状態変更「削除済み → 有効」が変更一覧の先頭に出力される。
+    /// </summary>
+    [Fact]
+    public async Task PreviewCardsAsync_DeletedCard_ShowsRestoreActionWithStateChange()
+    {
+        // Arrange
+        var csvContent = @"カードIDm,カード種別,管理番号,備考
+0123456789ABCDEF,Suica,001,復元";
+        var filePath = Path.Combine(_testDirectory, "cards_preview_restore.csv");
+        await Task.Run(() => File.WriteAllText(filePath, csvContent, CsvEncoding));
+
+        var deletedCard = new IcCard
+        {
+            CardIdm = "0123456789ABCDEF",
+            CardType = "Suica",
+            CardNumber = "001",
+            IsDeleted = true
+        };
+        _cardRepositoryMock.Setup(x => x.GetByIdmAsync("0123456789ABCDEF", true)).ReturnsAsync(deletedCard);
+
+        // Act — skipExisting=true でも削除済みは Restore 対象として扱われる
+        var result = await _service.PreviewCardsAsync(filePath, skipExisting: true);
+
+        // Assert
+        result.IsValid.Should().BeTrue();
+        result.UpdateCount.Should().Be(1, "復元は Update 扱いでカウントされる");
+        result.SkipCount.Should().Be(0);
+
+        var item = result.Items.Should().ContainSingle().Subject;
+        item.Action.Should().Be(ImportAction.Restore);
+        // 変更一覧の先頭に「状態: 削除済み → 有効」が挿入される（CsvImportService.Card.cs:308-313）
+        item.Changes.Should().NotBeEmpty();
+        item.Changes[0].FieldName.Should().Be("状態");
+        item.Changes[0].OldValue.Should().Be("削除済み");
+        item.Changes[0].NewValue.Should().Be("有効");
+    }
+
     #endregion
 
     #region ImportStaffAsync テスト

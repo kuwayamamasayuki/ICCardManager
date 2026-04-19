@@ -11,6 +11,8 @@ using ICCardManager.Data;
 using ICCardManager.Data.Repositories;
 using ICCardManager.Infrastructure.Caching;
 using ICCardManager.Models;
+using ICCardManager.Services.Import.Builders;
+using ICCardManager.Services.Import.Parsers;
 using System.Data.SQLite;
 
 namespace ICCardManager.Services
@@ -24,7 +26,7 @@ namespace ICCardManager.Services
             var errors = new List<CsvImportError>();
             return await ExecutePreviewWithErrorHandlingAsync(
                 () => PreviewLedgerDetailsInternalAsync(filePath, errors),
-                errors);
+                errors).ConfigureAwait(false);
         }
 
         /// <summary>
@@ -39,7 +41,7 @@ namespace ICCardManager.Services
             var updateCount = 0;
             var skipCount = 0;
 
-            var lines = await ReadCsvFileAsync(filePath);
+            var lines = await ReadCsvFileAsync(filePath).ConfigureAwait(false);
             if (lines.Count < 2)
             {
                 return new CsvImportPreviewResult
@@ -50,7 +52,7 @@ namespace ICCardManager.Services
             }
 
             // Issue #937: カード名表示のためにカード情報を取得
-            var allCards = await _cardRepository.GetAllIncludingDeletedAsync();
+            var allCards = await _cardRepository.GetAllIncludingDeletedAsync().ConfigureAwait(false);
             var cardNameMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
             foreach (var c in allCards)
             {
@@ -85,7 +87,7 @@ namespace ICCardManager.Services
                     continue;
                 }
 
-                var detail = ParseLedgerDetailFields(fields, lineNumber, line, errors);
+                var detail = LedgerDetailCsvRowParser.ParseFields(fields, lineNumber, line, errors);
                 if (detail == null)
                 {
                     continue;
@@ -107,7 +109,7 @@ namespace ICCardManager.Services
                     }
 
                     // カード存在チェック
-                    var card = await _cardRepository.GetByIdmAsync(cardIdm, includeDeleted: true);
+                    var card = await _cardRepository.GetByIdmAsync(cardIdm, includeDeleted: true).ConfigureAwait(false);
                     if (card == null)
                     {
                         errors.Add(new CsvImportError
@@ -133,7 +135,7 @@ namespace ICCardManager.Services
                 // 既存ledger_idの存在チェック
                 if (!existingDetailsByLedgerId.ContainsKey(detail.LedgerId))
                 {
-                    var ledger = await _ledgerRepository.GetByIdAsync(detail.LedgerId);
+                    var ledger = await _ledgerRepository.GetByIdAsync(detail.LedgerId).ConfigureAwait(false);
                     if (ledger == null)
                     {
                         errors.Add(new CsvImportError
@@ -284,7 +286,7 @@ namespace ICCardManager.Services
             var errors = new List<CsvImportError>();
             return await ExecuteImportWithErrorHandlingAsync(
                 () => ImportLedgerDetailsInternalAsync(filePath, errors),
-                errors);
+                errors).ConfigureAwait(false);
         }
 
         /// <summary>
@@ -296,7 +298,7 @@ namespace ICCardManager.Services
         {
             var importedCount = 0;
 
-            var lines = await ReadCsvFileAsync(filePath);
+            var lines = await ReadCsvFileAsync(filePath).ConfigureAwait(false);
             if (lines.Count < 2)
             {
                 return new CsvImportResult
@@ -332,7 +334,7 @@ namespace ICCardManager.Services
                     continue;
                 }
 
-                var detail = ParseLedgerDetailFields(fields, lineNumber, line, errors);
+                var detail = LedgerDetailCsvRowParser.ParseFields(fields, lineNumber, line, errors);
                 if (detail == null)
                 {
                     continue;
@@ -354,7 +356,7 @@ namespace ICCardManager.Services
                     }
 
                     // カード存在チェック
-                    var card = await _cardRepository.GetByIdmAsync(cardIdm, includeDeleted: true);
+                    var card = await _cardRepository.GetByIdmAsync(cardIdm, includeDeleted: true).ConfigureAwait(false);
                     if (card == null)
                     {
                         errors.Add(new CsvImportError
@@ -380,7 +382,7 @@ namespace ICCardManager.Services
                 // 既存ledger_idの存在チェック
                 if (!existingDetailsByLedgerId.ContainsKey(detail.LedgerId))
                 {
-                    var ledger = await _ledgerRepository.GetByIdAsync(detail.LedgerId);
+                    var ledger = await _ledgerRepository.GetByIdAsync(detail.LedgerId).ConfigureAwait(false);
                     if (ledger == null)
                     {
                         errors.Add(new CsvImportError
@@ -423,109 +425,18 @@ namespace ICCardManager.Services
                 };
             }
 
-            // Issue #906: 新規詳細（利用履歴ID空欄）のLedger自動作成とインポート
-            // Issue #918: カードIDm＋日付ごとにグループ化して個別のLedgerを作成
-            // Issue #1053: チャージ/ポイント還元境界で分割し、セグメントごとにLedgerを作成
+            // Issue #906: 新規詳細（利用履歴ID空欄）の Ledger 自動作成とインポート
+            // Issue #918: カードIDm＋日付ごとにグループ化して個別の Ledger を作成
+            // Issue #1053: チャージ/ポイント還元境界で分割し、セグメントごとに Ledger を作成
+            // Issue #1284: NewLedgerFromSegmentsBuilder に責務分離
+            var newLedgerBuilder = new NewLedgerFromSegmentsBuilder(_ledgerRepository);
             foreach (var kvp in newDetailsByCardIdmAndDate)
             {
-                var cardIdm = kvp.Key.CardIdm;
-                var detailRows = kvp.Value;
-                var firstLineNumber = detailRows.First().LineNumber;
-                var detailList = detailRows.Select(r => r.Detail).ToList();
-
-                try
-                {
-                    // チャージ/ポイント還元の位置で利用グループを分割
-                    var segments = LendingHistoryAnalyzer.SplitAtChargeBoundaries(detailList);
-
-                    // セグメントがない場合（空リスト対策）は元のリストで1セグメントとして扱う
-                    if (segments.Count == 0)
-                    {
-                        segments = new List<LendingHistoryAnalyzer.DailySegment>
-                        {
-                            new LendingHistoryAnalyzer.DailySegment
-                            {
-                                IsCharge = false,
-                                IsPointRedemption = false,
-                                Details = detailList
-                            }
-                        };
-                    }
-
-                    var summaryGenerator = new SummaryGenerator();
-                    var segmentFailed = false;
-
-                    foreach (var segment in segments)
-                    {
-                        var segmentDetails = segment.Details;
-
-                        // SummaryGeneratorで摘要を自動生成
-                        var summary = summaryGenerator.Generate(segmentDetails);
-                        if (string.IsNullOrEmpty(summary))
-                        {
-                            summary = "CSVインポート";
-                        }
-
-                        // LedgerSplitServiceと同じロジックで収支・残高を計算
-                        var (income, expense, balance) = LedgerSplitService.CalculateGroupFinancials(segmentDetails);
-
-                        // 日付はグループのキーから取得、DateTime.MinValueの場合は最も古い利用日時、なければ現在日時
-                        var date = kvp.Key.Date;
-                        if (date == DateTime.MinValue)
-                        {
-                            date = segmentDetails
-                                .Where(d => d.UseDate.HasValue)
-                                .OrderBy(d => d.UseDate!.Value)
-                                .Select(d => d.UseDate!.Value)
-                                .FirstOrDefault();
-                            if (date == default)
-                            {
-                                date = DateTime.Now;
-                            }
-                        }
-
-                        // Ledgerレコードを自動作成
-                        var newLedger = new Ledger
-                        {
-                            CardIdm = cardIdm,
-                            Date = date,
-                            Summary = summary,
-                            Income = income,
-                            Expense = expense,
-                            Balance = balance
-                        };
-
-                        var newLedgerId = await _ledgerRepository.InsertAsync(newLedger);
-
-                        // 詳細をインサート
-                        var success = await _ledgerRepository.InsertDetailsAsync(newLedgerId, segmentDetails);
-
-                        if (!success)
-                        {
-                            segmentFailed = true;
-                            errors.Add(new CsvImportError
-                            {
-                                LineNumber = firstLineNumber,
-                                Message = $"カード {cardIdm} の新規詳細の挿入に失敗しました",
-                                Data = cardIdm
-                            });
-                        }
-                    }
-
-                    if (!segmentFailed)
-                    {
-                        importedCount += detailRows.Count;
-                    }
-                }
-                catch (Exception ex)
-                {
-                    errors.Add(new CsvImportError
-                    {
-                        LineNumber = firstLineNumber,
-                        Message = $"カード {cardIdm} の利用履歴自動作成中にエラーが発生しました: {ex.Message}",
-                        Data = cardIdm
-                    });
-                }
+                importedCount += await newLedgerBuilder.BuildAndInsertAsync(
+                    kvp.Key.CardIdm,
+                    kvp.Key.Date,
+                    kvp.Value,
+                    errors).ConfigureAwait(false);
             }
 
             // 既存ledger_idごとにReplaceDetailsAsyncで全置換（変更がある場合のみ）
@@ -549,12 +460,12 @@ namespace ICCardManager.Services
 
                 try
                 {
-                    var success = await _ledgerRepository.ReplaceDetailsAsync(ledgerId, newDetails);
+                    var success = await _ledgerRepository.ReplaceDetailsAsync(ledgerId, newDetails).ConfigureAwait(false);
 
                     if (success)
                     {
                         // Issue #918: 詳細置換後、親Ledgerの金額を再計算して更新
-                        var ledger = await _ledgerRepository.GetByIdAsync(ledgerId);
+                        var ledger = await _ledgerRepository.GetByIdAsync(ledgerId).ConfigureAwait(false);
                         if (ledger != null)
                         {
                             var summaryGenerator = new SummaryGenerator();
@@ -565,7 +476,7 @@ namespace ICCardManager.Services
                             ledger.Income = income;
                             ledger.Expense = expense;
                             ledger.Balance = balance;
-                            await _ledgerRepository.UpdateAsync(ledger);
+                            await _ledgerRepository.UpdateAsync(ledger).ConfigureAwait(false);
                         }
 
                         importedCount += detailRows.Count;
@@ -600,196 +511,6 @@ namespace ICCardManager.Services
                 Errors = errors
             };
         }
-
-        /// <summary>
-        /// CSVフィールドからLedgerDetailをパース
-        /// </summary>
-        /// <param name="fields">パース済みフィールド（13列）</param>
-        /// <param name="lineNumber">行番号（エラー報告用）</param>
-        /// <param name="line">元の行データ（エラー報告用）</param>
-        /// <param name="errors">エラーリスト</param>
-        /// <returns>パース成功時はLedgerDetail、失敗時はnull</returns>
-        private static LedgerDetail ParseLedgerDetailFields(
-            List<string> fields,
-            int lineNumber,
-            string line,
-            List<CsvImportError> errors)
-        {
-            // [0]利用履歴ID [1]利用日時 [2]カードIDm [3]管理番号 [4]乗車駅 [5]降車駅
-            // [6]バス停 [7]金額 [8]残額 [9]チャージ [10]ポイント還元 [11]バス利用 [12]グループID
-
-            var ledgerIdStr = fields[0].Trim();
-            var useDateStr = fields[1].Trim();
-            // fields[2] カードIDm（利用履歴ID空欄時の自動作成で使用）
-            // fields[3] 管理番号（参照用）
-            var entryStation = fields[4].Trim();
-            var exitStation = fields[5].Trim();
-            var busStops = fields[6].Trim();
-            var amountStr = fields[7].Trim();
-            var balanceStr = fields[8].Trim();
-            var isChargeStr = fields[9].Trim();
-            var isPointRedemptionStr = fields[10].Trim();
-            var isBusStr = fields[11].Trim();
-            var groupIdStr = fields[12].Trim();
-
-            // 利用履歴ID: 空欄の場合は0（自動付与）、それ以外は整数
-            int ledgerId = 0;
-            if (!string.IsNullOrWhiteSpace(ledgerIdStr))
-            {
-                if (!int.TryParse(ledgerIdStr, out ledgerId))
-                {
-                    errors.Add(new CsvImportError
-                    {
-                        LineNumber = lineNumber,
-                        Message = "利用履歴IDの形式が不正です",
-                        Data = ledgerIdStr
-                    });
-                    return null;
-                }
-            }
-
-            // 利用日時: 任意（空欄=null）
-            DateTime? useDate = null;
-            if (!string.IsNullOrWhiteSpace(useDateStr))
-            {
-                if (!DateTime.TryParse(useDateStr, out var parsedDate))
-                {
-                    errors.Add(new CsvImportError
-                    {
-                        LineNumber = lineNumber,
-                        Message = "利用日時の形式が不正です",
-                        Data = useDateStr
-                    });
-                    return null;
-                }
-                useDate = parsedDate;
-            }
-
-            // 金額: 任意（空欄=null）
-            int? amount = null;
-            if (!string.IsNullOrWhiteSpace(amountStr))
-            {
-                if (!int.TryParse(amountStr, out var parsedAmount))
-                {
-                    errors.Add(new CsvImportError
-                    {
-                        LineNumber = lineNumber,
-                        Message = "金額の形式が不正です",
-                        Data = amountStr
-                    });
-                    return null;
-                }
-                amount = parsedAmount;
-            }
-
-            // 残額: 任意（空欄=null）
-            int? balance = null;
-            if (!string.IsNullOrWhiteSpace(balanceStr))
-            {
-                if (!int.TryParse(balanceStr, out var parsedBalance))
-                {
-                    errors.Add(new CsvImportError
-                    {
-                        LineNumber = lineNumber,
-                        Message = "残額の形式が不正です",
-                        Data = balanceStr
-                    });
-                    return null;
-                }
-                balance = parsedBalance;
-            }
-
-            // チャージ: 0 or 1
-            if (!ValidateBooleanField(isChargeStr, lineNumber, "チャージ", errors, out var isCharge))
-            {
-                return null;
-            }
-
-            // ポイント還元: 0 or 1
-            if (!ValidateBooleanField(isPointRedemptionStr, lineNumber, "ポイント還元", errors, out var isPointRedemption))
-            {
-                return null;
-            }
-
-            // バス利用: 0 or 1
-            if (!ValidateBooleanField(isBusStr, lineNumber, "バス利用", errors, out var isBus))
-            {
-                return null;
-            }
-
-            // グループID: 任意（空欄=null）
-            int? groupId = null;
-            if (!string.IsNullOrWhiteSpace(groupIdStr))
-            {
-                if (!int.TryParse(groupIdStr, out var parsedGroupId))
-                {
-                    errors.Add(new CsvImportError
-                    {
-                        LineNumber = lineNumber,
-                        Message = "グループIDの形式が不正です",
-                        Data = groupIdStr
-                    });
-                    return null;
-                }
-                groupId = parsedGroupId;
-            }
-
-            return new LedgerDetail
-            {
-                LedgerId = ledgerId,
-                UseDate = useDate,
-                EntryStation = string.IsNullOrWhiteSpace(entryStation) ? null : entryStation,
-                ExitStation = string.IsNullOrWhiteSpace(exitStation) ? null : exitStation,
-                BusStops = string.IsNullOrWhiteSpace(busStops) ? null : busStops,
-                Amount = amount,
-                Balance = balance,
-                IsCharge = isCharge,
-                IsPointRedemption = isPointRedemption,
-                IsBus = isBus,
-                GroupId = groupId
-            };
-        }
-
-        /// <summary>
-        /// ブール値フィールド（0/1）のバリデーション
-        /// </summary>
-        /// <param name="value">検証する値</param>
-        /// <param name="lineNumber">行番号</param>
-        /// <param name="fieldName">フィールド名</param>
-        /// <param name="errors">エラーリスト</param>
-        /// <param name="result">パース結果</param>
-        /// <returns>バリデーション成功の場合true</returns>
-        private static bool ValidateBooleanField(
-            string value,
-            int lineNumber,
-            string fieldName,
-            List<CsvImportError> errors,
-            out bool result)
-        {
-            result = false;
-            if (value == "0")
-            {
-                result = false;
-                return true;
-            }
-            if (value == "1")
-            {
-                result = true;
-                return true;
-            }
-
-            errors.Add(new CsvImportError
-            {
-                LineNumber = lineNumber,
-                Message = $"{fieldName}は0または1で指定してください",
-                Data = value
-            });
-            return false;
-        }
-
-        /// <summary>
-        /// CSVファイルを読み込み（UTF-8 BOM対応）
-        /// </summary>
 
         private static void DetectLedgerDetailChanges(
             List<LedgerDetail> existingDetails,

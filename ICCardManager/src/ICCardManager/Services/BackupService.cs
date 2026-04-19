@@ -65,7 +65,7 @@ namespace ICCardManager.Services
             try
             {
                 // バックアップ先フォルダを取得
-                var settings = await _settingsRepository.GetAppSettingsAsync();
+                var settings = await _settingsRepository.GetAppSettingsAsync().ConfigureAwait(false);
                 backupPath = settings.BackupPath;
 
                 if (string.IsNullOrWhiteSpace(backupPath))
@@ -104,7 +104,7 @@ namespace ICCardManager.Services
                 _logger.LogInformation("バックアップを作成しました: {Path}", backupFilePath);
 
                 // 古いバックアップを削除
-                await CleanupOldBackupsAsync(backupPath);
+                await CleanupOldBackupsAsync(backupPath).ConfigureAwait(false);
 
                 return backupFilePath;
             }
@@ -329,7 +329,7 @@ namespace ICCardManager.Services
         /// </summary>
         public virtual async Task<IEnumerable<BackupFileInfo>> GetBackupFilesAsync()
         {
-            var settings = await _settingsRepository.GetAppSettingsAsync();
+            var settings = await _settingsRepository.GetAppSettingsAsync().ConfigureAwait(false);
             var backupPath = settings.BackupPath;
 
             if (string.IsNullOrWhiteSpace(backupPath))

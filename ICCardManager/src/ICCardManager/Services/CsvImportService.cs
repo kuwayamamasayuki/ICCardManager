@@ -11,6 +11,7 @@ using ICCardManager.Data;
 using ICCardManager.Data.Repositories;
 using ICCardManager.Infrastructure.Caching;
 using ICCardManager.Models;
+using Microsoft.Extensions.Logging;
 using System.Data.SQLite;
 
 namespace ICCardManager.Services
@@ -175,7 +176,11 @@ namespace ICCardManager.Services
         private readonly IValidationService _validationService;
         private readonly DbContext _dbContext;
         private readonly ICacheService _cacheService;
+        private readonly ILogger<CsvImportService>? _logger;
 
+        /// <summary>
+        /// 6 引数オーバーロード（既存テストの Moq プロキシ生成互換性のため維持）
+        /// </summary>
         public CsvImportService(
             ICardRepository cardRepository,
             IStaffRepository staffRepository,
@@ -183,6 +188,21 @@ namespace ICCardManager.Services
             IValidationService validationService,
             DbContext dbContext,
             ICacheService cacheService)
+            : this(cardRepository, staffRepository, ledgerRepository, validationService, dbContext, cacheService, logger: null)
+        {
+        }
+
+        /// <summary>
+        /// Issue #1282: ILogger を受け取るコンストラクタ
+        /// </summary>
+        public CsvImportService(
+            ICardRepository cardRepository,
+            IStaffRepository staffRepository,
+            ILedgerRepository ledgerRepository,
+            IValidationService validationService,
+            DbContext dbContext,
+            ICacheService cacheService,
+            ILogger<CsvImportService>? logger)
         {
             _cardRepository = cardRepository;
             _staffRepository = staffRepository;
@@ -190,6 +210,7 @@ namespace ICCardManager.Services
             _validationService = validationService;
             _dbContext = dbContext;
             _cacheService = cacheService;
+            _logger = logger;
         }
 
         // === 共通ユーティリティ ===
@@ -208,7 +229,7 @@ namespace ICCardManager.Services
 
             while (!reader.EndOfStream)
             {
-                var line = await reader.ReadLineAsync();
+                var line = await reader.ReadLineAsync().ConfigureAwait(false);
                 if (line != null)
                 {
                     lines.Add(line);
@@ -234,7 +255,7 @@ namespace ICCardManager.Services
 
             try
             {
-                return await operation();
+                return await operation().ConfigureAwait(false);
             }
             catch (FileNotFoundException)
             {
@@ -297,7 +318,7 @@ namespace ICCardManager.Services
 
             try
             {
-                return await operation();
+                return await operation().ConfigureAwait(false);
             }
             catch (FileNotFoundException)
             {

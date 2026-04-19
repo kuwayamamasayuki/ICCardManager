@@ -329,6 +329,152 @@ public class ReportRowBuilderTests
 
     #endregion
 
+    #region Issue #1252: 繰越行の金額表示（Income/Expense 分離）
+
+    [Fact]
+    public void Build_4月前年度繰越行のExpenseは常に空欄()
+    {
+        // 繰越行は受入（Income）のみを持つ設計。CarryoverRowData に Expense プロパティが
+        // 存在しないため、ReportRow.Expense は決して設定されないことを検証
+        var data = CreateBaseData(2025, 4);
+        data.Carryover = new CarryoverRowData
+        {
+            Date = new DateTime(2025, 4, 1),
+            Summary = "前年度より繰越",
+            Income = 10000,
+            Balance = 10000
+        };
+        data.Ledgers = new List<Ledger>();
+
+        var result = ReportRowBuilder.Build(data);
+
+        var row = result.DataRows[0];
+        row.RowType.Should().Be(ReportRowType.Carryover);
+        row.Income.Should().Be(10000, "4月の前年度繰越は受入欄に金額を持つ");
+        row.Expense.Should().BeNull("繰越行は払出欄を持たない（Income/Expense 分離）");
+        row.Balance.Should().Be(10000);
+    }
+
+    [Fact]
+    public void Build_月次繰越行のIncomeもExpenseも空欄()
+    {
+        // 5月以降の月次繰越行は Income=null、Expense=null（どちらも空欄）
+        // Balance のみ持つ
+        var data = CreateBaseData(2025, 10);
+        data.Carryover = new CarryoverRowData
+        {
+            Date = new DateTime(2025, 10, 1),
+            Summary = "9月より繰越",
+            Income = null,
+            Balance = 4500
+        };
+        data.Ledgers = new List<Ledger>();
+
+        var result = ReportRowBuilder.Build(data);
+
+        var row = result.DataRows[0];
+        row.RowType.Should().Be(ReportRowType.Carryover);
+        row.Income.Should().BeNull("月次繰越は受入欄空欄");
+        row.Expense.Should().BeNull("繰越行は払出欄を持たない");
+        row.Balance.Should().Be(4500);
+    }
+
+    #endregion
+
+    #region Issue #1252: 帳票出力の行順序（繰越→明細→月計→累計→次年度繰越）
+
+    [Fact]
+    public void Build_3月の完全な行順序_繰越と明細と月計と累計と次年度繰越()
+    {
+        // 3月帳票には全5種の行要素が含まれる:
+        //   DataRows: [0]=Carryover → [1..n]=Data
+        //   続いて: MonthlyTotal → CumulativeTotal → CarryoverToNextYear
+        // ReportRowSet の構造でこの順序が保証されていることを検証
+        var data = CreateBaseData(2025, 3);
+        data.Carryover = new CarryoverRowData
+        {
+            Date = new DateTime(2025, 3, 1),
+            Summary = "2月より繰越",
+            Income = null,
+            Balance = 5000
+        };
+        data.Ledgers = new List<Ledger>
+        {
+            new() { Date = new DateTime(2025, 3, 5), Summary = "鉄道（博多～天神）",
+                     Income = 0, Expense = 300, Balance = 4700 },
+            new() { Date = new DateTime(2025, 3, 20), Summary = "役務費によりチャージ",
+                     Income = 2000, Expense = 0, Balance = 6700 }
+        };
+        data.MonthlyTotal = new ReportTotalData
+        {
+            Label = "3月計", Income = 2000, Expense = 300, Balance = null
+        };
+        data.CumulativeTotal = new ReportTotalData
+        {
+            Label = "累計", Income = 10000, Expense = 3300, Balance = 6700
+        };
+        data.CarryoverToNextYear = 6700;
+
+        var result = ReportRowBuilder.Build(data);
+
+        // DataRows 先頭は繰越行、後続は明細行
+        result.DataRows.Should().HaveCount(3, "繰越1件 + 明細2件");
+        result.DataRows[0].RowType.Should().Be(ReportRowType.Carryover, "1行目は繰越");
+        result.DataRows[0].Summary.Should().Be("2月より繰越");
+        result.DataRows[1].RowType.Should().Be(ReportRowType.Data, "2行目は明細");
+        result.DataRows[2].RowType.Should().Be(ReportRowType.Data, "3行目は明細");
+
+        // 集計行はそれぞれ設定される（月計 → 累計 → 次年度繰越）
+        result.MonthlyTotal.Should().NotBeNull();
+        result.MonthlyTotal.Label.Should().Be("3月計");
+        result.MonthlyTotal.Income.Should().Be(2000);
+        result.MonthlyTotal.Expense.Should().Be(300);
+
+        result.CumulativeTotal.Should().NotBeNull("3月は累計あり");
+        result.CumulativeTotal!.Label.Should().Be("累計");
+        result.CumulativeTotal.Balance.Should().Be(6700);
+
+        result.CarryoverToNextYear.Should().Be(6700, "3月の最後に次年度繰越");
+    }
+
+    [Fact]
+    public void Build_4月の行順序_繰越と明細と月計のみ_累計も次年度繰越もなし()
+    {
+        // 4月帳票は累計省略・次年度繰越なし。月計に残額を表示する
+        var data = CreateBaseData(2025, 4);
+        data.Carryover = new CarryoverRowData
+        {
+            Date = new DateTime(2025, 4, 1),
+            Summary = "前年度より繰越",
+            Income = 5000,
+            Balance = 5000
+        };
+        data.Ledgers = new List<Ledger>
+        {
+            new() { Date = new DateTime(2025, 4, 10), Summary = "鉄道",
+                     Income = 0, Expense = 210, Balance = 4790 }
+        };
+        data.MonthlyTotal = new ReportTotalData
+        {
+            Label = "4月計", Income = 0, Expense = 210, Balance = 4790
+        };
+        data.CumulativeTotal = null;
+        data.CarryoverToNextYear = null;
+
+        var result = ReportRowBuilder.Build(data);
+
+        result.DataRows.Should().HaveCount(2);
+        result.DataRows[0].RowType.Should().Be(ReportRowType.Carryover);
+        result.DataRows[0].Income.Should().Be(5000, "4月繰越は Income 持つ");
+        result.DataRows[1].RowType.Should().Be(ReportRowType.Data);
+
+        result.MonthlyTotal.Balance.Should().Be(4790, "4月は月計に残額を表示");
+        result.CumulativeTotal.Should().BeNull("4月は累計省略");
+        result.CarryoverToNextYear.Should().BeNull("4月は次年度繰越なし");
+    }
+
+    #endregion
+
     #region 統合テスト（繰越 + 明細 + 合計 + 累計）
 
     [Fact]

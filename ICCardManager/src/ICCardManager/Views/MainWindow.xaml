@@ -133,7 +133,8 @@
                 <Border Padding="40"
                         Background="{DynamicResource WaitingBackgroundBrush}"
                         Visibility="{Binding IsHistoryVisible, Converter={StaticResource BoolToVisibilityConverter}, ConverterParameter=invert}"
-                        AutomationProperties.Name="使い方ガイド">
+                        AutomationProperties.Name="使い方ガイド"
+                        AutomationProperties.HelpText="初期画面の使い方ガイドです。職員証を ICカードリーダー にタッチすると操作を開始できます。この領域は履歴表示時には非表示になります。">
                     <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" MaxWidth="600">
                         <TextBlock Text="🚃"
                                    FontSize="{DynamicResource IconFontSize}"
@@ -736,9 +737,11 @@
                                         <!-- 2行目: 最終利用日（左） + 貸出状態（右） -->
                                         <DockPanel>
                                             <!-- 貸出状態（右寄せ） -->
+                                            <!-- Issue #1274: アイコン＋テキスト＋スクリーンリーダー用説明文の3要素を揃える -->
                                             <TextBlock DockPanel.Dock="Right"
                                                        FontSize="{DynamicResource SmallFontSize}"
-                                                       Margin="5,0,0,0">
+                                                       Margin="5,0,0,0"
+                                                       AutomationProperties.Name="{Binding LentStatusAccessibilityText, Mode=OneWay}">
                                                 <TextBlock.Style>
                                                     <Style TargetType="TextBlock">
                                                         <Setter Property="Foreground" Value="{DynamicResource SuccessActionBrush}"/>

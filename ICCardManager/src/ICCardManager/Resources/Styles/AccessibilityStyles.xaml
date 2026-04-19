@@ -337,4 +337,42 @@
         <Setter Property="IsHitTestVisible" Value="False"/>
     </Style>
 
+    <!-- ===== バリデーションエラー表示スタイル（Issue #1279） ===== -->
+    <!--
+         Validation.ErrorTemplate を定義し、TextBox のバインディング検証が失敗した際に
+         赤枠 + 右側エラーメッセージを表示する。色覚多様性対応のため、色のみでなく
+         太い枠線とエラーアイコン（⚠）を併用する。
+    -->
+    <ControlTemplate x:Key="ValidationErrorTemplate">
+        <StackPanel Orientation="Horizontal">
+            <Border BorderBrush="{StaticResource ErrorBorderBrush}"
+                    BorderThickness="2"
+                    CornerRadius="4">
+                <AdornedElementPlaceholder x:Name="AdornedElement"/>
+            </Border>
+            <TextBlock Text="⚠"
+                       Foreground="{StaticResource ErrorForegroundBrush}"
+                       FontWeight="Bold"
+                       VerticalAlignment="Center"
+                       Margin="6,0,0,0"
+                       ToolTip="{Binding [0].ErrorContent}"
+                       AutomationProperties.Name="入力エラーあり"
+                       AutomationProperties.HelpText="この入力欄に検証エラーがあります。詳細はツールチップまたは画面下部のエラー表示を参照してください。"/>
+        </StackPanel>
+    </ControlTemplate>
+
+    <!-- 暗黙的に全 TextBox に適用されるスタイル。Issue #1279 によりエラー時の視覚変化を追加 -->
+    <!-- このスタイルは x:Key を持たないため、ResourceDictionary 配下の全 TextBox に自動適用される -->
+    <Style TargetType="TextBox">
+        <Setter Property="Validation.ErrorTemplate" Value="{StaticResource ValidationErrorTemplate}"/>
+        <Style.Triggers>
+            <Trigger Property="Validation.HasError" Value="True">
+                <Setter Property="ToolTip"
+                        Value="{Binding RelativeSource={RelativeSource Self}, Path=(Validation.Errors)[0].ErrorContent}"/>
+                <Setter Property="BorderBrush" Value="{StaticResource ErrorBorderBrush}"/>
+                <Setter Property="BorderThickness" Value="2"/>
+            </Trigger>
+        </Style.Triggers>
+    </Style>
+
 </ResourceDictionary>

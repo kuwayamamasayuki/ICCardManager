@@ -11,6 +11,7 @@ using ICCardManager.Data;
 using ICCardManager.Data.Repositories;
 using ICCardManager.Infrastructure.Caching;
 using ICCardManager.Models;
+using ICCardManager.Services.Import.Parsers;
 using System.Data.SQLite;
 
 namespace ICCardManager.Services
@@ -28,7 +29,7 @@ namespace ICCardManager.Services
 
             try
             {
-                var lines = await ReadCsvFileAsync(filePath);
+                var lines = await ReadCsvFileAsync(filePath).ConfigureAwait(false);
                 if (lines.Count < 2)
                 {
                     return new CsvImportResult
@@ -51,7 +52,7 @@ namespace ICCardManager.Services
                 var existingCardIdms = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
                 // 全カードのIDmをキャッシュ（パフォーマンス向上）
-                var allCards = await _cardRepository.GetAllIncludingDeletedAsync();
+                var allCards = await _cardRepository.GetAllIncludingDeletedAsync().ConfigureAwait(false);
                 foreach (var card in allCards)
                 {
                     existingCardIdms.Add(card.CardIdm);
@@ -68,158 +69,29 @@ namespace ICCardManager.Services
                     }
 
                     var fields = ParseCsvLine(line);
-
-                    if (fields.Count < minColumns)
+                    var parsed = LedgerCsvRowParser.TryParseRow(
+                        fields, lineNumber, line, hasIdColumn, minColumns,
+                        existingCardIdms, targetCardIdm, errors);
+                    if (parsed == null)
                     {
-                        errors.Add(new CsvImportError
-                        {
-                            LineNumber = lineNumber,
-                            Message = $"列数が不足しています（{minColumns}列必要）",
-                            Data = line
-                        });
-                        continue;
-                    }
-
-                    // フィールドのインデックスを調整（ID列の有無による）
-                    var offset = hasIdColumn ? 1 : 0;
-                    var idStr = hasIdColumn ? fields[0].Trim() : "";
-                    var dateStr = fields[0 + offset].Trim();
-                    var cardIdm = fields[1 + offset].Trim().ToUpperInvariant(); // IDmは大文字に正規化
-                    // fields[2 + offset] は管理番号（参照用、インポート時は使用しない）
-                    var summary = fields[3 + offset].Trim();
-                    var incomeStr = fields[4 + offset].Trim();
-                    var expenseStr = fields[5 + offset].Trim();
-                    var balanceStr = fields[6 + offset].Trim();
-                    var staffName = fields[7 + offset].Trim();
-                    var note = fields[8 + offset].Trim();
-
-                    // ID列がある場合、IDを解析
-                    int? ledgerId = null;
-                    if (hasIdColumn && !string.IsNullOrWhiteSpace(idStr))
-                    {
-                        if (!int.TryParse(idStr, out var parsedId))
-                        {
-                            errors.Add(new CsvImportError
-                            {
-                                LineNumber = lineNumber,
-                                Message = "IDの形式が不正です",
-                                Data = idStr
-                            });
-                            continue;
-                        }
-                        ledgerId = parsedId;
-                    }
-
-                    // バリデーション: 日時
-                    if (!DateTime.TryParse(dateStr, out var date))
-                    {
-                        errors.Add(new CsvImportError
-                        {
-                            LineNumber = lineNumber,
-                            Message = "日時の形式が不正です",
-                            Data = dateStr
-                        });
-                        continue;
-                    }
-
-                    // バリデーション: カードIDm
-                    // Issue #511: IDmが空の場合、targetCardIdmを使用
-                    if (string.IsNullOrWhiteSpace(cardIdm))
-                    {
-                        if (!string.IsNullOrWhiteSpace(targetCardIdm))
-                        {
-                            cardIdm = targetCardIdm.ToUpperInvariant();
-                        }
-                        else
-                        {
-                            errors.Add(new CsvImportError
-                            {
-                                LineNumber = lineNumber,
-                                Message = "カードIDmは必須です（CSVで空欄の場合はインポート先カードを指定してください）",
-                                Data = line
-                            });
-                            continue;
-                        }
-                    }
-
-                    // カードの存在チェック
-                    if (!existingCardIdms.Contains(cardIdm))
-                    {
-                        errors.Add(new CsvImportError
-                        {
-                            LineNumber = lineNumber,
-                            Message = "該当するカードが登録されていません",
-                            Data = cardIdm
-                        });
-                        continue;
-                    }
-
-                    // バリデーション: 摘要
-                    if (string.IsNullOrWhiteSpace(summary))
-                    {
-                        errors.Add(new CsvImportError
-                        {
-                            LineNumber = lineNumber,
-                            Message = "摘要は必須です",
-                            Data = line
-                        });
-                        continue;
-                    }
-
-                    // バリデーション: 残額
-                    if (!int.TryParse(balanceStr, out var balance))
-                    {
-                        errors.Add(new CsvImportError
-                        {
-                            LineNumber = lineNumber,
-                            Message = "残額の形式が不正です",
-                            Data = balanceStr
-                        });
-                        continue;
-                    }
-
-                    // 受入金額（空なら0）
-                    var income = 0;
-                    if (!string.IsNullOrWhiteSpace(incomeStr) && !int.TryParse(incomeStr, out income))
-                    {
-                        errors.Add(new CsvImportError
-                        {
-                            LineNumber = lineNumber,
-                            Message = "受入金額の形式が不正です",
-                            Data = incomeStr
-                        });
-                        continue;
-                    }
-
-                    // 払出金額（空なら0）
-                    var expense = 0;
-                    if (!string.IsNullOrWhiteSpace(expenseStr) && !int.TryParse(expenseStr, out expense))
-                    {
-                        errors.Add(new CsvImportError
-                        {
-                            LineNumber = lineNumber,
-                            Message = "払出金額の形式が不正です",
-                            Data = expenseStr
-                        });
                         continue;
                     }
 
                     // 既存レコードの確認（IDがある場合）
                     var isUpdate = false;
                     Ledger existingLedgerForUpdate = null;
-                    if (ledgerId.HasValue)
+                    if (parsed.LedgerId.HasValue)
                     {
-                        var existingLedger = await _ledgerRepository.GetByIdAsync(ledgerId.Value);
+                        var existingLedger = await _ledgerRepository.GetByIdAsync(parsed.LedgerId.Value).ConfigureAwait(false);
                         if (existingLedger != null)
                         {
-                            // Issue #639: 金額・日付を含む全フィールドで変更点を検出
-                            var hasChanges = existingLedger.Summary != summary ||
-                                            (existingLedger.StaffName ?? "") != staffName ||
-                                            (existingLedger.Note ?? "") != note ||
-                                            existingLedger.Income != income ||
-                                            existingLedger.Expense != expense ||
-                                            existingLedger.Balance != balance ||
-                                            existingLedger.Date != date;
+                            var hasChanges = existingLedger.Summary != parsed.Summary ||
+                                            (existingLedger.StaffName ?? "") != parsed.StaffName ||
+                                            (existingLedger.Note ?? "") != parsed.Note ||
+                                            existingLedger.Income != parsed.Income ||
+                                            existingLedger.Expense != parsed.Expense ||
+                                            existingLedger.Balance != parsed.Balance ||
+                                            existingLedger.Date != parsed.Date;
                             if (hasChanges)
                             {
                                 isUpdate = true;
@@ -227,17 +99,15 @@ namespace ICCardManager.Services
                             }
                             else if (skipExisting)
                             {
-                                // Issue #903: skipExisting=trueの場合のみ、変更がないレコードをスキップ
-                                // Issue #754: 残高整合性チェック用にはCSVの全レコードが必要
                                 var skippedLedger = new Ledger
                                 {
-                                    Id = ledgerId.Value,
-                                    CardIdm = cardIdm,
-                                    Date = date,
-                                    Summary = summary,
-                                    Income = income,
-                                    Expense = expense,
-                                    Balance = balance
+                                    Id = parsed.LedgerId.Value,
+                                    CardIdm = parsed.CardIdm,
+                                    Date = parsed.Date,
+                                    Summary = parsed.Summary,
+                                    Income = parsed.Income,
+                                    Expense = parsed.Expense,
+                                    Balance = parsed.Balance
                                 };
                                 allRecordsForValidation.Add((lineNumber, skippedLedger, false));
                                 skippedCount++;
@@ -245,7 +115,6 @@ namespace ICCardManager.Services
                             }
                             else
                             {
-                                // Issue #903: skipExisting=falseの場合、変更がなくても更新扱い
                                 isUpdate = true;
                                 existingLedgerForUpdate = existingLedger;
                             }
@@ -254,16 +123,15 @@ namespace ICCardManager.Services
 
                     var ledger = new Ledger
                     {
-                        Id = ledgerId ?? 0,
-                        CardIdm = cardIdm,
-                        Date = date,
-                        Summary = summary,
-                        Income = income,
-                        Expense = expense,
-                        Balance = balance,
-                        StaffName = string.IsNullOrWhiteSpace(staffName) ? null : staffName,
-                        Note = string.IsNullOrWhiteSpace(note) ? null : note,
-                        // Issue #639: 更新時はCSVに含まれないフィールドを既存レコードから引き継ぐ
+                        Id = parsed.LedgerId ?? 0,
+                        CardIdm = parsed.CardIdm,
+                        Date = parsed.Date,
+                        Summary = parsed.Summary,
+                        Income = parsed.Income,
+                        Expense = parsed.Expense,
+                        Balance = parsed.Balance,
+                        StaffName = string.IsNullOrWhiteSpace(parsed.StaffName) ? null : parsed.StaffName,
+                        Note = string.IsNullOrWhiteSpace(parsed.Note) ? null : parsed.Note,
                         LenderIdm = existingLedgerForUpdate?.LenderIdm,
                         ReturnerIdm = existingLedgerForUpdate?.ReturnerIdm,
                         LentAt = existingLedgerForUpdate?.LentAt,
@@ -280,7 +148,7 @@ namespace ICCardManager.Services
                     .GroupBy(r => r.Ledger.CardIdm, StringComparer.OrdinalIgnoreCase)
                     .ToDictionary(
                         g => g.Key,
-                        g => g.Min(r => r.Ledger.Date)));
+                        g => g.Min(r => r.Ledger.Date))).ConfigureAwait(false);
 
                 // Issue #754: 残高整合性チェックはスキップ分を含む全レコードで実施
                 // （スキップされたレコードを除外すると前後関係が崩れ、誤った前回残高でエラーになる）
@@ -317,7 +185,7 @@ namespace ICCardManager.Services
                 var newRecords = validRecords.Where(r => !r.IsUpdate).ToList();
                 var uniqueCardIdms = newRecords.Select(r => r.Ledger.CardIdm).Distinct();
                 var existingLedgerKeys = skipExisting
-                    ? await _ledgerRepository.GetExistingLedgerKeysAsync(uniqueCardIdms)
+                    ? await _ledgerRepository.GetExistingLedgerKeysAsync(uniqueCardIdms).ConfigureAwait(false)
                     : new HashSet<(string CardIdm, DateTime Date, string Summary, int Income, int Expense, int Balance)>();
 
                 // インポート実行（履歴はトランザクションなしで直接インポート）
@@ -328,7 +196,7 @@ namespace ICCardManager.Services
                         if (isUpdate)
                         {
                             // 既存レコードを更新
-                            var success = await _ledgerRepository.UpdateAsync(ledger);
+                            var success = await _ledgerRepository.UpdateAsync(ledger).ConfigureAwait(false);
                             if (success)
                             {
                                 updatedCount++;
@@ -354,7 +222,7 @@ namespace ICCardManager.Services
                             }
 
                             // 新規登録
-                            var id = await _ledgerRepository.InsertAsync(ledger);
+                            var id = await _ledgerRepository.InsertAsync(ledger).ConfigureAwait(false);
                             if (id > 0)
                             {
                                 importedCount++;
@@ -447,7 +315,7 @@ namespace ICCardManager.Services
 
             try
             {
-                var lines = await ReadCsvFileAsync(filePath);
+                var lines = await ReadCsvFileAsync(filePath).ConfigureAwait(false);
                 if (lines.Count < 2)
                 {
                     return new CsvImportPreviewResult
@@ -465,7 +333,7 @@ namespace ICCardManager.Services
                 // 全カードのIDmをキャッシュ
                 var existingCardIdms = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                 var cardNameMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-                var allCards = await _cardRepository.GetAllIncludingDeletedAsync();
+                var allCards = await _cardRepository.GetAllIncludingDeletedAsync().ConfigureAwait(false);
                 foreach (var card in allCards)
                 {
                     existingCardIdms.Add(card.CardIdm);
@@ -487,144 +355,19 @@ namespace ICCardManager.Services
                     }
 
                     var fields = ParseCsvLine(line);
-
-                    if (fields.Count < minColumns)
+                    var parsed = LedgerCsvRowParser.TryParseRow(
+                        fields, lineNumber, line, hasIdColumn, minColumns,
+                        existingCardIdms, targetCardIdm, errors);
+                    if (parsed == null)
                     {
-                        errors.Add(new CsvImportError
-                        {
-                            LineNumber = lineNumber,
-                            Message = $"列数が不足しています（{minColumns}列必要）",
-                            Data = line
-                        });
                         continue;
                     }
 
-                    // フィールドのインデックスを調整（ID列の有無による）
-                    var offset = hasIdColumn ? 1 : 0;
-                    var idStr = hasIdColumn ? fields[0].Trim() : "";
-                    var dateStr = fields[0 + offset].Trim();
-                    var cardIdm = fields[1 + offset].Trim().ToUpperInvariant(); // IDmは大文字に正規化
-                    // fields[2 + offset] は管理番号（参照用）
-                    var summary = fields[3 + offset].Trim();
-                    var incomeStr = fields[4 + offset].Trim();
-                    var expenseStr = fields[5 + offset].Trim();
-                    var balanceStr = fields[6 + offset].Trim();
-                    var staffName = fields[7 + offset].Trim();
-                    var note = fields[8 + offset].Trim();
-
-                    // ID列がある場合、IDを解析
-                    int? ledgerId = null;
-                    if (hasIdColumn && !string.IsNullOrWhiteSpace(idStr))
-                    {
-                        if (!int.TryParse(idStr, out var parsedId))
-                        {
-                            errors.Add(new CsvImportError
-                            {
-                                LineNumber = lineNumber,
-                                Message = "IDの形式が不正です",
-                                Data = idStr
-                            });
-                            continue;
-                        }
-                        ledgerId = parsedId;
-                    }
-
-                    // バリデーション: 日時
-                    if (!DateTime.TryParse(dateStr, out var date))
-                    {
-                        errors.Add(new CsvImportError
-                        {
-                            LineNumber = lineNumber,
-                            Message = "日時の形式が不正です",
-                            Data = dateStr
-                        });
-                        continue;
-                    }
-
-                    // バリデーション: カードIDm
-                    // Issue #511: IDmが空の場合、targetCardIdmを使用
-                    if (string.IsNullOrWhiteSpace(cardIdm))
-                    {
-                        if (!string.IsNullOrWhiteSpace(targetCardIdm))
-                        {
-                            cardIdm = targetCardIdm.ToUpperInvariant();
-                        }
-                        else
-                        {
-                            errors.Add(new CsvImportError
-                            {
-                                LineNumber = lineNumber,
-                                Message = "カードIDmは必須です（CSVで空欄の場合はインポート先カードを指定してください）",
-                                Data = line
-                            });
-                            continue;
-                        }
-                    }
-
-                    // カードの存在チェック
-                    if (!existingCardIdms.Contains(cardIdm))
-                    {
-                        errors.Add(new CsvImportError
-                        {
-                            LineNumber = lineNumber,
-                            Message = "該当するカードが登録されていません",
-                            Data = cardIdm
-                        });
-                        continue;
-                    }
-
-                    // バリデーション: 摘要
-                    if (string.IsNullOrWhiteSpace(summary))
-                    {
-                        errors.Add(new CsvImportError
-                        {
-                            LineNumber = lineNumber,
-                            Message = "摘要は必須です",
-                            Data = line
-                        });
-                        continue;
-                    }
-
-                    // バリデーション: 残額
-                    if (!int.TryParse(balanceStr, out var balance))
-                    {
-                        errors.Add(new CsvImportError
-                        {
-                            LineNumber = lineNumber,
-                            Message = "残額の形式が不正です",
-                            Data = balanceStr
-                        });
-                        continue;
-                    }
-
-                    // 受入金額（空なら0）
-                    var income = 0;
-                    if (!string.IsNullOrWhiteSpace(incomeStr) && !int.TryParse(incomeStr, out income))
-                    {
-                        errors.Add(new CsvImportError
-                        {
-                            LineNumber = lineNumber,
-                            Message = "受入金額の形式が不正です",
-                            Data = incomeStr
-                        });
-                        continue;
-                    }
-
-                    // 払出金額（空なら0）
-                    var expense = 0;
-                    if (!string.IsNullOrWhiteSpace(expenseStr) && !int.TryParse(expenseStr, out expense))
-                    {
-                        errors.Add(new CsvImportError
-                        {
-                            LineNumber = lineNumber,
-                            Message = "払出金額の形式が不正です",
-                            Data = expenseStr
-                        });
-                        continue;
-                    }
-
-                    cardIdmsInFile.Add(cardIdm);
-                    validatedRecords.Add((lineNumber, ledgerId, cardIdm, date, summary, income, expense, balance, staffName, note));
+                    cardIdmsInFile.Add(parsed.CardIdm);
+                    validatedRecords.Add((
+                        parsed.LineNumber, parsed.LedgerId, parsed.CardIdm,
+                        parsed.Date, parsed.Summary, parsed.Income, parsed.Expense,
+                        parsed.Balance, parsed.StaffName, parsed.Note));
                 }
 
                 // Issue #907: カードごとにDB上の直前残高を取得（最初の行の整合性チェック用）
@@ -632,7 +375,7 @@ namespace ICCardManager.Services
                     .GroupBy(r => r.CardIdm, StringComparer.OrdinalIgnoreCase)
                     .ToDictionary(
                         g => g.Key,
-                        g => g.Min(r => r.Date)));
+                        g => g.Min(r => r.Date))).ConfigureAwait(false);
 
                 // Issue #428: 金額の整合性チェック（カードごとに残高の連続性を検証）
                 // Issue #907: 最初の行もDB上の直前残高と照合
@@ -641,7 +384,7 @@ namespace ICCardManager.Services
                 // Issue #334: 既存履歴の重複チェック用キーを取得（新規追加分のみ）
                 // Issue #903: skipExisting=falseの場合は重複チェックを行わない
                 var existingLedgerKeys = skipExisting
-                    ? await _ledgerRepository.GetExistingLedgerKeysAsync(cardIdmsInFile)
+                    ? await _ledgerRepository.GetExistingLedgerKeysAsync(cardIdmsInFile).ConfigureAwait(false)
                     : new HashSet<(string CardIdm, DateTime Date, string Summary, int Income, int Expense, int Balance)>();
 
                 // プレビューアイテムを生成
@@ -653,7 +396,7 @@ namespace ICCardManager.Services
                     if (ledgerId.HasValue)
                     {
                         // IDがある場合は既存レコードを検索
-                        var existingLedger = await _ledgerRepository.GetByIdAsync(ledgerId.Value);
+                        var existingLedger = await _ledgerRepository.GetByIdAsync(ledgerId.Value).ConfigureAwait(false);
                         if (existingLedger != null)
                         {
                             // Issue #639: 金額・日付を含む全フィールドで変更点を検出
@@ -771,258 +514,6 @@ namespace ICCardManager.Services
                     Errors = errors
                 };
             }
-        }
-
-        /// <summary>
-        /// 出納記録の変更点を検出
-        /// </summary>
-        /// <param name="existingLedger">既存の出納記録</param>
-        /// <param name="newDate">新しい日付</param>
-        /// <param name="newSummary">新しい摘要</param>
-        /// <param name="newIncome">新しい受入金額</param>
-        /// <param name="newExpense">新しい払出金額</param>
-        /// <param name="newBalance">新しい残額</param>
-        /// <param name="newStaffName">新しい利用者名</param>
-        /// <param name="newNote">新しい備考</param>
-        /// <param name="changes">変更点リスト（検出結果が追加される）</param>
-        private static void DetectLedgerChanges(
-            Ledger existingLedger,
-            DateTime newDate,
-            string newSummary,
-            int newIncome,
-            int newExpense,
-            int newBalance,
-            string newStaffName,
-            string newNote,
-            List<FieldChange> changes)
-        {
-            // Issue #639: 金額・日付フィールドの変更も検出
-            if (existingLedger.Date != newDate)
-            {
-                changes.Add(new FieldChange
-                {
-                    FieldName = "日時",
-                    OldValue = existingLedger.Date.ToString("yyyy-MM-dd HH:mm:ss"),
-                    NewValue = newDate.ToString("yyyy-MM-dd HH:mm:ss")
-                });
-            }
-
-            if (existingLedger.Summary != newSummary)
-            {
-                changes.Add(new FieldChange
-                {
-                    FieldName = "摘要",
-                    OldValue = existingLedger.Summary ?? "(なし)",
-                    NewValue = newSummary
-                });
-            }
-
-            if (existingLedger.Income != newIncome)
-            {
-                changes.Add(new FieldChange
-                {
-                    FieldName = "受入金額",
-                    OldValue = $"{existingLedger.Income}円",
-                    NewValue = $"{newIncome}円"
-                });
-            }
-
-            if (existingLedger.Expense != newExpense)
-            {
-                changes.Add(new FieldChange
-                {
-                    FieldName = "払出金額",
-                    OldValue = $"{existingLedger.Expense}円",
-                    NewValue = $"{newExpense}円"
-                });
-            }
-
-            if (existingLedger.Balance != newBalance)
-            {
-                changes.Add(new FieldChange
-                {
-                    FieldName = "残額",
-                    OldValue = $"{existingLedger.Balance}円",
-                    NewValue = $"{newBalance}円"
-                });
-            }
-
-            var existingStaffName = existingLedger.StaffName ?? "";
-            if (existingStaffName != newStaffName)
-            {
-                changes.Add(new FieldChange
-                {
-                    FieldName = "利用者",
-                    OldValue = string.IsNullOrEmpty(existingStaffName) ? "(なし)" : existingStaffName,
-                    NewValue = string.IsNullOrEmpty(newStaffName) ? "(なし)" : newStaffName
-                });
-            }
-
-            var existingNote = existingLedger.Note ?? "";
-            if (existingNote != newNote)
-            {
-                changes.Add(new FieldChange
-                {
-                    FieldName = "備考",
-                    OldValue = string.IsNullOrEmpty(existingNote) ? "(なし)" : existingNote,
-                    NewValue = string.IsNullOrEmpty(newNote) ? "(なし)" : newNote
-                });
-            }
-        }
-
-        /// <summary>
-        /// 利用履歴詳細の変更検出
-        /// 既存の詳細リストとインポート対象の詳細リストを比較し、差分を検出する。
-        /// </summary>
-
-        internal static void ValidateBalanceConsistency(
-            List<(int LineNumber, int? LedgerId, string CardIdm, DateTime Date, string Summary, int Income, int Expense, int Balance, string StaffName, string Note)> records,
-            List<CsvImportError> errors,
-            Dictionary<string, int> previousBalanceByCard = null)
-        {
-            if (records.Count == 0) return;
-
-            // カードごとにグループ化して日時順にソート
-            var groupedByCard = records
-                .GroupBy(r => r.CardIdm, StringComparer.OrdinalIgnoreCase)
-                .ToDictionary(g => g.Key, g => g.OrderBy(r => r.Date).ThenBy(r => r.LineNumber).ToList());
-
-            foreach (var kvp in groupedByCard)
-            {
-                var cardIdm = kvp.Key;
-                var cardRecords = kvp.Value;
-
-                // Issue #907: 最初の行をDB上の直前残高と照合
-                if (cardRecords.Count > 0 && previousBalanceByCard != null &&
-                    previousBalanceByCard.TryGetValue(cardIdm.ToUpperInvariant(), out var prevDbBalance))
-                {
-                    var firstRecord = cardRecords[0];
-                    var expectedBalance = prevDbBalance + firstRecord.Income - firstRecord.Expense;
-                    if (expectedBalance != firstRecord.Balance)
-                    {
-                        errors.Add(new CsvImportError
-                        {
-                            LineNumber = firstRecord.LineNumber,
-                            Message = $"残高が一致しません（期待値: {expectedBalance}円、実際: {firstRecord.Balance}円）。" +
-                                      $"前回残高（DB）: {prevDbBalance}円 + 受入: {firstRecord.Income}円 - 払出: {firstRecord.Expense}円",
-                            Data = cardIdm
-                        });
-                    }
-                }
-
-                for (var i = 1; i < cardRecords.Count; i++)
-                {
-                    var prevRecord = cardRecords[i - 1];
-                    var currentRecord = cardRecords[i];
-
-                    // 期待される残高: 前の残高 + 受入金額 - 払出金額
-                    var expectedBalance = prevRecord.Balance + currentRecord.Income - currentRecord.Expense;
-
-                    if (expectedBalance != currentRecord.Balance)
-                    {
-                        errors.Add(new CsvImportError
-                        {
-                            LineNumber = currentRecord.LineNumber,
-                            Message = $"残高が一致しません（期待値: {expectedBalance}円、実際: {currentRecord.Balance}円）。" +
-                                      $"前回残高: {prevRecord.Balance}円 + 受入: {currentRecord.Income}円 - 払出: {currentRecord.Expense}円",
-                            Data = cardIdm
-                        });
-                    }
-                }
-            }
-        }
-
-        /// <summary>
-        /// 残高整合性チェック（インポート用）
-        /// カードごとに日時順で残高の連続性を検証します。
-        /// 計算式: 前の残高 + 受入金額 - 払出金額 = 今回の残高
-        /// Issue #907: 最初の行もDB上の直前残高と照合します。
-        /// </summary>
-        /// <param name="records">検証対象レコード（LineNumber, Ledger, IsUpdate）</param>
-        /// <param name="errors">エラーリスト</param>
-        /// <param name="previousBalanceByCard">カードIDmごとのDB上の直前残高（存在しない場合はキーなし）</param>
-        internal static void ValidateBalanceConsistencyForLedgers(
-            List<(int LineNumber, Ledger Ledger, bool IsUpdate)> records,
-            List<CsvImportError> errors,
-            Dictionary<string, int> previousBalanceByCard = null)
-        {
-            if (records.Count == 0) return;
-
-            // カードごとにグループ化して日時順にソート
-            var groupedByCard = records
-                .GroupBy(r => r.Ledger.CardIdm, StringComparer.OrdinalIgnoreCase)
-                .ToDictionary(g => g.Key, g => g.OrderBy(r => r.Ledger.Date).ThenBy(r => r.LineNumber).ToList());
-
-            foreach (var kvp in groupedByCard)
-            {
-                var cardIdm = kvp.Key;
-                var cardRecords = kvp.Value;
-
-                // Issue #907: 最初の行をDB上の直前残高と照合
-                if (cardRecords.Count > 0 && previousBalanceByCard != null &&
-                    previousBalanceByCard.TryGetValue(cardIdm.ToUpperInvariant(), out var prevDbBalance))
-                {
-                    var firstRecord = cardRecords[0];
-                    var expectedBalance = prevDbBalance + firstRecord.Ledger.Income - firstRecord.Ledger.Expense;
-                    if (expectedBalance != firstRecord.Ledger.Balance)
-                    {
-                        errors.Add(new CsvImportError
-                        {
-                            LineNumber = firstRecord.LineNumber,
-                            Message = $"残高が一致しません（期待値: {expectedBalance}円、実際: {firstRecord.Ledger.Balance}円）。" +
-                                      $"前回残高（DB）: {prevDbBalance}円 + 受入: {firstRecord.Ledger.Income}円 - 払出: {firstRecord.Ledger.Expense}円",
-                            Data = cardIdm
-                        });
-                    }
-                }
-
-                for (var i = 1; i < cardRecords.Count; i++)
-                {
-                    var prevRecord = cardRecords[i - 1];
-                    var currentRecord = cardRecords[i];
-
-                    // 期待される残高: 前の残高 + 受入金額 - 払出金額
-                    var expectedBalance = prevRecord.Ledger.Balance + currentRecord.Ledger.Income - currentRecord.Ledger.Expense;
-
-                    if (expectedBalance != currentRecord.Ledger.Balance)
-                    {
-                        errors.Add(new CsvImportError
-                        {
-                            LineNumber = currentRecord.LineNumber,
-                            Message = $"残高が一致しません（期待値: {expectedBalance}円、実際: {currentRecord.Ledger.Balance}円）。" +
-                                      $"前回残高: {prevRecord.Ledger.Balance}円 + 受入: {currentRecord.Ledger.Income}円 - 払出: {currentRecord.Ledger.Expense}円",
-                            Data = cardIdm
-                        });
-                    }
-                }
-            }
-        }
-
-        /// <summary>
-        /// Issue #907: カードごとにDB上の直前残高を取得する
-        /// CSVの各カードの最も古い日付より前のledgerレコードの残高を返します。
-        /// DB上に該当レコードがない場合はキーに含まれません。
-        /// </summary>
-        /// <param name="earliestDateByCard">カードIDmごとのCSV内の最小日付</param>
-        /// <returns>カードIDm（大文字）→直前残高のディクショナリ</returns>
-        private async Task<Dictionary<string, int>> GetPreviousBalanceByCardAsync(
-            Dictionary<string, DateTime> earliestDateByCard)
-        {
-            var result = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-
-            foreach (var kvp in earliestDateByCard)
-            {
-                var cardIdm = kvp.Key;
-                var earliestDate = kvp.Value;
-
-                var previousLedger = await _ledgerRepository.GetLatestBeforeDateAsync(cardIdm, earliestDate);
-                if (previousLedger != null)
-                {
-                    result[cardIdm.ToUpperInvariant()] = previousLedger.Balance;
-                }
-            }
-
-            return result;
         }
 
     }

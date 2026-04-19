@@ -273,7 +273,9 @@ public class ValidationServiceTests
 
         // Assert
         result.IsValid.Should().BeFalse();
-        result.ErrorMessage.Should().Contain("必須");
+        // Issue #1275: 詳細化されたエラーメッセージ（「何が/なぜ/どうすれば」の3要素）
+        result.ErrorMessage.Should().Contain("職員名");
+        result.ErrorMessage.Should().Contain("入力");
     }
 
     /// <summary>

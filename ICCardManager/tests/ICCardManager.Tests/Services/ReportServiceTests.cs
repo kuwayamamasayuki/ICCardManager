@@ -32,6 +32,8 @@ public class ReportServiceTests : IDisposable
         _ledgerRepositoryMock = new Mock<ILedgerRepository>();
         _settingsRepositoryMock = new Mock<ISettingsRepository>();
         _settingsRepositoryMock.Setup(s => s.GetAppSettings()).Returns(new AppSettings());
+        // Issue #1281: ReportService が非同期版を使うようになったため同モックも追加
+        _settingsRepositoryMock.Setup(s => s.GetAppSettingsAsync()).ReturnsAsync(new AppSettings());
         var reportDataBuilder = new ReportDataBuilder(
             _cardRepositoryMock.Object,
             _ledgerRepositoryMock.Object);

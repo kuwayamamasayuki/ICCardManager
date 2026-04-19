@@ -70,7 +70,7 @@ namespace ICCardManager.Services
             }
 
             // 元のLedgerをDBから取得
-            var originalLedger = await _ledgerRepository.GetByIdAsync(ledgerId);
+            var originalLedger = await _ledgerRepository.GetByIdAsync(ledgerId).ConfigureAwait(false);
             if (originalLedger == null)
             {
                 return new LedgerSplitResult
@@ -104,8 +104,8 @@ namespace ICCardManager.Services
                 // ReplaceDetailsAsync はDELETE+INSERTのため、rowidが再採番される
                 // DBは rowid DESC で時系列表示（大きいrowid＝古い＝先に表示）するので、
                 // 新しい明細から先に挿入して小さいrowidを割り当てる必要がある
-                await _ledgerRepository.ReplaceDetailsAsync(originalLedger.Id, firstGroup.AsEnumerable().Reverse());
-                await _ledgerRepository.UpdateAsync(originalLedger);
+                await _ledgerRepository.ReplaceDetailsAsync(originalLedger.Id, firstGroup.AsEnumerable().Reverse()).ConfigureAwait(false);
+                await _ledgerRepository.UpdateAsync(originalLedger).ConfigureAwait(false);
                 allSplitLedgers.Add(originalLedger);
 
                 // グループ2以降: 新しいLedgerを作成
@@ -135,17 +135,17 @@ namespace ICCardManager.Services
                         Note = null
                     };
 
-                    var newId = await _ledgerRepository.InsertAsync(newLedger);
+                    var newId = await _ledgerRepository.InsertAsync(newLedger).ConfigureAwait(false);
                     newLedger.Id = newId;
                     // Issue #880: 挿入順を逆にしてFeliCa互換のrowid順序を維持（上記コメント参照）
-                    await _ledgerRepository.InsertDetailsAsync(newId, groupDetails.AsEnumerable().Reverse());
+                    await _ledgerRepository.InsertDetailsAsync(newId, groupDetails.AsEnumerable().Reverse()).ConfigureAwait(false);
 
                     createdIds.Add(newId);
                     allSplitLedgers.Add(newLedger);
                 }
 
                 // 操作ログを記録
-                await _operationLogger.LogLedgerSplitAsync(operatorIdm, beforeLedger, allSplitLedgers);
+                await _operationLogger.LogLedgerSplitAsync(operatorIdm, beforeLedger, allSplitLedgers).ConfigureAwait(false);
 
                 _logger.LogInformation(
                     "Split ledger {LedgerId} into {Count} ledgers (new IDs: {NewIds})",

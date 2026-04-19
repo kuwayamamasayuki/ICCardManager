@@ -73,7 +73,7 @@ namespace ICCardManager.Services
         public async Task<ReportPrintData?> GetReportDataAsync(string cardIdm, int year, int month)
         {
             // Issue #841: データ準備を共通化されたReportDataBuilderに委譲
-            var data = await _reportDataBuilder.BuildAsync(cardIdm, year, month);
+            var data = await _reportDataBuilder.BuildAsync(cardIdm, year, month).ConfigureAwait(false);
             if (data == null)
             {
                 return null;
@@ -120,7 +120,7 @@ namespace ICCardManager.Services
             }
 
             // 最初のカードでドキュメントを作成
-            var firstData = await GetReportDataAsync(cardIdmList[0], year, month);
+            var firstData = await GetReportDataAsync(cardIdmList[0], year, month).ConfigureAwait(false);
             if (firstData == null)
             {
                 return null;
@@ -131,7 +131,7 @@ namespace ICCardManager.Services
             // 2枚目以降のカードを追加
             for (int i = 1; i < cardIdmList.Count; i++)
             {
-                var data = await GetReportDataAsync(cardIdmList[i], year, month);
+                var data = await GetReportDataAsync(cardIdmList[i], year, month).ConfigureAwait(false);
                 if (data == null)
                 {
                     continue;

@@ -63,7 +63,7 @@
     <PackageReference Include="Microsoft.Extensions.Caching.Memory" Version="8.0.1" />
 
     <!-- MVVM Toolkit -->
-    <PackageReference Include="CommunityToolkit.Mvvm" Version="8.2.2" />
+    <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.2" />
 
     <!-- FeliCa Library - Sony PaSoRi 用 -->
     <PackageReference Include="FelicaLib.DotNet" Version="1.2.67" />

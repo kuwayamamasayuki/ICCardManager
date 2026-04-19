@@ -240,7 +240,12 @@ namespace ICCardManager
             services.AddSingleton<IValidationService, ValidationService>();
             services.AddSingleton<SummaryGenerator>(sp =>
             {
-                var settings = sp.GetRequiredService<ISettingsRepository>().GetAppSettings();
+                // Issue #1281: この DI 初期化は UI スレッド（OnStartup）で実行されるため、
+                // SettingsRepository.GetAppSettings() 内の DbContext.LeaseConnection() が
+                // UI スレッド検出で例外を投げる。Task.Run でバックグラウンドスレッドに
+                // オフロードしてから取得する。
+                var repo = sp.GetRequiredService<ISettingsRepository>();
+                var settings = Task.Run(() => repo.GetAppSettings()).GetAwaiter().GetResult();
                 var orgOptions = sp.GetRequiredService<IOptions<OrganizationOptions>>().Value;
                 return new SummaryGenerator(settings.DepartmentType, orgOptions);
             });
@@ -265,6 +270,8 @@ namespace ICCardManager
             services.AddSingleton<IStationMasterService, StationMasterService>();
             services.AddSingleton<IDatabaseInfo>(sp => sp.GetRequiredService<DbContext>());
             services.AddSingleton<ICCardManager.Infrastructure.Timing.ISystemClock, ICCardManager.Infrastructure.Timing.SystemClock>();
+            // Issue #1265: 監査ログなりすまし防止のため、操作者コンテキストを一元管理する
+            services.AddSingleton<ICurrentOperatorContext, CurrentOperatorContext>();
             services.AddSingleton<SharedModeMonitor>();
             services.AddSingleton<WarningService>();
             services.AddSingleton<DashboardService>();
@@ -347,6 +354,30 @@ namespace ICCardManager
                 throw new InvalidOperationException(
                     "felicalib.dll が見つかりません。PaSoRi + felicalib 環境でのみ動作します。");
             }
+
+            // Issue #1266: felicalib.dll のハッシュ検証（DLL Hijacking 対策）
+            var guard = new Infrastructure.Security.FelicalibIntegrityGuard();
+            var integrityReport = guard.VerifyInBaseDirectory();
+            var integrityLogger = loggerFactory.CreateLogger("FelicalibIntegrity");
+            if (!integrityReport.IsVerified)
+            {
+                integrityLogger.LogError(
+                    "felicalib.dll の整合性検証に失敗: Result={Result}, Expected={Expected}, Actual={Actual}, File={File}, Error={Error}",
+                    integrityReport.Result,
+                    integrityReport.ExpectedSha256,
+                    integrityReport.ActualSha256 ?? "(未計算)",
+                    integrityReport.FilePath,
+                    integrityReport.ErrorMessage ?? "(なし)");
+                throw new InvalidOperationException(
+                    "felicalib.dll の整合性チェックに失敗しました " +
+                    $"（種別: {integrityReport.Result}）。\n" +
+                    "偽造または改変された DLL の可能性があります。\n" +
+                    "公式リリースから取得した正しい felicalib.dll を配置してください。\n" +
+                    $"期待ハッシュ (SHA-256): {integrityReport.ExpectedSha256}\n" +
+                    $"実ハッシュ (SHA-256):   {integrityReport.ActualSha256 ?? "(未計算)"}");
+            }
+            integrityLogger.LogInformation(
+                "felicalib.dll の整合性検証に成功: SHA-256={Sha256}", integrityReport.ActualSha256);
 
             var logger = loggerFactory.CreateLogger<FelicaCardReader>();
             logger.LogInformation("FelicaCardReader を使用します（残高・履歴読み取り可能）");
@@ -528,8 +559,10 @@ namespace ICCardManager
             try
             {
                 var settingsRepository = ServiceProvider.GetRequiredService<ISettingsRepository>();
-                // 同期版メソッドを使用してデッドロックを防止
-                var settings = settingsRepository.GetAppSettings();
+                // Issue #1281: UI スレッドから DbContext.LeaseConnection() を直接呼ぶと
+                // 例外になるため、Task.Run でバックグラウンドスレッドにオフロードしてから
+                // 同期取得する。起動時は競合する非同期操作がないため安全。
+                var settings = Task.Run(() => settingsRepository.GetAppSettings()).GetAwaiter().GetResult();
 
                 // 文字サイズを適用
                 ApplyFontSize(settings.FontSize);
@@ -580,6 +613,12 @@ namespace ICCardManager
             // Issue #663: ウィンドウ最小幅はフォントサイズに関係なく固定 愛称追加に伴い拡大（1400px）
             const double windowMinWidth = 1400;
 
+            // Issue #1273: トースト通知のサイズをフォントサイズに応じて動的計算。
+            // 計算ロジックは ToastLayoutCalculator（純粋関数）に集約してテスト容易性を確保。
+            var toastMinWidth = ToastLayoutCalculator.ComputeMinWidth(baseFontSize);
+            const double toastMaxWidth = ToastLayoutCalculator.MaxWidth;
+            var toastMaxHeight = ToastLayoutCalculator.ComputeMaxHeight(baseFontSize);
+
             // アプリケーションリソースを更新
             var resources = Application.Current.Resources;
             resources["BaseFontSize"] = baseFontSize;
@@ -592,6 +631,9 @@ namespace ICCardManager
             resources["DialogLargeIconFontSize"] = dialogLargeIconFontSize;
             resources["SidebarWidth"] = sidebarWidth;
             resources["WindowMinWidth"] = windowMinWidth;
+            resources["ToastMinWidth"] = toastMinWidth;
+            resources["ToastMaxWidth"] = toastMaxWidth;
+            resources["ToastMaxHeight"] = toastMaxHeight;
         }
 
         /// <summary>
@@ -645,7 +687,8 @@ namespace ICCardManager
 
                 // VACUUM（月次実行）
                 var settingsRepository = ServiceProvider.GetRequiredService<ISettingsRepository>();
-                var settings = settingsRepository.GetAppSettings();
+                // Issue #1281: UI スレッドから同期版を呼ばないよう Task.Run でオフロード
+                var settings = Task.Run(() => settingsRepository.GetAppSettings()).GetAwaiter().GetResult();
 
                 var today = DateTime.Now;
                 if (today.Day >= 10)
@@ -676,7 +719,19 @@ namespace ICCardManager
 
         protected override void OnExit(ExitEventArgs e)
         {
-            // リソースの解放
+            // Issue #1286: 明示的に SharedModeMonitor を Dispose してタイマーを確実に停止する。
+            // ServiceProvider.Dispose() でも破棄されるが、二重 Dispose は冪等で吸収される。
+            try
+            {
+                var monitor = ServiceProvider?.GetService<SharedModeMonitor>();
+                monitor?.Dispose();
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogWarning(ex, "SharedModeMonitor の Dispose でエラー");
+            }
+
+            // ServiceProvider 経由のリソース解放（他の IDisposable シングルトンも含む）
             if (ServiceProvider is IDisposable disposable)
             {
                 disposable.Dispose();

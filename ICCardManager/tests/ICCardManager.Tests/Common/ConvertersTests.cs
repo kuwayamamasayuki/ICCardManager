@@ -194,3 +194,83 @@ public class FileSizeConverterTests
         result.Should().Be(string.Empty);
     }
 }
+
+/// <summary>
+/// Issue #1278: <see cref="CountToAccessibilityTextConverter"/> の単体テスト。
+/// スクリーンリーダー向けに件数を自然言語で読み上げられるよう変換する。
+/// </summary>
+public class CountToAccessibilityTextConverterTests
+{
+    private readonly CountToAccessibilityTextConverter _converter = new();
+
+    [Theory]
+    [InlineData(1, "登録カード", "登録カードは1件です")]
+    [InlineData(5, "登録カード", "登録カードは5件です")]
+    [InlineData(100, "職員", "職員は100件です")]
+    [InlineData(1, "履歴", "履歴は1件です")]
+    public void Convert_正の整数の場合件数を含む説明文を返すこと(int count, string subject, string expected)
+    {
+        var result = _converter.Convert(count, typeof(string), subject, CultureInfo.InvariantCulture);
+        result.Should().Be(expected);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-1)]
+    [InlineData(-100)]
+    public void Convert_ゼロまたは負数の場合空リストを示す説明文を返すこと(int count)
+    {
+        var result = _converter.Convert(count, typeof(string), "登録カード", CultureInfo.InvariantCulture);
+        result.Should().Be("登録カードはまだありません。新規登録してください");
+    }
+
+    [Fact]
+    public void Convert_主語が未指定の場合項目という汎用語を使うこと()
+    {
+        var result = _converter.Convert(3, typeof(string), null, CultureInfo.InvariantCulture);
+        result.Should().Be("項目は3件です");
+    }
+
+    [Fact]
+    public void Convert_主語が空白のみの場合項目という汎用語を使うこと()
+    {
+        var result = _converter.Convert(0, typeof(string), "   ", CultureInfo.InvariantCulture);
+        result.Should().Be("項目はまだありません。新規登録してください");
+    }
+
+    [Fact]
+    public void Convert_文字列の数値を解釈できること()
+    {
+        var result = _converter.Convert("7", typeof(string), "カード", CultureInfo.InvariantCulture);
+        result.Should().Be("カードは7件です");
+    }
+
+    [Fact]
+    public void Convert_数値として解釈不能な値の場合空文字列を返すこと()
+    {
+        var result = _converter.Convert("abc", typeof(string), "登録カード", CultureInfo.InvariantCulture);
+        result.Should().Be(string.Empty);
+    }
+
+    [Fact]
+    public void Convert_nullの場合空文字列を返すこと()
+    {
+        var result = _converter.Convert(null, typeof(string), "登録カード", CultureInfo.InvariantCulture);
+        result.Should().Be(string.Empty);
+    }
+
+    [Fact]
+    public void Convert_境界値1件の場合件数テキストが返ること()
+    {
+        // 0件（まだありません）と1件（N件です）の境界を保証
+        var result = _converter.Convert(1, typeof(string), "登録カード", CultureInfo.InvariantCulture);
+        result.Should().Be("登録カード1件".Replace("登録カード1件", "登録カードは1件です"));
+    }
+
+    [Fact]
+    public void ConvertBack_NotImplementedExceptionをスローすること()
+    {
+        var act = () => _converter.ConvertBack("x", typeof(int), null, CultureInfo.InvariantCulture);
+        act.Should().Throw<System.NotImplementedException>();
+    }
+}

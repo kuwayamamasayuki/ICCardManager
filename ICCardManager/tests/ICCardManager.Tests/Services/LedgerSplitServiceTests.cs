@@ -40,7 +40,7 @@ public class LedgerSplitServiceTests
 
         _operationLogger = new OperationLogger(
             _operationLogRepositoryMock.Object,
-            _staffRepositoryMock.Object);
+            Mock.Of<ICurrentOperatorContext>());
 
         _service = new LedgerSplitService(
             _ledgerRepositoryMock.Object,

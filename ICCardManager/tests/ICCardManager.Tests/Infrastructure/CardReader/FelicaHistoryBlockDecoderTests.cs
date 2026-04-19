@@ -325,6 +325,183 @@ public class FelicaHistoryBlockDecoderTests
 
     #endregion
 
+    #region Issue #1253: バス判別のエッジケース
+
+    /// <summary>
+    /// Issue #1253: 入場駅コードのみ0、出場駅は駅名解決可能 → IsBus=false
+    /// 実装: 「駅コード両方0」の条件を満たさず、「駅名両方null」も満たさない（exitStationName は解決済み）
+    /// ため、バス判定されない
+    /// </summary>
+    [Fact]
+    public void Decode_EntryStationZero_ExitStationResolved_NotBus()
+    {
+        var block = BuildBlock(usageType: 0x16, entryStationCode: 0, exitStationCode: 0x5678, balance: 1000);
+
+        var result = FelicaHistoryBlockDecoder.Decode(block, null, FakeResolver, out _);
+
+        result.IsBus.Should().BeFalse("出場駅名が解決できれば駅コード0でもバス扱いしない");
+        result.EntryStation.Should().BeNull("入場駅コード0のためリゾルバ未呼出で null");
+        result.ExitStation.Should().Be("駅5678");
+    }
+
+    /// <summary>
+    /// Issue #1253: 入場駅コードのみ0、出場駅は駅コードありで解決不可 → IsBus=true
+    /// 実装: 「駅コード両方0」は満たさないが、「駅名両方null」を満たす（入場=コード0でnull、出場=解決不可でnull）
+    /// </summary>
+    [Fact]
+    public void Decode_EntryStationZero_ExitStationUnresolved_IsBus()
+    {
+        var block = BuildBlock(usageType: 0x16, entryStationCode: 0, exitStationCode: 0x5678, balance: 1000);
+
+        var result = FelicaHistoryBlockDecoder.Decode(block, null, NullResolver, out _);
+
+        result.IsBus.Should().BeTrue("駅コード0と解決不可の組み合わせは両方null扱いでバス判定");
+        result.EntryStation.Should().BeNull();
+        result.ExitStation.Should().BeNull();
+    }
+
+    /// <summary>
+    /// Issue #1253: 入場駅は解決可能、出場駅コードのみ0 → IsBus=false（逆パターン）
+    /// </summary>
+    [Fact]
+    public void Decode_ExitStationZero_EntryStationResolved_NotBus()
+    {
+        var block = BuildBlock(usageType: 0x16, entryStationCode: 0x1234, exitStationCode: 0, balance: 1000);
+
+        var result = FelicaHistoryBlockDecoder.Decode(block, null, FakeResolver, out _);
+
+        result.IsBus.Should().BeFalse();
+        result.EntryStation.Should().Be("駅1234");
+        result.ExitStation.Should().BeNull();
+    }
+
+    /// <summary>
+    /// Issue #1253: リゾルバが空文字列を返した場合の挙動を明文化
+    /// 実装は `entryStationName == null && exitStationName == null` を判定するため、
+    /// 空文字列は「解決済み」扱いとなり IsBus=false となる
+    /// （null と空文字列は区別される — 西鉄バス等は null を返す前提）
+    /// </summary>
+    [Fact]
+    public void Decode_ResolverReturnsEmptyString_TreatedAsResolved_NotBus()
+    {
+        var block = BuildBlock(usageType: 0x16, entryStationCode: 0x1234, exitStationCode: 0x5678, balance: 1000);
+        Func<int, int, string> emptyResolver = (_, _) => string.Empty;
+
+        var result = FelicaHistoryBlockDecoder.Decode(block, null, emptyResolver, out _);
+
+        result.IsBus.Should().BeFalse("空文字列は null と区別され、解決済み扱いでバス判定されない");
+        result.EntryStation.Should().Be(string.Empty);
+        result.ExitStation.Should().Be(string.Empty);
+    }
+
+    /// <summary>
+    /// Issue #1253: null と 空文字列の混在パターン
+    /// 片方が null、片方が空文字列の場合、「両方 null」ではないため IsBus=false
+    /// </summary>
+    [Fact]
+    public void Decode_ResolverMixesNullAndEmpty_NotBus()
+    {
+        var block = BuildBlock(usageType: 0x16, entryStationCode: 0x1234, exitStationCode: 0x5678, balance: 1000);
+        // 入場は null（解決不可）、出場は空文字（何らかの理由で空文字マスタが引かれた想定）
+        Func<int, int, string> mixedResolver = (line, num) => line == 0x12 ? null : string.Empty;
+
+        var result = FelicaHistoryBlockDecoder.Decode(block, null, mixedResolver, out _);
+
+        result.IsBus.Should().BeFalse("null と 空文字列の混在では両方nullの条件を満たさずバス判定されない");
+        result.EntryStation.Should().BeNull();
+        result.ExitStation.Should().Be(string.Empty);
+    }
+
+    /// <summary>
+    /// Issue #1253: チャージで駅名も解決可能な場合 → IsBus=false（最優先判定）
+    /// </summary>
+    [Fact]
+    public void Decode_ChargeWithResolvedStations_NotBus()
+    {
+        var block = BuildBlock(usageType: 0x02, entryStationCode: 0x1234, exitStationCode: 0x5678, balance: 1500);
+
+        var result = FelicaHistoryBlockDecoder.Decode(block, null, FakeResolver, out _);
+
+        result.IsCharge.Should().BeTrue();
+        result.IsBus.Should().BeFalse();
+        result.EntryStation.Should().Be("駅1234");
+        result.ExitStation.Should().Be("駅5678");
+    }
+
+    /// <summary>
+    /// Issue #1253: ポイント還元で駅名も解決可能な場合 → IsBus=false
+    /// </summary>
+    [Fact]
+    public void Decode_PointRedemptionWithResolvedStations_NotBus()
+    {
+        var block = BuildBlock(usageType: 0x0D, entryStationCode: 0x1234, exitStationCode: 0x5678, balance: 1500);
+
+        var result = FelicaHistoryBlockDecoder.Decode(block, null, FakeResolver, out _);
+
+        result.IsPointRedemption.Should().BeTrue();
+        result.IsBus.Should().BeFalse();
+    }
+
+    /// <summary>
+    /// Issue #1253: Issue #942 フォールバック発動時の IsBus の動作を明文化
+    /// 駅コード両方0 + 残高増加（通常利用扱いだが金額が負）の場合、
+    /// 最初に isBus=true（非チャージ・非還元＋駅コード0）と判定されたあとで、
+    /// フォールバックにより isPointRedemption が true に変わる。
+    /// IsBus 自体は再計算されないため IsBus=true のまま残り、
+    /// 「IsBus=true かつ IsPointRedemption=true」の複合状態となる。
+    /// 後段の SummaryGenerator では `!IsPointRedemption` フィルタで分類されるため実害はないが、
+    /// データベース上は複合状態として保存されることを明示的にテストする。
+    /// </summary>
+    [Fact]
+    public void Decode_Issue942Fallback_ZeroStations_IsBusStaysTrueWithFallback()
+    {
+        // 0x16（通常利用）だが残高が増加 → フォールバックで isPointRedemption=true になる
+        var previous = BuildBlock(balance: 500);
+        var current = BuildBlock(usageType: 0x16, entryStationCode: 0, exitStationCode: 0, balance: 700);
+
+        var result = FelicaHistoryBlockDecoder.Decode(current, previous, NullResolver, out var fallback);
+
+        fallback.Should().BeTrue("残高増加でフォールバックが発動する");
+        result.IsPointRedemption.Should().BeTrue();
+        result.IsBus.Should().BeTrue(
+            "Issue #942 フォールバックは IsBus を再計算しないため、駅コード0での初期判定 IsBus=true が維持される（後段処理では IsPointRedemption が優先されるため実害なし）");
+        result.Amount.Should().Be(200);
+    }
+
+    /// <summary>
+    /// Issue #1253: 駅コード=0 とリゾルバ nullの区別 — 両方0の場合は resolveStationName が呼ばれない
+    /// resolveStationName 呼び出しがゼロ回であることを検証
+    /// </summary>
+    [Fact]
+    public void Decode_BothStationCodesZero_ResolverNotCalled()
+    {
+        var block = BuildBlock(usageType: 0x16, entryStationCode: 0, exitStationCode: 0, balance: 1000);
+        var callCount = 0;
+        Func<int, int, string> countingResolver = (_, _) => { callCount++; return "呼ばれちゃダメ"; };
+
+        var result = FelicaHistoryBlockDecoder.Decode(block, null, countingResolver, out _);
+
+        callCount.Should().Be(0, "駅コード両方0の場合はリゾルバを呼び出さない");
+        result.IsBus.Should().BeTrue();
+    }
+
+    /// <summary>
+    /// Issue #1253: resolveStationName が例外を投げた場合も decoder は null を返す（内部 try-catch による防衛）
+    /// </summary>
+    [Fact]
+    public void Decode_ResolverThrowsException_ReturnsNull()
+    {
+        var block = BuildBlock(usageType: 0x16, entryStationCode: 0x1234, exitStationCode: 0x5678, balance: 1000);
+        Func<int, int, string> throwingResolver = (_, _) => throw new InvalidOperationException("マスタ参照エラー");
+
+        var result = FelicaHistoryBlockDecoder.Decode(block, null, throwingResolver, out var fallback);
+
+        result.Should().BeNull("リゾルバ例外は内部 catch で null を返すため、呼び出し側で null チェックが可能");
+        fallback.Should().BeFalse();
+    }
+
+    #endregion
+
     #region 金額計算
 
     /// <summary>

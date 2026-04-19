@@ -7,5 +7,14 @@
       "Bash(git push origin main*)",
       "Bash(git push -u origin main*)"
     ]
+  },
+  "hooks": {
+    "Stop": [
+      {
+        "type": "command",
+        "command": "bash .claude/hooks/check-doc-sync.sh",
+        "timeout": 15
+      }
+    ]
   }
 }

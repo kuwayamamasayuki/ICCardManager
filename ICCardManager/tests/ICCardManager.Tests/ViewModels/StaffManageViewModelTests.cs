@@ -41,7 +41,7 @@ public class StaffManageViewModelTests
 
         // OperationLoggerのモック（コンストラクタ引数が必要なためMock.Ofで作成）
         var operationLogRepositoryMock = new Mock<IOperationLogRepository>();
-        _operationLoggerMock = new Mock<OperationLogger>(operationLogRepositoryMock.Object, _staffRepositoryMock.Object);
+        _operationLoggerMock = new Mock<OperationLogger>(operationLogRepositoryMock.Object, Mock.Of<ICurrentOperatorContext>());
 
         // バリデーションはデフォルトで成功を返す
         _validationServiceMock.Setup(v => v.ValidateStaffIdm(It.IsAny<string>())).Returns(ValidationResult.Success());

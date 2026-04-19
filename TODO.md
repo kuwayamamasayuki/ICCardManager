@@ -1,16 +1,30 @@
 # 開発ToDo リスト
 
-## 現在のステータス: v2.2.0 リリース済み（全フェーズ完了）
+> **⚠️ このファイルは deprecated です（2026-04-17 付け・Issue #1249）**
+>
+> 本ファイルは **v2.2.0 時点の初期実装タスク進捗** を記録したもので、v2.3.0 以降の機能追加・リファクタリング・バグ修正は反映されていません（現行バージョンは v2.7.0）。
+>
+> **新しい情報源**:
+> - バージョン履歴・変更内容 → [`ICCardManager/CHANGELOG.md`](ICCardManager/CHANGELOG.md)
+> - 進行中タスク・バグ・要望 → [GitHub Issues](https://github.com/kuwayamamasayuki/ICCardManager/issues)
+> - 開発者向けガイド → [`ICCardManager/docs/manual/開発者ガイド.md`](ICCardManager/docs/manual/開発者ガイド.md)
+> - 設計書（アーキテクチャ・DB・機能仕様） → [`ICCardManager/docs/design/`](ICCardManager/docs/design/)
+>
+> 以下の内容は **v2.2.0 時点（2026 年 3 月末）のアーカイブ** として保持しています。新規作業の優先度判断には使用しないでください。
 
 ---
 
-## 実装タスク一覧
+## 付録: v2.2.0 時点の初期実装タスクアーカイブ
 
-### Phase 1: 環境確認
+> 以下は **v2.2.0 リリース時点で完了済み** とマークされていた初期実装タスク群です。歴史的記録として保持しています。当時の「現在のステータス: v2.2.0 リリース済み（全フェーズ完了）」は本ヘッダーの時点で **陳腐化** しており、以降の全変更は上記 CHANGELOG.md を参照してください。
+
+### 実装タスク一覧
+
+#### Phase 1: 環境確認
 - [x] Windows側でビルド・実行確認
 - [x] PaSoRi接続テスト（単体テスト＋統合テスト作成済み）
 
-### Phase 2: Models層の実装
+#### Phase 2: Models層の実装
 - [x] Staff.cs（職員エンティティ）
 - [x] IcCard.cs（交通系ICカードエンティティ）
 - [x] Ledger.cs（履歴概要エンティティ）
@@ -20,7 +34,7 @@
 - [x] MonthlyReportData.cs（月次帳票データ）
 - [x] ReportRow.cs（帳票行データ）
 
-### Phase 3: Data層の実装
+#### Phase 3: Data層の実装
 - [x] schema.sql（テーブル定義）
 - [x] DbContext.cs（DB接続管理）
 - [x] IStaffRepository / StaffRepository
@@ -29,7 +43,7 @@
 - [x] ISettingsRepository / SettingsRepository
 - [x] IOperationLogRepository / OperationLogRepository
 
-### Phase 4: Services層の実装
+#### Phase 4: Services層の実装
 - [x] CardTypeDetector.cs（カード種別判別）
 - [x] WarekiConverter.cs（和暦変換）
 - [x] SummaryGenerator.cs（摘要文字列生成）
@@ -48,7 +62,7 @@
 - [x] ToastNotificationService.cs（トースト通知）
 - [x] OperationLogExcelExportService.cs（操作ログExcel出力）
 
-### Phase 5: Infrastructure層の実装
+#### Phase 5: Infrastructure層の実装
 - [x] ICardReader.cs（インターフェース）
 - [x] FelicaCardReader.cs（PaSoRi + felicalib 経由でのFeliCa読み取り）
 - [x] HybridCardReader.cs（ハイブリッドリーダー）
@@ -56,7 +70,7 @@
 - [x] ISoundPlayer.cs（インターフェース）
 - [x] SoundPlayer.cs（効果音再生）
 
-### Phase 6: ViewModels層の実装
+#### Phase 6: ViewModels層の実装
 - [x] ViewModelBase.cs（基底クラス）
 - [x] MainViewModel.cs（メイン画面）
 - [x] SettingsViewModel.cs（設定画面）
@@ -75,7 +89,7 @@
 
 > **Note:** 履歴表示（HistoryViewModel）は独立した画面ではなく、MainViewModelおよびLedgerDetailViewModelに統合されている。
 
-### Phase 7: Views層の実装
+#### Phase 7: Views層の実装
 - [x] MainWindow.xaml（メイン画面）
 - [x] SettingsDialog.xaml（設定ダイアログ）
 - [x] ReportDialog.xaml（帳票作成ダイアログ）
@@ -98,7 +112,7 @@
 
 > **Note:** 履歴表示画面（HistoryView.xaml）は独立した画面ではなく、LedgerDetailDialog等に統合されている。
 
-### Phase 8: テスト拡充
+#### Phase 8: テスト拡充
 - [x] CardTypeDetectorTests.cs
 - [x] WarekiConverterTests.cs
 - [x] SummaryGeneratorTests.cs
@@ -109,7 +123,7 @@
 - [x] LedgerRepositoryTests.cs
 - [x] その他 90以上のテストファイル（合計101ファイル、カバレッジ70%以上を維持）
 
-### Phase 9: 統合・リリース
+#### Phase 9: 統合・リリース
 - [x] Windows側でのビルド確認
 - [x] CI通過確認（GitHub Actions: ci.yml、カバレッジ70%閾値）
 - [x] 結合テストの実施
@@ -121,9 +135,9 @@
 
 ---
 
-## 完了したタスク
+### 完了したタスク
 
-### CI/CD環境構築（完了）
+#### CI/CD環境構築（完了）
 - [x] .gitignore 作成
 - [x] ディレクトリ構造作成
 - [x] ICCardManager.sln 作成
@@ -136,7 +150,7 @@
 - [x] 単体テスト作成
 - [x] GitHub Actions CI 確認
 
-### コア機能実装（完了）
+#### コア機能実装（完了）
 - [x] Models層（エンティティ定義）
 - [x] Data層（DB接続、リポジトリ）
 - [x] Services層（ビジネスロジック）
@@ -145,7 +159,7 @@
 - [x] Views層（メイン画面＋全ダイアログ）
 - [x] DIコンテナ設定（App.xaml.cs）
 
-### 追加機能（当初計画外で実装済み）
+#### 追加機能（当初計画外で実装済み）
 - [x] 共有フォルダモード（複数PC共有DB対応）
 - [x] データ入出力（CSV Export/Import）
 - [x] 履歴マージ機能
@@ -159,7 +173,7 @@
 
 ---
 
-## 参考リンク
+### 参考リンク
 
 - GitHub リポジトリ: https://github.com/kuwayamamasayuki/ICCardManager
 - GitHub Actions: https://github.com/kuwayamamasayuki/ICCardManager/actions

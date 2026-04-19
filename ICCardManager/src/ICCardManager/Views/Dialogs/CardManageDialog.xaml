@@ -16,11 +16,15 @@
         ResizeMode="CanResize"
         KeyDown="Window_KeyDown"
         FontSize="{DynamicResource BaseFontSize}"
+        FocusManager.FocusedElement="{Binding ElementName=CardDataGrid}"
         AutomationProperties.Name="交通系ICカード管理ダイアログ"
         AutomationProperties.HelpText="交通系ICカードの登録・編集・削除ができます。カードをタッチして新規登録できます。Escキーで閉じます。">
 
     <Window.Resources>
         <BooleanToVisibilityConverter x:Key="BoolToVisibilityConverter"/>
+        <!-- Issue #1278: スクリーンリーダー向けの件数読み上げテキスト生成 -->
+        <common:CountToAccessibilityTextConverter x:Key="CountAccessibilityConverter"
+                                                   xmlns:common="clr-namespace:ICCardManager.Common"/>
     </Window.Resources>
 
     <Grid Margin="15">
@@ -38,6 +42,7 @@
             </Grid.RowDefinitions>
 
             <!-- ヘッダー -->
+            <!-- Issue #1278: 件数表示にスクリーンリーダー向けの自然言語テキストを付与 -->
             <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="0,0,0,10">
                 <TextBlock Text="登録済み交通系ICカード一覧"
                            FontSize="{DynamicResource LargeFontSize}"
@@ -47,7 +52,10 @@
                            FontSize="{DynamicResource BaseFontSize}"
                            Foreground="{DynamicResource SecondaryTextBrush}"
                            VerticalAlignment="Center"
-                           Margin="5,0,0,0"/>
+                           Margin="5,0,0,0"
+                           AutomationProperties.Name="{Binding Cards.Count, Converter={StaticResource CountAccessibilityConverter}, ConverterParameter=登録カード}"
+                           AutomationProperties.HelpText="登録済み交通系ICカードの件数です。0件の場合は新規登録が必要です。"
+                           AutomationProperties.LiveSetting="Polite"/>
             </StackPanel>
 
             <!-- カード一覧 -->
@@ -69,19 +77,20 @@
                     <DataGridTextColumn Header="種別" Binding="{Binding CardType}" Width="100"/>
                     <DataGridTextColumn Header="管理番号" Binding="{Binding CardNumber}" Width="100"/>
                     <DataGridTextColumn Header="備考" Binding="{Binding Note}" Width="*"/>
-                    <DataGridTemplateColumn Header="状態" Width="70">
+                    <DataGridTemplateColumn Header="状態" Width="90">
                         <DataGridTemplateColumn.CellTemplate>
                             <DataTemplate>
-                                <TextBlock>
+                                <!-- Issue #1274: 色 + アイコン + テキスト + スクリーンリーダー用説明文の
+                                     4要素で状態を伝達。LentStatusIcon / LentStatusDisplay は
+                                     LendingStatusPresenter で一元管理される。 -->
+                                <TextBlock AutomationProperties.Name="{Binding LentStatusAccessibilityText, Mode=OneWay}">
                                     <TextBlock.Style>
                                         <Style TargetType="TextBlock">
-                                            <Setter Property="Text" Value="利用可"/>
                                             <Setter Property="Foreground" Value="{DynamicResource SuccessActionBrush}"/>
                                             <Setter Property="FontWeight" Value="Bold"/>
                                             <Style.Triggers>
                                                 <!-- Issue #530: 払戻済状態（最優先） -->
                                                 <DataTrigger Binding="{Binding IsRefunded}" Value="True">
-                                                    <Setter Property="Text" Value="払戻済"/>
                                                     <Setter Property="Foreground" Value="{DynamicResource SecondaryTextBrush}"/>
                                                     <Setter Property="FontWeight" Value="Normal"/>
                                                 </DataTrigger>
@@ -91,7 +100,6 @@
                                                         <Condition Binding="{Binding IsRefunded}" Value="False"/>
                                                         <Condition Binding="{Binding IsLent}" Value="True"/>
                                                     </MultiDataTrigger.Conditions>
-                                                    <Setter Property="Text" Value="貸出中"/>
                                                     <Setter Property="Foreground" Value="{DynamicResource WarningActionBrush}"/>
                                                     <Setter Property="FontWeight" Value="Bold"/>
                                                 </MultiDataTrigger>
@@ -102,6 +110,9 @@
                                             </Style.Triggers>
                                         </Style>
                                     </TextBlock.Style>
+                                    <Run Text="{Binding LentStatusIcon, Mode=OneWay}"/>
+                                    <Run Text=" "/>
+                                    <Run Text="{Binding LentStatusDisplay, Mode=OneWay}"/>
                                 </TextBlock>
                             </DataTemplate>
                         </DataGridTemplateColumn.CellTemplate>
