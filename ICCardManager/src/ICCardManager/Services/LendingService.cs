@@ -325,43 +325,10 @@ namespace ICCardManager.Services
                 // READ操作はリトライ範囲の外で実行（不要な再クエリを防止）
                 var currentBalance = await ResolveInitialBalanceAsync(cardIdm, balance);
 
-                // トランザクション開始
+                // トランザクション内で貸出ledger作成 + カード状態更新
                 // 共有モード時のSQLITE_BUSY対策としてリトライでラップ（WRITE操作のみ）
-                await _dbContext.ExecuteWithRetryAsync(async () =>
-                {
-                    using var scope = await _dbContext.BeginTransactionAsync();
-
-                    try
-                    {
-                        var ledger = new Ledger
-                        {
-                            CardIdm = cardIdm,
-                            LenderIdm = staffIdm,
-                            Date = now,
-                            Summary = SummaryGenerator.GetLendingSummary(),
-                            Income = 0,
-                            Expense = 0,
-                            Balance = currentBalance,
-                            StaffName = staff.Name,
-                            LentAt = now,
-                            IsLentRecord = true
-                        };
-
-                        var ledgerId = await _ledgerRepository.InsertAsync(ledger);
-                        ledger.Id = ledgerId;
-                        result.CreatedLedgers.Add(ledger);
-
-                        // カードの貸出状態を更新
-                        await _cardRepository.UpdateLentStatusAsync(cardIdm, true, now, staffIdm);
-
-                        scope.Commit();
-                    }
-                    catch
-                    {
-                        scope.Rollback();
-                        throw;
-                    }
-                });
+                var ledger = await InsertLendLedgerAsync(cardIdm, staffIdm, staff.Name, currentBalance, now);
+                result.CreatedLedgers.Add(ledger);
 
                 // 処理情報を記録
                 LastProcessedCardIdm = cardIdm;
@@ -388,6 +355,53 @@ namespace ICCardManager.Services
             }
 
             return result;
+        }
+
+        /// <summary>
+        /// 貸出ledgerレコードを作成し、カードの貸出状態を更新する。
+        /// 共有モード時のSQLITE_BUSY対策として ExecuteWithRetryAsync でラップ。
+        /// </summary>
+        internal async Task<Ledger> InsertLendLedgerAsync(
+            string cardIdm, string staffIdm, string staffName, int balance, DateTime now)
+        {
+            Ledger createdLedger = null;
+
+            await _dbContext.ExecuteWithRetryAsync(async () =>
+            {
+                using var scope = await _dbContext.BeginTransactionAsync();
+
+                try
+                {
+                    var ledger = new Ledger
+                    {
+                        CardIdm = cardIdm,
+                        LenderIdm = staffIdm,
+                        Date = now,
+                        Summary = SummaryGenerator.GetLendingSummary(),
+                        Income = 0,
+                        Expense = 0,
+                        Balance = balance,
+                        StaffName = staffName,
+                        LentAt = now,
+                        IsLentRecord = true
+                    };
+
+                    var ledgerId = await _ledgerRepository.InsertAsync(ledger);
+                    ledger.Id = ledgerId;
+
+                    await _cardRepository.UpdateLentStatusAsync(cardIdm, true, now, staffIdm);
+
+                    scope.Commit();
+                    createdLedger = ledger;
+                }
+                catch
+                {
+                    scope.Rollback();
+                    throw;
+                }
+            });
+
+            return createdLedger;
         }
 
         /// <summary>
