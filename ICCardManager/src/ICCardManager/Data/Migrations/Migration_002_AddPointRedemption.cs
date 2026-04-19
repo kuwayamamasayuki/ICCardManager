@@ -20,9 +20,10 @@ namespace ICCardManager.Data.Migrations
 
         public void Up(SQLiteConnection connection, SQLiteTransaction transaction)
         {
-            // ledger_detailテーブルにis_point_redemptionカラムを追加
-            ExecuteNonQuery(connection, transaction,
-                "ALTER TABLE ledger_detail ADD COLUMN is_point_redemption INTEGER DEFAULT 0");
+            // Issue #1285: AddColumnIfNotExists で冪等化
+            MigrationHelpers.AddColumnIfNotExists(
+                connection, transaction,
+                "ledger_detail", "is_point_redemption", "INTEGER DEFAULT 0");
         }
 
         public void Down(SQLiteConnection connection, SQLiteTransaction transaction)
