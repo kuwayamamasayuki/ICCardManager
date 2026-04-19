@@ -25,7 +25,7 @@ namespace ICCardManager.Services
             var errors = new List<CsvImportError>();
             return await ExecuteImportWithErrorHandlingAsync(
                 () => ImportStaffInternalAsync(filePath, skipExisting, errors),
-                errors);
+                errors).ConfigureAwait(false);
         }
 
         /// <summary>
@@ -39,7 +39,7 @@ namespace ICCardManager.Services
             var importedCount = 0;
             var skippedCount = 0;
 
-            var lines = await ReadCsvFileAsync(filePath);
+            var lines = await ReadCsvFileAsync(filePath).ConfigureAwait(false);
             if (lines.Count < 2)
             {
                 return new CsvImportResult
@@ -91,7 +91,7 @@ namespace ICCardManager.Services
                 }
 
                 // 既存チェック（削除済みも含めて検索）
-                var existingStaff = await _staffRepository.GetByIdmAsync(staffIdm, includeDeleted: true);
+                var existingStaff = await _staffRepository.GetByIdmAsync(staffIdm, includeDeleted: true).ConfigureAwait(false);
                 if (existingStaff != null)
                 {
                     // 削除済み職員の場合は復元対象として扱う
@@ -146,7 +146,7 @@ namespace ICCardManager.Services
             }
 
             // トランザクション内でインポート実行
-            using var scope = await _dbContext.BeginTransactionAsync();
+            using var scope = await _dbContext.BeginTransactionAsync().ConfigureAwait(false);
             try
             {
                 foreach (var (lineNumber, staff, isUpdate, isRestore) in validRecords)
@@ -155,19 +155,19 @@ namespace ICCardManager.Services
                     if (isRestore)
                     {
                         // 削除済み職員を復元してから更新（トランザクション内）
-                        success = await _staffRepository.RestoreAsync(staff.StaffIdm, scope.Transaction);
+                        success = await _staffRepository.RestoreAsync(staff.StaffIdm, scope.Transaction).ConfigureAwait(false);
                         if (success)
                         {
-                            success = await _staffRepository.UpdateAsync(staff, scope.Transaction);
+                            success = await _staffRepository.UpdateAsync(staff, scope.Transaction).ConfigureAwait(false);
                         }
                     }
                     else if (isUpdate)
                     {
-                        success = await _staffRepository.UpdateAsync(staff, scope.Transaction);
+                        success = await _staffRepository.UpdateAsync(staff, scope.Transaction).ConfigureAwait(false);
                     }
                     else
                     {
-                        success = await _staffRepository.InsertAsync(staff, scope.Transaction);
+                        success = await _staffRepository.InsertAsync(staff, scope.Transaction).ConfigureAwait(false);
                     }
 
                     if (success)
@@ -241,7 +241,7 @@ namespace ICCardManager.Services
             var errors = new List<CsvImportError>();
             return await ExecutePreviewWithErrorHandlingAsync(
                 () => PreviewStaffInternalAsync(filePath, skipExisting, errors),
-                errors);
+                errors).ConfigureAwait(false);
         }
 
         /// <summary>
@@ -257,7 +257,7 @@ namespace ICCardManager.Services
             var updateCount = 0;
             var skipCount = 0;
 
-            var lines = await ReadCsvFileAsync(filePath);
+            var lines = await ReadCsvFileAsync(filePath).ConfigureAwait(false);
             if (lines.Count < 2)
             {
                 return new CsvImportPreviewResult
@@ -300,7 +300,7 @@ namespace ICCardManager.Services
                 }
 
                 // 既存チェック（削除済みも含めて検索）
-                var existingStaff = await _staffRepository.GetByIdmAsync(staffIdm, includeDeleted: true);
+                var existingStaff = await _staffRepository.GetByIdmAsync(staffIdm, includeDeleted: true).ConfigureAwait(false);
                 ImportAction action;
                 var changes = new List<FieldChange>();
 

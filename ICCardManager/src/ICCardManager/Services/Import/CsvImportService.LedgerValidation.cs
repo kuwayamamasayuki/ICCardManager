@@ -259,7 +259,7 @@ namespace ICCardManager.Services
                 var cardIdm = kvp.Key;
                 var earliestDate = kvp.Value;
 
-                var previousLedger = await _ledgerRepository.GetLatestBeforeDateAsync(cardIdm, earliestDate);
+                var previousLedger = await _ledgerRepository.GetLatestBeforeDateAsync(cardIdm, earliestDate).ConfigureAwait(false);
                 if (previousLedger != null)
                 {
                     result[cardIdm.ToUpperInvariant()] = previousLedger.Balance;

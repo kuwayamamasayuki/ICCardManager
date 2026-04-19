@@ -26,7 +26,7 @@ namespace ICCardManager.Services
             var errors = new List<CsvImportError>();
             return await ExecutePreviewWithErrorHandlingAsync(
                 () => PreviewLedgerDetailsInternalAsync(filePath, errors),
-                errors);
+                errors).ConfigureAwait(false);
         }
 
         /// <summary>
@@ -41,7 +41,7 @@ namespace ICCardManager.Services
             var updateCount = 0;
             var skipCount = 0;
 
-            var lines = await ReadCsvFileAsync(filePath);
+            var lines = await ReadCsvFileAsync(filePath).ConfigureAwait(false);
             if (lines.Count < 2)
             {
                 return new CsvImportPreviewResult
@@ -52,7 +52,7 @@ namespace ICCardManager.Services
             }
 
             // Issue #937: カード名表示のためにカード情報を取得
-            var allCards = await _cardRepository.GetAllIncludingDeletedAsync();
+            var allCards = await _cardRepository.GetAllIncludingDeletedAsync().ConfigureAwait(false);
             var cardNameMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
             foreach (var c in allCards)
             {
@@ -109,7 +109,7 @@ namespace ICCardManager.Services
                     }
 
                     // カード存在チェック
-                    var card = await _cardRepository.GetByIdmAsync(cardIdm, includeDeleted: true);
+                    var card = await _cardRepository.GetByIdmAsync(cardIdm, includeDeleted: true).ConfigureAwait(false);
                     if (card == null)
                     {
                         errors.Add(new CsvImportError
@@ -135,7 +135,7 @@ namespace ICCardManager.Services
                 // 既存ledger_idの存在チェック
                 if (!existingDetailsByLedgerId.ContainsKey(detail.LedgerId))
                 {
-                    var ledger = await _ledgerRepository.GetByIdAsync(detail.LedgerId);
+                    var ledger = await _ledgerRepository.GetByIdAsync(detail.LedgerId).ConfigureAwait(false);
                     if (ledger == null)
                     {
                         errors.Add(new CsvImportError
@@ -286,7 +286,7 @@ namespace ICCardManager.Services
             var errors = new List<CsvImportError>();
             return await ExecuteImportWithErrorHandlingAsync(
                 () => ImportLedgerDetailsInternalAsync(filePath, errors),
-                errors);
+                errors).ConfigureAwait(false);
         }
 
         /// <summary>
@@ -298,7 +298,7 @@ namespace ICCardManager.Services
         {
             var importedCount = 0;
 
-            var lines = await ReadCsvFileAsync(filePath);
+            var lines = await ReadCsvFileAsync(filePath).ConfigureAwait(false);
             if (lines.Count < 2)
             {
                 return new CsvImportResult
@@ -356,7 +356,7 @@ namespace ICCardManager.Services
                     }
 
                     // カード存在チェック
-                    var card = await _cardRepository.GetByIdmAsync(cardIdm, includeDeleted: true);
+                    var card = await _cardRepository.GetByIdmAsync(cardIdm, includeDeleted: true).ConfigureAwait(false);
                     if (card == null)
                     {
                         errors.Add(new CsvImportError
@@ -382,7 +382,7 @@ namespace ICCardManager.Services
                 // 既存ledger_idの存在チェック
                 if (!existingDetailsByLedgerId.ContainsKey(detail.LedgerId))
                 {
-                    var ledger = await _ledgerRepository.GetByIdAsync(detail.LedgerId);
+                    var ledger = await _ledgerRepository.GetByIdAsync(detail.LedgerId).ConfigureAwait(false);
                     if (ledger == null)
                     {
                         errors.Add(new CsvImportError
@@ -436,7 +436,7 @@ namespace ICCardManager.Services
                     kvp.Key.CardIdm,
                     kvp.Key.Date,
                     kvp.Value,
-                    errors);
+                    errors).ConfigureAwait(false);
             }
 
             // 既存ledger_idごとにReplaceDetailsAsyncで全置換（変更がある場合のみ）
@@ -460,12 +460,12 @@ namespace ICCardManager.Services
 
                 try
                 {
-                    var success = await _ledgerRepository.ReplaceDetailsAsync(ledgerId, newDetails);
+                    var success = await _ledgerRepository.ReplaceDetailsAsync(ledgerId, newDetails).ConfigureAwait(false);
 
                     if (success)
                     {
                         // Issue #918: 詳細置換後、親Ledgerの金額を再計算して更新
-                        var ledger = await _ledgerRepository.GetByIdAsync(ledgerId);
+                        var ledger = await _ledgerRepository.GetByIdAsync(ledgerId).ConfigureAwait(false);
                         if (ledger != null)
                         {
                             var summaryGenerator = new SummaryGenerator();
@@ -476,7 +476,7 @@ namespace ICCardManager.Services
                             ledger.Income = income;
                             ledger.Expense = expense;
                             ledger.Balance = balance;
-                            await _ledgerRepository.UpdateAsync(ledger);
+                            await _ledgerRepository.UpdateAsync(ledger).ConfigureAwait(false);
                         }
 
                         importedCount += detailRows.Count;

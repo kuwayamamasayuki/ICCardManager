@@ -25,7 +25,7 @@ namespace ICCardManager.Services
             var errors = new List<CsvImportError>();
             return await ExecuteImportWithErrorHandlingAsync(
                 () => ImportCardsInternalAsync(filePath, skipExisting, errors),
-                errors);
+                errors).ConfigureAwait(false);
         }
 
         /// <summary>
@@ -39,7 +39,7 @@ namespace ICCardManager.Services
             var importedCount = 0;
             var skippedCount = 0;
 
-            var lines = await ReadCsvFileAsync(filePath);
+            var lines = await ReadCsvFileAsync(filePath).ConfigureAwait(false);
             if (lines.Count < 2)
             {
                 return new CsvImportResult
@@ -96,7 +96,7 @@ namespace ICCardManager.Services
                 }
 
                 // 既存チェック（削除済みも含めて検索）
-                var existingCard = await _cardRepository.GetByIdmAsync(cardIdm, includeDeleted: true);
+                var existingCard = await _cardRepository.GetByIdmAsync(cardIdm, includeDeleted: true).ConfigureAwait(false);
                 if (existingCard != null)
                 {
                     // 削除済みカードの場合は復元対象として扱う
@@ -151,7 +151,7 @@ namespace ICCardManager.Services
             }
 
             // トランザクション内でインポート実行
-            using var scope = await _dbContext.BeginTransactionAsync();
+            using var scope = await _dbContext.BeginTransactionAsync().ConfigureAwait(false);
             try
             {
                 foreach (var (lineNumber, card, isUpdate, isRestore) in validRecords)
@@ -160,19 +160,19 @@ namespace ICCardManager.Services
                     if (isRestore)
                     {
                         // 削除済みカードを復元してから更新（トランザクション内）
-                        success = await _cardRepository.RestoreAsync(card.CardIdm, scope.Transaction);
+                        success = await _cardRepository.RestoreAsync(card.CardIdm, scope.Transaction).ConfigureAwait(false);
                         if (success)
                         {
-                            success = await _cardRepository.UpdateAsync(card, scope.Transaction);
+                            success = await _cardRepository.UpdateAsync(card, scope.Transaction).ConfigureAwait(false);
                         }
                     }
                     else if (isUpdate)
                     {
-                        success = await _cardRepository.UpdateAsync(card, scope.Transaction);
+                        success = await _cardRepository.UpdateAsync(card, scope.Transaction).ConfigureAwait(false);
                     }
                     else
                     {
-                        success = await _cardRepository.InsertAsync(card, scope.Transaction);
+                        success = await _cardRepository.InsertAsync(card, scope.Transaction).ConfigureAwait(false);
                     }
 
                     if (success)
@@ -238,7 +238,7 @@ namespace ICCardManager.Services
             var errors = new List<CsvImportError>();
             return await ExecutePreviewWithErrorHandlingAsync(
                 () => PreviewCardsInternalAsync(filePath, skipExisting, errors),
-                errors);
+                errors).ConfigureAwait(false);
         }
 
         /// <summary>
@@ -254,7 +254,7 @@ namespace ICCardManager.Services
             var updateCount = 0;
             var skipCount = 0;
 
-            var lines = await ReadCsvFileAsync(filePath);
+            var lines = await ReadCsvFileAsync(filePath).ConfigureAwait(false);
             if (lines.Count < 2)
             {
                 return new CsvImportPreviewResult
@@ -302,7 +302,7 @@ namespace ICCardManager.Services
                 }
 
                 // 既存チェック（削除済みも含めて検索）
-                var existingCard = await _cardRepository.GetByIdmAsync(cardIdm, includeDeleted: true);
+                var existingCard = await _cardRepository.GetByIdmAsync(cardIdm, includeDeleted: true).ConfigureAwait(false);
                 ImportAction action;
                 var changes = new List<FieldChange>();
 
