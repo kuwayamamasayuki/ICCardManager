@@ -453,6 +453,33 @@ namespace ICCardManager.Services
         }
 
         /// <summary>
+        /// 返却処理の事前検証。カード・貸出状態・職員の存在を順次チェックする。
+        /// </summary>
+        /// <returns>(Card, Returner, ErrorMessage)。ErrorMessage が非 null の場合は検証失敗。</returns>
+        internal async Task<(IcCard Card, Staff Returner, string ErrorMessage)> ValidateReturnPreconditionsAsync(
+            string staffIdm, string cardIdm)
+        {
+            var card = await _cardRepository.GetByIdmAsync(cardIdm);
+            if (card == null)
+            {
+                return (null, null, "カードが登録されていません。");
+            }
+
+            if (!card.IsLent)
+            {
+                return (card, null, "このカードは貸出されていません。");
+            }
+
+            var returner = await _staffRepository.GetByIdmAsync(staffIdm);
+            if (returner == null)
+            {
+                return (card, null, "職員証が登録されていません。");
+            }
+
+            return (card, returner, null);
+        }
+
+        /// <summary>
         /// ICカードの返却処理を実行し、利用履歴を記録します。
         /// </summary>
         /// <param name="staffIdm">返却者の職員証IDm（16桁の16進数文字列）</param>
@@ -494,26 +521,10 @@ namespace ICCardManager.Services
                     return result;
                 }
 
-                // カードを取得
-                var card = await _cardRepository.GetByIdmAsync(cardIdm);
-                if (card == null)
+                var (card, returner, validationError) = await ValidateReturnPreconditionsAsync(staffIdm, cardIdm);
+                if (validationError != null)
                 {
-                    result.ErrorMessage = "カードが登録されていません。";
-                    return result;
-                }
-
-                // 貸出中チェック
-                if (!card.IsLent)
-                {
-                    result.ErrorMessage = "このカードは貸出されていません。";
-                    return result;
-                }
-
-                // 返却者を取得
-                var returner = await _staffRepository.GetByIdmAsync(staffIdm);
-                if (returner == null)
-                {
-                    result.ErrorMessage = "職員証が登録されていません。";
+                    result.ErrorMessage = validationError;
                     return result;
                 }
 
