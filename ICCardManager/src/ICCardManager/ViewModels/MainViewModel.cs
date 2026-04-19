@@ -17,6 +17,7 @@ using ICCardManager.Infrastructure.Caching;
 using ICCardManager.Infrastructure.Timing;
 using ICCardManager.Models;
 using ICCardManager.Services;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 
@@ -114,6 +115,7 @@ public partial class MainViewModel : ViewModelBase
     private readonly SharedModeMonitor _sharedModeMonitor;
     private readonly WarningService _warningService;
     private readonly DashboardService _dashboardService;
+    private readonly ILogger<MainViewModel>? _logger;
     private readonly HashSet<CardReadingSource> _suppressionSources = new();
 
     /// <summary>
@@ -403,7 +405,8 @@ public partial class MainViewModel : ViewModelBase
         ICacheService cacheService,
         SharedModeMonitor sharedModeMonitor,
         WarningService warningService,
-        DashboardService dashboardService)
+        DashboardService dashboardService,
+        ILogger<MainViewModel>? logger = null)
     {
         _cardReader = cardReader;
         _soundPlayer = soundPlayer;
@@ -427,6 +430,7 @@ public partial class MainViewModel : ViewModelBase
         _sharedModeMonitor = sharedModeMonitor;
         _warningService = warningService;
         _dashboardService = dashboardService;
+        _logger = logger;
 
         // カード読み取り抑制メッセージの受信を登録（Issue #852）
         _messenger.Register<CardReadingSuppressedMessage>(this, (recipient, message) =>
@@ -603,9 +607,15 @@ public partial class MainViewModel : ViewModelBase
             // Issue #1110, #1131: 最終同期時刻を記録
             _sharedModeMonitor.RecordRefresh();
         }
-        catch (Exception)
+        catch (Exception ex)
         {
-            // リフレッシュ失敗は無視
+            // Issue #1282: 共有モードの定期リフレッシュはタイマー起動のため、失敗しても
+            // UI を止めず次回試行に委ねるのが設計意図。ただし無言握りつぶしは
+            // ネットワーク切断や DB 破損の兆候を見逃すため、LogDebug で痕跡を残す。
+            // 頻繁に呼ばれる処理なので LogWarning ではなく LogDebug とし、
+            // 運用時のログ肥大化を避ける。SharedModeMonitor のヘルスチェックが
+            // 接続断を別途 UI に通知するため、ユーザー影響は限定的。
+            _logger?.LogDebug(ex, "共有モードの定期データリフレッシュに失敗（次回タイマー発火で再試行）");
         }
     }
 

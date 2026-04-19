@@ -1015,8 +1015,14 @@ namespace ICCardManager.Data
                 // 接続一時停止中 — ネットワーク切断ではない
                 return true;
             }
-            catch (Exception)
+            catch (Exception ex)
             {
+                // Issue #1282: 疎通確認なので「失敗=未到達」を戻り値で通知するのが仕様。
+                // ただしサイレント握りつぶしはトラブル時のデバッグを困難にするため、
+                // LogDebug で失敗理由を残す。接続断は運用上頻繁に起きる想定のため
+                // LogWarning ではなく LogDebug を選択（ログファイルの肥大化を避ける）。
+                _logger?.LogDebug(ex,
+                    "DB接続疎通確認に失敗。呼び出し元には false を返す（ネットワーク断または読み取りエラー）");
                 return false;
             }
         }
