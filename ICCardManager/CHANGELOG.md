@@ -28,6 +28,9 @@
 **ユーザー体験改善**
 - エラーメッセージを「何が / なぜ / どうすれば」の3要素を含む具体的な文言に改善。`ValidationService` の全バリデーター（CardIdm/CardNumber/CardType/StaffIdm/StaffName/WarningBalance）と `LedgerRowEditViewModel.Validate` の7種のメッセージを、実際の入力値・期待値・解決アクションを明示する形に統一。例: 「カード種別を選択してください」→「カード種別が未選択です。ドロップダウンから「はやかけん」「nimoca」等を選択してください」。`.claude/rules/error-messages.md` に品質ガイドライン（3要素構成・禁止パターン・行動指示型語尾・最小文字数基準）を追加し、`ValidationServiceErrorMessageQualityTests` で自動検証（#1275）
 
+**リファクタリング**
+- `LendingService.LendAsync` / `ReturnAsync` を責務ごとに internal ヘルパーメソッドへ分割し、可読性とテスト容易性を向上（`LendAsync` 121行 → 62行、`ReturnAsync` 182行 → 99行）。抽出したヘルパー: `ValidateLendPreconditionsAsync` / `ValidateReturnPreconditionsAsync` / `ResolveLentRecordAsync` / `ResolveInitialBalanceAsync` / `InsertLendLedgerAsync` / `FilterUsageSinceLent` / `ResolveReturnBalanceAsync` / `ApplyBalanceWarningAsync` / `PersistReturnAsync`。public API は一切変更せず、既存テストは全件 pass。抽出ヘルパー向けの `LendingServiceHelperTests`（23件）を追加（#1283）
+
 ### v2.7.0 (2026-04-15)
 
 **新機能**
