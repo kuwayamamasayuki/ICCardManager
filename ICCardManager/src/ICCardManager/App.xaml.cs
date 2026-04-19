@@ -719,7 +719,19 @@ namespace ICCardManager
 
         protected override void OnExit(ExitEventArgs e)
         {
-            // リソースの解放
+            // Issue #1286: 明示的に SharedModeMonitor を Dispose してタイマーを確実に停止する。
+            // ServiceProvider.Dispose() でも破棄されるが、二重 Dispose は冪等で吸収される。
+            try
+            {
+                var monitor = ServiceProvider?.GetService<SharedModeMonitor>();
+                monitor?.Dispose();
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogWarning(ex, "SharedModeMonitor の Dispose でエラー");
+            }
+
+            // ServiceProvider 経由のリソース解放（他の IDisposable シングルトンも含む）
             if (ServiceProvider is IDisposable disposable)
             {
                 disposable.Dispose();
