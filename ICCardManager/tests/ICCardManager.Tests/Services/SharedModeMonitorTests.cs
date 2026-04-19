@@ -389,4 +389,65 @@ public class SharedModeMonitorTests
     }
 
     #endregion
+
+    #region Dispose（Issue #1286）
+
+    [Fact]
+    public void Dispose_TimersStopped()
+    {
+        _monitor.Start();
+        var healthTimer = _timerFactory.CreatedTimers[0];
+        var displayTimer = _timerFactory.CreatedTimers[1];
+
+        _monitor.Dispose();
+
+        healthTimer.IsRunning.Should().BeFalse();
+        displayTimer.IsRunning.Should().BeFalse();
+    }
+
+    [Fact]
+    public void Dispose_CalledTwice_DoesNotThrow()
+    {
+        _monitor.Start();
+
+        Action act = () =>
+        {
+            _monitor.Dispose();
+            _monitor.Dispose();
+        };
+
+        act.Should().NotThrow();
+    }
+
+    [Fact]
+    public void Start_AfterDispose_ThrowsObjectDisposedException()
+    {
+        _monitor.Dispose();
+
+        Action act = () => _monitor.Start();
+
+        act.Should().Throw<ObjectDisposedException>()
+            .Which.ObjectName.Should().Be(nameof(SharedModeMonitor));
+    }
+
+    [Fact]
+    public void Stop_AfterDispose_DoesNotThrow()
+    {
+        _monitor.Start();
+        _monitor.Dispose();
+
+        Action act = () => _monitor.Stop();
+
+        act.Should().NotThrow();
+    }
+
+    [Fact]
+    public void Dispose_WithoutStart_DoesNotThrow()
+    {
+        Action act = () => _monitor.Dispose();
+
+        act.Should().NotThrow();
+    }
+
+    #endregion
 }
