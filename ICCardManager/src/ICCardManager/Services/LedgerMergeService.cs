@@ -180,7 +180,7 @@ namespace ICCardManager.Services
             var ledgers = new List<Ledger>();
             foreach (var id in ledgerIds)
             {
-                var ledger = await _ledgerRepository.GetByIdAsync(id);
+                var ledger = await _ledgerRepository.GetByIdAsync(id).ConfigureAwait(false);
                 if (ledger == null)
                 {
                     return new LedgerMergeResult
@@ -287,7 +287,7 @@ namespace ICCardManager.Services
             {
                 // リポジトリで統合実行（トランザクション）
                 var sourceIds = sources.Select(s => s.Id).ToList();
-                var success = await _ledgerRepository.MergeLedgersAsync(target.Id, sourceIds, target);
+                var success = await _ledgerRepository.MergeLedgersAsync(target.Id, sourceIds, target).ConfigureAwait(false);
 
                 if (!success)
                 {
@@ -300,10 +300,10 @@ namespace ICCardManager.Services
 
                 // UndoデータをDBに保存
                 var undoJson = JsonSerializer.Serialize(undoData, JsonOptions);
-                await _ledgerRepository.SaveMergeHistoryAsync(target.Id, description, undoJson);
+                await _ledgerRepository.SaveMergeHistoryAsync(target.Id, description, undoJson).ConfigureAwait(false);
 
                 // 操作ログ記録
-                await _operationLogger.LogLedgerMergeAsync(operatorIdm, beforeLedgers, target);
+                await _operationLogger.LogLedgerMergeAsync(operatorIdm, beforeLedgers, target).ConfigureAwait(false);
 
                 _logger.LogInformation(
                     "Merged {Count} ledgers into ledger {TargetId}: {Summary}",
@@ -337,7 +337,7 @@ namespace ICCardManager.Services
             try
             {
                 // 履歴からUndoデータを取得
-                var entry = await GetMergeHistoryEntryAsync(mergeHistoryId);
+                var entry = await GetMergeHistoryEntryAsync(mergeHistoryId).ConfigureAwait(false);
                 if (entry == null)
                 {
                     return new LedgerMergeResult
@@ -347,7 +347,7 @@ namespace ICCardManager.Services
                     };
                 }
 
-                var success = await _ledgerRepository.UnmergeLedgersAsync(entry.UndoData);
+                var success = await _ledgerRepository.UnmergeLedgersAsync(entry.UndoData).ConfigureAwait(false);
 
                 if (!success)
                 {
@@ -359,7 +359,7 @@ namespace ICCardManager.Services
                 }
 
                 // 履歴を取り消し済みにマーク
-                await _ledgerRepository.MarkMergeHistoryUndoneAsync(mergeHistoryId);
+                await _ledgerRepository.MarkMergeHistoryUndoneAsync(mergeHistoryId).ConfigureAwait(false);
 
                 _logger.LogInformation(
                     "Unmerged merge history {HistoryId}: restored ledger {TargetId}",
@@ -386,7 +386,7 @@ namespace ICCardManager.Services
         /// </summary>
         public async Task<List<MergeHistoryEntry>> GetUndoableMergeHistoriesAsync()
         {
-            var rawEntries = await _ledgerRepository.GetMergeHistoriesAsync(undoneOnly: false);
+            var rawEntries = await _ledgerRepository.GetMergeHistoriesAsync(undoneOnly: false).ConfigureAwait(false);
             var result = new List<MergeHistoryEntry>();
 
             foreach (var (id, mergedAt, targetLedgerId, description, undoDataJson, isUndone) in rawEntries)
@@ -411,7 +411,7 @@ namespace ICCardManager.Services
         /// </summary>
         private async Task<MergeHistoryEntry?> GetMergeHistoryEntryAsync(int historyId)
         {
-            var rawEntries = await _ledgerRepository.GetMergeHistoriesAsync(undoneOnly: false);
+            var rawEntries = await _ledgerRepository.GetMergeHistoriesAsync(undoneOnly: false).ConfigureAwait(false);
             var entry = rawEntries.FirstOrDefault(e => e.Id == historyId && !e.IsUndone);
 
             if (entry.Id == 0) return null;

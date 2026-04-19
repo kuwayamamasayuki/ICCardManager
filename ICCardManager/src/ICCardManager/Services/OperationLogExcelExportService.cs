@@ -50,7 +50,7 @@ public class OperationLogExcelExportService
             ApplyFormatting(worksheet, row - 1);
 
             workbook.SaveAs(filePath);
-        });
+        }).ConfigureAwait(false);
     }
 
     /// <summary>

@@ -102,8 +102,8 @@ namespace ICCardManager.Services.Import.Builders
                         Balance = balance
                     };
 
-                    var newLedgerId = await _ledgerRepository.InsertAsync(newLedger);
-                    var success = await _ledgerRepository.InsertDetailsAsync(newLedgerId, segmentDetails);
+                    var newLedgerId = await _ledgerRepository.InsertAsync(newLedger).ConfigureAwait(false);
+                    var success = await _ledgerRepository.InsertDetailsAsync(newLedgerId, segmentDetails).ConfigureAwait(false);
 
                     if (!success)
                     {

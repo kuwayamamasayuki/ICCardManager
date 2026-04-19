@@ -136,7 +136,7 @@ namespace ICCardManager.Services
         /// </summary>
         public async Task<bool> CheckConnectionAsync()
         {
-            return await Task.Run(() => _databaseInfo.CheckConnection());
+            return await Task.Run(() => _databaseInfo.CheckConnection()).ConfigureAwait(false);
         }
 
         /// <summary>
@@ -185,7 +185,7 @@ namespace ICCardManager.Services
             _isHealthCheckRunning = true;
             try
             {
-                var isConnected = await CheckConnectionAsync();
+                var isConnected = await CheckConnectionAsync().ConfigureAwait(false);
                 HealthCheckCompleted?.Invoke(this, new DatabaseHealthEventArgs(isConnected));
                 return true;
             }
@@ -198,7 +198,7 @@ namespace ICCardManager.Services
         private async void OnHealthCheckTick(object sender, EventArgs e)
         {
             // async void は例外が伝播しないため、排他制御ロジックは ExecuteHealthCheckAsync に集約
-            await ExecuteHealthCheckAsync();
+            await ExecuteHealthCheckAsync().ConfigureAwait(false);
         }
 
         private void OnSyncDisplayTick(object sender, EventArgs e)

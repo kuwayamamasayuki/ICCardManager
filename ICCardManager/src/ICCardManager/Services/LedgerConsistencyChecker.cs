@@ -38,13 +38,13 @@ namespace ICCardManager.Services
             // ID順だとポイント還元と利用の順序が残高推移と一致せず、
             // 偽の不整合が報告される場合がある
             var ledgers = LedgerOrderHelper.ReorderByBalanceChain(
-                await _ledgerRepository.GetByDateRangeAsync(cardIdm, fromDate, toDate));
+                await _ledgerRepository.GetByDateRangeAsync(cardIdm, fromDate, toDate).ConfigureAwait(false));
 
             // Issue #1059: 詳細レベルのチェックのためにDetailsを読み込む
             if (ledgers.Count > 0)
             {
                 var ledgerIds = ledgers.Select(l => l.Id).ToList();
-                var detailsMap = await _ledgerRepository.GetDetailsByLedgerIdsAsync(ledgerIds);
+                var detailsMap = await _ledgerRepository.GetDetailsByLedgerIdsAsync(ledgerIds).ConfigureAwait(false);
                 foreach (var ledger in ledgers)
                 {
                     if (detailsMap.TryGetValue(ledger.Id, out var details))
