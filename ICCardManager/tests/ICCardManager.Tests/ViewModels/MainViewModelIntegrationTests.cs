@@ -565,6 +565,51 @@ public class MainViewModelIntegrationTests
             .Should().Be(1);
     }
 
+    /// <summary>
+    /// Issue #1359: SharedModeMonitor.ExecuteHealthCheckAsync は ConfigureAwait(false) を使用するため
+    /// HealthCheckCompleted イベントが thread pool スレッドから発火される。ViewModel は UI バインドされた
+    /// ObservableCollection (LentCards / CardBalanceDashboard / WarningMessages) を安全に更新するため、
+    /// IDispatcherService.InvokeAsync(Func&lt;Task&gt;) で UI スレッドへマーシャリングすること。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 回帰の経緯: Issue #1350 (commit 77479b1) で SharedModeMonitor に ConfigureAwait(false) を
+    /// 一貫適用した際、HealthCheckCompleted の発火スレッドが UI スレッドから thread pool に変わった。
+    /// 修正前の OnSharedModeHealthCheckCompleted は marshalling せず直接 UI 依存プロパティを更新していたため、
+    /// 実機 WPF では ObservableCollection 変更時に NotSupportedException が発生し、
+    /// RefreshSharedDataAsync の try/catch で握り潰されて RecordRefresh() が呼ばれず、
+    /// 表示が「同期待ち...」のまま固定される問題が発生していた。
+    /// </para>
+    /// <para>
+    /// xUnit は DispatcherSynchronizationContext を持たないため NotSupportedException 自体は検出できない。
+    /// 本テストは「マーシャリング経路が使われているか」を InvokeAsyncFuncCallCount で検証することで
+    /// 同等の回帰を固定化する。
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void SharedMode_HealthCheckCompleted_UI依存更新はIDispatcherServiceでmarshallingされること()
+    {
+        // Arrange: DB 接続成功 + 貸出カードなし（RefreshSharedDataAsync が正常完了する条件）
+        _databaseInfoMock.Setup(d => d.CheckConnection()).Returns(true);
+        _cardRepositoryMock.Setup(r => r.GetLentAsync(It.IsAny<bool>()))
+            .ReturnsAsync(new List<IcCard>());
+        _cardRepositoryMock.Setup(r => r.GetAllAsync())
+            .ReturnsAsync(new List<IcCard>());
+
+        var beforeFuncCount = _dispatcherService.InvokeAsyncFuncCallCount;
+
+        // Act: ExecuteHealthCheckAsync を実行（内部の ConfigureAwait(false) により
+        // HealthCheckCompleted は thread pool スレッド相当の経路で発火される）
+        _sharedModeMonitor.ExecuteHealthCheckAsync().GetAwaiter().GetResult();
+
+        // Assert: ViewModel ハンドラが InvokeAsync(Func<Task>) 経由で UI スレッドへマーシャリングした
+        _dispatcherService.InvokeAsyncFuncCallCount.Should().BeGreaterThan(
+            beforeFuncCount,
+            "HealthCheckCompleted は非UIスレッドから発火されるため、ViewModel は UI 依存の "
+            + "ObservableCollection 更新を IDispatcherService 経由でマーシャリングすべき "
+            + "(Issue #1359: Issue #1350 の ConfigureAwait(false) 追加による回帰)");
+    }
+
     #endregion
 
     #region エラー発生時のUI状態復帰

@@ -20,15 +20,29 @@ namespace ICCardManager.Tests.Infrastructure.Timing
     {
         private readonly List<Task> _pendingTasks = new List<Task>();
 
+        /// <summary>
+        /// <see cref="InvokeAsync(Action)"/> が呼ばれた回数。
+        /// Service 層イベントのマーシャリング有無を検証する回帰テストで使用する。
+        /// </summary>
+        public int InvokeAsyncActionCallCount { get; private set; }
+
+        /// <summary>
+        /// <see cref="InvokeAsync(Func{Task})"/> が呼ばれた回数。
+        /// Service 層イベントのマーシャリング有無を検証する回帰テストで使用する（Issue #1359）。
+        /// </summary>
+        public int InvokeAsyncFuncCallCount { get; private set; }
+
         /// <inheritdoc/>
         public void InvokeAsync(Action action)
         {
+            InvokeAsyncActionCallCount++;
             action();
         }
 
         /// <inheritdoc/>
         public void InvokeAsync(Func<Task> asyncAction)
         {
+            InvokeAsyncFuncCallCount++;
             var task = asyncAction();
             _pendingTasks.Add(task);
             task.GetAwaiter().GetResult();
