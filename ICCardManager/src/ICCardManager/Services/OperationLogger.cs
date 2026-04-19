@@ -31,6 +31,10 @@ namespace ICCardManager.Services
             public const string Restore = "RESTORE";
             public const string Merge = "MERGE";
             public const string Split = "SPLIT";
+            // Issue #1302: 一括操作 (監査証跡)
+            public const string Import = "IMPORT";
+            public const string Export = "EXPORT";
+            public const string Backup = "BACKUP";
         }
 
         /// <summary>
@@ -57,6 +61,9 @@ namespace ICCardManager.Services
             public const string Staff = "staff";
             public const string IcCard = "ic_card";
             public const string Ledger = "ledger";
+            // Issue #1302: 一括操作対象
+            public const string LedgerDetail = "ledger_detail";
+            public const string Database = "database";
         }
 
         public OperationLogger(
@@ -313,6 +320,129 @@ namespace ICCardManager.Services
                 Action = Actions.Split,
                 BeforeData = SerializeToJson(originalLedger),
                 AfterData = SerializeToJson(splitLedgers)
+            }).ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// CSV インポート操作のログを記録。Issue #1302。
+        /// </summary>
+        /// <param name="tableName">対象テーブル名 (<see cref="Tables"/> 定数)</param>
+        /// <param name="filePath">インポート元ファイルのフルパス</param>
+        /// <param name="insertedCount">新規挿入件数</param>
+        /// <param name="skippedCount">スキップ件数</param>
+        /// <param name="errorCount">エラー件数</param>
+        public async Task LogImportAsync(
+            string tableName,
+            string filePath,
+            int insertedCount,
+            int skippedCount,
+            int errorCount)
+        {
+            var (idm, name) = ResolveOperator();
+            var fileName = System.IO.Path.GetFileName(filePath);
+            var payload = new
+            {
+                FilePath = filePath,
+                FileName = fileName,
+                InsertedCount = insertedCount,
+                SkippedCount = skippedCount,
+                ErrorCount = errorCount
+            };
+            await _operationLogRepository.InsertAsync(new OperationLog
+            {
+                Timestamp = DateTime.Now,
+                OperatorIdm = idm,
+                OperatorName = name,
+                TargetTable = tableName,
+                TargetId = fileName,
+                Action = Actions.Import,
+                BeforeData = null,
+                AfterData = SerializeToJson(payload)
+            }).ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// CSV/Excel エクスポート操作のログを記録。Issue #1302。
+        /// </summary>
+        /// <param name="tableName">対象テーブル名 (<see cref="Tables"/> 定数)</param>
+        /// <param name="filePath">エクスポート先ファイルのフルパス</param>
+        /// <param name="recordCount">出力件数</param>
+        public async Task LogExportAsync(string tableName, string filePath, int recordCount)
+        {
+            var (idm, name) = ResolveOperator();
+            var fileName = System.IO.Path.GetFileName(filePath);
+            var payload = new
+            {
+                FilePath = filePath,
+                FileName = fileName,
+                RecordCount = recordCount
+            };
+            await _operationLogRepository.InsertAsync(new OperationLog
+            {
+                Timestamp = DateTime.Now,
+                OperatorIdm = idm,
+                OperatorName = name,
+                TargetTable = tableName,
+                TargetId = fileName,
+                Action = Actions.Export,
+                BeforeData = null,
+                AfterData = SerializeToJson(payload)
+            }).ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// バックアップ取得のログを記録。Issue #1302。
+        /// </summary>
+        /// <param name="filePath">バックアップファイルのフルパス</param>
+        public async Task LogBackupAsync(string filePath)
+        {
+            var (idm, name) = ResolveOperator();
+            var fileName = System.IO.Path.GetFileName(filePath);
+            var payload = new
+            {
+                FilePath = filePath,
+                FileName = fileName
+            };
+            await _operationLogRepository.InsertAsync(new OperationLog
+            {
+                Timestamp = DateTime.Now,
+                OperatorIdm = idm,
+                OperatorName = name,
+                TargetTable = Tables.Database,
+                TargetId = fileName,
+                Action = Actions.Backup,
+                BeforeData = null,
+                AfterData = SerializeToJson(payload)
+            }).ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// DB リストア操作のログを記録。Issue #1302。
+        /// </summary>
+        /// <remarks>
+        /// 既存の <see cref="LogStaffRestoreAsync(Staff)"/> はレコード単位復元だが、
+        /// こちらは DB 丸ごとリストア。<c>TargetTable="database"</c> で区別する。
+        /// </remarks>
+        /// <param name="filePath">リストア元ファイルのフルパス</param>
+        public async Task LogRestoreAsync(string filePath)
+        {
+            var (idm, name) = ResolveOperator();
+            var fileName = System.IO.Path.GetFileName(filePath);
+            var payload = new
+            {
+                FilePath = filePath,
+                FileName = fileName
+            };
+            await _operationLogRepository.InsertAsync(new OperationLog
+            {
+                Timestamp = DateTime.Now,
+                OperatorIdm = idm,
+                OperatorName = name,
+                TargetTable = Tables.Database,
+                TargetId = fileName,
+                Action = Actions.Restore,
+                BeforeData = null,
+                AfterData = SerializeToJson(payload)
             }).ConfigureAwait(false);
         }
 

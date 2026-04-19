@@ -482,4 +482,166 @@ public class OperationLoggerTests : IDisposable
     }
 
     #endregion
+
+    #region Issue #1302: Import / Export / Backup / Restore のテスト
+
+    [Fact]
+    public async Task LogImportAsync_WithSession_RecordsImportAction()
+    {
+        // Arrange
+        _operatorContext.BeginSession("1234567890ABCDEF", "田中 太郎");
+
+        // Act
+        await _logger.LogImportAsync(
+            OperationLogger.Tables.Staff,
+            @"C:\import\staff_20260419.csv",
+            insertedCount: 10,
+            skippedCount: 2,
+            errorCount: 0);
+
+        // Assert
+        var logs = await _operationLogRepository.GetByTargetAsync(
+            OperationLogger.Tables.Staff, "staff_20260419.csv");
+        logs.Should().HaveCount(1);
+        var log = logs.First();
+        log.Action.Should().Be(OperationLogger.Actions.Import);
+        log.TargetTable.Should().Be(OperationLogger.Tables.Staff);
+        log.TargetId.Should().Be("staff_20260419.csv");
+        log.OperatorIdm.Should().Be("1234567890ABCDEF");
+        log.OperatorName.Should().Be("田中 太郎");
+        log.BeforeData.Should().BeNull();
+        log.AfterData.Should().Contain("\"InsertedCount\":10");
+        log.AfterData.Should().Contain("\"SkippedCount\":2");
+        log.AfterData.Should().Contain("\"ErrorCount\":0");
+        log.AfterData.Should().Contain("staff_20260419.csv");
+    }
+
+    [Fact]
+    public async Task LogImportAsync_WithoutSession_FallsBackToGuiOperator()
+    {
+        // Arrange: セッション未開始
+
+        // Act
+        await _logger.LogImportAsync(
+            OperationLogger.Tables.Ledger,
+            @"D:\data\ledger.csv",
+            insertedCount: 100,
+            skippedCount: 0,
+            errorCount: 0);
+
+        // Assert
+        var logs = await _operationLogRepository.GetByOperatorAsync(OperationLogger.GuiOperator.Idm);
+        logs.Should().HaveCount(1);
+        logs.First().OperatorIdm.Should().Be(OperationLogger.GuiOperator.Idm);
+        logs.First().OperatorName.Should().Be(OperationLogger.GuiOperator.Name);
+        logs.First().TargetTable.Should().Be(OperationLogger.Tables.Ledger);
+        logs.First().Action.Should().Be(OperationLogger.Actions.Import);
+    }
+
+    [Fact]
+    public async Task LogExportAsync_WithSession_RecordsExportAction()
+    {
+        // Arrange
+        _operatorContext.BeginSession("AABBCCDDEEFF0011", "山田 花子");
+
+        // Act
+        await _logger.LogExportAsync(
+            OperationLogger.Tables.Ledger,
+            @"C:\export\ledgers_20260419_20260419.csv",
+            recordCount: 523);
+
+        // Assert
+        var logs = await _operationLogRepository.GetByTargetAsync(
+            OperationLogger.Tables.Ledger, "ledgers_20260419_20260419.csv");
+        logs.Should().HaveCount(1);
+        var log = logs.First();
+        log.Action.Should().Be(OperationLogger.Actions.Export);
+        log.TargetTable.Should().Be(OperationLogger.Tables.Ledger);
+        log.TargetId.Should().Be("ledgers_20260419_20260419.csv");
+        log.OperatorIdm.Should().Be("AABBCCDDEEFF0011");
+        log.OperatorName.Should().Be("山田 花子");
+        log.BeforeData.Should().BeNull();
+        log.AfterData.Should().Contain("\"RecordCount\":523");
+    }
+
+    [Fact]
+    public async Task LogExportAsync_LedgerDetailTable_RecordsCorrectly()
+    {
+        // Act
+        await _logger.LogExportAsync(
+            OperationLogger.Tables.LedgerDetail,
+            @"C:\export\ledger_details.csv",
+            recordCount: 1500);
+
+        // Assert
+        var logs = await _operationLogRepository.GetByTargetAsync(
+            OperationLogger.Tables.LedgerDetail, "ledger_details.csv");
+        logs.Should().HaveCount(1);
+        logs.First().TargetTable.Should().Be("ledger_detail");
+        logs.First().AfterData.Should().Contain("\"RecordCount\":1500");
+    }
+
+    [Fact]
+    public async Task LogBackupAsync_RecordsBackupActionWithDatabaseTarget()
+    {
+        // Arrange
+        _operatorContext.BeginSession("FFEEDDCCBBAA9988", "管理者");
+
+        // Act
+        await _logger.LogBackupAsync(@"C:\backup\iccard_20260419_100000.db");
+
+        // Assert
+        var logs = await _operationLogRepository.GetByTargetAsync(
+            OperationLogger.Tables.Database, "iccard_20260419_100000.db");
+        logs.Should().HaveCount(1);
+        var log = logs.First();
+        log.Action.Should().Be(OperationLogger.Actions.Backup);
+        log.TargetTable.Should().Be(OperationLogger.Tables.Database);
+        log.TargetId.Should().Be("iccard_20260419_100000.db");
+        log.OperatorName.Should().Be("管理者");
+        log.BeforeData.Should().BeNull();
+        log.AfterData.Should().Contain("iccard_20260419_100000.db");
+    }
+
+    [Fact]
+    public async Task LogRestoreAsync_RecordsRestoreActionWithDatabaseTarget()
+    {
+        // Arrange
+        _operatorContext.BeginSession("1122334455667788", "管理者2");
+
+        // Act
+        await _logger.LogRestoreAsync(@"C:\backup\iccard_backup.db");
+
+        // Assert
+        var logs = await _operationLogRepository.GetByTargetAsync(
+            OperationLogger.Tables.Database, "iccard_backup.db");
+        logs.Should().HaveCount(1);
+        var log = logs.First();
+        log.Action.Should().Be(OperationLogger.Actions.Restore);
+        log.TargetTable.Should().Be(OperationLogger.Tables.Database);
+        log.TargetId.Should().Be("iccard_backup.db");
+        log.OperatorName.Should().Be("管理者2");
+        log.AfterData.Should().Contain("iccard_backup.db");
+    }
+
+    [Fact]
+    public async Task LogRestoreAsync_DistinctFromStaffRestore_ByTargetTable()
+    {
+        // Arrange
+        var staff = CreateTestStaff();
+
+        // Act — 両方の RESTORE を実行
+        await _logger.LogStaffRestoreAsync(staff);
+        await _logger.LogRestoreAsync(@"C:\backup.db");
+
+        // Assert — Action=RESTORE が2件、TargetTable で区別可能
+        var allLogs = (await _operationLogRepository.GetByOperatorAsync(OperationLogger.GuiOperator.Idm)).ToList();
+        allLogs.Where(l => l.Action == OperationLogger.Actions.Restore).Should().HaveCount(2);
+        allLogs.Should().Contain(l =>
+            l.Action == OperationLogger.Actions.Restore && l.TargetTable == OperationLogger.Tables.Staff);
+        allLogs.Should().Contain(l =>
+            l.Action == OperationLogger.Actions.Restore && l.TargetTable == OperationLogger.Tables.Database);
+    }
+
+    #endregion
 }
