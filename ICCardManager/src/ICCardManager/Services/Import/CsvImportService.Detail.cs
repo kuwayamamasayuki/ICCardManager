@@ -191,7 +191,8 @@ namespace ICCardManager.Services
                         Action = ImportAction.Insert,
                         Changes = insertChanges
                     });
-                    newCount++;
+                    // Issue #1379: CSV 行数ベースでカウント（インポート結果と一致させる）
+                    newCount += detailList.Count;
                 }
                 else
                 {
@@ -212,7 +213,8 @@ namespace ICCardManager.Services
                             Action = ImportAction.Insert,
                             Changes = segmentChanges
                         });
-                        newCount++;
+                        // Issue #1379: CSV 行数ベースでカウント（インポート結果と一致させる）
+                        newCount += segment.Details.Count;
                     }
                 }
             }
@@ -233,12 +235,14 @@ namespace ICCardManager.Services
                 if (changes.Count > 0)
                 {
                     action = ImportAction.Update;
-                    updateCount++;
+                    // Issue #1379: CSV 行数ベースでカウント（インポート結果と一致させる）
+                    updateCount += detailRows.Count;
                 }
                 else
                 {
                     action = ImportAction.Skip;
-                    skipCount++;
+                    // Issue #1379: CSV 行数ベースでカウント（インポート結果と一致させる）
+                    skipCount += detailRows.Count;
                     // Issue #969: スキップ時も既存データの内容を表示
                     changes = CreateSkipDetailChanges(existingDetails);
                 }
