@@ -7,6 +7,7 @@ using ICCardManager.Data;
 using ICCardManager.Data.Repositories;
 using ICCardManager.Models;
 using ICCardManager.Services;
+using ICCardManager.Tests.Data;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Xunit;
@@ -29,7 +30,12 @@ namespace ICCardManager.Tests.Services;
 /// <c>ConfigureAwait(false)</c> があっても UI スレッドに留まる。本テストは
 /// <c>ReturnsAsync</c> によって同期完了する設定を与えることで、本番の "キャッシュヒット経路" を再現する。
 /// </para>
+/// <para>
+/// Issue #1372: 同一フック (<c>DbContext.IsOnUiThread</c>) を書き換える他テストクラスとの
+/// 並列実行レースを避けるため、<see cref="DbContextUiThreadHookCollection"/> に属させシリアル実行させる。
+/// </para>
 /// </remarks>
+[Collection(DbContextUiThreadHookCollection.Name)]
 public class BackupServiceUiThreadGuardTests : IDisposable
 {
     private readonly string _testDirectory;
