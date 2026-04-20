@@ -589,7 +589,7 @@ namespace ICCardManager.ViewModels
                     // 操作ログを記録（operatorIdmを設定してGUI操作を区別）
                     if (!string.IsNullOrEmpty(_operatorIdm))
                     {
-                        await _operationLogger.LogLedgerUpdateAsync(_operatorIdm, beforeLedger, _ledger);
+                        await _operationLogger.LogLedgerUpdateAsync(beforeLedger, _ledger);
                     }
                 }
 

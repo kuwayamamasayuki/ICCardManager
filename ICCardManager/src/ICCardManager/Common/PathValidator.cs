@@ -61,7 +61,7 @@ namespace ICCardManager.Common
         /// <returns>検証結果</returns>
         /// <remarks>
         /// UNC パスの場合、<see cref="DefaultUncTimeoutMs"/> の内部タイムアウトで到達性を
-        /// 確認する。ハングを防ぐため <see cref="Task.Run"/> 内で <see cref="Directory.Exists"/>
+        /// 確認する。ハングを防ぐため <c>Task.Run</c> 内で <see cref="Directory.Exists"/>
         /// を実行し、タイムアウト超過時は到達不可として扱う。UI スレッドから呼ぶ場合は
         /// <see cref="ValidateBackupPathAsync"/> の利用を検討すること。
         /// </remarks>
@@ -335,7 +335,7 @@ namespace ICCardManager.Common
         /// <remarks>
         /// <para>
         /// <see cref="Directory.Exists"/> はネットワーク不安定時に数十秒ハングし得るため、
-        /// <see cref="Task.Run"/> + <see cref="Task.Wait(int)"/> で明示的なタイムアウトを設ける。
+        /// <c>Task.Run</c> + <see cref="Task.Wait(int)"/> で明示的なタイムアウトを設ける。
         /// </para>
         /// <para>
         /// 戻り値 <c>true</c> は「指定されたUNCパスまで到達できて、かつディレクトリが存在する」を意味する。

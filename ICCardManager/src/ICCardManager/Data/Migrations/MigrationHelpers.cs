@@ -51,6 +51,10 @@ namespace ICCardManager.Data.Migrations
         /// <summary>
         /// 列が存在しない場合のみ <c>ALTER TABLE ... ADD COLUMN</c> を実行する（冪等）。
         /// </summary>
+        /// <param name="connection">対象データベースへの開いた接続</param>
+        /// <param name="transaction">実行中のトランザクション</param>
+        /// <param name="table">対象テーブル名</param>
+        /// <param name="column">追加する列名</param>
         /// <param name="typeAndConstraints">例: <c>"INTEGER DEFAULT 0"</c>, <c>"TEXT"</c></param>
         public static void AddColumnIfNotExists(
             SQLiteConnection connection,

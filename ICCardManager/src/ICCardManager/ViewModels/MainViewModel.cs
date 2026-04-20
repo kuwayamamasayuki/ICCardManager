@@ -1608,7 +1608,7 @@ public partial class MainViewModel : ViewModelBase
         var fullLedger = await _ledgerRepository.GetByIdAsync(ledger.Id);
         if (fullLedger == null) return;
         await _ledgerRepository.DeleteAsync(ledger.Id);
-        await _operationLogger.LogLedgerDeleteAsync(authResult.Idm, fullLedger);
+        await _operationLogger.LogLedgerDeleteAsync(fullLedger);
 
         await LoadHistoryLedgersAsync();
         await RefreshDashboardAsync();
@@ -1662,7 +1662,7 @@ public partial class MainViewModel : ViewModelBase
             if (fullLedger != null)
             {
                 await _ledgerRepository.DeleteAsync(ledger.Id);
-                await _operationLogger.LogLedgerDeleteAsync(operatorIdm, fullLedger);
+                await _operationLogger.LogLedgerDeleteAsync(fullLedger);
             }
 
             await LoadHistoryLedgersAsync();

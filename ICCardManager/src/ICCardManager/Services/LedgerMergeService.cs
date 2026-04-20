@@ -303,7 +303,7 @@ namespace ICCardManager.Services
                 await _ledgerRepository.SaveMergeHistoryAsync(target.Id, description, undoJson).ConfigureAwait(false);
 
                 // 操作ログ記録
-                await _operationLogger.LogLedgerMergeAsync(operatorIdm, beforeLedgers, target).ConfigureAwait(false);
+                await _operationLogger.LogLedgerMergeAsync(beforeLedgers, target).ConfigureAwait(false);
 
                 _logger.LogInformation(
                     "Merged {Count} ledgers into ledger {TargetId}: {Summary}",

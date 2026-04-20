@@ -220,7 +220,7 @@ namespace ICCardManager.ViewModels
                             var restoredCard = await _cardRepository.GetByIdmAsync(idm);
                             if (restoredCard != null)
                             {
-                                await _operationLogger.LogCardRestoreAsync(null, restoredCard);
+                                await _operationLogger.LogCardRestoreAsync(restoredCard);
                             }
 
                             _dialogService.ShowInformation(
@@ -392,7 +392,7 @@ namespace ICCardManager.ViewModels
                                     var restoredCard = await _cardRepository.GetByIdmAsync(EditCardIdm);
                                     if (restoredCard != null)
                                     {
-                                        await _operationLogger.LogCardRestoreAsync(null, restoredCard);
+                                        await _operationLogger.LogCardRestoreAsync(restoredCard);
                                     }
 
                                     var restoredIdm = EditCardIdm;
@@ -485,7 +485,7 @@ namespace ICCardManager.ViewModels
                     if (success)
                     {
                         // 操作ログを記録
-                        await _operationLogger.LogCardInsertAsync(null, card);
+                        await _operationLogger.LogCardInsertAsync(card);
 
                         // Issue #596: 履歴のインポート対象を決定
                         var history = _preReadHistory;
@@ -571,7 +571,7 @@ namespace ICCardManager.ViewModels
                         // 操作ログを記録
                         if (beforeCard != null)
                         {
-                            await _operationLogger.LogCardUpdateAsync(null, beforeCard, card);
+                            await _operationLogger.LogCardUpdateAsync(beforeCard, card);
                         }
 
                         var updatedIdm = EditCardIdm;
@@ -648,7 +648,7 @@ namespace ICCardManager.ViewModels
                     // 操作ログを記録（Issue #429: 認証済み職員のIDmを使用）
                     if (card != null)
                     {
-                        await _operationLogger.LogCardDeleteAsync(authResult.Idm, card);
+                        await _operationLogger.LogCardDeleteAsync(card);
                     }
 
                     StatusMessage = "削除しました";
@@ -759,7 +759,7 @@ namespace ICCardManager.ViewModels
                         // 操作ログを記録（払い戻しはカード更新として記録）
                         if (beforeCard != null && afterCard != null)
                         {
-                            await _operationLogger.LogCardUpdateAsync(null, beforeCard, afterCard);
+                            await _operationLogger.LogCardUpdateAsync(beforeCard, afterCard);
                         }
 
                         StatusMessage = currentBalance > 0
@@ -854,7 +854,7 @@ namespace ICCardManager.ViewModels
                                 var restoredCard = await _cardRepository.GetByIdmAsync(e.Idm);
                                 if (restoredCard != null)
                                 {
-                                    await _operationLogger.LogCardRestoreAsync(null, restoredCard);
+                                    await _operationLogger.LogCardRestoreAsync(restoredCard);
                                 }
 
                                 var restoredIdm = e.Idm;
