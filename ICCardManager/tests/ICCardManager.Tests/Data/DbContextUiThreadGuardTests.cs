@@ -14,7 +14,10 @@ namespace ICCardManager.Tests.Data;
 /// <remarks>
 /// 実際の WPF Dispatcher を立ち上げずにテストするため、<c>DbContext.IsOnUiThread</c> 内部フックを
 /// 差し替えることで「UI スレッドから呼ばれた」状態を模擬する。テスト終了後はフックを既定値に戻す。
+/// Issue #1372: 同一フックを書き換える他テストクラスとの並列実行レースを避けるため、
+/// <see cref="DbContextUiThreadHookCollection"/> に属させシリアル実行させる。
 /// </remarks>
+[Collection(DbContextUiThreadHookCollection.Name)]
 public class DbContextUiThreadGuardTests : IDisposable
 {
     private readonly string _testDirectory;
