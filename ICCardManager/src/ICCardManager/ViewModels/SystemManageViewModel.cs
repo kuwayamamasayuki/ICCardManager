@@ -123,7 +123,9 @@ public partial class SystemManageViewModel : ViewModelBase
         {
             try
             {
-                var success = _backupService.CreateBackup(dialog.FileName);
+                // Issue #1361: UI スレッドから sync 呼び出しは LeaseConnection の UI スレッドガード (#1281) に抵触するため、
+                // Task.Run で委譲する CreateBackupAsync を使用する
+                var success = await _backupService.CreateBackupAsync(dialog.FileName);
                 if (success)
                 {
                     LastBackupFile = dialog.FileName;
@@ -193,7 +195,9 @@ public partial class SystemManageViewModel : ViewModelBase
                 var preRestoreBackupPath = await GetPreRestoreBackupPathAsync();
 
                 // リストア前に現在のDBをバックアップ
-                var backupSuccess = _backupService.CreateBackup(preRestoreBackupPath);
+                // Issue #1361: UI スレッドから sync 呼び出しは LeaseConnection の UI スレッドガード (#1281) に抵触するため、
+                // Task.Run で委譲する CreateBackupAsync を使用する
+                var backupSuccess = await _backupService.CreateBackupAsync(preRestoreBackupPath);
                 if (!backupSuccess)
                 {
                     // バックアップ失敗時はユーザーに確認
@@ -324,7 +328,9 @@ public partial class SystemManageViewModel : ViewModelBase
                 var preRestoreBackupPath = await GetPreRestoreBackupPathAsync();
 
                 // リストア前に現在のDBをバックアップ
-                var backupSuccess = _backupService.CreateBackup(preRestoreBackupPath);
+                // Issue #1361: UI スレッドから sync 呼び出しは LeaseConnection の UI スレッドガード (#1281) に抵触するため、
+                // Task.Run で委譲する CreateBackupAsync を使用する
+                var backupSuccess = await _backupService.CreateBackupAsync(preRestoreBackupPath);
                 if (!backupSuccess)
                 {
                     // バックアップ失敗時はユーザーに確認
