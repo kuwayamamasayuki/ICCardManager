@@ -607,7 +607,7 @@ namespace ICCardManager.ViewModels
             if (newId > 0)
             {
                 newLedger.Id = newId;
-                await _operationLogger.LogLedgerInsertAsync(_operatorIdm, newLedger);
+                await _operationLogger.LogLedgerInsertAsync(newLedger);
                 IsSaved = true;
             }
             else
@@ -678,7 +678,7 @@ namespace ICCardManager.ViewModels
                     await SyncBusStopsFromSummaryAsync(ledger);
                 }
 
-                await _operationLogger.LogLedgerUpdateAsync(_operatorIdm, beforeLedger, ledger);
+                await _operationLogger.LogLedgerUpdateAsync(beforeLedger, ledger);
                 IsSaved = true;
             }
             else

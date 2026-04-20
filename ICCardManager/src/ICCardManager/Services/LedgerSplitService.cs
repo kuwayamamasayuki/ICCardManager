@@ -145,7 +145,7 @@ namespace ICCardManager.Services
                 }
 
                 // 操作ログを記録
-                await _operationLogger.LogLedgerSplitAsync(operatorIdm, beforeLedger, allSplitLedgers).ConfigureAwait(false);
+                await _operationLogger.LogLedgerSplitAsync(beforeLedger, allSplitLedgers).ConfigureAwait(false);
 
                 _logger.LogInformation(
                     "Split ledger {LedgerId} into {Count} ledgers (new IDs: {NewIds})",

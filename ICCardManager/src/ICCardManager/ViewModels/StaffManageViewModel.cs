@@ -165,7 +165,7 @@ namespace ICCardManager.ViewModels
                             var restoredStaff = await _staffRepository.GetByIdmAsync(idm);
                             if (restoredStaff != null)
                             {
-                                await _operationLogger.LogStaffRestoreAsync(null, restoredStaff);
+                                await _operationLogger.LogStaffRestoreAsync(restoredStaff);
                             }
 
                             _dialogService.ShowInformation(
@@ -293,7 +293,7 @@ namespace ICCardManager.ViewModels
                                         var restoredStaff = await _staffRepository.GetByIdmAsync(EditStaffIdm);
                                         if (restoredStaff != null)
                                         {
-                                            await _operationLogger.LogStaffRestoreAsync(null, restoredStaff);
+                                            await _operationLogger.LogStaffRestoreAsync(restoredStaff);
                                         }
 
                                         var restoredIdm = EditStaffIdm;
@@ -340,7 +340,7 @@ namespace ICCardManager.ViewModels
                         if (success)
                         {
                             // 操作ログを記録
-                            await _operationLogger.LogStaffInsertAsync(null, staff);
+                            await _operationLogger.LogStaffInsertAsync(staff);
 
                             var savedIdm = EditStaffIdm;
                             StatusMessage = "登録しました";
@@ -375,7 +375,7 @@ namespace ICCardManager.ViewModels
                             // 操作ログを記録
                             if (beforeStaff != null)
                             {
-                                await _operationLogger.LogStaffUpdateAsync(null, beforeStaff, staff);
+                                await _operationLogger.LogStaffUpdateAsync(beforeStaff, staff);
                             }
 
                             var updatedIdm = EditStaffIdm;
@@ -432,7 +432,7 @@ namespace ICCardManager.ViewModels
                         // 操作ログを記録（Issue #429: 認証済み職員のIDmを使用）
                         if (staff != null)
                         {
-                            await _operationLogger.LogStaffDeleteAsync(authResult.Idm, staff);
+                            await _operationLogger.LogStaffDeleteAsync(staff);
                         }
 
                         StatusMessage = "削除しました";
@@ -513,7 +513,7 @@ namespace ICCardManager.ViewModels
                                 var restoredStaff = await _staffRepository.GetByIdmAsync(e.Idm);
                                 if (restoredStaff != null)
                                 {
-                                    await _operationLogger.LogStaffRestoreAsync(null, restoredStaff);
+                                    await _operationLogger.LogStaffRestoreAsync(restoredStaff);
                                 }
 
                                 var restoredIdm = e.Idm;
