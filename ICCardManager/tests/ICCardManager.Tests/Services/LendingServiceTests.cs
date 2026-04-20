@@ -512,6 +512,105 @@ public class LendingServiceTests : IDisposable
     }
 
     /// <summary>
+    /// Issue #1303: 返却時に作成される利用 Ledger に LenderIdm が設定されることを確認
+    /// </summary>
+    [Fact]
+    public async Task ReturnAsync_WithRailwayUsage_SetsLenderIdmOnUsageLedger()
+    {
+        // Arrange
+        var card = CreateTestCard(isLent: true);
+        var staff = CreateTestStaff();
+        var lentRecord = CreateTestLentRecord();
+        var usageDetails = new List<LedgerDetail>
+        {
+            new()
+            {
+                UseDate = DateTime.Now,
+                EntryStation = "0001",
+                ExitStation = "0002",
+                Amount = 210,
+                Balance = 1790,
+                IsBus = false,
+                IsCharge = false,
+                IsPointRedemption = false
+            }
+        };
+
+        SetupReturnMocks(card, staff, lentRecord);
+
+        // 挿入された Ledger を捕捉
+        var insertedLedgers = new List<Ledger>();
+        _ledgerRepositoryMock.Setup(x => x.InsertAsync(It.IsAny<Ledger>()))
+            .ReturnsAsync((Ledger l) => { insertedLedgers.Add(l); return insertedLedgers.Count; });
+
+        // Act
+        var result = await _service.ReturnAsync(TestStaffIdm, TestCardIdm, usageDetails);
+
+        // Assert
+        result.Success.Should().BeTrue();
+        var usageLedger = insertedLedgers.FirstOrDefault(l => l.Expense > 0);
+        usageLedger.Should().NotBeNull("利用 Ledger が作成されるはず");
+        usageLedger!.LenderIdm.Should().Be(TestStaffIdm, "Issue #1303: 利用 Ledger に LenderIdm が設定されること");
+        usageLedger.StaffName.Should().Be(TestStaffName);
+    }
+
+    /// <summary>
+    /// Issue #1303: 残高不足パターンで作成される統合 Ledger にも LenderIdm が設定されることを確認
+    /// </summary>
+    [Fact]
+    public async Task ReturnAsync_InsufficientBalancePattern_SetsLenderIdmOnMergedLedger()
+    {
+        // Arrange: 残高不足→不足分チャージ→利用 のパターン
+        // ・残高 70 円で運賃 210 円の鉄道に乗ろうとしたら不足
+        // ・改札機で 140 円チャージ → 残高 210 円
+        // ・改札を通過 → 残高 0 円
+        // 検出条件 (LendingHistoryAnalyzer.DetectInsufficientBalancePattern):
+        //   originalBalance(70) < usageAmount(210)
+        //   chargeAfterBalance(210) == usageAmount(210) + usageAfterBalance(0)
+        //   chargeAmount(140) <= usageAmount(210)
+        //   usageAfterBalance(0) < InsufficientBalanceExcessThreshold
+        var card = CreateTestCard(isLent: true);
+        var staff = CreateTestStaff();
+        var lentRecord = CreateTestLentRecord();
+        var now = DateTime.Now;
+        var usageDetails = new List<LedgerDetail>
+        {
+            new()
+            {
+                UseDate = now.AddMinutes(-1),
+                IsCharge = true,
+                Amount = 140,    // 不足分のチャージ
+                Balance = 210    // チャージ後の残高
+            },
+            new()
+            {
+                UseDate = now,
+                EntryStation = "0001",
+                ExitStation = "0002",
+                Amount = 210,    // 運賃
+                Balance = 0,     // 利用後の残高
+                IsCharge = false
+            }
+        };
+
+        SetupReturnMocks(card, staff, lentRecord);
+        var insertedLedgers = new List<Ledger>();
+        _ledgerRepositoryMock.Setup(x => x.InsertAsync(It.IsAny<Ledger>()))
+            .ReturnsAsync((Ledger l) => { insertedLedgers.Add(l); return insertedLedgers.Count; });
+
+        // Act
+        var result = await _service.ReturnAsync(TestStaffIdm, TestCardIdm, usageDetails);
+
+        // Assert
+        result.Success.Should().BeTrue();
+        // 残高不足統合 Ledger は Note が「現金で支払」を含む
+        var mergedLedger = insertedLedgers.FirstOrDefault(l => !string.IsNullOrEmpty(l.Note) && l.Note.Contains("現金で支払"));
+        mergedLedger.Should().NotBeNull("残高不足統合 Ledger が作成されるはず");
+        mergedLedger!.LenderIdm.Should().Be(TestStaffIdm, "Issue #1303: 残高不足統合 Ledger にも LenderIdm が設定されること");
+        mergedLedger.StaffName.Should().Be(TestStaffName);
+    }
+
+    /// <summary>
     /// 残高警告閾値以下での返却でIsLowBalanceがtrueになることを確認
     /// </summary>
     [Fact]

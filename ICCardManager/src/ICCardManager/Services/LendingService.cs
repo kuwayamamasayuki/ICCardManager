@@ -490,7 +490,7 @@ namespace ICCardManager.Services
                 try
                 {
                     var createdLedgers = await CreateUsageLedgersAsync(
-                        cardIdm, lentRecord.StaffName ?? string.Empty, usageSinceLent, skipDuplicateCheck).ConfigureAwait(false);
+                        cardIdm, lentRecord.LenderIdm, lentRecord.StaffName ?? string.Empty, usageSinceLent, skipDuplicateCheck).ConfigureAwait(false);
 
                     result.CreatedLedgers.AddRange(createdLedgers);
 
@@ -749,7 +749,7 @@ namespace ICCardManager.Services
         /// </para>
         /// </remarks>
         private async Task<List<Ledger>> CreateUsageLedgersAsync(
-            string cardIdm, string staffName, List<LedgerDetail> details, bool skipDuplicateCheck = false)
+            string cardIdm, string staffIdm, string staffName, List<LedgerDetail> details, bool skipDuplicateCheck = false)
         {
             var createdLedgers = new List<Ledger>();
 
@@ -855,6 +855,7 @@ namespace ICCardManager.Services
                         Income = 0,
                         Expense = expense,   // 運賃 - チャージ額（カードから充当した金額）
                         Balance = usage.Balance ?? 0,  // 利用後の実残高（端数チャージの場合は端数が残る）
+                        LenderIdm = staffIdm,  // Issue #1303
                         StaffName = staffName,
                         Note = note
                     };
@@ -1056,9 +1057,14 @@ namespace ICCardManager.Services
                             fullLedger.Summary = summary;
                             fullLedger.Expense = expense;
                             fullLedger.Balance = balance;
+                            // Issue #1303: 既存レコードの利用者情報が欠落していれば現在のタッチ者で補完
                             if (fullLedger.StaffName == null && staffName != null)
                             {
                                 fullLedger.StaffName = staffName;
+                            }
+                            if (string.IsNullOrEmpty(fullLedger.LenderIdm) && !string.IsNullOrEmpty(staffIdm))
+                            {
+                                fullLedger.LenderIdm = staffIdm;
                             }
                             await _ledgerRepository.UpdateAsync(fullLedger).ConfigureAwait(false);
 
@@ -1112,6 +1118,8 @@ namespace ICCardManager.Services
                                 Income = 0,
                                 Expense = expense,
                                 Balance = balance,
+                                // Issue #1303: ポイント還元のみは機械操作扱いで LenderIdm/StaffName ともに null
+                                LenderIdm = usageDetails.All(d => d.IsPointRedemption) ? null : staffIdm,
                                 StaffName = usageDetails.All(d => d.IsPointRedemption) ? null : staffName
                             };
 
@@ -1252,8 +1260,8 @@ namespace ICCardManager.Services
 
                 try
                 {
-                    // 既存のCreateUsageLedgersAsyncを利用（staffNameはnull: 登録時には利用者情報がないため）
-                    var createdLedgers = await CreateUsageLedgersAsync(cardIdm, null, filtered).ConfigureAwait(false);
+                    // 既存のCreateUsageLedgersAsyncを利用（staffIdm/staffNameはnull: 登録時には利用者情報がないため）
+                    var createdLedgers = await CreateUsageLedgersAsync(cardIdm, null, null, filtered).ConfigureAwait(false);
 
                     scope.Commit();
 
