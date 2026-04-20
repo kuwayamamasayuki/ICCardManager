@@ -57,28 +57,11 @@ NON_DOC="$(printf '%s\n' "$CHANGED" \
 [ -z "$NON_DOC" ] && exit 0
 
 # ---- 自問プロンプトを stderr で注入（exit 2 で stop をブロック） ----
+# 出力は最小限。変更ファイルや確認観点の詳細は Claude 側で必要に応じて
+# git status / .claude/rules/*.md を参照する前提（画面の大半を覆わないため）。
+TOTAL="$(printf '%s\n' "$NON_DOC" | wc -l | tr -d ' ')"
 {
-  echo "📋 ドキュメント更新の自己確認"
-  echo ""
-  echo "本セッションで以下のコード/設定ファイルが変更されました:"
-  printf '%s\n' "$NON_DOC" | head -30 | sed 's/^/  - /'
-  TOTAL="$(printf '%s\n' "$NON_DOC" | wc -l | tr -d ' ')"
-  if [ "$TOTAL" -gt 30 ]; then
-    echo "  ... 他 $((TOTAL - 30)) 件"
-  fi
-  echo ""
-  echo "応答を終える前に、これらの変更に対応したドキュメント更新が必要か自問してください。"
-  echo "確認観点:"
-  echo "  - テスト追加/修正 → docs/design/07_テスト設計書.md"
-  echo "  - 主要クラスの構造変更 → docs/design/05_クラス設計書.md"
-  echo "  - DB スキーマ変更 → docs/design/02_DB設計書.md"
-  echo "  - 画面/操作フロー変更 → docs/design/03_画面設計書.md / docs/manual/ユーザーマニュアル.md"
-  echo "  - 公開 API / 動作仕様変更 → docs/design/04_機能設計書.md / ICCardManager/CHANGELOG.md"
-  echo "  - 依存パッケージ/素材追加 → ICCardManager/docs/THIRD_PARTY_LICENSES.md"
-  echo "  - シーケンス変化のある API 変更 → docs/design/06_シーケンス図.md"
-  echo ""
-  echo "更新不要と判断した場合は理由を一言添えた上で応答を終えてください。"
-  echo "(意図的にスキップする場合は SKIP_DOC_SYNC_CHECK=1 で再実行)"
+  echo "📋 ドキュメント同期確認: コード/設定 ${TOTAL}件変更。更新要否を自問し、不要なら理由を添えて応答を終えてください (観点: .claude/rules/*.md / バイパス: SKIP_DOC_SYNC_CHECK=1)。"
 } >&2
 
 exit 2
