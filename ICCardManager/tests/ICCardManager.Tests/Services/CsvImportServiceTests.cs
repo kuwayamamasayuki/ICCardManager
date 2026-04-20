@@ -754,6 +754,109 @@ INVALID_IDM,Suica,001,テスト";
         result.ErrorCount.Should().Be(1);
     }
 
+    /// <summary>
+    /// Issue #1370: 備考欄のみが変更された既存カードを Update として検出することを確認
+    /// </summary>
+    [Fact]
+    public async Task PreviewCardsAsync_NoteChanged_DetectsAsUpdate()
+    {
+        // Arrange
+        var csvContent = @"カードIDm,カード種別,管理番号,備考
+0123456789ABCDEF,Suica,001,新備考";
+
+        var filePath = Path.Combine(_testDirectory, "cards_preview_note_changed.csv");
+        await Task.Run(() => File.WriteAllText(filePath, csvContent, CsvEncoding));
+
+        // 既存カードと CSV は カード種別・管理番号 が同一で、備考のみ異なる
+        var existingCard = new IcCard
+        {
+            CardIdm = "0123456789ABCDEF",
+            CardType = "Suica",
+            CardNumber = "001",
+            Note = "旧備考"
+        };
+        _cardRepositoryMock.Setup(x => x.GetByIdmAsync("0123456789ABCDEF", true)).ReturnsAsync(existingCard);
+
+        // Act
+        var result = await _service.PreviewCardsAsync(filePath, skipExisting: false);
+
+        // Assert: 備考変更を Update として検出する
+        result.IsValid.Should().BeTrue();
+        result.UpdateCount.Should().Be(1);
+        result.SkipCount.Should().Be(0);
+        result.Items.Should().ContainSingle(item =>
+            item.Action == ImportAction.Update &&
+            item.Changes.Any(c => c.FieldName == "備考" &&
+                                  c.OldValue == "旧備考" &&
+                                  c.NewValue == "新備考"));
+    }
+
+    /// <summary>
+    /// Issue #1370: カード種別・管理番号・備考すべて同一の場合は Skip として扱われることを確認
+    /// </summary>
+    [Fact]
+    public async Task PreviewCardsAsync_AllFieldsIdentical_DetectsAsSkip()
+    {
+        // Arrange
+        var csvContent = @"カードIDm,カード種別,管理番号,備考
+0123456789ABCDEF,Suica,001,同じ備考";
+
+        var filePath = Path.Combine(_testDirectory, "cards_preview_identical.csv");
+        await Task.Run(() => File.WriteAllText(filePath, csvContent, CsvEncoding));
+
+        var existingCard = new IcCard
+        {
+            CardIdm = "0123456789ABCDEF",
+            CardType = "Suica",
+            CardNumber = "001",
+            Note = "同じ備考"
+        };
+        _cardRepositoryMock.Setup(x => x.GetByIdmAsync("0123456789ABCDEF", true)).ReturnsAsync(existingCard);
+
+        // Act
+        var result = await _service.PreviewCardsAsync(filePath, skipExisting: false);
+
+        // Assert: 全フィールド同一なので Skip 扱い
+        result.IsValid.Should().BeTrue();
+        result.UpdateCount.Should().Be(0);
+        result.SkipCount.Should().Be(1);
+        result.Items.Should().ContainSingle(item => item.Action == ImportAction.Skip);
+    }
+
+    /// <summary>
+    /// Issue #1370: 既存 Note が null で CSV 側が空文字のケースは変更なしと扱われることを確認
+    /// </summary>
+    [Fact]
+    public async Task PreviewCardsAsync_NoteNullVsEmpty_TreatedAsIdentical()
+    {
+        // Arrange: CSV の備考は空欄
+        var csvContent = @"カードIDm,カード種別,管理番号,備考
+0123456789ABCDEF,Suica,001,";
+
+        var filePath = Path.Combine(_testDirectory, "cards_preview_note_empty.csv");
+        await Task.Run(() => File.WriteAllText(filePath, csvContent, CsvEncoding));
+
+        // 既存カードの Note は null
+        var existingCard = new IcCard
+        {
+            CardIdm = "0123456789ABCDEF",
+            CardType = "Suica",
+            CardNumber = "001",
+            Note = null
+        };
+        _cardRepositoryMock.Setup(x => x.GetByIdmAsync("0123456789ABCDEF", true)).ReturnsAsync(existingCard);
+
+        // Act
+        var result = await _service.PreviewCardsAsync(filePath, skipExisting: false);
+
+        // Assert: null と空文字は同一扱い → Skip
+        result.IsValid.Should().BeTrue();
+        result.SkipCount.Should().Be(1);
+        result.Items.Should().ContainSingle(item =>
+            item.Action == ImportAction.Skip &&
+            !item.Changes.Any(c => c.FieldName == "備考"));
+    }
+
     #endregion
 
     #region PreviewStaffAsync テスト
@@ -786,6 +889,75 @@ FEDCBA9876543210,鈴木花子,002,テスト2";
             item.Action.Should().Be(ImportAction.Insert);
             item.Name.Should().NotBeNullOrEmpty();
         });
+    }
+
+    /// <summary>
+    /// Issue #1370: 備考欄のみが変更された既存職員を Update として検出することを確認
+    /// </summary>
+    [Fact]
+    public async Task PreviewStaffAsync_NoteChanged_DetectsAsUpdate()
+    {
+        // Arrange
+        var csvContent = @"職員IDm,氏名,職員番号,備考
+0123456789ABCDEF,山田太郎,001,新備考";
+
+        var filePath = Path.Combine(_testDirectory, "staff_preview_note_changed.csv");
+        await Task.Run(() => File.WriteAllText(filePath, csvContent, CsvEncoding));
+
+        // 既存職員と CSV は 氏名・職員番号 が同一で、備考のみ異なる
+        var existingStaff = new Staff
+        {
+            StaffIdm = "0123456789ABCDEF",
+            Name = "山田太郎",
+            Number = "001",
+            Note = "旧備考"
+        };
+        _staffRepositoryMock.Setup(x => x.GetByIdmAsync("0123456789ABCDEF", true)).ReturnsAsync(existingStaff);
+
+        // Act
+        var result = await _service.PreviewStaffAsync(filePath, skipExisting: false);
+
+        // Assert: 備考変更を Update として検出する
+        result.IsValid.Should().BeTrue();
+        result.UpdateCount.Should().Be(1);
+        result.SkipCount.Should().Be(0);
+        result.Items.Should().ContainSingle(item =>
+            item.Action == ImportAction.Update &&
+            item.Changes.Any(c => c.FieldName == "備考" &&
+                                  c.OldValue == "旧備考" &&
+                                  c.NewValue == "新備考"));
+    }
+
+    /// <summary>
+    /// Issue #1370: 氏名・職員番号・備考すべて同一の場合は Skip として扱われることを確認
+    /// </summary>
+    [Fact]
+    public async Task PreviewStaffAsync_AllFieldsIdentical_DetectsAsSkip()
+    {
+        // Arrange
+        var csvContent = @"職員IDm,氏名,職員番号,備考
+0123456789ABCDEF,山田太郎,001,同じ備考";
+
+        var filePath = Path.Combine(_testDirectory, "staff_preview_identical.csv");
+        await Task.Run(() => File.WriteAllText(filePath, csvContent, CsvEncoding));
+
+        var existingStaff = new Staff
+        {
+            StaffIdm = "0123456789ABCDEF",
+            Name = "山田太郎",
+            Number = "001",
+            Note = "同じ備考"
+        };
+        _staffRepositoryMock.Setup(x => x.GetByIdmAsync("0123456789ABCDEF", true)).ReturnsAsync(existingStaff);
+
+        // Act
+        var result = await _service.PreviewStaffAsync(filePath, skipExisting: false);
+
+        // Assert: 全フィールド同一なので Skip 扱い
+        result.IsValid.Should().BeTrue();
+        result.UpdateCount.Should().Be(0);
+        result.SkipCount.Should().Be(1);
+        result.Items.Should().ContainSingle(item => item.Action == ImportAction.Skip);
     }
 
     #endregion
