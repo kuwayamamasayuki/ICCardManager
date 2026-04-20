@@ -103,15 +103,17 @@ namespace ICCardManager.Services
                         existingStaff.Note = string.IsNullOrWhiteSpace(note) ? null : note;
                         validRecords.Add((lineNumber, existingStaff, true, true)); // isRestore = true
                     }
-                    else if (skipExisting)
-                    {
-                        // 有効な職員が存在し、スキップ設定の場合
-                        skippedCount++;
-                        continue;
-                    }
                     else
                     {
-                        // 有効な職員を更新
+                        // Issue #1376: skipExisting=true でも「全項目一致」のみスキップ。
+                        // 備考を含むいずれかのフィールドに差分があれば更新する
+                        var changes = new List<FieldChange>();
+                        DetectStaffChanges(existingStaff, name, number, note, changes);
+                        if (skipExisting && changes.Count == 0)
+                        {
+                            skippedCount++;
+                            continue;
+                        }
                         existingStaff.Name = name;
                         existingStaff.Number = string.IsNullOrWhiteSpace(number) ? null : number;
                         existingStaff.Note = string.IsNullOrWhiteSpace(note) ? null : note;
@@ -324,25 +326,21 @@ namespace ICCardManager.Services
                             NewValue = "有効"
                         });
                     }
-                    else if (skipExisting)
-                    {
-                        action = ImportAction.Skip;
-                        skipCount++;
-                    }
                     else
                     {
-                        action = ImportAction.Update;
-                        // 変更点を検出
+                        // Issue #1376: skipExisting の有無に関わらず全項目比較で差分を検出。
+                        // 差分あり → Update、差分なしかつ skipExisting=true → Skip、
+                        // 差分なしかつ skipExisting=false → Update（no-op 更新）
                         DetectStaffChanges(existingStaff, name, number, note, changes);
-                        if (changes.Count > 0)
+                        if (changes.Count == 0 && skipExisting)
                         {
-                            updateCount++;
+                            action = ImportAction.Skip;
+                            skipCount++;
                         }
                         else
                         {
-                            // 変更点がない場合はスキップ扱い
-                            action = ImportAction.Skip;
-                            skipCount++;
+                            action = ImportAction.Update;
+                            updateCount++;
                         }
                     }
                 }
