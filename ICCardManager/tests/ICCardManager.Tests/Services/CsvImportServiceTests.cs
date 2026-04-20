@@ -196,7 +196,7 @@ FEDCBA9876543210,PASMO,002,テスト2";
     }
 
     /// <summary>
-    /// 既存カードがスキップされることを確認
+    /// 既存カードが全項目一致のときスキップされることを確認（Issue #1376 で仕様明確化）
     /// </summary>
     [Fact]
     public async Task ImportCardsAsync_ExistingCard_Skipped()
@@ -208,7 +208,9 @@ FEDCBA9876543210,PASMO,002,テスト2";
         var filePath = Path.Combine(_testDirectory, "cards_existing.csv");
         await Task.Run(() => File.WriteAllText(filePath, csvContent, CsvEncoding));
 
-        var existingCard = new IcCard { CardIdm = "0123456789ABCDEF", CardType = "Suica", CardNumber = "001" };
+        // Issue #1376: 全項目一致の場合のみスキップされる仕様のため、
+        // 既存レコードにも CSV と同じ備考を設定して完全一致にする
+        var existingCard = new IcCard { CardIdm = "0123456789ABCDEF", CardType = "Suica", CardNumber = "001", Note = "テスト" };
         _cardRepositoryMock.Setup(x => x.GetByIdmAsync("0123456789ABCDEF", true)).ReturnsAsync(existingCard);
 
         // Act
@@ -300,11 +302,13 @@ INVALID_IDM,Suica,001,テスト";
         var filePath = Path.Combine(_testDirectory, "cards_already_restored_skip.csv");
         await Task.Run(() => File.WriteAllText(filePath, csvContent, CsvEncoding));
 
+        // Issue #1376: 全項目一致のときのみ Skip される仕様のため、既存にも Note="テスト" を設定
         var restoredCard = new IcCard
         {
             CardIdm = "0123456789ABCDEF",
             CardType = "Suica",
             CardNumber = "001",
+            Note = "テスト",
             IsDeleted = false
         };
         _cardRepositoryMock.Setup(x => x.GetByIdmAsync("0123456789ABCDEF", true)).ReturnsAsync(restoredCard);
@@ -569,6 +573,36 @@ FEDCBA9876543210,PASMO,002,削除済みで復元失敗";
         item.Changes[0].NewValue.Should().Be("有効");
     }
 
+    /// <summary>
+    /// Issue #1376: skipExisting=true でも備考のみ変更された既存カードは更新されることを確認
+    /// </summary>
+    [Fact]
+    public async Task ImportCardsAsync_NoteChanged_SkipExistingTrue_UpdatesInsteadOfSkip()
+    {
+        // Arrange
+        var csvContent = @"カードIDm,カード種別,管理番号,備考
+0123456789ABCDEF,Suica,001,新備考";
+
+        var filePath = Path.Combine(_testDirectory, "cards_skip_note_changed.csv");
+        await Task.Run(() => File.WriteAllText(filePath, csvContent, CsvEncoding));
+
+        // 備考のみ異なる既存カード
+        var existingCard = new IcCard { CardIdm = "0123456789ABCDEF", CardType = "Suica", CardNumber = "001", Note = "旧備考" };
+        _cardRepositoryMock.Setup(x => x.GetByIdmAsync("0123456789ABCDEF", true)).ReturnsAsync(existingCard);
+        _cardRepositoryMock.Setup(x => x.UpdateAsync(It.IsAny<IcCard>(), It.IsAny<SQLiteTransaction>())).ReturnsAsync(true);
+
+        // Act — skipExisting=true でも差分があれば更新される
+        var result = await _service.ImportCardsAsync(filePath, skipExisting: true);
+
+        // Assert
+        result.Success.Should().BeTrue();
+        result.ImportedCount.Should().Be(1, "備考差分があるため更新される");
+        result.SkippedCount.Should().Be(0);
+        _cardRepositoryMock.Verify(
+            x => x.UpdateAsync(It.Is<IcCard>(c => c.Note == "新備考"), It.IsAny<SQLiteTransaction>()),
+            Times.Once);
+    }
+
     #endregion
 
     #region ImportStaffAsync テスト
@@ -600,7 +634,7 @@ FEDCBA9876543210,鈴木花子,002,テスト2";
     }
 
     /// <summary>
-    /// 既存職員がスキップされることを確認
+    /// 既存職員が全項目一致のときスキップされることを確認（Issue #1376 で仕様明確化）
     /// </summary>
     [Fact]
     public async Task ImportStaffAsync_ExistingStaff_Skipped()
@@ -612,7 +646,9 @@ FEDCBA9876543210,鈴木花子,002,テスト2";
         var filePath = Path.Combine(_testDirectory, "staff_existing.csv");
         await Task.Run(() => File.WriteAllText(filePath, csvContent, CsvEncoding));
 
-        var existingStaff = new Staff { StaffIdm = "0123456789ABCDEF", Name = "山田太郎", Number = "001" };
+        // Issue #1376: 全項目一致の場合のみスキップされる仕様のため、
+        // 既存レコードにも CSV と同じ備考を設定して完全一致にする
+        var existingStaff = new Staff { StaffIdm = "0123456789ABCDEF", Name = "山田太郎", Number = "001", Note = "テスト" };
         _staffRepositoryMock.Setup(x => x.GetByIdmAsync("0123456789ABCDEF", true)).ReturnsAsync(existingStaff);
 
         // Act
@@ -644,6 +680,36 @@ FEDCBA9876543210,鈴木花子,002,テスト2";
         result.Success.Should().BeFalse();
         result.ErrorCount.Should().Be(1);
         result.Errors.Should().Contain(e => e.Message.Contains("氏名は必須"));
+    }
+
+    /// <summary>
+    /// Issue #1376: skipExisting=true でも備考のみ変更された既存職員は更新されることを確認
+    /// </summary>
+    [Fact]
+    public async Task ImportStaffAsync_NoteChanged_SkipExistingTrue_UpdatesInsteadOfSkip()
+    {
+        // Arrange
+        var csvContent = @"職員IDm,氏名,職員番号,備考
+0123456789ABCDEF,山田太郎,001,新備考";
+
+        var filePath = Path.Combine(_testDirectory, "staff_skip_note_changed.csv");
+        await Task.Run(() => File.WriteAllText(filePath, csvContent, CsvEncoding));
+
+        // 備考のみ異なる既存職員
+        var existingStaff = new Staff { StaffIdm = "0123456789ABCDEF", Name = "山田太郎", Number = "001", Note = "旧備考" };
+        _staffRepositoryMock.Setup(x => x.GetByIdmAsync("0123456789ABCDEF", true)).ReturnsAsync(existingStaff);
+        _staffRepositoryMock.Setup(x => x.UpdateAsync(It.IsAny<Staff>(), It.IsAny<SQLiteTransaction>())).ReturnsAsync(true);
+
+        // Act — skipExisting=true でも差分があれば更新される
+        var result = await _service.ImportStaffAsync(filePath, skipExisting: true);
+
+        // Assert
+        result.Success.Should().BeTrue();
+        result.ImportedCount.Should().Be(1, "備考差分があるため更新される");
+        result.SkippedCount.Should().Be(0);
+        _staffRepositoryMock.Verify(
+            x => x.UpdateAsync(It.Is<Staff>(s => s.Note == "新備考"), It.IsAny<SQLiteTransaction>()),
+            Times.Once);
     }
 
     #endregion
@@ -679,7 +745,7 @@ FEDCBA9876543210,PASMO,002,テスト2";
     }
 
     /// <summary>
-    /// 既存カードがスキップとしてプレビューされることを確認
+    /// 既存カードが全項目一致のときプレビューで Skip と判定されることを確認（Issue #1376 で仕様明確化）
     /// </summary>
     [Fact]
     public async Task PreviewCardsAsync_ExistingCard_ShowsAsSkip()
@@ -691,7 +757,8 @@ FEDCBA9876543210,PASMO,002,テスト2";
         var filePath = Path.Combine(_testDirectory, "cards_preview_existing.csv");
         await Task.Run(() => File.WriteAllText(filePath, csvContent, CsvEncoding));
 
-        var existingCard = new IcCard { CardIdm = "0123456789ABCDEF", CardType = "Suica", CardNumber = "001" };
+        // Issue #1376: 備考も含めて一致しているため Skip になる
+        var existingCard = new IcCard { CardIdm = "0123456789ABCDEF", CardType = "Suica", CardNumber = "001", Note = "テスト" };
         _cardRepositoryMock.Setup(x => x.GetByIdmAsync("0123456789ABCDEF", true)).ReturnsAsync(existingCard);
 
         // Act
@@ -813,8 +880,8 @@ INVALID_IDM,Suica,001,テスト";
         };
         _cardRepositoryMock.Setup(x => x.GetByIdmAsync("0123456789ABCDEF", true)).ReturnsAsync(existingCard);
 
-        // Act
-        var result = await _service.PreviewCardsAsync(filePath, skipExisting: false);
+        // Act — Issue #1376: 全項目一致は skipExisting=true のときに Skip 扱い
+        var result = await _service.PreviewCardsAsync(filePath, skipExisting: true);
 
         // Assert: 全フィールド同一なので Skip 扱い
         result.IsValid.Should().BeTrue();
@@ -846,8 +913,8 @@ INVALID_IDM,Suica,001,テスト";
         };
         _cardRepositoryMock.Setup(x => x.GetByIdmAsync("0123456789ABCDEF", true)).ReturnsAsync(existingCard);
 
-        // Act
-        var result = await _service.PreviewCardsAsync(filePath, skipExisting: false);
+        // Act — Issue #1376: 全項目一致は skipExisting=true のときに Skip 扱い
+        var result = await _service.PreviewCardsAsync(filePath, skipExisting: true);
 
         // Assert: null と空文字は同一扱い → Skip
         result.IsValid.Should().BeTrue();
@@ -855,6 +922,36 @@ INVALID_IDM,Suica,001,テスト";
         result.Items.Should().ContainSingle(item =>
             item.Action == ImportAction.Skip &&
             !item.Changes.Any(c => c.FieldName == "備考"));
+    }
+
+    /// <summary>
+    /// Issue #1376: skipExisting=true でも備考のみ変更された既存カードを Update として検出することを確認
+    /// </summary>
+    [Fact]
+    public async Task PreviewCardsAsync_NoteChanged_SkipExistingTrue_DetectsAsUpdate()
+    {
+        // Arrange
+        var csvContent = @"カードIDm,カード種別,管理番号,備考
+0123456789ABCDEF,Suica,001,新備考";
+
+        var filePath = Path.Combine(_testDirectory, "cards_preview_skip_note_changed.csv");
+        await Task.Run(() => File.WriteAllText(filePath, csvContent, CsvEncoding));
+
+        var existingCard = new IcCard { CardIdm = "0123456789ABCDEF", CardType = "Suica", CardNumber = "001", Note = "旧備考" };
+        _cardRepositoryMock.Setup(x => x.GetByIdmAsync("0123456789ABCDEF", true)).ReturnsAsync(existingCard);
+
+        // Act — skipExisting=true でも差分があれば Update
+        var result = await _service.PreviewCardsAsync(filePath, skipExisting: true);
+
+        // Assert
+        result.IsValid.Should().BeTrue();
+        result.UpdateCount.Should().Be(1);
+        result.SkipCount.Should().Be(0);
+        result.Items.Should().ContainSingle(item =>
+            item.Action == ImportAction.Update &&
+            item.Changes.Any(c => c.FieldName == "備考" &&
+                                  c.OldValue == "旧備考" &&
+                                  c.NewValue == "新備考"));
     }
 
     #endregion
@@ -950,14 +1047,44 @@ FEDCBA9876543210,鈴木花子,002,テスト2";
         };
         _staffRepositoryMock.Setup(x => x.GetByIdmAsync("0123456789ABCDEF", true)).ReturnsAsync(existingStaff);
 
-        // Act
-        var result = await _service.PreviewStaffAsync(filePath, skipExisting: false);
+        // Act — Issue #1376: 全項目一致は skipExisting=true のときに Skip 扱い
+        var result = await _service.PreviewStaffAsync(filePath, skipExisting: true);
 
         // Assert: 全フィールド同一なので Skip 扱い
         result.IsValid.Should().BeTrue();
         result.UpdateCount.Should().Be(0);
         result.SkipCount.Should().Be(1);
         result.Items.Should().ContainSingle(item => item.Action == ImportAction.Skip);
+    }
+
+    /// <summary>
+    /// Issue #1376: skipExisting=true でも備考のみ変更された既存職員を Update として検出することを確認
+    /// </summary>
+    [Fact]
+    public async Task PreviewStaffAsync_NoteChanged_SkipExistingTrue_DetectsAsUpdate()
+    {
+        // Arrange
+        var csvContent = @"職員IDm,氏名,職員番号,備考
+0123456789ABCDEF,山田太郎,001,新備考";
+
+        var filePath = Path.Combine(_testDirectory, "staff_preview_skip_note_changed.csv");
+        await Task.Run(() => File.WriteAllText(filePath, csvContent, CsvEncoding));
+
+        var existingStaff = new Staff { StaffIdm = "0123456789ABCDEF", Name = "山田太郎", Number = "001", Note = "旧備考" };
+        _staffRepositoryMock.Setup(x => x.GetByIdmAsync("0123456789ABCDEF", true)).ReturnsAsync(existingStaff);
+
+        // Act — skipExisting=true でも差分があれば Update
+        var result = await _service.PreviewStaffAsync(filePath, skipExisting: true);
+
+        // Assert
+        result.IsValid.Should().BeTrue();
+        result.UpdateCount.Should().Be(1);
+        result.SkipCount.Should().Be(0);
+        result.Items.Should().ContainSingle(item =>
+            item.Action == ImportAction.Update &&
+            item.Changes.Any(c => c.FieldName == "備考" &&
+                                  c.OldValue == "旧備考" &&
+                                  c.NewValue == "新備考"));
     }
 
     #endregion

@@ -108,15 +108,18 @@ namespace ICCardManager.Services
                         existingCard.Note = string.IsNullOrWhiteSpace(note) ? null : note;
                         validRecords.Add((lineNumber, existingCard, true, true)); // isRestore = true
                     }
-                    else if (skipExisting)
-                    {
-                        // 有効なカードが存在し、スキップ設定の場合
-                        skippedCount++;
-                        continue;
-                    }
                     else
                     {
-                        // 有効なカードを更新
+                        // Issue #1376: skipExisting=true でも「全項目一致」のみスキップ。
+                        // 備考を含むいずれかのフィールドに差分があれば更新する
+                        // （Preview 側と同じ判定ロジックを使う）
+                        var changes = new List<FieldChange>();
+                        DetectCardChanges(existingCard, cardType, cardNumber, note, changes);
+                        if (skipExisting && changes.Count == 0)
+                        {
+                            skippedCount++;
+                            continue;
+                        }
                         existingCard.CardType = cardType;
                         existingCard.CardNumber = cardNumber;
                         existingCard.Note = string.IsNullOrWhiteSpace(note) ? null : note;
@@ -327,25 +330,21 @@ namespace ICCardManager.Services
                             NewValue = "有効"
                         });
                     }
-                    else if (skipExisting)
-                    {
-                        action = ImportAction.Skip;
-                        skipCount++;
-                    }
                     else
                     {
-                        action = ImportAction.Update;
-                        // 変更点を検出
+                        // Issue #1376: skipExisting の有無に関わらず全項目比較で差分を検出。
+                        // 差分あり → Update、差分なしかつ skipExisting=true → Skip、
+                        // 差分なしかつ skipExisting=false → Update（no-op 更新）
                         DetectCardChanges(existingCard, cardType, cardNumber, note, changes);
-                        if (changes.Count > 0)
+                        if (changes.Count == 0 && skipExisting)
                         {
-                            updateCount++;
+                            action = ImportAction.Skip;
+                            skipCount++;
                         }
                         else
                         {
-                            // 変更点がない場合はスキップ扱い
-                            action = ImportAction.Skip;
-                            skipCount++;
+                            action = ImportAction.Update;
+                            updateCount++;
                         }
                     }
                 }
