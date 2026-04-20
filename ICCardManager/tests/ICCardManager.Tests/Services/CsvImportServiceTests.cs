@@ -2219,7 +2219,8 @@ FEDCBA9876543210,鈴木花子,002,テスト2";
 
         // Assert
         result.IsValid.Should().BeTrue();
-        result.UpdateCount.Should().Be(1); // ledger_id=1のグループ1件
+        // Issue #1379: プレビュー件数はインポート件数と揃えて CSV 行数ベース（2行 → 2件）
+        result.UpdateCount.Should().Be(2);
         result.Items.Should().HaveCount(1);
         result.Items[0].Action.Should().Be(ImportAction.Update);
         result.Items[0].AdditionalInfo.Should().Contain("2件");
@@ -2534,7 +2535,8 @@ FEDCBA9876543210,鈴木花子,002,テスト2";
 
         // Assert
         result.IsValid.Should().BeTrue();
-        result.NewCount.Should().Be(1);
+        // Issue #1379: NewCount は CSV 行数ベース（2 行 → 2 件）
+        result.NewCount.Should().Be(2);
         result.Items.Should().HaveCount(1);
         result.Items[0].Action.Should().Be(ImportAction.Insert);
         result.Items[0].Idm.Should().Be("(自動付与)");
@@ -2818,8 +2820,8 @@ FEDCBA9876543210,鈴木花子,002,テスト2";
 
         // Assert
         result.IsValid.Should().BeTrue();
-        // 3日分なので3つのプレビューアイテム
-        result.NewCount.Should().Be(3);
+        // Issue #1379: NewCount は CSV 行数ベース（5 行 → 5 件）。アイテムは日付単位で 3 つ
+        result.NewCount.Should().Be(5);
         result.Items.Should().HaveCount(3);
 
         // 日付順にソートされていること
@@ -3456,6 +3458,122 @@ FEDCBA9876543210,鈴木花子,002,テスト2";
         result.Items[0].Changes.Should().Contain(c => c.FieldName == "[1行目]" && c.IsDisplayOnly);
         result.Items[0].Changes[0].NewValue.Should().Contain("博多→天神");
         result.Items[0].ChangesHeader.Should().Be("スキップするデータ:");
+    }
+
+    #endregion
+
+    #region Issue #1379: プレビュー件数とインポート件数の整合性
+
+    /// <summary>
+    /// Issue #1379: 既存 Ledger の更新時、プレビューの UpdateCount とインポート後の ImportedCount が CSV 行数で一致すること
+    /// </summary>
+    [Fact]
+    public async Task LedgerDetails_既存更新_プレビューとインポートの件数が一致()
+    {
+        // Arrange: 同じ ledger_id=1 に 3 行（既存と差分あり）
+        var csvContent = @"利用履歴ID,利用日時,カードIDm,管理番号,乗車駅,降車駅,バス停,金額,残額,チャージ,ポイント還元,バス利用,グループID
+1,2024-01-15 10:30:00,0123456789ABCDEF,001,博多,天神,,260,9740,0,0,0,
+1,2024-01-15 12:00:00,0123456789ABCDEF,001,天神,博多,,260,9480,0,0,0,
+1,2024-01-15 17:00:00,0123456789ABCDEF,001,博多,天神,,260,9220,0,0,0,";
+
+        var filePath = Path.Combine(_testDirectory, "details_count_mismatch_update.csv");
+        await Task.Run(() => File.WriteAllText(filePath, csvContent, CsvEncoding));
+
+        // 既存 Ledger は Details 空（＝差分あり、更新対象）
+        _ledgerRepositoryMock.Setup(x => x.GetByIdAsync(1)).ReturnsAsync(new Ledger
+        {
+            Id = 1, CardIdm = "0123456789ABCDEF", Date = new DateTime(2024, 1, 15),
+            Summary = "鉄道", Income = 0, Expense = 0, Balance = 9220,
+            Details = new List<LedgerDetail>()
+        });
+        _ledgerRepositoryMock.Setup(x => x.ReplaceDetailsAsync(1, It.IsAny<IEnumerable<LedgerDetail>>()))
+            .ReturnsAsync(true);
+
+        // Act
+        var previewResult = await _service.PreviewLedgerDetailsAsync(filePath);
+        var importResult = await _service.ImportLedgerDetailsAsync(filePath);
+
+        // Assert: プレビューの件数合計 == インポート後の件数合計 == CSV データ行数
+        previewResult.UpdateCount.Should().Be(3);
+        importResult.ImportedCount.Should().Be(3);
+        (previewResult.NewCount + previewResult.UpdateCount + previewResult.SkipCount)
+            .Should().Be(importResult.ImportedCount + importResult.SkippedCount,
+                "Issue #1379: プレビュー合計とインポート合計は CSV 行数で一致する必要がある");
+    }
+
+    /// <summary>
+    /// Issue #1379: 既存 Ledger のスキップ時、プレビューの SkipCount とインポート後の SkippedCount が CSV 行数で一致すること
+    /// </summary>
+    [Fact]
+    public async Task LedgerDetails_既存スキップ_プレビューとインポートの件数が一致()
+    {
+        // Arrange: 既存データと完全一致する 2 行（差分なし → スキップ）
+        var csvContent = @"利用履歴ID,利用日時,カードIDm,管理番号,乗車駅,降車駅,バス停,金額,残額,チャージ,ポイント還元,バス利用,グループID
+1,2024-01-15 10:30:00,0123456789ABCDEF,001,博多,天神,,260,9740,0,0,0,
+1,2024-01-15 17:00:00,0123456789ABCDEF,001,天神,博多,,260,9480,0,0,0,";
+
+        var filePath = Path.Combine(_testDirectory, "details_count_mismatch_skip.csv");
+        await Task.Run(() => File.WriteAllText(filePath, csvContent, CsvEncoding));
+
+        var existingDetails = new List<LedgerDetail>
+        {
+            new LedgerDetail { LedgerId = 1, UseDate = new DateTime(2024, 1, 15, 10, 30, 0), EntryStation = "博多", ExitStation = "天神", Amount = 260, Balance = 9740 },
+            new LedgerDetail { LedgerId = 1, UseDate = new DateTime(2024, 1, 15, 17, 0, 0), EntryStation = "天神", ExitStation = "博多", Amount = 260, Balance = 9480 }
+        };
+        _ledgerRepositoryMock.Setup(x => x.GetByIdAsync(1)).ReturnsAsync(new Ledger
+        {
+            Id = 1, CardIdm = "0123456789ABCDEF", Date = new DateTime(2024, 1, 15),
+            Summary = "鉄道", Income = 0, Expense = 520, Balance = 9480,
+            Details = existingDetails
+        });
+
+        // Act
+        var previewResult = await _service.PreviewLedgerDetailsAsync(filePath);
+        var importResult = await _service.ImportLedgerDetailsAsync(filePath);
+
+        // Assert: プレビューとインポートの Skip 件数が CSV 行数で一致
+        previewResult.SkipCount.Should().Be(2);
+        importResult.SkippedCount.Should().Be(2);
+        importResult.ImportedCount.Should().Be(0);
+        (previewResult.NewCount + previewResult.UpdateCount + previewResult.SkipCount)
+            .Should().Be(importResult.ImportedCount + importResult.SkippedCount,
+                "Issue #1379: プレビュー合計とインポート合計は CSV 行数で一致する必要がある");
+    }
+
+    /// <summary>
+    /// Issue #1379: 新規 Ledger 作成時、プレビューの NewCount とインポート後の ImportedCount が CSV 行数で一致すること
+    /// </summary>
+    [Fact]
+    public async Task LedgerDetails_新規作成_プレビューとインポートの件数が一致()
+    {
+        // Arrange: 利用履歴 ID 空欄、同一日 3 行
+        var csvContent = @"利用履歴ID,利用日時,カードIDm,管理番号,乗車駅,降車駅,バス停,金額,残額,チャージ,ポイント還元,バス利用,グループID
+,2024-01-15 10:30:00,0123456789ABCDEF,001,博多,天神,,260,9740,0,0,0,
+,2024-01-15 12:00:00,0123456789ABCDEF,001,天神,博多,,260,9480,0,0,0,
+,2024-01-15 17:00:00,0123456789ABCDEF,001,博多,天神,,260,9220,0,0,0,";
+
+        var filePath = Path.Combine(_testDirectory, "details_count_mismatch_new.csv");
+        await Task.Run(() => File.WriteAllText(filePath, csvContent, CsvEncoding));
+
+        _cardRepositoryMock.Setup(x => x.GetByIdmAsync("0123456789ABCDEF", true))
+            .ReturnsAsync(new IcCard { CardIdm = "0123456789ABCDEF", CardType = "はやかけん", CardNumber = "001" });
+
+        var ledgerIdCounter = 100;
+        _ledgerRepositoryMock.Setup(x => x.InsertAsync(It.IsAny<Ledger>()))
+            .ReturnsAsync(() => ledgerIdCounter++);
+        _ledgerRepositoryMock.Setup(x => x.InsertDetailsAsync(It.IsAny<int>(), It.IsAny<IEnumerable<LedgerDetail>>()))
+            .ReturnsAsync(true);
+
+        // Act
+        var previewResult = await _service.PreviewLedgerDetailsAsync(filePath);
+        var importResult = await _service.ImportLedgerDetailsAsync(filePath);
+
+        // Assert: プレビューの NewCount とインポートの ImportedCount が CSV 行数で一致
+        previewResult.NewCount.Should().Be(3);
+        importResult.ImportedCount.Should().Be(3);
+        (previewResult.NewCount + previewResult.UpdateCount + previewResult.SkipCount)
+            .Should().Be(importResult.ImportedCount + importResult.SkippedCount,
+                "Issue #1379: プレビュー合計とインポート合計は CSV 行数で一致する必要がある");
     }
 
     #endregion
