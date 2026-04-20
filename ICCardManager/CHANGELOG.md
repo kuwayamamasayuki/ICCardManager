@@ -11,6 +11,7 @@
 - `PathValidator.ValidateBackupPath` に UNC パス到達性チェック（5秒タイムアウト）を追加。`Directory.Exists` がネットワーク不安定時に数十秒ハングする問題を解決。到達不可時は「ネットワーク共有に到達できません。ネットワーク接続を確認してください」と明確なエラーを表示。非同期版 `ValidateBackupPathAsync` も提供し、設定画面等 UI スレッドからの呼び出しでブロックしないように `SettingsViewModel.SaveAsync` を更新（#1269）
 
 **開発基盤**
+- リポジトリルートに `.gitattributes` を新設し、`packages.lock.json` / `*.json` / `*.yml` / `*.yaml` / dotfile (`.editorconfig` / `.gitignore` / `.gitattributes`) / `*.sh` の改行コードを **LF に正規化**。WSL / Windows 併用開発時に `dotnet restore` が生成する lock file の CRLF/LF 混在が毎回 "modified" として git 差分に現れる「誤差分ループ」問題を解消（Issue #1361 調査中に顕在化）。`.cs` / `.xaml` / `.csproj` など Windows 主戦場ファイルは Visual Studio の保存設定との衝突を避けるため **`* text=auto` を意図的に指定せず**対象外（将来 Issue で別途検討）。また `.db` / `.xlsx` / `.docx` / `.png` / `.ico` / `.wav` / `.dll` / `.exe` 等のバイナリを明示的に `binary` 指定して誤検出を防止。既存ファイルで CRLF だった `ICCardManager/.gitignore` と `ICCardManager/tests/ICCardManager.UITests/packages.lock.json` の 2 件を `git add --renormalize .` で LF に一括正規化。開発者ガイド §5.8 に改行コードポリシーを追記（#1368）
 - 依存パッケージの既知 CVE 継続監視の仕組みを導入。(1) GitHub Actions `vulnerability-scan.yml` が週次 + csproj 更新時に `dotnet list package --vulnerable --include-transitive` を自動実行し、検出時にジョブ失敗で通知、(2) Dependabot 設定で本体/テスト/UIテスト/github-actions の4エコシステムを週次監視・PR自動作成、(3) 開発者ガイド §5.7 に重大度別 SLA（Critical/High は24時間以内）と対応手順を明記、(4) リリーススキル (`/release`) に Phase 1 前のセキュリティチェック項目を追加（#1272）
 
 **アクセシビリティ改善**

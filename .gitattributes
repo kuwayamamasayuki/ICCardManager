@@ -1,0 +1,48 @@
+# Issue #1368: 改行コード正規化ポリシー
+#
+# 目的: WSL / Windows 併用開発時に `dotnet restore` 等が生成する
+# CRLF/LF 混在を git のコミットレイヤで統一し、誤差分ループを防止する。
+#
+# 方針: `* text=auto` は**意図的に置かない**。.cs / .xaml / .csproj など
+# Windows 主戦場ファイルの現状 CRLF を保持するため。lock file / JSON / YAML /
+# dotfile / .sh のみを明示的に LF で正規化する。
+#
+# Windows 主戦場ファイル (.cs / .xaml / .csproj 等) の改行統一方針は
+# 将来別 Issue で議論する。
+
+# --- チェックインで強制 LF に正規化するファイル群 ---
+
+# NuGet / .NET のパッケージロック（CI は Linux なので LF が正）
+*.lock.json    text eol=lf
+
+# 汎用 JSON（appsettings.json, package-lock.json 等を含む）
+*.json         text eol=lf
+
+# CI / GitHub Actions / Dependabot 設定
+*.yml          text eol=lf
+*.yaml         text eol=lf
+
+# dotfile
+.editorconfig  text eol=lf
+.gitignore     text eol=lf
+.gitattributes text eol=lf
+
+# シェルスクリプト（.claude/hooks 配下など）
+*.sh           text eol=lf
+
+# --- バイナリ（text 変換を明示的に禁止） ---
+*.db           binary
+*.sqlite       binary
+*.sqlite3      binary
+*.xlsx         binary
+*.docx         binary
+*.pdf          binary
+*.png          binary
+*.jpg          binary
+*.jpeg         binary
+*.gif          binary
+*.ico          binary
+*.wav          binary
+*.mp3          binary
+*.dll          binary
+*.exe          binary
