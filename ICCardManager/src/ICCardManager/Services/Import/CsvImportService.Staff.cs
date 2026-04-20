@@ -287,6 +287,10 @@ namespace ICCardManager.Services
                 var staffIdm = fields[0].Trim().ToUpperInvariant(); // IDmは大文字に正規化
                 var name = fields[1].Trim();
                 var number = fields.Count > 2 ? fields[2].Trim() : "";
+                // Issue #1370: プレビューでも備考差分検出のため note を読み取る
+                var note = fields.Count > 3
+                    ? Infrastructure.Security.FormulaInjectionSanitizer.Sanitize(fields[3].Trim())
+                    : "";
 
                 // バリデーション（共通メソッドを使用）
                 if (!ValidateIdm(staffIdm, lineNumber, "職員IDm", line, errors, isStaff: true))
@@ -312,7 +316,7 @@ namespace ICCardManager.Services
                         action = ImportAction.Restore;
                         updateCount++; // 復元+更新なので更新件数に含める
                         // 復元時も変更点を検出
-                        DetectStaffChanges(existingStaff, name, number, changes);
+                        DetectStaffChanges(existingStaff, name, number, note, changes);
                         changes.Insert(0, new FieldChange
                         {
                             FieldName = "状態",
@@ -329,7 +333,7 @@ namespace ICCardManager.Services
                     {
                         action = ImportAction.Update;
                         // 変更点を検出
-                        DetectStaffChanges(existingStaff, name, number, changes);
+                        DetectStaffChanges(existingStaff, name, number, note, changes);
                         if (changes.Count > 0)
                         {
                             updateCount++;
@@ -377,11 +381,13 @@ namespace ICCardManager.Services
         /// <param name="existingStaff">既存の職員</param>
         /// <param name="newName">新しい氏名</param>
         /// <param name="newNumber">新しい職員番号</param>
+        /// <param name="newNote">新しい備考</param>
         /// <param name="changes">変更点リスト（検出結果が追加される）</param>
         private static void DetectStaffChanges(
             Staff existingStaff,
             string newName,
             string newNumber,
+            string newNote,
             List<FieldChange> changes)
         {
             if (existingStaff.Name != newName)
@@ -401,6 +407,19 @@ namespace ICCardManager.Services
                     FieldName = "職員番号",
                     OldValue = existingStaff.Number ?? "(なし)",
                     NewValue = newNumber
+                });
+            }
+
+            // Issue #1370: 備考の差分検出
+            var existingNote = string.IsNullOrWhiteSpace(existingStaff.Note) ? null : existingStaff.Note;
+            var normalizedNewNote = string.IsNullOrWhiteSpace(newNote) ? null : newNote;
+            if (existingNote != normalizedNewNote)
+            {
+                changes.Add(new FieldChange
+                {
+                    FieldName = "備考",
+                    OldValue = existingNote ?? "(なし)",
+                    NewValue = normalizedNewNote ?? "(なし)"
                 });
             }
         }

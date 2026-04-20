@@ -284,6 +284,11 @@ namespace ICCardManager.Services
                 var cardIdm = fields[0].Trim().ToUpperInvariant(); // IDmは大文字に正規化
                 var cardType = fields[1].Trim();
                 var cardNumber = fields[2].Trim();
+                // Issue #1370: プレビューでも備考差分検出のため note を読み取る
+                // (インポート本体と同じ式インジェクション対策を適用)
+                var note = fields.Count > 3
+                    ? Infrastructure.Security.FormulaInjectionSanitizer.Sanitize(fields[3].Trim())
+                    : "";
 
                 // バリデーション（共通メソッドを使用）
                 if (!ValidateIdm(cardIdm, lineNumber, "カードIDm", line, errors))
@@ -314,7 +319,7 @@ namespace ICCardManager.Services
                         action = ImportAction.Restore;
                         updateCount++; // 復元+更新なので更新件数に含める
                         // 復元時も変更点を検出
-                        DetectCardChanges(existingCard, cardType, cardNumber, changes);
+                        DetectCardChanges(existingCard, cardType, cardNumber, note, changes);
                         changes.Insert(0, new FieldChange
                         {
                             FieldName = "状態",
@@ -331,7 +336,7 @@ namespace ICCardManager.Services
                     {
                         action = ImportAction.Update;
                         // 変更点を検出
-                        DetectCardChanges(existingCard, cardType, cardNumber, changes);
+                        DetectCardChanges(existingCard, cardType, cardNumber, note, changes);
                         if (changes.Count > 0)
                         {
                             updateCount++;
@@ -379,11 +384,13 @@ namespace ICCardManager.Services
         /// <param name="existingCard">既存のカード</param>
         /// <param name="newCardType">新しいカード種別</param>
         /// <param name="newCardNumber">新しい管理番号</param>
+        /// <param name="newNote">新しい備考</param>
         /// <param name="changes">変更点リスト（検出結果が追加される）</param>
         private static void DetectCardChanges(
             IcCard existingCard,
             string newCardType,
             string newCardNumber,
+            string newNote,
             List<FieldChange> changes)
         {
             if (existingCard.CardType != newCardType)
@@ -403,6 +410,21 @@ namespace ICCardManager.Services
                     FieldName = "管理番号",
                     OldValue = existingCard.CardNumber ?? "(なし)",
                     NewValue = newCardNumber
+                });
+            }
+
+            // Issue #1370: 備考の差分検出
+            // インポート本体と同じ正規化（空白のみは null 扱い）で比較することで、
+            // Preview の判定と実インポートの結果を一致させる
+            var existingNote = string.IsNullOrWhiteSpace(existingCard.Note) ? null : existingCard.Note;
+            var normalizedNewNote = string.IsNullOrWhiteSpace(newNote) ? null : newNote;
+            if (existingNote != normalizedNewNote)
+            {
+                changes.Add(new FieldChange
+                {
+                    FieldName = "備考",
+                    OldValue = existingNote ?? "(なし)",
+                    NewValue = normalizedNewNote ?? "(なし)"
                 });
             }
         }
