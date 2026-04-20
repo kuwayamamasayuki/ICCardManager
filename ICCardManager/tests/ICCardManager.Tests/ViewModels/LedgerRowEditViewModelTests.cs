@@ -270,6 +270,145 @@ public class LedgerRowEditViewModelTests
         _viewModel.SelectedStaff!.StaffIdm.Should().Be(_staffA.StaffIdm);
     }
 
+    /// <summary>
+    /// Issue #1303: 旧バグで作成された LenderIdm=null 行（StaffName のみ）を、
+    /// 氏名で照合して利用者欄に正しく選択できることを確認
+    /// </summary>
+    [Fact]
+    public async Task InitializeForEdit_LenderIdmNullButStaffNameMatches_SelectsByName()
+    {
+        // Arrange
+        var ledger = new Ledger
+        {
+            Id = 1, CardIdm = TestCardIdm,
+            Date = new DateTime(2026, 4, 17),
+            Summary = "鉄道（薬院～博多 往復）",
+            Income = 0, Expense = 420, Balance = 596,
+            LenderIdm = null,             // バグで未設定
+            StaffName = _staffA.Name,     // スナップショットには残っている
+            Note = string.Empty
+        };
+        _ledgerRepoMock.Setup(r => r.GetByIdAsync(1)).ReturnsAsync(ledger);
+        var dto = new LedgerDto
+        {
+            Id = 1, CardIdm = TestCardIdm,
+            Date = ledger.Date, DateDisplay = "R8.4.17",
+            Summary = ledger.Summary,
+            Income = 0, Expense = 420, Balance = 596,
+            StaffName = _staffA.Name
+        };
+
+        // Act
+        await _viewModel.InitializeForEditAsync(dto, TestOperatorIdm);
+
+        // Assert: 氏名フォールバックで職員 A が選択される
+        _viewModel.SelectedStaff.Should().NotBeNull();
+        _viewModel.SelectedStaff!.StaffIdm.Should().Be(_staffA.StaffIdm);
+    }
+
+    /// <summary>
+    /// Issue #1303: チャージ等、利用者情報が無い行は SelectedStaff が null のままになることを確認
+    /// </summary>
+    [Fact]
+    public async Task InitializeForEdit_LenderIdmNullAndStaffNameNull_LeavesSelectedStaffNull()
+    {
+        // Arrange
+        var ledger = new Ledger
+        {
+            Id = 2, CardIdm = TestCardIdm,
+            Date = new DateTime(2026, 4, 17),
+            Summary = "役務費によりチャージ",
+            Income = 1000, Expense = 0, Balance = 2000,
+            LenderIdm = null,
+            StaffName = null,
+            Note = string.Empty
+        };
+        _ledgerRepoMock.Setup(r => r.GetByIdAsync(2)).ReturnsAsync(ledger);
+        var dto = new LedgerDto
+        {
+            Id = 2, CardIdm = TestCardIdm,
+            Date = ledger.Date, DateDisplay = "R8.4.17",
+            Summary = ledger.Summary,
+            Income = 1000, Expense = 0, Balance = 2000
+        };
+
+        // Act
+        await _viewModel.InitializeForEditAsync(dto, TestOperatorIdm);
+
+        // Assert
+        _viewModel.SelectedStaff.Should().BeNull();
+    }
+
+    /// <summary>
+    /// Issue #1303: 論理削除等で IDm が一致しない場合も、同名アクティブ職員にフォールバック選択することを確認
+    /// （物品出納簿は氏名表示のみで区別不可のため許容）
+    /// </summary>
+    [Fact]
+    public async Task InitializeForEdit_LenderIdmNotInListButStaffNameMatches_FallsBackByName()
+    {
+        // Arrange
+        var ledger = new Ledger
+        {
+            Id = 3, CardIdm = TestCardIdm,
+            Date = new DateTime(2026, 4, 17),
+            Summary = "鉄道（薬院～博多）",
+            Income = 0, Expense = 210, Balance = 800,
+            LenderIdm = "DDDD000000000099",  // StaffList に存在しない IDm
+            StaffName = _staffA.Name,         // 同名のアクティブ職員 A は存在
+            Note = string.Empty
+        };
+        _ledgerRepoMock.Setup(r => r.GetByIdAsync(3)).ReturnsAsync(ledger);
+        var dto = new LedgerDto
+        {
+            Id = 3, CardIdm = TestCardIdm,
+            Date = ledger.Date, DateDisplay = "R8.4.17",
+            Summary = ledger.Summary,
+            Income = 0, Expense = 210, Balance = 800,
+            StaffName = _staffA.Name
+        };
+
+        // Act
+        await _viewModel.InitializeForEditAsync(dto, TestOperatorIdm);
+
+        // Assert
+        _viewModel.SelectedStaff.Should().NotBeNull();
+        _viewModel.SelectedStaff!.StaffIdm.Should().Be(_staffA.StaffIdm);
+    }
+
+    /// <summary>
+    /// Issue #1303: 該当氏名の職員がリストに存在しない場合は SelectedStaff が null のままになることを確認
+    /// </summary>
+    [Fact]
+    public async Task InitializeForEdit_LenderIdmNullAndStaffNameNotInList_LeavesSelectedStaffNull()
+    {
+        // Arrange
+        var ledger = new Ledger
+        {
+            Id = 4, CardIdm = TestCardIdm,
+            Date = new DateTime(2026, 4, 17),
+            Summary = "鉄道（博多～天神）",
+            Income = 0, Expense = 210, Balance = 800,
+            LenderIdm = null,
+            StaffName = "存在しない人物",
+            Note = string.Empty
+        };
+        _ledgerRepoMock.Setup(r => r.GetByIdAsync(4)).ReturnsAsync(ledger);
+        var dto = new LedgerDto
+        {
+            Id = 4, CardIdm = TestCardIdm,
+            Date = ledger.Date, DateDisplay = "R8.4.17",
+            Summary = ledger.Summary,
+            Income = 0, Expense = 210, Balance = 800,
+            StaffName = "存在しない人物"
+        };
+
+        // Act
+        await _viewModel.InitializeForEditAsync(dto, TestOperatorIdm);
+
+        // Assert
+        _viewModel.SelectedStaff.Should().BeNull();
+    }
+
     #endregion
 
     #region バリデーション

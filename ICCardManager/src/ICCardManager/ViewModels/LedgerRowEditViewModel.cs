@@ -279,8 +279,17 @@ namespace ICCardManager.ViewModels
 
             await LoadStaffListAsync();
 
-            // 現在の利用者を選択
+            // 現在の利用者を選択（Issue #1303）
+            // 1) まず LenderIdm 完全一致を試行
+            // 2) 一致が無い場合は StaffName でフォールバック
+            //    - 旧バグ（返却時の利用 Ledger で LenderIdm 未設定）由来の行を救済
+            //    - 論理削除等で LenderIdm が一致しない場合も同名アクティブ職員に紐づける
+            //    - 同名別職員を選んでしまう可能性はあるが、物品出納簿は氏名表示のみで区別不可のため許容
             SelectedStaff = StaffList.FirstOrDefault(s => s.StaffIdm == ledger.LenderIdm);
+            if (SelectedStaff == null && !string.IsNullOrEmpty(ledger.StaffName))
+            {
+                SelectedStaff = StaffList.FirstOrDefault(s => s.Name == ledger.StaffName);
+            }
 
             // Issue #750: 貸出中でなければ削除可能
             CanDelete = !ledgerDto.IsLentRecord;
