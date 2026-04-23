@@ -28,7 +28,7 @@ public class OperationLogExcelExportService
     /// <summary>
     /// 操作ログをExcelファイルにエクスポート
     /// </summary>
-    public async Task ExportAsync(IEnumerable<OperationLog> logs, string filePath)
+    public virtual async Task ExportAsync(IEnumerable<OperationLog> logs, string filePath)
     {
         await Task.Run(() =>
         {

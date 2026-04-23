@@ -21,12 +21,14 @@ public class OperationLogSearchViewModelTests
 {
     private readonly Mock<IOperationLogRepository> _repoMock;
     private readonly Mock<IDialogService> _dialogServiceMock;
+    private readonly Mock<OperationLogExcelExportService> _excelExportServiceMock;
     private readonly OperationLogSearchViewModel _viewModel;
 
     public OperationLogSearchViewModelTests()
     {
         _repoMock = new Mock<IOperationLogRepository>();
         _dialogServiceMock = new Mock<IDialogService>();
+        _excelExportServiceMock = new Mock<OperationLogExcelExportService>();
 
         // SearchAsyncのデフォルト: 空結果を返す
         _repoMock.Setup(r => r.SearchAsync(
@@ -44,7 +46,7 @@ public class OperationLogSearchViewModelTests
         _viewModel = new OperationLogSearchViewModel(
             _repoMock.Object,
             _dialogServiceMock.Object,
-            new OperationLogExcelExportService());
+            _excelExportServiceMock.Object);
     }
 
     #region コンストラクタ・初期状態
@@ -952,6 +954,67 @@ public class OperationLogSearchViewModelTests
 
         // Assert
         _viewModel.Logs[0].TargetDisplayName.Should().Be("田中太郎");
+    }
+
+    #endregion
+
+    #region Issue #1383: エクスポート完了時にプログレスバー(IsBusy)がダイアログ表示前に閉じること
+
+    /// <summary>
+    /// 成功時、ShowInformationが呼ばれる時点でIsBusy=falseになっていること。
+    /// BeginBusyスコープ内でMessageBoxを表示するとモーダル中プログレスバーが残るため、
+    /// スコープを抜けてから表示する修正が効いていることを確認する。
+    /// </summary>
+    [Fact]
+    public async Task ExportToExcelFileAsync_成功時_ShowInformation呼び出し時点でIsBusyがfalseであること()
+    {
+        // Arrange
+        var tempPath = System.IO.Path.Combine(System.IO.Path.GetTempPath(), $"op_{Guid.NewGuid()}.xlsx");
+        _repoMock
+            .Setup(r => r.SearchAllAsync(It.IsAny<OperationLogSearchCriteria>()))
+            .ReturnsAsync(Array.Empty<OperationLog>());
+        _excelExportServiceMock
+            .Setup(s => s.ExportAsync(It.IsAny<IEnumerable<OperationLog>>(), It.IsAny<string>()))
+            .Returns(Task.CompletedTask);
+
+        bool? isBusyAtShowInformation = null;
+        _dialogServiceMock
+            .Setup(d => d.ShowInformation(It.IsAny<string>(), It.IsAny<string>()))
+            .Callback(() => isBusyAtShowInformation = _viewModel.IsBusy);
+
+        // Act
+        await _viewModel.ExportToExcelFileAsync(tempPath);
+
+        // Assert
+        isBusyAtShowInformation.Should().NotBeNull("成功メッセージダイアログが表示されているはず");
+        isBusyAtShowInformation.Should().BeFalse("Issue #1383: ダイアログ表示時にはプログレスバーが閉じていること");
+        _viewModel.IsBusy.Should().BeFalse();
+    }
+
+    /// <summary>
+    /// 失敗時、ShowErrorが呼ばれる時点でIsBusy=falseになっていること。
+    /// </summary>
+    [Fact]
+    public async Task ExportToExcelFileAsync_失敗時_ShowError呼び出し時点でIsBusyがfalseであること()
+    {
+        // Arrange
+        var tempPath = System.IO.Path.Combine(System.IO.Path.GetTempPath(), $"op_{Guid.NewGuid()}.xlsx");
+        _repoMock
+            .Setup(r => r.SearchAllAsync(It.IsAny<OperationLogSearchCriteria>()))
+            .ThrowsAsync(new InvalidOperationException("テスト用例外"));
+
+        bool? isBusyAtShowError = null;
+        _dialogServiceMock
+            .Setup(d => d.ShowError(It.IsAny<string>(), It.IsAny<string>()))
+            .Callback(() => isBusyAtShowError = _viewModel.IsBusy);
+
+        // Act
+        await _viewModel.ExportToExcelFileAsync(tempPath);
+
+        // Assert
+        isBusyAtShowError.Should().NotBeNull("エラーダイアログが表示されているはず");
+        isBusyAtShowError.Should().BeFalse("Issue #1383: エラーダイアログ表示時にもプログレスバーが閉じていること");
+        _viewModel.IsBusy.Should().BeFalse();
     }
 
     #endregion
