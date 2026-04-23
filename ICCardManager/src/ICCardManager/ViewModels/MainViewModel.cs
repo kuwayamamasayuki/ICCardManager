@@ -613,6 +613,13 @@ public partial class MainViewModel : ViewModelBase
             await RefreshLentCardsAsync();
             await RefreshDashboardAsync();
 
+            // Issue #1381: 履歴画面が開いていれば、他PCで発生した変更を反映する
+            // （貸出/返却/チャージ処理後と同じ "if (IsHistoryVisible) LoadHistoryLedgersAsync" パターン）
+            if (IsHistoryVisible)
+            {
+                await LoadHistoryLedgersAsync();
+            }
+
             // Issue #1110, #1131: 最終同期時刻を記録
             _sharedModeMonitor.RecordRefresh();
         }
