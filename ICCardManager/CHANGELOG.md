@@ -51,6 +51,9 @@
 - DB マイグレーションの冪等性（二重実行安全性）を担保。`MigrationHelpers.AddColumnIfNotExists` を新設し、非冪等だった 5 つの `ALTER TABLE ADD COLUMN` 型マイグレーション（#002/#003/#005/#006/#009）を冪等化。共有モードで複数 PC が初回起動時にマイグレーション競合した場合や、`schema_migrations` テーブル部分破損時の再適用エラーを防止。全 9 マイグレーションの二重実行テスト (`MigrationIdempotencyTests`, 9件) と `MigrationHelpers` 単体テスト (7件) を追加。`.claude/rules/migrations.md` に冪等性チェックリストを新設し、開発者ガイド §3.5 を自動検出ロジック (`DiscoverMigrations()`) に合わせて更新（#1285）
 - `CsvImportService.Ledger.cs`（1031行 → 520行）と `Detail.cs`（1042行 → 761行）を責務分割。(1) Import/Preview 間で重複していた利用履歴行パース ~200 行を `LedgerCsvRowParser` に共通化、(2) 利用履歴詳細の 13 列パースを `LedgerDetailCsvRowParser` に抽出、(3) Detail の「履歴ID空欄→新規 Ledger 自動作成」ロジックを `NewLedgerFromSegmentsBuilder` に責務分離（Issue #906/#918/#1053 関連のロジック）、(4) 検証系 helper 4 メソッドを `CsvImportService.LedgerValidation.cs` partial に分離。public API は一切変更せず、既存 94 件のテストは全件 pass。抽出クラス向けの単体テスト 21 件を追加（`LedgerCsvRowParserTests` / `LedgerDetailCsvRowParserTests` / `NewLedgerFromSegmentsBuilderTests`）（#1284）
 
+**ドキュメント**
+- テスト設計書に「1.6 テストコードの読み方（非プログラマ向け）」節を追加。利用者（検収担当含む）が §2 以降のテストコード引用を参照する際に、テストファイル/メソッド命名の読み方、Arrange-Act-Assert 3 段構造、xUnit/FluentAssertions/Moq の主要記法を把握できるよう解説。実在テスト `DeleteOrClearFileTests` を引用し、C# やプログラミングの詳細な文法に詳しくなくても「何を確認しているテストか」が読み取れる構成とした。あわせて §0 の「対象読者」欄に利用者・検収担当を追加、§1.4 章マップ導入文に §1.6 への誘導注記を追加（#1385）
+
 ### v2.7.0 (2026-04-15)
 
 **新機能**
