@@ -471,4 +471,101 @@ public class DataExportImportViewModelTests : IDisposable
         _viewModel.ImportPreview = new CsvImportPreviewResult { IsValid = true };
         _viewModel.HasPreview = true;
     }
+
+    #region Issue #1383: エクスポート完了時にプログレスバー(IsBusy)がダイアログ表示前に閉じること
+
+    /// <summary>
+    /// 成功時、ShowInformationが呼ばれる時点でIsBusy=falseになっていること。
+    /// BeginBusyスコープ内でMessageBoxを表示するとモーダル中プログレスバーが残るため、
+    /// スコープを抜けてから表示する修正が効いていることを確認する。
+    /// </summary>
+    [Fact]
+    public async Task ExportToFileAsync_成功時_ShowInformation呼び出し時点でIsBusyがfalseであること()
+    {
+        // Arrange
+        var tempPath = System.IO.Path.Combine(System.IO.Path.GetTempPath(), $"export_{System.Guid.NewGuid()}.csv");
+        _viewModel.SelectedExportType = DataType.Cards;
+
+        _exportServiceMock
+            .Setup(x => x.ExportCardsAsync(It.IsAny<string>(), It.IsAny<bool>()))
+            .ReturnsAsync(new CsvExportResult
+            {
+                Success = true,
+                FilePath = tempPath,
+                ExportedCount = 3,
+            });
+
+        bool? isBusyAtShowInformation = null;
+        _dialogServiceMock
+            .Setup(d => d.ShowInformation(It.IsAny<string>(), It.IsAny<string>()))
+            .Callback(() => isBusyAtShowInformation = _viewModel.IsBusy);
+
+        // Act
+        await _viewModel.ExportToFileAsync(tempPath);
+
+        // Assert
+        isBusyAtShowInformation.Should().NotBeNull("成功メッセージダイアログが表示されているはず");
+        isBusyAtShowInformation.Should().BeFalse("Issue #1383: ダイアログ表示時にはプログレスバーが閉じていること");
+        _viewModel.IsBusy.Should().BeFalse();
+    }
+
+    /// <summary>
+    /// 失敗時、ShowErrorが呼ばれる時点でIsBusy=falseになっていること。
+    /// </summary>
+    [Fact]
+    public async Task ExportToFileAsync_失敗時_ShowError呼び出し時点でIsBusyがfalseであること()
+    {
+        // Arrange
+        var tempPath = System.IO.Path.Combine(System.IO.Path.GetTempPath(), $"export_{System.Guid.NewGuid()}.csv");
+        _viewModel.SelectedExportType = DataType.Cards;
+
+        _exportServiceMock
+            .Setup(x => x.ExportCardsAsync(It.IsAny<string>(), It.IsAny<bool>()))
+            .ReturnsAsync(new CsvExportResult
+            {
+                Success = false,
+                ErrorMessage = "書き込み権限がありません",
+            });
+
+        bool? isBusyAtShowError = null;
+        _dialogServiceMock
+            .Setup(d => d.ShowError(It.IsAny<string>(), It.IsAny<string>()))
+            .Callback(() => isBusyAtShowError = _viewModel.IsBusy);
+
+        // Act
+        await _viewModel.ExportToFileAsync(tempPath);
+
+        // Assert
+        isBusyAtShowError.Should().NotBeNull("エラーダイアログが表示されているはず");
+        isBusyAtShowError.Should().BeFalse("Issue #1383: エラーダイアログ表示時にもプログレスバーが閉じていること");
+        _viewModel.IsBusy.Should().BeFalse();
+    }
+
+    /// <summary>
+    /// 例外発生時、BeginBusyスコープが確実にDisposeされIsBusy=falseになること。
+    /// 例外パスではダイアログ表示はしないが、プログレスバーは必ず閉じる。
+    /// </summary>
+    [Fact]
+    public async Task ExportToFileAsync_例外発生時_IsBusyがfalseに戻ること()
+    {
+        // Arrange
+        var tempPath = System.IO.Path.Combine(System.IO.Path.GetTempPath(), $"export_{System.Guid.NewGuid()}.csv");
+        _viewModel.SelectedExportType = DataType.Cards;
+
+        _exportServiceMock
+            .Setup(x => x.ExportCardsAsync(It.IsAny<string>(), It.IsAny<bool>()))
+            .ThrowsAsync(new System.InvalidOperationException("意図的な例外"));
+
+        // Act
+        await _viewModel.ExportToFileAsync(tempPath);
+
+        // Assert
+        _viewModel.IsBusy.Should().BeFalse("例外発生時もusingブロックのDisposeでIsBusyはfalseに戻る");
+        _dialogServiceMock.Verify(
+            d => d.ShowInformation(It.IsAny<string>(), It.IsAny<string>()),
+            Times.Never,
+            "例外時は成功ダイアログを表示しない");
+    }
+
+    #endregion
 }

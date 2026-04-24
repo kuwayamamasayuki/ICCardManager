@@ -54,7 +54,7 @@ namespace ICCardManager.Services
         /// <summary>
         /// カード一覧をCSVエクスポート
         /// </summary>
-        public async Task<CsvExportResult> ExportCardsAsync(string filePath, bool includeDeleted = false)
+        public virtual async Task<CsvExportResult> ExportCardsAsync(string filePath, bool includeDeleted = false)
         {
             try
             {
@@ -103,7 +103,7 @@ namespace ICCardManager.Services
         /// <summary>
         /// 職員一覧をCSVエクスポート
         /// </summary>
-        public async Task<CsvExportResult> ExportStaffAsync(string filePath, bool includeDeleted = false)
+        public virtual async Task<CsvExportResult> ExportStaffAsync(string filePath, bool includeDeleted = false)
         {
             try
             {
@@ -152,7 +152,7 @@ namespace ICCardManager.Services
         /// <summary>
         /// 履歴データをCSVエクスポート（期間指定）
         /// </summary>
-        public async Task<CsvExportResult> ExportLedgersAsync(
+        public virtual async Task<CsvExportResult> ExportLedgersAsync(
             string filePath,
             DateTime startDate,
             DateTime endDate,
@@ -233,7 +233,7 @@ namespace ICCardManager.Services
         /// Issue #751対応: ledger_detailテーブルのデータをCSVに出力する。
         /// カードIDm・管理番号はledger→ic_cardのJOINで参照用に付与する。
         /// </remarks>
-        public async Task<CsvExportResult> ExportLedgerDetailsAsync(
+        public virtual async Task<CsvExportResult> ExportLedgerDetailsAsync(
             string filePath,
             DateTime startDate,
             DateTime endDate)

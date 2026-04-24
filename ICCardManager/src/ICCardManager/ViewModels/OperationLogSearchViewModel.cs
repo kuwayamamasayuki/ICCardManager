@@ -336,6 +336,17 @@ public partial class OperationLogSearchViewModel : ViewModelBase
             return;
         }
 
+        await ExportToExcelFileAsync(dialog.FileName);
+    }
+
+    /// <summary>
+    /// 指定ファイルへのExcelエクスポート本体。<see cref="ExportToExcelAsync"/> からファイル選択後に呼ばれるほか、
+    /// ユニットテストから <see cref="SaveFileDialog"/> を介さずに実行する経路としても使用する。
+    /// </summary>
+    internal async Task ExportToExcelFileAsync(string filePath)
+    {
+        int? exportedCount = null;
+        string errorMessage = null;
         using (BeginBusy("エクスポート中..."))
         {
             try
@@ -343,20 +354,30 @@ public partial class OperationLogSearchViewModel : ViewModelBase
                 var criteria = BuildSearchCriteria();
                 var logs = await _operationLogRepository.SearchAllAsync(criteria);
 
-                await _excelExportService.ExportAsync(logs, dialog.FileName);
+                await _excelExportService.ExportAsync(logs, filePath);
 
-                LastExportedFile = dialog.FileName;
-                SetStatus($"エクスポート完了: {logs.Count()}件を出力しました", false);
-
-                _dialogService.ShowInformation(
-                    $"Excelファイルを保存しました。\n\n出力先: {dialog.FileName}\n出力件数: {logs.Count()}件",
-                    "エクスポート完了");
+                LastExportedFile = filePath;
+                exportedCount = logs.Count();
+                SetStatus($"エクスポート完了: {exportedCount}件を出力しました", false);
             }
             catch (Exception ex)
             {
+                errorMessage = ex.Message;
                 SetStatus($"エクスポートエラー: {ex.Message}", true);
-                _dialogService.ShowError($"エクスポートに失敗しました。\n\n{ex.Message}", "エクスポートエラー");
             }
+        }
+
+        // Issue #1383: BeginBusyスコープを抜けてIsBusy=falseが確定した後にダイアログを表示する。
+        // スコープ内で表示するとMessageBoxがモーダルで待機する間プログレスバーが残り続ける。
+        if (errorMessage != null)
+        {
+            _dialogService.ShowError($"エクスポートに失敗しました。\n\n{errorMessage}", "エクスポートエラー");
+        }
+        else if (exportedCount.HasValue)
+        {
+            _dialogService.ShowInformation(
+                $"Excelファイルを保存しました。\n\n出力先: {filePath}\n出力件数: {exportedCount}件",
+                "エクスポート完了");
         }
     }
 

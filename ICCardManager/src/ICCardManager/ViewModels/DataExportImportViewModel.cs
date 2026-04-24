@@ -375,30 +375,38 @@ public partial class DataExportImportViewModel : ViewModelBase
             return;
         }
 
+        await ExportToFileAsync(dialog.FileName);
+    }
+
+    /// <summary>
+    /// 指定ファイルへのエクスポート本体。<see cref="ExportAsync"/> からファイル選択後に呼ばれるほか、
+    /// ユニットテストから <see cref="SaveFileDialog"/> を介さずに実行する経路としても使用する。
+    /// </summary>
+    internal async Task ExportToFileAsync(string filePath)
+    {
+        CsvExportResult result = null;
         using (BeginBusy("エクスポート中..."))
         {
             // Issue #1062: UIスレッドにプログレスバー描画の機会を与える
             await Task.Yield();
             try
             {
-                CsvExportResult result;
-
                 switch (SelectedExportType)
                 {
                     case DataType.Cards:
-                        result = await _exportService.ExportCardsAsync(dialog.FileName, IncludeDeletedInExport);
+                        result = await _exportService.ExportCardsAsync(filePath, IncludeDeletedInExport);
                         break;
 
                     case DataType.Staff:
-                        result = await _exportService.ExportStaffAsync(dialog.FileName, IncludeDeletedInExport);
+                        result = await _exportService.ExportStaffAsync(filePath, IncludeDeletedInExport);
                         break;
 
                     case DataType.Ledgers:
-                        result = await _exportService.ExportLedgersAsync(dialog.FileName, ExportStartDate, ExportEndDate);
+                        result = await _exportService.ExportLedgersAsync(filePath, ExportStartDate, ExportEndDate);
                         break;
 
                     case DataType.LedgerDetails:
-                        result = await _exportService.ExportLedgerDetailsAsync(dialog.FileName, ExportStartDate, ExportEndDate);
+                        result = await _exportService.ExportLedgerDetailsAsync(filePath, ExportStartDate, ExportEndDate);
                         break;
 
                     default:
@@ -416,16 +424,10 @@ public partial class DataExportImportViewModel : ViewModelBase
                         MapDataTypeToTableName(SelectedExportType),
                         result.FilePath,
                         result.ExportedCount);
-
-                    // Issue #512: 保存完了メッセージを表示
-                    _dialogService.ShowInformation(
-                        $"CSVファイルを保存しました。\n\n出力先: {result.FilePath}\n出力件数: {result.ExportedCount}件",
-                        "エクスポート完了");
                 }
                 else
                 {
                     SetStatus($"エクスポートエラー: {result.ErrorMessage}", true);
-                    _dialogService.ShowError($"エクスポートに失敗しました。\n\n{result.ErrorMessage}", "エクスポートエラー");
                 }
             }
             catch (Exception ex)
@@ -434,7 +436,26 @@ public partial class DataExportImportViewModel : ViewModelBase
 #if DEBUG
                 System.Diagnostics.Debug.WriteLine($"[Export Error] {ex.GetType().Name}: {ex.Message}");
 #endif
+                return;
             }
+        }
+
+        // Issue #1383: BeginBusyスコープを抜けてIsBusy=falseが確定した後にダイアログを表示する。
+        // スコープ内で表示するとMessageBoxがモーダルで待機する間プログレスバーが残り続ける。
+        if (result == null)
+        {
+            return;
+        }
+        if (result.Success)
+        {
+            // Issue #512: 保存完了メッセージを表示
+            _dialogService.ShowInformation(
+                $"CSVファイルを保存しました。\n\n出力先: {result.FilePath}\n出力件数: {result.ExportedCount}件",
+                "エクスポート完了");
+        }
+        else
+        {
+            _dialogService.ShowError($"エクスポートに失敗しました。\n\n{result.ErrorMessage}", "エクスポートエラー");
         }
     }
 
