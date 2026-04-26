@@ -913,16 +913,17 @@
                 <StackPanel Orientation="Horizontal">
                     <!-- 接続状態アイコン -->
                     <TextBlock x:Name="ConnectionIcon" VerticalAlignment="Center" Margin="0,0,5,0">
+                        <!-- Issue #1428: デフォルトを「切断」に反転し、Connected を明示トリガ化（fail-safe 表示） -->
                         <TextBlock.Style>
                             <Style TargetType="TextBlock">
-                                <Setter Property="Text" Value="🔗"/>
-                                <Setter Property="Foreground" Value="{DynamicResource SuccessActionBrush}"/>
-                                <Setter Property="ToolTip" Value="カードリーダー接続中"/>
+                                <Setter Property="Text" Value="🔌"/>
+                                <Setter Property="Foreground" Value="{DynamicResource ErrorBorderBrush}"/>
+                                <Setter Property="ToolTip" Value="カードリーダー切断"/>
                                 <Style.Triggers>
-                                    <DataTrigger Binding="{Binding CardReaderConnectionState}" Value="{x:Static cardReader:CardReaderConnectionState.Disconnected}">
-                                        <Setter Property="Text" Value="🔌"/>
-                                        <Setter Property="Foreground" Value="{DynamicResource ErrorBorderBrush}"/>
-                                        <Setter Property="ToolTip" Value="カードリーダー切断"/>
+                                    <DataTrigger Binding="{Binding CardReaderConnectionState}" Value="{x:Static cardReader:CardReaderConnectionState.Connected}">
+                                        <Setter Property="Text" Value="🔗"/>
+                                        <Setter Property="Foreground" Value="{DynamicResource SuccessActionBrush}"/>
+                                        <Setter Property="ToolTip" Value="カードリーダー接続中"/>
                                     </DataTrigger>
                                     <DataTrigger Binding="{Binding CardReaderConnectionState}" Value="{x:Static cardReader:CardReaderConnectionState.Reconnecting}">
                                         <Setter Property="Text" Value="🔄"/>
@@ -935,14 +936,15 @@
                     </TextBlock>
                     <!-- 接続状態テキスト -->
                     <TextBlock VerticalAlignment="Center">
+                        <!-- Issue #1428: デフォルトを「切断」に反転し、Connected を明示トリガ化（fail-safe 表示） -->
                         <TextBlock.Style>
                             <Style TargetType="TextBlock">
-                                <Setter Property="Text" Value="リーダー: 接続中"/>
-                                <Setter Property="Foreground" Value="{DynamicResource SuccessActionBrush}"/>
+                                <Setter Property="Text" Value="リーダー: 切断"/>
+                                <Setter Property="Foreground" Value="{DynamicResource ErrorBorderBrush}"/>
                                 <Style.Triggers>
-                                    <DataTrigger Binding="{Binding CardReaderConnectionState}" Value="{x:Static cardReader:CardReaderConnectionState.Disconnected}">
-                                        <Setter Property="Text" Value="リーダー: 切断"/>
-                                        <Setter Property="Foreground" Value="{DynamicResource ErrorBorderBrush}"/>
+                                    <DataTrigger Binding="{Binding CardReaderConnectionState}" Value="{x:Static cardReader:CardReaderConnectionState.Connected}">
+                                        <Setter Property="Text" Value="リーダー: 接続中"/>
+                                        <Setter Property="Foreground" Value="{DynamicResource SuccessActionBrush}"/>
                                     </DataTrigger>
                                     <DataTrigger Binding="{Binding CardReaderConnectionState}" Value="{x:Static cardReader:CardReaderConnectionState.Reconnecting}">
                                         <Setter Property="Text">
