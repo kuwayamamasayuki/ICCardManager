@@ -12,7 +12,10 @@
     必須画面（7枚）のみを取得します。
 
 .PARAMETER All
-    オプション画面も含むすべての画面（24枚）を取得します。
+    オプション画面も含むすべての画面（52枚）を取得します。
+    一部のエントリは `ManualOnly = $true` が指定されており、
+    スクリプトでは撮影せず手動でのPrtSc取得を促します
+    （別プロセスや特殊起動条件が必要な画面）。
 
 .PARAMETER OutputDir
     出力先ディレクトリを指定します。デフォルトは docs/screenshots/ です。
@@ -27,7 +30,7 @@
 
 .NOTES
     作成日: 2026-02-02
-    Issue: #427, #435, #849
+    Issue: #427, #435, #849, #1409-#1418
 #>
 
 param(
@@ -318,6 +321,177 @@ $optionalScreens = @(
         Title = "カード種別選択ダイアログ"
         Instructions = "未登録カードをICカードリーダーにタッチし、「職員証」か「交通系ICカード」かを選択するダイアログが表示されたら"
         ForegroundOnly = $true
+    },
+    # Issue #1409: ユーザーマニュアル §7.2 各設定項目のスクリーンショット
+    @{
+        Name = "settings_voice_dropdown.png"
+        Title = "音声設定ドロップダウン展開"
+        Instructions = "F5キーで設定画面を開き、音声設定のドロップダウン（効果音/男性/女性/無し）を展開した状態で"
+        ForegroundOnly = $true
+    },
+    @{
+        Name = "settings_department_dropdown.png"
+        Title = "部署設定ドロップダウン展開"
+        Instructions = "設定画面で部署設定のドロップダウン（市長事務部局／企業会計部局）を展開した状態で"
+        ForegroundOnly = $true
+    },
+    @{
+        Name = "settings_fontsize_small.png"
+        Title = "文字サイズ「小」"
+        Instructions = "設定画面で文字サイズを「小」に変更し、変更が反映された表示状態で"
+        ForegroundOnly = $true
+    },
+    @{
+        Name = "settings_fontsize_medium.png"
+        Title = "文字サイズ「中（標準）」"
+        Instructions = "設定画面で文字サイズを「中（標準）」に変更し、変更が反映された表示状態で"
+        ForegroundOnly = $true
+    },
+    @{
+        Name = "settings_fontsize_large.png"
+        Title = "文字サイズ「大」"
+        Instructions = "設定画面で文字サイズを「大」に変更し、変更が反映された表示状態で"
+        ForegroundOnly = $true
+    },
+    @{
+        Name = "settings_fontsize_xlarge.png"
+        Title = "文字サイズ「特大」"
+        Instructions = "設定画面で文字サイズを「特大」に変更し、変更が反映された表示状態で"
+        ForegroundOnly = $true
+    },
+    @{
+        Name = "settings_toast_topright.png"
+        Title = "トースト通知 表示位置「右上」"
+        Instructions = "設定でトースト位置を「右上」に変更後、トースト通知を発生させて表示中の状態で（メイン画面とトーストの位置関係が見える構図）"
+    },
+    @{
+        Name = "settings_toast_topleft.png"
+        Title = "トースト通知 表示位置「左上」"
+        Instructions = "設定でトースト位置を「左上」に変更後、トースト通知を発生させて表示中の状態で"
+    },
+    @{
+        Name = "settings_toast_bottomright.png"
+        Title = "トースト通知 表示位置「右下」"
+        Instructions = "設定でトースト位置を「右下」に変更後、トースト通知を発生させて表示中の状態で"
+    },
+    @{
+        Name = "settings_toast_bottomleft.png"
+        Title = "トースト通知 表示位置「左下」"
+        Instructions = "設定でトースト位置を「左下」に変更後、トースト通知を発生させて表示中の状態で"
+    },
+    # Issue #1410: ユーザーマニュアル §6.2 帳票作成完了画面
+    @{
+        Name = "report_completed_files.png"
+        Title = "帳票出力完了ファイル一覧"
+        Instructions = "F1キーで帳票作成画面を開き、複数カードを一括作成して完了後のファイル一覧ダイアログ（ファイル名がリンク化された状態）が表示されたら"
+        ForegroundOnly = $true
+    },
+    # Issue #1411: ユーザーマニュアル §9.3 エラーダイアログ
+    @{
+        Name = "error_unregistered_card.png"
+        Title = "未登録カードエラー"
+        Instructions = "未登録の交通系ICカードをリーダーにタッチし、「未登録のカードです」エラーが表示されたら"
+        ForegroundOnly = $true
+    },
+    @{
+        Name = "error_unregistered_staff.png"
+        Title = "未登録職員証エラー"
+        Instructions = "未登録の職員証をリーダーにタッチし、「未登録の職員証です」エラーが表示されたら"
+        ForegroundOnly = $true
+    },
+    @{
+        Name = "error_no_reader.png"
+        Title = "カードリーダー未接続エラー"
+        Instructions = "PaSoRiを外した状態でアプリを起動し「カードリーダーが見つかりません」エラーダイアログが表示されたら"
+        ForegroundOnly = $true
+    },
+    @{
+        Name = "warning_network_disconnected.png"
+        Title = "ネットワーク切断警告（共有モード）"
+        Instructions = "共有モードで稼働中にネットワークを切断し、メイン画面に切断警告バナーが表示された状態で"
+    },
+    # Issue #1412: ユーザーマニュアル §3.3 カード一覧の状態別
+    @{
+        Name = "card_list_status_mixed.png"
+        Title = "カード一覧（状態混在）"
+        Instructions = "メイン画面で「利用可（緑）」「貸出中（オレンジ）」「残額警告（赤背景）」のカードが同時に表示されている状態で"
+    },
+    @{
+        Name = "card_list_sort_menu.png"
+        Title = "カード一覧 並び替えメニュー"
+        Instructions = "メイン画面のカード一覧で並び替えメニューを開いた状態で"
+    },
+    # Issue #1413: 管理者マニュアル §2.6 アンインストールデータ取り扱い選択
+    @{
+        Name = "uninstall_data_choice.png"
+        Title = "アンインストール時データ取り扱い選択"
+        Instructions = "アンインストーラーを実行し、データ取り扱い選択ダイアログ（すべて削除/データのみ残す/何も削除しない）が表示されたら（※InnoSetupの別プロセスのため手動撮影）"
+        ManualOnly = $true
+    },
+    # Issue #1414: 管理者マニュアル §4 職員登録・編集ダイアログ
+    @{
+        Name = "staff_register_before_touch.png"
+        Title = "職員新規登録ダイアログ（職員証タッチ前）"
+        Instructions = "F2キーで職員管理画面を開き「新規登録」をクリック、職員証タッチ待ちの状態で"
+        ForegroundOnly = $true
+    },
+    @{
+        Name = "staff_register_after_touch.png"
+        Title = "職員新規登録ダイアログ（職員証タッチ後）"
+        Instructions = "新規登録ダイアログで職員証をタッチし、IDmが取り込まれて入力欄にフォーカスが移った状態で"
+        ForegroundOnly = $true
+    },
+    @{
+        Name = "staff_edit_dialog.png"
+        Title = "職員情報編集ダイアログ"
+        Instructions = "職員管理画面で職員行を選択して「編集」、職員情報編集ダイアログが表示されたら"
+        ForegroundOnly = $true
+    },
+    @{
+        Name = "staff_recard_touch_prompt.png"
+        Title = "職員証再登録 タッチ要求画面"
+        Instructions = "職員管理画面で「職員証再登録」を実行し、「職員証をタッチしてください」の画面が表示されたら"
+        ForegroundOnly = $true
+    },
+    # Issue #1415: 管理者マニュアル §5.3/§5.5 カード編集・払い戻しダイアログ
+    @{
+        Name = "card_edit_dialog.png"
+        Title = "交通系ICカード情報編集ダイアログ"
+        Instructions = "F3キーでカード管理画面を開き、行を選択して「編集」、カード情報編集ダイアログが表示されたら"
+        ForegroundOnly = $true
+    },
+    @{
+        Name = "card_refund_dialog.png"
+        Title = "交通系ICカード払い戻し確認ダイアログ"
+        Instructions = "カード管理画面で「払い戻し」を実行し、残高表示と論理削除警告が含まれた確認ダイアログが表示されたら"
+        ForegroundOnly = $true
+    },
+    # Issue #1416: CSV インポートプレビューは既存 import_preview.png を流用するため新規エントリなし
+    # Issue #1417: 管理者マニュアル §6.1/§6.2 バックアップ完了通知・リストア一覧
+    @{
+        Name = "backup_completed.png"
+        Title = "手動バックアップ完了通知"
+        Instructions = "F6キーでシステム管理画面を開き「バックアップを作成」をクリック、完了通知ダイアログが表示されたら"
+        ForegroundOnly = $true
+    },
+    @{
+        Name = "restore_list.png"
+        Title = "リストア用バックアップ一覧"
+        Instructions = "システム管理画面で「リストア」をクリックし、バックアップファイル一覧（ファイル名・タイムスタンプ・選択状態）が表示されたら"
+        ForegroundOnly = $true
+    },
+    @{
+        Name = "restore_file_dialog.png"
+        Title = "「ファイルを指定してリストア」選択ダイアログ"
+        Instructions = "リストア画面で「ファイルを指定してリストア」を選択し、ファイル選択ダイアログが表示されたら"
+        ForegroundOnly = $true
+    },
+    # Issue #1418: 管理者マニュアル §8.4 felicalib.dll ハッシュ検証失敗エラー
+    @{
+        Name = "felicalib_verification_failed.png"
+        Title = "felicalib.dll ハッシュ検証失敗ダイアログ"
+        Instructions = "テスト環境で felicalib.dll を意図的に差し替えてアプリを起動し、ハッシュ検証失敗エラー（期待ハッシュと実際のハッシュ表示）が出たら（※起動失敗するため手動撮影）"
+        ManualOnly = $true
     }
 )
 
@@ -450,6 +624,15 @@ function Start-ScreenshotSession {
 
         if ($key -eq "s" -or $key -eq "S") {
             Write-Host "    - スキップしました" -ForegroundColor Yellow
+            continue
+        }
+
+        # ManualOnly = 別プロセス起動や特殊条件が必要なためスクリプトでは撮影できない画面
+        $isManualOnly = $screen.ContainsKey("ManualOnly") -and $screen.ManualOnly
+        if ($isManualOnly) {
+            Write-Host "    ! このスクリーンショットはスクリプトでは撮影できません" -ForegroundColor Yellow
+            Write-Host "      上記の手順で画面を表示し、PrtSc 等で手動撮影して" -ForegroundColor Yellow
+            Write-Host "      $outputPath として保存してください" -ForegroundColor Yellow
             continue
         }
 
