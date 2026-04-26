@@ -11,6 +11,7 @@ using Xunit;
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Reflection;
 using System.Threading.Tasks;
 
 
@@ -737,6 +738,37 @@ public class BackupServiceTests : IDisposable
         // Assert
         result.Should().NotBeNull();
         File.Exists(result).Should().BeTrue();
+    }
+
+    #endregion
+
+    #region マニュアル記載値との同期（Issue #1408）
+
+    /// <summary>
+    /// Issue #1408: マニュアルに「最大 30 世代」と明記しているため、
+    /// 実装定数 <c>MaxBackupGenerations</c> が 30 から変わったらテストが落ちて
+    /// マニュアル更新を強制する。
+    /// </summary>
+    /// <remarks>
+    /// 同期更新が必要な箇所:
+    /// - ICCardManager/docs/manual/ユーザーマニュアル.md §7.2「バックアップ先フォルダ」
+    /// - ICCardManager/docs/manual/管理者マニュアル.md §3.3「バックアップ設定」
+    /// - ICCardManager/docs/manual/管理者マニュアル.md §6.1「バックアップとリストア」自動バックアップ
+    /// </remarks>
+    [Fact]
+    public void MaxBackupGenerations_MatchesDocumentedValue()
+    {
+        var field = typeof(BackupService).GetField(
+            "MaxBackupGenerations",
+            BindingFlags.NonPublic | BindingFlags.Static);
+
+        field.Should().NotBeNull(
+            "MaxBackupGenerations 定数が見つかりません。リネームした場合はマニュアルとこのテストを同期更新してください。");
+
+        var value = (int)field!.GetRawConstantValue()!;
+        value.Should().Be(30,
+            "マニュアル §3.3 / §6.1 / ユーザーマニュアル §7.2 で 30 世代と明記しているため、" +
+            "値を変更する場合は両マニュアルも同期更新が必要です（Issue #1408）。");
     }
 
     #endregion
