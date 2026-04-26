@@ -219,12 +219,34 @@ public class MainViewModelTests
     }
 
     /// <summary>
-    /// 初期背景色が白であること
+    /// MainViewModel が公開する状態系プロパティが
+    /// CurrentState / StatusMessage / StatusIcon の 3 つに限定されていること（Issue #1398）。
     /// </summary>
+    /// <remarks>
+    /// 過去に存在した StatusBackgroundColor / StatusBorderColor / StatusForegroundColor /
+    /// StatusLabel / StatusIconDescription は XAML から一度もバインドされず、SetState() の
+    /// switch 式も常にデフォルトケースに落ちるデッドコードだったため Issue #1398 で削除済み。
+    /// 同種のプロパティが復活してデッドコード化することを防ぐための回帰テスト。
+    /// </remarks>
     [Fact]
-    public void Constructor_ShouldSetInitialBackgroundColor()
+    public void MainViewModel_ShouldNotExposeDeadStatusStyleProperties()
     {
-        _viewModel.StatusBackgroundColor.Should().Be("#FFFFFF");
+        var deadProperties = new[]
+        {
+            "StatusBackgroundColor",
+            "StatusBorderColor",
+            "StatusForegroundColor",
+            "StatusLabel",
+            "StatusIconDescription",
+        };
+
+        var existing = deadProperties
+            .Where(name => typeof(MainViewModel).GetProperty(name) != null)
+            .ToArray();
+
+        existing.Should().BeEmpty(
+            "Issue #1398 で削除した未バインドプロパティが復活している: {0}",
+            string.Join(", ", existing));
     }
 
     /// <summary>
@@ -1186,7 +1208,6 @@ MainViewModel 仕様書
     - CurrentState = WaitingForStaffCard
     - StatusMessage = "職員証をタッチしてください"
     - StatusIcon = "👤"
-    - StatusBackgroundColor = "#FFFFFF"
     - RemainingSeconds = 0
 
 1.2 職員証タッチ時（WaitingForStaffCard → WaitingForIcCard）
