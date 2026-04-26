@@ -37,7 +37,7 @@ THEN
 ## 共有フォルダモード（複数PC共有DB）
 - DBパスは `C:\ProgramData\ICCardManager\database_config.txt` で指定（空欄/未作成=ローカルデフォルト）。インストーラーの「データベースの保存先」ページまたは設定画面（F5）から設定
 - UNCパス（`\\server\share\iccard.db`）指定時に自動的に共有モードとして動作
-- 共有モード時: journal_mode=DELETE（WALはネットワーク非推奨）、busy_timeout=5000ms
+- 共有モード時: journal_mode=DELETE（WALはネットワーク非推奨。DELETE設定不可時は TRUNCATE → PERSIST の順にフォールバック、Issue #1107）、busy_timeout=15000ms（SMB遅延と最大20台の同時アクセスを考慮、Issue #1107。ローカルモード時は5000ms）
 - キャッシュTTLを短縮し他PCの変更を早期反映
 - 30秒ごとの接続ヘルスチェック＋自動再接続
 - ステータスバーに「共有モード」表示、ネットワーク切断時は警告表示
