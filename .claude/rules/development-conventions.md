@@ -27,9 +27,10 @@
 - 色覚多様性対応: 暖色（貸出）vs 寒色（返却）で色相差を明確に
 - コントラスト: 背景色は彩度を確保しつつ、テキストとの可読性を維持
 - 文字サイズは設定で変更可能（小/中/大/特大）
-- 貸出時: 薄いオレンジ背景(#FFE0B2) + アイコン + 「ピッ」
-- 返却時: 薄い水色背景(#B3E5FC) + アイコン + 「ピピッ」
-- エラー時: 薄い赤背景(#FFEBEE) + 「ピー」
+- 貸出時: 薄いオレンジ背景(#FFF3E0、`LendingBackgroundBrush`) + アイコン + 「ピッ」
+- 返却時: 薄い水色背景(#E3F2FD、`ReturnBackgroundBrush`) + アイコン + 「ピピッ」
+- エラー時: 薄い赤背景(#FFEBEE、`ErrorBackgroundBrush`) + 「ピー」
+- **色値の Single Source of Truth**: `Resources/Styles/AccessibilityStyles.xaml` のブラシキー（`LendingBackgroundBrush` / `ReturnBackgroundBrush` / `ErrorBackgroundBrush`）を `DynamicResource` で参照すること。色値リテラル（`#FFF3E0` 等）を直接指定しない（Issue #1392）
 
 ## ICカード関連
 - **用語の使い分け（重要）**: 本システムでは「職員証」と「交通系ICカード」の2種類のICカードを扱う。UI文言・マニュアル・コード内のユーザー向けメッセージでは、交通系ICカードを指す場合は必ず**「交通系ICカード」**と記載し、単に「ICカード」とは書かないこと。「ICカード」だけでは職員証と区別がつかずユーザーが混乱する。ただし「ICカードリーダー」等のハードウェア名称はそのままでよい
