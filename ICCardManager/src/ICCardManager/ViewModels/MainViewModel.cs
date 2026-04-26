@@ -157,21 +157,6 @@ public partial class MainViewModel : ViewModelBase
     private string _statusIcon = "👤";
 
     [ObservableProperty]
-    private string _statusBackgroundColor = "#FFFFFF";
-
-    [ObservableProperty]
-    private string _statusBorderColor = "#9E9E9E";
-
-    [ObservableProperty]
-    private string _statusForegroundColor = "#424242";
-
-    [ObservableProperty]
-    private string _statusLabel = "待機中";
-
-    [ObservableProperty]
-    private string _statusIconDescription = "待機中アイコン";
-
-    [ObservableProperty]
     private int _remainingSeconds;
 
     [ObservableProperty]
@@ -2035,21 +2020,10 @@ public partial class MainViewModel : ViewModelBase
     /// <summary>
     /// 状態を設定
     /// </summary>
-    private void SetState(AppState state, string message, string? backgroundColor = null)
+    private void SetState(AppState state, string message)
     {
         CurrentState = state;
         StatusMessage = message;
-        StatusBackgroundColor = backgroundColor ?? "#FFFFFF";
-
-        // 背景色に応じてボーダー色、文字色、ラベルを設定（アクセシビリティ対応）
-        // 色だけでなくテキストラベルでも状態を示す
-        (StatusBorderColor, StatusForegroundColor, StatusLabel, StatusIconDescription) = backgroundColor switch
-        {
-            "#FFE0B2" => ("#FF9800", "#E65100", "貸出", "貸出完了アイコン"),     // 貸出（暖色系オレンジ）
-            "#B3E5FC" => ("#2196F3", "#0D47A1", "返却", "返却完了アイコン"),     // 返却（寒色系青）
-            "#FFEBEE" => ("#F44336", "#B71C1C", "エラー", "エラーアイコン"),     // エラー（赤）
-            _ => ("#9E9E9E", "#424242", "待機中", "待機中アイコン")              // 待機（グレー）
-        };
 
         StatusIcon = state switch
         {
@@ -2077,12 +2051,7 @@ public partial class MainViewModel : ViewModelBase
         {
             // 「職員証をタッチしてください」などの待機メッセージをクリア
             StatusMessage = string.Empty;
-            StatusBackgroundColor = "#FFFFFF";
-            StatusBorderColor = "#9E9E9E";
-            StatusForegroundColor = "#424242";
-            StatusLabel = string.Empty;
             StatusIcon = string.Empty;
-            StatusIconDescription = string.Empty;
         }
     }
 
