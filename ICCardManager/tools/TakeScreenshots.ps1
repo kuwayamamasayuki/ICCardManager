@@ -12,10 +12,14 @@
     必須画面（7枚）のみを取得します。
 
 .PARAMETER All
-    オプション画面も含むすべての画面（52枚）を取得します。
+    オプション画面も含むすべての画面（50枚）を取得します。
     一部のエントリは `ManualOnly = $true` が指定されており、
     スクリプトでは撮影せず手動でのPrtSc取得を促します
     （別プロセスや特殊起動条件が必要な画面）。
+    `DelaySeconds = N` が指定されたエントリは Enter 入力後に N 秒の
+    カウントダウンを挟んでから撮影します。カウントダウン中に
+    ユーザーがアプリ側へフォーカスを戻してドロップダウン等を
+    展開する想定で、撮影直前の SetForegroundWindow をスキップします。
 
 .PARAMETER OutputDir
     出力先ディレクトリを指定します。デフォルトは docs/screenshots/ です。
@@ -326,14 +330,16 @@ $optionalScreens = @(
     @{
         Name = "settings_voice_dropdown.png"
         Title = "音声設定ドロップダウン展開"
-        Instructions = "F5キーで設定画面を開き、音声設定のドロップダウン（効果音/男性/女性/無し）を展開した状態で"
+        Instructions = "F5キーで設定画面を開いた状態で Enter。カウントダウン中にアプリへフォーカスを戻し、音声設定のドロップダウン（効果音/男性/女性/無し）を展開してください"
         ForegroundOnly = $true
+        DelaySeconds = 5
     },
     @{
         Name = "settings_department_dropdown.png"
         Title = "部署設定ドロップダウン展開"
-        Instructions = "設定画面で部署設定のドロップダウン（市長事務部局／企業会計部局）を展開した状態で"
+        Instructions = "設定画面を開いた状態で Enter。カウントダウン中にアプリへフォーカスを戻し、部署設定のドロップダウン（市長事務部局／企業会計部局）を展開してください"
         ForegroundOnly = $true
+        DelaySeconds = 5
     },
     @{
         Name = "settings_fontsize_small.png"
@@ -381,9 +387,9 @@ $optionalScreens = @(
     },
     # Issue #1410: ユーザーマニュアル §6.2 帳票作成完了画面
     @{
-        Name = "report_completed_files.png"
-        Title = "帳票出力完了ファイル一覧"
-        Instructions = "F1キーで帳票作成画面を開き、複数カードを一括作成して完了後のファイル一覧ダイアログ（ファイル名がリンク化された状態）が表示されたら"
+        Name = "report_completed_status.png"
+        Title = "帳票出力完了ステータス表示"
+        Instructions = "F1キーで帳票作成画面を開き、複数カードを一括作成。出力完了後にステータスバーに「N件の帳票を作成しました」と表示されたら（ファイル一覧ダイアログは現状未実装）"
         ForegroundOnly = $true
     },
     # Issue #1411: ユーザーマニュアル §9.3 エラーダイアログ
@@ -394,15 +400,9 @@ $optionalScreens = @(
         ForegroundOnly = $true
     },
     @{
-        Name = "error_unregistered_staff.png"
-        Title = "未登録職員証エラー"
-        Instructions = "未登録の職員証をリーダーにタッチし、「未登録の職員証です」エラーが表示されたら"
-        ForegroundOnly = $true
-    },
-    @{
         Name = "error_no_reader.png"
-        Title = "カードリーダー未接続エラー"
-        Instructions = "PaSoRiを外した状態でアプリを起動し「カードリーダーが見つかりません」エラーダイアログが表示されたら"
+        Title = "カードリーダー未接続ステータス表示"
+        Instructions = "PaSoRiを外した状態でアプリを起動し、ステータスバー右下が「リーダー: 切断」と表示されたら（カードリーダー未検出時のエラーダイアログは現状未実装）"
         ForegroundOnly = $true
     },
     @{
@@ -419,7 +419,8 @@ $optionalScreens = @(
     @{
         Name = "card_list_sort_menu.png"
         Title = "カード一覧 並び替えメニュー"
-        Instructions = "メイン画面のカード一覧で並び替えメニューを開いた状態で"
+        Instructions = "メイン画面でカード一覧を表示した状態で Enter。カウントダウン中にアプリへフォーカスを戻し、並び替えメニューを開いてください"
+        DelaySeconds = 5
     },
     # Issue #1413: 管理者マニュアル §2.6 アンインストールデータ取り扱い選択
     @{
@@ -438,19 +439,13 @@ $optionalScreens = @(
     @{
         Name = "staff_register_after_touch.png"
         Title = "職員新規登録ダイアログ（職員証タッチ後）"
-        Instructions = "新規登録ダイアログで職員証をタッチし、IDmが取り込まれて入力欄にフォーカスが移った状態で"
+        Instructions = "新規登録ダイアログで職員証をタッチし、IDmが取り込まれた状態で（※IDm取込後の氏名欄への自動フォーカス遷移は未実装。手動で氏名欄をクリックしてから撮影）"
         ForegroundOnly = $true
     },
     @{
         Name = "staff_edit_dialog.png"
         Title = "職員情報編集ダイアログ"
         Instructions = "職員管理画面で職員行を選択して「編集」、職員情報編集ダイアログが表示されたら"
-        ForegroundOnly = $true
-    },
-    @{
-        Name = "staff_recard_touch_prompt.png"
-        Title = "職員証再登録 タッチ要求画面"
-        Instructions = "職員管理画面で「職員証再登録」を実行し、「職員証をタッチしてください」の画面が表示されたら"
         ForegroundOnly = $true
     },
     # Issue #1415: 管理者マニュアル §5.3/§5.5 カード編集・払い戻しダイアログ
@@ -469,9 +464,9 @@ $optionalScreens = @(
     # Issue #1416: CSV インポートプレビューは既存 import_preview.png を流用するため新規エントリなし
     # Issue #1417: 管理者マニュアル §6.1/§6.2 バックアップ完了通知・リストア一覧
     @{
-        Name = "backup_completed.png"
-        Title = "手動バックアップ完了通知"
-        Instructions = "F6キーでシステム管理画面を開き「バックアップを作成」をクリック、完了通知ダイアログが表示されたら"
+        Name = "backup_completed_status.png"
+        Title = "手動バックアップ完了ステータス表示"
+        Instructions = "F6キーでシステム管理画面を開き「バックアップを作成」をクリック、ステータスバーに「バックアップを作成しました: <ファイル名>」と表示されたら（完了通知ダイアログは現状未実装）"
         ForegroundOnly = $true
     },
     @{
@@ -505,7 +500,8 @@ if ($All) {
 function Take-Screenshot {
     param(
         [string]$OutputPath,
-        [bool]$ForegroundOnly = $false
+        [bool]$ForegroundOnly = $false,
+        [bool]$SkipForegroundActivation = $false
     )
 
     # ICCardManagerのプロセスを取得
@@ -526,8 +522,12 @@ function Take-Screenshot {
     }
 
     # ウィンドウをフォアグラウンドに移動
-    [Win32ApiDpi3]::SetForegroundWindow($hwnd) | Out-Null
-    Start-Sleep -Milliseconds 500
+    # DelaySeconds 撮影中はユーザーがアプリ側に保持しているフォーカスを
+    # 奪ってドロップダウンを閉じてしまわないよう、SetForegroundWindow をスキップする
+    if (-not $SkipForegroundActivation) {
+        [Win32ApiDpi3]::SetForegroundWindow($hwnd) | Out-Null
+        Start-Sleep -Milliseconds 500
+    }
 
     if ($ForegroundOnly) {
         # 前面ウィンドウ（ダイアログ等）のみをキャプチャ
@@ -636,8 +636,24 @@ function Start-ScreenshotSession {
             continue
         }
 
+        # DelaySeconds = ドロップダウン等、PowerShell へのフォーカス移動で閉じる画面向け。
+        # カウントダウン中にユーザーがアプリ側で対象を開く運用とし、
+        # 撮影時の SetForegroundWindow をスキップしてフォーカスを維持する。
+        $delaySeconds = if ($screen.ContainsKey("DelaySeconds")) { [int]$screen.DelaySeconds } else { 0 }
+        if ($delaySeconds -gt 0) {
+            Write-Host ""
+            Write-Host "    $delaySeconds 秒のカウントダウン後に撮影します。" -ForegroundColor Cyan
+            Write-Host "    その間にアプリへフォーカスを戻し、対象（ドロップダウン等）を開いてください。" -ForegroundColor Cyan
+            for ($i = $delaySeconds; $i -gt 0; $i--) {
+                Write-Host "      残り $i 秒..." -ForegroundColor Yellow
+                Start-Sleep -Seconds 1
+            }
+            Write-Host "    撮影します..." -ForegroundColor Green
+        }
+
         $isForegroundOnly = $screen.ContainsKey("ForegroundOnly") -and $screen.ForegroundOnly
-        if (Take-Screenshot -OutputPath $outputPath -ForegroundOnly $isForegroundOnly) {
+        $skipActivation = $delaySeconds -gt 0
+        if (Take-Screenshot -OutputPath $outputPath -ForegroundOnly $isForegroundOnly -SkipForegroundActivation $skipActivation) {
             Write-Host "    OK $($screen.Name) を保存しました" -ForegroundColor Green
         }
     }
