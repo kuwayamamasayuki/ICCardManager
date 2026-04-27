@@ -68,6 +68,12 @@ namespace ICCardManager.ViewModels
         [ObservableProperty]
         private string? _newlyRegisteredIdm;
 
+        /// <summary>
+        /// 職員証タッチで IDm が取り込まれ、新規登録モードに遷移した直後に発火する。
+        /// View 側で氏名入力欄にフォーカスを移すために購読する（Issue #1429）。
+        /// </summary>
+        public event EventHandler? RequestNameFocus;
+
         public StaffManageViewModel(
             IStaffRepository staffRepository,
             ICardReader cardReader,
@@ -212,6 +218,9 @@ namespace ICCardManager.ViewModels
             StatusMessage = "職員証を読み取りました。氏名を入力してください。";
             IsStatusError = false;
             IsWaitingForCard = false; // すでにIDmがあるので待機しない
+
+            // Issue #1429: 氏名入力欄へ自動フォーカス（View 側で購読）
+            RequestNameFocus?.Invoke(this, EventArgs.Empty);
 
             return false; // ダイアログは開いたまま
         }

@@ -17,6 +17,7 @@
         ResizeMode="CanResize"
         KeyDown="Window_KeyDown"
         FontSize="{DynamicResource BaseFontSize}"
+        FocusManager.FocusedElement="{Binding ElementName=NameTextBox}"
         AutomationProperties.Name="職員管理ダイアログ"
         AutomationProperties.HelpText="職員の登録・編集・削除ができます。職員証をタッチして新規登録できます。Escキーで閉じます。">
 
@@ -192,12 +193,14 @@
 
                     <!-- 氏名 -->
                     <TextBlock Text="氏名 *" FontWeight="Bold" Margin="0,0,0,5"/>
-                    <TextBox Text="{Binding EditName, UpdateSourceTrigger=PropertyChanged}"
+                    <TextBox x:Name="NameTextBox"
+                             Text="{Binding EditName, UpdateSourceTrigger=PropertyChanged}"
                              Padding="8"
                              Margin="0,0,0,15"
                              AutomationProperties.Name="氏名（必須）"
                              AutomationProperties.HelpText="職員の氏名を入力してください"
-                             ToolTip="職員の氏名（必須）"/>
+                             ToolTip="職員の氏名（必須）"
+                             IsVisibleChanged="NameTextBox_IsVisibleChanged"/>
 
                     <!-- 職員番号 -->
                     <TextBlock Text="職員番号" FontWeight="Bold" Margin="0,0,0,5"/>
