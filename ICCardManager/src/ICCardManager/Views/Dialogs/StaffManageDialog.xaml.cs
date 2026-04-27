@@ -65,17 +65,26 @@ namespace ICCardManager.Views.Dialogs
 
         /// <summary>
         /// Issue #1429: 職員証タッチで IDm が取り込まれた直後、氏名入力欄へ自動フォーカス。
-        /// レイアウト更新と入力処理が落ち着いてからフォーカスを当てるため Input 優先度で投入する。
+        /// 本ハンドラは <c>StaffManageDialog_Loaded</c> の async 経路から発火するため、
+        /// Window のアクティベーション・キーボードフォーカスツリー確立を待つ必要がある。
+        /// <c>DispatcherPriority.ContextIdle</c> は現在の実行コンテキストが空になってから動くため、
+        /// Loaded ハンドラ完了後に確実にフォーカスを設定できる（<c>Input</c> だと早すぎる）。
         /// </summary>
         private void ViewModel_RequestNameFocus(object? sender, EventArgs e)
         {
             Dispatcher.BeginInvoke(
                 new Action(() =>
                 {
-                    NameTextBox.Focus();
+                    // ダイアログのアクティベーション未完了に備える（モーダル経路で稀に発生）
+                    if (!IsActive)
+                    {
+                        Activate();
+                    }
+                    // Window スコープの論理フォーカス → キーボードフォーカスを順に確定
+                    FocusManager.SetFocusedElement(this, NameTextBox);
                     Keyboard.Focus(NameTextBox);
                 }),
-                DispatcherPriority.Input);
+                DispatcherPriority.ContextIdle);
         }
 
         /// <summary>

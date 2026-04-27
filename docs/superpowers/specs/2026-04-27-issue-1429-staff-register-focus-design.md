@@ -44,13 +44,15 @@ Issue 本文の「案 1（推奨・MVVM 原則準拠）」を採用。ViewModel 
   Dispatcher.BeginInvoke(
       new Action(() =>
       {
-          NameTextBox.Focus();
+          if (!IsActive) Activate();
+          FocusManager.SetFocusedElement(this, NameTextBox);
           Keyboard.Focus(NameTextBox);
       }),
-      DispatcherPriority.Input);
+      DispatcherPriority.ContextIdle);
   ```
-  - `BeginInvoke` + `Input` 優先度: レイアウト更新と入力処理が落ち着いてからフォーカスを投入し、描画と競合させない。
-  - `Focus()` + `Keyboard.Focus()` 二段呼び: 論理フォーカスとキーボードフォーカスを同期させ、即タイプ可能な状態にする。
+  - **`ContextIdle` 優先度**: 本ハンドラは `Loaded` の async 経路（`StartNewStaffWithIdmAsync`）の完了に伴って発火する。`Loaded` ハンドラ実行中は Window のアクティベーション・キーボードフォーカスツリー確立がまだ進行中で、`Input` 優先度では「キーボードフォーカスを受け取れる確定状態」になる前に Focus 操作が走り、論理フォーカスは当たるがキーボードフォーカスが当たらない（Tab を押して初めて Caret が現れる）症状が起きた。`ContextIdle` は現在の実行コンテキストが空になってから動くため Loaded 完了後に確実にフォーカスを設定できる。
+  - **`Activate()` フォールバック**: モーダル経路でも稀に Window が IsActive=false のままハンドラに到達するため、確実にアクティベートしてからフォーカスを当てる。
+  - **`FocusManager.SetFocusedElement(this, NameTextBox)` + `Keyboard.Focus(NameTextBox)`**: 前者で Window スコープの論理フォーカス、後者でキーボード（タイプ入力）フォーカスを順に確定。両方を明示することで「Tab を押すと現れる」現象を防ぐ。
 
 ## 5. テスト
 
