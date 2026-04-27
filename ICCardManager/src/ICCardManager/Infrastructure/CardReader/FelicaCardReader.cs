@@ -146,12 +146,23 @@ namespace ICCardManager.Infrastructure.CardReader
                 try
                 {
                     // felicalib.dll の存在確認
-                    if (!CheckFelicaLibAvailable())
+                    if (!IsFelicaLibLoaded())
                     {
                         var ex = new InvalidOperationException(
                             "felicalib.dll が見つからないか、Sony NFCポートソフトウェアがインストールされていません。");
-                        SetConnectionState(CardReaderConnectionState.Disconnected, ex.Message);
+                        SetConnectionStateForceNotify(CardReaderConnectionState.Disconnected, ex.Message);
                         throw ex;
+                    }
+
+                    // PaSoRi の物理接続確認 (Issue #1428)
+                    // DLL は存在しても PaSoRi が接続されていない場合は Disconnected として確実に通知する。
+                    if (!IsReaderConnected())
+                    {
+                        _logger.LogWarning("FelicaCardReader: PaSoRi が見つかりません");
+                        SetConnectionStateForceNotify(
+                            CardReaderConnectionState.Disconnected,
+                            "PaSoRi が見つかりません。USB 接続を確認して再接続ボタンを押してください。");
+                        return;
                     }
 
                     _logger.LogInformation("FelicaCardReader: カード読み取りを開始します");
@@ -163,7 +174,7 @@ namespace ICCardManager.Infrastructure.CardReader
                     StartHealthCheckTimer();
 
                     _isReading = true;
-                    SetConnectionState(CardReaderConnectionState.Connected);
+                    SetConnectionStateForceNotify(CardReaderConnectionState.Connected);
                 }
                 catch (Exception ex)
                 {
@@ -392,7 +403,7 @@ namespace ICCardManager.Infrastructure.CardReader
             {
                 try
                 {
-                    return CheckFelicaLibAvailable();
+                    return IsFelicaLibLoaded() && IsReaderConnected();
                 }
                 catch
                 {
@@ -423,17 +434,18 @@ namespace ICCardManager.Infrastructure.CardReader
         #region Private Methods
 
         /// <summary>
-        /// felicalib.dll が利用可能かチェック
+        /// felicalib.dll がロード可能かチェック (Issue #1428)
         /// </summary>
-        private bool CheckFelicaLibAvailable()
+        /// <remarks>
+        /// DLL の存在チェックのみを行い、PaSoRi の物理接続は判定しない。
+        /// PaSoRi の物理接続を判定するには <see cref="IsReaderConnected"/> を併用すること。
+        /// </remarks>
+        private bool IsFelicaLibLoaded()
         {
             lock (_felicaLock)
             {
                 try
                 {
-                    // FelicaUtility でテスト読み取りを試行
-                    // ワイルドカードシステムコードを使用してすべてのFeliCaカードに対応
-                    // カードがなくても例外が発生しなければ DLL は存在する
                     _ = FelicaUtility.GetIDm(WildcardSystemCode);
                     return true;
                 }
@@ -444,12 +456,69 @@ namespace ICCardManager.Infrastructure.CardReader
                 }
                 catch (Exception ex)
                 {
-                    // カードがない、リーダーが接続されていない等の場合はエラーになるが、
-                    // DLL自体は存在する
-                    _logger.LogDebug("FelicaCardReader: ヘルスチェック例外（カードなし等）: {Message}", ex.Message);
+                    // PaSoRi 未接続・カードなし等は DLL 自体は存在する。
+                    _logger.LogDebug("FelicaCardReader: DLL ロード判定中の例外: {Message}", ex.Message);
                     return true;
                 }
             }
+        }
+
+        /// <summary>
+        /// PaSoRi が物理接続されているかチェック (Issue #1428)
+        /// </summary>
+        /// <remarks>
+        /// DLL ロード可否を兼ねて判定する。<see cref="FelicaUtility.GetIDm"/> の例外メッセージから
+        /// 「リーダー未接続」相当を判別し、それ以外（カードなし等）は接続中として扱う。
+        /// </remarks>
+        private bool IsReaderConnected()
+        {
+            lock (_felicaLock)
+            {
+                try
+                {
+                    _ = FelicaUtility.GetIDm(WildcardSystemCode);
+                    return true;
+                }
+                catch (Exception ex) when (IsReaderUnavailableException(ex))
+                {
+                    _logger.LogDebug("FelicaCardReader: PaSoRi 未接続と判定: {Message}", ex.Message);
+                    return false;
+                }
+                catch (Exception ex)
+                {
+                    // カードなし等は接続中扱い。
+                    _logger.LogDebug("FelicaCardReader: 接続判定中の例外（カードなし等）: {Message}", ex.Message);
+                    return true;
+                }
+            }
+        }
+
+        /// <summary>
+        /// 例外メッセージから「PaSoRi 物理未接続」を示すパターンを判定する純粋関数 (Issue #1428)。
+        /// </summary>
+        /// <remarks>
+        /// felicalib の例外メッセージは将来変わる可能性があるため、
+        /// 表示層 (<c>MainWindow.xaml</c>) のデフォルト Setter「切断」によるフォールバックと併用する。
+        /// internal 公開でテストから直接検証可能にする。
+        /// </remarks>
+        internal static bool IsReaderUnavailableException(Exception ex)
+        {
+            if (ex is DllNotFoundException)
+            {
+                return true;
+            }
+
+            var message = ex?.Message;
+            if (string.IsNullOrEmpty(message))
+            {
+                return false;
+            }
+
+            // 大文字小文字を無視して PaSoRi 物理未接続を示すキーワードを判定。
+            return message.IndexOf("pasori", StringComparison.OrdinalIgnoreCase) >= 0
+                || message.IndexOf("open", StringComparison.OrdinalIgnoreCase) >= 0
+                || message.IndexOf("device", StringComparison.OrdinalIgnoreCase) >= 0
+                || message.IndexOf("reader", StringComparison.OrdinalIgnoreCase) >= 0;
         }
 
         /// <summary>
@@ -616,7 +685,9 @@ namespace ICCardManager.Infrastructure.CardReader
 
             try
             {
-                var isAvailable = CheckFelicaLibAvailable();
+                // Issue #1428: DLL ロードと PaSoRi 物理接続を別々に判定し、
+                // 「DLL 不在」と「PaSoRi 未接続」を統一して切断扱いにする。
+                var isAvailable = IsFelicaLibLoaded() && IsReaderConnected();
                 if (!isAvailable && _connectionState == CardReaderConnectionState.Connected)
                 {
                     _logger.LogWarning("FelicaCardReader: 接続が失われました");
@@ -636,7 +707,7 @@ namespace ICCardManager.Infrastructure.CardReader
         }
 
         /// <summary>
-        /// 接続状態を設定しイベントを発火
+        /// 接続状態を設定し、状態が変化した場合のみイベントを発火する。
         /// </summary>
         private void SetConnectionState(CardReaderConnectionState state, string message = null)
         {
@@ -647,6 +718,21 @@ namespace ICCardManager.Infrastructure.CardReader
 
             _connectionState = state;
             _logger.LogDebug("FelicaCardReader: 接続状態変更 {State} ({Message})", state, message);
+            ConnectionStateChanged?.Invoke(this, new ConnectionStateChangedEventArgs(state, message));
+        }
+
+        /// <summary>
+        /// 接続状態を設定しイベントを必ず発火する (Issue #1428)。
+        /// </summary>
+        /// <remarks>
+        /// 初期化時は内部状態と通知すべき状態が一致するケース（初期値 Disconnected → Disconnected 確定）が
+        /// あり、<see cref="SetConnectionState"/> では通知が抑止されてしまう。
+        /// 起動時の初回確定通知に限り本メソッドを使用し、ViewModel に確実に状態を伝播させる。
+        /// </remarks>
+        private void SetConnectionStateForceNotify(CardReaderConnectionState state, string message = null)
+        {
+            _connectionState = state;
+            _logger.LogDebug("FelicaCardReader: 接続状態確定 {State} ({Message})", state, message);
             ConnectionStateChanged?.Invoke(this, new ConnectionStateChangedEventArgs(state, message));
         }
 
