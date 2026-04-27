@@ -29,6 +29,7 @@ namespace ICCardManager.Views.Dialogs
 
             Loaded += StaffManageDialog_Loaded;
             _viewModel.PropertyChanged += ViewModel_PropertyChanged;
+            _viewModel.RequestNameFocus += ViewModel_RequestNameFocus;
             Closed += StaffManageDialog_Closed;
         }
 
@@ -58,7 +59,23 @@ namespace ICCardManager.Views.Dialogs
         private void StaffManageDialog_Closed(object sender, EventArgs e)
         {
             _viewModel.PropertyChanged -= ViewModel_PropertyChanged;
+            _viewModel.RequestNameFocus -= ViewModel_RequestNameFocus;
             _viewModel.Cleanup();
+        }
+
+        /// <summary>
+        /// Issue #1429: 職員証タッチで IDm が取り込まれた直後、氏名入力欄へ自動フォーカス。
+        /// レイアウト更新と入力処理が落ち着いてからフォーカスを当てるため Input 優先度で投入する。
+        /// </summary>
+        private void ViewModel_RequestNameFocus(object? sender, EventArgs e)
+        {
+            Dispatcher.BeginInvoke(
+                new Action(() =>
+                {
+                    NameTextBox.Focus();
+                    Keyboard.Focus(NameTextBox);
+                }),
+                DispatcherPriority.Input);
         }
 
         /// <summary>

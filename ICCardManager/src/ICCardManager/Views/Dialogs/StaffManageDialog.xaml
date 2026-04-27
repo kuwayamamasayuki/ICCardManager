@@ -192,7 +192,8 @@
 
                     <!-- 氏名 -->
                     <TextBlock Text="氏名 *" FontWeight="Bold" Margin="0,0,0,5"/>
-                    <TextBox Text="{Binding EditName, UpdateSourceTrigger=PropertyChanged}"
+                    <TextBox x:Name="NameTextBox"
+                             Text="{Binding EditName, UpdateSourceTrigger=PropertyChanged}"
                              Padding="8"
                              Margin="0,0,0,15"
                              AutomationProperties.Name="氏名（必須）"

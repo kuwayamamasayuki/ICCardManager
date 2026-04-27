@@ -581,4 +581,66 @@ public class StaffManageViewModelTests
     }
 
     #endregion
+
+    #region フォーカス制御テスト（Issue #1429）
+
+    /// <summary>
+    /// 未登録職員証で StartNewStaffWithIdmAsync を呼ぶと RequestNameFocus が 1 回発火すること。
+    /// </summary>
+    /// <remarks>
+    /// 職員証タッチ → IDm 取り込み → 新規登録モード遷移直後に View 側でフォーカスを当てるための通知。
+    /// 発火対象は「未登録職員証」分岐のみ（既登録/削除済み分岐はダイアログを閉じるため不要）。
+    /// </remarks>
+    [Fact]
+    public async Task StartNewStaffWithIdmAsync_WithUnregisteredCard_ShouldRaiseRequestNameFocus()
+    {
+        // Arrange
+        var idm = "FFFF000000000001";
+        _staffRepositoryMock.Setup(r => r.GetByIdmAsync(idm, true)).ReturnsAsync((Staff?)null);
+
+        var raisedCount = 0;
+        _viewModel.RequestNameFocus += (_, _) => raisedCount++;
+
+        // Act
+        var shouldClose = await _viewModel.StartNewStaffWithIdmAsync(idm);
+
+        // Assert
+        shouldClose.Should().BeFalse();              // ダイアログは開いたまま（編集続行）
+        _viewModel.IsWaitingForCard.Should().BeFalse();
+        _viewModel.IsEditing.Should().BeTrue();
+        raisedCount.Should().Be(1);                  // フォーカス要求が 1 回だけ発火
+    }
+
+    /// <summary>
+    /// 登録済み職員証で StartNewStaffWithIdmAsync を呼んだ場合は RequestNameFocus を発火しないこと。
+    /// </summary>
+    /// <remarks>
+    /// 既登録カードはダイアログを閉じる分岐に進むため、氏名入力欄へのフォーカス要求は不要。
+    /// </remarks>
+    [Fact]
+    public async Task StartNewStaffWithIdmAsync_WithRegisteredCard_ShouldNotRaiseRequestNameFocus()
+    {
+        // Arrange
+        var idm = "FFFF000000000001";
+        var existingStaff = new Staff
+        {
+            StaffIdm = idm,
+            Name = "田中太郎",
+            Number = "S-001",
+            IsDeleted = false
+        };
+        _staffRepositoryMock.Setup(r => r.GetByIdmAsync(idm, true)).ReturnsAsync(existingStaff);
+
+        var raisedCount = 0;
+        _viewModel.RequestNameFocus += (_, _) => raisedCount++;
+
+        // Act
+        var shouldClose = await _viewModel.StartNewStaffWithIdmAsync(idm);
+
+        // Assert
+        shouldClose.Should().BeTrue();               // 既登録なのでダイアログを閉じる
+        raisedCount.Should().Be(0);                  // フォーカス要求は発火しない
+    }
+
+    #endregion
 }
