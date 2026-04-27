@@ -17,6 +17,7 @@
         ResizeMode="CanResize"
         KeyDown="Window_KeyDown"
         FontSize="{DynamicResource BaseFontSize}"
+        FocusManager.FocusedElement="{Binding ElementName=NameTextBox}"
         AutomationProperties.Name="職員管理ダイアログ"
         AutomationProperties.HelpText="職員の登録・編集・削除ができます。職員証をタッチして新規登録できます。Escキーで閉じます。">
 

@@ -34,6 +34,7 @@ Issue 本文の「案 1（推奨・MVVM 原則準拠）」を採用。ViewModel 
 ### 4.2 `ICCardManager/src/ICCardManager/Views/Dialogs/StaffManageDialog.xaml`
 
 - 氏名 TextBox に `x:Name="NameTextBox"` を追加。
+- **`Window` タグに `FocusManager.FocusedElement="{Binding ElementName=NameTextBox}"` を追加**。これにより WPF 内部のフォーカス確定タイミング（Window アクティベート時）に直接乗ることができ、`Loaded` / `ContentRendered` / `Activated` の発火順や Dispatcher 優先度競合に依存せず確実にキーボードフォーカスを当てられる。`IsEditing=false` で NameTextBox が Visibility=Collapsed の場合は WPF が自動的にフォーカス対象外として扱うため、素開き時の挙動への副作用はなし。
 
 ### 4.3 `ICCardManager/src/ICCardManager/Views/Dialogs/StaffManageDialog.xaml.cs`
 
