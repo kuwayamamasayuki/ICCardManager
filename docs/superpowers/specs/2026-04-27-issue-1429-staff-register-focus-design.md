@@ -34,7 +34,8 @@ Issue 本文の「案 1（推奨・MVVM 原則準拠）」を採用。ViewModel 
 ### 4.2 `ICCardManager/src/ICCardManager/Views/Dialogs/StaffManageDialog.xaml`
 
 - 氏名 TextBox に `x:Name="NameTextBox"` を追加。
-- **`Window` タグに `FocusManager.FocusedElement="{Binding ElementName=NameTextBox}"` を追加**。これにより WPF 内部のフォーカス確定タイミング（Window アクティベート時）に直接乗ることができ、`Loaded` / `ContentRendered` / `Activated` の発火順や Dispatcher 優先度競合に依存せず確実にキーボードフォーカスを当てられる。`IsEditing=false` で NameTextBox が Visibility=Collapsed の場合は WPF が自動的にフォーカス対象外として扱うため、素開き時の挙動への副作用はなし。
+- **氏名 TextBox に `IsVisibleChanged="NameTextBox_IsVisibleChanged"` を追加**（最終的に主軸となるフォーカス確定経路）。経路 A（ダイアログ素開き → 新規登録ボタン → 職員証タッチ）では、ダイアログ起動時点で `IsEditing=false` のため NameTextBox は Visibility=Collapsed であり、Window アクティベート時の XAML レベル `FocusManager.FocusedElement` 指定は評価対象外として扱われる。その後「新規登録」ボタン押下で `IsEditing=true` となり Visible 化された瞬間が `IsVisibleChanged` の発火点であり、このタイミングが WPF "show-and-focus" 定番パターンの正解。
+- **`Window` タグに `FocusManager.FocusedElement="{Binding ElementName=NameTextBox}"` を併用**（保険）。経路 B（メイン画面で職員証タッチ → IDm 付きでダイアログ起動）で Window アクティベート時に既に Visible なケースのカバー用。
 
 ### 4.3 `ICCardManager/src/ICCardManager/Views/Dialogs/StaffManageDialog.xaml.cs`
 

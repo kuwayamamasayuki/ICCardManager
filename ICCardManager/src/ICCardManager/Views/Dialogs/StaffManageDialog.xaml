@@ -199,7 +199,8 @@
                              Margin="0,0,0,15"
                              AutomationProperties.Name="氏名（必須）"
                              AutomationProperties.HelpText="職員の氏名を入力してください"
-                             ToolTip="職員の氏名（必須）"/>
+                             ToolTip="職員の氏名（必須）"
+                             IsVisibleChanged="NameTextBox_IsVisibleChanged"/>
 
                     <!-- 職員番号 -->
                     <TextBlock Text="職員番号" FontWeight="Bold" Margin="0,0,0,5"/>

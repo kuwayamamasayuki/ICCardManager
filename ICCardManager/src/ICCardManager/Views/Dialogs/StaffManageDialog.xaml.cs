@@ -82,6 +82,34 @@ namespace ICCardManager.Views.Dialogs
         }
 
         /// <summary>
+        /// Issue #1429: NameTextBox 自身の Visibility が変化したタイミングでフォーカスを確定する。
+        /// 経路 A（ダイアログを素で開いて「新規登録」ボタン → 職員証タッチ）では、
+        /// Window アクティベート時点で NameTextBox は Visibility=Collapsed のため、
+        /// XAML の <c>FocusManager.FocusedElement</c> 指定は評価対象外として扱われる。
+        /// その後 IsEditing=true で Visible 化された瞬間が **本イベントの発火点** であり、
+        /// ここでフォーカスを当てるのが WPF "show-and-focus" の定番パターン。
+        /// </summary>
+        private void NameTextBox_IsVisibleChanged(object sender, DependencyPropertyChangedEventArgs e)
+        {
+            if (NameTextBox.IsVisible)
+            {
+                Dispatcher.BeginInvoke(
+                    new Action(() =>
+                    {
+                        if (!IsActive)
+                        {
+                            Activate();
+                        }
+                        NameTextBox.UpdateLayout();
+                        FocusManager.SetFocusedElement(this, NameTextBox);
+                        Keyboard.Focus(NameTextBox);
+                        NameTextBox.Focus();
+                    }),
+                    DispatcherPriority.ApplicationIdle);
+            }
+        }
+
+        /// <summary>
         /// Issue #1429: Window の最終描画完了。Loaded より後に発火する。
         /// このタイミングでは Window がアクティベーション完了し NameTextBox の視覚ツリー登録も済んでいる。
         /// </summary>
