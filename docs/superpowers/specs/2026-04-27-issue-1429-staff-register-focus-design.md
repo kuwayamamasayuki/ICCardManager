@@ -39,20 +39,35 @@ Issue 本文の「案 1（推奨・MVVM 原則準拠）」を採用。ViewModel 
 
 - コンストラクタで `_viewModel.RequestNameFocus += ViewModel_RequestNameFocus;` を購読。
 - `StaffManageDialog_Closed` で `-=` してリーク防止。
-- `ViewModel_RequestNameFocus` で以下を実行：
+- フォーカス要求と Window 描画完了 (`ContentRendered`) の **AND 条件** が揃ったときに限ってフォーカスを当てる構造に変更。
+  - `_focusRequestPending` / `_contentRendered` の 2 フラグを保持
+  - `ViewModel_RequestNameFocus` ＝ 前者を立てて `TryFocusNameTextBox()`
+  - `StaffManageDialog_ContentRendered` ＝ 後者を立てて `TryFocusNameTextBox()`
+  - `TryFocusNameTextBox` ＝ 両フラグが true のときだけフォーカス処理を `Dispatcher.BeginInvoke(... ApplicationIdle)` で予約
   ```csharp
   Dispatcher.BeginInvoke(
       new Action(() =>
       {
           if (!IsActive) Activate();
-          FocusManager.SetFocusedElement(this, NameTextBox);
-          Keyboard.Focus(NameTextBox);
+          NameTextBox.UpdateLayout();             // (1) 強制レイアウトパス
+          FocusManager.SetFocusedElement(this, NameTextBox);  // (2) Window スコープ論理フォーカス
+          Keyboard.Focus(NameTextBox);            // (3) キーボードフォーカス
+          NameTextBox.Focus();                    // (4) 念のため要素自身の Focus()
       }),
-      DispatcherPriority.ContextIdle);
+      DispatcherPriority.ApplicationIdle);
   ```
-  - **`ContextIdle` 優先度**: 本ハンドラは `Loaded` の async 経路（`StartNewStaffWithIdmAsync`）の完了に伴って発火する。`Loaded` ハンドラ実行中は Window のアクティベーション・キーボードフォーカスツリー確立がまだ進行中で、`Input` 優先度では「キーボードフォーカスを受け取れる確定状態」になる前に Focus 操作が走り、論理フォーカスは当たるがキーボードフォーカスが当たらない（Tab を押して初めて Caret が現れる）症状が起きた。`ContextIdle` は現在の実行コンテキストが空になってから動くため Loaded 完了後に確実にフォーカスを設定できる。
-  - **`Activate()` フォールバック**: モーダル経路でも稀に Window が IsActive=false のままハンドラに到達するため、確実にアクティベートしてからフォーカスを当てる。
-  - **`FocusManager.SetFocusedElement(this, NameTextBox)` + `Keyboard.Focus(NameTextBox)`**: 前者で Window スコープの論理フォーカス、後者でキーボード（タイプ入力）フォーカスを順に確定。両方を明示することで「Tab を押すと現れる」現象を防ぐ。
+
+#### なぜ `ContentRendered` を待つ必要があるか
+
+- 編集パネルは `Visibility="{Binding IsEditing, Converter={StaticResource BoolToVisibilityConverter}}"` で制御されており、**ダイアログ起動時は `IsEditing=false` で Collapsed**（NameTextBox は視覚ツリーに居るが描画されない）。
+- `StartNewStaffWithIdmAsync` 内で同期に `IsEditing=true` → `RequestNameFocus` 発火、という順序のため、**Visibility=Visible 切替直後の TextBox にフォーカスを当てる試みは WPF レイアウトパス未完了で空振り** する（症状：論理フォーカスは当たるがキーボードフォーカスが当たらず、Tab で初めて Caret が現れる）。
+- 当初の `Input`、次に試した `ContextIdle` のいずれも、`Loaded` async 経路の完了直後（Window がモーダルダイアログとしてアクティベーション完了する前）に走ってしまうため不十分だった。
+- `ContentRendered` イベントは Window の最終描画完了後に発火する確定タイミングのため、これを **必須前提** として AND 条件にすることで全レイアウト処理の終了を保証している。
+- `ApplicationIdle` 優先度は `Dispatcher` の最低優先度。フレームワーク内部の保留処理がすべて落ち着いてから動くため、フォーカス操作の競合を排除できる。
+
+- **`UpdateLayout()`**: Collapsed → Visible 切替後の同期レイアウトパスを強制実行し、TextBox を「フォーカス可能な確定状態」にする。
+- **`Activate()` フォールバック**: モーダル経路でも稀に Window が IsActive=false のままハンドラに到達するため、確実にアクティベートしてからフォーカスを当てる。
+- **`FocusManager.SetFocusedElement` + `Keyboard.Focus` + `Focus()`**: WPF のフォーカス API は論理フォーカス・キーボードフォーカス・要素フォーカスがそれぞれ別の概念。3 段がけで全層を確定する。
 
 ## 5. テスト
 

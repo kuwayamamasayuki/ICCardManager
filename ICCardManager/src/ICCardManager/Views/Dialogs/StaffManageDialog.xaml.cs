@@ -20,6 +20,11 @@ namespace ICCardManager.Views.Dialogs
         private readonly StaffManageViewModel _viewModel;
         private string? _presetIdm;
 
+        // Issue #1429: ContentRendered と RequestNameFocus の到着順は実行経路によって入れ替わるため、
+        // 両方が揃ったタイミングで NameTextBox.Focus() を確定させる。
+        private bool _focusRequestPending;
+        private bool _contentRendered;
+
         public StaffManageDialog(StaffManageViewModel viewModel)
         {
             InitializeComponent();
@@ -28,6 +33,7 @@ namespace ICCardManager.Views.Dialogs
             DataContext = _viewModel;
 
             Loaded += StaffManageDialog_Loaded;
+            ContentRendered += StaffManageDialog_ContentRendered;
             _viewModel.PropertyChanged += ViewModel_PropertyChanged;
             _viewModel.RequestNameFocus += ViewModel_RequestNameFocus;
             Closed += StaffManageDialog_Closed;
@@ -64,27 +70,56 @@ namespace ICCardManager.Views.Dialogs
         }
 
         /// <summary>
-        /// Issue #1429: 職員証タッチで IDm が取り込まれた直後、氏名入力欄へ自動フォーカス。
-        /// 本ハンドラは <c>StaffManageDialog_Loaded</c> の async 経路から発火するため、
-        /// Window のアクティベーション・キーボードフォーカスツリー確立を待つ必要がある。
-        /// <c>DispatcherPriority.ContextIdle</c> は現在の実行コンテキストが空になってから動くため、
-        /// Loaded ハンドラ完了後に確実にフォーカスを設定できる（<c>Input</c> だと早すぎる）。
+        /// Issue #1429: ViewModel が「氏名欄にフォーカスを当てたい」と要求した。
+        /// 編集パネルは <c>IsEditing</c> による Visibility="Collapsed → Visible" の切替直後で、
+        /// 視覚ツリーのレイアウト・描画パスがまだ走っていない可能性がある。
+        /// ここではフラグだけ立て、ContentRendered と AND を取った上でフォーカスを確定する。
         /// </summary>
         private void ViewModel_RequestNameFocus(object? sender, EventArgs e)
         {
+            _focusRequestPending = true;
+            TryFocusNameTextBox();
+        }
+
+        /// <summary>
+        /// Issue #1429: Window の最終描画完了。Loaded より後に発火する。
+        /// このタイミングでは Window がアクティベーション完了し NameTextBox の視覚ツリー登録も済んでいる。
+        /// </summary>
+        private void StaffManageDialog_ContentRendered(object? sender, EventArgs e)
+        {
+            _contentRendered = true;
+            TryFocusNameTextBox();
+        }
+
+        /// <summary>
+        /// Issue #1429: フォーカス要求と ContentRendered の両方が揃ったときのみフォーカスを当てる。
+        /// 編集パネルが Visibility=Collapsed → Visible に切り替わった直後はレイアウト未完了で
+        /// <c>Focus()</c> が空振りするため、(1) <c>UpdateLayout()</c> で強制レイアウト、
+        /// (2) <c>Activate()</c> で Window アクティベーション保証、
+        /// (3) <c>FocusManager.SetFocusedElement</c>（論理フォーカス）+ <c>Keyboard.Focus</c>（キーボードフォーカス）
+        /// の順に呼び、<c>DispatcherPriority.ApplicationIdle</c>（最低優先度）でディスパッチして
+        /// 全てのフレームワーク処理が落ち着いてから走らせる。
+        /// </summary>
+        private void TryFocusNameTextBox()
+        {
+            if (!_focusRequestPending || !_contentRendered)
+            {
+                return;
+            }
+
             Dispatcher.BeginInvoke(
                 new Action(() =>
                 {
-                    // ダイアログのアクティベーション未完了に備える（モーダル経路で稀に発生）
                     if (!IsActive)
                     {
                         Activate();
                     }
-                    // Window スコープの論理フォーカス → キーボードフォーカスを順に確定
+                    NameTextBox.UpdateLayout();
                     FocusManager.SetFocusedElement(this, NameTextBox);
                     Keyboard.Focus(NameTextBox);
+                    NameTextBox.Focus();
                 }),
-                DispatcherPriority.ContextIdle);
+                DispatcherPriority.ApplicationIdle);
         }
 
         /// <summary>
