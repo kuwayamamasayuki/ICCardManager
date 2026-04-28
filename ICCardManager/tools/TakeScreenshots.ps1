@@ -24,6 +24,11 @@
 .PARAMETER OutputDir
     出力先ディレクトリを指定します。デフォルトは docs/screenshots/ です。
 
+.PARAMETER Only
+    特定の画面だけを再撮影する場合に、対象の Name（拡張子省略可）を
+    カンマ区切りまたは配列で指定します。`-RequiredOnly` / `-All` の
+    指定有無に関わらず、必須・オプション両方の中から名前で絞り込みます。
+
 .EXAMPLE
     .\TakeScreenshots.ps1
     必須画面のみを取得します。
@@ -31,6 +36,14 @@
 .EXAMPLE
     .\TakeScreenshots.ps1 -All
     すべての画面を取得します。
+
+.EXAMPLE
+    .\TakeScreenshots.ps1 -Only card_registration_mode
+    指定した画面だけを再撮影します（拡張子は省略可）。
+
+.EXAMPLE
+    .\TakeScreenshots.ps1 -Only card_registration_mode,error_no_reader
+    複数画面をまとめて再撮影します。
 
 .NOTES
     作成日: 2026-02-02
@@ -40,7 +53,8 @@
 param(
     [switch]$RequiredOnly,
     [switch]$All,
-    [string]$OutputDir
+    [string]$OutputDir,
+    [string[]]$Only
 )
 
 # 必要なアセンブリをロード
@@ -491,6 +505,24 @@ if ($All) {
     $screens = $requiredScreens + $optionalScreens
 } else {
     $screens = $requiredScreens
+}
+
+# -Only 指定時は名前で絞り込み（拡張子省略可、複数指定可）
+if ($Only) {
+    $allScreens = $requiredScreens + $optionalScreens
+    # 比較用に拡張子を除いた小文字の名前へ正規化
+    $onlyNormalized = $Only | ForEach-Object { ($_ -replace '\.png$', '').ToLower() }
+    $screens = @($allScreens | Where-Object {
+        $name = ($_.Name -replace '\.png$', '').ToLower()
+        $onlyNormalized -contains $name
+    })
+    if ($screens.Count -eq 0) {
+        Write-Host "指定された画面が見つかりません: $($Only -join ', ')" -ForegroundColor Red
+        Write-Host ""
+        Write-Host "利用可能な Name 一覧:" -ForegroundColor Yellow
+        $allScreens | ForEach-Object { Write-Host "  - $($_.Name)" -ForegroundColor Gray }
+        exit 1
+    }
 }
 
 function Take-Screenshot {
