@@ -12,7 +12,7 @@
     必須画面（7枚）のみを取得します。
 
 .PARAMETER All
-    オプション画面も含むすべての画面（50枚）を取得します。
+    オプション画面も含むすべての画面（49枚）を取得します。
     一部のエントリは `ManualOnly = $true` が指定されており、
     スクリプトでは撮影せず手動でのPrtSc取得を促します
     （別プロセスや特殊起動条件が必要な画面）。
@@ -258,7 +258,7 @@ $optionalScreens = @(
     @{
         Name = "ledger_detail_merge.png"
         Title = "履歴の統合分割（履歴詳細）"
-        Instructions = "履歴照会画面で行をダブルクリックして詳細ダイアログが表示されたら"
+        Instructions = "履歴一覧で行の「詳細」ボタンをクリックし、利用詳細ダイアログが表示されたら（ダブルクリックでは開きません）"
         ForegroundOnly = $true
     },
     @{
@@ -285,7 +285,7 @@ $optionalScreens = @(
     @{
         Name = "card_registration_mode.png"
         Title = "カード登録方法の選択画面"
-        Instructions = "カード管理で新規登録後、カード登録方法の選択ダイアログが表示されたら"
+        Instructions = "カード管理画面で「新規登録」をクリック、未登録カードをタッチしてカード種別選択ダイアログで「交通系ICカード」を選択した後、カード登録方法選択ダイアログ（新規購入／繰越）が表示されたら"
         ForegroundOnly = $true
     },
     # Issue #849: マニュアル用スクリーンショット追加
@@ -393,12 +393,8 @@ $optionalScreens = @(
         ForegroundOnly = $true
     },
     # Issue #1411: ユーザーマニュアル §9.3 エラーダイアログ
-    @{
-        Name = "error_unregistered_card.png"
-        Title = "未登録カードエラー"
-        Instructions = "未登録の交通系ICカードをリーダーにタッチし、「未登録のカードです」エラーが表示されたら"
-        ForegroundOnly = $true
-    },
+    # 「未登録カードエラー」専用ダイアログは存在せず、card_type_selection.png
+    # （CardTypeSelectionDialog）と同一画面のため、マニュアルでは流用する。
     @{
         Name = "error_no_reader.png"
         Title = "カードリーダー未接続ステータス表示"
