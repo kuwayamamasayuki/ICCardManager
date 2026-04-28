@@ -28,6 +28,11 @@
     特定の画面だけを再撮影する場合に、対象の Name（拡張子省略可）を
     カンマ区切りまたは配列で指定します。`-RequiredOnly` / `-All` の
     指定有無に関わらず、必須・オプション両方の中から名前で絞り込みます。
+    指定可能な Name は `-List` で確認できます。
+
+.PARAMETER List
+    撮影可能な画面の一覧（Name とタイトル）を表示して終了します。
+    `-Only` に指定する名前を確認するときに使います。
 
 .EXAMPLE
     .\TakeScreenshots.ps1
@@ -36,6 +41,10 @@
 .EXAMPLE
     .\TakeScreenshots.ps1 -All
     すべての画面を取得します。
+
+.EXAMPLE
+    .\TakeScreenshots.ps1 -List
+    撮影可能な画面の Name とタイトル一覧を表示します。
 
 .EXAMPLE
     .\TakeScreenshots.ps1 -Only card_registration_mode
@@ -54,7 +63,8 @@ param(
     [switch]$RequiredOnly,
     [switch]$All,
     [string]$OutputDir,
-    [string[]]$Only
+    [string[]]$Only,
+    [switch]$List
 )
 
 # 必要なアセンブリをロード
@@ -500,6 +510,34 @@ $optionalScreens = @(
     }
 )
 
+# 画面情報を 1 行に整形（一覧表示用、-List / エラー時の両方で使用）
+function Format-ScreenLine {
+    param([hashtable]$Screen)
+    $shortName = $Screen.Name -replace '\.png$', ''
+    $manualMark = if ($Screen.ContainsKey("ManualOnly") -and $Screen.ManualOnly) { " [手動撮影]" } else { "" }
+    return ("  {0,-38} {1}{2}" -f $shortName, $Screen.Title, $manualMark)
+}
+
+# -List 指定時は撮影可能な画面の一覧を表示して終了
+if ($List) {
+    Write-Host "撮影可能な画面一覧（-Only に指定する Name）:" -ForegroundColor Cyan
+    Write-Host ""
+    Write-Host "[必須画面]" -ForegroundColor Green
+    foreach ($screen in $requiredScreens) {
+        Write-Host (Format-ScreenLine -Screen $screen)
+    }
+    Write-Host ""
+    Write-Host "[オプション画面]" -ForegroundColor Green
+    foreach ($screen in $optionalScreens) {
+        Write-Host (Format-ScreenLine -Screen $screen)
+    }
+    Write-Host ""
+    Write-Host "使用例:" -ForegroundColor Yellow
+    Write-Host "  .\TakeScreenshots.ps1 -Only card_registration_mode" -ForegroundColor Gray
+    Write-Host "  .\TakeScreenshots.ps1 -Only card_registration_mode,error_no_reader" -ForegroundColor Gray
+    exit 0
+}
+
 # 取得する画面リストを決定
 if ($All) {
     $screens = $requiredScreens + $optionalScreens
@@ -519,8 +557,10 @@ if ($Only) {
     if ($screens.Count -eq 0) {
         Write-Host "指定された画面が見つかりません: $($Only -join ', ')" -ForegroundColor Red
         Write-Host ""
-        Write-Host "利用可能な Name 一覧:" -ForegroundColor Yellow
-        $allScreens | ForEach-Object { Write-Host "  - $($_.Name)" -ForegroundColor Gray }
+        Write-Host "利用可能な Name 一覧（-List でも確認可能）:" -ForegroundColor Yellow
+        foreach ($screen in $allScreens) {
+            Write-Host (Format-ScreenLine -Screen $screen)
+        }
         exit 1
     }
 }
