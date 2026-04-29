@@ -218,8 +218,10 @@
         </GroupBox>
 
         <!-- 作成結果 -->
+        <!-- Issue #1410: CreatedFiles.Count は int のため WPF 標準 BooleanToVisibilityConverter で変換できず常に Collapsed になっていた。
+             ReportViewModel.HasCreatedFiles (bool) を介して Visibility を制御する。 -->
         <GroupBox Grid.Row="2" Header="作成結果" Padding="10" Margin="0,15,0,0"
-                  Visibility="{Binding CreatedFiles.Count, Converter={StaticResource BoolToVisibilityConverter}}"
+                  Visibility="{Binding HasCreatedFiles, Converter={StaticResource BoolToVisibilityConverter}}"
                   AutomationProperties.Name="帳票作成結果">
             <Grid>
                 <Grid.RowDefinitions>

@@ -783,4 +783,101 @@ public class ReportViewModelTests
     }
 
     #endregion
+
+    #region HasCreatedFiles テスト (Issue #1410)
+
+    /// <summary>
+    /// 初期状態では CreatedFiles が空で HasCreatedFiles が false であること。
+    /// 「作成結果」GroupBox は帳票作成前は非表示でなければならない。
+    /// </summary>
+    [Fact]
+    public void HasCreatedFiles_WhenInitialized_ShouldBeFalse()
+    {
+        // Assert
+        _viewModel.CreatedFiles.Should().BeEmpty();
+        _viewModel.HasCreatedFiles.Should().BeFalse();
+    }
+
+    /// <summary>
+    /// CreatedFiles に要素を追加すると HasCreatedFiles が true になること。
+    /// これにより ReportDialog の「作成結果」GroupBox の Visibility が Visible に切り替わる。
+    /// </summary>
+    [Fact]
+    public void HasCreatedFiles_AfterFileAdded_ShouldBeTrue()
+    {
+        // Act
+        _viewModel.CreatedFiles.Add(@"C:\dummy\file1.xlsx");
+
+        // Assert
+        _viewModel.HasCreatedFiles.Should().BeTrue();
+    }
+
+    /// <summary>
+    /// CreatedFiles を Clear すると HasCreatedFiles が false に戻ること。
+    /// 帳票再作成のクリアフローで「作成結果」GroupBox を一旦隠すために必須。
+    /// </summary>
+    [Fact]
+    public void HasCreatedFiles_AfterClear_ShouldBeFalse()
+    {
+        // Arrange
+        _viewModel.CreatedFiles.Add(@"C:\dummy\file1.xlsx");
+        _viewModel.CreatedFiles.Add(@"C:\dummy\file2.xlsx");
+        _viewModel.HasCreatedFiles.Should().BeTrue();
+
+        // Act
+        _viewModel.CreatedFiles.Clear();
+
+        // Assert
+        _viewModel.HasCreatedFiles.Should().BeFalse();
+    }
+
+    /// <summary>
+    /// CreatedFiles のコレクション変更で HasCreatedFiles の PropertyChanged が発火すること。
+    /// この通知が無いと xaml の Visibility バインディングが追従せず、Issue #1410 の不具合が再発する。
+    /// </summary>
+    [Fact]
+    public void HasCreatedFiles_WhenCreatedFilesAdded_ShouldRaisePropertyChanged()
+    {
+        // Arrange
+        var changedProperties = new List<string>();
+        _viewModel.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName != null)
+            {
+                changedProperties.Add(e.PropertyName);
+            }
+        };
+
+        // Act
+        _viewModel.CreatedFiles.Add(@"C:\dummy\file1.xlsx");
+
+        // Assert
+        changedProperties.Should().Contain(nameof(ReportViewModel.HasCreatedFiles));
+    }
+
+    /// <summary>
+    /// CreatedFiles のクリアでも HasCreatedFiles の PropertyChanged が発火すること。
+    /// </summary>
+    [Fact]
+    public void HasCreatedFiles_WhenCreatedFilesCleared_ShouldRaisePropertyChanged()
+    {
+        // Arrange
+        _viewModel.CreatedFiles.Add(@"C:\dummy\file1.xlsx");
+        var changedProperties = new List<string>();
+        _viewModel.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName != null)
+            {
+                changedProperties.Add(e.PropertyName);
+            }
+        };
+
+        // Act
+        _viewModel.CreatedFiles.Clear();
+
+        // Assert
+        changedProperties.Should().Contain(nameof(ReportViewModel.HasCreatedFiles));
+    }
+
+    #endregion
 }
