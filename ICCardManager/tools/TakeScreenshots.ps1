@@ -12,10 +12,27 @@
     必須画面（7枚）のみを取得します。
 
 .PARAMETER All
-    オプション画面も含むすべての画面（24枚）を取得します。
+    オプション画面も含むすべての画面（49枚）を取得します。
+    一部のエントリは `ManualOnly = $true` が指定されており、
+    スクリプトでは撮影せず手動でのPrtSc取得を促します
+    （別プロセスや特殊起動条件が必要な画面）。
+    `DelaySeconds = N` が指定されたエントリは Enter 入力後に N 秒の
+    カウントダウンを挟んでから撮影します。カウントダウン中に
+    ユーザーがアプリ側へフォーカスを戻してドロップダウン等を
+    展開する想定で、撮影直前の SetForegroundWindow をスキップします。
 
 .PARAMETER OutputDir
     出力先ディレクトリを指定します。デフォルトは docs/screenshots/ です。
+
+.PARAMETER Only
+    特定の画面だけを再撮影する場合に、対象の Name（拡張子省略可）を
+    カンマ区切りまたは配列で指定します。`-RequiredOnly` / `-All` の
+    指定有無に関わらず、必須・オプション両方の中から名前で絞り込みます。
+    指定可能な Name は `-List` で確認できます。
+
+.PARAMETER List
+    撮影可能な画面の一覧（Name とタイトル）を表示して終了します。
+    `-Only` に指定する名前を確認するときに使います。
 
 .EXAMPLE
     .\TakeScreenshots.ps1
@@ -25,15 +42,29 @@
     .\TakeScreenshots.ps1 -All
     すべての画面を取得します。
 
+.EXAMPLE
+    .\TakeScreenshots.ps1 -List
+    撮影可能な画面の Name とタイトル一覧を表示します。
+
+.EXAMPLE
+    .\TakeScreenshots.ps1 -Only card_registration_mode
+    指定した画面だけを再撮影します（拡張子は省略可）。
+
+.EXAMPLE
+    .\TakeScreenshots.ps1 -Only card_registration_mode,error_no_reader
+    複数画面をまとめて再撮影します。
+
 .NOTES
     作成日: 2026-02-02
-    Issue: #427, #435, #849
+    Issue: #427, #435, #849, #1409-#1418
 #>
 
 param(
     [switch]$RequiredOnly,
     [switch]$All,
-    [string]$OutputDir
+    [string]$OutputDir,
+    [string[]]$Only,
+    [switch]$List
 )
 
 # 必要なアセンブリをロード
@@ -251,7 +282,7 @@ $optionalScreens = @(
     @{
         Name = "ledger_detail_merge.png"
         Title = "履歴の統合分割（履歴詳細）"
-        Instructions = "履歴照会画面で行をダブルクリックして詳細ダイアログが表示されたら"
+        Instructions = "履歴一覧で行の「詳細」ボタンをクリックし、利用詳細ダイアログが表示されたら（ダブルクリックでは開きません）"
         ForegroundOnly = $true
     },
     @{
@@ -278,7 +309,7 @@ $optionalScreens = @(
     @{
         Name = "card_registration_mode.png"
         Title = "カード登録方法の選択画面"
-        Instructions = "カード管理で新規登録後、カード登録方法の選択ダイアログが表示されたら"
+        Instructions = "カード管理画面で「新規登録」をクリック、未登録カードをタッチしてカード種別選択ダイアログで「交通系ICカード」を選択した後、カード登録方法選択ダイアログ（新規購入／繰越）が表示されたら"
         ForegroundOnly = $true
     },
     # Issue #849: マニュアル用スクリーンショット追加
@@ -318,8 +349,194 @@ $optionalScreens = @(
         Title = "カード種別選択ダイアログ"
         Instructions = "未登録カードをICカードリーダーにタッチし、「職員証」か「交通系ICカード」かを選択するダイアログが表示されたら"
         ForegroundOnly = $true
+    },
+    # Issue #1409: ユーザーマニュアル §7.2 各設定項目のスクリーンショット
+    @{
+        Name = "settings_voice_dropdown.png"
+        Title = "音声設定ドロップダウン展開"
+        Instructions = "F5キーで設定画面を開いた状態で Enter。カウントダウン中にアプリへフォーカスを戻し、音声設定のドロップダウン（効果音/男性/女性/無し）を展開してください"
+        ForegroundOnly = $true
+        DelaySeconds = 5
+    },
+    @{
+        Name = "settings_department_dropdown.png"
+        Title = "部署設定ドロップダウン展開"
+        Instructions = "設定画面を開いた状態で Enter。カウントダウン中にアプリへフォーカスを戻し、部署設定のドロップダウン（市長事務部局／企業会計部局）を展開してください"
+        ForegroundOnly = $true
+        DelaySeconds = 5
+    },
+    @{
+        Name = "settings_fontsize_small.png"
+        Title = "文字サイズ「小」"
+        Instructions = "設定画面で文字サイズを「小」に変更し、変更が反映された表示状態で"
+        ForegroundOnly = $true
+    },
+    @{
+        Name = "settings_fontsize_medium.png"
+        Title = "文字サイズ「中（標準）」"
+        Instructions = "設定画面で文字サイズを「中（標準）」に変更し、変更が反映された表示状態で"
+        ForegroundOnly = $true
+    },
+    @{
+        Name = "settings_fontsize_large.png"
+        Title = "文字サイズ「大」"
+        Instructions = "設定画面で文字サイズを「大」に変更し、変更が反映された表示状態で"
+        ForegroundOnly = $true
+    },
+    @{
+        Name = "settings_fontsize_xlarge.png"
+        Title = "文字サイズ「特大」"
+        Instructions = "設定画面で文字サイズを「特大」に変更し、変更が反映された表示状態で"
+        ForegroundOnly = $true
+    },
+    @{
+        Name = "settings_toast_topright.png"
+        Title = "トースト通知 表示位置「右上」"
+        Instructions = "設定でトースト位置を「右上」に変更後、トースト通知を発生させて表示中の状態で（メイン画面とトーストの位置関係が見える構図）"
+    },
+    @{
+        Name = "settings_toast_topleft.png"
+        Title = "トースト通知 表示位置「左上」"
+        Instructions = "設定でトースト位置を「左上」に変更後、トースト通知を発生させて表示中の状態で"
+    },
+    @{
+        Name = "settings_toast_bottomright.png"
+        Title = "トースト通知 表示位置「右下」"
+        Instructions = "設定でトースト位置を「右下」に変更後、トースト通知を発生させて表示中の状態で"
+    },
+    @{
+        Name = "settings_toast_bottomleft.png"
+        Title = "トースト通知 表示位置「左下」"
+        Instructions = "設定でトースト位置を「左下」に変更後、トースト通知を発生させて表示中の状態で"
+    },
+    # Issue #1410: ユーザーマニュアル §6.2 帳票作成完了画面
+    @{
+        Name = "report_completed_status.png"
+        Title = "帳票出力完了ステータス表示"
+        Instructions = "F1キーで帳票作成画面を開き、複数カードを一括作成。出力完了後にステータスバーに「N件の帳票を作成しました」と表示されたら（ファイル一覧ダイアログは現状未実装）"
+        ForegroundOnly = $true
+    },
+    # Issue #1411: ユーザーマニュアル §9.3 エラーダイアログ
+    # 「未登録カードエラー」専用ダイアログは存在せず、card_type_selection.png
+    # （CardTypeSelectionDialog）と同一画面のため、マニュアルでは流用する。
+    @{
+        Name = "error_no_reader.png"
+        Title = "カードリーダー未接続ステータス表示"
+        Instructions = "PaSoRiを外した状態でアプリを起動し、ステータスバー右下が「リーダー: 切断」と表示されたら（カードリーダー未検出時のエラーダイアログは現状未実装）"
+        ForegroundOnly = $true
+    },
+    @{
+        Name = "warning_network_disconnected.png"
+        Title = "ネットワーク切断警告（共有モード）"
+        Instructions = "共有モードで稼働中にネットワークを切断し、メイン画面に切断警告バナーが表示された状態で"
+    },
+    # Issue #1412: ユーザーマニュアル §3.3 カード一覧の状態別
+    @{
+        Name = "card_list_status_mixed.png"
+        Title = "カード一覧（状態混在）"
+        Instructions = "メイン画面で「利用可（緑）」「貸出中（オレンジ）」「残額警告（赤背景）」のカードが同時に表示されている状態で"
+    },
+    @{
+        Name = "card_list_sort_menu.png"
+        Title = "カード一覧 並び替えメニュー"
+        Instructions = "メイン画面でカード一覧を表示した状態で Enter。カウントダウン中にアプリへフォーカスを戻し、並び替えメニューを開いてください"
+        DelaySeconds = 5
+    },
+    # Issue #1413: 管理者マニュアル §2.6 アンインストールデータ取り扱い選択
+    @{
+        Name = "uninstall_data_choice.png"
+        Title = "アンインストール時データ取り扱い選択"
+        Instructions = "アンインストーラーを実行し、データ取り扱い選択ダイアログ（すべて削除/データのみ残す/何も削除しない）が表示されたら（※InnoSetupの別プロセスのため手動撮影）"
+        ManualOnly = $true
+    },
+    # Issue #1414: 管理者マニュアル §4 職員登録・編集ダイアログ
+    @{
+        Name = "staff_register_before_touch.png"
+        Title = "職員新規登録ダイアログ（職員証タッチ前）"
+        Instructions = "F2キーで職員管理画面を開き「新規登録」をクリック、職員証タッチ待ちの状態で"
+        ForegroundOnly = $true
+    },
+    @{
+        Name = "staff_register_after_touch.png"
+        Title = "職員新規登録ダイアログ（職員証タッチ後）"
+        Instructions = "新規登録ダイアログで職員証をタッチし、IDmが取り込まれた状態で（※IDm取込後の氏名欄への自動フォーカス遷移は未実装。手動で氏名欄をクリックしてから撮影）"
+        ForegroundOnly = $true
+    },
+    @{
+        Name = "staff_edit_dialog.png"
+        Title = "職員情報編集ダイアログ"
+        Instructions = "職員管理画面で職員行を選択して「編集」、職員情報編集ダイアログが表示されたら"
+        ForegroundOnly = $true
+    },
+    # Issue #1415: 管理者マニュアル §5.3/§5.5 カード編集・払い戻しダイアログ
+    @{
+        Name = "card_edit_dialog.png"
+        Title = "交通系ICカード情報編集ダイアログ"
+        Instructions = "F3キーでカード管理画面を開き、行を選択して「編集」、カード情報編集ダイアログが表示されたら"
+        ForegroundOnly = $true
+    },
+    @{
+        Name = "card_refund_dialog.png"
+        Title = "交通系ICカード払い戻し確認ダイアログ"
+        Instructions = "カード管理画面で「払い戻し」を実行し、残高表示と論理削除警告が含まれた確認ダイアログが表示されたら"
+        ForegroundOnly = $true
+    },
+    # Issue #1416: CSV インポートプレビューは既存 import_preview.png を流用するため新規エントリなし
+    # Issue #1417: 管理者マニュアル §6.1/§6.2 バックアップ完了通知・リストア一覧
+    @{
+        Name = "backup_completed_status.png"
+        Title = "手動バックアップ完了ステータス表示"
+        Instructions = "F6キーでシステム管理画面を開き「バックアップを作成」をクリック、ステータスバーに「バックアップを作成しました: <ファイル名>」と表示されたら（完了通知ダイアログは現状未実装）"
+        ForegroundOnly = $true
+    },
+    @{
+        Name = "restore_list.png"
+        Title = "リストア用バックアップ一覧"
+        Instructions = "システム管理画面で「リストア」をクリックし、バックアップファイル一覧（ファイル名・タイムスタンプ・選択状態）が表示されたら"
+        ForegroundOnly = $true
+    },
+    @{
+        Name = "restore_file_dialog.png"
+        Title = "「ファイルを指定してリストア」選択ダイアログ"
+        Instructions = "リストア画面で「ファイルを指定してリストア」を選択し、ファイル選択ダイアログが表示されたら"
+        ForegroundOnly = $true
+    },
+    # Issue #1418: 管理者マニュアル §8.4 felicalib.dll ハッシュ検証失敗エラー
+    @{
+        Name = "felicalib_verification_failed.png"
+        Title = "felicalib.dll ハッシュ検証失敗ダイアログ"
+        Instructions = "テスト環境で felicalib.dll を意図的に差し替えてアプリを起動し、ハッシュ検証失敗エラー（期待ハッシュと実際のハッシュ表示）が出たら（※起動失敗するため手動撮影）"
+        ManualOnly = $true
     }
 )
+
+# 画面情報を 1 行に整形（一覧表示用、-List / エラー時の両方で使用）
+function Format-ScreenLine {
+    param([hashtable]$Screen)
+    $shortName = $Screen.Name -replace '\.png$', ''
+    $manualMark = if ($Screen.ContainsKey("ManualOnly") -and $Screen.ManualOnly) { " [手動撮影]" } else { "" }
+    return ("  {0,-38} {1}{2}" -f $shortName, $Screen.Title, $manualMark)
+}
+
+# -List 指定時は撮影可能な画面の一覧を表示して終了
+if ($List) {
+    Write-Host "撮影可能な画面一覧（-Only に指定する Name）:" -ForegroundColor Cyan
+    Write-Host ""
+    Write-Host "[必須画面]" -ForegroundColor Green
+    foreach ($screen in $requiredScreens) {
+        Write-Host (Format-ScreenLine -Screen $screen)
+    }
+    Write-Host ""
+    Write-Host "[オプション画面]" -ForegroundColor Green
+    foreach ($screen in $optionalScreens) {
+        Write-Host (Format-ScreenLine -Screen $screen)
+    }
+    Write-Host ""
+    Write-Host "使用例:" -ForegroundColor Yellow
+    Write-Host "  .\TakeScreenshots.ps1 -Only card_registration_mode" -ForegroundColor Gray
+    Write-Host "  .\TakeScreenshots.ps1 -Only card_registration_mode,error_no_reader" -ForegroundColor Gray
+    exit 0
+}
 
 # 取得する画面リストを決定
 if ($All) {
@@ -328,10 +545,31 @@ if ($All) {
     $screens = $requiredScreens
 }
 
+# -Only 指定時は名前で絞り込み（拡張子省略可、複数指定可）
+if ($Only) {
+    $allScreens = $requiredScreens + $optionalScreens
+    # 比較用に拡張子を除いた小文字の名前へ正規化
+    $onlyNormalized = $Only | ForEach-Object { ($_ -replace '\.png$', '').ToLower() }
+    $screens = @($allScreens | Where-Object {
+        $name = ($_.Name -replace '\.png$', '').ToLower()
+        $onlyNormalized -contains $name
+    })
+    if ($screens.Count -eq 0) {
+        Write-Host "指定された画面が見つかりません: $($Only -join ', ')" -ForegroundColor Red
+        Write-Host ""
+        Write-Host "利用可能な Name 一覧（-List でも確認可能）:" -ForegroundColor Yellow
+        foreach ($screen in $allScreens) {
+            Write-Host (Format-ScreenLine -Screen $screen)
+        }
+        exit 1
+    }
+}
+
 function Take-Screenshot {
     param(
         [string]$OutputPath,
-        [bool]$ForegroundOnly = $false
+        [bool]$ForegroundOnly = $false,
+        [bool]$SkipForegroundActivation = $false
     )
 
     # ICCardManagerのプロセスを取得
@@ -352,8 +590,12 @@ function Take-Screenshot {
     }
 
     # ウィンドウをフォアグラウンドに移動
-    [Win32ApiDpi3]::SetForegroundWindow($hwnd) | Out-Null
-    Start-Sleep -Milliseconds 500
+    # DelaySeconds 撮影中はユーザーがアプリ側に保持しているフォーカスを
+    # 奪ってドロップダウンを閉じてしまわないよう、SetForegroundWindow をスキップする
+    if (-not $SkipForegroundActivation) {
+        [Win32ApiDpi3]::SetForegroundWindow($hwnd) | Out-Null
+        Start-Sleep -Milliseconds 500
+    }
 
     if ($ForegroundOnly) {
         # 前面ウィンドウ（ダイアログ等）のみをキャプチャ
@@ -453,8 +695,33 @@ function Start-ScreenshotSession {
             continue
         }
 
+        # ManualOnly = 別プロセス起動や特殊条件が必要なためスクリプトでは撮影できない画面
+        $isManualOnly = $screen.ContainsKey("ManualOnly") -and $screen.ManualOnly
+        if ($isManualOnly) {
+            Write-Host "    ! このスクリーンショットはスクリプトでは撮影できません" -ForegroundColor Yellow
+            Write-Host "      上記の手順で画面を表示し、PrtSc 等で手動撮影して" -ForegroundColor Yellow
+            Write-Host "      $outputPath として保存してください" -ForegroundColor Yellow
+            continue
+        }
+
+        # DelaySeconds = ドロップダウン等、PowerShell へのフォーカス移動で閉じる画面向け。
+        # カウントダウン中にユーザーがアプリ側で対象を開く運用とし、
+        # 撮影時の SetForegroundWindow をスキップしてフォーカスを維持する。
+        $delaySeconds = if ($screen.ContainsKey("DelaySeconds")) { [int]$screen.DelaySeconds } else { 0 }
+        if ($delaySeconds -gt 0) {
+            Write-Host ""
+            Write-Host "    $delaySeconds 秒のカウントダウン後に撮影します。" -ForegroundColor Cyan
+            Write-Host "    その間にアプリへフォーカスを戻し、対象（ドロップダウン等）を開いてください。" -ForegroundColor Cyan
+            for ($i = $delaySeconds; $i -gt 0; $i--) {
+                Write-Host "      残り $i 秒..." -ForegroundColor Yellow
+                Start-Sleep -Seconds 1
+            }
+            Write-Host "    撮影します..." -ForegroundColor Green
+        }
+
         $isForegroundOnly = $screen.ContainsKey("ForegroundOnly") -and $screen.ForegroundOnly
-        if (Take-Screenshot -OutputPath $outputPath -ForegroundOnly $isForegroundOnly) {
+        $skipActivation = $delaySeconds -gt 0
+        if (Take-Screenshot -OutputPath $outputPath -ForegroundOnly $isForegroundOnly -SkipForegroundActivation $skipActivation) {
             Write-Host "    OK $($screen.Name) を保存しました" -ForegroundColor Green
         }
     }
