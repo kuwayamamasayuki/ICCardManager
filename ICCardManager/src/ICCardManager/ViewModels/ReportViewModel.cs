@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using System.Collections.Specialized;
 using System.Diagnostics;
 using System.IO;
 using System.Windows;
@@ -60,6 +61,13 @@ public partial class ReportViewModel : ViewModelBase
     [ObservableProperty]
     private ObservableCollection<string> _createdFiles = new();
 
+    /// <summary>
+    /// 作成済みファイルが 1 件以上存在するか。ReportDialog の「作成結果」セクション表示制御に使用する。
+    /// CreatedFiles.Count を直接 BooleanToVisibilityConverter に渡すと bool ではないため常に Collapsed
+    /// になってしまう問題（Issue #1410）を回避するため bool プロパティとして公開する。
+    /// </summary>
+    public bool HasCreatedFiles => CreatedFiles.Count > 0;
+
     [ObservableProperty]
     private bool _isLastMonthSelected;
 
@@ -89,6 +97,9 @@ public partial class ReportViewModel : ViewModelBase
         _navigationService = navigationService;
         _settingsRepository = settingsRepository;
 
+        // CreatedFiles の中身が変化したときに HasCreatedFiles の通知を発火する
+        _createdFiles.CollectionChanged += OnCreatedFilesCollectionChanged;
+
         // 年の選択肢を初期化（過去5年分）
         var currentYear = DateTime.Now.Year;
         for (var year = currentYear; year >= currentYear - 5; year--)
@@ -101,6 +112,11 @@ public partial class ReportViewModel : ViewModelBase
         SelectedYear = lastMonth.Year;
         SelectedMonth = lastMonth.Month;
         OutputFolder = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
+    }
+
+    private void OnCreatedFilesCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
+    {
+        OnPropertyChanged(nameof(HasCreatedFiles));
     }
 
     /// <summary>
