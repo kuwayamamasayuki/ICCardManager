@@ -475,7 +475,7 @@ $optionalScreens = @(
     @{
         Name = "card_edit_dialog.png"
         Title = "交通系ICカード情報編集ダイアログ"
-        Instructions = "F3キーでカード管理画面を開き、行を選択して「編集」、カード情報編集ダイアログが表示されたら"
+        Instructions = "F3キーでカード管理画面を開き、行を選択して「編集」、右側の編集フォームに種別／管理番号／備考の編集欄が表示された状態（CardManageDialog の右ペイン編集モード）で。マニュアル §5.3 で参照"
         ForegroundOnly = $true
     },
     @{
