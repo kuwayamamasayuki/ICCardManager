@@ -64,7 +64,12 @@ public partial class SystemManageViewModel : ViewModelBase
     /// バックアップ一覧を読み込む
     /// </summary>
     [RelayCommand]
-    public async Task LoadBackupsAsync()
+    public Task LoadBackupsAsync() => LoadBackupsInternalAsync(announceCount: true);
+
+    // Issue #1417: 件数を StatusMessage に書き戻すかを呼び出し側で制御できるよう分離。
+    // バックアップ作成直後の呼び出しでは announceCount=false を指定し、
+    // 直前に設定した完了メッセージ「バックアップを作成しました: ...」を上書きしないようにする。
+    internal async Task LoadBackupsInternalAsync(bool announceCount)
     {
         using (BeginBusy("バックアップ一覧を読み込み中..."))
         {
@@ -77,13 +82,16 @@ public partial class SystemManageViewModel : ViewModelBase
                     BackupFiles.Add(file);
                 }
 
-                if (BackupFiles.Count == 0)
+                if (announceCount)
                 {
-                    SetStatus("バックアップファイルが見つかりません", false);
-                }
-                else
-                {
-                    SetStatus($"{BackupFiles.Count}件のバックアップが見つかりました", false);
+                    if (BackupFiles.Count == 0)
+                    {
+                        SetStatus("バックアップファイルが見つかりません", false);
+                    }
+                    else
+                    {
+                        SetStatus($"{BackupFiles.Count}件のバックアップが見つかりました", false);
+                    }
                 }
             }
             catch (Exception ex)
@@ -119,23 +127,30 @@ public partial class SystemManageViewModel : ViewModelBase
             return;
         }
 
+        await CreateBackupCoreAsync(dialog.FileName);
+    }
+
+    // Issue #1417: SaveFileDialog はテスト不能 (UI スレッド要求) のため、
+    // バックアップ本体処理を internal メソッドに抽出してテスト可能化する。
+    internal async Task CreateBackupCoreAsync(string backupFilePath)
+    {
         using (BeginBusy("バックアップを作成中..."))
         {
             try
             {
                 // Issue #1361: UI スレッドから sync 呼び出しは LeaseConnection の UI スレッドガード (#1281) に抵触するため、
                 // Task.Run で委譲する CreateBackupAsync を使用する
-                var success = await _backupService.CreateBackupAsync(dialog.FileName);
+                var success = await _backupService.CreateBackupAsync(backupFilePath);
                 if (success)
                 {
-                    LastBackupFile = dialog.FileName;
-                    SetStatus($"バックアップを作成しました: {Path.GetFileName(dialog.FileName)}", false);
+                    LastBackupFile = backupFilePath;
+                    SetStatus($"バックアップを作成しました: {Path.GetFileName(backupFilePath)}", false);
 
                     // Issue #1302: 監査ログ記録
-                    await _operationLogger.LogBackupAsync(dialog.FileName);
+                    await _operationLogger.LogBackupAsync(backupFilePath);
 
-                    // バックアップ一覧を更新
-                    await LoadBackupsAsync();
+                    // Issue #1417: バックアップ一覧を更新するが、件数表示で完了メッセージを上書きしない
+                    await LoadBackupsInternalAsync(announceCount: false);
                 }
                 else
                 {
