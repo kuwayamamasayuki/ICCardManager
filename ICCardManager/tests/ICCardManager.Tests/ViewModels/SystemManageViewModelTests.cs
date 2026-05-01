@@ -201,6 +201,148 @@ public class SystemManageViewModelTests : IDisposable
 
     #endregion
 
+    #region CreateBackupCoreAsync テスト (Issue #1417)
+
+    [Fact]
+    public async Task CreateBackupCoreAsync_成功時にStatusMessageが完了通知のまま件数表示で上書きされないこと()
+    {
+        // Arrange: バックアップ成功 + 既存3件 → LoadBackupsInternalAsync(false) が件数を上書きしない経路の検証
+        const string backupPath = "/backups/backup_manual_20260501_120000.db";
+        _backupServiceMock.Setup(s => s.CreateBackupAsync(backupPath)).ReturnsAsync(true);
+        _backupServiceMock.Setup(s => s.GetBackupFilesAsync())
+            .ReturnsAsync(new List<BackupFileInfo>
+            {
+                new BackupFileInfo { FileName = "old1.db", FilePath = "/backups/old1.db", CreatedAt = DateTime.Now.AddDays(-1) },
+                new BackupFileInfo { FileName = "old2.db", FilePath = "/backups/old2.db", CreatedAt = DateTime.Now.AddDays(-2) },
+                new BackupFileInfo { FileName = "old3.db", FilePath = "/backups/old3.db", CreatedAt = DateTime.Now },
+            });
+
+        // Act
+        await _viewModel.CreateBackupCoreAsync(backupPath);
+
+        // Assert: Issue #1417 のバグ - 完了メッセージが LoadBackupsAsync の件数表示で上書きされる挙動の回帰防止
+        _viewModel.StatusMessage.Should().StartWith("バックアップを作成しました:");
+        _viewModel.StatusMessage.Should().Contain("backup_manual_20260501_120000.db");
+        _viewModel.StatusMessage.Should().NotContain("件のバックアップが見つかりました");
+        _viewModel.IsStatusError.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task CreateBackupCoreAsync_成功時にLastBackupFileが指定パスに更新されること()
+    {
+        // Arrange
+        const string backupPath = "/backups/manual.db";
+        _backupServiceMock.Setup(s => s.CreateBackupAsync(backupPath)).ReturnsAsync(true);
+        _backupServiceMock.Setup(s => s.GetBackupFilesAsync())
+            .ReturnsAsync(Enumerable.Empty<BackupFileInfo>());
+
+        // Act
+        await _viewModel.CreateBackupCoreAsync(backupPath);
+
+        // Assert
+        _viewModel.LastBackupFile.Should().Be(backupPath);
+    }
+
+    [Fact]
+    public async Task CreateBackupCoreAsync_成功時にBackupFilesが更新されること()
+    {
+        // Arrange: バックアップ成功時は内部で LoadBackupsInternalAsync が呼ばれ、一覧が更新される
+        const string backupPath = "/backups/manual.db";
+        var refreshedList = new List<BackupFileInfo>
+        {
+            new BackupFileInfo { FileName = "manual.db", FilePath = backupPath, CreatedAt = DateTime.Now },
+        };
+        _backupServiceMock.Setup(s => s.CreateBackupAsync(backupPath)).ReturnsAsync(true);
+        _backupServiceMock.Setup(s => s.GetBackupFilesAsync()).ReturnsAsync(refreshedList);
+
+        // Act
+        await _viewModel.CreateBackupCoreAsync(backupPath);
+
+        // Assert
+        _viewModel.BackupFiles.Should().HaveCount(1);
+        _viewModel.BackupFiles.Single().FilePath.Should().Be(backupPath);
+    }
+
+    [Fact]
+    public async Task CreateBackupCoreAsync_BackupServiceがfalseを返すとき失敗メッセージが表示されること()
+    {
+        // Arrange
+        const string backupPath = "/backups/manual.db";
+        _backupServiceMock.Setup(s => s.CreateBackupAsync(backupPath)).ReturnsAsync(false);
+
+        // Act
+        await _viewModel.CreateBackupCoreAsync(backupPath);
+
+        // Assert
+        _viewModel.StatusMessage.Should().Be("バックアップの作成に失敗しました");
+        _viewModel.IsStatusError.Should().BeTrue();
+        _viewModel.LastBackupFile.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task CreateBackupCoreAsync_例外発生時にエラーメッセージに例外文言が含まれること()
+    {
+        // Arrange
+        const string backupPath = "/backups/manual.db";
+        _backupServiceMock.Setup(s => s.CreateBackupAsync(backupPath))
+            .ThrowsAsync(new Exception("disk full"));
+
+        // Act
+        await _viewModel.CreateBackupCoreAsync(backupPath);
+
+        // Assert
+        _viewModel.StatusMessage.Should().Contain("失敗").And.Contain("disk full");
+        _viewModel.IsStatusError.Should().BeTrue();
+    }
+
+    #endregion
+
+    #region LoadBackupsInternalAsync テスト (Issue #1417)
+
+    [Fact]
+    public async Task LoadBackupsInternalAsync_announceCountがfalseの場合に件数表示でStatusMessageを上書きしないこと()
+    {
+        // Arrange: バックアップ成功直後の状態を再現し、その後の LoadBackupsInternalAsync(false) で上書きされないことを検証
+        var backupFiles = new List<BackupFileInfo>
+        {
+            new BackupFileInfo { FileName = "a.db", FilePath = "/a.db", CreatedAt = DateTime.Now },
+            new BackupFileInfo { FileName = "b.db", FilePath = "/b.db", CreatedAt = DateTime.Now },
+        };
+        _backupServiceMock.Setup(s => s.GetBackupFilesAsync()).ReturnsAsync(backupFiles);
+        _backupServiceMock.Setup(s => s.CreateBackupAsync(It.IsAny<string>())).ReturnsAsync(true);
+        await _viewModel.CreateBackupCoreAsync("/backups/test.db");
+
+        var statusBeforeReload = _viewModel.StatusMessage;
+        statusBeforeReload.Should().StartWith("バックアップを作成しました:");
+
+        // Act: 件数告知なしで再読込
+        await _viewModel.LoadBackupsInternalAsync(announceCount: false);
+
+        // Assert: 一覧は更新されているが StatusMessage は上書きされていない
+        _viewModel.BackupFiles.Should().HaveCount(2);
+        _viewModel.StatusMessage.Should().Be(statusBeforeReload);
+    }
+
+    [Fact]
+    public async Task LoadBackupsInternalAsync_announceCountがtrueの場合は従来通り件数表示すること()
+    {
+        // Arrange
+        var backupFiles = new List<BackupFileInfo>
+        {
+            new BackupFileInfo { FileName = "a.db", FilePath = "/a.db", CreatedAt = DateTime.Now },
+        };
+        _backupServiceMock.Setup(s => s.GetBackupFilesAsync()).ReturnsAsync(backupFiles);
+
+        // Act
+        await _viewModel.LoadBackupsInternalAsync(announceCount: true);
+
+        // Assert
+        _viewModel.StatusMessage.Should().Contain("1件");
+        _viewModel.IsStatusError.Should().BeFalse();
+    }
+
+    #endregion
+
     #region HasSelectedBackup テスト
 
     [Fact]
