@@ -481,7 +481,7 @@ $optionalScreens = @(
     @{
         Name = "card_refund_dialog.png"
         Title = "交通系ICカード払い戻し確認ダイアログ"
-        Instructions = "カード管理画面で「払い戻し」を実行し、残高表示と論理削除警告が含まれた確認ダイアログが表示されたら"
+        Instructions = "カード管理画面で「払い戻し」を実行し、残高表示と「払戻済」状態への遷移注意（黄色三角警告アイコン付き Yes/No）が含まれた確認ダイアログが表示されたら"
         ForegroundOnly = $true
     },
     # Issue #1416: CSV インポートプレビューは既存 import_preview.png を流用するため新規エントリなし
