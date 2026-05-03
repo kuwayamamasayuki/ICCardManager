@@ -307,6 +307,11 @@ $optionalScreens = @(
         Instructions = "インストーラーを実行し、オプション選択画面が表示されたら（※手動でPrtScで撮影してください）"
     },
     @{
+        Name = "installer_report_output.png"
+        Title = "インストーラー帳票出力先フォルダ選択画面"
+        Instructions = "インストーラーを実行し、データベース保存先の次に表示される「帳票出力先フォルダ」ページが表示されたら（※手動でPrtScで撮影してください）"
+    },
+    @{
         Name = "card_registration_mode.png"
         Title = "カード登録方法の選択画面"
         Instructions = "カード管理画面で「新規登録」をクリック、未登録カードをタッチしてカード種別選択ダイアログで「交通系ICカード」を選択した後、カード登録方法選択ダイアログ（新規購入／繰越）が表示されたら"
