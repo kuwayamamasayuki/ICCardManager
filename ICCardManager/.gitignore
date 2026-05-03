@@ -32,6 +32,7 @@ Thumbs.db
 *.tmp
 *.temp
 *.log
+mermaid-filter.err
 
 # デバッグシンボル（本番環境不要）
 *.pdb
