@@ -167,10 +167,12 @@ public class ReportDataBuilderTests
         result.Carryover.Income.Should().Be(5000);
         result.Carryover.Balance.Should().Be(5000);
 
-        // 月計: 4月は残額表示あり
-        result.MonthlyTotal.Income.Should().Be(0);
+        // 月計: 4月は残額表示あり、Income には前年度繰越（5000）を加算（Issue #1494）
+        result.MonthlyTotal.Income.Should().Be(5000, "4月計の受入には前年度繰越（5000）が加算される");
         result.MonthlyTotal.Expense.Should().Be(210);
         result.MonthlyTotal.Balance.Should().Be(4790);
+        // 受入 − 払出 = 残額 が成立
+        (result.MonthlyTotal.Income - result.MonthlyTotal.Expense).Should().Be(result.MonthlyTotal.Balance);
 
         // 累計: 4月はnull（省略）
         result.CumulativeTotal.Should().BeNull();
@@ -384,12 +386,14 @@ public class ReportDataBuilderTests
     [Fact]
     public async Task BuildAsync_MidYearCarryoverLedger_ExcludedFromMonthlyIncome()
     {
-        // Arrange: 登録月(8月)の月次帳票。既存データで Income に残高が入っていたケースも想定。
+        // Arrange: 紙出納簿から年度途中で移行したカードでは「○月から繰越」レコードが DB に
+        // Income=残高 で保存される（Issue #510）。これを月計に加算すると前月の累計と
+        // 二重計上になるため、IsMidYearCarryoverSummary フィルタで除外する。
         SetupCard();
         var augustLedgers = new List<Ledger>
         {
             CreateTestLedger(1, TestCardIdm, new DateTime(2025, 8, 1),
-                "7月から繰越", 5000, 0, 5000),   // 既存データで income が入っているケース
+                "7月から繰越", 5000, 0, 5000),   // 紙出納簿移行カードの繰越レコード
             CreateTestLedger(2, TestCardIdm, new DateTime(2025, 8, 10),
                 "鉄道（天神～博多）", 0, 210, 4790)
         };
@@ -403,11 +407,13 @@ public class ReportDataBuilderTests
         // Act
         var result = await _builder.BuildAsync(TestCardIdm, 2025, 8);
 
-        // Assert: 月次・年度累計とも繰越ledgerの受入は集計されない
-        result.MonthlyTotal.Income.Should().Be(0);
+        // Assert: 月次・年度累計とも繰越ledgerの受入は集計されない（二重計上防止）
+        result.MonthlyTotal.Income.Should().Be(0,
+            "「○月から繰越」レコードの Income は月計から除外される（紙出納簿移行カード対策）");
         result.MonthlyTotal.Expense.Should().Be(210);
         result.CumulativeTotal.Should().NotBeNull();
-        result.CumulativeTotal.Income.Should().Be(0);
+        result.CumulativeTotal.Income.Should().Be(0,
+            "「○月から繰越」レコードの Income は累計からも除外される");
         result.CumulativeTotal.Expense.Should().Be(210);
     }
 
@@ -1033,11 +1039,13 @@ public class ReportDataBuilderTests
         // Act
         var result = await _builder.BuildAsync(TestCardIdm, 2026, 5);
 
-        // Assert: 累計は2026年度分のみ（過去年度は混入しない）
+        // Assert: 累計は2026年度分のみ（過去年度の利用履歴は混入しない）が、
+        // Issue #1494 により前年度繰越額（=年度開始時残高 3000）は累計の受入に加算される。
         result.CumulativeTotal.Should().NotBeNull();
         result.CumulativeTotal.Expense.Should().Be(210,
             "累計は当年度（2026年度）のみで、過去年度の支出は含まれない");
-        result.CumulativeTotal.Income.Should().Be(0);
+        result.CumulativeTotal.Income.Should().Be(3000,
+            "Issue #1494: 累計の受入には前年度繰越額（3000）が加算される");
         result.CumulativeTotal.Balance.Should().Be(2790);
 
         // 月次繰越行は前月末残高（=前年度末残高）
@@ -1176,10 +1184,12 @@ public class ReportDataBuilderTests
         // Act
         var result = await _builder.BuildAsync(TestCardIdm, 2025, 4);
 
-        // Assert: 4月は累計省略（cumulativeはnull）。月計は当月分のみで、紙時代累計は cumulative 側の計算にのみ乗る
-        // 実装では cumulativeTotal=null となり、月計側の集計には紙時代累計は加算されない設計
+        // Assert: 4月は累計省略（cumulativeはnull）。
+        // Issue #1494: 月計の受入には前年度繰越額（5000）を加算する。
+        // 紙時代累計（CarryoverIncomeTotal=8000）は引き続き月計には加算しない（cumulative 側のみ）。
         result.CumulativeTotal.Should().BeNull("4月は累計省略");
-        result.MonthlyTotal.Income.Should().Be(0, "月計は当月実績のみ、紙時代累計は月計に加算しない");
+        result.MonthlyTotal.Income.Should().Be(5000,
+            "Issue #1494: 前年度繰越（5000）は月計に加算するが、紙時代累計（8000）は月計に加算しない");
         result.MonthlyTotal.Expense.Should().Be(210);
         result.MonthlyTotal.Balance.Should().Be(4790);
     }
@@ -1230,6 +1240,187 @@ public class ReportDataBuilderTests
         result.Carryover.Income.Should().BeNull("月次繰越の受入欄は空欄");
         result.Carryover.Balance.Should().Be(3000);
         result.Carryover.Summary.Should().Contain("9月").And.Contain("繰越");
+    }
+
+    #endregion
+
+    #region Issue #1494: 4月計および年度累計の受入金額に前年度繰越が加算されること
+
+    [Fact]
+    public async Task BuildAsync_April_MonthlyTotalIncome_IncludesFiscalYearCarryover()
+    {
+        // Arrange: 前年度残高 5000、4月にチャージ 1000、利用 210
+        SetupCard();
+        SetupCarryoverBalance(TestCardIdm, 2024, 5000);
+        var aprilLedgers = new List<Ledger>
+        {
+            CreateTestLedger(1, TestCardIdm, new DateTime(2025, 4, 5),
+                "役務費によりチャージ", 1000, 0, 6000),
+            CreateTestLedger(2, TestCardIdm, new DateTime(2025, 4, 10),
+                "鉄道（天神～博多）", 0, 210, 5790)
+        };
+        SetupMonthlyLedgers(TestCardIdm, 2025, 4, aprilLedgers);
+        SetupDateRangeLedgers(TestCardIdm,
+            new DateTime(2025, 4, 1), new DateTime(2025, 4, 30), aprilLedgers);
+
+        // Act
+        var result = await _builder.BuildAsync(TestCardIdm, 2025, 4);
+
+        // Assert: 4月計の受入＝当月チャージ（1000）＋前年度繰越（5000）＝6000
+        result.MonthlyTotal.Income.Should().Be(6000,
+            "4月計の受入＝当月チャージ＋前年度繰越");
+        result.MonthlyTotal.Expense.Should().Be(210);
+        result.MonthlyTotal.Balance.Should().Be(5790);
+        // 受入 − 払出 = 残額
+        (result.MonthlyTotal.Income - result.MonthlyTotal.Expense)
+            .Should().Be(result.MonthlyTotal.Balance);
+    }
+
+    [Fact]
+    public async Task BuildAsync_NonApril_CumulativeIncome_IncludesFiscalYearCarryover()
+    {
+        // Arrange: 前年度繰越 5000、4月チャージ 1000、5月チャージ 2000
+        SetupCard();
+        SetupCarryoverBalance(TestCardIdm, 2024, 5000);
+        var mayLedgers = new List<Ledger>
+        {
+            CreateTestLedger(2, TestCardIdm, new DateTime(2025, 5, 10),
+                "役務費によりチャージ", 2000, 0, 8000)
+        };
+        // 前月(4月)の残高を設定
+        SetupMonthlyLedgers(TestCardIdm, 2025, 4,
+            new List<Ledger>
+            {
+                CreateTestLedger(1, TestCardIdm, new DateTime(2025, 4, 5),
+                    "役務費によりチャージ", 1000, 0, 6000)
+            });
+        SetupMonthlyLedgers(TestCardIdm, 2025, 5, mayLedgers);
+        // 年度累計範囲（4月～5月）
+        var fyLedgers = new List<Ledger>
+        {
+            CreateTestLedger(1, TestCardIdm, new DateTime(2025, 4, 5), "チャージ", 1000, 0, 6000),
+            CreateTestLedger(2, TestCardIdm, new DateTime(2025, 5, 10), "チャージ", 2000, 0, 8000)
+        };
+        SetupDateRangeLedgers(TestCardIdm,
+            new DateTime(2025, 4, 1), new DateTime(2025, 5, 31), fyLedgers);
+
+        // Act
+        var result = await _builder.BuildAsync(TestCardIdm, 2025, 5);
+
+        // Assert: 5月の累計受入＝前年度繰越（5000）＋4月チャージ（1000）＋5月チャージ（2000）＝8000
+        result.CumulativeTotal.Should().NotBeNull();
+        result.CumulativeTotal.Income.Should().Be(8000,
+            "5月以降の累計受入には前年度繰越額が加算される");
+        result.CumulativeTotal.Expense.Should().Be(0);
+        result.CumulativeTotal.Balance.Should().Be(8000);
+    }
+
+    [Fact]
+    public async Task BuildAsync_MarchToApril_FiscalYearCarryover_IsSeamless_ForMonthlyTotalIncome()
+    {
+        // Arrange: 3月の次年度繰越額（=年度末残高）が、翌年度4月の前年度繰越として
+        // monthlyTotal.Income にも反映されることを検証する。
+        SetupCard();
+
+        // 2025年度: 4月にチャージ5000、3月に300円利用 → 年度末残高4700
+        var fy2025Ledgers = new List<Ledger>
+        {
+            CreateTestLedger(1, TestCardIdm, new DateTime(2025, 4, 10), "チャージ", 5000, 0, 5000),
+            CreateTestLedger(2, TestCardIdm, new DateTime(2026, 3, 5), "鉄道", 0, 300, 4700)
+        };
+        SetupMonthlyLedgers(TestCardIdm, 2026, 2,
+            new List<Ledger>
+            {
+                CreateTestLedger(99, TestCardIdm, new DateTime(2026, 2, 28), "鉄道", 0, 0, 5000)
+            });
+        SetupMonthlyLedgers(TestCardIdm, 2026, 3,
+            new List<Ledger>
+            {
+                CreateTestLedger(2, TestCardIdm, new DateTime(2026, 3, 5), "鉄道", 0, 300, 4700)
+            });
+        SetupDateRangeLedgers(TestCardIdm,
+            new DateTime(2025, 4, 1), new DateTime(2026, 3, 31), fy2025Ledgers);
+
+        // 2026年度: 4月初に前年度繰越4700。当月は利用なし
+        SetupCarryoverBalance(TestCardIdm, 2025, 4700);
+        SetupMonthlyLedgers(TestCardIdm, 2026, 4, new List<Ledger>());
+        SetupDateRangeLedgers(TestCardIdm,
+            new DateTime(2026, 4, 1), new DateTime(2026, 4, 30), new List<Ledger>());
+
+        // Act
+        var marchResult = await _builder.BuildAsync(TestCardIdm, 2026, 3);
+        var aprilResult = await _builder.BuildAsync(TestCardIdm, 2026, 4);
+
+        // Assert: 3月の次年度繰越と 4月の月計受入（=前年度繰越のみ）が一致
+        marchResult.CarryoverToNextYear.Should().Be(4700);
+        aprilResult.MonthlyTotal.Income.Should().Be(4700,
+            "4月計の受入＝前年度繰越額（当月利用なしの場合）");
+        aprilResult.MonthlyTotal.Income.Should().Be(marchResult.CarryoverToNextYear,
+            "3月末→4月初のシームレス遷移：次年度繰越額と4月計の受入は一致");
+    }
+
+    [Fact]
+    public async Task BuildAsync_PaperLedgerMigration_April_NoPrecedingBalance_DoesNotLeakCarryoverIncomeTotal()
+    {
+        // Arrange (改善提案C / Issue #1494): 紙出納簿移行カードの初年度4月境界ケース。
+        // - 紙出納簿で2024年度末まで運用、2025年4月からアプリ運用 (CarryoverFiscalYear=2025)
+        // - 前年度末の DB レコードは存在しない（紙時代）→ precedingBalance=null
+        // - CarryoverIncomeTotal=8000 / CarryoverExpenseTotal=2000（紙時代累計）
+        // 4月計の Income に CarryoverIncomeTotal が誤って漏れ出ないことを検証。
+        // （cumulativeTotal=null なので yearlyIncome 加算結果は破棄される設計）
+        var card = new IcCard
+        {
+            CardIdm = TestCardIdm,
+            CardType = "はやかけん",
+            CardNumber = "001",
+            CarryoverIncomeTotal = 8000,
+            CarryoverExpenseTotal = 2000,
+            CarryoverFiscalYear = 2025
+        };
+        _cardRepositoryMock
+            .Setup(r => r.GetByIdmAsync(TestCardIdm, true))
+            .ReturnsAsync(card);
+        SetupCarryoverBalance(TestCardIdm, 2024, null);  // 紙時代なので DB レコードなし
+        var aprilLedgers = new List<Ledger>
+        {
+            CreateTestLedger(1, TestCardIdm, new DateTime(2025, 4, 10),
+                "鉄道（天神～博多）", 0, 210, 7790)
+        };
+        SetupMonthlyLedgers(TestCardIdm, 2025, 4, aprilLedgers);
+        SetupDateRangeLedgers(TestCardIdm,
+            new DateTime(2025, 4, 1), new DateTime(2025, 4, 30), aprilLedgers);
+
+        // Act
+        var result = await _builder.BuildAsync(TestCardIdm, 2025, 4);
+
+        // Assert: precedingBalance=null なので前年度繰越加算分はゼロ。
+        // 紙時代累計（8000）は cumulativeTotal=null のため4月帳票には反映されない。
+        result.Carryover.Should().BeNull("precedingBalance=null のため繰越行は出力されない");
+        result.MonthlyTotal.Income.Should().Be(0,
+            "precedingBalance=null かつ当月チャージなしのため Income=0。CarryoverIncomeTotal は4月帳票に漏れない");
+        result.MonthlyTotal.Expense.Should().Be(210);
+        result.CumulativeTotal.Should().BeNull("4月は累計省略");
+    }
+
+    [Fact]
+    public async Task BuildAsync_April_NoLedgers_MonthlyTotal_IncomeEqualsBalance()
+    {
+        // Arrange: 4月に利用なしで前年度繰越のみ
+        SetupCard();
+        SetupCarryoverBalance(TestCardIdm, 2024, 7500);
+        SetupMonthlyLedgers(TestCardIdm, 2025, 4, new List<Ledger>());
+        SetupDateRangeLedgers(TestCardIdm,
+            new DateTime(2025, 4, 1), new DateTime(2025, 4, 30), new List<Ledger>());
+
+        // Act
+        var result = await _builder.BuildAsync(TestCardIdm, 2025, 4);
+
+        // Assert: 受入＝繰越額、払出＝0、残額＝繰越額
+        result.MonthlyTotal.Income.Should().Be(7500);
+        result.MonthlyTotal.Expense.Should().Be(0);
+        result.MonthlyTotal.Balance.Should().Be(7500);
+        (result.MonthlyTotal.Income - result.MonthlyTotal.Expense)
+            .Should().Be(result.MonthlyTotal.Balance);
     }
 
     #endregion

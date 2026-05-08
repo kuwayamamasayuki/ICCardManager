@@ -1346,10 +1346,14 @@ public class ReportServiceTests : IDisposable
 
         // 月計行（行6、データなし）- Issue #451: 0も表示
         // Issue #813: 4月は累計行を省略し、月計行に残額を表示
+        // Issue #1494: 4月計の受入には前年度繰越額（marchEndBalance=9200）が加算される
         worksheet.Cell(6, 2).GetString().Should().Be("4月計");
-        worksheet.Cell(6, 5).GetValue<int>().Should().Be(0);              // 受入0も表示 (E列)
+        worksheet.Cell(6, 5).GetValue<int>().Should().Be(marchEndBalance); // 受入=前年度繰越 (E列)
         worksheet.Cell(6, 6).GetValue<int>().Should().Be(0);              // 払出0も表示 (F列)
         worksheet.Cell(6, 7).GetValue<int>().Should().Be(marchEndBalance); // 残額=前年度繰越 (G列)
+        // 受入 − 払出 = 残額 が成立
+        (worksheet.Cell(6, 5).GetValue<int>() - worksheet.Cell(6, 6).GetValue<int>())
+            .Should().Be(worksheet.Cell(6, 7).GetValue<int>());
 
         // 累計行が出力されていないことを確認（行7は空であるべき）
         worksheet.Cell(7, 2).GetString().Should().NotBe("累計");
@@ -2965,11 +2969,15 @@ public class ReportServiceTests : IDisposable
         worksheet.Cell(6, 2).GetString().Should().Be("鉄道（博多～天神）");
 
         // 月計行（行7）- Issue #813: 4月は残額を表示
+        // Issue #1494: 4月計の受入には前年度繰越額（10000）が加算される
         worksheet.Cell(7, 2).GetString().Should().Be("4月計");
-        worksheet.Cell(7, 5).GetValue<int>().Should().Be(0);     // 受入合計 (E列)
+        worksheet.Cell(7, 5).GetValue<int>().Should().Be(10000); // 受入合計 (E列) = 当月チャージ0 + 前年度繰越10000
         worksheet.Cell(7, 6).GetValue<int>().Should().Be(300);   // 払出合計 (F列)
         worksheet.Cell(7, 7).GetValue<int>().Should().Be(9700);  // 残額 (G列) - 累計の代わりにここに表示
         worksheet.Cell(7, 7).Style.NumberFormat.Format.Should().Be("#,##0");
+        // 受入 − 払出 = 残額 が成立
+        (worksheet.Cell(7, 5).GetValue<int>() - worksheet.Cell(7, 6).GetValue<int>())
+            .Should().Be(worksheet.Cell(7, 7).GetValue<int>());
 
         // 累計行が出力されていないこと
         worksheet.Cell(8, 2).GetString().Should().NotBe("累計");
