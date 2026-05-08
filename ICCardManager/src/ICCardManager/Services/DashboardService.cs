@@ -41,18 +41,15 @@ namespace ICCardManager.Services
         /// <returns>ソート済みのダッシュボードアイテムと警告しきい値</returns>
         public async Task<DashboardResult> BuildDashboardAsync(DashboardSortOrder sortOrder)
         {
-            // Issue #504: データ取得を並列化して高速化
-            var settingsTask = _settingsRepository.GetAppSettingsAsync();
-            var cardsTask = _cardRepository.GetAllAsync();
-            var balancesTask = _ledgerRepository.GetAllLatestBalancesAsync();
-            var staffTask = _staffRepository.GetAllAsync();
-
-            await Task.WhenAll(settingsTask, cardsTask, balancesTask, staffTask).ConfigureAwait(false);
-
-            var settings = await settingsTask.ConfigureAwait(false);
-            var cards = await cardsTask.ConfigureAwait(false);
-            var balances = await balancesTask.ConfigureAwait(false);
-            var staffDict = (await staffTask.ConfigureAwait(false)).ToDictionary(s => s.StaffIdm, s => s.Name);
+            // Issue #1452: 同一の SQLiteConnection 上で SQLiteCommand が並列実行されると
+            // SQLITE_MISUSE 不定動作の原因となるため、リポジトリ呼び出しは直列化する。
+            // 旧: Task.WhenAll で並列起動（Issue #504 の高速化）→ SQLite の前提を破る正しさのリグレッション。
+            // 新: 直列 await により単一接続上の同時コマンド実行を防ぐ。
+            var settings = await _settingsRepository.GetAppSettingsAsync().ConfigureAwait(false);
+            var cards = await _cardRepository.GetAllAsync().ConfigureAwait(false);
+            var balances = await _ledgerRepository.GetAllLatestBalancesAsync().ConfigureAwait(false);
+            var staffDict = (await _staffRepository.GetAllAsync().ConfigureAwait(false))
+                .ToDictionary(s => s.StaffIdm, s => s.Name);
 
             var dashboardItems = new List<CardBalanceDashboardItem>();
 
