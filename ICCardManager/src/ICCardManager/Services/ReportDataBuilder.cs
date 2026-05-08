@@ -83,11 +83,9 @@ namespace ICCardManager.Services
             }
 
             // 月計を計算
-            // 年度途中の「○月から繰越」ledgerは残高引継ぎのため受入欄に金額を持たせず集計からも除外する
-            // （既存データで受入に値が入っていても安全に除外するための防御的フィルタ）
-            var monthlyIncome = ledgers
-                .Where(l => !SummaryGenerator.IsMidYearCarryoverSummary(l.Summary))
-                .Sum(l => l.Income);
+            // 「○月から繰越」レコードは Income=null で生成されるため Sum しても結果は同じ。
+            // 集計時のフィルタは撤廃し、表示時の Income 空欄制御は ReportRowBuilder 側に責務分離する。
+            var monthlyIncome = ledgers.Sum(l => l.Income);
             var monthlyExpense = ledgers.Sum(l => l.Expense);
             var monthEndBalance = ledgers.LastOrDefault()?.Balance ?? 0;
 
@@ -100,10 +98,14 @@ namespace ICCardManager.Services
                 (await _ledgerRepository.GetByDateRangeAsync(cardIdm, fiscalYearStart, fiscalYearEnd).ConfigureAwait(false))
                     .Where(l => l.Summary != SummaryGenerator.GetLendingSummary()));
 
-            // 年度途中の繰越ledgerは受入金額扱いしないため累計から除外する
-            var yearlyIncome = yearlyLedgers
-                .Where(l => !SummaryGenerator.IsMidYearCarryoverSummary(l.Summary))
-                .Sum(l => l.Income);
+            // Issue #1494: 「前年度より繰越」レコードは DB に保存されず CarryoverRowData として
+            // 表示用に合成されるため、月計・累計の集計に明示的に加算する必要がある。
+            // 4月の precedingBalance と「年度開始時の前年度繰越額」は同値なので、変数として一元化。
+            var fiscalYearCarryoverIncome = (month == 4)
+                ? (precedingBalance ?? 0)
+                : (await _ledgerRepository.GetCarryoverBalanceAsync(cardIdm, fiscalYearStartYear - 1).ConfigureAwait(false) ?? 0);
+
+            var yearlyIncome = yearlyLedgers.Sum(l => l.Income) + fiscalYearCarryoverIncome;
             var yearlyExpense = yearlyLedgers.Sum(l => l.Expense);
             var currentBalance = yearlyLedgers.LastOrDefault()?.Balance ?? monthEndBalance;
 
@@ -122,13 +124,14 @@ namespace ICCardManager.Services
             if (month == 4)
             {
                 // Issue #813: 4月は月計と累計が同額のため累計行を省略し、月計行に残額を表示
+                // Issue #1494: 4月計の受入には前年度繰越額を含める（紙の出納簿様式で「受入−払出=残額」が成立するように）
                 var aprilBalance = yearlyLedgers.Any()
                     ? currentBalance
                     : (precedingBalance ?? 0);
                 monthlyTotal = new ReportTotalData
                 {
                     Label = SummaryGenerator.GetMonthlySummary(month),
-                    Income = monthlyIncome,
+                    Income = monthlyIncome + fiscalYearCarryoverIncome,
                     Expense = monthlyExpense,
                     Balance = aprilBalance
                 };
