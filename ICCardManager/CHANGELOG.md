@@ -4,6 +4,7 @@
 
 **バグ修正**
 - 月次帳票（物品出納簿）の4月計および5月以降の年度累計の「受入金額」欄に、前年度からの繰越分が計上されない不具合を修正。「前年度より繰越」レコードは DB に保存されず `CarryoverRowData` として表示用に合成されるため、月計・累計の集計に明示的に加算されていなかった。`ReportDataBuilder` で `fiscalYearCarryoverIncome` を変数化し、4月計の Income と5月以降の累計 Income に加算するように修正。これにより紙の出納簿様式での「受入 − 払出 = 残額」が成立するようになった。`IsMidYearCarryoverSummary` による集計除外フィルタは紙出納簿移行カード（Issue #510）の二重計上防止のため引き続き維持する（#1494）
+- `DashboardService.BuildDashboardAsync` および `MainViewModel.HandleCardInStaffWaitingStateAsync` で `Task.WhenAll` により複数のリポジトリ呼び出しを並列起動していた箇所を直列 await に変更（**Issue #504 で導入されたデータ取得並列化を撤回**）。これらは内部で同一の `SQLiteConnection` 上で `SQLiteCommand` を並列実行する経路であり、`System.Data.SQLite` の前提（同一接続上の並列コマンド非保証）を破ることで `SQLITE_MISUSE` または不定動作の原因となっていた。Service 層の `ConfigureAwait(false)` 規約により継続が ThreadPool に逃げるため「WPF Dispatcher による直列化」は成立せず、ViewModel 層でも `SQLiteCommand` 自体が内部で別スレッドにディスパッチされ得るため UI スレッド単独実行は保証されない。直列化により正しさを回復。`DbContext.LeaseConnectionAsync` の XML doc に「Service / ViewModel 層で `Task.WhenAll` 並列起動禁止」の規律を明記して回帰防止。回帰テストとして `DashboardServiceTests.BuildDashboardAsync_リポジトリ呼び出しがオーバーラップしないこと` を追加（#1452）
 
 ### v2.8.0 (2026-05-03)
 

@@ -776,15 +776,10 @@ public partial class MainViewModel : ViewModelBase
     /// </summary>
     private async Task HandleCardInStaffWaitingStateAsync(string idm)
     {
-        // 職員証とカードを並列で検索（高速化）
-        var staffTask = _staffRepository.GetByIdmAsync(idm);
-        var cardTask = _cardRepository.GetByIdmAsync(idm);
-
-        await Task.WhenAll(staffTask, cardTask);
-
-        // awaitを使用してデッドロックを防止（Task.WhenAll後でも.Resultは避ける）
-        var staff = await staffTask;
-        var card = await cardTask;
+        // Issue #1452: 同一の SQLiteConnection 上で SQLiteCommand が並列実行されると
+        // SQLITE_MISUSE 不定動作の原因となるため、リポジトリ呼び出しは直列化する。
+        var staff = await _staffRepository.GetByIdmAsync(idm);
+        var card = await _cardRepository.GetByIdmAsync(idm);
 
         // 職員証かどうか確認
         if (staff != null)

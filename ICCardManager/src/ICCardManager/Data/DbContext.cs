@@ -308,10 +308,27 @@ namespace ICCardManager.Data
         /// 接続リースを非同期で取得する。using文で使用すること。
         /// </summary>
         /// <remarks>
-        /// セマフォは取得しない。WPFのUIスレッドでは全ての非同期操作がDispatcherで
-        /// 直列化されるため、非同期コード間の競合は発生しない。
-        /// バックグラウンドスレッドからのDBアクセスにはLeaseConnection()（同期版）を使用すること。
-        /// 書き込み操作はBeginTransactionAsync()でセマフォ保護される。
+        /// <para>
+        /// セマフォは取得せず、同一の <see cref="SQLiteConnection"/> インスタンスを返す。
+        /// 書き込み操作は <see cref="BeginTransactionAsync"/> でセマフォ保護される。
+        /// バックグラウンドスレッドからの同期 DB アクセスには <see cref="LeaseConnection"/>（同期版）を使用すること。
+        /// </para>
+        /// <para>
+        /// <b>重要（Issue #1452）— 並列起動禁止:</b>
+        /// 本メソッドはセマフォを取得しないため、複数のリポジトリ呼び出しを <c>Task.WhenAll</c> 等で
+        /// 並列起動すると、同一の <see cref="SQLiteConnection"/> 上で <see cref="SQLiteCommand"/> が
+        /// 並列実行される。<c>System.Data.SQLite</c> の <see cref="SQLiteConnection"/> は同一接続上の
+        /// 並列コマンド実行を保証していないため、<c>SQLITE_MISUSE</c> または不定動作の原因となる。
+        /// Service / ViewModel 層は **必ず直列 await** で呼び出すこと。
+        /// </para>
+        /// <para>
+        /// 並列化前提のレビュー観点（誤解されやすいので注記）:
+        /// (1) Service 層は <c>ConfigureAwait(false)</c> 規約により継続が ThreadPool に逃げるため、
+        ///     UI Dispatcher による暗黙の直列化は成立しない。
+        /// (2) ViewModel 層は <c>ConfigureAwait(false)</c> を付けないが、<see cref="SQLiteCommand"/>
+        ///     自体は内部で別スレッドにディスパッチされ得るため、UI スレッド単独で実行される保証はない。
+        ///     よって ViewModel 経路でも <c>Task.WhenAll</c> での並列起動は同様にリスクがある。
+        /// </para>
         /// </remarks>
         public virtual Task<ConnectionLease> LeaseConnectionAsync(CancellationToken ct = default)
         {

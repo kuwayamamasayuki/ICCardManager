@@ -547,4 +547,63 @@ public class DashboardServiceTests
     }
 
     #endregion
+
+    #region Issue #1452: 単一接続上の並列コマンド実行防止（回帰テスト）
+
+    [Fact]
+    public async Task BuildDashboardAsync_リポジトリ呼び出しがオーバーラップしないこと()
+    {
+        // Issue #1452: 同一の SQLiteConnection 上で SQLiteCommand が並列実行されると
+        // SQLITE_MISUSE 不定動作の原因となる。BuildDashboardAsync が Task.WhenAll で
+        // 4 リポジトリを並列起動していたため、本テストでリポジトリ呼び出しの保持区間が
+        // オーバーラップしないこと（最大同時実行数 ≦ 1）を検証する。
+
+        var activeCalls = 0;
+        var maxConcurrentCalls = 0;
+        var lockObj = new object();
+
+        async Task<T> InstrumentedAsync<T>(T value)
+        {
+            lock (lockObj)
+            {
+                activeCalls++;
+                if (activeCalls > maxConcurrentCalls)
+                    maxConcurrentCalls = activeCalls;
+            }
+            // 並列があれば検出されるよう少し滞留させる
+            await Task.Delay(20).ConfigureAwait(false);
+            lock (lockObj)
+            {
+                activeCalls--;
+            }
+            return value;
+        }
+
+        _settingsRepositoryMock
+            .Setup(s => s.GetAppSettingsAsync())
+            .Returns(() => InstrumentedAsync(new AppSettings { WarningBalance = 1000 }));
+        _cardRepositoryMock
+            .Setup(c => c.GetAllAsync())
+            .Returns(() => InstrumentedAsync<IEnumerable<IcCard>>(new List<IcCard>
+            {
+                new IcCard { CardIdm = "0102030405060708", CardType = "はやかけん", CardNumber = "H-001" }
+            }));
+        _ledgerRepositoryMock
+            .Setup(l => l.GetAllLatestBalancesAsync())
+            .Returns(() => InstrumentedAsync(
+                new Dictionary<string, (int Balance, DateTime? LastUsageDate)>()));
+        _staffRepositoryMock
+            .Setup(s => s.GetAllAsync())
+            .Returns(() => InstrumentedAsync<IEnumerable<Staff>>(new List<Staff>()));
+
+        // Act
+        await _service.BuildDashboardAsync(DashboardSortOrder.CardName);
+
+        // Assert
+        maxConcurrentCalls.Should().Be(1,
+            "BuildDashboardAsync は同一 SQLiteConnection 上の SQLITE_MISUSE を防ぐため、" +
+            "リポジトリ呼び出しを直列化する（Issue #1452）");
+    }
+
+    #endregion
 }
