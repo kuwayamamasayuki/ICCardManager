@@ -83,9 +83,12 @@ namespace ICCardManager.Services
             }
 
             // 月計を計算
-            // 「○月から繰越」レコードは Income=null で生成されるため Sum しても結果は同じ。
-            // 集計時のフィルタは撤廃し、表示時の Income 空欄制御は ReportRowBuilder 側に責務分離する。
-            var monthlyIncome = ledgers.Sum(l => l.Income);
+            // 紙出納簿移行カード（Issue #510）では「○月から繰越」レコードが DB に Income=残高 で
+            // 保存される運用のため、月計から除外しないと前月の累計と二重計上になる。
+            // 通常運用カードでは Income=null で生成されるため Sum 影響なし。
+            var monthlyIncome = ledgers
+                .Where(l => !SummaryGenerator.IsMidYearCarryoverSummary(l.Summary))
+                .Sum(l => l.Income);
             var monthlyExpense = ledgers.Sum(l => l.Expense);
             var monthEndBalance = ledgers.LastOrDefault()?.Balance ?? 0;
 
@@ -105,7 +108,10 @@ namespace ICCardManager.Services
                 ? (precedingBalance ?? 0)
                 : (await _ledgerRepository.GetCarryoverBalanceAsync(cardIdm, fiscalYearStartYear - 1).ConfigureAwait(false) ?? 0);
 
-            var yearlyIncome = yearlyLedgers.Sum(l => l.Income) + fiscalYearCarryoverIncome;
+            // 累計も同様に「○月から繰越」レコードを除外（紙出納簿移行カード対策）
+            var yearlyIncome = yearlyLedgers
+                .Where(l => !SummaryGenerator.IsMidYearCarryoverSummary(l.Summary))
+                .Sum(l => l.Income) + fiscalYearCarryoverIncome;
             var yearlyExpense = yearlyLedgers.Sum(l => l.Expense);
             var currentBalance = yearlyLedgers.LastOrDefault()?.Balance ?? monthEndBalance;
 

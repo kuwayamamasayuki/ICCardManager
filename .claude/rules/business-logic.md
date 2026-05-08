@@ -66,8 +66,8 @@ THEN
 
 「前年度より繰越」レコードは DB に保存されず `CarryoverRowData` として表示用に in-memory 合成されるため、月計・累計の集計には明示的に加算する必要がある。
 
-- **4月計の受入金額** = 当月の受入合計 ＋ 前年度繰越額
-- **5月以降の年度累計の受入金額** = 年度内の受入合計 ＋ 前年度繰越額（＋ 紙出納簿移行時のみ `CarryoverIncomeTotal`）
+- **4月計の受入金額** = 当月の受入合計（「○月から繰越」レコード除外） ＋ 前年度繰越額
+- **5月以降の年度累計の受入金額** = 年度内の受入合計（「○月から繰越」レコード除外） ＋ 前年度繰越額（＋ 紙出納簿移行時のみ `CarryoverIncomeTotal`）
 - 紙の出納簿様式での「受入 − 払出 = 残額」が月計・累計のいずれでも成立すること
-- 「○月から繰越」レコード（5月以降の月次繰越表示）は `Income=null` で生成される運用なので、Sum 結果に影響しない
-- `SummaryGenerator.IsMidYearCarryoverSummary` は表示時の Income 空欄制御（ReportRowBuilder）専用とし、集計フィルタとしては使わない
+- 紙出納簿から年度途中で移行したカード（Issue #510）では「○月から繰越」レコードが DB に `Income=残高` で保存される運用がある。これを月計・累計の `Sum` に含めると前月の累計と二重計上になるため、`SummaryGenerator.IsMidYearCarryoverSummary` で **集計から除外する**
+- `IsMidYearCarryoverSummary` は集計フィルタ（ReportDataBuilder）と表示時の Income 空欄制御（ReportRowBuilder）の両方で使用される

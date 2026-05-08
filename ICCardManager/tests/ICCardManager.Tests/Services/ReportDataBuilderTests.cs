@@ -383,9 +383,39 @@ public class ReportDataBuilderTests
         result.CumulativeTotal.Expense.Should().Be(400);
     }
 
-    // Issue #1494: UT-018 No.12「繰越ledgerの受入は月計から除外」のテストを削除。
-    // 「○月から繰越」レコードは現行運用では Income=null で生成されるため、
-    // フィルタ撤廃後も Sum 結果は変わらない。設計書側の記載も併せて削除。
+    [Fact]
+    public async Task BuildAsync_MidYearCarryoverLedger_ExcludedFromMonthlyIncome()
+    {
+        // Arrange: 紙出納簿から年度途中で移行したカードでは「○月から繰越」レコードが DB に
+        // Income=残高 で保存される（Issue #510）。これを月計に加算すると前月の累計と
+        // 二重計上になるため、IsMidYearCarryoverSummary フィルタで除外する。
+        SetupCard();
+        var augustLedgers = new List<Ledger>
+        {
+            CreateTestLedger(1, TestCardIdm, new DateTime(2025, 8, 1),
+                "7月から繰越", 5000, 0, 5000),   // 紙出納簿移行カードの繰越レコード
+            CreateTestLedger(2, TestCardIdm, new DateTime(2025, 8, 10),
+                "鉄道（天神～博多）", 0, 210, 4790)
+        };
+        // 前月(7月)は未登録
+        SetupMonthlyLedgers(TestCardIdm, 2025, 7, new List<Ledger>());
+        SetupCarryoverBalance(TestCardIdm, 2024, null);
+        SetupMonthlyLedgers(TestCardIdm, 2025, 8, augustLedgers);
+        SetupDateRangeLedgers(TestCardIdm,
+            new DateTime(2025, 4, 1), new DateTime(2025, 8, 31), augustLedgers);
+
+        // Act
+        var result = await _builder.BuildAsync(TestCardIdm, 2025, 8);
+
+        // Assert: 月次・年度累計とも繰越ledgerの受入は集計されない（二重計上防止）
+        result.MonthlyTotal.Income.Should().Be(0,
+            "「○月から繰越」レコードの Income は月計から除外される（紙出納簿移行カード対策）");
+        result.MonthlyTotal.Expense.Should().Be(210);
+        result.CumulativeTotal.Should().NotBeNull();
+        result.CumulativeTotal.Income.Should().Be(0,
+            "「○月から繰越」レコードの Income は累計からも除外される");
+        result.CumulativeTotal.Expense.Should().Be(210);
+    }
 
     [Fact]
     public async Task BuildAsync_NoCarryover_DoesNotChangeCumulative()
