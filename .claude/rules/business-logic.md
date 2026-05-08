@@ -71,3 +71,4 @@ THEN
 - 紙の出納簿様式での「受入 − 払出 = 残額」が月計・累計のいずれでも成立すること
 - 紙出納簿から年度途中で移行したカード（Issue #510）では「○月から繰越」レコードが DB に `Income=残高` で保存される運用がある。これを月計・累計の `Sum` に含めると前月の累計と二重計上になるため、`SummaryGenerator.IsMidYearCarryoverSummary` で **集計から除外する**
 - `IsMidYearCarryoverSummary` は集計フィルタ（ReportDataBuilder）と表示時の Income 空欄制御（ReportRowBuilder）の両方で使用される
+- 紙出納簿移行カードの `CarryoverIncomeTotal` / `CarryoverExpenseTotal`（Issue #1215）は **5月以降の年度累計** にのみ加算される。4月は累計行を省略し月計が累計を兼ねる設計（Issue #813）のため、4月帳票には紙時代累計を反映しない（運用上は「4月計の Income には当月チャージ＋前年度繰越のみ表示。紙時代累計は5月以降の累計行で確認」）

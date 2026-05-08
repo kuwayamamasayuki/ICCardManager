@@ -116,8 +116,12 @@ namespace ICCardManager.Services
             var currentBalance = yearlyLedgers.LastOrDefault()?.Balance ?? monthEndBalance;
 
             // Issue #1215: 紙の出納簿から年度途中で移行した場合、
-            // 該当年度の累計には紙の出納簿時代の累計を加算する
-            if (card.CarryoverFiscalYear.HasValue && card.CarryoverFiscalYear.Value == fiscalYearStartYear)
+            // 該当年度の累計には紙の出納簿時代の累計を加算する。
+            // 4月は cumulativeTotal=null（Issue #813）かつ月計には紙時代累計を含めない設計のため
+            // 加算は5月以降のみで意味を持つ。意図を明確化するため month != 4 ガードを併記。
+            if (card.CarryoverFiscalYear.HasValue
+                && card.CarryoverFiscalYear.Value == fiscalYearStartYear
+                && month != 4)
             {
                 yearlyIncome += card.CarryoverIncomeTotal;
                 yearlyExpense += card.CarryoverExpenseTotal;

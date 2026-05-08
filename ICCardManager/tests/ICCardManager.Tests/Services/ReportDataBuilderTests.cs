@@ -1360,6 +1360,49 @@ public class ReportDataBuilderTests
     }
 
     [Fact]
+    public async Task BuildAsync_PaperLedgerMigration_April_NoPrecedingBalance_DoesNotLeakCarryoverIncomeTotal()
+    {
+        // Arrange (改善提案C / Issue #1494): 紙出納簿移行カードの初年度4月境界ケース。
+        // - 紙出納簿で2024年度末まで運用、2025年4月からアプリ運用 (CarryoverFiscalYear=2025)
+        // - 前年度末の DB レコードは存在しない（紙時代）→ precedingBalance=null
+        // - CarryoverIncomeTotal=8000 / CarryoverExpenseTotal=2000（紙時代累計）
+        // 4月計の Income に CarryoverIncomeTotal が誤って漏れ出ないことを検証。
+        // （cumulativeTotal=null なので yearlyIncome 加算結果は破棄される設計）
+        var card = new IcCard
+        {
+            CardIdm = TestCardIdm,
+            CardType = "はやかけん",
+            CardNumber = "001",
+            CarryoverIncomeTotal = 8000,
+            CarryoverExpenseTotal = 2000,
+            CarryoverFiscalYear = 2025
+        };
+        _cardRepositoryMock
+            .Setup(r => r.GetByIdmAsync(TestCardIdm, true))
+            .ReturnsAsync(card);
+        SetupCarryoverBalance(TestCardIdm, 2024, null);  // 紙時代なので DB レコードなし
+        var aprilLedgers = new List<Ledger>
+        {
+            CreateTestLedger(1, TestCardIdm, new DateTime(2025, 4, 10),
+                "鉄道（天神～博多）", 0, 210, 7790)
+        };
+        SetupMonthlyLedgers(TestCardIdm, 2025, 4, aprilLedgers);
+        SetupDateRangeLedgers(TestCardIdm,
+            new DateTime(2025, 4, 1), new DateTime(2025, 4, 30), aprilLedgers);
+
+        // Act
+        var result = await _builder.BuildAsync(TestCardIdm, 2025, 4);
+
+        // Assert: precedingBalance=null なので前年度繰越加算分はゼロ。
+        // 紙時代累計（8000）は cumulativeTotal=null のため4月帳票には反映されない。
+        result.Carryover.Should().BeNull("precedingBalance=null のため繰越行は出力されない");
+        result.MonthlyTotal.Income.Should().Be(0,
+            "precedingBalance=null かつ当月チャージなしのため Income=0。CarryoverIncomeTotal は4月帳票に漏れない");
+        result.MonthlyTotal.Expense.Should().Be(210);
+        result.CumulativeTotal.Should().BeNull("4月は累計省略");
+    }
+
+    [Fact]
     public async Task BuildAsync_April_NoLedgers_MonthlyTotal_IncomeEqualsBalance()
     {
         // Arrange: 4月に利用なしで前年度繰越のみ
