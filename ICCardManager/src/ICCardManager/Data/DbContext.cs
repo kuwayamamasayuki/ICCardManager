@@ -261,47 +261,24 @@ namespace ICCardManager.Data
         }
 
         /// <summary>
-        /// ディレクトリを作成し、全ユーザーがアクセスできるように権限を設定
+        /// ディレクトリを作成する
         /// </summary>
         /// <remarks>
-        /// 既存ディレクトリに対しても権限を確認・修正する。
-        /// AddAccessRuleは同一ルールが既にあれば何もしないため、
-        /// 毎回呼んでも安全（冪等）。
+        /// Issue #1455: 旧実装ではランタイムで <c>BUILTIN\Users : FullControl</c> を
+        /// <c>AddAccessRule</c> で付与していたが、以下の理由で撤廃した:
+        /// (1) <c>FullControl</c> は削除権限まで含むため、一般ユーザーが他ユーザーのファイルを
+        ///     削除・差替え可能な過剰権限となっていた（PII 置換攻撃の足掛かり）。
+        /// (2) <c>AddAccessRule</c> は冪等ではなく、起動の度に新規 ACE が追加され ACL が累積する。
+        /// (3) インストーラー (<c>installer/ICCardManager.iss</c>) が
+        ///     <c>{commonappdata}\ICCardManager</c> 配下に <c>Permissions: users-full</c> を
+        ///     設定済みのため、ランタイムでの再付与は機能的に冗長。
+        /// 共有モード（UNC パス）等インストーラーの管理外パスを使う場合の権限は管理者責任とする。
         /// </remarks>
         /// <param name="directoryPath">ディレクトリパス</param>
         internal static void EnsureDirectoryWithPermissions(string directoryPath)
         {
-            try
-            {
-                // Directory.CreateDirectoryは既存ディレクトリに対しても安全（冪等）
-                Directory.CreateDirectory(directoryPath);
-
-                // 新規・既存問わず、Usersグループにフルコントロール権限を付与
-                var directoryInfo = new DirectoryInfo(directoryPath);
-                var directorySecurity = directoryInfo.GetAccessControl();
-                var usersIdentity = new SecurityIdentifier(WellKnownSidType.BuiltinUsersSid, null);
-                var accessRule = new FileSystemAccessRule(
-                    usersIdentity,
-                    FileSystemRights.FullControl,
-                    InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit,
-                    PropagationFlags.None,
-                    AccessControlType.Allow);
-                directorySecurity.AddAccessRule(accessRule);
-                directoryInfo.SetAccessControl(directorySecurity);
-
-#if DEBUG
-                System.Diagnostics.Debug.WriteLine($"[DbContext] ディレクトリ権限を確認・設定: {directoryPath}");
-#endif
-            }
-            catch (Exception ex)
-            {
-                _ = ex; // 警告抑制（DEBUGビルドでのみ使用）
-                // 権限設定に失敗してもディレクトリ作成は試みる
-#if DEBUG
-                System.Diagnostics.Debug.WriteLine($"[DbContext] ディレクトリ権限設定エラー: {ex.Message}");
-#endif
-                Directory.CreateDirectory(directoryPath);
-            }
+            // Directory.CreateDirectoryは既存ディレクトリに対しても安全（冪等）
+            Directory.CreateDirectory(directoryPath);
         }
 
         /// <summary>
@@ -770,7 +747,8 @@ namespace ICCardManager.Data
         /// 旧バージョンでは継承を無効化し現在のユーザーのみにACLを設定していたため、
         /// 他のWindowsユーザーがDBにアクセスできなかった。
         /// 本メソッドは継承を再有効化し、明示的ACLを削除することで、
-        /// 親ディレクトリ（EnsureDirectoryWithPermissionsでUsers FullControlを設定済み）
+        /// 親ディレクトリ（インストーラー <c>ICCardManager.iss</c> が
+        /// <c>{commonappdata}\ICCardManager</c> に <c>users-full</c> を設定済み）
         /// からの権限継承によりアクセス制御を行う。
         ///
         /// SQLiteの関連ファイル（-wal, -shm, -journal）も同様に処理する。

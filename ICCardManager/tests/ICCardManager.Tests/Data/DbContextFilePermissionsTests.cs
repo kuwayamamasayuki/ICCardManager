@@ -165,7 +165,7 @@ public class DbContextFilePermissionsTests : IDisposable
     }
 
     [Fact]
-    public void EnsureDirectoryWithPermissions_新規ディレクトリの場合_Usersグループにフルコントロールが付与される()
+    public void EnsureDirectoryWithPermissions_新規ディレクトリの場合_ディレクトリが作成される()
     {
         // Arrange
         var dirPath = Path.Combine(_tempDir, "newdir");
@@ -174,35 +174,37 @@ public class DbContextFilePermissionsTests : IDisposable
         DbContext.EnsureDirectoryWithPermissions(dirPath);
 
         // Assert
-        var dirInfo = new DirectoryInfo(dirPath);
-        dirInfo.Exists.Should().BeTrue();
-        var dirSecurity = dirInfo.GetAccessControl();
-        var rules = dirSecurity.GetAccessRules(true, false, typeof(SecurityIdentifier));
-
-        var usersIdentity = new SecurityIdentifier(WellKnownSidType.BuiltinUsersSid, null);
-        var hasUsersAccess = false;
-        foreach (FileSystemAccessRule rule in rules)
-        {
-            if (rule.IdentityReference.Equals(usersIdentity)
-                && rule.AccessControlType == AccessControlType.Allow
-                && rule.FileSystemRights.HasFlag(FileSystemRights.FullControl)
-                && rule.InheritanceFlags.HasFlag(InheritanceFlags.ContainerInherit)
-                && rule.InheritanceFlags.HasFlag(InheritanceFlags.ObjectInherit))
-            {
-                hasUsersAccess = true;
-                break;
-            }
-        }
-
-        hasUsersAccess.Should().BeTrue("Usersグループにフルコントロール（継承あり）が付与されるべき");
+        Directory.Exists(dirPath).Should().BeTrue("ディレクトリが作成されるべき");
     }
 
     [Fact]
-    public void EnsureDirectoryWithPermissions_既存ディレクトリの場合でもUsersグループにフルコントロールが付与される()
+    public void EnsureDirectoryWithPermissions_既存ディレクトリの場合_例外が発生しない()
     {
-        // Arrange: ディレクトリを先に作成（Usersの権限なし）
+        // Arrange: ディレクトリを先に作成
         var dirPath = Path.Combine(_tempDir, "existingdir");
         Directory.CreateDirectory(dirPath);
+
+        // Act
+        var act = () => DbContext.EnsureDirectoryWithPermissions(dirPath);
+
+        // Assert
+        act.Should().NotThrow("既存ディレクトリに対しても冪等に動作すべき");
+        Directory.Exists(dirPath).Should().BeTrue();
+    }
+
+    /// <summary>
+    /// Issue #1455: ランタイムでの ACL 拡張は撤廃された。
+    /// インストーラーが親ディレクトリに <c>users-full</c> を設定済みであり、
+    /// ランタイムで <c>BUILTIN\Users : FullControl</c> を <c>AddAccessRule</c> すると
+    /// (1) 削除権限を含む過剰権限となり、
+    /// (2) 起動の度に新規 ACE が追加され ACL が累積する。
+    /// 本テストは過剰権限の付与が再発しないことを保証する regression detector。
+    /// </summary>
+    [Fact]
+    public void EnsureDirectoryWithPermissions_明示的なUsersFullControlACEを追加しない()
+    {
+        // Arrange
+        var dirPath = Path.Combine(_tempDir, "noexplicit_acl");
 
         // Act
         DbContext.EnsureDirectoryWithPermissions(dirPath);
@@ -210,22 +212,47 @@ public class DbContextFilePermissionsTests : IDisposable
         // Assert
         var dirInfo = new DirectoryInfo(dirPath);
         var dirSecurity = dirInfo.GetAccessControl();
-        var rules = dirSecurity.GetAccessRules(true, false, typeof(SecurityIdentifier));
+        // includeExplicit=true, includeInherited=false で、明示的に追加された ACE のみ取得
+        var explicitRules = dirSecurity.GetAccessRules(true, false, typeof(SecurityIdentifier));
 
         var usersIdentity = new SecurityIdentifier(WellKnownSidType.BuiltinUsersSid, null);
-        var hasUsersAccess = false;
-        foreach (FileSystemAccessRule rule in rules)
+        foreach (FileSystemAccessRule rule in explicitRules)
         {
             if (rule.IdentityReference.Equals(usersIdentity)
-                && rule.AccessControlType == AccessControlType.Allow
-                && rule.FileSystemRights.HasFlag(FileSystemRights.FullControl))
+                && rule.AccessControlType == AccessControlType.Allow)
             {
-                hasUsersAccess = true;
-                break;
+                rule.FileSystemRights.HasFlag(FileSystemRights.FullControl)
+                    .Should().BeFalse(
+                        "Issue #1455: BUILTIN\\Users への明示的 FullControl ACE は付与しない");
             }
         }
+    }
 
-        hasUsersAccess.Should().BeTrue("既存ディレクトリでもUsersグループにフルコントロールが付与されるべき");
+    /// <summary>
+    /// Issue #1455: 旧実装の <c>AddAccessRule</c> は冪等ではなく、繰り返し呼び出すと
+    /// ACE が累積していた。本テストは複数回呼び出しても明示的 ACE 数が増加しないことを検証する。
+    /// </summary>
+    [Fact]
+    public void EnsureDirectoryWithPermissions_複数回呼び出してもACEが累積しない()
+    {
+        // Arrange
+        var dirPath = Path.Combine(_tempDir, "no_acl_growth");
+
+        // Act: 5回呼び出す
+        for (int i = 0; i < 5; i++)
+        {
+            DbContext.EnsureDirectoryWithPermissions(dirPath);
+        }
+
+        // Assert: 明示的 ACE 数は呼び出し回数に依存しない
+        var dirInfo = new DirectoryInfo(dirPath);
+        var dirSecurity = dirInfo.GetAccessControl();
+        var explicitRules = dirSecurity.GetAccessRules(true, false, typeof(SecurityIdentifier));
+
+        // 通常はインストーラー由来の ACE のみで、ランタイムでの追加が無いことを確認。
+        // テスト環境では親 (TempPath) の ACE を継承するのみで、明示的 ACE は 0 件。
+        explicitRules.Count.Should().BeLessThanOrEqualTo(1,
+            "ランタイムで明示的 ACE が累積追加されるべきではない（実際の運用ではインストーラーの ACE のみ）");
     }
 
     /// <summary>

@@ -5,8 +5,6 @@ using System.Linq;
 using System.Threading.Tasks;
 using System.IO;
 using System.Security;
-using System.Security.AccessControl;
-using System.Security.Principal;
 using ICCardManager.Common;
 using ICCardManager.Common.Exceptions;
 using ICCardManager.Data;
@@ -561,32 +559,19 @@ namespace ICCardManager.Services
         }
 
         /// <summary>
-        /// ディレクトリを作成し、全ユーザーがアクセスできるように権限を設定
+        /// バックアップディレクトリを作成する
         /// </summary>
+        /// <remarks>
+        /// Issue #1455: ランタイムで <c>BUILTIN\Users : FullControl</c> を付与する処理を撤廃した。
+        /// インストーラーが <c>{commonappdata}\ICCardManager\backup</c> に
+        /// <c>Permissions: users-full</c> を設定済みのため、ランタイムでの再付与は不要。
+        /// 詳細は <see cref="ICCardManager.Data.DbContext.EnsureDirectoryWithPermissions"/> 参照。
+        /// </remarks>
         /// <param name="directoryPath">ディレクトリパス</param>
         private static void EnsureDirectoryWithPermissions(string directoryPath)
         {
-            try
-            {
-                Directory.CreateDirectory(directoryPath);
-
-                var directoryInfo = new DirectoryInfo(directoryPath);
-                var directorySecurity = directoryInfo.GetAccessControl();
-                var usersIdentity = new SecurityIdentifier(WellKnownSidType.BuiltinUsersSid, null);
-                var accessRule = new FileSystemAccessRule(
-                    usersIdentity,
-                    FileSystemRights.FullControl,
-                    InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit,
-                    PropagationFlags.None,
-                    AccessControlType.Allow);
-                directorySecurity.AddAccessRule(accessRule);
-                directoryInfo.SetAccessControl(directorySecurity);
-            }
-            catch
-            {
-                // 権限設定に失敗してもディレクトリ作成は試みる
-                Directory.CreateDirectory(directoryPath);
-            }
+            // Directory.CreateDirectoryは既存ディレクトリに対しても安全（冪等）
+            Directory.CreateDirectory(directoryPath);
         }
 
     }
