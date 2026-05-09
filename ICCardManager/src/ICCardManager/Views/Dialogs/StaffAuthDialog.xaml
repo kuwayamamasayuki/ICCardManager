@@ -24,13 +24,18 @@
 
         <!-- アイコンとタイトル -->
         <StackPanel Grid.Row="0" HorizontalAlignment="Center" Margin="0,0,0,20">
-            <TextBlock Text="🔐" FontSize="{DynamicResource DialogLargeIconFontSize}" HorizontalAlignment="Center" Margin="0,0,0,10"/>
+            <TextBlock Text="🔐" FontSize="{DynamicResource DialogLargeIconFontSize}" HorizontalAlignment="Center" Margin="0,0,0,10"
+                       AutomationProperties.Name="認証アイコン"
+                       AutomationProperties.HelpText="鍵のアイコン。職員証による認証画面であることを示します"/>
+            <!-- Issue #1468: TextBlock は Text 自体がスクリーンリーダーに読み上げられる。
+                 Name を付けると Text の読み上げが上書きされるため、HelpText のみで補足。 -->
             <TextBlock Text="操作者を記録するため、職員証をタッチしてください"
                        FontSize="{DynamicResource LargeFontSize}"
                        FontWeight="Bold"
                        HorizontalAlignment="Center"
                        TextWrapping="Wrap"
-                       TextAlignment="Center"/>
+                       TextAlignment="Center"
+                       AutomationProperties.HelpText="職員証をICカードリーダーにタッチして本人確認を行ってください"/>
         </StackPanel>
 
         <!-- 操作内容の説明 -->
@@ -40,23 +45,31 @@
                            FontSize="{DynamicResource SmallFontSize}"
                            Foreground="{DynamicResource MutedTextBrush}"
                            Margin="0,0,0,3"/>
+                <!-- Issue #1468: 動的にテキストが書き換わる TextBlock では AutomationProperties.Name を設定しない。
+                     Name を付けると Text のフォールバック読み上げが上書きされ、内容変化がスクリーン
+                     リーダーに伝わらないため、HelpText のみで補足情報を付与する。 -->
                 <TextBlock x:Name="OperationDescriptionText"
                            Text="履歴の編集"
                            FontSize="{DynamicResource BaseFontSize}"
                            FontWeight="SemiBold"
-                           Foreground="{DynamicResource InfoTextBrush}"/>
+                           Foreground="{DynamicResource InfoTextBrush}"
+                           AutomationProperties.HelpText="この認証によって許可される操作の内容です"/>
             </StackPanel>
         </Border>
 
         <!-- ステータスメッセージ -->
         <Border x:Name="StatusBorder" Grid.Row="2" CornerRadius="4" Padding="12" Margin="0,0,0,15"
                 Background="{DynamicResource LendingBackgroundBrush}" Visibility="Collapsed">
+            <!-- Issue #1468: 動的更新される TextBlock。Name を付けず Text 自体を読み上げ対象にし、
+                 LiveSetting=Assertive でステータス変化（成功・失敗）を即時通知する。 -->
             <TextBlock x:Name="StatusText"
                        Text=""
                        FontSize="{DynamicResource BaseFontSize}"
                        TextWrapping="Wrap"
                        Foreground="{DynamicResource LendingForegroundBrush}"
-                       HorizontalAlignment="Center"/>
+                       HorizontalAlignment="Center"
+                       AutomationProperties.HelpText="認証処理の現在の状態（成功・失敗・進行中など）"
+                       AutomationProperties.LiveSetting="Assertive"/>
         </Border>
 
         <!-- タイムアウト表示 -->
@@ -65,12 +78,16 @@
                        FontSize="{DynamicResource SmallFontSize}"
                        Foreground="{DynamicResource MutedTextBrush}"
                        HorizontalAlignment="Center"/>
+            <!-- Issue #1468: 動的更新されるカウントダウン。LiveSetting=Polite で頻繁な変化が
+                 スクリーンリーダーの読み上げを阻害しないように Polite を選択。HelpText で補足。 -->
             <TextBlock x:Name="TimeoutText"
                        Text=""
                        FontSize="{DynamicResource LargeFontSize}"
                        FontWeight="Bold"
                        Foreground="{DynamicResource PrimaryBrush}"
-                       HorizontalAlignment="Center"/>
+                       HorizontalAlignment="Center"
+                       AutomationProperties.HelpText="この時間が0になると認証は自動的にキャンセルされます"
+                       AutomationProperties.LiveSetting="Polite"/>
         </StackPanel>
 
         <!-- キャンセルボタン -->
