@@ -232,27 +232,43 @@ public class DbContextFilePermissionsTests : IDisposable
     /// Issue #1455: 旧実装の <c>AddAccessRule</c> は冪等ではなく、繰り返し呼び出すと
     /// ACE が累積していた。本テストは複数回呼び出しても明示的 ACE 数が増加しないことを検証する。
     /// </summary>
+    /// <remarks>
+    /// 絶対値（0 や 1 等）でアサートするとテスト実行環境（<c>Path.GetTempPath()</c> の ACL 構成、
+    /// VirtualStore 設定、ローミングプロファイル等）に依存して false positive / false negative
+    /// が発生しうる。本テストは「初回呼び出し後の件数」を基準に「N 回呼び出し後も同件数」を
+    /// 検証することで、環境依存を排除して累積発生のみを検出する。
+    /// </remarks>
     [Fact]
     public void EnsureDirectoryWithPermissions_複数回呼び出してもACEが累積しない()
     {
         // Arrange
         var dirPath = Path.Combine(_tempDir, "no_acl_growth");
 
-        // Act: 5回呼び出す
-        for (int i = 0; i < 5; i++)
+        // Act 1: 初回呼び出しで基準件数を取得
+        DbContext.EnsureDirectoryWithPermissions(dirPath);
+        var initialExplicitAceCount = GetExplicitAceCount(dirPath);
+
+        // Act 2: 追加で 4 回（合計 5 回）呼び出す
+        for (int i = 0; i < 4; i++)
         {
             DbContext.EnsureDirectoryWithPermissions(dirPath);
         }
 
-        // Assert: 明示的 ACE 数は呼び出し回数に依存しない
+        // Assert: 明示的 ACE 数は初回と同じ（累積していない）
+        var finalExplicitAceCount = GetExplicitAceCount(dirPath);
+        finalExplicitAceCount.Should().Be(initialExplicitAceCount,
+            "ランタイムでの繰り返し呼び出しで明示的 ACE が増えてはならない（旧 AddAccessRule 非冪等問題の回帰防止）");
+    }
+
+    /// <summary>
+    /// 明示的（継承ではない）に追加された ACE の件数を取得する。
+    /// </summary>
+    private static int GetExplicitAceCount(string dirPath)
+    {
         var dirInfo = new DirectoryInfo(dirPath);
         var dirSecurity = dirInfo.GetAccessControl();
-        var explicitRules = dirSecurity.GetAccessRules(true, false, typeof(SecurityIdentifier));
-
-        // 通常はインストーラー由来の ACE のみで、ランタイムでの追加が無いことを確認。
-        // テスト環境では親 (TempPath) の ACE を継承するのみで、明示的 ACE は 0 件。
-        explicitRules.Count.Should().BeLessThanOrEqualTo(1,
-            "ランタイムで明示的 ACE が累積追加されるべきではない（実際の運用ではインストーラーの ACE のみ）");
+        // includeExplicit=true, includeInherited=false で、明示的に追加された ACE のみ取得
+        return dirSecurity.GetAccessRules(true, false, typeof(SecurityIdentifier)).Count;
     }
 
     /// <summary>
