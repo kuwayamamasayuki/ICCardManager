@@ -177,7 +177,7 @@ public class DialogAutomationPropertiesCoverageTests
         var xaml = ReadDialog("StaffAuthDialog.xaml");
 
         Regex.IsMatch(xaml,
-            @"x:Name=""StatusBorder""[\s\S]*?Visibility=""Collapsed""")
+            @"x:Name=""StatusBorder""[^>]*?Visibility=""Collapsed""")
             .Should().BeFalse(
             "StaffAuthDialog: StatusBorder の初期 Visibility が Collapsed だと " +
             "AutomationTree から除外され、Text 更新時に LiveRegionChanged が発火しない（Issue #1509）。" +
