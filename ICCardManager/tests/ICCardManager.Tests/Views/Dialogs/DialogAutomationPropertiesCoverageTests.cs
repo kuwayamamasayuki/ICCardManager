@@ -166,6 +166,131 @@ public class DialogAutomationPropertiesCoverageTests
             "HelpText と LiveSetting のみを使い、Text 自体を読み上げ対象にすること。");
     }
 
+    /// <summary>
+    /// Issue #1509: StatusBorder の初期 Visibility が Collapsed であってはならない。
+    /// Collapsed → Visible 遷移は WPF UI Automation の LiveRegionChanged を発火させないため、
+    /// 常時可視化して AutomationTree 上に常駐させる必要がある。
+    /// </summary>
+    [Fact]
+    public void StaffAuthDialog_StatusBorder_should_not_be_initially_collapsed()
+    {
+        var xaml = ReadDialog("StaffAuthDialog.xaml");
+
+        Regex.IsMatch(xaml,
+            @"x:Name=""StatusBorder""[^>]*?Visibility=""Collapsed""")
+            .Should().BeFalse(
+            "StaffAuthDialog: StatusBorder の初期 Visibility が Collapsed だと " +
+            "AutomationTree から除外され、Text 更新時に LiveRegionChanged が発火しない（Issue #1509）。" +
+            "Background=\"Transparent\" + BorderThickness=\"0\" で常時可視化すること。");
+    }
+
+    /// <summary>
+    /// Issue #1509: ShowStatus 内で UIElementAutomationPeer.RaiseAutomationEvent を
+    /// 明示呼び出ししないと、Text 代入だけでは LiveRegionChanged が確実に発火しない。
+    /// </summary>
+    [Fact]
+    public void StaffAuthDialog_code_behind_should_raise_LiveRegionChanged()
+    {
+        var codeBehind = ReadCodeBehind("StaffAuthDialog.xaml.cs");
+
+        codeBehind.Should().Contain(
+            "RaiseAutomationEvent(AutomationEvents.LiveRegionChanged)",
+            "StaffAuthDialog: Text 更新だけでは LiveRegionChanged が確実に発火しないため、" +
+            "ShowStatus 内で UIElementAutomationPeer.RaiseAutomationEvent(AutomationEvents.LiveRegionChanged) を明示呼び出しすること（Issue #1509）。");
+    }
+
+    /// <summary>
+    /// Issue #1509: 認証成功時にも ShowStatus でステータス表示し、
+    /// スクリーンリーダーに認証成功を通知する。
+    /// </summary>
+    [Fact]
+    public void StaffAuthDialog_authentication_success_path_should_call_ShowStatus()
+    {
+        var codeBehind = ReadCodeBehind("StaffAuthDialog.xaml.cs");
+
+        // OnCardRead の if (staff != null) { ... } ブロック内に ShowStatus 呼び出しが必要。
+        // 「認証に成功」というメッセージリテラルで成功パスを識別する。
+        Regex.IsMatch(codeBehind, @"ShowStatus\(\$?""認証に成功")
+            .Should().BeTrue(
+            "StaffAuthDialog: 認証成功時にも ShowStatus(\"認証に成功しました...\") を呼び出して " +
+            "スクリーンリーダー利用者に成功を通知すること（Issue #1509）。");
+    }
+
+    /// <summary>
+    /// Issue #1509/Issue #1392: ShowStatus メソッド本体に色値リテラル（#RRGGBB）を
+    /// 直接記述してはならない。AccessibilityStyles.xaml のブラシキーを
+    /// DynamicResource / FindResource 経由で参照すること。
+    /// </summary>
+    [Fact]
+    public void StaffAuthDialog_ShowStatus_should_use_DynamicResource_for_colors()
+    {
+        var codeBehind = ReadCodeBehind("StaffAuthDialog.xaml.cs");
+
+        // ShowStatus メソッド本体を抽出
+        var showStatusBody = ExtractMethodBody(codeBehind, "ShowStatus");
+
+        // 妥当性チェック: ExtractMethodBody が想定通りの範囲を抽出できているか確認する。
+        // ShowStatus は必ず StatusText.Text に書き込むため、抽出本文に "StatusText" が含まれるはず。
+        // 含まれない場合は ExtractMethodBody の制約（文字列/コメント中の {} 非対応）に
+        // 引っかかっている可能性がある。
+        showStatusBody.Should().Contain("StatusText",
+            "ExtractMethodBody が ShowStatus の本体を正しく抽出できていない可能性。" +
+            "ヘルパの制約（文字列リテラル内の {} 非対応など）に該当する変更が " +
+            "ShowStatus に入った可能性があるため、ヘルパまたは ShowStatus の修正を検討すること。");
+
+        Regex.IsMatch(showStatusBody, @"0x[0-9A-Fa-f]{2}")
+            .Should().BeFalse(
+            "StaffAuthDialog.ShowStatus: 色値リテラル（0xFF, 0xEB 等）は AccessibilityStyles.xaml の " +
+            "ブラシキー（ErrorBackgroundBrush / SuccessBackgroundBrush 等）を FindResource 経由で参照すること（Issue #1392）。" +
+            "現在のメソッド本体: " + showStatusBody);
+    }
+
+    /// <summary>
+    /// code-behind ファイルを読み込む。Views/Dialogs/ 配下を想定。
+    /// </summary>
+    private static string ReadCodeBehind(string fileName)
+    {
+        var path = Path.Combine(DialogsDirectory, fileName);
+        File.Exists(path).Should().BeTrue($"code-behind {fileName} が存在すべき");
+        return File.ReadAllText(path);
+    }
+
+    /// <summary>
+    /// 指定メソッドの本体（{ ... } の中身）をテキストから抽出する。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 単純な中括弧バランススキャナ。本実装は C# の以下の構文を**認識しない**:
+    /// 文字列リテラル内の <c>{</c>/<c>}</c>、補間文字列 <c>$"{expr}"</c>、
+    /// 逐語的文字列 <c>@"..."</c>、char リテラル <c>'{'</c>、コメント。
+    /// </para>
+    /// <para>
+    /// 静的検査ヘルパとしての利用想定: 対象メソッド本体に <c>{</c>/<c>}</c> を含む
+    /// 文字列リテラル等が無いことが前提。新規に対象メソッドを追加する際は、
+    /// 抽出結果に期待されるキーワードが含まれることをアサート側で確認すること。
+    /// </para>
+    /// </remarks>
+    private static string ExtractMethodBody(string code, string methodName)
+    {
+        var pattern = $@"\b{Regex.Escape(methodName)}\s*\([^)]*\)\s*(?::\s*base\([^)]*\))?\s*\{{";
+        var startMatch = Regex.Match(code, pattern);
+        if (!startMatch.Success)
+        {
+            throw new InvalidOperationException($"メソッド {methodName} が見つかりません");
+        }
+
+        var start = startMatch.Index + startMatch.Length;
+        var depth = 1;
+        var pos = start;
+        while (pos < code.Length && depth > 0)
+        {
+            if (code[pos] == '{') depth++;
+            else if (code[pos] == '}') depth--;
+            pos++;
+        }
+        return code.Substring(start, pos - start - 1);
+    }
+
     private static string ReadDialog(string fileName)
     {
         var path = Path.Combine(DialogsDirectory, fileName);

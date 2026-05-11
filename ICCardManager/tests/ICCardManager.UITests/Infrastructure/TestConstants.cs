@@ -43,6 +43,34 @@ namespace ICCardManager.UITests.Infrastructure
         public const string HistoryArea = "利用履歴表示エリア";
         public const string DashboardSortOrder = "ダッシュボードの並び順";
 
+        // ── StaffAuthDialog ───────────────────────────────
+        /// <summary>
+        /// StaffAuthDialog のウィンドウタイトル（Title="職員証による認証"）。
+        /// </summary>
+        public const string StaffAuthDialogName = "職員証による認証";
+
+        /// <summary>
+        /// StaffAuthDialog の StatusText に付与される AutomationProperties.HelpText の値。
+        /// AutomationId が無い場合は HelpText で要素を識別する。
+        /// </summary>
+        public const string StaffAuthStatusHelpText = "認証処理の現在の状態（成功・失敗・進行中など）";
+
+        /// <summary>
+        /// デバッグ用仮想タッチボタンの AutomationProperties.Name。
+        /// DEBUG ビルド時のみ表示される（Issue #688）。
+        /// </summary>
+        public const string DebugVirtualTouchButtonName = "職員証仮想タッチ（デバッグ用）";
+
+        /// <summary>
+        /// StaffManageDialog の削除ボタンの AutomationProperties.Name。
+        /// </summary>
+        public const string StaffManageDeleteButtonName = "削除";
+
+        /// <summary>
+        /// StaffAuthDialog のキャンセルボタン名。
+        /// </summary>
+        public const string StaffAuthCancelButtonName = "キャンセル";
+
         // ── タイムアウト（秒） ────────────────────────────
         public const int AppLaunchTimeoutSeconds = 30;
         public const int DialogOpenTimeoutSeconds = 10;

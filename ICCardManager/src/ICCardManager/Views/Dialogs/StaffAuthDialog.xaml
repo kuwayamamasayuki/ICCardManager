@@ -58,16 +58,20 @@
         </Border>
 
         <!-- ステータスメッセージ -->
+        <!-- Issue #1509: StatusBorder は常時可視化して AutomationTree 上に常駐させる。
+             Collapsed → Visible 遷移では LiveRegionChanged が発火しないため、
+             Text 更新時に code-behind から AutomationPeer.RaiseAutomationEvent を明示発火する。
+             初期は背景透明・枠なしで視覚的に中立、Text 設定時に背景色・枠を切り替える。 -->
         <Border x:Name="StatusBorder" Grid.Row="2" CornerRadius="4" Padding="12" Margin="0,0,0,15"
-                Background="{DynamicResource LendingBackgroundBrush}" Visibility="Collapsed">
-            <!-- Issue #1468: 動的更新される TextBlock。Name を付けず Text 自体を読み上げ対象にし、
+                Background="Transparent" BorderThickness="0" MinHeight="44">
+            <!-- Issue #1468/#1509: 動的更新される TextBlock。Name を付けず Text 自体を読み上げ対象にし、
                  LiveSetting=Assertive でステータス変化（成功・失敗）を即時通知する。 -->
             <TextBlock x:Name="StatusText"
                        Text=""
                        FontSize="{DynamicResource BaseFontSize}"
                        TextWrapping="Wrap"
-                       Foreground="{DynamicResource LendingForegroundBrush}"
                        HorizontalAlignment="Center"
+                       VerticalAlignment="Center"
                        AutomationProperties.HelpText="認証処理の現在の状態（成功・失敗・進行中など）"
                        AutomationProperties.LiveSetting="Assertive"/>
         </Border>

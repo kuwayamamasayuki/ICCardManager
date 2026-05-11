@@ -4,6 +4,7 @@ using System.IO;
 using FlaUI.Core;
 using FlaUI.Core.AutomationElements;
 using FlaUI.UIA3;
+using System.Data.SQLite;
 
 namespace ICCardManager.UITests.Infrastructure
 {
@@ -44,10 +45,84 @@ namespace ICCardManager.UITests.Infrastructure
         }
 
         /// <summary>
+        /// テスト用の職員 1 件を事前投入してアプリを起動する。
+        /// </summary>
+        /// <remarks>
+        /// StaffAuthDialog をトリガーするテスト用。
+        /// IDm "FFFF000000000001"（DebugVirtualTouchButton と一致）で職員「テスト職員」を登録する。
+        /// 既存 DB がある場合は退避し、新規空 DB を作って職員を投入する。
+        /// マイグレーションは一時的にアプリを起動して実行させ、終了後に職員 INSERT を行い、
+        /// 再度本起動する。ただし初回起動の Dispose が DB をリストアしないよう、
+        /// 初回 Dispose 前に BackupPath を削除してリストアをスキップする。
+        /// </remarks>
+        public static AppFixture LaunchWithSeededStaff()
+        {
+            RecoverOrphanBackups();
+
+            // 既存 DB を退避
+            if (File.Exists(DbPath))
+            {
+                CopyFileWithRetry(DbPath, DbBackupPath, maxRetries: 5, delayMs: 500);
+            }
+
+            // 空 DB ファイルを削除（アプリ初回起動でマイグレーション実行）
+            try { File.Delete(DbPath); } catch { /* ignore */ }
+
+            // アプリを起動して初期マイグレーションを実行させる
+            var initialFixture = Launch();
+            // メインウィンドウを取得することでアプリが完全初期化（DB マイグレーション完了）を保証
+            _ = initialFixture.MainWindow;
+
+            // Dispose 時に DB がリストアされないよう、BackupPath を退避してからリストアを防ぐ
+            // ※ initialFixture._dbBackedUp = true だと Dispose 後に BackupPath から DbPath へ復元されるため、
+            //    BackupPath を別名に移動しておき、Dispose 後に職員 INSERT → 再起動、最後に元の BackupPath を復元
+            var seededBackupPath = DbBackupPath + ".seeded-original";
+            if (File.Exists(DbBackupPath))
+            {
+                CopyFileWithRetry(DbBackupPath, seededBackupPath, maxRetries: 3, delayMs: 300);
+                try { File.Delete(DbBackupPath); } catch { /* ignore */ }
+            }
+
+            // 初回 Dispose（_dbBackedUp=true だが BackupPath が無いのでリストアされない）
+            initialFixture.Dispose();
+
+            // プロセス終了後の DB ファイルロック解放を待つ
+            System.Threading.Thread.Sleep(1000);
+
+            // SQLite に職員を直接 INSERT する（テスト用ヘルパ）
+            // staff テーブルのスキーマ: staff_idm (PK), name, number, note, is_deleted, deleted_at
+            using (var conn = new SQLiteConnection($"Data Source={DbPath};Version=3"))
+            {
+                conn.Open();
+                using var cmd = conn.CreateCommand();
+                cmd.CommandText =
+                    "INSERT OR IGNORE INTO staff (staff_idm, name, is_deleted) " +
+                    "VALUES ('FFFF000000000001', 'テスト職員', 0)";
+                cmd.ExecuteNonQuery();
+            }
+
+            // 再度起動（投入済み DB を使う）
+            // この時点で BackupPath は存在しない（上で削除済み）ので Launch() 内の dbBackedUp=false
+            // → Dispose 時にリストアなし。元の DB は seededBackupPath に保管されているので後で処理が必要。
+            // ただし UITest 終了後のリストアは別途考慮が必要。簡略化のため seededBackupPath を BackupPath に戻す。
+            if (File.Exists(seededBackupPath))
+            {
+                CopyFileWithRetry(seededBackupPath, DbBackupPath, maxRetries: 3, delayMs: 300);
+                try { File.Delete(seededBackupPath); } catch { /* ignore */ }
+            }
+
+            // 再起動（投入済み DB を使う）。Launch() は DbPath が存在するため BackupPath へバックアップする。
+            // BackupPath に元の DB（seededBackupPath から復元済み）があるので正しくリストアされる。
+            return Launch();
+        }
+
+        /// <summary>
         /// アプリケーションを起動し、メインウィンドウが表示されるまで待機する。
         /// </summary>
         public static AppFixture Launch()
         {
+            RecoverOrphanBackups();
+
             // DB バックアップ（既存 DB がある場合のみ）
             // 前回のテストプロセスが DB を解放するまで少し待つ場合がある
             var dbBackedUp = false;
@@ -235,6 +310,21 @@ namespace ICCardManager.UITests.Infrastructure
             throw new TimeoutException(
                 $"ICCardManager プロセスが {timeout.TotalSeconds} 秒以内に見つかりませんでした。\n" +
                 $"dotnet run プロセス状態: {(dotnetProcess.HasExited ? "終了済み" : "実行中")}");
+        }
+
+        /// <summary>
+        /// 前回テスト実行中にプロセス中断で残ったオーファンバックアップを復元する。
+        /// Issue #1509 関連: LaunchWithSeededStaff が中断された場合のユーザー DB 保護。
+        /// </summary>
+        private static void RecoverOrphanBackups()
+        {
+            var seededOriginalPath = DbBackupPath + ".seeded-original";
+            if (File.Exists(seededOriginalPath))
+            {
+                // seeded-original が残っている → 信頼できる元 DB として DbPath へ復元する
+                CopyFileWithRetry(seededOriginalPath, DbPath, maxRetries: 3, delayMs: 500);
+                try { File.Delete(seededOriginalPath); } catch { /* ignore */ }
+            }
         }
 
         /// <summary>

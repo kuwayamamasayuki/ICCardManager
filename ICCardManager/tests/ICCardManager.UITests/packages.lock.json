@@ -48,6 +48,15 @@
           "Microsoft.NETFramework.ReferenceAssemblies.net48": "1.0.3"
         }
       },
+      "System.Data.SQLite.Core": {
+        "type": "Direct",
+        "requested": "[1.0.119, )",
+        "resolved": "1.0.119",
+        "contentHash": "bhQB8HVtRA+OOYw8UTD1F1kU+nGJ0/OZvH1JmlVUI4bGvgVEWeX1NcHjA765NvUoRVuCPlt8PrEpZ1thSsk1jg==",
+        "dependencies": {
+          "Stub.System.Data.SQLite.Core.NetFramework": "[1.0.119]"
+        }
+      },
       "xunit": {
         "type": "Direct",
         "requested": "[2.9.3, )",
@@ -79,6 +88,11 @@
         "type": "Transitive",
         "resolved": "1.0.3",
         "contentHash": "zMk4D+9zyiEWByyQ7oPImPN/Jhpj166Ky0Nlla4eXlNL8hI/BtSJsgR8Inldd4NNpIAH3oh8yym0W2DrhXdSLQ=="
+      },
+      "Stub.System.Data.SQLite.Core.NetFramework": {
+        "type": "Transitive",
+        "resolved": "1.0.119",
+        "contentHash": "8b4SbSXAxXJ8tfn6bnBu0m+HXMZvkE+BfogUKITRFm+snxfT5BTK7fLZaAsNoFX8DkBBjtCEDd+ajWkcyu55QA=="
       },
       "System.CodeDom": {
         "type": "Transitive",
