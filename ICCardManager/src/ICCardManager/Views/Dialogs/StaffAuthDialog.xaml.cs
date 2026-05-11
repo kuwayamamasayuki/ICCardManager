@@ -1,7 +1,10 @@
 using System;
 using System.Threading.Tasks;
 using System.Windows;
+using System.Windows.Automation;
+using System.Windows.Automation.Peers;
 using System.Windows.Threading;
+using System.Windows.Media;
 using CommunityToolkit.Mvvm.Messaging;
 using ICCardManager.Common.Messages;
 using ICCardManager.Data.Repositories;
@@ -177,25 +180,33 @@ namespace ICCardManager.Views.Dialogs
             });
         }
 
+        /// <summary>
+        /// ステータスメッセージを表示し、スクリーンリーダーに LiveRegion 通知を発火する。
+        /// </summary>
+        /// <remarks>
+        /// Issue #1509: Text 更新だけでは LiveRegionChanged が確実に発火しないため、
+        /// UIElementAutomationPeer.RaiseAutomationEvent で明示的に通知する。
+        /// Issue #1392: 色値は AccessibilityStyles.xaml のブラシキーを FindResource で参照する
+        /// （色値の Single Source of Truth）。
+        /// </remarks>
         private void ShowStatus(string message, bool isError)
         {
             StatusText.Text = message;
-            StatusBorder.Visibility = Visibility.Visible;
 
-            if (isError)
-            {
-                StatusBorder.Background = new System.Windows.Media.SolidColorBrush(
-                    System.Windows.Media.Color.FromRgb(0xFF, 0xEB, 0xEE));
-                StatusText.Foreground = new System.Windows.Media.SolidColorBrush(
-                    System.Windows.Media.Color.FromRgb(0xC6, 0x28, 0x28));
-            }
-            else
-            {
-                StatusBorder.Background = new System.Windows.Media.SolidColorBrush(
-                    System.Windows.Media.Color.FromRgb(0xE8, 0xF5, 0xE9));
-                StatusText.Foreground = new System.Windows.Media.SolidColorBrush(
-                    System.Windows.Media.Color.FromRgb(0x2E, 0x7D, 0x32));
-            }
+            // 視覚的状態の切り替え（DynamicResource ブラシ参照、Issue #1392）
+            var bgKey = isError ? "ErrorBackgroundBrush" : "SuccessBackgroundBrush";
+            var fgKey = isError ? "ErrorForegroundBrush" : "SuccessForegroundBrush";
+            var borderKey = isError ? "ErrorBorderBrush" : "SuccessBorderBrush";
+
+            StatusBorder.Background = (Brush)Application.Current.FindResource(bgKey);
+            StatusBorder.BorderBrush = (Brush)Application.Current.FindResource(borderKey);
+            StatusBorder.BorderThickness = new Thickness(1);
+            StatusText.Foreground = (Brush)Application.Current.FindResource(fgKey);
+
+            // スクリーンリーダーへの即時通知（Issue #1509）
+            var peer = UIElementAutomationPeer.FromElement(StatusText)
+                       ?? UIElementAutomationPeer.CreatePeerForElement(StatusText);
+            peer.RaiseAutomationEvent(AutomationEvents.LiveRegionChanged);
         }
 
         /// <summary>
