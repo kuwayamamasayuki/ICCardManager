@@ -26,6 +26,9 @@
     <!-- FlaUI - WPF UIテスト自動化 -->
     <PackageReference Include="FlaUI.Core" Version="5.0.0" />
     <PackageReference Include="FlaUI.UIA3" Version="5.0.0" />
+
+    <!-- SQLite: テスト用シードデータ投入（メインプロジェクトのバージョンと一致させる） -->
+    <PackageReference Include="System.Data.SQLite.Core" Version="1.0.119" />
   </ItemGroup>
 
   <!-- dotnet test のソリューション全体実行から除外する。

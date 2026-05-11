@@ -92,16 +92,22 @@
                             Command="{Binding SetTodayCommand}"
                             Padding="8,4"
                             Margin="10,0,0,0"
+                            AutomationProperties.Name="今日の期間に設定"
+                            AutomationProperties.HelpText="開始日と終了日を本日に設定して操作ログを検索します"
                             ToolTip="今日の操作ログを表示"/>
                     <Button Content="今月"
                             Command="{Binding SetThisMonthCommand}"
                             Padding="8,4"
                             Margin="5,0,0,0"
+                            AutomationProperties.Name="今月の期間に設定"
+                            AutomationProperties.HelpText="開始日と終了日を今月の月初・月末に設定して操作ログを検索します"
                             ToolTip="今月の操作ログを表示"/>
                     <Button Content="先月"
                             Command="{Binding SetLastMonthCommand}"
                             Padding="8,4"
                             Margin="5,0,0,0"
+                            AutomationProperties.Name="先月の期間に設定"
+                            AutomationProperties.HelpText="開始日と終了日を先月の月初・月末に設定して操作ログを検索します"
                             ToolTip="先月の操作ログを表示"/>
                 </StackPanel>
 
@@ -116,7 +122,10 @@
                           DisplayMemberPath="DisplayName"
                           Width="100"
                           Margin="0,0,20,10"
-                          VerticalAlignment="Center"/>
+                          VerticalAlignment="Center"
+                          AutomationProperties.Name="操作種別"
+                          AutomationProperties.HelpText="検索する操作種別（追加・更新・削除など）を選択します。すべてを選ぶと種別による絞り込みは行いません"
+                          ToolTip="操作種別で絞り込み（追加・更新・削除など）"/>
 
                 <!-- 対象 -->
                 <TextBlock Grid.Row="0" Grid.Column="4"
@@ -129,7 +138,10 @@
                           DisplayMemberPath="DisplayName"
                           Width="120"
                           Margin="0,0,0,10"
-                          VerticalAlignment="Center"/>
+                          VerticalAlignment="Center"
+                          AutomationProperties.Name="対象テーブル"
+                          AutomationProperties.HelpText="検索対象とするテーブル（職員・カード・履歴など）を選択します。すべてを選ぶと対象テーブルによる絞り込みは行いません"
+                          ToolTip="対象テーブルで絞り込み（職員・カード・履歴など）"/>
 
                 <!-- 対象ID -->
                 <TextBlock Grid.Row="1" Grid.Column="0"
@@ -142,6 +154,8 @@
                          Padding="5"
                          HorizontalAlignment="Left"
                          Margin="0,0,20,0"
+                         AutomationProperties.Name="対象ID"
+                         AutomationProperties.HelpText="カードIDmや職員番号などの対象IDで絞り込みます。部分一致で検索されます。空欄にするとIDによる絞り込みは行いません"
                          ToolTip="カードIDmなどの対象IDで絞り込み（部分一致）"/>
 
                 <!-- 操作者名 -->
@@ -155,6 +169,8 @@
                          Padding="5"
                          HorizontalAlignment="Left"
                          Margin="0,0,20,0"
+                         AutomationProperties.Name="操作者名"
+                         AutomationProperties.HelpText="操作を行った職員名で絞り込みます。部分一致で検索されます。空欄にすると操作者による絞り込みは行いません"
                          ToolTip="操作者名で絞り込み（部分一致）"/>
 
                 <!-- 検索ボタン -->
@@ -165,6 +181,8 @@
                             Command="{Binding ClearFiltersCommand}"
                             Padding="15,6"
                             Margin="0,0,10,0"
+                            AutomationProperties.Name="検索条件をクリア"
+                            AutomationProperties.HelpText="入力した検索条件をすべてリセットして既定値に戻します"
                             ToolTip="検索条件をクリア"/>
                     <Button Content="検索"
                             Command="{Binding SearchCommand}"
@@ -172,6 +190,8 @@
                             Foreground="{DynamicResource OnPrimaryBrush}"
                             Padding="20,6"
                             FontWeight="Bold"
+                            AutomationProperties.Name="検索を実行"
+                            AutomationProperties.HelpText="入力した条件に一致する操作ログを検索して一覧に表示します"
                             ToolTip="条件に一致する操作ログを検索"/>
                 </StackPanel>
             </Grid>
@@ -245,9 +265,12 @@
 
                 <!-- ページ情報 -->
                 <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center">
+                    <!-- Issue #1468: 動的更新される TextBlock。Name は付けず Text 自体を読み上げ対象にする。 -->
                     <TextBlock Text="{Binding PageInfo}"
                                Foreground="{DynamicResource SecondaryTextBrush}"
-                               VerticalAlignment="Center"/>
+                               VerticalAlignment="Center"
+                               AutomationProperties.HelpText="現在の検索結果のページ情報（表示中の件数と総件数）"
+                               AutomationProperties.LiveSetting="Polite"/>
                     <TextBlock Text="  |  表示件数:"
                                Foreground="{DynamicResource SecondaryTextBrush}"
                                Margin="10,0,5,0"
@@ -255,7 +278,10 @@
                     <ComboBox ItemsSource="{Binding PageSizeOptions}"
                               SelectedItem="{Binding PageSize}"
                               Width="60"
-                              VerticalAlignment="Center"/>
+                              VerticalAlignment="Center"
+                              AutomationProperties.Name="1ページあたりの表示件数"
+                              AutomationProperties.HelpText="一覧に1ページあたり表示する操作ログの件数を選択します"
+                              ToolTip="1ページあたりの表示件数"/>
                 </StackPanel>
 
                 <!-- ページナビゲーション -->
@@ -265,6 +291,8 @@
                             IsEnabled="{Binding HasPreviousPage}"
                             Width="35"
                             Height="30"
+                            AutomationProperties.Name="最初のページへ移動"
+                            AutomationProperties.HelpText="検索結果の1ページ目を表示します"
                             ToolTip="最初のページ"/>
                     <Button Content="&#x25C0;"
                             Command="{Binding PreviousPageCommand}"
@@ -272,8 +300,13 @@
                             Width="35"
                             Height="30"
                             Margin="5,0,0,0"
+                            AutomationProperties.Name="前のページへ移動"
+                            AutomationProperties.HelpText="現在表示しているページの1つ前のページを表示します"
                             ToolTip="前のページ"/>
-                    <TextBlock VerticalAlignment="Center" Margin="15,0">
+                    <!-- Issue #1468: Run で構成される TextBlock。HelpText で補足し、ページ変更時は LiveSetting で通知。 -->
+                    <TextBlock VerticalAlignment="Center" Margin="15,0"
+                               AutomationProperties.HelpText="現在表示中のページ番号と総ページ数"
+                               AutomationProperties.LiveSetting="Polite">
                         <Run Text="{Binding CurrentPage, Mode=OneWay}"/>
                         <Run Text=" / "/>
                         <Run Text="{Binding TotalPages, Mode=OneWay}"/>
@@ -284,6 +317,8 @@
                             IsEnabled="{Binding HasNextPage}"
                             Width="35"
                             Height="30"
+                            AutomationProperties.Name="次のページへ移動"
+                            AutomationProperties.HelpText="現在表示しているページの1つ後のページを表示します"
                             ToolTip="次のページ"/>
                     <Button Content="&#x23ED;"
                             Command="{Binding LastPageCommand}"
@@ -291,6 +326,8 @@
                             Width="35"
                             Height="30"
                             Margin="5,0,0,0"
+                            AutomationProperties.Name="最後のページへ移動"
+                            AutomationProperties.HelpText="検索結果の最終ページを表示します"
                             ToolTip="最後のページ"/>
                 </StackPanel>
             </Grid>
@@ -309,20 +346,26 @@
                 <Button Content="Excelエクスポート"
                         Command="{Binding ExportToExcelCommand}"
                         Padding="15,8"
+                        AutomationProperties.Name="Excelファイルにエクスポート"
+                        AutomationProperties.HelpText="現在の検索条件に一致する操作ログをExcelファイル(.xlsx)として保存します"
                         ToolTip="検索結果をExcelファイルに出力"/>
                 <Button Content="開く"
                         Command="{Binding OpenExportedFileCommand}"
                         Padding="10,8"
                         Margin="5,0,0,0"
                         Visibility="{Binding LastExportedFile, Converter={StaticResource BoolToVisibilityConverter}}"
+                        AutomationProperties.Name="エクスポートしたファイルを開く"
+                        AutomationProperties.HelpText="直前にエクスポートしたExcelファイルを既定のアプリで開きます"
                         ToolTip="出力したExcelファイルを開く"/>
             </StackPanel>
 
             <!-- ステータスメッセージ -->
+            <!-- Issue #1468: 動的更新される TextBlock。Name は付けず Text 自体を読み上げ対象にする。 -->
             <TextBlock Grid.Column="1"
                        Text="{Binding StatusMessage}"
                        VerticalAlignment="Center"
                        Margin="20,0"
+                       AutomationProperties.HelpText="操作ログ検索の処理結果や件数を表示します"
                        AutomationProperties.LiveSetting="Polite">
                 <TextBlock.Style>
                     <Style TargetType="TextBlock">
@@ -343,20 +386,28 @@
                     Padding="20,8"
                     IsCancel="True"
                     AutomationProperties.Name="閉じる"
+                    AutomationProperties.HelpText="操作ログダイアログを閉じます"
                     ToolTip="ダイアログを閉じる (Escape)"/>
         </Grid>
 
         <!-- 処理中オーバーレイ -->
         <Border Grid.RowSpan="5"
                 Background="{DynamicResource OverlayBrush}"
-                Visibility="{Binding IsBusy, Converter={StaticResource BoolToVisibilityConverter}}">
+                Visibility="{Binding IsBusy, Converter={StaticResource BoolToVisibilityConverter}}"
+                AutomationProperties.Name="処理中オーバーレイ"
+                AutomationProperties.HelpText="操作ログの読み込みまたはエクスポート処理を実行中です。完了までお待ちください">
             <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
-                <ProgressBar IsIndeterminate="True" Width="200" Height="4"/>
+                <ProgressBar IsIndeterminate="True" Width="200" Height="4"
+                             AutomationProperties.Name="処理中"
+                             AutomationProperties.HelpText="処理が完了するまでお待ちください"/>
+                <!-- Issue #1468: 動的更新メッセージ。Name は付けず Text 自体を読み上げ対象にする。 -->
                 <TextBlock Text="{Binding BusyMessage}"
                            Foreground="{DynamicResource OnPrimaryBrush}"
                            FontSize="{DynamicResource BaseFontSize}"
                            Margin="0,10,0,0"
-                           HorizontalAlignment="Center"/>
+                           HorizontalAlignment="Center"
+                           AutomationProperties.HelpText="現在実行中の処理の内容"
+                           AutomationProperties.LiveSetting="Polite"/>
             </StackPanel>
         </Border>
     </Grid>

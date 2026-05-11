@@ -1,7 +1,10 @@
 using System;
 using System.Threading.Tasks;
 using System.Windows;
+using System.Windows.Automation;
+using System.Windows.Automation.Peers;
 using System.Windows.Threading;
+using System.Windows.Media;
 using CommunityToolkit.Mvvm.Messaging;
 using ICCardManager.Common.Messages;
 using ICCardManager.Data.Repositories;
@@ -26,6 +29,7 @@ namespace ICCardManager.Views.Dialogs
         private readonly IMessenger _messenger;
         private readonly DispatcherTimer _timeoutTimer;
         private int _remainingSeconds;
+        private DispatcherTimer? _closeTimer;
 
         /// <summary>
         /// 認証成功時の職員IDm
@@ -103,6 +107,7 @@ namespace ICCardManager.Views.Dialogs
         {
             // タイマー停止
             _timeoutTimer.Stop();
+            _closeTimer?.Stop();
 
             // カード読み取りイベントを解除
             _cardReader.CardRead -= OnCardRead;
@@ -130,15 +135,8 @@ namespace ICCardManager.Views.Dialogs
                 _soundPlayer.Play(SoundType.Warning);
                 ShowStatus("認証がタイムアウトしました", isError: true);
 
-                // 少し待ってから閉じる
-                var closeTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
-                closeTimer.Tick += (s, args) =>
-                {
-                    closeTimer.Stop();
-                    DialogResult = false;
-                    Close();
-                };
-                closeTimer.Start();
+                // 少し待ってから閉じる（Issue #1509: CloseAfterDelay に集約）
+                CloseAfterDelay(TimeSpan.FromSeconds(1), dialogResult: false);
             }
         }
 
@@ -160,8 +158,10 @@ namespace ICCardManager.Views.Dialogs
                         _soundPlayer.Play(SoundType.Notify);
                         _timeoutTimer.Stop();
 
-                        DialogResult = true;
-                        Close();
+                        // Issue #1509: 成功時もステータス表示してスクリーンリーダーに通知。
+                        // 700ms 後にクローズ（タイムアウト失敗側と同じ CloseAfterDelay テンプレート）。
+                        ShowStatus($"認証に成功しました（{staff.Name}）", isError: false);
+                        CloseAfterDelay(TimeSpan.FromMilliseconds(700), dialogResult: true);
                     }
                     else
                     {
@@ -177,25 +177,62 @@ namespace ICCardManager.Views.Dialogs
             });
         }
 
+        /// <summary>
+        /// 指定遅延後にダイアログを閉じる（Issue #1509）。
+        /// </summary>
+        /// <remarks>
+        /// 認証成功（700ms 表示）とタイムアウト失敗（1 秒表示）の両方で使用される
+        /// 共通テンプレート。スクリーンリーダー利用者にステータスを読み上げる時間を確保するため、
+        /// 即座に Close せず短時間だけ表示する。
+        /// </remarks>
+        private void CloseAfterDelay(TimeSpan delay, bool dialogResult)
+        {
+            // 既存タイマーが残っている場合は停止（連続呼び出し対策）
+            _closeTimer?.Stop();
+
+            _closeTimer = new DispatcherTimer { Interval = delay };
+            _closeTimer.Tick += (s, args) =>
+            {
+                _closeTimer.Stop();
+                // 既にダイアログが閉じられている場合は DialogResult/Close を呼ばない
+                // （Cancel ボタン等で先に閉じられたケースで InvalidOperationException を防止）
+                if (!IsLoaded)
+                {
+                    return;
+                }
+                DialogResult = dialogResult;
+                Close();
+            };
+            _closeTimer.Start();
+        }
+
+        /// <summary>
+        /// ステータスメッセージを表示し、スクリーンリーダーに LiveRegion 通知を発火する。
+        /// </summary>
+        /// <remarks>
+        /// Issue #1509: Text 更新だけでは LiveRegionChanged が確実に発火しないため、
+        /// UIElementAutomationPeer.RaiseAutomationEvent で明示的に通知する。
+        /// Issue #1392: 色値は AccessibilityStyles.xaml のブラシキーを FindResource で参照する
+        /// （色値の Single Source of Truth）。
+        /// </remarks>
         private void ShowStatus(string message, bool isError)
         {
             StatusText.Text = message;
-            StatusBorder.Visibility = Visibility.Visible;
 
-            if (isError)
-            {
-                StatusBorder.Background = new System.Windows.Media.SolidColorBrush(
-                    System.Windows.Media.Color.FromRgb(0xFF, 0xEB, 0xEE));
-                StatusText.Foreground = new System.Windows.Media.SolidColorBrush(
-                    System.Windows.Media.Color.FromRgb(0xC6, 0x28, 0x28));
-            }
-            else
-            {
-                StatusBorder.Background = new System.Windows.Media.SolidColorBrush(
-                    System.Windows.Media.Color.FromRgb(0xE8, 0xF5, 0xE9));
-                StatusText.Foreground = new System.Windows.Media.SolidColorBrush(
-                    System.Windows.Media.Color.FromRgb(0x2E, 0x7D, 0x32));
-            }
+            // 視覚的状態の切り替え（DynamicResource ブラシ参照、Issue #1392）
+            var bgKey = isError ? "ErrorBackgroundBrush" : "SuccessBackgroundBrush";
+            var fgKey = isError ? "ErrorForegroundBrush" : "SuccessForegroundBrush";
+            var borderKey = isError ? "ErrorBorderBrush" : "SuccessBorderBrush";
+
+            StatusBorder.Background = (Brush)Application.Current.FindResource(bgKey);
+            StatusBorder.BorderBrush = (Brush)Application.Current.FindResource(borderKey);
+            StatusBorder.BorderThickness = new Thickness(1);
+            StatusText.Foreground = (Brush)Application.Current.FindResource(fgKey);
+
+            // スクリーンリーダーへの即時通知（Issue #1509）
+            var peer = UIElementAutomationPeer.FromElement(StatusText)
+                       ?? UIElementAutomationPeer.CreatePeerForElement(StatusText);
+            peer.RaiseAutomationEvent(AutomationEvents.LiveRegionChanged);
         }
 
         /// <summary>
