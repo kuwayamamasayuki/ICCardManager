@@ -1,15 +1,5 @@
 # 更新履歴
 
-### v2.8.1 (2026-05-11)
-
-**バグ修正**
-- Service 層のリポジトリ呼び出しを直列化し SQLITE_MISUSE を防止 (Issue #1452)（#1452）
-- 月次帳票の4月計と年度累計の受入金額に前年度繰越を加算 (Issue #1494)（#1494）
-
-**ドキュメント**
-- CHANGELOG.md の Unreleased を v2.8.0 セクションへ統合（#1451）
-
-
 ### Unreleased
 
 **バグ修正**
@@ -21,9 +11,14 @@
 **アクセシビリティ改善**
 - 操作ログダイアログ（`OperationLogDialog`）と職員証認証ダイアログ（`StaffAuthDialog`）の `AutomationProperties.Name` / `AutomationProperties.HelpText` カバレッジを拡充し、スクリーンリーダー（NVDA / Narrator）でも検索条件・ページネーション・エクスポート操作を識別できるようにした。Issue #1468 のリポジトリ全体レビュー（UX 観点）で判明した「`OperationLogDialog` 17%、`StaffAuthDialog` 3 件しか付与されていない」状態を、業務監査画面（操作ログ）では検索ボタン・クリアボタン・対象ID/操作者名/操作種別/対象テーブルの絞り込み入力・期間クイック選択（今日/今月/先月）・ページネーション 4 ボタン・1ページ表示件数・Excel エクスポート・出力ファイルを開く・処理中オーバーレイまで、認証画面では認証ステータス変化（成功・失敗）と残り時間カウントダウンの読み上げまで網羅。動的に `Text` が書き換わる `TextBlock`（職員証認証ダイアログの `OperationDescriptionText` / `StatusText` / `TimeoutText`、操作ログダイアログのページ情報・現在ページ番号・検索ステータス・処理中メッセージ）では `AutomationProperties.Name` を**敢えて付与しない**設計とした。WPF の `TextBlockAutomationPeer.GetNameCore` は既定で `Text` を返すが、`AutomationProperties.Name` を明示すると Name 値が優先されて `Text` の動的更新がスクリーンリーダーへ通知されなくなるため、`HelpText` で補足情報を付与しつつ `LiveSetting` で変化通知を行う形に統一した。ステータス変化（成功・失敗）は `Assertive`（即時通知）、進捗・カウントダウンなど頻繁な更新は `Polite`（読み上げ阻害回避）で使い分け。回帰防止として `DialogAutomationPropertiesCoverageTests`（39件）を新規追加し、(a) 各ダイアログの `Name`/`HelpText` 出現回数が修正時点の最低水準を下回らないこと、(b) 主要操作（検索を実行・検索条件をクリア・対象ID・操作者名・操作種別・対象テーブル・Excelファイルにエクスポート・最初のページへ移動・最後のページへ移動・1ページあたりの表示件数）に個別 Name が付与されていること、(c) `StaffAuthDialog` の `StatusText` が `Assertive` / `TimeoutText` が `Polite` の `LiveSetting` を持つこと、(d) `OperationLogDialog` のステータスメッセージが `Polite` で変化通知すること、(e) 動的更新 `TextBlock`（`OperationDescriptionText` / `StatusText` / `TimeoutText`）に `AutomationProperties.Name` が**付かない**こと、を静的解析で検証する。実際にスクリーンリーダーで読み上げられるかは UI 自動化を要するため、PR テストプランで NVDA / Narrator による手動検証を行う（#1468）
 
+### v2.8.1 (2026-05-11)
+
 **バグ修正**
-- 月次帳票（物品出納簿）の4月計および5月以降の年度累計の「受入金額」欄に、前年度からの繰越分が計上されない不具合を修正。「前年度より繰越」レコードは DB に保存されず `CarryoverRowData` として表示用に合成されるため、月計・累計の集計に明示的に加算されていなかった。`ReportDataBuilder` で `fiscalYearCarryoverIncome` を変数化し、4月計の Income と5月以降の累計 Income に加算するように修正。これにより紙の出納簿様式での「受入 − 払出 = 残額」が成立するようになった。`IsMidYearCarryoverSummary` による集計除外フィルタは紙出納簿移行カード（Issue #510）の二重計上防止のため引き続き維持する（#1494）
-- `DashboardService.BuildDashboardAsync` および `MainViewModel.HandleCardInStaffWaitingStateAsync` で `Task.WhenAll` により複数のリポジトリ呼び出しを並列起動していた箇所を直列 await に変更（**Issue #504 で導入されたデータ取得並列化を撤回**）。これらは内部で同一の `SQLiteConnection` 上で `SQLiteCommand` を並列実行する経路であり、`System.Data.SQLite` の前提（同一接続上の並列コマンド非保証）を破ることで `SQLITE_MISUSE` または不定動作の原因となっていた。Service 層の `ConfigureAwait(false)` 規約により継続が ThreadPool に逃げるため「WPF Dispatcher による直列化」は成立せず、ViewModel 層でも `SQLiteCommand` 自体が内部で別スレッドにディスパッチされ得るため UI スレッド単独実行は保証されない。直列化により正しさを回復。`DbContext.LeaseConnectionAsync` の XML doc に「Service / ViewModel 層で `Task.WhenAll` 並列起動禁止」の規律を明記して回帰防止。回帰テストとして `DashboardServiceTests.BuildDashboardAsync_リポジトリ呼び出しがオーバーラップしないこと` を追加（#1452）
+- Service 層のリポジトリ呼び出しを直列化し SQLITE_MISUSE を防止 (Issue #1452)（#1452）
+- 月次帳票の4月計と年度累計の受入金額に前年度繰越を加算 (Issue #1494)（#1494）
+
+**ドキュメント**
+- CHANGELOG.md の Unreleased を v2.8.0 セクションへ統合（#1451）
 
 ### v2.8.0 (2026-05-03)
 
