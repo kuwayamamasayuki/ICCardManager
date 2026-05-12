@@ -228,10 +228,40 @@ $readmeContent = Get-Content $ReadmePath -Raw -Encoding UTF8
 $readmeContent = $readmeContent -replace '最新バージョン: \*\*v[^*]+\*\* \([^)]+\)', "最新バージョン: **v${NewVersion}** (${Today})"
 Write-Success "README.md: v${NewVersion} (${Today})"
 
-# 3c. CHANGELOG.md — 「# 更新履歴」の直後にセクション挿入
+# 3c. CHANGELOG.md — 既存 ### Unreleased があれば見出しを vX.Y.Z にリネーム+自動生成エントリを追記、なければ新規挿入
+# Issue: bump-version.ps1 が常に「# 更新履歴」直後にセクションを挿入していたため、
+# 既存の Unreleased セクションが新バージョンと前バージョンの間に孤児化していた（v2.8.0/v2.8.1 で発生）
 $changelogContent = Get-Content $ChangelogPath -Raw -Encoding UTF8
-$changelogContent = $changelogContent -replace '(# 更新履歴\r?\n)', "`$1`n${changelogSection}`n"
-Write-Success "CHANGELOG.md: セクション挿入"
+
+# 「### Unreleased」セクション（見出し行 + 次の ### 見出し or EOF までの本文）を検出
+$unreleasedRegex = [regex]'(?ms)### Unreleased[ \t]*\r?\n(.*?)(?=\r?\n### |\z)'
+$unreleasedMatch = $unreleasedRegex.Match($changelogContent)
+
+if ($unreleasedMatch.Success) {
+    # 既存 Unreleased を統合: 見出しを vX.Y.Z (date) にリネームし、自動生成エントリを末尾に追記
+    $unreleasedBody = $unreleasedMatch.Groups[1].Value.TrimEnd()
+    $newSection = "### v${NewVersion} (${Today})"
+    if ($unreleasedBody) {
+        $newSection += "`n${unreleasedBody}"
+    }
+    if ($hasEntries) {
+        $autoGenBody = ($changelogSection -replace '^### v[^\r\n]+\r?\n', '').TrimEnd()
+        if ($autoGenBody) {
+            $newSection += "`n${autoGenBody}"
+        }
+    }
+    # 後続セクションとの間に空行を確保（lookahead が前方の `\n` を1つ食うため）
+    $newSection += "`n"
+
+    $changelogContent = $changelogContent.Substring(0, $unreleasedMatch.Index) +
+                        $newSection +
+                        $changelogContent.Substring($unreleasedMatch.Index + $unreleasedMatch.Length)
+    Write-Success "CHANGELOG.md: 既存 ### Unreleased を v${NewVersion} へ統合（手動キュレーション分は保持。コミット由来エントリと重複している場合はPRで手動整理してください）"
+} else {
+    # Unreleased セクションなし → 「# 更新履歴」直後に新規挿入
+    $changelogContent = $changelogContent -replace '(# 更新履歴\r?\n)', "`$1`n${changelogSection}`n"
+    Write-Success "CHANGELOG.md: セクション挿入"
+}
 
 # 3d. ユーザーマニュアル — バージョン + 最終更新日
 $userManualContent = Get-Content $UserManualPath -Raw -Encoding UTF8
