@@ -108,4 +108,21 @@ gh release upload vX.Y.Z "installer/output/ICCardManager_Setup_X.Y.Z.exe" --clob
 - **WSL2 パス**: スクリプト呼び出しは `./tools/release.ps1` 形式で。bare path だと Windows 側で解決できない
 - **タグ重複**: 失敗リトライ時、タグ `vX.Y.Z` が既に存在する場合は `-SkipTag` で既存タグをスキップ
 - **ISCC.exe パス**: `settings.local.json` の許可パスと実際のインストール先が一致していること
-- **CHANGELOG.md**: リリーススクリプトが自動生成するため、手動で先に編集すると内容が重複する可能性がある
+- **CHANGELOG.md の `### Unreleased`**: `bump-version.ps1` は既存 `### Unreleased` セクションを検出すると、見出しを `### vX.Y.Z (date)` にリネームし、Unreleased 本文（手動キュレーションされたエントリ）を保持したまま、コミットメッセージから自動生成したエントリを末尾に追記する。**重複エントリが発生する場合があるため、PR レビュー時に手動で整理すること**。Unreleased が存在しない場合は「# 更新履歴」直後に新規セクションを挿入する従来挙動。
+  - 過去の不具合: v2.8.0 / v2.8.1 リリース時に既存 Unreleased が孤児化し、新バージョンと前バージョンの間に挟まる構造になっていた（PR #1451, #1511 で事後修正）。本ロジック追加により自動統合される。
+
+## CHANGELOG.md `### Unreleased` 運用ルール
+
+リリース後に追加する PR が CHANGELOG エントリを記載する場合、必ず **`# 更新履歴` 直下** に `### Unreleased` セクションを作成（または既存セクションに追記）すること。
+最新リリース版セクション（`### vX.Y.Z`）の**下**に `### Unreleased` を置くと、構造が壊れる（次回 `bump-version.ps1` の自動検出にもヒットしない）。
+
+```markdown
+# 更新履歴
+
+### Unreleased            ← 必ずここ（先頭）
+**バグ修正**
+- ...
+
+### v2.8.1 (2026-05-11)   ← 既存リリース版はこの下
+...
+```
