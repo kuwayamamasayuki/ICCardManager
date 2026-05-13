@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using System.Data.SQLite;
+using CommunityToolkit.Mvvm.Messaging;
 using FluentAssertions;
 using ICCardManager.Data;
 using ICCardManager.Data.Repositories;
@@ -85,7 +86,8 @@ public class DataExportImportViewModelTests : IDisposable
             _importServiceMock.Object,
             _dialogServiceMock.Object,
             _cardRepositoryMock.Object,
-            operationLogger);
+            operationLogger,
+            new WeakReferenceMessenger());
     }
 
     public void Dispose()
