@@ -73,6 +73,7 @@ ORDER BY DATE(date) ASC,
         /// <inheritdoc/>
         public async Task<Ledger> GetByIdAsync(int id)
         {
+            // Issue #1478: 本体と詳細を 1 ラウンドトリップで取得（複数結果セット）
             using var lease = await _dbContext.LeaseConnectionAsync();
             var connection = lease.Connection;
 
@@ -80,24 +81,32 @@ ORDER BY DATE(date) ASC,
             command.CommandText = @"SELECT id, card_idm, lender_idm, date, summary, income, expense, balance,
        staff_name, note, returner_idm, lent_at, returned_at, is_lent_record
 FROM ledger
-WHERE id = @id";
+WHERE id = @id;
+
+SELECT ledger_id, use_date, entry_station, exit_station,
+       bus_stops, amount, balance, is_charge, is_point_redemption, is_bus, group_id, rowid
+FROM ledger_detail
+WHERE ledger_id = @id
+ORDER BY use_date ASC, is_charge DESC, is_point_redemption DESC, rowid DESC";
 
             command.Parameters.AddWithValue("@id", id);
 
             using var reader = await command.ExecuteReaderAsync();
-            if (await reader.ReadAsync())
+            if (!await reader.ReadAsync())
             {
-                var ledger = MapToLedger(reader);
-                ledger.Details = (await GetDetailsAsync(id)).ToList();
-                return ledger;
+                return null;
             }
 
-            return null;
+            var ledger = MapToLedger(reader);
+            ledger.Details = await ReadAndSortDetailsAsync(reader);
+            return ledger;
         }
 
         /// <inheritdoc/>
         public async Task<Ledger> GetLentRecordAsync(string cardIdm)
         {
+            // Issue #1478: 本体と詳細を 1 ラウンドトリップで取得（複数結果セット）。
+            // 詳細側はサブクエリで本体と同じ id を解決する。
             using var lease = await _dbContext.LeaseConnectionAsync();
             var connection = lease.Connection;
 
@@ -107,19 +116,30 @@ WHERE id = @id";
 FROM ledger
 WHERE card_idm = @cardIdm AND is_lent_record = 1
 ORDER BY lent_at DESC
-LIMIT 1";
+LIMIT 1;
+
+SELECT ledger_id, use_date, entry_station, exit_station,
+       bus_stops, amount, balance, is_charge, is_point_redemption, is_bus, group_id, rowid
+FROM ledger_detail
+WHERE ledger_id = (
+    SELECT id FROM ledger
+    WHERE card_idm = @cardIdm AND is_lent_record = 1
+    ORDER BY lent_at DESC
+    LIMIT 1
+)
+ORDER BY use_date ASC, is_charge DESC, is_point_redemption DESC, rowid DESC";
 
             command.Parameters.AddWithValue("@cardIdm", cardIdm);
 
             using var reader = await command.ExecuteReaderAsync();
-            if (await reader.ReadAsync())
+            if (!await reader.ReadAsync())
             {
-                var ledger = MapToLedger(reader);
-                ledger.Details = (await GetDetailsAsync(ledger.Id)).ToList();
-                return ledger;
+                return null;
             }
 
-            return null;
+            var ledger = MapToLedger(reader);
+            ledger.Details = await ReadAndSortDetailsAsync(reader);
+            return ledger;
         }
 
         /// <inheritdoc/>
@@ -552,6 +572,27 @@ ORDER BY use_date ASC, is_charge DESC, is_point_redemption DESC, rowid DESC";
             // 残高チェーンで時系列順にソート（挿入順序に依存しない）
             // フォールバック時はSQL ORDER BY結果（上記）を維持する
             return Common.LedgerDetailChronologicalSorter.Sort(details, preserveOrderOnFailure: true);
+        }
+
+        /// <summary>
+        /// 開かれた DbDataReader の現在位置から次の結果セットへ移動し、
+        /// ledger_detail 行を読み出して残高チェーン順にソートして返す。
+        /// </summary>
+        /// <remarks>
+        /// GetByIdAsync / GetLentRecordAsync の複数結果セット読み出し用ヘルパー（Issue #1478）。
+        /// SQL ORDER BY はフォールバック用初期順序として使用し、読み取り後に残高チェーンで時系列順を決定する。
+        /// </remarks>
+        private static async Task<List<LedgerDetail>> ReadAndSortDetailsAsync(DbDataReader reader)
+        {
+            await reader.NextResultAsync();
+            var details = new List<LedgerDetail>();
+            while (await reader.ReadAsync())
+            {
+                details.Add(MapToLedgerDetail(reader));
+            }
+            return Common.LedgerDetailChronologicalSorter
+                .Sort(details, preserveOrderOnFailure: true)
+                .ToList();
         }
 
         /// <inheritdoc/>

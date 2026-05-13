@@ -179,6 +179,69 @@ public class LedgerRepositoryTests : IDisposable
     /// <summary>
     /// 存在しないIDでnullを返すことを確認
     /// </summary>
+    /// <summary>
+    /// Issue #1478: 本体と詳細を 1 RTT で取得する複数結果セット方式の検証。
+    /// 詳細レコードが存在する場合、本体と詳細の両方が同じ呼び出しで返ることを確認する。
+    /// </summary>
+    [Fact]
+    public async Task GetByIdAsync_LedgerAndDetailsExist_ReturnsLedgerWithDetails()
+    {
+        // Arrange
+        var ledger = CreateTestLedger(TestCardIdm, DateTime.Today, "鉄道（博多～天神）", expense: 260);
+        var id = await _repository.InsertAsync(ledger);
+
+        var detail1 = new LedgerDetail
+        {
+            LedgerId = id,
+            UseDate = DateTime.Today.AddHours(8),
+            EntryStation = "博多",
+            ExitStation = "天神",
+            Amount = 260,
+            Balance = 9740
+        };
+        var detail2 = new LedgerDetail
+        {
+            LedgerId = id,
+            UseDate = DateTime.Today.AddHours(18),
+            EntryStation = "天神",
+            ExitStation = "博多",
+            Amount = 260,
+            Balance = 9480
+        };
+        await _repository.InsertDetailAsync(detail1);
+        await _repository.InsertDetailAsync(detail2);
+
+        // Act
+        var result = await _repository.GetByIdAsync(id);
+
+        // Assert
+        result.Should().NotBeNull();
+        result!.Summary.Should().Be("鉄道（博多～天神）");
+        result.Details.Should().HaveCount(2);
+        result.Details.Should().Contain(d => d.EntryStation == "博多" && d.ExitStation == "天神");
+        result.Details.Should().Contain(d => d.EntryStation == "天神" && d.ExitStation == "博多");
+    }
+
+    /// <summary>
+    /// Issue #1478: 本体ありで詳細 0 件のとき、Details が空リストになることを確認。
+    /// 複数結果セットの 2 つ目を読み終えても例外にならず空コレクションが返る。
+    /// </summary>
+    [Fact]
+    public async Task GetByIdAsync_NoDetails_ReturnsLedgerWithEmptyDetails()
+    {
+        // Arrange
+        var ledger = CreateTestLedger(TestCardIdm, DateTime.Today, "鉄道（博多～天神）", expense: 260);
+        var id = await _repository.InsertAsync(ledger);
+
+        // Act
+        var result = await _repository.GetByIdAsync(id);
+
+        // Assert
+        result.Should().NotBeNull();
+        result!.Details.Should().NotBeNull();
+        result.Details.Should().BeEmpty();
+    }
+
     [Fact]
     public async Task GetByIdAsync_NonExistingId_ReturnsNull()
     {
@@ -370,6 +433,60 @@ public class LedgerRepositoryTests : IDisposable
         result.Should().NotBeNull();
         result!.IsLentRecord.Should().BeTrue();
         result.Summary.Should().Be("（貸出中）");
+    }
+
+    /// <summary>
+    /// Issue #1478: GetLentRecordAsync が複数結果セット方式で詳細も同時取得することを確認。
+    /// 複数の貸出中レコードのうち lent_at が最新のものに紐づく詳細だけが返る。
+    /// </summary>
+    [Fact]
+    public async Task GetLentRecordAsync_MultipleLentRecords_ReturnsLatestWithDetails()
+    {
+        // Arrange - 古い貸出中レコード（詳細なし）
+        var olderLedger = CreateTestLedger(TestCardIdm, DateTime.Today.AddDays(-1), "（貸出中）");
+        olderLedger.IsLentRecord = true;
+        olderLedger.LenderIdm = TestStaffIdm;
+        olderLedger.LentAt = DateTime.Now.AddHours(-5);
+        var olderId = await _repository.InsertAsync(olderLedger);
+
+        var olderDetail = new LedgerDetail
+        {
+            LedgerId = olderId,
+            UseDate = DateTime.Today.AddDays(-1),
+            EntryStation = "博多",
+            ExitStation = "天神",
+            Amount = 260,
+            Balance = 9740
+        };
+        await _repository.InsertDetailAsync(olderDetail);
+
+        // 新しい貸出中レコード（詳細あり）
+        var latestLedger = CreateTestLedger(TestCardIdm, DateTime.Today, "（貸出中）");
+        latestLedger.IsLentRecord = true;
+        latestLedger.LenderIdm = TestStaffIdm;
+        latestLedger.LentAt = DateTime.Now;
+        var latestId = await _repository.InsertAsync(latestLedger);
+
+        var latestDetail = new LedgerDetail
+        {
+            LedgerId = latestId,
+            UseDate = DateTime.Today,
+            EntryStation = "天神",
+            ExitStation = "薬院",
+            Amount = 210,
+            Balance = 9530
+        };
+        await _repository.InsertDetailAsync(latestDetail);
+
+        // Act
+        var result = await _repository.GetLentRecordAsync(TestCardIdm);
+
+        // Assert - 最新のレコードが返り、そのレコードに紐づく詳細のみが取得される
+        result.Should().NotBeNull();
+        result!.Id.Should().Be(latestId);
+        result.Details.Should().HaveCount(1);
+        result.Details[0].EntryStation.Should().Be("天神");
+        result.Details[0].ExitStation.Should().Be("薬院");
     }
 
     /// <summary>
