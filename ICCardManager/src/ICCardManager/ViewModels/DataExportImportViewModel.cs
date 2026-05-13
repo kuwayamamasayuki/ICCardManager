@@ -4,7 +4,9 @@ using System.IO;
 using System.Windows.Data;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using CommunityToolkit.Mvvm.Messaging;
 using ICCardManager.Common;
+using ICCardManager.Common.Messages;
 using ICCardManager.Data.Repositories;
 using ICCardManager.Dtos;
 using ICCardManager.Infrastructure.CardReader;
@@ -96,6 +98,7 @@ public partial class DataExportImportViewModel : ViewModelBase
     private readonly ICardRepository _cardRepository;
     private readonly ICardReader? _cardReader;
     private readonly OperationLogger _operationLogger;
+    private readonly IMessenger _messenger;
 
     [ObservableProperty]
     private DataType _selectedExportType = DataType.Cards;
@@ -301,6 +304,7 @@ public partial class DataExportImportViewModel : ViewModelBase
         IDialogService dialogService,
         ICardRepository cardRepository,
         OperationLogger operationLogger,
+        IMessenger messenger,
         ICardReader? cardReader = null)
     {
         _exportService = exportService;
@@ -308,6 +312,7 @@ public partial class DataExportImportViewModel : ViewModelBase
         _dialogService = dialogService;
         _cardRepository = cardRepository;
         _operationLogger = operationLogger;
+        _messenger = messenger;
         _cardReader = cardReader;
 
         // カードリーダーイベント購読
@@ -315,6 +320,22 @@ public partial class DataExportImportViewModel : ViewModelBase
         {
             _cardReader.CardRead += OnCardRead;
         }
+    }
+
+    /// <summary>
+    /// Issue #1514: カードタッチ待機状態が変化した際に、
+    /// MainViewModel 側の OnCardRead が二重起動するのを防ぐため
+    /// CardReadingSuppressedMessage を発信する。
+    /// </summary>
+    /// <remarks>
+    /// 待機開始 (true) で抑制 ON、待機終了 (false) で抑制 OFF を送信する。
+    /// CancelCardTouch・OnCardRead・ClearTargetCard・Cleanup・例外経路など
+    /// IsWaitingForCardTouch が false に戻るすべての経路で
+    /// 一律に抑制解除が走るようにここに集約している。
+    /// </remarks>
+    partial void OnIsWaitingForCardTouchChanged(bool value)
+    {
+        _messenger.Send(new CardReadingSuppressedMessage(value, CardReadingSource.DataImport));
     }
 
     /// <summary>
@@ -1006,7 +1027,7 @@ public partial class DataExportImportViewModel : ViewModelBase
                 TouchedCardInfo = "未登録のカードです";
                 SetStatus("このカードはシステムに登録されていません。先にカード管理で登録してください。", true);
                 _dialogService.ShowWarning(
-                    "タッチされたカードはシステムに登録されていません。\n\n利用履歴をインポートするには、先にカード管理で対象のICカードを登録してください。",
+                    "タッチされたカードはシステムに登録されていません。\n\n利用履歴をインポートするには、先にカード管理で対象の交通系ICカードを登録してください。",
                     "未登録カード");
             }
         });
