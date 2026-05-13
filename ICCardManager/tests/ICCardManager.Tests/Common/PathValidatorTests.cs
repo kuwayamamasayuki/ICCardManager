@@ -169,6 +169,47 @@ public class PathValidatorTests : IDisposable
     }
 
     /// <summary>
+    /// Issue #1483: <c>\\</c> プレフィックスと <c>//</c> プレフィックスの UNC パスが
+    /// <see cref="PathValidator"/> の形式検証で等価に扱われることを確認する。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>ValidateUncPathFormat</c> 内のプレフィックス除去ロジックの簡素化
+    /// （冗長な三項演算子の削除）に対する回帰検出テスト。両プレフィックスとも
+    /// 先頭 2 文字を除去するという仕様を固定する。
+    /// </para>
+    /// </remarks>
+    [Theory]
+    [InlineData(@"\\server\share\backup", "//server/share/backup")]
+    [InlineData(@"\\server", "//server")]
+    [InlineData(@"\\server\", "//server/")]
+    public void ValidateBackupPath_BothUncPrefixVariants_ProduceSameFormatVerdict(
+        string backslashPath, string forwardSlashPath)
+    {
+        // Act
+        var backslashResult = PathValidator.ValidateBackupPath(backslashPath);
+        var forwardSlashResult = PathValidator.ValidateBackupPath(forwardSlashPath);
+
+        // Assert: UNC 形式エラー（"サーバー名と共有名が必要" 等）の発生有無が一致すること。
+        // 書き込み権限チェックの結果は環境依存なので除外し、形式メッセージのみ比較する。
+        bool BackslashHasFormatError() =>
+            backslashResult.ErrorMessage != null &&
+            (backslashResult.ErrorMessage.Contains("サーバー名と共有名が必要") ||
+             backslashResult.ErrorMessage.Contains("サーバー名が不正") ||
+             backslashResult.ErrorMessage.Contains("共有名が不正"));
+
+        bool ForwardSlashHasFormatError() =>
+            forwardSlashResult.ErrorMessage != null &&
+            (forwardSlashResult.ErrorMessage.Contains("サーバー名と共有名が必要") ||
+             forwardSlashResult.ErrorMessage.Contains("サーバー名が不正") ||
+             forwardSlashResult.ErrorMessage.Contains("共有名が不正"));
+
+        BackslashHasFormatError().Should().Be(ForwardSlashHasFormatError(),
+            $"両プレフィックスは UNC 形式検証で同じ判定を返すべき。" +
+            $"\\\\ 側: {backslashResult.ErrorMessage}, // 側: {forwardSlashResult.ErrorMessage}");
+    }
+
+    /// <summary>
     /// サーバー名のみのUNCパス（共有名なし）が拒否されることを確認
     /// </summary>
     [Fact]
