@@ -5,10 +5,50 @@ using System.Threading.Tasks;
 using System.Globalization;
 using System.Windows;
 using System.Windows.Data;
+using System.Windows.Media;
 
 namespace ICCardManager.Common
 {
-/// <summary>
+    /// <summary>
+    /// リソースキー文字列を <see cref="Brush"/> に解決するコンバーター（Issue #1461）。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// SSOT 原則: ViewModel/DTO がカラーリテラル（例: "#FFEBEE"）を返してしまうと、
+    /// テーマ切替や <c>AccessibilityStyles.xaml</c> の値変更に追従できない。
+    /// このコンバーターは「キー名」（例: "ErrorBackgroundBrush"）を受け取り、
+    /// <see cref="Application.Current"/> のリソースから <see cref="Brush"/> を解決する。
+    /// </para>
+    /// <para>
+    /// null / 空文字列 / "Transparent" は <see cref="Brushes.Transparent"/> を返す。
+    /// 解決に失敗した場合も <see cref="Brushes.Transparent"/> を返し、UI を破綻させない。
+    /// </para>
+    /// </remarks>
+    public class ResourceKeyToBrushConverter : IValueConverter
+    {
+        public object Convert(object value, Type targetType, object parameter, CultureInfo culture)
+        {
+            var key = value as string;
+            if (string.IsNullOrEmpty(key) || string.Equals(key, "Transparent", StringComparison.OrdinalIgnoreCase))
+            {
+                return Brushes.Transparent;
+            }
+
+            if (Application.Current?.TryFindResource(key) is Brush brush)
+            {
+                return brush;
+            }
+
+            return Brushes.Transparent;
+        }
+
+        public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture)
+        {
+            throw new NotImplementedException();
+        }
+    }
+
+    /// <summary>
     /// 整数値をVisibilityに変換するコンバーター
     /// 0より大きい場合はVisible、それ以外はCollapsed
     /// </summary>

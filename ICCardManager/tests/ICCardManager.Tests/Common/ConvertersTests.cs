@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Windows;
+using System.Windows.Media;
 using FluentAssertions;
 using ICCardManager.Common;
 using Xunit;
@@ -271,6 +272,58 @@ public class CountToAccessibilityTextConverterTests
     public void ConvertBack_NotImplementedExceptionをスローすること()
     {
         var act = () => _converter.ConvertBack("x", typeof(int), null, CultureInfo.InvariantCulture);
+        act.Should().Throw<System.NotImplementedException>();
+    }
+}
+
+/// <summary>
+/// <see cref="ResourceKeyToBrushConverter"/> の単体テスト（Issue #1461）。
+/// </summary>
+/// <remarks>
+/// WPF <see cref="Application.Current"/> はテストでは null であり、リソース解決はフォールバックする。
+/// 本テストは「リテラル直書きとの分離」が型レベルで保たれ、未解決キーでも UI が破綻しない
+/// （= <see cref="Brushes.Transparent"/> を返す）ことを検証する。
+/// </remarks>
+public class ResourceKeyToBrushConverterTests
+{
+    private readonly ResourceKeyToBrushConverter _converter = new();
+
+    [Fact]
+    public void Convert_nullの場合Transparentを返すこと()
+    {
+        var result = _converter.Convert(null, typeof(Brush), null, CultureInfo.InvariantCulture);
+        result.Should().Be(Brushes.Transparent);
+    }
+
+    [Fact]
+    public void Convert_空文字の場合Transparentを返すこと()
+    {
+        var result = _converter.Convert(string.Empty, typeof(Brush), null, CultureInfo.InvariantCulture);
+        result.Should().Be(Brushes.Transparent);
+    }
+
+    [Theory]
+    [InlineData("Transparent")]
+    [InlineData("transparent")]
+    [InlineData("TRANSPARENT")]
+    public void Convert_Transparent文字列の場合大小文字を問わずTransparentを返すこと(string key)
+    {
+        var result = _converter.Convert(key, typeof(Brush), null, CultureInfo.InvariantCulture);
+        result.Should().Be(Brushes.Transparent);
+    }
+
+    [Fact]
+    public void Convert_存在しないキーの場合Transparentを返してUI破綻を防ぐこと()
+    {
+        // Application.Current が null またはキー未登録の場合でも、null 例外を起こさず Transparent を返す
+        var result = _converter.Convert("NonExistentBrushKey_xyz_12345", typeof(Brush), null, CultureInfo.InvariantCulture);
+        result.Should().Be(Brushes.Transparent);
+    }
+
+    [Fact]
+    public void ConvertBack_NotImplementedExceptionをスローすること()
+    {
+        var act = () => _converter.ConvertBack(Brushes.Red, typeof(string), null, CultureInfo.InvariantCulture);
         act.Should().Throw<System.NotImplementedException>();
     }
 }

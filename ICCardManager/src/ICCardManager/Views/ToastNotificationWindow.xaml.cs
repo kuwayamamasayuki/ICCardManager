@@ -223,59 +223,70 @@ namespace ICCardManager.Views
         }
 
         /// <summary>
-        /// 通知種類に応じたスタイルを適用
+        /// 通知種類に応じたスタイルを適用（Issue #1461: AccessibilityStyles.xaml の SSOT から取得）
         /// </summary>
         private void ApplyStyle(ToastType type)
         {
+            string backgroundKey, borderKey, titleForegroundKey;
             switch (type)
             {
                 case ToastType.Lend:
-                    // 貸出: 暖色系オレンジ（アクセシビリティ対応）
                     IconText.Text = "🚃";
-                    ToastBorder.Background = new SolidColorBrush(Color.FromRgb(255, 243, 224)); // #FFF3E0
-                    ToastBorder.BorderBrush = new SolidColorBrush(Color.FromRgb(255, 152, 0));  // #FF9800
-                    TitleText.Foreground = new SolidColorBrush(Color.FromRgb(230, 81, 0));     // #E65100
-                    MessageText.Foreground = new SolidColorBrush(Color.FromRgb(66, 66, 66));    // #424242
-                    SubMessageText.Foreground = new SolidColorBrush(Color.FromRgb(66, 66, 66));
+                    backgroundKey = "LendingBackgroundBrush";
+                    borderKey = "LendingBorderBrush";
+                    titleForegroundKey = "LendingForegroundBrush";
                     break;
 
                 case ToastType.Return:
-                    // 返却: 寒色系青（アクセシビリティ対応）
                     IconText.Text = "🏠";
-                    ToastBorder.Background = new SolidColorBrush(Color.FromRgb(227, 242, 253)); // #E3F2FD
-                    ToastBorder.BorderBrush = new SolidColorBrush(Color.FromRgb(33, 150, 243)); // #2196F3
-                    TitleText.Foreground = new SolidColorBrush(Color.FromRgb(13, 71, 161));    // #0D47A1
-                    MessageText.Foreground = new SolidColorBrush(Color.FromRgb(66, 66, 66));    // #424242
-                    SubMessageText.Foreground = new SolidColorBrush(Color.FromRgb(66, 66, 66));
+                    backgroundKey = "ReturnBackgroundBrush";
+                    borderKey = "ReturnBorderBrush";
+                    titleForegroundKey = "ReturnForegroundBrush";
                     break;
 
                 case ToastType.Info:
                     IconText.Text = "ℹ️";
-                    ToastBorder.Background = new SolidColorBrush(Color.FromRgb(227, 242, 253)); // #E3F2FD
-                    ToastBorder.BorderBrush = new SolidColorBrush(Color.FromRgb(33, 150, 243)); // #2196F3
-                    TitleText.Foreground = new SolidColorBrush(Color.FromRgb(13, 71, 161));    // #0D47A1
-                    MessageText.Foreground = new SolidColorBrush(Color.FromRgb(66, 66, 66));
-                    SubMessageText.Foreground = new SolidColorBrush(Color.FromRgb(66, 66, 66));
+                    backgroundKey = "ReturnBackgroundBrush";
+                    borderKey = "ReturnBorderBrush";
+                    titleForegroundKey = "ReturnForegroundBrush";
                     break;
 
                 case ToastType.Warning:
                     IconText.Text = "⚠️";
-                    ToastBorder.Background = new SolidColorBrush(Color.FromRgb(255, 243, 224)); // #FFF3E0
-                    ToastBorder.BorderBrush = new SolidColorBrush(Color.FromRgb(255, 152, 0));  // #FF9800
-                    TitleText.Foreground = new SolidColorBrush(Color.FromRgb(230, 81, 0));     // #E65100
-                    MessageText.Foreground = new SolidColorBrush(Color.FromRgb(66, 66, 66));
-                    SubMessageText.Foreground = new SolidColorBrush(Color.FromRgb(66, 66, 66));
+                    backgroundKey = "LendingBackgroundBrush";
+                    borderKey = "LendingBorderBrush";
+                    titleForegroundKey = "LendingForegroundBrush";
                     break;
 
                 case ToastType.Error:
                     IconText.Text = "❌";
-                    ToastBorder.Background = new SolidColorBrush(Color.FromRgb(255, 235, 238)); // #FFEBEE
-                    ToastBorder.BorderBrush = new SolidColorBrush(Color.FromRgb(244, 67, 54));  // #F44336
-                    TitleText.Foreground = new SolidColorBrush(Color.FromRgb(183, 28, 28));    // #B71C1C
-                    MessageText.Foreground = new SolidColorBrush(Color.FromRgb(66, 66, 66));
-                    SubMessageText.Foreground = new SolidColorBrush(Color.FromRgb(66, 66, 66));
+                    backgroundKey = "ErrorBackgroundBrush";
+                    borderKey = "ErrorBorderBrush";
+                    titleForegroundKey = "ErrorForegroundBrush";
                     break;
+
+                default:
+                    return;
             }
+
+            ToastBorder.Background = ResolveBrush(backgroundKey);
+            ToastBorder.BorderBrush = ResolveBrush(borderKey);
+            TitleText.Foreground = ResolveBrush(titleForegroundKey);
+
+            var messageBrush = ResolveBrush("WaitingForegroundBrush");
+            MessageText.Foreground = messageBrush;
+            SubMessageText.Foreground = messageBrush;
+        }
+
+        /// <summary>
+        /// アプリケーションリソースからブラシを解決する。リソースが見つからない場合は <see cref="Brushes.Transparent"/> を返す。
+        /// </summary>
+        /// <remarks>
+        /// テスト環境やリソース未登録時のクラッシュを防ぐため、フォールバックを持つ。
+        /// </remarks>
+        internal static Brush ResolveBrush(string resourceKey)
+        {
+            return Application.Current?.TryFindResource(resourceKey) as Brush ?? Brushes.Transparent;
         }
     }
 }
