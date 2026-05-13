@@ -176,7 +176,7 @@ namespace ICCardManager.Common
                 }
             }
 
-            // 8. 書き込み可能かチェック（ディレクトリが存在する場合）
+            // 9. 書き込み可能かチェック（ディレクトリが存在する場合）
             var writeCheckResult = CheckWritePermission(path);
             if (!writeCheckResult.IsValid)
             {
@@ -200,10 +200,9 @@ namespace ICCardManager.Common
         /// </summary>
         private static ValidationResult ValidateUncPathFormat(string path)
         {
-            // \\ または // のプレフィックスを除去してサーバー名・共有名を検証
-            var withoutPrefix = path.StartsWith(@"\\")
-                ? path.Substring(2)
-                : path.Substring(2); // "//" の場合
+            // \\ または // のプレフィックス（2文字）を除去してサーバー名・共有名を検証。
+            // どちらのプレフィックスでも長さは 2 で同一のため、分岐不要。
+            var withoutPrefix = path.Substring(2);
 
             // セパレータで分割
             var separators = new[] { '\\', '/' };
