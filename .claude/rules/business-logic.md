@@ -42,7 +42,7 @@ THEN
 - 30秒ごとの接続ヘルスチェック＋自動再接続
 - ステータスバーに「共有モード」表示、ネットワーク切断時は警告表示
 - DBパス変更後はアプリ再起動が必要
-- VACUUM: 共有モードでは失敗する場合あり（次回起動時に再試行）
+- VACUUM: 月初に「先勝ち CAS ロック」で 1 台だけが試行する（Issue #1482）。`SettingsRepository.TryAcquireMonthlyVacuumLockAsync` で `settings.last_vacuum_date` 行をアトミック更新し、`rowsAffected=1` を受け取った PC のみが VACUUM を実行。ロック獲得後の VACUUM 失敗は当月スキップとして確定し、来月まで誰も再試行しない（デッドロックスパイラル防止）
 - バックアップ: SQLite Backup API使用（同時アクセス中でも安全）
 - リストア: 他のPC全てがアプリ終了後に実行する必要あり
 - セットアップ: 1台目がDB初期化 → 2台目以降は同じパスを設定するだけ

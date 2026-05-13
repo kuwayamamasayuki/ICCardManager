@@ -697,27 +697,23 @@ namespace ICCardManager
                     _logger?.LogInformation("古い操作ログを{DeletedCount}件削除しました", logDeleted);
                 }
 
-                // VACUUM（月次実行）
-                var settingsRepository = ServiceProvider.GetRequiredService<ISettingsRepository>();
-                var settings = await settingsRepository.GetAppSettingsAsync();
-
+                // VACUUM（月次実行、先勝ち CAS ロック、Issue #1482）
+                // 共有モードで複数 PC が同時に起動した場合、ロック獲得した 1 台のみが
+                // VACUUM を試行する。ロック獲得後の VACUUM 失敗は当月スキップとして確定し、
+                // 来月まで誰も再試行しない（デッドロックスパイラル防止）。
                 var today = DateTime.Now;
                 if (today.Day >= 10)
                 {
-                    var lastVacuum = settings.LastVacuumDate;
-                    if (!lastVacuum.HasValue ||
-                        lastVacuum.Value.Year != today.Year ||
-                        lastVacuum.Value.Month != today.Month)
+                    var settingsRepository = ServiceProvider.GetRequiredService<ISettingsRepository>();
+                    if (await settingsRepository.TryAcquireMonthlyVacuumLockAsync(today))
                     {
                         if (await dbContext.VacuumAsync())
                         {
-                            settings.LastVacuumDate = today;
-                            _ = settingsRepository.SaveAppSettingsAsync(settings);
                             _logger?.LogInformation("VACUUM実行完了");
                         }
                         else
                         {
-                            _logger?.LogWarning("VACUUM失敗（他の接続がアクティブ）。次回起動時にリトライします。");
+                            _logger?.LogWarning("VACUUM失敗。来月再試行します。");
                         }
                     }
                 }
