@@ -1027,7 +1027,7 @@ public partial class DataExportImportViewModel : ViewModelBase
                 TouchedCardInfo = "未登録のカードです";
                 SetStatus("このカードはシステムに登録されていません。先にカード管理で登録してください。", true);
                 _dialogService.ShowWarning(
-                    "タッチされたカードはシステムに登録されていません。\n\n利用履歴をインポートするには、先にカード管理で対象のICカードを登録してください。",
+                    "タッチされたカードはシステムに登録されていません。\n\n利用履歴をインポートするには、先にカード管理で対象の交通系ICカードを登録してください。",
                     "未登録カード");
             }
         });
