@@ -552,7 +552,7 @@
                                         <ItemsControl.ItemTemplate>
                                             <DataTemplate>
                                                 <TextBlock Text="{Binding DisplayText}"
-                                                           Foreground="#795548"
+                                                           Foreground="{DynamicResource HintForegroundBrush}"
                                                            Margin="10,2,0,2"/>
                                             </DataTemplate>
                                         </ItemsControl.ItemTemplate>

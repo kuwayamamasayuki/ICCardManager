@@ -40,7 +40,7 @@
             <Border Background="{DynamicResource WarningBackgroundBrush}" CornerRadius="4" Padding="12" Margin="0,0,0,10">
                 <TextBlock TextWrapping="Wrap"
                            FontSize="{DynamicResource SmallFontSize}"
-                           Foreground="#795548">
+                           Foreground="{DynamicResource HintForegroundBrush}">
                     <Run Text="💡 ヒント: "/>
                     <Run Text="職員の認証に使用するカードは「職員証」、交通費精算に使用するカードは「交通系ICカード」を選択してください。"/>
                 </TextBlock>

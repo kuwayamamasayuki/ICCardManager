@@ -58,6 +58,8 @@
     <SolidColorBrush x:Key="SecondaryTextBrush" Color="Gray"/>
     <SolidColorBrush x:Key="MutedTextBrush" Color="#666666"/>
     <SolidColorBrush x:Key="DangerTextBrush" Color="#D32F2F"/>
+    <!-- ヒント／補足説明用（Brown 700）。色覚多様性に配慮した茶色系で、💡や⚠の説明文に使う（Issue #1461） -->
+    <SolidColorBrush x:Key="HintForegroundBrush" Color="#795548"/>
 
     <!-- 背景・ボーダー -->
     <SolidColorBrush x:Key="NeutralBackgroundBrush" Color="#F5F5F5"/>

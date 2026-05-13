@@ -37,7 +37,7 @@
                            FontWeight="Bold"
                            Foreground="{DynamicResource LendingForegroundBrush}"/>
                 <TextBlock FontSize="{DynamicResource SmallFontSize}"
-                           Foreground="#795548"
+                           Foreground="{DynamicResource HintForegroundBrush}"
                            Margin="0,5,0,0"
                            TextWrapping="Wrap">
                     <Run Text="バス停名は「乗車バス停～降車バス停」の形式で入力してください。"/>

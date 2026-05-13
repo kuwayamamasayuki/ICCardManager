@@ -103,9 +103,14 @@ namespace ICCardManager.Dtos
         public string LastUsageDateDisplay => DisplayFormatters.FormatDate(LastUsageDate);
 
         /// <summary>
-        /// 表示用: 行の背景色（警告時は薄い赤）
+        /// 表示用: 行の背景色を表すリソースキー。
+        /// 残高警告時は <c>ErrorBackgroundBrush</c>、通常時は <c>Transparent</c>。
         /// </summary>
-        public string RowBackgroundColor => IsBalanceWarning ? "#FFEBEE" : "Transparent";
+        /// <remarks>
+        /// Issue #1461: カラーリテラル直書きから AccessibilityStyles の SSOT へ。
+        /// XAML 側で <c>ResourceKeyToBrushConverter</c> 経由でブラシ解決する。
+        /// </remarks>
+        public string RowBackgroundResourceKey => IsBalanceWarning ? "ErrorBackgroundBrush" : "Transparent";
 
         #endregion
     }

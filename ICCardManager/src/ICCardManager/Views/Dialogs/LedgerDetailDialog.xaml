@@ -26,13 +26,20 @@
         <BooleanToVisibilityConverter x:Key="BoolToVisibilityConverter"/>
         <common:StringToVisibilityConverter x:Key="StringToVisibilityConverter" xmlns:common="clr-namespace:ICCardManager.Common"/>
 
-        <!-- グループ色のブラシ -->
+        <!-- グループ行背景色（5色サイクル、淡色） -->
         <SolidColorBrush x:Key="GroupColor0" Color="Transparent"/>
         <SolidColorBrush x:Key="GroupColor1" Color="#E3F2FD"/>
         <SolidColorBrush x:Key="GroupColor2" Color="#E8F5E9"/>
         <SolidColorBrush x:Key="GroupColor3" Color="#FFF3E0"/>
         <SolidColorBrush x:Key="GroupColor4" Color="#F3E5F5"/>
         <SolidColorBrush x:Key="GroupColor5" Color="#FFEBEE"/>
+
+        <!-- グループバッジ色（同サイクル、濃色） Issue #1461 -->
+        <SolidColorBrush x:Key="GroupBadgeColor1" Color="#1976D2"/>
+        <SolidColorBrush x:Key="GroupBadgeColor2" Color="#388E3C"/>
+        <SolidColorBrush x:Key="GroupBadgeColor3" Color="#F57C00"/>
+        <SolidColorBrush x:Key="GroupBadgeColor4" Color="#7B1FA2"/>
+        <SolidColorBrush x:Key="GroupBadgeColor5" Color="#D32F2F"/>
     </Window.Resources>
 
     <Grid Margin="15">
@@ -206,19 +213,19 @@
                                                 <Setter Property="Background" Value="Transparent"/>
                                                 <Style.Triggers>
                                                     <DataTrigger Binding="{Binding GroupColorIndex}" Value="1">
-                                                        <Setter Property="Background" Value="#E3F2FD"/>
+                                                        <Setter Property="Background" Value="{StaticResource GroupColor1}"/>
                                                     </DataTrigger>
                                                     <DataTrigger Binding="{Binding GroupColorIndex}" Value="2">
-                                                        <Setter Property="Background" Value="#E8F5E9"/>
+                                                        <Setter Property="Background" Value="{StaticResource GroupColor2}"/>
                                                     </DataTrigger>
                                                     <DataTrigger Binding="{Binding GroupColorIndex}" Value="3">
-                                                        <Setter Property="Background" Value="#FFF3E0"/>
+                                                        <Setter Property="Background" Value="{StaticResource GroupColor3}"/>
                                                     </DataTrigger>
                                                     <DataTrigger Binding="{Binding GroupColorIndex}" Value="4">
-                                                        <Setter Property="Background" Value="#F3E5F5"/>
+                                                        <Setter Property="Background" Value="{StaticResource GroupColor4}"/>
                                                     </DataTrigger>
                                                     <DataTrigger Binding="{Binding GroupColorIndex}" Value="5">
-                                                        <Setter Property="Background" Value="#FFEBEE"/>
+                                                        <Setter Property="Background" Value="{StaticResource GroupColor5}"/>
                                                     </DataTrigger>
                                                 </Style.Triggers>
                                             </Style>
@@ -239,19 +246,19 @@
                                                         <Setter Property="Background" Value="Transparent"/>
                                                         <Style.Triggers>
                                                             <DataTrigger Binding="{Binding GroupColorIndex}" Value="1">
-                                                                <Setter Property="Background" Value="#1976D2"/>
+                                                                <Setter Property="Background" Value="{StaticResource GroupBadgeColor1}"/>
                                                             </DataTrigger>
                                                             <DataTrigger Binding="{Binding GroupColorIndex}" Value="2">
-                                                                <Setter Property="Background" Value="#388E3C"/>
+                                                                <Setter Property="Background" Value="{StaticResource GroupBadgeColor2}"/>
                                                             </DataTrigger>
                                                             <DataTrigger Binding="{Binding GroupColorIndex}" Value="3">
-                                                                <Setter Property="Background" Value="#F57C00"/>
+                                                                <Setter Property="Background" Value="{StaticResource GroupBadgeColor3}"/>
                                                             </DataTrigger>
                                                             <DataTrigger Binding="{Binding GroupColorIndex}" Value="4">
-                                                                <Setter Property="Background" Value="#7B1FA2"/>
+                                                                <Setter Property="Background" Value="{StaticResource GroupBadgeColor4}"/>
                                                             </DataTrigger>
                                                             <DataTrigger Binding="{Binding GroupColorIndex}" Value="5">
-                                                                <Setter Property="Background" Value="#D32F2F"/>
+                                                                <Setter Property="Background" Value="{StaticResource GroupBadgeColor5}"/>
                                                             </DataTrigger>
                                                         </Style.Triggers>
                                                     </Style>

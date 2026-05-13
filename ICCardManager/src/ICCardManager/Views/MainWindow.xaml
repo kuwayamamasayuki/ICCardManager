@@ -23,6 +23,7 @@
         <conv:IntToVisibilityConverter x:Key="IntToVisibilityConverter"/>
         <conv:BoolToVisibilityConverter x:Key="BoolToVisibilityConverter"/>
         <conv:InverseBooleanConverter x:Key="InverseBooleanConverter"/>
+        <conv:ResourceKeyToBrushConverter x:Key="ResourceKeyToBrushConverter"/>
     </Window.Resources>
 
     <Window.InputBindings>
@@ -674,7 +675,7 @@
                                 <Border CornerRadius="4"
                                         Padding="10,8"
                                         Cursor="Hand"
-                                        Background="{Binding RowBackgroundColor}">
+                                        Background="{Binding RowBackgroundResourceKey, Converter={StaticResource ResourceKeyToBrushConverter}}">
                                     <Border.InputBindings>
                                         <MouseBinding MouseAction="LeftClick"
                                                       Command="{Binding DataContext.OpenCardHistoryFromDashboardCommand, RelativeSource={RelativeSource AncestorType=ListView}}"
