@@ -530,4 +530,91 @@ public class SettingsRepositoryTests : IDisposable
     }
 
     #endregion
+
+    #region TryAcquireMonthlyVacuumLockAsync テスト (Issue #1482)
+
+    /// <summary>
+    /// 前回実行履歴が無い場合は true を返し、当日日付が保存される
+    /// </summary>
+    [Fact]
+    public async Task TryAcquireMonthlyVacuumLockAsync_前回実行なし_trueを返し当日日付を保存する()
+    {
+        // Arrange: last_vacuum_date キーがまだ無い状態（テスト DB の初期スキーマ）
+        var today = new DateTime(2026, 5, 14);
+
+        // Act
+        var acquired = await _repository.TryAcquireMonthlyVacuumLockAsync(today);
+
+        // Assert
+        acquired.Should().BeTrue("行が存在しないので INSERT が成立し先勝ちになる");
+        var stored = await _repository.GetAsync(SettingsRepository.KeyLastVacuumDate);
+        stored.Should().Be("2026-05-14");
+    }
+
+    /// <summary>
+    /// 前月の日付が入っている場合は true を返し、当日日付に更新される
+    /// </summary>
+    [Fact]
+    public async Task TryAcquireMonthlyVacuumLockAsync_前月実行済み_trueを返し当日日付に更新する()
+    {
+        // Arrange
+        var today = new DateTime(2026, 5, 14);
+        await _repository.SetAsync(SettingsRepository.KeyLastVacuumDate, "2026-04-15");
+
+        // Act
+        var acquired = await _repository.TryAcquireMonthlyVacuumLockAsync(today);
+
+        // Assert
+        acquired.Should().BeTrue("既存値が当月外なので CAS の WHERE が真となり UPDATE が成立する");
+        var stored = await _repository.GetAsync(SettingsRepository.KeyLastVacuumDate);
+        stored.Should().Be("2026-05-14");
+    }
+
+    /// <summary>
+    /// 当月の日付が入っている場合は false を返し、既存値を変更しない
+    /// </summary>
+    [Fact]
+    public async Task TryAcquireMonthlyVacuumLockAsync_当月実行済み_falseを返し値を変更しない()
+    {
+        // Arrange
+        var today = new DateTime(2026, 5, 14);
+        await _repository.SetAsync(SettingsRepository.KeyLastVacuumDate, "2026-05-10");
+
+        // Act
+        var acquired = await _repository.TryAcquireMonthlyVacuumLockAsync(today);
+
+        // Assert
+        acquired.Should().BeFalse("既存値が当月なので CAS の WHERE が偽となり UPDATE は走らない");
+        var stored = await _repository.GetAsync(SettingsRepository.KeyLastVacuumDate);
+        stored.Should().Be("2026-05-10", "既存の当月日付を上書きしてはいけない");
+    }
+
+    /// <summary>
+    /// 同一 DbContext から複数 Repository が同時に呼び出しても、true を返すのは厳密に 1 つだけ
+    /// </summary>
+    /// <remarks>
+    /// SQLite の接続レベルロックで実質シリアル化されるが、その上でアプリ層の CAS（WHERE 句）が
+    /// 正しく機能して「先勝ち 1 つ、残りは false」となることを保証する。
+    /// </remarks>
+    [Fact]
+    public async Task TryAcquireMonthlyVacuumLockAsync_並列実行時_trueを返すのは1つだけ()
+    {
+        // Arrange
+        var today = new DateTime(2026, 5, 14);
+        const int parallelCount = 10;
+        var repos = Enumerable.Range(0, parallelCount)
+            .Select(_ => new SettingsRepository(_dbContext, _cacheServiceMock.Object, Options.Create(new CacheOptions())))
+            .ToList();
+
+        // Act: 10 並列で同時呼出
+        var tasks = repos.Select(r => r.TryAcquireMonthlyVacuumLockAsync(today)).ToList();
+        var results = await Task.WhenAll(tasks);
+
+        // Assert
+        results.Count(r => r).Should().Be(1, "先勝ちで正確に 1 つだけが true を返すべき");
+        var stored = await _repository.GetAsync(SettingsRepository.KeyLastVacuumDate);
+        stored.Should().Be("2026-05-14");
+    }
+
+    #endregion
 }

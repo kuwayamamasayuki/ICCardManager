@@ -85,6 +85,36 @@ ON CONFLICT(key) DO UPDATE SET value = @value";
         }
 
         /// <inheritdoc/>
+        public async Task<bool> TryAcquireMonthlyVacuumLockAsync(DateTime today)
+        {
+            // Issue #1482: 「先勝ち CAS ロック」。
+            // ON CONFLICT DO UPDATE の WHERE 句で「既存値が当月外なら更新」を表現し、
+            // SQLite のステートメント原子性を利用して複数 PC 間の排他を実現する。
+            // - 行が存在しない初回: INSERT が走り rowsAffected=1（先勝ち成立）
+            // - 既存値が前月/null: WHERE 真 → UPDATE 走り rowsAffected=1
+            // - 既存値が当月: WHERE 偽 → 何もしない、rowsAffected=0
+            using var lease = await _dbContext.LeaseConnectionAsync();
+            var connection = lease.Connection;
+
+            using var command = connection.CreateCommand();
+            command.CommandText = @"INSERT INTO settings (key, value) VALUES (@key, @today)
+ON CONFLICT(key) DO UPDATE SET value = excluded.value
+WHERE settings.value IS NULL OR substr(settings.value, 1, 7) <> @currentMonth";
+
+            command.Parameters.AddWithValue("@key", KeyLastVacuumDate);
+            command.Parameters.AddWithValue("@today", today.ToString("yyyy-MM-dd"));
+            command.Parameters.AddWithValue("@currentMonth", today.ToString("yyyy-MM"));
+
+            var rowsAffected = await command.ExecuteNonQueryAsync();
+            if (rowsAffected > 0)
+            {
+                _cacheService.Invalidate(CacheKeys.AppSettings);
+                return true;
+            }
+            return false;
+        }
+
+        /// <inheritdoc/>
         public async Task<AppSettings> GetAppSettingsAsync()
         {
             return await _cacheService.GetOrCreateAsync(
