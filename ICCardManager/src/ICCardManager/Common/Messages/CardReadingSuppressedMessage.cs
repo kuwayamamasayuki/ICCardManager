@@ -20,7 +20,18 @@ namespace ICCardManager.Common.Messages
         /// <summary>
         /// 職員証認証モード（StaffAuthDialog）
         /// </summary>
-        Authentication
+        Authentication,
+
+        /// <summary>
+        /// データインポートのカードタッチ待機モード（DataExportImportViewModel）
+        /// </summary>
+        /// <remarks>
+        /// Issue #1514: データインポートでカードタッチ待機中に未登録の交通系ICカードを
+        /// タッチすると、MainViewModel 側の CardTypeSelectionDialog と
+        /// DataExportImportViewModel 側の「未登録カード」MessageBox が二重表示されてしまうため、
+        /// データインポート画面側で MainViewModel.OnCardRead を抑制する用途で使用する。
+        /// </remarks>
+        DataImport
     }
 
     /// <summary>
