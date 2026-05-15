@@ -20,6 +20,9 @@
       <PrivateAssets>all</PrivateAssets>
     </PackageReference>
 
+    <!-- 動的 Skip（Issue #1522: WSL2 では二段モーダル取得が不安定のため自動 Skip） -->
+    <PackageReference Include="Xunit.SkippableFact" Version="1.4.13" />
+
     <!-- テストヘルパー -->
     <PackageReference Include="FluentAssertions" Version="6.12.0" />
 

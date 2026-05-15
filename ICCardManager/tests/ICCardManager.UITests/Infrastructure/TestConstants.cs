@@ -1,3 +1,5 @@
+using System;
+
 namespace ICCardManager.UITests.Infrastructure
 {
     /// <summary>
@@ -6,6 +8,21 @@ namespace ICCardManager.UITests.Infrastructure
     /// </summary>
     internal static class TestConstants
     {
+        /// <summary>
+        /// Issue #1522 関連のクイックフィルタ FlaUI テストをスキップすべきかを判定する。
+        /// <list type="bullet">
+        ///   <item>環境変数 <c>SKIP_QUICK_FILTER_UITEST=1</c> が設定されている場合（明示 opt-out）</item>
+        ///   <item>環境変数 <c>WSL_DISTRO_NAME</c> が設定されている場合（参考: Win32 子プロセスでは継承されないため通常は機能しないが、bash → wslenv 経由で渡された場合の opt-out として残す）</item>
+        /// </list>
+        /// Issue #1522 では「WSL2 経由実行時に二段モーダル取得が不安定」との既知制約が記載されたが、
+        /// 現環境では再現しないことを確認済み。将来再発した際の安全網として残す。
+        /// </summary>
+        public static bool ShouldSkipQuickFilterFlaUiTest =>
+            string.Equals(Environment.GetEnvironmentVariable("SKIP_QUICK_FILTER_UITEST"), "1",
+                StringComparison.Ordinal) ||
+            !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("WSL_DISTRO_NAME"));
+
+
         // ── メインウィンドウ ──────────────────────────────
         // WPF Window の UIA Name は Title と AutomationProperties.Name のどちらかが返る場合がある。
         // テストでは StartsWith で前方一致させるため、共通プレフィックス（= Title）を使う。
@@ -71,8 +88,45 @@ namespace ICCardManager.UITests.Infrastructure
         /// </summary>
         public const string StaffAuthCancelButtonName = "キャンセル";
 
+        // ── OperationLogDialog（Issue #1522） ────────────
+        /// <summary>
+        /// SystemManageDialog 内の「操作ログを表示」ボタン。
+        /// </summary>
+        public const string OpenOperationLogButton = "操作ログを表示";
+
+        /// <summary>
+        /// OperationLogDialog の AutomationProperties.Name。
+        /// </summary>
+        public const string OperationLogDialogName = "操作ログダイアログ";
+
+        /// <summary>
+        /// クイックフィルタ「今日」ボタン。
+        /// </summary>
+        public const string OperationLogQuickFilterToday = "今日の期間に設定";
+
+        /// <summary>
+        /// クイックフィルタ「今月」ボタン。
+        /// </summary>
+        public const string OperationLogQuickFilterThisMonth = "今月の期間に設定";
+
+        /// <summary>
+        /// クイックフィルタ「先月」ボタン。
+        /// </summary>
+        public const string OperationLogQuickFilterLastMonth = "先月の期間に設定";
+
+        /// <summary>
+        /// 操作種別 ComboBox。クイックフィルタとの矩形衝突検証で隣接基準として使用。
+        /// </summary>
+        public const string OperationLogActionTypeComboBox = "操作種別";
+
         // ── タイムアウト（秒） ────────────────────────────
         public const int AppLaunchTimeoutSeconds = 30;
         public const int DialogOpenTimeoutSeconds = 10;
+
+        /// <summary>
+        /// OperationLogDialog は初回起動時に DB クエリで遅延する可能性があるため、
+        /// 二段モーダルの取得には長めの待ち時間を確保する（Issue #1522）。
+        /// </summary>
+        public const int OperationLogDialogOpenTimeoutSeconds = 30;
     }
 }
