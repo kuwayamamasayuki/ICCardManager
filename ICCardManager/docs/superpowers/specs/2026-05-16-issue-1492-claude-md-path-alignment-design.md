@@ -17,7 +17,7 @@
 |---|---|
 | `docs/design/` | `ICCardManager/docs/design/` |
 | `docs/manual/` | `ICCardManager/docs/manual/` |
-| `Resources/Templates/物品出納簿テンプレート.xlsx` | `ICCardManager/src/ICCardManager/Resources/Templates/物品出納簿テンプレート.xlsx` |
+| `Resources/Templates/物品出納簿テンプレート.xlsx` | `ICCardManager/src/ICCardManager/Resources/Templates/`（実体は `物品出納簿テンプレート（企業会計部局）.xlsx` と `物品出納簿テンプレート（市長事務部局）.xlsx` の 2 ファイル。元の単一ファイル名は実在しない） |
 | `docs/線区駅順コード/StationCode.csv` | `ICCardManager/docs/線区駅順コード/StationCode.csv` |
 | ASCII tree のルート `ICCardManager/` | リポジトリルートは `.`。`./docs/`（superpowers のみ）と `./tools/` がルートに別途存在 |
 
