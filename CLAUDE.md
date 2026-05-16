@@ -15,13 +15,20 @@
 ## ディレクトリ構成
 
 ```
-ICCardManager/
-├── src/ICCardManager/      # 本体（Views, ViewModels, Models, Services, Data, Infrastructure, Common）
-├── tests/                  # ユニットテスト・UIテスト
-├── tools/                  # 開発支援ツール・スクリプト
-├── installer/              # InnoSetupインストーラー
-├── docs/design/            # 設計書（01〜08）
-└── docs/manual/            # ユーザー・管理者・開発者マニュアル
+.                                          # リポジトリルート
+├── ICCardManager/                         # 本プロジェクト本体
+│   ├── src/ICCardManager/                 # 本体（Views, ViewModels, Models, Services, Data, Infrastructure, Common）
+│   ├── tests/                             # ユニットテスト・UIテスト
+│   ├── tools/                             # 開発支援ツール・スクリプト
+│   ├── installer/                         # InnoSetupインストーラー
+│   ├── CHANGELOG.md                       # バージョン履歴・変更内容の Single Source of Truth
+│   └── docs/
+│       ├── design/                        # 設計書（01〜08）
+│       ├── manual/                        # ユーザー・管理者・開発者マニュアル
+│       └── 線区駅順コード/                  # 駅コード→駅名マスター
+├── CLAUDE.md                              # 本ファイル（プロジェクト指示書）
+├── docs/                                  # ルート直下。現状は superpowers プラグインキャッシュ等のみ（本プロジェクトの設計書は ICCardManager/docs/ 配下）
+└── tools/                                 # ルート直下の補助スクリプト群（ICCardManager/tools/ とは別物）
 ```
 
 ## よく使うコマンド
@@ -64,10 +71,10 @@ WSL2では "/mnt/c/Program Files/dotnet/dotnet.exe" を使用すること。
 ## 参照ドキュメント
 
 - `ICCardManager/CHANGELOG.md` — **バージョン履歴・変更内容の Single Source of Truth**（TODO.md より優先）
-- `docs/design/` — 設計書一式（01〜08）
-- `docs/manual/` — マニュアル（ユーザー・管理者・開発者）
-- `Resources/Templates/物品出納簿テンプレート.xlsx` — 月次帳票テンプレート
-- `docs/線区駅順コード/StationCode.csv` — 駅コード→駅名マスター（[出典](https://produ.irelang.jp/blog/2017/08/305/)、[新駅参照](https://ja.ysrl.org/atc/station-code.html)）
+- `ICCardManager/docs/design/` — 設計書一式（01〜08）
+- `ICCardManager/docs/manual/` — マニュアル（ユーザー・管理者・開発者）
+- `ICCardManager/src/ICCardManager/Resources/Templates/` — 月次帳票テンプレート（`物品出納簿テンプレート（企業会計部局）.xlsx`、`物品出納簿テンプレート（市長事務部局）.xlsx` の 2 ファイル）
+- `ICCardManager/docs/線区駅順コード/StationCode.csv` — 駅コード→駅名マスター（[出典](https://produ.irelang.jp/blog/2017/08/305/)、[新駅参照](https://ja.ysrl.org/atc/station-code.html)）
 
 ## 非推奨ドキュメント
 
