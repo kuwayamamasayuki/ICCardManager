@@ -70,8 +70,8 @@ namespace ICCardManager.Infrastructure.Logging
 
             if (Options.Enabled)
             {
-                // ログディレクトリを作成（全ユーザーがアクセスできるように権限を設定）
-                EnsureDirectoryWithPermissions(_logDirectory);
+                // ログディレクトリを作成（権限はインストーラーが設定済み、Issue #1455 / #1499）
+                EnsureDirectoryExists(_logDirectory);
 
                 // 古いログファイルを削除
                 CleanupOldLogs();
@@ -288,15 +288,18 @@ namespace ICCardManager.Infrastructure.Logging
         }
 
         /// <summary>
-        /// ログディレクトリを作成する
+        /// ログディレクトリが存在することを保証する（なければ作成する）。
         /// </summary>
         /// <remarks>
-        /// Issue #1455: ランタイムで <c>BUILTIN\Users : FullControl</c> を付与する処理を撤廃した。
-        /// インストーラーが <c>{commonappdata}\ICCardManager\Logs</c> に
-        /// <c>Permissions: users-full</c> を設定済みのため、ランタイムでの再付与は不要。
-        /// 詳細は <see cref="ICCardManager.Data.DbContext.EnsureDirectoryWithPermissions"/> 参照。
+        /// Issue #1455 / #1499:
+        /// 旧名は <c>EnsureDirectoryWithPermissions</c>。Issue #1455 でランタイム ACL 設定を撤廃した結果、
+        /// 実体が <c>Directory.CreateDirectory</c> の薄いラッパーとなったため、Issue #1499 で
+        /// 命名と挙動の乖離を解消するためにリネームした。インストーラーが
+        /// <c>{commonappdata}\ICCardManager\Logs</c> に <c>Permissions: users-full</c> を
+        /// 設定済みのため、ランタイムでの権限再付与は不要。
+        /// 詳細は <see cref="ICCardManager.Data.DbContext.EnsureDirectoryExists"/> 参照。
         /// </remarks>
-        private static void EnsureDirectoryWithPermissions(string directoryPath)
+        private static void EnsureDirectoryExists(string directoryPath)
         {
             // Directory.CreateDirectoryは既存ディレクトリに対しても安全（冪等）
             Directory.CreateDirectory(directoryPath);

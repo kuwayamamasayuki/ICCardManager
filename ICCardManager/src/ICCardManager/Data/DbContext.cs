@@ -254,18 +254,19 @@ namespace ICCardManager.Data
                 Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
                 "ICCardManager");
 
-            // ディレクトリを作成し、全ユーザーがアクセスできるように権限を設定
-            EnsureDirectoryWithPermissions(appDataPath);
+            // ディレクトリを作成（権限はインストーラーが設定済み、Issue #1455 / #1499）
+            EnsureDirectoryExists(appDataPath);
 
             return Path.Combine(appDataPath, DatabaseFileName);
         }
 
         /// <summary>
-        /// ディレクトリを作成する
+        /// ディレクトリが存在することを保証する（なければ作成する）。
         /// </summary>
         /// <remarks>
-        /// Issue #1455: 旧実装ではランタイムで <c>BUILTIN\Users : FullControl</c> を
-        /// <c>AddAccessRule</c> で付与していたが、以下の理由で撤廃した:
+        /// Issue #1455 / #1499:
+        /// 旧名は <c>EnsureDirectoryWithPermissions</c> で、当時はランタイムで
+        /// <c>BUILTIN\Users : FullControl</c> を <c>AddAccessRule</c> で付与していたが、以下の理由で撤廃した:
         /// (1) <c>FullControl</c> は削除権限まで含むため、一般ユーザーが他ユーザーのファイルを
         ///     削除・差替え可能な過剰権限となっていた（PII 置換攻撃の足掛かり）。
         /// (2) <c>AddAccessRule</c> は冪等ではなく、起動の度に新規 ACE が追加され ACL が累積する。
@@ -273,9 +274,11 @@ namespace ICCardManager.Data
         ///     <c>{commonappdata}\ICCardManager</c> 配下に <c>Permissions: users-full</c> を
         ///     設定済みのため、ランタイムでの再付与は機能的に冗長。
         /// 共有モード（UNC パス）等インストーラーの管理外パスを使う場合の権限は管理者責任とする。
+        /// 実体が <c>Directory.CreateDirectory</c> の薄いラッパーとなったため、Issue #1499 で
+        /// メソッド名を <c>EnsureDirectoryExists</c> に変更し、命名と挙動の乖離を解消した。
         /// </remarks>
         /// <param name="directoryPath">ディレクトリパス</param>
-        internal static void EnsureDirectoryWithPermissions(string directoryPath)
+        internal static void EnsureDirectoryExists(string directoryPath)
         {
             // Directory.CreateDirectoryは既存ディレクトリに対しても安全（冪等）
             Directory.CreateDirectory(directoryPath);
