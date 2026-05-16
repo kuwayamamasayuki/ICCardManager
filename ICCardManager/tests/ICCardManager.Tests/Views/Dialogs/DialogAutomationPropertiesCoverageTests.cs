@@ -150,10 +150,11 @@ public class DialogAutomationPropertiesCoverageTests
         var xaml = ReadDialog("StaffAuthDialog.xaml");
 
         Regex.IsMatch(xaml,
-            @"x:Name=""StatusText""[\s\S]*?AutomationProperties\.LiveSetting=""Assertive""")
+            @"x:Name=""StatusText""[^>]*?AutomationProperties\.LiveSetting=""Assertive""")
             .Should().BeTrue(
             "StaffAuthDialog: 認証ステータスは Assertive な LiveSetting で即時通知すべき。" +
-            "認証成功・失敗の結果がスクリーンリーダー利用者に伝わらないと、誤操作の温床になる。");
+            "認証成功・失敗の結果がスクリーンリーダー利用者に伝わらないと、誤操作の温床になる。" +
+            "（Issue #1503: 要素境界を跨ぐ誤マッチ防止のため `[^>]*?` で同一開始タグ内に限定）");
     }
 
     [Fact]
@@ -162,10 +163,11 @@ public class DialogAutomationPropertiesCoverageTests
         var xaml = ReadDialog("StaffAuthDialog.xaml");
 
         Regex.IsMatch(xaml,
-            @"x:Name=""TimeoutText""[\s\S]*?AutomationProperties\.LiveSetting=""Polite""")
+            @"x:Name=""TimeoutText""[^>]*?AutomationProperties\.LiveSetting=""Polite""")
             .Should().BeTrue(
             "StaffAuthDialog: タイムアウト残り時間は Polite で通知し、" +
-            "頻繁な秒数更新がスクリーンリーダーの読み上げを阻害しないようにする。");
+            "頻繁な秒数更新がスクリーンリーダーの読み上げを阻害しないようにする。" +
+            "（Issue #1503: 要素境界を跨ぐ誤マッチ防止のため `[^>]*?` で同一開始タグ内に限定）");
     }
 
     /// <summary>
@@ -177,8 +179,79 @@ public class DialogAutomationPropertiesCoverageTests
         var xaml = ReadDialog("OperationLogDialog.xaml");
 
         xaml.Should().MatchRegex(
-            @"Text=""\{Binding StatusMessage\}""[\s\S]*?AutomationProperties\.LiveSetting=""Polite""",
-            "OperationLogDialog: ステータスメッセージは Polite な LiveSetting で検索結果や件数の変化を通知すべき。");
+            @"Text=""\{Binding StatusMessage\}""[^>]*?AutomationProperties\.LiveSetting=""Polite""",
+            "OperationLogDialog: ステータスメッセージは Polite な LiveSetting で検索結果や件数の変化を通知すべき。" +
+            "（Issue #1503: 要素境界を跨ぐ誤マッチ防止のため `[^>]*?` で同一開始タグ内に限定）");
+    }
+
+    /// <summary>
+    /// Issue #1503: LiveSetting 検査 regex は同一要素内（同一開始タグ内）に閉じ込められるべき。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 旧来の <c>[\s\S]*?</c> は要素を跨いだ誤マッチを許してしまうため、
+    /// <c>[^>]*?</c> で開始タグ内に限定する。XAML の属性値は <c>"..."</c> で囲まれており、
+    /// 開始タグ内に裸の <c>&gt;</c> は出現しないため、<c>[^&gt;]</c> は同一開始タグ内に安全に留まる。
+    /// 改行・空白も <c>[^&gt;]</c> でマッチするため、マルチライン属性レイアウトでも問題ない。
+    /// </para>
+    /// </remarks>
+    [Theory]
+    // 同一要素内（マッチすべき）
+    [InlineData(
+        "<TextBlock Text=\"{Binding StatusMessage}\" AutomationProperties.LiveSetting=\"Polite\"/>",
+        true)]
+    // マルチライン属性レイアウト（マッチすべき）
+    [InlineData(
+        "<TextBlock Text=\"{Binding StatusMessage}\"\n           AutomationProperties.LiveSetting=\"Polite\"/>",
+        true)]
+    // 別要素を跨ぐ（マッチしてはならない: 旧 [\s\S]*? regex なら誤検出）
+    [InlineData(
+        "<TextBlock Text=\"{Binding StatusMessage}\"/><TextBlock AutomationProperties.LiveSetting=\"Polite\"/>",
+        false)]
+    // Text= と LiveSetting= が別 TextBlock に分かれているケース（マッチしてはならない）
+    [InlineData(
+        "<TextBlock Text=\"{Binding StatusMessage}\" Foreground=\"Red\"/>\n<TextBlock AutomationProperties.LiveSetting=\"Polite\"/>",
+        false)]
+    // 同じ要素内に LiveSetting がない（マッチしてはならない）
+    [InlineData(
+        "<TextBlock Text=\"{Binding StatusMessage}\"/>",
+        false)]
+    public void LiveSettingPattern_should_be_scoped_to_same_element(string syntheticXaml, bool expectedMatch)
+    {
+        // production テスト (StatusText/TimeoutText/StatusMessage) と同等の意味論を持つ
+        // 「同一開始タグ内マッチ」を [^>]*? で実現することを固定する（Issue #1503）。
+        var pattern = @"Text=""\{Binding StatusMessage\}""[^>]*?AutomationProperties\.LiveSetting=""Polite""";
+
+        Regex.IsMatch(syntheticXaml, pattern).Should().Be(expectedMatch,
+            "Issue #1503: LiveSetting 検査 regex は同一開始タグ内に閉じ込めるべき。" +
+            $"入力: {syntheticXaml.Replace("\n", "\\n")}");
+    }
+
+    /// <summary>
+    /// Issue #1503: 旧 <c>[\s\S]*?</c> パターンが要素境界を跨ぐ誤マッチを起こしていた事実を
+    /// 記録する回帰テスト。「なぜ <c>[^&gt;]*?</c> を採用したか」のドキュメントを兼ねる。
+    /// </summary>
+    [Fact]
+    public void OldGreedyPattern_would_have_falsely_matched_cross_element_LiveSetting()
+    {
+        // StatusMessage の TextBlock と、別 TextBlock の LiveSetting="Polite" が並ぶケース。
+        // この XAML から「StatusMessage の TextBlock に LiveSetting が付いている」と
+        // 推論するのは誤り。旧 regex はこの誤推論を許していた。
+        var crossElementXaml =
+            "<TextBlock Text=\"{Binding StatusMessage}\"/>" +
+            "<TextBlock AutomationProperties.LiveSetting=\"Polite\"/>";
+
+        var oldUnsafePattern = @"Text=""\{Binding StatusMessage\}""[\s\S]*?AutomationProperties\.LiveSetting=""Polite""";
+        var newSafePattern = @"Text=""\{Binding StatusMessage\}""[^>]*?AutomationProperties\.LiveSetting=""Polite""";
+
+        Regex.IsMatch(crossElementXaml, oldUnsafePattern).Should().BeTrue(
+            "Issue #1503 (回帰記録): 旧 `[\\s\\S]*?` regex は要素境界を考慮せず、" +
+            "別 TextBlock の LiveSetting=\"Polite\" を誤検出していた。" +
+            "本アサートは旧挙動を固定する記録目的。");
+
+        Regex.IsMatch(crossElementXaml, newSafePattern).Should().BeFalse(
+            "Issue #1503: 新 `[^>]*?` regex は同一開始タグ内に限定されるため、" +
+            "別 TextBlock の LiveSetting=\"Polite\" を誤検出しない。");
     }
 
     /// <summary>
