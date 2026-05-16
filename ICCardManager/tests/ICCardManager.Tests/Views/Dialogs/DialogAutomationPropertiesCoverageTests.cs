@@ -98,10 +98,47 @@ public class DialogAutomationPropertiesCoverageTests
     {
         var xaml = ReadDialog("OperationLogDialog.xaml");
 
-        xaml.Should().Contain($"AutomationProperties.Name=\"{requiredName}\"",
+        xaml.Should().MatchRegex(BuildAutomationNamePattern(requiredName),
             $"OperationLogDialog: 主要コントロールに AutomationProperties.Name=\"{requiredName}\" が必要。" +
-            "Issue #1468 で業務監査画面（操作ログ）のスクリーンリーダー対応を改善した際の付与項目。");
+            "Issue #1468 で業務監査画面（操作ログ）のスクリーンリーダー対応を改善した際の付与項目。" +
+            "（Issue #1504: XAML 整形で `=` 前後にスペースが入っても検出できるよう Regex マッチを採用）");
     }
+
+    /// <summary>
+    /// Issue #1504: <see cref="BuildAutomationNamePattern"/> が空白挿入を許容しつつ
+    /// 値の厳密一致を維持していることを、合成 XAML サンプルで固定する回帰テスト。
+    /// </summary>
+    [Theory]
+    [InlineData("<Button AutomationProperties.Name=\"検索を実行\" />", "検索を実行", true)]
+    [InlineData("<Button AutomationProperties.Name = \"検索を実行\" />", "検索を実行", true)]
+    [InlineData("<Button AutomationProperties.Name  =  \"検索を実行\" />", "検索を実行", true)]
+    [InlineData("<Button\n    AutomationProperties.Name=\"検索を実行\" />", "検索を実行", true)]
+    [InlineData("<Button AutomationProperties.Name=\"別の語\" />", "検索を実行", false)]
+    [InlineData("<Button AutomationProperties.Name=\"検索\" />", "検索を実行", false)]
+    [InlineData("", "検索を実行", false)]
+    public void AutomationNamePattern_should_be_whitespace_tolerant_but_value_strict(
+        string syntheticXaml, string requiredName, bool expectedMatch)
+    {
+        var pattern = BuildAutomationNamePattern(requiredName);
+
+        Regex.IsMatch(syntheticXaml, pattern).Should().Be(expectedMatch,
+            $"requiredName='{requiredName}' に対するパターンは、空白の有無や改行を許容しつつ" +
+            "値の部分一致や別文字列を取り違えてはならない（Issue #1504）。" +
+            $"入力: {syntheticXaml.Replace("\n", "\\n")}");
+    }
+
+    /// <summary>
+    /// XAML 上の <c>AutomationProperties.Name="…"</c> 表記を、空白・改行を許容しつつ
+    /// 値部分のみ厳密一致でマッチする正規表現を組み立てる（Issue #1504）。
+    /// </summary>
+    /// <remarks>
+    /// Visual Studio の XAML 整形で属性が <c>Name = "…"</c> のように展開される場合や、
+    /// 属性ごとに改行される場合でもマッチさせるため、<c>=</c> の前後と前置部に <c>\s*</c> を許容する。
+    /// 値（<paramref name="requiredName"/>）は <see cref="Regex.Escape(string)"/> でエスケープし、
+    /// メタ文字を含む語が来ても誤マッチしないようにする。
+    /// </remarks>
+    private static string BuildAutomationNamePattern(string requiredName)
+        => $@"AutomationProperties\.Name\s*=\s*""{Regex.Escape(requiredName)}""";
 
     /// <summary>
     /// StaffAuthDialog（職員証認証）は最重要のダイアログであり、ステータス変化と
