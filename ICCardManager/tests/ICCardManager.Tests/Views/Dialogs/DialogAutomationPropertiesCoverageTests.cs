@@ -37,10 +37,12 @@ public class DialogAutomationPropertiesCoverageTests
     /// </summary>
     public static TheoryData<string, int> MinimumNameCounts => new()
     {
-        // OperationLogDialog: 期間ボタン3個 + 検索条件4個 + 検索/クリア2個 +
-        // ページネーション4個 + ページサイズ + DataGrid + Window + エクスポート2個 + 閉じる + 処理中 = 19個以上
-        { "OperationLogDialog.xaml", 18 },
-        // StaffAuthDialog: Window + アイコン + キャンセル + 仮想タッチ = 4個以上
+        // OperationLogDialog: Window + 検索条件入力6個（開始日/終了日/操作種別/対象テーブル/対象ID/操作者名）+
+        // 期間クイック3個（今日/今月/先月）+ 検索/クリア2個 + DataGrid + ページサイズ +
+        // ページネーション4個（最初/前/次/最後）+ エクスポート2個（実行/開く）+ 閉じる + 処理中2個（オーバーレイ/テキスト）= 23個
+        // （Issue #1502: 実 XAML の付与数 23 と一致させ、回帰防止の感度を最大化）
+        { "OperationLogDialog.xaml", 23 },
+        // StaffAuthDialog: Window + 認証アイコン + キャンセル + 職員証仮想タッチ = 4個
         { "StaffAuthDialog.xaml", 4 },
     };
 
