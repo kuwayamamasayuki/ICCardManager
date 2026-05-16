@@ -272,8 +272,10 @@
 
                 <!-- ページ情報 -->
                 <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center">
-                    <!-- Issue #1468: 動的更新される TextBlock。Name は付けず Text 自体を読み上げ対象にする。 -->
-                    <TextBlock Text="{Binding PageInfo}"
+                    <!-- Issue #1468/#1501: 動的更新される TextBlock。Name は付けず Text 自体を読み上げ対象にする。
+                         x:Name は Issue #1501 の回帰テスト（Dynamic_text_blocks_should_not_have_AutomationProperties_Name）の検出対象識別子。 -->
+                    <TextBlock x:Name="PageInfoText"
+                               Text="{Binding PageInfo}"
                                Foreground="{DynamicResource SecondaryTextBrush}"
                                VerticalAlignment="Center"
                                AutomationProperties.HelpText="現在の検索結果のページ情報（表示中の件数と総件数）"
@@ -310,8 +312,10 @@
                             AutomationProperties.Name="前のページへ移動"
                             AutomationProperties.HelpText="現在表示しているページの1つ前のページを表示します"
                             ToolTip="前のページ"/>
-                    <!-- Issue #1468: Run で構成される TextBlock。HelpText で補足し、ページ変更時は LiveSetting で通知。 -->
-                    <TextBlock VerticalAlignment="Center" Margin="15,0"
+                    <!-- Issue #1468/#1501: Run で構成される TextBlock。HelpText で補足し、ページ変更時は LiveSetting で通知。
+                         x:Name は Issue #1501 の回帰テスト（Dynamic_text_blocks_should_not_have_AutomationProperties_Name）の検出対象識別子。 -->
+                    <TextBlock x:Name="CurrentPageNumberText"
+                               VerticalAlignment="Center" Margin="15,0"
                                AutomationProperties.HelpText="現在表示中のページ番号と総ページ数"
                                AutomationProperties.LiveSetting="Polite">
                         <Run Text="{Binding CurrentPage, Mode=OneWay}"/>
@@ -367,8 +371,10 @@
             </StackPanel>
 
             <!-- ステータスメッセージ -->
-            <!-- Issue #1468: 動的更新される TextBlock。Name は付けず Text 自体を読み上げ対象にする。 -->
-            <TextBlock Grid.Column="1"
+            <!-- Issue #1468/#1501: 動的更新される TextBlock。Name は付けず Text 自体を読み上げ対象にする。
+                 x:Name は Issue #1501 の回帰テスト（Dynamic_text_blocks_should_not_have_AutomationProperties_Name）の検出対象識別子。 -->
+            <TextBlock x:Name="StatusMessageText"
+                       Grid.Column="1"
                        Text="{Binding StatusMessage}"
                        VerticalAlignment="Center"
                        Margin="20,0"
@@ -407,8 +413,10 @@
                 <ProgressBar IsIndeterminate="True" Width="200" Height="4"
                              AutomationProperties.Name="処理中"
                              AutomationProperties.HelpText="処理が完了するまでお待ちください"/>
-                <!-- Issue #1468: 動的更新メッセージ。Name は付けず Text 自体を読み上げ対象にする。 -->
-                <TextBlock Text="{Binding BusyMessage}"
+                <!-- Issue #1468/#1501: 動的更新メッセージ。Name は付けず Text 自体を読み上げ対象にする。
+                     x:Name は Issue #1501 の回帰テスト（Dynamic_text_blocks_should_not_have_AutomationProperties_Name）の検出対象識別子。 -->
+                <TextBlock x:Name="ProcessingOverlayText"
+                           Text="{Binding BusyMessage}"
                            Foreground="{DynamicResource OnPrimaryBrush}"
                            FontSize="{DynamicResource BaseFontSize}"
                            Margin="0,10,0,0"
