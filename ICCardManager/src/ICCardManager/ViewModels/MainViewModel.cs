@@ -1576,8 +1576,10 @@ public partial class MainViewModel : ViewModelBase
         if (ledger == null) return;
         if (ledger.IsLentRecord)
         {
-            MessageBox.Show("貸出中のレコードは削除できません。", "削除不可",
-                MessageBoxButton.OK, MessageBoxImage.Warning);
+            _navigationService.ShowWarning(
+                "貸出中のレコードは削除できません。" +
+                "先にメイン画面で交通系ICカードをタッチして返却操作を行ってから、再度削除してください。",
+                "削除不可");
             return;
         }
 
