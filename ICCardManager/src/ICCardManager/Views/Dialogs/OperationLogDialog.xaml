@@ -55,8 +55,13 @@
         <Border Grid.Row="1" BorderBrush="{DynamicResource NeutralBorderBrush}" BorderThickness="1" CornerRadius="4" Padding="15" Margin="0,0,0,10">
             <Grid>
                 <Grid.RowDefinitions>
+                    <!-- Row 0: 期間 DatePicker（Issue #1523 で独立行に分離。Col1-5 を ColumnSpan=5 で全幅占有し終了日クリップを防ぐ） -->
                     <RowDefinition Height="Auto"/>
+                    <!-- Row 1: 操作種別 + 対象 ComboBox（Issue #1523 で Row 0 から分離） -->
                     <RowDefinition Height="Auto"/>
+                    <!-- Row 2: クイックフィルタ（Issue #1505 で独立行に分離） -->
+                    <RowDefinition Height="Auto"/>
+                    <!-- Row 3: 対象ID + 操作者名 + 検索ボタン -->
                     <RowDefinition Height="Auto"/>
                 </Grid.RowDefinitions>
                 <Grid.ColumnDefinitions>
@@ -73,9 +78,12 @@
                            Text="期間:"
                            VerticalAlignment="Center"
                            Margin="0,0,10,10"/>
-                <StackPanel Grid.Row="0" Grid.Column="1"
+                <!-- Issue #1523: Grid.ColumnSpan="5" で Col1-5 を全幅占有させ、終了日 DatePicker のクリップを根本回避する。
+                     Col 1 単独だと星共有列の幅不足 (~180px @ MinWidth=800) で StackPanel 希望幅 270px が確保されない。 -->
+                <StackPanel x:Name="DateRangePanel"
+                            Grid.Row="0" Grid.Column="1" Grid.ColumnSpan="5"
                             Orientation="Horizontal"
-                            Margin="0,0,20,10">
+                            Margin="0,0,0,10">
                     <DatePicker SelectedDate="{Binding FromDate}"
                                 Width="120"
                                 VerticalAlignment="Center"
@@ -91,41 +99,43 @@
                                 AutomationProperties.HelpText="検索期間の終了日を選択します。カレンダーから日付を選ぶか、直接入力してください"/>
                 </StackPanel>
 
-                <!-- 操作種別 -->
-                <TextBlock Grid.Row="0" Grid.Column="2"
+                <!-- 操作種別（Issue #1523 で Row 1 に移動） -->
+                <TextBlock Grid.Row="1" Grid.Column="0"
                            Text="操作種別:"
                            VerticalAlignment="Center"
                            Margin="0,0,10,10"/>
-                <ComboBox Grid.Row="0" Grid.Column="3"
+                <ComboBox Grid.Row="1" Grid.Column="1"
                           ItemsSource="{Binding ActionTypes}"
                           SelectedItem="{Binding SelectedAction}"
                           DisplayMemberPath="DisplayName"
                           Width="100"
+                          HorizontalAlignment="Left"
                           Margin="0,0,20,10"
                           VerticalAlignment="Center"
                           AutomationProperties.Name="操作種別"
                           AutomationProperties.HelpText="検索する操作種別（追加・更新・削除など）を選択します。すべてを選ぶと種別による絞り込みは行いません"
                           ToolTip="操作種別で絞り込み（追加・更新・削除など）"/>
 
-                <!-- 対象 -->
-                <TextBlock Grid.Row="0" Grid.Column="4"
+                <!-- 対象（Issue #1523 で Row 1 に移動） -->
+                <TextBlock Grid.Row="1" Grid.Column="2"
                            Text="対象:"
                            VerticalAlignment="Center"
                            Margin="0,0,10,10"/>
-                <ComboBox Grid.Row="0" Grid.Column="5"
+                <ComboBox Grid.Row="1" Grid.Column="3"
                           ItemsSource="{Binding TargetTables}"
                           SelectedItem="{Binding SelectedTargetTable}"
                           DisplayMemberPath="DisplayName"
                           Width="120"
+                          HorizontalAlignment="Left"
                           Margin="0,0,0,10"
                           VerticalAlignment="Center"
                           AutomationProperties.Name="対象テーブル"
                           AutomationProperties.HelpText="検索対象とするテーブル（職員・カード・履歴など）を選択します。すべてを選ぶと対象テーブルによる絞り込みは行いません"
                           ToolTip="対象テーブルで絞り込み（職員・カード・履歴など）"/>
 
-                <!-- クイックフィルタ（Issue #1505: Row 0 に同居させると星共有列の幅不足で描画クリップが発生するため独立行へ分離） -->
+                <!-- クイックフィルタ（Issue #1505 で独立行に分離。Issue #1523 の期間 DatePicker 分離に伴い Row 1 → Row 2 へ繰り下げ） -->
                 <StackPanel x:Name="QuickFilterPanel"
-                            Grid.Row="1" Grid.Column="1" Grid.ColumnSpan="5"
+                            Grid.Row="2" Grid.Column="1" Grid.ColumnSpan="5"
                             Orientation="Horizontal"
                             Margin="0,0,0,10">
                     <Button Content="今日"
@@ -150,12 +160,12 @@
                             ToolTip="先月の操作ログを表示"/>
                 </StackPanel>
 
-                <!-- 対象ID -->
-                <TextBlock Grid.Row="2" Grid.Column="0"
+                <!-- 対象ID（Issue #1523 の Row 追加に伴い Row 2 → Row 3 へ繰り下げ） -->
+                <TextBlock Grid.Row="3" Grid.Column="0"
                            Text="対象ID:"
                            VerticalAlignment="Center"
                            Margin="0,0,10,0"/>
-                <TextBox Grid.Row="2" Grid.Column="1"
+                <TextBox Grid.Row="3" Grid.Column="1"
                          Text="{Binding TargetIdFilter, UpdateSourceTrigger=PropertyChanged}"
                          Width="200"
                          Padding="5"
@@ -165,12 +175,12 @@
                          AutomationProperties.HelpText="カードIDmや職員番号などの対象IDで絞り込みます。部分一致で検索されます。空欄にするとIDによる絞り込みは行いません"
                          ToolTip="カードIDmなどの対象IDで絞り込み（部分一致）"/>
 
-                <!-- 操作者名 -->
-                <TextBlock Grid.Row="2" Grid.Column="2"
+                <!-- 操作者名（Issue #1523 の Row 追加に伴い Row 2 → Row 3 へ繰り下げ） -->
+                <TextBlock Grid.Row="3" Grid.Column="2"
                            Text="操作者名:"
                            VerticalAlignment="Center"
                            Margin="0,0,10,0"/>
-                <TextBox Grid.Row="2" Grid.Column="3"
+                <TextBox Grid.Row="3" Grid.Column="3"
                          Text="{Binding OperatorNameFilter, UpdateSourceTrigger=PropertyChanged}"
                          Width="150"
                          Padding="5"
@@ -180,8 +190,8 @@
                          AutomationProperties.HelpText="操作を行った職員名で絞り込みます。部分一致で検索されます。空欄にすると操作者による絞り込みは行いません"
                          ToolTip="操作者名で絞り込み（部分一致）"/>
 
-                <!-- 検索ボタン -->
-                <StackPanel Grid.Row="2" Grid.Column="4" Grid.ColumnSpan="2"
+                <!-- 検索ボタン（Issue #1523 の Row 追加に伴い Row 2 → Row 3 へ繰り下げ） -->
+                <StackPanel Grid.Row="3" Grid.Column="4" Grid.ColumnSpan="2"
                             Orientation="Horizontal"
                             HorizontalAlignment="Right">
                     <Button Content="クリア"
