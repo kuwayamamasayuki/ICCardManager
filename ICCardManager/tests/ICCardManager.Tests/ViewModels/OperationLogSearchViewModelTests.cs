@@ -17,6 +17,11 @@ namespace ICCardManager.Tests.ViewModels;
 /// <summary>
 /// OperationLogSearchViewModelの単体テスト
 /// </summary>
+/// <remarks>
+/// Issue #1479 で OFFSET pagination から keyset pagination に切り替えたため、
+/// すべてのモックは <see cref="IOperationLogRepository.SearchFirstPageAsync"/> など
+/// 4 種類の keyset メソッドを対象としている。
+/// </remarks>
 public class OperationLogSearchViewModelTests
 {
     private readonly Mock<IOperationLogRepository> _repoMock;
@@ -30,23 +35,67 @@ public class OperationLogSearchViewModelTests
         _dialogServiceMock = new Mock<IDialogService>();
         _excelExportServiceMock = new Mock<OperationLogExcelExportService>();
 
-        // SearchAsyncのデフォルト: 空結果を返す
-        _repoMock.Setup(r => r.SearchAsync(
-                It.IsAny<OperationLogSearchCriteria>(),
-                It.IsAny<int>(),
-                It.IsAny<int>()))
-            .ReturnsAsync(new OperationLogSearchResult
-            {
-                Items = Array.Empty<OperationLog>(),
-                TotalCount = 0,
-                CurrentPage = 1,
-                PageSize = 50
-            });
+        // デフォルト: 空ページを返す（4 keyset メソッドすべて）
+        SetupKeysetReturning(Array.Empty<OperationLog>());
 
         _viewModel = new OperationLogSearchViewModel(
             _repoMock.Object,
             _dialogServiceMock.Object,
             _excelExportServiceMock.Object);
+    }
+
+    /// <summary>
+    /// 4 種類の keyset メソッドすべてに同じページを返すモックを仕込む。
+    /// 多くのテストはページ遷移の経路ではなく「結果の表示変換」を検証するため、
+    /// どのメソッドが呼ばれても同じデータを返せば十分。
+    /// </summary>
+    private void SetupKeysetReturning(
+        IReadOnlyList<OperationLog> items,
+        int? totalCount = null,
+        bool hasPrevious = false,
+        bool hasNext = false)
+    {
+        var page = BuildPage(items, totalCount, hasPrevious, hasNext);
+        _repoMock.Setup(r => r.SearchFirstPageAsync(It.IsAny<OperationLogSearchCriteria>(), It.IsAny<int>()))
+            .ReturnsAsync(page);
+        _repoMock.Setup(r => r.SearchLastPageAsync(It.IsAny<OperationLogSearchCriteria>(), It.IsAny<int>()))
+            .ReturnsAsync(page);
+        _repoMock.Setup(r => r.SearchNextPageAsync(It.IsAny<OperationLogSearchCriteria>(), It.IsAny<OperationLogCursor>(), It.IsAny<int>()))
+            .ReturnsAsync(page);
+        _repoMock.Setup(r => r.SearchPreviousPageAsync(It.IsAny<OperationLogSearchCriteria>(), It.IsAny<OperationLogCursor>(), It.IsAny<int>()))
+            .ReturnsAsync(page);
+    }
+
+    private static OperationLogKeysetPage BuildPage(
+        IReadOnlyList<OperationLog> items,
+        int? totalCount,
+        bool hasPrevious,
+        bool hasNext)
+    {
+        return new OperationLogKeysetPage
+        {
+            Items = items,
+            TotalCount = totalCount ?? items.Count,
+            FirstCursor = items.Count > 0 ? new OperationLogCursor(items[0].Timestamp, items[0].Id) : null,
+            LastCursor = items.Count > 0 ? new OperationLogCursor(items[items.Count - 1].Timestamp, items[items.Count - 1].Id) : null,
+            HasPrevious = hasPrevious,
+            HasNext = hasNext
+        };
+    }
+
+    private static OperationLog MakeLog(int id, string action = "INSERT", string targetTable = "staff", string targetId = "id", string operatorName = "op", DateTime? timestamp = null, string beforeData = null, string afterData = null)
+    {
+        return new OperationLog
+        {
+            Id = id,
+            Timestamp = timestamp ?? new DateTime(2024, 1, 1, 0, 0, 0).AddSeconds(id),
+            Action = action,
+            TargetTable = targetTable,
+            TargetId = targetId,
+            OperatorName = operatorName,
+            BeforeData = beforeData,
+            AfterData = afterData
+        };
     }
 
     #region コンストラクタ・初期状態
@@ -98,80 +147,44 @@ public class OperationLogSearchViewModelTests
     [Fact]
     public void SetToday_今日の日付が設定されること()
     {
-        // Arrange
-        _viewModel.FromDate = DateTime.Today.AddMonths(-1);
-        _viewModel.ToDate = DateTime.Today.AddMonths(-1);
-
-        // Act
+        var today = DateTime.Today;
         _viewModel.SetTodayCommand.Execute(null);
-
-        // Assert
-        _viewModel.FromDate.Should().Be(DateTime.Today);
-        _viewModel.ToDate.Should().Be(DateTime.Today);
+        _viewModel.FromDate.Should().Be(today);
+        _viewModel.ToDate.Should().Be(today);
     }
 
     [Fact]
-    public void SetThisMonth_今月の全日が設定されること()
+    public void SetThisMonth_今月の日付が設定されること()
     {
-        // Act
         _viewModel.SetThisMonthCommand.Execute(null);
-
-        // Assert
         var today = DateTime.Today;
         _viewModel.FromDate.Should().Be(new DateTime(today.Year, today.Month, 1));
-        _viewModel.ToDate.Should().Be(new DateTime(today.Year, today.Month,
-            DateTime.DaysInMonth(today.Year, today.Month)));
+        _viewModel.ToDate.Should().Be(new DateTime(today.Year, today.Month, DateTime.DaysInMonth(today.Year, today.Month)));
     }
 
     [Fact]
-    public void SetLastMonth_先月の全日が設定されること()
+    public void SetLastMonth_先月の日付が設定されること()
     {
-        // Act
         _viewModel.SetLastMonthCommand.Execute(null);
-
-        // Assert
         var lastMonth = DateTime.Today.AddMonths(-1);
         _viewModel.FromDate.Should().Be(new DateTime(lastMonth.Year, lastMonth.Month, 1));
-        _viewModel.ToDate.Should().Be(new DateTime(lastMonth.Year, lastMonth.Month,
-            DateTime.DaysInMonth(lastMonth.Year, lastMonth.Month)));
+        _viewModel.ToDate.Should().Be(new DateTime(lastMonth.Year, lastMonth.Month, DateTime.DaysInMonth(lastMonth.Year, lastMonth.Month)));
     }
 
-    #endregion
-
-    #region フィルタクリア
-
     [Fact]
-    public void ClearFilters_全てのフィルタがリセットされること()
+    public void ClearFilters_フィルタが初期化されること()
     {
-        // Arrange: フィルタを設定
-        _viewModel.FromDate = new DateTime(2025, 1, 1);
-        _viewModel.ToDate = new DateTime(2025, 1, 31);
-        _viewModel.SelectedAction = _viewModel.ActionTypes[1]; // INSERT
-        _viewModel.SelectedTargetTable = _viewModel.TargetTables[1]; // staff
-        _viewModel.TargetIdFilter = "test-id";
-        _viewModel.OperatorNameFilter = "テスト";
+        _viewModel.SelectedAction = _viewModel.ActionTypes[1];
+        _viewModel.SelectedTargetTable = _viewModel.TargetTables[1];
+        _viewModel.TargetIdFilter = "ABC";
+        _viewModel.OperatorNameFilter = "山田";
 
-        // Act
         _viewModel.ClearFiltersCommand.Execute(null);
 
-        // Assert
-        var today = DateTime.Today;
-        _viewModel.FromDate.Should().Be(new DateTime(today.Year, today.Month, 1));
-        _viewModel.ToDate.Should().Be(today);
-        _viewModel.SelectedAction!.Value.Should().BeEmpty();
-        _viewModel.SelectedTargetTable!.Value.Should().BeEmpty();
+        _viewModel.SelectedAction.Should().Be(_viewModel.ActionTypes[0]);
+        _viewModel.SelectedTargetTable.Should().Be(_viewModel.TargetTables[0]);
         _viewModel.TargetIdFilter.Should().BeEmpty();
         _viewModel.OperatorNameFilter.Should().BeEmpty();
-    }
-
-    #endregion
-
-    #region ページ情報
-
-    [Fact]
-    public void PageInfo_データなしの場合に0件と表示されること()
-    {
-        _viewModel.PageInfo.Should().Be("0件");
     }
 
     #endregion
@@ -182,19 +195,10 @@ public class OperationLogSearchViewModelTests
     public async Task SearchAsync_リポジトリに検索条件を渡すこと()
     {
         // Arrange
-        OperationLogSearchCriteria? capturedCriteria = null;
-        _repoMock.Setup(r => r.SearchAsync(
-                It.IsAny<OperationLogSearchCriteria>(),
-                It.IsAny<int>(),
-                It.IsAny<int>()))
-            .Callback<OperationLogSearchCriteria, int, int>((c, _, __) => capturedCriteria = c)
-            .ReturnsAsync(new OperationLogSearchResult
-            {
-                Items = Array.Empty<OperationLog>(),
-                TotalCount = 0,
-                CurrentPage = 1,
-                PageSize = 50
-            });
+        OperationLogSearchCriteria capturedCriteria = null;
+        _repoMock.Setup(r => r.SearchLastPageAsync(It.IsAny<OperationLogSearchCriteria>(), It.IsAny<int>()))
+            .Callback<OperationLogSearchCriteria, int>((c, _) => capturedCriteria = c)
+            .ReturnsAsync(BuildPage(Array.Empty<OperationLog>(), 0, false, false));
 
         _viewModel.SelectedAction = _viewModel.ActionTypes[1]; // INSERT
         _viewModel.SelectedTargetTable = _viewModel.TargetTables[2]; // ic_card
@@ -216,19 +220,10 @@ public class OperationLogSearchViewModelTests
     public async Task SearchAsync_全件選択時にnullが渡されること()
     {
         // Arrange
-        OperationLogSearchCriteria? capturedCriteria = null;
-        _repoMock.Setup(r => r.SearchAsync(
-                It.IsAny<OperationLogSearchCriteria>(),
-                It.IsAny<int>(),
-                It.IsAny<int>()))
-            .Callback<OperationLogSearchCriteria, int, int>((c, _, __) => capturedCriteria = c)
-            .ReturnsAsync(new OperationLogSearchResult
-            {
-                Items = Array.Empty<OperationLog>(),
-                TotalCount = 0,
-                CurrentPage = 1,
-                PageSize = 50
-            });
+        OperationLogSearchCriteria capturedCriteria = null;
+        _repoMock.Setup(r => r.SearchLastPageAsync(It.IsAny<OperationLogSearchCriteria>(), It.IsAny<int>()))
+            .Callback<OperationLogSearchCriteria, int>((c, _) => capturedCriteria = c)
+            .ReturnsAsync(BuildPage(Array.Empty<OperationLog>(), 0, false, false));
 
         // Act (デフォルトのまま検索)
         await _viewModel.SearchAsync();
@@ -241,72 +236,37 @@ public class OperationLogSearchViewModelTests
     }
 
     [Fact]
-    public async Task SearchAsync_複数ページある場合に最終ページに移動すること()
+    public async Task SearchAsync_直接最終ページを取得する_Issue1479()
     {
-        // Arrange: 1ページ目→3ページある、3ページ目を返す
-        var callCount = 0;
-        _repoMock.Setup(r => r.SearchAsync(
-                It.IsAny<OperationLogSearchCriteria>(),
-                It.IsAny<int>(),
-                It.IsAny<int>()))
-            .ReturnsAsync((OperationLogSearchCriteria _, int page, int pageSize) =>
-            {
-                callCount++;
-                return new OperationLogSearchResult
-                {
-                    Items = new[]
-                    {
-                        new OperationLog
-                        {
-                            Id = page * 100,
-                            Timestamp = DateTime.Now,
-                            Action = "INSERT",
-                            TargetTable = "staff",
-                            TargetId = $"id-{page}",
-                            OperatorName = "テスト"
-                        }
-                    },
-                    TotalCount = 150,
-                    CurrentPage = page,
-                    PageSize = pageSize
-                };
-            });
+        // Arrange: SearchLastPageAsync が 1 度だけ呼ばれること（Issue #1479: keyset により First→Last の往復が不要）
+        var lastPageCallCount = 0;
+        var firstPageCallCount = 0;
+        var lastPageItems = new[] { MakeLog(150) };
+        _repoMock.Setup(r => r.SearchLastPageAsync(It.IsAny<OperationLogSearchCriteria>(), It.IsAny<int>()))
+            .Callback(() => lastPageCallCount++)
+            .ReturnsAsync(BuildPage(lastPageItems, totalCount: 150, hasPrevious: true, hasNext: false));
+        _repoMock.Setup(r => r.SearchFirstPageAsync(It.IsAny<OperationLogSearchCriteria>(), It.IsAny<int>()))
+            .Callback(() => firstPageCallCount++)
+            .ReturnsAsync(BuildPage(Array.Empty<OperationLog>(), 0, false, false));
 
         // Act
         await _viewModel.SearchAsync();
 
-        // Assert: 1ページ目取得→最終ページに移動で2回呼ばれる
-        callCount.Should().Be(2);
-        _viewModel.CurrentPage.Should().Be(3); // 150件÷50件=3ページの最終ページ
+        // Assert
+        lastPageCallCount.Should().Be(1);
+        firstPageCallCount.Should().Be(0);  // OFFSET 時代のような「先頭ページ経由」は不要
         _viewModel.TotalCount.Should().Be(150);
+        _viewModel.CurrentPage.Should().Be(3);  // 150件÷50件=3ページ
     }
 
     [Fact]
     public async Task SearchAsync_結果をLogsに正しくマッピングすること()
     {
         // Arrange
-        var testLog = new OperationLog
-        {
-            Id = 1,
-            Timestamp = new DateTime(2025, 6, 15, 10, 30, 0),
-            Action = "INSERT",
-            TargetTable = "staff",
-            TargetId = "ABC123",
-            OperatorName = "田中太郎",
-            AfterData = "{\"Name\":\"田中太郎\",\"Number\":\"001\"}"
-        };
-
-        _repoMock.Setup(r => r.SearchAsync(
-                It.IsAny<OperationLogSearchCriteria>(),
-                It.IsAny<int>(),
-                It.IsAny<int>()))
-            .ReturnsAsync(new OperationLogSearchResult
-            {
-                Items = new[] { testLog },
-                TotalCount = 1,
-                CurrentPage = 1,
-                PageSize = 50
-            });
+        var testLog = MakeLog(1, action: "INSERT", targetTable: "staff", targetId: "ABC123",
+            operatorName: "田中太郎",
+            afterData: "{\"Name\":\"田中太郎\",\"Number\":\"001\"}");
+        SetupKeysetReturning(new[] { testLog });
 
         // Act
         await _viewModel.SearchAsync();
@@ -326,28 +286,9 @@ public class OperationLogSearchViewModelTests
     public async Task SearchAsync_職員の表示名がJSONから正しく生成されること()
     {
         // Arrange
-        var testLog = new OperationLog
-        {
-            Id = 1,
-            Timestamp = DateTime.Now,
-            Action = "INSERT",
-            TargetTable = "staff",
-            TargetId = "ABC123",
-            OperatorName = "管理者",
-            AfterData = "{\"Name\":\"田中太郎\",\"Number\":\"001\"}"
-        };
-
-        _repoMock.Setup(r => r.SearchAsync(
-                It.IsAny<OperationLogSearchCriteria>(),
-                It.IsAny<int>(),
-                It.IsAny<int>()))
-            .ReturnsAsync(new OperationLogSearchResult
-            {
-                Items = new[] { testLog },
-                TotalCount = 1,
-                CurrentPage = 1,
-                PageSize = 50
-            });
+        var testLog = MakeLog(1, targetTable: "staff", targetId: "ABC123", operatorName: "管理者",
+            afterData: "{\"Name\":\"田中太郎\",\"Number\":\"001\"}");
+        SetupKeysetReturning(new[] { testLog });
 
         // Act
         await _viewModel.SearchAsync();
@@ -360,28 +301,9 @@ public class OperationLogSearchViewModelTests
     public async Task SearchAsync_カードの表示名がJSONから正しく生成されること()
     {
         // Arrange
-        var testLog = new OperationLog
-        {
-            Id = 1,
-            Timestamp = DateTime.Now,
-            Action = "INSERT",
-            TargetTable = "ic_card",
-            TargetId = "DEF456",
-            OperatorName = "管理者",
-            AfterData = "{\"CardType\":\"はやかけん\",\"CardNumber\":\"001\"}"
-        };
-
-        _repoMock.Setup(r => r.SearchAsync(
-                It.IsAny<OperationLogSearchCriteria>(),
-                It.IsAny<int>(),
-                It.IsAny<int>()))
-            .ReturnsAsync(new OperationLogSearchResult
-            {
-                Items = new[] { testLog },
-                TotalCount = 1,
-                CurrentPage = 1,
-                PageSize = 50
-            });
+        var testLog = MakeLog(1, targetTable: "ic_card", targetId: "DEF456", operatorName: "管理者",
+            afterData: "{\"CardType\":\"はやかけん\",\"CardNumber\":\"001\"}");
+        SetupKeysetReturning(new[] { testLog });
 
         // Act
         await _viewModel.SearchAsync();
@@ -394,28 +316,9 @@ public class OperationLogSearchViewModelTests
     public async Task SearchAsync_利用履歴の表示名がJSONから正しく生成されること()
     {
         // Arrange
-        var testLog = new OperationLog
-        {
-            Id = 1,
-            Timestamp = DateTime.Now,
-            Action = "INSERT",
-            TargetTable = "ledger",
-            TargetId = "42",
-            OperatorName = "管理者",
-            AfterData = "{\"Date\":\"2025-06-15\",\"Summary\":\"鉄道（博多～天神）\"}"
-        };
-
-        _repoMock.Setup(r => r.SearchAsync(
-                It.IsAny<OperationLogSearchCriteria>(),
-                It.IsAny<int>(),
-                It.IsAny<int>()))
-            .ReturnsAsync(new OperationLogSearchResult
-            {
-                Items = new[] { testLog },
-                TotalCount = 1,
-                CurrentPage = 1,
-                PageSize = 50
-            });
+        var testLog = MakeLog(1, targetTable: "ledger", targetId: "42", operatorName: "管理者",
+            afterData: "{\"Date\":\"2025-06-15\",\"Summary\":\"鉄道（博多～天神）\"}");
+        SetupKeysetReturning(new[] { testLog });
 
         // Act
         await _viewModel.SearchAsync();
@@ -430,27 +333,8 @@ public class OperationLogSearchViewModelTests
     public async Task SearchAsync_JSONが無い場合にTargetIdが表示名になること()
     {
         // Arrange
-        var testLog = new OperationLog
-        {
-            Id = 1,
-            Timestamp = DateTime.Now,
-            Action = "DELETE",
-            TargetTable = "staff",
-            TargetId = "FALLBACK_ID",
-            OperatorName = "管理者"
-        };
-
-        _repoMock.Setup(r => r.SearchAsync(
-                It.IsAny<OperationLogSearchCriteria>(),
-                It.IsAny<int>(),
-                It.IsAny<int>()))
-            .ReturnsAsync(new OperationLogSearchResult
-            {
-                Items = new[] { testLog },
-                TotalCount = 1,
-                CurrentPage = 1,
-                PageSize = 50
-            });
+        var testLog = MakeLog(1, action: "DELETE", targetTable: "staff", targetId: "FALLBACK_ID", operatorName: "管理者");
+        SetupKeysetReturning(new[] { testLog });
 
         // Act
         await _viewModel.SearchAsync();
@@ -463,29 +347,10 @@ public class OperationLogSearchViewModelTests
     public async Task SearchAsync_UPDATE操作の変更内容が生成されること()
     {
         // Arrange
-        var testLog = new OperationLog
-        {
-            Id = 1,
-            Timestamp = DateTime.Now,
-            Action = "UPDATE",
-            TargetTable = "staff",
-            TargetId = "ABC123",
-            OperatorName = "管理者",
-            BeforeData = "{\"Name\":\"田中太郎\",\"Number\":\"001\",\"Note\":\"\"}",
-            AfterData = "{\"Name\":\"田中花子\",\"Number\":\"001\",\"Note\":\"改姓\"}"
-        };
-
-        _repoMock.Setup(r => r.SearchAsync(
-                It.IsAny<OperationLogSearchCriteria>(),
-                It.IsAny<int>(),
-                It.IsAny<int>()))
-            .ReturnsAsync(new OperationLogSearchResult
-            {
-                Items = new[] { testLog },
-                TotalCount = 1,
-                CurrentPage = 1,
-                PageSize = 50
-            });
+        var testLog = MakeLog(1, action: "UPDATE", targetTable: "staff", targetId: "ABC123", operatorName: "管理者",
+            beforeData: "{\"Name\":\"田中太郎\",\"Number\":\"001\",\"Note\":\"\"}",
+            afterData: "{\"Name\":\"田中花子\",\"Number\":\"001\",\"Note\":\"改姓\"}");
+        SetupKeysetReturning(new[] { testLog });
 
         // Act
         await _viewModel.SearchAsync();
@@ -502,27 +367,8 @@ public class OperationLogSearchViewModelTests
     public async Task SearchAsync_INSERT操作の詳細サマリーが正しいこと()
     {
         // Arrange
-        var testLog = new OperationLog
-        {
-            Id = 1,
-            Timestamp = DateTime.Now,
-            Action = "INSERT",
-            TargetTable = "ic_card",
-            TargetId = "XYZ789",
-            OperatorName = "管理者"
-        };
-
-        _repoMock.Setup(r => r.SearchAsync(
-                It.IsAny<OperationLogSearchCriteria>(),
-                It.IsAny<int>(),
-                It.IsAny<int>()))
-            .ReturnsAsync(new OperationLogSearchResult
-            {
-                Items = new[] { testLog },
-                TotalCount = 1,
-                CurrentPage = 1,
-                PageSize = 50
-            });
+        var testLog = MakeLog(1, action: "INSERT", targetTable: "ic_card", targetId: "XYZ789", operatorName: "管理者");
+        SetupKeysetReturning(new[] { testLog });
 
         // Act
         await _viewModel.SearchAsync();
@@ -534,30 +380,18 @@ public class OperationLogSearchViewModelTests
     [Fact]
     public async Task NextPageAsync_次のページに移動すること()
     {
-        // Arrange: 2ページ分のデータ
-        _repoMock.Setup(r => r.SearchAsync(
-                It.IsAny<OperationLogSearchCriteria>(),
-                It.IsAny<int>(),
-                It.IsAny<int>()))
-            .ReturnsAsync((OperationLogSearchCriteria _, int page, int pageSize) =>
-                new OperationLogSearchResult
-                {
-                    Items = new[]
-                    {
-                        new OperationLog
-                        {
-                            Id = page,
-                            Timestamp = DateTime.Now,
-                            Action = "INSERT",
-                            TargetTable = "staff",
-                            TargetId = "id",
-                            OperatorName = "op"
-                        }
-                    },
-                    TotalCount = 100,
-                    CurrentPage = page,
-                    PageSize = pageSize
-                });
+        // Arrange: SearchLastPageAsync で page2 を返す（hasPrevious=true）
+        // FirstPageAsync で page1 を返す（hasNext=true, hasPrevious=false）
+        // NextPageAsync で page2 を返す（hasNext=false, hasPrevious=true）
+        var firstPageItems = new[] { MakeLog(1) };
+        var lastPageItems = new[] { MakeLog(2) };
+
+        _repoMock.Setup(r => r.SearchLastPageAsync(It.IsAny<OperationLogSearchCriteria>(), It.IsAny<int>()))
+            .ReturnsAsync(BuildPage(lastPageItems, totalCount: 100, hasPrevious: true, hasNext: false));
+        _repoMock.Setup(r => r.SearchFirstPageAsync(It.IsAny<OperationLogSearchCriteria>(), It.IsAny<int>()))
+            .ReturnsAsync(BuildPage(firstPageItems, totalCount: 100, hasPrevious: false, hasNext: true));
+        _repoMock.Setup(r => r.SearchNextPageAsync(It.IsAny<OperationLogSearchCriteria>(), It.IsAny<OperationLogCursor>(), It.IsAny<int>()))
+            .ReturnsAsync(BuildPage(lastPageItems, totalCount: 100, hasPrevious: true, hasNext: false));
 
         await _viewModel.SearchAsync(); // 最終ページ(2)に移動
         _viewModel.CurrentPage.Should().Be(2);
@@ -576,30 +410,14 @@ public class OperationLogSearchViewModelTests
     [Fact]
     public async Task PreviousPageAsync_前のページに移動すること()
     {
-        // Arrange: 3ページ分のデータ → 最終ページ(3)からスタート
-        _repoMock.Setup(r => r.SearchAsync(
-                It.IsAny<OperationLogSearchCriteria>(),
-                It.IsAny<int>(),
-                It.IsAny<int>()))
-            .ReturnsAsync((OperationLogSearchCriteria _, int page, int pageSize) =>
-                new OperationLogSearchResult
-                {
-                    Items = new[]
-                    {
-                        new OperationLog
-                        {
-                            Id = page,
-                            Timestamp = DateTime.Now,
-                            Action = "INSERT",
-                            TargetTable = "staff",
-                            TargetId = "id",
-                            OperatorName = "op"
-                        }
-                    },
-                    TotalCount = 150,
-                    CurrentPage = page,
-                    PageSize = pageSize
-                });
+        // Arrange: 3ページ分のデータ → 最終ページ(3)からスタート → PreviousPage → page2
+        var lastPageItems = new[] { MakeLog(150) };
+        var prevPageItems = new[] { MakeLog(100) };
+
+        _repoMock.Setup(r => r.SearchLastPageAsync(It.IsAny<OperationLogSearchCriteria>(), It.IsAny<int>()))
+            .ReturnsAsync(BuildPage(lastPageItems, totalCount: 150, hasPrevious: true, hasNext: false));
+        _repoMock.Setup(r => r.SearchPreviousPageAsync(It.IsAny<OperationLogSearchCriteria>(), It.IsAny<OperationLogCursor>(), It.IsAny<int>()))
+            .ReturnsAsync(BuildPage(prevPageItems, totalCount: 150, hasPrevious: true, hasNext: true));
 
         await _viewModel.SearchAsync();
         _viewModel.CurrentPage.Should().Be(3);
@@ -609,6 +427,66 @@ public class OperationLogSearchViewModelTests
 
         // Assert
         _viewModel.CurrentPage.Should().Be(2);
+    }
+
+    [Fact]
+    public async Task LastPageAsync_最終ページに移動すること()
+    {
+        // Arrange
+        var lastPageItems = new[] { MakeLog(99) };
+        _repoMock.Setup(r => r.SearchLastPageAsync(It.IsAny<OperationLogSearchCriteria>(), It.IsAny<int>()))
+            .ReturnsAsync(BuildPage(lastPageItems, totalCount: 100, hasPrevious: true, hasNext: false));
+
+        // 一旦 first へ
+        var firstPageItems = new[] { MakeLog(1) };
+        _repoMock.Setup(r => r.SearchFirstPageAsync(It.IsAny<OperationLogSearchCriteria>(), It.IsAny<int>()))
+            .ReturnsAsync(BuildPage(firstPageItems, totalCount: 100, hasPrevious: false, hasNext: true));
+
+        await _viewModel.SearchAsync();   // 最終(2)
+        await _viewModel.FirstPageAsync(); // 1
+        _viewModel.CurrentPage.Should().Be(1);
+
+        // Act
+        await _viewModel.LastPageAsync();
+
+        // Assert
+        _viewModel.CurrentPage.Should().Be(2);
+    }
+
+    [Fact]
+    public async Task PreviousPageAsync_HasPreviousがfalseなら呼ばれないこと()
+    {
+        // Arrange: 1 ページしか無い結果
+        var items = new[] { MakeLog(1) };
+        _repoMock.Setup(r => r.SearchLastPageAsync(It.IsAny<OperationLogSearchCriteria>(), It.IsAny<int>()))
+            .ReturnsAsync(BuildPage(items, totalCount: 1, hasPrevious: false, hasNext: false));
+
+        await _viewModel.SearchAsync();
+        _viewModel.HasPreviousPage.Should().BeFalse();
+
+        // Act
+        await _viewModel.PreviousPageAsync();
+
+        // Assert: SearchPreviousPageAsync が呼ばれていない
+        _repoMock.Verify(r => r.SearchPreviousPageAsync(It.IsAny<OperationLogSearchCriteria>(), It.IsAny<OperationLogCursor>(), It.IsAny<int>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task NextPageAsync_HasNextがfalseなら呼ばれないこと()
+    {
+        // Arrange
+        var items = new[] { MakeLog(1) };
+        _repoMock.Setup(r => r.SearchLastPageAsync(It.IsAny<OperationLogSearchCriteria>(), It.IsAny<int>()))
+            .ReturnsAsync(BuildPage(items, totalCount: 1, hasPrevious: false, hasNext: false));
+
+        await _viewModel.SearchAsync();
+        _viewModel.HasNextPage.Should().BeFalse();
+
+        // Act
+        await _viewModel.NextPageAsync();
+
+        // Assert
+        _repoMock.Verify(r => r.SearchNextPageAsync(It.IsAny<OperationLogSearchCriteria>(), It.IsAny<OperationLogCursor>(), It.IsAny<int>()), Times.Never);
     }
 
     [Fact]
@@ -626,34 +504,33 @@ public class OperationLogSearchViewModelTests
     public async Task SearchAsync_結果がある場合のステータスメッセージ()
     {
         // Arrange
-        _repoMock.Setup(r => r.SearchAsync(
-                It.IsAny<OperationLogSearchCriteria>(),
-                It.IsAny<int>(),
-                It.IsAny<int>()))
-            .ReturnsAsync(new OperationLogSearchResult
-            {
-                Items = new[]
-                {
-                    new OperationLog
-                    {
-                        Id = 1,
-                        Timestamp = DateTime.Now,
-                        Action = "INSERT",
-                        TargetTable = "staff",
-                        TargetId = "id",
-                        OperatorName = "op"
-                    }
-                },
-                TotalCount = 5,
-                CurrentPage = 1,
-                PageSize = 50
-            });
+        SetupKeysetReturning(new[] { MakeLog(1) }, totalCount: 5);
 
         // Act
         await _viewModel.SearchAsync();
 
         // Assert
         _viewModel.StatusMessage.Should().Be("5件の操作ログが見つかりました");
+    }
+
+    [Fact]
+    public async Task OnPageSizeChanged_ページサイズ変更で再検索されること()
+    {
+        // Arrange
+        await _viewModel.SearchAsync(); // 初期化（空ページ）
+
+        var capturedPageSize = 0;
+        _repoMock.Setup(r => r.SearchLastPageAsync(It.IsAny<OperationLogSearchCriteria>(), It.IsAny<int>()))
+            .Callback<OperationLogSearchCriteria, int>((_, size) => capturedPageSize = size)
+            .ReturnsAsync(BuildPage(Array.Empty<OperationLog>(), 0, false, false));
+
+        // Act
+        _viewModel.PageSize = 100;
+        // OnPageSizeChanged は fire-and-forget なので少し待つ
+        await Task.Delay(50);
+
+        // Assert: 新しい PageSize で呼ばれた
+        capturedPageSize.Should().Be(100);
     }
 
     #endregion
@@ -668,28 +545,7 @@ public class OperationLogSearchViewModelTests
     public async Task ActionDisplay_操作種別が正しく日本語変換されること(string action, string expected)
     {
         // Arrange
-        _repoMock.Setup(r => r.SearchAsync(
-                It.IsAny<OperationLogSearchCriteria>(),
-                It.IsAny<int>(),
-                It.IsAny<int>()))
-            .ReturnsAsync(new OperationLogSearchResult
-            {
-                Items = new[]
-                {
-                    new OperationLog
-                    {
-                        Id = 1,
-                        Timestamp = DateTime.Now,
-                        Action = action,
-                        TargetTable = "staff",
-                        TargetId = "id",
-                        OperatorName = "op"
-                    }
-                },
-                TotalCount = 1,
-                CurrentPage = 1,
-                PageSize = 50
-            });
+        SetupKeysetReturning(new[] { MakeLog(1, action: action) });
 
         // Act
         await _viewModel.SearchAsync();
@@ -706,28 +562,7 @@ public class OperationLogSearchViewModelTests
     public async Task TargetTableDisplay_対象テーブルが正しく日本語変換されること(string table, string expected)
     {
         // Arrange
-        _repoMock.Setup(r => r.SearchAsync(
-                It.IsAny<OperationLogSearchCriteria>(),
-                It.IsAny<int>(),
-                It.IsAny<int>()))
-            .ReturnsAsync(new OperationLogSearchResult
-            {
-                Items = new[]
-                {
-                    new OperationLog
-                    {
-                        Id = 1,
-                        Timestamp = DateTime.Now,
-                        Action = "INSERT",
-                        TargetTable = table,
-                        TargetId = "id",
-                        OperatorName = "op"
-                    }
-                },
-                TotalCount = 1,
-                CurrentPage = 1,
-                PageSize = 50
-            });
+        SetupKeysetReturning(new[] { MakeLog(1, targetTable: table) });
 
         // Act
         await _viewModel.SearchAsync();
@@ -744,29 +579,10 @@ public class OperationLogSearchViewModelTests
     public async Task UPDATE時_変更が無いフィールドは表示されないこと()
     {
         // Arrange
-        var testLog = new OperationLog
-        {
-            Id = 1,
-            Timestamp = DateTime.Now,
-            Action = "UPDATE",
-            TargetTable = "staff",
-            TargetId = "ABC",
-            OperatorName = "管理者",
-            BeforeData = "{\"Name\":\"田中太郎\",\"Number\":\"001\",\"Note\":\"\"}",
-            AfterData = "{\"Name\":\"田中太郎\",\"Number\":\"001\",\"Note\":\"メモ追加\"}"
-        };
-
-        _repoMock.Setup(r => r.SearchAsync(
-                It.IsAny<OperationLogSearchCriteria>(),
-                It.IsAny<int>(),
-                It.IsAny<int>()))
-            .ReturnsAsync(new OperationLogSearchResult
-            {
-                Items = new[] { testLog },
-                TotalCount = 1,
-                CurrentPage = 1,
-                PageSize = 50
-            });
+        var testLog = MakeLog(1, action: "UPDATE", targetTable: "staff", targetId: "ABC", operatorName: "管理者",
+            beforeData: "{\"Name\":\"田中太郎\",\"Number\":\"001\",\"Note\":\"\"}",
+            afterData: "{\"Name\":\"田中太郎\",\"Number\":\"001\",\"Note\":\"メモ追加\"}");
+        SetupKeysetReturning(new[] { testLog });
 
         // Act
         await _viewModel.SearchAsync();
@@ -782,29 +598,10 @@ public class OperationLogSearchViewModelTests
     public async Task UPDATE時_空からの値変更がなしとして表示されること()
     {
         // Arrange
-        var testLog = new OperationLog
-        {
-            Id = 1,
-            Timestamp = DateTime.Now,
-            Action = "UPDATE",
-            TargetTable = "ic_card",
-            TargetId = "XYZ",
-            OperatorName = "管理者",
-            BeforeData = "{\"CardType\":\"はやかけん\",\"CardNumber\":\"\",\"Note\":\"\"}",
-            AfterData = "{\"CardType\":\"はやかけん\",\"CardNumber\":\"001\",\"Note\":\"\"}"
-        };
-
-        _repoMock.Setup(r => r.SearchAsync(
-                It.IsAny<OperationLogSearchCriteria>(),
-                It.IsAny<int>(),
-                It.IsAny<int>()))
-            .ReturnsAsync(new OperationLogSearchResult
-            {
-                Items = new[] { testLog },
-                TotalCount = 1,
-                CurrentPage = 1,
-                PageSize = 50
-            });
+        var testLog = MakeLog(1, action: "UPDATE", targetTable: "ic_card", targetId: "XYZ", operatorName: "管理者",
+            beforeData: "{\"CardType\":\"はやかけん\",\"CardNumber\":\"\",\"Note\":\"\"}",
+            afterData: "{\"CardType\":\"はやかけん\",\"CardNumber\":\"001\",\"Note\":\"\"}");
+        SetupKeysetReturning(new[] { testLog });
 
         // Act
         await _viewModel.SearchAsync();
@@ -818,29 +615,10 @@ public class OperationLogSearchViewModelTests
     public async Task 不正なJSON_DetailSummaryがフォールバックすること()
     {
         // Arrange
-        var testLog = new OperationLog
-        {
-            Id = 1,
-            Timestamp = DateTime.Now,
-            Action = "UPDATE",
-            TargetTable = "staff",
-            TargetId = "ABC",
-            OperatorName = "管理者",
-            BeforeData = "not-json",
-            AfterData = "not-json"
-        };
-
-        _repoMock.Setup(r => r.SearchAsync(
-                It.IsAny<OperationLogSearchCriteria>(),
-                It.IsAny<int>(),
-                It.IsAny<int>()))
-            .ReturnsAsync(new OperationLogSearchResult
-            {
-                Items = new[] { testLog },
-                TotalCount = 1,
-                CurrentPage = 1,
-                PageSize = 50
-            });
+        var testLog = MakeLog(1, action: "UPDATE", targetTable: "staff", targetId: "ABC", operatorName: "管理者",
+            beforeData: "not-json",
+            afterData: "not-json");
+        SetupKeysetReturning(new[] { testLog });
 
         // Act
         await _viewModel.SearchAsync();
@@ -854,28 +632,9 @@ public class OperationLogSearchViewModelTests
     {
         // Arrange
         var longSummary = "鉄道（博多～天神、天神～薬院、薬院～大橋、大橋～春日原）"; // 25文字超
-        var testLog = new OperationLog
-        {
-            Id = 1,
-            Timestamp = DateTime.Now,
-            Action = "INSERT",
-            TargetTable = "ledger",
-            TargetId = "42",
-            OperatorName = "管理者",
-            AfterData = $"{{\"Date\":\"2025-06-15\",\"Summary\":\"{longSummary}\"}}"
-        };
-
-        _repoMock.Setup(r => r.SearchAsync(
-                It.IsAny<OperationLogSearchCriteria>(),
-                It.IsAny<int>(),
-                It.IsAny<int>()))
-            .ReturnsAsync(new OperationLogSearchResult
-            {
-                Items = new[] { testLog },
-                TotalCount = 1,
-                CurrentPage = 1,
-                PageSize = 50
-            });
+        var testLog = MakeLog(1, action: "INSERT", targetTable: "ledger", targetId: "42", operatorName: "管理者",
+            afterData: $"{{\"Date\":\"2025-06-15\",\"Summary\":\"{longSummary}\"}}");
+        SetupKeysetReturning(new[] { testLog });
 
         // Act
         await _viewModel.SearchAsync();
@@ -892,28 +651,9 @@ public class OperationLogSearchViewModelTests
     public async Task 職員証IDmしかない場合にIDmが表示名になること()
     {
         // Arrange
-        var testLog = new OperationLog
-        {
-            Id = 1,
-            Timestamp = DateTime.Now,
-            Action = "INSERT",
-            TargetTable = "staff",
-            TargetId = "ABC123",
-            OperatorName = "管理者",
-            AfterData = "{\"StaffIdm\":\"0123456789ABCDEF\"}"
-        };
-
-        _repoMock.Setup(r => r.SearchAsync(
-                It.IsAny<OperationLogSearchCriteria>(),
-                It.IsAny<int>(),
-                It.IsAny<int>()))
-            .ReturnsAsync(new OperationLogSearchResult
-            {
-                Items = new[] { testLog },
-                TotalCount = 1,
-                CurrentPage = 1,
-                PageSize = 50
-            });
+        var testLog = MakeLog(1, targetTable: "staff", targetId: "ABC123", operatorName: "管理者",
+            afterData: "{\"StaffIdm\":\"0123456789ABCDEF\"}");
+        SetupKeysetReturning(new[] { testLog });
 
         // Act
         await _viewModel.SearchAsync();
@@ -926,28 +666,9 @@ public class OperationLogSearchViewModelTests
     public async Task 名前のみで番号なしの場合に名前のみが表示されること()
     {
         // Arrange
-        var testLog = new OperationLog
-        {
-            Id = 1,
-            Timestamp = DateTime.Now,
-            Action = "INSERT",
-            TargetTable = "staff",
-            TargetId = "ABC123",
-            OperatorName = "管理者",
-            AfterData = "{\"Name\":\"田中太郎\"}"
-        };
-
-        _repoMock.Setup(r => r.SearchAsync(
-                It.IsAny<OperationLogSearchCriteria>(),
-                It.IsAny<int>(),
-                It.IsAny<int>()))
-            .ReturnsAsync(new OperationLogSearchResult
-            {
-                Items = new[] { testLog },
-                TotalCount = 1,
-                CurrentPage = 1,
-                PageSize = 50
-            });
+        var testLog = MakeLog(1, targetTable: "staff", targetId: "ABC123", operatorName: "管理者",
+            afterData: "{\"Name\":\"田中太郎\"}");
+        SetupKeysetReturning(new[] { testLog });
 
         // Act
         await _viewModel.SearchAsync();

@@ -249,8 +249,32 @@ public class SharedModeMonitorTests
         // Assert
         _timerFactory.CreatedTimers.Should().HaveCount(2);
         _timerFactory.CreatedTimers.Should().AllSatisfy(t => t.IsRunning.Should().BeTrue());
-        _timerFactory.CreatedTimers[0].Interval.Should().Be(TimeSpan.FromSeconds(30), "ヘルスチェックは30秒間隔");
+        _timerFactory.CreatedTimers[0].Interval.Should().Be(
+            TimeSpan.FromSeconds(SharedModeMonitor.HealthCheckIntervalSeconds),
+            "ヘルスチェックはHealthCheckIntervalSecondsの値で動作する（Issue #1493: 15秒）");
         _timerFactory.CreatedTimers[1].Interval.Should().Be(TimeSpan.FromSeconds(1), "同期表示は1秒間隔");
+    }
+
+    [Fact]
+    public void HealthCheckIntervalSeconds_共有モードの最大キャッシュTTLと一致すること()
+    {
+        // Issue #1493: TTLを超えて stale データが滞留しないよう、
+        // ヘルスチェック間隔は共有モード上書き後のキャッシュ TTL の最大値（CardListSeconds=15）と一致させる。
+        // 双方が独立に書き換わって整合性が崩れることを CI で検出する回帰防止テスト。
+        const int 共有モードCardListSeconds = 15; // App.xaml.cs:203 で設定
+        SharedModeMonitor.HealthCheckIntervalSeconds.Should().Be(
+            共有モードCardListSeconds,
+            "共有モード時のキャッシュ最大TTLとヘルスチェック間隔が一致していること");
+    }
+
+    [Fact]
+    public void HealthCheckIntervalSeconds_StaleThresholdSecondsと一致すること()
+    {
+        // Issue #1493: StaleThresholdSeconds を超える間ヘルスチェックが走らないと、
+        // 同期表示が stale 判定された後も確認が走らない区間が生じる。両者を一致させる。
+        SharedModeMonitor.HealthCheckIntervalSeconds.Should().Be(
+            SharedModeMonitor.StaleThresholdSeconds,
+            "ヘルスチェック間隔と stale 判定しきい値が一致していること");
     }
 
     [Fact]

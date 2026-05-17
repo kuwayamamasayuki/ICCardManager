@@ -197,7 +197,7 @@ public class OperationLogRepositoryTests : IDisposable
     #region SearchAsync テスト
 
     [Fact]
-    public async Task SearchAsync_WithDateRange_FiltersCorrectly()
+    public async Task SearchFirstPageAsync_WithDateRange_FiltersCorrectly()
     {
         // Arrange
         await SeedTestLogs();
@@ -209,7 +209,7 @@ public class OperationLogRepositoryTests : IDisposable
         };
 
         // Act
-        var result = await _repository.SearchAsync(criteria);
+        var result = await _repository.SearchFirstPageAsync(criteria, pageSize: 100);
 
         // Assert
         result.Items.Should().NotBeEmpty();
@@ -218,7 +218,7 @@ public class OperationLogRepositoryTests : IDisposable
     }
 
     [Fact]
-    public async Task SearchAsync_WithAction_FiltersCorrectly()
+    public async Task SearchFirstPageAsync_WithAction_FiltersCorrectly()
     {
         // Arrange
         await _repository.InsertAsync(CreateTestLog(action: "INSERT"));
@@ -228,15 +228,15 @@ public class OperationLogRepositoryTests : IDisposable
         var criteria = new OperationLogSearchCriteria { Action = "INSERT" };
 
         // Act
-        var result = await _repository.SearchAsync(criteria);
+        var result = await _repository.SearchFirstPageAsync(criteria, pageSize: 100);
 
         // Assert
         result.Items.Should().HaveCount(1);
-        result.Items.First().Action.Should().Be("INSERT");
+        result.Items[0].Action.Should().Be("INSERT");
     }
 
     [Fact]
-    public async Task SearchAsync_WithTargetTable_FiltersCorrectly()
+    public async Task SearchFirstPageAsync_WithTargetTable_FiltersCorrectly()
     {
         // Arrange
         await _repository.InsertAsync(CreateTestLog(targetTable: "staff"));
@@ -246,15 +246,15 @@ public class OperationLogRepositoryTests : IDisposable
         var criteria = new OperationLogSearchCriteria { TargetTable = "ic_card" };
 
         // Act
-        var result = await _repository.SearchAsync(criteria);
+        var result = await _repository.SearchFirstPageAsync(criteria, pageSize: 100);
 
         // Assert
         result.Items.Should().HaveCount(1);
-        result.Items.First().TargetTable.Should().Be("ic_card");
+        result.Items[0].TargetTable.Should().Be("ic_card");
     }
 
     [Fact]
-    public async Task SearchAsync_WithOperatorName_FiltersWithPartialMatch()
+    public async Task SearchFirstPageAsync_WithOperatorName_FiltersWithPartialMatch()
     {
         // Arrange
         await _repository.InsertAsync(CreateTestLog(operatorName: "山田太郎"));
@@ -264,7 +264,7 @@ public class OperationLogRepositoryTests : IDisposable
         var criteria = new OperationLogSearchCriteria { OperatorName = "山田" };
 
         // Act
-        var result = await _repository.SearchAsync(criteria);
+        var result = await _repository.SearchFirstPageAsync(criteria, pageSize: 100);
 
         // Assert
         result.Items.Should().HaveCount(2);
@@ -272,7 +272,7 @@ public class OperationLogRepositoryTests : IDisposable
     }
 
     [Fact]
-    public async Task SearchAsync_WithTargetId_FiltersWithPartialMatch()
+    public async Task SearchFirstPageAsync_WithTargetId_FiltersWithPartialMatch()
     {
         // Arrange
         await _repository.InsertAsync(CreateTestLog(targetId: "0123456789ABCDEF"));
@@ -281,15 +281,15 @@ public class OperationLogRepositoryTests : IDisposable
         var criteria = new OperationLogSearchCriteria { TargetId = "0123" };
 
         // Act
-        var result = await _repository.SearchAsync(criteria);
+        var result = await _repository.SearchFirstPageAsync(criteria, pageSize: 100);
 
         // Assert
         result.Items.Should().HaveCount(1);
-        result.Items.First().TargetId.Should().Contain("0123");
+        result.Items[0].TargetId.Should().Contain("0123");
     }
 
     [Fact]
-    public async Task SearchAsync_WithMultipleCriteria_FiltersCorrectly()
+    public async Task SearchFirstPageAsync_WithMultipleCriteria_FiltersCorrectly()
     {
         // Arrange
         await _repository.InsertAsync(CreateTestLog(
@@ -314,47 +314,14 @@ public class OperationLogRepositoryTests : IDisposable
         };
 
         // Act
-        var result = await _repository.SearchAsync(criteria);
+        var result = await _repository.SearchFirstPageAsync(criteria, pageSize: 100);
 
         // Assert
         result.Items.Should().HaveCount(1);
     }
 
     [Fact]
-    public async Task SearchAsync_Pagination_WorksCorrectly()
-    {
-        // Arrange
-        for (int i = 0; i < 25; i++)
-        {
-            await _repository.InsertAsync(CreateTestLog());
-        }
-
-        var criteria = new OperationLogSearchCriteria();
-
-        // Act
-        var page1 = await _repository.SearchAsync(criteria, page: 1, pageSize: 10);
-        var page2 = await _repository.SearchAsync(criteria, page: 2, pageSize: 10);
-        var page3 = await _repository.SearchAsync(criteria, page: 3, pageSize: 10);
-
-        // Assert
-        page1.Items.Should().HaveCount(10);
-        page1.TotalCount.Should().Be(25);
-        page1.TotalPages.Should().Be(3);
-        page1.CurrentPage.Should().Be(1);
-        page1.HasPreviousPage.Should().BeFalse();
-        page1.HasNextPage.Should().BeTrue();
-
-        page2.Items.Should().HaveCount(10);
-        page2.HasPreviousPage.Should().BeTrue();
-        page2.HasNextPage.Should().BeTrue();
-
-        page3.Items.Should().HaveCount(5);
-        page3.HasPreviousPage.Should().BeTrue();
-        page3.HasNextPage.Should().BeFalse();
-    }
-
-    [Fact]
-    public async Task SearchAsync_EmptyCriteria_ReturnsAll()
+    public async Task SearchFirstPageAsync_EmptyCriteria_ReturnsAll()
     {
         // Arrange
         await _repository.InsertAsync(CreateTestLog());
@@ -364,7 +331,7 @@ public class OperationLogRepositoryTests : IDisposable
         var criteria = new OperationLogSearchCriteria();
 
         // Act
-        var result = await _repository.SearchAsync(criteria);
+        var result = await _repository.SearchFirstPageAsync(criteria, pageSize: 100);
 
         // Assert
         result.Items.Should().HaveCount(3);
@@ -372,7 +339,7 @@ public class OperationLogRepositoryTests : IDisposable
     }
 
     [Fact]
-    public async Task SearchAsync_ReturnsSortedByTimestampAscending()
+    public async Task SearchFirstPageAsync_ReturnsSortedByTimestampAscending()
     {
         // Arrange: Issue #787 — 古い順にソートされることを検証
         await _repository.InsertAsync(CreateTestLog(timestamp: new DateTime(2024, 1, 20, 14, 0, 0)));
@@ -382,14 +349,320 @@ public class OperationLogRepositoryTests : IDisposable
         var criteria = new OperationLogSearchCriteria();
 
         // Act
-        var result = await _repository.SearchAsync(criteria);
+        var result = await _repository.SearchFirstPageAsync(criteria, pageSize: 100);
 
         // Assert: 古い順（ASC）で返ること — 最新ログが画面の下に表示される
-        var items = result.Items.ToList();
-        items.Should().HaveCount(3);
-        items[0].Timestamp.Should().Be(new DateTime(2024, 1, 10, 9, 0, 0));
-        items[1].Timestamp.Should().Be(new DateTime(2024, 1, 15, 12, 0, 0));
-        items[2].Timestamp.Should().Be(new DateTime(2024, 1, 20, 14, 0, 0));
+        result.Items.Should().HaveCount(3);
+        result.Items[0].Timestamp.Should().Be(new DateTime(2024, 1, 10, 9, 0, 0));
+        result.Items[1].Timestamp.Should().Be(new DateTime(2024, 1, 15, 12, 0, 0));
+        result.Items[2].Timestamp.Should().Be(new DateTime(2024, 1, 20, 14, 0, 0));
+    }
+
+    #endregion
+
+    #region keyset pagination テスト（Issue #1479）
+
+    [Fact]
+    public async Task SearchFirstPageAsync_ReturnsFirstNItems_OrderedByTimestampIdAsc()
+    {
+        // Arrange: 25 件挿入（タイムスタンプは挿入順に1秒ずつ進める）
+        for (int i = 0; i < 25; i++)
+        {
+            await _repository.InsertAsync(CreateTestLog(
+                timestamp: new DateTime(2024, 1, 1, 0, 0, 0).AddSeconds(i)));
+        }
+
+        // Act
+        var page = await _repository.SearchFirstPageAsync(new OperationLogSearchCriteria(), pageSize: 10);
+
+        // Assert
+        page.Items.Should().HaveCount(10);
+        page.TotalCount.Should().Be(25);
+        page.HasPrevious.Should().BeFalse();
+        page.HasNext.Should().BeTrue();
+        page.FirstCursor.Should().NotBeNull();
+        page.LastCursor.Should().NotBeNull();
+        page.Items[0].Timestamp.Should().Be(new DateTime(2024, 1, 1, 0, 0, 0));
+        page.Items[9].Timestamp.Should().Be(new DateTime(2024, 1, 1, 0, 0, 9));
+    }
+
+    [Fact]
+    public async Task SearchFirstPageAsync_EmptyTable_ReturnsEmptyPage()
+    {
+        // Act
+        var page = await _repository.SearchFirstPageAsync(new OperationLogSearchCriteria(), pageSize: 10);
+
+        // Assert
+        page.Items.Should().BeEmpty();
+        page.TotalCount.Should().Be(0);
+        page.HasPrevious.Should().BeFalse();
+        page.HasNext.Should().BeFalse();
+        page.FirstCursor.Should().BeNull();
+        page.LastCursor.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task SearchFirstPageAsync_LessThanPageSize_HasNextFalse()
+    {
+        // Arrange: 3 件のみ
+        for (int i = 0; i < 3; i++)
+        {
+            await _repository.InsertAsync(CreateTestLog(
+                timestamp: new DateTime(2024, 1, 1, 0, 0, 0).AddSeconds(i)));
+        }
+
+        // Act
+        var page = await _repository.SearchFirstPageAsync(new OperationLogSearchCriteria(), pageSize: 10);
+
+        // Assert
+        page.Items.Should().HaveCount(3);
+        page.HasNext.Should().BeFalse();
+        page.HasPrevious.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task SearchNextPageAsync_NavigatesForwardCorrectly()
+    {
+        // Arrange: 25 件挿入
+        for (int i = 0; i < 25; i++)
+        {
+            await _repository.InsertAsync(CreateTestLog(
+                timestamp: new DateTime(2024, 1, 1, 0, 0, 0).AddSeconds(i)));
+        }
+
+        var criteria = new OperationLogSearchCriteria();
+
+        // Act
+        var page1 = await _repository.SearchFirstPageAsync(criteria, pageSize: 10);
+        var page2 = await _repository.SearchNextPageAsync(criteria, page1.LastCursor, pageSize: 10);
+        var page3 = await _repository.SearchNextPageAsync(criteria, page2.LastCursor, pageSize: 10);
+
+        // Assert
+        page2.Items.Should().HaveCount(10);
+        page2.Items[0].Timestamp.Should().Be(new DateTime(2024, 1, 1, 0, 0, 10));
+        page2.HasPrevious.Should().BeTrue();
+        page2.HasNext.Should().BeTrue();
+
+        page3.Items.Should().HaveCount(5);
+        page3.Items[0].Timestamp.Should().Be(new DateTime(2024, 1, 1, 0, 0, 20));
+        page3.HasPrevious.Should().BeTrue();
+        page3.HasNext.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task SearchNextPageAsync_HandlesTimestampTies_ByIdOrder()
+    {
+        // Arrange: 同一 timestamp で 5 件、その後 5 件挿入。pageSize=3 で境界がタイ上にかかる。
+        var sameTs = new DateTime(2024, 1, 1, 12, 0, 0);
+        for (int i = 0; i < 5; i++)
+        {
+            await _repository.InsertAsync(CreateTestLog(timestamp: sameTs));
+        }
+        for (int i = 0; i < 5; i++)
+        {
+            await _repository.InsertAsync(CreateTestLog(timestamp: sameTs.AddSeconds(i + 1)));
+        }
+
+        var criteria = new OperationLogSearchCriteria();
+
+        // Act
+        var page1 = await _repository.SearchFirstPageAsync(criteria, pageSize: 3);
+        var page2 = await _repository.SearchNextPageAsync(criteria, page1.LastCursor, pageSize: 3);
+
+        // Assert: id ASC で連続している
+        page1.Items.Should().HaveCount(3);
+        page2.Items.Should().HaveCount(3);
+        page1.Items[2].Id.Should().BeLessThan(page2.Items[0].Id);
+        page1.Items.All(l => l.Timestamp == sameTs).Should().BeTrue();
+        // 4 件目と 5 件目は同タイムスタンプ、6 件目から先は別タイムスタンプ
+        page2.Items[0].Timestamp.Should().Be(sameTs);
+        page2.Items[1].Timestamp.Should().Be(sameTs);
+        page2.Items[2].Timestamp.Should().Be(sameTs.AddSeconds(1));
+    }
+
+    [Fact]
+    public async Task SearchPreviousPageAsync_NavigatesBackwardCorrectly()
+    {
+        // Arrange
+        for (int i = 0; i < 25; i++)
+        {
+            await _repository.InsertAsync(CreateTestLog(
+                timestamp: new DateTime(2024, 1, 1, 0, 0, 0).AddSeconds(i)));
+        }
+
+        var criteria = new OperationLogSearchCriteria();
+
+        // Act: First → Next → Next → Previous で page2 と一致するか
+        var page1 = await _repository.SearchFirstPageAsync(criteria, pageSize: 10);
+        var page2 = await _repository.SearchNextPageAsync(criteria, page1.LastCursor, pageSize: 10);
+        var page3 = await _repository.SearchNextPageAsync(criteria, page2.LastCursor, pageSize: 10);
+        var backToPage2 = await _repository.SearchPreviousPageAsync(criteria, page3.FirstCursor, pageSize: 10);
+
+        // Assert
+        backToPage2.Items.Should().HaveCount(10);
+        backToPage2.Items.Select(l => l.Id).Should().Equal(page2.Items.Select(l => l.Id));
+        backToPage2.HasPrevious.Should().BeTrue();
+        backToPage2.HasNext.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task SearchPreviousPageAsync_AtBeginning_HasPreviousFalse()
+    {
+        // Arrange
+        for (int i = 0; i < 15; i++)
+        {
+            await _repository.InsertAsync(CreateTestLog(
+                timestamp: new DateTime(2024, 1, 1, 0, 0, 0).AddSeconds(i)));
+        }
+
+        var criteria = new OperationLogSearchCriteria();
+
+        // Act: page2 から前ページ（=page1相当）に戻る
+        var page1 = await _repository.SearchFirstPageAsync(criteria, pageSize: 10);
+        var page2 = await _repository.SearchNextPageAsync(criteria, page1.LastCursor, pageSize: 10);
+        var backToFirst = await _repository.SearchPreviousPageAsync(criteria, page2.FirstCursor, pageSize: 10);
+
+        // Assert: 戻った先頭ページにはさらに前のページが無い
+        backToFirst.Items.Should().HaveCount(10);
+        backToFirst.HasPrevious.Should().BeFalse();
+        backToFirst.HasNext.Should().BeTrue();
+        backToFirst.Items.Select(l => l.Id).Should().Equal(page1.Items.Select(l => l.Id));
+    }
+
+    [Fact]
+    public async Task SearchLastPageAsync_ReturnsLastNItems()
+    {
+        // Arrange
+        for (int i = 0; i < 25; i++)
+        {
+            await _repository.InsertAsync(CreateTestLog(
+                timestamp: new DateTime(2024, 1, 1, 0, 0, 0).AddSeconds(i)));
+        }
+
+        // Act
+        var page = await _repository.SearchLastPageAsync(new OperationLogSearchCriteria(), pageSize: 10);
+
+        // Assert: 末尾 5 件は端数で、最終 5 件のみ取得（25 % 10 = 5）。末尾ページは page3 相当の 5 件。
+        page.Items.Should().HaveCount(5);
+        page.Items[0].Timestamp.Should().Be(new DateTime(2024, 1, 1, 0, 0, 20));
+        page.Items[4].Timestamp.Should().Be(new DateTime(2024, 1, 1, 0, 0, 24));
+        page.HasNext.Should().BeFalse();
+        page.HasPrevious.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task SearchLastPageAsync_ExactBoundary_ReturnsFullPage()
+    {
+        // Arrange: 20 件挿入で pageSize=10 だと最終ページは丁度 10 件
+        for (int i = 0; i < 20; i++)
+        {
+            await _repository.InsertAsync(CreateTestLog(
+                timestamp: new DateTime(2024, 1, 1, 0, 0, 0).AddSeconds(i)));
+        }
+
+        // Act
+        var page = await _repository.SearchLastPageAsync(new OperationLogSearchCriteria(), pageSize: 10);
+
+        // Assert
+        page.Items.Should().HaveCount(10);
+        page.Items[0].Timestamp.Should().Be(new DateTime(2024, 1, 1, 0, 0, 10));
+        page.Items[9].Timestamp.Should().Be(new DateTime(2024, 1, 1, 0, 0, 19));
+        page.HasNext.Should().BeFalse();
+        page.HasPrevious.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task SearchLastPageAsync_SinglePage_NoPrevNoNext()
+    {
+        // Arrange: 5 件だけ
+        for (int i = 0; i < 5; i++)
+        {
+            await _repository.InsertAsync(CreateTestLog(
+                timestamp: new DateTime(2024, 1, 1, 0, 0, 0).AddSeconds(i)));
+        }
+
+        // Act
+        var page = await _repository.SearchLastPageAsync(new OperationLogSearchCriteria(), pageSize: 10);
+
+        // Assert
+        page.Items.Should().HaveCount(5);
+        page.HasPrevious.Should().BeFalse();
+        page.HasNext.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task SequentialNavigation_FirstToLast_ReachesAllRows()
+    {
+        // Arrange: 27 件（端数）
+        for (int i = 0; i < 27; i++)
+        {
+            await _repository.InsertAsync(CreateTestLog(
+                timestamp: new DateTime(2024, 1, 1, 0, 0, 0).AddSeconds(i)));
+        }
+
+        var criteria = new OperationLogSearchCriteria();
+
+        // Act: First から HasNext=false になるまで進む
+        var collected = new List<OperationLog>();
+        var current = await _repository.SearchFirstPageAsync(criteria, pageSize: 10);
+        collected.AddRange(current.Items);
+        while (current.HasNext)
+        {
+            current = await _repository.SearchNextPageAsync(criteria, current.LastCursor, pageSize: 10);
+            collected.AddRange(current.Items);
+        }
+
+        // Assert: 全件揃い、id がユニーク
+        collected.Should().HaveCount(27);
+        collected.Select(l => l.Id).Distinct().Should().HaveCount(27);
+        collected.Should().BeInAscendingOrder(l => l.Timestamp);
+    }
+
+    [Fact]
+    public async Task SearchLastPageAsync_BackwardNavigation_ReachesFirst()
+    {
+        // Arrange: 23 件
+        for (int i = 0; i < 23; i++)
+        {
+            await _repository.InsertAsync(CreateTestLog(
+                timestamp: new DateTime(2024, 1, 1, 0, 0, 0).AddSeconds(i)));
+        }
+
+        var criteria = new OperationLogSearchCriteria();
+
+        // Act: Last から HasPrevious=false になるまで遡る
+        var collected = new List<OperationLog>();
+        var current = await _repository.SearchLastPageAsync(criteria, pageSize: 10);
+        collected.InsertRange(0, current.Items);
+        while (current.HasPrevious)
+        {
+            current = await _repository.SearchPreviousPageAsync(criteria, current.FirstCursor, pageSize: 10);
+            collected.InsertRange(0, current.Items);
+        }
+
+        // Assert
+        collected.Should().HaveCount(23);
+        collected.Should().BeInAscendingOrder(l => l.Timestamp);
+    }
+
+    [Fact]
+    public async Task SearchNextPageAsync_NullCursor_Throws()
+    {
+        // Act
+        Func<Task> act = () => _repository.SearchNextPageAsync(new OperationLogSearchCriteria(), afterCursor: null, pageSize: 10);
+
+        // Assert
+        await act.Should().ThrowAsync<ArgumentNullException>();
+    }
+
+    [Fact]
+    public async Task SearchFirstPageAsync_InvalidPageSize_Throws()
+    {
+        // Act
+        Func<Task> act = () => _repository.SearchFirstPageAsync(new OperationLogSearchCriteria(), pageSize: 0);
+
+        // Assert
+        await act.Should().ThrowAsync<ArgumentOutOfRangeException>();
     }
 
     #endregion

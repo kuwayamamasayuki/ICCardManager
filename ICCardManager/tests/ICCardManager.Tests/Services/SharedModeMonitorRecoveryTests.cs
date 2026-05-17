@@ -140,8 +140,9 @@ public class SharedModeMonitorRecoveryTests
 
         // ヘルスチェックタイマーは CreatedTimers[0]（Start 内で最初に生成）
         var healthCheckTimer = _timerFactory.CreatedTimers[0];
-        healthCheckTimer.Interval.Should().Be(TimeSpan.FromSeconds(30),
-            "ヘルスチェックは30秒間隔で発火");
+        healthCheckTimer.Interval.Should().Be(
+            TimeSpan.FromSeconds(SharedModeMonitor.HealthCheckIntervalSeconds),
+            "ヘルスチェックは HealthCheckIntervalSeconds の値で発火（Issue #1493: 15秒）");
 
         // OnHealthCheckTick は async void のため、TaskCompletionSource で完了を待機する
         var tcs = new TaskCompletionSource<DatabaseHealthEventArgs>(
