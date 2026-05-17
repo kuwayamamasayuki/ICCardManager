@@ -190,6 +190,31 @@ CREATE TABLE settings (
 
     [Fact]
     [Trait("Category", "Unit")]
+    public void BackfillLegacyMigrationVersion1_CalledTwice_DoesNotThrowAndKeepsSingleRow()
+    {
+        // Issue #1484: 共有モードで複数 PC が同時にレガシー DB を起動した際の
+        // TOCTOU 競合（テーブル存在チェック直後に他 PC が補填を完了させるレース）を再現する。
+        // BackfillLegacyMigrationVersion1 は内部的に INSERT OR IGNORE を使うため、
+        // 同じ接続で 2 回呼んでも UNIQUE 制約違反にならず、version=1 行は 1 件のまま維持される。
+        _dbContext = new DbContext(":memory:");
+
+        using var lease = _dbContext.LeaseConnection();
+        var connection = lease.Connection;
+
+        // Act: 補填処理を 2 回連続で実行（PC1 が補填完了直後に PC2 が同じ INSERT を投げる状況）
+        DbContext.BackfillLegacyMigrationVersion1(connection);
+        Action secondCall = () => DbContext.BackfillLegacyMigrationVersion1(connection);
+
+        // Assert
+        secondCall.Should().NotThrow("schema_migrations の補填 INSERT は冪等であるべき");
+
+        using var countCmd = connection.CreateCommand();
+        countCmd.CommandText = "SELECT COUNT(*) FROM schema_migrations WHERE version = 1";
+        Convert.ToInt32(countCmd.ExecuteScalar()).Should().Be(1, "version=1 の補填行は 1 件のみ存在すべき");
+    }
+
+    [Fact]
+    [Trait("Category", "Unit")]
     public void InitializeDatabase_NewDatabase_InsertsDefaultSettings()
     {
         // Arrange
