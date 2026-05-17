@@ -1191,6 +1191,105 @@ public class MainViewModelTests
     }
 
     #endregion
+
+    #region 履歴削除ガード（Issue #1486）
+
+    /// <summary>
+    /// 貸出中レコード（IsLentRecord=true）の削除を試みた場合、
+    /// 警告ダイアログが「何が／なぜ／どうすれば」の3要素を満たす本文で表示されること。
+    /// </summary>
+    [Fact]
+    public async Task DeleteLedgerRow_LentRecord_ShowsWarningWithRecoveryAction()
+    {
+        // Arrange
+        var lentLedger = new LedgerDto
+        {
+            Id = 101,
+            IsLentRecord = true,
+        };
+
+        string capturedMessage = null;
+        string capturedTitle = null;
+        _navigationServiceMock
+            .Setup(n => n.ShowWarning(It.IsAny<string>(), It.IsAny<string>()))
+            .Callback<string, string>((msg, title) =>
+            {
+                capturedMessage = msg;
+                capturedTitle = title;
+            });
+
+        // Act
+        await _viewModel.DeleteLedgerRowCommand.ExecuteAsync(lentLedger);
+
+        // Assert
+        _navigationServiceMock.Verify(
+            n => n.ShowWarning(It.IsAny<string>(), It.IsAny<string>()),
+            Times.Once,
+            "貸出中レコードに対しては必ず警告ダイアログを1回だけ表示すること");
+
+        capturedTitle.Should().Be("削除不可");
+        capturedMessage.Should().NotBeNullOrWhiteSpace();
+        // 何が／なぜ
+        capturedMessage.Should().Contain("貸出中", "メッセージは『何が問題か（貸出中である）』を含むこと");
+        capturedMessage.Should().Contain("削除できません", "メッセージは『なぜ削除不可か』を含むこと");
+        // どうすれば（解決アクション）
+        capturedMessage.Should().Contain("返却", "メッセージは『先に返却操作を行う』という解決アクションを含むこと");
+        // 行動指示型で終わる
+        capturedMessage.Should().EndWith("してください。", "エラーメッセージは行動指示型で終わること");
+        // 最小品質基準（error-messages.md の20文字以上）
+        capturedMessage.Length.Should().BeGreaterThan(20, "3要素を含むメッセージは20文字を大きく超えるはず");
+    }
+
+    /// <summary>
+    /// 貸出中レコードの削除を試みた場合、
+    /// 認証ダイアログを開かず、削除処理にも進まないこと。
+    /// </summary>
+    [Fact]
+    public async Task DeleteLedgerRow_LentRecord_DoesNotProceedToAuthenticationOrDelete()
+    {
+        // Arrange
+        var lentLedger = new LedgerDto
+        {
+            Id = 102,
+            IsLentRecord = true,
+        };
+
+        // Act
+        await _viewModel.DeleteLedgerRowCommand.ExecuteAsync(lentLedger);
+
+        // Assert
+        _staffAuthServiceMock.Verify(
+            s => s.RequestAuthenticationAsync(It.IsAny<string>()),
+            Times.Never,
+            "貸出中レコードでは認証フローを開始してはならない");
+        _ledgerRepositoryMock.Verify(
+            r => r.DeleteAsync(It.IsAny<int>()),
+            Times.Never,
+            "貸出中レコードでは DeleteAsync を呼んではならない");
+    }
+
+    /// <summary>
+    /// nullの ledger を渡された場合は、警告も認証も削除も一切起こさないこと（既存ガード仕様）。
+    /// </summary>
+    [Fact]
+    public async Task DeleteLedgerRow_NullLedger_DoesNothing()
+    {
+        // Act
+        await _viewModel.DeleteLedgerRowCommand.ExecuteAsync(null);
+
+        // Assert
+        _navigationServiceMock.Verify(
+            n => n.ShowWarning(It.IsAny<string>(), It.IsAny<string>()),
+            Times.Never);
+        _staffAuthServiceMock.Verify(
+            s => s.RequestAuthenticationAsync(It.IsAny<string>()),
+            Times.Never);
+        _ledgerRepositoryMock.Verify(
+            r => r.DeleteAsync(It.IsAny<int>()),
+            Times.Never);
+    }
+
+    #endregion
 }
 
 /*
