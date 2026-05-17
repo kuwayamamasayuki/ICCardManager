@@ -187,6 +187,10 @@ public partial class OperationLogSearchViewModel : ViewModelBase
         SelectedTargetTable = TargetTables[0];
     }
 
+    // keyset pagination カーソル（Issue #1479）。null は「カーソル未設定（空ページ or 初回前）」。
+    private OperationLogCursor _firstCursor;
+    private OperationLogCursor _lastCursor;
+
     /// <summary>
     /// 初期化
     /// </summary>
@@ -196,102 +200,110 @@ public partial class OperationLogSearchViewModel : ViewModelBase
     }
 
     /// <summary>
-    /// 検索を実行（Issue #787: 最終ページ＝最新データを表示）
+    /// 検索を実行（Issue #787: 最終ページ＝最新データを表示。Issue #1479: keyset で直接最終ページを取得）
     /// </summary>
     [RelayCommand]
     public async Task SearchAsync()
     {
-        // まず1ページ目を取得して総ページ数を把握
-        CurrentPage = 1;
-        await LoadPageAsync();
-
-        // 複数ページある場合は最終ページ（最新データ）に移動
-        if (TotalPages > 1)
-        {
-            CurrentPage = TotalPages;
-            await LoadPageAsync();
-        }
-    }
-
-    /// <summary>
-    /// 現在のページを読み込み
-    /// </summary>
-    private async Task LoadPageAsync()
-    {
         using (BeginBusy("検索中..."))
         {
             var criteria = BuildSearchCriteria();
-
-            var result = await _operationLogRepository.SearchAsync(criteria, CurrentPage, PageSize);
-
-            Logs.Clear();
-            foreach (var log in result.Items)
-            {
-                Logs.Add(ToDisplayItem(log));
-            }
-
-            TotalCount = result.TotalCount;
-            TotalPages = result.TotalPages;
-            HasPreviousPage = result.HasPreviousPage;
-            HasNextPage = result.HasNextPage;
-
-            OnPropertyChanged(nameof(PageInfo));
-
-            SetStatus(TotalCount > 0
-                ? $"{TotalCount}件の操作ログが見つかりました"
-                : "条件に一致する操作ログはありません", false);
+            var page = await _operationLogRepository.SearchLastPageAsync(criteria, PageSize);
+            ApplyPage(page);
+            CurrentPage = Math.Max(1, TotalPages);
         }
     }
 
     /// <summary>
-    /// 前のページへ
+    /// keyset pagination で取得したページを ViewModel 状態に反映（Issue #1479）。
+    /// </summary>
+    private void ApplyPage(OperationLogKeysetPage page)
+    {
+        Logs.Clear();
+        foreach (var log in page.Items)
+        {
+            Logs.Add(ToDisplayItem(log));
+        }
+
+        TotalCount = page.TotalCount;
+        TotalPages = PageSize > 0 && TotalCount > 0
+            ? (int)Math.Ceiling((double)TotalCount / PageSize)
+            : 0;
+        HasPreviousPage = page.HasPrevious;
+        HasNextPage = page.HasNext;
+        _firstCursor = page.FirstCursor;
+        _lastCursor = page.LastCursor;
+
+        OnPropertyChanged(nameof(PageInfo));
+
+        SetStatus(TotalCount > 0
+            ? $"{TotalCount}件の操作ログが見つかりました"
+            : "条件に一致する操作ログはありません", false);
+    }
+
+    /// <summary>
+    /// 前のページへ（keyset, Issue #1479）
     /// </summary>
     [RelayCommand]
     public async Task PreviousPageAsync()
     {
-        if (HasPreviousPage)
+        if (!HasPreviousPage || _firstCursor == null) return;
+
+        using (BeginBusy("検索中..."))
         {
-            CurrentPage--;
-            await LoadPageAsync();
+            var criteria = BuildSearchCriteria();
+            var page = await _operationLogRepository.SearchPreviousPageAsync(criteria, _firstCursor, PageSize);
+            ApplyPage(page);
+            CurrentPage = Math.Max(1, CurrentPage - 1);
         }
     }
 
     /// <summary>
-    /// 次のページへ
+    /// 次のページへ（keyset, Issue #1479）
     /// </summary>
     [RelayCommand]
     public async Task NextPageAsync()
     {
-        if (HasNextPage)
+        if (!HasNextPage || _lastCursor == null) return;
+
+        using (BeginBusy("検索中..."))
         {
+            var criteria = BuildSearchCriteria();
+            var page = await _operationLogRepository.SearchNextPageAsync(criteria, _lastCursor, PageSize);
+            ApplyPage(page);
             CurrentPage++;
-            await LoadPageAsync();
         }
     }
 
     /// <summary>
-    /// 最初のページへ
+    /// 最初のページへ（keyset, Issue #1479）
     /// </summary>
     [RelayCommand]
     public async Task FirstPageAsync()
     {
-        if (CurrentPage != 1)
+        if (CurrentPage == 1 && _firstCursor != null) return;
+
+        using (BeginBusy("検索中..."))
         {
+            var criteria = BuildSearchCriteria();
+            var page = await _operationLogRepository.SearchFirstPageAsync(criteria, PageSize);
+            ApplyPage(page);
             CurrentPage = 1;
-            await LoadPageAsync();
         }
     }
 
     /// <summary>
-    /// 最後のページへ
+    /// 最後のページへ（keyset, Issue #1479）
     /// </summary>
     [RelayCommand]
     public async Task LastPageAsync()
     {
-        if (CurrentPage != TotalPages)
+        using (BeginBusy("検索中..."))
         {
-            CurrentPage = TotalPages;
-            await LoadPageAsync();
+            var criteria = BuildSearchCriteria();
+            var page = await _operationLogRepository.SearchLastPageAsync(criteria, PageSize);
+            ApplyPage(page);
+            CurrentPage = Math.Max(1, TotalPages);
         }
     }
 
