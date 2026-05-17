@@ -1184,11 +1184,10 @@ namespace ICCardManager.Services
             if (rowsOnCurrentPage > 0 && rowsOnCurrentPage < rowsPerPage)
             {
                 var emptyRowsCount = rowsPerPage - rowsOnCurrentPage;
-                for (int i = 0; i < emptyRowsCount; i++)
-                {
-                    var row = currentRow + i;
-                    ApplyEmptyRowBorder(worksheet, row);
-                }
+                // Issue #1480: 連続する空白行を 1 度の範囲適用で塗ることで
+                // ClosedXML のスタイル操作回数を削減（per-row ループからの脱却）
+                ExcelStyleFormatter.ApplyEmptyRowBordersToRange(
+                    worksheet, currentRow, currentRow + emptyRowsCount - 1);
             }
         }
 

@@ -425,6 +425,164 @@ public class ExcelStyleFormatterTests
 
     #endregion
 
+    #region ApplyEmptyRowBordersToRange (Issue #1480)
+
+    /// <summary>
+    /// ApplyEmptyRowBordersToRange: 1 行範囲は per-row 版と同等の見た目を生成する
+    /// Issue #1480: 後方互換性検証
+    /// </summary>
+    [Fact]
+    public void ApplyEmptyRowBordersToRange_SingleRow_ProducesSameResultAsPerRow()
+    {
+        using var perRowBook = new XLWorkbook();
+        var perRowSheet = perRowBook.AddWorksheet("Test");
+        ExcelStyleFormatter.ApplyEmptyRowBorder(perRowSheet, 5);
+
+        using var rangeBook = new XLWorkbook();
+        var rangeSheet = rangeBook.AddWorksheet("Test");
+        ExcelStyleFormatter.ApplyEmptyRowBordersToRange(rangeSheet, 5, 5);
+
+        // 行高さ
+        rangeSheet.Row(5).Height.Should().Be(perRowSheet.Row(5).Height);
+
+        // 罫線・太字・結合の全項目
+        foreach (var col in new[] { 1, 2, 5, 8, 9, 12 })
+        {
+            rangeSheet.Cell(5, col).Style.Border.TopBorder
+                .Should().Be(perRowSheet.Cell(5, col).Style.Border.TopBorder, $"列 {col} の TopBorder");
+            rangeSheet.Cell(5, col).Style.Border.BottomBorder
+                .Should().Be(perRowSheet.Cell(5, col).Style.Border.BottomBorder, $"列 {col} の BottomBorder");
+            rangeSheet.Cell(5, col).Style.Border.LeftBorder
+                .Should().Be(perRowSheet.Cell(5, col).Style.Border.LeftBorder, $"列 {col} の LeftBorder");
+            rangeSheet.Cell(5, col).Style.Border.RightBorder
+                .Should().Be(perRowSheet.Cell(5, col).Style.Border.RightBorder, $"列 {col} の RightBorder");
+            rangeSheet.Cell(5, col).Style.Font.Bold
+                .Should().Be(perRowSheet.Cell(5, col).Style.Font.Bold, $"列 {col} の Bold");
+        }
+
+        // セル結合の状態（B-D, I-L）
+        rangeSheet.Cell(5, 2).IsMerged().Should().Be(perRowSheet.Cell(5, 2).IsMerged(), "B-D 列結合");
+        rangeSheet.Cell(5, 9).IsMerged().Should().Be(perRowSheet.Cell(5, 9).IsMerged(), "I-L 列結合");
+    }
+
+    /// <summary>
+    /// ApplyEmptyRowBordersToRange: 複数行範囲は全行に罫線・行高さ・結合が適用される
+    /// </summary>
+    [Fact]
+    public void ApplyEmptyRowBordersToRange_MultipleRows_AppliesToAllRows()
+    {
+        using var workbook = new XLWorkbook();
+        var worksheet = workbook.AddWorksheet("Test");
+
+        ExcelStyleFormatter.ApplyEmptyRowBordersToRange(worksheet, firstRow: 10, lastRow: 14);
+
+        // 各行に対する検証
+        for (int row = 10; row <= 14; row++)
+        {
+            worksheet.Row(row).Height.Should().Be(30, $"行 {row} の高さ");
+
+            // 各セルに上下罫線が引かれている
+            worksheet.Cell(row, 1).Style.Border.TopBorder.Should().Be(XLBorderStyleValues.Thin, $"行 {row} 列 1 の TopBorder");
+            worksheet.Cell(row, 1).Style.Border.BottomBorder.Should().Be(XLBorderStyleValues.Thin, $"行 {row} 列 1 の BottomBorder");
+            worksheet.Cell(row, 12).Style.Border.TopBorder.Should().Be(XLBorderStyleValues.Thin, $"行 {row} 列 12 の TopBorder");
+            worksheet.Cell(row, 12).Style.Border.BottomBorder.Should().Be(XLBorderStyleValues.Thin, $"行 {row} 列 12 の BottomBorder");
+
+            // 結合（B-D, I-L）
+            worksheet.Cell(row, 2).IsMerged().Should().BeTrue($"行 {row} の B-D 列結合");
+            worksheet.Cell(row, 9).IsMerged().Should().BeTrue($"行 {row} の I-L 列結合");
+        }
+    }
+
+    /// <summary>
+    /// ApplyEmptyRowBordersToRange: 範囲の両端（A列・L列）が全行で太線になる
+    /// </summary>
+    [Fact]
+    public void ApplyEmptyRowBordersToRange_LeftAndRightEdges_AreMedium()
+    {
+        using var workbook = new XLWorkbook();
+        var worksheet = workbook.AddWorksheet("Test");
+
+        ExcelStyleFormatter.ApplyEmptyRowBordersToRange(worksheet, firstRow: 20, lastRow: 23);
+
+        for (int row = 20; row <= 23; row++)
+        {
+            worksheet.Cell(row, 1).Style.Border.LeftBorder
+                .Should().Be(XLBorderStyleValues.Medium, $"行 {row} の A 列左端は太線");
+            worksheet.Cell(row, 12).Style.Border.RightBorder
+                .Should().Be(XLBorderStyleValues.Medium, $"行 {row} の L 列右端は太線");
+        }
+    }
+
+    /// <summary>
+    /// ApplyEmptyRowBordersToRange: firstRow > lastRow は no-op（例外を投げず何も変更しない）
+    /// </summary>
+    [Fact]
+    public void ApplyEmptyRowBordersToRange_EmptyRange_DoesNothing()
+    {
+        using var workbook = new XLWorkbook();
+        var worksheet = workbook.AddWorksheet("Test");
+
+        // 事前状態を記録
+        var originalHeight = worksheet.Row(5).Height;
+
+        // 範囲が空（firstRow > lastRow）
+        System.Action act = () => ExcelStyleFormatter.ApplyEmptyRowBordersToRange(worksheet, firstRow: 5, lastRow: 4);
+
+        act.Should().NotThrow("空範囲は no-op");
+        worksheet.Row(5).Height.Should().Be(originalHeight, "行高さは変更されない");
+        worksheet.Cell(5, 1).IsMerged().Should().BeFalse("結合されない");
+    }
+
+    /// <summary>
+    /// ApplyEmptyRowBordersToRange: 太字書式リセット（Issue #591 と等価）
+    /// </summary>
+    [Fact]
+    public void ApplyEmptyRowBordersToRange_ResetsBoldOnAllRows()
+    {
+        using var workbook = new XLWorkbook();
+        var worksheet = workbook.AddWorksheet("Test");
+
+        // 事前に太字を設定
+        worksheet.Range(30, 1, 32, 12).Style.Font.Bold = true;
+
+        ExcelStyleFormatter.ApplyEmptyRowBordersToRange(worksheet, firstRow: 30, lastRow: 32);
+
+        for (int row = 30; row <= 32; row++)
+        {
+            worksheet.Cell(row, 1).Style.Font.Bold.Should().BeFalse($"行 {row} の太字はリセット");
+            worksheet.Cell(row, 12).Style.Font.Bold.Should().BeFalse($"行 {row} の太字はリセット");
+        }
+    }
+
+    /// <summary>
+    /// ApplyEmptyRowBordersToRange: 大量行（100 行）でも例外なく動作し、サンプル行が正しく処理される
+    /// Issue #1480: スケーラビリティ確認
+    /// </summary>
+    [Fact]
+    public void ApplyEmptyRowBordersToRange_LargeRange_HandlesManyRowsCorrectly()
+    {
+        using var workbook = new XLWorkbook();
+        var worksheet = workbook.AddWorksheet("Test");
+
+        const int FirstRow = 1;
+        const int LastRow = 100;
+        ExcelStyleFormatter.ApplyEmptyRowBordersToRange(worksheet, FirstRow, LastRow);
+
+        // サンプル行（先頭・中間・末尾）を検証
+        foreach (var sampleRow in new[] { FirstRow, 50, LastRow })
+        {
+            worksheet.Row(sampleRow).Height.Should().Be(30, $"行 {sampleRow} の高さ");
+            worksheet.Cell(sampleRow, 1).Style.Border.LeftBorder
+                .Should().Be(XLBorderStyleValues.Medium, $"行 {sampleRow} の A 列左端");
+            worksheet.Cell(sampleRow, 12).Style.Border.RightBorder
+                .Should().Be(XLBorderStyleValues.Medium, $"行 {sampleRow} の L 列右端");
+            worksheet.Cell(sampleRow, 2).IsMerged().Should().BeTrue($"行 {sampleRow} の B-D 列結合");
+            worksheet.Cell(sampleRow, 9).IsMerged().Should().BeTrue($"行 {sampleRow} の I-L 列結合");
+        }
+    }
+
+    #endregion
+
     #region ConfigurePageSetup
 
     /// <summary>
