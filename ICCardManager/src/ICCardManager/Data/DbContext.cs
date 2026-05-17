@@ -730,6 +730,16 @@ namespace ICCardManager.Data
             System.Diagnostics.Debug.WriteLine("[DbContext] 既存DBを検出しました。バージョン1として記録します。");
 #endif
 
+            BackfillLegacyMigrationVersion1(connection);
+        }
+
+        /// <summary>
+        /// レガシーDB（マイグレーション機構導入前のDB）を <c>schema_migrations</c> のバージョン1として
+        /// 追記する。共有モードで複数 PC が同時起動した場合の TOCTOU 競合に備え、
+        /// テーブル作成・行挿入ともに冪等な SQL を使用する（Issue #1484）。
+        /// </summary>
+        internal static void BackfillLegacyMigrationVersion1(SQLiteConnection connection)
+        {
             using var createTableCmd = connection.CreateCommand();
             createTableCmd.CommandText = @"CREATE TABLE IF NOT EXISTS schema_migrations (
     version INTEGER PRIMARY KEY,
@@ -739,7 +749,7 @@ namespace ICCardManager.Data
             createTableCmd.ExecuteNonQuery();
 
             using var insertCmd = connection.CreateCommand();
-            insertCmd.CommandText = "INSERT INTO schema_migrations (version, description) VALUES (1, '初期スキーマ（既存DB）')";
+            insertCmd.CommandText = "INSERT OR IGNORE INTO schema_migrations (version, description) VALUES (1, '初期スキーマ（既存DB）')";
             insertCmd.ExecuteNonQuery();
         }
 
