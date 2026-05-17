@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Data.SQLite;
 using System.Linq;
 using System.Threading.Tasks;
 #if DEBUG
@@ -112,34 +113,56 @@ namespace ICCardManager.Services
             using var lease = await _dbContext.LeaseConnectionAsync().ConfigureAwait(false);
             var connection = lease.Connection;
 
-            var testCardIdms = string.Join(",", TestCardList.Select(c => $"'{c.CardIdm}'"));
-            var testStaffIdms = string.Join(",", TestStaffList.Select(s => $"'{s.StaffIdm}'"));
+            // IN 句のプレースホルダ列 (@<prefix>0, @<prefix>1, ...) を組み立て、
+            // 対応する値をパラメータとして登録する。SQL に値を直接埋め込まない
+            // コーディング標準を DEBUG 限定コードにも一貫適用する（Issue #1485）。
+            static string BuildInClause(SQLiteCommand cmd, IEnumerable<string> values, string prefix)
+            {
+                var placeholders = new List<string>();
+                var index = 0;
+                foreach (var value in values)
+                {
+                    var name = $"@{prefix}{index}";
+                    placeholders.Add(name);
+                    cmd.Parameters.AddWithValue(name, value);
+                    index++;
+                }
+                return string.Join(",", placeholders);
+            }
+
+            var testCardIdms = TestCardList.Select(c => c.CardIdm).ToArray();
+            var testStaffIdms = TestStaffList.Select(s => s.StaffIdm).ToArray();
 
             // 台帳詳細を削除（外部キー制約のため先に削除）
             using (var cmd = connection.CreateCommand())
             {
-                cmd.CommandText = $"DELETE FROM ledger_detail WHERE ledger_id IN (SELECT id FROM ledger WHERE card_idm IN ({testCardIdms}))";
+                var placeholders = BuildInClause(cmd, testCardIdms, "c");
+                cmd.CommandText =
+                    $"DELETE FROM ledger_detail WHERE ledger_id IN (SELECT id FROM ledger WHERE card_idm IN ({placeholders}))";
                 await cmd.ExecuteNonQueryAsync().ConfigureAwait(false);
             }
 
             // 台帳を削除
             using (var cmd = connection.CreateCommand())
             {
-                cmd.CommandText = $"DELETE FROM ledger WHERE card_idm IN ({testCardIdms})";
+                var placeholders = BuildInClause(cmd, testCardIdms, "c");
+                cmd.CommandText = $"DELETE FROM ledger WHERE card_idm IN ({placeholders})";
                 await cmd.ExecuteNonQueryAsync().ConfigureAwait(false);
             }
 
             // テストカードを削除
             using (var cmd = connection.CreateCommand())
             {
-                cmd.CommandText = $"DELETE FROM ic_card WHERE card_idm IN ({testCardIdms})";
+                var placeholders = BuildInClause(cmd, testCardIdms, "c");
+                cmd.CommandText = $"DELETE FROM ic_card WHERE card_idm IN ({placeholders})";
                 await cmd.ExecuteNonQueryAsync().ConfigureAwait(false);
             }
 
             // テスト職員を削除
             using (var cmd = connection.CreateCommand())
             {
-                cmd.CommandText = $"DELETE FROM staff WHERE staff_idm IN ({testStaffIdms})";
+                var placeholders = BuildInClause(cmd, testStaffIdms, "s");
+                cmd.CommandText = $"DELETE FROM staff WHERE staff_idm IN ({placeholders})";
                 await cmd.ExecuteNonQueryAsync().ConfigureAwait(false);
             }
 
