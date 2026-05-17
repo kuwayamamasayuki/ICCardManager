@@ -37,6 +37,14 @@
     <DebugSymbols>false</DebugSymbols>
   </PropertyGroup>
 
+  <!-- Issue #1487: VirtualCardDialog は DEBUG 専用機能（Issue #640）のため、Release ビルドから物理的に除外する。
+       これにより Release dll に型メタデータと XAML リソースが残らなくなる。
+       UI ボタン Visibility / OpenVirtualCardCommand / DI 登録の 3 重 #if DEBUG ガードと併用。 -->
+  <ItemGroup Condition="'$(Configuration)'=='Release'">
+    <Compile Remove="Views\Dialogs\VirtualCardDialog.xaml.cs" />
+    <Page Remove="Views\Dialogs\VirtualCardDialog.xaml" />
+  </ItemGroup>
+
   <ItemGroup>
     <AssemblyAttribute Include="System.Runtime.CompilerServices.InternalsVisibleTo">
       <_Parameter1>ICCardManager.Tests</_Parameter1>
