@@ -335,6 +335,95 @@ public class DebugDataServiceTests : IDisposable
 
     #endregion
 
+    #region CleanExistingTestDataAsync — Issue #1485 (SQL パラメータ化)
+
+    [Fact]
+    public async Task CleanExistingTestDataAsync_RemovesTestRecordsAndPreservesNonTestRecords()
+    {
+        // Arrange: テスト IDm（TestCardList[0]/TestStaffList[0]）と
+        //          非テスト IDm のレコードを直接 INSERT
+        var testCardIdm = DebugDataService.TestCardList[0].CardIdm;
+        var testStaffIdm = DebugDataService.TestStaffList[0].StaffIdm;
+        const string nonTestCardIdm = "AABBCCDD11223344";
+        const string nonTestStaffIdm = "EEFF001122334455";
+
+        using (var cmd = _connection.CreateCommand())
+        {
+            cmd.CommandText = @"
+                INSERT INTO staff (staff_idm) VALUES (@testStaff), (@nonTestStaff);
+                INSERT INTO ic_card (card_idm) VALUES (@testCard), (@nonTestCard);
+                INSERT INTO ledger (id, card_idm) VALUES (1, @testCard), (2, @nonTestCard);
+                INSERT INTO ledger_detail (ledger_id) VALUES (1), (2);";
+            cmd.Parameters.AddWithValue("@testStaff", testStaffIdm);
+            cmd.Parameters.AddWithValue("@nonTestStaff", nonTestStaffIdm);
+            cmd.Parameters.AddWithValue("@testCard", testCardIdm);
+            cmd.Parameters.AddWithValue("@nonTestCard", nonTestCardIdm);
+            cmd.ExecuteNonQuery();
+        }
+
+        // Act
+        await _service.CleanExistingTestDataAsync();
+
+        // Assert: テスト IDm の行は削除、非テスト IDm の行は残存
+        CountWhere("staff", "staff_idm", testStaffIdm).Should().Be(0, "テスト職員は削除されるべき");
+        CountWhere("staff", "staff_idm", nonTestStaffIdm).Should().Be(1, "本番職員は残存すべき");
+        CountWhere("ic_card", "card_idm", testCardIdm).Should().Be(0, "テストカードは削除されるべき");
+        CountWhere("ic_card", "card_idm", nonTestCardIdm).Should().Be(1, "本番カードは残存すべき");
+        CountWhere("ledger", "card_idm", testCardIdm).Should().Be(0, "テスト台帳は削除されるべき");
+        CountWhere("ledger", "card_idm", nonTestCardIdm).Should().Be(1, "本番台帳は残存すべき");
+
+        // ledger_detail は ledger_id 経由で削除されるため別途確認
+        using (var cmd = _connection.CreateCommand())
+        {
+            cmd.CommandText = "SELECT COUNT(*) FROM ledger_detail WHERE ledger_id = 1";
+            Convert.ToInt32(cmd.ExecuteScalar()).Should().Be(0, "テスト台帳の詳細は削除されるべき");
+        }
+        using (var cmd = _connection.CreateCommand())
+        {
+            cmd.CommandText = "SELECT COUNT(*) FROM ledger_detail WHERE ledger_id = 2";
+            Convert.ToInt32(cmd.ExecuteScalar()).Should().Be(1, "本番台帳の詳細は残存すべき");
+        }
+    }
+
+    [Fact]
+    public async Task CleanExistingTestDataAsync_DoesNotInjectFromQuotedIdm()
+    {
+        // Arrange: 引用符を含む悪意ある IDm を持つレコードを事前に挿入。
+        // 文字列補間ベースの旧実装ではこの値が SQL を破壊しうるが、
+        // パラメータ化により安全に扱われることを検証する。
+        const string maliciousIdm = "'; DROP TABLE ic_card; --";
+        using (var cmd = _connection.CreateCommand())
+        {
+            cmd.CommandText = "INSERT INTO ic_card (card_idm) VALUES (@idm)";
+            cmd.Parameters.AddWithValue("@idm", maliciousIdm);
+            cmd.ExecuteNonQuery();
+        }
+
+        // Act
+        await _service.CleanExistingTestDataAsync();
+
+        // Assert 1: ic_card テーブルが破壊されていない
+        using (var cmd = _connection.CreateCommand())
+        {
+            cmd.CommandText = "SELECT name FROM sqlite_master WHERE type='table' AND name='ic_card'";
+            cmd.ExecuteScalar().Should().Be("ic_card", "パラメータ化により ic_card テーブルは破壊されないべき");
+        }
+
+        // Assert 2: maliciousIdm は TestCardList に含まれないため削除対象外として残存
+        CountWhere("ic_card", "card_idm", maliciousIdm).Should().Be(1,
+            "パラメータ化により悪意ある IDm を持つ行は SQL 文として解釈されず、削除対象外のため残存すべき");
+    }
+
+    private int CountWhere(string table, string column, string value)
+    {
+        using var cmd = _connection.CreateCommand();
+        cmd.CommandText = $"SELECT COUNT(*) FROM {table} WHERE {column} = @v";
+        cmd.Parameters.AddWithValue("@v", value);
+        return Convert.ToInt32(cmd.ExecuteScalar());
+    }
+
+    #endregion
+
     public void Dispose()
     {
         _connection?.Dispose();
