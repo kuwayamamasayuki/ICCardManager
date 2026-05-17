@@ -165,27 +165,27 @@ public class DbContextFilePermissionsTests : IDisposable
     }
 
     [Fact]
-    public void EnsureDirectoryWithPermissions_新規ディレクトリの場合_ディレクトリが作成される()
+    public void EnsureDirectoryExists_新規ディレクトリの場合_ディレクトリが作成される()
     {
         // Arrange
         var dirPath = Path.Combine(_tempDir, "newdir");
 
         // Act
-        DbContext.EnsureDirectoryWithPermissions(dirPath);
+        DbContext.EnsureDirectoryExists(dirPath);
 
         // Assert
         Directory.Exists(dirPath).Should().BeTrue("ディレクトリが作成されるべき");
     }
 
     [Fact]
-    public void EnsureDirectoryWithPermissions_既存ディレクトリの場合_例外が発生しない()
+    public void EnsureDirectoryExists_既存ディレクトリの場合_例外が発生しない()
     {
         // Arrange: ディレクトリを先に作成
         var dirPath = Path.Combine(_tempDir, "existingdir");
         Directory.CreateDirectory(dirPath);
 
         // Act
-        var act = () => DbContext.EnsureDirectoryWithPermissions(dirPath);
+        var act = () => DbContext.EnsureDirectoryExists(dirPath);
 
         // Assert
         act.Should().NotThrow("既存ディレクトリに対しても冪等に動作すべき");
@@ -201,13 +201,13 @@ public class DbContextFilePermissionsTests : IDisposable
     /// 本テストは過剰権限の付与が再発しないことを保証する regression detector。
     /// </summary>
     [Fact]
-    public void EnsureDirectoryWithPermissions_明示的なUsersFullControlACEを追加しない()
+    public void EnsureDirectoryExists_明示的なUsersFullControlACEを追加しない()
     {
         // Arrange
         var dirPath = Path.Combine(_tempDir, "noexplicit_acl");
 
         // Act
-        DbContext.EnsureDirectoryWithPermissions(dirPath);
+        DbContext.EnsureDirectoryExists(dirPath);
 
         // Assert
         var dirInfo = new DirectoryInfo(dirPath);
@@ -239,19 +239,19 @@ public class DbContextFilePermissionsTests : IDisposable
     /// 検証することで、環境依存を排除して累積発生のみを検出する。
     /// </remarks>
     [Fact]
-    public void EnsureDirectoryWithPermissions_複数回呼び出してもACEが累積しない()
+    public void EnsureDirectoryExists_複数回呼び出してもACEが累積しない()
     {
         // Arrange
         var dirPath = Path.Combine(_tempDir, "no_acl_growth");
 
         // Act 1: 初回呼び出しで基準件数を取得
-        DbContext.EnsureDirectoryWithPermissions(dirPath);
+        DbContext.EnsureDirectoryExists(dirPath);
         var initialExplicitAceCount = GetExplicitAceCount(dirPath);
 
         // Act 2: 追加で 4 回（合計 5 回）呼び出す
         for (int i = 0; i < 4; i++)
         {
-            DbContext.EnsureDirectoryWithPermissions(dirPath);
+            DbContext.EnsureDirectoryExists(dirPath);
         }
 
         // Assert: 明示的 ACE 数は初回と同じ（累積していない）

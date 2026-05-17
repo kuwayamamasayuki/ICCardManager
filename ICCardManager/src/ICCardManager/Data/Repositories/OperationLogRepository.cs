@@ -124,54 +124,161 @@ ORDER BY timestamp ASC";
         }
 
         /// <inheritdoc/>
-        public async Task<OperationLogSearchResult> SearchAsync(OperationLogSearchCriteria criteria, int page = 1, int pageSize = 50)
+        public Task<OperationLogKeysetPage> SearchFirstPageAsync(OperationLogSearchCriteria criteria, int pageSize)
+            => FetchKeysetPageAsync(criteria, pageSize, KeysetDirection.Forward, cursor: null, isAnchoredAtEdge: true);
+
+        /// <inheritdoc/>
+        public Task<OperationLogKeysetPage> SearchNextPageAsync(OperationLogSearchCriteria criteria, OperationLogCursor afterCursor, int pageSize)
         {
-            using var lease = await _dbContext.LeaseConnectionAsync();
+            if (afterCursor == null) throw new ArgumentNullException(nameof(afterCursor));
+            return FetchKeysetPageAsync(criteria, pageSize, KeysetDirection.Forward, afterCursor, isAnchoredAtEdge: false);
+        }
+
+        /// <inheritdoc/>
+        public Task<OperationLogKeysetPage> SearchPreviousPageAsync(OperationLogSearchCriteria criteria, OperationLogCursor beforeCursor, int pageSize)
+        {
+            if (beforeCursor == null) throw new ArgumentNullException(nameof(beforeCursor));
+            return FetchKeysetPageAsync(criteria, pageSize, KeysetDirection.Backward, beforeCursor, isAnchoredAtEdge: false);
+        }
+
+        /// <inheritdoc/>
+        public Task<OperationLogKeysetPage> SearchLastPageAsync(OperationLogSearchCriteria criteria, int pageSize)
+            => FetchKeysetPageAsync(criteria, pageSize, KeysetDirection.Backward, cursor: null, isAnchoredAtEdge: true);
+
+        private enum KeysetDirection { Forward, Backward }
+
+        /// <summary>
+        /// keyset pagination の共通ページ取得（Issue #1479）。
+        /// </summary>
+        /// <remarks>
+        /// LIMIT pageSize+1 で 1 行余分に取得して「もう一方の境界の存在判定」を行う。
+        /// Backward 方向は ORDER BY DESC で取得した後アプリ側で reverse する。
+        /// </remarks>
+        private async Task<OperationLogKeysetPage> FetchKeysetPageAsync(
+            OperationLogSearchCriteria criteria,
+            int pageSize,
+            KeysetDirection direction,
+            OperationLogCursor cursor,
+            bool isAnchoredAtEdge)
+        {
+            if (pageSize <= 0) throw new ArgumentOutOfRangeException(nameof(pageSize), "pageSize must be positive");
+
+            using var lease = await _dbContext.LeaseConnectionAsync().ConfigureAwait(false);
             var connection = lease.Connection;
 
-            // WHERE句とパラメータを構築
             var (whereClause, parameters) = BuildWhereClause(criteria);
 
-            // 総件数を取得
-            using var countCommand = connection.CreateCommand();
-            countCommand.CommandText = $"SELECT COUNT(*) FROM operation_log {whereClause}";
-            foreach (var param in parameters)
+            // 総件数（表示用）
+            int totalCount;
+            using (var countCommand = connection.CreateCommand())
             {
-                countCommand.Parameters.AddWithValue(param.Key, param.Value);
+                countCommand.CommandText = $"SELECT COUNT(*) FROM operation_log {whereClause}";
+                foreach (var param in parameters)
+                {
+                    countCommand.Parameters.AddWithValue(param.Key, param.Value);
+                }
+                totalCount = Convert.ToInt32(await countCommand.ExecuteScalarAsync().ConfigureAwait(false));
             }
-            var totalCount = Convert.ToInt32(await countCommand.ExecuteScalarAsync());
 
-            // ページネーション付きでデータを取得
-            var logs = new List<OperationLog>();
-            var offset = (page - 1) * pageSize;
+            // ページ取得クエリ構築
+            var cursorClause = string.Empty;
+            if (cursor != null)
+            {
+                // ASC 方向: (ts > @ts) OR (ts = @ts AND id > @id)
+                // DESC 方向: (ts < @ts) OR (ts = @ts AND id < @id)
+                var op = direction == KeysetDirection.Forward ? ">" : "<";
+                cursorClause = whereClause.Length > 0
+                    ? $" AND (timestamp {op} @cursorTs OR (timestamp = @cursorTs AND id {op} @cursorId))"
+                    : $"WHERE (timestamp {op} @cursorTs OR (timestamp = @cursorTs AND id {op} @cursorId))";
+            }
+
+            var orderBy = direction == KeysetDirection.Forward
+                ? "ORDER BY timestamp ASC, id ASC"
+                : "ORDER BY timestamp DESC, id DESC";
+
+            // 末尾ページ（Backward + cursor 無し + isAnchoredAtEdge）の場合、
+            // 「最終ページの行数」は totalCount % pageSize（剰余ぴったり、または剰余 0 のとき pageSize）になる。
+            // それ以外は通常通り pageSize 行を要求する。
+            var requestedPageSize = pageSize;
+            if (direction == KeysetDirection.Backward && cursor == null && isAnchoredAtEdge && totalCount > 0)
+            {
+                var remainder = totalCount % pageSize;
+                requestedPageSize = remainder > 0 ? remainder : pageSize;
+            }
 
             using var command = connection.CreateCommand();
             command.CommandText = $@"SELECT id, timestamp, operator_idm, operator_name, target_table,
        target_id, action, before_data, after_data
 FROM operation_log
-{whereClause}
-ORDER BY timestamp ASC, id ASC
-LIMIT @pageSize OFFSET @offset";
+{whereClause}{cursorClause}
+{orderBy}
+LIMIT @limit";
 
             foreach (var param in parameters)
             {
                 command.Parameters.AddWithValue(param.Key, param.Value);
             }
-            command.Parameters.AddWithValue("@pageSize", pageSize);
-            command.Parameters.AddWithValue("@offset", offset);
-
-            using var reader = await command.ExecuteReaderAsync();
-            while (await reader.ReadAsync())
+            if (cursor != null)
             {
-                logs.Add(MapToOperationLog(reader));
+                command.Parameters.AddWithValue("@cursorTs", cursor.Timestamp.ToString("yyyy-MM-dd HH:mm:ss"));
+                command.Parameters.AddWithValue("@cursorId", cursor.Id);
+            }
+            command.Parameters.AddWithValue("@limit", requestedPageSize + 1);
+
+            var raw = new List<OperationLog>(requestedPageSize + 1);
+            using (var reader = await command.ExecuteReaderAsync().ConfigureAwait(false))
+            {
+                while (await reader.ReadAsync().ConfigureAwait(false))
+                {
+                    raw.Add(MapToOperationLog(reader));
+                }
             }
 
-            return new OperationLogSearchResult
+            var hasExtra = raw.Count > requestedPageSize;
+            if (hasExtra) raw.RemoveAt(raw.Count - 1);
+
+            // DESC 方向は ASC 表示順に戻す
+            if (direction == KeysetDirection.Backward)
             {
-                Items = logs,
+                raw.Reverse();
+            }
+
+            // hasExtra の意味付け:
+            //   Forward + 非エッジ起点 (Next)    → 「さらに次が存在」= HasNext
+            //   Forward + エッジ起点 (First)     → 「次ページが存在」= HasNext
+            //   Backward + 非エッジ起点 (Prev)   → 「さらに前が存在」= HasPrevious
+            //   Backward + エッジ起点 (Last)     → 「前ページが存在」= HasPrevious
+            bool hasNext;
+            bool hasPrevious;
+            if (direction == KeysetDirection.Forward)
+            {
+                hasNext = hasExtra;
+                hasPrevious = !isAnchoredAtEdge;  // First の場合は false、Next の場合は true（カーソル元のページが必ず存在）
+            }
+            else
+            {
+                hasPrevious = hasExtra;
+                hasNext = !isAnchoredAtEdge;       // Last の場合は false、Prev の場合は true
+            }
+
+            OperationLogCursor firstCursor = null;
+            OperationLogCursor lastCursor = null;
+            if (raw.Count > 0)
+            {
+                var first = raw[0];
+                var last = raw[raw.Count - 1];
+                firstCursor = new OperationLogCursor(first.Timestamp, first.Id);
+                lastCursor = new OperationLogCursor(last.Timestamp, last.Id);
+            }
+
+            return new OperationLogKeysetPage
+            {
+                Items = raw,
                 TotalCount = totalCount,
-                CurrentPage = page,
-                PageSize = pageSize
+                FirstCursor = firstCursor,
+                LastCursor = lastCursor,
+                HasPrevious = hasPrevious,
+                HasNext = hasNext
             };
         }
 

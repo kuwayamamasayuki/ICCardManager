@@ -88,8 +88,8 @@ namespace ICCardManager.Services
                 // パスを正規化
                 backupPath = PathValidator.NormalizePath(backupPath) ?? PathValidator.GetDefaultBackupPath();
 
-                // バックアップフォルダを作成（全ユーザーがアクセスできるように権限を設定）
-                EnsureDirectoryWithPermissions(backupPath);
+                // バックアップフォルダを作成（権限はインストーラーが設定済み、Issue #1455 / #1499）
+                EnsureDirectoryExists(backupPath);
 
                 // バックアップファイル名を生成
                 var timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
@@ -156,7 +156,7 @@ namespace ICCardManager.Services
                         return false;
                     }
 
-                    EnsureDirectoryWithPermissions(directory);
+                    EnsureDirectoryExists(directory);
                 }
 
                 // SQLite Backup APIでバックアップ（他PCが書き込み中でも安全）
@@ -559,16 +559,19 @@ namespace ICCardManager.Services
         }
 
         /// <summary>
-        /// バックアップディレクトリを作成する
+        /// バックアップディレクトリが存在することを保証する（なければ作成する）。
         /// </summary>
         /// <remarks>
-        /// Issue #1455: ランタイムで <c>BUILTIN\Users : FullControl</c> を付与する処理を撤廃した。
-        /// インストーラーが <c>{commonappdata}\ICCardManager\backup</c> に
-        /// <c>Permissions: users-full</c> を設定済みのため、ランタイムでの再付与は不要。
-        /// 詳細は <see cref="ICCardManager.Data.DbContext.EnsureDirectoryWithPermissions"/> 参照。
+        /// Issue #1455 / #1499:
+        /// 旧名は <c>EnsureDirectoryWithPermissions</c>。Issue #1455 でランタイム ACL 設定を撤廃した結果、
+        /// 実体が <c>Directory.CreateDirectory</c> の薄いラッパーとなったため、Issue #1499 で
+        /// 命名と挙動の乖離を解消するためにリネームした。インストーラーが
+        /// <c>{commonappdata}\ICCardManager\backup</c> に <c>Permissions: users-full</c> を
+        /// 設定済みのため、ランタイムでの権限再付与は不要。
+        /// 詳細は <see cref="ICCardManager.Data.DbContext.EnsureDirectoryExists"/> 参照。
         /// </remarks>
         /// <param name="directoryPath">ディレクトリパス</param>
-        private static void EnsureDirectoryWithPermissions(string directoryPath)
+        private static void EnsureDirectoryExists(string directoryPath)
         {
             // Directory.CreateDirectoryは既存ディレクトリに対しても安全（冪等）
             Directory.CreateDirectory(directoryPath);

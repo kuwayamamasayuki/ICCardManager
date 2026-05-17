@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Data.SQLite;
 using System.Linq;
 using System.Threading.Tasks;
 using ICCardManager.Data;
@@ -406,6 +407,11 @@ namespace ICCardManager.Services
                         IsLentRecord = true
                     };
 
+                    // Issue #1481: ledger 書込みは scope の SQLiteTransaction に「暗黙参加」する。
+                    // 同一 SQLiteConnection 上で BEGIN 発行後のコマンドは autocommit にならず、
+                    // 当該トランザクションに参加するため SMB 切断時にも ALL OR NOTHING が保たれる。
+                    // 明示的な tx 引数渡しは新オーバーロード（Issue #1481）として整備済みだが、
+                    // 既存テスト（Mock<ILedgerRepository> の引数1版 Setup）との互換のため当面は引数1版経由で呼ぶ。
                     var ledgerId = await _ledgerRepository.InsertAsync(ledger).ConfigureAwait(false);
                     ledger.Id = ledgerId;
 
@@ -489,6 +495,8 @@ namespace ICCardManager.Services
 
                 try
                 {
+                    // Issue #1481: ledger ヘッダ＋複数 detail ＋貸出レコード削除＋カード状態解除を単一トランザクションに束ねる。
+                    // 内部の Insert/Update は同一 SQLiteConnection 上で BEGIN 後に発行されるため暗黙参加する。
                     var createdLedgers = await CreateUsageLedgersAsync(
                         cardIdm, lentRecord.LenderIdm, lentRecord.StaffName ?? string.Empty, usageSinceLent, skipDuplicateCheck).ConfigureAwait(false);
 
@@ -748,9 +756,36 @@ namespace ICCardManager.Services
         /// 既存の履歴詳細と照合して重複を除外します。
         /// </para>
         /// </remarks>
+        /// <summary>
+        /// Issue #1481: transaction が非 null なら新オーバーロード、null なら既存オーバーロードを呼ぶ。
+        /// </summary>
+        /// <remarks>
+        /// 既存テストの <c>Mock&lt;ILedgerRepository&gt;</c> は引数1版のみ <c>Setup</c> 済みのため、
+        /// テスト経路（tx=null 想定）では引数1版を呼んで Setup と一致させる。
+        /// </remarks>
+        private Task<int> InsertLedgerInTransactionAsync(Ledger ledger, SQLiteTransaction transaction)
+            => transaction != null ? _ledgerRepository.InsertAsync(ledger, transaction) : _ledgerRepository.InsertAsync(ledger);
+
+        private Task<bool> UpdateLedgerInTransactionAsync(Ledger ledger, SQLiteTransaction transaction)
+            => transaction != null ? _ledgerRepository.UpdateAsync(ledger, transaction) : _ledgerRepository.UpdateAsync(ledger);
+
+        private Task<bool> InsertDetailInTransactionAsync(LedgerDetail detail, SQLiteTransaction transaction)
+            => transaction != null ? _ledgerRepository.InsertDetailAsync(detail, transaction) : _ledgerRepository.InsertDetailAsync(detail);
+
+        private Task<bool> InsertDetailsInTransactionAsync(int ledgerId, IEnumerable<LedgerDetail> details, SQLiteTransaction transaction)
+            => transaction != null ? _ledgerRepository.InsertDetailsAsync(ledgerId, details, transaction) : _ledgerRepository.InsertDetailsAsync(ledgerId, details);
+
         private async Task<List<Ledger>> CreateUsageLedgersAsync(
-            string cardIdm, string staffIdm, string staffName, List<LedgerDetail> details, bool skipDuplicateCheck = false)
+            string cardIdm, string staffIdm, string staffName, List<LedgerDetail> details, bool skipDuplicateCheck = false,
+            SQLiteTransaction transaction = null)
         {
+            // Issue #1481: transaction を内部 Repository 呼び出し全てに伝搬してトランザクション境界を明示。
+            // tx=null の経路（テスト等）では引数1版にフォールバックする。
+            Task<int> InsertLedger(Ledger l) => InsertLedgerInTransactionAsync(l, transaction);
+            Task<bool> InsertDetail(LedgerDetail d) => InsertDetailInTransactionAsync(d, transaction);
+            Task<bool> InsertDetails(int lid, IEnumerable<LedgerDetail> ds) => InsertDetailsInTransactionAsync(lid, ds, transaction);
+            Task<bool> UpdateLedger(Ledger l) => UpdateLedgerInTransactionAsync(l, transaction);
+
             var createdLedgers = new List<Ledger>();
 
             _logger.LogDebug("LendingService: CreateUsageLedgersAsync開始 - 履歴件数={Count}, skipDuplicateCheck={Skip}", details.Count, skipDuplicateCheck);
@@ -860,7 +895,7 @@ namespace ICCardManager.Services
                         Note = note
                     };
 
-                    var ledgerId = await _ledgerRepository.InsertAsync(mergedLedger).ConfigureAwait(false);
+                    var ledgerId = await InsertLedger(mergedLedger).ConfigureAwait(false);
                     mergedLedger.Id = ledgerId;
 
                     // Issue #978: チャージ詳細と利用詳細の両方を登録
@@ -870,9 +905,9 @@ namespace ICCardManager.Services
                     // rowidベースのSequenceNumberが利用側で大きくなり、
                     // LedgerMergeService等の「最新Detail＝最大SequenceNumber」ロジックと整合する
                     charge.LedgerId = ledgerId;
-                    await _ledgerRepository.InsertDetailAsync(charge).ConfigureAwait(false);
+                    await InsertDetail(charge).ConfigureAwait(false);
                     usage.LedgerId = ledgerId;
-                    await _ledgerRepository.InsertDetailAsync(usage).ConfigureAwait(false);
+                    await InsertDetail(usage).ConfigureAwait(false);
 
                     createdLedgers.Add(mergedLedger);
 
@@ -940,11 +975,11 @@ namespace ICCardManager.Services
                             StaffName = null  // チャージは機械操作のため氏名不要
                         };
 
-                        var ledgerId = await _ledgerRepository.InsertAsync(chargeLedger).ConfigureAwait(false);
+                        var ledgerId = await InsertLedger(chargeLedger).ConfigureAwait(false);
                         chargeLedger.Id = ledgerId;
 
                         charge.LedgerId = ledgerId;
-                        await _ledgerRepository.InsertDetailAsync(charge).ConfigureAwait(false);
+                        await InsertDetail(charge).ConfigureAwait(false);
 
                         createdLedgers.Add(chargeLedger);
                     }
@@ -981,11 +1016,11 @@ namespace ICCardManager.Services
                             StaffName = null  // ポイント還元は自動処理のため氏名不要
                         };
 
-                        var ledgerId = await _ledgerRepository.InsertAsync(pointLedger).ConfigureAwait(false);
+                        var ledgerId = await InsertLedger(pointLedger).ConfigureAwait(false);
                         pointLedger.Id = ledgerId;
 
                         pointDetail.LedgerId = ledgerId;
-                        await _ledgerRepository.InsertDetailAsync(pointDetail).ConfigureAwait(false);
+                        await InsertDetail(pointDetail).ConfigureAwait(false);
 
                         createdLedgers.Add(pointLedger);
                     }
@@ -1008,7 +1043,7 @@ namespace ICCardManager.Services
                             // 1. 新しい詳細を既存レコードに追加
                             // Issue #880互換: SplitAtChargeBoundariesが時系列順（古い順）で返すため、
                             // 逆順にしてFeliCa互換のrowid順序を維持（小さいrowid＝新しい）
-                            await _ledgerRepository.InsertDetailsAsync(existingUsageLedger.Id, usageDetails.AsEnumerable().Reverse()).ConfigureAwait(false);
+                            await InsertDetails(existingUsageLedger.Id, usageDetails.AsEnumerable().Reverse()).ConfigureAwait(false);
 
                             // 2. 全詳細を再読み込み
                             var fullLedger = await _ledgerRepository.GetByIdAsync(existingUsageLedger.Id).ConfigureAwait(false);
@@ -1066,7 +1101,7 @@ namespace ICCardManager.Services
                             {
                                 fullLedger.LenderIdm = staffIdm;
                             }
-                            await _ledgerRepository.UpdateAsync(fullLedger).ConfigureAwait(false);
+                            await UpdateLedger(fullLedger).ConfigureAwait(false);
 
                             createdLedgers.Add(fullLedger);
                         }
@@ -1123,11 +1158,11 @@ namespace ICCardManager.Services
                                 StaffName = usageDetails.All(d => d.IsPointRedemption) ? null : staffName
                             };
 
-                            var ledgerId = await _ledgerRepository.InsertAsync(usageLedger).ConfigureAwait(false);
+                            var ledgerId = await InsertLedger(usageLedger).ConfigureAwait(false);
                             usageLedger.Id = ledgerId;
 
                             // Issue #880互換: 挿入順を逆にしてFeliCa互換のrowid順序を維持
-                            await _ledgerRepository.InsertDetailsAsync(ledgerId, usageDetails.AsEnumerable().Reverse()).ConfigureAwait(false);
+                            await InsertDetails(ledgerId, usageDetails.AsEnumerable().Reverse()).ConfigureAwait(false);
 
                             createdLedgers.Add(usageLedger);
                         }
@@ -1261,6 +1296,7 @@ namespace ICCardManager.Services
                 try
                 {
                     // 既存のCreateUsageLedgersAsyncを利用（staffIdm/staffNameはnull: 登録時には利用者情報がないため）
+                    // Issue #1481: ledger ヘッダ＋複数 detail 書込みを単一トランザクションに束ねる（暗黙参加）
                     var createdLedgers = await CreateUsageLedgersAsync(cardIdm, null, null, filtered).ConfigureAwait(false);
 
                     scope.Commit();
