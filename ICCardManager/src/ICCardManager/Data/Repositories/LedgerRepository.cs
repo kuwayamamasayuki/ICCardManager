@@ -166,66 +166,112 @@ ORDER BY lent_at DESC";
         }
 
         /// <inheritdoc/>
-        public async Task<int> InsertAsync(Ledger ledger)
-        {
-            using var lease = await _dbContext.LeaseConnectionAsync();
-            var connection = lease.Connection;
+        public Task<int> InsertAsync(Ledger ledger) => InsertAsync(ledger, transaction: null);
 
-            using var command = connection.CreateCommand();
-            command.CommandText = @"INSERT INTO ledger (card_idm, lender_idm, date, summary, income, expense, balance,
+        /// <inheritdoc/>
+        public async Task<int> InsertAsync(Ledger ledger, SQLiteTransaction transaction)
+        {
+            ConnectionLease lease = null;
+            SQLiteConnection connection;
+            if (transaction != null)
+            {
+                connection = transaction.Connection;
+            }
+            else
+            {
+                lease = await _dbContext.LeaseConnectionAsync();
+                connection = lease.Connection;
+            }
+
+            try
+            {
+                using var command = connection.CreateCommand();
+                if (transaction != null)
+                {
+                    command.Transaction = transaction;
+                }
+                command.CommandText = @"INSERT INTO ledger (card_idm, lender_idm, date, summary, income, expense, balance,
                    staff_name, note, returner_idm, lent_at, returned_at, is_lent_record)
 VALUES (@cardIdm, @lenderIdm, @date, @summary, @income, @expense, @balance,
        @staffName, @note, @returnerIdm, @lentAt, @returnedAt, @isLentRecord);
 SELECT last_insert_rowid();";
 
-            command.Parameters.AddWithValue("@cardIdm", ledger.CardIdm);
-            command.Parameters.AddWithValue("@lenderIdm", (object)ledger.LenderIdm ?? DBNull.Value);
-            command.Parameters.AddWithValue("@date", ledger.Date.ToString("yyyy-MM-dd HH:mm:ss"));
-            command.Parameters.AddWithValue("@summary", ledger.Summary);
-            command.Parameters.AddWithValue("@income", ledger.Income);
-            command.Parameters.AddWithValue("@expense", ledger.Expense);
-            command.Parameters.AddWithValue("@balance", ledger.Balance);
-            command.Parameters.AddWithValue("@staffName", (object)ledger.StaffName ?? DBNull.Value);
-            command.Parameters.AddWithValue("@note", (object)ledger.Note ?? DBNull.Value);
-            command.Parameters.AddWithValue("@returnerIdm", (object)ledger.ReturnerIdm ?? DBNull.Value);
-            command.Parameters.AddWithValue("@lentAt", ledger.LentAt.HasValue ? ledger.LentAt.Value.ToString("yyyy-MM-dd HH:mm:ss") : DBNull.Value);
-            command.Parameters.AddWithValue("@returnedAt", ledger.ReturnedAt.HasValue ? ledger.ReturnedAt.Value.ToString("yyyy-MM-dd HH:mm:ss") : DBNull.Value);
-            command.Parameters.AddWithValue("@isLentRecord", ledger.IsLentRecord ? 1 : 0);
+                command.Parameters.AddWithValue("@cardIdm", ledger.CardIdm);
+                command.Parameters.AddWithValue("@lenderIdm", (object)ledger.LenderIdm ?? DBNull.Value);
+                command.Parameters.AddWithValue("@date", ledger.Date.ToString("yyyy-MM-dd HH:mm:ss"));
+                command.Parameters.AddWithValue("@summary", ledger.Summary);
+                command.Parameters.AddWithValue("@income", ledger.Income);
+                command.Parameters.AddWithValue("@expense", ledger.Expense);
+                command.Parameters.AddWithValue("@balance", ledger.Balance);
+                command.Parameters.AddWithValue("@staffName", (object)ledger.StaffName ?? DBNull.Value);
+                command.Parameters.AddWithValue("@note", (object)ledger.Note ?? DBNull.Value);
+                command.Parameters.AddWithValue("@returnerIdm", (object)ledger.ReturnerIdm ?? DBNull.Value);
+                command.Parameters.AddWithValue("@lentAt", ledger.LentAt.HasValue ? ledger.LentAt.Value.ToString("yyyy-MM-dd HH:mm:ss") : DBNull.Value);
+                command.Parameters.AddWithValue("@returnedAt", ledger.ReturnedAt.HasValue ? ledger.ReturnedAt.Value.ToString("yyyy-MM-dd HH:mm:ss") : DBNull.Value);
+                command.Parameters.AddWithValue("@isLentRecord", ledger.IsLentRecord ? 1 : 0);
 
-            var result = await command.ExecuteScalarAsync();
-            return Convert.ToInt32(result);
+                var result = await command.ExecuteScalarAsync();
+                return Convert.ToInt32(result);
+            }
+            finally
+            {
+                lease?.Dispose();
+            }
         }
 
         /// <inheritdoc/>
-        public async Task<bool> UpdateAsync(Ledger ledger)
-        {
-            using var lease = await _dbContext.LeaseConnectionAsync();
-            var connection = lease.Connection;
+        public Task<bool> UpdateAsync(Ledger ledger) => UpdateAsync(ledger, transaction: null);
 
-            using var command = connection.CreateCommand();
-            command.CommandText = @"UPDATE ledger
+        /// <inheritdoc/>
+        public async Task<bool> UpdateAsync(Ledger ledger, SQLiteTransaction transaction)
+        {
+            ConnectionLease lease = null;
+            SQLiteConnection connection;
+            if (transaction != null)
+            {
+                connection = transaction.Connection;
+            }
+            else
+            {
+                lease = await _dbContext.LeaseConnectionAsync();
+                connection = lease.Connection;
+            }
+
+            try
+            {
+                using var command = connection.CreateCommand();
+                if (transaction != null)
+                {
+                    command.Transaction = transaction;
+                }
+                command.CommandText = @"UPDATE ledger
 SET lender_idm = @lenderIdm, date = @date, summary = @summary,
     income = @income, expense = @expense, balance = @balance,
     staff_name = @staffName, note = @note, returner_idm = @returnerIdm,
     lent_at = @lentAt, returned_at = @returnedAt, is_lent_record = @isLentRecord
 WHERE id = @id";
 
-            command.Parameters.AddWithValue("@id", ledger.Id);
-            command.Parameters.AddWithValue("@lenderIdm", (object)ledger.LenderIdm ?? DBNull.Value);
-            command.Parameters.AddWithValue("@date", ledger.Date.ToString("yyyy-MM-dd HH:mm:ss"));
-            command.Parameters.AddWithValue("@summary", ledger.Summary);
-            command.Parameters.AddWithValue("@income", ledger.Income);
-            command.Parameters.AddWithValue("@expense", ledger.Expense);
-            command.Parameters.AddWithValue("@balance", ledger.Balance);
-            command.Parameters.AddWithValue("@staffName", (object)ledger.StaffName ?? DBNull.Value);
-            command.Parameters.AddWithValue("@note", (object)ledger.Note ?? DBNull.Value);
-            command.Parameters.AddWithValue("@returnerIdm", (object)ledger.ReturnerIdm ?? DBNull.Value);
-            command.Parameters.AddWithValue("@lentAt", ledger.LentAt.HasValue ? ledger.LentAt.Value.ToString("yyyy-MM-dd HH:mm:ss") : DBNull.Value);
-            command.Parameters.AddWithValue("@returnedAt", ledger.ReturnedAt.HasValue ? ledger.ReturnedAt.Value.ToString("yyyy-MM-dd HH:mm:ss") : DBNull.Value);
-            command.Parameters.AddWithValue("@isLentRecord", ledger.IsLentRecord ? 1 : 0);
+                command.Parameters.AddWithValue("@id", ledger.Id);
+                command.Parameters.AddWithValue("@lenderIdm", (object)ledger.LenderIdm ?? DBNull.Value);
+                command.Parameters.AddWithValue("@date", ledger.Date.ToString("yyyy-MM-dd HH:mm:ss"));
+                command.Parameters.AddWithValue("@summary", ledger.Summary);
+                command.Parameters.AddWithValue("@income", ledger.Income);
+                command.Parameters.AddWithValue("@expense", ledger.Expense);
+                command.Parameters.AddWithValue("@balance", ledger.Balance);
+                command.Parameters.AddWithValue("@staffName", (object)ledger.StaffName ?? DBNull.Value);
+                command.Parameters.AddWithValue("@note", (object)ledger.Note ?? DBNull.Value);
+                command.Parameters.AddWithValue("@returnerIdm", (object)ledger.ReturnerIdm ?? DBNull.Value);
+                command.Parameters.AddWithValue("@lentAt", ledger.LentAt.HasValue ? ledger.LentAt.Value.ToString("yyyy-MM-dd HH:mm:ss") : DBNull.Value);
+                command.Parameters.AddWithValue("@returnedAt", ledger.ReturnedAt.HasValue ? ledger.ReturnedAt.Value.ToString("yyyy-MM-dd HH:mm:ss") : DBNull.Value);
+                command.Parameters.AddWithValue("@isLentRecord", ledger.IsLentRecord ? 1 : 0);
 
-            var result = await command.ExecuteNonQueryAsync();
-            return result > 0;
+                var result = await command.ExecuteNonQueryAsync();
+                return result > 0;
+            }
+            finally
+            {
+                lease?.Dispose();
+            }
         }
 
         /// <inheritdoc/>
@@ -271,40 +317,67 @@ WHERE ledger_id IN (SELECT id FROM ledger WHERE card_idm = @cardIdm AND is_lent_
         }
 
         /// <inheritdoc/>
-        public async Task<bool> InsertDetailAsync(LedgerDetail detail)
-        {
-            using var lease = await _dbContext.LeaseConnectionAsync();
-            var connection = lease.Connection;
+        public Task<bool> InsertDetailAsync(LedgerDetail detail) => InsertDetailAsync(detail, transaction: null);
 
-            using var command = connection.CreateCommand();
-            command.CommandText = @"INSERT INTO ledger_detail (ledger_id, use_date, entry_station, exit_station,
+        /// <inheritdoc/>
+        public async Task<bool> InsertDetailAsync(LedgerDetail detail, SQLiteTransaction transaction)
+        {
+            ConnectionLease lease = null;
+            SQLiteConnection connection;
+            if (transaction != null)
+            {
+                connection = transaction.Connection;
+            }
+            else
+            {
+                lease = await _dbContext.LeaseConnectionAsync();
+                connection = lease.Connection;
+            }
+
+            try
+            {
+                using var command = connection.CreateCommand();
+                if (transaction != null)
+                {
+                    command.Transaction = transaction;
+                }
+                command.CommandText = @"INSERT INTO ledger_detail (ledger_id, use_date, entry_station, exit_station,
                            bus_stops, amount, balance, is_charge, is_point_redemption, is_bus, group_id)
 VALUES (@ledgerId, @useDate, @entryStation, @exitStation,
        @busStops, @amount, @balance, @isCharge, @isPointRedemption, @isBus, @groupId)";
 
-            command.Parameters.AddWithValue("@ledgerId", detail.LedgerId);
-            command.Parameters.AddWithValue("@useDate", detail.UseDate.HasValue ? detail.UseDate.Value.ToString("yyyy-MM-dd HH:mm:ss") : DBNull.Value);
-            command.Parameters.AddWithValue("@entryStation", (object)detail.EntryStation ?? DBNull.Value);
-            command.Parameters.AddWithValue("@exitStation", (object)detail.ExitStation ?? DBNull.Value);
-            command.Parameters.AddWithValue("@busStops", (object)detail.BusStops ?? DBNull.Value);
-            command.Parameters.AddWithValue("@amount", detail.Amount.HasValue ? detail.Amount.Value : DBNull.Value);
-            command.Parameters.AddWithValue("@balance", detail.Balance.HasValue ? detail.Balance.Value : DBNull.Value);
-            command.Parameters.AddWithValue("@isCharge", detail.IsCharge ? 1 : 0);
-            command.Parameters.AddWithValue("@isPointRedemption", detail.IsPointRedemption ? 1 : 0);
-            command.Parameters.AddWithValue("@isBus", detail.IsBus ? 1 : 0);
-            command.Parameters.AddWithValue("@groupId", detail.GroupId.HasValue ? detail.GroupId.Value : DBNull.Value);
+                command.Parameters.AddWithValue("@ledgerId", detail.LedgerId);
+                command.Parameters.AddWithValue("@useDate", detail.UseDate.HasValue ? detail.UseDate.Value.ToString("yyyy-MM-dd HH:mm:ss") : DBNull.Value);
+                command.Parameters.AddWithValue("@entryStation", (object)detail.EntryStation ?? DBNull.Value);
+                command.Parameters.AddWithValue("@exitStation", (object)detail.ExitStation ?? DBNull.Value);
+                command.Parameters.AddWithValue("@busStops", (object)detail.BusStops ?? DBNull.Value);
+                command.Parameters.AddWithValue("@amount", detail.Amount.HasValue ? detail.Amount.Value : DBNull.Value);
+                command.Parameters.AddWithValue("@balance", detail.Balance.HasValue ? detail.Balance.Value : DBNull.Value);
+                command.Parameters.AddWithValue("@isCharge", detail.IsCharge ? 1 : 0);
+                command.Parameters.AddWithValue("@isPointRedemption", detail.IsPointRedemption ? 1 : 0);
+                command.Parameters.AddWithValue("@isBus", detail.IsBus ? 1 : 0);
+                command.Parameters.AddWithValue("@groupId", detail.GroupId.HasValue ? detail.GroupId.Value : DBNull.Value);
 
-            var result = await command.ExecuteNonQueryAsync();
-            return result > 0;
+                var result = await command.ExecuteNonQueryAsync();
+                return result > 0;
+            }
+            finally
+            {
+                lease?.Dispose();
+            }
         }
 
         /// <inheritdoc/>
-        public async Task<bool> InsertDetailsAsync(int ledgerId, IEnumerable<LedgerDetail> details)
+        public Task<bool> InsertDetailsAsync(int ledgerId, IEnumerable<LedgerDetail> details)
+            => InsertDetailsAsync(ledgerId, details, transaction: null);
+
+        /// <inheritdoc/>
+        public async Task<bool> InsertDetailsAsync(int ledgerId, IEnumerable<LedgerDetail> details, SQLiteTransaction transaction)
         {
             foreach (var detail in details)
             {
                 detail.LedgerId = ledgerId;
-                if (!await InsertDetailAsync(detail))
+                if (!await InsertDetailAsync(detail, transaction))
                 {
                     return false;
                 }
