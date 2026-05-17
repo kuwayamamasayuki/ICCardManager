@@ -40,9 +40,11 @@ namespace ICCardManager.Services
             // 行の高さを30に設定
             worksheet.Row(row).Height = 30;
 
+            // Issue #1480: 行全体の Range を 1 回だけ取得して再利用（重複生成を削減）
+            var fullRange = worksheet.Range(row, 1, row, 12);
+
             // Issue #591: 既存ファイル上書き時に前回の太字書式が残る場合があるため、
             // データ行では太字を明示的にリセットする
-            var fullRange = worksheet.Range(row, 1, row, 12);
             fullRange.Style.Font.Bold = false;
 
             // Issue #858: 全列のフォントサイズを14ptに明示的に設定
@@ -73,17 +75,16 @@ namespace ICCardManager.Services
             worksheet.Cell(row, 8).Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
 
             // A列からL列まで罫線を適用
-            var range = worksheet.Range(row, 1, row, 12);
-            range.Style.Border.TopBorder = XLBorderStyleValues.Thin;
-            range.Style.Border.BottomBorder = XLBorderStyleValues.Thin;
-            range.Style.Border.InsideBorder = XLBorderStyleValues.Thin;
+            fullRange.Style.Border.TopBorder = XLBorderStyleValues.Thin;
+            fullRange.Style.Border.BottomBorder = XLBorderStyleValues.Thin;
+            fullRange.Style.Border.InsideBorder = XLBorderStyleValues.Thin;
 
             // 両端（A列左側、L列右側）は太線で表示
             worksheet.Cell(row, 1).Style.Border.LeftBorder = XLBorderStyleValues.Medium;
             worksheet.Cell(row, 12).Style.Border.RightBorder = XLBorderStyleValues.Medium;
 
             // 行全体を上下中央揃えに設定
-            range.Style.Alignment.Vertical = XLAlignmentVerticalValues.Center;
+            fullRange.Style.Alignment.Vertical = XLAlignmentVerticalValues.Center;
         }
 
         /// <summary>
@@ -101,6 +102,7 @@ namespace ICCardManager.Services
             // 行の高さを30に設定
             worksheet.Row(row).Height = 30;
 
+            // Issue #1480: 行全体の Range を 1 回だけ取得して再利用（重複生成を削減）
             // Issue #858: 全列のフォントサイズを14ptに明示的に設定
             // テンプレートの最初のシートを直接使う場合とAdd()で新規作成する場合で
             // デフォルトフォントサイズが異なるため、明示的に統一する
@@ -134,19 +136,18 @@ namespace ICCardManager.Services
             worksheet.Cell(row, 8).Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
 
             // A列からL列まで罫線を適用（内側は細線）
-            var range = worksheet.Range(row, 1, row, 12);
-            range.Style.Border.InsideBorder = XLBorderStyleValues.Thin;
+            fullRange.Style.Border.InsideBorder = XLBorderStyleValues.Thin;
 
             // 月計・累計行は上下を太線に
-            range.Style.Border.TopBorder = XLBorderStyleValues.Medium;
-            range.Style.Border.BottomBorder = XLBorderStyleValues.Medium;
+            fullRange.Style.Border.TopBorder = XLBorderStyleValues.Medium;
+            fullRange.Style.Border.BottomBorder = XLBorderStyleValues.Medium;
 
             // 両端（A列左側、L列右側）は太線で表示
             worksheet.Cell(row, 1).Style.Border.LeftBorder = XLBorderStyleValues.Medium;
             worksheet.Cell(row, 12).Style.Border.RightBorder = XLBorderStyleValues.Medium;
 
             // 行全体を上下中央揃えに設定
-            range.Style.Alignment.Vertical = XLAlignmentVerticalValues.Center;
+            fullRange.Style.Alignment.Vertical = XLAlignmentVerticalValues.Center;
         }
 
         /// <summary>
@@ -160,30 +161,61 @@ namespace ICCardManager.Services
         /// <param name="row">適用する行番号</param>
         internal static void ApplyEmptyRowBorder(IXLWorksheet worksheet, int row)
         {
-            // 行の高さを30に設定
-            worksheet.Row(row).Height = 30;
+            ApplyEmptyRowBordersToRange(worksheet, row, row);
+        }
+
+        /// <summary>
+        /// 連続する複数の空白行に罫線を一括適用します（性能最適化版）。
+        /// </summary>
+        /// <remarks>
+        /// <para>Issue #1480: 連続する空白行に対して per-row ループで個別 Range を生成する代わりに、
+        /// 1 つの複数行 Range に対してまとめて罫線を適用することで ClosedXML のスタイル操作回数を削減。</para>
+        /// <para>視覚的結果は <see cref="ApplyEmptyRowBorder"/> を <paramref name="firstRow"/> から
+        /// <paramref name="lastRow"/> までループ呼出した場合と同等。</para>
+        /// <para>セル結合（B-D 列、I-L 列）は複数行をまとめると 1 つの結合セルになってしまうため、
+        /// 行単位で個別に実行する。</para>
+        /// <para><paramref name="firstRow"/> &gt; <paramref name="lastRow"/> の場合は何もしない。</para>
+        /// </remarks>
+        /// <param name="worksheet">対象のワークシート</param>
+        /// <param name="firstRow">開始行番号（1 始まり、含む）</param>
+        /// <param name="lastRow">終了行番号（1 始まり、含む）</param>
+        internal static void ApplyEmptyRowBordersToRange(IXLWorksheet worksheet, int firstRow, int lastRow)
+        {
+            if (firstRow > lastRow)
+            {
+                return;
+            }
+
+            // 行の高さは行単位で設定する必要がある
+            for (int row = firstRow; row <= lastRow; row++)
+            {
+                worksheet.Row(row).Height = 30;
+            }
+
+            // 複数行範囲を 1 度だけ取得し、罫線・太字リセットを一括適用
+            var fullRange = worksheet.Range(firstRow, 1, lastRow, 12);
 
             // Issue #591: 既存ファイル上書き時に残った太字書式をリセット
-            var fullRange = worksheet.Range(row, 1, row, 12);
             fullRange.Style.Font.Bold = false;
 
-            // B列からD列を結合（摘要）
-            var summaryRange = worksheet.Range(row, 2, row, 4);
-            summaryRange.Merge();
-
-            // I列からL列を結合（備考）
-            var noteRange = worksheet.Range(row, 9, row, 12);
-            noteRange.Merge();
-
             // A列からL列まで罫線を適用
-            var range = worksheet.Range(row, 1, row, 12);
-            range.Style.Border.TopBorder = XLBorderStyleValues.Thin;
-            range.Style.Border.BottomBorder = XLBorderStyleValues.Thin;
-            range.Style.Border.InsideBorder = XLBorderStyleValues.Thin;
+            // 複数行範囲では TopBorder/BottomBorder は各セルにカスケード適用され、
+            // InsideBorder が内側（行間・列間）の境界に Thin を適用するため、
+            // 結果として per-row 適用と同等の見た目になる
+            fullRange.Style.Border.TopBorder = XLBorderStyleValues.Thin;
+            fullRange.Style.Border.BottomBorder = XLBorderStyleValues.Thin;
+            fullRange.Style.Border.InsideBorder = XLBorderStyleValues.Thin;
 
-            // 両端（A列左側、L列右側）は太線で表示
-            worksheet.Cell(row, 1).Style.Border.LeftBorder = XLBorderStyleValues.Medium;
-            worksheet.Cell(row, 12).Style.Border.RightBorder = XLBorderStyleValues.Medium;
+            // 両端（A列左側、L列右側）は太線で表示（範囲一括適用）
+            worksheet.Range(firstRow, 1, lastRow, 1).Style.Border.LeftBorder = XLBorderStyleValues.Medium;
+            worksheet.Range(firstRow, 12, lastRow, 12).Style.Border.RightBorder = XLBorderStyleValues.Medium;
+
+            // セル結合は行単位で実行（複数行をまとめると 1 つの結合セルになるため）
+            for (int row = firstRow; row <= lastRow; row++)
+            {
+                worksheet.Range(row, 2, row, 4).Merge();   // B-D 列（摘要）
+                worksheet.Range(row, 9, row, 12).Merge();  // I-L 列（備考）
+            }
         }
 
         /// <summary>
