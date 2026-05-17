@@ -260,10 +260,19 @@ public class DialogAutomationPropertiesCoverageTests
     /// 動的更新される TextBlock では AutomationProperties.Name を付けないこと。
     /// Name を付けると Text のフォールバック読み上げが上書きされ、内容変化が伝わらなくなる。
     /// </summary>
+    /// <remarks>
+    /// Issue #1501: OperationLogDialog 側の動的 TextBlock 4 要素（ページ情報・現在ページ番号・
+    /// 検索ステータスメッセージ・処理中メッセージ）を追加。PR #1500 の `CHANGELOG.md` および
+    /// `docs/design/03_画面設計書.md` で対象として明示されていたが回帰テストに反映されていなかった。
+    /// </remarks>
     [Theory]
     [InlineData("StaffAuthDialog.xaml", "OperationDescriptionText")]
     [InlineData("StaffAuthDialog.xaml", "StatusText")]
     [InlineData("StaffAuthDialog.xaml", "TimeoutText")]
+    [InlineData("OperationLogDialog.xaml", "PageInfoText")]
+    [InlineData("OperationLogDialog.xaml", "CurrentPageNumberText")]
+    [InlineData("OperationLogDialog.xaml", "StatusMessageText")]
+    [InlineData("OperationLogDialog.xaml", "ProcessingOverlayText")]
     public void Dynamic_text_blocks_should_not_have_AutomationProperties_Name(string xamlFileName, string elementName)
     {
         var xaml = ReadDialog(xamlFileName);
