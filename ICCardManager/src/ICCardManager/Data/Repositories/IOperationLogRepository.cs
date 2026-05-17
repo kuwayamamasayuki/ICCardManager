@@ -6,7 +6,7 @@ using ICCardManager.Models;
 
 namespace ICCardManager.Data.Repositories
 {
-/// <summary>
+    /// <summary>
     /// 操作ログ検索条件
     /// </summary>
     public class OperationLogSearchCriteria
@@ -31,30 +31,49 @@ namespace ICCardManager.Data.Repositories
     }
 
     /// <summary>
-    /// 操作ログ検索結果（ページネーション対応）
+    /// keyset pagination のカーソル位置（Issue #1479）。
     /// </summary>
-    public class OperationLogSearchResult
+    /// <remarks>
+    /// <see cref="OperationLog.Timestamp"/> と <see cref="OperationLog.Id"/> の複合キーで
+    /// 行を一意特定し、深いページでの OFFSET スキャンを回避する。
+    /// </remarks>
+    public sealed class OperationLogCursor
     {
-        /// <summary>検索結果のログ一覧</summary>
+        /// <summary>カーソル位置のタイムスタンプ</summary>
+        public DateTime Timestamp { get; }
+
+        /// <summary>カーソル位置の operation_log.id（タイブレーク用）</summary>
+        public int Id { get; }
+
+        public OperationLogCursor(DateTime timestamp, int id)
+        {
+            Timestamp = timestamp;
+            Id = id;
+        }
+    }
+
+    /// <summary>
+    /// keyset pagination のページ取得結果（Issue #1479）。
+    /// </summary>
+    public sealed class OperationLogKeysetPage
+    {
+        /// <summary>取得行（timestamp ASC, id ASC で正規化済み）</summary>
         public IReadOnlyList<OperationLog> Items { get; set; } = Array.Empty<OperationLog>();
 
-        /// <summary>総件数</summary>
+        /// <summary>検索条件にマッチする総件数（表示用）</summary>
         public int TotalCount { get; set; }
 
-        /// <summary>現在のページ（1始まり）</summary>
-        public int CurrentPage { get; set; }
+        /// <summary>取得行の先頭カーソル（前ページ取得時の起点）。空ページなら null。</summary>
+        public OperationLogCursor FirstCursor { get; set; }
 
-        /// <summary>1ページあたりの件数</summary>
-        public int PageSize { get; set; }
+        /// <summary>取得行の末尾カーソル（次ページ取得時の起点）。空ページなら null。</summary>
+        public OperationLogCursor LastCursor { get; set; }
 
-        /// <summary>総ページ数</summary>
-        public int TotalPages => PageSize > 0 ? (int)Math.Ceiling((double)TotalCount / PageSize) : 0;
+        /// <summary>前のページが存在するか</summary>
+        public bool HasPrevious { get; set; }
 
-        /// <summary>前のページがあるか</summary>
-        public bool HasPreviousPage => CurrentPage > 1;
-
-        /// <summary>次のページがあるか</summary>
-        public bool HasNextPage => CurrentPage < TotalPages;
+        /// <summary>次のページが存在するか</summary>
+        public bool HasNext { get; set; }
     }
 
     /// <summary>
@@ -88,12 +107,34 @@ namespace ICCardManager.Data.Repositories
         Task<IEnumerable<OperationLog>> GetByTargetAsync(string targetTable, string targetId);
 
         /// <summary>
-        /// 複合条件で操作ログを検索（ページネーション対応）
+        /// 検索結果の先頭ページを取得（keyset pagination, Issue #1479）
         /// </summary>
         /// <param name="criteria">検索条件</param>
-        /// <param name="page">ページ番号（1始まり）</param>
         /// <param name="pageSize">1ページあたりの件数</param>
-        Task<OperationLogSearchResult> SearchAsync(OperationLogSearchCriteria criteria, int page = 1, int pageSize = 50);
+        Task<OperationLogKeysetPage> SearchFirstPageAsync(OperationLogSearchCriteria criteria, int pageSize);
+
+        /// <summary>
+        /// 指定カーソル直後のページを取得（keyset pagination, Issue #1479）
+        /// </summary>
+        /// <param name="criteria">検索条件</param>
+        /// <param name="afterCursor">現在ページ末尾のカーソル</param>
+        /// <param name="pageSize">1ページあたりの件数</param>
+        Task<OperationLogKeysetPage> SearchNextPageAsync(OperationLogSearchCriteria criteria, OperationLogCursor afterCursor, int pageSize);
+
+        /// <summary>
+        /// 指定カーソル直前のページを取得（keyset pagination, Issue #1479）
+        /// </summary>
+        /// <param name="criteria">検索条件</param>
+        /// <param name="beforeCursor">現在ページ先頭のカーソル</param>
+        /// <param name="pageSize">1ページあたりの件数</param>
+        Task<OperationLogKeysetPage> SearchPreviousPageAsync(OperationLogSearchCriteria criteria, OperationLogCursor beforeCursor, int pageSize);
+
+        /// <summary>
+        /// 検索結果の最終ページを取得（keyset pagination, Issue #1479）
+        /// </summary>
+        /// <param name="criteria">検索条件</param>
+        /// <param name="pageSize">1ページあたりの件数</param>
+        Task<OperationLogKeysetPage> SearchLastPageAsync(OperationLogSearchCriteria criteria, int pageSize);
 
         /// <summary>
         /// 複合条件で全件取得（CSV出力用）
