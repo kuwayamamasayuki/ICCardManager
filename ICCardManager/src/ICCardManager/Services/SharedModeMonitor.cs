@@ -29,6 +29,14 @@ namespace ICCardManager.Services
         internal const int StaleThresholdSeconds = 15;
 
         /// <summary>
+        /// DB 接続ヘルスチェックの実行間隔（秒）。
+        /// 共有モードの最大キャッシュ TTL（<c>CacheOptions.CardListSeconds</c>=15）
+        /// および <see cref="StaleThresholdSeconds"/> と一致させ、
+        /// TTL を超えて stale データが滞留しないようにする（Issue #1493）。
+        /// </summary>
+        internal const int HealthCheckIntervalSeconds = 15;
+
+        /// <summary>
         /// DB接続チェック結果のイベント
         /// </summary>
         public event EventHandler<DatabaseHealthEventArgs> HealthCheckCompleted;
@@ -58,7 +66,7 @@ namespace ICCardManager.Services
             Stop();
 
             _healthCheckTimer = _timerFactory.Create();
-            _healthCheckTimer.Interval = TimeSpan.FromSeconds(30);
+            _healthCheckTimer.Interval = TimeSpan.FromSeconds(HealthCheckIntervalSeconds);
             _healthCheckTimer.Tick += OnHealthCheckTick;
             _healthCheckTimer.Start();
 
