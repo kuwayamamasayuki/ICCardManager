@@ -85,3 +85,97 @@ def compare(expected: Dict[str, int], actual: Dict[str, int]) -> Tuple[bool, str
         "  更新してください（Issue #1475 の同期手順を参照）。",
     ]
     return False, "\n".join(lines)
+
+
+def count_tests(csproj_path: str, prefix: str) -> int:
+    """dotnet test --list-tests を実行し、ICCardManager.<prefix>.* のテスト数を返す。
+
+    Raises:
+        RuntimeError: dotnet が非ゼロ終了したとき。
+    """
+    cmd = [
+        "dotnet", "test", csproj_path,
+        "--list-tests",
+        "--nologo",
+        "--verbosity", "quiet",
+        "--no-build",
+        "--configuration", "Release",
+    ]
+    proc = subprocess.run(
+        cmd, capture_output=True, text=True, encoding="utf-8"
+    )
+    if proc.returncode != 0:
+        raise RuntimeError(
+            f"dotnet test failed for {csproj_path} (exit {proc.returncode}):\n"
+            f"{proc.stderr}"
+        )
+    pattern = re.compile(rf"^\s+ICCardManager\.{re.escape(prefix)}\.")
+    return sum(1 for line in proc.stdout.splitlines() if pattern.match(line))
+
+
+def main(argv=None) -> int:
+    parser = argparse.ArgumentParser(
+        description="Verify §1.1a test counts in 07_テスト設計書.md against actual dotnet test counts."
+    )
+    parser.add_argument("--doc", required=True, help="Path to 07_テスト設計書.md")
+    parser.add_argument("--unit-csproj", required=True, help="Path to ICCardManager.Tests.csproj")
+    parser.add_argument("--ui-csproj", required=True, help="Path to ICCardManager.UITests.csproj")
+    args = parser.parse_args(argv)
+
+    expected = parse_doc_counts(args.doc)
+    if expected is None:
+        print(
+            "⚠ テスト件数表 §1.1a の形式が認識できません",
+            f"  ファイル: {args.doc}",
+            "  期待する形式は spec §4.1 を参照。表を破壊している場合は元に戻すか、",
+            "  本スクリプト (tools/check-test-count-sync.py) の正規表現を更新してください。",
+            sep="\n",
+            file=sys.stderr,
+        )
+        return 2
+
+    if expected["unit"] + expected["ui"] != expected["total"]:
+        print(
+            "❌ §1.1a の記載値の合計が単体+UI と一致しません",
+            f"  単体 {expected['unit']:,} + UI {expected['ui']:,} = {expected['unit']+expected['ui']:,}",
+            f"  記載合計: {expected['total']:,}",
+            "  §1.1a の表の足し算を修正してください。",
+            sep="\n",
+            file=sys.stderr,
+        )
+        return 1
+
+    try:
+        unit_actual = count_tests(args.unit_csproj, "Tests")
+        ui_actual = count_tests(args.ui_csproj, "UITests")
+    except RuntimeError as e:
+        print(f"⚠ {e}", file=sys.stderr)
+        return 2
+
+    if unit_actual == 0 or ui_actual == 0:
+        print(
+            "⚠ テスト件数が 0 件として検出されました",
+            f"  単体実測: {unit_actual}, UI 実測: {ui_actual}",
+            "  csproj パスまたは prefix の不一致が疑われます。ビルドが完了しているか、",
+            "  プロジェクト名 (ICCardManager.Tests / ICCardManager.UITests) が変わっていないか確認してください。",
+            sep="\n",
+            file=sys.stderr,
+        )
+        return 2
+
+    actual = {
+        "unit": unit_actual,
+        "ui": ui_actual,
+        "total": unit_actual + ui_actual,
+    }
+    ok, report = compare(expected, actual)
+    if ok:
+        print(report)
+        return 0
+    else:
+        print(report, file=sys.stderr)
+        return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())
