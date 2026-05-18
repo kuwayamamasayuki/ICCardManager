@@ -452,6 +452,34 @@ public class DialogAutomationPropertiesCoverageTests
             "Window.Closed 等で PropertyChanged を解除していること（メモリリーク防止）。");
     }
 
+    /// <summary>
+    /// Issue #1548/#1507: CurrentPageNumberText TextBlock は単一 Text バインドであること。
+    /// 以前は &lt;Run Text="{Binding CurrentPage}"/&gt; など 4 つの Run で構成されていたが、Run 構成では
+    /// Inlines 変更が親 TextBlock の Text プロパティ更新を伴わず TextBlockAutomationPeer の Name キャッシュが
+    /// invalidate されないため、コードビハインドの LiveRegionChanged 発火が Narrator に届かなかった。
+    /// 派生プロパティ PageNumberDisplay 経由の Text 単一バインドに回帰しないよう静的解析で固定する。
+    /// </summary>
+    [Fact]
+    public void OperationLogDialog_CurrentPageNumberTextは_単一Textバインドであること()
+    {
+        var xaml = ReadDialog("OperationLogDialog.xaml");
+
+        // CurrentPageNumberText に "Text=" 属性が含まれていること（単一バインド）
+        var hasTextBinding = Regex.IsMatch(xaml,
+            @"x:Name=""CurrentPageNumberText""[^/]*?Text=""\{Binding\s+PageNumberDisplay",
+            RegexOptions.Singleline);
+        hasTextBinding.Should().BeTrue(
+            "Issue #1548/#1507: CurrentPageNumberText は <Run> 構成ではなく Text=\"{Binding PageNumberDisplay}\" の単一バインドにすること。" +
+            "Run 構成では TextBlockAutomationPeer の Name キャッシュが invalidate されず LiveRegionChanged が Narrator に届かない。");
+
+        // CurrentPageNumberText の TextBlock 開始タグ直後に <Run が無いこと（XAML 全体の <Run は他要素にあるため、CurrentPageNumberText 限定で確認）
+        var hasRunChild = Regex.IsMatch(xaml,
+            @"x:Name=""CurrentPageNumberText""[^>]*>\s*<Run\s",
+            RegexOptions.Singleline);
+        hasRunChild.Should().BeFalse(
+            "Issue #1548/#1507: CurrentPageNumberText の子要素として <Run> を使わないこと。");
+    }
+
     private static string ResolveDialogsDirectory()
     {
         var current = new DirectoryInfo(AppContext.BaseDirectory);

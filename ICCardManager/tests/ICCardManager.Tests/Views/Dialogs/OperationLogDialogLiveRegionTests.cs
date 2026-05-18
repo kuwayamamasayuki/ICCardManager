@@ -5,7 +5,7 @@ using Xunit;
 namespace ICCardManager.Tests.Views.Dialogs;
 
 /// <summary>
-/// Issue #1548: <see cref="OperationLogDialog"/> の LiveRegion 発火対応のテスト。
+/// Issue #1548 / #1507: <see cref="OperationLogDialog"/> の LiveRegion 発火対応のテスト。
 /// プロパティ名 → 対象 TextBlock 名 のマッピング純粋関数を検証する。
 /// 実際の RaiseAutomationEvent 発火は WPF UI スレッドが必要なため、
 /// スクリーンリーダー実機読み上げ確認はユーザー手動で実施する（設計書 §5.4 参照）。
@@ -14,8 +14,9 @@ public class OperationLogDialogLiveRegionTests
 {
     [Theory]
     [InlineData("PageInfo", false, "PageInfoText")]
-    [InlineData("CurrentPage", false, "CurrentPageNumberText")]
-    [InlineData("TotalPages", false, "CurrentPageNumberText")]
+    // Issue #1548/#1507: CurrentPage / TotalPages 単体ではなく派生プロパティ PageNumberDisplay 経由で
+    // CurrentPageNumberText の読み上げを発火するように変更（Run 構成 → 単一 Text バインドへの移行に対応）。
+    [InlineData("PageNumberDisplay", false, "CurrentPageNumberText")]
     [InlineData("StatusMessage", false, "StatusMessageText")]
     [InlineData("BusyMessage", false, "ProcessingOverlayText")]
     public void GetTargetElementName_対象プロパティ変化時に_対応するTextBlock名を返すこと(
@@ -41,6 +42,10 @@ public class OperationLogDialogLiveRegionTests
     }
 
     [Theory]
+    // Issue #1548/#1507: CurrentPage / TotalPages 単体は派生プロパティ PageNumberDisplay 経由に集約されたため、
+    // 直接マッピングからは外れた（ViewModel 側の [NotifyPropertyChangedFor] が PageNumberDisplay の通知を伝搬する）。
+    [InlineData("CurrentPage")]
+    [InlineData("TotalPages")]
     [InlineData("UnknownProperty")]
     [InlineData("")]
     [InlineData(null)]

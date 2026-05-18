@@ -739,4 +739,78 @@ public class OperationLogSearchViewModelTests
     }
 
     #endregion
+
+    #region Issue #1548/#1507: PageNumberDisplay / PageInfo 依存通知
+
+    // 派生プロパティ PageNumberDisplay / PageInfo は CurrentPage / TotalPages / TotalCount / PageSize の
+    // setter から [NotifyPropertyChangedFor] により自動通知されることを検証する。
+    // この通知が無いと、OperationLogDialog の OnViewModelPropertyChanged ハンドラが LiveRegionChanged を
+    // 発火するチャンスを失い、スクリーンリーダー（Narrator/NVDA）でページ送り完了が読み上げられない。
+
+    [Fact]
+    public void CurrentPage変更で_PageInfoとPageNumberDisplayの両方の通知が発火すること()
+    {
+        var notified = new List<string?>();
+        _viewModel.PropertyChanged += (_, e) => notified.Add(e.PropertyName);
+
+        _viewModel.CurrentPage = 3;
+
+        notified.Should().Contain(nameof(OperationLogSearchViewModel.PageInfo));
+        notified.Should().Contain(nameof(OperationLogSearchViewModel.PageNumberDisplay));
+    }
+
+    [Fact]
+    public void TotalPages変更で_PageNumberDisplayの通知が発火すること()
+    {
+        var notified = new List<string?>();
+        _viewModel.PropertyChanged += (_, e) => notified.Add(e.PropertyName);
+
+        _viewModel.TotalPages = 5;
+
+        notified.Should().Contain(nameof(OperationLogSearchViewModel.PageNumberDisplay));
+    }
+
+    [Fact]
+    public void TotalCount変更で_PageInfoの通知が発火すること()
+    {
+        var notified = new List<string?>();
+        _viewModel.PropertyChanged += (_, e) => notified.Add(e.PropertyName);
+
+        _viewModel.TotalCount = 123;
+
+        notified.Should().Contain(nameof(OperationLogSearchViewModel.PageInfo));
+    }
+
+    [Fact]
+    public void PageSize変更で_PageInfoの通知が発火すること()
+    {
+        var notified = new List<string?>();
+        _viewModel.PropertyChanged += (_, e) => notified.Add(e.PropertyName);
+
+        _viewModel.PageSize = 100;
+
+        notified.Should().Contain(nameof(OperationLogSearchViewModel.PageInfo));
+    }
+
+    [Fact]
+    public void PageNumberDisplayは_CurrentPageとTotalPagesを連結した文字列であること()
+    {
+        _viewModel.CurrentPage = 2;
+        _viewModel.TotalPages = 7;
+
+        _viewModel.PageNumberDisplay.Should().Be("2 / 7 ページ");
+    }
+
+    [Fact]
+    public void PageNumberDisplayは_読み上げ用に末尾に_ページ_を含むこと()
+    {
+        // Issue #1548/#1507: Narrator が「N / M ページ」と読み上げるよう、末尾の "ページ" を派生プロパティに含める
+        // （元の XAML では <Run Text=" ページ"/> として静的 Run で含まれていた）。
+        _viewModel.CurrentPage = 1;
+        _viewModel.TotalPages = 1;
+
+        _viewModel.PageNumberDisplay.Should().EndWith(" ページ");
+    }
+
+    #endregion
 }

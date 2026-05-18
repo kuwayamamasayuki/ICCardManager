@@ -101,8 +101,11 @@ namespace ICCardManager.Views.Dialogs
             return propertyName switch
             {
                 nameof(OperationLogSearchViewModel.PageInfo) => "PageInfoText",
-                nameof(OperationLogSearchViewModel.CurrentPage) => "CurrentPageNumberText",
-                nameof(OperationLogSearchViewModel.TotalPages) => "CurrentPageNumberText",
+                // Issue #1548/#1507: CurrentPage / TotalPages 単体の通知で旧 Run 構成の CurrentPageNumberText に
+                // LiveRegion を発火しても Narrator に届かなかった。派生プロパティ PageNumberDisplay 経由（単一 Text バインド）に
+                // 移行し、ViewModel 側の [NotifyPropertyChangedFor] が CurrentPage/TotalPages 変化に応じて
+                // PageNumberDisplay の PropertyChanged を発火するため、このマッピングだけで読み上げをカバーできる。
+                nameof(OperationLogSearchViewModel.PageNumberDisplay) => "CurrentPageNumberText",
                 nameof(OperationLogSearchViewModel.StatusMessage) => "StatusMessageText",
                 nameof(OperationLogSearchViewModel.BusyMessage) => "ProcessingOverlayText",
                 // IsBusy=true への遷移時のみオーバーレイ出現の通知が必要。false への遷移（非表示）は不要。
