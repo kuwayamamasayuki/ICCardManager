@@ -28,6 +28,7 @@ public class FormulaInjectionSanitizerTests
     }
 
     [Theory]
+    // 危険文字で始まらない通常文字列
     [InlineData("hello")]
     [InlineData("123abc")]
     [InlineData("日本語")]
@@ -35,15 +36,10 @@ public class FormulaInjectionSanitizerTests
     [InlineData("1=2")]          // 途中に=があっても先頭ではない
     [InlineData("'=1+1")]        // 既にサニタイズ済み（'は危険文字ではない）
     [InlineData("\n=1+1")]       // LF は Excel の先頭スキップ対象外（ブラックリストに含めない）
-    public void IsDangerous_DoesNotStartWithDangerousChar_ReturnsFalse(string input)
-    {
-        FormulaInjectionSanitizer.IsDangerous(input).Should().BeFalse();
-    }
-
-    [Theory]
+    // null / 空文字列
     [InlineData(null)]
     [InlineData("")]
-    public void IsDangerous_NullOrEmpty_ReturnsFalse(string input)
+    public void IsDangerous_危険文字で始まらない入力はFalseを返すこと(string input)
     {
         FormulaInjectionSanitizer.IsDangerous(input).Should().BeFalse();
     }
