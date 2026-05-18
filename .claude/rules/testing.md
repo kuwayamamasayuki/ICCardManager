@@ -25,3 +25,4 @@
 ## テスト追加・修正時
 - テスト設計書（`docs/design/07_テスト設計書.md`）も同期更新すること
 - Stop hook（`.claude/hooks/check-doc-sync.sh`）がコード変更のあるセッション終了時に「ドキュメント更新が必要か」の自己確認プロンプトを注入する。テスト設計書の同期漏れもこの自問で検出されやすくなる。環境変数 `SKIP_DOC_SYNC_CHECK=1` でバイパス可
+- 件数表 §1.1a の同期は CI で自動検証される（`.github/workflows/test-count-sync-check.yml`、Issue #1546）。乖離があると PR がブロックされる。
