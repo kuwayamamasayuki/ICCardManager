@@ -1,0 +1,64 @@
+name: Test Count Sync Check
+
+on:
+  push:
+    branches: [ main, develop ]
+    paths:
+      - 'ICCardManager/tests/**/*.cs'
+      - 'ICCardManager/tests/**/*.csproj'
+      - 'ICCardManager/docs/design/07_テスト設計書.md'
+      - 'tools/check-test-count-sync.py'
+      - 'tools/tests/test_check_test_count_sync.py'
+      - '.github/workflows/test-count-sync-check.yml'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'ICCardManager/tests/**/*.cs'
+      - 'ICCardManager/tests/**/*.csproj'
+      - 'ICCardManager/docs/design/07_テスト設計書.md'
+      - 'tools/check-test-count-sync.py'
+      - 'tools/tests/test_check_test_count_sync.py'
+      - '.github/workflows/test-count-sync-check.yml'
+
+env:
+  DOTNET_VERSION: '8.0.x'
+  DOTNET_NOLOGO: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+
+jobs:
+  test-count-sync:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Run Python unit tests for the check script
+        shell: bash
+        run: python -m unittest discover -s tools/tests -t .
+
+      - name: Restore .NET dependencies
+        working-directory: ICCardManager
+        run: dotnet restore
+
+      - name: Build .NET solution (Release)
+        working-directory: ICCardManager
+        run: dotnet build --no-restore --configuration Release
+
+      - name: Verify test count sync (1.1a vs --list-tests)
+        shell: bash
+        run: |
+          python tools/check-test-count-sync.py \
+            --doc ICCardManager/docs/design/07_テスト設計書.md \
+            --unit-csproj ICCardManager/tests/ICCardManager.Tests/ICCardManager.Tests.csproj \
+            --ui-csproj ICCardManager/tests/ICCardManager.UITests/ICCardManager.UITests.csproj
