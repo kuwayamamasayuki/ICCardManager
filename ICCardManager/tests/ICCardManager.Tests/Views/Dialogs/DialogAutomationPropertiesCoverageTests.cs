@@ -419,6 +419,39 @@ public class DialogAutomationPropertiesCoverageTests
         return File.ReadAllText(path);
     }
 
+    /// <summary>
+    /// Issue #1548: OperationLogDialog のコードビハインドが LiveRegionChanged を明示発火していること。
+    /// AutomationProperties.LiveSetting="Polite" 単独ではスクリーンリーダーが沈黙するため、
+    /// UIElementAutomationPeer.RaiseAutomationEvent(AutomationEvents.LiveRegionChanged) の呼び出しが必須。
+    /// </summary>
+    [Fact]
+    public void OperationLogDialog_CodeBehindに_RaiseAutomationEventLiveRegionChangedが存在すること()
+    {
+        var code = ReadCodeBehind("OperationLogDialog.xaml.cs");
+
+        code.Should().Contain("RaiseAutomationEvent",
+            "AutomationProperties.LiveSetting='Polite' 単独では発火しないため、" +
+            "明示的な RaiseAutomationEvent 呼び出しが必須（Issue #1509 で StaffAuthDialog に確立されたパターン）。");
+        code.Should().Contain("AutomationEvents.LiveRegionChanged",
+            "発火するイベント種別は LiveRegionChanged であること。");
+    }
+
+    /// <summary>
+    /// Issue #1548: OperationLogDialog のコードビハインドが ViewModel.PropertyChanged を購読・解除していること。
+    /// ViewModel バインド駆動の TextBlock に対する LiveRegion 通知は、ViewModel 側のプロパティ変化を起点とするため、
+    /// 購読と解除の両方が必要（解除漏れはメモリリーク）。
+    /// </summary>
+    [Fact]
+    public void OperationLogDialog_CodeBehindで_ViewModelPropertyChangedを購読と解除していること()
+    {
+        var code = ReadCodeBehind("OperationLogDialog.xaml.cs");
+
+        Regex.IsMatch(code, @"PropertyChanged\s*\+=").Should().BeTrue(
+            "ViewModel の PropertyChanged を購読していること。");
+        Regex.IsMatch(code, @"PropertyChanged\s*-=").Should().BeTrue(
+            "Window.Closed 等で PropertyChanged を解除していること（メモリリーク防止）。");
+    }
+
     private static string ResolveDialogsDirectory()
     {
         var current = new DirectoryInfo(AppContext.BaseDirectory);
