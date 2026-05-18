@@ -51,4 +51,37 @@ def parse_doc_counts(md_path: str) -> Optional[Dict[str, int]]:
 
 
 def compare(expected: Dict[str, int], actual: Dict[str, int]) -> Tuple[bool, str]:
-    raise NotImplementedError
+    """記載値 (expected) と実測値 (actual) を比較し、差分レポートを返す。
+
+    Returns:
+        (True,  "✅ ...")  全一致
+        (False, "❌ ...")  乖離あり
+    """
+    keys = (("unit", "単体"), ("ui", "UI  "), ("total", "合計"))
+    diffs = [(k, expected[k], actual[k]) for k, _ in keys if expected[k] != actual[k]]
+
+    if not diffs:
+        lines = ["✅ テスト件数表 §1.1a と実測値が一致しています"]
+        for k, label in keys:
+            lines.append(f"  {label.strip()}: {expected[k]:,} 件")
+        return True, "\n".join(lines)
+
+    lines = [
+        "❌ テスト件数表 §1.1a が実測値と乖離しています",
+        "",
+        "| 種別 | 記載値 | 実測値 | 差分 |",
+        "|------|-------|-------|------|",
+    ]
+    for k, label in keys:
+        exp = expected[k]
+        act = actual[k]
+        diff = act - exp
+        sign = "+" if diff > 0 else ""
+        lines.append(f"| {label.strip()} | {exp:,} | {act:,} | {sign}{diff} |")
+    lines += [
+        "",
+        "修正方法:",
+        "  ICCardManager/docs/design/07_テスト設計書.md §1.1a の表を実測値で",
+        "  更新してください（Issue #1475 の同期手順を参照）。",
+    ]
+    return False, "\n".join(lines)

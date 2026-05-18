@@ -62,5 +62,29 @@ class ParseDocCountsTest(unittest.TestCase):
         self.assertEqual(result, {"unit": 3266, "ui": 26, "total": 3292})
 
 
+class CompareTest(unittest.TestCase):
+    def test_all_match_returns_ok_true(self):
+        expected = {"unit": 3266, "ui": 26, "total": 3292}
+        actual = {"unit": 3266, "ui": 26, "total": 3292}
+        ok, _ = compare(expected, actual)
+        self.assertTrue(ok)
+
+    def test_unit_only_diff_reports_unit_row(self):
+        expected = {"unit": 3266, "ui": 26, "total": 3292}
+        actual = {"unit": 3270, "ui": 26, "total": 3296}
+        ok, report = compare(expected, actual)
+        self.assertFalse(ok)
+        self.assertIn("3,266", report)
+        self.assertIn("3,270", report)
+        self.assertIn("+4", report)
+
+    def test_report_contains_recovery_instruction(self):
+        expected = {"unit": 3266, "ui": 26, "total": 3292}
+        actual = {"unit": 3270, "ui": 26, "total": 3296}
+        _, report = compare(expected, actual)
+        self.assertIn("§1.1a", report)
+        self.assertIn("更新してください", report)
+
+
 if __name__ == "__main__":
     unittest.main()
