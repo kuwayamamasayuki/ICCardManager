@@ -12,6 +12,15 @@ import subprocess
 import sys
 from typing import Dict, Optional, Tuple
 
+# Windows ランナーは stdout/stderr のデフォルトが cp1252 で絵文字 (✅ ❌ ⚠) が
+# UnicodeEncodeError を起こすため、UTF-8 に再構成する。Python 3.7+ で動作。
+for _stream in (sys.stdout, sys.stderr):
+    if hasattr(_stream, "reconfigure"):
+        try:
+            _stream.reconfigure(encoding="utf-8")
+        except Exception:
+            pass
+
 UNIT_RE = re.compile(r"^\|\s*単体テスト[^|]*\|\s*([\d,]+)\s*件\s*\|")
 UI_RE = re.compile(r"^\|\s*UI\s*テスト[^|]*\|\s*([\d,]+)\s*件\s*\|")
 TOTAL_RE = re.compile(r"^\|\s*\*\*合計\*\*\s*\|\s*\*\*([\d,]+)\s*件\*\*\s*\|")
