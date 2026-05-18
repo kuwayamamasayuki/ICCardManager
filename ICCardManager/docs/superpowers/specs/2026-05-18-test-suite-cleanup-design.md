@@ -69,3 +69,56 @@
 - `feedback_test_modification_approval.md`（既存テスト修正は事前承認必須）
 - `feedback_test_design_doc.md`（テスト変更時は設計書も同期）
 - `feedback_test_count_snapshot_sync.md`（§8.1 件数を `dotnet test --list-tests` 実測値で更新）
+
+---
+
+## 実施結果（2026-05-18）
+
+### スキャン結果サマリ
+
+| Category | 検出数 | 真の削除候補 | 状態 |
+|---------|-------|-------------|------|
+| 1. Skip 属性付き (`[Fact(Skip=...)]`) | **0** | 0 | 完全にクリーン（過去にも蓄積なし） |
+| 2. 意味のないアサーション (`true.Should().BeTrue()` 等) | **0** | 0 | 完全にクリーン |
+| 3. テスト名・意図重複 (構造類似 ratio≥0.85) | 475 ペア | **0** | 全て境界値テスト・同値分割テスト・偽陽性 |
+| 4. 同一コードパス重複 (同クラス本体完全一致) | 11 グループ | **1** | 10 グループは Theory 化候補（リファクタリング） |
+
+**3,267 件中、真の削除候補は 1 件のみ**。本リポジトリは既に高品質な状態。
+
+### 削除した重複テスト
+
+`tests/ICCardManager.Tests/Data/DbContextConnectionLeaseTests.cs:132-148`
+
+- 削除対象: `LeaseConnection_リエントラント呼び出しがデッドロックしないこと`
+- 重複ペア: 同ファイル L362 `LeaseConnection_同期版でリエントラントが動作すること`
+- 重複の本質: 両方とも同期 `dbContext.LeaseConnection()` を呼び、State Open + 同一 Connection を検証
+- 削除判断: L134 が `#region LeaseConnectionAsync` 内に**配置不整合**で置かれていた一方、L362 は `#region LeaseConnection（同期版）` 内で正しく配置されていたため L134 を削除
+- 影響: 単体テスト 3,267 → 3,266 件、`DbContextConnectionLease` 関連は 11 → 10 件、全件 GREEN
+
+### 検出ロジックの限界
+
+スキャン途中で明らかになった偽陽性パターン：
+
+1. **マルチクラス・パー・ファイル**: `IntToVisibilityConverterTests` と `BoolToVisibilityConverterTests` のように 1 ファイル内に複数 class を持つ場合、最初のクラスしか認識しないと別クラス間の同名メソッドを「同クラス内重複」と誤検出する → 修正済み（クラス位置トラッキングを追加）
+2. **過剰な正規化**: 数値・文字列リテラルを placeholder 化すると `_WithZero` / `_WithValue` / `_WithLargeValue` のような **入力違いの境界値テスト**が同一視され、真の重複と区別不能になる → 修正済み（リテラルを温存して比較）
+3. **ヘルパー隠蔽されたアサーション**: `.Should()` も `Assert.*` も直接呼ばない `AssertIdentifierIsInsideDebugBlock(path, ...)` のようなヘルパー経由検証は静的 grep では「アサーションなし」と誤判定 → 構造的に対処不能（テスト実行時の mutation testing が必要）
+
+### Theory 化候補（別 Issue で対応）
+
+Category 4 スキャンで検出された 10 グループは、**削除不可だが `[Theory] + [InlineData]` への統合でコード行数を削減できる**：
+
+| クラス | グループ | 件数 |
+|--------|---------|------|
+| `FileSizeConverterTests` | バイト/KB 単位 | 2 |
+| `PathValidatorTests` | 無効パスパターン | 2+ |
+| `FormulaInjectionSanitizerTests` | Null/Empty 判定 | 2 |
+| `SharedModeMonitorTests` | 経過秒数表示 | 2 |
+| `StationMasterServiceTests` | 路線×カード種別 | 9 |
+
+これらは別 Issue「refactor: 同構造 Fact テスト群を Theory + InlineData に統合」として起票し、本作業のスコープ外とする。
+
+### 学びとフォローアップ
+
+- **テスト品質はランタイム値で測れない**: 「3,000 件以上」は数の多さで「不要・重複が潜む」と懸念したが、実態は規律ある回帰防止の累積で、削除候補はほぼ存在しない
+- **真のテスト整理は構造ではなく意味から**: 静的 grep では意味的重複（同じ意図を別表現で書いた 2 テスト）は検出不可。本格的にやるなら mutation testing が必要
+- **将来の運用**: 新規テスト追加時は `.claude/rules/testing.md` の品質基準を遵守し、特に「`true.Should().BeTrue()` のような意味のないアサーションは絶対に書かない」を継続徹底すれば、本作業のような大規模整理は不要

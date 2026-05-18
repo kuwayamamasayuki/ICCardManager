@@ -129,24 +129,6 @@ public class DbContextConnectionLeaseTests : IDisposable
             "task2はtask1がリースを解放した後に取得すべき");
     }
 
-    [Fact]
-    [Trait("Category", "Unit")]
-    public void LeaseConnection_リエントラント呼び出しがデッドロックしないこと()
-    {
-        // Arrange
-        using var dbContext = CreateInitializedDbContext();
-
-        // Act - 外側のリースを取得し、内部で再度リースを取得（リエントラント）
-        using var outerLease = dbContext.LeaseConnection();
-        outerLease.Connection.State.Should().Be(ConnectionState.Open);
-
-        using var innerLease = dbContext.LeaseConnection();
-
-        // Assert - デッドロックせず、同一接続が返ること
-        innerLease.Connection.State.Should().Be(ConnectionState.Open);
-        innerLease.Connection.Should().BeSameAs(outerLease.Connection);
-    }
-
     #endregion
 
     #region ConnectionLease Dispose
