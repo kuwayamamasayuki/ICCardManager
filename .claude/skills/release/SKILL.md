@@ -77,6 +77,7 @@ git checkout -b chore/bump-version-X.Y.Z
 - `CHANGELOG.md` — 新セクション追加
 - `docs/manual/ユーザーマニュアル.md` — Version string
 - `docs/manual/管理者マニュアル.md` — Version string
+- `docs/manual/開発者ガイド.md` — **構造変更が含まれる場合**は §2.5「アーキテクチャの発展」を更新（Issue #1472 対策、下記）
 
 コミット → プッシュ → PR作成 → マージ。
 
@@ -102,6 +103,38 @@ gh release upload vX.Y.Z "installer/output/ICCardManager_Setup_X.Y.Z.exe" --clob
 - `build-installer.ps1` はクリーンビルド、dotnet publish、マニュアル変換(-NoMermaid)、Inno Setupを一括実行
 - `release.yml` GitHub Action は `v*` タグpushでRelease + ZIPを自動作成
 - 順序: Version bump PR → マージ → Tag → Build → GitHub Release
+
+## 開発者ガイド §2.5「アーキテクチャの発展」の更新（Issue #1472 対策）
+
+過去、リリース毎に追加された構造変更が `docs/manual/開発者ガイド.md` §2.5 に反映されず、章タイトルだけが古いバージョン上限で残る不具合があった（v2.7.0 までしか書かれていない状態で v2.8.0 がリリースされ、Issue #1472 で発覚）。再発防止のため、リリース時に以下を必ず確認する。
+
+### チェック手順
+
+1. 今回のリリースに **構造変更** が含まれるかを判定する。「構造変更」とは以下のいずれか:
+   - クラス・サービスの分割／統合（例: `LendingService` のヘルパー抽出 #1283、`CsvImportService` の再分割 #1284）
+   - 新しい横断規約の導入（例: `ConfigureAwait(false)` 規約 #1287）
+   - 新しいヘルパー基盤の追加（例: `MigrationHelpers` #1285）
+   - 新規 Value Object・インターフェース階層の追加
+   - **バグ修正・UI 微調整・テスト追加のみであれば §2.5 更新は不要**
+
+2. 構造変更が含まれる場合、`docs/manual/開発者ガイド.md` の以下 2 箇所を更新する:
+   - **§2.2 末尾の「refactor 履歴」blockquote**: 上限バージョンを今回のリリース版に伸長し、代表的な Issue 番号を 1〜2 件追記
+   - **§2.5 章タイトル**: 「アーキテクチャの発展（v2.5.0〜vX.Y.Z）」の上限バージョンを更新し、本文導入も同様に伸長
+   - **§2.5 配下のサブセクション**: 構造変更ごとに `#### 2.5.N <タイトル>（#Issue、vX.Y.Z）` を追加
+
+3. 文書を `bump-version.ps1` の `## 更新対象ファイル一覧` （手動リリースなら本 SKILL §1）に従って同一バージョン PR でコミットする。
+
+### 文面の参考スタイル
+
+```markdown
+#### 2.5.N <短い見出し>（#1234、vX.Y.Z）
+
+<1〜2 文の概要>。
+
+| <表 or 箇条書きで詳細> |
+```
+
+末尾に「`public` API は不変」「既存テスト全件 pass」「新規テスト N 件追加」のいずれかを明記すると、読者がリスク評価しやすい。
 
 ## Gotchas
 - **PowerShell バージョン**: `pwsh.exe`（7系）を使用。`powershell.exe`（5.1）では構文エラーになる
