@@ -93,20 +93,27 @@ namespace ICCardManager.Common
             // 1. null または空でないこと
             if (string.IsNullOrWhiteSpace(path))
             {
-                return ValidationResult.Failure("バックアップパスが指定されていません");
+                return ValidationResult.Failure(
+                    "バックアップパスが指定されていません。" +
+                    "バックアップ先のフォルダパス（例: C:\\Backup または \\\\server\\share\\backup）を入力してください。");
             }
 
             // 2. パス長チェック
             if (path.Length > MaxPathLength)
             {
-                return ValidationResult.Failure($"パスが長すぎます（最大{MaxPathLength}文字）");
+                return ValidationResult.Failure(
+                    $"パスが{path.Length}文字で長すぎます。" +
+                    $"Windows の上限（{MaxPathLength}文字）を超えるため保存できません。" +
+                    $"{MaxPathLength}文字以内の短いパスを指定してください。");
             }
 
             // 3. 不正な文字を含まないこと
             var invalidChars = Path.GetInvalidPathChars();
             if (path.IndexOfAny(invalidChars) >= 0)
             {
-                return ValidationResult.Failure("パスに使用できない文字が含まれています");
+                return ValidationResult.Failure(
+                    "パスに使用できない文字が含まれています。" +
+                    "ファイルシステムの予約文字（< > : \" | ? * 等）を取り除いて指定してください。");
             }
 
             // 4. UNCパスの形式チェック（UNCの場合はサーバー名と共有名が必要）
@@ -122,7 +129,11 @@ namespace ICCardManager.Common
             // 5. 絶対パスであること
             if (!Path.IsPathRooted(path))
             {
-                return ValidationResult.Failure("絶対パスを指定してください");
+                return ValidationResult.Failure(
+                    "絶対パスではありません。" +
+                    "相対パスは実行時の作業フォルダによって解釈が変わり危険なため使用できません。" +
+                    "「C:\\Backup」のようにドライブ文字から始まる絶対パス、" +
+                    "または「\\\\server\\share」形式のネットワークパスを指定してください。");
             }
 
             // 6. パストラバーサルを含まないこと（Issue #1268: 強化された検出）
@@ -130,7 +141,8 @@ namespace ICCardManager.Common
             {
                 return ValidationResult.Failure(
                     "パスに親ディレクトリへの移動指定（.. や URL エンコードされたトラバーサル等）が含まれています。" +
-                    "意図したフォルダ以外への書き込みを防ぐため拒否しました。");
+                    "意図したフォルダ以外への書き込みを防ぐため拒否しました。" +
+                    "「..」を含まない、対象フォルダを直接指す絶対パスを指定してください。");
             }
 
             // 7. UNCパスの到達性チェック（Issue #1269）
@@ -143,8 +155,10 @@ namespace ICCardManager.Common
                 if (!reachable)
                 {
                     return ValidationResult.Failure(
-                        "ネットワーク共有に到達できません。ネットワーク接続を確認してください。" +
-                        "（タイムアウト: " + (uncTimeoutMs / 1000) + "秒以内に応答がありませんでした）");
+                        "ネットワーク共有に到達できません" +
+                        "（タイムアウト: " + (uncTimeoutMs / 1000) + "秒以内に応答がありませんでした）。" +
+                        "ネットワーク接続とサーバー名・共有名を確認するか、" +
+                        "ローカルパスを指定してください。");
                 }
             }
 
@@ -160,7 +174,10 @@ namespace ICCardManager.Common
                         var driveInfo = new DriveInfo(root);
                         if (!driveInfo.IsReady)
                         {
-                            return ValidationResult.Failure($"ドライブ {root} が利用できません");
+                            return ValidationResult.Failure(
+                                $"ドライブ {root} が利用できません。" +
+                                "USB メモリの抜けや未マウントが原因の可能性があります。" +
+                                "接続を確認するか、利用可能な別のドライブを指定してください。");
                         }
                     }
                 }
@@ -211,19 +228,26 @@ namespace ICCardManager.Common
             // サーバー名と共有名の最低2つが必要
             if (parts.Length < 2)
             {
-                return ValidationResult.Failure("ネットワークパスにはサーバー名と共有名が必要です（例: \\\\server\\share）");
+                return ValidationResult.Failure(
+                    "ネットワークパスにはサーバー名と共有名が必要です。" +
+                    "「\\\\server\\share」のように、サーバー名と共有名を区切って指定してください。");
             }
 
             // サーバー名が空でないこと
             if (string.IsNullOrWhiteSpace(parts[0]))
             {
-                return ValidationResult.Failure("ネットワークパスのサーバー名が不正です");
+                return ValidationResult.Failure(
+                    "ネットワークパスのサーバー名が空です。" +
+                    "「\\\\サーバー名\\共有名」の形式で、" +
+                    "サーバー名にホスト名または IP アドレスを指定してください。");
             }
 
             // 共有名が空でないこと
             if (string.IsNullOrWhiteSpace(parts[1]))
             {
-                return ValidationResult.Failure("ネットワークパスの共有名が不正です");
+                return ValidationResult.Failure(
+                    "ネットワークパスの共有名が空です。" +
+                    "「\\\\サーバー名\\共有名」の形式で、サーバー名の後に共有名を指定してください。");
             }
 
             return ValidationResult.Success();
@@ -398,7 +422,10 @@ namespace ICCardManager.Common
                     }
                     catch (UnauthorizedAccessException)
                     {
-                        return ValidationResult.Failure("指定されたフォルダへの書き込み権限がありません");
+                        return ValidationResult.Failure(
+                            "指定されたフォルダへの書き込み権限がありません。" +
+                            "バックアップを保存できないため、" +
+                            "フォルダのアクセス権を確認するか、書き込み可能な別のフォルダを指定してください。");
                     }
                     catch (IOException ex)
                     {
@@ -419,7 +446,10 @@ namespace ICCardManager.Common
                         }
                         catch (UnauthorizedAccessException)
                         {
-                            return ValidationResult.Failure("指定されたフォルダの親ディレクトリへの書き込み権限がありません");
+                            return ValidationResult.Failure(
+                                "指定されたフォルダの親ディレクトリへの書き込み権限がありません。" +
+                                "親フォルダ内に新しいフォルダを作成できないため、" +
+                                "親フォルダのアクセス権を確認するか、書き込み可能な別の場所を指定してください。");
                         }
                         catch (IOException)
                         {
