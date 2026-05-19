@@ -155,11 +155,13 @@ namespace ICCardManager.Views.Dialogs
             var textBefore = element is TextBlock tb ? tb.Text : "<not TextBlock>";
             WriteDiagLog($"[LiveRegion #1507]   target='{targetName}', Text(before-dispatch)='{textBefore}'");
 
-            // Issue #1507: PropertyChanged → Binding の Text 更新 → Render → LiveRegionChanged 発火、の順を保証するため、
-            // DispatcherPriority.Loaded で 1 サイクル待ってから発火する。
-            // 同期発火だと Binding の Source→Target 更新が完了する前に Narrator が peer.GetName() を問い合わせ、
-            // 古い Text 値が読まれる or 変化を認識されずスキップされる挙動になる（ログ分析で判明）。
-            element.Dispatcher.BeginInvoke(DispatcherPriority.Loaded, new Action(() =>
+            // Issue #1507: 実機検証で「2/3 → 3/3 のみ読み上げられ、3/3 到達時に『次のページへ移動が無効になりました』が
+            // 先に読まれる」という挙動が判明。これは Narrator がフォーカス位置のキー操作フィードバック（Space/Enter 押下）の
+            // 読み上げ中、Polite/Assertive 問わず Live Region 通知を抑制すること、3/3 到達時のみボタン IsEnabled 変化で
+            // フォーカスが外れて Narrator のキー読み上げが完了 → その後 Live Region 通知が読まれることを示唆する。
+            // DispatcherPriority を Loaded → ApplicationIdle に変更し、Narrator のキー操作フィードバックを含む
+            // フォーカス関連の全処理が完了してから LiveRegionChanged を発火する。
+            element.Dispatcher.BeginInvoke(DispatcherPriority.ApplicationIdle, new Action(() =>
             {
                 var textAfter = element is TextBlock tb2 ? tb2.Text : "<not TextBlock>";
                 var existingPeer = UIElementAutomationPeer.FromElement(element);
