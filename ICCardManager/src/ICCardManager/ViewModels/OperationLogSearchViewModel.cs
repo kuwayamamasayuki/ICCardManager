@@ -336,8 +336,17 @@ public partial class OperationLogSearchViewModel : ViewModelBase
     {
         if (TotalPages > 0)
         {
-            SetStatus($"ページ {CurrentPage} / {TotalPages} に移動しました（合計 {TotalCount} 件）", false);
+            SetStatus(FormatPageNavigationStatus(CurrentPage, TotalPages, TotalCount), false);
         }
+    }
+
+    /// <summary>
+    /// Issue #1507: ページ送り完了時の <see cref="StatusMessage"/> 文字列フォーマット（純粋関数）。
+    /// 単体テスト容易化のため <c>internal static</c> に分離。フォーマットリグレッションを単体テストで固定する。
+    /// </summary>
+    internal static string FormatPageNavigationStatus(int currentPage, int totalPages, int totalCount)
+    {
+        return $"ページ {currentPage} / {totalPages} に移動しました（合計 {totalCount} 件）";
     }
 
     /// <summary>

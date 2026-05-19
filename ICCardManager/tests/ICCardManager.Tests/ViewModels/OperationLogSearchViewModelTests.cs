@@ -812,5 +812,21 @@ public class OperationLogSearchViewModelTests
         _viewModel.PageNumberDisplay.Should().EndWith(" ページ");
     }
 
+    [Theory]
+    [InlineData(1, 1, 5, "ページ 1 / 1 に移動しました（合計 5 件）")]
+    [InlineData(2, 3, 42, "ページ 2 / 3 に移動しました（合計 42 件）")]
+    [InlineData(10, 10, 200, "ページ 10 / 10 に移動しました（合計 200 件）")]
+    public void FormatPageNavigationStatus_想定形式の文字列を返すこと(
+        int currentPage, int totalPages, int totalCount, string expected)
+    {
+        // Issue #1507: ページ送り完了時の StatusMessage は「ページ N / M に移動しました（合計 X 件）」形式。
+        // この文字列は検索時の "N 件の操作ログが見つかりました" と意図的に異なる表現にしてあり、
+        // PropertyChanged が確実に発火（値変化）して Narrator が Polite Live Region として読み上げる。
+        // フォーマット変更でアナウンス機能が壊れないよう、純粋関数として固定する。
+        var result = OperationLogSearchViewModel.FormatPageNavigationStatus(currentPage, totalPages, totalCount);
+
+        result.Should().Be(expected);
+    }
+
     #endregion
 }

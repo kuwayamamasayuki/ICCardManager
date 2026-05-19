@@ -1,8 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.ComponentModel;
-using System.Diagnostics;
-using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
 using System.Windows;
@@ -74,36 +72,10 @@ namespace ICCardManager.Views.Dialogs
         /// 発火しないため、明示的に <c>UIElementAutomationPeer.RaiseAutomationEvent</c> を呼ぶ
         /// （Issue #1509 で StaffAuthDialog に確立されたパターンを ViewModel バインド向けに適用）。
         /// </summary>
-        // Issue #1507 診断ログ: CurrentPageNumberText だけ Narrator が読み上げない原因切り分け用。
-        // ファイル出力先: %TEMP%\ICCardManager_LiveRegionDiag.log（IDE 不要でユーザーが直接確認可能）。
-        // 原因特定後にこの診断コードは revert で除去する（一時的な調査用コード）。
-        private static readonly string DiagLogPath =
-            Path.Combine(Path.GetTempPath(), "ICCardManager_LiveRegionDiag.log");
-
-        private static void WriteDiagLog(string message)
-        {
-            try
-            {
-                File.AppendAllText(
-                    DiagLogPath,
-                    $"{DateTime.Now:HH:mm:ss.fff} {message}{Environment.NewLine}");
-            }
-            catch
-            {
-                // 診断ログ書き込み失敗はアプリ本体に影響させない（一時コードのため）
-            }
-            Debug.WriteLine(message);
-        }
-
         private void OnViewModelPropertyChanged(object? sender, PropertyChangedEventArgs e)
         {
             var isBusy = (sender as OperationLogSearchViewModel)?.IsBusy ?? false;
             var targetName = GetTargetElementName(e.PropertyName, isBusy);
-
-            WriteDiagLog(
-                $"[LiveRegion #1507] PropertyChanged: name='{e.PropertyName}', isBusy={isBusy}, " +
-                $"target='{targetName ?? "<null>"}', threadId={System.Threading.Thread.CurrentThread.ManagedThreadId}");
-
             UIElement? target = targetName switch
             {
                 "PageInfoText" => PageInfoText,
@@ -114,7 +86,7 @@ namespace ICCardManager.Views.Dialogs
             };
             if (target is not null)
             {
-                RaiseLiveRegionChanged(target, targetName!);
+                RaiseLiveRegionChanged(target);
             }
         }
 
@@ -139,8 +111,7 @@ namespace ICCardManager.Views.Dialogs
                 nameof(OperationLogSearchViewModel.StatusMessage) => "StatusMessageText",
                 // Issue #1507: BusyMessage の通知は IsBusy=true 時のオーバーレイ表示中のみ有意。
                 // IsBusy=false への遷移直後にも BusyMessage の最終値が再通知されるが、その時点でオーバーレイは
-                // 非表示で読み上げノイズになり、直前の PageNumberDisplay/StatusMessage の Live Region 通知の
-                // 読み上げを Narrator のキュー上で阻害する（連続発火による上書き・抑制の挙動）。
+                // 非表示で読み上げノイズになり、直前の Live Region 通知の読み上げを Narrator のキュー上で阻害する。
                 // IsBusy=true 時のみマッピング対象とすることで不要発火を抑制する。
                 nameof(OperationLogSearchViewModel.BusyMessage) => isBusy ? "ProcessingOverlayText" : null,
                 // IsBusy=true への遷移時のみオーバーレイ出現の通知が必要。false への遷移（非表示）は不要。
@@ -149,35 +120,20 @@ namespace ICCardManager.Views.Dialogs
             };
         }
 
-        private static void RaiseLiveRegionChanged(UIElement element, string targetName)
+        private static void RaiseLiveRegionChanged(UIElement element)
         {
-            // Issue #1507 診断ログ（同期発火前の値）: target.Text が PropertyChanged 直後の時点で新値か古い値かを確認。
-            var textBefore = element is TextBlock tb ? tb.Text : "<not TextBlock>";
-            WriteDiagLog($"[LiveRegion #1507]   target='{targetName}', Text(before-dispatch)='{textBefore}'");
-
-            // Issue #1507: 実機検証で「2/3 → 3/3 のみ読み上げられ、3/3 到達時に『次のページへ移動が無効になりました』が
-            // 先に読まれる」という挙動が判明。これは Narrator がフォーカス位置のキー操作フィードバック（Space/Enter 押下）の
-            // 読み上げ中、Polite/Assertive 問わず Live Region 通知を抑制すること、3/3 到達時のみボタン IsEnabled 変化で
-            // フォーカスが外れて Narrator のキー読み上げが完了 → その後 Live Region 通知が読まれることを示唆する。
-            // DispatcherPriority を Loaded → ApplicationIdle に変更し、Narrator のキー操作フィードバックを含む
-            // フォーカス関連の全処理が完了してから LiveRegionChanged を発火する。
+            // Issue #1507: PropertyChanged → Binding の Text 更新 → Render → LiveRegionChanged 発火、
+            // の順を保証するため、 DispatcherPriority.ApplicationIdle で 1 サイクル待ってから発火する。
+            // 同期発火だと Binding の Source→Target 更新が完了する前に Narrator が peer.GetName() を問い合わせ、
+            // 古い Text 値が読まれる挙動になる（実機検証で判明）。
+            // ApplicationIdle はフォーカス関連の Narrator 処理を含むすべての処理が完了したアイドル状態で走る。
+            // ただし Narrator はフォーカス位置のキー操作フィードバック中は Live Region 通知を抑制する
+            // 仕様があり、ページ送りの中間ページでは完全に読み上げられない既知制約あり（PR #1555 参照）。
             element.Dispatcher.BeginInvoke(DispatcherPriority.ApplicationIdle, new Action(() =>
             {
-                var textAfter = element is TextBlock tb2 ? tb2.Text : "<not TextBlock>";
-                var existingPeer = UIElementAutomationPeer.FromElement(element);
-                var peer = existingPeer ?? UIElementAutomationPeer.CreatePeerForElement(element);
-                var peerName = peer?.GetName() ?? "<peer-null>";
-                WriteDiagLog(
-                    $"[LiveRegion #1507]   [Loaded] target='{targetName}', Text(after-dispatch)='{textAfter}', " +
-                    $"peer.GetName()='{peerName}', peerExisted={existingPeer is not null}");
-
-                if (peer is null)
-                {
-                    WriteDiagLog($"[LiveRegion #1507]   [Loaded] peer is null, skipped");
-                    return;
-                }
-                peer.RaiseAutomationEvent(AutomationEvents.LiveRegionChanged);
-                WriteDiagLog($"[LiveRegion #1507]   [Loaded] Raised LiveRegionChanged on '{targetName}'");
+                var peer = UIElementAutomationPeer.FromElement(element)
+                           ?? UIElementAutomationPeer.CreatePeerForElement(element);
+                peer?.RaiseAutomationEvent(AutomationEvents.LiveRegionChanged);
             }));
         }
 
