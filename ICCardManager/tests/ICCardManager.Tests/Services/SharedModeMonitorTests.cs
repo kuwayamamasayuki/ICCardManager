@@ -117,49 +117,20 @@ public class SharedModeMonitorTests
     }
 
     [Theory]
-    [InlineData(0)]   // 経過0秒
-    [InlineData(2)]   // 経過2秒（< 5）
-    [InlineData(4)]   // 経過4秒（< 5の境界）
-    public void UpdateSyncDisplayText_5秒未満はたった今と表示されること(int elapsedSeconds)
-    {
-        // Arrange
-        SetLastRefreshAgo(elapsedSeconds);
-        SyncDisplayEventArgs? captured = null;
-        _monitor.SyncDisplayUpdated += (_, e) => captured = e;
-
-        // Act
-        _monitor.UpdateSyncDisplayText();
-
-        // Assert
-        captured.Should().NotBeNull();
-        captured!.Text.Should().Be("最終同期: たった今");
-    }
-
-    [Theory]
+    // 5秒未満は「たった今」
+    [InlineData(0, "最終同期: たった今")]
+    [InlineData(2, "最終同期: たった今")]
+    [InlineData(4, "最終同期: たった今")]
+    // 5秒以上60秒未満は「N秒前」
     [InlineData(5, "最終同期: 5秒前")]
     [InlineData(15, "最終同期: 15秒前")]
     [InlineData(30, "最終同期: 30秒前")]
     [InlineData(59, "最終同期: 59秒前")]
-    public void UpdateSyncDisplayText_5秒以上60秒未満はN秒前と表示されること(int elapsedSeconds, string expectedText)
-    {
-        // Arrange
-        SetLastRefreshAgo(elapsedSeconds);
-        SyncDisplayEventArgs? captured = null;
-        _monitor.SyncDisplayUpdated += (_, e) => captured = e;
-
-        // Act
-        _monitor.UpdateSyncDisplayText();
-
-        // Assert
-        captured.Should().NotBeNull();
-        captured!.Text.Should().Be(expectedText);
-    }
-
-    [Theory]
+    // 60秒以上は「N分前」
     [InlineData(60, "最終同期: 1分前")]
     [InlineData(120, "最終同期: 2分前")]
     [InlineData(3599, "最終同期: 59分前")]
-    public void UpdateSyncDisplayText_60秒以上はN分前と表示されること(int elapsedSeconds, string expectedText)
+    public void UpdateSyncDisplayText_経過時間に応じたテキストを生成すること(int elapsedSeconds, string expectedText)
     {
         // Arrange
         SetLastRefreshAgo(elapsedSeconds);

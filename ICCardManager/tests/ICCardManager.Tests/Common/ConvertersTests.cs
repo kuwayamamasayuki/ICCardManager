@@ -152,33 +152,14 @@ public class FileSizeConverterTests
     [InlineData(0L, "0 B")]
     [InlineData(512L, "512 B")]
     [InlineData(1023L, "1023 B")]
-    public void Convert_バイト単位の場合B表示になること(long input, string expected)
-    {
-        var result = _converter.Convert(input, typeof(string), null, CultureInfo.InvariantCulture);
-        result.Should().Be(expected);
-    }
-
-    [Theory]
     [InlineData(1024L, "1 KB")]
     [InlineData(1536L, "1.5 KB")]
-    public void Convert_KB単位の場合KB表示になること(long input, string expected)
+    [InlineData(1048576L, "1 MB")]
+    [InlineData(1073741824L, "1 GB")]
+    public void Convert_バイト数を適切な単位で表示すること(long input, string expected)
     {
         var result = _converter.Convert(input, typeof(string), null, CultureInfo.InvariantCulture);
         result.Should().Be(expected);
-    }
-
-    [Fact]
-    public void Convert_MB単位の場合MB表示になること()
-    {
-        var result = _converter.Convert(1048576L, typeof(string), null, CultureInfo.InvariantCulture);
-        result.Should().Be("1 MB");
-    }
-
-    [Fact]
-    public void Convert_GB単位の場合GB表示になること()
-    {
-        var result = _converter.Convert(1073741824L, typeof(string), null, CultureInfo.InvariantCulture);
-        result.Should().Be("1 GB");
     }
 
     [Fact]

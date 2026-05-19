@@ -291,122 +291,36 @@ public class PathValidatorTests : IDisposable
     #region ValidateBackupPath - パストラバーサルテスト
 
     /// <summary>
-    /// パストラバーサル（..）を含むパスが拒否されることを確認
+    /// パストラバーサル（..）の各種パターンが拒否されることを確認。
+    /// Issue #1268 で強化された UNC・URL エンコード・混合区切り・末尾空白・深いトラバーサルも含む。
     /// </summary>
-    [Fact]
-    public void ValidateBackupPath_PathTraversal_ReturnsInvalid()
+    [Theory]
+    // 単純トラバーサル
+    [InlineData(@"C:\backup\..\Windows\System32")]
+    [InlineData(@"C:\Users\test\..\admin\backup")]
+    [InlineData(@"C:\Users\test\..")]
+    // UNC パス（Issue #1268: 共有境界の逸脱）
+    [InlineData(@"\\server\share\..\admin\iccard.db")]
+    [InlineData(@"\\server\share\..\..\admin\iccard.db")]
+    // URL エンコード（Issue #1268: %2E%2E は .. の URL エンコード）
+    [InlineData(@"C:\backup\%2E%2E\Windows\System32")]
+    // 混合区切り文字（Issue #1268: / と \ の混在）
+    [InlineData(@"C:\backup/../Windows")]
+    [InlineData(@"C:/backup\..\Windows")]
+    [InlineData(@"C:\backup/..\..\Windows")]
+    // 末尾空白（Issue #1268: Windows は末尾空白を無視するため ".. " は ".." として解釈されうる）
+    [InlineData(@"C:\backup\.. \Windows")]
+    [InlineData(@"C:\backup\..  \Windows")]
+    public void ValidateBackupPath_パストラバーサルパターンを検出すること(string path)
     {
-        // Act
-        var result = PathValidator.ValidateBackupPath(@"C:\backup\..\Windows\System32");
-
-        // Assert
-        result.IsValid.Should().BeFalse();
-        result.ErrorMessage.Should().Contain("..");
-    }
-
-    /// <summary>
-    /// 中間に..を含むパスが拒否されることを確認
-    /// </summary>
-    [Fact]
-    public void ValidateBackupPath_PathTraversalInMiddle_ReturnsInvalid()
-    {
-        // Act
-        var result = PathValidator.ValidateBackupPath(@"C:\Users\test\..\admin\backup");
-
-        // Assert
-        result.IsValid.Should().BeFalse();
-        result.ErrorMessage.Should().Contain("..");
-    }
-
-    /// <summary>
-    /// 末尾に..を含むパスが拒否されることを確認
-    /// </summary>
-    [Fact]
-    public void ValidateBackupPath_PathTraversalAtEnd_ReturnsInvalid()
-    {
-        // Act
-        var result = PathValidator.ValidateBackupPath(@"C:\Users\test\..");
-
-        // Assert
+        var result = PathValidator.ValidateBackupPath(path);
         result.IsValid.Should().BeFalse();
         result.ErrorMessage.Should().Contain("..");
     }
 
     #endregion
 
-    #region Issue #1268: 強化されたパストラバーサル検出
-
-    /// <summary>
-    /// Issue #1268: UNC パスに埋め込まれたトラバーサルを検出する。
-    /// <c>\\server\share\..\admin</c> は <c>\\server\admin</c> に正規化され、
-    /// 意図した共有境界を逸脱する。
-    /// </summary>
-    [Fact]
-    public void ValidateBackupPath_UncPathWithTraversal_ReturnsInvalid()
-    {
-        // Act
-        var result = PathValidator.ValidateBackupPath(@"\\server\share\..\admin\iccard.db");
-
-        // Assert
-        result.IsValid.Should().BeFalse();
-        result.ErrorMessage.Should().Contain("..");
-    }
-
-    /// <summary>
-    /// Issue #1268: UNC パスで共有境界を逸脱する深いトラバーサル。
-    /// </summary>
-    [Fact]
-    public void ValidateBackupPath_UncPathDeepTraversal_ReturnsInvalid()
-    {
-        // Act: \\server\share\..\..\admin\iccard.db
-        var result = PathValidator.ValidateBackupPath(@"\\server\share\..\..\admin\iccard.db");
-
-        // Assert
-        result.IsValid.Should().BeFalse();
-        result.ErrorMessage.Should().Contain("..");
-    }
-
-    /// <summary>
-    /// Issue #1268: URL エンコードされたトラバーサル (<c>%2E%2E</c>) を検出する。
-    /// </summary>
-    [Fact]
-    public void ValidateBackupPath_UrlEncodedTraversal_ReturnsInvalid()
-    {
-        // Act: C:\backup\%2E%2E\Windows （%2E%2E は .. の URL エンコード）
-        var result = PathValidator.ValidateBackupPath(@"C:\backup\%2E%2E\Windows\System32");
-
-        // Assert
-        result.IsValid.Should().BeFalse();
-        result.ErrorMessage.Should().Contain("..");
-    }
-
-    /// <summary>
-    /// Issue #1268: 混合区切り文字 (<c>/</c> と <c>\</c>) のパストラバーサル検出。
-    /// </summary>
-    [Theory]
-    [InlineData(@"C:\backup/../Windows")]
-    [InlineData(@"C:/backup\..\Windows")]
-    [InlineData(@"C:\backup/..\..\Windows")]
-    public void ValidateBackupPath_MixedSeparatorTraversal_ReturnsInvalid(string path)
-    {
-        var result = PathValidator.ValidateBackupPath(path);
-        result.IsValid.Should().BeFalse();
-        result.ErrorMessage.Should().Contain("..");
-    }
-
-    /// <summary>
-    /// Issue #1268: 末尾空白パターン。
-    /// Windows は末尾の空白を無視するため <c>.. </c> は <c>..</c> として解釈されうる。
-    /// </summary>
-    [Theory]
-    [InlineData(@"C:\backup\.. \Windows")]     // ".. " （末尾空白1つ）
-    [InlineData(@"C:\backup\..  \Windows")]    // "..  "（末尾空白2つ）
-    public void ValidateBackupPath_DotSpaceTraversal_ReturnsInvalid(string path)
-    {
-        var result = PathValidator.ValidateBackupPath(path);
-        result.IsValid.Should().BeFalse();
-        result.ErrorMessage.Should().Contain("..");
-    }
+    #region Issue #1268: トラバーサル誤検出防止（false positive 対応）
 
     /// <summary>
     /// Issue #1268: 通常の有効なパスにはトラバーサル検出が誤反応しないこと（false positive 防止）。

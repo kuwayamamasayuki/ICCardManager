@@ -16,244 +16,106 @@ namespace ICCardManager.Tests.Services;
 /// </summary>
 public class StationMasterServiceTests
 {
-    #region 福岡エリア（はやかけん）のテスト
+    #region 路線別駅名取得テスト（カード種別×駅コード→駅名）
 
     /// <summary>
-    /// 福岡市地下鉄 空港線の駅名取得テスト（はやかけん利用時）
+    /// 各路線・各カード種別における駅コード→駅名マッピングのテスト。
+    /// CardType によって優先 Area が切り替わる仕様（はやかけん=九州/Suica=関東/PASMO=関東/TOICA=中部）を踏まえ、
+    /// 路線ごとに代表的な駅コードと期待される駅名を InlineData で列挙する。
     /// </summary>
     [Theory]
-    [InlineData(0xE701, "姪浜")]      // 空港線 始発
-    [InlineData(0xE703, "室見")]
-    [InlineData(0xE705, "藤崎")]
-    [InlineData(0xE707, "西新")]
-    [InlineData(0xE709, "唐人町")]
-    [InlineData(0xE70B, "大濠公園")]
-    [InlineData(0xE70D, "赤坂")]
-    [InlineData(0xE70F, "天神")]      // 主要駅
-    [InlineData(0xE711, "中洲川端")]
-    [InlineData(0xE713, "祇園")]
-    [InlineData(0xE715, "博多")]      // 主要駅
-    [InlineData(0xE717, "東比恵")]
-    [InlineData(0xE719, "福岡空港")]  // 空港線 終点
-    public void GetStationName_AirportLine_WithHayakaken_ReturnsCorrectName(int stationCode, string expectedName)
+    // 福岡市地下鉄 空港線（はやかけん）
+    [InlineData(0xE701, CardType.Hayakaken, "姪浜")]      // 空港線 始発
+    [InlineData(0xE703, CardType.Hayakaken, "室見")]
+    [InlineData(0xE705, CardType.Hayakaken, "藤崎")]
+    [InlineData(0xE707, CardType.Hayakaken, "西新")]
+    [InlineData(0xE709, CardType.Hayakaken, "唐人町")]
+    [InlineData(0xE70B, CardType.Hayakaken, "大濠公園")]
+    [InlineData(0xE70D, CardType.Hayakaken, "赤坂")]
+    [InlineData(0xE70F, CardType.Hayakaken, "天神")]      // 主要駅
+    [InlineData(0xE711, CardType.Hayakaken, "中洲川端")]
+    [InlineData(0xE713, CardType.Hayakaken, "祇園")]
+    [InlineData(0xE715, CardType.Hayakaken, "博多")]      // 主要駅
+    [InlineData(0xE717, CardType.Hayakaken, "東比恵")]
+    [InlineData(0xE719, CardType.Hayakaken, "福岡空港")]  // 空港線 終点
+
+    // 福岡市地下鉄 箱崎線（はやかけん）
+    [InlineData(0xE801, CardType.Hayakaken, "中洲川端")]  // 箱崎線 始発
+    [InlineData(0xE803, CardType.Hayakaken, "呉服町")]
+    [InlineData(0xE805, CardType.Hayakaken, "千代県庁口")]
+    [InlineData(0xE807, CardType.Hayakaken, "馬出九大病院前")]
+    [InlineData(0xE809, CardType.Hayakaken, "箱崎宮前")]
+    [InlineData(0xE80B, CardType.Hayakaken, "箱崎九大前")]
+    [InlineData(0xE80D, CardType.Hayakaken, "貝塚")]      // 箱崎線 終点
+
+    // 福岡市地下鉄 七隈線（はやかけん）
+    [InlineData(0xE901, CardType.Hayakaken, "橋本")]      // 七隈線 始発
+    [InlineData(0xE903, CardType.Hayakaken, "次郎丸")]
+    [InlineData(0xE90B, CardType.Hayakaken, "福大前")]    // 福岡大学前
+    [InlineData(0xE90D, CardType.Hayakaken, "七隈")]
+    [InlineData(0xE915, CardType.Hayakaken, "六本松")]
+    [InlineData(0xE91B, CardType.Hayakaken, "薬院")]      // 主要駅
+    [InlineData(0xE91D, CardType.Hayakaken, "渡辺通")]
+    [InlineData(0xE91F, CardType.Hayakaken, "天神南")]
+    [InlineData(0xE921, CardType.Hayakaken, "櫛田神社前")] // 2023年延伸開業（Issue #1120）
+
+    // JR九州 鹿児島本線（はやかけん）
+    [InlineData(0x0601, CardType.Hayakaken, "門司港")]    // 鹿児島本線 起点
+    [InlineData(0x0606, CardType.Hayakaken, "小倉")]      // 主要駅
+    [InlineData(0x0623, CardType.Hayakaken, "香椎")]
+    [InlineData(0x0624, CardType.Hayakaken, "千早")]
+    [InlineData(0x0625, CardType.Hayakaken, "箱崎")]
+    [InlineData(0x0626, CardType.Hayakaken, "吉塚")]
+    [InlineData(0x0627, CardType.Hayakaken, "博多")]      // 主要駅
+    [InlineData(0x0628, CardType.Hayakaken, "竹下")]
+    [InlineData(0x062A, CardType.Hayakaken, "南福岡")]
+    [InlineData(0x062B, CardType.Hayakaken, "春日")]
+    [InlineData(0x062C, CardType.Hayakaken, "大野城")]
+    [InlineData(0x062F, CardType.Hayakaken, "二日市")]
+    [InlineData(0x0637, CardType.Hayakaken, "鳥栖")]      // 分岐駅
+    [InlineData(0x063B, CardType.Hayakaken, "久留米")]    // 主要駅
+    [InlineData(0x064D, CardType.Hayakaken, "大牟田")]    // 県境駅
+
+    // JR山手線（Suica、Area=0 Line=37=0x25）
+    [InlineData(0x2501, CardType.Suica, "品川")]          // Line 37, Station 1
+    [InlineData(0x2507, CardType.Suica, "渋谷")]          // Line 37, Station 7
+    [InlineData(0x250A, CardType.Suica, "新宿")]          // Line 37, Station 10
+    [InlineData(0x250D, CardType.Suica, "高田馬場")]      // Line 37, Station 13
+    [InlineData(0x250F, CardType.Suica, "池袋")]          // Line 37, Station 15
+
+    // JR東海道本線 東京〜横浜（Suica、Area=0 Line=1=0x01）
+    [InlineData(0x0101, CardType.Suica, "東京")]          // Line 1, Station 1
+    [InlineData(0x0107, CardType.Suica, "品川")]          // Line 1, Station 7
+    [InlineData(0x0112, CardType.Suica, "横浜")]          // Line 1, Station 18
+
+    // 北陸新幹線 金沢延伸区間（Suica、Area=0 Line=73=0x49、Issue #1120）
+    [InlineData(0x4915, CardType.Suica, "飯山")]
+    [InlineData(0x4917, CardType.Suica, "上越妙高")]
+    [InlineData(0x4919, CardType.Suica, "糸魚川")]
+    [InlineData(0x491B, CardType.Suica, "黒部宇奈月温泉")]
+    [InlineData(0x491D, CardType.Suica, "富山")]
+    [InlineData(0x491F, CardType.Suica, "新高岡")]
+    [InlineData(0x4921, CardType.Suica, "金沢")]
+
+    // 相鉄新横浜線（PASMO、Area=0 Line=147=0x93、Issue #1120）
+    [InlineData(0x9383, CardType.PASMO, "羽沢横浜国大")]
+    [InlineData(0x9385, CardType.PASMO, "新横浜")]
+
+    // 東急新横浜線（PASMO、Area=0 Line=209=0xD1、Issue #1120）
+    [InlineData(0xD185, CardType.PASMO, "新綱島")]
+    [InlineData(0xD189, CardType.PASMO, "新横浜")]
+
+    // 北大阪急行 箕面延伸区間（TOICA、Area=2 Line=222=0xDE、Issue #1120）
+    // LineCode 222 は Area 0 に小田急多摩線も存在するため、Area 2 優先の TOICA/manaca で検索する必要がある
+    [InlineData(0xDE06, CardType.TOICA, "箕面船場阪大前")]
+    [InlineData(0xDE07, CardType.TOICA, "箕面萱野")]
+    public void GetStationName_カード種別と駅コードに応じた駅名を返すこと(int stationCode, CardType cardType, string expectedName)
     {
         // Arrange
         var service = new StationMasterService();
 
         // Act
-        var result = service.GetStationName(stationCode, CardType.Hayakaken);
-
-        // Assert
-        result.Should().Be(expectedName);
-    }
-
-    /// <summary>
-    /// 福岡市地下鉄 箱崎線の駅名取得テスト（はやかけん利用時）
-    /// </summary>
-    [Theory]
-    [InlineData(0xE801, "中洲川端")]  // 箱崎線 始発
-    [InlineData(0xE803, "呉服町")]
-    [InlineData(0xE805, "千代県庁口")]
-    [InlineData(0xE807, "馬出九大病院前")]
-    [InlineData(0xE809, "箱崎宮前")]
-    [InlineData(0xE80B, "箱崎九大前")]
-    [InlineData(0xE80D, "貝塚")]      // 箱崎線 終点
-    public void GetStationName_HakozakiLine_WithHayakaken_ReturnsCorrectName(int stationCode, string expectedName)
-    {
-        // Arrange
-        var service = new StationMasterService();
-
-        // Act
-        var result = service.GetStationName(stationCode, CardType.Hayakaken);
-
-        // Assert
-        result.Should().Be(expectedName);
-    }
-
-    /// <summary>
-    /// 福岡市地下鉄 七隈線の駅名取得テスト（はやかけん利用時）
-    /// </summary>
-    [Theory]
-    [InlineData(0xE901, "橋本")]      // 七隈線 始発
-    [InlineData(0xE903, "次郎丸")]
-    [InlineData(0xE90B, "福大前")]    // 福岡大学前
-    [InlineData(0xE90D, "七隈")]
-    [InlineData(0xE915, "六本松")]
-    [InlineData(0xE91B, "薬院")]      // 主要駅
-    [InlineData(0xE91D, "渡辺通")]
-    [InlineData(0xE91F, "天神南")]
-    [InlineData(0xE921, "櫛田神社前")]  // 2023年延伸開業（Issue #1120）
-    public void GetStationName_NanakumaLine_WithHayakaken_ReturnsCorrectName(int stationCode, string expectedName)
-    {
-        // Arrange
-        var service = new StationMasterService();
-
-        // Act
-        var result = service.GetStationName(stationCode, CardType.Hayakaken);
-
-        // Assert
-        result.Should().Be(expectedName);
-    }
-
-    /// <summary>
-    /// JR九州 鹿児島本線の駅名取得テスト（はやかけん利用時）
-    /// </summary>
-    [Theory]
-    [InlineData(0x0601, "門司港")]    // 鹿児島本線 起点
-    [InlineData(0x0606, "小倉")]      // 主要駅
-    [InlineData(0x0623, "香椎")]
-    [InlineData(0x0624, "千早")]
-    [InlineData(0x0625, "箱崎")]
-    [InlineData(0x0626, "吉塚")]
-    [InlineData(0x0627, "博多")]      // 主要駅
-    [InlineData(0x0628, "竹下")]
-    [InlineData(0x062A, "南福岡")]
-    [InlineData(0x062B, "春日")]
-    [InlineData(0x062C, "大野城")]
-    [InlineData(0x062F, "二日市")]
-    [InlineData(0x0637, "鳥栖")]      // 分岐駅
-    [InlineData(0x063B, "久留米")]    // 主要駅
-    [InlineData(0x064D, "大牟田")]    // 県境駅
-    public void GetStationName_KagoshimaLine_WithHayakaken_ReturnsCorrectName(int stationCode, string expectedName)
-    {
-        // Arrange
-        var service = new StationMasterService();
-
-        // Act
-        var result = service.GetStationName(stationCode, CardType.Hayakaken);
-
-        // Assert
-        result.Should().Be(expectedName);
-    }
-
-    #endregion
-
-    #region 関東エリア（Suica/PASMO）のテスト
-
-    /// <summary>
-    /// JR山手線の主要駅名取得テスト（Suica利用時）
-    /// CSVデータ: Area=0, Line=37 (0x25)
-    /// </summary>
-    [Theory]
-    [InlineData(0x2501, "品川")]      // Line 37, Station 1
-    [InlineData(0x2507, "渋谷")]      // Line 37, Station 7
-    [InlineData(0x250A, "新宿")]      // Line 37, Station 10
-    [InlineData(0x250D, "高田馬場")]  // Line 37, Station 13
-    [InlineData(0x250F, "池袋")]      // Line 37, Station 15
-    public void GetStationName_YamanoteLine_WithSuica_ReturnsCorrectName(int stationCode, string expectedName)
-    {
-        // Arrange
-        var service = new StationMasterService();
-
-        // Act
-        var result = service.GetStationName(stationCode, CardType.Suica);
-
-        // Assert
-        result.Should().Be(expectedName);
-    }
-
-    /// <summary>
-    /// JR東海道本線 東京〜横浜の駅名取得テスト（Suica利用時）
-    /// CSVデータ: Area=0, Line=1 (0x01)
-    /// </summary>
-    [Theory]
-    [InlineData(0x0101, "東京")]      // Line 1, Station 1
-    [InlineData(0x0107, "品川")]      // Line 1, Station 7
-    [InlineData(0x0112, "横浜")]      // Line 1, Station 18
-    public void GetStationName_TokaidoLine_Kanto_WithSuica_ReturnsCorrectName(int stationCode, string expectedName)
-    {
-        // Arrange
-        var service = new StationMasterService();
-
-        // Act
-        var result = service.GetStationName(stationCode, CardType.Suica);
-
-        // Assert
-        result.Should().Be(expectedName);
-    }
-
-    /// <summary>
-    /// 北陸新幹線 金沢延伸区間の駅名取得テスト（Issue #1120）
-    /// CSVデータ: Area=0, Line=73 (0x49)
-    /// </summary>
-    [Theory]
-    [InlineData(0x4915, "飯山")]
-    [InlineData(0x4917, "上越妙高")]
-    [InlineData(0x4919, "糸魚川")]
-    [InlineData(0x491B, "黒部宇奈月温泉")]
-    [InlineData(0x491D, "富山")]
-    [InlineData(0x491F, "新高岡")]
-    [InlineData(0x4921, "金沢")]
-    public void GetStationName_HokurikuShinkansen_Extension_ReturnsCorrectName(int stationCode, string expectedName)
-    {
-        // Arrange
-        var service = new StationMasterService();
-
-        // Act
-        var result = service.GetStationName(stationCode, CardType.Suica);
-
-        // Assert
-        result.Should().Be(expectedName);
-    }
-
-    /// <summary>
-    /// 相鉄新横浜線の駅名取得テスト（Issue #1120）
-    /// CSVデータ: Area=0, Line=147 (0x93)
-    /// </summary>
-    [Theory]
-    [InlineData(0x9383, "羽沢横浜国大")]
-    [InlineData(0x9385, "新横浜")]
-    public void GetStationName_SotetsuShinYokohamaLine_ReturnsCorrectName(int stationCode, string expectedName)
-    {
-        // Arrange
-        var service = new StationMasterService();
-
-        // Act
-        var result = service.GetStationName(stationCode, CardType.PASMO);
-
-        // Assert
-        result.Should().Be(expectedName);
-    }
-
-    /// <summary>
-    /// 東急新横浜線の駅名取得テスト（Issue #1120）
-    /// CSVデータ: Area=0, Line=209 (0xD1)
-    /// </summary>
-    [Theory]
-    [InlineData(0xD185, "新綱島")]
-    [InlineData(0xD189, "新横浜")]
-    public void GetStationName_TokyuShinYokohamaLine_ReturnsCorrectName(int stationCode, string expectedName)
-    {
-        // Arrange
-        var service = new StationMasterService();
-
-        // Act
-        var result = service.GetStationName(stationCode, CardType.PASMO);
-
-        // Assert
-        result.Should().Be(expectedName);
-    }
-
-    #endregion
-
-    #region 中部エリア（TOICA/manaca）のテスト
-
-    /// <summary>
-    /// 北大阪急行 箕面延伸区間の駅名取得テスト（Issue #1120）
-    /// CSVデータ: Area=2, Line=222 (0xDE)
-    /// 注: LineCode 222 は Area 0 に小田急多摩線も存在するため、
-    /// Area 2 優先の TOICA/manaca で検索する必要がある。
-    /// </summary>
-    [Theory]
-    [InlineData(0xDE06, "箕面船場阪大前")]
-    [InlineData(0xDE07, "箕面萱野")]
-    public void GetStationName_KitaOsakaKyuko_Extension_ReturnsCorrectName(int stationCode, string expectedName)
-    {
-        // Arrange
-        var service = new StationMasterService();
-
-        // Act — TOICA（中部優先: Area 2→0→1→3）で Area 2 が最優先検索される
-        var result = service.GetStationName(stationCode, CardType.TOICA);
+        var result = service.GetStationName(stationCode, cardType);
 
         // Assert
         result.Should().Be(expectedName);
