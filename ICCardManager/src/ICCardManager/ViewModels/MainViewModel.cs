@@ -202,6 +202,14 @@ public partial class MainViewModel : ViewModelBase
     private bool _isRefreshStale;
 
     /// <summary>
+    /// Issue #1470: 共有モード時のDB接続状態（Connected/Reconnecting/Disconnected）。
+    /// ローカルモード時はステータスバーが <see cref="IsSharedMode"/> Visibility で
+    /// 非表示になるため、既定値 Connected が UI に露出することはない。
+    /// </summary>
+    [ObservableProperty]
+    private SharedDbConnectionState _sharedDbConnectionState = SharedDbConnectionState.Connected;
+
+    /// <summary>
     /// ダッシュボードのソート順
     /// </summary>
     [ObservableProperty]
@@ -434,6 +442,7 @@ public partial class MainViewModel : ViewModelBase
         // SharedModeMonitorのイベント登録
         _sharedModeMonitor.HealthCheckCompleted += OnSharedModeHealthCheckCompleted;
         _sharedModeMonitor.SyncDisplayUpdated += OnSyncDisplayUpdated;
+        _sharedModeMonitor.ConnectionStateChanged += OnSharedDbConnectionStateChanged;
 
         // 履歴表示用の年リストを初期化（今年度から過去6年分）
         var currentYear = DateTime.Today.Year;
@@ -557,6 +566,41 @@ public partial class MainViewModel : ViewModelBase
     {
         LastRefreshText = e.Text;
         IsRefreshStale = e.IsStale;
+    }
+
+    /// <summary>
+    /// Issue #1470: SharedModeMonitor からの接続状態遷移を受けて UI とトーストを更新する。
+    /// </summary>
+    /// <remarks>
+    /// イベントは thread pool スレッドから発火される可能性があるため、
+    /// UI プロパティ更新と Toast 発火は IDispatcherService で UI スレッドに
+    /// マーシャリングする（OnSharedModeHealthCheckCompleted と同パターン）。
+    /// Toast は「遷移エッジ」でのみ発火させ、同一状態の継続による連続通知を抑止する。
+    /// </remarks>
+    private void OnSharedDbConnectionStateChanged(object sender, SharedDbConnectionStateChangedEventArgs e)
+    {
+        _dispatcherService.InvokeAsync(() =>
+        {
+            SharedDbConnectionState = e.NewState;
+
+            // 初回切断検知時のみ Toast 発火（Reconnecting → Disconnected の再失敗時は抑止）
+            if (e.NewState == SharedDbConnectionState.Disconnected
+                && e.OldState == SharedDbConnectionState.Connected)
+            {
+                _toastNotificationService.ShowWarning(
+                    "共有DB接続が切断されました",
+                    "ネットワーク接続を確認してください。15秒ごとに自動で再接続を試行します。");
+            }
+            // 切断状態（Disconnected/Reconnecting）からの復帰時のみ Toast 発火
+            else if (e.NewState == SharedDbConnectionState.Connected
+                     && (e.OldState == SharedDbConnectionState.Disconnected
+                         || e.OldState == SharedDbConnectionState.Reconnecting))
+            {
+                _toastNotificationService.ShowInfo(
+                    "共有DB接続が復旧しました",
+                    "データの同期を再開しました。");
+            }
+        });
     }
 
     /// <summary>

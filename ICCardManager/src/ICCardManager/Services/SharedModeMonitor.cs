@@ -22,6 +22,7 @@ namespace ICCardManager.Services
         private DateTime? _lastRefreshTime;
         private bool _isHealthCheckRunning;
         private bool _disposed;
+        private SharedDbConnectionState _currentConnectionState = SharedDbConnectionState.Connected;
 
         /// <summary>
         /// 最終同期からの経過がしきい値を超えた場合にstaleとみなす秒数
@@ -45,6 +46,16 @@ namespace ICCardManager.Services
         /// 同期表示テキストが更新されたときのイベント
         /// </summary>
         public event EventHandler<SyncDisplayEventArgs> SyncDisplayUpdated;
+
+        /// <summary>
+        /// DB接続状態が遷移したときのイベント（Issue #1470）。
+        /// </summary>
+        public event EventHandler<SharedDbConnectionStateChangedEventArgs> ConnectionStateChanged;
+
+        /// <summary>
+        /// 現在のDB接続状態（Issue #1470）。
+        /// </summary>
+        public SharedDbConnectionState CurrentConnectionState => _currentConnectionState;
 
         public SharedModeMonitor(IDatabaseInfo databaseInfo, ITimerFactory timerFactory, ISystemClock clock)
         {
@@ -193,7 +204,18 @@ namespace ICCardManager.Services
             _isHealthCheckRunning = true;
             try
             {
+                // Issue #1470: 前回 Disconnected の場合は実行中を Reconnecting として通知
+                if (_currentConnectionState == SharedDbConnectionState.Disconnected)
+                {
+                    TransitionConnectionState(SharedDbConnectionState.Reconnecting);
+                }
+
                 var isConnected = await CheckConnectionAsync().ConfigureAwait(false);
+
+                TransitionConnectionState(isConnected
+                    ? SharedDbConnectionState.Connected
+                    : SharedDbConnectionState.Disconnected);
+
                 HealthCheckCompleted?.Invoke(this, new DatabaseHealthEventArgs(isConnected));
                 return true;
             }
@@ -201,6 +223,19 @@ namespace ICCardManager.Services
             {
                 _isHealthCheckRunning = false;
             }
+        }
+
+        /// <summary>
+        /// Issue #1470: 接続状態を遷移させ、変化があった場合のみイベントを発火する。
+        /// </summary>
+        private void TransitionConnectionState(SharedDbConnectionState newState)
+        {
+            if (_currentConnectionState == newState)
+                return;
+
+            var oldState = _currentConnectionState;
+            _currentConnectionState = newState;
+            ConnectionStateChanged?.Invoke(this, new SharedDbConnectionStateChangedEventArgs(oldState, newState));
         }
 
         private async void OnHealthCheckTick(object sender, EventArgs e)
