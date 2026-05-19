@@ -269,6 +269,7 @@ public partial class OperationLogSearchViewModel : ViewModelBase
             var page = await _operationLogRepository.SearchPreviousPageAsync(criteria, _firstCursor, PageSize);
             ApplyPage(page);
             CurrentPage = Math.Max(1, CurrentPage - 1);
+            AnnouncePageNavigation();
         }
     }
 
@@ -286,6 +287,7 @@ public partial class OperationLogSearchViewModel : ViewModelBase
             var page = await _operationLogRepository.SearchNextPageAsync(criteria, _lastCursor, PageSize);
             ApplyPage(page);
             CurrentPage++;
+            AnnouncePageNavigation();
         }
     }
 
@@ -303,6 +305,7 @@ public partial class OperationLogSearchViewModel : ViewModelBase
             var page = await _operationLogRepository.SearchFirstPageAsync(criteria, PageSize);
             ApplyPage(page);
             CurrentPage = 1;
+            AnnouncePageNavigation();
         }
     }
 
@@ -318,6 +321,22 @@ public partial class OperationLogSearchViewModel : ViewModelBase
             var page = await _operationLogRepository.SearchLastPageAsync(criteria, PageSize);
             ApplyPage(page);
             CurrentPage = Math.Max(1, TotalPages);
+            AnnouncePageNavigation();
+        }
+    }
+
+    /// <summary>
+    /// Issue #1507: ページ送り完了時にスクリーンリーダー向けのアナウンスを <see cref="StatusMessage"/> にセットする。
+    /// 検索時の StatusMessage（"N 件の操作ログが見つかりました"）と異なる文字列にすることで、
+    /// PropertyChanged 通知が確実に発火し、 Polite Live Region として読み上げられる
+    /// （CurrentPageNumberText 単体の Live Region 通知は Narrator が連続発火の中で取りこぼすため、
+    /// 確実に読み上げ実績がある <see cref="StatusMessage"/> ルートで補強する）。
+    /// </summary>
+    private void AnnouncePageNavigation()
+    {
+        if (TotalPages > 0)
+        {
+            SetStatus($"ページ {CurrentPage} / {TotalPages} に移動しました（合計 {TotalCount} 件）", false);
         }
     }
 
