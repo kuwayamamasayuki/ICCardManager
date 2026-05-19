@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Diagnostics;
+using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
 using System.Windows;
@@ -72,15 +73,33 @@ namespace ICCardManager.Views.Dialogs
         /// 発火しないため、明示的に <c>UIElementAutomationPeer.RaiseAutomationEvent</c> を呼ぶ
         /// （Issue #1509 で StaffAuthDialog に確立されたパターンを ViewModel バインド向けに適用）。
         /// </summary>
+        // Issue #1507 診断ログ: CurrentPageNumberText だけ Narrator が読み上げない原因切り分け用。
+        // ファイル出力先: %TEMP%\ICCardManager_LiveRegionDiag.log（IDE 不要でユーザーが直接確認可能）。
+        // 原因特定後にこの診断コードは revert で除去する（一時的な調査用コード）。
+        private static readonly string DiagLogPath =
+            Path.Combine(Path.GetTempPath(), "ICCardManager_LiveRegionDiag.log");
+
+        private static void WriteDiagLog(string message)
+        {
+            try
+            {
+                File.AppendAllText(
+                    DiagLogPath,
+                    $"{DateTime.Now:HH:mm:ss.fff} {message}{Environment.NewLine}");
+            }
+            catch
+            {
+                // 診断ログ書き込み失敗はアプリ本体に影響させない（一時コードのため）
+            }
+            Debug.WriteLine(message);
+        }
+
         private void OnViewModelPropertyChanged(object? sender, PropertyChangedEventArgs e)
         {
             var isBusy = (sender as OperationLogSearchViewModel)?.IsBusy ?? false;
             var targetName = GetTargetElementName(e.PropertyName, isBusy);
 
-            // Issue #1507 診断ログ: CurrentPageNumberText だけ Narrator が読み上げない原因切り分け用。
-            // ユーザーが Visual Studio の Output ウィンドウ（または DebugView）で確認できる。
-            // 原因特定後にこの Debug.WriteLine 群は削除する（一時的な調査用コード）。
-            Debug.WriteLine(
+            WriteDiagLog(
                 $"[LiveRegion #1507] PropertyChanged: name='{e.PropertyName}', isBusy={isBusy}, " +
                 $"target='{targetName ?? "<null>"}', threadId={System.Threading.Thread.CurrentThread.ManagedThreadId}");
 
@@ -132,17 +151,17 @@ namespace ICCardManager.Views.Dialogs
             var existingPeer = UIElementAutomationPeer.FromElement(element);
             var peer = existingPeer ?? UIElementAutomationPeer.CreatePeerForElement(element);
             var peerName = peer?.GetName() ?? "<peer-null>";
-            Debug.WriteLine(
+            WriteDiagLog(
                 $"[LiveRegion #1507]   target='{targetName}', Text='{textValue}', peer.GetName()='{peerName}', " +
                 $"peerExisted={existingPeer is not null}, peerType={peer?.GetType().Name ?? "null"}");
 
             if (peer is null)
             {
-                Debug.WriteLine($"[LiveRegion #1507]   peer is null, skipped");
+                WriteDiagLog($"[LiveRegion #1507]   peer is null, skipped");
                 return;
             }
             peer.RaiseAutomationEvent(AutomationEvents.LiveRegionChanged);
-            Debug.WriteLine($"[LiveRegion #1507]   Raised LiveRegionChanged on '{targetName}'");
+            WriteDiagLog($"[LiveRegion #1507]   Raised LiveRegionChanged on '{targetName}'");
         }
 
         private void OnClosed(object? sender, EventArgs e)
