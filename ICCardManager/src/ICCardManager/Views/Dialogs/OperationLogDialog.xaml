@@ -327,12 +327,17 @@
                          Inlines 変更が親 TextBlock の Text プロパティ更新を伴わず TextBlockAutomationPeer の Name キャッシュが
                          invalidate されないため、コードビハインドの LiveRegionChanged 発火が Narrator に届かなかった。
                          ViewModel 派生プロパティ PageNumberDisplay 経由で Text を単一バインドする方式に変更した。
+                         Issue #1507（フォーマル）: 派生プロパティ化 + Dispatcher 遅延発火 + BusyMessage 抑制を試みたが、
+                         実機検証で依然 Narrator が読み上げない（[Loaded] 時点で Text/peer.GetName() は新値で確認済み）。
+                         原因は Polite Live Region の連続発火で前後の通知に押し負けることと推定。
+                         ページ送り操作はユーザーの明示アクションなので Assertive（割り込み読み上げ）を許容し、
+                         「N / M ページ」を確実に読み上げさせる方針に変更した。
                          x:Name は Issue #1501 の回帰テスト（Dynamic_text_blocks_should_not_have_AutomationProperties_Name）の検出対象識別子。 -->
                     <TextBlock x:Name="CurrentPageNumberText"
                                Text="{Binding PageNumberDisplay, Mode=OneWay}"
                                VerticalAlignment="Center" Margin="15,0"
                                AutomationProperties.HelpText="現在表示中のページ番号と総ページ数"
-                               AutomationProperties.LiveSetting="Polite"/>
+                               AutomationProperties.LiveSetting="Assertive"/>
                     <Button Content="&#x25B6;"
                             Command="{Binding NextPageCommand}"
                             IsEnabled="{Binding HasNextPage}"
