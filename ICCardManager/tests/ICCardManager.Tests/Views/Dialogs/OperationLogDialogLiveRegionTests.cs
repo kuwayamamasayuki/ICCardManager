@@ -18,7 +18,9 @@ public class OperationLogDialogLiveRegionTests
     // CurrentPageNumberText の読み上げを発火するように変更（Run 構成 → 単一 Text バインドへの移行に対応）。
     [InlineData("PageNumberDisplay", false, "CurrentPageNumberText")]
     [InlineData("StatusMessage", false, "StatusMessageText")]
-    [InlineData("BusyMessage", false, "ProcessingOverlayText")]
+    // Issue #1507: BusyMessage は IsBusy=true 時のみ通知（IsBusy=false 時の不要発火を抑制し、
+    // 直前の PageNumberDisplay 等の読み上げを Narrator のキュー上で阻害しないため）。
+    [InlineData("BusyMessage", true, "ProcessingOverlayText")]
     public void GetTargetElementName_対象プロパティ変化時に_対応するTextBlock名を返すこと(
         string propertyName, bool isBusy, string expectedTargetName)
     {
@@ -38,6 +40,15 @@ public class OperationLogDialogLiveRegionTests
     {
         // IsBusy=false への遷移はオーバーレイ非表示なので通知不要
         var result = OperationLogDialog.GetTargetElementName("IsBusy", isBusy: false);
+        result.Should().BeNull();
+    }
+
+    [Fact]
+    public void GetTargetElementName_BusyMessageかつIsBusyがfalseの場合_nullを返すこと()
+    {
+        // Issue #1507: IsBusy=false への遷移直後の BusyMessage 通知（最終値の残り）は
+        // ProcessingOverlay 非表示中で読み上げノイズになるため、対象外（null）に抑制する。
+        var result = OperationLogDialog.GetTargetElementName("BusyMessage", isBusy: false);
         result.Should().BeNull();
     }
 
