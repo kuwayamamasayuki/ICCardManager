@@ -192,17 +192,19 @@ public class PathValidatorTests : IDisposable
 
         // Assert: UNC 形式エラー（"サーバー名と共有名が必要" 等）の発生有無が一致すること。
         // 書き込み権限チェックの結果は環境依存なので除外し、形式メッセージのみ比較する。
+        // Issue #1471 で「サーバー名が不正」「共有名が不正」を「サーバー名が空」「共有名が空」に
+        // 文言変更したため、OR 句にもこのキーワードを含めて等価判定の検出範囲を維持する。
         bool BackslashHasFormatError() =>
             backslashResult.ErrorMessage != null &&
             (backslashResult.ErrorMessage.Contains("サーバー名と共有名が必要") ||
-             backslashResult.ErrorMessage.Contains("サーバー名が不正") ||
-             backslashResult.ErrorMessage.Contains("共有名が不正"));
+             backslashResult.ErrorMessage.Contains("サーバー名が空") ||
+             backslashResult.ErrorMessage.Contains("共有名が空"));
 
         bool ForwardSlashHasFormatError() =>
             forwardSlashResult.ErrorMessage != null &&
             (forwardSlashResult.ErrorMessage.Contains("サーバー名と共有名が必要") ||
-             forwardSlashResult.ErrorMessage.Contains("サーバー名が不正") ||
-             forwardSlashResult.ErrorMessage.Contains("共有名が不正"));
+             forwardSlashResult.ErrorMessage.Contains("サーバー名が空") ||
+             forwardSlashResult.ErrorMessage.Contains("共有名が空"));
 
         BackslashHasFormatError().Should().Be(ForwardSlashHasFormatError(),
             $"両プレフィックスは UNC 形式検証で同じ判定を返すべき。" +
