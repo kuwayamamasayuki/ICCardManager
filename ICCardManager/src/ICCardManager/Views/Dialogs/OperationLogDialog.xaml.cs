@@ -8,6 +8,7 @@ using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Automation.Peers;
 using System.Windows.Controls;
+using System.Windows.Threading;
 using ICCardManager.Common;
 using ICCardManager.ViewModels;
 
@@ -136,7 +137,12 @@ namespace ICCardManager.Views.Dialogs
                 // PageNumberDisplay の PropertyChanged を発火するため、このマッピングだけで読み上げをカバーできる。
                 nameof(OperationLogSearchViewModel.PageNumberDisplay) => "CurrentPageNumberText",
                 nameof(OperationLogSearchViewModel.StatusMessage) => "StatusMessageText",
-                nameof(OperationLogSearchViewModel.BusyMessage) => "ProcessingOverlayText",
+                // Issue #1507: BusyMessage の通知は IsBusy=true 時のオーバーレイ表示中のみ有意。
+                // IsBusy=false への遷移直後にも BusyMessage の最終値が再通知されるが、その時点でオーバーレイは
+                // 非表示で読み上げノイズになり、直前の PageNumberDisplay/StatusMessage の Live Region 通知の
+                // 読み上げを Narrator のキュー上で阻害する（連続発火による上書き・抑制の挙動）。
+                // IsBusy=true 時のみマッピング対象とすることで不要発火を抑制する。
+                nameof(OperationLogSearchViewModel.BusyMessage) => isBusy ? "ProcessingOverlayText" : null,
                 // IsBusy=true への遷移時のみオーバーレイ出現の通知が必要。false への遷移（非表示）は不要。
                 nameof(OperationLogSearchViewModel.IsBusy) => isBusy ? "ProcessingOverlayText" : null,
                 _ => null
@@ -145,23 +151,32 @@ namespace ICCardManager.Views.Dialogs
 
         private static void RaiseLiveRegionChanged(UIElement element, string targetName)
         {
-            // Issue #1507 診断ログ: target.Text が新しい値（例: "2 / 3 ページ"）に更新済みか確認。
-            // peer.GetName() は Narrator が読む文字列。両者が一致しない場合は Binding/Peer のキャッシュ問題。
-            var textValue = element is TextBlock tb ? tb.Text : "<not TextBlock>";
-            var existingPeer = UIElementAutomationPeer.FromElement(element);
-            var peer = existingPeer ?? UIElementAutomationPeer.CreatePeerForElement(element);
-            var peerName = peer?.GetName() ?? "<peer-null>";
-            WriteDiagLog(
-                $"[LiveRegion #1507]   target='{targetName}', Text='{textValue}', peer.GetName()='{peerName}', " +
-                $"peerExisted={existingPeer is not null}, peerType={peer?.GetType().Name ?? "null"}");
+            // Issue #1507 診断ログ（同期発火前の値）: target.Text が PropertyChanged 直後の時点で新値か古い値かを確認。
+            var textBefore = element is TextBlock tb ? tb.Text : "<not TextBlock>";
+            WriteDiagLog($"[LiveRegion #1507]   target='{targetName}', Text(before-dispatch)='{textBefore}'");
 
-            if (peer is null)
+            // Issue #1507: PropertyChanged → Binding の Text 更新 → Render → LiveRegionChanged 発火、の順を保証するため、
+            // DispatcherPriority.Loaded で 1 サイクル待ってから発火する。
+            // 同期発火だと Binding の Source→Target 更新が完了する前に Narrator が peer.GetName() を問い合わせ、
+            // 古い Text 値が読まれる or 変化を認識されずスキップされる挙動になる（ログ分析で判明）。
+            element.Dispatcher.BeginInvoke(DispatcherPriority.Loaded, new Action(() =>
             {
-                WriteDiagLog($"[LiveRegion #1507]   peer is null, skipped");
-                return;
-            }
-            peer.RaiseAutomationEvent(AutomationEvents.LiveRegionChanged);
-            WriteDiagLog($"[LiveRegion #1507]   Raised LiveRegionChanged on '{targetName}'");
+                var textAfter = element is TextBlock tb2 ? tb2.Text : "<not TextBlock>";
+                var existingPeer = UIElementAutomationPeer.FromElement(element);
+                var peer = existingPeer ?? UIElementAutomationPeer.CreatePeerForElement(element);
+                var peerName = peer?.GetName() ?? "<peer-null>";
+                WriteDiagLog(
+                    $"[LiveRegion #1507]   [Loaded] target='{targetName}', Text(after-dispatch)='{textAfter}', " +
+                    $"peer.GetName()='{peerName}', peerExisted={existingPeer is not null}");
+
+                if (peer is null)
+                {
+                    WriteDiagLog($"[LiveRegion #1507]   [Loaded] peer is null, skipped");
+                    return;
+                }
+                peer.RaiseAutomationEvent(AutomationEvents.LiveRegionChanged);
+                WriteDiagLog($"[LiveRegion #1507]   [Loaded] Raised LiveRegionChanged on '{targetName}'");
+            }));
         }
 
         private void OnClosed(object? sender, EventArgs e)
