@@ -1,10 +1,12 @@
 using System;
 using System.Collections.Generic;
 using System.ComponentModel;
+using System.Diagnostics;
 using System.Linq;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Automation.Peers;
+using System.Windows.Controls;
 using ICCardManager.Common;
 using ICCardManager.ViewModels;
 
@@ -74,6 +76,14 @@ namespace ICCardManager.Views.Dialogs
         {
             var isBusy = (sender as OperationLogSearchViewModel)?.IsBusy ?? false;
             var targetName = GetTargetElementName(e.PropertyName, isBusy);
+
+            // Issue #1507 診断ログ: CurrentPageNumberText だけ Narrator が読み上げない原因切り分け用。
+            // ユーザーが Visual Studio の Output ウィンドウ（または DebugView）で確認できる。
+            // 原因特定後にこの Debug.WriteLine 群は削除する（一時的な調査用コード）。
+            Debug.WriteLine(
+                $"[LiveRegion #1507] PropertyChanged: name='{e.PropertyName}', isBusy={isBusy}, " +
+                $"target='{targetName ?? "<null>"}', threadId={System.Threading.Thread.CurrentThread.ManagedThreadId}");
+
             UIElement? target = targetName switch
             {
                 "PageInfoText" => PageInfoText,
@@ -84,7 +94,7 @@ namespace ICCardManager.Views.Dialogs
             };
             if (target is not null)
             {
-                RaiseLiveRegionChanged(target);
+                RaiseLiveRegionChanged(target, targetName!);
             }
         }
 
@@ -114,11 +124,25 @@ namespace ICCardManager.Views.Dialogs
             };
         }
 
-        private static void RaiseLiveRegionChanged(UIElement element)
+        private static void RaiseLiveRegionChanged(UIElement element, string targetName)
         {
-            var peer = UIElementAutomationPeer.FromElement(element)
-                       ?? UIElementAutomationPeer.CreatePeerForElement(element);
+            // Issue #1507 診断ログ: target.Text が新しい値（例: "2 / 3 ページ"）に更新済みか確認。
+            // peer.GetName() は Narrator が読む文字列。両者が一致しない場合は Binding/Peer のキャッシュ問題。
+            var textValue = element is TextBlock tb ? tb.Text : "<not TextBlock>";
+            var existingPeer = UIElementAutomationPeer.FromElement(element);
+            var peer = existingPeer ?? UIElementAutomationPeer.CreatePeerForElement(element);
+            var peerName = peer?.GetName() ?? "<peer-null>";
+            Debug.WriteLine(
+                $"[LiveRegion #1507]   target='{targetName}', Text='{textValue}', peer.GetName()='{peerName}', " +
+                $"peerExisted={existingPeer is not null}, peerType={peer?.GetType().Name ?? "null"}");
+
+            if (peer is null)
+            {
+                Debug.WriteLine($"[LiveRegion #1507]   peer is null, skipped");
+                return;
+            }
             peer.RaiseAutomationEvent(AutomationEvents.LiveRegionChanged);
+            Debug.WriteLine($"[LiveRegion #1507]   Raised LiveRegionChanged on '{targetName}'");
         }
 
         private void OnClosed(object? sender, EventArgs e)
