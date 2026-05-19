@@ -5,6 +5,8 @@ using System.Linq;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Automation.Peers;
+using System.Windows.Controls;
+using System.Windows.Threading;
 using ICCardManager.Common;
 using ICCardManager.ViewModels;
 
@@ -101,10 +103,17 @@ namespace ICCardManager.Views.Dialogs
             return propertyName switch
             {
                 nameof(OperationLogSearchViewModel.PageInfo) => "PageInfoText",
-                nameof(OperationLogSearchViewModel.CurrentPage) => "CurrentPageNumberText",
-                nameof(OperationLogSearchViewModel.TotalPages) => "CurrentPageNumberText",
+                // Issue #1548/#1507: CurrentPage / TotalPages 単体の通知で旧 Run 構成の CurrentPageNumberText に
+                // LiveRegion を発火しても Narrator に届かなかった。派生プロパティ PageNumberDisplay 経由（単一 Text バインド）に
+                // 移行し、ViewModel 側の [NotifyPropertyChangedFor] が CurrentPage/TotalPages 変化に応じて
+                // PageNumberDisplay の PropertyChanged を発火するため、このマッピングだけで読み上げをカバーできる。
+                nameof(OperationLogSearchViewModel.PageNumberDisplay) => "CurrentPageNumberText",
                 nameof(OperationLogSearchViewModel.StatusMessage) => "StatusMessageText",
-                nameof(OperationLogSearchViewModel.BusyMessage) => "ProcessingOverlayText",
+                // Issue #1507: BusyMessage の通知は IsBusy=true 時のオーバーレイ表示中のみ有意。
+                // IsBusy=false への遷移直後にも BusyMessage の最終値が再通知されるが、その時点でオーバーレイは
+                // 非表示で読み上げノイズになり、直前の Live Region 通知の読み上げを Narrator のキュー上で阻害する。
+                // IsBusy=true 時のみマッピング対象とすることで不要発火を抑制する。
+                nameof(OperationLogSearchViewModel.BusyMessage) => isBusy ? "ProcessingOverlayText" : null,
                 // IsBusy=true への遷移時のみオーバーレイ出現の通知が必要。false への遷移（非表示）は不要。
                 nameof(OperationLogSearchViewModel.IsBusy) => isBusy ? "ProcessingOverlayText" : null,
                 _ => null
@@ -113,9 +122,19 @@ namespace ICCardManager.Views.Dialogs
 
         private static void RaiseLiveRegionChanged(UIElement element)
         {
-            var peer = UIElementAutomationPeer.FromElement(element)
-                       ?? UIElementAutomationPeer.CreatePeerForElement(element);
-            peer.RaiseAutomationEvent(AutomationEvents.LiveRegionChanged);
+            // Issue #1507: PropertyChanged → Binding の Text 更新 → Render → LiveRegionChanged 発火、
+            // の順を保証するため、 DispatcherPriority.ApplicationIdle で 1 サイクル待ってから発火する。
+            // 同期発火だと Binding の Source→Target 更新が完了する前に Narrator が peer.GetName() を問い合わせ、
+            // 古い Text 値が読まれる挙動になる（実機検証で判明）。
+            // ApplicationIdle はフォーカス関連の Narrator 処理を含むすべての処理が完了したアイドル状態で走る。
+            // ただし Narrator はフォーカス位置のキー操作フィードバック中は Live Region 通知を抑制する
+            // 仕様があり、ページ送りの中間ページでは完全に読み上げられない既知制約あり（PR #1555 参照）。
+            element.Dispatcher.BeginInvoke(DispatcherPriority.ApplicationIdle, new Action(() =>
+            {
+                var peer = UIElementAutomationPeer.FromElement(element)
+                           ?? UIElementAutomationPeer.CreatePeerForElement(element);
+                peer?.RaiseAutomationEvent(AutomationEvents.LiveRegionChanged);
+            }));
         }
 
         private void OnClosed(object? sender, EventArgs e)

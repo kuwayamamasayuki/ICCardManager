@@ -107,15 +107,20 @@ public partial class OperationLogSearchViewModel : ViewModelBase
 
     // ページネーション
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(PageInfo))]
+    [NotifyPropertyChangedFor(nameof(PageNumberDisplay))]
     private int _currentPage = 1;
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(PageNumberDisplay))]
     private int _totalPages;
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(PageInfo))]
     private int _totalCount;
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(PageInfo))]
     private int _pageSize = 50;
 
     [ObservableProperty]
@@ -167,6 +172,14 @@ public partial class OperationLogSearchViewModel : ViewModelBase
     public string PageInfo => TotalCount > 0
         ? $"{TotalCount}件中 {(CurrentPage - 1) * PageSize + 1}～{Math.Min(CurrentPage * PageSize, TotalCount)}件を表示"
         : "0件";
+
+    // Issue #1548/#1507: CurrentPageNumberText TextBlock 用の単一バインド文字列。
+    // 元は XAML 側で <Run Text="{Binding CurrentPage}"/> <Run Text=" / "/> <Run Text="{Binding TotalPages}"/> と
+    // Run 3 つで組み立てていたが、Run 構成では Inlines 変更が親 TextBlock の Text プロパティ更新を伴わず、
+    // TextBlockAutomationPeer の Name キャッシュが invalidate されないため、コードビハインドで
+    // LiveRegionChanged を発火しても Narrator が新しいテキストを取得しなかった。
+    // 派生プロパティ化し Text を単一バインドにすることで LiveRegion 通知時に新テキストが読み上げられる。
+    public string PageNumberDisplay => $"{CurrentPage} / {TotalPages} ページ";
 
     public OperationLogSearchViewModel(
         IOperationLogRepository operationLogRepository,
@@ -234,7 +247,8 @@ public partial class OperationLogSearchViewModel : ViewModelBase
         _firstCursor = page.FirstCursor;
         _lastCursor = page.LastCursor;
 
-        OnPropertyChanged(nameof(PageInfo));
+        // Issue #1548/#1507: PageInfo の通知は TotalCount setter の [NotifyPropertyChangedFor] で
+        // 自動発火するため、ここでの手動 OnPropertyChanged(nameof(PageInfo)) は不要（二重通知防止）。
 
         SetStatus(TotalCount > 0
             ? $"{TotalCount}件の操作ログが見つかりました"
@@ -255,6 +269,7 @@ public partial class OperationLogSearchViewModel : ViewModelBase
             var page = await _operationLogRepository.SearchPreviousPageAsync(criteria, _firstCursor, PageSize);
             ApplyPage(page);
             CurrentPage = Math.Max(1, CurrentPage - 1);
+            AnnouncePageNavigation();
         }
     }
 
@@ -272,6 +287,7 @@ public partial class OperationLogSearchViewModel : ViewModelBase
             var page = await _operationLogRepository.SearchNextPageAsync(criteria, _lastCursor, PageSize);
             ApplyPage(page);
             CurrentPage++;
+            AnnouncePageNavigation();
         }
     }
 
@@ -289,6 +305,7 @@ public partial class OperationLogSearchViewModel : ViewModelBase
             var page = await _operationLogRepository.SearchFirstPageAsync(criteria, PageSize);
             ApplyPage(page);
             CurrentPage = 1;
+            AnnouncePageNavigation();
         }
     }
 
@@ -304,7 +321,32 @@ public partial class OperationLogSearchViewModel : ViewModelBase
             var page = await _operationLogRepository.SearchLastPageAsync(criteria, PageSize);
             ApplyPage(page);
             CurrentPage = Math.Max(1, TotalPages);
+            AnnouncePageNavigation();
         }
+    }
+
+    /// <summary>
+    /// Issue #1507: ページ送り完了時にスクリーンリーダー向けのアナウンスを <see cref="StatusMessage"/> にセットする。
+    /// 検索時の StatusMessage（"N 件の操作ログが見つかりました"）と異なる文字列にすることで、
+    /// PropertyChanged 通知が確実に発火し、 Polite Live Region として読み上げられる
+    /// （CurrentPageNumberText 単体の Live Region 通知は Narrator が連続発火の中で取りこぼすため、
+    /// 確実に読み上げ実績がある <see cref="StatusMessage"/> ルートで補強する）。
+    /// </summary>
+    private void AnnouncePageNavigation()
+    {
+        if (TotalPages > 0)
+        {
+            SetStatus(FormatPageNavigationStatus(CurrentPage, TotalPages, TotalCount), false);
+        }
+    }
+
+    /// <summary>
+    /// Issue #1507: ページ送り完了時の <see cref="StatusMessage"/> 文字列フォーマット（純粋関数）。
+    /// 単体テスト容易化のため <c>internal static</c> に分離。フォーマットリグレッションを単体テストで固定する。
+    /// </summary>
+    internal static string FormatPageNavigationStatus(int currentPage, int totalPages, int totalCount)
+    {
+        return $"ページ {currentPage} / {totalPages} に移動しました（合計 {totalCount} 件）";
     }
 
     /// <summary>
