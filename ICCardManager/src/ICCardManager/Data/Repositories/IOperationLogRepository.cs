@@ -87,6 +87,15 @@ namespace ICCardManager.Data.Repositories
         Task<int> InsertAsync(OperationLog log);
 
         /// <summary>
+        /// 操作ログを既存トランザクション内で記録する (Issue #1458)。
+        /// Ledger 操作と同一トランザクションで監査ログを書き込むことで fsync 1 回分の往復を削減する。
+        /// </summary>
+        /// <param name="log">記録するログ</param>
+        /// <param name="transaction">既存トランザクション</param>
+        /// <returns>挿入されたログのID</returns>
+        Task<int> InsertAsync(OperationLog log, System.Data.SQLite.SQLiteTransaction transaction);
+
+        /// <summary>
         /// 指定期間の操作ログを取得
         /// </summary>
         /// <param name="fromDate">開始日</param>

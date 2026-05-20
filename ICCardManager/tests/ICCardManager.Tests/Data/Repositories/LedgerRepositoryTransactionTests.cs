@@ -203,4 +203,135 @@ public class LedgerRepositoryTransactionTests : IDisposable
         var persisted = await _repository.GetByIdAsync(ledgerId);
         persisted.Should().NotBeNull();
     }
+
+    #region DeleteAsync(int, SQLiteTransaction) テスト (Issue #1458)
+
+    [Fact]
+    public async Task DeleteAsync_WithTransactionCommitted_RemovesRow()
+    {
+        var ledgerId = await _repository.InsertAsync(CreateLedger());
+
+        using (var scope = await _dbContext.BeginTransactionAsync())
+        {
+            await _repository.DeleteAsync(ledgerId, scope.Transaction);
+            scope.Commit();
+        }
+
+        var persisted = await _repository.GetByIdAsync(ledgerId);
+        persisted.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task DeleteAsync_WithTransactionRolledBack_RowRemains()
+    {
+        var ledgerId = await _repository.InsertAsync(CreateLedger());
+
+        using (var scope = await _dbContext.BeginTransactionAsync())
+        {
+            await _repository.DeleteAsync(ledgerId, scope.Transaction);
+            scope.Rollback();
+        }
+
+        var persisted = await _repository.GetByIdAsync(ledgerId);
+        persisted.Should().NotBeNull("Rollback 後は削除が取り消されデータが残るはず");
+    }
+
+    #endregion
+
+    #region MergeLedgersAsync(..., SQLiteTransaction) テスト (Issue #1458)
+
+    [Fact]
+    public async Task MergeLedgersAsync_WithTransactionCommitted_MergesLedgers()
+    {
+        var targetId = await _repository.InsertAsync(CreateLedger(summary: "ターゲット"));
+        var sourceId = await _repository.InsertAsync(CreateLedger(summary: "ソース"));
+
+        var updatedTarget = await _repository.GetByIdAsync(targetId);
+        updatedTarget!.Summary = "統合後";
+
+        using (var scope = await _dbContext.BeginTransactionAsync())
+        {
+            var success = await _repository.MergeLedgersAsync(targetId, new[] { sourceId }, updatedTarget, scope.Transaction);
+            success.Should().BeTrue();
+            scope.Commit();
+        }
+
+        var afterTarget = await _repository.GetByIdAsync(targetId);
+        afterTarget.Should().NotBeNull();
+        afterTarget!.Summary.Should().Be("統合後");
+        var afterSource = await _repository.GetByIdAsync(sourceId);
+        afterSource.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task MergeLedgersAsync_WithTransactionRolledBack_LeavesLedgersUnchanged()
+    {
+        var targetId = await _repository.InsertAsync(CreateLedger(summary: "ターゲット"));
+        var sourceId = await _repository.InsertAsync(CreateLedger(summary: "ソース"));
+
+        var updatedTarget = await _repository.GetByIdAsync(targetId);
+        updatedTarget!.Summary = "統合後（rollback されるべき）";
+
+        using (var scope = await _dbContext.BeginTransactionAsync())
+        {
+            await _repository.MergeLedgersAsync(targetId, new[] { sourceId }, updatedTarget, scope.Transaction);
+            scope.Rollback();
+        }
+
+        var afterTarget = await _repository.GetByIdAsync(targetId);
+        afterTarget!.Summary.Should().Be("ターゲット");
+        var afterSource = await _repository.GetByIdAsync(sourceId);
+        afterSource.Should().NotBeNull();
+    }
+
+    #endregion
+
+    #region ReplaceDetailsAsync(..., SQLiteTransaction) テスト (Issue #1458)
+
+    [Fact]
+    public async Task ReplaceDetailsAsync_WithTransactionCommitted_ReplacesDetails()
+    {
+        var ledgerId = await _repository.InsertAsync(CreateLedger());
+        await _repository.InsertDetailAsync(CreateDetail(ledgerId, amount: 210, balance: 1000));
+
+        var newDetails = new List<LedgerDetail>
+        {
+            CreateDetail(ledgerId, amount: 100, balance: 900),
+            CreateDetail(ledgerId, amount: 200, balance: 700)
+        };
+
+        using (var scope = await _dbContext.BeginTransactionAsync())
+        {
+            await _repository.ReplaceDetailsAsync(ledgerId, newDetails, scope.Transaction);
+            scope.Commit();
+        }
+
+        var persisted = await _repository.GetByIdAsync(ledgerId);
+        persisted!.Details.Should().HaveCount(2);
+        persisted.Details.Select(d => d.Amount).Should().BeEquivalentTo(new[] { 100, 200 });
+    }
+
+    [Fact]
+    public async Task ReplaceDetailsAsync_WithTransactionRolledBack_KeepsOldDetails()
+    {
+        var ledgerId = await _repository.InsertAsync(CreateLedger());
+        await _repository.InsertDetailAsync(CreateDetail(ledgerId, amount: 210, balance: 1000));
+
+        var newDetails = new List<LedgerDetail>
+        {
+            CreateDetail(ledgerId, amount: 999, balance: 1)
+        };
+
+        using (var scope = await _dbContext.BeginTransactionAsync())
+        {
+            await _repository.ReplaceDetailsAsync(ledgerId, newDetails, scope.Transaction);
+            scope.Rollback();
+        }
+
+        var persisted = await _repository.GetByIdAsync(ledgerId);
+        persisted!.Details.Should().HaveCount(1);
+        persisted.Details[0].Amount.Should().Be(210, "Rollback 後は元の detail が残るはず");
+    }
+
+    #endregion
 }

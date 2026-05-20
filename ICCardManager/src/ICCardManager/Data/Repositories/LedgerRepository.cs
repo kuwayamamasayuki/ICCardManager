@@ -276,24 +276,47 @@ WHERE id = @id";
         }
 
         /// <inheritdoc/>
-        public async Task<bool> DeleteAsync(int id)
+        public Task<bool> DeleteAsync(int id) => DeleteAsync(id, transaction: null);
+
+        /// <inheritdoc/>
+        public async Task<bool> DeleteAsync(int id, SQLiteTransaction transaction)
         {
-            using var lease = await _dbContext.LeaseConnectionAsync();
-            var connection = lease.Connection;
+            ConnectionLease lease = null;
+            try
+            {
+                SQLiteConnection connection;
+                if (transaction != null)
+                {
+                    connection = (SQLiteConnection)transaction.Connection;
+                }
+                else
+                {
+                    lease = await _dbContext.LeaseConnectionAsync().ConfigureAwait(false);
+                    connection = lease.Connection;
+                }
 
-            // 詳細レコードを先に削除
-            using var deleteDetailCommand = connection.CreateCommand();
-            deleteDetailCommand.CommandText = "DELETE FROM ledger_detail WHERE ledger_id = @id";
-            deleteDetailCommand.Parameters.AddWithValue("@id", id);
-            await deleteDetailCommand.ExecuteNonQueryAsync();
+                // 詳細レコードを先に削除
+                using (var deleteDetailCommand = connection.CreateCommand())
+                {
+                    if (transaction != null) deleteDetailCommand.Transaction = transaction;
+                    deleteDetailCommand.CommandText = "DELETE FROM ledger_detail WHERE ledger_id = @id";
+                    deleteDetailCommand.Parameters.AddWithValue("@id", id);
+                    await deleteDetailCommand.ExecuteNonQueryAsync().ConfigureAwait(false);
+                }
 
-            // メインレコードを削除
-            using var command = connection.CreateCommand();
-            command.CommandText = "DELETE FROM ledger WHERE id = @id";
-            command.Parameters.AddWithValue("@id", id);
+                // メインレコードを削除
+                using var command = connection.CreateCommand();
+                if (transaction != null) command.Transaction = transaction;
+                command.CommandText = "DELETE FROM ledger WHERE id = @id";
+                command.Parameters.AddWithValue("@id", id);
 
-            var result = await command.ExecuteNonQueryAsync();
-            return result > 0;
+                var result = await command.ExecuteNonQueryAsync().ConfigureAwait(false);
+                return result > 0;
+            }
+            finally
+            {
+                lease?.Dispose();
+            }
         }
 
         /// <inheritdoc/>
@@ -960,43 +983,95 @@ WHERE card_idm IN ({string.Join(", ", parameters)})";
         }
 
         /// <inheritdoc/>
-        public async Task<bool> ReplaceDetailsAsync(int ledgerId, IEnumerable<LedgerDetail> details)
+        public Task<bool> ReplaceDetailsAsync(int ledgerId, IEnumerable<LedgerDetail> details)
+            => ReplaceDetailsAsync(ledgerId, details, transaction: null);
+
+        /// <inheritdoc/>
+        public async Task<bool> ReplaceDetailsAsync(int ledgerId, IEnumerable<LedgerDetail> details, SQLiteTransaction transaction)
         {
-            using var lease = await _dbContext.LeaseConnectionAsync();
-            var connection = lease.Connection;
+            ConnectionLease lease = null;
+            try
+            {
+                SQLiteConnection connection;
+                if (transaction != null)
+                {
+                    connection = (SQLiteConnection)transaction.Connection;
+                }
+                else
+                {
+                    lease = await _dbContext.LeaseConnectionAsync().ConfigureAwait(false);
+                    connection = lease.Connection;
+                }
 
-            // 既存の詳細をすべて削除
-            using var deleteCommand = connection.CreateCommand();
-            deleteCommand.CommandText = "DELETE FROM ledger_detail WHERE ledger_id = @ledgerId";
-            deleteCommand.Parameters.AddWithValue("@ledgerId", ledgerId);
-            await deleteCommand.ExecuteNonQueryAsync();
+                // 既存の詳細をすべて削除
+                using (var deleteCommand = connection.CreateCommand())
+                {
+                    if (transaction != null) deleteCommand.Transaction = transaction;
+                    deleteCommand.CommandText = "DELETE FROM ledger_detail WHERE ledger_id = @ledgerId";
+                    deleteCommand.Parameters.AddWithValue("@ledgerId", ledgerId);
+                    await deleteCommand.ExecuteNonQueryAsync().ConfigureAwait(false);
+                }
 
-            // 新しい詳細を登録
-            return await InsertDetailsAsync(ledgerId, details);
+                // 新しい詳細を登録（同一 tx で実行）
+                return await InsertDetailsAsync(ledgerId, details, transaction).ConfigureAwait(false);
+            }
+            finally
+            {
+                lease?.Dispose();
+            }
         }
 
         /// <inheritdoc/>
         public async Task<bool> MergeLedgersAsync(int targetLedgerId, IEnumerable<int> sourceLedgerIds, Ledger updatedTarget)
         {
-            var sourceIds = sourceLedgerIds.ToList();
-
-            using var scope = await _dbContext.BeginTransactionAsync();
-            var connection = scope.Lease.Connection;
-            var transaction = scope.Transaction;
+            // 既存非 tx 経路: 内部で tx を開き、新オーバーロードに委譲する (Issue #1458)。
+            using var scope = await _dbContext.BeginTransactionAsync().ConfigureAwait(false);
             try
             {
-                // 1. ソースの詳細をターゲットに移動（UPDATEでrowid保持）
-                foreach (var sourceId in sourceIds)
+                var result = await MergeLedgersAsync(targetLedgerId, sourceLedgerIds, updatedTarget, scope.Transaction).ConfigureAwait(false);
+                if (result)
                 {
-                    using var moveCommand = connection.CreateCommand();
-                    moveCommand.CommandText = "UPDATE ledger_detail SET ledger_id = @targetId WHERE ledger_id = @sourceId";
-                    moveCommand.Parameters.AddWithValue("@targetId", targetLedgerId);
-                    moveCommand.Parameters.AddWithValue("@sourceId", sourceId);
-                    await moveCommand.ExecuteNonQueryAsync();
+                    scope.Commit();
                 }
+                else
+                {
+                    scope.Rollback();
+                }
+                return result;
+            }
+            catch
+            {
+                scope.Rollback();
+                throw;
+            }
+        }
 
-                // 2. ターゲットLedgerを更新
-                using var updateCommand = connection.CreateCommand();
+        /// <inheritdoc/>
+        public async Task<bool> MergeLedgersAsync(
+            int targetLedgerId,
+            IEnumerable<int> sourceLedgerIds,
+            Ledger updatedTarget,
+            SQLiteTransaction transaction)
+        {
+            if (transaction == null) throw new ArgumentNullException(nameof(transaction));
+            var sourceIds = sourceLedgerIds.ToList();
+            var connection = (SQLiteConnection)transaction.Connection;
+
+            // 1. ソースの詳細をターゲットに移動（UPDATEでrowid保持）
+            foreach (var sourceId in sourceIds)
+            {
+                using var moveCommand = connection.CreateCommand();
+                moveCommand.Transaction = transaction;
+                moveCommand.CommandText = "UPDATE ledger_detail SET ledger_id = @targetId WHERE ledger_id = @sourceId";
+                moveCommand.Parameters.AddWithValue("@targetId", targetLedgerId);
+                moveCommand.Parameters.AddWithValue("@sourceId", sourceId);
+                await moveCommand.ExecuteNonQueryAsync().ConfigureAwait(false);
+            }
+
+            // 2. ターゲットLedgerを更新
+            using (var updateCommand = connection.CreateCommand())
+            {
+                updateCommand.Transaction = transaction;
                 updateCommand.CommandText = @"UPDATE ledger
 SET summary = @summary, income = @income, expense = @expense,
     balance = @balance, note = @note
@@ -1007,25 +1082,20 @@ WHERE id = @id";
                 updateCommand.Parameters.AddWithValue("@balance", updatedTarget.Balance);
                 updateCommand.Parameters.AddWithValue("@note", (object)updatedTarget.Note ?? DBNull.Value);
                 updateCommand.Parameters.AddWithValue("@id", targetLedgerId);
-                await updateCommand.ExecuteNonQueryAsync();
-
-                // 3. ソースLedgerを削除（detailsは既に移動済み）
-                foreach (var sourceId in sourceIds)
-                {
-                    using var deleteCommand = connection.CreateCommand();
-                    deleteCommand.CommandText = "DELETE FROM ledger WHERE id = @id";
-                    deleteCommand.Parameters.AddWithValue("@id", sourceId);
-                    await deleteCommand.ExecuteNonQueryAsync();
-                }
-
-                scope.Commit();
-                return true;
+                await updateCommand.ExecuteNonQueryAsync().ConfigureAwait(false);
             }
-            catch
+
+            // 3. ソースLedgerを削除（detailsは既に移動済み）
+            foreach (var sourceId in sourceIds)
             {
-                scope.Rollback();
-                throw;
+                using var deleteCommand = connection.CreateCommand();
+                deleteCommand.Transaction = transaction;
+                deleteCommand.CommandText = "DELETE FROM ledger WHERE id = @id";
+                deleteCommand.Parameters.AddWithValue("@id", sourceId);
+                await deleteCommand.ExecuteNonQueryAsync().ConfigureAwait(false);
             }
+
+            return true;
         }
 
         /// <inheritdoc/>

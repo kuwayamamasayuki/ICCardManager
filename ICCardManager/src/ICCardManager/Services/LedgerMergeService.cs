@@ -5,6 +5,7 @@ using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using ICCardManager.Common;
+using ICCardManager.Data;
 using ICCardManager.Data.Repositories;
 using ICCardManager.Models;
 using Microsoft.Extensions.Logging;
@@ -139,6 +140,7 @@ namespace ICCardManager.Services
         private readonly ILedgerRepository _ledgerRepository;
         private readonly SummaryGenerator _summaryGenerator;
         private readonly OperationLogger _operationLogger;
+        private readonly DbContext _dbContext;
         private readonly ILogger<LedgerMergeService> _logger;
 
         private static readonly JsonSerializerOptions JsonOptions = new JsonSerializerOptions
@@ -151,11 +153,13 @@ namespace ICCardManager.Services
             ILedgerRepository ledgerRepository,
             SummaryGenerator summaryGenerator,
             OperationLogger operationLogger,
+            DbContext dbContext,
             ILogger<LedgerMergeService> logger)
         {
             _ledgerRepository = ledgerRepository;
             _summaryGenerator = summaryGenerator;
             _operationLogger = operationLogger;
+            _dbContext = dbContext;
             _logger = logger;
         }
 
@@ -285,25 +289,26 @@ namespace ICCardManager.Services
 
             try
             {
-                // リポジトリで統合実行（トランザクション）
+                // Issue #1458: 統合と監査ログ INSERT を同一トランザクションで実行
                 var sourceIds = sources.Select(s => s.Id).ToList();
-                var success = await _ledgerRepository.MergeLedgersAsync(target.Id, sourceIds, target).ConfigureAwait(false);
-
-                if (!success)
+                using (var scope = await _dbContext.BeginTransactionAsync().ConfigureAwait(false))
                 {
-                    return new LedgerMergeResult
+                    var success = await _ledgerRepository.MergeLedgersAsync(target.Id, sourceIds, target, scope.Transaction).ConfigureAwait(false);
+                    if (!success)
                     {
-                        Success = false,
-                        ErrorMessage = "統合処理に失敗しました"
-                    };
+                        return new LedgerMergeResult
+                        {
+                            Success = false,
+                            ErrorMessage = "統合処理に失敗しました"
+                        };
+                    }
+                    await _operationLogger.LogLedgerMergeAsync(beforeLedgers, target, scope.Transaction).ConfigureAwait(false);
+                    scope.Commit();
                 }
 
-                // UndoデータをDBに保存
+                // UndoデータをDBに保存（独立した tx。Undo データは別系統のため tx に含めない）
                 var undoJson = JsonSerializer.Serialize(undoData, JsonOptions);
                 await _ledgerRepository.SaveMergeHistoryAsync(target.Id, description, undoJson).ConfigureAwait(false);
-
-                // 操作ログ記録
-                await _operationLogger.LogLedgerMergeAsync(beforeLedgers, target).ConfigureAwait(false);
 
                 _logger.LogInformation(
                     "Merged {Count} ledgers into ledger {TargetId}: {Summary}",

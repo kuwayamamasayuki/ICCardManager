@@ -61,6 +61,14 @@ namespace ICCardManager.Data.Repositories
         Task<bool> DeleteAsync(int id);
 
         /// <summary>
+        /// 利用履歴を既存トランザクション内で削除する (Issue #1458)。
+        /// Ledger 削除と監査ログ INSERT を同一 tx に統合するために使用する。
+        /// </summary>
+        /// <param name="id">履歴ID</param>
+        /// <param name="transaction">既存トランザクション</param>
+        Task<bool> DeleteAsync(int id, SQLiteTransaction transaction);
+
+        /// <summary>
         /// 指定カードの貸出中レコードをすべて削除
         /// </summary>
         Task<int> DeleteAllLentRecordsAsync(string cardIdm);

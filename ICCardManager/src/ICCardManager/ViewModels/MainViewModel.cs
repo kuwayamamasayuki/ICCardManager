@@ -9,6 +9,7 @@ using CommunityToolkit.Mvvm.Input;
 using CommunityToolkit.Mvvm.Messaging;
 using ICCardManager.Common;
 using ICCardManager.Common.Messages;
+using ICCardManager.Data;
 using ICCardManager.Data.Repositories;
 using ICCardManager.Dtos;
 using ICCardManager.Infrastructure.CardReader;
@@ -99,6 +100,7 @@ public partial class MainViewModel : ViewModelBase
     private readonly IStaffRepository _staffRepository;
     private readonly ICardRepository _cardRepository;
     private readonly ILedgerRepository _ledgerRepository;
+    private readonly DbContext _dbContext;
     private readonly ISettingsRepository _settingsRepository;
     private readonly LendingService _lendingService;
     private readonly IToastNotificationService _toastNotificationService;
@@ -399,6 +401,7 @@ public partial class MainViewModel : ViewModelBase
         SharedModeMonitor sharedModeMonitor,
         WarningService warningService,
         DashboardService dashboardService,
+        DbContext dbContext,
         ILogger<MainViewModel>? logger = null)
     {
         _cardReader = cardReader;
@@ -406,6 +409,7 @@ public partial class MainViewModel : ViewModelBase
         _staffRepository = staffRepository;
         _cardRepository = cardRepository;
         _ledgerRepository = ledgerRepository;
+        _dbContext = dbContext;
         _settingsRepository = settingsRepository;
         _lendingService = lendingService;
         _toastNotificationService = toastNotificationService;
@@ -1640,8 +1644,13 @@ public partial class MainViewModel : ViewModelBase
         // 削除実行
         var fullLedger = await _ledgerRepository.GetByIdAsync(ledger.Id);
         if (fullLedger == null) return;
-        await _ledgerRepository.DeleteAsync(ledger.Id);
-        await _operationLogger.LogLedgerDeleteAsync(fullLedger);
+        // Issue #1458: Ledger DELETE と監査ログ INSERT を同一トランザクションで実行
+        using (var scope = await _dbContext.BeginTransactionAsync())
+        {
+            await _ledgerRepository.DeleteAsync(ledger.Id, scope.Transaction);
+            await _operationLogger.LogLedgerDeleteAsync(fullLedger, scope.Transaction);
+            scope.Commit();
+        }
 
         await LoadHistoryLedgersAsync();
         await RefreshDashboardAsync();
@@ -1694,8 +1703,11 @@ public partial class MainViewModel : ViewModelBase
             var fullLedger = await _ledgerRepository.GetByIdAsync(ledger.Id);
             if (fullLedger != null)
             {
-                await _ledgerRepository.DeleteAsync(ledger.Id);
-                await _operationLogger.LogLedgerDeleteAsync(fullLedger);
+                // Issue #1458: Ledger DELETE と監査ログ INSERT を同一トランザクションで実行
+                using var scope = await _dbContext.BeginTransactionAsync();
+                await _ledgerRepository.DeleteAsync(ledger.Id, scope.Transaction);
+                await _operationLogger.LogLedgerDeleteAsync(fullLedger, scope.Transaction);
+                scope.Commit();
             }
 
             await LoadHistoryLedgersAsync();

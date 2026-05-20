@@ -226,6 +226,7 @@ public class MainViewModelSyncDisplayTests
             ledgerRepositoryMock.Object,
             summaryGenerator,
             operationLoggerMock.Object,
+            dbContext,
             NullLogger<LedgerMergeService>.Instance);
         var ledgerConsistencyChecker = new LedgerConsistencyChecker(ledgerRepositoryMock.Object);
 
@@ -257,7 +258,8 @@ public class MainViewModelSyncDisplayTests
             cacheServiceMock.Object,
             sharedModeMonitor,
             warningService,
-            dashboardService);
+            dashboardService,
+            dbContext);
 
         vm.IsSharedMode.Should().BeTrue("テスト用DbContext(:memory:)は共有モード扱い");
 
@@ -329,6 +331,7 @@ public class MainViewModelSyncDisplayTests
             ledgerRepositoryMock.Object,
             summaryGenerator,
             operationLoggerMock.Object,
+            dbContext,
             NullLogger<LedgerMergeService>.Instance);
         var ledgerConsistencyChecker = new LedgerConsistencyChecker(ledgerRepositoryMock.Object);
 
@@ -359,7 +362,8 @@ public class MainViewModelSyncDisplayTests
             cacheServiceMock.Object,
             sharedModeMonitor,
             warningService,
-            dashboardService);
+            dashboardService,
+            dbContext);
 
         return (vm, ledgerRepositoryMock);
     }

@@ -100,6 +100,7 @@ public class MainViewModelIntegrationTests
             _ledgerRepositoryMock.Object,
             summaryGenerator,
             _operationLogger,
+            dbContext,
             NullLogger<LedgerMergeService>.Instance);
 
         _sharedModeMonitor = new SharedModeMonitor(
@@ -171,7 +172,8 @@ public class MainViewModelIntegrationTests
             _cacheServiceMock.Object,
             _sharedModeMonitor,
             _warningService,
-            _dashboardService);
+            _dashboardService,
+            dbContext);
     }
 
     private void RaiseCardRead(string idm)

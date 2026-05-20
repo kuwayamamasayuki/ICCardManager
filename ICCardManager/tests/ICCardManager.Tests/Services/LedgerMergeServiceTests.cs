@@ -1,7 +1,9 @@
 using FluentAssertions;
+using ICCardManager.Data;
 using ICCardManager.Data.Repositories;
 using ICCardManager.Models;
 using ICCardManager.Services;
+using ICCardManager.Tests.Data;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
@@ -9,6 +11,7 @@ using Xunit;
 
 using System;
 using System.Collections.Generic;
+using System.Data.SQLite;
 using System.Linq;
 using System.Text.Json;
 using System.Threading.Tasks;
@@ -18,14 +21,21 @@ namespace ICCardManager.Tests.Services;
 /// <summary>
 /// LedgerMergeServiceのテスト
 /// </summary>
-public class LedgerMergeServiceTests
+public class LedgerMergeServiceTests : IDisposable
 {
     private readonly Mock<ILedgerRepository> _ledgerRepositoryMock;
     private readonly Mock<IOperationLogRepository> _operationLogRepositoryMock;
     private readonly Mock<IStaffRepository> _staffRepositoryMock;
     private readonly SummaryGenerator _summaryGenerator;
     private readonly OperationLogger _operationLogger;
+    private readonly DbContext _dbContext;
     private readonly LedgerMergeService _service;
+
+    public void Dispose()
+    {
+        _dbContext?.Dispose();
+        GC.SuppressFinalize(this);
+    }
 
     // テスト用定数
     private const string TestCardIdm = "0102030405060708";
@@ -50,10 +60,13 @@ public class LedgerMergeServiceTests
             _operationLogRepositoryMock.Object,
             Mock.Of<ICurrentOperatorContext>());
 
+        _dbContext = TestDbContextFactory.Create();
+
         _service = new LedgerMergeService(
             _ledgerRepositoryMock.Object,
             _summaryGenerator,
             _operationLogger,
+            _dbContext,
             NullLogger<LedgerMergeService>.Instance);
 
         // OperationLogger用のデフォルトセットアップ
@@ -159,7 +172,8 @@ public class LedgerMergeServiceTests
             .Setup(x => x.MergeLedgersAsync(
                 It.IsAny<int>(),
                 It.IsAny<IEnumerable<int>>(),
-                It.IsAny<Ledger>()))
+                It.IsAny<Ledger>(),
+                It.IsAny<SQLiteTransaction>()))
             .ReturnsAsync(true);
 
         _ledgerRepositoryMock
@@ -435,7 +449,8 @@ public class LedgerMergeServiceTests
         _ledgerRepositoryMock.Verify(x => x.MergeLedgersAsync(
             1,
             It.Is<IEnumerable<int>>(ids => ids.SequenceEqual(new[] { 2, 3 })),
-            It.IsAny<Ledger>()),
+            It.IsAny<Ledger>(),
+            It.IsAny<SQLiteTransaction>()),
             Times.Once);
     }
 
@@ -780,10 +795,10 @@ public class LedgerMergeServiceTests
         // Act
         await _service.MergeAsync(new List<int> { 1, 2 });
 
-        // Assert: OperationLogがMERGEアクションで記録されたこと
+        // Assert: OperationLogがMERGEアクションで記録されたこと（Issue #1458: tx 受入版に統一）
         _operationLogRepositoryMock.Verify(
             x => x.InsertAsync(It.Is<OperationLog>(
-                log => log.Action == "MERGE")),
+                log => log.Action == "MERGE"), It.IsAny<SQLiteTransaction>()),
             Times.Once);
     }
 
@@ -883,7 +898,7 @@ public class LedgerMergeServiceTests
         SetupGetByIdMocks(ledger1, ledger2);
 
         _ledgerRepositoryMock
-            .Setup(x => x.MergeLedgersAsync(It.IsAny<int>(), It.IsAny<IEnumerable<int>>(), It.IsAny<Ledger>()))
+            .Setup(x => x.MergeLedgersAsync(It.IsAny<int>(), It.IsAny<IEnumerable<int>>(), It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>()))
             .ReturnsAsync(false);
 
         // Act
@@ -912,7 +927,7 @@ public class LedgerMergeServiceTests
         SetupGetByIdMocks(ledger1, ledger2);
 
         _ledgerRepositoryMock
-            .Setup(x => x.MergeLedgersAsync(It.IsAny<int>(), It.IsAny<IEnumerable<int>>(), It.IsAny<Ledger>()))
+            .Setup(x => x.MergeLedgersAsync(It.IsAny<int>(), It.IsAny<IEnumerable<int>>(), It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>()))
             .ThrowsAsync(new Exception("Database error"));
 
         // Act
@@ -1789,7 +1804,7 @@ public class LedgerMergeServiceTests
         // Assert: 再マージも成功する（Undo に永続副作用がない）
         secondMerge.Success.Should().BeTrue("Undo後も同じLedgerを再統合できる");
         _ledgerRepositoryMock.Verify(
-            x => x.MergeLedgersAsync(It.IsAny<int>(), It.IsAny<IEnumerable<int>>(), It.IsAny<Ledger>()),
+            x => x.MergeLedgersAsync(It.IsAny<int>(), It.IsAny<IEnumerable<int>>(), It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>()),
             Times.Exactly(2),
             "MergeLedgersAsync が再マージ時にも呼ばれる");
     }

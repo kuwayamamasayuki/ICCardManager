@@ -5,6 +5,7 @@ using System.Linq;
 using System.Threading.Tasks;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using ICCardManager.Data;
 using ICCardManager.Data.Repositories;
 using ICCardManager.Dtos;
 using ICCardManager.Models;
@@ -35,6 +36,7 @@ namespace ICCardManager.ViewModels
         private readonly ILedgerRepository _ledgerRepository;
         private readonly IStaffRepository _staffRepository;
         private readonly OperationLogger _operationLogger;
+        private readonly DbContext _dbContext;
 
         private string _cardIdm = string.Empty;
         private string? _operatorIdm;
@@ -217,11 +219,13 @@ namespace ICCardManager.ViewModels
         public LedgerRowEditViewModel(
             ILedgerRepository ledgerRepository,
             IStaffRepository staffRepository,
-            OperationLogger operationLogger)
+            OperationLogger operationLogger,
+            DbContext dbContext)
         {
             _ledgerRepository = ledgerRepository;
             _staffRepository = staffRepository;
             _operationLogger = operationLogger;
+            _dbContext = dbContext;
         }
 
         /// <summary>
@@ -603,11 +607,14 @@ namespace ICCardManager.ViewModels
                 IsLentRecord = false
             };
 
-            var newId = await _ledgerRepository.InsertAsync(newLedger);
+            // Issue #1458: Ledger INSERT と監査ログ INSERT を同一トランザクションで実行
+            using var scope = await _dbContext.BeginTransactionAsync();
+            var newId = await _ledgerRepository.InsertAsync(newLedger, scope.Transaction);
             if (newId > 0)
             {
                 newLedger.Id = newId;
-                await _operationLogger.LogLedgerInsertAsync(newLedger);
+                await _operationLogger.LogLedgerInsertAsync(newLedger, scope.Transaction);
+                scope.Commit();
                 IsSaved = true;
             }
             else
@@ -666,19 +673,30 @@ namespace ICCardManager.ViewModels
                 ledger.StaffName = null;
             }
 
-            var result = await _ledgerRepository.UpdateAsync(ledger);
+            // Issue #1458: Ledger UPDATE と監査ログ INSERT を同一トランザクションで実行
+            bool result;
+            using (var scope = await _dbContext.BeginTransactionAsync())
+            {
+                result = await _ledgerRepository.UpdateAsync(ledger, scope.Transaction);
+                if (result)
+                {
+                    await _operationLogger.LogLedgerUpdateAsync(beforeLedger, ledger, scope.Transaction);
+                    scope.Commit();
+                }
+            }
+
             if (result)
             {
                 // Issue #983: 摘要編集時にバス停名をDetailに同期
                 // 摘要を直接編集するとLedger.Summaryは更新されるがDetail.BusStopsは更新されない。
                 // この不整合を放置すると、統合時にSummaryGenerator.Generate()が
                 // Detail.BusStopsから摘要を再生成し、修正前のバス停名に戻ってしまう。
+                // SMB 共有モードのロック競合を避けるため tx の外で実行する。
                 if (beforeLedger.Summary != ledger.Summary)
                 {
                     await SyncBusStopsFromSummaryAsync(ledger);
                 }
 
-                await _operationLogger.LogLedgerUpdateAsync(beforeLedger, ledger);
                 IsSaved = true;
             }
             else

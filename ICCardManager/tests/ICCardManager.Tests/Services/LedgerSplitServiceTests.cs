@@ -1,7 +1,9 @@
 using FluentAssertions;
+using ICCardManager.Data;
 using ICCardManager.Data.Repositories;
 using ICCardManager.Models;
 using ICCardManager.Services;
+using ICCardManager.Tests.Data;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
@@ -9,6 +11,7 @@ using Xunit;
 
 using System;
 using System.Collections.Generic;
+using System.Data.SQLite;
 using System.Linq;
 using System.Threading.Tasks;
 
@@ -17,14 +20,21 @@ namespace ICCardManager.Tests.Services;
 /// <summary>
 /// LedgerSplitServiceのテスト（Issue #634）
 /// </summary>
-public class LedgerSplitServiceTests
+public class LedgerSplitServiceTests : IDisposable
 {
     private readonly Mock<ILedgerRepository> _ledgerRepositoryMock;
     private readonly Mock<IOperationLogRepository> _operationLogRepositoryMock;
     private readonly Mock<IStaffRepository> _staffRepositoryMock;
     private readonly SummaryGenerator _summaryGenerator;
     private readonly OperationLogger _operationLogger;
+    private readonly DbContext _dbContext;
     private readonly LedgerSplitService _service;
+
+    public void Dispose()
+    {
+        _dbContext?.Dispose();
+        GC.SuppressFinalize(this);
+    }
 
     // テスト用定数
     private const string TestCardIdm = "0102030405060708";
@@ -42,15 +52,18 @@ public class LedgerSplitServiceTests
             _operationLogRepositoryMock.Object,
             Mock.Of<ICurrentOperatorContext>());
 
+        _dbContext = TestDbContextFactory.Create();
+
         _service = new LedgerSplitService(
             _ledgerRepositoryMock.Object,
             _summaryGenerator,
             _operationLogger,
+            _dbContext,
             NullLogger<LedgerSplitService>.Instance);
 
-        // OperationLogger用のデフォルトセットアップ
+        // OperationLogger用のデフォルトセットアップ (Issue #1458: tx 受入版)
         _operationLogRepositoryMock
-            .Setup(x => x.InsertAsync(It.IsAny<OperationLog>()))
+            .Setup(x => x.InsertAsync(It.IsAny<OperationLog>(), It.IsAny<SQLiteTransaction>()))
             .ReturnsAsync(1);
     }
 
@@ -158,19 +171,19 @@ public class LedgerSplitServiceTests
             .ReturnsAsync(originalLedger);
 
         _ledgerRepositoryMock
-            .Setup(x => x.ReplaceDetailsAsync(It.IsAny<int>(), It.IsAny<IEnumerable<LedgerDetail>>()))
+            .Setup(x => x.ReplaceDetailsAsync(It.IsAny<int>(), It.IsAny<IEnumerable<LedgerDetail>>(), It.IsAny<SQLiteTransaction>()))
             .ReturnsAsync(true);
 
         _ledgerRepositoryMock
-            .Setup(x => x.UpdateAsync(It.IsAny<Ledger>()))
+            .Setup(x => x.UpdateAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>()))
             .ReturnsAsync(true);
 
         _ledgerRepositoryMock
-            .Setup(x => x.InsertAsync(It.IsAny<Ledger>()))
+            .Setup(x => x.InsertAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>()))
             .ReturnsAsync(nextInsertId);
 
         _ledgerRepositoryMock
-            .Setup(x => x.InsertDetailsAsync(It.IsAny<int>(), It.IsAny<IEnumerable<LedgerDetail>>()))
+            .Setup(x => x.InsertDetailsAsync(It.IsAny<int>(), It.IsAny<IEnumerable<LedgerDetail>>(), It.IsAny<SQLiteTransaction>()))
             .ReturnsAsync(true);
     }
 
@@ -272,18 +285,18 @@ public class LedgerSplitServiceTests
 
         // 元のLedgerが更新されたことを検証
         _ledgerRepositoryMock.Verify(
-            x => x.ReplaceDetailsAsync(1, It.IsAny<IEnumerable<LedgerDetail>>()),
+            x => x.ReplaceDetailsAsync(1, It.IsAny<IEnumerable<LedgerDetail>>(), It.IsAny<SQLiteTransaction>()),
             Times.Once);
         _ledgerRepositoryMock.Verify(
-            x => x.UpdateAsync(It.Is<Ledger>(l => l.Id == 1)),
+            x => x.UpdateAsync(It.Is<Ledger>(l => l.Id == 1), It.IsAny<SQLiteTransaction>()),
             Times.Once);
 
         // 新しいLedgerが挿入されたことを検証
         _ledgerRepositoryMock.Verify(
-            x => x.InsertAsync(It.IsAny<Ledger>()),
+            x => x.InsertAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>()),
             Times.Once);
         _ledgerRepositoryMock.Verify(
-            x => x.InsertDetailsAsync(100, It.IsAny<IEnumerable<LedgerDetail>>()),
+            x => x.InsertDetailsAsync(100, It.IsAny<IEnumerable<LedgerDetail>>(), It.IsAny<SQLiteTransaction>()),
             Times.Once);
     }
 
@@ -308,16 +321,16 @@ public class LedgerSplitServiceTests
             .Setup(x => x.GetByIdAsync(1))
             .ReturnsAsync(originalLedger);
         _ledgerRepositoryMock
-            .Setup(x => x.ReplaceDetailsAsync(It.IsAny<int>(), It.IsAny<IEnumerable<LedgerDetail>>()))
+            .Setup(x => x.ReplaceDetailsAsync(It.IsAny<int>(), It.IsAny<IEnumerable<LedgerDetail>>(), It.IsAny<SQLiteTransaction>()))
             .ReturnsAsync(true);
         _ledgerRepositoryMock
-            .Setup(x => x.UpdateAsync(It.IsAny<Ledger>()))
+            .Setup(x => x.UpdateAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>()))
             .ReturnsAsync(true);
         _ledgerRepositoryMock
-            .Setup(x => x.InsertAsync(It.IsAny<Ledger>()))
+            .Setup(x => x.InsertAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>()))
             .ReturnsAsync(() => 100 + (++insertCallCount));
         _ledgerRepositoryMock
-            .Setup(x => x.InsertDetailsAsync(It.IsAny<int>(), It.IsAny<IEnumerable<LedgerDetail>>()))
+            .Setup(x => x.InsertDetailsAsync(It.IsAny<int>(), It.IsAny<IEnumerable<LedgerDetail>>(), It.IsAny<SQLiteTransaction>()))
             .ReturnsAsync(true);
 
         var details = new List<LedgerDetail>
@@ -339,7 +352,7 @@ public class LedgerSplitServiceTests
 
         // InsertAsyncが2回呼ばれたことを検証
         _ledgerRepositoryMock.Verify(
-            x => x.InsertAsync(It.IsAny<Ledger>()),
+            x => x.InsertAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>()),
             Times.Exactly(2));
     }
 
@@ -558,8 +571,8 @@ public class LedgerSplitServiceTests
 
         Ledger? insertedLedger = null;
         _ledgerRepositoryMock
-            .Setup(x => x.InsertAsync(It.IsAny<Ledger>()))
-            .Callback<Ledger>(l => insertedLedger = l)
+            .Setup(x => x.InsertAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>()))
+            .Callback<Ledger, SQLiteTransaction>((l, _) => insertedLedger = l)
             .ReturnsAsync(100);
 
         var details = new List<LedgerDetail>
@@ -603,14 +616,14 @@ public class LedgerSplitServiceTests
 
         List<LedgerDetail>? replacedDetails = null;
         _ledgerRepositoryMock
-            .Setup(x => x.ReplaceDetailsAsync(1, It.IsAny<IEnumerable<LedgerDetail>>()))
-            .Callback<int, IEnumerable<LedgerDetail>>((id, d) => replacedDetails = d.ToList())
+            .Setup(x => x.ReplaceDetailsAsync(1, It.IsAny<IEnumerable<LedgerDetail>>(), It.IsAny<SQLiteTransaction>()))
+            .Callback<int, IEnumerable<LedgerDetail>, SQLiteTransaction>((id, d, _) => replacedDetails = d.ToList())
             .ReturnsAsync(true);
 
         List<LedgerDetail>? insertedDetails = null;
         _ledgerRepositoryMock
-            .Setup(x => x.InsertDetailsAsync(100, It.IsAny<IEnumerable<LedgerDetail>>()))
-            .Callback<int, IEnumerable<LedgerDetail>>((id, d) => insertedDetails = d.ToList())
+            .Setup(x => x.InsertDetailsAsync(100, It.IsAny<IEnumerable<LedgerDetail>>(), It.IsAny<SQLiteTransaction>()))
+            .Callback<int, IEnumerable<LedgerDetail>, SQLiteTransaction>((id, d, _) => insertedDetails = d.ToList())
             .ReturnsAsync(true);
 
         var details = new List<LedgerDetail>
@@ -655,8 +668,8 @@ public class LedgerSplitServiceTests
 
         Ledger? insertedLedger = null;
         _ledgerRepositoryMock
-            .Setup(x => x.InsertAsync(It.IsAny<Ledger>()))
-            .Callback<Ledger>(l => insertedLedger = l)
+            .Setup(x => x.InsertAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>()))
+            .Callback<Ledger, SQLiteTransaction>((l, _) => insertedLedger = l)
             .ReturnsAsync(100);
 
         var details = new List<LedgerDetail>
@@ -711,12 +724,12 @@ public class LedgerSplitServiceTests
         // Act
         await _service.SplitAsync(1, details, operatorIdm: TestLenderIdm);
 
-        // Assert: 操作ログが記録される
+        // Assert: 操作ログが記録される (Issue #1458: tx 受入版)
         _operationLogRepositoryMock.Verify(
             x => x.InsertAsync(It.Is<OperationLog>(log =>
                 log.Action == "SPLIT" &&
                 log.TargetTable == "ledger" &&
-                log.TargetId == "1")),
+                log.TargetId == "1"), It.IsAny<SQLiteTransaction>()),
             Times.Once);
     }
 
@@ -740,8 +753,8 @@ public class LedgerSplitServiceTests
 
         Ledger? insertedLedger = null;
         _ledgerRepositoryMock
-            .Setup(x => x.InsertAsync(It.IsAny<Ledger>()))
-            .Callback<Ledger>(l => insertedLedger = l)
+            .Setup(x => x.InsertAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>()))
+            .Callback<Ledger, SQLiteTransaction>((l, _) => insertedLedger = l)
             .ReturnsAsync(100);
 
         var details = new List<LedgerDetail>
@@ -836,8 +849,8 @@ public class LedgerSplitServiceTests
 
         Ledger? insertedLedger = null;
         _ledgerRepositoryMock
-            .Setup(x => x.InsertAsync(It.IsAny<Ledger>()))
-            .Callback<Ledger>(l => insertedLedger = l)
+            .Setup(x => x.InsertAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>()))
+            .Callback<Ledger, SQLiteTransaction>((l, _) => insertedLedger = l)
             .ReturnsAsync(100);
 
         var details = new List<LedgerDetail>
@@ -905,26 +918,26 @@ public class LedgerSplitServiceTests
             .Setup(x => x.GetByIdAsync(1))
             .ReturnsAsync(originalLedger);
         _ledgerRepositoryMock
-            .Setup(x => x.UpdateAsync(It.IsAny<Ledger>()))
+            .Setup(x => x.UpdateAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>()))
             .ReturnsAsync(true);
 
         var insertCallCount = 0;
         _ledgerRepositoryMock
-            .Setup(x => x.InsertAsync(It.IsAny<Ledger>()))
+            .Setup(x => x.InsertAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>()))
             .ReturnsAsync(() => 100 + (++insertCallCount));
 
         // ReplaceDetailsAsync（グループ1）のキャプチャ
         List<LedgerDetail>? replacedDetails = null;
         _ledgerRepositoryMock
-            .Setup(x => x.ReplaceDetailsAsync(1, It.IsAny<IEnumerable<LedgerDetail>>()))
-            .Callback<int, IEnumerable<LedgerDetail>>((id, d) => replacedDetails = d.ToList())
+            .Setup(x => x.ReplaceDetailsAsync(1, It.IsAny<IEnumerable<LedgerDetail>>(), It.IsAny<SQLiteTransaction>()))
+            .Callback<int, IEnumerable<LedgerDetail>, SQLiteTransaction>((id, d, _) => replacedDetails = d.ToList())
             .ReturnsAsync(true);
 
         // InsertDetailsAsync（グループ2）のキャプチャ
         List<LedgerDetail>? insertedDetails = null;
         _ledgerRepositoryMock
-            .Setup(x => x.InsertDetailsAsync(It.IsAny<int>(), It.IsAny<IEnumerable<LedgerDetail>>()))
-            .Callback<int, IEnumerable<LedgerDetail>>((id, d) => insertedDetails = d.ToList())
+            .Setup(x => x.InsertDetailsAsync(It.IsAny<int>(), It.IsAny<IEnumerable<LedgerDetail>>(), It.IsAny<SQLiteTransaction>()))
+            .Callback<int, IEnumerable<LedgerDetail>, SQLiteTransaction>((id, d, _) => insertedDetails = d.ToList())
             .ReturnsAsync(true);
 
         // UIからは時系列順（古い→新しい）で渡される
@@ -971,20 +984,20 @@ public class LedgerSplitServiceTests
             .Setup(x => x.GetByIdAsync(1))
             .ReturnsAsync(originalLedger);
         _ledgerRepositoryMock
-            .Setup(x => x.UpdateAsync(It.IsAny<Ledger>()))
+            .Setup(x => x.UpdateAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>()))
             .ReturnsAsync(true);
         _ledgerRepositoryMock
-            .Setup(x => x.InsertAsync(It.IsAny<Ledger>()))
+            .Setup(x => x.InsertAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>()))
             .ReturnsAsync(100);
         _ledgerRepositoryMock
-            .Setup(x => x.InsertDetailsAsync(It.IsAny<int>(), It.IsAny<IEnumerable<LedgerDetail>>()))
+            .Setup(x => x.InsertDetailsAsync(It.IsAny<int>(), It.IsAny<IEnumerable<LedgerDetail>>(), It.IsAny<SQLiteTransaction>()))
             .ReturnsAsync(true);
 
         // ReplaceDetailsAsync（グループ1）のキャプチャ
         List<LedgerDetail>? replacedDetails = null;
         _ledgerRepositoryMock
-            .Setup(x => x.ReplaceDetailsAsync(1, It.IsAny<IEnumerable<LedgerDetail>>()))
-            .Callback<int, IEnumerable<LedgerDetail>>((id, d) => replacedDetails = d.ToList())
+            .Setup(x => x.ReplaceDetailsAsync(1, It.IsAny<IEnumerable<LedgerDetail>>(), It.IsAny<SQLiteTransaction>()))
+            .Callback<int, IEnumerable<LedgerDetail>, SQLiteTransaction>((id, d, _) => replacedDetails = d.ToList())
             .ReturnsAsync(true);
 
         // UIからは時系列順（古い→新しい）: 博多→天神(10:00)、天神→赤坂(12:00)
