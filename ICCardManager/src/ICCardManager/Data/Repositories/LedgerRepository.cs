@@ -661,15 +661,30 @@ FROM ledger
             using var command = connection.CreateCommand();
             // Issue #784: 同一日内の順序はアプリケーション層で残高チェーンにより決定
             // Issue #590: 新規購入/繰越はsummaryベースで最優先（income額に依存しない）
-            command.CommandText = $@"SELECT l.id, l.card_idm, l.lender_idm, l.date, l.summary, l.income, l.expense, l.balance,
+            // Issue #1457: detail_count を相関サブクエリ（N+1）から CTE による page-scoped 集計に変更
+            command.CommandText = $@"WITH paged_ledger AS (
+    SELECT id, card_idm, lender_idm, date, summary, income, expense, balance,
+           staff_name, note, returner_idm, lent_at, returned_at, is_lent_record
+    FROM ledger
+    {whereClause}
+    ORDER BY DATE(date) ASC,
+        CASE WHEN summary = '新規購入' OR summary LIKE '%月から繰越' THEN 0 ELSE 1 END ASC,
+        id ASC
+    LIMIT @pageSize OFFSET @offset
+)
+SELECT l.id, l.card_idm, l.lender_idm, l.date, l.summary, l.income, l.expense, l.balance,
        l.staff_name, l.note, l.returner_idm, l.lent_at, l.returned_at, l.is_lent_record,
-       (SELECT COUNT(*) FROM ledger_detail WHERE ledger_id = l.id) as detail_count
-FROM ledger l
-{whereClause.Replace("card_idm", "l.card_idm").Replace("date ", "l.date ")}
+       COALESCE(d.cnt, 0) AS detail_count
+FROM paged_ledger l
+LEFT JOIN (
+    SELECT ledger_id, COUNT(*) AS cnt
+    FROM ledger_detail
+    WHERE ledger_id IN (SELECT id FROM paged_ledger)
+    GROUP BY ledger_id
+) d ON d.ledger_id = l.id
 ORDER BY DATE(l.date) ASC,
   CASE WHEN l.summary = '新規購入' OR l.summary LIKE '%月から繰越' THEN 0 ELSE 1 END ASC,
-  l.id ASC
-LIMIT @pageSize OFFSET @offset";
+  l.id ASC";
 
             if (cardIdm != null)
             {
