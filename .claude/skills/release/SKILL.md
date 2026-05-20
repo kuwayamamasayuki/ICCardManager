@@ -75,9 +75,12 @@ git checkout -b chore/bump-version-X.Y.Z
 - `src/ICCardManager/ICCardManager.csproj` — `<Version>`, `<FileVersion>`, `<AssemblyVersion>`
 - `README.md` — 最新バージョン行
 - `CHANGELOG.md` — 新セクション追加
-- `docs/manual/ユーザーマニュアル.md` — Version string
-- `docs/manual/管理者マニュアル.md` — Version string
-- `docs/manual/開発者ガイド.md` — **構造変更が含まれる場合**は §2.5「アーキテクチャの発展」を更新（Issue #1472 対策、下記）
+- `docs/manual/ユーザーマニュアル.md` — Version string + 最終更新日
+- `docs/manual/管理者マニュアル.md` — Version string + 最終更新日
+- `docs/manual/かんたん導入ガイド.md` — Version string + 最終更新日（Issue #1462）
+- `docs/manual/はじめに.md` — Version string + 最終更新日（Issue #1462）
+- `docs/manual/ユーザーマニュアル概要版.md` — Version string + 最終更新日（Issue #1462）
+- `docs/manual/開発者ガイド.md` — Version string + 最終更新日（日付付き形式「YYYY年M月D日」）。**構造変更が含まれる場合**は加えて §2.5「アーキテクチャの発展」も更新（Issue #1472 対策、下記）
 
 コミット → プッシュ → PR作成 → マージ。
 

@@ -24,9 +24,14 @@ $ReadmePath = Join-Path $ProjectRoot "README.md"
 $ChangelogPath = Join-Path $ProjectRoot "CHANGELOG.md"
 $UserManualPath = Join-Path $ProjectRoot "docs\manual\ユーザーマニュアル.md"
 $AdminManualPath = Join-Path $ProjectRoot "docs\manual\管理者マニュアル.md"
+$QuickStartPath = Join-Path $ProjectRoot "docs\manual\かんたん導入ガイド.md"
+$IntroPath = Join-Path $ProjectRoot "docs\manual\はじめに.md"
+$UserManualBriefPath = Join-Path $ProjectRoot "docs\manual\ユーザーマニュアル概要版.md"
+$DeveloperGuidePath = Join-Path $ProjectRoot "docs\manual\開発者ガイド.md"
 
 $Today = Get-Date -Format "yyyy-MM-dd"
 $TodayJp = Get-Date -Format "yyyy年M月"
+$TodayJpFull = Get-Date -Format "yyyy年M月d日"
 
 # ─────────────────────────────────────────────────
 # ユーティリティ関数
@@ -275,6 +280,30 @@ $adminManualContent = $adminManualContent -replace '\*\*バージョン\*\*: [^\
 $adminManualContent = $adminManualContent -replace '\*\*最終更新日\*\*: [^\r\n]+', "**最終更新日**: ${TodayJp}"
 Write-Success "管理者マニュアル.md: ${NewVersion}"
 
+# 3f. かんたん導入ガイド — バージョン + 最終更新日（Issue #1462）
+$quickStartContent = Get-Content $QuickStartPath -Raw -Encoding UTF8
+$quickStartContent = $quickStartContent -replace '\*\*バージョン\*\*: [^\r\n]+', "**バージョン**: ${NewVersion}"
+$quickStartContent = $quickStartContent -replace '\*\*最終更新日\*\*: [^\r\n]+', "**最終更新日**: ${TodayJp}"
+Write-Success "かんたん導入ガイド.md: ${NewVersion}"
+
+# 3g. はじめに — バージョン + 最終更新日（Issue #1462）
+$introContent = Get-Content $IntroPath -Raw -Encoding UTF8
+$introContent = $introContent -replace '\*\*バージョン\*\*: [^\r\n]+', "**バージョン**: ${NewVersion}"
+$introContent = $introContent -replace '\*\*最終更新日\*\*: [^\r\n]+', "**最終更新日**: ${TodayJp}"
+Write-Success "はじめに.md: ${NewVersion}"
+
+# 3h. ユーザーマニュアル概要版 — バージョン + 最終更新日（Issue #1462）
+$userManualBriefContent = Get-Content $UserManualBriefPath -Raw -Encoding UTF8
+$userManualBriefContent = $userManualBriefContent -replace '\*\*バージョン\*\*: [^\r\n]+', "**バージョン**: ${NewVersion}"
+$userManualBriefContent = $userManualBriefContent -replace '\*\*最終更新日\*\*: [^\r\n]+', "**最終更新日**: ${TodayJp}"
+Write-Success "ユーザーマニュアル概要版.md: ${NewVersion}"
+
+# 3i. 開発者ガイド — バージョン + 最終更新日（日付までの詳細形式、Issue #1462）
+$developerGuideContent = Get-Content $DeveloperGuidePath -Raw -Encoding UTF8
+$developerGuideContent = $developerGuideContent -replace '\*\*バージョン\*\*: [^\r\n]+', "**バージョン**: ${NewVersion}"
+$developerGuideContent = $developerGuideContent -replace '\*\*最終更新日\*\*: [^\r\n]+', "**最終更新日**: ${TodayJpFull}"
+Write-Success "開発者ガイド.md: ${NewVersion}"
+
 # ─────────────────────────────────────────────────
 # 4. DryRun: 差分表示して終了
 # ─────────────────────────────────────────────────
@@ -288,11 +317,15 @@ if ($DryRun) {
     New-Item -ItemType Directory -Path $tempDir -Force | Out-Null
 
     $files = @(
-        @{ Path = $CsprojPath;      Content = $csprojContent },
-        @{ Path = $ReadmePath;      Content = $readmeContent },
-        @{ Path = $ChangelogPath;   Content = $changelogContent },
-        @{ Path = $UserManualPath;  Content = $userManualContent },
-        @{ Path = $AdminManualPath; Content = $adminManualContent }
+        @{ Path = $CsprojPath;           Content = $csprojContent },
+        @{ Path = $ReadmePath;           Content = $readmeContent },
+        @{ Path = $ChangelogPath;        Content = $changelogContent },
+        @{ Path = $UserManualPath;       Content = $userManualContent },
+        @{ Path = $AdminManualPath;      Content = $adminManualContent },
+        @{ Path = $QuickStartPath;       Content = $quickStartContent },
+        @{ Path = $IntroPath;            Content = $introContent },
+        @{ Path = $UserManualBriefPath;  Content = $userManualBriefContent },
+        @{ Path = $DeveloperGuidePath;   Content = $developerGuideContent }
     )
 
     foreach ($file in $files) {
@@ -325,7 +358,11 @@ $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
 [System.IO.File]::WriteAllText($ChangelogPath, $changelogContent, $utf8NoBom)
 [System.IO.File]::WriteAllText($UserManualPath, $userManualContent, $utf8NoBom)
 [System.IO.File]::WriteAllText($AdminManualPath, $adminManualContent, $utf8NoBom)
-Write-Success "5ファイルを更新しました"
+[System.IO.File]::WriteAllText($QuickStartPath, $quickStartContent, $utf8NoBom)
+[System.IO.File]::WriteAllText($IntroPath, $introContent, $utf8NoBom)
+[System.IO.File]::WriteAllText($UserManualBriefPath, $userManualBriefContent, $utf8NoBom)
+[System.IO.File]::WriteAllText($DeveloperGuidePath, $developerGuideContent, $utf8NoBom)
+Write-Success "9ファイルを更新しました"
 
 # ─────────────────────────────────────────────────
 # 6. ブランチ作成・コミット・プッシュ・PR作成
@@ -343,7 +380,11 @@ $filesToAdd = @(
     $ReadmePath,
     $ChangelogPath,
     $UserManualPath,
-    $AdminManualPath
+    $AdminManualPath,
+    $QuickStartPath,
+    $IntroPath,
+    $UserManualBriefPath,
+    $DeveloperGuidePath
 )
 foreach ($f in $filesToAdd) {
     git -C $ProjectRoot add $f
@@ -369,6 +410,10 @@ $prBody = @"
 - ``CHANGELOG.md``
 - ``docs/manual/ユーザーマニュアル.md``
 - ``docs/manual/管理者マニュアル.md``
+- ``docs/manual/かんたん導入ガイド.md``
+- ``docs/manual/はじめに.md``
+- ``docs/manual/ユーザーマニュアル概要版.md``
+- ``docs/manual/開発者ガイド.md``
 "@
 
 # WSL経由の場合、--body に複数行文字列を渡すとbashがバッククォート内の
