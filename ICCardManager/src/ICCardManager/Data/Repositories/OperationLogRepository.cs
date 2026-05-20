@@ -21,29 +21,49 @@ namespace ICCardManager.Data.Repositories
         }
 
         /// <inheritdoc/>
-        public async Task<int> InsertAsync(OperationLog log)
-        {
-            using var lease = await _dbContext.LeaseConnectionAsync();
-            var connection = lease.Connection;
+        public Task<int> InsertAsync(OperationLog log) => InsertAsync(log, transaction: null);
 
-            using var command = connection.CreateCommand();
-            command.CommandText = @"INSERT INTO operation_log (timestamp, operator_idm, operator_name, target_table,
+        /// <inheritdoc/>
+        public async Task<int> InsertAsync(OperationLog log, SQLiteTransaction transaction)
+        {
+            ConnectionLease lease = null;
+            try
+            {
+                SQLiteConnection connection;
+                if (transaction != null)
+                {
+                    connection = (SQLiteConnection)transaction.Connection;
+                }
+                else
+                {
+                    lease = await _dbContext.LeaseConnectionAsync().ConfigureAwait(false);
+                    connection = lease.Connection;
+                }
+
+                using var command = connection.CreateCommand();
+                if (transaction != null) command.Transaction = transaction;
+                command.CommandText = @"INSERT INTO operation_log (timestamp, operator_idm, operator_name, target_table,
                            target_id, action, before_data, after_data)
 VALUES (@timestamp, @operatorIdm, @operatorName, @targetTable,
        @targetId, @action, @beforeData, @afterData);
 SELECT last_insert_rowid();";
 
-            command.Parameters.AddWithValue("@timestamp", log.Timestamp.ToString("yyyy-MM-dd HH:mm:ss"));
-            command.Parameters.AddWithValue("@operatorIdm", log.OperatorIdm);
-            command.Parameters.AddWithValue("@operatorName", log.OperatorName);
-            command.Parameters.AddWithValue("@targetTable", (object)log.TargetTable ?? DBNull.Value);
-            command.Parameters.AddWithValue("@targetId", (object)log.TargetId ?? DBNull.Value);
-            command.Parameters.AddWithValue("@action", (object)log.Action ?? DBNull.Value);
-            command.Parameters.AddWithValue("@beforeData", (object)log.BeforeData ?? DBNull.Value);
-            command.Parameters.AddWithValue("@afterData", (object)log.AfterData ?? DBNull.Value);
+                command.Parameters.AddWithValue("@timestamp", log.Timestamp.ToString("yyyy-MM-dd HH:mm:ss"));
+                command.Parameters.AddWithValue("@operatorIdm", log.OperatorIdm);
+                command.Parameters.AddWithValue("@operatorName", log.OperatorName);
+                command.Parameters.AddWithValue("@targetTable", (object)log.TargetTable ?? DBNull.Value);
+                command.Parameters.AddWithValue("@targetId", (object)log.TargetId ?? DBNull.Value);
+                command.Parameters.AddWithValue("@action", (object)log.Action ?? DBNull.Value);
+                command.Parameters.AddWithValue("@beforeData", (object)log.BeforeData ?? DBNull.Value);
+                command.Parameters.AddWithValue("@afterData", (object)log.AfterData ?? DBNull.Value);
 
-            var result = await command.ExecuteScalarAsync();
-            return Convert.ToInt32(result);
+                var result = await command.ExecuteScalarAsync().ConfigureAwait(false);
+                return Convert.ToInt32(result);
+            }
+            finally
+            {
+                lease?.Dispose();
+            }
         }
 
         /// <inheritdoc/>
