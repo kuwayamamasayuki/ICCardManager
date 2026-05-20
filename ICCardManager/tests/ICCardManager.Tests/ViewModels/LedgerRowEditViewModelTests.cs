@@ -1,14 +1,17 @@
 using FluentAssertions;
+using ICCardManager.Data;
 using ICCardManager.Data.Repositories;
 using ICCardManager.Dtos;
 using ICCardManager.Models;
 using ICCardManager.Services;
+using ICCardManager.Tests.Data;
 using ICCardManager.ViewModels;
 using Moq;
 using Xunit;
 
 using System;
 using System.Collections.Generic;
+using System.Data.SQLite;
 using System.Linq;
 using System.Threading.Tasks;
 
@@ -17,12 +20,13 @@ namespace ICCardManager.Tests.ViewModels;
 /// <summary>
 /// LedgerRowEditViewModelの単体テスト（Issue #635）
 /// </summary>
-public class LedgerRowEditViewModelTests
+public class LedgerRowEditViewModelTests : IDisposable
 {
     private readonly Mock<ILedgerRepository> _ledgerRepoMock;
     private readonly Mock<IStaffRepository> _staffRepoMock;
     private readonly Mock<IOperationLogRepository> _operationLogRepoMock;
     private readonly OperationLogger _operationLogger;
+    private readonly DbContext _dbContext;
     private readonly LedgerRowEditViewModel _viewModel;
 
     private const string TestCardIdm = "0102030405060708";
@@ -40,13 +44,23 @@ public class LedgerRowEditViewModelTests
             _operationLogRepoMock.Object,
             Mock.Of<ICurrentOperatorContext>());
 
+        // Issue #1458: 実体の DbContext を使い、BeginTransactionAsync が本物の tx を返す状態でテスト
+        _dbContext = TestDbContextFactory.Create();
+
         _staffRepoMock.Setup(r => r.GetAllAsync())
             .ReturnsAsync(new List<Staff> { _staffA, _staffB });
 
         _viewModel = new LedgerRowEditViewModel(
             _ledgerRepoMock.Object,
             _staffRepoMock.Object,
-            _operationLogger);
+            _operationLogger,
+            _dbContext);
+    }
+
+    public void Dispose()
+    {
+        _dbContext?.Dispose();
+        GC.SuppressFinalize(this);
     }
 
     /// <summary>
@@ -678,7 +692,7 @@ public class LedgerRowEditViewModelTests
         _viewModel.Income = 0;
         _viewModel.Expense = 210;
 
-        _ledgerRepoMock.Setup(r => r.InsertAsync(It.IsAny<Ledger>()))
+        _ledgerRepoMock.Setup(r => r.InsertAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>()))
             .ReturnsAsync(100);
 
         // Act
@@ -690,7 +704,7 @@ public class LedgerRowEditViewModelTests
             l.CardIdm == TestCardIdm &&
             l.Summary == "鉄道（博多～天神）" &&
             l.Expense == 210
-        )), Times.Once);
+        ), It.IsAny<SQLiteTransaction>()), Times.Once);
     }
 
     [Fact]
@@ -703,7 +717,7 @@ public class LedgerRowEditViewModelTests
         _viewModel.Summary = "テスト摘要";
         _viewModel.Income = 500;
 
-        _ledgerRepoMock.Setup(r => r.InsertAsync(It.IsAny<Ledger>()))
+        _ledgerRepoMock.Setup(r => r.InsertAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>()))
             .ReturnsAsync(100);
 
         _staffRepoMock.Setup(r => r.GetByIdmAsync(TestOperatorIdm, It.IsAny<bool>()))
@@ -716,7 +730,7 @@ public class LedgerRowEditViewModelTests
         _operationLogRepoMock.Verify(r => r.InsertAsync(It.Is<OperationLog>(log =>
             log.Action == OperationLogger.Actions.Insert &&
             log.TargetTable == OperationLogger.Tables.Ledger
-        )), Times.Once);
+        ), It.IsAny<SQLiteTransaction>()), Times.Once);
     }
 
     [Fact]
@@ -733,7 +747,7 @@ public class LedgerRowEditViewModelTests
             StaffName = _staffA.Name
         };
         _ledgerRepoMock.Setup(r => r.GetByIdAsync(1)).ReturnsAsync(ledger);
-        _ledgerRepoMock.Setup(r => r.UpdateAsync(It.IsAny<Ledger>())).ReturnsAsync(true);
+        _ledgerRepoMock.Setup(r => r.UpdateAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>())).ReturnsAsync(true);
 
         _staffRepoMock.Setup(r => r.GetByIdmAsync(TestOperatorIdm, It.IsAny<bool>()))
             .ReturnsAsync(new Staff { StaffIdm = TestOperatorIdm, Name = "操作者" });
@@ -755,7 +769,7 @@ public class LedgerRowEditViewModelTests
         _viewModel.IsSaved.Should().BeTrue();
         _ledgerRepoMock.Verify(r => r.UpdateAsync(It.Is<Ledger>(l =>
             l.Summary == "変更後の摘要"
-        )), Times.Once);
+        ), It.IsAny<SQLiteTransaction>()), Times.Once);
     }
 
     [Fact]
@@ -768,7 +782,7 @@ public class LedgerRowEditViewModelTests
         _viewModel.Summary = "テスト";
         _viewModel.Income = 500;
 
-        _ledgerRepoMock.Setup(r => r.InsertAsync(It.IsAny<Ledger>()))
+        _ledgerRepoMock.Setup(r => r.InsertAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>()))
             .ReturnsAsync(0); // 失敗
 
         // Act
@@ -810,7 +824,7 @@ public class LedgerRowEditViewModelTests
     public async Task SaveAndEditNext_Addモード保存後にIsSaveAndEditNextRequestedがtrueになること()
     {
         // Arrange
-        _ledgerRepoMock.Setup(r => r.InsertAsync(It.IsAny<Ledger>()))
+        _ledgerRepoMock.Setup(r => r.InsertAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>()))
             .ReturnsAsync(100);
         _operationLogRepoMock.Setup(r => r.InsertAsync(It.IsAny<OperationLog>()))
             .ReturnsAsync(1);
@@ -840,7 +854,7 @@ public class LedgerRowEditViewModelTests
             Details = new List<LedgerDetail>()
         };
         _ledgerRepoMock.Setup(r => r.GetByIdAsync(1)).ReturnsAsync(existingLedger);
-        _ledgerRepoMock.Setup(r => r.UpdateAsync(It.IsAny<Ledger>())).ReturnsAsync(true);
+        _ledgerRepoMock.Setup(r => r.UpdateAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>())).ReturnsAsync(true);
         _operationLogRepoMock.Setup(r => r.InsertAsync(It.IsAny<OperationLog>()))
             .ReturnsAsync(1);
 
