@@ -7,6 +7,7 @@ using System.Windows.Input;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using ICCardManager.Common;
+using ICCardManager.Data;
 using ICCardManager.Data.Repositories;
 using ICCardManager.Dtos;
 using ICCardManager.Models;
@@ -118,6 +119,7 @@ namespace ICCardManager.ViewModels
         private readonly ILedgerRepository _ledgerRepository;
         private readonly SummaryGenerator _summaryGenerator;
         private readonly OperationLogger _operationLogger;
+        private readonly DbContext _dbContext;
         private readonly ILogger<LedgerDetailViewModel> _logger;
 
         private Ledger _ledger = null!;
@@ -227,12 +229,14 @@ namespace ICCardManager.ViewModels
             SummaryGenerator summaryGenerator,
             OperationLogger operationLogger,
             LedgerSplitService ledgerSplitService,
+            DbContext dbContext,
             ILogger<LedgerDetailViewModel> logger)
         {
             _ledgerRepository = ledgerRepository;
             _summaryGenerator = summaryGenerator;
             _operationLogger = operationLogger;
             _ledgerSplitService = ledgerSplitService;
+            _dbContext = dbContext;
             _logger = logger;
         }
 
@@ -583,14 +587,19 @@ namespace ICCardManager.ViewModels
                     };
 
                     _ledger.Summary = newSummary;
-                    await _ledgerRepository.UpdateAsync(_ledger);
-                    SummaryDisplay = newSummary;
-
-                    // 操作ログを記録（operatorIdmを設定してGUI操作を区別）
+                    // Issue #1458: 操作ログを記録する場合は Ledger UPDATE と監査ログ INSERT を同一トランザクションで実行
                     if (!string.IsNullOrEmpty(_operatorIdm))
                     {
-                        await _operationLogger.LogLedgerUpdateAsync(beforeLedger, _ledger);
+                        using var scope = await _dbContext.BeginTransactionAsync();
+                        await _ledgerRepository.UpdateAsync(_ledger, scope.Transaction);
+                        await _operationLogger.LogLedgerUpdateAsync(beforeLedger, _ledger, scope.Transaction);
+                        scope.Commit();
                     }
+                    else
+                    {
+                        await _ledgerRepository.UpdateAsync(_ledger);
+                    }
+                    SummaryDisplay = newSummary;
                 }
 
                 HasChanges = false;

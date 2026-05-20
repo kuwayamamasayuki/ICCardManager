@@ -1,5 +1,7 @@
 using FluentAssertions;
+using ICCardManager.Data;
 using ICCardManager.Data.Repositories;
+using ICCardManager.Tests.Data;
 using ICCardManager.Models;
 using ICCardManager.Services;
 using ICCardManager.ViewModels;
@@ -20,14 +22,22 @@ namespace ICCardManager.Tests.ViewModels;
 /// Issue #633: 分割操作でGroupIdが正しく設定されることを検証
 /// Issue #1134: パンくず表示を検証
 /// </summary>
-public class LedgerDetailViewModelTests
+public class LedgerDetailViewModelTests : IDisposable
 {
     private readonly LedgerDetailViewModel _viewModel;
     private readonly Mock<ILedgerRepository> _ledgerRepoMock;
+    private readonly DbContext _dbContext;
+
+    public void Dispose()
+    {
+        _dbContext?.Dispose();
+        GC.SuppressFinalize(this);
+    }
 
     public LedgerDetailViewModelTests()
     {
         _ledgerRepoMock = new Mock<ILedgerRepository>();
+        _dbContext = TestDbContextFactory.Create();
         var summaryGenerator = new SummaryGenerator();
         var operationLogRepoMock = new Mock<IOperationLogRepository>();
         var staffRepoMock = new Mock<IStaffRepository>();
@@ -47,6 +57,7 @@ public class LedgerDetailViewModelTests
             summaryGenerator,
             operationLogger,
             ledgerSplitService,
+            _dbContext,
             logger);
     }
 
