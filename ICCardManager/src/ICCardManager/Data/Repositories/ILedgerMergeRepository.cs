@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Data.SQLite;
 using System.Threading.Tasks;
 using ICCardManager.Models;
 
@@ -21,9 +22,24 @@ namespace ICCardManager.Data.Repositories
         Task<bool> ReplaceDetailsAsync(int ledgerId, IEnumerable<LedgerDetail> details);
 
         /// <summary>
+        /// 利用履歴詳細を既存トランザクション内で置き換える (Issue #1458)。
+        /// </summary>
+        Task<bool> ReplaceDetailsAsync(int ledgerId, IEnumerable<LedgerDetail> details, SQLiteTransaction transaction);
+
+        /// <summary>
         /// 複数のLedgerレコードを1つに統合する
         /// </summary>
         Task<bool> MergeLedgersAsync(int targetLedgerId, IEnumerable<int> sourceLedgerIds, Ledger updatedTarget);
+
+        /// <summary>
+        /// 複数のLedgerレコードを既存トランザクション内で統合する (Issue #1458)。
+        /// 監査ログ INSERT と同一 tx で実行することで fsync 1 回分の往復を削減する。
+        /// </summary>
+        Task<bool> MergeLedgersAsync(
+            int targetLedgerId,
+            IEnumerable<int> sourceLedgerIds,
+            Ledger updatedTarget,
+            SQLiteTransaction transaction);
 
         /// <summary>
         /// 統合を元に戻す
