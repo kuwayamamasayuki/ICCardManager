@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Data.SQLite;
 using System.Threading.Tasks;
 using System.Text.Json;
 using ICCardManager.Data.Repositories;
@@ -444,6 +445,106 @@ namespace ICCardManager.Services
                 BeforeData = null,
                 AfterData = SerializeToJson(payload)
             }).ConfigureAwait(false);
+        }
+
+        #endregion
+
+        #region tx 受入オーバーロード — Issue #1458
+
+        /// <summary>
+        /// 履歴挿入のログを既存トランザクションで記録する (Issue #1458)。
+        /// Ledger 操作と同一 tx で監査ログを書き込むことで fsync 1 回分の RTT を削減する。
+        /// </summary>
+        public async Task LogLedgerInsertAsync(Ledger ledger, SQLiteTransaction transaction)
+        {
+            var (idm, name) = ResolveOperator();
+            await _operationLogRepository.InsertAsync(new OperationLog
+            {
+                Timestamp = DateTime.Now,
+                OperatorIdm = idm,
+                OperatorName = name,
+                TargetTable = Tables.Ledger,
+                TargetId = ledger.Id.ToString(),
+                Action = Actions.Insert,
+                BeforeData = null,
+                AfterData = SerializeToJson(ledger)
+            }, transaction).ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// 履歴更新のログを既存トランザクションで記録する (Issue #1458)。
+        /// </summary>
+        public async Task LogLedgerUpdateAsync(Ledger beforeLedger, Ledger afterLedger, SQLiteTransaction transaction)
+        {
+            var (idm, name) = ResolveOperator();
+            await _operationLogRepository.InsertAsync(new OperationLog
+            {
+                Timestamp = DateTime.Now,
+                OperatorIdm = idm,
+                OperatorName = name,
+                TargetTable = Tables.Ledger,
+                TargetId = afterLedger.Id.ToString(),
+                Action = Actions.Update,
+                BeforeData = SerializeToJson(beforeLedger),
+                AfterData = SerializeToJson(afterLedger)
+            }, transaction).ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// 履歴削除のログを既存トランザクションで記録する (Issue #1458)。
+        /// </summary>
+        public async Task LogLedgerDeleteAsync(Ledger ledger, SQLiteTransaction transaction)
+        {
+            var (idm, name) = ResolveOperator();
+            await _operationLogRepository.InsertAsync(new OperationLog
+            {
+                Timestamp = DateTime.Now,
+                OperatorIdm = idm,
+                OperatorName = name,
+                TargetTable = Tables.Ledger,
+                TargetId = ledger.Id.ToString(),
+                Action = Actions.Delete,
+                BeforeData = SerializeToJson(ledger),
+                AfterData = null
+            }, transaction).ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// 履歴統合のログを既存トランザクションで記録する (Issue #1458)。
+        /// </summary>
+        public async Task LogLedgerMergeAsync(IReadOnlyList<Ledger> sourceLedgers, Ledger mergedLedger, SQLiteTransaction transaction)
+        {
+            var (idm, name) = ResolveOperator();
+            await _operationLogRepository.InsertAsync(new OperationLog
+            {
+                Timestamp = DateTime.Now,
+                OperatorIdm = idm,
+                OperatorName = name,
+                TargetTable = Tables.Ledger,
+                TargetId = mergedLedger.Id.ToString(),
+                Action = Actions.Merge,
+                BeforeData = SerializeToJson(sourceLedgers),
+                AfterData = SerializeToJson(mergedLedger)
+            }, transaction).ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// 履歴分割のログを既存トランザクションで記録する (Issue #1458)。
+        /// </summary>
+        public async Task LogLedgerSplitAsync(Ledger originalLedger, IReadOnlyList<Ledger> splitLedgers, SQLiteTransaction transaction)
+        {
+            var (idm, name) = ResolveOperator();
+            await _operationLogRepository.InsertAsync(new OperationLog
+            {
+                Timestamp = DateTime.Now,
+                OperatorIdm = idm,
+                OperatorName = name,
+                TargetTable = Tables.Ledger,
+                TargetId = originalLedger.Id.ToString(),
+                Action = Actions.Split,
+                BeforeData = SerializeToJson(originalLedger),
+                AfterData = SerializeToJson(splitLedgers)
+            }, transaction).ConfigureAwait(false);
         }
 
         #endregion
