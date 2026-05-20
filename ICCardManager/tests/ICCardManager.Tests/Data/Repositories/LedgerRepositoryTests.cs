@@ -1164,6 +1164,111 @@ public class LedgerRepositoryTests : IDisposable
         itemList.Should().NotContain(l => l.Summary == "10日前");
     }
 
+    /// <summary>
+    /// Issue #1457: detail_count を CTE+LEFT JOIN で取得した結果、
+    /// 詳細 0/1/複数件の各 ledger に対して正確な件数が返ることを確認する。
+    /// 旧実装の相関サブクエリと同じセマンティクスを維持していることの回帰検証。
+    /// </summary>
+    [Fact]
+    public async Task GetPagedAsync_DetailCount_AccurateForVariousCounts()
+    {
+        // Arrange - 3 件の ledger（詳細数 0/1/3 件）を登録
+        var today = DateTime.Today;
+
+        var noDetailLedger = CreateTestLedger(TestCardIdm, today.AddDays(-3), "詳細0件");
+        var noDetailId = await _repository.InsertAsync(noDetailLedger);
+
+        var oneDetailLedger = CreateTestLedger(TestCardIdm, today.AddDays(-2), "詳細1件", expense: 260);
+        var oneDetailId = await _repository.InsertAsync(oneDetailLedger);
+        await _repository.InsertDetailAsync(new LedgerDetail
+        {
+            LedgerId = oneDetailId,
+            UseDate = today.AddDays(-2).AddHours(9),
+            EntryStation = "博多",
+            ExitStation = "天神",
+            Amount = 260,
+            Balance = 9740
+        });
+
+        var threeDetailLedger = CreateTestLedger(TestCardIdm, today.AddDays(-1), "詳細3件", expense: 780);
+        var threeDetailId = await _repository.InsertAsync(threeDetailLedger);
+        for (int i = 0; i < 3; i++)
+        {
+            await _repository.InsertDetailAsync(new LedgerDetail
+            {
+                LedgerId = threeDetailId,
+                UseDate = today.AddDays(-1).AddHours(8 + i),
+                EntryStation = "駅A",
+                ExitStation = "駅B",
+                Amount = 260,
+                Balance = 9740 - 260 * (i + 1)
+            });
+        }
+
+        // Act
+        var (items, _) = await _repository.GetPagedAsync(TestCardIdm, today.AddDays(-10), today.AddDays(1), 1, 10);
+
+        // Assert
+        var itemList = items.ToList();
+        itemList.Should().HaveCount(3);
+        itemList.Single(l => l.Id == noDetailId).DetailCount.Should().Be(0,
+            "詳細レコードが 1 件もない ledger は LEFT JOIN で COALESCE(0) になる");
+        itemList.Single(l => l.Id == oneDetailId).DetailCount.Should().Be(1);
+        itemList.Single(l => l.Id == threeDetailId).DetailCount.Should().Be(3);
+    }
+
+    /// <summary>
+    /// Issue #1457: ページ外の ledger に紐づく詳細レコードが、
+    /// 現在ページの DetailCount に混入しないことを確認する（CTE スコープ検証）。
+    /// page_ledger CTE で取得した id 集合のみが COUNT 集計対象であることを保証する。
+    /// </summary>
+    [Fact]
+    public async Task GetPagedAsync_DetailCount_OnlyCountsRowsForPagedLedgers()
+    {
+        // Arrange - 5 件の ledger をそれぞれ異なる日付・異なる詳細件数で登録
+        var today = DateTime.Today;
+        var ids = new List<int>();
+        for (int i = 0; i < 5; i++)
+        {
+            var ledger = CreateTestLedger(TestCardIdm, today.AddDays(-(5 - i)), $"利用{i + 1}", expense: 100);
+            var id = await _repository.InsertAsync(ledger);
+            ids.Add(id);
+
+            // 詳細件数を i+1 件にする（1, 2, 3, 4, 5 件）
+            for (int j = 0; j <= i; j++)
+            {
+                await _repository.InsertDetailAsync(new LedgerDetail
+                {
+                    LedgerId = id,
+                    UseDate = today.AddDays(-(5 - i)).AddHours(8 + j),
+                    EntryStation = "X",
+                    ExitStation = "Y",
+                    Amount = 100,
+                    Balance = 0
+                });
+            }
+        }
+
+        // Act - pageSize=2 で 1 ページ目を取得（日付昇順なので「利用1」「利用2」が返るはず）
+        var (page1Items, totalCount) = await _repository.GetPagedAsync(TestCardIdm, today.AddDays(-10), today.AddDays(1), 1, 2);
+
+        // Assert
+        totalCount.Should().Be(5);
+        var page1List = page1Items.ToList();
+        page1List.Should().HaveCount(2);
+        page1List[0].Summary.Should().Be("利用1");
+        page1List[0].DetailCount.Should().Be(1, "詳細 1 件の ledger");
+        page1List[1].Summary.Should().Be("利用2");
+        page1List[1].DetailCount.Should().Be(2, "詳細 2 件の ledger（他ページの詳細件数が混入しない）");
+
+        // Act - 3 ページ目（最後の 1 件）を取得し、想定外の集計混入がないことを確認
+        var (page3Items, _) = await _repository.GetPagedAsync(TestCardIdm, today.AddDays(-10), today.AddDays(1), 3, 2);
+        var page3List = page3Items.ToList();
+        page3List.Should().HaveCount(1);
+        page3List[0].Summary.Should().Be("利用5");
+        page3List[0].DetailCount.Should().Be(5);
+    }
+
     #endregion
 
     #region UpdateDetailBusStopsAsync テスト
