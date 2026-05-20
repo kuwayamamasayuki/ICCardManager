@@ -6,6 +6,7 @@
         xmlns:vm="clr-namespace:ICCardManager.ViewModels"
         xmlns:conv="clr-namespace:ICCardManager.Common"
         xmlns:cardReader="clr-namespace:ICCardManager.Infrastructure.CardReader"
+        xmlns:services="clr-namespace:ICCardManager.Services"
         xmlns:app="clr-namespace:ICCardManager"
         mc:Ignorable="d"
         d:DataContext="{d:DesignInstance Type=vm:MainViewModel}"
@@ -981,14 +982,32 @@
                 </StackPanel>
             </StatusBarItem>
             <Separator/>
-            <!-- 共有モード表示 -->
-            <StatusBarItem AutomationProperties.Name="共有モード表示"
+            <!-- 共有モード表示（Issue #1470: 3状態 Connected/Reconnecting/Disconnected） -->
+            <StatusBarItem AutomationProperties.Name="共有モード接続状態"
                            Visibility="{Binding IsSharedMode, Converter={StaticResource BoolToVisibilityConverter}}">
-                <TextBlock Foreground="{DynamicResource PrimaryBrush}"
-                           FontWeight="Bold"
-                           ToolTip="共有フォルダ上のデータベースを使用しています（複数PC同時利用）">
-                    <Run Text="🔗"/>
-                    <Run Text=" 共有モード"/>
+                <TextBlock FontWeight="Bold">
+                    <TextBlock.Style>
+                        <Style TargetType="TextBlock">
+                            <!-- 既定: Connected -->
+                            <Setter Property="Text" Value="🔗 共有モード"/>
+                            <Setter Property="Foreground" Value="{DynamicResource PrimaryBrush}"/>
+                            <Setter Property="ToolTip" Value="共有フォルダ上のデータベースに接続中です（複数PC同時利用）"/>
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding SharedDbConnectionState}"
+                                             Value="{x:Static services:SharedDbConnectionState.Reconnecting}">
+                                    <Setter Property="Text" Value="🔄 共有モード（再接続中）"/>
+                                    <Setter Property="Foreground" Value="{DynamicResource WarningActionBrush}"/>
+                                    <Setter Property="ToolTip" Value="共有DBへの接続を再試行中です。"/>
+                                </DataTrigger>
+                                <DataTrigger Binding="{Binding SharedDbConnectionState}"
+                                             Value="{x:Static services:SharedDbConnectionState.Disconnected}">
+                                    <Setter Property="Text" Value="⚠ 共有モード（切断中）"/>
+                                    <Setter Property="Foreground" Value="{DynamicResource ErrorBorderBrush}"/>
+                                    <Setter Property="ToolTip" Value="共有DBへの接続が切断されています。ネットワーク接続を確認してください。"/>
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </TextBlock.Style>
                 </TextBlock>
             </StatusBarItem>
             <!-- Issue #1110, #1131: 最終同期経過時間（共有モード時のみ） -->
