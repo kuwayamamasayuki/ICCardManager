@@ -205,7 +205,9 @@ public class MainViewModelSyncDisplayTests
         ledgerRepositoryMock.Setup(r => r.GetDetailsByLedgerIdsAsync(It.IsAny<IEnumerable<int>>()))
             .ReturnsAsync(new Dictionary<int, List<Models.LedgerDetail>>());
 
-        var dbContext = new DbContext(":memory:");
+        // Issue #1559: :memory: はローカル扱いになるため、共有モード挙動を検証するには
+        // テスト用 internal コンストラクタの forceSharedMode: true を使用する
+        var dbContext = new DbContext(":memory:", logger: null, forceSharedMode: true);
         dbContext.InitializeDatabase();
 
         var summaryGenerator = new SummaryGenerator();
@@ -310,7 +312,9 @@ public class MainViewModelSyncDisplayTests
         settingsRepositoryMock.Setup(r => r.GetAppSettingsAsync())
             .ReturnsAsync(new AppSettings());
 
-        var dbContext = new DbContext(":memory:");
+        // Issue #1559: :memory: はローカル扱いになるため、共有モード挙動を検証するには
+        // テスト用 internal コンストラクタの forceSharedMode: true を使用する
+        var dbContext = new DbContext(":memory:", logger: null, forceSharedMode: true);
         dbContext.InitializeDatabase();
 
         var summaryGenerator = new SummaryGenerator();
