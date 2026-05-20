@@ -145,4 +145,48 @@ public class LedgerRepositoryBatchInsertTests : IDisposable
         var persisted = await _repository.GetByIdAsync(ledgerId);
         persisted.Should().BeNull("呼び出し元 tx の Rollback で ledger ヘッダと 100 件の detail が全て消えるべき");
     }
+
+    [Fact]
+    public async Task InsertDetailsAsync_EmptyCollection_ReturnsTrue_NoSideEffect()
+    {
+        var ledgerId = await _repository.InsertAsync(CreateLedger());
+
+        var result = await _repository.InsertDetailsAsync(ledgerId, Array.Empty<LedgerDetail>());
+
+        result.Should().BeTrue("空コレクションでも成功扱い");
+        var persisted = await _repository.GetByIdAsync(ledgerId);
+        persisted!.Details.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task InsertDetailsAsync_OverwritesLedgerId_OnEachRow()
+    {
+        // detail.LedgerId に -1 を入れて呼び、引数の ledgerId で全行が書き換えられることを確認。
+        var ledgerId = await _repository.InsertAsync(CreateLedger());
+        var details = CreateDetails(5);
+        foreach (var d in details) d.LedgerId = -1;
+
+        var result = await _repository.InsertDetailsAsync(ledgerId, details);
+
+        result.Should().BeTrue();
+        var persisted = await _repository.GetByIdAsync(ledgerId);
+        persisted!.Details.Should().HaveCount(5);
+        persisted.Details.Should().OnlyContain(d => d.LedgerId == ledgerId);
+    }
+
+    [Fact]
+    public async Task InsertDetailsAsync_TxNull_OnSqliteException_DoesNotLeakSemaphore()
+    {
+        // 不正な FK で例外が出た直後でも、次の BeginTransactionAsync がタイムアウトせず
+        // 取れること（内部 tx の rollback と lease 解放が正しく行われている証明）。
+        var invalidLedgerId = 999_999;
+        var details = CreateDetails(3);
+
+        var act = async () => await _repository.InsertDetailsAsync(invalidLedgerId, details);
+        await act.Should().ThrowAsync<SQLiteException>();
+
+        // セマフォが解放されていないと、ここで実質ハングする。テスト全体のタイムアウトで失敗する。
+        using var scope = await _dbContext.BeginTransactionAsync();
+        scope.Should().NotBeNull();
+    }
 }
