@@ -226,6 +226,7 @@ public class MainViewModelSyncDisplayTests
             ledgerRepositoryMock.Object,
             summaryGenerator,
             operationLoggerMock.Object,
+            dbContext,
             NullLogger<LedgerMergeService>.Instance);
         var ledgerConsistencyChecker = new LedgerConsistencyChecker(ledgerRepositoryMock.Object);
 
@@ -330,6 +331,7 @@ public class MainViewModelSyncDisplayTests
             ledgerRepositoryMock.Object,
             summaryGenerator,
             operationLoggerMock.Object,
+            dbContext,
             NullLogger<LedgerMergeService>.Instance);
         var ledgerConsistencyChecker = new LedgerConsistencyChecker(ledgerRepositoryMock.Object);
 

@@ -105,6 +105,7 @@ public class MainViewModelTests : IDisposable
             _ledgerRepositoryMock.Object,
             summaryGenerator,
             _operationLoggerMock.Object,
+            _dbContext,
             NullLogger<LedgerMergeService>.Instance);
 
         _timerFactory = new TestTimerFactory();

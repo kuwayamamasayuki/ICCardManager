@@ -100,6 +100,7 @@ public class MainViewModelIntegrationTests
             _ledgerRepositoryMock.Object,
             summaryGenerator,
             _operationLogger,
+            dbContext,
             NullLogger<LedgerMergeService>.Instance);
 
         _sharedModeMonitor = new SharedModeMonitor(

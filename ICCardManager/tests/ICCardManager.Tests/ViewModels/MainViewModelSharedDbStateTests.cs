@@ -91,6 +91,7 @@ public class MainViewModelSharedDbStateTests
             _ledgerRepositoryMock.Object,
             summaryGenerator,
             _operationLoggerMock.Object,
+            dbContext,
             NullLogger<LedgerMergeService>.Instance);
 
         _timerFactory = new TestTimerFactory();
