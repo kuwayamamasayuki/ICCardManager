@@ -414,6 +414,12 @@ VALUES (@ledgerId, @useDate, @entryStation, @exitStation,
         /// Issue #1456: ledger_detail への一括 INSERT 本体。
         /// 1 つの SQLiteCommand を生成し、パラメータを宣言したうえでループ内では値だけを差し替える。
         /// </summary>
+        /// <remarks>
+        /// 副作用: 各 detail の <c>LedgerId</c> を引数の <paramref name="ledgerId"/> で上書きする
+        /// （旧 <c>InsertDetailAsync</c> 経路と同じ挙動）。
+        /// 呼び出し元の責務: <paramref name="details"/> は物質化済みのコレクション（<see cref="IList{T}"/>）を
+        /// 渡すこと。`IEnumerable` の遅延列挙を渡すと、上位での `Count==0` 早期 return 等との二度走査になる。
+        /// </remarks>
         private static async Task<bool> InsertDetailsCore(
             int ledgerId, IList<LedgerDetail> details, SQLiteConnection connection, SQLiteTransaction transaction)
         {
