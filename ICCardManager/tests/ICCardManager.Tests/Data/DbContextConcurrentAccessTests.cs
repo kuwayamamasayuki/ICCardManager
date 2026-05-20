@@ -281,8 +281,9 @@ public class DbContextConcurrentAccessTests : IDisposable
     [Trait("Category", "Unit")]
     public async Task ExecuteWithRetryAsync_共有モードで最大5回リトライすること()
     {
-        using var dbContext = new DbContext(_dbPath);
-        dbContext.IsSharedMode.Should().BeTrue("パス指定時は共有モード");
+        // Issue #1559: UNCパス指定で共有モードを発動させ、リトライ回数のみを検証
+        using var dbContext = new DbContext(@"\\server\share\retry_test.db");
+        dbContext.IsSharedMode.Should().BeTrue("UNCパス指定時は共有モード");
 
         var attemptCount = 0;
         var act = () => dbContext.ExecuteWithRetryAsync(async () =>
@@ -386,8 +387,10 @@ public class DbContextConcurrentAccessTests : IDisposable
     [Trait("Category", "Integration")]
     public void InitializeDatabase_ネットワークフォルダが存在しない場合にIOExceptionをスローすること()
     {
+        // Issue #1559: 共有モードを発動させる必要があるため、ローカル一時パス + forceSharedMode を使用
+        // （存在しない UNC を実際に叩くと DNS タイムアウトで遅くなる/不安定になるため、test seam で共有モード化）
         var nonExistentPath = Path.Combine(_testDirectory, "nonexistent_folder", "iccard.db");
-        using var dbContext = new DbContext(nonExistentPath);
+        using var dbContext = new DbContext(nonExistentPath, logger: null, forceSharedMode: true);
 
         var act = () => dbContext.InitializeDatabase();
 

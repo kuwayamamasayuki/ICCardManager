@@ -139,11 +139,12 @@ namespace ICCardManager.Data
         private static readonly Random _jitterRandom = new Random();
 
         /// <summary>
-        /// 共有モード（ユーザーがDB保存先を明示的に指定した場合）かどうか
+        /// 共有モード（UNCパス または マップドネットワークドライブ指定時）かどうか
         /// </summary>
         /// <remarks>
-        /// UNCパス（\\server\share）だけでなく、ドライブレター形式（D:\share）の
-        /// マップドドライブも含む。デフォルトパス以外が指定された場合にtrueとなる。
+        /// UNCパス（\\server\share）と、ドライブレター形式（Z:\share）でも
+        /// DriveInfo.DriveType == DriveType.Network のマップドネットワークドライブを
+        /// 共有モード扱いとする。ローカルフルパス指定は共有モードにしない（Issue #1559）。
         /// </remarks>
         public bool IsSharedMode { get; }
 
@@ -205,6 +206,19 @@ namespace ICCardManager.Data
         /// <param name="databasePath">データベースファイルのパス（省略時はアプリフォルダ内）</param>
         /// <param name="logger">ロガー（省略時はログ出力なし）</param>
         public DbContext(string databasePath = null, ILogger<DbContext> logger = null)
+            : this(databasePath, logger, forceSharedMode: null)
+        {
+        }
+
+        /// <summary>
+        /// テスト用 internal コンストラクタ（Issue #1559）。
+        /// ローカル一時ファイルを使いながら共有モード挙動（busy_timeout / リトライ回数 等）を検証するために
+        /// IsSharedMode を強制的に指定する用途。production コードからは使用しない。
+        /// </summary>
+        /// <param name="databasePath">データベースファイルのパス</param>
+        /// <param name="logger">ロガー</param>
+        /// <param name="forceSharedMode">true/falseで IsSharedMode を強制指定。null の場合は通常の判定ロジック（UNC/マップドドライブ）を使用</param>
+        internal DbContext(string databasePath, ILogger<DbContext> logger, bool? forceSharedMode)
         {
             _logger = logger;
             DatabasePath = databasePath ?? GetDefaultDatabasePath();
@@ -218,8 +232,12 @@ namespace ICCardManager.Data
             // SQLiteConnectionStringBuilderでエスケープし、接続文字列インジェクションを防止
             var builder = new SQLiteConnectionStringBuilder { DataSource = effectivePath };
             _connectionString = builder.ToString();
-            // ユーザーが明示的にパスを指定した場合（databasePathがnull以外）は共有モード
-            IsSharedMode = databasePath != null;
+
+            // Issue #1559: UNCパス または マップドネットワークドライブ指定時のみ共有モード
+            // （ローカルフルパス指定では共有モードにしない）。テスト時は forceSharedMode で上書き可能
+            IsSharedMode = forceSharedMode ??
+                           (databasePath != null &&
+                            (IsUncPath(databasePath) || IsNetworkDrive(databasePath)));
         }
 
         /// <summary>
@@ -238,6 +256,39 @@ namespace ICCardManager.Data
             {
                 // パスがURI形式でない場合は \\で始まるかを直接チェック
                 return path.StartsWith(@"\\", StringComparison.Ordinal);
+            }
+        }
+
+        /// <summary>
+        /// マップドネットワークドライブ（例: Z:\share）かどうかを判定（Issue #1559）
+        /// </summary>
+        /// <remarks>
+        /// Path.GetPathRoot でルートを取得し、DriveInfo.DriveType が Network かを判定する。
+        /// パスが不正・null・未マウントドライブ等で例外発生時は false（ローカル扱い）にフォールバック。
+        /// UNCパスは IsUncPath 側で判定するため、ここでは早期 false を返す。
+        /// </remarks>
+        internal static bool IsNetworkDrive(string path)
+        {
+            if (string.IsNullOrWhiteSpace(path))
+                return false;
+
+            try
+            {
+                var root = Path.GetPathRoot(path);
+                if (string.IsNullOrEmpty(root))
+                    return false;
+
+                // UNCはここで除外（IsUncPathで判定する責務分離）
+                if (root.StartsWith(@"\\", StringComparison.Ordinal))
+                    return false;
+
+                var drive = new DriveInfo(root);
+                return drive.DriveType == DriveType.Network;
+            }
+            catch
+            {
+                // 不正パス・未マウントドライブ等はローカル扱い
+                return false;
             }
         }
 

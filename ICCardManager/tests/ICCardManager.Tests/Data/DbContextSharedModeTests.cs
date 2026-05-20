@@ -55,12 +55,22 @@ public class DbContextSharedModeTests : IDisposable
     #region IsSharedMode テスト
 
     [Fact]
-    public void IsSharedMode_パスを明示指定した場合trueであること()
+    public void IsSharedMode_UNCパスを指定した場合trueであること()
     {
+        // Issue #1559: 共有モード判定は UNC または マップドネットワークドライブのみ
+        using var dbContext = new DbContext(@"\\server\share\iccard.db");
+
+        dbContext.IsSharedMode.Should().BeTrue();
+    }
+
+    [Fact]
+    public void IsSharedMode_ローカルフルパスを指定した場合falseであること()
+    {
+        // Issue #1559: ローカルフルパス指定は共有モード扱いにしない
         var dbPath = Path.Combine(_testDirectory, "local.db");
         using var dbContext = new DbContext(dbPath);
 
-        dbContext.IsSharedMode.Should().BeTrue();
+        dbContext.IsSharedMode.Should().BeFalse();
     }
 
     [Fact]
