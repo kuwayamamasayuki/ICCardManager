@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Data;
 using System.Linq;
 using System.Threading.Tasks;
 using ICCardManager.Models;
@@ -374,10 +375,84 @@ VALUES (@ledgerId, @useDate, @entryStation, @exitStation,
         /// <inheritdoc/>
         public async Task<bool> InsertDetailsAsync(int ledgerId, IEnumerable<LedgerDetail> details, SQLiteTransaction transaction)
         {
+            // Issue #1456: 単一 SQLiteCommand を再利用してループ内 ExecuteNonQuery する。
+            // tx=null 経路では内部で BeginTransactionAsync して commit/rollback まで責任を持つ。
+            // tx 指定経路は呼び出し元の tx を共有し、commit/rollback には介入しない。
+            var list = details as IList<LedgerDetail> ?? details.ToList();
+            if (list.Count == 0)
+            {
+                return true;
+            }
+
+            if (transaction != null)
+            {
+                return await InsertDetailsCore(ledgerId, list, transaction.Connection, transaction).ConfigureAwait(false);
+            }
+
+            using var scope = await _dbContext.BeginTransactionAsync().ConfigureAwait(false);
+            try
+            {
+                var ok = await InsertDetailsCore(ledgerId, list, scope.Lease.Connection, scope.Transaction).ConfigureAwait(false);
+                if (ok)
+                {
+                    scope.Commit();
+                }
+                else
+                {
+                    scope.Rollback();
+                }
+                return ok;
+            }
+            catch
+            {
+                scope.Rollback();
+                throw;
+            }
+        }
+
+        /// <summary>
+        /// Issue #1456: ledger_detail への一括 INSERT 本体。
+        /// 1 つの SQLiteCommand を生成し、パラメータを宣言したうえでループ内では値だけを差し替える。
+        /// </summary>
+        private static async Task<bool> InsertDetailsCore(
+            int ledgerId, IList<LedgerDetail> details, SQLiteConnection connection, SQLiteTransaction transaction)
+        {
+            using var command = connection.CreateCommand();
+            command.Transaction = transaction;
+            command.CommandText = @"INSERT INTO ledger_detail (ledger_id, use_date, entry_station, exit_station,
+                               bus_stops, amount, balance, is_charge, is_point_redemption, is_bus, group_id)
+VALUES (@ledgerId, @useDate, @entryStation, @exitStation,
+       @busStops, @amount, @balance, @isCharge, @isPointRedemption, @isBus, @groupId)";
+
+            var pLedgerId          = command.Parameters.Add("@ledgerId",          DbType.Int32);
+            var pUseDate           = command.Parameters.Add("@useDate",           DbType.String);
+            var pEntryStation      = command.Parameters.Add("@entryStation",      DbType.String);
+            var pExitStation       = command.Parameters.Add("@exitStation",       DbType.String);
+            var pBusStops          = command.Parameters.Add("@busStops",          DbType.String);
+            var pAmount            = command.Parameters.Add("@amount",            DbType.Int32);
+            var pBalance           = command.Parameters.Add("@balance",           DbType.Int32);
+            var pIsCharge          = command.Parameters.Add("@isCharge",          DbType.Int32);
+            var pIsPointRedemption = command.Parameters.Add("@isPointRedemption", DbType.Int32);
+            var pIsBus             = command.Parameters.Add("@isBus",             DbType.Int32);
+            var pGroupId           = command.Parameters.Add("@groupId",           DbType.Int32);
+
             foreach (var detail in details)
             {
                 detail.LedgerId = ledgerId;
-                if (!await InsertDetailAsync(detail, transaction))
+
+                pLedgerId.Value          = detail.LedgerId;
+                pUseDate.Value           = detail.UseDate.HasValue ? (object)detail.UseDate.Value.ToString("yyyy-MM-dd HH:mm:ss") : DBNull.Value;
+                pEntryStation.Value      = (object)detail.EntryStation ?? DBNull.Value;
+                pExitStation.Value       = (object)detail.ExitStation  ?? DBNull.Value;
+                pBusStops.Value          = (object)detail.BusStops     ?? DBNull.Value;
+                pAmount.Value            = detail.Amount.HasValue  ? (object)detail.Amount.Value  : DBNull.Value;
+                pBalance.Value           = detail.Balance.HasValue ? (object)detail.Balance.Value : DBNull.Value;
+                pIsCharge.Value          = detail.IsCharge ? 1 : 0;
+                pIsPointRedemption.Value = detail.IsPointRedemption ? 1 : 0;
+                pIsBus.Value             = detail.IsBus ? 1 : 0;
+                pGroupId.Value           = detail.GroupId.HasValue ? (object)detail.GroupId.Value : DBNull.Value;
+
+                if (await command.ExecuteNonQueryAsync().ConfigureAwait(false) <= 0)
                 {
                     return false;
                 }
