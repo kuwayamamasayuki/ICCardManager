@@ -124,4 +124,25 @@ public class LedgerRepositoryBatchInsertTests : IDisposable
         persisted.Should().NotBeNull();
         persisted!.Details.Should().HaveCount(100);
     }
+
+    [Fact]
+    public async Task InsertDetailsAsync_LargeBatch_WithCallerTransaction_RollbackDiscardsAll()
+    {
+        // Issue #1456: 呼び出し元 tx 経由で 100 件挿入し、呼び出し元が Rollback すると
+        // 1 件も残らないことを確認。これにより以下を保証する:
+        //   (a) InsertDetailsAsync が呼び出し元 tx に介入していない（自分で commit していない）
+        //   (b) 100 件分のループが同一 tx 内で実行されている
+        int ledgerId;
+        using (var scope = await _dbContext.BeginTransactionAsync())
+        {
+            ledgerId = await _repository.InsertAsync(CreateLedger(), scope.Transaction);
+            var details = CreateDetails(100);
+            var result = await _repository.InsertDetailsAsync(ledgerId, details, scope.Transaction);
+            result.Should().BeTrue();
+            scope.Rollback();
+        }
+
+        var persisted = await _repository.GetByIdAsync(ledgerId);
+        persisted.Should().BeNull("呼び出し元 tx の Rollback で ledger ヘッダと 100 件の detail が全て消えるべき");
+    }
 }
