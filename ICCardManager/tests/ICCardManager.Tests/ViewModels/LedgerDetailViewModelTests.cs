@@ -49,6 +49,7 @@ public class LedgerDetailViewModelTests : IDisposable
             _ledgerRepoMock.Object,
             summaryGenerator,
             operationLogger,
+            _dbContext,
             splitServiceLogger);
         var logger = NullLogger<LedgerDetailViewModel>.Instance;
 

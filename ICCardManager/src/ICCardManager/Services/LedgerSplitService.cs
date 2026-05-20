@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 using ICCardManager.Common;
+using ICCardManager.Data;
 using ICCardManager.Data.Repositories;
 using ICCardManager.Models;
 using Microsoft.Extensions.Logging;
@@ -27,17 +28,20 @@ namespace ICCardManager.Services
         private readonly ILedgerRepository _ledgerRepository;
         private readonly SummaryGenerator _summaryGenerator;
         private readonly OperationLogger _operationLogger;
+        private readonly DbContext _dbContext;
         private readonly ILogger<LedgerSplitService> _logger;
 
         public LedgerSplitService(
             ILedgerRepository ledgerRepository,
             SummaryGenerator summaryGenerator,
             OperationLogger operationLogger,
+            DbContext dbContext,
             ILogger<LedgerSplitService> logger)
         {
             _ledgerRepository = ledgerRepository;
             _summaryGenerator = summaryGenerator;
             _operationLogger = operationLogger;
+            _dbContext = dbContext;
             _logger = logger;
         }
 
@@ -88,6 +92,10 @@ namespace ICCardManager.Services
                 var createdIds = new List<int>();
                 var allSplitLedgers = new List<Ledger>();
 
+                // Issue #1458: 分割処理全体 (ReplaceDetails/Update/Insert/InsertDetails と監査ログ INSERT)
+                // を単一の SQLiteTransaction で実行。部分書き込みも原子的に rollback される。
+                using var scope = await _dbContext.BeginTransactionAsync().ConfigureAwait(false);
+
                 // グループ1: 元のLedgerを更新
                 var firstGroup = groups[0].ToList();
                 ClearGroupIds(firstGroup);
@@ -104,8 +112,8 @@ namespace ICCardManager.Services
                 // ReplaceDetailsAsync はDELETE+INSERTのため、rowidが再採番される
                 // DBは rowid DESC で時系列表示（大きいrowid＝古い＝先に表示）するので、
                 // 新しい明細から先に挿入して小さいrowidを割り当てる必要がある
-                await _ledgerRepository.ReplaceDetailsAsync(originalLedger.Id, firstGroup.AsEnumerable().Reverse()).ConfigureAwait(false);
-                await _ledgerRepository.UpdateAsync(originalLedger).ConfigureAwait(false);
+                await _ledgerRepository.ReplaceDetailsAsync(originalLedger.Id, firstGroup.AsEnumerable().Reverse(), scope.Transaction).ConfigureAwait(false);
+                await _ledgerRepository.UpdateAsync(originalLedger, scope.Transaction).ConfigureAwait(false);
                 allSplitLedgers.Add(originalLedger);
 
                 // グループ2以降: 新しいLedgerを作成
@@ -135,17 +143,19 @@ namespace ICCardManager.Services
                         Note = null
                     };
 
-                    var newId = await _ledgerRepository.InsertAsync(newLedger).ConfigureAwait(false);
+                    var newId = await _ledgerRepository.InsertAsync(newLedger, scope.Transaction).ConfigureAwait(false);
                     newLedger.Id = newId;
                     // Issue #880: 挿入順を逆にしてFeliCa互換のrowid順序を維持（上記コメント参照）
-                    await _ledgerRepository.InsertDetailsAsync(newId, groupDetails.AsEnumerable().Reverse()).ConfigureAwait(false);
+                    await _ledgerRepository.InsertDetailsAsync(newId, groupDetails.AsEnumerable().Reverse(), scope.Transaction).ConfigureAwait(false);
 
                     createdIds.Add(newId);
                     allSplitLedgers.Add(newLedger);
                 }
 
-                // 操作ログを記録
-                await _operationLogger.LogLedgerSplitAsync(beforeLedger, allSplitLedgers).ConfigureAwait(false);
+                // 操作ログを同一 tx で記録
+                await _operationLogger.LogLedgerSplitAsync(beforeLedger, allSplitLedgers, scope.Transaction).ConfigureAwait(false);
+
+                scope.Commit();
 
                 _logger.LogInformation(
                     "Split ledger {LedgerId} into {Count} ledgers (new IDs: {NewIds})",
