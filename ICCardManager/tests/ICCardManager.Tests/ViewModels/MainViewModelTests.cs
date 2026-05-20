@@ -19,6 +19,7 @@ using Xunit;
 
 using System;
 using System.Collections.Generic;
+using System.Data.SQLite;
 using System.Linq;
 using System.Threading.Tasks;
 
@@ -34,7 +35,7 @@ namespace ICCardManager.Tests.ViewModels;
 /// 状態遷移・タイムアウト・30秒ルールなどの中核ロジックをテストできます。
 /// </para>
 /// </remarks>
-public class MainViewModelTests
+public class MainViewModelTests : IDisposable
 {
     private readonly Mock<ICardReader> _cardReaderMock;
     private readonly Mock<ISoundPlayer> _soundPlayerMock;
@@ -52,7 +53,14 @@ public class MainViewModelTests
     private readonly LedgerConsistencyChecker _ledgerConsistencyChecker;
     private readonly TestTimerFactory _timerFactory;
     private readonly SynchronousDispatcherService _dispatcherService;
+    private readonly DbContext _dbContext;
     private readonly MainViewModel _viewModel;
+
+    public void Dispose()
+    {
+        _dbContext?.Dispose();
+        GC.SuppressFinalize(this);
+    }
 
     public MainViewModelTests()
     {
@@ -73,11 +81,11 @@ public class MainViewModelTests
 
         var summaryGenerator = new SummaryGenerator();
         var lockManager = new CardLockManager(NullLogger<CardLockManager>.Instance);
-        var dbContext = new DbContext(":memory:");
-        dbContext.InitializeDatabase();
+        _dbContext = new DbContext(":memory:");
+        _dbContext.InitializeDatabase();
 
         _lendingService = new LendingService(
-            dbContext,
+            _dbContext,
             _cardRepositoryMock.Object,
             _staffRepositoryMock.Object,
             _ledgerRepositoryMock.Object,
@@ -131,7 +139,8 @@ public class MainViewModelTests
             new SharedModeMonitor(databaseInfoMock.Object, _timerFactory, new SystemClock()),
             new WarningService(_ledgerRepositoryMock.Object, databaseInfoMock.Object),
             new DashboardService(_cardRepositoryMock.Object, _ledgerRepositoryMock.Object,
-                _staffRepositoryMock.Object, _settingsRepositoryMock.Object));
+                _staffRepositoryMock.Object, _settingsRepositoryMock.Object),
+            _dbContext);
     }
 
     #region AppState列挙型テスト
@@ -522,7 +531,8 @@ public class MainViewModelTests
             new SharedModeMonitor(isolatedDbInfoMock.Object, isolatedTimerFactory, new SystemClock()),
             new WarningService(_ledgerRepositoryMock.Object, isolatedDbInfoMock.Object),
             new DashboardService(_cardRepositoryMock.Object, _ledgerRepositoryMock.Object,
-                _staffRepositoryMock.Object, _settingsRepositoryMock.Object));
+                _staffRepositoryMock.Object, _settingsRepositoryMock.Object),
+            _dbContext);
 
         var staffIdm = "0102030405060708";
         _staffRepositoryMock.Setup(r => r.GetByIdmAsync(staffIdm, It.IsAny<bool>()))
@@ -1187,7 +1197,8 @@ public class MainViewModelTests
             new SharedModeMonitor(databaseInfo, _timerFactory, new SystemClock()),
             new WarningService(_ledgerRepositoryMock.Object, databaseInfo),
             new DashboardService(_cardRepositoryMock.Object, _ledgerRepositoryMock.Object,
-                _staffRepositoryMock.Object, _settingsRepositoryMock.Object));
+                _staffRepositoryMock.Object, _settingsRepositoryMock.Object),
+            _dbContext);
     }
 
     #endregion
@@ -1263,7 +1274,7 @@ public class MainViewModelTests
             Times.Never,
             "貸出中レコードでは認証フローを開始してはならない");
         _ledgerRepositoryMock.Verify(
-            r => r.DeleteAsync(It.IsAny<int>()),
+            r => r.DeleteAsync(It.IsAny<int>(), It.IsAny<SQLiteTransaction>()),
             Times.Never,
             "貸出中レコードでは DeleteAsync を呼んではならない");
     }
@@ -1285,7 +1296,7 @@ public class MainViewModelTests
             s => s.RequestAuthenticationAsync(It.IsAny<string>()),
             Times.Never);
         _ledgerRepositoryMock.Verify(
-            r => r.DeleteAsync(It.IsAny<int>()),
+            r => r.DeleteAsync(It.IsAny<int>(), It.IsAny<SQLiteTransaction>()),
             Times.Never);
     }
 

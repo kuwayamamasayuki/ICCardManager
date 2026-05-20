@@ -171,7 +171,8 @@ public class MainViewModelIntegrationTests
             _cacheServiceMock.Object,
             _sharedModeMonitor,
             _warningService,
-            _dashboardService);
+            _dashboardService,
+            dbContext);
     }
 
     private void RaiseCardRead(string idm)
