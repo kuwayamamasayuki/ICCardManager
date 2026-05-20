@@ -26,6 +26,7 @@ public partial class SettingsViewModel : ViewModelBase
     private readonly ISettingsRepository _settingsRepository;
     private readonly IValidationService _validationService;
     private readonly ISoundPlayer _soundPlayer;
+    private readonly IDialogService _dialogService;
 
     [ObservableProperty]
     private int _warningBalance;
@@ -137,11 +138,13 @@ public partial class SettingsViewModel : ViewModelBase
         ISettingsRepository settingsRepository,
         IValidationService validationService,
         ISoundPlayer soundPlayer,
-        IOptions<DatabaseOptions> databaseOptions) // DI互換のため引数を維持（本体では未使用）
+        IOptions<DatabaseOptions> databaseOptions, // DI互換のため引数を維持（本体では未使用）
+        IDialogService dialogService)
     {
         _settingsRepository = settingsRepository;
         _validationService = validationService;
         _soundPlayer = soundPlayer;
+        _dialogService = dialogService;
         // database_config.txtから直接読む（設定ファイルが正。DI経由のDatabaseOptionsは
         // アプリ起動時に固定されるため、同一セッション中に設定変更しても反映されない）
         var fullPath = LoadDatabasePathFromConfigFile();
@@ -400,6 +403,45 @@ public partial class SettingsViewModel : ViewModelBase
                 DatabasePath = dialog.SelectedPath;
                 HasChanges = true;
             }
+        }
+    }
+
+    /// <summary>
+    /// データベース保存先をデフォルト（ローカル）に戻す（Issue #1559）。
+    /// database_config.txt を削除し、UI上のパスを空欄にする。反映には再起動が必要。
+    /// </summary>
+    [RelayCommand]
+    public void ResetDatabasePathToDefault()
+    {
+        const string Title = "データベース保存先をデフォルトに戻す";
+        var message =
+            "データベース保存先をローカルのデフォルト（C:\\ProgramData\\ICCardManager\\iccard.db）に戻します。\n" +
+            "現在の設定ファイル（database_config.txt）は削除されます。\n\n" +
+            "変更を反映するにはアプリケーションの再起動が必要です。続行しますか？";
+
+        if (!_dialogService.ShowConfirmation(message, Title))
+        {
+            return;
+        }
+
+        try
+        {
+            var configPath = GetDatabaseConfigPath();
+            if (File.Exists(configPath))
+            {
+                File.Delete(configPath);
+            }
+
+            DatabasePath = string.Empty;
+            _originalDatabasePath = string.Empty;
+            IsDatabasePathChanged = true;
+            SetStatus(
+                "データベース保存先をデフォルトに戻しました。変更を反映するにはアプリケーションを再起動してください。",
+                false);
+        }
+        catch (Exception ex)
+        {
+            SetStatus($"設定ファイルの削除に失敗しました: {ex.Message}", true);
         }
     }
 

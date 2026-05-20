@@ -25,6 +25,7 @@ public class SettingsViewModelTests
     private readonly Mock<ISettingsRepository> _settingsRepositoryMock;
     private readonly Mock<IValidationService> _validationServiceMock;
     private readonly Mock<ISoundPlayer> _soundPlayerMock;
+    private readonly Mock<IDialogService> _dialogServiceMock;
     private readonly SettingsViewModel _viewModel;
 
     public SettingsViewModelTests()
@@ -32,6 +33,7 @@ public class SettingsViewModelTests
         _settingsRepositoryMock = new Mock<ISettingsRepository>();
         _validationServiceMock = new Mock<IValidationService>();
         _soundPlayerMock = new Mock<ISoundPlayer>();
+        _dialogServiceMock = new Mock<IDialogService>();
 
         // バリデーションはデフォルトで成功を返す
         _validationServiceMock.Setup(v => v.ValidateWarningBalance(It.IsAny<int>())).Returns(ValidationResult.Success());
@@ -40,7 +42,8 @@ public class SettingsViewModelTests
             _settingsRepositoryMock.Object,
             _validationServiceMock.Object,
             _soundPlayerMock.Object,
-            Options.Create(new DatabaseOptions()));
+            Options.Create(new DatabaseOptions()),
+            _dialogServiceMock.Object);
     }
 
     #region 設定読み込みテスト
