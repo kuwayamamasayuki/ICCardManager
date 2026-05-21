@@ -38,7 +38,7 @@ public class SettingsViewModelDatabasePathTests
     }
 
     [Fact]
-    public void ResetDatabasePathToDefault_UserConfirms_DeletesConfigAndClearsPath()
+    public void ResetDatabasePathToDefault_UserConfirms_DeletesConfigAndShowsDefaultFolder()
     {
         var configPath = SettingsViewModel.GetDatabaseConfigPath();
         Directory.CreateDirectory(Path.GetDirectoryName(configPath)!);
@@ -54,8 +54,10 @@ public class SettingsViewModelDatabasePathTests
             vm.ResetDatabasePathToDefaultCommand.Execute(null);
 
             File.Exists(configPath).Should().BeFalse("確認後に config ファイルが削除される");
-            vm.DatabasePath.Should().BeEmpty("UI上のパスは空欄に");
-            vm.IsDatabasePathChanged.Should().BeTrue("再起動案内を表示するため変更フラグを立てる");
+            vm.DatabasePath.Should().Be(SettingsViewModel.GetDefaultDatabaseFolder(),
+                "UI上のパスはデフォルトフォルダ（C:\\ProgramData\\ICCardManager\\）を表示する");
+            vm.IsDatabasePathChanged.Should().BeFalse(
+                "config 削除済みのため SaveAsync 側の再保存処理は不要（変更フラグは立てない）");
             dialogMock.Verify(d => d.ShowConfirmation(It.IsAny<string>(), It.IsAny<string>()), Times.Once);
         }
         finally
@@ -89,7 +91,7 @@ public class SettingsViewModelDatabasePathTests
     }
 
     [Fact]
-    public void ResetDatabasePathToDefault_ConfigFileNotExists_StillClearsPath()
+    public void ResetDatabasePathToDefault_ConfigFileNotExists_StillShowsDefaultFolder()
     {
         // 既に config ファイルが無い状態でも安全にコマンド実行できる
         var configPath = SettingsViewModel.GetDatabaseConfigPath();
@@ -101,7 +103,7 @@ public class SettingsViewModelDatabasePathTests
         var vm = CreateVm(dialogMock);
         vm.ResetDatabasePathToDefaultCommand.Execute(null);
 
-        vm.DatabasePath.Should().BeEmpty();
-        vm.IsDatabasePathChanged.Should().BeTrue();
+        vm.DatabasePath.Should().Be(SettingsViewModel.GetDefaultDatabaseFolder());
+        vm.IsDatabasePathChanged.Should().BeFalse();
     }
 }

@@ -407,15 +407,27 @@ public partial class SettingsViewModel : ViewModelBase
     }
 
     /// <summary>
+    /// デフォルトのデータベース保存先フォルダパスを取得（Issue #1559）。
+    /// C:\ProgramData\ICCardManager\ を返す。
+    /// </summary>
+    internal static string GetDefaultDatabaseFolder()
+    {
+        return Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
+            "ICCardManager");
+    }
+
+    /// <summary>
     /// データベース保存先をデフォルト（ローカル）に戻す（Issue #1559）。
-    /// database_config.txt を削除し、UI上のパスを空欄にする。反映には再起動が必要。
+    /// database_config.txt を削除し、UI上のパスをデフォルトフォルダパスに更新する。反映には再起動が必要。
     /// </summary>
     [RelayCommand]
     public void ResetDatabasePathToDefault()
     {
+        var defaultFolder = GetDefaultDatabaseFolder();
         const string Title = "データベース保存先をデフォルトに戻す";
         var message =
-            "データベース保存先をローカルのデフォルト（C:\\ProgramData\\ICCardManager\\iccard.db）に戻します。\n" +
+            $"データベース保存先をローカルのデフォルト（{defaultFolder}\\iccard.db）に戻します。\n" +
             "現在の設定ファイル（database_config.txt）は削除されます。\n\n" +
             "変更を反映するにはアプリケーションの再起動が必要です。続行しますか？";
 
@@ -432,9 +444,11 @@ public partial class SettingsViewModel : ViewModelBase
                 File.Delete(configPath);
             }
 
-            DatabasePath = string.Empty;
-            _originalDatabasePath = string.Empty;
-            IsDatabasePathChanged = true;
+            // デフォルトフォルダを UI に表示。config 削除は既に完了しているため、
+            // 「変更なし状態」として IsDatabasePathChanged=false にして再保存処理を不要にする
+            DatabasePath = defaultFolder;
+            _originalDatabasePath = defaultFolder;
+            IsDatabasePathChanged = false;
             SetStatus(
                 "データベース保存先をデフォルトに戻しました。変更を反映するにはアプリケーションを再起動してください。",
                 false);
