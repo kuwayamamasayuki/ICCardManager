@@ -43,10 +43,9 @@ public class DbContextResilienceTests : IDisposable
     [Trait("Category", "Unit")]
     public void BusyTimeout_共有モードで15000msであること()
     {
-        var dbPath = Path.Combine(_testDirectory, "shared.db");
-        using var dbContext = new DbContext(dbPath);
+        // Issue #1559: UNCパス指定で共有モードを発動
+        using var dbContext = new DbContext(@"\\server\share\shared.db");
 
-        // 明示的パス指定 → 共有モード
         dbContext.IsSharedMode.Should().BeTrue();
         dbContext.BusyTimeoutMs.Should().Be(DbContext.SharedBusyTimeoutMs);
         dbContext.BusyTimeoutMs.Should().Be(15000);
@@ -73,8 +72,10 @@ public class DbContextResilienceTests : IDisposable
     [Trait("Category", "Unit")]
     public void GetConnection_共有モードでbusy_timeoutが15000msに設定されること()
     {
+        // Issue #1559: 実際の SQLite 接続を開く必要があるためローカル一時ファイル + forceSharedMode で
+        // 共有モード挙動を再現する
         var dbPath = Path.Combine(_testDirectory, "pragma_shared.db");
-        using var dbContext = new DbContext(dbPath);
+        using var dbContext = new DbContext(dbPath, logger: null, forceSharedMode: true);
         using var lease = dbContext.LeaseConnection();
         var connection = lease.Connection;
 

@@ -244,8 +244,8 @@ public class BackupServiceRestoreSafetyTests : IDisposable
     [Trait("Category", "Unit")]
     public void IsSharedMode_DbContextの状態を反映すること()
     {
-        var dbPath = Path.Combine(_testDirectory, "shared_check.db");
-        using var sharedContext = new DbContext(dbPath);
+        // Issue #1559: UNCパスで共有モードを発動
+        using var sharedContext = new DbContext(@"\\server\share\shared_check.db");
         var sharedService = new BackupService(
             sharedContext,
             CreateSettingsRepositoryMock().Object,

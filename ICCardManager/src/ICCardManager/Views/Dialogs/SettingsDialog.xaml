@@ -270,6 +270,15 @@
                                     AutomationProperties.Name="データベース保存先フォルダを選択"
                                     ToolTip="データベース保存先フォルダを選択します（アクセスキー: Alt+E）"/>
                         </Grid>
+                        <StackPanel Orientation="Horizontal"
+                                    HorizontalAlignment="Right"
+                                    Margin="0,5,0,0">
+                            <Button Content="デフォルトに戻す(_R)"
+                                    Command="{Binding ResetDatabasePathToDefaultCommand}"
+                                    Padding="15,6"
+                                    AutomationProperties.Name="データベース保存先をデフォルトに戻す"
+                                    ToolTip="database_config.txt を削除して、ローカルデフォルトパス（C:\ProgramData\ICCardManager\iccard.db）に戻します（アクセスキー: Alt+R）"/>
+                        </StackPanel>
                         <TextBlock Text="※ 空欄の場合、このPCのローカルフォルダ（C:\ProgramData\ICCardManager\）に保存されます"
                                    FontSize="{DynamicResource SmallFontSize}"
                                    Foreground="{DynamicResource SecondaryTextBrush}"
