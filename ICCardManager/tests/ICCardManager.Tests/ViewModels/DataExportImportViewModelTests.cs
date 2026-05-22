@@ -35,6 +35,7 @@ public class DataExportImportViewModelTests : IDisposable
     private readonly Mock<IDialogService> _dialogServiceMock;
     private readonly Mock<CsvImportService> _importServiceMock;
     private readonly Mock<CsvExportService> _exportServiceMock;
+    private readonly Mock<ICCardManager.Services.ISafeFileLauncher> _safeFileLauncherMock;
     private readonly SQLiteConnection _connection;
     private readonly DbContext _realDbContext;
     private readonly DataExportImportViewModel _viewModel;
@@ -81,13 +82,20 @@ public class DataExportImportViewModelTests : IDisposable
         var operatorContext = new CurrentOperatorContext(new SystemClock());
         var operationLogger = new OperationLogger(operationLogRepository, operatorContext);
 
+        _safeFileLauncherMock = new Mock<ICCardManager.Services.ISafeFileLauncher>();
+        _safeFileLauncherMock.Setup(l => l.LaunchFile(It.IsAny<string>()))
+            .Returns(ICCardManager.Services.SafeFileLaunchResult.Ok());
+        _safeFileLauncherMock.Setup(l => l.LaunchFolder(It.IsAny<string>()))
+            .Returns(ICCardManager.Services.SafeFileLaunchResult.Ok());
+
         _viewModel = new DataExportImportViewModel(
             _exportServiceMock.Object,
             _importServiceMock.Object,
             _dialogServiceMock.Object,
             _cardRepositoryMock.Object,
             operationLogger,
-            new WeakReferenceMessenger());
+            new WeakReferenceMessenger(),
+            _safeFileLauncherMock.Object);
     }
 
     public void Dispose()
@@ -567,6 +575,58 @@ public class DataExportImportViewModelTests : IDisposable
             d => d.ShowInformation(It.IsAny<string>(), It.IsAny<string>()),
             Times.Never,
             "例外時は成功ダイアログを表示しない");
+    }
+
+    #endregion
+
+    #region OpenExportedFile / OpenExportFolder（Issue #1465）
+
+    [Fact]
+    public void OpenExportedFile_ISafeFileLauncherへ委譲()
+    {
+        _viewModel.LastExportedFile = "C:\\export.csv";
+
+        _viewModel.OpenExportedFileCommand.Execute(null);
+
+        _safeFileLauncherMock.Verify(l => l.LaunchFile("C:\\export.csv"), Times.Once);
+    }
+
+    [Fact]
+    public void OpenExportedFile_失敗時_ステータスにエラー()
+    {
+        _viewModel.LastExportedFile = "C:\\evil.exe";
+        _safeFileLauncherMock.Setup(l => l.LaunchFile(It.IsAny<string>()))
+            .Returns(ICCardManager.Services.SafeFileLaunchResult.Fail("拡張子NG"));
+
+        _viewModel.OpenExportedFileCommand.Execute(null);
+
+        _viewModel.StatusMessage.Should().Contain("拡張子NG");
+        _viewModel.IsStatusError.Should().BeTrue();
+    }
+
+    [Fact]
+    public void OpenExportFolder_親フォルダ算出後にISafeFileLauncherへ委譲()
+    {
+        _viewModel.LastExportedFile = "C:\\exports\\file.csv";
+
+        _viewModel.OpenExportFolderCommand.Execute(null);
+
+        _safeFileLauncherMock.Verify(l => l.LaunchFolder("C:\\exports"), Times.Once);
+    }
+
+    [Fact]
+    public void OpenExportFolder_LastExportedFile未設定_空文字でlauncher呼び出し()
+    {
+        // LastExportedFile が空のとき Path.GetDirectoryName は null を返すため、
+        // ViewModel 側で空文字へフォールバックして launcher に委ねる（launcher 側で Validator が空エラーを返す）。
+        _viewModel.LastExportedFile = string.Empty;
+        _safeFileLauncherMock.Setup(l => l.LaunchFolder(string.Empty))
+            .Returns(ICCardManager.Services.SafeFileLaunchResult.Fail("フォルダパスが空です"));
+
+        _viewModel.OpenExportFolderCommand.Execute(null);
+
+        _safeFileLauncherMock.Verify(l => l.LaunchFolder(string.Empty), Times.Once);
+        _viewModel.IsStatusError.Should().BeTrue();
     }
 
     #endregion

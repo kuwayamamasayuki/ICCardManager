@@ -26,6 +26,7 @@ public class SystemManageViewModelTests : IDisposable
     private readonly Mock<ISettingsRepository> _settingsRepositoryMock;
     private readonly Mock<BackupService> _backupServiceMock;
     private readonly Mock<INavigationService> _navigationServiceMock;
+    private readonly Mock<ICCardManager.Services.ISafeFileLauncher> _safeFileLauncherMock;
     private readonly SystemManageViewModel _viewModel;
 
     public SystemManageViewModelTests()
@@ -46,11 +47,16 @@ public class SystemManageViewModelTests : IDisposable
         var operatorContext = new CurrentOperatorContext(new SystemClock());
         var operationLogger = new OperationLogger(operationLogRepository, operatorContext);
 
+        _safeFileLauncherMock = new Mock<ICCardManager.Services.ISafeFileLauncher>();
+        _safeFileLauncherMock.Setup(l => l.LaunchFolder(It.IsAny<string>()))
+            .Returns(ICCardManager.Services.SafeFileLaunchResult.Ok());
+
         _viewModel = new SystemManageViewModel(
             _backupServiceMock.Object,
             _settingsRepositoryMock.Object,
             _navigationServiceMock.Object,
-            operationLogger);
+            operationLogger,
+            _safeFileLauncherMock.Object);
     }
 
     public void Dispose()
@@ -425,6 +431,55 @@ public class SystemManageViewModelTests : IDisposable
         busyStates.Should().HaveCountGreaterOrEqualTo(2);
         busyStates.First().Should().BeTrue();
         busyStates.Last().Should().BeFalse();
+    }
+
+    #endregion
+
+    #region OpenBackupFolder（Issue #1465）
+
+    [Fact]
+    public void OpenBackupFolder_バックアップ無し_エラー表示()
+    {
+        _viewModel.OpenBackupFolderCommand.Execute(null);
+
+        _viewModel.IsStatusError.Should().BeTrue();
+        _viewModel.StatusMessage.Should().Contain("バックアップ");
+        _safeFileLauncherMock.Verify(l => l.LaunchFolder(It.IsAny<string>()), Times.Never);
+    }
+
+    [Fact]
+    public void OpenBackupFolder_バックアップ有り_ISafeFileLauncherへ親フォルダで委譲()
+    {
+        _viewModel.BackupFiles.Add(new BackupFileInfo
+        {
+            FileName = "backup_001.db",
+            FilePath = "C:\\backups\\backup_001.db",
+            CreatedAt = DateTime.Now,
+            FileSize = 1024
+        });
+
+        _viewModel.OpenBackupFolderCommand.Execute(null);
+
+        _safeFileLauncherMock.Verify(l => l.LaunchFolder("C:\\backups"), Times.Once);
+    }
+
+    [Fact]
+    public void OpenBackupFolder_launcherが失敗を返した場合_エラー表示()
+    {
+        _viewModel.BackupFiles.Add(new BackupFileInfo
+        {
+            FileName = "backup_001.db",
+            FilePath = "C:\\backups\\backup_001.db",
+            CreatedAt = DateTime.Now,
+            FileSize = 1024
+        });
+        _safeFileLauncherMock.Setup(l => l.LaunchFolder(It.IsAny<string>()))
+            .Returns(ICCardManager.Services.SafeFileLaunchResult.Fail("フォルダが見つかりません"));
+
+        _viewModel.OpenBackupFolderCommand.Execute(null);
+
+        _viewModel.IsStatusError.Should().BeTrue();
+        _viewModel.StatusMessage.Should().Contain("見つかりません");
     }
 
     #endregion

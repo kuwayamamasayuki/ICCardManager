@@ -261,6 +261,7 @@ public class MainViewModelSyncDisplayTests
             sharedModeMonitor,
             warningService,
             dashboardService,
+            new Mock<ICCardManager.Services.ISafeFileLauncher>().Object,
             dbContext);
 
         vm.IsSharedMode.Should().BeTrue("テスト用DbContext(:memory:)は共有モード扱い");
@@ -367,6 +368,7 @@ public class MainViewModelSyncDisplayTests
             sharedModeMonitor,
             warningService,
             dashboardService,
+            new Mock<ICCardManager.Services.ISafeFileLauncher>().Object,
             dbContext);
 
         return (vm, ledgerRepositoryMock);

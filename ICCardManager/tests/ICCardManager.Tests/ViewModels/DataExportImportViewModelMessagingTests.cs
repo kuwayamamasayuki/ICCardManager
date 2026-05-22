@@ -91,6 +91,7 @@ public class DataExportImportViewModelMessagingTests : IDisposable
             _cardRepositoryMock.Object,
             operationLogger,
             _messenger,
+            new Mock<ICCardManager.Services.ISafeFileLauncher>().Object,
             _cardReaderMock.Object);
     }
 

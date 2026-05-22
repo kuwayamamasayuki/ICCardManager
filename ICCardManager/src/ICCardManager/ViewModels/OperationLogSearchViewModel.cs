@@ -78,6 +78,7 @@ public partial class OperationLogSearchViewModel : ViewModelBase
     private readonly IOperationLogRepository _operationLogRepository;
     private readonly IDialogService _dialogService;
     private readonly OperationLogExcelExportService _excelExportService;
+    private readonly ISafeFileLauncher _safeFileLauncher;
 
     // 検索条件
     [ObservableProperty]
@@ -184,11 +185,13 @@ public partial class OperationLogSearchViewModel : ViewModelBase
     public OperationLogSearchViewModel(
         IOperationLogRepository operationLogRepository,
         IDialogService dialogService,
-        OperationLogExcelExportService excelExportService)
+        OperationLogExcelExportService excelExportService,
+        ISafeFileLauncher safeFileLauncher)
     {
         _operationLogRepository = operationLogRepository;
         _dialogService = dialogService;
         _excelExportService = excelExportService;
+        _safeFileLauncher = safeFileLauncher;
 
         // デフォルトは今月
         var today = DateTime.Today;
@@ -441,13 +444,11 @@ public partial class OperationLogSearchViewModel : ViewModelBase
     [RelayCommand]
     public void OpenExportedFile()
     {
-        if (!string.IsNullOrEmpty(LastExportedFile) && File.Exists(LastExportedFile))
+        // Issue #1465: 拡張子ホワイトリスト経由で安全に起動
+        var result = _safeFileLauncher.LaunchFile(LastExportedFile);
+        if (!result.Success)
         {
-            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
-            {
-                FileName = LastExportedFile,
-                UseShellExecute = true
-            });
+            SetStatus(result.ErrorMessage, isError: true);
         }
     }
 

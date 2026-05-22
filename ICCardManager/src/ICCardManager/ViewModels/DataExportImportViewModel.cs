@@ -99,6 +99,7 @@ public partial class DataExportImportViewModel : ViewModelBase
     private readonly ICardReader? _cardReader;
     private readonly OperationLogger _operationLogger;
     private readonly IMessenger _messenger;
+    private readonly ISafeFileLauncher _safeFileLauncher;
 
     [ObservableProperty]
     private DataType _selectedExportType = DataType.Cards;
@@ -305,6 +306,7 @@ public partial class DataExportImportViewModel : ViewModelBase
         ICardRepository cardRepository,
         OperationLogger operationLogger,
         IMessenger messenger,
+        ISafeFileLauncher safeFileLauncher,
         ICardReader? cardReader = null)
     {
         _exportService = exportService;
@@ -313,6 +315,7 @@ public partial class DataExportImportViewModel : ViewModelBase
         _cardRepository = cardRepository;
         _operationLogger = operationLogger;
         _messenger = messenger;
+        _safeFileLauncher = safeFileLauncher;
         _cardReader = cardReader;
 
         // カードリーダーイベント購読
@@ -888,13 +891,11 @@ public partial class DataExportImportViewModel : ViewModelBase
     [RelayCommand]
     public void OpenExportedFile()
     {
-        if (!string.IsNullOrEmpty(LastExportedFile) && File.Exists(LastExportedFile))
+        // Issue #1465: 拡張子ホワイトリスト経由で安全に起動
+        var result = _safeFileLauncher.LaunchFile(LastExportedFile);
+        if (!result.Success)
         {
-            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
-            {
-                FileName = LastExportedFile,
-                UseShellExecute = true
-            });
+            SetStatus(result.ErrorMessage, isError: true);
         }
     }
 
@@ -904,17 +905,12 @@ public partial class DataExportImportViewModel : ViewModelBase
     [RelayCommand]
     public void OpenExportFolder()
     {
-        if (!string.IsNullOrEmpty(LastExportedFile) && File.Exists(LastExportedFile))
+        // Issue #1465: ISafeFileLauncher 経由で explorer.exe を直接起動
+        var folder = string.IsNullOrEmpty(LastExportedFile) ? null : Path.GetDirectoryName(LastExportedFile);
+        var result = _safeFileLauncher.LaunchFolder(folder ?? string.Empty);
+        if (!result.Success)
         {
-            var folder = Path.GetDirectoryName(LastExportedFile);
-            if (!string.IsNullOrEmpty(folder) && Directory.Exists(folder))
-            {
-                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
-                {
-                    FileName = folder,
-                    UseShellExecute = true
-                });
-            }
+            SetStatus(result.ErrorMessage, isError: true);
         }
     }
 

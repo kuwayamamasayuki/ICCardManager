@@ -29,6 +29,7 @@ public partial class ReportViewModel : ViewModelBase
     private readonly ICardRepository _cardRepository;
     private readonly INavigationService _navigationService;
     private readonly ISettingsRepository _settingsRepository;
+    private readonly ISafeFileLauncher _safeFileLauncher;
     private bool _isInitialized;
 
     [ObservableProperty]
@@ -89,13 +90,15 @@ public partial class ReportViewModel : ViewModelBase
         PrintService printService,
         ICardRepository cardRepository,
         INavigationService navigationService,
-        ISettingsRepository settingsRepository)
+        ISettingsRepository settingsRepository,
+        ISafeFileLauncher safeFileLauncher)
     {
         _reportService = reportService;
         _printService = printService;
         _cardRepository = cardRepository;
         _navigationService = navigationService;
         _settingsRepository = settingsRepository;
+        _safeFileLauncher = safeFileLauncher;
 
         // CreatedFiles の中身が変化したときに HasCreatedFiles の通知を発火する
         _createdFiles.CollectionChanged += OnCreatedFilesCollectionChanged;
@@ -576,13 +579,11 @@ public partial class ReportViewModel : ViewModelBase
     [RelayCommand]
     public void OpenOutputFolder()
     {
-        if (!string.IsNullOrEmpty(OutputFolder) && Directory.Exists(OutputFolder))
+        // Issue #1465: ISafeFileLauncher 経由で explorer.exe を直接起動
+        var result = _safeFileLauncher.LaunchFolder(OutputFolder);
+        if (!result.Success)
         {
-            Process.Start(new ProcessStartInfo
-            {
-                FileName = OutputFolder,
-                UseShellExecute = true
-            });
+            SetStatus(result.ErrorMessage, isError: true);
         }
     }
 
@@ -592,13 +593,11 @@ public partial class ReportViewModel : ViewModelBase
     [RelayCommand]
     public void OpenCreatedFile(string filePath)
     {
-        if (!string.IsNullOrEmpty(filePath) && File.Exists(filePath))
+        // Issue #1465: 拡張子ホワイトリスト経由で安全に起動
+        var result = _safeFileLauncher.LaunchFile(filePath);
+        if (!result.Success)
         {
-            Process.Start(new ProcessStartInfo
-            {
-                FileName = filePath,
-                UseShellExecute = true
-            });
+            SetStatus(result.ErrorMessage, isError: true);
         }
     }
 

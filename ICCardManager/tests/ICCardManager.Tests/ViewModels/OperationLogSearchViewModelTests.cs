@@ -27,6 +27,7 @@ public class OperationLogSearchViewModelTests
     private readonly Mock<IOperationLogRepository> _repoMock;
     private readonly Mock<IDialogService> _dialogServiceMock;
     private readonly Mock<OperationLogExcelExportService> _excelExportServiceMock;
+    private readonly Mock<ICCardManager.Services.ISafeFileLauncher> _safeFileLauncherMock;
     private readonly OperationLogSearchViewModel _viewModel;
 
     public OperationLogSearchViewModelTests()
@@ -38,10 +39,15 @@ public class OperationLogSearchViewModelTests
         // デフォルト: 空ページを返す（4 keyset メソッドすべて）
         SetupKeysetReturning(Array.Empty<OperationLog>());
 
+        _safeFileLauncherMock = new Mock<ICCardManager.Services.ISafeFileLauncher>();
+        _safeFileLauncherMock.Setup(l => l.LaunchFile(It.IsAny<string>()))
+            .Returns(ICCardManager.Services.SafeFileLaunchResult.Ok());
+
         _viewModel = new OperationLogSearchViewModel(
             _repoMock.Object,
             _dialogServiceMock.Object,
-            _excelExportServiceMock.Object);
+            _excelExportServiceMock.Object,
+            _safeFileLauncherMock.Object);
     }
 
     /// <summary>
@@ -826,6 +832,33 @@ public class OperationLogSearchViewModelTests
         var result = OperationLogSearchViewModel.FormatPageNavigationStatus(currentPage, totalPages, totalCount);
 
         result.Should().Be(expected);
+    }
+
+    #endregion
+
+    #region OpenExportedFile（Issue #1465）
+
+    [Fact]
+    public void OpenExportedFile_ISafeFileLauncherへ委譲()
+    {
+        _viewModel.LastExportedFile = "C:\\export.xlsx";
+
+        _viewModel.OpenExportedFileCommand.Execute(null);
+
+        _safeFileLauncherMock.Verify(l => l.LaunchFile("C:\\export.xlsx"), Times.Once);
+    }
+
+    [Fact]
+    public void OpenExportedFile_launcher失敗時_エラー表示()
+    {
+        _viewModel.LastExportedFile = "C:\\evil.exe";
+        _safeFileLauncherMock.Setup(l => l.LaunchFile(It.IsAny<string>()))
+            .Returns(ICCardManager.Services.SafeFileLaunchResult.Fail("拡張子NG"));
+
+        _viewModel.OpenExportedFileCommand.Execute(null);
+
+        _viewModel.StatusMessage.Should().Contain("拡張子NG");
+        _viewModel.IsStatusError.Should().BeTrue();
     }
 
     #endregion

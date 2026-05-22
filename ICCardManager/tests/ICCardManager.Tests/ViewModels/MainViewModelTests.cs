@@ -141,6 +141,7 @@ public class MainViewModelTests : IDisposable
             new WarningService(_ledgerRepositoryMock.Object, databaseInfoMock.Object),
             new DashboardService(_cardRepositoryMock.Object, _ledgerRepositoryMock.Object,
                 _staffRepositoryMock.Object, _settingsRepositoryMock.Object),
+            new Mock<ICCardManager.Services.ISafeFileLauncher>().Object,
             _dbContext);
     }
 
@@ -533,6 +534,7 @@ public class MainViewModelTests : IDisposable
             new WarningService(_ledgerRepositoryMock.Object, isolatedDbInfoMock.Object),
             new DashboardService(_cardRepositoryMock.Object, _ledgerRepositoryMock.Object,
                 _staffRepositoryMock.Object, _settingsRepositoryMock.Object),
+            new Mock<ICCardManager.Services.ISafeFileLauncher>().Object,
             _dbContext);
 
         var staffIdm = "0102030405060708";
@@ -1199,6 +1201,7 @@ public class MainViewModelTests : IDisposable
             new WarningService(_ledgerRepositoryMock.Object, databaseInfo),
             new DashboardService(_cardRepositoryMock.Object, _ledgerRepositoryMock.Object,
                 _staffRepositoryMock.Object, _settingsRepositoryMock.Object),
+            new Mock<ICCardManager.Services.ISafeFileLauncher>().Object,
             _dbContext);
     }
 
