@@ -401,6 +401,11 @@ VALUES (@ledgerId, @useDate, @entryStation, @exitStation,
             // Issue #1456: 単一 SQLiteCommand を再利用してループ内 ExecuteNonQuery する。
             // tx=null 経路では内部で BeginTransactionAsync して commit/rollback まで責任を持つ。
             // tx 指定経路は呼び出し元の tx を共有し、commit/rollback には介入しない。
+            //
+            // Issue #1575: tx=null かつ既に外側 BeginTransactionAsync スコープ内にいる場合は、
+            // 自前の BeginTransactionAsync を開かない（DbContext._semaphore の再取得デッドロックを防ぐ）。
+            // 既存接続の暗黙トランザクションに参加する形で INSERT を発行する。
+            // 外側スコープがコミット／ロールバックされれば、本メソッドで発行した INSERT もそれに従う。
             var list = details as IList<LedgerDetail> ?? details.ToList();
             if (list.Count == 0)
             {
@@ -410,6 +415,14 @@ VALUES (@ledgerId, @useDate, @entryStation, @exitStation,
             if (transaction != null)
             {
                 return await InsertDetailsCore(ledgerId, list, transaction.Connection, transaction).ConfigureAwait(false);
+            }
+
+            if (_dbContext.HasActiveTransactionScope)
+            {
+                // Issue #1575: 外側 tx スコープ内なら暗黙参加し、自前の BeginTransactionAsync は開かない。
+                // commit/rollback は外側スコープに委ねる。
+                using var lease = await _dbContext.LeaseConnectionAsync().ConfigureAwait(false);
+                return await InsertDetailsCore(ledgerId, list, lease.Connection, transaction: null).ConfigureAwait(false);
             }
 
             using var scope = await _dbContext.BeginTransactionAsync().ConfigureAwait(false);

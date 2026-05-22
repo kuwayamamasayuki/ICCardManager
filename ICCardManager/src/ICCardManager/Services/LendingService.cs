@@ -497,6 +497,9 @@ namespace ICCardManager.Services
                 {
                     // Issue #1481: ledger ヘッダ＋複数 detail ＋貸出レコード削除＋カード状態解除を単一トランザクションに束ねる。
                     // 内部の Insert/Update は同一 SQLiteConnection 上で BEGIN 後に発行されるため暗黙参加する。
+                    // 注意: Issue #1575 で LedgerRepository.InsertDetailsAsync(1 引数版) が外側 tx 中の再入を
+                    // 自己検知する設計（DbContext.HasActiveTransactionScope）に変更されたため、ここで明示的に
+                    // transaction を伝搬しなくてもデッドロックしない。
                     var createdLedgers = await CreateUsageLedgersAsync(
                         cardIdm, lentRecord.LenderIdm, lentRecord.StaffName ?? string.Empty, usageSinceLent, skipDuplicateCheck).ConfigureAwait(false);
 

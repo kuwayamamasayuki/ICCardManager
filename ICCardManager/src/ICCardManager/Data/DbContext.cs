@@ -128,6 +128,27 @@ namespace ICCardManager.Data
         private readonly AsyncLocal<int> _reentrancyCount = new AsyncLocal<int>();
 
         /// <summary>
+        /// Issue #1575: 現在 <see cref="BeginTransactionAsync"/> のスコープが開かれているか（0 or 1）。
+        /// <see cref="_semaphore"/>（容量 1）で取得が直列化されるため、値は 0 か 1 のみ。
+        /// </summary>
+        private int _activeTransactionCount;
+
+        /// <summary>
+        /// Issue #1575: 現在 <see cref="BeginTransactionAsync"/> のスコープ内にいるかを示す。
+        /// Repository が自前で BeginTransactionAsync を開く前にこれが true なら、
+        /// 外側 tx に暗黙参加する経路（<see cref="LeaseConnectionAsync"/>）を取り、
+        /// セマフォ再取得によるデッドロックを防ぐ。
+        /// </summary>
+        /// <remarks>
+        /// 読み取り側にロックはないが、トランザクション取得が常に 1 並列であるため
+        /// false→true は単純に「外側スコープが直近に開いた」を意味する。
+        /// 一瞬の race（読み取った瞬間に値が変わる）が起きても、誤って <see cref="LeaseConnectionAsync"/> 経路を選ぶと
+        /// autocommit で動作する／誤って <see cref="BeginTransactionAsync"/> 経路を選ぶとセマフォで待たされるだけで、
+        /// いずれも安全側に倒れる。
+        /// </remarks>
+        public bool HasActiveTransactionScope => _activeTransactionCount > 0;
+
+        /// <summary>
         /// Issue #1166: 接続一時停止フラグ。
         /// リストア中にバックグラウンドタスクが接続を再オープンすることを防止する。
         /// </summary>
@@ -468,8 +489,11 @@ namespace ICCardManager.Data
             try
             {
                 var connection = GetConnectionInternal();
+                // Issue #1575: 外側 tx カウンタを増加（セマフォで直列化されているので 1 になる）。Lease 解放で必ず減らす。
+                _activeTransactionCount++;
                 var lease = new ConnectionLease(connection, () =>
                 {
+                    _activeTransactionCount = Math.Max(0, _activeTransactionCount - 1);
                     try { _semaphore.Release(); }
                     catch (ObjectDisposedException) { /* DbContext.Dispose()後のリース解放 */ }
                 });
@@ -478,6 +502,8 @@ namespace ICCardManager.Data
             }
             catch
             {
+                // 例外時はカウンタも戻す（実体は 0 or 1 だが防御的に Max でガード）
+                _activeTransactionCount = Math.Max(0, _activeTransactionCount - 1);
                 _semaphore.Release();
                 throw;
             }
