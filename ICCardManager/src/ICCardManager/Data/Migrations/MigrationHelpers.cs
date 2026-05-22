@@ -1,5 +1,6 @@
 using System;
 using System.Data.SQLite;
+using System.Text.RegularExpressions;
 
 namespace ICCardManager.Data.Migrations
 {
@@ -9,9 +10,25 @@ namespace ICCardManager.Data.Migrations
     /// <remarks>
     /// SQLite の <c>ALTER TABLE ADD COLUMN</c> は二重実行時に "duplicate column" エラーを出すため、
     /// <c>PRAGMA table_info()</c> で事前に列の有無を確認する方式で冪等化する。
+    ///
+    /// 識別子・型句のパラメータ化は SQLite ではサポートされないため、文字列補間で構築する。
+    /// 開発者が誤って外部入力相当の値を渡した場合の保険として、Issue #1466 で
+    /// ホワイトリスト regex による検証層を追加した。
     /// </remarks>
     internal static class MigrationHelpers
     {
+        private static readonly Regex IdentifierPattern =
+            new Regex(@"^[A-Za-z_][A-Za-z0-9_]*$", RegexOptions.Compiled);
+
+        private static readonly Regex TypeAndConstraintsPattern =
+            new Regex(
+                @"^(INTEGER|TEXT|REAL|BLOB|NUMERIC)" +
+                @"(\s+(NOT\s+NULL" +
+                @"|DEFAULT\s+(-?\d+(\.\d+)?|'[^';]*'|NULL)" +
+                @"|REFERENCES\s+[A-Za-z_][A-Za-z0-9_]*\([A-Za-z_][A-Za-z0-9_]*\)" +
+                @"))*\s*$",
+                RegexOptions.Compiled);
+
         /// <summary>
         /// 指定テーブルに指定列が存在するかを返す。
         /// </summary>
@@ -22,15 +39,8 @@ namespace ICCardManager.Data.Migrations
             string column)
         {
             if (connection == null) throw new ArgumentNullException(nameof(connection));
-            if (string.IsNullOrWhiteSpace(table)) throw new ArgumentException("table must be non-empty", nameof(table));
-            if (string.IsNullOrWhiteSpace(column)) throw new ArgumentException("column must be non-empty", nameof(column));
-
-            // PRAGMA は識別子のパラメータ化をサポートしないため、表名は文字列リテラル前提。
-            // 外部入力でないことを前提とするが、念のため不正文字を拒否する。
-            if (table.IndexOfAny(new[] { '\'', '"', ';', ' ' }) >= 0)
-            {
-                throw new ArgumentException($"invalid table name: {table}", nameof(table));
-            }
+            EnsureValidIdentifier(table, nameof(table));
+            EnsureValidIdentifier(column, nameof(column));
 
             using var command = connection.CreateCommand();
             command.Transaction = transaction;
@@ -38,7 +48,6 @@ namespace ICCardManager.Data.Migrations
             using var reader = command.ExecuteReader();
             while (reader.Read())
             {
-                // PRAGMA table_info の 2 列目（index 1）が column name
                 var name = reader.GetString(1);
                 if (string.Equals(name, column, StringComparison.OrdinalIgnoreCase))
                 {
@@ -63,6 +72,8 @@ namespace ICCardManager.Data.Migrations
             string column,
             string typeAndConstraints)
         {
+            EnsureValidTypeAndConstraints(typeAndConstraints);
+
             if (HasColumn(connection, transaction, table, column))
             {
                 return;
@@ -72,6 +83,48 @@ namespace ICCardManager.Data.Migrations
             command.Transaction = transaction;
             command.CommandText = $"ALTER TABLE {table} ADD COLUMN {column} {typeAndConstraints}";
             command.ExecuteNonQuery();
+        }
+
+        private static void EnsureValidIdentifier(string value, string paramName)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                throw new ArgumentException(
+                    $"{paramName} は空にできません。" +
+                    "`[A-Za-z_][A-Za-z0-9_]*` の識別子を渡してください。",
+                    paramName);
+            }
+
+            if (!IdentifierPattern.IsMatch(value))
+            {
+                throw new ArgumentException(
+                    $"{paramName} '{value}' は SQLite 識別子として不正です。" +
+                    "英字または '_' で始まり、英数字または '_' のみで構成される必要があります " +
+                    "（regex: `[A-Za-z_][A-Za-z0-9_]*`）。",
+                    paramName);
+            }
+        }
+
+        private static void EnsureValidTypeAndConstraints(string value)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                throw new ArgumentException(
+                    "typeAndConstraints は空にできません。" +
+                    "`INTEGER` / `TEXT` / `REAL` / `BLOB` / `NUMERIC` のいずれかに " +
+                    "`NOT NULL` / `DEFAULT <値>` / `REFERENCES <table>(<col>)` を組み合わせて指定してください。",
+                    nameof(value));
+            }
+
+            if (!TypeAndConstraintsPattern.IsMatch(value))
+            {
+                throw new ArgumentException(
+                    $"typeAndConstraints '{value}' は許可された構文に一致しません。" +
+                    "型は `INTEGER` / `TEXT` / `REAL` / `BLOB` / `NUMERIC` のいずれか、" +
+                    "制約は `NOT NULL` / `DEFAULT <整数|小数|'literal'|NULL>` / " +
+                    "`REFERENCES <table>(<col>)` の組み合わせのみ受理されます。",
+                    nameof(value));
+            }
         }
     }
 }
