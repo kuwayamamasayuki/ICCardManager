@@ -61,6 +61,7 @@
                             <ColumnDefinition Width="120"/>
                             <ColumnDefinition Width="80"/>
                             <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
                         </Grid.ColumnDefinitions>
 
                         <!-- 日時 -->
@@ -139,6 +140,19 @@
                                 </Border>
                             </Popup>
                         </Grid>
+
+                        <!-- Issue #1570: 往復ボタン（2行目以降のみ表示。1行上のバス停名の起点と終点を入れ替えて当該行に入力） -->
+                        <Button Grid.Column="3"
+                                Content="↑往復"
+                                Command="{Binding ApplyRoundTripCommand}"
+                                Visibility="{Binding HasPreviousItem, Converter={StaticResource BoolToVisibilityConverter}}"
+                                Padding="10,6"
+                                Margin="8,0,0,0"
+                                VerticalAlignment="Top"
+                                FontSize="{DynamicResource SmallFontSize}"
+                                AutomationProperties.Name="往復"
+                                AutomationProperties.HelpText="一つ上の行のバス停名（A～B）の起点と終点を入れ替えて当該行に入力します（B～A）"
+                                ToolTip="一つ上の行のバス停名の起点と終点を入れ替えて入力（例: 天神～博多駅 → 博多駅～天神）"/>
                     </Grid>
                 </DataTemplate>
             </ListView.ItemTemplate>

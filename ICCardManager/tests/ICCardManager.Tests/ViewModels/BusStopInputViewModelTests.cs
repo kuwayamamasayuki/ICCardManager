@@ -562,6 +562,171 @@ public class BusStopInputViewModelTests
     }
 
     #endregion
+
+    #region ApplyRoundTrip（Issue #1570: 往復ボタン）
+
+    [Fact]
+    public void InitializeWithDetails_先頭アイテムはHasPreviousItemがfalseであること()
+    {
+        var ledger = new Ledger { Id = 1 };
+        var details = new List<LedgerDetail>
+        {
+            new LedgerDetail { IsBus = true, UseDate = DateTime.Today, Amount = 200 },
+            new LedgerDetail { IsBus = true, UseDate = DateTime.Today, Amount = 200 },
+        };
+
+        _viewModel.InitializeWithDetails(ledger, details);
+
+        _viewModel.BusUsages[0].HasPreviousItem.Should().BeFalse("先頭行は前の行を持たない");
+        _viewModel.BusUsages[1].HasPreviousItem.Should().BeTrue("2行目以降は前の行を持つ");
+    }
+
+    [Fact]
+    public void InitializeWithDetails_2行目以降のPreviousItemが直前のアイテムを指すこと()
+    {
+        var ledger = new Ledger { Id = 1 };
+        var details = new List<LedgerDetail>
+        {
+            new LedgerDetail { IsBus = true, UseDate = DateTime.Today, Amount = 200 },
+            new LedgerDetail { IsBus = true, UseDate = DateTime.Today, Amount = 220 },
+            new LedgerDetail { IsBus = true, UseDate = DateTime.Today, Amount = 240 },
+        };
+
+        _viewModel.InitializeWithDetails(ledger, details);
+
+        _viewModel.BusUsages[0].PreviousItem.Should().BeNull();
+        _viewModel.BusUsages[1].PreviousItem.Should().BeSameAs(_viewModel.BusUsages[0]);
+        _viewModel.BusUsages[2].PreviousItem.Should().BeSameAs(_viewModel.BusUsages[1]);
+    }
+
+    [Fact]
+    public void ApplyRoundTrip_前の行の起点と終点が入れ替えて入力されること()
+    {
+        var ledger = new Ledger { Id = 1 };
+        var details = new List<LedgerDetail>
+        {
+            new LedgerDetail { IsBus = true, BusStops = "天神バス停～博多駅前" },
+            new LedgerDetail { IsBus = true, BusStops = null },
+        };
+        _viewModel.InitializeWithDetails(ledger, details);
+
+        _viewModel.BusUsages[1].ApplyRoundTripCommand.Execute(null);
+
+        _viewModel.BusUsages[1].BusStops.Should().Be("博多駅前～天神バス停");
+    }
+
+    [Fact]
+    public void ApplyRoundTrip_前の行の前後空白がトリムされて入れ替わること()
+    {
+        var ledger = new Ledger { Id = 1 };
+        var details = new List<LedgerDetail>
+        {
+            new LedgerDetail { IsBus = true, BusStops = "  天神  ～  博多  " },
+            new LedgerDetail { IsBus = true, BusStops = null },
+        };
+        _viewModel.InitializeWithDetails(ledger, details);
+
+        _viewModel.BusUsages[1].ApplyRoundTripCommand.Execute(null);
+
+        _viewModel.BusUsages[1].BusStops.Should().Be("博多～天神");
+    }
+
+    [Fact]
+    public void ApplyRoundTrip_前の行が空欄の場合は変更されないこと()
+    {
+        var ledger = new Ledger { Id = 1 };
+        var details = new List<LedgerDetail>
+        {
+            new LedgerDetail { IsBus = true, BusStops = null },
+            new LedgerDetail { IsBus = true, BusStops = "既存値" },
+        };
+        _viewModel.InitializeWithDetails(ledger, details);
+
+        _viewModel.BusUsages[1].ApplyRoundTripCommand.Execute(null);
+
+        _viewModel.BusUsages[1].BusStops.Should().Be("既存値", "前の行が空欄なら何もしない");
+    }
+
+    [Fact]
+    public void ApplyRoundTrip_前の行が形式不正でチルダなしの場合は変更されないこと()
+    {
+        var ledger = new Ledger { Id = 1 };
+        var details = new List<LedgerDetail>
+        {
+            new LedgerDetail { IsBus = true, BusStops = "天神博多" },
+            new LedgerDetail { IsBus = true, BusStops = "既存値" },
+        };
+        _viewModel.InitializeWithDetails(ledger, details);
+
+        _viewModel.BusUsages[1].ApplyRoundTripCommand.Execute(null);
+
+        _viewModel.BusUsages[1].BusStops.Should().Be("既存値", "「～」で分割できない値は反転対象外");
+    }
+
+    [Fact]
+    public void ApplyRoundTrip_前の行が星マークのみの場合は変更されないこと()
+    {
+        var ledger = new Ledger { Id = 1 };
+        var details = new List<LedgerDetail>
+        {
+            new LedgerDetail { IsBus = true, BusStops = "★" },
+            new LedgerDetail { IsBus = true, BusStops = "既存値" },
+        };
+        _viewModel.InitializeWithDetails(ledger, details);
+
+        _viewModel.BusUsages[1].ApplyRoundTripCommand.Execute(null);
+
+        _viewModel.BusUsages[1].BusStops.Should().Be("既存値");
+    }
+
+    [Fact]
+    public void ApplyRoundTrip_前の行がチルダ複数の場合は変更されないこと()
+    {
+        var ledger = new Ledger { Id = 1 };
+        var details = new List<LedgerDetail>
+        {
+            new LedgerDetail { IsBus = true, BusStops = "天神～博多～小倉" },
+            new LedgerDetail { IsBus = true, BusStops = "既存値" },
+        };
+        _viewModel.InitializeWithDetails(ledger, details);
+
+        _viewModel.BusUsages[1].ApplyRoundTripCommand.Execute(null);
+
+        _viewModel.BusUsages[1].BusStops.Should().Be("既存値");
+    }
+
+    [Fact]
+    public void ApplyRoundTrip_先頭アイテムでは何もしないこと()
+    {
+        var ledger = new Ledger { Id = 1 };
+        var details = new List<LedgerDetail>
+        {
+            new LedgerDetail { IsBus = true, BusStops = "既存値" },
+        };
+        _viewModel.InitializeWithDetails(ledger, details);
+
+        _viewModel.BusUsages[0].ApplyRoundTripCommand.Execute(null);
+
+        _viewModel.BusUsages[0].BusStops.Should().Be("既存値", "先頭行はPreviousItemがnullなので何もしない");
+    }
+
+    [Fact]
+    public void ApplyRoundTrip_既存値があっても上書きされること()
+    {
+        var ledger = new Ledger { Id = 1 };
+        var details = new List<LedgerDetail>
+        {
+            new LedgerDetail { IsBus = true, BusStops = "天神～博多" },
+            new LedgerDetail { IsBus = true, BusStops = "薬院～大橋" },
+        };
+        _viewModel.InitializeWithDetails(ledger, details);
+
+        _viewModel.BusUsages[1].ApplyRoundTripCommand.Execute(null);
+
+        _viewModel.BusUsages[1].BusStops.Should().Be("博多～天神");
+    }
+
+    #endregion
 }
 
 /// <summary>
