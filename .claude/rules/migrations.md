@@ -20,6 +20,15 @@
 - 素の `CREATE TABLE` / `CREATE INDEX`（必ず `IF NOT EXISTS` を付ける）
 - 素の `INSERT`（主キー重複で失敗するため `INSERT OR IGNORE` を使う）
 
+## `AddColumnIfNotExists` 引数の制約（Issue #1466）
+
+`MigrationHelpers.AddColumnIfNotExists` / `HasColumn` は SQL の識別子をパラメータ化できないため文字列補間で組み立てるが、開発者の事故防止としてホワイトリスト regex による検証層を持つ。受理される値の範囲は以下:
+
+- `table` / `column`: 識別子パターン `^[A-Za-z_][A-Za-z0-9_]*$`（英字または `_` で始まり、英数字または `_` のみ）
+- `typeAndConstraints`: 型は `INTEGER` / `TEXT` / `REAL` / `BLOB` / `NUMERIC` のいずれか。制約は `NOT NULL` / `DEFAULT <整数|小数|'literal'|NULL>` / `REFERENCES <table>(<col>)` の組み合わせ。リテラル内の `'` や `;` は禁止
+
+範囲外の値を渡すと `ArgumentException` が即座に投げられる。新しい型/制約（例: `BOOLEAN`、`UNIQUE`、`CHECK`）を使いたい場合は `MigrationHelpers.cs` の `TypeAndConstraintsPattern` を更新し、`MigrationHelpersTests` の Theory に positive/negative を追加すること。
+
 ## 新規マイグレーション追加手順
 
 1. `ICCardManager/src/ICCardManager/Data/Migrations/Migration_0NN_<説明>.cs` を作成
@@ -39,5 +48,6 @@
 ## 参考
 
 - 設計書: `docs/superpowers/specs/2026-04-19-issue-1285-migration-idempotency-design.md`
+- 設計書: `ICCardManager/docs/superpowers/specs/2026-05-22-issue-1466-migration-helpers-validation-design.md`（引数検証）
 - ヘルパー実装: `ICCardManager/src/ICCardManager/Data/Migrations/MigrationHelpers.cs`
 - テスト例: `ICCardManager/tests/ICCardManager.Tests/Data/Migrations/MigrationIdempotencyTests.cs`

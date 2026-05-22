@@ -2,6 +2,9 @@
 
 ### Unreleased
 
+**機能改善（保守性・防御）**
+- `MigrationHelpers.AddColumnIfNotExists` / `HasColumn` の引数 `column` / `typeAndConstraints` をホワイトリスト regex で検証する防御層を追加（Issue #1466）。識別子は `^[A-Za-z_][A-Za-z0-9_]*$`、型句は `INTEGER` / `TEXT` / `REAL` / `BLOB` / `NUMERIC` に `NOT NULL` / `DEFAULT <整数\|小数\|'literal'\|NULL>` / `REFERENCES <table>(<col>)` を組み合わせた構文のみ受理。範囲外の値を渡すと `ArgumentException` を即座に投げ SQL 実行に到達させない。既存呼び出し 7 callsite（`Migration_002` / `_003` / `_005` / `_006` ×2 / `_009` ×2）の実引数はすべて受理される。`HasColumn` の `table` 検証も既存の `IndexOfAny(['\'', '"', ';', ' '])` から識別子 regex に統一し、ヘルパー全体で一貫した防御に揃えた。本変更は開発者の事故予防が目的で、引数は元々外部入力ではないため攻撃面の縮小ではない（Sec M3, 2026-05-08 リポジトリ全体レビュー由来）
+
 **ドキュメント**
 - マニュアル 4 ファイル（`かんたん導入ガイド.md` / `はじめに.md` / `ユーザーマニュアル概要版.md` / `開発者ガイド.md`）のヘッダー `**バージョン**` 文字列が v2.7.0 のまま v2.8.0 / v2.8.1 リリースで取り残されていた問題を修正。コード側 `<Version>` は v2.8.1（`ICCardManager.csproj`）、`ユーザーマニュアル.md` / `管理者マニュアル.md` は v2.8.1 へ既に同期済みだったが、PR #1446 で「ユーザー/管理者」2 本だけが更新対象に組み込まれて残り 4 本が見落とされていた構造的な漏れ。再発防止として `tools/bump-version.ps1` の更新対象に 4 ファイルを追加（`$QuickStartPath` / `$IntroPath` / `$UserManualBriefPath` / `$DeveloperGuidePath` を変数化し、3f-3i の置換ブロック・DryRun の files 配列・最終 `WriteAllText` 列・`$filesToAdd` 配列・PR body の更新ファイル一覧の 5 箇所を全部同期）。開発者ガイドだけ既存スタイルが `**最終更新日**: 2026年4月15日` の日付付き形式だったため、新規変数 `$TodayJpFull = Get-Date -Format "yyyy年M月d日"` を導入して開発者ガイドのみそちらを参照する分岐とした（他 5 マニュアルは従来通り `$TodayJp` の月のみ表記）。`.claude/skills/release/SKILL.md` §1 の「更新対象ファイル」リストも 4 ファイル追記し、ドキュメント・スクリプト・実体ファイルの三者整合を確保（#1462）
 
