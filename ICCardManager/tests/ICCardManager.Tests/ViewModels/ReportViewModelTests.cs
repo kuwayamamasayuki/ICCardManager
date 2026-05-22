@@ -25,6 +25,7 @@ public class ReportViewModelTests
     private readonly Mock<ILedgerRepository> _ledgerRepositoryMock;
     private readonly Mock<ISettingsRepository> _settingsRepositoryMock;
     private readonly Mock<INavigationService> _navigationServiceMock;
+    private readonly Mock<ICCardManager.Services.ISafeFileLauncher> _safeFileLauncherMock;
     private readonly ReportService _reportService;
     private readonly PrintService _printService;
     private readonly ReportViewModel _viewModel;
@@ -43,12 +44,20 @@ public class ReportViewModelTests
 
         _settingsRepositoryMock.Setup(s => s.GetAppSettingsAsync()).ReturnsAsync(new AppSettings());
 
+        _safeFileLauncherMock = new Mock<ICCardManager.Services.ISafeFileLauncher>();
+        // 既定で成功を返す。失敗テストで個別に上書きする。
+        _safeFileLauncherMock.Setup(l => l.LaunchFolder(It.IsAny<string>()))
+            .Returns(ICCardManager.Services.SafeFileLaunchResult.Ok());
+        _safeFileLauncherMock.Setup(l => l.LaunchFile(It.IsAny<string>()))
+            .Returns(ICCardManager.Services.SafeFileLaunchResult.Ok());
+
         _viewModel = new ReportViewModel(
             _reportService,
             _printService,
             _cardRepositoryMock.Object,
             _navigationServiceMock.Object,
-            _settingsRepositoryMock.Object);
+            _settingsRepositoryMock.Object,
+            _safeFileLauncherMock.Object);
     }
 
     #region 初期化テスト
@@ -877,6 +886,53 @@ public class ReportViewModelTests
 
         // Assert
         changedProperties.Should().Contain(nameof(ReportViewModel.HasCreatedFiles));
+    }
+
+    #endregion
+
+    #region Open* コマンド経由のISafeFileLauncher 委譲（Issue #1465）
+
+    [Fact]
+    public void OpenOutputFolder_ISafeFileLauncher_LaunchFolderを呼び出す()
+    {
+        _viewModel.OutputFolder = "C:\\Reports";
+
+        _viewModel.OpenOutputFolderCommand.Execute(null);
+
+        _safeFileLauncherMock.Verify(l => l.LaunchFolder("C:\\Reports"), Times.Once);
+    }
+
+    [Fact]
+    public void OpenOutputFolder_失敗時_ステータスにエラー表示()
+    {
+        _safeFileLauncherMock.Setup(l => l.LaunchFolder(It.IsAny<string>()))
+            .Returns(ICCardManager.Services.SafeFileLaunchResult.Fail("テストエラー: 起動失敗"));
+        _viewModel.OutputFolder = "C:\\evil.exe";
+
+        _viewModel.OpenOutputFolderCommand.Execute(null);
+
+        _viewModel.StatusMessage.Should().Contain("起動失敗");
+        _viewModel.IsStatusError.Should().BeTrue();
+    }
+
+    [Fact]
+    public void OpenCreatedFile_ISafeFileLauncher_LaunchFileを呼び出す()
+    {
+        _viewModel.OpenCreatedFileCommand.Execute("C:\\report.xlsx");
+
+        _safeFileLauncherMock.Verify(l => l.LaunchFile("C:\\report.xlsx"), Times.Once);
+    }
+
+    [Fact]
+    public void OpenCreatedFile_失敗時_ステータスにエラー表示()
+    {
+        _safeFileLauncherMock.Setup(l => l.LaunchFile(It.IsAny<string>()))
+            .Returns(ICCardManager.Services.SafeFileLaunchResult.Fail("拡張子NG"));
+
+        _viewModel.OpenCreatedFileCommand.Execute("C:\\evil.exe");
+
+        _viewModel.StatusMessage.Should().Contain("拡張子NG");
+        _viewModel.IsStatusError.Should().BeTrue();
     }
 
     #endregion

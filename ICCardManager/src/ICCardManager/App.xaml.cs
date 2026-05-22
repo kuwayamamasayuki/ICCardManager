@@ -279,6 +279,8 @@ namespace ICCardManager
             services.AddSingleton<SharedModeMonitor>();
             services.AddSingleton<WarningService>();
             services.AddSingleton<DashboardService>();
+            // Issue #1465: Process.Start(UseShellExecute=true) のパス検証を一元化
+            services.AddSingleton<ISafeFileLauncher, SafeFileLauncher>();
 
             // Infrastructure層
     #if DEBUG

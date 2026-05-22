@@ -117,6 +117,7 @@ public partial class MainViewModel : ViewModelBase
     private readonly SharedModeMonitor _sharedModeMonitor;
     private readonly WarningService _warningService;
     private readonly DashboardService _dashboardService;
+    private readonly ISafeFileLauncher _safeFileLauncher;
     private readonly ILogger<MainViewModel>? _logger;
     private readonly HashSet<CardReadingSource> _suppressionSources = new();
 
@@ -401,6 +402,7 @@ public partial class MainViewModel : ViewModelBase
         SharedModeMonitor sharedModeMonitor,
         WarningService warningService,
         DashboardService dashboardService,
+        ISafeFileLauncher safeFileLauncher,
         DbContext dbContext,
         ILogger<MainViewModel>? logger = null)
     {
@@ -427,6 +429,7 @@ public partial class MainViewModel : ViewModelBase
         _sharedModeMonitor = sharedModeMonitor;
         _warningService = warningService;
         _dashboardService = dashboardService;
+        _safeFileLauncher = safeFileLauncher;
         _logger = logger;
 
         // カード読み取り抑制メッセージの受信を登録（Issue #852）
@@ -2383,18 +2386,13 @@ public partial class MainViewModel : ViewModelBase
     {
         var exeDir = AppDomain.CurrentDomain.BaseDirectory;
         var docsPath = System.IO.Path.Combine(exeDir, "Docs");
-        if (System.IO.Directory.Exists(docsPath))
-        {
-            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
-            {
-                FileName = docsPath,
-                UseShellExecute = true
-            });
-        }
-        else
+
+        // Issue #1465: ISafeFileLauncher 経由で explorer.exe を直接起動
+        var result = _safeFileLauncher.LaunchFolder(docsPath);
+        if (!result.Success)
         {
             MessageBox.Show(
-                "ドキュメントフォルダが見つかりません。\nアプリケーションを再インストールしてください。",
+                result.ErrorMessage + "\n\nアプリケーションの再インストールで復旧する可能性があります。",
                 "ヘルプ",
                 MessageBoxButton.OK,
                 MessageBoxImage.Warning);

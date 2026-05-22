@@ -173,6 +173,7 @@ public class MainViewModelIntegrationTests
             _sharedModeMonitor,
             _warningService,
             _dashboardService,
+            new Mock<ICCardManager.Services.ISafeFileLauncher>().Object,
             dbContext);
     }
 

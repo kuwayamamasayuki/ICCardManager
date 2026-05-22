@@ -122,6 +122,7 @@ public class MainViewModelSharedDbStateTests
             new WarningService(_ledgerRepositoryMock.Object, _databaseInfoMock.Object),
             new DashboardService(_cardRepositoryMock.Object, _ledgerRepositoryMock.Object,
                 _staffRepositoryMock.Object, _settingsRepositoryMock.Object),
+            new Mock<ICCardManager.Services.ISafeFileLauncher>().Object,
             dbContext);
     }
 

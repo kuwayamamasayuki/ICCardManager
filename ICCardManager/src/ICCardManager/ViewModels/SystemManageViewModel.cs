@@ -21,6 +21,7 @@ public partial class SystemManageViewModel : ViewModelBase
     private readonly ISettingsRepository _settingsRepository;
     private readonly INavigationService _navigationService;
     private readonly OperationLogger _operationLogger;
+    private readonly ISafeFileLauncher _safeFileLauncher;
 
     [ObservableProperty]
     private ObservableCollection<BackupFileInfo> _backupFiles = new();
@@ -46,12 +47,14 @@ public partial class SystemManageViewModel : ViewModelBase
         BackupService backupService,
         ISettingsRepository settingsRepository,
         INavigationService navigationService,
-        OperationLogger operationLogger)
+        OperationLogger operationLogger,
+        ISafeFileLauncher safeFileLauncher)
     {
         _backupService = backupService;
         _settingsRepository = settingsRepository;
         _navigationService = navigationService;
         _operationLogger = operationLogger;
+        _safeFileLauncher = safeFileLauncher;
     }
 
     partial void OnSelectedBackupChanged(BackupFileInfo? value)
@@ -274,21 +277,21 @@ public partial class SystemManageViewModel : ViewModelBase
     [RelayCommand]
     public void OpenBackupFolder()
     {
-        if (BackupFiles.Count > 0)
+        if (BackupFiles.Count == 0)
         {
-            var folder = Path.GetDirectoryName(BackupFiles[0].FilePath);
-            if (!string.IsNullOrEmpty(folder) && Directory.Exists(folder))
-            {
-                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
-                {
-                    FileName = folder,
-                    UseShellExecute = true
-                });
-            }
+            SetStatus(
+                "バックアップが 1 件もないため、フォルダを特定できません。" +
+                "「バックアップを作成」を実行してからお試しください。",
+                true);
+            return;
         }
-        else
+
+        // Issue #1465: ISafeFileLauncher 経由で explorer.exe を直接起動
+        var folder = Path.GetDirectoryName(BackupFiles[0].FilePath);
+        var result = _safeFileLauncher.LaunchFolder(folder ?? string.Empty);
+        if (!result.Success)
         {
-            SetStatus("バックアップフォルダが見つかりません", true);
+            SetStatus(result.ErrorMessage, true);
         }
     }
 
