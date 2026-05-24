@@ -646,44 +646,61 @@ namespace ICCardManager.Services
         /// <summary>
         /// 往復で使われなかった経路を取得
         /// </summary>
+        /// <remarks>
+        /// 各往復は forward 方向（A→B）と reverse 方向（B→A）の経路を 1 つずつ消費する。
+        /// 同方向の往復が N 件ある場合、forward は N 回、reverse も N 回まで消費可能。
+        /// この消費可能枠を超えた経路だけが余りとして残る。
+        ///
+        /// 旧実装は <c>(Entry, Exit)</c> の方向ペアごとに <c>usedCount</c> を取り、
+        /// 「2 回目以降は余り」と判定していたため、N 往復ある同方向のうち forward 1 件と
+        /// reverse 1 件だけが消費され、残り <c>2(N-1)</c> 件が余りに残る不具合があった
+        /// （Issue #1579）。
+        /// </remarks>
         private List<(string Entry, string Exit)> GetRemainingRoutes(
             List<(string Entry, string Exit)> allRoutes,
             List<(string Start, string End)> roundTrips)
         {
-            var remaining = new List<(string Entry, string Exit)>();
-            var roundTripSet = new HashSet<(string, string)>();
-
+            // 往復の正方向ペアごとに件数を集計（例: (天神,博多) の往復が 2 件 → forwardQuotas[(天神,博多)] = 2）
+            var forwardQuotas = new Dictionary<(string, string), int>();
             foreach (var rt in roundTrips)
             {
-                roundTripSet.Add((rt.Start, rt.End));
-                roundTripSet.Add((rt.End, rt.Start));
+                var key = (rt.Start, rt.End);
+                forwardQuotas[key] = forwardQuotas.TryGetValue(key, out var count) ? count + 1 : 1;
             }
 
-            var usedCount = new Dictionary<(string, string), int>();
+            var consumedForward = new Dictionary<(string, string), int>();
+            var consumedReverse = new Dictionary<(string, string), int>();
+
+            var remaining = new List<(string Entry, string Exit)>();
             foreach (var route in allRoutes)
             {
-                var key = (route.Entry, route.Exit);
+                var forwardKey = (route.Entry, route.Exit);
                 var reverseKey = (route.Exit, route.Entry);
 
-                if (roundTripSet.Contains(key) || roundTripSet.Contains(reverseKey))
+                // forward 方向で消費できるか
+                if (forwardQuotas.TryGetValue(forwardKey, out var fwdQuota))
                 {
-                    if (!usedCount.ContainsKey(key))
+                    var alreadyConsumed = consumedForward.TryGetValue(forwardKey, out var c) ? c : 0;
+                    if (alreadyConsumed < fwdQuota)
                     {
-                        usedCount[key] = 0;
-                    }
-
-                    usedCount[key]++;
-
-                    // 2回目以降は残りとして追加
-                    if (usedCount[key] > 1)
-                    {
-                        remaining.Add(route);
+                        consumedForward[forwardKey] = alreadyConsumed + 1;
+                        continue;
                     }
                 }
-                else
+
+                // reverse 方向で消費できるか
+                if (forwardQuotas.TryGetValue(reverseKey, out var revQuota))
                 {
-                    remaining.Add(route);
+                    var alreadyConsumed = consumedReverse.TryGetValue(reverseKey, out var c) ? c : 0;
+                    if (alreadyConsumed < revQuota)
+                    {
+                        consumedReverse[reverseKey] = alreadyConsumed + 1;
+                        continue;
+                    }
                 }
+
+                // どちらの方向枠も埋まっている、または往復に該当しない経路 → 余り
+                remaining.Add(route);
             }
 
             return remaining;
