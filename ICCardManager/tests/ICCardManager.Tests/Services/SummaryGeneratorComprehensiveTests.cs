@@ -1902,11 +1902,126 @@ public class SummaryGeneratorComprehensiveTests : IDisposable
         OutputInputAndResult(details, results);
     }
 
-    // Note: 3 往復以上（6+ 経路）および「2 往復 + 余り 1 件」（5 経路）のケースは
-    // 別の既存バグ（ConsolidateRoutes が「A→B→A→B」型のチェーンを 1 経路に
-    // 統合し情報を失う）の影響で正しい摘要が得られない。本 PR のスコープは
-    // ユーザー報告の 2 往復ケース修正に限定し、深層バグは Issue #1580 で
-    // フォローアップする。
+    /// <summary>
+    /// 同じ方向（天神→博多）の往復を 3 回行った場合、6 件の経路が
+    /// 「天神～博多 往復、天神～博多 往復、天神～博多 往復」として表示されること。
+    /// </summary>
+    /// <remarks>
+    /// バグ: <c>ConsolidateRoutes</c>（Issue #878）が <c>AreTransferStations</c> の
+    /// 隣接判定だけで乗継と往復の方向反転を区別できず、A→B→A→B→A→B→A という
+    /// 6 経路の循環チェーンを偶数長分割で再帰した結果、奇数長サブチェーン
+    /// [A→B, B→A, A→B] を 1 経路 (A, B) に潰してしまっていた。結果として
+    /// 3 往復分の情報が 1 往復分しか残らなかった（Issue #1580）。
+    ///
+    /// 修正: <c>ConsolidateRoutes</c> がチェーン内の既訪問駅集合を保持し、
+    /// 次経路の終点が既訪問なら方向反転とみなして乗継統合を打ち切る。
+    /// </remarks>
+    [Fact]
+    public void TC_BUG1580_バス_同方向の往復3回_全て表示される()
+    {
+        // Arrange: 天神→博多→天神→博多→天神→博多→天神 の 6 経路（バス、同日）
+        // ICカード履歴は新しい順なので逆順で投入
+        var details = new List<LedgerDetail>
+        {
+            CreateBusUsage(new DateTime(2024, 12, 9), 200, 4000, busStops: "博多～天神"),
+            CreateBusUsage(new DateTime(2024, 12, 9), 200, 4200, busStops: "天神～博多"),
+            CreateBusUsage(new DateTime(2024, 12, 9), 200, 4400, busStops: "博多～天神"),
+            CreateBusUsage(new DateTime(2024, 12, 9), 200, 4600, busStops: "天神～博多"),
+            CreateBusUsage(new DateTime(2024, 12, 9), 200, 4800, busStops: "博多～天神"),
+            CreateBusUsage(new DateTime(2024, 12, 9), 200, 5000, busStops: "天神～博多"),
+        };
+
+        // Act
+        var results = _generator.GenerateByDate(details);
+
+        // Assert: 3 往復として表示される
+        results.Should().HaveCount(1);
+        results[0].Summary.Should().Be("バス（天神～博多 往復、天神～博多 往復、天神～博多 往復）");
+        OutputInputAndResult(details, results);
+    }
+
+    /// <summary>
+    /// 鉄道側でも同じバグが発生することを固定する（3 往復 = 6 経路）。
+    /// </summary>
+    [Fact]
+    public void TC_BUG1580_鉄道_同方向の往復3回_全て表示される()
+    {
+        // Arrange: 天神→博多→天神→博多→天神→博多→天神 の 6 経路（鉄道、同日）
+        var details = new List<LedgerDetail>
+        {
+            CreateRailwayUsage(new DateTime(2024, 12, 9), "博多", "天神", 210, 3950),
+            CreateRailwayUsage(new DateTime(2024, 12, 9), "天神", "博多", 210, 4160),
+            CreateRailwayUsage(new DateTime(2024, 12, 9), "博多", "天神", 210, 4370),
+            CreateRailwayUsage(new DateTime(2024, 12, 9), "天神", "博多", 210, 4580),
+            CreateRailwayUsage(new DateTime(2024, 12, 9), "博多", "天神", 210, 4790),
+            CreateRailwayUsage(new DateTime(2024, 12, 9), "天神", "博多", 210, 5000),
+        };
+
+        // Act
+        var results = _generator.GenerateByDate(details);
+
+        // Assert
+        results.Should().HaveCount(1);
+        results[0].Summary.Should().Be("鉄道（天神～博多 往復、天神～博多 往復、天神～博多 往復）");
+        OutputInputAndResult(details, results);
+    }
+
+    /// <summary>
+    /// 同方向の往復 2 回 + 末尾に往復に使われない経路 1 件（5 経路）が
+    /// 「天神～博多 往復、天神～博多 往復、天神～博多」として表示されること。
+    /// </summary>
+    /// <remarks>
+    /// バグ: <c>ConsolidateRoutes</c> が A→B→A→B→A の 5 経路を AreTransferStations
+    /// が連続マッチするため 1 経路 (A, B) に潰してしまい、5 経路分の情報が消失
+    /// していた（Issue #1580）。チェーンが循環で終わらない（末尾が start に
+    /// 戻らない）ため Issue #878 の偶数長分割救済も発動しないパターン。
+    /// </remarks>
+    [Fact]
+    public void TC_BUG1580_バス_同方向の往復2回プラス余り1件_全て表示される()
+    {
+        // Arrange: 天神→博多→天神→博多→天神→博多 の 5 経路（バス、同日）
+        var details = new List<LedgerDetail>
+        {
+            CreateBusUsage(new DateTime(2024, 12, 9), 200, 4000, busStops: "天神～博多"),
+            CreateBusUsage(new DateTime(2024, 12, 9), 200, 4200, busStops: "博多～天神"),
+            CreateBusUsage(new DateTime(2024, 12, 9), 200, 4400, busStops: "天神～博多"),
+            CreateBusUsage(new DateTime(2024, 12, 9), 200, 4600, busStops: "博多～天神"),
+            CreateBusUsage(new DateTime(2024, 12, 9), 200, 4800, busStops: "天神～博多"),
+        };
+
+        // Act
+        var results = _generator.GenerateByDate(details);
+
+        // Assert: 2 往復 + 余り 1 件
+        results.Should().HaveCount(1);
+        results[0].Summary.Should().Be("バス（天神～博多 往復、天神～博多 往復、天神～博多）");
+        OutputInputAndResult(details, results);
+    }
+
+    /// <summary>
+    /// 鉄道側でも同じバグが発生することを固定する（2 往復 + 余り 1 件 = 5 経路）。
+    /// </summary>
+    [Fact]
+    public void TC_BUG1580_鉄道_同方向の往復2回プラス余り1件_全て表示される()
+    {
+        // Arrange: 天神→博多→天神→博多→天神→博多 の 5 経路（鉄道、同日）
+        var details = new List<LedgerDetail>
+        {
+            CreateRailwayUsage(new DateTime(2024, 12, 9), "天神", "博多", 210, 3950),
+            CreateRailwayUsage(new DateTime(2024, 12, 9), "博多", "天神", 210, 4160),
+            CreateRailwayUsage(new DateTime(2024, 12, 9), "天神", "博多", 210, 4370),
+            CreateRailwayUsage(new DateTime(2024, 12, 9), "博多", "天神", 210, 4580),
+            CreateRailwayUsage(new DateTime(2024, 12, 9), "天神", "博多", 210, 4790),
+        };
+
+        // Act
+        var results = _generator.GenerateByDate(details);
+
+        // Assert
+        results.Should().HaveCount(1);
+        results[0].Summary.Should().Be("鉄道（天神～博多 往復、天神～博多 往復、天神～博多）");
+        OutputInputAndResult(details, results);
+    }
 
     #endregion
 }
