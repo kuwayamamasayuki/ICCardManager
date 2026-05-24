@@ -1641,22 +1641,23 @@ public partial class MainViewModel : ViewModelBase
     public async Task DeleteLedgerRow(LedgerDto ledger)
     {
         if (ledger == null) return;
-        if (ledger.IsLentRecord)
-        {
-            _navigationService.ShowWarning(
-                "貸出中のレコードは削除できません。" +
-                "先にメイン画面で交通系ICカードをタッチして返却操作を行ってから、再度削除してください。",
-                "削除不可");
-            return;
-        }
 
         // 認証
         var authResult = await _staffAuthService.RequestAuthenticationAsync("履歴の削除");
         if (authResult == null) return;
 
-        // 確認
+        // 確認（Issue #1574: 貸出中レコードの場合は専用の警告メッセージ）
+        var confirmMessage = ledger.IsLentRecord
+            ? $"以下の履歴は「貸出中」状態のレコードです。\n\n" +
+              $"日付: {ledger.DateDisplay}\n摘要: {ledger.Summary}\n残高: {ledger.BalanceDisplay}円\n\n" +
+              "削除すると、このカードの貸出中状態も解消されます\n" +
+              "（他に貸出中レコードが残っている場合は維持されます）。\n\n" +
+              "通常は、メイン画面で交通系ICカードをタッチして返却操作を\n" +
+              "行うのが正しい復旧方法です。それでも削除しますか？"
+            : $"以下の履歴を削除してよろしいですか？\n\n日付: {ledger.DateDisplay}\n摘要: {ledger.Summary}\n残高: {ledger.BalanceDisplay}円";
+
         var result = MessageBox.Show(
-            $"以下の履歴を削除してよろしいですか？\n\n日付: {ledger.DateDisplay}\n摘要: {ledger.Summary}\n残高: {ledger.BalanceDisplay}円",
+            confirmMessage,
             "履歴の削除", MessageBoxButton.YesNo, MessageBoxImage.Warning);
         if (result != MessageBoxResult.Yes) return;
 
@@ -1671,10 +1672,33 @@ public partial class MainViewModel : ViewModelBase
             scope.Commit();
         }
 
+        // Issue #1574: 貸出中レコードを削除した場合、ic_card.is_lent を整合性リセット
+        await ResetIsLentIfNoOtherLentRecordsAsync(fullLedger);
+
         await LoadHistoryLedgersAsync();
         await RefreshDashboardAsync();
         await CheckWarningsAsync();
         await CheckAndNotifyConsistencyAsync();
+    }
+
+    /// <summary>
+    /// 削除した履歴が貸出中レコードだった場合、同じカードに他の貸出中レコードが残っていなければ
+    /// <c>ic_card.is_lent</c> を false にリセットする（Issue #1574）。
+    /// </summary>
+    /// <remarks>
+    /// 多重貸出中の異常状態（複数の貸出中レコードが残っている場合）では <c>is_lent=true</c> を維持し、
+    /// 段階的な復旧を可能にする。
+    /// </remarks>
+    private async Task ResetIsLentIfNoOtherLentRecordsAsync(Ledger deletedLedger)
+    {
+        if (deletedLedger == null || !deletedLedger.IsLentRecord) return;
+        if (string.IsNullOrEmpty(deletedLedger.CardIdm)) return;
+
+        var hasOther = await _ledgerRepository.HasOtherLentRecordsAsync(deletedLedger.CardIdm, deletedLedger.Id);
+        if (!hasOther)
+        {
+            await _cardRepository.UpdateLentStatusAsync(deletedLedger.CardIdm, isLent: false, lentAt: null, staffIdm: null);
+        }
     }
 
     /// <summary>
@@ -1723,10 +1747,15 @@ public partial class MainViewModel : ViewModelBase
             if (fullLedger != null)
             {
                 // Issue #1458: Ledger DELETE と監査ログ INSERT を同一トランザクションで実行
-                using var scope = await _dbContext.BeginTransactionAsync();
-                await _ledgerRepository.DeleteAsync(ledger.Id, scope.Transaction);
-                await _operationLogger.LogLedgerDeleteAsync(fullLedger, scope.Transaction);
-                scope.Commit();
+                using (var scope = await _dbContext.BeginTransactionAsync())
+                {
+                    await _ledgerRepository.DeleteAsync(ledger.Id, scope.Transaction);
+                    await _operationLogger.LogLedgerDeleteAsync(fullLedger, scope.Transaction);
+                    scope.Commit();
+                }
+
+                // Issue #1574: 貸出中レコードを削除した場合、ic_card.is_lent を整合性リセット
+                await ResetIsLentIfNoOtherLentRecordsAsync(fullLedger);
             }
 
             await LoadHistoryLedgersAsync();

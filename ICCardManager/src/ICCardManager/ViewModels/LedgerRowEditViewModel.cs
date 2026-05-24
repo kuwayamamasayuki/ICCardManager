@@ -176,10 +176,23 @@ namespace ICCardManager.ViewModels
         private string? _firstErrorField;
 
         /// <summary>
-        /// 削除が可能か（Editモードかつ貸出中でない場合のみ）Issue #750
+        /// 削除が可能か（Edit モードでは常に true）Issue #750 / Issue #1574。
         /// </summary>
+        /// <remarks>
+        /// 当初は貸出中レコードを保護するため <c>!IsLentRecord</c> を条件としていたが、
+        /// 異常状態で残った「（貸出中）」行の復旧手段がなくなる問題（Issue #1574）を受け、
+        /// Edit モードでは常に削除可能とした。誤操作防止は <see cref="RequestDelete"/> の
+        /// 確認メッセージで担保する（貸出中レコードの場合は専用の警告を表示）。
+        /// </remarks>
         [ObservableProperty]
         private bool _canDelete;
+
+        /// <summary>
+        /// 編集対象が「貸出中」状態の履歴行か（Issue #1574）。
+        /// 削除確認メッセージの分岐に使用する。
+        /// </summary>
+        [ObservableProperty]
+        private bool _isLentRecord;
 
         /// <summary>
         /// パンくずテキスト（Issue #1134）
@@ -295,8 +308,10 @@ namespace ICCardManager.ViewModels
                 SelectedStaff = StaffList.FirstOrDefault(s => s.Name == ledger.StaffName);
             }
 
-            // Issue #750: 貸出中でなければ削除可能
-            CanDelete = !ledgerDto.IsLentRecord;
+            // Issue #1574: 「（貸出中）」状態の履歴行が異常状態で残った場合の復旧手段として、
+            // 貸出中レコードも削除可能とする。誤操作防止は RequestDelete() の確認メッセージで担保。
+            CanDelete = true;
+            IsLentRecord = ledgerDto.IsLentRecord;
 
             Validate();
             OnPropertyChanged(nameof(IsAddMode));
@@ -748,19 +763,28 @@ namespace ICCardManager.ViewModels
         }
 
         /// <summary>
-        /// 削除を要求（Issue #750）
+        /// 削除を要求（Issue #750 / Issue #1574）。
         /// </summary>
         /// <remarks>
-        /// 実際の削除は呼び出し元（MainViewModel）で行う。
-        /// ダイアログは確認後に閉じる。
+        /// 実際の削除は呼び出し元（MainViewModel）で行う。ダイアログは確認後に閉じる。
+        /// 貸出中レコード（Issue #1574）の場合は専用の警告メッセージを表示する。
         /// </remarks>
         [RelayCommand]
         private void RequestDelete()
         {
             if (!CanDelete) return;
 
+            var message = IsLentRecord
+                ? "この履歴は「貸出中」状態のレコードです。\n" +
+                  "削除すると、このカードの貸出中状態も解消されます\n" +
+                  "（他に貸出中レコードが残っている場合は維持されます）。\n\n" +
+                  "通常は、メイン画面で交通系ICカードをタッチして返却操作を\n" +
+                  "行うのが正しい復旧方法です。それでも削除しますか？\n\n" +
+                  "削除した履歴は元に戻せません。"
+                : "この履歴を削除してよろしいですか？\n\n削除した履歴は元に戻せません。";
+
             var result = System.Windows.MessageBox.Show(
-                "この履歴を削除してよろしいですか？\n\n削除した履歴は元に戻せません。",
+                message,
                 "履歴の削除", System.Windows.MessageBoxButton.YesNo, System.Windows.MessageBoxImage.Warning);
             if (result != System.Windows.MessageBoxResult.Yes) return;
 

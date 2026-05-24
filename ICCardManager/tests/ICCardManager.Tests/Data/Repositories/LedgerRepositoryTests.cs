@@ -1524,6 +1524,122 @@ public class LedgerRepositoryTests : IDisposable
 
     #endregion
 
+    #region HasOtherLentRecordsAsync テスト（Issue #1574）
+
+    /// <summary>
+    /// Issue #1574: 削除対象 ID を除いて、他に貸出中レコードが残っていない場合は false を返す
+    /// </summary>
+    [Fact]
+    public async Task HasOtherLentRecordsAsync_OnlyTargetIsLent_ReturnsFalse()
+    {
+        // Arrange: 貸出中レコード 1 件 + 通常レコード 1 件
+        var lent = CreateTestLedger(TestCardIdm, DateTime.Today, "（貸出中）");
+        lent.IsLentRecord = true;
+        lent.LenderIdm = TestStaffIdm;
+        lent.LentAt = DateTime.Now;
+        var lentId = await _repository.InsertAsync(lent);
+
+        var normal = CreateTestLedger(TestCardIdm, DateTime.Today.AddDays(-1), "鉄道（博多～天神）", expense: 260);
+        normal.IsLentRecord = false;
+        await _repository.InsertAsync(normal);
+
+        // Act
+        var result = await _repository.HasOtherLentRecordsAsync(TestCardIdm, lentId);
+
+        // Assert
+        result.Should().BeFalse("削除対象の貸出中レコードを除外したら、他に貸出中はない");
+    }
+
+    /// <summary>
+    /// Issue #1574: 同じカードに他の貸出中レコードが残っている場合は true を返す
+    /// </summary>
+    [Fact]
+    public async Task HasOtherLentRecordsAsync_OtherLentRecordExists_ReturnsTrue()
+    {
+        // Arrange: 同一カードに貸出中レコードが 2 件残る異常状態
+        var lent1 = CreateTestLedger(TestCardIdm, DateTime.Today.AddDays(-1), "（貸出中）");
+        lent1.IsLentRecord = true;
+        lent1.LenderIdm = TestStaffIdm;
+        lent1.LentAt = DateTime.Now.AddHours(-2);
+        var lent1Id = await _repository.InsertAsync(lent1);
+
+        var lent2 = CreateTestLedger(TestCardIdm, DateTime.Today, "（貸出中）");
+        lent2.IsLentRecord = true;
+        lent2.LenderIdm = TestStaffIdm;
+        lent2.LentAt = DateTime.Now;
+        await _repository.InsertAsync(lent2);
+
+        // Act: lent1 を除外した判定
+        var result = await _repository.HasOtherLentRecordsAsync(TestCardIdm, lent1Id);
+
+        // Assert
+        result.Should().BeTrue("lent1 を除外しても lent2 が貸出中で残っている");
+    }
+
+    /// <summary>
+    /// Issue #1574: 別のカードに貸出中レコードがあっても、対象カードには影響しない
+    /// </summary>
+    [Fact]
+    public async Task HasOtherLentRecordsAsync_OtherCardHasLentRecord_ReturnsFalse()
+    {
+        // Arrange: 2 枚目のカードを登録し、そちらにのみ貸出中レコードを作る
+        var card2 = new IcCard
+        {
+            CardIdm = "0102030405060709",
+            CardType = "nimoca",
+            CardNumber = "N001"
+        };
+        await _cardRepository.InsertAsync(card2);
+
+        var lentOnCard2 = CreateTestLedger(card2.CardIdm, DateTime.Today, "（貸出中）");
+        lentOnCard2.IsLentRecord = true;
+        lentOnCard2.LenderIdm = TestStaffIdm;
+        lentOnCard2.LentAt = DateTime.Now;
+        await _repository.InsertAsync(lentOnCard2);
+
+        // 対象カードには貸出中レコードを 1 件入れ、削除対象 ID として扱う
+        var targetLent = CreateTestLedger(TestCardIdm, DateTime.Today, "（貸出中）");
+        targetLent.IsLentRecord = true;
+        targetLent.LenderIdm = TestStaffIdm;
+        targetLent.LentAt = DateTime.Now;
+        var targetId = await _repository.InsertAsync(targetLent);
+
+        // Act
+        var result = await _repository.HasOtherLentRecordsAsync(TestCardIdm, targetId);
+
+        // Assert
+        result.Should().BeFalse("別カードの貸出中レコードはカウントに含めない");
+    }
+
+    /// <summary>
+    /// Issue #1574: 通常レコード（is_lent_record=0）は同じカードでもカウントしない
+    /// </summary>
+    [Fact]
+    public async Task HasOtherLentRecordsAsync_OtherIsNormalRecord_ReturnsFalse()
+    {
+        // Arrange: 通常レコードが大量にあるが、貸出中は削除対象だけ
+        for (int i = 0; i < 3; i++)
+        {
+            var normal = CreateTestLedger(TestCardIdm, DateTime.Today.AddDays(-i - 1), $"鉄道利用 {i}", expense: 200);
+            normal.IsLentRecord = false;
+            await _repository.InsertAsync(normal);
+        }
+
+        var lent = CreateTestLedger(TestCardIdm, DateTime.Today, "（貸出中）");
+        lent.IsLentRecord = true;
+        lent.LenderIdm = TestStaffIdm;
+        lent.LentAt = DateTime.Now;
+        var lentId = await _repository.InsertAsync(lent);
+
+        // Act
+        var result = await _repository.HasOtherLentRecordsAsync(TestCardIdm, lentId);
+
+        // Assert
+        result.Should().BeFalse("通常レコードは貸出中ではないのでカウント対象外");
+    }
+
+    #endregion
+
     #region ヘルパーメソッド
 
     private static Ledger CreateTestLedger(string cardIdm, DateTime date, string summary, int income = 0, int expense = 0)

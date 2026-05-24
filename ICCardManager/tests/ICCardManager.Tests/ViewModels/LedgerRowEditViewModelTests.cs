@@ -640,11 +640,19 @@ public class LedgerRowEditViewModelTests : IDisposable
 
         // Assert: 通常レコードは削除可能
         _viewModel.CanDelete.Should().BeTrue();
+        _viewModel.IsLentRecord.Should().BeFalse(
+            "Issue #1574: 通常レコードの IsLentRecord フラグも初期化される");
         _viewModel.IsDeleteRequested.Should().BeFalse();
     }
 
+    /// <summary>
+    /// Issue #1574: 貸出中レコード（IsLentRecord = true）も Edit モードでは削除可能。
+    /// 旧仕様（Issue #750）では <c>CanDelete=false</c> だったが、異常状態で残った
+    /// 「（貸出中）」行の復旧手段がなくなる問題に対応し、削除を許可するように変更。
+    /// 誤操作防止は <see cref="LedgerRowEditViewModel.RequestDelete"/> の警告メッセージで担保する。
+    /// </summary>
     [Fact]
-    public async Task EditMode_LentRecord_CanDelete_IsFalse()
+    public async Task EditMode_LentRecord_CanDelete_IsTrue_Issue1574()
     {
         // Arrange: 貸出中レコード（IsLentRecord = true）
         var ledger = new Ledger
@@ -672,9 +680,13 @@ public class LedgerRowEditViewModelTests : IDisposable
         // Act
         await _viewModel.InitializeForEditAsync(dto, TestOperatorIdm);
 
-        // Assert: 貸出中レコードは削除不可
-        _viewModel.CanDelete.Should().BeFalse();
-        _viewModel.IsDeleteRequested.Should().BeFalse();
+        // Assert: 貸出中レコードも Edit モードでは削除可能（Issue #1574）
+        _viewModel.CanDelete.Should().BeTrue(
+            "Issue #1574: 異常状態で残った貸出中レコードを復旧するため削除可能とする");
+        _viewModel.IsLentRecord.Should().BeTrue(
+            "RequestDelete で貸出中専用の警告メッセージを出すためフラグが伝播する必要がある");
+        _viewModel.IsDeleteRequested.Should().BeFalse(
+            "削除要求はユーザーが明示的に行うまで false");
     }
 
     #endregion
