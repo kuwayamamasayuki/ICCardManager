@@ -1092,65 +1092,8 @@ public partial class MainViewModel : ViewModelBase
 
         if (result.Success)
         {
-            // 残高はLendingServiceで設定済み（カードから直接読み取った値を優先）
-            _soundPlayer.Play(SoundType.Return);
-
-            // トースト通知を表示（画面右上、フォーカスを奪わない）
-            _toastNotificationService.ShowReturnNotification(card.CardType, card.CardNumber, result.Balance, result.IsLowBalance, result.WarningBalance);
-
-            // メイン画面は変更しない（Issue #186: 職員の操作を妨げない）
-
-            await RefreshLentCardsAsync();
-            await RefreshDashboardAsync();
-
-            // 履歴が開いていれば再読み込み（Issue #889）
-            if (IsHistoryVisible)
-            {
-                await LoadHistoryLedgersAsync();
-            }
-
-            await CheckWarningsAsync();
-
-            // バス利用がある場合はバス停入力画面を表示
-            if (result.HasBusUsage && result.CreatedLedgers.Count > 0)
-            {
-                var settings = await _settingsRepository.GetAppSettingsAsync();
-
-                if (!settings.SkipBusStopInputOnReturn)
-                {
-                    // Issue #593: バス利用を含むLedgerをすべて取得（Summaryで判定）
-                    // LastOrDefaultでは最後のLedgerのみ取得されるため、バス利用が別日にある場合に空ダイアログになる
-                    var busLedgers = result.CreatedLedgers
-                        .Where(l => !l.IsLentRecord && l.Summary != null && l.Summary.Contains("バス"))
-                        .ToList();
-
-                    // Issue #1203: 複数のバス利用がある場合でも1つのダイアログでまとめて入力できるようにする
-                    if (busLedgers.Count > 0)
-                    {
-                        await _navigationService.ShowDialogAsync<Views.Dialogs.BusStopInputDialog>(
-                            async d => await d.InitializeWithLedgersAsync(busLedgers));
-                    }
-
-                    // バス停名入力後に履歴が開いていれば再読み込み
-                    if (busLedgers.Count > 0 && IsHistoryVisible)
-                    {
-                        await LoadHistoryLedgersAsync();
-                    }
-
-                    // Issue #660: バス停名入力後に警告メッセージを再チェック
-                    // バス停名の入力により★が消えた場合、件数を更新し、0件なら非表示にする
-                    await CheckWarningsAsync();
-                }
-                // スキップ時は★マークがSummaryGenerator側で自動付与されるため追加処理不要
-            }
-
-            // Issue #596: 今月の履歴が不完全な可能性がある場合に通知
-            if (result.MayHaveIncompleteHistory)
-            {
-                _toastNotificationService.ShowWarning(
-                    "履歴の確認",
-                    "今月の利用履歴がすべて取得できていない可能性があります。\nCSVインポートで不足分を補完してください。");
-            }
+            // 返却成功時の共通後処理（仮想タッチからも同じ処理を呼び出す。Issue #1577）
+            await HandleReturnSuccessAsync(card, result);
 
             // 30秒ルール用に職員情報を保存（ResetStateの前に保存）
             _lastProcessedStaffIdm = _currentStaffIdm;
@@ -1168,6 +1111,79 @@ public partial class MainViewModel : ViewModelBase
 
             // 状態をリセット
             ResetState();
+        }
+    }
+
+    /// <summary>
+    /// 返却成功時の共通後処理（Issue #1577）。
+    /// </summary>
+    /// <remarks>
+    /// 通常の返却フロー（<see cref="ProcessReturnAsync"/>）と仮想タッチ
+    /// （<see cref="ProcessVirtualTouchAsync"/>）の双方から呼び出される。
+    /// バス停入力ダイアログ・履歴再読み込み・警告再チェック等の追従処理を
+    /// 1か所にまとめ、片側だけ追加されて他方に反映されない事故を防ぐ。
+    /// テストから挙動を検証できるよう <c>internal</c> 公開する。
+    /// </remarks>
+    internal async Task HandleReturnSuccessAsync(IcCard card, LendingResult result)
+    {
+        // 残高はLendingServiceで設定済み（カードから直接読み取った値を優先）
+        _soundPlayer.Play(SoundType.Return);
+
+        // トースト通知を表示（画面右上、フォーカスを奪わない）
+        _toastNotificationService.ShowReturnNotification(card.CardType, card.CardNumber, result.Balance, result.IsLowBalance, result.WarningBalance);
+
+        // メイン画面は変更しない（Issue #186: 職員の操作を妨げない）
+
+        await RefreshLentCardsAsync();
+        await RefreshDashboardAsync();
+
+        // 履歴が開いていれば再読み込み（Issue #889）
+        if (IsHistoryVisible)
+        {
+            await LoadHistoryLedgersAsync();
+        }
+
+        await CheckWarningsAsync();
+
+        // バス利用がある場合はバス停入力画面を表示
+        if (result.HasBusUsage && result.CreatedLedgers.Count > 0)
+        {
+            var settings = await _settingsRepository.GetAppSettingsAsync();
+
+            if (!settings.SkipBusStopInputOnReturn)
+            {
+                // Issue #593: バス利用を含むLedgerをすべて取得（Summaryで判定）
+                // LastOrDefaultでは最後のLedgerのみ取得されるため、バス利用が別日にある場合に空ダイアログになる
+                var busLedgers = result.CreatedLedgers
+                    .Where(l => !l.IsLentRecord && l.Summary != null && l.Summary.Contains("バス"))
+                    .ToList();
+
+                // Issue #1203: 複数のバス利用がある場合でも1つのダイアログでまとめて入力できるようにする
+                if (busLedgers.Count > 0)
+                {
+                    await _navigationService.ShowDialogAsync<Views.Dialogs.BusStopInputDialog>(
+                        async d => await d.InitializeWithLedgersAsync(busLedgers));
+                }
+
+                // バス停名入力後に履歴が開いていれば再読み込み
+                if (busLedgers.Count > 0 && IsHistoryVisible)
+                {
+                    await LoadHistoryLedgersAsync();
+                }
+
+                // Issue #660: バス停名入力後に警告メッセージを再チェック
+                // バス停名の入力により★が消えた場合、件数を更新し、0件なら非表示にする
+                await CheckWarningsAsync();
+            }
+            // スキップ時は★マークがSummaryGenerator側で自動付与されるため追加処理不要
+        }
+
+        // Issue #596: 今月の履歴が不完全な可能性がある場合に通知
+        if (result.MayHaveIncompleteHistory)
+        {
+            _toastNotificationService.ShowWarning(
+                "履歴の確認",
+                "今月の利用履歴がすべて取得できていない可能性があります。\nCSVインポートで不足分を補完してください。");
         }
     }
 
@@ -2570,9 +2586,8 @@ public partial class MainViewModel : ViewModelBase
                     return;
                 }
 
-                // 返却成功: 通常の返却と同じUI通知を表示
-                _soundPlayer.Play(SoundType.Return);
-                _toastNotificationService.ShowReturnNotification(card.CardType, card.CardNumber, returnResult.Balance, returnResult.IsLowBalance, returnResult.WarningBalance);
+                // 返却成功: 通常の返却と同じ後処理を呼び出す（バス停入力ダイアログ等。Issue #1577）
+                await HandleReturnSuccessAsync(card, returnResult);
             }
             else
             {
