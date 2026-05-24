@@ -125,6 +125,7 @@ $Manuals = @(
         Output = "ユーザーマニュアル概要版.docx"
         Title = "交通系ICカード管理システム：ピッすい 操作ガイド（概要版）"
         VersionTracked = $true   # アプリバージョンに追従
+        ReferenceDoc = "reference-portrait.docx"  # 概要版のみ縦向き
     },
     @{
         Name = "管理者マニュアル"
@@ -189,12 +190,18 @@ Write-Host "  pandoc: $PandocExe" -ForegroundColor Green
 
 # リファレンスドキュメントの確認
 $ReferenceDocPath = Join-Path $ScriptDir "reference.docx"
+$ReferencePortraitDocPath = Join-Path $ScriptDir "reference-portrait.docx"
 $UseReferenceDoc = Test-Path $ReferenceDocPath
 if ($UseReferenceDoc) {
-    Write-Host "  reference.docx: 使用する（ページ番号・余白を適用）" -ForegroundColor Green
+    Write-Host "  reference.docx: 使用する（横向き・ページ番号・余白を適用）" -ForegroundColor Green
 } else {
     Write-Host "  警告: reference.docx が見つかりません。ページ番号・余白はデフォルトになります。" -ForegroundColor Yellow
     Write-Host "  作成: .\create-reference-doc.ps1 を実行してください。" -ForegroundColor Gray
+}
+if (Test-Path $ReferencePortraitDocPath) {
+    Write-Host "  reference-portrait.docx: 使用する（縦向き・概要版用）" -ForegroundColor Green
+} else {
+    Write-Host "  警告: reference-portrait.docx が見つかりません。概要版は横向きになります。" -ForegroundColor Yellow
 }
 
 # mermaid-filterの確認
@@ -270,9 +277,21 @@ foreach ($Manual in $Manuals) {
         "--metadata", "lang=ja-JP"
     )
 
-    # リファレンスドキュメントが存在する場合、使用する（ページ番号・余白を適用）
-    if ($UseReferenceDoc) {
-        $PandocArgs += @("--reference-doc", $ReferenceDocPath)
+    # リファレンスドキュメントの選択（マニュアルごとに異なるリファレンスを使用可能）
+    $SelectedRefDoc = $null
+    if ($Manual.ReferenceDoc) {
+        $ManualRefPath = Join-Path $ScriptDir $Manual.ReferenceDoc
+        if (Test-Path $ManualRefPath) {
+            $SelectedRefDoc = $ManualRefPath
+        } elseif ($UseReferenceDoc) {
+            Write-Host "    警告: $($Manual.ReferenceDoc) が見つかりません。reference.docx を使用します。" -ForegroundColor Yellow
+            $SelectedRefDoc = $ReferenceDocPath
+        }
+    } elseif ($UseReferenceDoc) {
+        $SelectedRefDoc = $ReferenceDocPath
+    }
+    if ($SelectedRefDoc) {
+        $PandocArgs += @("--reference-doc", $SelectedRefDoc)
     }
 
     # mermaid-filterが有効な場合、フィルターを追加
