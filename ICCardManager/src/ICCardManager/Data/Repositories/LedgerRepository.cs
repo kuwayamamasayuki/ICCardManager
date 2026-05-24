@@ -341,6 +341,24 @@ WHERE ledger_id IN (SELECT id FROM ledger WHERE card_idm = @cardIdm AND is_lent_
         }
 
         /// <inheritdoc/>
+        public async Task<bool> HasOtherLentRecordsAsync(string cardIdm, int excludeLedgerId)
+        {
+            using var lease = await _dbContext.LeaseConnectionAsync().ConfigureAwait(false);
+            var connection = lease.Connection;
+
+            using var command = connection.CreateCommand();
+            command.CommandText = @"SELECT COUNT(*) FROM ledger
+WHERE card_idm = @cardIdm
+  AND is_lent_record = 1
+  AND id <> @excludeLedgerId";
+            command.Parameters.AddWithValue("@cardIdm", cardIdm);
+            command.Parameters.AddWithValue("@excludeLedgerId", excludeLedgerId);
+
+            var count = Convert.ToInt32(await command.ExecuteScalarAsync().ConfigureAwait(false));
+            return count > 0;
+        }
+
+        /// <inheritdoc/>
         public Task<bool> InsertDetailAsync(LedgerDetail detail) => InsertDetailAsync(detail, transaction: null);
 
         /// <inheritdoc/>

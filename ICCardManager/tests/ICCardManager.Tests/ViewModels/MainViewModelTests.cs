@@ -1207,14 +1207,15 @@ public class MainViewModelTests : IDisposable
 
     #endregion
 
-    #region 履歴削除ガード（Issue #1486）
+    #region 履歴削除フロー（Issue #1486 / Issue #1574）
 
     /// <summary>
-    /// 貸出中レコード（IsLentRecord=true）の削除を試みた場合、
-    /// 警告ダイアログが「何が／なぜ／どうすれば」の3要素を満たす本文で表示されること。
+    /// Issue #1574: 貸出中レコード（IsLentRecord=true）の削除を試みた場合、
+    /// 旧仕様（Issue #1486）の <c>NavigationService.ShowWarning</c> による削除拒否は行われない。
+    /// 代わりに通常レコードと同じ認証フローへ進む。
     /// </summary>
     [Fact]
-    public async Task DeleteLedgerRow_LentRecord_ShowsWarningWithRecoveryAction()
+    public async Task DeleteLedgerRow_LentRecord_DoesNotShowBlockingWarning()
     {
         // Arrange
         var lentLedger = new LedgerDto
@@ -1223,44 +1224,22 @@ public class MainViewModelTests : IDisposable
             IsLentRecord = true,
         };
 
-        string capturedMessage = null;
-        string capturedTitle = null;
-        _navigationServiceMock
-            .Setup(n => n.ShowWarning(It.IsAny<string>(), It.IsAny<string>()))
-            .Callback<string, string>((msg, title) =>
-            {
-                capturedMessage = msg;
-                capturedTitle = title;
-            });
-
         // Act
         await _viewModel.DeleteLedgerRowCommand.ExecuteAsync(lentLedger);
 
-        // Assert
+        // Assert: 旧仕様の「削除不可」警告は出なくなった（Issue #1574）
         _navigationServiceMock.Verify(
             n => n.ShowWarning(It.IsAny<string>(), It.IsAny<string>()),
-            Times.Once,
-            "貸出中レコードに対しては必ず警告ダイアログを1回だけ表示すること");
-
-        capturedTitle.Should().Be("削除不可");
-        capturedMessage.Should().NotBeNullOrWhiteSpace();
-        // 何が／なぜ
-        capturedMessage.Should().Contain("貸出中", "メッセージは『何が問題か（貸出中である）』を含むこと");
-        capturedMessage.Should().Contain("削除できません", "メッセージは『なぜ削除不可か』を含むこと");
-        // どうすれば（解決アクション）
-        capturedMessage.Should().Contain("返却", "メッセージは『先に返却操作を行う』という解決アクションを含むこと");
-        // 行動指示型で終わる
-        capturedMessage.Should().EndWith("してください。", "エラーメッセージは行動指示型で終わること");
-        // 最小品質基準（error-messages.md の20文字以上）
-        capturedMessage.Length.Should().BeGreaterThan(20, "3要素を含むメッセージは20文字を大きく超えるはず");
+            Times.Never,
+            "Issue #1574: 貸出中レコードでも削除フローへ進めるよう、旧仕様の拒否警告を撤廃");
     }
 
     /// <summary>
-    /// 貸出中レコードの削除を試みた場合、
-    /// 認証ダイアログを開かず、削除処理にも進まないこと。
+    /// Issue #1574: 貸出中レコードでも認証フローが起動すること。
+    /// 旧仕様（Issue #1486）では認証前に拒否していたが、本 Issue で復旧手段として認証を経由した削除を許可する。
     /// </summary>
     [Fact]
-    public async Task DeleteLedgerRow_LentRecord_DoesNotProceedToAuthenticationOrDelete()
+    public async Task DeleteLedgerRow_LentRecord_StartsAuthenticationFlow()
     {
         // Arrange
         var lentLedger = new LedgerDto
@@ -1272,15 +1251,39 @@ public class MainViewModelTests : IDisposable
         // Act
         await _viewModel.DeleteLedgerRowCommand.ExecuteAsync(lentLedger);
 
-        // Assert
+        // Assert: 認証は起動する（Mock デフォルトで null 返却 → MessageBox.Show 手前で短絡）
         _staffAuthServiceMock.Verify(
             s => s.RequestAuthenticationAsync(It.IsAny<string>()),
-            Times.Never,
-            "貸出中レコードでは認証フローを開始してはならない");
+            Times.Once,
+            "Issue #1574: 貸出中レコードでも認証フローを開始する（復旧手段の提供）");
+    }
+
+    /// <summary>
+    /// 認証がキャンセル（null 返却）された場合、貸出中レコードでも削除には進まない。
+    /// </summary>
+    [Fact]
+    public async Task DeleteLedgerRow_LentRecord_WhenAuthCancelled_DoesNotDelete()
+    {
+        // Arrange
+        var lentLedger = new LedgerDto
+        {
+            Id = 103,
+            IsLentRecord = true,
+        };
+        // _staffAuthServiceMock は未設定なのでデフォルトで null（=キャンセル）が返る
+
+        // Act
+        await _viewModel.DeleteLedgerRowCommand.ExecuteAsync(lentLedger);
+
+        // Assert
         _ledgerRepositoryMock.Verify(
             r => r.DeleteAsync(It.IsAny<int>(), It.IsAny<SQLiteTransaction>()),
             Times.Never,
-            "貸出中レコードでは DeleteAsync を呼んではならない");
+            "認証キャンセル時は削除に進まない");
+        _cardRepositoryMock.Verify(
+            c => c.UpdateLentStatusAsync(It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<DateTime?>(), It.IsAny<string>()),
+            Times.Never,
+            "認証キャンセル時は is_lent リセットも行わない");
     }
 
     /// <summary>

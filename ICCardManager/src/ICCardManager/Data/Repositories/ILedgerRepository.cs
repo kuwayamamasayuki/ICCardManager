@@ -74,6 +74,14 @@ namespace ICCardManager.Data.Repositories
         Task<int> DeleteAllLentRecordsAsync(string cardIdm);
 
         /// <summary>
+        /// 指定カードに「貸出中」状態のレコードが、指定 ID 以外に残っているか判定する（Issue #1574）。
+        /// 貸出中レコード削除後の <c>ic_card.is_lent</c> 整合性判断に使用する。
+        /// </summary>
+        /// <param name="cardIdm">カード IDm</param>
+        /// <param name="excludeLedgerId">判定から除外する履歴 ID（通常は削除対象の ID）</param>
+        Task<bool> HasOtherLentRecordsAsync(string cardIdm, int excludeLedgerId);
+
+        /// <summary>
         /// 利用履歴詳細を登録
         /// </summary>
         Task<bool> InsertDetailAsync(LedgerDetail detail);
