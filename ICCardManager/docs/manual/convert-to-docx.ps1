@@ -1,4 +1,4 @@
-# マニュアル Word変換スクリプト
+﻿# マニュアル Word変換スクリプト
 # 使用方法:
 #   .\convert-to-docx.ps1              # 全マニュアルを変換（更新があるもののみ）
 #   .\convert-to-docx.ps1 -Force       # 全マニュアルを強制変換
