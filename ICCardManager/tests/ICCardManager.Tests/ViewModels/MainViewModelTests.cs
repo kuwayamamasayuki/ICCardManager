@@ -1305,6 +1305,153 @@ public class MainViewModelTests : IDisposable
     }
 
     #endregion
+
+    #region 返却成功時の共通後処理（Issue #1577）
+
+    /// <summary>
+    /// 返却成功時の共通後処理 <see cref="MainViewModel.HandleReturnSuccessAsync"/> から
+    /// バス停入力ダイアログまで到達できるよう、依存サービスの最低限のモックを設定する。
+    /// </summary>
+    /// <remarks>
+    /// このセットアップは仮想タッチ（<c>ProcessVirtualTouchAsync</c>）からも同じ
+    /// 共通メソッドが呼ばれることを担保するために必要。
+    /// </remarks>
+    private void SetupForReturnSuccess(bool skipBusStopInputOnReturn = false)
+    {
+        _settingsRepositoryMock
+            .Setup(s => s.GetAppSettingsAsync())
+            .ReturnsAsync(new AppSettings { SkipBusStopInputOnReturn = skipBusStopInputOnReturn, WarningBalance = 500 });
+
+        _cardRepositoryMock
+            .Setup(r => r.GetLentAsync(It.IsAny<bool>()))
+            .ReturnsAsync(new List<IcCard>());
+
+        _cardRepositoryMock
+            .Setup(r => r.GetAllAsync())
+            .ReturnsAsync(new List<IcCard>());
+
+        _staffRepositoryMock
+            .Setup(r => r.GetAllAsync())
+            .ReturnsAsync(new List<Staff>());
+
+        _ledgerRepositoryMock
+            .Setup(r => r.GetAllLatestBalancesAsync())
+            .ReturnsAsync(new Dictionary<string, (int Balance, DateTime? LastUsageDate)>());
+
+        _ledgerRepositoryMock
+            .Setup(r => r.GetByDateRangeAsync(It.IsAny<string>(), It.IsAny<DateTime>(), It.IsAny<DateTime>()))
+            .ReturnsAsync(new List<Ledger>());
+
+        _navigationServiceMock
+            .Setup(n => n.ShowDialogAsync<ICCardManager.Views.Dialogs.BusStopInputDialog>(
+                It.IsAny<Func<ICCardManager.Views.Dialogs.BusStopInputDialog, Task>>()))
+            .ReturnsAsync((bool?)true);
+    }
+
+    private static IcCard CreateTestCard() => new IcCard
+    {
+        CardIdm = "0123456789ABCDEF",
+        CardType = "Suica",
+        CardNumber = "001",
+    };
+
+    /// <summary>
+    /// バス利用を含む返却に成功した場合、バス停入力ダイアログが1回表示されること。
+    /// </summary>
+    /// <remarks>
+    /// Issue #1577: 通常返却 (<c>ProcessReturnAsync</c>) と仮想タッチ (<c>ProcessVirtualTouchAsync</c>) の
+    /// 双方が共通メソッド <c>HandleReturnSuccessAsync</c> を経由するため、ここでの挙動を1か所で
+    /// テストすれば両フローの回帰を検出できる。
+    /// </remarks>
+    [Fact]
+    public async Task HandleReturnSuccessAsync_WithBusUsage_ShowsBusStopInputDialog()
+    {
+        // Arrange
+        SetupForReturnSuccess();
+        var result = new LendingResult
+        {
+            Success = true,
+            Balance = 1000,
+            HasBusUsage = true,
+            CreatedLedgers = new List<Ledger>
+            {
+                new Ledger { Summary = "鉄道（A駅～B駅）、バス（★）", IsLentRecord = false },
+            },
+        };
+
+        // Act
+        await _viewModel.HandleReturnSuccessAsync(CreateTestCard(), result);
+
+        // Assert
+        _navigationServiceMock.Verify(
+            n => n.ShowDialogAsync<ICCardManager.Views.Dialogs.BusStopInputDialog>(
+                It.IsAny<Func<ICCardManager.Views.Dialogs.BusStopInputDialog, Task>>()),
+            Times.Once,
+            "Issue #1577: バス利用を含む返却ではバス停入力ダイアログを必ず表示すること");
+    }
+
+    /// <summary>
+    /// バス利用を含まない返却の場合、バス停入力ダイアログを表示しないこと。
+    /// </summary>
+    [Fact]
+    public async Task HandleReturnSuccessAsync_WithoutBusUsage_DoesNotShowBusStopInputDialog()
+    {
+        // Arrange
+        SetupForReturnSuccess();
+        var result = new LendingResult
+        {
+            Success = true,
+            Balance = 1000,
+            HasBusUsage = false,
+            CreatedLedgers = new List<Ledger>
+            {
+                new Ledger { Summary = "鉄道（A駅～B駅）", IsLentRecord = false },
+            },
+        };
+
+        // Act
+        await _viewModel.HandleReturnSuccessAsync(CreateTestCard(), result);
+
+        // Assert
+        _navigationServiceMock.Verify(
+            n => n.ShowDialogAsync<ICCardManager.Views.Dialogs.BusStopInputDialog>(
+                It.IsAny<Func<ICCardManager.Views.Dialogs.BusStopInputDialog, Task>>()),
+            Times.Never,
+            "バス利用が無い場合はバス停入力ダイアログを開かないこと");
+    }
+
+    /// <summary>
+    /// 設定で <see cref="AppSettings.SkipBusStopInputOnReturn"/> が true の場合、
+    /// バス利用があってもダイアログを表示しないこと（ユーザーが意図的に抑制）。
+    /// </summary>
+    [Fact]
+    public async Task HandleReturnSuccessAsync_WithSkipBusStopInputSetting_DoesNotShowDialog()
+    {
+        // Arrange
+        SetupForReturnSuccess(skipBusStopInputOnReturn: true);
+        var result = new LendingResult
+        {
+            Success = true,
+            Balance = 1000,
+            HasBusUsage = true,
+            CreatedLedgers = new List<Ledger>
+            {
+                new Ledger { Summary = "鉄道（A駅～B駅）、バス（★）", IsLentRecord = false },
+            },
+        };
+
+        // Act
+        await _viewModel.HandleReturnSuccessAsync(CreateTestCard(), result);
+
+        // Assert
+        _navigationServiceMock.Verify(
+            n => n.ShowDialogAsync<ICCardManager.Views.Dialogs.BusStopInputDialog>(
+                It.IsAny<Func<ICCardManager.Views.Dialogs.BusStopInputDialog, Task>>()),
+            Times.Never,
+            "SkipBusStopInputOnReturn=true の場合はバス停入力ダイアログを開かないこと");
+    }
+
+    #endregion
 }
 
 /*
