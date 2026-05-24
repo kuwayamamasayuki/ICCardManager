@@ -710,6 +710,23 @@ namespace ICCardManager.Services
         /// 連続する経路を統合（乗継判定）
         /// 注：起点と終点が同じになる循環移動の場合は統合せず、個別の経路を表示
         /// </summary>
+        /// <remarks>
+        /// Issue #1580: <c>AreTransferStations</c> の隣接判定だけでは「乗継（順方向に進む）」と
+        /// 「往復（戻ってくる）」を区別できないため、A→B→A→B 型のチェーンを 1 経路に
+        /// 潰してしまうバグがあった。本実装ではチェーン内の既訪問駅集合を保持し、
+        /// 次経路の終点が既訪問なら原則として方向反転とみなして乗継統合を打ち切る。
+        ///
+        /// 例外: 「次経路の終点 == チェーンの始点」かつ「チェーン長 ≥ 3」となる場合は
+        /// 「閉じた循環（A→B→C→A 型の単一周回移動）」とみなしてチェーンを継続させ、
+        /// 末尾の <see cref="AddConsolidatedChain"/> の循環検出に個別表示を委ねる
+        /// （Issue #878 で確立された奇数長循環 = 個別表示の設計を維持）。
+        ///
+        /// 一方 A→B→A（チェーン長 2 の反転）は break して個別化し、後段の
+        /// <see cref="DetectRoundTrips"/> に往復ペアとして拾わせる。
+        ///
+        /// 既訪問判定は <see cref="AreTransferStations"/> による同一視を考慮する
+        /// （例: 天神 と 西鉄福岡(天神) は同一駅とみなす）。
+        /// </remarks>
         private List<(string Start, string End)> ConsolidateRoutes(List<(string Entry, string Exit)> routes)
         {
             if (routes.Count == 0)
@@ -721,22 +738,33 @@ namespace ICCardManager.Services
             var chainStartIndex = 0;
             var currentStart = routes[0].Entry;
             var currentEnd = routes[0].Exit;
+            var visitedInChain = new List<string> { currentStart, currentEnd };
 
             for (int i = 1; i < routes.Count; i++)
             {
-                // 降車駅と次の乗車駅が同じ（または乗り継ぎ駅として同一視できる）場合は乗継として統合
-                if (AreTransferStations(currentEnd, routes[i].Entry))
+                var isTransfer = AreTransferStations(currentEnd, routes[i].Entry);
+                var nextExit = routes[i].Exit;
+                var nextExitVisited = visitedInChain.Any(v => AreTransferStations(v, nextExit));
+                var nextExitEqualsStart = AreTransferStations(currentStart, nextExit);
+                var chainLengthAfter = i - chainStartIndex + 1;
+                var isClosingCircular = nextExitEqualsStart && chainLengthAfter >= 3;
+
+                if (isTransfer && (!nextExitVisited || isClosingCircular))
                 {
-                    currentEnd = routes[i].Exit;
+                    currentEnd = nextExit;
+                    if (!nextExitVisited)
+                    {
+                        visitedInChain.Add(currentEnd);
+                    }
                 }
                 else
                 {
-                    // チェーンを結果に追加
                     AddConsolidatedChain(result, routes, chainStartIndex, i - 1, currentStart, currentEnd);
 
                     chainStartIndex = i;
                     currentStart = routes[i].Entry;
                     currentEnd = routes[i].Exit;
+                    visitedInChain = new List<string> { currentStart, currentEnd };
                 }
             }
 
