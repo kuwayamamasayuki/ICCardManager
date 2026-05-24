@@ -1838,4 +1838,75 @@ public class SummaryGeneratorComprehensiveTests : IDisposable
     }
 
     #endregion
+
+    #region カテゴリX: 同方向の往復が複数回ある場合（Issue #1579）
+
+    /// <summary>
+    /// 同じ方向（天神→博多）の往復を 2 回行った場合、4 件の経路が
+    /// 「天神～博多 往復、天神～博多 往復」とだけ表示され、個別経路の
+    /// 重複表示が残らないこと。
+    /// </summary>
+    /// <remarks>
+    /// バグ: <c>SummaryGenerator.GetRemainingRoutes</c> が <c>(Entry, Exit)</c>
+    /// 方向ごとに独立に <c>usedCount</c> を取り、1 回目の使用を「往復に消費済み」と
+    /// 扱った後、2 回目の同方向出現を「往復の余り」と誤判定して remaining に
+    /// 追加していた。結果として実際の 2 往復に加えて個別経路 2 件が末尾に
+    /// 連結され、「天神～博多 往復、天神～博多 往復、天神～博多、博多～天神」と
+    /// 重複表示された。Issue #1570（往復ボタン）でユーザーが同方向の往復を
+    /// 連続入力するハードルが下がったため再現確率が上がった。
+    /// </remarks>
+    [Fact]
+    public void TC_BUG1579_バス_同方向の往復2回_重複表示なし()
+    {
+        // Arrange: 天神→博多→天神→博多→天神 の 4 経路（バス、同日）
+        // ICカード履歴は新しい順なので逆順で投入
+        var details = new List<LedgerDetail>
+        {
+            CreateBusUsage(new DateTime(2024, 12, 9), 200, 4200, busStops: "博多～天神"),
+            CreateBusUsage(new DateTime(2024, 12, 9), 200, 4400, busStops: "天神～博多"),
+            CreateBusUsage(new DateTime(2024, 12, 9), 200, 4600, busStops: "博多～天神"),
+            CreateBusUsage(new DateTime(2024, 12, 9), 200, 4800, busStops: "天神～博多"),
+        };
+
+        // Act
+        var results = _generator.GenerateByDate(details);
+
+        // Assert: 2 往復として表示され、個別経路の重複が残らない
+        results.Should().HaveCount(1);
+        results[0].Summary.Should().Be("バス（天神～博多 往復、天神～博多 往復）");
+        OutputInputAndResult(details, results);
+    }
+
+    /// <summary>
+    /// 鉄道側でも同じバグが発生することを固定する。
+    /// 同方向の往復が複数あっても個別経路が remaining に残らない。
+    /// </summary>
+    [Fact]
+    public void TC_BUG1579_鉄道_同方向の往復2回_重複表示なし()
+    {
+        // Arrange: 天神→博多→天神→博多→天神 の 4 経路（鉄道、同日）
+        var details = new List<LedgerDetail>
+        {
+            CreateRailwayUsage(new DateTime(2024, 12, 9), "博多", "天神", 210, 4160),
+            CreateRailwayUsage(new DateTime(2024, 12, 9), "天神", "博多", 210, 4370),
+            CreateRailwayUsage(new DateTime(2024, 12, 9), "博多", "天神", 210, 4580),
+            CreateRailwayUsage(new DateTime(2024, 12, 9), "天神", "博多", 210, 4790),
+        };
+
+        // Act
+        var results = _generator.GenerateByDate(details);
+
+        // Assert
+        results.Should().HaveCount(1);
+        results[0].Summary.Should().Be("鉄道（天神～博多 往復、天神～博多 往復）");
+        OutputInputAndResult(details, results);
+    }
+
+    // Note: 3 往復以上（6+ 経路）および「2 往復 + 余り 1 件」（5 経路）のケースは
+    // 別の既存バグ（ConsolidateRoutes が「A→B→A→B」型のチェーンを 1 経路に
+    // 統合し情報を失う）の影響で正しい摘要が得られない。本 PR のスコープは
+    // ユーザー報告の 2 往復ケース修正に限定し、深層バグは Issue #1580 で
+    // フォローアップする。
+
+    #endregion
 }

@@ -84,6 +84,7 @@ public partial class BusStopInputViewModel : ViewModelBase
                 item.SetSuggestions(BusStopSuggestions);
                 BusUsages.Add(item);
             }
+            LinkPreviousItems();
 
             if (BusUsages.Count == 0)
             {
@@ -115,6 +116,7 @@ public partial class BusStopInputViewModel : ViewModelBase
             item.SetSuggestions(BusStopSuggestions);
             BusUsages.Add(item);
         }
+        LinkPreviousItems();
 
         if (BusUsages.Count == 0)
         {
@@ -171,6 +173,7 @@ public partial class BusStopInputViewModel : ViewModelBase
                 BusUsages.Add(item);
             }
         }
+        LinkPreviousItems();
 
         if (BusUsages.Count == 0)
         {
@@ -200,6 +203,7 @@ public partial class BusStopInputViewModel : ViewModelBase
             item.SetSuggestions(BusStopSuggestions);
             BusUsages.Add(item);
         }
+        LinkPreviousItems();
 
         if (BusUsages.Count == 0)
         {
@@ -211,6 +215,18 @@ public partial class BusStopInputViewModel : ViewModelBase
         }
 
         HasUnsavedChanges = false;
+    }
+
+    /// <summary>
+    /// Issue #1570: <see cref="BusUsages"/> の各アイテムに直前アイテムへの参照を設定する。
+    /// 先頭は null。「往復」ボタンの活性制御に使用。
+    /// </summary>
+    private void LinkPreviousItems()
+    {
+        for (int i = 0; i < BusUsages.Count; i++)
+        {
+            BusUsages[i].PreviousItem = i == 0 ? null : BusUsages[i - 1];
+        }
     }
 
     /// <summary>
@@ -446,6 +462,21 @@ public partial class BusStopInputItem : ObservableObject
     [ObservableProperty]
     private bool _showSuggestions;
 
+    /// <summary>
+    /// Issue #1570: 一つ前の行のアイテム。「往復」ボタンで参照する。
+    /// 先頭行では null。<see cref="BusStopInputViewModel"/> の初期化処理で
+    /// <see cref="BusStopInputViewModel.BusUsages"/> 構築後に直前のアイテムが設定される。
+    /// </summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasPreviousItem))]
+    private BusStopInputItem? _previousItem;
+
+    /// <summary>
+    /// Issue #1570: 「往復」ボタンを表示すべきか（前の行が存在するか）。
+    /// XAML で BooleanToVisibilityConverter と組み合わせて表示制御に使う。
+    /// </summary>
+    public bool HasPreviousItem => PreviousItem != null;
+
     public DateTime? UseDate => Detail.UseDate;
     public string UseDateDisplay => Detail.UseDate.HasValue
         ? WarekiConverter.ToWareki(Detail.UseDate.Value)
@@ -556,6 +587,28 @@ public partial class BusStopInputItem : ObservableObject
     public void HideSuggestions()
     {
         ShowSuggestions = false;
+    }
+
+    /// <summary>
+    /// Issue #1570: 一つ前の行の起点と終点を入れ替えた値を当該行にセットする（往復ボタン）。
+    /// 前の行が空欄／「★」のみ／「～」を含まない／「～」で分割して2要素にならない場合は何もしない。
+    /// </summary>
+    [RelayCommand]
+    public void ApplyRoundTrip()
+    {
+        if (PreviousItem == null) return;
+
+        var source = PreviousItem.BusStops;
+        if (string.IsNullOrWhiteSpace(source)) return;
+
+        var parts = source.Split('～');
+        if (parts.Length != 2) return;
+
+        var from = parts[0].Trim();
+        var to = parts[1].Trim();
+        if (string.IsNullOrEmpty(from) || string.IsNullOrEmpty(to)) return;
+
+        BusStops = $"{to}～{from}";
     }
 
     /// <summary>
