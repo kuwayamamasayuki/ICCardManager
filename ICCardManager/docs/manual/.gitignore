@@ -2,6 +2,6 @@
 *.docx
 # reference*.docxはpandocのテンプレートなのでリポジトリに含める
 !reference.docx
-!reference-portrait.docx
+!reference-summary.docx
 # 生成されるPDF文書（Markdownから都度生成）
 *.pdf

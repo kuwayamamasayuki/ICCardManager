@@ -124,8 +124,8 @@ $Manuals = @(
         Input = "ユーザーマニュアル概要版.md"
         Output = "ユーザーマニュアル概要版.docx"
         Title = "交通系ICカード管理システム：ピッすい 操作ガイド（概要版）"
-        VersionTracked = $true   # アプリバージョンに追従
-        ReferenceDoc = "reference-portrait.docx"  # 概要版のみ縦向き
+        VersionTracked = $false  # Markdown にバージョン行がないため注入不要
+        ReferenceDoc = "reference-summary.docx"  # 概要版専用（縦向き・ヘッダーフッターなし）
     },
     @{
         Name = "管理者マニュアル"
@@ -190,7 +190,7 @@ Write-Host "  pandoc: $PandocExe" -ForegroundColor Green
 
 # リファレンスドキュメントの確認
 $ReferenceDocPath = Join-Path $ScriptDir "reference.docx"
-$ReferencePortraitDocPath = Join-Path $ScriptDir "reference-portrait.docx"
+$ReferenceSummaryDocPath = Join-Path $ScriptDir "reference-summary.docx"
 $UseReferenceDoc = Test-Path $ReferenceDocPath
 if ($UseReferenceDoc) {
     Write-Host "  reference.docx: 使用する（横向き・ページ番号・余白を適用）" -ForegroundColor Green
@@ -198,10 +198,10 @@ if ($UseReferenceDoc) {
     Write-Host "  警告: reference.docx が見つかりません。ページ番号・余白はデフォルトになります。" -ForegroundColor Yellow
     Write-Host "  作成: .\create-reference-doc.ps1 を実行してください。" -ForegroundColor Gray
 }
-if (Test-Path $ReferencePortraitDocPath) {
-    Write-Host "  reference-portrait.docx: 使用する（縦向き・概要版用）" -ForegroundColor Green
+if (Test-Path $ReferenceSummaryDocPath) {
+    Write-Host "  reference-summary.docx: 使用する（概要版専用）" -ForegroundColor Green
 } else {
-    Write-Host "  警告: reference-portrait.docx が見つかりません。概要版は横向きになります。" -ForegroundColor Yellow
+    Write-Host "  警告: reference-summary.docx が見つかりません。概要版はデフォルトの reference.docx を使用します。" -ForegroundColor Yellow
 }
 
 # mermaid-filterの確認
