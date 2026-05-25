@@ -93,7 +93,7 @@ Source: "..\docs\manual\管理者マニュアル.md"; DestDir: "{app}\Docs"; Fla
 ; docx形式
 Source: "..\docs\manual\はじめに.docx"; DestDir: "{app}\Docs"; Flags: ignoreversion
 Source: "..\docs\manual\ユーザーマニュアル.docx"; DestDir: "{app}\Docs"; Flags: ignoreversion
-Source: "..\docs\manual\ユーザーマニュアル概要版（修正版）.docx"; DestDir: "{app}\Docs"; Flags: ignoreversion
+Source: "..\docs\manual\ユーザーマニュアル概要版.docx"; DestDir: "{app}\Docs"; Flags: ignoreversion
 Source: "..\docs\manual\管理者マニュアル.docx"; DestDir: "{app}\Docs"; Flags: ignoreversion
 ; PDF形式（Issue #642）
 Source: "..\docs\manual\はじめに.pdf"; DestDir: "{app}\Docs"; Flags: ignoreversion skipifsourcedoesntexist
