@@ -1,6 +1,6 @@
 # 更新履歴
 
-### Unreleased
+### v2.9.0 (2026-05-26)
 
 **バグ修正**
 - 何らかの原因（アプリ異常終了、DB 手動修復、過去バージョンの不具合等）で「（貸出中）」状態の履歴行（`ledger.is_lent_record = 1`）が残ってしまった場合に、変更ボタンから開いた `LedgerRowEditDialog` に「削除」ボタンが表示されず、また `MainViewModel.DeleteLedgerRow` 側でも `IsLentRecord=true` のレコードを拒否ガードで弾いていたため、対応する物理カードが既に手元にないケースで「返却操作で復旧する」ことが不可能になり、データ整合性を取り戻す手段がなくなる問題を修正した。Issue #750（履歴行の追加／削除／変更機能）と Issue #1486（削除ガードのエラーメッセージ強化）で導入された安全策は通常運用での誤削除防止には有効だったが、異常状態からの**復旧不可能**という副作用が残っていた。具体的修正: (a) `LedgerRowEditViewModel.InitializeForEditAsync` で `CanDelete = !ledgerDto.IsLentRecord` だった条件を `CanDelete = true` に変更し、新規 `[ObservableProperty] bool IsLentRecord` を追加して編集対象が貸出中レコードかどうかを保持する、(b) `LedgerRowEditViewModel.RequestDelete` の確認ダイアログを `IsLentRecord` で分岐し、貸出中の場合は「この履歴は『貸出中』状態のレコードです。削除すると、このカードの貸出中状態も解消されます（他に貸出中レコードが残っている場合は維持されます）。通常は、メイン画面で交通系ICカードをタッチして返却操作を行うのが正しい復旧方法です。それでも削除しますか？」という専用警告を表示する、(c) `MainViewModel.DeleteLedgerRow` から `IsLentRecord` 拒否ガード（`NavigationService.ShowWarning` で「削除不可」を出していた早期 return）を削除し、確認 `MessageBox.Show` を貸出中レコード専用文言に分岐、(d) `MainViewModel` に private ヘルパー `ResetIsLentIfNoOtherLentRecordsAsync(Ledger deletedLedger)` を新設し、削除した行が `IsLentRecord=true` の場合のみ新規追加した `ILedgerRepository.HasOtherLentRecordsAsync(cardIdm, excludeLedgerId)` で同一カードに他の貸出中レコードが残っているかを判定し、残っていなければ `_cardRepository.UpdateLentStatusAsync(cardIdm, isLent:false, lentAt:null, staffIdm:null)` で `ic_card.is_lent` をリセット（多重貸出中の異常状態では他レコードがあるため `is_lent=true` を維持し段階的復旧を可能にする）、(e) `MainViewModel.EditLedgerWithAuthAsync` の `IsDeleteRequested` 分岐（変更ダイアログ経由の削除パス、Issue #750）にも同じ `ResetIsLentIfNoOtherLentRecordsAsync` 呼び出しを追加。新規 `HasOtherLentRecordsAsync` は `SELECT COUNT(*) FROM ledger WHERE card_idm = @cardIdm AND is_lent_record = 1 AND id <> @excludeLedgerId` で実装し、ledger DELETE 用既存トランザクションとは別接続で `is_lent` リセットを行う（`UpdateLentStatusAsync` がトランザクション引数を持たない現行設計に揃えた最小修正。部分失敗時は `CheckAndNotifyConsistencyAsync` が警告を出すので運用上検知可能）。回帰防止として `LedgerRepositoryTests` に `HasOtherLentRecordsAsync` のテスト 4 件追加（削除対象除外で他になし → false / 同一カードに他の貸出中あり → true / 別カードの貸出中は無視 → false / 通常レコードは無視 → false）、`LedgerRowEditViewModelTests` の旧仕様検証テスト `EditMode_LentRecord_CanDelete_IsFalse` を `EditMode_LentRecord_CanDelete_IsTrue_Issue1574` に書き換え（`CanDelete=true` と `IsLentRecord=true` の伝播を検証）、`EditMode_NormalRecord_CanDelete_IsTrue` にも `IsLentRecord=false` 検証を追加、`MainViewModelTests` の Issue #1486 旧仕様検証テスト 2 件（`ShowsWarningWithRecoveryAction` / `DoesNotProceedToAuthenticationOrDelete`）を新仕様検証 3 件（`LentRecord_DoesNotShowBlockingWarning` / `LentRecord_StartsAuthenticationFlow` / `LentRecord_WhenAuthCancelled_DoesNotDelete`）に書き換え。マニュアル・設計書の同期更新は本 PR には含めず、PR レビューで実機検証（変更ダイアログから貸出中行を削除して `ic_card.is_lent` がリセットされること、貸出中カード一覧から消えること）を併せて確認する（Issue #1574）
@@ -86,6 +86,72 @@
 **テスト整理**
 - テスト件数表（`07_テスト設計書.md` §1.1a）と `dotnet test --list-tests` 実測値の乖離を CI で自動検出する workflow (`.github/workflows/test-count-sync-check.yml`) と検証スクリプト (`tools/check-test-count-sync.py`) を追加。Issue #1475（PR #1545）で運用ルールとして整備された「件数の同期手順」を機械化し、テスト追加・削除のたびに §1.1a の表を更新し忘れた PR を CI 段階でブロックする。検証は単体テスト・UI テスト・合計の 3 値を 0 件差で厳密比較し、乖離時は exit 1 で修正手順を表示、表形式自体の異常時は exit 2 で保守者向けメッセージを表示する。Python 純粋関数（パーサ・比較）には `unittest` 7 件のテストを追加。なお、本 PR の初回 CI で §1.1a に 39 件の乖離（記載: 単体 3,266 / 合計 3,292、実測: 単体 3,227 / 合計 3,253）が検出されたため、同 PR 内で記載値を実測値に同期更新した。これは導入した自動検証が production で正しく機能していることの実証も兼ねる（#1546）
 - `DbContextConnectionLeaseTests.cs` の `LeaseConnection_リエントラント呼び出しがデッドロックしないこと`（L132-148）を削除。同ファイル L362 の `LeaseConnection_同期版でリエントラントが動作すること` と**本体が完全に同一**（同じ `dbContext.LeaseConnection()` 同期 API を呼び、同じアサーション：State Open + 同一 Connection 検証）で、機能的に重複していた。削除した方は `#region LeaseConnectionAsync` 内に配置されていたが実装は同期 API を呼んでいる**配置不整合**もあり、`#region LeaseConnection（同期版）` 内の L362 のテストを保持するのが構造的にも整合する。`docs/design/07_テスト設計書.md §1.1a` と §8.1 のテスト件数スナップショットを 3,267 → 3,266 に同期更新。本作業は 3,267 件の単体テスト全件を 4 カテゴリ（Skip 属性付き / 意味のないアサーション / テスト名・意図重複 / 同一コードパス重複）で静的スキャンした結果見つかった唯一の真の重複で、他 392 ペア（構造類似ペア）は全て境界値テスト・同値分割テストであり削除対象外と確認した。スキャン手法と判断基準の詳細は `docs/superpowers/specs/2026-05-18-test-suite-cleanup-design.md` に記録（テストのみ修正、本体コード変更なし）
+
+**新機能**
+- Issue #1570 バス停名入力に往復ボタン追加（#1570）
+- 共有DB接続状態（Connected/Reconnecting/Disconnected）をステータスバーに3状態表示 (Issue #1470)（#1470）
+- テスト件数表の CI 自動検証 (Issue #1546)（#1546）
+- 操作ログクイックフィルタ実描画リグレッションをFlaUIで機械検証 (Issue #1522)（#1522）
+
+**バグ修正**
+- Issue #1584 インストーラーのフォルダ指定時にマップトドライブを選択可能にする（#1584）
+- Issue #1574 「(貸出中)」状態の履歴行を変更ボタンから削除可能にする（#1574）
+- Issue #1580 ConsolidateRoutes が A→B→A→B チェーンを乗継として誤統合し情報を失う問題を修正（#1580）
+- Issue #1577 仮想タッチからのバス停入力ダイアログ表示を共通化（#1577）
+- Issue #1575 利用履歴を含む返却処理のデッドロックを修正（#1575）
+- Issue #1465 Process.Start パス検証強化 (SafeFileLauncher 導入)（#1465）
+- MigrationHelpers の column / typeAndConstraints を regex 検証 (Issue #1466)（#1466）
+- 共有モード判定をUNC/マップドドライブ限定に修正 (Issue #1559)（#1559）
+- LedgerRepository.InsertDetailsAsync をバッチ化 (Issue #1456)（#1456）
+- PathValidator のエラーメッセージを3要素ガイドライン対応 (Issue #1471)（#1471）
+- OperationLogDialog の動的 TextBlock で LiveRegionChanged を発火 (Issue #1548, #1507)（#1548）
+- OperationLogDialog の動的 TextBlock で LiveRegionChanged を発火 (Issue #1548)（#1548）
+- DebugDataService の DELETE 文を IN 句パラメータ化 (Issue #1485)（#1485）
+- 操作ログダイアログの終了日 DatePicker クリップを期間 StackPanel の ColumnSpan=5 拡大で解消 (Issue #1523)（#1523）
+- LedgerRepository に SQLiteTransaction 明示参加オーバーロード追加 (Issue #1481)（#1481）
+- HandleLegacyDatabase の補填 INSERT を INSERT OR IGNORE 化 (Issue #1484)（#1484）
+- 削除不可ダイアログ（貸出中レコード）に解決アクションを追加 (Issue #1486)（#1486）
+- 共有モードヘルスチェック間隔をキャッシュ TTL に揃える (Issue #1493)（#1493）
+- 操作ログダイアログのクイックフィルタ「今日/今月/先月」ボタンを独立行へ分離 (Issue #1505)（#1505）
+- 共有モードのVACUUM競合を先勝ちCASロックで解消 (Issue #1482)（#1482）
+- LedgerRepository.GetByIdAsync / GetLentRecordAsync を 1 RTT に集約 (Issue #1478)（#1478）
+- PathValidator の冗長な三項演算子と重複コメント番号を修正 (Issue #1483)（#1483）
+- UI カラーリテラル直書きを撤廃し AccessibilityStyles の SSOT に統一 (Issue #1461)（#1461）
+- UI 文言の「ICカード」単独表記を「交通系ICカード」へ統一 (Issue #1460)（#1460）
+- データインポートのカードタッチ待機中にメイン画面の OnCardRead を抑制 (Issue #1514)（#1514）
+- ランタイムでの過剰 ACL 拡張を撤廃 (Issue #1455)（#1455）
+- OperationLogDialog/StaffAuthDialog の AutomationProperties カバレッジを拡充 (Issue #1468)（#1468）
+
+**リファクタリング**
+- 同構造 Fact/Theory テスト群を Theory + InlineData に統合 (5 クラス、Issue #1550)（#1550）
+- EnsureDirectoryWithPermissions を EnsureDirectoryExists にリネーム (Issue #1499)（#1499）
+
+**ドキュメント**
+- Issue #1571 UNCパス推奨記載を削除しマップドドライブと並列扱いに（#1571）
+- Issue #1565 残り2枚のスクリーンショット追加 (error_no_reader / warning_network_disconnected)（#1565）
+- マニュアル参照済みスクリーンショット 7 枚を追加 (Issue #1463)（#1463）
+- マニュアル4ファイルを v2.8.1 に同期 + bump-version.ps1 改修 (#1462)（#1462）
+- 開発者ガイド §2.5 を v2.8.0 まで伸長 (Issue #1472)（#1472）
+- 設計書 4 ファイルの「ICカード」単独表記を「交通系ICカード」に統一 (Issue #1474)（#1474）
+- テスト件数表の同期手順を明文化＆実測値に同期 (Issue #1475)（#1475）
+- DB設計書 §4 にマイグレーション冪等化ヘルパーの存在を明記 (Issue #1477)（#1477）
+- クラス設計書 §5.4 欠番を「意図的に欠番のまま維持」と確定 (Issue #1490)（#1490）
+- 開発者ガイド付録 C トラブルシューティングを v2.8.0 のテスト基盤に同期 (Issue #1491)（#1491）
+- 共有モード（UNC パス）の SMB 切断・再接続シナリオ手動テスト項目を追加 (Issue #1498)（#1498）
+- CLAUDE.md のディレクトリ構成と参照ドキュメントを実体パスに整合 (Issue #1492)（#1492）
+
+**テスト**
+- VirtualCardDialog の DEBUG ガード継続検証テストを追加 (Issue #1487)（#1487）
+- 動的TextBlock検証に OperationLogDialog 側 4 要素を追加 (Issue #1501)（#1501）
+- MinimumNameCounts コメントと閾値の不一致を修正 (Issue #1502)（#1502）
+- LiveSetting 検査 regex を要素境界で絞る (Issue #1503)（#1503）
+- AutomationProperties.Name 検査を Regex 化して XAML 整形の空白挿入に耐性を持たせる (Issue #1504)（#1504）
+
+**パフォーマンス**
+- Issue #1458 OperationLogger を Ledger 操作と同一トランザクション化（#1458）
+- Issue #1457 GetPagedAsync の detail_count を CTE+LEFT JOIN 化 (N+1 解消)（#1457）
+- ExcelStyleFormatter の重複 Range 生成削減と空白行一括版を追加 (Issue #1480)（#1480）
+- operation_log のページネーションを keyset 化 (Issue #1479)（#1479）
 
 ### v2.8.1 (2026-05-11)
 
