@@ -246,6 +246,58 @@ begin
   SetArrayLength(MappedDriveRemotePaths, MappedDriveCount);
 end;
 
+// HKCU\Network にエントリがない場合のフォールバック（Issue #1584）
+// GPOやログインスクリプトで割り当てたドライブ、/persistent:no のドライブは
+// レジストリに記録されないため、標準ユーザーセッションで WMI クエリを実行して検出する
+procedure DetectMappedDrivesFromSession();
+var
+  OutFile: string;
+  ResultCode: Integer;
+  Lines: TArrayOfString;
+  I: Integer;
+  Line: string;
+  PendingDriveLetter: string;
+  DeviceIdPrefix, ProviderPrefix: string;
+begin
+  OutFile := ExpandConstant('{tmp}\mapped_drives.txt');
+  DeviceIdPrefix := 'DeviceID=';
+  ProviderPrefix := 'ProviderName=';
+
+  ExecAsOriginalUser(ExpandConstant('{sys}\cmd.exe'),
+    '/c wmic path Win32_MappedLogicalDisk get DeviceID,ProviderName /format:list > "' + OutFile + '" 2>nul',
+    '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+
+  if not FileExists(OutFile) then Exit;
+  if not LoadStringsFromFile(OutFile, Lines) then
+  begin
+    DeleteFile(OutFile);
+    Exit;
+  end;
+
+  SetArrayLength(MappedDriveLetters, GetArrayLength(Lines));
+  SetArrayLength(MappedDriveRemotePaths, GetArrayLength(Lines));
+  PendingDriveLetter := '';
+
+  for I := 0 to GetArrayLength(Lines) - 1 do
+  begin
+    Line := Trim(Lines[I]);
+    if Pos(DeviceIdPrefix, Line) = 1 then
+      PendingDriveLetter := Trim(Copy(Line, Length(DeviceIdPrefix) + 1, Length(Line)))
+    else if (Pos(ProviderPrefix, Line) = 1) and (PendingDriveLetter <> '') then
+    begin
+      MappedDriveLetters[MappedDriveCount] := Uppercase(PendingDriveLetter);
+      MappedDriveRemotePaths[MappedDriveCount] := Trim(Copy(Line, Length(ProviderPrefix) + 1, Length(Line)));
+      MappedDriveCount := MappedDriveCount + 1;
+      PendingDriveLetter := '';
+    end;
+  end;
+
+  SetArrayLength(MappedDriveLetters, MappedDriveCount);
+  SetArrayLength(MappedDriveRemotePaths, MappedDriveCount);
+
+  DeleteFile(OutFile);
+end;
+
 // 管理者権限で実行中はBrowseForFolderにマップトドライブが表示されないため、
 // 検出したドライブを net use で昇格セッションに再マッピングする（Issue #1584）
 // /persistent:no で作成したマッピングは昇格セッション終了時に自動消滅するため、
@@ -281,7 +333,11 @@ var
   ExistingReportOutput: string;
 begin
   // マップトドライブを検出し、昇格セッションに再マッピング（Issue #1584）
+  // Method 1: HKCU\Network レジストリ（永続的マッピング）
   DetectMappedDrives();
+  // Method 2: レジストリに無い場合、標準ユーザーセッションの WMI クエリで検出
+  if MappedDriveCount = 0 then
+    DetectMappedDrivesFromSession();
   RemapDrivesForElevatedSession();
 
   // =============================================
