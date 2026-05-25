@@ -159,8 +159,6 @@ var
   MappedDriveLetters: TArrayOfString;
   MappedDriveRemotePaths: TArrayOfString;
   MappedDriveCount: Integer;
-  RemappedDriveLetters: TArrayOfString;
-  RemappedDriveCount: Integer;
 
 // 既存の設定ファイルを読み込む（アップグレード時のデフォルト値として使用）
 // LoadStringsFromFile（TArrayOfString版）は内部でTStringList.LoadFromFileを使い、
@@ -250,55 +248,29 @@ end;
 
 // 管理者権限で実行中はBrowseForFolderにマップトドライブが表示されないため、
 // 検出したドライブを net use で昇格セッションに再マッピングする（Issue #1584）
+// /persistent:no で作成したマッピングは昇格セッション終了時に自動消滅するため、
+// 明示的な net use /delete は行わない。net use /delete は HKCU\Network の
+// レジストリエントリも削除してしまい、元のユーザーマッピングを破壊するため。
 procedure RemapDrivesForElevatedSession();
 var
   I: Integer;
   ResultCode: Integer;
   NetExe: string;
 begin
-  RemappedDriveCount := 0;
   if MappedDriveCount = 0 then
     Exit;
 
-  SetArrayLength(RemappedDriveLetters, MappedDriveCount);
   NetExe := ExpandConstant('{sys}\net.exe');
 
   for I := 0 to MappedDriveCount - 1 do
   begin
     if not DirExists(MappedDriveLetters[I] + '\') then
     begin
-      if Exec(NetExe,
-              'use ' + MappedDriveLetters[I] + ' "' + MappedDriveRemotePaths[I] + '" /persistent:no',
-              '', SW_HIDE, ewWaitUntilTerminated, ResultCode) then
-      begin
-        if ResultCode = 0 then
-        begin
-          RemappedDriveLetters[RemappedDriveCount] := MappedDriveLetters[I];
-          RemappedDriveCount := RemappedDriveCount + 1;
-        end;
-      end;
+      Exec(NetExe,
+           'use ' + MappedDriveLetters[I] + ' "' + MappedDriveRemotePaths[I] + '" /persistent:no',
+           '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
     end;
   end;
-
-  SetArrayLength(RemappedDriveLetters, RemappedDriveCount);
-end;
-
-procedure CleanupRemappedDrives();
-var
-  I: Integer;
-  ResultCode: Integer;
-  NetExe: string;
-begin
-  if RemappedDriveCount = 0 then
-    Exit;
-
-  NetExe := ExpandConstant('{sys}\net.exe');
-  for I := 0 to RemappedDriveCount - 1 do
-  begin
-    Exec(NetExe, 'use ' + RemappedDriveLetters[I] + ' /delete /yes',
-         '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-  end;
-  RemappedDriveCount := 0;
 end;
 
 // インストールウィザードにページを追加
@@ -698,10 +670,4 @@ begin
       // IDCANCEL: 何も削除しない
     end;
   end;
-end;
-
-// インストーラー終了時に再マッピングしたドライブをクリーンアップ（Issue #1584）
-procedure DeinitializeSetup();
-begin
-  CleanupRemappedDrives();
 end;
