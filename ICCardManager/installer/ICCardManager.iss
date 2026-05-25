@@ -154,6 +154,18 @@ var
   ReportOutputNoteLabel: TNewStaticText;
   ReportOutputBrowseButton: TNewButton;
 
+// マップトドライブ検出（Issue #1584）
+var
+  MappedDriveLetters: TArrayOfString;
+  MappedDriveRemotePaths: TArrayOfString;
+  MappedDriveCount: Integer;
+  DbMappedDriveLabel: TNewStaticText;
+  DbMappedDriveCombo: TNewComboBox;
+  DbMappedDriveNote: TNewStaticText;
+  RptMappedDriveLabel: TNewStaticText;
+  RptMappedDriveCombo: TNewComboBox;
+  RptMappedDriveNote: TNewStaticText;
+
 // 既存の設定ファイルを読み込む（アップグレード時のデフォルト値として使用）
 // LoadStringsFromFile（TArrayOfString版）は内部でTStringList.LoadFromFileを使い、
 // UTF-8 BOM を自動検出してUnicodeにデコードする。BOMなしはANSI（Shift_JIS）として読む。
@@ -211,6 +223,70 @@ begin
   end;
 end;
 
+// マップトドライブをレジストリ（HKCU\Network）から検出（Issue #1584）
+// 管理者権限で実行中はBrowseForFolderにマップトドライブが表示されないため、
+// レジストリからドライブ情報を取得してコンボボックスに表示する
+procedure DetectMappedDrives();
+var
+  SubKeys: TArrayOfString;
+  I: Integer;
+  DriveLetter, RemotePath: string;
+begin
+  MappedDriveCount := 0;
+  if not RegGetSubkeyNames(HKCU, 'Network', SubKeys) then
+    Exit;
+
+  SetArrayLength(MappedDriveLetters, GetArrayLength(SubKeys));
+  SetArrayLength(MappedDriveRemotePaths, GetArrayLength(SubKeys));
+
+  for I := 0 to GetArrayLength(SubKeys) - 1 do
+  begin
+    DriveLetter := Uppercase(SubKeys[I]);
+    if RegQueryStringValue(HKCU, 'Network\' + SubKeys[I], 'RemotePath', RemotePath) then
+    begin
+      MappedDriveLetters[MappedDriveCount] := DriveLetter + ':';
+      MappedDriveRemotePaths[MappedDriveCount] := RemotePath;
+      MappedDriveCount := MappedDriveCount + 1;
+    end;
+  end;
+
+  SetArrayLength(MappedDriveLetters, MappedDriveCount);
+  SetArrayLength(MappedDriveRemotePaths, MappedDriveCount);
+end;
+
+procedure PopulateMappedDriveCombo(Combo: TNewComboBox);
+var
+  I: Integer;
+begin
+  Combo.Items.Clear;
+  Combo.Items.Add('-- 選択してください --');
+  for I := 0 to MappedDriveCount - 1 do
+    Combo.Items.Add(MappedDriveLetters[I] + '\ (' + MappedDriveRemotePaths[I] + ')');
+  Combo.ItemIndex := 0;
+end;
+
+procedure DbMappedDriveComboChange(Sender: TObject);
+var
+  Idx: Integer;
+begin
+  Idx := DbMappedDriveCombo.ItemIndex;
+  if Idx > 0 then
+  begin
+    DatabasePathEdit.Text := MappedDriveLetters[Idx - 1] + '\';
+    DatabaseSharedRadio.Checked := True;
+    DatabaseLocalRadio.Checked := False;
+  end;
+end;
+
+procedure RptMappedDriveComboChange(Sender: TObject);
+var
+  Idx: Integer;
+begin
+  Idx := RptMappedDriveCombo.ItemIndex;
+  if Idx > 0 then
+    ReportOutputPathEdit.Text := MappedDriveLetters[Idx - 1] + '\';
+end;
+
 // インストールウィザードにページを追加
 procedure InitializeWizard();
 var
@@ -218,6 +294,9 @@ var
   ExistingDbPath: string;
   ExistingReportOutput: string;
 begin
+  // マップトドライブを検出（Issue #1584）
+  DetectMappedDrives();
+
   // =============================================
   // 部署選択ページ（Issue #742）
   // =============================================
@@ -301,6 +380,33 @@ begin
     DatabaseLocalRadio.Checked := False;
   end;
 
+  // マップトドライブUI（Issue #1584）
+  if MappedDriveCount > 0 then
+  begin
+    DbMappedDriveLabel := TNewStaticText.Create(DatabasePage);
+    DbMappedDriveLabel.Parent := DatabasePage.Surface;
+    DbMappedDriveLabel.Caption := 'マップトドライブから選択:';
+    DbMappedDriveLabel.Top := DatabaseNoteLabel.Top + DatabaseNoteLabel.Height + 12;
+    DbMappedDriveLabel.Left := 20;
+
+    DbMappedDriveCombo := TNewComboBox.Create(DatabasePage);
+    DbMappedDriveCombo.Parent := DatabasePage.Surface;
+    DbMappedDriveCombo.Top := DbMappedDriveLabel.Top + DbMappedDriveLabel.Height + 4;
+    DbMappedDriveCombo.Left := 20;
+    DbMappedDriveCombo.Width := DatabasePage.SurfaceWidth - 20;
+    DbMappedDriveCombo.Style := csDropDownList;
+    DbMappedDriveCombo.OnChange := @DbMappedDriveComboChange;
+    PopulateMappedDriveCombo(DbMappedDriveCombo);
+
+    DbMappedDriveNote := TNewStaticText.Create(DatabasePage);
+    DbMappedDriveNote.Parent := DatabasePage.Surface;
+    DbMappedDriveNote.Caption :=
+      '※ 「参照」にマップトドライブが表示されない場合はこちらから選択できます。';
+    DbMappedDriveNote.Top := DbMappedDriveCombo.Top + DbMappedDriveCombo.Height + 4;
+    DbMappedDriveNote.Left := 20;
+    DbMappedDriveNote.Font.Color := clGray;
+  end;
+
   // =============================================
   // 帳票出力先選択ページ（DB保存先の次に表示）
   // =============================================
@@ -344,6 +450,33 @@ begin
     ReportOutputPathEdit.Text := ExistingReportOutput
   else
     ReportOutputPathEdit.Text := ExpandConstant('{userdocs}');
+
+  // マップトドライブUI（Issue #1584）
+  if MappedDriveCount > 0 then
+  begin
+    RptMappedDriveLabel := TNewStaticText.Create(ReportOutputPage);
+    RptMappedDriveLabel.Parent := ReportOutputPage.Surface;
+    RptMappedDriveLabel.Caption := 'マップトドライブから選択:';
+    RptMappedDriveLabel.Top := ReportOutputNoteLabel.Top + ReportOutputNoteLabel.Height + 12;
+    RptMappedDriveLabel.Left := 0;
+
+    RptMappedDriveCombo := TNewComboBox.Create(ReportOutputPage);
+    RptMappedDriveCombo.Parent := ReportOutputPage.Surface;
+    RptMappedDriveCombo.Top := RptMappedDriveLabel.Top + RptMappedDriveLabel.Height + 4;
+    RptMappedDriveCombo.Left := 0;
+    RptMappedDriveCombo.Width := ReportOutputPage.SurfaceWidth;
+    RptMappedDriveCombo.Style := csDropDownList;
+    RptMappedDriveCombo.OnChange := @RptMappedDriveComboChange;
+    PopulateMappedDriveCombo(RptMappedDriveCombo);
+
+    RptMappedDriveNote := TNewStaticText.Create(ReportOutputPage);
+    RptMappedDriveNote.Parent := ReportOutputPage.Surface;
+    RptMappedDriveNote.Caption :=
+      '※ 「参照」にマップトドライブが表示されない場合はこちらから選択できます。';
+    RptMappedDriveNote.Top := RptMappedDriveCombo.Top + RptMappedDriveCombo.Height + 4;
+    RptMappedDriveNote.Left := 0;
+    RptMappedDriveNote.Font.Color := clGray;
+  end;
 end;
 
 // 部署選択結果を設定ファイルに書き出す（Issue #742）
