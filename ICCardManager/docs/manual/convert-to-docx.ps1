@@ -273,7 +273,6 @@ foreach ($Manual in $Manuals) {
         "--to", "docx",
         "--resource-path", $ScriptDir,
         "--metadata", "title=$($Manual.Title)",
-        "--metadata", "author=システム管理者",
         "--metadata", "lang=ja-JP"
     )
 
