@@ -27,6 +27,63 @@ $ErrorActionPreference = "Stop"
 # pandocが生成するdocxのテーブルには罫線が含まれないことがある。
 # --reference-doc のテーブルスタイル継承はpandocバージョンにより挙動が異なるため、
 # 生成後にdocx（ZIPアーカイブ）内のXMLを直接編集して罫線を確実に付与する。
+function Set-TableCellVerticalCenter {
+    param([string]$DocxPath)
+
+    Add-Type -AssemblyName System.IO.Compression
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+
+    $archive = [System.IO.Compression.ZipFile]::Open(
+        $DocxPath, [System.IO.Compression.ZipArchiveMode]::Update)
+    try {
+        $entry = $archive.GetEntry("word/document.xml")
+        if (-not $entry) { return 0 }
+
+        $stream = $entry.Open()
+        $xml = New-Object System.Xml.XmlDocument
+        $xml.PreserveWhitespace = $true
+        $xml.Load($stream)
+        $stream.Dispose()
+
+        $ns = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+        $nsm = New-Object System.Xml.XmlNamespaceManager($xml.NameTable)
+        $nsm.AddNamespace("w", $ns)
+
+        $cellCount = 0
+        $tcNodes = $xml.SelectNodes("//w:tc", $nsm)
+
+        foreach ($tc in $tcNodes) {
+            $tcPr = $tc.SelectSingleNode("w:tcPr", $nsm)
+            if (-not $tcPr) {
+                $tcPr = $xml.CreateElement("w", "tcPr", $ns)
+                $tc.PrependChild($tcPr) | Out-Null
+            }
+
+            $vAlign = $tcPr.SelectSingleNode("w:vAlign", $nsm)
+            if (-not $vAlign) {
+                $vAlign = $xml.CreateElement("w", "vAlign", $ns)
+                $tcPr.AppendChild($vAlign) | Out-Null
+            }
+            $vAlign.SetAttribute("val", $ns, "center")
+            $cellCount++
+        }
+
+        if ($cellCount -gt 0) {
+            $entry.Delete()
+            $newEntry = $archive.CreateEntry(
+                "word/document.xml", [System.IO.Compression.CompressionLevel]::Optimal)
+            $newStream = $newEntry.Open()
+            $xml.Save($newStream)
+            $newStream.Dispose()
+        }
+
+        return $cellCount
+    }
+    finally {
+        $archive.Dispose()
+    }
+}
+
 function Add-TableBordersToDocx {
     param([string]$DocxPath)
 
@@ -126,6 +183,7 @@ $Manuals = @(
         Title = "交通系ICカード管理システム：ピッすい 操作ガイド（概要版）"
         VersionTracked = $false  # Markdown にバージョン行がないため注入不要
         ReferenceDoc = "reference-summary.docx"  # 概要版専用（縦向き・ヘッダーフッターなし）
+        TableCellVAlign = $true  # テーブルセルの上下中央揃え（後処理）
     },
     @{
         Name = "管理者マニュアル"
@@ -323,6 +381,19 @@ foreach ($Manual in $Manuals) {
         }
         catch {
             Write-Host "    警告: テーブル罫線の後処理をスキップしました: $($_.Exception.Message)" -ForegroundColor Yellow
+        }
+
+        # Issue #1489: テーブルセルの上下中央揃え（後処理）
+        if ($Manual.TableCellVAlign) {
+            try {
+                $cellCount = Set-TableCellVerticalCenter -DocxPath $OutputPath
+                if ($cellCount -gt 0) {
+                    Write-Host "    テーブルセル上下中央: ${cellCount}個のセルに適用" -ForegroundColor Gray
+                }
+            }
+            catch {
+                Write-Host "    警告: テーブルセル上下中央の後処理をスキップしました: $($_.Exception.Message)" -ForegroundColor Yellow
+            }
         }
 
         $FileInfo = Get-Item $OutputPath
