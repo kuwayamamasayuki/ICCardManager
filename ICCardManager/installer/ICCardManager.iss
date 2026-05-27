@@ -249,6 +249,7 @@ end;
 // HKCU\Network にエントリがない場合のフォールバック（Issue #1584）
 // GPOやログインスクリプトで割り当てたドライブ、/persistent:no のドライブは
 // レジストリに記録されないため、標準ユーザーセッションで WMI クエリを実行して検出する
+// wmic.exe は Windows 11 22H2 以降で非推奨（オプション機能）のため PowerShell を使用
 procedure DetectMappedDrivesFromSession();
 var
   OutFile: string;
@@ -263,8 +264,8 @@ begin
   DeviceIdPrefix := 'DeviceID=';
   ProviderPrefix := 'ProviderName=';
 
-  ExecAsOriginalUser(ExpandConstant('{sys}\cmd.exe'),
-    '/c wmic path Win32_MappedLogicalDisk get DeviceID,ProviderName /format:list > "' + OutFile + '" 2>nul',
+  ExecAsOriginalUser(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'),
+    '-NoProfile -ExecutionPolicy Bypass -Command "Get-CimInstance Win32_MappedLogicalDisk | ForEach-Object { ''DeviceID='' + $_.DeviceID; ''ProviderName='' + $_.ProviderName; '''' } | Out-File -FilePath ''' + OutFile + ''' -Encoding ASCII"',
     '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
 
   if not FileExists(OutFile) then Exit;
