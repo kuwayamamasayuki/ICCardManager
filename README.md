@@ -44,5 +44,5 @@
 ## リンク
 
 - [更新履歴（CHANGELOG）](ICCardManager/CHANGELOG.md)
-- [Issue・要望・バグ報告](../../issues)
+- [Issue・要望・バグ報告](https://github.com/kuwayamamasayuki/ICCardManager/issues)
 - [設計書一式](ICCardManager/docs/design/)
