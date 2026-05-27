@@ -35,10 +35,9 @@
 
 | ドキュメント | 説明 |
 |-------------|------|
-| [かんたん導入ガイド](ICCardManager/docs/manual/かんたん導入ガイド.md) | インストールから初回利用までの手順 |
-| [ユーザーマニュアル](ICCardManager/docs/manual/ユーザーマニュアル.md) | 全機能の操作方法 |
-| [ユーザーマニュアル概要版](ICCardManager/docs/manual/ユーザーマニュアル概要版.md) | よく使う操作を2ページにまとめた概要版 |
 | [はじめに](ICCardManager/docs/manual/はじめに.md) | システムの導入背景と概要 |
+| [ユーザーマニュアル概要版](ICCardManager/docs/manual/ユーザーマニュアル概要版.md) | よく使う操作を2ページにまとめた概要版 |
+| [ユーザーマニュアル](ICCardManager/docs/manual/ユーザーマニュアル.md) | 全機能の操作方法 |
 | [管理者マニュアル](ICCardManager/docs/manual/管理者マニュアル.md) | 設定・バックアップ・共有モードの管理手順 |
 | [開発者ガイド](ICCardManager/docs/manual/開発者ガイド.md) | ビルド・テスト・アーキテクチャの解説 |
 
