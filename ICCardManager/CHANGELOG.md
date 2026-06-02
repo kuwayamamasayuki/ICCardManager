@@ -3,7 +3,7 @@
 ### Unreleased
 
 **バグ修正**
-- Issue #1584 インストーラーのマップトドライブ検出で、日本語を含む共有名（例: `\\10.250.3.16\道路_建設推進課`）が `?` に化けて昇格セッションへの再マッピングが失敗する問題を修正。`Win32_MappedLogicalDisk.ProviderName` を一時ファイル経由で受け渡す際の `Out-File -Encoding ASCII` が non-ASCII を `?` に lossy 置換していたため、`-Encoding UTF8`（PowerShell 5.1 は BOM 付き UTF-8 を書き出し、Inno Setup の `LoadStringsFromFile` が BOM を自動検出して Unicode デコードする）に変更（#1584）
+- Issue #1584 インストーラーのマップトドライブ検出で、日本語を含む共有名（例: `\\10.250.3.16\道路_建設推進課`）が `?` に化けて昇格セッションへの再マッピングが失敗する問題を修正。`Win32_MappedLogicalDisk.ProviderName` を一時ファイル経由で受け渡す際の `Out-File -Encoding ASCII` が non-ASCII を `?` に lossy 置換していたため、`-Encoding UTF8`（PowerShell 5.1 は BOM 付き UTF-8 を書き出し、Inno Setup の `LoadStringsFromFile` が BOM を自動検出して Unicode デコードする）に変更（#1595）
 
 
 ### v2.9.2 (2026-05-28)
