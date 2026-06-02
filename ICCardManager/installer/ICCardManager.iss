@@ -265,7 +265,12 @@ begin
   ProviderPrefix := 'ProviderName=';
 
   ExecAsOriginalUser(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'),
-    '-NoProfile -ExecutionPolicy Bypass -Command "Get-CimInstance Win32_MappedLogicalDisk | ForEach-Object { ''DeviceID='' + $_.DeviceID; ''ProviderName='' + $_.ProviderName; '''' } | Out-File -FilePath ''' + OutFile + ''' -Encoding ASCII"',
+    // -Encoding UTF8: PowerShell 5.1 は BOM 付き UTF-8 で書き出す。Inno Setup の
+    // LoadStringsFromFile は BOM を自動検出して Unicode にデコードするため、
+    // 日本語を含む共有名（例: \\server\道路_建設推進課）も正しく扱える。
+    // ASCII を指定すると non-ASCII 文字が ? に lossy 置換され、後段の net use が
+    // 不正なパスで失敗する（Issue #1584）。
+    '-NoProfile -ExecutionPolicy Bypass -Command "Get-CimInstance Win32_MappedLogicalDisk | ForEach-Object { ''DeviceID='' + $_.DeviceID; ''ProviderName='' + $_.ProviderName; '''' } | Out-File -FilePath ''' + OutFile + ''' -Encoding UTF8"',
     '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
 
   if not FileExists(OutFile) then Exit;
