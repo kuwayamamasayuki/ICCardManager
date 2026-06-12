@@ -7,7 +7,7 @@
         MinWidth="380"
         MinHeight="220"
         WindowStartupLocation="CenterOwner"
-        ResizeMode="NoResize"
+        ResizeMode="CanResize"
         ShowInTaskbar="False"
         FontSize="{DynamicResource BaseFontSize}"
         AutomationProperties.Name="カード種別選択ダイアログ"

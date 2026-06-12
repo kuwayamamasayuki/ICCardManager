@@ -7,7 +7,7 @@
         MinWidth="380"
         MinHeight="260"
         WindowStartupLocation="CenterOwner"
-        ResizeMode="NoResize"
+        ResizeMode="CanResize"
         ShowInTaskbar="False"
         FontSize="{DynamicResource BaseFontSize}"
         AutomationProperties.Name="職員証認証ダイアログ"

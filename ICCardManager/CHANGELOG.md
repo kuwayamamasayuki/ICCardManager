@@ -3,6 +3,7 @@
 ### Unreleased
 
 **バグ修正**
+- Issue #1616 文字サイズ設定（小/中/大/特大）に追従しない固定 FontSize と、特大文字で手詰まりになる固定幅ダイアログを修正。(a) `BusStopInputDialog` の入力例ヒント「入力例: ○○バス停～△△バス停」の `FontSize="11"` ハードコードを `DynamicResource SmallFontSize` に変更し、文字サイズ設定に追従するようにした。(b) `StaffAuthDialog` / `CardRegistrationModeDialog` / `CardTypeSelectionDialog` の `ResizeMode="NoResize"` を `CanResize` に変更し、特大文字で長い職員名・カード種別名の折返しが多発しても利用者がウィンドウを広げられるようにした（3 ダイアログとも `MinWidth="380"` / `MinHeight` 指定済みのため極小化はしない。`SizeToContent="Height"` と `CanResize` の併用は、利用者が手動リサイズした時点で WPF が `SizeToContent` を `Manual` に切り替える標準パターン。他 13 ダイアログは既に `CanResize` 系で、03_画面設計書 §5.6（Issue #1280）の「リサイズ可能にする」原則とも整合）。回帰防止として `DialogLayoutConventionTests` 3 件を新設（UT-058d: Views 配下全 XAML の FontSize 数値ハードコード禁止 / 全ダイアログの `ResizeMode="NoResize"` 禁止 / `SizeToContent` 使用時の `MinWidth`・`MinHeight` 必須）。03_画面設計書 §4.2.3（FontSize は DynamicResource 参照の実装規約）・§5.6（NoResize 禁止）、07_テスト設計書 §1.1a・§2.45 を同期更新（#1616）
 - Issue #1584 インストーラーのマップトドライブ検出で、日本語を含む共有名（例: `\\10.250.3.16\道路_建設推進課`）が `?` に化けて昇格セッションへの再マッピングが失敗する問題を修正。`Win32_MappedLogicalDisk.ProviderName` を一時ファイル経由で受け渡す際の `Out-File -Encoding ASCII` が non-ASCII を `?` に lossy 置換していたため、`-Encoding UTF8`（PowerShell 5.1 は BOM 付き UTF-8 を書き出し、Inno Setup の `LoadStringsFromFile` が BOM を自動検出して Unicode デコードする）に変更（#1595）
 
 
