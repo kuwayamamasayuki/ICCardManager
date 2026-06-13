@@ -522,10 +522,16 @@ public partial class SettingsViewModel : ViewModelBase
     /// 設定ファイルにテキストを書き込む（アトミック書き込み）
     /// </summary>
     /// <remarks>
-    /// 一時ファイルに書き出してからリネームすることで、書き込み途中のクラッシュによる
-    /// ファイル破損を防止する。
+    /// 一時ファイルに書き出してから <see cref="File.Replace(string, string, string)"/> で
+    /// 原子的に置換することで、書き込み途中のクラッシュによるファイル破損・消失を防止する。
+    /// File.Replace は対象ファイルが存在しないと例外を投げるため、初回作成時のみ
+    /// File.Move へフォールバックする（Issue #1598）。
+    ///
+    /// 旧実装は File.Delete → File.Move の2段階で、その間にクラッシュすると
+    /// database_config.txt が消失し、共有モード運用中の PC が警告なくローカル DB へ
+    /// フォールバックして台帳が分裂する実害があった。
     /// </remarks>
-    private static void SaveConfigFile(string filePath, string value)
+    internal static void SaveConfigFile(string filePath, string value)
     {
         var directory = Path.GetDirectoryName(filePath);
         if (!string.IsNullOrEmpty(directory))
@@ -537,9 +543,15 @@ public partial class SettingsViewModel : ViewModelBase
         File.WriteAllText(tempPath, value ?? string.Empty, System.Text.Encoding.UTF8);
         if (File.Exists(filePath))
         {
-            File.Delete(filePath);
+            // 原子的置換: Delete→Move の「対象ファイルが存在しない窓」を排除する。
+            // 第3引数（バックアップファイル名）は null = バックアップを作らない。
+            File.Replace(tempPath, filePath, null);
         }
-        File.Move(tempPath, filePath);
+        else
+        {
+            // 初回作成時は対象が存在しないため File.Replace が使えない
+            File.Move(tempPath, filePath);
+        }
     }
 
     // =========================================================================
