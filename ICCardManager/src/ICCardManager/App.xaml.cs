@@ -195,10 +195,12 @@ namespace ICCardManager
             // ※ ローカル操作ではキャッシュが即座に無効化されるため、
             //   TTLは「他PCの操作結果が見えるまでの遅延」のみに影響する。
             //   20台同時接続での負荷を考慮し、過度に短くしない。
+            // Issue #1597: 「パス指定の有無」ではなく DbContext と同一の共有モード判定
+            //   （UNC／マップドネットワークドライブ）に揃える。ローカルフルパス指定では短縮しない。
             services.PostConfigure<CacheOptions>(cacheOptions =>
             {
                 var dbPath = ViewModels.SettingsViewModel.LoadDatabasePathFromConfigFile();
-                if (!string.IsNullOrWhiteSpace(dbPath))
+                if (Data.DbContext.IsSharedModePath(dbPath))
                 {
                     cacheOptions.CardListSeconds = 15;
                     cacheOptions.LentCardsSeconds = 10;
