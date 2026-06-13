@@ -46,6 +46,12 @@ namespace ICCardManager
         private ILogger<App> _logger;
 
         /// <summary>
+        /// Issue #1599: database_config.txt のパスが形式不正でデフォルトへフォールバック
+        /// した場合に、起動完了後ユーザーへ警告するための退避領域（不正だった生のパス）。
+        /// </summary>
+        private string _rejectedDatabaseConfigPath;
+
+        /// <summary>
         /// 現在のアプリケーションインスタンス
         /// </summary>
         public static new App Current => (App)Application.Current;
@@ -126,6 +132,10 @@ namespace ICCardManager
 
                 mainWindow.Show();
                 _logger.LogInformation("アプリケーション起動完了");
+
+                // Issue #1599: database_config.txt のパスが形式不正でデフォルトへ
+                // フォールバックしていた場合、ここでユーザーへ警告する
+                WarnIfDatabaseConfigPathRejected();
             }
             catch (Exception ex)
             {
@@ -169,6 +179,73 @@ namespace ICCardManager
         }
 
         /// <summary>
+        /// database_config.txt のデータベースパスを読み込み、形式が不正な場合は
+        /// デフォルトパスへフォールバックさせるため null を返す（Issue #1599）。
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// 起動時の検証は <see cref="PathValidator.ValidatePathFormat"/> による
+        /// 「形式チェックのみ」に限定する。到達性・ドライブ準備・書き込み権限の検証は
+        /// 行わない。これらを起動時に行うと、一時的にネットワークが切断されているだけの
+        /// 正当な共有 DB パスまで無効と判定し、黙ってローカルのデフォルト DB へ
+        /// 切り替わってしまう（データ消失に見える）危険があるため。
+        /// </para>
+        /// <para>
+        /// 不正だった場合は <see cref="_rejectedDatabaseConfigPath"/> に元の値を退避し、
+        /// 起動完了後（メインウィンドウ表示後）に <see cref="WarnIfDatabaseConfigPathRejected"/>
+        /// で 1 度だけユーザーへ警告する。複数回呼ばれても同じ値で冪等。
+        /// </para>
+        /// </remarks>
+        private string GetValidatedDatabaseConfigPath()
+        {
+            var raw = ViewModels.SettingsViewModel.LoadDatabasePathFromConfigFile();
+
+            // 空（未設定）はデフォルトパス利用の正常系。検証対象外。
+            if (string.IsNullOrWhiteSpace(raw))
+            {
+                return null;
+            }
+
+            var validation = PathValidator.ValidatePathFormat(raw);
+            if (validation.IsValid)
+            {
+                return raw;
+            }
+
+            // 形式不正: デフォルトパスへフォールバックし、起動後に警告する
+            _rejectedDatabaseConfigPath = raw;
+            _logger?.LogWarning(
+                "database_config.txt のデータベースパスが形式不正のためデフォルトへフォールバックします。" +
+                "Path={Path}, Reason={Reason}",
+                raw, validation.ErrorMessage);
+            return null;
+        }
+
+        /// <summary>
+        /// <see cref="GetValidatedDatabaseConfigPath"/> がパスを棄却していた場合、
+        /// ユーザーへ警告ダイアログを表示する（Issue #1599）。起動完了後に 1 度だけ呼ぶ。
+        /// </summary>
+        private void WarnIfDatabaseConfigPathRejected()
+        {
+            if (string.IsNullOrEmpty(_rejectedDatabaseConfigPath))
+            {
+                return;
+            }
+
+            MessageBox.Show(
+                $"設定ファイル（database_config.txt）のデータベース保存先「{_rejectedDatabaseConfigPath}」が" +
+                "無効な形式（相対パス・不正な文字を含む等）のため、既定の保存先を使用して起動しました。\n\n" +
+                "意図した保存先と異なる場合は、設定画面（F5）でドライブ文字から始まる絶対パス、" +
+                "または「\\\\server\\share」形式のネットワークパスを再設定してください。",
+                "データベース保存先の設定に関する警告",
+                MessageBoxButton.OK,
+                MessageBoxImage.Warning);
+
+            // 一度警告したら再表示しない
+            _rejectedDatabaseConfigPath = null;
+        }
+
+        /// <summary>
         /// サービスを登録
         /// </summary>
         private void ConfigureServices(IServiceCollection services)
@@ -184,7 +261,8 @@ namespace ICCardManager
             // （appsettings.jsonはProgram Files内で書き込み不可のため、別ファイルで管理）
             services.PostConfigure<DatabaseOptions>(dbOptions =>
             {
-                var configPath = ViewModels.SettingsViewModel.LoadDatabasePathFromConfigFile();
+                // Issue #1599: 形式不正なパスはここで弾き、デフォルトへフォールバックさせる
+                var configPath = GetValidatedDatabaseConfigPath();
                 if (!string.IsNullOrWhiteSpace(configPath))
                 {
                     dbOptions.Path = configPath;
@@ -199,7 +277,9 @@ namespace ICCardManager
             //   （UNC／マップドネットワークドライブ）に揃える。ローカルフルパス指定では短縮しない。
             services.PostConfigure<CacheOptions>(cacheOptions =>
             {
-                var dbPath = ViewModels.SettingsViewModel.LoadDatabasePathFromConfigFile();
+                // Issue #1599: 形式不正パスはフォールバック（=ローカルデフォルト）扱いとし、
+                // 共有モード判定にも検証後のパスを用いる
+                var dbPath = GetValidatedDatabaseConfigPath();
                 if (Data.DbContext.IsSharedModePath(dbPath))
                 {
                     cacheOptions.CardListSeconds = 15;
@@ -229,9 +309,10 @@ namespace ICCardManager
                 var dbOptions = sp.GetRequiredService<IOptions<DatabaseOptions>>().Value;
                 var path = dbOptions.Path;
                 // PostConfigureで設定されなかった場合、database_config.txtから直接読む（フォールバック）
+                // Issue #1599: ここでも形式検証を通し、不正パスはデフォルトへフォールバックさせる
                 if (string.IsNullOrWhiteSpace(path))
                 {
-                    path = ViewModels.SettingsViewModel.LoadDatabasePathFromConfigFile();
+                    path = GetValidatedDatabaseConfigPath();
                 }
                 var logger = sp.GetService<ILogger<DbContext>>();
                 return new DbContext(string.IsNullOrWhiteSpace(path) ? null : path, logger);

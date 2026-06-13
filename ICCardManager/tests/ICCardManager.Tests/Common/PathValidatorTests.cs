@@ -775,4 +775,132 @@ public class PathValidatorTests : IDisposable
     }
 
     #endregion
+
+    #region ValidatePathFormat - 形式のみ検証（Issue #1599）
+
+    /// <summary>
+    /// null・空・空白は形式不正として弾く。
+    /// </summary>
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void ValidatePathFormat_NullOrEmpty_ReturnsInvalid(string path)
+    {
+        var result = PathValidator.ValidatePathFormat(path);
+
+        result.IsValid.Should().BeFalse();
+        result.ErrorMessage.Should().NotBeNullOrWhiteSpace();
+    }
+
+    /// <summary>
+    /// 相対パスは弾く。これが本検証の主目的（SQLite が作業フォルダ基準で空DBを作る事故の防止）。
+    /// </summary>
+    [Theory]
+    [InlineData(@"relative\path\iccard.db")]
+    [InlineData("relative/path/iccard.db")]
+    [InlineData("iccard.db")]
+    public void ValidatePathFormat_RelativePath_ReturnsInvalid(string path)
+    {
+        var result = PathValidator.ValidatePathFormat(path);
+
+        result.IsValid.Should().BeFalse("相対パスは作業フォルダ依存で危険なため");
+        result.ErrorMessage.Should().Contain("絶対パス");
+    }
+
+    /// <summary>
+    /// 不正文字を含むパスは弾く（'|' は .NET Framework の GetInvalidPathChars に含まれる）。
+    /// </summary>
+    [Fact]
+    public void ValidatePathFormat_InvalidChars_ReturnsInvalid()
+    {
+        var path = "C:\\folder|name\\iccard.db";
+
+        var result = PathValidator.ValidatePathFormat(path);
+
+        result.IsValid.Should().BeFalse();
+        result.ErrorMessage.Should().Contain("使用できない文字");
+    }
+
+    /// <summary>
+    /// 親ディレクトリ移動（..）を含むパスは弾く。
+    /// </summary>
+    [Fact]
+    public void ValidatePathFormat_PathTraversal_ReturnsInvalid()
+    {
+        var result = PathValidator.ValidatePathFormat(@"C:\folder\..\other\iccard.db");
+
+        result.IsValid.Should().BeFalse();
+        result.ErrorMessage.Should().Contain("..");
+    }
+
+    /// <summary>
+    /// 260文字を超えるパスは弾く。
+    /// </summary>
+    [Fact]
+    public void ValidatePathFormat_PathTooLong_ReturnsInvalid()
+    {
+        var longPath = @"C:\" + new string('a', 300);
+
+        var result = PathValidator.ValidatePathFormat(longPath);
+
+        result.IsValid.Should().BeFalse();
+        result.ErrorMessage.Should().Contain("長すぎます");
+    }
+
+    /// <summary>
+    /// サーバー名・共有名が揃わない UNC パスは弾く。
+    /// </summary>
+    [Theory]
+    [InlineData(@"\\server")]
+    [InlineData(@"\\")]
+    public void ValidatePathFormat_IncompleteUnc_ReturnsInvalid(string path)
+    {
+        var result = PathValidator.ValidatePathFormat(path);
+
+        result.IsValid.Should().BeFalse();
+    }
+
+    /// <summary>
+    /// ドライブレターから始まる絶対ローカルパスは有効。
+    /// </summary>
+    [Fact]
+    public void ValidatePathFormat_AbsoluteLocalPath_ReturnsValid()
+    {
+        var result = PathValidator.ValidatePathFormat(@"C:\ICCardManager\iccard.db");
+
+        result.IsValid.Should().BeTrue();
+    }
+
+    /// <summary>
+    /// 正しい形式の UNC パスは有効。
+    /// </summary>
+    [Theory]
+    [InlineData(@"\\server\share\iccard.db")]
+    [InlineData("//server/share/iccard.db")]
+    public void ValidatePathFormat_ValidUncPath_ReturnsValid(string path)
+    {
+        var result = PathValidator.ValidatePathFormat(path);
+
+        result.IsValid.Should().BeTrue();
+    }
+
+    /// <summary>
+    /// 設計の核心: 形式検証は I/O を一切行わない。よって「存在しないドライブ」を
+    /// 指す well-formed な絶対パスでも valid を返す。これにより、一時的にネットワークが
+    /// 切断されているだけの正当な共有 DB パスを誤って無効判定し、黙ってローカルの
+    /// デフォルト DB へフォールバックする事故を防ぐ。
+    /// </summary>
+    [Fact]
+    public void ValidatePathFormat_WellFormedPathOnNonexistentDrive_ReturnsValid()
+    {
+        // Q: ドライブは通常存在しないが、形式は正しいため valid であるべき。
+        // （仮に環境に Q: が存在しても形式は正しいので結論は valid のまま=非フレーキー）
+        var result = PathValidator.ValidatePathFormat(@"Q:\share\ICCardManager\iccard.db");
+
+        result.IsValid.Should().BeTrue(
+            "形式検証は到達性・ドライブ存在を確認しないため、未マウントドライブでも形式が正しければ有効");
+    }
+
+    #endregion
 }
