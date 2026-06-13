@@ -256,9 +256,21 @@ namespace ICCardManager.Data
 
             // Issue #1559: UNCパス または マップドネットワークドライブ指定時のみ共有モード
             // （ローカルフルパス指定では共有モードにしない）。テスト時は forceSharedMode で上書き可能
-            IsSharedMode = forceSharedMode ??
-                           (databasePath != null &&
-                            (IsUncPath(databasePath) || IsNetworkDrive(databasePath)));
+            IsSharedMode = forceSharedMode ?? IsSharedModePath(databasePath);
+        }
+
+        /// <summary>
+        /// 指定パスが共有モード（複数PC共有）扱いになるかを判定する（Issue #1559 / #1597）。
+        /// </summary>
+        /// <remarks>
+        /// 共有モードの単一判定ロジック。DbContext のコンストラクタ（journal_mode / busy_timeout 等の切替）と
+        /// App.xaml.cs のキャッシュTTL短縮設定の両方がこのメソッドを参照することで、判定基準の二重管理を防ぐ。
+        /// UNCパス（\\server\share）またはマップドネットワークドライブ（DriveType.Network）のみ true。
+        /// null・空・ローカルフルパスは false（Issue #1597: パス指定の有無だけで共有モード扱いにしない）。
+        /// </remarks>
+        internal static bool IsSharedModePath(string path)
+        {
+            return path != null && (IsUncPath(path) || IsNetworkDrive(path));
         }
 
         /// <summary>
