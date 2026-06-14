@@ -277,6 +277,101 @@ public class ReportDataBuilderTests
 
     #endregion
 
+    #region Issue #1602: 利用空白月をまたぐ前月残高の遡及テスト
+
+    [Fact]
+    public async Task BuildAsync_PreviousMonthEmpty_FallsBackToEarlierMonthBalance()
+    {
+        // Arrange: 6月帳票。5月は利用なし（空白月）、4月に利用あり。
+        // 「前月から繰越」の残高は、利用のあった最後の月（4月）の月末残高(4500)を
+        // 引き継ぐべき。前年度繰越(3000)へ戻してはならない（Issue #1602・残高チェーン維持）。
+        SetupCard();
+
+        var juneLedgers = new List<Ledger>
+        {
+            CreateTestLedger(20, TestCardIdm, new DateTime(2025, 6, 5),
+                "鉄道（天神～博多）", 0, 210, 4290)
+        };
+
+        // 4月: 利用あり（月末残高 4500）
+        SetupMonthlyLedgers(TestCardIdm, 2025, 4,
+            new List<Ledger>
+            {
+                CreateTestLedger(10, TestCardIdm, new DateTime(2025, 4, 20),
+                    "鉄道（博多～天神）", 0, 500, 4500)
+            });
+        // 5月: 利用なし（空白月）
+        SetupMonthlyLedgers(TestCardIdm, 2025, 5, new List<Ledger>());
+        SetupMonthlyLedgers(TestCardIdm, 2025, 6, juneLedgers);
+        // 前年度繰越（誤って参照された場合に検出できるよう、4月末残高とは別の値を設定）
+        SetupCarryoverBalance(TestCardIdm, 2024, 3000);
+
+        var yearlyLedgers = new List<Ledger>
+        {
+            CreateTestLedger(10, TestCardIdm, new DateTime(2025, 4, 20), "鉄道", 0, 500, 4500),
+            CreateTestLedger(20, TestCardIdm, new DateTime(2025, 6, 5), "鉄道", 0, 210, 4290)
+        };
+        SetupDateRangeLedgers(TestCardIdm,
+            new DateTime(2025, 4, 1), new DateTime(2025, 6, 30), yearlyLedgers);
+
+        // Act
+        var result = await _builder.BuildAsync(TestCardIdm, 2025, 6);
+
+        // Assert: 繰越行は「5月から繰越」、残高は4月末残高(4500)、受入は空欄
+        result.Carryover.Should().NotBeNull();
+        result.Carryover.Summary.Should().Be(SummaryGenerator.GetCarryoverFromPreviousMonthSummary(5));
+        result.Carryover.Income.Should().BeNull();
+        result.Carryover.Balance.Should().Be(4500,
+            "利用のあった最後の月(4月)の月末残高を引き継ぐ。前年度繰越(3000)に戻してはならない");
+    }
+
+    [Fact]
+    public async Task BuildAsync_PreviousMonthEmpty_CrossingCalendarYear_FallsBackToEarlierMonthBalance()
+    {
+        // Arrange: 1月帳票（年度2025）。12月は利用なし、11月に利用あり。
+        // 暦年をまたいで遡る（12月→11月）ケースでも、利用のあった最後の月(11月)の
+        // 月末残高(6000)を引き継ぐべき（Issue #1602）。
+        SetupCard();
+
+        var januaryLedgers = new List<Ledger>
+        {
+            CreateTestLedger(40, TestCardIdm, new DateTime(2026, 1, 8),
+                "鉄道（天神～博多）", 0, 210, 5790)
+        };
+
+        // 11月: 利用あり（月末残高 6000）
+        SetupMonthlyLedgers(TestCardIdm, 2025, 11,
+            new List<Ledger>
+            {
+                CreateTestLedger(30, TestCardIdm, new DateTime(2025, 11, 18),
+                    "鉄道（博多～天神）", 0, 300, 6000)
+            });
+        // 12月: 利用なし（空白月）
+        SetupMonthlyLedgers(TestCardIdm, 2025, 12, new List<Ledger>());
+        SetupMonthlyLedgers(TestCardIdm, 2026, 1, januaryLedgers);
+        // 前年度（2024年度）繰越（誤参照検出用のデコイ値）
+        SetupCarryoverBalance(TestCardIdm, 2024, 2000);
+
+        var yearlyLedgers = new List<Ledger>
+        {
+            CreateTestLedger(30, TestCardIdm, new DateTime(2025, 11, 18), "鉄道", 0, 300, 6000),
+            CreateTestLedger(40, TestCardIdm, new DateTime(2026, 1, 8), "鉄道", 0, 210, 5790)
+        };
+        SetupDateRangeLedgers(TestCardIdm,
+            new DateTime(2025, 4, 1), new DateTime(2026, 1, 31), yearlyLedgers);
+
+        // Act
+        var result = await _builder.BuildAsync(TestCardIdm, 2026, 1);
+
+        // Assert: 繰越行は「12月から繰越」、残高は11月末残高(6000)
+        result.Carryover.Should().NotBeNull();
+        result.Carryover.Summary.Should().Be(SummaryGenerator.GetCarryoverFromPreviousMonthSummary(12));
+        result.Carryover.Balance.Should().Be(6000,
+            "暦年をまたいでも利用のあった最後の月(11月)の月末残高を引き継ぐ");
+    }
+
+    #endregion
+
     #region Issue #1215: 年度途中導入の累計初期値テスト
 
     [Fact]
@@ -397,8 +492,11 @@ public class ReportDataBuilderTests
             CreateTestLedger(2, TestCardIdm, new DateTime(2025, 8, 10),
                 "鉄道（天神～博多）", 0, 210, 4790)
         };
-        // 前月(7月)は未登録
+        // 8月登録のため4月～7月は未登録（Issue #1602: 前月残高は年度開始月まで遡るため全月を空に設定）
         SetupMonthlyLedgers(TestCardIdm, 2025, 7, new List<Ledger>());
+        SetupMonthlyLedgers(TestCardIdm, 2025, 6, new List<Ledger>());
+        SetupMonthlyLedgers(TestCardIdm, 2025, 5, new List<Ledger>());
+        SetupMonthlyLedgers(TestCardIdm, 2025, 4, new List<Ledger>());
         SetupCarryoverBalance(TestCardIdm, 2024, null);
         SetupMonthlyLedgers(TestCardIdm, 2025, 8, augustLedgers);
         SetupDateRangeLedgers(TestCardIdm,
