@@ -183,31 +183,47 @@ namespace ICCardManager.Services
         }
 
         /// <summary>
-        /// 前月の残高を取得
+        /// 前月末の残高を取得
         /// </summary>
+        /// <remarks>
+        /// Issue #1602: 直前月が利用空白でも、年度開始月（4月）まで 1 ヶ月ずつ遡り、
+        /// 利用のあった最後の月の月末残高を返す。これにより「○月から繰越」行の残高が
+        /// 利用空白月をまたいでも残高チェーン（受入 − 払出 = 残額）を維持する。
+        /// 年度開始月まで遡っても 1 件もデータがない場合のみ前年度繰越にフォールバックする。
+        /// （本メソッドは month != 4 のときだけ呼ばれる。4 月は呼び出し側で前年度繰越を直接取得する）
+        /// </remarks>
         /// <param name="cardIdm">カードIDm</param>
         /// <param name="year">年</param>
         /// <param name="month">月</param>
-        /// <returns>前月残高。過去のデータがない場合はnull</returns>
+        /// <returns>前月末残高。年度内に過去データがない場合は前年度繰越（それもなければnull）</returns>
         private async Task<int?> GetPreviousMonthBalanceAsync(string cardIdm, int year, int month)
         {
-            // 前月の年月を計算
-            var (previousYear, previousMonth) = FiscalYearHelper.GetPreviousMonth(year, month);
+            var fiscalYearStartYear = FiscalYearHelper.GetFiscalYear(year, month);
+            var (cursorYear, cursorMonth) = FiscalYearHelper.GetPreviousMonth(year, month);
 
-            // 前月の履歴を取得し、最後の残高を返す
-            // Issue #784: 残高チェーンに基づいて時系列順を復元
-            var previousLedgers = LedgerOrderHelper.ReorderByBalanceChain(
-                (await _ledgerRepository.GetByMonthAsync(cardIdm, previousYear, previousMonth).ConfigureAwait(false))
-                    .Where(l => l.Summary != SummaryGenerator.GetLendingSummary()));
-
-            if (previousLedgers.Count > 0)
+            // 年度開始月（4月）まで 1 ヶ月ずつ遡り、利用のあった最後の月の月末残高を返す
+            while (true)
             {
-                return previousLedgers.Last().Balance;
+                // Issue #784: 残高チェーンに基づいて時系列順を復元
+                var ledgers = LedgerOrderHelper.ReorderByBalanceChain(
+                    (await _ledgerRepository.GetByMonthAsync(cardIdm, cursorYear, cursorMonth).ConfigureAwait(false))
+                        .Where(l => l.Summary != SummaryGenerator.GetLendingSummary()));
+
+                if (ledgers.Count > 0)
+                {
+                    return ledgers.Last().Balance;
+                }
+
+                // 年度開始月（4月）まで遡り切ったら終了
+                if (cursorYear == fiscalYearStartYear && cursorMonth == 4)
+                {
+                    break;
+                }
+
+                (cursorYear, cursorMonth) = FiscalYearHelper.GetPreviousMonth(cursorYear, cursorMonth);
             }
 
-            // 前月のデータがない場合は、さらに前の月から繰り越しを探す
-            // 年度開始月（4月）まで遡って繰越残高を取得
-            var fiscalYearStartYear = FiscalYearHelper.GetFiscalYear(year, month);
+            // 年度内に 1 件もデータがない場合は前年度繰越にフォールバック
             var carryover = await _ledgerRepository.GetCarryoverBalanceAsync(cardIdm, fiscalYearStartYear - 1).ConfigureAwait(false);
             return carryover;
         }
