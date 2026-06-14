@@ -1119,7 +1119,9 @@ public partial class MainViewModel : ViewModelBase
     /// </summary>
     /// <remarks>
     /// 通常の返却フロー（<see cref="ProcessReturnAsync"/>）と仮想タッチ
-    /// （<see cref="ProcessVirtualTouchAsync"/>）の双方から呼び出される。
+    /// （<c>ProcessVirtualTouchAsync</c>、DEBUG ビルド限定）の双方から呼び出される。
+    /// 仮想タッチは <c>#if DEBUG</c> ブロック内に定義されており Release 構成では
+    /// 存在しないため、cref ではなくプレーン表記で参照する（Issue #1623）。
     /// バス停入力ダイアログ・履歴再読み込み・警告再チェック等の追従処理を
     /// 1か所にまとめ、片側だけ追加されて他方に反映されない事故を防ぐ。
     /// テストから挙動を検証できるよう <c>internal</c> 公開する。
