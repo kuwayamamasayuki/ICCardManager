@@ -76,6 +76,44 @@ public class SummaryGeneratorTests : IDisposable
 
     #endregion
 
+    #region Issue #1603: 払い戻し摘要（GetRefundSummary）
+
+    /// <summary>
+    /// デフォルトでは「払戻しによる払出」を返すこと
+    /// </summary>
+    [Fact]
+    public void GetRefundSummary_ReturnsDefaultText()
+    {
+        // Arrange - コンストラクタで ResetToDefaults 済み
+
+        // Act
+        var result = SummaryGenerator.GetRefundSummary();
+
+        // Assert
+        result.Should().Be("払戻しによる払出");
+    }
+
+    /// <summary>
+    /// OrganizationOptions.SummaryText.RefundSummary をカスタムした場合、その値を返すこと
+    /// </summary>
+    [Fact]
+    public void GetRefundSummary_WithCustomOption_ReturnsCustomText()
+    {
+        // Arrange
+        var options = new OrganizationOptions();
+        options.SummaryText.RefundSummary = "解約による払戻";
+        SummaryGenerator.Configure(options);
+
+        // Act
+        var result = SummaryGenerator.GetRefundSummary();
+
+        // Assert - 組織別にカスタマイズした摘要が反映される
+        result.Should().Be("解約による払戻");
+        // 後始末は Dispose() の ResetToDefaults() が担保
+    }
+
+    #endregion
+
     #region Issue #599: 繰越レコード日付計算
 
     [Fact]
