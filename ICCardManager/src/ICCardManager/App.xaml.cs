@@ -98,6 +98,12 @@ namespace ICCardManager
             // 古いログファイルを削除
             ErrorDialogHelper.CleanupOldLogs();
 
+            // Issue #1600: 帳票作成時に %TEMP%\ICCardManager へ展開された一時テンプレート
+            // （ICCardManager_Template_*.xlsx）を回収する。OnExit ではなく起動時に呼ぶことで、
+            // 前回がクラッシュや起動失敗（Shutdown(1)）で終了した場合でも確実に蓄積分を削除できる。
+            // 内部で例外を握りつぶす実装のため、try より前で直接呼んでよい。
+            TemplateResolver.CleanupTempFiles();
+
             try
             {
                 // 設定ファイルを読み込み

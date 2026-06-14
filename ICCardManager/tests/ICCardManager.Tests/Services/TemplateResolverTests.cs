@@ -131,5 +131,63 @@ public class TemplateResolverTests : IDisposable
         action.Should().NotThrow("一時ファイルがなくてもエラーにならないべき");
     }
 
+    /// <summary>
+    /// 蓄積した一時テンプレート（ICCardManager_Template_*.xlsx）を実際に削除し、
+    /// プレフィックスに一致しない無関係なファイルは残すこと（Issue #1600）。
+    /// </summary>
+    /// <remarks>
+    /// Issue #1600 で本メソッドを App.OnStartup から呼ぶようにしたため、
+    /// 「削除対象だけを正しく消す」契約を回帰ガードとして固定する。
+    /// </remarks>
+    [Fact]
+    [Trait("Category", "Unit")]
+    public void CleanupTempFiles_DeletesAccumulatedTemplates_ButPreservesUnrelatedFiles()
+    {
+        // Arrange — TemplateResolver が使う一時ディレクトリと同じ場所に
+        //           「蓄積した一時テンプレート」と「無関係なファイル」を作る。
+        // ※ プレフィックスは TemplateResolver.TempFilePrefix（private const）と一致させること。
+        const string tempFilePrefix = "ICCardManager_Template_";
+        var tempDir = Path.Combine(Path.GetTempPath(), "ICCardManager");
+        Directory.CreateDirectory(tempDir);
+
+        var accumulated = new[]
+        {
+            Path.Combine(tempDir, $"{tempFilePrefix}aaaaaaaaaaaa.xlsx"),
+            Path.Combine(tempDir, $"{tempFilePrefix}bbbbbbbbbbbb.xlsx"),
+        };
+        // プレフィックス不一致（残すべき）と、拡張子不一致（残すべき）の 2 種類
+        var unrelatedOtherName = Path.Combine(tempDir, "ユーザー作成ファイル.xlsx");
+        var unrelatedOtherExt = Path.Combine(tempDir, $"{tempFilePrefix}cccccccccccc.txt");
+
+        try
+        {
+            foreach (var f in accumulated)
+            {
+                File.WriteAllText(f, "dummy");
+            }
+            File.WriteAllText(unrelatedOtherName, "keep-me");
+            File.WriteAllText(unrelatedOtherExt, "keep-me");
+
+            // Act
+            TemplateResolver.CleanupTempFiles();
+
+            // Assert — 蓄積テンプレートは削除、無関係ファイルは残存
+            foreach (var f in accumulated)
+            {
+                File.Exists(f).Should().BeFalse($"蓄積した一時テンプレート {Path.GetFileName(f)} は削除されるべき");
+            }
+            File.Exists(unrelatedOtherName).Should().BeTrue("プレフィックス不一致のファイルは残すべき");
+            File.Exists(unrelatedOtherExt).Should().BeTrue("拡張子(.xlsx)不一致のファイルは残すべき");
+        }
+        finally
+        {
+            // Dispose() の CleanupTempFiles は無関係ファイルを消さないため明示的に後始末する
+            foreach (var f in new[] { unrelatedOtherName, unrelatedOtherExt })
+            {
+                if (File.Exists(f)) File.Delete(f);
+            }
+        }
+    }
+
     #endregion
 }
