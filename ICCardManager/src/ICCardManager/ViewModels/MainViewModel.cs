@@ -1046,7 +1046,8 @@ public partial class MainViewModel : ViewModelBase
             _soundPlayer.Play(SoundType.Error);
 
             // エラー時はトースト通知で表示（メイン画面は変更しない）
-            _toastNotificationService.ShowError("エラー", result.ErrorMessage ?? "貸出処理に失敗しました");
+            // フォールバック文言にも行動指示を付与（Issue #1614）。トーストは文字数制約があるため簡潔に。
+            _toastNotificationService.ShowError("エラー", result.ErrorMessage ?? "貸出処理に失敗しました。もう一度タッチしてください。");
 
             // 状態をリセット
             ResetState();
@@ -1107,7 +1108,8 @@ public partial class MainViewModel : ViewModelBase
             _soundPlayer.Play(SoundType.Error);
 
             // エラー時はトースト通知で表示（メイン画面は変更しない）
-            _toastNotificationService.ShowError("エラー", result.ErrorMessage ?? "返却処理に失敗しました");
+            // フォールバック文言にも行動指示を付与（Issue #1614）。トーストは文字数制約があるため簡潔に。
+            _toastNotificationService.ShowError("エラー", result.ErrorMessage ?? "返却処理に失敗しました。もう一度タッチしてください。");
 
             // 状態をリセット
             ResetState();

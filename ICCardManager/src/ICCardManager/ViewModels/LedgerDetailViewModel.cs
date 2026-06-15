@@ -611,7 +611,7 @@ namespace ICCardManager.ViewModels
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Failed to save ledger detail changes");
-                StatusMessage = $"エラー: {ex.Message}";
+                StatusMessage = ExceptionMessageFormatter.ToUserMessage(ex, "台帳の保存");
             }
             finally
             {
@@ -659,7 +659,7 @@ namespace ICCardManager.ViewModels
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Failed to split ledger {LedgerId}", _ledger.Id);
-                StatusMessage = $"エラー: {ex.Message}";
+                StatusMessage = ExceptionMessageFormatter.ToUserMessage(ex, "台帳の分割");
             }
             finally
             {

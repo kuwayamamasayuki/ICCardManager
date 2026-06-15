@@ -456,7 +456,9 @@ public partial class DataExportImportViewModel : ViewModelBase
             }
             catch (Exception ex)
             {
-                SetStatus($"エクスポートエラー: {ex.Message}", true);
+                // 技術的詳細はログへ。UI には 3 要素のユーザー向け文言を表示（Issue #1614）。
+                ErrorDialogHelper.LogException(ex, "エクスポート");
+                SetStatus(ExceptionMessageFormatter.ToUserMessage(ex, "エクスポート"), true);
 #if DEBUG
                 System.Diagnostics.Debug.WriteLine($"[Export Error] {ex.GetType().Name}: {ex.Message}");
 #endif
@@ -583,7 +585,9 @@ public partial class DataExportImportViewModel : ViewModelBase
             }
             catch (Exception ex)
             {
-                SetStatus($"プレビューエラー: {ex.Message}", true);
+                // 技術的詳細はログへ。UI には 3 要素のユーザー向け文言を表示（Issue #1614）。
+                ErrorDialogHelper.LogException(ex, "インポートプレビュー");
+                SetStatus(ExceptionMessageFormatter.ToUserMessage(ex, "インポートのプレビュー"), true);
 #if DEBUG
                 System.Diagnostics.Debug.WriteLine($"[Preview Error] {ex.GetType().Name}: {ex.Message}");
 #endif
@@ -721,10 +725,11 @@ public partial class DataExportImportViewModel : ViewModelBase
             }
             catch (Exception ex)
             {
-                SetStatus($"インポートエラー: {ex.Message}", true);
-                _dialogService.ShowError(
-                    $"インポート中にエラーが発生しました。\n\n{ex.Message}",
-                    "インポートエラー");
+                // 技術的詳細はログへ。UI には 3 要素のユーザー向け文言を表示（Issue #1614）。
+                ErrorDialogHelper.LogException(ex, "インポート");
+                var importErrorMessage = ExceptionMessageFormatter.ToUserMessage(ex, "インポート");
+                SetStatus(importErrorMessage, true);
+                _dialogService.ShowError(importErrorMessage, "インポートエラー");
 #if DEBUG
                 System.Diagnostics.Debug.WriteLine($"[ExecuteImport Error] {ex.GetType().Name}: {ex.Message}");
 #endif
@@ -873,10 +878,11 @@ public partial class DataExportImportViewModel : ViewModelBase
             }
             catch (Exception ex)
             {
-                SetStatus($"インポートエラー: {ex.Message}", true);
-                _dialogService.ShowError(
-                    $"インポート中にエラーが発生しました。\n\n{ex.Message}",
-                    "インポートエラー");
+                // 技術的詳細はログへ。UI には 3 要素のユーザー向け文言を表示（Issue #1614）。
+                ErrorDialogHelper.LogException(ex, "インポート");
+                var importErrorMessage = ExceptionMessageFormatter.ToUserMessage(ex, "インポート");
+                SetStatus(importErrorMessage, true);
+                _dialogService.ShowError(importErrorMessage, "インポートエラー");
 #if DEBUG
                 System.Diagnostics.Debug.WriteLine($"[Import Error] {ex.GetType().Name}: {ex.Message}");
                 System.Diagnostics.Debug.WriteLine($"[Import Error] StackTrace: {ex.StackTrace}");

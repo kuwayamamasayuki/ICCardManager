@@ -260,12 +260,15 @@ public class DataExportImportViewModelTests : IDisposable
         await _viewModel.ExecuteImportAsync();
 
         // Assert
+        // Issue #1614: 生の ex.Message（"DB接続エラー"）を UI に漏らさず、
+        // 「何が／なぜ／どうすれば」を満たす文言を表示する。技術的詳細はログのみ。
         _dialogServiceMock.Verify(
             d => d.ShowError(
-                It.Is<string>(msg => msg.Contains("DB接続エラー")),
+                It.Is<string>(msg => !msg.Contains("DB接続エラー") && msg.Contains("インポートに失敗")),
                 It.Is<string>(title => title.Contains("エラー"))),
             Times.Once);
-        _viewModel.StatusMessage.Should().Contain("DB接続エラー");
+        _viewModel.StatusMessage.Should().NotContain("DB接続エラー", "技術的詳細はログのみに記録する");
+        _viewModel.StatusMessage.Should().Contain("インポートに失敗");
     }
 
     /// <summary>

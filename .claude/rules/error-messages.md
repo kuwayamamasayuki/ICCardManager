@@ -82,6 +82,23 @@ ValidationMessage =
 - エラーメッセージは `AutomationProperties.Name` でスクリーンリーダーにも読み上げさせる
 - 色（赤）だけでなくアイコン（⚠️）とテキストで情報を伝達（Issue #1274 の色覚多様性対応原則と一貫）
 
+## 例外からのユーザー向けメッセージ生成（Issue #1614）
+
+`catch (Exception ex)` で捕捉した例外を UI に表示する際、**生の `ex.Message` を直接ユーザーへ出さない**こと。`ex.Message` は英語・技術用語（SQLite エラー、スタックトレース由来文言等）を含みうるため、職員には解読不能で、内部実装の露出にもなる。
+
+```csharp
+// ❌ 悪い例: 生の例外メッセージが UI に漏れる
+StatusMessage = $"エラー: {ex.Message}";
+
+// ✅ 良い例: 3 要素準拠の文言を表示し、技術的詳細はログへ逃がす
+_logger.LogError(ex, "Failed to save ledger");                 // ILogger 保持時
+StatusMessage = ExceptionMessageFormatter.ToUserMessage(ex, "台帳の保存");
+```
+
+- 変換は `Common/ExceptionMessageFormatter.ToUserMessage(Exception, operation)` を使う。`operation` はユーザー視点の操作名（「台帳の保存」「エクスポート」「リストア」等）で、文言の「何が」部分になる。例外種別に応じた「なぜ／どうすれば」が付与される。`AppException` は整備済みの `UserFriendlyMessage` がそのまま使われる。
+- 技術的詳細（`ex.Message`）は必ずログへ残す。`ILogger` を注入済みなら `_logger.LogError(ex, ...)`、注入していない ViewModel / View コードビハインドでは `ErrorDialogHelper.LogException(ex, "操作名")`（既存のファイルログ機構を再利用、ダイアログ非表示）を使う。
+- トースト通知は文字数制約があるため、`ToUserMessage` のフル文言ではなく簡潔な行動指示（「もう一度タッチしてください」等）を優先してよい。
+
 ## 既存コードへの適用
 
 新規コード追加時は上記ガイドラインを適用。既存コードの改善は **該当 Issue にスコープを絞って** 段階的に実施（一括変更は diff の肥大化・レビュー困難化を招く）。

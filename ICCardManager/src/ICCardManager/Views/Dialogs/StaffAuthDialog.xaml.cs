@@ -6,6 +6,7 @@ using System.Windows.Automation.Peers;
 using System.Windows.Threading;
 using System.Windows.Media;
 using CommunityToolkit.Mvvm.Messaging;
+using ICCardManager.Common;
 using ICCardManager.Common.Messages;
 using ICCardManager.Data.Repositories;
 using ICCardManager.Infrastructure.CardReader;
@@ -178,7 +179,9 @@ namespace ICCardManager.Views.Dialogs
                 }
                 catch (Exception ex)
                 {
-                    ShowStatus($"エラー: {ex.Message}", isError: true);
+                    // 技術的詳細はログへ。UI には 3 要素のユーザー向け文言を表示（Issue #1614）。
+                    ErrorDialogHelper.LogException(ex, "職員証の認証");
+                    ShowStatus(ExceptionMessageFormatter.ToUserMessage(ex, "職員証の認証"), isError: true);
                 }
             });
         }
