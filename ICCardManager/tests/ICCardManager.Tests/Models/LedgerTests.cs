@@ -1,11 +1,35 @@
+using System;
 using FluentAssertions;
 using ICCardManager.Models;
+using ICCardManager.Services;
+using ICCardManager.Tests.Services;
 using Xunit;
 
 namespace ICCardManager.Tests.Domain;
 
-public class LedgerTests
+/// <summary>
+/// <see cref="Ledger"/> のドメインロジックのテスト。
+/// </summary>
+/// <remarks>
+/// Issue #1604: <see cref="Ledger.IsMidYearCarryover"/> の判定が
+/// <see cref="SummaryGenerator.IsMidYearCarryoverSummary"/>（静的 <c>_options</c> 参照）へ
+/// 一元化されたため、本クラスも静的状態を読み取るようになった。並列実行時の汚染を避けるため
+/// <see cref="SummaryGeneratorCollection"/> に編入し、各テスト前後でデフォルトへリセットする。
+/// </remarks>
+[Collection(SummaryGeneratorCollection.Name)]
+public class LedgerTests : IDisposable
 {
+    public LedgerTests()
+    {
+        // テスト間の静的状態汚染を防止
+        SummaryGenerator.ResetToDefaults();
+    }
+
+    public void Dispose()
+    {
+        SummaryGenerator.ResetToDefaults();
+    }
+
     #region IsCarryover
 
     [Fact]
