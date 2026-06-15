@@ -187,17 +187,5 @@ namespace ICCardManager.Views.Dialogs
         {
             Close();
         }
-
-        /// <summary>
-        /// キー入力処理（Issue #445対応: ESCキーで閉じる）
-        /// </summary>
-        private void Window_KeyDown(object sender, KeyEventArgs e)
-        {
-            if (e.Key == Key.Escape)
-            {
-                Close();
-                e.Handled = true;
-            }
-        }
     }
 }

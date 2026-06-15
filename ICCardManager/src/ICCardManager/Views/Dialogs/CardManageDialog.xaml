@@ -14,7 +14,6 @@
         MinWidth="720"
         WindowStartupLocation="CenterOwner"
         ResizeMode="CanResize"
-        KeyDown="Window_KeyDown"
         FontSize="{DynamicResource BaseFontSize}"
         FocusManager.FocusedElement="{Binding ElementName=CardDataGrid}"
         AutomationProperties.Name="交通系ICカード管理ダイアログ"
@@ -126,6 +125,7 @@
                 <Button DockPanel.Dock="Right"
                         Content="完了"
                         Click="CloseButton_Click"
+                        IsCancel="True"
                         Padding="20,8"
                         Margin="10,0,0,5"
                         VerticalAlignment="Top"/>
