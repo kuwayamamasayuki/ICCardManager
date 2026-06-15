@@ -618,6 +618,203 @@ public class CardManageViewModelTests
 
     #endregion
 
+    #region 払い戻しテスト（Issue #1603）
+
+    /// <summary>
+    /// 払い戻し時に Income=0／Expense=残高／Balance=0／Summary=「払戻しによる払出」の
+    /// Ledger が作成され、カードが払戻済状態に更新されること
+    /// </summary>
+    [Fact]
+    public async Task RefundAsync_ShouldCreateRefundLedgerWithBalanceAsExpense()
+    {
+        // Arrange
+        const string idm = "0102030405060708";
+        var card = new CardDto
+        {
+            CardIdm = idm,
+            CardType = "はやかけん",
+            CardNumber = "H-001",
+            IsLent = false,
+            IsRefunded = false
+        };
+        _viewModel.SelectedCard = card;
+
+        // 最新残高 3,000 円
+        _ledgerRepositoryMock.Setup(r => r.GetLatestLedgerAsync(idm))
+            .ReturnsAsync(new Ledger { CardIdm = idm, Balance = 3000 });
+        _ledgerRepositoryMock.Setup(r => r.InsertAsync(It.IsAny<Ledger>())).ReturnsAsync(1);
+        _cardRepositoryMock.Setup(r => r.SetRefundedAsync(idm))
+            .ReturnsAsync(ICCardManager.Data.Repositories.CardOperationResult.Success);
+        _cardRepositoryMock.Setup(r => r.GetByIdmAsync(idm, It.IsAny<bool>()))
+            .ReturnsAsync(new IcCard { CardIdm = idm, CardType = "はやかけん", CardNumber = "H-001" });
+        _cardRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<IcCard>());
+
+        // Act
+        await _viewModel.RefundAsync();
+
+        // Assert - 残高を払出金額として計上し残高 0 の払戻 Ledger が生成される
+        _ledgerRepositoryMock.Verify(r => r.InsertAsync(It.Is<Ledger>(l =>
+            l.CardIdm == idm &&
+            l.Income == 0 &&
+            l.Expense == 3000 &&
+            l.Balance == 0 &&
+            l.Summary == "払戻しによる払出" &&
+            l.IsLentRecord == false)), Times.Once);
+        // 最新残高を取得していること
+        _ledgerRepositoryMock.Verify(r => r.GetLatestLedgerAsync(idm), Times.Once);
+        // カードが払戻済状態に更新されること
+        _cardRepositoryMock.Verify(r => r.SetRefundedAsync(idm), Times.Once);
+    }
+
+    /// <summary>
+    /// 残高が存在しない（Ledger なし）場合は Expense=0／Balance=0 で払い戻されること
+    /// </summary>
+    [Fact]
+    public async Task RefundAsync_WithNoLedger_ShouldUseZeroBalance()
+    {
+        // Arrange
+        const string idm = "0102030405060708";
+        _viewModel.SelectedCard = new CardDto
+        {
+            CardIdm = idm,
+            CardType = "nimoca",
+            CardNumber = "N-001",
+            IsLent = false,
+            IsRefunded = false
+        };
+
+        // 履歴なし → 残高 0 とみなす
+        _ledgerRepositoryMock.Setup(r => r.GetLatestLedgerAsync(idm)).ReturnsAsync((Ledger?)null);
+        _ledgerRepositoryMock.Setup(r => r.InsertAsync(It.IsAny<Ledger>())).ReturnsAsync(1);
+        _cardRepositoryMock.Setup(r => r.SetRefundedAsync(idm))
+            .ReturnsAsync(ICCardManager.Data.Repositories.CardOperationResult.Success);
+        _cardRepositoryMock.Setup(r => r.GetByIdmAsync(idm, It.IsAny<bool>()))
+            .ReturnsAsync(new IcCard { CardIdm = idm, CardType = "nimoca", CardNumber = "N-001" });
+        _cardRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<IcCard>());
+
+        // Act
+        await _viewModel.RefundAsync();
+
+        // Assert
+        _ledgerRepositoryMock.Verify(r => r.InsertAsync(It.Is<Ledger>(l =>
+            l.Income == 0 &&
+            l.Expense == 0 &&
+            l.Balance == 0 &&
+            l.Summary == "払戻しによる払出")), Times.Once);
+        _cardRepositoryMock.Verify(r => r.SetRefundedAsync(idm), Times.Once);
+    }
+
+    /// <summary>
+    /// 貸出中のカードは払い戻しできず、エラーダイアログを表示して処理を中断すること
+    /// </summary>
+    [Fact]
+    public async Task RefundAsync_LentCard_ShouldShowErrorAndNotRefund()
+    {
+        // Arrange
+        _viewModel.SelectedCard = new CardDto
+        {
+            CardIdm = "0102030405060708",
+            CardType = "はやかけん",
+            CardNumber = "H-001",
+            IsLent = true,
+            IsRefunded = false
+        };
+
+        // Act
+        await _viewModel.RefundAsync();
+
+        // Assert - 「貸出中」を含むエラーダイアログが表示され、払戻処理は一切行われない
+        _dialogServiceMock.Verify(d => d.ShowError(
+            It.Is<string>(s => s.Contains("貸出中")),
+            It.IsAny<string>()), Times.Once);
+        _ledgerRepositoryMock.Verify(r => r.InsertAsync(It.IsAny<Ledger>()), Times.Never);
+        _cardRepositoryMock.Verify(r => r.SetRefundedAsync(It.IsAny<string>()), Times.Never);
+    }
+
+    /// <summary>
+    /// カード未選択時に払い戻しを呼んでも何も起きないこと
+    /// </summary>
+    [Fact]
+    public async Task RefundAsync_WithNoSelectedCard_ShouldDoNothing()
+    {
+        // Arrange
+        _viewModel.SelectedCard = null;
+
+        // Act
+        await _viewModel.RefundAsync();
+
+        // Assert
+        _ledgerRepositoryMock.Verify(r => r.InsertAsync(It.IsAny<Ledger>()), Times.Never);
+        _cardRepositoryMock.Verify(r => r.SetRefundedAsync(It.IsAny<string>()), Times.Never);
+    }
+
+    /// <summary>
+    /// 確認ダイアログでキャンセルした場合は払い戻し処理を行わないこと
+    /// </summary>
+    [Fact]
+    public async Task RefundAsync_WhenUserCancelsConfirmation_ShouldNotRefund()
+    {
+        // Arrange
+        const string idm = "0102030405060708";
+        _viewModel.SelectedCard = new CardDto
+        {
+            CardIdm = idm,
+            CardType = "はやかけん",
+            CardNumber = "H-001",
+            IsLent = false,
+            IsRefunded = false
+        };
+        _ledgerRepositoryMock.Setup(r => r.GetLatestLedgerAsync(idm))
+            .ReturnsAsync(new Ledger { CardIdm = idm, Balance = 1000 });
+        // ユーザーが確認ダイアログで「いいえ」を選択
+        _dialogServiceMock.Setup(d => d.ShowWarningConfirmation(It.IsAny<string>(), It.IsAny<string>()))
+            .Returns(false);
+
+        // Act
+        await _viewModel.RefundAsync();
+
+        // Assert
+        _ledgerRepositoryMock.Verify(r => r.InsertAsync(It.IsAny<Ledger>()), Times.Never);
+        _cardRepositoryMock.Verify(r => r.SetRefundedAsync(It.IsAny<string>()), Times.Never);
+    }
+
+    /// <summary>
+    /// SetRefundedAsync が失敗した場合はエラーダイアログを表示すること
+    /// </summary>
+    [Fact]
+    public async Task RefundAsync_WhenSetRefundedFails_ShouldShowError()
+    {
+        // Arrange
+        const string idm = "0102030405060708";
+        _viewModel.SelectedCard = new CardDto
+        {
+            CardIdm = idm,
+            CardType = "はやかけん",
+            CardNumber = "H-001",
+            IsLent = false,
+            IsRefunded = false
+        };
+        _ledgerRepositoryMock.Setup(r => r.GetLatestLedgerAsync(idm))
+            .ReturnsAsync(new Ledger { CardIdm = idm, Balance = 500 });
+        _ledgerRepositoryMock.Setup(r => r.InsertAsync(It.IsAny<Ledger>())).ReturnsAsync(1);
+        // 払戻状態への更新が失敗
+        _cardRepositoryMock.Setup(r => r.SetRefundedAsync(idm))
+            .ReturnsAsync(ICCardManager.Data.Repositories.CardOperationResult.NotFound);
+        _cardRepositoryMock.Setup(r => r.GetByIdmAsync(idm, It.IsAny<bool>()))
+            .ReturnsAsync(new IcCard { CardIdm = idm, CardType = "はやかけん", CardNumber = "H-001" });
+        _cardRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<IcCard>());
+
+        // Act
+        await _viewModel.RefundAsync();
+
+        // Assert - 失敗時はエラーダイアログを表示
+        _dialogServiceMock.Verify(d => d.ShowError(
+            It.IsAny<string>(),
+            It.Is<string>(title => title.Contains("払い戻し"))), Times.Once);
+    }
+
+    #endregion
+
     #region キャンセルテスト
 
     /// <summary>

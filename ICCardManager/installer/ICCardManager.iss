@@ -602,12 +602,32 @@ begin
   SaveStringToFile(ConfigFile, OutputPath, False);
 end;
 
-// DB保存先ページのバリデーション（「次へ」ボタン押下時に呼ばれる）
+// DB保存先・帳票出力先ページのバリデーション（「次へ」ボタン押下時に呼ばれる）
 function NextButtonClick(CurPageID: Integer): Boolean;
 var
   SharedPath: string;
+  ReportPath: string;
 begin
   Result := True;
+
+  // 帳票出力先ページ: 入力がある場合のみ形式チェック（空欄は任意=既定動作なので許可）
+  // Issue #1599: DB保存先ページと同等の形式検証（UNC または ドライブレター付き絶対パス）を行い、
+  //   不正値が report_output_config.txt に書き込まれ起動時に伝播するのを防ぐ
+  if CurPageID = ReportOutputPage.ID then
+  begin
+    ReportPath := Trim(ReportOutputPathEdit.Text);
+    if ReportPath <> '' then
+    begin
+      if not ((Length(ReportPath) >= 3) and (((ReportPath[1] = '\') and (ReportPath[2] = '\')) or (ReportPath[2] = ':'))) then
+      begin
+        MsgBox('帳票の出力先フォルダを正しく入力してください。' + #13#10 +
+               '例: C:\Users\username\Documents または \\server\share\reports' + #13#10 +
+               '（空欄のままにすると既定の出力先が使用されます）', mbError, MB_OK);
+        Result := False;
+        Exit;
+      end;
+    end;
+  end;
 
   if CurPageID = DatabasePage.ID then
   begin

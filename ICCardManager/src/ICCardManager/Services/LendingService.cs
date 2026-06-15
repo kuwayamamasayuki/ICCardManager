@@ -5,6 +5,7 @@ using System.Linq;
 using System.Threading.Tasks;
 using ICCardManager.Data;
 using ICCardManager.Data.Repositories;
+using ICCardManager.Infrastructure.Timing;
 using ICCardManager.Models;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -156,6 +157,7 @@ namespace ICCardManager.Services
         private readonly ISettingsRepository _settingsRepository;
         private readonly SummaryGenerator _summaryGenerator;
         private readonly CardLockManager _lockManager;
+        private readonly ISystemClock _clock;
         private readonly ILogger<LendingService> _logger;
 
         /// <summary>
@@ -192,7 +194,8 @@ namespace ICCardManager.Services
             SummaryGenerator summaryGenerator,
             CardLockManager lockManager,
             IOptions<AppOptions> appOptions,
-            ILogger<LendingService> logger)
+            ILogger<LendingService> logger,
+            ISystemClock clock = null)
         {
             _dbContext = dbContext;
             _cardRepository = cardRepository;
@@ -201,6 +204,9 @@ namespace ICCardManager.Services
             _settingsRepository = settingsRepository;
             _summaryGenerator = summaryGenerator;
             _lockManager = lockManager;
+            // 既定はシステム時計（DateTime.Now）。テストでは固定時計を注入して
+            // 30秒ルール（IsRetouchWithinTimeout）の境界を決定論的に検証する（Issue #1626）
+            _clock = clock ?? new SystemClock();
             _retouchTimeoutSeconds = appOptions.Value.RetouchWindowSeconds;
             _lockTimeoutMs = appOptions.Value.CardLockTimeoutSeconds * 1000;
             _logger = logger;
@@ -340,7 +346,7 @@ namespace ICCardManager.Services
                     return result;
                 }
 
-                var now = DateTime.Now;
+                var now = _clock.Now;
 
                 // Issue #656: カードから残高を読み取れなかった場合、直近の履歴から残高を取得
                 // READ操作はリトライ範囲の外で実行（不要な再クエリを防止）
@@ -677,7 +683,7 @@ namespace ICCardManager.Services
                     return result;
                 }
 
-                var now = DateTime.Now;
+                var now = _clock.Now;
                 var detailList = usageDetails.ToList();
 
                 _logger.LogDebug("LendingService: 返却処理 - 受け取った履歴件数={Count}", detailList.Count);
@@ -1246,7 +1252,7 @@ namespace ICCardManager.Services
                 return false;
             }
 
-            var elapsed = DateTime.Now - LastProcessedTime.Value;
+            var elapsed = _clock.Now - LastProcessedTime.Value;
             return elapsed.TotalSeconds <= _retouchTimeoutSeconds;
         }
 

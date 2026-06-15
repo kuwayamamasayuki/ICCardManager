@@ -5,6 +5,7 @@ using System.Linq;
 using System.Threading.Tasks;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using ICCardManager.Common;
 using ICCardManager.Data;
 using ICCardManager.Data.Repositories;
 using ICCardManager.Dtos;
@@ -595,7 +596,9 @@ namespace ICCardManager.ViewModels
             }
             catch (Exception ex)
             {
-                StatusMessage = $"エラー: {ex.Message}";
+                // 技術的詳細はログへ。UI には 3 要素のユーザー向け文言を表示（Issue #1614）。
+                ErrorDialogHelper.LogException(ex, "台帳行の保存");
+                StatusMessage = ExceptionMessageFormatter.ToUserMessage(ex, "保存");
             }
             finally
             {
@@ -832,7 +835,9 @@ namespace ICCardManager.ViewModels
             }
             catch (Exception ex)
             {
-                StatusMessage = $"エラー: {ex.Message}";
+                // 技術的詳細はログへ。UI には 3 要素のユーザー向け文言を表示（Issue #1614）。
+                ErrorDialogHelper.LogException(ex, "台帳行の保存");
+                StatusMessage = ExceptionMessageFormatter.ToUserMessage(ex, "保存");
             }
             finally
             {

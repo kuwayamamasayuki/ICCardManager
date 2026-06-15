@@ -195,4 +195,58 @@ public class PathValidatorErrorMessageQualityTests : IDisposable
         result.ErrorMessage.Should().Contain("ネットワーク接続",
             "どう解決か: 確認項目を示す");
     }
+
+    // =========================================================================
+    // ValidatePathFormat（Issue #1599）のメッセージ品質
+    // =========================================================================
+
+    [Fact]
+    public void ValidatePathFormat_RelativePath_MeetsQualityAndIncludesExample()
+    {
+        var result = PathValidator.ValidatePathFormat(@"relative\folder\iccard.db");
+
+        result.IsValid.Should().BeFalse();
+        AssertQualityCriteria(result.ErrorMessage);
+        result.ErrorMessage.Should().Contain("絶対パス",
+            "何が問題か: 絶対パスでない");
+        result.ErrorMessage.Should().Contain(@"C:\",
+            "どう解決か: ローカルパスの形式例");
+        result.ErrorMessage.Should().Contain(@"\\",
+            "どう解決か: UNCパスの形式例");
+    }
+
+    [Fact]
+    public void ValidatePathFormat_Empty_MeetsQualityAndIncludesExample()
+    {
+        var result = PathValidator.ValidatePathFormat(string.Empty);
+
+        result.IsValid.Should().BeFalse();
+        AssertQualityCriteria(result.ErrorMessage);
+        result.ErrorMessage.Should().Contain("指定されていません",
+            "何が問題か: パス未指定");
+        result.ErrorMessage.Should().ContainAny(@"C:\", @"\\",
+            "どう解決か: 形式例を示す");
+    }
+
+    [Fact]
+    public void ValidatePathFormat_InvalidChars_MeetsQuality()
+    {
+        var result = PathValidator.ValidatePathFormat("C:\\folder|name\\iccard.db");
+
+        result.IsValid.Should().BeFalse();
+        AssertQualityCriteria(result.ErrorMessage);
+        result.ErrorMessage.Should().Contain("使用できない文字",
+            "何が問題か: 不正文字");
+    }
+
+    [Fact]
+    public void ValidatePathFormat_PathTraversal_MeetsQuality()
+    {
+        var result = PathValidator.ValidatePathFormat(@"C:\folder\..\other\iccard.db");
+
+        result.IsValid.Should().BeFalse();
+        AssertQualityCriteria(result.ErrorMessage);
+        result.ErrorMessage.Should().Contain("親ディレクトリ",
+            "なぜ問題か: 親ディレクトリへの移動");
+    }
 }

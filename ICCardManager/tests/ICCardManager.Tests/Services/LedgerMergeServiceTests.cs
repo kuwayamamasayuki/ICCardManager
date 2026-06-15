@@ -906,7 +906,13 @@ public class LedgerMergeServiceTests : IDisposable
 
         // Assert
         result.Success.Should().BeFalse();
-        result.ErrorMessage.Should().Contain("統合処理に失敗");
+        // Issue #1614: メッセージ品質ガイドライン（何が／なぜ／どうすれば）準拠の文言に改善。
+        // 完全一致ではなく「失敗」キーワード＋行動指示で終わる品質基準で検証する。
+        result.ErrorMessage.Should().Contain("統合に失敗", "何が: 統合操作の失敗");
+        result.ErrorMessage.Should().MatchRegex("してください。?$|お試しください。?$",
+            "どうすれば: 行動指示で終わるべき");
+        result.ErrorMessage.Length.Should().BeGreaterThanOrEqualTo(20,
+            "3要素を含む十分な説明であるべき");
     }
 
     /// <summary>
@@ -935,8 +941,12 @@ public class LedgerMergeServiceTests : IDisposable
 
         // Assert
         result.Success.Should().BeFalse();
-        result.ErrorMessage.Should().Contain("エラーが発生");
-        result.ErrorMessage.Should().Contain("Database error");
+        // Issue #1614: 生の ex.Message（"Database error"）を漏らさず、品質基準を満たす文言を返す。
+        // 技術的詳細は _logger.LogError でログのみに記録する。
+        result.ErrorMessage.Should().Contain("統合に失敗", "何が: 統合操作の失敗");
+        result.ErrorMessage.Should().NotContain("Database error", "技術的詳細はログのみに記録する");
+        result.ErrorMessage.Should().MatchRegex("してください。?$|お試しください。?$",
+            "どうすれば: 行動指示で終わるべき");
     }
 
     #endregion

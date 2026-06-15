@@ -271,4 +271,28 @@ public class ErrorDialogHelperTests
     }
 
     #endregion
+
+    #region LogException（Issue #1614）
+
+    [Fact]
+    public void LogException_nullを渡しても例外を投げないこと()
+    {
+        // ILogger 非保持の呼び出し元が安全に使えるよう、null は no-op であるべき。
+        var act = () => ErrorDialogHelper.LogException(null, "テスト");
+
+        act.Should().NotThrow();
+    }
+
+    [Fact]
+    public void LogException_例外を渡しても呼び出し元へ再スローしないこと()
+    {
+        // ログ出力の失敗・成功にかかわらず、業務処理の catch 内から安全に呼べる契約。
+        var act = () => ErrorDialogHelper.LogException(
+            new InvalidOperationException("technical detail for log only"),
+            "リストア");
+
+        act.Should().NotThrow();
+    }
+
+    #endregion
 }

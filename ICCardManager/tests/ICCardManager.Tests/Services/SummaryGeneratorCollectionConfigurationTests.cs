@@ -2,6 +2,7 @@ using System;
 using System.Linq;
 using System.Reflection;
 using FluentAssertions;
+using ICCardManager.Tests.Domain;
 using Xunit;
 
 namespace ICCardManager.Tests.Services;
@@ -61,6 +62,8 @@ public class SummaryGeneratorCollectionConfigurationTests
     [InlineData(typeof(SummaryGeneratorEdgeCaseTests))]
     [InlineData(typeof(SummaryGeneratorComprehensiveTests))]
     [InlineData(typeof(OrganizationOptionsTests))]
+    [InlineData(typeof(MidYearCarryoverConsistencyTests))]
+    [InlineData(typeof(LedgerTests))]
     public void SummaryGenerator関連テストクラスがCollectionに属していること(Type testClass)
     {
         // Act
@@ -88,6 +91,8 @@ public class SummaryGeneratorCollectionConfigurationTests
     [InlineData(typeof(SummaryGeneratorEdgeCaseTests))]
     [InlineData(typeof(SummaryGeneratorComprehensiveTests))]
     [InlineData(typeof(OrganizationOptionsTests))]
+    [InlineData(typeof(MidYearCarryoverConsistencyTests))]
+    [InlineData(typeof(LedgerTests))]
     public void Collection対象テストクラスはIDisposableを実装していること(Type testClass)
     {
         // Act

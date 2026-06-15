@@ -1,8 +1,8 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Text.RegularExpressions;
 using System.Threading.Tasks;
+using ICCardManager.Services;
 namespace ICCardManager.Models
 {
 /// <summary>
@@ -93,9 +93,6 @@ namespace ICCardManager.Models
 
         // === ドメインロジック ===
 
-        private static readonly Regex MidYearCarryoverPattern =
-            new Regex(@"^(1[0-2]|[1-9])月から繰越$", RegexOptions.Compiled);
-
         /// <summary>
         /// 繰越レコード（新規購入または年度途中繰越）かどうか
         /// </summary>
@@ -109,7 +106,15 @@ namespace ICCardManager.Models
         /// <summary>
         /// 年度途中導入の繰越レコード（「○月から繰越」）かどうか
         /// </summary>
+        /// <remarks>
+        /// 「○月から繰越」判定は <see cref="SummaryGenerator.IsMidYearCarryoverSummary"/> に
+        /// 一元化されており、組織設定 <c>MidYearCarryoverPattern</c> に追従する（Issue #1604）。
+        /// 以前は本クラス側にハードコードした正規表現を持っていたため、組織設定でパターンを
+        /// カスタムすると帳票集計フィルタ（<c>ReportDataBuilder</c> 経由）とソート・特別扱い判定
+        /// （本プロパティ）が乖離し、月計・累計の二重計上（Issue #1494 で対策した問題の再発形）
+        /// を招くリスクがあった。判定を単一の真実源に統合してこれを防ぐ。
+        /// </remarks>
         public bool IsMidYearCarryover =>
-            !string.IsNullOrEmpty(Summary) && MidYearCarryoverPattern.IsMatch(Summary);
+            SummaryGenerator.IsMidYearCarryoverSummary(Summary);
     }
 }

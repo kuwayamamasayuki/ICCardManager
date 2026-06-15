@@ -256,9 +256,33 @@ namespace ICCardManager.Data
 
             // Issue #1559: UNCパス または マップドネットワークドライブ指定時のみ共有モード
             // （ローカルフルパス指定では共有モードにしない）。テスト時は forceSharedMode で上書き可能
-            IsSharedMode = forceSharedMode ??
-                           (databasePath != null &&
-                            (IsUncPath(databasePath) || IsNetworkDrive(databasePath)));
+            IsSharedMode = forceSharedMode ?? IsSharedModePath(databasePath);
+        }
+
+        /// <summary>
+        /// 指定パスが共有モード（複数PC共有）扱いになるかを判定する（Issue #1559 / #1597）。
+        /// </summary>
+        /// <remarks>
+        /// 共有モードの単一判定ロジック。DbContext のコンストラクタ（journal_mode / busy_timeout 等の切替）と
+        /// App.xaml.cs のキャッシュTTL短縮設定の両方がこのメソッドを参照することで、判定基準の二重管理を防ぐ。
+        /// UNCパス（\\server\share）またはマップドネットワークドライブ（DriveType.Network）のみ true。
+        /// null・空・ローカルフルパスは false（Issue #1597: パス指定の有無だけで共有モード扱いにしない）。
+        /// </remarks>
+        internal static bool IsSharedModePath(string path)
+        {
+            return IsSharedModePath(path, DefaultDriveTypeResolver);
+        }
+
+        /// <summary>
+        /// 共有モード判定の本体。マップドネットワークドライブ判定の DriveType 解決を注入可能にした
+        /// オーバーロード（Issue #1605）。
+        /// </summary>
+        /// <param name="path">判定対象パス</param>
+        /// <param name="driveTypeResolver">ドライブルート（例: <c>Z:\</c>）から <see cref="DriveType"/> を
+        /// 解決する関数。テストではモックを注入して「ネットワークドライブ → 共有モード有効」の正方向を検証する。</param>
+        internal static bool IsSharedModePath(string path, Func<string, DriveType> driveTypeResolver)
+        {
+            return path != null && (IsUncPath(path) || IsNetworkDrive(path, driveTypeResolver));
         }
 
         /// <summary>
@@ -290,6 +314,24 @@ namespace ICCardManager.Data
         /// </remarks>
         internal static bool IsNetworkDrive(string path)
         {
+            return IsNetworkDrive(path, DefaultDriveTypeResolver);
+        }
+
+        /// <summary>
+        /// マップドネットワークドライブ判定の本体。DriveType の解決を注入可能にしたオーバーロード（Issue #1605）。
+        /// </summary>
+        /// <param name="path">判定対象パス</param>
+        /// <param name="driveTypeResolver">ドライブルート（例: <c>Z:\</c>）から <see cref="DriveType"/> を
+        /// 解決する関数。既定では実 <see cref="DriveInfo"/> を用いる（<see cref="DefaultDriveTypeResolver"/>）が、
+        /// テストではモックを注入して正方向（<see cref="DriveType.Network"/> → 共有モード有効）を検証できる。</param>
+        /// <remarks>
+        /// 実ネットワークドライブなしには正方向（true を返すケース）をテストできなかった問題（Issue #1605）に
+        /// 対応するための internal seam。本番経路は <see cref="IsNetworkDrive(string)"/> 経由で
+        /// <see cref="DefaultDriveTypeResolver"/> を使用するため挙動は不変。
+        /// resolver が例外を投げた場合（不正ルート等）は catch でローカル扱い（false）にフォールバックする。
+        /// </remarks>
+        internal static bool IsNetworkDrive(string path, Func<string, DriveType> driveTypeResolver)
+        {
             if (string.IsNullOrWhiteSpace(path))
                 return false;
 
@@ -303,14 +345,21 @@ namespace ICCardManager.Data
                 if (root.StartsWith(@"\\", StringComparison.Ordinal))
                     return false;
 
-                var drive = new DriveInfo(root);
-                return drive.DriveType == DriveType.Network;
+                return driveTypeResolver(root) == DriveType.Network;
             }
             catch
             {
                 // 不正パス・未マウントドライブ等はローカル扱い
                 return false;
             }
+        }
+
+        /// <summary>
+        /// 既定の DriveType 解決関数。実 <see cref="DriveInfo"/> を用いてドライブ種別を取得する（Issue #1605）。
+        /// </summary>
+        private static DriveType DefaultDriveTypeResolver(string root)
+        {
+            return new DriveInfo(root).DriveType;
         }
 
         /// <summary>

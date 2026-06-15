@@ -155,7 +155,12 @@ public class SystemManageViewModelTests : IDisposable
         await _viewModel.LoadBackupsAsync();
 
         // Assert
-        _viewModel.StatusMessage.Should().Contain("失敗しました").And.Contain("disk error");
+        // Issue #1614: 生の ex.Message（"disk error"）を UI に漏らさず、
+        // 「何が／なぜ／どうすれば」を満たす文言を表示する。技術的詳細はログのみに記録。
+        _viewModel.StatusMessage.Should().Contain("失敗しました");
+        _viewModel.StatusMessage.Should().NotContain("disk error", "技術的詳細はログのみに記録する");
+        _viewModel.StatusMessage.Should().MatchRegex("してください。?$|連絡してください。?$",
+            "行動指示で終わるべき");
         _viewModel.IsStatusError.Should().BeTrue();
     }
 
@@ -280,13 +285,19 @@ public class SystemManageViewModelTests : IDisposable
         await _viewModel.CreateBackupCoreAsync(backupPath);
 
         // Assert
-        _viewModel.StatusMessage.Should().Be("バックアップの作成に失敗しました");
+        // Issue #1614: メッセージ品質ガイドライン（何が／なぜ／どうすれば）準拠の文言に改善。
+        // 完全一致ではなく「何が」キーワード＋行動指示で終わる品質基準で検証する。
+        _viewModel.StatusMessage.Should().StartWith("バックアップの作成に失敗しました", "何が: 作成失敗");
+        _viewModel.StatusMessage.Should().MatchRegex("してください。?$",
+            "どうすれば: 行動指示で終わるべき");
+        _viewModel.StatusMessage.Length.Should().BeGreaterThanOrEqualTo(20,
+            "3要素を含む十分な説明であるべき");
         _viewModel.IsStatusError.Should().BeTrue();
         _viewModel.LastBackupFile.Should().BeEmpty();
     }
 
     [Fact]
-    public async Task CreateBackupCoreAsync_例外発生時にエラーメッセージに例外文言が含まれること()
+    public async Task CreateBackupCoreAsync_例外発生時に例外文言を漏らさず品質基準を満たすメッセージが表示されること()
     {
         // Arrange
         const string backupPath = "/backups/manual.db";
@@ -297,7 +308,11 @@ public class SystemManageViewModelTests : IDisposable
         await _viewModel.CreateBackupCoreAsync(backupPath);
 
         // Assert
-        _viewModel.StatusMessage.Should().Contain("失敗").And.Contain("disk full");
+        // Issue #1614: 生の ex.Message（"disk full"）を UI に漏らさない。技術的詳細はログのみ。
+        _viewModel.StatusMessage.Should().Contain("失敗");
+        _viewModel.StatusMessage.Should().NotContain("disk full", "技術的詳細はログのみに記録する");
+        _viewModel.StatusMessage.Should().MatchRegex("してください。?$|連絡してください。?$",
+            "行動指示で終わるべき");
         _viewModel.IsStatusError.Should().BeTrue();
     }
 

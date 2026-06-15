@@ -6,11 +6,13 @@ using System.Windows.Automation.Peers;
 using System.Windows.Threading;
 using System.Windows.Media;
 using CommunityToolkit.Mvvm.Messaging;
+using ICCardManager.Common;
 using ICCardManager.Common.Messages;
 using ICCardManager.Data.Repositories;
 using ICCardManager.Infrastructure.CardReader;
 using ICCardManager.Infrastructure.Sound;
 using ICCardManager.Services;
+using ICCardManager.Views.Helpers;
 using Microsoft.Extensions.Options;
 
 namespace ICCardManager.Views.Dialogs
@@ -30,6 +32,7 @@ namespace ICCardManager.Views.Dialogs
         private readonly DispatcherTimer _timeoutTimer;
         private int _remainingSeconds;
         private DispatcherTimer? _closeTimer;
+        private bool _timeoutWarningNotified;
 
         /// <summary>
         /// 認証成功時の職員IDm
@@ -69,7 +72,7 @@ namespace ICCardManager.Views.Dialogs
             _soundPlayer = soundPlayer;
             _messenger = messenger;
             _remainingSeconds = appOptions.Value.StaffCardTimeoutSeconds;
-            TimeoutText.Text = $"{_remainingSeconds}秒";
+            TimeoutText.Text = AuthTimeoutDisplay.FormatRemaining(_remainingSeconds);
 
             // タイムアウトタイマーの設定
             _timeoutTimer = new DispatcherTimer
@@ -119,13 +122,17 @@ namespace ICCardManager.Views.Dialogs
         private void OnTimeoutTick(object? sender, EventArgs e)
         {
             _remainingSeconds--;
-            TimeoutText.Text = $"{_remainingSeconds}秒";
+            TimeoutText.Text = AuthTimeoutDisplay.FormatRemaining(_remainingSeconds);
 
-            if (_remainingSeconds <= 10)
+            // 残り10秒以下は「色・アイコン・テキスト・音の4要素」で警告する（Issue #1613）。
+            // - 色: DangerTextBrush（赤）。色値は AccessibilityStyles.xaml の SSOT を参照（Issue #1392/#1461）
+            // - アイコン＋テキスト: FormatRemaining が ⚠ を前置（色覚多様性・無音環境への配慮）
+            // - 音: 警告域へ入った最初の1回だけ Warning 音を鳴らす（毎秒鳴らすと煩雑なため）
+            if (AuthTimeoutDisplay.IsWarning(_remainingSeconds) && !_timeoutWarningNotified)
             {
-                // 10秒以下は赤色で表示
-                TimeoutText.Foreground = new System.Windows.Media.SolidColorBrush(
-                    System.Windows.Media.Color.FromRgb(0xD3, 0x2F, 0x2F));
+                _timeoutWarningNotified = true;
+                TimeoutText.Foreground = (Brush)Application.Current.FindResource("DangerTextBrush");
+                _soundPlayer.Play(SoundType.Warning);
             }
 
             if (_remainingSeconds <= 0)
@@ -172,7 +179,9 @@ namespace ICCardManager.Views.Dialogs
                 }
                 catch (Exception ex)
                 {
-                    ShowStatus($"エラー: {ex.Message}", isError: true);
+                    // 技術的詳細はログへ。UI には 3 要素のユーザー向け文言を表示（Issue #1614）。
+                    ErrorDialogHelper.LogException(ex, "職員証の認証");
+                    ShowStatus(ExceptionMessageFormatter.ToUserMessage(ex, "職員証の認証"), isError: true);
                 }
             });
         }

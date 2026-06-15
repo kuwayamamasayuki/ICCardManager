@@ -1,10 +1,10 @@
 using System;
 using System.Collections.Generic;
-using System.Reflection;
 using System.Threading.Tasks;
 using FluentAssertions;
 using ICCardManager.Data;
 using ICCardManager.Data.Repositories;
+using ICCardManager.Infrastructure.Timing;
 using ICCardManager.Models;
 using ICCardManager.Services;
 using ICCardManager.ViewModels;
@@ -25,8 +25,11 @@ namespace ICCardManager.Tests.Services;
 /// 4. 複数カードの交互操作時の混同防止
 /// 5. AppOptions.RetouchWindowSeconds 設定の反映
 ///
-/// 時刻操作は DateTime.Now ベースのため、LastProcessedTime をリフレクションで
-/// 書き換えて経過時間をシミュレートする。
+/// 時刻は <see cref="ISystemClock"/> を注入した固定時計（<see cref="FakeClock"/>）で
+/// 制御する。貸出／返却で記録される LastProcessedTime も判定で読む現在時刻も同一の
+/// 固定時計から得られるため、wall-clock のジッタに依存せず境界値を決定論的に検証できる
+/// （Issue #1626。従来は LastProcessedTime をリフレクションで書き換えていたが、判定側が
+/// 別の瞬間の DateTime.Now を読むため境界ちょうど 30 秒が CI 負荷時に非決定的に落ちていた）。
 /// </summary>
 public class LendingServiceRetouchTimeoutTests : IDisposable
 {
@@ -37,6 +40,7 @@ public class LendingServiceRetouchTimeoutTests : IDisposable
     private readonly Mock<ISettingsRepository> _settingsRepositoryMock;
     private readonly SummaryGenerator _summaryGenerator;
     private readonly CardLockManager _lockManager;
+    private readonly FakeClock _clock;
 
     private const string CardAIdm = "0102030405060708";
     private const string CardBIdm = "A1A2A3A4A5A6A7A8";
@@ -55,6 +59,9 @@ public class LendingServiceRetouchTimeoutTests : IDisposable
         _settingsRepositoryMock.Setup(s => s.GetAppSettingsAsync()).ReturnsAsync(new AppSettings());
         _summaryGenerator = new SummaryGenerator();
         _lockManager = new CardLockManager(NullLogger<CardLockManager>.Instance);
+
+        // 任意の固定基準時刻。曜日・月境界等の影響を避けるため月初の正午を採用。
+        _clock = new FakeClock(new DateTime(2026, 1, 15, 12, 0, 0));
 
         _staffRepositoryMock.Setup(r => r.GetByIdmAsync(StaffIdm, false))
             .ReturnsAsync(new Staff { StaffIdm = StaffIdm, Name = "テスト職員", IsDeleted = false });
@@ -81,7 +88,8 @@ public class LendingServiceRetouchTimeoutTests : IDisposable
             _summaryGenerator,
             _lockManager,
             Options.Create(new AppOptions { RetouchWindowSeconds = retouchWindowSeconds }),
-            NullLogger<LendingService>.Instance);
+            NullLogger<LendingService>.Instance,
+            _clock);
     }
 
     /// <summary>
@@ -139,16 +147,15 @@ public class LendingServiceRetouchTimeoutTests : IDisposable
     }
 
     /// <summary>
-    /// LastProcessedTime を指定した時刻に書き換える（経過時間シミュレーション用）。
-    /// auto-property の private setter を反射で呼ぶ。
+    /// 直前処理（LastProcessedTime）からちょうど <paramref name="seconds"/> 秒が経過した
+    /// 状態を再現する。固定時計を「LastProcessedTime + seconds」へ進めることで、
+    /// 判定メソッドが読む現在時刻との差分を ms 単位のジッタなく厳密に確定させる。
     /// </summary>
-    private static void OverrideLastProcessedTime(LendingService service, DateTime overrideTime)
+    private void AdvanceToElapsedSeconds(LendingService service, double seconds)
     {
-        var property = typeof(LendingService).GetProperty(
-            nameof(LendingService.LastProcessedTime),
-            BindingFlags.Instance | BindingFlags.Public);
-        property.Should().NotBeNull("LastProcessedTime プロパティが存在する必要がある");
-        property!.SetValue(service, (DateTime?)overrideTime);
+        service.LastProcessedTime.Should().NotBeNull(
+            "経過時間をシミュレートする前に貸出／返却で LastProcessedTime が設定されている必要がある");
+        _clock.Now = service.LastProcessedTime!.Value.AddSeconds(seconds);
     }
 
     #region 境界値テスト（29秒以内 / ちょうど30秒 / 31秒経過）
@@ -164,8 +171,8 @@ public class LendingServiceRetouchTimeoutTests : IDisposable
         SetupLendMocks(CardAIdm);
         await service.LendAsync(StaffIdm, CardAIdm);
 
-        // Act: LastProcessedTime を29秒前に偽装
-        OverrideLastProcessedTime(service, DateTime.Now.AddSeconds(-29));
+        // Act: 29秒経過を固定時計で再現
+        AdvanceToElapsedSeconds(service, 29);
 
         // Assert: 30秒ルール対象
         service.IsRetouchWithinTimeout(CardAIdm).Should().BeTrue(
@@ -186,8 +193,8 @@ public class LendingServiceRetouchTimeoutTests : IDisposable
         SetupReturnMocks(CardAIdm);
         await service.ReturnAsync(StaffIdm, CardAIdm, new List<LedgerDetail>());
 
-        // Act: LastProcessedTime を31秒前に偽装
-        OverrideLastProcessedTime(service, DateTime.Now.AddSeconds(-31));
+        // Act: 31秒経過を固定時計で再現
+        AdvanceToElapsedSeconds(service, 31);
 
         // Assert: タイムアウト超過のため新規操作として扱う
         service.IsRetouchWithinTimeout(CardAIdm).Should().BeFalse(
@@ -197,6 +204,7 @@ public class LendingServiceRetouchTimeoutTests : IDisposable
     /// <summary>
     /// 貸出からちょうど30秒経過の時点では、30秒ルールの対象（true）であること（境界値）。
     /// 実装は elapsed.TotalSeconds &lt;= _retouchTimeoutSeconds のため境界は含む。
+    /// 固定時計注入により、ちょうど 30.000 秒を ms 単位のジッタなく検証する（Issue #1626）。
     /// </summary>
     [Fact]
     public async Task IsRetouchWithinTimeout_Exactly30Seconds_ReturnsTrue()
@@ -206,12 +214,33 @@ public class LendingServiceRetouchTimeoutTests : IDisposable
         SetupLendMocks(CardAIdm);
         await service.LendAsync(StaffIdm, CardAIdm);
 
-        // Act: 30秒ちょうど前に偽装
-        OverrideLastProcessedTime(service, DateTime.Now.AddSeconds(-30));
+        // Act: ちょうど30秒経過を固定時計で再現
+        AdvanceToElapsedSeconds(service, 30);
 
         // Assert: 境界値は inclusively true
         service.IsRetouchWithinTimeout(CardAIdm).Should().BeTrue(
             "ちょうど30秒は <= 判定のためtrue");
+    }
+
+    /// <summary>
+    /// 30秒をわずかに（1ms）超えた時点では30秒ルールの対象外（false）であること。
+    /// 境界 30 秒ちょうどが true、その直後が false であることをペアで固定し、
+    /// 判定が &lt;= 30 の閉区間であることを決定論的に保証する（Issue #1626）。
+    /// </summary>
+    [Fact]
+    public async Task IsRetouchWithinTimeout_JustOver30Seconds_ReturnsFalse()
+    {
+        // Arrange
+        var service = CreateService(retouchWindowSeconds: 30);
+        SetupLendMocks(CardAIdm);
+        await service.LendAsync(StaffIdm, CardAIdm);
+
+        // Act: 30.001秒経過を固定時計で再現
+        AdvanceToElapsedSeconds(service, 30.001);
+
+        // Assert: 境界を 1ms でも超えたら対象外
+        service.IsRetouchWithinTimeout(CardAIdm).Should().BeFalse(
+            "30秒を超えた瞬間に30秒ルールの対象外になる");
     }
 
     #endregion
@@ -235,8 +264,8 @@ public class LendingServiceRetouchTimeoutTests : IDisposable
         service.LastOperationType.Should().Be(LendingOperationType.Lend);
         service.LastProcessedTime.Should().NotBeNull();
 
-        // Act: 29秒前にLastProcessedTimeを偽装 → 2回目タッチを擬似
-        OverrideLastProcessedTime(service, DateTime.Now.AddSeconds(-29));
+        // Act: 29秒経過を固定時計で再現 → 2回目タッチを擬似
+        AdvanceToElapsedSeconds(service, 29);
 
         // Assert: IsRetouchWithinTimeout=true + LastOperationType=Lend
         // MainViewModel はこれを見て「逆操作=Return」を選択する
@@ -259,8 +288,8 @@ public class LendingServiceRetouchTimeoutTests : IDisposable
         await service.ReturnAsync(StaffIdm, CardAIdm, new List<LedgerDetail>());
         service.LastOperationType.Should().Be(LendingOperationType.Return);
 
-        // Act: 31秒経過を偽装
-        OverrideLastProcessedTime(service, DateTime.Now.AddSeconds(-31));
+        // Act: 31秒経過を固定時計で再現
+        AdvanceToElapsedSeconds(service, 31);
 
         // Assert: タイムアウト超過
         service.IsRetouchWithinTimeout(CardAIdm).Should().BeFalse(
@@ -378,15 +407,25 @@ public class LendingServiceRetouchTimeoutTests : IDisposable
         await service.LendAsync(StaffIdm, CardAIdm);
 
         // Act/Assert: 設定値 - 1秒 → true
-        OverrideLastProcessedTime(service, DateTime.Now.AddSeconds(-(configuredSeconds - 1)));
+        AdvanceToElapsedSeconds(service, configuredSeconds - 1);
         service.IsRetouchWithinTimeout(CardAIdm).Should().BeTrue(
             $"RetouchWindowSeconds={configuredSeconds} の場合、{configuredSeconds - 1}秒経過は対象内");
 
         // Act/Assert: 設定値 + 1秒 → false
-        OverrideLastProcessedTime(service, DateTime.Now.AddSeconds(-(configuredSeconds + 1)));
+        AdvanceToElapsedSeconds(service, configuredSeconds + 1);
         service.IsRetouchWithinTimeout(CardAIdm).Should().BeFalse(
             $"RetouchWindowSeconds={configuredSeconds} の場合、{configuredSeconds + 1}秒経過は対象外");
     }
 
     #endregion
+
+    /// <summary>
+    /// テスト用の固定時計。<see cref="Now"/> を書き換えることで任意の経過時間を再現する。
+    /// </summary>
+    private sealed class FakeClock : ISystemClock
+    {
+        public DateTime Now { get; set; }
+
+        public FakeClock(DateTime now) => Now = now;
+    }
 }

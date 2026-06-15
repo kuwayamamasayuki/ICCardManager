@@ -204,6 +204,87 @@ namespace ICCardManager.Common
         }
 
         /// <summary>
+        /// パスの「形式」のみを検証する（I/O を一切伴わない）。Issue #1599。
+        /// </summary>
+        /// <param name="path">検証するパス</param>
+        /// <returns>検証結果</returns>
+        /// <remarks>
+        /// <para>
+        /// <see cref="ValidateBackupPath(string)"/> と異なり、UNC 到達性・ドライブ準備状態・
+        /// 書き込み権限といった I/O を伴うチェックは行わず、純粋な文字列としての形式
+        /// （絶対パスか／不正文字を含まないか／長さ／UNC 構造／トラバーサル）だけを検証する。
+        /// </para>
+        /// <para>
+        /// 用途は <c>database_config.txt</c> 等の設定ファイルを起動時に読み込む際の防御
+        /// （手編集・部分破損・インストーラー書き込みで相対パスや不正文字が混入した場合）。
+        /// 起動時に到達性チェックまで行うと、一時的にネットワークが切断されているだけの
+        /// 正当な共有 DB パスまで「無効」と判定してしまい、黙ってローカルのデフォルト DB へ
+        /// 切り替わる（データが消えたように見える）危険があるため、ここでは形式のみを見る。
+        /// </para>
+        /// </remarks>
+        public static ValidationResult ValidatePathFormat(string path)
+        {
+            // 1. null または空でないこと
+            if (string.IsNullOrWhiteSpace(path))
+            {
+                return ValidationResult.Failure(
+                    "パスが指定されていません。" +
+                    "「C:\\ICCardManager」のような絶対パス、" +
+                    "または「\\\\server\\share\\ICCardManager」形式のネットワークパスを指定してください。");
+            }
+
+            // 2. パス長チェック
+            if (path.Length > MaxPathLength)
+            {
+                return ValidationResult.Failure(
+                    $"パスが{path.Length}文字で長すぎます。" +
+                    $"Windows の上限（{MaxPathLength}文字）を超えています。" +
+                    $"{MaxPathLength}文字以内の短いパスを指定してください。");
+            }
+
+            // 3. 不正な文字を含まないこと
+            if (path.IndexOfAny(Path.GetInvalidPathChars()) >= 0)
+            {
+                return ValidationResult.Failure(
+                    "パスに使用できない文字が含まれています。" +
+                    "ファイルシステムの予約文字（< > \" | ? * 等）を取り除いて指定してください。");
+            }
+
+            // 4. UNCパスの形式チェック（UNCの場合はサーバー名と共有名が必要）
+            if (IsUncPath(path))
+            {
+                var uncValidation = ValidateUncPathFormat(path);
+                if (!uncValidation.IsValid)
+                {
+                    return uncValidation;
+                }
+            }
+
+            // 5. 絶対パスであること（相対パスは作業フォルダ基準で解釈され、SQLite が
+            //    予期せぬ場所に空DBを新規作成してしまう。本検証の主目的）
+            if (!Path.IsPathRooted(path))
+            {
+                return ValidationResult.Failure(
+                    "絶対パスではありません。" +
+                    "相対パスは実行時の作業フォルダによって解釈が変わり、" +
+                    "予期しない場所にデータベースが作成される危険があるため使用できません。" +
+                    "「C:\\ICCardManager」のようにドライブ文字から始まる絶対パス、" +
+                    "または「\\\\server\\share」形式のネットワークパスを指定してください。");
+            }
+
+            // 6. パストラバーサルを含まないこと（Issue #1268 の検出を流用）
+            if (ContainsPathTraversal(path))
+            {
+                return ValidationResult.Failure(
+                    "パスに親ディレクトリへの移動指定（.. や URL エンコードされたトラバーサル等）が含まれています。" +
+                    "意図しないフォルダを参照する危険があるため拒否しました。" +
+                    "「..」を含まない、対象を直接指す絶対パスを指定してください。");
+            }
+
+            return ValidationResult.Success();
+        }
+
+        /// <summary>
         /// UNCパスかどうかを判定
         /// </summary>
         internal static bool IsUncPath(string path)
