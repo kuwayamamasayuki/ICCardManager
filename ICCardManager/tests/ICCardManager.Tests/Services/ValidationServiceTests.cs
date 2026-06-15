@@ -60,6 +60,26 @@ public class ValidationServiceTests
     }
 
     /// <summary>
+    /// 空のカードIDmのエラーメッセージは交通系ICカードを指す際に「交通系ICカード」と
+    /// 明記し、単なる「ICカード」表記をしないこと（Issue #1612 用語ルール違反の防止）。
+    /// ValidateCardIdm はカード管理ダイアログ・CSV取込における交通系ICカード登録専用であり、
+    /// 職員証検証は別メソッド ValidateStaffIdm が担うため「交通系ICカード」が正しい。
+    /// </summary>
+    [Fact]
+    public void ValidateCardIdm_WithEmptyIdm_ShouldUseKoutsuukeiTerminology()
+    {
+        // Act
+        var result = _service.ValidateCardIdm(string.Empty);
+
+        // Assert
+        result.IsValid.Should().BeFalse();
+        result.ErrorMessage.Should().Contain("交通系ICカード");
+        // 「交通系」を伴わない裸の「ICカード」表記が残っていないこと
+        result.ErrorMessage!.Replace("交通系ICカード", string.Empty)
+            .Should().NotContain("ICカード");
+    }
+
+    /// <summary>
     /// 16文字以外のカードIDmはエラーになること
     /// </summary>
     [Theory]

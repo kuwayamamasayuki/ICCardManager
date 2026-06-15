@@ -68,7 +68,7 @@ namespace ICCardManager.Services
             {
                 return ValidationResult.Failure(
                     "カードIDmが入力されていません。" +
-                    "カードリーダーでICカードをタッチするか、16桁の16進数を直接入力してください。");
+                    "カードリーダーで交通系ICカードをタッチするか、16桁の16進数を直接入力してください。");
             }
 
             if (idm.Length != IdmLength)
