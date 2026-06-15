@@ -537,7 +537,8 @@ namespace ICCardManager
         /// 部署種別（"mayor_office" or "enterprise_account"）を書き出す。
         /// 起動時にこのファイルを読み取り、DB設定に適用する。
         /// ファイルは削除せず永続的に保持する（インストーラーがアップグレード時にデフォルト値として使用）。
-        /// ファイルが存在しない場合（手動インストール等）はschema.sqlのデフォルト値が使用される。
+        /// ファイルが存在しない場合（手動インストール等）は department_type 設定が DB に存在せず、
+        /// SettingsRepository.ParseDepartmentType の既定値（市長事務部局 / mayor_office）が使用される。
         /// </remarks>
         private void ApplyDepartmentConfigFromFile()
         {
@@ -566,7 +567,7 @@ namespace ICCardManager
             catch (Exception ex)
             {
                 _logger?.LogWarning(ex, "部署設定ファイルの適用でエラー");
-                // エラーが発生してもアプリは起動させる（schema.sqlのデフォルト値が使用される）
+                // エラーが発生してもアプリは起動させる（department_type 未設定時は市長事務部局が既定値）
             }
         }
 
