@@ -93,6 +93,28 @@ namespace ICCardManager.Common
         }
 
         /// <summary>
+        /// 例外の技術的詳細（種別・メッセージ・スタックトレース）をログファイルにのみ記録する（Issue #1614）。
+        /// ダイアログは表示しない。
+        /// </summary>
+        /// <remarks>
+        /// <c>ILogger</c> を注入していない ViewModel / View コードビハインドが、
+        /// ユーザーには <see cref="ExceptionMessageFormatter"/> の文言を表示しつつ、
+        /// 詳細をログへ逃がすために用いる。これにより生の <c>ex.Message</c> を UI に出さずに済む。
+        /// </remarks>
+        /// <param name="exception">記録する例外。<c>null</c> の場合は何もしない。</param>
+        /// <param name="context">発生コンテキスト（操作名やメソッド名など。省略可）。</param>
+        public static void LogException(Exception exception, string context = null)
+        {
+            if (exception == null)
+            {
+                return;
+            }
+
+            var (_, errorCode) = GetErrorInfo(exception);
+            LogError(exception, errorCode, isFatal: false, context: context);
+        }
+
+        /// <summary>
         /// 例外からエラー情報を取得
         /// </summary>
         internal static (string Message, string ErrorCode) GetErrorInfo(Exception exception)
@@ -174,7 +196,7 @@ namespace ICCardManager.Common
         /// <summary>
         /// エラーをログファイルに出力
         /// </summary>
-        private static void LogError(Exception exception, string errorCode, bool isFatal = false)
+        private static void LogError(Exception exception, string errorCode, bool isFatal = false, string context = null)
         {
             try
             {
@@ -183,8 +205,10 @@ namespace ICCardManager.Common
                 var logFileName = $"error_{DateTime.Now:yyyyMMdd}.log";
                 var logFilePath = Path.Combine(LogDirectory, logFileName);
 
+                var contextPart = string.IsNullOrWhiteSpace(context) ? string.Empty : $"({context}) ";
                 var logEntry = $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] " +
                               $"{(isFatal ? "FATAL" : "ERROR")} [{errorCode}] " +
+                              contextPart +
                               $"{exception.GetType().Name}: {exception.Message}\n" +
                               $"StackTrace: {exception.StackTrace}\n";
 

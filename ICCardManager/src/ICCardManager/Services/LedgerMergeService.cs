@@ -299,7 +299,8 @@ namespace ICCardManager.Services
                         return new LedgerMergeResult
                         {
                             Success = false,
-                            ErrorMessage = "統合処理に失敗しました"
+                            ErrorMessage = "履歴の統合に失敗しました。対象の履歴が他の操作で変更された可能性があります。" +
+                                           "画面を最新の状態に更新してから再度お試しください。"
                         };
                     }
                     await _operationLogger.LogLedgerMergeAsync(beforeLedgers, target, scope.Transaction).ConfigureAwait(false);
@@ -326,7 +327,8 @@ namespace ICCardManager.Services
                 return new LedgerMergeResult
                 {
                     Success = false,
-                    ErrorMessage = $"統合中にエラーが発生しました: {ex.Message}"
+                    // 技術的詳細はログ（上の LogError）へ。UI には 3 要素のユーザー向け文言を返す（Issue #1614）。
+                    ErrorMessage = ExceptionMessageFormatter.ToUserMessage(ex, "履歴の統合")
                 };
             }
         }

@@ -99,7 +99,9 @@ public partial class SystemManageViewModel : ViewModelBase
             }
             catch (Exception ex)
             {
-                SetStatus($"バックアップ一覧の取得に失敗しました: {ex.Message}", true);
+                // 技術的詳細はログへ。UI には 3 要素のユーザー向け文言を表示（Issue #1614）。
+                ErrorDialogHelper.LogException(ex, "バックアップ一覧の取得");
+                SetStatus(ExceptionMessageFormatter.ToUserMessage(ex, "バックアップ一覧の取得"), true);
             }
         }
     }
@@ -157,12 +159,14 @@ public partial class SystemManageViewModel : ViewModelBase
                 }
                 else
                 {
-                    SetStatus("バックアップの作成に失敗しました", true);
+                    SetStatus("バックアップの作成に失敗しました。保存先の空き容量や書き込み権限を確認してから再度実行してください。", true);
                 }
             }
             catch (Exception ex)
             {
-                SetStatus($"バックアップの作成に失敗しました: {ex.Message}", true);
+                // 技術的詳細はログへ。UI には 3 要素のユーザー向け文言を表示（Issue #1614）。
+                ErrorDialogHelper.LogException(ex, "バックアップの作成");
+                SetStatus(ExceptionMessageFormatter.ToUserMessage(ex, "バックアップの作成"), true);
             }
         }
     }
@@ -247,13 +251,16 @@ public partial class SystemManageViewModel : ViewModelBase
                     var errorMessage = _backupService.IsSharedMode
                         ? "リストアに失敗しました。他のPCでアプリケーションが起動中の可能性があります。" +
                           "すべてのPCでアプリケーションを終了してから再度お試しください。"
-                        : "リストアに失敗しました";
+                        : "リストアに失敗しました。バックアップファイルが破損しているか、データベースが使用中の可能性があります。" +
+                          "別のバックアップファイルを選ぶか、アプリケーションを再起動してから再度お試しください。";
                     SetStatus(errorMessage, true);
                 }
             }
             catch (Exception ex)
             {
-                SetStatus($"リストアに失敗しました: {ex.Message}", true);
+                // 技術的詳細はログへ。UI には 3 要素のユーザー向け文言を表示（Issue #1614）。
+                ErrorDialogHelper.LogException(ex, "リストア");
+                SetStatus(ExceptionMessageFormatter.ToUserMessage(ex, "リストア"), true);
             }
         }
 
@@ -380,13 +387,16 @@ public partial class SystemManageViewModel : ViewModelBase
                     var errorMessage2 = _backupService.IsSharedMode
                         ? "リストアに失敗しました。他のPCでアプリケーションが起動中の可能性があります。" +
                           "すべてのPCでアプリケーションを終了してから再度お試しください。"
-                        : "リストアに失敗しました";
+                        : "リストアに失敗しました。バックアップファイルが破損しているか、データベースが使用中の可能性があります。" +
+                          "別のバックアップファイルを選ぶか、アプリケーションを再起動してから再度お試しください。";
                     SetStatus(errorMessage2, true);
                 }
             }
             catch (Exception ex)
             {
-                SetStatus($"リストアに失敗しました: {ex.Message}", true);
+                // 技術的詳細はログへ。UI には 3 要素のユーザー向け文言を表示（Issue #1614）。
+                ErrorDialogHelper.LogException(ex, "リストア");
+                SetStatus(ExceptionMessageFormatter.ToUserMessage(ex, "リストア"), true);
             }
         }
 
