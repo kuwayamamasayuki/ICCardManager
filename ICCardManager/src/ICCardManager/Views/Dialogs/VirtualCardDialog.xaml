@@ -116,6 +116,7 @@
                     AutomationProperties.Name="タッチ実行"
                     ToolTip="指定した情報で仮想交通系ICカードタッチをシミュレーション実行します"/>
             <Button Content="閉じる" Click="CloseButton_Click"
+                    IsCancel="True"
                     Padding="24,8"
                     AutomationProperties.Name="閉じる"
                     ToolTip="ダイアログを閉じる"/>
