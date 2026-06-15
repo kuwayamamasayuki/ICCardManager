@@ -73,6 +73,11 @@
     <SolidColorBrush x:Key="WarningActionBrush" Color="#FF9800"/>
     <SolidColorBrush x:Key="OverlayBrush" Color="#80000000"/>
 
+    <!-- ===== アニメーション用カラー ===== -->
+    <!-- ColorAnimation は Brush ではなく Color を直接補間するため、SolidColorBrush ではなく Color で定義する。 -->
+    <!-- 行ハイライト（薄い黄色）: 新規登録・更新・復元後に該当行を一瞬ハイライトしてフェードアウト（Issue #1613） -->
+    <Color x:Key="RowHighlightColor">#FFF9C4</Color>
+
     <!-- ===== フォーカス表示スタイル ===== -->
     <!-- キーボードナビゲーション用の明確なフォーカス表示 -->
 
