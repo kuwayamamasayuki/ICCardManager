@@ -13,11 +13,17 @@ namespace ICCardManager.Views.Helpers
     /// </summary>
     /// <remarks>
     /// 新規登録・更新・復元後に該当行をスクロール表示し、
-    /// 薄い黄色(#FFF9C4)で一瞬ハイライトしてフェードアウトさせる。
+    /// 薄い黄色（AccessibilityStyles.xaml の <c>RowHighlightColor</c>: #FFF9C4）で
+    /// 一瞬ハイライトしてフェードアウトさせる。色値は SSOT を参照する（Issue #1392/#1461/#1613）。
     /// </remarks>
     public static class DataGridHighlightHelper
     {
-        private static readonly Color HighlightColor = Color.FromRgb(0xFF, 0xF9, 0xC4);
+        /// <summary>
+        /// ハイライト色を AccessibilityStyles.xaml の <c>RowHighlightColor</c> リソースから解決する。
+        /// ColorAnimation は Brush ではなく Color を補間するため、Brush キーではなく Color リソースを参照する。
+        /// </summary>
+        private static Color GetHighlightColor()
+            => (Color)Application.Current.FindResource("RowHighlightColor");
 
         /// <summary>
         /// 指定アイテムの行をスクロール表示し、黄色ハイライト→フェードアウトする
@@ -59,12 +65,13 @@ namespace ICCardManager.Views.Helpers
         /// </summary>
         private static void AnimateRow(DataGridRow row, double durationSeconds, Action onCompleted = null)
         {
-            var brush = new SolidColorBrush(HighlightColor);
+            var highlightColor = GetHighlightColor();
+            var brush = new SolidColorBrush(highlightColor);
             row.Background = brush;
 
             var animation = new ColorAnimation
             {
-                From = HighlightColor,
+                From = highlightColor,
                 To = Colors.Transparent,
                 Duration = new Duration(TimeSpan.FromSeconds(durationSeconds)),
                 EasingFunction = new QuadraticEase { EasingMode = EasingMode.EaseIn }

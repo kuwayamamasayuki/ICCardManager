@@ -60,4 +60,23 @@ public class AccessibilityStylesResourceKeysTests
         xaml.Should().MatchRegex("x:Key=\"HintForegroundBrush\"\\s+Color=\"#795548\"",
             because: "ヒント色は色覚多様性に配慮した茶系（Brown 700）で固定されているべき");
     }
+
+    [Fact]
+    public void RowHighlightColor_キーが定義されていること()
+    {
+        // Issue #1613: DataGridHighlightHelper の行ハイライト色（旧 #FFF9C4 直書き）を SSOT 化。
+        var xaml = ReadAccessibilityStylesXaml();
+        xaml.Should().Contain("x:Key=\"RowHighlightColor\"",
+            because: "DataGrid 行ハイライト色は AccessibilityStyles.xaml で SSOT として定義されているべき（Issue #1613）");
+    }
+
+    [Fact]
+    public void RowHighlightColor_薄い黄色FFF9C4のColorリソースで定義されていること()
+    {
+        // Issue #1613: ColorAnimation は Brush ではなく Color を補間するため、
+        // SolidColorBrush ではなく <Color> 要素で定義する必要がある。
+        var xaml = ReadAccessibilityStylesXaml();
+        xaml.Should().MatchRegex("<Color x:Key=\"RowHighlightColor\">#FFF9C4</Color>",
+            because: "行ハイライト色は薄い黄色 (#FFF9C4) の Color リソースとして固定されているべき");
+    }
 }
