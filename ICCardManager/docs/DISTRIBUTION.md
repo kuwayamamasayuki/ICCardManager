@@ -45,7 +45,8 @@ publish/
     │   ├── return.wav         # 返却音
     │   └── warning.wav        # 警告音
     └── Templates/
-        └── 物品出納簿テンプレート.xlsx  # 月次帳票テンプレート
+        ├── 物品出納簿テンプレート（企業会計部局）.xlsx  # 月次帳票テンプレート（企業会計部局）
+        └── 物品出納簿テンプレート（市長事務部局）.xlsx  # 月次帳票テンプレート（市長事務部局）
 ```
 
 ### ファイルサイズの目安
@@ -108,7 +109,7 @@ installer/output/ICCardManager_Setup_1.0.7.exe
 |------|------|
 | アプリケーション本体 | ICCardManager.exe と依存DLL |
 | サウンドファイル | Resources/Sounds/ 配下のWAVファイル |
-| テンプレートファイル | Resources/Templates/物品出納簿テンプレート.xlsx |
+| テンプレートファイル | Resources/Templates/物品出納簿テンプレート（企業会計部局）.xlsx、物品出納簿テンプレート（市長事務部局）.xlsx |
 | ドキュメント | ユーザーマニュアル、管理者マニュアル（md/docx/pdf形式） |
 | アイコン | アプリケーションアイコン（app.ico） |
 
@@ -179,7 +180,7 @@ installer/output/ICCardManager_Setup_1.0.7.exe
 ### 帳票出力でエラーが発生する場合
 
 1. **テンプレートファイルの確認**
-   - `C:\Program Files\ICCardManager\Resources\Templates\物品出納簿テンプレート.xlsx` が存在するか確認
+   - `C:\Program Files\ICCardManager\Resources\Templates\物品出納簿テンプレート（企業会計部局）.xlsx`・`物品出納簿テンプレート（市長事務部局）.xlsx` の 2 ファイルが存在するか確認
 
 2. **出力先フォルダのアクセス権限**
    - 出力先フォルダに書き込み権限があるか確認

@@ -251,7 +251,7 @@ dotnet test --filter "FullyQualifiedName~SummaryGeneratorTests"
 <details>
 <summary>帳票出力でエラーが発生する</summary>
 
-1. インストールフォルダ内の `Resources/Templates/物品出納簿テンプレート.xlsx` が存在するか確認
+1. インストールフォルダ内の `Resources/Templates/物品出納簿テンプレート（企業会計部局）.xlsx`・`物品出納簿テンプレート（市長事務部局）.xlsx` の 2 ファイルが存在するか確認
 2. 出力先フォルダに書き込み権限があるか確認
 
 </details>
