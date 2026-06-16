@@ -8,7 +8,7 @@ namespace ICCardManager.Services
     /// 共有フォルダモードでのDB接続監視と同期表示を担当するサービス
     /// </summary>
     /// <remarks>
-    /// MainViewModelから抽出。30秒ごとのDB接続ヘルスチェックと
+    /// MainViewModelから抽出。15秒ごと（HealthCheckIntervalSeconds）のDB接続ヘルスチェックと
     /// 1秒ごとの同期経過時間表示を管理する。
     /// </remarks>
     public class SharedModeMonitor : IDisposable
