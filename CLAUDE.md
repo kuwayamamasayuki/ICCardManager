@@ -17,13 +17,13 @@
 ```
 .                                          # リポジトリルート
 ├── ICCardManager/                         # 本プロジェクト本体
-│   ├── src/ICCardManager/                 # 本体（Views, ViewModels, Models, Services, Data, Infrastructure, Common）
+│   ├── src/ICCardManager/                 # 本体（Views, ViewModels, Models, Services, Data, Dtos, Infrastructure, Common, Resources）
 │   ├── tests/                             # ユニットテスト・UIテスト
 │   ├── tools/                             # 開発支援ツール・スクリプト
 │   ├── installer/                         # InnoSetupインストーラー
 │   ├── CHANGELOG.md                       # バージョン履歴・変更内容の Single Source of Truth
 │   └── docs/
-│       ├── design/                        # 設計書（01〜08）
+│       ├── design/                        # 設計書（00・00a・01〜08）
 │       ├── manual/                        # ユーザー・管理者・開発者マニュアル
 │       └── 線区駅順コード/                  # 駅コード→駅名マスター
 ├── CLAUDE.md                              # 本ファイル（プロジェクト指示書）
@@ -67,11 +67,13 @@ WSL2では "/mnt/c/Program Files/dotnet/dotnet.exe" を使用すること。
 | `git-workflow.md` | ブランチルール、ステージング規約 |
 | `testing.md` | テスト品質、ハードコーディング禁止、テスト実装原則 |
 | `error-messages.md` | エラーメッセージ品質（「何が/なぜ/どうすれば」3要素、禁止パターン、Issue #1275） |
+| `async-configureawait.md` | async/ConfigureAwait(false) 規約（Service 層のみ付与、ViewModels/Views/tests は付けない、CA2007、Issue #1287） |
+| `migrations.md` | マイグレーション作成規約（冪等性必須、AddColumnIfNotExists 引数検証、新規マイグレーション追加手順） |
 
 ## 参照ドキュメント
 
 - `ICCardManager/CHANGELOG.md` — **バージョン履歴・変更内容の Single Source of Truth**
-- `ICCardManager/docs/design/` — 設計書一式（01〜08）
+- `ICCardManager/docs/design/` — 設計書一式（用語集 00・00a と 01〜08）
 - `ICCardManager/docs/manual/` — マニュアル（ユーザー・管理者・開発者）
 - `ICCardManager/src/ICCardManager/Resources/Templates/` — 月次帳票テンプレート（`物品出納簿テンプレート（企業会計部局）.xlsx`、`物品出納簿テンプレート（市長事務部局）.xlsx` の 2 ファイル）
 - `ICCardManager/docs/線区駅順コード/StationCode.csv` — 駅コード→駅名マスター（[出典](https://produ.irelang.jp/blog/2017/08/305/)、[新駅参照](https://ja.ysrl.org/atc/station-code.html)）
