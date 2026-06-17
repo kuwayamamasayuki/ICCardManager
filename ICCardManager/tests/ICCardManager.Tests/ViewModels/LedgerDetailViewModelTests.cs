@@ -27,6 +27,7 @@ public class LedgerDetailViewModelTests : IDisposable
     private readonly LedgerDetailViewModel _viewModel;
     private readonly Mock<ILedgerRepository> _ledgerRepoMock;
     private readonly DbContext _dbContext;
+    private readonly Mock<IStaffAuthService> _staffAuthServiceMock;
 
     public void Dispose()
     {
@@ -52,6 +53,7 @@ public class LedgerDetailViewModelTests : IDisposable
             _dbContext,
             splitServiceLogger);
         var logger = NullLogger<LedgerDetailViewModel>.Instance;
+        _staffAuthServiceMock = new Mock<IStaffAuthService>();
 
         _viewModel = new LedgerDetailViewModel(
             _ledgerRepoMock.Object,
@@ -59,6 +61,7 @@ public class LedgerDetailViewModelTests : IDisposable
             operationLogger,
             ledgerSplitService,
             _dbContext,
+            _staffAuthServiceMock.Object,
             logger);
     }
 
@@ -305,6 +308,30 @@ public class LedgerDetailViewModelTests : IDisposable
 
         // Assert
         _viewModel.BreadcrumbText.Should().Be("履歴詳細");
+    }
+
+    #endregion
+
+    #region 履歴分割の職員認証ゲート（SEQ-AUTH-01）
+
+    [Fact]
+    public async Task SaveWithFullSplit_認証キャンセル時_分割せず中止メッセージを表示する()
+    {
+        // Arrange: 3項目を個別グループに分割し、変更あり状態にする
+        AddItems(3);
+        _viewModel.SplitAllCommand.Execute(null);
+        _viewModel.HasChanges.Should().BeTrue();
+        // _staffAuthServiceMock は未設定 → RequestAuthenticationAsync は既定で null（=認証キャンセル）を返す
+
+        // Act
+        await _viewModel.SaveWithFullSplitCommand.ExecuteAsync(null);
+
+        // Assert: 認証を要求し、キャンセルされたため分割を実行しない
+        _staffAuthServiceMock.Verify(
+            s => s.RequestAuthenticationAsync("履歴の分割"), Times.Once);
+        _viewModel.HasChanges.Should().BeTrue(
+            "認証キャンセル時は分割を実行しないため変更フラグは保持される");
+        _viewModel.StatusMessage.Should().Be("認証がキャンセルされたため分割を中止しました");
     }
 
     #endregion

@@ -223,6 +223,7 @@ namespace ICCardManager.ViewModels
         private string _breadcrumbText = string.Empty;
 
         private readonly LedgerSplitService _ledgerSplitService;
+        private readonly IStaffAuthService _staffAuthService;
 
         public LedgerDetailViewModel(
             ILedgerRepository ledgerRepository,
@@ -230,6 +231,7 @@ namespace ICCardManager.ViewModels
             OperationLogger operationLogger,
             LedgerSplitService ledgerSplitService,
             DbContext dbContext,
+            IStaffAuthService staffAuthService,
             ILogger<LedgerDetailViewModel> logger)
         {
             _ledgerRepository = ledgerRepository;
@@ -237,6 +239,7 @@ namespace ICCardManager.ViewModels
             _operationLogger = operationLogger;
             _ledgerSplitService = ledgerSplitService;
             _dbContext = dbContext;
+            _staffAuthService = staffAuthService;
             _logger = logger;
         }
 
@@ -627,6 +630,15 @@ namespace ICCardManager.ViewModels
         {
             if (!HasChanges) return;
 
+            // 履歴分割は ledger を改変する監査対象の重要操作のため職員認証を要求する
+            // （設計 06_シーケンス図 §11 / SEQ-AUTH-01。追加・削除・変更と同じゲート）
+            var authResult = await _staffAuthService.RequestAuthenticationAsync("履歴の分割");
+            if (authResult == null)
+            {
+                StatusMessage = "認証がキャンセルされたため分割を中止しました";
+                return;
+            }
+
             IsBusy = true;
             StatusMessage = "分割中...";
 
@@ -640,7 +652,7 @@ namespace ICCardManager.ViewModels
                 }).ToList();
 
                 var result = await _ledgerSplitService.SplitAsync(
-                    _ledger.Id, updatedDetails, _operatorIdm);
+                    _ledger.Id, updatedDetails, authResult.Idm);
 
                 if (!result.Success)
                 {
