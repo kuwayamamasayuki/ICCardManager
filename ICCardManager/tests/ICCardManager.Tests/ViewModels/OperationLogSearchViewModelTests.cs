@@ -744,6 +744,39 @@ public class OperationLogSearchViewModelTests
         _viewModel.IsBusy.Should().BeFalse();
     }
 
+    /// <summary>
+    /// エクスポート失敗時、生の <c>ex.Message</c> を ShowError／StatusMessage に漏らさず、
+    /// 3要素準拠（操作名を含み「～ください。」で終わる）の文言を表示すること（Issue #1614）。
+    /// </summary>
+    [Fact]
+    public async Task ExportToExcelFileAsync_失敗時_生の例外メッセージを漏らさず3要素文言を表示すること()
+    {
+        // Arrange
+        const string rawTechnicalDetail = "Object reference not set to an instance of an object.";
+        var tempPath = System.IO.Path.Combine(System.IO.Path.GetTempPath(), $"op_{Guid.NewGuid()}.xlsx");
+        _repoMock
+            .Setup(r => r.SearchAllAsync(It.IsAny<OperationLogSearchCriteria>()))
+            .ThrowsAsync(new InvalidOperationException(rawTechnicalDetail));
+
+        string? shownMessage = null;
+        _dialogServiceMock
+            .Setup(d => d.ShowError(It.IsAny<string>(), It.IsAny<string>()))
+            .Callback<string, string>((message, _) => shownMessage = message);
+
+        // Act
+        await _viewModel.ExportToExcelFileAsync(tempPath);
+
+        // Assert - ダイアログ
+        shownMessage.Should().NotBeNull();
+        shownMessage.Should().NotContain(rawTechnicalDetail);   // 生の技術詳細が漏れない
+        shownMessage.Should().Contain("操作ログのエクスポート");  // 「何が」= 操作名
+        shownMessage.Should().EndWith("ください。");             // 行動指示で終わる
+
+        // Assert - ステータスバー
+        _viewModel.StatusMessage.Should().NotContain(rawTechnicalDetail);
+        _viewModel.StatusMessage.Should().Contain("操作ログのエクスポート");
+    }
+
     #endregion
 
     #region Issue #1548/#1507: PageNumberDisplay / PageInfo 依存通知

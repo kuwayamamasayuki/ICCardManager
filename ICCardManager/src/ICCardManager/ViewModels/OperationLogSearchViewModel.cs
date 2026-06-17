@@ -419,8 +419,10 @@ public partial class OperationLogSearchViewModel : ViewModelBase
             }
             catch (Exception ex)
             {
-                errorMessage = ex.Message;
-                SetStatus($"エクスポートエラー: {ex.Message}", true);
+                // Issue #1614: 生の ex.Message を UI に出さず、3要素準拠の文言を表示。技術詳細はログへ逃がす。
+                ErrorDialogHelper.LogException(ex, "操作ログのエクスポート");
+                errorMessage = ExceptionMessageFormatter.ToUserMessage(ex, "操作ログのエクスポート");
+                SetStatus(errorMessage, true);
             }
         }
 
@@ -428,7 +430,7 @@ public partial class OperationLogSearchViewModel : ViewModelBase
         // スコープ内で表示するとMessageBoxがモーダルで待機する間プログレスバーが残り続ける。
         if (errorMessage != null)
         {
-            _dialogService.ShowError($"エクスポートに失敗しました。\n\n{errorMessage}", "エクスポートエラー");
+            _dialogService.ShowError(errorMessage, "エクスポートエラー");
         }
         else if (exportedCount.HasValue)
         {

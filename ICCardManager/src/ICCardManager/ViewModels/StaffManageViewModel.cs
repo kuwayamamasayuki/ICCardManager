@@ -7,6 +7,7 @@ using System.Windows;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using CommunityToolkit.Mvvm.Messaging;
+using ICCardManager.Common;
 using ICCardManager.Common.Messages;
 using ICCardManager.Data.Repositories;
 using ICCardManager.Dtos;
@@ -404,11 +405,10 @@ namespace ICCardManager.ViewModels
             }
             catch (Exception ex)
             {
-                StatusMessage = $"エラー: {ex.Message}";
+                // Issue #1614: 生の ex.Message を UI に出さず、3要素準拠の文言を表示。技術詳細はログへ逃がす。
+                ErrorDialogHelper.LogException(ex, "職員の保存");
+                StatusMessage = ExceptionMessageFormatter.ToUserMessage(ex, "職員の保存");
                 IsStatusError = true;
-#if DEBUG
-                System.Diagnostics.Debug.WriteLine($"[StaffManageViewModel] SaveAsync エラー: {ex}");
-#endif
             }
         }
 
@@ -458,11 +458,10 @@ namespace ICCardManager.ViewModels
             }
             catch (Exception ex)
             {
-                StatusMessage = $"エラー: {ex.Message}";
+                // Issue #1614: 生の ex.Message を UI に出さず、3要素準拠の文言を表示。技術詳細はログへ逃がす。
+                ErrorDialogHelper.LogException(ex, "職員の削除");
+                StatusMessage = ExceptionMessageFormatter.ToUserMessage(ex, "職員の削除");
                 IsStatusError = true;
-#if DEBUG
-                System.Diagnostics.Debug.WriteLine($"[StaffManageViewModel] DeleteAsync エラー: {ex}");
-#endif
             }
         }
 
