@@ -244,38 +244,83 @@ begin
 
   SetArrayLength(MappedDriveLetters, MappedDriveCount);
   SetArrayLength(MappedDriveRemotePaths, MappedDriveCount);
+  Log('マップトドライブ検出(Method 1: HKCU\Network): ' + IntToStr(MappedDriveCount) + ' 件');
 end;
 
 // HKCU\Network にエントリがない場合のフォールバック（Issue #1584）
 // GPOやログインスクリプトで割り当てたドライブ、/persistent:no のドライブは
 // レジストリに記録されないため、標準ユーザーセッションで WMI クエリを実行して検出する
 // wmic.exe は Windows 11 22H2 以降で非推奨（オプション機能）のため PowerShell を使用
+//
+// 受け渡しファイルの置き場所には「元ユーザー（非昇格トークン）が書き込め、かつ
+// 昇格中のインストーラーが読める」ディレクトリが必要。{tmp} は昇格実行時に
+// 保護 ACL 付きで作成され（現在ユーザーには読み取り＋実行のみ許可）、
+// ExecAsOriginalUser で起動した PowerShell からの書き込みが Access Denied になる
+// （v2.9.3-rc1 で検出が常に失敗していた根本原因）。そのため
+// C:\Users\Public（INTERACTIVE が書き込み可）→ C:\ProgramData（Users が
+// ファイル作成可）の順に試行する。
 procedure DetectMappedDrivesFromSession();
 var
+  ExchangeDirs: TArrayOfString;
   OutFile: string;
   ResultCode: Integer;
+  ExecOk, Found: Boolean;
   Lines: TArrayOfString;
-  I: Integer;
+  I, D: Integer;
   Line: string;
   PendingDriveLetter: string;
   DeviceIdPrefix, ProviderPrefix: string;
 begin
-  OutFile := ExpandConstant('{tmp}\mapped_drives.txt');
+  MappedDriveCount := 0;
   DeviceIdPrefix := 'DeviceID=';
   ProviderPrefix := 'ProviderName=';
 
-  ExecAsOriginalUser(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'),
-    // -Encoding UTF8: PowerShell 5.1 は BOM 付き UTF-8 で書き出す。Inno Setup の
-    // LoadStringsFromFile は BOM を自動検出して Unicode にデコードするため、
-    // 日本語を含む共有名（例: \\server\道路_建設推進課）も正しく扱える。
-    // ASCII を指定すると non-ASCII 文字が ? に lossy 置換され、後段の net use が
-    // 不正なパスで失敗する（Issue #1584）。
-    '-NoProfile -ExecutionPolicy Bypass -Command "Get-CimInstance Win32_MappedLogicalDisk | ForEach-Object { ''DeviceID='' + $_.DeviceID; ''ProviderName='' + $_.ProviderName; '''' } | Out-File -FilePath ''' + OutFile + ''' -Encoding UTF8"',
-    '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  SetArrayLength(ExchangeDirs, 2);
+  ExchangeDirs[0] := GetEnv('PUBLIC');                  // 通常 C:\Users\Public
+  ExchangeDirs[1] := ExpandConstant('{commonappdata}'); // 通常 C:\ProgramData
 
-  if not FileExists(OutFile) then Exit;
+  Found := False;
+  for D := 0 to GetArrayLength(ExchangeDirs) - 1 do
+  begin
+    if Trim(ExchangeDirs[D]) = '' then Continue;
+
+    // 共用ディレクトリに置くため、固定名ファイルの先回り作成（squatting）への
+    // 緩和策としてランダムなファイル名を使い、実行前に同名ファイルを削除する
+    OutFile := AddBackslash(ExchangeDirs[D]) +
+      'iccm_mapped_drives_' + IntToStr(Random(2147483647)) + '.txt';
+    DeleteFile(OutFile);
+
+    ExecOk := ExecAsOriginalUser(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'),
+      // -Encoding UTF8: PowerShell 5.1 は BOM 付き UTF-8 で書き出す。Inno Setup の
+      // LoadStringsFromFile は BOM を自動検出して Unicode にデコードするため、
+      // 日本語を含む共有名（例: \\server\道路_建設推進課）も正しく扱える。
+      // ASCII を指定すると non-ASCII 文字が ? に lossy 置換され、後段の net use が
+      // 不正なパスで失敗する（Issue #1584）。
+      '-NoProfile -ExecutionPolicy Bypass -Command "Get-CimInstance Win32_MappedLogicalDisk | ForEach-Object { ''DeviceID='' + $_.DeviceID; ''ProviderName='' + $_.ProviderName; '''' } | Out-File -FilePath ''' + OutFile + ''' -Encoding UTF8"',
+      '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+
+    if not ExecOk then
+      Log('マップトドライブ検出(Method 2): PowerShell の起動に失敗 (dir=' + ExchangeDirs[D] + ')')
+    else
+      Log('マップトドライブ検出(Method 2): PowerShell exit code=' + IntToStr(ResultCode) +
+          ' (dir=' + ExchangeDirs[D] + ')');
+
+    if FileExists(OutFile) then
+    begin
+      Found := True;
+      Break;
+    end;
+  end;
+
+  if not Found then
+  begin
+    Log('マップトドライブ検出(Method 2): 受け渡しファイルが作成されず検出をスキップしました');
+    Exit;
+  end;
+
   if not LoadStringsFromFile(OutFile, Lines) then
   begin
+    Log('マップトドライブ検出(Method 2): 受け渡しファイルの読み込みに失敗しました');
     DeleteFile(OutFile);
     Exit;
   end;
@@ -302,6 +347,7 @@ begin
   SetArrayLength(MappedDriveRemotePaths, MappedDriveCount);
 
   DeleteFile(OutFile);
+  Log('マップトドライブ検出(Method 2): ' + IntToStr(MappedDriveCount) + ' 件');
 end;
 
 // 管理者権限で実行中はBrowseForFolderにマップトドライブが表示されないため、
@@ -322,11 +368,17 @@ begin
 
   for I := 0 to MappedDriveCount - 1 do
   begin
-    if not DirExists(MappedDriveLetters[I] + '\') then
+    if DirExists(MappedDriveLetters[I] + '\') then
+      Log('再マッピング不要（昇格セッションで既にアクセス可能）: ' + MappedDriveLetters[I])
+    else
     begin
-      Exec(NetExe,
-           'use ' + MappedDriveLetters[I] + ' "' + MappedDriveRemotePaths[I] + '" /persistent:no',
-           '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+      if Exec(NetExe,
+              'use ' + MappedDriveLetters[I] + ' "' + MappedDriveRemotePaths[I] + '" /persistent:no',
+              '', SW_HIDE, ewWaitUntilTerminated, ResultCode) then
+        Log('再マッピング: net use ' + MappedDriveLetters[I] + ' "' + MappedDriveRemotePaths[I] +
+            '" → exit code=' + IntToStr(ResultCode))
+      else
+        Log('再マッピング: net.exe の起動に失敗 (' + MappedDriveLetters[I] + ')');
     end;
   end;
 end;
