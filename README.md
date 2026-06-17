@@ -28,7 +28,7 @@
 |------|------|
 | OS | Windows 10 / 11 |
 | ランタイム | .NET Framework 4.8（Windows 10 以降は標準搭載） |
-| ICカードリーダー | Sony PaSoRi（RC-S300 等） |
+| ICカードリーダー | Sony PaSoRi（RC-S300/RC-S380 等） |
 | ネットワーク | 不要（スタンドアロン動作。共有モード利用時のみ LAN 接続が必要） |
 
 ## ドキュメント
