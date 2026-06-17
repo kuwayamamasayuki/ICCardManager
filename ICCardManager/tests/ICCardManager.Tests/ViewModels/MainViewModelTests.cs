@@ -813,6 +813,24 @@ public class MainViewModelTests : IDisposable
         _viewModel.HistoryLedgers[0].HasBalanceInconsistency.Should().BeFalse();
     }
 
+    // 履歴統合の職員認証ゲート（SEQ-AUTH-01）
+    [Fact]
+    public async Task MergeHistoryLedgers_認証キャンセル時_統合を実行しない()
+    {
+        // Arrange: 隣接する2件をチェック済みにする
+        _viewModel.HistoryLedgers.Add(new LedgerDto { Id = 1, IsChecked = true });
+        _viewModel.HistoryLedgers.Add(new LedgerDto { Id = 2, IsChecked = true });
+        // _staffAuthServiceMock は未設定 → RequestAuthenticationAsync は既定で null（=認証キャンセル）を返す
+
+        // Act
+        await _viewModel.MergeHistoryLedgersCommand.ExecuteAsync(null);
+
+        // Assert: 認証を要求し、キャンセルされたため確認ダイアログ・統合処理へ進まない
+        // （認証ゲートは確認ダイアログ MessageBox.Show より前に位置するため、本テストは UI を起動しない）
+        _staffAuthServiceMock.Verify(
+            s => s.RequestAuthenticationAsync("履歴の統合"), Times.Once);
+    }
+
     [Fact]
     public void ApplyBalanceInconsistencyMarkers_複数の不整合がある場合にすべてマーキングされること()
     {

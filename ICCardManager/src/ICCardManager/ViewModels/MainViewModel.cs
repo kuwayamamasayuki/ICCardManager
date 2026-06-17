@@ -1972,6 +1972,11 @@ public partial class MainViewModel : ViewModelBase
         // 表示順（古い順）でソートされたDTOリスト
         var sortedDtos = indices.Select(i => HistoryLedgers[i]).ToList();
 
+        // 履歴統合は ledger を改変する監査対象の重要操作のため職員認証を要求する
+        // （設計 06_シーケンス図 §10 / SEQ-AUTH-01。追加・削除・変更と同じゲート）
+        var authResult = await _staffAuthService.RequestAuthenticationAsync("履歴の統合");
+        if (authResult == null) return;
+
         // 確認ダイアログ
         var message = "以下の履歴を統合します。\n\n";
         foreach (var dto in sortedDtos)
@@ -1990,7 +1995,7 @@ public partial class MainViewModel : ViewModelBase
 
         // 統合実行
         var ledgerIds = sortedDtos.Select(dto => dto.Id).ToList();
-        var mergeResult = await _ledgerMergeService.MergeAsync(ledgerIds);
+        var mergeResult = await _ledgerMergeService.MergeAsync(ledgerIds, authResult.Idm);
 
         if (mergeResult.Success)
         {
