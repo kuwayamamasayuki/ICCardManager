@@ -1,6 +1,6 @@
 # 更新履歴
 
-### Unreleased
+### v2.9.3 (2026-06-18)
 
 **ドキュメント**
 - Issue #1612 最重要ルール「交通系ICカードを指す場合は必ず『交通系ICカード』と記載（単なる『ICカード』はNG、『ICカードリーダー』はOK）」の違反が Issue #1460/#1474 の一括統一後も残存していたため是正した。修正対象: (a) UI 文言 `ValidationService.ValidateCardIdm` 空入力エラー「カードリーダーで**ICカード**をタッチするか…」→「カードリーダーで**交通系ICカード**をタッチするか…」。同メソッドはカード管理ダイアログ（`CardManageViewModel`）と CSV 取込（`CsvImportService`）における交通系ICカード登録専用で、職員証検証は別メソッド `ValidateStaffIdm` が担うため「職員証または」ではなく「交通系ICカード」が正しい、(b) ユーザーマニュアル概要版の画像 alt テキスト「![ICカードをタッチ]」×2（docx/PDF 変換時に図表名として露出しうる）、(c) 03_画面設計書（状態遷移図・画面一覧・操作ヒント・仮想カードダイアログ等 11 箇所。実 UI `MainWindow.xaml:869` は既に「交通系ICカード」表記のため設計書を実装へ同期）、(d) 02_DB設計書（ledger_detail 説明・§11.4 物理排他制御の本文計 4 箇所）、(e) 07_テスト設計書（UT-039 背景・UT-064 目的の計 2 箇所）。なお 07_テスト設計書 §UT-063（「ICカード」単独表記を検出する CI テスト自体の仕様記述）と 00_用語集の「単に『ICカード』とは呼ばない」は、違反パターンを意図的に引用しているメタ記述のため変更しない。回帰防止として `ValidationServiceTests` に `ValidateCardIdm_WithEmptyIdm_ShouldUseKoutsuukeiTerminology`（エラーメッセージが「交通系ICカード」を含み、裸の「ICカード」表記を含まないことを検証）を 1 件追加。07_テスト設計書 §1.1a（3,555→3,556 件）・§UT-008 カードIDm表（No.10）を同期更新（#1612）
@@ -28,6 +28,47 @@
 - Issue #1604 「○月から繰越」（年度途中導入カードの繰越レコード, Issue #510）判定の二重実装に整合性テストを追加し、併せて判定ロジックを一元化した。従来は (a) ソート・特別扱い用の `Ledger.IsMidYearCarryover`（`Ledger.cs` にハードコードした正規表現 `^(1[0-2]|[1-9])月から繰越$`）と、(b) 帳票集計フィルタ用の `SummaryGenerator.IsMidYearCarryoverSummary`（組織設定 `OrganizationOptions.SummaryText.MidYearCarryoverPattern` でカスタム可能、`ReportDataBuilder` / `ReportRowBuilder` が使用）が独立実装されており、組織設定でパターンをカスタムすると両者が乖離し、月計・累計の二重計上（Issue #1494 で対策した問題の再発形）につながるリスクがあった。`Ledger.IsMidYearCarryover` / `IsCarryover` は本体コードからは呼ばれず（ソート・特別扱いは SQL の `summary LIKE '%月から繰越'` 側が担う）テストからのみ検証される domain ヘルパーであり、呼び出し側への影響がないことを確認した上で、`Ledger.IsMidYearCarryover` を `SummaryGenerator.IsMidYearCarryoverSummary` への委譲に変更して判定を単一の真実源に統合（ハードコード正規表現と `System.Text.RegularExpressions` using を除去、`ICCardManager.Services` を参照）。これにより組織設定パターン下でも両判定が常に一致する。回帰防止として `MidYearCarryoverConsistencyTests` 26 件を新設（デフォルト設定での両判定一致17パターン＝正常系1〜12月・前後空白・ゼロ埋め・無効月・空・null 等／カスタムパターン設定時の両判定一致5件／不正な正規表現 `[` 設定時にデフォルトパターンへフォールバックする `catch (ArgumentException)` 分岐の検証4件＝従来一度も実行されていなかった分岐をカバー）。一元化により `Ledger.IsMidYearCarryover` が `SummaryGenerator` の静的 `_options` を読むようになったため、`LedgerTests` を `SummaryGeneratorCollection`（並列実行抑止）へ編入し `IDisposable` でデフォルトへリセット、`SummaryGeneratorCollectionConfigurationTests` の Collection 編入検証 Theory 2 つに `MidYearCarryoverConsistencyTests` / `LedgerTests` を追加（計4件増）。本番の利用箇所（帳票集計）の挙動はデフォルト設定で不変。07_テスト設計書 §1.1a（3,506→3,536）・UT-002c-2 を同期更新（#1604）
 - Issue #1603 払い戻しフローの単体テストが 2 層で欠落していたため補完した。(a) `CardManageViewModel.RefundAsync` を検証する `CardManageViewModelTests` 6 件を新設（残高ありの正常払戻で Income=0／Expense=残高／Balance=0／Summary="払戻しによる払出"／IsLentRecord=false の Ledger 生成と `SetRefundedAsync` 呼出、残高なし=Ledger 不在時の Expense=0／Balance=0、貸出中カードの「貸出中」エラーダイアログと払戻処理スキップ、カード未選択時の no-op、確認ダイアログキャンセル時の no-op、`SetRefundedAsync` 失敗時のエラーダイアログ表示）、(b) テスト設計書 UT-002 No.10 に記載がありながらテストが存在しなかった `SummaryGenerator.GetRefundSummary` の `SummaryGeneratorTests` 2 件を新設（デフォルト "払戻しによる払出"、`OrganizationOptions.SummaryText.RefundSummary` カスタム時の反映）。本番コードの変更は伴わない既存挙動の回帰防止テスト。07_テスト設計書 §1.1a（3,498→3,506）・UT-002・UT-025 を同期更新（#1603）
 
+**バグ修正**
+- Issue #1584 保護付き{tmp}で常に失敗していたマップトドライブ検出を修正（#1584）
+- 履歴統合・分割に職員認証ゲートを追加（無認証で実行できる監査統制欠落を是正）（SEQ-AUTH-01）（#1652）
+- Issue #1626 フレーキーテスト IsRetouchWithinTimeout_Exactly30Seconds を時刻注入で決定論化（#1626）
+- Issue #1615 カード管理・職員管理ダイアログだけ Esc キーで閉じられない（IsCancel 未設定）を是正（#1615）
+- Issue #1614 エラーメッセージ品質ガイドライン違反（生 ex.Message 表示・3要素欠如）を是正（#1614）
+- Issue #1613 色リテラル直書きの残存を是正しSSOTへ統合（#1613）
+- Issue #1602 月次帳票の前月残高取得を利用空白月をまたいで遡及（#1602）
+- Issue #1623 Release構成のCS1574警告を解消（cref→プレーン表記）（#1623）
+- Issue #1600 起動時に一時テンプレートを回収して %TEMP% 蓄積を解消（#1600）
+- Issue #1599 起動時に database_config.txt のパスを形式検証してフォールバック（#1599）
+- Issue #1598 設定ファイル保存を File.Replace で原子的置換に変更（#1598）
+- Issue #1597 ローカルフルパス指定でも共有モード用キャッシュTTL短縮が発動する問題を修正（#1597）
+- Issue #1616 文字サイズ設定に追従しない固定FontSizeとNoResizeダイアログを修正（#1616）
+- Issue #1584 マップトドライブ検出の日本語共有名対応 (ASCII→UTF-8)（#1584）
+
+**リファクタリング**
+- Issue #1610 参照されないデッドリソース schema.sql を削除しドキュメント参照をマイグレーションへ同期（#1610）
+
+**ドキュメント**
+- 03_画面設計書 §4.1 ヘッダー色を SSOT 実態へ是正（直接指定→HeaderBackgroundBrush）（ドリフト監査 D1）（#1650）
+- business-logic 摘要表のチャージ文言に企業会計部局「旅費によりチャージ」を併記（ドリフト監査 D2）（#1649）
+- 設計書索引(docs/design/README)に欠落していた 00a_技術スタック用語集 を追加（ドリフト監査 D6）（#1648）
+- 04_機能設計書を実装へ整合（出力ファイル名・削除SQL・貸出中摘要の全角）（ドリフト監査 D1/D9）（#1646）
+- 02_DB設計書のマイグレーション履歴表・インデックス・SQL例を実装へ同期（ドリフト監査 D1/D5/D2）（#1645）
+- 設計書05/08を実態へ整合（存在しないCardTypeDetector削除・管理doc配置パス是正）（ドリフト監査 D1/D6）（#1647）
+- 06_シーケンス図を実装へ整合（サウンドAPI・バックアップ手段・用語）（ドリフト監査 D1/D9）（#1644）
+- CLAUDE.md の構成記述を実態へ同期（ルール表・ディレクトリツリー・設計書番号）（ドリフト監査 D2/D1）（#1643）
+- 機能設計書 §8.2「4月計」サンプルの受入金額を実装に整合（3000→8000）（ドリフト監査 D1）（#1642）
+- 帳票テンプレートの単一ファイル名参照を部署別2ファイルへ是正（ドリフト監査 D6）（#1641）
+- Issue #1612 交通系ICカードの用語ルール違反（UI文言・設計書・マニュアル）を是正（#1612）
+- Issue #1611 設計書・マニュアルの陳腐化/記載漏れを実装へ同期（#1611）
+- Issue #1609 VACUUM の旧仕様記述を #1482 正仕様（月次CASロック自動実行）へ同期（#1609）
+- Issue #1608 自動バックアップ機能の有無を設計書間で実装に統一（#1608）
+- Issue #1607 ヘルスチェック間隔「30秒」の旧記述を #1493 正仕様（15秒）へ同期（#1607）
+- Issue #1606 共有モード判定の旧仕様記述を #1559 正仕様へ同期（#1606）
+
+**テスト**
+- Issue #1605 IsNetworkDrive 正方向分岐を注入シームで単体テスト可能化（#1605）
+- Issue #1604 「○月から繰越」判定の整合性テストを追加し判定を一元化（#1604）
+- Issue #1603 払い戻しフロー（RefundAsync／GetRefundSummary）の単体テストを追加（#1603）
 
 ### v2.9.2 (2026-05-28)
 
