@@ -37,7 +37,7 @@ THEN
 ## 共有フォルダモード（複数PC共有DB）
 - DBパスは `C:\ProgramData\ICCardManager\database_config.txt` で指定（空欄/未作成=ローカルデフォルト）。インストーラーの「データベースの保存先」ページまたは設定画面（F5）から設定。設定画面の「デフォルトに戻す」ボタンで `database_config.txt` を削除して復旧可能（Issue #1559）
 - 共有モードの判定は **UNCパス**（`\\server\share\iccard.db`）または **マップドネットワークドライブ**（`Z:\share\iccard.db` 等で `DriveInfo.DriveType == DriveType.Network`）指定時に自動的に有効化される（Issue #1559）。ローカルフルパス指定（例: `C:\Users\foo\db\iccard.db`）では共有モードにならない
-- 共有モード時: journal_mode=DELETE（WALはネットワーク非推奨。DELETE設定不可時は TRUNCATE → PERSIST の順にフォールバック、Issue #1107）、busy_timeout=15000ms（SMB遅延と最大20台の同時アクセスを考慮、Issue #1107。ローカルモード時は5000ms）
+- journal_mode=DELETE は**全接続に適用**（`DbContext.ConfigurePragmas` は `IsSharedMode` で分岐せず、常に DELETE→TRUNCATE→PERSIST の順に試行する。WAL はネットワーク（SMB）非推奨のため、共有モードの安全性を主目的に全モードで DELETE に統一、Issue #1107）。busy_timeout は**モード別**（共有モード15000ms / ローカルモード5000ms。SMB遅延と最大20台の同時アクセスを考慮、Issue #1107）
 - キャッシュTTLを短縮し他PCの変更を早期反映
 - 15秒ごとの接続ヘルスチェック＋自動再接続（共有モード時のカード系キャッシュの最長TTL=15秒（カード一覧 15秒・貸出中カード 10秒。職員一覧 30秒・設定 3分 は対象外）および stale 判定しきい値=15秒と一致させる、Issue #1493）
 - ステータスバーに「共有モード」表示、ネットワーク切断時は警告表示

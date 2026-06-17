@@ -4,6 +4,7 @@
 
 **ドキュメント**
 - ドリフト監査（B グループ）規約・設計書の旧仕様記述を実装の正仕様へ同期した。(a) **ヘルスチェック SQL**: `02_DB設計書 §10`・`04_機能設計書`・`05_クラス設計書` が `SELECT 1` と例示していたが、実装 `DbContext.CheckConnection()` は `SELECT COUNT(*) FROM sqlite_master`（Issue #1110: 定数の `SELECT 1` では実ファイルアクセスが発生せず切断を検出できないため sqlite_master 読み取りを強制）へ修正。(b) **VACUUM 実行タイミング**: `business-logic.md`・`04_機能設計書`・`00a_技術スタック用語集` が「月初」と記していたが、実装 `App.xaml.cs` は `today.Day >= 10`（毎月10日以降の最初の起動時）でのみ試行するため「10日以降の初回起動時」へ修正。(c) **CA2007 適用範囲**: `async-configureawait.md` が「Service 層のみ対象」と記していたが、`.editorconfig` は `src/ICCardManager` 配下全体を `suggestion`（ViewModels / Views / tests のみ `none`）とするため実態へ修正。いずれも doc のみの修正で実装挙動の変更なし（SEQ-AUTH-01 / ドリフト監査 B）
+- ドリフト監査（A-2 / SHARED-R5-01）`journal_mode` の記述を実態へ同期した。`business-logic.md` / `02_DB設計書 §10` が「共有モード時: journal_mode=DELETE」と共有限定で記していたが、実装 `DbContext.ConfigurePragmas` は `IsSharedMode` で分岐せず**全接続に DELETE→TRUNCATE→PERSIST を試行**する（WAL は SMB 上で問題を起こすため使わない）。doc を「journal_mode=DELETE は全接続に適用（主目的は共有モードの安全性）、busy_timeout のみモード別」へ修正。doc のみ・実装挙動の変更なし（SHARED-R5-01）
 
 ### v2.9.4 (2026-06-18)
 
