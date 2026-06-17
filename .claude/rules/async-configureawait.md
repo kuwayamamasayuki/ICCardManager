@@ -26,7 +26,7 @@ ViewModel と同じ理由で付けない。
 
 ## アナライザ
 
-`.editorconfig` で `CA2007` を `severity=suggestion` として設定。Service 層のみ対象、ViewModels / Views / tests は `none` で無効化。
+`.editorconfig` で `CA2007` を `severity=suggestion` として設定。`src/ICCardManager` 配下全体が対象（Common / Data / Dtos / Infrastructure / Models / Services 等）で、ViewModels / Views / tests のみ `none` で無効化。
 
 ## 例外: UI 依存サービス
 
