@@ -190,6 +190,16 @@ begin
   end;
 end;
 
+// Issue #1655: 「このPCのみで使用」を選択したら共有フォルダパス欄を空にする
+// （前回設定で残った共有パスが見えたままだと誤解を招く。実際の database_config.txt 削除は
+//   WriteDatabaseConfig が担うが、UI 上もパスを残さないことで挙動を一致させる）
+procedure DatabaseLocalRadioClick(Sender: TObject);
+begin
+  if (DatabaseLocalRadio <> nil) and DatabaseLocalRadio.Checked
+     and (DatabasePathEdit <> nil) then
+    DatabasePathEdit.Text := '';
+end;
+
 // DB保存先の「参照」ボタンクリック
 procedure DatabaseBrowseButtonClick(Sender: TObject);
 var
@@ -433,6 +443,7 @@ begin
   DatabaseLocalRadio.Width := DatabasePage.SurfaceWidth;
   DatabaseLocalRadio.Height := 20;
   DatabaseLocalRadio.Checked := True;
+  DatabaseLocalRadio.OnClick := @DatabaseLocalRadioClick;  // Issue #1655: 選択時に共有パス欄を空にする
 
   DatabaseSharedRadio := TNewRadioButton.Create(DatabasePage);
   DatabaseSharedRadio.Parent := DatabasePage.Surface;
@@ -565,19 +576,23 @@ begin
       SharedPath := Trim(DatabasePathEdit.Text);
   end;
 
-  if not IsShared then
-    Exit;
-
-  if SharedPath = '' then
-    Exit;
-
-  // フォルダパス + ファイル名
-  FullDbPath := AddBackslash(SharedPath) + 'iccard.db';
-
   ConfigDir := ExpandConstant('{commonappdata}\ICCardManager');
-  ForceDirectories(ConfigDir);
   ConfigFile := ConfigDir + '\database_config.txt';
 
+  // Issue #1655: 「このPCのみで使用」選択時（または共有パス未指定時）は、前回インストールで
+  // 残った共有フォルダ設定を確実に削除する。削除せず Exit するだけだと、旧パス（例: V:\...）が
+  // database_config.txt に残存し、ローカル運用を選んだのに起動時へ伝播して共有モードのまま
+  // アクセスエラーになる（database_config.txt が無い＝ローカル既定、が正しい挙動）。
+  if (not IsShared) or (SharedPath = '') then
+  begin
+    if FileExists(ConfigFile) then
+      DeleteFile(ConfigFile);
+    Exit;
+  end;
+
+  // 共有フォルダ: フォルダパス + ファイル名 を書き出す
+  FullDbPath := AddBackslash(SharedPath) + 'iccard.db';
+  ForceDirectories(ConfigDir);
   SaveStringToFile(ConfigFile, FullDbPath, False);
 end;
 
