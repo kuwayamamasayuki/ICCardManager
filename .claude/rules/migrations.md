@@ -47,7 +47,7 @@
 
 ## 参考
 
-- 設計書: `docs/superpowers/specs/2026-04-19-issue-1285-migration-idempotency-design.md`
+- 設計書: `ICCardManager/docs/superpowers/specs/2026-04-19-issue-1285-migration-idempotency-design.md`
 - 設計書: `ICCardManager/docs/superpowers/specs/2026-05-22-issue-1466-migration-helpers-validation-design.md`（引数検証）
 - ヘルパー実装: `ICCardManager/src/ICCardManager/Data/Migrations/MigrationHelpers.cs`
 - テスト例: `ICCardManager/tests/ICCardManager.Tests/Data/Migrations/MigrationIdempotencyTests.cs`

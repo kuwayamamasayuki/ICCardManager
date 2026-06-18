@@ -8,7 +8,7 @@
 
 **Tech Stack:** WPF (.NET Framework 4.8), C# 10, MVVM Toolkit, xUnit + FluentAssertions, FlaUI 5.0.0 (UI Automation), AccessibilityStyles.xaml (WCAG 2.1 AA 準拠ブラシ)
 
-**Spec:** `docs/superpowers/specs/2026-05-11-issue-1509-staff-auth-live-region-design.md`
+**Spec:** `ICCardManager/docs/superpowers/specs/2026-05-11-issue-1509-staff-auth-live-region-design.md`
 
 **ブランチ:** `fix/issue-1509-live-region-firing`（既に main から作成済み）
 

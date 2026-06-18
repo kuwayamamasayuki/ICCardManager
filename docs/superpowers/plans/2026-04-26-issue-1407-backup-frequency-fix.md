@@ -62,7 +62,7 @@ Expected: §3.3 と §6.1 が両方ヒットすること（補足ブロックの
 
 ```bash
 git add ICCardManager/docs/manual/管理者マニュアル.md \
-        docs/superpowers/specs/2026-04-26-issue-1407-backup-frequency-fix-design.md \
+        ICCardManager/docs/superpowers/specs/2026-04-26-issue-1407-backup-frequency-fix-design.md \
         docs/superpowers/plans/2026-04-26-issue-1407-backup-frequency-fix.md
 git commit -m "$(cat <<'EOF'
 docs: 管理者マニュアル §9.1 自動バックアップ頻度を実装に合わせて修正 (Issue #1407)
@@ -102,7 +102,7 @@ gh pr create --title "docs: 管理者マニュアル §9.1 自動バックアッ
 
 - 管理者マニュアル §9.1 表で「日次（自動）バックアップ」と記載していた頻度を、実装挙動に合わせて「起動時」に変更
 - 表直下に補足ブロックを追加し、常駐起動運用 vs 手動起動運用での実質頻度差と、長期間未起動時の手動バックアップ推奨を明記
-- 設計書: \`docs/superpowers/specs/2026-04-26-issue-1407-backup-frequency-fix-design.md\`
+- 設計書: \`ICCardManager/docs/superpowers/specs/2026-04-26-issue-1407-backup-frequency-fix-design.md\`
 - Closes #1407
 
 ## Test plan

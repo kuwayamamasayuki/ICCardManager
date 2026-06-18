@@ -703,7 +703,7 @@ EOF
 
 ## 参考
 
-- 設計書: `docs/superpowers/specs/2026-04-19-issue-1285-migration-idempotency-design.md`
+- 設計書: `ICCardManager/docs/superpowers/specs/2026-04-19-issue-1285-migration-idempotency-design.md`
 - ヘルパー: `ICCardManager/src/ICCardManager/Data/Migrations/MigrationHelpers.cs`
 ```
 

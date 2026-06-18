@@ -99,7 +99,7 @@ gh pr create --title "docs: 管理者マニュアル §5.6.3 の手順番号 10 
 ## Summary
 
 - 管理者マニュアル §5.6.3「登録手順（紙の出納簿からの繰越の場合）」の手順番号が \`9 → 11 → 12\` と飛び番になっていた問題を、\`9 → 10 → 11\` の連番に修正
-- 設計書: \`docs/superpowers/specs/2026-04-26-issue-1406-step-numbering-fix-design.md\`
+- 設計書: \`ICCardManager/docs/superpowers/specs/2026-04-26-issue-1406-step-numbering-fix-design.md\`
 - Closes #1406
 
 ## Test plan

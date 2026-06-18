@@ -34,5 +34,5 @@ ViewModel と同じ理由で付けない。
 
 ## 参考
 
-- 設計書: `docs/superpowers/specs/2026-04-19-issue-1287-configure-await-services-design.md`
+- 設計書: `ICCardManager/docs/superpowers/specs/2026-04-19-issue-1287-configure-await-services-design.md`
 - Issue #1287

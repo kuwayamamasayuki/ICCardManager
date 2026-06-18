@@ -6,7 +6,7 @@
 
 **Architecture:** Markdown 文書 (`管理者マニュアル.md`) + CHANGELOG への 1 行追記のみ。コードロジック・ps1・スクリーンショット撮影スクリプトは変更なし (PR #1427 で既設)。画像本体ファイルはユーザーが別コミットで追加 (Issue #1415 / #1416 と同パターン)。
 
-**Tech Stack:** Markdown / Git。設計書: `docs/superpowers/specs/2026-05-01-issue-1417-backup-restore-screenshots-design.md`。
+**Tech Stack:** Markdown / Git。設計書: `ICCardManager/docs/superpowers/specs/2026-05-01-issue-1417-backup-restore-screenshots-design.md`。
 
 ---
 
@@ -287,7 +287,7 @@ gh pr create --title "docs: 管理者マニュアル §6.1/§6.2 バックアッ
 
 ## 関連
 
-- 設計書: `docs/superpowers/specs/2026-05-01-issue-1417-backup-restore-screenshots-design.md`
+- 設計書: `ICCardManager/docs/superpowers/specs/2026-05-01-issue-1417-backup-restore-screenshots-design.md`
 - 関連 Issue: #1415 / #1416 (同系統のスクリーンショット追加 PR)
 - 関連 PR: #1427 (TakeScreenshots.ps1 拡張、本 PR の画像エントリを既設)
 

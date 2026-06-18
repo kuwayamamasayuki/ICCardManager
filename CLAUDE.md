@@ -27,7 +27,7 @@
 │       ├── manual/                        # ユーザー・管理者・開発者マニュアル
 │       └── 線区駅順コード/                  # 駅コード→駅名マスター
 ├── CLAUDE.md                              # 本ファイル（プロジェクト指示書）
-├── docs/                                  # ルート直下。現状は superpowers プラグインキャッシュ等のみ（本プロジェクトの設計書は ICCardManager/docs/ 配下）
+├── docs/                                  # ルート直下の superpowers ワークフロー成果物（プラグインキャッシュ・plans）。設計 spec は ICCardManager/docs/superpowers/specs/ に集約済み（本プロジェクトの設計書は ICCardManager/docs/ 配下）
 └── tools/                                 # ルート直下の補助スクリプト群（ICCardManager/tools/ とは別物）
 ```
 
