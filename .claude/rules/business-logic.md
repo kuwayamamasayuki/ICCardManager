@@ -12,6 +12,10 @@
    - 貸出中(is_lent=1) → 返却処理
 3. 30秒以内に同一カード再タッチ → 逆処理（貸出→返却、返却→貸出）
 
+> **「30秒」は既定値で変更可能**: しきい値は `AppOptions.RetouchWindowSeconds`（既定 `AppConstants.DefaultCardRetouchTimeoutSeconds = 30`）で設定できる。本書で「30秒」と書く箇所はこの既定値を指す。
+>
+> **逆処理は「職員証タッチ待ち」状態でも発生する**: 上記フローは線形に見えるが、再タッチ逆処理は交通系ICカードタッチ待ち状態に限定されない。職員証を再タッチせずに同一の交通系ICカードを時間内に再タッチした場合も、`MainViewModel.HandleCardInStaffWaitingStateAsync` が `IsRetouchWithinTimeout` を判定して `Process30SecondRuleAsync`（逆処理）を実行する。
+
 ## バス利用判別ロジック
 ```
 IF entry_station（乗車駅）が空欄 AND

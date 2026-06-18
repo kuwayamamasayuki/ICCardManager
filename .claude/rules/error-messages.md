@@ -106,3 +106,11 @@ StatusMessage = ExceptionMessageFormatter.ToUserMessage(ex, "台帳の保存");
 ## テスト
 
 エラーメッセージ品質を固定するため、`ValidationServiceErrorMessageQualityTests` の `AssertQualityCriteria` を参考に、新しい Validator を追加する際は同様の品質テストを書く。
+
+品質テストは対象の増加に伴い複数クラスへ分化している。新規追加時は最も近い既存クラスを参考にすること。
+
+| クラス | 対象 |
+|--------|------|
+| `ValidationServiceErrorMessageQualityTests` | `ValidationService` の各 Validator |
+| `PathValidatorErrorMessageQualityTests` | パス検証（`SafeFilePathValidator` 等）のエラー文言 |
+| `ExceptionMessageFormatterTests` | `ExceptionMessageFormatter.ToUserMessage`（例外→3要素文言、Issue #1614） |

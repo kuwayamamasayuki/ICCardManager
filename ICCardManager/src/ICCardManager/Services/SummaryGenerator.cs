@@ -68,7 +68,15 @@ namespace ICCardManager.Services
     /// </item>
     /// <item>
     /// <term>チャージ</term>
-    /// <description>役務費によりチャージ</description>
+    /// <description>役務費によりチャージ（企業会計部局設定時は「旅費によりチャージ」。<see cref="OrganizationOptions"/>）</description>
+    /// </item>
+    /// <item>
+    /// <term>ポイント還元</term>
+    /// <description>ポイント還元</description>
+    /// </item>
+    /// <item>
+    /// <term>払戻し</term>
+    /// <description>払戻しによる払出</description>
     /// </item>
     /// </list>
     /// <para>
