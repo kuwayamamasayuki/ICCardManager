@@ -3,6 +3,7 @@
 ### Unreleased
 
 **バグ修正**
+- ドリフト監査（TERM-R4-01 / TERM-R5-01）用語統一 CI ガード `UserFacingTextConventionTests`（Issue #1460）が、トースト通知の文言を一切走査できていなかった問題を是正した。検査対象に実在しない `ShowToast*()` を指定していたため（実トースト API は `IToastNotificationService.ShowInfo` / `ShowWarning` / `ShowError(title, message)`）トースト呼び出しが走査スコープ外で、さらに抽出が**第1引数のみ**だったためユーザー文言が入る**第2引数 message** と `$"..."` 補間文字列も取りこぼしていた（「ICカード」単独表記の将来混入を検出できない潜在ギャップ）。実トースト caller を検査対象へ追加し、抽出ロジックを「呼び出しの全引数の文字列リテラル（第2引数以降・補間文字列の静的テキストを含む。補間穴 `{expr}` は除外）」を文字単位スキャナで走査する方式へ刷新。回帰防止に抽出ロジックのセルフテストを1件追加（`ExtractCSharpUserFacingArguments_ScansSecondArgumentAndInterpolatedText`）。拡充後も既存の UI 文言に裸の「ICカード」違反は0件でグリーン維持。07_テスト設計書 §2.48（検査範囲・UT-063-4）/ §1.1a（3,566→3,567件）を同期更新（ドリフト監査 TERM-R4-01 / TERM-R5-01 / Issue #1460）
 - Issue #1614 例外メッセージ品質ガイドライン違反（生 `ex.Message` の UI 露出）の残存を是正した。`StaffManageViewModel`（職員の保存／削除の catch、計2箇所）と `OperationLogSearchViewModel`（操作ログのエクスポートの catch）が、捕捉した例外の生 `ex.Message` を `StatusMessage`／`ShowError` ダイアログへ直接出していた。`ex.Message` は SQLite エラー等の英語・技術用語を含みうるため職員には解読不能で、内部実装の露出にもなる。各 catch を `ExceptionMessageFormatter.ToUserMessage(ex, 操作名)` 経由の「何が／なぜ／どうすれば」3要素文言へ差し替え、技術的詳細は `ErrorDialogHelper.LogException(ex, 操作名)`（両 VM とも `ILogger` 未注入のためファイルログ機構を使用）へ逃がした。回帰防止として、生の技術詳細を漏らさず操作名を含み「～ください。」で終わることを固定する単体テストを3件追加（`StaffManageViewModelTests` 2件・`OperationLogSearchViewModelTests` 1件）。なお `MainViewModel` の仮想タッチエラー（`#if DEBUG` 限定のデバッグ機能で一般ユーザーに露出しない）、起動時致命エラーとクラッシュ診断用の `StackTrace` 表示（意図的）はスコープ外。07_テスト設計書 §1.1a（3,563→3,566件）を同期更新（#1614）
 
 **ドキュメント**
