@@ -118,7 +118,7 @@ installer/output/ICCardManager_Setup_1.0.7.exe
 ### 動作環境
 
 - **OS**: Windows 10/11 (64-bit)
-- **ICカードリーダー**: Sony PaSoRi（RC-S380等）
+- **ICカードリーダー**: Sony PaSoRi（RC-S300/RC-S380等）
 - **.NET Framework**: 4.8（Windows 10/11にプリインストール済み）
 - **ストレージ**: 100MB以上の空き容量
 
