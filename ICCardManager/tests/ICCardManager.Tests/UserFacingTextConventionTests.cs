@@ -47,8 +47,15 @@ public class UserFacingTextConventionTests
 
     /// <summary>
     /// C# 側でユーザー文言を渡すと想定される呼び出しパターン。
-    /// 第1引数（文字列リテラル）を検査対象に抽出する。
+    /// 各呼び出しの「全引数」の文字列リテラル（第2引数以降・補間文字列を含む）を検査対象に抽出する。
     /// </summary>
+    /// <remarks>
+    /// Issue #1460 当初は実在しない <c>ShowToast*()</c> を対象にしており、トースト文言が一切走査されていなかった
+    /// （TERM-R4-01）。実トースト API は <see cref="ICCardManager.Services.IToastNotificationService"/> の
+    /// <c>ShowInfo</c> / <c>ShowWarning</c> / <c>ShowError</c><c>(title, message)</c> で、ユーザー文言は
+    /// <b>第2引数</b>。第1引数固定だった旧抽出ロジックでは message を取りこぼしていた（TERM-R5-01）。
+    /// 現在は全引数を走査するため title / message の双方が検査される。
+    /// </remarks>
     private static readonly string[] CSharpUserFacingCallers =
     {
         @"MessageBox\.Show",
@@ -60,7 +67,9 @@ public class UserFacingTextConventionTests
         @"DialogService\.ShowError",
         @"DialogService\.ShowInformation",
         @"DialogService\.ShowConfirmation",
-        @"ShowToast\w*",
+        @"_toastNotificationService\.ShowInfo",
+        @"_toastNotificationService\.ShowWarning",
+        @"_toastNotificationService\.ShowError",
         @"SetStatus",
     };
 
@@ -84,6 +93,37 @@ public class UserFacingTextConventionTests
     {
         HasStandaloneICCard(text).Should().Be(expectedViolation,
             $"入力「{text}」に対する検出結果が期待と異なる");
+    }
+
+    /// <summary>
+    /// 抽出ロジックのセルフテスト（TERM-R4-01 / TERM-R5-01 回帰防止）:
+    /// トーストの第2引数 message・補間文字列の静的テキストまで走査対象に含まれることを保証する。
+    /// ここが壊れると、トースト文言や `$"..."` 中の「ICカード」単独表記を取りこぼす。
+    /// </summary>
+    [Fact]
+    public void ExtractCSharpUserFacingArguments_ScansSecondArgumentAndInterpolatedText()
+    {
+        var sample =
+            "_toastNotificationService.ShowError(\"エラー\", \"ICカードをタッチしてください\");\n" +
+            "_dialogService.ShowWarning($\"{count}件のICカードが見つかりません\");\n" +
+            "MessageBox.Show(\"交通系ICカードを登録\", \"確認\");\n";
+
+        var texts = ExtractCSharpUserFacingArguments(sample).Select(h => h.Text).ToList();
+
+        // トーストは title(第1) と message(第2) の双方が抽出される
+        texts.Should().Contain("エラー");
+        texts.Should().Contain("ICカードをタッチしてください");
+        // MessageBox の第1・第2引数も抽出される
+        texts.Should().Contain("交通系ICカードを登録");
+        texts.Should().Contain("確認");
+        // 補間文字列は静的テキストのみ（補間穴 {count} は除外）
+        texts.Should().Contain("件のICカードが見つかりません");
+
+        // 抽出結果を検出関数に通すと、トースト message と補間文字列の裸「ICカード」を違反として捕捉できる
+        var violations = texts.Where(HasStandaloneICCard).ToList();
+        violations.Should().Contain("ICカードをタッチしてください");
+        violations.Should().Contain("件のICカードが見つかりません");
+        violations.Should().NotContain("交通系ICカードを登録"); // 正規表記は違反でない
     }
 
     [Fact]
@@ -159,60 +199,152 @@ public class UserFacingTextConventionTests
     }
 
     /// <summary>
-    /// C# のソース全体から、ユーザー文言を渡す呼び出しの第1引数文字列リテラルを抽出する。
-    /// 行番号も併せて返すため、違反時にすぐ箇所を特定できる。
+    /// C# のソース全体から、ユーザー文言を渡す呼び出しの「全引数」の文字列リテラルを抽出する。
+    /// 第1引数だけでなく第2引数以降（トーストの message 等）も対象とし、<c>$"..."</c> 補間文字列の
+    /// 静的テキストも拾う。行番号も併せて返すため、違反時にすぐ箇所を特定できる。
     /// </summary>
     private static IEnumerable<(string Text, int LineNumber)> ExtractCSharpUserFacingArguments(string content)
     {
         var callerAlt = string.Join("|", CSharpUserFacingCallers);
-        // 第1引数のみが必要。文字列リテラル中の \" / \\ をエスケープシーケンスとして許容する。
-        var pattern = $@"(?:{callerAlt})\s*\(\s*(@?""(?:[^""\\]|\\.)*"")";
-        foreach (Match m in Regex.Matches(content, pattern))
+        // 呼び出し名 + 開き括弧までをマッチし、そこから引数リストを文字単位で走査する。
+        var callerRegex = new Regex($@"(?:{callerAlt})\s*\(");
+        foreach (Match m in callerRegex.Matches(content))
         {
-            var literal = m.Groups[1].Value;
-            var unquoted = UnquoteCSharpStringLiteral(literal);
-            // マッチ開始位置から行番号を算出する（先頭から '\n' の数 + 1）
-            var lineNumber = content.Take(m.Index).Count(c => c == '\n') + 1;
-            yield return (unquoted, lineNumber);
+            foreach (var (text, index) in ExtractArgumentStringLiterals(content, m.Index + m.Length))
+            {
+                // マッチ開始位置から行番号を算出する（先頭から '\n' の数 + 1）
+                var lineNumber = content.Take(index).Count(c => c == '\n') + 1;
+                yield return (text, lineNumber);
+            }
         }
     }
 
     /// <summary>
-    /// C# 文字列リテラル表記から実際の文字列値を復元する（簡易版）。
-    /// 用語チェックには十分な精度。エスケープシーケンスは
-    /// `\n` `\t` `\"` `\\` のみ展開し、それ以外は素通し（検査対象外文字のため）。
+    /// 呼び出しの引数リスト（開き括弧の直後 <paramref name="startIndex"/> から対応する閉じ括弧まで）を
+    /// 文字単位で走査し、含まれる全ての文字列リテラルの静的テキストを列挙する。
+    /// 括弧・文字列リテラルを認識するため、入れ子の括弧やリテラル内の括弧・引用符を正しく扱う。
     /// </summary>
-    private static string UnquoteCSharpStringLiteral(string literal)
+    private static IEnumerable<(string Text, int Index)> ExtractArgumentStringLiterals(string content, int startIndex)
     {
-        if (literal.StartsWith("@\""))
+        int depth = 1; // すでに呼び出しの '(' の内側にいる
+        int i = startIndex;
+        while (i < content.Length && depth > 0)
         {
-            // verbatim 文字列: "" のみエスケープ。
-            return literal.Substring(2, literal.Length - 3).Replace("\"\"", "\"");
-        }
-
-        var inner = literal.Substring(1, literal.Length - 2);
-        var sb = new System.Text.StringBuilder(inner.Length);
-        for (int i = 0; i < inner.Length; i++)
-        {
-            if (inner[i] == '\\' && i + 1 < inner.Length)
+            char c = content[i];
+            if (c == '"' || c == '@' || c == '$')
             {
-                switch (inner[i + 1])
+                var (text, next, ok) = TryReadStringLiteral(content, i);
+                if (ok)
                 {
-                    case 'n': sb.Append('\n'); break;
-                    case 't': sb.Append('\t'); break;
-                    case 'r': sb.Append('\r'); break;
-                    case '"': sb.Append('"'); break;
-                    case '\\': sb.Append('\\'); break;
-                    default: sb.Append(inner[i + 1]); break;
+                    yield return (text, i);
+                    i = next;
+                    continue;
                 }
-                i++;
             }
-            else
+            if (c == '\'')
             {
-                sb.Append(inner[i]);
+                i = SkipCharLiteral(content, i);
+                continue;
             }
+            if (c == '(') depth++;
+            else if (c == ')') depth--;
+            i++;
         }
-        return sb.ToString();
+    }
+
+    /// <summary>
+    /// <paramref name="start"/> 位置から C# 文字列リテラルを読み取り、(静的テキスト, リテラル終端の次位置, 成否) を返す。
+    /// 通常 (<c>"..."</c>)・verbatim (<c>@"..."</c>)・補間 (<c>$"..."</c> / <c>$@"..."</c> / <c>@$"..."</c>) に対応。
+    /// 補間穴 <c>{expr}</c> の中身は静的テキストに含めない（用語検査は静的部分のみ対象）。
+    /// </summary>
+    private static (string Text, int Next, bool Ok) TryReadStringLiteral(string content, int start)
+    {
+        bool verbatim = false, interpolated = false;
+        int p = start;
+        while (p < content.Length && (content[p] == '@' || content[p] == '$'))
+        {
+            if (content[p] == '@') verbatim = true;
+            else interpolated = true;
+            p++;
+        }
+        if (p >= content.Length || content[p] != '"')
+        {
+            return (string.Empty, start + 1, false);
+        }
+        p++; // 開きクオートをスキップ
+
+        var sb = new System.Text.StringBuilder();
+        while (p < content.Length)
+        {
+            char c = content[p];
+
+            if (interpolated && c == '{')
+            {
+                if (p + 1 < content.Length && content[p + 1] == '{') { sb.Append('{'); p += 2; continue; }
+                p = SkipInterpolationHole(content, p + 1); // '{' の次から
+                continue;
+            }
+            if (interpolated && c == '}' && p + 1 < content.Length && content[p + 1] == '}')
+            {
+                sb.Append('}'); p += 2; continue;
+            }
+
+            if (!verbatim && c == '\\' && p + 1 < content.Length)
+            {
+                char n = content[p + 1];
+                sb.Append(n switch { 'n' => '\n', 't' => '\t', 'r' => '\r', _ => n });
+                p += 2;
+                continue;
+            }
+
+            if (c == '"')
+            {
+                if (verbatim && p + 1 < content.Length && content[p + 1] == '"') { sb.Append('"'); p += 2; continue; }
+                return (sb.ToString(), p + 1, true);
+            }
+
+            sb.Append(c);
+            p++;
+        }
+        return (sb.ToString(), p, true); // 未終端は保険（実コードでは到達しない想定）
+    }
+
+    /// <summary>
+    /// 補間穴 <c>{expr}</c> の内部を読み飛ばし、対応する <c>}</c> の次の位置を返す。
+    /// 入れ子の <c>{}</c> や穴の中の文字列リテラルを認識する。<paramref name="start"/> は最初の <c>{</c> の次の位置。
+    /// </summary>
+    private static int SkipInterpolationHole(string content, int start)
+    {
+        int depth = 1;
+        int p = start;
+        while (p < content.Length && depth > 0)
+        {
+            char c = content[p];
+            if (c == '{') { depth++; p++; }
+            else if (c == '}') { depth--; p++; }
+            else if (c == '"' || c == '@' || c == '$')
+            {
+                var (_, next, ok) = TryReadStringLiteral(content, p);
+                p = ok ? next : p + 1;
+            }
+            else { p++; }
+        }
+        return p;
+    }
+
+    /// <summary>
+    /// 文字リテラル <c>'x'</c> / <c>'\n'</c> を読み飛ばし、終端の <c>'</c> の次の位置を返す。
+    /// </summary>
+    private static int SkipCharLiteral(string content, int start)
+    {
+        int p = start + 1;
+        while (p < content.Length)
+        {
+            if (content[p] == '\\') { p += 2; continue; }
+            if (content[p] == '\'') { return p + 1; }
+            p++;
+        }
+        return start + 1;
     }
 
     /// <summary>
