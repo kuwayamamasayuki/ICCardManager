@@ -377,6 +377,33 @@ public class StaffManageViewModelTests
         _viewModel.StatusMessage.Should().Contain("失敗");
     }
 
+    /// <summary>
+    /// 保存中に例外が発生した場合、生の <c>ex.Message</c> を漏らさず
+    /// 3要素準拠（操作名を含み「～ください。」で終わる）の文言を表示すること（Issue #1614）。
+    /// </summary>
+    [Fact]
+    public async Task SaveAsync_WhenExceptionThrown_ShouldShowUserFriendlyMessageWithoutRawDetail()
+    {
+        // Arrange
+        const string rawTechnicalDetail = "SQLite Error 19: UNIQUE constraint failed";
+        _viewModel.StartNewStaff();
+        _viewModel.EditStaffIdm = "FFFF000000000001";
+        _viewModel.EditName = "田中太郎";
+
+        _staffRepositoryMock.Setup(r => r.GetByIdmAsync("FFFF000000000001", true)).ReturnsAsync((Staff?)null);
+        _staffRepositoryMock.Setup(r => r.InsertAsync(It.IsAny<Staff>()))
+            .ThrowsAsync(new Exception(rawTechnicalDetail));
+
+        // Act
+        await _viewModel.SaveAsync();
+
+        // Assert
+        _viewModel.IsStatusError.Should().BeTrue();
+        _viewModel.StatusMessage.Should().NotContain(rawTechnicalDetail);   // 生の技術詳細が漏れない
+        _viewModel.StatusMessage.Should().Contain("職員の保存");             // 「何が」= 操作名
+        _viewModel.StatusMessage.Should().EndWith("ください。");             // 行動指示で終わる
+    }
+
     #endregion
 
     #region 削除テスト
@@ -443,6 +470,31 @@ public class StaffManageViewModelTests
 
         // Assert
         _viewModel.StatusMessage.Should().Contain("失敗");
+    }
+
+    /// <summary>
+    /// 削除中に例外が発生した場合、生の <c>ex.Message</c> を漏らさず
+    /// 3要素準拠（操作名を含み「～ください。」で終わる）の文言を表示すること（Issue #1614）。
+    /// </summary>
+    [Fact]
+    public async Task DeleteAsync_WhenExceptionThrown_ShouldShowUserFriendlyMessageWithoutRawDetail()
+    {
+        // Arrange
+        const string rawTechnicalDetail = "SQLite Error 5: database is locked";
+        var staff = new StaffDto { StaffIdm = "FFFF000000000001", Name = "田中太郎" };
+        _viewModel.SelectedStaff = staff;
+
+        _staffRepositoryMock.Setup(r => r.DeleteAsync("FFFF000000000001"))
+            .ThrowsAsync(new Exception(rawTechnicalDetail));
+
+        // Act
+        await _viewModel.DeleteAsync();
+
+        // Assert
+        _viewModel.IsStatusError.Should().BeTrue();
+        _viewModel.StatusMessage.Should().NotContain(rawTechnicalDetail);   // 生の技術詳細が漏れない
+        _viewModel.StatusMessage.Should().Contain("職員の削除");             // 「何が」= 操作名
+        _viewModel.StatusMessage.Should().EndWith("ください。");             // 行動指示で終わる
     }
 
     #endregion
