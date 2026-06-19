@@ -1,6 +1,6 @@
 # 更新履歴
 
-### Unreleased
+### v2.9.5 (2026-06-19)
 
 **バグ修正**
 - ドリフト監査（TERM-R4-01 / TERM-R5-01）用語統一 CI ガード `UserFacingTextConventionTests`（Issue #1460）が、トースト通知の文言を一切走査できていなかった問題を是正した。検査対象に実在しない `ShowToast*()` を指定していたため（実トースト API は `IToastNotificationService.ShowInfo` / `ShowWarning` / `ShowError(title, message)`）トースト呼び出しが走査スコープ外で、さらに抽出が**第1引数のみ**だったためユーザー文言が入る**第2引数 message** と `$"..."` 補間文字列も取りこぼしていた（「ICカード」単独表記の将来混入を検出できない潜在ギャップ）。実トースト caller を検査対象へ追加し、抽出ロジックを「呼び出しの全引数の文字列リテラル（第2引数以降・補間文字列の静的テキストを含む。補間穴 `{expr}` は除外）」を文字単位スキャナで走査する方式へ刷新。回帰防止に抽出ロジックのセルフテストを1件追加（`ExtractCSharpUserFacingArguments_ScansSecondArgumentAndInterpolatedText`）。拡充後も既存の UI 文言に裸の「ICカード」違反は0件でグリーン維持。07_テスト設計書 §2.48（検査範囲・UT-063-4）/ §1.1a（3,566→3,567件）を同期更新（ドリフト監査 TERM-R4-01 / TERM-R5-01 / Issue #1460）
@@ -17,6 +17,21 @@
 - ドリフト監査（CLAUDE-R5-02 / R5-03・superpowers 設計 spec の分裂統合）プロジェクトの設計 spec が `docs/superpowers/specs/`（root・24本）と `ICCardManager/docs/superpowers/specs/`（19本）の2か所に分裂していたため、CLAUDE.md が宣言する正典「設計書は `ICCardManager/docs/` 配下」および Issue #1492（パス整合）の方針に従い、root の spec を `ICCardManager/docs/superpowers/specs/` へ集約した（計43本）。重複していた #1487 は root 側が「静的解析のみ」の旧ドラフト、ICCardManager 側が「csproj 物理除外」の実装済み最終版だったため root 旧ドラフトを破棄。spec への参照（`.claude/rules/migrations.md` / `async-configureawait.md`、`07_テスト設計書`、`docs/superpowers/plans/` 配下のリンク）を新パスへ更新し、CLAUDE.md のディレクトリ構成記述（root `docs/` は superpowers ワークフロー成果物、設計 spec は ICCardManager 配下）を実態へ修正。CHANGELOG の過去リリース記録（歴史的記述）と plans 本体は据え置き。doc 構成の整理のみ・実装挙動の変更なし（ドリフト監査 CLAUDE-R5-02 / CLAUDE-R5-03 / Issue #1492）
 - ドリフト監査（ACA-R4-01・テストの ConfigureAwait 規約の適用範囲明記）`async-configureawait.md` の「テストコードに ConfigureAwait(false) を付けない」規約に対し一部テストが該当文字列を含んでいたが、調査の結果これらは (1) ConfigureAwait を解説するコメント、(2) 本番メソッドを override するテストダブル（本番規約を踏襲）、(3) `Task.Delay`/`Task.WhenAll` 等フレームワーク基本型の await（UI 文脈非依存）であり、規約が狙う「SUT の async API を await するテスト本体」の違反ではないと判明。規約に適用範囲（対象＝テスト本体の SUT await、対象外＝コメント言及・テストダブルの override・フレームワーク基本型 await）を明記して齟齬を解消。doc のみ・テスト変更なし（ドリフト監査 ACA-R4-01 / Issue #1287）
 - ドリフト監査（EM-R5-01 / SHARED-R5-02・規約の役割分担と適用範囲の明記）(a) **例外→文言マッピングの併存（EM-R5-01）**: `ErrorDialogHelper.GetErrorInfo`（致命エラーダイアログ用・`SYS00x` コード付き・「なぜ」1要素）と `ExceptionMessageFormatter.ToUserMessage`（通常エラー用・3要素）で例外種別→文言マッピングが2か所に併存していたため、`error-messages.md` に役割分担表を追記。`GetErrorInfo` が3要素を満たさないのは致命エラー時にエラーコード＋スタックトレースでの原因究明を優先する設計判断であり違反ではない旨、通常エラー経路では `ToUserMessage` を使う旨を明記（現状維持・コード変更なし）。(b) **VACUUM 月次ロックの適用範囲（SHARED-R5-02）**: `business-logic.md` が VACUUM の月次 CAS ロックを共有フォルダモード節にのみ記載していたが、実装（`App.xaml.cs` の `Day>=10` ＋ `TryAcquireMonthlyVacuumLockAsync`）は全モードで動作する（ローカルは競合なしで常に獲得）ため、全モード動作である旨を注記。いずれも doc のみ・実装挙動の変更なし。なお UISSOT-R4-01/R5-01（03 §4.1 は色値とブラシキーの参照カタログで SSOT 原則は明記済み）と BL-R5-03/04（摘要8パターン・タイムアウト遷移は記載済み）は非ドリフトのため変更なし（ドリフト監査 EM-R5-01 / SHARED-R5-02）
+
+**バグ修正**
+- 用語統一CIガードがトースト文言を走査できていなかった問題を是正（TERM-R4-01/R5-01）（#1664）
+- Issue #1614 生 ex.Message の UI 露出残存（職員管理・操作ログエクスポート）を是正（#1614）
+
+**ドキュメント**
+- needs_human 2件（EM-R5-01 / SHARED-R5-02）の方針を規約に明記（#1668）
+- テストの ConfigureAwait 規約に適用範囲を明記（ACA-R4-01）（#1667）
+- ドリフト監査 H グループ（needs_human のうち一意修正可能な doc 2件）を実態へ同期（#1665）
+- ドリフト監査 G グループ（設計書クラス図/シーケンス図 medium/low 3件）を実態へ同期（#1663）
+- ドリフト監査 F グループ（残 SAFE doc-only 6件）を実態へ一括同期（#1662）
+- 事実確認系の doc を実態へ同期（JSON キー casing・PaSoRi 対応機種）（ドリフト監査 E）（#1660）
+- 削除方針の過少記述を実態へ追記（operation_log の6年削除・ledger 個別物理削除経路）（ドリフト監査 C）（#1659）
+- CHANGELOG v2.9.4 の重複エントリを整理（bump-version 自動生成と手動キュレーションの重複）（#1658）
+- 規約・設計書の旧仕様記述を実装へ同期（ヘルスチェックSQL・VACUUM・CA2007・journal_mode）（ドリフト監査 B + A-2）（#1654）
 
 ### v2.9.4 (2026-06-18)
 
