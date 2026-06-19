@@ -8,7 +8,7 @@
 
 **Tech Stack:** Markdown (Pandoc 拡張記法 `{width=NN%}`), PowerShell 5.1, GitHub CLI (`gh`)
 
-**設計書:** `docs/superpowers/specs/2026-05-01-issue-1415-section5-screenshots-design.md`
+**設計書:** `ICCardManager/docs/superpowers/specs/2026-05-01-issue-1415-section5-screenshots-design.md`
 
 **ブランチ:** `docs/issue-1415-section5-card-edit-refund-screenshot`（既に作成済み・設計書コミット済み）
 

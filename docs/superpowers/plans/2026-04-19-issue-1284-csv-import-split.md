@@ -1512,7 +1512,7 @@ gh pr create --title "refactor: CsvImportService.Ledger/Detail を責務分割 (
 | (partial) `CsvImportService.LedgerValidation` | `Services/Import/` | partial class 分割 |
 
 ## Issue 記載との差分
-Issue は "private class" を推奨するも、C# の nested private class はユニットテストできない。`InternalsVisibleTo` が既設のため **internal static クラス** として新規ファイル配置（spec: `docs/superpowers/specs/2026-04-19-issue-1284-csv-import-split-design.md`）。
+Issue は "private class" を推奨するも、C# の nested private class はユニットテストできない。`InternalsVisibleTo` が既設のため **internal static クラス** として新規ファイル配置（spec: `ICCardManager/docs/superpowers/specs/2026-04-19-issue-1284-csv-import-split-design.md`）。
 
 ## Test plan
 - [x] `CsvImportServiceTests` / `CsvImportServiceExceptionLoggingTests` 全 94 件 pass

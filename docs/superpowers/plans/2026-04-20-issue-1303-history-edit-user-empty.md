@@ -10,7 +10,7 @@
 
 **Tech Stack:** C# / .NET Framework 4.8 / WPF (MVVM Toolkit) / xUnit + FluentAssertions + Moq / SQLite
 
-**Reference:** 設計書 `docs/superpowers/specs/2026-04-20-issue-1303-history-edit-user-empty-design.md`
+**Reference:** 設計書 `ICCardManager/docs/superpowers/specs/2026-04-20-issue-1303-history-edit-user-empty-design.md`
 
 **Working dir:** プロジェクトルート (`/mnt/d/OneDrive/交通系/src`)。 dotnet コマンドは `"/mnt/c/Program Files/dotnet/dotnet.exe"` を使用。
 

@@ -104,7 +104,7 @@ gh pr create --title "docs: FAQ Q5 の管理者マニュアル参照リンクを
 ## Summary
 
 - ユーザーマニュアル §8 FAQ Q5 が参照していた管理者マニュアル「3.5 共有フォルダの設定」は欠番で実在しないため、実在する §2.1 / §2.5 への参照に差し替え
-- 設計書: `docs/superpowers/specs/2026-04-26-issue-1405-faq-q5-broken-link-design.md`
+- 設計書: `ICCardManager/docs/superpowers/specs/2026-04-26-issue-1405-faq-q5-broken-link-design.md`
 - Closes #1405
 
 ## Test plan
