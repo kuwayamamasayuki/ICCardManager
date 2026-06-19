@@ -233,7 +233,7 @@ $readmeContent = Get-Content $ReadmePath -Raw -Encoding UTF8
 $readmeContent = $readmeContent -replace '最新バージョン: \*\*v[^*]+\*\* \([^)]+\)', "最新バージョン: **v${NewVersion}** (${Today})"
 Write-Success "README.md: v${NewVersion} (${Today})"
 
-# 3c. CHANGELOG.md — 既存 ### Unreleased があれば見出しを vX.Y.Z にリネーム+自動生成エントリを追記、なければ新規挿入
+# 3c. CHANGELOG.md — 既存 ### Unreleased があれば見出しを vX.Y.Z に昇格（手動キュレーション本文を正典とし、自動生成は本文が空の時のみフォールバック採用）、なければ新規挿入
 # Issue: bump-version.ps1 が常に「# 更新履歴」直後にセクションを挿入していたため、
 # 既存の Unreleased セクションが新バージョンと前バージョンの間に孤児化していた（v2.8.0/v2.8.1 で発生）
 $changelogContent = Get-Content $ChangelogPath -Raw -Encoding UTF8
@@ -243,17 +243,26 @@ $unreleasedRegex = [regex]'(?ms)### Unreleased[ \t]*\r?\n(.*?)(?=\r?\n### |\z)'
 $unreleasedMatch = $unreleasedRegex.Match($changelogContent)
 
 if ($unreleasedMatch.Success) {
-    # 既存 Unreleased を統合: 見出しを vX.Y.Z (date) にリネームし、自動生成エントリを末尾に追記
+    # 既存 Unreleased を昇格: 見出しを vX.Y.Z (date) にリネームする。
+    # 運用上、変更内容は PR ごとに ### Unreleased へ手動キュレーションされており、これが正典（SSOT）。
+    # → 手動キュレーション本文がある場合はコミット由来の自動生成エントリを「追記しない」。
+    #   以前は両方を残していたため毎リリースで二重記載が発生していた（v2.9.4 #1658 / v2.9.5 で手動整理した再発バグ）。
+    # 本文が空の Unreleased（見出しだけ先置きされていた）場合に限り、フォールバックとして自動生成エントリを採用する。
     $unreleasedBody = $unreleasedMatch.Groups[1].Value.TrimEnd()
     $newSection = "### v${NewVersion} (${Today})"
     if ($unreleasedBody) {
+        # 手動キュレーション済み → これを正典として採用し、自動生成は破棄（二重記載防止）
         $newSection += "`n${unreleasedBody}"
-    }
-    if ($hasEntries) {
+        Write-Success "CHANGELOG.md: 既存 ### Unreleased を v${NewVersion} へ昇格（手動キュレーション本文を採用。コミット由来の自動生成エントリは二重記載防止のため破棄）"
+    } elseif ($hasEntries) {
+        # Unreleased が空 → フォールバックでコミット由来エントリを採用
         $autoGenBody = ($changelogSection -replace '^### v[^\r\n]+\r?\n', '').TrimEnd()
         if ($autoGenBody) {
             $newSection += "`n${autoGenBody}"
         }
+        Write-Success "CHANGELOG.md: 空の ### Unreleased を v${NewVersion} へ昇格（コミット由来の自動生成エントリを採用）"
+    } else {
+        Write-Success "CHANGELOG.md: ### Unreleased を v${NewVersion} へ昇格"
     }
     # 後続セクションとの間に空行を確保（lookahead が前方の `\n` を1つ食うため）
     $newSection += "`n"
@@ -261,7 +270,6 @@ if ($unreleasedMatch.Success) {
     $changelogContent = $changelogContent.Substring(0, $unreleasedMatch.Index) +
                         $newSection +
                         $changelogContent.Substring($unreleasedMatch.Index + $unreleasedMatch.Length)
-    Write-Success "CHANGELOG.md: 既存 ### Unreleased を v${NewVersion} へ統合（手動キュレーション分は保持。コミット由来エントリと重複している場合はPRで手動整理してください）"
 } else {
     # Unreleased セクションなし → 「# 更新履歴」直後に新規挿入
     $changelogContent = $changelogContent -replace '(# 更新履歴\r?\n)', "`$1`n${changelogSection}`n"
