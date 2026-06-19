@@ -99,6 +99,17 @@ StatusMessage = ExceptionMessageFormatter.ToUserMessage(ex, "台帳の保存");
 - 技術的詳細（`ex.Message`）は必ずログへ残す。`ILogger` を注入済みなら `_logger.LogError(ex, ...)`、注入していない ViewModel / View コードビハインドでは `ErrorDialogHelper.LogException(ex, "操作名")`（既存のファイルログ機構を再利用、ダイアログ非表示）を使う。
 - トースト通知は文字数制約があるため、`ToUserMessage` のフル文言ではなく簡潔な行動指示（「もう一度タッチしてください」等）を優先してよい。
 
+### `ToUserMessage` と `ErrorDialogHelper.GetErrorInfo` の役割分担（ドリフト監査 EM-R5-01）
+
+例外種別から文言を引くマッピングは 2 か所にあり、**用途が異なる**ため意図的に併存させる:
+
+| 変換 | 用途 | 文言の粒度 |
+|------|------|-----------|
+| `ExceptionMessageFormatter.ToUserMessage(ex, operation)` | **通常のエラー経路**（操作の失敗をステータス/ダイアログで案内し、ユーザーが自力で回復する） | 「何が／なぜ／どうすれば」の **3 要素**（操作名を含み行動指示で終わる） |
+| `ErrorDialogHelper.GetErrorInfo(ex)` → `ShowFatalError` | **致命的エラーダイアログ**（継続不能・クラッシュ診断目的） | `SYS00x` エラーコード＋簡潔な「なぜ」。**併せて `StackTrace` を表示**して障害解析に供する |
+
+`GetErrorInfo` の文言が 3 要素を満たさない（「どうすれば」を欠く）のは、致命エラー時はユーザーの自己回復より**エラーコード＋スタックトレースによる原因究明**を優先する設計判断であり、品質ガイドライン違反ではない。新規の**通常エラー**経路では `ToUserMessage` を使うこと（`GetErrorInfo` を通常経路に転用しない）。
+
 ## 既存コードへの適用
 
 新規コード追加時は上記ガイドラインを適用。既存コードの改善は **該当 Issue にスコープを絞って** 段階的に実施（一括変更は diff の肥大化・レビュー困難化を招く）。

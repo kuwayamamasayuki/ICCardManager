@@ -46,7 +46,7 @@ THEN
 - 15秒ごとの接続ヘルスチェック＋自動再接続（共有モード時のカード系キャッシュの最長TTL=15秒（カード一覧 15秒・貸出中カード 10秒。職員一覧 30秒・設定 3分 は対象外）および stale 判定しきい値=15秒と一致させる、Issue #1493）
 - ステータスバーに「共有モード」表示、ネットワーク切断時は警告表示
 - DBパス変更後はアプリ再起動が必要
-- VACUUM: 毎月10日以降の最初の起動時に「先勝ち CAS ロック」で 1 台だけが試行する（`App.xaml.cs` の `today.Day >= 10` ガード、Issue #1482）。`SettingsRepository.TryAcquireMonthlyVacuumLockAsync` で `settings.last_vacuum_date` 行をアトミック更新し、`rowsAffected=1` を受け取った PC のみが VACUUM を実行。ロック獲得後の VACUUM 失敗は当月スキップとして確定し、来月まで誰も再試行しない（デッドロックスパイラル防止）
+- VACUUM: 毎月10日以降の最初の起動時に「先勝ち CAS ロック」で 1 台だけが試行する（`App.xaml.cs` の `today.Day >= 10` ガード、Issue #1482）。`SettingsRepository.TryAcquireMonthlyVacuumLockAsync` で `settings.last_vacuum_date` 行をアトミック更新し、`rowsAffected=1` を受け取った PC のみが VACUUM を実行。ロック獲得後の VACUUM 失敗は当月スキップとして確定し、来月まで誰も再試行しない（デッドロックスパイラル防止）。なおこの「毎月10日以降の初回起動時に1回」という月次ロック機構は**共有モード限定ではなく全モードで動作する**（本項を共有フォルダモード節に記載しているのは複数 PC 競合時の CAS ロックが主眼のため）。ローカルモード（単一 PC）では競合がないため CAS ロックは常に獲得され、実質「月1回 VACUUM を試行する」ガードとして働く（ドリフト監査 SHARED-R5-02）
 - バックアップ: SQLite Backup API使用（同時アクセス中でも安全）
 - リストア: 他のPC全てがアプリ終了後に実行する必要あり
 - セットアップ: 1台目がDB初期化 → 2台目以降は同じパスを設定するだけ
