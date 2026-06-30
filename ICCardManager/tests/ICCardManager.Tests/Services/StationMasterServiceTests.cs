@@ -109,6 +109,12 @@ public class StationMasterServiceTests
     // LineCode 222 は Area 0 に小田急多摩線も存在するため、Area 2 優先の TOICA/manaca で検索する必要がある
     [InlineData(0xDE06, CardType.TOICA, "箕面船場阪大前")]
     [InlineData(0xDE07, CardType.TOICA, "箕面萱野")]
+
+    // 西鉄天神大牟田線（はやかけん、Area=3 Line=215=0xD7、Issue #1674）
+    // LineCode 215 は Area 0（京急大師線）・Area 2（北神急行）にも存在するため、Area 3 優先の はやかけん で解決される必要がある
+    [InlineData(0xD771, CardType.Hayakaken, "雑餉隈")]    // 桜並木の手前
+    [InlineData(0xD772, CardType.Hayakaken, "桜並木")]    // 2023年開業（Issue #1674）
+    [InlineData(0xD773, CardType.Hayakaken, "春日原")]    // 桜並木の次
     public void GetStationName_カード種別と駅コードに応じた駅名を返すこと(int stationCode, CardType cardType, string expectedName)
     {
         // Arrange
