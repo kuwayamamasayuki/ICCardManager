@@ -115,6 +115,28 @@ public class StationMasterServiceTests
     [InlineData(0xD771, CardType.Hayakaken, "雑餉隈")]    // 桜並木の手前
     [InlineData(0xD772, CardType.Hayakaken, "桜並木")]    // 2023年開業（Issue #1674）
     [InlineData(0xD773, CardType.Hayakaken, "春日原")]    // 桜並木の次
+
+    // JR各社 2015〜2025年の新駅・改称（全国監査、Issue #1674）
+    // FeliCa の線区駅順コードは JR 全社が Area 0（全国共通サイバネ体系）に格納される。
+    // リージョン適合カード（非 Area 0 優先）で正しく解決される＝私鉄エリアと衝突しないことを担保する。
+    [InlineData(0x3F11, CardType.Suica, "幕張豊砂")]        // 京葉線 2023年開業
+    [InlineData(0x5523, CardType.Suica, "上所")]            // 越後線 2025年開業
+    [InlineData(0x015F, CardType.TOICA, "御厨")]            // 東海道本線(JR東海) 2020年開業
+    [InlineData(0x01F9, CardType.ICOCA, "摩耶")]            // 東海道本線(JR神戸線) 2016年開業
+    [InlineData(0x0A20, CardType.ICOCA, "東姫路")]          // 山陽本線 2016年開業
+    [InlineData(0x0A5E, CardType.ICOCA, "寺家")]            // 山陽本線 2017年開業
+    [InlineData(0x01DC, CardType.ICOCA, "JR総持寺")]        // 東海道本線(JR京都線) 2018年開業
+    [InlineData(0x6A05, CardType.ICOCA, "衣摺加美北")]      // おおさか東線 2018年開業
+    [InlineData(0x0B02, CardType.ICOCA, "梅小路京都西")]    // 山陰本線(嵯峨野線) 2019年開業
+    [InlineData(0x6CC3, CardType.ICOCA, "JR野江")]          // おおさか東線 北区間 2019年開業
+    [InlineData(0x6CC9, CardType.ICOCA, "南吹田")]          // おおさか東線 北区間 2019年開業
+    [InlineData(0x0666, CardType.SUGOCA, "西熊本")]         // 鹿児島本線 2016年開業
+    [InlineData(0x7814, CardType.Hayakaken, "糸島高校前")]  // 筑肥線 2019年開業
+    [InlineData(0x5E4A, CardType.SUGOCA, "大村車両基地")]   // 大村線 2020年開業
+    [InlineData(0x5E4C, CardType.SUGOCA, "新大村")]         // 大村線 2022年開業（西九州新幹線接続）
+    [InlineData(0x24CF, CardType.Kitaca, "ロイズタウン")]   // 札沼線(学園都市線) 2022年開業
+    [InlineData(0x24D0, CardType.Kitaca, "太美")]           // 札沼線 2022年改称（旧 石狩太美）
+    [InlineData(0x24D2, CardType.Kitaca, "当別")]           // 札沼線 2022年改称（旧 石狩当別）
     public void GetStationName_カード種別と駅コードに応じた駅名を返すこと(int stationCode, CardType cardType, string expectedName)
     {
         // Arrange
