@@ -137,6 +137,31 @@ public class StationMasterServiceTests
     [InlineData(0x24CF, CardType.Kitaca, "ロイズタウン")]   // 札沼線(学園都市線) 2022年開業
     [InlineData(0x24D0, CardType.Kitaca, "太美")]           // 札沼線 2022年改称（旧 石狩太美）
     [InlineData(0x24D2, CardType.Kitaca, "当別")]           // 札沼線 2022年改称（旧 石狩当別）
+
+    // 再採番を伴う新駅4駅と再採番された既存駅（Issue #1676）
+    // 新駅挿入による繰り下げ（仙石線のみ繰り上げ）は隣接する空きスロットで吸収され、
+    // 路線末尾まで連鎖しない。ysrl 現行値（code.php?region=0&line=NNN）で路線全体を突合済み。
+    [InlineData(0x0105, CardType.Suica, "田町")]            // 東海道本線 旧 001-006 → 005（空き005へ移動）
+    [InlineData(0x0106, CardType.Suica, "高輪ゲートウェイ")] // 東海道本線 2020年開業
+    [InlineData(0x0A68, CardType.ICOCA, "新白島")]          // 山陽本線 2015年開業（旧 横川のスロット）
+    [InlineData(0x0A69, CardType.ICOCA, "横川")]            // 山陽本線 旧 010-104 → 105
+    [InlineData(0x0A6A, CardType.ICOCA, "西広島")]          // 山陽本線 旧 010-105 → 106（空き106が吸収）
+    [InlineData(0x2399, CardType.Suica, "陸前小野")]        // 仙石線 旧 035-154 → 153（空き153へ繰り上げ）
+    [InlineData(0x239A, CardType.Suica, "鹿妻")]            // 仙石線 旧 035-155 → 154
+    [InlineData(0x239B, CardType.Suica, "矢本")]            // 仙石線 旧 035-156 → 155
+    [InlineData(0x239C, CardType.Suica, "東矢本")]          // 仙石線 旧 035-157 → 156
+    [InlineData(0x239D, CardType.Suica, "陸前赤井")]        // 仙石線 旧 035-158 → 157
+    [InlineData(0x239E, CardType.Suica, "石巻あゆみ野")]    // 仙石線 2016年開業
+    [InlineData(0x239F, CardType.Suica, "蛇田")]            // 仙石線 159 再採番の影響なし（隣接駅ガード）
+    [InlineData(0x3182, CardType.Suica, "前潟")]            // 田沢湖線 2023年開業
+    [InlineData(0x3183, CardType.Suica, "大釜")]            // 田沢湖線 旧 049-130 → 131
+    [InlineData(0x3184, CardType.Suica, "小岩井")]          // 田沢湖線 旧 049-131 → 132
+    [InlineData(0x3185, CardType.Suica, "雫石")]            // 田沢湖線 旧 049-132 → 133（空き133が吸収）
+    [InlineData(0x3186, CardType.Suica, "春木場")]          // 田沢湖線 134 再採番の影響なし（隣接駅ガード）
+
+    // 同一線区の路線単位突合で検出した空きスロット新駅（Issue #1676）
+    [InlineData(0x017A, CardType.TOICA, "相見")]            // 東海道本線(JR東海) 2012年開業（#1674監査窓外）
+    [InlineData(0x0A22, CardType.ICOCA, "手柄山平和公園")]  // 山陽本線 2026年開業（#1674監査窓外）
     public void GetStationName_カード種別と駅コードに応じた駅名を返すこと(int stationCode, CardType cardType, string expectedName)
     {
         // Arrange
