@@ -457,7 +457,7 @@ public class StationCodeToSummaryTests
         {
             CreateRailwayUsageFromCodes(
                 new DateTime(2024, 12, 9),
-                0x062F,  // 二日市（帰り）
+                0x0630,  // 二日市（帰り）。旧 006-047 → 048（Issue #1680 再採番反映）
                 0x0627,  // 博多
                 CardType.Hayakaken,
                 280,
@@ -465,7 +465,7 @@ public class StationCodeToSummaryTests
             CreateRailwayUsageFromCodes(
                 new DateTime(2024, 12, 9),
                 0x0627,  // 博多（行き）
-                0x062F,  // 二日市
+                0x0630,  // 二日市
                 CardType.Hayakaken,
                 280,
                 5000)

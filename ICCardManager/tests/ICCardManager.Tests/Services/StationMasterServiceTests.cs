@@ -71,7 +71,7 @@ public class StationMasterServiceTests
     [InlineData(0x062A, CardType.Hayakaken, "南福岡")]
     [InlineData(0x062B, CardType.Hayakaken, "春日")]
     [InlineData(0x062C, CardType.Hayakaken, "大野城")]
-    [InlineData(0x062F, CardType.Hayakaken, "二日市")]
+    [InlineData(0x062F, CardType.Hayakaken, "都府楼南")]  // 旧 006-046 → 047（Issue #1680 再採番反映。二日市は 0x0630 へ移動）
     [InlineData(0x0637, CardType.Hayakaken, "鳥栖")]      // 分岐駅
     [InlineData(0x063B, CardType.Hayakaken, "久留米")]    // 主要駅
     [InlineData(0x064D, CardType.Hayakaken, "大牟田")]    // 県境駅
@@ -162,6 +162,110 @@ public class StationMasterServiceTests
     // 同一線区の路線単位突合で検出した空きスロット新駅（Issue #1676）
     [InlineData(0x017A, CardType.TOICA, "相見")]            // 東海道本線(JR東海) 2012年開業（#1674監査窓外）
     [InlineData(0x0A22, CardType.ICOCA, "手柄山平和公園")]  // 山陽本線 2026年開業（#1674監査窓外）
+
+    // region=0 全線区突合で検出した「同一コード・異名」乖離の解消 — A. 再採番系（Issue #1680）
+    // ysrl 現行値（code.php?region=0&line=NNN）で各路線を丸ごと突合して反映。
+    // なお ysrl 側で 006-077（大牟田/新大牟田）・006-087（玉名/新玉名）は在来線と新幹線が
+    // 同一コードに重複掲載されているため、IC利用実態のある在来線名を維持している。
+    // 東北本線（紫波中央 1998年開業）
+    [InlineData(0x029D, CardType.Suica, "石鳥谷")]          // 旧 002-158 → 157
+    [InlineData(0x029E, CardType.Suica, "日詰")]            // 旧 002-159 → 158
+    [InlineData(0x029F, CardType.Suica, "紫波中央")]        // 1998年開業
+    [InlineData(0x02A0, CardType.Suica, "古館")]            // 160 再採番の影響なし（隣接駅ガード）
+    // 鹿児島本線（再採番・改称。都府楼南 0x062F は上の鹿児島本線ブロックで検証）
+    [InlineData(0x0630, CardType.Hayakaken, "二日市")]      // 旧 006-047 → 048
+    [InlineData(0x0631, CardType.Hayakaken, "天拝山")]      // 049 再採番の影響なし（隣接駅ガード）
+    [InlineData(0x0643, CardType.Hayakaken, "筑後船小屋")]  // 2011年改称（旧 船小屋）
+    [InlineData(0x0657, CardType.SUGOCA, "玉名")]           // ysrl 側の重複掲載のため在来線名を維持
+    [InlineData(0x0668, CardType.SUGOCA, "富合")]           // 2011年開業
+    [InlineData(0x0669, CardType.SUGOCA, "宇土")]           // 旧 006-104 → 105
+    // 日豊本線
+    [InlineData(0x071B, CardType.SUGOCA, "三毛門")]         // 旧 007-026 → 027
+    [InlineData(0x071C, CardType.SUGOCA, "吉富")]           // 旧 007-027 → 028
+    [InlineData(0x071D, CardType.SUGOCA, "中津")]           // 旧 007-028 → 029
+    // 山陰本線（繰り上げ・繰り下げ混在の再採番＋梶栗郷台地 2008年開業）
+    [InlineData(0x0B64, CardType.ICOCA, "安来")]            // 旧 011-101 → 100
+    [InlineData(0x0B65, CardType.ICOCA, "荒島")]            // 旧 011-102 → 101
+    [InlineData(0x0B66, CardType.ICOCA, "揖屋")]            // 旧 011-103 → 102
+    [InlineData(0x0B68, CardType.ICOCA, "東松江")]          // 104 再採番の影響なし（隣接駅ガード）
+    [InlineData(0x0B6D, CardType.ICOCA, "来待")]            // 旧 011-108 → 109
+    [InlineData(0x0B6E, CardType.ICOCA, "宍道")]            // 旧 011-109 → 110
+    [InlineData(0x0B6F, CardType.ICOCA, "荘原")]            // 旧 011-110 → 111
+    [InlineData(0x0B70, CardType.ICOCA, "直江")]            // 旧 011-111 → 112
+    [InlineData(0x0B72, CardType.ICOCA, "出雲市")]          // 旧 011-112 → 114
+    [InlineData(0x0B73, CardType.ICOCA, "西出雲")]          // 旧 011-113 → 115
+    [InlineData(0x0B74, CardType.ICOCA, "出雲神西")]        // 旧 011-114 → 116
+    [InlineData(0x0B75, CardType.ICOCA, "江南")]            // 旧 011-115 → 117
+    [InlineData(0x0B76, CardType.ICOCA, "小田")]            // 旧 011-116 → 118
+    [InlineData(0x0B77, CardType.ICOCA, "田儀")]            // 旧 011-117 → 119
+    [InlineData(0x0BC2, CardType.ICOCA, "安岡")]            // 旧 011-195 → 194
+    [InlineData(0x0BC3, CardType.ICOCA, "梶栗郷台地")]      // 2008年開業
+    // 予讃線（南伊予 2020年開業。JR四国は ICOCA エリア）
+    [InlineData(0x1047, CardType.ICOCA, "南伊予")]          // 2020年開業
+    [InlineData(0x1048, CardType.ICOCA, "伊予横田")]        // 旧 016-071 → 072
+    [InlineData(0x1049, CardType.ICOCA, "鳥ノ木")]          // 旧 016-072 → 073
+    [InlineData(0x104A, CardType.ICOCA, "伊予市")]          // 旧 016-073 → 074
+    [InlineData(0x104B, CardType.ICOCA, "向井原")]          // 旧 016-074 → 075
+    // 奥羽本線（泉外旭川 2021年開業）
+    [InlineData(0x1255, CardType.Suica, "泉外旭川")]        // 2021年開業
+    [InlineData(0x1256, CardType.Suica, "土崎")]            // 旧 018-085 → 086
+    // 磐越西線（郡山富田 2016年開業）
+    [InlineData(0x1F82, CardType.Suica, "郡山富田")]        // 2016年開業
+    [InlineData(0x1F83, CardType.Suica, "喜久田")]          // 旧 031-130 → 131
+    // 横須賀線・品鶴線（武蔵小杉 2010年開業。CSV は新川崎の2行重複データも修正）
+    [InlineData(0x2A0B, CardType.Suica, "新川崎")]
+    [InlineData(0x2A0C, CardType.Suica, "武蔵小杉")]        // 2010年開業
+    [InlineData(0x2A0D, CardType.Suica, "西大井")]          // 旧 042-014 → 013
+    // 烏山線
+    [InlineData(0x3005, CardType.Suica, "大金")]            // 旧 048-006 → 005
+    [InlineData(0x3006, CardType.Suica, "小塙")]            // 旧 048-007 → 006
+    // 小海線（CSV の中込2行重複データを修正）
+    [InlineData(0x5319, CardType.Suica, "中込")]            // 025 影響なし（隣接駅ガード）
+    [InlineData(0x531A, CardType.Suica, "滑津")]
+    // 大村線（新大村 2022年開業に伴う再採番の残り。新駅自体は #1674 で追加済み）
+    [InlineData(0x5E4D, CardType.SUGOCA, "諏訪")]           // 旧 094-076 → 077
+    [InlineData(0x5E4E, CardType.SUGOCA, "大村")]           // 旧 094-077 → 078
+
+    // region=0 全線区突合で検出した「同一コード・異名」乖離の解消 — B. 駅名改称・表記修正（Issue #1680、コード不変）
+    [InlineData(0x0207, CardType.Suica, "鶯谷")]            // 東北本線 表記修正（旧 鴬谷）
+    [InlineData(0x051B, CardType.Suica, "龍ケ崎市")]        // 常磐線 2020年改称（旧 佐貫）
+    [InlineData(0x0F17, CardType.Kitaca, "名寄高校")]       // 宗谷本線 2022年移転改称（旧 東風連）
+    [InlineData(0x21D0, CardType.Kitaca, "渡島当別")]       // 道南いさりび鉄道（渡島鶴岡は2014年廃止）
+    [InlineData(0x264F, CardType.ICOCA, "仁方")]            // 呉線 誤記修正（仁万は山陰本線の駅）
+    [InlineData(0x2F04, CardType.Suica, "文挾")]            // 日光線 表記修正
+    [InlineData(0x3DC8, CardType.Kitaca, "奥津軽いまべつ")] // 海峡線 2016年改称（旧 津軽今別）
+    [InlineData(0x4022, CardType.TOICA, "常葉大学前")]      // 天竜浜名湖線 2022年改称（旧 浜松大学前）
+    [InlineData(0x4025, CardType.TOICA, "岡地")]            // 天竜浜名湖線 2022年改称（旧 気賀高校前）
+    [InlineData(0x501B, CardType.ICOCA, "越前下山")]        // 越美北線 データ不備修正（駅名への「九頭竜線」混入）
+    [InlineData(0x501C, CardType.ICOCA, "九頭竜湖")]        // 越美北線 データ不備修正（同上）
+    [InlineData(0x50CE, CardType.Kitaca, "摩周")]           // 釧網本線 注記残骸の除去（旧称 弟子屈は Note 列へ）
+    [InlineData(0x5853, CardType.SUGOCA, "江北")]           // 長崎本線 2022年改称（旧 肥前山口）
+    [InlineData(0x5A02, CardType.ICOCA, "コウノトリの郷")]  // 宮津線 2015年改称（旧 但馬三江）
+    [InlineData(0x6917, CardType.ICOCA, "寝屋川公園")]      // 片町線 2019年改称（旧 東寝屋川）
+    [InlineData(0x8129, CardType.PASMO, "御花畑")]          // 秩父本線 表記修正
+    [InlineData(0x824A, CardType.PASMO, "東京国際クルーズターミナル")] // ゆりかもめ 2019年改称（旧 船の科学館）
+    [InlineData(0x824E, CardType.PASMO, "東京ビッグサイト")]           // ゆりかもめ 2019年改称（旧 国際展示場正門）
+    [InlineData(0x9D12, CardType.PASMO, "獨協大学前")]      // 伊勢崎線 2017年改称（旧 松原団地）
+    [InlineData(0xA30D, CardType.PASMO, "江曽島")]          // 宇都宮線(東武) 表記修正
+    [InlineData(0xB003, CardType.PASMO, "四ツ木")]          // 押上線 表記修正
+    [InlineData(0xB104, CardType.PASMO, "京成金町")]        // 金町線（旧 金町）
+    [InlineData(0xC00E, CardType.PASMO, "多摩湖")]          // 多摩湖線 2021年改称（旧 西武遊園地）
+    [InlineData(0xC00F, CardType.PASMO, "西武園ゆうえんち")] // 山口線 2021年改称（旧 遊園地西）
+    [InlineData(0xD03B, CardType.PASMO, "南町田グランベリーパーク")] // 田園都市線 2019年改称
+    [InlineData(0xD514, CardType.PASMO, "花月総持寺")]      // 京急本線 2020年改称（旧 花月園前）
+    [InlineData(0xD519, CardType.PASMO, "京急東神奈川")]    // 京急本線 2020年改称（旧 仲木戸）
+    [InlineData(0xD606, CardType.PASMO, "羽田空港第3ターミナル")]       // 京急空港線 2020年改称
+    [InlineData(0xD607, CardType.PASMO, "羽田空港第1・第2ターミナル")] // 京急空港線 2020年改称
+    [InlineData(0xD706, CardType.PASMO, "大師橋")]          // 京急大師線 2020年改称。LineCode 215 は Area 3（西鉄）にも存在するため関東優先の PASMO で解決
+    [InlineData(0xD806, CardType.PASMO, "逗子・葉山")]      // 京急逗子線 2020年改称（旧 新逗子）
+    [InlineData(0xE530, CardType.PASMO, "四ツ谷")]          // 丸ノ内線 表記修正
+    [InlineData(0xE704, CardType.PASMO, "池袋")]            // 副都心線 表記修正（旧 池袋駅）。LineCode 231 は Area 3（福岡市地下鉄空港線）にも存在するため関東優先の PASMO で解決
+    [InlineData(0xE72E, CardType.PASMO, "四ツ谷")]          // 南北線 表記修正
+    [InlineData(0xEE01, CardType.PASMO, "リゾートゲートウェイ・ステーション")]   // ディズニーリゾートライン 正式駅名へ統一
+    [InlineData(0xEE02, CardType.PASMO, "東京ディズニーランド・ステーション")]   // 同上
+    [InlineData(0xEE04, CardType.PASMO, "ベイサイド・ステーション")]             // 同上
+    [InlineData(0xEE06, CardType.PASMO, "東京ディズニーシー・ステーション")]     // 同上
+    [InlineData(0xFE16, CardType.PASMO, "富士フイルム前")]  // 大雄山線 正式表記（旧 富士フィルム前）
     public void GetStationName_カード種別と駅コードに応じた駅名を返すこと(int stationCode, CardType cardType, string expectedName)
     {
         // Arrange
