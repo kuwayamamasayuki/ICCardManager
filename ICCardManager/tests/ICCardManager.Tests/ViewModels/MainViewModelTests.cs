@@ -453,10 +453,10 @@ public class MainViewModelTests : IDisposable
     }
 
     /// <summary>
-    /// タイムアウト時にエラー音が再生されること
+    /// タイムアウト時に警告音（中立音）が再生され、エラー音は再生されないこと（Issue #1683）
     /// </summary>
     [Fact]
-    public async Task Timeout_ShouldPlayErrorSound()
+    public async Task Timeout_ShouldPlayWarningSound_NotErrorSound()
     {
         // Arrange
         var staffIdm = "0102030405060708";
@@ -473,7 +473,34 @@ public class MainViewModelTests : IDisposable
         timer.SimulateTicks(60);
 
         // Assert
-        _soundPlayerMock.Verify(s => s.Play(SoundType.Error), Times.Once);
+        _soundPlayerMock.Verify(s => s.Play(SoundType.Warning), Times.Once);
+        _soundPlayerMock.Verify(s => s.Play(SoundType.Error), Times.Never);
+    }
+
+    /// <summary>
+    /// タイムアウト時に「時間切れ」トーンの情報トーストが表示されること（Issue #1683）
+    /// </summary>
+    [Fact]
+    public async Task Timeout_ShouldShowTimeUpToast()
+    {
+        // Arrange
+        var staffIdm = "0102030405060708";
+        _staffRepositoryMock.Setup(r => r.GetByIdmAsync(staffIdm, It.IsAny<bool>()))
+            .ReturnsAsync(new Staff { StaffIdm = staffIdm, Name = "テスト職員" });
+
+        _cardReaderMock.Raise(r => r.CardRead += null,
+            _cardReaderMock.Object, new CardReadEventArgs { Idm = staffIdm });
+        await _dispatcherService.WaitForPendingAsync();
+
+        var timer = _timerFactory.LastCreatedTimer!;
+
+        // Act
+        timer.SimulateTicks(60);
+
+        // Assert - 「失敗」ではなく「時間切れ」トーン（エラートーストは出さない）
+        _toastMock.Verify(t => t.ShowInfo("時間切れ",
+            "職員証のタッチからやり直してください"), Times.Once);
+        _toastMock.Verify(t => t.ShowError(It.IsAny<string>(), It.IsAny<string>()), Times.Never);
     }
 
     /// <summary>

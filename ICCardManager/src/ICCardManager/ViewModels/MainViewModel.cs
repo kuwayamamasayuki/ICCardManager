@@ -2208,13 +2208,19 @@ public partial class MainViewModel : ViewModelBase
     /// <summary>
     /// タイムアウトタイマーのTick
     /// </summary>
+    /// <remarks>
+    /// Issue #1683: 時間切れは操作の失敗ではないため、エラー音（ピー）ではなく
+    /// 中立的な警告音を鳴らし、「時間切れ」トーンの情報トーストで再操作を案内する。
+    /// </remarks>
     private void OnTimeoutTick(object? sender, EventArgs e)
     {
         RemainingSeconds--;
 
         if (RemainingSeconds <= 0)
         {
-            _soundPlayer.Play(SoundType.Error);
+            _soundPlayer.Play(SoundType.Warning);
+            _toastNotificationService.ShowInfo("時間切れ",
+                "職員証のタッチからやり直してください");
             ResetState();
         }
     }
