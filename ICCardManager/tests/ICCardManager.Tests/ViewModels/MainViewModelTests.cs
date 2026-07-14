@@ -737,6 +737,132 @@ public class MainViewModelTests : IDisposable
 
     #endregion
 
+    #region 次アクションガイド（Issue #1684）
+
+    /// <summary>
+    /// 初期状態（待機中）では、次アクションガイドに状態名「待機中」＋アイコン👤＋
+    /// 貸出・返却（職員証）と履歴確認（交通系ICカード）の両方の入口を案内する文言が表示されること。
+    /// 「職員証をタッチしてください」に限定しない: この状態は両方のカードを受け付けるため、
+    /// 職員証に限定すると「履歴確認にも認証が必要」という誤解を招く
+    /// </summary>
+    [Fact]
+    public void NextActionGuide_InitialState_ShouldShowStaffCardPrompt()
+    {
+        _viewModel.NextActionStateText.Should().Be("待機中");
+        _viewModel.NextActionIcon.Should().Be("👤");
+        _viewModel.NextActionMessage.Should().Be("貸出・返却は職員証を、履歴の確認は交通系ICカードをタッチしてください");
+    }
+
+    /// <summary>
+    /// 職員証タッチ後は、次アクションガイドに状態名「交通系ICカードタッチ待ち」＋アイコン🚃＋
+    /// 操作者名入りの「○○さん、交通系ICカードをタッチしてください」が表示されること
+    /// （StatusMessage は Issue #186 でクリアされるが、ガイドは CurrentState から導出するため常設表示できる）
+    /// </summary>
+    [Fact]
+    public async Task NextActionGuide_AfterStaffTouch_ShouldShowIcCardPromptWithStaffName()
+    {
+        // Arrange
+        var staffIdm = "0102030405060708";
+        _staffRepositoryMock.Setup(r => r.GetByIdmAsync(staffIdm, It.IsAny<bool>()))
+            .ReturnsAsync(new Staff { StaffIdm = staffIdm, Name = "テスト職員" });
+
+        // Act
+        _cardReaderMock.Raise(r => r.CardRead += null,
+            _cardReaderMock.Object, new CardReadEventArgs { Idm = staffIdm });
+        await _dispatcherService.WaitForPendingAsync();
+
+        // Assert
+        _viewModel.NextActionStateText.Should().Be("交通系ICカードタッチ待ち");
+        _viewModel.NextActionIcon.Should().Be("🚃");
+        _viewModel.NextActionMessage.Should().Be("テスト職員さん、交通系ICカードをタッチしてください");
+    }
+
+    /// <summary>
+    /// 職員証タッチによる状態遷移で、次アクションガイドの派生プロパティ
+    /// （NextActionStateText / NextActionIcon / NextActionMessage）の変更通知が発火すること（XAMLバインド更新用）
+    /// </summary>
+    [Fact]
+    public async Task NextActionGuide_StateChange_ShouldNotifyDerivedProperties()
+    {
+        // Arrange
+        var staffIdm = "0102030405060708";
+        _staffRepositoryMock.Setup(r => r.GetByIdmAsync(staffIdm, It.IsAny<bool>()))
+            .ReturnsAsync(new Staff { StaffIdm = staffIdm, Name = "テスト職員" });
+
+        var notified = new List<string?>();
+        _viewModel.PropertyChanged += (_, e) => notified.Add(e.PropertyName);
+
+        // Act
+        _cardReaderMock.Raise(r => r.CardRead += null,
+            _cardReaderMock.Object, new CardReadEventArgs { Idm = staffIdm });
+        await _dispatcherService.WaitForPendingAsync();
+
+        // Assert
+        notified.Should().Contain(nameof(MainViewModel.NextActionStateText));
+        notified.Should().Contain(nameof(MainViewModel.NextActionIcon));
+        notified.Should().Contain(nameof(MainViewModel.NextActionMessage));
+    }
+
+    /// <summary>
+    /// タイムアウト到達後は、次アクションガイドが「待機中」の案内に戻ること
+    /// </summary>
+    [Fact]
+    public async Task NextActionGuide_AfterTimeout_ShouldReturnToStaffCardPrompt()
+    {
+        // Arrange - 職員証タッチでICカード待ち状態にする
+        var staffIdm = "0102030405060708";
+        _staffRepositoryMock.Setup(r => r.GetByIdmAsync(staffIdm, It.IsAny<bool>()))
+            .ReturnsAsync(new Staff { StaffIdm = staffIdm, Name = "テスト職員" });
+
+        _cardReaderMock.Raise(r => r.CardRead += null,
+            _cardReaderMock.Object, new CardReadEventArgs { Idm = staffIdm });
+        await _dispatcherService.WaitForPendingAsync();
+
+        var timer = _timerFactory.LastCreatedTimer!;
+
+        // Act - タイムアウトまで進める
+        timer.SimulateTicks(60);
+
+        // Assert
+        _viewModel.NextActionStateText.Should().Be("待機中");
+        _viewModel.NextActionIcon.Should().Be("👤");
+        _viewModel.NextActionMessage.Should().Be("貸出・返却は職員証を、履歴の確認は交通系ICカードをタッチしてください");
+    }
+
+    /// <summary>
+    /// Issue #1211 の持ち替え（ICカード待ち中の別職員証タッチ）では CurrentState が変化しないため、
+    /// 次アクションガイドの文言が新しい操作者名へ明示的に更新・通知されること
+    /// </summary>
+    [Fact]
+    public async Task NextActionGuide_StaffHandover_ShouldUpdateMessageToNewStaff()
+    {
+        // Arrange - まず佐藤の職員証でICカード待ちにする
+        var staffAIdm = "0102030405060708";
+        var staffBIdm = "0807060504030201";
+        _staffRepositoryMock.Setup(r => r.GetByIdmAsync(staffAIdm, It.IsAny<bool>()))
+            .ReturnsAsync(new Staff { StaffIdm = staffAIdm, Name = "佐藤" });
+        _staffRepositoryMock.Setup(r => r.GetByIdmAsync(staffBIdm, It.IsAny<bool>()))
+            .ReturnsAsync(new Staff { StaffIdm = staffBIdm, Name = "鈴木" });
+
+        _cardReaderMock.Raise(r => r.CardRead += null,
+            _cardReaderMock.Object, new CardReadEventArgs { Idm = staffAIdm });
+        await _dispatcherService.WaitForPendingAsync();
+
+        var notified = new List<string?>();
+        _viewModel.PropertyChanged += (_, e) => notified.Add(e.PropertyName);
+
+        // Act - 鈴木の職員証をタッチ（持ち替え）
+        _cardReaderMock.Raise(r => r.CardRead += null,
+            _cardReaderMock.Object, new CardReadEventArgs { Idm = staffBIdm });
+        await _dispatcherService.WaitForPendingAsync();
+
+        // Assert - 文言が鈴木に切り替わり、変更通知も発火していること
+        _viewModel.NextActionMessage.Should().Be("鈴木さん、交通系ICカードをタッチしてください");
+        notified.Should().Contain(nameof(MainViewModel.NextActionMessage));
+    }
+
+    #endregion
+
     #region ICカード待ち状態での職員証タッチ（持ち替え対応 / Issue #1211）
 
     /// <summary>
