@@ -152,6 +152,9 @@ public partial class MainViewModel : ViewModelBase
     private readonly int _timeoutSeconds;
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(NextActionStateText))]
+    [NotifyPropertyChangedFor(nameof(NextActionIcon))]
+    [NotifyPropertyChangedFor(nameof(NextActionMessage))]
     private AppState _currentState = AppState.WaitingForStaffCard;
 
     [ObservableProperty]
@@ -185,6 +188,45 @@ public partial class MainViewModel : ViewModelBase
     /// 残り秒数が警告域（残り10秒以下）かどうか。バナーの色変化トリガに使用（Issue #1682）。
     /// </summary>
     public bool IsTimeoutWarning => AuthTimeoutDisplay.IsWarning(RemainingSeconds);
+
+    /// <summary>
+    /// 次アクションガイドの状態名（Issue #1684）。
+    /// メイン画面ヘッダー直下の常設バナーに「現在どの状態か」を表示する。
+    /// </summary>
+    /// <remarks>
+    /// <see cref="StatusMessage"/> は職員証タッチ後に意図的にクリアされる（Issue #186）ため、
+    /// 常設表示には使えない。状態の Single Source of Truth である <see cref="CurrentState"/>
+    /// から導出する（<see cref="TimeoutRemainingText"/> と同じ computed property パターン）。
+    /// </remarks>
+    public string NextActionStateText => CurrentState switch
+    {
+        AppState.WaitingForIcCard => "交通系ICカードタッチ待ち",
+        AppState.Processing => "処理中",
+        _ => "職員証タッチ待ち"
+    };
+
+    /// <summary>
+    /// 次アクションガイドの状態アイコン（Issue #1684）。色や文字だけに依存しない4要素原則の一部。
+    /// </summary>
+    public string NextActionIcon => CurrentState switch
+    {
+        AppState.WaitingForIcCard => "🚃",
+        AppState.Processing => "⏳",
+        _ => "👤"
+    };
+
+    /// <summary>
+    /// 次アクションガイドの操作案内文言（Issue #1684）。
+    /// 交通系ICカードタッチ待ち中は操作者名を含めて表示する（トースト通知と同等の情報を常設化）。
+    /// </summary>
+    public string NextActionMessage => CurrentState switch
+    {
+        AppState.WaitingForIcCard => string.IsNullOrEmpty(_currentStaffName)
+            ? "交通系ICカードをタッチしてください"
+            : $"{_currentStaffName}さん、交通系ICカードをタッチしてください",
+        AppState.Processing => "処理中です。そのままお待ちください",
+        _ => "職員証をタッチしてください"
+    };
 
     [ObservableProperty]
     private ObservableCollection<WarningItem> _warningMessages = new();
@@ -913,6 +955,10 @@ public partial class MainViewModel : ViewModelBase
         {
             _currentStaffIdm = idm;
             _currentStaffName = staff.Name;
+
+            // Issue #1684: 持ち替えでは CurrentState が変化しない（WaitingForIcCard のまま）ため、
+            // 操作者名を含む次アクションガイドの文言を明示的に更新する
+            OnPropertyChanged(nameof(NextActionMessage));
 
             _soundPlayer.Play(SoundType.Notify);
             _toastNotificationService.ShowStaffRecognizedNotification(staff.Name);

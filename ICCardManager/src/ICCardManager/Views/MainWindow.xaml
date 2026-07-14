@@ -42,6 +42,8 @@
     <Grid>
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
+            <!-- 次アクションガイド（Issue #1684）。状態＋操作案内を常設表示する -->
+            <RowDefinition Height="Auto"/>
             <!-- タイムアウト残り時間バナー（Issue #1682）。非表示時は行ごと折りたたまれる -->
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
@@ -123,11 +125,53 @@
             </DockPanel>
         </Border>
 
+        <!-- 次アクションガイド（Issue #1684） -->
+        <!-- 現在の状態（職員証タッチ待ち／交通系ICカードタッチ待ち／処理中）と次に行う操作を常設表示する。
+             トースト通知（数秒で消える）を見逃しても画面上に誘導が残るようにするための常設バナー。
+             アイコン＋状態名＋操作文言＋背景色の4要素で状態を伝達（色のみに依存しない）。 -->
+        <Border Grid.Row="1" Padding="15,10"
+                AutomationProperties.Name="次の操作ガイド"
+                AutomationProperties.HelpText="現在の状態と次に行う操作を常に表示します。"
+                AutomationProperties.LiveSetting="Polite">
+            <Border.Style>
+                <Style TargetType="Border">
+                    <Setter Property="Background" Value="{DynamicResource WaitingBackgroundBrush}"/>
+                    <Setter Property="BorderBrush" Value="{DynamicResource WaitingBorderBrush}"/>
+                    <Setter Property="BorderThickness" Value="0,0,0,1"/>
+                    <Style.Triggers>
+                        <!-- 交通系ICカードタッチ待ち中は情報ヘッダー用の薄い水色で「操作が進行中」を示す
+                             （ReturnBackgroundBrush の操作ヒント用途兼用は Issue #1399 の設計判断） -->
+                        <DataTrigger Binding="{Binding CurrentState}" Value="WaitingForIcCard">
+                            <Setter Property="Background" Value="{DynamicResource ReturnBackgroundBrush}"/>
+                            <Setter Property="BorderBrush" Value="{DynamicResource PrimaryBrush}"/>
+                        </DataTrigger>
+                    </Style.Triggers>
+                </Style>
+            </Border.Style>
+            <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                <TextBlock Text="{Binding NextActionIcon}"
+                           FontSize="{DynamicResource LargeFontSize}"
+                           VerticalAlignment="Center"
+                           Margin="0,0,8,0"/>
+                <TextBlock Text="{Binding NextActionStateText}"
+                           FontSize="{DynamicResource BaseFontSize}"
+                           Foreground="{DynamicResource SecondaryTextBrush}"
+                           VerticalAlignment="Center"
+                           Margin="0,0,15,0"/>
+                <TextBlock Text="{Binding NextActionMessage}"
+                           FontSize="{DynamicResource LargeFontSize}"
+                           FontWeight="Bold"
+                           TextWrapping="Wrap"
+                           VerticalAlignment="Center"
+                           AutomationProperties.Name="{Binding NextActionMessage}"/>
+            </StackPanel>
+        </Border>
+
         <!-- タイムアウト残り時間バナー（Issue #1682） -->
         <!-- 職員証タッチ後、交通系ICカードをタッチできる残り時間を可視化する。
              残り10秒以下は ⚠ アイコン＋テキスト＋色変化で注意喚起（色のみに依存しない4要素原則）。
              RemainingSeconds=0（カウントダウン停止中）はバナーごと折りたたむ。 -->
-        <Border Grid.Row="1" Padding="15,8"
+        <Border Grid.Row="2" Padding="15,8"
                 Visibility="{Binding RemainingSeconds, Converter={StaticResource IntToVisibilityConverter}}"
                 AutomationProperties.Name="交通系ICカードタッチの残り時間"
                 AutomationProperties.HelpText="交通系ICカードをタッチできる残り時間です。0秒になると職員証タッチ待ちに戻ります。">
@@ -195,7 +239,7 @@
         </Border>
 
         <!-- メインコンテンツ -->
-        <Grid Grid.Row="2">
+        <Grid Grid.Row="3">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*"/>
                 <!-- Issue #542: カード一覧の幅を広く（金額・貸出者まで表示、フォントサイズに応じて動的調整） -->
@@ -917,7 +961,7 @@
         </Grid>
 
         <!-- 処理中オーバーレイ -->
-        <Border Grid.Row="2" Background="{DynamicResource OverlayBrush}"
+        <Border Grid.Row="3" Background="{DynamicResource OverlayBrush}"
                 Visibility="{Binding IsBusy, Converter={StaticResource BoolToVisibilityConverter}}">
             <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
                 <ProgressBar IsIndeterminate="True" Width="200" Height="4"/>
@@ -930,7 +974,7 @@
         </Border>
 
         <!-- 操作ヒント + デバッグボタン -->
-        <Border Grid.Row="3" Background="{DynamicResource ReturnBackgroundBrush}" Padding="15,10">
+        <Border Grid.Row="4" Background="{DynamicResource ReturnBackgroundBrush}" Padding="15,10">
             <Grid>
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*"/>
@@ -959,7 +1003,7 @@
         </Border>
 
         <!-- ステータスバー -->
-        <StatusBar Grid.Row="4">
+        <StatusBar Grid.Row="5">
             <StatusBarItem>
                 <TextBlock>
                     <Run Text="状態: "/>
