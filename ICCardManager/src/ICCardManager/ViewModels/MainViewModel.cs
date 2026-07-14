@@ -202,7 +202,10 @@ public partial class MainViewModel : ViewModelBase
     {
         AppState.WaitingForIcCard => "交通系ICカードタッチ待ち",
         AppState.Processing => "処理中",
-        _ => "職員証タッチ待ち"
+        // 「職員証タッチ待ち」とは表示しない: この状態は職員証（貸出・返却）と
+        // 交通系ICカード（履歴確認）の両方を受け付けるため、職員証に限定すると
+        // 「履歴確認にも認証が必要」という誤解を招く
+        _ => "待機中"
     };
 
     /// <summary>
@@ -225,7 +228,7 @@ public partial class MainViewModel : ViewModelBase
             ? "交通系ICカードをタッチしてください"
             : $"{_currentStaffName}さん、交通系ICカードをタッチしてください",
         AppState.Processing => "処理中です。そのままお待ちください",
-        _ => "職員証をタッチしてください"
+        _ => "貸出・返却は職員証を、履歴の確認は交通系ICカードをタッチしてください"
     };
 
     [ObservableProperty]

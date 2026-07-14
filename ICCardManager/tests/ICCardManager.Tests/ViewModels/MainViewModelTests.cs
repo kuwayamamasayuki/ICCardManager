@@ -740,15 +740,17 @@ public class MainViewModelTests : IDisposable
     #region 次アクションガイド（Issue #1684）
 
     /// <summary>
-    /// 初期状態（職員証タッチ待ち）では、次アクションガイドに
-    /// 状態名「職員証タッチ待ち」＋アイコン👤＋「職員証をタッチしてください」が表示されること
+    /// 初期状態（待機中）では、次アクションガイドに状態名「待機中」＋アイコン👤＋
+    /// 貸出・返却（職員証）と履歴確認（交通系ICカード）の両方の入口を案内する文言が表示されること。
+    /// 「職員証をタッチしてください」に限定しない: この状態は両方のカードを受け付けるため、
+    /// 職員証に限定すると「履歴確認にも認証が必要」という誤解を招く
     /// </summary>
     [Fact]
     public void NextActionGuide_InitialState_ShouldShowStaffCardPrompt()
     {
-        _viewModel.NextActionStateText.Should().Be("職員証タッチ待ち");
+        _viewModel.NextActionStateText.Should().Be("待機中");
         _viewModel.NextActionIcon.Should().Be("👤");
-        _viewModel.NextActionMessage.Should().Be("職員証をタッチしてください");
+        _viewModel.NextActionMessage.Should().Be("貸出・返却は職員証を、履歴の確認は交通系ICカードをタッチしてください");
     }
 
     /// <summary>
@@ -802,7 +804,7 @@ public class MainViewModelTests : IDisposable
     }
 
     /// <summary>
-    /// タイムアウト到達後は、次アクションガイドが「職員証タッチ待ち」の案内に戻ること
+    /// タイムアウト到達後は、次アクションガイドが「待機中」の案内に戻ること
     /// </summary>
     [Fact]
     public async Task NextActionGuide_AfterTimeout_ShouldReturnToStaffCardPrompt()
@@ -822,9 +824,9 @@ public class MainViewModelTests : IDisposable
         timer.SimulateTicks(60);
 
         // Assert
-        _viewModel.NextActionStateText.Should().Be("職員証タッチ待ち");
+        _viewModel.NextActionStateText.Should().Be("待機中");
         _viewModel.NextActionIcon.Should().Be("👤");
-        _viewModel.NextActionMessage.Should().Be("職員証をタッチしてください");
+        _viewModel.NextActionMessage.Should().Be("貸出・返却は職員証を、履歴の確認は交通系ICカードをタッチしてください");
     }
 
     /// <summary>
