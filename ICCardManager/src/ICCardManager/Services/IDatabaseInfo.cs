@@ -15,6 +15,11 @@ namespace ICCardManager.Services
         bool IsSharedMode { get; }
 
         /// <summary>
+        /// 現在使用中のデータベースファイルのパス（Issue #1686）
+        /// </summary>
+        string DatabasePath { get; }
+
+        /// <summary>
         /// 接続が一時停止中（リストア中など）かどうか
         /// </summary>
         bool IsConnectionSuspended { get; }
@@ -34,5 +39,11 @@ namespace ICCardManager.Services
         /// </summary>
         /// <returns>接続可能な場合true</returns>
         bool CheckConnection();
+
+        /// <summary>
+        /// DBへの書き込み可否確認（Issue #1686）
+        /// </summary>
+        /// <returns>書き込み可能な場合true</returns>
+        bool CheckWritable();
     }
 }

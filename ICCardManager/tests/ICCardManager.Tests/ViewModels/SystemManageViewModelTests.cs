@@ -27,7 +27,10 @@ public class SystemManageViewModelTests : IDisposable
     private readonly Mock<BackupService> _backupServiceMock;
     private readonly Mock<INavigationService> _navigationServiceMock;
     private readonly Mock<ICCardManager.Services.ISafeFileLauncher> _safeFileLauncherMock;
+    private readonly Mock<IDatabaseInfo> _databaseInfoMock;
     private readonly SystemManageViewModel _viewModel;
+
+    private const string TestDatabasePath = @"C:\ProgramData\ICCardManager\iccard.db";
 
     public SystemManageViewModelTests()
     {
@@ -51,12 +54,42 @@ public class SystemManageViewModelTests : IDisposable
         _safeFileLauncherMock.Setup(l => l.LaunchFolder(It.IsAny<string>()))
             .Returns(ICCardManager.Services.SafeFileLaunchResult.Ok());
 
+        // データベース情報（Issue #1686）: 既定はローカルモード・読み書き可能
+        _databaseInfoMock = new Mock<IDatabaseInfo>();
+        _databaseInfoMock.SetupGet(d => d.DatabasePath).Returns(TestDatabasePath);
+        _databaseInfoMock.SetupGet(d => d.IsSharedMode).Returns(false);
+        _databaseInfoMock.Setup(d => d.CheckConnection()).Returns(true);
+        _databaseInfoMock.Setup(d => d.CheckWritable()).Returns(true);
+
         _viewModel = new SystemManageViewModel(
             _backupServiceMock.Object,
             _settingsRepositoryMock.Object,
             _navigationServiceMock.Object,
             operationLogger,
-            _safeFileLauncherMock.Object);
+            _safeFileLauncherMock.Object,
+            _databaseInfoMock.Object);
+    }
+
+    /// <summary>
+    /// 共有モード設定の IDatabaseInfo を持つ ViewModel を生成（Issue #1686 のモード表示テスト用）
+    /// </summary>
+    private SystemManageViewModel CreateViewModelWithSharedMode(string databasePath)
+    {
+        var sharedInfoMock = new Mock<IDatabaseInfo>();
+        sharedInfoMock.SetupGet(d => d.DatabasePath).Returns(databasePath);
+        sharedInfoMock.SetupGet(d => d.IsSharedMode).Returns(true);
+
+        var operationLogRepository = new OperationLogRepository(_dbContext);
+        var operatorContext = new CurrentOperatorContext(new SystemClock());
+        var operationLogger = new OperationLogger(operationLogRepository, operatorContext);
+
+        return new SystemManageViewModel(
+            _backupServiceMock.Object,
+            _settingsRepositoryMock.Object,
+            _navigationServiceMock.Object,
+            operationLogger,
+            _safeFileLauncherMock.Object,
+            sharedInfoMock.Object);
     }
 
     public void Dispose()
@@ -495,6 +528,94 @@ public class SystemManageViewModelTests : IDisposable
 
         _viewModel.IsStatusError.Should().BeTrue();
         _viewModel.StatusMessage.Should().Contain("見つかりません");
+    }
+
+    #endregion
+
+    #region データベース情報の常設表示・接続テスト（Issue #1686）
+
+    [Fact]
+    public void DatabasePathDisplay_使用中のDBパスを返すこと()
+    {
+        _viewModel.DatabasePathDisplay.Should().Be(TestDatabasePath);
+    }
+
+    [Fact]
+    public void ローカルモード時_モード表示がローカルモードであること()
+    {
+        _viewModel.DatabaseModeText.Should().Contain("ローカルモード");
+        _viewModel.DatabaseModeIcon.Should().Be("💻");
+    }
+
+    [Fact]
+    public void 共有モード時_モード表示が共有モードであること()
+    {
+        var sharedViewModel = CreateViewModelWithSharedMode(@"\\server\share\iccard.db");
+
+        sharedViewModel.DatabasePathDisplay.Should().Be(@"\\server\share\iccard.db");
+        sharedViewModel.DatabaseModeText.Should().Contain("共有モード");
+        sharedViewModel.DatabaseModeIcon.Should().Be("🔗");
+    }
+
+    [Fact]
+    public async Task 接続テスト_読み書き可能な場合_成功メッセージを表示すること()
+    {
+        await _viewModel.TestDatabaseConnectionAsync();
+
+        _viewModel.IsStatusError.Should().BeFalse();
+        _viewModel.StatusMessage.Should().Contain("成功");
+        _viewModel.StatusMessage.Should().Contain("書き込み");
+        _databaseInfoMock.Verify(d => d.CheckConnection(), Times.Once);
+        _databaseInfoMock.Verify(d => d.CheckWritable(), Times.Once);
+    }
+
+    [Fact]
+    public async Task 接続テスト_到達不可の場合_パス入りの3要素エラーメッセージを表示すること()
+    {
+        _databaseInfoMock.Setup(d => d.CheckConnection()).Returns(false);
+
+        await _viewModel.TestDatabaseConnectionAsync();
+
+        _viewModel.IsStatusError.Should().BeTrue();
+        // 3要素: 何が（どのDBに接続できないか）・なぜ（ネットワーク/共有フォルダ）・どうすれば（確認してください）
+        _viewModel.StatusMessage.Should().Contain(TestDatabasePath, "どのDBに接続できないかを示す（何が）");
+        _viewModel.StatusMessage.Should().Contain("接続できません");
+        _viewModel.StatusMessage.Should().EndWith("確認してください。");
+        _viewModel.StatusMessage.Length.Should().BeGreaterOrEqualTo(20, "エラーメッセージ品質基準（最小20文字）");
+        // 到達できない場合は書込テストまで進まない
+        _databaseInfoMock.Verify(d => d.CheckWritable(), Times.Never);
+    }
+
+    [Fact]
+    public async Task 接続テスト_書込不可の場合_アクセス権を示唆する3要素エラーメッセージを表示すること()
+    {
+        _databaseInfoMock.Setup(d => d.CheckWritable()).Returns(false);
+
+        await _viewModel.TestDatabaseConnectionAsync();
+
+        _viewModel.IsStatusError.Should().BeTrue();
+        _viewModel.StatusMessage.Should().Contain(TestDatabasePath);
+        _viewModel.StatusMessage.Should().Contain("書き込みができません");
+        _viewModel.StatusMessage.Should().Contain("アクセス権");
+        _viewModel.StatusMessage.Should().EndWith("確認してください。");
+        _viewModel.StatusMessage.Length.Should().BeGreaterOrEqualTo(20, "エラーメッセージ品質基準（最小20文字）");
+    }
+
+    [Fact]
+    public async Task 接続テスト_実行中はIsBusyがtrueになること()
+    {
+        var busyStates = new List<bool>();
+        _viewModel.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName == nameof(SystemManageViewModel.IsBusy))
+                busyStates.Add(_viewModel.IsBusy);
+        };
+
+        await _viewModel.TestDatabaseConnectionAsync();
+
+        busyStates.Should().HaveCountGreaterOrEqualTo(2);
+        busyStates.First().Should().BeTrue();
+        busyStates.Last().Should().BeFalse();
     }
 
     #endregion

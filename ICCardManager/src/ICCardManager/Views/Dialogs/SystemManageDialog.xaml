@@ -27,6 +27,8 @@
 
     <Grid Margin="20">
         <Grid.RowDefinitions>
+            <!-- データベース情報（Issue #1686） -->
+            <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
@@ -34,8 +36,40 @@
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
 
+        <!-- データベース情報（Issue #1686） -->
+        <!-- 「このPCがどのDBを見ているか」を設定画面を開かずに確認できる常設表示。
+             共有モードのトラブル時、最初の切り分け（どのDBか・到達/書込できるか）をこの画面で完了させる。 -->
+        <GroupBox Grid.Row="0" Header="データベース情報" Margin="0,0,0,15" Padding="15">
+            <StackPanel>
+                <StackPanel Orientation="Horizontal" Margin="0,0,0,5">
+                    <TextBlock Text="{Binding DatabaseModeIcon, Mode=OneWay}"
+                               FontSize="{DynamicResource BaseFontSize}"
+                               Margin="0,0,5,0"/>
+                    <TextBlock Text="{Binding DatabaseModeText, Mode=OneWay}"
+                               FontWeight="Bold"
+                               FontSize="{DynamicResource BaseFontSize}"
+                               AutomationProperties.Name="{Binding DatabaseModeText}"/>
+                </StackPanel>
+
+                <TextBlock Text="{Binding DatabasePathDisplay, Mode=OneWay, StringFormat=現在のデータベース: {0}}"
+                           ToolTip="{Binding DatabasePathDisplay}"
+                           TextTrimming="CharacterEllipsis"
+                           Foreground="{DynamicResource SecondaryTextBrush}"
+                           FontSize="{DynamicResource SmallFontSize}"
+                           Margin="0,0,0,10"
+                           AutomationProperties.Name="{Binding DatabasePathDisplay, StringFormat=現在のデータベース: {0}}"/>
+
+                <Button Content="接続をテスト"
+                        Command="{Binding TestDatabaseConnectionCommand}"
+                        Padding="15,10"
+                        HorizontalAlignment="Left"
+                        AutomationProperties.Name="データベース接続をテスト"
+                        ToolTip="データベースへの到達と書き込みが可能かをその場で確認します（結果は下部に表示されます）"/>
+            </StackPanel>
+        </GroupBox>
+
         <!-- 操作ログ -->
-        <GroupBox Grid.Row="0" Header="操作ログ" Margin="0,0,0,15" Padding="15">
+        <GroupBox Grid.Row="1" Header="操作ログ" Margin="0,0,0,15" Padding="15">
             <StackPanel>
                 <TextBlock Text="システムの操作履歴を確認できます。"
                            Foreground="{DynamicResource SecondaryTextBrush}"
@@ -54,7 +88,7 @@
         </GroupBox>
 
         <!-- 手動バックアップ -->
-        <GroupBox Grid.Row="1" Header="手動バックアップ" Margin="0,0,0,15" Padding="15">
+        <GroupBox Grid.Row="2" Header="手動バックアップ" Margin="0,0,0,15" Padding="15">
             <StackPanel>
                 <TextBlock Text="任意のタイミングでデータベースのバックアップを作成できます。"
                            Foreground="{DynamicResource SecondaryTextBrush}"
@@ -89,7 +123,7 @@
         </GroupBox>
 
         <!-- リストア -->
-        <GroupBox Grid.Row="2" Header="リストア（データ復元）" Padding="15">
+        <GroupBox Grid.Row="3" Header="リストア（データ復元）" Padding="15">
             <Grid>
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto"/>
@@ -162,7 +196,7 @@
         </GroupBox>
 
         <!-- ステータスメッセージ -->
-        <Border Grid.Row="3"
+        <Border Grid.Row="4"
                 Padding="10"
                 Margin="0,15,0,0"
                 CornerRadius="5"
@@ -194,7 +228,7 @@
         </Border>
 
         <!-- 閉じるボタン -->
-        <StackPanel Grid.Row="4"
+        <StackPanel Grid.Row="5"
                     Orientation="Horizontal"
                     HorizontalAlignment="Right"
                     Margin="0,15,0,0">
@@ -208,7 +242,7 @@
         </StackPanel>
 
         <!-- 処理中オーバーレイ -->
-        <Border Grid.RowSpan="5"
+        <Border Grid.RowSpan="6"
                 Background="{DynamicResource OverlayBrush}"
                 Visibility="{Binding IsBusy, Converter={StaticResource BoolToVisibilityConverter}}">
             <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
