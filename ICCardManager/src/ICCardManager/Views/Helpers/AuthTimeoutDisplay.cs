@@ -3,6 +3,8 @@ namespace ICCardManager.Views.Helpers
     /// <summary>
     /// 職員証認証ダイアログ（<see cref="Dialogs.StaffAuthDialog"/>）のタイムアウト残り秒数表示を
     /// 組み立てる純粋ロジック（Issue #1613）。
+    /// Issue #1682 からはメイン画面のカウントダウンバナー
+    /// （<see cref="ViewModels.MainViewModel.TimeoutRemainingText"/> 等）でも共用する。
     /// </summary>
     /// <remarks>
     /// development-conventions.md の「色・アイコン・テキスト・音の4要素で状態を伝達」原則に基づき、

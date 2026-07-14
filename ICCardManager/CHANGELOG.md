@@ -20,6 +20,10 @@
 - Issue #1683 メイン画面の60秒タイムアウト時の音を、エラー音（ピー / error.wav）から中立的な警告音（warning.wav）へ変更し、あわせて情報トースト「時間切れ／職員証のタッチからやり直してください」で再操作を案内するようにした。時間切れは操作の失敗ではないのに、エラーと同じ「ピー」音では職員が「壊してしまった」と誤認する恐れがあったため、心理的安全性を優先した変更（`MainViewModel.OnTimeoutTick`）。なお職員認証ダイアログ（StaffAuthDialog）のタイムアウトは認証失敗として扱うためエラー音のままでスコープ外。
   - テスト: `MainViewModelTests` の `Timeout_ShouldPlayErrorSound` を `Timeout_ShouldPlayWarningSound_NotErrorSound` にリネーム（警告音が鳴りエラー音は鳴らないことを検証）し、`Timeout_ShouldShowTimeUpToast`（「時間切れ」トースト表示・エラートースト非表示を検証）を新設。
   - 03_画面設計書（効果音一覧・操作フィードバック）／07_テスト設計書 §1.1a（単体 3,693→3,694・合計 3,719→3,720 件）・UT-038・ST-002／ユーザーマニュアル §4.5 を同期更新（#1683）
+- Issue #1682 メイン画面に **60秒タイムアウトの残り時間バナー** を追加した。職員証タッチ後の交通系ICカードタッチ待ちの間、ヘッダー直下に「⏱ 交通系ICカードをタッチしてください」の案内・プログレスバー・残り秒数を表示し、待ち時間の不安と無言リセットによる再タッチ手戻りを解消する（従来 `MainViewModel.RemainingSeconds` は実装済みだが XAML 未バインドで、タイムアウト到達まで残り時間が見えなかった）。
+  - **残り10秒以下の警告域**では背景を `WarningBackgroundBrush`（黄）、秒数文字色を `DangerTextBrush`、バーを `WarningActionBrush` に切り替え、⚠ アイコンを秒数へ前置（色のみに依存しない4要素原則）。警告域判定・文言生成は `AuthTimeoutDisplay.IsWarning` / `FormatRemaining`（Issue #1613）を `StaffAuthDialog` と共用。バナーは `RemainingSeconds=0` で行ごと折りたたみ（`IntToVisibilityConverter`）。警告域進入時の警告音は、タイムアウト確定時の警告音（#1683）との二重鳴動を避けるため鳴らさない設計判断。
+  - テスト: `MainViewModelTests` に `TimeoutCountdown_*` / `TimeoutSeconds_*` 6件を新設（初期状態・警告域境界 11秒/10秒・派生プロパティ変更通知・タイムアウト後の解除・プログレスバー最大値）。
+  - 03_画面設計書 §3.1.1〜3.1.2（画面レイアウト・タイムアウトバナー仕様）／07_テスト設計書 §1.1a（単体 3,694→3,700・合計 3,720→3,726 件）・UT-038a 新設／ユーザーマニュアル §4.5 を同期更新（#1682）
 
 ### v2.10.0 (2026-07-01)
 

@@ -18,6 +18,7 @@ using ICCardManager.Infrastructure.Caching;
 using ICCardManager.Infrastructure.Timing;
 using ICCardManager.Models;
 using ICCardManager.Services;
+using ICCardManager.Views.Helpers;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
@@ -159,8 +160,31 @@ public partial class MainViewModel : ViewModelBase
     [ObservableProperty]
     private string _statusIcon = "👤";
 
+    /// <summary>
+    /// 交通系ICカードタッチ待ちの残り秒数。
+    /// Issue #1682: メイン画面のカウントダウンバナー（プログレスバー＋残り秒数）に表示する。
+    /// 0 のときバナーは非表示（IntToVisibilityConverter）。
+    /// </summary>
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(TimeoutRemainingText))]
+    [NotifyPropertyChangedFor(nameof(IsTimeoutWarning))]
     private int _remainingSeconds;
+
+    /// <summary>
+    /// タイムアウト設定秒数。カウントダウンバナーのプログレスバー最大値に使用（Issue #1682）。
+    /// </summary>
+    public int TimeoutSeconds => _timeoutSeconds;
+
+    /// <summary>
+    /// 残り秒数の表示文言。警告域（残り10秒以下）では ⚠ アイコンを前置し、
+    /// 色以外の手段でも警告を伝える（Issue #1682、<see cref="AuthTimeoutDisplay"/> を流用）。
+    /// </summary>
+    public string TimeoutRemainingText => AuthTimeoutDisplay.FormatRemaining(RemainingSeconds);
+
+    /// <summary>
+    /// 残り秒数が警告域（残り10秒以下）かどうか。バナーの色変化トリガに使用（Issue #1682）。
+    /// </summary>
+    public bool IsTimeoutWarning => AuthTimeoutDisplay.IsWarning(RemainingSeconds);
 
     [ObservableProperty]
     private ObservableCollection<WarningItem> _warningMessages = new();

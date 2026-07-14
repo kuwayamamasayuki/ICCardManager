@@ -604,6 +604,139 @@ public class MainViewModelTests : IDisposable
 
     #endregion
 
+    #region タイムアウト残り時間の可視化（Issue #1682）
+
+    /// <summary>
+    /// 初期状態（職員証タッチ待ち）ではカウントダウンが非表示相当（RemainingSeconds=0）で、
+    /// 警告フラグも立たないこと
+    /// </summary>
+    [Fact]
+    public void TimeoutCountdown_InitialState_ShouldBeHiddenAndNotWarning()
+    {
+        _viewModel.RemainingSeconds.Should().Be(0);
+        _viewModel.IsTimeoutWarning.Should().BeFalse();
+        _viewModel.TimeoutRemainingText.Should().Be("0秒");
+    }
+
+    /// <summary>
+    /// TimeoutSeconds が設定されたタイムアウト秒数を返すこと（プログレスバーの最大値に使用）
+    /// </summary>
+    [Fact]
+    public void TimeoutSeconds_ShouldReturnConfiguredTimeout()
+    {
+        _viewModel.TimeoutSeconds.Should().Be(60);
+    }
+
+    /// <summary>
+    /// 残り秒数が警告閾値（10秒）超の間は ⚠ なしの通常表示で、警告フラグが立たないこと
+    /// </summary>
+    [Fact]
+    public async Task TimeoutCountdown_BeforeWarningZone_ShouldShowPlainText()
+    {
+        // Arrange - 職員証タッチでICカード待ち状態にする
+        var staffIdm = "0102030405060708";
+        _staffRepositoryMock.Setup(r => r.GetByIdmAsync(staffIdm, It.IsAny<bool>()))
+            .ReturnsAsync(new Staff { StaffIdm = staffIdm, Name = "テスト職員" });
+
+        _cardReaderMock.Raise(r => r.CardRead += null,
+            _cardReaderMock.Object, new CardReadEventArgs { Idm = staffIdm });
+        await _dispatcherService.WaitForPendingAsync();
+
+        var timer = _timerFactory.LastCreatedTimer!;
+
+        // Act - 残り11秒（警告域の1秒手前）まで進める
+        timer.SimulateTicks(49);
+
+        // Assert
+        _viewModel.RemainingSeconds.Should().Be(11);
+        _viewModel.IsTimeoutWarning.Should().BeFalse();
+        _viewModel.TimeoutRemainingText.Should().Be("11秒");
+    }
+
+    /// <summary>
+    /// 残り10秒以下では ⚠ アイコンを前置した文言になり、警告フラグが立つこと
+    /// （色だけに依存しない4要素原則: アイコン＋テキストでも警告を伝達）
+    /// </summary>
+    [Fact]
+    public async Task TimeoutCountdown_InWarningZone_ShouldShowWarningIconAndSetFlag()
+    {
+        // Arrange
+        var staffIdm = "0102030405060708";
+        _staffRepositoryMock.Setup(r => r.GetByIdmAsync(staffIdm, It.IsAny<bool>()))
+            .ReturnsAsync(new Staff { StaffIdm = staffIdm, Name = "テスト職員" });
+
+        _cardReaderMock.Raise(r => r.CardRead += null,
+            _cardReaderMock.Object, new CardReadEventArgs { Idm = staffIdm });
+        await _dispatcherService.WaitForPendingAsync();
+
+        var timer = _timerFactory.LastCreatedTimer!;
+
+        // Act - 残り10秒（警告域の先頭）まで進める
+        timer.SimulateTicks(50);
+
+        // Assert
+        _viewModel.RemainingSeconds.Should().Be(10);
+        _viewModel.IsTimeoutWarning.Should().BeTrue();
+        _viewModel.TimeoutRemainingText.Should().Be("⚠ 10秒");
+    }
+
+    /// <summary>
+    /// RemainingSeconds の変更に連動して派生プロパティ
+    /// （TimeoutRemainingText / IsTimeoutWarning）の変更通知が発火すること（XAMLバインド更新用）
+    /// </summary>
+    [Fact]
+    public async Task TimeoutCountdown_Tick_ShouldNotifyDerivedProperties()
+    {
+        // Arrange
+        var staffIdm = "0102030405060708";
+        _staffRepositoryMock.Setup(r => r.GetByIdmAsync(staffIdm, It.IsAny<bool>()))
+            .ReturnsAsync(new Staff { StaffIdm = staffIdm, Name = "テスト職員" });
+
+        _cardReaderMock.Raise(r => r.CardRead += null,
+            _cardReaderMock.Object, new CardReadEventArgs { Idm = staffIdm });
+        await _dispatcherService.WaitForPendingAsync();
+
+        var timer = _timerFactory.LastCreatedTimer!;
+        var notified = new List<string?>();
+        _viewModel.PropertyChanged += (_, e) => notified.Add(e.PropertyName);
+
+        // Act
+        timer.SimulateTicks(1);
+
+        // Assert
+        notified.Should().Contain(nameof(MainViewModel.TimeoutRemainingText));
+        notified.Should().Contain(nameof(MainViewModel.IsTimeoutWarning));
+    }
+
+    /// <summary>
+    /// タイムアウト到達後は RemainingSeconds=0 に戻り、警告表示も解除されること
+    /// （バナーが非表示に戻るための前提条件）
+    /// </summary>
+    [Fact]
+    public async Task TimeoutCountdown_AfterTimeout_ShouldClearWarningState()
+    {
+        // Arrange
+        var staffIdm = "0102030405060708";
+        _staffRepositoryMock.Setup(r => r.GetByIdmAsync(staffIdm, It.IsAny<bool>()))
+            .ReturnsAsync(new Staff { StaffIdm = staffIdm, Name = "テスト職員" });
+
+        _cardReaderMock.Raise(r => r.CardRead += null,
+            _cardReaderMock.Object, new CardReadEventArgs { Idm = staffIdm });
+        await _dispatcherService.WaitForPendingAsync();
+
+        var timer = _timerFactory.LastCreatedTimer!;
+
+        // Act
+        timer.SimulateTicks(60);
+
+        // Assert
+        _viewModel.RemainingSeconds.Should().Be(0);
+        _viewModel.IsTimeoutWarning.Should().BeFalse();
+        _viewModel.TimeoutRemainingText.Should().Be("0秒");
+    }
+
+    #endregion
+
     #region ICカード待ち状態での職員証タッチ（持ち替え対応 / Issue #1211）
 
     /// <summary>
