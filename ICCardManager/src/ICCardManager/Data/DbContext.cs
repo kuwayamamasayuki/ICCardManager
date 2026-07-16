@@ -7,6 +7,8 @@ using System.Threading.Tasks;
 using System.IO;
 using System.Security.AccessControl;
 using System.Security.Principal;
+using ICCardManager.Common;
+using ICCardManager.Common.Exceptions;
 using ICCardManager.Data.Migrations;
 using ICCardManager.Services;
 using Microsoft.Extensions.Logging;
@@ -802,6 +804,11 @@ namespace ICCardManager.Data
             // 複数PCが同時にマイグレーションを実行しても、schema_migrationsの
             // PRIMARY KEY制約により重複適用が防止される。
             var runner = new MigrationRunner(connection);
+
+            // Issue #1687: DBのスキーマがこのアプリの対応範囲より新しい場合、
+            // 旧バージョンのアプリからの書き込みはデータ不整合を招くためブロックする
+            EnsureSchemaVersionCompatibility(runner, connection);
+
             var appliedCount = runner.MigrateToLatest();
 
             if (appliedCount > 0)
@@ -809,6 +816,89 @@ namespace ICCardManager.Data
 #if DEBUG
                 System.Diagnostics.Debug.WriteLine($"[DbContext] {appliedCount}件のマイグレーションを適用しました");
 #endif
+            }
+
+            // Issue #1687: このDBを開くために必要なアプリバージョンの目安を記録する。
+            // 旧バージョンのアプリをブロックした際、「どのバージョン以上に更新すべきか」を
+            // メッセージに表示するために使用する（引き上げのみで、下げることはない）
+            RecordMinimumAppVersion(connection);
+        }
+
+        /// <summary>
+        /// settings テーブルの「要求アプリバージョン」キー（Issue #1687）。
+        /// このDBを最後に更新した最も新しいアプリバージョンが記録される。
+        /// </summary>
+        public const string MinAppVersionSettingKey = "min_app_version";
+
+        /// <summary>
+        /// DBのスキーマバージョンがこのアプリの対応範囲内であることを確認する（Issue #1687）
+        /// </summary>
+        /// <exception cref="DatabaseVersionMismatchException">
+        /// DBのスキーマバージョンがこのアプリの把握する最大マイグレーションバージョンを
+        /// 超えている場合（＝より新しいバージョンのアプリで更新されたDBの場合）
+        /// </exception>
+        private static void EnsureSchemaVersionCompatibility(MigrationRunner runner, SQLiteConnection connection)
+        {
+            var databaseVersion = runner.GetCurrentVersion();
+            var appVersion = runner.GetLatestKnownVersion();
+
+            if (databaseVersion <= appVersion)
+                return;
+
+            // ブロックメッセージ用に、DBを更新した側のアプリバージョンを取得する。
+            // settings テーブルやキーが存在しない場合は null（フォールバック文言になる）
+            string requiredAppVersion = null;
+            try
+            {
+                using var command = connection.CreateCommand();
+                command.CommandText = "SELECT value FROM settings WHERE key = @key";
+                command.Parameters.AddWithValue("@key", MinAppVersionSettingKey);
+                requiredAppVersion = command.ExecuteScalar() as string;
+            }
+            catch (SQLiteException)
+            {
+                // settings テーブルが読めなくてもブロック自体は成立させる
+            }
+
+            throw new DatabaseVersionMismatchException(databaseVersion, appVersion, requiredAppVersion);
+        }
+
+        /// <summary>
+        /// settings の min_app_version を自バージョンで引き上げ記録する（Issue #1687）
+        /// </summary>
+        /// <remarks>
+        /// 保存値が自バージョン以上の場合は何もしない（複数PC運用で、より新しい
+        /// バージョンのPCが記録した値を古いPCが下書きしないため）。
+        /// 記録の失敗は起動を阻害しない（次回起動時に再試行される）。
+        /// </remarks>
+        private void RecordMinimumAppVersion(SQLiteConnection connection)
+        {
+            try
+            {
+                string storedValue = null;
+                using (var selectCommand = connection.CreateCommand())
+                {
+                    selectCommand.CommandText = "SELECT value FROM settings WHERE key = @key";
+                    selectCommand.Parameters.AddWithValue("@key", MinAppVersionSettingKey);
+                    storedValue = selectCommand.ExecuteScalar() as string;
+                }
+
+                if (AppVersionInfo.TryParseNormalized(storedValue, out var storedVersion) &&
+                    storedVersion >= AppVersionInfo.Current)
+                {
+                    return;
+                }
+
+                using var upsertCommand = connection.CreateCommand();
+                upsertCommand.CommandText = @"INSERT INTO settings (key, value) VALUES (@key, @value)
+ON CONFLICT(key) DO UPDATE SET value = excluded.value";
+                upsertCommand.Parameters.AddWithValue("@key", MinAppVersionSettingKey);
+                upsertCommand.Parameters.AddWithValue("@value", AppVersionInfo.CurrentString);
+                upsertCommand.ExecuteNonQuery();
+            }
+            catch (SQLiteException ex)
+            {
+                _logger?.LogWarning(ex, "min_app_version の記録に失敗しました（次回起動時に再試行されます）");
             }
         }
 

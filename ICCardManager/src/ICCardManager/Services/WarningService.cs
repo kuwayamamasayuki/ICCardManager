@@ -19,11 +19,22 @@ namespace ICCardManager.Services
     {
         private readonly ILedgerRepository _ledgerRepository;
         private readonly IDatabaseInfo _databaseInfo;
+        private readonly IUpdateNotificationService _updateNotificationService;
 
-        public WarningService(ILedgerRepository ledgerRepository, IDatabaseInfo databaseInfo)
+        /// <param name="ledgerRepository">台帳リポジトリ</param>
+        /// <param name="databaseInfo">DB接続情報</param>
+        /// <param name="updateNotificationService">
+        /// 更新通知チェック（Issue #1687）。null の場合、更新通知警告は常に生成されない
+        /// （既存テストの構築コードとの互換のため省略可能にしている。DI経由では常に注入される）
+        /// </param>
+        public WarningService(
+            ILedgerRepository ledgerRepository,
+            IDatabaseInfo databaseInfo,
+            IUpdateNotificationService updateNotificationService = null)
         {
             _ledgerRepository = ledgerRepository;
             _databaseInfo = databaseInfo;
+            _updateNotificationService = updateNotificationService;
         }
 
         /// <summary>
@@ -91,6 +102,29 @@ namespace ICCardManager.Services
                 Type = WarningType.DatabaseJournalModeDegraded,
                 DisplayText = $"⚠️ データベースのクラッシュ耐性が低下しています（journal_mode={_databaseInfo.CurrentJournalMode}）。" +
                               "ファイルサーバ管理者にご相談ください。"
+            };
+        }
+
+        /// <summary>
+        /// 更新通知警告を生成（Issue #1687）
+        /// </summary>
+        /// <remarks>
+        /// DBと同じフォルダの latest_version.txt に自バージョンより新しいバージョンが
+        /// 記載されている場合、更新を促す通知を生成する。ファイル読み取りを伴うため、
+        /// UI スレッドから呼ぶ場合は Task.Run 経由を推奨（SMB遅延対策）。
+        /// </remarks>
+        /// <returns>新しいバージョンがある場合はWarningItem、ない場合はnull</returns>
+        public WarningItem CheckUpdateNotificationWarning()
+        {
+            var result = _updateNotificationService?.CheckForNewerVersion();
+            if (result == null)
+                return null;
+
+            return new WarningItem
+            {
+                Type = WarningType.NewVersionAvailable,
+                DisplayText = $"ℹ️ 新しいバージョン {result.LatestVersion} が公開されています" +
+                              $"（このPCは {result.CurrentVersion}）。管理者に更新をご確認ください。"
             };
         }
     }

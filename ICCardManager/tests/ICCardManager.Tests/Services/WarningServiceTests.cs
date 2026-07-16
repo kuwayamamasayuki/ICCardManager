@@ -224,4 +224,47 @@ public class WarningServiceTests
     }
 
     #endregion
+
+    #region CheckUpdateNotificationWarning — 更新通知（Issue #1687）
+
+    [Fact]
+    public void CheckUpdateNotificationWarning_新バージョンがある場合は両バージョンを含む通知を返す()
+    {
+        var updateServiceMock = new Mock<IUpdateNotificationService>();
+        updateServiceMock.Setup(x => x.CheckForNewerVersion()).Returns(new UpdateCheckResult
+        {
+            LatestVersion = "2.11.0",
+            CurrentVersion = "2.10.0",
+        });
+        var service = new WarningService(
+            _ledgerRepositoryMock.Object, _databaseInfoMock.Object, updateServiceMock.Object);
+
+        var warning = service.CheckUpdateNotificationWarning();
+
+        warning.Should().NotBeNull();
+        warning!.Type.Should().Be(WarningType.NewVersionAvailable);
+        warning.DisplayText.Should().Contain("2.11.0", "新しいバージョンを明示する");
+        warning.DisplayText.Should().Contain("2.10.0", "このPCの現在バージョンも併記する");
+        warning.DisplayText.Should().Contain("ご確認ください", "行動指示で終わる");
+    }
+
+    [Fact]
+    public void CheckUpdateNotificationWarning_更新がない場合はnullを返す()
+    {
+        var updateServiceMock = new Mock<IUpdateNotificationService>();
+        updateServiceMock.Setup(x => x.CheckForNewerVersion()).Returns((UpdateCheckResult)null);
+        var service = new WarningService(
+            _ledgerRepositoryMock.Object, _databaseInfoMock.Object, updateServiceMock.Object);
+
+        service.CheckUpdateNotificationWarning().Should().BeNull();
+    }
+
+    [Fact]
+    public void CheckUpdateNotificationWarning_サービス未注入の場合はnullを返す()
+    {
+        // 既存の2引数構築（テスト互換経路）では更新通知は常に無効
+        _service.CheckUpdateNotificationWarning().Should().BeNull();
+    }
+
+    #endregion
 }

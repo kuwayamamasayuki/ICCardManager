@@ -582,6 +582,10 @@ public partial class MainViewModel : ViewModelBase
             // Issue #504: バス停未入力チェックはバックグラウンドで実行（起動を遅延させない）
             _ = CheckIncompleteBusStopsAsync();
 
+            // Issue #1687: 更新通知チェック（latest_version.txt）もバックグラウンドで実行
+            // （共有フォルダのSMB遅延で起動をブロックしないため）
+            _ = CheckUpdateNotificationAsync();
+
             // 共有モード時はDB接続の定期ヘルスチェックを開始
             if (IsSharedMode)
             {
@@ -608,6 +612,22 @@ public partial class MainViewModel : ViewModelBase
 
         var warning = _warningService.CheckJournalModeWarning();
         if (warning != null)
+            WarningMessages.Add(warning);
+    }
+
+    /// <summary>
+    /// Issue #1687: 更新通知チェック（WarningServiceに委譲）。
+    /// internal: テストから直接呼び出して挙動を検証するため。
+    /// </summary>
+    /// <remarks>
+    /// latest_version.txt の読み取りは共有フォルダ（SMB）アクセスを伴うため
+    /// Task.Run でバックグラウンド実行し、結果の WarningMessages 追加は
+    /// await 後の UI コンテキストで行う。重複追加は防止する。
+    /// </remarks>
+    internal async Task CheckUpdateNotificationAsync()
+    {
+        var warning = await Task.Run(() => _warningService.CheckUpdateNotificationWarning());
+        if (warning != null && !WarningMessages.Any(w => w.Type == WarningType.NewVersionAvailable))
             WarningMessages.Add(warning);
     }
 
@@ -777,12 +797,13 @@ public partial class MainViewModel : ViewModelBase
     /// </summary>
     private void ApplyDataWarnings(int warningBalance)
     {
-        // インフラ系の警告（接続断・カードリーダー）は保持し、データ系の警告のみクリア
+        // インフラ系の警告（接続断・カードリーダー・更新通知）は保持し、データ系の警告のみクリア
         var infraWarnings = WarningMessages
             .Where(w => w.Type == WarningType.DatabaseConnectionLost ||
                         w.Type == WarningType.CardReaderConnection ||
                         w.Type == WarningType.CardReaderError ||
-                        w.Type == WarningType.DatabaseJournalModeDegraded)
+                        w.Type == WarningType.DatabaseJournalModeDegraded ||
+                        w.Type == WarningType.NewVersionAvailable)
             .ToList();
         WarningMessages.Clear();
         foreach (var warning in infraWarnings)
