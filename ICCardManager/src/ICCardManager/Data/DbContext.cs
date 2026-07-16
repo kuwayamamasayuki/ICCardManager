@@ -1198,6 +1198,65 @@ namespace ICCardManager.Data
         }
 
         /// <summary>
+        /// DBへの書き込み可否確認（IDatabaseInfo実装、Issue #1686）
+        /// </summary>
+        /// <remarks>
+        /// user_version（本アプリでは未使用のDBヘッダ領域）への実書き込みをトランザクション内で
+        /// 行い、即座に ROLLBACK する。値もデータも変化しない。
+        /// BEGIN IMMEDIATE（書き込みロック取得）だけでは読み取り専用ファイルでも成功してしまう
+        /// （SQLITE_READONLY は実際のページ書き込みで初めて発生する）ことを実測で確認済みのため、
+        /// 実書き込みを伴うプローブとしている。読み取り専用のファイル属性や共有フォルダの
+        /// アクセス権不足（変更権限なし）をこの方法で検出できる。
+        /// </remarks>
+        /// <returns>書き込み可能な場合true</returns>
+        public bool CheckWritable()
+        {
+            if (IsConnectionSuspended)
+                return true;
+
+            // 別の書き込みトランザクションが進行中の場合、BEGIN が二重開始で失敗して
+            // 誤って「書込不可」と報告してしまう。書き込みが現に機能している状況なので true を返す
+            if (HasActiveTransactionScope)
+                return true;
+
+            try
+            {
+                using var lease = LeaseConnection();
+                using var command = lease.Connection.CreateCommand();
+
+                command.CommandText = "PRAGMA user_version;";
+                var currentVersion = Convert.ToInt64(command.ExecuteScalar());
+
+                command.CommandText = "BEGIN IMMEDIATE;";
+                command.ExecuteNonQuery();
+                try
+                {
+                    // +1 した値を書いて実書き込みを強制する（ROLLBACK で元に戻る）
+                    command.CommandText = $"PRAGMA user_version = {currentVersion + 1};";
+                    command.ExecuteNonQuery();
+                    return true;
+                }
+                finally
+                {
+                    command.CommandText = "ROLLBACK;";
+                    command.ExecuteNonQuery();
+                }
+            }
+            catch (InvalidOperationException)
+            {
+                // 接続一時停止中 — 書込権限の問題ではない
+                return true;
+            }
+            catch (Exception ex)
+            {
+                // CheckConnection と同じ方針: 「失敗=書込不可」を戻り値で通知しつつ LogDebug で痕跡を残す
+                _logger?.LogDebug(ex,
+                    "DB書込可否確認に失敗。呼び出し元には false を返す（読み取り専用アクセス権または接続エラー）");
+                return false;
+            }
+        }
+
+        /// <summary>
         /// リソースを解放
         /// </summary>
         public void Dispose()

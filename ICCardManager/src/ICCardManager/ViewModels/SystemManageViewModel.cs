@@ -22,6 +22,7 @@ public partial class SystemManageViewModel : ViewModelBase
     private readonly INavigationService _navigationService;
     private readonly OperationLogger _operationLogger;
     private readonly ISafeFileLauncher _safeFileLauncher;
+    private readonly IDatabaseInfo _databaseInfo;
 
     [ObservableProperty]
     private ObservableCollection<BackupFileInfo> _backupFiles = new();
@@ -43,18 +44,76 @@ public partial class SystemManageViewModel : ViewModelBase
     /// </summary>
     public bool HasSelectedBackup => SelectedBackup != null;
 
+    /// <summary>
+    /// 現在使用中のデータベースファイルのパス（Issue #1686、常設表示用）
+    /// </summary>
+    public string DatabasePathDisplay => _databaseInfo.DatabasePath;
+
+    /// <summary>
+    /// データベースの動作モード表示（Issue #1686）。
+    /// 共有フォルダモードか、このPC内のローカルモードかを常時表示する
+    /// </summary>
+    public string DatabaseModeText => _databaseInfo.IsSharedMode
+        ? "共有モード（複数のPCでデータベースを共有しています）"
+        : "ローカルモード（このPCの中に保存されています）";
+
+    /// <summary>
+    /// データベースの動作モードアイコン（Issue #1686）。
+    /// ステータスバーの共有モードインジケーター（🔗）と同じ図像を使用し、色以外の手段でもモードを伝達する
+    /// </summary>
+    public string DatabaseModeIcon => _databaseInfo.IsSharedMode ? "🔗" : "💻";
+
     public SystemManageViewModel(
         BackupService backupService,
         ISettingsRepository settingsRepository,
         INavigationService navigationService,
         OperationLogger operationLogger,
-        ISafeFileLauncher safeFileLauncher)
+        ISafeFileLauncher safeFileLauncher,
+        IDatabaseInfo databaseInfo)
     {
         _backupService = backupService;
         _settingsRepository = settingsRepository;
         _navigationService = navigationService;
         _operationLogger = operationLogger;
         _safeFileLauncher = safeFileLauncher;
+        _databaseInfo = databaseInfo;
+    }
+
+    /// <summary>
+    /// データベースへの接続テストを実行する（Issue #1686）。
+    /// 到達性（読み取り）と書込可否を順に確認し、結果をステータスメッセージへ表示する
+    /// </summary>
+    [RelayCommand]
+    public async Task TestDatabaseConnectionAsync()
+    {
+        using (BeginBusy("データベース接続をテスト中..."))
+        {
+            // CheckConnection / CheckWritable は同期I/O（ネットワーク越しだと busy_timeout 最大15秒待つ）
+            // のため、UIスレッドを塞がないよう Task.Run で退避する
+            var canRead = await Task.Run(() => _databaseInfo.CheckConnection());
+            if (!canRead)
+            {
+                SetStatus(
+                    $"データベース（{DatabasePathDisplay}）に接続できません。" +
+                    "ネットワークが切断されているか、共有フォルダにアクセスできない状態です。" +
+                    "ネットワーク接続と共有フォルダの状態を確認してください。",
+                    true);
+                return;
+            }
+
+            var canWrite = await Task.Run(() => _databaseInfo.CheckWritable());
+            if (!canWrite)
+            {
+                SetStatus(
+                    $"データベース（{DatabasePathDisplay}）に接続できましたが、書き込みができません。" +
+                    "ファイルまたは共有フォルダのアクセス権が読み取り専用になっている可能性があります。" +
+                    "フォルダの「変更」権限があるか確認してください。",
+                    true);
+                return;
+            }
+
+            SetStatus("接続テストに成功しました。データベースへの読み取り・書き込みの両方が可能です。", false);
+        }
     }
 
     partial void OnSelectedBackupChanged(BackupFileInfo? value)
