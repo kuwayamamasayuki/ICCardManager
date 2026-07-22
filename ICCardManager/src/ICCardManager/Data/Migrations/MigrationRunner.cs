@@ -51,6 +51,19 @@ namespace ICCardManager.Data.Migrations
         }
 
         /// <summary>
+        /// このアプリが把握している最新のマイグレーションバージョンを取得（Issue #1687）
+        /// </summary>
+        /// <remarks>
+        /// DBの現在バージョン（<see cref="GetCurrentVersion"/>）がこの値を超えている場合、
+        /// DBはより新しいバージョンのアプリで更新されており、このアプリからの
+        /// 書き込みはデータ不整合を招く恐れがある。
+        /// </remarks>
+        public int GetLatestKnownVersion()
+        {
+            return _migrations.Count > 0 ? _migrations.Max(m => m.Version) : 0;
+        }
+
+        /// <summary>
         /// 最新バージョンにマイグレーション
         /// </summary>
         /// <returns>適用されたマイグレーション数</returns>

@@ -74,15 +74,7 @@ namespace ICCardManager
         /// <summary>
         /// アプリケーションのバージョン番号（XAMLからバインド可能: Issue #475）
         /// </summary>
-        public static string AppVersion
-        {
-            get
-            {
-                var version = System.Reflection.Assembly.GetExecutingAssembly().GetName().Version;
-                // Major.Minor.Build 形式で返す（Revisionは省略）
-                return version != null ? $"{version.Major}.{version.Minor}.{version.Build}" : "不明";
-            }
-        }
+        public static string AppVersion => AppVersionInfo.CurrentString;
 
         // Issue #1356: OnStartup を async void 化し、Issue #1281 の UI スレッドガードに抵触する
         // DbContext 同期 API 呼び出し (InitializeDatabase / CleanupOldData / Vacuum) を
@@ -142,6 +134,20 @@ namespace ICCardManager
                 // Issue #1599: database_config.txt のパスが形式不正でデフォルトへ
                 // フォールバックしていた場合、ここでユーザーへ警告する
                 WarnIfDatabaseConfigPathRejected();
+            }
+            catch (DatabaseVersionMismatchException ex)
+            {
+                // Issue #1687: 旧バージョンのアプリが新スキーマのDB（共有DB等）を開こうとした場合、
+                // データ不整合防止のため明示的にブロックして終了する
+                ErrorDialogHelper.LogException(ex, "起動時のデータベースバージョン確認");
+
+                MessageBox.Show(
+                    ex.UserFriendlyMessage,
+                    "ピッすいの更新が必要です",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Warning);
+
+                Shutdown(1);
             }
             catch (Exception ex)
             {
@@ -366,6 +372,8 @@ namespace ICCardManager
             // Issue #1265: 監査ログなりすまし防止のため、操作者コンテキストを一元管理する
             services.AddSingleton<ICurrentOperatorContext, CurrentOperatorContext>();
             services.AddSingleton<SharedModeMonitor>();
+            // Issue #1687: 共有フォルダの latest_version.txt による更新通知
+            services.AddSingleton<IUpdateNotificationService, UpdateNotificationService>();
             services.AddSingleton<WarningService>();
             services.AddSingleton<DashboardService>();
             // Issue #1465: Process.Start(UseShellExecute=true) のパス検証を一元化

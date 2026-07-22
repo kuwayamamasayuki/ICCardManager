@@ -24,7 +24,10 @@ namespace ICCardManager.Dtos
         DatabaseConnectionLost,
 
         /// <summary>データベースのジャーナルモードがDELETEに設定できず、クラッシュ耐性が低下している警告（Issue #1172）</summary>
-        DatabaseJournalModeDegraded
+        DatabaseJournalModeDegraded,
+
+        /// <summary>新しいアプリバージョンが公開されている通知（共有フォルダの latest_version.txt 経由、Issue #1687）</summary>
+        NewVersionAvailable
     }
 
     /// <summary>
