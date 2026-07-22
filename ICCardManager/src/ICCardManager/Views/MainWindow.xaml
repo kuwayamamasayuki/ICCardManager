@@ -930,14 +930,15 @@
                                                 </Style.Triggers>
                                             </Style>
                                         </Border.Style>
-                                        <StackPanel Orientation="Horizontal">
-                                            <TextBlock Text="{Binding DisplayText}"
-                                                       TextWrapping="Wrap"
-                                                       FontSize="{DynamicResource SmallFontSize}"/>
+                                        <!-- Issue #1687: 横方向StackPanelは子を無限幅で測定しWrapが効かないため、
+                                             DockPanel（ヒント右端＋本文が残り幅で折り返し）で長文警告のはみ出しを防ぐ -->
+                                        <DockPanel>
                                             <!-- Issue #1110: DB接続断時に「クリックして再接続」ヒントを表示 -->
-                                            <TextBlock Text="（クリックして再接続）"
+                                            <TextBlock DockPanel.Dock="Right"
+                                                       Text="（クリックして再接続）"
                                                        FontSize="{DynamicResource SmallFontSize}"
                                                        Foreground="{DynamicResource SecondaryTextBrush}"
+                                                       VerticalAlignment="Center"
                                                        Margin="8,0,0,0">
                                                 <TextBlock.Style>
                                                     <Style TargetType="TextBlock">
@@ -950,7 +951,10 @@
                                                     </Style>
                                                 </TextBlock.Style>
                                             </TextBlock>
-                                        </StackPanel>
+                                            <TextBlock Text="{Binding DisplayText}"
+                                                       TextWrapping="Wrap"
+                                                       FontSize="{DynamicResource SmallFontSize}"/>
+                                        </DockPanel>
                                     </Border>
                                 </DataTemplate>
                             </ItemsControl.ItemTemplate>

@@ -20,8 +20,9 @@
   - **(2) 旧バージョンの共有DBブロック（能動型防御）**: `DbContext.InitializeDatabase` で「DBの `schema_migrations` 最大バージョン > アプリが把握する最大マイグレーションバージョン」を検出したら、`DatabaseVersionMismatchException`（**DB008**）で起動を明示ブロックし、「ピッすいの更新が必要です」ダイアログ（要求バージョン・DBスキーマ/対応スキーマ番号入り、3要素準拠文言）を表示して終了する。判定はアプリバージョンではなく**スキーマバージョン比較**のため、スキーマ変更のないマイナー更新では旧バージョンPCを誤ブロックしない。ローカルDBでも同じ破損リスクがあるため**全モード対象**。
   - 表示用の要求バージョンは settings 新キー `min_app_version` から取得（各アプリが起動時に自バージョンで**引き上げのみ**記録。スキーマ変更なしのためマイグレーション追加は不要）。バージョン比較は AssemblyVersion（4要素）と txt（3要素）の比較罠を避けるため `AppVersionInfo` で Major.Minor.Build に正規化。
   - **制約**: 本機能を持たない旧バージョン（v2.10.0 以前）自体のブロックは原理的に不可能（旧側にチェックコードがないため）。次のスキーマ変更以降の混在事故を防ぐ仕組み。インストーラーからの `latest_version.txt` 自動生成・インストーラーショートカット提示は今回スコープ外（フォローアップ候補）。
-  - テスト: `AppVersionInfoTests`（正規化パース、14件）・`UpdateNotificationServiceTests`（表記ゆれ・異常系、14件）・`DbContextVersionGuardTests`（ブロック送出・`min_app_version` 引き上げ記録、6件）を新設、`WarningServiceTests` に通知生成3件を追加。
-  - 管理者マニュアル §2.6（latest_version.txt 運用・起動ブロックの対処）／02_DB設計書 §3.7（`min_app_version`）／04_機能設計書 §18.6／05_クラス設計書 §3.3／07_テスト設計書 §1.1a（単体 3,716→3,753・合計 3,742→3,779 件）・UT-063〜UT-065 を同期更新（#1687）
+  - **警告エリアの折り返し修正**: 更新通知の長文警告が文字サイズ「中」以上でメイン画面右にはみ出したため（手動テストで検出）、警告 ItemTemplate の横方向 StackPanel（Issue #1110 由来。子を無限幅で測定するため `TextWrapping="Wrap"` が機能しない）を DockPanel に変更し、本文が残り幅で折り返すようにした（`MainWindow.xaml`）。
+  - テスト: `AppVersionInfoTests`（正規化パース、14件）・`UpdateNotificationServiceTests`（表記ゆれ・異常系、14件）・`DbContextVersionGuardTests`（ブロック送出・`min_app_version` 引き上げ記録、6件）・`MainWindowWarningAreaLayoutTests`（警告エリア折り返しの静的検証、2件）を新設、`WarningServiceTests` に通知生成3件を追加。
+  - 管理者マニュアル §2.6（latest_version.txt 運用・起動ブロックの対処）／02_DB設計書 §3.7（`min_app_version`）／04_機能設計書 §18.6／05_クラス設計書 §3.3／07_テスト設計書 §1.1a（単体 3,716→3,755・合計 3,742→3,781 件）・UT-063〜UT-065a を同期更新（#1687）
 
 **機能改善（ユーザビリティ）**
 - Issue #1683 メイン画面の60秒タイムアウト時の音を、エラー音（ピー / error.wav）から中立的な警告音（warning.wav）へ変更し、あわせて情報トースト「時間切れ／職員証のタッチからやり直してください」で再操作を案内するようにした。時間切れは操作の失敗ではないのに、エラーと同じ「ピー」音では職員が「壊してしまった」と誤認する恐れがあったため、心理的安全性を優先した変更（`MainViewModel.OnTimeoutTick`）。なお職員認証ダイアログ（StaffAuthDialog）のタイムアウトは認証失敗として扱うためエラー音のままでスコープ外。
