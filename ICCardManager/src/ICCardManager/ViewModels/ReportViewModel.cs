@@ -30,6 +30,7 @@ public partial class ReportViewModel : ViewModelBase
     private readonly INavigationService _navigationService;
     private readonly ISettingsRepository _settingsRepository;
     private readonly ISafeFileLauncher _safeFileLauncher;
+    private readonly ReportPreflightChecker _preflightChecker;
     private bool _isInitialized;
 
     [ObservableProperty]
@@ -91,7 +92,8 @@ public partial class ReportViewModel : ViewModelBase
         ICardRepository cardRepository,
         INavigationService navigationService,
         ISettingsRepository settingsRepository,
-        ISafeFileLauncher safeFileLauncher)
+        ISafeFileLauncher safeFileLauncher,
+        ReportPreflightChecker preflightChecker)
     {
         _reportService = reportService;
         _printService = printService;
@@ -99,6 +101,7 @@ public partial class ReportViewModel : ViewModelBase
         _navigationService = navigationService;
         _settingsRepository = settingsRepository;
         _safeFileLauncher = safeFileLauncher;
+        _preflightChecker = preflightChecker;
 
         // CreatedFiles の中身が変化したときに HasCreatedFiles の通知を発火する
         _createdFiles.CollectionChanged += OnCreatedFilesCollectionChanged;
@@ -434,6 +437,13 @@ public partial class ReportViewModel : ViewModelBase
             return;
         }
 
+        // Issue #1688: 出力前プリフライトチェック
+        // 中止する場合に不要な上書き確認ダイアログを見せないよう、上書き確認より前に実施する
+        if (!await RunPreflightBeforeCreateAsync())
+        {
+            return;
+        }
+
         // 上書き確認: 既存ファイルをチェック
         // Issue #477: 年度ファイル名に変更
         var existingFiles = new List<string>();
@@ -571,6 +581,91 @@ public partial class ReportViewModel : ViewModelBase
             System.Diagnostics.Debug.WriteLine("[ReportVM] 帳票作成がキャンセルされました");
 #endif
         }
+    }
+
+    /// <summary>
+    /// 帳票作成前のプリフライトチェックを実行し、作成を続行してよいかを返す（Issue #1688）
+    /// </summary>
+    /// <remarks>
+    /// 続行時は実ファイル生成（テンプレート解決・Excel出力）へ進むため単体テストから
+    /// <see cref="CreateReportAsync"/> 経由では検証できない。判断部分だけを internal で公開する。
+    /// </remarks>
+    /// <returns>続行する場合true、ユーザーが中止を選んだ場合false</returns>
+    internal async Task<bool> RunPreflightBeforeCreateAsync()
+    {
+        var result = await RunPreflightAsync();
+
+        // 警告がなければ確認を挟まずそのまま作成に進む
+        if (!result.HasWarnings)
+        {
+            return true;
+        }
+
+        var dialogResult = ShowPreflightDialog(result, isConfirmationMode: true);
+        if (dialogResult == true)
+        {
+            return true;
+        }
+
+        // ステータス欄はボタン列と幅を分け合うため簡潔にする。
+        // 「なぜ」「どうすれば」は直前のプリフライト結果ダイアログで提示済み（Issue #1688）
+        SetStatus("帳票作成を中止しました", true);
+        return false;
+    }
+
+    /// <summary>
+    /// 事前チェックを単独で実行して結果を表示する（Issue #1688）
+    /// </summary>
+    /// <remarks>
+    /// 帳票を出力せずに月次データの健全性だけを確認したい運用のための経路。
+    /// </remarks>
+    [RelayCommand]
+    public async Task RunPreflightCheckAsync()
+    {
+        SetStatus(string.Empty, false);
+
+        if (SelectedCards.Count == 0)
+        {
+            SetStatus("カードを1つ以上選択してください", true);
+            return;
+        }
+
+        var result = await RunPreflightAsync();
+        ShowPreflightDialog(result, isConfirmationMode: false);
+
+        SetStatus(
+            result.HasWarnings
+                ? $"事前チェック: 警告{result.Warnings.Count}件"
+                : "事前チェック: 問題なし",
+            result.HasWarnings);
+    }
+
+    /// <summary>
+    /// 選択中のカードについてプリフライトチェックを実行する
+    /// </summary>
+    private async Task<ReportPreflightResult> RunPreflightAsync()
+    {
+        var cardIdms = SelectedCards.Select(c => c.CardIdm).ToList();
+        using (BeginBusy($"帳票データを確認中... ({cardIdms.Count}件)"))
+        {
+            return await _preflightChecker.CheckAsync(cardIdms, SelectedYear, SelectedMonth);
+        }
+    }
+
+    /// <summary>
+    /// プリフライトチェック結果ダイアログを表示する
+    /// </summary>
+    /// <param name="result">チェック結果</param>
+    /// <param name="isConfirmationMode">確認モード（作成フロー経由）かどうか</param>
+    /// <returns>「このまま作成する」が選ばれた場合true</returns>
+    private bool? ShowPreflightDialog(ReportPreflightResult result, bool isConfirmationMode)
+    {
+        return _navigationService.ShowDialog<Views.Dialogs.ReportPreflightDialog>(d =>
+        {
+            d.ViewModel.SetResult(result, SelectedYear, SelectedMonth, isConfirmationMode);
+            d.Owner = Application.Current?.Windows.OfType<Window>().FirstOrDefault(w => w.IsActive)
+                      ?? Application.Current?.MainWindow;
+        });
     }
 
     /// <summary>

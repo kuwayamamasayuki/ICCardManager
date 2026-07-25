@@ -1,0 +1,175 @@
+<Window x:Class="ICCardManager.Views.Dialogs.ReportPreflightDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:vm="clr-namespace:ICCardManager.ViewModels"
+        mc:Ignorable="d"
+        d:DataContext="{d:DesignInstance Type=vm:ReportPreflightViewModel}"
+        Title="帳票の事前チェック"
+        Height="560"
+        Width="760"
+        MinHeight="440"
+        MinWidth="600"
+        WindowStartupLocation="CenterOwner"
+        ResizeMode="CanResize"
+        FontSize="{DynamicResource BaseFontSize}"
+        AutomationProperties.Name="帳票の事前チェック結果ダイアログ"
+        AutomationProperties.HelpText="帳票を出力する前に検出された警告の一覧です。">
+
+    <Window.Resources>
+        <BooleanToVisibilityConverter x:Key="BoolToVisibilityConverter"/>
+
+        <!-- カードごとにグループ化して表示する -->
+        <CollectionViewSource x:Key="GroupedWarnings" Source="{Binding Warnings}">
+            <CollectionViewSource.GroupDescriptions>
+                <PropertyGroupDescription PropertyName="CardDisplayName"/>
+            </CollectionViewSource.GroupDescriptions>
+        </CollectionViewSource>
+    </Window.Resources>
+
+    <Grid Margin="20">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <!-- 見出し -->
+        <Border Grid.Row="0"
+                Padding="12"
+                Margin="0,0,0,12"
+                AutomationProperties.Name="事前チェック結果の要約">
+            <Border.Style>
+                <Style TargetType="Border">
+                    <Setter Property="Background" Value="{DynamicResource ErrorBackgroundBrush}"/>
+                    <Style.Triggers>
+                        <DataTrigger Binding="{Binding HasNoWarnings}" Value="True">
+                            <Setter Property="Background" Value="{DynamicResource ReturnBackgroundBrush}"/>
+                        </DataTrigger>
+                    </Style.Triggers>
+                </Style>
+            </Border.Style>
+            <StackPanel>
+                <TextBlock Text="{Binding TargetPeriodText, StringFormat={}{0} の帳票を出力する前のチェック結果}"
+                           FontWeight="Bold"
+                           TextWrapping="Wrap"/>
+                <TextBlock Text="{Binding SummaryText}"
+                           Margin="0,6,0,0"
+                           TextWrapping="Wrap"
+                           AutomationProperties.LiveSetting="Assertive"
+                           AutomationProperties.Name="警告件数"/>
+            </StackPanel>
+        </Border>
+
+        <!-- 警告一覧 -->
+        <ListBox Grid.Row="1"
+                 ItemsSource="{Binding Source={StaticResource GroupedWarnings}}"
+                 SelectedItem="{Binding SelectedWarning}"
+                 Visibility="{Binding HasWarnings, Converter={StaticResource BoolToVisibilityConverter}}"
+                 HorizontalContentAlignment="Stretch"
+                 ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                 AutomationProperties.Name="警告一覧"
+                 AutomationProperties.HelpText="検出された警告の一覧です。行を選択すると詳細が表示されます。">
+            <ListBox.GroupStyle>
+                <GroupStyle>
+                    <GroupStyle.HeaderTemplate>
+                        <DataTemplate>
+                            <TextBlock Text="{Binding Name}"
+                                       FontWeight="Bold"
+                                       Margin="0,8,0,4"
+                                       Foreground="{DynamicResource PrimaryBrush}"/>
+                        </DataTemplate>
+                    </GroupStyle.HeaderTemplate>
+                </GroupStyle>
+            </ListBox.GroupStyle>
+            <ListBox.ItemTemplate>
+                <DataTemplate>
+                    <StackPanel Margin="4,3">
+                        <TextBlock Text="{Binding DisplayText}"
+                                   TextWrapping="Wrap"/>
+                        <TextBlock Text="{Binding RowSummary}"
+                                   Margin="0,2,0,0"
+                                   TextWrapping="Wrap"
+                                   Foreground="{DynamicResource SecondaryTextBrush}"/>
+                    </StackPanel>
+                </DataTemplate>
+            </ListBox.ItemTemplate>
+        </ListBox>
+
+        <!-- 警告0件時の案内（参照モードのみ到達する） -->
+        <TextBlock Grid.Row="1"
+                   Text="繰越額・残額・未返却カードのいずれにも問題は見つかりませんでした。"
+                   TextWrapping="Wrap"
+                   VerticalAlignment="Top"
+                   Margin="4,8,0,0"
+                   Visibility="{Binding HasNoWarnings, Converter={StaticResource BoolToVisibilityConverter}}"
+                   AutomationProperties.Name="チェック結果なし"/>
+
+        <!-- 選択行の詳細 -->
+        <Border Grid.Row="2"
+                Background="{DynamicResource ReturnBackgroundBrush}"
+                Padding="12"
+                Margin="0,12,0,0"
+                Visibility="{Binding HasWarnings, Converter={StaticResource BoolToVisibilityConverter}}">
+            <TextBlock Text="{Binding SelectedDetailText}"
+                       TextWrapping="Wrap"
+                       Foreground="{DynamicResource HintForegroundBrush}"
+                       AutomationProperties.LiveSetting="Polite"
+                       AutomationProperties.Name="警告の詳細と対処方法"/>
+        </Border>
+
+        <!-- ボタンエリア -->
+        <StackPanel Grid.Row="3"
+                    Orientation="Horizontal"
+                    HorizontalAlignment="Right"
+                    Margin="0,15,0,0">
+            <!-- 確認モード: 中止／続行を選ばせる -->
+            <!-- IsCancel="True" により DialogResult=false が自動設定される（Click ハンドラ不要） -->
+            <Button Content="中止して修正する"
+                    Visibility="{Binding IsConfirmationMode, Converter={StaticResource BoolToVisibilityConverter}}"
+                    Padding="20,10"
+                    Margin="0,0,10,0"
+                    MinWidth="140"
+                    IsDefault="True"
+                    IsCancel="True"
+                    AutomationProperties.Name="中止して修正する"
+                    AutomationProperties.HelpText="帳票作成を中止します。履歴画面で警告の内容を修正してください。"
+                    ToolTip="帳票作成を中止する (Escape)"/>
+            <Button Content="このまま作成する"
+                    Click="ContinueCreationButton_Click"
+                    Visibility="{Binding IsConfirmationMode, Converter={StaticResource BoolToVisibilityConverter}}"
+                    Padding="20,10"
+                    MinWidth="140"
+                    Background="{DynamicResource SuccessActionBrush}"
+                    Foreground="{DynamicResource OnPrimaryBrush}"
+                    AutomationProperties.Name="このまま作成する"
+                    AutomationProperties.HelpText="警告を承知のうえで帳票を作成します。"
+                    ToolTip="警告を無視して帳票を作成する"/>
+
+            <!-- 参照モード: 閉じるだけ -->
+            <Button Content="閉じる"
+                    Padding="20,10"
+                    MinWidth="100"
+                    AutomationProperties.Name="閉じる"
+                    AutomationProperties.HelpText="ダイアログを閉じます"
+                    ToolTip="ダイアログを閉じる (Escape)">
+                <Button.Style>
+                    <Style TargetType="Button">
+                        <Setter Property="Visibility" Value="Visible"/>
+                        <Setter Property="IsDefault" Value="True"/>
+                        <Setter Property="IsCancel" Value="True"/>
+                        <Style.Triggers>
+                            <DataTrigger Binding="{Binding IsConfirmationMode}" Value="True">
+                                <Setter Property="Visibility" Value="Collapsed"/>
+                                <Setter Property="IsDefault" Value="False"/>
+                                <Setter Property="IsCancel" Value="False"/>
+                            </DataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </Button.Style>
+            </Button>
+        </StackPanel>
+    </Grid>
+</Window>

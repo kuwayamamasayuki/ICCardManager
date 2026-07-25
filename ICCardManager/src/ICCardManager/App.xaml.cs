@@ -358,6 +358,8 @@ namespace ICCardManager
             services.AddSingleton<LedgerMergeService>();
             services.AddSingleton<LedgerSplitService>();
             services.AddSingleton<LedgerConsistencyChecker>();
+            // Issue #1688: 帳票出力前プリフライトチェック
+            services.AddSingleton<ReportPreflightChecker>();
             services.AddSingleton<CsvExportService>();
             services.AddSingleton<OperationLogExcelExportService>();
             services.AddSingleton<CsvImportService>();
@@ -413,6 +415,7 @@ namespace ICCardManager
             services.AddTransient<SystemManageViewModel>();
             services.AddTransient<IncompleteBusStopViewModel>();
             services.AddTransient<LedgerRowEditViewModel>();
+            services.AddTransient<ReportPreflightViewModel>();
     #if DEBUG
             // Issue #640: 仮想タッチ設定ダイアログ
             services.AddTransient<VirtualCardViewModel>();
@@ -424,6 +427,7 @@ namespace ICCardManager
             services.AddTransient<Views.Dialogs.StaffManageDialog>();
             services.AddTransient<Views.Dialogs.SettingsDialog>();
             services.AddTransient<Views.Dialogs.ReportDialog>();
+            services.AddTransient<Views.Dialogs.ReportPreflightDialog>();
 
             services.AddTransient<Views.Dialogs.BusStopInputDialog>();
             services.AddTransient<Views.Dialogs.PrintPreviewDialog>();
