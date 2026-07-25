@@ -28,6 +28,7 @@ public class SystemManageViewModelTests : IDisposable
     private readonly Mock<INavigationService> _navigationServiceMock;
     private readonly Mock<ICCardManager.Services.ISafeFileLauncher> _safeFileLauncherMock;
     private readonly Mock<IDatabaseInfo> _databaseInfoMock;
+    private readonly Mock<IStaffAuthService> _staffAuthServiceMock;
     private readonly SystemManageViewModel _viewModel;
 
     private const string TestDatabasePath = @"C:\ProgramData\ICCardManager\iccard.db";
@@ -61,13 +62,21 @@ public class SystemManageViewModelTests : IDisposable
         _databaseInfoMock.Setup(d => d.CheckConnection()).Returns(true);
         _databaseInfoMock.Setup(d => d.CheckWritable()).Returns(true);
 
+        // Issue #1705: リストアは職員認証を必須とする。既定は認証成功を返す
+        // （個別テストで null=キャンセルへ上書きする）。
+        _staffAuthServiceMock = new Mock<IStaffAuthService>();
+        _staffAuthServiceMock
+            .Setup(a => a.RequestAuthenticationAsync(It.IsAny<string>()))
+            .ReturnsAsync(new StaffAuthResult { Idm = "0123456789ABCDEF", StaffName = "テスト職員" });
+
         _viewModel = new SystemManageViewModel(
             _backupServiceMock.Object,
             _settingsRepositoryMock.Object,
             _navigationServiceMock.Object,
             operationLogger,
             _safeFileLauncherMock.Object,
-            _databaseInfoMock.Object);
+            _databaseInfoMock.Object,
+            _staffAuthServiceMock.Object);
     }
 
     /// <summary>
@@ -89,7 +98,8 @@ public class SystemManageViewModelTests : IDisposable
             _navigationServiceMock.Object,
             operationLogger,
             _safeFileLauncherMock.Object,
-            sharedInfoMock.Object);
+            sharedInfoMock.Object,
+            _staffAuthServiceMock.Object);
     }
 
     public void Dispose()
@@ -127,6 +137,69 @@ public class SystemManageViewModelTests : IDisposable
     public void 初期状態でHasSelectedBackupがfalseであること()
     {
         _viewModel.HasSelectedBackup.Should().BeFalse();
+    }
+
+    #endregion
+
+    #region リストア認証テスト（Issue #1705）
+
+    [Fact]
+    public async Task RestoreAsync_認証がキャンセルされた場合_リストアを実行しない()
+    {
+        // Arrange: バックアップを選択済みだが、職員認証はキャンセル（null）される
+        _viewModel.SelectedBackup = new BackupFileInfo
+        {
+            FileName = "backup_20260101.db",
+            FilePath = @"C:\backup\backup_20260101.db",
+        };
+        _staffAuthServiceMock
+            .Setup(a => a.RequestAuthenticationAsync(It.IsAny<string>()))
+            .ReturnsAsync((StaffAuthResult?)null);
+
+        // Act
+        await _viewModel.RestoreAsync();
+
+        // Assert: 認証がなければ DB は一切上書きされない（破壊的操作の認可ゲート）
+        _backupServiceMock.Verify(b => b.RestoreFromBackup(It.IsAny<string>()), Times.Never);
+        _viewModel.StatusMessage.Should().Contain("職員認証");
+    }
+
+    [Fact]
+    public async Task RestoreAsync_認証が要求されること()
+    {
+        // Arrange: バックアップを選択済み・認証キャンセルで確認ダイアログ前に停止させる
+        _viewModel.SelectedBackup = new BackupFileInfo
+        {
+            FileName = "backup_20260101.db",
+            FilePath = @"C:\backup\backup_20260101.db",
+        };
+        _staffAuthServiceMock
+            .Setup(a => a.RequestAuthenticationAsync(It.IsAny<string>()))
+            .ReturnsAsync((StaffAuthResult?)null);
+
+        // Act
+        await _viewModel.RestoreAsync();
+
+        // Assert: リストア操作名で認証が要求される
+        _staffAuthServiceMock.Verify(
+            a => a.RequestAuthenticationAsync(It.Is<string>(s => s.Contains("リストア"))),
+            Times.Once);
+    }
+
+    [Fact]
+    public async Task RestoreAsync_バックアップ未選択の場合_認証を要求しない()
+    {
+        // Arrange: 何も選択していない
+        _viewModel.SelectedBackup = null;
+
+        // Act
+        await _viewModel.RestoreAsync();
+
+        // Assert: 選択ガードで早期 return するため認証は要求されない
+        _staffAuthServiceMock.Verify(
+            a => a.RequestAuthenticationAsync(It.IsAny<string>()),
+            Times.Never);
+        _viewModel.StatusMessage.Should().Contain("選択してください");
     }
 
     [Fact]
