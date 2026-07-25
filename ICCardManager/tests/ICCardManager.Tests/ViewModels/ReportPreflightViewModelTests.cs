@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using FluentAssertions;
 using ICCardManager.Services;
@@ -140,6 +141,54 @@ namespace ICCardManager.Tests.ViewModels
             viewModel.SelectedWarning = viewModel.Warnings[0];
 
             viewModel.SelectedDetailText.Should().Be("履歴画面で該当行を修正してください。");
+        }
+
+        /// <summary>
+        /// 警告を選択したとき SelectedDetailText の PropertyChanged が発火すること
+        /// </summary>
+        /// <remarks>
+        /// SelectedDetailText は算出プロパティのため、SelectedWarning の変更時に明示的に
+        /// 通知しないと**値は正しいのに UI が更新されない**（プロパティを直接読むテストでは
+        /// 検出できない失敗モード）。バインディングが実際に更新される保証として通知を固定する。
+        /// </remarks>
+        [Fact]
+        public void SelectedWarning_WhenChanged_RaisesPropertyChangedForSelectedDetailText()
+        {
+            var viewModel = new ReportPreflightViewModel();
+            viewModel.SetResult(CreateResult(
+                CreateWarning("AAA", "はやかけん 001", new DateTime(2026, 7, 5)),
+                CreateWarning("AAA", "はやかけん 001", new DateTime(2026, 7, 20))),
+                2026, 7, isConfirmationMode: false);
+
+            var raised = new List<string>();
+            viewModel.PropertyChanged += (_, e) => raised.Add(e.PropertyName);
+
+            viewModel.SelectedWarning = viewModel.Warnings[1];
+
+            raised.Should().Contain(nameof(ReportPreflightViewModel.SelectedDetailText),
+                "算出プロパティの通知がないとバインディングが更新されず、詳細欄が古い表示のまま残る");
+            raised.Should().Contain(nameof(ReportPreflightViewModel.SelectedWarning));
+        }
+
+        /// <summary>
+        /// 選択を解除したとき詳細欄が案内文に戻ること（通知込み）
+        /// </summary>
+        [Fact]
+        public void SelectedWarning_WhenClearedToNull_RaisesNotificationAndRestoresPrompt()
+        {
+            var viewModel = new ReportPreflightViewModel();
+            viewModel.SetResult(CreateResult(
+                CreateWarning("AAA", "はやかけん 001", new DateTime(2026, 7, 5))),
+                2026, 7, isConfirmationMode: false);
+            viewModel.SelectedWarning = viewModel.Warnings[0];
+
+            var raised = new List<string>();
+            viewModel.PropertyChanged += (_, e) => raised.Add(e.PropertyName);
+
+            viewModel.SelectedWarning = null;
+
+            raised.Should().Contain(nameof(ReportPreflightViewModel.SelectedDetailText));
+            viewModel.SelectedDetailText.Should().Contain("選択すると");
         }
 
         /// <summary>
