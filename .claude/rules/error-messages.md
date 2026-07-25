@@ -125,3 +125,6 @@ StatusMessage = ExceptionMessageFormatter.ToUserMessage(ex, "台帳の保存");
 | `ValidationServiceErrorMessageQualityTests` | `ValidationService` の各 Validator |
 | `PathValidatorErrorMessageQualityTests` | パス検証（`SafeFilePathValidator` 等）のエラー文言 |
 | `ExceptionMessageFormatterTests` | `ExceptionMessageFormatter.ToUserMessage`（例外→3要素文言、Issue #1614） |
+| `ReportPreflightCheckerTests.AllWarnings_SatisfyErrorMessageQualityCriteria` | 帳票出力前プリフライトチェックの警告文言（5種別すべてを発生させ、`DisplayText` の情報量とカード名の明示、`DetailText` が行動指示で終わることを検証、Issue #1688） |
+
+> **バリデーション以外の「警告文言」も本ガイドラインの対象**: プリフライトチェックのように、入力値の妥当性ではなく**データの状態**を警告する文言も 3 要素を満たすこと。「何が」＝どのカードのどの行か（カード名・利用日・摘要・金額）、「なぜ」＝帳票にどう影響するか、「どうすれば」＝どの画面で何を直すか。専用の品質テストクラスを新設せず、対象サービスのテストクラス内に品質テストを1件置く形でよい。
