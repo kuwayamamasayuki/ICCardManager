@@ -4,8 +4,10 @@ using System.ComponentModel;
 using System.Linq;
 using System.Threading.Tasks;
 using FluentAssertions;
+using ICCardManager.Common;
 using ICCardManager.Data;
 using ICCardManager.Data.Repositories;
+using ICCardManager.Dtos;
 using ICCardManager.Infrastructure.Timing;
 using ICCardManager.Models;
 using ICCardManager.Services;
@@ -29,6 +31,7 @@ public class SystemManageViewModelTests : IDisposable
     private readonly Mock<ICCardManager.Services.ISafeFileLauncher> _safeFileLauncherMock;
     private readonly Mock<IDatabaseInfo> _databaseInfoMock;
     private readonly Mock<IStaffAuthService> _staffAuthServiceMock;
+    private readonly Mock<IBackupHealthService> _backupHealthServiceMock;
     private readonly SystemManageViewModel _viewModel;
 
     private const string TestDatabasePath = @"C:\ProgramData\ICCardManager\iccard.db";
@@ -69,6 +72,13 @@ public class SystemManageViewModelTests : IDisposable
             .Setup(a => a.RequestAuthenticationAsync(It.IsAny<string>()))
             .ReturnsAsync(new StaffAuthResult { Idm = "0123456789ABCDEF", StaffName = "テスト職員" });
 
+        // Issue #1689: バックアップ健全性。既定は「記録なし」を返し、
+        // 健全性表示のテストは個別に GetHealthAsync を上書きする。
+        _backupHealthServiceMock = new Mock<IBackupHealthService>();
+        _backupHealthServiceMock
+            .Setup(s => s.GetHealthAsync())
+            .ReturnsAsync(new BackupHealthInfo { MaxGenerations = AppConstants.MaxBackupGenerations });
+
         _viewModel = new SystemManageViewModel(
             _backupServiceMock.Object,
             _settingsRepositoryMock.Object,
@@ -76,7 +86,8 @@ public class SystemManageViewModelTests : IDisposable
             operationLogger,
             _safeFileLauncherMock.Object,
             _databaseInfoMock.Object,
-            _staffAuthServiceMock.Object);
+            _staffAuthServiceMock.Object,
+            _backupHealthServiceMock.Object);
     }
 
     /// <summary>
@@ -99,7 +110,8 @@ public class SystemManageViewModelTests : IDisposable
             operationLogger,
             _safeFileLauncherMock.Object,
             sharedInfoMock.Object,
-            _staffAuthServiceMock.Object);
+            _staffAuthServiceMock.Object,
+            _backupHealthServiceMock.Object);
     }
 
     public void Dispose()
@@ -689,6 +701,184 @@ public class SystemManageViewModelTests : IDisposable
         busyStates.Should().HaveCountGreaterOrEqualTo(2);
         busyStates.First().Should().BeTrue();
         busyStates.Last().Should().BeFalse();
+    }
+
+    #endregion
+
+    #region バックアップ健全性表示テスト（Issue #1689）
+
+    private void SetupHealth(BackupHealthInfo health) =>
+        _backupHealthServiceMock.Setup(s => s.GetHealthAsync()).ReturnsAsync(health);
+
+    [Fact]
+    public async Task バックアップ状況_最終成功日時と経過日数が表示されること()
+    {
+        SetupHealth(new BackupHealthInfo { LastSuccessAt = DateTime.Now.Date.AddDays(-3).AddHours(8) });
+
+        await _viewModel.LoadBackupHealthAsync();
+
+        _viewModel.LastBackupSuccessText.Should().Contain("最終成功:");
+        _viewModel.LastBackupSuccessText.Should().Contain("3日前");
+    }
+
+    [Theory]
+    [InlineData(0, "本日")]
+    [InlineData(1, "昨日")]
+    [InlineData(5, "5日前")]
+    public async Task バックアップ状況_経過日数が自然な日本語で表示されること(int daysAgo, string expected)
+    {
+        SetupHealth(new BackupHealthInfo { LastSuccessAt = DateTime.Now.Date.AddDays(-daysAgo).AddHours(8) });
+
+        await _viewModel.LoadBackupHealthAsync();
+
+        _viewModel.LastBackupSuccessText.Should().Contain(expected);
+    }
+
+    [Fact]
+    public async Task バックアップ状況_記録がない場合は記録なしと表示されること()
+    {
+        // 「-」だけだと故障と誤読されるため、次にいつ表示されるかまで案内する
+        SetupHealth(new BackupHealthInfo { LastSuccessAt = null });
+
+        await _viewModel.LoadBackupHealthAsync();
+
+        _viewModel.LastBackupSuccessText.Should().Contain("記録なし");
+        _viewModel.IsBackupStale.Should().BeFalse("判断材料がない状態は警告扱いにしない");
+    }
+
+    [Fact]
+    public async Task バックアップ状況_しきい値を超えると警告状態になること()
+    {
+        SetupHealth(new BackupHealthInfo
+        {
+            LastSuccessAt = DateTime.Now.Date.AddDays(-(AppConstants.BackupStaleWarningDays + 1))
+        });
+
+        await _viewModel.LoadBackupHealthAsync();
+
+        _viewModel.IsBackupStale.Should().BeTrue();
+        // 色だけでなくアイコンでも状態を伝える（UI/UX原則）
+        _viewModel.BackupHealthIcon.Should().Be("⚠");
+    }
+
+    [Fact]
+    public async Task バックアップ状況_しきい値内なら正常アイコンになること()
+    {
+        SetupHealth(new BackupHealthInfo { LastSuccessAt = DateTime.Now.Date });
+
+        await _viewModel.LoadBackupHealthAsync();
+
+        _viewModel.IsBackupStale.Should().BeFalse();
+        _viewModel.BackupHealthIcon.Should().Be("✔");
+    }
+
+    [Fact]
+    public async Task バックアップ状況_世代数が上限とともに表示されること()
+    {
+        SetupHealth(new BackupHealthInfo { GenerationCount = 12, MaxGenerations = 30 });
+
+        await _viewModel.LoadBackupHealthAsync();
+
+        _viewModel.BackupGenerationText.Should().Be("保持世代: 12 / 30");
+    }
+
+    [Fact]
+    public async Task バックアップ状況_空き容量が単位付きで表示されること()
+    {
+        SetupHealth(new BackupHealthInfo { FreeSpaceBytes = 1024L * 1024 * 1024 * 5 });
+
+        await _viewModel.LoadBackupHealthAsync();
+
+        _viewModel.BackupFreeSpaceText.Should().Be("保存先の空き容量: 5.0 GB");
+    }
+
+    [Fact]
+    public async Task バックアップ状況_空き容量が取得できない場合は不明と表示されること()
+    {
+        SetupHealth(new BackupHealthInfo { FreeSpaceBytes = null });
+
+        await _viewModel.LoadBackupHealthAsync();
+
+        _viewModel.BackupFreeSpaceText.Should().Contain("不明");
+    }
+
+    [Fact]
+    public async Task バックアップ状況_保存先フォルダが表示されること()
+    {
+        SetupHealth(new BackupHealthInfo { BackupFolderPath = @"\\fileserver\iccard\backup" });
+
+        await _viewModel.LoadBackupHealthAsync();
+
+        _viewModel.BackupFolderText.Should().Be(@"保存先: \\fileserver\iccard\backup");
+    }
+
+    [Fact]
+    public async Task バックアップ状況_最終実施PC名が表示されること()
+    {
+        SetupHealth(new BackupHealthInfo { LastSuccessMachineName = "PC-KEIRI-01" });
+
+        await _viewModel.LoadBackupHealthAsync();
+
+        _viewModel.LastBackupMachineText.Should().Be("最終実施PC: PC-KEIRI-01");
+    }
+
+    [Fact]
+    public async Task バックアップ状況_VACUUM実施日と実施PCが表示されること()
+    {
+        SetupHealth(new BackupHealthInfo
+        {
+            LastVacuumDate = new DateTime(2026, 7, 10),
+            LastVacuumMachineName = "PC-KEIRI-03"
+        });
+
+        await _viewModel.LoadBackupHealthAsync();
+
+        _viewModel.LastVacuumText.Should().Be("最終最適化(VACUUM): 2026/07/10（実施PC: PC-KEIRI-03）");
+    }
+
+    [Fact]
+    public async Task バックアップ状況_VACUUM未実行なら未実行と表示されること()
+    {
+        SetupHealth(new BackupHealthInfo { LastVacuumDate = null });
+
+        await _viewModel.LoadBackupHealthAsync();
+
+        _viewModel.LastVacuumText.Should().Be("最終最適化(VACUUM): 未実行");
+    }
+
+    [Fact]
+    public void バックアップ状況_共有モードでのみPC名関連を表示すること()
+    {
+        // ローカルモードでは実施PCが自明なため表示しない
+        _viewModel.IsSharedMode.Should().BeFalse();
+
+        var sharedViewModel = CreateViewModelWithSharedMode(@"\\server\share\iccard.db");
+        sharedViewModel.IsSharedMode.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task バックアップ状況_読み込み時に表示プロパティの変更通知が発火すること()
+    {
+        var changed = new List<string>();
+        _viewModel.PropertyChanged += (_, e) => changed.Add(e.PropertyName);
+        SetupHealth(new BackupHealthInfo { LastSuccessAt = DateTime.Now, GenerationCount = 3 });
+
+        await _viewModel.LoadBackupHealthAsync();
+
+        changed.Should().Contain(nameof(SystemManageViewModel.LastBackupSuccessText));
+        changed.Should().Contain(nameof(SystemManageViewModel.BackupGenerationText));
+        changed.Should().Contain(nameof(SystemManageViewModel.BackupFreeSpaceText));
+        changed.Should().Contain(nameof(SystemManageViewModel.IsBackupStale));
+        changed.Should().Contain(nameof(SystemManageViewModel.BackupHealthIcon));
+    }
+
+    [Fact]
+    public async Task バックアップ一覧読み込み時に健全性も更新されること()
+    {
+        // 一覧と健全性は同じフォルダの状態を映すため、手動バックアップ直後も同時に更新される
+        await _viewModel.LoadBackupsAsync();
+
+        _backupHealthServiceMock.Verify(s => s.GetHealthAsync(), Times.AtLeastOnce);
     }
 
     #endregion
