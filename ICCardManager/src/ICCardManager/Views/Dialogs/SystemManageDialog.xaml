@@ -8,9 +8,9 @@
         mc:Ignorable="d"
         d:DataContext="{d:DesignInstance Type=vm:SystemManageViewModel}"
         Title="システム管理"
-        Height="750"
+        Height="860"
         Width="650"
-        MinHeight="620"
+        MinHeight="700"
         MinWidth="520"
         WindowStartupLocation="CenterOwner"
         ResizeMode="CanResize"
@@ -87,13 +87,87 @@
             </StackPanel>
         </GroupBox>
 
-        <!-- 手動バックアップ -->
-        <GroupBox Grid.Row="2" Header="手動バックアップ" Margin="0,0,0,15" Padding="15">
+        <!-- バックアップ状況（Issue #1689） -->
+        <!-- 起動時の自動バックアップは fire-and-forget のため、失敗しても管理者は気づけなかった。
+             最終成功日時・世代数・空き容量をここに常設表示し「静かな失敗」を早期発見できるようにする。
+             長文になり得る行はすべて TextWrapping="Wrap"（横 StackPanel を使わない）。Issue #1687 / #1688 参照。 -->
+        <GroupBox Grid.Row="2" Header="バックアップ状況" Margin="0,0,0,15" Padding="15">
             <StackPanel>
-                <TextBlock Text="任意のタイミングでデータベースのバックアップを作成できます。"
+                <!-- 最終成功日時: 色だけでなくアイコンでも状態を伝える（UI/UX原則） -->
+                <DockPanel Margin="0,0,0,8">
+                    <TextBlock DockPanel.Dock="Left"
+                               Text="{Binding BackupHealthIcon, Mode=OneWay}"
+                               Margin="0,0,6,0"
+                               VerticalAlignment="Top"
+                               FontSize="{DynamicResource BaseFontSize}">
+                        <TextBlock.Style>
+                            <Style TargetType="TextBlock">
+                                <Setter Property="Foreground" Value="{DynamicResource SecondaryTextBrush}"/>
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding IsBackupStale}" Value="True">
+                                        <Setter Property="Foreground" Value="{DynamicResource DangerTextBrush}"/>
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </TextBlock.Style>
+                    </TextBlock>
+
+                    <TextBlock Text="{Binding LastBackupSuccessText, Mode=OneWay}"
+                               TextWrapping="Wrap"
+                               FontWeight="Bold"
+                               FontSize="{DynamicResource BaseFontSize}"
+                               AutomationProperties.Name="{Binding LastBackupSuccessText}">
+                        <TextBlock.Style>
+                            <Style TargetType="TextBlock">
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding IsBackupStale}" Value="True">
+                                        <Setter Property="Foreground" Value="{DynamicResource DangerTextBrush}"/>
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </TextBlock.Style>
+                    </TextBlock>
+                </DockPanel>
+
+                <TextBlock Text="{Binding BackupGenerationText, Mode=OneWay}"
+                           TextWrapping="Wrap"
                            Foreground="{DynamicResource SecondaryTextBrush}"
                            FontSize="{DynamicResource SmallFontSize}"
-                           Margin="0,0,0,10"/>
+                           AutomationProperties.Name="{Binding BackupGenerationText}"/>
+
+                <TextBlock Text="{Binding BackupFreeSpaceText, Mode=OneWay}"
+                           TextWrapping="Wrap"
+                           Foreground="{DynamicResource SecondaryTextBrush}"
+                           FontSize="{DynamicResource SmallFontSize}"
+                           AutomationProperties.Name="{Binding BackupFreeSpaceText}"/>
+
+                <TextBlock Text="{Binding BackupFolderText, Mode=OneWay}"
+                           TextWrapping="Wrap"
+                           ToolTip="{Binding BackupFolderText}"
+                           Foreground="{DynamicResource SecondaryTextBrush}"
+                           FontSize="{DynamicResource SmallFontSize}"
+                           AutomationProperties.Name="{Binding BackupFolderText}"/>
+
+                <!-- 共有モードでのみ「どのPCが実施したか」を表示（ローカルモードでは自明なため出さない） -->
+                <TextBlock Text="{Binding LastBackupMachineText, Mode=OneWay}"
+                           TextWrapping="Wrap"
+                           Foreground="{DynamicResource SecondaryTextBrush}"
+                           FontSize="{DynamicResource SmallFontSize}"
+                           Visibility="{Binding IsSharedMode, Converter={StaticResource BoolToVisibilityConverter}}"
+                           AutomationProperties.Name="{Binding LastBackupMachineText}"/>
+
+                <TextBlock Text="{Binding LastVacuumText, Mode=OneWay}"
+                           TextWrapping="Wrap"
+                           Foreground="{DynamicResource SecondaryTextBrush}"
+                           FontSize="{DynamicResource SmallFontSize}"
+                           Visibility="{Binding IsSharedMode, Converter={StaticResource BoolToVisibilityConverter}}"
+                           AutomationProperties.Name="{Binding LastVacuumText}"/>
+
+                <TextBlock Text="任意のタイミングでデータベースのバックアップを作成できます。"
+                           TextWrapping="Wrap"
+                           Foreground="{DynamicResource SecondaryTextBrush}"
+                           FontSize="{DynamicResource SmallFontSize}"
+                           Margin="0,10,0,10"/>
 
                 <StackPanel Orientation="Horizontal">
                     <Button Content="バックアップを作成"

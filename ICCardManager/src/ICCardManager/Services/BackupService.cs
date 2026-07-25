@@ -23,9 +23,10 @@ namespace ICCardManager.Services
         private readonly ILogger<BackupService> _logger;
 
         /// <summary>
-        /// バックアップファイル保持世代数
+        /// バックアップファイル保持世代数（Issue #1689 で <see cref="AppConstants"/> に集約。
+        /// システム管理画面の「◯/30 世代」表示と実際の削除しきい値を同一の値から導くため）
         /// </summary>
-        private const int MaxBackupGenerations = 30;
+        private const int MaxBackupGenerations = AppConstants.MaxBackupGenerations;
 
         /// <summary>
         /// バックアップファイル名のプレフィックス
@@ -50,7 +51,10 @@ namespace ICCardManager.Services
         /// <summary>
         /// 共有モードかどうか（DbContextの状態を公開）
         /// </summary>
-        public bool IsSharedMode => _dbContext.IsSharedMode;
+        /// <remarks>
+        /// Issue #1689: BackupHealthService のテストで共有／ローカル両モードの分岐を検証するため virtual。
+        /// </remarks>
+        public virtual bool IsSharedMode => _dbContext.IsSharedMode;
 
         /// <summary>
         /// 自動バックアップを実行
@@ -62,31 +66,8 @@ namespace ICCardManager.Services
 
             try
             {
-                // バックアップ先フォルダを取得
-                var settings = await _settingsRepository.GetAppSettingsAsync().ConfigureAwait(false);
-                backupPath = settings.BackupPath;
-
-                if (string.IsNullOrWhiteSpace(backupPath))
-                {
-                    backupPath = PathValidator.GetDefaultBackupPath();
-                    _logger.LogDebug("バックアップパス未設定のためデフォルトを使用: {Path}", backupPath);
-                }
-                else
-                {
-                    // パスを検証
-                    var validationResult = PathValidator.ValidateBackupPath(backupPath);
-                    if (!validationResult.IsValid)
-                    {
-                        _logger.LogWarning(
-                            "バックアップパスが無効です: {Path} - {Error}。デフォルトパスを使用します",
-                            backupPath,
-                            validationResult.ErrorMessage);
-                        backupPath = PathValidator.GetDefaultBackupPath();
-                    }
-                }
-
-                // パスを正規化
-                backupPath = PathValidator.NormalizePath(backupPath) ?? PathValidator.GetDefaultBackupPath();
+                // バックアップ先フォルダを取得（検証・既定値フォールバック・正規化まで）
+                backupPath = await ResolveBackupFolderAsync().ConfigureAwait(false);
 
                 // バックアップフォルダを作成（権限はインストーラーが設定済み、Issue #1455 / #1499）
                 EnsureDirectoryExists(backupPath);
@@ -109,6 +90,11 @@ namespace ICCardManager.Services
                 // 古いバックアップを削除
                 await CleanupOldBackupsAsync(backupPath).ConfigureAwait(false);
 
+                // Issue #1689: 成功日時と実施PC名を記録する。
+                // 呼び出し側（App.PerformStartupTasksAsync）は戻り値を捨てる fire-and-forget のため、
+                // 「最後に成功したのはいつか」をサービス内部で永続化しないと誰も知り得ない。
+                await RecordBackupSuccessAsync().ConfigureAwait(false);
+
                 return backupFilePath;
             }
             catch (UnauthorizedAccessException ex)
@@ -130,6 +116,66 @@ namespace ICCardManager.Services
             {
                 _logger.LogError(ex, "自動バックアップに失敗しました（予期しないエラー）");
                 return null;
+            }
+        }
+
+        /// <summary>
+        /// 実際に使用されるバックアップ保存先フォルダを解決する（Issue #1689）
+        /// </summary>
+        /// <remarks>
+        /// 設定値 → 検証（不正なら既定パスへフォールバック）→ 正規化、という
+        /// <see cref="ExecuteAutoBackupAsync"/> と同一の手順を通す。
+        /// システム管理画面の「バックアップ状況」も同じ結果を使うことで、
+        /// 「画面に出ているフォルダ」と「実際に書かれるフォルダ」の食い違いを構造的に防ぐ。
+        /// </remarks>
+        /// <returns>正規化済みのバックアップ保存先フォルダのパス</returns>
+        public virtual async Task<string> ResolveBackupFolderAsync()
+        {
+            var settings = await _settingsRepository.GetAppSettingsAsync().ConfigureAwait(false);
+            var backupPath = settings?.BackupPath;
+
+            if (string.IsNullOrWhiteSpace(backupPath))
+            {
+                backupPath = PathValidator.GetDefaultBackupPath();
+                _logger.LogDebug("バックアップパス未設定のためデフォルトを使用: {Path}", backupPath);
+            }
+            else
+            {
+                var validationResult = PathValidator.ValidateBackupPath(backupPath);
+                if (!validationResult.IsValid)
+                {
+                    _logger.LogWarning(
+                        "バックアップパスが無効です: {Path} - {Error}。デフォルトパスを使用します",
+                        backupPath,
+                        validationResult.ErrorMessage);
+                    backupPath = PathValidator.GetDefaultBackupPath();
+                }
+            }
+
+            return PathValidator.NormalizePath(backupPath) ?? PathValidator.GetDefaultBackupPath();
+        }
+
+        /// <summary>
+        /// バックアップ成功日時と実施PC名を settings に記録する（Issue #1689）
+        /// </summary>
+        /// <remarks>
+        /// 記録の失敗はバックアップ本体の成功を取り消さない（記録は監視用の補助情報のため）。
+        /// 失敗時は Warning ログのみ出して続行する。
+        /// </remarks>
+        private async Task RecordBackupSuccessAsync()
+        {
+            try
+            {
+                await _settingsRepository.SetAsync(
+                    SettingsRepository.KeyLastBackupSuccessAt,
+                    DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss")).ConfigureAwait(false);
+                await _settingsRepository.SetAsync(
+                    SettingsRepository.KeyLastBackupMachine,
+                    Environment.MachineName).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "バックアップ成功日時の記録に失敗しました（バックアップ自体は成功しています）");
             }
         }
 
