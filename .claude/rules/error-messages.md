@@ -98,6 +98,7 @@ StatusMessage = ExceptionMessageFormatter.ToUserMessage(ex, "台帳の保存");
 - 変換は `Common/ExceptionMessageFormatter.ToUserMessage(Exception, operation)` を使う。`operation` はユーザー視点の操作名（「台帳の保存」「エクスポート」「リストア」等）で、文言の「何が」部分になる。例外種別に応じた「なぜ／どうすれば」が付与される。`AppException` は整備済みの `UserFriendlyMessage` がそのまま使われる。
 - 技術的詳細（`ex.Message`）は必ずログへ残す。`ILogger` を注入済みなら `_logger.LogError(ex, ...)`、注入していない ViewModel / View コードビハインドでは `ErrorDialogHelper.LogException(ex, "操作名")`（既存のファイルログ機構を再利用、ダイアログ非表示）を使う。
 - トースト通知は文字数制約があるため、`ToUserMessage` のフル文言ではなく簡潔な行動指示（「もう一度タッチしてください」等）を優先してよい。
+- **ボタン行と幅を分け合うステータス欄も同様**に簡潔でよい（例: 帳票作成ダイアログ左下の `StatusMessage`。「事前チェック: 警告3件」「帳票作成を中止しました」）。直前のダイアログで「なぜ／どうすれば」を提示済みなら、ステータス欄で繰り返さない。§「最小文字数基準: 20文字以上」は `ValidationService` の Validator 文言に対する基準であり、これら表示領域が制約された箇所には適用しない（Issue #1688）。ただし文字数を詰めること自体を対策にせず、`TextWrapping="Wrap"` による折り返しを併せて担保すること（`.claude/rules/development-conventions.md` の UI/UX原則を参照）。
 
 ### `ToUserMessage` と `ErrorDialogHelper.GetErrorInfo` の役割分担（ドリフト監査 EM-R5-01）
 

@@ -27,6 +27,11 @@
 - 色覚多様性対応: 暖色（貸出）vs 寒色（返却）で色相差を明確に
 - コントラスト: 背景色は彩度を確保しつつ、テキストとの可読性を維持
 - 文字サイズは設定で変更可能（小/中/大/特大）
+- **長文の可能性があるテキストは「幅」ではなく「折り返し」で担保する**（Issue #1687、#1688）。文字サイズが4段階で変わるため、`Width` / `MinWidth` の調整やボタン幅を詰める対処は特大でまた破綻する。`TextBlock` には `TextWrapping="Wrap"` を明示し、加えて以下の2つの罠に注意する:
+  - **横方向 `StackPanel` は子を無限幅で測定する**ため、その中では `TextWrapping="Wrap"` が機能しない。`DockPanel` / `Grid` 等の幅制約のあるパネルを使う（Issue #1687）
+  - **`Grid` は既定で子をクリップしない**（`ClipToBounds=false`）。`*` 列は隣の `Auto` 列（ボタン等）が広がると子の希望幅より狭くなるが、`TextWrapping` がないとテキストは列幅を無視して隣の要素の下へはみ出す（Issue #1688）
+  - ボタン行にステータス表示を同居させる場合、ボタン側の `StackPanel` に `VerticalAlignment="Center"` を付け、テキストが2行に折り返しても縦に引き伸ばされないようにする
+  - 回帰は XAML テキスト上の静的検証で固定する（`MainWindowWarningAreaLayoutTests` / `ReportDialogStatusAreaLayoutTests` が参考実装）。実描画の確認には UI オートメーションが必要なため、文字サイズ変更時の表示は手動検証する
 - 貸出時: 薄いオレンジ背景(#FFF3E0、`LendingBackgroundBrush`) + アイコン + 「ピッ」
 - 返却時: 薄い水色背景(#E3F2FD、`ReturnBackgroundBrush`) + アイコン + 「ピピッ」
 - エラー時: 薄い赤背景(#FFEBEE、`ErrorBackgroundBrush`) + 「ピー」
