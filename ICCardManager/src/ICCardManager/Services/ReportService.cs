@@ -683,9 +683,14 @@ namespace ICCardManager.Services
         /// <returns>ファイル名（例: 物品出納簿_はやかけん_H001_2024年度.xlsx）</returns>
         public static string GetFiscalYearFileName(string cardType, string cardNumber, int fiscalYear)
         {
+            // Issue #1703: CardType / CardNumber は CSV 取込・共有DB 経由でパス区切りを含みうる。
+            // ファイル名構成要素としてサニタイズし、Path.Combine + SaveAs 解決時の
+            // 出力フォルダ外へのパストラバーサルを防ぐ（名前生成の単一チョークポイント）。
+            var safeCardType = FileNameSanitizer.SanitizeComponent(cardType);
+            var safeCardNumber = FileNameSanitizer.SanitizeComponent(cardNumber);
             return string.Format(
                 new OrganizationOptions().ReportLayout.FileNameFormat,
-                cardType, cardNumber, fiscalYear);
+                safeCardType, safeCardNumber, fiscalYear);
         }
 
         /// <summary>

@@ -2,6 +2,11 @@
 
 ### Unreleased
 
+**セキュリティ**
+- Issue #1703 月次帳票のファイル名生成におけるパストラバーサル（CWE-22）を修正した。`CardType` / `CardNumber` は CSV 取込（`CsvImportService` は非空チェックのみ）や共有モードの他 PC による DB 直接書き込み経由でパス区切り（`..\` 等）を含みうるが、これらが `ReportService.GetFiscalYearFileName` でファイル名に素通しされ、`Path.Combine` + `workbook.SaveAs` の解決時に選択した出力フォルダの外へ `.xlsx` を書き込み／上書きできる状態だった（例: `物品出納簿_..\..\..\Users\Public\evil_2024年度.xlsx` → `C:\Users\Public` 配下へ流出）。
+  - **対策**: ファイル名生成の単一チョークポイント `ReportService.GetFiscalYearFileName` で `CardType` / `CardNumber` を新設 `FileNameSanitizer.SanitizeComponent`（`Infrastructure/Security`）によりサニタイズし、パス区切り・予約文字・制御文字を `_` へ置換。3 sink（`ReportService` の一括生成・単票生成、`ReportViewModel.CreateReportAsync`）はいずれも本関数を経由するため一括で防御される。sink 側での無害化を主防御とすることで、CSV 取込・共有DB 書き込みの両汚染経路を同時にカバーする（入力側検証だけでは共有DB 経路を塞げないため）。Issue #1267 の `FormulaInjectionSanitizer` と同じ「sink 側でユーザー入力を無害化」パターンを踏襲。
+  - 検証: `FileNameSanitizerTests`（単体20件）／`ReportServiceFileNameSecurityTests`（統合4件）を新設。07_テスト設計書 §1.1a（単体 3,716→3,740・合計 3,742→3,766 件）・§6 UT-SECURITY-006 を同期更新（#1703）
+
 **機能追加**
 - Issue #1676 駅コードマスター（`StationCode.csv`）に、#1674 で見送っていた**再採番を伴う新駅4駅**（高輪ゲートウェイ・新白島・石巻あゆみ野・前潟）を反映した。権威データ源（自動改札機の研究 `ja.ysrl.org` の路線別ページ）の現行コード列と**路線まるごと機械突合**し、再採番後の駅順を確定。`docs/線区駅順コード/StationCode.csv`（マスター）と `src/ICCardManager/Resources/StationCode.csv`（埋め込みリソース）の両方を更新（両ファイルは常に同一）。
   - **新駅追加（4駅）**: 高輪ゲートウェイ（東海道本線 001-006、2020年開業）／新白島（山陽本線 010-104、2015年開業）／石巻あゆみ野（仙石線 035-158、2016年開業）／前潟（田沢湖線 049-130、2023年開業）。
