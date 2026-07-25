@@ -266,10 +266,15 @@
 
             <!-- ステータスメッセージ -->
             <!-- Issue #1278: LiveSetting=Assertive でスクリーンリーダーに変化を即時通知 -->
+            <!-- Issue #1688: TextWrapping="Wrap" 必須。ボタンが増えて残り幅が狭くなると、
+                 Wrap なしではボタンの下へ文字がはみ出す（Grid は既定で子をクリップしないため）。
+                 文字サイズ「大」「特大」でも同じ問題が起きるため、幅ではなく折り返しで担保する。 -->
             <TextBlock Grid.Column="0"
                        Text="{Binding StatusMessage}"
                        FontWeight="Bold"
+                       TextWrapping="Wrap"
                        VerticalAlignment="Center"
+                       Margin="0,0,10,0"
                        AutomationProperties.LiveSetting="Assertive"
                        AutomationProperties.Name="帳票作成ステータス">
                 <TextBlock.Style>
@@ -285,8 +290,11 @@
             </TextBlock>
 
             <!-- ボタン -->
+            <!-- Issue #1688: VerticalAlignment="Center"。ステータスが2行に折り返して行が高くなっても
+                 ボタンが縦に引き伸ばされないようにする。 -->
             <StackPanel Grid.Column="1"
-                        Orientation="Horizontal">
+                        Orientation="Horizontal"
+                        VerticalAlignment="Center">
                 <Button Content="閉じる"
                         Click="CloseButton_Click"
                         Padding="20,10"

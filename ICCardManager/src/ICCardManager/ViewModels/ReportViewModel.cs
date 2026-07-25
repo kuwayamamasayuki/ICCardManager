@@ -607,7 +607,9 @@ public partial class ReportViewModel : ViewModelBase
             return true;
         }
 
-        SetStatus("事前チェックの警告により帳票作成を中止しました。履歴を修正してから再度実行してください", true);
+        // ステータス欄はボタン列と幅を分け合うため簡潔にする。
+        // 「なぜ」「どうすれば」は直前のプリフライト結果ダイアログで提示済み（Issue #1688）
+        SetStatus("帳票作成を中止しました", true);
         return false;
     }
 
@@ -633,8 +635,8 @@ public partial class ReportViewModel : ViewModelBase
 
         SetStatus(
             result.HasWarnings
-                ? $"事前チェックで{result.Warnings.Count}件の警告が見つかりました"
-                : "事前チェックで問題は見つかりませんでした",
+                ? $"事前チェック: 警告{result.Warnings.Count}件"
+                : "事前チェック: 問題なし",
             result.HasWarnings);
     }
 

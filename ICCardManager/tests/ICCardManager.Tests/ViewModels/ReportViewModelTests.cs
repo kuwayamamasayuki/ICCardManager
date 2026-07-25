@@ -1094,7 +1094,7 @@ public class ReportViewModelTests
 
         await _viewModel.RunPreflightCheckAsync();
 
-        _viewModel.StatusMessage.Should().Contain("1件の警告");
+        _viewModel.StatusMessage.Should().Contain("警告1件");
         _viewModel.IsStatusError.Should().BeTrue();
         _navigationServiceMock.Verify(
             n => n.ShowDialog<ICCardManager.Views.Dialogs.ReportPreflightDialog>(
@@ -1113,7 +1113,7 @@ public class ReportViewModelTests
 
         await _viewModel.RunPreflightCheckAsync();
 
-        _viewModel.StatusMessage.Should().Contain("問題は見つかりませんでした");
+        _viewModel.StatusMessage.Should().Contain("問題なし");
         _viewModel.IsStatusError.Should().BeFalse();
         _navigationServiceMock.Verify(
             n => n.ShowDialog<ICCardManager.Views.Dialogs.ReportPreflightDialog>(
