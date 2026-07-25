@@ -296,6 +296,15 @@
                         AutomationProperties.Name="閉じる"
                         AutomationProperties.HelpText="ダイアログを閉じます"
                         ToolTip="ダイアログを閉じる (Escape)"/>
+                <!-- Issue #1688: 出力せずに月次データの健全性だけを確認する -->
+                <Button Content="事前チェック"
+                        Command="{Binding RunPreflightCheckCommand}"
+                        Padding="20,10"
+                        Margin="0,0,10,0"
+                        MinWidth="100"
+                        AutomationProperties.Name="帳票の事前チェック"
+                        AutomationProperties.HelpText="帳票を出力せずに、未返却カード・負残高・繰越の不一致がないかを確認します"
+                        ToolTip="出力前に未返却・負残高・繰越の不一致を確認"/>
                 <Button Content="プレビュー"
                         Command="{Binding PreviewSelectedCommand}"
                         Padding="20,10"

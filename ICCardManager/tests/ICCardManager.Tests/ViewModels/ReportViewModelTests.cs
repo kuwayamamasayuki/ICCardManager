@@ -28,6 +28,7 @@ public class ReportViewModelTests
     private readonly Mock<ICCardManager.Services.ISafeFileLauncher> _safeFileLauncherMock;
     private readonly ReportService _reportService;
     private readonly PrintService _printService;
+    private readonly Mock<IReportDataBuilder> _preflightDataBuilderMock;
     private readonly ReportViewModel _viewModel;
 
     public ReportViewModelTests()
@@ -51,13 +52,47 @@ public class ReportViewModelTests
         _safeFileLauncherMock.Setup(l => l.LaunchFile(It.IsAny<string>()))
             .Returns(ICCardManager.Services.SafeFileLaunchResult.Ok());
 
+        // Issue #1688: プリフライトチェック。既定では帳票データを構築できない（=警告なし）状態にし、
+        // 警告を出したいテストで個別に上書きする。
+        _preflightDataBuilderMock = new Mock<IReportDataBuilder>();
+        _preflightDataBuilderMock
+            .Setup(b => b.BuildAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<int>()))
+            .ReturnsAsync((MonthlyReportData)null);
+        _ledgerRepositoryMock.Setup(r => r.GetAllLentRecordsAsync()).ReturnsAsync(new List<Ledger>());
+        var preflightChecker = new ReportPreflightChecker(
+            _preflightDataBuilderMock.Object, _ledgerRepositoryMock.Object);
+
         _viewModel = new ReportViewModel(
             _reportService,
             _printService,
             _cardRepositoryMock.Object,
             _navigationServiceMock.Object,
             _settingsRepositoryMock.Object,
-            _safeFileLauncherMock.Object);
+            _safeFileLauncherMock.Object,
+            preflightChecker);
+    }
+
+    /// <summary>
+    /// プリフライトチェックが警告を出すよう、不整合な帳票データを返すように設定する
+    /// </summary>
+    private void SetupPreflightWarning()
+    {
+        _preflightDataBuilderMock
+            .Setup(b => b.BuildAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<int>()))
+            .ReturnsAsync(() => new MonthlyReportData
+            {
+                Card = new IcCard { CardIdm = "0123456789ABCDEF", CardType = "はやかけん", CardNumber = "001" },
+                Year = _viewModel.SelectedYear,
+                Month = _viewModel.SelectedMonth,
+                PrecedingBalance = null,
+                Ledgers = new List<Ledger>
+                {
+                    // 残額がマイナス（NegativeBalance）
+                    new Ledger { Id = 1, Date = new DateTime(2026, 7, 15), Summary = "鉄道（博多～天神）", Expense = 500, Balance = -120 }
+                },
+                MonthlyTotal = new ReportTotalData { Label = "月計", Income = 0, Expense = 500, Balance = null },
+                CumulativeTotal = null
+            });
     }
 
     #region 初期化テスト
@@ -933,6 +968,174 @@ public class ReportViewModelTests
 
         _viewModel.StatusMessage.Should().Contain("拡張子NG");
         _viewModel.IsStatusError.Should().BeTrue();
+    }
+
+    #endregion
+
+    #region 帳票出力前プリフライトチェック（Issue #1688）
+
+    /// <summary>
+    /// テスト用にカードを1枚選択状態にする
+    /// </summary>
+    private void SelectOneCard()
+    {
+        _viewModel.SelectedCards.Clear();
+        _viewModel.SelectedCards.Add(new CardDto
+        {
+            CardIdm = "0123456789ABCDEF",
+            CardType = "はやかけん",
+            CardNumber = "001"
+        });
+    }
+
+    /// <summary>
+    /// 警告がなければ確認ダイアログを表示せずそのまま作成に進むこと
+    /// </summary>
+    [Fact]
+    public async Task RunPreflightBeforeCreateAsync_WithNoWarnings_ProceedsWithoutDialog()
+    {
+        SelectOneCard();
+
+        var canProceed = await _viewModel.RunPreflightBeforeCreateAsync();
+
+        canProceed.Should().BeTrue();
+        _navigationServiceMock.Verify(
+            n => n.ShowDialog<ICCardManager.Views.Dialogs.ReportPreflightDialog>(
+                It.IsAny<Action<ICCardManager.Views.Dialogs.ReportPreflightDialog>>()),
+            Times.Never);
+    }
+
+    /// <summary>
+    /// 警告があり「中止して修正する」が選ばれた場合、作成に進まないこと
+    /// </summary>
+    [Fact]
+    public async Task RunPreflightBeforeCreateAsync_WhenUserCancels_StopsCreation()
+    {
+        SelectOneCard();
+        SetupPreflightWarning();
+        _navigationServiceMock
+            .Setup(n => n.ShowDialog<ICCardManager.Views.Dialogs.ReportPreflightDialog>(
+                It.IsAny<Action<ICCardManager.Views.Dialogs.ReportPreflightDialog>>()))
+            .Returns(false);
+
+        var canProceed = await _viewModel.RunPreflightBeforeCreateAsync();
+
+        canProceed.Should().BeFalse();
+        _viewModel.StatusMessage.Should().Contain("中止");
+        _viewModel.IsStatusError.Should().BeTrue();
+    }
+
+    /// <summary>
+    /// 警告があっても「このまま作成する」が選ばれた場合は作成に進むこと
+    /// （Issue #1688: 強制ブロックはしない方針）
+    /// </summary>
+    [Fact]
+    public async Task RunPreflightBeforeCreateAsync_WhenUserContinues_ProceedsWithCreation()
+    {
+        SelectOneCard();
+        SetupPreflightWarning();
+        _navigationServiceMock
+            .Setup(n => n.ShowDialog<ICCardManager.Views.Dialogs.ReportPreflightDialog>(
+                It.IsAny<Action<ICCardManager.Views.Dialogs.ReportPreflightDialog>>()))
+            .Returns(true);
+
+        var canProceed = await _viewModel.RunPreflightBeforeCreateAsync();
+
+        canProceed.Should().BeTrue();
+        _viewModel.StatusMessage.Should().NotContain("中止");
+    }
+
+    /// <summary>
+    /// ダイアログが閉じられただけ（DialogResult=null）の場合は中止として扱うこと
+    /// </summary>
+    [Fact]
+    public async Task RunPreflightBeforeCreateAsync_WhenDialogClosedWithoutChoice_StopsCreation()
+    {
+        SelectOneCard();
+        SetupPreflightWarning();
+        _navigationServiceMock
+            .Setup(n => n.ShowDialog<ICCardManager.Views.Dialogs.ReportPreflightDialog>(
+                It.IsAny<Action<ICCardManager.Views.Dialogs.ReportPreflightDialog>>()))
+            .Returns((bool?)null);
+
+        var canProceed = await _viewModel.RunPreflightBeforeCreateAsync();
+
+        canProceed.Should().BeFalse();
+    }
+
+    /// <summary>
+    /// 中止を選んだ場合、帳票ファイルが1件も作成されないこと
+    /// </summary>
+    [Fact]
+    public async Task CreateReportAsync_WhenPreflightCancelled_CreatesNoFiles()
+    {
+        SelectOneCard();
+        _viewModel.OutputFolder = Path.GetTempPath();
+        SetupPreflightWarning();
+        _navigationServiceMock
+            .Setup(n => n.ShowDialog<ICCardManager.Views.Dialogs.ReportPreflightDialog>(
+                It.IsAny<Action<ICCardManager.Views.Dialogs.ReportPreflightDialog>>()))
+            .Returns(false);
+
+        await _viewModel.CreateReportAsync();
+
+        _viewModel.CreatedFiles.Should().BeEmpty();
+        _viewModel.StatusMessage.Should().Contain("中止");
+    }
+
+    /// <summary>
+    /// 「事前チェック」ボタンは警告件数をステータスに表示すること
+    /// </summary>
+    [Fact]
+    public async Task RunPreflightCheckAsync_WithWarnings_ShowsWarningCountInStatus()
+    {
+        SelectOneCard();
+        SetupPreflightWarning();
+
+        await _viewModel.RunPreflightCheckAsync();
+
+        _viewModel.StatusMessage.Should().Contain("1件の警告");
+        _viewModel.IsStatusError.Should().BeTrue();
+        _navigationServiceMock.Verify(
+            n => n.ShowDialog<ICCardManager.Views.Dialogs.ReportPreflightDialog>(
+                It.IsAny<Action<ICCardManager.Views.Dialogs.ReportPreflightDialog>>()),
+            Times.Once);
+    }
+
+    /// <summary>
+    /// 「事前チェック」ボタンは警告0件でも結果ダイアログを表示すること
+    /// （出力せずに健全性だけ確認したい運用のため）
+    /// </summary>
+    [Fact]
+    public async Task RunPreflightCheckAsync_WithNoWarnings_StillShowsResultDialog()
+    {
+        SelectOneCard();
+
+        await _viewModel.RunPreflightCheckAsync();
+
+        _viewModel.StatusMessage.Should().Contain("問題は見つかりませんでした");
+        _viewModel.IsStatusError.Should().BeFalse();
+        _navigationServiceMock.Verify(
+            n => n.ShowDialog<ICCardManager.Views.Dialogs.ReportPreflightDialog>(
+                It.IsAny<Action<ICCardManager.Views.Dialogs.ReportPreflightDialog>>()),
+            Times.Once);
+    }
+
+    /// <summary>
+    /// カード未選択で「事前チェック」を押した場合はエラーを表示しダイアログを開かないこと
+    /// </summary>
+    [Fact]
+    public async Task RunPreflightCheckAsync_WithNoSelectedCards_ShowsError()
+    {
+        _viewModel.SelectedCards.Clear();
+
+        await _viewModel.RunPreflightCheckAsync();
+
+        _viewModel.StatusMessage.Should().Contain("カードを1つ以上選択");
+        _navigationServiceMock.Verify(
+            n => n.ShowDialog<ICCardManager.Views.Dialogs.ReportPreflightDialog>(
+                It.IsAny<Action<ICCardManager.Views.Dialogs.ReportPreflightDialog>>()),
+            Times.Never);
     }
 
     #endregion
