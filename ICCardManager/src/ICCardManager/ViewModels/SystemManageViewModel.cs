@@ -23,6 +23,7 @@ public partial class SystemManageViewModel : ViewModelBase
     private readonly OperationLogger _operationLogger;
     private readonly ISafeFileLauncher _safeFileLauncher;
     private readonly IDatabaseInfo _databaseInfo;
+    private readonly IStaffAuthService _staffAuthService;
 
     [ObservableProperty]
     private ObservableCollection<BackupFileInfo> _backupFiles = new();
@@ -69,7 +70,8 @@ public partial class SystemManageViewModel : ViewModelBase
         INavigationService navigationService,
         OperationLogger operationLogger,
         ISafeFileLauncher safeFileLauncher,
-        IDatabaseInfo databaseInfo)
+        IDatabaseInfo databaseInfo,
+        IStaffAuthService staffAuthService)
     {
         _backupService = backupService;
         _settingsRepository = settingsRepository;
@@ -77,6 +79,7 @@ public partial class SystemManageViewModel : ViewModelBase
         _operationLogger = operationLogger;
         _safeFileLauncher = safeFileLauncher;
         _databaseInfo = databaseInfo;
+        _staffAuthService = staffAuthService;
     }
 
     /// <summary>
@@ -242,6 +245,16 @@ public partial class SystemManageViewModel : ViewModelBase
             return;
         }
 
+        // Issue #1705: DB リストアは全レコード（台帳・残高・職員・カード）を置換する破壊的操作のため、
+        // 単一台帳行の削除（#635）と同様に職員認証を必須とする。認可の非対称性
+        // （1 行削除には認証を課すのに DB 全体置換は無認証）を解消する。
+        var authResult = await _staffAuthService.RequestAuthenticationAsync("データベースのリストア");
+        if (authResult == null)
+        {
+            SetStatus("リストアには職員認証が必要です。認証がキャンセルされたため、リストアを中止しました。", false);
+            return;
+        }
+
         // 確認ダイアログ
         // Issue #1108: 共有モード時は他PCの終了を促す警告を追加
         var sharedModeWarning = _backupService.IsSharedMode
@@ -376,6 +389,15 @@ public partial class SystemManageViewModel : ViewModelBase
 
         if (dialog.ShowDialog() != true)
         {
+            return;
+        }
+
+        // Issue #1705: 外部ファイルからのリストアも DB 全体を置換する破壊的操作のため、
+        // 選択バックアップからのリストアと同様に職員認証を必須とする。
+        var authResult = await _staffAuthService.RequestAuthenticationAsync("データベースのリストア");
+        if (authResult == null)
+        {
+            SetStatus("リストアには職員認証が必要です。認証がキャンセルされたため、リストアを中止しました。", false);
             return;
         }
 
