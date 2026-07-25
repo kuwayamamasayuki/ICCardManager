@@ -9,6 +9,10 @@
 - Issue #1705 データベースのリストアに**職員認証を必須化**した（認可欠落 CWE-862 の修正）。従来 `SystemManageViewModel` のリストア（選択バックアップ経路 `RestoreAsync`・外部ファイル経路 `RestoreFromFileAsync`）は `MessageBox` 確認のみで、任意のユーザー選択 `.db` ファイルからライブDB全体（台帳・残高・職員・カード）を無認証で上書きできた。単一台帳行の削除（#635）には職員タッチを課しているのに、遥かに破壊的な「DB全体置換」が無認証という認可の非対称性を解消する。
   - **対策**: 両リストア経路の先頭（確認ダイアログより前）に `IStaffAuthService.RequestAuthenticationAsync("データベースのリストア")` を挿入し、認証されない（キャンセル）場合はリストアを中止する。台帳変更ゲート（`MainViewModel.DeleteLedgerRow`）と同じ認証パターンを踏襲。`SystemManageViewModel` に `IStaffAuthService` を注入（DI は登録済みのため自動解決）。
   - 検証: `SystemManageViewModelTests` に3件新設（認証キャンセル時に `RestoreFromBackup` を呼ばない／リストア操作名で認証要求／バックアップ未選択時は認証を要求しない）。07_テスト設計書 §1.1a（単体 3,740→3,758・合計 3,766→3,784 件）・§6 UT-SECURITY-007 を同期更新（#1705）
+- Issue #1704 認証クレデンシャルであるカード IDm をログ出力時に**マスク**するようにした（情報漏えい CWE-532 の修正）。本システムでは職員証の IDm が唯一の認証要素（パスワード機構は存在しない）だが、`FelicaCardReader` が全タッチカードの完全 IDm を Information レベル（既定で有効・常時）でログ出力しており、ログ格納先 `C:\ProgramData\ICCardManager\Logs`（インストーラが `users-full` ACL を付与）を読める任意のローカルユーザーが職員の IDm を収集でき、IDm エミュレーションによるなりすまし→台帳改竄に繋がる状態だった。
+  - **対策**: 新設 `IdmMasker.Mask`（`Infrastructure/Security`）で IDm の先頭4文字のみ残し以降を `*` に伏せる。`FelicaCardReader` の3箇所（カード検出 Information・履歴/残高の IDm 不一致 Warning 各1）と `LendingService` の履歴インポートエラー Error 1箇所に適用し、ログに平文 IDm を一切残さないようにした。トラブルシュート時の識別性（相関）は先頭4文字で確保する。
+  - 検証: `IdmMaskerTests`（単体10件）を新設。07_テスト設計書 §1.1a（単体 3,716→3,726・合計 3,742→3,752 件）・§6 UT-SECURITY-008 を同期更新（#1704）
+  - なお当該ログディレクトリの `users-full` ACL 厳格化（多層防御）は環境依存リスク（アプリの書込権限）があるため別途検討とし、本修正では平文 IDm の除去（収集対象そのものの無害化）を主対策とした。
 
 **機能追加**
 - Issue #1676 駅コードマスター（`StationCode.csv`）に、#1674 で見送っていた**再採番を伴う新駅4駅**（高輪ゲートウェイ・新白島・石巻あゆみ野・前潟）を反映した。権威データ源（自動改札機の研究 `ja.ysrl.org` の路線別ページ）の現行コード列と**路線まるごと機械突合**し、再採番後の駅順を確定。`docs/線区駅順コード/StationCode.csv`（マスター）と `src/ICCardManager/Resources/StationCode.csv`（埋め込みリソース）の両方を更新（両ファイルは常に同一）。

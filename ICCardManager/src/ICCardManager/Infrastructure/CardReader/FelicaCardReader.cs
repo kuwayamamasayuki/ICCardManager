@@ -6,6 +6,7 @@ using System.Timers;
 using FelicaLib;
 using ICCardManager.Common;
 using ICCardManager.Common.Exceptions;
+using ICCardManager.Infrastructure.Security;
 using ICCardManager.Models;
 using ICCardManager.Services;
 using Microsoft.Extensions.Logging;
@@ -229,7 +230,8 @@ namespace ICCardManager.Infrastructure.CardReader
                         var currentIdm = GetIdmString(currentIdmBytes);
                         if (!string.Equals(currentIdm, idm, StringComparison.OrdinalIgnoreCase))
                         {
-                            _logger.LogWarning("FelicaCardReader: 履歴読み取り時にIDmが一致しません。期待={Expected}, 実際={Actual}", idm, currentIdm);
+                            // Issue #1704: IDm は認証クレデンシャルのためログにはマスクして出力する
+                            _logger.LogWarning("FelicaCardReader: 履歴読み取り時にIDmが一致しません。期待={Expected}, 実際={Actual}", IdmMasker.Mask(idm), IdmMasker.Mask(currentIdm));
                             return;
                         }
 
@@ -353,7 +355,8 @@ namespace ICCardManager.Infrastructure.CardReader
                         var currentIdm = GetIdmString(currentIdmBytes);
                         if (!string.Equals(currentIdm, idm, StringComparison.OrdinalIgnoreCase))
                         {
-                            _logger.LogWarning("FelicaCardReader: 残高読み取り時にIDmが一致しません。期待={Expected}, 実際={Actual}", idm, currentIdm);
+                            // Issue #1704: IDm は認証クレデンシャルのためログにはマスクして出力する
+                            _logger.LogWarning("FelicaCardReader: 残高読み取り時にIDmが一致しません。期待={Expected}, 実際={Actual}", IdmMasker.Mask(idm), IdmMasker.Mask(currentIdm));
                             return null;
                         }
 
@@ -618,7 +621,8 @@ namespace ICCardManager.Infrastructure.CardReader
                     _cardWasLifted = false;  // カードが検出されたのでフラグをリセット
                 }
 
-                _logger.LogInformation("FelicaCardReader: カード検出 IDm={Idm}", idm);
+                // Issue #1704: IDm は認証クレデンシャルのためログにはマスクして出力する
+                _logger.LogInformation("FelicaCardReader: カード検出 IDm={Idm}", IdmMasker.Mask(idm));
 
                 // イベントを発火（UIスレッドで処理されるため、ここでは即座に返る）
                 CardRead?.Invoke(this, new CardReadEventArgs

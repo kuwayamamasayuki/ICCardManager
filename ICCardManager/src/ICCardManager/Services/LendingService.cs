@@ -5,6 +5,7 @@ using System.Linq;
 using System.Threading.Tasks;
 using ICCardManager.Data;
 using ICCardManager.Data.Repositories;
+using ICCardManager.Infrastructure.Security;
 using ICCardManager.Infrastructure.Timing;
 using ICCardManager.Models;
 using Microsoft.Extensions.Logging;
@@ -1332,7 +1333,8 @@ namespace ICCardManager.Services
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "カード登録時の履歴インポートでエラーが発生しました（CardIdm={CardIdm}）", cardIdm);
+                // Issue #1704: IDm は認証クレデンシャルのためログにはマスクして出力する
+                _logger.LogError(ex, "カード登録時の履歴インポートでエラーが発生しました（CardIdm={CardIdm}）", IdmMasker.Mask(cardIdm));
                 result.Success = false;
             }
 
