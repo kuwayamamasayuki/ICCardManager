@@ -21,7 +21,8 @@ namespace ICCardManager.Common
     {
         /// <summary>
         /// トースト最大幅（フォントサイズに依存しない固定値）。
-        /// 画面右上にタイル配置される前提で、デスクトップに過度に張り出さない幅を設定。
+        /// 設定された画面隅（<see cref="ICCardManager.Models.ToastPosition"/>。既定は右上）に
+        /// 配置される前提で、デスクトップに過度に張り出さない幅を設定。
         /// </summary>
         public const double MaxWidth = 520;
 

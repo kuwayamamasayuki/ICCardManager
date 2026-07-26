@@ -8,7 +8,8 @@ namespace ICCardManager.Services
     /// トースト通知サービスのインターフェース
     /// </summary>
     /// <remarks>
-    /// 画面右上に表示されるフォーカスを奪わない通知を管理するサービス。
+    /// 設定された画面隅（<see cref="ICCardManager.Models.ToastPosition"/>。既定は右上）に表示される、
+    /// フォーカスを奪わない通知を管理するサービス。
     /// 貸出・返却時の通知をメインウィンドウとは別ウィンドウで表示し、
     /// 職員の操作を妨げないようにする。
     /// </remarks>

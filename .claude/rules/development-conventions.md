@@ -38,6 +38,10 @@
 - **色値の Single Source of Truth**: `Resources/Styles/AccessibilityStyles.xaml` のブラシキー（`LendingBackgroundBrush` / `ReturnBackgroundBrush` / `ErrorBackgroundBrush` / `HintForegroundBrush` 等）を `DynamicResource` で参照すること。色値リテラル（`#FFF3E0` 等）を直接指定しない（Issue #1392、#1461）。コードビハインドでは `Application.Current.TryFindResource("KeyName") as Brush` で取得する（`new SolidColorBrush(Color.FromRgb(...))` 禁止）。ViewModel/DTO で行ごとに色を切り替える場合は色値文字列ではなく**リソースキー名**を返し、XAML 側で `ResourceKeyToBrushConverter` 経由でブラシ解決する
 - **`ReturnBackgroundBrush` の用途**: 「返却完了」シグナルに加え、ダイアログの情報ヘッダー・操作ヒント・装飾用途でも兼用する。専用の `HintBackgroundBrush` 等は新設しない設計判断。意味の区別は色ではなくアイコン・テキスト・配置で行う（Issue #1399、`docs/design/03_画面設計書.md` §4.1 参照）
 - **`HintForegroundBrush` の用途**: 「💡 ヒント」「⚠ 注意」等の補足説明文の文字色（マテリアル Brown 700 / `#795548`）。背景ブラシに関する Issue #1399 の方針とは独立した「前景色」キー（Issue #1461）
+- **設定で変更できる項目をコメントで断定しない**（Issue #1697）。設定項目が後から追加されると、それ以前に書かれた「常に◯◯」という前提のコメントが実装と乖離したまま残る。**コメントは PR 本文・設計書・マニュアルへの記述の元ネタとして参照される**ため、放置すると誤記述が下流へ伝播する（トースト表示位置設定 `AppSettings.ToastPosition` 追加後も「画面右上に表示」というコメントが残り、PR #1696 の本文へ「画面右上に表示される」と伝播した実例がある）。
+  - 書き方: 「設定された画面隅（`ToastPosition`。既定は右上）に表示」のように**「設定に従う」＋「既定値」**の形にする。既定値の説明として具体値に言及するのは正当（`AppSettings` の enum コメント、設定画面の ToolTip 等）
+  - 回帰は規約テストで固定する（`ToastPositionCommentConventionTests` が参考実装）。「断定表現の不在」だけでなく**「実装が全選択肢を分岐していること」も併せて検証**する。前者だけだと実装が固定値へ退化した際に逆方向の乖離が生まれるため
+  - 検査対象が汎用ファイル（`MainViewModel` 等）に及ぶ場合は、対象機能のキーワードを含む行に絞る。「メイン画面右下の警告エリア」のような**別機能の正当な記述を誤検出する**（実際に発生）
 
 ## ICカード関連
 - **用語の使い分け（重要）**: 本システムでは「職員証」と「交通系ICカード」の2種類のICカードを扱う。UI文言・マニュアル・コード内のユーザー向けメッセージでは、交通系ICカードを指す場合は必ず**「交通系ICカード」**と記載し、単に「ICカード」とは書かないこと。「ICカード」だけでは職員証と区別がつかずユーザーが混乱する。ただし「ICカードリーダー」等のハードウェア名称、および「ICカード管理」等の画面・機能名（固有名詞）はそのままでよい（用語ガード `UserFacingTextConventionTests` の `AllowedCompounds` がこれらの複合語を許容する）

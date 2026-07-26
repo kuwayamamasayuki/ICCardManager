@@ -2,6 +2,12 @@
 
 ### Unreleased
 
+**ドキュメント**
+- Issue #1697 トースト通知の表示位置を「画面右上」と断定するコード内コメントを、実装（設定 `AppSettings.ToastPosition`: 右上/左上/右下/左下、既定は右上）と整合する記述へ修正した。表示位置設定が追加される前の前提が残っており、このコメントを根拠に PR 本文へ「画面右上に表示される」という不正確な記述が伝播した実例（Issue #1683 / PR #1696）があったため、誤記述の伝播経路を断つ。
+  - 修正箇所: `IToastNotificationService` / `ToastNotificationService` / `ToastNotificationWindow`（クラス remarks とコンストラクタ内コメント）／`ToastLayoutCalculator.MaxWidth`／`MainViewModel` の貸出・返却トースト呼び出し前コメント2箇所。`ToastNotificationWindow.PositionToast()` は既に `ToastPosition` の4隅を分岐しており**実装は正しく、古いのはコメントのみ**であることを確認した。あわせて `ToastLayoutCalculator` の「タイル配置される前提」も実装（同一座標に単発表示。タイル配置は未実装）に合わせて修正した。
+  - 既定値の説明として「右上」に言及している箇所（`AppSettings` の enum コメント・`SettingsViewModel`・設定画面 ToolTip・画面設計書・ユーザーマニュアル）は正しいため変更なし。
+  - 再発防止として `ToastPositionCommentConventionTests`（3件）を新設。トースト関連ソースが特定の隅を断定していないこと・`PositionToast` が `ToastPosition` 全メンバーを分岐していること・既定値が `TopRight` であることを静的に固定する。`MainViewModel` は「トースト」「Toast」を含む行のみ検査し、メイン画面の警告エリア（画面右下）等の正当な記述を誤検出しない。07_テスト設計書 §1.1a（単体 3,909→3,912・合計 3,935→3,938 件）・§2.52 UT-TOAST-POSITION-001 を同期更新（#1697）
+
 **セキュリティ**
 - Issue #1703 月次帳票のファイル名生成におけるパストラバーサル（CWE-22）を修正した。`CardType` / `CardNumber` は CSV 取込（`CsvImportService` は非空チェックのみ）や共有モードの他 PC による DB 直接書き込み経由でパス区切り（`..\` 等）を含みうるが、これらが `ReportService.GetFiscalYearFileName` でファイル名に素通しされ、`Path.Combine` + `workbook.SaveAs` の解決時に選択した出力フォルダの外へ `.xlsx` を書き込み／上書きできる状態だった（例: `物品出納簿_..\..\..\Users\Public\evil_2024年度.xlsx` → `C:\Users\Public` 配下へ流出）。
   - **対策**: ファイル名生成の単一チョークポイント `ReportService.GetFiscalYearFileName` で `CardType` / `CardNumber` を新設 `FileNameSanitizer.SanitizeComponent`（`Infrastructure/Security`）によりサニタイズし、パス区切り・予約文字・制御文字を `_` へ置換。3 sink（`ReportService` の一括生成・単票生成、`ReportViewModel.CreateReportAsync`）はいずれも本関数を経由するため一括で防御される。sink 側での無害化を主防御とすることで、CSV 取込・共有DB 書き込みの両汚染経路を同時にカバーする（入力側検証だけでは共有DB 経路を塞げないため）。Issue #1267 の `FormulaInjectionSanitizer` と同じ「sink 側でユーザー入力を無害化」パターンを踏襲。
