@@ -20,6 +20,7 @@ namespace ICCardManager.Services
         private readonly ILedgerRepository _ledgerRepository;
         private readonly IDatabaseInfo _databaseInfo;
         private readonly IUpdateNotificationService _updateNotificationService;
+        private readonly IBackupHealthService _backupHealthService;
 
         /// <param name="ledgerRepository">台帳リポジトリ</param>
         /// <param name="databaseInfo">DB接続情報</param>
@@ -27,14 +28,20 @@ namespace ICCardManager.Services
         /// 更新通知チェック（Issue #1687）。null の場合、更新通知警告は常に生成されない
         /// （既存テストの構築コードとの互換のため省略可能にしている。DI経由では常に注入される）
         /// </param>
+        /// <param name="backupHealthService">
+        /// バックアップ健全性チェック（Issue #1689）。null の場合、バックアップ警告は常に生成されない
+        /// （updateNotificationService と同じ理由で省略可能）
+        /// </param>
         public WarningService(
             ILedgerRepository ledgerRepository,
             IDatabaseInfo databaseInfo,
-            IUpdateNotificationService updateNotificationService = null)
+            IUpdateNotificationService updateNotificationService = null,
+            IBackupHealthService backupHealthService = null)
         {
             _ledgerRepository = ledgerRepository;
             _databaseInfo = databaseInfo;
             _updateNotificationService = updateNotificationService;
+            _backupHealthService = backupHealthService;
         }
 
         /// <summary>
@@ -125,6 +132,48 @@ namespace ICCardManager.Services
                 Type = WarningType.NewVersionAvailable,
                 DisplayText = $"ℹ️ 新しいバージョン {result.LatestVersion} が公開されています" +
                               $"（このPCは {result.CurrentVersion}）。管理者に更新をご確認ください。"
+            };
+        }
+
+        /// <summary>
+        /// バックアップ健全性警告を生成（Issue #1689）
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// 「最終成功からの経過日数」で判定する。起動時に自動バックアップが走る設計のため
+        /// 「連続失敗回数」でも検知できそうに見えるが、長期休暇などでアプリを起動しなかった期間は
+        /// 失敗回数が増えないまま古いバックアップだけが残る。経過日数ならこの穴を塞げる。
+        /// </para>
+        /// <para>
+        /// 成功記録が一度もない場合（＝Issue #1689 導入前からの既存環境の初回起動時）は
+        /// 警告しない。判断材料がない状態で警告を出すと、実際には正常な環境でも
+        /// 必ず警告が出てしまい「オオカミ少年」になるため。
+        /// </para>
+        /// <para>
+        /// settings の読み取りとバックアップフォルダ走査（共有モードでは SMB アクセス）を伴うため、
+        /// UI スレッドから呼ぶ場合は Task.Run 経由を推奨。
+        /// </para>
+        /// </remarks>
+        /// <param name="now">現在日時（テスト容易性のため引数で受け取る）</param>
+        /// <returns>しきい値を超えて成功していない場合は WarningItem、正常な場合は null</returns>
+        public async Task<WarningItem> CheckBackupHealthWarningAsync(DateTime now)
+        {
+            if (_backupHealthService == null)
+                return null;
+
+            var health = await _backupHealthService.GetHealthAsync().ConfigureAwait(false);
+            var elapsedDays = health?.GetDaysSinceLastSuccess(now);
+            if (elapsedDays == null || elapsedDays <= AppConstants.BackupStaleWarningDays)
+                return null;
+
+            return new WarningItem
+            {
+                Type = WarningType.BackupStale,
+                DisplayText =
+                    $"⚠️ 自動バックアップが{elapsedDays}日間成功していません" +
+                    $"（最終成功: {DisplayFormatters.FormatDateTime(health.LastSuccessAt)}）。" +
+                    "保存先フォルダーの空き容量やアクセス権に問題がある可能性があります。" +
+                    "システム管理画面（F6）でバックアップ状況を確認し、手動バックアップを実行してください。"
             };
         }
     }

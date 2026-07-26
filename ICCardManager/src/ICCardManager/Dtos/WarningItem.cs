@@ -27,7 +27,10 @@ namespace ICCardManager.Dtos
         DatabaseJournalModeDegraded,
 
         /// <summary>新しいアプリバージョンが公開されている通知（共有フォルダの latest_version.txt 経由、Issue #1687）</summary>
-        NewVersionAvailable
+        NewVersionAvailable,
+
+        /// <summary>自動バックアップが長期間成功していない警告（Issue #1689）</summary>
+        BackupStale
     }
 
     /// <summary>

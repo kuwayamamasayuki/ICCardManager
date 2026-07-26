@@ -145,6 +145,118 @@ public class MainViewModelTests : IDisposable
             _dbContext);
     }
 
+    /// <summary>
+    /// バックアップ健全性チェックを差し込んだ ViewModel を生成（Issue #1689）
+    /// </summary>
+    private MainViewModel CreateViewModelWithBackupHealth(IBackupHealthService backupHealthService)
+    {
+        var databaseInfoMock = new Mock<IDatabaseInfo>();
+        return new MainViewModel(
+            _cardReaderMock.Object,
+            _soundPlayerMock.Object,
+            _staffRepositoryMock.Object,
+            _cardRepositoryMock.Object,
+            _ledgerRepositoryMock.Object,
+            _settingsRepositoryMock.Object,
+            _lendingService,
+            _toastMock.Object,
+            _staffAuthServiceMock.Object,
+            _ledgerMergeService,
+            _messengerMock.Object,
+            _navigationServiceMock.Object,
+            _operationLoggerMock.Object,
+            _ledgerConsistencyChecker,
+            Options.Create(new AppOptions()),
+            _timerFactory,
+            _dispatcherService,
+            databaseInfoMock.Object,
+            new Mock<ICacheService>().Object,
+            new SharedModeMonitor(databaseInfoMock.Object, _timerFactory, new SystemClock()),
+            new WarningService(
+                _ledgerRepositoryMock.Object,
+                databaseInfoMock.Object,
+                updateNotificationService: null,
+                backupHealthService: backupHealthService),
+            new DashboardService(_cardRepositoryMock.Object, _ledgerRepositoryMock.Object,
+                _staffRepositoryMock.Object, _settingsRepositoryMock.Object),
+            new Mock<ICCardManager.Services.ISafeFileLauncher>().Object,
+            _dbContext);
+    }
+
+    #region バックアップ健全性警告テスト（Issue #1689）
+
+    [Fact]
+    public async Task CheckBackupHealthAsync_バックアップが長期間成功していない場合は警告を追加すること()
+    {
+        var healthMock = new Mock<IBackupHealthService>();
+        healthMock.Setup(s => s.GetHealthAsync()).ReturnsAsync(new BackupHealthInfo
+        {
+            LastSuccessAt = DateTime.Now.Date.AddDays(-30)
+        });
+        var vm = CreateViewModelWithBackupHealth(healthMock.Object);
+
+        await vm.CheckBackupHealthAsync();
+
+        vm.WarningMessages.Should().ContainSingle(w => w.Type == WarningType.BackupStale);
+    }
+
+    [Fact]
+    public async Task CheckBackupHealthAsync_バックアップが正常なら警告を追加しないこと()
+    {
+        var healthMock = new Mock<IBackupHealthService>();
+        healthMock.Setup(s => s.GetHealthAsync()).ReturnsAsync(new BackupHealthInfo
+        {
+            LastSuccessAt = DateTime.Now
+        });
+        var vm = CreateViewModelWithBackupHealth(healthMock.Object);
+
+        await vm.CheckBackupHealthAsync();
+
+        vm.WarningMessages.Should().NotContain(w => w.Type == WarningType.BackupStale);
+    }
+
+    [Fact]
+    public async Task CheckBackupHealthAsync_手動バックアップで解消したら警告を取り除くこと()
+    {
+        // 追加のみだと、手動バックアップで復旧しても警告が残り続けてしまう
+        var healthMock = new Mock<IBackupHealthService>();
+        healthMock.Setup(s => s.GetHealthAsync()).ReturnsAsync(new BackupHealthInfo
+        {
+            LastSuccessAt = DateTime.Now.Date.AddDays(-30)
+        });
+        var vm = CreateViewModelWithBackupHealth(healthMock.Object);
+        await vm.CheckBackupHealthAsync();
+        vm.WarningMessages.Should().ContainSingle(w => w.Type == WarningType.BackupStale);
+
+        // 手動バックアップが成功した状態を模す
+        healthMock.Setup(s => s.GetHealthAsync()).ReturnsAsync(new BackupHealthInfo
+        {
+            LastSuccessAt = DateTime.Now
+        });
+        await vm.CheckBackupHealthAsync();
+
+        vm.WarningMessages.Should().NotContain(w => w.Type == WarningType.BackupStale);
+    }
+
+    [Fact]
+    public async Task CheckBackupHealthAsync_複数回呼んでも警告が重複しないこと()
+    {
+        var healthMock = new Mock<IBackupHealthService>();
+        healthMock.Setup(s => s.GetHealthAsync()).ReturnsAsync(new BackupHealthInfo
+        {
+            LastSuccessAt = DateTime.Now.Date.AddDays(-30)
+        });
+        var vm = CreateViewModelWithBackupHealth(healthMock.Object);
+
+        await vm.CheckBackupHealthAsync();
+        await vm.CheckBackupHealthAsync();
+        await vm.CheckBackupHealthAsync();
+
+        vm.WarningMessages.Count(w => w.Type == WarningType.BackupStale).Should().Be(1);
+    }
+
+    #endregion
+
     #region AppState列挙型テスト
 
     /// <summary>

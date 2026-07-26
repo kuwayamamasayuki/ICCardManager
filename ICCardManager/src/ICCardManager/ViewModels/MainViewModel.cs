@@ -586,6 +586,11 @@ public partial class MainViewModel : ViewModelBase
             // （共有フォルダのSMB遅延で起動をブロックしないため）
             _ = CheckUpdateNotificationAsync();
 
+            // Issue #1689: バックアップ健全性チェック。起動時の自動バックアップは
+            // App.PerformStartupTasksAsync で並行実行中のため、判定材料は「前回までの記録」になる。
+            // 今回のバックアップが成功すれば次回起動時に警告は消える。
+            _ = CheckBackupHealthAsync();
+
             // 共有モード時はDB接続の定期ヘルスチェックを開始
             if (IsSharedMode)
             {
@@ -628,6 +633,28 @@ public partial class MainViewModel : ViewModelBase
     {
         var warning = await Task.Run(() => _warningService.CheckUpdateNotificationWarning());
         if (warning != null && !WarningMessages.Any(w => w.Type == WarningType.NewVersionAvailable))
+            WarningMessages.Add(warning);
+    }
+
+    /// <summary>
+    /// Issue #1689: バックアップ健全性チェック（WarningServiceに委譲）。
+    /// internal: テストから直接呼び出して挙動を検証するため。
+    /// </summary>
+    /// <remarks>
+    /// settings 読み取りとバックアップフォルダの走査（共有モードでは SMB アクセス）を伴うため
+    /// Task.Run でバックグラウンド実行し、WarningMessages の更新は await 後の UI コンテキストで行う。
+    /// 手動バックアップ後の再判定でも呼ばれるため、解消済みなら既存の警告を取り除く
+    /// （追加のみだと一度出た警告が復旧後も残り続ける）。
+    /// </remarks>
+    internal async Task CheckBackupHealthAsync()
+    {
+        var warning = await Task.Run(() => _warningService.CheckBackupHealthWarningAsync(DateTime.Now));
+
+        var existing = WarningMessages.FirstOrDefault(w => w.Type == WarningType.BackupStale);
+        if (existing != null)
+            WarningMessages.Remove(existing);
+
+        if (warning != null)
             WarningMessages.Add(warning);
     }
 
@@ -2618,6 +2645,15 @@ public partial class MainViewModel : ViewModelBase
             case WarningType.DatabaseConnectionLost:
                 // Issue #1110: 接続断警告クリックで手動再接続を試行
                 await RetryDatabaseConnectionAsync();
+                break;
+
+            case WarningType.BackupStale:
+                // Issue #1689: バックアップ健全性警告クリックでシステム管理画面を開く。
+                // 警告文言が案内する「システム管理画面（F6）」へ、キー操作を覚えていなくても到達できるようにする。
+                _navigationService.ShowDialog<Views.Dialogs.SystemManageDialog>();
+
+                // ダイアログ内で手動バックアップを実行した可能性があるため、警告を再判定する
+                await CheckBackupHealthAsync();
                 break;
         }
     }

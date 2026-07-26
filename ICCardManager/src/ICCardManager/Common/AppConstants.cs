@@ -31,5 +31,20 @@ namespace ICCardManager.Common
         /// <see href=".claude/rules/business-logic.md">「排他制御」参照</see>。
         /// </summary>
         public const int DefaultCardLockTimeoutSeconds = 5;
+
+        // --- バックアップ健全性（Issue #1689） ---
+
+        /// <summary>
+        /// バックアップファイルの保持世代数の上限。
+        /// 起動時に1世代ずつ増えるため、およそ1か月分の履歴が残る。
+        /// </summary>
+        public const int MaxBackupGenerations = 30;
+
+        /// <summary>
+        /// 最終バックアップ成功からこの日数を超えて経過した場合、システム警告を表示する。
+        /// 起動頻度に依存しない「最終成功からの経過日数」で判定することで、
+        /// 長期休暇などでアプリを起動しなかった期間も検知できる。
+        /// </summary>
+        public const int BackupStaleWarningDays = 7;
     }
 }

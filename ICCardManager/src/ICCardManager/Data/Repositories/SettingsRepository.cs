@@ -24,6 +24,17 @@ namespace ICCardManager.Data.Repositories
         public const string KeyFontSize = "font_size";
         public const string KeyLastVacuumDate = "last_vacuum_date";
 
+        // バックアップ健全性キー（Issue #1689）
+        // settings は key-value テーブルのためスキーマ変更（マイグレーション）は不要。
+        /// <summary>最後にバックアップが成功した日時（ISO 8601 "yyyy-MM-dd HH:mm:ss"）</summary>
+        public const string KeyLastBackupSuccessAt = "last_backup_success_at";
+
+        /// <summary>最後にバックアップを実施した PC 名</summary>
+        public const string KeyLastBackupMachine = "last_backup_machine";
+
+        /// <summary>最後に VACUUM を実行した PC 名（日付は <see cref="KeyLastVacuumDate"/>）</summary>
+        public const string KeyLastVacuumMachine = "last_vacuum_machine";
+
         // ウィンドウ設定キー
         public const string KeyWindowLeft = "window_left";
         public const string KeyWindowTop = "window_top";

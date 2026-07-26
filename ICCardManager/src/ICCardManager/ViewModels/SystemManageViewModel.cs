@@ -6,6 +6,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using ICCardManager.Common;
 using ICCardManager.Data.Repositories;
+using ICCardManager.Dtos;
 using ICCardManager.Services;
 using Microsoft.Win32;
 using System.Threading.Tasks;
@@ -24,6 +25,7 @@ public partial class SystemManageViewModel : ViewModelBase
     private readonly ISafeFileLauncher _safeFileLauncher;
     private readonly IDatabaseInfo _databaseInfo;
     private readonly IStaffAuthService _staffAuthService;
+    private readonly IBackupHealthService _backupHealthService;
 
     [ObservableProperty]
     private ObservableCollection<BackupFileInfo> _backupFiles = new();
@@ -64,6 +66,118 @@ public partial class SystemManageViewModel : ViewModelBase
     /// </summary>
     public string DatabaseModeIcon => _databaseInfo.IsSharedMode ? "🔗" : "💻";
 
+    // --- バックアップ健全性（Issue #1689） ---
+    // 「バックアップが正しく動き続けているか」を管理者がこの画面だけで判断できるようにする。
+    // 表示文字列を ViewModel 側で組み立てるのは、XAML の StringFormat では
+    // 「記録なし」「本日／昨日／N日前」のような条件分岐を表現できないため。
+
+    [ObservableProperty]
+    private BackupHealthInfo? _backupHealth;
+
+    /// <summary>
+    /// 最終バックアップ成功日時の表示テキスト
+    /// </summary>
+    public string LastBackupSuccessText
+    {
+        get
+        {
+            if (BackupHealth?.LastSuccessAt == null)
+                return "最終成功: 記録なし（次回の自動バックアップ成功後に表示されます）";
+
+            var elapsed = BackupHealth.GetDaysSinceLastSuccess(DateTime.Now) ?? 0;
+            var elapsedText = elapsed == 0 ? "本日" : elapsed == 1 ? "昨日" : $"{elapsed}日前";
+            return $"最終成功: {DisplayFormatters.FormatDateTime(BackupHealth.LastSuccessAt)}（{elapsedText}）";
+        }
+    }
+
+    /// <summary>
+    /// バックアップが長期間成功していない状態か（警告色・警告アイコンの切り替えに使用）
+    /// </summary>
+    public bool IsBackupStale
+    {
+        get
+        {
+            var elapsed = BackupHealth?.GetDaysSinceLastSuccess(DateTime.Now);
+            return elapsed != null && elapsed > AppConstants.BackupStaleWarningDays;
+        }
+    }
+
+    /// <summary>
+    /// バックアップ健全性アイコン（色に依存せず状態を伝えるため、UI/UX原則に従いアイコンでも表現する）
+    /// </summary>
+    public string BackupHealthIcon => IsBackupStale ? "⚠" : "✔";
+
+    /// <summary>
+    /// 保持世代数の表示テキスト（例: 「保持世代: 12 / 30」）
+    /// </summary>
+    public string BackupGenerationText =>
+        $"保持世代: {BackupHealth?.GenerationCount ?? 0} / {BackupHealth?.MaxGenerations ?? AppConstants.MaxBackupGenerations}";
+
+    /// <summary>
+    /// 保存先の空き容量の表示テキスト
+    /// </summary>
+    public string BackupFreeSpaceText =>
+        $"保存先の空き容量: {DiskSpaceHelper.FormatBytes(BackupHealth?.FreeSpaceBytes)}";
+
+    /// <summary>
+    /// バックアップ保存先フォルダの表示テキスト
+    /// </summary>
+    public string BackupFolderText => $"保存先: {BackupHealth?.BackupFolderPath ?? "-"}";
+
+    /// <summary>
+    /// 共有モードでのみ表示する「最終実施PC」の表示テキスト（Issue #1689）。
+    /// ローカルモードでは自PCしか実施し得ないため表示しない
+    /// </summary>
+    public string LastBackupMachineText =>
+        $"最終実施PC: {(string.IsNullOrWhiteSpace(BackupHealth?.LastSuccessMachineName) ? "-" : BackupHealth!.LastSuccessMachineName)}";
+
+    /// <summary>
+    /// 共有モードでのみ表示する「最終VACUUM」の表示テキスト（Issue #1689）
+    /// </summary>
+    public string LastVacuumText
+    {
+        get
+        {
+            var date = BackupHealth?.LastVacuumDate;
+            var machine = BackupHealth?.LastVacuumMachineName;
+            if (date == null)
+                return "最終最適化(VACUUM): 未実行";
+
+            var machineText = string.IsNullOrWhiteSpace(machine) ? string.Empty : $"（実施PC: {machine}）";
+            return $"最終最適化(VACUUM): {DisplayFormatters.FormatDate(date)}{machineText}";
+        }
+    }
+
+    /// <summary>
+    /// 共有モードかどうか（PC名関連の表示切り替えに使用）
+    /// </summary>
+    public bool IsSharedMode => _databaseInfo.IsSharedMode;
+
+    partial void OnBackupHealthChanged(BackupHealthInfo? value)
+    {
+        OnPropertyChanged(nameof(LastBackupSuccessText));
+        OnPropertyChanged(nameof(IsBackupStale));
+        OnPropertyChanged(nameof(BackupHealthIcon));
+        OnPropertyChanged(nameof(BackupGenerationText));
+        OnPropertyChanged(nameof(BackupFreeSpaceText));
+        OnPropertyChanged(nameof(BackupFolderText));
+        OnPropertyChanged(nameof(LastBackupMachineText));
+        OnPropertyChanged(nameof(LastVacuumText));
+    }
+
+    /// <summary>
+    /// バックアップ健全性情報を読み込む（Issue #1689）
+    /// </summary>
+    /// <remarks>
+    /// フォルダ走査と空き容量取得は同期I/Oで、共有モードでは SMB 越しになるため
+    /// Task.Run でUIスレッドから退避する（接続テストと同じ方針）。
+    /// </remarks>
+    [RelayCommand]
+    public async Task LoadBackupHealthAsync()
+    {
+        BackupHealth = await Task.Run(() => _backupHealthService.GetHealthAsync());
+    }
+
     public SystemManageViewModel(
         BackupService backupService,
         ISettingsRepository settingsRepository,
@@ -71,7 +185,8 @@ public partial class SystemManageViewModel : ViewModelBase
         OperationLogger operationLogger,
         ISafeFileLauncher safeFileLauncher,
         IDatabaseInfo databaseInfo,
-        IStaffAuthService staffAuthService)
+        IStaffAuthService staffAuthService,
+        IBackupHealthService backupHealthService)
     {
         _backupService = backupService;
         _settingsRepository = settingsRepository;
@@ -80,6 +195,7 @@ public partial class SystemManageViewModel : ViewModelBase
         _safeFileLauncher = safeFileLauncher;
         _databaseInfo = databaseInfo;
         _staffAuthService = staffAuthService;
+        _backupHealthService = backupHealthService;
     }
 
     /// <summary>
@@ -146,6 +262,10 @@ public partial class SystemManageViewModel : ViewModelBase
                 {
                     BackupFiles.Add(file);
                 }
+
+                // Issue #1689: 一覧と健全性表示（世代数・空き容量）は同じフォルダの状態を映すため、
+                // 一覧を読み直すタイミングで必ず健全性も更新する（手動バックアップ直後もここを通る）。
+                await LoadBackupHealthAsync();
 
                 if (announceCount)
                 {

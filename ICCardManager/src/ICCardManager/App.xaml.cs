@@ -376,6 +376,7 @@ namespace ICCardManager
             services.AddSingleton<SharedModeMonitor>();
             // Issue #1687: 共有フォルダの latest_version.txt による更新通知
             services.AddSingleton<IUpdateNotificationService, UpdateNotificationService>();
+            services.AddSingleton<IBackupHealthService, BackupHealthService>();
             services.AddSingleton<WarningService>();
             services.AddSingleton<DashboardService>();
             // Issue #1465: Process.Start(UseShellExecute=true) のパス検証を一元化
@@ -814,6 +815,11 @@ namespace ICCardManager
                         if (await dbContext.VacuumAsync())
                         {
                             _logger?.LogInformation("VACUUM実行完了");
+
+                            // Issue #1689: 共有モードでは複数PCのうち1台だけがVACUUMを実施するため、
+                            // どのPCが実施したかを記録してシステム管理画面から追跡できるようにする
+                            var backupHealthService = ServiceProvider.GetRequiredService<IBackupHealthService>();
+                            await backupHealthService.RecordVacuumMachineAsync();
                         }
                         else
                         {
