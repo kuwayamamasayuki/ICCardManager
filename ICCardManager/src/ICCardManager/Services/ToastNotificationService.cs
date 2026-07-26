@@ -10,7 +10,8 @@ namespace ICCardManager.Services
     /// トースト通知サービスの実装
     /// </summary>
     /// <remarks>
-    /// ToastNotificationWindowを使用して画面右上に通知を表示する。
+    /// ToastNotificationWindowを使用して、設定された画面隅
+    /// （<see cref="ICCardManager.Models.ToastPosition"/>。既定は右上）に通知を表示する。
     /// フォーカスを奪わないため、職員の操作を妨げない。
     /// </remarks>
     public class ToastNotificationService : IToastNotificationService

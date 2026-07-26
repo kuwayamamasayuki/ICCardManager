@@ -1141,7 +1141,7 @@ public partial class MainViewModel : ViewModelBase
         {
             _soundPlayer.Play(SoundType.Lend);
 
-            // トースト通知を表示（画面右上、フォーカスを奪わない）
+            // トースト通知を表示（表示位置は設定に従う、フォーカスを奪わない）
             _toastNotificationService.ShowLendNotification(card.CardType, card.CardNumber);
 
             // メイン画面は変更しない（Issue #186: 職員の操作を妨げない）
@@ -1254,7 +1254,7 @@ public partial class MainViewModel : ViewModelBase
         // 残高はLendingServiceで設定済み（カードから直接読み取った値を優先）
         _soundPlayer.Play(SoundType.Return);
 
-        // トースト通知を表示（画面右上、フォーカスを奪わない）
+        // トースト通知を表示（表示位置は設定に従う、フォーカスを奪わない）
         _toastNotificationService.ShowReturnNotification(card.CardType, card.CardNumber, result.Balance, result.IsLowBalance, result.WarningBalance);
 
         // メイン画面は変更しない（Issue #186: 職員の操作を妨げない）

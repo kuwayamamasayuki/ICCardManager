@@ -45,7 +45,8 @@ namespace ICCardManager.Views
     /// トースト通知ウィンドウ
     /// </summary>
     /// <remarks>
-    /// 画面右上に表示されるフォーカスを奪わない通知ウィンドウ。
+    /// 設定された画面隅（<see cref="ToastPosition"/>。既定は右上）に表示される、
+    /// フォーカスを奪わない通知ウィンドウ。
     /// 貸出・返却時の「いってらっしゃい！」「おかえりなさい！」メッセージを
     /// メインウィンドウとは別に表示し、職員の操作を妨げないようにする。
     /// </remarks>
@@ -71,7 +72,7 @@ namespace ICCardManager.Views
             };
             _autoCloseTimer.Tick += OnAutoCloseTimerTick;
 
-            // 画面右上に配置
+            // 設定された表示位置（CurrentPosition）に配置する（OnLoaded → PositionToast）
             Loaded += OnLoaded;
 
             // クリックで閉じる（エラー通知など自動消去されない場合用）
