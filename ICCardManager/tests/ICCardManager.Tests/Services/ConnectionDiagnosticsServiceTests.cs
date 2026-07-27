@@ -325,6 +325,65 @@ public class ConnectionDiagnosticsServiceTests : IDisposable
         _connectionState.VerifyGet(p => p.CurrentConnectionState, Times.Never);
     }
 
+    [Fact]
+    public async Task SharedFolderConnection_WhenMonitorSaysConnectedButDatabaseUnreachable_IsWarningNotOk()
+    {
+        // 監視は15秒周期のため、ネットワークを抜いた直後は Connected のまま残る。
+        // これをそのまま「正常」と表示すると、同じ診断結果の中で
+        // 「項目1: 到達できません」と「項目4: 正常」が併存する自己矛盾になる。
+        _databaseInfo.SetupGet(d => d.IsSharedMode).Returns(true);
+        _databaseInfo.Setup(d => d.CheckConnection()).Returns(false);
+        _connectionState.SetupGet(p => p.CurrentConnectionState).Returns(SharedDbConnectionState.Connected);
+
+        var item = await RunAndGet(DiagnosticItemKind.SharedFolderConnection);
+
+        item.Status.Should().Be(DiagnosticStatus.Warning);
+        item.DetailText.Should().Contain("15秒", "監視間隔ゆえに未反映であることを利用者へ伝える");
+    }
+
+    [Fact]
+    public async Task SharedFolderConnection_WhenMonitorSaysDisconnected_StaysErrorEvenIfDatabaseReachable()
+    {
+        // 断続的な切断は「今は到達できるが直近で切れていた」形で現れる。
+        // 即時確認が通ったからといって監視の検知結果を握りつぶさない。
+        _databaseInfo.SetupGet(d => d.IsSharedMode).Returns(true);
+        _databaseInfo.Setup(d => d.CheckConnection()).Returns(true);
+        _connectionState.SetupGet(p => p.CurrentConnectionState).Returns(SharedDbConnectionState.Disconnected);
+
+        var item = await RunAndGet(DiagnosticItemKind.SharedFolderConnection);
+
+        item.Status.Should().Be(DiagnosticStatus.Error);
+    }
+
+    [Fact]
+    public async Task SharedFolderConnection_WhenConnectedAndReachable_DetailDisclosesMonitoringInterval()
+    {
+        // 「正常」が意味するのは「最大15秒前の確認が成功していた」であり、
+        // 「今この瞬間つながっている」ではない。その限界を文言で明示する。
+        _databaseInfo.SetupGet(d => d.IsSharedMode).Returns(true);
+        _connectionState.SetupGet(p => p.CurrentConnectionState).Returns(SharedDbConnectionState.Connected);
+
+        var item = await RunAndGet(DiagnosticItemKind.SharedFolderConnection);
+
+        item.Status.Should().Be(DiagnosticStatus.Ok);
+        item.DetailText.Should().Contain("15秒");
+    }
+
+    [Fact]
+    public async Task Report_NeverClaimsSharedFolderIsHealthyWhileDatabaseIsUnreachable()
+    {
+        // 診断結果全体としての整合性。到達不可のときに「正常」の項目が
+        // 共有フォルダ接続状態として残っていてはならない。
+        _databaseInfo.SetupGet(d => d.IsSharedMode).Returns(true);
+        _databaseInfo.Setup(d => d.CheckConnection()).Returns(false);
+        _connectionState.SetupGet(p => p.CurrentConnectionState).Returns(SharedDbConnectionState.Connected);
+
+        var report = await CreateService().RunDiagnosticsAsync();
+
+        report.Items.Single(i => i.Kind == DiagnosticItemKind.SharedFolderConnection)
+            .Status.Should().NotBe(DiagnosticStatus.Ok);
+    }
+
     #endregion
 
     #region 項目 5: ICカードリーダー

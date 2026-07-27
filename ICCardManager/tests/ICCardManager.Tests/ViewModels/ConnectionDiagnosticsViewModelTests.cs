@@ -159,6 +159,51 @@ public class ConnectionDiagnosticsViewModelTests
     }
 
     [Fact]
+    public async Task 再診断中_前回の結果が残らないこと()
+    {
+        // 再診断は数十秒かかり得る（切断時の DB 疎通確認は SMB のタイムアウトまでブロックする）。
+        // その間に前回の「正常」が表示され続けると、切断中でも正常と読めてしまう。
+        var vm = CreateViewModel();
+        await vm.RunDiagnosticsAsync();
+        vm.Items.Should().NotBeEmpty();
+
+        var itemCountDuringRun = -1;
+        var hasResultDuringRun = true;
+        _diagnosticsService.Setup(s => s.RunDiagnosticsAsync()).Returns(() =>
+        {
+            itemCountDuringRun = vm.Items.Count;
+            hasResultDuringRun = vm.HasResult;
+            return Task.FromResult(BuildReport(
+                Item(DiagnosticItemKind.DatabaseReachability, DiagnosticStatus.Error)));
+        });
+
+        await vm.RunDiagnosticsAsync();
+
+        itemCountDuringRun.Should().Be(0, "実行中は前回の項目を残さない");
+        hasResultDuringRun.Should().BeFalse("実行中は前回の総合判定を残さない");
+    }
+
+    [Fact]
+    public async Task 再診断中_前回の結果をコピーできないこと()
+    {
+        // 実行中に古い結果をコピーして IT 担当へ送ると、誤った状況が伝わる
+        var vm = CreateViewModel();
+        await vm.RunDiagnosticsAsync();
+
+        var canCopyDuringRun = true;
+        _diagnosticsService.Setup(s => s.RunDiagnosticsAsync()).Returns(() =>
+        {
+            canCopyDuringRun = vm.CopyResultCommand.CanExecute(null);
+            return Task.FromResult(BuildReport(
+                Item(DiagnosticItemKind.DatabaseReachability, DiagnosticStatus.Ok)));
+        });
+
+        await vm.RunDiagnosticsAsync();
+
+        canCopyDuringRun.Should().BeFalse();
+    }
+
+    [Fact]
     public async Task 診断実行_総合判定の見出しが更新されること()
     {
         SetupReport(BuildReport(Item(DiagnosticItemKind.CardReader, DiagnosticStatus.Error)));

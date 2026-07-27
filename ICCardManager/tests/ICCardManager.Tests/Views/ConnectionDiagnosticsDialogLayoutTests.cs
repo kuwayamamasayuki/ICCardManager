@@ -92,6 +92,22 @@ public class ConnectionDiagnosticsDialogLayoutTests
     }
 
     [Fact]
+    public void Dialog_should_show_a_busy_overlay_while_diagnosing()
+    {
+        // 診断は切断時に数十秒かかり得る（SMB のタイムアウトまでブロックする）。
+        // 実行中であることが見えないと、前回の結果を今回の結果と読み違える。
+        // 他の全ダイアログが持つ「処理中オーバーレイ」と同じ機構を備えること。
+        var xaml = Xaml;
+
+        xaml.Should().MatchRegex(
+            @"<Border(?:(?!</Border>)[\s\S])*?Visibility\s*=\s*""\{Binding IsBusy",
+            "IsBusy に連動する処理中オーバーレイが必要");
+
+        xaml.Should().Contain("{Binding BusyMessage",
+            "何を実行中かを利用者へ示す");
+    }
+
+    [Fact]
     public void Interactive_elements_should_expose_automation_names()
     {
         // スクリーンリーダー対応（色や配置に依存しない情報伝達）
@@ -109,8 +125,10 @@ public class ConnectionDiagnosticsDialogLayoutTests
     /// </summary>
     private static string ExtractButtonArea()
     {
+        // ボタン用 StackPanel の閉じタグを終端に使う。外側 Grid の閉じタグに依存すると、
+        // 後段に要素（処理中オーバーレイ等）を足しただけで抽出が壊れる。
         var pattern = new Regex(
-            @"<!--\s*ステータスとボタン。[\s\S]*?-->\s*<Grid\b[\s\S]*?</Grid>\s*</Grid>",
+            @"<!--\s*ステータスとボタン。[\s\S]*?-->\s*<Grid\b[\s\S]*?</StackPanel>\s*</Grid>",
             RegexOptions.Compiled);
 
         var match = pattern.Match(Xaml);

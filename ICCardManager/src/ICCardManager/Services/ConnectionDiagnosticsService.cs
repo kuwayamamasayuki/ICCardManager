@@ -79,7 +79,7 @@ namespace ICCardManager.Services
 
             AddItem(items,
                 DiagnosticItemKind.SharedFolderConnection, SharedFolderConnectionTitle,
-                CheckSharedFolderConnection);
+                () => CheckSharedFolderConnection(isReachable));
 
             AddItem(items,
                 DiagnosticItemKind.CardReader, CardReaderTitle,
@@ -199,7 +199,35 @@ namespace ICCardManager.Services
 
         private const string SharedFolderConnectionTitle = "共有フォルダ接続状態";
 
-        private DiagnosticItem CheckSharedFolderConnection()
+        /// <summary>
+        /// 接続監視の実行間隔（秒）。文言で「どれくらい古い情報か」を示すために参照する
+        /// </summary>
+        /// <remarks>
+        /// <see cref="SharedModeMonitor.HealthCheckIntervalSeconds"/> を単一の出典とし、
+        /// 監視間隔を変えたときに診断の文言だけが取り残されないようにする。
+        /// </remarks>
+        private const int MonitoringIntervalSeconds = SharedModeMonitor.HealthCheckIntervalSeconds;
+
+        /// <summary>
+        /// 共有フォルダの接続状態を診断する
+        /// </summary>
+        /// <param name="isReachable">項目1（データベース到達性）の即時確認が成功したか</param>
+        /// <remarks>
+        /// <para>
+        /// 判定元の <see cref="ISharedDbConnectionStateProvider.CurrentConnectionState"/> は
+        /// <see cref="SharedModeMonitor"/> の <c>HealthCheckIntervalSeconds</c>（15秒）周期の
+        /// ヘルスチェックでしか更新されない。したがって <c>Connected</c> が意味するのは
+        /// 「最大15秒前の確認が成功していた」であって「今この瞬間つながっている」ではない。
+        /// </para>
+        /// <para>
+        /// この時間差を無視すると、ネットワークを抜いた直後の診断で
+        /// 「項目1: 到達できません（異常）」と「項目4: 正常」が同じ結果に併存し、
+        /// 診断ツールとして自己矛盾した出力になる。そのため即時確認の結果
+        /// (<paramref name="isReachable"/>) と突き合わせ、監視が追いついていない場合は
+        /// 正常と断定せず警告として報告する。
+        /// </para>
+        /// </remarks>
+        private DiagnosticItem CheckSharedFolderConnection(bool isReachable)
         {
             if (!_databaseInfo.IsSharedMode)
             {
@@ -211,9 +239,21 @@ namespace ICCardManager.Services
             switch (_connectionStateProvider.CurrentConnectionState)
             {
                 case SharedDbConnectionState.Connected:
+                    // 監視は成功を記録しているが、たった今の確認では到達できなかった場合。
+                    // 監視が切断をまだ検知していないだけなので「正常」と断定しない。
+                    if (!isReachable)
+                    {
+                        return Warning(DiagnosticItemKind.SharedFolderConnection, SharedFolderConnectionTitle,
+                            "確認中（監視は未検知）",
+                            $"共有フォルダの接続監視は直近{MonitoringIntervalSeconds}秒以内の確認で成功を記録していますが、" +
+                            "この診断の時点では共有フォルダへ到達できませんでした。" +
+                            $"監視は{MonitoringIntervalSeconds}秒ごとに確認するため、切断がまだ反映されていない可能性があります。" +
+                            "「データベース到達性」の対処を行ったうえで、しばらく待ってから再診断してください。");
+                    }
+
                     return Ok(DiagnosticItemKind.SharedFolderConnection, SharedFolderConnectionTitle,
                         "接続中",
-                        "直近の接続確認は成功しています。");
+                        $"直近の接続確認は成功しています（{MonitoringIntervalSeconds}秒ごとに確認しています）。");
 
                 case SharedDbConnectionState.Reconnecting:
                     return Warning(DiagnosticItemKind.SharedFolderConnection, SharedFolderConnectionTitle,

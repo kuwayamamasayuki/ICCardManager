@@ -20,6 +20,7 @@
         AutomationProperties.HelpText="データベース、ICカードリーダー、バックアップ保存先の状態をまとめて確認します。Escapeキーで閉じます。">
 
     <Window.Resources>
+        <BooleanToVisibilityConverter x:Key="BoolToVisibilityConverter"/>
         <conv:ResourceKeyToBrushConverter x:Key="ResourceKeyToBrushConverter"/>
         <conv:StringToVisibilityConverter x:Key="StringToVisibilityConverter"/>
     </Window.Resources>
@@ -196,5 +197,27 @@
                         ToolTip="ダイアログを閉じる (Escape)"/>
             </StackPanel>
         </Grid>
+
+        <!-- 処理中オーバーレイ。
+             切断時の疎通確認は SMB のタイムアウトまでブロックし得るため実行に数十秒かかる。
+             実行中であることが見えないと、前回の結果を今回の結果と読み違える。 -->
+        <Border Grid.RowSpan="4"
+                Background="{DynamicResource OverlayBrush}"
+                Visibility="{Binding IsBusy, Converter={StaticResource BoolToVisibilityConverter}}">
+            <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
+                <ProgressBar IsIndeterminate="{Binding IsIndeterminate}"
+                             Value="{Binding ProgressValue}"
+                             Maximum="{Binding ProgressMax}"
+                             Width="200" Height="20"
+                             Foreground="{DynamicResource PrimaryBrush}"/>
+                <TextBlock Text="{Binding BusyMessage}"
+                           Foreground="{DynamicResource OnPrimaryBrush}"
+                           FontSize="{DynamicResource BaseFontSize}"
+                           Margin="0,10,0,0"
+                           HorizontalAlignment="Center"
+                           AutomationProperties.LiveSetting="Assertive"
+                           AutomationProperties.Name="診断の実行状況"/>
+            </StackPanel>
+        </Border>
     </Grid>
 </Window>

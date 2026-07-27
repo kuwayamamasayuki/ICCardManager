@@ -96,6 +96,12 @@ namespace ICCardManager.ViewModels
         {
             using (BeginBusy("接続診断を実行中..."))
             {
+                // 前回の結果を先に捨てる。診断は切断時に数十秒かかり得る
+                // （SMB のタイムアウトまでブロックする）ため、その間ずっと前回の
+                // 「正常」が残っていると、切断中でも正常と読めてしまう。
+                // 併せてコピーも実行不可になり、古い結果を IT 担当へ送る事故を防ぐ。
+                ClearResult();
+
                 var report = await Task.Run(() => _diagnosticsService.RunDiagnosticsAsync());
 
                 Report = report;
@@ -142,6 +148,17 @@ namespace ICCardManager.ViewModels
         partial void OnSelectedItemChanged(DiagnosticItem value)
         {
             OnPropertyChanged(nameof(SelectedDetailText));
+        }
+
+        /// <summary>
+        /// 表示中の診断結果を破棄する（実行開始時に呼ぶ）
+        /// </summary>
+        private void ClearResult()
+        {
+            Report = null;
+            Items = new ObservableCollection<DiagnosticItem>();
+            SelectedItem = null;
+            SetStatus("接続診断を実行しています...", false);
         }
 
         private static string BuildResultStatusMessage(DiagnosticReport report)
