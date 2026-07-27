@@ -128,5 +128,8 @@ StatusMessage = ExceptionMessageFormatter.ToUserMessage(ex, "台帳の保存");
 | `ExceptionMessageFormatterTests` | `ExceptionMessageFormatter.ToUserMessage`（例外→3要素文言、Issue #1614） |
 | `ReportPreflightCheckerTests.AllWarnings_SatisfyErrorMessageQualityCriteria` | 帳票出力前プリフライトチェックの警告文言（5種別すべてを発生させ、`DisplayText` の情報量とカード名の明示、`DetailText` が行動指示で終わることを検証、Issue #1688） |
 | `WarningServiceBackupHealthTests.BackupStaleWarning_SatisfiesErrorMessageQualityCriteria` | バックアップ健全性警告の文言（経過日数・最終成功日時の明示、原因候補、システム管理画面（F6）への誘導と行動指示、Issue #1689） |
+| `ConnectionDiagnosticsServiceTests.AllProblemItems_SatisfyErrorMessageQualityCriteria` | 接続診断の警告・異常文言（8項目すべてを問題状態へ落とし、`DetailText` が20文字以上・行動指示で終わる・曖昧文言を含まないことを検証、Issue #1690） |
+
+> **品質テストは「対象の網羅」も併せて表明する**: 診断・チェック系のように項目が増えていくサービスでは、文言の品質だけを検証すると項目追加時に品質テストの追随漏れが静かに起きる。`ConnectionDiagnosticsServiceTests` は全項目種別が問題状態として集まっていること（`Enum.GetValues(typeof(DiagnosticItemKind)).Length` と一致）を同じテスト内で表明し、項目を足したのに文言を検証していない状態を検出する。
 
 > **バリデーション以外の「警告文言」も本ガイドラインの対象**: プリフライトチェックのように、入力値の妥当性ではなく**データの状態**を警告する文言も 3 要素を満たすこと。「何が」＝どのカードのどの行か（カード名・利用日・摘要・金額）、「なぜ」＝帳票にどう影響するか、「どうすれば」＝どの画面で何を直すか。専用の品質テストクラスを新設せず、対象サービスのテストクラス内に品質テストを1件置く形でよい。
