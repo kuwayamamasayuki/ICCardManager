@@ -11,7 +11,7 @@ namespace ICCardManager.Services
     /// MainViewModelから抽出。15秒ごと（HealthCheckIntervalSeconds）のDB接続ヘルスチェックと
     /// 1秒ごとの同期経過時間表示を管理する。
     /// </remarks>
-    public class SharedModeMonitor : IDisposable
+    public class SharedModeMonitor : IDisposable, ISharedDbConnectionStateProvider
     {
         private readonly IDatabaseInfo _databaseInfo;
         private readonly ITimerFactory _timerFactory;
@@ -55,6 +55,9 @@ namespace ICCardManager.Services
         /// <summary>
         /// 現在のDB接続状態（Issue #1470）。
         /// </summary>
+        /// <remarks>
+        /// <see cref="ISharedDbConnectionStateProvider"/> 経由で接続診断（Issue #1690）からも参照される。
+        /// </remarks>
         public SharedDbConnectionState CurrentConnectionState => _currentConnectionState;
 
         public SharedModeMonitor(IDatabaseInfo databaseInfo, ITimerFactory timerFactory, ISystemClock clock)

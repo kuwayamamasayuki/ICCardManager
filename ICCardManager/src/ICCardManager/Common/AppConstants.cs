@@ -46,5 +46,18 @@ namespace ICCardManager.Common
         /// 長期休暇などでアプリを起動しなかった期間も検知できる。
         /// </summary>
         public const int BackupStaleWarningDays = 7;
+
+        // --- 接続診断（Issue #1690） ---
+
+        /// <summary>
+        /// バックアップ保存先の空き容量がこの値を下回った場合、接続診断で警告する（バイト）。
+        /// </summary>
+        /// <remarks>
+        /// DB 本体は数十 MB 規模だが、保持世代数の上限（<see cref="MaxBackupGenerations"/>）分の
+        /// バックアップが同居するため、当面の書き込みに余裕がある水準として 1 GB を採る。
+        /// 空き容量不足はバックアップが失敗し始める予兆であり本体動作を即座に妨げるものではないため、
+        /// 判定は「異常」ではなく「警告」とする。
+        /// </remarks>
+        public const long DiagnosticsLowDiskSpaceWarningBytes = 1024L * 1024L * 1024L;
     }
 }

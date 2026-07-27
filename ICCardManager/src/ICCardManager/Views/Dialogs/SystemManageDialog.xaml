@@ -59,12 +59,15 @@
                            Margin="0,0,0,10"
                            AutomationProperties.Name="{Binding DatabasePathDisplay, StringFormat=現在のデータベース: {0}}"/>
 
-                <Button Content="接続をテスト"
-                        Command="{Binding TestDatabaseConnectionCommand}"
+                <!-- Issue #1690: 「接続をテスト」（DBのみ）を接続診断へ統合。
+                     DBの到達性・書込権限は診断項目に内包されるため機能は後退しない。 -->
+                <Button Content="接続診断"
+                        Command="{Binding OpenConnectionDiagnosticsCommand}"
                         Padding="15,10"
                         HorizontalAlignment="Left"
-                        AutomationProperties.Name="データベース接続をテスト"
-                        ToolTip="データベースへの到達と書き込みが可能かをその場で確認します（結果は下部に表示されます）"/>
+                        AutomationProperties.Name="接続診断を開く"
+                        AutomationProperties.HelpText="データベース、ICカードリーダー、バックアップ保存先の状態をまとめて確認し、結果をコピーできます。"
+                        ToolTip="データベース・ICカードリーダー・バックアップ保存先の状態をまとめて確認します"/>
             </StackPanel>
         </GroupBox>
 

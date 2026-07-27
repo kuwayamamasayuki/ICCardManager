@@ -642,65 +642,19 @@ public class SystemManageViewModelTests : IDisposable
         sharedViewModel.DatabaseModeIcon.Should().Be("🔗");
     }
 
+    // Issue #1690: 「接続をテスト」（DBのみ）は接続診断へ統合された。
+    // 到達性・書込権限の判定と3要素メッセージの検証は ConnectionDiagnosticsServiceTests
+    // （DatabaseReachability_* / DatabaseWritable_* / AllProblemItems_SatisfyErrorMessageQualityCriteria）へ、
+    // 実行中の IsBusy 遷移は ConnectionDiagnosticsViewModelTests へ移管している。
+    // 本クラスに残すのは「F6 から診断ダイアログへ到達できること」のみ。
     [Fact]
-    public async Task 接続テスト_読み書き可能な場合_成功メッセージを表示すること()
+    public void 接続診断_コマンド実行でダイアログを開くこと()
     {
-        await _viewModel.TestDatabaseConnectionAsync();
+        _viewModel.OpenConnectionDiagnostics();
 
-        _viewModel.IsStatusError.Should().BeFalse();
-        _viewModel.StatusMessage.Should().Contain("成功");
-        _viewModel.StatusMessage.Should().Contain("書き込み");
-        _databaseInfoMock.Verify(d => d.CheckConnection(), Times.Once);
-        _databaseInfoMock.Verify(d => d.CheckWritable(), Times.Once);
-    }
-
-    [Fact]
-    public async Task 接続テスト_到達不可の場合_パス入りの3要素エラーメッセージを表示すること()
-    {
-        _databaseInfoMock.Setup(d => d.CheckConnection()).Returns(false);
-
-        await _viewModel.TestDatabaseConnectionAsync();
-
-        _viewModel.IsStatusError.Should().BeTrue();
-        // 3要素: 何が（どのDBに接続できないか）・なぜ（ネットワーク/共有フォルダ）・どうすれば（確認してください）
-        _viewModel.StatusMessage.Should().Contain(TestDatabasePath, "どのDBに接続できないかを示す（何が）");
-        _viewModel.StatusMessage.Should().Contain("接続できません");
-        _viewModel.StatusMessage.Should().EndWith("確認してください。");
-        _viewModel.StatusMessage.Length.Should().BeGreaterOrEqualTo(20, "エラーメッセージ品質基準（最小20文字）");
-        // 到達できない場合は書込テストまで進まない
-        _databaseInfoMock.Verify(d => d.CheckWritable(), Times.Never);
-    }
-
-    [Fact]
-    public async Task 接続テスト_書込不可の場合_アクセス権を示唆する3要素エラーメッセージを表示すること()
-    {
-        _databaseInfoMock.Setup(d => d.CheckWritable()).Returns(false);
-
-        await _viewModel.TestDatabaseConnectionAsync();
-
-        _viewModel.IsStatusError.Should().BeTrue();
-        _viewModel.StatusMessage.Should().Contain(TestDatabasePath);
-        _viewModel.StatusMessage.Should().Contain("書き込みができません");
-        _viewModel.StatusMessage.Should().Contain("アクセス権");
-        _viewModel.StatusMessage.Should().EndWith("確認してください。");
-        _viewModel.StatusMessage.Length.Should().BeGreaterOrEqualTo(20, "エラーメッセージ品質基準（最小20文字）");
-    }
-
-    [Fact]
-    public async Task 接続テスト_実行中はIsBusyがtrueになること()
-    {
-        var busyStates = new List<bool>();
-        _viewModel.PropertyChanged += (_, e) =>
-        {
-            if (e.PropertyName == nameof(SystemManageViewModel.IsBusy))
-                busyStates.Add(_viewModel.IsBusy);
-        };
-
-        await _viewModel.TestDatabaseConnectionAsync();
-
-        busyStates.Should().HaveCountGreaterOrEqualTo(2);
-        busyStates.First().Should().BeTrue();
-        busyStates.Last().Should().BeFalse();
+        _navigationServiceMock.Verify(
+            n => n.ShowDialog<ICCardManager.Views.Dialogs.ConnectionDiagnosticsDialog>(null),
+            Times.Once);
     }
 
     #endregion
