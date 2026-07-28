@@ -78,6 +78,7 @@ public class ConnectionDiagnosticsServiceTests : IDisposable
     {
         public FolderWriteAccess FolderAccess { get; set; } = FolderWriteAccess.Writable;
         public long? FreeSpace { get; set; } = 50L * 1024 * 1024 * 1024;
+        public bool FileReachable { get; set; } = true;
 
         public TestableService(
             IDatabaseInfo databaseInfo,
@@ -95,6 +96,8 @@ public class ConnectionDiagnosticsServiceTests : IDisposable
         protected override FolderWriteAccess ProbeFolderWriteAccess(string folder) => FolderAccess;
 
         protected override long? GetFreeSpaceBytes(string folder) => FreeSpace;
+
+        protected override bool ProbeDatabaseFileReachable(string databasePath) => FileReachable;
     }
 
     private TestableService CreateService() => new(
@@ -208,6 +211,38 @@ public class ConnectionDiagnosticsServiceTests : IDisposable
 
         item.DetailText.Should().NotContain("ネットワーク接続と共有フォルダ");
         item.DetailText.Should().Contain("ディスク");
+    }
+
+    [Fact]
+    public async Task DatabaseReachability_WhenFileUnreachableButQuerySucceedsFromCache_IsError()
+    {
+        // 実機で確認した事象（PR #1714 レビュー）。DbContext は接続を開きっぱなしで保持するため、
+        // sqlite_master の読み取りは SQLite のページキャッシュから返り、ネットワーク切断後も
+        // CheckConnection() が true を返し続ける。書き込み（BEGIN IMMEDIATE）だけが
+        // 実際にファイルへ到達する必要があるため失敗し、
+        // 「到達性 正常 ／ 書込権限 異常」という誤った組み合わせが表示されていた。
+        _databaseInfo.Setup(d => d.CheckConnection()).Returns(true);
+        var service = CreateService();
+        service.FileReachable = false;
+
+        var item = await RunAndGet(DiagnosticItemKind.DatabaseReachability, service);
+
+        item.Status.Should().Be(DiagnosticStatus.Error);
+    }
+
+    [Fact]
+    public async Task DatabaseWritable_WhenFileUnreachable_IsNotApplicableInsteadOfPermissionError()
+    {
+        // 到達できないのに「書込権限がありません」と報告すると、
+        // 原因がアクセス権にあると誤解させ、権限設定の確認へ誘導してしまう。
+        _databaseInfo.Setup(d => d.CheckConnection()).Returns(true);
+        _databaseInfo.Setup(d => d.CheckWritable()).Returns(false);
+        var service = CreateService();
+        service.FileReachable = false;
+
+        var item = await RunAndGet(DiagnosticItemKind.DatabaseWritable, service);
+
+        item.Status.Should().Be(DiagnosticStatus.NotApplicable);
     }
 
     [Fact]
@@ -367,6 +402,22 @@ public class ConnectionDiagnosticsServiceTests : IDisposable
 
         item.Status.Should().Be(DiagnosticStatus.Ok);
         item.DetailText.Should().Contain("15秒");
+    }
+
+    [Fact]
+    public async Task SharedFolderConnection_WhenFileUnreachableButMonitorSaysConnected_IsNotOk()
+    {
+        // 監視（SharedModeMonitor）も同じ CheckConnection() を使うため、切断後も Connected のまま残る。
+        // 項目1がファイル実測で異常になることで、項目4との突き合わせが初めて正しく働く。
+        _databaseInfo.SetupGet(d => d.IsSharedMode).Returns(true);
+        _databaseInfo.Setup(d => d.CheckConnection()).Returns(true);
+        _connectionState.SetupGet(p => p.CurrentConnectionState).Returns(SharedDbConnectionState.Connected);
+        var service = CreateService();
+        service.FileReachable = false;
+
+        var item = await RunAndGet(DiagnosticItemKind.SharedFolderConnection, service);
+
+        item.Status.Should().NotBe(DiagnosticStatus.Ok);
     }
 
     [Fact]

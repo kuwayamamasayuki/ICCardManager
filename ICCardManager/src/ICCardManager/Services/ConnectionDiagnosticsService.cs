@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Threading.Tasks;
 using ICCardManager.Common;
 using ICCardManager.Dtos;
@@ -116,11 +117,40 @@ namespace ICCardManager.Services
         private const string DatabaseReachabilityTitle = "データベース到達性";
         private const string DatabaseWritableTitle = "データベース書込権限";
 
+        /// <summary>
+        /// データベースファイルそのものへ到達できるかを実測する
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// <see cref="IDatabaseInfo.CheckConnection"/> だけでは切断を検知できない。
+        /// <c>DbContext</c> は接続を開きっぱなしで保持しており、疎通確認に使う
+        /// <c>SELECT COUNT(*) FROM sqlite_master</c> は SQLite のページキャッシュから
+        /// 応答され得るため、ネットワークが切れた後も成功し続けることがある
+        /// （実機で確認。書き込みだけが失敗し「到達性 正常／書込権限 異常」という
+        /// 誤った組み合わせが表示された）。
+        /// </para>
+        /// <para>
+        /// そのためファイルシステムへ実際に問い合わせ、SMB のラウンドトリップを強制する。
+        /// 到達できない理由（切断・削除・権限）は区別せず、いずれも「到達できない」として扱う。
+        /// テストから差し替えられるよう <c>protected virtual</c> の継ぎ目にしている。
+        /// </para>
+        /// </remarks>
+        protected virtual bool ProbeDatabaseFileReachable(string databasePath)
+        {
+            if (string.IsNullOrWhiteSpace(databasePath))
+                return false;
+
+            // File.Exists は例外を投げず、到達不能・権限なしのいずれでも false を返す
+            return File.Exists(databasePath);
+        }
+
         private DiagnosticItem CheckDatabaseReachability()
         {
             var path = SafePath(() => _databaseInfo.DatabasePath);
 
-            if (_databaseInfo.CheckConnection())
+            // クエリが通ることと、ファイルへ実際に届くことの両方を要求する。
+            // 前者だけではキャッシュ応答で切断を見逃す（ProbeDatabaseFileReachable の remarks 参照）。
+            if (_databaseInfo.CheckConnection() && ProbeDatabaseFileReachable(path))
             {
                 return Ok(DiagnosticItemKind.DatabaseReachability, DatabaseReachabilityTitle,
                     "接続できます",
