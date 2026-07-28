@@ -265,6 +265,32 @@ public class ConnectionDiagnosticsServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task DatabaseWritable_InSharedMode_ListsNetworkAsAPossibleCause()
+    {
+        // 実機検証では相手PCの電源断が原因だったが、文言はアクセス権と復元処理しか挙げておらず、
+        // 「共有フォルダのあるパソコンが落ちている」を疑えなかった（PR #1714 レビュー）。
+        _databaseInfo.SetupGet(d => d.IsSharedMode).Returns(true);
+        _databaseInfo.Setup(d => d.CheckWritable()).Returns(false);
+
+        var item = await RunAndGet(DiagnosticItemKind.DatabaseWritable);
+
+        item.DetailText.Should().Contain("ネットワーク");
+        item.DetailText.Should().Contain("起動している", "相手PCの電源断を疑えるようにする");
+    }
+
+    [Fact]
+    public async Task DatabaseWritable_InLocalMode_DoesNotBlameOtherPcs()
+    {
+        // ローカルモードでは他のパソコンは存在しないため、原因候補に挙げるのは誤誘導
+        _databaseInfo.Setup(d => d.CheckWritable()).Returns(false);
+
+        var item = await RunAndGet(DiagnosticItemKind.DatabaseWritable);
+
+        item.DetailText.Should().NotContain("他のパソコン");
+        item.DetailText.Should().NotContain("ネットワーク");
+    }
+
+    [Fact]
     public async Task DatabaseWritable_WhenUnreachable_IsNotApplicableAndPointsToReachability()
     {
         // 到達できない DB に書込確認まで走らせると、同じ原因で異常が 2 件出て
