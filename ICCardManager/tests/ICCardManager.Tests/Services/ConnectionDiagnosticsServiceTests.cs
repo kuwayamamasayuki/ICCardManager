@@ -718,6 +718,13 @@ public class ConnectionDiagnosticsServiceTests : IDisposable
         var secondRun = await service.RunDiagnosticsAsync();
         collected.AddRange(secondRun.Items.Where(i => i.IsProblem));
 
+        // (3) 項目4の「監視は Connected だが即時確認は失敗」分岐。
+        // (2) は Disconnected で発生させるため、この警告文言だけ検証から漏れる。
+        _databaseInfo.Setup(d => d.CheckConnection()).Returns(false);
+        _connectionState.SetupGet(p => p.CurrentConnectionState).Returns(SharedDbConnectionState.Connected);
+        var thirdRun = await CreateService().RunDiagnosticsAsync();
+        collected.Add(thirdRun.Items.Single(i => i.Kind == DiagnosticItemKind.SharedFolderConnection));
+
         return collected;
     }
 
