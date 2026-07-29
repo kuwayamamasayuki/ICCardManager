@@ -1,0 +1,223 @@
+<Window x:Class="ICCardManager.Views.Dialogs.ConnectionDiagnosticsDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:vm="clr-namespace:ICCardManager.ViewModels"
+        xmlns:conv="clr-namespace:ICCardManager.Common"
+        mc:Ignorable="d"
+        d:DataContext="{d:DesignInstance Type=vm:ConnectionDiagnosticsViewModel}"
+        Title="接続診断"
+        Height="660"
+        Width="760"
+        MinHeight="520"
+        MinWidth="600"
+        WindowStartupLocation="CenterOwner"
+        ResizeMode="CanResize"
+        Loaded="Window_Loaded"
+        FontSize="{DynamicResource BaseFontSize}"
+        AutomationProperties.Name="接続診断ダイアログ"
+        AutomationProperties.HelpText="データベース、ICカードリーダー、バックアップ保存先の状態をまとめて確認します。Escapeキーで閉じます。">
+
+    <Window.Resources>
+        <BooleanToVisibilityConverter x:Key="BoolToVisibilityConverter"/>
+        <conv:ResourceKeyToBrushConverter x:Key="ResourceKeyToBrushConverter"/>
+        <conv:StringToVisibilityConverter x:Key="StringToVisibilityConverter"/>
+    </Window.Resources>
+
+    <Grid Margin="20">
+        <Grid.RowDefinitions>
+            <!-- 総合判定ヘッダー -->
+            <RowDefinition Height="Auto"/>
+            <!-- 診断項目一覧 -->
+            <RowDefinition Height="*"/>
+            <!-- 選択項目の詳細 -->
+            <RowDefinition Height="Auto"/>
+            <!-- ステータスとボタン -->
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <!-- 総合判定。アイコン・テキスト・色の3要素で状態を伝える（色のみに依存しない） -->
+        <Border Grid.Row="0"
+                Background="{DynamicResource ReturnBackgroundBrush}"
+                BorderBrush="{DynamicResource SubtleBorderBrush}"
+                BorderThickness="1"
+                Padding="15"
+                Margin="0,0,0,12">
+            <!-- 横方向 StackPanel は子を無限幅で測定し Wrap が効かないため Grid を使う -->
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+
+                <TextBlock Grid.Column="0"
+                           Text="{Binding OverallIcon, Mode=OneWay}"
+                           Foreground="{Binding OverallForegroundResourceKey, Mode=OneWay, Converter={StaticResource ResourceKeyToBrushConverter}}"
+                           FontWeight="Bold"
+                           VerticalAlignment="Top"
+                           Margin="0,0,10,0"
+                           AutomationProperties.Name="総合判定のアイコン"/>
+
+                <StackPanel Grid.Column="1">
+                    <TextBlock Text="{Binding OverallSummaryText, Mode=OneWay}"
+                               FontWeight="Bold"
+                               TextWrapping="Wrap"
+                               Foreground="{Binding OverallForegroundResourceKey, Mode=OneWay, Converter={StaticResource ResourceKeyToBrushConverter}}"
+                               AutomationProperties.LiveSetting="Assertive"
+                               AutomationProperties.Name="総合判定"/>
+
+                    <TextBlock Text="{Binding DiagnosedAtText, Mode=OneWay, StringFormat=診断日時: {0}}"
+                               Margin="0,6,0,0"
+                               TextWrapping="Wrap"
+                               Foreground="{DynamicResource SecondaryTextBrush}"
+                               FontSize="{DynamicResource SmallFontSize}"
+                               AutomationProperties.Name="診断日時"/>
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <!-- 診断項目一覧。HorizontalContentAlignment=Stretch と横スクロール無効により
+             行テンプレート内の TextWrapping が機能する -->
+        <ListBox Grid.Row="1"
+                 ItemsSource="{Binding Items}"
+                 SelectedItem="{Binding SelectedItem, Mode=TwoWay}"
+                 HorizontalContentAlignment="Stretch"
+                 ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                 ScrollViewer.VerticalScrollBarVisibility="Auto"
+                 AutomationProperties.Name="診断項目一覧"
+                 AutomationProperties.HelpText="項目を選択すると、下に詳細と対処方法が表示されます。">
+            <ListBox.ItemTemplate>
+                <DataTemplate>
+                    <Grid Margin="0,5">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="Auto" MinWidth="60"/>
+                            <ColumnDefinition Width="Auto" MinWidth="170"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+
+                        <TextBlock Grid.Column="0"
+                                   Text="{Binding StatusIcon, Mode=OneWay}"
+                                   Foreground="{Binding StatusForegroundResourceKey, Mode=OneWay, Converter={StaticResource ResourceKeyToBrushConverter}}"
+                                   FontWeight="Bold"
+                                   VerticalAlignment="Top"
+                                   Margin="0,0,8,0"/>
+
+                        <TextBlock Grid.Column="1"
+                                   Text="{Binding StatusLabel, Mode=OneWay}"
+                                   Foreground="{Binding StatusForegroundResourceKey, Mode=OneWay, Converter={StaticResource ResourceKeyToBrushConverter}}"
+                                   FontWeight="Bold"
+                                   VerticalAlignment="Top"
+                                   TextWrapping="Wrap"
+                                   Margin="0,0,10,0"/>
+
+                        <TextBlock Grid.Column="2"
+                                   Text="{Binding Title, Mode=OneWay}"
+                                   VerticalAlignment="Top"
+                                   TextWrapping="Wrap"
+                                   Margin="0,0,10,0"/>
+
+                        <TextBlock Grid.Column="3"
+                                   Text="{Binding SummaryText, Mode=OneWay}"
+                                   VerticalAlignment="Top"
+                                   TextWrapping="Wrap"
+                                   Foreground="{DynamicResource SecondaryTextBrush}"/>
+                    </Grid>
+                </DataTemplate>
+            </ListBox.ItemTemplate>
+        </ListBox>
+
+        <!-- 選択項目の詳細（何が・なぜ・どうすれば） -->
+        <Border Grid.Row="2"
+                Background="{DynamicResource NeutralBackgroundBrush}"
+                BorderBrush="{DynamicResource SubtleBorderBrush}"
+                BorderThickness="1"
+                Padding="15"
+                Margin="0,12,0,0">
+            <ScrollViewer VerticalScrollBarVisibility="Auto"
+                          HorizontalScrollBarVisibility="Disabled"
+                          MaxHeight="150">
+                <TextBlock Text="{Binding SelectedDetailText, Mode=OneWay}"
+                           TextWrapping="Wrap"
+                           Foreground="{DynamicResource HintForegroundBrush}"
+                           AutomationProperties.LiveSetting="Polite"
+                           AutomationProperties.Name="選択した項目の詳細と対処方法"/>
+            </ScrollViewer>
+        </Border>
+
+        <!-- ステータスとボタン。ボタン列が広がっても左のテキストは折り返して逃がす -->
+        <Grid Grid.Row="3" Margin="0,15,0,0">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+
+            <TextBlock Grid.Column="0"
+                       Text="{Binding StatusMessage, Mode=OneWay}"
+                       TextWrapping="Wrap"
+                       VerticalAlignment="Center"
+                       Margin="0,0,15,0"
+                       Visibility="{Binding StatusMessage, Mode=OneWay, Converter={StaticResource StringToVisibilityConverter}}"
+                       Foreground="{DynamicResource SecondaryTextBrush}"
+                       AutomationProperties.LiveSetting="Polite"
+                       AutomationProperties.Name="操作の結果"/>
+
+            <!-- テキストが2行に折り返してもボタンが縦に引き伸ばされないよう中央揃え -->
+            <StackPanel Grid.Column="1"
+                        Orientation="Horizontal"
+                        VerticalAlignment="Center">
+                <Button Content="再診断"
+                        Command="{Binding RunDiagnosticsCommand}"
+                        Padding="20,10"
+                        MinWidth="100"
+                        Margin="0,0,10,0"
+                        AutomationProperties.Name="再診断"
+                        AutomationProperties.HelpText="もう一度すべての項目を確認します。"
+                        ToolTip="もう一度すべての項目を確認します"/>
+
+                <Button Content="結果をコピー"
+                        Command="{Binding CopyResultCommand}"
+                        Padding="20,10"
+                        MinWidth="120"
+                        Margin="0,0,10,0"
+                        Background="{DynamicResource HeaderBackgroundBrush}"
+                        Foreground="{DynamicResource OnPrimaryBrush}"
+                        AutomationProperties.Name="診断結果をコピー"
+                        AutomationProperties.HelpText="診断結果と環境情報をクリップボードへコピーします。メールに貼り付けてIT担当へ送れます。"
+                        ToolTip="診断結果をクリップボードへコピーする"/>
+
+                <Button Content="閉じる"
+                        Padding="20,10"
+                        MinWidth="100"
+                        IsDefault="True"
+                        IsCancel="True"
+                        AutomationProperties.Name="閉じる"
+                        AutomationProperties.HelpText="ダイアログを閉じます。"
+                        ToolTip="ダイアログを閉じる (Escape)"/>
+            </StackPanel>
+        </Grid>
+
+        <!-- 処理中オーバーレイ。
+             切断時の疎通確認は SMB のタイムアウトまでブロックし得るため実行に数十秒かかる。
+             実行中であることが見えないと、前回の結果を今回の結果と読み違える。 -->
+        <Border Grid.RowSpan="4"
+                Background="{DynamicResource OverlayBrush}"
+                Visibility="{Binding IsBusy, Converter={StaticResource BoolToVisibilityConverter}}">
+            <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
+                <ProgressBar IsIndeterminate="{Binding IsIndeterminate}"
+                             Value="{Binding ProgressValue}"
+                             Maximum="{Binding ProgressMax}"
+                             Width="200" Height="20"
+                             Foreground="{DynamicResource PrimaryBrush}"/>
+                <TextBlock Text="{Binding BusyMessage}"
+                           Foreground="{DynamicResource OnPrimaryBrush}"
+                           FontSize="{DynamicResource BaseFontSize}"
+                           Margin="0,10,0,0"
+                           HorizontalAlignment="Center"
+                           AutomationProperties.LiveSetting="Assertive"
+                           AutomationProperties.Name="診断の実行状況"/>
+            </StackPanel>
+        </Border>
+    </Grid>
+</Window>

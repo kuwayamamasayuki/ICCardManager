@@ -199,40 +199,18 @@ public partial class SystemManageViewModel : ViewModelBase
     }
 
     /// <summary>
-    /// データベースへの接続テストを実行する（Issue #1686）。
-    /// 到達性（読み取り）と書込可否を順に確認し、結果をステータスメッセージへ表示する
+    /// 接続診断ダイアログを開く（Issue #1690）
     /// </summary>
+    /// <remarks>
+    /// Issue #1686 の「接続をテスト」（DB の到達性・書込可否のみ）を置き換える。
+    /// 到達性と書込権限は接続診断の項目 1・2 に内包されるため機能は後退せず、
+    /// ICカードリーダー・バックアップ保存先・空き容量まで一度に確認できる。
+    /// 似た2つのボタンが並ぶ混乱を避けるため、片方だけを残している。
+    /// </remarks>
     [RelayCommand]
-    public async Task TestDatabaseConnectionAsync()
+    public void OpenConnectionDiagnostics()
     {
-        using (BeginBusy("データベース接続をテスト中..."))
-        {
-            // CheckConnection / CheckWritable は同期I/O（ネットワーク越しだと busy_timeout 最大15秒待つ）
-            // のため、UIスレッドを塞がないよう Task.Run で退避する
-            var canRead = await Task.Run(() => _databaseInfo.CheckConnection());
-            if (!canRead)
-            {
-                SetStatus(
-                    $"データベース（{DatabasePathDisplay}）に接続できません。" +
-                    "ネットワークが切断されているか、共有フォルダにアクセスできない状態です。" +
-                    "ネットワーク接続と共有フォルダの状態を確認してください。",
-                    true);
-                return;
-            }
-
-            var canWrite = await Task.Run(() => _databaseInfo.CheckWritable());
-            if (!canWrite)
-            {
-                SetStatus(
-                    $"データベース（{DatabasePathDisplay}）に接続できましたが、書き込みができません。" +
-                    "ファイルまたは共有フォルダのアクセス権が読み取り専用になっている可能性があります。" +
-                    "フォルダの「変更」権限があるか確認してください。",
-                    true);
-                return;
-            }
-
-            SetStatus("接続テストに成功しました。データベースへの読み取り・書き込みの両方が可能です。", false);
-        }
+        _navigationService.ShowDialog<Views.Dialogs.ConnectionDiagnosticsDialog>();
     }
 
     partial void OnSelectedBackupChanged(BackupFileInfo? value)

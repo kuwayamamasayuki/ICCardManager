@@ -374,9 +374,15 @@ namespace ICCardManager
             // Issue #1265: 監査ログなりすまし防止のため、操作者コンテキストを一元管理する
             services.AddSingleton<ICurrentOperatorContext, CurrentOperatorContext>();
             services.AddSingleton<SharedModeMonitor>();
+            // Issue #1690: 接続診断は「直近のヘルスチェック結果」だけを SharedModeMonitor から読む。
+            // タイマー基盤ごと依存させないよう、読み取り専用の窓口として同一インスタンスを公開する
+            services.AddSingleton<ISharedDbConnectionStateProvider>(sp => sp.GetRequiredService<SharedModeMonitor>());
             // Issue #1687: 共有フォルダの latest_version.txt による更新通知
             services.AddSingleton<IUpdateNotificationService, UpdateNotificationService>();
             services.AddSingleton<IBackupHealthService, BackupHealthService>();
+            // Issue #1690: 障害時の自己切り分け用の接続診断
+            services.AddSingleton<IConnectionDiagnosticsService, ConnectionDiagnosticsService>();
+            services.AddSingleton<IClipboardService, WpfClipboardService>();
             services.AddSingleton<WarningService>();
             services.AddSingleton<DashboardService>();
             // Issue #1465: Process.Start(UseShellExecute=true) のパス検証を一元化
@@ -417,6 +423,7 @@ namespace ICCardManager
             services.AddTransient<IncompleteBusStopViewModel>();
             services.AddTransient<LedgerRowEditViewModel>();
             services.AddTransient<ReportPreflightViewModel>();
+            services.AddTransient<ConnectionDiagnosticsViewModel>();
     #if DEBUG
             // Issue #640: 仮想タッチ設定ダイアログ
             services.AddTransient<VirtualCardViewModel>();
@@ -439,6 +446,7 @@ namespace ICCardManager
             services.AddTransient<Views.Dialogs.IncompleteBusStopDialog>();
             services.AddTransient<Views.Dialogs.LedgerRowEditDialog>();
             services.AddTransient<Views.Dialogs.CardTypeSelectionDialog>();
+            services.AddTransient<Views.Dialogs.ConnectionDiagnosticsDialog>();
     #if DEBUG
             services.AddTransient<Views.Dialogs.VirtualCardDialog>();
     #endif
