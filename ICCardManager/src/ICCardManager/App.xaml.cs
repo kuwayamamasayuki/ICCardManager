@@ -360,6 +360,8 @@ namespace ICCardManager
             services.AddSingleton<LedgerConsistencyChecker>();
             // Issue #1688: 帳票出力前プリフライトチェック
             services.AddSingleton<ReportPreflightChecker>();
+            // Issue #1691: 帳票の出力済み / 未出力チェックリスト
+            services.AddSingleton<IReportExportStatusService, ReportExportStatusService>();
             services.AddSingleton<CsvExportService>();
             services.AddSingleton<OperationLogExcelExportService>();
             services.AddSingleton<CsvImportService>();

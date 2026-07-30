@@ -31,6 +31,7 @@ public partial class ReportViewModel : ViewModelBase
     private readonly ISettingsRepository _settingsRepository;
     private readonly ISafeFileLauncher _safeFileLauncher;
     private readonly ReportPreflightChecker _preflightChecker;
+    private readonly IReportExportStatusService _exportStatusService;
     private bool _isInitialized;
 
     [ObservableProperty]
@@ -77,6 +78,12 @@ public partial class ReportViewModel : ViewModelBase
     private bool _isThisMonthSelected;
 
     /// <summary>
+    /// 出力済み / 未出力チェックリストの集計文言（Issue #1691）
+    /// </summary>
+    [ObservableProperty]
+    private string _exportStatusSummary = string.Empty;
+
+    /// <summary>
     /// 年の選択肢（過去5年分）
     /// </summary>
     public ObservableCollection<int> Years { get; } = new();
@@ -93,7 +100,8 @@ public partial class ReportViewModel : ViewModelBase
         INavigationService navigationService,
         ISettingsRepository settingsRepository,
         ISafeFileLauncher safeFileLauncher,
-        ReportPreflightChecker preflightChecker)
+        ReportPreflightChecker preflightChecker,
+        IReportExportStatusService exportStatusService)
     {
         _reportService = reportService;
         _printService = printService;
@@ -102,6 +110,7 @@ public partial class ReportViewModel : ViewModelBase
         _settingsRepository = settingsRepository;
         _safeFileLauncher = safeFileLauncher;
         _preflightChecker = preflightChecker;
+        _exportStatusService = exportStatusService;
 
         // CreatedFiles の中身が変化したときに HasCreatedFiles の通知を発火する
         _createdFiles.CollectionChanged += OnCreatedFilesCollectionChanged;
@@ -133,6 +142,9 @@ public partial class ReportViewModel : ViewModelBase
         await LoadCardsAsync();
         await LoadOutputFolderAsync();
         _isInitialized = true;
+
+        // Issue #1691: 出力先フォルダが確定してから出力済み / 未出力を判定する
+        await RefreshExportStatusAsync();
     }
 
     /// <summary>
@@ -143,6 +155,9 @@ public partial class ReportViewModel : ViewModelBase
         // 初期化完了前（コンストラクタやLoadOutputFolderAsyncでの設定）は保存しない
         if (!_isInitialized) return;
         _ = SaveOutputFolderAsync();
+
+        // Issue #1691: 出力先が変われば出力済み判定もやり直す
+        _ = RefreshExportStatusAsync();
     }
 
     /// <summary>
@@ -226,6 +241,13 @@ public partial class ReportViewModel : ViewModelBase
 
         IsThisMonthSelected = (SelectedYear == now.Year && SelectedMonth == now.Month);
         IsLastMonthSelected = (SelectedYear == lastMonth.Year && SelectedMonth == lastMonth.Month);
+
+        // Issue #1691: 対象年月が変われば「出力済み / 未出力」も変わる。
+        // 初期化前（コンストラクタでの既定値設定）は出力先フォルダが未確定のため走らせない。
+        if (_isInitialized)
+        {
+            _ = RefreshExportStatusAsync();
+        }
     }
 
     /// <summary>
@@ -257,6 +279,13 @@ public partial class ReportViewModel : ViewModelBase
             // デフォルトで全選択
             IsAllSelected = true;
             SelectAllCards();
+        }
+
+        // Issue #1691: カード一覧を読み直したら出力状況も判定し直す。
+        // 初期化中は出力先フォルダが未確定のため InitializeAsync 側でまとめて実行する。
+        if (_isInitialized)
+        {
+            await RefreshExportStatusAsync();
         }
     }
 
@@ -385,6 +414,173 @@ public partial class ReportViewModel : ViewModelBase
         // 全選択チェックボックスの状態を更新
         IsAllSelected = SelectedCards.Count == Cards.Count;
     }
+
+    #region 出力済みチェックリスト・一括出力（Issue #1691）
+
+    /// <summary>
+    /// 対象年月・出力先フォルダに対する「出力済み / 未出力」を再判定する（Issue #1691）
+    /// </summary>
+    /// <remarks>
+    /// 判定は出力先フォルダの実ファイル走査。カード枚数ぶんのファイルを開くため
+    /// <c>Task.Run</c> でバックグラウンドスレッドへオフロードする（Excel 生成と同じ方針）。
+    /// </remarks>
+    [RelayCommand]
+    public async Task RefreshExportStatusAsync()
+    {
+        if (_exportStatusService == null || Cards.Count == 0)
+        {
+            ExportStatusSummary = string.Empty;
+            return;
+        }
+
+        var targets = Cards
+            .Select(c => new ReportExportTarget
+            {
+                CardIdm = c.CardIdm,
+                CardType = c.CardType,
+                CardNumber = c.CardNumber,
+            })
+            .ToList();
+
+        var capturedFolder = OutputFolder;
+        var capturedYear = SelectedYear;
+        var capturedMonth = SelectedMonth;
+
+        var statuses = await Task.Run(() =>
+            _exportStatusService.GetStatuses(targets, capturedFolder, capturedYear, capturedMonth));
+
+        ApplyExportStatuses(statuses);
+    }
+
+    /// <summary>
+    /// 判定結果をカード一覧へ反映し、集計文言を更新する
+    /// </summary>
+    internal void ApplyExportStatuses(IReadOnlyList<ReportExportStatus> statuses)
+    {
+        var byCardIdm = (statuses ?? new List<ReportExportStatus>())
+            .Where(s => s != null && !string.IsNullOrEmpty(s.CardIdm))
+            .GroupBy(s => s.CardIdm)
+            .ToDictionary(g => g.Key, g => g.First());
+
+        foreach (var card in Cards)
+        {
+            if (byCardIdm.TryGetValue(card.CardIdm, out var status))
+            {
+                card.ExportState = status.State;
+                card.ExportLastWriteTime = status.LastWriteTime;
+            }
+            else
+            {
+                card.ExportState = ReportExportState.Unknown;
+                card.ExportLastWriteTime = null;
+            }
+        }
+
+        UpdateExportStatusSummary();
+    }
+
+    /// <summary>
+    /// チェックリストの集計文言を更新する
+    /// </summary>
+    private void UpdateExportStatusSummary()
+    {
+        if (Cards.Count == 0)
+        {
+            ExportStatusSummary = string.Empty;
+            return;
+        }
+
+        var exported = Cards.Count(c => c.ExportState == ReportExportState.Exported);
+        var notExported = Cards.Count(c => c.ExportState == ReportExportState.NotExported);
+        var unknown = Cards.Count(c => c.ExportState == ReportExportState.Unknown);
+
+        var summary = $"{SelectedYear}年{SelectedMonth}月: 出力済み {exported}件 / 未出力 {notExported}件";
+        if (unknown > 0)
+        {
+            summary += $" / 確認できません {unknown}件";
+        }
+
+        ExportStatusSummary = summary;
+    }
+
+    /// <summary>
+    /// 先月分を全カード一括出力する（Issue #1691）
+    /// </summary>
+    /// <remarks>
+    /// 月初に前月分を締めて出力する定例作業を1操作にまとめる導線。
+    /// 対象年月を先月に切り替え、払戻済でない全カードを選択してから
+    /// <see cref="CreateReportAsync"/> と同じ経路（プリフライト→上書き確認→出力）を通す。
+    /// 払戻済カードは一覧に残るため、必要なら手動でチェックを付けて出力できる。
+    /// </remarks>
+    [RelayCommand]
+    public async Task BulkExportLastMonthAsync()
+    {
+        SelectLastMonth();
+
+        var targetCount = SelectExportTargetCards();
+        if (targetCount == 0)
+        {
+            SetStatus("出力対象のカードがありません", true);
+            return;
+        }
+
+        await CreateReportAsync();
+    }
+
+    /// <summary>
+    /// 一括出力の対象カード（払戻済でないカード）を選択する
+    /// </summary>
+    /// <returns>選択されたカード数</returns>
+    internal int SelectExportTargetCards()
+    {
+        _isBulkUpdating = true;
+        try
+        {
+            SelectedCards.Clear();
+            foreach (var card in Cards)
+            {
+                card.IsSelected = !card.IsRefunded;
+                if (card.IsSelected)
+                {
+                    SelectedCards.Add(card);
+                }
+            }
+        }
+        finally
+        {
+            _isBulkUpdating = false;
+        }
+
+        // 全選択チェックボックスの表示状態を実態に合わせる
+        _isUpdatingFromCardSelection = true;
+        IsAllSelected = SelectedCards.Count == Cards.Count && Cards.Count > 0;
+        _isUpdatingFromCardSelection = false;
+
+        return SelectedCards.Count;
+    }
+
+    /// <summary>
+    /// プリフライトチェック結果をカード一覧の警告マーカーへ反映する（Issue #1691）
+    /// </summary>
+    /// <remarks>
+    /// チェック対象は選択中のカードのみのため、実行のたびに全カードを0件へ戻してから
+    /// 検出件数を割り当てる（前回チェック時の古い警告件数が残らないようにする）。
+    /// </remarks>
+    internal void ApplyPreflightWarnings(ReportPreflightResult result)
+    {
+        var countByCardIdm = (result?.Warnings ?? new List<ReportPreflightWarning>())
+            .Where(w => w != null && !string.IsNullOrEmpty(w.CardIdm))
+            .GroupBy(w => w.CardIdm)
+            .ToDictionary(g => g.Key, g => g.Count());
+
+        foreach (var card in Cards)
+        {
+            card.PreflightWarningCount =
+                countByCardIdm.TryGetValue(card.CardIdm, out var count) ? count : 0;
+        }
+    }
+
+    #endregion
 
     /// <summary>
     /// 出力フォルダを選択
@@ -581,6 +777,12 @@ public partial class ReportViewModel : ViewModelBase
             System.Diagnostics.Debug.WriteLine("[ReportVM] 帳票作成がキャンセルされました");
 #endif
         }
+        finally
+        {
+            // Issue #1691: 途中で失敗・中断しても「どこまで出力できたか」を一覧へ反映する。
+            // 中断時こそチェックリストの価値が高いため、成功時のみの更新にはしない。
+            await RefreshExportStatusAsync();
+        }
     }
 
     /// <summary>
@@ -648,7 +850,12 @@ public partial class ReportViewModel : ViewModelBase
         var cardIdms = SelectedCards.Select(c => c.CardIdm).ToList();
         using (BeginBusy($"帳票データを確認中... ({cardIdms.Count}件)"))
         {
-            return await _preflightChecker.CheckAsync(cardIdms, SelectedYear, SelectedMonth);
+            var result = await _preflightChecker.CheckAsync(cardIdms, SelectedYear, SelectedMonth);
+
+            // Issue #1691: 警告のあるカードを一覧上でマークする
+            ApplyPreflightWarnings(result);
+
+            return result;
         }
     }
 
