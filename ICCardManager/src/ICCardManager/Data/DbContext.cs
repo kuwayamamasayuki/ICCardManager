@@ -1255,6 +1255,23 @@ ON CONFLICT(key) DO UPDATE SET value = excluded.value";
         /// <summary>
         /// DB接続の疎通確認（IDatabaseInfo実装）
         /// </summary>
+        /// <remarks>
+        /// <para>
+        /// SQLite クエリの成功だけでは切断を検知できない（Issue #1716）。本クラスは接続を
+        /// 開きっぱなしの単一接続として保持しており、疎通確認に使う
+        /// <c>SELECT COUNT(*) FROM sqlite_master</c> はスキーマ情報が SQLite のページキャッシュに
+        /// 載っているため、SMB へ一切出て行かずに応答され得る。実機の共有モードでネットワークを
+        /// 切断しても本メソッドが true を返し続け、「到達性 正常／書込権限 異常」という
+        /// 自己矛盾した接続診断結果になることを確認している
+        /// （Issue #1110 の「sqlite_master 読み取りでファイルアクセスを強制」という意図は達成できていなかった）。
+        /// </para>
+        /// <para>
+        /// そのためクエリの成否に加えて <see cref="ProbeDatabaseFileReachable"/> による
+        /// ファイルシステムへの実問い合わせを併用し、SMB のラウンドトリップを強制する。
+        /// プローブはリース解放後に実行する。死んだ UNC パスへの問い合わせは SMB タイムアウトまで
+        /// ブロックするため、その間、接続セマフォを掴んだままにしないことを意図している。
+        /// </para>
+        /// </remarks>
         /// <returns>接続可能な場合true</returns>
         public bool CheckConnection()
         {
@@ -1263,12 +1280,14 @@ ON CONFLICT(key) DO UPDATE SET value = excluded.value";
 
             try
             {
-                using var lease = LeaseConnection();
-                using var command = lease.Connection.CreateCommand();
-                // Issue #1110: sqlite_masterからの読み取りで実際のファイルアクセスを強制
-                command.CommandText = "SELECT COUNT(*) FROM sqlite_master";
-                command.ExecuteScalar();
-                return true;
+                using (var lease = LeaseConnection())
+                using (var command = lease.Connection.CreateCommand())
+                {
+                    // Issue #1110: sqlite_masterからの読み取り。ただしページキャッシュ応答があり得るため
+                    // これ単独では到達性の証明にならない（下のファイル到達確認と併用する / Issue #1716）
+                    command.CommandText = "SELECT COUNT(*) FROM sqlite_master";
+                    command.ExecuteScalar();
+                }
             }
             catch (InvalidOperationException)
             {
@@ -1285,7 +1304,61 @@ ON CONFLICT(key) DO UPDATE SET value = excluded.value";
                     "DB接続疎通確認に失敗。呼び出し元には false を返す（ネットワーク断または読み取りエラー）");
                 return false;
             }
+
+            // Issue #1716: クエリはキャッシュ応答し得るため、ファイルへ実際に届くことも要求する
+            if (!ProbeDatabaseFileReachable())
+            {
+                _logger?.LogDebug(
+                    "DB接続疎通確認に失敗。呼び出し元には false を返す" +
+                    "（クエリは成功したがデータベースファイルへ到達できない: {DatabasePath}）",
+                    DatabasePath);
+                return false;
+            }
+
+            return true;
         }
+
+        /// <summary>
+        /// データベースファイルそのものへ到達できるかを実測する（Issue #1716）
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// 到達できない理由（ネットワーク切断・ファイル削除・アクセス権喪失）は区別せず、
+        /// いずれも「到達できない」として扱う。<c>File.Exists</c> は例外を投げず、
+        /// 到達不能・権限なしのいずれでも false を返す。
+        /// </para>
+        /// <para>
+        /// インメモリDB（<c>:memory:</c>）とパス未設定（テスト用 protected コンストラクタ）は
+        /// ファイルを持たないため、常に到達可能として扱う。ここを除外しないと、
+        /// インメモリDBを使う多数の単体テストが一斉に「接続不可」になる。
+        /// </para>
+        /// <para>
+        /// テストから到達不能状態を再現できるよう <c>protected virtual</c> の継ぎ目にしている
+        /// （<c>ConnectionDiagnosticsService.ProbeDatabaseFileReachable</c> と同じ設計）。
+        /// </para>
+        /// </remarks>
+        /// <returns>ファイルへ到達できる場合true（インメモリDB・パス未設定は常にtrue）</returns>
+        protected virtual bool ProbeDatabaseFileReachable()
+        {
+            if (IsInMemoryDatabasePath(DatabasePath))
+                return true;
+
+            return File.Exists(DatabasePath);
+        }
+
+        /// <summary>
+        /// ファイル実体を持たないDBパス（インメモリDB・パス未設定）かどうかを判定する（Issue #1716）
+        /// </summary>
+        internal static bool IsInMemoryDatabasePath(string path)
+        {
+            return string.IsNullOrWhiteSpace(path)
+                || path.Equals(InMemoryDatabasePath, StringComparison.OrdinalIgnoreCase);
+        }
+
+        /// <summary>
+        /// インメモリDBを指すDataSource値。単体テストが <c>new DbContext(":memory:")</c> で使用する
+        /// </summary>
+        internal const string InMemoryDatabasePath = ":memory:";
 
         /// <summary>
         /// DBへの書き込み可否確認（IDatabaseInfo実装、Issue #1686）

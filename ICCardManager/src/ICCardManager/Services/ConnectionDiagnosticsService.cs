@@ -122,7 +122,7 @@ namespace ICCardManager.Services
         /// </summary>
         /// <remarks>
         /// <para>
-        /// <see cref="IDatabaseInfo.CheckConnection"/> だけでは切断を検知できない。
+        /// <see cref="IDatabaseInfo.CheckConnection"/> だけでは切断を検知できなかった。
         /// <c>DbContext</c> は接続を開きっぱなしで保持しており、疎通確認に使う
         /// <c>SELECT COUNT(*) FROM sqlite_master</c> は SQLite のページキャッシュから
         /// 応答され得るため、ネットワークが切れた後も成功し続けることがある
@@ -133,6 +133,13 @@ namespace ICCardManager.Services
         /// そのためファイルシステムへ実際に問い合わせ、SMB のラウンドトリップを強制する。
         /// 到達できない理由（切断・削除・権限）は区別せず、いずれも「到達できない」として扱う。
         /// テストから差し替えられるよう <c>protected virtual</c> の継ぎ目にしている。
+        /// </para>
+        /// <para>
+        /// Issue #1716 で <c>DbContext.CheckConnection</c> 自体が同じファイル到達確認を行うようになったが、
+        /// 本プローブは defense-in-depth として残す。
+        /// <see cref="IDatabaseInfo"/> は interface であり、<c>DbContext</c> 以外の実装
+        /// （将来の別実装やテストダブル）が到達確認を伴う保証はないため、
+        /// 診断結果の正しさを上流実装に依存させない。
         /// </para>
         /// </remarks>
         protected virtual bool ProbeDatabaseFileReachable(string databasePath)
