@@ -328,6 +328,23 @@ public class ScreenTransitionDiagramConsistencyTests
             "更新後、本テストの ExpectedStaffAuthOperations も更新すること。");
     }
 
+    [Fact]
+    public void 遷移図に自明な戻りエッジを描かない()
+    {
+        var returnEdges = ParseDiagramEdges()
+            .Where(e => e.Label.Contains("閉じる"))
+            .Select(e => $"  - {e.From} -->|{e.Label}| {e.To}")
+            .ToList();
+
+        returnEdges.Should().BeEmpty(
+            "「呼び出し元へ戻る」遷移は全ダイアログに共通する規則のため、§1 の「図の読み方」注記に集約している。" +
+            "1 本ずつ描くとエッジ数が倍増し（実測: 49 本中 24 本が戻りエッジ）、" +
+            "単一ハブ構造ゆえの混雑と相まって図が読めなくなる（Issue #1715）。" +
+            "呼び出し元**以外**へ遷移する例外だけをエッジで示すこと" +
+            "（例: INCBUSSTOP -->|バス停名入力| BUSSTOP）。\n" +
+            string.Join("\n", returnEdges));
+    }
+
     private static IEnumerable<string> EnumerateStaffAuthCallingViewModels()
     {
         return Directory
@@ -336,7 +353,11 @@ public class ScreenTransitionDiagramConsistencyTests
             .OrderBy(f => f, StringComparer.Ordinal);
     }
 
-    /// <summary>§1 画面遷移図の Mermaid ブロック本文を取り出す。</summary>
+    /// <summary>
+    /// §1 画面遷移図の Mermaid ブロック本文を取り出す。
+    /// グルーピング構文（<c>subgraph SG_XXX[表題]</c> / <c>end</c>）は除外する。
+    /// subgraph 行を残すと、その ID・表題がノード定義として誤検出されうるため。
+    /// </summary>
     private static string[] GetDiagramLines()
     {
         var section = ExtractSection("## 1. 画面遷移図", "## 2. ");
@@ -348,7 +369,18 @@ public class ScreenTransitionDiagramConsistencyTests
         var end = Array.FindIndex(lines, start + 1, l => l.TrimStart().StartsWith("```", StringComparison.Ordinal));
         end.Should().BeGreaterThan(start, "§1 の Mermaid ブロックが閉じられている");
 
-        return lines.Skip(start + 1).Take(end - start - 1).ToArray();
+        return lines
+            .Skip(start + 1)
+            .Take(end - start - 1)
+            .Where(l => !IsGroupingSyntax(l))
+            .ToArray();
+    }
+
+    private static bool IsGroupingSyntax(string line)
+    {
+        var trimmed = line.Trim();
+        return trimmed.StartsWith("subgraph", StringComparison.OrdinalIgnoreCase)
+               || trimmed.Equals("end", StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>ノード ID → ラベル。</summary>
