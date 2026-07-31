@@ -128,5 +128,96 @@ namespace ICCardManager.Dtos
         /// 繰越累計が有効な会計年度（Issue #1215）
         /// </summary>
         public int? CarryoverFiscalYear { get; set; }
+
+        #region 帳票出力状況（Issue #1691）
+
+        /// <summary>
+        /// 対象年月の帳票が出力済みか（帳票作成画面のチェックリストで使用）
+        /// </summary>
+        /// <remarks>
+        /// <see cref="IsSelected"/> と同様、帳票作成画面の表示状態をこの DTO に載せている。
+        /// 出力先フォルダの実ファイル走査で決まる値のため、対象年月・出力先フォルダを
+        /// 変えるたびに再判定される。
+        /// </remarks>
+        [ObservableProperty]
+        private ReportExportState _exportState = ReportExportState.Unknown;
+
+        /// <summary>
+        /// 年度ファイルの最終更新日時（出力済みの場合のみ設定。Issue #1691）
+        /// </summary>
+        [ObservableProperty]
+        private DateTime? _exportLastWriteTime;
+
+        /// <summary>
+        /// プリフライトチェックで検出された警告件数（Issue #1691）
+        /// </summary>
+        [ObservableProperty]
+        private int _preflightWarningCount;
+
+        partial void OnExportStateChanged(ReportExportState value) => NotifyExportDisplayChanged();
+
+        partial void OnExportLastWriteTimeChanged(DateTime? value) => NotifyExportDisplayChanged();
+
+        partial void OnPreflightWarningCountChanged(int value)
+        {
+            OnPropertyChanged(nameof(HasPreflightWarning));
+            OnPropertyChanged(nameof(PreflightWarningText));
+            OnPropertyChanged(nameof(PreflightWarningAccessibilityText));
+        }
+
+        private void NotifyExportDisplayChanged()
+        {
+            OnPropertyChanged(nameof(ExportStateIcon));
+            OnPropertyChanged(nameof(ExportStateText));
+            OnPropertyChanged(nameof(ExportStateAccessibilityText));
+            OnPropertyChanged(nameof(ExportStateBrushKey));
+        }
+
+        /// <summary>
+        /// 表示用: 出力状況のアイコン（Issue #1691）
+        /// </summary>
+        public string ExportStateIcon =>
+            ReportExportStatusPresenter.Resolve(ExportState, ExportLastWriteTime).Icon;
+
+        /// <summary>
+        /// 表示用: 出力状況のテキスト（Issue #1691）
+        /// </summary>
+        public string ExportStateText =>
+            ReportExportStatusPresenter.Resolve(ExportState, ExportLastWriteTime).ShortText;
+
+        /// <summary>
+        /// スクリーンリーダー向けの出力状況説明文（Issue #1691）
+        /// </summary>
+        public string ExportStateAccessibilityText =>
+            ReportExportStatusPresenter.Resolve(ExportState, ExportLastWriteTime).AccessibilityText;
+
+        /// <summary>
+        /// 出力状況の文字色として使うリソースキー名（Issue #1691）
+        /// </summary>
+        /// <remarks>
+        /// 色値リテラルではなくキー名を返し、XAML 側の <c>ResourceKeyToBrushConverter</c> で
+        /// ブラシへ解決する（Issue #1392 / #1461）。
+        /// </remarks>
+        public string ExportStateBrushKey =>
+            ReportExportStatusPresenter.Resolve(ExportState, ExportLastWriteTime).BrushKey;
+
+        /// <summary>
+        /// プリフライト警告があるか（Issue #1691）
+        /// </summary>
+        public bool HasPreflightWarning => PreflightWarningCount > 0;
+
+        /// <summary>
+        /// 表示用: プリフライト警告マーカー（Issue #1691）
+        /// </summary>
+        public string PreflightWarningText =>
+            ReportExportStatusPresenter.FormatWarningMarker(PreflightWarningCount);
+
+        /// <summary>
+        /// スクリーンリーダー向けのプリフライト警告説明文（Issue #1691）
+        /// </summary>
+        public string PreflightWarningAccessibilityText =>
+            ReportExportStatusPresenter.FormatWarningAccessibilityText(PreflightWarningCount);
+
+        #endregion
     }
 }

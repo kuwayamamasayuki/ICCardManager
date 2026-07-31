@@ -82,6 +82,8 @@
     <Reference Include="ReachFramework" />
     <Reference Include="System.Printing" />
     <Reference Include="System.Windows.Forms" />
+    <!-- Issue #1691: xlsx（OPC/ZIP）からシート名だけを読み出す XlsxSheetNameReader で使用 -->
+    <Reference Include="System.IO.Compression" />
   </ItemGroup>
 
   <ItemGroup>

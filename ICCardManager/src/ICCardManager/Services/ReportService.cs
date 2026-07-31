@@ -421,7 +421,12 @@ namespace ICCardManager.Services
         /// <summary>
         /// 月に対応するシート名を取得
         /// </summary>
-        private static string GetMonthSheetName(int month)
+        /// <remarks>
+        /// Issue #1691: <see cref="ReportExportStatusService"/> が「対象月のシートが存在するか」で
+        /// 出力済み判定を行うため internal に公開する。シート名の書式をここ以外で組み立てると、
+        /// 命名規則を変えたときに「出力したのに未出力と表示される」形で静かに乖離する。
+        /// </remarks>
+        internal static string GetMonthSheetName(int month)
         {
             return $"{month}月";
         }

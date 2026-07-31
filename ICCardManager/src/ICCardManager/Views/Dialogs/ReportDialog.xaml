@@ -4,6 +4,7 @@
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:vm="clr-namespace:ICCardManager.ViewModels"
+        xmlns:conv="clr-namespace:ICCardManager.Common"
         mc:Ignorable="d"
         d:DataContext="{d:DesignInstance Type=vm:ReportViewModel}"
         Title="帳票作成"
@@ -19,6 +20,8 @@
 
     <Window.Resources>
         <BooleanToVisibilityConverter x:Key="BoolToVisibilityConverter"/>
+        <!-- Issue #1691: 出力状況の文字色をリソースキー名から解決する（色値リテラル禁止） -->
+        <conv:ResourceKeyToBrushConverter x:Key="ResourceKeyToBrushConverter"/>
     </Window.Resources>
 
     <Grid Margin="20">
@@ -151,14 +154,56 @@
                     <RowDefinition Height="*"/>
                 </Grid.RowDefinitions>
 
-                <!-- 全選択チェックボックス -->
-                <CheckBox Grid.Row="0"
-                          Content="すべて選択"
-                          IsChecked="{Binding IsAllSelected}"
-                          Margin="0,0,0,10"
-                          AutomationProperties.Name="すべてのカードを選択"
-                          AutomationProperties.HelpText="オンにすると一覧中のすべての交通系ICカードが帳票作成の対象になります。オフにすると選択状態が解除されます。"
-                          ToolTip="すべてのカードを選択または解除"/>
+                <!-- 全選択チェックボックスと出力状況サマリ -->
+                <!-- Issue #1691: サマリは Grid の * 列に置き、TextWrapping で折り返す
+                     （横 StackPanel は子を無限幅で測定するため Wrap が効かない） -->
+                <Grid Grid.Row="0" Margin="0,0,0,10">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+
+                    <CheckBox Grid.Column="0"
+                              Content="すべて選択"
+                              IsChecked="{Binding IsAllSelected}"
+                              VerticalAlignment="Center"
+                              AutomationProperties.Name="すべてのカードを選択"
+                              AutomationProperties.HelpText="オンにすると一覧中のすべての交通系ICカードが帳票作成の対象になります。オフにすると選択状態が解除されます。"
+                              ToolTip="すべてのカードを選択または解除"/>
+
+                    <TextBlock Grid.Column="1"
+                               Text="{Binding ExportStatusSummary}"
+                               TextWrapping="Wrap"
+                               Margin="15,0,10,0"
+                               VerticalAlignment="Center"
+                               Foreground="{DynamicResource SecondaryTextBrush}"
+                               AutomationProperties.Name="{Binding ExportStatusSummary}"
+                               AutomationProperties.HelpText="対象年月の帳票について、出力済みのカード数と未出力のカード数です。"/>
+
+                    <!-- Issue #1691: 月初の定例作業（前月分を全カード出力）を1操作にまとめる -->
+                    <Button Grid.Column="2"
+                            Content="先月分を一括出力"
+                            Command="{Binding BulkExportLastMonthCommand}"
+                            Padding="12,6"
+                            Margin="0,0,10,0"
+                            VerticalAlignment="Center"
+                            Background="{DynamicResource SuccessActionBrush}"
+                            Foreground="{DynamicResource OnPrimaryBrush}"
+                            AutomationProperties.Name="先月分を一括出力"
+                            AutomationProperties.HelpText="対象年月を先月に切り替え、払戻済を除くすべての交通系ICカードの帳票をまとめて作成します。"
+                            ToolTip="先月分を、払戻済を除く全カードまとめて作成"/>
+
+                    <Button Grid.Column="3"
+                            Content="出力状況を更新"
+                            Command="{Binding RefreshExportStatusCommand}"
+                            Padding="12,6"
+                            VerticalAlignment="Center"
+                            AutomationProperties.Name="出力状況を更新"
+                            AutomationProperties.HelpText="出力先フォルダを調べ直して、カードごとの出力済み・未出力を最新の状態にします。"
+                            ToolTip="出力先フォルダを調べ直して出力済み・未出力を更新"/>
+                </Grid>
 
                 <!-- カード一覧 -->
                 <!-- Note: チェックボックスで選択を管理するため、ListViewの選択機能は無効化 -->
@@ -193,22 +238,60 @@
                                 <CheckBox IsChecked="{Binding IsSelected, Mode=TwoWay}"
                                           Margin="5"
                                           AutomationProperties.HelpText="選択するとこのカードが帳票作成対象に含まれます。">
+                                    <!-- Issue #1691: 出力済み / 未出力と事前チェック警告も読み上げに含める -->
                                     <AutomationProperties.Name>
-                                        <MultiBinding StringFormat="{}{0} {1} {2}">
+                                        <MultiBinding StringFormat="{}{0} {1} {2} {3} {4}">
                                             <Binding Path="CardType"/>
                                             <Binding Path="CardNumber"/>
                                             <Binding Path="Note"/>
+                                            <Binding Path="ExportStateAccessibilityText"/>
+                                            <Binding Path="PreflightWarningAccessibilityText"/>
                                         </MultiBinding>
                                     </AutomationProperties.Name>
-                                    <StackPanel Orientation="Horizontal">
-                                        <TextBlock Text="{Binding CardType}"
-                                                   Width="100"
-                                                   FontWeight="Bold"/>
-                                        <TextBlock Text="{Binding CardNumber}"
-                                                   Width="100"/>
-                                        <TextBlock Text="{Binding Note}"
+                                    <!-- Issue #1691: 備考と出力状況が同居するため Grid で幅を配分する。
+                                         横 StackPanel のままだと備考が折り返せず、出力状況の下へはみ出す。 -->
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="Auto" MinWidth="100"/>
+                                            <ColumnDefinition Width="Auto" MinWidth="90"/>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                        </Grid.ColumnDefinitions>
+
+                                        <TextBlock Grid.Column="0"
+                                                   Text="{Binding CardType}"
+                                                   FontWeight="Bold"
+                                                   VerticalAlignment="Center"/>
+                                        <TextBlock Grid.Column="1"
+                                                   Text="{Binding CardNumber}"
+                                                   VerticalAlignment="Center"/>
+                                        <TextBlock Grid.Column="2"
+                                                   Text="{Binding Note}"
+                                                   TextWrapping="Wrap"
+                                                   Margin="0,0,10,0"
+                                                   VerticalAlignment="Center"
                                                    Foreground="{DynamicResource SecondaryTextBrush}"/>
-                                    </StackPanel>
+
+                                        <!-- 事前チェック警告のマーカー（アイコン＋件数。色のみに依存しない） -->
+                                        <TextBlock Grid.Column="3"
+                                                   Text="{Binding PreflightWarningText}"
+                                                   TextWrapping="Wrap"
+                                                   Margin="0,0,10,0"
+                                                   VerticalAlignment="Center"
+                                                   Foreground="{DynamicResource WarningForegroundBrush}"
+                                                   Visibility="{Binding HasPreflightWarning, Converter={StaticResource BoolToVisibilityConverter}}"
+                                                   AutomationProperties.Name="{Binding PreflightWarningAccessibilityText}"/>
+
+                                        <!-- 出力済み / 未出力（アイコン＋テキスト＋色の3要素で伝達） -->
+                                        <TextBlock Grid.Column="4"
+                                                   TextWrapping="Wrap"
+                                                   VerticalAlignment="Center"
+                                                   Foreground="{Binding ExportStateBrushKey, Converter={StaticResource ResourceKeyToBrushConverter}}"
+                                                   AutomationProperties.Name="{Binding ExportStateAccessibilityText}">
+                                            <Run Text="{Binding ExportStateIcon, Mode=OneWay}"/><Run Text=" "/><Run Text="{Binding ExportStateText, Mode=OneWay}"/>
+                                        </TextBlock>
+                                    </Grid>
                                 </CheckBox>
                             </Border>
                         </DataTemplate>

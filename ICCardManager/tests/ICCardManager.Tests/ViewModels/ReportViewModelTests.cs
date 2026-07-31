@@ -29,6 +29,7 @@ public class ReportViewModelTests
     private readonly ReportService _reportService;
     private readonly PrintService _printService;
     private readonly Mock<IReportDataBuilder> _preflightDataBuilderMock;
+    private readonly Mock<IReportExportStatusService> _exportStatusServiceMock;
     private readonly ReportViewModel _viewModel;
 
     public ReportViewModelTests()
@@ -62,6 +63,18 @@ public class ReportViewModelTests
         var preflightChecker = new ReportPreflightChecker(
             _preflightDataBuilderMock.Object, _ledgerRepositoryMock.Object);
 
+        // Issue #1691: 出力済み / 未出力チェックリスト。
+        // 既定では出力先フォルダを走査できない状態（=判定不能）にし、
+        // 状況を指定したいテストで個別に上書きする。
+        _exportStatusServiceMock = new Mock<IReportExportStatusService>();
+        _exportStatusServiceMock
+            .Setup(s => s.GetStatuses(
+                It.IsAny<IEnumerable<ReportExportTarget>>(),
+                It.IsAny<string>(),
+                It.IsAny<int>(),
+                It.IsAny<int>()))
+            .Returns(new List<ReportExportStatus>());
+
         _viewModel = new ReportViewModel(
             _reportService,
             _printService,
@@ -69,7 +82,22 @@ public class ReportViewModelTests
             _navigationServiceMock.Object,
             _settingsRepositoryMock.Object,
             _safeFileLauncherMock.Object,
-            preflightChecker);
+            preflightChecker,
+            _exportStatusServiceMock.Object);
+    }
+
+    /// <summary>
+    /// 出力状況サービスが指定の状態を返すように設定する（Issue #1691）
+    /// </summary>
+    private void SetupExportStatuses(params ReportExportStatus[] statuses)
+    {
+        _exportStatusServiceMock
+            .Setup(s => s.GetStatuses(
+                It.IsAny<IEnumerable<ReportExportTarget>>(),
+                It.IsAny<string>(),
+                It.IsAny<int>(),
+                It.IsAny<int>()))
+            .Returns(statuses.ToList());
     }
 
     /// <summary>
@@ -1136,6 +1164,276 @@ public class ReportViewModelTests
             n => n.ShowDialog<ICCardManager.Views.Dialogs.ReportPreflightDialog>(
                 It.IsAny<Action<ICCardManager.Views.Dialogs.ReportPreflightDialog>>()),
             Times.Never);
+    }
+
+    #endregion
+
+    #region 出力済みチェックリスト・一括出力テスト（Issue #1691）
+
+    /// <summary>
+    /// 3枚のカード（うち1枚は払戻済）を読み込む
+    /// </summary>
+    private async Task LoadThreeCardsAsync()
+    {
+        var cards = new List<IcCard>
+        {
+            new() { CardIdm = "01", CardType = "nimoca", CardNumber = "N-001" },
+            new() { CardIdm = "02", CardType = "nimoca", CardNumber = "N-002", IsRefunded = true },
+            new() { CardIdm = "03", CardType = "はやかけん", CardNumber = "H-001" }
+        };
+        _cardRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(cards);
+        await _viewModel.LoadCardsAsync();
+    }
+
+    /// <summary>
+    /// 出力状況の判定結果がカード一覧へ反映されること
+    /// </summary>
+    [Fact]
+    public async Task RefreshExportStatusAsync_ShouldApplyStatesToCards()
+    {
+        // Arrange
+        await LoadThreeCardsAsync();
+        var lastWrite = new DateTime(2026, 7, 28, 14, 2, 0);
+        SetupExportStatuses(
+            new ReportExportStatus
+            {
+                CardIdm = "01",
+                State = ReportExportState.Exported,
+                LastWriteTime = lastWrite
+            },
+            new ReportExportStatus { CardIdm = "02", State = ReportExportState.NotExported },
+            new ReportExportStatus { CardIdm = "03", State = ReportExportState.Unknown });
+
+        // Act
+        await _viewModel.RefreshExportStatusAsync();
+
+        // Assert
+        var byIdm = _viewModel.Cards.ToDictionary(c => c.CardIdm);
+        byIdm["01"].ExportState.Should().Be(ReportExportState.Exported);
+        byIdm["01"].ExportLastWriteTime.Should().Be(lastWrite);
+        byIdm["01"].ExportStateText.Should().Contain("出力済み");
+        byIdm["02"].ExportState.Should().Be(ReportExportState.NotExported);
+        byIdm["02"].ExportStateText.Should().Be("未出力");
+        byIdm["03"].ExportState.Should().Be(ReportExportState.Unknown);
+    }
+
+    /// <summary>
+    /// 判定結果に含まれないカードは「判定不能」に戻されること
+    /// （前回判定の結果が古いまま残らないようにする）
+    /// </summary>
+    [Fact]
+    public async Task RefreshExportStatusAsync_WithMissingCard_ShouldResetToUnknown()
+    {
+        // Arrange
+        await LoadThreeCardsAsync();
+        SetupExportStatuses(
+            new ReportExportStatus { CardIdm = "01", State = ReportExportState.Exported });
+        await _viewModel.RefreshExportStatusAsync();
+
+        // Act: 2回目は「01」の結果も返らない
+        SetupExportStatuses();
+        await _viewModel.RefreshExportStatusAsync();
+
+        // Assert
+        _viewModel.Cards.Should().OnlyContain(c => c.ExportState == ReportExportState.Unknown);
+    }
+
+    /// <summary>
+    /// 集計文言に対象年月と出力済み・未出力の件数が含まれること
+    /// </summary>
+    [Fact]
+    public async Task RefreshExportStatusAsync_ShouldBuildSummaryWithCounts()
+    {
+        // Arrange
+        await LoadThreeCardsAsync();
+        _viewModel.SelectedYear = 2026;
+        _viewModel.SelectedMonth = 6;
+        SetupExportStatuses(
+            new ReportExportStatus { CardIdm = "01", State = ReportExportState.Exported },
+            new ReportExportStatus { CardIdm = "02", State = ReportExportState.NotExported },
+            new ReportExportStatus { CardIdm = "03", State = ReportExportState.NotExported });
+
+        // Act
+        await _viewModel.RefreshExportStatusAsync();
+
+        // Assert
+        _viewModel.ExportStatusSummary.Should().Contain("2026年6月");
+        _viewModel.ExportStatusSummary.Should().Contain("出力済み 1件");
+        _viewModel.ExportStatusSummary.Should().Contain("未出力 2件");
+        _viewModel.ExportStatusSummary.Should().NotContain("確認できません");
+    }
+
+    /// <summary>
+    /// 判定不能のカードがある場合は集計文言にその件数も含まれること
+    /// </summary>
+    [Fact]
+    public async Task RefreshExportStatusAsync_WithUnknownCards_ShouldReportUnknownCount()
+    {
+        // Arrange
+        await LoadThreeCardsAsync();
+        SetupExportStatuses(
+            new ReportExportStatus { CardIdm = "01", State = ReportExportState.Exported },
+            new ReportExportStatus { CardIdm = "02", State = ReportExportState.Unknown },
+            new ReportExportStatus { CardIdm = "03", State = ReportExportState.Unknown });
+
+        // Act
+        await _viewModel.RefreshExportStatusAsync();
+
+        // Assert
+        _viewModel.ExportStatusSummary.Should().Contain("確認できません 2件");
+    }
+
+    /// <summary>
+    /// カードが1枚も無い場合は集計文言を出さないこと
+    /// </summary>
+    [Fact]
+    public async Task RefreshExportStatusAsync_WithNoCards_ShouldClearSummary()
+    {
+        // Arrange
+        _cardRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<IcCard>());
+        await _viewModel.LoadCardsAsync();
+
+        // Act
+        await _viewModel.RefreshExportStatusAsync();
+
+        // Assert
+        _viewModel.ExportStatusSummary.Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// 一括出力の対象選択は払戻済カードを除外すること
+    /// </summary>
+    [Fact]
+    public async Task SelectExportTargetCards_ShouldExcludeRefundedCards()
+    {
+        // Arrange
+        await LoadThreeCardsAsync();
+
+        // Act
+        var count = _viewModel.SelectExportTargetCards();
+
+        // Assert
+        count.Should().Be(2);
+        _viewModel.SelectedCards.Should().HaveCount(2);
+        _viewModel.SelectedCards.Should().NotContain(c => c.IsRefunded);
+        _viewModel.Cards.Single(c => c.CardIdm == "02").IsSelected.Should().BeFalse();
+        // 全カードが対象になっていないため「すべて選択」はオフ
+        _viewModel.IsAllSelected.Should().BeFalse();
+    }
+
+    /// <summary>
+    /// 払戻済カードが無ければ「すべて選択」がオンになること
+    /// </summary>
+    [Fact]
+    public async Task SelectExportTargetCards_WithoutRefundedCards_ShouldTurnOnSelectAll()
+    {
+        // Arrange
+        var cards = new List<IcCard>
+        {
+            new() { CardIdm = "01", CardType = "nimoca", CardNumber = "N-001" },
+            new() { CardIdm = "02", CardType = "はやかけん", CardNumber = "H-001" }
+        };
+        _cardRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(cards);
+        await _viewModel.LoadCardsAsync();
+
+        // Act
+        var count = _viewModel.SelectExportTargetCards();
+
+        // Assert
+        count.Should().Be(2);
+        _viewModel.IsAllSelected.Should().BeTrue();
+    }
+
+    /// <summary>
+    /// 一括出力ボタンは対象年月を先月に切り替えること
+    /// </summary>
+    [Fact]
+    public async Task BulkExportLastMonthAsync_ShouldSwitchToLastMonth()
+    {
+        // Arrange
+        await LoadThreeCardsAsync();
+        _viewModel.SelectedYear = 2020;
+        _viewModel.SelectedMonth = 1;
+        // 出力先フォルダを未指定にして実ファイル生成まで進まないようにする
+        _viewModel.OutputFolder = string.Empty;
+
+        // Act
+        await _viewModel.BulkExportLastMonthAsync();
+
+        // Assert
+        var lastMonth = DateTime.Now.AddMonths(-1);
+        _viewModel.SelectedYear.Should().Be(lastMonth.Year);
+        _viewModel.SelectedMonth.Should().Be(lastMonth.Month);
+        _viewModel.IsLastMonthSelected.Should().BeTrue();
+        // 払戻済を除く2枚が選択されている
+        _viewModel.SelectedCards.Should().HaveCount(2);
+    }
+
+    /// <summary>
+    /// 出力対象カードが1枚も無い場合はエラーを表示して出力へ進まないこと
+    /// </summary>
+    [Fact]
+    public async Task BulkExportLastMonthAsync_WithOnlyRefundedCards_ShowsError()
+    {
+        // Arrange
+        var cards = new List<IcCard>
+        {
+            new() { CardIdm = "01", CardType = "nimoca", CardNumber = "N-001", IsRefunded = true }
+        };
+        _cardRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(cards);
+        await _viewModel.LoadCardsAsync();
+
+        // Act
+        await _viewModel.BulkExportLastMonthAsync();
+
+        // Assert
+        _viewModel.StatusMessage.Should().Contain("出力対象のカードがありません");
+        _viewModel.IsStatusError.Should().BeTrue();
+    }
+
+    /// <summary>
+    /// プリフライト警告がカードごとの件数として一覧へ反映されること
+    /// </summary>
+    [Fact]
+    public async Task ApplyPreflightWarnings_ShouldSetWarningCountPerCard()
+    {
+        // Arrange
+        await LoadThreeCardsAsync();
+        var result = new ReportPreflightResult();
+        result.Warnings.Add(new ReportPreflightWarning { CardIdm = "01" });
+        result.Warnings.Add(new ReportPreflightWarning { CardIdm = "01" });
+        result.Warnings.Add(new ReportPreflightWarning { CardIdm = "03" });
+
+        // Act
+        _viewModel.ApplyPreflightWarnings(result);
+
+        // Assert
+        var byIdm = _viewModel.Cards.ToDictionary(c => c.CardIdm);
+        byIdm["01"].PreflightWarningCount.Should().Be(2);
+        byIdm["01"].HasPreflightWarning.Should().BeTrue();
+        byIdm["01"].PreflightWarningText.Should().Contain("警告2件");
+        byIdm["02"].PreflightWarningCount.Should().Be(0);
+        byIdm["02"].HasPreflightWarning.Should().BeFalse();
+        byIdm["03"].PreflightWarningCount.Should().Be(1);
+    }
+
+    /// <summary>
+    /// 再チェックで解消した警告が一覧に残らないこと
+    /// </summary>
+    [Fact]
+    public async Task ApplyPreflightWarnings_WhenWarningResolved_ShouldClearMarker()
+    {
+        // Arrange
+        await LoadThreeCardsAsync();
+        var first = new ReportPreflightResult();
+        first.Warnings.Add(new ReportPreflightWarning { CardIdm = "01" });
+        _viewModel.ApplyPreflightWarnings(first);
+
+        // Act: 2回目は警告なし
+        _viewModel.ApplyPreflightWarnings(new ReportPreflightResult());
+
+        // Assert
+        _viewModel.Cards.Should().OnlyContain(c => c.PreflightWarningCount == 0);
     }
 
     #endregion
