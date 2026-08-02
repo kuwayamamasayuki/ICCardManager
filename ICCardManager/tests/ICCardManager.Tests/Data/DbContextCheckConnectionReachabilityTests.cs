@@ -85,11 +85,11 @@ public class DbContextCheckConnectionReachabilityTests : IDisposable
             x => x.Log(
                 LogLevel.Information,
                 It.IsAny<EventId>(),
-                It.Is<It.IsAnyType>((v, t) => v.ToString().Contains("到達できません")),
+                It.Is<It.IsAnyType>((v, t) => v.ToString().Contains("失敗段階=ファイル到達確認")),
                 It.IsAny<Exception>(),
                 It.IsAny<Func<It.IsAnyType, Exception, string>>()),
             Times.AtLeastOnce,
-            "切断は運用上もっとも重要な事象のため、ログファイルに残る水準で記録する");
+            "切断は運用上もっとも重要な事象のため、ログファイルに残る水準で・失敗段階つきで記録する");
     }
 
     [Fact]
@@ -202,14 +202,15 @@ public class DbContextCheckConnectionReachabilityTests : IDisposable
     }
 
     [Fact]
-    public void CheckConnection_到達確認が上限時間内に完了しなければfalseを返すこと()
+    public void CheckConnection_疎通確認が上限時間内に完了しなければfalseを返すこと()
     {
-        // Arrange: 到達不能な UNC への File.Exists が 21〜42 秒ブロックする状況を、
-        // テストが解放するまで戻らないプローブで再現する（Issue #1716）
+        // Arrange: 疎通確認のいずれかの区間がブロックする状況を、テストが解放するまで
+        // 戻らないプローブで再現する。実機では接続オープン〜クエリの区間が 82.3 秒
+        // ブロックしたが、どの区間でも「確認全体が返らない」点は同じ（Issue #1716）
         var dbPath = Path.Combine(_testDirectory, "probe_timeout.db");
         using var blocking = new BlockingProbeDbContext(dbPath)
         {
-            ProbeTimeout = TimeSpan.FromMilliseconds(200)
+            CheckTimeout = TimeSpan.FromMilliseconds(200)
         };
 
         // Act
@@ -218,7 +219,7 @@ public class DbContextCheckConnectionReachabilityTests : IDisposable
         stopwatch.Stop();
 
         // Assert
-        result.Should().BeFalse("上限時間内に到達を確認できなければ切断とみなす");
+        result.Should().BeFalse("上限時間内に疎通確認が完了しなければ切断とみなす");
         stopwatch.Elapsed.Should().BeLessThan(TimeSpan.FromSeconds(5),
             "下位のブロック時間に引きずられず、上限で打ち切られること");
 
@@ -226,14 +227,15 @@ public class DbContextCheckConnectionReachabilityTests : IDisposable
     }
 
     [Fact]
-    public void CheckConnection_上限超過後も到達確認を多重起動しないこと()
+    public void CheckConnection_上限超過後も疎通確認を多重起動しないこと()
     {
-        // Arrange: 上限で打ち切っても File.Exists 自体は中断できないため、
-        // 打ち切るたびに新しい確認を始めるとブロック済みスレッドが積み上がる
+        // Arrange: 上限で打ち切っても下位の呼び出し（接続オープン / クエリ / File.Exists）は
+        // 中断できないため、打ち切るたびに新しい確認を始めるとブロック済みスレッドが積み上がり、
+        // さらに接続セマフォ待ちの行列を作って本来のDB操作まで巻き添えにする
         var dbPath = Path.Combine(_testDirectory, "probe_single_flight.db");
         using var blocking = new BlockingProbeDbContext(dbPath)
         {
-            ProbeTimeout = TimeSpan.FromMilliseconds(100)
+            CheckTimeout = TimeSpan.FromMilliseconds(100)
         };
 
         // Act: 進行中の確認が終わらないまま 3 回チェックする（ヘルスチェック 3 周期分に相当）
@@ -243,19 +245,19 @@ public class DbContextCheckConnectionReachabilityTests : IDisposable
 
         // Assert
         blocking.ProbeCallCount.Should().Be(1,
-            "進行中の到達確認があるうちは新しい確認を開始しない（スレッドの累積防止）");
+            "進行中の疎通確認があるうちは新しい確認を開始しない（スレッドの累積防止）");
 
         blocking.ReleaseProbe();
     }
 
     [Fact]
-    public void CheckConnection_到達確認が上限内に完了すればその結果を返すこと()
+    public void CheckConnection_疎通確認が上限内に完了すればその結果を返すこと()
     {
         // Arrange: 先に解放しておき、プローブが即座に完了する状態を作る
         var dbPath = Path.Combine(_testDirectory, "probe_within_limit.db");
         using var blocking = new BlockingProbeDbContext(dbPath)
         {
-            ProbeTimeout = TimeSpan.FromSeconds(5),
+            CheckTimeout = TimeSpan.FromSeconds(5),
             ProbeResult = true
         };
         blocking.ReleaseProbe();
@@ -267,9 +269,9 @@ public class DbContextCheckConnectionReachabilityTests : IDisposable
     }
 
     [Fact]
-    public void CheckConnection_到達確認が例外を投げても到達不能として扱うこと()
+    public void CheckConnection_疎通確認中の例外を接続なしとして扱うこと()
     {
-        // Arrange: プローブ内の想定外例外が呼び出し元へ伝播しないこと
+        // Arrange: 疎通確認中の想定外例外が呼び出し元へ伝播しないこと
         var dbPath = Path.Combine(_testDirectory, "probe_throws.db");
         using var throwing = new ThrowingProbeDbContext(dbPath);
 
@@ -277,27 +279,27 @@ public class DbContextCheckConnectionReachabilityTests : IDisposable
         var result = throwing.CheckConnection();
 
         // Assert
-        result.Should().BeFalse("到達確認の失敗は例外ではなく戻り値で通知する（CheckConnection の仕様）");
+        result.Should().BeFalse("疎通確認の失敗は例外ではなく戻り値で通知する（CheckConnection の仕様）");
     }
 
     [Fact]
-    public void ReachabilityProbeTimeout_既定値がAppConstantsの設定と一致すること()
+    public void ConnectionCheckTimeout_既定値がAppConstantsの設定と一致すること()
     {
         // Arrange
         using var dbContext = new TimeoutExposingDbContext(":memory:");
 
         // Act & Assert
         dbContext.Timeout.Should().Be(
-            TimeSpan.FromSeconds(AppConstants.DatabaseReachabilityProbeTimeoutSeconds),
+            TimeSpan.FromSeconds(AppConstants.DatabaseConnectionCheckTimeoutSeconds),
             "上限値は AppConstants に一元化し、実装側でリテラルを持たない");
     }
 
     [Fact]
-    public void 到達確認の上限時間はヘルスチェック間隔より短いこと()
+    public void 疎通確認の上限時間はヘルスチェック間隔より短いこと()
     {
         // 上限がヘルスチェック間隔（15秒）以上だと、1 回の確認が次の Tick を追い越して
         // 取りこぼしが常態化する。検知の最大遅延も「間隔 + 上限」で見積もれなくなる
-        AppConstants.DatabaseReachabilityProbeTimeoutSeconds
+        AppConstants.DatabaseConnectionCheckTimeoutSeconds
             .Should().BeLessThan(SharedModeMonitor.HealthCheckIntervalSeconds,
                 "切断検知の最大遅延を『ヘルスチェック間隔 + 上限時間』に収めるための前提");
     }
@@ -346,12 +348,12 @@ public class DbContextCheckConnectionReachabilityTests : IDisposable
         public int ProbeCallCount => Volatile.Read(ref _probeCallCount);
 
         /// <summary>上限時間。テストを高速かつ決定的にするため既定値より大幅に短くする</summary>
-        public TimeSpan ProbeTimeout { get; set; } = TimeSpan.FromMilliseconds(200);
+        public TimeSpan CheckTimeout { get; set; } = TimeSpan.FromMilliseconds(200);
 
         /// <summary>解放後に到達確認が返す結果</summary>
         public bool ProbeResult { get; set; } = true;
 
-        protected override TimeSpan ReachabilityProbeTimeout => ProbeTimeout;
+        protected override TimeSpan ConnectionCheckTimeout => CheckTimeout;
 
         protected override bool ProbeDatabaseFileReachable()
         {
@@ -393,6 +395,6 @@ public class DbContextCheckConnectionReachabilityTests : IDisposable
         {
         }
 
-        public TimeSpan Timeout => ReachabilityProbeTimeout;
+        public TimeSpan Timeout => ConnectionCheckTimeout;
     }
 }

@@ -162,15 +162,15 @@ namespace ICCardManager.Data
         private static readonly Random _jitterRandom = new Random();
 
         /// <summary>
-        /// Issue #1716: 進行中のファイル到達確認。上限時間で打ち切っても下位の呼び出しは中断できないため、
+        /// Issue #1716: 進行中の疎通確認。上限時間で打ち切っても下位の呼び出しは中断できないため、
         /// 同時に走る確認を 1 本に限定してブロック済みスレッドの累積を防ぐ。
         /// </summary>
-        private Task<bool> _pendingReachabilityProbe;
+        private Task<bool> _pendingConnectionCheck;
 
         /// <summary>
-        /// <see cref="_pendingReachabilityProbe"/> の生成・差し替えを直列化するロック
+        /// <see cref="_pendingConnectionCheck"/> の生成・差し替えを直列化するロック
         /// </summary>
-        private readonly object _reachabilityProbeLock = new object();
+        private readonly object _connectionCheckLock = new object();
 
         /// <summary>
         /// 共有モード（UNCパス または マップドネットワークドライブ指定時）かどうか
@@ -1279,11 +1279,23 @@ ON CONFLICT(key) DO UPDATE SET value = excluded.value";
         /// <para>
         /// そのためクエリの成否に加えて <see cref="ProbeDatabaseFileReachable"/> による
         /// ファイルシステムへの実問い合わせを併用し、SMB のラウンドトリップを強制する。
-        /// プローブはリース解放後に実行する。死んだ UNC パスへの問い合わせは SMB タイムアウトまで
-        /// ブロックするため、その間、接続セマフォを掴んだままにしないことを意図している。
-        /// さらにブロック時間そのものにも上限を設ける
-        /// （<see cref="ProbeDatabaseFileReachableWithinTimeout"/>）。上限がないと切断の通知が
-        /// 最大 1 分近く遅れ、待機中に復旧すると切断を一度も検知できない。
+        /// プローブはリース解放後に実行し、死んだ UNC パスへの問い合わせが SMB タイムアウトまで
+        /// ブロックする間、接続セマフォを掴んだままにしない。
+        /// </para>
+        /// <para>
+        /// <b>確認全体に上限時間を設ける</b>: 疎通確認は「接続リース取得 → 接続オープン
+        /// （切断後は再オープン）→ クエリ → ファイル到達確認」と複数のネットワーク待ちが
+        /// 直列に並び、<b>どの区間も下位の TCP/SMB タイムアウトまで戻ってこない</b>。
+        /// 区間ごとに上限を設けても塞ぎ残しが生じるため、確認全体をバックグラウンドで実行し
+        /// <see cref="ConnectionCheckTimeout"/> を超えたら「接続なし」とみなす。
+        /// 実機ログでは接続オープン〜クエリの区間だけで 82.3 秒ブロックし、切断トーストが
+        /// 90 秒以上遅れた（Issue #1716）。
+        /// </para>
+        /// <para>
+        /// 呼び出し元は UI スレッド以外から呼ぶこと。上限までの待機（最大
+        /// <see cref="ConnectionCheckTimeout"/>）が呼び出しスレッドをブロックする。
+        /// 既存の呼び出し元（<c>SharedModeMonitor</c> / <c>ConnectionDiagnosticsService</c>）は
+        /// いずれも <c>Task.Run</c> で退避済み。
         /// </para>
         /// </remarks>
         /// <returns>接続可能な場合true</returns>
@@ -1292,9 +1304,46 @@ ON CONFLICT(key) DO UPDATE SET value = excluded.value";
             if (IsConnectionSuspended)
                 return true;
 
-            // Issue #1716: 「どの段階に何ミリ秒かかったか」を残す。疎通確認は
-            // 接続リース取得 → 接続オープン（切断後は再オープン）→ クエリ → ファイル到達確認 と
-            // 複数のネットワーク待ちが直列に並ぶため、遅延の原因を段階まで絞れないと調査できない
+            Task<bool> check;
+            lock (_connectionCheckLock)
+            {
+                // 上限で打ち切っても下位の呼び出し自体は中断できないため、進行中の確認は 1 本に限定する。
+                // 打ち切るたびに新しい確認を始めると、ブロックしたスレッドが 15 秒ごとに積み上がり、
+                // さらに接続セマフォ待ちの行列を作って本来のDB操作まで巻き添えにする
+                if (_pendingConnectionCheck == null || _pendingConnectionCheck.IsCompleted)
+                {
+                    _pendingConnectionCheck = Task.Run(() =>
+                    {
+                        // 想定外の例外は「接続なし」に丸め、Task を faulted にしない
+                        try { return ExecuteConnectionCheck(); }
+                        catch { return false; }
+                    });
+                }
+
+                check = _pendingConnectionCheck;
+            }
+
+            var timeout = ConnectionCheckTimeout;
+            if (!check.Wait(timeout))
+            {
+                _logger?.LogInformation(
+                    "DB接続疎通確認: {TimeoutSeconds}秒以内に完了しないため「接続なし」とみなします（{DatabasePath}）。" +
+                    "ネットワークが切断されている可能性があります。",
+                    timeout.TotalSeconds, DatabasePath);
+                return false;
+            }
+
+            return check.Result;
+        }
+
+        /// <summary>
+        /// 疎通確認の本体（Issue #1716）。上限時間の管理は <see cref="CheckConnection"/> が行う
+        /// </summary>
+        /// <returns>接続可能な場合true</returns>
+        private bool ExecuteConnectionCheck()
+        {
+            // Issue #1716: 「どの段階に何ミリ秒かかったか」を残す。
+            // 遅延の原因を段階まで絞れないと調査できない（実機で 82.3 秒の内訳特定に必要だった）
             var queryStopwatch = System.Diagnostics.Stopwatch.StartNew();
             try
             {
@@ -1333,7 +1382,7 @@ ON CONFLICT(key) DO UPDATE SET value = excluded.value";
 
             // Issue #1716: クエリはキャッシュ応答し得るため、ファイルへ実際に届くことも要求する
             var probeStopwatch = System.Diagnostics.Stopwatch.StartNew();
-            var isReachable = ProbeDatabaseFileReachableWithinTimeout();
+            var isReachable = ProbeDatabaseFileReachable();
             probeStopwatch.Stop();
 
             LogConnectionCheckOutcome(
@@ -1383,83 +1432,10 @@ ON CONFLICT(key) DO UPDATE SET value = excluded.value";
         private const int SlowConnectionCheckThresholdMs = 1000;
 
         /// <summary>
-        /// ファイル到達確認に上限時間を設けて実行する（Issue #1716）
+        /// 疎通確認全体の上限時間（Issue #1716）。テストから短縮できるよう仮想メンバーにしている
         /// </summary>
-        /// <remarks>
-        /// <para>
-        /// 到達不能な UNC パスへの <c>File.Exists</c> は下位の TCP/SMB タイムアウトまで戻らない
-        /// （実測 21〜42 秒。直後の再呼び出しは Windows のネガティブキャッシュにより 0 秒）。
-        /// 上限を設けないと 15 秒周期のヘルスチェックが 1 回で 40 秒以上占有され、切断通知が
-        /// 最大 1 分近く遅れる。さらに待機中にネットワークが復旧すると進行中の確認がそのまま成功し、
-        /// 切断を一度も検知できない。実機で「トーストが出たり出なかったり、出ても約1分かかる」
-        /// という形で観測された。
-        /// </para>
-        /// <para>
-        /// <b>進行中の確認は 1 本に限定する</b>: 上限で打ち切っても下位の呼び出し自体は中断できない
-        /// （<c>File.Exists</c> にキャンセル手段がない）。打ち切るたびに新しい確認を始めると、
-        /// ブロックしたスレッドが 15 秒ごとに積み上がる。進行中のものがあればそれを待ち直す。
-        /// </para>
-        /// </remarks>
-        /// <returns>上限時間内に到達を確認できた場合true</returns>
-        private bool ProbeDatabaseFileReachableWithinTimeout()
-        {
-            if (IsInMemoryDatabasePath(DatabasePath))
-                return true;
-
-            Task<bool> probe;
-            lock (_reachabilityProbeLock)
-            {
-                if (_pendingReachabilityProbe == null || _pendingReachabilityProbe.IsCompleted)
-                {
-                    // 想定外の例外は「到達不能」に丸め、Task を faulted にしない
-                    // （待機側で AggregateException を扱わずに済ませる）
-                    _pendingReachabilityProbe = Task.Run(() =>
-                    {
-                        try { return ProbeDatabaseFileReachable(); }
-                        catch { return false; }
-                    });
-                }
-
-                probe = _pendingReachabilityProbe;
-            }
-
-            var timeout = ReachabilityProbeTimeout;
-            var stopwatch = System.Diagnostics.Stopwatch.StartNew();
-            var completed = probe.Wait(timeout);
-            stopwatch.Stop();
-
-            // 以下の失敗ログを LogDebug ではなく LogInformation にする理由（Issue #1716）:
-            // appsettings.json の既定フィルタが Information のため、LogDebug はログファイルに残らない。
-            // ネットワーク断は運用上もっとも重要な事象であり、いつ検知したかを後から追えないと
-            // 原因調査ができない（本 Issue の調査で実際にログから追跡できなかった）。
-            // 出力は失敗時のみのため、正常運用中にログが肥大化することはない。
-            if (!completed)
-            {
-                _logger?.LogInformation(
-                    "DB接続疎通確認: データベースファイルへの到達確認が{TimeoutSeconds}秒以内に完了しないため" +
-                    "「到達不能」とみなします（{DatabasePath}）。ネットワークが切断されている可能性があります。",
-                    timeout.TotalSeconds, DatabasePath);
-                return false;
-            }
-
-            if (!probe.Result)
-            {
-                _logger?.LogInformation(
-                    "DB接続疎通確認: データベースファイルへ到達できません" +
-                    "（{DatabasePath}、確認所要 {ElapsedMs}ms）。" +
-                    "クエリはページキャッシュから応答したため成功していますが、切断として扱います。",
-                    DatabasePath, stopwatch.ElapsedMilliseconds);
-                return false;
-            }
-
-            return true;
-        }
-
-        /// <summary>
-        /// ファイル到達確認の上限時間（Issue #1716）。テストから短縮できるよう仮想メンバーにしている
-        /// </summary>
-        protected virtual TimeSpan ReachabilityProbeTimeout =>
-            TimeSpan.FromSeconds(AppConstants.DatabaseReachabilityProbeTimeoutSeconds);
+        protected virtual TimeSpan ConnectionCheckTimeout =>
+            TimeSpan.FromSeconds(AppConstants.DatabaseConnectionCheckTimeoutSeconds);
 
         /// <summary>
         /// データベースファイルそのものへ到達できるかを実測する（Issue #1716）
