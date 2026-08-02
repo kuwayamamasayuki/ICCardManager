@@ -534,6 +534,15 @@ namespace ICCardManager
         private async Task InitializeDatabaseAsync()
         {
             var dbContext = ServiceProvider.GetRequiredService<DbContext>();
+
+            // Issue #1716: 障害調査でまず必要になる「どのDBを、どのモードで開いているか」を残す。
+            // 共有モードかどうかで接続監視の有無も切断時の挙動も変わるため、
+            // ログだけを見て前提を確認できるようにする
+            _logger.LogInformation(
+                "データベース: {DatabasePath}（共有モード={IsSharedMode}、接続監視={MonitorEnabled}）",
+                dbContext.DatabasePath, dbContext.IsSharedMode,
+                dbContext.IsSharedMode ? "有効（15秒間隔）" : "無効");
+
             await dbContext.InitializeDatabaseAsync();
 
     #if DEBUG

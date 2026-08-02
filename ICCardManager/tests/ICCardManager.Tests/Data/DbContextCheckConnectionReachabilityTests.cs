@@ -176,6 +176,32 @@ public class DbContextCheckConnectionReachabilityTests : IDisposable
     }
 
     [Fact]
+    public void CheckConnection_クエリ段階の失敗も失敗段階つきでInformationに記録すること()
+    {
+        // Arrange: ディレクトリを DB パスに指定してクエリ段階を失敗させる
+        // （Issue #1282 の LogDebug は本番の既定フィルタで出力されないため、
+        //   障害調査に必要な情報は Information でも残す。Issue #1716）
+        var loggerMock = new Mock<ILogger<DbContext>>();
+        using var dbContext = new DbContext(_testDirectory, loggerMock.Object);
+
+        // Act
+        var result = dbContext.CheckConnection();
+
+        // Assert
+        result.Should().BeFalse();
+
+        loggerMock.Verify(
+            x => x.Log(
+                LogLevel.Information,
+                It.IsAny<EventId>(),
+                It.Is<It.IsAnyType>((v, t) => v.ToString().Contains("失敗段階=クエリ")),
+                It.IsAny<Exception>(),
+                It.IsAny<Func<It.IsAnyType, Exception, string>>()),
+            Times.AtLeastOnce,
+            "どの段階で失敗したかが分からないと、遅延・切断の原因を切り分けられない");
+    }
+
+    [Fact]
     public void CheckConnection_到達確認が上限時間内に完了しなければfalseを返すこと()
     {
         // Arrange: 到達不能な UNC への File.Exists が 21〜42 秒ブロックする状況を、

@@ -1292,6 +1292,10 @@ ON CONFLICT(key) DO UPDATE SET value = excluded.value";
             if (IsConnectionSuspended)
                 return true;
 
+            // Issue #1716: 「どの段階に何ミリ秒かかったか」を残す。疎通確認は
+            // 接続リース取得 → 接続オープン（切断後は再オープン）→ クエリ → ファイル到達確認 と
+            // 複数のネットワーク待ちが直列に並ぶため、遅延の原因を段階まで絞れないと調査できない
+            var queryStopwatch = System.Diagnostics.Stopwatch.StartNew();
             try
             {
                 using (var lease = LeaseConnection())
@@ -1302,6 +1306,8 @@ ON CONFLICT(key) DO UPDATE SET value = excluded.value";
                     command.CommandText = "SELECT COUNT(*) FROM sqlite_master";
                     command.ExecuteScalar();
                 }
+
+                queryStopwatch.Stop();
             }
             catch (InvalidOperationException)
             {
@@ -1310,18 +1316,71 @@ ON CONFLICT(key) DO UPDATE SET value = excluded.value";
             }
             catch (Exception ex)
             {
+                queryStopwatch.Stop();
+
                 // Issue #1282: 疎通確認なので「失敗=未到達」を戻り値で通知するのが仕様。
                 // ただしサイレント握りつぶしはトラブル時のデバッグを困難にするため、
-                // LogDebug で失敗理由を残す。接続断は運用上頻繁に起きる想定のため
+                // LogDebug で失敗理由（例外の詳細）を残す。接続断は運用上頻繁に起きる想定のため
                 // LogWarning ではなく LogDebug を選択（ログファイルの肥大化を避ける）。
                 _logger?.LogDebug(ex,
                     "DB接続疎通確認に失敗。呼び出し元には false を返す（ネットワーク断または読み取りエラー）");
+
+                // Issue #1716: 上の LogDebug は本番の既定フィルタ（Information）では出力されないため、
+                // 障害調査に必要な「いつ・どの段階で・何ミリ秒かけて失敗したか」は Information でも残す
+                LogConnectionCheckOutcome("クエリ", queryStopwatch.ElapsedMilliseconds, probeMs: null, isConnected: false);
                 return false;
             }
 
             // Issue #1716: クエリはキャッシュ応答し得るため、ファイルへ実際に届くことも要求する
-            return ProbeDatabaseFileReachableWithinTimeout();
+            var probeStopwatch = System.Diagnostics.Stopwatch.StartNew();
+            var isReachable = ProbeDatabaseFileReachableWithinTimeout();
+            probeStopwatch.Stop();
+
+            LogConnectionCheckOutcome(
+                isReachable ? null : "ファイル到達確認",
+                queryStopwatch.ElapsedMilliseconds,
+                probeStopwatch.ElapsedMilliseconds,
+                isReachable);
+
+            return isReachable;
         }
+
+        /// <summary>
+        /// 疎通確認の結果と段階ごとの所要時間を記録する（Issue #1716）
+        /// </summary>
+        /// <remarks>
+        /// 失敗時、または正常でも <see cref="SlowConnectionCheckThresholdMs"/> を超えて時間がかかった場合のみ
+        /// 出力する。正常かつ高速な通常運用（15秒ごと）ではログに何も残らないため肥大化しない。
+        /// レベルに Information を選ぶ理由は <c>.claude/rules/development-conventions.md</c>「ロギング」を参照。
+        /// </remarks>
+        /// <param name="failedStage">失敗した段階の名称。成功時は null</param>
+        /// <param name="queryMs">接続リース取得〜クエリ完了までの所要ミリ秒</param>
+        /// <param name="probeMs">ファイル到達確認の所要ミリ秒。クエリ段階で失敗した場合は null</param>
+        /// <param name="isConnected">疎通確認の結果</param>
+        private void LogConnectionCheckOutcome(string failedStage, long queryMs, long? probeMs, bool isConnected)
+        {
+            if (_logger == null)
+                return;
+
+            var isSlow = queryMs >= SlowConnectionCheckThresholdMs
+                         || (probeMs ?? 0) >= SlowConnectionCheckThresholdMs;
+
+            if (isConnected && !isSlow)
+                return;
+
+            _logger.LogInformation(
+                "DB接続疎通確認: 結果={IsConnected}{FailedStage}（クエリ {QueryMs}ms、ファイル到達確認 {ProbeMs}）{DatabasePath}",
+                isConnected ? "接続あり" : "接続なし",
+                failedStage == null ? string.Empty : $"／失敗段階={failedStage}",
+                queryMs,
+                probeMs.HasValue ? $"{probeMs.Value}ms" : "未実施",
+                DatabasePath);
+        }
+
+        /// <summary>
+        /// 疎通確認が「遅い」とみなすしきい値（ミリ秒）。正常なローカル/LAN では数ミリ秒で完了する
+        /// </summary>
+        private const int SlowConnectionCheckThresholdMs = 1000;
 
         /// <summary>
         /// ファイル到達確認に上限時間を設けて実行する（Issue #1716）
