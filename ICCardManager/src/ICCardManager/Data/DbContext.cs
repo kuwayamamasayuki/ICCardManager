@@ -162,6 +162,17 @@ namespace ICCardManager.Data
         private static readonly Random _jitterRandom = new Random();
 
         /// <summary>
+        /// Issue #1716: 進行中の疎通確認。上限時間で打ち切っても下位の呼び出しは中断できないため、
+        /// 同時に走る確認を 1 本に限定してブロック済みスレッドの累積を防ぐ。
+        /// </summary>
+        private Task<bool> _pendingConnectionCheck;
+
+        /// <summary>
+        /// <see cref="_pendingConnectionCheck"/> の生成・差し替えを直列化するロック
+        /// </summary>
+        private readonly object _connectionCheckLock = new object();
+
+        /// <summary>
         /// 共有モード（UNCパス または マップドネットワークドライブ指定時）かどうか
         /// </summary>
         /// <remarks>
@@ -1255,20 +1266,97 @@ ON CONFLICT(key) DO UPDATE SET value = excluded.value";
         /// <summary>
         /// DB接続の疎通確認（IDatabaseInfo実装）
         /// </summary>
+        /// <remarks>
+        /// <para>
+        /// SQLite クエリの成功だけでは切断を検知できない（Issue #1716）。本クラスは接続を
+        /// 開きっぱなしの単一接続として保持しており、疎通確認に使う
+        /// <c>SELECT COUNT(*) FROM sqlite_master</c> はスキーマ情報が SQLite のページキャッシュに
+        /// 載っているため、SMB へ一切出て行かずに応答され得る。実機の共有モードでネットワークを
+        /// 切断しても本メソッドが true を返し続け、「到達性 正常／書込権限 異常」という
+        /// 自己矛盾した接続診断結果になることを確認している
+        /// （Issue #1110 の「sqlite_master 読み取りでファイルアクセスを強制」という意図は達成できていなかった）。
+        /// </para>
+        /// <para>
+        /// そのためクエリの成否に加えて <see cref="ProbeDatabaseFileReachable"/> による
+        /// ファイルシステムへの実問い合わせを併用し、SMB のラウンドトリップを強制する。
+        /// プローブはリース解放後に実行し、死んだ UNC パスへの問い合わせが SMB タイムアウトまで
+        /// ブロックする間、接続セマフォを掴んだままにしない。
+        /// </para>
+        /// <para>
+        /// <b>確認全体に上限時間を設ける</b>: 疎通確認は「接続リース取得 → 接続オープン
+        /// （切断後は再オープン）→ クエリ → ファイル到達確認」と複数のネットワーク待ちが
+        /// 直列に並び、<b>どの区間も下位の TCP/SMB タイムアウトまで戻ってこない</b>。
+        /// 区間ごとに上限を設けても塞ぎ残しが生じるため、確認全体をバックグラウンドで実行し
+        /// <see cref="ConnectionCheckTimeout"/> を超えたら「接続なし」とみなす。
+        /// 実機ログでは接続オープン〜クエリの区間だけで 82.3 秒ブロックし、切断トーストが
+        /// 90 秒以上遅れた（Issue #1716）。
+        /// </para>
+        /// <para>
+        /// 呼び出し元は UI スレッド以外から呼ぶこと。上限までの待機（最大
+        /// <see cref="ConnectionCheckTimeout"/>）が呼び出しスレッドをブロックする。
+        /// 既存の呼び出し元（<c>SharedModeMonitor</c> / <c>ConnectionDiagnosticsService</c>）は
+        /// いずれも <c>Task.Run</c> で退避済み。
+        /// </para>
+        /// </remarks>
         /// <returns>接続可能な場合true</returns>
         public bool CheckConnection()
         {
             if (IsConnectionSuspended)
                 return true;
 
+            Task<bool> check;
+            lock (_connectionCheckLock)
+            {
+                // 上限で打ち切っても下位の呼び出し自体は中断できないため、進行中の確認は 1 本に限定する。
+                // 打ち切るたびに新しい確認を始めると、ブロックしたスレッドが 15 秒ごとに積み上がり、
+                // さらに接続セマフォ待ちの行列を作って本来のDB操作まで巻き添えにする
+                if (_pendingConnectionCheck == null || _pendingConnectionCheck.IsCompleted)
+                {
+                    _pendingConnectionCheck = Task.Run(() =>
+                    {
+                        // 想定外の例外は「接続なし」に丸め、Task を faulted にしない
+                        try { return ExecuteConnectionCheck(); }
+                        catch { return false; }
+                    });
+                }
+
+                check = _pendingConnectionCheck;
+            }
+
+            var timeout = ConnectionCheckTimeout;
+            if (!check.Wait(timeout))
+            {
+                _logger?.LogInformation(
+                    "DB接続疎通確認: {TimeoutSeconds}秒以内に完了しないため「接続なし」とみなします（{DatabasePath}）。" +
+                    "ネットワークが切断されている可能性があります。",
+                    timeout.TotalSeconds, DatabasePath);
+                return false;
+            }
+
+            return check.Result;
+        }
+
+        /// <summary>
+        /// 疎通確認の本体（Issue #1716）。上限時間の管理は <see cref="CheckConnection"/> が行う
+        /// </summary>
+        /// <returns>接続可能な場合true</returns>
+        private bool ExecuteConnectionCheck()
+        {
+            // Issue #1716: 「どの段階に何ミリ秒かかったか」を残す。
+            // 遅延の原因を段階まで絞れないと調査できない（実機で 82.3 秒の内訳特定に必要だった）
+            var queryStopwatch = System.Diagnostics.Stopwatch.StartNew();
             try
             {
-                using var lease = LeaseConnection();
-                using var command = lease.Connection.CreateCommand();
-                // Issue #1110: sqlite_masterからの読み取りで実際のファイルアクセスを強制
-                command.CommandText = "SELECT COUNT(*) FROM sqlite_master";
-                command.ExecuteScalar();
-                return true;
+                using (var lease = LeaseConnection())
+                using (var command = lease.Connection.CreateCommand())
+                {
+                    // Issue #1110: sqlite_masterからの読み取り。ただしページキャッシュ応答があり得るため
+                    // これ単独では到達性の証明にならない（下のファイル到達確認と併用する / Issue #1716）
+                    command.CommandText = "SELECT COUNT(*) FROM sqlite_master";
+                    command.ExecuteScalar();
+                }
+
+                queryStopwatch.Stop();
             }
             catch (InvalidOperationException)
             {
@@ -1277,15 +1365,119 @@ ON CONFLICT(key) DO UPDATE SET value = excluded.value";
             }
             catch (Exception ex)
             {
+                queryStopwatch.Stop();
+
                 // Issue #1282: 疎通確認なので「失敗=未到達」を戻り値で通知するのが仕様。
                 // ただしサイレント握りつぶしはトラブル時のデバッグを困難にするため、
-                // LogDebug で失敗理由を残す。接続断は運用上頻繁に起きる想定のため
+                // LogDebug で失敗理由（例外の詳細）を残す。接続断は運用上頻繁に起きる想定のため
                 // LogWarning ではなく LogDebug を選択（ログファイルの肥大化を避ける）。
                 _logger?.LogDebug(ex,
                     "DB接続疎通確認に失敗。呼び出し元には false を返す（ネットワーク断または読み取りエラー）");
+
+                // Issue #1716: 上の LogDebug は本番の既定フィルタ（Information）では出力されないため、
+                // 障害調査に必要な「いつ・どの段階で・何ミリ秒かけて失敗したか」は Information でも残す
+                LogConnectionCheckOutcome("クエリ", queryStopwatch.ElapsedMilliseconds, probeMs: null, isConnected: false);
                 return false;
             }
+
+            // Issue #1716: クエリはキャッシュ応答し得るため、ファイルへ実際に届くことも要求する
+            var probeStopwatch = System.Diagnostics.Stopwatch.StartNew();
+            var isReachable = ProbeDatabaseFileReachable();
+            probeStopwatch.Stop();
+
+            LogConnectionCheckOutcome(
+                isReachable ? null : "ファイル到達確認",
+                queryStopwatch.ElapsedMilliseconds,
+                probeStopwatch.ElapsedMilliseconds,
+                isReachable);
+
+            return isReachable;
         }
+
+        /// <summary>
+        /// 疎通確認の結果と段階ごとの所要時間を記録する（Issue #1716）
+        /// </summary>
+        /// <remarks>
+        /// 失敗時、または正常でも <see cref="SlowConnectionCheckThresholdMs"/> を超えて時間がかかった場合のみ
+        /// 出力する。正常かつ高速な通常運用（15秒ごと）ではログに何も残らないため肥大化しない。
+        /// レベルに Information を選ぶ理由は <c>.claude/rules/development-conventions.md</c>「ロギング」を参照。
+        /// </remarks>
+        /// <param name="failedStage">失敗した段階の名称。成功時は null</param>
+        /// <param name="queryMs">接続リース取得〜クエリ完了までの所要ミリ秒</param>
+        /// <param name="probeMs">ファイル到達確認の所要ミリ秒。クエリ段階で失敗した場合は null</param>
+        /// <param name="isConnected">疎通確認の結果</param>
+        private void LogConnectionCheckOutcome(string failedStage, long queryMs, long? probeMs, bool isConnected)
+        {
+            if (_logger == null)
+                return;
+
+            var isSlow = queryMs >= SlowConnectionCheckThresholdMs
+                         || (probeMs ?? 0) >= SlowConnectionCheckThresholdMs;
+
+            if (isConnected && !isSlow)
+                return;
+
+            _logger.LogInformation(
+                "DB接続疎通確認: 結果={IsConnected}{FailedStage}（クエリ {QueryMs}ms、ファイル到達確認 {ProbeMs}）{DatabasePath}",
+                isConnected ? "接続あり" : "接続なし",
+                failedStage == null ? string.Empty : $"／失敗段階={failedStage}",
+                queryMs,
+                probeMs.HasValue ? $"{probeMs.Value}ms" : "未実施",
+                DatabasePath);
+        }
+
+        /// <summary>
+        /// 疎通確認が「遅い」とみなすしきい値（ミリ秒）。正常なローカル/LAN では数ミリ秒で完了する
+        /// </summary>
+        private const int SlowConnectionCheckThresholdMs = 1000;
+
+        /// <summary>
+        /// 疎通確認全体の上限時間（Issue #1716）。テストから短縮できるよう仮想メンバーにしている
+        /// </summary>
+        protected virtual TimeSpan ConnectionCheckTimeout =>
+            TimeSpan.FromSeconds(AppConstants.DatabaseConnectionCheckTimeoutSeconds);
+
+        /// <summary>
+        /// データベースファイルそのものへ到達できるかを実測する（Issue #1716）
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// 到達できない理由（ネットワーク切断・ファイル削除・アクセス権喪失）は区別せず、
+        /// いずれも「到達できない」として扱う。<c>File.Exists</c> は例外を投げず、
+        /// 到達不能・権限なしのいずれでも false を返す。
+        /// </para>
+        /// <para>
+        /// インメモリDB（<c>:memory:</c>）とパス未設定（テスト用 protected コンストラクタ）は
+        /// ファイルを持たないため、常に到達可能として扱う。ここを除外しないと、
+        /// インメモリDBを使う多数の単体テストが一斉に「接続不可」になる。
+        /// </para>
+        /// <para>
+        /// テストから到達不能状態を再現できるよう <c>protected virtual</c> の継ぎ目にしている
+        /// （<c>ConnectionDiagnosticsService.ProbeDatabaseFileReachable</c> と同じ設計）。
+        /// </para>
+        /// </remarks>
+        /// <returns>ファイルへ到達できる場合true（インメモリDB・パス未設定は常にtrue）</returns>
+        protected virtual bool ProbeDatabaseFileReachable()
+        {
+            if (IsInMemoryDatabasePath(DatabasePath))
+                return true;
+
+            return File.Exists(DatabasePath);
+        }
+
+        /// <summary>
+        /// ファイル実体を持たないDBパス（インメモリDB・パス未設定）かどうかを判定する（Issue #1716）
+        /// </summary>
+        internal static bool IsInMemoryDatabasePath(string path)
+        {
+            return string.IsNullOrWhiteSpace(path)
+                || path.Equals(InMemoryDatabasePath, StringComparison.OrdinalIgnoreCase);
+        }
+
+        /// <summary>
+        /// インメモリDBを指すDataSource値。単体テストが <c>new DbContext(":memory:")</c> で使用する
+        /// </summary>
+        internal const string InMemoryDatabasePath = ":memory:";
 
         /// <summary>
         /// DBへの書き込み可否確認（IDatabaseInfo実装、Issue #1686）

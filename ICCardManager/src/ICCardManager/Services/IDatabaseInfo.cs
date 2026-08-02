@@ -37,6 +37,11 @@ namespace ICCardManager.Services
         /// <summary>
         /// DB接続の疎通確認
         /// </summary>
+        /// <remarks>
+        /// Issue #1716: 実装は「クエリが通ること」だけで true を返してはならない。
+        /// 開きっぱなしの接続ではクエリがページキャッシュから応答され、
+        /// ネットワーク切断後も成功し続けるため、データベースファイルへの実到達確認を伴うこと。
+        /// </remarks>
         /// <returns>接続可能な場合true</returns>
         bool CheckConnection();
 
