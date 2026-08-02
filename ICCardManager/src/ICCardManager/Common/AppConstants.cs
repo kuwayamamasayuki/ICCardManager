@@ -59,5 +59,28 @@ namespace ICCardManager.Common
         /// 判定は「異常」ではなく「警告」とする。
         /// </remarks>
         public const long DiagnosticsLowDiskSpaceWarningBytes = 1024L * 1024L * 1024L;
+
+        // --- DB 到達性の確認（Issue #1716） ---
+
+        /// <summary>
+        /// データベースファイルへの到達確認（<c>File.Exists</c>）をこの秒数まで待ち、
+        /// 戻らなければ「到達不能」とみなす。
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// 到達不能な UNC パスへの <c>File.Exists</c> は、下位の TCP/SMB タイムアウトまで戻ってこない
+        /// （開発機での実測値は 21〜42 秒。直後の再呼び出しは Windows のネガティブキャッシュにより 0 秒）。
+        /// 上限を設けないと、15 秒周期のヘルスチェックが 1 回で 40 秒以上占有され、
+        /// 切断の通知が最大 1 分近く遅れる。さらにその間にネットワークが復旧すると
+        /// 進行中の確認がそのまま成功し、切断を一度も検知できない（Issue #1716 の実機報告）。
+        /// </para>
+        /// <para>
+        /// 5 秒とするのは、正常な LAN 上の <c>File.Exists</c> が 10 ミリ秒未満で完了するのに対し
+        /// 約 500 倍の余裕があり、「遅いだけの共有フォルダ」を切断と誤判定しにくいため。
+        /// この値により切断検知は最悪でも
+        /// <c>SharedModeMonitor.HealthCheckIntervalSeconds</c>（15 秒）＋ 5 秒 = 20 秒に収まる。
+        /// </para>
+        /// </remarks>
+        public const int DatabaseReachabilityProbeTimeoutSeconds = 5;
     }
 }
