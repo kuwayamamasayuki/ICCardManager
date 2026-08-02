@@ -22,6 +22,15 @@
 | ledger | 物理削除（6年後自動 ＋ 履歴画面からの個別削除） | 監査対応の保存期間経過後は不要。加えて、誤登録の訂正用に履歴画面から個別行を**職員認証＋確認のうえ物理削除**でき（`MainViewModel.DeleteLedgerRow` → `LedgerRepository.DeleteAsync`、Issue #635）、その操作は `operation_log` に記録される |
 | operation_log | 物理削除（6年後自動） | ledgerと同じ保存期間経過後に削除 |
 
+## ロギング
+
+**本番のログファイルに残したい事象に `LogDebug` を使わない**（Issue #1716）。`appsettings.json` の `Logging:LogLevel:Default` は `"Information"` のため、**`LogDebug` は本番でファイルに一切出力されない**。`FileLogger.IsEnabled` が `LogLevel.None` 以外を通すため一見出力されそうに見えるが、その手前で `ILoggerFactory` のフィルタが落としている。
+
+- 「無言で握りつぶさない」ための痕跡ログを `LogDebug` で書くと、**本番では実質無言のまま**になる（Issue #1282 で `DbContext.CheckConnection` に入れた `LogDebug` が該当。Issue #1716 の調査で実機ログから切断の痕跡を追えず判明した）
+- 判断基準は「**障害調査でこの行が無いと困るか**」。困るなら `LogInformation` 以上にする。失敗時・状態遷移時のみ出力する設計なら、正常運用中のログ肥大化は起きない
+- 逆に、正常時も高頻度で出る内容（毎ループの経過報告等）は `LogDebug` のままでよい（本番では出力されない前提を織り込む）
+- ログレベルを変更したら、その理由をコード上のコメントに残す（後から「なぜ Information なのか」を再検討させない）
+
 ## UI/UX原則
 - 色・アイコン・テキスト・音の4要素で状態を伝達（色や音のみに依存しない）
 - 色覚多様性対応: 暖色（貸出）vs 寒色（返却）で色相差を明確に
