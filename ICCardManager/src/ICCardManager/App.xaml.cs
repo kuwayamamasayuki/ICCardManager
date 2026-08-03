@@ -429,6 +429,7 @@ namespace ICCardManager
             services.AddTransient<LedgerRowEditViewModel>();
             services.AddTransient<ReportPreflightViewModel>();
             services.AddTransient<ConnectionDiagnosticsViewModel>();
+            services.AddTransient<AdminDashboardViewModel>();
     #if DEBUG
             // Issue #640: 仮想タッチ設定ダイアログ
             services.AddTransient<VirtualCardViewModel>();
