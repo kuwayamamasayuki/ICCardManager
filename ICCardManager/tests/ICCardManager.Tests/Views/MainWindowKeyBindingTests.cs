@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Linq;
 using System.Text.RegularExpressions;
 using FluentAssertions;
 using Xunit;
@@ -84,6 +85,67 @@ public class MainWindowKeyBindingTests
             "Issue #1289: F7 ボタンの ToolTip には、F1 ではないことを示す記述が含まれるべき（Windows 慣習利用者の混乱防止）");
         helpButton.Should().MatchRegex(@"AutomationProperties\.HelpText\s*=\s*""[^""]*F1[^""]*""",
             "Issue #1289: F7 ボタンの HelpText にも、F1 ではなく F7 であることを示す参照が含まれるべき");
+    }
+
+    [Fact]
+    public void F8_KeyBinding_is_bound_to_OpenAdminDashboardCommand()
+    {
+        var xaml = File.ReadAllText(MainWindowXamlPath);
+
+        var pattern = new Regex(
+            @"<KeyBinding\s+Key\s*=\s*""F8""\s+Command\s*=\s*""\{Binding\s+OpenAdminDashboardCommand\}""\s*/>",
+            RegexOptions.Compiled);
+
+        pattern.IsMatch(xaml).Should().BeTrue(
+            "Issue #1692: F8 は管理者ダッシュボードを開く");
+    }
+
+    [Fact]
+    public void Function_keys_should_not_be_assigned_twice()
+    {
+        var xaml = File.ReadAllText(MainWindowXamlPath);
+
+        var keys = Regex.Matches(xaml, @"<KeyBinding\s+Key\s*=\s*""(F\d+)""")
+            .Cast<Match>()
+            .Select(m => m.Groups[1].Value)
+            .ToList();
+
+        keys.Should().OnlyHaveUniqueItems(
+            "同じファンクションキーに 2 つの機能を割り当てると、どちらが動くか XAML の記述順に依存する");
+    }
+
+    [Fact]
+    public void F8_dashboard_button_should_expose_tooltip_and_helptext()
+    {
+        var xaml = File.ReadAllText(MainWindowXamlPath);
+
+        var button = ExtractButtonDefinition(xaml, "OpenAdminDashboardCommand");
+        button.Should().NotBeNull("管理者ダッシュボード(F8)ボタンの定義が XAML 内に存在すべき");
+
+        button!.Should().MatchRegex(@"ToolTip\s*=\s*""[^""]*F8[^""]*""");
+        button.Should().MatchRegex(@"AutomationProperties\.HelpText\s*=\s*""[^""]*F8[^""]*""",
+            "スクリーンリーダー利用者にもショートカットを伝えるため");
+    }
+
+    [Fact]
+    public void Shortcut_help_panel_should_list_every_assigned_function_key()
+    {
+        // ボタンの表記とヘルプ一覧が食い違うと、利用者はどちらが正しいか判断できない
+        var xaml = File.ReadAllText(MainWindowXamlPath);
+
+        var assigned = Regex.Matches(xaml, @"<KeyBinding\s+Key\s*=\s*""(F\d+)""")
+            .Cast<Match>()
+            .Select(m => m.Groups[1].Value)
+            .Distinct()
+            .ToList();
+
+        var listed = Regex.Matches(xaml, @"<TextBlock\s+Text\s*=\s*""(F\d+):\s*[^""]*""")
+            .Cast<Match>()
+            .Select(m => m.Groups[1].Value)
+            .ToList();
+
+        listed.Should().BeEquivalentTo(assigned,
+            "ショートカット一覧には割り当て済みのファンクションキーが過不足なく載るべき");
     }
 
     /// <summary>

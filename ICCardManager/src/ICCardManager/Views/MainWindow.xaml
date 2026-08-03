@@ -37,6 +37,7 @@
         <KeyBinding Key="F5" Command="{Binding OpenSettingsCommand}"/>
         <KeyBinding Key="F6" Command="{Binding OpenSystemManageCommand}"/>
         <KeyBinding Key="F7" Command="{Binding OpenHelpCommand}"/>
+        <KeyBinding Key="F8" Command="{Binding OpenAdminDashboardCommand}"/>
     </Window.InputBindings>
 
     <Grid>
@@ -114,10 +115,17 @@
                             AutomationProperties.Name="ヘルプを開く"
                             AutomationProperties.HelpText="ユーザーマニュアル等のドキュメントフォルダを開きます。ショートカット: F7 (F1 ではありません。F1 は帳票です)"
                             ToolTip="ヘルプを開く (F7)&#x0a;※F1 ではありません"/>
+                    <Button Content="ダッシュボード (F8)" Margin="5,3"
+                            Style="{StaticResource AccessibleButtonStyle}"
+                            Command="{Binding OpenAdminDashboardCommand}"
+                            TabIndex="8"
+                            AutomationProperties.Name="管理者ダッシュボードを開く"
+                            AutomationProperties.HelpText="貸出中・長期未返却・残額不足・帳票未出力の状況と、カードの稼働状況や利用の推移を確認します。ショートカット: F8"
+                            ToolTip="管理者ダッシュボードを開く (F8)"/>
                     <Button Content="終了" Margin="15,3,5,3"
                             Style="{StaticResource AccessibleButtonStyle}"
                             Command="{Binding ExitCommand}"
-                            TabIndex="8"
+                            TabIndex="9"
                             AutomationProperties.Name="アプリケーションを終了"
                             AutomationProperties.HelpText="アプリケーションを終了します。"
                             ToolTip="アプリケーションを終了"/>
@@ -324,7 +332,9 @@
                                     <TextBlock Text="F3: カード管理" FontSize="{DynamicResource SmallFontSize}" Margin="0,0,20,5"/>
                                     <TextBlock Text="F4: データ入出力" FontSize="{DynamicResource SmallFontSize}" Margin="0,0,20,5"/>
                                     <TextBlock Text="F5: 設定" FontSize="{DynamicResource SmallFontSize}" Margin="0,0,20,5"/>
-                                    <TextBlock Text="F6: システム管理" FontSize="{DynamicResource SmallFontSize}" Margin="0,0,0,5"/>
+                                    <TextBlock Text="F6: システム管理" FontSize="{DynamicResource SmallFontSize}" Margin="0,0,20,5"/>
+                                    <TextBlock Text="F7: ヘルプ" FontSize="{DynamicResource SmallFontSize}" Margin="0,0,20,5"/>
+                                    <TextBlock Text="F8: ダッシュボード" FontSize="{DynamicResource SmallFontSize}" Margin="0,0,0,5"/>
                                 </WrapPanel>
                             </StackPanel>
                         </Border>
