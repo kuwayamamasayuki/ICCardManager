@@ -100,5 +100,29 @@ namespace ICCardManager.Dtos
         /// <summary>いずれかの注意事項に該当するかどうか（一覧の強調表示に使う）</summary>
         public bool HasAttention
             => IsLongTermUnreturned || IsBalanceWarning || ReportState == ReportExportState.NotExported;
+
+        /// <summary>
+        /// 帳票の出力状況の表示テキスト。
+        /// </summary>
+        /// <remarks>
+        /// 画面の一覧と Excel 出力で同じ文言を使うため DTO 側に置く。
+        /// 「判定不可」は「未出力」と区別できる語にすること（出力先フォルダが未設定なだけの
+        /// カードを未出力として督促すると誤った作業を誘発する）。
+        /// </remarks>
+        public string ReportStateText
+        {
+            get
+            {
+                switch (ReportState)
+                {
+                    case ReportExportState.Exported:
+                        return "出力済み";
+                    case ReportExportState.NotExported:
+                        return "未出力";
+                    default:
+                        return "判定不可";
+                }
+            }
+        }
     }
 }

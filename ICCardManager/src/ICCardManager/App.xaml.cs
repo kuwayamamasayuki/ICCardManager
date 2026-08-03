@@ -389,6 +389,7 @@ namespace ICCardManager
             services.AddSingleton<DashboardService>();
             // Issue #1692: 管理者ダッシュボード（メイン画面内のカード残高ダッシュボードとは別物）
             services.AddSingleton<IAdminDashboardService, AdminDashboardService>();
+            services.AddSingleton<AdminDashboardExcelExportService>();
             // Issue #1465: Process.Start(UseShellExecute=true) のパス検証を一元化
             services.AddSingleton<ISafeFileLauncher, SafeFileLauncher>();
 
