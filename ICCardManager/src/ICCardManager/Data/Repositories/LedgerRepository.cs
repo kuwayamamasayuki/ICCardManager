@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Data;
 using System.Linq;
 using System.Threading.Tasks;
+using ICCardManager.Dtos;
 using ICCardManager.Models;
 using System.Data.Common;
 using System.Data.SQLite;
@@ -610,6 +611,150 @@ WHERE l.id = (
             }
 
             return result;
+        }
+
+        // --- 管理者ダッシュボード用の集計クエリ（Issue #1692） ---
+        // 台帳は 6 年分保持されるため、全件を C# へ読み出さず SQL 側で GROUP BY する。
+        // いずれも貸出中レコード（is_lent_record = 1）を除外する。貸出中レコードは
+        // 「（貸出中）」というプレースホルダであり利用実績ではないため（帳票でも出力しない）。
+
+        /// <inheritdoc/>
+        public async Task<IReadOnlyList<CardUsageStatsRow>> GetUsageStatsByCardAsync(DateTime fromDate, DateTime toDate)
+        {
+            using var lease = await _dbContext.LeaseConnectionAsync().ConfigureAwait(false);
+            var connection = lease.Connection;
+            var result = new List<CardUsageStatsRow>();
+
+            using var command = connection.CreateCommand();
+            // COUNT(DISTINCT DATE(date)): 同日に複数回利用しても稼働は 1 日と数える。
+            // date 列は "yyyy-MM-dd HH:mm:ss" の TEXT なので DATE() で日付部分を切り出せる。
+            command.CommandText = @"SELECT card_idm,
+       COUNT(DISTINCT DATE(date)) AS used_days,
+       COUNT(*) AS usage_count,
+       COALESCE(SUM(expense), 0) AS total_expense,
+       COALESCE(SUM(income), 0) AS total_income,
+       MAX(date) AS last_usage
+FROM ledger
+WHERE date BETWEEN @fromDate AND @toDate
+  AND is_lent_record = 0
+GROUP BY card_idm";
+
+            AddDateRangeParameters(command, fromDate, toDate);
+
+            using var reader = await command.ExecuteReaderAsync().ConfigureAwait(false);
+            while (await reader.ReadAsync().ConfigureAwait(false))
+            {
+                result.Add(new CardUsageStatsRow
+                {
+                    CardIdm = reader.GetString(0),
+                    UsedDayCount = reader.GetInt32(1),
+                    UsageCount = reader.GetInt32(2),
+                    TotalExpense = reader.GetInt32(3),
+                    TotalIncome = reader.GetInt32(4),
+                    LastUsageDate = reader.IsDBNull(5) ? (DateTime?)null : DateTime.Parse(reader.GetString(5))
+                });
+            }
+
+            return result;
+        }
+
+        /// <inheritdoc/>
+        public async Task<IReadOnlyList<MonthlyUsageRow>> GetMonthlyUsageByLenderAsync(DateTime fromDate, DateTime toDate)
+        {
+            using var lease = await _dbContext.LeaseConnectionAsync().ConfigureAwait(false);
+            var connection = lease.Connection;
+            var result = new List<MonthlyUsageRow>();
+
+            using var command = connection.CreateCommand();
+            // lender_idm と staff_name の両方でグループ化する。過去のインポートデータには
+            // lender_idm を持たない行があり、その場合は staff_name でしか職員を区別できないため。
+            // lender_idm を持つ行の統合（改姓等で staff_name が割れた場合）は呼び出し側で行う。
+            command.CommandText = @"SELECT strftime('%Y-%m', date) AS ym,
+       COALESCE(lender_idm, '') AS lender,
+       COALESCE(staff_name, '') AS staff,
+       COALESCE(SUM(expense), 0) AS total_expense,
+       COALESCE(SUM(income), 0) AS total_income,
+       COUNT(*) AS usage_count
+FROM ledger
+WHERE date BETWEEN @fromDate AND @toDate
+  AND is_lent_record = 0
+GROUP BY ym, lender, staff
+ORDER BY ym, staff";
+
+            AddDateRangeParameters(command, fromDate, toDate);
+
+            using var reader = await command.ExecuteReaderAsync().ConfigureAwait(false);
+            while (await reader.ReadAsync().ConfigureAwait(false))
+            {
+                result.Add(new MonthlyUsageRow
+                {
+                    YearMonth = reader.GetString(0),
+                    LenderIdm = reader.GetString(1),
+                    StaffName = reader.GetString(2),
+                    TotalExpense = reader.GetInt32(3),
+                    TotalIncome = reader.GetInt32(4),
+                    UsageCount = reader.GetInt32(5)
+                });
+            }
+
+            return result;
+        }
+
+        /// <inheritdoc/>
+        public async Task<IReadOnlyList<MonthEndBalanceRow>> GetMonthEndBalancesByCardAsync(DateTime fromDate, DateTime toDate)
+        {
+            using var lease = await _dbContext.LeaseConnectionAsync().ConfigureAwait(false);
+            var connection = lease.Connection;
+            var result = new List<MonthEndBalanceRow>();
+
+            using var command = connection.CreateCommand();
+            // 「その月の最終レコード」を相関サブクエリで特定する（GetAllLatestBalancesAsync と同じ作法）。
+            // 集約関数と同じ行の他列が返る SQLite 固有の bare column 仕様には依存しない。
+            // 同日に複数レコードがある場合は id の大きい方＝後から記録された方を採る（Issue #1068 と同じ順序）。
+            command.CommandText = @"SELECT l.card_idm,
+       strftime('%Y-%m', l.date) AS ym,
+       l.balance
+FROM ledger l
+WHERE l.date BETWEEN @fromDate AND @toDate
+  AND l.is_lent_record = 0
+  AND l.id = (
+      SELECT l2.id FROM ledger l2
+      WHERE l2.card_idm = l.card_idm
+        AND l2.is_lent_record = 0
+        AND l2.date BETWEEN @fromDate AND @toDate
+        AND strftime('%Y-%m', l2.date) = strftime('%Y-%m', l.date)
+      ORDER BY l2.date DESC, l2.id DESC
+      LIMIT 1
+  )
+ORDER BY l.card_idm, ym";
+
+            AddDateRangeParameters(command, fromDate, toDate);
+
+            using var reader = await command.ExecuteReaderAsync().ConfigureAwait(false);
+            while (await reader.ReadAsync().ConfigureAwait(false))
+            {
+                result.Add(new MonthEndBalanceRow
+                {
+                    CardIdm = reader.GetString(0),
+                    YearMonth = reader.GetString(1),
+                    Balance = reader.GetInt32(2)
+                });
+            }
+
+            return result;
+        }
+
+        /// <summary>
+        /// 集計クエリ共通の日付範囲パラメータを設定する。
+        /// </summary>
+        /// <remarks>
+        /// date 列は時刻を含む TEXT のため、終端は当日 23:59:59 まで含める
+        /// （GetByDateRangeAsync と同じ扱い。ここを日付だけにすると当日分が丸ごと落ちる）。
+        /// </remarks>
+        private static void AddDateRangeParameters(SQLiteCommand command, DateTime fromDate, DateTime toDate)
+        {
+            command.Parameters.AddWithValue("@fromDate", fromDate.Date.ToString("yyyy-MM-dd HH:mm:ss"));
+            command.Parameters.AddWithValue("@toDate", toDate.Date.AddDays(1).AddSeconds(-1).ToString("yyyy-MM-dd HH:mm:ss"));
         }
 
         /// <inheritdoc/>
