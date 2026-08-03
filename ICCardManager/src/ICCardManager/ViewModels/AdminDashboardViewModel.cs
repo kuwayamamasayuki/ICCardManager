@@ -380,6 +380,12 @@ namespace ICCardManager.ViewModels
 
         partial void OnSelectedFilterChanged(AdminDashboardCardFilter value) => ApplyFilter();
 
+        /// <summary>
+        /// サマリータイルのクリックから一覧の絞り込みを切り替える。
+        /// </summary>
+        [RelayCommand]
+        public void SetFilter(AdminDashboardCardFilter filter) => SelectedFilter = filter;
+
         #endregion
 
         #region 絞り込み

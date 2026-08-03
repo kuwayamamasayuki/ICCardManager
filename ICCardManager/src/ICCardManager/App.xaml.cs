@@ -449,6 +449,7 @@ namespace ICCardManager
             services.AddTransient<Views.Dialogs.OperationLogDialog>();
             services.AddTransient<Views.Dialogs.LedgerDetailDialog>();
             services.AddTransient<Views.Dialogs.SystemManageDialog>();
+            services.AddTransient<Views.Dialogs.AdminDashboardDialog>();
             services.AddTransient<Views.Dialogs.IncompleteBusStopDialog>();
             services.AddTransient<Views.Dialogs.LedgerRowEditDialog>();
             services.AddTransient<Views.Dialogs.CardTypeSelectionDialog>();

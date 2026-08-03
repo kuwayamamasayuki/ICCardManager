@@ -170,12 +170,29 @@ namespace ICCardManager.Common.Charting
     /// </summary>
     public class ChartAxisTick
     {
+        /// <summary>ラベルを配置する箱の幅（中央揃えの基準）</summary>
+        /// <remarks>
+        /// 文字サイズが 4 段階で変わるため実測幅では中央を決められない。固定幅の箱に
+        /// <c>TextAlignment="Center"</c> で流し込み、箱ごと目盛りの中心へ寄せる。
+        /// 幅は「特大（20pt）で "2026/05" が収まる」ことを基準にしている。
+        /// </remarks>
+        public const double LabelBoxWidth = 76;
+
+        /// <summary>ラベルを配置する箱の高さ（中央揃えの基準）</summary>
+        public const double LabelBoxHeight = 22;
+
         public ChartAxisTick(double value, double position, string label)
         {
             Value = value;
             Position = position;
             Label = label;
         }
+
+        /// <summary>X 軸ラベルを目盛りの中心へ寄せるための <c>Canvas.Left</c> 値</summary>
+        public double LabelLeftCentered => Position - (LabelBoxWidth / 2.0);
+
+        /// <summary>Y 軸ラベルを目盛りの中心へ寄せるための <c>Canvas.Top</c> 値</summary>
+        public double LabelTopCentered => Position - (LabelBoxHeight / 2.0);
 
         /// <summary>目盛りが表す値（カテゴリ軸では元データ列における位置）</summary>
         public double Value { get; }
