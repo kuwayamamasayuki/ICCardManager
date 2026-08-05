@@ -93,4 +93,6 @@ THEN
 - **除外を忘れると「使っていないカードが使われているように見える」**。登録しただけのカードが「利用1回・稼働率 > 0%」になり、遊休カードの発見という目的が成立しなくなる
 - SQL で除外する場合の表現は `summary = '新規購入' OR summary LIKE '%月から繰越'`（`LedgerRepository.GetByDateRangeAsync` の ORDER BY と `Ledger.IsCarryover` に同じ表現がある）。テストでは摘要文字列をハードコードせず `SummaryGenerator.GetMidYearCarryoverSummary` の生成結果を使い、生成側と検査側が揃って壊れないようにする
 - **貸出期間は DB に残らない**。返却時に `LendingService` が貸出中レコードを物理削除し、`ic_card.last_lent_at` も null に戻す。`operation_log` にも記録がないため、「何日間貸し出されていたか」を後から集計することはできない（Issue #1692 で稼働率を「利用実績のあった日数」で定義した理由）
+- **`ledger.date` は「返却日」ではなく「カードの利用日」**（`LedgerDetail.UseDate`）。`LendingService.CreateUsageLedgersAsync` の Ledger 生成 4 経路（通常の利用／チャージ／ポイント還元／残高不足マージ）はすべて `Date = ….UseDate ?? dateGroup.Key` で、`dateGroup.Key` も `UseDate.Date`。返却時刻は `returned_at` 列に入るが集計には使わない。したがって**月・年度の帰属は乗車日で決まる**（例: 3/31 に乗車し 4/1 に返却 → 3月＝FY2025 に計上）
+- **貸出中の利用は返却まで台帳に存在しない**。行が作られるのは返却処理のときで、貸出中はカードが手元に無く利用内容を読み取れない。よって**月末時点で貸出中のカードがあると、その月の集計は未確定**（返却時に乗車日の月へ遡って追加される）。「月末に締めた数値が後から増える」ことを前提に、集計系の画面・帳票では**貸出中カードの有無を利用者に示す**こと（帳票は `ReportPreflightChecker` の「未返却のまま月をまたぐカード」警告、管理者ダッシュボードは「貸出中」「長期未返却」タイルが担う）
 - **`ic_card.is_lent` と貸出中レコードは一時的にずれる**（共有モードで他 PC の返却が反映される前など。起動時に `LendingService.CheckAndRepairLentStatusAsync` が修復する）。両方を別々の判定に使うと「貸出中0枚なのに長期未返却1枚」のような自己矛盾した集計値になる。**どちらか一方を母集団の正とし、サマリー値どうしの不変条件をテストで表明する**
