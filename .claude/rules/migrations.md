@@ -1,3 +1,10 @@
+---
+paths:
+  - "ICCardManager/src/ICCardManager/Data/Migrations/**"
+  - "ICCardManager/tests/ICCardManager.Tests/Data/Migrations/**"
+  - "ICCardManager/docs/design/02_DB設計書.md"
+---
+
 # マイグレーション作成規約
 
 ## 冪等性（二重実行安全）の必須化

@@ -1,3 +1,11 @@
+---
+paths:
+  - "ICCardManager/src/ICCardManager/Services/**"
+  - "ICCardManager/src/ICCardManager/Data/**"
+  - "ICCardManager/src/ICCardManager/Infrastructure/**"
+  - "ICCardManager/src/ICCardManager/Common/**"
+---
+
 # async / ConfigureAwait(false) 規約
 
 ## Service 層（Services/ 配下）
