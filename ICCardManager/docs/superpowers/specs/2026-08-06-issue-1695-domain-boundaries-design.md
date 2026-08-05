@@ -157,12 +157,16 @@ paths:
 
 1. `FelicaHistoryBlockDecoder` の参照元は `Infrastructure/CardReader/` 配下のみ
 2. `IStationMasterService` / `StationMasterService` の参照元は `Infrastructure/CardReader/` と DI 登録（`App.xaml.cs`）のみ
-3. `Data/` 配下に交通系語彙（`SummaryGenerator` / `StationMaster` / `EntryStation` / `ExitStation` / `BusStops`）への**実コード**参照がない
+3. `Data/` 配下に交通系固有の**判断ロジック**（`SummaryGenerator` / `StationMasterService` / `FelicaHistoryBlockDecoder` / `DetermineIsBusUsage`）への実コード参照がない
+4. 上記 3 件の走査が実際に本番ソースを covering していること（走査件数と、検査対象記号が境界内に実在すること）
 
 **固定しない:**
 
 - `SummaryGenerator` 全体の参照制限 — 22 ファイルから使われており、汎用メソッド（繰越・月計・累計・貸出中）の利用は正当。ここを縛ると正しいコードが落ちる
 - `LedgerDetail` の駅フィールドの参照制限 — 帳票・CSV・履歴編集画面からの利用が正当
+- **`Data/` からの `EntryStation` / `ExitStation` / `BusStops` / `IsBus` 参照** — 当初の案では #3 の禁止語に含めていたが、実装時に `LedgerRepository` がこれらを DB 列へマッピングしていることが判明し、**設計を修正した**。永続化層が固有列を読み書きするのは正当な責務であり境界違反ではない。禁止すべきは「データの**形**」ではなく「データの**解釈**」
+
+> 検査 #4 を追加したのは、パス解決が壊れると走査対象ゼロで #1〜#3 が無条件 green になるため（`.claude/rules/testing.md`「通るが目的を果たさないテスト」）。走査件数と、検査対象記号が境界内に実在することを併せて表明する。
 
 ### 6.2 実装方式
 
