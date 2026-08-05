@@ -258,7 +258,7 @@
                                    VerticalAlignment="Center"
                                    Margin="0,0,12,0"
                                    Foreground="{DynamicResource HintForegroundBrush}"
-                                   Text="💡 稼働率は「利用実績があった日数 ÷ 期間の日数」です。貸出したまま使われなかった日は含みません。利用回数・利用総額と併せて判断してください。"/>
+                                   Text="💡 稼働率は「利用実績があった日数 ÷ 期間の日数」です。貸出したまま使われなかった日は含みません。利用回数・利用総額と併せて判断してください。なお貸出中カードの利用は返却時に記録されるため、返却されるまで集計に含まれません（返却後、乗車した日の月に遡って加算されます）。"/>
 
                         <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
                             <TextBlock Text="集計期間:" VerticalAlignment="Center" Margin="0,0,6,0"/>
