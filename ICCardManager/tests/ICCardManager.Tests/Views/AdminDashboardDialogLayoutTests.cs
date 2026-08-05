@@ -149,32 +149,10 @@ public class AdminDashboardDialogLayoutTests
 
     #endregion
 
-    #region 用語
-
-    [Fact]
-    public void Should_not_use_bare_ic_card_term()
-    {
-        // 「ICカード」だけでは職員証と区別がつかない（CLAUDE.md の最重要ルール）
-        var bareMatches = Regex.Matches(Xaml, "ICカード")
-            .Cast<Match>()
-            .Where(m => !IsAllowedCompound(Xaml, m.Index))
-            .ToList();
-
-        bareMatches.Should().BeEmpty("交通系ICカードを指す場合は必ず「交通系ICカード」と記載すること");
-    }
-
-    private static bool IsAllowedCompound(string text, int index)
-    {
-        if (index >= 3 && text.Substring(index - 3, 3) == "交通系")
-        {
-            return true;
-        }
-
-        var tail = text.Substring(index, Math.Min(10, text.Length - index));
-        return tail.StartsWith("ICカードリーダ") || tail.StartsWith("ICカード管理");
-    }
-
-    #endregion
+    // 用語ガード（「ICカード」単独表記の禁止）は本クラスに置かない。
+    // UserFacingTextConventionTests が Views/ 配下の *.xaml を再帰的に走査しており、
+    // 本画面も自動で対象になる。ここに簡易版を重ねると許容複合語の定義が 2 か所に分かれ、
+    // 片方だけ更新されたときに検査が食い違う。
 
     private static string ExtractBlock(string pattern)
     {

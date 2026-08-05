@@ -250,10 +250,17 @@ public class AdminDashboardViewModelTests
         var vm = CreateViewModel();
         await vm.LoadOperationStatusAsync();
 
-        vm.LongTermUnreturnedDays = 30;
-        await Task.Delay(50);
+        // 再集計は fire-and-forget で走るため、固定時間の待機（Task.Delay）だと
+        // 遅いマシンで不安定になる。呼び出されたことをシグナルで待つ。
+        var reloaded = new TaskCompletionSource<bool>();
+        _service.Setup(s => s.GetOperationStatusAsync(It.IsAny<DateTime>(), 30))
+            .Callback(() => reloaded.TrySetResult(true))
+            .ReturnsAsync(CreateStatus(CreateCard()));
 
-        _service.Verify(s => s.GetOperationStatusAsync(It.IsAny<DateTime>(), 30), Times.AtLeastOnce);
+        vm.LongTermUnreturnedDays = 30;
+
+        var finished = await Task.WhenAny(reloaded.Task, Task.Delay(TimeSpan.FromSeconds(5)));
+        finished.Should().BeSameAs(reloaded.Task, "しきい値を変えたら新しい値で再集計されるべき");
     }
 
     #endregion
@@ -307,7 +314,12 @@ public class AdminDashboardViewModelTests
         vm.UsageBars.Should().HaveCount(6, "3 か月 × 2 系列");
         vm.UsageLegend.Select(l => l.Label).Should().Equal(new[] { "職員1", "職員2" });
         vm.UsageMonthLabels.Should().HaveCount(3);
-        vm.UsageAxisTicks.Should().NotBeEmpty();
+
+        // 積み上げなので Y 軸の上限は「月ごとの合計の最大値」で決まる。
+        // 系列ごとの最大値（600円）でスケールを作ると棒が枠外へはみ出す。
+        // 月合計は 300 / 600 / 900 円なので、上限は 900 を超える切りの良い値になる
+        vm.UsageAxisTicks.Last().Label.Should().Be("1,000");
+        vm.UsageAxisTicks.Should().HaveCount(6);
     }
 
     [Fact]
@@ -416,7 +428,8 @@ public class AdminDashboardViewModelTests
         vm.IsStatusError.Should().BeTrue();
         // Issue #1614: 生の例外メッセージ（英語・技術用語）をそのまま出さない
         vm.StatusMessage.Should().NotContain("SQLITE_BUSY");
-        vm.StatusMessage.Should().NotBeEmpty();
+        vm.StatusMessage.Should().Contain("運用状況の集計",
+            "どの操作が失敗したのかが分からないと利用者は次の行動を決められない");
         vm.IsBusy.Should().BeFalse();
     }
 

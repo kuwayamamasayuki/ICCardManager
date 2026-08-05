@@ -453,28 +453,91 @@ public class AdminDashboardServiceTests
 
     #region GetOperationStatusAsync — SQLite の直列アクセス
 
+    /// <summary>
+    /// リポジトリ呼び出しの保持区間が重ならないことを数えるための計測器。
+    /// </summary>
+    /// <remarks>
+    /// 呼び出し「順序」だけを見る Moq の <c>MockSequence</c> では並列化のリグレッションを
+    /// 検出できない（<c>Task.WhenAll</c> へ書き換えても開始順序は変わらないため）。
+    /// 実際の同時実行数を数える方式は `DashboardServiceTests` の Issue #1452 回帰テストと同じ。
+    /// </remarks>
+    private sealed class ConcurrencyProbe
+    {
+        private readonly object _lock = new object();
+        private int _activeCalls;
+
+        public int MaxConcurrentCalls { get; private set; }
+
+        public async Task<T> TrackAsync<T>(T value)
+        {
+            lock (_lock)
+            {
+                _activeCalls++;
+                if (_activeCalls > MaxConcurrentCalls)
+                {
+                    MaxConcurrentCalls = _activeCalls;
+                }
+            }
+
+            // 並列があれば検出されるよう少し滞留させる
+            await Task.Delay(20).ConfigureAwait(false);
+
+            lock (_lock)
+            {
+                _activeCalls--;
+            }
+
+            return value;
+        }
+    }
+
     [Fact]
-    public async Task GetOperationStatusAsync_CallsRepositoriesSequentially()
+    public async Task GetOperationStatusAsync_DoesNotOverlapRepositoryCalls()
     {
         // Issue #1452: 同一の SQLiteConnection 上でコマンドを並列実行すると SQLITE_MISUSE になる
-        var sequence = new MockSequence();
-        _settingsRepository.InSequence(sequence).Setup(r => r.GetAppSettingsAsync())
-            .ReturnsAsync(new AppSettings { WarningBalance = 10000, ReportOutputFolder = @"C:\reports" });
-        _cardRepository.InSequence(sequence).Setup(r => r.GetAllAsync())
-            .ReturnsAsync(new List<IcCard>());
-        _ledgerRepository.InSequence(sequence).Setup(r => r.GetAllLentRecordsAsync())
-            .ReturnsAsync(new List<Ledger>());
-        _ledgerRepository.InSequence(sequence).Setup(r => r.GetAllLatestBalancesAsync())
-            .ReturnsAsync(new Dictionary<string, (int, DateTime?)>());
-        _staffRepository.InSequence(sequence).Setup(r => r.GetAllAsync())
-            .ReturnsAsync(new List<Staff>());
+        var probe = new ConcurrencyProbe();
+        _settingsRepository.Setup(r => r.GetAppSettingsAsync())
+            .Returns(() => probe.TrackAsync(new AppSettings { WarningBalance = 10000, ReportOutputFolder = @"C:\reports" }));
+        _cardRepository.Setup(r => r.GetAllAsync())
+            .Returns(() => probe.TrackAsync<IEnumerable<IcCard>>(new List<IcCard> { Card(CardA) }));
+        _ledgerRepository.Setup(r => r.GetAllLentRecordsAsync())
+            .Returns(() => probe.TrackAsync(new List<Ledger>()));
+        _ledgerRepository.Setup(r => r.GetAllLatestBalancesAsync())
+            .Returns(() => probe.TrackAsync(new Dictionary<string, (int Balance, DateTime? LastUsageDate)>()));
+        _staffRepository.Setup(r => r.GetAllAsync())
+            .Returns(() => probe.TrackAsync<IEnumerable<Staff>>(new List<Staff>()));
         _reportExportStatusService
             .Setup(s => s.GetStatuses(It.IsAny<IEnumerable<ReportExportTarget>>(), It.IsAny<string>(), It.IsAny<int>(), It.IsAny<int>()))
             .Returns(new List<ReportExportStatus>());
 
-        var act = async () => await CreateService().GetOperationStatusAsync(AsOf, AppConstants.LongTermUnreturnedDays);
+        await CreateService().GetOperationStatusAsync(AsOf, AppConstants.LongTermUnreturnedDays);
 
-        await act.Should().NotThrowAsync();
+        probe.MaxConcurrentCalls.Should().Be(1,
+            "同一 SQLiteConnection 上の SQLITE_MISUSE を防ぐためリポジトリ呼び出しを直列化する（Issue #1452）");
+    }
+
+    [Fact]
+    public async Task GetAnalyticsAsync_DoesNotOverlapRepositoryCalls()
+    {
+        var probe = new ConcurrencyProbe();
+        _cardRepository.Setup(r => r.GetAllAsync())
+            .Returns(() => probe.TrackAsync<IEnumerable<IcCard>>(new List<IcCard> { Card(CardA) }));
+        _ledgerRepository.Setup(r => r.GetUsageStatsByCardAsync(It.IsAny<DateTime>(), It.IsAny<DateTime>()))
+            .Returns(() => probe.TrackAsync<IReadOnlyList<CardUsageStatsRow>>(new List<CardUsageStatsRow>()));
+        _ledgerRepository.Setup(r => r.GetMonthlyUsageByLenderAsync(It.IsAny<DateTime>(), It.IsAny<DateTime>()))
+            .Returns(() => probe.TrackAsync<IReadOnlyList<MonthlyUsageRow>>(new List<MonthlyUsageRow>()));
+        _ledgerRepository.Setup(r => r.GetMonthEndBalancesByCardAsync(It.IsAny<DateTime>(), It.IsAny<DateTime>()))
+            .Returns(() => probe.TrackAsync<IReadOnlyList<MonthEndBalanceRow>>(new List<MonthEndBalanceRow>()));
+        _ledgerRepository.Setup(r => r.GetBalancesBeforeAsync(It.IsAny<DateTime>()))
+            .Returns(() => probe.TrackAsync(new Dictionary<string, int>()));
+        _staffRepository.Setup(r => r.GetAllAsync())
+            .Returns(() => probe.TrackAsync<IEnumerable<Staff>>(new List<Staff>()));
+
+        await CreateService().GetAnalyticsAsync(
+            new DateTime(2026, 5, 1), new DateTime(2026, 7, 31), AsOf);
+
+        probe.MaxConcurrentCalls.Should().Be(1,
+            "利用分析も同じ接続を使うため直列化が必要（Issue #1452）");
     }
 
     #endregion

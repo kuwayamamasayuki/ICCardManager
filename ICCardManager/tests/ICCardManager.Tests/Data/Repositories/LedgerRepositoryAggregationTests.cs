@@ -35,6 +35,21 @@ public class LedgerRepositoryAggregationTests : IDisposable
     private const string StaffA = "STAFF00000000001";
     private const string StaffB = "STAFF00000000002";
 
+    /// <summary>
+    /// 台帳に保存されるが利用実績ではない「繰越」系の摘要。
+    /// </summary>
+    /// <remarks>
+    /// 「○月から繰越」は生成側（<see cref="SummaryGenerator"/>）から取り、テスト側で
+    /// 文字列を組み立てない。「新規購入」は本番にも生成メソッドが無くリテラルのため、
+    /// <c>CarryoverSummaries_AreRecognizedByTheProductionPredicate</c> で
+    /// <see cref="Ledger.IsCarryover"/> との対応を表明して乖離を検出する。
+    /// </remarks>
+    private static readonly string[] CarryoverSummaries =
+    {
+        "新規購入",
+        SummaryGenerator.GetMidYearCarryoverSummary(4)
+    };
+
     public LedgerRepositoryAggregationTests()
     {
         _dbContext = TestDbContextFactory.Create();
@@ -223,14 +238,28 @@ public class LedgerRepositoryAggregationTests : IDisposable
         // これらを数えると、一度も使っていないカードが「利用1回・稼働率>0」に見え、
         // 「遊んでいるカードの発見」という目的に直接反する。
         await SeedMastersAsync();
-        await InsertLedgerAsync(CardA, new DateTime(2026, 5, 1), income: 5000, summary: "新規購入");
-        await InsertLedgerAsync(CardA, new DateTime(2026, 5, 2), income: 3000,
-            summary: SummaryGenerator.GetMidYearCarryoverSummary(4));
+        foreach (var summary in CarryoverSummaries)
+        {
+            await InsertLedgerAsync(CardA, new DateTime(2026, 5, 1), income: 5000, summary: summary);
+        }
 
         var result = await _ledgerRepository.GetUsageStatsByCardAsync(
             new DateTime(2026, 5, 1), new DateTime(2026, 5, 31));
 
         result.Should().BeEmpty("繰越・新規購入だけのカードは稼働率 0% として扱われるべき");
+    }
+
+    [Fact]
+    public void CarryoverSummaries_AreRecognizedByTheProductionPredicate()
+    {
+        // テストが使う摘要が本番の「繰越」判定と一致していることを表明する。
+        // ここが揃っていないと、本番の摘要文字列が変わったときに
+        // テストだけ旧文字列で通り続け、除外漏れを検出できなくなる。
+        foreach (var summary in CarryoverSummaries)
+        {
+            new Ledger { Summary = summary }.IsCarryover.Should().BeTrue(
+                $"「{summary}」は Ledger.IsCarryover が繰越と判定する摘要であるべき");
+        }
     }
 
     [Fact]
