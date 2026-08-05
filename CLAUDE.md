@@ -45,6 +45,7 @@ WSL2では "/mnt/c/Program Files/dotnet/dotnet.exe" を使用すること。
 | `testing.md` | 条件付き（`tests/**`、07_テスト設計書） | テスト品質、ハードコーディング禁止、テスト実装原則 |
 | `async-configureawait.md` | 条件付き（`Services/**`、`Data/**`、`Infrastructure/**`、`Common/**`） | async/ConfigureAwait(false) 規約（Service 層のみ付与、ViewModels/Views/tests は付けない、CA2007、Issue #1287） |
 | `migrations.md` | 条件付き（`Data/Migrations/**`、02_DB設計書） | マイグレーション作成規約（冪等性必須、AddColumnIfNotExists 引数検証、新規マイグレーション追加手順） |
+| `domain-boundaries.md` | 条件付き（`Services/**`、`Models/**`、`Infrastructure/**`、05_クラス設計書） | 交通系固有ロジックの境界（3リング、新しいロジックの置き場所の決定木、SummaryGenerator の汎用/固有の同居、Issue #1695） |
 
 ## 参照ドキュメント
 
