@@ -6,41 +6,15 @@
 
 ## 技術スタック
 
-- **言語**: C# 10 / .NET Framework 4.8 + WPF（MVVM）
-- **DB**: SQLite3
-- **ICカードリーダー**: PaSoRi（felicalib 経由）
-- **帳票出力**: ClosedXML
-- **テスト**: xUnit + FluentAssertions + Moq
+- **言語**: C# 10 / .NET Framework 4.8 + WPF（MVVM） — .NET Core / .NET 5+ ではない
+- **ICカードリーダー**: PaSoRi（felicalib 経由。NuGet ではなくネイティブ DLL 依存）
 
-## ディレクトリ構成
+## ディレクトリ構成の注意点
 
-```
-.                                          # リポジトリルート
-├── ICCardManager/                         # 本プロジェクト本体
-│   ├── src/ICCardManager/                 # 本体（Views, ViewModels, Models, Services, Data, Dtos, Infrastructure, Common, Resources）
-│   ├── tests/                             # ユニットテスト・UIテスト
-│   ├── tools/                             # 開発支援ツール・スクリプト
-│   ├── installer/                         # InnoSetupインストーラー
-│   ├── CHANGELOG.md                       # バージョン履歴・変更内容の Single Source of Truth
-│   └── docs/
-│       ├── design/                        # 設計書（00・00a・01〜08）
-│       ├── manual/                        # ユーザー・管理者・開発者マニュアル
-│       └── 線区駅順コード/                  # 駅コード→駅名マスター
-├── CLAUDE.md                              # 本ファイル（プロジェクト指示書）
-├── docs/                                  # ルート直下の superpowers ワークフロー成果物（プラグインキャッシュ・plans）。設計 spec は ICCardManager/docs/superpowers/specs/ に集約済み（本プロジェクトの設計書は ICCardManager/docs/ 配下）
-└── tools/                                 # ルート直下の補助スクリプト群（ICCardManager/tools/ とは別物）
-```
+ツリー構成は `ls` で確認できるが、**同名ディレクトリが2組あり混同しやすい**ので注意:
 
-## よく使うコマンド
-
-> **注**: WSL2環境では `dotnet` の代わりに `"/mnt/c/Program Files/dotnet/dotnet.exe"` を使用すること。
-
-```bash
-dotnet build                                # ビルド
-dotnet test                                 # テスト実行
-dotnet run --project src/ICCardManager      # 実行
-dotnet publish -c Release                   # リリースビルド
-```
+- `docs/`（ルート直下） = superpowers ワークフロー成果物（プラグインキャッシュ・plans）。**本プロジェクトの設計書は `ICCardManager/docs/` 配下**。設計 spec は `ICCardManager/docs/superpowers/specs/` に集約済み
+- `tools/`（ルート直下） = 補助スクリプト群。`ICCardManager/tools/`（開発支援ツール）とは別物
 
 ## 最重要ルール
 
@@ -60,15 +34,17 @@ WSL2では "/mnt/c/Program Files/dotnet/dotnet.exe" を使用すること。
 
 ## 詳細ルール（`.claude/rules/` に一元化）
 
-| ファイル | 内容 |
-|---------|------|
-| `development-conventions.md` | 環境制約、DB設計原則、UI/UX原則、ICカード関連、論理削除の方針 |
-| `business-logic.md` | 状態遷移、貸出/返却フロー、バス判別、摘要生成、共有モード、残高不足処理、月次帳票 |
-| `git-workflow.md` | ブランチルール、ステージング規約 |
-| `testing.md` | テスト品質、ハードコーディング禁止、テスト実装原則 |
-| `error-messages.md` | エラーメッセージ品質（「何が/なぜ/どうすれば」3要素、禁止パターン、Issue #1275） |
-| `async-configureawait.md` | async/ConfigureAwait(false) 規約（Service 層のみ付与、ViewModels/Views/tests は付けない、CA2007、Issue #1287） |
-| `migrations.md` | マイグレーション作成規約（冪等性必須、AddColumnIfNotExists 引数検証、新規マイグレーション追加手順） |
+「読込」列が **常時** のファイルは毎セッション自動でロードされる。**条件付き** のファイルは frontmatter の `paths:` に一致するファイルを扱うときだけロードされるため、**該当作業に入る前に自分で読むこと**。
+
+| ファイル | 読込 | 内容 |
+|---------|------|------|
+| `development-conventions.md` | 常時 | 環境制約、DB設計原則、UI/UX原則、ICカード関連、論理削除の方針 |
+| `business-logic.md` | 常時 | 状態遷移、貸出/返却フロー、バス判別、摘要生成、共有モード、残高不足処理、月次帳票 |
+| `git-workflow.md` | 常時 | ブランチルール、ステージング規約 |
+| `error-messages.md` | 常時 | エラーメッセージ品質（「何が/なぜ/どうすれば」3要素、禁止パターン、Issue #1275） |
+| `testing.md` | 条件付き（`tests/**`、07_テスト設計書） | テスト品質、ハードコーディング禁止、テスト実装原則 |
+| `async-configureawait.md` | 条件付き（`Services/**`、`Data/**`、`Infrastructure/**`、`Common/**`） | async/ConfigureAwait(false) 規約（Service 層のみ付与、ViewModels/Views/tests は付けない、CA2007、Issue #1287） |
+| `migrations.md` | 条件付き（`Data/Migrations/**`、02_DB設計書） | マイグレーション作成規約（冪等性必須、AddColumnIfNotExists 引数検証、新規マイグレーション追加手順） |
 
 ## 参照ドキュメント
 

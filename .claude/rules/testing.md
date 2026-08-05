@@ -1,3 +1,9 @@
+---
+paths:
+  - "ICCardManager/tests/**"
+  - "ICCardManager/docs/design/07_テスト設計書.md"
+---
+
 # テストコード作成時の厳守事項
 
 ## テストコードの品質
