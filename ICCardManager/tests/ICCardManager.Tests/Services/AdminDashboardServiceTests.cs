@@ -73,8 +73,11 @@ public class AdminDashboardServiceTests
         IEnumerable<CardUsageStatsRow> usageStats = null,
         IEnumerable<MonthlyUsageRow> monthlyUsage = null,
         IEnumerable<MonthEndBalanceRow> monthEndBalances = null,
-        IEnumerable<Staff> staff = null)
+        IEnumerable<Staff> staff = null,
+        Dictionary<string, int> balancesBeforePeriod = null)
     {
+        _ledgerRepository.Setup(r => r.GetBalancesBeforeAsync(It.IsAny<DateTime>()))
+            .ReturnsAsync(balancesBeforePeriod ?? new Dictionary<string, int>());
         _cardRepository.Setup(r => r.GetAllAsync())
             .ReturnsAsync(cards ?? new List<IcCard>());
         _ledgerRepository.Setup(r => r.GetUsageStatsByCardAsync(It.IsAny<DateTime>(), It.IsAny<DateTime>()))
@@ -219,6 +222,49 @@ public class AdminDashboardServiceTests
 
         card.ElapsedLentDays.Should().Be(2, "古いレコードを採ると経過日数を過大に見せてしまう");
         card.IsLongTermUnreturned.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task GetOperationStatusAsync_WithStaleLentRecordButCardNotLent_DoesNotCountAsUnreturned()
+    {
+        // ic_card.is_lent = 0 なのに貸出中レコードが残る不整合は、共有モードで他 PC の
+        // 返却が反映される前などに一時的に起こる（起動時に LendingService が修復する）。
+        // ここで督促対象に数えると「貸出中 0 枚なのに長期未返却 1 枚」という自己矛盾になり、
+        // しかも貸出職員名は解決できないため督促に使えない行が出る。
+        SetupDefaults(
+            cards: new[] { Card(CardA, isLent: false) },
+            lentRecords: new[] { LentRecord(CardA, AsOf.AddDays(-60)) });
+
+        var result = await CreateService().GetOperationStatusAsync(AsOf, AppConstants.LongTermUnreturnedDays);
+
+        result.LongTermUnreturnedCount.Should().Be(0);
+        result.Cards.Single().IsLongTermUnreturned.Should().BeFalse();
+        result.Cards.Single().ElapsedLentDays.Should().BeNull();
+        result.Cards.Single().LentAt.Should().BeNull("貸出中でないカードに貸出日時を出すと返却済みか判断できない");
+    }
+
+    [Fact]
+    public async Task GetOperationStatusAsync_LongTermUnreturnedNeverExceedsLentCount()
+    {
+        // サマリータイルの数値どうしが矛盾しないことを不変条件として表明する
+        SetupDefaults(
+            cards: new[]
+            {
+                Card(CardA, isLent: true),
+                Card(CardB, number: "002", isLent: false),
+                Card("CCCC000000000003", number: "003", isLent: false)
+            },
+            lentRecords: new[]
+            {
+                LentRecord(CardA, AsOf.AddDays(-60)),
+                LentRecord(CardB, AsOf.AddDays(-60)),
+                LentRecord("CCCC000000000003", AsOf.AddDays(-60))
+            });
+
+        var result = await CreateService().GetOperationStatusAsync(AsOf, AppConstants.LongTermUnreturnedDays);
+
+        result.LongTermUnreturnedCount.Should().BeLessOrEqualTo(result.LentCardCount);
+        result.LongTermUnreturnedCount.Should().Be(1);
     }
 
     [Fact]
@@ -716,6 +762,26 @@ public class AdminDashboardServiceTests
 
         result.BalanceSeries.Single().MonthlyBalances
             .Should().Equal(new double?[] { 5000.0, 5000.0, 3000.0 });
+    }
+
+    [Fact]
+    public async Task GetAnalyticsAsync_SeedsBalanceFromBeforeThePeriod()
+    {
+        // 期間の先頭に取引が無いだけのカードは、期間前の残高を引き継いで線を描き始める。
+        // 引き継がないと「4か月目から使い始めたカード」に見えるが、実際には残高を持っていた。
+        SetupAnalyticsDefaults(
+            cards: new[] { Card(CardA) },
+            balancesBeforePeriod: new Dictionary<string, int> { [CardA] = 8000 },
+            monthEndBalances: new[]
+            {
+                new MonthEndBalanceRow { CardIdm = CardA, YearMonth = "2026-07", Balance = 3000 }
+            });
+
+        var result = await CreateService().GetAnalyticsAsync(
+            new DateTime(2026, 5, 1), new DateTime(2026, 7, 31), AsOf);
+
+        result.BalanceSeries.Single().MonthlyBalances
+            .Should().Equal(new double?[] { 8000.0, 8000.0, 3000.0 });
     }
 
     [Fact]

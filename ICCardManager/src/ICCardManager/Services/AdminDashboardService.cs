@@ -94,7 +94,14 @@ namespace ICCardManager.Services
                 var balance = balances.TryGetValue(card.CardIdm, out var balanceInfo) ? balanceInfo.Balance : 0;
                 var lastUsageDate = balances.TryGetValue(card.CardIdm, out var usageInfo) ? usageInfo.LastUsageDate : null;
 
-                latestLentByCard.TryGetValue(card.CardIdm, out var lentRecord);
+                // 貸出中でないカードは、貸出中レコードが残っていても返却済みとして扱う。
+                // ic_card.is_lent = 0 なのに貸出中レコードが残る不整合は、共有モードで他 PC の
+                // 返却が反映される前などに一時的に生じる（起動時に LendingService が修復する）。
+                // ここで督促対象に数えると「貸出中 0 枚なのに長期未返却 1 枚」という自己矛盾になり、
+                // しかも貸出職員名を解決できないため督促に使えない行が出る。
+                var lentRecord = card.IsLent && latestLentByCard.TryGetValue(card.CardIdm, out var record)
+                    ? record
+                    : null;
                 var lentAt = lentRecord?.LentAt;
                 var elapsedLentDays = lentAt.HasValue
                     ? CardUtilizationCalculator.CalculateElapsedDays(lentAt.Value, asOf)
@@ -146,6 +153,7 @@ namespace ICCardManager.Services
             var usageStats = await _ledgerRepository.GetUsageStatsByCardAsync(fromDate, toDate).ConfigureAwait(false);
             var monthlyUsage = await _ledgerRepository.GetMonthlyUsageByLenderAsync(fromDate, toDate).ConfigureAwait(false);
             var monthEndBalances = await _ledgerRepository.GetMonthEndBalancesByCardAsync(fromDate, toDate).ConfigureAwait(false);
+            var balancesBeforePeriod = await _ledgerRepository.GetBalancesBeforeAsync(fromDate).ConfigureAwait(false);
             var staffNames = await BuildStaffNameMapAsync().ConfigureAwait(false);
 
             var months = EnumerateMonthKeys(fromDate, toDate);
@@ -159,7 +167,7 @@ namespace ICCardManager.Services
                 MonthLabels = months.Select(FormatMonthLabel).ToList(),
                 Utilizations = BuildUtilizations(cards, usageStats, periodDayCount, asOf),
                 UsageSeries = BuildUsageSeries(monthlyUsage, months, staffNames),
-                BalanceSeries = BuildBalanceSeries(cards, monthEndBalances, months)
+                BalanceSeries = BuildBalanceSeries(cards, monthEndBalances, balancesBeforePeriod, months)
             };
         }
 
@@ -364,7 +372,10 @@ namespace ICCardManager.Services
         }
 
         private static IReadOnlyList<MonthlyBalanceSeries> BuildBalanceSeries(
-            IReadOnlyList<IcCard> cards, IReadOnlyList<MonthEndBalanceRow> monthEndBalances, IReadOnlyList<string> months)
+            IReadOnlyList<IcCard> cards,
+            IReadOnlyList<MonthEndBalanceRow> monthEndBalances,
+            Dictionary<string, int> balancesBeforePeriod,
+            IReadOnlyList<string> months)
         {
             var monthIndex = new Dictionary<string, int>();
             for (var i = 0; i < months.Count; i++)
@@ -392,17 +403,30 @@ namespace ICCardManager.Services
             var series = new List<MonthlyBalanceSeries>(cards.Count);
             foreach (var card in cards)
             {
+                var hasInitial = balancesBeforePeriod != null
+                    && balancesBeforePeriod.TryGetValue(card.CardIdm, out var initial);
+                var initialValue = hasInitial ? (double?)balancesBeforePeriod[card.CardIdm] : null;
+
                 if (!byCard.TryGetValue(card.CardIdm, out var values))
                 {
-                    continue;
+                    // 期間内に一度も取引が無くても、期間前に残高があるカードは水平線として描く。
+                    // 系列ごと落とすと「残高が無い」のか「使われていない」のか区別できない。
+                    if (!hasInitial)
+                    {
+                        continue;
+                    }
+
+                    values = new double?[months.Count];
                 }
 
                 series.Add(new MonthlyBalanceSeries
                 {
                     CardIdm = card.CardIdm,
                     DisplayName = card.DisplayName,
-                    // 取引の無い月は前月の残高のまま。欠測として線を切ると残高不明と誤読される
-                    MonthlyBalances = CardUtilizationCalculator.CarryForward(values)
+                    // 取引の無い月は前月の残高のまま。欠測として線を切ると残高不明と誤読される。
+                    // 期間の先頭に取引が無いだけのカードは期間前の残高を起点にする
+                    // （引き継がないと「途中から使い始めたカード」に見える）
+                    MonthlyBalances = CardUtilizationCalculator.CarryForward(values, initialValue)
                 });
             }
 

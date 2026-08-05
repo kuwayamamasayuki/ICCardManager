@@ -100,12 +100,18 @@ namespace ICCardManager.Common
         /// <summary>
         /// 残高推移の欠測月を直前の月の値で補完する。
         /// </summary>
+        /// <param name="monthlyValues">月ごとの値（取引が無い月は null）</param>
+        /// <param name="initialValue">
+        /// 集計期間の直前時点の値。期間の先頭に取引が無いだけのカードを
+        /// 「まだ残高が無かった」と誤読させないために引き継ぐ。不明な場合は null。
+        /// </param>
         /// <remarks>
         /// 残高は「その月に取引が無ければ前月末のまま」であり、欠測を線の切断として描くと
-        /// 「残高が不明になった」と誤読される。一方、先頭側の欠測（カード登録前・取引開始前）は
+        /// 「残高が不明になった」と誤読される。<paramref name="initialValue"/> も無い先頭側の欠測は
         /// 補完する根拠が無いため null のまま残し、折れ線を描き始めない。
         /// </remarks>
-        internal static IReadOnlyList<double?> CarryForward(IReadOnlyList<double?> monthlyValues)
+        internal static IReadOnlyList<double?> CarryForward(
+            IReadOnlyList<double?> monthlyValues, double? initialValue = null)
         {
             if (monthlyValues == null || monthlyValues.Count == 0)
             {
@@ -113,7 +119,7 @@ namespace ICCardManager.Common
             }
 
             var result = new double?[monthlyValues.Count];
-            double? previous = null;
+            double? previous = initialValue;
 
             for (var i = 0; i < monthlyValues.Count; i++)
             {

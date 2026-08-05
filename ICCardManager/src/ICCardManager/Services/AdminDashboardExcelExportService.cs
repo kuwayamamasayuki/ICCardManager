@@ -174,7 +174,12 @@ namespace ICCardManager.Services
         {
             var sheet = workbook.Worksheets.Add(UtilizationSheetName);
 
-            var headers = new[] { "カード", "稼働率", "利用日数", "利用回数", "利用総額", "最終利用日", "未使用日数" };
+            // 「最終利用日」は運用状況シートが全期間、こちらは集計期間内。同じ列名だと
+            // 2 つのシートで値が食い違って見えるため、列名で範囲を明示する
+            var headers = new[]
+            {
+                "カード", "稼働率", "利用日数", "利用回数", "利用総額", "期間内の最終利用日", "期間内の未使用日数"
+            };
             WriteHeaders(sheet, headers);
 
             var row = 2;

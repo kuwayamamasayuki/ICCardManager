@@ -110,5 +110,14 @@ namespace ICCardManager.Data.Repositories
         /// 取引が無かった月は行が返らない。折れ線グラフでは前月の残高を引き継ぐこと。
         /// </remarks>
         Task<IReadOnlyList<MonthEndBalanceRow>> GetMonthEndBalancesByCardAsync(DateTime fromDate, DateTime toDate);
+
+        /// <summary>
+        /// 指定日より前の最終レコード時点の残高を全カード分まとめて取得（Issue #1692）
+        /// </summary>
+        /// <remarks>
+        /// 残高推移グラフの起点に使う。集計期間の先頭に取引が無いだけのカードを
+        /// 「まだ残高が無かった」と誤読させないため、期間前の残高を引き継ぐ。
+        /// </remarks>
+        Task<Dictionary<string, int>> GetBalancesBeforeAsync(DateTime beforeDate);
     }
 }

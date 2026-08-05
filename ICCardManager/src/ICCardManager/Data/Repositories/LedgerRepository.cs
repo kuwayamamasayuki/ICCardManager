@@ -618,6 +618,36 @@ WHERE l.id = (
         // いずれも貸出中レコード（is_lent_record = 1）を除外する。貸出中レコードは
         // 「（貸出中）」というプレースホルダであり利用実績ではないため（帳票でも出力しない）。
 
+        /// <summary>
+        /// 利用実績の集計から除外する「繰越レコード」の条件。
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// 「新規購入」と「○月から繰越」（紙の出納簿から年度途中で移行したカード、Issue #510）は
+        /// 台帳に実レコードとして保存されるが、**利用実績ではない**。これを数えると
+        /// 一度も使っていないカードが「利用1回・稼働率 &gt; 0%」に見え、「遊んでいるカードの発見」
+        /// という目的に直接反する。
+        /// </para>
+        /// <para>
+        /// 条件は <c>GetByDateRangeAsync</c> の ORDER BY および <see cref="Models.Ledger.IsCarryover"/>
+        /// と同じ表現を使う（<c>summary = '新規購入' OR summary LIKE '%月から繰越'</c>）。
+        /// 対応関係は <c>LedgerRepositoryAggregationTests</c> が
+        /// <c>SummaryGenerator.GetMidYearCarryoverSummary</c> の生成結果で検証している。
+        /// </para>
+        /// <para>
+        /// <b>残高推移（<see cref="GetMonthEndBalancesByCardAsync"/>）ではこの除外を行わない。</b>
+        /// 繰越レコードの balance はその時点の正しい残高であり、除外すると移行直後の月の残高が
+        /// 欠落して折れ線を描き始められなくなるため。利用実績とは扱いが逆になる。
+        /// </para>
+        /// <para>
+        /// チャージ（受入）は除外しない。カードが運用されている証拠であり、除外すると
+        /// 「チャージしたのに稼働 0%」という別の誤解を生む。移動に使ったかどうかは
+        /// 利用総額（払出）で区別できる。
+        /// </para>
+        /// </remarks>
+        private const string ExcludeCarryoverCondition =
+            "AND summary <> '新規購入' AND summary NOT LIKE '%月から繰越'";
+
         /// <inheritdoc/>
         public async Task<IReadOnlyList<CardUsageStatsRow>> GetUsageStatsByCardAsync(DateTime fromDate, DateTime toDate)
         {
@@ -628,7 +658,7 @@ WHERE l.id = (
             using var command = connection.CreateCommand();
             // COUNT(DISTINCT DATE(date)): 同日に複数回利用しても稼働は 1 日と数える。
             // date 列は "yyyy-MM-dd HH:mm:ss" の TEXT なので DATE() で日付部分を切り出せる。
-            command.CommandText = @"SELECT card_idm,
+            command.CommandText = $@"SELECT card_idm,
        COUNT(DISTINCT DATE(date)) AS used_days,
        COUNT(*) AS usage_count,
        COALESCE(SUM(expense), 0) AS total_expense,
@@ -637,6 +667,7 @@ WHERE l.id = (
 FROM ledger
 WHERE date BETWEEN @fromDate AND @toDate
   AND is_lent_record = 0
+  {ExcludeCarryoverCondition}
 GROUP BY card_idm";
 
             AddDateRangeParameters(command, fromDate, toDate);
@@ -669,7 +700,7 @@ GROUP BY card_idm";
             // lender_idm と staff_name の両方でグループ化する。過去のインポートデータには
             // lender_idm を持たない行があり、その場合は staff_name でしか職員を区別できないため。
             // lender_idm を持つ行の統合（改姓等で staff_name が割れた場合）は呼び出し側で行う。
-            command.CommandText = @"SELECT strftime('%Y-%m', date) AS ym,
+            command.CommandText = $@"SELECT strftime('%Y-%m', date) AS ym,
        COALESCE(lender_idm, '') AS lender,
        COALESCE(staff_name, '') AS staff,
        COALESCE(SUM(expense), 0) AS total_expense,
@@ -678,6 +709,7 @@ GROUP BY card_idm";
 FROM ledger
 WHERE date BETWEEN @fromDate AND @toDate
   AND is_lent_record = 0
+  {ExcludeCarryoverCondition}
 GROUP BY ym, lender, staff
 ORDER BY ym, staff";
 
@@ -739,6 +771,41 @@ ORDER BY l.card_idm, ym";
                     YearMonth = reader.GetString(1),
                     Balance = reader.GetInt32(2)
                 });
+            }
+
+            return result;
+        }
+
+        /// <inheritdoc/>
+        public async Task<Dictionary<string, int>> GetBalancesBeforeAsync(DateTime beforeDate)
+        {
+            using var lease = await _dbContext.LeaseConnectionAsync().ConfigureAwait(false);
+            var connection = lease.Connection;
+            var result = new Dictionary<string, int>();
+
+            using var command = connection.CreateCommand();
+            // 「指定日より前の最終レコード」を相関サブクエリで特定する
+            // （GetAllLatestBalancesAsync と同じ作法）。
+            // 繰越・新規購入レコードも残高の情報源として正しいため除外しない。
+            command.CommandText = @"SELECT l.card_idm, l.balance
+FROM ledger l
+WHERE l.date < @beforeDate
+  AND l.is_lent_record = 0
+  AND l.id = (
+      SELECT l2.id FROM ledger l2
+      WHERE l2.card_idm = l.card_idm
+        AND l2.is_lent_record = 0
+        AND l2.date < @beforeDate
+      ORDER BY l2.date DESC, l2.id DESC
+      LIMIT 1
+  )";
+
+            command.Parameters.AddWithValue("@beforeDate", beforeDate.Date.ToString("yyyy-MM-dd HH:mm:ss"));
+
+            using var reader = await command.ExecuteReaderAsync().ConfigureAwait(false);
+            while (await reader.ReadAsync().ConfigureAwait(false))
+            {
+                result[reader.GetString(0)] = reader.GetInt32(1);
             }
 
             return result;

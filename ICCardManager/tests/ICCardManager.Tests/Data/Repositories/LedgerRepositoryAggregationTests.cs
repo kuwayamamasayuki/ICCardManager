@@ -7,6 +7,7 @@ using ICCardManager.Data;
 using ICCardManager.Data.Repositories;
 using ICCardManager.Infrastructure.Caching;
 using ICCardManager.Models;
+using ICCardManager.Services;
 using ICCardManager.Tests.Data;
 using Microsoft.Extensions.Options;
 using Moq;
@@ -85,13 +86,14 @@ public class LedgerRepositoryAggregationTests : IDisposable
         int balance = 1000,
         string lenderIdm = StaffA,
         string staffName = "福岡 太郎",
-        bool isLentRecord = false)
+        bool isLentRecord = false,
+        string summary = null)
         => _ledgerRepository.InsertAsync(new Ledger
         {
             CardIdm = cardIdm,
             LenderIdm = lenderIdm,
             Date = date,
-            Summary = isLentRecord ? "（貸出中）" : "鉄道（A駅～B駅）",
+            Summary = summary ?? (isLentRecord ? "（貸出中）" : "鉄道（A駅～B駅）"),
             Income = income,
             Expense = expense,
             Balance = balance,
@@ -215,6 +217,56 @@ public class LedgerRepositoryAggregationTests : IDisposable
     }
 
     [Fact]
+    public async Task GetUsageStatsByCardAsync_ExcludesCarryoverAndInitialPurchaseRecords()
+    {
+        // 「新規購入」「○月から繰越」は台帳に残るが利用実績ではない。
+        // これらを数えると、一度も使っていないカードが「利用1回・稼働率>0」に見え、
+        // 「遊んでいるカードの発見」という目的に直接反する。
+        await SeedMastersAsync();
+        await InsertLedgerAsync(CardA, new DateTime(2026, 5, 1), income: 5000, summary: "新規購入");
+        await InsertLedgerAsync(CardA, new DateTime(2026, 5, 2), income: 3000,
+            summary: SummaryGenerator.GetMidYearCarryoverSummary(4));
+
+        var result = await _ledgerRepository.GetUsageStatsByCardAsync(
+            new DateTime(2026, 5, 1), new DateTime(2026, 5, 31));
+
+        result.Should().BeEmpty("繰越・新規購入だけのカードは稼働率 0% として扱われるべき");
+    }
+
+    [Fact]
+    public async Task GetUsageStatsByCardAsync_CountsOnlyRealUsageDaysAlongsideCarryover()
+    {
+        await SeedMastersAsync();
+        await InsertLedgerAsync(CardA, new DateTime(2026, 5, 1), income: 5000, summary: "新規購入");
+        await InsertLedgerAsync(CardA, new DateTime(2026, 5, 10), expense: 210);
+
+        var row = (await _ledgerRepository.GetUsageStatsByCardAsync(
+            new DateTime(2026, 5, 1), new DateTime(2026, 5, 31))).Single();
+
+        row.UsedDayCount.Should().Be(1);
+        row.UsageCount.Should().Be(1);
+        row.LastUsageDate.Should().Be(new DateTime(2026, 5, 10));
+    }
+
+    [Fact]
+    public async Task GetUsageStatsByCardAsync_KeepsChargeRecordsAsUsage()
+    {
+        // チャージは「カードが運用されている」証拠であり除外しない。
+        // 除外すると「チャージしたのに稼働 0%」という別の誤解を生む。
+        // 移動に使ったかどうかは利用総額（払出）で区別できる。
+        await SeedMastersAsync();
+        await InsertLedgerAsync(CardA, new DateTime(2026, 5, 10), income: 3000,
+            summary: SummaryGenerator.GetChargeSummary());
+
+        var row = (await _ledgerRepository.GetUsageStatsByCardAsync(
+            new DateTime(2026, 5, 1), new DateTime(2026, 5, 31))).Single();
+
+        row.UsedDayCount.Should().Be(1);
+        row.TotalExpense.Should().Be(0);
+        row.TotalIncome.Should().Be(3000);
+    }
+
+    [Fact]
     public async Task GetUsageStatsByCardAsync_WithOnlyLentRecord_ReturnsNoRowForThatCard()
     {
         await SeedMastersAsync();
@@ -283,6 +335,24 @@ public class LedgerRepositoryAggregationTests : IDisposable
 
         result[0].LenderIdm.Should().BeEmpty();
         result[0].StaffName.Should().Be("旧 職員");
+    }
+
+    [Fact]
+    public async Task GetMonthlyUsageByLenderAsync_ExcludesCarryoverAndInitialPurchaseRecords()
+    {
+        await SeedMastersAsync();
+        await InsertLedgerAsync(CardA, new DateTime(2026, 5, 1), income: 5000, summary: "新規購入");
+        await InsertLedgerAsync(CardA, new DateTime(2026, 5, 2), income: 3000,
+            summary: SummaryGenerator.GetMidYearCarryoverSummary(4));
+        await InsertLedgerAsync(CardA, new DateTime(2026, 5, 10), expense: 210);
+
+        var result = await _ledgerRepository.GetMonthlyUsageByLenderAsync(
+            new DateTime(2026, 5, 1), new DateTime(2026, 5, 31));
+
+        // 繰越の受入額を「その月に投入した金額」として数えると実態より多く見える
+        result.Single().UsageCount.Should().Be(1);
+        result.Single().TotalIncome.Should().Be(0);
+        result.Single().TotalExpense.Should().Be(210);
     }
 
     [Fact]
@@ -397,6 +467,22 @@ public class LedgerRepositoryAggregationTests : IDisposable
     }
 
     [Fact]
+    public async Task GetMonthEndBalancesByCardAsync_KeepsCarryoverRecordsAsBalanceSource()
+    {
+        // 残高推移では繰越・新規購入も「その時点の残高」を示す正しい情報源。
+        // 利用実績の集計（稼働率）とは扱いが逆になるため、意図して除外しない。
+        await SeedMastersAsync();
+        await InsertLedgerAsync(CardA, new DateTime(2026, 5, 1), income: 5000, balance: 5000,
+            summary: SummaryGenerator.GetMidYearCarryoverSummary(4));
+
+        var result = await _ledgerRepository.GetMonthEndBalancesByCardAsync(
+            new DateTime(2026, 5, 1), new DateTime(2026, 5, 31));
+
+        result.Single().Balance.Should().Be(5000,
+            "繰越を除外すると移行直後の月の残高が欠落し、折れ線が描き始められなくなる");
+    }
+
+    [Fact]
     public async Task GetMonthEndBalancesByCardAsync_ExcludesLentRecords()
     {
         await SeedMastersAsync();
@@ -449,6 +535,82 @@ public class LedgerRepositoryAggregationTests : IDisposable
             new DateTime(2026, 5, 1), new DateTime(2026, 5, 31));
 
         result.Single().Balance.Should().Be(0, "残高 0 は欠測ではなく「使い切った」という意味を持つ");
+    }
+
+    #endregion
+
+    #region GetBalancesBeforeAsync
+
+    [Fact]
+    public async Task GetBalancesBeforeAsync_WithEmptyDatabase_ReturnsEmpty()
+    {
+        var result = await _ledgerRepository.GetBalancesBeforeAsync(new DateTime(2026, 5, 1));
+
+        result.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task GetBalancesBeforeAsync_ReturnsBalanceOfTheLastRecordBeforeTheDate()
+    {
+        await SeedMastersAsync();
+        await InsertLedgerAsync(CardA, new DateTime(2026, 3, 10), balance: 9000);
+        await InsertLedgerAsync(CardA, new DateTime(2026, 4, 20), balance: 8000);
+        await InsertLedgerAsync(CardA, new DateTime(2026, 5, 5), balance: 7000);
+
+        var result = await _ledgerRepository.GetBalancesBeforeAsync(new DateTime(2026, 5, 1));
+
+        result[CardA].Should().Be(8000, "基準日当日以降のレコードは含めない");
+    }
+
+    [Fact]
+    public async Task GetBalancesBeforeAsync_ExcludesRecordsOnTheBoundaryDate()
+    {
+        await SeedMastersAsync();
+        await InsertLedgerAsync(CardA, new DateTime(2026, 4, 30, 23, 59, 0), balance: 8000);
+        await InsertLedgerAsync(CardA, new DateTime(2026, 5, 1, 0, 0, 0), balance: 7000);
+
+        var result = await _ledgerRepository.GetBalancesBeforeAsync(new DateTime(2026, 5, 1));
+
+        result[CardA].Should().Be(8000);
+    }
+
+    [Fact]
+    public async Task GetBalancesBeforeAsync_KeepsCarryoverRecordsAsBalanceSource()
+    {
+        // 期間前の残高としては繰越・新規購入も正しい情報源
+        await SeedMastersAsync();
+        await InsertLedgerAsync(CardA, new DateTime(2026, 4, 1), income: 5000, balance: 5000,
+            summary: SummaryGenerator.GetMidYearCarryoverSummary(3));
+
+        var result = await _ledgerRepository.GetBalancesBeforeAsync(new DateTime(2026, 5, 1));
+
+        result[CardA].Should().Be(5000);
+    }
+
+    [Fact]
+    public async Task GetBalancesBeforeAsync_ExcludesLentRecords()
+    {
+        await SeedMastersAsync();
+        await InsertLedgerAsync(CardA, new DateTime(2026, 4, 10), balance: 8000);
+        await InsertLedgerAsync(CardA, new DateTime(2026, 4, 20), balance: 8000, isLentRecord: true);
+
+        var result = await _ledgerRepository.GetBalancesBeforeAsync(new DateTime(2026, 5, 1));
+
+        result.Should().HaveCount(1);
+        result[CardA].Should().Be(8000);
+    }
+
+    [Fact]
+    public async Task GetBalancesBeforeAsync_ReturnsOneEntryPerCard()
+    {
+        await SeedMastersAsync();
+        await InsertLedgerAsync(CardA, new DateTime(2026, 4, 10), balance: 8000);
+        await InsertLedgerAsync(CardB, new DateTime(2026, 4, 11), balance: 3000);
+
+        var result = await _ledgerRepository.GetBalancesBeforeAsync(new DateTime(2026, 5, 1));
+
+        result.Should().HaveCount(2);
+        result[CardB].Should().Be(3000);
     }
 
     #endregion

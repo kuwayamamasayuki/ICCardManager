@@ -369,8 +369,11 @@
                             <DataGridTextColumn Header="利用日数" Binding="{Binding UsedDayCount}" Width="1*"/>
                             <DataGridTextColumn Header="利用回数" Binding="{Binding UsageCount}" Width="1*"/>
                             <DataGridTextColumn Header="利用総額" Binding="{Binding TotalExpense, StringFormat='{}{0:N0}円'}" Width="1.2*"/>
-                            <DataGridTextColumn Header="最終利用日" Binding="{Binding LastUsageDate, StringFormat='{}{0:yyyy/MM/dd}'}" Width="1.2*"/>
-                            <DataGridTextColumn Header="未使用日数" Binding="{Binding UnusedDays}" Width="1*"/>
+                            <!-- 運用状況タブの「最終利用日」は全期間、こちらは集計期間内。
+                                 同じ列名だと、期間を短くしたときに空欄と日付が食い違って見え、
+                                 どちらが正しいのか判断できなくなるため列名で範囲を明示する -->
+                            <DataGridTextColumn Header="期間内の最終利用日" Binding="{Binding LastUsageDate, StringFormat='{}{0:yyyy/MM/dd}'}" Width="1.5*"/>
+                            <DataGridTextColumn Header="期間内の未使用日数" Binding="{Binding UnusedDays}" Width="1.3*"/>
                         </DataGrid.Columns>
                     </DataGrid>
                 </Grid>
