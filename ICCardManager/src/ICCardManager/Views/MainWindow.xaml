@@ -12,7 +12,7 @@
         d:DataContext="{d:DesignInstance Type=vm:MainViewModel}"
         Title="{x:Static conv:AppConstants.SystemName}"
         Height="700"
-        Width="1450"
+        Width="1650"
         MinWidth="{DynamicResource WindowMinWidth}"
         MinHeight="600"
         WindowStartupLocation="CenterScreen"
@@ -37,6 +37,7 @@
         <KeyBinding Key="F5" Command="{Binding OpenSettingsCommand}"/>
         <KeyBinding Key="F6" Command="{Binding OpenSystemManageCommand}"/>
         <KeyBinding Key="F7" Command="{Binding OpenHelpCommand}"/>
+        <KeyBinding Key="F8" Command="{Binding OpenAdminDashboardCommand}"/>
     </Window.InputBindings>
 
     <Grid>
@@ -63,7 +64,15 @@
                            VerticalAlignment="Center"
                            Margin="0,0,30,0"/>
 
-                <!-- ボタン群（右寄せ・折り返し対応） -->
+                <!-- ボタン群（右寄せ・折り返し対応）
+                     ボタンを増やす／ラベルを長くするときは Window の既定 Width を再検討すること。
+                     WrapPanel なので溢れても壊れないが、2 段になるとヘッダーが縦幅を食う。
+                     タイトル＋ボタン列＋余白の必要幅の実測値（Yu Gothic UI、WPF FormattedText）:
+                       小(12)=1305 / 中(14)=1441 / 大(16)=1592 / 特大(20)=1864
+                     既定 Width=1650 は「大」まで 1 段に収める値。特大は WrapPanel の折り返しに委ねる
+                     （特大を 1 段に収めるには 1900px 超が必要で、業務 PC の画面幅に収まらないため）。
+                     MinWidth は据え置き。縮めたときに 2 段になるのは意図した挙動で、
+                     最小幅を上げると低解像度環境でウィンドウを画面内に収められなくなる（Issue #1692） -->
                 <WrapPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
                     <Button Content="帳票 (F1)" Margin="5,3"
                             Style="{StaticResource AccessibleButtonStyle}"
@@ -114,10 +123,17 @@
                             AutomationProperties.Name="ヘルプを開く"
                             AutomationProperties.HelpText="ユーザーマニュアル等のドキュメントフォルダを開きます。ショートカット: F7 (F1 ではありません。F1 は帳票です)"
                             ToolTip="ヘルプを開く (F7)&#x0a;※F1 ではありません"/>
+                    <Button Content="ダッシュボード (F8)" Margin="5,3"
+                            Style="{StaticResource AccessibleButtonStyle}"
+                            Command="{Binding OpenAdminDashboardCommand}"
+                            TabIndex="8"
+                            AutomationProperties.Name="管理者ダッシュボードを開く"
+                            AutomationProperties.HelpText="貸出中・長期未返却・残額不足・帳票未出力の状況と、カードの稼働状況や利用の推移を確認します。ショートカット: F8"
+                            ToolTip="管理者ダッシュボードを開く (F8)"/>
                     <Button Content="終了" Margin="15,3,5,3"
                             Style="{StaticResource AccessibleButtonStyle}"
                             Command="{Binding ExitCommand}"
-                            TabIndex="8"
+                            TabIndex="9"
                             AutomationProperties.Name="アプリケーションを終了"
                             AutomationProperties.HelpText="アプリケーションを終了します。"
                             ToolTip="アプリケーションを終了"/>
@@ -324,7 +340,9 @@
                                     <TextBlock Text="F3: カード管理" FontSize="{DynamicResource SmallFontSize}" Margin="0,0,20,5"/>
                                     <TextBlock Text="F4: データ入出力" FontSize="{DynamicResource SmallFontSize}" Margin="0,0,20,5"/>
                                     <TextBlock Text="F5: 設定" FontSize="{DynamicResource SmallFontSize}" Margin="0,0,20,5"/>
-                                    <TextBlock Text="F6: システム管理" FontSize="{DynamicResource SmallFontSize}" Margin="0,0,0,5"/>
+                                    <TextBlock Text="F6: システム管理" FontSize="{DynamicResource SmallFontSize}" Margin="0,0,20,5"/>
+                                    <TextBlock Text="F7: ヘルプ" FontSize="{DynamicResource SmallFontSize}" Margin="0,0,20,5"/>
+                                    <TextBlock Text="F8: ダッシュボード" FontSize="{DynamicResource SmallFontSize}" Margin="0,0,0,5"/>
                                 </WrapPanel>
                             </StackPanel>
                         </Border>

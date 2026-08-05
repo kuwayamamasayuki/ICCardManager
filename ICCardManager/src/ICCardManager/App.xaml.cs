@@ -387,6 +387,9 @@ namespace ICCardManager
             services.AddSingleton<IClipboardService, WpfClipboardService>();
             services.AddSingleton<WarningService>();
             services.AddSingleton<DashboardService>();
+            // Issue #1692: 管理者ダッシュボード（メイン画面内のカード残高ダッシュボードとは別物）
+            services.AddSingleton<IAdminDashboardService, AdminDashboardService>();
+            services.AddSingleton<AdminDashboardExcelExportService>();
             // Issue #1465: Process.Start(UseShellExecute=true) のパス検証を一元化
             services.AddSingleton<ISafeFileLauncher, SafeFileLauncher>();
 
@@ -426,6 +429,7 @@ namespace ICCardManager
             services.AddTransient<LedgerRowEditViewModel>();
             services.AddTransient<ReportPreflightViewModel>();
             services.AddTransient<ConnectionDiagnosticsViewModel>();
+            services.AddTransient<AdminDashboardViewModel>();
     #if DEBUG
             // Issue #640: 仮想タッチ設定ダイアログ
             services.AddTransient<VirtualCardViewModel>();
@@ -445,6 +449,7 @@ namespace ICCardManager
             services.AddTransient<Views.Dialogs.OperationLogDialog>();
             services.AddTransient<Views.Dialogs.LedgerDetailDialog>();
             services.AddTransient<Views.Dialogs.SystemManageDialog>();
+            services.AddTransient<Views.Dialogs.AdminDashboardDialog>();
             services.AddTransient<Views.Dialogs.IncompleteBusStopDialog>();
             services.AddTransient<Views.Dialogs.LedgerRowEditDialog>();
             services.AddTransient<Views.Dialogs.CardTypeSelectionDialog>();

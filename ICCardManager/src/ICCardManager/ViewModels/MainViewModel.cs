@@ -2560,6 +2560,19 @@ public partial class MainViewModel : ViewModelBase
     }
 
     /// <summary>
+    /// 管理者ダッシュボード画面を開く（Issue #1692）
+    /// </summary>
+    /// <remarks>
+    /// メイン画面内のカード残高ダッシュボード（<see cref="CardBalanceDashboard"/>）とは別物で、
+    /// 貸出中・長期未返却・残額不足・帳票未出力の統制情報と利用分析をまとめて表示する。
+    /// </remarks>
+    [RelayCommand]
+    public void OpenAdminDashboard()
+    {
+        _navigationService.ShowDialog<Views.Dialogs.AdminDashboardDialog>();
+    }
+
+    /// <summary>
     /// ヘルプ（ドキュメントフォルダ）を開く（Issue #641）
     /// </summary>
     [RelayCommand]

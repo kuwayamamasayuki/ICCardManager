@@ -85,5 +85,50 @@ namespace ICCardManager.Common
         /// </para>
         /// </remarks>
         public const int DatabaseConnectionCheckTimeoutSeconds = 10;
+
+        // --- 管理者ダッシュボード（Issue #1692） ---
+
+        /// <summary>
+        /// 貸出からこの日数以上返却されていないカードを「長期未返却（督促対象）」として扱う既定値。
+        /// </summary>
+        /// <remarks>
+        /// 出張・研修などで数日間の貸出が常態のため 7 日では誤検知が多く督促リストとして機能しない。
+        /// 2 週間を超える貸出は返し忘れがほぼ確実であるため 14 日を既定とする。
+        /// 運用差を吸収できるよう管理者ダッシュボード画面上で
+        /// <see cref="LongTermUnreturnedDayOptions"/> から切り替えられる。
+        /// </remarks>
+        public const int LongTermUnreturnedDays = 14;
+
+        /// <summary>
+        /// 長期未返却しきい値として画面上で選択できる日数の選択肢。
+        /// </summary>
+        /// <remarks>
+        /// 恒久設定（<c>AppSettings</c>）には持たせず画面上の表示フィルタに留めている。
+        /// 設定項目化は settings テーブル・設定画面・移行処理へ波及するため別 Issue とする。
+        /// </remarks>
+        public static readonly int[] LongTermUnreturnedDayOptions = { 7, 14, 30 };
+
+        /// <summary>
+        /// 管理者ダッシュボードの利用分析における既定の集計期間（か月）。
+        /// </summary>
+        /// <remarks>
+        /// 台帳は 6 年保持されるが、既定で全期間を集計すると初回表示が重くなるうえ
+        /// 「いま何枚必要か」の判断には直近 1 年で足りるため 12 か月を既定とする。
+        /// </remarks>
+        public const int AdminDashboardDefaultMonths = 12;
+
+        /// <summary>
+        /// 管理者ダッシュボードのグラフに同時に描画する系列数の上限。
+        /// </summary>
+        /// <remarks>
+        /// これを超える系列は「その他」に集約する。色数を増やすと色覚多様性への配慮
+        /// （色相差の確保）が破綻し、凡例も読み取れなくなるため。
+        /// </remarks>
+        public const int AdminDashboardMaxSeries = 5;
+
+        /// <summary>
+        /// 管理者ダッシュボードの稼働状況グラフに表示するカード数の上限（稼働率の低い順）。
+        /// </summary>
+        public const int AdminDashboardUtilizationChartMaxCards = 15;
     }
 }

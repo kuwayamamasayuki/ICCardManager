@@ -1,0 +1,672 @@
+<Window x:Class="ICCardManager.Views.Dialogs.AdminDashboardDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:vm="clr-namespace:ICCardManager.ViewModels"
+        xmlns:conv="clr-namespace:ICCardManager.Common"
+        mc:Ignorable="d"
+        d:DataContext="{d:DesignInstance Type=vm:AdminDashboardViewModel}"
+        Title="管理者ダッシュボード"
+        Height="780"
+        Width="1100"
+        MinHeight="640"
+        MinWidth="900"
+        WindowStartupLocation="CenterOwner"
+        ResizeMode="CanResize"
+        Loaded="Window_Loaded"
+        FontSize="{DynamicResource BaseFontSize}"
+        AutomationProperties.Name="管理者ダッシュボード"
+        AutomationProperties.HelpText="貸出中・長期未返却・残額不足・帳票未出力の状況と、カードの稼働状況や利用の推移をまとめて確認します。Escapeキーで閉じます。">
+
+    <Window.Resources>
+        <BooleanToVisibilityConverter x:Key="BoolToVisibilityConverter"/>
+        <conv:ResourceKeyToBrushConverter x:Key="ResourceKeyToBrushConverter"/>
+        <conv:StringToVisibilityConverter x:Key="StringToVisibilityConverter"/>
+
+        <!-- サマリータイル。文字サイズ4段階で崩れないよう内部は DockPanel（横 StackPanel は Wrap を殺す） -->
+        <Style x:Key="SummaryTileStyle" TargetType="Button">
+            <Setter Property="Margin" Value="0,0,10,10"/>
+            <Setter Property="Padding" Value="14,10"/>
+            <Setter Property="MinWidth" Value="180"/>
+            <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+            <Setter Property="Background" Value="{DynamicResource NeutralBackgroundBrush}"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource NeutralBorderBrush}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+        </Style>
+
+        <!-- グラフの Y 軸目盛りラベル -->
+        <Style x:Key="AxisLabelStyle" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="{DynamicResource SmallFontSize}"/>
+            <Setter Property="Foreground" Value="{DynamicResource SecondaryTextBrush}"/>
+            <Setter Property="TextWrapping" Value="Wrap"/>
+        </Style>
+    </Window.Resources>
+
+    <Grid Margin="16">
+        <Grid.RowDefinitions>
+            <!-- ヘッダー（基準日時・しきい値・更新） -->
+            <RowDefinition Height="Auto"/>
+            <!-- タブ -->
+            <RowDefinition Height="*"/>
+            <!-- ステータスとボタン -->
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <!-- ヘッダー -->
+        <Border Grid.Row="0"
+                Background="{DynamicResource ReturnBackgroundBrush}"
+                BorderBrush="{DynamicResource SubtleBorderBrush}"
+                BorderThickness="1"
+                CornerRadius="4"
+                Padding="14"
+                Margin="0,0,0,12">
+            <!-- 横方向 StackPanel は子を無限幅で測定し Wrap が効かないため Grid を使う -->
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+
+                <TextBlock Grid.Column="0"
+                           TextWrapping="Wrap"
+                           VerticalAlignment="Center"
+                           Margin="0,0,12,0"
+                           AutomationProperties.Name="集計の基準日時">
+                    <Run Text="📊 集計基準:"/>
+                    <Run Text="{Binding AsOf, Mode=OneWay, StringFormat='{}{0:yyyy/MM/dd HH:mm}'}"/>
+                </TextBlock>
+
+                <!-- テキストが2行に折り返してもボタンが縦に引き伸ばされないよう中央揃え -->
+                <StackPanel Grid.Column="1"
+                            Orientation="Horizontal"
+                            VerticalAlignment="Center">
+                    <TextBlock Text="長期未返却:"
+                               VerticalAlignment="Center"
+                               Margin="0,0,6,0"/>
+                    <ComboBox ItemsSource="{Binding LongTermUnreturnedDayOptions}"
+                              SelectedItem="{Binding LongTermUnreturnedDays, Mode=TwoWay}"
+                              MinWidth="70"
+                              Margin="0,0,4,0"
+                              AutomationProperties.Name="長期未返却とみなす日数"
+                              AutomationProperties.HelpText="貸出からこの日数以上返却されていないカードを督促対象として数えます。"
+                              ToolTip="貸出からこの日数以上返却されていないカードを督促対象にする"/>
+                    <TextBlock Text="日以上"
+                               VerticalAlignment="Center"
+                               Margin="0,0,14,0"/>
+
+                    <Button Content="更新"
+                            Command="{Binding LoadOperationStatusCommand}"
+                            Padding="18,8"
+                            MinWidth="90"
+                            AutomationProperties.Name="運用状況を更新"
+                            AutomationProperties.HelpText="現在の運用状況をもう一度集計します。"
+                            ToolTip="現在の運用状況をもう一度集計する"/>
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <TabControl Grid.Row="1" x:Name="DashboardTabs" SelectionChanged="DashboardTabs_SelectionChanged">
+
+            <!-- ===== タブ1: 運用状況 ===== -->
+            <TabItem Header="運用状況" AutomationProperties.Name="運用状況タブ">
+                <Grid Margin="10">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                    </Grid.RowDefinitions>
+
+                    <!-- サマリータイル。UniformGrid は特大文字で切れるため WrapPanel を使う -->
+                    <WrapPanel Grid.Row="0" Margin="0,0,0,8">
+                        <Button Style="{StaticResource SummaryTileStyle}"
+                                Command="{Binding SetFilterCommand}"
+                                CommandParameter="{x:Static vm:AdminDashboardCardFilter.Lent}"
+                                AutomationProperties.Name="貸出中のカード枚数。押すと一覧を貸出中に絞り込みます。"
+                                ToolTip="押すと一覧を貸出中に絞り込む">
+                            <DockPanel LastChildFill="True">
+                                <TextBlock DockPanel.Dock="Top"
+                                           Text="🔶 貸出中"
+                                           TextWrapping="Wrap"
+                                           Foreground="{DynamicResource SecondaryTextBrush}"/>
+                                <TextBlock Text="{Binding OperationStatus.LentCardCount, Mode=OneWay, StringFormat='{}{0} 枚'}"
+                                           TextWrapping="Wrap"
+                                           FontSize="{DynamicResource LargeFontSize}"
+                                           FontWeight="Bold"/>
+                            </DockPanel>
+                        </Button>
+
+                        <Button Style="{StaticResource SummaryTileStyle}"
+                                Command="{Binding SetFilterCommand}"
+                                CommandParameter="{x:Static vm:AdminDashboardCardFilter.LongTermUnreturned}"
+                                AutomationProperties.Name="長期未返却のカード枚数。押すと一覧を督促対象に絞り込みます。"
+                                ToolTip="押すと一覧を督促対象に絞り込む">
+                            <DockPanel LastChildFill="True">
+                                <TextBlock DockPanel.Dock="Top"
+                                           Text="⏰ 長期未返却"
+                                           TextWrapping="Wrap"
+                                           Foreground="{DynamicResource SecondaryTextBrush}"/>
+                                <TextBlock Text="{Binding OperationStatus.LongTermUnreturnedCount, Mode=OneWay, StringFormat='{}{0} 枚'}"
+                                           TextWrapping="Wrap"
+                                           FontSize="{DynamicResource LargeFontSize}"
+                                           FontWeight="Bold"
+                                           Foreground="{DynamicResource DangerTextBrush}"/>
+                            </DockPanel>
+                        </Button>
+
+                        <Button Style="{StaticResource SummaryTileStyle}"
+                                Command="{Binding SetFilterCommand}"
+                                CommandParameter="{x:Static vm:AdminDashboardCardFilter.LowBalance}"
+                                AutomationProperties.Name="残額不足のカード枚数。押すと一覧を残額不足に絞り込みます。"
+                                ToolTip="押すと一覧を残額不足に絞り込む">
+                            <DockPanel LastChildFill="True">
+                                <TextBlock DockPanel.Dock="Top"
+                                           Text="💰 残額不足"
+                                           TextWrapping="Wrap"
+                                           Foreground="{DynamicResource SecondaryTextBrush}"/>
+                                <TextBlock Text="{Binding OperationStatus.LowBalanceCount, Mode=OneWay, StringFormat='{}{0} 枚'}"
+                                           TextWrapping="Wrap"
+                                           FontSize="{DynamicResource LargeFontSize}"
+                                           FontWeight="Bold"
+                                           Foreground="{DynamicResource DangerTextBrush}"/>
+                            </DockPanel>
+                        </Button>
+
+                        <Button Style="{StaticResource SummaryTileStyle}"
+                                Command="{Binding SetFilterCommand}"
+                                CommandParameter="{x:Static vm:AdminDashboardCardFilter.ReportNotExported}"
+                                AutomationProperties.Name="当月の帳票が未出力のカード枚数。押すと一覧を未出力に絞り込みます。"
+                                ToolTip="押すと一覧を帳票未出力に絞り込む">
+                            <DockPanel LastChildFill="True">
+                                <TextBlock DockPanel.Dock="Top"
+                                           Text="📄 当月帳票 未出力"
+                                           TextWrapping="Wrap"
+                                           Foreground="{DynamicResource SecondaryTextBrush}"/>
+                                <TextBlock Text="{Binding OperationStatus.ReportNotExportedCount, Mode=OneWay, StringFormat='{}{0} 枚'}"
+                                           TextWrapping="Wrap"
+                                           FontSize="{DynamicResource LargeFontSize}"
+                                           FontWeight="Bold"/>
+                            </DockPanel>
+                        </Button>
+
+                        <Button Style="{StaticResource SummaryTileStyle}"
+                                Command="{Binding SetFilterCommand}"
+                                CommandParameter="{x:Static vm:AdminDashboardCardFilter.All}"
+                                AutomationProperties.Name="集計対象のカード枚数。押すと絞り込みを解除します。"
+                                ToolTip="押すと絞り込みを解除する">
+                            <DockPanel LastChildFill="True">
+                                <TextBlock DockPanel.Dock="Top"
+                                           Text="🗂 対象カード"
+                                           TextWrapping="Wrap"
+                                           Foreground="{DynamicResource SecondaryTextBrush}"/>
+                                <TextBlock Text="{Binding OperationStatus.TotalCardCount, Mode=OneWay, StringFormat='{}{0} 枚'}"
+                                           TextWrapping="Wrap"
+                                           FontSize="{DynamicResource LargeFontSize}"
+                                           FontWeight="Bold"/>
+                            </DockPanel>
+                        </Button>
+                    </WrapPanel>
+
+                    <DataGrid Grid.Row="1"
+                              ItemsSource="{Binding FilteredCards}"
+                              Style="{DynamicResource AccessibleDataGridStyle}"
+                              AutoGenerateColumns="False"
+                              IsReadOnly="True"
+                              GridLinesVisibility="Horizontal"
+                              RowHeaderWidth="0"
+                              AlternatingRowBackground="{DynamicResource AlternatingRowBrush}"
+                              AutomationProperties.Name="カードごとの運用状況一覧">
+                        <DataGrid.RowStyle>
+                            <Style TargetType="DataGridRow">
+                                <Style.Triggers>
+                                    <!-- 色だけに依存しないよう、各列のテキストでも状態が読める -->
+                                    <DataTrigger Binding="{Binding HasAttention}" Value="True">
+                                        <Setter Property="Background" Value="{DynamicResource WarningBackgroundBrush}"/>
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </DataGrid.RowStyle>
+                        <DataGrid.Columns>
+                            <DataGridTextColumn Header="カード" Binding="{Binding DisplayName}" Width="1.6*"/>
+                            <DataGridTextColumn Header="貸出職員" Binding="{Binding LentStaffName}" Width="1.2*"/>
+                            <DataGridTextColumn Header="貸出日時" Binding="{Binding LentAt, StringFormat='{}{0:yyyy/MM/dd HH:mm}'}" Width="1.3*"/>
+                            <DataGridTextColumn Header="経過日数" Binding="{Binding ElapsedLentDays}" Width="0.8*"/>
+                            <DataGridTextColumn Header="残額" Binding="{Binding CurrentBalance, StringFormat='{}{0:N0}円'}" Width="1*"/>
+                            <DataGridTextColumn Header="当月帳票" Binding="{Binding ReportStateText}" Width="1*"/>
+                            <DataGridTextColumn Header="最終利用日" Binding="{Binding LastUsageDate, StringFormat='{}{0:yyyy/MM/dd}'}" Width="1.1*"/>
+                        </DataGrid.Columns>
+                    </DataGrid>
+                </Grid>
+            </TabItem>
+
+            <!-- ===== タブ2: 稼働状況 ===== -->
+            <TabItem Header="稼働状況" x:Name="UtilizationTab" AutomationProperties.Name="稼働状況タブ">
+                <Grid Margin="10">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                    </Grid.RowDefinitions>
+
+                    <Grid Grid.Row="0" Margin="0,0,0,8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+
+                        <TextBlock Grid.Column="0"
+                                   TextWrapping="Wrap"
+                                   VerticalAlignment="Center"
+                                   Margin="0,0,12,0"
+                                   Foreground="{DynamicResource HintForegroundBrush}"
+                                   Text="💡 稼働率は「利用実績があった日数 ÷ 期間の日数」です。貸出したまま使われなかった日は含みません。利用回数・利用総額と併せて判断してください。なお貸出中カードの利用は返却時に記録されるため、返却されるまで集計に含まれません（返却後、乗車した日の月に遡って加算されます）。"/>
+
+                        <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                            <TextBlock Text="集計期間:" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                            <ComboBox ItemsSource="{Binding AnalysisMonthOptions}"
+                                      SelectedItem="{Binding AnalysisMonths, Mode=TwoWay}"
+                                      MinWidth="70"
+                                      Margin="0,0,4,0"
+                                      AutomationProperties.Name="分析の集計期間（か月）"
+                                      ToolTip="さかのぼって集計する月数"/>
+                            <TextBlock Text="か月" VerticalAlignment="Center" Margin="0,0,10,0"/>
+                            <Button Content="再集計"
+                                    Command="{Binding LoadAnalyticsCommand}"
+                                    Padding="16,8"
+                                    MinWidth="90"
+                                    AutomationProperties.Name="指定した期間で再集計"
+                                    ToolTip="指定した期間で集計し直す"/>
+                        </StackPanel>
+                    </Grid>
+
+                    <!-- グラフ本体。文字サイズを大きくしても軸が崩れないよう固定サイズ＋スクロール -->
+                    <ScrollViewer Grid.Row="1"
+                                  HorizontalScrollBarVisibility="Auto"
+                                  VerticalScrollBarVisibility="Disabled"
+                                  MaxHeight="260"
+                                  Margin="0,0,0,8">
+                        <Grid Width="{Binding UtilizationCanvasWidth, Mode=OneWay}"
+                              Height="{Binding UtilizationChartHeight, Mode=OneWay}"
+                              AutomationProperties.Name="カード別の稼働率グラフ"
+                              AutomationProperties.HelpText="同じ内容を下の一覧でも確認できます。">
+
+                            <ItemsControl ItemsSource="{Binding UtilizationBars}">
+                                <ItemsControl.ItemsPanel>
+                                    <ItemsPanelTemplate><Canvas/></ItemsPanelTemplate>
+                                </ItemsControl.ItemsPanel>
+                                <ItemsControl.ItemContainerStyle>
+                                    <Style TargetType="ContentPresenter">
+                                        <Setter Property="Canvas.Left" Value="{Binding Left}"/>
+                                        <Setter Property="Canvas.Top" Value="{Binding Top}"/>
+                                    </Style>
+                                </ItemsControl.ItemContainerStyle>
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <Rectangle Width="{Binding Width}"
+                                                   Height="{Binding Height}"
+                                                   RadiusX="2" RadiusY="2"
+                                                   Fill="{Binding BrushKey, Converter={StaticResource ResourceKeyToBrushConverter}}"/>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+
+                            <ItemsControl ItemsSource="{Binding UtilizationCategoryLabels}">
+                                <ItemsControl.ItemsPanel>
+                                    <ItemsPanelTemplate><Canvas/></ItemsPanelTemplate>
+                                </ItemsControl.ItemsPanel>
+                                <ItemsControl.ItemContainerStyle>
+                                    <Style TargetType="ContentPresenter">
+                                        <Setter Property="Canvas.Left" Value="0"/>
+                                        <Setter Property="Canvas.Top" Value="{Binding LabelTopCentered}"/>
+                                    </Style>
+                                </ItemsControl.ItemContainerStyle>
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <TextBlock Text="{Binding Label}"
+                                                   Width="162"
+                                                   TextTrimming="CharacterEllipsis"
+                                                   TextWrapping="NoWrap"
+                                                   ToolTip="{Binding Label}"
+                                                   Style="{StaticResource AxisLabelStyle}"/>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+
+                            <ItemsControl ItemsSource="{Binding UtilizationAxisTicks}">
+                                <ItemsControl.ItemsPanel>
+                                    <ItemsPanelTemplate><Canvas/></ItemsPanelTemplate>
+                                </ItemsControl.ItemsPanel>
+                                <ItemsControl.ItemContainerStyle>
+                                    <Style TargetType="ContentPresenter">
+                                        <Setter Property="Canvas.Left" Value="{Binding LabelLeftCentered}"/>
+                                        <Setter Property="Canvas.Top" Value="0"/>
+                                    </Style>
+                                </ItemsControl.ItemContainerStyle>
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <TextBlock Text="{Binding Label}"
+                                                   Width="76"
+                                                   TextAlignment="Center"
+                                                   Style="{StaticResource AxisLabelStyle}"/>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </Grid>
+                    </ScrollViewer>
+
+                    <!-- グラフと同じ内容の一覧。図形だけに依存せずスクリーンリーダーでも読める -->
+                    <DataGrid Grid.Row="2"
+                              ItemsSource="{Binding Analytics.Utilizations}"
+                              Style="{DynamicResource AccessibleDataGridStyle}"
+                              AutoGenerateColumns="False"
+                              IsReadOnly="True"
+                              GridLinesVisibility="Horizontal"
+                              RowHeaderWidth="0"
+                              AlternatingRowBackground="{DynamicResource AlternatingRowBrush}"
+                              AutomationProperties.Name="カード別の稼働状況一覧">
+                        <DataGrid.Columns>
+                            <DataGridTextColumn Header="カード" Binding="{Binding DisplayName}" Width="1.8*"/>
+                            <DataGridTextColumn Header="稼働率" Binding="{Binding UtilizationRate, StringFormat='{}{0:P1}'}" Width="1*"/>
+                            <DataGridTextColumn Header="利用日数" Binding="{Binding UsedDayCount}" Width="1*"/>
+                            <DataGridTextColumn Header="利用回数" Binding="{Binding UsageCount}" Width="1*"/>
+                            <DataGridTextColumn Header="利用総額" Binding="{Binding TotalExpense, StringFormat='{}{0:N0}円'}" Width="1.2*"/>
+                            <!-- 運用状況タブの「最終利用日」は全期間、こちらは集計期間内。
+                                 同じ列名だと、期間を短くしたときに空欄と日付が食い違って見え、
+                                 どちらが正しいのか判断できなくなるため列名で範囲を明示する -->
+                            <DataGridTextColumn Header="期間内の最終利用日" Binding="{Binding LastUsageDate, StringFormat='{}{0:yyyy/MM/dd}'}" Width="1.5*"/>
+                            <DataGridTextColumn Header="期間内の未使用日数" Binding="{Binding UnusedDays}" Width="1.3*"/>
+                        </DataGrid.Columns>
+                    </DataGrid>
+                </Grid>
+            </TabItem>
+
+            <!-- ===== タブ3: 利用推移 ===== -->
+            <TabItem Header="利用推移" x:Name="TrendTab" AutomationProperties.Name="利用推移タブ">
+                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                    <Grid Margin="10">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                        </Grid.RowDefinitions>
+
+                        <TextBlock Grid.Row="0"
+                                   Text="職員別の月次利用額"
+                                   FontWeight="Bold"
+                                   TextWrapping="Wrap"
+                                   Margin="0,0,0,6"/>
+
+                        <ScrollViewer Grid.Row="1"
+                                      HorizontalScrollBarVisibility="Auto"
+                                      VerticalScrollBarVisibility="Disabled">
+                            <Grid Width="{Binding TrendCanvasWidth, Mode=OneWay}"
+                                  Height="{Binding TrendCanvasHeight, Mode=OneWay}"
+                                  AutomationProperties.Name="職員別の月次利用額グラフ"
+                                  AutomationProperties.HelpText="同じ内容を下の凡例と稼働状況タブの一覧でも確認できます。">
+
+                                <ItemsControl ItemsSource="{Binding UsageAxisTicks}">
+                                    <ItemsControl.ItemsPanel>
+                                        <ItemsPanelTemplate><Canvas/></ItemsPanelTemplate>
+                                    </ItemsControl.ItemsPanel>
+                                    <ItemsControl.ItemContainerStyle>
+                                        <Style TargetType="ContentPresenter">
+                                            <Setter Property="Canvas.Left" Value="0"/>
+                                            <Setter Property="Canvas.Top" Value="{Binding LabelTopCentered}"/>
+                                        </Style>
+                                    </ItemsControl.ItemContainerStyle>
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <TextBlock Text="{Binding Label}"
+                                                       Width="66"
+                                                       TextAlignment="Right"
+                                                       Style="{StaticResource AxisLabelStyle}"/>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+
+                                <ItemsControl ItemsSource="{Binding UsageBars}">
+                                    <ItemsControl.ItemsPanel>
+                                        <ItemsPanelTemplate><Canvas/></ItemsPanelTemplate>
+                                    </ItemsControl.ItemsPanel>
+                                    <ItemsControl.ItemContainerStyle>
+                                        <Style TargetType="ContentPresenter">
+                                            <Setter Property="Canvas.Left" Value="{Binding Left}"/>
+                                            <Setter Property="Canvas.Top" Value="{Binding Top}"/>
+                                        </Style>
+                                    </ItemsControl.ItemContainerStyle>
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <Rectangle Width="{Binding Width}"
+                                                       Height="{Binding Height}"
+                                                       Fill="{Binding BrushKey, Converter={StaticResource ResourceKeyToBrushConverter}}"/>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+
+                                <ItemsControl ItemsSource="{Binding UsageMonthLabels}">
+                                    <ItemsControl.ItemsPanel>
+                                        <ItemsPanelTemplate><Canvas/></ItemsPanelTemplate>
+                                    </ItemsControl.ItemsPanel>
+                                    <ItemsControl.ItemContainerStyle>
+                                        <Style TargetType="ContentPresenter">
+                                            <Setter Property="Canvas.Left" Value="{Binding LabelLeftCentered}"/>
+                                            <Setter Property="Canvas.Top" Value="246"/>
+                                        </Style>
+                                    </ItemsControl.ItemContainerStyle>
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <TextBlock Text="{Binding Label}"
+                                                       Width="76"
+                                                       TextAlignment="Center"
+                                                       Style="{StaticResource AxisLabelStyle}"/>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                            </Grid>
+                        </ScrollViewer>
+
+                        <!-- 凡例。特大文字でも折り返せるよう WrapPanel -->
+                        <ItemsControl Grid.Row="2" ItemsSource="{Binding UsageLegend}" Margin="0,6,0,16">
+                            <ItemsControl.ItemsPanel>
+                                <ItemsPanelTemplate><WrapPanel/></ItemsPanelTemplate>
+                            </ItemsControl.ItemsPanel>
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <Border Margin="0,0,14,4" Padding="0">
+                                        <DockPanel LastChildFill="True">
+                                            <Rectangle DockPanel.Dock="Left"
+                                                       Width="14" Height="14"
+                                                       Margin="0,0,6,0"
+                                                       VerticalAlignment="Center"
+                                                       Fill="{Binding BrushKey, Converter={StaticResource ResourceKeyToBrushConverter}}"/>
+                                            <TextBlock Text="{Binding Label}"
+                                                       TextWrapping="Wrap"
+                                                       VerticalAlignment="Center"/>
+                                        </DockPanel>
+                                    </Border>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+
+                        <TextBlock Grid.Row="3"
+                                   Text="カード別の残高推移"
+                                   FontWeight="Bold"
+                                   TextWrapping="Wrap"
+                                   Margin="0,0,0,6"/>
+
+                        <ScrollViewer Grid.Row="4"
+                                      HorizontalScrollBarVisibility="Auto"
+                                      VerticalScrollBarVisibility="Disabled">
+                            <Grid Width="{Binding TrendCanvasWidth, Mode=OneWay}"
+                                  Height="{Binding TrendCanvasHeight, Mode=OneWay}"
+                                  AutomationProperties.Name="カード別の残高推移グラフ"
+                                  AutomationProperties.HelpText="描画するカードは下のチェックボックスで選べます。">
+
+                                <ItemsControl ItemsSource="{Binding BalanceAxisTicks}">
+                                    <ItemsControl.ItemsPanel>
+                                        <ItemsPanelTemplate><Canvas/></ItemsPanelTemplate>
+                                    </ItemsControl.ItemsPanel>
+                                    <ItemsControl.ItemContainerStyle>
+                                        <Style TargetType="ContentPresenter">
+                                            <Setter Property="Canvas.Left" Value="0"/>
+                                            <Setter Property="Canvas.Top" Value="{Binding LabelTopCentered}"/>
+                                        </Style>
+                                    </ItemsControl.ItemContainerStyle>
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <TextBlock Text="{Binding Label}"
+                                                       Width="66"
+                                                       TextAlignment="Right"
+                                                       Style="{StaticResource AxisLabelStyle}"/>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+
+                                <ItemsControl ItemsSource="{Binding BalanceLines}">
+                                    <ItemsControl.ItemsPanel>
+                                        <ItemsPanelTemplate><Canvas/></ItemsPanelTemplate>
+                                    </ItemsControl.ItemsPanel>
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <Canvas>
+                                                <Polyline Points="{Binding Points}"
+                                                          StrokeThickness="2"
+                                                          Stroke="{Binding BrushKey, Converter={StaticResource ResourceKeyToBrushConverter}}"/>
+                                                <ItemsControl ItemsSource="{Binding Markers}">
+                                                    <ItemsControl.ItemsPanel>
+                                                        <ItemsPanelTemplate><Canvas/></ItemsPanelTemplate>
+                                                    </ItemsControl.ItemsPanel>
+                                                    <ItemsControl.ItemContainerStyle>
+                                                        <Style TargetType="ContentPresenter">
+                                                            <Setter Property="Canvas.Left" Value="{Binding MarkerLeft}"/>
+                                                            <Setter Property="Canvas.Top" Value="{Binding MarkerTop}"/>
+                                                        </Style>
+                                                    </ItemsControl.ItemContainerStyle>
+                                                    <ItemsControl.ItemTemplate>
+                                                        <DataTemplate>
+                                                            <Ellipse Width="{Binding MarkerSize}"
+                                                                     Height="{Binding MarkerSize}"
+                                                                     Fill="{Binding DataContext.BrushKey, RelativeSource={RelativeSource AncestorType=ContentPresenter, AncestorLevel=2}, Converter={StaticResource ResourceKeyToBrushConverter}}"/>
+                                                        </DataTemplate>
+                                                    </ItemsControl.ItemTemplate>
+                                                </ItemsControl>
+                                            </Canvas>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+
+                                <ItemsControl ItemsSource="{Binding BalanceMonthLabels}">
+                                    <ItemsControl.ItemsPanel>
+                                        <ItemsPanelTemplate><Canvas/></ItemsPanelTemplate>
+                                    </ItemsControl.ItemsPanel>
+                                    <ItemsControl.ItemContainerStyle>
+                                        <Style TargetType="ContentPresenter">
+                                            <Setter Property="Canvas.Left" Value="{Binding LabelLeftCentered}"/>
+                                            <Setter Property="Canvas.Top" Value="246"/>
+                                        </Style>
+                                    </ItemsControl.ItemContainerStyle>
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <TextBlock Text="{Binding Label}"
+                                                       Width="76"
+                                                       TextAlignment="Center"
+                                                       Style="{StaticResource AxisLabelStyle}"/>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                            </Grid>
+                        </ScrollViewer>
+
+                        <ItemsControl Grid.Row="5" ItemsSource="{Binding BalanceSeriesOptions}" Margin="0,6,0,0">
+                            <ItemsControl.ItemsPanel>
+                                <ItemsPanelTemplate><WrapPanel/></ItemsPanelTemplate>
+                            </ItemsControl.ItemsPanel>
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <CheckBox IsChecked="{Binding IsSelected, Mode=TwoWay}"
+                                              Margin="0,0,14,4"
+                                              VerticalContentAlignment="Center"
+                                              AutomationProperties.Name="{Binding DisplayName}"
+                                              AutomationProperties.HelpText="残高推移グラフに描画するかどうかを切り替えます。">
+                                        <TextBlock Text="{Binding DisplayName}" TextWrapping="Wrap"/>
+                                    </CheckBox>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </Grid>
+                </ScrollViewer>
+            </TabItem>
+        </TabControl>
+
+        <!-- ステータスとボタン -->
+        <Grid Grid.Row="2" Margin="0,12,0,0">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+
+            <TextBlock Grid.Column="0"
+                       Text="{Binding StatusMessage}"
+                       TextWrapping="Wrap"
+                       VerticalAlignment="Center"
+                       Margin="0,0,12,0"
+                       AutomationProperties.LiveSetting="Polite"
+                       AutomationProperties.Name="操作の結果"/>
+
+            <!-- テキストが2行に折り返してもボタンが縦に引き伸ばされないよう中央揃え -->
+            <StackPanel Grid.Column="1"
+                        Orientation="Horizontal"
+                        VerticalAlignment="Center">
+                <Button Content="出力したファイルを開く"
+                        Command="{Binding OpenExportedFileCommand}"
+                        Padding="16,10"
+                        Margin="0,0,10,0"
+                        Visibility="{Binding LastExportedFile, Converter={StaticResource StringToVisibilityConverter}}"
+                        AutomationProperties.Name="出力したファイルを開く"
+                        ToolTip="直前に出力した Excel ファイルを開く"/>
+
+                <Button Content="Excel出力"
+                        Command="{Binding ExportToExcelCommand}"
+                        Padding="20,10"
+                        MinWidth="120"
+                        Margin="0,0,10,0"
+                        Background="{DynamicResource HeaderBackgroundBrush}"
+                        Foreground="{DynamicResource OnPrimaryBrush}"
+                        AutomationProperties.Name="集計結果をExcelへ出力"
+                        AutomationProperties.HelpText="運用状況と利用分析をExcelファイルへ出力します。"
+                        ToolTip="運用状況と利用分析をExcelファイルへ出力する"/>
+
+                <Button Content="閉じる"
+                        Padding="20,10"
+                        MinWidth="100"
+                        IsCancel="True"
+                        AutomationProperties.Name="閉じる"
+                        AutomationProperties.HelpText="ダイアログを閉じます。"
+                        ToolTip="ダイアログを閉じる (Escape)"/>
+            </StackPanel>
+        </Grid>
+
+        <!-- 処理中オーバーレイ。6年分の集計は時間がかかるため実行中であることを明示する -->
+        <Border Grid.RowSpan="3"
+                Background="{DynamicResource OverlayBrush}"
+                Visibility="{Binding IsBusy, Converter={StaticResource BoolToVisibilityConverter}}">
+            <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
+                <ProgressBar IsIndeterminate="{Binding IsIndeterminate}"
+                             Value="{Binding ProgressValue}"
+                             Maximum="{Binding ProgressMax}"
+                             Width="200" Height="20"
+                             Foreground="{DynamicResource PrimaryBrush}"/>
+                <TextBlock Text="{Binding BusyMessage}"
+                           Foreground="{DynamicResource OnPrimaryBrush}"
+                           FontSize="{DynamicResource BaseFontSize}"
+                           TextWrapping="Wrap"
+                           Margin="0,10,0,0"
+                           HorizontalAlignment="Center"
+                           AutomationProperties.LiveSetting="Assertive"
+                           AutomationProperties.Name="集計の実行状況"/>
+            </StackPanel>
+        </Border>
+    </Grid>
+</Window>

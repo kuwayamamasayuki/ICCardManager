@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
+using ICCardManager.Dtos;
 using ICCardManager.Models;
 
 namespace ICCardManager.Data.Repositories
@@ -87,5 +88,36 @@ namespace ICCardManager.Data.Repositories
         /// </summary>
         Task<HashSet<(string CardIdm, DateTime Date, string Summary, int Income, int Expense, int Balance)>> GetExistingLedgerKeysAsync(
             IEnumerable<string> cardIdms);
+
+        /// <summary>
+        /// 指定期間のカード別利用実績を集計して取得（管理者ダッシュボードの稼働状況用、Issue #1692）
+        /// </summary>
+        /// <remarks>
+        /// 台帳は 6 年分保持されるため、全件を読み出さず SQL 側で GROUP BY する。
+        /// 貸出中レコード（<c>is_lent_record = 1</c>）は「利用」ではないため除外する。
+        /// </remarks>
+        Task<IReadOnlyList<CardUsageStatsRow>> GetUsageStatsByCardAsync(DateTime fromDate, DateTime toDate);
+
+        /// <summary>
+        /// 指定期間の月別 × 貸出職員別の利用額を集計して取得（Issue #1692）
+        /// </summary>
+        Task<IReadOnlyList<MonthlyUsageRow>> GetMonthlyUsageByLenderAsync(DateTime fromDate, DateTime toDate);
+
+        /// <summary>
+        /// 指定期間のカード別 × 月別の月末残高を取得（Issue #1692）
+        /// </summary>
+        /// <remarks>
+        /// 取引が無かった月は行が返らない。折れ線グラフでは前月の残高を引き継ぐこと。
+        /// </remarks>
+        Task<IReadOnlyList<MonthEndBalanceRow>> GetMonthEndBalancesByCardAsync(DateTime fromDate, DateTime toDate);
+
+        /// <summary>
+        /// 指定日より前の最終レコード時点の残高を全カード分まとめて取得（Issue #1692）
+        /// </summary>
+        /// <remarks>
+        /// 残高推移グラフの起点に使う。集計期間の先頭に取引が無いだけのカードを
+        /// 「まだ残高が無かった」と誤読させないため、期間前の残高を引き継ぐ。
+        /// </remarks>
+        Task<Dictionary<string, int>> GetBalancesBeforeAsync(DateTime beforeDate);
     }
 }
