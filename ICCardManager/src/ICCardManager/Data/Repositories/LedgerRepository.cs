@@ -1232,36 +1232,79 @@ WHERE card_idm IN ({string.Join(", ", parameters)})";
         /// <inheritdoc/>
         public async Task<bool> ReplaceDetailsAsync(int ledgerId, IEnumerable<LedgerDetail> details, SQLiteTransaction transaction)
         {
-            ConnectionLease lease = null;
+            // Issue #1724: DELETE と INSERT は必ず同一トランザクションで実行する。
+            // 旧実装は tx=null のとき DELETE を autocommit で確定させたあと InsertDetailsAsync が
+            // 「別の」トランザクションを開いていたため、INSERT が失敗すると DELETE だけが残り
+            // 当該 ledger の明細が全消失していた（UI は「保存に失敗しました」としか出さないため silent な喪失）。
+            // InsertDetailsAsync (Issue #1456 / #1575) と同じ 3 分岐へ揃える:
+            //   1. tx 指定           … 呼び出し元の tx を共有し、commit/rollback には介入しない
+            //   2. 外側 tx スコープ内 … 既存接続の活性トランザクションへ暗黙参加する
+            //                          （自前で BeginTransactionAsync すると DbContext._semaphore の
+            //                            再取得でデッドロックするため）
+            //   3. それ以外           … 自前で BeginTransactionAsync し commit/rollback まで責任を持つ
+            var list = details as IList<LedgerDetail> ?? details.ToList();
+
+            if (transaction != null)
+            {
+                return await ReplaceDetailsCore(ledgerId, list, transaction.Connection, transaction).ConfigureAwait(false);
+            }
+
+            if (_dbContext.HasActiveTransactionScope)
+            {
+                using var lease = await _dbContext.LeaseConnectionAsync().ConfigureAwait(false);
+                return await ReplaceDetailsCore(ledgerId, list, lease.Connection, transaction: null).ConfigureAwait(false);
+            }
+
+            using var scope = await _dbContext.BeginTransactionAsync().ConfigureAwait(false);
             try
             {
-                SQLiteConnection connection;
-                if (transaction != null)
+                var ok = await ReplaceDetailsCore(ledgerId, list, scope.Lease.Connection, scope.Transaction).ConfigureAwait(false);
+                if (ok)
                 {
-                    connection = (SQLiteConnection)transaction.Connection;
+                    scope.Commit();
                 }
                 else
                 {
-                    lease = await _dbContext.LeaseConnectionAsync().ConfigureAwait(false);
-                    connection = lease.Connection;
+                    scope.Rollback();
                 }
-
-                // 既存の詳細をすべて削除
-                using (var deleteCommand = connection.CreateCommand())
-                {
-                    if (transaction != null) deleteCommand.Transaction = transaction;
-                    deleteCommand.CommandText = "DELETE FROM ledger_detail WHERE ledger_id = @ledgerId";
-                    deleteCommand.Parameters.AddWithValue("@ledgerId", ledgerId);
-                    await deleteCommand.ExecuteNonQueryAsync().ConfigureAwait(false);
-                }
-
-                // 新しい詳細を登録（同一 tx で実行）
-                return await InsertDetailsAsync(ledgerId, details, transaction).ConfigureAwait(false);
+                return ok;
             }
-            finally
+            catch
             {
-                lease?.Dispose();
+                scope.Rollback();
+                throw;
             }
+        }
+
+        /// <summary>
+        /// Issue #1724: ledger_detail 全置換（DELETE → INSERT）の本体。
+        /// 呼び出し元が用意した単一の接続・トランザクション上で実行し、commit/rollback には介入しない。
+        /// </summary>
+        /// <remarks>
+        /// 呼び出し元の責務: <paramref name="details"/> は物質化済みのコレクションを渡すこと
+        /// （<see cref="InsertDetailsCore"/> と同じ理由）。
+        /// </remarks>
+        private static async Task<bool> ReplaceDetailsCore(
+            int ledgerId, IList<LedgerDetail> details, SQLiteConnection connection, SQLiteTransaction transaction)
+        {
+            // 既存の詳細をすべて削除
+            using (var deleteCommand = connection.CreateCommand())
+            {
+                deleteCommand.Transaction = transaction;
+                deleteCommand.CommandText = "DELETE FROM ledger_detail WHERE ledger_id = @ledgerId";
+                deleteCommand.Parameters.AddWithValue("@ledgerId", ledgerId);
+                await deleteCommand.ExecuteNonQueryAsync().ConfigureAwait(false);
+            }
+
+            // 置換後が空（＝全削除）の場合も DELETE 済みで成功とする
+            // （旧実装が委譲していた InsertDetailsAsync の Count==0 早期 return と同じ挙動）。
+            if (details.Count == 0)
+            {
+                return true;
+            }
+
+            // 新しい詳細を同一 tx で登録
+            return await InsertDetailsCore(ledgerId, details, connection, transaction).ConfigureAwait(false);
         }
 
         /// <inheritdoc/>
