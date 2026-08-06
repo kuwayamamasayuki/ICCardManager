@@ -13,6 +13,7 @@
 - IDmは16進数文字列（16文字）として保存
 - 外部キー制約を有効化
 - 削除方式はテーブルごとに異なる（→「論理削除の方針」参照）
+- **1 メソッドで 2 文以上（DELETE→INSERT 等）を発行するリポジトリメソッドは 3 分岐にする**（Issue #1724）。SQLite は接続に活性トランザクションが無いと各文を autocommit で即確定するため、`command.Transaction` を設定し忘れた文は同メソッド内の後続文が失敗しても巻き戻らない（`ReplaceDetailsAsync` はこれで `ledger_detail` の明細が全消失した）。分岐は ①tx 引数あり → その tx を全文に適用（commit/rollback は呼び出し元）②引数 null かつ `_dbContext.HasActiveTransactionScope` → 接続だけ借りて暗黙参加（同上、外側スコープに委ねる）③それ以外 → 自前 `BeginTransactionAsync` で commit/rollback まで持つ。**②は省略不可** — `BeginTransactionAsync` は `SemaphoreSlim(1,1)` を取るため入れ子で開くと自己デッドロックする（Issue #1575）。実装例は `LedgerRepository.InsertDetailsAsync` / `ReplaceDetailsAsync`、詳細は `ICCardManager/docs/design/05_クラス設計書.md` §5.5b
 
 ### 論理削除の方針
 | テーブル | 削除方式 | 理由 |
