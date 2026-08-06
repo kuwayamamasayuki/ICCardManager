@@ -2708,6 +2708,121 @@ public class LendingServiceTests : IDisposable
             "不完全でない場合はEarliestHistoryDateは設定されない");
     }
 
+    /// <summary>
+    /// Issue #1723: 年度途中繰越モードの登録では「○月から繰越」行が importFromDate と同日・
+    /// Income=0・Note=null・StaffName=null で先に作成されるため、同日の利用履歴の統合対象
+    /// （Issue #837）に選ばれて利用行へ上書き消滅しないこと
+    /// </summary>
+    [Fact]
+    public async Task ImportHistoryForRegistrationAsync_MidYearCarryoverOnSameDay_DoesNotMergeIntoCarryover()
+    {
+        // Arrange - 「7月から繰越」: 繰越行は繰越月翌月1日（=importFromDate）に作成される
+        var importFromDate = new DateTime(2026, 8, 1);
+        var carryoverLedger = new Ledger
+        {
+            Id = 10,
+            CardIdm = TestCardIdm,
+            Date = importFromDate,
+            Summary = SummaryGenerator.GetMidYearCarryoverSummary(7),
+            Income = 0,
+            Expense = 0,
+            Balance = 3000,
+            StaffName = null,
+            Note = null,
+            IsLentRecord = false,
+            Details = new List<LedgerDetail>()
+        };
+        carryoverLedger.IsCarryover.Should().BeTrue(
+            "前提: フィクスチャは本番の繰越判定（Ledger.IsCarryover）に一致していなければテストが成立しない");
+
+        var history = new List<LedgerDetail>
+        {
+            new() { UseDate = importFromDate, Balance = 2790, Amount = 210, EntryStation = "天神", ExitStation = "博多" }
+        };
+
+        _ledgerRepositoryMock.Setup(x => x.GetByDateRangeAsync(TestCardIdm, It.IsAny<DateTime>(), It.IsAny<DateTime>()))
+            .ReturnsAsync(new List<Ledger> { carryoverLedger });
+        _ledgerRepositoryMock.Setup(x => x.GetByIdAsync(carryoverLedger.Id))
+            .ReturnsAsync(carryoverLedger);
+        _ledgerRepositoryMock.Setup(x => x.GetExistingDetailKeysAsync(TestCardIdm, It.IsAny<DateTime>()))
+            .ReturnsAsync(new HashSet<(DateTime?, int?, bool)>());
+        _ledgerRepositoryMock.Setup(x => x.GetLatestBeforeDateAsync(TestCardIdm, It.IsAny<DateTime>()))
+            .ReturnsAsync(new Ledger { Balance = 3000 });
+        _ledgerRepositoryMock.Setup(x => x.InsertAsync(It.IsAny<Ledger>()))
+            .ReturnsAsync(1);
+        _ledgerRepositoryMock.Setup(x => x.InsertDetailsAsync(It.IsAny<int>(), It.IsAny<IEnumerable<LedgerDetail>>()))
+            .ReturnsAsync(true);
+
+        // Act
+        var result = await _service.ImportHistoryForRegistrationAsync(TestCardIdm, history, importFromDate);
+
+        // Assert
+        result.Success.Should().BeTrue();
+        carryoverLedger.Summary.Should().Be(SummaryGenerator.GetMidYearCarryoverSummary(7),
+            "繰越行の摘要が利用摘要へ上書きされてはならない（期首残高行の消滅＝Issue #1723）");
+        _ledgerRepositoryMock.Verify(x => x.UpdateAsync(It.Is<Ledger>(l => l.Id == carryoverLedger.Id)), Times.Never(),
+            "繰越行は同一日統合（Issue #837）の対象から除外されるべき");
+        _ledgerRepositoryMock.Verify(x => x.InsertAsync(It.Is<Ledger>(l => !l.IsCarryover && l.Expense == 210)), Times.Once(),
+            "利用は繰越行とは別の新規レコードとして作成されるべき");
+    }
+
+    /// <summary>
+    /// Issue #1723: 残高0円で登録した「新規購入」行（Income=0）も繰越レコードであり、
+    /// 登録日当日の利用履歴の統合対象に選ばれないこと（IsCarryover のもう一方の分岐）
+    /// </summary>
+    [Fact]
+    public async Task ImportHistoryForRegistrationAsync_ZeroBalanceNewPurchaseOnSameDay_DoesNotMergeIntoNewPurchase()
+    {
+        // Arrange - 残高0円の新規購入登録: Income=0 のため Issue #837 の統合フィルタを通過してしまう形状
+        var importFromDate = new DateTime(2026, 8, 1);
+        var newPurchaseLedger = new Ledger
+        {
+            Id = 20,
+            CardIdm = TestCardIdm,
+            Date = importFromDate,
+            Summary = "新規購入",
+            Income = 0,
+            Expense = 0,
+            Balance = 0,
+            StaffName = null,
+            Note = null,
+            IsLentRecord = false,
+            Details = new List<LedgerDetail>()
+        };
+        newPurchaseLedger.IsCarryover.Should().BeTrue(
+            "前提: フィクスチャは本番の繰越判定（Ledger.IsCarryover）に一致していなければテストが成立しない");
+
+        var history = new List<LedgerDetail>
+        {
+            // 当日にチャージ 1000円 → 利用 210円
+            new() { UseDate = importFromDate, Balance = 1000, Amount = 1000, IsCharge = true },
+            new() { UseDate = importFromDate, Balance = 790, Amount = 210, EntryStation = "天神", ExitStation = "博多" }
+        };
+
+        _ledgerRepositoryMock.Setup(x => x.GetByDateRangeAsync(TestCardIdm, It.IsAny<DateTime>(), It.IsAny<DateTime>()))
+            .ReturnsAsync(new List<Ledger> { newPurchaseLedger });
+        _ledgerRepositoryMock.Setup(x => x.GetByIdAsync(newPurchaseLedger.Id))
+            .ReturnsAsync(newPurchaseLedger);
+        _ledgerRepositoryMock.Setup(x => x.GetExistingDetailKeysAsync(TestCardIdm, It.IsAny<DateTime>()))
+            .ReturnsAsync(new HashSet<(DateTime?, int?, bool)>());
+        _ledgerRepositoryMock.Setup(x => x.GetLatestBeforeDateAsync(TestCardIdm, It.IsAny<DateTime>()))
+            .ReturnsAsync(new Ledger { Balance = 0 });
+        _ledgerRepositoryMock.Setup(x => x.InsertAsync(It.IsAny<Ledger>()))
+            .ReturnsAsync(1);
+        _ledgerRepositoryMock.Setup(x => x.InsertDetailsAsync(It.IsAny<int>(), It.IsAny<IEnumerable<LedgerDetail>>()))
+            .ReturnsAsync(true);
+
+        // Act
+        var result = await _service.ImportHistoryForRegistrationAsync(TestCardIdm, history, importFromDate);
+
+        // Assert
+        result.Success.Should().BeTrue();
+        newPurchaseLedger.Summary.Should().Be("新規購入",
+            "新規購入行の摘要が利用摘要へ上書きされてはならない");
+        _ledgerRepositoryMock.Verify(x => x.UpdateAsync(It.Is<Ledger>(l => l.Id == newPurchaseLedger.Id)), Times.Never(),
+            "新規購入行は同一日統合（Issue #837）の対象から除外されるべき");
+    }
+
     #endregion
 
     #region CalculatePreHistoryBalance テスト（Issue #596）

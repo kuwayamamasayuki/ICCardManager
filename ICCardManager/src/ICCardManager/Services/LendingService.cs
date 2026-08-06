@@ -936,13 +936,18 @@ namespace ICCardManager.Services
                 // 最初の利用セグメント処理時に既存レコードとの統合を試みる
                 // Issue #1147: 利用者（StaffName）が一致するレコードのみ統合対象とする
                 //   異なる職員が同日に同じカードを使った場合は別レコードとして作成
+                // Issue #1723: 繰越レコード（「新規購入」「○月から繰越」）は統合対象から除外する。
+                //   年度途中繰越の繰越行は Income=0・Note=null・StaffName=null で importFromDate と
+                //   同日に作成されるため、登録時インポート（staffName=null）で他条件を全て満たして
+                //   しまい、統合すると期首残高行が利用行に上書きされて消滅する
                 List<Ledger> existingUsageLedgers = null;
                 var hasUsageSegment = segments.Any(s => !s.IsCharge);
                 if (hasUsageSegment)
                 {
                     var existingLedgers = await _ledgerRepository.GetByDateRangeAsync(cardIdm, date, date).ConfigureAwait(false);
                     existingUsageLedgers = existingLedgers
-                        .Where(l => !l.IsLentRecord && l.Income == 0 && string.IsNullOrEmpty(l.Note)
+                        .Where(l => !l.IsLentRecord && !l.IsCarryover && l.Income == 0
+                                    && string.IsNullOrEmpty(l.Note)
                                     && l.StaffName == staffName)  // Issue #1147: 同一利用者のみ統合
                         .OrderByDescending(l => l.Balance)  // 残高降順（高い=古い）
                         .ToList();
