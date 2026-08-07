@@ -10,6 +10,7 @@ using Xunit;
 
 using System;
 using System.Collections.Generic;
+using System.Data.SQLite;
 using System.Linq;
 using System.Threading.Tasks;
 
@@ -331,6 +332,136 @@ public class LedgerRepositoryTransactionTests : IDisposable
         var persisted = await _repository.GetByIdAsync(ledgerId);
         persisted!.Details.Should().HaveCount(1);
         persisted.Details[0].Amount.Should().Be(210, "Rollback 後は元の detail が残るはず");
+    }
+
+    #endregion
+
+    #region ReplaceDetailsAsync(tx=null) の原子性テスト (Issue #1724)
+
+    /// <summary>
+    /// ledger_detail への INSERT を必ず失敗させる BEFORE INSERT トリガーを張る。
+    /// </summary>
+    /// <remarks>
+    /// Issue #1724: 「DELETE は成功したが INSERT が落ちた」状態を実 SQLite 上で決定論的に再現するための
+    /// テスト専用スキーマ。本番の共有モードでは他 PC との競合による SQLITE_BUSY や SMB 断で同じ状態になる。
+    /// RAISE(ABORT) は「そのステートメントだけを取り消し、トランザクションは活性のまま例外を投げる」ため、
+    /// 呼び出し側が同一トランザクション内で DELETE も巻き戻せるかを正確に検証できる。
+    /// </remarks>
+    private async Task CreateFailingInsertTriggerAsync()
+    {
+        using var lease = await _dbContext.LeaseConnectionAsync();
+        using var command = lease.Connection.CreateCommand();
+        command.CommandText = @"CREATE TRIGGER fail_ledger_detail_insert BEFORE INSERT ON ledger_detail
+BEGIN
+    SELECT RAISE(ABORT, 'simulated ledger_detail insert failure');
+END";
+        await command.ExecuteNonQueryAsync();
+    }
+
+    private async Task DropFailingInsertTriggerAsync()
+    {
+        using var lease = await _dbContext.LeaseConnectionAsync();
+        using var command = lease.Connection.CreateCommand();
+        command.CommandText = "DROP TRIGGER IF EXISTS fail_ledger_detail_insert";
+        await command.ExecuteNonQueryAsync();
+    }
+
+    /// <summary>
+    /// Issue #1724: tx なし・外側 tx なしの経路で INSERT が失敗した場合、
+    /// 先行する DELETE もロールバックされ旧明細が残ること。
+    /// </summary>
+    /// <remarks>
+    /// 修正前は DELETE が autocommit で即確定したあと InsertDetailsAsync が別 tx を開いていたため、
+    /// INSERT 失敗時に当該 ledger の明細が全消失していた（UI は「保存に失敗しました」としか出さないため silent な喪失）。
+    /// </remarks>
+    [Fact]
+    public async Task ReplaceDetailsAsync_WithoutTransaction_WhenInsertFails_KeepsOldDetails()
+    {
+        var ledgerId = await _repository.InsertAsync(CreateLedger());
+        await _repository.InsertDetailAsync(CreateDetail(ledgerId, amount: 210, balance: 1000));
+
+        await CreateFailingInsertTriggerAsync();
+
+        var newDetails = new List<LedgerDetail>
+        {
+            CreateDetail(ledgerId, amount: 100, balance: 900),
+            CreateDetail(ledgerId, amount: 200, balance: 700)
+        };
+
+        Func<Task> act = () => _repository.ReplaceDetailsAsync(ledgerId, newDetails);
+        await act.Should().ThrowAsync<SQLiteException>("INSERT の失敗は握りつぶさず呼び出し元へ伝播するべき");
+
+        await DropFailingInsertTriggerAsync();
+
+        var persisted = await _repository.GetByIdAsync(ledgerId);
+        persisted!.Details.Should().HaveCount(
+            1, "INSERT が失敗したら先行する DELETE も同一 tx でロールバックされ、旧明細が残るべき");
+        persisted.Details[0].Amount.Should().Be(210);
+        persisted.Details[0].EntryStation.Should().Be("A駅");
+    }
+
+    /// <summary>
+    /// Issue #1724: tx なし経路の正常系。置換が永続化され、内部で開いた tx が解放されること。
+    /// </summary>
+    /// <remarks>
+    /// 内部 tx を commit/rollback せずに放置すると <see cref="DbContext"/> のセマフォが解放されず、
+    /// 後続の <c>BeginTransactionAsync</c> がハングする。タイムアウト付きで待って回帰を検出する。
+    /// </remarks>
+    [Fact]
+    public async Task ReplaceDetailsAsync_WithoutTransaction_ReplacesDetailsAndReleasesTransaction()
+    {
+        var ledgerId = await _repository.InsertAsync(CreateLedger());
+        await _repository.InsertDetailAsync(CreateDetail(ledgerId, amount: 210, balance: 1000));
+
+        var newDetails = new List<LedgerDetail>
+        {
+            CreateDetail(ledgerId, amount: 100, balance: 900),
+            CreateDetail(ledgerId, amount: 200, balance: 700)
+        };
+
+        var result = await _repository.ReplaceDetailsAsync(ledgerId, newDetails);
+        result.Should().BeTrue();
+
+        var persisted = await _repository.GetByIdAsync(ledgerId);
+        persisted!.Details.Should().HaveCount(2);
+        persisted.Details.Select(d => d.Amount).Should().BeEquivalentTo(new[] { 100, 200 });
+
+        var beginTask = _dbContext.BeginTransactionAsync();
+        var completed = await Task.WhenAny(beginTask, Task.Delay(TimeSpan.FromSeconds(5)));
+        completed.Should().BeSameAs(
+            beginTask, "tx=null 経路は自前で開いた tx を commit して解放するべき（未解放だとセマフォが枯渇する）");
+        using var scope = await beginTask;
+        scope.Rollback();
+    }
+
+    /// <summary>
+    /// Issue #1724 / #1575: 外側 tx スコープ内から tx=null で呼ばれた場合は暗黙参加し、
+    /// 自前の BeginTransactionAsync を開かないこと（セマフォ再取得デッドロックの回帰防止）。
+    /// </summary>
+    [Fact]
+    public async Task ReplaceDetailsAsync_WithoutTransaction_InsideOuterScope_ParticipatesAndRollsBack()
+    {
+        var ledgerId = await _repository.InsertAsync(CreateLedger());
+        await _repository.InsertDetailAsync(CreateDetail(ledgerId, amount: 210, balance: 1000));
+
+        var newDetails = new List<LedgerDetail>
+        {
+            CreateDetail(ledgerId, amount: 100, balance: 900)
+        };
+
+        using (var scope = await _dbContext.BeginTransactionAsync())
+        {
+            var replaceTask = _repository.ReplaceDetailsAsync(ledgerId, newDetails);
+            var completed = await Task.WhenAny(replaceTask, Task.Delay(TimeSpan.FromSeconds(5)));
+            completed.Should().BeSameAs(
+                replaceTask, "外側 tx スコープ内では自前の BeginTransactionAsync を開かず暗黙参加するべき");
+            (await replaceTask).Should().BeTrue();
+            scope.Rollback();
+        }
+
+        var persisted = await _repository.GetByIdAsync(ledgerId);
+        persisted!.Details.Should().HaveCount(1, "外側 tx の Rollback で DELETE も取り消されるべき");
+        persisted.Details[0].Amount.Should().Be(210);
     }
 
     #endregion
