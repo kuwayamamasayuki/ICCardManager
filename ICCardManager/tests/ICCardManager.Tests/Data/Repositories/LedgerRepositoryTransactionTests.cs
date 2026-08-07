@@ -465,4 +465,159 @@ END";
     }
 
     #endregion
+
+    #region MergeLedgersAsync の競合検出 / DeleteAsync の原子性 (Issue #1753)
+
+    /// <summary>
+    /// 指定テーブルの DELETE を必ず失敗させる BEFORE DELETE トリガーを張る（Issue #1753）。
+    /// </summary>
+    private async Task CreateFailingDeleteTriggerAsync(string tableName)
+    {
+        using var lease = await _dbContext.LeaseConnectionAsync();
+        using var command = lease.Connection.CreateCommand();
+        command.CommandText = $@"CREATE TRIGGER fail_{tableName}_delete BEFORE DELETE ON {tableName}
+BEGIN
+    SELECT RAISE(ABORT, 'simulated {tableName} delete failure');
+END";
+        await command.ExecuteNonQueryAsync();
+    }
+
+    private async Task DropFailingDeleteTriggerAsync(string tableName)
+    {
+        using var lease = await _dbContext.LeaseConnectionAsync();
+        using var command = lease.Connection.CreateCommand();
+        command.CommandText = $"DROP TRIGGER IF EXISTS fail_{tableName}_delete";
+        await command.ExecuteNonQueryAsync();
+    }
+
+    /// <summary>
+    /// 統合を実行し、結果に応じて commit / rollback する（本番 <c>LedgerMergeService</c> と同じ作法）。
+    /// </summary>
+    private async Task<bool> MergeWithScopeAsync(int targetId, int[] sourceIds, Ledger updatedTarget)
+    {
+        using var scope = await _dbContext.BeginTransactionAsync();
+        var result = await _repository.MergeLedgersAsync(targetId, sourceIds, updatedTarget, scope.Transaction);
+        if (result)
+        {
+            scope.Commit();
+        }
+        else
+        {
+            scope.Rollback();
+        }
+        return result;
+    }
+
+    /// <summary>
+    /// Issue #1753: 統合元が他 PC に先に統合・削除されていた場合、競合として false を返すこと。
+    /// </summary>
+    /// <remarks>
+    /// 実機で発生した共有モードの競合そのもの。旧実装は 3 つの ExecuteNonQuery の影響行数を
+    /// 一切見ずに無条件 true を返していたため、DELETE が 0 行でも「統合成功」と報告していた。
+    /// </remarks>
+    [Fact]
+    public async Task MergeLedgersAsync_WhenSourceAlreadyDeleted_ReturnsFalse()
+    {
+        var targetId = await _repository.InsertAsync(CreateLedger(balance: 2186, summary: "鉄道（薬院～博多）"));
+        await _repository.InsertDetailAsync(CreateDetail(targetId, amount: 210, balance: 2186));
+        var sourceId = await _repository.InsertAsync(CreateLedger(balance: 1976, summary: "鉄道（博多～薬院）"));
+        await _repository.InsertDetailAsync(CreateDetail(sourceId, amount: 210, balance: 1976));
+
+        // 他 PC が先に同じ統合を実行し、統合元を消した状況を再現する
+        await _repository.DeleteAsync(sourceId);
+
+        var updatedTarget = await _repository.GetByIdAsync(targetId);
+        updatedTarget!.Summary = "鉄道（薬院～博多 往復）";
+        updatedTarget.Expense = 420;
+        updatedTarget.Balance = 1976;
+
+        var result = await MergeWithScopeAsync(targetId, new[] { sourceId }, updatedTarget);
+
+        result.Should().BeFalse(
+            "統合元の DELETE が 0 行なら、他 PC に先を越された競合として検出されるべき");
+
+        var persisted = await _repository.GetByIdAsync(targetId);
+        persisted!.Summary.Should().Be(
+            "鉄道（薬院～博多）", "競合検出時はロールバックされ、統合先の摘要も書き換わらないべき");
+        persisted.Expense.Should().Be(210);
+    }
+
+    /// <summary>
+    /// Issue #1753: 統合先が他 PC に削除されていた場合、競合として false を返すこと。
+    /// </summary>
+    /// <remarks>
+    /// 明細を持つ ledger だと手順1の <c>UPDATE ledger_detail SET ledger_id</c> が外部キー違反で
+    /// 例外になり「無言で成功する」経路に到達しないため、明細を持たない ledger
+    /// （「新規購入」「○月から繰越」等の実在パターン）で検証する。
+    /// </remarks>
+    [Fact]
+    public async Task MergeLedgersAsync_WhenTargetAlreadyDeleted_ReturnsFalse()
+    {
+        var targetId = await _repository.InsertAsync(CreateLedger(balance: 5000, summary: "新規購入"));
+        var sourceId = await _repository.InsertAsync(CreateLedger(balance: 4790, summary: "鉄道（A駅〜B駅）"));
+
+        // 他 PC が統合先を消した状況を再現する
+        await _repository.DeleteAsync(targetId);
+
+        var updatedTarget = CreateLedger(balance: 4790, summary: "統合後の摘要");
+        updatedTarget.Id = targetId;
+
+        var result = await MergeWithScopeAsync(targetId, new[] { sourceId }, updatedTarget);
+
+        result.Should().BeFalse("統合先の UPDATE が 0 行なら競合として検出されるべき");
+        (await _repository.GetByIdAsync(sourceId)).Should().NotBeNull(
+            "競合検出時はロールバックされ、統合元も削除されないべき");
+    }
+
+    /// <summary>
+    /// Issue #1753: 正常系（競合なし）では従来どおり統合が成立すること。
+    /// </summary>
+    [Fact]
+    public async Task MergeLedgersAsync_WhenAllRowsPresent_MergesAndReturnsTrue()
+    {
+        var targetId = await _repository.InsertAsync(CreateLedger(balance: 2186, summary: "鉄道（薬院～博多）"));
+        await _repository.InsertDetailAsync(CreateDetail(targetId, amount: 210, balance: 2186));
+        var sourceId = await _repository.InsertAsync(CreateLedger(balance: 1976, summary: "鉄道（博多～薬院）"));
+        await _repository.InsertDetailAsync(CreateDetail(sourceId, amount: 210, balance: 1976));
+
+        var updatedTarget = await _repository.GetByIdAsync(targetId);
+        updatedTarget!.Summary = "鉄道（薬院～博多 往復）";
+        updatedTarget.Expense = 420;
+        updatedTarget.Balance = 1976;
+
+        var result = await MergeWithScopeAsync(targetId, new[] { sourceId }, updatedTarget);
+
+        result.Should().BeTrue();
+
+        var persisted = await _repository.GetByIdAsync(targetId);
+        persisted!.Summary.Should().Be("鉄道（薬院～博多 往復）");
+        persisted.Expense.Should().Be(420);
+        persisted.Details.Should().HaveCount(2, "統合元の明細が統合先へ移動しているべき");
+        (await _repository.GetByIdAsync(sourceId)).Should().BeNull("統合元は削除されるべき");
+    }
+
+    /// <summary>
+    /// Issue #1753: tx なし経路の DeleteAsync で ledger の削除が失敗した場合、
+    /// 先行する ledger_detail の削除もロールバックされること（Issue #1724 と同型）。
+    /// </summary>
+    [Fact]
+    public async Task DeleteAsync_WithoutTransaction_WhenLedgerDeleteFails_KeepsDetails()
+    {
+        var ledgerId = await _repository.InsertAsync(CreateLedger());
+        await _repository.InsertDetailAsync(CreateDetail(ledgerId, amount: 210, balance: 1000));
+
+        await CreateFailingDeleteTriggerAsync("ledger");
+
+        Func<Task> act = () => _repository.DeleteAsync(ledgerId);
+        await act.Should().ThrowAsync<SQLiteException>("DELETE の失敗は呼び出し元へ伝播するべき");
+
+        await DropFailingDeleteTriggerAsync("ledger");
+
+        var persisted = await _repository.GetByIdAsync(ledgerId);
+        persisted.Should().NotBeNull("ledger の削除が失敗したのだから行は残るべき");
+        persisted!.Details.Should().HaveCount(
+            1, "ledger の DELETE が失敗したら明細の DELETE も同一 tx でロールバックされるべき");
+    }
+
+    #endregion
 }

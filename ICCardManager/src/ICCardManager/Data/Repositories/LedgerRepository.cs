@@ -282,63 +282,118 @@ WHERE id = @id";
         /// <inheritdoc/>
         public async Task<bool> DeleteAsync(int id, SQLiteTransaction transaction)
         {
-            ConnectionLease lease = null;
+            // Issue #1753: ledger_detail と ledger の DELETE を必ず同一トランザクションで実行する。
+            // 旧実装は tx=null 経路で明細の DELETE を autocommit で確定させていたため、
+            // 直後の ledger 削除が失敗すると「明細だけが消えた台帳行」が残った（Issue #1724 と同型）。
+            // 3 分岐の根拠は 05_クラス設計書 §5.5b を参照。
+            if (transaction != null)
+            {
+                return await DeleteCore(id, transaction.Connection, transaction).ConfigureAwait(false);
+            }
+
+            if (_dbContext.HasActiveTransactionScope)
+            {
+                using var lease = await _dbContext.LeaseConnectionAsync().ConfigureAwait(false);
+                return await DeleteCore(id, lease.Connection, transaction: null).ConfigureAwait(false);
+            }
+
+            using var scope = await _dbContext.BeginTransactionAsync().ConfigureAwait(false);
             try
             {
-                SQLiteConnection connection;
-                if (transaction != null)
+                var ok = await DeleteCore(id, scope.Lease.Connection, scope.Transaction).ConfigureAwait(false);
+                if (ok)
                 {
-                    connection = (SQLiteConnection)transaction.Connection;
+                    scope.Commit();
                 }
                 else
                 {
-                    lease = await _dbContext.LeaseConnectionAsync().ConfigureAwait(false);
-                    connection = lease.Connection;
+                    scope.Rollback();
                 }
-
-                // 詳細レコードを先に削除
-                using (var deleteDetailCommand = connection.CreateCommand())
-                {
-                    if (transaction != null) deleteDetailCommand.Transaction = transaction;
-                    deleteDetailCommand.CommandText = "DELETE FROM ledger_detail WHERE ledger_id = @id";
-                    deleteDetailCommand.Parameters.AddWithValue("@id", id);
-                    await deleteDetailCommand.ExecuteNonQueryAsync().ConfigureAwait(false);
-                }
-
-                // メインレコードを削除
-                using var command = connection.CreateCommand();
-                if (transaction != null) command.Transaction = transaction;
-                command.CommandText = "DELETE FROM ledger WHERE id = @id";
-                command.Parameters.AddWithValue("@id", id);
-
-                var result = await command.ExecuteNonQueryAsync().ConfigureAwait(false);
-                return result > 0;
+                return ok;
             }
-            finally
+            catch
             {
-                lease?.Dispose();
+                scope.Rollback();
+                throw;
             }
+        }
+
+        /// <summary>
+        /// Issue #1753: ledger 1 件の削除本体（明細 → 本体の順）。
+        /// 呼び出し元が用意した単一の接続・トランザクション上で実行し、commit/rollback には介入しない。
+        /// </summary>
+        private static async Task<bool> DeleteCore(int id, SQLiteConnection connection, SQLiteTransaction transaction)
+        {
+            // 詳細レコードを先に削除
+            using (var deleteDetailCommand = connection.CreateCommand())
+            {
+                deleteDetailCommand.Transaction = transaction;
+                deleteDetailCommand.CommandText = "DELETE FROM ledger_detail WHERE ledger_id = @id";
+                deleteDetailCommand.Parameters.AddWithValue("@id", id);
+                await deleteDetailCommand.ExecuteNonQueryAsync().ConfigureAwait(false);
+            }
+
+            // メインレコードを削除
+            using var command = connection.CreateCommand();
+            command.Transaction = transaction;
+            command.CommandText = "DELETE FROM ledger WHERE id = @id";
+            command.Parameters.AddWithValue("@id", id);
+
+            var result = await command.ExecuteNonQueryAsync().ConfigureAwait(false);
+            return result > 0;
         }
 
         /// <inheritdoc/>
         public async Task<int> DeleteAllLentRecordsAsync(string cardIdm)
         {
-            using var lease = await _dbContext.LeaseConnectionAsync();
-            var connection = lease.Connection;
+            // Issue #1753: 明細と本体の 2 段削除を同一トランザクションで実行する（DeleteAsync と同じ理由）。
+            if (_dbContext.HasActiveTransactionScope)
+            {
+                using var lease = await _dbContext.LeaseConnectionAsync().ConfigureAwait(false);
+                return await DeleteAllLentRecordsCore(cardIdm, lease.Connection, transaction: null).ConfigureAwait(false);
+            }
 
+            using var scope = await _dbContext.BeginTransactionAsync().ConfigureAwait(false);
+            try
+            {
+                var deleted = await DeleteAllLentRecordsCore(
+                    cardIdm, scope.Lease.Connection, scope.Transaction).ConfigureAwait(false);
+                scope.Commit();
+                return deleted;
+            }
+            catch
+            {
+                scope.Rollback();
+                throw;
+            }
+        }
+
+        /// <summary>
+        /// Issue #1753: 貸出中レコード一括削除の本体（明細 → 本体の順）。
+        /// </summary>
+        /// <remarks>
+        /// 対象 0 件（<c>deleted == 0</c>）は競合ではなく正常な結果のため、commit する。
+        /// </remarks>
+        private static async Task<int> DeleteAllLentRecordsCore(
+            string cardIdm, SQLiteConnection connection, SQLiteTransaction transaction)
+        {
             // 貸出中レコードに紐づく詳細レコードを先に削除
-            using var deleteDetailCommand = connection.CreateCommand();
-            deleteDetailCommand.CommandText = @"DELETE FROM ledger_detail
+            using (var deleteDetailCommand = connection.CreateCommand())
+            {
+                deleteDetailCommand.Transaction = transaction;
+                deleteDetailCommand.CommandText = @"DELETE FROM ledger_detail
 WHERE ledger_id IN (SELECT id FROM ledger WHERE card_idm = @cardIdm AND is_lent_record = 1)";
-            deleteDetailCommand.Parameters.AddWithValue("@cardIdm", cardIdm);
-            await deleteDetailCommand.ExecuteNonQueryAsync();
+                deleteDetailCommand.Parameters.AddWithValue("@cardIdm", cardIdm);
+                await deleteDetailCommand.ExecuteNonQueryAsync().ConfigureAwait(false);
+            }
 
             // 貸出中レコードをすべて削除
             using var command = connection.CreateCommand();
+            command.Transaction = transaction;
             command.CommandText = "DELETE FROM ledger WHERE card_idm = @cardIdm AND is_lent_record = 1";
             command.Parameters.AddWithValue("@cardIdm", cardIdm);
 
-            return await command.ExecuteNonQueryAsync();
+            return await command.ExecuteNonQueryAsync().ConfigureAwait(false);
         }
 
         /// <inheritdoc/>
@@ -1343,7 +1398,16 @@ WHERE card_idm IN ({string.Join(", ", parameters)})";
             var sourceIds = sourceLedgerIds.ToList();
             var connection = (SQLiteConnection)transaction.Connection;
 
+            // Issue #1753: 各文の影響行数を検証し、想定と異なれば false を返す（楽観ロック）。
+            // 共有モードでは読み取り（LedgerMergeService の GetByIdAsync）と本メソッドの書き込みが
+            // 別トランザクションのため、その間に他 PC が同じ履歴を統合・削除し得る。
+            // 旧実装は 3 文とも影響行数を見ずに無条件 true を返しており、対象が既に消えていても
+            // 「統合しました」と報告していた（呼び出し元の競合エラー分岐が到達不能だった）。
+            // false を返すとトランザクションは呼び出し元でロールバックされる。
+
             // 1. ソースの詳細をターゲットに移動（UPDATEでrowid保持）
+            //    0 行は競合ではない: 明細を持たない ledger（「新規購入」「○月から繰越」等）が実在するため、
+            //    ここでは件数を検証しない。ソースの消滅は手順 3 の DELETE で検出する。
             foreach (var sourceId in sourceIds)
             {
                 using var moveCommand = connection.CreateCommand();
@@ -1368,7 +1432,14 @@ WHERE id = @id";
                 updateCommand.Parameters.AddWithValue("@balance", updatedTarget.Balance);
                 updateCommand.Parameters.AddWithValue("@note", (object)updatedTarget.Note ?? DBNull.Value);
                 updateCommand.Parameters.AddWithValue("@id", targetLedgerId);
-                await updateCommand.ExecuteNonQueryAsync().ConfigureAwait(false);
+
+                // SQLite の changes() は WHERE に一致した行を（値が変わらなくても）数えるため、
+                // 0 行は「統合先が存在しない」＝競合を意味する。
+                var updated = await updateCommand.ExecuteNonQueryAsync().ConfigureAwait(false);
+                if (updated != 1)
+                {
+                    return false;
+                }
             }
 
             // 3. ソースLedgerを削除（detailsは既に移動済み）
@@ -1378,7 +1449,13 @@ WHERE id = @id";
                 deleteCommand.Transaction = transaction;
                 deleteCommand.CommandText = "DELETE FROM ledger WHERE id = @id";
                 deleteCommand.Parameters.AddWithValue("@id", sourceId);
-                await deleteCommand.ExecuteNonQueryAsync().ConfigureAwait(false);
+
+                // 0 行は「統合元が他 PC に先に統合・削除された」＝競合。
+                var deleted = await deleteCommand.ExecuteNonQueryAsync().ConfigureAwait(false);
+                if (deleted != 1)
+                {
+                    return false;
+                }
             }
 
             return true;

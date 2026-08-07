@@ -1025,4 +1025,79 @@ public class LedgerSplitServiceTests : IDisposable
     }
 
     #endregion
+
+    #region 競合検出 (Issue #1753)
+
+    /// <summary>
+    /// Issue #1753: 分割対象が他 PC に削除されていた場合（UpdateAsync が 0 行＝false）、
+    /// 分割を続行せず競合として失敗を返すこと。
+    /// </summary>
+    /// <remarks>
+    /// 旧実装は UpdateAsync の戻り値を破棄していたため、元 Ledger を更新できていないのに
+    /// グループ2以降の新 Ledger だけが作られ、分割元のデータが失われる状態になり得た。
+    /// </remarks>
+    [Fact]
+    public async Task SplitAsync_WhenOriginalLedgerUpdateAffectsNoRow_ReturnsConflictError()
+    {
+        var originalLedger = CreateTestLedger(
+            id: 1,
+            date: new DateTime(2026, 2, 3),
+            summary: "鉄道（博多～赤坂）",
+            income: 0,
+            expense: 460,
+            balance: 540);
+
+        SetupDefaultMocks(originalLedger, nextInsertId: 100);
+
+        // 他 PC が分割対象を削除した状況: UPDATE が 1 行も一致しない
+        _ledgerRepositoryMock
+            .Setup(x => x.UpdateAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>()))
+            .ReturnsAsync(false);
+
+        var details = new List<LedgerDetail>
+        {
+            CreateRailDetail("博多", "天神", 260, 740, 1,
+                useDate: new DateTime(2026, 2, 3, 10, 0, 0), groupId: 1),
+            CreateRailDetail("天神", "赤坂", 200, 540, 2,
+                useDate: new DateTime(2026, 2, 3, 14, 0, 0), groupId: 2)
+        };
+
+        var result = await _service.SplitAsync(1, details);
+
+        result.Success.Should().BeFalse("更新対象が存在しないなら分割は成立しない");
+        result.ErrorMessage.Should().Contain(
+            "最新の状態に更新", "競合時は画面を更新してやり直すよう案内するべき");
+        result.ErrorMessage.Should().EndWith("お試しください。");
+
+        _ledgerRepositoryMock.Verify(
+            x => x.InsertAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>()),
+            Times.Never,
+            "競合を検出したら新しい Ledger を作ってはならない");
+    }
+
+    /// <summary>
+    /// Issue #1753: 分割対象が見つからない場合のエラー文言が 3 要素を満たすこと。
+    /// </summary>
+    [Fact]
+    public async Task SplitAsync_WhenLedgerNotFound_ReturnsRecoverableMessage()
+    {
+        _ledgerRepositoryMock
+            .Setup(x => x.GetByIdAsync(It.IsAny<int>()))
+            .ReturnsAsync((Ledger?)null);
+
+        var details = new List<LedgerDetail>
+        {
+            CreateRailDetail("博多", "天神", 260, 740, 1, groupId: 1),
+            CreateRailDetail("天神", "赤坂", 200, 540, 2, groupId: 2)
+        };
+
+        var result = await _service.SplitAsync(1, details);
+
+        result.Success.Should().BeFalse();
+        result.ErrorMessage.Should().NotBeNull();
+        result.ErrorMessage!.Length.Should().BeGreaterOrEqualTo(20, "「なぜ」「どうすれば」を含めるには短すぎない文言が必要");
+        result.ErrorMessage.Should().EndWith("お試しください。", "行動指示で終わるべき");
+    }
+
+    #endregion
 }
