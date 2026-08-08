@@ -128,6 +128,44 @@ public class OperationLogExcelExportServiceTests : IDisposable
         result.Should().Contain("開始ページ番号: 1");
     }
 
+    /// <summary>
+    /// Issue #1726: 紙出納簿移行カードの繰越累計3項目が操作ログに表示されること
+    /// </summary>
+    /// <remarks>
+    /// FormatJsonToReadable / GetChangeSummary はフィールド名マップに無いプロパティを
+    /// 読み飛ばすため、マップから漏れると BeforeData / AfterData の生 JSON には値があるのに
+    /// 画面・Excel には一切現れず、監査で追跡できなくなる（Issue #510 / #1215 の値は
+    /// 月次帳票の年度累計と開始ページ番号を左右する）。
+    /// </remarks>
+    [Fact]
+    public void FormatJsonToReadable_IcCard_繰越累計も日本語に整形()
+    {
+        var json = @"{""CardIdm"":""FEDCBA9876543210"",""CardType"":""はやかけん"",""CardNumber"":""001"",""StartingPageNumber"":7,""CarryoverIncomeTotal"":120000,""CarryoverExpenseTotal"":95000,""CarryoverFiscalYear"":2025}";
+
+        var result = OperationLogExcelExportService.FormatJsonToReadable("ic_card", json);
+
+        result.Should().Contain("繰越累計受入: 120000");
+        result.Should().Contain("繰越累計払出: 95000");
+        result.Should().Contain("繰越累計の対象年度: 2025");
+    }
+
+    /// <summary>
+    /// Issue #1726: 繰越累計が変化した更新は変更サマリーに現れること
+    /// </summary>
+    [Fact]
+    public void GetChangeSummary_IcCard_繰越累計の変更を検出()
+    {
+        var before = @"{""CardIdm"":""FEDCBA9876543210"",""StartingPageNumber"":7,""CarryoverIncomeTotal"":120000,""CarryoverExpenseTotal"":95000,""CarryoverFiscalYear"":2025}";
+        var after = @"{""CardIdm"":""FEDCBA9876543210"",""StartingPageNumber"":1,""CarryoverIncomeTotal"":0,""CarryoverExpenseTotal"":0,""CarryoverFiscalYear"":null}";
+
+        var result = OperationLogExcelExportService.GetChangeSummary("ic_card", before, after);
+
+        result.Should().Contain("開始ページ番号: 7 → 1");
+        result.Should().Contain("繰越累計受入: 120000 → 0");
+        result.Should().Contain("繰越累計払出: 95000 → 0");
+        result.Should().Contain("繰越累計の対象年度: 2025 → （なし）");
+    }
+
     [Fact]
     public void FormatJsonToReadable_Ledger_出納簿JSONを日本語に整形()
     {

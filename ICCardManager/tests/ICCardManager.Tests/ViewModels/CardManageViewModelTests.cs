@@ -414,6 +414,16 @@ public class CardManageViewModelTests
         _viewModel.StartEdit();
         _viewModel.EditNote = "更新後のメモ";
 
+        // Issue #1726: 編集対象外の列は DB の最新値（GetByIdmAsync）から引き継ぐ
+        _cardRepositoryMock.Setup(r => r.GetByIdmAsync("0102030405060708", false)).ReturnsAsync(new IcCard
+        {
+            CardIdm = "0102030405060708",
+            CardType = "はやかけん",
+            CardNumber = "H-001",
+            IsLent = true,
+            LastLentAt = DateTime.Now,
+            LastLentStaff = "staff123"
+        });
         _cardRepositoryMock.Setup(r => r.UpdateAsync(It.IsAny<IcCard>())).ReturnsAsync(true);
         _cardRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<IcCard>());
 
@@ -429,29 +439,41 @@ public class CardManageViewModelTests
     }
 
     /// <summary>
-    /// Issue #1726: 編集保存時、登録時にのみ確定する値（開始ページ番号・繰越累計）が
-    /// リポジトリへ渡す IcCard に引き継がれること
+    /// Issue #1726: 編集保存時、この画面で編集できない列がすべて DB の最新値から
+    /// 引き継がれること（操作ログに虚偽の変更を残さない）
     /// </summary>
     /// <remarks>
-    /// 引き継がないと、操作ログの AfterData（IcCard 全体の JSON）に
-    /// 「開始ページ番号 7 → 1」「繰越受入 120,000 → 0」という実際には起きていない変更が
-    /// 記録され、監査時に誤読される。DB 側の保全は CardRepository 側で担保している
+    /// OperationLogger は IcCard 全体を JSON 化して BeforeData / AfterData に記録するため、
+    /// 引き継がないと「開始ページ番号 7 → 1」「繰越累計受入 120,000 → 0」
+    /// 「払戻済み: はい → いいえ」「貸出中: はい → いいえ」という実際には起きていない
+    /// 変更が監査ログに残る。編集対象（カード種別・管理番号・備考）以外を網羅して表明する。
+    /// 引き継ぎ元を一覧（SelectedCard）ではなく beforeCard にしているのは、一覧が
+    /// GetAllAsync のキャッシュ由来で自動更新されず、共有モードでは他PCの貸出が
+    /// 反映されないため。DB 側の値の保全は CardRepository 側で担保している
     /// （CardRepositoryTests.UpdateAsync_CardWithCarryoverInfo_DoesNotOverwriteRegistrationOnlyColumns）。
     /// </remarks>
     [Fact]
-    public async Task SaveAsync_ExistingCard_ShouldCarryOverRegistrationOnlyValues()
+    public async Task SaveAsync_ExistingCard_ShouldCarryOverAllNonEditableFieldsFromDb()
     {
-        // Arrange: 紙の出納簿から年度途中で移行したカード（Issue #510 / #1215）
+        // Arrange: 紙の出納簿から年度途中で移行し（#510 / #1215）、かつ払戻済み・貸出中のカード
         var idm = "0102030405060708";
+        var lentAt = new DateTime(2026, 8, 1, 9, 30, 0);
+        var refundedAt = new DateTime(2026, 8, 5, 14, 0, 0);
+
+        // 一覧（キャッシュ由来）は古い状態を持っている＝ここから引き継いではいけない
         _viewModel.SelectedCard = new CardDto
         {
             CardIdm = idm,
             CardType = "はやかけん",
             CardNumber = "H-001",
-            StartingPageNumber = 7,
-            CarryoverIncomeTotal = 120000,
-            CarryoverExpenseTotal = 95000,
-            CarryoverFiscalYear = 2025
+            IsLent = false,
+            LentAt = null,
+            LastLentStaff = null,
+            IsRefunded = false,
+            StartingPageNumber = 1,
+            CarryoverIncomeTotal = 0,
+            CarryoverExpenseTotal = 0,
+            CarryoverFiscalYear = null
         };
         _viewModel.StartEdit();
         _viewModel.EditNote = "備考の誤字を修正";
@@ -461,6 +483,11 @@ public class CardManageViewModelTests
             CardIdm = idm,
             CardType = "はやかけん",
             CardNumber = "H-001",
+            IsLent = true,
+            LastLentAt = lentAt,
+            LastLentStaff = "STAFF00000000001",
+            IsRefunded = true,
+            RefundedAt = refundedAt,
             StartingPageNumber = 7,
             CarryoverIncomeTotal = 120000,
             CarryoverExpenseTotal = 95000,
@@ -472,54 +499,18 @@ public class CardManageViewModelTests
         // Act
         await _viewModel.SaveAsync();
 
-        // Assert
+        // Assert: 編集した備考は反映され、編集対象外の列はすべて DB の値のまま
         _cardRepositoryMock.Verify(r => r.UpdateAsync(It.Is<IcCard>(c =>
             c.Note == "備考の誤字を修正" &&
             c.StartingPageNumber == 7 &&
             c.CarryoverIncomeTotal == 120000 &&
             c.CarryoverExpenseTotal == 95000 &&
-            c.CarryoverFiscalYear == 2025
-        )), Times.Once);
-    }
-
-    /// <summary>
-    /// Issue #1726: 更新前データを DB から取得できない場合は、一覧（SelectedCard）の値で
-    /// 登録時専用の値を代替すること
-    /// </summary>
-    /// <remarks>
-    /// 共有モードで他PCがカードを削除した直後など beforeCard が null になり得る。
-    /// この場合もモデル既定値（1 / 0 / 0 / NULL）へ落とさない。
-    /// </remarks>
-    [Fact]
-    public async Task SaveAsync_ExistingCard_WhenBeforeCardMissing_UsesSelectedCardForRegistrationOnlyValues()
-    {
-        // Arrange
-        var idm = "0102030405060708";
-        _viewModel.SelectedCard = new CardDto
-        {
-            CardIdm = idm,
-            CardType = "はやかけん",
-            CardNumber = "H-001",
-            StartingPageNumber = 7,
-            CarryoverIncomeTotal = 120000,
-            CarryoverExpenseTotal = 95000,
-            CarryoverFiscalYear = 2025
-        };
-        _viewModel.StartEdit();
-
-        _cardRepositoryMock.Setup(r => r.GetByIdmAsync(idm, false)).ReturnsAsync((IcCard?)null);
-        _cardRepositoryMock.Setup(r => r.UpdateAsync(It.IsAny<IcCard>())).ReturnsAsync(true);
-        _cardRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<IcCard>());
-
-        // Act
-        await _viewModel.SaveAsync();
-
-        // Assert
-        _cardRepositoryMock.Verify(r => r.UpdateAsync(It.Is<IcCard>(c =>
-            c.StartingPageNumber == 7 &&
-            c.CarryoverIncomeTotal == 120000 &&
-            c.CarryoverExpenseTotal == 95000 &&
-            c.CarryoverFiscalYear == 2025
+            c.CarryoverFiscalYear == 2025 &&
+            c.IsRefunded == true &&
+            c.RefundedAt == refundedAt &&
+            c.IsLent == true &&
+            c.LastLentAt == lentAt &&
+            c.LastLentStaff == "STAFF00000000001"
         )), Times.Once);
     }
 

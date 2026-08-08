@@ -479,6 +479,10 @@ public class OperationLogExcelExportService
                 { "Note", "備考" },
                 { "IsDeleted", "削除済み" },
             },
+            // Issue #1726: 繰越累計3項目を追加。マップに無いプロパティは FormatJsonToReadable /
+            // GetChangeSummary が読み飛ばすため、載せないと BeforeData / AfterData の生 JSON には
+            // 値があるのに操作ログの画面・Excel には一切現れない（＝監査で追跡できない）。
+            // 紙出納簿移行カード（#510 / #1215）の値は月次帳票の年度累計と開始ページ番号を左右する。
             "ic_card" => new Dictionary<string, string>
             {
                 { "CardIdm", "カードIDm" },
@@ -489,6 +493,9 @@ public class OperationLogExcelExportService
                 { "IsRefunded", "払戻済み" },
                 { "IsLent", "貸出中" },
                 { "StartingPageNumber", "開始ページ番号" },
+                { "CarryoverIncomeTotal", "繰越累計受入" },
+                { "CarryoverExpenseTotal", "繰越累計払出" },
+                { "CarryoverFiscalYear", "繰越累計の対象年度" },
             },
             "ledger" => new Dictionary<string, string>
             {

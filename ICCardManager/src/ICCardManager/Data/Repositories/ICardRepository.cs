@@ -67,7 +67,13 @@ namespace ICCardManager.Data.Repositories
         /// <see cref="IcCard.CarryoverExpenseTotal"/> / <see cref="IcCard.CarryoverFiscalYear"/> は
         /// 登録時にのみ確定する値（編集 UI を持たない）ため、本メソッドでは**更新しない**。
         /// これらを引数の <paramref name="card"/> に設定しても DB へは反映されない。
-        /// 詳細は <c>.claude/rules/development-conventions.md</c> の「部分構築モデルで全列 UPDATE しない」を参照。
+        /// 同様に <see cref="IcCard.IsLent"/> 系は <see cref="UpdateLentStatusAsync"/>、
+        /// <see cref="IcCard.IsRefunded"/> 系は <see cref="SetRefundedAsync"/>、
+        /// <see cref="IcCard.IsDeleted"/> 系は <see cref="DeleteAsync"/> / <see cref="RestoreAsync(string)"/>
+        /// が担当する専用列で、本メソッドの更新対象ではない。
+        /// 詳細は <c>.claude/rules/development-conventions.md</c> の
+        /// 「UPDATE の SET 句は『その経路で本当に編集する列』に限る」および
+        /// <c>docs/design/05_クラス設計書.md</c> §5.5b を参照。
         /// </remarks>
         Task<bool> UpdateAsync(IcCard card);
 
