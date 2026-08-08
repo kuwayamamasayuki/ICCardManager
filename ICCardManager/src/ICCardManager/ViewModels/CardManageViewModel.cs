@@ -553,16 +553,32 @@ namespace ICCardManager.ViewModels
                     // 更新前のデータを取得（操作ログ用）
                     var beforeCard = await _cardRepository.GetByIdmAsync(EditCardIdm);
 
-                    // 更新
+                    // Issue #1726: この画面で編集できるのはカード種別・管理番号・備考の3項目だけ。
+                    // それ以外の列（繰越累計 #1215 / 開始ページ番号 #510 / 貸出状態 / 払戻状態）は
+                    // 専用の経路でのみ変化するため、DB の最新値（beforeCard）をそのまま引き継ぐ。
+                    // 引き継がないと OperationLogger が IcCard 全体を JSON 化して BeforeData /
+                    // AfterData に記録するため、「開始ページ番号 7 → 1」「払戻済み: はい → いいえ」の
+                    // ような実際には起きていない変更が監査ログに残る。
+                    // 一覧（SelectedCard）ではなく beforeCard を使うのは、一覧が GetAllAsync の
+                    // キャッシュ由来で自動更新されず、共有モードでは他 PC の貸出が反映されないため。
+                    // beforeCard が null（他 PC が削除した等）の場合は UpdateAsync の WHERE
+                    // （is_deleted = 0）も一致せず 0 行 → false となり操作ログも記録されないため、
+                    // ここで代替値を用意しても観測されない（既定値のままでよい）。
                     var card = new IcCard
                     {
                         CardIdm = EditCardIdm,
                         CardType = EditCardType,
                         CardNumber = sanitizedCardNumber,
                         Note = string.IsNullOrWhiteSpace(sanitizedNote) ? null : sanitizedNote,
-                        IsLent = SelectedCard!.IsLent,
-                        LastLentAt = SelectedCard.LentAt,
-                        LastLentStaff = SelectedCard.LastLentStaff
+                        IsLent = beforeCard?.IsLent ?? false,
+                        LastLentAt = beforeCard?.LastLentAt,
+                        LastLentStaff = beforeCard?.LastLentStaff,
+                        IsRefunded = beforeCard?.IsRefunded ?? false,
+                        RefundedAt = beforeCard?.RefundedAt,
+                        StartingPageNumber = beforeCard?.StartingPageNumber ?? 1,
+                        CarryoverIncomeTotal = beforeCard?.CarryoverIncomeTotal ?? 0,
+                        CarryoverExpenseTotal = beforeCard?.CarryoverExpenseTotal ?? 0,
+                        CarryoverFiscalYear = beforeCard?.CarryoverFiscalYear
                     };
 
                     var success = await _cardRepository.UpdateAsync(card);
