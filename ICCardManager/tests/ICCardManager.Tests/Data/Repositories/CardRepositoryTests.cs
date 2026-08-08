@@ -347,6 +347,79 @@ public class CardRepositoryTests : IDisposable
     }
 
     /// <summary>
+    /// Issue #1726: 更新は登録時にのみ確定する列（開始ページ番号・繰越累計）を上書きしないことを確認
+    /// </summary>
+    /// <remarks>
+    /// 紙の出納簿から年度途中で移行したカード（Issue #510 / #1215）について、
+    /// カード管理画面が備考の修正だけを目的に組んだ IcCard（当該4項目はモデル既定値のまま）で
+    /// 更新しても、DB 側の繰越累計・開始ページ番号が保全されることを表明する。
+    /// これが崩れると5月以降の月次帳票の年度累計から紙時代の累計が丸ごと欠落する。
+    /// </remarks>
+    [Fact]
+    public async Task UpdateAsync_CardWithCarryoverInfo_DoesNotOverwriteRegistrationOnlyColumns()
+    {
+        // Arrange: 紙の出納簿から年度途中で移行したカードとして登録
+        var registered = CreateTestCard("0102030405060708", "はやかけん", "H001");
+        registered.StartingPageNumber = 7;
+        registered.CarryoverIncomeTotal = 120000;
+        registered.CarryoverExpenseTotal = 95000;
+        registered.CarryoverFiscalYear = 2025;
+        await _repository.InsertAsync(registered);
+
+        // 編集画面の入力だけで組んだカード（開始ページ番号=1、繰越累計=0/0/null が既定値）
+        var editedFromForm = CreateTestCard("0102030405060708", "はやかけん", "H001");
+        editedFromForm.Note = "備考の誤字を修正";
+        editedFromForm.StartingPageNumber.Should().Be(1, "モデル既定値であること（前提の確認）");
+        editedFromForm.CarryoverFiscalYear.Should().BeNull("モデル既定値であること（前提の確認）");
+
+        // Act
+        var result = await _repository.UpdateAsync(editedFromForm);
+
+        // Assert: 編集対象の備考は反映され、登録時専用の4項目は保全される
+        result.Should().BeTrue();
+
+        var stored = await _repository.GetByIdmAsync("0102030405060708");
+        stored!.Note.Should().Be("備考の誤字を修正");
+        stored.StartingPageNumber.Should().Be(7);
+        stored.CarryoverIncomeTotal.Should().Be(120000);
+        stored.CarryoverExpenseTotal.Should().Be(95000);
+        stored.CarryoverFiscalYear.Should().Be(2025);
+    }
+
+    /// <summary>
+    /// Issue #1726: トランザクション対応オーバーロードでも登録時専用列が保全されることを確認
+    /// </summary>
+    [Fact]
+    public async Task UpdateAsync_WithTransaction_DoesNotOverwriteRegistrationOnlyColumns()
+    {
+        // Arrange
+        var registered = CreateTestCard("0102030405060709", "nimoca", "N001");
+        registered.StartingPageNumber = 12;
+        registered.CarryoverIncomeTotal = 50000;
+        registered.CarryoverExpenseTotal = 31000;
+        registered.CarryoverFiscalYear = 2026;
+        await _repository.InsertAsync(registered);
+
+        var editedFromForm = CreateTestCard("0102030405060709", "nimoca", "N002");
+
+        // Act: CSVインポートと同じくトランザクション内で更新する
+        using (var scope = await _dbContext.BeginTransactionAsync())
+        {
+            var result = await _repository.UpdateAsync(editedFromForm, scope.Transaction);
+            result.Should().BeTrue();
+            scope.Commit();
+        }
+
+        // Assert
+        var stored = await _repository.GetByIdmAsync("0102030405060709");
+        stored!.CardNumber.Should().Be("N002");
+        stored.StartingPageNumber.Should().Be(12);
+        stored.CarryoverIncomeTotal.Should().Be(50000);
+        stored.CarryoverExpenseTotal.Should().Be(31000);
+        stored.CarryoverFiscalYear.Should().Be(2026);
+    }
+
+    /// <summary>
     /// 論理削除されたカードは更新できないことを確認
     /// </summary>
     [Fact]

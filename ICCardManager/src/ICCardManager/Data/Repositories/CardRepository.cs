@@ -301,6 +301,14 @@ VALUES (@cardIdm, @cardType, @cardNumber, @note, 0, NULL, 0, NULL, NULL, @starti
         /// <summary>
         /// カード更新の内部実装
         /// </summary>
+        /// <remarks>
+        /// Issue #1726: starting_page_number / carryover_income_total / carryover_expense_total /
+        /// carryover_fiscal_year は SET しない。これらは登録時（<see cref="InsertAsyncInternal"/>）に
+        /// のみ確定する値で編集 UI を持たないため、更新経路が全列を SET すると、
+        /// 呼び出し元が部分的に構築した <see cref="IcCard"/>（備考の修正だけを目的とした更新等）の
+        /// 既定値（1 / 0 / 0 / NULL）で紙出納簿移行カードの繰越累計・開始ページ番号が静かに消える。
+        /// 「呼び出し元が引き継ぎ忘れないこと」に依存せず、UPDATE 文の対象列から外して構造的に防ぐ。
+        /// </remarks>
         private async Task<bool> UpdateAsyncInternal(IcCard card, SQLiteTransaction? transaction)
         {
             using var lease = await _dbContext.LeaseConnectionAsync();
@@ -309,21 +317,13 @@ VALUES (@cardIdm, @cardType, @cardNumber, @note, 0, NULL, 0, NULL, NULL, @starti
             using var command = connection.CreateCommand();
             command.Transaction = transaction;
             command.CommandText = @"UPDATE ic_card
-SET card_type = @cardType, card_number = @cardNumber, note = @note, starting_page_number = @startingPageNumber,
-    carryover_income_total = @carryoverIncomeTotal,
-    carryover_expense_total = @carryoverExpenseTotal,
-    carryover_fiscal_year = @carryoverFiscalYear
+SET card_type = @cardType, card_number = @cardNumber, note = @note
 WHERE card_idm = @cardIdm AND is_deleted = 0";
 
             command.Parameters.AddWithValue("@cardIdm", card.CardIdm);
             command.Parameters.AddWithValue("@cardType", card.CardType);
             command.Parameters.AddWithValue("@cardNumber", card.CardNumber);
             command.Parameters.AddWithValue("@note", (object)card.Note ?? DBNull.Value);
-            command.Parameters.AddWithValue("@startingPageNumber", card.StartingPageNumber);
-            command.Parameters.AddWithValue("@carryoverIncomeTotal", card.CarryoverIncomeTotal);
-            command.Parameters.AddWithValue("@carryoverExpenseTotal", card.CarryoverExpenseTotal);
-            command.Parameters.AddWithValue("@carryoverFiscalYear",
-                card.CarryoverFiscalYear.HasValue ? (object)card.CarryoverFiscalYear.Value : DBNull.Value);
 
             var result = await command.ExecuteNonQueryAsync();
             if (result > 0 && transaction == null)

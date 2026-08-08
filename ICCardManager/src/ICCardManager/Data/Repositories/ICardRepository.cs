@@ -58,13 +58,25 @@ namespace ICCardManager.Data.Repositories
         Task<bool> InsertAsync(IcCard card, SQLiteTransaction transaction);
 
         /// <summary>
-        /// ICカード情報を更新
+        /// ICカード情報（カード種別・管理番号・備考）を更新
         /// </summary>
+        /// <remarks>
+        /// Issue #1726: 更新対象は <see cref="IcCard.CardType"/> / <see cref="IcCard.CardNumber"/> /
+        /// <see cref="IcCard.Note"/> の 3 項目のみ。
+        /// <see cref="IcCard.StartingPageNumber"/> / <see cref="IcCard.CarryoverIncomeTotal"/> /
+        /// <see cref="IcCard.CarryoverExpenseTotal"/> / <see cref="IcCard.CarryoverFiscalYear"/> は
+        /// 登録時にのみ確定する値（編集 UI を持たない）ため、本メソッドでは**更新しない**。
+        /// これらを引数の <paramref name="card"/> に設定しても DB へは反映されない。
+        /// 詳細は <c>.claude/rules/development-conventions.md</c> の「部分構築モデルで全列 UPDATE しない」を参照。
+        /// </remarks>
         Task<bool> UpdateAsync(IcCard card);
 
         /// <summary>
-        /// ICカード情報を更新（トランザクション対応）
+        /// ICカード情報（カード種別・管理番号・備考）を更新（トランザクション対応）
         /// </summary>
+        /// <remarks>
+        /// 更新対象列の範囲は <see cref="UpdateAsync(IcCard)"/> と同じ（Issue #1726）。
+        /// </remarks>
         Task<bool> UpdateAsync(IcCard card, SQLiteTransaction transaction);
 
         /// <summary>

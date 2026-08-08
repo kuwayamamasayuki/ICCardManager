@@ -553,6 +553,14 @@ namespace ICCardManager.ViewModels
                     // 更新前のデータを取得（操作ログ用）
                     var beforeCard = await _cardRepository.GetByIdmAsync(EditCardIdm);
 
+                    // Issue #1726: 繰越累計（#1215）・開始ページ番号（#510）は登録時にのみ確定する値で
+                    // 編集 UI を持たない。編集フォームの入力だけで IcCard を組むとモデル上は既定値
+                    // （1 / 0 / 0 / NULL）になり、操作ログの AfterData（IcCard 全体の JSON）に
+                    // 「開始ページ番号 7 → 1」のような実際には起きていない変更が記録され監査で誤読される。
+                    // DB 側は CardRepository.UpdateAsync が当該列を SET しないため実値が保全される。
+                    // 取得元は DB の最新値（beforeCard）を優先し、取得できない場合は一覧の値で代替する。
+                    var carryoverSource = beforeCard ?? SelectedCard!.ToEntity();
+
                     // 更新
                     var card = new IcCard
                     {
@@ -562,7 +570,11 @@ namespace ICCardManager.ViewModels
                         Note = string.IsNullOrWhiteSpace(sanitizedNote) ? null : sanitizedNote,
                         IsLent = SelectedCard!.IsLent,
                         LastLentAt = SelectedCard.LentAt,
-                        LastLentStaff = SelectedCard.LastLentStaff
+                        LastLentStaff = SelectedCard.LastLentStaff,
+                        StartingPageNumber = carryoverSource.StartingPageNumber,
+                        CarryoverIncomeTotal = carryoverSource.CarryoverIncomeTotal,
+                        CarryoverExpenseTotal = carryoverSource.CarryoverExpenseTotal,
+                        CarryoverFiscalYear = carryoverSource.CarryoverFiscalYear
                     };
 
                     var success = await _cardRepository.UpdateAsync(card);

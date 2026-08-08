@@ -428,6 +428,101 @@ public class CardManageViewModelTests
         _viewModel.IsEditing.Should().BeFalse(); // CancelEdit()で編集モード終了
     }
 
+    /// <summary>
+    /// Issue #1726: 編集保存時、登録時にのみ確定する値（開始ページ番号・繰越累計）が
+    /// リポジトリへ渡す IcCard に引き継がれること
+    /// </summary>
+    /// <remarks>
+    /// 引き継がないと、操作ログの AfterData（IcCard 全体の JSON）に
+    /// 「開始ページ番号 7 → 1」「繰越受入 120,000 → 0」という実際には起きていない変更が
+    /// 記録され、監査時に誤読される。DB 側の保全は CardRepository 側で担保している
+    /// （CardRepositoryTests.UpdateAsync_CardWithCarryoverInfo_DoesNotOverwriteRegistrationOnlyColumns）。
+    /// </remarks>
+    [Fact]
+    public async Task SaveAsync_ExistingCard_ShouldCarryOverRegistrationOnlyValues()
+    {
+        // Arrange: 紙の出納簿から年度途中で移行したカード（Issue #510 / #1215）
+        var idm = "0102030405060708";
+        _viewModel.SelectedCard = new CardDto
+        {
+            CardIdm = idm,
+            CardType = "はやかけん",
+            CardNumber = "H-001",
+            StartingPageNumber = 7,
+            CarryoverIncomeTotal = 120000,
+            CarryoverExpenseTotal = 95000,
+            CarryoverFiscalYear = 2025
+        };
+        _viewModel.StartEdit();
+        _viewModel.EditNote = "備考の誤字を修正";
+
+        _cardRepositoryMock.Setup(r => r.GetByIdmAsync(idm, false)).ReturnsAsync(new IcCard
+        {
+            CardIdm = idm,
+            CardType = "はやかけん",
+            CardNumber = "H-001",
+            StartingPageNumber = 7,
+            CarryoverIncomeTotal = 120000,
+            CarryoverExpenseTotal = 95000,
+            CarryoverFiscalYear = 2025
+        });
+        _cardRepositoryMock.Setup(r => r.UpdateAsync(It.IsAny<IcCard>())).ReturnsAsync(true);
+        _cardRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<IcCard>());
+
+        // Act
+        await _viewModel.SaveAsync();
+
+        // Assert
+        _cardRepositoryMock.Verify(r => r.UpdateAsync(It.Is<IcCard>(c =>
+            c.Note == "備考の誤字を修正" &&
+            c.StartingPageNumber == 7 &&
+            c.CarryoverIncomeTotal == 120000 &&
+            c.CarryoverExpenseTotal == 95000 &&
+            c.CarryoverFiscalYear == 2025
+        )), Times.Once);
+    }
+
+    /// <summary>
+    /// Issue #1726: 更新前データを DB から取得できない場合は、一覧（SelectedCard）の値で
+    /// 登録時専用の値を代替すること
+    /// </summary>
+    /// <remarks>
+    /// 共有モードで他PCがカードを削除した直後など beforeCard が null になり得る。
+    /// この場合もモデル既定値（1 / 0 / 0 / NULL）へ落とさない。
+    /// </remarks>
+    [Fact]
+    public async Task SaveAsync_ExistingCard_WhenBeforeCardMissing_UsesSelectedCardForRegistrationOnlyValues()
+    {
+        // Arrange
+        var idm = "0102030405060708";
+        _viewModel.SelectedCard = new CardDto
+        {
+            CardIdm = idm,
+            CardType = "はやかけん",
+            CardNumber = "H-001",
+            StartingPageNumber = 7,
+            CarryoverIncomeTotal = 120000,
+            CarryoverExpenseTotal = 95000,
+            CarryoverFiscalYear = 2025
+        };
+        _viewModel.StartEdit();
+
+        _cardRepositoryMock.Setup(r => r.GetByIdmAsync(idm, false)).ReturnsAsync((IcCard?)null);
+        _cardRepositoryMock.Setup(r => r.UpdateAsync(It.IsAny<IcCard>())).ReturnsAsync(true);
+        _cardRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<IcCard>());
+
+        // Act
+        await _viewModel.SaveAsync();
+
+        // Assert
+        _cardRepositoryMock.Verify(r => r.UpdateAsync(It.Is<IcCard>(c =>
+            c.StartingPageNumber == 7 &&
+            c.CarryoverIncomeTotal == 120000 &&
+            c.CarryoverExpenseTotal == 95000 &&
+            c.CarryoverFiscalYear == 2025
+        )), Times.Once);
+    }
+
     #endregion
 
     #region ハイライト表示テスト（Issue #707）

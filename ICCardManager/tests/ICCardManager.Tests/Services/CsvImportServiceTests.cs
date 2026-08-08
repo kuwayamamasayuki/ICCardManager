@@ -372,6 +372,59 @@ INVALID_IDM,Suica,001,テスト";
     }
 
     /// <summary>
+    /// Issue #1726: カードCSVは繰越累計・開始ページ番号の列を持たないため、
+    /// 更新経路では DB から読み込んだ既存カードの値をそのまま引き継ぐこと。
+    /// </summary>
+    /// <remarks>
+    /// CSV の列は「カードIDm / カード種別 / 管理番号 / 備考」の4列のみ。
+    /// 更新用の IcCard を CSV の値だけから新規生成する実装に変わると、
+    /// 紙の出納簿から移行したカード（Issue #510 / #1215）の繰越累計・開始ページ番号が
+    /// モデル既定値へ落ちる。ここでその退行を検出する。
+    /// </remarks>
+    [Fact]
+    public async Task ImportCardsAsync_ExistingCardWithCarryoverInfo_PreservesRegistrationOnlyValues()
+    {
+        // Arrange
+        var csvContent = @"カードIDm,カード種別,管理番号,備考
+0123456789ABCDEF,はやかけん,H-001,備考の誤字を修正";
+        var filePath = Path.Combine(_testDirectory, "cards_preserve_carryover.csv");
+        await Task.Run(() => File.WriteAllText(filePath, csvContent, CsvEncoding));
+
+        var existingCard = new IcCard
+        {
+            CardIdm = "0123456789ABCDEF",
+            CardType = "はやかけん",
+            CardNumber = "H-001",
+            Note = "誤字あり",
+            IsDeleted = false,
+            StartingPageNumber = 7,
+            CarryoverIncomeTotal = 120000,
+            CarryoverExpenseTotal = 95000,
+            CarryoverFiscalYear = 2025
+        };
+        _cardRepositoryMock.Setup(x => x.GetByIdmAsync("0123456789ABCDEF", true)).ReturnsAsync(existingCard);
+        _cardRepositoryMock.Setup(x => x.UpdateAsync(It.IsAny<IcCard>(), It.IsAny<SQLiteTransaction>())).ReturnsAsync(true);
+
+        // Act
+        var result = await _service.ImportCardsAsync(filePath, skipExisting: true);
+
+        // Assert
+        result.Success.Should().BeTrue();
+        result.ImportedCount.Should().Be(1);
+        _cardRepositoryMock.Verify(
+            x => x.UpdateAsync(
+                It.Is<IcCard>(c =>
+                    c.Note == "備考の誤字を修正" &&
+                    c.StartingPageNumber == 7 &&
+                    c.CarryoverIncomeTotal == 120000 &&
+                    c.CarryoverExpenseTotal == 95000 &&
+                    c.CarryoverFiscalYear == 2025),
+                It.IsAny<SQLiteTransaction>()),
+            Times.Once,
+            "CSV に無い繰越累計・開始ページ番号は既存カードの値が引き継がれる");
+    }
+
+    /// <summary>
     /// Issue #1264: 復元 → 再度削除 → 再度復元のサイクル。
     /// 複数回インポートを繰り返しても、削除済み判定が毎回正しく動作し、
     /// Restore→Update が適切に呼ばれる。
