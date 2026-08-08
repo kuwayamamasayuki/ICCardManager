@@ -101,6 +101,23 @@ namespace ICCardManager.Services
         /// カード内の履歴の最古日付（Issue #664: 不完全履歴の場合のみ有効）
         /// </summary>
         public DateTime? EarliestHistoryDate { get; set; }
+
+        /// <summary>
+        /// 失敗した理由（Issue #1727。<see cref="Success"/> が false のときのみ設定される）
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// エラーメッセージの「なぜ」だけを保持する。「何が」「どうすれば」を含まないのは、
+        /// 復旧手段を知っているのが呼び出し元だから。カード登録直後であれば
+        /// 「CSVインポートで補完する」が正解だが、「しばらく待ってから再度実行してください」は
+        /// 誤り（カード行は既に登録済みで、同じ操作をやり直せない）。
+        /// 呼び出し元が 3 要素（何が／なぜ／どうすれば）に組み立てて表示すること。
+        /// </para>
+        /// <para>
+        /// 生の <see cref="Exception.Message"/> は含めない（Issue #1614）。
+        /// </para>
+        /// </remarks>
+        public string FailureReason { get; set; }
     }
 
     /// <summary>
@@ -1283,9 +1300,19 @@ namespace ICCardManager.Services
         /// <param name="cardIdm">カードのIDm</param>
         /// <param name="historyDetails">カードから読み取った履歴詳細</param>
         /// <param name="importFromDate">インポート対象の開始日</param>
-        /// <returns>インポート結果</returns>
+        /// <param name="initialLedger">
+        /// 初期残高レコード（「新規購入」/「○月から繰越」）。Issue #1727。
+        /// 指定すると履歴行と同一トランザクションで登録される。null の場合は履歴行のみを登録する。
+        /// </param>
+        /// <returns>
+        /// インポート結果。<see cref="HistoryImportResult.Success"/> が false の場合、
+        /// <paramref name="initialLedger"/> を含めて **1 行も登録されていない**。
+        /// 呼び出し元は必ず <see cref="HistoryImportResult.Success"/> を確認し、
+        /// 失敗をユーザーへ通知すること。
+        /// </returns>
         public async Task<HistoryImportResult> ImportHistoryForRegistrationAsync(
-            string cardIdm, List<LedgerDetail> historyDetails, DateTime importFromDate)
+            string cardIdm, List<LedgerDetail> historyDetails, DateTime importFromDate,
+            Ledger initialLedger = null)
         {
             var result = new HistoryImportResult();
 
@@ -1298,42 +1325,64 @@ namespace ICCardManager.Services
                     .ThenByDescending(d => d.Balance)
                     .ToList();
 
-                if (filtered.Count == 0)
+                if (filtered.Count == 0 && initialLedger == null)
                 {
                     result.Success = true;
                     result.ImportedCount = 0;
                     return result;
                 }
 
-                // トランザクション開始
-                using var scope = await _dbContext.BeginTransactionAsync().ConfigureAwait(false);
+                var importedCount = 0;
 
-                try
+                // Issue #1727: 他の書込み経路（貸出・返却・整合性修復）と同様にリトライで包む。
+                // 共有モードでは他PCの書込みと競合して SQLITE_BUSY になり得るが、
+                // ここは busy_timeout でカバーできない接続レベルのロックも起こり得る。
+                await _dbContext.ExecuteWithRetryAsync(async () =>
                 {
-                    // 既存のCreateUsageLedgersAsyncを利用（staffIdm/staffNameはnull: 登録時には利用者情報がないため）
-                    // Issue #1481: ledger ヘッダ＋複数 detail 書込みを単一トランザクションに束ねる（暗黙参加）
-                    var createdLedgers = await CreateUsageLedgersAsync(cardIdm, null, null, filtered).ConfigureAwait(false);
+                    // トランザクション開始
+                    using var scope = await _dbContext.BeginTransactionAsync().ConfigureAwait(false);
 
-                    scope.Commit();
-
-                    result.Success = true;
-                    result.ImportedCount = createdLedgers.Count;
-
-                    // 完全性チェック: 元の履歴（フィルタ前）を使用
-                    result.MayHaveIncompleteHistory = CheckHistoryCompleteness(historyDetails, importFromDate);
-
-                    // Issue #664: 不完全な場合、履歴の最古日付をメッセージ用に記録
-                    if (result.MayHaveIncompleteHistory)
+                    try
                     {
-                        result.EarliestHistoryDate = historyDetails
-                            .Where(d => d.UseDate.HasValue)
-                            .Min(d => d.UseDate.Value);
+                        // Issue #1727: 初期残高行は「この後に履歴が入る」前提で履歴最古エントリから
+                        // 逆算した値（CardManageViewModel.CalculatePreHistoryBalance）である。
+                        // 別トランザクションで先に確定させると、履歴インポートだけが失敗したときに
+                        // 実カードと合わない残高の行だけが台帳に残り、以降の残高チェーンがずれ続ける。
+                        // リポジトリは同一接続を借りるため、ここでの Insert は本スコープに暗黙参加する。
+                        if (initialLedger != null)
+                        {
+                            await _ledgerRepository.InsertAsync(initialLedger).ConfigureAwait(false);
+                        }
+
+                        // 既存のCreateUsageLedgersAsyncを利用（staffIdm/staffNameはnull: 登録時には利用者情報がないため）
+                        // Issue #1481: ledger ヘッダ＋複数 detail 書込みを単一トランザクションに束ねる（暗黙参加）
+                        var createdLedgers = filtered.Count > 0
+                            ? await CreateUsageLedgersAsync(cardIdm, null, null, filtered).ConfigureAwait(false)
+                            : new List<Ledger>();
+
+                        scope.Commit();
+
+                        importedCount = createdLedgers.Count;
                     }
-                }
-                catch
+                    catch
+                    {
+                        scope.Rollback();
+                        throw;
+                    }
+                }).ConfigureAwait(false);
+
+                result.Success = true;
+                result.ImportedCount = importedCount;
+
+                // 完全性チェック: 元の履歴（フィルタ前）を使用
+                result.MayHaveIncompleteHistory = CheckHistoryCompleteness(historyDetails, importFromDate);
+
+                // Issue #664: 不完全な場合、履歴の最古日付をメッセージ用に記録
+                if (result.MayHaveIncompleteHistory)
                 {
-                    scope.Rollback();
-                    throw;
+                    result.EarliestHistoryDate = historyDetails
+                        .Where(d => d.UseDate.HasValue)
+                        .Min(d => d.UseDate.Value);
                 }
             }
             catch (Exception ex)
@@ -1341,9 +1390,48 @@ namespace ICCardManager.Services
                 // Issue #1704: IDm は認証クレデンシャルのためログにはマスクして出力する
                 _logger.LogError(ex, "カード登録時の履歴インポートでエラーが発生しました（CardIdm={CardIdm}）", IdmMasker.Mask(cardIdm));
                 result.Success = false;
+                // ロールバック済みなので、途中まで作られた行数は残さない
+                result.ImportedCount = 0;
+                result.FailureReason = GetHistoryImportFailureReason(ex);
             }
 
             return result;
+        }
+
+        /// <summary>
+        /// Issue #1727: 履歴インポート失敗の「なぜ」をユーザー向け文言に変換する
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// <see cref="GetUserFriendlyErrorMessage"/>（Issue #1110）を流用しないのは、
+        /// あちらが「再度○○をお試しください」で終わるため。カード登録直後の履歴インポートは
+        /// 同じ操作をやり直せない（カード行は既に登録済み）ので、行動指示としては誤りになる。
+        /// また既定分岐が生の <see cref="Exception.Message"/> を含む点も Issue #1614 に反する。
+        /// </para>
+        /// <para>
+        /// 「どうすれば」は復旧手段を知っている呼び出し元（<c>CardManageViewModel</c>）が付ける。
+        /// </para>
+        /// </remarks>
+        internal static string GetHistoryImportFailureReason(Exception ex)
+        {
+            if (ex is System.Data.SQLite.SQLiteException sqliteEx)
+            {
+                switch (sqliteEx.ResultCode)
+                {
+                    case System.Data.SQLite.SQLiteErrorCode.Busy:
+                    case System.Data.SQLite.SQLiteErrorCode.Locked:
+                        return "他のPCがデータベースを使用中で、書き込みが競合しました。";
+                    case System.Data.SQLite.SQLiteErrorCode.IoErr:
+                        return "ネットワーク共有フォルダーへの接続が切れました。";
+                }
+            }
+
+            if (ex is System.IO.IOException)
+            {
+                return "ネットワーク共有フォルダーへの接続が切れました。";
+            }
+
+            return "データベースへの書き込み中に問題が発生しました。";
         }
 
         /// <summary>
