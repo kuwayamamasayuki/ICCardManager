@@ -80,7 +80,9 @@ namespace ICCardManager.Services
                 return new LedgerSplitResult
                 {
                     Success = false,
-                    ErrorMessage = "履歴データが見つかりません"
+                    // Issue #1753: 内部 ID を出さず「なぜ／どうすれば」を伝える（.claude/rules/error-messages.md）
+                    ErrorMessage = "分割対象の履歴が見つかりません。他のPCまたは他の操作で削除・統合された可能性があります。" +
+                                   "画面を最新の状態に更新してから再度お試しください。"
                 };
             }
 
@@ -112,8 +114,26 @@ namespace ICCardManager.Services
                 // ReplaceDetailsAsync はDELETE+INSERTのため、rowidが再採番される
                 // DBは rowid DESC で時系列表示（大きいrowid＝古い＝先に表示）するので、
                 // 新しい明細から先に挿入して小さいrowidを割り当てる必要がある
-                await _ledgerRepository.ReplaceDetailsAsync(originalLedger.Id, firstGroup.AsEnumerable().Reverse(), scope.Transaction).ConfigureAwait(false);
-                await _ledgerRepository.UpdateAsync(originalLedger, scope.Transaction).ConfigureAwait(false);
+                var detailsReplaced = await _ledgerRepository.ReplaceDetailsAsync(
+                    originalLedger.Id, firstGroup.AsEnumerable().Reverse(), scope.Transaction).ConfigureAwait(false);
+
+                // Issue #1753: UpdateAsync は影響行数 0 で false を返す。共有モードでは読み取り（上の
+                // GetByIdAsync）と本トランザクションの間に他 PC が同じ履歴を統合・削除し得るため、
+                // 戻り値を破棄すると「元 Ledger を更新できていないのに新 Ledger だけ作られる」状態になる。
+                // 早期 return で scope は Dispose 時に自動ロールバックされる。
+                var targetUpdated = await _ledgerRepository.UpdateAsync(
+                    originalLedger, scope.Transaction).ConfigureAwait(false);
+
+                if (!detailsReplaced || !targetUpdated)
+                {
+                    return new LedgerSplitResult
+                    {
+                        Success = false,
+                        ErrorMessage = "履歴の分割に失敗しました。対象の履歴が他の操作で変更された可能性があります。" +
+                                       "画面を最新の状態に更新してから再度お試しください。"
+                    };
+                }
+
                 allSplitLedgers.Add(originalLedger);
 
                 // グループ2以降: 新しいLedgerを作成

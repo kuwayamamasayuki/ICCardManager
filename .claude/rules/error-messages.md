@@ -126,6 +126,7 @@ StatusMessage = ExceptionMessageFormatter.ToUserMessage(ex, "台帳の保存");
 | `ValidationServiceErrorMessageQualityTests` | `ValidationService` の各 Validator |
 | `PathValidatorErrorMessageQualityTests` | パス検証（`SafeFilePathValidator` 等）のエラー文言 |
 | `ExceptionMessageFormatterTests` | `ExceptionMessageFormatter.ToUserMessage`（例外→3要素文言、Issue #1614） |
+| `LedgerMergeServiceTests` / `LedgerSplitServiceTests` の各1件 | 履歴統合・分割の競合エラー文言（内部 ID を露出しないこと、原因と回復手段を含み行動指示で終わること、Issue #1753） |
 | `ReportPreflightCheckerTests.AllWarnings_SatisfyErrorMessageQualityCriteria` | 帳票出力前プリフライトチェックの警告文言（5種別すべてを発生させ、`DisplayText` の情報量とカード名の明示、`DetailText` が行動指示で終わることを検証、Issue #1688） |
 | `WarningServiceBackupHealthTests.BackupStaleWarning_SatisfiesErrorMessageQualityCriteria` | バックアップ健全性警告の文言（経過日数・最終成功日時の明示、原因候補、システム管理画面（F6）への誘導と行動指示、Issue #1689） |
 | `ConnectionDiagnosticsServiceTests.AllProblemItems_SatisfyErrorMessageQualityCriteria` | 接続診断の警告・異常文言（8項目すべてを問題状態へ落とし、`DetailText` が20文字以上・行動指示で終わる・曖昧文言を含まないことを検証、Issue #1690） |

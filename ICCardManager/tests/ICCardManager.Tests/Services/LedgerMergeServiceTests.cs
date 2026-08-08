@@ -242,7 +242,8 @@ public class LedgerMergeServiceTests : IDisposable
 
         // Assert
         result.Success.Should().BeFalse();
-        result.ErrorMessage.Should().Contain("ID=999");
+        // Issue #1753: 内部 ID の露出をやめたため ID の照合はしない。
+        // 文言品質の検証は MergeAsync_WhenLedgerMissing_DoesNotExposeInternalIdAndGuidesRecovery が担う。
         result.ErrorMessage.Should().Contain("見つかりません");
     }
 
@@ -2010,6 +2011,77 @@ public class LedgerMergeServiceTests : IDisposable
         receivedUndoData.DetailOriginalLedgerMap.Should().HaveCount(2);
         receivedUndoData.DetailOriginalLedgerMap["10"].Should().Be(42);
         receivedUndoData.DetailOriginalLedgerMap["20"].Should().Be(43);
+    }
+
+    #endregion
+
+    #region 競合検出 (Issue #1753)
+
+    /// <summary>
+    /// 統合対象2件をカード・日付を揃えて用意する（競合テスト用の共通アレンジ）。
+    /// </summary>
+    private void SetupMergeableLedgers()
+    {
+        var ledger1 = CreateTestLedger(1, TestCardIdm, new DateTime(2026, 7, 3), "鉄道（薬院～博多）", 210, 2186);
+        ledger1.Details.Add(CreateRailDetail(1, "薬院", "博多", 210, 2186, 1));
+
+        var ledger2 = CreateTestLedger(2, TestCardIdm, new DateTime(2026, 7, 3), "鉄道（博多～薬院）", 210, 1976);
+        ledger2.Details.Add(CreateRailDetail(2, "博多", "薬院", 210, 1976, 2));
+
+        SetupGetByIdMocks(ledger1, ledger2);
+    }
+
+    /// <summary>
+    /// Issue #1753: リポジトリが競合を検出（false）した場合、画面更新を促す文言を返すこと。
+    /// </summary>
+    /// <remarks>
+    /// 修正前は <c>LedgerRepository.MergeLedgersAsync</c> が影響行数を見ずに無条件 true を返していたため、
+    /// この分岐は本番で一度も実行されない到達不能コードだった。本テストは分岐が生きていることを表明する。
+    /// </remarks>
+    [Fact]
+    [Trait("Category", "Unit")]
+    public async Task MergeAsync_WhenRepositoryDetectsConflict_ReturnsRefreshInstruction()
+    {
+        SetupMergeableLedgers();
+
+        _ledgerRepositoryMock
+            .Setup(x => x.MergeLedgersAsync(
+                It.IsAny<int>(), It.IsAny<IEnumerable<int>>(), It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>()))
+            .ReturnsAsync(false);
+
+        var result = await _service.MergeAsync(new List<int> { 1, 2 });
+
+        result.Success.Should().BeFalse();
+        result.ErrorMessage.Should().Contain("他の操作", "競合であることを伝えるべき");
+        result.ErrorMessage.Should().Contain("最新の状態に更新", "回復手段を示すべき");
+        result.ErrorMessage.Should().EndWith("お試しください。", "行動指示で終わるべき");
+    }
+
+    /// <summary>
+    /// Issue #1753: 統合対象が消えていた場合のエラー文言が内部 ID を露出せず、3 要素を満たすこと。
+    /// </summary>
+    /// <remarks>
+    /// 実機では共有モードで他 PC が先に同じ履歴を統合したときに発生した。
+    /// 旧文言「履歴 ID=999 が見つかりません」は内部 ID を出すだけで、原因も回復手段も伝えていなかった
+    /// （`.claude/rules/error-messages.md` の「何が／なぜ／どうすれば」）。
+    /// </remarks>
+    [Fact]
+    [Trait("Category", "Unit")]
+    public async Task MergeAsync_WhenLedgerMissing_DoesNotExposeInternalIdAndGuidesRecovery()
+    {
+        _ledgerRepositoryMock.Setup(x => x.GetByIdAsync(1))
+            .ReturnsAsync(CreateTestLedger(1, TestCardIdm, DateTime.Now, "A", 200, 800));
+        _ledgerRepositoryMock.Setup(x => x.GetByIdAsync(999))
+            .ReturnsAsync((Ledger?)null);
+
+        var result = await _service.MergeAsync(new List<int> { 1, 999 });
+
+        result.Success.Should().BeFalse();
+        result.ErrorMessage.Should().NotBeNull();
+        result.ErrorMessage.Should().NotContain("ID=", "内部 ID は職員には意味がなく、実装の露出でもある");
+        result.ErrorMessage!.Length.Should().BeGreaterOrEqualTo(20);
+        result.ErrorMessage.Should().Contain("他の", "他 PC / 他の操作で変更された可能性を伝えるべき");
+        result.ErrorMessage.Should().EndWith("お試しください。", "行動指示で終わるべき");
     }
 
     #endregion

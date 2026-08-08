@@ -187,10 +187,18 @@ namespace ICCardManager.Services
                 var ledger = await _ledgerRepository.GetByIdAsync(id).ConfigureAwait(false);
                 if (ledger == null)
                 {
+                    // 共有モードの競合調査に必要なため Warning で残す（LogDebug は本番のログファイルに出ない）。
+                    _logger.LogWarning(
+                        "Merge aborted: ledger {LedgerId} not found. Requested ids: {Ids}",
+                        id, string.Join(", ", ledgerIds));
                     return new LedgerMergeResult
                     {
                         Success = false,
-                        ErrorMessage = $"履歴 ID={id} が見つかりません"
+                        // Issue #1753: 内部 ID を出さず「なぜ／どうすれば」を伝える（.claude/rules/error-messages.md）。
+                        // 共有モードでは他 PC が先に同じ履歴を統合したときに実際に発生する。
+                        // 技術的詳細（対象 ID）はログへ逃がす。
+                        ErrorMessage = "統合対象の履歴が見つかりません。他のPCまたは他の操作で統合・削除された可能性があります。" +
+                                       "画面を最新の状態に更新してから再度お試しください。"
                     };
                 }
                 ledgers.Add(ledger);

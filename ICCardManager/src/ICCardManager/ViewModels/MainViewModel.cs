@@ -2131,6 +2131,11 @@ public partial class MainViewModel : ViewModelBase
         }
         else
         {
+            // Issue #1753: 失敗時も一覧を再読込する。共有モードでは他 PC が同じ履歴を統合・削除した
+            // ことが失敗要因になり得るため、古い一覧のままだと再試行しても同じエラーで止まる。
+            // エラー文言（「画面を最新の状態に更新してから再度お試しください」）とも整合させる。
+            await LoadHistoryLedgersAsync();
+
             MessageBox.Show(
                 mergeResult.ErrorMessage,
                 "統合エラー",

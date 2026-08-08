@@ -590,18 +590,42 @@ namespace ICCardManager.ViewModels
                     };
 
                     _ledger.Summary = newSummary;
+
                     // Issue #1458: 操作ログを記録する場合は Ledger UPDATE と監査ログ INSERT を同一トランザクションで実行
+                    // Issue #1753: UpdateAsync は影響行数 0 で false を返す。共有モードでは他 PC が
+                    // この履歴を統合・削除し得るため、戻り値を破棄すると「更新できていないのに保存完了」と表示される。
+                    bool summaryUpdated;
                     if (!string.IsNullOrEmpty(_operatorIdm))
                     {
                         using var scope = await _dbContext.BeginTransactionAsync();
-                        await _ledgerRepository.UpdateAsync(_ledger, scope.Transaction);
-                        await _operationLogger.LogLedgerUpdateAsync(beforeLedger, _ledger, scope.Transaction);
-                        scope.Commit();
+                        summaryUpdated = await _ledgerRepository.UpdateAsync(_ledger, scope.Transaction);
+                        if (summaryUpdated)
+                        {
+                            await _operationLogger.LogLedgerUpdateAsync(beforeLedger, _ledger, scope.Transaction);
+                            scope.Commit();
+                        }
+                        else
+                        {
+                            scope.Rollback();
+                        }
                     }
                     else
                     {
-                        await _ledgerRepository.UpdateAsync(_ledger);
+                        summaryUpdated = await _ledgerRepository.UpdateAsync(_ledger);
                     }
+
+                    if (!summaryUpdated)
+                    {
+                        // 更新できなかったので、インメモリの摘要も元へ戻して画面と DB の食い違いを残さない
+                        _ledger.Summary = beforeLedger.Summary;
+                        _logger.LogWarning(
+                            "Summary update affected no row for ledger {LedgerId} (likely changed by another PC)",
+                            _ledger.Id);
+                        StatusMessage = "この履歴は他の操作で変更されたため摘要を更新できませんでした。" +
+                                        "画面を最新の状態に更新してから再度お試しください。";
+                        return;
+                    }
+
                     SummaryDisplay = newSummary;
                 }
 
