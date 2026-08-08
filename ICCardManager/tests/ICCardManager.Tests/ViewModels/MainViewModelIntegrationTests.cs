@@ -686,6 +686,268 @@ public class MainViewModelIntegrationTests
 
     #endregion
 
+    #region 後処理の例外による Processing 固着（Issue #1725）
+
+    /// <summary>
+    /// 貸出成功後のリフレッシュ（<c>ICardRepository.GetLentAsync</c>）で例外が出ても、
+    /// 状態が <see cref="AppState.Processing"/> のまま残らないこと。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Issue #1725 の中核。<c>ProcessLendAsync</c> は先頭で Processing を設定するが、
+    /// <c>ResetState()</c> は成功・失敗の各分岐末尾にしかなく、その間の後処理
+    /// （貸出中カード一覧・ダッシュボード・履歴の更新）は無防備だった。
+    /// 共有モードで SMB が瞬断すると <c>SQLiteException</c> がそのまま伝播し、
+    /// Processing が残ったまま復帰手段が無くなる。
+    /// </para>
+    /// <para>
+    /// 修正前は例外が <c>SynchronousDispatcherService</c> 経由で本テストまで伝播するため、
+    /// このテストは「例外がスローされる」形で失敗する（本番の <c>WpfDispatcherService</c> は
+    /// 内側 Task を観測しないため、実機では例外が消えて Processing だけが残る）。
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task PostProcessingFailure_貸出後のリフレッシュ例外でもProcessingが解除されること()
+    {
+        ArrangeSuccessfulLend();
+
+        RaiseCardRead(StaffIdm);
+        await _dispatcherService.WaitForPendingAsync();
+
+        // 貸出自体は成功させ、その直後のリフレッシュだけを失敗させる
+        _cardRepositoryMock.Setup(r => r.GetLentAsync(It.IsAny<bool>()))
+            .ThrowsAsync(new InvalidOperationException("database is locked"));
+
+        // Act
+        RaiseCardRead(CardIdmA);
+        await _dispatcherService.WaitForPendingAsync();
+
+        // Assert: 貸出は成立している（台帳へ書き込み済み）
+        _ledgerRepositoryMock.Verify(r => r.InsertAsync(It.IsAny<Ledger>()), Times.AtLeastOnce);
+        // 状態が Processing のまま固着していない
+        _viewModel.CurrentState.Should().Be(AppState.WaitingForStaffCard,
+            "後処理が例外で終わっても Processing を解除しないと、以後の全カードタッチが破棄される");
+        _viewModel.RemainingSeconds.Should().Be(0);
+    }
+
+    /// <summary>
+    /// 後処理の例外後も、次のカードタッチが処理されること（Issue #1725 の実害そのもの）。
+    /// </summary>
+    /// <remarks>
+    /// Processing が残ると <c>HandleCardReadAsync</c> 冒頭の「処理中は無視」で
+    /// 以後のタッチがすべて破棄され、タイムアウトタイマーも停止済みのため自動復帰しない。
+    /// 状態値の検証だけでなく「次のタッチが実際に効くこと」を表明する。
+    /// </remarks>
+    [Fact]
+    public async Task PostProcessingFailure_例外後も次の職員証タッチが処理されること()
+    {
+        ArrangeSuccessfulLend();
+
+        RaiseCardRead(StaffIdm);
+        await _dispatcherService.WaitForPendingAsync();
+
+        _cardRepositoryMock.Setup(r => r.GetLentAsync(It.IsAny<bool>()))
+            .ThrowsAsync(new InvalidOperationException("database is locked"));
+
+        RaiseCardRead(CardIdmA);
+        await _dispatcherService.WaitForPendingAsync();
+
+        // Act: 復旧後に職員証をタッチし直す
+        _cardRepositoryMock.Setup(r => r.GetLentAsync(It.IsAny<bool>()))
+            .ReturnsAsync(new List<IcCard>());
+        RaiseCardRead(StaffIdm);
+        await _dispatcherService.WaitForPendingAsync();
+
+        // Assert: 職員証が認識され交通系ICカード待ちへ遷移している
+        _viewModel.CurrentState.Should().Be(AppState.WaitingForIcCard,
+            "Processing が固着していると職員証タッチも破棄され、アプリ再起動以外に復帰手段が無くなる");
+    }
+
+    /// <summary>
+    /// 返却成功後の後処理（<c>HandleReturnSuccessAsync</c>）で例外が出ても、
+    /// 状態が Processing のまま残らないこと。
+    /// </summary>
+    [Fact]
+    public async Task PostProcessingFailure_返却後のリフレッシュ例外でもProcessingが解除されること()
+    {
+        ArrangeSuccessfulReturn();
+
+        RaiseCardRead(StaffIdm);
+        await _dispatcherService.WaitForPendingAsync();
+
+        _cardRepositoryMock.Setup(r => r.GetLentAsync(It.IsAny<bool>()))
+            .ThrowsAsync(new InvalidOperationException("database is locked"));
+
+        // Act
+        RaiseCardRead(CardIdmA);
+        await _dispatcherService.WaitForPendingAsync();
+
+        // Assert: 返却は成立している（貸出中レコードが削除済み）
+        _ledgerRepositoryMock.Verify(r => r.DeleteAllLentRecordsAsync(CardIdmA), Times.AtLeastOnce);
+        _viewModel.CurrentState.Should().Be(AppState.WaitingForStaffCard);
+    }
+
+    /// <summary>
+    /// 後処理が失敗しても、30秒ルール用の操作者情報が保存されていること。
+    /// </summary>
+    /// <remarks>
+    /// 従来 <c>_lastProcessedStaffIdm</c> はリフレッシュ群の「後」で保存されていたため、
+    /// 後処理が例外で終わると保存されず、直後に再タッチしても
+    /// <c>Process30SecondRuleAsync</c> が「操作者情報がありません」で止まっていた。
+    /// 記録が確定した時点（リフレッシュより前）で保存する。
+    /// </remarks>
+    [Fact]
+    public async Task PostProcessingFailure_例外時も30秒ルール用の操作者情報が保存されること()
+    {
+        ArrangeSuccessfulLend();
+
+        RaiseCardRead(StaffIdm);
+        await _dispatcherService.WaitForPendingAsync();
+
+        _cardRepositoryMock.Setup(r => r.GetLentAsync(It.IsAny<bool>()))
+            .ThrowsAsync(new InvalidOperationException("database is locked"));
+
+        // Act
+        RaiseCardRead(CardIdmA);
+        await _dispatcherService.WaitForPendingAsync();
+
+        // Assert
+        var field = typeof(MainViewModel).GetField("_lastProcessedStaffIdm",
+            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+        field!.GetValue(_viewModel).Should().Be(StaffIdm,
+            "記録が確定した時点で保存しないと、後処理の失敗で30秒ルールの逆処理が使えなくなる");
+    }
+
+    /// <summary>
+    /// 記録が確定した後の失敗では「記録済み」と伝え、再タッチを促さないこと。
+    /// </summary>
+    /// <remarks>
+    /// ここで従来のフォールバック文言「もう一度タッチしてください」を出すと、
+    /// 30秒ルールにより<b>逆処理（貸出→返却）</b>が走り、記録済みの操作が取り消される。
+    /// 音も中立的な <see cref="SoundType.Warning"/> を使う（記録は成功しているため
+    /// エラー音は事実と矛盾する）。
+    /// </remarks>
+    [Fact]
+    public async Task PostProcessingFailure_記録済みを伝える警告を表示し再タッチを促さないこと()
+    {
+        ArrangeSuccessfulLend();
+
+        RaiseCardRead(StaffIdm);
+        await _dispatcherService.WaitForPendingAsync();
+
+        _cardRepositoryMock.Setup(r => r.GetLentAsync(It.IsAny<bool>()))
+            .ThrowsAsync(new InvalidOperationException("database is locked"));
+
+        // Act
+        RaiseCardRead(CardIdmA);
+        await _dispatcherService.WaitForPendingAsync();
+
+        // Assert: 「記録済み」を伝える警告トーストが出る
+        _toastMock.Verify(t => t.ShowWarning(
+            It.Is<string>(title => title.Contains("記録済み")),
+            It.IsAny<string>()), Times.Once);
+        // 再タッチを促す文言は出さない（逆処理で記録が取り消されるため）
+        _toastMock.Verify(t => t.ShowError(
+            It.IsAny<string>(),
+            It.Is<string>(m => m.Contains("もう一度タッチ"))), Times.Never);
+        // 記録は成功しているのでエラー音は鳴らさない
+        _soundPlayerMock.Verify(s => s.Play(SoundType.Error), Times.Never);
+        _soundPlayerMock.Verify(s => s.Play(SoundType.Warning), Times.Once);
+    }
+
+    /// <summary>
+    /// 記録が確定する<b>前</b>の例外では、従来どおり再タッチを促すこと（回帰防止）。
+    /// </summary>
+    /// <remarks>
+    /// 「記録済み」判定を入れたことで、本当に失敗したケースまで
+    /// 「記録済み・再タッチ不要」と案内してしまうと貸出漏れになる。
+    /// カードリーダーの履歴読み取り自体が失敗する経路で確認する。
+    /// </remarks>
+    [Fact]
+    public async Task PostProcessingFailure_記録前の失敗では従来どおり再タッチを促すこと()
+    {
+        _cardRepositoryMock.Setup(r => r.GetByIdmAsync(CardIdmA, It.IsAny<bool>()))
+            .ReturnsAsync(BuildLentCard(CardIdmA));
+        // 履歴読み取りで例外（Result 型ではなく例外がそのまま飛ぶ経路）
+        _cardReaderMock.Setup(r => r.TryReadHistoryAsync(CardIdmA))
+            .ThrowsAsync(new InvalidOperationException("reader disconnected"));
+
+        RaiseCardRead(StaffIdm);
+        await _dispatcherService.WaitForPendingAsync();
+
+        // Act
+        RaiseCardRead(CardIdmA);
+        await _dispatcherService.WaitForPendingAsync();
+
+        // Assert: 記録前なのでエラー扱い・再タッチを促す
+        _soundPlayerMock.Verify(s => s.Play(SoundType.Error), Times.Once);
+        _toastMock.Verify(t => t.ShowError("エラー",
+            It.Is<string>(m => m.Contains("もう一度タッチ"))), Times.Once);
+        _toastMock.Verify(t => t.ShowWarning(
+            It.Is<string>(title => title.Contains("記録済み")),
+            It.IsAny<string>()), Times.Never);
+        _viewModel.CurrentState.Should().Be(AppState.WaitingForStaffCard);
+    }
+
+    /// <summary>
+    /// 貸出が成功するようリポジトリモックを設定する（後処理の失敗だけを切り出すため）。
+    /// </summary>
+    private void ArrangeSuccessfulLend()
+    {
+        _cardRepositoryMock.Setup(r => r.GetByIdmAsync(CardIdmA, It.IsAny<bool>()))
+            .ReturnsAsync(BuildAvailableCard(CardIdmA));
+        _cardRepositoryMock.Setup(r => r.UpdateLentStatusAsync(
+                CardIdmA, true, It.IsAny<DateTime?>(), StaffIdm))
+            .ReturnsAsync(true);
+        _ledgerRepositoryMock.Setup(r => r.InsertAsync(It.IsAny<Ledger>())).ReturnsAsync(1);
+        _cardRepositoryMock.Setup(r => r.GetLentAsync(It.IsAny<bool>()))
+            .ReturnsAsync(new List<IcCard> { BuildLentCard(CardIdmA) });
+        _cardRepositoryMock.Setup(r => r.GetAllAsync())
+            .ReturnsAsync(new List<IcCard> { BuildLentCard(CardIdmA) });
+    }
+
+    /// <summary>
+    /// 返却が成功するようリポジトリモック・カードリーダーモックを設定する。
+    /// </summary>
+    private void ArrangeSuccessfulReturn()
+    {
+        var lentRecord = new Ledger
+        {
+            Id = 100,
+            CardIdm = CardIdmA,
+            LenderIdm = StaffIdm,
+            Date = DateTime.Now.AddHours(-2),
+            Summary = SummaryGenerator.GetLendingSummary(),
+            StaffName = StaffName,
+            LentAt = DateTime.Now.AddHours(-2),
+            IsLentRecord = true,
+        };
+        _cardRepositoryMock.Setup(r => r.GetByIdmAsync(CardIdmA, It.IsAny<bool>()))
+            .ReturnsAsync(BuildLentCard(CardIdmA));
+        _ledgerRepositoryMock.Setup(r => r.GetLentRecordAsync(CardIdmA)).ReturnsAsync(lentRecord);
+        _ledgerRepositoryMock.Setup(r => r.DeleteAllLentRecordsAsync(CardIdmA)).ReturnsAsync(1);
+        _cardRepositoryMock.Setup(r => r.UpdateLentStatusAsync(CardIdmA, false, null, null))
+            .ReturnsAsync(true);
+        _cardRepositoryMock.Setup(r => r.GetLentAsync(It.IsAny<bool>()))
+            .ReturnsAsync(new List<IcCard>());
+        _cardRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<IcCard>());
+        _cardReaderMock.Setup(r => r.TryReadHistoryAsync(CardIdmA))
+            .ReturnsAsync(CardReadResult<IReadOnlyList<LedgerDetail>>.Ok(new List<LedgerDetail>
+            {
+                new LedgerDetail
+                {
+                    UseDate = DateTime.Now.AddHours(-1),
+                    Balance = 2500,
+                    Amount = 210,
+                    IsCharge = false,
+                    EntryStation = "博多",
+                    ExitStation = "天神",
+                },
+            }));
+    }
+
+    #endregion
+
     #region タイムアウト60秒での状態リセット
 
     /// <summary>

@@ -15,6 +15,7 @@ using ICCardManager.Dtos;
 using ICCardManager.Infrastructure.CardReader;
 using ICCardManager.Infrastructure.Sound;
 using ICCardManager.Infrastructure.Caching;
+using ICCardManager.Infrastructure.Security;
 using ICCardManager.Infrastructure.Timing;
 using ICCardManager.Models;
 using ICCardManager.Services;
@@ -1118,59 +1119,76 @@ public partial class MainViewModel : ViewModelBase
         // メイン画面は変更せず、内部状態のみ更新（Issue #186）
         SetInternalState(AppState.Processing);
 
-        // カードから残高を読み取る（Issue #526: 貸出時も残高を記録）
-        // Issue #656: エラーイベントを一時的に抑制（カード離脱時の警告メッセージを防止）
-        int? balance = null;
-        _cardReader.Error -= OnCardReaderError;
+        // Issue #1725: 台帳への記録が確定したかを追跡する。
+        // 記録後に後処理（画面更新）が失敗した場合、「もう一度タッチ」と案内すると
+        // 30秒ルールの逆処理が走り、記録済みの貸出が取り消されてしまうため。
+        var recorded = false;
         try
         {
-            balance = await _cardReader.ReadBalanceAsync(card.CardIdm);
+            // カードから残高を読み取る（Issue #526: 貸出時も残高を記録）
+            // Issue #656: エラーイベントを一時的に抑制（カード離脱時の警告メッセージを防止）
+            int? balance = null;
+            _cardReader.Error -= OnCardReaderError;
+            try
+            {
+                balance = await _cardReader.ReadBalanceAsync(card.CardIdm);
+            }
+            catch
+            {
+                // 残高読み取りエラーは無視（貸出処理は続行）
+            }
+            finally
+            {
+                _cardReader.Error += OnCardReaderError;
+            }
+
+            var result = await _lendingService.LendAsync(_currentStaffIdm!, card.CardIdm, balance);
+
+            if (result.Success)
+            {
+                recorded = true;
+
+                _soundPlayer.Play(SoundType.Lend);
+
+                // トースト通知を表示（表示位置は設定に従う、フォーカスを奪わない）
+                _toastNotificationService.ShowLendNotification(card.CardType, card.CardNumber);
+
+                // メイン画面は変更しない（Issue #186: 職員の操作を妨げない）
+
+                // 30秒ルール用に職員情報を保存（Issue #1725: 後処理より前に確定させる。
+                // リフレッシュの後に置くと、後処理が例外で終わったとき保存されず、
+                // 直後の再タッチが「操作者情報がありません」で止まる）
+                _lastProcessedStaffIdm = _currentStaffIdm;
+                _lastProcessedStaffName = _currentStaffName;
+
+                await RefreshLentCardsAsync();
+                await RefreshDashboardAsync();
+
+                // 履歴が開いていれば再読み込み（Issue #526）
+                if (IsHistoryVisible)
+                {
+                    await LoadHistoryLedgersAsync();
+                }
+            }
+            else
+            {
+                _soundPlayer.Play(SoundType.Error);
+
+                // エラー時はトースト通知で表示（メイン画面は変更しない）
+                // フォールバック文言にも行動指示を付与（Issue #1614）。トーストは文字数制約があるため簡潔に。
+                _toastNotificationService.ShowError("エラー", result.ErrorMessage ?? "貸出処理に失敗しました。もう一度タッチしてください。");
+            }
         }
-        catch
+        catch (Exception ex)
         {
-            // 残高読み取りエラーは無視（貸出処理は続行）
+            NotifyProcessingFailure(ex, "貸出", card, recorded);
         }
         finally
         {
-            _cardReader.Error += OnCardReaderError;
-        }
-
-        var result = await _lendingService.LendAsync(_currentStaffIdm!, card.CardIdm, balance);
-
-        if (result.Success)
-        {
-            _soundPlayer.Play(SoundType.Lend);
-
-            // トースト通知を表示（表示位置は設定に従う、フォーカスを奪わない）
-            _toastNotificationService.ShowLendNotification(card.CardType, card.CardNumber);
-
-            // メイン画面は変更しない（Issue #186: 職員の操作を妨げない）
-
-            await RefreshLentCardsAsync();
-            await RefreshDashboardAsync();
-
-            // 履歴が開いていれば再読み込み（Issue #526）
-            if (IsHistoryVisible)
-            {
-                await LoadHistoryLedgersAsync();
-            }
-
-            // 30秒ルール用に職員情報を保存（ResetStateの前に保存）
-            _lastProcessedStaffIdm = _currentStaffIdm;
-            _lastProcessedStaffName = _currentStaffName;
-
-            // 状態をリセット（次の操作を受け付ける）
-            ResetState();
-        }
-        else
-        {
-            _soundPlayer.Play(SoundType.Error);
-
-            // エラー時はトースト通知で表示（メイン画面は変更しない）
-            // フォールバック文言にも行動指示を付与（Issue #1614）。トーストは文字数制約があるため簡潔に。
-            _toastNotificationService.ShowError("エラー", result.ErrorMessage ?? "貸出処理に失敗しました。もう一度タッチしてください。");
-
-            // 状態をリセット
+            // Issue #1725: 例外経路でも必ず Processing を解除する。
+            // 解除しないと以後の全カードタッチが HandleCardReadAsync 冒頭の
+            // 「処理中は無視」で破棄され、タイムアウトタイマーも停止済みのため
+            // アプリ再起動以外に復帰手段が無くなる。
             ResetState();
         }
     }
@@ -1196,44 +1214,105 @@ public partial class MainViewModel : ViewModelBase
         // メイン画面は変更せず、内部状態のみ更新（Issue #186）
         SetInternalState(AppState.Processing);
 
-        // Issue #1169: カードから履歴を読み取る（リーダーエラーと履歴ゼロ件を区別）
-        var historyResult = await _cardReader.TryReadHistoryAsync(card.CardIdm);
-        if (!historyResult.Success)
+        // Issue #1725: 台帳への記録が確定したかを追跡する（ProcessLendAsync と同じ理由）
+        var recorded = false;
+        try
         {
-            // リーダーエラー: 不正確なデータをDBに記録しないため返却処理を中断
-            _soundPlayer.Play(SoundType.Error);
-            _toastNotificationService.ShowError(
-                "カードリーダーエラー",
-                "履歴の読み取りに失敗しました。カードを再度タッチしてください。");
-            ResetState();
-            return;
+            // Issue #1169: カードから履歴を読み取る（リーダーエラーと履歴ゼロ件を区別）
+            var historyResult = await _cardReader.TryReadHistoryAsync(card.CardIdm);
+            if (!historyResult.Success)
+            {
+                // リーダーエラー: 不正確なデータをDBに記録しないため返却処理を中断
+                _soundPlayer.Play(SoundType.Error);
+                _toastNotificationService.ShowError(
+                    "カードリーダーエラー",
+                    "履歴の読み取りに失敗しました。カードを再度タッチしてください。");
+                return; // 状態リセットは finally が行う
+            }
+            var usageDetailsList = historyResult.Value.ToList();
+
+            var result = await _lendingService.ReturnAsync(_currentStaffIdm!, card.CardIdm, usageDetailsList);
+
+            if (result.Success)
+            {
+                recorded = true;
+
+                // 30秒ルール用に職員情報を保存（Issue #1725: 後処理より前に確定させる）
+                _lastProcessedStaffIdm = _currentStaffIdm;
+                _lastProcessedStaffName = _currentStaffName;
+
+                // 返却成功時の共通後処理（仮想タッチからも同じ処理を呼び出す。Issue #1577）
+                await HandleReturnSuccessAsync(card, result);
+            }
+            else
+            {
+                _soundPlayer.Play(SoundType.Error);
+
+                // エラー時はトースト通知で表示（メイン画面は変更しない）
+                // フォールバック文言にも行動指示を付与（Issue #1614）。トーストは文字数制約があるため簡潔に。
+                _toastNotificationService.ShowError("エラー", result.ErrorMessage ?? "返却処理に失敗しました。もう一度タッチしてください。");
+            }
         }
-        var usageDetailsList = historyResult.Value.ToList();
-
-        var result = await _lendingService.ReturnAsync(_currentStaffIdm!, card.CardIdm, usageDetailsList);
-
-        if (result.Success)
+        catch (Exception ex)
         {
-            // 返却成功時の共通後処理（仮想タッチからも同じ処理を呼び出す。Issue #1577）
-            await HandleReturnSuccessAsync(card, result);
-
-            // 30秒ルール用に職員情報を保存（ResetStateの前に保存）
-            _lastProcessedStaffIdm = _currentStaffIdm;
-            _lastProcessedStaffName = _currentStaffName;
-
-            // 状態をリセット（次の操作を受け付ける）
+            NotifyProcessingFailure(ex, "返却", card, recorded);
+        }
+        finally
+        {
+            // Issue #1725: 例外経路でも必ず Processing を解除する（ProcessLendAsync と同じ理由）
             ResetState();
+        }
+    }
+
+    /// <summary>
+    /// 貸出／返却処理で捕捉した例外をログへ残し、ユーザーへ通知します（Issue #1725）。
+    /// </summary>
+    /// <param name="ex">捕捉した例外</param>
+    /// <param name="operationName">ユーザー視点の操作名（「貸出」「返却」）</param>
+    /// <param name="card">対象の交通系ICカード</param>
+    /// <param name="recorded">
+    /// 台帳への記録が確定済みかどうか。<c>true</c> の場合は「記録済み」として案内し、
+    /// 再タッチを促さない。
+    /// </param>
+    /// <remarks>
+    /// <para>
+    /// <b>記録済みのときに「もう一度タッチしてください」と案内してはならない。</b>
+    /// 30秒以内の再タッチは逆処理（貸出→返却）として扱われるため、
+    /// 案内どおりに操作すると記録済みの貸出／返却が取り消される。
+    /// </para>
+    /// <para>
+    /// 音も記録済みかどうかで分ける。記録は成功しているのにエラー音（ピー）を鳴らすと
+    /// 事実と矛盾するため、中立的な <see cref="SoundType.Warning"/> を使う
+    /// （時間切れを警告音で扱う Issue #1683 と同じ考え方）。
+    /// </para>
+    /// <para>
+    /// ログは <c>LogError</c>。<c>LogDebug</c> では本番の
+    /// <c>Logging:LogLevel:Default = Information</c> によりファイルへ出力されず、
+    /// 障害調査で経路を追えない（Issue #1716 の教訓）。
+    /// </para>
+    /// </remarks>
+    private void NotifyProcessingFailure(Exception ex, string operationName, IcCard card, bool recorded)
+    {
+        _logger?.LogError(
+            ex,
+            "{Operation}処理で予期しない例外が発生しました（CardIdm={CardIdm}, 記録済み={Recorded}）",
+            operationName,
+            IdmMasker.Mask(card?.CardIdm),
+            recorded);
+
+        if (recorded)
+        {
+            _soundPlayer.Play(SoundType.Warning);
+            _toastNotificationService.ShowWarning(
+                $"{operationName}は記録済み",
+                "画面の更新に失敗しました。再タッチしないでください。");
         }
         else
         {
             _soundPlayer.Play(SoundType.Error);
-
-            // エラー時はトースト通知で表示（メイン画面は変更しない）
-            // フォールバック文言にも行動指示を付与（Issue #1614）。トーストは文字数制約があるため簡潔に。
-            _toastNotificationService.ShowError("エラー", result.ErrorMessage ?? "返却処理に失敗しました。もう一度タッチしてください。");
-
-            // 状態をリセット
-            ResetState();
+            _toastNotificationService.ShowError(
+                "エラー",
+                $"{operationName}処理に失敗しました。もう一度タッチしてください。");
         }
     }
 
