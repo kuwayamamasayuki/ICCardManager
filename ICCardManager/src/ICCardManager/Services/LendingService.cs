@@ -1373,17 +1373,6 @@ namespace ICCardManager.Services
 
                 result.Success = true;
                 result.ImportedCount = importedCount;
-
-                // 完全性チェック: 元の履歴（フィルタ前）を使用
-                result.MayHaveIncompleteHistory = CheckHistoryCompleteness(historyDetails, importFromDate);
-
-                // Issue #664: 不完全な場合、履歴の最古日付をメッセージ用に記録
-                if (result.MayHaveIncompleteHistory)
-                {
-                    result.EarliestHistoryDate = historyDetails
-                        .Where(d => d.UseDate.HasValue)
-                        .Min(d => d.UseDate.Value);
-                }
             }
             catch (Exception ex)
             {
@@ -1392,7 +1381,40 @@ namespace ICCardManager.Services
                 result.Success = false;
                 // ロールバック済みなので、途中まで作られた行数は残さない
                 result.ImportedCount = 0;
-                result.FailureReason = GetHistoryImportFailureReason(ex);
+                result.FailureReason = GetHistoryImportFailureReason(ex, _dbContext.IsSharedMode);
+            }
+
+            // Issue #1727: コミット確定後の後処理は、取込の成否に影響させない。
+            // ここで例外を通して Success=false にすると、呼び出し元は「台帳には1行も
+            // 記録されていません。CSVインポートで取り込んでください」と**事実に反する**
+            // 案内をし、職員がそれに従うとコミット済みの行の上に同じ利用が二重計上される。
+            // 完全性チェックは「不足しているかもしれない」という助言でしかないため、
+            // 判定できなかった場合は助言を出さない（＝false）扱いで十分。
+            if (result.Success)
+            {
+                try
+                {
+                    // 完全性チェック: 元の履歴（フィルタ前）を使用
+                    result.MayHaveIncompleteHistory = CheckHistoryCompleteness(historyDetails, importFromDate);
+
+                    // Issue #664: 不完全な場合、履歴の最古日付をメッセージ用に記録
+                    if (result.MayHaveIncompleteHistory)
+                    {
+                        // UseDate を持つ要素が無い場合、Min は例外ではなく null を返す
+                        // （DateTime? のセレクタを渡しているため）
+                        result.EarliestHistoryDate = historyDetails
+                            .Where(d => d.UseDate.HasValue)
+                            .Min(d => d.UseDate);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex,
+                        "履歴の完全性チェックに失敗しました（取込自体は成功しています。CardIdm={CardIdm}）",
+                        IdmMasker.Mask(cardIdm));
+                    result.MayHaveIncompleteHistory = false;
+                    result.EarliestHistoryDate = null;
+                }
             }
 
             return result;
@@ -1411,24 +1433,39 @@ namespace ICCardManager.Services
         /// <para>
         /// 「どうすれば」は復旧手段を知っている呼び出し元（<c>CardManageViewModel</c>）が付ける。
         /// </para>
+        /// <para>
+        /// <paramref name="isSharedMode"/> で文言を分けるのは、**ローカルモードには「他のPC」が
+        /// 存在しない**ため。単一 PC でも VACUUM・バックアップ・接続ヘルスチェックといった
+        /// 自プロセス内の別接続と競合して SQLITE_BUSY は起こり得る。そこで「他のPCが使用中」と
+        /// 案内すると、職員は存在しない相手を探して原因究明が止まる。
+        /// </para>
         /// </remarks>
-        internal static string GetHistoryImportFailureReason(Exception ex)
+        /// <param name="ex">捕捉した例外</param>
+        /// <param name="isSharedMode">共有フォルダモードで動作しているか（<c>DbContext.IsSharedMode</c>）</param>
+        internal static string GetHistoryImportFailureReason(Exception ex, bool isSharedMode)
         {
+            // ネットワーク共有が絡まない環境では、原因をネットワークに帰さない
+            var ioReason = isSharedMode
+                ? "ネットワーク共有フォルダーへの接続が切れました。"
+                : "データベースファイルの読み書きに失敗しました。";
+
             if (ex is System.Data.SQLite.SQLiteException sqliteEx)
             {
                 switch (sqliteEx.ResultCode)
                 {
                     case System.Data.SQLite.SQLiteErrorCode.Busy:
                     case System.Data.SQLite.SQLiteErrorCode.Locked:
-                        return "他のPCがデータベースを使用中で、書き込みが競合しました。";
+                        return isSharedMode
+                            ? "他のPCがデータベースを使用中で、書き込みが競合しました。"
+                            : "データベースが他の処理（バックアップや最適化など）で使用中で、書き込みが競合しました。";
                     case System.Data.SQLite.SQLiteErrorCode.IoErr:
-                        return "ネットワーク共有フォルダーへの接続が切れました。";
+                        return ioReason;
                 }
             }
 
             if (ex is System.IO.IOException)
             {
-                return "ネットワーク共有フォルダーへの接続が切れました。";
+                return ioReason;
             }
 
             return "データベースへの書き込み中に問題が発生しました。";

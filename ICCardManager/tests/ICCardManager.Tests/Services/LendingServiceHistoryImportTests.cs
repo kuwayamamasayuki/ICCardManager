@@ -160,26 +160,96 @@ public class LendingServiceHistoryImportTests : IDisposable
     [Theory]
     [InlineData(SQLiteErrorCode.Busy)]
     [InlineData(SQLiteErrorCode.Locked)]
-    public void GetHistoryImportFailureReason_SqliteContention_ExplainsOtherPcIsWriting(SQLiteErrorCode code)
+    public void GetHistoryImportFailureReason_SharedModeContention_ExplainsOtherPcIsWriting(SQLiteErrorCode code)
     {
         var reason = LendingService.GetHistoryImportFailureReason(
-            new SQLiteException(code, "database is locked"));
+            new SQLiteException(code, "database is locked"), isSharedMode: true);
 
         reason.Should().Contain("他のPC");
         reason.Should().NotContain("database is locked");
     }
 
     /// <summary>
-    /// 例外種別が分からない場合も、生の例外メッセージを露出しないこと。
+    /// ローカルモードでは存在しない「他のPC」を原因として案内しないこと。
     /// </summary>
-    [Fact]
-    public void GetHistoryImportFailureReason_UnknownException_DoesNotLeakRawMessage()
+    /// <remarks>
+    /// 単一 PC でも VACUUM・バックアップ・接続ヘルスチェックといった自プロセス内の
+    /// 別接続と競合して SQLITE_BUSY は起こり得る。「他のPCが使用中」と案内すると、
+    /// 職員は存在しない相手を探して原因究明が止まる。
+    /// </remarks>
+    [Theory]
+    [InlineData(SQLiteErrorCode.Busy)]
+    [InlineData(SQLiteErrorCode.Locked)]
+    public void GetHistoryImportFailureReason_LocalModeContention_DoesNotBlameOtherPc(SQLiteErrorCode code)
     {
         var reason = LendingService.GetHistoryImportFailureReason(
-            new Exception("Object reference not set to an instance of an object."));
+            new SQLiteException(code, "database is locked"), isSharedMode: false);
+
+        reason.Should().NotContain("他のPC");
+        reason.Should().NotContain("ネットワーク");
+        reason.Should().Contain("競合", "競合が起きたこと自体は伝える必要がある");
+        reason.Should().NotContain("database is locked");
+    }
+
+    /// <summary>
+    /// ローカルモードの I/O 障害を「ネットワーク共有フォルダー」の問題として案内しないこと。
+    /// </summary>
+    [Fact]
+    public void GetHistoryImportFailureReason_LocalModeIoError_DoesNotBlameNetwork()
+    {
+        var reason = LendingService.GetHistoryImportFailureReason(
+            new System.IO.IOException("The device is not ready."), isSharedMode: false);
+
+        reason.Should().NotContain("ネットワーク");
+        reason.Should().NotContain("device is not ready");
+    }
+
+    /// <summary>
+    /// 例外種別が分からない場合も、生の例外メッセージを露出しないこと。
+    /// </summary>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void GetHistoryImportFailureReason_UnknownException_DoesNotLeakRawMessage(bool isSharedMode)
+    {
+        var reason = LendingService.GetHistoryImportFailureReason(
+            new Exception("Object reference not set to an instance of an object."), isSharedMode);
 
         reason.Should().NotBeNullOrWhiteSpace();
         reason.Should().NotContain("Object reference");
+    }
+
+    /// <summary>
+    /// コミット確定後の後処理で例外が出ても、取込を失敗として報告しないこと。
+    /// </summary>
+    /// <remarks>
+    /// Issue #1727 のレビュー指摘。完全性チェック（コミット後に実行）で例外が出たときに
+    /// Success=false を返すと、呼び出し元は「台帳には1行も記録されていません。
+    /// CSVインポートで取り込んでください」と**事実に反する**案内をする。職員がそれに従うと
+    /// コミット済みの行の上に同じ利用が二重計上される。
+    /// </remarks>
+    [Fact]
+    public async Task ImportHistoryForRegistrationAsync_PostCommitCheckThrows_StillReportsSuccess()
+    {
+        // Arrange: UseDate を持たない要素だけで 20 件以上を渡し、
+        // 完全性チェック→最古日付の算出という後処理に異常系の入力を与える。
+        SetupReadMocks();
+        _ledgerRepositoryMock.Setup(r => r.InsertAsync(It.IsAny<Ledger>())).ReturnsAsync(1);
+
+        var history = CreateHistory();
+        for (var i = 0; i < 25; i++)
+        {
+            history.Add(new LedgerDetail { UseDate = null, Balance = 4000 - i, Amount = 100 });
+        }
+
+        // Act
+        var result = await _service.ImportHistoryForRegistrationAsync(
+            TestCardIdm, history, new DateTime(2026, 2, 1));
+
+        // Assert: コミットは通っているので必ず成功として返る
+        result.Success.Should().BeTrue("コミット確定後の後処理は取込の成否に影響させない");
+        result.ImportedCount.Should().BeGreaterThan(0);
+        result.FailureReason.Should().BeNull();
     }
 
     #region 初期残高行と履歴行の原子性（実リポジトリ）
