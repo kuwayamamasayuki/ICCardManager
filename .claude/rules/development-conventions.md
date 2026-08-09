@@ -45,6 +45,14 @@
 - 逆に、正常時も高頻度で出る内容（毎ループの経過報告等）は `LogDebug` のままでよい（本番では出力されない前提を織り込む）
 - ログレベルを変更したら、その理由をコード上のコメントに残す（後から「なぜ Information なのか」を再検討させない）
 
+### 是正するときは `LogDebug` を消さず Information を併設する（Issue #1730）
+
+`LogDebug(ex, …)` は例外オブジェクトごと渡せてスタックトレースが残るため、開発時の価値がある。**置き換えではなく併設**にすること。既存テストが `LogLevel.Debug` をピン留めしていても緑のまま通り、レベル引き上げのために回帰テストを弱める必要がなくなる（`ExecuteConnectionCheck` / `CheckWritable` はいずれもこの形。`DbContextCheckConnectionLoggingTests` と `DbContextCheckConnectionReachabilityTests` が Debug と Information を別テストで共存させている）。
+
+- **規約を新設したら、同種の既存箇所を横断で洗う**。#1716 は `DbContext.CheckConnection` を是正したが、**並行して別 Issue（#1686）で追加された兄弟メソッド `CheckWritable`** が取り残され、#1730 として再発した。「同じ判断が要る箇所」は `grep "LogDebug(ex"` のような機械的な洗い出しで列挙し、対象外とした箇所は**なぜ対象外か**を Issue／PR に書く（例: `MainViewModel` の定期リフレッシュ失敗は切断中 15 秒ごとに出続け、かつ同じ切断を `LogConnectionCheckOutcome` が Information で既に記録しているため据え置き）
+- **Information ログには「調査を先に進める値」を載せる**。レベルだけ上げて「失敗しました」とだけ書くと、出力されるようになっただけで切り分けはできない。`CheckWritable` は bool しか返さないため画面は原因**候補**を並べるにとどまり、それを 1 つに絞れるのは `SQLiteException.ResultCode`（`ReadOnly` / `Full` / `Busy` / `Locked`）だけだった。**UI が候補を並べている箇所は、ログが候補を絞れているかを確認する合図**
+- **テストはレベルだけでなく載っている値まで表明する**。`LogLevel.Information` が呼ばれたことの確認だけでは、原因を切り分けられない空虚なログでも通る。あわせて**成功時に出さないこと**も固定する（後から「常に出す」実装へ緩めてもテストが通ってしまうため）
+
 ## 「処理中」フラグの解除は `finally` で保証する（Issue #1725）
 
 **入力を止めるフラグを立てたら、解除は必ず `try/finally`（または `IDisposable`）に置く。** 成功分岐と失敗分岐の末尾に解除を書く形は、その 2 つの分岐の途中で例外が出たときに解除されない。
