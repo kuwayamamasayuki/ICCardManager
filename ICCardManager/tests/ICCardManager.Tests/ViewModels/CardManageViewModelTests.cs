@@ -1493,4 +1493,270 @@ public class CardManageViewModelTests
     }
 
     #endregion
+
+    #region Issue #1727: カード登録時の履歴インポート失敗の通知
+
+    /// <summary>
+    /// 履歴インポートが失敗する状態を作る。
+    /// </summary>
+    /// <remarks>
+    /// SQLITE_BUSY ではなく <see cref="InvalidOperationException"/> を使うのは、
+    /// リトライ待機（ローカルモードで最大 2.6 秒）を挟まずに「任意の例外で無言失敗しない」
+    /// ことを検証するため。Issue #1727 の故障は SQLITE_BUSY に限らない。
+    /// </remarks>
+    private void ArrangeFailingHistoryImport(string idm)
+    {
+        _ledgerRepositoryMock.Setup(r => r.GetExistingDetailKeysAsync(idm, It.IsAny<DateTime>()))
+            .ReturnsAsync(new HashSet<(DateTime?, int?, bool)>());
+        _ledgerRepositoryMock.Setup(r => r.GetLatestBeforeDateAsync(idm, It.IsAny<DateTime>()))
+            .ReturnsAsync((Ledger?)null);
+        _ledgerRepositoryMock.Setup(r => r.InsertAsync(It.IsAny<Ledger>()))
+            .ThrowsAsync(new InvalidOperationException("database is locked"));
+    }
+
+    /// <summary>
+    /// 新規登録用の入力を整える（履歴あり・新規購入モード）。
+    /// </summary>
+    private void ArrangeNewCardWithHistory(string idm, string cardNumber)
+    {
+        var preReadHistory = new List<LedgerDetail>
+        {
+            new() { UseDate = DateTime.Today, EntryStation = "博多", ExitStation = "天神", Amount = 210, Balance = 4790 }
+        };
+
+        _cardRepositoryMock.Setup(r => r.GetByIdmAsync(idm, true)).ReturnsAsync((IcCard?)null);
+        _cardRepositoryMock.Setup(r => r.InsertAsync(It.IsAny<IcCard>())).ReturnsAsync(true);
+
+        _viewModel.SetPreReadBalance(4790);
+        _viewModel.SetPreReadHistory(preReadHistory);
+
+        _viewModel.StartNewCard();
+        _viewModel.EditCardIdm = idm;
+        _viewModel.EditCardType = "はやかけん";
+        _viewModel.EditCardNumber = cardNumber;
+    }
+
+    /// <summary>
+    /// 履歴インポートが失敗した場合、「登録しました」と成功扱いで表示しないこと。
+    /// </summary>
+    /// <remarks>
+    /// Issue #1727: 初期残高行は「履歴が入る前提」で履歴最古エントリから逆算した値のため、
+    /// 履歴が入らないまま成功表示すると、職員は残高チェーンが実カードとずれたことに気付けない。
+    /// </remarks>
+    [Fact]
+    public async Task SaveAsync_NewCard_WhenHistoryImportFails_ShouldNotReportSuccess()
+    {
+        // Arrange
+        var idm = "0102030405060708";
+        ArrangeNewCardWithHistory(idm, "H-001");
+        ArrangeFailingHistoryImport(idm);
+
+        // Act
+        await _viewModel.SaveAsync();
+
+        // Assert
+        _viewModel.StatusMessage.Should().NotBe("登録しました",
+            "履歴の取込に失敗しているため成功として表示してはならない");
+        _viewModel.IsStatusError.Should().BeTrue(
+            "取込失敗はエラーとして識別できる状態で表示する必要がある");
+    }
+
+    /// <summary>
+    /// 履歴インポートが失敗した場合、復旧手段を示すエラーダイアログを表示すること。
+    /// </summary>
+    [Fact]
+    public async Task SaveAsync_NewCard_WhenHistoryImportFails_ShouldShowErrorDialogWithRecoveryGuidance()
+    {
+        // Arrange
+        var idm = "0102030405060708";
+        ArrangeNewCardWithHistory(idm, "H-001");
+        ArrangeFailingHistoryImport(idm);
+
+        string? shownMessage = null;
+        _dialogServiceMock.Setup(d => d.ShowError(It.IsAny<string>(), It.IsAny<string>()))
+            .Callback<string, string>((message, _) => shownMessage = message);
+
+        // Act
+        await _viewModel.SaveAsync();
+
+        // Assert
+        _dialogServiceMock.Verify(d => d.ShowError(It.IsAny<string>(), It.IsAny<string>()), Times.Once);
+        shownMessage.Should().NotBeNull();
+        shownMessage!.Should().Contain("H-001", "どの交通系ICカードで起きたかを特定できる必要がある");
+        shownMessage.Should().Contain("CSVインポート", "復旧手段を提示する必要がある");
+    }
+
+    /// <summary>
+    /// 履歴インポートが失敗しても、カード自体は登録済みのため一覧を更新し編集を終了すること。
+    /// </summary>
+    /// <remarks>
+    /// Issue #1727: 失敗時に編集フォームを開いたまま残すと、職員が同じ内容で再保存して
+    /// 「既に登録されています」に突き当たる。カード行の作成自体は成功しているため、
+    /// 成功時と同じ後処理（一覧再読込・編集終了）を行ったうえでエラーを提示する。
+    /// </remarks>
+    [Fact]
+    public async Task SaveAsync_NewCard_WhenHistoryImportFails_ShouldStillRefreshListAndExitEditMode()
+    {
+        // Arrange
+        var idm = "0102030405060708";
+        ArrangeNewCardWithHistory(idm, "H-001");
+        ArrangeFailingHistoryImport(idm);
+
+        // Act
+        await _viewModel.SaveAsync();
+
+        // Assert
+        _viewModel.IsEditing.Should().BeFalse("カード行は登録済みのため編集モードは終了する");
+        _cardRepositoryMock.Verify(r => r.GetAllAsync(), Times.AtLeastOnce(),
+            "登録済みのカードを一覧に反映する必要がある");
+    }
+
+    /// <summary>
+    /// 履歴インポート失敗時のエラーメッセージがエラーメッセージ品質基準を満たすこと。
+    /// </summary>
+    /// <remarks>
+    /// `.claude/rules/error-messages.md` の「何が／なぜ／どうすれば」3要素。
+    /// 生の例外メッセージ（英語・技術用語）を露出していないことも併せて検証する（Issue #1614）。
+    /// </remarks>
+    [Fact]
+    public async Task SaveAsync_NewCard_HistoryImportFailureMessage_SatisfiesErrorMessageQualityCriteria()
+    {
+        // Arrange
+        var idm = "0102030405060708";
+        ArrangeNewCardWithHistory(idm, "H-001");
+        ArrangeFailingHistoryImport(idm);
+
+        string? shownMessage = null;
+        _dialogServiceMock.Setup(d => d.ShowError(It.IsAny<string>(), It.IsAny<string>()))
+            .Callback<string, string>((message, _) => shownMessage = message);
+
+        // Act
+        await _viewModel.SaveAsync();
+
+        // Assert
+        shownMessage.Should().NotBeNull();
+        var message = shownMessage!;
+
+        // 何が: 対象が交通系ICカードであることと、何に失敗したかが分かる
+        message.Should().Contain("交通系ICカード");
+        message.Should().Contain("利用履歴");
+
+        // なぜ: 台帳がどういう状態になったかを説明している
+        message.Should().Contain("台帳");
+
+        // どうすれば: 行動指示で終わる
+        message.TrimEnd().Should().EndWith("してください。");
+
+        // 生の例外メッセージを露出しない（Issue #1614）
+        message.Should().NotContain("database is locked");
+
+        // 曖昧な定型文で終わらせない
+        message.Should().NotContain("エラーが発生しました。\n");
+        message.Length.Should().BeGreaterThan(20);
+
+        // ステータス欄も同様に誤解を生まないこと
+        _viewModel.StatusMessage.Should().Contain("履歴");
+        _viewModel.StatusMessage.TrimEnd().Should().EndWith("してください。");
+    }
+
+    /// <summary>
+    /// 一覧の再読込が失敗しても、履歴インポート失敗の通知は行われること。
+    /// </summary>
+    /// <remarks>
+    /// Issue #1727 のレビュー指摘。取込が失敗する原因（共有フォルダの切断・DB のロック）は
+    /// 直後の `LoadCardsAsync`（`GetAllAsync`）でも同じく例外になる。通知を後処理のあとに
+    /// 置いたままだと、**この修正が対象とするまさにその状況でだけ通知が失われる**。
+    /// カード行と操作ログはコミット済みのため、職員は登録失敗と誤解して再登録し
+    /// 「既に登録されています」に突き当たる。
+    /// </remarks>
+    [Fact]
+    public async Task SaveAsync_NewCard_WhenHistoryImportFailsAndRefreshAlsoFails_StillNotifiesFailure()
+    {
+        // Arrange
+        var idm = "0102030405060708";
+        ArrangeNewCardWithHistory(idm, "H-001");
+        ArrangeFailingHistoryImport(idm);
+
+        // 取込失敗と同じ原因（DB 到達不能）で一覧の再読込も失敗する状況を模擬する
+        _cardRepositoryMock.Setup(r => r.GetAllAsync())
+            .ThrowsAsync(new InvalidOperationException("database is locked"));
+
+        string? shownMessage = null;
+        _dialogServiceMock.Setup(d => d.ShowError(It.IsAny<string>(), It.IsAny<string>()))
+            .Callback<string, string>((message, _) => shownMessage = message);
+
+        // Act
+        Func<Task> act = async () => await _viewModel.SaveAsync();
+
+        // Assert
+        await act.Should().NotThrowAsync("後処理の失敗で未処理例外にしない");
+        shownMessage.Should().NotBeNull("一覧の再読込が失敗しても取込失敗は通知する");
+        shownMessage!.Should().Contain("CSVインポート");
+        _viewModel.IsStatusError.Should().BeTrue();
+        _viewModel.IsEditing.Should().BeFalse("カード行は登録済みのため編集モードは終了する");
+    }
+
+    /// <summary>
+    /// 一覧の再読込の失敗を、成功パスでは握りつぶさないこと。
+    /// </summary>
+    /// <remarks>
+    /// Issue #1727 のレビュー指摘への対処は例外フィルタで失敗時のみに限定しており、
+    /// 成功時の挙動（例外がそのまま伝播する）は変えていないことを固定する。
+    /// 成功時まで握りつぶすと、一覧が古いまま「登録しました」と表示されてしまう。
+    /// </remarks>
+    [Fact]
+    public async Task SaveAsync_NewCard_WhenImportSucceedsButRefreshFails_DoesNotSwallowException()
+    {
+        // Arrange
+        var idm = "0102030405060708";
+        ArrangeNewCardWithHistory(idm, "H-001");
+
+        _ledgerRepositoryMock.Setup(r => r.GetExistingDetailKeysAsync(idm, It.IsAny<DateTime>()))
+            .ReturnsAsync(new HashSet<(DateTime?, int?, bool)>());
+        _ledgerRepositoryMock.Setup(r => r.GetLatestBeforeDateAsync(idm, It.IsAny<DateTime>()))
+            .ReturnsAsync((Ledger?)null);
+        _ledgerRepositoryMock.Setup(r => r.InsertAsync(It.IsAny<Ledger>())).ReturnsAsync(1);
+        _ledgerRepositoryMock.Setup(r => r.InsertDetailsAsync(It.IsAny<int>(), It.IsAny<IEnumerable<LedgerDetail>>()))
+            .ReturnsAsync(true);
+
+        _cardRepositoryMock.Setup(r => r.GetAllAsync())
+            .ThrowsAsync(new InvalidOperationException("database is locked"));
+
+        // Act
+        Func<Task> act = async () => await _viewModel.SaveAsync();
+
+        // Assert
+        await act.Should().ThrowAsync<InvalidOperationException>(
+            "成功パスの挙動は変更していない（例外フィルタで失敗時のみ握っている）");
+    }
+
+    /// <summary>
+    /// 履歴インポートが成功した場合は従来どおり「登録しました」と表示し、
+    /// エラーダイアログを出さないこと（回帰防止）。
+    /// </summary>
+    [Fact]
+    public async Task SaveAsync_NewCard_WhenHistoryImportSucceeds_ShouldReportSuccess()
+    {
+        // Arrange
+        var idm = "0102030405060708";
+        ArrangeNewCardWithHistory(idm, "H-001");
+
+        _ledgerRepositoryMock.Setup(r => r.GetExistingDetailKeysAsync(idm, It.IsAny<DateTime>()))
+            .ReturnsAsync(new HashSet<(DateTime?, int?, bool)>());
+        _ledgerRepositoryMock.Setup(r => r.GetLatestBeforeDateAsync(idm, It.IsAny<DateTime>()))
+            .ReturnsAsync((Ledger?)null);
+        _ledgerRepositoryMock.Setup(r => r.InsertAsync(It.IsAny<Ledger>())).ReturnsAsync(1);
+        _ledgerRepositoryMock.Setup(r => r.InsertDetailsAsync(It.IsAny<int>(), It.IsAny<IEnumerable<LedgerDetail>>()))
+            .ReturnsAsync(true);
+
+        // Act
+        await _viewModel.SaveAsync();
+
+        // Assert
+        _viewModel.StatusMessage.Should().Be("登録しました");
+        _viewModel.IsStatusError.Should().BeFalse();
+        _dialogServiceMock.Verify(d => d.ShowError(It.IsAny<string>(), It.IsAny<string>()), Times.Never);
+    }
+
+    #endregion
 }
