@@ -117,6 +117,37 @@ public class ReportDataBuilderTests
         SetupDateRangeLedgers(TestCardIdm, fiscalYearStart, fiscalYearEnd, ledgers);
     }
 
+    /// <summary>
+    /// 年度内（4月～対象月）に台帳が1件もない「遊休カード」のセットアップ（Issue #1728）
+    /// </summary>
+    /// <remarks>
+    /// <see cref="SetupBasicMonth"/> は「前月に台帳あり／年度範囲は空」という
+    /// 実 DB では生じ得ない構成のため流用しない。ReportDataBuilder の
+    /// GetPreviousMonthBalanceAsync は年度開始月まで 1 ヶ月ずつ遡るので、
+    /// 年度内の全月について空を返すよう設定する。
+    /// </remarks>
+    /// <param name="previousYearCarryover">前年度繰越額。存在しない場合は null</param>
+    private void SetupIdleFiscalYear(int year, int month, int? previousYearCarryover)
+    {
+        SetupCard();
+
+        var fiscalYearStartYear = month >= 4 ? year : year - 1;
+        SetupCarryoverBalance(TestCardIdm, fiscalYearStartYear - 1, previousYearCarryover);
+
+        var cursor = new DateTime(fiscalYearStartYear, 4, 1);
+        var lastMonth = new DateTime(year, month, 1);
+        while (cursor <= lastMonth)
+        {
+            SetupMonthlyLedgers(TestCardIdm, cursor.Year, cursor.Month, new List<Ledger>());
+            cursor = cursor.AddMonths(1);
+        }
+
+        SetupDateRangeLedgers(TestCardIdm,
+            new DateTime(fiscalYearStartYear, 4, 1),
+            new DateTime(year, month, DateTime.DaysInMonth(year, month)),
+            new List<Ledger>());
+    }
+
     #endregion
 
     #region カード不存在テスト
@@ -1519,6 +1550,141 @@ public class ReportDataBuilderTests
         result.MonthlyTotal.Balance.Should().Be(7500);
         (result.MonthlyTotal.Income - result.MonthlyTotal.Expense)
             .Should().Be(result.MonthlyTotal.Balance);
+    }
+
+    #endregion
+
+    #region Issue #1728: 年度内に台帳が1件もないカードの累計残額
+
+    [Fact]
+    public async Task BuildAsync_MayOrLater_NoLedgersInFiscalYear_CumulativeBalanceFallsBackToCarryover()
+    {
+        // Arrange: 前年度末残高 7,500 円のまま当年度に一度も使われていない遊休カードの6月帳票
+        SetupIdleFiscalYear(2025, 6, 7500);
+
+        // Act
+        var result = await _builder.BuildAsync(TestCardIdm, 2025, 6);
+
+        // Assert: 繰越行と累計行の残高が一致する（同一帳票内で矛盾しない）
+        result.Carryover.Should().NotBeNull();
+        result.Carryover.Balance.Should().Be(7500, "「5月より繰越」の残額は前年度繰越額");
+
+        result.CumulativeTotal.Should().NotBeNull();
+        result.CumulativeTotal.Income.Should().Be(7500, "年度累計の受入は前年度繰越額のみ");
+        result.CumulativeTotal.Expense.Should().Be(0);
+        result.CumulativeTotal.Balance.Should().Be(7500,
+            "年度内に台帳がなくても残額は前年度繰越から続く（0円へ落ちない）");
+        (result.CumulativeTotal.Income - result.CumulativeTotal.Expense)
+            .Should().Be(result.CumulativeTotal.Balance,
+                "受入 − 払出 = 残額 が累計行でも成立すること");
+    }
+
+    [Fact]
+    public async Task BuildAsync_March_NoLedgersInFiscalYear_CarryoverToNextYearKeepsBalance()
+    {
+        // Arrange: 2025年度（2025/4～2026/3）を通して一度も使われていないカード
+        SetupIdleFiscalYear(2026, 3, 7500);
+
+        // Act
+        var result = await _builder.BuildAsync(TestCardIdm, 2026, 3);
+
+        // Assert
+        result.CarryoverToNextYear.Should().Be(7500,
+            "「次年度へ繰越」が0円になると翌年度4月の「前年度より繰越」と食い違う");
+        result.CumulativeTotal.Balance.Should().Be(7500);
+    }
+
+    [Fact]
+    public async Task BuildAsync_MarchToNextApril_NoLedgers_CarryoverChainIsContinuous()
+    {
+        // Arrange: 2025年度を無利用で終え、2026年度4月も無利用
+        SetupIdleFiscalYear(2026, 3, 7500);
+        SetupMonthlyLedgers(TestCardIdm, 2026, 4, new List<Ledger>());
+        SetupDateRangeLedgers(TestCardIdm,
+            new DateTime(2026, 4, 1), new DateTime(2026, 4, 30), new List<Ledger>());
+        // 2025年度に台帳がないため、2026年4月から見た前年度繰越も 2024年度末の残高と同額になる
+        SetupCarryoverBalance(TestCardIdm, 2025, 7500);
+
+        // Act
+        var marchResult = await _builder.BuildAsync(TestCardIdm, 2026, 3);
+        var aprilResult = await _builder.BuildAsync(TestCardIdm, 2026, 4);
+
+        // Assert: 3月の「次年度へ繰越」と翌年度4月の「前年度より繰越」が一致する
+        aprilResult.Carryover.Should().NotBeNull();
+        aprilResult.Carryover.Income.Should().Be(marchResult.CarryoverToNextYear,
+            "年度をまたいで繰越額が消えないこと");
+        aprilResult.MonthlyTotal.Balance.Should().Be(marchResult.CarryoverToNextYear);
+    }
+
+    [Fact]
+    public async Task BuildAsync_MayOrLater_NoLedgersAndNoCarryover_CumulativeBalanceIsZero()
+    {
+        // Arrange: 前年度繰越も存在しない（当年度に登録され、まだ一度も使われていないカード）
+        SetupIdleFiscalYear(2025, 6, null);
+
+        // Act
+        var result = await _builder.BuildAsync(TestCardIdm, 2025, 6);
+
+        // Assert
+        result.Carryover.Should().BeNull("前年度繰越がないため繰越行は出力されない");
+        result.CumulativeTotal.Should().NotBeNull();
+        result.CumulativeTotal.Income.Should().Be(0);
+        result.CumulativeTotal.Expense.Should().Be(0);
+        result.CumulativeTotal.Balance.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task BuildAsync_MayOrLater_NoLedgersInFiscalYear_PreflightReportsNoTotalMismatch()
+    {
+        // Arrange: 前年度末残高 7,500 円のまま当年度に一度も使われていない遊休カード
+        // 本 Issue の実質的な受益は「毎月出ていた誤警告の解消」にあるが、
+        // ReportPreflightChecker に手組みの MonthlyReportData を渡すテストでは
+        // 修正前後で入力が同じになり検出力を持たない。ReportDataBuilder の実出力を
+        // そのままプリフライトへ通すことで、両者の不変条件が接続していることを表明する。
+        SetupIdleFiscalYear(2025, 6, 7500);
+        var data = await _builder.BuildAsync(TestCardIdm, 2025, 6);
+
+        // Act
+        var preflight = new ReportPreflightResult();
+        ReportPreflightChecker.CheckReportData(data, null, preflight);
+
+        // Assert
+        preflight.Warnings.Should().NotContain(
+            w => w.IssueType == ReportPreflightIssueType.TotalMismatch,
+            "遊休カードは台帳側に不整合がなく、履歴画面でも直せないため誤警告になる");
+    }
+
+    [Fact]
+    public async Task BuildAsync_LedgersEarlierInFiscalYear_CumulativeBalanceKeepsLastUsedMonth()
+    {
+        // Arrange: 5月に利用があり、6月以降は空白のまま12月帳票を作成する
+        // （年度内に台帳があるケースの既存挙動が壊れていないことの固定）
+        SetupCard();
+        SetupCarryoverBalance(TestCardIdm, 2024, 7500);
+        var mayLedgers = new List<Ledger>
+        {
+            CreateTestLedger(1, TestCardIdm, new DateTime(2025, 5, 20),
+                "鉄道（天神～博多）", 0, 300, 7200)
+        };
+        SetupMonthlyLedgers(TestCardIdm, 2025, 4, new List<Ledger>());
+        SetupMonthlyLedgers(TestCardIdm, 2025, 5, mayLedgers);
+        for (int m = 6; m <= 12; m++)
+        {
+            SetupMonthlyLedgers(TestCardIdm, 2025, m, new List<Ledger>());
+        }
+        SetupDateRangeLedgers(TestCardIdm,
+            new DateTime(2025, 4, 1), new DateTime(2025, 12, 31), mayLedgers);
+
+        // Act
+        var result = await _builder.BuildAsync(TestCardIdm, 2025, 12);
+
+        // Assert: 最後に利用のあった月の残高を維持する
+        result.CumulativeTotal.Should().NotBeNull();
+        result.CumulativeTotal.Balance.Should().Be(7200);
+        result.CumulativeTotal.Income.Should().Be(7500);
+        result.CumulativeTotal.Expense.Should().Be(300);
+        (result.CumulativeTotal.Income - result.CumulativeTotal.Expense)
+            .Should().Be(result.CumulativeTotal.Balance);
     }
 
     #endregion
