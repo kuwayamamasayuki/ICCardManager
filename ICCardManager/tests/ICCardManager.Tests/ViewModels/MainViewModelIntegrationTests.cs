@@ -46,6 +46,11 @@ public class MainViewModelIntegrationTests
 {
     private const string StaffIdm = "0102030405060708";
     private const string StaffName = "テスト職員";
+
+    /// <summary>Issue #1729: 「前回操作者」と「現在の操作者」を区別するための2人目の職員</summary>
+    private const string StaffIdmB = "0807060504030201";
+    private const string StaffNameB = "テスト職員B";
+
     private const string CardIdmA = "1111222233334444";
     private const string CardIdmB = "5555666677778888";
 
@@ -144,6 +149,9 @@ public class MainViewModelIntegrationTests
         // 職員・カードの既定モック
         _staffRepositoryMock.Setup(r => r.GetByIdmAsync(StaffIdm, It.IsAny<bool>()))
             .ReturnsAsync(new Staff { StaffIdm = StaffIdm, Name = StaffName });
+        // Issue #1729: 2人目の職員（別職員が操作を引き継ぐシナリオ用）
+        _staffRepositoryMock.Setup(r => r.GetByIdmAsync(StaffIdmB, It.IsAny<bool>()))
+            .ReturnsAsync(new Staff { StaffIdm = StaffIdmB, Name = StaffNameB });
 
         // カードリーダーの既定（残高読み取りは 1500 円、履歴は空）
         _cardReaderMock.Setup(r => r.ReadBalanceAsync(It.IsAny<string>())).ReturnsAsync(1500);
@@ -409,6 +417,175 @@ public class MainViewModelIntegrationTests
         _viewModel.LentCards.Should().BeEmpty();
         // LendingService 側の最終操作種別は Return に更新
         _lendingService.LastOperationType.Should().Be(LendingOperationType.Return);
+    }
+
+    /// <summary>
+    /// Issue #1729: 「貸出中カードを返却 → 30秒以内に同一カードを再タッチして貸出」の
+    /// シナリオで必要なリポジトリモックを組み立て、<c>InsertAsync</c> に渡された
+    /// <see cref="Ledger"/> を捕捉するリストを返す。
+    /// </summary>
+    /// <remarks>
+    /// 台帳に記録された操作者は <c>ledger.LenderIdm</c> / <c>ledger.StaffName</c> と
+    /// <c>ic_card.lender_idm</c>（<c>UpdateLentStatusAsync</c> の第4引数）に現れるため、
+    /// 呼び出し側はこの2つを突き合わせて「誰の名前で記録されたか」を検証する。
+    /// </remarks>
+    private List<Ledger> ArrangeReturnThenRelendScenario()
+    {
+        var isLent = true;
+        var insertedLedgers = new List<Ledger>();
+
+        var lentRecord = new Ledger
+        {
+            Id = 300,
+            CardIdm = CardIdmA,
+            LenderIdm = StaffIdm,
+            Date = DateTime.Now,
+            Summary = SummaryGenerator.GetLendingSummary(),
+            StaffName = StaffName,
+            LentAt = DateTime.Now,
+            IsLentRecord = true,
+        };
+
+        _cardRepositoryMock.Setup(r => r.GetByIdmAsync(CardIdmA, It.IsAny<bool>()))
+            .ReturnsAsync(() => isLent ? BuildLentCard(CardIdmA) : BuildAvailableCard(CardIdmA));
+        _cardRepositoryMock.Setup(r => r.UpdateLentStatusAsync(
+                CardIdmA, true, It.IsAny<DateTime?>(), It.IsAny<string>()))
+            .ReturnsAsync(() => { isLent = true; return true; });
+        _cardRepositoryMock.Setup(r => r.UpdateLentStatusAsync(CardIdmA, false, null, null))
+            .ReturnsAsync(() => { isLent = false; return true; });
+        _ledgerRepositoryMock.Setup(r => r.InsertAsync(It.IsAny<Ledger>()))
+            .ReturnsAsync((Ledger ledger) => { insertedLedgers.Add(ledger); return insertedLedgers.Count; });
+        _ledgerRepositoryMock.Setup(r => r.GetLentRecordAsync(CardIdmA)).ReturnsAsync(lentRecord);
+        _ledgerRepositoryMock.Setup(r => r.DeleteAllLentRecordsAsync(CardIdmA)).ReturnsAsync(1);
+
+        _cardRepositoryMock.Setup(r => r.GetLentAsync(It.IsAny<bool>()))
+            .ReturnsAsync(() => isLent
+                ? new List<IcCard> { BuildLentCard(CardIdmA) }
+                : new List<IcCard>());
+        _cardRepositoryMock.Setup(r => r.GetAllAsync())
+            .ReturnsAsync(() => isLent
+                ? new List<IcCard> { BuildLentCard(CardIdmA) }
+                : new List<IcCard> { BuildAvailableCard(CardIdmA) });
+
+        return insertedLedgers;
+    }
+
+    /// <summary>
+    /// Issue #1729: 職員A の返却直後（30秒以内）に職員B が職員証をタッチしてから
+    /// 同一カードをタッチした場合、貸出は「いま操作している職員B」で記録されること。
+    /// </summary>
+    /// <remarks>
+    /// 修正前は <c>Process30SecondRuleAsync</c> が <c>_currentStaffIdm</c> を
+    /// 前回操作者（職員A）で無条件に上書きしていたため、実際に持ち出したのは職員B なのに
+    /// <c>ledger.StaffName</c> / <c>ic_card.lender_idm</c> / <c>operation_log</c> が職員A になり、
+    /// 長期未返却の督促も職員A へ向かっていた。
+    /// </remarks>
+    [Fact]
+    public async Task Retouch30Sec_別職員が職員証をタッチしてからの再タッチは現在の操作者で記録されること()
+    {
+        // Arrange
+        var insertedLedgers = ArrangeReturnThenRelendScenario();
+
+        // Act-1: 職員A が貸出中カードを返却
+        RaiseCardRead(StaffIdm);
+        await _dispatcherService.WaitForPendingAsync();
+        RaiseCardRead(CardIdmA);
+        await _dispatcherService.WaitForPendingAsync();
+
+        _lendingService.LastOperationType.Should().Be(
+            LendingOperationType.Return, "30秒ルールの前提として直前の操作が返却として記録されている");
+        _viewModel.CurrentState.Should().Be(
+            AppState.WaitingForStaffCard, "返却後は ResetState により操作者情報がクリアされる");
+
+        // Act-2: 職員B が自分の職員証をタッチしてから同一カードをタッチ（30秒以内の再タッチ）
+        RaiseCardRead(StaffIdmB);
+        await _dispatcherService.WaitForPendingAsync();
+        RaiseCardRead(CardIdmA);
+        await _dispatcherService.WaitForPendingAsync();
+
+        // Assert: 貸出レコードの操作者は職員B
+        var lendLedgers = insertedLedgers.Where(l => l.IsLentRecord).ToList();
+        lendLedgers.Should().HaveCount(1, "30秒ルールの逆処理により貸出レコードが1件作成される");
+        lendLedgers[0].LenderIdm.Should().Be(StaffIdmB, "実際にカードを持ち出したのは職員B");
+        lendLedgers[0].StaffName.Should().Be(StaffNameB);
+
+        // Assert: ic_card.lender_idm も職員B（督促の宛先になる）
+        _cardRepositoryMock.Verify(r => r.UpdateLentStatusAsync(
+            CardIdmA, true, It.IsAny<DateTime?>(), StaffIdmB), Times.Once);
+        _cardRepositoryMock.Verify(
+            r => r.UpdateLentStatusAsync(CardIdmA, true, It.IsAny<DateTime?>(), StaffIdm),
+            Times.Never,
+            "前回操作者（職員A）で貸出者を上書きしてはならない");
+    }
+
+    /// <summary>
+    /// Issue #1729: 職員証をタッチせずに再タッチした場合（誤操作の即時取り消し）は、
+    /// 従来どおり前回操作者で補完されること。
+    /// </summary>
+    /// <remarks>
+    /// 上の修正で「操作者が確定していれば上書きしない」に変えたため、
+    /// 30秒ルール本来の用途（職員証を再度タッチせずに直前の操作を取り消す）が
+    /// 壊れていないことを併せて固定する。
+    /// </remarks>
+    [Fact]
+    public async Task Retouch30Sec_職員証タッチなしの再タッチは前回操作者で補完されること()
+    {
+        // Arrange
+        var insertedLedgers = ArrangeReturnThenRelendScenario();
+
+        // Act-1: 職員A が貸出中カードを返却
+        RaiseCardRead(StaffIdm);
+        await _dispatcherService.WaitForPendingAsync();
+        RaiseCardRead(CardIdmA);
+        await _dispatcherService.WaitForPendingAsync();
+
+        _viewModel.CurrentState.Should().Be(AppState.WaitingForStaffCard);
+
+        // Act-2: 職員証をタッチせずに同一カードを再タッチ
+        RaiseCardRead(CardIdmA);
+        await _dispatcherService.WaitForPendingAsync();
+
+        // Assert: 操作者が未確定のため前回操作者（職員A）で補完される
+        var lendLedgers = insertedLedgers.Where(l => l.IsLentRecord).ToList();
+        lendLedgers.Should().HaveCount(1, "職員証タッチなしでも30秒ルールの逆処理は動作する");
+        lendLedgers[0].LenderIdm.Should().Be(StaffIdm, "直前に操作した職員A で補完される");
+        lendLedgers[0].StaffName.Should().Be(StaffName);
+        _soundPlayerMock.Verify(s => s.Play(SoundType.Lend), Times.Once);
+    }
+
+    /// <summary>
+    /// Issue #1729: 操作者が現在も前回も不明な場合はエラーとし、台帳へ記録しないこと。
+    /// </summary>
+    /// <remarks>
+    /// 仮想タッチ（Issue #1577）は <see cref="LendingService.ReturnAsync"/> を直接呼ぶため
+    /// <c>LendingService.LastProcessedCardIdm</c> は記録されるが MainViewModel の
+    /// 「前回操作者」は記録されない。この状態で30秒以内に同一カードをタッチすると
+    /// 操作者不明の再タッチが成立するため、エラー分岐は到達可能であり残す必要がある。
+    /// </remarks>
+    [Fact]
+    public async Task Retouch30Sec_操作者が現在も前回も不明な場合はエラーとなり台帳へ記録されないこと()
+    {
+        // Arrange: MainViewModel を経由せずに返却（＝「前回操作者」が記録されない経路）
+        var insertedLedgers = ArrangeReturnThenRelendScenario();
+        var returnResult = await _lendingService.ReturnAsync(StaffIdm, CardIdmA, new List<LedgerDetail>());
+        returnResult.Success.Should().BeTrue("以降の再タッチ判定の前提として返却が成立している");
+        _lendingService.IsRetouchWithinTimeout(CardIdmA).Should().BeTrue();
+        insertedLedgers.Clear();
+
+        // Act: 職員証タッチ待ち状態のまま同一カードをタッチ
+        _viewModel.CurrentState.Should().Be(AppState.WaitingForStaffCard);
+        RaiseCardRead(CardIdmA);
+        await _dispatcherService.WaitForPendingAsync();
+
+        // Assert: エラー通知のみで、台帳・カード状態は変更されない
+        _toastMock.Verify(
+            t => t.ShowError("エラー", It.Is<string>(m => m.Contains("操作者情報がありません"))),
+            Times.Once);
+        _soundPlayerMock.Verify(s => s.Play(SoundType.Error), Times.Once);
+        insertedLedgers.Should().BeEmpty("操作者不明のまま台帳へ記録してはならない");
+        _cardRepositoryMock.Verify(
+            r => r.UpdateLentStatusAsync(CardIdmA, true, It.IsAny<DateTime?>(), It.IsAny<string>()),
+            Times.Never);
     }
 
     #endregion
