@@ -1531,11 +1531,54 @@ ON CONFLICT(key) DO UPDATE SET value = excluded.value";
             }
             catch (Exception ex)
             {
-                // CheckConnection と同じ方針: 「失敗=書込不可」を戻り値で通知しつつ LogDebug で痕跡を残す
+                // CheckConnection と同じ方針: 「失敗=書込不可」を戻り値で通知しつつ LogDebug で痕跡を残す。
+                // 例外オブジェクトごと渡すのはこちらだけ（スタックトレースは開発時のみ必要）
                 _logger?.LogDebug(ex,
                     "DB書込可否確認に失敗。呼び出し元には false を返す（読み取り専用アクセス権または接続エラー）");
+
+                // Issue #1730: 上の LogDebug は本番の既定フィルタ（Information）では出力されないため、
+                // 障害調査に必要な「なぜ書き込めなかったか」は Information でも残す
+                LogWritableCheckFailure(ex);
                 return false;
             }
+        }
+
+        /// <summary>
+        /// 書込可否確認の失敗理由を記録する（Issue #1730）
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// 失敗時のみ出力する。<see cref="CheckWritable"/> の本番呼び出し元は接続診断（F6→接続診断）の
+        /// オンデマンド 1 経路のみのため、ログ肥大化は起きない。
+        /// </para>
+        /// <para>
+        /// <b>SQLite の結果コードが調査の核心。</b> 接続診断の画面は書込不可の原因候補として
+        /// 「読み取り専用属性／アクセス権不足／他プログラムによる占有」を並べるが、そのどれであるかは
+        /// 示せない（<see cref="CheckWritable"/> は bool しか返さない）。結果コード
+        /// （<c>ReadOnly</c> / <c>Full</c> / <c>Busy</c> / <c>Locked</c> 等）は候補を 1 つに絞れる唯一の材料で、
+        /// これがログに無いと管理者はログを回収しても切り分けられない。
+        /// </para>
+        /// <para>
+        /// レベルに Information を選ぶ理由は <c>.claude/rules/development-conventions.md</c>「ロギング」を参照
+        /// （Issue #1716 で <see cref="ExecuteConnectionCheck"/> に入れたのと同じ対応）。
+        /// </para>
+        /// </remarks>
+        /// <param name="ex">書込可否確認で捕捉した例外</param>
+        private void LogWritableCheckFailure(Exception ex)
+        {
+            if (_logger == null)
+                return;
+
+            var resultCode = ex is SQLiteException sqliteException
+                ? sqliteException.ResultCode.ToString()
+                : "なし";
+
+            _logger.LogInformation(
+                "DB書込可否確認: 結果=書込不可（例外={ExceptionType}、SQLite結果コード={SqliteResultCode}、メッセージ={ExceptionMessage}）{DatabasePath}",
+                ex.GetType().Name,
+                resultCode,
+                ex.Message,
+                DatabasePath);
         }
 
         /// <summary>
