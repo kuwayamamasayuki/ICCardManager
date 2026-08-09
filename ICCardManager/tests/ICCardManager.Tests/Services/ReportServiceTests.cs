@@ -3410,4 +3410,161 @@ public class ReportServiceTests : IDisposable
     }
 
     #endregion
+
+    #region Issue #1728: 年度内無利用カードの Excel 出力
+
+    /// <summary>
+    /// 「前年度末に残高を持ったまま、当年度は一度も使われていない遊休カード」のモックを構成する
+    /// </summary>
+    /// <remarks>
+    /// 台帳は 2025/3/10 の「新規購入 7,500円」1 行のみ。FY2025（2025/4～2026/3）および
+    /// FY2026 には台帳が存在しない。複数職員でシェアする運用では常時発生する状態で、
+    /// Issue #1728 以前は累計残額と次年度繰越が 0 円で印字されていた。
+    /// </remarks>
+    private void SetupIdleCard(string cardIdm, IcCard card)
+    {
+        _cardRepositoryMock
+            .Setup(r => r.GetByIdmAsync(cardIdm, true))
+            .ReturnsAsync(card);
+
+        // 新規購入は前年度（FY2024）。これより後の月なら帳票はスキップされない（Issue #501）
+        _ledgerRepositoryMock
+            .Setup(r => r.GetPurchaseDateAsync(cardIdm))
+            .ReturnsAsync(new DateTime(2025, 3, 10));
+
+        // FY2025 / FY2026 はどの月も空
+        _ledgerRepositoryMock
+            .Setup(r => r.GetByMonthAsync(cardIdm, It.IsAny<int>(), It.IsAny<int>()))
+            .ReturnsAsync(new List<Ledger>());
+        _ledgerRepositoryMock
+            .Setup(r => r.GetByDateRangeAsync(cardIdm, It.IsAny<DateTime>(), It.IsAny<DateTime>()))
+            .ReturnsAsync(new List<Ledger>());
+
+        // 2024年度末の残高 7,500 円。FY2025 に台帳がないため、FY2026 から見た前年度繰越も
+        // 実 DB では同じ 7,500 円になる（GetCarryoverBalanceAsync は年度末以前の最新残高を返す）
+        _ledgerRepositoryMock
+            .Setup(r => r.GetCarryoverBalanceAsync(cardIdm, 2024))
+            .ReturnsAsync(7500);
+        _ledgerRepositoryMock
+            .Setup(r => r.GetCarryoverBalanceAsync(cardIdm, 2025))
+            .ReturnsAsync(7500);
+    }
+
+    /// <summary>
+    /// 金額セルを読む。0 円は空欄で出力される行があるため、空欄は 0 とみなす
+    /// </summary>
+    private static int ReadAmountCell(IXLWorksheet worksheet, int row, int column)
+    {
+        var cell = worksheet.Cell(row, column);
+        return cell.IsEmpty() ? 0 : cell.GetValue<int>();
+    }
+
+    /// <summary>
+    /// TC-1728-1: 年度内無利用カードの累計行に前年度繰越額が印字される
+    /// </summary>
+    [Fact]
+    public async Task CreateMonthlyReportAsync_IdleCard_CumulativeRowKeepsCarriedOverBalance()
+    {
+        // Arrange: 2025年6月分（FY2025 は 4月から一度も利用がない）
+        var cardIdm = "0102030405060708";
+        SetupIdleCard(cardIdm, CreateTestCard(cardIdm));
+        var outputPath = CreateTempFilePath();
+
+        // Act
+        var result = await _reportService.CreateMonthlyReportAsync(cardIdm, 2025, 6, outputPath);
+
+        // Assert
+        result.Success.Should().BeTrue();
+
+        using var workbook = new XLWorkbook(outputPath);
+        var worksheet = workbook.Worksheets.First();
+
+        // 行5: 繰越行（月次繰越なので受入欄は空欄、残額に前年度繰越額）
+        worksheet.Cell(5, 2).GetString().Should().Be("5月より繰越");
+        worksheet.Cell(5, 7).GetValue<int>().Should().Be(7500);
+
+        // 行6: 月計（当月の利用なし）
+        worksheet.Cell(6, 2).GetString().Should().Be("6月計");
+
+        // 行7: 累計 — Issue #1728 以前はここの残額が 0 円で印字され、
+        // すぐ上の繰越行 7,500円 と同一帳票内で矛盾していた
+        worksheet.Cell(7, 2).GetString().Should().Be("累計");
+        ReadAmountCell(worksheet, 7, 5).Should().Be(7500, "年度累計の受入は前年度繰越額");
+        ReadAmountCell(worksheet, 7, 6).Should().Be(0, "年度内に払出はない");
+        ReadAmountCell(worksheet, 7, 7).Should().Be(7500, "累計の残額が0円へ落ちない");
+
+        // 紙の出納簿様式の不変条件が Excel 上でも成立すること
+        (ReadAmountCell(worksheet, 7, 5) - ReadAmountCell(worksheet, 7, 6))
+            .Should().Be(ReadAmountCell(worksheet, 7, 7), "受入 − 払出 = 残額");
+    }
+
+    /// <summary>
+    /// TC-1728-2: 年度内無利用カードの3月帳票で「次年度へ繰越」が0円にならない
+    /// </summary>
+    [Fact]
+    public async Task CreateMonthlyReportAsync_IdleCard_InMarch_CarryoverToNextYearIsNotZero()
+    {
+        // Arrange: 2026年3月分（FY2025 を通して一度も利用がない）
+        var cardIdm = "0102030405060708";
+        SetupIdleCard(cardIdm, CreateTestCard(cardIdm));
+        var outputPath = CreateTempFilePath();
+
+        // Act
+        var result = await _reportService.CreateMonthlyReportAsync(cardIdm, 2026, 3, outputPath);
+
+        // Assert
+        result.Success.Should().BeTrue();
+
+        using var workbook = new XLWorkbook(outputPath);
+        var worksheet = workbook.Worksheets.First();
+
+        worksheet.Cell(5, 2).GetString().Should().Be("2月より繰越");
+        worksheet.Cell(6, 2).GetString().Should().Be("3月計");
+        worksheet.Cell(7, 2).GetString().Should().Be("累計");
+        ReadAmountCell(worksheet, 7, 7).Should().Be(7500);
+
+        // 行8: 次年度へ繰越 — Issue #1728 以前は払出欄が 0 円で印字され、
+        // 翌年度4月の「前年度より繰越」と食い違って繰越チェーンが切れていた
+        worksheet.Cell(8, 2).GetString().Should().Be("次年度へ繰越");
+        ReadAmountCell(worksheet, 8, 6).Should().Be(7500, "払出欄に繰越額が印字される");
+        ReadAmountCell(worksheet, 8, 7).Should().Be(0, "次年度繰越行の残額は常に0");
+    }
+
+    /// <summary>
+    /// TC-1728-3: 3月の「次年度へ繰越」と翌年度4月の「前年度より繰越」が Excel 上で一致する
+    /// </summary>
+    [Fact]
+    public async Task CreateMonthlyReportAsync_IdleCard_MarchToNextApril_CarryoverChainMatches()
+    {
+        // Arrange: 年度が変わるとファイルも変わるため、出力先を分ける
+        var cardIdm = "0102030405060708";
+        SetupIdleCard(cardIdm, CreateTestCard(cardIdm));
+        var marchPath = CreateTempFilePath();
+        var aprilPath = CreateTempFilePath();
+
+        // Act
+        var marchResult = await _reportService.CreateMonthlyReportAsync(cardIdm, 2026, 3, marchPath);
+        var aprilResult = await _reportService.CreateMonthlyReportAsync(cardIdm, 2026, 4, aprilPath);
+
+        // Assert
+        marchResult.Success.Should().BeTrue();
+        aprilResult.Success.Should().BeTrue();
+
+        using var marchBook = new XLWorkbook(marchPath);
+        using var aprilBook = new XLWorkbook(aprilPath);
+        var marchSheet = marchBook.Worksheets.First();
+        var aprilSheet = aprilBook.Worksheets.First();
+
+        var carriedOut = ReadAmountCell(marchSheet, 8, 6);   // 3月「次年度へ繰越」の払出欄
+
+        aprilSheet.Cell(5, 2).GetString().Should().Be("前年度より繰越");
+        ReadAmountCell(aprilSheet, 5, 5).Should().Be(carriedOut, "前年度より繰越の受入欄が3月の繰越額と一致する");
+        ReadAmountCell(aprilSheet, 5, 7).Should().Be(carriedOut, "同じく残額も一致する");
+
+        // 4月は累計行を省略し月計行が残額を持つ（Issue #813）
+        aprilSheet.Cell(6, 2).GetString().Should().Be("4月計");
+        ReadAmountCell(aprilSheet, 6, 7).Should().Be(carriedOut);
+    }
+
+    #endregion
 }

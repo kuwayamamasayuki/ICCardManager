@@ -90,7 +90,6 @@ namespace ICCardManager.Services
                 .Where(l => !SummaryGenerator.IsMidYearCarryoverSummary(l.Summary))
                 .Sum(l => l.Income);
             var monthlyExpense = ledgers.Sum(l => l.Expense);
-            var monthEndBalance = ledgers.LastOrDefault()?.Balance ?? 0;
 
             // 累計データを計算（4月の月計残額表示にも使用）
             var fiscalYearStartYear = FiscalYearHelper.GetFiscalYear(year, month);
@@ -113,7 +112,18 @@ namespace ICCardManager.Services
                 .Where(l => !SummaryGenerator.IsMidYearCarryoverSummary(l.Summary))
                 .Sum(l => l.Income) + fiscalYearCarryoverIncome;
             var yearlyExpense = yearlyLedgers.Sum(l => l.Expense);
-            var currentBalance = yearlyLedgers.LastOrDefault()?.Balance ?? monthEndBalance;
+
+            // Issue #1728: 年度内に台帳が1件もない遊休カードでは前年度繰越へフォールバックする。
+            // 旧実装は当月末残高（monthEndBalance）へ落としていたが、年度範囲は当月を包含するため
+            // 年度内が空なら当月も必ず空であり、フォールバック先は常に 0 だった。その結果、
+            // 5月以降の累計残額と3月の次年度繰越が 0 円で出力され、同一帳票内の繰越行および
+            // 翌年度4月の「前年度より繰越」と矛盾していた。
+            // precedingBalance は 4月なら前年度繰越、5月以降は GetPreviousMonthBalanceAsync
+            // （年度内が空なら同じ前年度繰越へフォールバックする）。前年度繰越も無い新規カードでは
+            // null になり、その場合 fiscalYearCarryoverIncome が 0 を与える。
+            var currentBalance = yearlyLedgers.LastOrDefault()?.Balance
+                ?? precedingBalance
+                ?? fiscalYearCarryoverIncome;
 
             // Issue #1215: 紙の出納簿から年度途中で移行した場合、
             // 該当年度の累計には紙の出納簿時代の累計を加算する。
@@ -135,15 +145,15 @@ namespace ICCardManager.Services
             {
                 // Issue #813: 4月は月計と累計が同額のため累計行を省略し、月計行に残額を表示
                 // Issue #1494: 4月計の受入には前年度繰越額を含める（紙の出納簿様式で「受入−払出=残額」が成立するように）
-                var aprilBalance = yearlyLedgers.Any()
-                    ? currentBalance
-                    : (precedingBalance ?? 0);
+                // Issue #1728: 台帳なしのときの前年度繰越フォールバックは currentBalance が担う。
+                // 以前は4月だけ別式（aprilBalance）で手当てしていたため、同じ考慮が5月以降と
+                // 3月の次年度繰越に入らず実装漏れとなった。等価であることを確認のうえ一本化した。
                 monthlyTotal = new ReportTotalData
                 {
                     Label = SummaryGenerator.GetMonthlySummary(month),
                     Income = monthlyIncome + fiscalYearCarryoverIncome,
                     Expense = monthlyExpense,
-                    Balance = aprilBalance
+                    Balance = currentBalance
                 };
                 cumulativeTotal = null;
             }
