@@ -1069,23 +1069,37 @@ public partial class MainViewModel : ViewModelBase
     /// 直前の処理と逆の処理（貸出→返却、返却→貸出）を実行します。
     /// </para>
     /// <para>
-    /// 職員証スキップモードでない場合も動作するよう、
-    /// 最後に操作を行った職員の情報を使用します。
+    /// 職員証タッチ待ち状態（<see cref="AppState.WaitingForStaffCard"/>）からも動作するよう、
+    /// <b>操作者が未確定のときに限り</b>最後に操作を行った職員の情報で補完します。
+    /// </para>
+    /// <para>
+    /// <b>Issue #1729: 操作者が確定している場合は上書きしない。</b>
+    /// ICカード待ち状態（<see cref="AppState.WaitingForIcCard"/>）から呼ばれる場合、
+    /// 直前の職員証タッチで <c>_currentStaffIdm</c> が確定している。ここで前回操作者に
+    /// 差し替えると、実際に操作した職員とは別の職員が
+    /// <c>ledger.StaffName</c> / <c>ic_card.lender_idm</c> / <c>operation_log</c> に記録され、
+    /// 長期未返却の督促も誤った職員へ向かう。
+    /// なお <see cref="AppState.WaitingForStaffCard"/> へ遷移する経路は
+    /// <c>ResetState()</c> ただ 1 つで、そこで <c>_currentStaffIdm</c> は必ず null になるため、
+    /// 「未確定＝職員証タッチ待ち経路」と判定できる。
     /// </para>
     /// </remarks>
     private async Task Process30SecondRuleAsync(IcCard card)
     {
-        // 30秒ルール用に保存した職員情報を使用
-        if (string.IsNullOrEmpty(_lastProcessedStaffIdm))
+        // Issue #1729: 操作者が未確定のときだけ、30秒ルール用に保存した職員情報で補完する。
+        // 職員証タッチ済み（ICカード待ち経路）では、いま操作している職員をそのまま使う。
+        if (string.IsNullOrEmpty(_currentStaffIdm))
         {
-            _soundPlayer.Play(SoundType.Error);
-            _toastNotificationService.ShowError("エラー", "操作者情報がありません。職員証をタッチしてください。");
-            return;
-        }
+            if (string.IsNullOrEmpty(_lastProcessedStaffIdm))
+            {
+                _soundPlayer.Play(SoundType.Error);
+                _toastNotificationService.ShowError("エラー", "操作者情報がありません。職員証をタッチしてください。");
+                return;
+            }
 
-        // 一時的に職員情報を設定
-        _currentStaffIdm = _lastProcessedStaffIdm;
-        _currentStaffName = _lastProcessedStaffName;
+            _currentStaffIdm = _lastProcessedStaffIdm;
+            _currentStaffName = _lastProcessedStaffName;
+        }
 
         // 逆の処理を行う
         if (_lendingService.LastOperationType == LendingOperationType.Lend)
