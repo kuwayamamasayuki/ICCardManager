@@ -741,8 +741,9 @@ namespace ICCardManager.Services
             }
             else
             {
-                var entry = !string.IsNullOrEmpty(detail.EntryStation) ? detail.EntryStation : "?";
-                var exit = !string.IsNullOrEmpty(detail.ExitStation) ? detail.ExitStation : "?";
+                // Issue #1735: 摘要生成側（SummaryGenerator）と同じプレースホルダを共有する
+                var entry = !string.IsNullOrEmpty(detail.EntryStation) ? detail.EntryStation : SummaryGenerator.UnknownStationPlaceholder;
+                var exit = !string.IsNullOrEmpty(detail.ExitStation) ? detail.ExitStation : SummaryGenerator.UnknownStationPlaceholder;
                 if (!string.IsNullOrEmpty(detail.EntryStation) || !string.IsNullOrEmpty(detail.ExitStation))
                 {
                     parts.Add($"{entry}→{exit}");
