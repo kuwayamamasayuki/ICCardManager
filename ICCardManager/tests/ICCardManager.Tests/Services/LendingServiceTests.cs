@@ -12,6 +12,7 @@ using Xunit;
 
 using System;
 using System.Collections.Generic;
+using System.Data.SQLite;
 using System.Linq;
 using System.Threading.Tasks;
 
@@ -1394,6 +1395,62 @@ public class LendingServiceTests : IDisposable
         // Issue #837対応: 同一日既存レコード検索（デフォルトは空=統合なし）
         _ledgerRepositoryMock.Setup(x => x.GetByDateRangeAsync(TestCardIdm, It.IsAny<DateTime>(), It.IsAny<DateTime>()))
             .ReturnsAsync(new List<Ledger>());
+    }
+
+    #endregion
+
+    #region 返却リトライの冪等性テスト（Issue #1733）
+
+    /// <summary>
+    /// SQLITE_BUSY による1回のリトライ後も CreatedLedgers が二重に積まれないことを確認（Issue #1733）。
+    /// PersistReturnAsync がリトライ境界（ExecuteWithRetryAsync）のラムダ内で result へ AddRange すると、
+    /// 1回目の試行がロールバックされても積んだ Ledger が result に残り、リトライ成功分と重複する。
+    /// 重複すると MainViewModel がバス停入力ダイアログへ同一バス乗車行を2回渡し、職員が二重入力させられる。
+    /// </summary>
+    [Fact]
+    public async Task ReturnAsync_BusyRetryDuringPersist_DoesNotDuplicateCreatedLedgers()
+    {
+        // Arrange
+        var card = CreateTestCard(isLent: true);
+        var staff = CreateTestStaff();
+        var lentRecord = CreateTestLentRecord();
+        var usageDetails = new List<LedgerDetail>
+        {
+            new()
+            {
+                UseDate = DateTime.Today,
+                IsBus = true,
+                Amount = 200
+            }
+        };
+
+        SetupReturnMocks(card, staff, lentRecord);
+
+        // CreateUsageLedgersAsync（result へ Ledger を積む処理）の後に呼ばれる DeleteAllLentRecordsAsync を
+        // 1回目だけ SQLITE_BUSY で失敗させ、ExecuteWithRetryAsync の実リトライ（2回目で成功）を発生させる
+        var deleteLentRecordsCalls = 0;
+        _ledgerRepositoryMock.Setup(x => x.DeleteAllLentRecordsAsync(TestCardIdm))
+            .ReturnsAsync(() =>
+            {
+                if (++deleteLentRecordsCalls == 1)
+                {
+                    throw new SQLiteException(SQLiteErrorCode.Busy, "database is locked");
+                }
+                return 1;
+            });
+
+        // Act
+        var result = await _service.ReturnAsync(TestStaffIdm, TestCardIdm, usageDetails);
+
+        // Assert
+        result.Success.Should().BeTrue();
+
+        // リトライが実際に発生したことを表明する（発生していなければこのテストは重複の有無を何も検証していない）
+        deleteLentRecordsCalls.Should().Be(2, "1回目は SQLITE_BUSY、2回目のリトライで成功していること");
+
+        // ロールバック済みの1回目分が残らず、成功した2回目の分だけが積まれること
+        result.CreatedLedgers.Should().HaveCount(1,
+            "ロールバックされた1回目の試行分の Ledger がリトライ後の result に残ってはならない");
     }
 
     #endregion

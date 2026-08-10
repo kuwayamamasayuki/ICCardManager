@@ -513,6 +513,12 @@ namespace ICCardManager.Services
             bool skipDuplicateCheck,
             LendingResult result)
         {
+            // Issue #1733: ExecuteWithRetryAsync はラムダ全体を SQLITE_BUSY/LOCKED で再実行するため、
+            // ラムダ内で result へ AddRange するとロールバック済みの試行分が累積する（バス停入力ダイアログの
+            // 二重表示につながる）。ローカル変数は試行ごとに代入で上書きされる（冪等）ため、
+            // result への反映はリトライ境界の外で成功した最終試行の分だけを行う（LendAsync と同じ配置）。
+            List<Ledger> createdLedgers = null;
+
             await _dbContext.ExecuteWithRetryAsync(async () =>
             {
                 using var scope = await _dbContext.BeginTransactionAsync().ConfigureAwait(false);
@@ -524,12 +530,8 @@ namespace ICCardManager.Services
                     // 注意: Issue #1575 で LedgerRepository.InsertDetailsAsync(1 引数版) が外側 tx 中の再入を
                     // 自己検知する設計（DbContext.HasActiveTransactionScope）に変更されたため、ここで明示的に
                     // transaction を伝搬しなくてもデッドロックしない。
-                    var createdLedgers = await CreateUsageLedgersAsync(
+                    createdLedgers = await CreateUsageLedgersAsync(
                         cardIdm, lentRecord.LenderIdm, lentRecord.StaffName ?? string.Empty, usageSinceLent, skipDuplicateCheck).ConfigureAwait(false);
-
-                    result.CreatedLedgers.AddRange(createdLedgers);
-
-                    result.HasBusUsage = usageSinceLent.Any(d => d.IsBus);
 
                     // 貸出レコードをすべて削除（履歴に「（貸出中）」が残らないようにする）
                     // 共有モードで重複した貸出中レコードがある場合にも対応
@@ -545,6 +547,9 @@ namespace ICCardManager.Services
                     throw;
                 }
             }).ConfigureAwait(false);
+
+            result.CreatedLedgers.AddRange(createdLedgers);
+            result.HasBusUsage = usageSinceLent.Any(d => d.IsBus);
         }
 
         /// <summary>
