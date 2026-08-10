@@ -307,13 +307,23 @@ namespace ICCardManager.Infrastructure.Logging
 
         public void Dispose()
         {
-            _cancellationTokenSource.Cancel();
+            // Issue #1732: Cancel を CompleteAdding より先に呼ぶと、GetConsumingEnumerable(token) が
+            // キュー残量より先にキャンセルを検査して列挙を打ち切り、未書き出しのログが無言で破棄される
+            // （TryAdd 失敗経路を通らないため _droppedLogCount にも計上されない）。
+            // CompleteAdding → Wait（フラッシュ完了待ち）→ タイムアウト時のみ Cancel の順にする。
             _logQueue.CompleteAdding();
 
             try
             {
-                // キューに残っているログを書き込むために少し待機
-                _outputTask.Wait(TimeSpan.FromSeconds(2));
+                // キューに残っているログが書き終わるまで待機
+                if (!_outputTask.Wait(TimeSpan.FromSeconds(2)))
+                {
+                    // 2秒で書き終わらない場合のみ打ち切る（ディスク遅延等での終了ハング防止）。
+                    // Cancel 後の短い待機は、書き込みタスクがキャンセルを観測して終了する前に
+                    // 後続の _logQueue.Dispose() が走ることを防ぐため
+                    _cancellationTokenSource.Cancel();
+                    _outputTask.Wait(TimeSpan.FromMilliseconds(500));
+                }
             }
             catch (AggregateException)
             {
