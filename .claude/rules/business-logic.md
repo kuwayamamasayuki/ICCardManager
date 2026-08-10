@@ -16,6 +16,22 @@
 >
 > **逆処理は「職員証タッチ待ち」状態でも発生する**: 上記フローは線形に見えるが、再タッチ逆処理は交通系ICカードタッチ待ち状態に限定されない。職員証を再タッチせずに同一の交通系ICカードを時間内に再タッチした場合も、`MainViewModel.HandleCardInStaffWaitingStateAsync` が `IsRetouchWithinTimeout` を判定して `Process30SecondRuleAsync`（逆処理）を実行する。
 
+### 逆処理を「誰の操作」として記録するか（Issue #1729）
+
+`IsRetouchWithinTimeout` は**交通系ICカードの IDm しか見ない**（職員証は判定条件に含まれない）。したがって**前回とは別の職員が続けて操作した場合も逆処理が発動する**。誰の操作として記録するかは操作者の確定状況で決まる。
+
+| 再タッチ時の状態 | `_currentStaffIdm` | 記録する操作者 |
+|------------------|--------------------|----------------|
+| ICカードタッチ待ち（職員証タッチ済み） | 確定済み | **いまタッチした職員**（上書き禁止） |
+| 職員証タッチ待ち | null | 前回操作者（`_lastProcessedStaffIdm`）で補完 |
+| 職員証タッチ待ち かつ 前回操作者も null | null | 記録せずエラー通知 |
+
+- **「無い値の補完」と「有る値の上書き」を同じ代入文で書かない**。`Process30SecondRuleAsync` の `_currentStaffIdm = _lastProcessedStaffIdm;` は「操作者不在時の補完」が意図（XML コメントもその趣旨）だったが、無条件代入だったため職員証タッチ済みの経路では**確定済みの操作者を捨てて前回操作者に差し替えていた**。`ledger.StaffName` / `ic_card.lender_idm` / `operation_log` が実際の操作者と食い違い、長期未返却の督促も誤った職員へ向かう
+- **「意図が補完なら、補完の条件を書く」**。`if (string.IsNullOrEmpty(_currentStaffIdm))` を付けるだけで意図とコードが一致する。コメントで意図を書いても、コードが無条件なら無条件に動く
+- **null 判定を経路判定の代理に使うなら、その等価性を確かめて明記する**。`AppState.WaitingForStaffCard` へ遷移する経路は `MainViewModel.ResetState()` ただ 1 つで、そこで `_currentStaffIdm` は必ず null になるため「未確定＝職員証タッチ待ち経路」が成立する。この前提が崩れる遷移を足すときは本規則を見直すこと
+- **エラー分岐（操作者が現在も前回も不明）は到達可能**。仮想タッチ（Issue #1577）は `LendingService.ReturnAsync` を直接呼ぶため `LastProcessedCardIdm` は立つが `MainViewModel` の前回操作者は立たない。「到達不能だから」と削らない
+- **操作者の帰属はテストで表明する**。`CurrentState` や「例外が出ない」ではなく、**台帳に記録された IDm・氏名**（`ledger.LenderIdm` / `StaffName`）と `UpdateLentStatusAsync` の第4引数を具体値で検証する（`MainViewModelIntegrationTests` の `Retouch30Sec_*` 3件が参考実装）
+
 ## バス利用判別ロジック
 ```
 IF entry_station（乗車駅）が空欄 AND
