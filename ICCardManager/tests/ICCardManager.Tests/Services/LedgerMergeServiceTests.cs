@@ -351,6 +351,97 @@ public class LedgerMergeServiceTests : IDisposable
         result.MergedLedger!.Income.Should().Be(5000, "3000 + 2000");
     }
 
+    /// <summary>
+    /// チャージとポイント還元を混在して統合しようとした場合はエラーとなること（Issue #1736）
+    /// </summary>
+    /// <remarks>
+    /// 両者とも Income&gt;0 / Expense=0 のため「チャージと利用」チェックには掛からないが、
+    /// 混在した詳細集合は SummaryGenerator.Generate がどの摘要パターンにも該当せず
+    /// 空文字を返すため、統合を許可すると摘要が空欄のまま保存されてしまう。
+    /// 集計はチャージ／ポイント還元行を摘要文字列で分類するため、統合自体を拒否する。
+    /// </remarks>
+    [Fact]
+    [Trait("Category", "Unit")]
+    public async Task MergeAsync_ChargeAndPointRedemption_ReturnsError()
+    {
+        // Arrange: チャージ（Income）とポイント還元（Income）を混在
+        var date = new DateTime(2026, 2, 3);
+
+        var ledger1 = CreateTestLedger(1, TestCardIdm, date, "役務費によりチャージ", 0, 3000);
+        ledger1.Income = 3000;
+        ledger1.Details.Add(CreateChargeDetail(1, 3000, 3000, 2, date));
+
+        var ledger2 = CreateTestLedger(2, TestCardIdm, date, "ポイント還元", 0, 3100);
+        ledger2.Income = 100;
+        ledger2.Details.Add(new LedgerDetail
+        {
+            LedgerId = 2,
+            IsPointRedemption = true,
+            Amount = 100,
+            Balance = 3100,
+            SequenceNumber = 1,
+            UseDate = date
+        });
+
+        SetupGetByIdMocks(ledger1, ledger2);
+
+        // Act
+        var result = await _service.MergeAsync(new List<int> { 1, 2 });
+
+        // Assert
+        result.Success.Should().BeFalse();
+        result.ErrorMessage.Should().Contain("チャージとポイント還元", "何が: どの取引種別の組み合わせが問題か");
+        result.ErrorMessage!.Length.Should().BeGreaterThanOrEqualTo(20, "情報不足の短文にしない");
+        result.ErrorMessage.Should().MatchRegex("してください。?$", "行動指示で終わるべき");
+        _ledgerRepositoryMock.Verify(
+            x => x.MergeLedgersAsync(
+                It.IsAny<int>(), It.IsAny<IEnumerable<int>>(), It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>()),
+            Times.Never,
+            "バリデーションで拒否された統合はDBへ書き込まれない");
+    }
+
+    /// <summary>
+    /// チャージと暗黙のポイント還元（負金額・フラグなし）の混在もエラーとなること（Issue #1736）
+    /// </summary>
+    /// <remarks>
+    /// Issue #942: ICカードの生データでは、ポイント還元が IsPointRedemption=false のまま
+    /// 負金額レコードとして記録されることがある。SummaryGenerator.Generate はこれを
+    /// ポイント還元として扱うため、バリデーションも同じ分類で拒否しないと
+    /// 明示フラグの有無で挙動が食い違う。
+    /// </remarks>
+    [Fact]
+    [Trait("Category", "Unit")]
+    public async Task MergeAsync_ChargeAndImplicitPointRedemption_ReturnsError()
+    {
+        // Arrange: チャージと、負金額だがフラグの立っていないポイント還元
+        var date = new DateTime(2026, 2, 3);
+
+        var ledger1 = CreateTestLedger(1, TestCardIdm, date, "役務費によりチャージ", 0, 3000);
+        ledger1.Income = 3000;
+        ledger1.Details.Add(CreateChargeDetail(1, 3000, 3000, 2, date));
+
+        var ledger2 = CreateTestLedger(2, TestCardIdm, date, "ポイント還元", 0, 3100);
+        ledger2.Income = 100;
+        ledger2.Details.Add(new LedgerDetail
+        {
+            LedgerId = 2,
+            EntryStation = "博多",
+            Amount = -100,
+            Balance = 3100,
+            SequenceNumber = 1,
+            UseDate = date
+        });
+
+        SetupGetByIdMocks(ledger1, ledger2);
+
+        // Act
+        var result = await _service.MergeAsync(new List<int> { 1, 2 });
+
+        // Assert
+        result.Success.Should().BeFalse();
+        result.ErrorMessage.Should().Contain("チャージとポイント還元", "明示フラグ付きの混在と同じ理由で拒否される");
+    }
+
     #endregion
 
     #region MergeAsync 統合ロジックテスト
@@ -679,6 +770,35 @@ public class LedgerMergeServiceTests : IDisposable
         result.MergedLedger!.Income.Should().Be(300, "100 + 200 = 300");
         result.MergedLedger.Expense.Should().Be(0, "ポイント還元はExpenseなし");
         result.MergedLedger.Balance.Should().Be(5300, "最新Detailの残高");
+    }
+
+    /// <summary>
+    /// SummaryGenerator.Generate が空文字を返す統合でも摘要が空欄で保存されないこと（Issue #1736）
+    /// </summary>
+    /// <remarks>
+    /// 明細を持たない行（手入力で訂正した行等）同士の統合では Generate が空文字を返す。
+    /// LedgerSplitService と同じ空文字ガードで統合先の元の摘要を維持する
+    /// （摘要が空欄の行は物品出納簿でどの取引か判別できなくなるため）。
+    /// </remarks>
+    [Fact]
+    [Trait("Category", "Unit")]
+    public async Task MergeAsync_GeneratorReturnsEmpty_KeepsTargetOriginalSummary()
+    {
+        // Arrange: 明細なしの行同士（バリデーションは通過し、Generate は空文字を返す）
+        var date = new DateTime(2026, 2, 3);
+        var ledger1 = CreateTestLedger(1, TestCardIdm, date, "鉄道（博多～天神）", 200, 800);
+        var ledger2 = CreateTestLedger(2, TestCardIdm, date, "鉄道（天神～博多）", 210, 590);
+
+        SetupGetByIdMocks(ledger1, ledger2);
+        SetupMergeMockSuccess();
+
+        // Act
+        var result = await _service.MergeAsync(new List<int> { 1, 2 });
+
+        // Assert
+        result.Success.Should().BeTrue();
+        result.MergedLedger!.Summary.Should().Be("鉄道（博多～天神）",
+            "Generate が空文字を返した場合は統合先の元の摘要を維持する");
     }
 
     // 注: MergeAsync_ThreeRailTrips_CalculatesFinancialsCorrectly は
