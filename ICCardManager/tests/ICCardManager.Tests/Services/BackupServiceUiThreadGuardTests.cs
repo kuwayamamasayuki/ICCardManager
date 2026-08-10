@@ -139,7 +139,7 @@ public class BackupServiceUiThreadGuardTests : IDisposable
     /// <summary>
     /// UI スレッド模擬時でも <see cref="BackupService.ExecuteAutoBackupAsync"/> は
     /// 内部で Task.Run を使用して UI スレッドガードに抵触せず完了する。
-    /// 本番では <c>App.PerformStartupTasksAsync</c> から UI スレッド上で fire-and-forget 起動される経路を模擬。
+    /// 本番では <c>StartupTaskRunner</c> から UI スレッド上で起動される経路を模擬。
     /// </summary>
     [Fact]
     public async Task ExecuteAutoBackupAsync_UIスレッド模擬時でもバックアップファイルが生成されること()

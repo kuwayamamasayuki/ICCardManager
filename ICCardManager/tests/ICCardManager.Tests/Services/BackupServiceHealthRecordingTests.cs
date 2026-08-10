@@ -16,7 +16,7 @@ namespace ICCardManager.Tests.Services;
 /// BackupService のバックアップ成功記録の単体テスト（Issue #1689）
 /// </summary>
 /// <remarks>
-/// 呼び出し側（App.PerformStartupTasksAsync）は戻り値を捨てる fire-and-forget のため、
+/// 呼び出し側（StartupTaskRunner）は戻り値をログにも UI にも出さないため、
 /// 「最後に成功したのはいつか」をサービス内部で永続化しないと誰も知り得ない。
 /// ここでは記録が確実に行われること、および記録の失敗がバックアップ本体の成功を
 /// 取り消さないことを固定する。
