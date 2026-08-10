@@ -282,7 +282,11 @@ namespace ICCardManager.Services
                 sortedDetailsForSummary[i].SequenceNumber = i + 1;
             }
 
-            target.Summary = _summaryGenerator.Generate(sortedDetailsForSummary);
+            // Issue #1736: Generate が空文字を返す詳細集合（明細を持たない行同士の統合等）では
+            // 統合先の元の摘要を維持する（LedgerSplitService と同じ空文字ガード）。
+            // 摘要が空欄の行は物品出納簿でどの取引か判別できなくなるため、空欄のまま保存しない。
+            var regeneratedSummary = _summaryGenerator.Generate(sortedDetailsForSummary);
+            target.Summary = !string.IsNullOrEmpty(regeneratedSummary) ? regeneratedSummary : target.Summary;
 
             // Noteの統合（非空のものを連結）
             var notes = ledgers
@@ -468,6 +472,23 @@ namespace ICCardManager.Services
             if (hasIncome && hasExpense)
             {
                 return "チャージと利用の履歴は統合できません";
+            }
+
+            // チャージとポイント還元の混在チェック（Issue #1736）
+            // 両者とも Income>0 / Expense=0 のため上のチェックには掛からないが、
+            // 混在した詳細集合は SummaryGenerator.Generate がどの摘要パターンにも該当せず
+            // 空文字を返す。集計はチャージ／ポイント還元行を摘要文字列で分類するため
+            // （.claude/rules/business-logic.md「ledger を集計するときの前提」）、
+            // 結合摘要を新設せず統合自体を拒否する。
+            // 暗黙のポイント還元（Issue #942: 負金額・フラグなし）も Generate と同じ分類で扱う。
+            var hasCharge = ledgers.Any(l => l.Details.Any(d => d.IsCharge));
+            var hasPointRedemption = ledgers.Any(l => l.Details.Any(
+                d => d.IsPointRedemption || SummaryGenerator.IsImplicitPointRedemption(d)));
+            if (hasCharge && hasPointRedemption)
+            {
+                return "チャージとポイント還元の履歴は統合できません。" +
+                       "取引の種類が異なるため、1行にまとめると摘要でどちらの取引か判別できなくなります。" +
+                       "それぞれ別の行のまま管理してください。";
             }
 
             return null;
