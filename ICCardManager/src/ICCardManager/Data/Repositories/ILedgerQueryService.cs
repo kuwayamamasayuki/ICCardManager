@@ -34,21 +34,40 @@ namespace ICCardManager.Data.Repositories
         /// <summary>
         /// 指定日以前の利用履歴を取得（残額計算用）
         /// </summary>
+        /// <remarks>
+        /// Issue #1731: 同一日に複数レコードがある場合は id 順ではなく残高チェーン
+        /// （Issue #784 の <c>LedgerOrderHelper.ReorderByBalanceChain</c>）で時系列順を
+        /// 確定した最終レコードを返す。貸出中レコード（is_lent_record = 1）も対象に含む
+        /// （返却処理の残高起点として使われるため）。
+        /// </remarks>
         Task<Ledger> GetLatestBeforeDateAsync(string cardIdm, DateTime beforeDate);
 
         /// <summary>
         /// 年度繰越残高を取得
         /// </summary>
+        /// <remarks>
+        /// Issue #1731: 年度末最終日に複数レコードがある場合は残高チェーン順の最終残高を返す
+        /// （<see cref="GetLatestBeforeDateAsync"/> と同じ規則）。
+        /// </remarks>
         Task<int?> GetCarryoverBalanceAsync(string cardIdm, int fiscalYear);
 
         /// <summary>
         /// 指定カードの最新利用履歴を取得
         /// </summary>
+        /// <remarks>
+        /// Issue #1731: 同一日に複数レコードがある場合は残高チェーン順の最終レコードを返す
+        /// （<see cref="GetLatestBeforeDateAsync"/> と同じ規則）。
+        /// </remarks>
         Task<Ledger> GetLatestLedgerAsync(string cardIdm);
 
         /// <summary>
         /// 全カードの最新残高情報を一括取得（ダッシュボード用）
         /// </summary>
+        /// <remarks>
+        /// Issue #1731: 最新日に複数レコードがあるカードは残高チェーン順の最終残高を返す
+        /// （<see cref="GetLatestBeforeDateAsync"/> と同じ規則）。最終利用日は最新日時
+        /// （貸出中レコードがあればその時刻付き日時）を返す。
+        /// </remarks>
         Task<Dictionary<string, (int Balance, DateTime? LastUsageDate)>> GetAllLatestBalancesAsync();
 
         /// <summary>

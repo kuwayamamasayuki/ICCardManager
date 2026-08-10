@@ -5,6 +5,7 @@ using System.Linq;
 using System.Threading.Tasks;
 using ICCardManager.Dtos;
 using ICCardManager.Models;
+using ICCardManager.Services;
 using System.Data.Common;
 using System.Data.SQLite;
 
@@ -579,27 +580,106 @@ VALUES (@ledgerId, @useDate, @entryStation, @exitStation,
         /// <inheritdoc/>
         public async Task<Ledger> GetLatestBeforeDateAsync(string cardIdm, DateTime beforeDate)
         {
-            using var lease = await _dbContext.LeaseConnectionAsync();
-            var connection = lease.Connection;
+            using var lease = await _dbContext.LeaseConnectionAsync().ConfigureAwait(false);
+            return await GetChainFinalLedgerAsync(
+                lease.Connection, cardIdm, beforeDate.ToString("yyyy-MM-dd")).ConfigureAwait(false);
+        }
 
-            using var command = connection.CreateCommand();
-            command.CommandText = @"SELECT id, card_idm, lender_idm, date, summary, income, expense, balance,
+        /// <summary>
+        /// 「最新残高」系クエリの共通実装。最新日の全レコードを残高チェーン
+        /// （<see cref="LedgerOrderHelper.ReorderByBalanceChain"/>、Issue #784）で時系列順に
+        /// 並べ替え、その最終レコードを返す。
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// Issue #1731: 同一日の利用系レコードは時刻がすべて 00:00:00 で保存されるため、
+        /// <c>ORDER BY date DESC, id DESC</c> の同日タイブレークは実質 id のみで決まる。
+        /// 同日統合（Issue #837: チャージ行を新規 INSERT し、利用は古い id の行を UPDATE する）等で
+        /// id 順が時系列と逆転すると、その日の最終残高ではない行（チャージ直後の中間残高等）が
+        /// 「最新残高」として返り、残高チェーン順で表示する履歴グリッド（Issue #784/#1004）や
+        /// 帳票の前月繰越と食い違う。
+        /// </para>
+        /// <para>
+        /// 前日以前の最終残高をチェーン開始点として渡すのは、同額のポイント還元と利用で残高が
+        /// 循環する日（Issue #1004 形状）では当日の行だけから開始点を特定できないため。
+        /// 貸出中レコード（is_lent_record = 1）は除外しない。返却処理
+        /// （LendingService.GetLastBalanceAsync）が貸出中プレースホルダの残高を
+        /// 残高チェーンの起点として使う挙動を維持する。
+        /// </para>
+        /// </remarks>
+        /// <param name="connection">リース済みの接続</param>
+        /// <param name="cardIdm">カードIDm</param>
+        /// <param name="beforeDate">この日付（"yyyy-MM-dd"）より前に限定する場合に指定。null なら全期間</param>
+        private static async Task<Ledger> GetChainFinalLedgerAsync(
+            SQLiteConnection connection, string cardIdm, string beforeDate)
+        {
+            // 最新日（DATE(date) が最大の日）の全レコードを取得する。
+            // date は "yyyy-MM-dd HH:mm:ss" の TEXT のため MAX(date) が最新日時、その DATE() が最新日
+            var beforeFilter = beforeDate != null ? "AND date < @beforeDate" : string.Empty;
+            var latestDayLedgers = new List<Ledger>();
+
+            using (var command = connection.CreateCommand())
+            {
+                command.CommandText = $@"SELECT id, card_idm, lender_idm, date, summary, income, expense, balance,
        staff_name, note, returner_idm, lent_at, returned_at, is_lent_record
 FROM ledger
-WHERE card_idm = @cardIdm AND date < @beforeDate
+WHERE card_idm = @cardIdm {beforeFilter}
+  AND DATE(date) = (
+    SELECT DATE(MAX(date)) FROM ledger
+    WHERE card_idm = @cardIdm {beforeFilter})
+ORDER BY date ASC, id ASC";
+
+                command.Parameters.AddWithValue("@cardIdm", cardIdm);
+                if (beforeDate != null)
+                {
+                    command.Parameters.AddWithValue("@beforeDate", beforeDate);
+                }
+
+                using var reader = await command.ExecuteReaderAsync().ConfigureAwait(false);
+                while (await reader.ReadAsync().ConfigureAwait(false))
+                {
+                    latestDayLedgers.Add(MapToLedger(reader));
+                }
+            }
+
+            if (latestDayLedgers.Count == 0)
+            {
+                return null;
+            }
+
+            if (latestDayLedgers.Count == 1)
+            {
+                return latestDayLedgers[0];
+            }
+
+            var precedingBalance = await GetPrecedingBalanceAsync(
+                connection, cardIdm, latestDayLedgers[0].Date.Date).ConfigureAwait(false);
+            return LedgerOrderHelper.ReorderByBalanceChain(latestDayLedgers, precedingBalance).Last();
+        }
+
+        /// <summary>
+        /// 指定日より前の最終レコードの残高を取得する（残高チェーンの開始点シード用）。
+        /// </summary>
+        /// <remarks>
+        /// 前日側にも同日の id 逆転がありシードが中間残高になる可能性は残るが、
+        /// 再帰的に遡ると際限がないため 1 段のみとする。シードが不正確な場合でも
+        /// <see cref="LedgerOrderHelper.ReorderByBalanceChain"/> は id 順フォールバックで
+        /// 従来挙動（id 順）に一致するため、従来より悪化することはない。
+        /// </remarks>
+        private static async Task<int?> GetPrecedingBalanceAsync(
+            SQLiteConnection connection, string cardIdm, DateTime day)
+        {
+            using var command = connection.CreateCommand();
+            command.CommandText = @"SELECT balance FROM ledger
+WHERE card_idm = @cardIdm AND DATE(date) < @day
 ORDER BY date DESC, id DESC
 LIMIT 1";
 
             command.Parameters.AddWithValue("@cardIdm", cardIdm);
-            command.Parameters.AddWithValue("@beforeDate", beforeDate.ToString("yyyy-MM-dd"));
+            command.Parameters.AddWithValue("@day", day.ToString("yyyy-MM-dd"));
 
-            using var reader = await command.ExecuteReaderAsync();
-            if (await reader.ReadAsync())
-            {
-                return MapToLedger(reader);
-            }
-
-            return null;
+            var result = await command.ExecuteScalarAsync().ConfigureAwait(false);
+            return result == null || result == DBNull.Value ? (int?)null : Convert.ToInt32(result);
         }
 
         /// <inheritdoc/>
@@ -615,54 +695,57 @@ LIMIT 1";
         /// <inheritdoc/>
         public async Task<Ledger> GetLatestLedgerAsync(string cardIdm)
         {
-            using var lease = await _dbContext.LeaseConnectionAsync();
-            var connection = lease.Connection;
-
-            using var command = connection.CreateCommand();
-            command.CommandText = @"SELECT id, card_idm, lender_idm, date, summary, income, expense, balance,
-       staff_name, note, returner_idm, lent_at, returned_at, is_lent_record
-FROM ledger
-WHERE card_idm = @cardIdm
-ORDER BY date DESC, id DESC
-LIMIT 1";
-
-            command.Parameters.AddWithValue("@cardIdm", cardIdm);
-
-            using var reader = await command.ExecuteReaderAsync();
-            if (await reader.ReadAsync())
-            {
-                return MapToLedger(reader);
-            }
-
-            return null;
+            using var lease = await _dbContext.LeaseConnectionAsync().ConfigureAwait(false);
+            return await GetChainFinalLedgerAsync(lease.Connection, cardIdm, beforeDate: null).ConfigureAwait(false);
         }
 
         /// <inheritdoc/>
         public async Task<Dictionary<string, (int Balance, DateTime? LastUsageDate)>> GetAllLatestBalancesAsync()
         {
-            using var lease = await _dbContext.LeaseConnectionAsync();
+            using var lease = await _dbContext.LeaseConnectionAsync().ConfigureAwait(false);
             var connection = lease.Connection;
             var result = new Dictionary<string, (int Balance, DateTime? LastUsageDate)>();
 
-            using var command = connection.CreateCommand();
-            // 各カードについて日付が最も新しいレコード（同日の場合はID降順）から残高と最終利用日を取得
+            // 各カードについて最新日（DATE(date) が最大の日）の全レコードを取得
             // ※ MAX(id) ではなく日付基準にすることで、データインポート後も正しい最終利用日・残高が表示される (Issue #1068)
-            command.CommandText = @"SELECT l.card_idm, l.balance, l.date
-FROM ledger l
-WHERE l.id = (
-    SELECT l2.id FROM ledger l2
-    WHERE l2.card_idm = l.card_idm
-    ORDER BY l2.date DESC, l2.id DESC
-    LIMIT 1
-)";
-
-            using var reader = await command.ExecuteReaderAsync();
-            while (await reader.ReadAsync())
+            // ※ 最新日の 1 行ではなく全行を取得するのは、同一日内の順序を残高チェーンで確定するため (Issue #1731)
+            var latestDayLedgers = new List<Ledger>();
+            using (var command = connection.CreateCommand())
             {
-                var cardIdm = reader.GetString(0);
-                var balance = reader.GetInt32(1);
-                var lastUsageDate = reader.IsDBNull(2) ? (DateTime?)null : DateTime.Parse(reader.GetString(2));
-                result[cardIdm] = (balance, lastUsageDate);
+                command.CommandText = @"SELECT id, card_idm, lender_idm, date, summary, income, expense, balance,
+       staff_name, note, returner_idm, lent_at, returned_at, is_lent_record
+FROM ledger l
+WHERE DATE(l.date) = (
+    SELECT DATE(MAX(l2.date)) FROM ledger l2
+    WHERE l2.card_idm = l.card_idm
+)
+ORDER BY l.card_idm ASC, l.date ASC, l.id ASC";
+
+                using var reader = await command.ExecuteReaderAsync().ConfigureAwait(false);
+                while (await reader.ReadAsync().ConfigureAwait(false))
+                {
+                    latestDayLedgers.Add(MapToLedger(reader));
+                }
+            }
+
+            foreach (var cardGroup in latestDayLedgers.GroupBy(l => l.CardIdm))
+            {
+                var dayLedgers = cardGroup.ToList();
+
+                Ledger chainFinal;
+                if (dayLedgers.Count == 1)
+                {
+                    chainFinal = dayLedgers[0];
+                }
+                else
+                {
+                    var precedingBalance = await GetPrecedingBalanceAsync(
+                        connection, cardGroup.Key, dayLedgers[0].Date.Date).ConfigureAwait(false);
+                    chainFinal = LedgerOrderHelper.ReorderByBalanceChain(dayLedgers, precedingBalance).Last();
+                }
+
+                // 最終利用日は最新日時（貸出中レコードは時刻を持つため従来どおり時刻付きの値を維持する）
+                result[cardGroup.Key] = (chainFinal.Balance, dayLedgers.Max(l => l.Date));
             }
 
             return result;

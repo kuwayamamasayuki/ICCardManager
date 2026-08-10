@@ -116,3 +116,6 @@ THEN
   - **同じ欠損への手当てを 2 か所に分けない**。4月だけ別式（`aprilBalance`）で前年度繰越へ落としていたため、5月以降の累計と3月の次年度繰越が取り残された。等価に統合できるなら統合する。分けたままにするなら、なぜ分ける必要があるかをコメントに書く
   - **無利用のカードでも帳票は毎月出力される**。「使われていないカードは帳票を見ない」は成り立たない（一括出力の対象は払戻済み以外の全カード）。**利用実績ゼロを異常系ではなく通常運用として扱う**こと
 - **`ic_card.is_lent` と貸出中レコードは一時的にずれる**（共有モードで他 PC の返却が反映される前など。起動時に `LendingService.CheckAndRepairLentStatusAsync` が修復する）。両方を別々の判定に使うと「貸出中0枚なのに長期未返却1枚」のような自己矛盾した集計値になる。**どちらか一方を母集団の正とし、サマリー値どうしの不変条件をテストで表明する**
+- **同一日内の順序は id では決まらない — 「その日の最終レコード」を SQL の `ORDER BY … id DESC LIMIT 1` で確定しない**（Issue #1731）。同一日の利用系レコードは時刻がすべて 00:00:00 で保存されるため同日のタイブレークは実質 id のみになるが、同日統合（Issue #837: チャージ行を新規 INSERT・利用は古い id の行を UPDATE）等で id 順は時系列と食い違う。「最新残高」「その日の最終残高」が必要な集計は `LedgerRepository` の単票クエリ（`GetLatestBeforeDateAsync` / `GetLatestLedgerAsync` / `GetCarryoverBalanceAsync` / `GetAllLatestBalancesAsync`。残高チェーンで確定済み）を使うか、`LedgerOrderHelper.ReorderByBalanceChain`（Issue #784）で並べ替えた最終行を取ること
+  - **同額のポイント還元と利用が同日にあると残高チェーンが循環し、当日の行だけでは開始点を特定できない**（Issue #1004 形状）。前日以前の最終残高をチェーン開始点のシードとして渡すこと（`LedgerRepository.GetChainFinalLedgerAsync` が参考実装。解決できない場合は id 順フォールバックで従来挙動に一致する）
+  - グラフ用の SQL 集計（`GetMonthEndBalancesByCardAsync` / `GetBalancesBeforeAsync`、Issue #1692）は SQL 側で同じ id タイブレークを使ったまま（Issue #1731 のスコープ外。影響はダッシュボードのグラフ表示に限られるため Issue #1770 で別途追跡）。これらを流用・拡張するときはこの制約を引き継いでいることを認識すること

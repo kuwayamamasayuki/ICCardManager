@@ -3,6 +3,7 @@ using ICCardManager.Data;
 using ICCardManager.Data.Repositories;
 using ICCardManager.Infrastructure.Caching;
 using ICCardManager.Models;
+using ICCardManager.Services;
 using ICCardManager.Tests.Data;
 using Microsoft.Extensions.Options;
 using Moq;
@@ -677,6 +678,150 @@ public class LedgerRepositoryTests : IDisposable
         result.Should().BeNull();
     }
 
+    /// <summary>
+    /// Issue #1731: 同一日内で id 順が時系列と逆転している場合（Issue #837 の同日統合形状）でも、
+    /// 残高チェーン順の最終レコードが返ることを確認
+    /// </summary>
+    /// <remarks>
+    /// Issue #837 の同日統合では、2回目の返却でチャージ行が新規 INSERT（id 大）され、
+    /// 利用セグメントは既存の古い id の行が UPDATE されるため、
+    /// 「id 最大 = チャージ行（中間残高）」「真の最終残高 = 小さい id の行」になる。
+    /// 同一日の利用系レコードは時刻がすべて 00:00:00 で保存されるため、
+    /// ORDER BY date DESC, id DESC では中間残高の方が返ってしまう。
+    /// </remarks>
+    [Fact]
+    public async Task GetLatestBeforeDateAsync_SameDayIdOrderReversed_ReturnsChainFinalBalance()
+    {
+        // Arrange - 前日: 残高5000
+        var previous = CreateTestLedger(TestCardIdm, new DateTime(2026, 3, 9), "鉄道（博多～天神）", expense: 260);
+        previous.Balance = 5000;
+        await _repository.InsertAsync(previous);
+
+        // 同日 3/10: 時系列は チャージ(5000→8000) → 利用(8000→7740) だが、
+        // 利用行の方が先に INSERT されている（id が小さい = 挿入順が時系列と逆）
+        var mergedUsage = CreateTestLedger(TestCardIdm, new DateTime(2026, 3, 10), "鉄道（博多～天神）", expense: 260);
+        mergedUsage.Balance = 7740;
+        await _repository.InsertAsync(mergedUsage);
+
+        var charge = CreateTestLedger(TestCardIdm, new DateTime(2026, 3, 10), "チャージ", income: 3000);
+        charge.Balance = 8000;
+        await _repository.InsertAsync(charge);
+
+        // Act
+        var result = await _repository.GetLatestBeforeDateAsync(TestCardIdm, new DateTime(2026, 3, 11));
+
+        // Assert - id 最大のチャージ行（8,000円 = 中間残高）ではなく残高チェーン最終の利用行が返る
+        result.Should().NotBeNull();
+        result!.Balance.Should().Be(7740, "同一日内は id 順ではなく残高チェーン順の最終レコードを返すべき");
+    }
+
+    /// <summary>
+    /// Issue #1731: 同額のポイント還元と利用で残高が循環する日（Issue #1004 形状）でも、
+    /// 前日の残高をチェーン開始点として時系列順を確定できることを確認
+    /// </summary>
+    /// <remarks>
+    /// 還元(+240)と利用(-240)が同額だと「残高チェーンの開始点」を当日の行だけからは
+    /// 特定できない（どちらの処理前残高も他方の残高と一致する）。前日以前の最終残高を
+    /// 開始点として与えることで初めて時系列順が確定する形状。
+    /// </remarks>
+    [Fact]
+    public async Task GetLatestBeforeDateAsync_SameDayBalanceCycle_ResolvesChainStartFromPrecedingDay()
+    {
+        // Arrange - 前日: 残高1696
+        var previous = CreateTestLedger(TestCardIdm, new DateTime(2026, 3, 9), "鉄道（博多～天神）", expense: 260);
+        previous.Balance = 1696;
+        await _repository.InsertAsync(previous);
+
+        // 同日 3/10: 時系列は 利用(1696→1456) → 還元(1456→1696) だが、還元行の方が id が小さい
+        var redemption = CreateTestLedger(TestCardIdm, new DateTime(2026, 3, 10), "ポイント還元", income: 240);
+        redemption.Balance = 1696;
+        await _repository.InsertAsync(redemption);
+
+        var usage = CreateTestLedger(TestCardIdm, new DateTime(2026, 3, 10), "鉄道（博多～天神）", expense: 240);
+        usage.Balance = 1456;
+        await _repository.InsertAsync(usage);
+
+        // Act
+        var result = await _repository.GetLatestBeforeDateAsync(TestCardIdm, new DateTime(2026, 3, 11));
+
+        // Assert - id 最大の利用行（1,456円）ではなく、チェーン最終の還元行（1,696円）が返る
+        result.Should().NotBeNull();
+        result!.Balance.Should().Be(1696, "残高が循環する日は前日残高を開始点にチェーンを解決すべき");
+    }
+
+    /// <summary>
+    /// Issue #1731: 最新日に貸出中レコードがある場合、それが残高チェーン最終として返ることを確認
+    /// </summary>
+    /// <remarks>
+    /// 返却処理（LendingService.GetLastBalanceAsync）は貸出中プレースホルダの残高を
+    /// 残高チェーンの起点として使う。残高チェーン順の導入後もこの挙動を維持する。
+    /// </remarks>
+    [Fact]
+    public async Task GetLatestBeforeDateAsync_LentRecordOnLatestDay_ReturnsLentRecord()
+    {
+        // Arrange - 前日: 残高5000
+        var previous = CreateTestLedger(TestCardIdm, new DateTime(2026, 3, 9), "鉄道（博多～天神）", expense: 260);
+        previous.Balance = 5000;
+        await _repository.InsertAsync(previous);
+
+        // 同日 3/10: 利用(00:00, 5000→4740) → 貸出中プレースホルダ(14:30, 残高4740)
+        var usage = CreateTestLedger(TestCardIdm, new DateTime(2026, 3, 10), "鉄道（博多～天神）", expense: 260);
+        usage.Balance = 4740;
+        await _repository.InsertAsync(usage);
+
+        var lent = CreateTestLedger(TestCardIdm, new DateTime(2026, 3, 10, 14, 30, 0), SummaryGenerator.GetLendingSummary());
+        lent.Balance = 4740;
+        lent.IsLentRecord = true;
+        await _repository.InsertAsync(lent);
+
+        // Act
+        var result = await _repository.GetLatestBeforeDateAsync(TestCardIdm, new DateTime(2026, 3, 11));
+
+        // Assert - 貸出中プレースホルダが残高チェーン最終として返る（返却時の残高起点）
+        result.Should().NotBeNull();
+        result!.IsLentRecord.Should().BeTrue("最新日の貸出中プレースホルダは残高チェーンの最終レコードとして返るべき");
+        result.Balance.Should().Be(4740);
+    }
+
+    /// <summary>
+    /// Issue #1731: 履歴画面のグリッド最終行（GetPagedAsync + ReorderByBalanceChain）と
+    /// ヘッダー残高（GetLatestBeforeDateAsync）が同じ値になることを確認
+    /// </summary>
+    /// <remarks>
+    /// MainViewModel.LoadHistoryLedgersAsync はグリッドを ReorderByBalanceChain で
+    /// 並べ替える一方、ヘッダーの HistoryCurrentBalance は GetLatestBeforeDateAsync を使う。
+    /// 修正前は同一画面内でグリッド最終行とヘッダーの残高が食い違っていた（故障シナリオ (a)）。
+    /// 2つの実経路を同じ DB に接続して一致を表明する。
+    /// </remarks>
+    [Fact]
+    public async Task GetLatestBeforeDateAsync_MatchesReorderedGridLastRowBalance()
+    {
+        // Arrange - Issue #1004 形状（同額の還元と利用で残高が循環する日）
+        var previous = CreateTestLedger(TestCardIdm, new DateTime(2026, 3, 9), "鉄道（博多～天神）", expense: 260);
+        previous.Balance = 1696;
+        await _repository.InsertAsync(previous);
+
+        var redemption = CreateTestLedger(TestCardIdm, new DateTime(2026, 3, 10), "ポイント還元", income: 240);
+        redemption.Balance = 1696;
+        await _repository.InsertAsync(redemption);
+
+        var usage = CreateTestLedger(TestCardIdm, new DateTime(2026, 3, 10), "鉄道（博多～天神）", expense: 240);
+        usage.Balance = 1456;
+        await _repository.InsertAsync(usage);
+
+        // Act - グリッド側: MainViewModel.LoadHistoryLedgersAsync と同じ経路
+        var (rawLedgers, _) = await _repository.GetPagedAsync(
+            TestCardIdm, new DateTime(2026, 3, 1), new DateTime(2026, 3, 31), 1, 50);
+        var gridLastBalance = LedgerOrderHelper.ReorderByBalanceChain(rawLedgers).Last().Balance;
+
+        // ヘッダー側: HistoryCurrentBalance と同じ経路
+        var header = await _repository.GetLatestBeforeDateAsync(TestCardIdm, new DateTime(2026, 3, 11));
+
+        // Assert - 同一画面に表示される2つの残高が一致する
+        gridLastBalance.Should().Be(1696, "グリッド最終行は残高チェーン順の最終レコードであるべき");
+        header!.Balance.Should().Be(gridLastBalance, "ヘッダー残高はグリッド最終行の残高と一致すべき");
+    }
+
     #endregion
 
     #region GetCarryoverBalanceAsync テスト
@@ -717,6 +862,71 @@ public class LedgerRepositoryTests : IDisposable
 
         // Assert
         result.Should().BeNull();
+    }
+
+    /// <summary>
+    /// Issue #1731: 年度末（3/31）に id 順と時系列が逆転したレコードがある場合でも、
+    /// 残高チェーン最終の残高が繰越額として返ることを確認
+    /// </summary>
+    /// <remarks>
+    /// 年度繰越額は物品出納簿の「前年度より繰越」および5月以降の年度累計に使われるため、
+    /// ここが中間残高になると翌年度の帳票が誤る。
+    /// </remarks>
+    [Fact]
+    public async Task GetCarryoverBalanceAsync_SameDayIdOrderReversedAtFiscalYearEnd_ReturnsChainFinalBalance()
+    {
+        // Arrange - 年度末より前: 残高6500
+        var previous = CreateTestLedger(TestCardIdm, new DateTime(2024, 3, 25), "鉄道（博多～天神）", expense: 260);
+        previous.Balance = 6500;
+        await _repository.InsertAsync(previous);
+
+        // 年度末 3/31: 時系列は チャージ(6500→9500) → 利用(9500→9240) だが、利用行の方が id が小さい
+        var mergedUsage = CreateTestLedger(TestCardIdm, new DateTime(2024, 3, 31), "鉄道（博多～天神）", expense: 260);
+        mergedUsage.Balance = 9240;
+        await _repository.InsertAsync(mergedUsage);
+
+        var charge = CreateTestLedger(TestCardIdm, new DateTime(2024, 3, 31), "チャージ", income: 3000);
+        charge.Balance = 9500;
+        await _repository.InsertAsync(charge);
+
+        // Act
+        var result = await _repository.GetCarryoverBalanceAsync(TestCardIdm, 2023);
+
+        // Assert - id 最大のチャージ行（9,500円 = 中間残高）ではなく年度末最終の残高が繰り越される
+        result.Should().Be(9240, "年度繰越額は残高チェーン順で確定した年度末最終残高であるべき");
+    }
+
+    #endregion
+
+    #region GetLatestLedgerAsync テスト
+
+    /// <summary>
+    /// Issue #1731: 同一日内で id 順が時系列と逆転している場合でも、
+    /// 残高チェーン順の最終レコードが返ることを確認（GetLatestBeforeDateAsync と同じ規則）
+    /// </summary>
+    [Fact]
+    public async Task GetLatestLedgerAsync_SameDayIdOrderReversed_ReturnsChainFinalBalance()
+    {
+        // Arrange - 前日: 残高5000
+        var previous = CreateTestLedger(TestCardIdm, new DateTime(2026, 3, 9), "鉄道（博多～天神）", expense: 260);
+        previous.Balance = 5000;
+        await _repository.InsertAsync(previous);
+
+        // 同日 3/10: 時系列は チャージ(5000→8000) → 利用(8000→7740) だが、利用行の方が id が小さい
+        var mergedUsage = CreateTestLedger(TestCardIdm, new DateTime(2026, 3, 10), "鉄道（博多～天神）", expense: 260);
+        mergedUsage.Balance = 7740;
+        await _repository.InsertAsync(mergedUsage);
+
+        var charge = CreateTestLedger(TestCardIdm, new DateTime(2026, 3, 10), "チャージ", income: 3000);
+        charge.Balance = 8000;
+        await _repository.InsertAsync(charge);
+
+        // Act
+        var result = await _repository.GetLatestLedgerAsync(TestCardIdm);
+
+        // Assert
+        result.Should().NotBeNull();
+        result!.Balance.Should().Be(7740, "同一日内は id 順ではなく残高チェーン順の最終レコードを返すべき");
     }
 
     #endregion
@@ -1463,12 +1673,17 @@ public class LedgerRepositoryTests : IDisposable
     }
 
     /// <summary>
-    /// 同一日付のレコードが複数ある場合、ID降順で最新のものが返されることを確認
+    /// 同一日付のレコードが複数ある場合、残高チェーン順の最終レコードの残高が返されることを確認
     /// </summary>
+    /// <remarks>
+    /// Issue #1731 で契約を「ID降順」から「残高チェーン順の最終」へ変更した。
+    /// 本フィクスチャは id 順＝時系列順のため ID 大の行とも一致する。id 順が時系列と
+    /// 逆転するケースは <c>GetAllLatestBalancesAsync_SameDayIdOrderReversed_ReturnsChainFinalBalance</c> が固定する。
+    /// </remarks>
     [Fact]
-    public async Task GetAllLatestBalancesAsync_SameDateMultipleRecords_ReturnsHighestId()
+    public async Task GetAllLatestBalancesAsync_SameDateMultipleRecords_ReturnsChainFinalBalance()
     {
-        // Arrange - 同日に2件登録（チャージと利用）
+        // Arrange - 同日に2件登録（チャージ(→13000) → 利用(→12740) の順で残高チェーンが連なる）
         var ledger1 = CreateTestLedger(TestCardIdm, new DateTime(2026, 3, 15), "チャージ", income: 3000);
         ledger1.Balance = 13000;
         await _repository.InsertAsync(ledger1);
@@ -1480,10 +1695,10 @@ public class LedgerRepositoryTests : IDisposable
         // Act
         var result = await _repository.GetAllLatestBalancesAsync();
 
-        // Assert - 同日ならIDが大きい方（後にINSERTされた方）が返される
+        // Assert - 残高チェーン最終の利用行（12,740円）が返される
         result.Should().ContainKey(TestCardIdm);
         var (balance, _) = result[TestCardIdm];
-        balance.Should().Be(12740, "同日の場合はIDが大きいレコードの残高が返されるべき");
+        balance.Should().Be(12740, "同日の場合は残高チェーン順の最終レコードの残高が返されるべき");
     }
 
     /// <summary>
@@ -1520,6 +1735,37 @@ public class LedgerRepositoryTests : IDisposable
         result[TestCardIdm].LastUsageDate.Should().Be(new DateTime(2026, 3, 20));
         result[card2Idm].Balance.Should().Be(15000);
         result[card2Idm].LastUsageDate.Should().Be(new DateTime(2026, 3, 25));
+    }
+
+    /// <summary>
+    /// Issue #1731: 同一日内で id 順が時系列と逆転している場合でも、
+    /// 残高チェーン順の最終残高が返ることを確認（カード一覧・ダッシュボードの残高表示）
+    /// </summary>
+    [Fact]
+    public async Task GetAllLatestBalancesAsync_SameDayIdOrderReversed_ReturnsChainFinalBalance()
+    {
+        // Arrange - 前日: 残高5000
+        var previous = CreateTestLedger(TestCardIdm, new DateTime(2026, 3, 9), "鉄道（博多～天神）", expense: 260);
+        previous.Balance = 5000;
+        await _repository.InsertAsync(previous);
+
+        // 同日 3/10: 時系列は チャージ(5000→8000) → 利用(8000→7740) だが、利用行の方が id が小さい
+        var mergedUsage = CreateTestLedger(TestCardIdm, new DateTime(2026, 3, 10), "鉄道（博多～天神）", expense: 260);
+        mergedUsage.Balance = 7740;
+        await _repository.InsertAsync(mergedUsage);
+
+        var charge = CreateTestLedger(TestCardIdm, new DateTime(2026, 3, 10), "チャージ", income: 3000);
+        charge.Balance = 8000;
+        await _repository.InsertAsync(charge);
+
+        // Act
+        var result = await _repository.GetAllLatestBalancesAsync();
+
+        // Assert - id 最大のチャージ行（8,000円 = 中間残高）ではなく残高チェーン最終の残高が返る
+        result.Should().ContainKey(TestCardIdm);
+        var (balance, lastUsageDate) = result[TestCardIdm];
+        balance.Should().Be(7740, "同一日内は id 順ではなく残高チェーン順の最終残高を返すべき");
+        lastUsageDate.Should().Be(new DateTime(2026, 3, 10));
     }
 
     #endregion
