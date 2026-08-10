@@ -251,6 +251,37 @@ public class FileLoggerProviderTests : IDisposable
         act.Should().NotThrow("Disabled状態でもDisposeは例外なく完了すべき");
     }
 
+    /// <summary>
+    /// Issue #1732: Dispose時、キューに残っている未書き出しのログがファイルへフラッシュされること。
+    /// 旧実装は Cancel が CompleteAdding より先だったため、GetConsumingEnumerable(token) が
+    /// キュー残量より先にキャンセルを検査して列挙を打ち切り、残りのログが無言で破棄されていた。
+    /// </summary>
+    [Fact]
+    public void Dispose_キューに積まれた未書き出しのログが全てファイルに書き込まれること()
+    {
+        // Arrange
+        var provider = CreateProvider(enabled: true);
+        const int messageCount = 500;
+
+        // Act: 書き込み完了を待たずに大量メッセージを積んで即Dispose
+        // （消費側は1件ごとにファイルを開閉するため、Dispose時点でキューに未書き出し分が残る）
+        for (int i = 0; i < messageCount; i++)
+        {
+            provider.WriteLog($"フラッシュ検証_{i:D4}");
+        }
+        provider.Dispose();
+
+        // Assert: 積んだ全メッセージがファイルに書かれ、ドロップ扱いにもなっていないこと
+        provider.DroppedLogCount.Should().Be(0, "キャパシティ未満の書き込みでドロップは発生しない");
+        var logFiles = Directory.GetFiles(_testLogDir, "ICCardManager_*.log");
+        logFiles.Should().NotBeEmpty();
+        var flushedLines = File.ReadAllLines(logFiles[0])
+            .Where(line => line.StartsWith("フラッシュ検証_"))
+            .ToArray();
+        flushedLines.Should().HaveCount(messageCount,
+            "Dispose は CompleteAdding → Wait の順でキューを排出してから終了すべき（Issue #1732）");
+    }
+
     #endregion
 
     #region ファイルローテーション テスト
