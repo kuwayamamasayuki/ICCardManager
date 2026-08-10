@@ -587,9 +587,10 @@ public partial class MainViewModel : ViewModelBase
             // （共有フォルダのSMB遅延で起動をブロックしないため）
             _ = CheckUpdateNotificationAsync();
 
-            // Issue #1689: バックアップ健全性チェック。起動時の自動バックアップは
-            // App.PerformStartupTasksAsync で並行実行中のため、判定材料は「前回までの記録」になる。
-            // 今回のバックアップが成功すれば次回起動時に警告は消える。
+            // Issue #1689: バックアップ健全性チェック。
+            // Issue #1737 で起動時タスクが直列 await になり、本メソッドが走る時点では
+            // 今回の自動バックアップは完了している（StartupTaskRunner の実行後に MainWindow を表示するため）。
+            // したがって判定材料には今回の成功記録が含まれ、成功していれば警告は出ない。
             _ = CheckBackupHealthAsync();
 
             // 共有モード時はDB接続の定期ヘルスチェックを開始

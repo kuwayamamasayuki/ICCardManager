@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Data.SQLite;
 using System.Linq;
 using System.Threading.Tasks;
 using System.IO;
@@ -81,18 +82,14 @@ namespace ICCardManager.Data.Repositories
         /// <inheritdoc/>
         public async Task<bool> SetAsync(string key, string value)
         {
-            using var lease = await _dbContext.LeaseConnectionAsync();
-            var connection = lease.Connection;
-
-            using var command = connection.CreateCommand();
-            command.CommandText = @"INSERT INTO settings (key, value) VALUES (@key, @value)
+            return await WriteGuardedAsync(command =>
+            {
+                command.CommandText = @"INSERT INTO settings (key, value) VALUES (@key, @value)
 ON CONFLICT(key) DO UPDATE SET value = @value";
 
-            command.Parameters.AddWithValue("@key", key);
-            command.Parameters.AddWithValue("@value", (object)value ?? DBNull.Value);
-
-            var result = await command.ExecuteNonQueryAsync();
-            return result > 0;
+                command.Parameters.AddWithValue("@key", key);
+                command.Parameters.AddWithValue("@value", (object)value ?? DBNull.Value);
+            }).ConfigureAwait(false);
         }
 
         /// <inheritdoc/>
@@ -104,25 +101,68 @@ ON CONFLICT(key) DO UPDATE SET value = @value";
             // - 行が存在しない初回: INSERT が走り rowsAffected=1（先勝ち成立）
             // - 既存値が前月/null: WHERE 真 → UPDATE 走り rowsAffected=1
             // - 既存値が当月: WHERE 偽 → 何もしない、rowsAffected=0
-            using var lease = await _dbContext.LeaseConnectionAsync();
-            var connection = lease.Connection;
-
-            using var command = connection.CreateCommand();
-            command.CommandText = @"INSERT INTO settings (key, value) VALUES (@key, @today)
+            var acquired = await WriteGuardedAsync(command =>
+            {
+                command.CommandText = @"INSERT INTO settings (key, value) VALUES (@key, @today)
 ON CONFLICT(key) DO UPDATE SET value = excluded.value
 WHERE settings.value IS NULL OR substr(settings.value, 1, 7) <> @currentMonth";
 
-            command.Parameters.AddWithValue("@key", KeyLastVacuumDate);
-            command.Parameters.AddWithValue("@today", today.ToString("yyyy-MM-dd"));
-            command.Parameters.AddWithValue("@currentMonth", today.ToString("yyyy-MM"));
+                command.Parameters.AddWithValue("@key", KeyLastVacuumDate);
+                command.Parameters.AddWithValue("@today", today.ToString("yyyy-MM-dd"));
+                command.Parameters.AddWithValue("@currentMonth", today.ToString("yyyy-MM"));
+            }).ConfigureAwait(false);
 
-            var rowsAffected = await command.ExecuteNonQueryAsync();
-            if (rowsAffected > 0)
+            if (acquired)
             {
                 _cacheService.Invalidate(CacheKeys.AppSettings);
                 return true;
             }
             return false;
+        }
+
+        /// <summary>
+        /// settings への 1 文の書き込みを、単一接続のセマフォ保護下で実行する（Issue #1737）。
+        /// </summary>
+        /// <param name="configureCommand">CommandText とパラメータを設定するデリゲート</param>
+        /// <returns>影響行数が 1 以上なら true</returns>
+        /// <remarks>
+        /// <para>
+        /// <c>settings</c> は起動時の自動バックアップ（<c>last_backup_success_at</c>）や
+        /// 月次 VACUUM の CAS ロックなど、**UI 操作を伴わない保守処理**から書かれる。
+        /// <see cref="DbContext.LeaseConnectionAsync"/> はセマフォを取らないため、そのまま使うと
+        /// <c>CleanupOldData</c> が開いているトランザクションの内側に INSERT が潜り込み、
+        /// cleanup のロールバックで書き込みが道連れで消える。VACUUM 実行中なら
+        /// "cannot VACUUM - SQL statements in progress" になる。
+        /// </para>
+        /// <para>
+        /// 分岐は <c>.claude/rules/development-conventions.md</c> の規約に従う:
+        /// 外側スコープが既にある場合は接続だけを借りて暗黙参加する（②）。
+        /// <see cref="DbContext.BeginTransactionAsync"/> は <c>SemaphoreSlim(1,1)</c> を取るため、
+        /// 入れ子で開くと自己デッドロックする（Issue #1575）。
+        /// <see cref="SaveAppSettingsAsync"/> は実際に外側スコープの内側から本メソッドを繰り返し呼ぶ。
+        /// </para>
+        /// </remarks>
+        private async Task<bool> WriteGuardedAsync(Action<SQLiteCommand> configureCommand)
+        {
+            // ② 外側に BeginTransactionAsync のスコープがある場合は、そのトランザクションへ暗黙参加する
+            //    （セマフォは外側が保持済み。commit/rollback も外側の責務）
+            if (_dbContext.HasActiveTransactionScope)
+            {
+                using var lease = await _dbContext.LeaseConnectionAsync().ConfigureAwait(false);
+                using var joinedCommand = lease.Connection.CreateCommand();
+                configureCommand(joinedCommand);
+                return await joinedCommand.ExecuteNonQueryAsync().ConfigureAwait(false) > 0;
+            }
+
+            // ③ 外側スコープが無い場合は自前でトランザクションを持つ（＝セマフォを取る）
+            using var scope = await _dbContext.BeginTransactionAsync().ConfigureAwait(false);
+            using var command = scope.Lease.Connection.CreateCommand();
+            command.Transaction = scope.Transaction;
+            configureCommand(command);
+
+            var rowsAffected = await command.ExecuteNonQueryAsync().ConfigureAwait(false);
+            scope.Commit();
+            return rowsAffected > 0;
         }
 
         /// <inheritdoc/>

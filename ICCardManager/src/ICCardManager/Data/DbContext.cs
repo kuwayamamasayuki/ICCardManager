@@ -1118,7 +1118,11 @@ ON CONFLICT(key) DO UPDATE SET value = excluded.value";
         /// <see cref="LeaseConnection"/> ガードで例外にならないよう、<see cref="Task.Run{TResult}(Func{TResult})"/>
         /// でバックグラウンドスレッドに確実にオフロードする。
         /// </summary>
-        public Task<(int LedgerCount, int OperationLogCount)> CleanupOldDataAsync(CancellationToken cancellationToken = default)
+        /// <remarks>
+        /// Issue #1737: 起動時タスクの実行順・直列性を <see cref="Services.StartupTaskRunner"/> の
+        /// 単体テストで固定するため virtual（テストダブルで差し替える）。
+        /// </remarks>
+        public virtual Task<(int LedgerCount, int OperationLogCount)> CleanupOldDataAsync(CancellationToken cancellationToken = default)
             => Task.Run(CleanupOldData, cancellationToken);
 
         /// <summary>
@@ -1157,8 +1161,19 @@ ON CONFLICT(key) DO UPDATE SET value = excluded.value";
         /// VACUUMを実行してデータベースを最適化
         /// </summary>
         /// <remarks>
+        /// <para>
         /// 共有モードでは他PCが接続中の場合、排他ロックを取得できず失敗する可能性がある。
         /// その場合はfalseを返し、次回起動時にリトライする。
+        /// </para>
+        /// <para>
+        /// <b>Issue #1737:</b> SQLite 由来の失敗は理由を問わず false（当月スキップ）に畳む。
+        /// 呼び出し元（<see cref="Services.StartupTaskRunner"/>）は先勝ち CAS ロック（Issue #1482）を
+        /// <b>消費してから</b>ここへ来るため、例外を投げ返してもロックは戻らず当月は誰も再試行しない。
+        /// それでいて呼び出し元のログには VACUUM が原因だと分からない形でしか痕跡が残らなかった。
+        /// Busy / Locked のみを対象にしていると、同一接続に未完了のステートメントがある場合の
+        /// "cannot VACUUM - SQL statements in progress"（<see cref="SQLiteErrorCode.Error"/>）や
+        /// 書き込み不可・容量不足が素通りする。
+        /// </para>
         /// </remarks>
         /// <returns>VACUUMが成功した場合true</returns>
         public bool Vacuum()
@@ -1171,10 +1186,16 @@ ON CONFLICT(key) DO UPDATE SET value = excluded.value";
                 command.ExecuteNonQuery();
                 return true;
             }
-            catch (SQLiteException ex) when (ex.ResultCode == SQLiteErrorCode.Busy || ex.ResultCode == SQLiteErrorCode.Locked)
+            catch (SQLiteException ex)
             {
+                // Issue #1716 / #1730: 障害調査で「なぜ VACUUM が飛ばされたか」を追えるよう、
+                // 本番のログファイルへ出力される Warning で記録する（LogDebug は Release で出力されない）。
+                // 原因候補を 1 つに絞れるのは ResultCode だけなので必ず載せる。
+                // 失敗の理由はモードによって異なる（共有モード=他PCの接続、ローカルモード=自プロセス内の
+                // 別処理）ため、ここでは原因を断定せず ResultCode の提示に留める。
+                _logger?.LogWarning(ex, "VACUUM をスキップしました（ResultCode={ResultCode}）", ex.ResultCode);
 #if DEBUG
-                System.Diagnostics.Debug.WriteLine($"[DbContext] VACUUM失敗（他の接続がアクティブ）: {ex.Message}");
+                System.Diagnostics.Debug.WriteLine($"[DbContext] VACUUM失敗（ResultCode={ex.ResultCode}）: {ex.Message}");
 #endif
                 return false;
             }
@@ -1185,7 +1206,11 @@ ON CONFLICT(key) DO UPDATE SET value = excluded.value";
         /// <see cref="LeaseConnection"/> ガードで例外にならないよう、<see cref="Task.Run{TResult}(Func{TResult})"/>
         /// でバックグラウンドスレッドに確実にオフロードする。
         /// </summary>
-        public Task<bool> VacuumAsync(CancellationToken cancellationToken = default)
+        /// <remarks>
+        /// Issue #1737: 起動時タスクの実行順・直列性を <see cref="Services.StartupTaskRunner"/> の
+        /// 単体テストで固定するため virtual（テストダブルで差し替える）。
+        /// </remarks>
+        public virtual Task<bool> VacuumAsync(CancellationToken cancellationToken = default)
             => Task.Run(Vacuum, cancellationToken);
 
         /// <summary>
