@@ -385,6 +385,9 @@ namespace ICCardManager.Services
             }
             catch (Exception ex)
             {
+                // Issue #1734: トースト通知は数秒で消えるため、失敗の事実と原因（例外種別・スタックトレース）を
+                // 本番ログへ必ず残す。LogDebug では既定の Logging:LogLevel=Information によりファイル出力されない
+                _logger.LogError(ex, "貸出処理に失敗しました（CardIdm={CardIdm}）", IdmMasker.Mask(cardIdm));
                 // Issue #1110: SQLiteエラーをユーザー向けメッセージに変換
                 result.ErrorMessage = GetUserFriendlyErrorMessage(ex, "貸出");
             }
@@ -757,6 +760,9 @@ namespace ICCardManager.Services
             }
             catch (Exception ex)
             {
+                // Issue #1734: トースト通知は数秒で消えるため、失敗の事実と原因（例外種別・スタックトレース）を
+                // 本番ログへ必ず残す。LogDebug では既定の Logging:LogLevel=Information によりファイル出力されない
+                _logger.LogError(ex, "返却処理に失敗しました（CardIdm={CardIdm}）", IdmMasker.Mask(cardIdm));
                 // Issue #1110: SQLiteエラーをユーザー向けメッセージに変換
                 result.ErrorMessage = GetUserFriendlyErrorMessage(ex, "返却");
             }

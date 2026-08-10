@@ -1,6 +1,7 @@
 using FluentAssertions;
 using ICCardManager.Data;
 using ICCardManager.Data.Repositories;
+using ICCardManager.Infrastructure.Security;
 using ICCardManager.Models;
 using ICCardManager.Services;
 using ICCardManager.ViewModels;
@@ -4591,6 +4592,186 @@ public class LendingServiceTests : IDisposable
         result.Balance.Should().Be(800);
         result.IsLowBalance.Should().BeTrue("800 < 3000");
         result.WarningBalance.Should().Be(3000, "しきい値が結果に含まれる");
+    }
+
+    #endregion
+
+    #region 例外時のログ記録テスト（Issue #1734）
+
+    /// <summary>
+    /// ロガーを差し替えた LendingService を生成する（Issue #1734 の例外ログ検証用）。
+    /// クラス共有の _service は NullLogger のためログ呼び出しを観測できない。
+    /// </summary>
+    private LendingService CreateServiceWithLogger(ILogger<LendingService> logger)
+    {
+        return new LendingService(
+            _dbContext,
+            _cardRepositoryMock.Object,
+            _staffRepositoryMock.Object,
+            _ledgerRepositoryMock.Object,
+            _settingsRepositoryMock.Object,
+            _summaryGenerator,
+            _lockManager,
+            Options.Create(new AppOptions()),
+            logger);
+    }
+
+    /// <summary>
+    /// 貸出処理の例外が LogError で本番ログに残ることを確認（Issue #1734）。
+    /// トーストは数秒で消えるため、ログに痕跡が無いと「返却したのに貸出中のまま」等の
+    /// 申告に対して原因（例外種別・スタックトレース）を調査できない。
+    /// レベルだけでなく、調査を先に進める値（操作種別・マスク済み IDm・例外本体）が
+    /// 載っていることまで検証する（Issue #1730 の方針）。
+    /// </summary>
+    [Fact]
+    public async Task LendAsync_ExceptionThrown_LogsErrorWithMaskedIdm()
+    {
+        // Arrange
+        var loggerMock = new Mock<ILogger<LendingService>>();
+        var service = CreateServiceWithLogger(loggerMock.Object);
+
+        var card = CreateTestCard(isLent: false);
+        var staff = CreateTestStaff();
+        _cardRepositoryMock.Setup(x => x.GetByIdmAsync(TestCardIdm, false))
+            .ReturnsAsync(card);
+        _staffRepositoryMock.Setup(x => x.GetByIdmAsync(TestStaffIdm, false))
+            .ReturnsAsync(staff);
+
+        // 書込み経路（scope.Rollback → 再スロー → LendAsync の catch）で失敗させる。
+        // InvalidOperationException は ExecuteWithRetryAsync のリトライ対象外のため待機なしで1回で確定する
+        var thrown = new InvalidOperationException("書込み失敗のシミュレーション");
+        _ledgerRepositoryMock.Setup(x => x.InsertAsync(It.IsAny<Ledger>()))
+            .ThrowsAsync(thrown);
+
+        // Act
+        var result = await service.LendAsync(TestStaffIdm, TestCardIdm, balance: 1000);
+
+        // Assert
+        result.Success.Should().BeFalse();
+        result.ErrorMessage.Should().NotBeNullOrEmpty("トースト向けのユーザー文言（Issue #1110）は維持される");
+
+        var masked = IdmMasker.Mask(TestCardIdm);
+        loggerMock.Verify(
+            x => x.Log(
+                LogLevel.Error,
+                It.IsAny<EventId>(),
+                It.Is<It.IsAnyType>((v, t) =>
+                    v.ToString().Contains("貸出") &&
+                    v.ToString().Contains(masked) &&
+                    !v.ToString().Contains(TestCardIdm)),
+                It.Is<Exception>(e => ReferenceEquals(e, thrown)),
+                It.IsAny<Func<It.IsAnyType, Exception, string>>()),
+            Times.Once,
+            "Issue #1734: 操作種別とマスク済み IDm（生 IDm は禁止）を載せ、例外本体を渡してスタックトレースを残す");
+    }
+
+    /// <summary>
+    /// 返却処理の例外が LogError で本番ログに残ることを確認（Issue #1734）。
+    /// 検証観点は <see cref="LendAsync_ExceptionThrown_LogsErrorWithMaskedIdm"/> と同じ。
+    /// </summary>
+    [Fact]
+    public async Task ReturnAsync_ExceptionThrown_LogsErrorWithMaskedIdm()
+    {
+        // Arrange
+        var loggerMock = new Mock<ILogger<LendingService>>();
+        var service = CreateServiceWithLogger(loggerMock.Object);
+
+        var card = CreateTestCard(isLent: true);
+        var staff = CreateTestStaff();
+        var lentRecord = CreateTestLentRecord();
+        SetupReturnMocks(card, staff, lentRecord);
+
+        var thrown = new InvalidOperationException("書込み失敗のシミュレーション");
+        _ledgerRepositoryMock.Setup(x => x.DeleteAllLentRecordsAsync(TestCardIdm))
+            .ThrowsAsync(thrown);
+
+        // Act
+        var result = await service.ReturnAsync(TestStaffIdm, TestCardIdm, new List<LedgerDetail>());
+
+        // Assert
+        result.Success.Should().BeFalse();
+        result.ErrorMessage.Should().NotBeNullOrEmpty("トースト向けのユーザー文言（Issue #1110）は維持される");
+
+        var masked = IdmMasker.Mask(TestCardIdm);
+        loggerMock.Verify(
+            x => x.Log(
+                LogLevel.Error,
+                It.IsAny<EventId>(),
+                It.Is<It.IsAnyType>((v, t) =>
+                    v.ToString().Contains("返却") &&
+                    v.ToString().Contains(masked) &&
+                    !v.ToString().Contains(TestCardIdm)),
+                It.Is<Exception>(e => ReferenceEquals(e, thrown)),
+                It.IsAny<Func<It.IsAnyType, Exception, string>>()),
+            Times.Once,
+            "Issue #1734: 操作種別とマスク済み IDm（生 IDm は禁止）を載せ、例外本体を渡してスタックトレースを残す");
+    }
+
+    /// <summary>
+    /// 貸出成功時には LogError を出さないことを確認（Issue #1734）。
+    /// 「常にログを出す」実装へ緩んでもテストが通ってしまうのを防ぐ（Issue #1730 の方針）。
+    /// </summary>
+    [Fact]
+    public async Task LendAsync_Success_DoesNotLogError()
+    {
+        // Arrange
+        var loggerMock = new Mock<ILogger<LendingService>>();
+        var service = CreateServiceWithLogger(loggerMock.Object);
+
+        var card = CreateTestCard(isLent: false);
+        var staff = CreateTestStaff();
+        _cardRepositoryMock.Setup(x => x.GetByIdmAsync(TestCardIdm, false))
+            .ReturnsAsync(card);
+        _staffRepositoryMock.Setup(x => x.GetByIdmAsync(TestStaffIdm, false))
+            .ReturnsAsync(staff);
+        _ledgerRepositoryMock.Setup(x => x.InsertAsync(It.IsAny<Ledger>()))
+            .ReturnsAsync(1);
+
+        // Act
+        var result = await service.LendAsync(TestStaffIdm, TestCardIdm, balance: 1000);
+
+        // Assert
+        result.Success.Should().BeTrue();
+        loggerMock.Verify(
+            x => x.Log(
+                LogLevel.Error,
+                It.IsAny<EventId>(),
+                It.Is<It.IsAnyType>((v, t) => true),
+                It.IsAny<Exception>(),
+                It.IsAny<Func<It.IsAnyType, Exception, string>>()),
+            Times.Never,
+            "成功時にまで Error が出ると本物の障害が埋もれる");
+    }
+
+    /// <summary>
+    /// 返却成功時には LogError を出さないことを確認（Issue #1734）。
+    /// </summary>
+    [Fact]
+    public async Task ReturnAsync_Success_DoesNotLogError()
+    {
+        // Arrange
+        var loggerMock = new Mock<ILogger<LendingService>>();
+        var service = CreateServiceWithLogger(loggerMock.Object);
+
+        var card = CreateTestCard(isLent: true);
+        var staff = CreateTestStaff();
+        var lentRecord = CreateTestLentRecord();
+        SetupReturnMocks(card, staff, lentRecord);
+
+        // Act
+        var result = await service.ReturnAsync(TestStaffIdm, TestCardIdm, new List<LedgerDetail>());
+
+        // Assert
+        result.Success.Should().BeTrue();
+        loggerMock.Verify(
+            x => x.Log(
+                LogLevel.Error,
+                It.IsAny<EventId>(),
+                It.Is<It.IsAnyType>((v, t) => true),
+                It.IsAny<Exception>(),
+                It.IsAny<Func<It.IsAnyType, Exception, string>>()),
+            Times.Never,
+            "成功時にまで Error が出ると本物の障害が埋もれる");
     }
 
     #endregion
