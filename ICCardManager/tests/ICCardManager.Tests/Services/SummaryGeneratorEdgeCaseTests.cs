@@ -379,6 +379,305 @@ public class SummaryGeneratorEdgeCaseTests : IDisposable
 
     #endregion
 
+    #region 片側駅名欠落のプレースホルダ補完 (Issue #1735)
+
+    /// <summary>
+    /// 降車駅だけ駅名が解決できなかった鉄道明細が、摘要から落ちずに
+    /// プレースホルダ「?」で補完されて出力されることを検証。
+    /// StationCode.csv 未収録の新駅で降車した場合に発生する形状
+    /// （FelicaHistoryBlockDecoder は片側解決時 IsBus=false・欠落側 null を返す）。
+    /// </summary>
+    [Fact]
+    public void Generate_ExitStationUnresolved_UsesPlaceholderInsteadOfDroppingTrip()
+    {
+        var details = new List<LedgerDetail>
+        {
+            new LedgerDetail
+            {
+                UseDate = new DateTime(2026, 8, 1),
+                EntryStation = "博多",
+                ExitStation = null,
+                Amount = 210,
+                Balance = 790
+            }
+        };
+
+        var result = _generator.Generate(details);
+
+        result.Should().Be("鉄道（博多～?）");
+    }
+
+    /// <summary>
+    /// 乗車駅だけ駅名が解決できなかった鉄道明細も同様に補完されることを検証。
+    /// </summary>
+    [Fact]
+    public void Generate_EntryStationUnresolved_UsesPlaceholderInsteadOfDroppingTrip()
+    {
+        var details = new List<LedgerDetail>
+        {
+            new LedgerDetail
+            {
+                UseDate = new DateTime(2026, 8, 1),
+                EntryStation = null,
+                ExitStation = "天神",
+                Amount = 210,
+                Balance = 790
+            }
+        };
+
+        var result = _generator.Generate(details);
+
+        result.Should().Be("鉄道（?～天神）");
+    }
+
+    /// <summary>
+    /// 複数区間のうち1件だけ片側欠落の場合、その区間が黙って欠落せず
+    /// 「?」付きで併記されることを検証（Issue #1735 の故障シナリオ後半）。
+    /// 入力は履歴と同じ新しい順（Generate 内部で時系列順に反転される）。
+    /// </summary>
+    [Fact]
+    public void Generate_OneSidedTripMixedWithFullTrip_BothAppearInSummary()
+    {
+        var details = new List<LedgerDetail>
+        {
+            // 新しい方: 降車駅が未解決
+            new LedgerDetail
+            {
+                UseDate = new DateTime(2026, 8, 1),
+                EntryStation = "香椎",
+                ExitStation = null,
+                Amount = 260,
+                Balance = 580
+            },
+            // 古い方: 両駅とも解決済み
+            new LedgerDetail
+            {
+                UseDate = new DateTime(2026, 8, 1),
+                EntryStation = "博多",
+                ExitStation = "天神",
+                Amount = 210,
+                Balance = 790
+            }
+        };
+
+        var result = _generator.Generate(details);
+
+        result.Should().Be("鉄道（博多～天神、香椎～?）");
+    }
+
+    /// <summary>
+    /// 未解決駅（同一の新駅）への往復が往復として検出されることを検証。
+    /// 博多→X（未収録駅）、X→博多 の移動は「博多～? 往復」になる。
+    /// </summary>
+    [Fact]
+    public void Generate_RoundTripToUnresolvedStation_DetectedAsRoundTrip()
+    {
+        var details = new List<LedgerDetail>
+        {
+            // 新しい方: 復路（乗車駅が未解決）
+            new LedgerDetail
+            {
+                UseDate = new DateTime(2026, 8, 1),
+                EntryStation = null,
+                ExitStation = "博多",
+                Amount = 210,
+                Balance = 580
+            },
+            // 古い方: 往路（降車駅が未解決）
+            new LedgerDetail
+            {
+                UseDate = new DateTime(2026, 8, 1),
+                EntryStation = "博多",
+                ExitStation = null,
+                Amount = 210,
+                Balance = 790
+            }
+        };
+
+        var result = _generator.Generate(details);
+
+        result.Should().Be("鉄道（博多～? 往復）");
+    }
+
+    /// <summary>
+    /// 連続する2区間の接続点が両方とも未解決の場合、プレースホルダ同士が
+    /// 一致して乗継統合されることを検証（同一の未収録駅を経由した継続移動とみなす）。
+    /// </summary>
+    [Fact]
+    public void Generate_ConsecutiveTripsJoinedAtUnresolvedStation_ConsolidatedAsTransfer()
+    {
+        var details = new List<LedgerDetail>
+        {
+            // 新しい方: 乗車駅が未解決
+            new LedgerDetail
+            {
+                UseDate = new DateTime(2026, 8, 1),
+                EntryStation = null,
+                ExitStation = "天神",
+                Amount = 260,
+                Balance = 580
+            },
+            // 古い方: 降車駅が未解決
+            new LedgerDetail
+            {
+                UseDate = new DateTime(2026, 8, 1),
+                EntryStation = "博多",
+                ExitStation = null,
+                Amount = 210,
+                Balance = 790
+            }
+        };
+
+        var result = _generator.Generate(details);
+
+        result.Should().Be("鉄道（博多～天神）");
+    }
+
+    /// <summary>
+    /// GroupId が設定された片側欠落明細も摘要から落ちないことを検証
+    /// （履歴編集画面でグループ化された場合の経路）。
+    /// </summary>
+    [Fact]
+    public void Generate_GroupedOneSidedTrip_UsesPlaceholderInsteadOfDroppingTrip()
+    {
+        var details = new List<LedgerDetail>
+        {
+            new LedgerDetail
+            {
+                UseDate = new DateTime(2026, 8, 1),
+                GroupId = 1,
+                EntryStation = "博多",
+                ExitStation = null,
+                Amount = 210,
+                Balance = 790
+            }
+        };
+
+        var result = _generator.Generate(details);
+
+        result.Should().Be("鉄道（博多～?）");
+    }
+
+    /// <summary>
+    /// 運賃 0 円の片側欠落明細（入場記録のみ＝未完了移動）は従来どおり
+    /// 摘要に採用されないことを検証。プレースホルダ補完は「運賃が発生した完了移動」に
+    /// 限定される（SummaryGeneratorComprehensiveTests TC019 の仕様を維持する境界）。
+    /// </summary>
+    [Fact]
+    public void Generate_OneSidedTripWithZeroAmount_ExcludedFromSummary()
+    {
+        var details = new List<LedgerDetail>
+        {
+            // 新しい方: 入場記録のみ（運賃 0 円）
+            new LedgerDetail
+            {
+                UseDate = new DateTime(2026, 8, 1),
+                EntryStation = "天神",
+                ExitStation = null,
+                Amount = 0,
+                Balance = 790
+            },
+            // 古い方: 通常の完了移動
+            new LedgerDetail
+            {
+                UseDate = new DateTime(2026, 8, 1),
+                EntryStation = "博多",
+                ExitStation = "天神",
+                Amount = 210,
+                Balance = 790
+            }
+        };
+
+        var result = _generator.Generate(details);
+
+        result.Should().Be("鉄道（博多～天神）");
+    }
+
+    /// <summary>
+    /// 両駅とも欠落した鉄道明細は従来どおり経路に採用されないことを検証
+    /// （有効な区間と混在する場合、有効な区間のみが出力される）。
+    /// </summary>
+    [Fact]
+    public void Generate_BothStationsEmptyMixedWithFullTrip_OnlyFullTripAppears()
+    {
+        var details = new List<LedgerDetail>
+        {
+            new LedgerDetail
+            {
+                UseDate = new DateTime(2026, 8, 1),
+                EntryStation = null,
+                ExitStation = null,
+                Amount = 260,
+                Balance = 580
+            },
+            new LedgerDetail
+            {
+                UseDate = new DateTime(2026, 8, 1),
+                EntryStation = "博多",
+                ExitStation = "天神",
+                Amount = 210,
+                Balance = 790
+            }
+        };
+
+        var result = _generator.Generate(details);
+
+        result.Should().Be("鉄道（博多～天神）");
+    }
+
+    /// <summary>
+    /// 両駅とも欠落した鉄道明細のみの場合、Generate は空文字を返すという契約を固定する。
+    /// この空文字を摘要が空欄の台帳行にしないのは LendingService 側の
+    /// 代替文言ガード（GetUnknownUsageSummary）の責務（LendingServiceTests で検証）。
+    /// </summary>
+    [Fact]
+    public void Generate_BothStationsEmptyOnly_ReturnsEmpty()
+    {
+        var details = new List<LedgerDetail>
+        {
+            new LedgerDetail
+            {
+                UseDate = new DateTime(2026, 8, 1),
+                EntryStation = null,
+                ExitStation = null,
+                Amount = 210,
+                Balance = 790
+            }
+        };
+
+        var result = _generator.Generate(details);
+
+        result.Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// 代替摘要の既定値を検証（摘要が空欄の台帳行を防ぐ安全網の文言）。
+    /// </summary>
+    [Fact]
+    public void GetUnknownUsageSummary_Default_ReturnsRailwayUnknownRoute()
+    {
+        SummaryGenerator.GetUnknownUsageSummary().Should().Be("鉄道（区間不明）");
+    }
+
+    /// <summary>
+    /// 代替摘要が SummaryTextOptions でカスタマイズ可能なことを検証。
+    /// </summary>
+    [Fact]
+    public void GetUnknownUsageSummary_Configured_ReturnsCustomText()
+    {
+        SummaryGenerator.Configure(new OrganizationOptions
+        {
+            SummaryText = new SummaryTextOptions
+            {
+                UnknownUsageSummary = "電車（経路不明）"
+            }
+        });
+
+        SummaryGenerator.GetUnknownUsageSummary().Should().Be("電車（経路不明）");
+    }
+
+    #endregion
+
     // 注: GetMidYearCarryoverSummary / IsMidYearCarryoverSummary の静的メソッドテストは
     // SummaryGeneratorTests.cs でカバー済みのためこのファイルからは削除
 }

@@ -63,6 +63,11 @@ namespace ICCardManager.Services
     /// <description>鉄道（A駅～B駅、C駅～D駅）</description>
     /// </item>
     /// <item>
+    /// <term>片側駅名不明</term>
+    /// <description>鉄道（A駅～?）※駅名を解決できなかった側は「?」。
+    /// ただし運賃 0 円の片側欠落（入場記録のみ）は従来どおり出力しない（Issue #1735）</description>
+    /// </item>
+    /// <item>
     /// <term>バス混在</term>
     /// <description>鉄道（A駅～B駅）、バス（★）</description>
     /// </item>
@@ -85,6 +90,16 @@ namespace ICCardManager.Services
     /// </remarks>
     public class SummaryGenerator
     {
+        /// <summary>
+        /// 駅名を解決できなかった側に充てるプレースホルダ（Issue #1735）
+        /// </summary>
+        /// <remarks>
+        /// StationCode.csv 未収録の新駅などで片側の駅名だけが解決できなかった鉄道明細を、
+        /// 摘要から黙って落とさず「A駅～?」の形で経路に採用するために使う。
+        /// CSVインポートの明細説明文（CsvImportService.Detail.cs）と同じ表記。
+        /// </remarks>
+        internal const string UnknownStationPlaceholder = "?";
+
         private readonly DepartmentType _departmentType;
 
         /// <summary>
@@ -545,13 +560,14 @@ namespace ICCardManager.Services
 
             // GroupIdでグループ化（NULLは個別のグループとして扱う）
             // まず、GroupIdがある経路とない経路を分離
+            // Issue #1735: 運賃が発生した片側欠落明細も摘要から落とさない（欠落側はプレースホルダで補完）
             var groupedTrips = sortedTrips
-                .Where(t => t.GroupId.HasValue && !string.IsNullOrEmpty(t.EntryStation) && !string.IsNullOrEmpty(t.ExitStation))
+                .Where(t => t.GroupId.HasValue && IsSummarizableTrip(t))
                 .GroupBy(t => t.GroupId!.Value)
                 .OrderBy(g => g.Min(t => t.UseDate ?? DateTime.MaxValue));
 
             var ungroupedTrips = sortedTrips
-                .Where(t => !t.GroupId.HasValue && !string.IsNullOrEmpty(t.EntryStation) && !string.IsNullOrEmpty(t.ExitStation))
+                .Where(t => !t.GroupId.HasValue && IsSummarizableTrip(t))
                 .ToList();
 
             // グループ化された経路を処理
@@ -560,7 +576,8 @@ namespace ICCardManager.Services
                 var groupTrips = SortChronologically(group.ToList());
                 if (groupTrips.Count == 1)
                 {
-                    result.Add($"{groupTrips[0].EntryStation}～{groupTrips[0].ExitStation}");
+                    var route = ToRoute(groupTrips[0]);
+                    result.Add($"{route.Entry}～{route.Exit}");
                 }
                 else
                 {
@@ -592,13 +609,56 @@ namespace ICCardManager.Services
         /// </summary>
         private string GenerateRailwaySummaryAutomatic(List<LedgerDetail> sortedTrips)
         {
+            // Issue #1735: 片側だけ駅名が解決できた明細（StationCode.csv 未収録の新駅等）を
+            // 摘要から黙って落とさず、欠落側をプレースホルダで埋めて経路に採用する。
+            // 両側とも駅名が無い明細は従来どおり除外する（その結果摘要が空になるケースは
+            // LendingService 側の代替文言ガードが受け止める）
             var routes = sortedTrips
-                .Where(t => !string.IsNullOrEmpty(t.EntryStation) && !string.IsNullOrEmpty(t.ExitStation))
-                .Select(t => (Entry: t.EntryStation!, Exit: t.ExitStation!))
+                .Where(IsSummarizableTrip)
+                .Select(ToRoute)
                 .ToList();
 
             return BuildRouteSummary(routes);
         }
+
+        /// <summary>
+        /// 明細を摘要の経路として採用できるか（Issue #1735）
+        /// </summary>
+        /// <remarks>
+        /// <list type="bullet">
+        /// <item><description>両側とも駅名あり → 採用（従来どおり。同一駅乗降の 0 円移動も含む）</description></item>
+        /// <item><description>両側とも駅名なし → 除外（従来どおり。経路として表現できない）</description></item>
+        /// <item><description>片側のみ駅名あり → 運賃が発生した完了移動のみ採用。金額 0 の明細は
+        /// 「入場記録のみ」（未完了移動）とみなし従来どおり除外する。摘要は払出金額の説明であり、
+        /// 払出のない未完了記録を載せない仕様（SummaryGeneratorComprehensiveTests TC019）を維持する。
+        /// 金額 null は情報不足のため、区間の黙示的欠落を防ぐ側（採用）に倒す</description></item>
+        /// </list>
+        /// </remarks>
+        private static bool IsSummarizableTrip(LedgerDetail trip)
+        {
+            var hasEntry = !string.IsNullOrEmpty(trip.EntryStation);
+            var hasExit = !string.IsNullOrEmpty(trip.ExitStation);
+
+            if (hasEntry && hasExit)
+            {
+                return true;
+            }
+            if (!hasEntry && !hasExit)
+            {
+                return false;
+            }
+
+            // 片側欠落: 運賃が発生していれば採用（int? の lifted 比較により Amount=null も採用側）
+            return trip.Amount != 0;
+        }
+
+        /// <summary>
+        /// 明細を経路タプルへ変換する。駅名を解決できなかった側は
+        /// <see cref="UnknownStationPlaceholder"/> で埋める（Issue #1735）
+        /// </summary>
+        private static (string Entry, string Exit) ToRoute(LedgerDetail trip) => (
+            Entry: string.IsNullOrEmpty(trip.EntryStation) ? UnknownStationPlaceholder : trip.EntryStation!,
+            Exit: string.IsNullOrEmpty(trip.ExitStation) ? UnknownStationPlaceholder : trip.ExitStation!);
 
         /// <summary>
         /// 往復を検出
@@ -998,6 +1058,23 @@ namespace ICCardManager.Services
         public static string GetRefundSummary()
         {
             return _options.SummaryText.RefundSummary;
+        }
+
+        /// <summary>
+        /// 区間を特定できない利用の代替摘要を生成（Issue #1735）
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// 利用明細から摘要を生成できなかった（<see cref="Generate"/> が空文字を返した）場合に、
+        /// 摘要が空欄の台帳行を保存しないための代替文言。LendingService の Ledger 生成経路が使う。
+        /// 片側欠落は <see cref="UnknownStationPlaceholder"/> による補完で摘要に採用されるため、
+        /// 本文言が使われるのは乗車駅・降車駅の両方が欠落した鉄道明細のみ。
+        /// </para>
+        /// <para>交通系固有メソッド（駅名からの摘要組み立ての安全網。domain-boundaries.md 参照）。</para>
+        /// </remarks>
+        public static string GetUnknownUsageSummary()
+        {
+            return _options.SummaryText.UnknownUsageSummary;
         }
 
         /// <summary>

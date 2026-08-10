@@ -74,6 +74,15 @@ namespace ICCardManager.Services
         public string RefundSummary { get; set; } = "払戻しによる払出";
 
         /// <summary>
+        /// 区間を特定できない利用の代替摘要（Issue #1735）
+        /// </summary>
+        /// <remarks>
+        /// 乗車駅・降車駅の両方が欠落し摘要の自動生成が空文字になった利用レコードに充てる文言。
+        /// 摘要が空欄の台帳行を保存しないための安全網。
+        /// </remarks>
+        public string UnknownUsageSummary { get; set; } = "鉄道（区間不明）";
+
+        /// <summary>
         /// 貸出中の摘要
         /// </summary>
         public string LendingSummary { get; set; } = "（貸出中）";

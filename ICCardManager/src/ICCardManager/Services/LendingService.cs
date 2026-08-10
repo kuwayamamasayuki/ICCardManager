@@ -917,7 +917,12 @@ namespace ICCardManager.Services
                         expense, shortfall, totalFare, chargeAmount);
 
                     // マージしたLedgerを作成
+                    // Issue #1735: 駅名が解決できず摘要を生成できない場合も、摘要が空欄の台帳行を保存しない
                     var summary = _summaryGenerator.Generate(new List<LedgerDetail> { usage });
+                    if (string.IsNullOrEmpty(summary))
+                    {
+                        summary = SummaryGenerator.GetUnknownUsageSummary();
+                    }
                     var note = SummaryGenerator.GetInsufficientBalanceNote(totalFare, shortfall);
 
                     var mergedLedger = new Ledger
@@ -1132,7 +1137,11 @@ namespace ICCardManager.Services
                             }
 
                             // 5. 既存レコードを更新
-                            fullLedger.Summary = summary;
+                            // Issue #1735: 再生成した摘要が空なら既存の摘要を維持する（CsvImportService.Detail と
+                            // 同じガード）。既存も空なら代替文言で補い、摘要が空欄の台帳行を残さない
+                            fullLedger.Summary = !string.IsNullOrEmpty(summary) ? summary
+                                : !string.IsNullOrEmpty(fullLedger.Summary) ? fullLedger.Summary
+                                : SummaryGenerator.GetUnknownUsageSummary();
                             fullLedger.Expense = expense;
                             fullLedger.Balance = balance;
                             // Issue #1303: 既存レコードの利用者情報が欠落していれば現在のタッチ者で補完
@@ -1187,6 +1196,11 @@ namespace ICCardManager.Services
                             }
 
                             var summary = _summaryGenerator.Generate(usageDetails);
+                            // Issue #1735: 駅名が解決できず摘要を生成できない場合も、摘要が空欄の台帳行を保存しない
+                            if (string.IsNullOrEmpty(summary))
+                            {
+                                summary = SummaryGenerator.GetUnknownUsageSummary();
+                            }
 
                             var usageLedger = new Ledger
                             {
