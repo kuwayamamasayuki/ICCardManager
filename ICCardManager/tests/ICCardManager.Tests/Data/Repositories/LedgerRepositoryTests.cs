@@ -1673,12 +1673,17 @@ public class LedgerRepositoryTests : IDisposable
     }
 
     /// <summary>
-    /// 同一日付のレコードが複数ある場合、ID降順で最新のものが返されることを確認
+    /// 同一日付のレコードが複数ある場合、残高チェーン順の最終レコードの残高が返されることを確認
     /// </summary>
+    /// <remarks>
+    /// Issue #1731 で契約を「ID降順」から「残高チェーン順の最終」へ変更した。
+    /// 本フィクスチャは id 順＝時系列順のため ID 大の行とも一致する。id 順が時系列と
+    /// 逆転するケースは <c>GetAllLatestBalancesAsync_SameDayIdOrderReversed_ReturnsChainFinalBalance</c> が固定する。
+    /// </remarks>
     [Fact]
-    public async Task GetAllLatestBalancesAsync_SameDateMultipleRecords_ReturnsHighestId()
+    public async Task GetAllLatestBalancesAsync_SameDateMultipleRecords_ReturnsChainFinalBalance()
     {
-        // Arrange - 同日に2件登録（チャージと利用）
+        // Arrange - 同日に2件登録（チャージ(→13000) → 利用(→12740) の順で残高チェーンが連なる）
         var ledger1 = CreateTestLedger(TestCardIdm, new DateTime(2026, 3, 15), "チャージ", income: 3000);
         ledger1.Balance = 13000;
         await _repository.InsertAsync(ledger1);
@@ -1690,10 +1695,10 @@ public class LedgerRepositoryTests : IDisposable
         // Act
         var result = await _repository.GetAllLatestBalancesAsync();
 
-        // Assert - 同日ならIDが大きい方（後にINSERTされた方）が返される
+        // Assert - 残高チェーン最終の利用行（12,740円）が返される
         result.Should().ContainKey(TestCardIdm);
         var (balance, _) = result[TestCardIdm];
-        balance.Should().Be(12740, "同日の場合はIDが大きいレコードの残高が返されるべき");
+        balance.Should().Be(12740, "同日の場合は残高チェーン順の最終レコードの残高が返されるべき");
     }
 
     /// <summary>
