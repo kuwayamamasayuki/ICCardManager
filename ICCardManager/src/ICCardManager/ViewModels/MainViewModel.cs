@@ -812,9 +812,10 @@ public partial class MainViewModel : ViewModelBase
     }
 
     /// <summary>
-    /// 警告チェック（従来版、必要に応じて使用）
+    /// 警告チェック（従来版、必要に応じて使用）。
+    /// internal: テストから直接呼び出して挙動を検証するため（Issue #1739）。
     /// </summary>
-    private async Task CheckWarningsAsync()
+    internal async Task CheckWarningsAsync()
     {
         var settings = await _settingsRepository.GetAppSettingsAsync();
         ApplyDataWarnings(settings.WarningBalance);
@@ -824,20 +825,23 @@ public partial class MainViewModel : ViewModelBase
     /// <summary>
     /// Issue #504: ダッシュボードデータからデータ系の警告を生成・適用（WarningServiceに委譲）
     /// </summary>
+    /// <remarks>
+    /// Issue #1739: 取り除くのは「本メソッドがこの直後に作り直す種別」だけに限る。
+    /// 以前は保持する種別を列挙して残りを <c>Clear()</c> していたが、その形は
+    /// WarningType を新設するたびに保持リストを更新する義務を生み、実際 Issue #1689 の
+    /// <see cref="WarningType.BackupStale"/> と <see cref="WarningType.BalanceInconsistency"/> が
+    /// 漏れて「起動直後の最初のカード操作で警告が消え、そのセッション中は復活しない」状態になっていた。
+    /// 保持側ではなくクリア側を列挙すれば、再生成手段を持たない新しい種別は既定で残る。
+    /// </remarks>
     private void ApplyDataWarnings(int warningBalance)
     {
-        // インフラ系の警告（接続断・カードリーダー・更新通知）は保持し、データ系の警告のみクリア
-        var infraWarnings = WarningMessages
-            .Where(w => w.Type == WarningType.DatabaseConnectionLost ||
-                        w.Type == WarningType.CardReaderConnection ||
-                        w.Type == WarningType.CardReaderError ||
-                        w.Type == WarningType.DatabaseJournalModeDegraded ||
-                        w.Type == WarningType.NewVersionAvailable)
+        // 直後に作り直す残額警告のみ取り除く（他種別はそれぞれのチェックメソッドが管理する）
+        var staleLowBalanceWarnings = WarningMessages
+            .Where(w => w.Type == WarningType.LowBalance)
             .ToList();
-        WarningMessages.Clear();
-        foreach (var warning in infraWarnings)
+        foreach (var warning in staleLowBalanceWarnings)
         {
-            WarningMessages.Add(warning);
+            WarningMessages.Remove(warning);
         }
 
         // WarningServiceに委譲して残額警告を生成
@@ -849,11 +853,23 @@ public partial class MainViewModel : ViewModelBase
     }
 
     /// <summary>
-    /// バス停名未入力チェック（WarningServiceに委譲）
+    /// バス停名未入力チェック（WarningServiceに委譲）。
+    /// internal: テストから直接呼び出して挙動を検証するため（Issue #1739）。
     /// </summary>
-    private async Task CheckIncompleteBusStopsAsync()
+    /// <remarks>
+    /// Issue #1739: 自分が出す種別を入れ替える形（既存を取り除いてから追加）にして、
+    /// <see cref="ApplyDataWarnings"/> の事前クリアに依存しない。起動時の本メソッドは
+    /// fire-and-forget で走るため、完了前にカード操作が入ると警告再チェックと並走して
+    /// 二重に追加され得た。<c>CheckBackupHealthAsync</c> と同じ形。
+    /// </remarks>
+    internal async Task CheckIncompleteBusStopsAsync()
     {
         var warning = await _warningService.CheckIncompleteBusStopsAsync();
+
+        var existing = WarningMessages.FirstOrDefault(w => w.Type == WarningType.IncompleteBusStop);
+        if (existing != null)
+            WarningMessages.Remove(existing);
+
         if (warning != null)
         {
             WarningMessages.Add(warning);
