@@ -929,24 +929,29 @@ public class DataExportImportViewModelTests : IDisposable
 
     // ImportAsync（「直接インポート(_R)」ボタン）は OpenFileDialog をコマンド内で生成するため
     // 単体テストから起動できない。Issue #1785 で結果処理を RunImportAsync へ共通化したことにより、
-    // この経路の設定（clearPreviewAfterImport: false）を直接検証できるようになった。
-    // 共通化前は ExecuteImportAsync 側にしかテストが無く、複製側は無検証だった。
+    // この経路を直接検証できるようになった。共通化前は ExecuteImportAsync 側にしかテストが無く、
+    // 複製側は無検証だった。
+    // Issue #1782 で clearPreviewAfterImport 引数を撤廃し、経路によらず取り込み確定時は
+    // プレビューを畳む挙動へ統一した。
 
     private const string DirectImportFileName = "staff_20260811.csv";
     private static readonly string DirectImportFilePath =
         System.IO.Path.Combine(ImportSourceDirectory, DirectImportFileName);
 
     /// <summary>
-    /// 直接インポートは成功してもプレビュー表示をクリアしないこと（Issue #1785 で挙動を保存）
+    /// 直接インポートは成功したら別ファイルのプレビュー表示もクリアすること（Issue #1782）
     /// </summary>
     /// <remarks>
-    /// プレビューは ExecuteImportAsync 経路の入力であり、直接インポートとは無関係。
-    /// 共通化にあたって一律クリアにすると、プレビュー確認中の職員の作業状態を勝手に捨てることになる。
+    /// Issue #1785 では「プレビューは ExecuteImportAsync 経路の入力であり直接インポートとは無関係」
+    /// として残す挙動を保存したが、無関係なのは<b>入力元</b>だけだった。プレビューの登録・スキップ件数は
+    /// 取り込み前の DB を基準に算出した値で、別ファイルの取り込みが確定した時点で古くなる。
+    /// 残すと「インポート実行」ボタン（<c>IsEnabled="{Binding HasPreview}"</c>）が別ファイルに対して
+    /// 有効なまま残り、押せば修正前のファイルを修正済みデータの上へ丸ごと取り込み直せてしまう。
     /// </remarks>
     [Fact]
-    public async Task RunImportAsync_直接インポート_成功してもプレビューをクリアしないこと()
+    public async Task RunImportAsync_直接インポート_成功したら別ファイルのプレビューもクリアすること()
     {
-        // Arrange: プレビューを表示したまま直接インポートを実行する状況
+        // Arrange: 別ファイルのプレビューを表示したまま直接インポートを実行する状況
         SetupValidPreview();
         _viewModel.ImportPreviewFile = ImportSourceFilePath;
         _importServiceMock
@@ -958,11 +963,12 @@ public class DataExportImportViewModelTests : IDisposable
             });
 
         // Act
-        await _viewModel.RunImportAsync(DirectImportFilePath, clearPreviewAfterImport: false);
+        await _viewModel.RunImportAsync(DirectImportFilePath);
 
         // Assert
-        _viewModel.HasPreview.Should().BeTrue("直接インポートはプレビューを入力としないため消してはならない");
-        _viewModel.ImportPreviewFile.Should().Be(ImportSourceFilePath);
+        _viewModel.HasPreview.Should().BeFalse(
+            "陳腐化したプレビューを残すと「インポート実行」ボタンが有効なまま残るため");
+        _viewModel.ImportPreviewFile.Should().BeEmpty();
         _viewModel.LastImportedFile.Should().Be(
             DirectImportFilePath,
             "取り込んだのはダイアログで選んだファイルであるため");
@@ -986,7 +992,7 @@ public class DataExportImportViewModelTests : IDisposable
             });
 
         // Act
-        await _viewModel.RunImportAsync(DirectImportFilePath, clearPreviewAfterImport: false);
+        await _viewModel.RunImportAsync(DirectImportFilePath);
 
         // Assert
         _importServiceMock.Verify(
@@ -1028,7 +1034,7 @@ public class DataExportImportViewModelTests : IDisposable
             });
 
         // Act
-        await _viewModel.RunImportAsync(DirectImportFilePath, clearPreviewAfterImport: false);
+        await _viewModel.RunImportAsync(DirectImportFilePath);
 
         // Assert
         _viewModel.ImportErrors.Should().ContainSingle()
@@ -1060,7 +1066,7 @@ public class DataExportImportViewModelTests : IDisposable
             });
 
         // Act
-        await _viewModel.RunImportAsync(DirectImportFilePath, clearPreviewAfterImport: false);
+        await _viewModel.RunImportAsync(DirectImportFilePath);
 
         // Assert
         _viewModel.IsStatusError.Should().BeTrue();
@@ -1082,7 +1088,7 @@ public class DataExportImportViewModelTests : IDisposable
     /// </summary>
     /// <remarks>
     /// Issue #1741 の是正は ExecuteImportAsync 側でのみテストされていた。
-    /// 共通化後は同じ経路を通ることを、複製側の設定（clearPreviewAfterImport: false）でも表明する。
+    /// 共通化後は同じ経路を通ることを、直接インポート側からの呼び出しでも表明する。
     /// </remarks>
     [Fact]
     public async Task RunImportAsync_直接インポート_監査ログ記録の失敗を取り込み失敗として通知しないこと()
@@ -1100,7 +1106,7 @@ public class DataExportImportViewModelTests : IDisposable
             });
 
         // Act
-        await viewModel.RunImportAsync(DirectImportFilePath, clearPreviewAfterImport: false);
+        await viewModel.RunImportAsync(DirectImportFilePath);
 
         // Assert
         viewModel.IsStatusError.Should().BeFalse();
@@ -1315,17 +1321,18 @@ public class DataExportImportViewModelTests : IDisposable
     }
 
     /// <summary>
-    /// 直接インポートは部分成功でもプレビューを破棄しないこと（Issue #1781）
+    /// 直接インポートは部分成功でもプレビューを破棄すること（Issue #1782）
     /// </summary>
     /// <remarks>
-    /// 直接インポートのインポート元はファイルダイアログの選択結果であり、
-    /// 画面に出ているプレビューとは無関係。破棄すると職員の作業状態を勝手に捨てることになる
-    /// （Issue #1785 で成功分岐について保存した性質を、部分成功分岐でも保つ）。
+    /// 破棄の判定は「成否」ではなく「書き込みが確定したか」で行う（Issue #1781）。
+    /// 部分成功でも登録済みの行は確定しているため、表示中のプレビューは古くなる。
+    /// Issue #1785 で成功分岐について保存した「残す」性質は、Issue #1782 で
+    /// 経路によらず破棄する方針へ改めた（本テストはその方針を部分成功分岐でも表明する）。
     /// </remarks>
     [Fact]
-    public async Task RunImportAsync_直接インポート_部分成功でもプレビューを破棄しないこと()
+    public async Task RunImportAsync_直接インポート_部分成功でもプレビューを破棄すること()
     {
-        // Arrange: プレビューを表示したまま直接インポートを実行する状況
+        // Arrange: 別ファイルのプレビューを表示したまま直接インポートを実行する状況
         SetupValidPreview();
         _viewModel.ImportPreviewFile = ImportSourceFilePath;
         _importServiceMock
@@ -1333,10 +1340,36 @@ public class DataExportImportViewModelTests : IDisposable
             .ReturnsAsync(CreatePartialSuccessResult(importedCount: 98, errorCount: 2));
 
         // Act
-        await _viewModel.RunImportAsync(DirectImportFilePath, clearPreviewAfterImport: false);
+        await _viewModel.RunImportAsync(DirectImportFilePath);
 
         // Assert
-        _viewModel.HasPreview.Should().BeTrue("直接インポートはプレビューを入力としないため消してはならない");
+        _viewModel.HasPreview.Should().BeFalse("98件の書き込みが確定した時点でプレビューは古くなるため");
+        _viewModel.ImportPreviewFile.Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// 直接インポートが1件も登録できなかった一部エラーでは、プレビューを破棄しないこと（Issue #1782）
+    /// </summary>
+    /// <remarks>
+    /// 破棄の条件は「書き込みが確定したか」であって「直接インポートを実行したか」ではない。
+    /// 経路を条件から外した（Issue #1782）ことで、確定していない場合まで破棄する実装へ
+    /// 倒れていないことを表明する。
+    /// </remarks>
+    [Fact]
+    public async Task RunImportAsync_直接インポート_1件も登録されなければプレビューを残すこと()
+    {
+        // Arrange
+        SetupValidPreview();
+        _viewModel.ImportPreviewFile = ImportSourceFilePath;
+        _importServiceMock
+            .Setup(s => s.ImportCardsAsync(It.IsAny<string>(), It.IsAny<bool>()))
+            .ReturnsAsync(CreatePartialSuccessResult(importedCount: 0, errorCount: 2));
+
+        // Act
+        await _viewModel.RunImportAsync(DirectImportFilePath);
+
+        // Assert
+        _viewModel.HasPreview.Should().BeTrue("1件も確定していないためプレビューは古くなっていない");
         _viewModel.ImportPreviewFile.Should().Be(ImportSourceFilePath);
     }
 
@@ -1368,6 +1401,163 @@ public class DataExportImportViewModelTests : IDisposable
             SkippedCount = 0,
             Errors = errors
         };
+    }
+
+    #endregion
+
+    #region 直接インポートによる陳腐化プレビューの破棄（Issue #1782）
+
+    // 故障シナリオ（Issue #1782）:
+    //   1. 職員が cards_old.csv をプレビュー（HasPreview=true）
+    //   2. 誤りに気付き「直接インポート」で修正版 cards_fixed.csv を取り込み、成功
+    //   3. プレビュー欄は cards_old.csv を表示したままで「インポート実行」も有効
+    //   4. 職員がそれを押すと、修正前の cards_old.csv が修正済みデータの上へ再取り込みされる
+
+    private static readonly string StalePreviewFilePath =
+        System.IO.Path.Combine(ImportSourceDirectory, "cards_old.csv");
+
+    private static readonly string FixedImportFilePath =
+        System.IO.Path.Combine(ImportSourceDirectory, "cards_fixed.csv");
+
+    /// <summary>
+    /// 直接インポートの後に「インポート実行」を押しても、古いファイルが再取り込みされないこと（Issue #1782）
+    /// </summary>
+    /// <remarks>
+    /// <c>HasPreview</c> の値だけを見るテストでは、この Issue の実害（ボタンが有効なまま残り、
+    /// 押すと古いファイルを取り込み直せること）を表現できない。実際に続けて
+    /// <see cref="DataExportImportViewModel.ExecuteImportAsync"/> を呼び、
+    /// インポートサービスへ渡ったパスが直接インポートで選んだ1件だけであることを表明する。
+    /// </remarks>
+    [Fact]
+    public async Task 直接インポート後にインポート実行を押しても古いファイルは再取り込みされないこと()
+    {
+        // Arrange: cards_old.csv のプレビューを表示したまま、修正版を直接インポートする
+        SetupValidPreview();
+        _viewModel.ImportPreviewFile = StalePreviewFilePath;
+
+        var importedFiles = new List<string>();
+        _importServiceMock
+            .Setup(s => s.ImportCardsAsync(It.IsAny<string>(), It.IsAny<bool>()))
+            .Callback<string, bool>((path, _) => importedFiles.Add(path))
+            .ReturnsAsync(new CsvImportResult { Success = true, ImportedCount = 3 });
+
+        // Act: 直接インポート → 未処理に見えるパネルの「インポート実行」を続けて押す
+        await _viewModel.RunImportAsync(FixedImportFilePath);
+        await _viewModel.ExecuteImportAsync();
+
+        // Assert
+        importedFiles.Should().ContainSingle(
+            "「インポート実行」で古いファイルが取り込まれてはならない")
+            .Which.Should().Be(FixedImportFilePath);
+        _viewModel.IsStatusError.Should().BeTrue(
+            "プレビューが無い状態での「インポート実行」は入力不足として弾かれること");
+        _viewModel.StatusMessage.Should().Contain(
+            "プレビュー",
+            "何をすればよいか（先にプレビュー）を示すこと");
+    }
+
+    /// <summary>
+    /// 別ファイルのプレビューを破棄したとき、完了ダイアログでその旨を案内すること（Issue #1782）
+    /// </summary>
+    /// <remarks>
+    /// プレビューを黙って消すと、職員には作業状態が理由不明に失われたように見える。
+    /// error-messages.md の3要素（何が／なぜ／どうすれば）で案内する。
+    /// </remarks>
+    [Fact]
+    public async Task 直接インポートで別ファイルのプレビューを破棄したら完了ダイアログで案内すること()
+    {
+        // Arrange
+        SetupValidPreview();
+        _viewModel.ImportPreviewFile = StalePreviewFilePath;
+        _importServiceMock
+            .Setup(s => s.ImportCardsAsync(It.IsAny<string>(), It.IsAny<bool>()))
+            .ReturnsAsync(new CsvImportResult { Success = true, ImportedCount = 3 });
+
+        string informationMessage = null;
+        _dialogServiceMock
+            .Setup(d => d.ShowInformation(It.IsAny<string>(), It.IsAny<string>()))
+            .Callback<string, string>((message, _) => informationMessage = message);
+
+        // Act
+        await _viewModel.RunImportAsync(FixedImportFilePath);
+
+        // Assert
+        informationMessage.Should().NotBeNull("インポート完了ダイアログが表示されること");
+        informationMessage.Should().Contain(
+            "cards_old.csv",
+            "何が消えたのかを特定できること（ClearPreview 前に確定させた値であること）");
+        informationMessage.Should().Contain(
+            "最新ではなくなった",
+            "なぜ消したのか（取り込みで件数が古くなる）を示すこと");
+        informationMessage.TrimEnd().Should().EndWith(
+            "してください。",
+            "行動指示型で終わること（error-messages.md）");
+    }
+
+    /// <summary>
+    /// プレビュー経由の取り込みでは、プレビュー破棄の案内を出さないこと（Issue #1782）
+    /// </summary>
+    /// <remarks>
+    /// この経路で消えるのは、いま取り込んだファイル自身のプレビューであり消えて当然。
+    /// 起きていない事象（別ファイルの作業状態の消失）を案内すると、職員は失われていない作業を探す
+    /// （error-messages.md「原因を断定する前に、その原因が成立する構成かを確認する」）。
+    /// </remarks>
+    [Fact]
+    public async Task プレビュー経由の取り込みではプレビュー破棄を案内しないこと()
+    {
+        // Arrange
+        SetupValidPreview();
+        _viewModel.ImportPreviewFile = ImportSourceFilePath;
+        _importServiceMock
+            .Setup(s => s.ImportCardsAsync(It.IsAny<string>(), It.IsAny<bool>()))
+            .ReturnsAsync(new CsvImportResult { Success = true, ImportedCount = 3 });
+
+        string informationMessage = null;
+        _dialogServiceMock
+            .Setup(d => d.ShowInformation(It.IsAny<string>(), It.IsAny<string>()))
+            .Callback<string, string>((message, _) => informationMessage = message);
+
+        // Act
+        await _viewModel.ExecuteImportAsync();
+
+        // Assert
+        informationMessage.Should().NotBeNull();
+        informationMessage.Should().NotContain(
+            "別ファイル",
+            "取り込んだファイル自身のプレビューが消えただけで、失われた作業は無いため");
+        _viewModel.HasPreview.Should().BeFalse("従来どおりプレビューは畳まれること");
+    }
+
+    /// <summary>
+    /// プレビューが表示されていなければ、破棄の案内を出さないこと（Issue #1782）
+    /// </summary>
+    [Fact]
+    public void BuildDiscardedPreviewNotice_プレビュー未表示なら案内しないこと()
+    {
+        var notice = DataExportImportViewModel.BuildDiscardedPreviewNotice(
+            hadPreview: false,
+            previewFilePath: StalePreviewFilePath,
+            importedFilePath: FixedImportFilePath);
+
+        notice.Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// 大文字小文字だけが異なる同一パスは「別ファイル」として案内しないこと（Issue #1782）
+    /// </summary>
+    /// <remarks>
+    /// Windows のパスは大文字小文字を区別しない。区別する比較にすると、
+    /// 同じファイルを取り込んだだけで「別ファイルのプレビューを消した」と誤って案内する。
+    /// </remarks>
+    [Fact]
+    public void BuildDiscardedPreviewNotice_大文字小文字違いの同一パスは案内しないこと()
+    {
+        var notice = DataExportImportViewModel.BuildDiscardedPreviewNotice(
+            hadPreview: true,
+            previewFilePath: StalePreviewFilePath,
+            importedFilePath: StalePreviewFilePath.ToUpperInvariant());
+
+        notice.Should().BeEmpty();
     }
 
     #endregion
