@@ -639,6 +639,14 @@ public partial class DataExportImportViewModel : ViewModelBase
     {
         ImportErrors.Clear();
 
+        // Issue #1783: 「インポート完了: <ファイル名>」（DataExportImportDialog.xaml の LastImportedFile 表示）は
+        // 直前の操作の結果を表す欄であり、次の取り込みを始めた時点で前回の結果は無効になる。
+        // 開始時にクリアしないと、前回成功したファイル名が失敗通知の隣に残り、
+        // 同じファイルを直して取り込み直して失敗した場合には同一ファイル名で
+        // 「インポートに失敗しました」と「インポート完了: 同じファイル」が同居する。
+        // 例外で中断する経路（共有フォルダーの切断等）も同じ経路でまとめて塞げる。
+        LastImportedFile = string.Empty;
+
         using (BeginBusy("インポート中..."))
         {
             // Issue #1062: UIスレッドにプログレスバー描画の機会を与える
@@ -676,8 +684,6 @@ public partial class DataExportImportViewModel : ViewModelBase
                         SetStatus("不正なデータタイプです", true);
                         return;
                 }
-
-                LastImportedFile = sourceFilePath;
 
                 // Issue #744: インポート実行済みフラグを設定（ダイアログ終了後のリフレッシュ用）
                 if (result.ImportedCount > 0)
@@ -742,6 +748,15 @@ public partial class DataExportImportViewModel : ViewModelBase
 
         if (importCommitted)
         {
+            // Issue #1783: 「インポート完了: <ファイル名>」の表示も、プレビュー破棄と同じ
+            // 「書き込みが確定したか」で決める。以前は結果を検査する前に無条件で代入していたため、
+            // 対象カードを解決できない CSV のように完全に失敗した取り込みでも
+            // 赤い「インポートに失敗しました」ダイアログの隣に緑の完了表示が並び、
+            // データが入ったのかどうか職員が判断できなかった。
+            // 新しい条件式を立てず importCommitted に相乗りさせる（同じ判断を2か所に分けない、Issue #1728）。
+            // すぐ隣の ExportAsync は if (result.Success) の内側で LastExportedFile を代入しており、
+            // インポート側だけがこの形から外れていた。
+            LastImportedFile = sourceFilePath;
             ClearPreview();
         }
 

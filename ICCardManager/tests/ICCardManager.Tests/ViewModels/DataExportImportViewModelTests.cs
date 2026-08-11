@@ -1561,4 +1561,144 @@ public class DataExportImportViewModelTests : IDisposable
     }
 
     #endregion
+
+    #region インポート失敗時に「インポート完了」を表示しないこと（Issue #1783）
+
+    // 故障シナリオ（Issue #1783）:
+    //   1. 職員が対象カードを解決できない利用履歴 CSV を取り込む
+    //   2. ImportLedgersAsync が Success=false / ErrorMessage 付きで返る
+    //   3. 赤い「インポートに失敗しました」ダイアログと
+    //      「インポート完了: C:\temp\ledger.csv」（DataExportImportDialog.xaml:354）が同時に表示され、
+    //      職員はデータが入ったのかどうか判断できない
+    //
+    // 成功時・部分成功時に LastImportedFile が設定されることは既存テスト
+    // （Issue #1782 / #1781 の各リージョン）が表明済みのため、ここでは重複させない。
+
+    private static readonly string FailedImportFilePath =
+        System.IO.Path.Combine(ImportSourceDirectory, "ledger_broken.csv");
+
+    /// <summary>
+    /// インポート自体が失敗したときは「インポート完了」表示を出さないこと（Issue #1783）
+    /// </summary>
+    /// <remarks>
+    /// <c>LastImportedFile</c> は結果表示であり、結果を検査する前に代入してはならない。
+    /// 同じ ViewModel のエクスポート側は <c>if (result.Success)</c> の内側で
+    /// <c>LastExportedFile</c> を代入しており、インポート側だけが取り残されていた。
+    /// </remarks>
+    [Fact]
+    public async Task RunImportAsync_失敗時は完了表示のファイル名を設定しないこと()
+    {
+        // Arrange
+        _viewModel.SelectedImportType = DataType.Cards;
+        _importServiceMock
+            .Setup(s => s.ImportCardsAsync(It.IsAny<string>(), It.IsAny<bool>()))
+            .ReturnsAsync(new CsvImportResult
+            {
+                Success = false,
+                ErrorMessage = "指定されたファイルが見つかりません。",
+                ImportedCount = 0
+            });
+
+        // Act
+        await _viewModel.RunImportAsync(FailedImportFilePath);
+
+        // Assert
+        _viewModel.LastImportedFile.Should().BeEmpty(
+            "エラーダイアログの隣に「インポート完了: <ファイル名>」が並ぶと、"
+            + "データが入ったのかどうか職員が判断できないため");
+        _dialogServiceMock.Verify(
+            d => d.ShowError(It.IsAny<string>(), "インポートエラー"),
+            Times.Once);
+    }
+
+    /// <summary>
+    /// 全行エラーで1件も登録されなかったときも完了表示を出さないこと（Issue #1783）
+    /// </summary>
+    /// <remarks>
+    /// 判定は「成否」ではなく「書き込みが確定したか」（Issue #1781 の <c>importCommitted</c>）に相乗りさせる。
+    /// 全行エラーはダイアログこそ「インポート完了（一部エラー）」だが登録件数は 0 件で、
+    /// 取り込まれたファイルとして表示すると実態と食い違う。
+    /// </remarks>
+    [Fact]
+    public async Task RunImportAsync_全行エラーで1件も登録されなければ完了表示を出さないこと()
+    {
+        // Arrange
+        _viewModel.SelectedImportType = DataType.Cards;
+        _importServiceMock
+            .Setup(s => s.ImportCardsAsync(It.IsAny<string>(), It.IsAny<bool>()))
+            .ReturnsAsync(CreatePartialSuccessResult(importedCount: 0, errorCount: 2));
+
+        // Act
+        await _viewModel.RunImportAsync(FailedImportFilePath);
+
+        // Assert
+        _viewModel.LastImportedFile.Should().BeEmpty(
+            "1件も書き込まれていないファイルを「インポート完了」として表示してはならないため");
+        _viewModel.ImportErrors.Should().HaveCount(2, "どの行を直すかは画面に残す必要があるため");
+    }
+
+    /// <summary>
+    /// 直前の成功で出ていた完了表示が、次のインポート失敗で消えること（Issue #1783）
+    /// </summary>
+    /// <remarks>
+    /// 失敗分岐で代入しないだけでは不十分。前回成功時のファイル名が残り続けるため、
+    /// 同じファイルを直して取り込み直して失敗した場合に、
+    /// 「インポートに失敗しました」と「インポート完了: 同じファイル名」が再び同居する。
+    /// 表示は最新の操作の結果を表すべきなので、取り込み開始時にクリアする。
+    /// </remarks>
+    [Fact]
+    public async Task RunImportAsync_直前の成功の完了表示が次の失敗で消えること()
+    {
+        // Arrange: 1回目は成功、2回目は同じファイルで失敗
+        _viewModel.SelectedImportType = DataType.Cards;
+        _importServiceMock
+            .SetupSequence(s => s.ImportCardsAsync(It.IsAny<string>(), It.IsAny<bool>()))
+            .ReturnsAsync(new CsvImportResult { Success = true, ImportedCount = 3 })
+            .ReturnsAsync(new CsvImportResult
+            {
+                Success = false,
+                ErrorMessage = "ヘッダー行が想定と異なります",
+                ImportedCount = 0
+            });
+
+        // Act
+        await _viewModel.RunImportAsync(ImportSourceFilePath);
+        var afterSuccess = _viewModel.LastImportedFile;
+
+        await _viewModel.RunImportAsync(ImportSourceFilePath);
+
+        // Assert
+        afterSuccess.Should().Be(ImportSourceFilePath, "1回目は取り込みが確定しているため");
+        _viewModel.LastImportedFile.Should().BeEmpty(
+            "前回成功時のファイル名が残ると、失敗通知の隣に同じファイル名の完了表示が並ぶため");
+    }
+
+    /// <summary>
+    /// 直前の成功で出ていた完了表示が、次のインポートの例外で消えること（Issue #1783）
+    /// </summary>
+    /// <remarks>
+    /// 例外経路（共有フォルダーの切断など）は結果オブジェクトを返さないため、
+    /// 「失敗分岐で代入しない」だけでは前回の表示が残る。開始時のクリアで両経路をまとめて塞ぐ。
+    /// </remarks>
+    [Fact]
+    public async Task RunImportAsync_直前の成功の完了表示が次の例外で消えること()
+    {
+        // Arrange
+        _viewModel.SelectedImportType = DataType.Cards;
+        _importServiceMock
+            .SetupSequence(s => s.ImportCardsAsync(It.IsAny<string>(), It.IsAny<bool>()))
+            .ReturnsAsync(new CsvImportResult { Success = true, ImportedCount = 3 })
+            .ThrowsAsync(new InvalidOperationException("ネットワークパスが見つかりません"));
+
+        // Act
+        await _viewModel.RunImportAsync(ImportSourceFilePath);
+        await _viewModel.RunImportAsync(FailedImportFilePath);
+
+        // Assert
+        _viewModel.LastImportedFile.Should().BeEmpty(
+            "例外で中断した取り込みを、前回のファイル名で「完了」と表示してはならないため");
+        _viewModel.IsStatusError.Should().BeTrue();
+    }
+
+    #endregion
 }
