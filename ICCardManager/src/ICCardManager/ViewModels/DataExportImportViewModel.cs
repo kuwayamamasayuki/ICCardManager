@@ -614,9 +614,9 @@ public partial class DataExportImportViewModel : ViewModelBase
         }
 
         // Issue #1741: インポート元パスをここで確定させて引数として渡す。
-        // ImportPreviewFile は画面の一時状態で、成功分岐の ClearPreview() が空にするため、
+        // ImportPreviewFile は画面の一時状態で、取り込み後の ClearPreview() が空にするため、
         // 取り込み後に読み直すと監査ログへ空パスが記録される。
-        await RunImportAsync(ImportPreviewFile, clearPreviewOnSuccess: true);
+        await RunImportAsync(ImportPreviewFile, clearPreviewAfterImport: true);
     }
 
     /// <summary>
@@ -627,9 +627,11 @@ public partial class DataExportImportViewModel : ViewModelBase
     /// 取り込む CSV のパス。呼び出し元で確定済みの値を渡すこと（Issue #1741）。
     /// 画面状態のプロパティを本メソッド内で読み直してはならない。
     /// </param>
-    /// <param name="clearPreviewOnSuccess">
-    /// 成功時にプレビュー表示を消すか。プレビュー経由の経路は取り込み済みのプレビューが
-    /// 画面に残らないよう <c>true</c>、直接インポートは無関係なプレビューを消さないよう <c>false</c>。
+    /// <param name="clearPreviewAfterImport">
+    /// 取り込みが確定したときにプレビュー表示を消すか。プレビュー経由の経路は取り込み済みの
+    /// プレビューが画面に残らないよう <c>true</c>、直接インポートは無関係なプレビューを
+    /// 消さないよう <c>false</c>。実際に消すかどうかの条件は
+    /// <see cref="HandleImportResultAsync"/> を参照（Issue #1781）。
     /// </param>
     /// <remarks>
     /// 2つのコマンドは差分8行の全文複製（約115行）で、結果処理・監査記録に関わる修正を
@@ -639,7 +641,7 @@ public partial class DataExportImportViewModel : ViewModelBase
     /// テストから直接呼べるよう internal にしている（<see cref="ImportAsync"/> は
     /// <see cref="OpenFileDialog"/> をコマンド内で生成するため単体テストから起動できない）。
     /// </remarks>
-    internal async Task RunImportAsync(string sourceFilePath, bool clearPreviewOnSuccess)
+    internal async Task RunImportAsync(string sourceFilePath, bool clearPreviewAfterImport)
     {
         ImportErrors.Clear();
 
@@ -689,7 +691,7 @@ public partial class DataExportImportViewModel : ViewModelBase
                     HasImported = true;
                 }
 
-                await HandleImportResultAsync(result, sourceFilePath, importTargetTable, clearPreviewOnSuccess);
+                await HandleImportResultAsync(result, sourceFilePath, importTargetTable, clearPreviewAfterImport);
             }
             catch (Exception ex)
             {
@@ -712,13 +714,30 @@ public partial class DataExportImportViewModel : ViewModelBase
     /// <param name="result">インポートサービスの実行結果</param>
     /// <param name="sourceFilePath">監査ログへ記録するインポート元パス（確定済みの値）</param>
     /// <param name="targetTable">監査ログへ記録する対象テーブル（確定済みの値）</param>
-    /// <param name="clearPreviewOnSuccess">成功時にプレビュー表示を消すか</param>
+    /// <param name="clearPreviewAfterImport">取り込み確定時にプレビュー表示を消すか</param>
     private async Task HandleImportResultAsync(
         CsvImportResult result,
         string sourceFilePath,
         string targetTable,
-        bool clearPreviewOnSuccess)
+        bool clearPreviewAfterImport)
     {
+        // Issue #1781: プレビューの破棄は「成否」ではなく「書き込みが確定したか」で判断する。
+        // 部分成功（Success=false / ErrorMessage なし）でも登録済みの行は確定しているため、
+        // 陳腐化したプレビューを残すと「インポート実行」ボタン
+        // （DataExportImportDialog.xaml の IsEnabled="{Binding HasPreview}"）が
+        // 同じファイルで有効なまま残り、押すと丸ごと取り込み直せてしまう。
+        // ic_card / staff / ledger は skip-existing で救われるが ledger_detail は救われず、
+        // 明細がそのまま重複してカードの残高チェーンが壊れる。
+        //
+        // 判定を成功／部分成功の各分岐へ分けず1か所に置く（同じ判断を2か所に分けない、Issue #1728）。
+        // 「Success」を条件に含めるのは、全件スキップ（ImportedCount=0 の成功）でも
+        // 従来どおりプレビューを畳むため。
+        var importCommitted = result.Success || result.ImportedCount > 0;
+        if (clearPreviewAfterImport && importCommitted)
+        {
+            ClearPreview();
+        }
+
         if (result.Success)
         {
             var message = $"インポート完了: {result.ImportedCount}件を登録しました";
@@ -728,13 +747,8 @@ public partial class DataExportImportViewModel : ViewModelBase
             }
             SetStatus(message, false);
 
-            if (clearPreviewOnSuccess)
-            {
-                ClearPreview();
-            }
-
             // Issue #1302: 監査ログ記録
-            // Issue #1741: 直前の ClearPreview() で空になる ImportPreviewFile ではなく
+            // Issue #1741: 本メソッド冒頭の ClearPreview() で空になる ImportPreviewFile ではなく
             // 呼び出し元が確定させた引数を使う（空パスだと後からファイルを追跡できない）。
             // 記録の失敗を取り込みの失敗として通知しない（TryLogImportAsync の remarks 参照）
             var auditLogged = await TryLogImportAsync(targetTable, sourceFilePath, result);
@@ -791,10 +805,41 @@ public partial class DataExportImportViewModel : ViewModelBase
             _dialogService.ShowWarning(
                 $"インポートが完了しましたが、一部エラーがあります。\n\n登録件数: {result.ImportedCount}件\nエラー: {result.ErrorCount}件"
                 + (result.SkippedCount > 0 ? $"\nスキップ: {result.SkippedCount}件" : "")
-                + "\n\n詳細はエラー一覧を確認してください。"
+                + BuildPartialImportGuidance(result.ImportedCount)
                 + (partialAuditLogged ? "" : AuditLogFailureNotice),
                 "インポート完了（一部エラー）");
         }
+    }
+
+    /// <summary>
+    /// 部分成功（一部エラー）時の復旧手順を組み立てる（Issue #1781）
+    /// </summary>
+    /// <remarks>
+    /// 従来の「詳細はエラー一覧を確認してください。」だけでは、職員がエラー行を直した CSV を
+    /// 丸ごと取り込み直す運用を招く。<c>ledger_detail</c> のインポートは skip-existing を
+    /// 持たないため、それは確実に二重登録になりカードの残高チェーンが壊れる。
+    /// 「何が」＝一部の行がエラー、「なぜ」＝登録済みの行は確定済みで再取り込みは重複、
+    /// 「どうすれば」＝エラー行だけの CSV を作って再プレビュー、の3要素で構成する。
+    /// <para>
+    /// <paramref name="importedCount"/> が 0 のときに二重登録へ言及しないのは、
+    /// 起きていない事象を警告すると職員が存在しない重複を探して原因究明が止まるため
+    /// （error-messages.md「原因を断定する前に、その原因が成立する構成かを確認する」）。
+    /// </para>
+    /// </remarks>
+    /// <param name="importedCount">実際に登録が確定した件数</param>
+    internal static string BuildPartialImportGuidance(int importedCount)
+    {
+        if (importedCount > 0)
+        {
+            return $"\n\n登録された{importedCount}件は取り込みが確定済みのため、"
+                + "同じファイルをそのまま再度インポートすると二重登録になります。"
+                + "画面下部のエラー一覧に表示された行だけを残したCSVファイルを作成し、"
+                + "あらためてプレビューしてからインポートしてください。";
+        }
+
+        return "\n\n登録が確定した行はありません。"
+            + "画面下部のエラー一覧を確認してCSVファイルを修正し、"
+            + "あらためてプレビューしてからインポートしてください。";
     }
 
     /// <summary>
@@ -873,8 +918,8 @@ public partial class DataExportImportViewModel : ViewModelBase
         }
 
         // この経路のインポート元はプレビューではなくファイルダイアログの選択結果のため、
-        // 成功してもプレビュー表示はクリアしない（従来どおりの挙動）。
-        await RunImportAsync(dialog.FileName, clearPreviewOnSuccess: false);
+        // 取り込みが確定してもプレビュー表示はクリアしない（従来どおりの挙動）。
+        await RunImportAsync(dialog.FileName, clearPreviewAfterImport: false);
     }
 
     /// <summary>
