@@ -47,7 +47,10 @@ public class OperationLogExcelExportServiceTests : IDisposable
     [InlineData("RESTORE", "復元")]
     [InlineData("MERGE", "統合")]
     [InlineData("SPLIT", "分割")]
-    public void GetActionDisplayName_全6種別を正しく変換(string action, string expected)
+    [InlineData("IMPORT", "インポート")]
+    [InlineData("EXPORT", "エクスポート")]
+    [InlineData("BACKUP", "バックアップ")]
+    public void GetActionDisplayName_全9種別を正しく変換(string action, string expected)
     {
         var result = OperationLogExcelExportService.GetActionDisplayName(action);
         result.Should().Be(expected);
@@ -75,7 +78,9 @@ public class OperationLogExcelExportServiceTests : IDisposable
     [InlineData("staff", "職員")]
     [InlineData("ic_card", "交通系ICカード")]
     [InlineData("ledger", "利用履歴")]
-    public void GetTargetTableDisplayName_全3テーブルを正しく変換(string table, string expected)
+    [InlineData("ledger_detail", "利用明細")]
+    [InlineData("database", "データベース")]
+    public void GetTargetTableDisplayName_全5テーブルを正しく変換(string table, string expected)
     {
         var result = OperationLogExcelExportService.GetTargetTableDisplayName(table);
         result.Should().Be(expected);

@@ -300,34 +300,19 @@ public class OperationLogExcelExportService
     }
 
     /// <summary>
-    /// 操作種別の表示名を取得
+    /// 操作種別の表示名を取得（Issue #1787: SSOT の <see cref="OperationLogDisplayNames"/> へ委譲）
     /// </summary>
     internal static string GetActionDisplayName(string? action)
     {
-        return action switch
-        {
-            "INSERT" => "登録",
-            "UPDATE" => "更新",
-            "DELETE" => "削除",
-            "RESTORE" => "復元",
-            "MERGE" => "統合",
-            "SPLIT" => "分割",
-            _ => action ?? ""
-        };
+        return OperationLogDisplayNames.GetActionDisplayName(action);
     }
 
     /// <summary>
-    /// 対象テーブルの表示名を取得
+    /// 対象テーブルの表示名を取得（Issue #1787: SSOT の <see cref="OperationLogDisplayNames"/> へ委譲）
     /// </summary>
     internal static string GetTargetTableDisplayName(string? targetTable)
     {
-        return targetTable switch
-        {
-            "staff" => "職員",
-            "ic_card" => "交通系ICカード",
-            "ledger" => "利用履歴",
-            _ => targetTable ?? ""
-        };
+        return OperationLogDisplayNames.GetTableDisplayName(targetTable);
     }
 
     /// <summary>

@@ -131,19 +131,28 @@ public class OperationLogSearchViewModelTests
     }
 
     [Fact]
-    public void Constructor_操作種別の選択肢が正しいこと()
+    public void Constructor_操作種別の選択肢が全操作種別を網羅すること()
     {
-        _viewModel.ActionTypes.Should().HaveCount(4);
+        // Issue #1787: 「すべて」＋ SSOT（OperationLogDisplayNames）の全操作種別を SSOT の順序どおりに並べる。
+        // SSOT 側が全 Actions 定数を網羅することは OperationLogDisplayNamesTests が固定しているため、
+        // ここでは「コンボが SSOT から生成されること」を表明する（種別追加時にコンボが自動追随する）。
+        _viewModel.ActionTypes[0].Value.Should().BeEmpty();
+        _viewModel.ActionTypes[0].DisplayName.Should().Be("すべて");
         _viewModel.ActionTypes.Select(a => a.Value)
-            .Should().BeEquivalentTo(new[] { "", "INSERT", "UPDATE", "DELETE" });
+            .Should().Equal(new[] { "" }.Concat(OperationLogDisplayNames.ActionEntries.Select(e => e.Key)));
+        _viewModel.ActionTypes.Skip(1).Select(a => a.DisplayName)
+            .Should().Equal(OperationLogDisplayNames.ActionEntries.Select(e => e.Value));
     }
 
     [Fact]
-    public void Constructor_対象テーブルの選択肢が正しいこと()
+    public void Constructor_対象テーブルの選択肢が全テーブルを網羅すること()
     {
-        _viewModel.TargetTables.Should().HaveCount(4);
+        _viewModel.TargetTables[0].Value.Should().BeEmpty();
+        _viewModel.TargetTables[0].DisplayName.Should().Be("すべて");
         _viewModel.TargetTables.Select(t => t.Value)
-            .Should().BeEquivalentTo(new[] { "", "staff", "ic_card", "ledger" });
+            .Should().Equal(new[] { "" }.Concat(OperationLogDisplayNames.TableEntries.Select(e => e.Key)));
+        _viewModel.TargetTables.Skip(1).Select(t => t.DisplayName)
+            .Should().Equal(OperationLogDisplayNames.TableEntries.Select(e => e.Value));
     }
 
     #endregion
@@ -617,6 +626,12 @@ public class OperationLogSearchViewModelTests
     [InlineData("INSERT", "登録")]
     [InlineData("UPDATE", "更新")]
     [InlineData("DELETE", "削除")]
+    [InlineData("RESTORE", "復元")]
+    [InlineData("MERGE", "統合")]
+    [InlineData("SPLIT", "分割")]
+    [InlineData("IMPORT", "インポート")]
+    [InlineData("EXPORT", "エクスポート")]
+    [InlineData("BACKUP", "バックアップ")]
     [InlineData("UNKNOWN", "UNKNOWN")]
     public async Task ActionDisplay_操作種別が正しく日本語変換されること(string action, string expected)
     {
@@ -634,6 +649,8 @@ public class OperationLogSearchViewModelTests
     [InlineData("staff", "職員")]
     [InlineData("ic_card", "交通系ICカード")]
     [InlineData("ledger", "利用履歴")]
+    [InlineData("ledger_detail", "利用明細")]
+    [InlineData("database", "データベース")]
     [InlineData("other", "other")]
     public async Task TargetTableDisplay_対象テーブルが正しく日本語変換されること(string table, string expected)
     {
@@ -645,6 +662,23 @@ public class OperationLogSearchViewModelTests
 
         // Assert
         _viewModel.Logs[0].TargetTableDisplay.Should().Be(expected);
+    }
+
+    [Fact]
+    public async Task DetailSummary_一括操作も日本語で組み立てられること()
+    {
+        // Issue #1787: IMPORT 等の一括操作（Issue #1302）が「ic_card（cards.csv）をIMPORT」と
+        // 英字混じりで表示されていた回帰を防ぐ
+        var testLog = MakeLog(1, action: "IMPORT", targetTable: "ic_card", targetId: "cards_20260811.csv",
+            operatorName: "管理者",
+            afterData: "{\"FilePath\":\"C:\\\\data\\\\cards_20260811.csv\",\"FileName\":\"cards_20260811.csv\",\"InsertedCount\":3,\"SkippedCount\":0,\"ErrorCount\":0}");
+        SetupKeysetReturning(new[] { testLog });
+
+        // Act
+        await _viewModel.SearchAsync();
+
+        // Assert
+        _viewModel.Logs[0].DetailSummary.Should().Be("交通系ICカード（cards_20260811.csv）をインポート");
     }
 
     #endregion

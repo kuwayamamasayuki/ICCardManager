@@ -47,6 +47,12 @@
   - 警告・異常の文言は 3 要素（何が／なぜ／どうすれば）で行動指示で終わる。クリップボード出力（`DiagnosticReportFormatter`）には診断日時・総合判定・アプリバージョン・PC名・OS・DBパス・動作モードを含め、**正常項目の詳細は省く**（対処すべき箇所が埋もれるため）。クリップボードは他プロセスにロックされ得るため `IClipboardService.TrySetText` が成否を返し、失敗を静かに握りつぶさず案内する。
   - 検証: `ConnectionDiagnosticsServiceTests`（56件）・`ConnectionDiagnosticsViewModelTests`（17件）・`DiagnosticReportTests`（13件）・`DiagnosticReportFormatterTests`（13件）・`FolderWriteAccessProbeTests`（9件）・`ConnectionDiagnosticsDialogLayoutTests`（7件）を新設（+115）、`SystemManageViewModelTests` は接続テスト4件を診断側へ移管し診断起動1件を追加（−3）。OS へ問い合わせる部分は `protected virtual` の継ぎ目（`ProbeFolderWriteAccess` / `GetFreeSpaceBytes`）としてテスト用サブクラスから差し替え、権限不足・ディスク満杯を決定的に再現する。メッセージ品質テストは「全項目種別が問題状態として集まっていること」も併せて表明し、項目追加時の追随漏れを検出する。
   - 03_画面設計書 §1・§2・§3.15・§3.22／04_機能設計書 §19／05_クラス設計書 §3.2・§3.3・§10.3／07_テスト設計書 §1.1a（単体 3,912→4,024・合計 3,938→4,050 件）・§2.47a・§2.53 UT-DIAG-001〜004／管理者マニュアル §10.0・§10.2・§10.4・クイックガイド／`.claude/rules/error-messages.md` を同期更新（#1690）
+- Issue #1787 **操作ログの操作種別・対象テーブルの表示名と絞り込みに IMPORT/EXPORT/BACKUP 等を追加**した。表示名マッピングが画面側4箇所（一覧の「操作」「対象」列・絞り込みコンボ・詳細サマリー）と Excel 側2箇所に分散していたため、Issue #1302 で追加された操作種別に表示側が追随できず、英大文字のまま表示されるうえ**監査時に「インポート操作だけを抽出する」ができなかった**（#1741 でファイル名が追跡できるようになったぶん、絞り込めない不便が目立っていた）。
+  - **表示名を `OperationLogDisplayNames`（`OperationLogger.Actions` / `Tables` 定数に隣接）へ一元化**し、6箇所すべてをそこへ委譲した。操作種別コンボは「すべて」＋登録／更新／削除／復元／統合／分割／インポート／エクスポート／バックアップ、対象コンボは「すべて」＋職員／交通系ICカード／利用履歴／利用明細／データベースになり、いずれも SSOT から自動生成されるため種別追加時の追随漏れが構造的に起きない。
+  - 「操作」「対象」列と絞り込みコンボの固定幅を `MinWidth`＋自動幅へ変更した（「エクスポート」等6文字の表示名が文字サイズ「大」以上で切れるため。幅の下限は従来値を維持）。
+  - 一覧・Excel の操作種別の色分け（INSERT 緑／UPDATE 橙／DELETE 赤等）は従来どおり。一括操作へは色を増やさない（色の意味が薄まるため。判断理由は 03_画面設計書 §3.13）。
+  - 検証: `OperationLogDisplayNamesTests`（26件）を新設し、`OperationLogger.Actions` / `Tables` の**全定数が表示名を持つことを定数リフレクション走査で固定**（種別を追加したのに表示名を定義し忘れる回帰を検出。定数クラスのため `Enum.GetValues` の代わりに `FieldInfo.IsLiteral` で走査）。`OperationLogSearchViewModelTests` +9件・`OperationLogExcelExportServiceTests` +5件（+40）。
+  - 03_画面設計書 §3.13／04_機能設計書 §10.2／05_クラス設計書 §3.3／07_テスト設計書 §1.1a（単体 4,637→4,677・合計 4,663→4,703 件）・§2.25 UT-033c／管理者マニュアル §8.3 を同期更新（#1787）
 
 **バグ修正**
 - Issue #1742 **未観測 Task 例外ハンドラがファイナライザスレッドでモーダルダイアログを開く**問題を修正した。`TaskScheduler.UnobservedTaskException` は Task のファイナライズ時（＝ファイナライザスレッド）に発火するが、旧実装はそこから同期 `Dispatcher.Invoke` で `ErrorDialogHelper.ShowError`（モーダルの `MessageBox.Show`）を開いていたため、ユーザーが [OK] を押すまでファイナライザスレッドがブロックされ、プロセス全体のファイナライザ（SQLite 接続等の後始末）が停止していた。無人の共用端末では「バックグラウンド処理エラー」ダイアログが長時間放置され得る。

@@ -8,6 +8,67 @@ using ICCardManager.Models;
 
 namespace ICCardManager.Services
 {
+    /// <summary>
+    /// 操作ログの操作種別・対象テーブルの表示名マッピング（Issue #1787）
+    /// </summary>
+    /// <remarks>
+    /// 表示名の Single Source of Truth。画面（OperationLogSearchViewModel の一覧表示・絞り込みコンボ・
+    /// 詳細サマリー）と Excel（OperationLogExcelExportService）はすべてここへ委譲する。
+    /// <see cref="OperationLogger.Actions"/> / <see cref="OperationLogger.Tables"/> へ定数を追加したら
+    /// 本クラスのエントリにも追加すること（漏れは OperationLogDisplayNamesTests の
+    /// 定数リフレクション走査テストが検出する）。
+    /// </remarks>
+    public static class OperationLogDisplayNames
+    {
+        /// <summary>操作種別の表示名（コンボの表示順を兼ねる順序付きリスト）</summary>
+        public static IReadOnlyList<KeyValuePair<string, string>> ActionEntries { get; } =
+            new[]
+            {
+                new KeyValuePair<string, string>(OperationLogger.Actions.Insert, "登録"),
+                new KeyValuePair<string, string>(OperationLogger.Actions.Update, "更新"),
+                new KeyValuePair<string, string>(OperationLogger.Actions.Delete, "削除"),
+                new KeyValuePair<string, string>(OperationLogger.Actions.Restore, "復元"),
+                new KeyValuePair<string, string>(OperationLogger.Actions.Merge, "統合"),
+                new KeyValuePair<string, string>(OperationLogger.Actions.Split, "分割"),
+                new KeyValuePair<string, string>(OperationLogger.Actions.Import, "インポート"),
+                new KeyValuePair<string, string>(OperationLogger.Actions.Export, "エクスポート"),
+                new KeyValuePair<string, string>(OperationLogger.Actions.Backup, "バックアップ"),
+            };
+
+        /// <summary>対象テーブルの表示名（コンボの表示順を兼ねる順序付きリスト）</summary>
+        /// <remarks>ledger_detail の「利用明細」は DatabaseException.GetEntityDisplayName と揃えている。</remarks>
+        public static IReadOnlyList<KeyValuePair<string, string>> TableEntries { get; } =
+            new[]
+            {
+                new KeyValuePair<string, string>(OperationLogger.Tables.Staff, "職員"),
+                new KeyValuePair<string, string>(OperationLogger.Tables.IcCard, "交通系ICカード"),
+                new KeyValuePair<string, string>(OperationLogger.Tables.Ledger, "利用履歴"),
+                new KeyValuePair<string, string>(OperationLogger.Tables.LedgerDetail, "利用明細"),
+                new KeyValuePair<string, string>(OperationLogger.Tables.Database, "データベース"),
+            };
+
+        private static readonly Dictionary<string, string> ActionMap = BuildMap(ActionEntries);
+        private static readonly Dictionary<string, string> TableMap = BuildMap(TableEntries);
+
+        /// <summary>操作種別の表示名を取得（未知の値は生値、null は空文字）</summary>
+        public static string GetActionDisplayName(string? action) =>
+            action != null && ActionMap.TryGetValue(action, out var name) ? name : action ?? "";
+
+        /// <summary>対象テーブルの表示名を取得（未知の値は生値、null は空文字）</summary>
+        public static string GetTableDisplayName(string? targetTable) =>
+            targetTable != null && TableMap.TryGetValue(targetTable, out var name) ? name : targetTable ?? "";
+
+        private static Dictionary<string, string> BuildMap(IReadOnlyList<KeyValuePair<string, string>> entries)
+        {
+            var map = new Dictionary<string, string>(entries.Count);
+            foreach (var entry in entries)
+            {
+                map.Add(entry.Key, entry.Value);
+            }
+            return map;
+        }
+    }
+
 /// <summary>
     /// 操作ログ記録サービス
     /// </summary>

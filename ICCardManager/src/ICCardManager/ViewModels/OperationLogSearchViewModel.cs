@@ -44,21 +44,9 @@ public class OperationLogDisplayItem
     public DateTime Timestamp { get; init; }
     public string TimestampDisplay => DisplayFormatters.FormatTimestamp(Timestamp);
     public string Action { get; init; } = string.Empty;
-    public string ActionDisplay => Action switch
-    {
-        "INSERT" => "登録",
-        "UPDATE" => "更新",
-        "DELETE" => "削除",
-        _ => Action
-    };
+    public string ActionDisplay => OperationLogDisplayNames.GetActionDisplayName(Action);
     public string TargetTable { get; init; } = string.Empty;
-    public string TargetTableDisplay => TargetTable switch
-    {
-        "staff" => "職員",
-        "ic_card" => "交通系ICカード",
-        "ledger" => "利用履歴",
-        _ => TargetTable
-    };
+    public string TargetTableDisplay => OperationLogDisplayNames.GetTableDisplayName(TargetTable);
     public string TargetId { get; init; } = string.Empty;
     /// <summary>
     /// 対象の詳細表示名（例: 「田中太郎（001）」「はやかけん 001」「R7.2.6 鉄道（博多～天神）」）
@@ -141,26 +129,20 @@ public partial class OperationLogSearchViewModel : ViewModelBase
     private string _lastExportedFile = string.Empty;
 
     /// <summary>
-    /// 操作種別の選択肢
+    /// 操作種別の選択肢（Issue #1787: 「すべて」＋ SSOT の全操作種別。種別追加時に自動追随する）
     /// </summary>
-    public ObservableCollection<ActionTypeItem> ActionTypes { get; } = new()
-    {
-        new ActionTypeItem { Value = "", DisplayName = "すべて" },
-        new ActionTypeItem { Value = "INSERT", DisplayName = "登録" },
-        new ActionTypeItem { Value = "UPDATE", DisplayName = "更新" },
-        new ActionTypeItem { Value = "DELETE", DisplayName = "削除" }
-    };
+    public ObservableCollection<ActionTypeItem> ActionTypes { get; } = new(
+        new[] { new ActionTypeItem { Value = "", DisplayName = "すべて" } }
+            .Concat(OperationLogDisplayNames.ActionEntries
+                .Select(e => new ActionTypeItem { Value = e.Key, DisplayName = e.Value })));
 
     /// <summary>
-    /// 対象テーブルの選択肢
+    /// 対象テーブルの選択肢（Issue #1787: 「すべて」＋ SSOT の全テーブル）
     /// </summary>
-    public ObservableCollection<TargetTableItem> TargetTables { get; } = new()
-    {
-        new TargetTableItem { Value = "", DisplayName = "すべて" },
-        new TargetTableItem { Value = "staff", DisplayName = "職員" },
-        new TargetTableItem { Value = "ic_card", DisplayName = "交通系ICカード" },
-        new TargetTableItem { Value = "ledger", DisplayName = "利用履歴" }
-    };
+    public ObservableCollection<TargetTableItem> TargetTables { get; } = new(
+        new[] { new TargetTableItem { Value = "", DisplayName = "すべて" } }
+            .Concat(OperationLogDisplayNames.TableEntries
+                .Select(e => new TargetTableItem { Value = e.Key, DisplayName = e.Value })));
 
     /// <summary>
     /// ページサイズの選択肢
@@ -637,22 +619,8 @@ public partial class OperationLogSearchViewModel : ViewModelBase
     /// </summary>
     private static string GenerateDetailSummary(OperationLog log)
     {
-        var action = log.Action switch
-        {
-            "INSERT" => "登録",
-            "UPDATE" => "更新",
-            "DELETE" => "削除",
-            "RESTORE" => "復元",
-            _ => log.Action ?? ""
-        };
-
-        var target = log.TargetTable switch
-        {
-            "staff" => "職員",
-            "ic_card" => "交通系ICカード",
-            "ledger" => "利用履歴",
-            _ => log.TargetTable ?? ""
-        };
+        var action = OperationLogDisplayNames.GetActionDisplayName(log.Action);
+        var target = OperationLogDisplayNames.GetTableDisplayName(log.TargetTable);
 
         // UPDATE操作の場合は変更内容の詳細を表示（Issue #537）
         if (log.Action == "UPDATE" && !string.IsNullOrEmpty(log.BeforeData) && !string.IsNullOrEmpty(log.AfterData))
