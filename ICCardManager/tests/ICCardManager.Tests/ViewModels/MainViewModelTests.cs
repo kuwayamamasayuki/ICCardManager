@@ -257,6 +257,315 @@ public class MainViewModelTests : IDisposable
 
     #endregion
 
+    #region 警告の保持（Issue #1739）
+
+    /// <summary>
+    /// CheckWarningsAsync が最後まで走るための最小限のモック設定（Issue #1739）
+    /// </summary>
+    /// <param name="warningBalance">残額警告のしきい値（円）</param>
+    /// <param name="busStopLedgers">バス停未入力チェックが走査する台帳（null なら空）</param>
+    private void SetupWarningCheckDefaults(int warningBalance = 1000, List<Ledger> busStopLedgers = null)
+    {
+        _settingsRepositoryMock.Setup(r => r.GetAppSettingsAsync())
+            .ReturnsAsync(new AppSettings { WarningBalance = warningBalance });
+        _ledgerRepositoryMock.Setup(r => r.GetByDateRangeAsync(
+                It.IsAny<string>(), It.IsAny<DateTime>(), It.IsAny<DateTime>()))
+            .ReturnsAsync(busStopLedgers ?? new List<Ledger>());
+    }
+
+    /// <summary>
+    /// Issue #1739: 起動時に立ったバックアップ健全性警告が、カード操作後の警告再チェックで消えないこと。
+    /// </summary>
+    /// <remarks>
+    /// CheckBackupHealthAsync の呼び出し元は起動時と警告クリック時しかないため、
+    /// ここで消えると警告はそのセッション中二度と復活しない（Issue #1689 の目的が無効化される）。
+    /// </remarks>
+    [Fact]
+    public async Task CheckWarningsAsync_バックアップ健全性警告を消さないこと()
+    {
+        SetupWarningCheckDefaults();
+        var healthMock = new Mock<IBackupHealthService>();
+        healthMock.Setup(s => s.GetHealthAsync()).ReturnsAsync(new BackupHealthInfo
+        {
+            LastSuccessAt = DateTime.Now.Date.AddDays(-30)
+        });
+        var vm = CreateViewModelWithBackupHealth(healthMock.Object);
+        await vm.CheckBackupHealthAsync();
+        vm.WarningMessages.Should().ContainSingle(w => w.Type == WarningType.BackupStale);
+
+        // 返却・貸出・履歴編集などの後処理で走る警告再チェック
+        await vm.CheckWarningsAsync();
+
+        vm.WarningMessages.Should().ContainSingle(w => w.Type == WarningType.BackupStale);
+    }
+
+    /// <summary>
+    /// Issue #1739: インポート後などに全カード分立った残高不整合警告が、警告再チェックで消えないこと。
+    /// </summary>
+    /// <remarks>
+    /// 再生成手段は表示中カード限定の CheckAndNotifyConsistencyAsync しかないため、
+    /// ここで消えると履歴画面を開いていないカードの不整合は気づけなくなる。
+    /// </remarks>
+    [Fact]
+    public async Task CheckWarningsAsync_残高不整合警告を消さないこと()
+    {
+        SetupWarningCheckDefaults();
+        _viewModel.WarningMessages.Add(new WarningItem
+        {
+            Type = WarningType.BalanceInconsistency,
+            CardIdm = "1111222233334444",
+            DisplayText = "⚠️ 残高の不整合が2件あります（はやかけん 5042）"
+        });
+
+        await _viewModel.CheckWarningsAsync();
+
+        _viewModel.WarningMessages
+            .Should().ContainSingle(w => w.Type == WarningType.BalanceInconsistency)
+            .Which.CardIdm.Should().Be("1111222233334444");
+    }
+
+    /// <summary>
+    /// Issue #1739: 警告再チェックで消えてよいのは、そこで作り直す種別だけであること。
+    /// </summary>
+    /// <remarks>
+    /// WarningType を新設したときに「クリアされるが再生成されない」種別が生まれていないかを検出する。
+    /// 保持対象を列挙で導出しているため、新しい種別は自動的に検査対象になる。
+    /// </remarks>
+    [Fact]
+    public async Task CheckWarningsAsync_再生成対象以外の警告種別をすべて保持すること()
+    {
+        // CheckWarningsAsync が自ら作り直す 2 種別のみクリア対象
+        var regenerated = new[] { WarningType.LowBalance, WarningType.IncompleteBusStop };
+        var preserved = Enum.GetValues(typeof(WarningType)).Cast<WarningType>()
+            .Where(t => !regenerated.Contains(t))
+            .ToList();
+        preserved.Should().NotBeEmpty("保持対象が空だと本テストは何も検証しない");
+
+        SetupWarningCheckDefaults();
+        foreach (var type in preserved)
+        {
+            _viewModel.WarningMessages.Add(new WarningItem
+            {
+                Type = type,
+                DisplayText = $"⚠️ {type} のテスト警告"
+            });
+        }
+
+        await _viewModel.CheckWarningsAsync();
+
+        _viewModel.WarningMessages.Select(w => w.Type).Should().BeEquivalentTo(preserved);
+    }
+
+    /// <summary>
+    /// Issue #1739: 残額警告は警告再チェックのたびに作り直され、重複しないこと。
+    /// </summary>
+    [Fact]
+    public async Task CheckWarningsAsync_残額警告は再生成され重複しないこと()
+    {
+        SetupWarningCheckDefaults(warningBalance: 1000);
+        _viewModel.CardBalanceDashboard.Add(new CardBalanceDashboardItem
+        {
+            CardIdm = "1111222233334444",
+            CardType = "はやかけん",
+            CardNumber = "5042",
+            CurrentBalance = 500
+        });
+
+        await _viewModel.CheckWarningsAsync();
+        await _viewModel.CheckWarningsAsync();
+
+        _viewModel.WarningMessages.Count(w => w.Type == WarningType.LowBalance).Should().Be(1);
+    }
+
+    /// <summary>
+    /// Issue #1739: 残額がしきい値を上回ったら残額警告が取り除かれること。
+    /// </summary>
+    [Fact]
+    public async Task CheckWarningsAsync_残額がしきい値を上回れば残額警告を取り除くこと()
+    {
+        SetupWarningCheckDefaults(warningBalance: 1000);
+        var item = new CardBalanceDashboardItem
+        {
+            CardIdm = "1111222233334444",
+            CardType = "はやかけん",
+            CardNumber = "5042",
+            CurrentBalance = 500
+        };
+        _viewModel.CardBalanceDashboard.Add(item);
+        await _viewModel.CheckWarningsAsync();
+        _viewModel.WarningMessages.Should().ContainSingle(w => w.Type == WarningType.LowBalance);
+
+        // チャージして残額が回復した状態を模す
+        item.CurrentBalance = 5000;
+        await _viewModel.CheckWarningsAsync();
+
+        _viewModel.WarningMessages.Should().NotContain(w => w.Type == WarningType.LowBalance);
+    }
+
+    /// <summary>
+    /// Issue #1739: バス停名未入力警告を、複数回チェックしても重複させないこと。
+    /// </summary>
+    /// <remarks>
+    /// 起動時の CheckIncompleteBusStopsAsync は fire-and-forget で走るため、
+    /// 完了前にカード操作が入ると警告再チェックと並走して二重に追加され得る。
+    /// </remarks>
+    [Fact]
+    public async Task CheckIncompleteBusStopsAsync_複数回呼んでも警告が重複しないこと()
+    {
+        SetupWarningCheckDefaults(busStopLedgers: new List<Ledger>
+        {
+            new Ledger { CardIdm = "1111222233334444", Summary = "バス（★）" }
+        });
+
+        await _viewModel.CheckIncompleteBusStopsAsync();
+        await _viewModel.CheckIncompleteBusStopsAsync();
+
+        _viewModel.WarningMessages.Count(w => w.Type == WarningType.IncompleteBusStop).Should().Be(1);
+    }
+
+    /// <summary>
+    /// Issue #1739: バス停名が入力されて未入力が0件になったら、警告を取り除くこと。
+    /// </summary>
+    [Fact]
+    public async Task CheckIncompleteBusStopsAsync_未入力が解消したら警告を取り除くこと()
+    {
+        SetupWarningCheckDefaults(busStopLedgers: new List<Ledger>
+        {
+            new Ledger { CardIdm = "1111222233334444", Summary = "バス（★）" }
+        });
+        await _viewModel.CheckIncompleteBusStopsAsync();
+        _viewModel.WarningMessages.Should().ContainSingle(w => w.Type == WarningType.IncompleteBusStop);
+
+        // バス停名が入力された状態を模す
+        SetupWarningCheckDefaults(busStopLedgers: new List<Ledger>
+        {
+            new Ledger { CardIdm = "1111222233334444", Summary = "バス（天神～博多駅前）" }
+        });
+        await _viewModel.CheckIncompleteBusStopsAsync();
+
+        _viewModel.WarningMessages.Should().NotContain(w => w.Type == WarningType.IncompleteBusStop);
+    }
+
+    /// <summary>
+    /// Issue #1739: F6 で直接システム管理画面を開いて手動バックアップに成功した場合も、
+    /// 警告が取り除かれること。
+    /// </summary>
+    /// <remarks>
+    /// BackupStale 警告の文言自体が「システム管理画面（F6）で…手動バックアップを実行してください」と
+    /// 案内しているため、再判定が警告クリック経由にしか無いと、案内どおり操作した管理者には
+    /// 「復旧したのに警告が消えない」ように見える。
+    /// </remarks>
+    [Fact]
+    public async Task OpenSystemManage_手動バックアップで解消したら警告を取り除くこと()
+    {
+        var healthMock = new Mock<IBackupHealthService>();
+        healthMock.Setup(s => s.GetHealthAsync()).ReturnsAsync(new BackupHealthInfo
+        {
+            LastSuccessAt = DateTime.Now.Date.AddDays(-30)
+        });
+        var vm = CreateViewModelWithBackupHealth(healthMock.Object);
+        await vm.CheckBackupHealthAsync();
+        vm.WarningMessages.Should().ContainSingle(w => w.Type == WarningType.BackupStale);
+
+        // F6 でシステム管理画面を開き、手動バックアップに成功した状態を模す
+        healthMock.Setup(s => s.GetHealthAsync()).ReturnsAsync(new BackupHealthInfo
+        {
+            LastSuccessAt = DateTime.Now
+        });
+        await vm.OpenSystemManage();
+
+        vm.WarningMessages.Should().NotContain(w => w.Type == WarningType.BackupStale);
+    }
+
+    /// <summary>
+    /// Issue #1739: 残高不整合警告をクリックして履歴（既定は当月）を開いても、
+    /// 期間外の不整合を理由に立っている警告が消えないこと。
+    /// </summary>
+    /// <remarks>
+    /// 警告は全期間チェック（CheckAllCardsConsistencyAsync）で立つのに、クリック後の
+    /// 再判定が表示期間だけを見ていると、当月が整合しているだけで警告が消える。
+    /// 履歴にハイライトも出ないため「解消済み」と誤解され、期間外の不整合が放置される。
+    /// </remarks>
+    [Fact]
+    public async Task HandleWarningClick_表示期間外の残高不整合警告を消さないこと()
+    {
+        const string cardIdm = "1111222233334444";
+        SetupWarningCheckDefaults();
+        _cardRepositoryMock.Setup(r => r.GetByIdmAsync(cardIdm, It.IsAny<bool>()))
+            .ReturnsAsync(new IcCard { CardIdm = cardIdm, CardType = "はやかけん", CardNumber = "5042" });
+        // 履歴表示時に「統合を元に戻す」ボタンの有効判定が走るため既定値を用意する
+        _ledgerRepositoryMock.Setup(r => r.GetMergeHistoriesAsync(It.IsAny<bool>()))
+            .ReturnsAsync(new List<(int, DateTime, int, string, string, bool)>());
+
+        // 全期間（2000-01-01 起点）は不整合、表示期間（当月）は整合
+        var inconsistentLedgers = new List<Ledger>
+        {
+            new Ledger { Id = 1, CardIdm = cardIdm, Date = new DateTime(2026, 3, 1), Balance = 1000 },
+            new Ledger { Id = 2, CardIdm = cardIdm, Date = new DateTime(2026, 3, 2), Balance = 500, Expense = 100 }
+        };
+        _ledgerRepositoryMock.Setup(r => r.GetByDateRangeAsync(
+                cardIdm, It.Is<DateTime>(d => d.Year == 2000), It.IsAny<DateTime>()))
+            .ReturnsAsync(inconsistentLedgers);
+        _ledgerRepositoryMock.Setup(r => r.GetByDateRangeAsync(
+                cardIdm, It.Is<DateTime>(d => d.Year != 2000), It.IsAny<DateTime>()))
+            .ReturnsAsync(new List<Ledger>());
+
+        var warning = new WarningItem
+        {
+            Type = WarningType.BalanceInconsistency,
+            CardIdm = cardIdm,
+            DisplayText = "⚠️ 残高の不整合が1件あります（はやかけん 5042）"
+        };
+        _viewModel.WarningMessages.Add(warning);
+
+        await _viewModel.HandleWarningClick(warning);
+
+        _viewModel.WarningMessages
+            .Should().ContainSingle(w => w.Type == WarningType.BalanceInconsistency)
+            .Which.CardIdm.Should().Be(cardIdm);
+    }
+
+    /// <summary>
+    /// Issue #1739: 保留していた古いチェック結果が、後から確定した新しい結果を上書きしないこと。
+    /// </summary>
+    /// <remarks>
+    /// 起動時の CheckIncompleteBusStopsAsync は fire-and-forget で走る。共有モードの SMB 遅延で
+    /// 保留している間にバス停名が入力されて警告が消えたのに、await 前の台帳から作った警告を
+    /// そのまま書き戻すと、入力済みなのに警告が復活する（クリックしてもダイアログは空になる）。
+    /// </remarks>
+    [Fact]
+    public async Task CheckIncompleteBusStopsAsync_保留中の古い結果が新しい結果を上書きしないこと()
+    {
+        _settingsRepositoryMock.Setup(r => r.GetAppSettingsAsync())
+            .ReturnsAsync(new AppSettings { WarningBalance = 1000 });
+
+        var firstCallGate = new TaskCompletionSource<IEnumerable<Ledger>>();
+        var callCount = 0;
+        _ledgerRepositoryMock.Setup(r => r.GetByDateRangeAsync(
+                It.IsAny<string>(), It.IsAny<DateTime>(), It.IsAny<DateTime>()))
+            .Returns(() => ++callCount == 1
+                ? firstCallGate.Task
+                : Task.FromResult<IEnumerable<Ledger>>(new List<Ledger>()));
+
+        // 起動時の fire-and-forget を模す（1回目は保留のまま進まない）
+        var pendingStartupCheck = _viewModel.CheckIncompleteBusStopsAsync();
+
+        // バス停名の入力後に走る再チェックが先に完了し、「未入力なし」で確定する
+        await _viewModel.CheckIncompleteBusStopsAsync();
+        _viewModel.WarningMessages.Should().NotContain(w => w.Type == WarningType.IncompleteBusStop);
+
+        // 保留していた起動時チェックが古い台帳（★あり）で完了しても、警告は復活しない
+        firstCallGate.SetResult(new List<Ledger>
+        {
+            new Ledger { CardIdm = "1111222233334444", Summary = "バス（★）" }
+        });
+        await pendingStartupCheck;
+
+        _viewModel.WarningMessages.Should().NotContain(w => w.Type == WarningType.IncompleteBusStop);
+    }
+
+    #endregion
+
     #region AppState列挙型テスト
 
     /// <summary>
