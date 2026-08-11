@@ -859,6 +859,8 @@ namespace ICCardManager
         /// </summary>
         private void SetupGlobalExceptionHandlers()
         {
+            _unobservedTaskExceptionHandler = CreateUnobservedTaskExceptionHandler();
+
             // UIスレッド上の未処理例外
             DispatcherUnhandledException += OnDispatcherUnhandledException;
 
@@ -867,6 +869,50 @@ namespace ICCardManager
 
             // Task内の未観測例外
             TaskScheduler.UnobservedTaskException += OnUnobservedTaskException;
+        }
+
+        /// <summary>
+        /// 未観測 Task 例外のハンドラ本体（Issue #1742）。
+        /// SetupGlobalExceptionHandlers で生成し、OnUnobservedTaskException から委譲する。
+        /// </summary>
+        private UnobservedTaskExceptionHandler _unobservedTaskExceptionHandler;
+
+        /// <summary>
+        /// <see cref="UnobservedTaskExceptionHandler"/> を App の実行環境へ配線して生成
+        /// </summary>
+        /// <remarks>
+        /// 本メソッドは DI コンテナ構築前（OnStartup 冒頭）に呼ばれるため、
+        /// ロガー・トースト通知サービスはクロージャで発火時に遅延解決する。
+        /// 配線の制約（同期 Invoke 禁止・モーダル表示禁止・シャットダウンガード必須）は
+        /// AppUnobservedTaskExceptionConventionTests が静的検証で固定している。
+        /// </remarks>
+        private UnobservedTaskExceptionHandler CreateUnobservedTaskExceptionHandler()
+        {
+            return new UnobservedTaskExceptionHandler(
+                getLogger: () => _logger,
+                isUiAvailable: () =>
+                {
+                    var app = Application.Current;
+
+                    // Dispatcher シャットダウン後はポストしたアクションが実行されないため、
+                    // UI 通知をスキップしてログ記録のみとする
+                    return app != null
+                        && !app.Dispatcher.HasShutdownStarted
+                        && !app.Dispatcher.HasShutdownFinished;
+                },
+                postToUi: action => Application.Current?.Dispatcher.BeginInvoke(action),
+                notifyError: exception =>
+                {
+                    // OnExit で ServiceProvider が Dispose された後の発火では GetService が
+                    // ObjectDisposedException を投げ得るが、UnobservedTaskExceptionHandler 側の
+                    // try/catch が握りつぶすため通知がスキップされるだけで済む。
+                    // 文言: トーストは文字数制約があるため 3 要素のフル文言ではなく簡潔表現を優先
+                    // （error-messages.md）。例外の詳細は Handle がログへ記録済み
+                    ServiceProvider?.GetService<IToastNotificationService>()?.ShowError(
+                        "バックグラウンド処理エラー",
+                        "画面更新などのバックグラウンド処理が失敗しました。操作はそのまま続けられます。" +
+                        "繰り返し表示される場合は管理者に連絡してください。");
+                });
         }
 
         /// <summary>
@@ -914,28 +960,22 @@ namespace ICCardManager
         }
 
         /// <summary>
-        /// Task内の未観測例外ハンドラー
+        /// Task内の未観測例外ハンドラー（Issue #1742）
         /// </summary>
+        /// <remarks>
+        /// 本ハンドラは Task のファイナライズ時（＝ファイナライザスレッド）に呼ばれる。
+        /// 同期ディスパッチ（Dispatcher.Invoke）＋モーダル表示（ErrorDialogHelper →
+        /// MessageBox.Show）を行うと、ユーザーが [OK] を押すまでプロセス全体の
+        /// ファイナライザが停止するため、ログ記録と非同期・非モーダル通知だけを行う
+        /// UnobservedTaskExceptionHandler へ委譲する。
+        /// </remarks>
         private void OnUnobservedTaskException(object sender, UnobservedTaskExceptionEventArgs e)
         {
-            _logger?.LogError(e.Exception, "Task未観測例外 (InnerCount={InnerCount})", e.Exception.InnerExceptions.Count);
-
-            // 例外を観測済みとしてマーク（アプリケーションのクラッシュを防止）
+            // 例外を観測済みとしてマーク（アプリケーションのクラッシュを防止）。
+            // 以降の処理で何が起きてもプロセスを守れるよう、最初に呼ぶ
             e.SetObserved();
 
-            // 内部例外もログに記録
-            foreach (var innerException in e.Exception.InnerExceptions)
-            {
-                _logger?.LogError(innerException, "Task未観測例外の内部例外");
-            }
-
-            // UIスレッドでエラーダイアログを表示
-            Dispatcher.Invoke(() =>
-            {
-                // 複数の例外がある場合は最初のものを表示
-                var displayException = e.Exception.InnerExceptions.FirstOrDefault() ?? e.Exception;
-                ErrorDialogHelper.ShowError(displayException, "バックグラウンド処理エラー");
-            });
+            _unobservedTaskExceptionHandler?.Handle(e.Exception);
         }
 
         #endregion
