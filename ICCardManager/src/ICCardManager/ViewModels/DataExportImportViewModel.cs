@@ -647,6 +647,18 @@ public partial class DataExportImportViewModel : ViewModelBase
         // 例外で中断する経路（共有フォルダーの切断等）も同じ経路でまとめて塞げる。
         LastImportedFile = string.Empty;
 
+        // Issue #1784: 結果ダイアログは BeginBusy スコープを抜けて IsBusy=false が確定した後に表示する。
+        // スコープ内で表示すると MessageBox がモーダルで待機する間、
+        // DataExportImportDialog.xaml の全面オーバーレイ（Grid.RowSpan=6・不透明）と不確定 ProgressBar が
+        // 「インポートが完了しました」の背後で回り続け、処理が終わったのか職員が判断できない。
+        // Issue #1383 がエクスポート経路（ExportToFileAsync）で解消した不具合のインポート版。
+        //
+        // 表示処理そのものを遅延させる（結果オブジェクトを持ち回すのではなく Action として持つ）ことで、
+        // 分岐ごとに組み立てた文言をその場に残したまま、ダイアログを出す地点を1か所へ集約できる。
+        // 分岐が増えても「文言の組み立て」と「表示のタイミング」が離れないため、
+        // 新しい分岐だけスコープ内で表示する形の再発を構造的に防ぐ。
+        Action pendingResultDialog = null;
+
         using (BeginBusy("インポート中..."))
         {
             // Issue #1062: UIスレッドにプログレスバー描画の機会を与える
@@ -691,7 +703,7 @@ public partial class DataExportImportViewModel : ViewModelBase
                     HasImported = true;
                 }
 
-                await HandleImportResultAsync(result, sourceFilePath, importTargetTable);
+                pendingResultDialog = await HandleImportResultAsync(result, sourceFilePath, importTargetTable);
             }
             catch (Exception ex)
             {
@@ -699,22 +711,36 @@ public partial class DataExportImportViewModel : ViewModelBase
                 ErrorDialogHelper.LogException(ex, "インポート");
                 var importErrorMessage = ExceptionMessageFormatter.ToUserMessage(ex, "インポート");
                 SetStatus(importErrorMessage, true);
-                _dialogService.ShowError(importErrorMessage, "インポートエラー");
+                pendingResultDialog = () => _dialogService.ShowError(importErrorMessage, "インポートエラー");
 #if DEBUG
                 System.Diagnostics.Debug.WriteLine($"[Import Error] {ex.GetType().Name}: {ex.Message}");
                 System.Diagnostics.Debug.WriteLine($"[Import Error] StackTrace: {ex.StackTrace}");
 #endif
             }
         }
+
+        // Issue #1784: ここが結果ダイアログを表示する唯一の地点。IsBusy=false が確定済み。
+        // データ種別が不正な分岐は using の内側で return するため、ここには到達せず
+        // ダイアログも表示しない（ExportToFileAsync の default 分岐と同じ扱い）。
+        pendingResultDialog?.Invoke();
     }
 
     /// <summary>
-    /// インポート結果（成功／失敗／部分成功）の通知・監査ログ記録を行う（Issue #1785）
+    /// インポート結果（成功／失敗／部分成功）の画面反映・監査ログ記録を行い、
+    /// 結果ダイアログの表示処理を呼び出し元へ返す（Issue #1785）
     /// </summary>
+    /// <remarks>
+    /// Issue #1784: 本メソッドはダイアログを<b>表示しない</b>。呼び出し元
+    /// （<see cref="RunImportAsync"/>）が <c>BeginBusy</c> スコープを抜けてから実行する。
+    /// ステータス文言・エラー一覧・プレビュー破棄といった画面状態の更新はダイアログより先に
+    /// 反映させたいため、ここに残してある。分岐を追加するときは
+    /// <c>_dialogService.ShowXxx</c> を直接呼ばず、戻り値の <see cref="Action"/> に載せること。
+    /// </remarks>
     /// <param name="result">インポートサービスの実行結果</param>
     /// <param name="sourceFilePath">監査ログへ記録するインポート元パス（確定済みの値）</param>
     /// <param name="targetTable">監査ログへ記録する対象テーブル（確定済みの値）</param>
-    private async Task HandleImportResultAsync(
+    /// <returns>スコープを抜けた後に実行する結果ダイアログの表示処理</returns>
+    private async Task<Action> HandleImportResultAsync(
         CsvImportResult result,
         string sourceFilePath,
         string targetTable)
@@ -781,59 +807,57 @@ public partial class DataExportImportViewModel : ViewModelBase
 
             if (auditLogged)
             {
-                _dialogService.ShowInformation(
-                    completionMessage + discardedPreviewNotice,
-                    "インポート完了");
+                var informationMessage = completionMessage + discardedPreviewNotice;
+                return () => _dialogService.ShowInformation(informationMessage, "インポート完了");
             }
-            else
-            {
-                _dialogService.ShowWarning(
-                    completionMessage + AuditLogFailureNotice + discardedPreviewNotice,
-                    "インポート完了（操作ログ記録の失敗あり）");
-            }
+
+            var warningMessage = completionMessage + AuditLogFailureNotice + discardedPreviewNotice;
+            return () => _dialogService.ShowWarning(
+                warningMessage,
+                "インポート完了（操作ログ記録の失敗あり）");
         }
-        else if (!string.IsNullOrEmpty(result.ErrorMessage))
+
+        if (!string.IsNullOrEmpty(result.ErrorMessage))
         {
             SetStatus($"インポートエラー: {result.ErrorMessage}", true);
-            _dialogService.ShowError(
-                $"インポートに失敗しました。\n\n{result.ErrorMessage}",
-                "インポートエラー");
+            var errorMessage = $"インポートに失敗しました。\n\n{result.ErrorMessage}";
+            return () => _dialogService.ShowError(errorMessage, "インポートエラー");
         }
-        else
+
+        // ここから先は部分成功（一部エラー）。書き込みは確定しているため警告として通知する。
+        var partialStatusMessage =
+            $"インポート完了（一部エラー）: {result.ImportedCount}件を登録、{result.ErrorCount}件がエラー";
+        if (result.SkippedCount > 0)
         {
-            var message = $"インポート完了（一部エラー）: {result.ImportedCount}件を登録、{result.ErrorCount}件がエラー";
-            if (result.SkippedCount > 0)
-            {
-                message += $"、{result.SkippedCount}件はスキップ";
-            }
-            SetStatus(message, false);
-
-            // エラー詳細を追加
-            foreach (var error in result.Errors.Take(10))
-            {
-                ImportErrors.Add($"行{error.LineNumber}: {error.Message}");
-            }
-
-            if (result.Errors.Count > 10)
-            {
-                ImportErrors.Add($"... 他 {result.Errors.Count - 10}件のエラー");
-            }
-
-            // Issue #1302: 部分成功でもデータは書き込まれたため監査ログ記録
-            var partialAuditLogged = true;
-            if (result.ImportedCount > 0)
-            {
-                partialAuditLogged = await TryLogImportAsync(targetTable, sourceFilePath, result);
-            }
-
-            _dialogService.ShowWarning(
-                $"インポートが完了しましたが、一部エラーがあります。\n\n登録件数: {result.ImportedCount}件\nエラー: {result.ErrorCount}件"
-                + (result.SkippedCount > 0 ? $"\nスキップ: {result.SkippedCount}件" : "")
-                + BuildPartialImportGuidance(result.ImportedCount)
-                + (partialAuditLogged ? "" : AuditLogFailureNotice)
-                + discardedPreviewNotice,
-                "インポート完了（一部エラー）");
+            partialStatusMessage += $"、{result.SkippedCount}件はスキップ";
         }
+        SetStatus(partialStatusMessage, false);
+
+        // エラー詳細を追加
+        foreach (var error in result.Errors.Take(10))
+        {
+            ImportErrors.Add($"行{error.LineNumber}: {error.Message}");
+        }
+
+        if (result.Errors.Count > 10)
+        {
+            ImportErrors.Add($"... 他 {result.Errors.Count - 10}件のエラー");
+        }
+
+        // Issue #1302: 部分成功でもデータは書き込まれたため監査ログ記録
+        var partialAuditLogged = true;
+        if (result.ImportedCount > 0)
+        {
+            partialAuditLogged = await TryLogImportAsync(targetTable, sourceFilePath, result);
+        }
+
+        var partialWarningMessage =
+            $"インポートが完了しましたが、一部エラーがあります。\n\n登録件数: {result.ImportedCount}件\nエラー: {result.ErrorCount}件"
+            + (result.SkippedCount > 0 ? $"\nスキップ: {result.SkippedCount}件" : "")
+            + BuildPartialImportGuidance(result.ImportedCount)
+            + (partialAuditLogged ? "" : AuditLogFailureNotice)
+            + discardedPreviewNotice;
+        return () => _dialogService.ShowWarning(partialWarningMessage, "インポート完了（一部エラー）");
     }
 
     /// <summary>
