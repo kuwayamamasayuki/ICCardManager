@@ -544,6 +544,16 @@ public partial class OperationLogSearchViewModel : ViewModelBase
         {
             var doc = JsonDocument.Parse(jsonData);
 
+            // Issue #1741: 一括操作（IMPORT / EXPORT / BACKUP / RESTORE、Issue #1302）の payload は
+            // ファイル情報だけを持ちエンティティ項目を持たないため、テーブル別の生成へ回すと必ず空になる。
+            // Action で振り分けないのは RESTORE がレコード単位復元（LogStaffRestoreAsync）と共用のため。
+            // payload に FileName があるかで判定すれば、両者を取り違えない。
+            var bulkOperationFileName = GetJsonPropertyValue(doc, "FileName") ?? "";
+            if (bulkOperationFileName.Length > 0)
+            {
+                return bulkOperationFileName;
+            }
+
             return log.TargetTable switch
             {
                 "staff" => GenerateStaffDisplayName(doc),

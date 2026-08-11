@@ -335,6 +335,76 @@ public class OperationLogSearchViewModelTests
         displayName.Should().Contain("R7"); // 令和7年
     }
 
+    /// <summary>
+    /// Issue #1741: インポート行の表示名にインポート元ファイル名が出ること
+    /// </summary>
+    /// <remarks>
+    /// 一括操作（IMPORT / EXPORT / BACKUP / RESTORE、Issue #1302）の payload は
+    /// ファイル情報だけを持ちエンティティ項目を持たないため、テーブル別の生成へ回すと必ず空になる。
+    /// target_id を復旧しても、この列が空欄では取り込み元を追跡できない。
+    /// </remarks>
+    [Fact]
+    public async Task SearchAsync_インポートの表示名がファイル名になること()
+    {
+        // Arrange: ic_card テーブル宛だが payload は OperationLogger.LogImportAsync の形
+        var testLog = MakeLog(1, action: "IMPORT", targetTable: "ic_card", targetId: "cards_20260811.csv",
+            operatorName: "管理者",
+            afterData: "{\"FilePath\":\"C:\\\\temp\\\\cards_20260811.csv\",\"FileName\":\"cards_20260811.csv\","
+                       + "\"InsertedCount\":3,\"SkippedCount\":0,\"ErrorCount\":0}");
+        SetupKeysetReturning(new[] { testLog });
+
+        // Act
+        await _viewModel.SearchAsync();
+
+        // Assert
+        _viewModel.Logs[0].TargetDisplayName.Should().Be("cards_20260811.csv");
+    }
+
+    /// <summary>
+    /// Issue #1741: エクスポート／バックアップ行の表示名もファイル名になること
+    /// </summary>
+    [Theory]
+    [InlineData("EXPORT", "ledger", "ledger_202608.csv")]
+    [InlineData("BACKUP", "database", "iccard_20260811.db")]
+    public async Task SearchAsync_一括ファイル操作の表示名がファイル名になること(
+        string action, string targetTable, string fileName)
+    {
+        // Arrange
+        var testLog = MakeLog(1, action: action, targetTable: targetTable, targetId: fileName,
+            operatorName: "管理者",
+            afterData: $"{{\"FilePath\":\"C:\\\\temp\\\\{fileName}\",\"FileName\":\"{fileName}\"}}");
+        SetupKeysetReturning(new[] { testLog });
+
+        // Act
+        await _viewModel.SearchAsync();
+
+        // Assert
+        _viewModel.Logs[0].TargetDisplayName.Should().Be(fileName);
+    }
+
+    /// <summary>
+    /// Issue #1741: レコード単位の復元（RESTORE）は従来どおりエンティティの表示名になること
+    /// </summary>
+    /// <remarks>
+    /// RESTORE は DB 丸ごとリストア（ファイル操作）とレコード単位復元で共用されるため、
+    /// Action だけで振り分けると職員の復元がファイル名扱いになる。payload の FileName 有無で判定する。
+    /// </remarks>
+    [Fact]
+    public async Task SearchAsync_レコード単位の復元は一括ファイル操作と誤判定されないこと()
+    {
+        // Arrange
+        var testLog = MakeLog(1, action: "RESTORE", targetTable: "staff", targetId: "ABC123",
+            operatorName: "管理者",
+            afterData: "{\"Name\":\"田中太郎\",\"Number\":\"001\"}");
+        SetupKeysetReturning(new[] { testLog });
+
+        // Act
+        await _viewModel.SearchAsync();
+
+        // Assert
+        _viewModel.Logs[0].TargetDisplayName.Should().Be("田中太郎（001）");
+    }
+
     [Fact]
     public async Task SearchAsync_JSONが無い場合にTargetIdが表示名になること()
     {
