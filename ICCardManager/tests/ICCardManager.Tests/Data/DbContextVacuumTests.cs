@@ -1,4 +1,5 @@
 using System;
+using System.Data.SQLite;
 using System.IO;
 using FluentAssertions;
 using ICCardManager.Data;
@@ -115,6 +116,45 @@ public class DbContextVacuumTests : IDisposable
         // Assert: レベルだけでなく「切り分けを先に進める値」（ResultCode）が載っていること
         VerifyLogged(loggerMock, LogLevel.Warning, "VACUUM");
         VerifyLogged(loggerMock, LogLevel.Warning, "Error");
+    }
+
+    /// <summary>
+    /// 恒久的な失敗（待っても解消しない）は Error で記録する。
+    /// </summary>
+    /// <remarks>
+    /// 月次 VACUUM は CAS ロック（Issue #1482）を消費してから実行されるため、失敗しても
+    /// 当月は誰も再試行しない。書き込み不可・容量不足・破損を「来月再試行します」の Warning に
+    /// 紛れさせると、DB ファイル自体の異常が無関係な書き込みの失敗まで気付かれない。
+    /// 実機で ReadOnly / Full / Corrupt を安定して再現できないため、分類そのものを表明する。
+    /// </remarks>
+    [Theory]
+    [InlineData(SQLiteErrorCode.ReadOnly)]
+    [InlineData(SQLiteErrorCode.Full)]
+    [InlineData(SQLiteErrorCode.Corrupt)]
+    [InlineData(SQLiteErrorCode.NotADb)]
+    [InlineData(SQLiteErrorCode.CantOpen)]
+    [InlineData(SQLiteErrorCode.Perm)]
+    public void IsPermanentVacuumFailure_待っても解消しないコードを恒久的失敗と判定すること(SQLiteErrorCode code)
+    {
+        DbContext.IsPermanentVacuumFailure(code).Should().BeTrue(
+            $"{code} は月次の再試行では解消しないため Error として管理者に届ける必要がある");
+    }
+
+    /// <summary>
+    /// 一時的な失敗（来月または次回起動で解消し得る）は Warning に留める。
+    /// </summary>
+    /// <remarks>
+    /// <see cref="SQLiteErrorCode.Error"/> は "cannot VACUUM - SQL statements in progress" が返すコードで、
+    /// 他の接続がステートメントを保持しているだけの一時的な状態。恒久扱いすると誤警報になる。
+    /// </remarks>
+    [Theory]
+    [InlineData(SQLiteErrorCode.Busy)]
+    [InlineData(SQLiteErrorCode.Locked)]
+    [InlineData(SQLiteErrorCode.Error)]
+    public void IsPermanentVacuumFailure_一時的なコードを恒久的失敗と判定しないこと(SQLiteErrorCode code)
+    {
+        DbContext.IsPermanentVacuumFailure(code).Should().BeFalse(
+            $"{code} は他の接続がアクティブなだけで、次回起動や来月には解消し得る");
     }
 
     private static void VerifyLogged(Mock<ILogger<DbContext>> loggerMock, LogLevel level, string expectedFragment)

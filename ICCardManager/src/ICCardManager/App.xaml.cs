@@ -811,7 +811,21 @@ namespace ICCardManager
         /// </remarks>
         private async Task PerformStartupTasksAsync()
         {
-            var runner = ServiceProvider.GetRequiredService<StartupTaskRunner>();
+            // 保守タスクの依存が解決できなくてもアプリは起動させる。
+            // RunAsync の内部 catch は「自分自身の DI 解決」を覆えないため、ここで囲む必要がある。
+            // 起動時タスクは貸出・返却の前提ではなく、失敗しても当日のバックアップと
+            // 古いデータ削除を諦めるだけで済む（起動を止めると窓口業務が丸ごと止まる）。
+            StartupTaskRunner runner;
+            try
+            {
+                runner = ServiceProvider.GetRequiredService<StartupTaskRunner>();
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogError(ex, "起動時タスクの初期化に失敗したためスキップします");
+                return;
+            }
+
             await runner.RunAsync(DateTime.Now);
         }
 

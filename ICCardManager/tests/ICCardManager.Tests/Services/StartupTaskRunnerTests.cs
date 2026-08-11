@@ -39,11 +39,16 @@ public class StartupTaskRunnerTests
     private readonly Mock<ILogger<StartupTaskRunner>> _loggerMock = new();
     private readonly StartupTaskRunner _runner;
 
-    /// <summary>VACUUM を試行する日（10日以降）。</summary>
-    private static readonly DateTime VacuumDay = new(2026, 8, 10);
+    /// <summary>
+    /// VACUUM を試行する日。しきい値は本番の定数から導出する
+    /// （テスト側に日付リテラルを再エンコードすると、しきい値変更時に
+    /// 「9日は15日より前」のような誤った理由でテストが通り続ける）。
+    /// </summary>
+    private static readonly DateTime VacuumDay =
+        new DateTime(2026, 8, 1).AddDays(StartupTaskRunner.MonthlyVacuumStartDay - 1);
 
-    /// <summary>VACUUM を試行しない日（10日より前）。</summary>
-    private static readonly DateTime NonVacuumDay = new(2026, 8, 9);
+    /// <summary>VACUUM を試行しない日（しきい値の前日）。</summary>
+    private static readonly DateTime NonVacuumDay = VacuumDay.AddDays(-1);
 
     public StartupTaskRunnerTests()
     {
@@ -76,36 +81,7 @@ public class StartupTaskRunnerTests
     public async Task RunAsync_バックアップと古いデータ削除が同時に実行されないこと()
     {
         // Arrange: 各タスクの「保持区間」を計測する。
-        // バックアップ側は実際に await 境界をまたいで滞在させ、
-        // fire-and-forget なら後続タスクと保持区間が重なるようにする。
-        var tracker = new ConcurrencyTracker();
-
-        _backupServiceMock.Setup(x => x.ExecuteAutoBackupAsync())
-            .Returns(async () =>
-            {
-                tracker.Enter("backup");
-                await Task.Delay(100);
-                tracker.Exit("backup");
-                return "C:\\backup\\dummy.db";
-            });
-
-        _dbContextMock.Setup(x => x.CleanupOldDataAsync(It.IsAny<CancellationToken>()))
-            .Returns(async () =>
-            {
-                tracker.Enter("cleanup");
-                await Task.Delay(20);
-                tracker.Exit("cleanup");
-                return (0, 0);
-            });
-
-        _dbContextMock.Setup(x => x.VacuumAsync(It.IsAny<CancellationToken>()))
-            .Returns(async () =>
-            {
-                tracker.Enter("vacuum");
-                await Task.Delay(20);
-                tracker.Exit("vacuum");
-                return true;
-            });
+        var tracker = SetupTrackedTasks();
 
         // Act
         await _runner.RunAsync(VacuumDay);
@@ -120,34 +96,7 @@ public class StartupTaskRunnerTests
     public async Task RunAsync_バックアップ完了後に古いデータ削除が始まること()
     {
         // Arrange
-        var tracker = new ConcurrencyTracker();
-
-        _backupServiceMock.Setup(x => x.ExecuteAutoBackupAsync())
-            .Returns(async () =>
-            {
-                tracker.Enter("backup");
-                await Task.Delay(100);
-                tracker.Exit("backup");
-                return "C:\\backup\\dummy.db";
-            });
-
-        _dbContextMock.Setup(x => x.CleanupOldDataAsync(It.IsAny<CancellationToken>()))
-            .Returns(async () =>
-            {
-                tracker.Enter("cleanup");
-                await Task.Delay(20);
-                tracker.Exit("cleanup");
-                return (0, 0);
-            });
-
-        _dbContextMock.Setup(x => x.VacuumAsync(It.IsAny<CancellationToken>()))
-            .Returns(async () =>
-            {
-                tracker.Enter("vacuum");
-                await Task.Delay(20);
-                tracker.Exit("vacuum");
-                return true;
-            });
+        var tracker = SetupTrackedTasks();
 
         // Act
         await _runner.RunAsync(VacuumDay);
@@ -160,10 +109,45 @@ public class StartupTaskRunnerTests
     }
 
     [Fact]
+    public async Task RunAsync_バックアップがnullを返したら警告を残し後続タスクを続けること()
+    {
+        // Arrange: ExecuteAutoBackupAsync は失敗を「例外」ではなく「null 戻り値」で表す
+        // （内部で全例外を catch して null を返す）。本番で実際に観測できるのはこちらだけで、
+        // 例外経路はモックでしか再現できない。戻り値を捨てていると、バックアップ先が
+        // 到達不能でも起動シーケンスのログは正常に見えてしまう。
+        _backupServiceMock.Setup(x => x.ExecuteAutoBackupAsync())
+            .ReturnsAsync((string)null);
+
+        // Act
+        await _runner.RunAsync(VacuumDay);
+
+        // Assert
+        VerifyLogged(LogLevel.Warning, "自動バックアップに失敗");
+        _dbContextMock.Verify(x => x.CleanupOldDataAsync(It.IsAny<CancellationToken>()), Times.Once,
+            "バックアップの失敗で古いデータ削除がスキップされてはならない");
+        _dbContextMock.Verify(x => x.VacuumAsync(It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task RunAsync_バックアップ成功時は失敗警告を出さないこと()
+    {
+        // Act
+        await _runner.RunAsync(VacuumDay);
+
+        // Assert: 正常運用でログを肥大化させない
+        VerifyNotLogged("自動バックアップに失敗");
+    }
+
+    [Fact]
     public async Task RunAsync_バックアップが例外で失敗しても後続タスクは実行されること()
     {
         // Arrange: 直列化（await 化）で「バックアップの失敗が後続タスクを巻き添えにする」
         // 退行が起きないことを固定する。
+        //
+        // 注: 現在の BackupService.ExecuteAutoBackupAsync は全例外を内部で catch するため
+        // この経路は本番では到達しない（実際に観測されるのは上の null 戻り値のケース）。
+        // ここで固定しているのは「BackupService が将来例外を投げるようになっても
+        // 後続タスクが止まらない」という backstop の振る舞い。
         _backupServiceMock.Setup(x => x.ExecuteAutoBackupAsync())
             .ThrowsAsync(new InvalidOperationException("バックアップ先が見つかりません"));
 
@@ -282,6 +266,50 @@ public class StartupTaskRunnerTests
     #endregion
 
     #region ヘルパー
+
+    /// <summary>
+    /// 起動時タスク3本を「保持区間を計測するスタブ」に差し替える。
+    /// </summary>
+    /// <remarks>
+    /// 直列性テストが複数あるため 1 か所に集約する。個別にコピーすると、
+    /// 4 本目のタスクを足したときに片方だけが更新され、
+    /// もう片方は古いタスク集合を計測したまま緑になる。
+    /// バックアップ側だけ滞在時間を長くしてあるのは、
+    /// fire-and-forget なら後続タスクと保持区間が確実に重なるようにするため。
+    /// </remarks>
+    private ConcurrencyTracker SetupTrackedTasks()
+    {
+        var tracker = new ConcurrencyTracker();
+
+        _backupServiceMock.Setup(x => x.ExecuteAutoBackupAsync())
+            .Returns(async () =>
+            {
+                tracker.Enter("backup");
+                await Task.Delay(100);
+                tracker.Exit("backup");
+                return "C:\\backup\\dummy.db";
+            });
+
+        _dbContextMock.Setup(x => x.CleanupOldDataAsync(It.IsAny<CancellationToken>()))
+            .Returns(async () =>
+            {
+                tracker.Enter("cleanup");
+                await Task.Delay(20);
+                tracker.Exit("cleanup");
+                return (0, 0);
+            });
+
+        _dbContextMock.Setup(x => x.VacuumAsync(It.IsAny<CancellationToken>()))
+            .Returns(async () =>
+            {
+                tracker.Enter("vacuum");
+                await Task.Delay(20);
+                tracker.Exit("vacuum");
+                return true;
+            });
+
+        return tracker;
+    }
 
     private void VerifyLogged(LogLevel level, string expectedFragment)
     {

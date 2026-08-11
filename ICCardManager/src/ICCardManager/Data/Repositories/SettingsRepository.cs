@@ -82,14 +82,31 @@ namespace ICCardManager.Data.Repositories
         /// <inheritdoc/>
         public async Task<bool> SetAsync(string key, string value)
         {
-            return await WriteGuardedAsync(command =>
-            {
-                command.CommandText = @"INSERT INTO settings (key, value) VALUES (@key, @value)
+            return await WriteGuardedAsync(command => ConfigureSetCommand(command, key, value), scope: null)
+                .ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// 呼び出し元が開いたトランザクションへ書き込む <see cref="SetAsync(string, string)"/>（Issue #1737）。
+        /// </summary>
+        /// <remarks>
+        /// 外側スコープの内側から書く経路は**必ずこちらを使う**こと。
+        /// 引数なし版はスコープの持ち主を判別できず、他フローのスコープに巻き込まれる余地が残る
+        /// （<see cref="WriteGuardedAsync"/> の分岐②の注記を参照）。
+        /// </remarks>
+        private async Task<bool> SetAsync(string key, string value, TransactionScope scope)
+        {
+            return await WriteGuardedAsync(command => ConfigureSetCommand(command, key, value), scope)
+                .ConfigureAwait(false);
+        }
+
+        private static void ConfigureSetCommand(SQLiteCommand command, string key, string value)
+        {
+            command.CommandText = @"INSERT INTO settings (key, value) VALUES (@key, @value)
 ON CONFLICT(key) DO UPDATE SET value = @value";
 
-                command.Parameters.AddWithValue("@key", key);
-                command.Parameters.AddWithValue("@value", (object)value ?? DBNull.Value);
-            }).ConfigureAwait(false);
+            command.Parameters.AddWithValue("@key", key);
+            command.Parameters.AddWithValue("@value", (object)value ?? DBNull.Value);
         }
 
         /// <inheritdoc/>
@@ -110,7 +127,7 @@ WHERE settings.value IS NULL OR substr(settings.value, 1, 7) <> @currentMonth";
                 command.Parameters.AddWithValue("@key", KeyLastVacuumDate);
                 command.Parameters.AddWithValue("@today", today.ToString("yyyy-MM-dd"));
                 command.Parameters.AddWithValue("@currentMonth", today.ToString("yyyy-MM"));
-            }).ConfigureAwait(false);
+            }, scope: null).ConfigureAwait(false);
 
             if (acquired)
             {
@@ -124,6 +141,7 @@ WHERE settings.value IS NULL OR substr(settings.value, 1, 7) <> @currentMonth";
         /// settings への 1 文の書き込みを、単一接続のセマフォ保護下で実行する（Issue #1737）。
         /// </summary>
         /// <param name="configureCommand">CommandText とパラメータを設定するデリゲート</param>
+        /// <param name="scope">呼び出し元が開いたトランザクション。無い場合は null</param>
         /// <returns>影響行数が 1 以上なら true</returns>
         /// <remarks>
         /// <para>
@@ -135,34 +153,81 @@ WHERE settings.value IS NULL OR substr(settings.value, 1, 7) <> @currentMonth";
         /// "cannot VACUUM - SQL statements in progress" になる。
         /// </para>
         /// <para>
-        /// 分岐は <c>.claude/rules/development-conventions.md</c> の規約に従う:
-        /// 外側スコープが既にある場合は接続だけを借りて暗黙参加する（②）。
-        /// <see cref="DbContext.BeginTransactionAsync"/> は <c>SemaphoreSlim(1,1)</c> を取るため、
-        /// 入れ子で開くと自己デッドロックする（Issue #1575）。
-        /// <see cref="SaveAppSettingsAsync"/> は実際に外側スコープの内側から本メソッドを繰り返し呼ぶ。
+        /// 分岐は <c>.claude/rules/development-conventions.md</c> の 3 分岐規約に従う。
+        /// </para>
+        /// <para>
+        /// <b>① <paramref name="scope"/> あり</b>: そのトランザクションを全文に適用する。
+        /// commit / rollback は呼び出し元の責務。<see cref="SaveAppSettingsAsync"/> のように
+        /// 外側スコープの内側から書く経路は**必ずこの形にする**。
+        /// </para>
+        /// <para>
+        /// <b>② <paramref name="scope"/> が null かつ <see cref="DbContext.HasActiveTransactionScope"/></b>:
+        /// 接続だけ借りて暗黙参加する。<see cref="DbContext.BeginTransactionAsync"/> は
+        /// <c>SemaphoreSlim(1,1)</c> を取るため、自分のフローが既に開いているスコープの内側で
+        /// 開き直すと自己デッドロックする（Issue #1575）。この分岐はそれを避けるための backstop。
+        /// <b>ただし <see cref="DbContext.HasActiveTransactionScope"/> はプロセス全体のカウンタであり、
+        /// 「自分のスコープか他フローのスコープか」を区別できない。</b>
+        /// 他フローのスコープに巻き込まれると、そのロールバックで書き込みが消える（#1737 の欠陥そのもの）。
+        /// したがって**入れ子になる経路は①で明示的に引き渡すこと**。②に頼ってはならない。
+        /// </para>
+        /// <para>
+        /// <b>③ それ以外</b>: 自前でトランザクションを持つ（＝セマフォを取る）。
+        /// 他フローがスコープを保持していればここで待たされるため、巻き込まれない。
+        /// 共有モードの SQLITE_BUSY に備え <c>DbContext.ExecuteWithRetryAsync</c>
+        /// で包む（Issue #1727「書込みトランザクションを新設したら既存の同種経路と同じ防御が掛かっているかを見る」）。
         /// </para>
         /// </remarks>
-        private async Task<bool> WriteGuardedAsync(Action<SQLiteCommand> configureCommand)
+        private async Task<bool> WriteGuardedAsync(Action<SQLiteCommand> configureCommand, TransactionScope scope)
         {
-            // ② 外側に BeginTransactionAsync のスコープがある場合は、そのトランザクションへ暗黙参加する
-            //    （セマフォは外側が保持済み。commit/rollback も外側の責務）
+            // ① 呼び出し元がトランザクションを引き渡した場合はそれを使う
+            if (scope != null)
+            {
+                return await ExecuteWriteAsync(scope.Lease.Connection, scope.Transaction, configureCommand)
+                    .ConfigureAwait(false);
+            }
+
+            // ② 引数 null かつ外側スコープが開いている場合は接続だけ借りて暗黙参加する
+            //    （commit/rollback は外側の責務。上記 remarks の注意書きを必ず読むこと）
             if (_dbContext.HasActiveTransactionScope)
             {
                 using var lease = await _dbContext.LeaseConnectionAsync().ConfigureAwait(false);
-                using var joinedCommand = lease.Connection.CreateCommand();
-                configureCommand(joinedCommand);
-                return await joinedCommand.ExecuteNonQueryAsync().ConfigureAwait(false) > 0;
+                return await ExecuteWriteAsync(lease.Connection, transaction: null, configureCommand)
+                    .ConfigureAwait(false);
             }
 
             // ③ 外側スコープが無い場合は自前でトランザクションを持つ（＝セマフォを取る）
-            using var scope = await _dbContext.BeginTransactionAsync().ConfigureAwait(false);
-            using var command = scope.Lease.Connection.CreateCommand();
-            command.Transaction = scope.Transaction;
+            var result = false;
+            await _dbContext.ExecuteWithRetryAsync(async () =>
+            {
+                using var ownScope = await _dbContext.BeginTransactionAsync().ConfigureAwait(false);
+                result = await ExecuteWriteAsync(
+                    ownScope.Lease.Connection, ownScope.Transaction, configureCommand).ConfigureAwait(false);
+                ownScope.Commit();
+            }).ConfigureAwait(false);
+            return result;
+        }
+
+        /// <summary>
+        /// 指定の接続／トランザクション上で 1 文を実行する（Issue #1737）。
+        /// </summary>
+        /// <remarks>
+        /// コマンドは呼び出しごとに新規作成するため、
+        /// <c>DbContext.ExecuteWithRetryAsync</c> による再試行でも
+        /// パラメータが二重登録されない。
+        /// </remarks>
+        private static async Task<bool> ExecuteWriteAsync(
+            SQLiteConnection connection,
+            SQLiteTransaction transaction,
+            Action<SQLiteCommand> configureCommand)
+        {
+            using var command = connection.CreateCommand();
+            if (transaction != null)
+            {
+                command.Transaction = transaction;
+            }
             configureCommand(command);
 
-            var rowsAffected = await command.ExecuteNonQueryAsync().ConfigureAwait(false);
-            scope.Commit();
-            return rowsAffected > 0;
+            return await command.ExecuteNonQueryAsync().ConfigureAwait(false) > 0;
         }
 
         /// <inheritdoc/>
@@ -405,32 +470,35 @@ WHERE settings.value IS NULL OR substr(settings.value, 1, 7) <> @currentMonth";
                 {
                     success = true;
 
-                    success &= await SetAsync(KeyWarningBalance, settings.WarningBalance.ToString());
-                    success &= await SetAsync(KeyBackupPath, settings.BackupPath);
-                    success &= await SetAsync(KeyFontSize, FontSizeToString(settings.FontSize));
+                    // Issue #1737: 外側スコープの内側から書くため、トランザクションを明示的に引き渡す（分岐①）。
+                    // 引数なし版に頼ると HasActiveTransactionScope（プロセス全体のカウンタ）経由の
+                    // 暗黙参加になり、「自分のスコープか他フローのスコープか」を区別できない。
+                    success &= await SetAsync(KeyWarningBalance, settings.WarningBalance.ToString(), scope);
+                    success &= await SetAsync(KeyBackupPath, settings.BackupPath, scope);
+                    success &= await SetAsync(KeyFontSize, FontSizeToString(settings.FontSize), scope);
 
                     if (settings.LastVacuumDate.HasValue)
                     {
-                        success &= await SetAsync(KeyLastVacuumDate, settings.LastVacuumDate.Value.ToString("yyyy-MM-dd"));
+                        success &= await SetAsync(KeyLastVacuumDate, settings.LastVacuumDate.Value.ToString("yyyy-MM-dd"), scope);
                     }
 
                     // ウィンドウ設定を保存
-                    success &= await SaveWindowSettingsToDbAsync(settings.MainWindowSettings);
+                    success &= await SaveWindowSettingsToDbAsync(settings.MainWindowSettings, scope);
 
                     // 音声モード設定を保存
-                    success &= await SetAsync(KeySoundMode, SoundModeToString(settings.SoundMode));
+                    success &= await SetAsync(KeySoundMode, SoundModeToString(settings.SoundMode), scope);
 
                     // トースト位置設定を保存
-                    success &= await SetAsync(KeyToastPosition, ToastPositionToString(settings.ToastPosition));
+                    success &= await SetAsync(KeyToastPosition, ToastPositionToString(settings.ToastPosition), scope);
 
                     // 部署種別設定を保存
-                    success &= await SetAsync(KeyDepartmentType, DepartmentTypeToString(settings.DepartmentType));
+                    success &= await SetAsync(KeyDepartmentType, DepartmentTypeToString(settings.DepartmentType), scope);
 
                     // バス停入力スキップ設定を保存
-                    success &= await SetAsync(KeySkipBusStopInputOnReturn, settings.SkipBusStopInputOnReturn.ToString().ToLowerInvariant());
+                    success &= await SetAsync(KeySkipBusStopInputOnReturn, settings.SkipBusStopInputOnReturn.ToString().ToLowerInvariant(), scope);
 
                     // 帳票出力先フォルダ設定を保存
-                    success &= await SetAsync(KeyReportOutputFolder, settings.ReportOutputFolder ?? string.Empty);
+                    success &= await SetAsync(KeyReportOutputFolder, settings.ReportOutputFolder ?? string.Empty, scope);
 
                     scope.Commit();
                 }
@@ -450,31 +518,33 @@ WHERE settings.value IS NULL OR substr(settings.value, 1, 7) <> @currentMonth";
         /// <summary>
         /// ウィンドウ設定をDBに保存
         /// </summary>
-        private async Task<bool> SaveWindowSettingsToDbAsync(WindowSettings windowSettings)
+        /// <param name="windowSettings">保存するウィンドウ設定</param>
+        /// <param name="scope">呼び出し元が開いたトランザクション（Issue #1737: 分岐①で引き渡す）</param>
+        private async Task<bool> SaveWindowSettingsToDbAsync(WindowSettings windowSettings, TransactionScope scope)
         {
             var success = true;
 
             if (windowSettings.Left.HasValue)
             {
-                success &= await SetAsync(KeyWindowLeft, windowSettings.Left.Value.ToString("F0"));
+                success &= await SetAsync(KeyWindowLeft, windowSettings.Left.Value.ToString("F0"), scope);
             }
 
             if (windowSettings.Top.HasValue)
             {
-                success &= await SetAsync(KeyWindowTop, windowSettings.Top.Value.ToString("F0"));
+                success &= await SetAsync(KeyWindowTop, windowSettings.Top.Value.ToString("F0"), scope);
             }
 
             if (windowSettings.Width.HasValue)
             {
-                success &= await SetAsync(KeyWindowWidth, windowSettings.Width.Value.ToString("F0"));
+                success &= await SetAsync(KeyWindowWidth, windowSettings.Width.Value.ToString("F0"), scope);
             }
 
             if (windowSettings.Height.HasValue)
             {
-                success &= await SetAsync(KeyWindowHeight, windowSettings.Height.Value.ToString("F0"));
+                success &= await SetAsync(KeyWindowHeight, windowSettings.Height.Value.ToString("F0"), scope);
             }
 
-            success &= await SetAsync(KeyWindowMaximized, windowSettings.IsMaximized.ToString().ToLowerInvariant());
+            success &= await SetAsync(KeyWindowMaximized, windowSettings.IsMaximized.ToString().ToLowerInvariant(), scope);
 
             return success;
         }

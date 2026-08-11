@@ -61,18 +61,38 @@ namespace ICCardManager.Services
                 // 自動バックアップ（Issue #1737: 必ず完了を待つ）
                 // 戻り値を捨てる fire-and-forget にすると、バックアップ末尾の
                 // 「成功日時・実施PC名を settings へ記録する INSERT」（Issue #1689）が
-                // 後続タスクと同一接続上で並走する。バックアップ本体（BackupDatabaseTo）は
-                // 同期 LeaseConnection() でセマフォを取るため後続タスクはどのみち待たされており、
-                // await 化で増える待ち時間は「古い世代の削除（ファイル走査）＋ INSERT 2 件」分のみ。
+                // 後続タスクと同一接続上で並走する。
+                //
+                // 起動時間への影響: バックアップ本体（BackupDatabaseTo）と CleanupOldData は
+                // どちらも同期 LeaseConnection() でセマフォを奪い合う。バックアップが先に取れば
+                // 後続タスクは従来も待たされており、await 化で増えるのは
+                // 「古い世代の削除（ファイル走査）＋ INSERT 2 件」分だけ。
+                // 一方 CleanupOldData が先に取った回は、従来はバックアップ本体が
+                // 起動シーケンスの完了後（＝メイン画面の表示後）まで走り続けていたため、
+                // その回に限りメイン画面の表示が最大でバックアップ所要時間だけ遅くなる。
+                // 単一接続上の記録欠落を防ぐには直列化が必要であり、このコストは受け入れる。
                 //
                 // バックアップの失敗で後続の保守タスクを巻き添えにしないよう、
                 // ここだけは個別に catch する（fire-and-forget 時代の性質を維持する）。
                 try
                 {
-                    await _backupService.ExecuteAutoBackupAsync().ConfigureAwait(false);
+                    // ExecuteAutoBackupAsync は失敗を「例外」ではなく「null 戻り値」で表す
+                    // （内部で全例外を catch して null を返す）。戻り値を捨てると、
+                    // バックアップ先が到達不能でも起動シーケンスのログは正常に見えてしまう。
+                    var backupPath = await _backupService.ExecuteAutoBackupAsync().ConfigureAwait(false);
+                    if (string.IsNullOrEmpty(backupPath))
+                    {
+                        // 原因の詳細は BackupService 側が LogError 済み。ここでは
+                        // 「起動シーケンスのどこで落ちたか」を追えるようにする（Issue #1716）。
+                        _logger.LogWarning(
+                            "起動時の自動バックアップに失敗しました。後続の保守タスクは継続します。"
+                            + "詳細は BackupService のログを参照してください。");
+                    }
                 }
                 catch (Exception ex)
                 {
+                    // 現在の ExecuteAutoBackupAsync は例外を投げないが、
+                    // 実装が変わっても後続タスクを巻き添えにしないための backstop。
                     _logger.LogError(ex, "起動時の自動バックアップでエラー");
                 }
 

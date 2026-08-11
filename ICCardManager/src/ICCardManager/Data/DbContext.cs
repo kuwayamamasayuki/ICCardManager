@@ -1189,15 +1189,55 @@ ON CONFLICT(key) DO UPDATE SET value = excluded.value";
             catch (SQLiteException ex)
             {
                 // Issue #1716 / #1730: 障害調査で「なぜ VACUUM が飛ばされたか」を追えるよう、
-                // 本番のログファイルへ出力される Warning で記録する（LogDebug は Release で出力されない）。
+                // 本番のログファイルへ出力されるレベルで記録する（LogDebug は Release で出力されない）。
                 // 原因候補を 1 つに絞れるのは ResultCode だけなので必ず載せる。
-                // 失敗の理由はモードによって異なる（共有モード=他PCの接続、ローカルモード=自プロセス内の
-                // 別処理）ため、ここでは原因を断定せず ResultCode の提示に留める。
-                _logger?.LogWarning(ex, "VACUUM をスキップしました（ResultCode={ResultCode}）", ex.ResultCode);
+                //
+                // Issue #1737: レベルは「待てば直るか」で分ける。呼び出し元は false を
+                // 「当月スキップ・来月再試行」として扱うが、書き込み不可・容量不足・DB 破損は
+                // 待っても直らないため、毎月 Warning 1 行が出るだけでは管理者に届かない。
+                if (IsPermanentVacuumFailure(ex.ResultCode))
+                {
+                    _logger?.LogError(ex,
+                        "VACUUM に失敗しました（ResultCode={ResultCode}）。" +
+                        "データベースファイルが書き込み不可・容量不足・破損のいずれかの可能性があります。" +
+                        "月次の再試行では解消しないため、データベースの保存先を確認してください。",
+                        ex.ResultCode);
+                }
+                else
+                {
+                    // 他の接続がアクティブな場合など。失敗の理由はモードによって異なる
+                    // （共有モード=他PCの接続、ローカルモード=自プロセス内の別処理）ため原因は断定しない。
+                    _logger?.LogWarning(ex, "VACUUM をスキップしました（ResultCode={ResultCode}）", ex.ResultCode);
+                }
 #if DEBUG
                 System.Diagnostics.Debug.WriteLine($"[DbContext] VACUUM失敗（ResultCode={ex.ResultCode}）: {ex.Message}");
 #endif
                 return false;
+            }
+        }
+
+        /// <summary>
+        /// VACUUM の失敗が「待っても解消しない」種類かを判定する（Issue #1737）。
+        /// </summary>
+        /// <remarks>
+        /// 月次 VACUUM は先勝ち CAS ロック（Issue #1482）を消費してから実行されるため、
+        /// 失敗しても当月は誰も再試行しない。恒久的な失敗をログレベルで区別しないと、
+        /// 書き込み不可・破損した DB が「来月再試行します」の Warning に紛れて放置される。
+        /// </remarks>
+        internal static bool IsPermanentVacuumFailure(SQLiteErrorCode resultCode)
+        {
+            switch (resultCode)
+            {
+                case SQLiteErrorCode.ReadOnly:  // 共有先の権限が読み取り専用になった
+                case SQLiteErrorCode.Full:      // 保存先の空き容量不足
+                case SQLiteErrorCode.Corrupt:   // DB ファイルの破損
+                case SQLiteErrorCode.NotADb:    // DB ファイルではない／暗号化されている
+                case SQLiteErrorCode.CantOpen:  // ファイルを開けない（パス・権限）
+                case SQLiteErrorCode.Perm:      // アクセス権限がない
+                    return true;
+                default:
+                    // Busy / Locked / Error（"SQL statements in progress" 等）は一時的とみなす
+                    return false;
             }
         }
 
