@@ -13,12 +13,16 @@
 
     <!--
       テストプロジェクト限定の警告抑制。いずれもテスト特有の表現で、
-      プロダクションコードでは抑制していない:
+      プロダクションコードでは抑制していない。
+      警告 ID は BuildWarningSuppressionConventionTests が突き合わせるため、
+      NoWarn へ追加したものは必ず本コメントにも理由付きで列挙すること:
         CS0618  : [Obsolete] API の動作互換性検証で旧オーバーロードを直接呼ぶ
-        CS8600/8602/8603/8620/8625 : Null を意図的に渡す / 返すテストケース
+        CS8600, CS8602, CS8603, CS8620, CS8625 : Null を意図的に渡す / 返すテストケース
         xUnit1012 : null リテラルを non-nullable パラメータに渡すテスト
         xUnit1030 : ConfigureAwait(false) をテストでは付けない規約 (async-configureawait.md)
         xUnit1031 : 既存テストで同期 .Result/.Wait() を使う箇所
+      CS8618（未初期化の非 Null 許容フィールド）は意図的に抑制しない。
+      テストフィクスチャの初期化漏れを示す実バグであり得るため、宣言側を是正する（Issue #1786）。
     -->
     <NoWarn>$(NoWarn);CS0618;CS8600;CS8602;CS8603;CS8620;CS8625;xUnit1012;xUnit1030;xUnit1031</NoWarn>
   </PropertyGroup>

@@ -49,6 +49,16 @@
   - 03_画面設計書 §1・§2・§3.15・§3.22／04_機能設計書 §19／05_クラス設計書 §3.2・§3.3・§10.3／07_テスト設計書 §1.1a（単体 3,912→4,024・合計 3,938→4,050 件）・§2.47a・§2.53 UT-DIAG-001〜004／管理者マニュアル §10.0・§10.2・§10.4・クイックガイド／`.claude/rules/error-messages.md` を同期更新（#1690）
 
 **バグ修正**
+- Issue #1786 **ビルド警告 CS8618**（`SettingsRepositorySetConcurrencyTests`）を解消した。Release / Debug いずれのビルドでも 1 件出ていた唯一の警告で、コミット 564b9be0（Issue #1737 / PR #1776）で追加したテストヘルパー `CleanupSimulator` の `_worker` フィールドが未初期化だったことによる。
+  - **是正は宣言側で行い、`NoWarn` による抑制も `= null!` も使わない**。`_worker` は `StartAndWaitUntilTransactionOpenAsync` を呼ぶまで実際に null であり、`RollbackAndCompleteAsync` も `if (_worker != null)` で分岐している。`= null!` は「必ず非 null」とコンパイラに宣言することになり、この null チェックと矛盾する。正しい注釈は `Task?`。
+  - **警告の「発生」を CI で止める**。`ci.yml` の code-quality ジョブに**ビルド警告ゼロ検証**を追加した（`: warning ` を含む行を数え、1 件でもあれば警告内容を出力して fail）。従来 CI に警告のゲートは無く、警告ゼロは「気付いた人が Issue を起票する」運用でしか担保されていなかった。`-warnaserror` は NuGet / MSBuild 警告まで昇格させて CI を不安定にするため使わない。
+  - **警告を消した「手段」を規約テストで見張る**（`BuildWarningSuppressionConventionTests`）。抑制自体は禁じず（テスト特有の表現に対する抑制は正当）、理由の明示を義務付ける。**検査範囲は「守りたい性質」ではなく「その性質を破れる全経路」から決めた** — csproj の `<NoWarn>` だけを見張ると、①同一 csproj 内の 2 つ目の（構成条件付き）`<NoWarn>` ②全プロジェクトへ import される `Directory.Build.props` ③走査対象から漏れたプロジェクト（`ICCardManager.UITests`） ④後勝ちで上書きされる `<Nullable>` ⑤ソース中の `#pragma warning disable`（このリポジトリで既に 7 箇所使われている確立した手段）の **5 通りで迂回できる**。走査対象を `Directory.Build.props` ＋ sln の全 4 プロジェクトへ広げ、`Regex.Matches` で全 `<NoWarn>` 要素を読み、`<Nullable>` は最後の値（実効値）を見て、ソースの `#pragma` も検査する。
+  - **理由コメントの照合は語境界一致で行い、否定行を理由から除外する**。単純な部分文字列一致だと「CS8618 は抑制しない」という**戒めのコメント自体**が CS8618 の抑制を正当化し、`CS862` の抑制が既存の `CS8620` の記述で「理由あり」になる。
+  - **空振り検出を「プロジェクトごとの `NoWarn` 非空」で書かない**。それは規約が推奨する「抑制を解消する」変更を赤にし、修正者を「走査対象からそのプロジェクトを外す」方向へ誘導する（外すと理由コメント検査の対象からも静かに落ちる）。抽出器を既知のサンプル XML で固定し、実ファイルの抑制がゼロでも空振り検出が働くようにした。
+  - あわせて理由コメントの無かった `DebugDataViewer.csproj` に説明を追記し、`ICCardManager.Tests.csproj` のコメントで圧縮表記していた ID（`CS8600/8602/…`）を完全な形（`CS8600, CS8602, …`）へ改めた。ソリューションルート探索は `TestPaths` へ切り出した（同じ探索は既存の規約テスト 5 クラスにも複製されており、その集約は別途）。
+  - **テストヘルパーのハング経路も併せて塞いだ**。`CleanupSimulator.StartAndWaitUntilTransactionOpenAsync` は `_transactionOpened` をタイムアウト無し・worker を観測せずに `await` していたため、worker が `SetResult` 到達前に落ちると（`LeaseConnection` / `BeginTransaction` / `DELETE` の失敗）`dotnet test` 全体がアサーション失敗も例外メッセージも残さずハングする。worker 自身を待機対象に含め、失敗を「ハング」ではなく「例外」として表面化させる。
+  - 検証: `BuildWarningSuppressionConventionTests`（5件）を新設（+5）。上記 5 つの迂回経路を**同時に注入**し、4 件が fail・抽出妥当性テストのみ green になることを確認済み。Release / Debug 双方のソリューションビルドが 0 警告になることも実測した。
+  - 07_テスト設計書 §1.1a（単体 4,617→4,622・合計 4,643→4,648 件）・§2 UT-079／開発者ガイド §4.7／`.claude/rules/development-conventions.md`／`ci.yml` を同期更新（#1786）
 - Issue #1784 **インポート結果ダイアログの背後にプログレスバーが残存する**問題を修正した（Issue #1383 のインポート版）。
   - **現象**: データエクスポート/インポート画面（F9）でインポートを実行すると、「インポートが完了しました。登録件数: N件」のダイアログが出た**あとも背後でプログレスバーが回り続ける**。処理中オーバーレイ（`DataExportImportDialog.xaml` の `Grid.RowSpan=6`・不透明 `OverlayBrush` の全面 Border）と不確定 `ProgressBar`、「インポート中...」の文字がモーダル表示中ずっと重なって描かれる。完了だけでなくエラー（`ShowError`）・一部エラー（`ShowWarning`）でも同様。
   - **影響**: 完了を伝えるダイアログと「処理中」の表示が同時に出るため、職員は取り込みが終わったのか続いているのか判断できない。OK を押してよいのか迷って待ち、あるいは処理が固まったと誤認して強制終了すれば、共有モードでは DB のロックが残り他 PC の操作まで巻き込む。

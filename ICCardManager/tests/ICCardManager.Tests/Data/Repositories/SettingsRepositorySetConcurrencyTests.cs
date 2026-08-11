@@ -156,13 +156,23 @@ public class SettingsRepositorySetConcurrencyTests : IDisposable
         private readonly DbContext _dbContext;
         private readonly TaskCompletionSource<bool> _transactionOpened = new();
         private readonly TaskCompletionSource<bool> _releaseSignal = new();
-        private Task _worker;
+
+        /// <summary>
+        /// 滞留側の作業タスク。<see cref="StartAndWaitUntilTransactionOpenAsync"/> を呼ぶまでは
+        /// 未起動のため null であり得る。
+        /// </summary>
+        /// <remarks>
+        /// Issue #1786: 元は非 Null 許容で宣言しており CS8618 が出ていた。
+        /// <c>= null!</c> による初期化は「必ず非 null」とコンパイラに宣言することになり、
+        /// 実際に null チェックしている <see cref="RollbackAndCompleteAsync"/> と矛盾するため採らない。
+        /// </remarks>
+        private Task? _worker;
 
         public CleanupSimulator(DbContext dbContext) => _dbContext = dbContext;
 
         public async Task StartAndWaitUntilTransactionOpenAsync()
         {
-            _worker = Task.Run(() =>
+            var worker = Task.Run(() =>
             {
                 // 同期 LeaseConnection がセマフォを取り、トランザクションを開く（CleanupOldDataInternal と同型）
                 using var lease = _dbContext.LeaseConnection();
@@ -182,7 +192,20 @@ public class SettingsRepositorySetConcurrencyTests : IDisposable
                 transaction.Rollback();
             });
 
-            await _transactionOpened.Task;
+            _worker = worker;
+
+            // _transactionOpened 単独で待つと、worker が SetResult へ到達する前に落ちた場合
+            // （LeaseConnection / BeginTransaction / DELETE の失敗）に永久に完了せず、
+            // dotnet test 全体がアサーション失敗も例外メッセージも残さないままハングする。
+            // worker 自身も待機対象に含め、失敗を「ハング」ではなく「例外」として表面化させる。
+            var completed = await Task.WhenAny(_transactionOpened.Task, worker);
+            if (completed == worker)
+            {
+                await worker;
+                throw new InvalidOperationException(
+                    "CleanupSimulator の worker がトランザクションを開かないまま完了した。"
+                    + "StartAndWaitUntilTransactionOpenAsync の再現手順を確認してください。");
+            }
         }
 
         public async Task RollbackAndCompleteAsync()

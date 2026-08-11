@@ -75,5 +75,31 @@ jobs:
       run: dotnet format --verify-no-changes --verbosity diagnostic
       continue-on-error: true
 
-    - name: Build with analyzers
-      run: dotnet build --no-restore --configuration Release
+    # ビルド警告ゼロを維持する（.claude/rules/development-conventions.md、Issue #1786）。
+    # 警告を消した「手段」（NoWarn / #pragma への逃げ）は BuildWarningSuppressionConventionTests が
+    # 見張るが、警告の「発生」自体を止めるゲートはここにしか置けない。
+    #
+    # -warnaserror は NU* / MSB* まで昇格させて CI を不安定にするため使わず、
+    # コンパイラ警告行を数える方式にする。
+    - name: Build with analyzers (ビルド警告ゼロを検証)
+      shell: pwsh
+      run: |
+        $output = dotnet build --no-restore --configuration Release --nologo 2>&1 | Out-String
+        Write-Host $output
+        if ($LASTEXITCODE -ne 0) {
+          Write-Host "::error::ビルドに失敗しました。"
+          exit $LASTEXITCODE
+        }
+
+        $warnings = $output -split "`r?`n" |
+          Where-Object { $_ -match ': warning ' } |
+          ForEach-Object { $_.Trim() } |
+          Sort-Object -Unique
+
+        if ($warnings.Count -gt 0) {
+          Write-Host "::error::ビルド警告が $($warnings.Count) 件あります。宣言側を是正するか、やむを得ない場合は csproj の NoWarn へ理由コメント付きで追加してください（.claude/rules/development-conventions.md）。"
+          $warnings | ForEach-Object { Write-Host $_ }
+          exit 1
+        }
+
+        Write-Host "ビルド警告 0 件"
