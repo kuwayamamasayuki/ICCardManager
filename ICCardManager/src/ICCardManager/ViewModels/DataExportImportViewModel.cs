@@ -616,7 +616,7 @@ public partial class DataExportImportViewModel : ViewModelBase
         // Issue #1741: インポート元パスをここで確定させて引数として渡す。
         // ImportPreviewFile は画面の一時状態で、取り込み後の ClearPreview() が空にするため、
         // 取り込み後に読み直すと監査ログへ空パスが記録される。
-        await RunImportAsync(ImportPreviewFile, clearPreviewAfterImport: true);
+        await RunImportAsync(ImportPreviewFile);
     }
 
     /// <summary>
@@ -627,12 +627,6 @@ public partial class DataExportImportViewModel : ViewModelBase
     /// 取り込む CSV のパス。呼び出し元で確定済みの値を渡すこと（Issue #1741）。
     /// 画面状態のプロパティを本メソッド内で読み直してはならない。
     /// </param>
-    /// <param name="clearPreviewAfterImport">
-    /// 取り込みが確定したときにプレビュー表示を消すか。プレビュー経由の経路は取り込み済みの
-    /// プレビューが画面に残らないよう <c>true</c>、直接インポートは無関係なプレビューを
-    /// 消さないよう <c>false</c>。実際に消すかどうかの条件は
-    /// <see cref="HandleImportResultAsync"/> を参照（Issue #1781）。
-    /// </param>
     /// <remarks>
     /// 2つのコマンドは差分8行の全文複製（約115行）で、結果処理・監査記録に関わる修正を
     /// 毎回2箇所へ適用する必要があった。Issue #1741 では実際に一方の経路だけが壊れており、
@@ -641,7 +635,7 @@ public partial class DataExportImportViewModel : ViewModelBase
     /// テストから直接呼べるよう internal にしている（<see cref="ImportAsync"/> は
     /// <see cref="OpenFileDialog"/> をコマンド内で生成するため単体テストから起動できない）。
     /// </remarks>
-    internal async Task RunImportAsync(string sourceFilePath, bool clearPreviewAfterImport)
+    internal async Task RunImportAsync(string sourceFilePath)
     {
         ImportErrors.Clear();
 
@@ -691,7 +685,7 @@ public partial class DataExportImportViewModel : ViewModelBase
                     HasImported = true;
                 }
 
-                await HandleImportResultAsync(result, sourceFilePath, importTargetTable, clearPreviewAfterImport);
+                await HandleImportResultAsync(result, sourceFilePath, importTargetTable);
             }
             catch (Exception ex)
             {
@@ -714,12 +708,10 @@ public partial class DataExportImportViewModel : ViewModelBase
     /// <param name="result">インポートサービスの実行結果</param>
     /// <param name="sourceFilePath">監査ログへ記録するインポート元パス（確定済みの値）</param>
     /// <param name="targetTable">監査ログへ記録する対象テーブル（確定済みの値）</param>
-    /// <param name="clearPreviewAfterImport">取り込み確定時にプレビュー表示を消すか</param>
     private async Task HandleImportResultAsync(
         CsvImportResult result,
         string sourceFilePath,
-        string targetTable,
-        bool clearPreviewAfterImport)
+        string targetTable)
     {
         // Issue #1781: プレビューの破棄は「成否」ではなく「書き込みが確定したか」で判断する。
         // 部分成功（Success=false / ErrorMessage なし）でも登録済みの行は確定しているため、
@@ -732,8 +724,23 @@ public partial class DataExportImportViewModel : ViewModelBase
         // 判定を成功／部分成功の各分岐へ分けず1か所に置く（同じ判断を2か所に分けない、Issue #1728）。
         // 「Success」を条件に含めるのは、全件スキップ（ImportedCount=0 の成功）でも
         // 従来どおりプレビューを畳むため。
+        //
+        // Issue #1782: 取り込み経路（プレビュー経由／直接インポート）では分岐しない。直接インポートは
+        // 「表示中のプレビューとは無関係だから残す」としていたが、無関係なのは入力元だけである。
+        // プレビューの登録・スキップ件数は取り込み前の DB を基準に算出した値で、取り込みが確定した
+        // 時点で古くなる。残すと別ファイルのプレビューに対して「インポート実行」が有効なまま残り、
+        // 押せば修正前のファイルを修正済みデータの上へ丸ごと取り込み直せてしまう。
+        // 「消すかどうか」を呼び出し元の引数で選ばせない — 選べる限り、あとから増えた経路が
+        // 再び誤った値を渡す（CLAUDE.md #1726「呼び出し元に引き継がせるのではなく、選択肢を無くす」）。
         var importCommitted = result.Success || result.ImportedCount > 0;
-        if (clearPreviewAfterImport && importCommitted)
+
+        // ClearPreview() が ImportPreviewFile を空にするため、案内文の材料は破棄する前に確定させる
+        // （取り込み後に画面状態のプロパティを読み直さない、Issue #1741 と同じ罠）。
+        var discardedPreviewNotice = importCommitted
+            ? BuildDiscardedPreviewNotice(HasPreview, ImportPreviewFile, sourceFilePath)
+            : string.Empty;
+
+        if (importCommitted)
         {
             ClearPreview();
         }
@@ -759,12 +766,14 @@ public partial class DataExportImportViewModel : ViewModelBase
 
             if (auditLogged)
             {
-                _dialogService.ShowInformation(completionMessage, "インポート完了");
+                _dialogService.ShowInformation(
+                    completionMessage + discardedPreviewNotice,
+                    "インポート完了");
             }
             else
             {
                 _dialogService.ShowWarning(
-                    completionMessage + AuditLogFailureNotice,
+                    completionMessage + AuditLogFailureNotice + discardedPreviewNotice,
                     "インポート完了（操作ログ記録の失敗あり）");
             }
         }
@@ -806,7 +815,8 @@ public partial class DataExportImportViewModel : ViewModelBase
                 $"インポートが完了しましたが、一部エラーがあります。\n\n登録件数: {result.ImportedCount}件\nエラー: {result.ErrorCount}件"
                 + (result.SkippedCount > 0 ? $"\nスキップ: {result.SkippedCount}件" : "")
                 + BuildPartialImportGuidance(result.ImportedCount)
-                + (partialAuditLogged ? "" : AuditLogFailureNotice),
+                + (partialAuditLogged ? "" : AuditLogFailureNotice)
+                + discardedPreviewNotice,
                 "インポート完了（一部エラー）");
         }
     }
@@ -840,6 +850,46 @@ public partial class DataExportImportViewModel : ViewModelBase
         return "\n\n登録が確定した行はありません。"
             + "画面下部のエラー一覧を確認してCSVファイルを修正し、"
             + "あらためてプレビューしてからインポートしてください。";
+    }
+
+    /// <summary>
+    /// 取り込み確定に伴って破棄したプレビューについて、完了ダイアログへ添える案内を組み立てる（Issue #1782）
+    /// </summary>
+    /// <remarks>
+    /// プレビュー経由の取り込み（<see cref="ExecuteImportAsync"/>）で消えるのは、いま取り込んだ
+    /// ファイル自身のプレビューであり、消えて当然のため案内しない。案内するのは直接インポートで
+    /// 「別のファイルのプレビューが表示されたまま」だった場合に限る。起きていない事象を案内すると
+    /// 職員は存在しない作業の消失を探して混乱する
+    /// （error-messages.md「原因を断定する前に、その原因が成立する構成かを確認する」）。
+    /// <para>
+    /// 文言は「何が」＝表示中だった別ファイルのプレビューを消したこと、「なぜ」＝取り込みで
+    /// データが変わり件数が最新でなくなること、「どうすれば」＝あらためてプレビューしてから
+    /// インポートすること、の3要素で構成する。
+    /// </para>
+    /// </remarks>
+    /// <param name="hadPreview">取り込み確定の直前にプレビューが表示されていたか</param>
+    /// <param name="previewFilePath">そのプレビューのファイルパス（<see cref="ClearPreview"/> が空にする前の値）</param>
+    /// <param name="importedFilePath">実際に取り込んだファイルのパス</param>
+    internal static string BuildDiscardedPreviewNotice(
+        bool hadPreview,
+        string previewFilePath,
+        string importedFilePath)
+    {
+        if (!hadPreview || string.IsNullOrEmpty(previewFilePath))
+        {
+            return string.Empty;
+        }
+
+        // 同じファイルなら「別のファイルのプレビューが消えた」ではないため案内しない。
+        // Windows のパスは大文字小文字を区別しないため OrdinalIgnoreCase で比較する。
+        if (string.Equals(previewFilePath, importedFilePath, StringComparison.OrdinalIgnoreCase))
+        {
+            return string.Empty;
+        }
+
+        return $"\n\n※表示していた別ファイル「{Path.GetFileName(previewFilePath)}」のプレビューはクリアしました。"
+            + "今回の取り込みでデータが変わり、そのプレビューの登録・スキップ件数は最新ではなくなったためです。"
+            + "そのファイルも取り込む場合は、あらためてプレビューしてからインポートしてください。";
     }
 
     /// <summary>
@@ -917,9 +967,10 @@ public partial class DataExportImportViewModel : ViewModelBase
             return;
         }
 
-        // この経路のインポート元はプレビューではなくファイルダイアログの選択結果のため、
-        // 取り込みが確定してもプレビュー表示はクリアしない（従来どおりの挙動）。
-        await RunImportAsync(dialog.FileName, clearPreviewAfterImport: false);
+        // Issue #1782: この経路のインポート元はプレビューではなくファイルダイアログの選択結果だが、
+        // 取り込みが確定したらプレビュー表示も畳む。残すと別ファイルのプレビューに対して
+        // 「インポート実行」ボタンが有効なまま残り、古いファイルを取り込み直せてしまう。
+        await RunImportAsync(dialog.FileName);
     }
 
     /// <summary>
