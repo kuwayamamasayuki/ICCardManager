@@ -812,8 +812,12 @@ namespace ICCardManager.Data
             }
 
             // マイグレーションを実行（各マイグレーションが独自にトランザクションを管理）
-            // 複数PCが同時にマイグレーションを実行しても、schema_migrationsの
-            // PRIMARY KEY制約により重複適用が防止される。
+            // 複数PCが同時にマイグレーションを実行した場合、後発PCは陳腐化したバージョンの
+            // スナップショットに基づいて同じマイグレーションを再適用する。Up()は規約により
+            // 冪等（.claude/rules/migrations.md）で、適用記録のINSERTもINSERT OR IGNOREのため、
+            // 後発PCも例外なく起動できる（Issue #1738）。
+            // schema_migrationsのPRIMARY KEY制約が防ぐのは記録の重複であって、
+            // 重複適用そのものではない点に注意。
             var runner = new MigrationRunner(connection);
 
             // Issue #1687: DBのスキーマがこのアプリの対応範囲より新しい場合、

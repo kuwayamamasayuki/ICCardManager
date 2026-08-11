@@ -5,6 +5,7 @@ using Xunit;
 
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
 
@@ -477,6 +478,131 @@ public class MigrationRunnerTests : IDisposable
         timestamp.Should().BeOnOrBefore(afterMigrate.AddSeconds(1));
     }
 
+    // ===== Issue #1738: 共有モードで複数PCが同時起動したときの適用記録の衝突 =====
+
+    [Fact]
+    [Trait("Category", "Unit")]
+    public void ApplyMigration_他PCが同じバージョンを先に記録済みでも例外にならない_Issue1738()
+    {
+        // Issue #1738: 共有DBを使う2台がほぼ同時に起動すると、双方が MigrateTo 冒頭の
+        // GetCurrentVersion() で同じ版数を読み、同じマイグレーションを適用しようとする。
+        // ApplyMigration の BeginTransaction() は BEGIN IMMEDIATE のため、後発PCは
+        // 先発PCの COMMIT を待ってから Up()（規約により冪等）を再実行し、適用記録の
+        // INSERT で PRIMARY KEY と衝突していた。この例外は MigrationException として
+        // App.OnStartup の汎用 catch まで到達し、後発PCは「起動エラーが発生しました」
+        // ダイアログ + Shutdown(1) でアプリを起動できなかった。
+        //
+        // 「後発PCが陳腐化したスナップショットで適用する」状態を決定的に再現するため、
+        // MigrateTo のスキップ判定を経由せず ApplyMigration を直接呼ぶ（Issue #1484 の
+        // BackfillLegacyMigrationVersion1 を直接2回呼ぶテストと同じ手法）。
+        var databasePath = CreateTempDatabasePath();
+        try
+        {
+            using var firstPcConnection = OpenSharedDatabase(databasePath);
+            using var secondPcConnection = OpenSharedDatabase(databasePath);
+
+            // Arrange: 先発PCがマイグレーション1を適用してコミット済み
+            var firstPcMigration = new TestMigration(1, "先発PCが適用したスキーマ更新");
+            new MigrationRunner(firstPcConnection, new[] { firstPcMigration }).MigrateToLatest();
+
+            var secondPcMigration = new TestMigration(1, "後発PCが適用したスキーマ更新");
+            var secondPcRunner = new MigrationRunner(secondPcConnection, new[] { secondPcMigration });
+
+            // Act: 後発PCが同じバージョンを適用する
+            Action act = () => secondPcRunner.ApplyMigration(secondPcMigration);
+
+            // Assert
+            act.Should().NotThrow("適用記録が既にあっても後発PCは起動できなければならない");
+            secondPcMigration.UpCalled.Should().BeTrue("Up() は冪等前提で再実行される");
+            secondPcRunner.GetCurrentVersion().Should().Be(1);
+            CountMigrationRecords(secondPcConnection, version: 1)
+                .Should().Be(1, "適用記録が二重に増えてはならない");
+            ReadMigrationDescription(secondPcConnection, version: 1)
+                .Should().Be("先発PCが適用したスキーマ更新",
+                    "INSERT OR IGNORE は先に記録された行を上書きしない");
+        }
+        finally
+        {
+            DeleteTempDatabase(databasePath);
+        }
+    }
+
+    [Fact]
+    [Trait("Category", "Unit")]
+    public void ApplyMigration_適用記録が制約違反で保存できない場合は例外を投げる_Issue1738()
+    {
+        // Issue #1738: 適用記録の INSERT を OR IGNORE にすると、PRIMARY KEY 衝突
+        //（＝他PCが先に記録した正常系）だけでなく NOT NULL 等の本物の制約違反まで
+        // 握りつぶされる。記録が入らないまま成功扱いにすると GetCurrentVersion() が
+        // 永久に上がらず、毎回の起動で同じ Up() が再適用され続ける無言の劣化になる。
+        // そのため「行が書けなかったのか、他PCが先に書いたのか」を読み戻して確定させる。
+        var migration = new NullDescriptionMigration(1);
+        var runner = new MigrationRunner(_connection, new IMigration[] { migration });
+
+        // Act
+        Action act = () => runner.MigrateToLatest();
+
+        // Assert
+        act.Should().Throw<MigrationException>()
+            .WithMessage("*マイグレーション 1 の適用に失敗しました*")
+            .WithInnerException<MigrationException>()
+            .WithMessage("*適用記録*schema_migrations*");
+        runner.GetCurrentVersion().Should().Be(0, "記録できなかったマイグレーションは適用済みにしない");
+    }
+
+    /// <summary>
+    /// 共有フォルダ上のDBを模したファイルDBへの接続を開く（Issue #1738）。
+    /// 本番の <c>DbContext.ConfigurePragmas</c> と同じく busy_timeout と
+    /// journal_mode=DELETE を設定し、BEGIN IMMEDIATE の競合が待機で解決される状態にする。
+    /// </summary>
+    private static SQLiteConnection OpenSharedDatabase(string databasePath)
+    {
+        var connection = new SQLiteConnection($"Data Source={databasePath};Version=3;");
+        connection.Open();
+
+        using var pragmaCommand = connection.CreateCommand();
+        pragmaCommand.CommandText = "PRAGMA busy_timeout = 15000; PRAGMA journal_mode = DELETE;";
+        pragmaCommand.ExecuteNonQuery();
+
+        return connection;
+    }
+
+    private static string CreateTempDatabasePath()
+        => Path.Combine(Path.GetTempPath(), $"iccard_migration_race_{Guid.NewGuid():N}.db");
+
+    private static void DeleteTempDatabase(string databasePath)
+    {
+        SQLiteConnection.ClearAllPools();
+
+        try
+        {
+            if (File.Exists(databasePath))
+            {
+                File.Delete(databasePath);
+            }
+        }
+        catch (IOException)
+        {
+            // 一時ファイルの後始末失敗はテスト結果に影響させない
+        }
+    }
+
+    private static int CountMigrationRecords(SQLiteConnection connection, int version)
+    {
+        using var command = connection.CreateCommand();
+        command.CommandText = "SELECT COUNT(*) FROM schema_migrations WHERE version = @version";
+        command.Parameters.AddWithValue("@version", version);
+        return Convert.ToInt32(command.ExecuteScalar());
+    }
+
+    private static string ReadMigrationDescription(SQLiteConnection connection, int version)
+    {
+        using var command = connection.CreateCommand();
+        command.CommandText = "SELECT description FROM schema_migrations WHERE version = @version";
+        command.Parameters.AddWithValue("@version", version);
+        return command.ExecuteScalar() as string;
+    }
+
     /// <summary>
     /// テスト用マイグレーション
     /// </summary>
@@ -532,6 +658,31 @@ public class MigrationRunnerTests : IDisposable
         public void Down(SQLiteConnection connection, SQLiteTransaction transaction)
         {
             // ダウングレードは成功する
+        }
+    }
+
+    /// <summary>
+    /// 適用記録の INSERT が制約違反になるテスト用マイグレーション（Issue #1738）。
+    /// <c>schema_migrations.description</c> は NOT NULL のため、
+    /// INSERT OR IGNORE が本物の制約違反まで握りつぶす状況を作る。
+    /// </summary>
+    private class NullDescriptionMigration : IMigration
+    {
+        public int Version { get; }
+        public string Description => null;
+
+        public NullDescriptionMigration(int version)
+        {
+            Version = version;
+        }
+
+        public void Up(SQLiteConnection connection, SQLiteTransaction transaction)
+        {
+            // スキーマ変更は行わない（検証対象は適用記録の書き込みのみ）
+        }
+
+        public void Down(SQLiteConnection connection, SQLiteTransaction transaction)
+        {
         }
     }
 }
