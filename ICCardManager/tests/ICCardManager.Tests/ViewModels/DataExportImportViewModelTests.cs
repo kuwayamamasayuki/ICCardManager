@@ -929,7 +929,7 @@ public class DataExportImportViewModelTests : IDisposable
 
     // ImportAsync（「直接インポート(_R)」ボタン）は OpenFileDialog をコマンド内で生成するため
     // 単体テストから起動できない。Issue #1785 で結果処理を RunImportAsync へ共通化したことにより、
-    // この経路の設定（clearPreviewOnSuccess: false）を直接検証できるようになった。
+    // この経路の設定（clearPreviewAfterImport: false）を直接検証できるようになった。
     // 共通化前は ExecuteImportAsync 側にしかテストが無く、複製側は無検証だった。
 
     private const string DirectImportFileName = "staff_20260811.csv";
@@ -958,7 +958,7 @@ public class DataExportImportViewModelTests : IDisposable
             });
 
         // Act
-        await _viewModel.RunImportAsync(DirectImportFilePath, clearPreviewOnSuccess: false);
+        await _viewModel.RunImportAsync(DirectImportFilePath, clearPreviewAfterImport: false);
 
         // Assert
         _viewModel.HasPreview.Should().BeTrue("直接インポートはプレビューを入力としないため消してはならない");
@@ -986,7 +986,7 @@ public class DataExportImportViewModelTests : IDisposable
             });
 
         // Act
-        await _viewModel.RunImportAsync(DirectImportFilePath, clearPreviewOnSuccess: false);
+        await _viewModel.RunImportAsync(DirectImportFilePath, clearPreviewAfterImport: false);
 
         // Assert
         _importServiceMock.Verify(
@@ -1028,7 +1028,7 @@ public class DataExportImportViewModelTests : IDisposable
             });
 
         // Act
-        await _viewModel.RunImportAsync(DirectImportFilePath, clearPreviewOnSuccess: false);
+        await _viewModel.RunImportAsync(DirectImportFilePath, clearPreviewAfterImport: false);
 
         // Assert
         _viewModel.ImportErrors.Should().ContainSingle()
@@ -1060,7 +1060,7 @@ public class DataExportImportViewModelTests : IDisposable
             });
 
         // Act
-        await _viewModel.RunImportAsync(DirectImportFilePath, clearPreviewOnSuccess: false);
+        await _viewModel.RunImportAsync(DirectImportFilePath, clearPreviewAfterImport: false);
 
         // Assert
         _viewModel.IsStatusError.Should().BeTrue();
@@ -1082,7 +1082,7 @@ public class DataExportImportViewModelTests : IDisposable
     /// </summary>
     /// <remarks>
     /// Issue #1741 の是正は ExecuteImportAsync 側でのみテストされていた。
-    /// 共通化後は同じ経路を通ることを、複製側の設定（clearPreviewOnSuccess: false）でも表明する。
+    /// 共通化後は同じ経路を通ることを、複製側の設定（clearPreviewAfterImport: false）でも表明する。
     /// </remarks>
     [Fact]
     public async Task RunImportAsync_直接インポート_監査ログ記録の失敗を取り込み失敗として通知しないこと()
@@ -1100,7 +1100,7 @@ public class DataExportImportViewModelTests : IDisposable
             });
 
         // Act
-        await viewModel.RunImportAsync(DirectImportFilePath, clearPreviewOnSuccess: false);
+        await viewModel.RunImportAsync(DirectImportFilePath, clearPreviewAfterImport: false);
 
         // Assert
         viewModel.IsStatusError.Should().BeFalse();
@@ -1115,6 +1115,259 @@ public class DataExportImportViewModelTests : IDisposable
                                    && m.Contains("再度インポートしないでください")),
                 It.IsAny<string>()),
             Times.Once);
+    }
+
+    #endregion
+
+    #region 部分成功時のプレビュー破棄（Issue #1781）
+
+    // 部分成功（一部エラー）分岐は ClearPreview() を呼んでいなかったため、
+    // HasPreview=true・ImportPreviewFile=同じファイルのまま「インポート実行」ボタン
+    // （IsEnabled="{Binding HasPreview}"）が有効に残り、押すと同じ CSV を丸ごと取り込み直せた。
+    // ledger_detail のインポートは skip-existing を持たないため、登録済みの明細がそのまま重複し
+    // カードの残高チェーンが壊れる。
+
+    /// <summary>
+    /// 部分成功でもプレビューが破棄されること（成功分岐と対称にする、Issue #1781）
+    /// </summary>
+    [Fact]
+    public async Task ExecuteImportAsync_部分成功時にプレビューを破棄すること()
+    {
+        // Arrange
+        SetupValidPreview();
+        _viewModel.ImportPreviewFile = ImportSourceFilePath;
+        _importServiceMock
+            .Setup(s => s.ImportCardsAsync(It.IsAny<string>(), It.IsAny<bool>()))
+            .ReturnsAsync(CreatePartialSuccessResult(importedCount: 98, errorCount: 2));
+
+        _viewModel.HasPreview.Should().BeTrue("プレビューがセットアップされていること");
+
+        // Act
+        await _viewModel.ExecuteImportAsync();
+
+        // Assert
+        _viewModel.HasPreview.Should().BeFalse(
+            "「インポート実行」ボタンの IsEnabled が HasPreview に束縛されているため");
+        _viewModel.ImportPreviewFile.Should().BeEmpty();
+        _viewModel.PreviewItems.Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// 部分成功のあと「インポート実行」を押し直しても取り込みが走らないこと（Issue #1781）
+    /// </summary>
+    /// <remarks>
+    /// HasPreview の値だけを見るテストでは、この Issue の実害（同じファイルの再取り込みによる
+    /// 二重登録）を表明できない。「次の操作が効かないこと」まで検証する
+    /// （CLAUDE.md「状態値だけでなく次の操作が効くことをテストで表明する」）。
+    /// </remarks>
+    [Fact]
+    public async Task ExecuteImportAsync_部分成功後に再実行しても同じファイルを取り込み直さないこと()
+    {
+        // Arrange
+        SetupValidPreview();
+        _viewModel.ImportPreviewFile = ImportSourceFilePath;
+        _importServiceMock
+            .Setup(s => s.ImportCardsAsync(It.IsAny<string>(), It.IsAny<bool>()))
+            .ReturnsAsync(CreatePartialSuccessResult(importedCount: 98, errorCount: 2));
+
+        // Act: 職員がエラー行を直そうとして「インポート実行」をもう一度押す
+        await _viewModel.ExecuteImportAsync();
+        await _viewModel.ExecuteImportAsync();
+
+        // Assert
+        _importServiceMock.Verify(
+            s => s.ImportCardsAsync(It.IsAny<string>(), It.IsAny<bool>()),
+            Times.Once,
+            "登録済みの98件が重複するため、2回目の取り込みは走ってはならない");
+        _viewModel.StatusMessage.Should().Contain(
+            "プレビュー",
+            "再実行が拒否された理由と次の操作を案内すること");
+        _viewModel.IsStatusError.Should().BeTrue();
+    }
+
+    /// <summary>
+    /// 部分成功でもエラー一覧は残ること（Issue #1781）
+    /// </summary>
+    /// <remarks>
+    /// エラー一覧の表示条件は ImportErrors.Count（DataExportImportDialog.xaml:570）で
+    /// HasPreview とは独立しているため、プレビューを畳んでも修正対象の行は画面に残る。
+    /// 「完了メッセージを出す欄を、その完了処理で消える表示条件に紐付けない」（Issue #1727）の確認。
+    /// </remarks>
+    [Fact]
+    public async Task ExecuteImportAsync_部分成功でプレビューを破棄してもエラー一覧は残ること()
+    {
+        // Arrange
+        SetupValidPreview();
+        _viewModel.ImportPreviewFile = ImportSourceFilePath;
+        _importServiceMock
+            .Setup(s => s.ImportCardsAsync(It.IsAny<string>(), It.IsAny<bool>()))
+            .ReturnsAsync(CreatePartialSuccessResult(importedCount: 98, errorCount: 2));
+
+        // Act
+        await _viewModel.ExecuteImportAsync();
+
+        // Assert
+        _viewModel.HasPreview.Should().BeFalse();
+        _viewModel.ImportErrors.Should().HaveCount(2, "どの行を直せばよいかは画面に残す必要があるため");
+        _viewModel.ImportErrors.Should().Contain("行3: IDmが不正です");
+        _viewModel.LastImportedFile.Should().Be(
+            ImportSourceFilePath,
+            "どのファイルを取り込んだかはプレビューを畳んだ後も表示され続けること");
+    }
+
+    /// <summary>
+    /// 1件も登録されなかった一部エラーではプレビューを維持すること（Issue #1781）
+    /// </summary>
+    /// <remarks>
+    /// 破棄の判断根拠は「成否」ではなく「書き込みが確定したか」。全行エラーで 0 件なら
+    /// 再実行しても二重登録は起きないため、CSV を直してそのまま押し直せる状態を残す。
+    /// </remarks>
+    [Fact]
+    public async Task ExecuteImportAsync_一部エラーでも1件も登録されていなければプレビューを維持すること()
+    {
+        // Arrange
+        SetupValidPreview();
+        _viewModel.ImportPreviewFile = ImportSourceFilePath;
+        _importServiceMock
+            .Setup(s => s.ImportCardsAsync(It.IsAny<string>(), It.IsAny<bool>()))
+            .ReturnsAsync(CreatePartialSuccessResult(importedCount: 0, errorCount: 2));
+
+        // Act
+        await _viewModel.ExecuteImportAsync();
+
+        // Assert
+        _viewModel.HasPreview.Should().BeTrue("二重登録の危険がないため作業状態を捨てない");
+        _viewModel.ImportPreviewFile.Should().Be(ImportSourceFilePath);
+        _viewModel.HasImported.Should().BeFalse();
+    }
+
+    /// <summary>
+    /// 部分成功の警告文言が二重登録の回避手順を案内すること（Issue #1781）
+    /// </summary>
+    /// <remarks>
+    /// 「詳細はエラー一覧を確認してください」だけでは、直した CSV を丸ごと取り込み直す運用を招く。
+    /// ledger_detail は skip-existing を持たないため、これは確実に二重登録になる。
+    /// error-messages.md の3要素（何が／なぜ／どうすれば）で検証する。
+    /// </remarks>
+    [Fact]
+    public async Task ExecuteImportAsync_部分成功の警告文言が二重登録の回避手順を案内すること()
+    {
+        // Arrange
+        SetupValidPreview(DataType.LedgerDetails);
+        _importServiceMock
+            .Setup(s => s.ImportLedgerDetailsAsync(It.IsAny<string>()))
+            .ReturnsAsync(CreatePartialSuccessResult(importedCount: 98, errorCount: 2));
+
+        string warningMessage = null;
+        _dialogServiceMock
+            .Setup(d => d.ShowWarning(It.IsAny<string>(), It.IsAny<string>()))
+            .Callback<string, string>((message, _) => warningMessage = message);
+
+        // Act
+        await _viewModel.ExecuteImportAsync();
+
+        // Assert
+        warningMessage.Should().NotBeNull("部分成功は警告ダイアログで通知されること");
+
+        // 何が: 登録できた件数とエラー件数
+        warningMessage.Should().Contain("98件").And.Contain("2件");
+
+        // なぜ: 登録済みの行は取り込み確定済みで、再取り込みは二重登録になる
+        warningMessage.Should().Contain("二重登録");
+
+        // どうすれば: エラー行だけの CSV を作り、あらためてプレビューする
+        warningMessage.Should().Contain("エラー一覧");
+        warningMessage.Should().Contain("プレビュー");
+        warningMessage.TrimEnd().Should().EndWith(
+            "してください。",
+            "行動指示型で終わること（error-messages.md）");
+    }
+
+    /// <summary>
+    /// 1件も登録されなかった一部エラーでは「二重登録」を警告しないこと（Issue #1781）
+    /// </summary>
+    /// <remarks>
+    /// 起きていない事象を警告すると、職員は存在しない重複を探して原因究明が止まる
+    /// （error-messages.md「エラー文言で原因を断定する前に、その原因が成立する構成かを確認する」）。
+    /// </remarks>
+    [Fact]
+    public async Task ExecuteImportAsync_1件も登録されていなければ二重登録を警告しないこと()
+    {
+        // Arrange
+        SetupValidPreview();
+        _importServiceMock
+            .Setup(s => s.ImportCardsAsync(It.IsAny<string>(), It.IsAny<bool>()))
+            .ReturnsAsync(CreatePartialSuccessResult(importedCount: 0, errorCount: 2));
+
+        string warningMessage = null;
+        _dialogServiceMock
+            .Setup(d => d.ShowWarning(It.IsAny<string>(), It.IsAny<string>()))
+            .Callback<string, string>((message, _) => warningMessage = message);
+
+        // Act
+        await _viewModel.ExecuteImportAsync();
+
+        // Assert
+        warningMessage.Should().NotBeNull();
+        warningMessage.Should().NotContain("二重登録", "1件も書き込まれていないため重複は起こり得ない");
+        warningMessage.Should().Contain("エラー一覧");
+        warningMessage.TrimEnd().Should().EndWith("してください。");
+    }
+
+    /// <summary>
+    /// 直接インポートは部分成功でもプレビューを破棄しないこと（Issue #1781）
+    /// </summary>
+    /// <remarks>
+    /// 直接インポートのインポート元はファイルダイアログの選択結果であり、
+    /// 画面に出ているプレビューとは無関係。破棄すると職員の作業状態を勝手に捨てることになる
+    /// （Issue #1785 で成功分岐について保存した性質を、部分成功分岐でも保つ）。
+    /// </remarks>
+    [Fact]
+    public async Task RunImportAsync_直接インポート_部分成功でもプレビューを破棄しないこと()
+    {
+        // Arrange: プレビューを表示したまま直接インポートを実行する状況
+        SetupValidPreview();
+        _viewModel.ImportPreviewFile = ImportSourceFilePath;
+        _importServiceMock
+            .Setup(s => s.ImportCardsAsync(It.IsAny<string>(), It.IsAny<bool>()))
+            .ReturnsAsync(CreatePartialSuccessResult(importedCount: 98, errorCount: 2));
+
+        // Act
+        await _viewModel.RunImportAsync(DirectImportFilePath, clearPreviewAfterImport: false);
+
+        // Assert
+        _viewModel.HasPreview.Should().BeTrue("直接インポートはプレビューを入力としないため消してはならない");
+        _viewModel.ImportPreviewFile.Should().Be(ImportSourceFilePath);
+    }
+
+    /// <summary>
+    /// 部分成功の警告文言を検証するための結果を組み立てる（Issue #1781）
+    /// </summary>
+    /// <remarks>
+    /// 部分成功分岐の条件は Success=false かつ ErrorMessage が空であること。
+    /// この2条件を各テストへ散らすと、条件が変わったときに空振りするテストが生まれる。
+    /// </remarks>
+    private static CsvImportResult CreatePartialSuccessResult(int importedCount, int errorCount)
+    {
+        var errors = new List<CsvImportError>();
+        for (var i = 0; i < errorCount; i++)
+        {
+            errors.Add(new CsvImportError
+            {
+                LineNumber = 3 + i,
+                Message = i == 0 ? "IDmが不正です" : $"{i + 1}件目の不正な行です"
+            });
+        }
+
+        return new CsvImportResult
+        {
+            Success = false,
+            ErrorMessage = null,
+            ImportedCount = importedCount,
+            ErrorCount = errorCount,
+            SkippedCount = 0,
+            Errors = errors
+        };
     }
 
     #endregion
