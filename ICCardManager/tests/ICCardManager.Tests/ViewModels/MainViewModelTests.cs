@@ -1478,6 +1478,97 @@ public class MainViewModelTests : IDisposable
 
     #endregion
 
+    #region 履歴行編集の自動計算の起点（Issue #1740）
+
+    /// <summary>
+    /// Issue #1740: 2行目以降を編集する場合、直前行の残高が自動計算の起点として供給されること。
+    /// </summary>
+    [Fact]
+    public void FindPreviousBalanceForEdit_2行目以降は直上行の残高を返すこと()
+    {
+        // Arrange
+        _viewModel.HistoryLedgers.Add(new LedgerDto { Id = 1, Balance = 2000 });
+        _viewModel.HistoryLedgers.Add(new LedgerDto { Id = 2, Balance = 5000 });
+        _viewModel.HistoryLedgers.Add(new LedgerDto { Id = 3, Balance = 4790 });
+
+        // Act & Assert
+        _viewModel.FindPreviousBalanceForEdit(_viewModel.HistoryLedgers[1]).Should().Be(2000);
+        _viewModel.FindPreviousBalanceForEdit(_viewModel.HistoryLedgers[2]).Should().Be(5000);
+    }
+
+    /// <summary>
+    /// Issue #1740: 先頭行には直前行が無いため null を返し、自動計算を無効化させること。
+    /// ここで 0 を返すと「0 + 受入 - 払出」で残高が破壊される（本Issueの不具合そのもの）。
+    /// </summary>
+    [Fact]
+    public void FindPreviousBalanceForEdit_先頭行はnullを返すこと()
+    {
+        // Arrange
+        _viewModel.HistoryLedgers.Add(new LedgerDto { Id = 1, Balance = 2000 });
+        _viewModel.HistoryLedgers.Add(new LedgerDto { Id = 2, Balance = 5000 });
+
+        // Act & Assert
+        _viewModel.FindPreviousBalanceForEdit(_viewModel.HistoryLedgers[0]).Should().BeNull();
+    }
+
+    /// <summary>
+    /// Issue #1740 / Issue #1155: 1ページ目の先頭に挿入される繰越行（Id=0）が直前行になる場合、
+    /// その残高が起点として供給されること。表示期間の最初の実データ行も自動計算できる。
+    /// </summary>
+    [Fact]
+    public void FindPreviousBalanceForEdit_繰越行が直前にある場合はその残高を返すこと()
+    {
+        // Arrange: BuildCarryoverRowAsync が生成する繰越行は Id = 0
+        _viewModel.HistoryLedgers.Add(new LedgerDto { Id = 0, Balance = 7500, Summary = "前年度より繰越" });
+        _viewModel.HistoryLedgers.Add(new LedgerDto { Id = 42, Balance = 7290 });
+
+        // Act & Assert
+        _viewModel.FindPreviousBalanceForEdit(_viewModel.HistoryLedgers[1]).Should().Be(7500);
+    }
+
+    /// <summary>
+    /// Issue #1740: 一覧に存在しない行が渡された場合も 0 に丸めず null を返すこと。
+    /// </summary>
+    [Fact]
+    public void FindPreviousBalanceForEdit_一覧に無い行はnullを返すこと()
+    {
+        // Arrange
+        _viewModel.HistoryLedgers.Add(new LedgerDto { Id = 1, Balance = 2000 });
+
+        // Act & Assert
+        _viewModel.FindPreviousBalanceForEdit(new LedgerDto { Id = 999, Balance = 100 }).Should().BeNull();
+        _viewModel.FindPreviousBalanceForEdit(null).Should().BeNull();
+    }
+
+    /// <summary>
+    /// Issue #1740: 繰越額の取得と繰越行の生成を分離しても、生成結果が従来と一致すること。
+    /// 分離したのは、残高チェーンの並べ替えシードと繰越行が同じ値を必要とするため。
+    /// </summary>
+    [Fact]
+    public void BuildCarryoverRow_繰越額が無い場合はnullを返すこと()
+    {
+        // Act & Assert
+        _viewModel.BuildCarryoverRow("0102030405060708", 2026, 5, null).Should().BeNull();
+    }
+
+    /// <summary>
+    /// Issue #1740: 繰越額があれば、その残高を持つ表示専用行（Id=0）を生成すること。
+    /// </summary>
+    [Fact]
+    public void BuildCarryoverRow_繰越額から表示専用の繰越行を生成すること()
+    {
+        // Act
+        var row = _viewModel.BuildCarryoverRow("0102030405060708", 2026, 5, 7500);
+
+        // Assert
+        row.Should().NotBeNull();
+        row!.Id.Should().Be(0, "DBに実体を持たない合成行");
+        row.Balance.Should().Be(7500);
+        row.IsCarryoverRow.Should().BeTrue();
+    }
+
+    #endregion
+
     #region 残高不整合ハイライト（Issue #1052）
 
     [Fact]

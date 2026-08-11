@@ -23,7 +23,7 @@ namespace ICCardManager.Tests.Views;
 public class SystemManageDialogBackupHealthLayoutTests
 {
     private static readonly string SystemManageDialogXamlPath =
-        ResolveViewPath(Path.Combine("Views", "Dialogs", "SystemManageDialog.xaml"));
+        Helpers.ViewSourceLocator.Resolve(Path.Combine("Views", "Dialogs", "SystemManageDialog.xaml"));
 
     [Fact]
     public void Backup_health_group_box_should_exist()
@@ -101,22 +101,5 @@ public class SystemManageDialogBackupHealthLayoutTests
 
         match.Success.Should().BeTrue("SystemManageDialog.xaml に「バックアップ状況」の GroupBox が存在すべき");
         return match.Value;
-    }
-
-    private static string ResolveViewPath(string relativePath)
-    {
-        var current = new DirectoryInfo(AppContext.BaseDirectory);
-        while (current != null)
-        {
-            var candidate = Path.Combine(current.FullName, "src", "ICCardManager", relativePath);
-            if (File.Exists(candidate))
-            {
-                return candidate;
-            }
-            current = current.Parent;
-        }
-
-        throw new InvalidOperationException(
-            $"{relativePath} を {AppContext.BaseDirectory} の親階層から解決できませんでした");
     }
 }

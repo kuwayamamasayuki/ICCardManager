@@ -23,7 +23,7 @@ namespace ICCardManager.Tests.Views;
 public class ReportDialogStatusAreaLayoutTests
 {
     private static readonly string ReportDialogXamlPath =
-        ResolveViewPath(Path.Combine("Views", "Dialogs", "ReportDialog.xaml"));
+        Helpers.ViewSourceLocator.Resolve(Path.Combine("Views", "Dialogs", "ReportDialog.xaml"));
 
     [Fact]
     public void Status_message_should_have_text_wrapping()
@@ -59,22 +59,5 @@ public class ReportDialogStatusAreaLayoutTests
         var match = pattern.Match(xaml);
         match.Success.Should().BeTrue("ReportDialog.xaml に「ボタンエリア」の Grid が存在すべき");
         return match.Value;
-    }
-
-    private static string ResolveViewPath(string relativePath)
-    {
-        var current = new DirectoryInfo(AppContext.BaseDirectory);
-        while (current != null)
-        {
-            var candidate = Path.Combine(current.FullName, "src", "ICCardManager", relativePath);
-            if (File.Exists(candidate))
-            {
-                return candidate;
-            }
-            current = current.Parent;
-        }
-
-        throw new InvalidOperationException(
-            $"{relativePath} を {AppContext.BaseDirectory} の親階層から解決できませんでした");
     }
 }

@@ -32,7 +32,7 @@ namespace ICCardManager.Tests.Views;
 public class CardManageDialogStatusAreaLayoutTests
 {
     private static readonly string CardManageDialogXamlPath =
-        ResolveViewPath(Path.Combine("Views", "Dialogs", "CardManageDialog.xaml"));
+        Helpers.ViewSourceLocator.Resolve(Path.Combine("Views", "Dialogs", "CardManageDialog.xaml"));
 
     /// <summary>
     /// ステータス欄が、IsEditing で表示制御されるコンテナの内側に無いこと。
@@ -131,22 +131,5 @@ public class CardManageDialogStatusAreaLayoutTests
             "CardManageDialog.xaml に StatusMessage を表示する TextBlock が存在すべき");
 
         return match.Value;
-    }
-
-    private static string ResolveViewPath(string relativePath)
-    {
-        var current = new DirectoryInfo(AppContext.BaseDirectory);
-        while (current != null)
-        {
-            var candidate = Path.Combine(current.FullName, "src", "ICCardManager", relativePath);
-            if (File.Exists(candidate))
-            {
-                return candidate;
-            }
-            current = current.Parent;
-        }
-
-        throw new InvalidOperationException(
-            $"{relativePath} を {AppContext.BaseDirectory} の親階層から解決できませんでした");
     }
 }
