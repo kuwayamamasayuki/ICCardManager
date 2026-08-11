@@ -180,13 +180,18 @@
                          ToolTip="残高（自動計算ONの場合は自動で計算されます）（アクセスキー: Alt+B）"/>
                 <TextBlock Text="円" VerticalAlignment="Center" Margin="5,0,0,0"
                            FontSize="{DynamicResource BaseFontSize}"/>
+                <!-- Issue #1740: 直前行の残高が特定できない場合は自動計算を無効化する。
+                     理由と対処は AutoBalanceToolTip が状態に応じて説明する。 -->
                 <CheckBox Content="自動計算(_A)"
                           IsChecked="{Binding IsAutoBalance}"
+                          IsEnabled="{Binding CanAutoBalance}"
                           VerticalAlignment="Center"
                           Margin="15,0,0,0"
                           FontSize="{DynamicResource BaseFontSize}"
                           AutomationProperties.Name="残高を自動計算"
-                          ToolTip="ONにすると、前行の残高 + 受入 - 払出 で自動計算されます（アクセスキー: Alt+A）"/>
+                          AutomationProperties.HelpText="{Binding AutoBalanceToolTip}"
+                          ToolTip="{Binding AutoBalanceToolTip}"
+                          ToolTipService.ShowOnDisabled="True"/>
             </StackPanel>
 
             <!-- 利用者 (_U) -->

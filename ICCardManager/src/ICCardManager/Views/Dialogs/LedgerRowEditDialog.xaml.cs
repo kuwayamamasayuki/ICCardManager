@@ -127,9 +127,13 @@ namespace ICCardManager.Views.Dialogs
         /// </summary>
         /// <param name="ledgerDto">編集対象</param>
         /// <param name="operatorIdm">認証済み職員IDm</param>
-        public async Task InitializeForEditAsync(LedgerDto ledgerDto, string operatorIdm)
+        /// <param name="previousBalance">
+        /// 履歴一覧の表示順で編集対象の直前にある行の残高（Issue #1740）。残高自動計算の起点。
+        /// 直前行が表示範囲に無い場合は null を渡すと自動計算が無効化される。
+        /// </param>
+        public async Task InitializeForEditAsync(LedgerDto ledgerDto, string operatorIdm, int? previousBalance = null)
         {
-            await _viewModel.InitializeForEditAsync(ledgerDto, operatorIdm);
+            await _viewModel.InitializeForEditAsync(ledgerDto, operatorIdm, previousBalance);
         }
 
         /// <summary>

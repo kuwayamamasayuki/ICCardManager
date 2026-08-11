@@ -425,6 +425,178 @@ public class LedgerRowEditViewModelTests : IDisposable
 
     #endregion
 
+    #region Editモードの残高自動計算（Issue #1740）
+
+    /// <summary>
+    /// Issue #1740 の検証用: 前行残高 2,000 円のあとに続くチャージ行
+    /// （受入 3,000 円・払出 0 円・残高 5,000 円）を Edit モードで開く。
+    /// </summary>
+    private LedgerDto SetupChargeRowForEdit()
+    {
+        var ledger = new Ledger
+        {
+            Id = 10, CardIdm = TestCardIdm,
+            Date = new DateTime(2026, 1, 12),
+            Summary = "役務費によりチャージ",
+            Income = 3000, Expense = 0, Balance = 5000,
+            LenderIdm = _staffA.StaffIdm,
+            StaffName = _staffA.Name,
+            Note = string.Empty
+        };
+        _ledgerRepoMock.Setup(r => r.GetByIdAsync(10)).ReturnsAsync(ledger);
+
+        return new LedgerDto
+        {
+            Id = 10, CardIdm = TestCardIdm,
+            Date = ledger.Date, DateDisplay = "R8.1.12",
+            Summary = ledger.Summary,
+            Income = 3000, Expense = 0, Balance = 5000,
+            StaffName = _staffA.Name
+        };
+    }
+
+    /// <summary>
+    /// Issue #1740: Edit モードで「自動計算」を ON にすると、前行残高を起点に再計算されること。
+    /// 修正前は PreviousBalance が既定値 0 のままで 0+3000-0=3000 となり、
+    /// DB の正しい残高 5,000 円を破壊していた。
+    /// </summary>
+    [Fact]
+    public async Task EditMode_AutoBalanceOn_前行残高を起点に再計算されること()
+    {
+        // Arrange
+        var dto = SetupChargeRowForEdit();
+        await _viewModel.InitializeForEditAsync(dto, TestOperatorIdm, previousBalance: 2000);
+
+        // Act
+        _viewModel.IsAutoBalance = true;
+
+        // Assert: 2000 + 3000 - 0
+        _viewModel.Balance.Should().Be(5000);
+        _viewModel.PreviousBalance.Should().Be(2000);
+    }
+
+    /// <summary>
+    /// Issue #1740: 自動計算 ON の状態で金額を修正しても、前行残高を起点に追随すること。
+    /// </summary>
+    [Fact]
+    public async Task EditMode_AutoBalanceOn_金額修正時も前行残高を起点に追随すること()
+    {
+        // Arrange
+        var dto = SetupChargeRowForEdit();
+        await _viewModel.InitializeForEditAsync(dto, TestOperatorIdm, previousBalance: 2000);
+        _viewModel.IsAutoBalance = true;
+
+        // Act: チャージ額を 3,000 → 5,000 に訂正
+        _viewModel.Income = 5000;
+
+        // Assert: 2000 + 5000 - 0
+        _viewModel.Balance.Should().Be(7000);
+    }
+
+    /// <summary>
+    /// Issue #1740: 前行が特定できない場合（ページ先頭行など）は自動計算を使えないこと。
+    /// </summary>
+    [Fact]
+    public async Task EditMode_前行残高が不明なら自動計算を使えないこと()
+    {
+        // Arrange & Act
+        var dto = SetupChargeRowForEdit();
+        await _viewModel.InitializeForEditAsync(dto, TestOperatorIdm, previousBalance: null);
+
+        // Assert
+        _viewModel.CanAutoBalance.Should().BeFalse();
+    }
+
+    /// <summary>
+    /// Issue #1740: 前行が特定できない状態で自動計算フラグが立っても、残高を書き換えないこと。
+    /// チェックボックスは無効化されるが、コード経路が残らないことを表明する（fail-safe）。
+    /// </summary>
+    [Fact]
+    public async Task EditMode_前行残高が不明なら自動計算ONでも残高が変化しないこと()
+    {
+        // Arrange
+        var dto = SetupChargeRowForEdit();
+        await _viewModel.InitializeForEditAsync(dto, TestOperatorIdm, previousBalance: null);
+
+        // Act
+        _viewModel.IsAutoBalance = true;
+
+        // Assert: DB の値のまま
+        _viewModel.Balance.Should().Be(5000);
+    }
+
+    /// <summary>
+    /// Issue #1740: 引数を省略した呼び出しでは自動計算を使えないこと（fail-safe な既定値）。
+    /// 呼び出し元の渡し忘れで残高が破壊されないことを表明する。
+    /// </summary>
+    [Fact]
+    public async Task EditMode_前行残高を省略した場合はfail_safeに倒れること()
+    {
+        // Arrange
+        var dto = SetupChargeRowForEdit();
+
+        // Act
+        await _viewModel.InitializeForEditAsync(dto, TestOperatorIdm);
+        _viewModel.IsAutoBalance = true;
+
+        // Assert
+        _viewModel.CanAutoBalance.Should().BeFalse();
+        _viewModel.Balance.Should().Be(5000);
+    }
+
+    /// <summary>
+    /// Issue #1740: 初期化直後は DB の残高がそのまま入り、自動計算は OFF で始まること。
+    /// 修正前は初期化中にも誤った再計算が走り、直後の Balance 代入が偶然打ち消していた。
+    /// </summary>
+    [Fact]
+    public async Task EditMode_初期化直後はDB値の残高と自動計算OFFで始まること()
+    {
+        // Arrange & Act
+        var dto = SetupChargeRowForEdit();
+        await _viewModel.InitializeForEditAsync(dto, TestOperatorIdm, previousBalance: 2000);
+
+        // Assert
+        _viewModel.Balance.Should().Be(5000);
+        _viewModel.IsAutoBalance.Should().BeFalse();
+    }
+
+    /// <summary>
+    /// Issue #1740: Add モードの自動計算は従来どおり常に使えること（既存挙動の不変）。
+    /// </summary>
+    [Fact]
+    public async Task AddMode_自動計算は常に使えること()
+    {
+        // Arrange & Act
+        var allLedgers = CreateTestLedgers();
+        await _viewModel.InitializeForAddAsync(TestCardIdm, allLedgers, TestOperatorIdm);
+
+        // Assert
+        _viewModel.CanAutoBalance.Should().BeTrue();
+        _viewModel.IsAutoBalance.Should().BeTrue();
+    }
+
+    /// <summary>
+    /// Issue #1740: 自動計算が使えない場合、ToolTip がその理由と対処を説明すること。
+    /// 無効化された操作部品の理由が利用者に伝わらない状態を防ぐ（error-messages.md）。
+    /// </summary>
+    [Fact]
+    public async Task EditMode_自動計算が使えない場合はToolTipが理由と対処を示すこと()
+    {
+        // Arrange
+        var dto = SetupChargeRowForEdit();
+        var enabledTooltip = _viewModel.AutoBalanceToolTip;
+
+        // Act
+        await _viewModel.InitializeForEditAsync(dto, TestOperatorIdm, previousBalance: null);
+
+        // Assert
+        _viewModel.AutoBalanceToolTip.Should().NotBe(enabledTooltip);
+        _viewModel.AutoBalanceToolTip.Should().Contain("前の行");
+        _viewModel.AutoBalanceToolTip.Should().EndWith("してください。");
+    }
+
+    #endregion
+
     #region バリデーション
 
     [Fact]

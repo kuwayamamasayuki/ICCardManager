@@ -122,10 +122,42 @@ namespace ICCardManager.ViewModels
         private int _insertIndex;
 
         /// <summary>
-        /// 挿入位置の直前行の残高
+        /// 直前行の残高（自動計算の起点）
         /// </summary>
+        /// <remarks>
+        /// Addモードは挿入位置に追随して <see cref="RecalculateBalance"/> が毎回設定する。
+        /// Editモードは編集対象行が固定のため <see cref="InitializeForEditAsync"/> で一度だけ設定する（Issue #1740）。
+        /// </remarks>
         [ObservableProperty]
         private int _previousBalance;
+
+        /// <summary>
+        /// 残高の自動計算が使えるか（Issue #1740）
+        /// </summary>
+        /// <remarks>
+        /// Addモードは挿入位置プレビューから直前行を必ず特定できるため常に true。
+        /// Editモードは <see cref="InitializeForEditAsync"/> に直前行の残高が渡されたときのみ true になる。
+        /// false のときは <see cref="RecalculateBalance"/> が残高に触れず、手入力のみとなる。
+        /// </remarks>
+        [ObservableProperty]
+        private bool _canAutoBalance = true;
+
+        /// <summary>
+        /// 「自動計算」チェックボックスのToolTip（Issue #1740）
+        /// </summary>
+        /// <remarks>
+        /// 自動計算が使えない場合は、無効化されている理由と復旧手段を示す
+        /// （<c>.claude/rules/error-messages.md</c> の「何が／なぜ／どうすれば」）。
+        /// </remarks>
+        public string AutoBalanceToolTip => CanAutoBalance
+            ? "ONにすると、前の行の残高 + 受入 - 払出 で自動計算されます（アクセスキー: Alt+A）"
+            : "残高の自動計算は前の行の残高を起点にしますが、修正対象の前の行が履歴の表示範囲にありません。" +
+              "残高欄に金額を直接入力するか、履歴の表示期間を広げて前の行が見える状態にしてから修正してください。";
+
+        partial void OnCanAutoBalanceChanged(bool value)
+        {
+            OnPropertyChanged(nameof(AutoBalanceToolTip));
+        }
 
         /// <summary>
         /// 挿入位置プレビューを表示するか（Addモードのみ）
@@ -274,7 +306,13 @@ namespace ICCardManager.ViewModels
         /// </summary>
         /// <param name="ledgerDto">編集対象</param>
         /// <param name="operatorIdm">認証済み職員IDm</param>
-        public async Task InitializeForEditAsync(LedgerDto ledgerDto, string operatorIdm)
+        /// <param name="previousBalance">
+        /// 履歴一覧の表示順で編集対象の直前にある行の残高（Issue #1740）。
+        /// 自動計算の起点として使う。直前行が表示範囲に無い場合（ページ先頭行など）は null を渡すこと。
+        /// null のときは自動計算を使用不可（<see cref="CanAutoBalance"/> = false）にして手入力のみとする。
+        /// 既定値が null なのは、呼び出し元が渡し忘れても残高を破壊せず「便利機能が使えない」だけで済ませるため。
+        /// </param>
+        public async Task InitializeForEditAsync(LedgerDto ledgerDto, string operatorIdm, int? previousBalance = null)
         {
             _operatorIdm = operatorIdm;
             _cardIdm = ledgerDto.CardIdm;
@@ -282,6 +320,12 @@ namespace ICCardManager.ViewModels
 
             Mode = LedgerRowEditMode.Edit;
             DialogTitle = "履歴行の修正";
+
+            // Issue #1740: 金額の復元で誤った自動計算が走らないよう、値の代入より先に自動計算を止める。
+            // （IsAutoBalance の既定値は true のため、Income/Expense の代入で RecalculateBalance が発火する）
+            IsAutoBalance = false; // 編集モードでは手動入力開始
+            CanAutoBalance = previousBalance.HasValue;
+            PreviousBalance = previousBalance ?? 0;
 
             // 完全なLedgerオブジェクトを取得
             var ledger = await _ledgerRepository.GetByIdAsync(ledgerDto.Id);
@@ -292,7 +336,6 @@ namespace ICCardManager.ViewModels
             Income = ledger.Income;
             Expense = ledger.Expense;
             Balance = ledger.Balance;
-            IsAutoBalance = false; // 編集モードでは手動入力開始
             Note = ledger.Note ?? string.Empty;
 
             await LoadStaffListAsync();
@@ -469,6 +512,11 @@ namespace ICCardManager.ViewModels
         {
             if (!IsAutoBalance) return;
 
+            // Issue #1740: 直前行の残高が特定できていないときは残高に触れない。
+            // Editモードで PreviousBalance が既定値 0 のまま計算され、DBの正しい残高を
+            // 「0 + 受入 - 払出」で上書きしていた不具合への fail-safe。
+            if (!CanAutoBalance) return;
+
             if (Mode == LedgerRowEditMode.Add)
             {
                 // 挿入位置の直前行の残高を取得
@@ -481,6 +529,8 @@ namespace ICCardManager.ViewModels
                     PreviousBalance = 0;
                 }
             }
+            // Editモードは編集対象行が固定のため、InitializeForEditAsync が設定した
+            // PreviousBalance をそのまま使う（Addモードのように毎回引き直す必要がない）。
 
             Balance = PreviousBalance + Income - Expense;
         }

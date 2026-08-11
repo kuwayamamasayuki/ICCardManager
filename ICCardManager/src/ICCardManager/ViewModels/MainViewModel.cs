@@ -1998,18 +1998,49 @@ public partial class MainViewModel : ViewModelBase
     }
 
     /// <summary>
+    /// 編集対象行の直前行の残高を、履歴一覧の表示順から求める（Issue #1740）。
+    /// 直前行が表示範囲に無い場合（ページ先頭行など）は null を返す。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 供給源に <see cref="HistoryLedgers"/> を使うのは、追加モードの挿入位置プレビューと同じ並び
+    /// （<see cref="Services.LedgerOrderHelper.ReorderByBalanceChain"/> で残高チェーン順に整列済み）
+    /// を起点にするため。同一日内の利用系レコードは時刻をすべて 00:00:00 で保存するため、
+    /// 日付や id から直前行を引くと同日統合（Issue #837）の影響で時系列と食い違う（Issue #1731）。
+    /// </para>
+    /// <para>
+    /// 1ページ目の先頭には繰越行（Issue #1155、<see cref="BuildCarryoverRowAsync"/>）が入るため、
+    /// 表示期間の最初の実データ行にも直前行の残高が供給される。繰越行の Id は 0 で実レコードと衝突しない。
+    /// </para>
+    /// <para>
+    /// null を返した場合、編集ダイアログ側は自動計算を無効化して手入力のみとする。
+    /// 「前行が無いから 0 から計算する」としてはならない（Issue #1740 の不具合そのもの）。
+    /// </para>
+    /// </remarks>
+    internal int? FindPreviousBalanceForEdit(LedgerDto ledger)
+    {
+        if (ledger == null) return null;
+
+        var index = HistoryLedgers.ToList().FindIndex(l => l.Id == ledger.Id);
+        return index > 0 ? HistoryLedgers[index - 1].Balance : (int?)null;
+    }
+
+    /// <summary>
     /// 認証済みの状態で履歴を編集（Issue #1134: 「保存して次へ」ループ対応）
     /// </summary>
     private async Task EditLedgerWithAuthAsync(LedgerDto ledger, string operatorIdm, bool showSaveAndNext = false)
     {
         var cardName = HistoryCard?.DisplayName;
 
+        // Issue #1740: 残高の自動計算に使う直前行の残高を、ダイアログを開く前に確定させる
+        var previousBalance = FindPreviousBalanceForEdit(ledger);
+
         // 全項目編集ダイアログ表示
         Views.Dialogs.LedgerRowEditDialog capturedEditDialog = null;
         var dialogResult = await _navigationService.ShowDialogAsync<Views.Dialogs.LedgerRowEditDialog>(
             async d =>
             {
-                await d.InitializeForEditAsync(ledger, operatorIdm);
+                await d.InitializeForEditAsync(ledger, operatorIdm, previousBalance);
                 if (showSaveAndNext)
                 {
                     d.SetShowSaveAndNextButton(true);
