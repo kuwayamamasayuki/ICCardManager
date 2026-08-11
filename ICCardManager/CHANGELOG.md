@@ -210,6 +210,15 @@
   - 検証: `DbContextCheckConnectionReachabilityTests`（22件）を新設（+22）。単体テストで SMB 切断は再現できないため、到達確認を `protected virtual` のテスト継ぎ目とし「クエリは通るがファイルへ届かない」状態を差し替えで作る。あわせて既定実装（`File.Exists` ベース）自体も実ファイルの有無で検証し、継ぎ目だけを検証して実装が空洞化することを防ぐ。ブロックの再現は `ManualResetEventSlim` と短縮した上限（100〜200ms）で決定的に行い、実時間の待機に依存しない。上限時間 < ヘルスチェック間隔（15秒）の関係も規約テストで固定した。既存の `DbContextCheckConnectionLoggingTests` / `DbContextCheckWritableTests` / `SharedModeMonitor*Tests` / `ConnectionDiagnosticsServiceTests` に影響がないことも確認済み。
   - 03_画面設計書 §3.22／04_機能設計書 §18.4・§19.2／05_クラス設計書 §3.3・§5.5／07_テスト設計書 §1.1a（単体 4,088→4,110・合計 4,114→4,136 件）・§2.55 UT-072 を同期更新（#1716）
 
+**リファクタリング**
+- Issue #1785 データ入出力ダイアログの**インポート2コマンドの複製を解消**した。「直接インポート(_R)」にバインドされた `DataExportImportViewModel.ImportAsync` は `ExecuteImportAsync` の全文複製で、**約115行中8行しか差が無かった**（インポート元が `dialog.FileName` か確定済みローカル変数かという点のみ。データ種別の switch・`LastImportedFile` 代入・`HasImported` 設定・成功/エラー/部分成功の3分岐・`TryLogImportAsync` 2箇所・catch まで同一）。結果処理・監査記録に関わる修正を毎回2箇所へ適用する必要があり、片方だけ直すと「一方の経路だけ壊れている」非対称が生じる。Issue #1741 では実際にこの非対称が発生しており、複製側が無傷であることを別途確認する作業が発生した。
+  - インポート本体を `RunImportAsync(string sourceFilePath, bool clearPreviewOnSuccess)`、結果の通知・監査記録を `HandleImportResultAsync(...)` として抽出し、両コマンドから呼ぶ構造にした。コマンド側に残るのは**インポート元の決定だけ**（`ExecuteImportAsync` はプレビューの検証と確定済みパス、`ImportAsync` は `OpenFileDialog` の選択結果）。`DataExportImportViewModel.cs` は 1,135 → 1,055 行。
+  - **唯一の挙動差は引数で表す**。プレビュー経由の経路は成功時に `ClearPreview()` を呼ぶが、直接インポートはプレビューを入力としないため呼ばない。一律クリアにするとプレビュー確認中の職員の作業状態を勝手に捨てることになるため、`clearPreviewOnSuccess` で明示的に切り替える。`ClearPreview()` の呼び出し位置（ステータス設定の後・監査記録の前）も元のままにし、完了ダイアログが出る時点でプレビューが消えている表示順を保存した。
+  - **挙動不変**。`#if DEBUG` のデバッグ出力ラベルのみ `[ExecuteImport Error]` / `[Import Error]` の2系統から `[Import Error]`（StackTrace 併記）へ統一した（Release ビルドには影響しない）。
+  - **これまでテスト不能だった経路を検証可能にした**。`ImportAsync` は `OpenFileDialog` をコマンド内で生成するため単体テストから起動できず、この経路の結果処理は一度もテストされていなかった。`RunImportAsync` を `internal` にしたことで複製側の設定（`clearPreviewOnSuccess: false`）を直接検証できる。
+  - 検証: `DataExportImportViewModelTests` に5件（直接インポート経路の成功／部分成功／失敗／監査ログ記録失敗／プレビュー非クリア）、`DataExportImportViewModelImportPathSharingTests` を新設して6件（+11、全4,644件パス）。**複製の復活は挙動テストでは表明できない**（複製された2つの実装が偶然どちらも正しい間は緑のまま通る）ため、レイアウト規約テストと同じくソーステキストを検査し、両コマンド本体がサービス呼び出し・監査記録・完了通知を持たないことと、インポートサービスの呼び分けがファイル全体で1箇所であることを固定した。リファクタ前のソースに対して同じ検査を行うと落ちること（禁止要素12行／出現回数2）を確認済み。
+  - 05_クラス設計書 §5.17／07_テスト設計書 §1.1a（単体 4,580→4,591・合計 4,606→4,617 件）・§2 UT-028 No.18〜22・UT-028a を同期更新（#1785）
+
 **ドキュメント**
 - Issue #1695 **交通系固有ロジックの境界を文書化し、規約テストで固定した**（2026-07-10 ユーザビリティ総合検討 Phase 3）。本システムのコア（タッチ認証→貸出/返却→出納簿）は「複数職員でシェアする物品の出納管理」として交通系ICカード以外（社用携帯・鍵・公用車両等）にも通用するが、どこまでが交通系固有かがどこにも書かれておらず、改修のたびに各自が判断していた。**今すぐの汎用化は行わず**、境界の可視化と保全のみを行う（YAGNI）。
   - **3リング境界モデル**を 05_クラス設計書 §2a に新設した。中心＝汎用コア（staff／貸出返却の状態遷移／30秒ルール／ledger の受入・払出・残額／繰越・月計・累計／操作ログ／バックアップ／帳票骨格）、中間＝交通系アダプタ（`ICardReader` 実装／`CardType`／`LedgerDetail` の乗車駅・降車駅・バス停）、外側＝交通系固有（駅名摘要／バス判別／往復・乗継・循環判定／`StationMasterService`／`FelicaHistoryBlockDecoder`）。ルールは「内側のリングに外側リングの知識を持ち込まない」の1点。**この境界はレイヤー構成（Presentation/Business/Data/Infrastructure）と直交する縦串**で、交通系固有性は3層すべてに分散しているため既存のレイヤー図では表現できない。
