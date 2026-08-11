@@ -613,6 +613,34 @@ public partial class DataExportImportViewModel : ViewModelBase
             return;
         }
 
+        // Issue #1741: インポート元パスをここで確定させて引数として渡す。
+        // ImportPreviewFile は画面の一時状態で、成功分岐の ClearPreview() が空にするため、
+        // 取り込み後に読み直すと監査ログへ空パスが記録される。
+        await RunImportAsync(ImportPreviewFile, clearPreviewOnSuccess: true);
+    }
+
+    /// <summary>
+    /// インポート本体。プレビュー経由（<see cref="ExecuteImportAsync"/>）と
+    /// 直接インポート（<see cref="ImportAsync"/>）の共通処理（Issue #1785）
+    /// </summary>
+    /// <param name="sourceFilePath">
+    /// 取り込む CSV のパス。呼び出し元で確定済みの値を渡すこと（Issue #1741）。
+    /// 画面状態のプロパティを本メソッド内で読み直してはならない。
+    /// </param>
+    /// <param name="clearPreviewOnSuccess">
+    /// 成功時にプレビュー表示を消すか。プレビュー経由の経路は取り込み済みのプレビューが
+    /// 画面に残らないよう <c>true</c>、直接インポートは無関係なプレビューを消さないよう <c>false</c>。
+    /// </param>
+    /// <remarks>
+    /// 2つのコマンドは差分8行の全文複製（約115行）で、結果処理・監査記録に関わる修正を
+    /// 毎回2箇所へ適用する必要があった。Issue #1741 では実際に一方の経路だけが壊れており、
+    /// 複製側が無傷であることを別途確認する作業が発生した。
+    /// インポートの分岐を増やすときは必ずここへ書き、コマンド側へ複製しないこと。
+    /// テストから直接呼べるよう internal にしている（<see cref="ImportAsync"/> は
+    /// <see cref="OpenFileDialog"/> をコマンド内で生成するため単体テストから起動できない）。
+    /// </remarks>
+    internal async Task RunImportAsync(string sourceFilePath, bool clearPreviewOnSuccess)
+    {
         ImportErrors.Clear();
 
         using (BeginBusy("インポート中..."))
@@ -623,31 +651,29 @@ public partial class DataExportImportViewModel : ViewModelBase
             {
                 CsvImportResult result;
 
-                // Issue #1741: インポート元パスと対象データ種別をここでローカル変数へ確定させる。
-                // どちらも画面の一時状態で、ImportPreviewFile は成功分岐の ClearPreview() が空にし、
-                // SelectedImportType は await 中のキー操作（データ種別コンボのアクセスキー）で変わり得る。
-                // 監査ログ記録時にプロパティを読み直すと、空パスや実際とは異なる対象テーブルが記録される。
-                var importSourceFilePath = ImportPreviewFile;
+                // Issue #1741: 対象データ種別をここでローカル変数へ確定させる。
+                // SelectedImportType は await 中のキー操作（データ種別コンボのアクセスキー）で変わり得るため、
+                // 監査ログ記録時にプロパティを読み直すと実際とは異なる対象テーブルが記録される。
                 var importDataType = SelectedImportType;
                 var importTargetTable = MapDataTypeToTableName(importDataType);
 
                 switch (importDataType)
                 {
                     case DataType.Cards:
-                        result = await _importService.ImportCardsAsync(importSourceFilePath, SkipExistingOnImport);
+                        result = await _importService.ImportCardsAsync(sourceFilePath, SkipExistingOnImport);
                         break;
 
                     case DataType.Staff:
-                        result = await _importService.ImportStaffAsync(importSourceFilePath, SkipExistingOnImport);
+                        result = await _importService.ImportStaffAsync(sourceFilePath, SkipExistingOnImport);
                         break;
 
                     case DataType.Ledgers:
                         // Issue #511: ターゲットカードIDmを渡す
-                        result = await _importService.ImportLedgersAsync(importSourceFilePath, SkipExistingOnImport, GetTargetCardIdm());
+                        result = await _importService.ImportLedgersAsync(sourceFilePath, SkipExistingOnImport, GetTargetCardIdm());
                         break;
 
                     case DataType.LedgerDetails:
-                        result = await _importService.ImportLedgerDetailsAsync(importSourceFilePath);
+                        result = await _importService.ImportLedgerDetailsAsync(sourceFilePath);
                         break;
 
                     default:
@@ -655,7 +681,7 @@ public partial class DataExportImportViewModel : ViewModelBase
                         return;
                 }
 
-                LastImportedFile = importSourceFilePath;
+                LastImportedFile = sourceFilePath;
 
                 // Issue #744: インポート実行済みフラグを設定（ダイアログ終了後のリフレッシュ用）
                 if (result.ImportedCount > 0)
@@ -663,77 +689,7 @@ public partial class DataExportImportViewModel : ViewModelBase
                     HasImported = true;
                 }
 
-                if (result.Success)
-                {
-                    var message = $"インポート完了: {result.ImportedCount}件を登録しました";
-                    if (result.SkippedCount > 0)
-                    {
-                        message += $"（{result.SkippedCount}件はスキップ）";
-                    }
-                    SetStatus(message, false);
-                    ClearPreview();
-
-                    // Issue #1302: 監査ログ記録
-                    // Issue #1741: 直前の ClearPreview() で空になる ImportPreviewFile ではなく
-                    // 確定済みのローカル変数を渡す（空パスだと後からファイルを追跡できない）
-                    var auditLogged = await TryLogImportAsync(importTargetTable, importSourceFilePath, result);
-
-                    var completionMessage =
-                        $"インポートが完了しました。\n\n登録件数: {result.ImportedCount}件"
-                        + (result.SkippedCount > 0 ? $"\nスキップ: {result.SkippedCount}件" : "");
-
-                    if (auditLogged)
-                    {
-                        _dialogService.ShowInformation(completionMessage, "インポート完了");
-                    }
-                    else
-                    {
-                        _dialogService.ShowWarning(
-                            completionMessage + AuditLogFailureNotice,
-                            "インポート完了（操作ログ記録の失敗あり）");
-                    }
-                }
-                else if (!string.IsNullOrEmpty(result.ErrorMessage))
-                {
-                    SetStatus($"インポートエラー: {result.ErrorMessage}", true);
-                    _dialogService.ShowError(
-                        $"インポートに失敗しました。\n\n{result.ErrorMessage}",
-                        "インポートエラー");
-                }
-                else
-                {
-                    var message = $"インポート完了（一部エラー）: {result.ImportedCount}件を登録、{result.ErrorCount}件がエラー";
-                    if (result.SkippedCount > 0)
-                    {
-                        message += $"、{result.SkippedCount}件はスキップ";
-                    }
-                    SetStatus(message, false);
-
-                    // エラー詳細を追加
-                    foreach (var error in result.Errors.Take(10))
-                    {
-                        ImportErrors.Add($"行{error.LineNumber}: {error.Message}");
-                    }
-
-                    if (result.Errors.Count > 10)
-                    {
-                        ImportErrors.Add($"... 他 {result.Errors.Count - 10}件のエラー");
-                    }
-
-                    // Issue #1302: 部分成功でもデータは書き込まれたため監査ログ記録
-                    var partialAuditLogged = true;
-                    if (result.ImportedCount > 0)
-                    {
-                        partialAuditLogged = await TryLogImportAsync(importTargetTable, importSourceFilePath, result);
-                    }
-
-                    _dialogService.ShowWarning(
-                        $"インポートが完了しましたが、一部エラーがあります。\n\n登録件数: {result.ImportedCount}件\nエラー: {result.ErrorCount}件"
-                        + (result.SkippedCount > 0 ? $"\nスキップ: {result.SkippedCount}件" : "")
-                        + "\n\n詳細はエラー一覧を確認してください。"
-                        + (partialAuditLogged ? "" : AuditLogFailureNotice),
-                        "インポート完了（一部エラー）");
-                }
+                await HandleImportResultAsync(result, sourceFilePath, importTargetTable, clearPreviewOnSuccess);
             }
             catch (Exception ex)
             {
@@ -743,9 +699,101 @@ public partial class DataExportImportViewModel : ViewModelBase
                 SetStatus(importErrorMessage, true);
                 _dialogService.ShowError(importErrorMessage, "インポートエラー");
 #if DEBUG
-                System.Diagnostics.Debug.WriteLine($"[ExecuteImport Error] {ex.GetType().Name}: {ex.Message}");
+                System.Diagnostics.Debug.WriteLine($"[Import Error] {ex.GetType().Name}: {ex.Message}");
+                System.Diagnostics.Debug.WriteLine($"[Import Error] StackTrace: {ex.StackTrace}");
 #endif
             }
+        }
+    }
+
+    /// <summary>
+    /// インポート結果（成功／失敗／部分成功）の通知・監査ログ記録を行う（Issue #1785）
+    /// </summary>
+    /// <param name="result">インポートサービスの実行結果</param>
+    /// <param name="sourceFilePath">監査ログへ記録するインポート元パス（確定済みの値）</param>
+    /// <param name="targetTable">監査ログへ記録する対象テーブル（確定済みの値）</param>
+    /// <param name="clearPreviewOnSuccess">成功時にプレビュー表示を消すか</param>
+    private async Task HandleImportResultAsync(
+        CsvImportResult result,
+        string sourceFilePath,
+        string targetTable,
+        bool clearPreviewOnSuccess)
+    {
+        if (result.Success)
+        {
+            var message = $"インポート完了: {result.ImportedCount}件を登録しました";
+            if (result.SkippedCount > 0)
+            {
+                message += $"（{result.SkippedCount}件はスキップ）";
+            }
+            SetStatus(message, false);
+
+            if (clearPreviewOnSuccess)
+            {
+                ClearPreview();
+            }
+
+            // Issue #1302: 監査ログ記録
+            // Issue #1741: 直前の ClearPreview() で空になる ImportPreviewFile ではなく
+            // 呼び出し元が確定させた引数を使う（空パスだと後からファイルを追跡できない）。
+            // 記録の失敗を取り込みの失敗として通知しない（TryLogImportAsync の remarks 参照）
+            var auditLogged = await TryLogImportAsync(targetTable, sourceFilePath, result);
+
+            var completionMessage =
+                $"インポートが完了しました。\n\n登録件数: {result.ImportedCount}件"
+                + (result.SkippedCount > 0 ? $"\nスキップ: {result.SkippedCount}件" : "");
+
+            if (auditLogged)
+            {
+                _dialogService.ShowInformation(completionMessage, "インポート完了");
+            }
+            else
+            {
+                _dialogService.ShowWarning(
+                    completionMessage + AuditLogFailureNotice,
+                    "インポート完了（操作ログ記録の失敗あり）");
+            }
+        }
+        else if (!string.IsNullOrEmpty(result.ErrorMessage))
+        {
+            SetStatus($"インポートエラー: {result.ErrorMessage}", true);
+            _dialogService.ShowError(
+                $"インポートに失敗しました。\n\n{result.ErrorMessage}",
+                "インポートエラー");
+        }
+        else
+        {
+            var message = $"インポート完了（一部エラー）: {result.ImportedCount}件を登録、{result.ErrorCount}件がエラー";
+            if (result.SkippedCount > 0)
+            {
+                message += $"、{result.SkippedCount}件はスキップ";
+            }
+            SetStatus(message, false);
+
+            // エラー詳細を追加
+            foreach (var error in result.Errors.Take(10))
+            {
+                ImportErrors.Add($"行{error.LineNumber}: {error.Message}");
+            }
+
+            if (result.Errors.Count > 10)
+            {
+                ImportErrors.Add($"... 他 {result.Errors.Count - 10}件のエラー");
+            }
+
+            // Issue #1302: 部分成功でもデータは書き込まれたため監査ログ記録
+            var partialAuditLogged = true;
+            if (result.ImportedCount > 0)
+            {
+                partialAuditLogged = await TryLogImportAsync(targetTable, sourceFilePath, result);
+            }
+
+            _dialogService.ShowWarning(
+                $"インポートが完了しましたが、一部エラーがあります。\n\n登録件数: {result.ImportedCount}件\nエラー: {result.ErrorCount}件"
+                + (result.SkippedCount > 0 ? $"\nスキップ: {result.SkippedCount}件" : "")
+                + "\n\n詳細はエラー一覧を確認してください。"
+                + (partialAuditLogged ? "" : AuditLogFailureNotice),
+                "インポート完了（一部エラー）");
         }
     }
 
@@ -767,7 +815,7 @@ public partial class DataExportImportViewModel : ViewModelBase
     /// </summary>
     /// <remarks>
     /// 監査ログ記録は取り込みがコミットされた後の後処理であり、ここでの失敗を
-    /// <see cref="ExecuteImportAsync"/> の catch へ流すと、確定済みの取り込みが
+    /// <see cref="RunImportAsync"/> の catch へ流すと、確定済みの取り込みが
     /// 「インポートに失敗しました」と通知され、職員が再実行して二重登録を招く。
     /// CLAUDE.md（Issue #1727）の「コミット確定後の後処理を、成否の判定に巻き込まない」に従う。
     /// <see cref="OperationLogger.LogImportAsync"/> は内部で例外を握りつぶさないため、
@@ -824,137 +872,9 @@ public partial class DataExportImportViewModel : ViewModelBase
             return;
         }
 
-        ImportErrors.Clear();
-
-        using (BeginBusy("インポート中..."))
-        {
-            // Issue #1062: UIスレッドにプログレスバー描画の機会を与える
-            await Task.Yield();
-            try
-            {
-                CsvImportResult result;
-
-                // Issue #1741: 対象データ種別をローカル変数へ確定させる。
-                // await 中に画面のデータ種別が変わると、監査ログが実際とは異なる対象テーブルを記録する。
-                // （インポート元パスはこの経路では最初からローカルの dialog.FileName を使っている）
-                var importDataType = SelectedImportType;
-                var importTargetTable = MapDataTypeToTableName(importDataType);
-
-                switch (importDataType)
-                {
-                    case DataType.Cards:
-                        result = await _importService.ImportCardsAsync(dialog.FileName, SkipExistingOnImport);
-                        break;
-
-                    case DataType.Staff:
-                        result = await _importService.ImportStaffAsync(dialog.FileName, SkipExistingOnImport);
-                        break;
-
-                    case DataType.Ledgers:
-                        // Issue #511: ターゲットカードIDmを渡す
-                        result = await _importService.ImportLedgersAsync(dialog.FileName, SkipExistingOnImport, GetTargetCardIdm());
-                        break;
-
-                    case DataType.LedgerDetails:
-                        result = await _importService.ImportLedgerDetailsAsync(dialog.FileName);
-                        break;
-
-                    default:
-                        SetStatus("不正なデータタイプです", true);
-                        return;
-                }
-
-                LastImportedFile = dialog.FileName;
-
-                // Issue #744: インポート実行済みフラグを設定（ダイアログ終了後のリフレッシュ用）
-                if (result.ImportedCount > 0)
-                {
-                    HasImported = true;
-                }
-
-                if (result.Success)
-                {
-                    var message = $"インポート完了: {result.ImportedCount}件を登録しました";
-                    if (result.SkippedCount > 0)
-                    {
-                        message += $"（{result.SkippedCount}件はスキップ）";
-                    }
-                    SetStatus(message, false);
-
-                    // Issue #1302: 監査ログ記録
-                    // Issue #1741: 記録の失敗を取り込みの失敗として通知しない（TryLogImportAsync の remarks 参照）
-                    var auditLogged = await TryLogImportAsync(importTargetTable, dialog.FileName, result);
-
-                    var completionMessage =
-                        $"インポートが完了しました。\n\n登録件数: {result.ImportedCount}件"
-                        + (result.SkippedCount > 0 ? $"\nスキップ: {result.SkippedCount}件" : "");
-
-                    if (auditLogged)
-                    {
-                        _dialogService.ShowInformation(completionMessage, "インポート完了");
-                    }
-                    else
-                    {
-                        _dialogService.ShowWarning(
-                            completionMessage + AuditLogFailureNotice,
-                            "インポート完了（操作ログ記録の失敗あり）");
-                    }
-                }
-                else if (!string.IsNullOrEmpty(result.ErrorMessage))
-                {
-                    SetStatus($"インポートエラー: {result.ErrorMessage}", true);
-                    _dialogService.ShowError(
-                        $"インポートに失敗しました。\n\n{result.ErrorMessage}",
-                        "インポートエラー");
-                }
-                else
-                {
-                    var message = $"インポート完了（一部エラー）: {result.ImportedCount}件を登録、{result.ErrorCount}件がエラー";
-                    if (result.SkippedCount > 0)
-                    {
-                        message += $"、{result.SkippedCount}件はスキップ";
-                    }
-                    SetStatus(message, false);
-
-                    // エラー詳細を追加
-                    foreach (var error in result.Errors.Take(10))
-                    {
-                        ImportErrors.Add($"行{error.LineNumber}: {error.Message}");
-                    }
-
-                    if (result.Errors.Count > 10)
-                    {
-                        ImportErrors.Add($"... 他 {result.Errors.Count - 10}件のエラー");
-                    }
-
-                    // Issue #1302: 部分成功でもデータは書き込まれたため監査ログ記録
-                    var partialAuditLogged = true;
-                    if (result.ImportedCount > 0)
-                    {
-                        partialAuditLogged = await TryLogImportAsync(importTargetTable, dialog.FileName, result);
-                    }
-
-                    _dialogService.ShowWarning(
-                        $"インポートが完了しましたが、一部エラーがあります。\n\n登録件数: {result.ImportedCount}件\nエラー: {result.ErrorCount}件"
-                        + (result.SkippedCount > 0 ? $"\nスキップ: {result.SkippedCount}件" : "")
-                        + "\n\n詳細はエラー一覧を確認してください。"
-                        + (partialAuditLogged ? "" : AuditLogFailureNotice),
-                        "インポート完了（一部エラー）");
-                }
-            }
-            catch (Exception ex)
-            {
-                // 技術的詳細はログへ。UI には 3 要素のユーザー向け文言を表示（Issue #1614）。
-                ErrorDialogHelper.LogException(ex, "インポート");
-                var importErrorMessage = ExceptionMessageFormatter.ToUserMessage(ex, "インポート");
-                SetStatus(importErrorMessage, true);
-                _dialogService.ShowError(importErrorMessage, "インポートエラー");
-#if DEBUG
-                System.Diagnostics.Debug.WriteLine($"[Import Error] {ex.GetType().Name}: {ex.Message}");
-                System.Diagnostics.Debug.WriteLine($"[Import Error] StackTrace: {ex.StackTrace}");
-#endif
-            }
-        }
+        // この経路のインポート元はプレビューではなくファイルダイアログの選択結果のため、
+        // 成功してもプレビュー表示はクリアしない（従来どおりの挙動）。
+        await RunImportAsync(dialog.FileName, clearPreviewOnSuccess: false);
     }
 
     /// <summary>

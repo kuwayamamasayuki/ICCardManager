@@ -16,6 +16,10 @@ namespace ICCardManager.Tests.Views.Helpers;
 /// 集約しないと、テスト出力ディレクトリの構成やソースレイアウトが変わったときに全クラスを
 /// 個別に直すことになり、直し漏れたクラスだけが静かに検査対象を見失う。
 /// </para>
+/// <para>
+/// 解決処理自体は拡張子を問わないため、XAML 以外のソーステキスト検査からも利用してよい
+/// （Issue #1785 の <c>DataExportImportViewModelImportPathSharingTests</c> が ViewModel の .cs を検査する）。
+/// </para>
 /// </remarks>
 public static class ViewSourceLocator
 {

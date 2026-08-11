@@ -924,4 +924,198 @@ public class DataExportImportViewModelTests : IDisposable
     }
 
     #endregion
+
+    #region 直接インポート経路（旧API互換）の結果処理（Issue #1785）
+
+    // ImportAsync（「直接インポート(_R)」ボタン）は OpenFileDialog をコマンド内で生成するため
+    // 単体テストから起動できない。Issue #1785 で結果処理を RunImportAsync へ共通化したことにより、
+    // この経路の設定（clearPreviewOnSuccess: false）を直接検証できるようになった。
+    // 共通化前は ExecuteImportAsync 側にしかテストが無く、複製側は無検証だった。
+
+    private const string DirectImportFileName = "staff_20260811.csv";
+    private static readonly string DirectImportFilePath =
+        System.IO.Path.Combine(ImportSourceDirectory, DirectImportFileName);
+
+    /// <summary>
+    /// 直接インポートは成功してもプレビュー表示をクリアしないこと（Issue #1785 で挙動を保存）
+    /// </summary>
+    /// <remarks>
+    /// プレビューは ExecuteImportAsync 経路の入力であり、直接インポートとは無関係。
+    /// 共通化にあたって一律クリアにすると、プレビュー確認中の職員の作業状態を勝手に捨てることになる。
+    /// </remarks>
+    [Fact]
+    public async Task RunImportAsync_直接インポート_成功してもプレビューをクリアしないこと()
+    {
+        // Arrange: プレビューを表示したまま直接インポートを実行する状況
+        SetupValidPreview();
+        _viewModel.ImportPreviewFile = ImportSourceFilePath;
+        _importServiceMock
+            .Setup(s => s.ImportCardsAsync(It.IsAny<string>(), It.IsAny<bool>()))
+            .ReturnsAsync(new CsvImportResult
+            {
+                Success = true,
+                ImportedCount = 3
+            });
+
+        // Act
+        await _viewModel.RunImportAsync(DirectImportFilePath, clearPreviewOnSuccess: false);
+
+        // Assert
+        _viewModel.HasPreview.Should().BeTrue("直接インポートはプレビューを入力としないため消してはならない");
+        _viewModel.ImportPreviewFile.Should().Be(ImportSourceFilePath);
+        _viewModel.LastImportedFile.Should().Be(
+            DirectImportFilePath,
+            "取り込んだのはダイアログで選んだファイルであるため");
+        _viewModel.HasImported.Should().BeTrue();
+    }
+
+    /// <summary>
+    /// 直接インポートでも、渡されたパスでインポートサービスが呼ばれ監査ログへ記録されること（Issue #1785）
+    /// </summary>
+    [Fact]
+    public async Task RunImportAsync_直接インポート_成功時に監査ログへファイルパスが記録されること()
+    {
+        // Arrange
+        SetupValidPreview();
+        _importServiceMock
+            .Setup(s => s.ImportCardsAsync(It.IsAny<string>(), It.IsAny<bool>()))
+            .ReturnsAsync(new CsvImportResult
+            {
+                Success = true,
+                ImportedCount = 4
+            });
+
+        // Act
+        await _viewModel.RunImportAsync(DirectImportFilePath, clearPreviewOnSuccess: false);
+
+        // Assert
+        _importServiceMock.Verify(
+            s => s.ImportCardsAsync(DirectImportFilePath, It.IsAny<bool>()),
+            Times.Once,
+            "プレビューのパスではなく引数で渡したパスを取り込むこと");
+
+        var log = await GetSingleImportLogAsync();
+        log.TargetTable.Should().Be(OperationLogger.Tables.IcCard);
+        log.TargetId.Should().Be(DirectImportFileName);
+        GetAfterDataString(log, "FilePath").Should().Be(
+            DirectImportFilePath,
+            "どのファイルを取り込んだかを後から追跡できる必要があるため");
+        _dialogServiceMock.Verify(
+            d => d.ShowInformation(It.Is<string>(m => m.Contains("4件")), "インポート完了"),
+            Times.Once);
+    }
+
+    /// <summary>
+    /// 直接インポートの部分成功時、エラー一覧の表示と監査ログ記録の両方が行われること（Issue #1785）
+    /// </summary>
+    [Fact]
+    public async Task RunImportAsync_直接インポート_部分成功時もエラー一覧と監査ログが揃うこと()
+    {
+        // Arrange
+        SetupValidPreview();
+        _importServiceMock
+            .Setup(s => s.ImportCardsAsync(It.IsAny<string>(), It.IsAny<bool>()))
+            .ReturnsAsync(new CsvImportResult
+            {
+                Success = false,
+                ErrorMessage = null,
+                ImportedCount = 2,
+                ErrorCount = 1,
+                Errors = new List<CsvImportError>
+                {
+                    new CsvImportError { LineNumber = 3, Message = "IDmが不正です" }
+                }
+            });
+
+        // Act
+        await _viewModel.RunImportAsync(DirectImportFilePath, clearPreviewOnSuccess: false);
+
+        // Assert
+        _viewModel.ImportErrors.Should().ContainSingle()
+            .Which.Should().Be("行3: IDmが不正です");
+        _viewModel.HasImported.Should().BeTrue("2件は書き込まれているため");
+        _dialogServiceMock.Verify(
+            d => d.ShowWarning(It.Is<string>(m => m.Contains("一部エラー")), It.IsAny<string>()),
+            Times.Once);
+
+        var log = await GetSingleImportLogAsync();
+        GetAfterDataString(log, "FilePath").Should().Be(DirectImportFilePath);
+    }
+
+    /// <summary>
+    /// 直接インポートでもインポート自体の失敗はエラーダイアログで通知し、監査ログは記録しないこと（Issue #1785）
+    /// </summary>
+    [Fact]
+    public async Task RunImportAsync_直接インポート_失敗時はエラー通知のみで監査ログを残さないこと()
+    {
+        // Arrange
+        SetupValidPreview();
+        _importServiceMock
+            .Setup(s => s.ImportCardsAsync(It.IsAny<string>(), It.IsAny<bool>()))
+            .ReturnsAsync(new CsvImportResult
+            {
+                Success = false,
+                ErrorMessage = "ヘッダー行が想定と異なります",
+                ImportedCount = 0
+            });
+
+        // Act
+        await _viewModel.RunImportAsync(DirectImportFilePath, clearPreviewOnSuccess: false);
+
+        // Assert
+        _viewModel.IsStatusError.Should().BeTrue();
+        _viewModel.HasImported.Should().BeFalse("1件も書き込まれていないため");
+        _dialogServiceMock.Verify(
+            d => d.ShowError(It.Is<string>(m => m.Contains("ヘッダー行が想定と異なります")), "インポートエラー"),
+            Times.Once);
+
+        var logs = await _operationLogRepository.GetByDateRangeAsync(
+            DateTime.Today.AddDays(-1),
+            DateTime.Today.AddDays(1));
+        logs.Should().NotContain(
+            l => l.Action == OperationLogger.Actions.Import,
+            "書き込みが発生していない以上インポートとして記録してはならない");
+    }
+
+    /// <summary>
+    /// 直接インポートでも監査ログ記録の失敗を取り込み失敗として通知しないこと（Issue #1741 / #1785）
+    /// </summary>
+    /// <remarks>
+    /// Issue #1741 の是正は ExecuteImportAsync 側でのみテストされていた。
+    /// 共通化後は同じ経路を通ることを、複製側の設定（clearPreviewOnSuccess: false）でも表明する。
+    /// </remarks>
+    [Fact]
+    public async Task RunImportAsync_直接インポート_監査ログ記録の失敗を取り込み失敗として通知しないこと()
+    {
+        // Arrange: operation_log への INSERT だけが失敗する ViewModel
+        var dialogServiceMock = new Mock<IDialogService>();
+        var viewModel = CreateViewModelWithFailingAuditLog(dialogServiceMock);
+        SetupValidPreview(viewModel);
+        _importServiceMock
+            .Setup(s => s.ImportCardsAsync(It.IsAny<string>(), It.IsAny<bool>()))
+            .ReturnsAsync(new CsvImportResult
+            {
+                Success = true,
+                ImportedCount = 3
+            });
+
+        // Act
+        await viewModel.RunImportAsync(DirectImportFilePath, clearPreviewOnSuccess: false);
+
+        // Assert
+        viewModel.IsStatusError.Should().BeFalse();
+        viewModel.HasImported.Should().BeTrue();
+        dialogServiceMock.Verify(
+            d => d.ShowError(It.IsAny<string>(), It.IsAny<string>()),
+            Times.Never,
+            "取り込みは確定しているためエラーとして通知してはならない");
+        dialogServiceMock.Verify(
+            d => d.ShowWarning(
+                It.Is<string>(m => m.Contains("操作ログへの記録に失敗")
+                                   && m.Contains("再度インポートしないでください")),
+                It.IsAny<string>()),
+            Times.Once);
+    }
+
+    #endregion
 }
