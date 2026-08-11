@@ -38,6 +38,7 @@ public class DataExportImportViewModelTests : IDisposable
     private readonly Mock<ICCardManager.Services.ISafeFileLauncher> _safeFileLauncherMock;
     private readonly SQLiteConnection _connection;
     private readonly DbContext _realDbContext;
+    private readonly OperationLogRepository _operationLogRepository;
     private readonly DataExportImportViewModel _viewModel;
 
     public DataExportImportViewModelTests()
@@ -77,10 +78,12 @@ public class DataExportImportViewModelTests : IDisposable
             _dbContextMock.Object,
             _cacheServiceMock.Object);
 
-        // OperationLogger (Issue #1302): 実DB + 実Contextを使う（ログ書き込みは副作用のみでテスト対象外）
-        var operationLogRepository = new OperationLogRepository(_realDbContext);
+        // OperationLogger (Issue #1302): 実DB + 実Contextを使う。
+        // Issue #1741: 書き込まれた operation_log 行そのものを検証対象にするため、
+        // リポジトリをフィールドで保持して読み返せるようにする。
+        _operationLogRepository = new OperationLogRepository(_realDbContext);
         var operatorContext = new CurrentOperatorContext(new SystemClock());
-        var operationLogger = new OperationLogger(operationLogRepository, operatorContext);
+        var operationLogger = new OperationLogger(_operationLogRepository, operatorContext);
 
         _safeFileLauncherMock = new Mock<ICCardManager.Services.ISafeFileLauncher>();
         _safeFileLauncherMock.Setup(l => l.LaunchFile(It.IsAny<string>()))
@@ -630,6 +633,138 @@ public class DataExportImportViewModelTests : IDisposable
 
         _safeFileLauncherMock.Verify(l => l.LaunchFolder(string.Empty), Times.Once);
         _viewModel.IsStatusError.Should().BeTrue();
+    }
+
+    #endregion
+
+    #region 監査ログへのインポート元ファイルパス記録（Issue #1741）
+
+    private const string ImportSourceDirectory = @"C:\temp";
+    private const string ImportSourceFileName = "cards_20260811.csv";
+    private static readonly string ImportSourceFilePath =
+        System.IO.Path.Combine(ImportSourceDirectory, ImportSourceFileName);
+
+    /// <summary>
+    /// インポート成功時、監査ログにインポート元ファイルのパスとファイル名が記録されること（Issue #1741）
+    /// </summary>
+    /// <remarks>
+    /// 成功分岐は ClearPreview() で ImportPreviewFile を空にするため、
+    /// 監査ログの引数をビュー状態プロパティから読み直すと空文字が記録される。
+    /// </remarks>
+    [Fact]
+    public async Task ExecuteImportAsync_OnSuccess_ShouldRecordImportSourceFilePathInOperationLog()
+    {
+        // Arrange
+        SetupValidPreview();
+        _viewModel.ImportPreviewFile = ImportSourceFilePath;
+        _importServiceMock
+            .Setup(s => s.ImportCardsAsync(It.IsAny<string>(), It.IsAny<bool>()))
+            .ReturnsAsync(new CsvImportResult
+            {
+                Success = true,
+                ImportedCount = 3
+            });
+
+        // Act
+        await _viewModel.ExecuteImportAsync();
+
+        // Assert
+        var log = await GetSingleImportLogAsync();
+        log.TargetTable.Should().Be(OperationLogger.Tables.IcCard);
+        log.TargetId.Should().Be(
+            ImportSourceFileName,
+            "操作ログ画面の対象IDにインポート元ファイル名が表示される必要があるため");
+        GetAfterDataString(log, "FilePath").Should().Be(
+            ImportSourceFilePath,
+            "どのファイルを取り込んだかを後から追跡できる必要があるため");
+        GetAfterDataString(log, "FileName").Should().Be(ImportSourceFileName);
+    }
+
+    /// <summary>
+    /// 部分成功時も監査ログにインポート元ファイルのパスが記録されること（Issue #1741）
+    /// </summary>
+    /// <remarks>
+    /// 修正前から正しく記録されていた分岐。成功分岐との非対称が再発しないよう固定する。
+    /// </remarks>
+    [Fact]
+    public async Task ExecuteImportAsync_OnPartialSuccess_ShouldRecordImportSourceFilePathInOperationLog()
+    {
+        // Arrange
+        SetupValidPreview();
+        _viewModel.ImportPreviewFile = ImportSourceFilePath;
+        _importServiceMock
+            .Setup(s => s.ImportCardsAsync(It.IsAny<string>(), It.IsAny<bool>()))
+            .ReturnsAsync(new CsvImportResult
+            {
+                Success = false,
+                ErrorMessage = null,
+                ImportedCount = 2,
+                ErrorCount = 1,
+                Errors = new List<CsvImportError>
+                {
+                    new CsvImportError { LineNumber = 3, Message = "IDmが不正です" }
+                }
+            });
+
+        // Act
+        await _viewModel.ExecuteImportAsync();
+
+        // Assert
+        var log = await GetSingleImportLogAsync();
+        log.TargetId.Should().Be(ImportSourceFileName);
+        GetAfterDataString(log, "FilePath").Should().Be(ImportSourceFilePath);
+    }
+
+    /// <summary>
+    /// 職員データのインポート成功時も、対象テーブルとファイルパスが正しく記録されること（Issue #1741）
+    /// </summary>
+    [Fact]
+    public async Task ExecuteImportAsync_StaffImport_OnSuccess_ShouldRecordImportSourceFilePathInOperationLog()
+    {
+        // Arrange
+        SetupValidPreview(DataType.Staff);
+        _viewModel.ImportPreviewFile = ImportSourceFilePath;
+        _importServiceMock
+            .Setup(s => s.ImportStaffAsync(It.IsAny<string>(), It.IsAny<bool>()))
+            .ReturnsAsync(new CsvImportResult
+            {
+                Success = true,
+                ImportedCount = 5
+            });
+
+        // Act
+        await _viewModel.ExecuteImportAsync();
+
+        // Assert
+        var log = await GetSingleImportLogAsync();
+        log.TargetTable.Should().Be(OperationLogger.Tables.Staff);
+        log.TargetId.Should().Be(ImportSourceFileName);
+        GetAfterDataString(log, "FilePath").Should().Be(ImportSourceFilePath);
+    }
+
+    /// <summary>
+    /// operation_log に記録された唯一の IMPORT 行を取得する
+    /// </summary>
+    private async Task<ICCardManager.Models.OperationLog> GetSingleImportLogAsync()
+    {
+        var logs = await _operationLogRepository.GetByDateRangeAsync(
+            DateTime.Today.AddDays(-1),
+            DateTime.Today.AddDays(1));
+
+        return logs.Should()
+            .ContainSingle(l => l.Action == OperationLogger.Actions.Import)
+            .Which;
+    }
+
+    /// <summary>
+    /// operation_log の after_data(JSON) から文字列プロパティを取り出す
+    /// </summary>
+    private static string GetAfterDataString(ICCardManager.Models.OperationLog log, string propertyName)
+    {
+        log.AfterData.Should().NotBeNullOrEmpty("after_data に payload が記録されていること");
+
+        using var document = System.Text.Json.JsonDocument.Parse(log.AfterData);
+        return document.RootElement.GetProperty(propertyName).GetString();
     }
 
     #endregion

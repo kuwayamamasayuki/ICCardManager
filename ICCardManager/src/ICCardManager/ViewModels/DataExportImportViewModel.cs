@@ -623,23 +623,28 @@ public partial class DataExportImportViewModel : ViewModelBase
             {
                 CsvImportResult result;
 
+                // Issue #1741: インポート元パスをここでローカル変数へ確定させる。
+                // ImportPreviewFile は画面の一時状態で、成功分岐の ClearPreview() が空にするため、
+                // 監査ログ記録時にプロパティを読み直すと空文字が記録される。
+                var importSourceFilePath = ImportPreviewFile;
+
                 switch (SelectedImportType)
                 {
                     case DataType.Cards:
-                        result = await _importService.ImportCardsAsync(ImportPreviewFile, SkipExistingOnImport);
+                        result = await _importService.ImportCardsAsync(importSourceFilePath, SkipExistingOnImport);
                         break;
 
                     case DataType.Staff:
-                        result = await _importService.ImportStaffAsync(ImportPreviewFile, SkipExistingOnImport);
+                        result = await _importService.ImportStaffAsync(importSourceFilePath, SkipExistingOnImport);
                         break;
 
                     case DataType.Ledgers:
                         // Issue #511: ターゲットカードIDmを渡す
-                        result = await _importService.ImportLedgersAsync(ImportPreviewFile, SkipExistingOnImport, GetTargetCardIdm());
+                        result = await _importService.ImportLedgersAsync(importSourceFilePath, SkipExistingOnImport, GetTargetCardIdm());
                         break;
 
                     case DataType.LedgerDetails:
-                        result = await _importService.ImportLedgerDetailsAsync(ImportPreviewFile);
+                        result = await _importService.ImportLedgerDetailsAsync(importSourceFilePath);
                         break;
 
                     default:
@@ -647,7 +652,7 @@ public partial class DataExportImportViewModel : ViewModelBase
                         return;
                 }
 
-                LastImportedFile = ImportPreviewFile;
+                LastImportedFile = importSourceFilePath;
 
                 // Issue #744: インポート実行済みフラグを設定（ダイアログ終了後のリフレッシュ用）
                 if (result.ImportedCount > 0)
@@ -666,9 +671,11 @@ public partial class DataExportImportViewModel : ViewModelBase
                     ClearPreview();
 
                     // Issue #1302: 監査ログ記録
+                    // Issue #1741: 直前の ClearPreview() で空になる ImportPreviewFile ではなく
+                    // 確定済みのローカル変数を渡す（空パスだと後からファイルを追跡できない）
                     await _operationLogger.LogImportAsync(
                         MapDataTypeToTableName(SelectedImportType),
-                        ImportPreviewFile,
+                        importSourceFilePath,
                         result.ImportedCount,
                         result.SkippedCount,
                         result.ErrorCount);
@@ -710,7 +717,7 @@ public partial class DataExportImportViewModel : ViewModelBase
                     {
                         await _operationLogger.LogImportAsync(
                             MapDataTypeToTableName(SelectedImportType),
-                            ImportPreviewFile,
+                            importSourceFilePath,
                             result.ImportedCount,
                             result.SkippedCount,
                             result.ErrorCount);
