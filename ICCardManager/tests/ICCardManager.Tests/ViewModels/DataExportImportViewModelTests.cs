@@ -1701,4 +1701,217 @@ public class DataExportImportViewModelTests : IDisposable
     }
 
     #endregion
+
+    #region Issue #1784: インポート結果ダイアログ表示時にプログレスバー(IsBusy)が閉じていること
+
+    // Issue #1383 はエクスポート経路について「BeginBusy スコープを抜けて IsBusy=false が確定してから
+    // MessageBox を表示する」形へ是正したが、インポート経路は結果ダイアログをスコープの内側で
+    // 表示したままだった。DataExportImportDialog.xaml の全面オーバーレイ Border（Grid.RowSpan=6・
+    // 不透明 OverlayBrush）と不確定 ProgressBar、「インポート中...」の文字がモーダル表示中ずっと
+    // 重なって描かれるため、職員は「インポートが完了しました」の下でプログレスバーが回り続けるのを見て
+    // 処理が続いているのか判断できない。
+    //
+    // 検証は「IsBusy の最終値」ではなく「ダイアログ呼び出し時点の値」で行う。
+    // 最終値は修正前でも false（using が必ず Dispose する）のため、Callback でその瞬間を
+    // 捕捉しないと修正前のコードでも通ってしまう。
+
+    private const string ProgressBarClosedReason =
+        "Issue #1784: 結果ダイアログの表示中にプログレスバーが残っていてはならない";
+
+    /// <summary>
+    /// 成功時、ShowInformation が呼ばれる時点で IsBusy=false になっていること
+    /// </summary>
+    [Fact]
+    public async Task RunImportAsync_成功時_ShowInformation呼び出し時点でIsBusyがfalseであること()
+    {
+        // Arrange
+        SetupValidPreview();
+        _importServiceMock
+            .Setup(s => s.ImportCardsAsync(It.IsAny<string>(), It.IsAny<bool>()))
+            .ReturnsAsync(new CsvImportResult { Success = true, ImportedCount = 3 });
+
+        bool? isBusyAtDialog = null;
+        _dialogServiceMock
+            .Setup(d => d.ShowInformation(It.IsAny<string>(), It.IsAny<string>()))
+            .Callback(() => isBusyAtDialog = _viewModel.IsBusy);
+
+        // Act
+        await _viewModel.RunImportAsync(ImportSourceFilePath);
+
+        // Assert
+        isBusyAtDialog.Should().NotBeNull("完了ダイアログが表示されているはず");
+        isBusyAtDialog.Should().BeFalse(ProgressBarClosedReason);
+        _viewModel.IsBusy.Should().BeFalse();
+    }
+
+    /// <summary>
+    /// 失敗時、ShowError が呼ばれる時点で IsBusy=false になっていること
+    /// </summary>
+    [Fact]
+    public async Task RunImportAsync_失敗時_ShowError呼び出し時点でIsBusyがfalseであること()
+    {
+        // Arrange
+        SetupValidPreview();
+        _importServiceMock
+            .Setup(s => s.ImportCardsAsync(It.IsAny<string>(), It.IsAny<bool>()))
+            .ReturnsAsync(new CsvImportResult
+            {
+                Success = false,
+                ErrorMessage = "対象カードを解決できませんでした"
+            });
+
+        bool? isBusyAtDialog = null;
+        _dialogServiceMock
+            .Setup(d => d.ShowError(It.IsAny<string>(), It.IsAny<string>()))
+            .Callback(() => isBusyAtDialog = _viewModel.IsBusy);
+
+        // Act
+        await _viewModel.RunImportAsync(ImportSourceFilePath);
+
+        // Assert
+        isBusyAtDialog.Should().NotBeNull("エラーダイアログが表示されているはず");
+        isBusyAtDialog.Should().BeFalse(ProgressBarClosedReason);
+        _viewModel.IsBusy.Should().BeFalse();
+    }
+
+    /// <summary>
+    /// 部分成功（一部エラー）時、ShowWarning が呼ばれる時点で IsBusy=false になっていること
+    /// </summary>
+    [Fact]
+    public async Task RunImportAsync_部分成功時_ShowWarning呼び出し時点でIsBusyがfalseであること()
+    {
+        // Arrange
+        SetupValidPreview();
+        _importServiceMock
+            .Setup(s => s.ImportCardsAsync(It.IsAny<string>(), It.IsAny<bool>()))
+            .ReturnsAsync(new CsvImportResult
+            {
+                Success = false,
+                ErrorMessage = null,
+                ImportedCount = 2,
+                ErrorCount = 1,
+                Errors = new List<CsvImportError>
+                {
+                    new CsvImportError { LineNumber = 3, Message = "IDmが不正です" }
+                }
+            });
+
+        bool? isBusyAtDialog = null;
+        _dialogServiceMock
+            .Setup(d => d.ShowWarning(It.IsAny<string>(), It.IsAny<string>()))
+            .Callback(() => isBusyAtDialog = _viewModel.IsBusy);
+
+        // Act
+        await _viewModel.RunImportAsync(ImportSourceFilePath);
+
+        // Assert
+        isBusyAtDialog.Should().NotBeNull("一部エラーの警告ダイアログが表示されているはず");
+        isBusyAtDialog.Should().BeFalse(ProgressBarClosedReason);
+        _viewModel.IsBusy.Should().BeFalse();
+    }
+
+    /// <summary>
+    /// 成功したが監査ログ記録に失敗した場合も、ShowWarning 呼び出し時点で IsBusy=false であること
+    /// </summary>
+    /// <remarks>
+    /// 成功分岐には ShowInformation と ShowWarning の2つの出口があり、後者だけ取り残される形の
+    /// 修正漏れを防ぐために独立したテストを置く（Issue #1741 で追加された分岐）。
+    /// </remarks>
+    [Fact]
+    public async Task RunImportAsync_監査ログ記録失敗時_ShowWarning呼び出し時点でIsBusyがfalseであること()
+    {
+        // Arrange: operation_log への INSERT だけが失敗する ViewModel
+        var dialogServiceMock = new Mock<IDialogService>();
+        var viewModel = CreateViewModelWithFailingAuditLog(dialogServiceMock);
+        SetupValidPreview(viewModel);
+        _importServiceMock
+            .Setup(s => s.ImportCardsAsync(It.IsAny<string>(), It.IsAny<bool>()))
+            .ReturnsAsync(new CsvImportResult { Success = true, ImportedCount = 3 });
+
+        bool? isBusyAtDialog = null;
+        dialogServiceMock
+            .Setup(d => d.ShowWarning(It.IsAny<string>(), It.IsAny<string>()))
+            .Callback(() => isBusyAtDialog = viewModel.IsBusy);
+
+        // Act
+        await viewModel.RunImportAsync(ImportSourceFilePath);
+
+        // Assert
+        isBusyAtDialog.Should().NotBeNull("操作ログ記録失敗の警告ダイアログが表示されているはず");
+        isBusyAtDialog.Should().BeFalse(ProgressBarClosedReason);
+        viewModel.IsBusy.Should().BeFalse();
+    }
+
+    /// <summary>
+    /// 例外発生時、ShowError が呼ばれる時点で IsBusy=false になっていること
+    /// </summary>
+    /// <remarks>
+    /// 共有フォルダーの切断等で ImportXxxAsync が送出する経路。catch 節はスコープの内側にあるため、
+    /// 結果分岐と同様にダイアログ表示だけをスコープの外へ持ち出す必要がある。
+    /// </remarks>
+    [Fact]
+    public async Task RunImportAsync_例外発生時_ShowError呼び出し時点でIsBusyがfalseであること()
+    {
+        // Arrange
+        SetupValidPreview();
+        _importServiceMock
+            .Setup(s => s.ImportCardsAsync(It.IsAny<string>(), It.IsAny<bool>()))
+            .ThrowsAsync(new InvalidOperationException("ネットワークパスが見つかりません"));
+
+        bool? isBusyAtDialog = null;
+        _dialogServiceMock
+            .Setup(d => d.ShowError(It.IsAny<string>(), It.IsAny<string>()))
+            .Callback(() => isBusyAtDialog = _viewModel.IsBusy);
+
+        // Act
+        await _viewModel.RunImportAsync(ImportSourceFilePath);
+
+        // Assert
+        isBusyAtDialog.Should().NotBeNull("例外時もエラーダイアログが表示されているはず");
+        isBusyAtDialog.Should().BeFalse(ProgressBarClosedReason);
+        _viewModel.IsBusy.Should().BeFalse();
+    }
+
+    /// <summary>
+    /// 結果ダイアログの表示自体が例外を投げても、確定済みの取り込みを巻き添えにしないこと
+    /// </summary>
+    /// <remarks>
+    /// Issue #1784 でダイアログ表示を `BeginBusy` スコープの外へ出したことにより、
+    /// 表示処理は `try` の外側に位置するようになった。ここを素通しにすると、
+    /// 取り込みがコミットされ監査ログも記録された**後**の通知失敗が
+    /// `AsyncRelayCommand` 経由で未捕捉例外になり、職員は成功直後にクラッシュを見て
+    /// 「データが入ったのか」を判断できない（Issue #1783 が消したはずの曖昧さの再発）。
+    /// 「コミット確定後の後処理を、成否の判定に巻き込まない」（CLAUDE.md / Issue #1727）に従い、
+    /// 表示の失敗はログへ逃がし、ステータス欄に残る結果表示で情報を保つ。
+    /// </remarks>
+    [Fact]
+    public async Task RunImportAsync_結果ダイアログの表示が例外を投げても確定済みの取り込みを巻き添えにしないこと()
+    {
+        // Arrange
+        SetupValidPreview();
+        _importServiceMock
+            .Setup(s => s.ImportCardsAsync(It.IsAny<string>(), It.IsAny<bool>()))
+            .ReturnsAsync(new CsvImportResult { Success = true, ImportedCount = 3 });
+        _dialogServiceMock
+            .Setup(d => d.ShowInformation(It.IsAny<string>(), It.IsAny<string>()))
+            .Throws(new InvalidOperationException("ウィンドウは既に破棄されています"));
+
+        // Act
+        Func<Task> act = () => _viewModel.RunImportAsync(ImportSourceFilePath);
+
+        // Assert
+        await act.Should().NotThrowAsync(
+            "取り込みは確定済みであり、通知の失敗を取り込みの失敗として伝播させてはならない");
+        _viewModel.IsStatusError.Should().BeFalse(
+            "ダイアログを出せなかっただけで、取り込み自体は成功しているため");
+        _viewModel.StatusMessage.Should().Contain(
+            "インポート完了",
+            "ダイアログが出せなくてもステータス欄には結果が残ること");
+        _viewModel.LastImportedFile.Should().Be(
+            ImportSourceFilePath,
+            "書き込みが確定した事実は通知の成否に左右されないため");
+        _viewModel.IsBusy.Should().BeFalse("表示が失敗してもプログレスバーは閉じたままであること");
+    }
+
+    #endregion
 }
