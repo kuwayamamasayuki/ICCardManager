@@ -166,6 +166,62 @@ public class OperationLogExcelExportServiceTests : IDisposable
         result.Should().Contain("繰越累計の対象年度: 2025 → （なし）");
     }
 
+    /// <summary>
+    /// Issue #1741: インポートの payload（ファイルパス・件数）が日本語に整形されること
+    /// </summary>
+    /// <remarks>
+    /// 一括操作（IMPORT / EXPORT / BACKUP / RESTORE、Issue #1302）の payload は
+    /// 対象テーブルではなく Action で形が決まるため、テーブル別マップだけでは拾えない。
+    /// 漏れると operation_log には値があるのに Excel の「変更後」列が空欄になり、
+    /// 「どのファイルから何件取り込んだか」を監査成果物として提出できない（#1726 と同型）。
+    /// </remarks>
+    [Fact]
+    public void FormatJsonToReadable_Import_インポートpayloadを日本語に整形()
+    {
+        var json = @"{""FilePath"":""C:\\temp\\cards_20260811.csv"",""FileName"":""cards_20260811.csv"",""InsertedCount"":3,""SkippedCount"":1,""ErrorCount"":0}";
+
+        var result = OperationLogExcelExportService.FormatJsonToReadable("ic_card", json);
+
+        result.Should().Contain(@"ファイルパス: C:\temp\cards_20260811.csv");
+        result.Should().Contain("ファイル名: cards_20260811.csv");
+        result.Should().Contain("登録件数: 3");
+        result.Should().Contain("スキップ件数: 1");
+        result.Should().Contain("エラー件数: 0");
+    }
+
+    /// <summary>
+    /// Issue #1741: エクスポート／バックアップの payload も整形されること（対象テーブルを問わない）
+    /// </summary>
+    [Theory]
+    [InlineData("ledger", @"{""FilePath"":""C:\\out\\ledger.csv"",""FileName"":""ledger.csv"",""RecordCount"":120}", "出力件数: 120")]
+    [InlineData("ledger_detail", @"{""FilePath"":""C:\\in\\detail.csv"",""FileName"":""detail.csv"",""InsertedCount"":8}", "登録件数: 8")]
+    [InlineData("database", @"{""FilePath"":""C:\\bk\\iccard.db"",""FileName"":""iccard.db""}", "ファイル名: iccard.db")]
+    public void FormatJsonToReadable_一括操作payloadは対象テーブルを問わず整形される(
+        string targetTable, string json, string expectedFragment)
+    {
+        var result = OperationLogExcelExportService.FormatJsonToReadable(targetTable, json);
+
+        result.Should().Contain("ファイルパス: ");
+        result.Should().Contain(expectedFragment);
+    }
+
+    /// <summary>
+    /// Issue #1741: 一括操作の項目を足してもエンティティ側の項目名が失われないこと
+    /// </summary>
+    [Fact]
+    public void GetFieldNameMap_一括操作項目の併合でエンティティ項目が失われないこと()
+    {
+        var map = OperationLogExcelExportService.GetFieldNameMap("ic_card");
+
+        // エンティティ側（従来から存在する項目）
+        map.Should().ContainKey("CardIdm");
+        map.Should().ContainKey("CarryoverIncomeTotal");
+        // 一括操作側（Issue #1741 で追加）
+        map.Should().ContainKey("FilePath");
+        map.Should().ContainKey("FileName");
+        map["FileName"].Should().Be("ファイル名", "エンティティ側の Name（氏名）と取り違えないこと");
+    }
+
     [Fact]
     public void FormatJsonToReadable_Ledger_出納簿JSONを日本語に整形()
     {
@@ -298,11 +354,21 @@ public class OperationLogExcelExportServiceTests : IDisposable
 
     #region GetFieldNameMap
 
+    /// <summary>
+    /// 未知テーブルはエンティティ項目を持たない（Issue #1741 で一括操作項目のみに変更）
+    /// </summary>
+    /// <remarks>
+    /// 一括操作（IMPORT / EXPORT / BACKUP / RESTORE）の payload は Action で形が決まるため、
+    /// database / ledger_detail 宛の行も整形できるよう既定マップにも併合している。
+    /// 「エンティティ項目が紛れ込まないこと」がこのテストの本来の関心事。
+    /// </remarks>
     [Fact]
-    public void GetFieldNameMap_未知テーブルは空辞書()
+    public void GetFieldNameMap_未知テーブルは一括操作項目のみ()
     {
         var result = OperationLogExcelExportService.GetFieldNameMap("unknown");
-        result.Should().BeEmpty();
+
+        result.Keys.Should().BeEquivalentTo(
+            "FilePath", "FileName", "InsertedCount", "SkippedCount", "ErrorCount", "RecordCount");
     }
 
     #endregion

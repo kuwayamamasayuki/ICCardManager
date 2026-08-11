@@ -465,11 +465,32 @@ public class OperationLogExcelExportService
     }
 
     /// <summary>
+    /// 一括操作（IMPORT / EXPORT / BACKUP / RESTORE、Issue #1302）の payload 項目名（Issue #1741）
+    /// </summary>
+    /// <remarks>
+    /// これらの payload は対象テーブルではなく Action で形が決まるため、
+    /// テーブル別のマップだけでは拾えない。全テーブルのマップへ併合する。
+    /// 載せないと DB の after_data には値があるのに Excel の「変更前 / 変更後」列が空欄になり、
+    /// 「どのファイルから何件取り込んだか」を監査成果物として提出できない。
+    /// エンティティ側のプロパティ名とは衝突しない（Name は "FileName" として別名）。
+    /// </remarks>
+    private static readonly IReadOnlyDictionary<string, string> BulkOperationFieldNames =
+        new Dictionary<string, string>
+        {
+            { "FilePath", "ファイルパス" },
+            { "FileName", "ファイル名" },
+            { "InsertedCount", "登録件数" },
+            { "SkippedCount", "スキップ件数" },
+            { "ErrorCount", "エラー件数" },
+            { "RecordCount", "出力件数" },
+        };
+
+    /// <summary>
     /// テーブルごとのフィールド名マッピングを取得
     /// </summary>
     internal static IReadOnlyDictionary<string, string> GetFieldNameMap(string? targetTable)
     {
-        return targetTable switch
+        var map = targetTable switch
         {
             "staff" => new Dictionary<string, string>
             {
@@ -511,6 +532,15 @@ public class OperationLogExcelExportService
             },
             _ => new Dictionary<string, string>()
         };
+
+        // Issue #1741: 一括操作の payload は Action で決まりテーブルに依存しないため、
+        // どのテーブルのマップにも併合する（database / ledger_detail の既定マップも含む）。
+        foreach (var kvp in BulkOperationFieldNames)
+        {
+            map[kvp.Key] = kvp.Value;
+        }
+
+        return map;
     }
 
     /// <summary>

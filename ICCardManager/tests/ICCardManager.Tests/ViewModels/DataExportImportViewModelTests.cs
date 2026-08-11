@@ -481,11 +481,17 @@ public class DataExportImportViewModelTests : IDisposable
     /// テスト用にプレビュー状態をセットアップするヘルパー
     /// </summary>
     private void SetupValidPreview(DataType dataType = DataType.Cards)
+        => SetupValidPreview(_viewModel, dataType);
+
+    /// <summary>
+    /// 指定した ViewModel にプレビュー状態をセットアップするヘルパー（Issue #1741 で追加）
+    /// </summary>
+    private static void SetupValidPreview(DataExportImportViewModel viewModel, DataType dataType = DataType.Cards)
     {
-        _viewModel.SelectedImportType = dataType;
-        _viewModel.ImportPreviewFile = "test.csv";
-        _viewModel.ImportPreview = new CsvImportPreviewResult { IsValid = true };
-        _viewModel.HasPreview = true;
+        viewModel.SelectedImportType = dataType;
+        viewModel.ImportPreviewFile = "test.csv";
+        viewModel.ImportPreview = new CsvImportPreviewResult { IsValid = true };
+        viewModel.HasPreview = true;
     }
 
     #region Issue #1383: エクスポート完了時にプログレスバー(IsBusy)がダイアログ表示前に閉じること
@@ -740,6 +746,156 @@ public class DataExportImportViewModelTests : IDisposable
         log.TargetTable.Should().Be(OperationLogger.Tables.Staff);
         log.TargetId.Should().Be(ImportSourceFileName);
         GetAfterDataString(log, "FilePath").Should().Be(ImportSourceFilePath);
+    }
+
+    /// <summary>
+    /// Issue #1741: await 中にデータ種別が変わっても、監査ログの対象テーブルは実際の取込先になること
+    /// </summary>
+    /// <remarks>
+    /// データ種別コンボはアクセスキー（Alt+I）を持ち IsBusy でも操作できるため、
+    /// SelectedImportType を await 後に読み直すと実際とは異なるテーブル名が記録され得る。
+    /// </remarks>
+    [Fact]
+    public async Task ExecuteImportAsync_await中にデータ種別が変わっても対象テーブルは実際の取込先になること()
+    {
+        // Arrange
+        SetupValidPreview();
+        _viewModel.ImportPreviewFile = ImportSourceFilePath;
+        _importServiceMock
+            .Setup(s => s.ImportCardsAsync(It.IsAny<string>(), It.IsAny<bool>()))
+            // インポート実行中に画面のデータ種別が切り替わる状況を再現する
+            .Callback(() => _viewModel.SelectedImportType = DataType.Staff)
+            .ReturnsAsync(new CsvImportResult
+            {
+                Success = true,
+                ImportedCount = 3
+            });
+
+        // Act
+        await _viewModel.ExecuteImportAsync();
+
+        // Assert
+        _viewModel.SelectedImportType.Should().Be(DataType.Staff, "前提: 実行中に種別が切り替わっていること");
+        var log = await GetSingleImportLogAsync();
+        log.TargetTable.Should().Be(
+            OperationLogger.Tables.IcCard,
+            "実際に書き込まれたのはカードテーブルであるため");
+        GetAfterDataString(log, "FilePath").Should().Be(ImportSourceFilePath);
+    }
+
+    /// <summary>
+    /// Issue #1741: 監査ログの記録に失敗しても、確定済みの取り込みを「失敗」として通知しないこと
+    /// </summary>
+    /// <remarks>
+    /// 監査ログ記録はコミット確定後の後処理。ここでの例外を取り込みの catch へ流すと
+    /// 「インポートに失敗しました」と通知され、職員が再実行して二重登録を招く
+    /// （CLAUDE.md / Issue #1727「コミット確定後の後処理を、成否の判定に巻き込まない」）。
+    /// </remarks>
+    [Fact]
+    public async Task ExecuteImportAsync_監査ログ記録の失敗を取り込み失敗として通知しないこと()
+    {
+        // Arrange: operation_log への INSERT だけが失敗する ViewModel
+        var dialogServiceMock = new Mock<IDialogService>();
+        var viewModel = CreateViewModelWithFailingAuditLog(dialogServiceMock);
+        SetupValidPreview(viewModel);
+        viewModel.ImportPreviewFile = ImportSourceFilePath;
+        _importServiceMock
+            .Setup(s => s.ImportCardsAsync(It.IsAny<string>(), It.IsAny<bool>()))
+            .ReturnsAsync(new CsvImportResult
+            {
+                Success = true,
+                ImportedCount = 3
+            });
+
+        // Act
+        await viewModel.ExecuteImportAsync();
+
+        // Assert: 取り込みは成功として扱われること
+        viewModel.IsStatusError.Should().BeFalse();
+        viewModel.StatusMessage.Should().Contain("3件を登録しました");
+        viewModel.HasImported.Should().BeTrue();
+        dialogServiceMock.Verify(
+            d => d.ShowError(It.IsAny<string>(), It.IsAny<string>()),
+            Times.Never,
+            "取り込みは確定しているためエラーとして通知してはならない");
+
+        // Assert: 記録失敗は「再実行するな」と併せて伝えること
+        dialogServiceMock.Verify(
+            d => d.ShowWarning(
+                It.Is<string>(m => m.Contains("3件")
+                                   && m.Contains("操作ログへの記録に失敗")
+                                   && m.Contains("再度インポートしないでください")),
+                It.IsAny<string>()),
+            Times.Once);
+    }
+
+    /// <summary>
+    /// Issue #1741: 部分成功でも監査ログの記録失敗を取り込み失敗として通知しないこと
+    /// </summary>
+    [Fact]
+    public async Task ExecuteImportAsync_部分成功時も監査ログ記録の失敗を取り込み失敗として通知しないこと()
+    {
+        // Arrange
+        var dialogServiceMock = new Mock<IDialogService>();
+        var viewModel = CreateViewModelWithFailingAuditLog(dialogServiceMock);
+        SetupValidPreview(viewModel);
+        viewModel.ImportPreviewFile = ImportSourceFilePath;
+        _importServiceMock
+            .Setup(s => s.ImportCardsAsync(It.IsAny<string>(), It.IsAny<bool>()))
+            .ReturnsAsync(new CsvImportResult
+            {
+                Success = false,
+                ErrorMessage = null,
+                ImportedCount = 2,
+                ErrorCount = 1,
+                Errors = new List<CsvImportError>
+                {
+                    new CsvImportError { LineNumber = 3, Message = "IDmが不正です" }
+                }
+            });
+
+        // Act
+        await viewModel.ExecuteImportAsync();
+
+        // Assert
+        viewModel.IsStatusError.Should().BeFalse();
+        viewModel.HasImported.Should().BeTrue();
+        dialogServiceMock.Verify(
+            d => d.ShowError(It.IsAny<string>(), It.IsAny<string>()),
+            Times.Never);
+        dialogServiceMock.Verify(
+            d => d.ShowWarning(
+                It.Is<string>(m => m.Contains("一部エラー") && m.Contains("操作ログへの記録に失敗")),
+                It.IsAny<string>()),
+            Times.Once);
+    }
+
+    /// <summary>
+    /// operation_log への INSERT だけが失敗する ViewModel を組み立てる（Issue #1741）
+    /// </summary>
+    /// <remarks>
+    /// OperationLogger は具象クラスで LogImportAsync も非 virtual だが、例外を内部で握りつぶさないため、
+    /// リポジトリ境界（IOperationLogRepository）で失敗を注入すれば本番と同じ経路で例外が伝播する。
+    /// </remarks>
+    private DataExportImportViewModel CreateViewModelWithFailingAuditLog(Mock<IDialogService> dialogServiceMock)
+    {
+        var failingRepository = new Mock<IOperationLogRepository>();
+        failingRepository
+            .Setup(r => r.InsertAsync(It.IsAny<ICCardManager.Models.OperationLog>()))
+            .ThrowsAsync(new InvalidOperationException("operation_log への書き込みに失敗しました"));
+
+        var operationLogger = new OperationLogger(
+            failingRepository.Object,
+            new CurrentOperatorContext(new SystemClock()));
+
+        return new DataExportImportViewModel(
+            _exportServiceMock.Object,
+            _importServiceMock.Object,
+            dialogServiceMock.Object,
+            _cardRepositoryMock.Object,
+            operationLogger,
+            new WeakReferenceMessenger(),
+            _safeFileLauncherMock.Object);
     }
 
     /// <summary>
