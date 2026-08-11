@@ -2,8 +2,6 @@ using System;
 using System.Collections.Generic;
 using FluentAssertions;
 using ICCardManager.Common;
-using Microsoft.Extensions.Logging;
-using Moq;
 using Xunit;
 
 namespace ICCardManager.Tests.Common;
@@ -19,42 +17,43 @@ namespace ICCardManager.Tests.Common;
 /// ハンドラから例外が漏れるとプロセスが異常終了する。
 /// </para>
 /// <para>
-/// 本テストは抽出したハンドラ本体の 2 つの性質を固定する:
+/// 本テストは抽出したハンドラ本体の 3 つの性質を固定する:
 /// ①通知は「UI スレッドへの非同期ポスト」経由でのみ実行される（呼び出しスレッドをブロックしない）、
-/// ②ハンドラおよびポストしたアクションから例外が一切漏れない。
-/// <c>App.xaml.cs</c> 側の配線（シャットダウンガード・BeginInvoke・トースト通知）は
-/// <see cref="AppUnobservedTaskExceptionConventionTests"/> が静的検証で固定する。
+/// ②ハンドラおよびポストしたアクションから例外が一切漏れない、
+/// ③通知はクールダウンで間引かれる（エラートーストは自動消去されないため、
+/// 繰り返し発生する障害で無人端末に積み上がるのを防ぐ。ログは間引かない）。
+/// <c>App.xaml.cs</c> 側の配線（シャットダウンガード・BeginInvoke・トースト通知・
+/// DI 非依存のフォールバックログ）は <see cref="AppUnobservedTaskExceptionConventionTests"/>
+/// が静的検証で固定する。
 /// </para>
 /// </remarks>
 public class UnobservedTaskExceptionHandlerTests
 {
-    private readonly Mock<ILogger> _loggerMock = new();
+    private readonly List<(Exception Exception, string Message)> _loggedErrors = new();
     private readonly List<Action> _postedActions = new();
     private readonly List<Exception> _notifiedExceptions = new();
 
+    /// <summary>テストから進められる決定論的な時計（既定はクールダウンの影響を受けない固定時刻）。</summary>
+    private DateTime _utcNow = new(2026, 8, 12, 9, 0, 0, DateTimeKind.Utc);
+
     private UnobservedTaskExceptionHandler CreateHandler(
-        Func<ILogger?>? getLogger = null,
+        Action<Exception, string>? logError = null,
         Func<bool>? isUiAvailable = null,
         Action<Action>? postToUi = null,
         Action<Exception>? notifyError = null)
     {
         return new UnobservedTaskExceptionHandler(
-            getLogger ?? (() => _loggerMock.Object),
+            logError ?? ((exception, message) => _loggedErrors.Add((exception, message))),
             isUiAvailable ?? (() => true),
             postToUi ?? _postedActions.Add,
-            notifyError ?? _notifiedExceptions.Add);
+            notifyError ?? _notifiedExceptions.Add,
+            () => _utcNow);
     }
 
-    private void VerifyErrorLogged(Exception expected, string because)
+    private void AssertErrorLogged(Exception expected, string because)
     {
-        _loggerMock.Verify(
-            x => x.Log(
-                LogLevel.Error,
-                It.IsAny<EventId>(),
-                It.Is<It.IsAnyType>((v, t) => true),
-                It.Is<Exception>(e => ReferenceEquals(e, expected)),
-                It.IsAny<Func<It.IsAnyType, Exception, string>>()),
-            Times.Once,
+        _loggedErrors.Should().Contain(
+            entry => ReferenceEquals(entry.Exception, expected),
             because);
     }
 
@@ -100,9 +99,9 @@ public class UnobservedTaskExceptionHandlerTests
 
         handler.Handle(aggregate);
 
-        VerifyErrorLogged(aggregate, "集約例外そのものを記録しないと未観測例外の発生自体を追跡できない");
-        VerifyErrorLogged(inner1, "内部例外を記録しないと障害の原因を特定できない");
-        VerifyErrorLogged(inner2, "2件目以降の内部例外も等しく記録する");
+        AssertErrorLogged(aggregate, "集約例外そのものを記録しないと未観測例外の発生自体を追跡できない");
+        AssertErrorLogged(inner1, "内部例外を記録しないと障害の原因を特定できない");
+        AssertErrorLogged(inner2, "2件目以降の内部例外も等しく記録する");
     }
 
     [Fact]
@@ -119,7 +118,7 @@ public class UnobservedTaskExceptionHandlerTests
         // Dispatcher 上で実行されるアクションから例外が漏れると
         // DispatcherUnhandledException へ波及し、二次エラーダイアログが出る
         act.Should().NotThrow();
-        VerifyErrorLogged(notifyException, "通知の失敗も無言で握りつぶさない");
+        AssertErrorLogged(notifyException, "通知の失敗も無言で握りつぶさない");
     }
 
     [Fact]
@@ -132,7 +131,7 @@ public class UnobservedTaskExceptionHandlerTests
 
         // ファイナライザスレッドへ例外が漏れるとプロセスが異常終了する
         act.Should().NotThrow();
-        VerifyErrorLogged(postException, "ディスパッチの失敗も無言で握りつぶさない");
+        AssertErrorLogged(postException, "ディスパッチの失敗も無言で握りつぶさない");
     }
 
     [Fact]
@@ -144,18 +143,18 @@ public class UnobservedTaskExceptionHandlerTests
         var act = () => handler.Handle(new AggregateException(new TimeoutException()));
 
         act.Should().NotThrow();
-        VerifyErrorLogged(guardException, "ガード判定の失敗も無言で握りつぶさない");
+        AssertErrorLogged(guardException, "ガード判定の失敗も無言で握りつぶさない");
     }
 
     [Fact]
-    public void Handle_ロガー取得が失敗しても通知は行われること()
+    public void Handle_ログ記録が失敗しても通知は行われること()
     {
-        var handler = CreateHandler(getLogger: () => throw new InvalidOperationException("ロガー未初期化"));
+        var handler = CreateHandler(logError: (_, _) => throw new InvalidOperationException("ログ記録失敗"));
 
         var act = () => handler.Handle(new AggregateException(new TimeoutException()));
 
         // SetupGlobalExceptionHandlers は DI コンテナ構築前に呼ばれるため、
-        // ロガーが取得できない時期にも発火し得る。ログ経路の障害が通知経路を道連れにしない
+        // ログ経路が機能しない時期にも発火し得る。ログ経路の障害が通知経路を道連れにしない
         act.Should().NotThrow();
         _postedActions.Should().ContainSingle("ログに残せなくてもユーザーへの通知は行うべき");
     }
@@ -170,5 +169,35 @@ public class UnobservedTaskExceptionHandlerTests
         act.Should().NotThrow();
         _postedActions.Should().BeEmpty();
         _notifiedExceptions.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void Handle_クールダウン内の連続発火では通知を再ポストせずログは毎回記録すること()
+    {
+        var first = new AggregateException(new TimeoutException("1回目"));
+        var second = new AggregateException(new TimeoutException("2回目"));
+        var handler = CreateHandler();
+
+        handler.Handle(first);
+        _utcNow += UnobservedTaskExceptionHandler.NotificationCooldown - TimeSpan.FromSeconds(1);
+        handler.Handle(second);
+
+        // エラートーストは自動消去されない（クリックで閉じる）ため、繰り返し発生する障害で
+        // 発火のたびに通知すると無人の共用端末にトーストが際限なく積み上がる
+        _postedActions.Should().ContainSingle("クールダウン内の再発火はトーストを積み増さない");
+        AssertErrorLogged(second, "通知を間引いてもログは間引かない（障害調査の痕跡を欠かさない）");
+    }
+
+    [Fact]
+    public void Handle_クールダウン経過後の発火では再び通知をポストすること()
+    {
+        var handler = CreateHandler();
+
+        handler.Handle(new AggregateException(new TimeoutException("1回目")));
+        _utcNow += UnobservedTaskExceptionHandler.NotificationCooldown;
+        handler.Handle(new AggregateException(new TimeoutException("2回目")));
+
+        _postedActions.Should().HaveCount(2,
+            "抑止は恒久ではなくクールダウンに限る（新たな障害の発生をユーザーが知れなくなるため）");
     }
 }

@@ -50,12 +50,14 @@
 
 **バグ修正**
 - Issue #1742 **未観測 Task 例外ハンドラがファイナライザスレッドでモーダルダイアログを開く**問題を修正した。`TaskScheduler.UnobservedTaskException` は Task のファイナライズ時（＝ファイナライザスレッド）に発火するが、旧実装はそこから同期 `Dispatcher.Invoke` で `ErrorDialogHelper.ShowError`（モーダルの `MessageBox.Show`）を開いていたため、ユーザーが [OK] を押すまでファイナライザスレッドがブロックされ、プロセス全体のファイナライザ（SQLite 接続等の後始末）が停止していた。無人の共用端末では「バックグラウンド処理エラー」ダイアログが長時間放置され得る。
-  - **ハンドラ本体を `Common/UnobservedTaskExceptionHandler` へ抽出**し、①`e.SetObserved()` を最初に呼ぶ ②ログ記録（集約例外＋全内部例外） ③シャットダウンガード（`Dispatcher.HasShutdownStarted` / `HasShutdownFinished`）④`Dispatcher.BeginInvoke`（非同期）で**非モーダルのトースト通知**（`IToastNotificationService.ShowError`）、の形へ改めた。いかなる内部エラー（ロガー未初期化・ディスパッチ失敗・通知失敗）も外へ漏らさない — ファイナライザから例外が漏れるとプロセスが異常終了するため。
-  - **ロガー・トーストは発火時に遅延解決する**。`SetupGlobalExceptionHandlers` は DI コンテナ構築前（`OnStartup` 冒頭）に呼ばれるため、生成時に解決すると常に null を掴む。
-  - **トースト文言は簡潔表現とし、例外の詳細はログのみに残す**（`error-messages.md` のトースト例外規定。生の `ex.Message` を UI へ出さない #1614 の方針を踏襲）。エラートーストは自動消去されないため見逃しは防げる。
-  - **`App` は WPF `Application` のため単体テストから駆動できない**。挙動はデリゲート注入の `UnobservedTaskExceptionHandler` で検証し、`App.xaml.cs` 側の配線（同期 Invoke 禁止・モーダル禁止・ガード必須・SetObserved が先）はソーステキストの静的検証で固定する二段構えとした（`WpfDispatcherService.ObserveTask` と同じ判断）。静的検証はコメント除去後のコードのみを対象とし、「同期 Invoke を使わない」という戒めのコメントが禁止語検査に引っかかる極性反転を避けた。
-  - 検証: `UnobservedTaskExceptionHandlerTests`（8件）・`AppUnobservedTaskExceptionConventionTests`（4件）を新設（+12）。Release / Debug 双方のソリューションビルドが 0 警告であることも実測した。
-  - 05_クラス設計書 §9.5・§10.1a／07_テスト設計書 §1.1a（単体 4,622→4,634・合計 4,648→4,660 件）・§2 UT-080 を同期更新（#1742）
+  - **ハンドラ本体を `Common/UnobservedTaskExceptionHandler` へ抽出**し、①`e.SetObserved()` を最初に呼ぶ ②ログ記録（集約例外＋全内部例外） ③シャットダウンガード（`Dispatcher.HasShutdownStarted` / `HasShutdownFinished`）④`Dispatcher.BeginInvoke`（非同期）で**非モーダルのトースト通知**（`IToastNotificationService.ShowError`）、の形へ改めた。いかなる内部エラー（ログ記録失敗・ディスパッチ失敗・通知失敗）も外へ漏らさない — ファイナライザから例外が漏れるとプロセスが異常終了するため。
+  - **通知はクールダウン（5分）で間引く（ログは毎回記録）**。エラートーストは自動消去されない（クリックで閉じる）ため、共有モードのヘルスチェック失敗のような繰り返し発生する障害で発火のたびに通知すると、無人の共用端末にトーストが際限なく積み上がる（コードレビューで検出）。
+  - **ログ記録は ILogger が使えない時期も無痕跡にしない**。`SetupGlobalExceptionHandlers` は DI コンテナ構築前（`OnStartup` 冒頭）に呼ばれるため `_logger` はその時点で null。旧実装は `ErrorDialogHelper` が DI 非依存でファイルログも書いていたため、単純に ILogger へ寄せると構築前・構築失敗時の発火がどこにも残らなくなる（コードレビューで検出）。配線側で「`_logger` があれば ILogger／なければ `ErrorDialogHelper.LogException`（DI 非依存・ダイアログ非表示）」とフォールバックする。トーストの解決も同様に発火時の遅延解決とする。
+  - **トースト文言は `ExceptionMessageFormatter.ToUserMessage` で例外種別に応じて組み立てる**（生の `ex.Message` を UI へ出さない #1614 の方針。固定文言だと「管理者に連絡」と案内された管理者へ原因が伝わらない — コードレビューで検出。トースト本文は `TextWrapping="Wrap"` のため折り返して表示される）。
+  - **`App` は WPF `Application` のため単体テストから駆動できない**。挙動はデリゲート注入の `UnobservedTaskExceptionHandler` で検証し、`App.xaml.cs` 側の配線（同期 Invoke 禁止・モーダル禁止・ガード必須・SetObserved が先・フォールバックログ必須）はソーステキストの静的検証で固定する二段構えとした（`WpfDispatcherService.ObserveTask` と同じ判断）。
+  - **静的検証は「コードのみ」テキストを対象とする**（新設 `TestSourceInspection`）。コメント除去により「同期 Invoke を使わない」という戒めのコメントが禁止語検査に引っかかる極性反転を避けるのに加え、①生ソースへの波括弧対応はコメント・文字列内の `}` で抽出が黙って短縮される ②正規表現ベースの除去は文字列リテラル内の `//` を誤処理する、の 2 つの迂回経路を 1 パスの状態機械で塞いだ。禁止トークンも固定部分文字列ではなく正規表現（`\.Invoke\s*\(`）で照合し、空白挿入・中間変数による迂回を検出する（いずれもコードレビューで検出。検査ロジック自体を既知のサンプルで固定）。
+  - 検証: `UnobservedTaskExceptionHandlerTests`（10件）・`AppUnobservedTaskExceptionConventionTests`（5件）を新設（+15）。Release / Debug 双方のソリューションビルドが 0 警告であることも実測した。
+  - 05_クラス設計書 §9.5・§10.1a／07_テスト設計書 §1.1a（単体 4,622→4,637・合計 4,648→4,663 件）・§2 UT-080 を同期更新（#1742）
 - Issue #1786 **ビルド警告 CS8618**（`SettingsRepositorySetConcurrencyTests`）を解消した。Release / Debug いずれのビルドでも 1 件出ていた唯一の警告で、コミット 564b9be0（Issue #1737 / PR #1776）で追加したテストヘルパー `CleanupSimulator` の `_worker` フィールドが未初期化だったことによる。
   - **是正は宣言側で行い、`NoWarn` による抑制も `= null!` も使わない**。`_worker` は `StartAndWaitUntilTransactionOpenAsync` を呼ぶまで実際に null であり、`RollbackAndCompleteAsync` も `if (_worker != null)` で分岐している。`= null!` は「必ず非 null」とコンパイラに宣言することになり、この null チェックと矛盾する。正しい注釈は `Task?`。
   - **警告の「発生」を CI で止める**。`ci.yml` の code-quality ジョブに**ビルド警告ゼロ検証**を追加した（`: warning ` を含む行を数え、1 件でもあれば警告内容を出力して fail）。従来 CI に警告のゲートは無く、警告ゼロは「気付いた人が Issue を起票する」運用でしか担保されていなかった。`-warnaserror` は NuGet / MSBuild 警告まで昇格させて CI を不安定にするため使わない。

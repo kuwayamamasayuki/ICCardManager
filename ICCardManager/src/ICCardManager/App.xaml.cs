@@ -889,7 +889,21 @@ namespace ICCardManager
         private UnobservedTaskExceptionHandler CreateUnobservedTaskExceptionHandler()
         {
             return new UnobservedTaskExceptionHandler(
-                getLogger: () => _logger,
+                logError: (exception, message) =>
+                {
+                    var logger = _logger;
+                    if (logger != null)
+                    {
+                        logger.LogError(exception, message);
+                    }
+                    else
+                    {
+                        // DI コンテナ構築前（OnStartup 冒頭〜構築失敗時）の発火でも痕跡を残す。
+                        // ErrorDialogHelper.LogException は DI 非依存のファイルログ
+                        // （error_YYYYMMDD.log）で、ダイアログは表示しない
+                        ErrorDialogHelper.LogException(exception, message);
+                    }
+                },
                 isUiAvailable: () =>
                 {
                     var app = Application.Current;
@@ -906,12 +920,12 @@ namespace ICCardManager
                     // OnExit で ServiceProvider が Dispose された後の発火では GetService が
                     // ObjectDisposedException を投げ得るが、UnobservedTaskExceptionHandler 側の
                     // try/catch が握りつぶすため通知がスキップされるだけで済む。
-                    // 文言: トーストは文字数制約があるため 3 要素のフル文言ではなく簡潔表現を優先
-                    // （error-messages.md）。例外の詳細は Handle がログへ記録済み
+                    // 文言: 例外種別に応じた「何が/なぜ/どうすれば」を ToUserMessage で組み立てる
+                    // （生の ex.Message を UI へ出さない #1614。トーストの本文は
+                    // TextWrapping="Wrap" のため長めの文言でも切れずに折り返される）
                     ServiceProvider?.GetService<IToastNotificationService>()?.ShowError(
                         "バックグラウンド処理エラー",
-                        "画面更新などのバックグラウンド処理が失敗しました。操作はそのまま続けられます。" +
-                        "繰り返し表示される場合は管理者に連絡してください。");
+                        ExceptionMessageFormatter.ToUserMessage(exception, "バックグラウンド処理"));
                 });
         }
 
@@ -975,6 +989,9 @@ namespace ICCardManager
             // 以降の処理で何が起きてもプロセスを守れるよう、最初に呼ぶ
             e.SetObserved();
 
+            // ?. は意図的な fail-safe: ハンドラ未生成（配線順の退行時のみ到達）で
+            // NullReferenceException を投げるとファイナライザからプロセスが異常終了する。
+            // SetObserved 済みのため、黙って捨ててもプロセスは守られる
             _unobservedTaskExceptionHandler?.Handle(e.Exception);
         }
 
