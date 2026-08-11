@@ -1118,7 +1118,11 @@ ON CONFLICT(key) DO UPDATE SET value = excluded.value";
         /// <see cref="LeaseConnection"/> ガードで例外にならないよう、<see cref="Task.Run{TResult}(Func{TResult})"/>
         /// でバックグラウンドスレッドに確実にオフロードする。
         /// </summary>
-        public Task<(int LedgerCount, int OperationLogCount)> CleanupOldDataAsync(CancellationToken cancellationToken = default)
+        /// <remarks>
+        /// Issue #1737: 起動時タスクの実行順・直列性を <see cref="Services.StartupTaskRunner"/> の
+        /// 単体テストで固定するため virtual（テストダブルで差し替える）。
+        /// </remarks>
+        public virtual Task<(int LedgerCount, int OperationLogCount)> CleanupOldDataAsync(CancellationToken cancellationToken = default)
             => Task.Run(CleanupOldData, cancellationToken);
 
         /// <summary>
@@ -1157,8 +1161,19 @@ ON CONFLICT(key) DO UPDATE SET value = excluded.value";
         /// VACUUMを実行してデータベースを最適化
         /// </summary>
         /// <remarks>
+        /// <para>
         /// 共有モードでは他PCが接続中の場合、排他ロックを取得できず失敗する可能性がある。
         /// その場合はfalseを返し、次回起動時にリトライする。
+        /// </para>
+        /// <para>
+        /// <b>Issue #1737:</b> SQLite 由来の失敗は理由を問わず false（当月スキップ）に畳む。
+        /// 呼び出し元（<see cref="Services.StartupTaskRunner"/>）は先勝ち CAS ロック（Issue #1482）を
+        /// <b>消費してから</b>ここへ来るため、例外を投げ返してもロックは戻らず当月は誰も再試行しない。
+        /// それでいて呼び出し元のログには VACUUM が原因だと分からない形でしか痕跡が残らなかった。
+        /// Busy / Locked のみを対象にしていると、同一接続に未完了のステートメントがある場合の
+        /// "cannot VACUUM - SQL statements in progress"（<see cref="SQLiteErrorCode.Error"/>）や
+        /// 書き込み不可・容量不足が素通りする。
+        /// </para>
         /// </remarks>
         /// <returns>VACUUMが成功した場合true</returns>
         public bool Vacuum()
@@ -1171,12 +1186,58 @@ ON CONFLICT(key) DO UPDATE SET value = excluded.value";
                 command.ExecuteNonQuery();
                 return true;
             }
-            catch (SQLiteException ex) when (ex.ResultCode == SQLiteErrorCode.Busy || ex.ResultCode == SQLiteErrorCode.Locked)
+            catch (SQLiteException ex)
             {
+                // Issue #1716 / #1730: 障害調査で「なぜ VACUUM が飛ばされたか」を追えるよう、
+                // 本番のログファイルへ出力されるレベルで記録する（LogDebug は Release で出力されない）。
+                // 原因候補を 1 つに絞れるのは ResultCode だけなので必ず載せる。
+                //
+                // Issue #1737: レベルは「待てば直るか」で分ける。呼び出し元は false を
+                // 「当月スキップ・来月再試行」として扱うが、書き込み不可・容量不足・DB 破損は
+                // 待っても直らないため、毎月 Warning 1 行が出るだけでは管理者に届かない。
+                if (IsPermanentVacuumFailure(ex.ResultCode))
+                {
+                    _logger?.LogError(ex,
+                        "VACUUM に失敗しました（ResultCode={ResultCode}）。" +
+                        "データベースファイルが書き込み不可・容量不足・破損のいずれかの可能性があります。" +
+                        "月次の再試行では解消しないため、データベースの保存先を確認してください。",
+                        ex.ResultCode);
+                }
+                else
+                {
+                    // 他の接続がアクティブな場合など。失敗の理由はモードによって異なる
+                    // （共有モード=他PCの接続、ローカルモード=自プロセス内の別処理）ため原因は断定しない。
+                    _logger?.LogWarning(ex, "VACUUM をスキップしました（ResultCode={ResultCode}）", ex.ResultCode);
+                }
 #if DEBUG
-                System.Diagnostics.Debug.WriteLine($"[DbContext] VACUUM失敗（他の接続がアクティブ）: {ex.Message}");
+                System.Diagnostics.Debug.WriteLine($"[DbContext] VACUUM失敗（ResultCode={ex.ResultCode}）: {ex.Message}");
 #endif
                 return false;
+            }
+        }
+
+        /// <summary>
+        /// VACUUM の失敗が「待っても解消しない」種類かを判定する（Issue #1737）。
+        /// </summary>
+        /// <remarks>
+        /// 月次 VACUUM は先勝ち CAS ロック（Issue #1482）を消費してから実行されるため、
+        /// 失敗しても当月は誰も再試行しない。恒久的な失敗をログレベルで区別しないと、
+        /// 書き込み不可・破損した DB が「来月再試行します」の Warning に紛れて放置される。
+        /// </remarks>
+        internal static bool IsPermanentVacuumFailure(SQLiteErrorCode resultCode)
+        {
+            switch (resultCode)
+            {
+                case SQLiteErrorCode.ReadOnly:  // 共有先の権限が読み取り専用になった
+                case SQLiteErrorCode.Full:      // 保存先の空き容量不足
+                case SQLiteErrorCode.Corrupt:   // DB ファイルの破損
+                case SQLiteErrorCode.NotADb:    // DB ファイルではない／暗号化されている
+                case SQLiteErrorCode.CantOpen:  // ファイルを開けない（パス・権限）
+                case SQLiteErrorCode.Perm:      // アクセス権限がない
+                    return true;
+                default:
+                    // Busy / Locked / Error（"SQL statements in progress" 等）は一時的とみなす
+                    return false;
             }
         }
 
@@ -1185,7 +1246,11 @@ ON CONFLICT(key) DO UPDATE SET value = excluded.value";
         /// <see cref="LeaseConnection"/> ガードで例外にならないよう、<see cref="Task.Run{TResult}(Func{TResult})"/>
         /// でバックグラウンドスレッドに確実にオフロードする。
         /// </summary>
-        public Task<bool> VacuumAsync(CancellationToken cancellationToken = default)
+        /// <remarks>
+        /// Issue #1737: 起動時タスクの実行順・直列性を <see cref="Services.StartupTaskRunner"/> の
+        /// 単体テストで固定するため virtual（テストダブルで差し替える）。
+        /// </remarks>
+        public virtual Task<bool> VacuumAsync(CancellationToken cancellationToken = default)
             => Task.Run(Vacuum, cancellationToken);
 
         /// <summary>

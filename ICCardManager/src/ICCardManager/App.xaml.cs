@@ -382,6 +382,8 @@ namespace ICCardManager
             // Issue #1687: 共有フォルダの latest_version.txt による更新通知
             services.AddSingleton<IUpdateNotificationService, UpdateNotificationService>();
             services.AddSingleton<IBackupHealthService, BackupHealthService>();
+            // Issue #1737: 起動時タスク（バックアップ→古いデータ削除→月次VACUUM）の直列実行
+            services.AddSingleton<StartupTaskRunner>();
             // Issue #1690: 障害時の自己切り分け用の接続診断
             services.AddSingleton<IConnectionDiagnosticsService, ConnectionDiagnosticsService>();
             services.AddSingleton<IClipboardService, WpfClipboardService>();
@@ -563,7 +565,7 @@ namespace ICCardManager
             ApplySavedSettings();
 
             // 起動時処理
-            await PerformStartupTasksAsync(dbContext);
+            await PerformStartupTasksAsync();
         }
 
         /// <summary>
@@ -803,59 +805,28 @@ namespace ICCardManager
         /// 起動時タスクを実行（Issue #1356 で async 化）
         /// </summary>
         /// <remarks>
-        /// Issue #1281 の UI スレッドガード対応として、DbContext の同期 API
-        /// (<see cref="DbContext.CleanupOldData"/> / <see cref="DbContext.Vacuum"/>) と
-        /// <see cref="ISettingsRepository.GetAppSettings"/> を async 版で呼ぶ。
+        /// Issue #1737: 実処理は <see cref="StartupTaskRunner"/> にある。
+        /// 各タスクは単一の SQLite 接続を共有するため実行順と直列性が要件になっており、
+        /// それを単体テストで固定できるよう App から切り出した。
         /// </remarks>
-        private async Task PerformStartupTasksAsync(DbContext dbContext)
+        private async Task PerformStartupTasksAsync()
         {
+            // 保守タスクの依存が解決できなくてもアプリは起動させる。
+            // RunAsync の内部 catch は「自分自身の DI 解決」を覆えないため、ここで囲む必要がある。
+            // 起動時タスクは貸出・返却の前提ではなく、失敗しても当日のバックアップと
+            // 古いデータ削除を諦めるだけで済む（起動を止めると窓口業務が丸ごと止まる）。
+            StartupTaskRunner runner;
             try
             {
-                // 自動バックアップ
-                var backupService = ServiceProvider.GetRequiredService<BackupService>();
-                _ = backupService.ExecuteAutoBackupAsync();
-
-                // 古いデータの削除（6年経過分）
-                var (ledgerDeleted, logDeleted) = await dbContext.CleanupOldDataAsync();
-                if (ledgerDeleted > 0)
-                {
-                    _logger?.LogInformation("古い利用履歴を{DeletedCount}件削除しました", ledgerDeleted);
-                }
-                if (logDeleted > 0)
-                {
-                    _logger?.LogInformation("古い操作ログを{DeletedCount}件削除しました", logDeleted);
-                }
-
-                // VACUUM（月次実行、先勝ち CAS ロック、Issue #1482）
-                // 共有モードで複数 PC が同時に起動した場合、ロック獲得した 1 台のみが
-                // VACUUM を試行する。ロック獲得後の VACUUM 失敗は当月スキップとして確定し、
-                // 来月まで誰も再試行しない（デッドロックスパイラル防止）。
-                var today = DateTime.Now;
-                if (today.Day >= 10)
-                {
-                    var settingsRepository = ServiceProvider.GetRequiredService<ISettingsRepository>();
-                    if (await settingsRepository.TryAcquireMonthlyVacuumLockAsync(today))
-                    {
-                        if (await dbContext.VacuumAsync())
-                        {
-                            _logger?.LogInformation("VACUUM実行完了");
-
-                            // Issue #1689: 共有モードでは複数PCのうち1台だけがVACUUMを実施するため、
-                            // どのPCが実施したかを記録してシステム管理画面から追跡できるようにする
-                            var backupHealthService = ServiceProvider.GetRequiredService<IBackupHealthService>();
-                            await backupHealthService.RecordVacuumMachineAsync();
-                        }
-                        else
-                        {
-                            _logger?.LogWarning("VACUUM失敗。来月再試行します。");
-                        }
-                    }
-                }
+                runner = ServiceProvider.GetRequiredService<StartupTaskRunner>();
             }
             catch (Exception ex)
             {
-                _logger?.LogError(ex, "起動時タスクでエラー");
+                _logger?.LogError(ex, "起動時タスクの初期化に失敗したためスキップします");
+                return;
             }
+
+            await runner.RunAsync(DateTime.Now);
         }
 
         protected override void OnExit(ExitEventArgs e)

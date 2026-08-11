@@ -78,9 +78,9 @@ namespace ICCardManager.Services
                 var backupFilePath = Path.Combine(backupPath, backupFileName);
 
                 // SQLite Backup APIでバックアップ（他PCが書き込み中でも安全）
-                // Issue #1361: 呼び出し元（App.PerformStartupTasksAsync）が UI スレッドで
-                // fire-and-forget する経路があり、GetAppSettingsAsync がキャッシュヒット時に
-                // 同期完了すると ConfigureAwait(false) があっても UI スレッドに留まる。
+                // Issue #1361: 起動経路（StartupTaskRunner）は UI スレッドから始まり、
+                // GetAppSettingsAsync がキャッシュヒット時に同期完了すると
+                // ConfigureAwait(false) があっても UI スレッドに留まる。
                 // LeaseConnection() の UI スレッドガード (#1281) に抵触しないよう、
                 // BackupDatabaseTo を Task.Run でバックグラウンドにオフロードする。
                 await Task.Run(() => BackupDatabaseTo(backupFilePath)).ConfigureAwait(false);
@@ -91,8 +91,13 @@ namespace ICCardManager.Services
                 await CleanupOldBackupsAsync(backupPath).ConfigureAwait(false);
 
                 // Issue #1689: 成功日時と実施PC名を記録する。
-                // 呼び出し側（App.PerformStartupTasksAsync）は戻り値を捨てる fire-and-forget のため、
+                // 呼び出し側（StartupTaskRunner）は戻り値をログにも UI にも出さないため、
                 // 「最後に成功したのはいつか」をサービス内部で永続化しないと誰も知り得ない。
+                //
+                // Issue #1737: この記録は単一 SQLite 接続への書き込みであり、
+                // 起動時の後続タスク（古いデータ削除・VACUUM）と並走してはならない。
+                // 呼び出し側が直列 await すること、および SettingsRepository 側が
+                // セマフォ保護下で書くことの 2 段で担保している。
                 await RecordBackupSuccessAsync().ConfigureAwait(false);
 
                 return backupFilePath;
