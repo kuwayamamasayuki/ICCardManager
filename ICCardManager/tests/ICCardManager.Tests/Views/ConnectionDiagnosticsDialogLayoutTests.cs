@@ -22,7 +22,7 @@ namespace ICCardManager.Tests.Views;
 public class ConnectionDiagnosticsDialogLayoutTests
 {
     private static readonly string DialogXamlPath =
-        ResolveViewPath(Path.Combine("Views", "Dialogs", "ConnectionDiagnosticsDialog.xaml"));
+        Helpers.ViewSourceLocator.Resolve(Path.Combine("Views", "Dialogs", "ConnectionDiagnosticsDialog.xaml"));
 
     private static string Xaml => File.ReadAllText(DialogXamlPath);
 
@@ -134,22 +134,5 @@ public class ConnectionDiagnosticsDialogLayoutTests
         var match = pattern.Match(Xaml);
         match.Success.Should().BeTrue("ConnectionDiagnosticsDialog.xaml に「ステータスとボタン」の Grid が存在すべき");
         return match.Value;
-    }
-
-    private static string ResolveViewPath(string relativePath)
-    {
-        var current = new DirectoryInfo(AppContext.BaseDirectory);
-        while (current != null)
-        {
-            var candidate = Path.Combine(current.FullName, "src", "ICCardManager", relativePath);
-            if (File.Exists(candidate))
-            {
-                return candidate;
-            }
-            current = current.Parent;
-        }
-
-        throw new InvalidOperationException(
-            $"{relativePath} を {AppContext.BaseDirectory} の親階層から解決できませんでした");
     }
 }

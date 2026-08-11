@@ -1593,14 +1593,26 @@ public partial class MainViewModel : ViewModelBase
             var (rawLedgers, totalCount) = await _ledgerRepository.GetPagedAsync(
                 HistoryCard.CardIdm, HistoryFromDate, HistoryToDate, HistoryCurrentPage, HistoryPageSize);
 
+            // Issue #1740: 表示期間の直前残高をチェーン開始点のシードとして渡す。
+            // シードが無いと、同額のポイント還元と利用が同日にある形状（Issue #1004）で
+            // 残高チェーンが循環して開始点を特定できず id 順フォールバックへ落ちる。
+            // この並びは #1740 以降「自動計算の起点＝DB へ書き戻す残高」の根拠になったため、
+            // 表示上の見間違いでは済まなくなった。
+            // 2ページ目以降はページ先頭行の直前残高を特定できないため渡さない
+            // （誤ったシードは、シード無しより悪い並びを生む）。
+            int? precedingBalance = HistoryCurrentPage == 1
+                ? await GetPrecedingBalanceAsync(
+                    HistoryCard.CardIdm, HistoryFromDate.Year, HistoryFromDate.Month)
+                : null;
+
             // Issue #784: 残高チェーンに基づいて同一日内の時系列順を復元
-            var ledgers = Services.LedgerOrderHelper.ReorderByBalanceChain(rawLedgers);
+            var ledgers = Services.LedgerOrderHelper.ReorderByBalanceChain(rawLedgers, precedingBalance);
 
             // Issue #1155: 1ページ目の先頭に繰越行を挿入（帳票と同じ表示）
             if (HistoryCurrentPage == 1)
             {
-                var carryoverDto = await BuildCarryoverRowAsync(
-                    HistoryCard.CardIdm, HistoryFromDate.Year, HistoryFromDate.Month);
+                var carryoverDto = BuildCarryoverRow(
+                    HistoryCard.CardIdm, HistoryFromDate.Year, HistoryFromDate.Month, precedingBalance);
                 if (carryoverDto != null)
                 {
                     HistoryLedgers.Add(carryoverDto);
@@ -1650,19 +1662,35 @@ public partial class MainViewModel : ViewModelBase
     /// </summary>
     internal async Task<LedgerDto> BuildCarryoverRowAsync(string cardIdm, int year, int month)
     {
-        int? precedingBalance;
+        var precedingBalance = await GetPrecedingBalanceAsync(cardIdm, year, month);
+        return BuildCarryoverRow(cardIdm, year, month, precedingBalance);
+    }
+
+    /// <summary>
+    /// 表示期間の直前の残高（＝繰越額）を取得する。null は「それ以前に履歴が無い」を表す。
+    /// </summary>
+    /// <remarks>
+    /// Issue #1740: 残高チェーンの並べ替えシードと繰越行の生成の双方が同じ値を必要とするため、
+    /// <see cref="BuildCarryoverRowAsync"/> から切り出した。呼び出し元は 1 回の取得で両方に使う。
+    /// </remarks>
+    internal async Task<int?> GetPrecedingBalanceAsync(string cardIdm, int year, int month)
+    {
         if (month == 4)
         {
-            precedingBalance = await _ledgerRepository.GetCarryoverBalanceAsync(cardIdm, year - 1);
-        }
-        else
-        {
-            // 前月末の最新残高を取得
-            var firstDayOfMonth = new DateTime(year, month, 1);
-            var lastLedger = await _ledgerRepository.GetLatestBeforeDateAsync(cardIdm, firstDayOfMonth);
-            precedingBalance = lastLedger?.Balance;
+            return await _ledgerRepository.GetCarryoverBalanceAsync(cardIdm, year - 1);
         }
 
+        // 前月末の最新残高を取得
+        var firstDayOfMonth = new DateTime(year, month, 1);
+        var lastLedger = await _ledgerRepository.GetLatestBeforeDateAsync(cardIdm, firstDayOfMonth);
+        return lastLedger?.Balance;
+    }
+
+    /// <summary>
+    /// Issue #1155: 取得済みの繰越額から繰越行のDTOを生成する（繰越額が無い場合は null）。
+    /// </summary>
+    internal LedgerDto BuildCarryoverRow(string cardIdm, int year, int month, int? precedingBalance)
+    {
         if (!precedingBalance.HasValue)
         {
             return null;
@@ -1903,8 +1931,16 @@ public partial class MainViewModel : ViewModelBase
 
         // ダイアログ表示
         var allLedgers = HistoryLedgers.ToList();
+
+        // Issue #1740: 一覧の先頭がカードの履歴の先頭でもあるときだけ、先頭への挿入で
+        // 直前残高 0 を起点にしてよい。1ページ目に繰越行が無いことは「表示期間より前に
+        // 履歴が無い」ことを意味する（BuildCarryoverRow は繰越額が取れない場合のみ null を返す）。
+        var historyStartsAtCardBeginning =
+            HistoryCurrentPage == 1 && allLedgers.FirstOrDefault()?.IsCarryoverRow != true;
+
         var result = await _navigationService.ShowDialogAsync<Views.Dialogs.LedgerRowEditDialog>(
-            async d => await d.InitializeForAddAsync(HistoryCard.CardIdm, allLedgers, authResult.Idm));
+            async d => await d.InitializeForAddAsync(
+                HistoryCard.CardIdm, allLedgers, authResult.Idm, historyStartsAtCardBeginning));
 
         if (result == true)
         {
@@ -2019,10 +2055,41 @@ public partial class MainViewModel : ViewModelBase
     /// </remarks>
     internal int? FindPreviousBalanceForEdit(LedgerDto ledger)
     {
-        if (ledger == null) return null;
-
-        var index = HistoryLedgers.ToList().FindIndex(l => l.Id == ledger.Id);
+        var index = IndexOfHistoryLedger(ledger);
         return index > 0 ? HistoryLedgers[index - 1].Balance : (int?)null;
+    }
+
+    /// <summary>
+    /// 履歴一覧における行の位置を返す（見つからない場合は -1）。
+    /// </summary>
+    /// <remarks>
+    /// Issue #1740: 「保存して次へ」「次へ」「戻る」と自動計算の起点特定が同じ索引を使う。
+    /// 別々に書くと、照合条件を変えたときに片方だけ直して「次へが開く行」と
+    /// 「自動計算の起点」がずれる。
+    /// </remarks>
+    private int IndexOfHistoryLedger(LedgerDto ledger)
+    {
+        if (ledger == null) return -1;
+
+        for (int i = 0; i < HistoryLedgers.Count; i++)
+        {
+            if (HistoryLedgers[i].Id == ledger.Id) return i;
+        }
+        return -1;
+    }
+
+    /// <summary>
+    /// 履歴一覧の指定位置にある行が編集可能か（Issue #1740）。
+    /// </summary>
+    /// <remarks>
+    /// 繰越行（<see cref="BuildCarryoverRow"/>）は DB に実体を持たない表示専用の合成行で、
+    /// 一覧では修正ボタンを隠している。「次へ」「戻る」のナビゲーションにも同じガードが要る
+    /// （無いと全項目空欄のダイアログが開き、存在しない行を編集させられているように見える）。
+    /// </remarks>
+    private bool IsEditableHistoryLedger(int index)
+    {
+        if (index < 0 || index >= HistoryLedgers.Count) return false;
+        return !HistoryLedgers[index].IsCarryoverRow;
     }
 
     /// <summary>
@@ -2085,34 +2152,37 @@ public partial class MainViewModel : ViewModelBase
             // Issue #1134: 「保存して次へ」が要求された場合、次の行を開く
             if (capturedEditDialog?.IsSaveAndEditNextRequested == true)
             {
-                var currentIndex = HistoryLedgers.ToList().FindIndex(l => l.Id == ledger.Id);
-                if (currentIndex >= 0 && currentIndex < HistoryLedgers.Count - 1)
-                {
-                    var nextLedger = HistoryLedgers[currentIndex + 1];
-                    await EditLedgerWithAuthAsync(nextLedger, operatorIdm, showSaveAndNext: true);
-                }
+                await EditAdjacentLedgerAsync(ledger, operatorIdm, offset: 1);
             }
         }
         // Issue #1134: 「次へ（保存しない）」が要求された場合
         else if (capturedEditDialog?.IsSkipToNextRequested == true)
         {
-            var currentIndex = HistoryLedgers.ToList().FindIndex(l => l.Id == ledger.Id);
-            if (currentIndex >= 0 && currentIndex < HistoryLedgers.Count - 1)
-            {
-                var nextLedger = HistoryLedgers[currentIndex + 1];
-                await EditLedgerWithAuthAsync(nextLedger, operatorIdm, showSaveAndNext: true);
-            }
+            await EditAdjacentLedgerAsync(ledger, operatorIdm, offset: 1);
         }
         // Issue #1134: 「戻る」が要求された場合
         else if (capturedEditDialog?.IsBackRequested == true)
         {
-            var currentIndex = HistoryLedgers.ToList().FindIndex(l => l.Id == ledger.Id);
-            if (currentIndex > 0)
-            {
-                var prevLedger = HistoryLedgers[currentIndex - 1];
-                await EditLedgerWithAuthAsync(prevLedger, operatorIdm, showSaveAndNext: true);
-            }
+            await EditAdjacentLedgerAsync(ledger, operatorIdm, offset: -1);
         }
+    }
+
+    /// <summary>
+    /// 履歴一覧で隣接する行の編集ダイアログを開く（Issue #1134 の「次へ」「戻る」）。
+    /// </summary>
+    /// <remarks>
+    /// Issue #1740: 隣が繰越行（DB に実体を持たない合成行）の場合は何もしない。
+    /// ガードが無いと全項目空欄のダイアログが開く。
+    /// </remarks>
+    private async Task EditAdjacentLedgerAsync(LedgerDto ledger, string operatorIdm, int offset)
+    {
+        var currentIndex = IndexOfHistoryLedger(ledger);
+        if (currentIndex < 0) return;
+
+        var targetIndex = currentIndex + offset;
+        if (!IsEditableHistoryLedger(targetIndex)) return;
+
+        await EditLedgerWithAuthAsync(HistoryLedgers[targetIndex], operatorIdm, showSaveAndNext: true);
     }
 
     /// <summary>

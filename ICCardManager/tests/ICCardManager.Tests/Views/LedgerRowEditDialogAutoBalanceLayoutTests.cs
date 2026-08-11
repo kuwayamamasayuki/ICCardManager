@@ -29,7 +29,7 @@ namespace ICCardManager.Tests.Views;
 public class LedgerRowEditDialogAutoBalanceLayoutTests
 {
     private static readonly string LedgerRowEditDialogXamlPath =
-        ResolveViewPath(Path.Combine("Views", "Dialogs", "LedgerRowEditDialog.xaml"));
+        Helpers.ViewSourceLocator.Resolve(Path.Combine("Views", "Dialogs", "LedgerRowEditDialog.xaml"));
 
     /// <summary>
     /// 「自動計算」チェックボックスの有効/無効が CanAutoBalance に結線されていること。
@@ -53,7 +53,7 @@ public class LedgerRowEditDialogAutoBalanceLayoutTests
         var checkBox = ExtractAutoBalanceCheckBox();
 
         checkBox.Should().MatchRegex(
-            @"ToolTip\s*=\s*""\{Binding\s+AutoBalanceToolTip\}""",
+            @"Text\s*=\s*""\{Binding\s+AutoBalanceToolTip\}""",
             "自動計算が使えない理由と対処を状態に応じて説明する必要がある（Issue #1740）");
     }
 
@@ -72,6 +72,44 @@ public class LedgerRowEditDialogAutoBalanceLayoutTests
     }
 
     /// <summary>
+    /// 長文の ToolTip が折り返されること（文字サイズ4段階への対応）。
+    /// </summary>
+    /// <remarks>
+    /// WPF 既定の ToolTip は TextWrapping も MaxWidth も持たず1行で描画するため、
+    /// 無効時の長文が画面外へはみ出して復旧手段の部分だけ読めなくなる。
+    /// 幅を詰めるのではなく折り返しで担保する（CLAUDE.md の UI/UX 原則）。
+    /// </remarks>
+    [Fact]
+    public void Auto_balance_tooltip_should_wrap_instead_of_relying_on_width()
+    {
+        var checkBox = ExtractAutoBalanceCheckBox();
+
+        checkBox.Should().MatchRegex(
+            @"TextWrapping\s*=\s*""Wrap""",
+            "無効時の ToolTip は長文になるため折り返しが必要（Issue #1740）");
+        checkBox.Should().MatchRegex(
+            @"<ToolTip\b[^>]*MaxWidth\s*=\s*""\d+""",
+            "折り返し幅の上限が無いと ToolTip が横に伸び続ける（Issue #1740）");
+    }
+
+    /// <summary>
+    /// ToolTip が DataContext の継承に頼らず PlacementTarget 経由で結線されていること。
+    /// </summary>
+    /// <remarks>
+    /// ToolTip は視覚ツリー外の Popup に載るため、継承に依存すると
+    /// バインドが解決されず空の ToolTip になり得る。
+    /// </remarks>
+    [Fact]
+    public void Auto_balance_tooltip_should_resolve_its_datacontext_via_placement_target()
+    {
+        var checkBox = ExtractAutoBalanceCheckBox();
+
+        checkBox.Should().MatchRegex(
+            @"DataContext\s*=\s*""\{Binding\s+PlacementTarget\.DataContext",
+            "ToolTip の DataContext は PlacementTarget から明示的に辿る（Issue #1740）");
+    }
+
+    /// <summary>
     /// 抽出そのものが妥当であること（抽出範囲が空振りして検査が無意味にならないため）。
     /// </summary>
     [Fact]
@@ -81,16 +119,20 @@ public class LedgerRowEditDialogAutoBalanceLayoutTests
 
         checkBox.Should().Contain("自動計算");
         checkBox.Should().MatchRegex(@"IsChecked\s*=\s*""\{Binding\s+IsAutoBalance\}""");
+        checkBox.Should().Contain("</CheckBox>", "開始タグから終了タグまでを抽出範囲に含める");
     }
 
     /// <summary>
-    /// 「自動計算」CheckBox のマークアップを抽出する。
+    /// 「自動計算」CheckBox のマークアップ（開始タグ〜終了タグ）を抽出する。
     /// </summary>
     private static string ExtractAutoBalanceCheckBox()
     {
         var xaml = File.ReadAllText(LedgerRowEditDialogXamlPath);
 
-        var match = Regex.Match(xaml, @"<CheckBox\b[^>]*?IsChecked\s*=\s*""\{Binding\s+IsAutoBalance\}""[^>]*?/>",
+        var match = Regex.Match(
+            xaml,
+            @"<CheckBox\b(?:(?!</CheckBox>).)*?IsChecked\s*=\s*""\{Binding\s+IsAutoBalance\}""" +
+            @"(?:(?!</CheckBox>).)*?</CheckBox>",
             RegexOptions.Singleline);
 
         match.Success.Should().BeTrue(
@@ -98,22 +140,5 @@ public class LedgerRowEditDialogAutoBalanceLayoutTests
             "マークアップの構造が変わった場合は本テストの抽出条件も更新してください");
 
         return match.Value;
-    }
-
-    private static string ResolveViewPath(string relativePath)
-    {
-        var current = new DirectoryInfo(AppContext.BaseDirectory);
-        while (current != null)
-        {
-            var candidate = Path.Combine(current.FullName, "src", "ICCardManager", relativePath);
-            if (File.Exists(candidate))
-            {
-                return candidate;
-            }
-            current = current.Parent;
-        }
-
-        throw new InvalidOperationException(
-            $"{relativePath} を {AppContext.BaseDirectory} の親階層から解決できませんでした");
     }
 }

@@ -119,5 +119,21 @@ internal int? FindPreviousBalanceForEdit(LedgerDto ledger)
 
 ## 6. スコープ外
 
-- **Add モードで挿入位置が先頭のとき `PreviousBalance = 0` になる点**: 本 Issue の対象ではない。挿入位置プレビューで前後の行が可視化されており、利用者が起点を確認できる。
 - **編集によって後続行の残高チェーンが崩れる点**: 1 行の編集は本来後続行すべてに波及するが、本システムは自動補正せず `LedgerConsistencyChecker` の警告で運用に委ねる設計。本 Issue は「起点が 0 で計算される」誤りのみを対象とする。
+
+## 7. コードレビューを受けた追加対応
+
+当初「Add モードで挿入位置が先頭のとき `PreviousBalance = 0` になる点」をスコープ外としていたが、コードレビューで**同じ 0 起点の残高破壊が Add モードで到達可能**であること、および §3.1 の XML doc がそれと矛盾する記述（「Add モードは常に true」）になっていることが指摘されたため、本 PR に含めた。あわせて次を是正した。
+
+| 対応 | 内容 |
+|------|------|
+| 自動計算の可否を動的化 | `AutoBalanceUnavailableReason`（`None` / `PreviousRowNotIdentified` / `EditDateChanged`）を導入し、挿入位置・利用日の変更で都度再判定する。使えなくなったらチェックも解除する |
+| Edit モードの利用日変更 | 日付を変えると行の入る位置と直前行が変わるため自動計算を無効化する（元の日付へ戻せば再び使える） |
+| Add モードの先頭挿入 | 一覧の先頭がカードの履歴の先頭でもあるときだけ 0 起点を許す。判定材料は `InitializeForAddAsync` の `historyStartsAtCardBeginning`（1ページ目かつ繰越行が無い＝表示期間より前に履歴が無い） |
+| ON→OFF の復元 | 自動計算 ON の直前の残高を退避し、OFF で復元する |
+| 残高チェーンのシード | 1ページ目では表示期間の直前残高を `ReorderByBalanceChain` のシードとして渡す。`GetPrecedingBalanceAsync` を `BuildCarryoverRowAsync` から切り出し、シードと繰越行で同じ値を使う |
+| 繰越行のナビゲーションガード | 「戻る」「次へ」が Id=0 の合成繰越行を編集対象に選ばないようにする（`EditAdjacentLedgerAsync` に集約） |
+| 初期化順序 | 対象行の取得結果（null チェック）を通ってから状態を書き換える。他 PC が削除済みの行で無関係なバリデーションエラーが出ないようにする |
+| ToolTip 文言 | 画面に存在しない「表示期間を広げる」を案内しない。理由ごとに文言を分ける |
+| ToolTip の折り返し | 要素構文へ変え `TextWrapping="Wrap"` と `MaxWidth` を指定。DataContext は継承に頼らず `PlacementTarget` 経由で解決する |
+| テストヘルパーの重複 | 6 クラスに複製されていた `ResolveViewPath` を `Views/Helpers/ViewSourceLocator` へ集約 |

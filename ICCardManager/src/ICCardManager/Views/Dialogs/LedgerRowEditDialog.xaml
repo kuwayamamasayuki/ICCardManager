@@ -181,7 +181,10 @@
                 <TextBlock Text="円" VerticalAlignment="Center" Margin="5,0,0,0"
                            FontSize="{DynamicResource BaseFontSize}"/>
                 <!-- Issue #1740: 直前行の残高が特定できない場合は自動計算を無効化する。
-                     理由と対処は AutoBalanceToolTip が状態に応じて説明する。 -->
+                     理由と対処は AutoBalanceToolTip が状態に応じて説明する。
+                     ToolTip は要素構文で TextWrapping="Wrap" を明示する。WPF 既定の ToolTip は
+                     折り返さず MaxWidth も持たないため、無効時の長文が画面外へはみ出して
+                     復旧手段の部分だけ読めなくなる（文字サイズ「特大」で顕著）。 -->
                 <CheckBox Content="自動計算(_A)"
                           IsChecked="{Binding IsAutoBalance}"
                           IsEnabled="{Binding CanAutoBalance}"
@@ -190,8 +193,19 @@
                           FontSize="{DynamicResource BaseFontSize}"
                           AutomationProperties.Name="残高を自動計算"
                           AutomationProperties.HelpText="{Binding AutoBalanceToolTip}"
-                          ToolTip="{Binding AutoBalanceToolTip}"
-                          ToolTipService.ShowOnDisabled="True"/>
+                          ToolTipService.ShowOnDisabled="True">
+                    <CheckBox.ToolTip>
+                        <!-- ToolTip は視覚ツリー外の Popup に載るため、DataContext の継承に頼らず
+                             PlacementTarget 経由で明示的に辿る -->
+                        <ToolTip MaxWidth="400"
+                                 DataContext="{Binding PlacementTarget.DataContext,
+                                               RelativeSource={RelativeSource Self}}">
+                            <TextBlock Text="{Binding AutoBalanceToolTip}"
+                                       TextWrapping="Wrap"
+                                       FontSize="{DynamicResource BaseFontSize}"/>
+                        </ToolTip>
+                    </CheckBox.ToolTip>
+                </CheckBox>
             </StackPanel>
 
             <!-- 利用者 (_U) -->

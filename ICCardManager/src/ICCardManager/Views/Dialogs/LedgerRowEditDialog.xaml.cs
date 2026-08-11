@@ -117,9 +117,17 @@ namespace ICCardManager.Views.Dialogs
         /// <param name="cardIdm">対象カードIDm</param>
         /// <param name="allLedgers">表示中の全履歴</param>
         /// <param name="operatorIdm">認証済み職員IDm</param>
-        public async Task InitializeForAddAsync(string cardIdm, List<LedgerDto> allLedgers, string operatorIdm)
+        /// <param name="historyStartsAtCardBeginning">
+        /// <paramref name="allLedgers"/> の先頭がカードの履歴の先頭でもあるか（Issue #1740）。
+        /// false のとき、先頭への挿入では残高の自動計算が無効化される。
+        /// </param>
+        public async Task InitializeForAddAsync(
+            string cardIdm,
+            List<LedgerDto> allLedgers,
+            string operatorIdm,
+            bool historyStartsAtCardBeginning = false)
         {
-            await _viewModel.InitializeForAddAsync(cardIdm, allLedgers, operatorIdm);
+            await _viewModel.InitializeForAddAsync(cardIdm, allLedgers, operatorIdm, historyStartsAtCardBeginning);
         }
 
         /// <summary>

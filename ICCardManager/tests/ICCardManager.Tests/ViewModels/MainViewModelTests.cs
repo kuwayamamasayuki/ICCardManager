@@ -1540,6 +1540,33 @@ public class MainViewModelTests : IDisposable
         _viewModel.FindPreviousBalanceForEdit(null).Should().BeNull();
     }
 
+    /// <summary>
+    /// Issue #1740: 繰越額の取得と繰越行の生成を分離しても、生成結果が従来と一致すること。
+    /// 分離したのは、残高チェーンの並べ替えシードと繰越行が同じ値を必要とするため。
+    /// </summary>
+    [Fact]
+    public void BuildCarryoverRow_繰越額が無い場合はnullを返すこと()
+    {
+        // Act & Assert
+        _viewModel.BuildCarryoverRow("0102030405060708", 2026, 5, null).Should().BeNull();
+    }
+
+    /// <summary>
+    /// Issue #1740: 繰越額があれば、その残高を持つ表示専用行（Id=0）を生成すること。
+    /// </summary>
+    [Fact]
+    public void BuildCarryoverRow_繰越額から表示専用の繰越行を生成すること()
+    {
+        // Act
+        var row = _viewModel.BuildCarryoverRow("0102030405060708", 2026, 5, 7500);
+
+        // Assert
+        row.Should().NotBeNull();
+        row!.Id.Should().Be(0, "DBに実体を持たない合成行");
+        row.Balance.Should().Be(7500);
+        row.IsCarryoverRow.Should().BeTrue();
+    }
+
     #endregion
 
     #region 残高不整合ハイライト（Issue #1052）

@@ -26,6 +26,26 @@ namespace ICCardManager.ViewModels
     }
 
     /// <summary>
+    /// 残高の自動計算が使えない理由（Issue #1740）
+    /// </summary>
+    public enum AutoBalanceUnavailableReason
+    {
+        /// <summary>自動計算が使える</summary>
+        None,
+
+        /// <summary>
+        /// 自動計算の起点となる直前行を特定できない。
+        /// 履歴一覧のページ先頭行・表示期間の先頭行（繰越行も無い場合）が該当する。
+        /// </summary>
+        PreviousRowNotIdentified,
+
+        /// <summary>
+        /// Editモードで利用日を変更したため、この行が入る位置と直前行が変わり起点を確定できない。
+        /// </summary>
+        EditDateChanged
+    }
+
+    /// <summary>
     /// 履歴行の追加/全項目編集ダイアログのViewModel（Issue #635）
     /// </summary>
     /// <remarks>
@@ -132,15 +152,21 @@ namespace ICCardManager.ViewModels
         private int _previousBalance;
 
         /// <summary>
+        /// 残高の自動計算が使えない理由（Issue #1740）
+        /// </summary>
+        [ObservableProperty]
+        private AutoBalanceUnavailableReason _autoBalanceUnavailableReason;
+
+        /// <summary>
         /// 残高の自動計算が使えるか（Issue #1740）
         /// </summary>
         /// <remarks>
-        /// Addモードは挿入位置プレビューから直前行を必ず特定できるため常に true。
-        /// Editモードは <see cref="InitializeForEditAsync"/> に直前行の残高が渡されたときのみ true になる。
+        /// 直前行の残高（自動計算の起点）を確定できるときだけ true。
         /// false のときは <see cref="RecalculateBalance"/> が残高に触れず、手入力のみとなる。
+        /// 可否は挿入位置・利用日の変更で変わるため <see cref="UpdateAutoBalanceAvailability"/> が都度更新する。
         /// </remarks>
-        [ObservableProperty]
-        private bool _canAutoBalance = true;
+        public bool CanAutoBalance =>
+            AutoBalanceUnavailableReason == AutoBalanceUnavailableReason.None;
 
         /// <summary>
         /// 「自動計算」チェックボックスのToolTip（Issue #1740）
@@ -148,14 +174,30 @@ namespace ICCardManager.ViewModels
         /// <remarks>
         /// 自動計算が使えない場合は、無効化されている理由と復旧手段を示す
         /// （<c>.claude/rules/error-messages.md</c> の「何が／なぜ／どうすれば」）。
+        /// 「どうすれば」は画面上に実在する操作でなければならないため、履歴一覧に無い
+        /// 「表示期間を広げる」等は案内しない（期間は暦月固定で広げる操作が存在しない）。
         /// </remarks>
-        public string AutoBalanceToolTip => CanAutoBalance
-            ? "ONにすると、前の行の残高 + 受入 - 払出 で自動計算されます（アクセスキー: Alt+A）"
-            : "残高の自動計算は前の行の残高を起点にしますが、修正対象の前の行が履歴の表示範囲にありません。" +
-              "残高欄に金額を直接入力するか、履歴の表示期間を広げて前の行が見える状態にしてから修正してください。";
-
-        partial void OnCanAutoBalanceChanged(bool value)
+        public string AutoBalanceToolTip
         {
+            get
+            {
+                switch (AutoBalanceUnavailableReason)
+                {
+                    case AutoBalanceUnavailableReason.PreviousRowNotIdentified:
+                        return "残高の自動計算は前の行の残高を起点にしますが、その前の行が履歴一覧に表示されていません。" +
+                               "1つ上の行の残高を確認し、残高欄に金額を直接入力してください。";
+                    case AutoBalanceUnavailableReason.EditDateChanged:
+                        return "利用日を変更したため、この行が入る位置と直前の行が変わります。" +
+                               "自動計算の起点を確定できないため、残高欄に金額を直接入力してください。";
+                    default:
+                        return "ONにすると、前の行の残高 + 受入 - 払出 で自動計算されます（アクセスキー: Alt+A）";
+                }
+            }
+        }
+
+        partial void OnAutoBalanceUnavailableReasonChanged(AutoBalanceUnavailableReason value)
+        {
+            OnPropertyChanged(nameof(CanAutoBalance));
             OnPropertyChanged(nameof(AutoBalanceToolTip));
         }
 
@@ -262,6 +304,27 @@ namespace ICCardManager.ViewModels
         /// </summary>
         private List<LedgerDto> _allLedgers = new();
 
+        /// <summary>
+        /// <see cref="_allLedgers"/> の先頭がカードの履歴の先頭でもあるか（Addモード用、Issue #1740）
+        /// </summary>
+        private bool _historyStartsAtCardBeginning;
+
+        /// <summary>
+        /// Editモードで呼び出し元から渡された直前行の残高（Issue #1740）。
+        /// null は「直前行を特定できない」を表す。
+        /// </summary>
+        private int? _editPreviousBalance;
+
+        /// <summary>
+        /// Editモードの初期利用日（Issue #1740）。ここから変わったら自動計算の起点が確定できなくなる。
+        /// </summary>
+        private DateTime _initialEditDate;
+
+        /// <summary>
+        /// 自動計算を ON にする直前の残高（Issue #1740）。OFF に戻したときの復元用。
+        /// </summary>
+        private int? _balanceBeforeAutoBalance;
+
         public LedgerRowEditViewModel(
             ILedgerRepository ledgerRepository,
             IStaffRepository staffRepository,
@@ -280,11 +343,23 @@ namespace ICCardManager.ViewModels
         /// <param name="cardIdm">対象カードIDm</param>
         /// <param name="allLedgers">表示中の全履歴（挿入位置プレビュー用）</param>
         /// <param name="operatorIdm">認証済み職員IDm</param>
-        public async Task InitializeForAddAsync(string cardIdm, List<LedgerDto> allLedgers, string operatorIdm)
+        /// <param name="historyStartsAtCardBeginning">
+        /// <paramref name="allLedgers"/> の先頭が、そのカードの履歴の先頭でもあるか（Issue #1740）。
+        /// true のときに限り、先頭への挿入（<c>InsertIndex == 0</c>）で直前残高 0 を起点にしてよい。
+        /// false（ページ2以降・表示期間より前に履歴がある場合）では起点を特定できないため自動計算を無効化する。
+        /// 既定値が false なのは、呼び出し元が渡し忘れても「0 起点で残高を破壊する」より
+        /// 「自動計算が使えない」に倒すため。
+        /// </param>
+        public async Task InitializeForAddAsync(
+            string cardIdm,
+            List<LedgerDto> allLedgers,
+            string operatorIdm,
+            bool historyStartsAtCardBeginning = false)
         {
             _cardIdm = cardIdm;
             _operatorIdm = operatorIdm;
             _allLedgers = allLedgers;
+            _historyStartsAtCardBeginning = historyStartsAtCardBeginning;
 
             Mode = LedgerRowEditMode.Add;
             DialogTitle = "履歴行の追加";
@@ -295,6 +370,7 @@ namespace ICCardManager.ViewModels
             // 挿入位置を末尾に設定
             InsertIndex = _allLedgers.Count;
             UpdateContextRows();
+            UpdateAutoBalanceAvailability();
             RecalculateBalance();
             Validate();
 
@@ -321,15 +397,21 @@ namespace ICCardManager.ViewModels
             Mode = LedgerRowEditMode.Edit;
             DialogTitle = "履歴行の修正";
 
+            // 完全なLedgerオブジェクトを取得
+            // Issue #1740: 状態を書き換えるのはこの null チェックを通ってから。
+            // 手前で IsAutoBalance を代入すると Validate() が走り、行が既に削除されている
+            // （共有モードで他PCが削除した）ケースで空ダイアログに「摘要が空です」という
+            // 実際の原因と無関係なエラーが出る。
+            var ledger = await _ledgerRepository.GetByIdAsync(ledgerDto.Id);
+            if (ledger == null) return;
+
             // Issue #1740: 金額の復元で誤った自動計算が走らないよう、値の代入より先に自動計算を止める。
             // （IsAutoBalance の既定値は true のため、Income/Expense の代入で RecalculateBalance が発火する）
             IsAutoBalance = false; // 編集モードでは手動入力開始
-            CanAutoBalance = previousBalance.HasValue;
+            _editPreviousBalance = previousBalance;
+            _initialEditDate = ledger.Date;
             PreviousBalance = previousBalance ?? 0;
-
-            // 完全なLedgerオブジェクトを取得
-            var ledger = await _ledgerRepository.GetByIdAsync(ledgerDto.Id);
-            if (ledger == null) return;
+            UpdateAutoBalanceAvailability();
 
             EditDate = ledger.Date;
             Summary = ledger.Summary;
@@ -401,11 +483,22 @@ namespace ICCardManager.ViewModels
         /// <summary>
         /// IsAutoBalance変更時のコールバック
         /// </summary>
+        /// <remarks>
+        /// Issue #1740: ON にすると自動計算値で残高を上書きするため、上書き前の値を退避し
+        /// OFF に戻したときに復元する。復元手段が無いと、試しにチェックを入れて外しただけで
+        /// 元の残高（DB 値）が失われ、そのまま保存されて不整合が下の行へ伝播する。
+        /// </remarks>
         partial void OnIsAutoBalanceChanged(bool value)
         {
             if (value)
             {
+                _balanceBeforeAutoBalance = Balance;
                 RecalculateBalance();
+            }
+            else if (_balanceBeforeAutoBalance.HasValue)
+            {
+                Balance = _balanceBeforeAutoBalance.Value;
+                _balanceBeforeAutoBalance = null;
             }
             Validate();
         }
@@ -453,7 +546,15 @@ namespace ICCardManager.ViewModels
                 }
                 InsertIndex = newIndex;
                 UpdateContextRows();
+                UpdateAutoBalanceAvailability();
                 RecalculateBalance();
+            }
+            else if (Mode == LedgerRowEditMode.Edit)
+            {
+                // Issue #1740: Editモードでも利用日は変更できる。日付を変えると行の入る位置が
+                // 変わり、初期化時に確定した直前行はもう直前ではなくなるため、自動計算を無効化する。
+                // （Addモードのように挿入位置プレビューを持たないため、直前行を引き直す手段が無い）
+                UpdateAutoBalanceAvailability();
             }
             Validate();
         }
@@ -468,6 +569,7 @@ namespace ICCardManager.ViewModels
             {
                 InsertIndex--;
                 UpdateContextRows();
+                UpdateAutoBalanceAvailability();
                 RecalculateBalance();
                 Validate();
             }
@@ -483,6 +585,7 @@ namespace ICCardManager.ViewModels
             {
                 InsertIndex++;
                 UpdateContextRows();
+                UpdateAutoBalanceAvailability();
                 RecalculateBalance();
                 Validate();
             }
@@ -506,6 +609,49 @@ namespace ICCardManager.ViewModels
         }
 
         /// <summary>
+        /// 残高の自動計算が使えるかを現在の状態から判定して更新する（Issue #1740）。
+        /// </summary>
+        /// <remarks>
+        /// 可否は固定ではなく、挿入位置の移動（Add）・利用日の変更（Add/Edit）で変わる。
+        /// 使えなくなったときは <see cref="IsAutoBalance"/> も解除し、残高欄が編集可能になることで
+        /// 利用者に状態の変化が見えるようにする（チェックが入ったまま計算されない状態を作らない）。
+        /// </remarks>
+        private void UpdateAutoBalanceAvailability()
+        {
+            AutoBalanceUnavailableReason reason;
+
+            if (Mode == LedgerRowEditMode.Add)
+            {
+                // 先頭への挿入で起点 0 が正しいのは、一覧の先頭がカードの履歴の先頭でもあるときだけ。
+                // ページ2以降や表示期間より前に履歴がある場合、0 を起点にすると残高を破壊する。
+                reason = (InsertIndex > 0 || _historyStartsAtCardBeginning)
+                    ? AutoBalanceUnavailableReason.None
+                    : AutoBalanceUnavailableReason.PreviousRowNotIdentified;
+            }
+            else if (!_editPreviousBalance.HasValue)
+            {
+                reason = AutoBalanceUnavailableReason.PreviousRowNotIdentified;
+            }
+            else
+            {
+                // 利用日を変えると行の入る位置が変わり、初期化時の直前行はもう直前ではない
+                reason = EditDate.Date == _initialEditDate.Date
+                    ? AutoBalanceUnavailableReason.None
+                    : AutoBalanceUnavailableReason.EditDateChanged;
+            }
+
+            if (reason == AutoBalanceUnavailableReason) return;
+
+            AutoBalanceUnavailableReason = reason;
+
+            if (reason != AutoBalanceUnavailableReason.None && IsAutoBalance)
+            {
+                // OnIsAutoBalanceChanged が自動計算前の残高を復元する
+                IsAutoBalance = false;
+            }
+        }
+
+        /// <summary>
         /// 残高を再計算
         /// </summary>
         private void RecalculateBalance()
@@ -519,15 +665,12 @@ namespace ICCardManager.ViewModels
 
             if (Mode == LedgerRowEditMode.Add)
             {
-                // 挿入位置の直前行の残高を取得
-                if (InsertIndex > 0 && InsertIndex <= _allLedgers.Count)
-                {
-                    PreviousBalance = _allLedgers[InsertIndex - 1].Balance;
-                }
-                else
-                {
-                    PreviousBalance = 0;
-                }
+                // 挿入位置の直前行の残高を取得。
+                // InsertIndex == 0 で 0 を起点にできるのは一覧の先頭がカードの履歴の先頭のときだけで、
+                // それ以外は UpdateAutoBalanceAvailability が自動計算を無効化しているためここへ来ない。
+                PreviousBalance = (InsertIndex > 0 && InsertIndex <= _allLedgers.Count)
+                    ? _allLedgers[InsertIndex - 1].Balance
+                    : 0;
             }
             // Editモードは編集対象行が固定のため、InitializeForEditAsync が設定した
             // PreviousBalance をそのまま使う（Addモードのように毎回引き直す必要がない）。
