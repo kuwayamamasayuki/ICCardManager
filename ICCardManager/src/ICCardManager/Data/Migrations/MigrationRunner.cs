@@ -206,7 +206,14 @@ namespace ICCardManager.Data.Migrations
         /// <summary>
         /// マイグレーションを適用
         /// </summary>
-        private void ApplyMigration(IMigration migration)
+        /// <remarks>
+        /// Issue #1738: 「他PCが同じバージョンを先に記録済みの状態で適用する」経路を、
+        /// <see cref="MigrateTo"/> 冒頭のバージョン読み取り（＝スキップ判定）を経由せずに
+        /// 直接検証できるよう internal に公開している（Issue #1484 で
+        /// <c>DbContext.BackfillLegacyMigrationVersion1</c> を切り出したのと同じ意図）。
+        /// production コードからは <see cref="MigrateTo"/> 経由でのみ呼ばれる。
+        /// </remarks>
+        internal void ApplyMigration(IMigration migration)
         {
             using var transaction = _connection.BeginTransaction();
             try
@@ -300,14 +307,52 @@ namespace ICCardManager.Data.Migrations
         /// <summary>
         /// マイグレーション適用を記録
         /// </summary>
+        /// <remarks>
+        /// Issue #1738: 共有モードで複数PCが同時起動すると、双方が <see cref="MigrateTo"/> 冒頭で
+        /// 同じ版数を読み、同じマイグレーションを適用しようとする。後発PCの Up() は規約により
+        /// 冪等（.claude/rules/migrations.md）なので成功するが、素の INSERT では適用記録が
+        /// PRIMARY KEY と衝突して <see cref="MigrationException"/> となり、App.OnStartup の
+        /// 汎用 catch まで到達して後発PCが起動不能になっていた。同じテーブルへ補填 INSERT する
+        /// <c>DbContext.BackfillLegacyMigrationVersion1</c> は Issue #1484 で既に
+        /// INSERT OR IGNORE 化されており、runner だけが規約から外れていた。
+        /// </remarks>
         private void RecordMigration(IMigration migration, SQLiteTransaction transaction)
         {
             using var command = _connection.CreateCommand();
             command.Transaction = transaction;
-            command.CommandText = "INSERT INTO schema_migrations (version, description) VALUES (@version, @description)";
+            command.CommandText = "INSERT OR IGNORE INTO schema_migrations (version, description) VALUES (@version, @description)";
             command.Parameters.AddWithValue("@version", migration.Version);
             command.Parameters.AddWithValue("@description", migration.Description);
-            command.ExecuteNonQuery();
+            var rowsAffected = command.ExecuteNonQuery();
+
+            if (rowsAffected > 0)
+            {
+                return;
+            }
+
+            // OR IGNORE は PRIMARY KEY 衝突（＝他PCが先に記録した正常系）だけでなく
+            // NOT NULL / CHECK 等の本物の制約違反も握りつぶす。記録が入らないまま成功扱いに
+            // すると GetCurrentVersion() が永久に上がらず、毎起動で同じ Up() が再適用され
+            // 続ける無言の劣化になるため、行の有無を読み戻して両者を確定させる。
+            if (!MigrationRecordExists(migration.Version, transaction))
+            {
+                throw new MigrationException(
+                    $"マイグレーション {migration.Version} の適用記録を schema_migrations テーブルに保存できませんでした" +
+                    "（制約違反により記録が無視されました）。このまま起動しても毎回同じマイグレーションが再適用されます。" +
+                    "データベースファイルが破損している可能性があるため、システム管理者に連絡し、バックアップファイルから復元してください。");
+            }
+        }
+
+        /// <summary>
+        /// 指定バージョンの適用記録が存在するかを確認（Issue #1738）
+        /// </summary>
+        private bool MigrationRecordExists(int version, SQLiteTransaction transaction)
+        {
+            using var command = _connection.CreateCommand();
+            command.Transaction = transaction;
+            command.CommandText = "SELECT COUNT(*) FROM schema_migrations WHERE version = @version";
+            command.Parameters.AddWithValue("@version", version);
+            return Convert.ToInt32(command.ExecuteScalar()) > 0;
         }
 
         /// <summary>

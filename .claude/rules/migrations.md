@@ -27,6 +27,14 @@ paths:
 - 素の `CREATE TABLE` / `CREATE INDEX`（必ず `IF NOT EXISTS` を付ける）
 - 素の `INSERT`（主キー重複で失敗するため `INSERT OR IGNORE` を使う）
 
+## 冪等性の規約は「マイグレーション本体」だけでなく「適用記録の書き込み」にも掛かる（Issue #1738）
+
+`Up()` をいくら冪等にしても、**適用記録の INSERT が素の `INSERT` なら共有モードの同時起動でアプリが起動不能になる**。`MigrateTo` は冒頭で `GetCurrentVersion()` を 1 回読むだけで、そのスナップショットは他 PC の適用で陳腐化する。しかも `ApplyMigration` の `BeginTransaction()` は `BEGIN IMMEDIATE`（System.Data.SQLite の既定 `IsolationLevel.Serializable`）のため、後発 PC は**先発 PC の COMMIT を待ってから、先発が入れた version を INSERT する**形になる。busy_timeout による待機は衝突を回避するどころか確定させる。
+
+- **`schema_migrations` へ INSERT する箇所は 2 つある**。`MigrationRunner.RecordMigration`（通常のマイグレーション適用）と `DbContext.BackfillLegacyMigrationVersion1`（レガシー DB の version=1 補填）。後者は Issue #1484 で `INSERT OR IGNORE` 化されたが、**runner 側が取り残されて #1738 として再発した**。規約を直すときは同じテーブルを書く箇所を横断で洗うこと
+- **`INSERT OR IGNORE` は PRIMARY KEY 衝突以外の制約違反も握りつぶす**。`NOT NULL` / `CHECK` の違反まで無視されると、記録が入らないまま成功扱いになり、`GetCurrentVersion()` が永久に上がらず**毎起動で同じ `Up()` が再適用され続ける無言の劣化**になる。`ExecuteNonQuery()` の戻り値が 0 のときは行の有無を読み戻し、「他 PC が先に記録した（正常）」と「書き込めなかった（異常）」を確定させること（`RecordMigration` が参考実装）
+- **`DbContext.InitializeDatabase` のコメントを「PRIMARY KEY 制約により重複適用が防止される」と書かない**。PK が防ぐのは記録の重複であって、重複**適用**そのものではない（後発 PC は `Up()` を実際に再実行する）。誤った前提のコメントが「だから安全」という判断を下流に伝播させた
+
 ## `AddColumnIfNotExists` 引数の制約（Issue #1466）
 
 `MigrationHelpers.AddColumnIfNotExists` / `HasColumn` は SQL の識別子をパラメータ化できないため文字列補間で組み立てるが、開発者の事故防止としてホワイトリスト regex による検証層を持つ。受理される値の範囲は以下:
