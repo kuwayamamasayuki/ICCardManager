@@ -1872,5 +1872,46 @@ public class DataExportImportViewModelTests : IDisposable
         _viewModel.IsBusy.Should().BeFalse();
     }
 
+    /// <summary>
+    /// 結果ダイアログの表示自体が例外を投げても、確定済みの取り込みを巻き添えにしないこと
+    /// </summary>
+    /// <remarks>
+    /// Issue #1784 でダイアログ表示を `BeginBusy` スコープの外へ出したことにより、
+    /// 表示処理は `try` の外側に位置するようになった。ここを素通しにすると、
+    /// 取り込みがコミットされ監査ログも記録された**後**の通知失敗が
+    /// `AsyncRelayCommand` 経由で未捕捉例外になり、職員は成功直後にクラッシュを見て
+    /// 「データが入ったのか」を判断できない（Issue #1783 が消したはずの曖昧さの再発）。
+    /// 「コミット確定後の後処理を、成否の判定に巻き込まない」（CLAUDE.md / Issue #1727）に従い、
+    /// 表示の失敗はログへ逃がし、ステータス欄に残る結果表示で情報を保つ。
+    /// </remarks>
+    [Fact]
+    public async Task RunImportAsync_結果ダイアログの表示が例外を投げても確定済みの取り込みを巻き添えにしないこと()
+    {
+        // Arrange
+        SetupValidPreview();
+        _importServiceMock
+            .Setup(s => s.ImportCardsAsync(It.IsAny<string>(), It.IsAny<bool>()))
+            .ReturnsAsync(new CsvImportResult { Success = true, ImportedCount = 3 });
+        _dialogServiceMock
+            .Setup(d => d.ShowInformation(It.IsAny<string>(), It.IsAny<string>()))
+            .Throws(new InvalidOperationException("ウィンドウは既に破棄されています"));
+
+        // Act
+        Func<Task> act = () => _viewModel.RunImportAsync(ImportSourceFilePath);
+
+        // Assert
+        await act.Should().NotThrowAsync(
+            "取り込みは確定済みであり、通知の失敗を取り込みの失敗として伝播させてはならない");
+        _viewModel.IsStatusError.Should().BeFalse(
+            "ダイアログを出せなかっただけで、取り込み自体は成功しているため");
+        _viewModel.StatusMessage.Should().Contain(
+            "インポート完了",
+            "ダイアログが出せなくてもステータス欄には結果が残ること");
+        _viewModel.LastImportedFile.Should().Be(
+            ImportSourceFilePath,
+            "書き込みが確定した事実は通知の成否に左右されないため");
+        _viewModel.IsBusy.Should().BeFalse("表示が失敗してもプログレスバーは閉じたままであること");
+    }
+
     #endregion
 }

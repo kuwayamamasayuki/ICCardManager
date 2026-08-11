@@ -722,7 +722,21 @@ public partial class DataExportImportViewModel : ViewModelBase
         // Issue #1784: ここが結果ダイアログを表示する唯一の地点。IsBusy=false が確定済み。
         // データ種別が不正な分岐は using の内側で return するため、ここには到達せず
         // ダイアログも表示しない（ExportToFileAsync の default 分岐と同じ扱い）。
-        pendingResultDialog?.Invoke();
+        //
+        // 表示処理は try の外側にあるため、ここを素通しにすると通知の失敗が
+        // AsyncRelayCommand 経由の未捕捉例外になる。この時点で取り込みは既にコミットされ
+        // 監査ログも記録済みのため、職員は成功直後にクラッシュを見て「データが入ったのか」を
+        // 判断できない（Issue #1783 が消したはずの曖昧さの再発）。
+        // 「コミット確定後の後処理を、成否の判定に巻き込まない」（Issue #1727）に従い、
+        // 表示の失敗はログへ逃がす。結果は SetStatus 済みでステータス欄に残るため情報は失われない。
+        try
+        {
+            pendingResultDialog?.Invoke();
+        }
+        catch (Exception ex)
+        {
+            ErrorDialogHelper.LogException(ex, "インポート結果の通知");
+        }
     }
 
     /// <summary>
