@@ -172,7 +172,7 @@ public class SettingsRepositorySetConcurrencyTests : IDisposable
 
         public async Task StartAndWaitUntilTransactionOpenAsync()
         {
-            _worker = Task.Run(() =>
+            var worker = Task.Run(() =>
             {
                 // 同期 LeaseConnection がセマフォを取り、トランザクションを開く（CleanupOldDataInternal と同型）
                 using var lease = _dbContext.LeaseConnection();
@@ -192,7 +192,20 @@ public class SettingsRepositorySetConcurrencyTests : IDisposable
                 transaction.Rollback();
             });
 
-            await _transactionOpened.Task;
+            _worker = worker;
+
+            // _transactionOpened 単独で待つと、worker が SetResult へ到達する前に落ちた場合
+            // （LeaseConnection / BeginTransaction / DELETE の失敗）に永久に完了せず、
+            // dotnet test 全体がアサーション失敗も例外メッセージも残さないままハングする。
+            // worker 自身も待機対象に含め、失敗を「ハング」ではなく「例外」として表面化させる。
+            var completed = await Task.WhenAny(_transactionOpened.Task, worker);
+            if (completed == worker)
+            {
+                await worker;
+                throw new InvalidOperationException(
+                    "CleanupSimulator の worker がトランザクションを開かないまま完了した。"
+                    + "StartAndWaitUntilTransactionOpenAsync の再現手順を確認してください。");
+            }
         }
 
         public async Task RollbackAndCompleteAsync()
