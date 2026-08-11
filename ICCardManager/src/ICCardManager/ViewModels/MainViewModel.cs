@@ -556,10 +556,10 @@ public partial class MainViewModel : ViewModelBase
     {
         using (BeginBusy("初期化中..."))
         {
-            // Issue #1172: ジャーナルモードがDELETE以外（degraded）の場合、UI警告を追加
-            var journalWarning = _warningService.CheckJournalModeWarning();
-            if (journalWarning != null)
-                WarningMessages.Add(journalWarning);
+            // Issue #1172: ジャーナルモードがDELETE以外（degraded）の場合、UI警告を追加。
+            // Issue #1739: WarningService を直接呼ばず本メソッド経由にする。インラインで Add すると
+            // 重複ガードを通らず、再入時に同じ警告が2行並ぶ（04_機能設計書 §7.4 の表とも食い違う）。
+            CheckJournalModeWarning();
 
             // Issue #790: 起動時に貸出状態の整合性をチェック・修復
             await _lendingService.RepairLentStatusConsistencyAsync();
@@ -650,14 +650,16 @@ public partial class MainViewModel : ViewModelBase
     /// </remarks>
     internal async Task CheckBackupHealthAsync()
     {
+        var sequence = ++_backupHealthCheckSequence;
         var warning = await Task.Run(() => _warningService.CheckBackupHealthWarningAsync(DateTime.Now));
 
-        var existing = WarningMessages.FirstOrDefault(w => w.Type == WarningType.BackupStale);
-        if (existing != null)
-            WarningMessages.Remove(existing);
+        // Issue #1739: より新しいチェックが始まっていれば、この結果は陳腐化している
+        // （起動時の fire-and-forget が保留している間に、手動バックアップ後の再判定が走る経路がある）
+        if (sequence != _backupHealthCheckSequence) return;
 
-        if (warning != null)
-            WarningMessages.Add(warning);
+        ReplaceWarnings(
+            w => w.Type == WarningType.BackupStale,
+            warning == null ? null : new[] { warning });
     }
 
     /// <summary>
@@ -836,44 +838,73 @@ public partial class MainViewModel : ViewModelBase
     private void ApplyDataWarnings(int warningBalance)
     {
         // 直後に作り直す残額警告のみ取り除く（他種別はそれぞれのチェックメソッドが管理する）
-        var staleLowBalanceWarnings = WarningMessages
-            .Where(w => w.Type == WarningType.LowBalance)
-            .ToList();
-        foreach (var warning in staleLowBalanceWarnings)
+        ReplaceWarnings(
+            w => w.Type == WarningType.LowBalance,
+            _warningService.CheckLowBalanceWarnings(CardBalanceDashboard, warningBalance));
+    }
+
+    /// <summary>
+    /// Issue #1739: 条件に一致する既存の警告を取り除き、新しい警告で置き換える。
+    /// </summary>
+    /// <remarks>
+    /// 「各チェックメソッドは自分が生成する種別だけを入れ替える」という規約
+    /// （04_機能設計書 §7.4）の実装を1か所に集約する。追加のみで書くと他メソッドの
+    /// 事前クリアに依存することになり、その依存先を変えた瞬間か、fire-and-forget と
+    /// 並走したときに重複表示になる。
+    /// </remarks>
+    /// <param name="selector">取り除く対象を選ぶ述語</param>
+    /// <param name="replacements">追加し直す警告（null・空なら除去のみ行う）</param>
+    private void ReplaceWarnings(
+        Func<WarningItem, bool> selector,
+        IEnumerable<WarningItem> replacements = null)
+    {
+        foreach (var stale in WarningMessages.Where(selector).ToList())
         {
-            WarningMessages.Remove(warning);
+            WarningMessages.Remove(stale);
         }
 
-        // WarningServiceに委譲して残額警告を生成
-        var lowBalanceWarnings = _warningService.CheckLowBalanceWarnings(CardBalanceDashboard, warningBalance);
-        foreach (var warning in lowBalanceWarnings)
+        if (replacements == null) return;
+
+        foreach (var warning in replacements)
         {
             WarningMessages.Add(warning);
         }
     }
 
     /// <summary>
+    /// Issue #1739: 非同期チェックの結果が陳腐化していないかを判定するための世代番号。
+    /// </summary>
+    /// <remarks>
+    /// バス停未入力チェックとバックアップ健全性チェックは起動時に fire-and-forget で走る。
+    /// 共有モードの SMB 遅延でそれが保留している間に、ユーザー操作起点の同じチェックが
+    /// 完了することがある。await 前に取得したデータから作った警告をそのまま書き戻すと、
+    /// 解消済みの警告を復活させてしまうため、より新しいチェックが始まっていたら破棄する。
+    /// ViewModel はすべて UI スレッド上で動くため、単純なインクリメントで足りる。
+    /// </remarks>
+    private int _busStopCheckSequence;
+    private int _backupHealthCheckSequence;
+
+    /// <summary>
     /// バス停名未入力チェック（WarningServiceに委譲）。
     /// internal: テストから直接呼び出して挙動を検証するため（Issue #1739）。
     /// </summary>
     /// <remarks>
-    /// Issue #1739: 自分が出す種別を入れ替える形（既存を取り除いてから追加）にして、
+    /// Issue #1739: 自分が出す種別を入れ替える形（<see cref="ReplaceWarnings"/>）にして、
     /// <see cref="ApplyDataWarnings"/> の事前クリアに依存しない。起動時の本メソッドは
     /// fire-and-forget で走るため、完了前にカード操作が入ると警告再チェックと並走して
     /// 二重に追加され得た。<c>CheckBackupHealthAsync</c> と同じ形。
     /// </remarks>
     internal async Task CheckIncompleteBusStopsAsync()
     {
+        var sequence = ++_busStopCheckSequence;
         var warning = await _warningService.CheckIncompleteBusStopsAsync();
 
-        var existing = WarningMessages.FirstOrDefault(w => w.Type == WarningType.IncompleteBusStop);
-        if (existing != null)
-            WarningMessages.Remove(existing);
+        // より新しいチェックが始まっていれば、この結果は陳腐化している（そちらが書き戻す）
+        if (sequence != _busStopCheckSequence) return;
 
-        if (warning != null)
-        {
-            WarningMessages.Add(warning);
-        }
+        ReplaceWarnings(
+            w => w.Type == WarningType.IncompleteBusStop,
+            warning == null ? null : new[] { warning });
     }
 
 
@@ -901,6 +932,17 @@ public partial class MainViewModel : ViewModelBase
         {
             CardBalanceDashboard.Add(item);
         }
+
+        // Issue #1739: 有効でなくなったカードの残高不整合警告を取り除く。
+        // 生成元（CheckAndNotifyConsistencyAsync / CheckAllCardsConsistencyAsync）はどちらも
+        // is_deleted = 0 のカードしか走査しないため、カードを論理削除すると除去経路が無くなり、
+        // クリックしても履歴が開かない警告が再起動まで残る（旧実装では ApplyDataWarnings の
+        // Clear() が巻き添えで消していた）。ダッシュボードは DashboardService が
+        // CardRepository.GetAllAsync から組む「有効なカードの母集団」そのもののため、
+        // 最新のカード集合を知れるのはここ。
+        var activeCardIdms = new HashSet<string>(CardBalanceDashboard.Select(i => i.CardIdm));
+        ReplaceWarnings(w => w.Type == WarningType.BalanceInconsistency
+                             && !activeCardIdms.Contains(w.CardIdm));
     }
 
     /// <summary>
@@ -1836,6 +1878,10 @@ public partial class MainViewModel : ViewModelBase
             await LoadHistoryLedgersAsync();
             // Issue #660: 分割等で摘要が変わった場合に警告を更新
             await CheckWarningsAsync();
+            // Issue #1739: 明細の金額編集は残高チェーンを変えるため、整合性も再判定する。
+            // 他の履歴編集経路（行の追加・編集・削除）は既にこの組で呼んでいたが、本経路だけ
+            // 抜けており、不整合を直しても古い件数の警告が残っていた。
+            await CheckAndNotifyConsistencyAsync();
         }
     }
 
@@ -2039,6 +2085,32 @@ public partial class MainViewModel : ViewModelBase
     }
 
     /// <summary>
+    /// 残高整合性チェックで「全期間」を指す範囲（SQLite の date 型互換の範囲）。
+    /// </summary>
+    /// <remarks>
+    /// Issue #1739: 残高不整合警告は表示期間ではなくカード全体の状態を表すため、
+    /// <see cref="CheckAndNotifyConsistencyAsync"/> と <see cref="CheckAllCardsConsistencyAsync"/> の
+    /// どちらも同じ範囲で判定する。片方だけ範囲が違うと、一方が立てた警告をもう一方が黙って消す。
+    /// </remarks>
+    private static readonly DateTime FullPeriodStart = new DateTime(2000, 1, 1);
+    private static readonly DateTime FullPeriodEnd = new DateTime(2099, 12, 31);
+
+    /// <summary>
+    /// 残高不整合警告を組み立てる（表示文言を1か所に集約する）
+    /// </summary>
+    private static WarningItem BuildBalanceInconsistencyWarning(
+        string cardType, string cardNumber, string cardIdm, ConsistencyResult result)
+    {
+        var totalCount = result.Inconsistencies.Count + result.DetailInconsistencies.Count;
+        return new WarningItem
+        {
+            DisplayText = $"⚠️ 残高の不整合が{totalCount}件あります（{cardType} {cardNumber}）",
+            Type = WarningType.BalanceInconsistency,
+            CardIdm = cardIdm
+        };
+    }
+
+    /// <summary>
     /// 残高整合性チェック＆警告表示
     /// </summary>
     /// <remarks>
@@ -2052,27 +2124,23 @@ public partial class MainViewModel : ViewModelBase
         var checkResult = await _ledgerConsistencyChecker.CheckBalanceConsistencyAsync(
             HistoryCard.CardIdm, HistoryFromDate, HistoryToDate);
 
-        // 既存の同カードの残高不整合警告を削除（重複防止）
-        var existingWarnings = WarningMessages
-            .Where(w => w.Type == WarningType.BalanceInconsistency && w.CardIdm == HistoryCard.CardIdm)
-            .ToList();
-        foreach (var warning in existingWarnings)
-        {
-            WarningMessages.Remove(warning);
-        }
+        // Issue #1739: 警告は「このカードに不整合があるか」を全期間で表す。表示期間だけで
+        // 判定して警告を消すと、CheckAllCardsConsistencyAsync が全期間で立てた期間外の不整合が、
+        // 警告をクリックして履歴（既定は当月）を開いた瞬間に黙って消える。履歴にハイライトも
+        // 出ないため「解消済み」と誤解され、不整合が放置される。
+        // 表示期間の結果を流用しないのは、チェーンの起点が範囲によって変わるため
+        // 部分範囲の判定が全期間の判定と一致する保証がないから。
+        var warningResult = await _ledgerConsistencyChecker.CheckBalanceConsistencyAsync(
+            HistoryCard.CardIdm, FullPeriodStart, FullPeriodEnd);
 
-        if (!checkResult.IsConsistent)
-        {
-            var totalCount = checkResult.Inconsistencies.Count + checkResult.DetailInconsistencies.Count;
-            WarningMessages.Add(new WarningItem
-            {
-                DisplayText = $"⚠️ 残高の不整合が{totalCount}件あります（{HistoryCard.CardType} {HistoryCard.CardNumber}）",
-                Type = WarningType.BalanceInconsistency,
-                CardIdm = HistoryCard.CardIdm
-            });
-        }
+        ReplaceWarnings(
+            w => w.Type == WarningType.BalanceInconsistency && w.CardIdm == HistoryCard.CardIdm,
+            warningResult.IsConsistent
+                ? null
+                : new[] { BuildBalanceInconsistencyWarning(HistoryCard.CardType, HistoryCard.CardNumber, HistoryCard.CardIdm, warningResult) });
 
         // Issue #1052: ハイライトデータを最新の整合性チェック結果で同期更新
+        // （ハイライトは画面に出ている行が対象のため、表示期間の結果を使う）
         // レコード編集・削除後にもハイライトが正しく反映される
         if (_balanceInconsistencies.Count > 0 || !checkResult.IsConsistent)
         {
@@ -2109,29 +2177,14 @@ public partial class MainViewModel : ViewModelBase
         {
             if (card.IsDeleted) continue;
 
-            // 全期間をチェック（SQLiteのdate型互換の範囲を使用）
             var checkResult = await _ledgerConsistencyChecker.CheckBalanceConsistencyAsync(
-                card.CardIdm, new DateTime(2000, 1, 1), new DateTime(2099, 12, 31));
+                card.CardIdm, FullPeriodStart, FullPeriodEnd);
 
-            // 既存の同カードの残高不整合警告を削除（重複防止）
-            var existingWarnings = WarningMessages
-                .Where(w => w.Type == WarningType.BalanceInconsistency && w.CardIdm == card.CardIdm)
-                .ToList();
-            foreach (var warning in existingWarnings)
-            {
-                WarningMessages.Remove(warning);
-            }
-
-            if (!checkResult.IsConsistent)
-            {
-                var totalCount = checkResult.Inconsistencies.Count + checkResult.DetailInconsistencies.Count;
-                WarningMessages.Add(new WarningItem
-                {
-                    DisplayText = $"⚠️ 残高の不整合が{totalCount}件あります（{card.CardType} {card.CardNumber}）",
-                    Type = WarningType.BalanceInconsistency,
-                    CardIdm = card.CardIdm
-                });
-            }
+            ReplaceWarnings(
+                w => w.Type == WarningType.BalanceInconsistency && w.CardIdm == card.CardIdm,
+                checkResult.IsConsistent
+                    ? null
+                    : new[] { BuildBalanceInconsistencyWarning(card.CardType, card.CardNumber, card.CardIdm, checkResult) });
         }
 
         // 現在表示中のカードのハイライトも更新
@@ -2668,10 +2721,19 @@ public partial class MainViewModel : ViewModelBase
     /// <summary>
     /// システム管理画面を開く
     /// </summary>
+    /// <remarks>
+    /// Issue #1739: 閉じたあとにバックアップ健全性を再判定する。BackupStale 警告の文言自体が
+    /// 「システム管理画面（F6）で…手動バックアップを実行してください」と案内しているため、
+    /// 再判定を警告クリック経由だけに置くと、案内どおり F6 を押した管理者には
+    /// 「復旧したのに警告が消えない」ように見え、復旧済みの原因調査を続けさせてしまう。
+    /// </remarks>
     [RelayCommand]
-    public void OpenSystemManage()
+    public async Task OpenSystemManage()
     {
         _navigationService.ShowDialog<Views.Dialogs.SystemManageDialog>();
+
+        // ダイアログ内で手動バックアップを実行した可能性があるため、警告を再判定する
+        await CheckBackupHealthAsync();
     }
 
     /// <summary>
@@ -2778,10 +2840,8 @@ public partial class MainViewModel : ViewModelBase
             case WarningType.BackupStale:
                 // Issue #1689: バックアップ健全性警告クリックでシステム管理画面を開く。
                 // 警告文言が案内する「システム管理画面（F6）」へ、キー操作を覚えていなくても到達できるようにする。
-                _navigationService.ShowDialog<Views.Dialogs.SystemManageDialog>();
-
-                // ダイアログ内で手動バックアップを実行した可能性があるため、警告を再判定する
-                await CheckBackupHealthAsync();
+                // Issue #1739: 画面表示と再判定は F6 と同一の経路（OpenSystemManage）に集約する。
+                await OpenSystemManage();
                 break;
         }
     }

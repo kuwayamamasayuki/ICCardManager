@@ -347,7 +347,10 @@ public class MainViewModelIntegrationTests
             .ReturnsAsync(true);
         _cardRepositoryMock.Setup(r => r.GetLentAsync(It.IsAny<bool>()))
             .ReturnsAsync(new List<IcCard>());
-        _cardRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<IcCard>());
+        // 不整合警告の対象カード（CardIdmB）は有効なカードとして登録されている必要がある。
+        // Issue #1739: ダッシュボード更新時に「有効でなくなったカード」の不整合警告を除去するため。
+        _cardRepositoryMock.Setup(r => r.GetAllAsync())
+            .ReturnsAsync(new List<IcCard> { BuildAvailableCard(CardIdmB) });
 
         // 起動時に立った警告を模す（BackupStale は CheckBackupHealthAsync、
         // BalanceInconsistency は CheckAllCardsConsistencyAsync が立てる）
@@ -376,6 +379,59 @@ public class MainViewModelIntegrationTests
         _viewModel.WarningMessages
             .Should().ContainSingle(w => w.Type == WarningType.BalanceInconsistency)
             .Which.CardIdm.Should().Be(CardIdmB);
+    }
+
+    /// <summary>
+    /// Issue #1739: 有効でなくなったカード（論理削除済み）の残高不整合警告は取り除かれること。
+    /// </summary>
+    /// <remarks>
+    /// 生成元（CheckAndNotifyConsistencyAsync / CheckAllCardsConsistencyAsync）はどちらも
+    /// is_deleted = 0 のカードしか走査しないため、除去経路が無いと再起動まで残り続け、
+    /// クリックしても履歴が開かない「消せない警告」になる。
+    /// </remarks>
+    [Fact]
+    public async Task ReturnFlow_有効でなくなったカードの残高不整合警告は取り除かれること()
+    {
+        // Arrange: 返却フロー。カード一覧には CardIdmB を含めない（＝論理削除された状態）
+        var lentRecord = new Ledger
+        {
+            Id = 100,
+            CardIdm = CardIdmA,
+            LenderIdm = StaffIdm,
+            Date = DateTime.Now.AddHours(-2),
+            Summary = SummaryGenerator.GetLendingSummary(),
+            StaffName = StaffName,
+            LentAt = DateTime.Now.AddHours(-2),
+            IsLentRecord = true,
+        };
+        _cardRepositoryMock.Setup(r => r.GetByIdmAsync(CardIdmA, It.IsAny<bool>()))
+            .ReturnsAsync(BuildLentCard(CardIdmA));
+        _ledgerRepositoryMock.Setup(r => r.GetLentRecordAsync(CardIdmA)).ReturnsAsync(lentRecord);
+        _ledgerRepositoryMock.Setup(r => r.DeleteAllLentRecordsAsync(CardIdmA)).ReturnsAsync(1);
+        _cardRepositoryMock.Setup(r => r.UpdateLentStatusAsync(CardIdmA, false, null, null))
+            .ReturnsAsync(true);
+        _cardRepositoryMock.Setup(r => r.GetLentAsync(It.IsAny<bool>()))
+            .ReturnsAsync(new List<IcCard>());
+        _cardRepositoryMock.Setup(r => r.GetAllAsync())
+            .ReturnsAsync(new List<IcCard> { BuildAvailableCard(CardIdmA) });
+
+        _viewModel.WarningMessages.Add(new WarningItem
+        {
+            Type = WarningType.BalanceInconsistency,
+            CardIdm = CardIdmB,
+            DisplayText = "⚠️ 残高の不整合が2件あります（はやかけん 5043）"
+        });
+
+        RaiseCardRead(StaffIdm);
+        await _dispatcherService.WaitForPendingAsync();
+
+        // Act
+        RaiseCardRead(CardIdmA);
+        await _dispatcherService.WaitForPendingAsync();
+
+        // Assert: 返却は成立し、有効でないカードの不整合警告だけが消えている
+        _lendingService.LastOperationType.Should().Be(LendingOperationType.Return);
+        _viewModel.WarningMessages.Should().NotContain(w => w.Type == WarningType.BalanceInconsistency);
     }
 
     /// <summary>
