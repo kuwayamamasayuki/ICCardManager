@@ -156,7 +156,17 @@ public class SettingsRepositorySetConcurrencyTests : IDisposable
         private readonly DbContext _dbContext;
         private readonly TaskCompletionSource<bool> _transactionOpened = new();
         private readonly TaskCompletionSource<bool> _releaseSignal = new();
-        private Task _worker;
+
+        /// <summary>
+        /// 滞留側の作業タスク。<see cref="StartAndWaitUntilTransactionOpenAsync"/> を呼ぶまでは
+        /// 未起動のため null であり得る。
+        /// </summary>
+        /// <remarks>
+        /// Issue #1786: 元は非 Null 許容で宣言しており CS8618 が出ていた。
+        /// <c>= null!</c> による初期化は「必ず非 null」とコンパイラに宣言することになり、
+        /// 実際に null チェックしている <see cref="RollbackAndCompleteAsync"/> と矛盾するため採らない。
+        /// </remarks>
+        private Task? _worker;
 
         public CleanupSimulator(DbContext dbContext) => _dbContext = dbContext;
 

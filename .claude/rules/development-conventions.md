@@ -62,6 +62,16 @@
 - **Information ログには「調査を先に進める値」を載せる**。レベルだけ上げて「失敗しました」とだけ書くと、出力されるようになっただけで切り分けはできない。`CheckWritable` は bool しか返さないため画面は原因**候補**を並べるにとどまり、それを 1 つに絞れるのは `SQLiteException.ResultCode`（`ReadOnly` / `Full` / `Busy` / `Locked`）だけだった。**UI が候補を並べている箇所は、ログが候補を絞れているかを確認する合図**
 - **テストはレベルだけでなく載っている値まで表明する**。`LogLevel.Information` が呼ばれたことの確認だけでは、原因を切り分けられない空虚なログでも通る。あわせて**成功時に出さないこと**も固定する（後から「常に出す」実装へ緩めてもテストが通ってしまうため）
 
+## ビルド警告は「抑制」ではなく「是正」で消す（Issue #1786）
+
+CI にビルド警告のゲートは無い（`.github/workflows/ci.yml` は警告を検査しない）。警告ゼロは**気付いた人が Issue を起票する運用**でしか担保されていないため、是正手段の選び方を規約で固定する。回帰は `BuildWarningSuppressionConventionTests` が csproj の静的検査で押さえる。
+
+- **`NoWarn` へ追加したら、同じ csproj のコメントに ID と理由を書く**。抑制自体は禁じない（テスト特有の表現に対する抑制は正当）が、理由の無い抑制が積み上がると「ビルド警告ゼロ」が実態を伴わなくなる。コメントでは `CS8600/8602/8603` のような圧縮表記を使わず `CS8600, CS8602, CS8603` と完全な形で列挙する（突き合わせが誤検出するため）
+- **CS8618（未初期化の非 Null 許容フィールド）は抑制しない**。テストフィクスチャの初期化漏れという実バグを示し得る。宣言側を是正すること
+- **`= null!` は「必ず非 null」という宣言**であり、実際に null チェックしているフィールドに付けると意図とコードが食い違う。null になり得るなら `?` を付ける（#1786 の `CleanupSimulator._worker` は `StartAndWaitUntilTransactionOpenAsync` 前は実際に null で、`RollbackAndCompleteAsync` も null チェックしていた → `Task?` が正解）
+- **`<Nullable>enable</Nullable>` を外して黙らせない**。Null 許容系の警告が一括で消え、個別に理由を書く規約ごと無効化される
+- ビルド警告を伴う変更をしたら、**Release / Debug 双方**でソリューションビルドし 0 警告を実測する（`"/mnt/c/Program Files/dotnet/dotnet.exe" build ICCardManager/ICCardManager.sln -c Release`）
+
 ## 「処理中」フラグの解除は `finally` で保証する（Issue #1725）
 
 **入力を止めるフラグを立てたら、解除は必ず `try/finally`（または `IDisposable`）に置く。** 成功分岐と失敗分岐の末尾に解除を書く形は、その 2 つの分岐の途中で例外が出たときに解除されない。
