@@ -111,6 +111,14 @@ StatusMessage = ExceptionMessageFormatter.ToUserMessage(ex, "台帳の保存");
 
 `GetErrorInfo` の文言が 3 要素を満たさない（「どうすれば」を欠く）のは、致命エラー時はユーザーの自己回復より**エラーコード＋スタックトレースによる原因究明**を優先する設計判断であり、品質ガイドライン違反ではない。新規の**通常エラー**経路では `ToUserMessage` を使うこと（`GetErrorInfo` を通常経路に転用しない）。
 
+### サービス内の「例外 → 文言」の対応表は 1 か所に集約する（Issue #1744）
+
+同じ `catch` の ladder（`FileNotFoundException` → … → `catch (Exception)`）を複数のメソッドへ書き写さない。**次に対応表を変える人が、一部の経路を取りこぼす**。
+
+- `CsvImportService` は共通ハンドラー 2 つと利用履歴の Import / Preview に同じ ladder を計 4 回持っており、#1744 で `FileOperationException` を足す際に 4 か所すべてへ同じ catch を書く必要があった（1 つ漏らすと `catch (Exception)` に落ちて生の `ex.Message` が UI に出る＝#1614 違反）。`catch (Exception)` 1 つから共通の変換関数を呼ぶ形へ統一した
+- 集約すると `AppException` を一括で `UserFriendlyMessage` へ寄せられる。#1744 では副次的に、利用履歴経路だけ `DatabaseException` が生の `ex.Message` で表示されていた欠陥も同時に消えた
+- **同じ規約が「文言の対応表」以外にも効く**: 何かを列挙するコードが 2 か所以上にできたら、それは片方だけ更新される日が来るという合図（`.claude/rules/development-conventions.md` の「全消し＋再生成」「ガードを書くときは経路を列挙する」と同じ判断）
+
 ## 既存コードへの適用
 
 新規コード追加時は上記ガイドラインを適用。既存コードの改善は **該当 Issue にスコープを絞って** 段階的に実施（一括変更は diff の肥大化・レビュー困難化を招く）。
@@ -130,6 +138,9 @@ StatusMessage = ExceptionMessageFormatter.ToUserMessage(ex, "台帳の保存");
 | `ReportPreflightCheckerTests.AllWarnings_SatisfyErrorMessageQualityCriteria` | 帳票出力前プリフライトチェックの警告文言（5種別すべてを発生させ、`DisplayText` の情報量とカード名の明示、`DetailText` が行動指示で終わることを検証、Issue #1688） |
 | `WarningServiceBackupHealthTests.BackupStaleWarning_SatisfiesErrorMessageQualityCriteria` | バックアップ健全性警告の文言（経過日数・最終成功日時の明示、原因候補、システム管理画面（F6）への誘導と行動指示、Issue #1689） |
 | `ConnectionDiagnosticsServiceTests.AllProblemItems_SatisfyErrorMessageQualityCriteria` | 接続診断の警告・異常文言（8項目すべてを問題状態へ落とし、`DetailText` が20文字以上・行動指示で終わる・曖昧文言を含まないことを検証、Issue #1690） |
+| `CsvImportServiceTests` の 2 件（`文字コード判別不能の…` / `宣言された文字コードで読めない…`） | CSVインポートの文字コードエラー（`FileOperationException.UndecidableEncoding` / `UnreadableDeclaredEncoding`）。判別に用いた候補（UTF-8 / Shift_JIS）と Excel の保存形式名を示し、行動指示で終わること、**ファイルパスをユーザー向け文言へ露出しない**ことを検証（Issue #1744） |
+
+> **「判別できない」と「判別できたが読めない」で文言を分ける**（Issue #1744）: 原因が違えば「どうすれば」も違う。BOM が文字コードを宣言しているファイルに「文字コードを判別できませんでした。CSV UTF-8 形式で保存し直してください」と案内すると、**既にその形式であるファイルに対する無意味な指示**になり、真の原因（転送の失敗・破損）から利用者を遠ざける。品質テストは互いの文言を含まないこと（`NotContain("判別できませんでした")`）も表明し、取り違えを検出する。
 
 > **品質テストは「対象の網羅」も併せて表明する**: 診断・チェック系のように項目が増えていくサービスでは、文言の品質だけを検証すると項目追加時に品質テストの追随漏れが静かに起きる。`ConnectionDiagnosticsServiceTests` は全項目種別が問題状態として集まっていること（`Enum.GetValues(typeof(DiagnosticItemKind)).Length` と一致）を同じテスト内で表明し、項目を足したのに文言を検証していない状態を検出する。
 

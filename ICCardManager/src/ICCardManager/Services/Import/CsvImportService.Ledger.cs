@@ -29,7 +29,7 @@ namespace ICCardManager.Services
 
             try
             {
-                var lines = await ReadCsvFileAsync(filePath).ConfigureAwait(false);
+                var lines = await ReadCsvFileAsync(filePath, _logger).ConfigureAwait(false);
                 if (lines.Count < 2)
                 {
                     return new CsvImportResult
@@ -259,39 +259,15 @@ namespace ICCardManager.Services
                     Errors = errors
                 };
             }
-            catch (FileNotFoundException)
-            {
-                return new CsvImportResult
-                {
-                    Success = false,
-                    ErrorMessage = "指定されたファイルが見つかりません。",
-                    Errors = errors
-                };
-            }
-            catch (UnauthorizedAccessException)
-            {
-                return new CsvImportResult
-                {
-                    Success = false,
-                    ErrorMessage = "ファイルへのアクセス権限がありません。",
-                    Errors = errors
-                };
-            }
-            catch (IOException ex)
-            {
-                return new CsvImportResult
-                {
-                    Success = false,
-                    ErrorMessage = $"ファイルの読み込みエラー: {ex.Message}",
-                    Errors = errors
-                };
-            }
+            // 例外 → ユーザー向け文言の対応表は ToUserFacingErrorMessage に集約する。
+            // ここで ladder を書き写すと、次に対応表を変えたときにこの経路だけ取り残される
+            // （Issue #1744 の FileOperationException 追加で実際に4か所へ同じ catch を書く羽目になった）
             catch (Exception ex)
             {
                 return new CsvImportResult
                 {
                     Success = false,
-                    ErrorMessage = $"予期しないエラーが発生しました: {ex.Message}",
+                    ErrorMessage = ToUserFacingErrorMessage(ex),
                     Errors = errors
                 };
             }
@@ -315,7 +291,7 @@ namespace ICCardManager.Services
 
             try
             {
-                var lines = await ReadCsvFileAsync(filePath).ConfigureAwait(false);
+                var lines = await ReadCsvFileAsync(filePath, _logger).ConfigureAwait(false);
                 if (lines.Count < 2)
                 {
                     return new CsvImportPreviewResult
@@ -478,39 +454,13 @@ namespace ICCardManager.Services
                     Items = items
                 };
             }
-            catch (FileNotFoundException)
-            {
-                return new CsvImportPreviewResult
-                {
-                    IsValid = false,
-                    ErrorMessage = "指定されたファイルが見つかりません。",
-                    Errors = errors
-                };
-            }
-            catch (UnauthorizedAccessException)
-            {
-                return new CsvImportPreviewResult
-                {
-                    IsValid = false,
-                    ErrorMessage = "ファイルへのアクセス権限がありません。",
-                    Errors = errors
-                };
-            }
-            catch (IOException ex)
-            {
-                return new CsvImportPreviewResult
-                {
-                    IsValid = false,
-                    ErrorMessage = $"ファイルの読み込みエラー: {ex.Message}",
-                    Errors = errors
-                };
-            }
+            // 対応表の集約については ImportLedgersAsync 側のコメントを参照
             catch (Exception ex)
             {
                 return new CsvImportPreviewResult
                 {
                     IsValid = false,
-                    ErrorMessage = $"予期しないエラーが発生しました: {ex.Message}",
+                    ErrorMessage = ToUserFacingErrorMessage(ex),
                     Errors = errors
                 };
             }
