@@ -7,6 +7,7 @@ using ICCardManager.Data.Repositories;
 using ICCardManager.Infrastructure.Caching;
 using ICCardManager.Models;
 using ICCardManager.Services;
+using Microsoft.Extensions.Logging;
 using System.Data.SQLite;
 using Moq;
 using Xunit;
@@ -2586,6 +2587,22 @@ FEDCBA9876543210,鈴木花子,002,テスト2";
     }
 
     [Fact]
+    public void 宣言された文字コードで読めないエラー文言がエラーメッセージ品質基準を満たすこと()
+    {
+        var message = FileOperationException
+            .UnreadableDeclaredEncoding("UTF-8（BOM付き）", @"C:\work\ledger_20260812.csv").UserFriendlyMessage;
+
+        message.Should().Contain("UTF-8（BOM付き）");        // 何が（判別できた文字コードを名指しする）
+        message.Should().Contain("壊れている");              // なぜ（曖昧さではなく破損だと伝える）
+        message.Should().EndWith("してください。");           // 行動指示型で終わる
+        message.Length.Should().BeGreaterOrEqualTo(20);
+        // 判別不能の文言と取り違えない（誤診断＋無意味な指示になるため）
+        message.Should().NotContain("判別できませんでした");
+        message.Should().NotContain("エラーが発生しました");
+        message.Should().NotContain(@"C:\work");
+    }
+
+    [Fact]
     public async Task ImportStaffAsync_BOM無しShiftJISのCSVでも氏名が文字化けせずDBへ渡ること()
     {
         // Arrange: Issue #1744 の故障シナリオ（Excel で再保存された職員CSVの取り込み）
@@ -2611,102 +2628,225 @@ FEDCBA9876543210,鈴木花子,002,テスト2";
         inserted.Note.Should().Be("交通課");
     }
 
-    [Fact]
-    public async Task ImportStaffAsync_文字コードを判別できないCSVは行動指示付きのエラーで中断すること()
+    /// <summary>
+    /// ReadCsvFileAsync を共有する 8 経路すべて。
+    /// 1 つでも独自の catch 連鎖を持つと catch (Exception) へ落ちて生の例外メッセージが出るため
+    /// （Issue #1614 違反）、経路を列挙して全件を同じ契約で固定する。
+    /// </summary>
+    public static IEnumerable<object[]> 全インポート経路 => new[]
+    {
+        new object[] { "職員インポート" },
+        new object[] { "職員プレビュー" },
+        new object[] { "カードインポート" },
+        new object[] { "カードプレビュー" },
+        new object[] { "履歴インポート" },
+        new object[] { "履歴プレビュー" },
+        new object[] { "履歴詳細インポート" },
+        new object[] { "履歴詳細プレビュー" }
+    };
+
+    /// <summary>指定した経路を実行し、（成功したか, エラーメッセージ）を返す</summary>
+    private async Task<(bool Succeeded, string ErrorMessage)> InvokeImportRouteAsync(string route, string filePath)
+    {
+        switch (route)
+        {
+            case "職員インポート":
+                var staffImport = await _service.ImportStaffAsync(filePath);
+                return (staffImport.Success, staffImport.ErrorMessage);
+            case "職員プレビュー":
+                var staffPreview = await _service.PreviewStaffAsync(filePath);
+                return (staffPreview.IsValid, staffPreview.ErrorMessage);
+            case "カードインポート":
+                var cardImport = await _service.ImportCardsAsync(filePath);
+                return (cardImport.Success, cardImport.ErrorMessage);
+            case "カードプレビュー":
+                var cardPreview = await _service.PreviewCardsAsync(filePath);
+                return (cardPreview.IsValid, cardPreview.ErrorMessage);
+            case "履歴インポート":
+                var ledgerImport = await _service.ImportLedgersAsync(filePath);
+                return (ledgerImport.Success, ledgerImport.ErrorMessage);
+            case "履歴プレビュー":
+                var ledgerPreview = await _service.PreviewLedgersAsync(filePath);
+                return (ledgerPreview.IsValid, ledgerPreview.ErrorMessage);
+            case "履歴詳細インポート":
+                var detailImport = await _service.ImportLedgerDetailsAsync(filePath);
+                return (detailImport.Success, detailImport.ErrorMessage);
+            case "履歴詳細プレビュー":
+                var detailPreview = await _service.PreviewLedgerDetailsAsync(filePath);
+                return (detailPreview.IsValid, detailPreview.ErrorMessage);
+            default:
+                throw new ArgumentOutOfRangeException(nameof(route), route, "未知のインポート経路");
+        }
+    }
+
+    [Theory]
+    [MemberData(nameof(全インポート経路))]
+    public async Task 文字コードを判別できないCSVはどの経路でも行動指示付きのエラーで中断すること(string route)
     {
         // Arrange
-        var filePath = WriteUndecidableCsv("staff_undecidable.csv");
+        var filePath = WriteUndecidableCsv($"undecidable_{route}.csv");
+
+        // Act
+        var (succeeded, errorMessage) = await InvokeImportRouteAsync(route, filePath);
+
+        // Assert
+        succeeded.Should().BeFalse();
+        errorMessage.Should().Contain("文字コード");
+        errorMessage.Should().EndWith("インポートしてください。");
+        errorMessage.Should().NotContain("予期しないエラー", "生の例外メッセージを UI へ出さない（Issue #1614）");
+    }
+
+    [Theory]
+    [MemberData(nameof(全インポート経路))]
+    public async Task BOMが示す文字コードで読めないCSVはどの経路でも破損として案内すること(string route)
+    {
+        // Arrange: UTF-8 BOM を名乗るが本文が壊れているファイル（転送の失敗・切り詰めを模す）
+        var filePath = Path.Combine(_testDirectory, $"corrupted_{route}.csv");
+        var utf8Bom = new UTF8Encoding(true).GetPreamble();
+        var body = new byte[] { 0x82, 0x20 };
+        var bytes = new byte[utf8Bom.Length + body.Length];
+        Buffer.BlockCopy(utf8Bom, 0, bytes, 0, utf8Bom.Length);
+        Buffer.BlockCopy(body, 0, bytes, utf8Bom.Length, body.Length);
+        File.WriteAllBytes(filePath, bytes);
+
+        // Act
+        var (succeeded, errorMessage) = await InvokeImportRouteAsync(route, filePath);
+
+        // Assert: 「判別できません／CSV UTF-8 で保存し直して」は誤診断かつ無意味な指示になる
+        succeeded.Should().BeFalse();
+        errorMessage.Should().Contain("UTF-8（BOM付き）", "何として読めなかったかを示す");
+        errorMessage.Should().Contain("壊れている", "原因が曖昧さではなく破損であることを伝える");
+        errorMessage.Should().NotContain("判別できませんでした");
+        errorMessage.Should().EndWith("インポートしてください。");
+        errorMessage.Should().NotContain("予期しないエラー");
+    }
+
+    [Fact]
+    public async Task ImportStaffAsync_文字コードを判別できないCSVでは1件も書き込まないこと()
+    {
+        // Arrange
+        var filePath = WriteUndecidableCsv("staff_undecidable_no_write.csv");
 
         // Act
         var result = await _service.ImportStaffAsync(filePath);
 
         // Assert
         result.Success.Should().BeFalse();
-        result.ErrorMessage.Should().Contain("文字コード");
-        result.ErrorMessage.Should().EndWith("インポートしてください。");
-        result.ErrorMessage.Should().NotContain("予期しないエラー");
         _staffRepositoryMock.Verify(
             x => x.InsertAsync(It.IsAny<Staff>(), It.IsAny<SQLiteTransaction>()), Times.Never);
+        _staffRepositoryMock.Verify(
+            x => x.UpdateAsync(It.IsAny<Staff>(), It.IsAny<SQLiteTransaction>()), Times.Never);
+    }
+
+    #endregion
+
+    #region Issue #1744: 文字コード判別のログ
+
+    private static void VerifyLogged(Mock<ILogger> loggerMock, LogLevel level, string expectedFragment)
+    {
+        loggerMock.Verify(
+            x => x.Log(
+                level,
+                It.IsAny<EventId>(),
+                It.Is<It.IsAnyType>((v, t) => v.ToString().Contains(expectedFragment)),
+                It.IsAny<Exception>(),
+                It.IsAny<Func<It.IsAnyType, Exception, string>>()),
+            Times.AtLeastOnce,
+            $"{level} ログに「{expectedFragment}」を含む記録が必要");
+    }
+
+    private static void VerifyNeverLogged(Mock<ILogger> loggerMock, LogLevel level)
+    {
+        loggerMock.Verify(
+            x => x.Log(
+                level,
+                It.IsAny<EventId>(),
+                It.IsAny<It.IsAnyType>(),
+                It.IsAny<Exception>(),
+                It.IsAny<Func<It.IsAnyType, Exception, string>>()),
+            Times.Never,
+            $"{level} ログを出してはいけない");
     }
 
     [Fact]
-    public async Task PreviewStaffAsync_文字コードを判別できないCSVは行動指示付きのエラーを返すこと()
+    public async Task ReadCsvFileAsync_ShiftJISと判別したときは文字コード名をInformationで記録すること()
+    {
+        // Arrange: LogDebug では本番のログレベル設定（Information）で出力されない（Issue #1716）
+        var filePath = WriteShiftJisCsv("sjis_logged.csv", "氏名\n山田太郎");
+        var loggerMock = new Mock<ILogger>();
+
+        // Act
+        await CsvImportService.ReadCsvFileAsync(filePath, loggerMock.Object);
+
+        // Assert: レベルだけでなく「調査を先に進める値」が載っていることまで表明する
+        VerifyLogged(loggerMock, LogLevel.Information, "Shift_JIS");
+    }
+
+    [Fact]
+    public async Task ReadCsvFileAsync_UTF8と判別したときは文字コードのログを出さないこと()
+    {
+        // Arrange: 既定の文字コードでも毎回出すとログが肥大化する
+        var filePath = Path.Combine(_testDirectory, "utf8_not_logged.csv");
+        File.WriteAllText(filePath, "氏名\n山田太郎", CsvEncoding);
+        var loggerMock = new Mock<ILogger>();
+
+        // Act
+        await CsvImportService.ReadCsvFileAsync(filePath, loggerMock.Object);
+
+        // Assert
+        VerifyNeverLogged(loggerMock, LogLevel.Information);
+    }
+
+    [Fact]
+    public async Task ReadCsvFileAsync_BOM無しUTF8と判別したときも文字コードのログを出さないこと()
     {
         // Arrange
-        var filePath = WriteUndecidableCsv("preview_undecidable.csv");
+        var filePath = Path.Combine(_testDirectory, "utf8_nobom_not_logged.csv");
+        File.WriteAllBytes(filePath, new UTF8Encoding(false).GetBytes("氏名\n山田太郎"));
+        var loggerMock = new Mock<ILogger>();
 
         // Act
-        var result = await _service.PreviewStaffAsync(filePath);
+        await CsvImportService.ReadCsvFileAsync(filePath, loggerMock.Object);
 
         // Assert
-        result.IsValid.Should().BeFalse();
-        result.ErrorMessage.Should().Contain("文字コード");
-        result.ErrorMessage.Should().EndWith("インポートしてください。");
-        result.ErrorMessage.Should().NotContain("予期しないエラー");
+        VerifyNeverLogged(loggerMock, LogLevel.Information);
     }
 
     [Fact]
-    public async Task ImportLedgersAsync_文字コードを判別できないCSVは行動指示付きのエラーで中断すること()
+    public async Task ReadCsvFileAsync_判別不能のときは中断の理由をWarningで記録すること()
     {
-        // Arrange: 利用履歴の経路は共通ハンドラーではなく独自の catch 連鎖を持つため個別に固定する
-        var filePath = WriteUndecidableCsv("ledger_undecidable.csv");
+        // Arrange: 中断こそログが要る。呼び出し元の catch は結果へ文言を写すだけでログを書かない
+        var filePath = WriteUndecidableCsv("undecidable_logged.csv");
+        var loggerMock = new Mock<ILogger>();
 
         // Act
-        var result = await _service.ImportLedgersAsync(filePath);
+        var act = async () => await CsvImportService.ReadCsvFileAsync(filePath, loggerMock.Object);
 
         // Assert
-        result.Success.Should().BeFalse();
-        result.ErrorMessage.Should().Contain("文字コード");
-        result.ErrorMessage.Should().EndWith("インポートしてください。");
-        result.ErrorMessage.Should().NotContain("予期しないエラー");
+        await act.Should().ThrowAsync<FileOperationException>();
+        VerifyLogged(loggerMock, LogLevel.Warning, "判別できません");
+        VerifyLogged(loggerMock, LogLevel.Warning, filePath);
     }
 
     [Fact]
-    public async Task PreviewLedgersAsync_文字コードを判別できないCSVは行動指示付きのエラーを返すこと()
-    {
-        // Arrange
-        var filePath = WriteUndecidableCsv("ledger_preview_undecidable.csv");
-
-        // Act
-        var result = await _service.PreviewLedgersAsync(filePath);
-
-        // Assert
-        result.IsValid.Should().BeFalse();
-        result.ErrorMessage.Should().Contain("文字コード");
-        result.ErrorMessage.Should().EndWith("インポートしてください。");
-        result.ErrorMessage.Should().NotContain("予期しないエラー");
-    }
-
-    [Fact]
-    public async Task ImportLedgerDetailsAsync_文字コードを判別できないCSVは行動指示付きのエラーで中断すること()
+    public async Task ReadCsvFileAsync_BOMが示す文字コードで読めないときはWarningに文字コード名を載せること()
     {
         // Arrange
-        var filePath = WriteUndecidableCsv("detail_undecidable.csv");
+        var filePath = Path.Combine(_testDirectory, "corrupted_logged.csv");
+        var preamble = new UTF8Encoding(true).GetPreamble();
+        var bytes = new byte[preamble.Length + 2];
+        Buffer.BlockCopy(preamble, 0, bytes, 0, preamble.Length);
+        bytes[preamble.Length] = 0x82;
+        bytes[preamble.Length + 1] = 0x20;
+        File.WriteAllBytes(filePath, bytes);
+        var loggerMock = new Mock<ILogger>();
 
         // Act
-        var result = await _service.ImportLedgerDetailsAsync(filePath);
+        var act = async () => await CsvImportService.ReadCsvFileAsync(filePath, loggerMock.Object);
 
         // Assert
-        result.Success.Should().BeFalse();
-        result.ErrorMessage.Should().Contain("文字コード");
-        result.ErrorMessage.Should().EndWith("インポートしてください。");
-        result.ErrorMessage.Should().NotContain("予期しないエラー");
-    }
-
-    [Fact]
-    public async Task ImportCardsAsync_文字コードを判別できないCSVは行動指示付きのエラーで中断すること()
-    {
-        // Arrange
-        var filePath = WriteUndecidableCsv("card_undecidable.csv");
-
-        // Act
-        var result = await _service.ImportCardsAsync(filePath);
-
-        // Assert
-        result.Success.Should().BeFalse();
-        result.ErrorMessage.Should().Contain("文字コード");
-        result.ErrorMessage.Should().EndWith("インポートしてください。");
-        result.ErrorMessage.Should().NotContain("予期しないエラー");
+        await act.Should().ThrowAsync<FileOperationException>();
+        VerifyLogged(loggerMock, LogLevel.Warning, "UTF-8（BOM付き）");
     }
 
     #endregion

@@ -130,7 +130,9 @@ StatusMessage = ExceptionMessageFormatter.ToUserMessage(ex, "台帳の保存");
 | `ReportPreflightCheckerTests.AllWarnings_SatisfyErrorMessageQualityCriteria` | 帳票出力前プリフライトチェックの警告文言（5種別すべてを発生させ、`DisplayText` の情報量とカード名の明示、`DetailText` が行動指示で終わることを検証、Issue #1688） |
 | `WarningServiceBackupHealthTests.BackupStaleWarning_SatisfiesErrorMessageQualityCriteria` | バックアップ健全性警告の文言（経過日数・最終成功日時の明示、原因候補、システム管理画面（F6）への誘導と行動指示、Issue #1689） |
 | `ConnectionDiagnosticsServiceTests.AllProblemItems_SatisfyErrorMessageQualityCriteria` | 接続診断の警告・異常文言（8項目すべてを問題状態へ落とし、`DetailText` が20文字以上・行動指示で終わる・曖昧文言を含まないことを検証、Issue #1690） |
-| `CsvImportServiceTests.文字コード判別不能のエラー文言がエラーメッセージ品質基準を満たすこと` | CSVインポートの文字コード判別不能エラー（`FileOperationException.UndecidableEncoding`）。判別に用いた候補（UTF-8 / Shift_JIS）と Excel の保存形式名を示し、行動指示で終わること、**ファイルパスをユーザー向け文言へ露出しない**ことを検証（Issue #1744） |
+| `CsvImportServiceTests` の 2 件（`文字コード判別不能の…` / `宣言された文字コードで読めない…`） | CSVインポートの文字コードエラー（`FileOperationException.UndecidableEncoding` / `UnreadableDeclaredEncoding`）。判別に用いた候補（UTF-8 / Shift_JIS）と Excel の保存形式名を示し、行動指示で終わること、**ファイルパスをユーザー向け文言へ露出しない**ことを検証（Issue #1744） |
+
+> **「判別できない」と「判別できたが読めない」で文言を分ける**（Issue #1744）: 原因が違えば「どうすれば」も違う。BOM が文字コードを宣言しているファイルに「文字コードを判別できませんでした。CSV UTF-8 形式で保存し直してください」と案内すると、**既にその形式であるファイルに対する無意味な指示**になり、真の原因（転送の失敗・破損）から利用者を遠ざける。品質テストは互いの文言を含まないこと（`NotContain("判別できませんでした")`）も表明し、取り違えを検出する。
 
 > **品質テストは「対象の網羅」も併せて表明する**: 診断・チェック系のように項目が増えていくサービスでは、文言の品質だけを検証すると項目追加時に品質テストの追随漏れが静かに起きる。`ConnectionDiagnosticsServiceTests` は全項目種別が問題状態として集まっていること（`Enum.GetValues(typeof(DiagnosticItemKind)).Length` と一致）を同じテスト内で表明し、項目を足したのに文言を検証していない状態を検出する。
 

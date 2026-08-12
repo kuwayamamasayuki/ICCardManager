@@ -806,7 +806,11 @@ public class AppExceptionTests
             FileOperationException.AccessDenied("/p").ErrorCode,
             FileOperationException.FileInUse("/p").ErrorCode,
             FileOperationException.InvalidFormat("/p").ErrorCode,
-            FileOperationException.DirectoryCreationFailed("/p").ErrorCode
+            FileOperationException.DirectoryCreationFailed("/p").ErrorCode,
+            // Issue #1744: 新しいファクトリを足したらこの配列にも足すこと。
+            // 足し忘れると「重複しないこと」の検査対象から外れ、次の追加者が同じコードを採っても緑のまま通る
+            FileOperationException.UndecidableEncoding("/p").ErrorCode,
+            FileOperationException.UnreadableDeclaredEncoding("UTF-8（BOM付き）", "/p").ErrorCode
         };
 
         fileOperationCodes.Should().OnlyHaveUniqueItems();

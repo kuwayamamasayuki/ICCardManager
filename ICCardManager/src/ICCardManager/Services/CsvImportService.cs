@@ -230,34 +230,31 @@ namespace ICCardManager.Services
         /// IDm・日付・金額は ASCII のため全バリデーションを素通りし、検出手段が無かった。
         /// </para>
         /// <para>
-        /// 判別できない場合は <see cref="FileOperationException.UndecidableEncoding"/> を投げて中断する。
+        /// 判別できない場合は <see cref="FileOperationException.UndecidableEncoding"/> を、
+        /// BOM が示す文字コードとして読めない（＝破損）場合は
+        /// <see cref="FileOperationException.UnreadableDeclaredEncoding"/> を投げて中断する。
         /// 呼び出し元（<c>ExecuteImportWithErrorHandlingAsync</c> 等）がユーザー向け文言へ変換する。
         /// </para>
         /// </remarks>
-        /// <exception cref="FileOperationException">文字コードを判別できない場合</exception>
+        /// <exception cref="FileOperationException">文字コードを判別できない、または宣言された文字コードとして読めない場合</exception>
         internal static async Task<List<string>> ReadCsvFileAsync(string filePath, ILogger logger = null)
         {
-            // FileShare.ReadWrite で開くことで、他プロセス（Excel等）がファイルを使用中でも読み込み可能にする
-            byte[] bytes;
-            using (var fileStream = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
-            using (var buffer = new MemoryStream())
-            {
-                await fileStream.CopyToAsync(buffer).ConfigureAwait(false);
-                bytes = buffer.ToArray();
-            }
+            var bytes = await ReadAllBytesAsync(filePath).ConfigureAwait(false);
 
             var decoded = TextEncodingDetector.Decode(bytes);
             if (!decoded.IsDecoded)
             {
-                throw FileOperationException.UndecidableEncoding(filePath);
+                throw CreateEncodingFailureException(decoded, filePath, logger);
             }
 
             // 障害調査で「どの文字コードとして読んだか」が分からないと、
-            // 文字化けの相談を受けたときに切り分けられない（LogDebug は本番で出力されない。Issue #1716）
+            // 文字化けの相談を受けたときに切り分けられない（LogDebug は本番で出力されない。Issue #1716）。
+            // BOM の有無は表示名（「UTF-8（BOM付き）」等）が示すため、ここで断定しない
+            // （UTF-16 / UTF-32 は BOM があるからこそ判別できており、「BOM無し」は事実に反する）
             if (decoded.Encoding != DetectedTextEncoding.Utf8WithBom && decoded.Encoding != DetectedTextEncoding.Utf8)
             {
                 logger?.LogInformation(
-                    "CSVインポート: 文字コードを {Encoding} と判別しました（BOM無し）。File={FilePath}",
+                    "CSVインポート: 文字コードを {Encoding} と判別しました。File={FilePath}",
                     TextEncodingDetector.GetDisplayName(decoded.Encoding), filePath);
             }
 
@@ -273,6 +270,72 @@ namespace ICCardManager.Services
             }
 
             return lines;
+        }
+
+        /// <summary>
+        /// ファイル全体をバイト列として読み込む
+        /// </summary>
+        /// <remarks>
+        /// FileShare.ReadWrite で開くことで、他プロセス（Excel等）がファイルを使用中でも読み込める。
+        /// **長さぶんのバッファを1つだけ確保する** — `MemoryStream` + `ToArray()` は倍々のバッファと
+        /// 連続配列の二重確保になり、x86（`PlatformTarget`）の 2GB 空間で数十MB の台帳CSVを
+        /// 取り込む際に不要なピークを生む（Issue #1744 コードレビュー指摘）。
+        /// 他プロセスが読み取り中にファイルを縮めた場合に備え、実際に読めた長さへ切り詰める。
+        /// </remarks>
+        private static async Task<byte[]> ReadAllBytesAsync(string filePath)
+        {
+            using (var fileStream = new FileStream(
+                filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite, 4096, useAsync: true))
+            {
+                var buffer = new byte[fileStream.Length];
+                var offset = 0;
+                while (offset < buffer.Length)
+                {
+                    var read = await fileStream
+                        .ReadAsync(buffer, offset, buffer.Length - offset).ConfigureAwait(false);
+                    if (read == 0)
+                    {
+                        break;
+                    }
+
+                    offset += read;
+                }
+
+                if (offset == buffer.Length)
+                {
+                    return buffer;
+                }
+
+                var truncated = new byte[offset];
+                Buffer.BlockCopy(buffer, 0, truncated, 0, offset);
+                return truncated;
+            }
+        }
+
+        /// <summary>
+        /// 文字コードの復号失敗を、ログを残したうえでユーザー向け例外へ変換する
+        /// </summary>
+        /// <remarks>
+        /// **中断こそログが要る**。成功時（Shift_JIS 判別）だけ Information を出して失敗時が無言だと、
+        /// 「インポートできない」という問い合わせに対してログから何も分からない
+        /// （呼び出し元の catch は結果オブジェクトへ文言を写すだけで、ログは書かない。Issue #1744 コードレビュー指摘）。
+        /// </remarks>
+        private static FileOperationException CreateEncodingFailureException(
+            TextDecodeResult decoded, string filePath, ILogger logger)
+        {
+            if (decoded.Failure == TextDecodeFailure.DeclaredEncodingUnreadable)
+            {
+                var encodingName = TextEncodingDetector.GetDisplayName(decoded.Encoding);
+                logger?.LogWarning(
+                    "CSVインポートを中断: BOM は {Encoding} を示していますが、その文字コードとして読み取れないデータが含まれています（破損・切り詰めの可能性）。File={FilePath}",
+                    encodingName, filePath);
+                return FileOperationException.UnreadableDeclaredEncoding(encodingName, filePath);
+            }
+
+            logger?.LogWarning(
+                "CSVインポートを中断: 文字コードを判別できません（UTF-8・Shift_JIS のいずれとしても復号できませんでした）。File={FilePath}",
+                filePath);
+            return FileOperationException.UndecidableEncoding(filePath);
         }
 
         #region 共通処理基盤
@@ -293,61 +356,48 @@ namespace ICCardManager.Services
             {
                 return await operation().ConfigureAwait(false);
             }
-            catch (FileNotFoundException)
-            {
-                return new CsvImportResult
-                {
-                    Success = false,
-                    ErrorMessage = "指定されたファイルが見つかりません。",
-                    Errors = errors
-                };
-            }
-            catch (UnauthorizedAccessException)
-            {
-                return new CsvImportResult
-                {
-                    Success = false,
-                    ErrorMessage = "ファイルへのアクセス権限がありません。",
-                    Errors = errors
-                };
-            }
-            // Issue #1744: 文字コード判別不能など、整備済みのユーザー向け文言を持つファイル操作例外。
-            // 生の ex.Message を出さないよう IOException / Exception より先に捕捉する（Issue #1614）
-            catch (FileOperationException ex)
-            {
-                return new CsvImportResult
-                {
-                    Success = false,
-                    ErrorMessage = ex.UserFriendlyMessage,
-                    Errors = errors
-                };
-            }
-            catch (IOException ex)
-            {
-                return new CsvImportResult
-                {
-                    Success = false,
-                    ErrorMessage = $"ファイルの読み込みエラー: {ex.Message}",
-                    Errors = errors
-                };
-            }
-            catch (DatabaseException ex)
-            {
-                return new CsvImportResult
-                {
-                    Success = false,
-                    ErrorMessage = ex.UserFriendlyMessage,
-                    Errors = errors
-                };
-            }
             catch (Exception ex)
             {
                 return new CsvImportResult
                 {
                     Success = false,
-                    ErrorMessage = $"予期しないエラーが発生しました: {ex.Message}",
+                    ErrorMessage = ToUserFacingErrorMessage(ex),
                     Errors = errors
                 };
+            }
+        }
+
+        /// <summary>
+        /// インポート／プレビューで捕捉した例外をユーザー向けの文言へ変換する
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// **例外 → 文言の対応表はここ 1 か所に置く**（Issue #1744 コードレビュー指摘）。
+        /// 従来はこの ladder が共通ハンドラー 2 つと利用履歴の Import / Preview に計 4 回
+        /// 書き写されており、Issue #1744 の <see cref="FileOperationException"/> 追加でも
+        /// 4 か所すべてに同じ catch を足す必要があった。**次に対応表を変える人が
+        /// 利用履歴経路を取りこぼす**（＝この Issue が直したのと同じ形の欠陥）ため集約する。
+        /// </para>
+        /// <para>
+        /// <see cref="AppException"/>（<see cref="FileOperationException"/> /
+        /// <see cref="DatabaseException"/> 等）は整備済みの <see cref="AppException.UserFriendlyMessage"/>
+        /// を使い、生の <c>ex.Message</c> を UI へ出さない（Issue #1614）。
+        /// </para>
+        /// </remarks>
+        private static string ToUserFacingErrorMessage(Exception ex)
+        {
+            switch (ex)
+            {
+                case FileNotFoundException _:
+                    return "指定されたファイルが見つかりません。";
+                case UnauthorizedAccessException _:
+                    return "ファイルへのアクセス権限がありません。";
+                case AppException appException:
+                    return appException.UserFriendlyMessage;
+                case IOException _:
+                    return $"ファイルの読み込みエラー: {ex.Message}";
+                default:
+                    return $"予期しないエラーが発生しました: {ex.Message}";
             }
         }
 
@@ -367,59 +417,12 @@ namespace ICCardManager.Services
             {
                 return await operation().ConfigureAwait(false);
             }
-            catch (FileNotFoundException)
-            {
-                return new CsvImportPreviewResult
-                {
-                    IsValid = false,
-                    ErrorMessage = "指定されたファイルが見つかりません。",
-                    Errors = errors
-                };
-            }
-            catch (UnauthorizedAccessException)
-            {
-                return new CsvImportPreviewResult
-                {
-                    IsValid = false,
-                    ErrorMessage = "ファイルへのアクセス権限がありません。",
-                    Errors = errors
-                };
-            }
-            // Issue #1744: 文字コード判別不能など、整備済みのユーザー向け文言を持つファイル操作例外。
-            // 生の ex.Message を出さないよう IOException / Exception より先に捕捉する（Issue #1614）
-            catch (FileOperationException ex)
-            {
-                return new CsvImportPreviewResult
-                {
-                    IsValid = false,
-                    ErrorMessage = ex.UserFriendlyMessage,
-                    Errors = errors
-                };
-            }
-            catch (IOException ex)
-            {
-                return new CsvImportPreviewResult
-                {
-                    IsValid = false,
-                    ErrorMessage = $"ファイルの読み込みエラー: {ex.Message}",
-                    Errors = errors
-                };
-            }
-            catch (DatabaseException ex)
-            {
-                return new CsvImportPreviewResult
-                {
-                    IsValid = false,
-                    ErrorMessage = ex.UserFriendlyMessage,
-                    Errors = errors
-                };
-            }
             catch (Exception ex)
             {
                 return new CsvImportPreviewResult
                 {
                     IsValid = false,
-                    ErrorMessage = $"予期しないエラーが発生しました: {ex.Message}",
+                    ErrorMessage = ToUserFacingErrorMessage(ex),
                     Errors = errors
                 };
             }

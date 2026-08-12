@@ -31,22 +31,50 @@ namespace ICCardManager.Common
         Undecidable
     }
 
+    /// <summary>復号に失敗した理由</summary>
+    /// <remarks>
+    /// **「判別できない」と「判別できたが読めない」を混ぜない**（Issue #1744 コードレビュー指摘）。
+    /// BOM がある場合、文字コードは曖昧ではなく**確定している**。それを
+    /// <see cref="Undecidable"/> に丸めると「文字コードを判別できませんでした。
+    /// CSV UTF-8 形式で保存し直してください」という、**事実と異なる診断と無意味な指示**になる
+    /// （その形式で保存済みのファイルに対して同じ形式で保存し直させることになる）。
+    /// </remarks>
+    public enum TextDecodeFailure
+    {
+        /// <summary>失敗していない</summary>
+        None,
+
+        /// <summary>BOM が無く、UTF-8・Shift_JIS のいずれとしても復号できない</summary>
+        Undecidable,
+
+        /// <summary>BOM が文字コードを示しているが、その文字コードとして復号できない（＝ファイルの破損・切り詰め）</summary>
+        DeclaredEncodingUnreadable
+    }
+
     /// <summary>テキストの復号結果</summary>
     public sealed class TextDecodeResult
     {
-        /// <summary>判別された文字コード</summary>
+        /// <summary>
+        /// 判別された文字コード。
+        /// <see cref="TextDecodeFailure.DeclaredEncodingUnreadable"/> の場合は
+        /// **BOM が示していた文字コード**（利用者向けの文言でその名前を示すため）
+        /// </summary>
         public DetectedTextEncoding Encoding { get; }
 
-        /// <summary>復号されたテキスト（判別不能の場合は null）</summary>
+        /// <summary>復号されたテキスト（復号できなかった場合は null）</summary>
         public string Text { get; }
+
+        /// <summary>復号に失敗した理由（成功時は <see cref="TextDecodeFailure.None"/>）</summary>
+        public TextDecodeFailure Failure { get; }
 
         /// <summary>復号できたか</summary>
         public bool IsDecoded => Text != null;
 
-        internal TextDecodeResult(DetectedTextEncoding encoding, string text)
+        internal TextDecodeResult(DetectedTextEncoding encoding, string text, TextDecodeFailure failure = TextDecodeFailure.None)
         {
             Encoding = encoding;
             Text = text;
+            Failure = failure;
         }
     }
 
@@ -145,17 +173,35 @@ namespace ICCardManager.Common
             }
 
             // BOM なし: UTF-8 → Shift_JIS の順で厳格に復号を試す（順序の理由はクラスコメント参照）
-            if (TryDecode(bytes, 0, StrictUtf8, out var utf8Text))
+            if (TryDecode(bytes, 0, StrictUtf8, out var utf8Text) && !ContainsNul(utf8Text))
             {
                 return new TextDecodeResult(DetectedTextEncoding.Utf8, utf8Text);
             }
 
-            if (TryDecode(bytes, 0, StrictShiftJis, out var shiftJisText))
+            if (TryDecode(bytes, 0, StrictShiftJis, out var shiftJisText) && !ContainsNul(shiftJisText))
             {
                 return new TextDecodeResult(DetectedTextEncoding.ShiftJis, shiftJisText);
             }
 
-            return new TextDecodeResult(DetectedTextEncoding.Undecidable, null);
+            return new TextDecodeResult(DetectedTextEncoding.Undecidable, null, TextDecodeFailure.Undecidable);
+        }
+
+        /// <summary>
+        /// 復号結果に NUL 文字（U+0000）が含まれるか
+        /// </summary>
+        /// <remarks>
+        /// **BOM なし UTF-16 / UTF-32 を「UTF-8 として読めた」と誤判定させないためのガード**
+        /// （Issue #1744 コードレビュー指摘）。UTF-16 LE の ASCII 文字は <c>41 00</c> のように
+        /// NUL バイトを挟むが、**NUL は UTF-8 として妥当なバイト**であるため厳格 UTF-8 の
+        /// 検査を素通りし、U+0000 混じりのゴミ文字列が「成功」として返ってしまう。
+        /// CSV に NUL 文字が現れることは無いため、これを検出したら判別不能として中断する
+        /// （利用者への指示「Excel で CSV UTF-8 形式に保存し直す」は UTF-16 ファイルにも有効）。
+        /// BOM 付きの経路には適用しない — そちらは文字コードが確定しており、NUL は
+        /// 判別の問題ではなく内容の問題だから。
+        /// </remarks>
+        private static bool ContainsNul(string text)
+        {
+            return text.IndexOf('\0') >= 0;
         }
 
         /// <summary>
@@ -185,19 +231,22 @@ namespace ICCardManager.Common
         }
 
         /// <summary>
-        /// BOM が示す文字コードで復号する。復号できない場合は判別不能とする
+        /// BOM が示す文字コードで復号する。復号できない場合は「宣言された文字コードで読めない」とする
         /// </summary>
         /// <remarks>
         /// BOM が UTF-8 を名乗っていても中身が壊れている場合はある。
         /// そこで置換文字を混ぜて読み進めると、化けたデータが 6 年保存の台帳へ入るため、
         /// 「BOM で名乗ったからには厳格に読める」ことを条件にする。
+        /// ただし失敗の理由は <see cref="TextDecodeFailure.Undecidable"/> ではなく
+        /// <see cref="TextDecodeFailure.DeclaredEncodingUnreadable"/> とし、
+        /// **判別された文字コードを結果に残す**（利用者へ「◯◯として読めない」と正しく伝えるため）。
         /// </remarks>
         private static TextDecodeResult DecodeWithBom(
             byte[] bytes, int bomLength, Encoding encoding, DetectedTextEncoding detected)
         {
             return TryDecode(bytes, bomLength, encoding, out var text)
                 ? new TextDecodeResult(detected, text)
-                : new TextDecodeResult(DetectedTextEncoding.Undecidable, null);
+                : new TextDecodeResult(detected, null, TextDecodeFailure.DeclaredEncodingUnreadable);
         }
 
         private static bool TryDecode(byte[] bytes, int offset, Encoding encoding, out string text)

@@ -83,16 +83,29 @@ public class TextEncodingDetectorTests
     }
 
     [Fact]
-    public void Decode_UTF8_BOM付きだが後続が不正なバイト列は判別不能になること()
+    public void Decode_UTF8_BOM付きだが後続が不正なバイト列は復号を拒否すること()
     {
         // BOM が UTF-8 を名乗っていても、置換文字（U+FFFD）を混ぜて読み進めない。
         var bytes = new UTF8Encoding(true).GetPreamble().Concat(new byte[] { 0x82, 0x20 });
 
         var result = TextEncodingDetector.Decode(bytes);
 
-        result.Encoding.Should().Be(DetectedTextEncoding.Undecidable);
         result.IsDecoded.Should().BeFalse();
         result.Text.Should().BeNull();
+    }
+
+    [Fact]
+    public void Decode_BOM付きで読めない場合は判別不能ではなく宣言された文字コードで読めないと報告すること()
+    {
+        // BOM がある時点で文字コードは確定しており曖昧ではない。
+        // Undecidable に丸めると「判別できませんでした／CSV UTF-8 で保存し直してください」という
+        // 事実と異なる診断＋無意味な指示になる（既に CSV UTF-8 なので何も変わらない）。
+        var bytes = new UTF8Encoding(true).GetPreamble().Concat(new byte[] { 0x82, 0x20 });
+
+        var result = TextEncodingDetector.Decode(bytes);
+
+        result.Failure.Should().Be(TextDecodeFailure.DeclaredEncodingUnreadable);
+        result.Encoding.Should().Be(DetectedTextEncoding.Utf8WithBom, "利用者へ「何として読めなかったか」を示すため判別結果を残す");
     }
 
     #endregion
@@ -183,8 +196,32 @@ public class TextEncodingDetectorTests
         var result = TextEncodingDetector.Decode(bytes);
 
         result.Encoding.Should().Be(DetectedTextEncoding.Undecidable);
+        result.Failure.Should().Be(TextDecodeFailure.Undecidable);
         result.IsDecoded.Should().BeFalse();
         result.Text.Should().BeNull();
+    }
+
+    [Fact]
+    public void Decode_BOM無しUTF16はUTF8として復号せず判別不能にすること()
+    {
+        // UTF-16 LE の ASCII 部分（41 00 …）はすべて妥当な UTF-8 バイトのため、
+        // 厳格 UTF-8 の検査を素通りして U+0000 混じりのゴミ文字列が「成功」で返ってしまう。
+        // CSV に NUL 文字は現れないため、これを検出して中断させる。
+        var bytes = Encoding.Unicode.GetBytes(SampleCsv); // BOM を付けない
+
+        var result = TextEncodingDetector.Decode(bytes);
+
+        result.IsDecoded.Should().BeFalse();
+        result.Failure.Should().Be(TextDecodeFailure.Undecidable);
+    }
+
+    [Fact]
+    public void Decode_成功時のFailureはNoneであること()
+    {
+        var result = TextEncodingDetector.Decode(ShiftJis.GetBytes(SampleCsv));
+
+        result.Failure.Should().Be(TextDecodeFailure.None);
+        result.IsDecoded.Should().BeTrue();
     }
 
     [Fact]
