@@ -111,6 +111,14 @@ StatusMessage = ExceptionMessageFormatter.ToUserMessage(ex, "台帳の保存");
 
 `GetErrorInfo` の文言が 3 要素を満たさない（「どうすれば」を欠く）のは、致命エラー時はユーザーの自己回復より**エラーコード＋スタックトレースによる原因究明**を優先する設計判断であり、品質ガイドライン違反ではない。新規の**通常エラー**経路では `ToUserMessage` を使うこと（`GetErrorInfo` を通常経路に転用しない）。
 
+### サービス内の「例外 → 文言」の対応表は 1 か所に集約する（Issue #1744）
+
+同じ `catch` の ladder（`FileNotFoundException` → … → `catch (Exception)`）を複数のメソッドへ書き写さない。**次に対応表を変える人が、一部の経路を取りこぼす**。
+
+- `CsvImportService` は共通ハンドラー 2 つと利用履歴の Import / Preview に同じ ladder を計 4 回持っており、#1744 で `FileOperationException` を足す際に 4 か所すべてへ同じ catch を書く必要があった（1 つ漏らすと `catch (Exception)` に落ちて生の `ex.Message` が UI に出る＝#1614 違反）。`catch (Exception)` 1 つから共通の変換関数を呼ぶ形へ統一した
+- 集約すると `AppException` を一括で `UserFriendlyMessage` へ寄せられる。#1744 では副次的に、利用履歴経路だけ `DatabaseException` が生の `ex.Message` で表示されていた欠陥も同時に消えた
+- **同じ規約が「文言の対応表」以外にも効く**: 何かを列挙するコードが 2 か所以上にできたら、それは片方だけ更新される日が来るという合図（`.claude/rules/development-conventions.md` の「全消し＋再生成」「ガードを書くときは経路を列挙する」と同じ判断）
+
 ## 既存コードへの適用
 
 新規コード追加時は上記ガイドラインを適用。既存コードの改善は **該当 Issue にスコープを絞って** 段階的に実施（一括変更は diff の肥大化・レビュー困難化を招く）。
