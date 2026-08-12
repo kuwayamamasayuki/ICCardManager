@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Text.RegularExpressions;
 using FluentAssertions;
 using Xunit;
@@ -39,6 +40,13 @@ namespace ICCardManager.Tests.Views.Dialogs;
 /// OnClosing の確認を通す。本テストはどちらの手段でも「Esc で閉じられる」規約を満たすとみなす
 /// （配線の正しさは <c>LedgerDetailDialogCloseGuardTests</c> が個別に固定する）。
 /// </para>
+/// <para>
+/// <b>代替手段は「Escape の KeyBinding があること」では認めない。</b> それだけを見ると、
+/// 検索条件のクリア等に Escape を割り当てたダイアログが IsCancel を外しても検査が通り、
+/// 「Esc で閉じられる」規約が静かに破れる（緩和は 1 ダイアログのためでも、検査は母集団全体に効く）。
+/// KeyBinding の <c>Command</c> がクローズを要求するコマンド（名前に Close を含む）へ
+/// 束縛されていることまで確かめる。
+/// </para>
 /// </remarks>
 public class DialogEscapeCloseConventionTests
 {
@@ -63,8 +71,7 @@ public class DialogEscapeCloseConventionTests
         {
             var xaml = File.ReadAllText(path);
             var hasIsCancel = Regex.IsMatch(xaml, @"IsCancel\s*=\s*""True""");
-            var hasEscapeKeyBinding = Regex.IsMatch(xaml, @"<KeyBinding\s+Key\s*=\s*""Escape""");
-            if (!hasIsCancel && !hasEscapeKeyBinding)
+            if (!hasIsCancel && !HasEscapeCloseKeyBinding(xaml))
             {
                 violations.Add(Path.GetFileName(path));
             }
@@ -72,9 +79,53 @@ public class DialogEscapeCloseConventionTests
 
         violations.Should().BeEmpty(
             "すべてのダイアログは Esc キーで閉じられること（Issue #1615）。通常は IsCancel=\"True\" ボタン、" +
-            "未保存変更ガードを OnClosing に持つダイアログは Escape の KeyBinding を用いる（Issue #1743）。" +
-            "独自の Window_KeyDown Esc ハンドラは用いない。" +
+            "未保存変更ガードを OnClosing に持つダイアログは Escape の KeyBinding をクローズ要求コマンドへ" +
+            "束縛して用いる（Issue #1743）。独自の Window_KeyDown Esc ハンドラは用いない。" +
             "違反ダイアログ: " + string.Join(", ", violations));
+    }
+
+    /// <summary>
+    /// 検査ロジック自体をサンプル入力で固定する（空振り防止）。
+    /// </summary>
+    /// <remarks>
+    /// 実データ（現状は LedgerDetailDialog ただ 1 件）だけで確かめると、そのダイアログが
+    /// IsCancel へ戻ったときに代替手段の検査が誰にも検証されないまま残る。
+    /// </remarks>
+    [Theory]
+    [InlineData(@"<KeyBinding Key=""Escape"" Command=""{Binding RequestCloseCommand}""/>", true)]
+    [InlineData(@"<KeyBinding Command=""{Binding CloseCommand}"" Key=""Escape""/>", true)]
+    [InlineData(@"<KeyBinding Key=""Escape"" Command=""{Binding ClearFilterCommand}""/>", false)]
+    [InlineData(@"<KeyBinding Key=""Escape""/>", false)]
+    [InlineData(@"<KeyBinding Key=""S"" Modifiers=""Control"" Command=""{Binding CloseCommand}""/>", false)]
+    public void Escape代替手段の判定がバインド先を見ていること(string xaml, bool expected)
+    {
+        HasEscapeCloseKeyBinding(xaml).Should().Be(expected,
+            "Escape の KeyBinding は、クローズを要求するコマンドへ束縛されている場合にのみ" +
+            "IsCancel の代替として認める（Issue #1743）");
+    }
+
+    /// <summary>
+    /// Escape がクローズ要求コマンドへ束縛された KeyBinding を持つか。
+    /// </summary>
+    private static bool HasEscapeCloseKeyBinding(string xaml)
+    {
+        return Regex.Matches(xaml, @"<KeyBinding\b[^>]*?/>")
+            .Cast<Match>()
+            .Select(m => m.Value)
+            .Any(element =>
+                GetAttribute(element, "Key") == "Escape"
+                && Regex.IsMatch(
+                    GetAttribute(element, "Command") ?? string.Empty,
+                    @"^\{Binding\s+\w*Close\w*Command\}$"));
+    }
+
+    /// <summary>
+    /// 要素テキストから属性値を取り出す（見つからなければ null）。
+    /// </summary>
+    private static string? GetAttribute(string element, string attributeName)
+    {
+        var match = Regex.Match(element, attributeName + @"\s*=\s*""(?<value>[^""]*)""");
+        return match.Success ? match.Groups["value"].Value : null;
     }
 
     /// <summary>

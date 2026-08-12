@@ -117,6 +117,15 @@ namespace ICCardManager.Views.Dialogs
             if (_viewModel != null && !_viewModel.CanClose(ConfirmDiscardChanges))
             {
                 e.Cancel = true;
+                return;
+            }
+
+            // Issue #1743: 摘要 UPDATE だけが競合で失敗した場合、明細は別トランザクションで
+            // 確定済みなのに OnSaveCompleted は呼ばれない。DB へ書き込みが残っている以上、
+            // 呼び出し元には履歴一覧の再読込が必要だと伝える
+            if (_viewModel?.HasPersistedChanges == true)
+            {
+                WasSaved = true;
             }
         }
 

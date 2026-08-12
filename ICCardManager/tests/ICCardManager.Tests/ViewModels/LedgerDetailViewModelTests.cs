@@ -387,6 +387,125 @@ public class LedgerDetailViewModelTests : IDisposable
     }
 
     [Fact]
+    public async Task CanClose_保存トランザクション実行中は確認を求めず閉じられない()
+    {
+        // Arrange: 実際に保存を走らせ、ReplaceDetailsAsync の中で止めて「保存中」を再現する
+        //（IsBusy を直接立てると本番で成立しない状態を検証してしまう）
+        await InitializeWithTestLedgerAsync();
+        AddItems(3);
+        _viewModel.SplitAllCommand.Execute(null);
+
+        var replaceEntered = new TaskCompletionSource<bool>();
+        var releaseReplace = new TaskCompletionSource<bool>();
+        _ledgerRepoMock
+            .Setup(r => r.ReplaceDetailsAsync(It.IsAny<int>(), It.IsAny<IEnumerable<LedgerDetail>>()))
+            .Returns(async () =>
+            {
+                replaceEntered.TrySetResult(true);
+                await releaseReplace.Task;
+                return true;
+            });
+        _ledgerRepoMock.Setup(r => r.UpdateAsync(It.IsAny<Ledger>())).ReturnsAsync(true);
+
+        var saveTask = _viewModel.SaveCommand.ExecuteAsync(null);
+        await WaitForAsync(replaceEntered, "ReplaceDetailsAsync の開始");
+        _viewModel.IsBusy.Should().BeTrue("前提: 保存トランザクションが実行中");
+
+        try
+        {
+            var confirmCalls = 0;
+
+            // Act: 保存中に ✕ / Alt+F4 / Escape で閉じようとする
+            var canClose = _viewModel.CanClose(() => { confirmCalls++; return true; });
+
+            // Assert: DB コミット中にウィンドウが閉じると、保存は成功しているのに
+            // 呼び出し元が WasSaved=false を見て履歴一覧を再読込しない
+            canClose.Should().BeFalse("保存トランザクションの実行中は閉じられないこと");
+            confirmCalls.Should().Be(0,
+                "保存中の変更は破棄されるわけではないため、破棄確認を出すのは事実に反する");
+        }
+        finally
+        {
+            releaseReplace.TrySetResult(true);
+            await saveTask;
+        }
+    }
+
+    [Fact]
+    public async Task SaveAsync_摘要更新のみ競合したとき_明細は保存済みとして扱う()
+    {
+        // Arrange: 明細の置換は成功、摘要 UPDATE だけが競合で 0 行（共有モードで他 PC が変更）
+        await InitializeWithTestLedgerAsync();
+        AddItems(3);
+        _viewModel.SplitAllCommand.Execute(null);
+
+        _ledgerRepoMock
+            .Setup(r => r.ReplaceDetailsAsync(It.IsAny<int>(), It.IsAny<IEnumerable<LedgerDetail>>()))
+            .ReturnsAsync(true);
+        _ledgerRepoMock.Setup(r => r.UpdateAsync(It.IsAny<Ledger>())).ReturnsAsync(false);
+
+        // Act
+        await _viewModel.SaveCommand.ExecuteAsync(null);
+
+        // Assert: 明細の GroupId は別トランザクションで既にコミット済みのため、
+        // 「未保存の変更がある」と表示して破棄確認を出すのは事実に反する
+        _viewModel.HasChanges.Should().BeFalse(
+            "明細は DB へ確定済みで、閉じても破棄されるものは無い");
+        _viewModel.HasPersistedChanges.Should().BeTrue(
+            "呼び出し元が履歴一覧を再読込しないと、画面の旧グループと DB の新 GroupId が食い違う");
+        _viewModel.StatusMessage.Should().Contain("摘要を更新できませんでした",
+            "摘要だけ更新できなかったことは利用者へ伝える");
+    }
+
+    [Fact]
+    public async Task SaveAsync_保存前はHasPersistedChangesが立たない()
+    {
+        // Arrange: 明細の置換自体が失敗した場合は何もコミットされていない
+        await InitializeWithTestLedgerAsync();
+        AddItems(3);
+        _viewModel.SplitAllCommand.Execute(null);
+
+        _ledgerRepoMock
+            .Setup(r => r.ReplaceDetailsAsync(It.IsAny<int>(), It.IsAny<IEnumerable<LedgerDetail>>()))
+            .ReturnsAsync(false);
+
+        // Act
+        await _viewModel.SaveCommand.ExecuteAsync(null);
+
+        // Assert
+        _viewModel.HasPersistedChanges.Should().BeFalse(
+            "1 行もコミットされていないのに再読込を促すと、成功したように見える");
+        _viewModel.HasChanges.Should().BeTrue("保存できていないので変更は保持される");
+    }
+
+    /// <summary>
+    /// SaveAsync を走らせるための最小の台帳で ViewModel を初期化する。
+    /// </summary>
+    private async Task InitializeWithTestLedgerAsync()
+    {
+        _ledgerRepoMock.Setup(r => r.GetByIdAsync(1)).ReturnsAsync(new Ledger
+        {
+            Id = 1,
+            CardIdm = "0123456789ABCDEF",
+            Date = new DateTime(2026, 2, 10),
+            Summary = "テスト",
+            Balance = 500,
+            Details = new List<LedgerDetail>()
+        });
+
+        await _viewModel.InitializeAsync(1);
+    }
+
+    /// <summary>
+    /// 非同期処理が所定の地点へ到達するのを待つ（固定時間の待機はマシン速度で不安定になる）。
+    /// </summary>
+    private static async Task WaitForAsync(TaskCompletionSource<bool> signal, string what)
+    {
+        var completed = await Task.WhenAny(signal.Task, Task.Delay(TimeSpan.FromSeconds(5)));
+        completed.Should().BeSameAs(signal.Task, $"{what} が 5 秒以内に到達すること");
+    }
+
+    [Fact]
     public void RequestCloseCommand_OnCloseRequestedコールバックを呼ぶ()
     {
         // Arrange
