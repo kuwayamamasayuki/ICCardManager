@@ -3,6 +3,7 @@ using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 using FluentAssertions;
+using ICCardManager.Common;
 using ICCardManager.Data;
 using ICCardManager.Data.Repositories;
 using ICCardManager.Models;
@@ -34,6 +35,11 @@ namespace ICCardManager.Tests.Services;
 /// Issue #1372: 同一フック (<c>DbContext.IsOnUiThread</c>) を書き換える他テストクラスとの
 /// 並列実行レースを避けるため、<see cref="DbContextUiThreadHookCollection"/> に属させシリアル実行させる。
 /// </para>
+/// <para>
+/// Issue #1746: `ResolveBackupFolderAsync` / `GetBackupFilesAsync` の UNC 検証オフロードの
+/// 検証では <c>PathValidator.UncReachabilityChecker</c> フックも差し替える。差し替えは
+/// テスト固有マーカーを含むパスのみ介入し、他の並列テストへ影響しない形にする。
+/// </para>
 /// </remarks>
 [Collection(DbContextUiThreadHookCollection.Name)]
 public class BackupServiceUiThreadGuardTests : IDisposable
@@ -42,6 +48,7 @@ public class BackupServiceUiThreadGuardTests : IDisposable
     private readonly string _dbPath;
     private readonly string _backupDirectory;
     private readonly Func<bool> _originalIsOnUiThread;
+    private readonly Func<string, int, bool> _originalUncReachabilityChecker;
 
     public BackupServiceUiThreadGuardTests()
     {
@@ -51,11 +58,13 @@ public class BackupServiceUiThreadGuardTests : IDisposable
         _backupDirectory = Path.Combine(_testDirectory, "backup");
         Directory.CreateDirectory(_backupDirectory);
         _originalIsOnUiThread = DbContext.IsOnUiThread;
+        _originalUncReachabilityChecker = PathValidator.UncReachabilityChecker;
     }
 
     public void Dispose()
     {
         DbContext.IsOnUiThread = _originalIsOnUiThread;
+        PathValidator.UncReachabilityChecker = _originalUncReachabilityChecker;
         try
         {
             if (Directory.Exists(_testDirectory))
@@ -65,13 +74,13 @@ public class BackupServiceUiThreadGuardTests : IDisposable
         GC.SuppressFinalize(this);
     }
 
-    private Mock<ISettingsRepository> CreateSettingsRepositoryMock()
+    private Mock<ISettingsRepository> CreateSettingsRepositoryMock(string backupPath = null)
     {
         var mock = new Mock<ISettingsRepository>();
         // ReturnsAsync は完了済みタスクを返すため、await .ConfigureAwait(false) は
         // context switch せず呼び出し元スレッドに留まる。本番のキャッシュヒット経路と同じ挙動になる。
         mock.Setup(x => x.GetAppSettingsAsync())
-            .ReturnsAsync(new AppSettings { BackupPath = _backupDirectory });
+            .ReturnsAsync(new AppSettings { BackupPath = backupPath ?? _backupDirectory });
         return mock;
     }
 
@@ -163,5 +172,118 @@ public class BackupServiceUiThreadGuardTests : IDisposable
             + "UI スレッドガードに抵触せず完了すべき (Issue #1361)");
         File.Exists(backupFilePath).Should().BeTrue(
             "成功時はバックアップファイルが実際に生成されるべき");
+    }
+
+    /// <summary>
+    /// Issue #1746: UNC パス設定時の <see cref="BackupService.ResolveBackupFolderAsync"/> は、
+    /// UNC 到達性チェック（最大5秒）の完了を待たずに制御を返すこと。
+    /// 同期版 <c>PathValidator.ValidateBackupPath</c> を呼ぶ実装では、設定キャッシュヒット時
+    /// （本番の通常経路）に呼び出しスレッド＝UI スレッド上で検証が走り、起動直後の画面が固まる。
+    /// </summary>
+    /// <remarks>
+    /// スレッド ID の比較は「await で解放されたスレッドをプールが Task.Run に再利用する」
+    /// 可能性があり理論上不安定なため、「チェック完了前に Task が未完了のまま返る」ことで
+    /// 非ブロックを表明する。修正前の同期実装では呼び出し自体がブロックし、
+    /// 返ってきた時点で完了済みになるため確実に赤になる。
+    /// </remarks>
+    [Fact]
+    public async Task ResolveBackupFolderAsync_UNC到達性チェックの完了前に制御を返すこと()
+    {
+        var folder = await AssertReturnsBeforeUncCheckCompletesAsync(
+            service => service.ResolveBackupFolderAsync(),
+            "UNC 到達性チェックの完了前に制御が返るべき。同期版 ValidateBackupPath を呼ぶ実装では"
+            + "呼び出し自体がブロックし、起動時経路では UI スレッドが最大5秒固まる (Issue #1746)");
+
+        folder.Should().Be(
+            PathValidator.NormalizePath(PathValidator.GetDefaultBackupPath()),
+            "到達不可の UNC パスは既定パスへフォールバックする既存挙動が保たれるべき");
+    }
+
+    /// <summary>
+    /// Issue #1746: <see cref="BackupService.GetBackupFilesAsync"/>（リストア画面から
+    /// UI スレッドで呼ばれる）も <see cref="BackupService.ResolveBackupFolderAsync"/> と
+    /// 同型の「キャッシュヒット → 同期 UNC 検証」を持っていたため、同じ非ブロック性を表明する。
+    /// </summary>
+    [Fact]
+    public async Task GetBackupFilesAsync_UNC到達性チェックの完了前に制御を返すこと()
+    {
+        var files = await AssertReturnsBeforeUncCheckCompletesAsync(
+            service => service.GetBackupFilesAsync(),
+            "UNC 到達性チェックの完了前に制御が返るべき。リストア画面は UI スレッドから"
+            + "本メソッドを呼ぶため、同期検証では画面が最大5秒固まる (Issue #1746)");
+
+        files.Should().NotBeNull(
+            "到達不可の UNC パスは既定パスへフォールバックし、一覧取得自体は成功すべき");
+    }
+
+    /// <summary>
+    /// Issue #1746 の非ブロック性表明の共通手順: 到達不可の UNC パスを設定し、
+    /// 到達性チェックがブロックしている間に <paramref name="invokeAsync"/> が
+    /// 未完了の Task を返すことを表明したうえで、チェックを解放して結果を返す。
+    /// </summary>
+    /// <remarks>
+    /// アサーション失敗時（<c>checkerStarted</c> のタイムアウト・<c>IsCompleted</c> の失敗）にも
+    /// <c>finally</c> でチェッカーを解放して SUT の Task を観測しきる。これを怠ると、
+    /// <c>using</c> が破棄した <see cref="ManualResetEventSlim"/> に対して残存プールスレッドが
+    /// <c>Wait</c> して <see cref="ObjectDisposedException"/> になり、本来のアサーション失敗が
+    /// 二次例外に埋もれる（また未観測 Task が <see cref="Dispose"/> の一時フォルダ削除と競合する）。
+    /// </remarks>
+    private async Task<T> AssertReturnsBeforeUncCheckCompletesAsync<T>(
+        Func<BackupService, Task<T>> invokeAsync,
+        string nonBlockingBecause)
+    {
+        // テスト固有マーカー: 並列実行中の他テストが公開 API へ渡すパスには介入しない
+        var uncMarker = $"issue1746-{Guid.NewGuid():N}";
+        var uncPath = $@"\\{uncMarker}\share\backup";
+
+        var settingsMock = CreateSettingsRepositoryMock(uncPath);
+
+        using var checkerStarted = new ManualResetEventSlim(false);
+        using var releaseChecker = new ManualResetEventSlim(false);
+        Task<T> task = null;
+        try
+        {
+            PathValidator.UncReachabilityChecker = (path, timeoutMs) =>
+            {
+                if (!path.Contains(uncMarker))
+                {
+                    return PathValidator.DefaultUncReachabilityChecker(path, timeoutMs);
+                }
+                checkerStarted.Set();
+                // 修正前の同期実装への退行時もテストを有限時間で終わらせるための上限。
+                // 緑実装では直後の releaseChecker.Set() で即解放されるため待ち切らない。
+                // timeoutMs（本番の5秒）をそのまま使うと、CI 高負荷時に「Set → IsCompleted 読取」の
+                // 間で待ちが自然満了し Task が完了して偽赤になり得るため、余裕を持った上限にする
+                releaseChecker.Wait(TimeSpan.FromSeconds(30));
+                return false; // 到達不可 → 既定パスへのフォールバック（既存挙動）を誘発
+            };
+
+            using var dbContext = new DbContext(_dbPath);
+            var service = new BackupService(
+                dbContext,
+                settingsMock.Object,
+                NullLogger<BackupService>.Instance);
+
+            task = invokeAsync(service);
+
+            checkerStarted.Wait(TimeSpan.FromSeconds(10)).Should().BeTrue(
+                "UNC パス設定時は到達性チェックが呼ばれるべき（呼ばれない場合はテストの前提が崩れている）");
+            task.IsCompleted.Should().BeFalse(nonBlockingBecause);
+
+            releaseChecker.Set();
+            return await task;
+        }
+        finally
+        {
+            // アサーション失敗経路でもチェッカーを解放し、SUT の Task を観測しきってから
+            // イベントの破棄（using）と Dispose() の一時フォルダ削除に進む
+            releaseChecker.Set();
+            if (task != null)
+            {
+                try { await task; }
+                catch { /* 本来のアサーション失敗を二次例外で隠さない */ }
+            }
+            PathValidator.UncReachabilityChecker = _originalUncReachabilityChecker;
+        }
     }
 }
