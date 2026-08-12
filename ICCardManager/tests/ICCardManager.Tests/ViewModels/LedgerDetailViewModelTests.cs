@@ -335,4 +335,71 @@ public class LedgerDetailViewModelTests : IDisposable
     }
 
     #endregion
+
+    #region ダイアログクローズガード（Issue #1743）
+
+    [Fact]
+    public void CanClose_変更がなければ確認を求めずに閉じられる()
+    {
+        // Arrange
+        var confirmCalls = 0;
+        _viewModel.HasChanges.Should().BeFalse("前提: 初期状態は未保存の変更なし");
+
+        // Act
+        var canClose = _viewModel.CanClose(() => { confirmCalls++; return false; });
+
+        // Assert
+        canClose.Should().BeTrue("未保存の変更が無ければ破棄確認なしで閉じられるべき");
+        confirmCalls.Should().Be(0, "変更が無いのに破棄確認を出すと操作の妨げになる");
+    }
+
+    [Fact]
+    public void CanClose_変更ありで破棄を承諾すると閉じられる()
+    {
+        // Arrange: 分割操作で未保存の変更がある状態にする
+        AddItems(3);
+        _viewModel.SplitAllCommand.Execute(null);
+        _viewModel.HasChanges.Should().BeTrue("前提: 分割操作で未保存の変更がある状態");
+        var confirmCalls = 0;
+
+        // Act
+        var canClose = _viewModel.CanClose(() => { confirmCalls++; return true; });
+
+        // Assert
+        canClose.Should().BeTrue("破棄を承諾したら閉じられるべき");
+        confirmCalls.Should().Be(1, "未保存の変更があるときは必ず破棄確認を通す");
+    }
+
+    [Fact]
+    public void CanClose_変更ありで破棄を拒否すると閉じられない()
+    {
+        // Arrange: 分割操作で未保存の変更がある状態にする
+        AddItems(3);
+        _viewModel.SplitAllCommand.Execute(null);
+        _viewModel.HasChanges.Should().BeTrue("前提: 分割操作で未保存の変更がある状態");
+
+        // Act
+        var canClose = _viewModel.CanClose(() => false);
+
+        // Assert
+        canClose.Should().BeFalse("「いいえ」を選んだら編集内容を保持したままダイアログに留まるべき");
+        _viewModel.HasChanges.Should().BeTrue("拒否しても編集内容（変更フラグ）は失われない");
+    }
+
+    [Fact]
+    public void RequestCloseCommand_OnCloseRequestedコールバックを呼ぶ()
+    {
+        // Arrange
+        var closeRequests = 0;
+        _viewModel.OnCloseRequested = () => closeRequests++;
+
+        // Act: Escape キーの KeyBinding から実行される経路
+        _viewModel.RequestCloseCommand.Execute(null);
+
+        // Assert: View 側で OnCloseRequested = Close を設定するため、
+        // この経路が Window.Close() → OnClosing の破棄確認へ届く
+        closeRequests.Should().Be(1, "Escape キーからウィンドウの Close() へ届く唯一の経路");
+    }
+
+    #endregion
 }

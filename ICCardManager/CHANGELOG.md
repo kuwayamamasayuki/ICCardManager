@@ -57,6 +57,12 @@
   - 03_画面設計書 §3.13／04_機能設計書 §10.2・§10.3／05_クラス設計書 §3.3／07_テスト設計書 §1.1a（単体 4,637→4,680・合計 4,663→4,706 件）・§2.25 UT-033c／管理者マニュアル §8.3 を同期更新（#1787）
 
 **バグ修正**
+- Issue #1743 **利用履歴詳細ダイアログのタイトルバー ✕ が未保存確認を迂回し編集が消える**問題を修正した。未保存変更の破棄確認が「閉じる」ボタンの Click ハンドラにしか無く、タイトルバーの ✕ / Alt+F4 では確認なしで閉じて分割・摘要の編集が失われていた。さらに「閉じる」ボタンの `IsCancel="True"` は WPF の仕様上 Click 処理の**後**に無条件で `DialogResult=false` を設定するため、Click ハンドラで「いいえ」を選んで early-return しても閉じてしまう経路になっていた。
+  - **破棄確認を `OnClosing` へ一元化**した。すべてのクローズ経路（「閉じる」ボタン／✕／Alt+F4／Escape）が通る唯一の関門であり、判定は `LedgerDetailViewModel.CanClose(Func<bool>)` に置いて単体テスト可能にした。保存後の自動クローズ（#634）は `HasChanges = false` になってから走るため確認は出ない。
+  - **`IsCancel="True"` を撤去し、Escape は `KeyBinding`（`RequestCloseCommand` → `OnCloseRequested` → `Window.Close()`）で配線**した。IsCancel を残すと確認が二重に出るうえ、Closing をキャンセルすると `DialogResult` が `false` のまま残り（セッターは値が変化したときだけ `Close()` を呼ぶ）、以後の Escape／クリックが無反応になる。
+  - **「Esc で閉じられる」規約（#1615）は維持**。`DialogEscapeCloseConventionTests` の検査を「`IsCancel="True"` または Escape の `KeyBinding`」のいずれかを持つことへ広げた（未保存変更ガードを `OnClosing` に持つダイアログ用の第2の正規手段）。
+  - 検証: `LedgerDetailDialogCloseGuardTests`（静的検証4件）を新設、`LedgerDetailViewModelTests` に4件追加（+8）。実際のクローズ挙動（✕／Alt+F4／Escape での確認表示、「いいえ」で編集が残ること）は WPF Window の STA インスタンス化を要するため PR テストプランで手動検証する。
+  - 03_画面設計書 §3.11／07_テスト設計書 §1.1a（単体 4,680→4,688・合計 4,706→4,714 件）・§2 UT-029 No.12〜15・UT-058e・UT-058e2／ユーザーマニュアル §5.4 を同期更新（#1743）
 - Issue #1742 **未観測 Task 例外ハンドラがファイナライザスレッドでモーダルダイアログを開く**問題を修正した。`TaskScheduler.UnobservedTaskException` は Task のファイナライズ時（＝ファイナライザスレッド）に発火するが、旧実装はそこから同期 `Dispatcher.Invoke` で `ErrorDialogHelper.ShowError`（モーダルの `MessageBox.Show`）を開いていたため、ユーザーが [OK] を押すまでファイナライザスレッドがブロックされ、プロセス全体のファイナライザ（SQLite 接続等の後始末）が停止していた。無人の共用端末では「バックグラウンド処理エラー」ダイアログが長時間放置され得る。
   - **ハンドラ本体を `Common/UnobservedTaskExceptionHandler` へ抽出**し、①`e.SetObserved()` を最初に呼ぶ ②ログ記録（集約例外＋全内部例外） ③シャットダウンガード（`Dispatcher.HasShutdownStarted` / `HasShutdownFinished`）④`Dispatcher.BeginInvoke`（非同期）で**非モーダルのトースト通知**（`IToastNotificationService.ShowError`）、の形へ改めた。いかなる内部エラー（ログ記録失敗・ディスパッチ失敗・通知失敗）も外へ漏らさない — ファイナライザから例外が漏れるとプロセスが異常終了するため。
   - **通知はクールダウン（5分）で間引く（ログは毎回記録）**。エラートーストは自動消去されない（クリックで閉じる）ため、共有モードのヘルスチェック失敗のような繰り返し発生する障害で発火のたびに通知すると、無人の共用端末にトーストが際限なく積み上がる（コードレビューで検出）。

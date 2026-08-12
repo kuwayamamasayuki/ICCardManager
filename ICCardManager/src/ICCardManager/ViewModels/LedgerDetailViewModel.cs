@@ -206,6 +206,11 @@ namespace ICCardManager.ViewModels
         public Action? OnSaveCompleted { get; set; }
 
         /// <summary>
+        /// クローズ要求時のコールバック（Issue #1743: Escape キーの KeyBinding から Window.Close() へ届く経路）
+        /// </summary>
+        public Action? OnCloseRequested { get; set; }
+
+        /// <summary>
         /// 複数グループがあるかどうか（Issue #634: ボタン切り替え用）
         /// </summary>
         [ObservableProperty]
@@ -703,6 +708,41 @@ namespace ICCardManager.ViewModels
             }
         }
 
+        /// <summary>
+        /// ダイアログを閉じてよいか判定する（Issue #1743）
+        /// </summary>
+        /// <param name="confirmDiscard">
+        /// 未保存の変更を破棄してよいかをユーザーに確認するコールバック。破棄してよい場合に true を返す。
+        /// 未保存の変更が無い場合は呼ばれない。
+        /// </param>
+        /// <returns>閉じてよい場合 true、閉じる操作を中止すべき場合 false</returns>
+        /// <remarks>
+        /// タイトルバーの ✕ / Alt+F4 / Escape / 「閉じる」ボタンのどの経路で閉じても
+        /// View 側の OnClosing が本メソッドを通るため、破棄確認はここに一元化される。
+        /// </remarks>
+        public bool CanClose(Func<bool> confirmDiscard)
+        {
+            if (!HasChanges)
+            {
+                return true;
+            }
 
+            return confirmDiscard();
+        }
+
+        /// <summary>
+        /// ダイアログのクローズを要求する（Issue #1743）
+        /// </summary>
+        /// <remarks>
+        /// Escape キーの KeyBinding から実行される。View 側が <see cref="OnCloseRequested"/> に
+        /// Window.Close() を設定するため、この経路も OnClosing の破棄確認を通る。
+        /// Button.IsCancel は Click 処理の後に無条件で DialogResult=false を設定し、破棄確認で
+        /// 「いいえ」を選んでも DialogResult が false のまま残って以後の操作が無反応になるため使わない。
+        /// </remarks>
+        [RelayCommand]
+        private void RequestClose()
+        {
+            OnCloseRequested?.Invoke();
+        }
     }
 }

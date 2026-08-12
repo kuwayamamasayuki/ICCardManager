@@ -30,6 +30,15 @@ namespace ICCardManager.Tests.Views.Dialogs;
 /// Release ビルドでは csproj により Compile 対象から除外されるが、ソースファイルはツリーに
 /// 存在するため本テストの対象に含まれ、例外リストは不要。
 /// </para>
+/// <para>
+/// 未保存変更の破棄確認を OnClosing で行うダイアログ（LedgerDetailDialog、Issue #1743）は
+/// IsCancel を使えない。IsCancel は Click 処理の後に無条件で DialogResult=false を設定するため
+/// 確認で「いいえ」を選んでも閉じてしまい、Closing をキャンセルしても DialogResult が false の
+/// まま残って以後の Escape が無反応になる。この場合は Escape を
+/// <c>KeyBinding</c>（→ ViewModel のクローズ要求コマンド → <c>Window.Close()</c>）で配線し、
+/// OnClosing の確認を通す。本テストはどちらの手段でも「Esc で閉じられる」規約を満たすとみなす
+/// （配線の正しさは <c>LedgerDetailDialogCloseGuardTests</c> が個別に固定する）。
+/// </para>
 /// </remarks>
 public class DialogEscapeCloseConventionTests
 {
@@ -39,10 +48,11 @@ public class DialogEscapeCloseConventionTests
 
     /// <summary>
     /// Views/Dialogs 配下の各ダイアログ XAML は、Esc キーで閉じられるよう
-    /// <c>IsCancel="True"</c> を宣言したボタンを少なくとも 1 つ持たなければならない。
+    /// <c>IsCancel="True"</c> を宣言したボタン、または Escape の <c>KeyBinding</c>
+    /// （未保存変更ガードを持つダイアログ用、Issue #1743）のいずれかを持たなければならない。
     /// </summary>
     [Fact]
-    public void 全ダイアログがIsCancelボタンを宣言していること()
+    public void 全ダイアログがEscで閉じる手段を宣言していること()
     {
         var dialogs = Directory.GetFiles(DialogsDirectory, "*.xaml", SearchOption.TopDirectoryOnly);
         dialogs.Should().NotBeEmpty("Views/Dialogs 配下にダイアログ XAML が存在するはず");
@@ -52,15 +62,18 @@ public class DialogEscapeCloseConventionTests
         foreach (var path in dialogs)
         {
             var xaml = File.ReadAllText(path);
-            if (!Regex.IsMatch(xaml, @"IsCancel\s*=\s*""True"""))
+            var hasIsCancel = Regex.IsMatch(xaml, @"IsCancel\s*=\s*""True""");
+            var hasEscapeKeyBinding = Regex.IsMatch(xaml, @"<KeyBinding\s+Key\s*=\s*""Escape""");
+            if (!hasIsCancel && !hasEscapeKeyBinding)
             {
                 violations.Add(Path.GetFileName(path));
             }
         }
 
         violations.Should().BeEmpty(
-            "すべてのダイアログは Esc キーで閉じられるよう IsCancel=\"True\" ボタンを持つこと（Issue #1615）。" +
-            "独自の Window_KeyDown Esc ハンドラではなく WPF 慣用の IsCancel を用いてキーボード操作の一貫性を保つ。" +
+            "すべてのダイアログは Esc キーで閉じられること（Issue #1615）。通常は IsCancel=\"True\" ボタン、" +
+            "未保存変更ガードを OnClosing に持つダイアログは Escape の KeyBinding を用いる（Issue #1743）。" +
+            "独自の Window_KeyDown Esc ハンドラは用いない。" +
             "違反ダイアログ: " + string.Join(", ", violations));
     }
 
