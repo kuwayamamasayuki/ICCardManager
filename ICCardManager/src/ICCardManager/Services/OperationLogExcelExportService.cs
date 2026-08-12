@@ -258,7 +258,10 @@ public class OperationLogExcelExportService
     {
         // 列幅の設定
         worksheet.Column(1).Width = 20;  // 日時
-        worksheet.Column(2).Width = 10;  // 操作種別
+        // Issue #1787: 表示名が「エクスポート」「バックアップ」等の全角6文字になったため 10 → 14 へ。
+        // Excel の列幅は半角換算のため全角6文字 ≒ 12 相当で、10 のままだと ApplyFormatting の
+        // WrapText で2行に折り返り、監査成果物として提出する行の高さが揃わなくなる
+        worksheet.Column(2).Width = 14;  // 操作種別
         worksheet.Column(3).Width = 18;  // 対象
         worksheet.Column(4).Width = 20;  // 対象ID
         worksheet.Column(5).Width = 12;  // 操作者
@@ -300,34 +303,19 @@ public class OperationLogExcelExportService
     }
 
     /// <summary>
-    /// 操作種別の表示名を取得
+    /// 操作種別の表示名を取得（Issue #1787: SSOT の <see cref="OperationLogDisplayNames"/> へ委譲）
     /// </summary>
     internal static string GetActionDisplayName(string? action)
     {
-        return action switch
-        {
-            "INSERT" => "登録",
-            "UPDATE" => "更新",
-            "DELETE" => "削除",
-            "RESTORE" => "復元",
-            "MERGE" => "統合",
-            "SPLIT" => "分割",
-            _ => action ?? ""
-        };
+        return OperationLogDisplayNames.GetActionDisplayName(action);
     }
 
     /// <summary>
-    /// 対象テーブルの表示名を取得
+    /// 対象テーブルの表示名を取得（Issue #1787: SSOT の <see cref="OperationLogDisplayNames"/> へ委譲）
     /// </summary>
     internal static string GetTargetTableDisplayName(string? targetTable)
     {
-        return targetTable switch
-        {
-            "staff" => "職員",
-            "ic_card" => "交通系ICカード",
-            "ledger" => "利用履歴",
-            _ => targetTable ?? ""
-        };
+        return OperationLogDisplayNames.GetTableDisplayName(targetTable);
     }
 
     /// <summary>

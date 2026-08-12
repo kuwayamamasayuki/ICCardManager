@@ -104,17 +104,18 @@
                            Text="操作種別:"
                            VerticalAlignment="Center"
                            Margin="0,0,10,10"/>
+                <!-- Issue #1787: 「エクスポート」等6文字の選択肢が入るため固定幅を MinWidth に変更（内容と文字サイズに追随） -->
                 <ComboBox Grid.Row="1" Grid.Column="1"
                           ItemsSource="{Binding ActionTypes}"
                           SelectedItem="{Binding SelectedAction}"
                           DisplayMemberPath="DisplayName"
-                          Width="100"
+                          MinWidth="100"
                           HorizontalAlignment="Left"
                           Margin="0,0,20,10"
                           VerticalAlignment="Center"
                           AutomationProperties.Name="操作種別"
-                          AutomationProperties.HelpText="検索する操作種別（追加・更新・削除など）を選択します。すべてを選ぶと種別による絞り込みは行いません"
-                          ToolTip="操作種別で絞り込み（追加・更新・削除など）"/>
+                          AutomationProperties.HelpText="検索する操作種別（登録・更新・削除・インポートなど）を選択します。すべてを選ぶと種別による絞り込みは行いません"
+                          ToolTip="操作種別で絞り込み（登録・更新・削除・インポートなど）"/>
 
                 <!-- 対象（Issue #1523 で Row 1 に移動） -->
                 <TextBlock Grid.Row="1" Grid.Column="2"
@@ -125,13 +126,13 @@
                           ItemsSource="{Binding TargetTables}"
                           SelectedItem="{Binding SelectedTargetTable}"
                           DisplayMemberPath="DisplayName"
-                          Width="120"
+                          MinWidth="120"
                           HorizontalAlignment="Left"
                           Margin="0,0,0,10"
                           VerticalAlignment="Center"
                           AutomationProperties.Name="対象テーブル"
-                          AutomationProperties.HelpText="検索対象とするテーブル（職員・カード・履歴など）を選択します。すべてを選ぶと対象テーブルによる絞り込みは行いません"
-                          ToolTip="対象テーブルで絞り込み（職員・カード・履歴など）"/>
+                          AutomationProperties.HelpText="検索対象とするテーブル（職員・交通系ICカード・利用履歴など）を選択します。すべてを選ぶと対象テーブルによる絞り込みは行いません"
+                          ToolTip="対象テーブルで絞り込み（職員・交通系ICカード・利用履歴など）"/>
 
                 <!-- クイックフィルタ（Issue #1505 で独立行に分離。Issue #1523 の期間 DatePicker 分離に伴い Row 1 → Row 2 へ繰り下げ） -->
                 <StackPanel x:Name="QuickFilterPanel"
@@ -232,10 +233,20 @@
                   AutomationProperties.HelpText="検索条件に一致する操作ログの一覧です。">
             <DataGrid.Columns>
                 <DataGridTextColumn Header="日時" Binding="{Binding TimestampDisplay}" Width="150"/>
-                <DataGridTextColumn Header="操作" Binding="{Binding ActionDisplay}" Width="60">
+                <!-- Issue #1787: 列幅の設計。「インポート」「エクスポート」「バックアップ」等の表示名が
+                     入るようになったため従来の Width="60" では中サイズでも切れる。
+                     ・幅は「中」(BaseFontSize=14) で最長値が収まる固定値とし、大／特大は TextWrapping で担保する
+                       （全角1文字 ≒ BaseFontSize px。「バックアップ」6文字 = 84px @中 / 96px @大 / 120px @特大）。
+                       Width="Auto" は使わない — WPF DataGrid の Auto 幅は実体化済み行の最大値を保持して縮まないため、
+                       一度でも長い値を含むページを表示すると以後も広がったままになり星列を圧迫し続ける
+                     ・固定幅を増やしたぶんは「対象詳細」を固定 250 → Width="*" に変更して相殺する。
+                       固定列の合計は 150+95+105+100=450 となり、MinWidth=800（実効 ~754px）でも
+                       星列 2 本に各 ~152px が残る（変更前の「詳細」は ~114px だった） -->
+                <DataGridTextColumn Header="操作" Binding="{Binding ActionDisplay}" Width="95">
                     <DataGridTextColumn.ElementStyle>
                         <Style TargetType="TextBlock">
                             <Setter Property="HorizontalAlignment" Value="Center"/>
+                            <Setter Property="TextWrapping" Value="Wrap"/>
                             <Style.Triggers>
                                 <DataTrigger Binding="{Binding Action}" Value="INSERT">
                                     <Setter Property="Foreground" Value="{DynamicResource SuccessActionBrush}"/>
@@ -253,10 +264,28 @@
                         </Style>
                     </DataGridTextColumn.ElementStyle>
                 </DataGridTextColumn>
-                <DataGridTextColumn Header="対象" Binding="{Binding TargetTableDisplay}" Width="80"/>
-                <DataGridTextColumn Header="対象詳細" Binding="{Binding TargetDisplayName}" Width="250"/>
+                <DataGridTextColumn Header="対象" Binding="{Binding TargetTableDisplay}" Width="105">
+                    <DataGridTextColumn.ElementStyle>
+                        <Style TargetType="TextBlock">
+                            <Setter Property="TextWrapping" Value="Wrap"/>
+                        </Style>
+                    </DataGridTextColumn.ElementStyle>
+                </DataGridTextColumn>
+                <DataGridTextColumn Header="対象詳細" Binding="{Binding TargetDisplayName}" Width="*" MinWidth="150">
+                    <DataGridTextColumn.ElementStyle>
+                        <Style TargetType="TextBlock">
+                            <Setter Property="TextWrapping" Value="Wrap"/>
+                        </Style>
+                    </DataGridTextColumn.ElementStyle>
+                </DataGridTextColumn>
                 <DataGridTextColumn Header="操作者" Binding="{Binding OperatorName}" Width="100"/>
-                <DataGridTextColumn Header="詳細" Binding="{Binding DetailSummary}" Width="*"/>
+                <DataGridTextColumn Header="詳細" Binding="{Binding DetailSummary}" Width="*" MinWidth="150">
+                    <DataGridTextColumn.ElementStyle>
+                        <Style TargetType="TextBlock">
+                            <Setter Property="TextWrapping" Value="Wrap"/>
+                        </Style>
+                    </DataGridTextColumn.ElementStyle>
+                </DataGridTextColumn>
             </DataGrid.Columns>
 
             <!-- 操作種別による行スタイル -->

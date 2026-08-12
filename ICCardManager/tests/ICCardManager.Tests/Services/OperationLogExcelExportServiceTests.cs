@@ -40,59 +40,48 @@ public class OperationLogExcelExportServiceTests : IDisposable
 
     #region GetActionDisplayName
 
-    [Theory]
-    [InlineData("INSERT", "登録")]
-    [InlineData("UPDATE", "更新")]
-    [InlineData("DELETE", "削除")]
-    [InlineData("RESTORE", "復元")]
-    [InlineData("MERGE", "統合")]
-    [InlineData("SPLIT", "分割")]
-    public void GetActionDisplayName_全6種別を正しく変換(string action, string expected)
+    // Issue #1787: 表示名の値そのものは SSOT（OperationLogDisplayNames）側の
+    // OperationLogDisplayNamesTests が全定数走査で固定している。ここは「委譲していること」だけを
+    // 表明し、同じ対応表を複数のテストクラスへ重複させない（.claude/rules/testing.md
+    // 「同じ規約の検査を 2 か所に書かない」。重複させると表示名を1語変えるだけで
+    // 3 ファイルの修正が必要になり、片方だけ更新されたときに検査が食い違う）。
+
+    [Fact]
+    public void GetActionDisplayName_全操作種別がSSOTへ委譲されていること()
     {
-        var result = OperationLogExcelExportService.GetActionDisplayName(action);
-        result.Should().Be(expected);
+        foreach (var entry in OperationLogDisplayNames.ActionEntries)
+        {
+            OperationLogExcelExportService.GetActionDisplayName(entry.Key)
+                .Should().Be(OperationLogDisplayNames.GetActionDisplayName(entry.Key));
+        }
     }
 
     [Fact]
-    public void GetActionDisplayName_未知の値はそのまま返す()
+    public void GetActionDisplayName_未知の値と_nullもSSOTと同じ挙動になること()
     {
-        var result = OperationLogExcelExportService.GetActionDisplayName("UNKNOWN");
-        result.Should().Be("UNKNOWN");
-    }
-
-    [Fact]
-    public void GetActionDisplayName_nullは空文字を返す()
-    {
-        var result = OperationLogExcelExportService.GetActionDisplayName(null);
-        result.Should().Be("");
+        OperationLogExcelExportService.GetActionDisplayName("UNKNOWN").Should().Be("UNKNOWN");
+        OperationLogExcelExportService.GetActionDisplayName(null).Should().Be("");
     }
 
     #endregion
 
     #region GetTargetTableDisplayName
 
-    [Theory]
-    [InlineData("staff", "職員")]
-    [InlineData("ic_card", "交通系ICカード")]
-    [InlineData("ledger", "利用履歴")]
-    public void GetTargetTableDisplayName_全3テーブルを正しく変換(string table, string expected)
+    [Fact]
+    public void GetTargetTableDisplayName_全テーブルがSSOTへ委譲されていること()
     {
-        var result = OperationLogExcelExportService.GetTargetTableDisplayName(table);
-        result.Should().Be(expected);
+        foreach (var entry in OperationLogDisplayNames.TableEntries)
+        {
+            OperationLogExcelExportService.GetTargetTableDisplayName(entry.Key)
+                .Should().Be(OperationLogDisplayNames.GetTableDisplayName(entry.Key));
+        }
     }
 
     [Fact]
-    public void GetTargetTableDisplayName_未知のテーブルはそのまま返す()
+    public void GetTargetTableDisplayName_未知のテーブルと_nullもSSOTと同じ挙動になること()
     {
-        var result = OperationLogExcelExportService.GetTargetTableDisplayName("unknown_table");
-        result.Should().Be("unknown_table");
-    }
-
-    [Fact]
-    public void GetTargetTableDisplayName_nullは空文字を返す()
-    {
-        var result = OperationLogExcelExportService.GetTargetTableDisplayName(null);
-        result.Should().Be("");
+        OperationLogExcelExportService.GetTargetTableDisplayName("unknown_table").Should().Be("unknown_table");
+        OperationLogExcelExportService.GetTargetTableDisplayName(null).Should().Be("");
     }
 
     #endregion
@@ -463,34 +452,80 @@ public class OperationLogExcelExportServiceTests : IDisposable
         worksheet.Cell(2, 1).Value.ToString().Should().BeEmpty();
     }
 
+    /// <summary>
+    /// Issue #1787: SSOT の全操作種別を実際に xlsx へ書き出して検証する。
+    /// </summary>
+    /// <remarks>
+    /// テストデータを SSOT（<see cref="OperationLogDisplayNames.ActionEntries"/>）から導出することで、
+    /// 操作種別を追加したとき本テストが自動的にその行を通す。かつては 6 種別をリテラルで並べていたため
+    /// IMPORT / EXPORT / BACKUP が <c>WriteDataRow</c> を一度も通らなかった。
+    /// これらは <c>GetActionColor</c> が null を返す唯一の経路であり、payload も
+    /// <c>BulkOperationFieldNames</c> 側でしか解決されない特殊形状のため、
+    /// 色設定・変更前/変更後セルの整形が壊れても緑のまま通っていた。
+    /// </remarks>
     [Fact]
     public async Task ExportAsync_AllActionTypes_全操作種別が正しくエクスポート()
     {
         var filePath = Path.Combine(_testDirectory, "all_actions.xlsx");
-        var logs = new List<OperationLog>
-        {
-            CreateLog(1, "INSERT", "staff"),
-            CreateLog(2, "UPDATE", "ic_card"),
-            CreateLog(3, "DELETE", "ledger"),
-            CreateLog(4, "RESTORE", "staff"),
-            CreateLog(5, "MERGE", "ledger"),
-            CreateLog(6, "SPLIT", "ledger"),
-        };
+        var actions = OperationLogDisplayNames.ActionEntries.ToList();
+        var logs = actions
+            .Select((entry, index) => CreateLog(index + 1, entry.Key, "ledger"))
+            .ToList();
 
         await _service.ExportAsync(logs, filePath);
 
         using var workbook = new XLWorkbook(filePath);
         var worksheet = workbook.Worksheets.First();
 
-        worksheet.Cell(2, 2).Value.ToString().Should().Be("登録");
-        worksheet.Cell(3, 2).Value.ToString().Should().Be("更新");
-        worksheet.Cell(4, 2).Value.ToString().Should().Be("削除");
-        worksheet.Cell(5, 2).Value.ToString().Should().Be("復元");
-        worksheet.Cell(6, 2).Value.ToString().Should().Be("統合");
-        worksheet.Cell(7, 2).Value.ToString().Should().Be("分割");
+        for (var i = 0; i < actions.Count; i++)
+        {
+            var row = i + 2; // 1 行目はヘッダー
+            worksheet.Cell(row, 2).Value.ToString().Should().Be(
+                actions[i].Value,
+                $"操作種別 {actions[i].Key} の行が日本語表示名で出力される必要がある");
+        }
 
         // WrapText が有効であること
         worksheet.Cell(2, 7).Style.Alignment.WrapText.Should().BeTrue();
+    }
+
+    /// <summary>
+    /// Issue #1787: 一括操作（IMPORT / EXPORT / BACKUP）の payload が「変更後」列へ整形されること。
+    /// </summary>
+    /// <remarks>
+    /// 上のテストは操作種別セル（B列）しか見ないため、payload 整形の破損は捕まえられない。
+    /// これらの行は色付けされない（GetActionColor が null）唯一の経路でもあるため併せて固定する。
+    /// </remarks>
+    [Theory]
+    [InlineData("IMPORT", "ic_card", @"{""FilePath"":""C:\\temp\\cards.csv"",""FileName"":""cards.csv"",""InsertedCount"":3}", "登録件数: 3")]
+    [InlineData("EXPORT", "operation_log", @"{""FilePath"":""C:\\temp\\log.xlsx"",""FileName"":""log.xlsx"",""RecordCount"":120}", "出力件数: 120")]
+    [InlineData("BACKUP", "database", @"{""FilePath"":""C:\\temp\\iccard.db"",""FileName"":""iccard.db""}", "ファイル名: iccard.db")]
+    public async Task ExportAsync_一括操作のpayloadが変更後列へ整形されること(
+        string action, string targetTable, string afterJson, string expectedFragment)
+    {
+        var filePath = Path.Combine(_testDirectory, $"bulk_{action}.xlsx");
+        var log = new OperationLog
+        {
+            Id = 1,
+            Timestamp = new DateTime(2026, 8, 11, 10, 0, 0),
+            Action = action,
+            TargetTable = targetTable,
+            TargetId = "dummy",
+            OperatorName = "テスト管理者",
+            OperatorIdm = "OPERATOR001",
+            BeforeData = null,
+            AfterData = afterJson
+        };
+
+        await _service.ExportAsync(new[] { log }, filePath);
+
+        using var workbook = new XLWorkbook(filePath);
+        var worksheet = workbook.Worksheets.First();
+
+        worksheet.Cell(2, 8).Value.ToString().Should().Contain("ファイルパス: ");
+        worksheet.Cell(2, 8).Value.ToString().Should().Contain(expectedFragment);
+        // 一括操作は色付けの対象外（既定の文字色のまま太字にしない）
+        worksheet.Cell(2, 2).Style.Font.Bold.Should().BeFalse();
     }
 
     #endregion

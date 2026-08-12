@@ -8,6 +8,74 @@ using ICCardManager.Models;
 
 namespace ICCardManager.Services
 {
+    /// <summary>
+    /// 操作ログの操作種別・対象テーブルの表示名マッピング（Issue #1787）
+    /// </summary>
+    /// <remarks>
+    /// 表示名の Single Source of Truth。画面（OperationLogSearchViewModel の一覧表示・絞り込みコンボ・
+    /// 詳細サマリー）と Excel（OperationLogExcelExportService）はすべてここへ委譲する。
+    /// <see cref="OperationLogger.Actions"/> / <see cref="OperationLogger.Tables"/> へ定数を追加したら
+    /// 本クラスのエントリにも追加すること（漏れは OperationLogDisplayNamesTests の
+    /// 定数リフレクション走査テストが検出する）。
+    /// </remarks>
+    public static class OperationLogDisplayNames
+    {
+        /// <summary>操作種別の表示名（コンボの表示順を兼ねる順序付きリスト）</summary>
+        public static IReadOnlyList<KeyValuePair<string, string>> ActionEntries { get; } =
+            new[]
+            {
+                new KeyValuePair<string, string>(OperationLogger.Actions.Insert, "登録"),
+                new KeyValuePair<string, string>(OperationLogger.Actions.Update, "更新"),
+                new KeyValuePair<string, string>(OperationLogger.Actions.Delete, "削除"),
+                new KeyValuePair<string, string>(OperationLogger.Actions.Restore, "復元"),
+                new KeyValuePair<string, string>(OperationLogger.Actions.Merge, "統合"),
+                new KeyValuePair<string, string>(OperationLogger.Actions.Split, "分割"),
+                new KeyValuePair<string, string>(OperationLogger.Actions.Import, "インポート"),
+                new KeyValuePair<string, string>(OperationLogger.Actions.Export, "エクスポート"),
+                new KeyValuePair<string, string>(OperationLogger.Actions.Backup, "バックアップ"),
+            };
+
+        /// <summary>対象テーブルの表示名（コンボの表示順を兼ねる順序付きリスト）</summary>
+        /// <remarks>
+        /// ledger_detail の「利用明細」は <c>DatabaseException.GetEntityDisplayName</c> と同じ訳語にしている。
+        /// ただし ledger は本表が「利用履歴」、同メソッドが「出納記録」で**意図的に異なる**:
+        /// 操作ログ画面は職員が日々の貸出・返却を追う文脈、DB エラーダイアログは帳票の元帳を指す文脈で、
+        /// 画面ごとに定着した呼称を優先している。両者を統合するなら用語集（00_用語集）の改訂を伴うため、
+        /// ここで片方へ寄せない（Issue #1787 のコードレビューで検出）。
+        /// </remarks>
+        public static IReadOnlyList<KeyValuePair<string, string>> TableEntries { get; } =
+            new[]
+            {
+                new KeyValuePair<string, string>(OperationLogger.Tables.Staff, "職員"),
+                new KeyValuePair<string, string>(OperationLogger.Tables.IcCard, "交通系ICカード"),
+                new KeyValuePair<string, string>(OperationLogger.Tables.Ledger, "利用履歴"),
+                new KeyValuePair<string, string>(OperationLogger.Tables.LedgerDetail, "利用明細"),
+                new KeyValuePair<string, string>(OperationLogger.Tables.Database, "データベース"),
+                new KeyValuePair<string, string>(OperationLogger.Tables.OperationLog, "操作ログ"),
+            };
+
+        private static readonly Dictionary<string, string> ActionMap = BuildMap(ActionEntries);
+        private static readonly Dictionary<string, string> TableMap = BuildMap(TableEntries);
+
+        /// <summary>操作種別の表示名を取得（未知の値は生値、null は空文字）</summary>
+        public static string GetActionDisplayName(string? action) =>
+            action != null && ActionMap.TryGetValue(action, out var name) ? name : action ?? "";
+
+        /// <summary>対象テーブルの表示名を取得（未知の値は生値、null は空文字）</summary>
+        public static string GetTableDisplayName(string? targetTable) =>
+            targetTable != null && TableMap.TryGetValue(targetTable, out var name) ? name : targetTable ?? "";
+
+        private static Dictionary<string, string> BuildMap(IReadOnlyList<KeyValuePair<string, string>> entries)
+        {
+            var map = new Dictionary<string, string>(entries.Count);
+            foreach (var entry in entries)
+            {
+                map.Add(entry.Key, entry.Value);
+            }
+            return map;
+        }
+    }
+
 /// <summary>
     /// 操作ログ記録サービス
     /// </summary>
@@ -65,6 +133,8 @@ namespace ICCardManager.Services
             // Issue #1302: 一括操作対象
             public const string LedgerDetail = "ledger_detail";
             public const string Database = "database";
+            // Issue #1787: 操作ログ自身の Excel 書き出し（個人情報の持ち出し）を EXPORT として記録する対象
+            public const string OperationLog = "operation_log";
         }
 
         public OperationLogger(
