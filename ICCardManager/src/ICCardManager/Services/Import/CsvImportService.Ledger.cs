@@ -269,7 +269,7 @@ namespace ICCardManager.Services
                     }
                     else
                     {
-                        scope.Rollback();
+                        TryRollbackImportTransaction(scope);
                         // ImportedCount は importedCount + updatedCount のため両方を戻す
                         importedCount = 0;
                         updatedCount = 0;
@@ -277,18 +277,21 @@ namespace ICCardManager.Services
                 }
                 catch (SQLiteException ex)
                 {
-                    scope.Rollback();
+                    // ログはロールバックより先に書く。ROLLBACK 自体が失敗すると
+                    // その二次例外が本来の失敗要因を置き換えて抜け、この LogError も
+                    // DatabaseException へのラップも実行されない（TryRollbackImportTransaction の remarks 参照）。
                     // Issue #1282: SQLiteException は DatabaseException へラップして詳細を保持
                     _logger?.LogError(ex,
                         "履歴CSVインポートのトランザクション中に SQLite エラーが発生しロールバック");
+                    TryRollbackImportTransaction(scope);
                     throw DatabaseException.QueryFailed("CSV import transaction", ex);
                 }
                 catch (Exception ex)
                 {
-                    scope.Rollback();
                     // Issue #1282: 想定外の例外も握りつぶさずログに記録してから再スロー
                     _logger?.LogError(ex,
                         "履歴CSVインポートのトランザクション中に想定外の例外が発生しロールバック");
+                    TryRollbackImportTransaction(scope);
                     throw;
                 }
 

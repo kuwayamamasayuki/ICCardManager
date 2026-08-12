@@ -365,6 +365,62 @@ SELECT last_insert_rowid();";
     }
 
     /// <summary>
+    /// ロールバック自体が失敗しても、本来の失敗要因の文言が返ること。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>catch</c> の中で素の <c>scope.Rollback()</c> を呼ぶと、ロールバックの二次例外が
+    /// <b>本来の失敗要因を置き換えて</b> 抜けてしまい、その catch に書いた <c>LogError</c> も
+    /// <c>DatabaseException</c> へのラップも実行されない。結果、
+    /// <c>ToUserFacingErrorMessage</c> の <c>default</c> 分岐に落ちて
+    /// 「予期しないエラーが発生しました: No transaction is active on this connection」という
+    /// 生の英語メッセージが UI へ出る（Issue #1614 違反）。
+    /// </para>
+    /// <para>
+    /// ロールバックが失敗する状況は実在する。<c>COMMIT</c> が SQLITE_BUSY 等で失敗すると
+    /// SQLite 側は既に自動ロールバック済みで <c>SQLiteTransaction</c> が無効化されており、
+    /// 続けて <c>Rollback()</c> を呼ぶと <see cref="InvalidOperationException"/> になる。
+    /// 共有フォルダーモードの接続断でも同様。ここでは同じ状態
+    /// （＝トランザクションが既に巻き戻っている）を、書き込み失敗の直前に
+    /// テスト側から <c>Rollback()</c> して再現する。
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task ImportLedgersAsync_ロールバックも失敗_本来の失敗要因の文言が返ること()
+    {
+        // Arrange
+        await SeedCardAsync();
+        var filePath = await WriteThreeRowCsvAsync("ledgers_rollback_also_fails.csv");
+        var counter = new InsertCounter();
+        var (service, _) = CreateServiceOverRealRepository(counter, (callNumber, ledger, transaction) =>
+        {
+            if (callNumber != 2)
+            {
+                return _realLedgerRepository.InsertAsync(ledger, transaction);
+            }
+
+            // トランザクションを先に巻き戻しておく。以降 SUT 側の Rollback() は
+            // InvalidOperationException になる（COMMIT 失敗後・接続断後と同じ状態）
+            transaction.Rollback();
+            throw new SQLiteException(SQLiteErrorCode.Busy, "database is locked");
+        });
+
+        // Act
+        var result = await service.ImportLedgersAsync(filePath);
+
+        // Assert
+        result.Success.Should().BeFalse();
+        (await CountLedgerRowsAsync()).Should().Be(0, "巻き戻っている以上、1行も残らないこと");
+        result.ErrorMessage.Should().NotContain("予期しないエラー",
+            "ロールバックの二次例外が本来の失敗要因を置き換えて default 分岐へ落ちていないこと");
+        result.ErrorMessage.Should().NotContain("No transaction is active",
+            "ロールバック失敗の生の英語メッセージを UI へ出さない（Issue #1614）");
+        result.ErrorMessage.Should().NotContain("database is locked",
+            "本来の失敗要因も生のままは出さない（Issue #1614）");
+        result.ErrorMessage.Should().EndWith("ください。", "行動指示で終わること（error-messages.md）");
+    }
+
+    /// <summary>
     /// すべて成功した場合はコミットされ、全行が台帳へ確定すること。
     /// </summary>
     /// <remarks>

@@ -1321,6 +1321,88 @@ public class DataExportImportViewModelTests : IDisposable
     }
 
     /// <summary>
+    /// 1件も登録されなかった場合、見出しが「完了」と述べないこと（Issue #1745）
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 従来この分岐は無条件に「部分成功」とみなし、タイトル・本文とも
+    /// 「インポート完了（一部エラー）」「インポートが完了しましたが」と表示していた。
+    /// 本文の <c>BuildPartialImportGuidance(0)</c> は正しく「登録が確定した行はありません」と
+    /// 述べるため、見出しと本文が同一ダイアログ内で矛盾し、職員はデータが入ったのか判断できない
+    /// （見出しと実態を一致させる、Issue #1783 と同じ判断）。
+    /// </para>
+    /// <para>
+    /// Issue #1745 で利用履歴のインポートがトランザクション化され、カード／職員と同様に
+    /// 1件でも失敗すれば全件ロールバックするようになったため、<c>ImportedCount = 0</c> は
+    /// 例外的な形ではなく**通常の失敗形**になった。管理者マニュアル §5.6.5 も
+    /// 「1件も登録されません」と案内しており、その案内と画面が食い違わないようにする。
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task ExecuteImportAsync_1件も登録されていなければ完了と表示しないこと()
+    {
+        // Arrange
+        SetupValidPreview();
+        _importServiceMock
+            .Setup(s => s.ImportCardsAsync(It.IsAny<string>(), It.IsAny<bool>()))
+            .ReturnsAsync(CreatePartialSuccessResult(importedCount: 0, errorCount: 2));
+
+        string warningMessage = null;
+        string warningTitle = null;
+        _dialogServiceMock
+            .Setup(d => d.ShowWarning(It.IsAny<string>(), It.IsAny<string>()))
+            .Callback<string, string>((message, title) =>
+            {
+                warningMessage = message;
+                warningTitle = title;
+            });
+
+        // Act
+        await _viewModel.ExecuteImportAsync();
+
+        // Assert: ダイアログのタイトル・本文とも「完了」と述べない
+        warningTitle.Should().NotBeNull();
+        warningTitle.Should().NotContain("完了", "1件も書き込まれていないため完了ではない");
+        warningTitle.Should().Contain("中断");
+        warningMessage.Should().NotContain("完了", "本文の「登録が確定した行はありません」と矛盾させない");
+        warningMessage.Should().Contain("2件", "エラー件数は伝える");
+
+        // Assert: ステータス欄も同様。取り込めていない以上エラー表示にする
+        _viewModel.StatusMessage.Should().NotContain("完了");
+        _viewModel.IsStatusError.Should().BeTrue("1件も取り込めていないため成功色で表示しない");
+    }
+
+    /// <summary>
+    /// 1件でも登録が確定していれば従来どおり「完了（一部エラー）」と表示すること（Issue #1745）
+    /// </summary>
+    /// <remarks>
+    /// 失敗側だけを固定すると、実装が「常に中断と表示する」へ退化しても検出できない。
+    /// 利用履歴詳細のインポートはトランザクションを持たず部分成功し得るため、この経路は実在する。
+    /// </remarks>
+    [Fact]
+    public async Task ExecuteImportAsync_1件でも登録されていれば完了と表示すること()
+    {
+        // Arrange
+        SetupValidPreview();
+        _importServiceMock
+            .Setup(s => s.ImportCardsAsync(It.IsAny<string>(), It.IsAny<bool>()))
+            .ReturnsAsync(CreatePartialSuccessResult(importedCount: 1, errorCount: 2));
+
+        string warningTitle = null;
+        _dialogServiceMock
+            .Setup(d => d.ShowWarning(It.IsAny<string>(), It.IsAny<string>()))
+            .Callback<string, string>((_, title) => warningTitle = title);
+
+        // Act
+        await _viewModel.ExecuteImportAsync();
+
+        // Assert
+        warningTitle.Should().Contain("完了", "書き込みが確定しているため完了として通知する");
+        warningTitle.Should().NotContain("中断");
+        _viewModel.IsStatusError.Should().BeFalse("確定した行があるためエラー色にはしない");
+    }
+
+    /// <summary>
     /// 直接インポートは部分成功でもプレビューを破棄すること（Issue #1782）
     /// </summary>
     /// <remarks>

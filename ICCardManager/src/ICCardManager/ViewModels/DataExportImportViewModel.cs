@@ -838,14 +838,25 @@ public partial class DataExportImportViewModel : ViewModelBase
             return () => _dialogService.ShowError(errorMessage, "インポートエラー");
         }
 
-        // ここから先は部分成功（一部エラー）。書き込みは確定しているため警告として通知する。
-        var partialStatusMessage =
-            $"インポート完了（一部エラー）: {result.ImportedCount}件を登録、{result.ErrorCount}件がエラー";
+        // ここから先はエラー付きの終了。「登録が確定した行があるか」で文言を分ける（Issue #1745）。
+        //
+        // 従来はこの分岐を無条件に「部分成功」とみなし「インポート完了（一部エラー）」と表示していたが、
+        // ledger のインポートがトランザクション化され（#1745）、カード／職員と同様に
+        // 1件でも失敗すれば全件ロールバックするようになったため、ImportedCount=0 が通常の失敗形になった。
+        // 「完了しました」の見出しの隣で本文が「登録が確定した行はありません」と述べる自己矛盾になり、
+        // 職員はデータが入ったのか判断できない（見出しと実態を一致させる、Issue #1783 と同じ判断）。
+        //
+        // 新しい条件式を立てず、既に「書き込みが確定したか」を表している importCommitted に相乗りさせる
+        // （同じ判断を2か所に分けない、Issue #1728）。この分岐では Success=false のため
+        // importCommitted は ImportedCount > 0 と等価になる。
+        var partialStatusMessage = importCommitted
+            ? $"インポート完了（一部エラー）: {result.ImportedCount}件を登録、{result.ErrorCount}件がエラー"
+            : $"インポートを中断しました: {result.ErrorCount}件がエラー（登録0件）";
         if (result.SkippedCount > 0)
         {
             partialStatusMessage += $"、{result.SkippedCount}件はスキップ";
         }
-        SetStatus(partialStatusMessage, false);
+        SetStatus(partialStatusMessage, !importCommitted);
 
         // エラー詳細を追加
         foreach (var error in result.Errors.Take(10))
@@ -866,12 +877,16 @@ public partial class DataExportImportViewModel : ViewModelBase
         }
 
         var partialWarningMessage =
-            $"インポートが完了しましたが、一部エラーがあります。\n\n登録件数: {result.ImportedCount}件\nエラー: {result.ErrorCount}件"
+            (importCommitted
+                ? $"インポートが完了しましたが、一部エラーがあります。\n\n登録件数: {result.ImportedCount}件\nエラー: {result.ErrorCount}件"
+                : $"エラーがあったため、インポートを中断しました。\n\nエラー: {result.ErrorCount}件")
             + (result.SkippedCount > 0 ? $"\nスキップ: {result.SkippedCount}件" : "")
             + BuildPartialImportGuidance(result.ImportedCount)
             + (partialAuditLogged ? "" : AuditLogFailureNotice)
             + discardedPreviewNotice;
-        return () => _dialogService.ShowWarning(partialWarningMessage, "インポート完了（一部エラー）");
+        return () => _dialogService.ShowWarning(
+            partialWarningMessage,
+            importCommitted ? "インポート完了（一部エラー）" : "インポートを中断しました");
     }
 
     /// <summary>
