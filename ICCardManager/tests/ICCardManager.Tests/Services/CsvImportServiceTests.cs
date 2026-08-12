@@ -1,6 +1,7 @@
 using System.IO;
 using System.Text;
 using FluentAssertions;
+using ICCardManager.Common.Exceptions;
 using ICCardManager.Data;
 using ICCardManager.Data.Repositories;
 using ICCardManager.Infrastructure.Caching;
@@ -2508,6 +2509,204 @@ FEDCBA9876543210,鈴木花子,002,テスト2";
 
         // Assert
         lines.Should().BeEmpty();
+    }
+
+    #endregion
+
+    #region Issue #1744: CSVインポートの文字コード判別
+
+    /// <summary>Shift_JIS（cp932）でCSVファイルを書き出す</summary>
+    private string WriteShiftJisCsv(string fileName, string content)
+    {
+        var filePath = Path.Combine(_testDirectory, fileName);
+        File.WriteAllBytes(filePath, Encoding.GetEncoding(932).GetBytes(content));
+        return filePath;
+    }
+
+    /// <summary>UTF-8 でも Shift_JIS でも復号できないバイト列のCSVを書き出す</summary>
+    private string WriteUndecidableCsv(string fileName)
+    {
+        var filePath = Path.Combine(_testDirectory, fileName);
+        // 0x82 は Shift_JIS のリードバイトだが 0x20 は正当なトレイルバイトではなく、
+        // UTF-8 としても 0x82 単独は不正。どちらの候補でも復号できない。
+        File.WriteAllBytes(filePath, new byte[] { 0x82, 0x20, 0x0A, 0x82, 0x20 });
+        return filePath;
+    }
+
+    [Fact]
+    public async Task ReadCsvFileAsync_BOM無しShiftJISのファイルを文字化けせずに読み取れること()
+    {
+        // Arrange: 日本語版 Excel で「CSV（コンマ区切り）」保存すると BOM 無し Shift_JIS になる
+        var filePath = WriteShiftJisCsv(
+            "sjis_no_bom.csv",
+            "職員IDm,氏名,職員番号,備考\n0123456789ABCDEF,山田太郎,001,福岡市役所");
+
+        // Act
+        var lines = await CsvImportService.ReadCsvFileAsync(filePath);
+
+        // Assert
+        lines.Should().HaveCount(2);
+        lines[0].Should().Be("職員IDm,氏名,職員番号,備考");
+        lines[1].Should().Be("0123456789ABCDEF,山田太郎,001,福岡市役所");
+        lines[1].Should().NotContain("�");
+    }
+
+    [Fact]
+    public async Task ReadCsvFileAsync_文字コードを判別できないファイルは例外を投げること()
+    {
+        // Arrange
+        var filePath = WriteUndecidableCsv("undecidable.csv");
+
+        // Act
+        var act = async () => await CsvImportService.ReadCsvFileAsync(filePath);
+
+        // Assert: 生の例外メッセージではなくユーザー向け文言を持つ例外であること（Issue #1614）
+        var exception = await act.Should().ThrowAsync<FileOperationException>();
+        exception.Which.UserFriendlyMessage.Should().Contain("文字コード");
+        exception.Which.UserFriendlyMessage.Should().EndWith("インポートしてください。");
+    }
+
+    [Fact]
+    public void 文字コード判別不能のエラー文言がエラーメッセージ品質基準を満たすこと()
+    {
+        // Issue #1275 の「何が／なぜ／どうすれば」3要素を固定する
+        var message = FileOperationException
+            .UndecidableEncoding(@"C:\work\staff_20260812.csv").UserFriendlyMessage;
+
+        message.Should().Contain("文字コード");            // 何が
+        message.Should().Contain("UTF-8");                 // なぜ（判別に用いた候補を示す）
+        message.Should().Contain("Shift_JIS");
+        message.Should().Contain("CSV UTF-8");             // どうすれば（Excel の保存形式名）
+        message.Should().EndWith("してください。");         // 行動指示型で終わる
+        message.Length.Should().BeGreaterOrEqualTo(20);
+        message.Should().NotContain("エラーが発生しました");
+        message.Should().NotContain("不正な値");
+        // 内部情報（ファイルパス）をユーザー向け文言へ露出しない（Issue #1614）
+        message.Should().NotContain(@"C:\work");
+    }
+
+    [Fact]
+    public async Task ImportStaffAsync_BOM無しShiftJISのCSVでも氏名が文字化けせずDBへ渡ること()
+    {
+        // Arrange: Issue #1744 の故障シナリオ（Excel で再保存された職員CSVの取り込み）
+        var filePath = WriteShiftJisCsv(
+            "staff_sjis.csv",
+            "職員IDm,氏名,職員番号,備考\n0123456789ABCDEF,山田太郎,001,交通課");
+
+        Staff? inserted = null;
+        _staffRepositoryMock.Setup(x => x.GetByIdmAsync(It.IsAny<string>(), true)).ReturnsAsync((Staff?)null);
+        _staffRepositoryMock
+            .Setup(x => x.InsertAsync(It.IsAny<Staff>(), It.IsAny<SQLiteTransaction>()))
+            .Callback<Staff, SQLiteTransaction>((s, _) => inserted = s)
+            .ReturnsAsync(true);
+
+        // Act
+        var result = await _service.ImportStaffAsync(filePath);
+
+        // Assert: 文字化けした氏名がそのまま staff へ書き込まれていた退行を固定する
+        result.Success.Should().BeTrue();
+        result.ImportedCount.Should().Be(1);
+        inserted.Should().NotBeNull();
+        inserted!.Name.Should().Be("山田太郎");
+        inserted.Note.Should().Be("交通課");
+    }
+
+    [Fact]
+    public async Task ImportStaffAsync_文字コードを判別できないCSVは行動指示付きのエラーで中断すること()
+    {
+        // Arrange
+        var filePath = WriteUndecidableCsv("staff_undecidable.csv");
+
+        // Act
+        var result = await _service.ImportStaffAsync(filePath);
+
+        // Assert
+        result.Success.Should().BeFalse();
+        result.ErrorMessage.Should().Contain("文字コード");
+        result.ErrorMessage.Should().EndWith("インポートしてください。");
+        result.ErrorMessage.Should().NotContain("予期しないエラー");
+        _staffRepositoryMock.Verify(
+            x => x.InsertAsync(It.IsAny<Staff>(), It.IsAny<SQLiteTransaction>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task PreviewStaffAsync_文字コードを判別できないCSVは行動指示付きのエラーを返すこと()
+    {
+        // Arrange
+        var filePath = WriteUndecidableCsv("preview_undecidable.csv");
+
+        // Act
+        var result = await _service.PreviewStaffAsync(filePath);
+
+        // Assert
+        result.IsValid.Should().BeFalse();
+        result.ErrorMessage.Should().Contain("文字コード");
+        result.ErrorMessage.Should().EndWith("インポートしてください。");
+        result.ErrorMessage.Should().NotContain("予期しないエラー");
+    }
+
+    [Fact]
+    public async Task ImportLedgersAsync_文字コードを判別できないCSVは行動指示付きのエラーで中断すること()
+    {
+        // Arrange: 利用履歴の経路は共通ハンドラーではなく独自の catch 連鎖を持つため個別に固定する
+        var filePath = WriteUndecidableCsv("ledger_undecidable.csv");
+
+        // Act
+        var result = await _service.ImportLedgersAsync(filePath);
+
+        // Assert
+        result.Success.Should().BeFalse();
+        result.ErrorMessage.Should().Contain("文字コード");
+        result.ErrorMessage.Should().EndWith("インポートしてください。");
+        result.ErrorMessage.Should().NotContain("予期しないエラー");
+    }
+
+    [Fact]
+    public async Task PreviewLedgersAsync_文字コードを判別できないCSVは行動指示付きのエラーを返すこと()
+    {
+        // Arrange
+        var filePath = WriteUndecidableCsv("ledger_preview_undecidable.csv");
+
+        // Act
+        var result = await _service.PreviewLedgersAsync(filePath);
+
+        // Assert
+        result.IsValid.Should().BeFalse();
+        result.ErrorMessage.Should().Contain("文字コード");
+        result.ErrorMessage.Should().EndWith("インポートしてください。");
+        result.ErrorMessage.Should().NotContain("予期しないエラー");
+    }
+
+    [Fact]
+    public async Task ImportLedgerDetailsAsync_文字コードを判別できないCSVは行動指示付きのエラーで中断すること()
+    {
+        // Arrange
+        var filePath = WriteUndecidableCsv("detail_undecidable.csv");
+
+        // Act
+        var result = await _service.ImportLedgerDetailsAsync(filePath);
+
+        // Assert
+        result.Success.Should().BeFalse();
+        result.ErrorMessage.Should().Contain("文字コード");
+        result.ErrorMessage.Should().EndWith("インポートしてください。");
+        result.ErrorMessage.Should().NotContain("予期しないエラー");
+    }
+
+    [Fact]
+    public async Task ImportCardsAsync_文字コードを判別できないCSVは行動指示付きのエラーで中断すること()
+    {
+        // Arrange
+        var filePath = WriteUndecidableCsv("card_undecidable.csv");
+
+        // Act
+        var result = await _service.ImportCardsAsync(filePath);
+
+        // Assert
+        result.Success.Should().BeFalse();
+        result.ErrorMessage.Should().Contain("文字コード");
+        result.ErrorMessage.Should().EndWith("インポートしてください。");
+        result.ErrorMessage.Should().NotContain("予期しないエラー");
     }
 
     #endregion

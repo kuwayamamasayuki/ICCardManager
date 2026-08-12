@@ -6,6 +6,7 @@ using System.IO;
 using System.Security;
 using System.Text;
 using System.Text.RegularExpressions;
+using ICCardManager.Common;
 using ICCardManager.Common.Exceptions;
 using ICCardManager.Data;
 using ICCardManager.Data.Repositories;
@@ -219,18 +220,53 @@ namespace ICCardManager.Services
         /// CSVファイルを読み込み、行のリストとして返す
         /// </summary>
         /// <param name="filePath">CSVファイルパス</param>
-        internal static async Task<List<string>> ReadCsvFileAsync(string filePath)
+        /// <param name="logger">判別結果を記録するロガー（省略可）</param>
+        /// <remarks>
+        /// <para>
+        /// Issue #1744: 文字コードは <see cref="TextEncodingDetector"/> で判別する。
+        /// 従来は BOM 無しファイルを <see cref="Encoding.UTF8"/>（置換フォールバック）固定で復号していたため、
+        /// 日本語版 Excel が「CSV（コンマ区切り）」として保存し直した Shift_JIS ファイルの日本語が
+        /// U+FFFD へ置換され、化けたまま staff / ic_card / ledger へ書き込まれていた。
+        /// IDm・日付・金額は ASCII のため全バリデーションを素通りし、検出手段が無かった。
+        /// </para>
+        /// <para>
+        /// 判別できない場合は <see cref="FileOperationException.UndecidableEncoding"/> を投げて中断する。
+        /// 呼び出し元（<c>ExecuteImportWithErrorHandlingAsync</c> 等）がユーザー向け文言へ変換する。
+        /// </para>
+        /// </remarks>
+        /// <exception cref="FileOperationException">文字コードを判別できない場合</exception>
+        internal static async Task<List<string>> ReadCsvFileAsync(string filePath, ILogger logger = null)
         {
-            // UTF-8 with BOMに対応
             // FileShare.ReadWrite で開くことで、他プロセス（Excel等）がファイルを使用中でも読み込み可能にする
-            var fileStream = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
-            using var reader = new StreamReader(fileStream, Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
-            var lines = new List<string>();
-
-            while (!reader.EndOfStream)
+            byte[] bytes;
+            using (var fileStream = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+            using (var buffer = new MemoryStream())
             {
-                var line = await reader.ReadLineAsync().ConfigureAwait(false);
-                if (line != null)
+                await fileStream.CopyToAsync(buffer).ConfigureAwait(false);
+                bytes = buffer.ToArray();
+            }
+
+            var decoded = TextEncodingDetector.Decode(bytes);
+            if (!decoded.IsDecoded)
+            {
+                throw FileOperationException.UndecidableEncoding(filePath);
+            }
+
+            // 障害調査で「どの文字コードとして読んだか」が分からないと、
+            // 文字化けの相談を受けたときに切り分けられない（LogDebug は本番で出力されない。Issue #1716）
+            if (decoded.Encoding != DetectedTextEncoding.Utf8WithBom && decoded.Encoding != DetectedTextEncoding.Utf8)
+            {
+                logger?.LogInformation(
+                    "CSVインポート: 文字コードを {Encoding} と判別しました（BOM無し）。File={FilePath}",
+                    TextEncodingDetector.GetDisplayName(decoded.Encoding), filePath);
+            }
+
+            // StringReader.ReadLine は StreamReader と同じく CR / LF / CRLF のいずれも行区切りとして扱う
+            var lines = new List<string>();
+            using (var reader = new StringReader(decoded.Text))
+            {
+                string line;
+                while ((line = reader.ReadLine()) != null)
                 {
                     lines.Add(line);
                 }
@@ -272,6 +308,17 @@ namespace ICCardManager.Services
                 {
                     Success = false,
                     ErrorMessage = "ファイルへのアクセス権限がありません。",
+                    Errors = errors
+                };
+            }
+            // Issue #1744: 文字コード判別不能など、整備済みのユーザー向け文言を持つファイル操作例外。
+            // 生の ex.Message を出さないよう IOException / Exception より先に捕捉する（Issue #1614）
+            catch (FileOperationException ex)
+            {
+                return new CsvImportResult
+                {
+                    Success = false,
+                    ErrorMessage = ex.UserFriendlyMessage,
                     Errors = errors
                 };
             }
@@ -335,6 +382,17 @@ namespace ICCardManager.Services
                 {
                     IsValid = false,
                     ErrorMessage = "ファイルへのアクセス権限がありません。",
+                    Errors = errors
+                };
+            }
+            // Issue #1744: 文字コード判別不能など、整備済みのユーザー向け文言を持つファイル操作例外。
+            // 生の ex.Message を出さないよう IOException / Exception より先に捕捉する（Issue #1614）
+            catch (FileOperationException ex)
+            {
+                return new CsvImportPreviewResult
+                {
+                    IsValid = false,
+                    ErrorMessage = ex.UserFriendlyMessage,
                     Errors = errors
                 };
             }

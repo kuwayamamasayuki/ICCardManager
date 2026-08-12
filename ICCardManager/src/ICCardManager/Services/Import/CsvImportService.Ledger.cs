@@ -29,7 +29,7 @@ namespace ICCardManager.Services
 
             try
             {
-                var lines = await ReadCsvFileAsync(filePath).ConfigureAwait(false);
+                var lines = await ReadCsvFileAsync(filePath, _logger).ConfigureAwait(false);
                 if (lines.Count < 2)
                 {
                     return new CsvImportResult
@@ -277,6 +277,16 @@ namespace ICCardManager.Services
                     Errors = errors
                 };
             }
+            // Issue #1744: 文字コード判別不能など、整備済みのユーザー向け文言を持つファイル操作例外
+            catch (FileOperationException ex)
+            {
+                return new CsvImportResult
+                {
+                    Success = false,
+                    ErrorMessage = ex.UserFriendlyMessage,
+                    Errors = errors
+                };
+            }
             catch (IOException ex)
             {
                 return new CsvImportResult
@@ -315,7 +325,7 @@ namespace ICCardManager.Services
 
             try
             {
-                var lines = await ReadCsvFileAsync(filePath).ConfigureAwait(false);
+                var lines = await ReadCsvFileAsync(filePath, _logger).ConfigureAwait(false);
                 if (lines.Count < 2)
                 {
                     return new CsvImportPreviewResult
@@ -493,6 +503,16 @@ namespace ICCardManager.Services
                 {
                     IsValid = false,
                     ErrorMessage = "ファイルへのアクセス権限がありません。",
+                    Errors = errors
+                };
+            }
+            // Issue #1744: 文字コード判別不能など、整備済みのユーザー向け文言を持つファイル操作例外
+            catch (FileOperationException ex)
+            {
+                return new CsvImportPreviewResult
+                {
+                    IsValid = false,
+                    ErrorMessage = ex.UserFriendlyMessage,
                     Errors = errors
                 };
             }

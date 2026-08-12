@@ -39,7 +39,7 @@ namespace ICCardManager.Services
             var importedCount = 0;
             var skippedCount = 0;
 
-            var lines = await ReadCsvFileAsync(filePath).ConfigureAwait(false);
+            var lines = await ReadCsvFileAsync(filePath, _logger).ConfigureAwait(false);
             if (lines.Count < 2)
             {
                 return new CsvImportResult
@@ -259,7 +259,7 @@ namespace ICCardManager.Services
             var updateCount = 0;
             var skipCount = 0;
 
-            var lines = await ReadCsvFileAsync(filePath).ConfigureAwait(false);
+            var lines = await ReadCsvFileAsync(filePath, _logger).ConfigureAwait(false);
             if (lines.Count < 2)
             {
                 return new CsvImportPreviewResult
