@@ -371,7 +371,10 @@
                             <DataGridTextColumn Header="利用総額" Binding="{Binding TotalExpense, StringFormat='{}{0:N0}円'}" Width="1.2*"/>
                             <!-- 運用状況タブの「最終利用日」は全期間、こちらは集計期間内。
                                  同じ列名だと、期間を短くしたときに空欄と日付が食い違って見え、
-                                 どちらが正しいのか判断できなくなるため列名で範囲を明示する -->
+                                 どちらが正しいのか判断できなくなるため列名で範囲を明示する。
+                                 なお両タブとも「利用実績」（貸出中・新規購入・繰越を除く）のみを
+                                 数える点は同じ（Issue #1747。運用状況タブが最新レコード日を
+                                 表示していた頃は、登録しただけのカードで両タブが矛盾していた） -->
                             <DataGridTextColumn Header="期間内の最終利用日" Binding="{Binding LastUsageDate, StringFormat='{}{0:yyyy/MM/dd}'}" Width="1.5*"/>
                             <DataGridTextColumn Header="期間内の未使用日数" Binding="{Binding UnusedDays}" Width="1.3*"/>
                         </DataGrid.Columns>

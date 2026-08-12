@@ -787,6 +787,33 @@ ORDER BY l.card_idm ASC, l.date ASC, l.id ASC";
             "AND summary <> '新規購入' AND summary NOT LIKE '%月から繰越'";
 
         /// <inheritdoc/>
+        public async Task<Dictionary<string, DateTime>> GetAllLastUsageDatesAsync()
+        {
+            using var lease = await _dbContext.LeaseConnectionAsync().ConfigureAwait(false);
+            var connection = lease.Connection;
+            var result = new Dictionary<string, DateTime>();
+
+            using var command = connection.CreateCommand();
+            // Issue #1747: GetAllLatestBalancesAsync の LastUsageDate は貸出中プレースホルダ・
+            // 新規購入・繰越を除外しない「最新レコード日」で、登録しただけのカードが
+            // 「使われている」ように見える。最終利用日の表示にはこちらを使う。
+            // 残高が要らないため残高チェーン（Issue #1731）は不要で、MAX(date) だけでよい。
+            command.CommandText = $@"SELECT card_idm, MAX(date) AS last_usage
+FROM ledger
+WHERE is_lent_record = 0
+  {ExcludeCarryoverCondition}
+GROUP BY card_idm";
+
+            using var reader = await command.ExecuteReaderAsync().ConfigureAwait(false);
+            while (await reader.ReadAsync().ConfigureAwait(false))
+            {
+                result[reader.GetString(0)] = DateTime.Parse(reader.GetString(1));
+            }
+
+            return result;
+        }
+
+        /// <inheritdoc/>
         public async Task<IReadOnlyList<CardUsageStatsRow>> GetUsageStatsByCardAsync(DateTime fromDate, DateTime toDate)
         {
             using var lease = await _dbContext.LeaseConnectionAsync().ConfigureAwait(false);

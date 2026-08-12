@@ -74,6 +74,7 @@ namespace ICCardManager.Services
             var cards = FilterActiveCards(await _cardRepository.GetAllAsync().ConfigureAwait(false));
             var lentRecords = await _ledgerRepository.GetAllLentRecordsAsync().ConfigureAwait(false);
             var balances = await _ledgerRepository.GetAllLatestBalancesAsync().ConfigureAwait(false);
+            var lastUsageDates = await _ledgerRepository.GetAllLastUsageDatesAsync().ConfigureAwait(false);
             var staffNames = await BuildStaffNameMapAsync().ConfigureAwait(false);
 
             // Issue #1691: 帳票の出力状況は出力先フォルダのファイル走査（同期処理）で判定するため、
@@ -92,7 +93,14 @@ namespace ICCardManager.Services
             foreach (var card in cards)
             {
                 var balance = balances.TryGetValue(card.CardIdm, out var balanceInfo) ? balanceInfo.Balance : 0;
-                var lastUsageDate = balances.TryGetValue(card.CardIdm, out var usageInfo) ? usageInfo.LastUsageDate : null;
+
+                // Issue #1747: 最終利用日は残高とは別のクエリから取る。GetAllLatestBalancesAsync の
+                // LastUsageDate は貸出中・新規購入・繰越を含む「最新レコード日」で、登録しただけの
+                // カードが「使われている」ように見え、稼働状況タブ（利用実績のみ集計）と矛盾する。
+                // 利用実績が無いカードは辞書に載らないため null（画面では空欄）になる。
+                var lastUsageDate = lastUsageDates.TryGetValue(card.CardIdm, out var usageDate)
+                    ? usageDate
+                    : (DateTime?)null;
 
                 // 貸出中でないカードは、貸出中レコードが残っていても返却済みとして扱う。
                 // ic_card.is_lent = 0 なのに貸出中レコードが残る不整合は、共有モードで他 PC の

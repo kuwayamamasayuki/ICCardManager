@@ -49,6 +49,7 @@ public class AdminDashboardServiceTests
         IEnumerable<IcCard> cards = null,
         IEnumerable<Ledger> lentRecords = null,
         Dictionary<string, (int Balance, DateTime? LastUsageDate)> balances = null,
+        Dictionary<string, DateTime> lastUsageDates = null,
         IEnumerable<Staff> staff = null,
         AppSettings settings = null,
         IEnumerable<ReportExportStatus> reportStatuses = null)
@@ -61,6 +62,8 @@ public class AdminDashboardServiceTests
             .ReturnsAsync((lentRecords ?? Enumerable.Empty<Ledger>()).ToList());
         _ledgerRepository.Setup(r => r.GetAllLatestBalancesAsync())
             .ReturnsAsync(balances ?? new Dictionary<string, (int, DateTime?)>());
+        _ledgerRepository.Setup(r => r.GetAllLastUsageDatesAsync())
+            .ReturnsAsync(lastUsageDates ?? new Dictionary<string, DateTime>());
         _staffRepository.Setup(r => r.GetAllAsync())
             .ReturnsAsync(staff ?? new List<Staff>());
         _reportExportStatusService
@@ -313,14 +316,35 @@ public class AdminDashboardServiceTests
     [Fact]
     public async Task GetOperationStatusAsync_ReportsLastUsageDate()
     {
+        // Issue #1747: 最終利用日は残高クエリの「最新レコード日」ではなく、
+        // 利用実績（貸出中・繰越を除外した）クエリから取る
         var lastUsage = AsOf.AddDays(-5);
         SetupDefaults(
             cards: new[] { Card(CardA) },
-            balances: new Dictionary<string, (int, DateTime?)> { [CardA] = (12000, lastUsage) });
+            balances: new Dictionary<string, (int, DateTime?)> { [CardA] = (12000, null) },
+            lastUsageDates: new Dictionary<string, DateTime> { [CardA] = lastUsage });
 
         var card = (await CreateService().GetOperationStatusAsync(AsOf, AppConstants.LongTermUnreturnedDays)).Cards.Single();
 
         card.LastUsageDate.Should().Be(lastUsage);
+    }
+
+    [Fact]
+    public async Task GetOperationStatusAsync_DoesNotUseLatestRecordDateAsLastUsageDate()
+    {
+        // Issue #1747 故障シナリオ(1): 登録しただけのカードでは残高クエリの最新レコード日
+        //（＝新規購入日）が返るが、利用実績が無い以上、最終利用日は空欄にすべき。
+        // ここで残高側の日付へフォールバックすると同じバグが再発する。
+        var purchaseDate = AsOf.AddDays(-30);
+        SetupDefaults(
+            cards: new[] { Card(CardA) },
+            balances: new Dictionary<string, (int, DateTime?)> { [CardA] = (5000, purchaseDate) },
+            lastUsageDates: new Dictionary<string, DateTime>());
+
+        var card = (await CreateService().GetOperationStatusAsync(AsOf, AppConstants.LongTermUnreturnedDays)).Cards.Single();
+
+        card.LastUsageDate.Should().BeNull("利用実績の無いカードに最終利用日を表示してはいけない");
+        card.CurrentBalance.Should().Be(5000, "残高は繰越レコードも含む全レコードから取る（Issue #1747 で変えない側）");
     }
 
     #endregion
@@ -504,6 +528,8 @@ public class AdminDashboardServiceTests
             .Returns(() => probe.TrackAsync(new List<Ledger>()));
         _ledgerRepository.Setup(r => r.GetAllLatestBalancesAsync())
             .Returns(() => probe.TrackAsync(new Dictionary<string, (int Balance, DateTime? LastUsageDate)>()));
+        _ledgerRepository.Setup(r => r.GetAllLastUsageDatesAsync())
+            .Returns(() => probe.TrackAsync(new Dictionary<string, DateTime>()));
         _staffRepository.Setup(r => r.GetAllAsync())
             .Returns(() => probe.TrackAsync<IEnumerable<Staff>>(new List<Staff>()));
         _reportExportStatusService

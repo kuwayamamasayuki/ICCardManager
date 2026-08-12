@@ -309,6 +309,90 @@ public class LedgerRepositoryAggregationTests : IDisposable
 
     #endregion
 
+    #region GetAllLastUsageDatesAsync（Issue #1747）
+
+    [Fact]
+    public async Task GetAllLastUsageDatesAsync_WithEmptyDatabase_ReturnsEmpty()
+    {
+        var result = await _ledgerRepository.GetAllLastUsageDatesAsync();
+
+        result.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task GetAllLastUsageDatesAsync_ReturnsLatestUsageDatePerCard()
+    {
+        await SeedMastersAsync();
+        await InsertLedgerAsync(CardA, new DateTime(2026, 5, 10), expense: 210);
+        await InsertLedgerAsync(CardA, new DateTime(2026, 5, 25), expense: 300);
+        await InsertLedgerAsync(CardB, new DateTime(2026, 6, 1), expense: 500);
+
+        var result = await _ledgerRepository.GetAllLastUsageDatesAsync();
+
+        result[CardA].Should().Be(new DateTime(2026, 5, 25));
+        result[CardB].Should().Be(new DateTime(2026, 6, 1));
+    }
+
+    [Fact]
+    public async Task GetAllLastUsageDatesAsync_WithOnlyCarryoverRecords_DoesNotReportTheCard()
+    {
+        // Issue #1747 故障シナリオ(1): 登録しただけで一度も使っていないカードの
+        // 「新規購入」レコードの日付が、運用状況タブの最終利用日として表示されていた。
+        // 同じ画面の稼働状況タブは稼働率 0%・最終利用日空欄で並ぶため矛盾して見える。
+        await SeedMastersAsync();
+        foreach (var summary in CarryoverSummaries)
+        {
+            await InsertLedgerAsync(CardA, new DateTime(2026, 5, 1), income: 5000, summary: summary);
+        }
+
+        var result = await _ledgerRepository.GetAllLastUsageDatesAsync();
+
+        result.Should().NotContainKey(CardA, because: "繰越・新規購入は利用実績ではない");
+    }
+
+    [Fact]
+    public async Task GetAllLastUsageDatesAsync_IgnoresLentPlaceholderNewerThanUsage()
+    {
+        // Issue #1747 故障シナリオ(2): 貸出中プレースホルダは date=貸出日時 で最新行になるため、
+        // 「最終利用日」が「貸出日時」と同一になり、利用実績ゼロでも今日使ったように見えていた。
+        await SeedMastersAsync();
+        await InsertLedgerAsync(CardA, new DateTime(2026, 5, 10), expense: 210);
+        await InsertLedgerAsync(CardA, new DateTime(2026, 5, 20, 14, 30, 0), isLentRecord: true);
+
+        var result = await _ledgerRepository.GetAllLastUsageDatesAsync();
+
+        result[CardA].Should().Be(new DateTime(2026, 5, 10), "貸出中プレースホルダは利用実績ではない");
+    }
+
+    [Fact]
+    public async Task GetAllLastUsageDatesAsync_CountsChargeAsUsage()
+    {
+        // チャージは「カードが運用されている」証拠であり除外しない
+        // （GetUsageStatsByCardAsync / ExcludeCarryoverCondition と同じ判断）。
+        await SeedMastersAsync();
+        await InsertLedgerAsync(CardA, new DateTime(2026, 5, 12), income: 3000,
+            summary: SummaryGenerator.GetChargeSummary());
+
+        var result = await _ledgerRepository.GetAllLastUsageDatesAsync();
+
+        result[CardA].Should().Be(new DateTime(2026, 5, 12));
+    }
+
+    [Fact]
+    public async Task GetAllLastUsageDatesAsync_ReportsRealUsageAlongsideCarryover()
+    {
+        // 新規購入 → 実利用の順で記録された通常のカードでは実利用の日付が返る
+        await SeedMastersAsync();
+        await InsertLedgerAsync(CardA, new DateTime(2026, 5, 1), income: 5000, summary: "新規購入");
+        await InsertLedgerAsync(CardA, new DateTime(2026, 5, 10), expense: 210);
+
+        var result = await _ledgerRepository.GetAllLastUsageDatesAsync();
+
+        result[CardA].Should().Be(new DateTime(2026, 5, 10));
+    }
+
+    #endregion
+
     #region GetMonthlyUsageByLenderAsync
 
     [Fact]

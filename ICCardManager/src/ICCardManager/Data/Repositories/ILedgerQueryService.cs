@@ -109,6 +109,20 @@ namespace ICCardManager.Data.Repositories
             IEnumerable<string> cardIdms);
 
         /// <summary>
+        /// 全カードの最終利用日を一括取得（管理者ダッシュボードの運用状況用、Issue #1747）
+        /// </summary>
+        /// <remarks>
+        /// 「利用実績」の定義は稼働状況の集計（<see cref="GetUsageStatsByCardAsync"/>）と同じ:
+        /// 貸出中プレースホルダ（<c>is_lent_record = 1</c>）と繰越レコード
+        /// （「新規購入」「○月から繰越」）は利用実績ではないため除外する。
+        /// 利用実績が 1 件も無いカードは辞書に含まれない（最終利用日は空欄扱い）。
+        /// <see cref="GetAllLatestBalancesAsync"/> の LastUsageDate はこれらを除外しない
+        /// 「最新レコード日」であり、登録しただけのカードが「使われている」ように見えるため、
+        /// 利用実績の表示にはこちらを使うこと。
+        /// </remarks>
+        Task<Dictionary<string, DateTime>> GetAllLastUsageDatesAsync();
+
+        /// <summary>
         /// 指定期間のカード別利用実績を集計して取得（管理者ダッシュボードの稼働状況用、Issue #1692）
         /// </summary>
         /// <remarks>
