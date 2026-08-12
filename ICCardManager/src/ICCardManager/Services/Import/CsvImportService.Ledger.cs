@@ -12,6 +12,7 @@ using ICCardManager.Data.Repositories;
 using ICCardManager.Infrastructure.Caching;
 using ICCardManager.Models;
 using ICCardManager.Services.Import.Parsers;
+using Microsoft.Extensions.Logging;
 using System.Data.SQLite;
 
 namespace ICCardManager.Services
@@ -188,15 +189,34 @@ namespace ICCardManager.Services
                     ? await _ledgerRepository.GetExistingLedgerKeysAsync(uniqueCardIdms).ConfigureAwait(false)
                     : new HashSet<(string CardIdm, DateTime Date, string Summary, int Income, int Expense, int Balance)>();
 
-                // インポート実行（履歴はトランザクションなしで直接インポート）
-                foreach (var (lineNumber, ledger, isUpdate) in validRecords)
+                // Issue #1745: インポート実行はトランザクションで囲み「全か無か」で確定させる。
+                // 以前はここだけトランザクションを持たず（カード/職員インポートは Card.cs:157- /
+                // Staff.cs:151- で BeginTransactionAsync で囲んでいる）、tx を渡さない
+                // InsertAsync(Ledger) / UpdateAsync(Ledger) が autocommit で 1 行ずつ確定していた。
+                // 共有モードで他 PC のバックアップ等により途中行が SQLITE_BUSY で失敗すると、
+                // それ以前の行だけが台帳に残る。事前の ValidateBalanceConsistencyForLedgers は
+                // 「全行が入る前提」で残高チェーンを検証しているため、途中で切れた状態は
+                // 誰にも検証されないまま確定してしまう。
+                //
+                // tx は scope.Transaction を明示的に引き渡す（development-conventions.md の「①」経路）。
+                // BeginTransactionAsync は SemaphoreSlim(1,1) を取るため、リポジトリ側で入れ子に
+                // 開くと自己デッドロックする（Issue #1575）。HasActiveTransactionScope による
+                // 暗黙参加（②）は backstop であって正規手段ではない（Issue #1737）。
+                using var scope = await _dbContext.BeginTransactionAsync().ConfigureAwait(false);
+                try
                 {
-                    try
+                    // 行ごとの try/catch は持たない（カード/職員インポートと同じ形）。
+                    // 例外を握って続行すると、ロックが取れない状況では後続行も同じ理由で失敗し
+                    // 同一のエラーが行数分だけ並ぶ。加えて ex.Message を UI のエラー一覧へ
+                    // 直接載せることになり、生の例外メッセージを出さない規約に反する（Issue #1614）。
+                    // 例外はメソッド冒頭の catch へ抜け、ToUserFacingErrorMessage が
+                    // 集約済みの対応表で 3 要素文言へ変換する（Issue #1744）。
+                    foreach (var (lineNumber, ledger, isUpdate) in validRecords)
                     {
                         if (isUpdate)
                         {
                             // 既存レコードを更新
-                            var success = await _ledgerRepository.UpdateAsync(ledger).ConfigureAwait(false);
+                            var success = await _ledgerRepository.UpdateAsync(ledger, scope.Transaction).ConfigureAwait(false);
                             if (success)
                             {
                                 updatedCount++;
@@ -222,7 +242,7 @@ namespace ICCardManager.Services
                             }
 
                             // 新規登録
-                            var id = await _ledgerRepository.InsertAsync(ledger).ConfigureAwait(false);
+                            var id = await _ledgerRepository.InsertAsync(ledger, scope.Transaction).ConfigureAwait(false);
                             if (id > 0)
                             {
                                 importedCount++;
@@ -238,16 +258,38 @@ namespace ICCardManager.Services
                             }
                         }
                     }
-                    catch (Exception ex)
+
+                    // すべて成功したらコミット
+                    if (errors.Count == 0)
                     {
-                        var action = isUpdate ? "更新" : "登録";
-                        errors.Add(new CsvImportError
-                        {
-                            LineNumber = lineNumber,
-                            Message = $"履歴の{action}中にエラーが発生しました: {ex.Message}",
-                            Data = ledger.CardIdm
-                        });
+                        scope.Commit();
+                        // カード/職員インポートはここでキャッシュを無効化するが、履歴は行わない。
+                        // LedgerRepository は ICacheService を参照しておらず CacheKeys にも
+                        // ledger 系のプレフィックスが無いため、無効化すべきキャッシュが存在しない。
                     }
+                    else
+                    {
+                        scope.Rollback();
+                        // ImportedCount は importedCount + updatedCount のため両方を戻す
+                        importedCount = 0;
+                        updatedCount = 0;
+                    }
+                }
+                catch (SQLiteException ex)
+                {
+                    scope.Rollback();
+                    // Issue #1282: SQLiteException は DatabaseException へラップして詳細を保持
+                    _logger?.LogError(ex,
+                        "履歴CSVインポートのトランザクション中に SQLite エラーが発生しロールバック");
+                    throw DatabaseException.QueryFailed("CSV import transaction", ex);
+                }
+                catch (Exception ex)
+                {
+                    scope.Rollback();
+                    // Issue #1282: 想定外の例外も握りつぶさずログに記録してから再スロー
+                    _logger?.LogError(ex,
+                        "履歴CSVインポートのトランザクション中に想定外の例外が発生しロールバック");
+                    throw;
                 }
 
                 return new CsvImportResult

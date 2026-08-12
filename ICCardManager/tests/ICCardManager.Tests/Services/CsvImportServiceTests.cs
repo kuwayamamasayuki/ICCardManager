@@ -1669,7 +1669,7 @@ FEDCBA9876543210,鈴木花子,002,テスト2";
             IsLentRecord = false
         };
         _ledgerRepositoryMock.Setup(x => x.GetByIdAsync(1)).ReturnsAsync(existingLedger);
-        _ledgerRepositoryMock.Setup(x => x.UpdateAsync(It.IsAny<Ledger>())).ReturnsAsync(true);
+        _ledgerRepositoryMock.Setup(x => x.UpdateAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>())).ReturnsAsync(true);
         _ledgerRepositoryMock.Setup(x => x.GetExistingLedgerKeysAsync(It.IsAny<IEnumerable<string>>()))
             .ReturnsAsync(new HashSet<(string, DateTime, string, int, int, int)>());
 
@@ -1687,7 +1687,7 @@ FEDCBA9876543210,鈴木花子,002,テスト2";
             l.Income == 10000 &&
             l.Balance == 10000 &&
             l.Summary == "12月から繰越"
-        )), Times.Once);
+        ), It.IsAny<SQLiteTransaction>()), Times.Once);
     }
 
     /// <summary>
@@ -1730,7 +1730,7 @@ FEDCBA9876543210,鈴木花子,002,テスト2";
             IsLentRecord = false
         };
         _ledgerRepositoryMock.Setup(x => x.GetByIdAsync(5)).ReturnsAsync(existingLedger);
-        _ledgerRepositoryMock.Setup(x => x.UpdateAsync(It.IsAny<Ledger>())).ReturnsAsync(true);
+        _ledgerRepositoryMock.Setup(x => x.UpdateAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>())).ReturnsAsync(true);
         _ledgerRepositoryMock.Setup(x => x.GetExistingLedgerKeysAsync(It.IsAny<IEnumerable<string>>()))
             .ReturnsAsync(new HashSet<(string, DateTime, string, int, int, int)>());
 
@@ -1750,7 +1750,7 @@ FEDCBA9876543210,鈴木花子,002,テスト2";
             l.LentAt == lentAt &&
             l.ReturnedAt == returnedAt &&
             l.IsLentRecord == false
-        )), Times.Once);
+        ), It.IsAny<SQLiteTransaction>()), Times.Once);
     }
 
     /// <summary>
@@ -1793,7 +1793,7 @@ FEDCBA9876543210,鈴木花子,002,テスト2";
         result.SkippedCount.Should().Be(1);
 
         // UpdateAsyncは呼ばれない
-        _ledgerRepositoryMock.Verify(x => x.UpdateAsync(It.IsAny<Ledger>()), Times.Never);
+        _ledgerRepositoryMock.Verify(x => x.UpdateAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>()), Times.Never);
     }
 
     /// <summary>
@@ -1899,7 +1899,7 @@ FEDCBA9876543210,鈴木花子,002,テスト2";
             Summary = "鉄道（六本松～天神）", Income = 0, Expense = 420, Balance = 6076,
             Note = null
         });
-        _ledgerRepositoryMock.Setup(x => x.UpdateAsync(It.IsAny<Ledger>())).ReturnsAsync(true);
+        _ledgerRepositoryMock.Setup(x => x.UpdateAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>())).ReturnsAsync(true);
         _ledgerRepositoryMock.Setup(x => x.GetExistingLedgerKeysAsync(It.IsAny<IEnumerable<string>>()))
             .ReturnsAsync(new HashSet<(string, DateTime, string, int, int, int)>());
 
@@ -2001,7 +2001,7 @@ FEDCBA9876543210,鈴木花子,002,テスト2";
         result.Success.Should().BeTrue();
         result.ImportedCount.Should().Be(0);
         result.SkippedCount.Should().Be(1);
-        _ledgerRepositoryMock.Verify(x => x.InsertAsync(It.IsAny<Ledger>()), Times.Never);
+        _ledgerRepositoryMock.Verify(x => x.InsertAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>()), Times.Never);
     }
 
     /// <summary>
@@ -2022,7 +2022,7 @@ FEDCBA9876543210,鈴木花子,002,テスト2";
             new IcCard { CardIdm = "0123456789ABCDEF", CardType = "はやかけん", CardNumber = "001" }
         };
         _cardRepositoryMock.Setup(x => x.GetAllIncludingDeletedAsync()).ReturnsAsync(cards);
-        _ledgerRepositoryMock.Setup(x => x.InsertAsync(It.IsAny<Ledger>())).ReturnsAsync(1);
+        _ledgerRepositoryMock.Setup(x => x.InsertAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>())).ReturnsAsync(1);
 
         // Act: skipExisting=false
         var result = await _service.ImportLedgersAsync(filePath, skipExisting: false);
@@ -2031,7 +2031,7 @@ FEDCBA9876543210,鈴木花子,002,テスト2";
         result.Success.Should().BeTrue();
         result.ImportedCount.Should().Be(1);
         result.SkippedCount.Should().Be(0);
-        _ledgerRepositoryMock.Verify(x => x.InsertAsync(It.IsAny<Ledger>()), Times.Once);
+        _ledgerRepositoryMock.Verify(x => x.InsertAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>()), Times.Once);
         // GetExistingLedgerKeysAsync は呼ばれないこと
         _ledgerRepositoryMock.Verify(x => x.GetExistingLedgerKeysAsync(It.IsAny<IEnumerable<string>>()), Times.Never);
     }
@@ -2097,7 +2097,7 @@ FEDCBA9876543210,鈴木花子,002,テスト2";
             Balance = 8806
         };
         _ledgerRepositoryMock.Setup(x => x.GetByIdAsync(1)).ReturnsAsync(existingLedger);
-        _ledgerRepositoryMock.Setup(x => x.UpdateAsync(It.IsAny<Ledger>())).ReturnsAsync(true);
+        _ledgerRepositoryMock.Setup(x => x.UpdateAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>())).ReturnsAsync(true);
 
         // Act: skipExisting=false
         var result = await _service.ImportLedgersAsync(filePath, skipExisting: false);
@@ -2106,7 +2106,7 @@ FEDCBA9876543210,鈴木花子,002,テスト2";
         result.Success.Should().BeTrue();
         result.SkippedCount.Should().Be(0);
         result.ImportedCount.Should().Be(1);
-        _ledgerRepositoryMock.Verify(x => x.UpdateAsync(It.IsAny<Ledger>()), Times.Once);
+        _ledgerRepositoryMock.Verify(x => x.UpdateAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>()), Times.Once);
     }
 
     /// <summary>
@@ -2146,8 +2146,8 @@ FEDCBA9876543210,鈴木花子,002,テスト2";
         // Assert: 変更がないのでスキップされる
         result.Success.Should().BeTrue();
         result.SkippedCount.Should().Be(1);
-        _ledgerRepositoryMock.Verify(x => x.UpdateAsync(It.IsAny<Ledger>()), Times.Never);
-        _ledgerRepositoryMock.Verify(x => x.InsertAsync(It.IsAny<Ledger>()), Times.Never);
+        _ledgerRepositoryMock.Verify(x => x.UpdateAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>()), Times.Never);
+        _ledgerRepositoryMock.Verify(x => x.InsertAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>()), Times.Never);
     }
 
     /// <summary>
