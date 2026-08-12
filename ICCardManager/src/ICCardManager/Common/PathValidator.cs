@@ -75,7 +75,9 @@ namespace ICCardManager.Common
         public static async Task<ValidationResult> ValidateBackupPathAsync(
             string path, CancellationToken cancellationToken = default)
         {
-            // 非UNC部分の検証は高速なのでインラインで実行し、到達性チェックのみ非同期化
+            // 検証全体（UNC 到達性チェック・書き込み権限プローブ含む）を Task.Run でオフロードする。
+            // 書き込み権限プローブ（CheckWritePermission）は低速な共有でタイムアウトなしにブロックし得るため、
+            // 到達性チェックだけでなく全体をスレッドプールへ逃がす（Issue #1746）
             return await Task.Run(
                 () => ValidateBackupPath(path, UncReachabilityChecker, DefaultUncTimeoutMs),
                 cancellationToken).ConfigureAwait(false);
@@ -466,18 +468,33 @@ namespace ICCardManager.Common
             };
 
         /// <summary>
+        /// <see cref="UncReachabilityChecker"/> の AsyncLocal バッキングストア。
+        /// AsyncLocal のため、差し替えは設定したテストの実行コンテキストにのみ見え、
+        /// xUnit が並列実行する他テストや本番経路（sync 版 <see cref="ValidateBackupPath(string)"/> を含む）
+        /// へ漏れない（<c>DbContext.IsOnUiThread</c> と同じ機構。Issue #1372 参照）。
+        /// </summary>
+        private static readonly AsyncLocal<Func<string, int, bool>> _uncReachabilityCheckerOverride = new();
+
+        /// <summary>
         /// 公開エントリポイント（<see cref="ValidateBackupPath(string)"/> /
         /// <see cref="ValidateBackupPathAsync"/>）が実際に使用する UNC 到達性チェック関数。
         /// 既定は <see cref="DefaultUncReachabilityChecker"/>。
         /// </summary>
         /// <remarks>
-        /// テスト用フック（Issue #1746。<c>DbContext.IsOnUiThread</c> と同じ流儀）。
-        /// 差し替えるテストは、(1) 使用後に必ず既定値へ復元すること、
-        /// (2) 並列実行中の他テストへ影響しないよう、テスト固有のマーカーを含むパスのみ
-        /// 介入し、それ以外は <see cref="DefaultUncReachabilityChecker"/> へ委譲する形にすること
+        /// テスト用フック（Issue #1746。<c>DbContext.IsOnUiThread</c> と同じ流儀＝AsyncLocal バック）。
+        /// <see cref="ValidateBackupPathAsync"/> の <c>Task.Run</c> には ExecutionContext が
+        /// 流れるため、テスト本体で設定した差し替えはオフロード先でも有効。
+        /// 差し替えるテストは、(1) 使用後に既定値へ復元すること（AsyncLocal のため漏れても
+        /// 他テストへは波及しないが、同一コンテキスト内の後続コードのための作法）、
+        /// (2) 防御として、テスト固有のマーカーを含むパスのみ介入し、それ以外は
+        /// <see cref="DefaultUncReachabilityChecker"/> へ委譲する形にすること
         /// （<c>BackupServiceUiThreadGuardTests</c> が参考実装）。
         /// </remarks>
-        internal static Func<string, int, bool> UncReachabilityChecker = DefaultUncReachabilityChecker;
+        internal static Func<string, int, bool> UncReachabilityChecker
+        {
+            get => _uncReachabilityCheckerOverride.Value ?? DefaultUncReachabilityChecker;
+            set => _uncReachabilityCheckerOverride.Value = value;
+        }
 
         /// <summary>
         /// UNC パスから <c>\\server\share</c> 形式のルート部分を抽出する。

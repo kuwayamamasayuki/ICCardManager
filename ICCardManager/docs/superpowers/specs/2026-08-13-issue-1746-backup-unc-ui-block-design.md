@@ -39,10 +39,15 @@ var validationResult = await PathValidator.ValidateBackupPathAsync(backupPath).C
 `DbContext.IsOnUiThread`（Issue #1281/#1372 で確立した流儀）と同様の、テストから差し替え可能な static フックを追加する:
 
 ```csharp
-internal static Func<string, int, bool> UncReachabilityChecker = DefaultUncReachabilityChecker;
+private static readonly AsyncLocal<Func<string, int, bool>> _uncReachabilityCheckerOverride = new();
+internal static Func<string, int, bool> UncReachabilityChecker
+{
+    get => _uncReachabilityCheckerOverride.Value ?? DefaultUncReachabilityChecker;
+    set => _uncReachabilityCheckerOverride.Value = value;
+}
 ```
 
-公開 2 エントリポイント（sync `ValidateBackupPath(string)` / `ValidateBackupPathAsync`）はこのフックを経由する。既定値は従来の `DefaultUncReachabilityChecker`（readonly のまま維持）のため本番挙動は不変。
+公開 2 エントリポイント（sync `ValidateBackupPath(string)` / `ValidateBackupPathAsync`）はこのフックを経由する。既定値は従来の `DefaultUncReachabilityChecker`（readonly のまま維持）のため本番挙動は不変。`DbContext.IsOnUiThread` と同じく AsyncLocal バックのプロパティにすることで、差し替えは設定したテストの実行コンテキストにのみ見え（`Task.Run` へは ExecutionContext 経由で流れる）、並列実行中の他テストや本番経路（sync 版含む）へプロセスグローバルに漏れない。
 
 併せて `ValidateBackupPathAsync` 内の `await Task.Run(...)` に `.ConfigureAwait(false)` を付与する（`Common/**` の async 規約、Issue #1287）。
 
@@ -52,7 +57,7 @@ internal static Func<string, int, bool> UncReachabilityChecker = DefaultUncReach
 
 **判別方法**: スレッド ID 比較は「await でスレッドが解放された後、同一スレッドがプールに戻って Task.Run の仕事を拾う」可能性があり理論上フレーキーなため使わない。代わりに「**到達性チェックの完了前に呼び出しが制御を返すこと**」（= Task が未完了のまま返ること）を表明する:
 
-1. フックを「開始を通知 → 解放イベントを待つ（暴走防止の上限 `DefaultUncTimeoutMs`）→ false を返す」フェイクに差し替え
+1. フックを「開始を通知 → 解放イベントを待つ（暴走防止の上限 30 秒。本番タイムアウト 5 秒をそのまま使うと CI 高負荷時に待ちが自然満了して偽赤になり得るため余裕を持たせる）→ false を返す」フェイクに差し替え
 2. `var task = service.ResolveBackupFolderAsync();` を呼ぶ
 3. チェック開始の通知を待ち、`task.IsCompleted == false` を表明（修正前の同期実装ではこの呼び出し自体がブロックし、返ってきた時点で完了済みのため **Red**）
 4. 解放後、既定パスへのフォールバックという既存挙動が保たれることも表明
