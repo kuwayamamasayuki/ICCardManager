@@ -66,7 +66,7 @@ namespace ICCardManager.Common
         /// <see cref="ValidateBackupPathAsync"/> の利用を検討すること。
         /// </remarks>
         public static ValidationResult ValidateBackupPath(string path)
-            => ValidateBackupPath(path, DefaultUncReachabilityChecker, DefaultUncTimeoutMs);
+            => ValidateBackupPath(path, UncReachabilityChecker, DefaultUncTimeoutMs);
 
         /// <summary>
         /// バックアップパスの非同期検証（Issue #1269）。UI スレッドをブロックせず、
@@ -77,8 +77,8 @@ namespace ICCardManager.Common
         {
             // 非UNC部分の検証は高速なのでインラインで実行し、到達性チェックのみ非同期化
             return await Task.Run(
-                () => ValidateBackupPath(path, DefaultUncReachabilityChecker, DefaultUncTimeoutMs),
-                cancellationToken);
+                () => ValidateBackupPath(path, UncReachabilityChecker, DefaultUncTimeoutMs),
+                cancellationToken).ConfigureAwait(false);
         }
 
         /// <summary>
@@ -464,6 +464,20 @@ namespace ICCardManager.Common
                     return false;
                 }
             };
+
+        /// <summary>
+        /// 公開エントリポイント（<see cref="ValidateBackupPath(string)"/> /
+        /// <see cref="ValidateBackupPathAsync"/>）が実際に使用する UNC 到達性チェック関数。
+        /// 既定は <see cref="DefaultUncReachabilityChecker"/>。
+        /// </summary>
+        /// <remarks>
+        /// テスト用フック（Issue #1746。<c>DbContext.IsOnUiThread</c> と同じ流儀）。
+        /// 差し替えるテストは、(1) 使用後に必ず既定値へ復元すること、
+        /// (2) 並列実行中の他テストへ影響しないよう、テスト固有のマーカーを含むパスのみ
+        /// 介入し、それ以外は <see cref="DefaultUncReachabilityChecker"/> へ委譲する形にすること
+        /// （<c>BackupServiceUiThreadGuardTests</c> が参考実装）。
+        /// </remarks>
+        internal static Func<string, int, bool> UncReachabilityChecker = DefaultUncReachabilityChecker;
 
         /// <summary>
         /// UNC パスから <c>\\server\share</c> 形式のルート部分を抽出する。
