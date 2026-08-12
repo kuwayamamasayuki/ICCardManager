@@ -368,6 +368,46 @@ namespace ICCardManager.Services
         }
 
         /// <summary>
+        /// インポートのトランザクションをロールバックする（ロールバック自体の失敗を外へ漏らさない）
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// <b>ロールバックは失敗し得る</b>。<c>COMMIT</c> が SQLITE_BUSY 等で失敗すると
+        /// SQLite 側は既に自動ロールバック済みで <c>SQLiteTransaction</c> が無効化されており、
+        /// 続けて <c>Rollback()</c> を呼ぶと <see cref="InvalidOperationException"/>
+        /// （"No transaction is active on this connection"）になる。接続断でも同様に失敗する。
+        /// </para>
+        /// <para>
+        /// <c>catch</c> の中で素の <c>scope.Rollback()</c> を呼ぶと、この二次例外が
+        /// <b>本来の失敗要因を置き換えて</b> 抜けてしまい、(1) その catch に書いた
+        /// <c>LogError</c> が実行されず障害調査の手掛かりが残らない、(2)
+        /// <see cref="DatabaseException"/> へのラップも飛ばされるため
+        /// <see cref="ToUserFacingErrorMessage"/> の <c>default</c> 分岐に落ちて
+        /// 生の英語メッセージが UI へ出る（Issue #1614 違反）、という二重の害がある。
+        /// </para>
+        /// <para>
+        /// 握りつぶしても<b>データが確定することはない</b>。書き込みが確定するのは
+        /// <c>Commit()</c> が成功したときだけで、未コミットのトランザクションは
+        /// <c>TransactionScope.Dispose()</c>（＝接続リースの解放）で必ず巻き戻る。
+        /// </para>
+        /// </remarks>
+        /// <param name="scope">巻き戻すトランザクションスコープ</param>
+        private void TryRollbackImportTransaction(TransactionScope scope)
+        {
+            try
+            {
+                scope.Rollback();
+            }
+            catch (Exception rollbackException)
+            {
+                // 本来の失敗要因は呼び出し元の catch が既にログ済み。ここは補足情報として残す
+                // （LogDebug は本番で出力されないため Warning。development-conventions.md 参照）
+                _logger?.LogWarning(rollbackException,
+                    "インポートのロールバックに失敗（未コミットのためデータは確定しない）");
+            }
+        }
+
+        /// <summary>
         /// インポート／プレビューで捕捉した例外をユーザー向けの文言へ変換する
         /// </summary>
         /// <remarks>
