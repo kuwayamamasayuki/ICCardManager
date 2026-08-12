@@ -28,6 +28,7 @@ public class OperationLogSearchViewModelTests
     private readonly Mock<IDialogService> _dialogServiceMock;
     private readonly Mock<OperationLogExcelExportService> _excelExportServiceMock;
     private readonly Mock<ICCardManager.Services.ISafeFileLauncher> _safeFileLauncherMock;
+    private readonly Mock<IOperationLogRepository> _auditRepoMock;
     private readonly OperationLogSearchViewModel _viewModel;
 
     public OperationLogSearchViewModelTests()
@@ -43,11 +44,18 @@ public class OperationLogSearchViewModelTests
         _safeFileLauncherMock.Setup(l => l.LaunchFile(It.IsAny<string>()))
             .Returns(ICCardManager.Services.SafeFileLaunchResult.Ok());
 
+        // Issue #1787: エクスポートの監査ログ記録用。検索用リポジトリとは別のモックにして
+        // 「検索の呼び出し」と「監査ログの書き込み」を取り違えずに検証できるようにする
+        _auditRepoMock = new Mock<IOperationLogRepository>();
+        var operatorContextMock = new Mock<ICurrentOperatorContext>();
+        operatorContextMock.SetupGet(c => c.HasSession).Returns(false);
+
         _viewModel = new OperationLogSearchViewModel(
             _repoMock.Object,
             _dialogServiceMock.Object,
             _excelExportServiceMock.Object,
-            _safeFileLauncherMock.Object);
+            _safeFileLauncherMock.Object,
+            new OperationLogger(_auditRepoMock.Object, operatorContextMock.Object));
     }
 
     /// <summary>
@@ -846,6 +854,77 @@ public class OperationLogSearchViewModelTests
         isBusyAtShowError.Should().NotBeNull("エラーダイアログが表示されているはず");
         isBusyAtShowError.Should().BeFalse("Issue #1383: エラーダイアログ表示時にもプログレスバーが閉じていること");
         _viewModel.IsBusy.Should().BeFalse();
+    }
+
+    /// <summary>
+    /// Issue #1787: 操作ログ自身の Excel 書き出しも EXPORT として監査ログに記録すること。
+    /// </summary>
+    /// <remarks>
+    /// 出力内容は職員氏名・IDm を含む個人情報であり、絞り込みコンボに「エクスポート」を用意した以上、
+    /// この経路が記録されないと「この期間に持ち出しは無かった」という誤った結論を与える。
+    /// </remarks>
+    [Fact]
+    public async Task ExportToExcelFileAsync_成功時_エクスポートが監査ログに記録されること()
+    {
+        // Arrange
+        var tempPath = System.IO.Path.Combine(System.IO.Path.GetTempPath(), $"op_{Guid.NewGuid()}.xlsx");
+        _repoMock
+            .Setup(r => r.SearchAllAsync(It.IsAny<OperationLogSearchCriteria>()))
+            .ReturnsAsync(new[] { MakeLog(1), MakeLog(2), MakeLog(3) });
+        _excelExportServiceMock
+            .Setup(s => s.ExportAsync(It.IsAny<IEnumerable<OperationLog>>(), It.IsAny<string>()))
+            .Returns(Task.CompletedTask);
+
+        OperationLog recorded = null;
+        _auditRepoMock
+            .Setup(r => r.InsertAsync(It.IsAny<OperationLog>()))
+            .Callback<OperationLog>(log => recorded = log)
+            .ReturnsAsync(1);
+
+        // Act
+        await _viewModel.ExportToExcelFileAsync(tempPath);
+
+        // Assert
+        recorded.Should().NotBeNull("エクスポートは監査ログに残る必要がある");
+        recorded!.Action.Should().Be(OperationLogger.Actions.Export);
+        recorded.TargetTable.Should().Be(OperationLogger.Tables.OperationLog);
+        recorded.TargetId.Should().Be(System.IO.Path.GetFileName(tempPath));
+        // payload にフルパスと出力件数が入ること（同名ファイルを別フォルダーへ出した2件を区別するため）
+        recorded.AfterData.Should().Contain(System.IO.Path.GetFileName(tempPath));
+        recorded.AfterData.Should().Contain("\"RecordCount\":3");
+    }
+
+    /// <summary>
+    /// Issue #1787: 監査ログの記録に失敗しても、書き出し済みのエクスポートを失敗として扱わないこと。
+    /// </summary>
+    /// <remarks>
+    /// ファイルは既に出力済みであり、ここで「エクスポートに失敗しました」と通知すると
+    /// 職員が再実行する。CLAUDE.md（Issue #1727）の
+    /// 「コミット確定後の後処理を、成否の判定に巻き込まない」に従う。
+    /// </remarks>
+    [Fact]
+    public async Task ExportToExcelFileAsync_監査ログの記録失敗はエクスポートの成否に影響しないこと()
+    {
+        // Arrange
+        var tempPath = System.IO.Path.Combine(System.IO.Path.GetTempPath(), $"op_{Guid.NewGuid()}.xlsx");
+        _repoMock
+            .Setup(r => r.SearchAllAsync(It.IsAny<OperationLogSearchCriteria>()))
+            .ReturnsAsync(new[] { MakeLog(1) });
+        _excelExportServiceMock
+            .Setup(s => s.ExportAsync(It.IsAny<IEnumerable<OperationLog>>(), It.IsAny<string>()))
+            .Returns(Task.CompletedTask);
+        _auditRepoMock
+            .Setup(r => r.InsertAsync(It.IsAny<OperationLog>()))
+            .ThrowsAsync(new InvalidOperationException("監査ログ記録失敗"));
+
+        // Act
+        await _viewModel.ExportToExcelFileAsync(tempPath);
+
+        // Assert: 成功として扱われ、エラーダイアログは出ない
+        _dialogServiceMock.Verify(d => d.ShowError(It.IsAny<string>(), It.IsAny<string>()), Times.Never);
+        _dialogServiceMock.Verify(d => d.ShowInformation(It.IsAny<string>(), It.IsAny<string>()), Times.Once);
+        _viewModel.IsStatusError.Should().BeFalse();
+        _viewModel.LastExportedFile.Should().Be(tempPath);
     }
 
     /// <summary>

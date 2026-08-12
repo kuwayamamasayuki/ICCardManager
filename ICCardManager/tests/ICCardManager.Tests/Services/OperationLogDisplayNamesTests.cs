@@ -33,18 +33,27 @@ public class OperationLogDisplayNamesTests
             .ToList();
     }
 
-    [Fact]
-    public void 定数抽出_Actionsから9定数が列挙されること()
+    /// <summary>
+    /// 抽出ロジックの空振り検出用サンプル。本番の定数クラスと同じ形（public const string）を持つ。
+    /// </summary>
+    private static class SampleConstants
     {
-        // 抽出ロジック自体の空振り検出（対象がゼロ件でも他のテストが緑になるのを防ぐ）。
-        // 定数を追加したらこの期待値も更新する（追加の事実を明示させるための固定値）。
-        GetConstantValues(typeof(OperationLogger.Actions)).Should().HaveCount(9);
+        public const string First = "FIRST";
+        public const string Second = "SECOND";
+
+        // 抽出対象外であるべきもの（型違い・非 const）が混ざらないことも併せて固定する
+        public const int NotAString = 1;
+        public static readonly string NotALiteral = "READONLY";
     }
 
     [Fact]
-    public void 定数抽出_Tablesから5定数が列挙されること()
+    public void 定数抽出ロジックが既知のサンプルから正しく値を取り出すこと()
     {
-        GetConstantValues(typeof(OperationLogger.Tables)).Should().HaveCount(5);
+        // 空振り検出は「本番の実件数」ではなく検査ロジック自体を既知の入力で固定する
+        // （実件数をピン留めすると、種別を正しく追加しただけで無関係な赤が出て
+        //   修正者が期待値の機械的な書き換えへ誘導される。development-conventions.md 参照）。
+        GetConstantValues(typeof(SampleConstants))
+            .Should().Equal("FIRST", "SECOND");
     }
 
     [Fact]
@@ -128,7 +137,8 @@ public class OperationLogDisplayNamesTests
     [InlineData("ledger", "利用履歴")]
     [InlineData("ledger_detail", "利用明細")]
     [InlineData("database", "データベース")]
-    public void GetTableDisplayName_全5テーブルを正しく変換すること(string table, string expected)
+    [InlineData("operation_log", "操作ログ")]
+    public void GetTableDisplayName_全テーブルを正しく変換すること(string table, string expected)
     {
         OperationLogDisplayNames.GetTableDisplayName(table).Should().Be(expected);
     }

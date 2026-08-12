@@ -36,7 +36,13 @@ namespace ICCardManager.Services
             };
 
         /// <summary>対象テーブルの表示名（コンボの表示順を兼ねる順序付きリスト）</summary>
-        /// <remarks>ledger_detail の「利用明細」は DatabaseException.GetEntityDisplayName と揃えている。</remarks>
+        /// <remarks>
+        /// ledger_detail の「利用明細」は <c>DatabaseException.GetEntityDisplayName</c> と同じ訳語にしている。
+        /// ただし ledger は本表が「利用履歴」、同メソッドが「出納記録」で**意図的に異なる**:
+        /// 操作ログ画面は職員が日々の貸出・返却を追う文脈、DB エラーダイアログは帳票の元帳を指す文脈で、
+        /// 画面ごとに定着した呼称を優先している。両者を統合するなら用語集（00_用語集）の改訂を伴うため、
+        /// ここで片方へ寄せない（Issue #1787 のコードレビューで検出）。
+        /// </remarks>
         public static IReadOnlyList<KeyValuePair<string, string>> TableEntries { get; } =
             new[]
             {
@@ -45,6 +51,7 @@ namespace ICCardManager.Services
                 new KeyValuePair<string, string>(OperationLogger.Tables.Ledger, "利用履歴"),
                 new KeyValuePair<string, string>(OperationLogger.Tables.LedgerDetail, "利用明細"),
                 new KeyValuePair<string, string>(OperationLogger.Tables.Database, "データベース"),
+                new KeyValuePair<string, string>(OperationLogger.Tables.OperationLog, "操作ログ"),
             };
 
         private static readonly Dictionary<string, string> ActionMap = BuildMap(ActionEntries);
@@ -126,6 +133,8 @@ namespace ICCardManager.Services
             // Issue #1302: 一括操作対象
             public const string LedgerDetail = "ledger_detail";
             public const string Database = "database";
+            // Issue #1787: 操作ログ自身の Excel 書き出し（個人情報の持ち出し）を EXPORT として記録する対象
+            public const string OperationLog = "operation_log";
         }
 
         public OperationLogger(

@@ -67,6 +67,7 @@ public partial class OperationLogSearchViewModel : ViewModelBase
     private readonly IDialogService _dialogService;
     private readonly OperationLogExcelExportService _excelExportService;
     private readonly ISafeFileLauncher _safeFileLauncher;
+    private readonly OperationLogger _operationLogger;
 
     // 検索条件
     [ObservableProperty]
@@ -168,12 +169,14 @@ public partial class OperationLogSearchViewModel : ViewModelBase
         IOperationLogRepository operationLogRepository,
         IDialogService dialogService,
         OperationLogExcelExportService excelExportService,
-        ISafeFileLauncher safeFileLauncher)
+        ISafeFileLauncher safeFileLauncher,
+        OperationLogger operationLogger)
     {
         _operationLogRepository = operationLogRepository;
         _dialogService = dialogService;
         _excelExportService = excelExportService;
         _safeFileLauncher = safeFileLauncher;
+        _operationLogger = operationLogger;
 
         // デフォルトは今月
         var today = DateTime.Today;
@@ -398,6 +401,12 @@ public partial class OperationLogSearchViewModel : ViewModelBase
                 LastExportedFile = filePath;
                 exportedCount = logs.Count();
                 SetStatus($"エクスポート完了: {exportedCount}件を出力しました", false);
+
+                // Issue #1787: 操作ログ自身の書き出しも EXPORT として記録する。
+                // 出力内容は職員氏名・IDm を含む個人情報であり、絞り込みコンボに「エクスポート」を
+                // 用意した以上、この経路が記録されないと「この期間に持ち出しは無かった」という
+                // 誤った結論を与える（記録経路は DataExportImportViewModel の1つだけだった）。
+                await TryLogExportAsync(filePath, exportedCount.Value);
             }
             catch (Exception ex)
             {
@@ -419,6 +428,30 @@ public partial class OperationLogSearchViewModel : ViewModelBase
             _dialogService.ShowInformation(
                 $"Excelファイルを保存しました。\n\n出力先: {filePath}\n出力件数: {exportedCount}件",
                 "エクスポート完了");
+        }
+    }
+
+    /// <summary>
+    /// エクスポートの監査ログを記録する。記録に失敗しても例外は伝播させない（Issue #1787）
+    /// </summary>
+    /// <remarks>
+    /// ファイルは既に書き出し済みであり、ここでの失敗を <see cref="ExportToExcelFileAsync"/> の
+    /// catch へ流すと「エクスポートに失敗しました」と通知されて職員が再実行する。
+    /// CLAUDE.md（Issue #1727）の「コミット確定後の後処理を、成否の判定に巻き込まない」に従う。
+    /// 記録の成否をユーザーへ通知しないのは、インポート（Issue #1741）と異なり
+    /// 再実行による二重登録の危険が無く、案内すべき復旧行動が存在しないため。
+    /// </remarks>
+    private async Task TryLogExportAsync(string filePath, int recordCount)
+    {
+        try
+        {
+            await _operationLogger.LogExportAsync(
+                OperationLogger.Tables.OperationLog, filePath, recordCount);
+        }
+        catch (Exception ex)
+        {
+            // 無言で握りつぶさない（本番のログファイルに残す必要があるため LogDebug は使わない）
+            ErrorDialogHelper.LogException(ex, "操作ログエクスポートの操作ログ記録");
         }
     }
 
