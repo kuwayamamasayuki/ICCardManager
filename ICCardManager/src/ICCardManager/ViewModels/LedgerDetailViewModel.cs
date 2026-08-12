@@ -206,6 +206,21 @@ namespace ICCardManager.ViewModels
         public Action? OnSaveCompleted { get; set; }
 
         /// <summary>
+        /// クローズ要求時のコールバック（Issue #1743: Escape キーの KeyBinding から Window.Close() へ届く経路）
+        /// </summary>
+        public Action? OnCloseRequested { get; set; }
+
+        /// <summary>
+        /// このダイアログで 1 件でも DB へ書き込みが確定したか（Issue #1743）
+        /// </summary>
+        /// <remarks>
+        /// 明細の置換（<c>ReplaceDetailsAsync</c>）は摘要 UPDATE とは別トランザクションで先に確定するため、
+        /// 摘要 UPDATE だけが競合で失敗しても明細の変更は DB に残る。呼び出し元がこのフラグを見て
+        /// 一覧を再読込しないと、画面の旧グループと DB の新 GroupId が食い違ったままになる。
+        /// </remarks>
+        public bool HasPersistedChanges { get; private set; }
+
+        /// <summary>
         /// 複数グループがあるかどうか（Issue #634: ボタン切り替え用）
         /// </summary>
         [ObservableProperty]
@@ -575,6 +590,10 @@ namespace ICCardManager.ViewModels
                     return;
                 }
 
+                // Issue #1743: ここで明細は別トランザクションとして確定済み。以降の摘要 UPDATE が
+                // 失敗しても DB には残るため、呼び出し元が一覧を再読込できるよう記録する
+                HasPersistedChanges = true;
+
                 // 摘要を再生成
                 var newSummary = _summaryGenerator.Generate(updatedDetails);
                 if (!string.IsNullOrEmpty(newSummary) && newSummary != _ledger.Summary)
@@ -623,6 +642,10 @@ namespace ICCardManager.ViewModels
                             _ledger.Id);
                         StatusMessage = "この履歴は他の操作で変更されたため摘要を更新できませんでした。" +
                                         "画面を最新の状態に更新してから再度お試しください。";
+
+                        // Issue #1743: 明細は確定済みなので「未保存の変更」ではない。true のままだと
+                        // 閉じるときに「破棄してよろしいですか？」と事実に反する確認が出る
+                        HasChanges = false;
                         return;
                     }
 
@@ -684,6 +707,7 @@ namespace ICCardManager.ViewModels
                     return;
                 }
 
+                HasPersistedChanges = true;
                 HasChanges = false;
                 StatusMessage = $"{result.CreatedLedgerIds.Count + 1}件の履歴に分割しました";
                 _logger.LogInformation(
@@ -703,6 +727,54 @@ namespace ICCardManager.ViewModels
             }
         }
 
+        /// <summary>
+        /// ダイアログを閉じてよいか判定する（Issue #1743）
+        /// </summary>
+        /// <param name="confirmDiscard">
+        /// 未保存の変更を破棄してよいかをユーザーに確認するコールバック。破棄してよい場合に true を返す。
+        /// 未保存の変更が無い場合は呼ばれない。
+        /// </param>
+        /// <returns>閉じてよい場合 true、閉じる操作を中止すべき場合 false</returns>
+        /// <remarks>
+        /// <para>
+        /// タイトルバーの ✕ / Alt+F4 / Escape / 「閉じる」ボタンのどの経路で閉じても
+        /// View 側の OnClosing が本メソッドを通るため、破棄確認はここに一元化される。
+        /// </para>
+        /// <para>
+        /// 保存・分割の DB トランザクション実行中（<see cref="IsBusy"/>）は破棄確認を出さずに閉じない。
+        /// 処理中オーバーレイはマウスのヒットテストしか塞がず ✕ / Alt+F4 / Escape は生きているため、
+        /// この間に閉じられると①「破棄しますか」という事実に反する確認が出る②書き込みは成功するのに
+        /// 呼び出し元が保存済みと認識できず履歴一覧が更新されない、の 2 つが同時に起きる。
+        /// </para>
+        /// </remarks>
+        public bool CanClose(Func<bool> confirmDiscard)
+        {
+            if (IsBusy)
+            {
+                return false;
+            }
 
+            if (!HasChanges)
+            {
+                return true;
+            }
+
+            return confirmDiscard();
+        }
+
+        /// <summary>
+        /// ダイアログのクローズを要求する（Issue #1743）
+        /// </summary>
+        /// <remarks>
+        /// Escape キーの KeyBinding から実行される。View 側が <see cref="OnCloseRequested"/> に
+        /// Window.Close() を設定するため、この経路も OnClosing の破棄確認を通る。
+        /// Button.IsCancel は Click 処理の後に無条件で DialogResult=false を設定し、破棄確認で
+        /// 「いいえ」を選んでも DialogResult が false のまま残って以後の操作が無反応になるため使わない。
+        /// </remarks>
+        [RelayCommand]
+        private void RequestClose()
+        {
+            OnCloseRequested?.Invoke();
+        }
     }
 }

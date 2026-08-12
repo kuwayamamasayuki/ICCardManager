@@ -20,6 +20,9 @@
     <Window.InputBindings>
         <!-- Ctrl+S: 保存 -->
         <KeyBinding Key="S" Modifiers="Control" Command="{Binding SaveCommand}"/>
+        <!-- Escape: 閉じる（Issue #1743: IsCancel は Click 後に無条件で DialogResult=false を設定し
+             OnClosing の破棄確認と両立しないため、KeyBinding 経由で Close() に通す） -->
+        <KeyBinding Key="Escape" Command="{Binding RequestCloseCommand}"/>
     </Window.InputBindings>
 
     <Window.Resources>
@@ -488,10 +491,11 @@
                             AutomationProperties.Name="摘要のみ更新"
                             ToolTip="1つの履歴レコードのまま摘要を変更します"/>
                 </StackPanel>
+                <!-- IsCancel は付けない（Issue #1743: 未保存確認で「いいえ」を選んでも
+                     DialogResult=false が設定されて閉じてしまう。Escape は InputBindings が担う） -->
                 <Button Content="閉じる"
                         Click="CloseButton_Click"
                         Padding="20,8"
-                        IsCancel="True"
                         AutomationProperties.Name="閉じる"
                         ToolTip="ダイアログを閉じる (Escape)"/>
             </StackPanel>
