@@ -123,8 +123,13 @@ namespace ICCardManager.Services
         /// <summary>
         /// 新規購入または繰越レコードかどうかを判定する。
         /// </summary>
-        private static bool IsSpecialRecord(Ledger l) =>
-            l.Summary == "新規購入" || l.Summary?.EndsWith("月から繰越") == true;
+        /// <remarks>
+        /// 判定は <see cref="Ledger.IsCarryover"/>（→ <see cref="SummaryGenerator.IsMidYearCarryoverSummary"/>）
+        /// へ委譲し、組織設定 <c>MidYearCarryoverPattern</c> に追従する（Issue #1749）。
+        /// 以前は <c>EndsWith("月から繰越")</c> のハードコードで、Issue #1604 の一元化が
+        /// 届いておらず、書式カスタム時に繰越レコードが「同日の先頭固定」から漏れていた。
+        /// </remarks>
+        private static bool IsSpecialRecord(Ledger l) => l.IsCarryover;
 
         /// <summary>
         /// チェーン構築用の内部データ構造。

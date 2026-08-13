@@ -98,7 +98,10 @@ namespace ICCardManager.Models
         /// </summary>
         /// <remarks>
         /// 帳票のソート順や日次集計で特別扱いされるレコードの判定。
-        /// SQL内の「summary = '新規購入' OR summary LIKE '%月から繰越'」と同等。
+        /// SQL 側の同等条件（<c>LedgerRepository</c> の「summary = '新規購入' OR summary LIKE
+        /// <c>@midYearCarryoverPattern</c>」）と対応する。繰越側の LIKE パターンは
+        /// <c>SummaryGenerator.GetMidYearCarryoverLikePattern</c> が組織設定から導出し、
+        /// 本プロパティと SQL が揃って設定に追従する（Issue #1749）。
         /// </remarks>
         public bool IsCarryover =>
             Summary == "新規購入" || IsMidYearCarryover;

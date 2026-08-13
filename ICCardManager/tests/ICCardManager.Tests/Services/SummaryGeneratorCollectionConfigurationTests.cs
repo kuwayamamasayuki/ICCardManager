@@ -2,6 +2,7 @@ using System;
 using System.Linq;
 using System.Reflection;
 using FluentAssertions;
+using ICCardManager.Tests.Data.Repositories;
 using ICCardManager.Tests.Domain;
 using Xunit;
 
@@ -64,6 +65,10 @@ public class SummaryGeneratorCollectionConfigurationTests
     [InlineData(typeof(OrganizationOptionsTests))]
     [InlineData(typeof(MidYearCarryoverConsistencyTests))]
     [InlineData(typeof(LedgerTests))]
+    // Issue #1749: Configure/ResetToDefaults を呼ぶ 3 クラス（繰越判定 SQL の組織設定追従）
+    [InlineData(typeof(LedgerRepositoryMidYearCarryoverPatternTests))]
+    [InlineData(typeof(LedgerOrderHelperMidYearCarryoverPatternTests))]
+    [InlineData(typeof(SummaryGeneratorMidYearCarryoverLikePatternTests))]
     public void SummaryGenerator関連テストクラスがCollectionに属していること(Type testClass)
     {
         // Act
@@ -93,6 +98,10 @@ public class SummaryGeneratorCollectionConfigurationTests
     [InlineData(typeof(OrganizationOptionsTests))]
     [InlineData(typeof(MidYearCarryoverConsistencyTests))]
     [InlineData(typeof(LedgerTests))]
+    // Issue #1749: Configure/ResetToDefaults を呼ぶ 3 クラス（繰越判定 SQL の組織設定追従）
+    [InlineData(typeof(LedgerRepositoryMidYearCarryoverPatternTests))]
+    [InlineData(typeof(LedgerOrderHelperMidYearCarryoverPatternTests))]
+    [InlineData(typeof(SummaryGeneratorMidYearCarryoverLikePatternTests))]
     public void Collection対象テストクラスはIDisposableを実装していること(Type testClass)
     {
         // Act

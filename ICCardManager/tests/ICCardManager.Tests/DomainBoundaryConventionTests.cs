@@ -67,6 +67,44 @@ public class DomainBoundaryConventionTests
     };
 
     /// <summary>
+    /// Data 層から参照してよい <c>SummaryGenerator</c> の汎用メソッド呼び出し
+    /// （Issue #1749、設計書 05 §2a.4 seam カタログ）。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 繰越 LIKE パターン導出（<c>GetMidYearCarryoverLikePattern</c>）は交通系固有の
+    /// 「データの解釈」ではなく物品出納簿の様式に属する汎用ロジックであり、
+    /// SQL 側の繰越判定を組織設定 <c>MidYearCarryoverFormat</c> へ追従させるために
+    /// <c>LedgerRepository</c> がパラメータバインドで参照する。
+    /// 記号一致だけでは <c>SummaryGenerator</c> の汎用/固有メソッドを区別できないため、
+    /// <b>完全修飾の呼び出し形</b>（開き括弧まで）で限定して許可する。
+    /// </para>
+    /// <para>
+    /// 許可の適用は「行から許可呼び出しを除去してから禁止記号を照合する」方式。
+    /// 同一行に固有メソッドの参照が同居していれば従来どおり違反として検出される
+    /// （<see cref="RemoveAllowedDataLayerCalls_KnownSamples_BehaveAsPinned"/> で固定）。
+    /// </para>
+    /// </remarks>
+    private static readonly string[] GenericSummaryGeneratorCallsAllowedInDataLayer =
+    {
+        "SummaryGenerator.GetMidYearCarryoverLikePattern(",
+    };
+
+    /// <summary>
+    /// Data 層の 1 行から、許可された汎用メソッド呼び出しを除去する。
+    /// 除去後に禁止記号が残らなければ、その行は許可された参照だけで構成されている。
+    /// </summary>
+    private static string RemoveAllowedDataLayerCalls(string line)
+    {
+        foreach (var allowed in GenericSummaryGeneratorCallsAllowedInDataLayer)
+        {
+            line = line.Replace(allowed, string.Empty);
+        }
+
+        return line;
+    }
+
+    /// <summary>
     /// 交通系固有ロジックを参照してよいディレクトリ（ソースルートからの相対パス）。
     /// </summary>
     private const string CardReaderInfrastructureDir = @"Infrastructure\CardReader";
@@ -122,7 +160,8 @@ public class DomainBoundaryConventionTests
         var violations = new List<string>();
         foreach (var csPath in EnumerateProductionSourceFiles(dataRoot))
         {
-            foreach (var hit in FindSymbolsInCode(csPath, TransitLogicSymbolsForbiddenInDataLayer))
+            foreach (var hit in FindSymbolsInCode(
+                csPath, TransitLogicSymbolsForbiddenInDataLayer, RemoveAllowedDataLayerCalls))
             {
                 violations.Add(hit);
             }
@@ -132,9 +171,40 @@ public class DomainBoundaryConventionTests
             "永続化層（Data/）が交通系固有の<判断ロジック>を参照しています（Issue #1695、設計書 05 §2a.5）。\n" +
             "LedgerDetail の乗車駅・降車駅・バス停を DB 列へマッピングすることは正当な責務ですが、\n" +
             "摘要生成・駅名解決・バス判別といった解釈は Services / Infrastructure の責務です。\n" +
+            "例外として、汎用メソッドの完全修飾呼び出し（GenericSummaryGeneratorCallsAllowedInDataLayer、\n" +
+            "現在は繰越 LIKE パターン導出のみ）は許可されています（Issue #1749）。\n" +
             "意図的に境界を変更する場合は、docs/design/05_クラス設計書.md §2a.4 の " +
             "seam カタログを更新したうえで本テストを修正してください。\n\n" +
             "違反箇所:\n" + string.Join("\n", violations));
+    }
+
+    /// <summary>
+    /// 許可リストの適用ロジック自体を既知のサンプル入力で固定する。
+    /// </summary>
+    /// <remarks>
+    /// 実データ（Data/ 配下のソース）だけに依存すると、許可リストの書き換えや
+    /// 除去ロジックの退行（例: 前方一致化で <c>GetMidYearCarryoverLikePatternX</c> まで
+    /// 許可してしまう）が「違反ゼロ」のまま素通りする。検査ロジックはサンプルで固定する
+    /// （`.claude/rules/development-conventions.md`「空振り検出を『各対象が非空であること』で
+    /// 書かない」）。
+    /// </remarks>
+    [Theory]
+    // 許可された汎用メソッドの呼び出しだけの行 → 禁止記号は残らない
+    [InlineData("SummaryGenerator.GetMidYearCarryoverLikePattern());", false)]
+    // 固有メソッドの参照 → 従来どおり検出される
+    [InlineData("var s = SummaryGenerator.GetChargeSummary();", true)]
+    // 許可呼び出しと固有メソッドが同居する行 → 検出される
+    [InlineData("Use(SummaryGenerator.GetMidYearCarryoverLikePattern(), SummaryGenerator.Generate(d));", true)]
+    // 許可メソッド名を前方に含む別メソッド → 検出される（前方一致で素通りしないこと）
+    [InlineData("SummaryGenerator.GetMidYearCarryoverLikePatternX();", true)]
+    // メソッド参照だけでなく型名の単独参照も検出される
+    [InlineData("private readonly SummaryGenerator _generator;", true)]
+    public void RemoveAllowedDataLayerCalls_KnownSamples_BehaveAsPinned(string line, bool shouldRemainForbidden)
+    {
+        var sanitized = RemoveAllowedDataLayerCalls(line);
+
+        TransitLogicSymbolsForbiddenInDataLayer.Any(sanitized.Contains)
+            .Should().Be(shouldRemainForbidden);
     }
 
     /// <summary>
@@ -209,7 +279,12 @@ public class DomainBoundaryConventionTests
     /// <summary>
     /// 1 ファイルから、コメントを除去したうえで対象記号を含む行を列挙する。
     /// </summary>
-    private static IEnumerable<string> FindSymbolsInCode(string csPath, IReadOnlyList<string> symbols)
+    /// <param name="sanitizeLine">
+    /// 照合前に行へ適用する変換（許可された参照の除去。Issue #1749）。
+    /// 違反として報告する行テキストは変換前の原文を使う。
+    /// </param>
+    private static IEnumerable<string> FindSymbolsInCode(
+        string csPath, IReadOnlyList<string> symbols, Func<string, string>? sanitizeLine = null)
     {
         var codeLines = StripComments(File.ReadAllText(csPath)).Split('\n');
         var relativePath = MakeRelativeToSourceRoot(csPath);
@@ -217,9 +292,10 @@ public class DomainBoundaryConventionTests
         for (int i = 0; i < codeLines.Length; i++)
         {
             var line = codeLines[i];
+            var target = sanitizeLine != null ? sanitizeLine(line) : line;
             foreach (var symbol in symbols)
             {
-                if (line.Contains(symbol))
+                if (target.Contains(symbol))
                 {
                     yield return $"  {relativePath}:{i + 1} [{symbol}] {line.Trim()}";
                     break; // 同一行で複数記号が当たっても 1 件として報告する
