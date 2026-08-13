@@ -94,7 +94,14 @@ namespace ICCardManager.Dtos
         /// <summary>対象年月の帳票の出力状況</summary>
         public ReportExportState ReportState { get; set; }
 
-        /// <summary>最終利用日</summary>
+        /// <summary>
+        /// 最終利用日（全期間の利用実績のうち最新の日付。利用実績が無ければ null＝空欄）
+        /// </summary>
+        /// <remarks>
+        /// 「利用実績」は稼働状況タブと同じ定義で、貸出中プレースホルダ・新規購入・
+        /// 繰越レコードを含まない（Issue #1747）。最新レコード日を表示すると、
+        /// 登録しただけのカードが「使われている」ように見えてしまう。
+        /// </remarks>
         public DateTime? LastUsageDate { get; set; }
 
         /// <summary>いずれかの注意事項に該当するかどうか（一覧の強調表示に使う）</summary>
