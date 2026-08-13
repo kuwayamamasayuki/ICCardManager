@@ -1,0 +1,802 @@
+{
+ "stats": {
+  "areas": 14,
+  "areasResponded": 14,
+  "rawFindings": 93,
+  "deduped": 84,
+  "verified": 30,
+  "confirmed": 28,
+  "refuted": 2,
+  "unverified": 54
+ },
+ "confirmed": [
+  {
+   "file": "ICCardManager/src/ICCardManager/Services/LendingService.cs",
+   "line": 945,
+   "title": "「○月から繰越」レコードが登録時の履歴インポートで利用レコードに上書きされる",
+   "severity": "high",
+   "category": "data-integrity",
+   "description": "CreateUsageLedgersAsync の「同一日の既存利用レコード」統合対象フィルタが、繰越レコードを除外していない。条件は `!l.IsLentRecord && l.Income == 0 && string.IsNullOrEmpty(l.Note) && l.StaffName == staffName` のみで、business-logic.md が要求する `Ledger.IsCarryover` / `SummaryGenerator.IsMidYearCarryoverSummary` による除外が入っていない。年度途中導入モード（Issue #510）で作られる「○月から繰越」レコードは CardManageViewModel.CreateInitialLedgerAsync により Income=0（hasIncome = IsNewPurchase || isFiscalYearCarryover が false のため）・Note=null・StaffName=null・IsLentRecord=false で作成され、かつ Date は GetMidYearCarryoverDate（繰越月の翌月1日）= ImportHistoryForRegistrationAsync に渡す importFromDate と同一日である。ImportHistoryForRegistrationAsync は staffName=null で CreateUsageLedgersAsync を呼ぶため `l.StaffName == staffName` も null==null で成立し、繰越レコードが統合対象として選ばれる。",
+   "scenario": "「7月から繰越（残高3,000円）」でカードを登録する。カードの履歴に 8/1 の鉄道利用（A駅→B駅 210円）が含まれている場合、CreateInitialLedgerAsync が Date=8/1・Summary=「7月から繰越」・Income=0・Balance=3000 の行を作る。続く ImportHistoryForRegistrationAsync が 8/1 の日付グループを処理する際、GetByDateRangeAsync(card, 8/1, 8/1) がこの繰越行を返し、フィルタを全て通過して統合対象になる。結果、繰越行の Summary が「鉄道（A駅～B駅）」に、Expense が 210 に、Balance が 2790 に UpdateLedger で上書きされ、繰越レコードが消滅する。月次帳票では期首残高の行が失われ、IsMidYearCarryoverSummary による月計・累計の除外も効かなくなるため、受入−払出=残額が成立しなくなる。",
+   "foundBy": "lending",
+   "fixHint": "LendingService.cs:944-948 の統合対象フィルタに `&& !l.IsCarryover`（Ledger.IsCarryover=新規購入＋「○月から繰越」）を追加し、繰越行と同日に利用履歴がある登録時インポートの回帰テストを LendingServiceTests に追加する。",
+   "verifyReasoning": "実行経路を全段確認できた。(1) 登録: CardManageViewModel.cs:499 で importFromDate = GetImportFromDate(modeResult) → 繰越モードでは SummaryGenerator.GetMidYearCarryoverDate（SummaryGenerator.cs:1069-1081、繰越月の翌月1日 00:00:00）。(2) CardManageViewModel.cs:512-513 で CreateInitialLedgerAsync(overrideDate: importFromDate) → CardManageViewModel.cs:1033/1038-1041/1057-1073 により Date=翌月1日・Summary=「○月から繰越」・Income=0（hasIncome = IsNewPurchase || 3月繰越 が false）・Note=null・StaffName=null・IsLentRecord=false の行を InsertAsync（1075、コミット済み）。(3) 直後の CardManageViewModel.cs:516 → LendingService.ImportHistoryForRegistrationAsync（LendingService.cs:1282）が staffIdm/staffName=null で CreateUsageLedgersAsync を呼ぶ（LendingService.cs:1310）。(4) LendingService.cs:864 の日付グループが翌月1日（＝繰越行と同日、history は 1291 で >= importFromDate のみ通す）で、利用セグメントがあれば 943 の GetByDateRangeAsync(cardIdm, date, date) が繰越行を返す（LedgerRepository.cs:26-64 にフィルタなし、繰越を先頭に並べる ORDER BY のみ）。(5) 944-948 のフィルタ `!IsLentRecord && Income == 0 && IsNullOrEmpty(Note) && StaffName == staffName` は全て成立（null==null）し、Ledger.IsCarryover / SummaryGenerator.IsMidYearCarryoverSummary（Ledger.cs:103-118）による除外がない。(6) 1044-1049 で existingUsageLedger に選ばれ、1056-1114 で詳細追加後 Summary（1063 再生成）・Expense・Balance を上書きして UpdateLedger（1114）→「○月から繰越」行が利用行に化けて消滅する。防御は他になし: 通常の返却経路は staffName が非 null のため繰越行（StaffName=null）とは一致せず、新規購入/3月繰越は Income=残高で 945 の Income==0 に弾かれるので、年度途中繰越（Issue #510）だけが露出する。テストも ImportHistoryForRegistrationAsync 系（LendingServiceTests.cs:2468 以降の6件）に繰越行との同日統合を検証するものはなく、MidYearCarryoverConsistencyTests は判定一元化のみ。事後検知も弱い: ReportPreflightChecker.cs:263 の繰越スキップが効かなくなるが、移行月は PrecedingBalance が null（259 で return）のため警告も出ず、期首残高行が黙って失われる。"
+  },
+  {
+   "file": "ICCardManager/src/ICCardManager/Data/Repositories/LedgerRepository.cs",
+   "line": 1250,
+   "title": "ReplaceDetailsAsync(tx=null) は DELETE を先にコミットするため INSERT 失敗で明細が全消失する",
+   "severity": "high",
+   "category": "data-integrity",
+   "description": "ReplaceDetailsAsync のトランザクション無し経路は、(1) 既存 ledger_detail を DELETE（autocommit で即確定）→ (2) InsertDetailsAsync(transaction: null) が **別の** トランザクションを開いて INSERT、という二段構えになっている。InsertDetailsAsync 内で例外が出ると scope.Rollback() されるが、直前の DELETE は既にコミット済みのため復元されない。結果としてその ledger の明細が DB から永久に失われる。tx を渡す経路（LedgerSplitService）と、外側 tx スコープ内から呼ばれる経路（HasActiveTransactionScope=true）は暗黙参加するので原子的だが、tx なし・外側 tx なしの呼び出しだけが穴になっている。既存テストは LedgerRepositoryTransactionTests.ReplaceDetailsAsync_WithTransactionRolledBack_KeepsOldDetails（tx あり経路）のみを固定しており、この経路は未検証。",
+   "scenario": "共有モード（SMB・最大20台）で職員が履歴詳細ダイアログ（LedgerDetailViewModel.SaveAsync, ViewModels/LedgerDetailViewModel.cs:571）の「保存」を押す。DELETE が確定した直後、他 PC の書き込みと競合して INSERT 側が SQLITE_BUSY で失敗 → InsertDetailsAsync が Rollback して false/例外を返す。ViewModel は「保存に失敗しました」と表示するだけなので職員は「何も変わっていない」と誤認するが、実際には当該台帳行の乗車明細（乗車駅・降車駅・金額・バス停）が全件消えている。月次帳票の摘要再生成もできなくなる。CSV 明細インポート（Services/Import/CsvImportService.Detail.cs:467）も同じ経路で、こちらは複数 ledger 分がループで走るため被害が拡大する。",
+   "foundBy": "repositories",
+   "fixHint": "ReplaceDetailsAsync に InsertDetailsAsync と同じ3分岐（tx あり／HasActiveTransactionScope で暗黙参加／それ以外は自前 BeginTransactionAsync）を実装し、DELETE と INSERT を必ず同一トランザクションで実行して commit/rollback まで責任を持つ（tx なし経路のロールバックで旧明細が残ることを実 SQLite テストで固定）。",
+   "verifyReasoning": "実行経路を追って成立を確認した。\n\n1) LedgerRepository.cs:1229-1230 — 引数2つの `ReplaceDetailsAsync` は `transaction: null` で3引数版へ委譲。\n2) LedgerRepository.cs:1233-1247 — `transaction == null` の場合 `_dbContext.LeaseConnectionAsync()` で接続を取得。DbContext.cs:447-452 の `LeaseConnectionAsync` は**セマフォを取らず、トランザクションも開かない**（単一の共有 SQLiteConnection を返すだけ）。\n3) LedgerRepository.cs:1250-1256 — `deleteCommand.Transaction` は tx=null のため未設定 → 接続に活性トランザクションが無い状態なので `DELETE FROM ledger_detail WHERE ledger_id=@id` は **autocommit で即確定**。\n4) LedgerRepository.cs:1259 → InsertDetailsAsync(…, transaction: null)（LedgerRepository.cs:418-466）。ここで `transaction==null` かつ `_dbContext.HasActiveTransactionScope==false` のため LedgerRepository.cs:447 で **別の** `BeginTransactionAsync()` を開き、失敗時は 457/463 で `scope.Rollback()` する。直前の DELETE は別トランザクションで確定済みのため復元されない。\n\n呼び出し元で外側 tx が無いことも確認:\n- ViewModels/LedgerDetailViewModel.cs:571 — `ReplaceDetailsAsync(_ledger.Id, updatedDetails)`（tx なし）。`BeginTransactionAsync` は 596 行目、つまり **置換が終わった後**にしか開かれないので、置換時点で `HasActiveTransactionScope=false`。失敗時は 574 で「保存に失敗しました」と出すだけ（明細は既に消えている）。\n- Services/Import/CsvImportService.Detail.cs:448-507 — ループ内 467 行目で tx なし呼び出し。外側スコープ無し。例外は 498-506 で errors に積むだけでループ継続するため、複数 ledger に被害が拡大しうる。\n\n一方、原子的な経路は指摘のとおり:\n- LedgerSplitService.cs:115 は `scope.Transaction` を渡す（DELETE も INSERT も同一 tx）。\n- 外側 tx スコープ内から tx=null で呼ばれた場合は、DELETE が接続の活性トランザクションに暗黙参加し、InsertDetailsAsync も LedgerRepository.cs:439-445（Issue #1575 経路）で暗黙参加するため原子的。\n\n設計意図による許容ではないことも確認: ICCardManager/docs/superpowers/specs/2026-05-20-issue-1456-ledger-insert-details-batch-design.md は `InsertDetailsAsync` 単体の ALL-OR-NOTHING 化（§失敗モードと回復、142行目「重要な挙動変更」）だけを扱い、`ReplaceDetailsAsync` の DELETE を同一 tx に含める話は一切無い（同 spec は ReplaceDetailsAsync を「tx=null 経路の呼び出し元」として列挙するのみ、15-18/124行目）。つまり #1456 で INSERT 側だけ tx 化した結果、DELETE が tx 外に取り残された形。\n\nテストも指摘どおり穴あり: tests/…/LedgerRepositoryTransactionTests.cs:315 の `ReplaceDetailsAsync_WithTransactionRolledBack_KeepsOldDetails` は tx あり経路のみ。tx なし経路は tests/…/LedgerDetailOrderingIntegrationTests.cs:295 が正常系（順序）を触るだけで、INSERT 失敗時の挙動は未検証。\n\n発火条件は例外または `InsertDetailsCore` の 0 行返却（LedgerRepository.cs:516-519）。共有モード（SMB・最大20台、busy_timeout 15s）では DELETE 確定後〜BEGIN の間に他 PC が書き込みロックを保持して SQLITE_BUSY、SMB 断、ディスク障害、プロセス異常終了のいずれでも当該 ledger の明細が全消失し、UI は「保存に失敗しました」としか出さないため喪失が silent。"
+  },
+  {
+   "file": "ICCardManager/src/ICCardManager/ViewModels/MainViewModel.cs",
+   "line": 1149,
+   "title": "貸出/返却の後処理で例外が出ると Processing のまま復帰不能になる",
+   "severity": "high",
+   "category": "correctness",
+   "description": "ProcessLendAsync / ProcessReturnAsync は先頭で SetInternalState(AppState.Processing) を実行し、ResetState() は成功・失敗の各分岐の最後でしか呼ばれない。LendAsync/ReturnAsync 自体は内部で catch しているが、その後に呼ぶ RefreshLentCardsAsync()（_cardRepository.GetLentAsync）・RefreshDashboardAsync()・LoadHistoryLedgersAsync()・HandleReturnSuccessAsync() 内の GetAppSettingsAsync/CheckWarningsAsync/ダイアログ表示には try/catch が一切なく、例外はそのまま HandleCardReadAsync まで伝播する。呼び出し元は OnCardRead の _dispatcherService.InvokeAsync(Func<Task>) で、WpfDispatcherService は Dispatcher.InvokeAsync(asyncAction) の戻り値も内側 Task も await しないため、例外は誰にも観測されない（App の TaskScheduler.UnobservedTaskException は GC 後に遅延して発火するだけで状態は戻らない）。結果として CurrentState は Processing に固定され、HandleCardReadAsync 冒頭の『処理中は無視』でその後のすべてのカードタッチが破棄される。タイマーも停止済み、Cancel()（Esc）は WaitingForIcCard のときしか ResetState しないため、アプリ再起動以外に復帰手段がない。",
+   "scenario": "共有モード運用中、返却タッチの直後にネットワーク共有が瞬断し RefreshDashboardAsync 内の SELECT が SQLiteException を投げる。返却自体は DB にコミット済みだが ResetState() が実行されないため CurrentState=Processing が残る。以後、職員証も交通系ICカードもタッチ音すら鳴らず全く反応しなくなり（HandleCardReadAsync が即 return）、60秒タイムアウトも停止済みなので自動復帰しない。ユーザーには何のエラーも出ないまま端末が事実上停止し、再起動するまで貸出・返却ができない。",
+   "foundBy": "mainvm",
+   "fixHint": "ProcessLendAsync / ProcessReturnAsync の本体を try/catch(Exception) + finally { ResetState(); } で包み（30秒ルール用の職員情報保存も finally 前に確定）、catch では ExceptionMessageFormatter.ToUserMessage による簡潔なトーストと LogError を出す。併せて WpfDispatcherService.InvokeAsync(Func&lt;Task&gt;) が内側 Task を観測して例外をログするようにする。",
+   "verifyReasoning": "実行経路を実コードで確認できた。(1) ProcessLendAsync は MainViewModel.cs:1119 で SetInternalState(AppState.Processing) を設定し、成功分岐の ResetState() は 1163 行目にしかない。その手前 1149/1150 の RefreshLentCardsAsync / RefreshDashboardAsync には try/catch が無い（MainViewModel.cs:865-873, 878-886 に catch なし）。ProcessReturnAsync も同様（1197 で Processing、1218 の HandleReturnSuccessAsync → 1262-1263 Refresh 系、1271 CheckWarningsAsync（内部で _settingsRepository.GetAppSettingsAsync、MainViewModel.cs:815-820 に catch なし）、1276 の GetAppSettingsAsync、1289 の ShowDialogAsync がすべて無防備で、ResetState は 1225 行目）。(2) 下位層も例外を握らない: CardRepository.GetLentAsync → GetLentFromDbAsync（CardRepository.cs:158-）は DbContext.LeaseConnectionAsync → GetConnectionInternal を直接使い try/catch 無し。DashboardService.BuildDashboardAsync（DashboardService.cs:42-52）も同様に 4 リポジトリを素で await するのみ。よって共有モードの SMB 瞬断で SQLiteException がそのまま伝播する。(3) 伝播先で誰も観測しない: 呼び出し元は MainViewModel.cs:908 の _dispatcherService.InvokeAsync(() => HandleCardReadAsync(e.Idm)) で、WpfDispatcherService.cs:20-24 は Dispatcher.InvokeAsync(asyncAction) の DispatcherOperation も内側 Task も await しない。async メソッドの例外は返り値 Task に格納されるため DispatcherUnhandledException（App.xaml.cs:904）は発火せず、App.xaml.cs:948 の UnobservedTaskException が GC 後に遅延発火してダイアログを出すだけで、CurrentState は復元されない。(4) 復帰手段が無い: CurrentState を書き戻すのは ResetState（MainViewModel.cs:2292-2299、SetState は 2254/2279 のみ）だけで、タイムアウトタイマーは HandleCardInIcCardWaitingStateAsync:996 の StopTimeout() で停止済み（OnTimeoutTick は動かない）、Cancel() は WaitingForIcCard のときしか ResetState しない。以後 HandleCardReadAsync:917 の「処理中は無視」で全タッチが破棄される。さらに共有モードの定期リフレッシュ RefreshSharedDataAsync（MainViewModel.cs:761-763、04_機能設計書.md:1200 に明記）も Processing 中はスキップするため自己回復もしない。設計書・コードコメントにこの状態固定を許容する記述は見当たらず、むしろ RefreshSharedDataAsync だけが try/catch を持つ非対称が意図的防御の不在を示す。なお指摘の「何のエラーも出ない」は厳密には不正確で、GC 契機で「バックグラウンド処理エラー」ダイアログが遅れて出うるが、Processing 固定と全タッチ無視という本質は成立する。"
+  },
+  {
+   "file": "ICCardManager/src/ICCardManager/ViewModels/CardManageViewModel.cs",
+   "line": 557,
+   "title": "カード編集保存で繰越累計・開始ページ番号が既定値に消される",
+   "severity": "high",
+   "category": "data-integrity",
+   "description": "カード管理の「更新」経路（SaveAsync の else ブロック）では、更新用の IcCard を CardIdm/CardType/CardNumber/Note/IsLent 系だけで新規生成しており、StartingPageNumber・CarryoverIncomeTotal・CarryoverExpenseTotal・CarryoverFiscalYear を引き継いでいない。一方 CardRepository.UpdateAsyncInternal の UPDATE 文はこれら4列も無条件に SET するため、モデルの既定値（StartingPageNumber=1、Carryover*=0、CarryoverFiscalYear=NULL）が DB へ上書きされる。新規登録経路（441行）ではこれらを設定しているので、値を失うのは編集経路だけ。",
+   "scenario": "紙の出納簿から年度途中で移行したカード（Issue #510/#1215、CarryoverIncomeTotal=120000 / CarryoverExpenseTotal=95000 / CarryoverFiscalYear=2025、StartingPageNumber=7）について、管理者がカード管理画面で備考の誤字だけを直して「保存」する。UpdateAsync が carryover_income_total=0, carryover_expense_total=0, carryover_fiscal_year=NULL, starting_page_number=1 を書き込み、以後この年度の5月以降の月次帳票で「年度累計の受入・払出」から紙時代の累計が丸ごと欠落し、出納簿のページ番号も1に戻る。操作ログには UPDATE として記録されるが CardManageViewModel はカード番号・種別・備考しか差分表示しないため、消えたこと自体が気付かれない。",
+   "foundBy": "viewmodels",
+   "fixHint": "更新経路の new IcCard に beforeCard（または SelectedCard）から StartingPageNumber・CarryoverIncomeTotal・CarryoverExpenseTotal・CarryoverFiscalYear を引き継ぐ（恒久策としては UpdateAsyncInternal の SET から当該4列を外し専用更新メソッドへ分離し、CSV 更新経路も併せて修正、保全を回帰テストで固定）。",
+   "verifyReasoning": "実行経路を確認: CardManageViewModel.cs:314-327 StartEdit（ガードは SelectedCard != null のみ、繰越カードを除外しない、IsNewCard=false）→ SaveAsync の更新分岐 CardManageViewModel.cs:552-567 で new IcCard を CardIdm/CardType/CardNumber/Note/IsLent/LastLentAt/LastLentStaff だけで生成（StartingPageNumber は Models/IcCard.cs:78 の既定1、Carryover* は既定0/null のまま）→ CardManageViewModel.cs:568 _cardRepository.UpdateAsync → CardRepository.cs:304-326 UpdateAsyncInternal の UPDATE が starting_page_number / carryover_income_total / carryover_expense_total / carryover_fiscal_year を無条件 SET し既定値で上書き。結果、ReportDataBuilder.cs:122-128（CarryoverFiscalYear == fiscalYearStartYear かつ month != 4 のとき年度累計へ紙時代累計を加算）が発火せず5月以降の累計から欠落し、ReportService.cs:785-798 の4月開始ページが1へ戻る。新規登録経路 CardManageViewModel.cs:441-458 はこれらを設定しており欠落は編集経路固有。防御・意図的設計は見つからず: CardRepositoryTests.cs:307-365 の UpdateAsync テストは戻り値のみ検証で値の保全を表明していない、設計書・コメントにも編集時リセットの記述なし。直前に beforeCard（CardManageViewModel.cs:551 GetByIdmAsync）と SelectedCard（CardDto、DtoMapper.cs:35-36 で当該4値を保持）が手元にあるのに未使用。復旧も困難で、繰越値の入力 UI は新規登録時の CardRegistrationModeDialog のみ、CSV のカード列にはこれら4項目が存在しないため CsvImportService.Card.cs:169,174 の更新経路でも同じ消失が起きる。severity は critical から high に下げる（消失は静かで UI からの復旧手段がない一方、影響は紙出納簿移行カード（Issue #510/#1215）と StartingPageNumber!=1 のカードに限定され、ledger 本体は無傷）。"
+  },
+  {
+   "file": "ICCardManager/src/ICCardManager/ViewModels/MainViewModel.cs",
+   "line": 1119,
+   "title": "貸出/返却中の例外で AppState.Processing が固着し以後の全タッチが無視される",
+   "severity": "high",
+   "category": "correctness",
+   "description": "ProcessLendAsync (1119) / ProcessReturnAsync (1197) は先頭で SetInternalState(AppState.Processing) を実行するが、以降の await 群が try/finally で保護されていない。成功経路の RefreshLentCardsAsync (865-873) / RefreshDashboardAsync (878-886) / LoadHistoryLedgersAsync はいずれも try/catch を持たない生のリポジトリ呼び出しであり、ここで例外が出ると 1163 行の ResetState() に到達しない。呼び出し元の OnCardRead (904-909) は _dispatcherService.InvokeAsync(Func<Task>) による fire-and-forget のため、この例外は Task に格納されたまま誰にも観測されず、ログにも UI にも一切現れない。",
+   "scenario": "共有モードで貸出書き込み直後にネットワークが瞬断し、RefreshLentCardsAsync の GetLentAsync（キャッシュ TTL 10 秒切れで DB 再読込）が SQLiteException を投げる。ResetState() が呼ばれず CurrentState は Processing のまま固定される。以後どの職員が職員証・交通系ICカードをタッチしても HandleCardReadAsync が 917 行で即 return するため無反応になり、RefreshSharedDataAsync も 762 行で同じ判定によりスキップされ続けて他 PC の変更も反映されなくなる。画面には「処理中です。そのままお待ちください」が出たまま復旧手段がなく、アプリ再起動以外に回復できない。例外は握りつぶされるためログにも残らず原因究明もできない。",
+   "foundBy": "async-threading",
+   "fixHint": "ProcessLendAsync / ProcessReturnAsync の本体を try/catch/finally で包み、例外時も finally で必ず ResetState()（＋ ExceptionMessageFormatter.ToUserMessage によるトースト表示と LogError）を実行する。併せて OnCardRead の fire-and-forget が例外を観測できるようにする。",
+   "verifyReasoning": "実行経路を確認できた。(1) MainViewModel.cs:1119 `SetInternalState(AppState.Processing)` 後、1149 `await RefreshLentCardsAsync()` / 1150 `RefreshDashboardAsync()` / 1155 `LoadHistoryLedgersAsync()` は try/finally 外で、1163 の `ResetState()` に到達しないと Processing が残る（ProcessReturnAsync 1197→1218 `HandleReturnSuccessAsync`→1225 も同形）。(2) 例外源は実在する: RefreshLentCardsAsync (865-873) → CardRepository.GetLentAsync (140-153) → GetLentFromDbAsync (158-175) は `LeaseConnectionAsync`/`ExecuteReaderAsync` を try/catch なしで実行（LendAsync 自体は内部 try を持つため、露出窓は成功後のリフレッシュ群）。(3) 復旧手段が全て塞がっている: HandleCardInIcCardWaitingStateAsync が 996 で `StopTimeout()` を呼ぶため Processing 中はタイムアウトタイマーが停止しており OnTimeoutTick (2336-2347) の ResetState は発火しない。Cancel(Esc) は 2456 で WaitingForIcCard のときのみリセット。RefreshSharedDataAsync は 762 で Processing をスキップ。以後の全タッチは HandleCardReadAsync 917 で即 return。(4) 例外は OnCardRead 904-909 → WpfDispatcherService.cs:20-24 の `Dispatcher.InvokeAsync(Func<Task>)`（内側 Task 未観測）で握られる。ただし指摘の「ログにも UI にも一切現れない」は不正確で、App.xaml.cs:948 の TaskScheduler.UnobservedTaskException ハンドラが LogError とエラーダイアログを出す（GC ファイナライズ時のみで非決定的、かつ状態は戻らない）。設計書 03_画面設計書.md §状態遷移にも Processing の失敗時復帰は定義されておらず、意図的な設計とみなせる記述・ガードは見つからなかった。"
+  },
+  {
+   "file": "ICCardManager/src/ICCardManager/ViewModels/CardManageViewModel.cs",
+   "line": 516,
+   "title": "カード登録時の履歴インポート失敗が無視され「登録しました」と表示される",
+   "severity": "high",
+   "category": "data-integrity",
+   "description": "ImportHistoryForRegistrationAsync は例外を握りつぶして result.Success=false を返すだけ（LendingService.cs:1334-1339、ErrorMessage も持たない）で、呼び出し元は MayHaveIncompleteHistory しか見ておらず Success を一切チェックしていない。さらに ImportHistoryForRegistrationAsync のトランザクションは他の書込み経路と違い ExecuteWithRetryAsync でラップされていないため、共有モードの SQLITE_BUSY で一発失敗する。初期残高レコード（CreateInitialLedgerAsync）は別トランザクションで先にコミット済みで、しかもその残高は「履歴がインポートされる前提」で CalculatePreHistoryBalance により履歴最古エントリから逆算した値になっている。",
+   "scenario": "共有フォルダ上のDBで、他PCが返却処理中にカードを新規登録する。CreateInitialLedgerAsync が「新規購入 残高5,000円（＝履歴最古の取引前残高を逆算した値）」をコミットした直後、ImportHistoryForRegistrationAsync の BeginTransactionAsync／INSERT が SQLITE_BUSY を投げてロールバックされる。呼び出し元は Success を見ないので StatusMessage は「登録しました」となり、職員は失敗に気付かない。台帳にはカードの現残高（例 3,200円）ではなく逆算した 5,000円の行だけが残り、以降の返却・月次帳票の残高チェーンが実カードと最大で当月利用額分ずれ続ける。",
+   "foundBy": "lending",
+   "fixHint": "CardManageViewModel.SaveCard で importResult.Success=false を分岐して「履歴の取込に失敗した／初期残高行のみ登録された／CSVインポートで補完する」旨をエラー表示（IsStatusError=true＋ダイアログ）し、併せて ImportHistoryForRegistrationAsync のトランザクションを他の書込み経路と同様 _dbContext.ExecuteWithRetryAsync でラップする（可能なら初期残高行の作成と同一トランザクションに束ねる）。",
+   "verifyReasoning": "実行経路を追って指摘どおりに成立することを確認した。\n\n1) 呼び出し元（ICCardManager/src/ICCardManager/ViewModels/CardManageViewModel.cs:505-542）: filteredHistory がある場合 CalculatePreHistoryBalance（同ファイル 1106-1120、履歴最古エントリからの逆算）で initialBalance を決め、CreateInitialLedgerAsync(overrideDate/overrideBalance)（990-1093）で「新規購入/○月から繰越」行を **独立して先に** _ledgerRepository.InsertAsync（1075）でコミット。その直後に ImportHistoryForRegistrationAsync（516）を呼ぶが、参照するのは importResult.MayHaveIncompleteHistory（519）のみで **importResult.Success は本ファイル中どこでも参照されない**（grep 済み）。そのまま 538 で StatusMessage = \"登録しました\"、IsStatusError = false。呼び出し元に外側トランザクションは無く、SaveCard 内の他の catch もこの結果を拾わない。\n\n2) 失敗側（ICCardManager/src/ICCardManager/Services/LendingService.cs:1282-1342）: BeginTransactionAsync → CreateUsageLedgersAsync → Commit を try で囲み、catch(Exception) で `_logger.LogError(...)` と `result.Success = false;` のみ（1334-1340）。ErrorMessage 相当のプロパティは HistoryImportResult（同 78-104）に存在しない。したがって例外は完全にログのみで、UI へ一切伝わらない。\n\n3) 再現性の裏付け: 同じ LendingService の他の書込み経路（237、397、499）は「共有モード時の SQLITE_BUSY 対策」として明示的に _dbContext.ExecuteWithRetryAsync（DbContext.cs:1212-1252、共有時 5 回リトライ）でラップされているのに対し、1305 の BeginTransactionAsync（DbContext.cs:548、リトライ無し）はラップされていない。busy_timeout 15000ms（共有モード）が多くを吸収するため確率は指摘ほど高くないが、SQLITE_BUSY に限らず **任意の例外**（接続断・制約違反等）で同じ無言失敗になる。\n\n4) 結果の不整合: 台帳には逆算した取引前残高（例 5,000円）の初期行だけが残り、実残高（例 3,200円）に至る履歴行が欠落する。返却時の再取込は FilterUsageSinceLent（LendingService.cs:579-588）で「貸出日−7日」以降しか対象にしないため、繰越モードのように importFromDate が数週間〜数か月前になるケースでは欠落分が自動回復しない（カード履歴は20件で回転するため後からの復元も困難）。\n\n5) 防御の有無: 意図的許容を示す設計記述は見つからなかった。CreateInitialLedgerAsync の握りつぶしには「Issue #1282: 残額読み取りエラーでもカード登録は成功させる」という明示的な設計コメントがあるが、履歴インポート失敗側には同種の記述が無く、docs/design にも該当記述なし（`履歴インポート` の grep は 03_画面設計書の別文脈と 07_テスト設計書のログ記述のみ）。CardManageViewModel 側に Success=false を扱うテストも存在しない。唯一の下流検知は帳票出力時の ReportPreflightChecker（受入−払出=残額 不成立／繰越額不一致の警告、ReportPreflightChecker.cs:200-282）だが、これは月次帳票を作るまで気付けず、登録時点の誤りを防ぐものではない。"
+  },
+  {
+   "file": "ICCardManager/src/ICCardManager/Services/ReportDataBuilder.cs",
+   "line": 116,
+   "title": "年度内に台帳が1件もないカードの累計残額が0円になる",
+   "severity": "high",
+   "category": "data-integrity",
+   "description": "`currentBalance` は年度内台帳が空のとき `monthEndBalance`（当月台帳が空なら 0）へフォールバックする。前年度繰越（`precedingBalance` / `fiscalYearCarryoverIncome`）へは落ちない。その結果、5月以降の `cumulativeTotal.Balance` が 0 になる一方で `yearlyIncome` には前年度繰越額が加算されるため、帳票上で「受入 − 払出 = 残額」が破綻する。4月だけは 138-140 行で `yearlyLedgers.Any() ? currentBalance : (precedingBalance ?? 0)` と明示的にガードされており、同じ考慮が5月以降に入っていないのは実装漏れであることが読み取れる。3月の `carryoverToNextYear`（169行）も同じ `currentBalance` を使うため、年度をまたいで繰越額が消える。",
+   "scenario": "前年度末残高 7,500 円のまま当年度に一度も使われていない遊休カード（複数職員シェア運用では常時発生する）。2025年6月の帳票を作成すると、GetPreviousMonthBalanceAsync が4月まで遡って空 → GetCarryoverBalanceAsync(2024)=7500 を返すので繰越行は「5月より繰越 残額 7,500」と印字される。一方 GetByDateRangeAsync(4/1〜6/30) が空のため currentBalance=0 となり、累計行は「受入 7,500 / 払出 0 / 残額 0」と印字される。同一帳票内で残高が矛盾し、ReportPreflightChecker.AddTotalMismatchWarning が毎月警告を出す。さらに翌3月の帳票では「次年度へ繰越」が 0 円で出力され、翌年度4月の「前年度より繰越」（DB から直接取得＝7,500）と一致しなくなる。",
+   "foundBy": "reports",
+   "fixHint": "ReportDataBuilder.cs:116 の currentBalance を `yearlyLedgers.LastOrDefault()?.Balance ?? (precedingBalance ?? fiscalYearCarryoverIncome)` とし、4月と同じ前年度繰越フォールバックを5月以降の累計・3月の次年度繰越にも適用する（併せて5月以降の「年度内台帳ゼロ」回帰テストを追加）。",
+   "verifyReasoning": "経路を実コードで追跡し成立を確認。ReportDataBuilder.cs:48 → GetPreviousMonthBalanceAsync(:199-229) は年度内が空なら :227 で GetCarryoverBalanceAsync(fy-1)（LedgerRepository.cs:551-557 で年度末以前の最新残高＝7,500）を返し、:74-82 で繰越行「○月から繰越 残額 7,500」を生成する。一方 :100-102 の GetByDateRangeAsync(4/1〜当月末) が空のため :116 の currentBalance は monthEndBalance（:93、当月も空なので 0）へ落ち、:107-114 の yearlyIncome だけが fiscalYearCarryoverIncome 7,500 を加算する。結果 :159-165 の cumulativeTotal は Income 7,500 / Expense 0 / Balance 0 となり、ReportRowBuilder.cs:73-82 → ReportService.cs:357-363 が無条件にそのまま Excel へ出力する（ReportService.cs:242-252 のスキップは「新規購入より前の月」のみ、ReportViewModel.cs:531 の一括出力対象は払戻済以外の全カードで利用有無による絞り込みなし）。ReportPreflightChecker.cs:250→288-308 の AddTotalMismatchWarning（7500-0≠0）が毎月 TotalMismatch を出すが、履歴画面では直せないため誤警告化する。3月は ReportDataBuilder.cs:169 で carryoverToNextYear=currentBalance=0 が印字され、翌年度4月の前年度繰越（:44 の DB 直取得＝7,500）と食い違い年度間の繰越チェーンが切れる。意図的設計ではない根拠: 同一の欠損に対し4月だけ :138-140 で yearlyLedgers.Any() ? currentBalance : (precedingBalance ?? 0) と明示ガードされ、テストも4月版のみ（ReportDataBuilderTests.cs:1503 BuildAsync_April_NoLedgers_MonthlyTotal_IncomeEqualsBalance）で5月以降の同型テストが存在しない。既存の BuildAsync_NoLedgers_ReturnsZeroTotals（同 :1025）は SetupBasicMonth が「前月に台帳あり／年度範囲は空」という実 DB では生じ得ないモック構成で、かつ CumulativeTotal を検証していないため現挙動を固定していない。加えて .claude/rules/business-logic.md および docs/design/04_機能設計書.md:486,638 は「受入 − 払出 = 残額 が月計・累計のいずれでも成立すること」を要件として明記しており、本挙動はこれに反する。"
+  },
+  {
+   "file": "ICCardManager/src/ICCardManager/ViewModels/MainViewModel.cs",
+   "line": 1086,
+   "title": "30秒ルールの逆処理が現在の操作者を前回操作者で上書きし台帳に誤記録する",
+   "severity": "high",
+   "category": "data-integrity",
+   "description": "Process30SecondRuleAsync は _currentStaffIdm / _currentStaffName を無条件に _lastProcessedStaffIdm / _lastProcessedStaffName で上書きする。この上書きは『職員証タッチ待ち状態で操作者情報が無い場合の補完』が目的（XMLコメントもその趣旨）だが、WaitingForIcCard 状態から呼ばれる経路（HandleCardInIcCardWaitingStateAsync の IsRetouchWithinTimeout 分岐）では直前の職員証タッチで _currentStaffIdm が確定しているのに、それを捨てて前回操作者に差し替えてしまう。ProcessLendAsync/ProcessReturnAsync はこの値を LendingService.LendAsync(_currentStaffIdm!, ...) に渡し、LendingService は staff を引き直して ledger.StaffName と ic_card.lender_idm に書き込むため、台帳・貸出者が実際の操作者と食い違う。operation_log 上も誤った職員が操作したことになる。",
+   "scenario": "職員Aがカード X を返却する（LastProcessedCardIdm=X, LastOperationType=Return）。20秒後、職員Bが自分の職員証をタッチし（_currentStaffIdm=B）、続けて同じカード X をタッチして借りようとする。IsRetouchWithinTimeout(X) が true になるため Process30SecondRuleAsync が走り、_currentStaffIdm が B から A に差し替えられたうえで ProcessLendAsync が実行される。カードは実際にはBが持ち出したのに、ledger の利用者と ic_card.lender_idm は A になり、長期未返却の督促も A に向く。",
+   "foundBy": "mainvm",
+   "fixHint": "Process30SecondRuleAsync では `_currentStaffIdm` が未設定のときだけ `_lastProcessedStaffIdm` で補完し（`if (string.IsNullOrEmpty(_currentStaffIdm)) { … }`）、職員証タッチ済み（WaitingForIcCard 経路）では現在の操作者をそのまま使う。",
+   "verifyReasoning": "実行経路を全て確認できた。(1) 職員A が カードX を返却 → MainViewModel.cs:1213 ReturnAsync 成功 → :1221-1222 で `_lastProcessedStaffIdm/Name = A`、LendingService.cs:724-726 で `LastProcessedCardIdm=X / LastProcessedTime=now / LastOperationType=Return` を記録、直後 :1226 ResetState()（MainViewModel.cs:2293-2299）で `_currentStaffIdm=null`、状態は WaitingForStaffCard。LendingService.ClearHistory() は src 側から一切呼ばれておらず（呼び出しはテストのみ）、再タッチ履歴は残る。(2) 20秒後に職員B が職員証タッチ → MainViewModel.cs:945-967 で `_currentStaffIdm=B`、SetInternalState(WaitingForIcCard)。(3) B が同じカードX をタッチ → MainViewModel.cs:936 → HandleCardInIcCardWaitingStateAsync（:993〜）→ 未登録/払戻チェックを通過 → :1042 `IsRetouchWithinTimeout(X)`（LendingService.cs:1249-1257、同一IDm かつ経過22秒 ≤ 30 で true）→ :1045 Process30SecondRuleAsync。(4) Process30SecondRuleAsync（MainViewModel.cs:1075-）は :1078 の空チェックのみで、:1086-1087 で `_currentStaffIdm = _lastProcessedStaffIdm(A)` と無条件上書き。LastOperationType==Return なので :1094 ProcessLendAsync → :1138 `LendAsync(_currentStaffIdm! = A, X, balance)` → LendingService.cs:357 InsertLendLedgerAsync(cardIdm, staffIdm=A, staff.Name=A…) で ledger.StaffName と ic_card の lender_idm に A が書かれる。結果、実際に持ち出したのは B なのに貸出者は A となり、B へのフィードバック（ShowLendNotification はカード種別・番号のみ）にも誤りの兆候が出ない。防御・設計意図の反証材料は見つからなかった: (a) 04_機能設計書 §3（171-217行）の30秒ルール仕様は操作者の帰属について何も規定していない、(b) メソッドの XML コメント（:1069-1072）も「職員証スキップモードでない場合も動作するよう、最後に操作を行った職員の情報を使用」＝操作者不在時の補完が趣旨で、操作者が確定済みの場合の上書きを正当化していない、(c) むしろ HandleCardInIcCardWaitingStateAsync の Issue #1211 コメント（:998-1003）は「ICカード待ち中の職員証タッチは…操作者を上書きする」と明記しており、直後に前回操作者へ差し戻す挙動は同 Issue の意図と矛盾する、(d) MainViewModelIntegrationTests.cs:353-412 の30秒ルールテストは同一職員のケースのみで、別職員時の上書きを固定するテストは存在しない（grep 済み）。WaitingForStaffCard 経路（:974-977）では `_currentStaffIdm` が null のため上書きは正当で、問題は WaitingForIcCard 経路に限定される。"
+  },
+  {
+   "file": "ICCardManager/src/ICCardManager/Data/DbContext.cs",
+   "line": 1535,
+   "title": "CheckWritable の失敗痕跡が LogDebug のみで本番ログに一切残らない",
+   "severity": "medium",
+   "category": "observability",
+   "description": "`DbContext.CheckWritable()` の例外 catch は `_logger?.LogDebug(ex, \"DB書込可否確認に失敗...\")` だけで痕跡を残している。`.claude/rules/development-conventions.md`（Issue #1716）が明記するとおり `appsettings.json` の `Logging:LogLevel:Default` は `Information` のため、この行は本番のログファイルに一切出力されない。兄弟メソッドの `ExecuteConnectionCheck`（同ファイル 1374-1379 行）は Issue #1716 で `LogConnectionCheckOutcome(...)` による Information ログを併設して穴を塞いだが、`CheckWritable` にはその対応が入っていない。さらにテスト `ICCardManager/tests/ICCardManager.Tests/Data/DbContextCheckWritableTests.cs:113`（`CheckWritable_接続自体が失敗する場合falseを返しLogDebugで痕跡を残すこと`）が `LogLevel.Debug` をピン留めしており、規約どおり Information へ引き上げると逆にテストが落ちる。規約が禁じたアンチパターンをテストが「正」として固定している。",
+   "scenario": "共有フォルダの権限が「読み取りのみ」に変更された環境で、職員が接続診断（F6/F7）を開くと「書込権限: 異常」と表示される。`ConnectionDiagnosticsService.cs:192` は `CheckWritable()` の bool しか見ないため、原因となった SQLite 例外（アクセス拒否／ディスクフル／ロック競合のどれか）はログファイルに残らない。管理者がログを回収しても切り分け材料がゼロで、Issue #1716 と同じ「実機ログから痕跡を追えない」状況が再発する。",
+   "foundBy": "repositories,resources,tests",
+   "fixHint": "ExecuteConnectionCheck と同じ形で、DbContext.cs:1532 の catch に LogDebug を残したまま「書込可否確認が失敗した事実＋例外種別／メッセージ」を LogInformation で併設し（失敗時のみ出力なのでログ肥大化なし）、DbContextCheckWritableTests に Information 出力を検証するテストを追加する。",
+   "verifyReasoning": "経路を実際に追って成立を確認した。(1) 指摘の catch は DbContext.cs:1532-1538（CheckWritable 本体は 1494-1539）にあり、痕跡は `_logger?.LogDebug(ex, \"DB書込可否確認に失敗…\")` のみ。(2) 本番の logger は DI で必ず注入される（App.xaml.cs:330 `new DbContext(path, logger)`）が、App.xaml.cs:305-309 で `builder.AddConfiguration(Configuration.GetSection(\"Logging\"))` しており appsettings.json の `Logging:LogLevel:Default = \"Information\"` / `ICCardManager = \"Information\"`（`Logging:File` 配下に LogLevel 指定なし）のため、Debug は ILoggerFactory のフィルタ段階で落ちる。FileLogger.cs:28-30 の `IsEnabled` は `LogLevel.None` 以外を通すだけで、その手前で落ちる構造は .claude/rules/development-conventions.md「ロギング」（Issue #1716）が明記するとおり。(3) 本番の唯一の呼び出し元は ConnectionDiagnosticsService.cs:192 `if (_databaseInfo.CheckWritable())` で、false の場合 DetailText に原因「候補」を並べるだけ（同 203-216）。CheckWritable は例外を投げないため、項目実行を包む ConnectionDiagnosticsService.cs:534 の `LogWarning` にも到達しない。ConnectionDiagnosticsViewModel.cs:119-133 のクリップボードコピーも DetailText を写すだけで、SQLite 例外（SQLITE_READONLY／ディスクフル／ロック競合の別）は本番のログにもコピー結果にも一切残らない。(4) 兄弟の ExecuteConnectionCheck は DbContext.cs:1371-1379 で LogDebug を残しつつ `LogConnectionCheckOutcome(...)`（Information、同 1405-1420 付近）を併設して #1716 で穴を塞いだが、CheckWritable は #1686（PR #1700）で追加されたまま #1716 の対応が及んでおらず、規約の判断基準「障害調査でこの行が無いと困るか」に照らして未対応。設計書・コメント上も CheckWritable を意図的に Debug 据え置きとする記述は見つからなかった（コメントは「CheckConnection と同じ方針」とあるが、その CheckConnection 自体が #1716 で Information 併設へ改められている）。ただし指摘のうち「Information へ引き上げるとテストが落ちる」は限定的に正しいだけで、DbContextCheckWritableTests.cs:126-134 の Verify は `LogLevel.Debug` の AtLeastOnce であり、ExecuteConnectionCheck と同様に LogDebug を残したまま Information を併設すれば既存テストは緑のまま通る（DbContextCheckConnectionLoggingTests.cs:51-73 も同じ形で Debug をピン留めしたまま共存している）。重大度は high ではなく medium と再評価する: 機能への影響はなく、失敗自体は接続診断 UI に「書き込めません」＋原因候補として可視化され、呼び出しも F6→接続診断のオンデマンド 1 経路のみ（15秒周期の無言ヘルスチェックだった #1716 とは露出度が異なる）。欠けているのは例外種別による切り分け材料に限られる。"
+  },
+  {
+   "file": "ICCardManager/src/ICCardManager/Data/Repositories/LedgerRepository.cs",
+   "line": 535,
+   "title": "最新残高の取得が id DESC 順のみで、Issue #784/#1004 の残高チェーン順序を無視している",
+   "severity": "medium",
+   "category": "correctness",
+   "description": "同一リポジトリ内の GetByDateRangeAsync / GetPagedAsync は「同一日内の順序は id では決まらない」ことを前提に、CASE で繰越を先頭に固定し、残りの順序はアプリ層の LedgerOrderHelper.ReorderByBalanceChain（Issue #784）に委ねている。LedgerConsistencyChecker も「ID順だとポイント還元と利用の順序が残高推移と一致せず、偽の不整合が報告される」（Issue #1004）と明記している。ところが「最終レコード1件」を返す GetLatestBeforeDateAsync / GetLatestLedgerAsync（571行）/ GetAllLatestBalancesAsync（600行）は `ORDER BY date DESC, id DESC LIMIT 1` だけで決めており、同じ前提を適用していない。同一日に複数レコードがある場合、挿入順（id）が残高チェーン上の時系列と一致しなければ、その日の最終残高ではない値が「最新残高」として返る。",
+   "scenario": "1日にチャージ・利用・ポイント還元が混在するカードで、詳細の分割/統合や CSV インポートにより ledger 行の id 順が実際の時系列とずれる（Issue #1004 が想定する状況）。(a) 履歴画面ではグリッドが ReorderByBalanceChain で並べ替えられて最終行の残高は正しいのに、ヘッダーの HistoryCurrentBalance（MainViewModel.cs:1476 が GetLatestBeforeDateAsync を使用）は id 最大の行の残高を表示し、画面内で数値が食い違う。(b) より重大なのは LendingService.GetLastBalanceAsync（Services/LendingService.cs:1191）が同メソッドで「カードの最終残高」を取得している点で、誤った残高を基点に返却時の新規 ledger 行の balance が計算され、残高チェーンに恒久的な不整合が書き込まれる。",
+   "foundBy": "repositories,aggregation",
+   "fixHint": "「最新残高」を返す単票クエリ（GetLatestBeforeDateAsync / GetLatestLedgerAsync / GetAllLatestBalancesAsync / GetCarryoverBalanceAsync）を、最新日の全行を取得して LedgerOrderHelper.ReorderByBalanceChain(...).Last() で確定する方式に揃える（貸出中レコードを含める現在の挙動は LendingService の起点取得のため維持し、Issue #1004 形状の回帰テストを追加）。",
+   "verifyReasoning": "【前提の確認】FelicaHistoryBlockDecoder.cs:74 が `useDate = new DateTime(year, month, day)`（時刻なし）で、Ledger.Date は `detail.UseDate ?? date`（LendingService.cs:894,978,1024,1154 すべて）。LedgerRepository.cs:203 で \"yyyy-MM-dd HH:mm:ss\" 保存されるが同一日の利用系レコードは時刻が全て 00:00:00 になるため、`ORDER BY date DESC, id DESC`（LedgerRepository.cs:533/569/595）の同日タイブレークは **id のみ**で決まる。\n\n【id順≠時系列順が実在すること】(1) 07_テスト設計書.md:612/966 が Issue #1004 の実データ形状として「3/10: 還元(Id=16,残高1696) + 利用(Id=17,残高1456)、ID順(16→17)だと不整合だが残高チェーン順(17→16)で整合」と明記。この形状では id 最大は 利用(1456) で、その日の実残高 1696 ではない。(2) 現行コードでも生成経路がある: LendingService.cs:945 の Issue #837 同日統合は、2回目の返却で先にチャージ Ledger を新規 INSERT（:987 InsertLedger、id 大）し、後続の利用セグメントは既存の**古い id** の Ledger を UPDATE する（:1044-1112）。結果、同日で「id 最大＝チャージ行（中間残高）」「真の最終残高＝小さい id の統合行」になる。\n\n【故障経路 (a) 確認】MainViewModel.cs:1445 は行を `LedgerOrderHelper.ReorderByBalanceChain` で並べ替える一方、同メソッド内 MainViewModel.cs:1476 のヘッダー残高 HistoryCurrentBalance は GetLatestBeforeDateAsync（id DESC）を使う。上記データでは同一画面でグリッド最終行 1696 とヘッダー 1456 が食い違う。DashboardService.cs:50 / AdminDashboardService.cs:76 の残高表示も GetAllLatestBalancesAsync（同じ id DESC）で同様。\n\n【より重い経路（指摘より深い）】ReportDataBuilder.cs:199-214 の前月繰越は意図的に ReorderByBalanceChain(...).Last() を使うのに、ReportDataBuilder.cs:44/109/227 の前年度繰越は GetCarryoverBalanceAsync → GetLatestBeforeDateAsync(LedgerRepository.cs:555) の id DESC を使う。年度末の最終稼働日に上記の id 逆転があると、物品出納簿の「前年度より繰越」および5月以降の累計受入額が誤る。さらに MainViewModel.cs:1499-1512 の BuildCarryoverRowAsync は「ReportDataBuilderと同じロジックで」とコメントしながら GetLatestBeforeDateAsync を使っており、実装が実際に食い違っている。\n\n【指摘の一部は反証】シナリオ(b)（返却時の残高チェーン恒久破壊）は成立しない。PersistReturnAsync（LendingService.cs:507-519）は CreateUsageLedgersAsync の**後**に DeleteAllLentRecordsAsync を呼ぶため、GetLastBalanceAsync（:1191）実行時点で貸出中プレースホルダ（InsertLendLedgerAsync、LendingService.cs:405-414: `Date = now`（時刻あり）、`Balance = 貸出時残高`）が必ず存在し、date が時刻付きで同日の利用行(00:00:00)より必ず新しいため id 順に関係なくこれが返る＝チェーンの正しい起点。加えて実運用では useCardBalance=true（:857）でカード読取残高が優先される。よって書き込み側の恒久破壊は起きない。\n\n【判定】読み取り側（履歴ヘッダー・カード一覧/ダッシュボード残高・年度繰越額）の誤表示/誤出力として成立。書き込み破壊は否定されるため severity は high → medium に下方修正。なお LedgerRepositoryTests.cs:1469 は「同日は id 最大」を明示的に固定しているが、フィクスチャは id 順＝時系列順の例のみで、逆転ケースを扱っていない（＝逆転時の挙動は意図された設計として担保されていない）。"
+  },
+  {
+   "file": "ICCardManager/src/ICCardManager/Infrastructure/Logging/FileLoggerProvider.cs",
+   "line": 310,
+   "title": "Dispose が CompleteAdding より先に Cancel するためキュー内のログが全て破棄される",
+   "severity": "medium",
+   "category": "resource-leak",
+   "description": "Dispose() は `_cancellationTokenSource.Cancel()` を先に呼び、その後 `CompleteAdding()` → `_outputTask.Wait(2秒)` の順で進む。BlockingCollection.GetConsumingEnumerable(token) の内部 TryTakeWithNoTimeValidation は取り出し前に必ず token のキャンセルを検査して OperationCanceledException を投げるため、キューに未書き出しの要素が残っていても即座に列挙が終了する。結果として「キューに残っているログを書き込むために少し待機」というコメントの意図は成立せず、_outputTask.Wait は既に終了済みのタスクを待つだけの空処理になっている。破棄された分は _droppedLogCount にも計上されないため、Dispose 末尾の「未レポートのドロップ件数」レポートにも現れない。正しい順序は CompleteAdding() → Wait → Cancel。既存の FileLoggerProviderTests にもフラッシュを検証するテストは無い（Dispose_例外なく終了すること のみ）。",
+   "scenario": "共有モードで DB 接続が切れた状態のまま職員がアプリを終了する。終了処理中に MainWindow_Closing のウィンドウ位置保存失敗や App.OnExit の SharedModeMonitor.Dispose 例外（LogWarning）などが記録されるが、これらは FileLoggerProvider のキューに積まれた直後に Cancel されるためファイルに一切書かれない。Issue #1716 で問題になった「実機ログから障害の痕跡を追えない」状況が、終了時のログについて再発する。ログ書き込みが SMB 遅延等で滞留していた場合は、終了直前の数十〜数千行がまとめて消える。",
+   "foundBy": "common-infra,resources",
+   "fixHint": "Dispose の順序を `CompleteAdding()` → `_outputTask.Wait(2s)` → `Cancel()`（Wait がタイムアウトした場合の打ち切り手段としてのみ Cancel）に変更し、Dispose 前にキューへ積んだメッセージがファイルに書かれることを検証するテストを FileLoggerProviderTests に追加する。",
+   "verifyReasoning": "実コード確認: /mnt/d/OneDrive/交通系/src/ICCardManager/src/ICCardManager/Infrastructure/Logging/FileLoggerProvider.cs:308-321 で Dispose が `_cancellationTokenSource.Cancel()`(310) → `_logQueue.CompleteAdding()`(311) → `_outputTask.Wait(2秒)`(316、コメント「キューに残っているログを書き込むために少し待機」315) の順。消費側は同ファイル 134 の `_logQueue.GetConsumingEnumerable(_cancellationTokenSource.Token)`。\n\nBCL 挙動の実測検証: /tmp/bcprobe で同構造（capacity 5000、消費側は1件あたり 20ms のファイル書き込み相当、20件を積んで 50ms 後に Dispose 相当）を .NET で再現したところ、現行順序（Cancel先行）は written=2/20、提案順序（CompleteAdding先行→Wait→Cancel）は written=20/20。BlockingCollection の TryTakeWithNoTimeValidation がキュー残量より先に token.IsCancellationRequested を検査して OperationCanceledException を投げるという指摘の説明どおりで、ProcessLogQueue の catch(OperationCanceledException) 142-145 が即座に握りつぶすため Wait は終了済みタスクを待つだけの空処理になる。\n\n到達経路: App.xaml.cs:305-310 で AddFile → FileLoggerExtensions.cs:24 で `ILoggerProvider` を Singleton 登録、appsettings.json:22-23 で File ロギングは本番 Enabled=true。終了時は App.xaml.cs:876-879 の `ServiceProvider.Dispose()` が FileLoggerProvider.Dispose を呼ぶ。その直前の App.xaml.cs:867-872（SharedModeMonitor.Dispose 失敗時の LogWarning）等、終了処理中に積まれたログは消費が追いつかない分だけ破棄される。破棄は TryAdd 失敗経路（WriteLog 107-127）を通らないため `_droppedLogCount` に計上されず、Dispose 末尾 323-334 の未レポート件数レポートにも一切現れない（無言の欠落）。他所のガードや設計意図（コードコメント・.claude/rules・docs）に、この順序を意図的とする記述は見つからなかった。むしろ 315 のコメントは flush を意図しており、実装と乖離している。\n\nseverity を high → medium へ再評価: 影響は「終了時にキュー残留していた分のログが無言で欠落する」診断情報の損失のみで、業務データやアプリ動作への影響はない。損失量はその瞬間のキュー残量に依存し、通常運用では数行〜数十行程度。なお指摘シナリオ中の「SMB遅延でログ書き込みが滞留」は不正確で、ログ出力先は共有フォルダではなくローカルの CommonApplicationData（FileLoggerProvider.cs:68-69）。ただしこの点は欠陥そのものを否定しない。"
+  },
+  {
+   "file": "ICCardManager/src/ICCardManager/Services/LendingService.cs",
+   "line": 513,
+   "title": "返却トランザクションのリトライで CreatedLedgers が二重に積まれる",
+   "severity": "medium",
+   "category": "concurrency",
+   "description": "PersistReturnAsync は DbContext.ExecuteWithRetryAsync のデリゲート全体を SQLITE_BUSY/LOCKED でリトライする構造だが、`result.CreatedLedgers.AddRange(createdLedgers)` をリトライ対象のラムダ内で実行している。ラムダは冪等ではないため、1回目の試行がロールバックされても result には1回目分の Ledger が残り、2回目の成功分が追加される。同じファイルの RepairLentStatusConsistencyAsync はラムダ内で `repairCount = 0;` と明示的に初期化してこの問題を回避しており、PersistReturnAsync だけ対策が漏れている。",
+   "scenario": "共有モードで返却処理中、CreateUsageLedgersAsync が完了して result.CreatedLedgers に鉄道＋バスの2件を追加した直後、DeleteAllLentRecordsAsync または UpdateLentStatusAsync が SQLITE_BUSY を投げる。scope.Rollback() 後に ExecuteWithRetryAsync が同じラムダを再実行し、CreatedLedgers は4件（ロールバック済み2件＋コミット済み2件）になる。MainViewModel.HandleReturnSuccessAsync はこのリストからバス利用 Ledger を抽出して BusStopInputDialog に渡すため、BusStopInputViewModel.InitializeWithLedgersAsync が同一 Ledger を2回 GetByIdAsync して BusUsages に同じバス乗車行を重複表示する。職員は同じ1回の乗車に対してバス停名を2回入力させられ、後入力が先入力を上書きする（IDが再採番されて GetByIdAsync が null を返した場合は、DB に存在しない Ledger インスタンスに対する入力が黙って捨てられる）。",
+   "foundBy": "lending",
+   "fixHint": "PersistReturnAsync のラムダ冒頭で result.CreatedLedgers.Clear()（RepairLentStatusConsistencyAsync の repairCount=0 と同様）にするか、ローカル変数へ受けてリトライ境界の外で代入し、リトライ時に累積しないようにする（LendingServiceTests に BUSY 1回→成功で CreatedLedgers が想定件数のままとなる回帰テストを追加）。",
+   "verifyReasoning": "実行経路を追って成立を確認した。(1) LendingService.cs:499-530 の PersistReturnAsync は ExecuteWithRetryAsync のラムダ内で `result.CreatedLedgers.AddRange(createdLedgers)`（513行）を実行し、その後 519（DeleteAllLentRecordsAsync）/521（UpdateLentStatusAsync）/523（scope.Commit()）が続く。result は ReturnAsync（713-714行）が生成した呼び出し元インスタンスで、ラムダ側に初期化は無い。(2) DbContext.cs:1212-1241 の ExecuteWithRetryAsync は `catch (SQLiteException ex) when (ex.ResultCode == Busy || Locked)` で**同じラムダを丸ごと再実行**する（共有モードは最大5回）。(3) 例外のラップは無い: LedgerRepository.DeleteAllLentRecordsAsync（324-342）/ CardRepository.UpdateLentStatusAsync（338-360）はいずれも生の SQLiteCommand をそのまま実行し、SQLiteException が素通しで retry フィルタに一致する。BeginTransactionAsync（DbContext.cs:548-570）は BEGIN 後に RESERVED を握るため 519/521 での BUSY は起きにくいが、**journal_mode=DELETE（business-logic.md に「全接続に DELETE」と明記）では COMMIT 時に EXCLUSIVE 取得待ちで SQLITE_BUSY が busy_timeout(共有15秒)超過後に発生し得る**。System.Data.SQLite の Commit 失敗時はトランザクションが有効なまま残るので 527行 の scope.Rollback() は成功し、ラムダを抜けて retry される → CreatedLedgers はロールバック済み分＋コミット済み分で累積する。(4) 下流にガードは無い: MainViewModel.cs:1274-1291 は CreatedLedgers を Summary に「バス」を含むかだけで絞り（Distinct 無し）、BusStopInputViewModel.InitializeWithLedgersAsync（139-190）も Id 重複を排除せず、各 Ledger の Details をそのまま BusUsages に追加するため、同一バス乗車行が2重表示され職員が2回入力させられる。(5) 意図的設計ではない反証も無く、むしろ同一ファイルの RepairLentStatusConsistencyAsync が 260行 で `repairCount = 0;` をラムダ内に明示して同じ罠を回避しており、LendAsync も 358-359行 で Add をリトライ境界の**外**に置いている（PersistReturnAsync だけ内側）。設計書（05_クラス設計書.md:764-777、06_シーケンス図.md:483）にもラムダ非冪等を許容する記述は無く、専用テストも存在しない（tests に PersistReturnAsync のリトライ検証なし）。なお ResolveReturnBalanceAsync（547-562）は LastOrDefault を使うため残高は正しい値になり、rowid はロールバックで巻き戻るため通常は同一 ID が再採番される（DB 上の重複行は生じない）。したがって影響は「バス停入力ダイアログの重複行・二重入力」と、他 PC の割り込み挿入で stale Id が別レコードを指した場合の誤編集に限られ、high ではなく medium と再評価した。"
+  },
+  {
+   "file": "ICCardManager/src/ICCardManager/Services/LendingService.cs",
+   "line": 372,
+   "title": "貸出・返却の例外がログに一切残らない",
+   "severity": "medium",
+   "category": "observability",
+   "description": "LendAsync / ReturnAsync の catch は GetUserFriendlyErrorMessage で文言を作って result.ErrorMessage に入れるだけで、_logger を持っているにもかかわらず LogError/LogWarning を呼んでいない。トースト通知は数秒で消えるため、貸出・返却が失敗した事実と原因（例外種別・スタックトレース）が本番のログファイルにまったく残らない。development-conventions.md の「無言で握りつぶさない」「障害調査でこの行が無いと困るなら Information 以上」に反する。",
+   "scenario": "職員から「返却したのに貸出中のままになっている」と申告があった場合、実際には ReturnAsync が SQLiteException でロールバックしていても、ログには LendingService からの痕跡が一切ない（周辺の LogDebug は appsettings.json の Logging:LogLevel:Default=Information によりファイルに出力されない）。DbContext 側のリトライ警告が出るのは Busy/Locked に限られるため、IOException やその他の例外は完全に無痕跡となり、再発条件を特定できない。",
+   "foundBy": "lending",
+   "fixHint": "LendAsync（LendingService.cs:369）/ ReturnAsync（同 736）の catch で `_logger.LogError(ex, \"貸出/返却処理に失敗しました（CardIdm={CardIdm}）\", IdmMasker.Mask(cardIdm))` を先に呼んでから ErrorMessage を設定する（同ファイル 1337 行と同じ IDm マスク方式に揃える）。",
+   "verifyReasoning": "実行経路を追って指摘どおりであることを確認した。\n\n1. LendingService.cs:325-386 の LendAsync: try 内の例外は 369-373 の `catch (Exception ex)` で捕捉され、`result.ErrorMessage = GetUserFriendlyErrorMessage(ex, \"貸出\")` を代入するだけ。`_logger`（162行で保持、213行で注入）への呼び出しは無い。ReturnAsync も同様（LendingService.cs:736-740）。\n2. 変換関数 GetUserFriendlyErrorMessage は LendingService.cs:1356-1377 の `internal static` で、ILogger を受け取らず一切ログしない（純粋な文字列変換。テストも LendingServiceErrorMessageTests で文字列のみ検証）。\n3. 内側の書き込み経路にもログは無い。InsertLendLedgerAsync（LendingService.cs:392-438）と PersistReturnAsync（同 492-531）の `catch { scope.Rollback(); throw; }` は無言で再スロー。LedgerRepository / IcCardRepository には LogError/LogWarning が無い（grep で該当なし）。DbContext.TransactionScope.Rollback（DbContext.cs:72）もログしない。\n4. 呼び出し元でも記録されない。MainViewModel.ProcessLendAsync（MainViewModel.cs:1138-1176）/ ProcessReturnAsync（同 1213-1235）の失敗分岐は `_soundPlayer.Play(SoundType.Error)` と `_toastNotificationService.ShowError(...)` のみで、ILogger も ErrorDialogHelper.LogException も呼ばない。仮想タッチ経路（同 2758/2768）も同様。\n5. 唯一残りうる痕跡は DbContext.ExecuteWithRetryAsync（DbContext.cs:1212-1241）の `_logger?.LogWarning(\"DB操作リトライ...\")` だが、これは `ex.ResultCode == Busy || Locked` かつ `attempt < delays.Length` の場合のみ。IOException・SQLITE_IOERR・NullReference 等は 1 行も出ない。リトライ枯渇後の最終スローもログされない。\n6. 周辺の LogDebug（LendingService.cs:690/697/703 等）は appsettings.json:16-20 の `Logging:LogLevel:Default = \"Information\"` によりファイル出力されない（.claude/rules/development-conventions.md「ロギング」節、Issue #1716 で明示された既知の性質）。\n7. 意図的な設計である証跡は見つからなかった。逆に同ファイル 1334-1337 では履歴インポート失敗を `_logger.LogError(ex, ..., IdmMasker.Mask(cardIdm))` で記録しており、コードベースの規約（development-conventions.md「障害調査でこの行が無いと困るなら Information 以上」）はログを求める側。docs/design にも Issue #1110 関連でログ省略を正当化する記述は無い（#1110 の記述は CheckConnection の話のみ）。\n\nしたがって「返却したのに貸出中のまま」の申告に対し、IOException 等では LendingService からの痕跡がゼロという故障シナリオは成立する。ただし機能的な誤動作・データ破損ではなく診断可能性の欠落であり、ユーザーにはトーストで失敗が伝わり、共有モードで最も起きやすい Busy/Locked は DbContext のリトライ警告が残るため、high ではなく medium が妥当。"
+  },
+  {
+   "file": "ICCardManager/src/ICCardManager/Services/SummaryGenerator.cs",
+   "line": 596,
+   "title": "駅名が片側しか解決できない鉄道利用が摘要から消え、摘要が空欄の台帳行が保存される",
+   "severity": "medium",
+   "category": "data-integrity",
+   "description": "GenerateRailwaySummaryAutomatic は乗車駅・降車駅の**両方**が非空の詳細だけを経路に採用する。FelicaHistoryBlockDecoder のバス判定は「駅コードが両方0」または「駅名が両方とも解決できなかった」場合にのみ IsBus=true とするため、**片方だけ駅名が解決できた**詳細は IsBus=false（＝鉄道扱い）かつ EntryStation か ExitStation の一方が null になる。この詳細は routes から落とされ、BuildRouteSummary が string.Empty を返す。GenerateUsageSummary / Generate は空の railwaySummary を summaryParts に追加しないため、その詳細が唯一の利用だった場合 Generate は空文字を返す。LendingService の返却処理（1156行 / 1063行 / 892行）は LedgerSplitService.cs:106 や CsvImportService.Detail.cs:479、LedgerDetailViewModel.cs:580 と違って空文字ガードを持たないため、Summary=\"\" のまま ledger 行が INSERT/UPDATE される。",
+   "scenario": "StationCode.csv に未収録の新駅（または StationMasterService.GetStationNameOrNull が null を返す駅コード）で降車した場合。乗車駅「博多」は解決、降車駅は null → isBus=false、ExitStation=null。返却処理で LendingService.CreateUsageLedgersAsync がこの1件だけの利用セグメントに対し Generate() を呼び、空文字が返る。結果、払出金額と残額は入っているのに**摘要が空欄の行**が ledger に保存され、物品出納簿にもそのまま空欄で出力される。複数区間のうち1件がこの状態なら、その区間だけが摘要から黙って欠落し、払出金額と摘要が不整合になる。",
+   "foundBy": "summary",
+   "fixHint": "片側だけ駅名が解決できた明細は CsvImportService.Detail.cs:744 と同様に未解決側をプレースホルダ（\"?\" もしくは \"駅XX-YY\"）で埋めて経路に採用し、併せて LendingService の Ledger 生成3経路（892/1102/1156）に「Generate が空なら既存 Summary か代替文言を使う」ガードを追加する。",
+   "verifyReasoning": "実行経路を全段確認できた。(1) 駅名解決は片側だけ失敗しうる: FelicaCardReader.ParseHistoryData:766 → FelicaHistoryBlockDecoder.Decode の resolveStationName は StationMasterService.GetStationNameOrNull:213-228（全エリア検索で見つからなければ null を返す。フォールバック文字列 \"駅XX-YY\" を返すのは別メソッド GetStationName:154 で、デコード経路では使われない）。(2) 片側解決時は鉄道扱いになる: FelicaHistoryBlockDecoder.cs:123-126 の isBus は「駅コードが両方0」または「駅名が両方 null」でのみ true。entry が解決し exit が null（または exitStationCode==0 で entryStationCode>0）の場合 isBus=false、cs:161-163 で ExitStation=null のまま LedgerDetail が生成される。(3) この明細は途中で除去されない: MainViewModel.ProcessReturnAsync:1200-1213 は履歴をそのまま ReturnAsync へ渡し、LendingService.ReturnAsync:654 → CreateUsageLedgersAsync:788-849 のフィルタは重複除外と UseDate 有無のみで、駅名欠落による除外・補完は無い。(4) 摘要が空になる: SummaryGenerator.Generate:391 → 鉄道明細として GenerateRailwaySummary:519 → GroupId 無しなので GenerateRailwaySummaryAutomatic:594-600 の `!string.IsNullOrEmpty(EntryStation) && !string.IsNullOrEmpty(ExitStation)` フィルタで routes が空 → BuildRouteSummary:465-469 が string.Empty → Generate:418-431 で summaryParts に追加されず \"\"。(5) 空文字がそのまま保存される: LendingService.cs:1156-1163（新規作成）で Summary=\"\" のまま InsertLedger、既存統合経路 cs:1063/1102 では既存 Summary を \"\" で上書きしうる、残高不足マージ経路 cs:892-899 も同様。空文字ガードを持つのは LedgerSplitService.cs:106、CsvImportService.Detail.cs:479、LedgerDetailViewModel.cs:580 のみで、いずれも「既存 Summary を維持」する更新系。新規 INSERT 経路には代替値が無く、ガードも無い。(6) 事後の検知もない: 未入力警告は LedgerRepository.cs:845 の `WHERE is_bus = 1` のみを対象とするため、駅名欠落の鉄道明細は WarningService で拾われない。CsvImportService.Detail.cs:744-747 は同じ状況に \"?\" プレースホルダを充てており、片側欠落が想定外ではないことを示す。既存テスト（StationCodeToSummaryTests / SummaryGeneratorEdgeCaseTests / FelicaHistoryBlockDecoderTests）に片側解決ケースは無く、設計書・コメントにも「片側欠落は摘要から落とす」という意図の記述は見つからなかった。よって「摘要が空欄の ledger 行」「複数区間のうち1区間の黙示的欠落」は成立する。なお金額（Expense/Balance）は明細の Amount/Balance から算出されるため誤らず、履歴画面から駅名を補って摘要を再生成できるため、重大度は high ではなく medium と再評価した。参考: 検証中に他エージェント由来と思われる未追跡ファイル /mnt/d/OneDrive/交通系/src/ICCardManager/tests/ICCardManager.Tests/Services/TempOneSidedStationProbeTests.cs（必ず失敗するプローブ）が残存している。"
+  },
+  {
+   "file": "ICCardManager/src/ICCardManager/Services/SummaryGenerator.cs",
+   "line": 437,
+   "title": "チャージとポイント還元だけの詳細集合で Generate が空文字を返す",
+   "severity": "medium",
+   "category": "data-integrity",
+   "description": "Generate は「全件チャージ」「全件ポイント還元」の early return を持つが、**チャージとポイント還元が混在**した場合はどちらにも該当せず、続く railwayTrips / busTrips のフィルタが両方とも IsCharge / IsPointRedemption を除外するため summaryParts が空になり string.Empty を返す。LedgerMergeService.Validate はこの組み合わせを許可する（どちらも Income>0 / Expense=0 なので「チャージと利用の混在」チェックに掛からない）うえ、LedgerMergeService.cs:277 は空文字ガードなしで target.Summary に代入し UpdateAsync で永続化する。",
+   "scenario": "履歴画面で同一日の「役務費によりチャージ」行と「ポイント還元」行を選択して統合する。Validate は hasIncome=true / hasExpense=false のため通過し、Generate([charge, pointRedemption]) が \"\" を返す。統合後のレコードは受入金額だけが残り摘要が空欄になり、どの取引か判別不能な行が物品出納簿に出力される。元の2行は物理削除されるため、Undo しない限り情報が失われる。",
+   "foundBy": "summary",
+   "fixHint": "LedgerMergeService.cs:277 に LedgerSplitService.cs:106 と同じ空文字ガードを入れる（空なら元の摘要を維持）うえで、Generate 側でチャージ＋ポイント還元混在時に「役務費によりチャージ、ポイント還元」を組み立てるか、Validate/CanMergeHistoryLedgers で当該混在を明示的に拒否する（3要素のエラーメッセージ付き）。",
+   "verifyReasoning": "実行経路を全て確認できた。(1) 生成源: LendingService.cs:977-994 がチャージ Ledger（Income>0 / Expense=0、detail は IsCharge=true）を、LendingService.cs:1018-1035 がポイント還元 Ledger（Income=Math.Abs(amount)>0 / Expense=0、detail は IsPointRedemption=true）を、それぞれ独立した ledger 行として作る。同一カード・同日に両方が発生すれば履歴一覧で隣接する。(2) UI ガード: MainViewModel.cs:2145-2165 の CanMergeHistoryLedgers は「同一カード」「貸出中でない」「Income>0 と Expense>0 の混在でない」しか見ない。両方 Expense=0 なので通過。MainViewModel.cs:2080-2091 の隣接チェックも隣り合っていれば通過し、LedgerDto にも行単位の統合可否フラグは無い（Dtos/LedgerDto.cs:21 の IsChecked のみ）。(3) サービス側ガード: LedgerMergeService.cs:442-466 の Validate も同じ3条件のみで、hasIncome=true / hasExpense=false のため null（エラーなし）を返す。(4) 摘要生成: SummaryGenerator.cs:403 の All(IsCharge) はポイント還元 detail で false、SummaryGenerator.cs:410 の All(IsPointRedemption || IsImplicitPointRedemption) はチャージ detail で false（IsImplicitPointRedemption は SummaryGenerator.cs:159-165 で !IsCharge を要求）。続く SummaryGenerator.cs:415-416 の railwayTrips / busTrips は両 detail を除外するため summaryParts が空になり、SummaryGenerator.cs:437 の string.Join が \"\" を返す。(5) 永続化: LedgerMergeService.cs:277 は空文字ガードなしで target.Summary に代入し、LedgerRepository.cs:1318-1322 の UPDATE ledger SET summary=@summary … でそのまま保存される（Migration_001_Initial.cs:48 の summary は NOT NULL のみで空文字は通る）。ソース ledger 行は同 UPDATE 後に削除される。裏付け: 同じ Generate を使う LedgerSplitService.cs:106 / :139 は `!string.IsNullOrEmpty(summary) ? summary : \"（分割）\"` と空文字ガードを持っており、Generate が空を返し得ることはコードベース側で既知。LedgerMergeServiceTests.cs にも MergeAsync_TwoCharges_Succeeds(:329) / MergeAsync_TwoPointRedemptions_SumsIncomeCorrectly(:636) はあるが、チャージ＋ポイント還元の混在ケースは無くテストの空白になっている。設計書・ルール（business-logic.md の摘要生成表、domain-boundaries.md）にも「混在は不許可」と読める記述はなく、意図的な設計とは判断できない。ただし ledger_merge_history に Undo データが保存され UI から「統合を元に戻す」ことができる（LedgerMergeService.cs:312 / :342）ため、指摘の「情報が失われる」は完全な不可逆ではなく、また摘要欄が空になるのは履歴一覧上すぐ視認できる。この点を踏まえ severity は high から medium に下げた。"
+  },
+  {
+   "file": "ICCardManager/src/ICCardManager/App.xaml.cs",
+   "line": 816,
+   "title": "起動時の自動バックアップが fire-and-forget で並走し、単一接続上の CleanupOldData / VACUUM と競合する",
+   "severity": "medium",
+   "category": "concurrency",
+   "description": "PerformStartupTasksAsync は `_ = backupService.ExecuteAutoBackupAsync();` で戻り値を捨てて起動し、直後に `await dbContext.CleanupOldDataAsync()` と `TryAcquireMonthlyVacuumLockAsync` / `VacuumAsync()` を実行する。DbContext は接続を1本しか持たず、`LeaseConnectionAsync` はセマフォを取らない（DbContext.cs:447-452）ため、バックアップ側の後続処理（`RecordBackupSuccessAsync` → `SettingsRepository.SetAsync`、BackupService.cs:165-180）が発行する INSERT は、CleanupOldData が開いているトランザクションの内側で実行される／VACUUM 実行中の同一接続に対して並列にコマンドを発行することになる。DbContext.cs:431-445 が「Task.WhenAll 等での並列起動禁止・SQLITE_MISUSE の原因になる」と明記している規約を、起動シーケンス自身が破っている。",
+   "scenario": "共有モードで 8/10 に起動した場合: (1) バックアップの `Task.Run(BackupDatabaseTo)` がセマフォを取り、CleanupOldDataAsync が待つ →(2) バックアップが解放し CleanupOldDataInternal が `BeginTransaction()` で DELETE 中 →(3) バックアップ側の RecordBackupSuccessAsync が `LeaseConnectionAsync`（セマフォ無し）で `last_backup_success_at` を INSERT → この INSERT は cleanup のトランザクションに巻き込まれ、cleanup が SQLITE_BUSY で Rollback すると成功記録ごと消える → バックアップは実際には成功しているのに 7 日経過で `WarningType.BackupStale` の誤警告が出る。さらに (4) 直後の `VacuumAsync()` 実行中にバックアップ側の INSERT が同一接続へ届くと SQLite は \"cannot VACUUM - SQL statements in progress\"（ResultCode=Error）を返す。`DbContext.Vacuum()` は Busy/Locked しか catch しないため例外が PerformStartupTasksAsync の catch まで飛び、既に CAS ロック（last_vacuum_date=当月）は消費済みなので当月の VACUUM は誰も再試行しない上、ログには意図した「VACUUM失敗。来月再試行します。」ではなく「起動時タスクでエラー」しか残らない。",
+   "foundBy": "data-shared",
+   "fixHint": "`SettingsRepository.SetAsync` の書き込みを `BeginTransactionAsync`（セマフォ保護）経由に変えるか、`RecordBackupSuccessAsync` をセマフォ保護されたリース内で実行し、単一接続上の並列コマンド発行（Issue #1452 規約違反）を解消する。",
+   "verifyReasoning": "経路を実コードで確認できた。(1) App.xaml.cs:816 `_ = backupService.ExecuteAutoBackupAsync();` は戻り値を捨てる fire-and-forget（App.xaml.cs:810-855、呼び出し元は App.xaml.cs:566 の await）。(2) BackupService.cs:86 の `await Task.Run(() => BackupDatabaseTo(...))` で App 側へ制御が戻り、App.xaml.cs:818 `await dbContext.CleanupOldDataAsync()`（DbContext.cs:1121-1122 → Task.Run(CleanupOldData)）が走る。BackupDatabaseTo（BackupService.cs:444-457）と CleanupOldDataInternal（DbContext.cs:1127-1132）はどちらも同期 `LeaseConnection()`（DbContext.cs:470-492、481 で `_semaphore.Wait()`）を取るためここまでは直列化される。(3) 問題はバックアップ側のセマフォ解放後の継続だ。BackupService.cs:91 `CleanupOldBackupsAsync`（562-563、ファイル走査のみ、数ms）→ BackupService.cs:96 `RecordBackupSuccessAsync`（165-180）→ `SettingsRepository.SetAsync`（SettingsRepository.cs:82-96）が **`LeaseConnectionAsync()`（DbContext.cs:447-452、セマフォを取らず `GetConnectionInternal()`（DbContext.cs:586-）の単一共有 `_connection` をそのまま返す）** で INSERT を発行する。この時点で CleanupOldDataInternal はセマフォを保持したまま DbContext.cs:1132 `connection.BeginTransaction()` を開いて 2 本の DELETE を実行中であり、同一 SQLiteConnection 上で並列にコマンドが走る。SQLite のトランザクションは接続単位のため、この INSERT は cleanup のトランザクションに巻き込まれ、DbContext.cs:1150-1154 の catch で Rollback されると `last_backup_success_at` の記録ごと消える（CleanupOldData はリトライして再実行するが settings 書き込みは戻らない）。(4) これは DbContext.cs:429-437 が「Issue #1452 — 並列起動禁止／必ず直列 await」と明記し、DashboardServiceTests・AdminDashboardServiceTests が maxConcurrentCalls==1 で回帰固定している規約そのものの違反であり、起動シーケンス自身が破っている。#1689 以前はバックアップ継続がファイル I/O のみで DB 書き込みが無かったため、`RecordBackupSuccessAsync` の追加で新たに生じた経路。VACUUM 側（App.xaml.cs:830-840、DbContext.cs:1164-1183 が Busy/Locked しか catch しない）も同じ無保護 INSERT と衝突しうるが、cleanup 完了後で窓が狭く二次的。指摘の「7日経過で BackupStale の誤警告」は前日以前の成功記録が残るため 7 日連続で失われる必要があり過大評価だが、規約違反と記録欠落自体は成立する。防いでいるガード・設計意図の記述は見つからず（MainViewModel.cs:588-591 は警告判定が「前回までの記録」を見る旨の注記のみで、接続競合には触れていない）。"
+  },
+  {
+   "file": "ICCardManager/src/ICCardManager/Data/Migrations/MigrationRunner.cs",
+   "line": 307,
+   "title": "schema_migrations への INSERT が OR IGNORE でなく、複数PC同時起動でアプリが起動不能になる",
+   "severity": "medium",
+   "category": "concurrency",
+   "description": "DbContext.InitializeDatabase は「複数PCが同時にマイグレーションを実行しても、schema_migrations の PRIMARY KEY 制約により重複適用が防止される」（Data/DbContext.cs:815-816）という前提で MigrateToLatest を呼ぶ。しかし RecordMigration は素の INSERT であり、PK 衝突は「静かに防止」されず SQLiteException になる。ApplyMigration はそれを捕捉して transaction.Rollback() のうえ MigrationException を再スローするため、例外は InitializeDatabase → App.OnStartup の汎用 catch まで到達し、エラーダイアログ＋Shutdown(1) となる。.claude/rules/migrations.md が Up() の冪等性を要求している目的（共有モードでの複数PC同時起動）が、適用記録の INSERT で破られている。",
+   "scenario": "新バージョン配布後の朝、共有 DB を使う PC-A と PC-B がほぼ同時に起動する。両者とも GetCurrentVersion() で 8 を読み、migration 9 を適用しようとする。PC-A が先に BEGIN→Up→INSERT(version=9)→COMMIT。PC-B は busy_timeout（共有モード15000ms）待機後に処理を進め、Up() は冪等なので成功するが、INSERT INTO schema_migrations (version=9) が UNIQUE 制約違反となり MigrationException → App.xaml.cs の汎用 catch で「起動エラーが発生しました」ダイアログ＋Shutdown(1)。PC-B の職員はアプリを起動できず、原因不明のエラーとして問い合わせになる（再起動すれば直るため再現も困難）。",
+   "foundBy": "repositories",
+   "fixHint": "MigrationRunner.RecordMigration の INSERT を INSERT OR IGNORE にし（Up() の冪等性が規約で保証済みのため安全）、DbContext.cs:815-816 のコメントを実態に合わせて修正、MigrationRunner の並行適用回帰テストを追加する。",
+   "verifyReasoning": "実行経路を確認した。MigrationRunner.cs:85 の GetCurrentVersion() はトランザクション外で 1 回だけ読まれ、:91-99 のループはこの陳腐化したスナップショットで pending を決める。ApplyMigration(:211) → Up(:219) → RecordMigration(:303-310) は素の INSERT で、version は INTEGER PRIMARY KEY(:292-296)。PK 衝突は SQLiteException → :232 catch → :237 Rollback → :242 MigrationException。呼び出し元 DbContext.cs:823（MigrateToLatest）→ App.xaml.cs:119 まで retry も握り潰しもなく、App.xaml.cs:138 は DatabaseVersionMismatchException のみ特別扱いのため :151 の汎用 catch に落ち、エラーダイアログ＋Shutdown(1) となる。DbContext.cs:800-812 の BEGIN IMMEDIATE は HandleLegacyDatabase のみを直列化し、:799 のコメント通り MigrateToLatest は範囲外。共有モードの busy_timeout(15s) 待機はむしろ「A の commit を待ってから A が入れた version を INSERT する」形になり衝突を確実にする。EnsureSchemaVersionCompatibility(DbContext.cs:851-875) は databaseVersion(8) <= appVersion(9) で素通り。意図的な設計ではないことも確認: Issue #1285 の設計書は「MigrationRunner 本体の refactor」を明示的にスコープ外としており、.claude/rules/migrations.md は行追加に素の INSERT を禁止、同一テーブルへの補填 INSERT である DbContext.cs:979 は Issue #1484 の TOCTOU 対策で既に INSERT OR IGNORE を使っている（runner だけが不整合）。MigrationRunner の並行適用テストは存在せず、MigrationIdempotencyTests は意図的に MigrationRunner を経由しない。severity は high→medium に再評価: トランザクションはロールバックされデータ破損はなく、窓はスキーマ更新日の一方の移行実行時間に限られ、再起動すれば DB が新バージョンのため正常起動する（＝一過性・自己回復可能）。"
+  },
+  {
+   "file": "ICCardManager/src/ICCardManager/ViewModels/MainViewModel.cs",
+   "line": 829,
+   "title": "ApplyDataWarnings が BackupStale 警告を消し、二度と再表示されない",
+   "severity": "medium",
+   "category": "correctness",
+   "description": "ApplyDataWarnings はインフラ系として DatabaseConnectionLost / CardReaderConnection / CardReaderError / DatabaseJournalModeDegraded / NewVersionAvailable の5種だけを退避して WarningMessages.Clear() する。Issue #1689 で追加された WarningType.BackupStale はこの保持リストに含まれておらず、また ApplyDataWarnings 後に再生成されるのは残額警告（CheckLowBalanceWarnings）とバス停未入力だけなので、一度消えると復活しない。CheckBackupHealthAsync は起動時（InitializeAsync の fire-and-forget）と BackupStale 警告クリック時にしか呼ばれないため、実質『起動直後の最初の返却操作で警告が消える』挙動になる。同じ理由で CheckAllCardsConsistencyAsync がインポート後に全カード分立てた BalanceInconsistency 警告も、次の CheckWarningsAsync で表示中カード以外は失われる。MainViewModelTests のバックアップ健全性テストは CheckBackupHealthAsync 単体しか呼んでおらず、この相互作用は未検証。",
+   "scenario": "バックアップが10日間失敗している環境で起動すると『バックアップが○日間成功していません』警告がメイン画面に出る。職員が最初の交通系ICカード返却を行うと HandleReturnSuccessAsync → CheckWarningsAsync → ApplyDataWarnings が走り、警告が黙って消える。以後その日は何度返却しても再判定されないため、管理者はバックアップが止まっていることに気づかないまま運用を続ける（Issue #1689 の目的が最初の1操作で無効化される）。",
+   "foundBy": "mainvm",
+   "fixHint": "`ApplyDataWarnings` の保持リストに `WarningType.BackupStale`（および `BalanceInconsistency`）を追加し、`CheckWarningsAsync` 実行後も残ることを MainViewModelTests に相互作用テストとして追加する。",
+   "verifyReasoning": "実行経路を確認できた。(1) MainViewModel.cs:825-847 `ApplyDataWarnings` は保持対象を DatabaseConnectionLost / CardReaderConnection / CardReaderError / DatabaseJournalModeDegraded / NewVersionAvailable の5種に限定し（828-834行）、835行 `WarningMessages.Clear()` で残り全部を破棄、その後 842行で残額警告のみ再生成する。BackupStale は保持リストに無い。(2) MainViewModel.cs:815-820 `CheckWarningsAsync` は `ApplyDataWarnings`（818行）と `CheckIncompleteBusStopsAsync`（819行）しか呼ばない＝再生成されるのは残額警告とバス停未入力のみ。(3) 返却経路は MainViewModel.cs:1252 `HandleReturnSuccessAsync` → 1271行 `await CheckWarningsAsync()`。貸出/履歴編集/インポート等（1301, 1731, 1758, 1806, 1889, 1896, 2484, 2539）も同様。(4) BackupStale を立てるのは `CheckBackupHealthAsync`（MainViewModel.cs:649-659）のみで、呼び出し元は起動時の fire-and-forget（592行、`ApplyDataWarnings`(577行) より後なので起動時は正しく表示される）と、警告クリック時（2663-2670行、警告が消えていればクリックできない）の2箇所だけ。リポジトリ全体を grep しても他に再判定する経路・タイマーは無い。したがって「起動後の最初のカード操作で BackupStale が消え、以後そのセッション中は復活しない」は成立する。(5) 意図的な設計ではない：827行のコメントは「インフラ系の警告（接続断・カードリーダー・更新通知）は保持し、データ系のみクリア」であり、BackupStale はダッシュボードから再生成されないインフラ系のため、Issue #1689 追加時の保持リスト更新漏れ。CHANGELOG.md:104 / docs/design/04_機能設計書.md:1094 にも「操作で消える」旨の記載は無く、むしろ「手動バックアップで解消すると消える」＝それまでは出続ける前提。(6) テストは MainViewModelTests.cs:188-256 の4件がいずれも `CheckBackupHealthAsync` を単独で呼ぶだけで、`ApplyDataWarnings`／`CheckWarningsAsync` との相互作用は未検証。副次指摘の BalanceInconsistency（`CheckAllCardsConsistencyAsync` は 2540行のインポート後経路でのみ全カード分を生成、再生成手段は HistoryCard 限定の `CheckAndNotifyConsistencyAsync` のみ）も同じ機序で成立する。severity は high→medium に再評価：データ破壊ではなく警告表示の消失であり、毎起動時には再表示される（システム管理画面 F6 の常設表示・接続診断でも同状態を確認できる）ため。ただし実質「毎朝の最初の1操作まで」しか見えず、Issue #1689 の受動的気づきの目的はほぼ無効化される。"
+  },
+  {
+   "file": "ICCardManager/src/ICCardManager/ViewModels/LedgerRowEditViewModel.cs",
+   "line": 485,
+   "title": "Edit モードで自動計算 ON にすると残高が前行無視で再計算される",
+   "severity": "medium",
+   "category": "data-integrity",
+   "description": "RecalculateBalance は Mode==Add のときだけ PreviousBalance を挿入位置の直前行から取得する。Edit モードでは PreviousBalance が一度も設定されず既定値 0 のままなので、Balance = 0 + Income - Expense となる。「自動計算」チェックボックス（LedgerRowEditDialog.xaml:184）はモードで無効化されておらず Edit モードでも操作でき、ToolTip は「前行の残高 + 受入 - 払出 で自動計算されます」と説明している。",
+   "scenario": "履歴一覧で既存のチャージ行（受入3000円・払出0円・残高5000円、前行残高2000円）を「修正」で開く。InitializeForEditAsync が IsAutoBalance=false で開始するが、利用者が金額を直したあと「自動計算」にチェックを入れると OnIsAutoBalanceChanged→RecalculateBalance が走り、残高が 0+3000-0=3000 になる。マイナスではないためバリデーションを通過し、そのまま保存されて台帳の残高が 5000→3000 に化ける。以降の行の残高と整合が取れなくなり、物品出納簿の残額欄が狂う（払出行の場合は負値になり保存はブロックされるが、入力済みの残高は破壊される）。",
+   "foundBy": "viewmodels",
+   "fixHint": "Edit モードでは自動計算チェックボックスを無効化する（IsEnabled=\"{Binding IsAddMode}\"）か、InitializeForEditAsync に前行を渡して PreviousBalance を設定し RecalculateBalance の Mode ガードを外す",
+   "verifyReasoning": "実行経路を確認: LedgerRowEditViewModel.cs:468-486 の RecalculateBalance は Mode==Add のブロック(472-483)でのみ PreviousBalance を設定し、485 行 Balance = PreviousBalance + Income - Expense は全モード共通。PreviousBalance への代入はリポジトリ全体で 477/481 のみ（grep 確認）で、Edit モードでは既定値 0 のまま。さらに InitializeForEditAsync(277) は allLedgers を受け取らず _allLedgers が空のため、前行残高を取得する手段自体が無い。UI: LedgerRowEditDialog.xaml:183-189 の「自動計算」CheckBox には IsEnabled/Visibility バインドが無く（Add 限定なのは 246 行の挿入位置プレビューのみ）、ToolTip は「前行の残高 + 受入 - 払出 で自動計算されます」と説明。経路は MainViewModel.cs:1856 → InitializeForEditAsync（295 で IsAutoBalance=false、294 で DB 値復元のため初期状態は正常）→ 利用者がチェック ON → OnIsAutoBalanceChanged(361-368) → RecalculateBalance → Balance=0+Income-Expense → Validate(491) は Balance<0 しか見ず受入行は通過 → Save(578) → SaveEditAsync:680 ledger.Balance = Balance → UpdateAsync(698) で DB 反映。反証材料を探したが、設計書 docs/design/03_画面設計書.md:734 は自動計算をモード無区別で規定し（§3.12 で「追加モード時のみ」と書かれるのは挿入位置プレビューだけ）、Edit 限定除外の設計意図やコメントは無い。テスト LedgerRowEditViewModelTests も AddMode_* のみで Edit モードの自動計算は未カバー。緩和要因として、再計算値は無効化された残高欄に表示され、保存後 MainViewModel.cs:1896 → CheckAndNotifyConsistencyAsync(1937-1962) が LedgerConsistencyChecker で残高不整合を警告する（自動修正はしない設計のため破損値は DB に残る）。利用者の明示操作（チェック ON）が必要で保存前に値が見える点と事後検知がある点から high ではなく medium と評価。"
+  },
+  {
+   "file": "ICCardManager/src/ICCardManager/ViewModels/DataExportImportViewModel.cs",
+   "line": 666,
+   "title": "インポート成功時の監査ログにファイルパスが空で記録される",
+   "severity": "medium",
+   "category": "data-integrity",
+   "description": "ExecuteImportAsync の成功分岐で ClearPreview() を呼んだ直後に _operationLogger.LogImportAsync(..., ImportPreviewFile, ...) を実行している。ClearPreview は ImportPreviewFile = string.Empty を行うため、監査ログへ渡るのは空文字列になる。OperationLogger.LogImportAsync は TargetId = Path.GetFileName(filePath) と payload.FilePath に格納するので、両方が空になる。同メソッド内の部分成功分岐（711行）は ClearPreview を呼ばないため正しいパスが記録されており、成功時だけ欠落する非対称が生じている。",
+   "scenario": "利用履歴CSVを全件エラーなしでインポートする（result.Success=true）。operation_log には Action=IMPORT / target_id='' / after_data の FilePath='' が記録され、操作ログ画面では「利用履歴を登録」とだけ表示されて、どのファイルを取り込んだのかが後から追跡できない。逆に一部エラーで終わったインポートだけファイル名が残るため、監査時に「成功したインポートの記録が壊れている」状態になる。",
+   "foundBy": "viewmodels",
+   "fixHint": "LogImportAsync の引数を :650 で退避済みの LastImportedFile に変えるか、ClearPreview() の呼び出しを監査ログ記録の後ろへ移動する（併せて成功時のパス記録を検証するテストを追加）。",
+   "verifyReasoning": "実行経路を確認して成立。DataExportImportViewModel.cs:658 の result.Success 分岐で :666 ClearPreview() を呼び、ClearPreview は :744-746 で ImportPreviewFile = string.Empty（[ObservableProperty] _importPreviewFile、:137-138）を実行する。その直後の :669-674 で LogImportAsync に ImportPreviewFile を渡すため引数は空文字列。OperationLogger.cs:335-362 では Path.GetFileName(\"\") が例外を投げず \"\" を返し、TargetId = \"\" と payload.FilePath = \"\" のまま operation_log へ INSERT される。非対称も実在：部分成功分岐 :711-716 は ClearPreview を通らないため正しいパスが残り、旧 API 経路 :822 / :864 は dialog.FileName を直接渡している。防御・設計意図は見当たらない — :650 の LastImportedFile はキャプチャされるが logger へは渡されず単なる VM プロパティ。git log -L 658,680 で確認すると「// Issue #1302: 監査ログ記録」ブロックが既存の ClearPreview() の後ろに丸ごと挿入されており、空パスを許容する旨のコメント・設計書・Issue の記述はない。テスト側も DataExportImportViewModelTests.cs:80-83 が実 OperationLogger を「ログ書き込みは副作用のみでテスト対象外」として配線するのみで、渡されるパスを検証するテストは存在せず現行挙動を固定してもいない。重大度は high から medium へ再評価：業務データ（ic_card/staff/ledger）の書き込みは正常で、監査行も操作者・日時・対象テーブル・登録/スキップ/エラー件数を保持しており、欠落するのは成功時のインポート元ファイル識別情報のみ（追跡性の劣化であってデータ破損やユーザー可視の失敗ではない）。"
+  },
+  {
+   "file": "ICCardManager/src/ICCardManager/App.xaml.cs",
+   "line": 962,
+   "title": "未観測Task例外ハンドラがファイナライザスレッドでモーダルダイアログを開く",
+   "severity": "medium",
+   "category": "concurrency",
+   "description": "TaskScheduler.UnobservedTaskException は Task のファイナライズ時（＝ファイナライザスレッド）で発火する。OnUnobservedTaskException はそのスレッドから Dispatcher.Invoke（同期）を呼び、その中の ErrorDialogHelper.ShowError は最終的に MessageBox.Show（モーダル）を実行する。ユーザーが [OK] を押すまでファイナライザスレッドがブロックされ、プロセス全体のファイナライザが停止する。さらにアプリ終了中に発火した場合は Dispatcher が既にシャットダウンしており Dispatcher.Invoke が TaskCanceledException を投げるが、UnobservedTaskException ハンドラから例外が抜けるとファイナライザから例外が漏れるためプロセスが異常終了する。",
+   "scenario": "MainViewModel.cs:583/587/592、ReportViewModel.cs:157/160/249、VirtualCardViewModel.cs:168 など多数の fire-and-forget（`_ = XxxAsync();`）のいずれかが例外で終了する。ユーザーが気付かないままGCが走ると、無人の共用端末に「バックグラウンド処理エラー」ダイアログが出たままファイナライザスレッドが停止し、SQLite 接続等のファイナライズが行われなくなる。またアプリ終了操作の直後に同じことが起きると Dispatcher シャットダウン後の Invoke で例外がファイナライザから漏れ、終了処理途中でプロセスが落ちる（OnExit の ServiceProvider.Dispose 前に落ちれば DB 接続やタイマーが後始末されない）。",
+   "foundBy": "common-infra",
+   "fixHint": "ハンドラ本体を try/catch で包み、Dispatcher.Invoke（同期・モーダル）をやめて `Dispatcher.HasShutdownStarted/HasShutdownFinished` ガード付きの `Dispatcher.BeginInvoke`（非同期）＋非モーダル通知（トースト等）に置き換える。",
+   "verifyReasoning": "指摘の中核（ファイナライザスレッドから同期 Invoke でモーダルダイアログを開く）は実行経路で成立を確認。ただしシナリオ後半の終了時クラッシュ部分は前提が一部誤っており、そこは減点。\n\n【確認した経路（ガード無し）】\n1. ICCardManager/src/ICCardManager/ViewModels/MainViewModel.cs:583 `_ = CheckIncompleteBusStopsAsync();`（同587 CheckUpdateNotificationAsync、592 CheckBackupHealthAsync も同型）\n2. MainViewModel.cs:852-858 CheckIncompleteBusStopsAsync — **try/catch なし**。632-637 / 649-659 も同様に catch なし（VirtualCardViewModel.cs:142-152 は try/catch 済みで対象外）\n3. Services/WarningService.cs:81-84 が `_ledgerRepository.GetByDateRangeAsync` で DB アクセス。共有モード（SMB／最大20台、business-logic.md）では SQLite/ネットワーク例外が現実に起こり得る → 破棄済み Task が faulted のまま未観測\n4. GC → TaskExceptionHolder ファイナライザ（ファイナライザスレッド）→ TaskScheduler.PublishUnobservedTaskException → App.xaml.cs:948 OnUnobservedTaskException\n5. App.xaml.cs:962 `Dispatcher.Invoke(...)`（**同期**。ファイナライザスレッドを完了までブロック）\n6. Common/ErrorDialogHelper.cs:32 ShowError → :41-47 `Application.Current.Dispatcher.Invoke` → :45 ShowErrorDialog → :158 `MessageBox.Show(...)`（**モーダル**）\n\n→ ユーザーが [OK] を押すまでファイナライザスレッドが停止する。無人の共用端末では長時間放置されうる。プロセス全体のファイナライザキューが止まり、SQLiteConnection 等のファイナライザ依存の後始末・`GC.WaitForPendingFinalizers` が滞る。レース不要で成立する。\n\n【意図的な防御が無いことの確認】\n- App.xaml.cs:889-899 SetupGlobalExceptionHandlers 周辺および 948-968 に shutdown ガード・try/catch は無い（`grep Shutdown` の該当は 150/189 の起動失敗時 Shutdown(1) と 861 OnExit のみ）\n- リポジトリ全体の *.md に「UnobservedTaskException／未観測」の記述なし、tests にも該当テストなし → 設計意図として許容された形跡なし\n\n【指摘のうち成立しない部分（severity を high→medium に引き下げた理由）】\n- 「終了中に発火 → Dispatcher シャットダウン後の Invoke で TaskCanceledException がファイナライザから漏れる」経路は、TaskExceptionHolder のファイナライザ自身が `!Environment.HasShutdownStarted && !AppDomain.CurrentDomain.IsFinalizingForUnload()` でガードしているため、CLR シャットダウン開始後は発火しない。成立余地は「Dispatcher シャットダウン済み かつ CLR シャットダウン未開始」の極めて狭い窓に GC が走った場合に限られる\n- 「OnExit の ServiceProvider.Dispose 前に落ちれば DB 接続やタイマーが後始末されない」は順序が逆。WPF は Exit イベント（App.xaml.cs:861 OnExit、ServiceProvider.Dispose は :876-879）を先に走らせてから Dispatcher をシャットダウンするため、この窓はすでに Dispose 完了後であり、当該被害は生じない\n- 主被害は「終了処理の破壊」ではなく「ファイナライザスレッドの長時間停止（degradation）」であり、データ損失は伴わない。またモーダル表示自体は本アプリの既定のエラー提示方式（App.xaml.cs:904-919 の UI スレッド版と同様）で、欠陥は同期 Invoke＋ガード欠如の点に限られる"
+  },
+  {
+   "file": "ICCardManager/src/ICCardManager/Views/Dialogs/LedgerDetailDialog.xaml.cs",
+   "line": 89,
+   "title": "利用履歴詳細のタイトルバー✕が未保存確認を迂回し編集が消える",
+   "severity": "medium",
+   "category": "data-integrity",
+   "description": "未保存変更の破棄確認は「閉じる」ボタンの Click ハンドラ `CloseButton_Click` にしか実装されておらず、Window に `Closing` ハンドラが無い。Views 配下の XAML 全体を検索しても `Closing=\"` は 1 件も存在しない（`grep -rn 'Closing=\"' Views/` が空）。そのためタイトルバーの ✕ / Alt+F4 / タスクバーの「閉じる」経由では確認ダイアログが出ず、`HasChanges=true` の編集内容が黙って破棄される。フッターには「未保存の変更があります」（LedgerDetailDialog.xaml:435）を赤字で出しているのに、その警告を無視して閉じられる経路が残っている。加えて「閉じる」ボタンは `IsCancel=\"True\"`（LedgerDetailDialog.xaml:494）でもあるため、Escape でも同じ迂回リスクがある（IsCancel の既定動作は Click ハンドラの early-return では止められない）。",
+   "scenario": "利用履歴詳細で分割線を挿入し摘要を編集（HasChanges=true、フッターに「未保存の変更があります」表示）→ 「閉じる」ではなくウィンドウ右上の ✕ をクリック → 確認ダイアログが出ず即座に閉じ、分割・摘要の編集が全て失われる。「閉じる」ボタンなら確認が出るため、ユーザーは「✕ でも確認が出るはず」と期待して操作し、編集を失う。",
+   "foundBy": "views",
+   "fixHint": "LedgerDetailDialog に Closing ハンドラ（OnClosing オーバーライド）を追加して HasChanges 時の破棄確認を一元化し、CloseButton_Click は Close() 呼び出しのみへ、IsCancel=\"True\" は外して Escape も InputBindings 経由で同じ経路に通す。",
+   "verifyReasoning": "実行経路を追って成立を確認した。(1) 起動経路: MainViewModel.ShowLedgerDetail (ViewModels/MainViewModel.cs:1716-1721) → NavigationService.ShowDialogAsync (Services/DialogService.cs 内 NavigationService、末尾 `return dialog.ShowDialog();`) でモーダル表示。(2) ウィンドウ定義: Views/Dialogs/LedgerDetailDialog.xaml:1-18 は WindowStyle 既定（SingleBorderWindow）+ ResizeMode=\"CanResize\" で、タイトルバーの ✕ が有効。(3) ガード: 未保存確認は Views/Dialogs/LedgerDetailDialog.xaml.cs:89-106 の CloseButton_Click（HasChanges==true で MessageBox、No なら return）だけ。同ファイル全108行に Closing/OnClosing のフックは無く（19行目で Window を直接継承、独自基底クラス無し）、リポジトリ全体でも Closing 購読は MainWindow.xaml.cs:33 と DataExportImportDialog.xaml.cs:27 の 2 件のみで本ダイアログは対象外。よって ✕ / Alt+F4 / システムメニューの閉じるは確認を通らない。(4) 失われるデータの実在: HasChanges は ToggleDividerAt 等の分割操作・摘要変更で true になり（ViewModels/LedgerDetailViewModel.cs:353,484,512,540）、永続化は SaveAsync / SaveWithFullSplitAsync でのみ行われる（同 552-663、成功時に HasChanges=false）。未保存のまま閉じれば GroupId 変更はメモリ上のみで消える。XAML:432-439 は HasChanges 時に「未保存の変更があります」を DangerTextBrush で表示しており、警告が出ている状態で無確認クローズできる。(5) 設計上の意図的許容の証跡は見つからなかった: docs/design/03_画面設計書.md に「未保存」「保存されていない変更」の記述は 0 件、コード内コメントにも意図の記載なし。テストも DialogMinimumSizeTests のみで本挙動の固定は無い。なお副次的に、閉じるボタンは IsCancel=\"True\"（XAML:494）でモーダル表示のため、Click ハンドラの early-return 後も Button の Cancel 処理が DialogResult=false を設定してウィンドウを閉じる（WPF Button.OnClick は base.OnClick で Click を発火した後にダイアログ処理を行う）ため、「いいえ」を選んでも閉じてしまう疑いが強く、Escape でも同様。ただしこの点は実機未検証のため主論拠には含めない。重大度は、失われるのは未保存の編集内容のみで DB の永続データ破壊や監査記録の欠落は起きず、再操作でやり直せることから high ではなく medium と評価した。"
+  },
+  {
+   "file": "ICCardManager/src/ICCardManager/Services/CsvImportService.cs",
+   "line": 227,
+   "title": "CSVインポートがUTF-8固定でShift_JISを文字化けしたままDB保存する",
+   "severity": "medium",
+   "category": "data-integrity",
+   "description": "ReadCsvFileAsync は BOM 検出付きだがフォールバックが Encoding.UTF8 固定。BOM の無い Shift_JIS ファイルは UTF-8 として復号され、日本語部分が U+FFFD（?）に置換される。IDm・金額・日付は ASCII のため全バリデーション（ValidateIdm / ValidateRequired / ValidateBalanceConsistency）を通過し、文字化けした氏名・摘要・備考・駅名がそのまま staff / ic_card / ledger / ledger_detail に書き込まれる。エクスポート側は UTF8Encoding(true)（BOM付き）で出力するため自作ファイルの往復は成立するが、日本語版 Excel で「CSV（カンマ区切り）」として保存し直すと BOM が失われ ANSI(Shift_JIS) になる。マニュアル・設計書に文字コードの指定は一切見当たらない（docs/manual, docs/design を grep して該当なし）。",
+   "scenario": "職員一覧をエクスポート（UTF-8 BOM）→ 担当者が Excel で氏名を追記し「CSV（カンマ区切り）」で上書き保存（Shift_JIS・BOM無し）→ 再インポート。氏名「山田太郎」が「?????」等に化けた状態で ValidateRequired を通過し、staff.name が文字化けのまま更新される。プレビュー画面にも化けた文字が並ぶが「更新」として正常終了扱いになる。ledger の摘要・備考でも同様に発生し、こちらは6年保存の監査対象データが破壊される。",
+   "foundBy": "other-services",
+   "fixHint": "ReadCsvFileAsync で BOM 無し時はバイト列の UTF-8 妥当性を判定し、不正なら Encoding.GetEncoding(932) へフォールバック（SettingsViewModel.cs:483-511 と同方針）、判定不能・置換文字検出時は「何が/なぜ/どうすれば」形式のエラーでインポートを中断し、併せてマニュアルに保存文字コードを明記する。",
+   "verifyReasoning": "CsvImportService.cs:222-240 の ReadCsvFileAsync は BOM 検出のみで、BOM 無しファイルは Encoding.UTF8（置換フォールバック）固定で復号するため Shift_JIS の日本語が U+FFFD になる。cp932 バイト列を UTF-8 復号するシミュレーションで、カンマ・列数（職員4列/履歴10列）と ASCII の IDm・日付・金額が温存され日本語のみ化けることを確認した。したがって CsvImportService.cs:426-444 の ValidateRequired（IsNullOrWhiteSpace のみ）、ValidateIdm、残高整合性チェックはすべて通過する。読み取りは全インポート経路が共有（Import/CsvImportService.Staff.cs:42,262 / .Card.cs:42,260 / .Ledger.cs:32,318 / .Detail.cs:44,305）。書き込み到達も確認：Staff.cs:75,101,117,126-132 で化けた name が staff へ、Ledger.cs:22-120 はヘッダー検査が headerFields[0]==\"ID\"（ASCII）のみのため弾かれず化けた摘要・備考が ledger（6年保存の監査対象）へ入る。UI ガードは無く、ViewModels/DataExportImportViewModel.cs:754-796 の「直接インポート」（Views/Dialogs/DataExportImportDialog.xaml:381-388）はプレビューを迂回する。設計意図としての許容も無し：docs/manual/管理者マニュアル.md §5.6.5（836-880行）はエクスポートCSVをテンプレートに編集する運用を推奨しつつ文字コード指定が無く、docs/manual・docs/design に該当記述なし。一方 ViewModels/SettingsViewModel.cs:483-511 では BOM 無し＝Shift_JIS として Encoding.GetEncoding(932) にフォールバックする処理が既にあり、環境に BOM 無し SJIS が存在する認識はある。severity は、クラッシュせず推奨経路のプレビュー DataGrid（DataExportImportDialog.xaml:479）で化けが目視できること、admin 操作かつ Excel 再保存という利用者手順に依存することから high → medium に再評価。"
+  },
+  {
+   "file": "ICCardManager/src/ICCardManager/Services/Import/CsvImportService.Ledger.cs",
+   "line": 191,
+   "title": "履歴CSVインポートだけトランザクション無しで部分コミットされる",
+   "severity": "medium",
+   "category": "data-integrity",
+   "description": "ImportCardsInternalAsync / ImportStaffInternalAsync は BeginTransactionAsync で囲み、1件でも失敗すれば Rollback して importedCount=0 に戻すのに対し、ImportLedgersAsync は「履歴はトランザクションなしで直接インポート」として InsertAsync/UpdateAsync を逐次実行する。途中行の失敗（共有モードでの SQLITE_BUSY、他PCの排他等）は行ごとの catch で errors に積まれるだけで、それ以前の行は DB に残る。事前の ValidateBalanceConsistencyForLedgers は「全行が入る前提」で残高チェーンを検証しているため、途中で切れると DB 上の残高チェーンが破断した状態が確定する。さらに foreach の外側で例外が出た場合（289行目の catch）、実際に挿入済みの件数を持つ importedCount は捨てられ ImportedCount=0 の結果が返るため、ViewModel 側は「登録0件のエラー」と表示し、監査ログ（LogImportAsync は result.ImportedCount>0 の分岐でのみ記録）も残らない。",
+   "scenario": "紙出納簿から移行した300行の履歴CSVをインポート中、150行目で他PCのバックアップ処理により SQLITE_BUSY が発生。1〜149行目は ledger に挿入済みのまま残り、UIには「インポート完了（一部エラー）: 149件を登録、1件がエラー」と出る。以降の行は未登録なので、そのカードの残額チェーン（前残高＋受入−払出＝残額）は149行目と既存データの間で不整合となり、月次帳票の月計・累計が合わなくなる。同じCSVを再実行しても skipExisting=false 運用なら1〜149行目が二重登録される。",
+   "foundBy": "other-services",
+   "fixHint": "Card.cs:157-205 に倣い ImportLedgersAsync の投入ループを `using var scope = await _dbContext.BeginTransactionAsync()` で囲み、既存の `InsertAsync/UpdateAsync(ledger, scope.Transaction)` 多重定義（LedgerRepository.cs:174,228）を必ず使って（tx=null 経路は Issue #1575 のセマフォ再取得デッドロックを招くため不可）、errors>0 なら Rollback して importedCount=0 を返す。",
+   "verifyReasoning": "【中核の主張＝コード事実として確認】ImportLedgersAsync（CsvImportService.Ledger.cs:23）は、事前バリデーション通過後、191行のコメント「履歴はトランザクションなしで直接インポート」どおり 192-251 行の foreach で `_ledgerRepository.InsertAsync(ledger)` / `UpdateAsync(ledger)` を逐次実行する。LedgerRepository.cs:171 の `InsertAsync(Ledger) => InsertAsync(ledger, transaction: null)` → 同 174-220 は tx=null 時に `LeaseConnectionAsync()` で接続を借りて **autocommit で INSERT** する。したがって N 行目で SQLiteException（SQLITE_BUSY 等）が出ると Ledger.cs:241 の行ごと catch に落ち、1..N-1 行は DB にコミット済みのまま残る。return は Ledger.cs:253 で Success=false / ImportedCount=N-1 となり、DataExportImportViewModel.cs:638→690 の「インポート完了（一部エラー）」分岐に入る。対して ImportCardsInternalAsync（Card.cs:157-205）/ ImportStaffInternalAsync（Staff.cs:151-）は `BeginTransactionAsync` で囲み、errors>0 なら `scope.Rollback(); importedCount = 0;`（Card.cs:196-205）と全か無かにしている。ledger だけ原子性が無いのは事実で、Insert/Update とも `SQLiteTransaction` を受ける多重定義（LedgerRepository.cs:174, 228）が既にあるため技術的制約でもない。\n\n【指摘の付随主張2点は反証】(1)「289行目の外側 catch で importedCount が捨てられ ImportedCount=0 になる」— foreach の本体は 194-250 の `try/catch (Exception ex)` で完全に包まれており、ループ内の DB 例外は外側 catch へ到達しない。ループ外にあるのはタプル分解と errors.Add のみで、実行経路として成立しない。(2)「監査ログは ImportedCount>0 の分岐でのみ記録＝残らない」— 逆で、DataExportImportViewModel.cs:708-718 に「Issue #1302: 部分成功でもデータは書き込まれたため監査ログ記録」として `if (result.ImportedCount > 0) LogImportAsync(...)` があり、部分成功時こそ記録される（Success 分岐は 669）。この Issue #1302 のコメント自体、ledger/detail 系インポートが部分書き込みしうることを UI 層が既知として扱っている証拠でもある。\n\n【被害の程度も指摘より小さい】データ由来のエラーは Ledger.cs:156 の ValidateBalanceConsistencyForLedgers → 159-169 で「1件でもエラーがあれば1行も書かずに return」するため、ループ中の失敗はインフラ起因（BUSY/接続断）に限られる。SkipExistingOnImport は既定 true（DataExportImportViewModel.cs:120）で、重複判定キーは (CardIdm, Date, Summary, Income, Expense, Balance)（Ledger.cs:217）なので、同じ CSV の再実行は既登録分をスキップして残りだけ入り自己修復する（二重登録は利用者が明示的にチェックを外した場合のみで、その場合は失敗が無くても同様に重複する＝本欠陥固有ではない）。「残高チェーンが破断して確定」も、途中で切れた場合に残るのは内部整合な短いチェーンであり、後続既存行との不連続はそもそも完全インポートでも検査対象外（GetPreviousBalanceByCardAsync は範囲直前の残高しか見ない）。エラー行は行番号付きで UI に列挙される。\n\n以上より「ledger インポートに原子性が無く部分コミットが残る」という中核は実行経路つきで成立するが、根拠として挙げられた2つの被害経路は誤りで、実害は限定的。"
+  },
+  {
+   "file": "ICCardManager/src/ICCardManager/Services/BackupService.cs",
+   "line": 144,
+   "title": "起動時自動バックアップの UNC 検証が UI スレッドで最大5秒＋無制限にブロックする",
+   "severity": "medium",
+   "category": "ui",
+   "description": "App.PerformStartupTasksAsync は UI スレッド上で `_ = backupService.ExecuteAutoBackupAsync();` を fire-and-forget する（App.xaml.cs:816。直前の 566 行まで await が挟まらないため確実に UI スレッド）。ExecuteAutoBackupAsync の最初の await は ResolveBackupFolderAsync 内の GetAppSettingsAsync だが、App.xaml.cs:563 の ApplySavedSettings() が直前に AppSettings をキャッシュへ入れている（SettingsRepository.GetAppSettings → _cacheService.Set、TTL 3分）ため必ずキャッシュヒットして同期完了する。同期完了したタスクは ConfigureAwait(false) があっても継続が UI スレッドに留まるため、その直後の PathValidator.ValidateBackupPath（UNC 到達性を Task.Wait(5000) でブロッキング検査）と EnsureDirectoryExists（Directory.CreateDirectory、タイムアウトなし）が UI スレッドで実行される。同ファイル 81-85 行のコメントはこの「キャッシュヒット時は UI スレッドに留まる」機構を明示的に認識しているが、対策は BackupDatabaseTo の Task.Run オフロードのみで、その手前の ResolveBackupFolderAsync / EnsureDirectoryExists は保護されていない。",
+   "scenario": "バックアップ先に UNC パス（\\\\server\\share\\backup）を設定した環境でサーバが停止している、または SMB が応答しない状態でアプリを起動する。ValidateBackupPath が UI スレッドを 5 秒ブロックし、続く EnsureDirectoryExists が応答しない SMB 共有に対して無制限にブロックする（SMB のセッションタイムアウトまで数十秒）。起動直後にメイン画面が固まって職員証タッチを受け付けず、ユーザーからは「起動しない／固まった」ように見える。ネットワーク障害時にこそバックアップ健全性を確認したいのに、その経路自体がアプリを止める。",
+   "foundBy": "async-threading",
+   "fixHint": "BackupService.ResolveBackupFolderAsync（BackupService.cs:141）の同期 PathValidator.ValidateBackupPath を既存の ValidateBackupPathAsync（Task.Run 版）へ置換し、併せて EnsureDirectoryExists（BackupService.cs:71）も Task.Run でオフロードして、UI スレッド起点でも起動経路がブロックしないことを回帰テストで固定する。",
+   "verifyReasoning": "経路を実コードで確認できた。(1) スレッド: App.xaml.cs:83 `OnStartup` は async void（WPF 同期コンテキスト上）→ :119 `await InitializeDatabaseAsync()` → :563 `ApplySavedSettings()` → :566 `await PerformStartupTasksAsync(dbContext)` → :816 `_ = backupService.ExecuteAutoBackupAsync();`。この間の await はすべて ConfigureAwait 無指定で UI スレッドへ戻るため、816 行は UI スレッド。(2) 同期完了: ApplySavedSettings（App.xaml.cs:701）が `SettingsRepository.GetAppSettings()` を呼び、:149 で `_cacheService.Set(CacheKeys.AppSettings, …)` によりキャッシュ投入。直後に BackupService.cs:70 → :134 `await _settingsRepository.GetAppSettingsAsync().ConfigureAwait(false)` は SettingsRepository.cs:129 → CacheService.cs:44-48 の「ロック取得前の高速パス」で await 前に return するため完了済み Task を返し、ConfigureAwait(false) でもスレッドホップせず UI スレッドで継続する（この機構は BackupService.cs:80-84 のコメント自身が Issue #1361 として明記）。(3) ブロック: 継続先の BackupService.cs:141 `PathValidator.ValidateBackupPath(backupPath)` は同期版で、PathValidator.cs:68-69 → :155-165（UNC 到達性）→ :450-459 `existsTask.Wait(timeoutMs)`（DefaultUncTimeoutMs = 5000, PathValidator.cs:25）で最大5秒、呼び出しスレッド＝UI スレッドをブロックする。さらに到達可能だが低速な共有では PathValidator.cs:490-515 `CheckWritePermission` の `File.WriteAllText`/`File.Delete` がタイムアウトなしで UI スレッドをブロックする。(4) 設計意図による免責は無い: 逆に PathValidator.cs:63-66 の remarks が「UI スレッドから呼ぶ場合は ValidateBackupPathAsync を使うこと」と明示し、CHANGELOG.md:453（Issue #1269）も「設定画面等 UI スレッドからの呼び出しでブロックしないよう SettingsViewModel.SaveAsync を更新」と規約化している。SettingsViewModel.cs:244/311 は ValidateBackupPathAsync を使っており、BackupService だけがこの規約から漏れている。Issue #1361 の対策は BackupDatabaseTo の Task.Run オフロードのみで、その手前の ResolveBackupFolderAsync は未保護。なお指摘のうち「EnsureDirectoryExists が無制限にブロック」の部分は成立しない: UNC 到達不可なら ValidateBackupPath が Failure を返し BackupService.cs:145 でローカル既定パスへフォールバックするため、CreateDirectory は UNC に対して走らない。また MainWindow.Show() は App.xaml.cs:130 と InitializeDatabaseAsync より後なので、実害は「表示済み画面の固まり」ではなく「ウィンドウ表示が最大5秒＋α 遅延する起動ハング」。中核の欠陥（UI スレッドでの同期 UNC 検証）は成立するため confirmed とし、影響範囲の過大評価分を差し引いて severity を medium に再評価した。"
+  },
+  {
+   "file": "ICCardManager/src/ICCardManager/Services/AdminDashboardService.cs",
+   "line": 95,
+   "title": "運用状況タブの「最終利用日」が新規購入・繰越・貸出中レコードを利用実績として拾う",
+   "severity": "medium",
+   "category": "data-integrity",
+   "description": "GetOperationStatusAsync は LastUsageDate を GetAllLatestBalancesAsync（LedgerRepository.cs:595）から取っているが、このクエリは is_lent_record も 新規購入／○月から繰越 も一切除外せず「card_idm ごとに date 最新の 1 行」を返すだけ。一方、同じダッシュボードの稼働状況タブは GetUsageStatsByCardAsync（ExcludeCarryoverCondition + is_lent_record = 0）で最終利用日を出している。Issue #1692 で SQL 集計側だけに除外を入れ、運用状況タブが使う残高／最終利用日の経路が取り残されている。business-logic.md の「除外を忘れると『使っていないカードが使われているように見える』」がそのまま再発している。",
+   "scenario": "(1) 2025-05-10 に「新規購入」で登録しただけで一度も使っていないカードがあると、F8 管理者ダッシュボードのタブ1「運用状況」の最終利用日列に 2025/05/10 が表示される。同じダイアログのタブ2「稼働状況」では同カードが稼働率 0%・利用回数 0・期間内の最終利用日 空欄で並ぶため、同一画面で矛盾した値が出て「遊休カードの発見」という目的が崩れる（Excel 出力 AdminDashboardExcelExportService.cs:162 にも同じ値が出る）。(2) 貸出中のカードでは 貸出中プレースホルダ（date=貸出日時）が最新行になるため、最終利用日列が「貸出日時」列とまったく同じ日付になり、返却前で利用実績が 1 件も無いのに「今日使った」ように見える。",
+   "foundBy": "aggregation",
+   "fixHint": "残高は現行どおり全レコードから取りつつ、最終利用日だけを `is_lent_record = 0` ＋ `ExcludeCarryoverCondition` 付きの別クエリ（例 `GetAllLastUsageDatesAsync`）で取得し、`AdminDashboardService.cs:95` の `LastUsageDate` をそちらへ差し替える（`GetAllLatestBalancesAsync` 自体に除外を足すと新規購入カードの残高が 0 になり残額不足が誤検知されるため不可）。",
+   "verifyReasoning": "指摘どおりの経路が成立することを実コードで確認した。\n\n【経路1: 新規購入レコードが「最終利用日」になる】\n1. カード登録時に `ICCardManager/src/ICCardManager/ViewModels/CardManageViewModel.cs:1023`（`summary = \"新規購入\"`）〜:1057-1062 で `Date = recordDate`（購入日）、`IsLentRecord` 未設定（=0）の ledger 行が実レコードとして INSERT される。\n2. `AdminDashboardService.GetOperationStatusAsync` は `AdminDashboardService.cs:76` で `_ledgerRepository.GetAllLatestBalancesAsync()` を呼び、`AdminDashboardService.cs:95` で `usageInfo.LastUsageDate` を `LastUsageDate`（同:128）へ入れている。\n3. `LedgerRepository.GetAllLatestBalancesAsync`（`LedgerRepository.cs:586-613`）の SQL は `WHERE l.id = (SELECT l2.id … ORDER BY l2.date DESC, l2.id DESC LIMIT 1)` のみで、`is_lent_record` も `ExcludeCarryoverCondition`（同:648-649）も一切適用していない。一方、稼働状況タブ側の `GetUsageStatsByCardAsync`（同:661-671）は `is_lent_record = 0` ＋ `ExcludeCarryoverCondition` を適用している。\n4. 表示は `Views/Dialogs/AdminDashboardDialog.xaml:235`（運用状況タブ「最終利用日」）と `Services/AdminDashboardExcelExportService.cs:162`。よって一度も使っていない登録直後カードで運用状況タブに購入日が「最終利用日」として出る一方、同じダイアログのタブ2（同 XAML:375「期間内の最終利用日」）は空欄になる。\n\n【経路2: 貸出中プレースホルダが「最終利用日」になる】\n`LendingService.InsertLendLedgerAsync`（`Services/LendingService.cs:404-414`）が `Date = now` / `LentAt = now` / `IsLentRecord = true` の行を INSERT する。返却時に作られる利用行は `Date = usage.UseDate ?? date`（同:898, 980, 1021, 1161）で乗車日＝過去日なので、貸出中はこのプレースホルダが `date` 最新行になり、`GetAllLatestBalancesAsync` はその日付を返す。結果、`AdminDashboardDialog.xaml:231`「貸出日時」と同:235「最終利用日」が同一日付で並び、利用実績ゼロでも「今日使った」ように見える。\n\n【設計意図による防御は無かった】\n- `04_機能設計書.md:1366` と `AdminDashboardDialog.xaml:372` のコメントは 2 つの「最終利用日」の差を**集計範囲（全期間 vs 期間内）**としてのみ説明しており、レコード種別（新規購入・繰越・貸出中）の混入は説明されていない。`Dtos/AdminDashboardOperationStatus.cs:97` の XML コメントも「最終利用日」とだけ書かれている。\n- `LedgerRepository.cs:616-619` の「いずれも貸出中レコードを除外する」というコメントは #1692 で追加された集計クエリ群に対する記述で、既存の `GetAllLatestBalancesAsync` は対象外。\n- `.claude/rules/business-logic.md` の「除外を忘れると『使っていないカードが使われているように見える』」に正面から抵触する。\n- 既存テストは repository をモックしており（`tests/.../Services/AdminDashboardServiceTests.cs:314-323` は辞書値をそのまま返すだけ）、SQL の除外有無を検証していないため回帰も止まっていない。\n\n【severity を high → medium に再評価した理由】\n保存データの破壊はなく表示値のみの誤り。遊休カード判定の主系である稼働状況タブ（`GetUsageStatsByCardAsync` 経由）は正しく除外しており、誤るのは運用状況タブ／Excel の補助列。また `GetAllLatestBalancesAsync` は `DashboardService.cs:73` 経由でメイン画面のカード残高一覧でも以前から同じ挙動であり、#1692 で新規に混入したものではなく既存 API の意味の取り残し。ただし #1692 のダッシュボードは「遊休カード発見」を目的に掲げており、同一ダイアログ内で矛盾値が並ぶ実害は残る。"
+  },
+  {
+   "file": "ICCardManager/src/ICCardManager/Services/BackupService.cs",
+   "line": 447,
+   "title": "バックアップを直接コピー先へ書くため、途中失敗した破損ファイルが有効な世代として残る",
+   "severity": "medium",
+   "category": "data-integrity",
+   "description": "BackupDatabaseTo は最終ファイル名（backup_yyyyMMdd_HHmmss.db）を先に削除してから直接 `BackupDatabase` を実行する。テンポラリ名で作って成功後にリネームする手順を取っていないため、コピー途中で失敗すると中途半端なファイルがそのままバックアップ世代として残る。SQLite Backup API はヘッダを最初に書くので、`IsValidSqliteFile`（先頭16バイトのマジックのみ確認）はこの破損ファイルを「有効」と判定する。",
+   "scenario": "共有モードでバックアップ先が UNC のとき、`sourceConnection.BackupDatabase(...)` の途中でネットワークが切れると IOException となり ExecuteAutoBackupAsync は null を返す（ログのみ）。しかし backup_20260810_090000.db という切り詰められたファイルは残る。この状態で (1) `CleanupOldBackupsAsync` は 30 世代のカウントにこのゴミを含めるため正常な最古世代が1つ余分に削除され、(2) 障害時に利用者がシステム管理画面のバックアップ一覧から最新＝この破損ファイルを選ぶと、`IsValidSqliteFile` を通過して `File.Copy` で本番 DB を上書きし、6年保存の台帳データを破損コピーで置き換えてしまう。",
+   "foundBy": "data-shared,data-shared",
+   "fixHint": "BackupDatabaseTo を「一時名（例: backup_....db.tmp）へ書き→成功後に File.Move で最終名へリネーム、例外時は try/catch で一時ファイルを削除」に変更し、GetBackupFiles / CleanupOldBackups が拾わない拡張子にする。",
+   "verifyReasoning": "経路を確認: (1) BackupService.cs:444-457 BackupDatabaseTo は最終ファイル名で destinationConnection を開き BackupDatabase を直接実行、テンポラリ名→リネームも失敗時の destinationPath 削除も無い。(2) 失敗は ExecuteAutoBackupAsync:86 → catch :105/:115（CreateBackup:209 → catch :222/:237）でログのみ・null 返却となり、切り詰められた backup_yyyyMMdd_HHmmss.db が残置される。(3) GetBackupFilesAsync:397-434 はファイル名パターンのみで列挙し検証しないため、破損ファイルが CreationTime 最新として一覧先頭に出る。(4) SystemManageViewModel.cs:410 → RestoreFromBackup:268 → IsValidSqliteFile:285（実体 :466-488）は先頭16バイトのマジックのみ判定 → File.Copy(overwrite:true):323 で本番 DB を上書きし、直後の CleanupJournalFiles:328 が -journal を削除するためホットジャーナルによる巻き戻しの余地も消える。(5) CleanupOldBackupsAsync:561-604 も名前パターンでカウントするためゴミが 30 世代枠を消費し正常世代が1つ余分に削除される。ヘッダ有効性の前提も妥当: sqlite3_backup_step はページ1から昇順にコピーし pager の書き出しも pgno 昇順のため、既定キャッシュ(約2MB)を超える DB では中断時にページ1(SQLite format 3\\0)だけ書かれた切り詰めファイルが残りうる。UNC 断のほか App.xaml.cs:816 の fire-and-forget 実行中のプロセス終了でも同状態になる。反証材料の探索: ICCardManager/docs/ にアトミック書き込みを見送った設計記述は無く、BackupServiceTests にも一時ファイル/破損ファイルのテストは無い。意図的に許容された形跡なし。緩和はあるが解消はしない: リストア前に現行 DB を別途バックアップする（SystemManageViewModel.cs:392）ため恒久的喪失にはならず、他世代も残る。よって medium 据え置き。"
+  },
+  {
+   "file": "ICCardManager/src/ICCardManager/Data/Repositories/LedgerRepository.cs",
+   "line": 649,
+   "title": "繰越除外の SQL が '%月から繰越' 固定で、設定可能な MidYearCarryoverPattern と乖離する",
+   "severity": "low",
+   "category": "data-integrity",
+   "description": "Issue #1604 で「○月から繰越」の判定は SummaryGenerator.IsMidYearCarryoverSummary（OrganizationOptions.MidYearCarryoverPattern に追従）へ一元化され、Models/Ledger.cs:104 の IsCarryover もそれを参照するよう修正された。理由はコメントに「組織設定でパターンをカスタムすると帳票集計フィルタと本プロパティが乖離し、月計・累計の二重計上（Issue #1494 の再発形）を招く」と明記されている。しかし LedgerRepository 側の SQL 4 箇所（ExcludeCarryoverCondition、GetByDateRangeAsync の ORDER BY CASE:45、GetPagedAsync の CASE:937/952、GetPurchaseDateAsync:1524）は依然として '%月から繰越' をハードコードしており、同じ乖離が SQL 層に残っている。生成側（MidYearCarryoverFormat = \"{0}月から繰越\"）を変えると SQL だけが追従しない。既定値では一致するため現時点では潜在的だが、Issue #1604 で解消したはずの穴が SQL 側に残っている状態。",
+   "scenario": "appsettings.json の OrganizationOptions:SummaryText:MidYearCarryoverFormat を組織の様式に合わせて（例）\"{0}月分より繰越\" に変更する。以後カード登録時に生成・保存される繰越レコードの摘要は SQL の LIKE '%月から繰越' に一致しなくなり、管理者ダッシュボード（GetUsageStatsByCardAsync / GetMonthlyUsageByLenderAsync）が繰越レコードを実績としてカウントする。登録しただけのカードが「利用1回・稼働率>0%」となり、遊休カード発見という機能目的が成立しなくなる（business-logic.md が Issue #1692 の罠として明記している状態そのもの）。同時に GetPurchaseDateAsync が null を返し、GetByDateRangeAsync/GetPagedAsync の繰越先頭固定も効かなくなる。",
+   "foundBy": "repositories,aggregation,tests",
+   "fixHint": "SQL 側の繰越判定を OrganizationOptions 由来にする（SummaryGenerator に SQL 用 LIKE パターン導出を追加してクエリへ注入するか、集計 SQL では除外せず結果を SummaryGenerator.IsMidYearCarryoverSummary で後段フィルタする）。併せて LedgerOrderHelper.cs:127 も同メソッドへ寄せ、カスタムパターン設定下での一致を LedgerRepositoryAggregationTests で固定する。",
+   "verifyReasoning": "実装経路を追った結果、指摘の「SQL 層だけが組織設定に追従しない」という事実関係は正しい。\n\n確認した経路:\n1. 生成側: ICCardManager/src/ICCardManager/ViewModels/CardManageViewModel.cs:1033 で `summary = SummaryGenerator.GetMidYearCarryoverSummary(月)` → Services/SummaryGenerator.cs:1052-1054 が `_options.SummaryText.MidYearCarryoverFormat`（Services/OrganizationOptions.cs:99、既定 \"{0}月から繰越\"）を `string.Format` して ledger.summary に保存（同 1057 付近で Ledger 生成、hasIncome=false なので Income=0）。\n2. 判定側（C#）: Models/Ledger.cs:104,117-118 は Issue #1604 で `SummaryGenerator.IsMidYearCarryoverSummary`（OrganizationOptions.cs:104 の `MidYearCarryoverPattern` 追従、SummaryGenerator.cs:1088-1097）へ委譲済み。Services/ReportDataBuilder.cs:90,113、ReportRowBuilder.cs:49、ReportPreflightChecker.cs:216,263 も同メソッド経由で設定に追従する。\n3. 判定側（SQL）: Data/Repositories/LedgerRepository.cs:648-649 の `ExcludeCarryoverCondition`（\"AND summary <> '新規購入' AND summary NOT LIKE '%月から繰越'\"）、同 45 / 937 / 952 の ORDER BY CASE、同 1524 の GetPurchaseDateAsync は文字列リテラル固定。設定バインドは App.xaml.cs:269 `services.Configure<OrganizationOptions>(...)` で有効（出荷 appsettings.json には OrganizationOptions セクションが無く既定値。よって現状は乖離しない＝潜在）。\n4. 影響経路: LedgerRepository.cs:670/712（GetUsageStatsByCardAsync / GetMonthlyUsageByLenderAsync）→ Services/AdminDashboardService.cs:153-154 → BuildUtilizations。MidYearCarryoverFormat をカスタムすると繰越行が SQL の LIKE に一致せず、`COUNT(DISTINCT DATE(date))`/`COUNT(*)` に混入し、登録しただけのカードが「利用1回・稼働率>0%」になる（Income=0 なので金額系への影響はない）。GetPurchaseDateAsync(1514-1524) も null を返し ReportService.cs:242 の「新規購入より前の月はスキップ」が効かなくなる（生成される帳票が空になるだけで実害は小）。帳票の金額集計は ReportDataBuilder 経由なので二重計上は起きない。\n\n反証を試みた点と結果:\n- 意図的な設計か: .claude/rules/business-logic.md と ICCardManager/docs/design/04_機能設計書.md:1334 は「SQL の表現は `summary = '新規購入' OR summary LIKE '%月から繰越'`（GetByDateRangeAsync の ORDER BY と Ledger.IsCarryover に同じ表現がある）」と書くが、Ledger.IsCarryover は #1604 で正規表現化されており、この記述自体が既にドリフトしている。SQL 側リテラルを「設定非追従で良い」と決めた記録は docs/superpowers/specs にも Issue 参照にも見つからない。\n- 後段ガードの有無: AdminDashboardService.cs:150-171 に C# 側の再フィルタは無く、SQL の結果をそのまま使う。防止機構なし。\n- テストによる検出可否: tests/Data/Repositories/LedgerRepositoryAggregationTests.cs:50,375,505,612 は `SummaryGenerator.GetMidYearCarryoverSummary` の生成結果を使うため既定パターンの改変は検出できるが、appsettings.json でのカスタム時は検出できない。MidYearCarryoverConsistencyTests は C# 2 経路のみを対象で SQL 層を含まない。\n- 同種のドリフトが他にもある: Services/LedgerOrderHelper.cs:127 も `EndsWith(\"月から繰越\")` を直書きで、#1604 の一元化が届いていない（同一原因の追加箇所）。\n- なお「新規購入」は生成側（CardManageViewModel.cs:1023）もリテラルで設定項目が無いため、SQL のリテラルと整合しており問題ない。\n\n結論: 事実関係は確認できるが、既定設定では発現せず、影響は管理者ダッシュボードの稼働率表示と帳票スキップ判定に限られ（会計値・帳票金額は無傷）、発現には出荷構成に無い appsettings.json のカスタムが必要。よって指摘は成立するが重大度は medium ではなく low。\n\n参考（本指摘の範囲外の別事象）: 繰越月=3 の登録は CardManageViewModel.cs:1025-1029 で「前年度より繰越」を保存するが、これは既定設定でも SQL の除外条件にも Ledger.IsCarryover にも該当せず、ダッシュボードが利用実績として数える。こちらは設定乖離ではなく除外漏れで、別途確認の価値がある。"
+  }
+ ],
+ "refuted": [
+  {
+   "file": "ICCardManager/src/ICCardManager/Data/DbContext.cs",
+   "line": 1512,
+   "title": "CheckWritable の ROLLBACK 失敗で共有接続にトランザクションが残り以後の書込が全滅",
+   "reason": "確認経路: DbContext.cs:1494-1539 (CheckWritable の BEGIN IMMEDIATE / finally ROLLBACK)、DbContext.cs:470-492 (LeaseConnection = _semaphore 保持)、DbContext.cs:548-572 (BeginTransactionAsync)、DbContext.cs:586-623 (GetConnectionInternal の State!=Open 判定)、ConnectionDiagnosticsService.cs:181-197 (到達性 OK のときのみ CheckWritable を呼ぶ)、tests/Data/DbContextCheckWritableTests.cs。\n\n指摘の前提「finally の ROLLBACK が失敗するとトランザクションが開いたまま残る」が、本プロジェクトが使う SQLite バージョンでは成立しない。ICCardManager.csproj:56 は System.Data.SQLite.Core 1.0.119（同梱 SQLite 3.46 系）で、SQLite 3.7.11 以降 ROLLBACK は保留クエリがあっても SQLITE_BUSY にならず、vdbe.c の OP_AutoCommit は iRollback 経路で sqlite3RollbackAll() の戻り値を捨てて db->autoCommit=1 を無条件に立てる。したがって ROLLBACK 文が返しうるエラーは実質「cannot rollback - no transaction is active」＝既にトランザクションが閉じている場合のみで、「例外が出た＝開いたまま」という組み合わせが作れない。\n\n実測でも確認（sqlite 3.45.1、python3）:\n(1) 読み取り専用DB → BEGIN IMMEDIATE=OK / PRAGMA user_version 書込=「attempt to write a readonly database」/ その後 ROLLBACK=OK・in_transaction=False・以後 BEGIN 可能。CheckWritable の唯一の現実的な失敗経路（DbContextCheckWritableTests の読み取り専用テスト）はリークしない。\n(2) I/O エラー相当の再現（ジャーナル削除が失敗するようディレクトリを書込不可にして ROLLBACK） → ROLLBACK は OK を返し in_transaction=False、その後 BEGIN も成功。ページャの I/O 失敗でもトランザクション状態は必ず解除される。\n\nまたシナリオ側の前提も弱い: (a) CheckWritable は LeaseConnection() でセマフォを保持するため BeginTransactionAsync と同時実行されない、(b) IsConnectionSuspended / HasActiveTransactionScope で早期 return する（1496-1502）、(c) ConnectionDiagnosticsService は CheckConnection＋ファイル到達確認が通ったときだけ呼ぶ（テスト DatabaseWritable_WhenUnreachable_DoesNotCallCheckWritable が固定）。残る「ROLLBACK が .NET 例外を投げうる」ケースはリストア中の SuspendConnections による接続 Dispose 程度で、その場合は接続オブジェクト自体が破棄され GetConnectionInternal(614-619) が新規接続を張り直すため、トランザクションが居座る接続は残らない。よって「以後の書込が全滅し再起動まで復旧しない」経路を具体化できない。"
+  },
+  {
+   "file": "ICCardManager/src/ICCardManager/Data/DbContext.cs",
+   "line": 447,
+   "title": "LeaseConnectionAsync がセマフォを取らず同一 SQLiteConnection 上でコマンドが並列実行される",
+   "reason": "実装は指摘どおりだが、「セマフォ非取得」は仕様として明文化・テスト固定された意図的設計であり、指摘が主張する故障は具体的に成立しない。\n\n1) 実装確認: DbContext.cs:447-452 の LeaseConnectionAsync はセマフォを取らず解放処理も空。同期版 LeaseConnection() は DbContext.cs:470-492 で _semaphore.Wait()、BeginTransactionAsync は DbContext.cs:550 で WaitAsync。ここまでは指摘の記述と一致。\n\n2) 意図的設計であることの根拠:\n- ICCardManager/docs/design/05_クラス設計書.md:792「LeaseConnectionAsync()（非同期版）は現在セマフォを取得しない。同一 SQLiteConnection を複数タスクが共有する前提」、同795「書き込み系は必ず BeginTransactionAsync 経由で実行することで、他の書き込みとのレース条件を防げる」と排他制御方針が明記されている。\n- DbContext.cs:136-149（Issue #1575）で、この非取得挙動は**load-bearing**。Repository が外側 tx のスコープ内（HasActiveTransactionScope）で LeaseConnectionAsync 経路を選び「外側 tx に暗黙参加」することでセマフォ再取得デッドロックを回避している。LeaseConnectionAsync にセマフォを取らせると Issue #1575（LendingService.ReturnAsync→InsertDetailsAsync の無限待機、07_テスト設計書.md:1280-1292 UT-017h2）を再発させる。\n- 挙動は回帰テストで固定済み: tests/ICCardManager.Tests/Data/DbContextUiThreadGuardTests.cs:107-116「非同期版はセマフォを取得しないため UI スレッドから安全に呼べるのが本修正の前提」（07_テスト設計書.md UT-059 ケース4）。\n\n3) DbContext.cs:431-445 の XML doc の警告は「同一フロー内で Task.WhenAll 等により並列起動するな」という呼び出し規約であり、規約は 04_機能設計書.md:1314 / .claude/rules/testing.md:31 に展開され、DashboardServiceTests / AdminDashboardServiceTests が maxConcurrentCalls==1 を表明して固定している（07_テスト設計書.md:2822, 4135）。実装が自らの制約に違反しているのではなく、制約は呼び出し側規約として運用されている。\n\n4) 指摘の故障シナリオの成立性: 経路自体（SharedModeMonitor.cs:216→:161 Task.Run→DbContext.cs:1302 CheckConnection→:1344 ExecuteConnectionCheck→LeaseConnection、および BackupService.cs:86/452 の Task.Run + LeaseConnection）が UI 側 LeaseConnectionAsync 読み取りと重なり得ることまでは追えるが、そこから SQLITE_MISUSE／結果破損が生じるとは言えない。System.Data.SQLite のネイティブは serialized(SQLITE_THREADSAFE=1) で同一ハンドル上のコマンドは内部ミューテックスで直列化され、SQLITE_MISUSE は主に closed/disposed ハンドル利用で発生する。また「進行中トランザクションの未コミットデータ読み取り」は同一接続共有という前提上の既知挙動であり、Issue #1575 では逆にそれを利用する設計。実障害の記録も見当たらない（Issue #1716 の実機ログ調査でも該当なし）。\n\n以上より、実装は設計書・テストで固定された意図的挙動であり、具体的な故障経路を確定できないため refuted と判断する。なお「同期経路（セマフォあり）と非同期経路（セマフォなし）が異スレッドで重なり得る」という構造的な残存リスク自体は事実で、将来 GetConnectionInternal の再接続と読み取りが競合する等の別リスクとあわせて設計課題として扱う価値はあるが、本指摘のバグとしては成立しない。"
+  }
+ ],
+ "unverified": [
+  {
+   "file": "ICCardManager/src/ICCardManager/Services/LendingService.cs",
+   "line": 1376,
+   "title": "生の ex.Message をそのままユーザー向けメッセージに埋め込んでいる",
+   "severity": "medium",
+   "foundBy": "lending"
+  },
+  {
+   "file": "ICCardManager/src/ICCardManager/Services/LendingService.cs",
+   "line": 721,
+   "title": "返却コミット後の後処理例外で「返却失敗」と誤表示され、30秒ルールも効かない",
+   "severity": "medium",
+   "foundBy": "lending"
+  },
+  {
+   "file": "ICCardManager/src/ICCardManager/Services/LendingService.cs",
+   "line": 274,
+   "title": "貸出状態修復が削除済みカードに届かず、失敗しても「修復しました」と記録する",
+   "severity": "medium",
+   "foundBy": "lending"
+  },
+  {
+   "file": "ICCardManager/src/ICCardManager/Services/LendingService.cs",
+   "line": 840,
+   "title": "返却で台帳が1行も作られない経路が本番ログに残らない（LogDebug）",
+   "severity": "medium",
+   "foundBy": "lending"
+  },
+  {
+   "file": "ICCardManager/src/ICCardManager/Services/SummaryGenerator.cs",
+   "line": 1075,
+   "title": "GetMidYearCarryoverDate: 繰越月＝登録月のとき繰越レコードが1年前の日付になる",
+   "severity": "medium",
+   "foundBy": "summary"
+  },
+  {
+   "file": "ICCardManager/src/ICCardManager/Services/LedgerOrderHelper.cs",
+   "line": 127,
+   "title": "繰越判定がハードコードされ SummaryGenerator.IsMidYearCarryoverSummary と乖離する",
+   "severity": "medium",
+   "foundBy": "summary"
+  },
+  {
+   "file": "ICCardManager/src/ICCardManager/Services/LedgerMergeService.cs",
+   "line": 483,
+   "title": "摘要からのバス停名抽出が BusLabel 設定を無視してハードコードされている",
+   "severity": "medium",
+   "foundBy": "summary"
+  },
+  {
+   "file": "ICCardManager/src/ICCardManager/Services/ReportService.cs",
+   "line": 437,
+   "title": "既存シート再生成時に旧改ページが残りページ番号が飛ぶ",
+   "severity": "medium",
+   "foundBy": "reports"
+  },
+  {
+   "file": "ICCardManager/src/ICCardManager/Services/PrintService.cs",
+   "line": 321,
+   "title": "印刷プレビューで月計・累計行がページからはみ出す行数域がある",
+   "severity": "medium",
+   "foundBy": "reports"
+  },
+  {
+   "file": "ICCardManager/src/ICCardManager/Data/DbContext.cs",
+   "line": 728,
+   "title": "SuspendConnections / CloseConnection が使用中の接続を他スレッドから Close+Dispose する",
+   "severity": "medium",
+   "foundBy": "data-shared"
+  },
+  {
+   "file": "ICCardManager/src/ICCardManager/Data/DbContext.cs",
+   "line": 618,
+   "title": "ConfigurePragmas が例外を投げると PRAGMA 未適用の接続が以後ずっと再利用される",
+   "severity": "medium",
+   "foundBy": "data-shared"
+  },
+  {
+   "file": "ICCardManager/src/ICCardManager/Data/Repositories/LedgerRepository.cs",
+   "line": 1394,
+   "title": "UnmergeLedgersAsync が rowid のみで明細を移動し、所属 ledger を検証していない",
+   "severity": "medium",
+   "foundBy": "repositories"
+  },
+  {
+   "file": "ICCardManager/src/ICCardManager/Data/Repositories/LedgerRepository.cs",
+   "line": 1417,
+   "title": "UnmergeLedgersAsync が内部でコミットするため、統合履歴の「取り消し済み」マークと原子的にできない",
+   "severity": "medium",
+   "foundBy": "repositories"
+  },
+  {
+   "file": "ICCardManager/src/ICCardManager/ViewModels/MainViewModel.cs",
+   "line": 2356,
+   "title": "カードリーダーエラー警告が重複排除も削除もされず無限に蓄積する",
+   "severity": "medium",
+   "foundBy": "mainvm"
+  },
+  {
+   "file": "ICCardManager/src/ICCardManager/ViewModels/MainViewModel.cs",
+   "line": 786,
+   "title": "共有モード定期リフレッシュ失敗の痕跡が LogDebug で本番ログに残らない",
+   "severity": "medium",
+   "foundBy": "mainvm"
+  },
+  {
+   "file": "ICCardManager/src/ICCardManager/ViewModels/MainViewModel.cs",
+   "line": 1363,
+   "title": "未登録カード種別選択ダイアログ中もカード読み取りが有効でダイアログが多重に開く",
+   "severity": "medium",
+   "foundBy": "mainvm"
+  },
+  {
+   "file": "ICCardManager/src/ICCardManager/ViewModels/StaffManageViewModel.cs",
+   "line": 568,
+   "title": "職員登録ダイアログが1枚読み取った時点でカード読取抑制を解除する",
+   "severity": "medium",
+   "foundBy": "viewmodels"
+  },
+  {
+   "file": "ICCardManager/src/ICCardManager/ViewModels/BusStopInputViewModel.cs",
+   "line": 359,
+   "title": "バス停名の類似警告・未入力警告が保存メッセージに即上書きされ表示されない",
+   "severity": "medium",
+   "foundBy": "viewmodels"
+  },
+  {
+   "file": "ICCardManager/src/ICCardManager/ViewModels/LedgerDetailViewModel.cs",
+   "line": 509,
+   "title": "「すべて統合」が1グループ化ではなく GroupId 全 null（自動検出）にしている",
+   "severity": "medium",
+   "foundBy": "viewmodels"
+  },
+  {
+   "file": "ICCardManager/src/ICCardManager/ViewModels/DataExportImportViewModel.cs",
+   "line": 980,
+   "title": "カードリーダー開始失敗で生の ex.Message を画面に出している",
+   "severity": "medium",
+   "foundBy": "viewmodels"
+  },
+  {
+   "file": "ICCardManager/src/ICCardManager/App.xaml.cs",
+   "line": 750,
+   "title": "メイン画面の MinWidth=1400 が 1366px 幅の業務PCに収まらない",
+   "severity": "medium",
+   "foundBy": "common-infra"
+  },
+  {
+   "file": "ICCardManager/src/ICCardManager/Common/AppConstants.cs",
+   "line": 41,
+   "title": "バックアップ保持世代数30は共有バックアップ先だと数日分しか残らない",
+   "severity": "medium",
+   "foundBy": "common-infra"
+  },
+  {
+   "file": "ICCardManager/src/ICCardManager/Views/Dialogs/IncompleteBusStopDialog.xaml.cs",
+   "line": 34,
+   "title": "生の ex.Message をユーザーに表示し技術詳細をログに残さない",
+   "severity": "medium",
+   "foundBy": "views"
+  },
+  {
+   "file": "ICCardManager/src/ICCardManager/Views/Dialogs/LedgerDetailDialog.xaml",
+   "line": 31,
+   "title": "AccessibilityStyles の色値をダイアログ内で literal 複製している",
+   "severity": "medium",
+   "foundBy": "views"
+  },
+  {
+   "file": "ICCardManager/src/ICCardManager/Views/MainWindow.xaml.cs",
+   "line": 72,
+   "title": "async void の Closing でウィンドウ位置保存がシャットダウンと競合する",
+   "severity": "medium",
+   "foundBy": "views"
+  },
+  {
+   "file": "ICCardManager/src/ICCardManager/Services/Import/CsvImportService.Detail.cs",
+   "line": 483,
+   "title": "詳細インポートで親Ledgerの更新結果を確認せず成功扱いにする",
+   "severity": "medium",
+   "foundBy": "other-services"
+  },
+  {
+   "file": "ICCardManager/src/ICCardManager/Services/Import/CsvImportService.Staff.cs",
+   "line": 401,
+   "title": "職員番号が未設定の職員は毎回「更新」扱いになり幻の差分が表示される",
+   "severity": "medium",
+   "foundBy": "other-services"
+  },
+  {
+   "file": "ICCardManager/src/ICCardManager/Services/Import/CsvImportService.Staff.cs",
+   "line": 79,
+   "title": "エクスポート→インポートの往復で先頭にシングルクォートが恒久的に混入する",
+   "severity": "medium",
+   "foundBy": "other-services"
+  },
+  {
+   "file": "ICCardManager/src/ICCardManager/Infrastructure/Timing/WpfDispatcherService.cs",
+   "line": 23,
+   "title": "InvokeAsync(Func<Task>) は内側 Task を捨てるため例外を握りつぶす（doc と逆）",
+   "severity": "medium",
+   "foundBy": "async-threading"
+  },
+  {
+   "file": "ICCardManager/src/ICCardManager/ViewModels/CardManageViewModel.cs",
+   "line": 832,
+   "title": "カード登録の OnCardRead が例外無保護の fire-and-forget で DB 失敗が無言化する",
+   "severity": "medium",
+   "foundBy": "async-threading"
+  },
+  {
+   "file": "ICCardManager/src/ICCardManager/Infrastructure/Caching/CacheService.cs",
+   "line": 56,
+   "title": "Infrastructure 層の CacheService で ConfigureAwait(false) が欠落",
+   "severity": "medium",
+   "foundBy": "async-threading"
+  },
+  {
+   "file": "ICCardManager/src/ICCardManager/ViewModels/AdminDashboardViewModel.cs",
+   "line": 533,
+   "title": "月別利用額グラフの「その他」系列が最上位系列と同色になる",
+   "severity": "medium",
+   "foundBy": "aggregation"
+  },
+  {
+   "file": "ICCardManager/src/ICCardManager/Services/AdminDashboardService.cs",
+   "line": 169,
+   "title": "月別利用額グラフだけが削除済み・払戻済カードを除外していない",
+   "severity": "medium",
+   "foundBy": "aggregation"
+  },
+  {
+   "file": "ICCardManager/src/ICCardManager/ViewModels/MainViewModel.cs",
+   "line": 1345,
+   "title": "未登録カード処理が Processing 状態にせず Error ハンドラの -=/+= が二重購読を生む",
+   "severity": "medium",
+   "foundBy": "resources"
+  },
+  {
+   "file": "ICCardManager/tests/ICCardManager.Tests/Data/DbContextCleanupTests.cs",
+   "line": 195,
+   "title": "うるう日(2/29)実行で落ちる6年保持境界テスト",
+   "severity": "medium",
+   "foundBy": "tests"
+  },
+  {
+   "file": "ICCardManager/tests/ICCardManager.Tests/ViewModels/ReportViewModelTests.cs",
+   "line": 814,
+   "title": "fire-and-forget の完了を固定待機で待つテスト（testing.md 違反）",
+   "severity": "medium",
+   "foundBy": "tests"
+  },
+  {
+   "file": "ICCardManager/src/ICCardManager/Models/LedgerDetail.cs",
+   "line": 83,
+   "title": "SequenceNumber の向きを説明する XML doc が実装と逆になっている",
+   "severity": "low",
+   "foundBy": "summary"
+  },
+  {
+   "file": "ICCardManager/src/ICCardManager/Services/ReportService.cs",
+   "line": 697,
+   "title": "帳票ファイル名が appsettings.json の設定を無視する",
+   "severity": "low",
+   "foundBy": "reports"
+  },
+  {
+   "file": "ICCardManager/src/ICCardManager/Services/ReportService.cs",
+   "line": 334,
+   "title": "TemplateMapping 設定がヘッダーのみ有効で本体は定数のまま",
+   "severity": "low",
+   "foundBy": "reports"
+  },
+  {
+   "file": "ICCardManager/src/ICCardManager/Data/DbContext.cs",
+   "line": 1228,
+   "title": "static Random をロックなしで複数スレッドから使用しジッターが無効化され得る",
+   "severity": "low",
+   "foundBy": "data-shared"
+  },
+  {
+   "file": "ICCardManager/src/ICCardManager/ViewModels/MainViewModel.cs",
+   "line": 1470,
+   "title": "履歴のページ数クランプ後に再読込しないため空の一覧と件数表示が食い違う",
+   "severity": "low",
+   "foundBy": "mainvm"
+  },
+  {
+   "file": "ICCardManager/src/ICCardManager/ViewModels/OperationLogSearchViewModel.cs",
+   "line": 47,
+   "title": "操作ログ画面が RESTORE/IMPORT/BACKUP 等を英語のまま表示する",
+   "severity": "low",
+   "foundBy": "viewmodels"
+  },
+  {
+   "file": "ICCardManager/src/ICCardManager/Infrastructure/CardReader/FelicaCardReader.cs",
+   "line": 709,
+   "title": "ヘルスチェックの例外が LogTrace のため本番ログに一切残らない",
+   "severity": "low",
+   "foundBy": "common-infra"
+  },
+  {
+   "file": "ICCardManager/src/ICCardManager/Common/PathValidator.cs",
+   "line": 513,
+   "title": "生の例外メッセージをそのままユーザー向け検証エラーに埋め込んでいる",
+   "severity": "low",
+   "foundBy": "common-infra"
+  },
+  {
+   "file": "ICCardManager/src/ICCardManager/Infrastructure/Security/FelicalibIntegrityGuard.cs",
+   "line": 28,
+   "title": "再配布する felicalib.dll のライセンス表記がコード内で矛盾している",
+   "severity": "low",
+   "foundBy": "common-infra"
+  },
+  {
+   "file": "ICCardManager/src/ICCardManager/Views/MainWindow.xaml",
+   "line": 814,
+   "title": "ローカル値の Background が Style の残額警告 DataTrigger を無効化している",
+   "severity": "low",
+   "foundBy": "views"
+  },
+  {
+   "file": "ICCardManager/src/ICCardManager/Services/CsvExportService.cs",
+   "line": 62,
+   "title": "CsvExportService の includeDeleted=true 経路だけ ConfigureAwait(false) が欠落",
+   "severity": "low",
+   "foundBy": "other-services"
+  },
+  {
+   "file": "ICCardManager/src/ICCardManager/Services/StationMasterService.cs",
+   "line": 126,
+   "title": "駅マスタ読込失敗が本番で無言：約100駅のフォールバックへ静かに縮退する",
+   "severity": "low",
+   "foundBy": "other-services"
+  },
+  {
+   "file": "ICCardManager/src/ICCardManager/Services/CardLockManager.cs",
+   "line": 216,
+   "title": "ClearAllLocks は IsDisposed を立てずに Semaphore を Dispose する（#1171 の対策漏れ）",
+   "severity": "low",
+   "foundBy": "other-services"
+  },
+  {
+   "file": "ICCardManager/src/ICCardManager/Data/Repositories/CardRepository.cs",
+   "line": 43,
+   "title": "Data/Repositories 全体で ConfigureAwait(false) が一箇所も付与されていない",
+   "severity": "low",
+   "foundBy": "async-threading"
+  },
+  {
+   "file": "ICCardManager/src/ICCardManager/Data/DbContext.cs",
+   "line": 162,
+   "title": "リトライのジッター生成に static Random を複数スレッドから共有している",
+   "severity": "low",
+   "foundBy": "async-threading"
+  },
+  {
+   "file": "ICCardManager/src/ICCardManager/Services/WarningService.cs",
+   "line": 86,
+   "title": "バス停未入力の件数集計が BusPlaceholder 設定を経由せず「★」をハードコードしている",
+   "severity": "low",
+   "foundBy": "aggregation"
+  },
+  {
+   "file": "ICCardManager/tests/ICCardManager.Tests/UserFacingTextConventionTests.cs",
+   "line": 132,
+   "title": "用語ガードが Services/Common の利用者向け文言を走査していない",
+   "severity": "low",
+   "foundBy": "tests"
+  },
+  {
+   "file": "ICCardManager/tests/ICCardManager.Tests/Services/CardLockManagerTests.cs",
+   "line": 487,
+   "title": "並行クリーンアップのテストが NotThrowAsync のみで結果を検証しない",
+   "severity": "low",
+   "foundBy": "tests"
+  }
+ ],
+ "areaSummaries": [
+  {
+   "area": "lending",
+   "summary": "lending 領域の状態遷移そのもの（30秒ルール、カード単位ロック、貸出中レコードと is_lent の対応、残高不足1行マージの会計計算）は健全で、逆処理が職員証タッチ待ち状態でも起きる仕様も MainViewModel 側と整合していた。残高不足マージの受入−払出＝残額差分も検算して一致を確認している。一方で、トランザクション境界の外側に副作用や後処理が漏れている箇所に実害のある欠陥が集中している。特に CreateUsageLedgersAsync の「同一日既存レコード統合」フィルタが繰越レコードを除外しておらず、年度途中導入カードの登録時に「○月から繰越」行が利用行へ上書き破壊されうる点（business-logic.md が繰り返し警告している罠そのもの）と、ExecuteWithRetryAsync のリトライラムダ内で result を累積している点が最も危険。加えて貸出・返却の例外がログに一切残らず、生の ex.Message が UI に露出するため、障害調査の起点も失われている。"
+  },
+  {
+   "area": "summary",
+   "summary": "SummaryGenerator は摘要生成ロジック本体（往復・乗継・循環・バス）については Issue #878/#985/#1579/#1580 の修正が積み重なっており、境界ケースの再帰・消費枠の扱いも読み取れる範囲では健全だった。一方で「摘要が生成できなかったとき string.Empty を返す」という契約が呼び出し側で一貫して守られておらず（LedgerSplitService / CsvImportService / LedgerDetailViewModel はガードするが LendingService と LedgerMergeService はガードしない）、片側だけ駅名が解決できた鉄道利用やチャージ＋ポイント還元の統合で摘要が空欄の台帳行が保存されうるのが最大の弱点。繰越まわりは Issue #1604 で Ledger.IsCarryover と IsMidYearCarryoverSummary の一元化が済んでいるが、LedgerOrderHelper が一元化から漏れており、SQL の LIKE 表現と合わせて判定が三重化したままである。GetMidYearCarryoverDate の年推定ヒューリスティックにも繰越月＝登録月で1年ずれる穴がある。"
+  },
+  {
+   "area": "reports",
+   "summary": "帳票領域（ReportDataBuilder / ReportRowBuilder / ReportService / ReportPreflightChecker / PrintService / ReportExportStatusService）を実コードとテストの両面から確認した。Issue #1494 で定めた「4月計＝当月受入＋前年度繰越」「5月以降の累計への CarryoverIncomeTotal/ExpenseTotal 加算」「○月から繰越の集計除外」「（貸出中）行の除外」「和暦変換」「4月の累計行省略・3月の次年度繰越」の各ルールは概ね実装・テストとも整合しており、テンプレート2種の選択も DepartmentType 経由で SummaryGenerator と一貫している。一方、残高フォールバックには4月だけにガードが入っていて5月以降に同じ考慮が無く、年度内に台帳が1件も無いカードで累計残額が0円になる実害のある欠陥が残っている（最重要）。加えて、既存シート再生成時に Excel の改ページ情報がクリアされず翌月以降のページ番号が飛ぶ問題、印刷プレビューで合計行が最終ページから溢れる行数域、OrganizationOptions の設定が帳票本体で半分しか反映されない問題を検出した。"
+  },
+  {
+   "area": "data-shared",
+   "summary": "共有 DB まわりの設計意図（セマフォ直列化、CAS ロック、疎通確認の上限時間、バックアップ健全性）はコメント・テストとも整備されているが、「単一 SQLiteConnection を LeaseConnectionAsync がセマフォ無しで共有する」という構造上の前提が守られていない箇所が複数残っている。特に起動シーケンスの fire-and-forget バックアップと CleanupOldData / VACUUM の並走、および CheckWritable の生 BEGIN IMMEDIATE〜ROLLBACK は、無言のデータ取り消し（操作ログ・バックアップ成功記録の消失）と当月 VACUUM の恒久スキップという実害に直結する。バックアップ側は破損した中間ファイルが有効世代として残りリストア候補になる点、接続 PRAGMA の適用が一度きりで失敗時に再適用されない点も、共有モード特有の障害時に効いてくる。BackupStaleWarningDays の「超えて」判定（&gt; と null 抑止）と共有モード判定・database_config.txt の扱いは仕様どおりで問題を見つけられなかった。"
+  },
+  {
+   "area": "repositories",
+   "summary": "repositories 領域（Data/Repositories/ 全 14 ファイルと Data/Migrations/ 全 11 ファイル）を精査した。SQL のパラメータ化は全箇所で徹底されており（IN 句の動的生成も含め文字列連結による値埋め込みは皆無）、日付 TEXT の範囲検索も AddDateRangeParameters に集約されて月末 23:59:59 の扱いが統一されている。論理削除フラグ（staff/ic_card の is_deleted）の WHERE 句漏れは見つからず、includeDeleted の分岐も一貫している。マイグレーションの Up() はすべて IF NOT EXISTS / AddColumnIfNotExists / INSERT OR IGNORE で冪等化されており、MigrationHelpers の引数検証も規約どおり。一方で、原子性の境界に穴が残っている点が最大の弱点で、とりわけ ReplaceDetailsAsync の非トランザクション経路は DELETE 確定後に別トランザクションで INSERT するため、実運用（履歴詳細の保存・CSV 明細インポート）で明細の全消失を招きうる。次いで、schema_migrations への素の INSERT による共有モード同時起動時の起動失敗、および「同一日内の順序は id で決まらない」という Issue #784/#1004 の前提が最新残高取得系のクエリにだけ適用されていない点が実害の大きい欠陥である。"
+  },
+  {
+   "area": "mainvm",
+   "summary": "MainViewModel は状態機械・履歴・警告・共有モード同期を1クラスに抱えており、正常系の遷移とタイマー制御自体は概ね整合している（StopTimeout/StartTimeout の対称性、Processing 中のタッチ無視、Dispatcher へのマーシャリングは適切）。一方で「例外が起きたときに状態が戻らない」経路と「警告コレクションの生存期間管理」に構造的な穴があり、いずれも実運用で恒久的な機能停止・警告消失として現れる。特に ProcessLend/ProcessReturn の後処理で例外が出ると CurrentState=Processing のまま復帰手段がなく、以後すべてのカードタッチが無反応になる点が最も重い。30秒ルールの逆処理が現在の操作者を無条件に上書きする点は台帳の操作者記録を誤らせるデータ整合性の問題。"
+  },
+  {
+   "area": "viewmodels",
+   "summary": "ViewModels 層（MainViewModel を除く18ファイル）を精読した。全体として BeginBusy スコープ、Issue #1383（IsBusy 確定後のダイアログ表示）、Issue #1614（ExceptionMessageFormatter 経由の文言化）といった既存規約はおおむね守られており、AdminDashboardViewModel の繰越除外判定・イベント購読解除・_isBulkUpdating/_isUpdatingFromCardSelection のガードにも取り違えは見つからなかった。一方で「DB へ書き戻す直前にモデルを部分的にしか組み立てていない」型の欠陥が2件あり、カード編集での繰越累計消失（CardManageViewModel）と Edit モード自動計算による残高破壊（LedgerRowEditViewModel）は月次帳票の金額へ直接波及するため優先度が高い。ほかに監査ログのファイルパス欠落、職員登録時のカード読取抑制の早期解除、ユーザーへ到達しない警告文言など、実装されているのに機能していない経路が複数残っている。"
+  },
+  {
+   "area": "common-infra",
+   "summary": "common-infra 領域（Common/ 43ファイル、Infrastructure/ 28ファイル、Models/、Dtos/、App.xaml.cs）を精査した。純粋関数群（WarekiConverter、FiscalYearHelper、ChartScale/ChartGeometryCalculator、ToastLayoutCalculator、FelicaHistoryBlockDecoder、FormulaInjectionSanitizer、FileNameSanitizer、IdmMasker、DiskSpaceHelper）は境界値・null・0除算・オーバーフローの扱いが丁寧で、ブラシリソースキーの実在確認・felicalib.dll のピン留めハッシュ実測一致・IDm の生ログ出力ゼロも確認でき、実害のある欠陥は見つからなかった。一方で、アプリ全体の骨格にあたる例外ハンドラ・ロガー・ウィンドウ制約に、単体テストでは捕まらない不具合が残っている。特に未観測 Task 例外ハンドラがファイナライザスレッドからモーダルダイアログを開く実装は、ファイナライザ停止または終了時のプロセス異常終了を招くため優先度が高い。次いで、ログの終了時ドレインが実際には機能していない点（Issue #1716 の調査を再び阻む）と、規約が明示的に禁じている最小幅の引き上げ（1366px 環境で画面外にはみ出す）を挙げる。"
+  },
+  {
+   "area": "views",
+   "summary": "Views 領域は全体として規約遵守度が高い。色値リテラルの直書き（`#RRGGBB`）は XAML 属性値に 1 件も無く、コードビハインドの色取得はすべて `Application.Current.TryFindResource` / `FindResource` 経由、`new SolidColorBrush(Color.FromRgb(...))` も皆無で、Views/Resources から参照される DynamicResource/StaticResource キーは全件が実在する（スクリプトで全 XAML を突合、未解決ゼロ）。UI 文言の「ICカード」単独表記も、ユーザーに見える文字列としては 0 件だった（残存は `Resources/generate_icon.py` のコメントのみ）。横方向 StackPanel と TextWrapping の罠（Issue #1687/#1688）も、新しい AdminDashboardDialog / ConnectionDiagnosticsDialog では DockPanel・Grid・WrapPanel を意識的に選んでおり対処済み。一方で、(1) 利用履歴詳細ダイアログが未保存変更の確認を「閉じる」ボタンにしか実装しておらずタイトルバーの ✕ で編集が黙って失われる（Views 配下に `Closing` ハンドラが 1 件も無い）、(2) IncompleteBusStopDialog だけが Issue #1614 で禁止された生の `ex.Message` 表示かつログ記録なし、(3) LedgerDetailDialog が AccessibilityStyles の色値をローカル辞書に複製、という 3 点は実害のある逸脱として残っている。加えて MainWindow の `async void` Closing によるウィンドウ位置保存の競合と、カード一覧行で Style の背景トリガーがローカル値に殺されている死んだ安全網を指摘した。"
+  },
+  {
+   "area": "other-services",
+   "summary": "CSVインポート/エクスポート、駅マスタ、操作ログ、接続診断、共有モード監視を中心に調査した。OperationLogger・ConnectionDiagnosticsService・BackupHealthService・WarningService・UpdateNotificationService・AdminDashboardService は例外処理・ConfigureAwait・文言品質とも規約に沿っており実害のある欠陥は見つからなかった。一方、CSVインポート境界には実害のある問題が集中している：文字コードが UTF-8 固定で日本語版 Excel が保存する Shift_JIS を無言で文字化けさせたまま DB に書き込むこと、カード/職員インポートがトランザクションで保護されているのに履歴・履歴詳細インポートだけ部分コミットを許し残高チェーンを破断させうること、詳細インポートで親Ledger更新の戻り値を検証していないこと。加えて職員番号の null/空文字比較漏れによる恒常的な誤「更新」判定、式インジェクション対策の往復でシングルクォートが DB に恒久混入する問題を確認した。"
+  },
+  {
+   "area": "async-threading",
+   "summary": "async/threading 領域は、UI スレッドガード（DbContext.ThrowIfOnUiThread）・Dispatcher マーシャリング・カードロックのクリーンアップ競合対策など、過去 Issue で個別に手当てされた形跡が濃く、Services 層の ConfigureAwait(false) 徹底や CardLockManager の TOCTOU 対策など良質な実装も多い。一方で「非同期の失敗をどこで観測するか」の設計が欠落しており、fire-and-forget（IDispatcherService の Func<Task> オーバーロード、_ = XxxAsync()、Dispatcher.InvokeAsync(async () => ...)）で投げられた例外が一切ログにも UI にも現れない経路がアプリの中核（カードタッチ処理・カード/職員登録）に残っている。特に ProcessLendAsync/ProcessReturnAsync が Processing 状態を try/finally で保護していないため、共有モードの一時的な DB 障害でアプリ全体が無反応に固着し、しかも原因がログに残らない。加えて DbContext の接続直列化が非同期経路（LeaseConnectionAsync）で成立しておらず、コード自身が危険と明記した「同一 SQLiteConnection 上の並列コマンド実行」がヘルスチェック・起動時バックアップと通常操作の間で実際に起こりうる状態にある。"
+  },
+  {
+   "area": "aggregation",
+   "summary": "ledger 集計の消費者（ReportDataBuilder / ReportRowBuilder / ReportPreflightChecker / AdminDashboardService / DashboardService / WarningService / CsvExportService / LedgerConsistencyChecker / IncompleteBusStopViewModel）を列挙して読み込んだ。帳票側（ReportDataBuilder・ReportRowBuilder・ReportPreflightChecker）と管理者ダッシュボードの SQL 集計（GetUsageStatsByCardAsync / GetMonthlyUsageByLenderAsync / GetMonthEndBalancesByCardAsync / GetBalancesBeforeAsync）は、繰越・新規購入・貸出中の除外／包含が目的別に正しく作り分けられており、月・年度帰属も ledger.date 基準で統一されている。一方で、Issue #1692 で SQL 側だけが修正され、同じダッシュボードが併用する GetAllLatestBalancesAsync 経路（最終利用日）が取り残されている点が最大の問題で、同一ダイアログ内で自己矛盾する値が出る。加えて、月別利用額グラフだけがカードの有効性フィルタを通らない、系列数と色数が一致せず「その他」が最上位系列と同色になる、といった消費者側の不整合と、摘要文字列を SummaryGenerator/OrganizationOptions を経由せず SQL・C# にハードコードしている箇所が残っている。"
+  },
+  {
+   "area": "resources",
+   "summary": "リソース管理の基本規律は概ね良好で、SQLiteCommand / DataReader は全て using で包まれ（非 using の CreateCommand・ExecuteReader はゼロ件）、ConnectionLease も try/finally で確実に解放されている。DispatcherTimer / System.Timers.Timer もすべて Stop + イベント解除 + Dispose の三点セットが揃い（SharedModeMonitor.Stop、FelicaCardReader.StopPollingTimer/StopHealthCheckTimer、MainViewModel.StopTimeout）、ダイアログのカードリーダー購読も Closed → Cleanup() で解除されている。一方でリスクは 2 か所に集中している。ひとつは DbContext.CheckWritable() で、SQLiteTransaction を使わず生 SQL の BEGIN IMMEDIATE/ROLLBACK を長寿命の共有接続上に直接発行しており、ROLLBACK 失敗時のトランザクション残留（＝共有モードで全PCの書込を止める）と、セマフォを取らない LeaseConnectionAsync 経由の並行書き込みを巻き込んで無言で取り消す危険がある。もうひとつは FileLoggerProvider.Dispose で、CompleteAdding より先に Cancel するためコメントが謳うフラッシュが機能せず終了時のログが失われる。"
+  },
+  {
+   "area": "tests",
+   "summary": "テスト領域（226 ファイル）は全体として質が高い。摘要文字列は原則 `SummaryGenerator` の生成結果を使い（`LedgerRepositoryAggregationTests`）、並列化回帰は「順序」ではなく実同時実行数で検出し（`AdminDashboardServiceTests` / `DashboardServiceTests` の ConcurrencyProbe）、規約テスト群（用語ガード・画面遷移図整合・ToastPosition・接続診断の網羅表明）はセルフテスト付きで空振りしない作りになっている。アサーション皆無のテストや `SummaryGenerator` 静的状態のコレクション漏れも見つからなかった。一方で、規約が後から禁止したアンチパターン（`CheckWritable` 失敗の LogDebug 痕跡）をテストが「正」として固定している箇所が 1 件あり、これは本番の障害調査可能性に直結する実害。加えて、繰越摘要判定が C# 側だけ組織設定に追従し SQL 側はリテラルのまま、という乖離をテストが検出できていない。残りはうるう日依存・固定待機依存の不安定テストと、ガードの走査範囲不足。"
+  }
+ ]
+}
