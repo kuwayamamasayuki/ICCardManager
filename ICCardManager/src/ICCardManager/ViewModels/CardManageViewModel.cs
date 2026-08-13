@@ -463,7 +463,7 @@ namespace ICCardManager.ViewModels
                     {
                         success = await _cardRepository.InsertAsync(card);
                     }
-                    catch (DuplicateCardNumberException)
+                    catch (DuplicateCardNumberException duplicate)
                     {
                         if (isAutoNumbered)
                         {
@@ -474,8 +474,9 @@ namespace ICCardManager.ViewModels
                         }
                         else
                         {
-                            // 手動指定の番号が重複
-                            StatusMessage = $"管理番号 {sanitizedCardNumber} は同じ種別で既に使用されています。別の番号を指定してください。";
+                            // 手動指定の番号が重複。文言は例外側（Issue #1757 で集約）を使い、
+                            // 登録・編集・CSVインポートで同じ案内になるようにする
+                            StatusMessage = duplicate.UserFriendlyMessage;
                             IsStatusError = true;
                             _registrationModeResult = null;
                             return;
@@ -629,7 +630,23 @@ namespace ICCardManager.ViewModels
                         CarryoverFiscalYear = beforeCard?.CarryoverFiscalYear
                     };
 
-                    var success = await _cardRepository.UpdateAsync(card);
+                    bool success;
+                    try
+                    {
+                        success = await _cardRepository.UpdateAsync(card);
+                    }
+                    catch (DuplicateCardNumberException duplicate)
+                    {
+                        // Issue #1757: 登録経路と同じ案内を出す。捕捉しないと未処理例外ハンドラー
+                        // 任せになり、「予期しないエラーが発生しました。／エラーコード: CARD001」の
+                        // モーダルダイアログが出る（AppException 継承前は SYS999）。原因は分かっても
+                        // 操作の文脈から切り離されるため、ステータス欄でその場に出す。
+                        // CancelEdit() は呼ばない（番号だけ直して再保存できるようにする）。
+                        StatusMessage = duplicate.UserFriendlyMessage;
+                        IsStatusError = true;
+                        return;
+                    }
+
                     if (success)
                     {
                         // 操作ログを記録

@@ -309,6 +309,9 @@ VALUES (@cardIdm, @cardType, @cardNumber, @note, 0, NULL, 0, NULL, NULL, @starti
         /// 既定値（1 / 0 / 0 / NULL）で紙出納簿移行カードの繰越累計・開始ページ番号が静かに消える。
         /// 「呼び出し元が引き継ぎ忘れないこと」に依存せず、UPDATE 文の対象列から外して構造的に防ぐ。
         /// </remarks>
+        /// <exception cref="DuplicateCardNumberException">
+        /// 同一種別で同一管理番号のカードが既に存在する場合（UNIQUE制約違反、Issue #1757）
+        /// </exception>
         private async Task<bool> UpdateAsyncInternal(IcCard card, SQLiteTransaction? transaction)
         {
             using var lease = await _dbContext.LeaseConnectionAsync();
@@ -325,13 +328,26 @@ WHERE card_idm = @cardIdm AND is_deleted = 0";
             command.Parameters.AddWithValue("@cardNumber", card.CardNumber);
             command.Parameters.AddWithValue("@note", (object)card.Note ?? DBNull.Value);
 
-            var result = await command.ExecuteNonQueryAsync();
-            if (result > 0 && transaction == null)
+            try
             {
-                // トランザクション外の場合のみキャッシュ無効化
-                InvalidateCardCache();
+                var result = await command.ExecuteNonQueryAsync();
+                if (result > 0 && transaction == null)
+                {
+                    // トランザクション外の場合のみキャッシュ無効化
+                    InvalidateCardCache();
+                }
+                return result > 0;
             }
-            return result > 0;
+            catch (SQLiteException ex) when (IsDuplicateCardNumberError(ex))
+            {
+                // Issue #1757: 登録経路（InsertAsyncInternal）と同じ例外へ変換する。
+                // 変換しないと生の SQLiteException が App.OnDispatcherUnhandledException まで抜け、
+                // ErrorDialogHelper.GetErrorInfo の既定分岐から
+                // 「予期しないエラーが発生しました。／エラーコード: SYS999」という
+                // 原因も回復手段も示さないダイアログになる。同じ「管理番号の重複」という
+                // 復旧可能な入力ミスが、登録では親切な案内、編集では原因不明のエラー、と非対称になる。
+                throw new DuplicateCardNumberException(card.CardType, card.CardNumber, ex);
+            }
         }
 
         /// <inheritdoc/>
@@ -400,6 +416,16 @@ WHERE card_idm = @cardIdm AND is_deleted = 0 AND is_lent = 0";
         /// <summary>
         /// カード復元の内部実装
         /// </summary>
+        /// <remarks>
+        /// Issue #1757: 部分ユニークインデックス <c>idx_card_type_number_active</c> は
+        /// <c>is_deleted = 0</c> の行だけを対象とするため、**復元も UNIQUE 制約に触れる経路**である。
+        /// 削除中に同じ種別・番号のカードが新規登録されていると（削除済みの番号は再利用できる仕様）、
+        /// <c>is_deleted</c> を 0 へ戻す本 UPDATE が制約違反になる。
+        /// </remarks>
+        /// <exception cref="DuplicateCardNumberException">
+        /// 復元しようとしたカードの種別＋管理番号を、有効な別のカードが既に使用している場合
+        /// （UNIQUE制約違反、Issue #1757）
+        /// </exception>
         private async Task<bool> RestoreAsyncInternal(string cardIdm, SQLiteTransaction? transaction)
         {
             using var lease = await _dbContext.LeaseConnectionAsync();
@@ -413,13 +439,60 @@ WHERE card_idm = @cardIdm AND is_deleted = 1";
 
             command.Parameters.AddWithValue("@cardIdm", cardIdm);
 
-            var result = await command.ExecuteNonQueryAsync();
-            if (result > 0 && transaction == null)
+            try
             {
-                // トランザクション外の場合のみキャッシュ無効化
-                InvalidateCardCache();
+                var result = await command.ExecuteNonQueryAsync();
+                if (result > 0 && transaction == null)
+                {
+                    // トランザクション外の場合のみキャッシュ無効化
+                    InvalidateCardCache();
+                }
+                return result > 0;
             }
-            return result > 0;
+            catch (SQLiteException ex) when (IsDuplicateCardNumberError(ex))
+            {
+                // Issue #1757: INSERT / UPDATE と同じ例外へ変換する。変換しないと生の
+                // SQLiteException が抜け、CSVインポートでは行番号の無い一般エラー、
+                // カード管理画面では「予期しないエラー（SYS999）」として案内される。
+                // 復元は引数に IDm しか持たないため、文言に載せる種別・番号は失敗時だけ読み直す。
+                var (cardType, cardNumber) =
+                    await ReadCardTypeAndNumberAsync(connection, transaction, cardIdm);
+                throw DuplicateCardNumberException.ForRestore(cardType, cardNumber, ex);
+            }
+        }
+
+        /// <summary>
+        /// UNIQUE制約違反の報告に載せるカード種別・管理番号をDBから直接読み取る（Issue #1757）
+        /// </summary>
+        /// <remarks>
+        /// 失敗経路でのみ呼ばれる。読み取り自体が失敗しても、本来の重複エラーの通知を
+        /// 二次例外で潰さないよう空文字へ倒す（`.claude/rules/development-conventions.md`
+        /// 「catch の中の後始末は、それ自体が失敗し得ることを前提に書く」）。
+        /// </remarks>
+        private static async Task<(string CardType, string CardNumber)> ReadCardTypeAndNumberAsync(
+            SQLiteConnection connection, SQLiteTransaction? transaction, string cardIdm)
+        {
+            try
+            {
+                using var command = connection.CreateCommand();
+                command.Transaction = transaction;
+                command.CommandText = "SELECT card_type, card_number FROM ic_card WHERE card_idm = @cardIdm";
+                command.Parameters.AddWithValue("@cardIdm", cardIdm);
+
+                using var reader = await command.ExecuteReaderAsync();
+                if (await reader.ReadAsync())
+                {
+                    return (
+                        reader.IsDBNull(0) ? string.Empty : reader.GetString(0),
+                        reader.IsDBNull(1) ? string.Empty : reader.GetString(1));
+                }
+            }
+            catch (SQLiteException)
+            {
+                // 付随情報が取れないだけ。重複エラー自体の通知は続行する
+            }
+
+            return (string.Empty, string.Empty);
         }
 
         /// <summary>

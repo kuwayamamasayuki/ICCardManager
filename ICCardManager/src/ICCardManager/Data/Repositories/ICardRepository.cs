@@ -50,11 +50,24 @@ namespace ICCardManager.Data.Repositories
         /// <summary>
         /// ICカードを登録
         /// </summary>
+        /// <remarks>
+        /// Issue #1757: カード種別＋管理番号の UNIQUE 制約（<c>idx_card_type_number_active</c>）に
+        /// 触れる 3 経路（登録・更新・復元）は、いずれも制約違反を
+        /// <see cref="DuplicateCardNumberException"/> へ変換して投げる。呼び出し元は
+        /// <c>bool</c> の戻り値だけでなく本例外も扱うこと（未捕捉のまま UI へ抜けると、
+        /// 操作の文脈から切り離されたモーダルダイアログになる）。
+        /// </remarks>
+        /// <exception cref="DuplicateCardNumberException">
+        /// 同一種別で同一管理番号の有効なカードが既に存在する場合
+        /// </exception>
         Task<bool> InsertAsync(IcCard card);
 
         /// <summary>
         /// ICカードを登録（トランザクション対応）
         /// </summary>
+        /// <exception cref="DuplicateCardNumberException">
+        /// 同一種別で同一管理番号の有効なカードが既に存在する場合（<see cref="InsertAsync(IcCard)"/> と同じ）
+        /// </exception>
         Task<bool> InsertAsync(IcCard card, SQLiteTransaction transaction);
 
         /// <summary>
@@ -75,6 +88,9 @@ namespace ICCardManager.Data.Repositories
         /// 「UPDATE の SET 句は『その経路で本当に編集する列』に限る」および
         /// <c>docs/design/05_クラス設計書.md</c> §5.5b を参照。
         /// </remarks>
+        /// <exception cref="DuplicateCardNumberException">
+        /// 変更後のカード種別＋管理番号を、有効な別のカードが既に使用している場合（Issue #1757）
+        /// </exception>
         Task<bool> UpdateAsync(IcCard card);
 
         /// <summary>
@@ -83,6 +99,9 @@ namespace ICCardManager.Data.Repositories
         /// <remarks>
         /// 更新対象列の範囲は <see cref="UpdateAsync(IcCard)"/> と同じ（Issue #1726）。
         /// </remarks>
+        /// <exception cref="DuplicateCardNumberException">
+        /// <see cref="UpdateAsync(IcCard)"/> と同じ（Issue #1757）
+        /// </exception>
         Task<bool> UpdateAsync(IcCard card, SQLiteTransaction transaction);
 
         /// <summary>
@@ -104,7 +123,16 @@ namespace ICCardManager.Data.Repositories
         /// <summary>
         /// 論理削除されたICカードを復元
         /// </summary>
+        /// <remarks>
+        /// Issue #1757: 削除済みカードの管理番号は再利用できる（部分ユニークインデックスは
+        /// <c>is_deleted = 0</c> のみ対象）ため、削除中に同じ種別・番号のカードが登録されていると
+        /// 復元が UNIQUE 制約違反になる。番号を指定し直せない経路のため、例外の
+        /// <c>UserFriendlyMessage</c> は「使用中カードの番号を変更してから復元する」案内になる。
+        /// </remarks>
         /// <param name="cardIdm">ICカードIDm</param>
+        /// <exception cref="DuplicateCardNumberException">
+        /// 復元対象の種別＋管理番号を、有効な別のカードが既に使用している場合
+        /// </exception>
         Task<bool> RestoreAsync(string cardIdm);
 
         /// <summary>
@@ -112,6 +140,9 @@ namespace ICCardManager.Data.Repositories
         /// </summary>
         /// <param name="cardIdm">ICカードIDm</param>
         /// <param name="transaction">SQLiteトランザクション</param>
+        /// <exception cref="DuplicateCardNumberException">
+        /// <see cref="RestoreAsync(string)"/> と同じ（Issue #1757）
+        /// </exception>
         Task<bool> RestoreAsync(string cardIdm, SQLiteTransaction transaction);
 
         /// <summary>

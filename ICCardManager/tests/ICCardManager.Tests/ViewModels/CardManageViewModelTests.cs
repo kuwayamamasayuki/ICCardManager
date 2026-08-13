@@ -439,6 +439,65 @@ public class CardManageViewModelTests
     }
 
     /// <summary>
+    /// Issue #1757: 編集保存で管理番号が重複したとき、致命的エラーにせず
+    /// 行動指示付きのメッセージを表示すること
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 修正前は <c>CardRepository.UpdateAsyncInternal</c> に UNIQUE 制約違反の catch が無く、
+    /// 生の <c>SQLiteException</c> が <c>App.OnDispatcherUnhandledException</c> まで抜けて
+    /// 「予期しないエラーが発生しました。／エラーコード: SYS999」という、原因も回復手段も
+    /// 示さないモーダルダイアログになっていた。
+    /// 登録経路（<c>SaveAsync_NewCard</c>）は同じ操作を親切に案内するため、非対称だった。
+    /// </para>
+    /// <para>
+    /// 文言は登録経路と同一にし、`.claude/rules/error-messages.md` の3要素
+    /// （何が＝管理番号、なぜ＝同じ種別で使用中、どうすれば＝別の番号を指定）を満たす。
+    /// あわせて<b>編集モードが維持される</b>ことを表明する。ここで <c>CancelEdit()</c> が
+    /// 走ると入力内容が消え、ユーザーは番号だけ直して再保存できない。
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task SaveAsync_ExistingCard_WithDuplicateCardNumber_ShouldShowActionableError()
+    {
+        // Arrange
+        var existingCard = new CardDto
+        {
+            CardIdm = "0102030405060708",
+            CardType = "nimoca",
+            CardNumber = "N-002"
+        };
+        _viewModel.SelectedCard = existingCard;
+        _viewModel.StartEdit();
+        _viewModel.EditCardNumber = "N-001"; // 同一種別の別カードが使用中の番号
+
+        _cardRepositoryMock.Setup(r => r.GetByIdmAsync("0102030405060708", false)).ReturnsAsync(new IcCard
+        {
+            CardIdm = "0102030405060708",
+            CardType = "nimoca",
+            CardNumber = "N-002"
+        });
+        _cardRepositoryMock.Setup(r => r.UpdateAsync(It.IsAny<IcCard>()))
+            .ThrowsAsync(new DuplicateCardNumberException(
+                "nimoca", "N-001", new InvalidOperationException("UNIQUE constraint failed")));
+
+        // Act
+        var act = async () => await _viewModel.SaveAsync();
+
+        // Assert: 例外が ViewModel の外へ漏れない（漏れると致命的エラーダイアログになる）
+        await act.Should().NotThrowAsync();
+
+        _viewModel.IsStatusError.Should().BeTrue();
+        _viewModel.StatusMessage.Should().Contain("N-001");
+        _viewModel.StatusMessage.Should().Contain("既に使用されています");
+        _viewModel.StatusMessage.Should().EndWith("別の番号を指定してください。");
+
+        // 入力内容を失わせない（番号だけ直して再保存できること）
+        _viewModel.IsEditing.Should().BeTrue();
+        _viewModel.EditCardNumber.Should().Be("N-001");
+    }
+
+    /// <summary>
     /// Issue #1726: 編集保存時、この画面で編集できない列がすべて DB の最新値から
     /// 引き継がれること（操作ログに虚偽の変更を残さない）
     /// </summary>

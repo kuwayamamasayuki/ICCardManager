@@ -160,22 +160,39 @@ namespace ICCardManager.Services
                 foreach (var (lineNumber, card, isUpdate, isRestore) in validRecords)
                 {
                     bool success;
-                    if (isRestore)
+                    try
                     {
-                        // 削除済みカードを復元してから更新（トランザクション内）
-                        success = await _cardRepository.RestoreAsync(card.CardIdm, scope.Transaction).ConfigureAwait(false);
-                        if (success)
+                        if (isRestore)
+                        {
+                            // 削除済みカードを復元してから更新（トランザクション内）
+                            success = await _cardRepository.RestoreAsync(card.CardIdm, scope.Transaction).ConfigureAwait(false);
+                            if (success)
+                            {
+                                success = await _cardRepository.UpdateAsync(card, scope.Transaction).ConfigureAwait(false);
+                            }
+                        }
+                        else if (isUpdate)
                         {
                             success = await _cardRepository.UpdateAsync(card, scope.Transaction).ConfigureAwait(false);
                         }
+                        else
+                        {
+                            success = await _cardRepository.InsertAsync(card, scope.Transaction).ConfigureAwait(false);
+                        }
                     }
-                    else if (isUpdate)
+                    catch (DuplicateCardNumberException duplicate)
                     {
-                        success = await _cardRepository.UpdateAsync(card, scope.Transaction).ConfigureAwait(false);
-                    }
-                    else
-                    {
-                        success = await _cardRepository.InsertAsync(card, scope.Transaction).ConfigureAwait(false);
+                        // Issue #1757: 管理番号の重複は CSV の内容に起因する復旧可能な入力ミス。
+                        // 他のバリデーションエラーと同じ「行番号 ＋ 行動指示付きの文言」で報告する。
+                        // 捕捉しないと下の catch (Exception) から再スローされ、UI には
+                        // 何行目が悪いか分からないまま結果全体のエラーとして出る。
+                        errors.Add(new CsvImportError
+                        {
+                            LineNumber = lineNumber,
+                            Message = duplicate.UserFriendlyMessage,
+                            Data = card.CardIdm
+                        });
+                        continue;
                     }
 
                     if (success)
