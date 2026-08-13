@@ -45,10 +45,10 @@ paths:
 
 | 種別 | メソッド |
 |------|---------|
-| 汎用（物品出納簿の様式） | `GetLendingSummary` / 繰越各種 / `GetMonthlySummary` / `GetCumulativeSummary` / `GetChargeSummary` / `GetRefundSummary` / `IsMidYearCarryoverSummary` |
+| 汎用（物品出納簿の様式） | `GetLendingSummary` / 繰越各種 / `GetMonthlySummary` / `GetCumulativeSummary` / `GetChargeSummary` / `GetRefundSummary` / `IsMidYearCarryoverSummary` / `GetMidYearCarryoverLikePattern`（SQL 用 LIKE パターン導出、Issue #1749） |
 | 交通系固有 | 駅名からの摘要組み立て / バス混在表記 / 往復・乗継・循環判定 / `GetInsufficientBalanceNote` |
 
-- 汎用メソッドは汎用コア（`ReportDataBuilder` / `Models/Ledger` 等）から呼んでよい。実際 22 ファイルから使われている
+- 汎用メソッドは汎用コア（`ReportDataBuilder` / `Models/Ledger` 等）から呼んでよい。実際 22 ファイルから使われている。ただし **`Data/` 配下からの参照は規約テストが完全修飾呼び出し単位で許可管理する**（現在は `GetMidYearCarryoverLikePattern` のみ。設計書 05 §2a.5、Issue #1749）
 - **新しいメソッドを追加するときは、どちらの群に属するかを XML doc コメントに書く**。書かないと次に読む人が同じ調査をやり直す
 - 固有メソッドを汎用コアから呼びたくなったら、それは汎用コアに固有知識を持ち込もうとしている合図。1 段外側で値を組み立ててから渡す
 
