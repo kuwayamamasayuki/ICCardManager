@@ -253,6 +253,29 @@ public class BackupServiceAtomicWriteTests : IDisposable
     }
 
     /// <summary>
+    /// バックアップが失敗したときも古い一時ファイルを回収することを確認
+    /// </summary>
+    /// <remarks>
+    /// 回収を成功時にしか行わないと、UNC 断でコピーが失敗し続ける環境
+    /// （＝まさに残骸が生まれる環境）でだけ回収が動かず、DB 本体大のファイルが
+    /// 起動のたびに積み上がる。
+    /// </remarks>
+    [Fact]
+    public async Task ExecuteAutoBackupAsync_バックアップ失敗時も古い一時ファイルを回収すること()
+    {
+        // Arrange
+        var stale = CreateTempFile(DateTime.Now.AddHours(-AppConstants.BackupTempFileStaleHours - 1));
+        var service = CreateFailingService();
+
+        // Act
+        var result = await service.ExecuteAutoBackupAsync();
+
+        // Assert
+        result.Should().BeNull("コピーが中断されたためバックアップは失敗すること");
+        File.Exists(stale).Should().BeFalse("失敗時も回収は行われること");
+    }
+
+    /// <summary>
     /// 書き込み中の可能性がある一時ファイルを削除しないことを確認
     /// </summary>
     /// <remarks>
@@ -270,6 +293,88 @@ public class BackupServiceAtomicWriteTests : IDisposable
 
         // Assert
         File.Exists(inProgress).Should().BeTrue();
+    }
+
+    #endregion
+
+    #region 後片付けの失敗をバックアップの成否に混ぜない
+
+    /// <summary>
+    /// 世代削除に失敗してもバックアップを成功として扱い、成功日時を記録することを確認
+    /// </summary>
+    /// <remarks>
+    /// 最終名へのリネームが済んだ時点でバックアップは確定している。そのあとの後片付けの
+    /// 失敗を成否判定に混ぜると `last_backup_success_at` が更新されず、実際には書けているのに
+    /// 7 日後に `BackupStale` 警告が出る（`.claude/rules/development-conventions.md`
+    /// 「コミット確定後の後処理を、成否の判定に巻き込まない」）。
+    /// </remarks>
+    [Fact]
+    public async Task ExecuteAutoBackupAsync_世代削除の失敗をバックアップの失敗にしないこと()
+    {
+        // Arrange
+        var service = new CleanupFailingBackupService(_dbContext, _settingsRepositoryMock.Object);
+
+        // Act
+        var result = await service.ExecuteAutoBackupAsync();
+
+        // Assert
+        result.Should().NotBeNull("バックアップファイルは最終名で確定しているため成功として扱うこと");
+        File.Exists(result!).Should().BeTrue();
+        ListBackupGenerations().Should().ContainSingle().Which.Should().Be(result);
+
+        _settingsRepositoryMock.Verify(
+            x => x.SetAsync(SettingsRepository.KeyLastBackupSuccessAt, It.IsAny<string>()),
+            Times.Once,
+            "後片付けの失敗で成功日時の記録まで飛ばしてはならない");
+    }
+
+    #endregion
+
+    #region ジャーナルファイルの後始末
+
+    /// <summary>
+    /// コピー失敗時に一時ファイルのロールバックジャーナルも削除することを確認
+    /// </summary>
+    /// <remarks>
+    /// ジャーナルの名前は `.tmp` で終わらないため回収処理の対象外。ここで消さないと誰も消さない。
+    /// </remarks>
+    [Fact]
+    public void CreateBackup_コピー失敗時に一時ファイルのジャーナルを残さないこと()
+    {
+        // Arrange
+        var service = CreateFailingService();
+        var backupPath = Path.Combine(_backupDirectory, "backup_20260813_090000.db");
+
+        // Act
+        service.CreateBackup(backupPath);
+
+        // Assert
+        service.LastCopyDestination.Should().NotBeNull();
+        File.Exists(service.LastCopyDestination + "-journal").Should().BeFalse();
+        ListJournalFiles().Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// コピー成功時にも一時ファイルのロールバックジャーナルを残さないことを確認
+    /// </summary>
+    /// <remarks>
+    /// 一時ファイル本体は最終名へリネームされるが、取り残されたジャーナルは
+    /// 名前が `.tmp` で終わらないため回収処理では拾えない。
+    /// </remarks>
+    [Fact]
+    public void CreateBackup_コピー成功時にも一時ファイルのジャーナルを残さないこと()
+    {
+        // Arrange
+        var service = new JournalLeavingBackupService(_dbContext, _settingsRepositoryMock.Object);
+        var backupPath = Path.Combine(_backupDirectory, "backup_20260813_090000.db");
+
+        // Act
+        var result = service.CreateBackup(backupPath);
+
+        // Assert
+        result.Should().BeTrue();
+        File.Exists(backupPath).Should().BeTrue();
+        ListJournalFiles().Should().BeEmpty();
     }
 
     #endregion
@@ -369,6 +474,13 @@ public class BackupServiceAtomicWriteTests : IDisposable
             .ToList();
     }
 
+    private List<string> ListJournalFiles()
+    {
+        return Directory.GetFiles(_backupDirectory, "*", SearchOption.TopDirectoryOnly)
+            .Where(f => f.EndsWith("-journal", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+    }
+
     private string CreateTempFile(DateTime lastWriteTime)
     {
         var path = Path.Combine(
@@ -428,7 +540,49 @@ public class BackupServiceAtomicWriteTests : IDisposable
             base.CopyDatabaseTo(destinationPath);
             Truncate(destinationPath, _truncateTo);
 
+            // コピー先の接続が異常終了してロールバックジャーナルが取り残された状態も併せて再現する
+            File.WriteAllText(destinationPath + "-journal", "orphaned journal");
+
             throw new IOException("ネットワーク共有への書き込みが中断されました");
+        }
+    }
+
+    /// <summary>
+    /// コピーは成功するが、ロールバックジャーナルが取り残された状況を再現するテスト用サービス
+    /// </summary>
+    private sealed class JournalLeavingBackupService : BackupService
+    {
+        public JournalLeavingBackupService(DbContext dbContext, ISettingsRepository settingsRepository)
+            : base(dbContext, settingsRepository, NullLogger<BackupService>.Instance)
+        {
+        }
+
+        internal override void CopyDatabaseTo(string destinationPath)
+        {
+            base.CopyDatabaseTo(destinationPath);
+            File.WriteAllText(destinationPath + "-journal", "orphaned journal");
+        }
+    }
+
+    /// <summary>
+    /// バックアップ自体は成功するが、後片付け（世代削除）が失敗する状況を再現するテスト用サービス
+    /// </summary>
+    /// <remarks>
+    /// 実機では共有フォルダーの切断・権限エラーで <c>Directory.GetFiles</c> が失敗する。
+    /// 非同期の失敗（<c>Task.Run</c> 内の例外）と同じ形にするため、同期 throw ではなく
+    /// 失敗済みの <see cref="Task"/> を返す。
+    /// </remarks>
+    private sealed class CleanupFailingBackupService : BackupService
+    {
+        public CleanupFailingBackupService(DbContext dbContext, ISettingsRepository settingsRepository)
+            : base(dbContext, settingsRepository, NullLogger<BackupService>.Instance)
+        {
+        }
+
+        internal override Task CleanupOldBackupsAsync(string backupPath)
+        {
+            return Task.FromException(
+                new IOException("ネットワーク共有からバックアップ一覧を取得できませんでした"));
         }
     }
 

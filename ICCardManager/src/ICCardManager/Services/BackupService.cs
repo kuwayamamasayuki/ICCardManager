@@ -49,6 +49,14 @@ namespace ICCardManager.Services
         internal const string BackupTempFileExtension = ".tmp";
 
         /// <summary>
+        /// 一時ファイル名に含めるランダム識別子の文字数（Issue #1748）
+        /// </summary>
+        /// <remarks>
+        /// 短くする理由は <see cref="BackupDatabaseTo"/> の remarks を参照（パス長上限への配慮）。
+        /// </remarks>
+        internal const int TempFileTokenLength = 8;
+
+        /// <summary>
         /// SQLite データベースファイルのヘッダ長（バイト）
         /// </summary>
         private const int SqliteHeaderLength = 100;
@@ -98,12 +106,43 @@ namespace ICCardManager.Services
                 // ConfigureAwait(false) があっても UI スレッドに留まる。
                 // LeaseConnection() の UI スレッドガード (#1281) に抵触しないよう、
                 // BackupDatabaseTo を Task.Run でバックグラウンドにオフロードする。
-                await Task.Run(() => BackupDatabaseTo(backupFilePath)).ConfigureAwait(false);
+                //
+                // Issue #1748: 中断されたバックアップの一時ファイルの回収は、
+                // バックアップの成否によらず finally で実行する。成功時にしか掃除しないと、
+                // UNC 断でコピー／差し替えが失敗し続ける環境（＝残骸が生まれる環境）でだけ
+                // 回収が動かず、DB 本体大のファイルが起動のたびに積み上がる。
+                // CleanupStaleTempFiles は内部で例外を握りつぶすため、finally に置いても
+                // 本来の失敗要因を置き換えない（「catch の中の後始末」と同じ理由）。
+                await Task.Run(() =>
+                {
+                    try
+                    {
+                        BackupDatabaseTo(backupFilePath);
+                    }
+                    finally
+                    {
+                        CleanupStaleTempFiles(backupPath);
+                    }
+                }).ConfigureAwait(false);
 
                 _logger.LogInformation("バックアップを作成しました: {Path}", backupFilePath);
 
                 // 古いバックアップを削除
-                await CleanupOldBackupsAsync(backupPath).ConfigureAwait(false);
+                // Issue #1748: ここから先はバックアップファイルが最終名で確定済み。
+                // 後片付け（世代削除）の失敗を「バックアップの失敗」に混ぜてはならない
+                // （混ぜると RecordBackupSuccessAsync まで飛ばされ、実際には成功しているのに
+                // last_backup_success_at が更新されず BackupStale 警告が出る）。
+                // .claude/rules/development-conventions.md「コミット確定後の後処理を、成否の判定に巻き込まない」
+                try
+                {
+                    await CleanupOldBackupsAsync(backupPath).ConfigureAwait(false);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex,
+                        "古いバックアップの整理に失敗しました（バックアップ自体は成功しています）: {Path}",
+                        backupPath);
+                }
 
                 // Issue #1689: 成功日時と実施PC名を記録する。
                 // 呼び出し側（StartupTaskRunner）は戻り値をログにも UI にも出さないため、
@@ -513,13 +552,24 @@ namespace ICCardManager.Services
         /// 「最終名で存在する＝コピーが完了している」が構造的に保証される。
         /// </para>
         /// <para>
-        /// 一時ファイル名には GUID を含める。共有モードでは最大 20 台が同じフォルダーへ書き込むため、
-        /// 秒単位のタイムスタンプが衝突すると複数台が同一の一時ファイルを開いて互いのコピーを壊し得る。
+        /// 一時ファイル名にはランダムな識別子を含める。共有モードでは最大 20 台が同じフォルダーへ
+        /// 書き込むため、秒単位のタイムスタンプが衝突すると複数台が同一の一時ファイルを開いて
+        /// 互いのコピーを壊し得る。
+        /// </para>
+        /// <para>
+        /// 識別子は GUID そのものではなく先頭 <see cref="TempFileTokenLength"/> 文字を使う。
+        /// 一時ファイル名は最終名より長くなるため、その分だけ Windows のパス長上限（260 文字）に
+        /// 早く到達する。<see cref="PathValidator"/> が検証するのは**フォルダーのパス長**であり、
+        /// 検証を通ったフォルダーでも一時ファイルのフルパスが上限を超えると
+        /// <see cref="PathTooLongException"/> でバックアップ全体が失敗する。
+        /// 32 文字だと最終名より 37 文字長くなるが、8 文字なら 13 文字に収まる。
+        /// 衝突確率は 20 台が同時に引いても 10 億分の 1 以下で、目的（同時書き込みの回避）には十分。
         /// </para>
         /// </remarks>
         private void BackupDatabaseTo(string destinationPath)
         {
-            var tempPath = $"{destinationPath}.{Guid.NewGuid():N}{BackupTempFileExtension}";
+            var token = Guid.NewGuid().ToString("N").Substring(0, TempFileTokenLength);
+            var tempPath = $"{destinationPath}.{token}{BackupTempFileExtension}";
 
             try
             {
@@ -531,6 +581,14 @@ namespace ICCardManager.Services
                 // （.claude/rules/development-conventions.md「catch の中の後始末」参照）。
                 TryDeleteFile(tempPath, "中断したバックアップの一時ファイル");
                 throw;
+            }
+            finally
+            {
+                // コピー先の接続が異常終了するとロールバックジャーナル（<一時ファイル>-journal）が残る。
+                // 回収処理は拡張子 .tmp のファイルしか見ないため、ここで消さないと誰も消さない。
+                // 成功時にも実行するのは、リネーム後に取り残されたジャーナルを拾う手段が
+                // どこにも無いため（一時ファイル本体と違い、名前が .tmp で終わらない）。
+                CleanupJournalFiles(tempPath);
             }
 
             // ここまで来たらコピーは完了している。最終名へ差し替える。
@@ -792,15 +850,20 @@ namespace ICCardManager.Services
         /// <summary>
         /// 古いバックアップを削除
         /// </summary>
-        private Task CleanupOldBackupsAsync(string backupPath)
+        /// <remarks>
+        /// Issue #1748: 共有フォルダーの切断・権限エラーで列挙自体が失敗し得る。その失敗を
+        /// 「バックアップの失敗」に混ぜてはならない（→ <see cref="ExecuteAutoBackupAsync"/>）。
+        /// その分岐は実機でしか起きないため、単体テストが差し替えられるよう
+        /// <c>internal virtual</c> にしている（<see cref="CopyDatabaseTo"/> と同じ理由）。
+        /// </remarks>
+        /// <param name="backupPath">バックアップ保存先フォルダー</param>
+        internal virtual Task CleanupOldBackupsAsync(string backupPath)
         {
             return Task.Run(() =>
             {
-                // Issue #1748: 中断されたバックアップの残骸を先に掃除する。
-                // 一時ファイルは世代の列挙対象外なので世代数には影響しないが、
-                // DB 本体と同じサイズのため放置すると保存先を圧迫する。
-                CleanupStaleTempFiles(backupPath);
-
+                // Issue #1748: 中断されたバックアップの残骸の掃除は
+                // ExecuteAutoBackupAsync 側（コピーの成否によらない finally）が担う。
+                // 一時ファイルは世代の列挙対象外なので、ここでの世代数には影響しない。
                 var backupFiles = EnumerateBackupFiles(backupPath);
 
                 // 保持世代数を超えるファイルを削除
@@ -851,13 +914,33 @@ namespace ICCardManager.Services
         /// <see cref="AppConstants.BackupTempFileStaleHours"/> 時間以上更新されていないものだけを
         /// 対象にするのは、共有モードで**他 PC が書き込み中**の一時ファイルを消さないため。
         /// </para>
+        /// <para>
+        /// 回収は最善努力であり、**本メソッドは例外を投げない**。呼び出し元（バックアップ本体の
+        /// <c>finally</c>）で例外を漏らすと、本来の失敗要因を置き換えたり、書き込み済みの
+        /// バックアップを「失敗」に転じさせて成功日時の記録まで飛ばしてしまうため。
+        /// </para>
         /// </remarks>
         /// <param name="backupPath">バックアップ保存先フォルダー</param>
         private void CleanupStaleTempFiles(string backupPath)
         {
             var threshold = DateTime.Now.AddHours(-AppConstants.BackupTempFileStaleHours);
 
-            foreach (var file in EnumerateBackupTempFiles(backupPath))
+            List<FileInfo> tempFiles;
+            try
+            {
+                tempFiles = EnumerateBackupTempFiles(backupPath);
+            }
+            catch (Exception ex)
+            {
+                // 共有フォルダーの切断・権限エラー等で列挙自体が失敗し得る。
+                // 次回のバックアップで回収されるため、ここでは記録のみ。
+                _logger.LogWarning(ex,
+                    "中断したバックアップの一時ファイルの列挙に失敗しました: {Path}",
+                    backupPath);
+                return;
+            }
+
+            foreach (var file in tempFiles)
             {
                 if (file.LastWriteTime >= threshold)
                 {
