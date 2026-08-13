@@ -85,4 +85,15 @@ public class SummaryGeneratorMidYearCarryoverLikePatternTests : IDisposable
 
         SummaryGenerator.GetMidYearCarryoverLikePattern().Should().Be("%月から繰越");
     }
+
+    [Fact]
+    public void GetMidYearCarryoverLikePattern_null書式では既定パターンへフォールバックすること()
+    {
+        // 設定バインドで null が入っても例外を漏らさないこと。本メソッドは全 ledger クエリの
+        // 構築で呼ばれるため、ArgumentNullException が漏れると履歴一覧・集計が全滅する
+        // （FormatException だけを catch していた初版の回帰ガード、Issue #1749 レビュー指摘）
+        Configure(null!);
+
+        SummaryGenerator.GetMidYearCarryoverLikePattern().Should().Be("%月から繰越");
+    }
 }

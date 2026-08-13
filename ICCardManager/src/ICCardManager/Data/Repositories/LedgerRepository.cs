@@ -43,7 +43,7 @@ namespace ICCardManager.Data.Repositories
 FROM ledger
 {whereClause}
 ORDER BY DATE(date) ASC,
-  CASE WHEN summary = '新規購入' OR summary LIKE @midYearCarryoverPattern ESCAPE '\' THEN 0 ELSE 1 END ASC,
+  {CarryoverFirstSortKey()},
   id ASC";
 
             AddMidYearCarryoverParameter(command);
@@ -807,6 +807,19 @@ ORDER BY l.card_idm ASC, l.date ASC, l.id ASC";
                 "@midYearCarryoverPattern", SummaryGenerator.GetMidYearCarryoverLikePattern());
         }
 
+        /// <summary>
+        /// 「新規購入・繰越レコードを同日の先頭に固定する」ORDER BY のソートキー（Issue #590）。
+        /// </summary>
+        /// <remarks>
+        /// <see cref="ExcludeCarryoverCondition"/> と同じ判定を肯定形で使う。3 クエリ
+        /// （<c>GetByDateRangeAsync</c> / <c>GetPagedAsync</c> の CTE 内・外側）に同一の
+        /// CASE 式を書き写していた重複を 1 か所へ集約（Issue #1749 レビュー指摘）。
+        /// 本キーを含むクエリも <see cref="AddMidYearCarryoverParameter"/> を必ず併用すること。
+        /// </remarks>
+        /// <param name="columnPrefix">テーブル別名の接頭辞（例: <c>"l."</c>）。省略時はなし</param>
+        private static string CarryoverFirstSortKey(string columnPrefix = "") =>
+            $"CASE WHEN {columnPrefix}summary = '新規購入' OR {columnPrefix}summary LIKE @midYearCarryoverPattern ESCAPE '\\' THEN 0 ELSE 1 END ASC";
+
         /// <inheritdoc/>
         public async Task<Dictionary<string, DateTime>> GetAllLastUsageDatesAsync()
         {
@@ -1124,7 +1137,7 @@ FROM ledger
     FROM ledger
     {whereClause}
     ORDER BY DATE(date) ASC,
-        CASE WHEN summary = '新規購入' OR summary LIKE @midYearCarryoverPattern ESCAPE '\' THEN 0 ELSE 1 END ASC,
+        {CarryoverFirstSortKey()},
         id ASC
     LIMIT @pageSize OFFSET @offset
 )
@@ -1139,7 +1152,7 @@ LEFT JOIN (
     GROUP BY ledger_id
 ) d ON d.ledger_id = l.id
 ORDER BY DATE(l.date) ASC,
-  CASE WHEN l.summary = '新規購入' OR l.summary LIKE @midYearCarryoverPattern ESCAPE '\' THEN 0 ELSE 1 END ASC,
+  {CarryoverFirstSortKey("l.")},
   l.id ASC";
 
             // CTE 内と外側 ORDER BY の 2 箇所が同じ名前付きパラメータを参照する（バインドは 1 回でよい）

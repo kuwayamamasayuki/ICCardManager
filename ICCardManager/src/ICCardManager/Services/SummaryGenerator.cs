@@ -1176,7 +1176,9 @@ namespace ICCardManager.Services
             catch (ArgumentException)
             {
                 // 不正な正規表現の場合はデフォルトパターンにフォールバック
-                return Regex.IsMatch(summary, @"^(1[0-2]|[1-9])月から繰越$");
+                // （リテラルを直書きせず SummaryTextOptions の既定値を単一の真実源とする。
+                //   GetMidYearCarryoverLikePattern のフォールバックと同じ流儀）
+                return Regex.IsMatch(summary, new SummaryTextOptions().MidYearCarryoverPattern);
             }
         }
 
@@ -1190,14 +1192,19 @@ namespace ICCardManager.Services
         /// SQLite の SQL では正規表現が使えないため、生成書式 <c>MidYearCarryoverFormat</c> の
         /// 月プレースホルダー <c>{0}</c> を <c>%</c> に置き換えた LIKE パターンで近似する。
         /// 既定書式では従来 SQL にハードコードされていた <c>'%月から繰越'</c> と一致する。
-        /// 近似のため「13月から繰越」のような範囲外の月にも一致するが、生成側
+        /// 近似のため「13月から繰越」のような範囲外の月や「備考 4月から繰越」のような
+        /// 接頭辞付きにも一致する（先頭 <c>%</c> は月数字だけでなく任意の接頭辞を許す）。生成側
         /// （<see cref="GetMidYearCarryoverSummary"/>）は 1〜12 月しか保存しないため
-        /// 実データでは乖離しない（従来のハードコードと同じ近似度）。
+        /// 実データでは乖離しない（従来のハードコードと同じ近似度）。CSV インポート等で
+        /// この形の摘要を持ち込むと、SQL（一致）と C# 正規表現（不一致）で判定が分かれる点に注意。
         /// </para>
         /// <para>
         /// 書式リテラル部の LIKE メタ文字（<c>%</c> <c>_</c> <c>\</c>）はバックスラッシュでエスケープする。
-        /// 不正な書式（<c>string.Format</c> が失敗する）は既定書式へフォールバックする
-        /// （<see cref="IsMidYearCarryoverSummary"/> の不正正規表現フォールバックと同じ方針）。
+        /// 不正な書式（<c>string.Format</c> が <see cref="FormatException"/> で失敗する、
+        /// または書式が null で <see cref="ArgumentNullException"/> になる）は既定書式へ
+        /// フォールバックする（<see cref="IsMidYearCarryoverSummary"/> の不正正規表現
+        /// フォールバックと同じ方針。本メソッドは全 ledger クエリの構築で呼ばれるため、
+        /// 設定不備で照会系が全滅しないことを優先する）。
         /// </para>
         /// <para>
         /// 汎用/固有の別: 汎用（物品出納簿の様式）。<see cref="IsMidYearCarryoverSummary"/> と同群。
@@ -1214,9 +1221,12 @@ namespace ICCardManager.Services
             {
                 formatted = string.Format(_options.SummaryText.MidYearCarryoverFormat, placeholder);
             }
-            catch (FormatException)
+            catch (Exception ex) when (ex is FormatException or ArgumentNullException)
             {
-                // 不正な書式は既定書式へフォールバック（既定値は SummaryTextOptions と同期）
+                // 不正な書式（FormatException）／null 書式（ArgumentNullException）は
+                // 既定書式へフォールバック（既定値は SummaryTextOptions と同期）。
+                // FormatException だけを catch すると、設定バインドで null が入った場合に
+                // ArgumentNullException が漏れて全 ledger クエリが失敗する（Issue #1749 レビュー指摘）
                 formatted = string.Format(new SummaryTextOptions().MidYearCarryoverFormat, placeholder);
             }
 

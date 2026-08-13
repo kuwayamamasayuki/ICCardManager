@@ -116,7 +116,8 @@ namespace ICCardManager.Data.Repositories
         /// <remarks>
         /// 「利用実績」の定義は稼働状況の集計（<see cref="GetUsageStatsByCardAsync"/>）と同じ:
         /// 貸出中プレースホルダ（<c>is_lent_record = 1</c>）と繰越レコード
-        /// （「新規購入」「○月から繰越」）は利用実績ではないため除外する。
+        /// （「新規購入」および組織設定 <c>MidYearCarryoverFormat</c> に従う繰越摘要。
+        /// 既定書式では「○月から繰越」、Issue #1749）は利用実績ではないため除外する。
         /// 利用実績が 1 件も無いカードは辞書に含まれない（最終利用日は空欄扱い）。
         /// <see cref="GetAllLatestBalancesAsync"/> の LastUsageDate はこれらを除外しない
         /// 「最新レコード日」であり、登録しただけのカードが「使われている」ように見えるため、
