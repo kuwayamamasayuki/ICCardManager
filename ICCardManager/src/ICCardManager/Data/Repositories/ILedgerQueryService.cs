@@ -67,6 +67,8 @@ namespace ICCardManager.Data.Repositories
         /// Issue #1731: 最新日に複数レコードがあるカードは残高チェーン順の最終残高を返す
         /// （<see cref="GetLatestBeforeDateAsync"/> と同じ規則）。最終利用日は最新日時
         /// （貸出中レコードがあればその時刻付き日時）を返す。
+        /// LastUsageDate は貸出中・新規購入・繰越を除外しない「最新レコード日」である点に注意。
+        /// 利用実績としての最終利用日は <see cref="GetAllLastUsageDatesAsync"/> を使う（Issue #1747）。
         /// </remarks>
         Task<Dictionary<string, (int Balance, DateTime? LastUsageDate)>> GetAllLatestBalancesAsync();
 
@@ -118,7 +120,10 @@ namespace ICCardManager.Data.Repositories
         /// 利用実績が 1 件も無いカードは辞書に含まれない（最終利用日は空欄扱い）。
         /// <see cref="GetAllLatestBalancesAsync"/> の LastUsageDate はこれらを除外しない
         /// 「最新レコード日」であり、登録しただけのカードが「使われている」ように見えるため、
-        /// 利用実績の表示にはこちらを使うこと。
+        /// 新しく「最終利用日」を表示する箇所ではこちらを使うこと。
+        /// なお既存のメイン画面カード残高ダッシュボード（DashboardService）は #1747 の
+        /// スコープ判断により従来どおり「最新レコード日」を表示している（挙動を揃える場合は
+        /// 別 Issue で扱う）。
         /// </remarks>
         Task<Dictionary<string, DateTime>> GetAllLastUsageDatesAsync();
 
