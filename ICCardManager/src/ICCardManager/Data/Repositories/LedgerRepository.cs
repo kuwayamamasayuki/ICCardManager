@@ -43,9 +43,10 @@ namespace ICCardManager.Data.Repositories
 FROM ledger
 {whereClause}
 ORDER BY DATE(date) ASC,
-  CASE WHEN summary = '新規購入' OR summary LIKE '%月から繰越' THEN 0 ELSE 1 END ASC,
+  CASE WHEN summary = '新規購入' OR summary LIKE @midYearCarryoverPattern ESCAPE '\' THEN 0 ELSE 1 END ASC,
   id ASC";
 
+            AddMidYearCarryoverParameter(command);
             if (cardIdm != null)
             {
                 command.Parameters.AddWithValue("@cardIdm", cardIdm);
@@ -768,8 +769,13 @@ ORDER BY l.card_idm ASC, l.date ASC, l.id ASC";
         /// </para>
         /// <para>
         /// 条件は <c>GetByDateRangeAsync</c> の ORDER BY および <see cref="Models.Ledger.IsCarryover"/>
-        /// と同じ表現を使う（<c>summary = '新規購入' OR summary LIKE '%月から繰越'</c>）。
-        /// 対応関係は <c>LedgerRepositoryAggregationTests</c> が
+        /// と同じ判定（「新規購入」リテラル＋繰越 LIKE パターン）を使う。繰越側のパターンは
+        /// <c>'%月から繰越'</c> のハードコードではなく、組織設定 <c>MidYearCarryoverFormat</c> 由来の
+        /// <c>SummaryGenerator.GetMidYearCarryoverLikePattern</c> をパラメータバインドする
+        /// （Issue #1749。書式カスタム時に SQL だけが追従しない乖離の防止）。
+        /// 本条件を含むクエリは <see cref="AddMidYearCarryoverParameter"/> を必ず併用すること。
+        /// 対応関係は <c>LedgerRepositoryAggregationTests</c> /
+        /// <c>LedgerRepositoryMidYearCarryoverPatternTests</c> が
         /// <c>SummaryGenerator.GetMidYearCarryoverSummary</c> の生成結果で検証している。
         /// </para>
         /// <para>
@@ -784,7 +790,22 @@ ORDER BY l.card_idm ASC, l.date ASC, l.id ASC";
         /// </para>
         /// </remarks>
         private const string ExcludeCarryoverCondition =
-            "AND summary <> '新規購入' AND summary NOT LIKE '%月から繰越'";
+            @"AND summary <> '新規購入' AND summary NOT LIKE @midYearCarryoverPattern ESCAPE '\'";
+
+        /// <summary>
+        /// 繰越摘要の LIKE パターン（組織設定 <c>MidYearCarryoverFormat</c> 由来、Issue #1749）を
+        /// コマンドへバインドする。
+        /// </summary>
+        /// <remarks>
+        /// <c>@midYearCarryoverPattern</c> を参照する SQL（<see cref="ExcludeCarryoverCondition"/> と
+        /// 繰越先頭ソートの CASE 式）と必ず対で使うこと。バインドを忘れると
+        /// System.Data.SQLite が「Insufficient parameters」で失敗する。
+        /// </remarks>
+        private static void AddMidYearCarryoverParameter(SQLiteCommand command)
+        {
+            command.Parameters.AddWithValue(
+                "@midYearCarryoverPattern", SummaryGenerator.GetMidYearCarryoverLikePattern());
+        }
 
         /// <inheritdoc/>
         public async Task<Dictionary<string, DateTime>> GetAllLastUsageDatesAsync()
@@ -803,6 +824,8 @@ FROM ledger
 WHERE is_lent_record = 0
   {ExcludeCarryoverCondition}
 GROUP BY card_idm";
+
+            AddMidYearCarryoverParameter(command);
 
             using var reader = await command.ExecuteReaderAsync().ConfigureAwait(false);
             while (await reader.ReadAsync().ConfigureAwait(false))
@@ -836,6 +859,7 @@ WHERE date BETWEEN @fromDate AND @toDate
 GROUP BY card_idm";
 
             AddDateRangeParameters(command, fromDate, toDate);
+            AddMidYearCarryoverParameter(command);
 
             using var reader = await command.ExecuteReaderAsync().ConfigureAwait(false);
             while (await reader.ReadAsync().ConfigureAwait(false))
@@ -879,6 +903,7 @@ GROUP BY ym, lender, staff
 ORDER BY ym, staff";
 
             AddDateRangeParameters(command, fromDate, toDate);
+            AddMidYearCarryoverParameter(command);
 
             using var reader = await command.ExecuteReaderAsync().ConfigureAwait(false);
             while (await reader.ReadAsync().ConfigureAwait(false))
@@ -1099,7 +1124,7 @@ FROM ledger
     FROM ledger
     {whereClause}
     ORDER BY DATE(date) ASC,
-        CASE WHEN summary = '新規購入' OR summary LIKE '%月から繰越' THEN 0 ELSE 1 END ASC,
+        CASE WHEN summary = '新規購入' OR summary LIKE @midYearCarryoverPattern ESCAPE '\' THEN 0 ELSE 1 END ASC,
         id ASC
     LIMIT @pageSize OFFSET @offset
 )
@@ -1114,9 +1139,11 @@ LEFT JOIN (
     GROUP BY ledger_id
 ) d ON d.ledger_id = l.id
 ORDER BY DATE(l.date) ASC,
-  CASE WHEN l.summary = '新規購入' OR l.summary LIKE '%月から繰越' THEN 0 ELSE 1 END ASC,
+  CASE WHEN l.summary = '新規購入' OR l.summary LIKE @midYearCarryoverPattern ESCAPE '\' THEN 0 ELSE 1 END ASC,
   l.id ASC";
 
+            // CTE 内と外側 ORDER BY の 2 箇所が同じ名前付きパラメータを参照する（バインドは 1 回でよい）
+            AddMidYearCarryoverParameter(command);
             if (cardIdm != null)
             {
                 command.Parameters.AddWithValue("@cardIdm", cardIdm);
@@ -1751,9 +1778,10 @@ ORDER BY l.card_idm, l.date, l.id, d.rowid";
             // Issue #510: 年度途中導入の繰越レコード（「○月から繰越」）も認識する
             command.CommandText = @"SELECT MIN(date) FROM ledger
 WHERE card_idm = @cardIdm
-  AND (summary = '新規購入' OR summary LIKE '%月から繰越')";
+  AND (summary = '新規購入' OR summary LIKE @midYearCarryoverPattern ESCAPE '\')";
 
             command.Parameters.AddWithValue("@cardIdm", cardIdm);
+            AddMidYearCarryoverParameter(command);
 
             var result = await command.ExecuteScalarAsync();
             if (result != null && result != DBNull.Value)

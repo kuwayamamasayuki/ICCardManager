@@ -1181,6 +1181,53 @@ namespace ICCardManager.Services
         }
 
         /// <summary>
+        /// 繰越摘要を SQL の LIKE で近似判定するためのパターンを導出（Issue #1749）
+        /// </summary>
+        /// <returns>LIKE パターン。エスケープ文字はバックスラッシュ（SQL 側で <c>ESCAPE '\'</c> を指定すること）</returns>
+        /// <remarks>
+        /// <para>
+        /// 判定の正は <see cref="IsMidYearCarryoverSummary"/>（正規表現 <c>MidYearCarryoverPattern</c>）だが、
+        /// SQLite の SQL では正規表現が使えないため、生成書式 <c>MidYearCarryoverFormat</c> の
+        /// 月プレースホルダー <c>{0}</c> を <c>%</c> に置き換えた LIKE パターンで近似する。
+        /// 既定書式では従来 SQL にハードコードされていた <c>'%月から繰越'</c> と一致する。
+        /// 近似のため「13月から繰越」のような範囲外の月にも一致するが、生成側
+        /// （<see cref="GetMidYearCarryoverSummary"/>）は 1〜12 月しか保存しないため
+        /// 実データでは乖離しない（従来のハードコードと同じ近似度）。
+        /// </para>
+        /// <para>
+        /// 書式リテラル部の LIKE メタ文字（<c>%</c> <c>_</c> <c>\</c>）はバックスラッシュでエスケープする。
+        /// 不正な書式（<c>string.Format</c> が失敗する）は既定書式へフォールバックする
+        /// （<see cref="IsMidYearCarryoverSummary"/> の不正正規表現フォールバックと同じ方針）。
+        /// </para>
+        /// <para>
+        /// 汎用/固有の別: 汎用（物品出納簿の様式）。<see cref="IsMidYearCarryoverSummary"/> と同群。
+        /// </para>
+        /// </remarks>
+        public static string GetMidYearCarryoverLikePattern()
+        {
+            // 私用領域の文字を月プレースホルダーの一時マーカーに使う
+            // （書式リテラル部のエスケープ処理と {0} の % 置換を混同させないため）
+            const string placeholder = "\uE000";
+
+            string formatted;
+            try
+            {
+                formatted = string.Format(_options.SummaryText.MidYearCarryoverFormat, placeholder);
+            }
+            catch (FormatException)
+            {
+                // 不正な書式は既定書式へフォールバック（既定値は SummaryTextOptions と同期）
+                formatted = string.Format(new SummaryTextOptions().MidYearCarryoverFormat, placeholder);
+            }
+
+            return formatted
+                .Replace("\\", "\\\\")
+                .Replace("%", "\\%")
+                .Replace("_", "\\_")
+                .Replace(placeholder, "%");
+        }
+
+        /// <summary>
         /// 月計の摘要を生成
         /// </summary>
         public static string GetMonthlySummary(int month)
