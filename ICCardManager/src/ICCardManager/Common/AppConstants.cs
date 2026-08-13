@@ -47,6 +47,21 @@ namespace ICCardManager.Common
         /// </summary>
         public const int BackupStaleWarningDays = 7;
 
+        /// <summary>
+        /// 中断されたバックアップの一時ファイルを削除するまでの経過時間（時間、Issue #1748）。
+        /// </summary>
+        /// <remarks>
+        /// 一時ファイルは失敗時に <c>BackupService</c> 自身が削除するが、コピー中にプロセスが
+        /// 強制終了した場合（電源断・タスクマネージャーからの終了）は削除経路を通らずに残る。
+        /// DB 本体と同じサイズのファイルが溜まると保存先を圧迫するため定期的に掃除する。
+        /// <para>
+        /// 「十分に古いものだけ」に限るのは、共有モードで**他 PC が書き込み中の一時ファイル**を
+        /// 消さないため。1 回のバックアップは長くても分オーダーで終わるので、24 時間あれば
+        /// 進行中のものを誤削除する余地はない。
+        /// </para>
+        /// </remarks>
+        public const int BackupTempFileStaleHours = 24;
+
         // --- 接続診断（Issue #1690） ---
 
         /// <summary>

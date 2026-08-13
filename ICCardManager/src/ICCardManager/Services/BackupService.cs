@@ -31,12 +31,27 @@ namespace ICCardManager.Services
         /// <summary>
         /// バックアップファイル名のプレフィックス
         /// </summary>
-        private const string BackupFilePrefix = "backup_";
+        internal const string BackupFilePrefix = "backup_";
 
         /// <summary>
         /// バックアップファイルの拡張子
         /// </summary>
-        private const string BackupFileExtension = ".db";
+        internal const string BackupFileExtension = ".db";
+
+        /// <summary>
+        /// 書き込み途中のバックアップに付ける一時ファイルの拡張子（Issue #1748）
+        /// </summary>
+        /// <remarks>
+        /// バックアップ世代の列挙パターン <c>backup_*.db</c> に一致しないことが要件。
+        /// 一致すると、中断されたファイルが世代数を消費し（正常な最古世代が余分に削除される）、
+        /// リストア候補としても一覧に現れてしまう。
+        /// </remarks>
+        internal const string BackupTempFileExtension = ".tmp";
+
+        /// <summary>
+        /// SQLite データベースファイルのヘッダ長（バイト）
+        /// </summary>
+        private const int SqliteHeaderLength = 100;
 
         public BackupService(
             DbContext dbContext,
@@ -435,9 +450,7 @@ namespace ICCardManager.Services
                 return Enumerable.Empty<BackupFileInfo>();
             }
 
-            return Directory.GetFiles(backupPath, $"{BackupFilePrefix}*{BackupFileExtension}")
-                .Select(f => new FileInfo(f))
-                .OrderByDescending(f => f.CreationTime)
+            return EnumerateBackupFiles(backupPath)
                 .Select(f => new BackupFileInfo
                 {
                     FilePath = f.FullName,
@@ -448,13 +461,102 @@ namespace ICCardManager.Services
         }
 
         /// <summary>
-        /// SQLite Backup APIを使用してデータベースをバックアップ
+        /// バックアップ世代ファイルを新しい順に列挙する
+        /// </summary>
+        /// <remarks>
+        /// Issue #1748: 一覧表示（<see cref="GetBackupFilesAsync"/>）と世代削除
+        /// （<see cref="CleanupOldBackupsAsync"/>）が同じ母集団を見ることを構造的に保証するため、
+        /// 列挙条件をここ 1 か所に集約する。片方だけが一時ファイルを拾うと
+        /// 「一覧に出ないのに世代数だけ消費する」という食い違いが生まれる。
+        /// <para>
+        /// <c>EndsWith</c> による絞り込みは冗長に見えるが意図的なもの。Win32 のワイルドカード照合は
+        /// 8.3 短縮名にも一致し、拡張子がちょうど 3 文字のときは前方一致で拾う仕様があるため、
+        /// 「一時ファイルは列挙されない」という本 Issue の前提を検索パターンの実装依存に委ねない。
+        /// </para>
+        /// </remarks>
+        /// <param name="backupPath">バックアップ保存先フォルダー</param>
+        internal static List<FileInfo> EnumerateBackupFiles(string backupPath)
+        {
+            return Directory.GetFiles(backupPath, $"{BackupFilePrefix}*{BackupFileExtension}")
+                .Where(f => f.EndsWith(BackupFileExtension, StringComparison.OrdinalIgnoreCase))
+                .Select(f => new FileInfo(f))
+                .OrderByDescending(f => f.CreationTime)
+                .ToList();
+        }
+
+        /// <summary>
+        /// 書き込み途中のバックアップの一時ファイルを列挙する（Issue #1748）
+        /// </summary>
+        /// <param name="backupPath">バックアップ保存先フォルダー</param>
+        internal static List<FileInfo> EnumerateBackupTempFiles(string backupPath)
+        {
+            return Directory.GetFiles(backupPath, $"{BackupFilePrefix}*{BackupTempFileExtension}")
+                .Where(f => f.EndsWith(BackupTempFileExtension, StringComparison.OrdinalIgnoreCase))
+                .Select(f => new FileInfo(f))
+                .ToList();
+        }
+
+        /// <summary>
+        /// SQLite Backup APIを使用してデータベースをバックアップ（一時ファイル経由で不可分に差し替える）
         /// </summary>
         /// <remarks>
         /// File.Copyと異なり、他のプロセスが書き込み中でも整合性のあるコピーが作成される。
-        /// 既存の非SQLiteファイルが存在する場合は削除してから作成する。
+        /// <para>
+        /// Issue #1748: 最終ファイル名へ直接書いてはならない。SQLite Backup API はページ 1
+        /// （<c>"SQLite format 3\0"</c> のマジックヘッダを含む）から昇順にコピーするため、
+        /// コピー途中で失敗したファイルは「頭だけ正しい」形で残る。最終名で書いていると、
+        /// その切り詰められたファイルがそのまま有効な世代として観測され、
+        /// (1) 世代数を消費して正常な最古世代を余分に削除させ、
+        /// (2) リストア画面で最新世代として選ばれ、<see cref="IsValidSqliteFile"/> を通過して
+        /// 本番 DB を上書きし得る。
+        /// 一時ファイルへ書き切ってから最終名へリネームすれば、切り替え点がメタデータ操作 1 回になり、
+        /// 「最終名で存在する＝コピーが完了している」が構造的に保証される。
+        /// </para>
+        /// <para>
+        /// 一時ファイル名には GUID を含める。共有モードでは最大 20 台が同じフォルダーへ書き込むため、
+        /// 秒単位のタイムスタンプが衝突すると複数台が同一の一時ファイルを開いて互いのコピーを壊し得る。
+        /// </para>
         /// </remarks>
         private void BackupDatabaseTo(string destinationPath)
+        {
+            var tempPath = $"{destinationPath}.{Guid.NewGuid():N}{BackupTempFileExtension}";
+
+            try
+            {
+                CopyDatabaseTo(tempPath);
+            }
+            catch
+            {
+                // 後始末そのものが失敗して本来の失敗要因を置き換えないよう、削除は個別に握りつぶす
+                // （.claude/rules/development-conventions.md「catch の中の後始末」参照）。
+                TryDeleteFile(tempPath, "中断したバックアップの一時ファイル");
+                throw;
+            }
+
+            // ここまで来たらコピーは完了している。最終名へ差し替える。
+            // .NET Framework 4.8 の File.Move には overwrite 引数がないため事前に削除する。
+            // 差し替え段で失敗した場合は一時ファイルを消さない ―― 中身は完全なコピーであり、
+            // 消すと「移動先も一時ファイルも無い」状態になる。放置しても一覧には出ず、
+            // CleanupStaleTempFiles が後日回収する。
+            if (File.Exists(destinationPath))
+            {
+                File.Delete(destinationPath);
+            }
+
+            File.Move(tempPath, destinationPath);
+        }
+
+        /// <summary>
+        /// SQLite Backup API でデータベースの内容を指定パスへコピーする
+        /// </summary>
+        /// <remarks>
+        /// Issue #1748: 「コピーの実行」だけを担い、一時ファイル経由の差し替えは
+        /// <see cref="BackupDatabaseTo"/> が担う。コピー途中で失敗する状況は実機でしか起きない
+        /// （UNC 断・プロセス強制終了）ため、単体テストが本メソッドを差し替えて再現できるよう
+        /// <c>internal virtual</c> にしている。
+        /// </remarks>
+        /// <param name="destinationPath">コピー先のパス</param>
+        internal virtual void CopyDatabaseTo(string destinationPath)
         {
             // 既存ファイルが非SQLite形式の場合Open()が失敗するため、事前に削除
             if (File.Exists(destinationPath))
@@ -470,19 +572,55 @@ namespace ICCardManager.Services
         }
 
         /// <summary>
+        /// ファイルを削除する（失敗しても呼び出し元へ伝播させない）
+        /// </summary>
+        /// <param name="filePath">削除するファイルのパス</param>
+        /// <param name="description">ログに出す対象の説明</param>
+        private void TryDeleteFile(string filePath, string description)
+        {
+            try
+            {
+                if (File.Exists(filePath))
+                {
+                    File.Delete(filePath);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "{Description}の削除に失敗しました: {Path}", description, filePath);
+            }
+        }
+
+        /// <summary>
         /// ファイルが有効なSQLiteデータベースかどうかを簡易検証
         /// </summary>
         /// <remarks>
         /// SQLiteファイルの先頭16バイトは "SQLite format 3\0" というマジックヘッダ。
         /// 不正なファイルのリストアによるデータ破壊を防止する。
+        /// <para>
+        /// Issue #1748: マジックヘッダだけでは**書き込み途中で切り詰められたファイル**を弾けない。
+        /// SQLite Backup API はページ 1 から昇順にコピーするため、中断したファイルは
+        /// 必ずマジックヘッダを備えている。書き込み側は一時ファイル経由に変えたが、
+        /// 本修正より前に作られた破損世代が既に保存先へ残っている可能性があるため、
+        /// 読み取り側でもヘッダが宣言するサイズと実ファイルサイズの整合を確認する。
+        /// </para>
+        /// <para>
+        /// 判定はヘッダ 100 バイトの読み取りだけで完結し、ファイル全長の読み取り
+        /// （<c>PRAGMA integrity_check</c> 等）は行わない。本メソッドはリストア実行中に
+        /// UI スレッド上で呼ばれるため、DB 全体の読み込みを挟むと保存先が UNC のとき画面が固まる。
+        /// </para>
         /// </remarks>
-        private static bool IsValidSqliteFile(string filePath)
+        /// <param name="filePath">検証するファイルのパス</param>
+        /// <returns>有効な SQLite データベースとみなせる場合 true</returns>
+        internal static bool IsValidSqliteFile(string filePath)
         {
             try
             {
-                var header = new byte[16];
                 using var stream = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.Read);
-                if (stream.Read(header, 0, 16) < 16)
+                var fileLength = stream.Length;
+
+                var header = new byte[SqliteHeaderLength];
+                if (!TryReadExactly(stream, header))
                     return false;
 
                 // "SQLite format 3\0" (ASCII)
@@ -492,12 +630,95 @@ namespace ICCardManager.Services
                     if (header[i] != expected[i])
                         return false;
                 }
-                return true;
+
+                return !IsTruncatedSqliteFile(header, fileLength);
             }
             catch
             {
                 return false;
             }
+        }
+
+        /// <summary>
+        /// SQLite ヘッダが宣言するページ数に対してファイルが短い（＝書き込み途中）かどうかを判定する
+        /// </summary>
+        /// <remarks>
+        /// Issue #1748: ヘッダの構造は SQLite のファイルフォーマット仕様による。
+        /// <list type="bullet">
+        /// <item>オフセット 16（2 バイト, ビッグエンディアン）: ページサイズ。値 1 は 65536 を表す</item>
+        /// <item>オフセット 24（4 バイト）: ファイル変更カウンタ</item>
+        /// <item>オフセット 28（4 バイト）: ヘッダが記録するページ数</item>
+        /// <item>オフセット 92（4 バイト）: 上記ページ数が有効だった時点の変更カウンタ</item>
+        /// </list>
+        /// ページ数フィールドは「オフセット 24 と 92 が一致するときだけ有効」と規定されている。
+        /// 一致しない場合は判定材料が無いため <c>false</c>（＝切り詰めとみなさない）を返す。
+        /// **判定できないことを異常として扱うと、正当なバックアップのリストアを塞いでしまう**ため。
+        /// </remarks>
+        /// <param name="header">先頭 100 バイトのヘッダ</param>
+        /// <param name="fileLength">実ファイルサイズ（バイト）</param>
+        /// <returns>切り詰められていると判定できる場合 true</returns>
+        private static bool IsTruncatedSqliteFile(byte[] header, long fileLength)
+        {
+            int pageSize = (header[16] << 8) | header[17];
+            if (pageSize == 1)
+            {
+                pageSize = 65536;
+            }
+
+            // 仕様上ページサイズは 512〜65536 の 2 のべき乗。外れる場合はヘッダ自体が壊れている
+            if (pageSize < 512 || (pageSize & (pageSize - 1)) != 0)
+            {
+                return true;
+            }
+
+            var changeCounter = ReadUInt32BigEndian(header, 24);
+            var versionValidFor = ReadUInt32BigEndian(header, 92);
+            if (changeCounter != versionValidFor)
+            {
+                return false;
+            }
+
+            var pageCount = ReadUInt32BigEndian(header, 28);
+            if (pageCount == 0)
+            {
+                return false;
+            }
+
+            return fileLength < (long)pageCount * pageSize;
+        }
+
+        /// <summary>
+        /// ストリームからバッファ長ちょうどのバイト数を読み取る
+        /// </summary>
+        /// <remarks>
+        /// <see cref="FileStream.Read(byte[], int, int)"/> は要求したバイト数より少なく返すことが
+        /// 許されているため（SMB 越しでは実際に起こり得る）、満たされるまで読み進める。
+        /// </remarks>
+        /// <returns>バッファを満たせた場合 true、途中で EOF に達した場合 false</returns>
+        private static bool TryReadExactly(Stream stream, byte[] buffer)
+        {
+            var offset = 0;
+            while (offset < buffer.Length)
+            {
+                var read = stream.Read(buffer, offset, buffer.Length - offset);
+                if (read <= 0)
+                {
+                    return false;
+                }
+                offset += read;
+            }
+            return true;
+        }
+
+        /// <summary>
+        /// ビッグエンディアンの 4 バイト符号なし整数を読み取る（SQLite ヘッダはビッグエンディアン）
+        /// </summary>
+        private static uint ReadUInt32BigEndian(byte[] buffer, int offset)
+        {
+            return ((uint)buffer[offset] << 24)
+                 | ((uint)buffer[offset + 1] << 16)
+                 | ((uint)buffer[offset + 2] << 8)
+                 | buffer[offset + 3];
         }
 
         /// <summary>
@@ -575,10 +796,12 @@ namespace ICCardManager.Services
         {
             return Task.Run(() =>
             {
-                var backupFiles = Directory.GetFiles(backupPath, $"{BackupFilePrefix}*{BackupFileExtension}")
-                    .Select(f => new FileInfo(f))
-                    .OrderByDescending(f => f.CreationTime)
-                    .ToList();
+                // Issue #1748: 中断されたバックアップの残骸を先に掃除する。
+                // 一時ファイルは世代の列挙対象外なので世代数には影響しないが、
+                // DB 本体と同じサイズのため放置すると保存先を圧迫する。
+                CleanupStaleTempFiles(backupPath);
+
+                var backupFiles = EnumerateBackupFiles(backupPath);
 
                 // 保持世代数を超えるファイルを削除
                 if (backupFiles.Count > MaxBackupGenerations)
@@ -615,6 +838,43 @@ namespace ICCardManager.Services
                     }
                 }
             });
+        }
+
+        /// <summary>
+        /// 中断されたバックアップの一時ファイルを削除する（Issue #1748）
+        /// </summary>
+        /// <remarks>
+        /// 一時ファイルは失敗時に <see cref="BackupDatabaseTo"/> の catch が削除するが、
+        /// コピー中にプロセスが強制終了された場合（電源断・タスクマネージャーからの終了）は
+        /// その経路を通らずに残る。
+        /// <para>
+        /// <see cref="AppConstants.BackupTempFileStaleHours"/> 時間以上更新されていないものだけを
+        /// 対象にするのは、共有モードで**他 PC が書き込み中**の一時ファイルを消さないため。
+        /// </para>
+        /// </remarks>
+        /// <param name="backupPath">バックアップ保存先フォルダー</param>
+        private void CleanupStaleTempFiles(string backupPath)
+        {
+            var threshold = DateTime.Now.AddHours(-AppConstants.BackupTempFileStaleHours);
+
+            foreach (var file in EnumerateBackupTempFiles(backupPath))
+            {
+                if (file.LastWriteTime >= threshold)
+                {
+                    continue;
+                }
+
+                // 「無言で消える」ことがないよう Information で残す。
+                // 一時ファイルの残存は前回のバックアップが完走しなかった痕跡であり、
+                // 障害調査でこの行が無いと「いつ中断したか」を追えない
+                // （.claude/rules/development-conventions.md「ロギング」参照）。
+                _logger.LogInformation(
+                    "中断したバックアップの一時ファイルを削除します: {Path}, LastWrite={LastWrite}",
+                    file.FullName,
+                    file.LastWriteTime);
+
+                TryDeleteFile(file.FullName, "中断したバックアップの一時ファイル");
+            }
         }
 
         /// <summary>
