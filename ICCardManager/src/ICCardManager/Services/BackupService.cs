@@ -957,6 +957,12 @@ namespace ICCardManager.Services
                     file.LastWriteTime);
 
                 TryDeleteFile(file.FullName, "中断したバックアップの一時ファイル");
+
+                // 一時ファイルに付随するロールバックジャーナルも一緒に回収する。
+                // プロセスが強制終了された場合は BackupDatabaseTo の finally を通らないため、
+                // ジャーナルだけが残る。その名前は .tmp で終わらず
+                // EnumerateBackupTempFiles の対象外なので、ここで消さないと恒久的に残る。
+                CleanupJournalFiles(file.FullName);
             }
         }
 

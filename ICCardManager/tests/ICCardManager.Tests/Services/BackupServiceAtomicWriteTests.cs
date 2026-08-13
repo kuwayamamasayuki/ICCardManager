@@ -276,6 +276,30 @@ public class BackupServiceAtomicWriteTests : IDisposable
     }
 
     /// <summary>
+    /// 古い一時ファイルに付随するジャーナルも一緒に回収することを確認
+    /// </summary>
+    /// <remarks>
+    /// プロセス強制終了ではコピーの `finally` を通らないため、一時ファイルとジャーナルの
+    /// 両方が残る。ジャーナルの名前は `.tmp` で終わらず回収の検索パターンに一致しないので、
+    /// 一時ファイルを消すときに併せて消さないと恒久的に残る。
+    /// </remarks>
+    [Fact]
+    public async Task ExecuteAutoBackupAsync_古い一時ファイルのジャーナルも回収すること()
+    {
+        // Arrange
+        var stale = CreateTempFile(DateTime.Now.AddHours(-AppConstants.BackupTempFileStaleHours - 1));
+        var staleJournal = stale + "-journal";
+        File.WriteAllText(staleJournal, "orphaned journal");
+
+        // Act
+        await _service.ExecuteAutoBackupAsync();
+
+        // Assert
+        File.Exists(stale).Should().BeFalse();
+        File.Exists(staleJournal).Should().BeFalse("ジャーナルは .tmp で終わらないため個別に回収する必要がある");
+    }
+
+    /// <summary>
     /// 書き込み中の可能性がある一時ファイルを削除しないことを確認
     /// </summary>
     /// <remarks>
