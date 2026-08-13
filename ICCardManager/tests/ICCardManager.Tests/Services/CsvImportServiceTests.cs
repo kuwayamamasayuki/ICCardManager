@@ -170,6 +170,74 @@ FEDCBA9876543210,PASMO,002,テスト2";
     }
 
     /// <summary>
+    /// Issue #1757: カードCSVインポートで管理番号が重複したとき、行番号付きの
+    /// 分かりやすいエラーとして報告されること（登録・更新の両経路）
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>CardRepository</c> は UNIQUE 制約違反を <see cref="DuplicateCardNumberException"/> へ
+    /// 変換する（登録は Issue #1106、更新は Issue #1757 で追加）。これは
+    /// <see cref="ICCardManager.Common.Exceptions.AppException"/> ではないため、
+    /// 捕捉しないと <c>ToUserFacingErrorMessage</c> の <c>default</c> 分岐に落ちて
+    /// 「<b>予期しないエラーが発生しました</b>: …」という誤った枕詞が付き、
+    /// さらに<b>何行目が悪いのか分からない</b>（他のインポートエラーは行番号付き）。
+    /// </para>
+    /// <para>
+    /// 重複は CSV の内容に起因する<b>復旧可能な入力ミス</b>なので、他のバリデーション
+    /// エラーと同じ形（行番号 ＋ 行動指示付きの文言）で報告する。
+    /// </para>
+    /// </remarks>
+    [Theory]
+    [InlineData(true)]  // 既存カードの更新経路（Issue #1757 で新たに例外化された経路）
+    [InlineData(false)] // 新規カードの登録経路（Issue #1106 から例外化されていた経路）
+    public async Task ImportCardsAsync_DuplicateCardNumber_ReportsLineNumberedError(bool isUpdate)
+    {
+        // Arrange
+        var csvContent = @"カードIDm,カード種別,管理番号,備考
+0123456789ABCDEF,nimoca,N-001,重複する番号";
+
+        var filePath = Path.Combine(_testDirectory, $"cards_duplicate_{isUpdate}.csv");
+        await Task.Run(() => File.WriteAllText(filePath, csvContent, CsvEncoding));
+
+        var duplicate = new DuplicateCardNumberException(
+            "nimoca", "N-001", new InvalidOperationException("UNIQUE constraint failed"));
+
+        if (isUpdate)
+        {
+            _cardRepositoryMock.Setup(x => x.GetByIdmAsync("0123456789ABCDEF", true)).ReturnsAsync(new IcCard
+            {
+                CardIdm = "0123456789ABCDEF",
+                CardType = "nimoca",
+                CardNumber = "N-999"
+            });
+            _cardRepositoryMock.Setup(x => x.UpdateAsync(It.IsAny<IcCard>(), It.IsAny<SQLiteTransaction>()))
+                .ThrowsAsync(duplicate);
+        }
+        else
+        {
+            _cardRepositoryMock.Setup(x => x.GetByIdmAsync(It.IsAny<string>(), true)).ReturnsAsync((IcCard?)null);
+            _cardRepositoryMock.Setup(x => x.InsertAsync(It.IsAny<IcCard>(), It.IsAny<SQLiteTransaction>()))
+                .ThrowsAsync(duplicate);
+        }
+
+        // Act — 例外が外へ漏れず、結果オブジェクトとして報告されること
+        var act = async () => await _service.ImportCardsAsync(filePath, skipExisting: false);
+        var result = await act.Should().NotThrowAsync();
+
+        // Assert
+        result.Which.Success.Should().BeFalse();
+        result.Which.ImportedCount.Should().Be(0, "重複行があるためロールバックされる");
+        result.Which.Errors.Should().ContainSingle();
+
+        var error = result.Which.Errors[0];
+        error.LineNumber.Should().Be(2, "CSV の2行目（ヘッダーの次）が重複している");
+        error.Message.Should().Contain("N-001");
+        error.Message.Should().Contain("既に使用されています");
+        error.Message.Should().EndWith("別の番号を指定してください。");
+        error.Message.Should().NotContain("予期しないエラー");
+    }
+
+    /// <summary>
     /// 削除済みカードのRestoreAsyncが失敗した場合、エラー件数がカウントされロールバックされること
     /// </summary>
     [Fact]

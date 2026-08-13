@@ -309,6 +309,9 @@ VALUES (@cardIdm, @cardType, @cardNumber, @note, 0, NULL, 0, NULL, NULL, @starti
         /// 既定値（1 / 0 / 0 / NULL）で紙出納簿移行カードの繰越累計・開始ページ番号が静かに消える。
         /// 「呼び出し元が引き継ぎ忘れないこと」に依存せず、UPDATE 文の対象列から外して構造的に防ぐ。
         /// </remarks>
+        /// <exception cref="DuplicateCardNumberException">
+        /// 同一種別で同一管理番号のカードが既に存在する場合（UNIQUE制約違反、Issue #1757）
+        /// </exception>
         private async Task<bool> UpdateAsyncInternal(IcCard card, SQLiteTransaction? transaction)
         {
             using var lease = await _dbContext.LeaseConnectionAsync();
@@ -325,13 +328,24 @@ WHERE card_idm = @cardIdm AND is_deleted = 0";
             command.Parameters.AddWithValue("@cardNumber", card.CardNumber);
             command.Parameters.AddWithValue("@note", (object)card.Note ?? DBNull.Value);
 
-            var result = await command.ExecuteNonQueryAsync();
-            if (result > 0 && transaction == null)
+            try
             {
-                // トランザクション外の場合のみキャッシュ無効化
-                InvalidateCardCache();
+                var result = await command.ExecuteNonQueryAsync();
+                if (result > 0 && transaction == null)
+                {
+                    // トランザクション外の場合のみキャッシュ無効化
+                    InvalidateCardCache();
+                }
+                return result > 0;
             }
-            return result > 0;
+            catch (SQLiteException ex) when (IsDuplicateCardNumberError(ex))
+            {
+                // Issue #1757: 登録経路（InsertAsyncInternal）と同じ例外へ変換する。
+                // 変換しないと生の SQLiteException が App.OnDispatcherUnhandledException まで抜け、
+                // 同じ「管理番号の重複」という復旧可能な入力ミスが、登録では親切な案内、
+                // 編集では SYS00x ＋スタックトレースの致命的エラーダイアログ、と非対称になる。
+                throw new DuplicateCardNumberException(card.CardType, card.CardNumber, ex);
+            }
         }
 
         /// <inheritdoc/>

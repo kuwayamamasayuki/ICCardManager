@@ -107,6 +107,90 @@ public class CardNumberUniqueConstraintTests : IDisposable
     }
 
     /// <summary>
+    /// 既存カードの管理番号を、同一種別の別カードが使用中の番号へ更新すると
+    /// <see cref="DuplicateCardNumberException"/> がスローされることを確認（Issue #1757）
+    /// </summary>
+    /// <remarks>
+    /// 登録経路（<c>InsertAsync</c>）は UNIQUE 制約違反を捕捉して本例外へ変換するが、
+    /// 更新経路には同等の catch が無く、生の <see cref="SQLiteException"/> が
+    /// <c>App.OnDispatcherUnhandledException</c> まで抜けて
+    /// 「SYS00x ＋スタックトレース」の致命的エラーダイアログになっていた。
+    /// 同じ操作が登録では親切に案内され編集ではクラッシュ相当、という非対称を解消する。
+    /// </remarks>
+    [Fact]
+    [Trait("Category", "Unit")]
+    public async Task UpdateAsync_DuplicateCardTypeAndNumber_ThrowsDuplicateCardNumberException()
+    {
+        // Arrange: 同一種別で別番号の2枚を登録し、片方を他方の番号へ変更する
+        await _repository.InsertAsync(CreateTestCard("CARD000000000001", "nimoca", "N-001"));
+        await _repository.InsertAsync(CreateTestCard("CARD000000000002", "nimoca", "N-002"));
+
+        var edited = CreateTestCard("CARD000000000002", "nimoca", "N-001");
+
+        // Act
+        var act = async () => await _repository.UpdateAsync(edited);
+
+        // Assert: 生の SQLiteException ではなく、UI が案内文へ変換できる例外であること
+        var ex = await act.Should().ThrowAsync<DuplicateCardNumberException>();
+        ex.Which.CardType.Should().Be("nimoca");
+        ex.Which.CardNumber.Should().Be("N-001");
+    }
+
+    /// <summary>
+    /// 削除済みカードが使っていた番号へは更新できることを確認（Issue #1757）
+    /// </summary>
+    /// <remarks>
+    /// 部分ユニークインデックス <c>idx_card_type_number_active</c> は
+    /// <c>WHERE is_deleted = 0</c> のため、削除済みカードの番号は再利用できる。
+    /// 例外変換を追加したことで正当な更新まで塞いでいないことを表明する。
+    /// </remarks>
+    [Fact]
+    [Trait("Category", "Unit")]
+    public async Task UpdateAsync_SameNumberAsDeletedCard_Succeeds()
+    {
+        // Arrange
+        await _repository.InsertAsync(CreateTestCard("CARD000000000001", "nimoca", "N-001"));
+        await _repository.DeleteAsync("CARD000000000001");
+        await _repository.InsertAsync(CreateTestCard("CARD000000000002", "nimoca", "N-002"));
+
+        var edited = CreateTestCard("CARD000000000002", "nimoca", "N-001");
+
+        // Act
+        var result = await _repository.UpdateAsync(edited);
+
+        // Assert
+        result.Should().BeTrue();
+        var updated = await _repository.GetByIdmAsync("CARD000000000002");
+        updated.CardNumber.Should().Be("N-001");
+    }
+
+    /// <summary>
+    /// 自分自身の番号を変えない更新（備考だけの修正等）が成功することを確認（Issue #1757）
+    /// </summary>
+    /// <remarks>
+    /// UPDATE は自分の行を書き換えるため UNIQUE 制約に抵触しない。例外変換の追加で
+    /// この最も一般的な編集操作が壊れていないことを固定する。
+    /// </remarks>
+    [Fact]
+    [Trait("Category", "Unit")]
+    public async Task UpdateAsync_UnchangedCardNumber_Succeeds()
+    {
+        // Arrange
+        await _repository.InsertAsync(CreateTestCard("CARD000000000001", "nimoca", "N-001"));
+
+        var edited = CreateTestCard("CARD000000000001", "nimoca", "N-001");
+        edited.Note = "備考を修正";
+
+        // Act
+        var result = await _repository.UpdateAsync(edited);
+
+        // Assert
+        result.Should().BeTrue();
+        var updated = await _repository.GetByIdmAsync("CARD000000000001");
+        updated.Note.Should().Be("備考を修正");
+    }
+
+    /// <summary>
     /// 削除済みカードと同じ種別・番号のカードを登録できることを確認
     /// （部分ユニークインデックスはis_deleted = 0のみ対象）
     /// </summary>
