@@ -176,11 +176,12 @@ FEDCBA9876543210,PASMO,002,テスト2";
     /// <remarks>
     /// <para>
     /// <c>CardRepository</c> は UNIQUE 制約違反を <see cref="DuplicateCardNumberException"/> へ
-    /// 変換する（登録は Issue #1106、更新は Issue #1757 で追加）。これは
-    /// <see cref="ICCardManager.Common.Exceptions.AppException"/> ではないため、
-    /// 捕捉しないと <c>ToUserFacingErrorMessage</c> の <c>default</c> 分岐に落ちて
-    /// 「<b>予期しないエラーが発生しました</b>: …」という誤った枕詞が付き、
-    /// さらに<b>何行目が悪いのか分からない</b>（他のインポートエラーは行番号付き）。
+    /// 変換する（登録は Issue #1106、更新・復元は Issue #1757 で追加）。取り込みループで
+    /// 捕捉しないと <c>ExecuteImportWithErrorHandlingAsync</c> まで抜けて<b>結果全体のエラー</b>になり、
+    /// <b>何行目が悪いのか分からない</b>（他のインポートエラーは行番号付き）。
+    /// 文言自体は本例外が <see cref="ICCardManager.Common.Exceptions.AppException"/> を継承する
+    /// （Issue #1757）ため <c>ToUserFacingErrorMessage</c> の <c>AppException</c> 分岐へ倒れるが、
+    /// <b>行番号は失われる</b>。この 2 段構えのうち行番号の側を本テストが固定する。
     /// </para>
     /// <para>
     /// 重複は CSV の内容に起因する<b>復旧可能な入力ミス</b>なので、他のバリデーション

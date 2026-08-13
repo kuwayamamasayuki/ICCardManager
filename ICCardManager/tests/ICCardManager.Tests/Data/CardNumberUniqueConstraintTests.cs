@@ -114,8 +114,9 @@ public class CardNumberUniqueConstraintTests : IDisposable
     /// 登録経路（<c>InsertAsync</c>）は UNIQUE 制約違反を捕捉して本例外へ変換するが、
     /// 更新経路には同等の catch が無く、生の <see cref="SQLiteException"/> が
     /// <c>App.OnDispatcherUnhandledException</c> まで抜けて
-    /// 「SYS00x ＋スタックトレース」の致命的エラーダイアログになっていた。
-    /// 同じ操作が登録では親切に案内され編集ではクラッシュ相当、という非対称を解消する。
+    /// 「予期しないエラーが発生しました。／エラーコード: SYS999」という
+    /// 原因も回復手段も示さないダイアログになっていた。
+    /// 同じ操作が登録では親切に案内され編集では原因不明、という非対称を解消する。
     /// </remarks>
     [Fact]
     [Trait("Category", "Unit")]
@@ -188,6 +189,71 @@ public class CardNumberUniqueConstraintTests : IDisposable
         result.Should().BeTrue();
         var updated = await _repository.GetByIdmAsync("CARD000000000001");
         updated.Note.Should().Be("備考を修正");
+    }
+
+    /// <summary>
+    /// 削除済みカードの番号を別のカードが使っている状態で復元すると
+    /// <see cref="DuplicateCardNumberException"/> がスローされることを確認（Issue #1757）
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 部分ユニークインデックスが <c>WHERE is_deleted = 0</c> であることの帰結として、
+    /// <b>復元（<c>is_deleted</c> を 1→0 に戻す UPDATE）も UNIQUE 制約に触れる</b>。
+    /// 「削除 → 同じ番号で別カードを登録（仕様上可能）→ 元のカードを復元」で必ず違反する。
+    /// 変換しないと生の <see cref="SQLiteException"/> が抜け、カード管理画面では
+    /// 「予期しないエラー（SYS999）」、CSVインポートでは行番号の無い一般エラーになる。
+    /// </para>
+    /// <para>
+    /// 案内文言は登録・更新と同じにしない。復元には管理番号の入力欄が無く
+    /// 「別の番号を指定してください」は<b>実行できない指示</b>になるため、
+    /// 「使用中カードの番号を変更してから復元する」という取れる行動を示す。
+    /// </para>
+    /// </remarks>
+    [Fact]
+    [Trait("Category", "Unit")]
+    public async Task RestoreAsync_NumberTakenByActiveCard_ThrowsDuplicateCardNumberException()
+    {
+        // Arrange: 削除 → 同じ種別・番号で別カードを登録（部分ユニークのため成功する）
+        await _repository.InsertAsync(CreateTestCard("CARD000000000001", "nimoca", "N-001"));
+        await _repository.DeleteAsync("CARD000000000001");
+        await _repository.InsertAsync(CreateTestCard("CARD000000000002", "nimoca", "N-001"));
+
+        // Act
+        var act = async () => await _repository.RestoreAsync("CARD000000000001");
+
+        // Assert
+        var ex = await act.Should().ThrowAsync<DuplicateCardNumberException>();
+        ex.Which.CardType.Should().Be("nimoca", "IDm しか持たない復元経路でも種別を読み直して報告する");
+        ex.Which.CardNumber.Should().Be("N-001");
+        ex.Which.UserFriendlyMessage.Should().Contain("N-001");
+        ex.Which.UserFriendlyMessage.Should().NotContain("別の番号を指定してください",
+            "復元経路には管理番号の入力欄が無く、実行できない指示になるため");
+        ex.Which.UserFriendlyMessage.Should().EndWith("もう一度復元してください。");
+    }
+
+    /// <summary>
+    /// 番号が競合しない削除済みカードは従来どおり復元できることを確認（Issue #1757）
+    /// </summary>
+    /// <remarks>
+    /// 例外変換の追加で、最も一般的な復元操作（誤って削除したカードの復旧）を
+    /// 塞いでいないことを対で固定する。
+    /// </remarks>
+    [Fact]
+    [Trait("Category", "Unit")]
+    public async Task RestoreAsync_NumberNotTaken_Succeeds()
+    {
+        // Arrange
+        await _repository.InsertAsync(CreateTestCard("CARD000000000001", "nimoca", "N-001"));
+        await _repository.DeleteAsync("CARD000000000001");
+
+        // Act
+        var result = await _repository.RestoreAsync("CARD000000000001");
+
+        // Assert
+        result.Should().BeTrue();
+        var restored = await _repository.GetByIdmAsync("CARD000000000001");
+        restored.Should().NotBeNull();
+        restored.CardNumber.Should().Be("N-001");
     }
 
     /// <summary>

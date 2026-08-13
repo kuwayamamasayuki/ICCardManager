@@ -637,8 +637,10 @@ namespace ICCardManager.ViewModels
                     }
                     catch (DuplicateCardNumberException duplicate)
                     {
-                        // Issue #1757: 登録経路と同じ案内を出す。捕捉しないと致命的エラー
-                        // ダイアログ（SYS00x ＋スタックトレース）になり編集内容も失われる。
+                        // Issue #1757: 登録経路と同じ案内を出す。捕捉しないと未処理例外ハンドラー
+                        // 任せになり、「予期しないエラーが発生しました。／エラーコード: CARD001」の
+                        // モーダルダイアログが出る（AppException 継承前は SYS999）。原因は分かっても
+                        // 操作の文脈から切り離されるため、ステータス欄でその場に出す。
                         // CancelEdit() は呼ばない（番号だけ直して再保存できるようにする）。
                         StatusMessage = duplicate.UserFriendlyMessage;
                         IsStatusError = true;

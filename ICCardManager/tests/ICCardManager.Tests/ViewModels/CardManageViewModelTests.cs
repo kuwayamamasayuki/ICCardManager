@@ -446,7 +446,8 @@ public class CardManageViewModelTests
     /// <para>
     /// 修正前は <c>CardRepository.UpdateAsyncInternal</c> に UNIQUE 制約違反の catch が無く、
     /// 生の <c>SQLiteException</c> が <c>App.OnDispatcherUnhandledException</c> まで抜けて
-    /// 「SYS00x ＋スタックトレース」の致命的エラーダイアログになり編集内容も失われた。
+    /// 「予期しないエラーが発生しました。／エラーコード: SYS999」という、原因も回復手段も
+    /// 示さないモーダルダイアログになっていた。
     /// 登録経路（<c>SaveAsync_NewCard</c>）は同じ操作を親切に案内するため、非対称だった。
     /// </para>
     /// <para>
