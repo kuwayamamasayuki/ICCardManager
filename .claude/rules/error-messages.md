@@ -111,6 +111,18 @@ StatusMessage = ExceptionMessageFormatter.ToUserMessage(ex, "台帳の保存");
 
 `GetErrorInfo` の文言が 3 要素を満たさない（「どうすれば」を欠く）のは、致命エラー時はユーザーの自己回復より**エラーコード＋スタックトレースによる原因究明**を優先する設計判断であり、品質ガイドライン違反ではない。新規の**通常エラー**経路では `ToUserMessage` を使うこと（`GetErrorInfo` を通常経路に転用しない）。
 
+### 同じ制約違反は「すべての経路」で同じ例外へ変換する（Issue #1757）
+
+DB 制約（UNIQUE 等）の違反を捕捉してドメイン例外へ変換するとき、**その制約に触れる経路を全部列挙してから書く**。1 経路だけ変換すると、同じユーザー操作が経路によって「親切な案内」と「クラッシュ相当」に分かれる。
+
+`CardRepository` は `INSERT` の UNIQUE 制約違反（`idx_card_type_number_active`）だけを `DuplicateCardNumberException` へ変換しており、`UPDATE` には同等の catch が無かった。結果、**カード登録で管理番号が重複すれば「別の番号を指定してください」と案内されるのに、カード編集で同じことをすると生の `SQLiteException` が未処理例外ハンドラーまで抜けて「SYS00x ＋スタックトレース」の致命的エラーダイアログ**になり、編集内容も失われた。
+
+- **変換用のドメイン例外は `AppException` を継承させる**。`App.OnDispatcherUnhandledException` / `ErrorDialogHelper.GetErrorInfo` / `CsvImportService.ToUserFacingErrorMessage` はいずれも `AppException` を特別扱いして `UserFriendlyMessage` を使うため、**捕捉漏れがあっても「予期しないエラー（SYS999）」ではなく整備済みの案内へ倒れる**。文言も例外クラス 1 か所に集約でき、経路ごとの食い違いを構造的に防げる
+- **新しい例外を投げるようにしたら、既存の catch 階層を再確認する**。#1757 では `UpdateAsync` が `SQLiteException` を投げなくなったことで、CSV インポートの `catch (SQLiteException)` → `DatabaseException` ラップ（＝`AppException` 分岐で適切な文言）を通らなくなり、`default` 分岐の「予期しないエラーが発生しました: …」へ退行した。**例外型の変更は、その型を前提にしていた上位の分岐を静かに外す**
+- **一括処理（CSVインポート等）では、行番号付きのエラーとして報告する**。復旧可能な入力ミスを結果全体のエラーにすると、利用者は「どの行を直せばよいか」が分からない。他のバリデーションエラーと同じ形に揃える
+- **エラー表示時に入力内容を消さない**。編集ダイアログで `CancelEdit()` 相当を呼ぶと、ユーザーは指摘された 1 項目だけを直して再保存できず、最初からやり直しになる
+- 回帰テストは「重複を検出すること」だけでなく「**正当な操作を塞いでいないこと**」を対で固定する。前者だけだと、対象の操作を無条件に失敗させる実装でも緑になる（#1757 では「削除済みカードの番号は再利用できる」「番号を変えない更新は成功する」を併置）
+
 ### サービス内の「例外 → 文言」の対応表は 1 か所に集約する（Issue #1744）
 
 同じ `catch` の ladder（`FileNotFoundException` → … → `catch (Exception)`）を複数のメソッドへ書き写さない。**次に対応表を変える人が、一部の経路を取りこぼす**。
