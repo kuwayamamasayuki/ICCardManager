@@ -580,18 +580,14 @@ public partial class MainViewModel : ViewModelBase
             // カード読み取り開始
             await _cardReader.StartReadingAsync();
 
-            // Issue #504: バス停未入力チェックはバックグラウンドで実行（起動を遅延させない）
-            _ = CheckIncompleteBusStopsAsync();
+            // Issue #504 / #1689 / #1758: DB を読む起動時チェックはバックグラウンドで、かつ**直列に**実行する
+            // （起動を遅延させず、同一接続上のコマンド並走も避ける）。詳細は RunStartupDataChecksAsync を参照。
+            _ = RunStartupDataChecksAsync();
 
             // Issue #1687: 更新通知チェック（latest_version.txt）もバックグラウンドで実行
-            // （共有フォルダのSMB遅延で起動をブロックしないため）
+            // （共有フォルダのSMB遅延で起動をブロックしないため）。
+            // DB を触らずファイル読み取りのみのため、上のチェック群とは独立に走らせてよい。
             _ = CheckUpdateNotificationAsync();
-
-            // Issue #1689: バックアップ健全性チェック。
-            // Issue #1737 で起動時タスクが直列 await になり、本メソッドが走る時点では
-            // 今回の自動バックアップは完了している（StartupTaskRunner の実行後に MainWindow を表示するため）。
-            // したがって判定材料には今回の成功記録が含まれ、成功していれば警告は出ない。
-            _ = CheckBackupHealthAsync();
 
             // 共有モード時はDB接続の定期ヘルスチェックを開始
             if (IsSharedMode)
@@ -659,6 +655,75 @@ public partial class MainViewModel : ViewModelBase
 
         ReplaceWarnings(
             w => w.Type == WarningType.BackupStale,
+            warning == null ? null : new[] { warning });
+    }
+
+    /// <summary>
+    /// Issue #1758: DB を読む起動時チェックを1本のバックグラウンドタスクへ直列に並べる。
+    /// internal: テストから直接呼び出して挙動を検証するため。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>なぜ直列か</b>: <see cref="Data.DbContext"/> は <c>SQLiteConnection</c> を1本しか持たず、
+    /// <c>LeaseConnectionAsync</c> はセマフォを取らない（Issue #1452 の「並列起動禁止」）。
+    /// 各チェックを個別に <c>_ =</c> で捨てると、戻り値を捨てた async メソッドの継続どうしが
+    /// 同一接続上で並走し、<c>SQLITE_MISUSE</c> または不定動作の原因になる（Issue #1737 と同じ形）。
+    /// fire-and-forget の入口を1本に絞れば、起動をブロックせずに直列性を保てる。
+    /// </para>
+    /// <para>
+    /// <b>なぜ個別に catch するか</b>: fire-and-forget には「前段が落ちても後段は動く」という
+    /// 副次的な性質がある。単純な <c>await</c> の連結はこれを失わせるため、各呼び出しを個別に
+    /// 包んで明示的に保存する（Issue #1737）。
+    /// </para>
+    /// <para>
+    /// バックアップ健全性チェックは、Issue #1737 で起動時タスクが直列 await になったことにより
+    /// 本メソッドが走る時点で今回の自動バックアップが完了している（<c>StartupTaskRunner</c> の
+    /// 実行後に MainWindow を表示するため）。したがって判定材料には今回の成功記録が含まれる。
+    /// </para>
+    /// </remarks>
+    internal async Task RunStartupDataChecksAsync()
+    {
+        await RunGuardedStartupCheckAsync(CheckIncompleteBusStopsAsync, "バス停名未入力チェック");
+        await RunGuardedStartupCheckAsync(CheckBackupHealthAsync, "バックアップ健全性チェック");
+        await RunGuardedStartupCheckAsync(CheckCarryoverDataLossAsync, "繰越情報消失チェック");
+    }
+
+    /// <summary>
+    /// 起動時チェック1件を実行し、失敗しても後続へ影響させない。
+    /// </summary>
+    private async Task RunGuardedStartupCheckAsync(Func<Task> check, string checkName)
+    {
+        try
+        {
+            await check();
+        }
+        catch (Exception ex)
+        {
+            // 障害調査で必要になるため Information ではなく Error で残す（.claude/rules のロギング規約）。
+            // ユーザーへの通知は行わない（起動を妨げない補助的なチェックのため）。
+            _logger?.LogError(ex, "起動時の{CheckName}に失敗しました", checkName);
+        }
+    }
+
+    /// <summary>
+    /// Issue #1758: 繰越情報消失チェック（WarningServiceに委譲）。
+    /// internal: テストから直接呼び出して挙動を検証するため。
+    /// </summary>
+    /// <remarks>
+    /// operation_log の走査（共有モードでは SMB アクセス）を伴うため Task.Run でバックグラウンド実行し、
+    /// WarningMessages の更新は await 後の UI コンテキストで行う。<c>CheckBackupHealthAsync</c> と同じ形。
+    /// DB を直接修正して復旧された場合に警告が消えるよう、解消済みなら既存の警告を取り除く。
+    /// </remarks>
+    internal async Task CheckCarryoverDataLossAsync()
+    {
+        var sequence = ++_carryoverDataLossCheckSequence;
+        var warning = await Task.Run(() => _warningService.CheckCarryoverDataLossWarningAsync());
+
+        // Issue #1739: より新しいチェックが始まっていれば、この結果は陳腐化している
+        if (sequence != _carryoverDataLossCheckSequence) return;
+
+        ReplaceWarnings(
+            w => w.Type == WarningType.CarryoverDataLoss,
             warning == null ? null : new[] { warning });
     }
 
@@ -883,6 +948,7 @@ public partial class MainViewModel : ViewModelBase
     /// </remarks>
     private int _busStopCheckSequence;
     private int _backupHealthCheckSequence;
+    private int _carryoverDataLossCheckSequence;
 
     /// <summary>
     /// バス停名未入力チェック（WarningServiceに委譲）。
@@ -2773,6 +2839,10 @@ public partial class MainViewModel : ViewModelBase
         // ダイアログを閉じた後、貸出中カード一覧とダッシュボードを更新
         await RefreshLentCardsAsync();
         await RefreshDashboardAsync();
+
+        // Issue #1758: カードの論理削除で繰越情報消失の母集団が変わる。カード管理画面が唯一の入口のため、
+        // ここで再判定しないと「クリックしても対象が無い警告」が再起動まで残る（Issue #1739 の教訓）。
+        await CheckCarryoverDataLossAsync();
     }
 
     /// <summary>
@@ -2936,6 +3006,15 @@ public partial class MainViewModel : ViewModelBase
             case WarningType.DatabaseConnectionLost:
                 // Issue #1110: 接続断警告クリックで手動再接続を試行
                 await RetryDatabaseConnectionAsync();
+                break;
+
+            case WarningType.CarryoverDataLoss:
+                // Issue #1758: 繰越情報消失警告クリックで、失われた元の値の一覧を表示する。
+                // 復旧は DB の直接修正でしか行えないため、ここでは値を確認できることが目的。
+                _navigationService.ShowDialog<Views.Dialogs.CarryoverDataLossDialog>();
+
+                // ダイアログを開いている間に他PCで復旧された場合に備えて再判定する
+                await CheckCarryoverDataLossAsync();
                 break;
 
             case WarningType.BackupStale:

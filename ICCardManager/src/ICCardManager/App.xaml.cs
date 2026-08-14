@@ -382,6 +382,8 @@ namespace ICCardManager
             // Issue #1687: 共有フォルダの latest_version.txt による更新通知
             services.AddSingleton<IUpdateNotificationService, UpdateNotificationService>();
             services.AddSingleton<IBackupHealthService, BackupHealthService>();
+            // Issue #1758: Issue #1726 以前の UPDATE で失われた繰越情報の検出（検知のみ・復旧はしない）
+            services.AddSingleton<ICarryoverDataLossDetector, CarryoverDataLossDetector>();
             // Issue #1737: 起動時タスク（バックアップ→古いデータ削除→月次VACUUM）の直列実行
             services.AddSingleton<StartupTaskRunner>();
             // Issue #1690: 障害時の自己切り分け用の接続診断
@@ -428,6 +430,7 @@ namespace ICCardManager
             services.AddTransient<LedgerDetailViewModel>();
             services.AddTransient<SystemManageViewModel>();
             services.AddTransient<IncompleteBusStopViewModel>();
+            services.AddTransient<CarryoverDataLossViewModel>();
             services.AddTransient<LedgerRowEditViewModel>();
             services.AddTransient<ReportPreflightViewModel>();
             services.AddTransient<ConnectionDiagnosticsViewModel>();
@@ -453,6 +456,7 @@ namespace ICCardManager
             services.AddTransient<Views.Dialogs.SystemManageDialog>();
             services.AddTransient<Views.Dialogs.AdminDashboardDialog>();
             services.AddTransient<Views.Dialogs.IncompleteBusStopDialog>();
+            services.AddTransient<Views.Dialogs.CarryoverDataLossDialog>();
             services.AddTransient<Views.Dialogs.LedgerRowEditDialog>();
             services.AddTransient<Views.Dialogs.CardTypeSelectionDialog>();
             services.AddTransient<Views.Dialogs.ConnectionDiagnosticsDialog>();

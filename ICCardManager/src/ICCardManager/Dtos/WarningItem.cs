@@ -30,7 +30,16 @@ namespace ICCardManager.Dtos
         NewVersionAvailable,
 
         /// <summary>自動バックアップが長期間成功していない警告（Issue #1689）</summary>
-        BackupStale
+        BackupStale,
+
+        /// <summary>
+        /// 紙出納簿移行カードの繰越累計・開始ページ番号が失われている警告（Issue #1758）
+        /// </summary>
+        /// <remarks>
+        /// Issue #1726 以前の <c>UPDATE ic_card</c> が繰越4項目を既定値で上書きしていたことによる被害。
+        /// 検出のみで復旧手段は持たない（復旧は DB の直接修正）。
+        /// </remarks>
+        CarryoverDataLoss
     }
 
     /// <summary>
