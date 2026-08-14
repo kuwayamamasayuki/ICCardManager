@@ -35,11 +35,11 @@ public class CarryoverDataLossDetectorTests
     /// <summary>
     /// 紙出納簿から移行したカード（繰越情報を持つ健全な状態）
     /// </summary>
-    private static IcCard MigratedCard(string idm = TargetIdm) => new IcCard
+    private static IcCard MigratedCard(string idm = TargetIdm, string cardNumber = "001") => new IcCard
     {
         CardIdm = idm,
         CardType = "はやかけん",
-        CardNumber = "001",
+        CardNumber = cardNumber,
         Note = "移行カード",
         StartingPageNumber = 7,
         CarryoverIncomeTotal = 45000,
@@ -50,9 +50,9 @@ public class CarryoverDataLossDetectorTests
     /// <summary>
     /// 繰越情報が既定値へ落ちた状態（Issue #1726 以前の UPDATE 後）
     /// </summary>
-    private static IcCard DamagedCard(string idm = TargetIdm)
+    private static IcCard DamagedCard(string idm = TargetIdm, string cardNumber = "001")
     {
-        var card = MigratedCard(idm);
+        var card = MigratedCard(idm, cardNumber);
         card.StartingPageNumber = 1;
         card.CarryoverIncomeTotal = 0;
         card.CarryoverExpenseTotal = 0;
@@ -197,6 +197,35 @@ public class CarryoverDataLossDetectorTests
         var result = await detector.DetectAsync();
 
         result.Select(i => i.CardIdm).Should().BeEquivalentTo(new[] { TargetIdm, secondIdm });
+    }
+
+    [Fact]
+    public async Task DetectAsync_消失の発生が古い順に返すこと()
+    {
+        // 並び順は警告文言に効く: WarningService.FormatCardNames は先頭
+        // AppConstants.CarryoverDataLossWarningMaxListedCards 枚だけを名前で列挙し、
+        // 残りを「ほか○枚」に畳む。順序が不定だと、どのカードが名指しされるかが不定になる。
+        //
+        // **カード名の昇順が時系列と逆になる配置にする**。両カードの表示名が同じだと
+        // 「名前順に並べ替える」実装へ退行しても順序が変わらず、テストが素通りする
+        // （実際に OrderBy(CardDisplayName) を注入して赤になることを確認済み）。
+        const string olderIdm = "AAAABBBBCCCC0001";
+        const string newerIdm = "AAAABBBBCCCC0002";
+
+        var detector = CreateDetector(
+            logs: new[]
+            {
+                UpdateLog(MigratedCard(newerIdm, "001"), DamagedCard(newerIdm, "001"),
+                    new DateTime(2026, 6, 15), id: 20),
+                UpdateLog(MigratedCard(olderIdm, "900"), DamagedCard(olderIdm, "900"),
+                    new DateTime(2026, 5, 20), id: 21)
+            },
+            currentCards: new[] { DamagedCard(newerIdm, "001"), DamagedCard(olderIdm, "900") });
+
+        var result = await detector.DetectAsync();
+
+        result.Select(i => i.CardDisplayName).Should().ContainInOrder("はやかけん 900", "はやかけん 001");
+        result.Select(i => i.CardIdm).Should().ContainInOrder(olderIdm, newerIdm);
     }
 
     #endregion

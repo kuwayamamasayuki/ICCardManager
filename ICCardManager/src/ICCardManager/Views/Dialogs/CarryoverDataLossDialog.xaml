@@ -101,9 +101,11 @@
             </DataGrid.Columns>
         </DataGrid>
 
-        <!-- 0件時の案内（警告クリック後に他PCで復旧された場合などに到達する） -->
+        <!-- 0件時の案内（警告クリック後に他PCで復旧された場合などに到達する）。
+             文言は ViewModel が持つ: 一覧が空になる理由には「被害が無い」と「確認できなかった」の
+             2つがあり、後者に「ありません」と出すと被害なしと誤読させるため（Issue #1758）。 -->
         <TextBlock Grid.Row="2"
-                   Text="繰越情報が失われたカードはありません。"
+                   Text="{Binding EmptyStateMessage}"
                    TextWrapping="Wrap"
                    VerticalAlignment="Center"
                    HorizontalAlignment="Center"

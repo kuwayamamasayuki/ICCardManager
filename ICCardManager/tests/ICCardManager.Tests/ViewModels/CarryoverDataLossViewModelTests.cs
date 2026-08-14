@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using FluentAssertions;
 using ICCardManager.Common;
@@ -96,6 +97,60 @@ public class CarryoverDataLossViewModelTests
 
         vm.Items.Should().BeEmpty();
         vm.HasItems.Should().BeFalse();
+        vm.EmptyStateMessage.Should().Be(CarryoverDataLossViewModel.NoLossMessage);
+    }
+
+    [Fact]
+    public async Task InitializeAsync_検出に失敗したとき_被害なしと読める文言を出さないこと()
+    {
+        // 一覧が空になる理由は「被害が無い」と「確認できなかった」の2つある。
+        // どちらも同じ「ありません」を出すと、DB 接続断で確認できなかっただけの利用者に
+        // 「うちは無事だ」と誤って結論させる。データ健全性の画面で最も避けたい誤誘導。
+        var detector = new Mock<ICarryoverDataLossDetector>();
+        detector.Setup(d => d.DetectAsync()).ThrowsAsync(new InvalidOperationException("DB 接続断を注入"));
+        var vm = new CarryoverDataLossViewModel(detector.Object);
+
+        Func<Task> act = () => vm.InitializeAsync();
+
+        // 呼び出し元（ダイアログ）がエラー通知を出せるよう、例外はそのまま伝える
+        await act.Should().ThrowAsync<InvalidOperationException>();
+
+        vm.HasItems.Should().BeFalse();
+        vm.EmptyStateMessage.Should().Be(CarryoverDataLossViewModel.DetectionFailedMessage);
+        vm.EmptyStateMessage.Should().NotBe(CarryoverDataLossViewModel.NoLossMessage);
+        vm.EmptyStateMessage.Should().NotContain("ありません。", "「被害なし」と読める断定をしないこと");
+    }
+
+    [Fact]
+    public async Task InitializeAsync_失敗後に成功したら案内を戻すこと()
+    {
+        // 接続が復旧して再読み込みしたのに「確認に失敗しました」が残ると、
+        // 今度は逆に「まだ確認できていない」と誤解させる。
+        var detector = new Mock<ICarryoverDataLossDetector>();
+        detector.SetupSequence(d => d.DetectAsync())
+            .ThrowsAsync(new InvalidOperationException("DB 接続断を注入"))
+            .ReturnsAsync(new List<CarryoverDataLossItem>());
+        var vm = new CarryoverDataLossViewModel(detector.Object);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => vm.InitializeAsync());
+        await vm.InitializeAsync();
+
+        vm.EmptyStateMessage.Should().Be(CarryoverDataLossViewModel.NoLossMessage);
+    }
+
+    [Fact]
+    public void DetectionFailedMessage_エラーメッセージ品質を満たすこと()
+    {
+        // .claude/rules/error-messages.md の3要素
+        var text = CarryoverDataLossViewModel.DetectionFailedMessage;
+
+        text.Should().Contain("繰越情報");                 // 何が
+        text.Should().MatchRegex("失敗|できません");        // なぜ
+        // 「〜してください」に限定せず「〜てください」で判定する。本文言の最後の行動は
+        // 「もう一度この画面を開く」であり、規約が求めるのは行動指示型で終わることであって
+        // サ変動詞の形ではない（文言を正規表現へ合わせにいかない）。
+        Regex.IsMatch(text, "てください。?$").Should().BeTrue("行動指示型で終わること");
+        text.Length.Should().BeGreaterThan(20);
     }
 
     [Fact]

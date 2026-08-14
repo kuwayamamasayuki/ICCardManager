@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Threading.Tasks;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -25,6 +26,22 @@ namespace ICCardManager.ViewModels
         /// </remarks>
         public const string NotLostText = "（消失なし）";
 
+        /// <summary>被害が1件も無かったときの案内</summary>
+        public const string NoLossMessage = "繰越情報が失われたカードはありません。";
+
+        /// <summary>
+        /// 検出そのものに失敗したときの案内
+        /// </summary>
+        /// <remarks>
+        /// 一覧が空になる理由は「被害が無い」と「確認できなかった」の2つある。
+        /// どちらにも <see cref="NoLossMessage"/> を出すと、DB 接続断で確認できなかっただけの
+        /// 利用者に「うちは無事だ」と誤って結論させる。**「判定できない」を「異常なし」に丸めない**
+        /// （.claude/rules/development-conventions.md の Issue #1748 の項と同じ判断）。
+        /// </remarks>
+        public const string DetectionFailedMessage =
+            "繰越情報の確認に失敗しました（被害が無いという意味ではありません）。" +
+            "データベースへの接続状態を確認したうえで、もう一度この画面を開いてください。";
+
         private readonly ICarryoverDataLossDetector _detector;
 
         public CarryoverDataLossViewModel(ICarryoverDataLossDetector detector)
@@ -40,15 +57,45 @@ namespace ICCardManager.ViewModels
         private bool _hasItems;
 
         /// <summary>
+        /// 一覧が空のときに表示する案内
+        /// </summary>
+        /// <remarks>
+        /// 「被害が無い」と「確認できなかった」を同じ文言で表さないための state。
+        /// 表示条件（<see cref="HasItems"/>）と文言を分けることで、View 側は単一の
+        /// <c>DataTrigger</c> のままで両者を出し分けられる。
+        /// </remarks>
+        [ObservableProperty]
+        private string _emptyStateMessage = NoLossMessage;
+
+        /// <summary>
         /// 検出をやり直して一覧を作り直す
         /// </summary>
         /// <remarks>
+        /// <para>
         /// 復旧の進み具合を確認するために再実行できる。全消ししてから詰め直すのは
         /// 「自分が出した行だけを入れ替える」形（本一覧の行はすべてこのメソッドが作る）。
+        /// </para>
+        /// <para>
+        /// 失敗しても例外は握りつぶさず、<see cref="EmptyStateMessage"/> を切り替えてから
+        /// そのまま伝える。呼び出し元（ダイアログ）がエラー通知を出す責務を持つため。
+        /// 成功時に文言を戻すのも必須で、戻さないと復旧後の再読み込みで今度は逆に
+        /// 「まだ確認できていない」と誤解させる。
+        /// </para>
         /// </remarks>
         public async Task InitializeAsync()
         {
-            var items = await _detector.DetectAsync();
+            IReadOnlyList<CarryoverDataLossItem> items;
+            try
+            {
+                items = await _detector.DetectAsync();
+            }
+            catch
+            {
+                Items.Clear();
+                HasItems = false;
+                EmptyStateMessage = DetectionFailedMessage;
+                throw;
+            }
 
             Items.Clear();
             foreach (var item in items)
@@ -57,6 +104,7 @@ namespace ICCardManager.ViewModels
             }
 
             HasItems = Items.Count > 0;
+            EmptyStateMessage = NoLossMessage;
         }
     }
 

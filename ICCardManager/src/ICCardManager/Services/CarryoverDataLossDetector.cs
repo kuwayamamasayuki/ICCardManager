@@ -86,11 +86,24 @@ namespace ICCardManager.Services
                 .GroupBy(c => c.CardIdm)
                 .ToDictionary(g => g.Key, g => g.First());
 
-            var detected = new Dictionary<string, CarryoverDataLossItem>();
+            // 「検出済みのカード」の判定と「返す順序」を分けて持つ。
+            // Dictionary の列挙順は言語仕様上の保証がなく、一方で並び順は警告文言へ載せる
+            // 先頭数枚（WarningService.FormatCardNames）の選択に効くため、順序は List で明示する。
+            var detectedIdms = new HashSet<string>();
+            var detected = new List<CarryoverDataLossItem>();
 
             // 時系列順に走査し、カードごとに「最初の消失」だけを採る。2回目以降の UPDATE では
             // BeforeData も既に既定値へ落ちているため、最新のログを採ると失われた値として
             // 既定値（1 / 0 / 0 / null）を提示してしまう。
+            //
+            // この「最初の1件で打ち切る」形は、**1回の UPDATE で4項目が同時に落ちる**という
+            // 前提に依存する。Issue #1726 以前の CardManageViewModel は画面入力だけから組んだ
+            // IcCard を渡していたため4項目が必ず同時に既定値へ落ちており、ic_card へ UPDATE ログを
+            // 書く経路は当時これ1つだった（CSV インポートは一括の IMPORT ログを書く）。
+            // したがって「別々のログで異なる項目が落ちる」形は現状では発生しない。
+            // ic_card の UPDATE ログを書く経路を増やすときは、この前提が崩れていないか確認すること
+            // （崩れる場合は複数ログの消失項目をマージする必要があり、LostAt / OperatorName を
+            // どの操作のものにするかという別の判断も伴う）。
             var orderedLogs = (logs ?? Enumerable.Empty<OperationLog>())
                 .Where(l => l != null && !string.IsNullOrEmpty(l.TargetId))
                 .OrderBy(l => l.Timestamp)
@@ -98,7 +111,7 @@ namespace ICCardManager.Services
 
             foreach (var log in orderedLogs)
             {
-                if (detected.ContainsKey(log.TargetId))
+                if (detectedIdms.Contains(log.TargetId))
                     continue;
 
                 if (!currentCards.TryGetValue(log.TargetId, out var current))
@@ -111,10 +124,13 @@ namespace ICCardManager.Services
 
                 var item = BuildLossItem(log, before, after, current);
                 if (item != null)
-                    detected[log.TargetId] = item;
+                {
+                    detectedIdms.Add(log.TargetId);
+                    detected.Add(item);
+                }
             }
 
-            return detected.Values.ToList();
+            return detected;
         }
 
         /// <summary>
