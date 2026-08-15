@@ -437,6 +437,10 @@ public class StaffManageViewModelTests
         };
         _viewModel.SelectedStaff = staff;
 
+        // Issue #1760: 削除前データを読めないと削除自体を行わないため、
+        // 対象行が存在する（実 DB で成立する）状態を仕掛ける
+        _staffRepositoryMock.Setup(r => r.GetByIdmAsync("FFFF000000000001", false))
+            .ReturnsAsync(new Staff { StaffIdm = "FFFF000000000001", Name = "田中太郎" });
         _staffRepositoryMock.Setup(r => r.DeleteAsync("FFFF000000000001")).ReturnsAsync(true);
         _staffRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<Staff>());
 
@@ -483,6 +487,10 @@ public class StaffManageViewModelTests
         var staff = new StaffDto { StaffIdm = "FFFF000000000001", Name = "田中太郎" };
         _viewModel.SelectedStaff = staff;
 
+        // Issue #1760: 削除前データを読めないと DeleteAsync まで到達しないため、
+        // 対象行が存在する状態を仕掛けたうえで DeleteAsync に例外を注入する
+        _staffRepositoryMock.Setup(r => r.GetByIdmAsync("FFFF000000000001", false))
+            .ReturnsAsync(new Staff { StaffIdm = "FFFF000000000001", Name = "田中太郎" });
         _staffRepositoryMock.Setup(r => r.DeleteAsync("FFFF000000000001"))
             .ThrowsAsync(new Exception(rawTechnicalDetail));
 
@@ -1146,6 +1154,116 @@ public class StaffManageViewModelTests
             log.Action == OperationLogger.Actions.Update &&
             log.BeforeData!.Contains("田中太郎") &&
             log.AfterData!.Contains("田中花子"))), Times.Once);
+    }
+
+    /// <summary>
+    /// Issue #1760: 削除前データを読めなかったときは削除自体を行わないこと
+    /// </summary>
+    /// <remarks>
+    /// カード側と同型。<c>DeleteAsync</c>（論理削除）の WHERE も <c>is_deleted = 0</c> のため、
+    /// 読み取り後に他 PC が復元すると論理削除だけが確定して監査記録が残らない。
+    /// </remarks>
+    [Fact]
+    public async Task DeleteAsync_WhenTargetRowMissing_ShouldNotDeleteWithoutAuditLog()
+    {
+        // Arrange
+        const string idm = "FFFF000000000001";
+        _viewModel.SelectedStaff = new StaffDto
+        {
+            StaffIdm = idm,
+            Name = "田中太郎",
+            Number = "S-001"
+        };
+
+        // 読み取り時点では他 PC が論理削除済み
+        _staffRepositoryMock.Setup(r => r.GetByIdmAsync(idm, false)).ReturnsAsync((Staff?)null);
+        // その直後に他 PC が復元した → 論理削除は 1 行に一致して成功し得る
+        _staffRepositoryMock.Setup(r => r.DeleteAsync(idm)).ReturnsAsync(true);
+        _staffRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<Staff>());
+
+        // Act
+        await _viewModel.DeleteAsync();
+
+        // Assert
+        _staffRepositoryMock.Verify(r => r.DeleteAsync(idm), Times.Never,
+            "削除前データを読めていない状態で削除すると、変更が監査記録に残らない");
+        _operationLogRepositoryMock.Verify(r => r.InsertAsync(It.IsAny<OperationLog>()), Times.Never);
+
+        // 一覧を再読込し、キャッシュも破棄していること（書き込みを通らないため #1759 の破棄が働かない）
+        _staffRepositoryMock.Verify(r => r.InvalidateCache(), Times.Once);
+        _staffRepositoryMock.Verify(r => r.GetAllAsync(), Times.Once);
+        _viewModel.IsStatusError.Should().BeTrue();
+        _viewModel.StatusMessage.Should().Contain("田中太郎");
+        _viewModel.StatusMessage.Should().EndWith("やり直してください。");
+    }
+
+    /// <summary>
+    /// Issue #1760: 削除が成功した経路では必ず操作ログが 1 行残ること（正常系の回帰固定）
+    /// </summary>
+    [Fact]
+    public async Task DeleteAsync_WhenSucceeds_ShouldWriteAuditLog()
+    {
+        // Arrange
+        const string idm = "FFFF000000000001";
+        _viewModel.SelectedStaff = new StaffDto
+        {
+            StaffIdm = idm,
+            Name = "田中太郎",
+            Number = "S-001"
+        };
+
+        _staffRepositoryMock.Setup(r => r.GetByIdmAsync(idm, false))
+            .ReturnsAsync(new Staff { StaffIdm = idm, Name = "田中太郎", Number = "S-001" });
+        _staffRepositoryMock.Setup(r => r.DeleteAsync(idm)).ReturnsAsync(true);
+        _staffRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<Staff>());
+
+        // Act
+        await _viewModel.DeleteAsync();
+
+        // Assert
+        _operationLogRepositoryMock.Verify(r => r.InsertAsync(It.Is<OperationLog>(log =>
+            log.TargetTable == OperationLogger.Tables.Staff &&
+            log.TargetId == idm &&
+            log.Action == OperationLogger.Actions.Delete)), Times.Once);
+    }
+
+    /// <summary>
+    /// Issue #1760: 復元の直後に他 PC が職員を削除しても、操作ログは残ること
+    /// </summary>
+    [Fact]
+    public async Task SaveAsync_WhenRestoredStaffCannotBeReRead_ShouldStillWriteAuditLog()
+    {
+        // Arrange
+        const string idm = "FFFF000000000001";
+        _staffRepositoryMock.Setup(r => r.GetByIdmAsync(idm, true)).ReturnsAsync(new Staff
+        {
+            StaffIdm = idm,
+            Name = "田中太郎",
+            Number = "S-001",
+            IsDeleted = true
+        });
+        _staffRepositoryMock.Setup(r => r.RestoreAsync(idm)).ReturnsAsync(true);
+        // 復元の直後に他 PC が削除した → 再読取は null
+        _staffRepositoryMock.Setup(r => r.GetByIdmAsync(idm, false)).ReturnsAsync((Staff?)null);
+        _staffRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<Staff>());
+
+        OperationLog? recorded = null;
+        _operationLogRepositoryMock.Setup(r => r.InsertAsync(It.IsAny<OperationLog>()))
+            .Callback<OperationLog>(log => recorded = log)
+            .ReturnsAsync(1);
+
+        _viewModel.StartNewStaff();
+        _viewModel.EditStaffIdm = idm;
+        _viewModel.EditName = "鈴木花子";
+
+        // Act
+        await _viewModel.SaveAsync();
+
+        // Assert
+        recorded.Should().NotBeNull("復元が確定した以上、監査記録を落としてはならない");
+        recorded!.Action.Should().Be(OperationLogger.Actions.Restore);
+        recorded.TargetId.Should().Be(idm);
+        recorded.AfterData.Should().Contain("田中太郎", "復元前に読み取った値をそのまま記録すること");
     }
 
     /// <summary>

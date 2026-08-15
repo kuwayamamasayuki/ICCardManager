@@ -217,11 +217,11 @@ namespace ICCardManager.ViewModels
                         if (restored)
                         {
                             // 操作ログを記録（復元後のデータを取得）
-                            var restoredCard = await _cardRepository.GetByIdmAsync(idm);
-                            if (restoredCard != null)
-                            {
-                                await _operationLogger.LogCardRestoreAsync(restoredCard);
-                            }
+                            // Issue #1760: 再読取が null になるのは復元の直後に他 PC が削除した場合だけ。
+                            // 復元は確定済みなので記録を落とさず、復元前のデータで補う。
+                            var restoredCard = await _cardRepository.GetByIdmAsync(idm)
+                                ?? CreateRestoredSnapshot(existing);
+                            await _operationLogger.LogCardRestoreAsync(restoredCard);
 
                             _dialogService.ShowInformation(
                                 $"{existing.CardNumber} を復元しました",
@@ -399,11 +399,11 @@ namespace ICCardManager.ViewModels
                                 if (restored)
                                 {
                                     // 操作ログを記録（復元後のデータを取得）
-                                    var restoredCard = await _cardRepository.GetByIdmAsync(EditCardIdm);
-                                    if (restoredCard != null)
-                                    {
-                                        await _operationLogger.LogCardRestoreAsync(restoredCard);
-                                    }
+                                    // Issue #1760: 再読取が null になるのは復元の直後に他 PC が
+                                    // 削除した場合だけ。復元は確定済みなので記録を落とさない。
+                                    var restoredCard = await _cardRepository.GetByIdmAsync(EditCardIdm)
+                                        ?? CreateRestoredSnapshot(existing);
+                                    await _operationLogger.LogCardRestoreAsync(restoredCard);
 
                                     var restoredIdm = EditCardIdm;
                                     var restoredNumber = existing.CardNumber;
@@ -817,17 +817,29 @@ namespace ICCardManager.ViewModels
 
             using (BeginBusy("削除中..."))
             {
-                // 削除前のデータを取得（操作ログ用）
-                var card = await _cardRepository.GetByIdmAsync(SelectedCard.CardIdm);
+                // Issue #1760: 識別情報は再読込より前に確定させる（再読込で選択が解除されるため）
+                var targetIdm = SelectedCard.CardIdm;
+                var targetLabel = FormatCardLabel(SelectedCard.CardType, SelectedCard.CardNumber);
 
-                var deleteResult = await _cardRepository.DeleteAsync(SelectedCard.CardIdm);
+                // 削除前のデータを取得（操作ログ用）
+                //
+                // Issue #1760: 読めなければ削除自体を行わない。読み取れない時点で対象カードは
+                // 現在存在しないが、その直後に他 PC が復元すると DeleteAsync（WHERE is_deleted = 0）は
+                // 1 行に一致して成功し得る。従来の `if (card != null)` ガードでは、論理削除だけが
+                // 確定して operation_log には 1 行も残らなかった。削除は監査上もっとも重要な操作で、
+                // 「誰がいつ削除したのか分からない」記録は後から復元できない。
+                var card = await _cardRepository.GetByIdmAsync(targetIdm);
+                if (card == null)
+                {
+                    await NotifyDeleteConflictAsync(targetLabel);
+                    return;
+                }
+
+                var deleteResult = await _cardRepository.DeleteAsync(targetIdm);
                 if (deleteResult == CardOperationResult.Success)
                 {
                     // 操作ログを記録（Issue #429: 認証済み職員のIDmを使用）
-                    if (card != null)
-                    {
-                        await _operationLogger.LogCardDeleteAsync(card);
-                    }
+                    await _operationLogger.LogCardDeleteAsync(card);
 
                     await LoadCardsAsync();
                     CancelEdit();
@@ -835,6 +847,13 @@ namespace ICCardManager.ViewModels
                     // 完了メッセージは必ず後処理のあとに設定する（先に設定すると一度も表示されない）。
                     StatusMessage = "削除しました";
                     IsStatusError = false;
+                }
+                else if (deleteResult == CardOperationResult.NotFound)
+                {
+                    // Issue #1760: 事前読み取りで検出した場合と**同じ条件**（対象行が無い）なので
+                    // 同じ文言で案内する。検出のタイミングによって案内が変わると、
+                    // 同じ状況に別の説明が出ることになる（Issue #1757 と同じ判断）。
+                    await NotifyDeleteConflictAsync(targetLabel);
                 }
                 else
                 {
@@ -845,6 +864,24 @@ namespace ICCardManager.ViewModels
                     await LoadCardsAsync();
                 }
             }
+        }
+
+        /// <summary>
+        /// 削除対象のカードが見つからなかった（競合）ことを案内し、カード一覧を再読込する
+        /// </summary>
+        /// <param name="targetLabel">対象カードの表示名（再読込より前に確定させたもの）</param>
+        /// <remarks>
+        /// Issue #1760: 削除は編集フォーム非表示時にも実行できるため、案内はステータス欄ではなく
+        /// ダイアログで出す（Issue #1109 と同じ理由）。文言が「再読み込みしました」と述べるため
+        /// 再読込を先に行い、書き込みを 1 回も通らない経路ではキャッシュも明示的に破棄する。
+        /// </remarks>
+        private async Task NotifyDeleteConflictAsync(string targetLabel)
+        {
+            _cardRepository.InvalidateCache();
+            await LoadCardsAsync();
+            _dialogService.ShowError(
+                ConcurrencyConflictMessage.ForDelete(targetLabel, "カード一覧"),
+                "削除できません");
         }
 
         /// <summary>
@@ -1028,6 +1065,37 @@ namespace ICCardManager.ViewModels
         }
 
         /// <summary>
+        /// 復元後のカードの状態を、復元前に読み取ったデータから組み立てる
+        /// </summary>
+        /// <param name="deletedCard">復元前に読み取ったカード（<c>includeDeleted: true</c> で取得したもの）</param>
+        /// <remarks>
+        /// Issue #1760: 復元直後の再読取が失敗したときに、操作ログの <c>AfterData</c> として使う。
+        /// <c>RestoreAsync</c> が変えるのは <c>is_deleted</c> / <c>deleted_at</c> の 2 列だけなので、
+        /// それ以外は復元前の値をそのまま引き継ぐ（<see cref="CreateRefundedSnapshot"/> と同じ理由）。
+        /// </remarks>
+        private static IcCard CreateRestoredSnapshot(IcCard deletedCard)
+        {
+            return new IcCard
+            {
+                CardIdm = deletedCard.CardIdm,
+                CardType = deletedCard.CardType,
+                CardNumber = deletedCard.CardNumber,
+                Note = deletedCard.Note,
+                IsLent = deletedCard.IsLent,
+                LastLentAt = deletedCard.LastLentAt,
+                LastLentStaff = deletedCard.LastLentStaff,
+                IsRefunded = deletedCard.IsRefunded,
+                RefundedAt = deletedCard.RefundedAt,
+                StartingPageNumber = deletedCard.StartingPageNumber,
+                CarryoverIncomeTotal = deletedCard.CarryoverIncomeTotal,
+                CarryoverExpenseTotal = deletedCard.CarryoverExpenseTotal,
+                CarryoverFiscalYear = deletedCard.CarryoverFiscalYear,
+                IsDeleted = false,
+                DeletedAt = null
+            };
+        }
+
+        /// <summary>
         /// カード操作の失敗原因に応じたエラーメッセージを返す
         /// </summary>
         /// <param name="result">操作結果</param>
@@ -1093,11 +1161,11 @@ namespace ICCardManager.ViewModels
                             if (restored)
                             {
                                 // 操作ログを記録（復元後のデータを取得）
-                                var restoredCard = await _cardRepository.GetByIdmAsync(e.Idm);
-                                if (restoredCard != null)
-                                {
-                                    await _operationLogger.LogCardRestoreAsync(restoredCard);
-                                }
+                                // Issue #1760: 再読取が null になるのは復元の直後に他 PC が
+                                // 削除した場合だけ。復元は確定済みなので記録を落とさない。
+                                var restoredCard = await _cardRepository.GetByIdmAsync(e.Idm)
+                                    ?? CreateRestoredSnapshot(existing);
+                                await _operationLogger.LogCardRestoreAsync(restoredCard);
 
                                 var restoredIdm = e.Idm;
                                 var restoredNumber = existing.CardNumber;

@@ -724,6 +724,10 @@ public class CardManageViewModelTests
         };
         _viewModel.SelectedCard = card;
 
+        // Issue #1760: 削除前データを読めないと削除自体を行わないため、
+        // 対象行が存在する（実 DB で成立する）状態を仕掛ける
+        _cardRepositoryMock.Setup(r => r.GetByIdmAsync("0102030405060708", false))
+            .ReturnsAsync(new IcCard { CardIdm = "0102030405060708", CardType = "はやかけん", CardNumber = "H-001" });
         _cardRepositoryMock.Setup(r => r.DeleteAsync("0102030405060708")).ReturnsAsync(ICCardManager.Data.Repositories.CardOperationResult.Success);
         _cardRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<IcCard>());
 
@@ -2046,6 +2050,10 @@ public class CardManageViewModelTests
             IsLent = false
         };
 
+        // Issue #1760: 削除前データを読めないと削除自体を行わないため、
+        // 対象行が存在する（実 DB で成立する）状態を仕掛ける
+        _cardRepositoryMock.Setup(r => r.GetByIdmAsync(idm, false))
+            .ReturnsAsync(new IcCard { CardIdm = idm, CardType = "はやかけん", CardNumber = "H-001" });
         _cardRepositoryMock.Setup(r => r.DeleteAsync(idm))
             .ReturnsAsync(ICCardManager.Data.Repositories.CardOperationResult.Success);
         _cardRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<IcCard>());
@@ -2333,6 +2341,135 @@ public class CardManageViewModelTests
         after.IsRefunded.Should().BeTrue("この操作が変えたのは払戻状態であること");
         after.RefundedAt.Should().NotBeNull();
         after.StartingPageNumber.Should().Be(7, "この操作が変えていない列は払戻前の値を保つこと");
+    }
+
+    /// <summary>
+    /// Issue #1760: 削除前データを読めなかったときは削除自体を行わないこと
+    /// </summary>
+    /// <remarks>
+    /// 更新・払い戻しと同型。<c>DeleteAsync</c> の WHERE も <c>is_deleted = 0</c> のため、
+    /// 読み取り後に他 PC が復元すると論理削除だけが確定して監査記録が残らない。
+    /// 削除は監査上もっとも重要な操作であり、記録の漏れは特に問題になる。
+    /// </remarks>
+    [Fact]
+    public async Task DeleteAsync_WhenTargetRowMissing_ShouldNotDeleteWithoutAuditLog()
+    {
+        // Arrange
+        const string idm = "0102030405060708";
+        _viewModel.SelectedCard = new CardDto
+        {
+            CardIdm = idm,
+            CardType = "はやかけん",
+            CardNumber = "H-001",
+            IsLent = false
+        };
+
+        // 読み取り時点では他 PC が論理削除済み
+        _cardRepositoryMock.Setup(r => r.GetByIdmAsync(idm, false)).ReturnsAsync((IcCard?)null);
+        // その直後に他 PC が復元した → 論理削除は 1 行に一致して成功し得る
+        _cardRepositoryMock.Setup(r => r.DeleteAsync(idm))
+            .ReturnsAsync(ICCardManager.Data.Repositories.CardOperationResult.Success);
+        _cardRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<IcCard>());
+
+        // Act
+        await _viewModel.DeleteAsync();
+
+        // Assert
+        _cardRepositoryMock.Verify(r => r.DeleteAsync(idm), Times.Never,
+            "削除前データを読めていない状態で削除すると、変更が監査記録に残らない");
+        _operationLogRepositoryMock.Verify(r => r.InsertAsync(It.IsAny<OperationLog>()), Times.Never);
+
+        // 一覧を再読込し、キャッシュも破棄していること（書き込みを通らないため #1759 の破棄が働かない）
+        _cardRepositoryMock.Verify(r => r.InvalidateCache(), Times.Once);
+        _cardRepositoryMock.Verify(r => r.GetAllAsync(), Times.Once);
+        _dialogServiceMock.Verify(d => d.ShowError(
+            It.Is<string>(m => m.Contains("H-001") && m.EndsWith("やり直してください。")),
+            It.IsAny<string>()), Times.Once);
+    }
+
+    /// <summary>
+    /// Issue #1760: 削除が成功した経路では必ず操作ログが 1 行残ること（正常系の回帰固定）
+    /// </summary>
+    [Fact]
+    public async Task DeleteAsync_WhenSucceeds_ShouldWriteAuditLog()
+    {
+        // Arrange
+        const string idm = "0102030405060708";
+        _viewModel.SelectedCard = new CardDto
+        {
+            CardIdm = idm,
+            CardType = "はやかけん",
+            CardNumber = "H-001",
+            IsLent = false
+        };
+
+        _cardRepositoryMock.Setup(r => r.GetByIdmAsync(idm, false)).ReturnsAsync(new IcCard
+        {
+            CardIdm = idm,
+            CardType = "はやかけん",
+            CardNumber = "H-001"
+        });
+        _cardRepositoryMock.Setup(r => r.DeleteAsync(idm))
+            .ReturnsAsync(ICCardManager.Data.Repositories.CardOperationResult.Success);
+        _cardRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<IcCard>());
+
+        // Act
+        await _viewModel.DeleteAsync();
+
+        // Assert
+        _operationLogRepositoryMock.Verify(r => r.InsertAsync(It.Is<OperationLog>(log =>
+            log.TargetTable == OperationLogger.Tables.IcCard &&
+            log.TargetId == idm &&
+            log.Action == OperationLogger.Actions.Delete)), Times.Once);
+    }
+
+    /// <summary>
+    /// Issue #1760: 復元の直後に他 PC がカードを削除しても、操作ログは残ること
+    /// </summary>
+    /// <remarks>
+    /// <c>RestoreAsync</c> の成功後に行う再読取が null になるのは、その直後に
+    /// 他 PC がカードを論理削除した場合だけ。復元は既に確定しているため、
+    /// 再読取の失敗を理由に記録を落としてはならない（払い戻しと同じ判断）。
+    /// </remarks>
+    [Fact]
+    public async Task SaveAsync_WhenRestoredCardCannotBeReRead_ShouldStillWriteAuditLog()
+    {
+        // Arrange
+        const string idm = "0102030405060708";
+        _cardRepositoryMock.Setup(r => r.GetByIdmAsync(idm, true)).ReturnsAsync(new IcCard
+        {
+            CardIdm = idm,
+            CardType = "はやかけん",
+            CardNumber = "H-001",
+            StartingPageNumber = 7,
+            IsDeleted = true
+        });
+        _cardRepositoryMock.Setup(r => r.RestoreAsync(idm)).ReturnsAsync(true);
+        // 復元の直後に他 PC が削除した → 再読取は null
+        _cardRepositoryMock.Setup(r => r.GetByIdmAsync(idm, false)).ReturnsAsync((IcCard?)null);
+        _cardRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<IcCard>());
+
+        OperationLog? recorded = null;
+        _operationLogRepositoryMock.Setup(r => r.InsertAsync(It.IsAny<OperationLog>()))
+            .Callback<OperationLog>(log => recorded = log)
+            .ReturnsAsync(1);
+
+        _viewModel.StartNewCard();
+        _viewModel.EditCardIdm = idm;
+        _viewModel.EditCardNumber = "H-002";
+
+        // Act
+        await _viewModel.SaveAsync();
+
+        // Assert
+        recorded.Should().NotBeNull("復元が確定した以上、監査記録を落としてはならない");
+        recorded!.Action.Should().Be(OperationLogger.Actions.Restore);
+        recorded.TargetId.Should().Be(idm);
+
+        var after = JsonSerializer.Deserialize<IcCard>(recorded.AfterData!)!;
+        after.IsDeleted.Should().BeFalse("この操作が変えたのは削除状態であること");
+        after.DeletedAt.Should().BeNull();
+        after.StartingPageNumber.Should().Be(7, "この操作が変えていない列は復元前の値を保つこと");
     }
 
     /// <summary>
