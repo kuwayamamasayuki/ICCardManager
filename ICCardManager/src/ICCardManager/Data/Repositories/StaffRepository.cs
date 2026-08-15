@@ -184,9 +184,15 @@ WHERE staff_idm = @staffIdm AND is_deleted = 0";
             command.Parameters.AddWithValue("@note", (object)staff.Note ?? DBNull.Value);
 
             var result = await command.ExecuteNonQueryAsync();
-            if (result > 0 && transaction == null)
+            if (transaction == null)
             {
-                // トランザクション外の場合のみキャッシュ無効化
+                // トランザクション外の場合のみキャッシュ無効化。
+                // Issue #1759: 影響行数 0（＝WHERE is_deleted = 0 に一致しない）のときも
+                // 無効化する。0 行は「他 PC がこの職員を削除した」ことの証明であり、
+                // キャッシュされた職員一覧が古いと確定している。ここで捨てないと、
+                // 競合を検出した ViewModel が案内どおりに一覧を再読込しても
+                // 削除済みの職員を含む古い一覧が返り（既定 TTL 60 秒／共有モード 30 秒）、
+                // 「一覧を再読み込みしました」という案内が事実にならない。
                 InvalidateStaffCache();
             }
             return result > 0;
@@ -206,10 +212,10 @@ WHERE staff_idm = @staffIdm AND is_deleted = 0";
             command.Parameters.AddWithValue("@staffIdm", staffIdm);
 
             var result = await command.ExecuteNonQueryAsync();
-            if (result > 0)
-            {
-                InvalidateStaffCache();
-            }
+            // Issue #1759: 影響行数 0（＝他 PC が先に削除した）のときも無効化する。
+            // 古い職員一覧を返すと、競合を案内された利用者が一覧を確認しても
+            // 削除済みの職員が並んだままになる。
+            InvalidateStaffCache();
             return result > 0;
         }
 
@@ -242,9 +248,12 @@ WHERE staff_idm = @staffIdm AND is_deleted = 1";
             command.Parameters.AddWithValue("@staffIdm", staffIdm);
 
             var result = await command.ExecuteNonQueryAsync();
-            if (result > 0 && transaction == null)
+            if (transaction == null)
             {
-                // トランザクション外の場合のみキャッシュ無効化
+                // トランザクション外の場合のみキャッシュ無効化。
+                // Issue #1759: 影響行数 0（＝WHERE is_deleted = 1 に一致しない）のときも
+                // 無効化する。0 行は「他 PC が先に復元した」ことの証明であり、
+                // キャッシュされた職員一覧が古いと確定している（UPDATE 側と同じ理由）。
                 InvalidateStaffCache();
             }
             return result > 0;

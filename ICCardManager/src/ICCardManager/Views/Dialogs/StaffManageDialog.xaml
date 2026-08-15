@@ -123,6 +123,12 @@
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto"/>
                     <RowDefinition Height="*"/>
+                    <!-- Issue #1759: ステータス欄は編集フォーム（Row 1）の外に置く。
+                         削除の結果表示は CancelEdit() 後（IsEditing=false）に設定され、
+                         そもそも削除ボタンは非編集時にしか押せないため、内側に置くと
+                         「削除しました」も競合エラーの案内も表示されないまま消える。
+                         CardManageDialog（Issue #1727）と同じ構成に揃える。 -->
+                    <RowDefinition Height="Auto"/>
                     <RowDefinition Height="Auto"/>
                 </Grid.RowDefinitions>
 
@@ -223,23 +229,6 @@
                              AutomationProperties.Name="備考"
                              AutomationProperties.HelpText="メモや備考を入力してください（任意）"
                              ToolTip="備考（任意）"/>
-
-                    <!-- ステータスメッセージ（エラー時は赤色: Issue #286） -->
-                    <TextBlock Text="{Binding StatusMessage}"
-                               FontWeight="Bold"
-                               TextWrapping="Wrap"
-                               Margin="0,0,0,10">
-                        <TextBlock.Style>
-                            <Style TargetType="TextBlock">
-                                <Setter Property="Foreground" Value="{DynamicResource PrimaryBrush}"/>
-                                <Style.Triggers>
-                                    <DataTrigger Binding="{Binding IsStatusError}" Value="True">
-                                        <Setter Property="Foreground" Value="{DynamicResource DangerTextBrush}"/>
-                                    </DataTrigger>
-                                </Style.Triggers>
-                            </Style>
-                        </TextBlock.Style>
-                    </TextBlock>
                 </StackPanel>
 
                 <!-- 未選択時の表示（編集モードでない場合のみ表示） -->
@@ -271,8 +260,41 @@
                                Margin="0,5,0,0"/>
                 </StackPanel>
 
+                <!-- ステータスメッセージ（エラー時は赤色: Issue #286） -->
+                <!-- Issue #1759: 編集中のバリデーションエラーと、保存・削除の結果表示の
+                     両方をここが担う。後者は CancelEdit() で IsEditing=false になった
+                     あと、あるいは非編集時（削除）に設定されるため、IsEditing に連動しない
+                     行に置く必要がある。
+                     文字サイズは4段階で変わるため幅ではなく折り返しで担保する。 -->
+                <TextBlock Grid.Row="2"
+                           Text="{Binding StatusMessage}"
+                           FontWeight="Bold"
+                           TextWrapping="Wrap"
+                           Margin="0,0,0,10"
+                           AutomationProperties.LiveSetting="Polite"
+                           AutomationProperties.Name="{Binding StatusMessage}">
+                    <TextBlock.Style>
+                        <Style TargetType="TextBlock">
+                            <Setter Property="Foreground" Value="{DynamicResource PrimaryBrush}"/>
+                            <Setter Property="Visibility" Value="Visible"/>
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding IsStatusError}" Value="True">
+                                    <Setter Property="Foreground" Value="{DynamicResource DangerTextBrush}"/>
+                                </DataTrigger>
+                                <!-- 未設定時は行ごと畳んで、ボタンが下へずれないようにする -->
+                                <DataTrigger Binding="{Binding StatusMessage}" Value="">
+                                    <Setter Property="Visibility" Value="Collapsed"/>
+                                </DataTrigger>
+                                <DataTrigger Binding="{Binding StatusMessage}" Value="{x:Null}">
+                                    <Setter Property="Visibility" Value="Collapsed"/>
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </TextBlock.Style>
+                </TextBlock>
+
                 <!-- フォームボタン -->
-                <StackPanel Grid.Row="2"
+                <StackPanel Grid.Row="3"
                             Orientation="Horizontal"
                             HorizontalAlignment="Right"
                             Visibility="{Binding IsEditing, Converter={StaticResource BoolToVisibilityConverter}}">

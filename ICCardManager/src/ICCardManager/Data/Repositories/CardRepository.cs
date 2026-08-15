@@ -331,9 +331,15 @@ WHERE card_idm = @cardIdm AND is_deleted = 0";
             try
             {
                 var result = await command.ExecuteNonQueryAsync();
-                if (result > 0 && transaction == null)
+                if (transaction == null)
                 {
-                    // トランザクション外の場合のみキャッシュ無効化
+                    // トランザクション外の場合のみキャッシュ無効化。
+                    // Issue #1759: 影響行数 0（＝WHERE is_deleted = 0 に一致しない）のときも
+                    // 無効化する。0 行は「他 PC がこのカードを削除した」ことの証明であり、
+                    // キャッシュされたカード一覧が古いと確定している。ここで捨てないと、
+                    // 競合を検出した ViewModel が案内どおりに一覧を再読込しても
+                    // 削除済みのカードを含む古い一覧が返り（既定 TTL 60 秒／共有モード 15 秒）、
+                    // 「一覧を再読み込みしました」という案内が事実にならない。
                     InvalidateCardCache();
                 }
                 return result > 0;
@@ -442,9 +448,12 @@ WHERE card_idm = @cardIdm AND is_deleted = 1";
             try
             {
                 var result = await command.ExecuteNonQueryAsync();
-                if (result > 0 && transaction == null)
+                if (transaction == null)
                 {
-                    // トランザクション外の場合のみキャッシュ無効化
+                    // トランザクション外の場合のみキャッシュ無効化。
+                    // Issue #1759: 影響行数 0（＝WHERE is_deleted = 1 に一致しない）のときも
+                    // 無効化する。0 行は「他 PC が先に復元した」ことの証明であり、
+                    // キャッシュされたカード一覧が古いと確定している（UPDATE 側と同じ理由）。
                     InvalidateCardCache();
                 }
                 return result > 0;
