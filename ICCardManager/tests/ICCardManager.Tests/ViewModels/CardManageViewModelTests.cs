@@ -266,8 +266,9 @@ public class CardManageViewModelTests
     /// 新規カードが正常に保存されること
     /// </summary>
     /// <remarks>
-    /// 成功後にCancelEdit()が呼ばれStatusMessageがクリアされるため、
-    /// リポジトリ呼び出しとIsEditing状態で成功を検証します。
+    /// 本テストはリポジトリ呼び出しと IsEditing 状態で成功を検証する。完了メッセージが
+    /// 残ることは Issue #1759 の *_ShouldKeepCompletionMessage が担保する
+    /// （かつては CancelEdit() がメッセージを消していたため検証できなかった）。
     /// </remarks>
     [Fact]
     public async Task SaveAsync_NewCard_ShouldInsertCard()
@@ -394,8 +395,9 @@ public class CardManageViewModelTests
     /// カードが正常に更新されること
     /// </summary>
     /// <remarks>
-    /// 成功後にCancelEdit()が呼ばれStatusMessageがクリアされるため、
-    /// リポジトリ呼び出しとIsEditing状態で成功を検証します。
+    /// 本テストはリポジトリ呼び出しと IsEditing 状態で成功を検証する。完了メッセージが
+    /// 残ることは Issue #1759 の *_ShouldKeepCompletionMessage が担保する
+    /// （かつては CancelEdit() がメッセージを消していたため検証できなかった）。
     /// </remarks>
     [Fact]
     public async Task SaveAsync_ExistingCard_ShouldUpdateCard()
@@ -691,8 +693,8 @@ public class CardManageViewModelTests
     /// カードが正常に削除されること
     /// </summary>
     /// <remarks>
-    /// 削除後にStatusMessageはクリアされないが、
-    /// リポジトリ呼び出しの検証を優先します。
+    /// 本テストはリポジトリ呼び出しで成功を検証する。完了メッセージが
+    /// 残ることは Issue #1759 の DeleteAsync_WhenSucceeds_ShouldKeepCompletionMessage が担保する。
     /// </remarks>
     [Fact]
     public async Task DeleteAsync_ShouldDeleteCard()
@@ -1925,6 +1927,190 @@ public class CardManageViewModelTests
 
         // 「削除された可能性」（更新側の理由）と取り違えていないこと
         _viewModel.StatusMessage.Should().NotContain("削除された可能性");
+    }
+
+    /// <summary>
+    /// Issue #1759: 編集中に管理番号を書き換えていても、競合の案内は
+    /// <b>一覧に載っている管理番号</b>で対象を名指しすること
+    /// </summary>
+    /// <remarks>
+    /// 「カード一覧で状態を確認してからやり直してください」と案内する以上、
+    /// 一覧に存在しない編集後の番号で名指しすると案内どおりの確認ができない。
+    /// </remarks>
+    [Fact]
+    public async Task SaveAsync_WhenUpdateMatchesNoRow_ShouldNameTargetByItsListedNumber()
+    {
+        // Arrange
+        var idm = "0102030405060708";
+        _viewModel.SelectedCard = new CardDto
+        {
+            CardIdm = idm,
+            CardType = "はやかけん",
+            CardNumber = "H-001"
+        };
+        _viewModel.StartEdit();
+        _viewModel.EditCardNumber = "H-777";  // 番号を打ち直した直後に他PCが削除した
+
+        _cardRepositoryMock.Setup(r => r.GetByIdmAsync(idm, false)).ReturnsAsync((IcCard?)null);
+        _cardRepositoryMock.Setup(r => r.UpdateAsync(It.IsAny<IcCard>())).ReturnsAsync(false);
+        _cardRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<IcCard>());
+
+        // Act
+        await _viewModel.SaveAsync();
+
+        // Assert
+        _viewModel.StatusMessage.Should().Contain("H-001", "一覧に載っている管理番号で名指しすること");
+        _viewModel.StatusMessage.Should().NotContain("H-777", "未保存の入力値で名指ししないこと");
+        _viewModel.EditCardNumber.Should().Be("H-777", "入力内容は消さないこと");
+    }
+
+    #endregion
+
+    #region Issue #1759: 成功メッセージが CancelEdit() で消されないこと
+
+    /// <summary>
+    /// Issue #1759: 更新成功時、完了メッセージが表示されたまま残ること
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>CancelEdit()</c> は <c>StatusMessage</c> を空にするため、完了メッセージを
+    /// その<b>前</b>に設定すると一度も表示されない。Issue #1727 はこの順序問題を
+    /// カード登録経路でのみ是正しており、更新・削除・復元・払戻の各経路は
+    /// 「設定 → 再読込 → CancelEdit()」のままで**完了メッセージが消えていた**。
+    /// </para>
+    /// <para>
+    /// ステータス欄の所在（Issue #1727 / #1759 の XAML 修正）と、この順序の両方が
+    /// 揃って初めてメッセージが利用者に届く。片方だけでは不十分。
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task SaveAsync_ExistingCard_WhenUpdateSucceeds_ShouldKeepCompletionMessage()
+    {
+        // Arrange
+        var idm = "0102030405060708";
+        _viewModel.SelectedCard = new CardDto
+        {
+            CardIdm = idm,
+            CardType = "はやかけん",
+            CardNumber = "H-001"
+        };
+        _viewModel.StartEdit();
+        _viewModel.EditNote = "更新後のメモ";
+
+        _cardRepositoryMock.Setup(r => r.GetByIdmAsync(idm, false)).ReturnsAsync(new IcCard
+        {
+            CardIdm = idm,
+            CardType = "はやかけん",
+            CardNumber = "H-001"
+        });
+        _cardRepositoryMock.Setup(r => r.UpdateAsync(It.IsAny<IcCard>())).ReturnsAsync(true);
+        _cardRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<IcCard>());
+
+        // Act
+        await _viewModel.SaveAsync();
+
+        // Assert
+        _viewModel.StatusMessage.Should().Be("更新しました");
+        _viewModel.IsStatusError.Should().BeFalse();
+        _viewModel.IsEditing.Should().BeFalse(); // CancelEdit() は従来どおり呼ばれる
+    }
+
+    /// <summary>
+    /// Issue #1759: 削除成功時、完了メッセージが表示されたまま残ること
+    /// </summary>
+    [Fact]
+    public async Task DeleteAsync_WhenSucceeds_ShouldKeepCompletionMessage()
+    {
+        // Arrange
+        var idm = "0102030405060708";
+        _viewModel.SelectedCard = new CardDto
+        {
+            CardIdm = idm,
+            CardType = "はやかけん",
+            CardNumber = "H-001",
+            IsLent = false
+        };
+
+        _cardRepositoryMock.Setup(r => r.DeleteAsync(idm))
+            .ReturnsAsync(ICCardManager.Data.Repositories.CardOperationResult.Success);
+        _cardRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<IcCard>());
+
+        // Act
+        await _viewModel.DeleteAsync();
+
+        // Assert
+        _viewModel.StatusMessage.Should().Be("削除しました");
+        _viewModel.IsStatusError.Should().BeFalse();
+    }
+
+    /// <summary>
+    /// Issue #1759: 削除済みカードの復元成功時、完了メッセージが表示されたまま残ること
+    /// </summary>
+    [Fact]
+    public async Task SaveAsync_NewCard_WhenRestoreSucceeds_ShouldKeepCompletionMessage()
+    {
+        // Arrange
+        var idm = "0102030405060708";
+        _cardRepositoryMock.Setup(r => r.GetByIdmAsync(idm, true)).ReturnsAsync(new IcCard
+        {
+            CardIdm = idm,
+            CardType = "はやかけん",
+            CardNumber = "H-001",
+            IsDeleted = true
+        });
+        _cardRepositoryMock.Setup(r => r.RestoreAsync(idm)).ReturnsAsync(true);
+        _cardRepositoryMock.Setup(r => r.GetByIdmAsync(idm, false)).ReturnsAsync(new IcCard
+        {
+            CardIdm = idm,
+            CardType = "はやかけん",
+            CardNumber = "H-001"
+        });
+        _cardRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<IcCard>());
+
+        _viewModel.StartNewCard();
+        _viewModel.EditCardIdm = idm;
+        _viewModel.EditCardNumber = "H-002";
+
+        // Act
+        await _viewModel.SaveAsync();
+
+        // Assert
+        _viewModel.StatusMessage.Should().Be("H-001 を復元しました");
+        _viewModel.IsStatusError.Should().BeFalse();
+    }
+
+    /// <summary>
+    /// Issue #1759: 払い戻し成功時、完了メッセージが表示されたまま残ること
+    /// </summary>
+    [Fact]
+    public async Task RefundAsync_WhenSucceeds_ShouldKeepCompletionMessage()
+    {
+        // Arrange
+        const string idm = "0102030405060708";
+        _viewModel.SelectedCard = new CardDto
+        {
+            CardIdm = idm,
+            CardType = "はやかけん",
+            CardNumber = "H-001",
+            IsLent = false,
+            IsRefunded = false
+        };
+
+        _ledgerRepositoryMock.Setup(r => r.GetLatestLedgerAsync(idm))
+            .ReturnsAsync(new Ledger { CardIdm = idm, Balance = 3000 });
+        _ledgerRepositoryMock.Setup(r => r.InsertAsync(It.IsAny<Ledger>())).ReturnsAsync(1);
+        _cardRepositoryMock.Setup(r => r.SetRefundedAsync(idm))
+            .ReturnsAsync(ICCardManager.Data.Repositories.CardOperationResult.Success);
+        _cardRepositoryMock.Setup(r => r.GetByIdmAsync(idm, It.IsAny<bool>()))
+            .ReturnsAsync(new IcCard { CardIdm = idm, CardType = "はやかけん", CardNumber = "H-001" });
+        _cardRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<IcCard>());
+
+        // Act
+        await _viewModel.RefundAsync();
+
+        // Assert
+        _viewModel.StatusMessage.Should().Be("払い戻しが完了しました（払戻額: ¥3,000）");
+        _viewModel.IsStatusError.Should().BeFalse();
     }
 
     #endregion

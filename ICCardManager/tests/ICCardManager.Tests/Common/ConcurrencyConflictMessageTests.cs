@@ -49,9 +49,19 @@ public class ConcurrencyConflictMessageTests
 
     private static string Invoke(string factoryName)
     {
+        // 引数の型まで指定する。指定しないと、将来オーバーロードが増えたときに
+        // AmbiguousMatchException／TargetParameterCountException という
+        // 「何を直せばよいか分からない失敗」になる。
         var method = typeof(ConcurrencyConflictMessage)
-            .GetMethod(factoryName, BindingFlags.Public | BindingFlags.Static);
-        method.Should().NotBeNull($"{factoryName} が見つかること");
+            .GetMethod(
+                factoryName,
+                BindingFlags.Public | BindingFlags.Static,
+                binder: null,
+                types: new[] { typeof(string), typeof(string) },
+                modifiers: null);
+        method.Should().NotBeNull(
+            $"{factoryName} は (string target, string listName) を受け取るファクトリであること。" +
+            "別の形のファクトリを足すなら、本テストの呼び出し方も併せて更新する");
         return (string)method!.Invoke(null, new object[] { Target, ListName })!;
     }
 

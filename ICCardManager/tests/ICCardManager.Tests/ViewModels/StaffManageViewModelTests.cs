@@ -197,8 +197,9 @@ public class StaffManageViewModelTests
     /// 新規職員が正常に保存されること
     /// </summary>
     /// <remarks>
-    /// 成功後にCancelEdit()が呼ばれStatusMessageがクリアされるため、
-    /// リポジトリ呼び出しとIsEditing状態で成功を検証します。
+    /// 本テストはリポジトリ呼び出しで成功を検証する。完了メッセージが
+    /// 残ることは Issue #1759 の *_ShouldKeepCompletionMessage が担保する
+    /// （かつては CancelEdit() がメッセージを消していたため検証できなかった）。
     /// </remarks>
     [Fact]
     public async Task SaveAsync_NewStaff_ShouldInsertStaff()
@@ -323,8 +324,9 @@ public class StaffManageViewModelTests
     /// 職員が正常に更新されること
     /// </summary>
     /// <remarks>
-    /// 成功後にCancelEdit()が呼ばれStatusMessageがクリアされるため、
-    /// リポジトリ呼び出しとIsEditing状態で成功を検証します。
+    /// 本テストはリポジトリ呼び出しで成功を検証する。完了メッセージが
+    /// 残ることは Issue #1759 の *_ShouldKeepCompletionMessage が担保する
+    /// （かつては CancelEdit() がメッセージを消していたため検証できなかった）。
     /// </remarks>
     [Fact]
     public async Task SaveAsync_ExistingStaff_ShouldUpdateStaff()
@@ -815,6 +817,231 @@ public class StaffManageViewModelTests
         _viewModel.StatusMessage.Should().Contain("田中太郎");                // 何が
         _viewModel.StatusMessage.Should().Contain("先に削除された可能性");     // なぜ
         _viewModel.StatusMessage.Should().EndWith("やり直してください。");     // どうすれば
+    }
+
+    /// <summary>
+    /// Issue #1759: 一覧の再読込で選択が解除されても、削除の競合エラーが
+    /// 例外にならず案内文言として表示されること
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 本番の <c>StaffManageDialog</c> は <c>SelectedItem="{Binding SelectedStaff}"</c>（TwoWay）で
+    /// DataGrid に束縛されている。<c>LoadStaffAsync()</c> の <c>StaffList.Clear()</c> は
+    /// Selector の選択解除を引き起こし、それが <b>SelectedStaff = null</b> として書き戻される。
+    /// 再読込のあとで <c>SelectedStaff.Name</c> を読むと <c>NullReferenceException</c> になり、
+    /// 3要素の案内の代わりに <c>ExceptionMessageFormatter</c> の汎用文言が出る。
+    /// </para>
+    /// <para>
+    /// ViewModel 単体テストには View が無いためこの経路は素通りする。
+    /// ここでは <c>CollectionChanged</c> を購読して DataGrid の書き戻しを再現し、
+    /// 「識別情報を再読込より前に確定させる」実装を固定する。
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task DeleteAsync_WhenReloadClearsSelection_ShouldStillShowActionableError()
+    {
+        // Arrange
+        var idm = "0102030405060708";
+        _viewModel.SelectedStaff = new StaffDto
+        {
+            StaffIdm = idm,
+            Name = "田中太郎",
+            Number = "001"
+        };
+
+        // DataGrid の SelectedItem バインドを再現する（Clear() で選択が解除される）
+        _viewModel.StaffList.CollectionChanged += (_, e) =>
+        {
+            if (e.Action == System.Collections.Specialized.NotifyCollectionChangedAction.Reset)
+            {
+                _viewModel.SelectedStaff = null;
+            }
+        };
+
+        _staffRepositoryMock.Setup(r => r.GetByIdmAsync(idm, false)).ReturnsAsync(new Staff
+        {
+            StaffIdm = idm,
+            Name = "田中太郎",
+            Number = "001"
+        });
+        _staffRepositoryMock.Setup(r => r.DeleteAsync(idm)).ReturnsAsync(false);
+        _staffRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<Staff>());
+
+        // Act
+        await _viewModel.DeleteAsync();
+
+        // Assert
+        _viewModel.SelectedStaff.Should().BeNull("一覧の再読込で選択が解除された状況を再現している");
+
+        // 例外の汎用文言（ExceptionMessageFormatter）ではなく競合の案内が出ること
+        _viewModel.IsStatusError.Should().BeTrue();
+        _viewModel.StatusMessage.Should().Contain("田中太郎");
+        _viewModel.StatusMessage.Should().Contain("先に削除された可能性");
+        _viewModel.StatusMessage.Should().NotContain("職員の削除");
+    }
+
+    /// <summary>
+    /// Issue #1759: 編集中に氏名を書き換えていても、競合の案内は
+    /// <b>一覧に載っている氏名</b>で対象を名指しすること
+    /// </summary>
+    /// <remarks>
+    /// 「一覧で状態を確認してからやり直してください」と案内する以上、
+    /// 一覧に存在しない編集後の氏名で名指しすると案内どおりの確認ができない。
+    /// </remarks>
+    [Fact]
+    public async Task SaveAsync_WhenUpdateMatchesNoRow_ShouldNameTargetByItsListedName()
+    {
+        // Arrange
+        var idm = "0102030405060708";
+        _viewModel.SelectedStaff = new StaffDto
+        {
+            StaffIdm = idm,
+            Name = "田中太郎",
+            Number = "001"
+        };
+        _viewModel.StartEdit();
+        _viewModel.EditName = "田中花子";  // 改姓を入力した直後に他PCが削除した
+
+        _staffRepositoryMock.Setup(r => r.GetByIdmAsync(idm, false)).ReturnsAsync((Staff?)null);
+        _staffRepositoryMock.Setup(r => r.UpdateAsync(It.IsAny<Staff>())).ReturnsAsync(false);
+        _staffRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<Staff>());
+
+        // Act
+        await _viewModel.SaveAsync();
+
+        // Assert
+        _viewModel.StatusMessage.Should().Contain("田中太郎", "一覧に載っている氏名で名指しすること");
+        _viewModel.StatusMessage.Should().NotContain("田中花子", "未保存の入力値で名指ししないこと");
+        _viewModel.EditName.Should().Be("田中花子", "入力内容は消さないこと");
+    }
+
+    #endregion
+
+    #region Issue #1759: 成功メッセージが CancelEdit() で消されないこと
+
+    /// <summary>
+    /// Issue #1759: 登録成功時、完了メッセージが表示されたまま残ること
+    /// </summary>
+    /// <remarks>
+    /// <c>CancelEdit()</c> は <c>StatusMessage</c> を空にするため、完了メッセージを
+    /// その<b>前</b>に設定すると一度も表示されない。ステータス欄の所在（XAML）と
+    /// この順序の両方が揃って初めてメッセージが利用者に届く。
+    /// </remarks>
+    [Fact]
+    public async Task SaveAsync_NewStaff_WhenInsertSucceeds_ShouldKeepCompletionMessage()
+    {
+        // Arrange
+        _viewModel.StartNewStaff();
+        _viewModel.EditStaffIdm = "FFFF000000000001";
+        _viewModel.EditName = "田中太郎";
+
+        _staffRepositoryMock.Setup(r => r.GetByIdmAsync("FFFF000000000001", true)).ReturnsAsync((Staff?)null);
+        _staffRepositoryMock.Setup(r => r.InsertAsync(It.IsAny<Staff>())).ReturnsAsync(true);
+        _staffRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<Staff>());
+
+        // Act
+        await _viewModel.SaveAsync();
+
+        // Assert
+        _viewModel.StatusMessage.Should().Be("登録しました");
+        _viewModel.IsStatusError.Should().BeFalse();
+        _viewModel.IsEditing.Should().BeFalse(); // CancelEdit() は従来どおり呼ばれる
+    }
+
+    /// <summary>
+    /// Issue #1759: 更新成功時、完了メッセージが表示されたまま残ること
+    /// </summary>
+    [Fact]
+    public async Task SaveAsync_ExistingStaff_WhenUpdateSucceeds_ShouldKeepCompletionMessage()
+    {
+        // Arrange
+        var idm = "FFFF000000000001";
+        _viewModel.SelectedStaff = new StaffDto { StaffIdm = idm, Name = "田中太郎", Number = "001" };
+        _viewModel.StartEdit();
+        _viewModel.EditNote = "更新後のメモ";
+
+        _staffRepositoryMock.Setup(r => r.GetByIdmAsync(idm, false)).ReturnsAsync(new Staff
+        {
+            StaffIdm = idm,
+            Name = "田中太郎",
+            Number = "001"
+        });
+        _staffRepositoryMock.Setup(r => r.UpdateAsync(It.IsAny<Staff>())).ReturnsAsync(true);
+        _staffRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<Staff>());
+
+        // Act
+        await _viewModel.SaveAsync();
+
+        // Assert
+        _viewModel.StatusMessage.Should().Be("更新しました");
+        _viewModel.IsStatusError.Should().BeFalse();
+    }
+
+    /// <summary>
+    /// Issue #1759: 削除成功時、完了メッセージが表示されたまま残ること
+    /// </summary>
+    /// <remarks>
+    /// 本 PR でステータス欄を編集フォームの外へ移した直接の動機がこの経路。
+    /// 所在を直しても順序が直っていなければ、やはり一度も表示されない。
+    /// </remarks>
+    [Fact]
+    public async Task DeleteAsync_WhenSucceeds_ShouldKeepCompletionMessage()
+    {
+        // Arrange
+        var idm = "FFFF000000000001";
+        _viewModel.SelectedStaff = new StaffDto { StaffIdm = idm, Name = "田中太郎", Number = "001" };
+
+        _staffRepositoryMock.Setup(r => r.GetByIdmAsync(idm, false)).ReturnsAsync(new Staff
+        {
+            StaffIdm = idm,
+            Name = "田中太郎",
+            Number = "001"
+        });
+        _staffRepositoryMock.Setup(r => r.DeleteAsync(idm)).ReturnsAsync(true);
+        _staffRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<Staff>());
+
+        // Act
+        await _viewModel.DeleteAsync();
+
+        // Assert
+        _viewModel.StatusMessage.Should().Be("削除しました");
+        _viewModel.IsStatusError.Should().BeFalse();
+    }
+
+    /// <summary>
+    /// Issue #1759: 削除済み職員の復元成功時、完了メッセージが表示されたまま残ること
+    /// </summary>
+    [Fact]
+    public async Task SaveAsync_NewStaff_WhenRestoreSucceeds_ShouldKeepCompletionMessage()
+    {
+        // Arrange
+        var idm = "FFFF000000000001";
+        _staffRepositoryMock.Setup(r => r.GetByIdmAsync(idm, true)).ReturnsAsync(new Staff
+        {
+            StaffIdm = idm,
+            Name = "田中太郎",
+            Number = "001",
+            IsDeleted = true
+        });
+        _staffRepositoryMock.Setup(r => r.RestoreAsync(idm)).ReturnsAsync(true);
+        _staffRepositoryMock.Setup(r => r.GetByIdmAsync(idm, false)).ReturnsAsync(new Staff
+        {
+            StaffIdm = idm,
+            Name = "田中太郎",
+            Number = "001"
+        });
+        _staffRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<Staff>());
+
+        _viewModel.StartNewStaff();
+        _viewModel.EditStaffIdm = idm;
+        _viewModel.EditName = "鈴木花子";
+
+        // Act
+        await _viewModel.SaveAsync();
+
+        // Assert
+        _viewModel.StatusMessage.Should().Be("田中太郎（001） を復元しました");
+        _viewModel.IsStatusError.Should().BeFalse();
     }
 
     #endregion

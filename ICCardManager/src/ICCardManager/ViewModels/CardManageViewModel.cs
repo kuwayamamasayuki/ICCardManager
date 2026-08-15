@@ -303,6 +303,16 @@ namespace ICCardManager.ViewModels
         }
 
         /// <summary>
+        /// ユーザー向けメッセージで交通系ICカードを特定するための表示名を組み立てる。
+        /// </summary>
+        /// <remarks>
+        /// Issue #1759: 競合エラーの文言で同じ表記を使うため 1 か所に集約する
+        /// （<c>StaffManageViewModel.FormatStaffLabel</c> と対になる）。
+        /// </remarks>
+        private static string FormatCardLabel(string cardType, string cardNumber)
+            => $"交通系ICカード「{cardType} {cardNumber}」";
+
+        /// <summary>
         /// 編集コマンドが実行可能かどうか
         /// </summary>
         private bool CanEdit() => SelectedCard != null;
@@ -396,11 +406,14 @@ namespace ICCardManager.ViewModels
                                     }
 
                                     var restoredIdm = EditCardIdm;
-                                    StatusMessage = $"{existing.CardNumber} を復元しました";
-                                    IsStatusError = false;
+                                    var restoredNumber = existing.CardNumber;
                                     await LoadCardsAsync();
                                     CancelEdit();
                                     SelectAndHighlight(restoredIdm);
+                                    // Issue #1759: CancelEdit() は StatusMessage / IsStatusError をクリアするため、
+                                    // 完了メッセージは必ず後処理のあとに設定する（先に設定すると一度も表示されない）。
+                                    StatusMessage = $"{restoredNumber} を復元しました";
+                                    IsStatusError = false;
                                 }
                                 else
                                 {
@@ -409,7 +422,7 @@ namespace ICCardManager.ViewModels
                                     // 0 行に一致した場合だけ。つまり他 PC が先に復元したことを意味する。
                                     await LoadCardsAsync();
                                     StatusMessage = ConcurrencyConflictMessage.ForRestore(
-                                        $"交通系ICカード「{existing.CardType} {existing.CardNumber}」", "カード一覧");
+                                        FormatCardLabel(existing.CardType, existing.CardNumber), "カード一覧");
                                     IsStatusError = true;
                                 }
                             }
@@ -661,11 +674,13 @@ namespace ICCardManager.ViewModels
                         }
 
                         var updatedIdm = EditCardIdm;
-                        StatusMessage = "更新しました";
-                        IsStatusError = false;
                         await LoadCardsAsync();
                         CancelEdit();
                         SelectAndHighlight(updatedIdm);
+                        // Issue #1759: CancelEdit() は StatusMessage / IsStatusError をクリアするため、
+                        // 完了メッセージは必ず後処理のあとに設定する（先に設定すると一度も表示されない）。
+                        StatusMessage = "更新しました";
+                        IsStatusError = false;
                     }
                     else
                     {
@@ -678,9 +693,17 @@ namespace ICCardManager.ViewModels
                         // 「競合検出時は UI 側で一覧を再読込すること」）。
                         // 再読込を先に行うのは、文言が「再読み込みしました」と述べるため。
                         // CancelEdit() は呼ばない（入力内容を消さない。Issue #1757）。
+                        //
+                        // 「何が」は**編集後の入力値ではなく一覧に載っている値**で名指しする。
+                        // 管理番号や種別を書き換えている途中なら、編集後の値は一覧のどこにも
+                        // 存在せず「一覧で状態を確認して」という案内が実行できなくなる。
+                        // 一覧の再読込で DataGrid の選択が解除され SelectedCard は null に
+                        // なる（SelectedItem は TwoWay バインド）ため、再読込より前に確定させる。
+                        var conflictLabel = SelectedCard != null
+                            ? FormatCardLabel(SelectedCard.CardType, SelectedCard.CardNumber)
+                            : FormatCardLabel(EditCardType, sanitizedCardNumber);
                         await LoadCardsAsync();
-                        StatusMessage = ConcurrencyConflictMessage.ForUpdate(
-                            $"交通系ICカード「{EditCardType} {sanitizedCardNumber}」", "カード一覧");
+                        StatusMessage = ConcurrencyConflictMessage.ForUpdate(conflictLabel, "カード一覧");
                         IsStatusError = true;
                     }
                 }
@@ -748,10 +771,12 @@ namespace ICCardManager.ViewModels
                         await _operationLogger.LogCardDeleteAsync(card);
                     }
 
-                    StatusMessage = "削除しました";
-                    IsStatusError = false;
                     await LoadCardsAsync();
                     CancelEdit();
+                    // Issue #1759: CancelEdit() は StatusMessage / IsStatusError をクリアするため、
+                    // 完了メッセージは必ず後処理のあとに設定する（先に設定すると一度も表示されない）。
+                    StatusMessage = "削除しました";
+                    IsStatusError = false;
                 }
                 else
                 {
@@ -859,12 +884,14 @@ namespace ICCardManager.ViewModels
                             await _operationLogger.LogCardUpdateAsync(beforeCard, afterCard);
                         }
 
+                        await LoadCardsAsync();
+                        CancelEdit();
+                        // Issue #1759: CancelEdit() は StatusMessage / IsStatusError をクリアするため、
+                        // 完了メッセージは必ず後処理のあとに設定する（先に設定すると一度も表示されない）。
                         StatusMessage = currentBalance > 0
                             ? $"払い戻しが完了しました（払戻額: ¥{currentBalance:N0}）"
                             : "払い戻しが完了しました";
                         IsStatusError = false;
-                        await LoadCardsAsync();
-                        CancelEdit();
                     }
                     else
                     {
@@ -955,11 +982,14 @@ namespace ICCardManager.ViewModels
                                 }
 
                                 var restoredIdm = e.Idm;
-                                StatusMessage = $"{existing.CardNumber} を復元しました";
-                                IsStatusError = false;
+                                var restoredNumber = existing.CardNumber;
                                 await LoadCardsAsync();
                                 CancelEdit();
                                 SelectAndHighlight(restoredIdm);
+                                // Issue #1759: CancelEdit() は StatusMessage / IsStatusError をクリアするため、
+                                // 完了メッセージは必ず後処理のあとに設定する（先に設定すると一度も表示されない）。
+                                StatusMessage = $"{restoredNumber} を復元しました";
+                                IsStatusError = false;
                             }
                             else
                             {
@@ -967,7 +997,7 @@ namespace ICCardManager.ViewModels
                                 // false は「他 PC が先に復元した」ことを意味する。
                                 await LoadCardsAsync();
                                 StatusMessage = ConcurrencyConflictMessage.ForRestore(
-                                    $"交通系ICカード「{existing.CardType} {existing.CardNumber}」", "カード一覧");
+                                    FormatCardLabel(existing.CardType, existing.CardNumber), "カード一覧");
                                 IsStatusError = true;
                             }
                         }

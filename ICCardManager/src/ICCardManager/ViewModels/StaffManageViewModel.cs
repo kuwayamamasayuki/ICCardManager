@@ -315,11 +315,13 @@ namespace ICCardManager.ViewModels
                                         }
 
                                         var restoredIdm = EditStaffIdm;
-                                        StatusMessage = $"{identifier} を復元しました";
-                                        IsStatusError = false;
                                         await LoadStaffAsync();
                                         CancelEdit();
                                         SelectAndHighlight(restoredIdm);
+                                        // Issue #1759: CancelEdit() は StatusMessage / IsStatusError をクリアするため、
+                                        // 完了メッセージは必ず後処理のあとに設定する（先に設定すると一度も表示されない）。
+                                        StatusMessage = $"{identifier} を復元しました";
+                                        IsStatusError = false;
                                     }
                                     else
                                     {
@@ -328,7 +330,7 @@ namespace ICCardManager.ViewModels
                                         // 0 行に一致した場合だけ。つまり他 PC が先に復元したことを意味する。
                                         await LoadStaffAsync();
                                         StatusMessage = ConcurrencyConflictMessage.ForRestore(
-                                            $"職員証「{identifier}」", "職員一覧");
+                                            $"職員「{identifier}」", "職員一覧");
                                         IsStatusError = true;
                                     }
                                 }
@@ -366,11 +368,13 @@ namespace ICCardManager.ViewModels
                             await _operationLogger.LogStaffInsertAsync(staff);
 
                             var savedIdm = EditStaffIdm;
-                            StatusMessage = "登録しました";
-                            IsStatusError = false;
                             await LoadStaffAsync();
                             CancelEdit();
                             SelectAndHighlight(savedIdm);
+                            // Issue #1759: CancelEdit() は StatusMessage / IsStatusError をクリアするため、
+                            // 完了メッセージは必ず後処理のあとに設定する（先に設定すると一度も表示されない）。
+                            StatusMessage = "登録しました";
+                            IsStatusError = false;
                         }
                         else
                         {
@@ -402,11 +406,13 @@ namespace ICCardManager.ViewModels
                             }
 
                             var updatedIdm = EditStaffIdm;
-                            StatusMessage = "更新しました";
-                            IsStatusError = false;
                             await LoadStaffAsync();
                             CancelEdit();
                             SelectAndHighlight(updatedIdm);
+                            // Issue #1759: CancelEdit() は StatusMessage / IsStatusError をクリアするため、
+                            // 完了メッセージは必ず後処理のあとに設定する（先に設定すると一度も表示されない）。
+                            StatusMessage = "更新しました";
+                            IsStatusError = false;
                         }
                         else
                         {
@@ -416,9 +422,18 @@ namespace ICCardManager.ViewModels
                             // 論理削除されたことを意味する。カード側（CardManageViewModel）と同じ扱いにする。
                             // 再読込を先に行うのは文言が「再読み込みしました」と述べるため。
                             // CancelEdit() は呼ばない（入力内容を消さない）。
+                            //
+                            // 「何が」は**編集後の入力値ではなく一覧に載っている値**で名指しする。
+                            // 氏名を書き換えている途中なら、編集後の氏名は一覧のどこにも存在せず
+                            // 「一覧で状態を確認して」という案内が実行できなくなる。
+                            // 一覧の再読込で DataGrid の選択が解除され SelectedStaff は null に
+                            // なる（SelectedItem は TwoWay バインド）ため、再読込より前に確定させる。
+                            var conflictLabel = SelectedStaff != null
+                                ? FormatStaffLabel(SelectedStaff.Name, SelectedStaff.Number)
+                                : FormatStaffLabel(sanitizedName, sanitizedNumber);
                             await LoadStaffAsync();
                             StatusMessage = ConcurrencyConflictMessage.ForUpdate(
-                                $"職員証「{FormatStaffLabel(sanitizedName, sanitizedNumber)}」", "職員一覧");
+                                $"職員「{conflictLabel}」", "職員一覧");
                             IsStatusError = true;
                         }
                     }
@@ -441,6 +456,15 @@ namespace ICCardManager.ViewModels
         {
             if (SelectedStaff == null) return;
 
+            // Issue #1759: 削除対象の識別情報は**ここで確定させる**。
+            // 失敗時に呼ぶ LoadStaffAsync() は StaffList.Clear() を行い、DataGrid の
+            // SelectedItem="{Binding SelectedStaff}"（TwoWay）が選択解除を書き戻すため
+            // SelectedStaff は null になる。再読込のあとで SelectedStaff を参照すると
+            // NullReferenceException になり、案内文の代わりに例外の汎用メッセージが出る
+            // （ViewModel 単体テストには View が無いため、この欠陥は検出されない）。
+            var targetIdm = SelectedStaff.StaffIdm;
+            var targetLabel = FormatStaffLabel(SelectedStaff.Name, SelectedStaff.Number);
+
             // Issue #429: 職員の削除は認証が必要
             var authResult = await _staffAuthService.RequestAuthenticationAsync("職員の削除");
             if (authResult == null)
@@ -454,9 +478,9 @@ namespace ICCardManager.ViewModels
                 using (BeginBusy("削除中..."))
                 {
                     // 削除前のデータを取得（操作ログ用）
-                    var staff = await _staffRepository.GetByIdmAsync(SelectedStaff.StaffIdm);
+                    var staff = await _staffRepository.GetByIdmAsync(targetIdm);
 
-                    var success = await _staffRepository.DeleteAsync(SelectedStaff.StaffIdm);
+                    var success = await _staffRepository.DeleteAsync(targetIdm);
                     if (success)
                     {
                         // 操作ログを記録（Issue #429: 認証済み職員のIDmを使用）
@@ -465,10 +489,12 @@ namespace ICCardManager.ViewModels
                             await _operationLogger.LogStaffDeleteAsync(staff);
                         }
 
-                        StatusMessage = "削除しました";
-                        IsStatusError = false;
                         await LoadStaffAsync();
                         CancelEdit();
+                        // Issue #1759: CancelEdit() は StatusMessage / IsStatusError をクリアするため、
+                        // 完了メッセージは必ず後処理のあとに設定する（先に設定すると一度も表示されない）。
+                        StatusMessage = "削除しました";
+                        IsStatusError = false;
                     }
                     else
                     {
@@ -477,9 +503,10 @@ namespace ICCardManager.ViewModels
                         // 0 行に一致した場合だけ。つまり他 PC が先に削除したことを意味する。
                         // カード側の削除は CardOperationResult を返し Issue #1109 で是正済みだが、
                         // 職員側は bool のままで案内が「削除に失敗しました」の9文字だけだった。
+                        // targetLabel はメソッド冒頭で確定済み（再読込後の SelectedStaff は null）。
                         await LoadStaffAsync();
                         StatusMessage = ConcurrencyConflictMessage.ForDelete(
-                            $"職員証「{FormatStaffLabel(SelectedStaff.Name, SelectedStaff.Number)}」", "職員一覧");
+                            $"職員「{targetLabel}」", "職員一覧");
                         IsStatusError = true;
                     }
                 }
@@ -507,6 +534,9 @@ namespace ICCardManager.ViewModels
             EditNumber = string.Empty;
             EditNote = string.Empty;
             StatusMessage = string.Empty;
+            // Issue #1759: ステータス欄が編集フォームの外へ出て常時表示になったため、
+            // エラー状態（赤色）を残したままにしない。CardManageViewModel.CancelEdit と揃える。
+            IsStatusError = false;
 
             // 職員証登録モードを解除（Issue #852）
             _messenger.Send(new CardReadingSuppressedMessage(false, CardReadingSource.StaffRegistration));
@@ -551,11 +581,13 @@ namespace ICCardManager.ViewModels
                                 }
 
                                 var restoredIdm = e.Idm;
-                                StatusMessage = $"{identifier} を復元しました";
-                                IsStatusError = false;
                                 await LoadStaffAsync();
                                 CancelEdit();
                                 SelectAndHighlight(restoredIdm);
+                                // Issue #1759: CancelEdit() は StatusMessage / IsStatusError をクリアするため、
+                                // 完了メッセージは必ず後処理のあとに設定する（先に設定すると一度も表示されない）。
+                                StatusMessage = $"{identifier} を復元しました";
+                                IsStatusError = false;
                             }
                             else
                             {
@@ -563,7 +595,7 @@ namespace ICCardManager.ViewModels
                                 // false は「他 PC が先に復元した」ことを意味する。
                                 await LoadStaffAsync();
                                 StatusMessage = ConcurrencyConflictMessage.ForRestore(
-                                    $"職員証「{identifier}」", "職員一覧");
+                                    $"職員「{identifier}」", "職員一覧");
                                 IsStatusError = true;
                             }
                         }
