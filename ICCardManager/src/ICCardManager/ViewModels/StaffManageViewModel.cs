@@ -75,6 +75,27 @@ namespace ICCardManager.ViewModels
         /// </summary>
         public event EventHandler? RequestNameFocus;
 
+        /// <summary>
+        /// 編集中の対象を「一覧に載っている表記」で名指しするための退避値（Issue #1761）
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// <b>編集フォームが開いている間、編集対象を指すのは <see cref="EditStaffIdm"/>（主キー）であって
+        /// <see cref="SelectedStaff"/> ではない。</b> <c>SelectedItem="{Binding SelectedStaff}"</c> は
+        /// TwoWay バインドのため、選択行の Ctrl+クリック（<c>SelectionMode=Single</c> でも選択解除できる）や
+        /// <c>StaffList.Clear()</c>（一覧の再読込）によって <see cref="SelectedStaff"/> <b>だけ</b>が null に戻る。
+        /// 編集フォームは <c>IsEditing</c> にのみ連動するのでそのまま開いており、入力内容も残っている。
+        /// </para>
+        /// <para>
+        /// 競合の案内は<b>一覧に載っている値</b>で対象を名指しする必要がある（Issue #1759）。
+        /// 未保存の入力値で代替すると、氏名を書き換えている途中に競合したとき
+        /// 「一覧のどこにも存在しない氏名」で「職員一覧で状態を確認してください」と案内することになる。
+        /// カード側（<c>CardManageViewModel</c>）と同型のため同じ扱いにする。
+        /// </para>
+        /// </remarks>
+        private string _editTargetName = string.Empty;
+        private string _editTargetNumber = string.Empty;
+
         public StaffManageViewModel(
             IStaffRepository staffRepository,
             ICardReader cardReader,
@@ -115,6 +136,30 @@ namespace ICCardManager.ViewModels
             => string.IsNullOrWhiteSpace(number) ? name : $"{name}（{number}）";
 
         /// <summary>
+        /// 編集中の対象を、編集開始時に一覧へ載っていた表記で名指しする（Issue #1761）
+        /// </summary>
+        private string EditTargetLabel => FormatStaffLabel(_editTargetName, _editTargetNumber);
+
+        /// <summary>
+        /// 編集対象の退避値を確定させる（Issue #1761）
+        /// </summary>
+        /// <param name="staff">編集対象として一覧から選ばれた職員</param>
+        private void SetEditTarget(StaffDto staff)
+        {
+            _editTargetName = staff.Name;
+            _editTargetNumber = staff.Number ?? string.Empty;
+        }
+
+        /// <summary>
+        /// 編集対象の退避値を破棄する（新規登録の開始時・編集の終了時。Issue #1761）
+        /// </summary>
+        private void ClearEditTarget()
+        {
+            _editTargetName = string.Empty;
+            _editTargetNumber = string.Empty;
+        }
+
+        /// <summary>
         /// 職員一覧を読み込み
         /// </summary>
         [RelayCommand]
@@ -144,6 +189,8 @@ namespace ICCardManager.ViewModels
             EditName = string.Empty;
             EditNumber = string.Empty;
             EditNote = string.Empty;
+            // Issue #1761: 新規登録には「一覧に載っている表記」が存在しない
+            ClearEditTarget();
             StatusMessage = "職員証をタッチするとIDmを読み取ります";
             IsStatusError = false;
             IsWaitingForCard = true;
@@ -226,6 +273,8 @@ namespace ICCardManager.ViewModels
             EditName = string.Empty;
             EditNumber = string.Empty;
             EditNote = string.Empty;
+            // Issue #1761: 新規登録には「一覧に載っている表記」が存在しない
+            ClearEditTarget();
             StatusMessage = "職員証を読み取りました。氏名を入力してください。";
             IsStatusError = false;
             IsWaitingForCard = false; // すでにIDmがあるので待機しない
@@ -250,6 +299,9 @@ namespace ICCardManager.ViewModels
             EditName = SelectedStaff.Name;
             EditNumber = SelectedStaff.Number ?? string.Empty;
             EditNote = SelectedStaff.Note ?? string.Empty;
+            // Issue #1761: 以降 SelectedStaff は参照しない。編集対象は EditStaffIdm、
+            // 名指しに使う表記はここで確定させた退避値が担う。
+            SetEditTarget(SelectedStaff);
             StatusMessage = string.Empty;
             IsStatusError = false;
             IsWaitingForCard = false;
@@ -395,7 +447,7 @@ namespace ICCardManager.ViewModels
                         // （CardManageViewModel）と同型の欠陥のため同じ扱いにする。
                         if (beforeStaff == null)
                         {
-                            await NotifyUpdateConflictAsync(sanitizedName, sanitizedNumber);
+                            await NotifyUpdateConflictAsync(EditTargetLabel);
                             return;
                         }
 
@@ -429,7 +481,7 @@ namespace ICCardManager.ViewModels
                             // UPDATE ... WHERE staff_idm = @staffIdm AND is_deleted = 0 が
                             // 0 行に一致した場合だけ（Issue #1753）。つまり編集中に対象の職員が
                             // 論理削除されたことを意味する。カード側（CardManageViewModel）と同じ扱いにする。
-                            await NotifyUpdateConflictAsync(sanitizedName, sanitizedNumber);
+                            await NotifyUpdateConflictAsync(EditTargetLabel);
                         }
                     }
                 }
@@ -446,8 +498,7 @@ namespace ICCardManager.ViewModels
         /// <summary>
         /// 更新対象の職員が見つからなかった（競合）ことを案内し、職員一覧を再読込する
         /// </summary>
-        /// <param name="fallbackName">一覧に対象が残っていないときに名指しへ使う氏名</param>
-        /// <param name="fallbackNumber">同じく職員番号</param>
+        /// <param name="targetLabel">対象職員の表示名（一覧に載っていた表記で確定させたもの）</param>
         /// <remarks>
         /// <para>
         /// Issue #1753: 再読込を先に行うのは文言が「再読み込みしました」と述べるため。
@@ -457,20 +508,20 @@ namespace ICCardManager.ViewModels
         /// 「何が」は<b>編集後の入力値ではなく一覧に載っている値</b>で名指しする。
         /// 氏名を書き換えている途中なら、編集後の氏名は一覧のどこにも存在せず
         /// 「一覧で状態を確認して」という案内が実行できなくなる。
-        /// 一覧の再読込で DataGrid の選択が解除され <see cref="SelectedStaff"/> は null に
-        /// なる（<c>SelectedItem</c> は TwoWay バインド）ため、再読込より前に確定させる。
         /// </para>
         /// <para>
         /// Issue #1760: この順序を守る箇所が複数（更新前データの欠落・更新の影響行数 0）に
         /// 増えたため、呼び出し側へ書き写さずここへ集約する。
         /// </para>
+        /// <para>
+        /// Issue #1761: ラベルの決定は<b>呼び出し側の責任</b>にした。以前はここで
+        /// <see cref="SelectedStaff"/> を優先し、null のときだけ引数（未保存の入力値）へ
+        /// 退避していたため、編集中に選択が外れると<b>一覧に存在しない氏名で名指し</b>していた。
+        /// 編集経路は <see cref="EditTargetLabel"/> を渡す。
+        /// </para>
         /// </remarks>
-        private async Task NotifyUpdateConflictAsync(string fallbackName, string fallbackNumber)
+        private async Task NotifyUpdateConflictAsync(string targetLabel)
         {
-            var conflictLabel = SelectedStaff != null
-                ? FormatStaffLabel(SelectedStaff.Name, SelectedStaff.Number)
-                : FormatStaffLabel(fallbackName, fallbackNumber);
-
             // Issue #1760: 更新前データを読めずに書き込みを中止した経路は、リポジトリの
             // 書き込みを 1 回も通らないため、影響行数 0 でのキャッシュ破棄（Issue #1759）が
             // 働かない。LoadStaffAsync() は GetAllAsync のキャッシュ（既定 TTL 60 秒／
@@ -478,7 +529,7 @@ namespace ICCardManager.ViewModels
             // 古い一覧が返り、「一覧を再読み込みしました」という案内が事実にならない。
             _staffRepository.InvalidateCache();
             await LoadStaffAsync();
-            StatusMessage = ConcurrencyConflictMessage.ForUpdate($"職員「{conflictLabel}」", "職員一覧");
+            StatusMessage = ConcurrencyConflictMessage.ForUpdate($"職員「{targetLabel}」", "職員一覧");
             IsStatusError = true;
         }
 
@@ -611,6 +662,8 @@ namespace ICCardManager.ViewModels
             EditName = string.Empty;
             EditNumber = string.Empty;
             EditNote = string.Empty;
+            // Issue #1761: 編集対象の退避値も他の編集状態と同じタイミングで破棄する
+            ClearEditTarget();
             StatusMessage = string.Empty;
             // Issue #1759: ステータス欄が編集フォームの外へ出て常時表示になったため、
             // エラー状態（赤色）を残したままにしない。CardManageViewModel.CancelEdit と揃える。
@@ -712,6 +765,21 @@ namespace ICCardManager.ViewModels
         /// <summary>
         /// 選択職員変更時の処理
         /// </summary>
+        /// <remarks>
+        /// <para>
+        /// <b>選択が外れた（<paramref name="value"/> が null）ときに編集フォームは閉じない</b>（Issue #1761）。
+        /// 編集中の対象は <see cref="EditStaffIdm"/>（主キー）で特定されており、
+        /// <see cref="SelectedStaff"/> は一覧の選択状態を表すだけなので、選択が外れても編集は継続できる。
+        /// </para>
+        /// <para>
+        /// 選択は利用者の明示的な操作以外でも外れる（選択行の Ctrl+クリック、
+        /// <c>LoadStaffAsync</c> の <c>StaffList.Clear()</c> による <c>SelectedItem</c> の書き戻し）。
+        /// ここでフォームを閉じると<b>入力途中の氏名・備考が予告なく消える</b>ため、閉じる案は採らない。
+        /// 代わりに「編集中に <see cref="SelectedStaff"/> を参照しない」ことを不変条件とし、
+        /// 名指しに要る表記は <see cref="_editTargetName"/> / <see cref="_editTargetNumber"/> に退避しておく。
+        /// この不変条件は <c>StaffManageViewModelTests</c> の Issue #1761 region で固定している。
+        /// </para>
+        /// </remarks>
         partial void OnSelectedStaffChanged(StaffDto? value)
         {
             // 新規登録モード中は選択変更を無視
@@ -724,6 +792,8 @@ namespace ICCardManager.ViewModels
                 EditName = value.Name;
                 EditNumber = value.Number ?? string.Empty;
                 EditNote = value.Note ?? string.Empty;
+                // Issue #1761: 編集対象が切り替わったので、名指しに使う表記も追随させる
+                SetEditTarget(value);
                 StatusMessage = string.Empty;
                 IsStatusError = false;
             }

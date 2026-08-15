@@ -1310,4 +1310,214 @@ public class StaffManageViewModelTests
     }
 
     #endregion
+
+    #region Issue #1761: 一覧の選択が外れても編集を継続できること（SelectedStaff 非依存）
+
+    /// <summary>
+    /// Issue #1761: 編集中に一覧の選択が外れても、編集フォームと入力内容が保持されること
+    /// </summary>
+    /// <remarks>
+    /// <c>SelectedItem="{Binding SelectedStaff}"</c> は TwoWay バインドのため、選択行の
+    /// Ctrl+クリックや <c>StaffList.Clear()</c> による書き戻しで
+    /// <see cref="StaffManageViewModel.SelectedStaff"/> だけが null に戻る。
+    /// 編集対象は <c>EditStaffIdm</c>（主キー）が特定しており、編集は継続できる。
+    /// カード側（<c>CardManageViewModelTests</c>）と同型のため同じ扱いにする。
+    /// </remarks>
+    [Fact]
+    public void OnSelectedStaffChanged_WhenSelectionClearedDuringEdit_ShouldKeepEditFormAndInput()
+    {
+        // Arrange
+        const string idm = "FFFF000000000001";
+        _viewModel.SelectedStaff = new StaffDto
+        {
+            StaffIdm = idm,
+            Name = "田中太郎",
+            Number = "001",
+            Note = "編集前のメモ"
+        };
+        _viewModel.StartEdit();
+        _viewModel.EditNote = "入力途中のメモ";
+
+        // Act - 選択行を Ctrl+クリックして選択解除した
+        _viewModel.SelectedStaff = null;
+
+        // Assert
+        _viewModel.IsEditing.Should().BeTrue("選択解除でフォームを閉じると入力内容が予告なく消える");
+        _viewModel.IsNewStaff.Should().BeFalse("既存職員の編集モードのままであること");
+        _viewModel.EditStaffIdm.Should().Be(idm, "編集対象を特定するのは主キーであること");
+        _viewModel.EditName.Should().Be("田中太郎");
+        _viewModel.EditNumber.Should().Be("001");
+        _viewModel.EditNote.Should().Be("入力途中のメモ");
+    }
+
+    /// <summary>
+    /// Issue #1761: 選択が外れた状態で保存しても、<c>EditStaffIdm</c> の職員が更新され
+    /// 監査ログも残ること
+    /// </summary>
+    [Fact]
+    public async Task SaveAsync_WhenSelectionClearedDuringEdit_ShouldUpdateTargetIdentifiedByEditStaffIdm()
+    {
+        // Arrange
+        const string idm = "FFFF000000000001";
+        _viewModel.SelectedStaff = new StaffDto
+        {
+            StaffIdm = idm,
+            Name = "田中太郎",
+            Number = "001"
+        };
+        _viewModel.StartEdit();
+        _viewModel.EditNote = "更新後のメモ";
+
+        _staffRepositoryMock.Setup(r => r.GetByIdmAsync(idm, false)).ReturnsAsync(new Staff
+        {
+            StaffIdm = idm,
+            Name = "田中太郎",
+            Number = "001",
+            Note = "更新前のメモ"
+        });
+        _staffRepositoryMock.Setup(r => r.UpdateAsync(It.IsAny<Staff>())).ReturnsAsync(true);
+        _staffRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<Staff>());
+
+        // 保存を押す直前に一覧の選択が外れた
+        _viewModel.SelectedStaff = null;
+
+        // Act
+        await _viewModel.SaveAsync();
+
+        // Assert
+        _staffRepositoryMock.Verify(r => r.UpdateAsync(It.Is<Staff>(s =>
+            s.StaffIdm == idm && s.Note == "更新後のメモ")), Times.Once);
+
+        _operationLogRepositoryMock.Verify(r => r.InsertAsync(It.Is<OperationLog>(log =>
+            log.TargetTable == OperationLogger.Tables.Staff &&
+            log.TargetId == idm &&
+            log.Action == OperationLogger.Actions.Update &&
+            log.AfterData!.Contains("更新後のメモ"))), Times.Once);
+
+        _viewModel.StatusMessage.Should().Be("更新しました");
+        _viewModel.IsStatusError.Should().BeFalse();
+    }
+
+    /// <summary>
+    /// Issue #1761: 選択が外れた状態で競合しても、案内は<b>一覧に載っていた氏名</b>で
+    /// 対象を名指しすること
+    /// </summary>
+    /// <remarks>
+    /// Issue #1759 の実装は <c>SelectedStaff</c> を優先し null のときだけ未保存の入力値へ
+    /// 退避する形だったため、選択が外れると<b>禁じたはずの「未保存の入力値による名指し」</b>へ落ちていた。
+    /// </remarks>
+    [Fact]
+    public async Task SaveAsync_WhenSelectionClearedAndUpdateConflicts_ShouldNameTargetByItsListedName()
+    {
+        // Arrange
+        const string idm = "FFFF000000000001";
+        _viewModel.SelectedStaff = new StaffDto
+        {
+            StaffIdm = idm,
+            Name = "田中太郎",
+            Number = "001"
+        };
+        _viewModel.StartEdit();
+        _viewModel.EditName = "田中花子";  // 氏名を打ち直した（結婚等）
+
+        _staffRepositoryMock.Setup(r => r.GetByIdmAsync(idm, false)).ReturnsAsync((Staff?)null);
+        _staffRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<Staff>());
+
+        // 一覧の再読込などで選択が外れた
+        _viewModel.SelectedStaff = null;
+
+        // Act
+        await _viewModel.SaveAsync();
+
+        // Assert
+        _viewModel.StatusMessage.Should().Contain("田中太郎",
+            "選択が外れていても、編集開始時に一覧へ載っていた氏名で名指しすること");
+        _viewModel.StatusMessage.Should().NotContain("田中花子",
+            "未保存の入力値は一覧のどこにも存在せず、案内どおりの確認ができない");
+        _viewModel.StatusMessage.Should().EndWith("やり直してください。");
+        _viewModel.EditName.Should().Be("田中花子", "入力内容は消さないこと");
+    }
+
+    /// <summary>
+    /// Issue #1761: 編集中に一覧で別の行を選び直したら、名指しに使う表記も切替後の行に追随すること
+    /// </summary>
+    [Fact]
+    public async Task SaveAsync_WhenEditTargetSwitchedThenConflicts_ShouldNameSwitchedTarget()
+    {
+        // Arrange
+        const string firstIdm = "FFFF000000000001";
+        const string secondIdm = "FFFF000000000002";
+        _viewModel.SelectedStaff = new StaffDto
+        {
+            StaffIdm = firstIdm,
+            Name = "田中太郎",
+            Number = "001"
+        };
+        _viewModel.StartEdit();
+
+        // 編集中に一覧で別の職員を選び直した（フォームの中身も差し替わる）
+        _viewModel.SelectedStaff = new StaffDto
+        {
+            StaffIdm = secondIdm,
+            Name = "鈴木花子",
+            Number = "002"
+        };
+        _viewModel.EditStaffIdm.Should().Be(secondIdm, "前提: 選択切替で編集対象が差し替わること");
+
+        _staffRepositoryMock.Setup(r => r.GetByIdmAsync(secondIdm, false)).ReturnsAsync((Staff?)null);
+        _staffRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<Staff>());
+
+        // 保存直前に選択が外れる（再読込による書き戻し）
+        _viewModel.SelectedStaff = null;
+
+        // Act
+        await _viewModel.SaveAsync();
+
+        // Assert
+        _viewModel.StatusMessage.Should().Contain("鈴木花子", "切替後の職員で名指しすること");
+        _viewModel.StatusMessage.Should().NotContain("田中太郎", "切替前の職員で名指ししないこと");
+    }
+
+    /// <summary>
+    /// Issue #1761: 認証ダイアログの待機中に選択が外れても、削除は開始時点の対象に対して行われること
+    /// </summary>
+    /// <remarks>
+    /// 職員側の <c>DeleteAsync</c> は Issue #1759 で識別情報をメソッド冒頭（最初の await より前）へ
+    /// 確定させており、この形が正しいことをカード側と対で固定する（片方だけ直すと退行に気付けない）。
+    /// </remarks>
+    [Fact]
+    public async Task DeleteAsync_WhenSelectionClearedDuringAuthentication_ShouldStillDeleteInitialTarget()
+    {
+        // Arrange
+        const string idm = "FFFF000000000001";
+        _viewModel.SelectedStaff = new StaffDto
+        {
+            StaffIdm = idm,
+            Name = "田中太郎",
+            Number = "001"
+        };
+
+        // 認証（職員証タッチ待ち）の最中に一覧の選択が外れた
+        _staffAuthServiceMock.Setup(s => s.RequestAuthenticationAsync(It.IsAny<string>()))
+            .Callback(() => _viewModel.SelectedStaff = null)
+            .ReturnsAsync(new StaffAuthResult { Idm = "TEST_OPERATOR_IDM", StaffName = "テスト操作者" });
+
+        _staffRepositoryMock.Setup(r => r.GetByIdmAsync(idm, false))
+            .ReturnsAsync(new Staff { StaffIdm = idm, Name = "田中太郎", Number = "001" });
+        _staffRepositoryMock.Setup(r => r.DeleteAsync(idm)).ReturnsAsync(true);
+        _staffRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<Staff>());
+
+        // Act
+        await _viewModel.DeleteAsync();
+
+        // Assert
+        _staffRepositoryMock.Verify(r => r.DeleteAsync(idm), Times.Once);
+        _operationLogRepositoryMock.Verify(r => r.InsertAsync(It.Is<OperationLog>(log =>
+            log.TargetTable == OperationLogger.Tables.Staff &&
+            log.TargetId == idm &&
+            log.Action == OperationLogger.Actions.Delete)), Times.Once);
+        _viewModel.StatusMessage.Should().Be("削除しました");
+    }
+
+    #endregion
 }
