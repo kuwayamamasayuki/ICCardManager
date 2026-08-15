@@ -17,7 +17,8 @@ using System.Threading.Tasks;
 namespace ICCardManager.Tests.Services;
 
 /// <summary>
-/// Issue #1727: カード登録時の履歴インポートの失敗通知・リトライ・原子性のテスト
+/// Issue #1727 / #1763: カード登録時の台帳書き込み（履歴インポート・初期残高行）の
+/// 失敗通知・リトライ・原子性のテスト
 /// </summary>
 /// <remarks>
 /// <para>
@@ -31,6 +32,12 @@ namespace ICCardManager.Tests.Services;
 ///   <item><description>失敗を <c>Success=false</c> ＋ <c>FailureReason</c> で呼び出し元に伝える</description></item>
 ///   <item><description>初期残高行と履歴行が同一トランザクションで確定する（片方だけ残らない）</description></item>
 /// </list>
+/// <para>
+/// Issue #1763: カード内に取り込む履歴が<b>無い</b>登録（履歴 0 件＋初期残高行のみ）も
+/// 本メソッドを通すようにしたため、その組み合わせについても同じ 3 点を固定する。
+/// 修正前はこの経路だけ <c>CardManageViewModel</c> がリポジトリを直接叩いており、
+/// リトライも失敗通知も無かった。
+/// </para>
 /// </remarks>
 public class LendingServiceHistoryImportTests : IDisposable
 {
@@ -370,6 +377,97 @@ public class LendingServiceHistoryImportTests : IDisposable
         counter.Count.Should().BeGreaterOrEqualTo(2, "初期残高行の登録までは進んでいること");
         (await CountLedgerRowsAsync()).Should().Be(0,
             "履歴行が入らなかった以上、逆算した初期残高行だけを残してはならない");
+    }
+
+    /// <summary>
+    /// 取り込む履歴が 0 件でも、初期残高行だけは確定すること（Issue #1763）。
+    /// </summary>
+    /// <remarks>
+    /// カード内に対象履歴が無い登録経路は、修正前は
+    /// <c>CardManageViewModel</c> がリポジトリを直接叩いていた。本メソッドへ寄せた以上、
+    /// 「履歴 0 件＋初期残高行あり」で初期残高行が実際に永続化されることを実 DB で表明する。
+    /// </remarks>
+    [Fact]
+    public async Task ImportHistoryForRegistrationAsync_EmptyHistoryWithInitialLedger_PersistsInitialLedgerRow()
+    {
+        // Arrange
+        await SeedCardAsync();
+        var realRepository = new LedgerRepository(_dbContext);
+        var counter = new InsertCounter();
+        var service = CreateServiceOverRealRepository(realRepository, counter, failOnInsertNumber: null);
+
+        // Act
+        var result = await service.ImportHistoryForRegistrationAsync(
+            TestCardIdm, new List<LedgerDetail>(), new DateTime(2026, 2, 1), CreateInitialLedger());
+
+        // Assert
+        result.Success.Should().BeTrue();
+        result.ImportedCount.Should().Be(0, "取り込む利用履歴は無い");
+        (await CountLedgerRowsAsync()).Should().Be(1, "初期残高行だけが記録されること");
+    }
+
+    /// <summary>
+    /// 取り込む履歴が 0 件のとき、初期残高行の書込み失敗を成功として返さないこと（Issue #1763）。
+    /// </summary>
+    /// <remarks>
+    /// ここで失われるのは「新規購入 / ○月から繰越」＝そのカード唯一の受入行であり、
+    /// 欠落すると台帳が 0 行のまま払出だけが積み上がる。呼び出し元が通知できるよう、
+    /// <c>Success=false</c> と <c>FailureReason</c> を返す必要がある。
+    /// </remarks>
+    [Fact]
+    public async Task ImportHistoryForRegistrationAsync_EmptyHistoryWithInitialLedger_WriteFails_ReturnsFailureWithReason()
+    {
+        // Arrange
+        await SeedCardAsync();
+        var realRepository = new LedgerRepository(_dbContext);
+        var counter = new InsertCounter();
+        var service = CreateServiceOverRealRepository(realRepository, counter, failOnInsertNumber: 1);
+
+        // Act
+        var result = await service.ImportHistoryForRegistrationAsync(
+            TestCardIdm, new List<LedgerDetail>(), new DateTime(2026, 2, 1), CreateInitialLedger());
+
+        // Assert
+        result.Success.Should().BeFalse("初期残高行が入らなかった以上、成功として返してはならない");
+        result.FailureReason.Should().NotBeNullOrWhiteSpace();
+        result.FailureReason.Should().NotContain("simulated write failure",
+            "生の例外メッセージをユーザー向け文言に混ぜない（Issue #1614）");
+        (await CountLedgerRowsAsync()).Should().Be(0);
+    }
+
+    /// <summary>
+    /// 取り込む履歴が 0 件でも、一過性の SQLITE_BUSY はリトライで吸収されること（Issue #1763）。
+    /// </summary>
+    /// <remarks>
+    /// 修正前のこの経路は <c>DbContext.ExecuteWithRetryAsync</c> で包まれておらず、
+    /// 共有モードの一過性の競合で一発失敗して無言で受入行を落としていた。
+    /// </remarks>
+    [Fact]
+    public async Task ImportHistoryForRegistrationAsync_EmptyHistoryWithInitialLedger_TransientSqliteBusy_RetriesAndSucceeds()
+    {
+        // Arrange
+        SetupReadMocks();
+
+        var insertAttempts = 0;
+        _ledgerRepositoryMock.Setup(r => r.InsertAsync(It.IsAny<Ledger>()))
+            .Returns<Ledger>(_ =>
+            {
+                insertAttempts++;
+                if (insertAttempts == 1)
+                {
+                    // 1回目だけ他PCとの競合を模擬する
+                    throw new SQLiteException(SQLiteErrorCode.Busy, "database is locked");
+                }
+                return Task.FromResult(insertAttempts);
+            });
+
+        // Act
+        var result = await _service.ImportHistoryForRegistrationAsync(
+            TestCardIdm, new List<LedgerDetail>(), new DateTime(2026, 2, 1), CreateInitialLedger());
+
+        // Assert
+        result.Success.Should().BeTrue("一過性の SQLITE_BUSY はリトライで吸収されるべき");
+        insertAttempts.Should().BeGreaterThan(1, "リトライが行われたことを示す");
     }
 
     /// <summary>
