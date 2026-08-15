@@ -536,6 +536,9 @@ WHERE card_idm = @cardIdm AND is_deleted = 1";
         }
 
         /// <inheritdoc/>
+        public void InvalidateCache() => InvalidateCardCache();
+
+        /// <inheritdoc/>
         public async Task<bool> ExistsAsync(string cardIdm)
         {
             using var lease = await _dbContext.LeaseConnectionAsync();

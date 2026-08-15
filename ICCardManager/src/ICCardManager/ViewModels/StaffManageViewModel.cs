@@ -179,11 +179,11 @@ namespace ICCardManager.ViewModels
                         if (restored)
                         {
                             // 操作ログを記録（復元後のデータを取得）
-                            var restoredStaff = await _staffRepository.GetByIdmAsync(idm);
-                            if (restoredStaff != null)
-                            {
-                                await _operationLogger.LogStaffRestoreAsync(restoredStaff);
-                            }
+                            // Issue #1760: 再読取が null になるのは復元の直後に他 PC が削除した場合だけ。
+                            // 復元は確定済みなので記録を落とさず、復元前のデータで補う。
+                            var restoredStaff = await _staffRepository.GetByIdmAsync(idm)
+                                ?? CreateRestoredSnapshot(existing);
+                            await _operationLogger.LogStaffRestoreAsync(restoredStaff);
 
                             _dialogService.ShowInformation(
                                 $"{identifier} を復元しました",
@@ -308,11 +308,11 @@ namespace ICCardManager.ViewModels
                                     if (restored)
                                     {
                                         // 操作ログを記録（復元後のデータを取得）
-                                        var restoredStaff = await _staffRepository.GetByIdmAsync(EditStaffIdm);
-                                        if (restoredStaff != null)
-                                        {
-                                            await _operationLogger.LogStaffRestoreAsync(restoredStaff);
-                                        }
+                                        // Issue #1760: 再読取が null になるのは復元の直後に他 PC が削除した場合だけ。
+                                        // 復元は確定済みなので記録を落とさず、復元前のデータで補う。
+                                        var restoredStaff = await _staffRepository.GetByIdmAsync(EditStaffIdm)
+                                            ?? CreateRestoredSnapshot(existing);
+                                        await _operationLogger.LogStaffRestoreAsync(restoredStaff);
 
                                         var restoredIdm = EditStaffIdm;
                                         await LoadStaffAsync();
@@ -387,6 +387,18 @@ namespace ICCardManager.ViewModels
                         // 更新前のデータを取得（操作ログ用）
                         var beforeStaff = await _staffRepository.GetByIdmAsync(EditStaffIdm);
 
+                        // Issue #1760: 読み取れなかった時点で「対象の職員は現在 is_deleted = 0 として
+                        // 存在しない」ことが確定しているため、UpdateAsync を呼ばずに競合として扱う。
+                        // 通常は UpdateAsync の WHERE（同じ is_deleted = 0）も 0 行になるが、
+                        // 読み取りと書き込みの間に他 PC が職員を復元すると 1 行に一致して成功し、
+                        // 更新だけが通って operation_log には 1 行も残らない。カード側
+                        // （CardManageViewModel）と同型の欠陥のため同じ扱いにする。
+                        if (beforeStaff == null)
+                        {
+                            await NotifyUpdateConflictAsync(sanitizedName, sanitizedNumber);
+                            return;
+                        }
+
                         // 更新
                         var staff = new Staff
                         {
@@ -399,11 +411,8 @@ namespace ICCardManager.ViewModels
                         var success = await _staffRepository.UpdateAsync(staff);
                         if (success)
                         {
-                            // 操作ログを記録
-                            if (beforeStaff != null)
-                            {
-                                await _operationLogger.LogStaffUpdateAsync(beforeStaff, staff);
-                            }
+                            // 操作ログを記録（beforeStaff は上のガードで非 null が確定している。Issue #1760）
+                            await _operationLogger.LogStaffUpdateAsync(beforeStaff, staff);
 
                             var updatedIdm = EditStaffIdm;
                             await LoadStaffAsync();
@@ -420,21 +429,7 @@ namespace ICCardManager.ViewModels
                             // UPDATE ... WHERE staff_idm = @staffIdm AND is_deleted = 0 が
                             // 0 行に一致した場合だけ（Issue #1753）。つまり編集中に対象の職員が
                             // 論理削除されたことを意味する。カード側（CardManageViewModel）と同じ扱いにする。
-                            // 再読込を先に行うのは文言が「再読み込みしました」と述べるため。
-                            // CancelEdit() は呼ばない（入力内容を消さない）。
-                            //
-                            // 「何が」は**編集後の入力値ではなく一覧に載っている値**で名指しする。
-                            // 氏名を書き換えている途中なら、編集後の氏名は一覧のどこにも存在せず
-                            // 「一覧で状態を確認して」という案内が実行できなくなる。
-                            // 一覧の再読込で DataGrid の選択が解除され SelectedStaff は null に
-                            // なる（SelectedItem は TwoWay バインド）ため、再読込より前に確定させる。
-                            var conflictLabel = SelectedStaff != null
-                                ? FormatStaffLabel(SelectedStaff.Name, SelectedStaff.Number)
-                                : FormatStaffLabel(sanitizedName, sanitizedNumber);
-                            await LoadStaffAsync();
-                            StatusMessage = ConcurrencyConflictMessage.ForUpdate(
-                                $"職員「{conflictLabel}」", "職員一覧");
-                            IsStatusError = true;
+                            await NotifyUpdateConflictAsync(sanitizedName, sanitizedNumber);
                         }
                     }
                 }
@@ -446,6 +441,45 @@ namespace ICCardManager.ViewModels
                 StatusMessage = ExceptionMessageFormatter.ToUserMessage(ex, "職員の保存");
                 IsStatusError = true;
             }
+        }
+
+        /// <summary>
+        /// 更新対象の職員が見つからなかった（競合）ことを案内し、職員一覧を再読込する
+        /// </summary>
+        /// <param name="fallbackName">一覧に対象が残っていないときに名指しへ使う氏名</param>
+        /// <param name="fallbackNumber">同じく職員番号</param>
+        /// <remarks>
+        /// <para>
+        /// Issue #1753: 再読込を先に行うのは文言が「再読み込みしました」と述べるため。
+        /// <c>CancelEdit()</c> は呼ばない（入力内容を消さない）。
+        /// </para>
+        /// <para>
+        /// 「何が」は<b>編集後の入力値ではなく一覧に載っている値</b>で名指しする。
+        /// 氏名を書き換えている途中なら、編集後の氏名は一覧のどこにも存在せず
+        /// 「一覧で状態を確認して」という案内が実行できなくなる。
+        /// 一覧の再読込で DataGrid の選択が解除され <see cref="SelectedStaff"/> は null に
+        /// なる（<c>SelectedItem</c> は TwoWay バインド）ため、再読込より前に確定させる。
+        /// </para>
+        /// <para>
+        /// Issue #1760: この順序を守る箇所が複数（更新前データの欠落・更新の影響行数 0）に
+        /// 増えたため、呼び出し側へ書き写さずここへ集約する。
+        /// </para>
+        /// </remarks>
+        private async Task NotifyUpdateConflictAsync(string fallbackName, string fallbackNumber)
+        {
+            var conflictLabel = SelectedStaff != null
+                ? FormatStaffLabel(SelectedStaff.Name, SelectedStaff.Number)
+                : FormatStaffLabel(fallbackName, fallbackNumber);
+
+            // Issue #1760: 更新前データを読めずに書き込みを中止した経路は、リポジトリの
+            // 書き込みを 1 回も通らないため、影響行数 0 でのキャッシュ破棄（Issue #1759）が
+            // 働かない。LoadStaffAsync() は GetAllAsync のキャッシュ（既定 TTL 60 秒／
+            // 共有モード 30 秒）を読むため、ここで破棄しないと削除済みの職員を含む
+            // 古い一覧が返り、「一覧を再読み込みしました」という案内が事実にならない。
+            _staffRepository.InvalidateCache();
+            await LoadStaffAsync();
+            StatusMessage = ConcurrencyConflictMessage.ForUpdate($"職員「{conflictLabel}」", "職員一覧");
+            IsStatusError = true;
         }
 
         /// <summary>
@@ -478,16 +512,24 @@ namespace ICCardManager.ViewModels
                 using (BeginBusy("削除中..."))
                 {
                     // 削除前のデータを取得（操作ログ用）
+                    //
+                    // Issue #1760: 読めなければ削除自体を行わない。読み取れない時点で対象の職員は
+                    // 現在存在しないが、その直後に他 PC が復元すると DeleteAsync（論理削除。
+                    // WHERE is_deleted = 0）は 1 行に一致して成功し得る。従来の
+                    // `if (staff != null)` ガードでは、論理削除だけが確定して
+                    // operation_log には 1 行も残らなかった。カード側と同じ扱いにする。
                     var staff = await _staffRepository.GetByIdmAsync(targetIdm);
+                    if (staff == null)
+                    {
+                        await NotifyDeleteConflictAsync(targetLabel);
+                        return;
+                    }
 
                     var success = await _staffRepository.DeleteAsync(targetIdm);
                     if (success)
                     {
                         // 操作ログを記録（Issue #429: 認証済み職員のIDmを使用）
-                        if (staff != null)
-                        {
-                            await _operationLogger.LogStaffDeleteAsync(staff);
-                        }
+                        await _operationLogger.LogStaffDeleteAsync(staff);
 
                         await LoadStaffAsync();
                         CancelEdit();
@@ -504,10 +546,7 @@ namespace ICCardManager.ViewModels
                         // カード側の削除は CardOperationResult を返し Issue #1109 で是正済みだが、
                         // 職員側は bool のままで案内が「削除に失敗しました」の9文字だけだった。
                         // targetLabel はメソッド冒頭で確定済み（再読込後の SelectedStaff は null）。
-                        await LoadStaffAsync();
-                        StatusMessage = ConcurrencyConflictMessage.ForDelete(
-                            $"職員「{targetLabel}」", "職員一覧");
-                        IsStatusError = true;
+                        await NotifyDeleteConflictAsync(targetLabel);
                     }
                 }
             }
@@ -518,6 +557,45 @@ namespace ICCardManager.ViewModels
                 StatusMessage = ExceptionMessageFormatter.ToUserMessage(ex, "職員の削除");
                 IsStatusError = true;
             }
+        }
+
+        /// <summary>
+        /// 削除対象の職員が見つからなかった（競合）ことを案内し、職員一覧を再読込する
+        /// </summary>
+        /// <param name="targetLabel">対象職員の表示名（再読込より前に確定させたもの）</param>
+        /// <remarks>
+        /// Issue #1760: 事前読み取りで検出した場合と影響行数 0 で検出した場合は<b>同じ条件</b>
+        /// （対象行が無い）なので、同じ文言で案内する。書き込みを 1 回も通らない経路では
+        /// <c>DeleteAsync</c> によるキャッシュ破棄（Issue #1759）が働かないため明示的に破棄する。
+        /// </remarks>
+        private async Task NotifyDeleteConflictAsync(string targetLabel)
+        {
+            _staffRepository.InvalidateCache();
+            await LoadStaffAsync();
+            StatusMessage = ConcurrencyConflictMessage.ForDelete($"職員「{targetLabel}」", "職員一覧");
+            IsStatusError = true;
+        }
+
+        /// <summary>
+        /// 復元後の職員の状態を、復元前に読み取ったデータから組み立てる
+        /// </summary>
+        /// <param name="deletedStaff">復元前に読み取った職員（<c>includeDeleted: true</c> で取得したもの）</param>
+        /// <remarks>
+        /// Issue #1760: 復元直後の再読取が失敗したときに、操作ログの <c>AfterData</c> として使う。
+        /// <c>RestoreAsync</c> が変えるのは <c>is_deleted</c> / <c>deleted_at</c> の 2 列だけなので、
+        /// それ以外は復元前の値をそのまま引き継ぐ。
+        /// </remarks>
+        private static Staff CreateRestoredSnapshot(Staff deletedStaff)
+        {
+            return new Staff
+            {
+                StaffIdm = deletedStaff.StaffIdm,
+                Name = deletedStaff.Name,
+                Number = deletedStaff.Number,
+                Note = deletedStaff.Note,
+                IsDeleted = false,
+                DeletedAt = null
+            };
         }
 
         /// <summary>
@@ -574,11 +652,11 @@ namespace ICCardManager.ViewModels
                             if (restored)
                             {
                                 // 操作ログを記録（復元後のデータを取得）
-                                var restoredStaff = await _staffRepository.GetByIdmAsync(e.Idm);
-                                if (restoredStaff != null)
-                                {
-                                    await _operationLogger.LogStaffRestoreAsync(restoredStaff);
-                                }
+                                // Issue #1760: 再読取が null になるのは復元の直後に他 PC が削除した場合だけ。
+                                // 復元は確定済みなので記録を落とさず、復元前のデータで補う。
+                                var restoredStaff = await _staffRepository.GetByIdmAsync(e.Idm)
+                                    ?? CreateRestoredSnapshot(existing);
+                                await _operationLogger.LogStaffRestoreAsync(restoredStaff);
 
                                 var restoredIdm = e.Idm;
                                 await LoadStaffAsync();
