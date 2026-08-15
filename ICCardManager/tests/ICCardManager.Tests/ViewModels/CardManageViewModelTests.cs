@@ -1818,4 +1818,114 @@ public class CardManageViewModelTests
     }
 
     #endregion
+
+    #region Issue #1759: 影響行数0（競合）を検出したときの案内と一覧再読込
+
+    /// <summary>
+    /// Issue #1759: 編集保存で UpdateAsync が false を返したとき、
+    /// 3要素の案内を出し、カード一覧を再読込すること
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>CardRepository.UpdateAsync</c> が false を返すのは
+    /// <c>UPDATE ... WHERE card_idm = @cardIdm AND is_deleted = 0</c> が 0 行に一致した場合だけ、
+    /// つまり編集中に対象カードが論理削除された（共有モードで他 PC が削除した等）ことを意味する。
+    /// 修正前は「更新に失敗しました」の8文字だけを表示し一覧も再読込しなかったため、
+    /// 何度保存し直しても同じ8文字が出るだけで、アプリを開き直すまで状況が変わらなかった。
+    /// </para>
+    /// <para>
+    /// 再読込は <c>.claude/rules/development-conventions.md</c>（Issue #1753）の
+    /// 「競合検出時は UI 側で一覧を再読込すること」に基づく。文言で「一覧を確認して
+    /// やり直す」と案内する以上、再読込しないと同じエラーを繰り返す。
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task SaveAsync_ExistingCard_WhenUpdateMatchesNoRow_ShouldReloadCardsAndShowActionableError()
+    {
+        // Arrange
+        var idm = "0102030405060708";
+        _viewModel.SelectedCard = new CardDto
+        {
+            CardIdm = idm,
+            CardType = "はやかけん",
+            CardNumber = "H-001"
+        };
+        _viewModel.StartEdit();
+        _viewModel.EditNote = "備考の誤字を直した";
+
+        _cardRepositoryMock.Setup(r => r.GetByIdmAsync(idm, false)).ReturnsAsync(new IcCard
+        {
+            CardIdm = idm,
+            CardType = "はやかけん",
+            CardNumber = "H-001"
+        });
+        // 他PCがこのカードを論理削除した → WHERE is_deleted = 0 に 0 行 → false
+        _cardRepositoryMock.Setup(r => r.UpdateAsync(It.IsAny<IcCard>())).ReturnsAsync(false);
+        _cardRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<IcCard>());
+
+        // Act
+        await _viewModel.SaveAsync();
+
+        // Assert: 一覧を再読込していること（削除済みカードが選択されたまま残らない）
+        _cardRepositoryMock.Verify(r => r.GetAllAsync(), Times.Once);
+
+        // 3要素（.claude/rules/error-messages.md）
+        _viewModel.IsStatusError.Should().BeTrue();
+        _viewModel.StatusMessage.Length.Should().BeGreaterOrEqualTo(20);
+        _viewModel.StatusMessage.Should().Contain("H-001");             // 何が
+        _viewModel.StatusMessage.Should().Contain("削除された可能性");   // なぜ
+        _viewModel.StatusMessage.Should().EndWith("やり直してください。"); // どうすれば
+
+        // 入力内容を失わせない（Issue #1757: エラー表示時に CancelEdit() を呼ばない）
+        _viewModel.IsEditing.Should().BeTrue();
+        _viewModel.EditNote.Should().Be("備考の誤字を直した");
+    }
+
+    /// <summary>
+    /// Issue #1759: 削除済みカードの復元で RestoreAsync が false を返したとき、
+    /// 3要素の案内を出し、カード一覧を再読込すること
+    /// </summary>
+    /// <remarks>
+    /// <c>RestoreAsync</c> の WHERE は <c>is_deleted = 1</c> のため、false は
+    /// 「他 PC が先に復元した」ことを意味する。更新分岐と同じ欠陥形状であり、
+    /// 更新だけを直すと同じ再発を呼び込むため併せて是正する
+    /// （<c>.claude/rules/development-conventions.md</c> Issue #1730 の横断洗い出し）。
+    /// </remarks>
+    [Fact]
+    public async Task SaveAsync_NewCard_WhenRestoreMatchesNoRow_ShouldReloadCardsAndShowActionableError()
+    {
+        // Arrange
+        var idm = "0102030405060708";
+        _cardRepositoryMock.Setup(r => r.GetByIdmAsync(idm, true)).ReturnsAsync(new IcCard
+        {
+            CardIdm = idm,
+            CardType = "はやかけん",
+            CardNumber = "H-001",
+            IsDeleted = true
+        });
+        // 他PCが先に復元した → WHERE is_deleted = 1 に 0 行 → false
+        _cardRepositoryMock.Setup(r => r.RestoreAsync(idm)).ReturnsAsync(false);
+        _cardRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<IcCard>());
+
+        _viewModel.StartNewCard();
+        _viewModel.EditCardIdm = idm;
+        _viewModel.EditCardNumber = "H-002";
+
+        // Act
+        await _viewModel.SaveAsync();
+
+        // Assert
+        _cardRepositoryMock.Verify(r => r.GetAllAsync(), Times.Once);
+
+        _viewModel.IsStatusError.Should().BeTrue();
+        _viewModel.StatusMessage.Length.Should().BeGreaterOrEqualTo(20);
+        _viewModel.StatusMessage.Should().Contain("H-001");                 // 何が（削除時点の管理番号）
+        _viewModel.StatusMessage.Should().Contain("先に復元された可能性");   // なぜ
+        _viewModel.StatusMessage.Should().EndWith("やり直してください。");   // どうすれば
+
+        // 「削除された可能性」（更新側の理由）と取り違えていないこと
+        _viewModel.StatusMessage.Should().NotContain("削除された可能性");
+    }
+
+    #endregion
 }

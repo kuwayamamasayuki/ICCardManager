@@ -404,7 +404,12 @@ namespace ICCardManager.ViewModels
                                 }
                                 else
                                 {
-                                    StatusMessage = "復元に失敗しました";
+                                    // Issue #1759: RestoreAsync が false を返すのは
+                                    // UPDATE ... WHERE card_idm = @cardIdm AND is_deleted = 1 が
+                                    // 0 行に一致した場合だけ。つまり他 PC が先に復元したことを意味する。
+                                    await LoadCardsAsync();
+                                    StatusMessage = ConcurrencyConflictMessage.ForRestore(
+                                        $"交通系ICカード「{existing.CardType} {existing.CardNumber}」", "カード一覧");
                                     IsStatusError = true;
                                 }
                             }
@@ -664,7 +669,18 @@ namespace ICCardManager.ViewModels
                     }
                     else
                     {
-                        StatusMessage = "更新に失敗しました";
+                        // Issue #1759: UpdateAsync が false を返すのは
+                        // UPDATE ... WHERE card_idm = @cardIdm AND is_deleted = 0 が
+                        // 0 行に一致した場合だけ（Issue #1753）。つまり編集中に対象カードが
+                        // 論理削除されたことを意味するため、原因と次の行動を具体的に案内する。
+                        // 一覧を再読込しないと削除済みのカードが選択されたまま残り、
+                        // 何度保存しても同じメッセージが出続ける（Issue #1753 の
+                        // 「競合検出時は UI 側で一覧を再読込すること」）。
+                        // 再読込を先に行うのは、文言が「再読み込みしました」と述べるため。
+                        // CancelEdit() は呼ばない（入力内容を消さない。Issue #1757）。
+                        await LoadCardsAsync();
+                        StatusMessage = ConcurrencyConflictMessage.ForUpdate(
+                            $"交通系ICカード「{EditCardType} {sanitizedCardNumber}」", "カード一覧");
                         IsStatusError = true;
                     }
                 }
@@ -947,7 +963,11 @@ namespace ICCardManager.ViewModels
                             }
                             else
                             {
-                                StatusMessage = "復元に失敗しました";
+                                // Issue #1759: 保存経路（SaveAsync）の復元分岐と同じ扱い。
+                                // false は「他 PC が先に復元した」ことを意味する。
+                                await LoadCardsAsync();
+                                StatusMessage = ConcurrencyConflictMessage.ForRestore(
+                                    $"交通系ICカード「{existing.CardType} {existing.CardNumber}」", "カード一覧");
                                 IsStatusError = true;
                             }
                         }

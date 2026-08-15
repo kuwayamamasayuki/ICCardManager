@@ -125,6 +125,17 @@ DB 制約（UNIQUE 等）の違反を捕捉してドメイン例外へ変換す�
 - **エラー表示時に入力内容を消さない**。編集ダイアログで `CancelEdit()` 相当を呼ぶと、ユーザーは指摘された 1 項目だけを直して再保存できず、最初からやり直しになる
 - 回帰テストは「重複を検出すること」だけでなく「**正当な操作を塞いでいないこと**」を対で固定する。前者だけだと、対象の操作を無条件に失敗させる実装でも緑になる（#1757 では「削除済みカードの番号は再利用できる」「番号を変えない更新は成功する」を併置）
 
+### 「影響行数 0」は失敗ではなく競合 — 原因を名指しできる（Issue #1759）
+
+`UpdateAsync` / `RestoreAsync` / `DeleteAsync` が `bool` で `false` を返すのは、WHERE 句（`is_deleted = 0` または `= 1`）に **1 行も一致しなかった場合だけ**である（#1753 で導入した影響行数による競合検出）。つまり原因は「対象行が別の状態へ変わった」に特定でき、**「更新に失敗しました」と書く理由がない**。
+
+- **戻り値が `bool` の分岐を見たら、まずリポジトリの WHERE 句を読む**。`false` の意味が 1 つに定まるなら、その 1 つを文言に書く。#1759 では Card / Staff の両 ViewModel に同型の分岐が **7 か所**あり、いずれも 8〜9 文字の定型文だった
+- **原因を断定する前に、その原因が成立する構成かを確認する**（`.claude/rules/development-conventions.md` と同じ判断）。「他のパソコンで削除されました」はローカルモードでは誤りになる。「他のパソコンや**別の操作**で〜した**可能性があります**」とモード中立に書く
+- **操作ごとに「なぜ」を変える**。復元できなかった原因は「先に**復元**された」であって「削除された」ではない。文言を集約するときも `ForUpdate` / `ForRestore` / `ForDelete` を分け、互いの文言を含まないことをテストで表明する
+- **「一覧を確認してやり直す」と案内するなら、案内する側が先に一覧を再読込する**（#1753）。再読込しないと同じエラーを繰り返す。文言が「再読み込みしました」と述べる以上、**再読込を先に実行してから**文言を設定する
+- **エラー表示で入力内容を消さない**（#1757）。`CancelEdit()` 相当を呼ぶと、指摘された項目だけを直して再操作できない
+- **文言を長くしたら、その表示領域が「その状態で生きているか」を必ず確認する**（#1727 の「所在」）。#1759 では職員管理ダイアログのステータス欄が `Visibility="{Binding IsEditing}"` のパネル内にあり、**削除の結果表示は成功・失敗とも一度も表示されていなかった**（削除ボタンは非編集時にしか押せないため）。ViewModel のテストはこれを検出できないので、XAML テキスト上の静的検証を対で置く
+
 ### サービス内の「例外 → 文言」の対応表は 1 か所に集約する（Issue #1744）
 
 同じ `catch` の ladder（`FileNotFoundException` → … → `catch (Exception)`）を複数のメソッドへ書き写さない。**次に対応表を変える人が、一部の経路を取りこぼす**。
@@ -153,6 +164,7 @@ DB 制約（UNIQUE 等）の違反を捕捉してドメイン例外へ変換す�
 | `WarningServiceBackupHealthTests.BackupStaleWarning_SatisfiesErrorMessageQualityCriteria` | バックアップ健全性警告の文言（経過日数・最終成功日時の明示、原因候補、システム管理画面（F6）への誘導と行動指示、Issue #1689） |
 | `ConnectionDiagnosticsServiceTests.AllProblemItems_SatisfyErrorMessageQualityCriteria` | 接続診断の警告・異常文言（8項目すべてを問題状態へ落とし、`DetailText` が20文字以上・行動指示で終わる・曖昧文言を含まないことを検証、Issue #1690） |
 | `CsvImportServiceLedgerTransactionTests.ImportLedgersAsync_SQLiteエラー_生の例外メッセージをUIへ出さないこと` | 履歴CSVインポートの書き込み失敗（Issue #1745）。`SQLiteException` を `DatabaseException.QueryFailed` へラップしてから再スローすること（生のままだと `ToUserFacingErrorMessage` の `default` 分岐に落ちて `ex.Message` が漏れる）を、`NotContain("database is locked")` / `NotContain("予期しないエラー")` で表明 |
+| `ConcurrencyConflictMessageTests` | 競合（影響行数 0）検出時の案内文言（`Common/ConcurrencyConflictMessage`、Issue #1759）。**全ファクトリをリフレクションで列挙**して 3 要素を検証し、操作ごとに「なぜ」が異なること（更新＝削除された／復元＝先に復元された／削除＝先に削除された）も表明する |
 | `CsvImportServiceTests` の 2 件（`文字コード判別不能の…` / `宣言された文字コードで読めない…`） | CSVインポートの文字コードエラー（`FileOperationException.UndecidableEncoding` / `UnreadableDeclaredEncoding`）。判別に用いた候補（UTF-8 / Shift_JIS）と Excel の保存形式名を示し、行動指示で終わること、**ファイルパスをユーザー向け文言へ露出しない**ことを検証（Issue #1744） |
 
 > **「判別できない」と「判別できたが読めない」で文言を分ける**（Issue #1744）: 原因が違えば「どうすれば」も違う。BOM が文字コードを宣言しているファイルに「文字コードを判別できませんでした。CSV UTF-8 形式で保存し直してください」と案内すると、**既にその形式であるファイルに対する無意味な指示**になり、真の原因（転送の失敗・破損）から利用者を遠ざける。品質テストは互いの文言を含まないこと（`NotContain("判別できませんでした")`）も表明し、取り違えを検出する。

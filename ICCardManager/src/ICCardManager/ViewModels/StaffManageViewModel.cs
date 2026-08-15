@@ -105,6 +105,16 @@ namespace ICCardManager.ViewModels
         }
 
         /// <summary>
+        /// ユーザー向けメッセージで職員を特定するための表示名を組み立てる（氏名（職員番号））。
+        /// </summary>
+        /// <remarks>
+        /// Issue #1759: 復元提案のダイアログと競合エラーの文言で同じ表記を使うため 1 か所に集約する。
+        /// 職員番号は任意入力のため、空のときは氏名だけにする。
+        /// </remarks>
+        private static string FormatStaffLabel(string name, string number)
+            => string.IsNullOrWhiteSpace(number) ? name : $"{name}（{number}）";
+
+        /// <summary>
         /// 職員一覧を読み込み
         /// </summary>
         [RelayCommand]
@@ -283,9 +293,7 @@ namespace ICCardManager.ViewModels
                         var existing = await _staffRepository.GetByIdmAsync(EditStaffIdm, includeDeleted: true);
                         if (existing != null)
                         {
-                            var identifier = string.IsNullOrWhiteSpace(existing.Number)
-                                ? existing.Name
-                                : $"{existing.Name}（{existing.Number}）";
+                            var identifier = FormatStaffLabel(existing.Name, existing.Number);
 
                             if (existing.IsDeleted)
                             {
@@ -315,7 +323,12 @@ namespace ICCardManager.ViewModels
                                     }
                                     else
                                     {
-                                        StatusMessage = "復元に失敗しました";
+                                        // Issue #1759: RestoreAsync が false を返すのは
+                                        // UPDATE ... WHERE staff_idm = @staffIdm AND is_deleted = 1 が
+                                        // 0 行に一致した場合だけ。つまり他 PC が先に復元したことを意味する。
+                                        await LoadStaffAsync();
+                                        StatusMessage = ConcurrencyConflictMessage.ForRestore(
+                                            $"職員証「{identifier}」", "職員一覧");
                                         IsStatusError = true;
                                     }
                                 }
@@ -397,7 +410,15 @@ namespace ICCardManager.ViewModels
                         }
                         else
                         {
-                            StatusMessage = "更新に失敗しました";
+                            // Issue #1759: UpdateAsync が false を返すのは
+                            // UPDATE ... WHERE staff_idm = @staffIdm AND is_deleted = 0 が
+                            // 0 行に一致した場合だけ（Issue #1753）。つまり編集中に対象の職員が
+                            // 論理削除されたことを意味する。カード側（CardManageViewModel）と同じ扱いにする。
+                            // 再読込を先に行うのは文言が「再読み込みしました」と述べるため。
+                            // CancelEdit() は呼ばない（入力内容を消さない）。
+                            await LoadStaffAsync();
+                            StatusMessage = ConcurrencyConflictMessage.ForUpdate(
+                                $"職員証「{FormatStaffLabel(sanitizedName, sanitizedNumber)}」", "職員一覧");
                             IsStatusError = true;
                         }
                     }
@@ -451,7 +472,14 @@ namespace ICCardManager.ViewModels
                     }
                     else
                     {
-                        StatusMessage = "削除に失敗しました";
+                        // Issue #1759: DeleteAsync（論理削除）が false を返すのは
+                        // UPDATE ... WHERE staff_idm = @staffIdm AND is_deleted = 0 が
+                        // 0 行に一致した場合だけ。つまり他 PC が先に削除したことを意味する。
+                        // カード側の削除は CardOperationResult を返し Issue #1109 で是正済みだが、
+                        // 職員側は bool のままで案内が「削除に失敗しました」の9文字だけだった。
+                        await LoadStaffAsync();
+                        StatusMessage = ConcurrencyConflictMessage.ForDelete(
+                            $"職員証「{FormatStaffLabel(SelectedStaff.Name, SelectedStaff.Number)}」", "職員一覧");
                         IsStatusError = true;
                     }
                 }
@@ -501,9 +529,7 @@ namespace ICCardManager.ViewModels
                 var existing = await _staffRepository.GetByIdmAsync(e.Idm, includeDeleted: true);
                 if (existing != null)
                 {
-                    var identifier = string.IsNullOrWhiteSpace(existing.Number)
-                        ? existing.Name
-                        : $"{existing.Name}（{existing.Number}）";
+                    var identifier = FormatStaffLabel(existing.Name, existing.Number);
 
                     if (existing.IsDeleted)
                     {
@@ -533,7 +559,11 @@ namespace ICCardManager.ViewModels
                             }
                             else
                             {
-                                StatusMessage = "復元に失敗しました";
+                                // Issue #1759: 保存経路（SaveAsync）の復元分岐と同じ扱い。
+                                // false は「他 PC が先に復元した」ことを意味する。
+                                await LoadStaffAsync();
+                                StatusMessage = ConcurrencyConflictMessage.ForRestore(
+                                    $"職員証「{identifier}」", "職員一覧");
                                 IsStatusError = true;
                             }
                         }

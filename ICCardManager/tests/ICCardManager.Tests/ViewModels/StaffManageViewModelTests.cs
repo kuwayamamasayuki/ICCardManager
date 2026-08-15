@@ -453,24 +453,11 @@ public class StaffManageViewModelTests
         _staffRepositoryMock.Verify(r => r.DeleteAsync(It.IsAny<string>()), Times.Never);
     }
 
-    /// <summary>
-    /// 削除に失敗した場合、エラーメッセージが表示されること
-    /// </summary>
-    [Fact]
-    public async Task DeleteAsync_WhenDeleteFails_ShouldShowError()
-    {
-        // Arrange
-        var staff = new StaffDto { StaffIdm = "FFFF000000000001", Name = "田中太郎" };
-        _viewModel.SelectedStaff = staff;
-
-        _staffRepositoryMock.Setup(r => r.DeleteAsync("FFFF000000000001")).ReturnsAsync(false);
-
-        // Act
-        await _viewModel.DeleteAsync();
-
-        // Assert
-        _viewModel.StatusMessage.Should().Contain("失敗");
-    }
+    // Issue #1759: 「削除に失敗した場合にエラーメッセージが表示されること」を検証していた
+    // DeleteAsync_WhenDeleteFails_ShouldShowError は、同じ状況（DeleteAsync=false）を
+    // より強く表明する DeleteAsync_WhenDeleteMatchesNoRow_ShouldReloadStaffAndShowActionableError
+    // へ統合した（本ファイル末尾の Issue #1759 リージョン）。旧テストは
+    // StatusMessage.Contain("失敗") で規約違反の旧文言をピン留めしていた。
 
     /// <summary>
     /// 削除中に例外が発生した場合、生の <c>ex.Message</c> を漏らさず
@@ -692,6 +679,142 @@ public class StaffManageViewModelTests
         // Assert
         shouldClose.Should().BeTrue();               // 既登録なのでダイアログを閉じる
         raisedCount.Should().Be(0);                  // フォーカス要求は発火しない
+    }
+
+    #endregion
+
+    #region Issue #1759: 影響行数0（競合）を検出したときの案内と一覧再読込
+
+    /// <summary>
+    /// Issue #1759: 編集保存で UpdateAsync が false を返したとき、
+    /// 3要素の案内を出し、職員一覧を再読込すること
+    /// </summary>
+    /// <remarks>
+    /// <c>StaffRepository.UpdateAsync</c> が false を返すのは
+    /// <c>UPDATE ... WHERE staff_idm = @staffIdm AND is_deleted = 0</c> が 0 行に一致した場合だけ。
+    /// カード側（<c>CardManageViewModel</c>）と同一の欠陥形状のため併せて是正する。
+    /// </remarks>
+    [Fact]
+    public async Task SaveAsync_ExistingStaff_WhenUpdateMatchesNoRow_ShouldReloadStaffAndShowActionableError()
+    {
+        // Arrange
+        var idm = "0102030405060708";
+        _viewModel.SelectedStaff = new StaffDto
+        {
+            StaffIdm = idm,
+            Name = "田中太郎",
+            Number = "001"
+        };
+        _viewModel.StartEdit();
+        _viewModel.EditNote = "備考の誤字を直した";
+
+        _staffRepositoryMock.Setup(r => r.GetByIdmAsync(idm, false)).ReturnsAsync(new Staff
+        {
+            StaffIdm = idm,
+            Name = "田中太郎",
+            Number = "001"
+        });
+        // 他PCがこの職員を論理削除した → WHERE is_deleted = 0 に 0 行 → false
+        _staffRepositoryMock.Setup(r => r.UpdateAsync(It.IsAny<Staff>())).ReturnsAsync(false);
+        _staffRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<Staff>());
+
+        // Act
+        await _viewModel.SaveAsync();
+
+        // Assert
+        _staffRepositoryMock.Verify(r => r.GetAllAsync(), Times.Once);
+
+        _viewModel.IsStatusError.Should().BeTrue();
+        _viewModel.StatusMessage.Length.Should().BeGreaterOrEqualTo(20);
+        _viewModel.StatusMessage.Should().Contain("田中太郎");           // 何が
+        _viewModel.StatusMessage.Should().Contain("削除された可能性");    // なぜ
+        _viewModel.StatusMessage.Should().EndWith("やり直してください。"); // どうすれば
+
+        // 入力内容を失わせない
+        _viewModel.IsEditing.Should().BeTrue();
+        _viewModel.EditNote.Should().Be("備考の誤字を直した");
+    }
+
+    /// <summary>
+    /// Issue #1759: 削除済み職員の復元で RestoreAsync が false を返したとき、
+    /// 3要素の案内を出し、職員一覧を再読込すること
+    /// </summary>
+    [Fact]
+    public async Task SaveAsync_NewStaff_WhenRestoreMatchesNoRow_ShouldReloadStaffAndShowActionableError()
+    {
+        // Arrange
+        var idm = "0102030405060708";
+        _staffRepositoryMock.Setup(r => r.GetByIdmAsync(idm, true)).ReturnsAsync(new Staff
+        {
+            StaffIdm = idm,
+            Name = "田中太郎",
+            Number = "001",
+            IsDeleted = true
+        });
+        // 他PCが先に復元した → WHERE is_deleted = 1 に 0 行 → false
+        _staffRepositoryMock.Setup(r => r.RestoreAsync(idm)).ReturnsAsync(false);
+        _staffRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<Staff>());
+
+        _viewModel.StartNewStaff();
+        _viewModel.EditStaffIdm = idm;
+        _viewModel.EditName = "鈴木花子";
+
+        // Act
+        await _viewModel.SaveAsync();
+
+        // Assert
+        _staffRepositoryMock.Verify(r => r.GetAllAsync(), Times.Once);
+
+        _viewModel.IsStatusError.Should().BeTrue();
+        _viewModel.StatusMessage.Length.Should().BeGreaterOrEqualTo(20);
+        _viewModel.StatusMessage.Should().Contain("田中太郎");               // 何が（削除時点の氏名）
+        _viewModel.StatusMessage.Should().Contain("先に復元された可能性");    // なぜ
+        _viewModel.StatusMessage.Should().EndWith("やり直してください。");    // どうすれば
+        _viewModel.StatusMessage.Should().NotContain("削除された可能性");
+    }
+
+    /// <summary>
+    /// Issue #1759: 削除で DeleteAsync が false を返したとき、
+    /// 3要素の案内を出し、職員一覧を再読込すること
+    /// </summary>
+    /// <remarks>
+    /// <c>StaffRepository.DeleteAsync</c> の WHERE も <c>is_deleted = 0</c> のため、
+    /// false は「他 PC が先に削除した」ことを意味する。
+    /// カード側の削除は <c>CardOperationResult</c> を返し Issue #1109 で既に是正済みだが、
+    /// 職員側は bool のままで案内が「削除に失敗しました」の9文字だけだった。
+    /// </remarks>
+    [Fact]
+    public async Task DeleteAsync_WhenDeleteMatchesNoRow_ShouldReloadStaffAndShowActionableError()
+    {
+        // Arrange
+        var idm = "0102030405060708";
+        _viewModel.SelectedStaff = new StaffDto
+        {
+            StaffIdm = idm,
+            Name = "田中太郎",
+            Number = "001"
+        };
+
+        _staffRepositoryMock.Setup(r => r.GetByIdmAsync(idm, false)).ReturnsAsync(new Staff
+        {
+            StaffIdm = idm,
+            Name = "田中太郎",
+            Number = "001"
+        });
+        _staffRepositoryMock.Setup(r => r.DeleteAsync(idm)).ReturnsAsync(false);
+        _staffRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<Staff>());
+
+        // Act
+        await _viewModel.DeleteAsync();
+
+        // Assert
+        _staffRepositoryMock.Verify(r => r.GetAllAsync(), Times.Once);
+
+        _viewModel.IsStatusError.Should().BeTrue();
+        _viewModel.StatusMessage.Length.Should().BeGreaterOrEqualTo(20);
+        _viewModel.StatusMessage.Should().Contain("田中太郎");                // 何が
+        _viewModel.StatusMessage.Should().Contain("先に削除された可能性");     // なぜ
+        _viewModel.StatusMessage.Should().EndWith("やり直してください。");     // どうすれば
     }
 
     #endregion
