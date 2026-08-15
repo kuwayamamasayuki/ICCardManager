@@ -1403,7 +1403,14 @@ namespace ICCardManager.Services
                     }
                     catch
                     {
-                        scope.Rollback();
+                        // Issue #1745: 素の Rollback() を呼ばない。COMMIT が SQLITE_BUSY 等で
+                        // 失敗した後は SQLiteTransaction が無効化されており Rollback() 自体が
+                        // 例外になる。その二次例外が本来の失敗要因を置き換えて抜けると、
+                        // ①ExecuteWithRetryAsync の `when (ex is SQLiteException Busy/Locked)` に
+                        // 一致せずリトライが働かない、②GetHistoryImportFailureReason が
+                        // 既定分岐に落ちて「なぜ」が「データベースへの書き込み中に問題が発生しました。」
+                        // に退化する、という二重の害になる。
+                        TryRollbackRegistrationImport(scope, cardIdm);
                         throw;
                     }
                 }).ConfigureAwait(false);
@@ -1414,7 +1421,12 @@ namespace ICCardManager.Services
             catch (Exception ex)
             {
                 // Issue #1704: IDm は認証クレデンシャルのためログにはマスクして出力する
-                _logger.LogError(ex, "カード登録時の履歴インポートでエラーが発生しました（CardIdm={CardIdm}）", IdmMasker.Mask(cardIdm));
+                // Issue #1763: 履歴が無い登録（初期残高行のみ）もこのメソッドを通るため、
+                // 「履歴インポート」と決め打ちせず、実際に何を書こうとしたかを値で残す
+                // （ログは調査を先に進める値を載せる。development-conventions.md 参照）
+                _logger.LogError(ex,
+                    "カード登録時の台帳書き込みでエラーが発生しました（CardIdm={CardIdm}, 履歴件数={HistoryCount}, 初期残高行={HasInitialLedger}）",
+                    IdmMasker.Mask(cardIdm), historyDetails?.Count ?? 0, initialLedger != null);
                 result.Success = false;
                 // ロールバック済みなので、途中まで作られた行数は残さない
                 result.ImportedCount = 0;
@@ -1455,6 +1467,32 @@ namespace ICCardManager.Services
             }
 
             return result;
+        }
+
+        /// <summary>
+        /// Issue #1745: <see cref="ImportHistoryForRegistrationAsync"/> のロールバックを
+        /// 二次例外で本来の失敗要因を潰さずに試みる
+        /// </summary>
+        /// <remarks>
+        /// 書き込みが確定するのは <c>Commit()</c> の成功時だけで、未コミットのトランザクションは
+        /// <c>TransactionScope.Dispose()</c> でも巻き戻る（二重の巻き戻し）。したがってここでの
+        /// 失敗を握りつぶしてもデータは確定しない。ログは <c>LogDebug</c> では本番のファイルに
+        /// 出力されないため Warning に置く（development-conventions.md 参照）。
+        /// </remarks>
+        private void TryRollbackRegistrationImport(TransactionScope scope, string cardIdm)
+        {
+            try
+            {
+                scope.Rollback();
+            }
+            catch (Exception rollbackException)
+            {
+                // 本来の失敗要因は呼び出し元の catch が LogError で記録する。ここは補足情報
+                _logger?.LogWarning(rollbackException,
+                    "カード登録時の台帳書き込みのロールバックに失敗しました" +
+                    "（未コミットのためデータは確定しない。CardIdm={CardIdm}）",
+                    IdmMasker.Mask(cardIdm));
+            }
         }
 
         /// <summary>

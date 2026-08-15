@@ -471,6 +471,112 @@ public class LendingServiceHistoryImportTests : IDisposable
     }
 
     /// <summary>
+    /// <c>BeginTransactionAsync</c> が返したスコープを捕捉するテスト用 <see cref="DbContext"/>。
+    /// </summary>
+    /// <remarks>
+    /// ロールバックが失敗する状態（＝トランザクションが既に巻き戻っている）を
+    /// テストから作るために、SUT が開いた <see cref="TransactionScope"/> への参照が要る。
+    /// </remarks>
+    private sealed class ScopeCapturingDbContext : DbContext
+    {
+        public ScopeCapturingDbContext(string databasePath) : base(databasePath) { }
+
+        /// <summary>最後に開いたスコープ。<c>BeginTransactionAsync</c> 前は null。</summary>
+        public TransactionScope? LastScope { get; private set; }
+
+        public override async Task<TransactionScope> BeginTransactionAsync(
+            System.Threading.CancellationToken ct = default)
+        {
+            LastScope = await base.BeginTransactionAsync(ct);
+            return LastScope;
+        }
+    }
+
+    /// <summary>
+    /// ロールバック自体が失敗しても、本来の SQLITE_BUSY がリトライで吸収されること（Issue #1745 / #1763）。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>COMMIT</c> が SQLITE_BUSY 等で失敗すると SQLite 側は既に自動ロールバック済みで
+    /// <c>SQLiteTransaction</c> が無効化されており、続けて <c>Rollback()</c> を呼ぶと
+    /// <see cref="InvalidOperationException"/> になる（接続断でも同様）。<c>catch</c> の中で
+    /// 素の <c>scope.Rollback()</c> を呼ぶと、この二次例外が<b>本来の失敗要因を置き換えて</b>抜け、
+    /// ①<c>ExecuteWithRetryAsync</c> の <c>SQLiteException(Busy/Locked)</c> 判定に一致せず
+    /// リトライが働かない、②<c>GetHistoryImportFailureReason</c> が既定分岐へ落ちて
+    /// 「なぜ」が退化する、という二重の害になる。
+    /// </para>
+    /// <para>
+    /// ここでは同じ状態を、書込み失敗の直前にテスト側から <c>Rollback()</c> して再現する
+    /// （<c>CsvImportServiceLedgerTransactionTests</c> の同型テストと同じ作法）。
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task ImportHistoryForRegistrationAsync_ロールバックも失敗_本来のSqliteBusyがリトライで吸収されること()
+    {
+        // Arrange
+        using var lockManager = new CardLockManager(NullLogger<CardLockManager>.Instance);
+        using var dbContext = new ScopeCapturingDbContext(":memory:");
+        dbContext.InitializeDatabase();
+
+        using (var lease = await dbContext.LeaseConnectionAsync())
+        using (var seed = lease.Connection.CreateCommand())
+        {
+            seed.CommandText =
+                "INSERT INTO ic_card (card_idm, card_type, card_number) VALUES (@idm, 'はやかけん', 'H001')";
+            seed.Parameters.AddWithValue("@idm", TestCardIdm);
+            await seed.ExecuteNonQueryAsync();
+        }
+
+        var realRepository = new LedgerRepository(dbContext);
+        var insertAttempts = 0;
+        var repoMock = new Mock<ILedgerRepository>();
+        repoMock.Setup(r => r.InsertAsync(It.IsAny<Ledger>()))
+            .Returns<Ledger>(ledger =>
+            {
+                insertAttempts++;
+                if (insertAttempts == 1)
+                {
+                    // トランザクションを先に巻き戻しておく。以降 SUT 側の Rollback() は
+                    // InvalidOperationException になる（COMMIT 失敗後・接続断後と同じ状態）
+                    dbContext.LastScope!.Transaction.Rollback();
+                    throw new SQLiteException(SQLiteErrorCode.Busy, "database is locked");
+                }
+                return realRepository.InsertAsync(ledger);
+            });
+
+        var settingsRepositoryMock = new Mock<ISettingsRepository>();
+        settingsRepositoryMock.Setup(s => s.GetAppSettings()).Returns(new AppSettings());
+        settingsRepositoryMock.Setup(s => s.GetAppSettingsAsync()).ReturnsAsync(new AppSettings());
+
+        var service = new LendingService(
+            dbContext,
+            new Mock<ICardRepository>().Object,
+            new Mock<IStaffRepository>().Object,
+            repoMock.Object,
+            settingsRepositoryMock.Object,
+            new SummaryGenerator(),
+            lockManager,
+            Options.Create(new AppOptions()),
+            NullLogger<LendingService>.Instance);
+
+        // Act
+        var result = await service.ImportHistoryForRegistrationAsync(
+            TestCardIdm, new List<LedgerDetail>(), new DateTime(2026, 2, 1), CreateInitialLedger());
+
+        // Assert
+        result.Success.Should().BeTrue(
+            "ロールバックの二次例外が本来の SQLITE_BUSY を置き換えると、リトライが働かず失敗で確定する");
+        insertAttempts.Should().BeGreaterThan(1, "リトライが行われたことを示す");
+
+        using var countLease = await dbContext.LeaseConnectionAsync();
+        using var countCommand = countLease.Connection.CreateCommand();
+        countCommand.CommandText = "SELECT COUNT(*) FROM ledger WHERE card_idm = @idm";
+        countCommand.Parameters.AddWithValue("@idm", TestCardIdm);
+        Convert.ToInt32(await countCommand.ExecuteScalarAsync()).Should().Be(1,
+            "リトライで初期残高行が確定すること");
+    }
+
+    /// <summary>
     /// 成功時は初期残高行と履歴行がまとめて確定すること。
     /// </summary>
     [Fact]
