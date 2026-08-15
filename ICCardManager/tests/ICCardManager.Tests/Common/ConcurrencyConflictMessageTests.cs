@@ -117,4 +117,22 @@ public class ConcurrencyConflictMessageTests
         restore.Should().NotContain("削除された可能性");
         new[] { update, restore, delete }.Distinct().Should().HaveCount(3);
     }
+
+    /// <summary>
+    /// 払い戻しの競合は、利用者が行った操作名で述べること（Issue #1760）
+    /// </summary>
+    /// <remarks>
+    /// 「なぜ」（対象行が削除された）は更新と同じだが、「何が」は利用者が実際に行った
+    /// 操作でなければならない。払い戻しを試みた職員に「更新できませんでした」と出すと、
+    /// 自分が何をした結果なのか結び付かない。
+    /// </remarks>
+    [Fact]
+    public void ForRefund_NamesTheRefundOperation()
+    {
+        var refund = ConcurrencyConflictMessage.ForRefund(Target, ListName);
+
+        refund.Should().Contain("払い戻しできませんでした");
+        refund.Should().Contain("削除された可能性");
+        refund.Should().NotBe(ConcurrencyConflictMessage.ForUpdate(Target, ListName));
+    }
 }

@@ -34,6 +34,19 @@ namespace ICCardManager.Common
             => Build(target, "更新", "他のパソコンや別の操作で削除された可能性があります。", listName);
 
         /// <summary>
+        /// 払い戻し対象の行が見つからなかったときの文言を組み立てる。
+        /// </summary>
+        /// <param name="target">対象の説明。「何が」に相当する</param>
+        /// <param name="listName">再読込した一覧の名称</param>
+        /// <remarks>
+        /// Issue #1760: 「なぜ」は <see cref="ForUpdate"/> と同じ（対象行が削除された）だが、
+        /// <b>「何が」は利用者が実際に行った操作で述べる</b>。払い戻しを試みた職員に
+        /// 「更新できませんでした」と出すと、自分の操作と結果が結び付かない。
+        /// </remarks>
+        public static string ForRefund(string target, string listName)
+            => Build(target, "払い戻し", "他のパソコンや別の操作で削除された可能性があります。", listName);
+
+        /// <summary>
         /// 復元対象の行（削除済みの行）が見つからなかったときの文言を組み立てる。
         /// </summary>
         /// <param name="target">対象の説明。「何が」に相当する</param>

@@ -620,6 +620,19 @@ namespace ICCardManager.ViewModels
                     // 更新前のデータを取得（操作ログ用）
                     var beforeCard = await _cardRepository.GetByIdmAsync(EditCardIdm);
 
+                    // Issue #1760: 読み取れなかった時点で「対象カードは現在 is_deleted = 0 として
+                    // 存在しない」ことが確定しているため、UpdateAsync を呼ばずに競合として扱う。
+                    // 通常は UpdateAsync の WHERE（同じ is_deleted = 0）も 0 行になるが、
+                    // 読み取りと書き込みの間に他 PC がカードを復元すると 1 行に一致して成功し、
+                    // 更新だけが通って operation_log には 1 行も残らない。operation_log は
+                    // 6 年保存される唯一の監査記録であり、「誰がいつ何を変更したのか分からない変更」が
+                    // 残ることは、誤った記録が残るのと同等以上に問題になる。
+                    if (beforeCard == null)
+                    {
+                        await NotifyUpdateConflictAsync(EditCardType, sanitizedCardNumber);
+                        return;
+                    }
+
                     // Issue #1726: この画面で編集できるのはカード種別・管理番号・備考の3項目だけ。
                     // それ以外の列（繰越累計 #1215 / 開始ページ番号 #510 / 貸出状態 / 払戻状態）は
                     // 専用の経路でのみ変化するため、DB の最新値（beforeCard）をそのまま引き継ぐ。
@@ -628,24 +641,21 @@ namespace ICCardManager.ViewModels
                     // ような実際には起きていない変更が監査ログに残る。
                     // 一覧（SelectedCard）ではなく beforeCard を使うのは、一覧が GetAllAsync の
                     // キャッシュ由来で自動更新されず、共有モードでは他 PC の貸出が反映されないため。
-                    // beforeCard が null（他 PC が削除した等）の場合は UpdateAsync の WHERE
-                    // （is_deleted = 0）も一致せず 0 行 → false となり操作ログも記録されないため、
-                    // ここで代替値を用意しても観測されない（既定値のままでよい）。
                     var card = new IcCard
                     {
                         CardIdm = EditCardIdm,
                         CardType = EditCardType,
                         CardNumber = sanitizedCardNumber,
                         Note = string.IsNullOrWhiteSpace(sanitizedNote) ? null : sanitizedNote,
-                        IsLent = beforeCard?.IsLent ?? false,
-                        LastLentAt = beforeCard?.LastLentAt,
-                        LastLentStaff = beforeCard?.LastLentStaff,
-                        IsRefunded = beforeCard?.IsRefunded ?? false,
-                        RefundedAt = beforeCard?.RefundedAt,
-                        StartingPageNumber = beforeCard?.StartingPageNumber ?? 1,
-                        CarryoverIncomeTotal = beforeCard?.CarryoverIncomeTotal ?? 0,
-                        CarryoverExpenseTotal = beforeCard?.CarryoverExpenseTotal ?? 0,
-                        CarryoverFiscalYear = beforeCard?.CarryoverFiscalYear
+                        IsLent = beforeCard.IsLent,
+                        LastLentAt = beforeCard.LastLentAt,
+                        LastLentStaff = beforeCard.LastLentStaff,
+                        IsRefunded = beforeCard.IsRefunded,
+                        RefundedAt = beforeCard.RefundedAt,
+                        StartingPageNumber = beforeCard.StartingPageNumber,
+                        CarryoverIncomeTotal = beforeCard.CarryoverIncomeTotal,
+                        CarryoverExpenseTotal = beforeCard.CarryoverExpenseTotal,
+                        CarryoverFiscalYear = beforeCard.CarryoverFiscalYear
                     };
 
                     bool success;
@@ -667,11 +677,8 @@ namespace ICCardManager.ViewModels
 
                     if (success)
                     {
-                        // 操作ログを記録
-                        if (beforeCard != null)
-                        {
-                            await _operationLogger.LogCardUpdateAsync(beforeCard, card);
-                        }
+                        // 操作ログを記録（beforeCard は上のガードで非 null が確定している。Issue #1760）
+                        await _operationLogger.LogCardUpdateAsync(beforeCard, card);
 
                         var updatedIdm = EditCardIdm;
                         await LoadCardsAsync();
@@ -687,27 +694,71 @@ namespace ICCardManager.ViewModels
                         // Issue #1759: UpdateAsync が false を返すのは
                         // UPDATE ... WHERE card_idm = @cardIdm AND is_deleted = 0 が
                         // 0 行に一致した場合だけ（Issue #1753）。つまり編集中に対象カードが
-                        // 論理削除されたことを意味するため、原因と次の行動を具体的に案内する。
-                        // 一覧を再読込しないと削除済みのカードが選択されたまま残り、
-                        // 何度保存しても同じメッセージが出続ける（Issue #1753 の
-                        // 「競合検出時は UI 側で一覧を再読込すること」）。
-                        // 再読込を先に行うのは、文言が「再読み込みしました」と述べるため。
-                        // CancelEdit() は呼ばない（入力内容を消さない。Issue #1757）。
-                        //
-                        // 「何が」は**編集後の入力値ではなく一覧に載っている値**で名指しする。
-                        // 管理番号や種別を書き換えている途中なら、編集後の値は一覧のどこにも
-                        // 存在せず「一覧で状態を確認して」という案内が実行できなくなる。
-                        // 一覧の再読込で DataGrid の選択が解除され SelectedCard は null に
-                        // なる（SelectedItem は TwoWay バインド）ため、再読込より前に確定させる。
-                        var conflictLabel = SelectedCard != null
-                            ? FormatCardLabel(SelectedCard.CardType, SelectedCard.CardNumber)
-                            : FormatCardLabel(EditCardType, sanitizedCardNumber);
-                        await LoadCardsAsync();
-                        StatusMessage = ConcurrencyConflictMessage.ForUpdate(conflictLabel, "カード一覧");
-                        IsStatusError = true;
+                        // 論理削除されたことを意味する。
+                        await NotifyUpdateConflictAsync(EditCardType, sanitizedCardNumber);
                     }
                 }
             }
+        }
+
+        /// <summary>
+        /// 更新対象のカードが見つからなかった（競合）ことを案内し、カード一覧を再読込する
+        /// </summary>
+        /// <param name="fallbackCardType">一覧に対象が残っていないときに名指しへ使うカード種別</param>
+        /// <param name="fallbackCardNumber">同じく管理番号</param>
+        /// <remarks>
+        /// <para>
+        /// Issue #1753: 一覧を再読込しないと削除済みのカードが選択されたまま残り、
+        /// 何度保存しても同じメッセージが出続ける（「競合検出時は UI 側で一覧を再読込すること」）。
+        /// 再読込を先に行うのは、文言が「再読み込みしました」と述べるため。
+        /// <c>CancelEdit()</c> は呼ばない（入力内容を消さない。Issue #1757）。
+        /// </para>
+        /// <para>
+        /// 「何が」は<b>編集後の入力値ではなく一覧に載っている値</b>で名指しする。
+        /// 管理番号や種別を書き換えている途中なら、編集後の値は一覧のどこにも
+        /// 存在せず「一覧で状態を確認して」という案内が実行できなくなる。
+        /// 一覧の再読込で DataGrid の選択が解除され <see cref="SelectedCard"/> は null に
+        /// なる（<c>SelectedItem</c> は TwoWay バインド）ため、再読込より前に確定させる。
+        /// </para>
+        /// <para>
+        /// Issue #1760: この「ラベル確定 → 再読込 → 文言設定」の順序を守る箇所が
+        /// 複数（更新前データの欠落・更新の影響行数 0・払戻前データの欠落）に増えたため、
+        /// 呼び出し側へ書き写さずここへ集約する。
+        /// </para>
+        /// </remarks>
+        private Task NotifyUpdateConflictAsync(string fallbackCardType, string fallbackCardNumber)
+            => NotifyConflictAsync(ConcurrencyConflictMessage.ForUpdate, fallbackCardType, fallbackCardNumber);
+
+        /// <summary>
+        /// 払い戻し対象のカードが見つからなかった（競合）ことを案内し、カード一覧を再読込する
+        /// </summary>
+        /// <param name="fallbackCardType">一覧に対象が残っていないときに名指しへ使うカード種別</param>
+        /// <param name="fallbackCardNumber">同じく管理番号</param>
+        /// <remarks>
+        /// Issue #1760: 「なぜ」は更新と同じ（対象行が削除された）だが、「何が」は利用者が
+        /// 実際に行った操作で述べる。<see cref="NotifyUpdateConflictAsync"/> を流用すると
+        /// 払い戻しを試みた職員に「更新できませんでした」と案内することになる。
+        /// </remarks>
+        private Task NotifyRefundConflictAsync(string fallbackCardType, string fallbackCardNumber)
+            => NotifyConflictAsync(ConcurrencyConflictMessage.ForRefund, fallbackCardType, fallbackCardNumber);
+
+        /// <summary>
+        /// 競合の案内文言を組み立てて表示する（ラベル確定 → 一覧再読込 → 文言設定の順序を守る）
+        /// </summary>
+        /// <param name="messageFactory">操作に対応する <see cref="ConcurrencyConflictMessage"/> のファクトリ</param>
+        /// <param name="fallbackCardType">一覧に対象が残っていないときに名指しへ使うカード種別</param>
+        /// <param name="fallbackCardNumber">同じく管理番号</param>
+        private async Task NotifyConflictAsync(
+            Func<string, string, string> messageFactory,
+            string fallbackCardType,
+            string fallbackCardNumber)
+        {
+            var conflictLabel = SelectedCard != null
+                ? FormatCardLabel(SelectedCard.CardType, SelectedCard.CardNumber)
+                : FormatCardLabel(fallbackCardType, fallbackCardNumber);
+            await LoadCardsAsync();
+            StatusMessage = messageFactory(conflictLabel, "カード一覧");
+            IsStatusError = true;
         }
 
         /// <summary>
@@ -844,11 +895,28 @@ namespace ICCardManager.ViewModels
 
             using (BeginBusy("払い戻し処理中..."))
             {
+                var refundCardIdm = SelectedCard.CardIdm;
+
+                // 払い戻し前のデータを取得（操作ログ用）
+                //
+                // Issue #1760: 書き込みより**前**に取得し、読めなければ払い戻し自体を行わない。
+                // 読み取れない（is_deleted = 0 で引けない）時点で対象カードは現在存在しないが、
+                // その直後に他 PC が復元すると SetRefundedAsync は 1 行に一致して成功し得る。
+                // 従来の `if (beforeCard != null)` ガードでは、払戻済への変更だけが確定して
+                // operation_log には 1 行も残らなかった。あわせて、払戻台帳だけが作られて
+                // カードは払戻済にならない中途半端な状態も防ぐ。
+                var beforeCard = await _cardRepository.GetByIdmAsync(refundCardIdm);
+                if (beforeCard == null)
+                {
+                    await NotifyRefundConflictAsync(SelectedCard.CardType, SelectedCard.CardNumber);
+                    return;
+                }
+
                 // 払い戻しのLedgerを作成
                 var now = DateTime.Now;
                 var refundLedger = new Ledger
                 {
-                    CardIdm = SelectedCard.CardIdm,
+                    CardIdm = refundCardIdm,
                     LenderIdm = null,
                     Date = now,
                     Summary = SummaryGenerator.GetRefundSummary(),
@@ -867,22 +935,22 @@ namespace ICCardManager.ViewModels
 
                 if (ledgerId > 0)
                 {
-                    // 払い戻し前のデータを取得（操作ログ用）
-                    var beforeCard = await _cardRepository.GetByIdmAsync(SelectedCard.CardIdm);
-
                     // Issue #530: カードを「払戻済」状態に設定（論理削除ではない）
-                    var refundResult = await _cardRepository.SetRefundedAsync(SelectedCard.CardIdm);
+                    var refundResult = await _cardRepository.SetRefundedAsync(refundCardIdm);
 
                     if (refundResult == CardOperationResult.Success)
                     {
                         // 払い戻し後のデータを取得（操作ログ用）
-                        var afterCard = await _cardRepository.GetByIdmAsync(SelectedCard.CardIdm);
+                        //
+                        // Issue #1760: 再読取が null になるのは、払い戻しが確定した直後に
+                        // 他 PC がこのカードを論理削除した場合だけ。払い戻しは既に確定しているため、
+                        // 再読取の失敗を理由に監査記録を落としてはならない。この操作が変えた列
+                        // （払戻状態）だけを払い戻し前のデータへ適用したスナップショットで記録する。
+                        var afterCard = await _cardRepository.GetByIdmAsync(refundCardIdm)
+                            ?? CreateRefundedSnapshot(beforeCard, now);
 
                         // 操作ログを記録（払い戻しはカード更新として記録）
-                        if (beforeCard != null && afterCard != null)
-                        {
-                            await _operationLogger.LogCardUpdateAsync(beforeCard, afterCard);
-                        }
+                        await _operationLogger.LogCardUpdateAsync(beforeCard, afterCard);
 
                         await LoadCardsAsync();
                         CancelEdit();
@@ -907,6 +975,39 @@ namespace ICCardManager.ViewModels
                     IsStatusError = true;
                 }
             }
+        }
+
+        /// <summary>
+        /// 払い戻し後のカードの状態を、払い戻し前のデータから組み立てる
+        /// </summary>
+        /// <param name="beforeCard">払い戻し前に読み取ったカード</param>
+        /// <param name="refundedAt">払い戻しを実施した日時</param>
+        /// <remarks>
+        /// Issue #1760: 払い戻し直後の再読取が失敗したときに、操作ログの <c>AfterData</c> として使う。
+        /// <c>SetRefundedAsync</c> が変えるのは <c>is_refunded</c> / <c>refunded_at</c> の 2 列だけなので、
+        /// それ以外は払い戻し前の値をそのまま引き継ぐ（引き継がないと「開始ページ番号 7 → 1」のような
+        /// 実際には起きていない変更が監査ログに残る。Issue #1726 と同じ理由）。
+        /// </remarks>
+        private static IcCard CreateRefundedSnapshot(IcCard beforeCard, DateTime refundedAt)
+        {
+            return new IcCard
+            {
+                CardIdm = beforeCard.CardIdm,
+                CardType = beforeCard.CardType,
+                CardNumber = beforeCard.CardNumber,
+                Note = beforeCard.Note,
+                IsDeleted = beforeCard.IsDeleted,
+                DeletedAt = beforeCard.DeletedAt,
+                IsLent = beforeCard.IsLent,
+                LastLentAt = beforeCard.LastLentAt,
+                LastLentStaff = beforeCard.LastLentStaff,
+                StartingPageNumber = beforeCard.StartingPageNumber,
+                CarryoverIncomeTotal = beforeCard.CarryoverIncomeTotal,
+                CarryoverExpenseTotal = beforeCard.CarryoverExpenseTotal,
+                CarryoverFiscalYear = beforeCard.CarryoverFiscalYear,
+                IsRefunded = true,
+                RefundedAt = refundedAt
+            };
         }
 
         /// <summary>

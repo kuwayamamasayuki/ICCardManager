@@ -387,6 +387,18 @@ namespace ICCardManager.ViewModels
                         // 更新前のデータを取得（操作ログ用）
                         var beforeStaff = await _staffRepository.GetByIdmAsync(EditStaffIdm);
 
+                        // Issue #1760: 読み取れなかった時点で「対象の職員は現在 is_deleted = 0 として
+                        // 存在しない」ことが確定しているため、UpdateAsync を呼ばずに競合として扱う。
+                        // 通常は UpdateAsync の WHERE（同じ is_deleted = 0）も 0 行になるが、
+                        // 読み取りと書き込みの間に他 PC が職員を復元すると 1 行に一致して成功し、
+                        // 更新だけが通って operation_log には 1 行も残らない。カード側
+                        // （CardManageViewModel）と同型の欠陥のため同じ扱いにする。
+                        if (beforeStaff == null)
+                        {
+                            await NotifyUpdateConflictAsync(sanitizedName, sanitizedNumber);
+                            return;
+                        }
+
                         // 更新
                         var staff = new Staff
                         {
@@ -399,11 +411,8 @@ namespace ICCardManager.ViewModels
                         var success = await _staffRepository.UpdateAsync(staff);
                         if (success)
                         {
-                            // 操作ログを記録
-                            if (beforeStaff != null)
-                            {
-                                await _operationLogger.LogStaffUpdateAsync(beforeStaff, staff);
-                            }
+                            // 操作ログを記録（beforeStaff は上のガードで非 null が確定している。Issue #1760）
+                            await _operationLogger.LogStaffUpdateAsync(beforeStaff, staff);
 
                             var updatedIdm = EditStaffIdm;
                             await LoadStaffAsync();
@@ -420,21 +429,7 @@ namespace ICCardManager.ViewModels
                             // UPDATE ... WHERE staff_idm = @staffIdm AND is_deleted = 0 が
                             // 0 行に一致した場合だけ（Issue #1753）。つまり編集中に対象の職員が
                             // 論理削除されたことを意味する。カード側（CardManageViewModel）と同じ扱いにする。
-                            // 再読込を先に行うのは文言が「再読み込みしました」と述べるため。
-                            // CancelEdit() は呼ばない（入力内容を消さない）。
-                            //
-                            // 「何が」は**編集後の入力値ではなく一覧に載っている値**で名指しする。
-                            // 氏名を書き換えている途中なら、編集後の氏名は一覧のどこにも存在せず
-                            // 「一覧で状態を確認して」という案内が実行できなくなる。
-                            // 一覧の再読込で DataGrid の選択が解除され SelectedStaff は null に
-                            // なる（SelectedItem は TwoWay バインド）ため、再読込より前に確定させる。
-                            var conflictLabel = SelectedStaff != null
-                                ? FormatStaffLabel(SelectedStaff.Name, SelectedStaff.Number)
-                                : FormatStaffLabel(sanitizedName, sanitizedNumber);
-                            await LoadStaffAsync();
-                            StatusMessage = ConcurrencyConflictMessage.ForUpdate(
-                                $"職員「{conflictLabel}」", "職員一覧");
-                            IsStatusError = true;
+                            await NotifyUpdateConflictAsync(sanitizedName, sanitizedNumber);
                         }
                     }
                 }
@@ -446,6 +441,38 @@ namespace ICCardManager.ViewModels
                 StatusMessage = ExceptionMessageFormatter.ToUserMessage(ex, "職員の保存");
                 IsStatusError = true;
             }
+        }
+
+        /// <summary>
+        /// 更新対象の職員が見つからなかった（競合）ことを案内し、職員一覧を再読込する
+        /// </summary>
+        /// <param name="fallbackName">一覧に対象が残っていないときに名指しへ使う氏名</param>
+        /// <param name="fallbackNumber">同じく職員番号</param>
+        /// <remarks>
+        /// <para>
+        /// Issue #1753: 再読込を先に行うのは文言が「再読み込みしました」と述べるため。
+        /// <c>CancelEdit()</c> は呼ばない（入力内容を消さない）。
+        /// </para>
+        /// <para>
+        /// 「何が」は<b>編集後の入力値ではなく一覧に載っている値</b>で名指しする。
+        /// 氏名を書き換えている途中なら、編集後の氏名は一覧のどこにも存在せず
+        /// 「一覧で状態を確認して」という案内が実行できなくなる。
+        /// 一覧の再読込で DataGrid の選択が解除され <see cref="SelectedStaff"/> は null に
+        /// なる（<c>SelectedItem</c> は TwoWay バインド）ため、再読込より前に確定させる。
+        /// </para>
+        /// <para>
+        /// Issue #1760: この順序を守る箇所が複数（更新前データの欠落・更新の影響行数 0）に
+        /// 増えたため、呼び出し側へ書き写さずここへ集約する。
+        /// </para>
+        /// </remarks>
+        private async Task NotifyUpdateConflictAsync(string fallbackName, string fallbackNumber)
+        {
+            var conflictLabel = SelectedStaff != null
+                ? FormatStaffLabel(SelectedStaff.Name, SelectedStaff.Number)
+                : FormatStaffLabel(fallbackName, fallbackNumber);
+            await LoadStaffAsync();
+            StatusMessage = ConcurrencyConflictMessage.ForUpdate($"職員「{conflictLabel}」", "職員一覧");
+            IsStatusError = true;
         }
 
         /// <summary>

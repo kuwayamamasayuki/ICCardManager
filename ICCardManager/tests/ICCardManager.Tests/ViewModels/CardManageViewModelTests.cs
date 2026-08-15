@@ -17,6 +17,7 @@ using IOperationLogRepository = ICCardManager.Data.Repositories.IOperationLogRep
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text.Json;
 using System.Threading.Tasks;
 
 
@@ -33,6 +34,12 @@ public class CardManageViewModelTests
     private readonly Mock<IValidationService> _validationServiceMock;
     private readonly Mock<IStaffRepository> _staffRepositoryMock;
     private readonly Mock<OperationLogger> _operationLoggerMock;
+    /// <summary>
+    /// 操作ログの記録先。<see cref="OperationLogger"/> のログ記録メソッドは virtual ではないため
+    /// <see cref="_operationLoggerMock"/> では検証できない（モックの実体が本物の実装を実行する）。
+    /// 「ログが残ったか」は本物の実装が書き込むこのリポジトリで検証する（Issue #1760）。
+    /// </summary>
+    private readonly Mock<IOperationLogRepository> _operationLogRepositoryMock;
     private readonly Mock<IDialogService> _dialogServiceMock;
     private readonly Mock<IStaffAuthService> _staffAuthServiceMock;
     private readonly LendingService _lendingService;
@@ -49,8 +56,8 @@ public class CardManageViewModelTests
         _staffAuthServiceMock = new Mock<IStaffAuthService>();
 
         // OperationLoggerのモック（コンストラクタ引数が必要なためMock.Ofで作成）
-        var operationLogRepositoryMock = new Mock<IOperationLogRepository>();
-        _operationLoggerMock = new Mock<OperationLogger>(operationLogRepositoryMock.Object, Mock.Of<ICurrentOperatorContext>());
+        _operationLogRepositoryMock = new Mock<IOperationLogRepository>();
+        _operationLoggerMock = new Mock<OperationLogger>(_operationLogRepositoryMock.Object, Mock.Of<ICurrentOperatorContext>());
 
         // LendingServiceの作成（Issue #596対応）
         var settingsRepositoryMock = new Mock<ISettingsRepository>();
@@ -625,6 +632,10 @@ public class CardManageViewModelTests
         _viewModel.StartEdit();
         _viewModel.EditNote = "更新後のメモ";
 
+        // Issue #1760: 更新前データを読めないと更新自体を行わないため、
+        // 対象行が存在する（実 DB で成立する）状態を仕掛ける
+        _cardRepositoryMock.Setup(r => r.GetByIdmAsync(idm, false))
+            .ReturnsAsync(new IcCard { CardIdm = idm, CardType = "はやかけん", CardNumber = "H-001" });
         _cardRepositoryMock.Setup(r => r.UpdateAsync(It.IsAny<IcCard>())).ReturnsAsync(true);
         _cardRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<IcCard>
         {
@@ -677,6 +688,10 @@ public class CardManageViewModelTests
         _viewModel.SelectedCard = existingCard;
         _viewModel.StartEdit();
         _viewModel.EditNote = "更新後のメモ";
+        // Issue #1760: 更新前データを読めないと更新自体を行わないため、
+        // 対象行が存在する（実 DB で成立する）状態を仕掛ける
+        _cardRepositoryMock.Setup(r => r.GetByIdmAsync(idm, false))
+            .ReturnsAsync(new IcCard { CardIdm = idm, CardType = "はやかけん", CardNumber = "H-001" });
         _cardRepositoryMock.Setup(r => r.UpdateAsync(It.IsAny<IcCard>())).ReturnsAsync(true);
         await _viewModel.SaveAsync();
 
@@ -2111,6 +2126,213 @@ public class CardManageViewModelTests
         // Assert
         _viewModel.StatusMessage.Should().Be("払い戻しが完了しました（払戻額: ¥3,000）");
         _viewModel.IsStatusError.Should().BeFalse();
+    }
+
+    #endregion
+
+    #region Issue #1760: 監査ログを残せない書き込みを行わないこと
+
+    /// <summary>
+    /// Issue #1760: 更新前データを読めなかったときは更新自体を行わないこと
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>GetByIdmAsync</c>（<c>is_deleted = 0</c>）が null を返した時点で、対象カードは
+    /// その時点で存在しないことが確定している。通常はこの後の <c>UpdateAsync</c> も
+    /// 同じ WHERE で 0 行になるが、<b>読み取りと書き込みの間に他 PC がカードを復元する</b>と
+    /// 1 行に一致して成功し得る。従来はこの経路で更新だけが通り、
+    /// <c>if (beforeCard != null)</c> により操作ログが 1 行も残らなかった。
+    /// </para>
+    /// <para>
+    /// <c>operation_log</c> は 6 年保存される唯一の監査記録であり、記録の漏れは
+    /// 誤った記録が残るのと同等以上に問題になる。
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task SaveAsync_ExistingCard_WhenTargetRowMissing_ShouldNotUpdateWithoutAuditLog()
+    {
+        // Arrange
+        const string idm = "0102030405060708";
+        _viewModel.SelectedCard = new CardDto
+        {
+            CardIdm = idm,
+            CardType = "はやかけん",
+            CardNumber = "H-001"
+        };
+        _viewModel.StartEdit();
+        _viewModel.EditNote = "更新後のメモ";
+
+        // 読み取り時点では他 PC が論理削除済み
+        _cardRepositoryMock.Setup(r => r.GetByIdmAsync(idm, false)).ReturnsAsync((IcCard?)null);
+        // その直後に他 PC が復元した → UPDATE は 1 行に一致して成功し得る
+        _cardRepositoryMock.Setup(r => r.UpdateAsync(It.IsAny<IcCard>())).ReturnsAsync(true);
+        _cardRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<IcCard>());
+
+        // Act
+        await _viewModel.SaveAsync();
+
+        // Assert - 監査ログを残せない更新は行わない
+        _cardRepositoryMock.Verify(r => r.UpdateAsync(It.IsAny<IcCard>()), Times.Never,
+            "更新前データを読めていない状態で書き込むと、変更が監査記録に残らない");
+        _operationLogRepositoryMock.Verify(r => r.InsertAsync(It.IsAny<OperationLog>()), Times.Never);
+
+        // 競合として案内し、一覧を再読込していること
+        _viewModel.IsStatusError.Should().BeTrue();
+        _viewModel.StatusMessage.Should().Contain("H-001");
+        _viewModel.StatusMessage.Should().EndWith("やり直してください。");
+        _cardRepositoryMock.Verify(r => r.GetAllAsync(), Times.Once);
+        _viewModel.EditNote.Should().Be("更新後のメモ", "入力内容は消さないこと");
+    }
+
+    /// <summary>
+    /// Issue #1760: 更新が成功した経路では必ず操作ログが 1 行残ること（正常系の回帰固定）
+    /// </summary>
+    /// <remarks>
+    /// 失敗パスだけを直すと、成功パスの記録を落とす退行に気付けない。
+    /// </remarks>
+    [Fact]
+    public async Task SaveAsync_ExistingCard_WhenUpdateSucceeds_ShouldWriteAuditLog()
+    {
+        // Arrange
+        const string idm = "0102030405060708";
+        _viewModel.SelectedCard = new CardDto
+        {
+            CardIdm = idm,
+            CardType = "はやかけん",
+            CardNumber = "H-001"
+        };
+        _viewModel.StartEdit();
+        _viewModel.EditNote = "更新後のメモ";
+
+        _cardRepositoryMock.Setup(r => r.GetByIdmAsync(idm, false)).ReturnsAsync(new IcCard
+        {
+            CardIdm = idm,
+            CardType = "はやかけん",
+            CardNumber = "H-001",
+            Note = "更新前のメモ"
+        });
+        _cardRepositoryMock.Setup(r => r.UpdateAsync(It.IsAny<IcCard>())).ReturnsAsync(true);
+        _cardRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<IcCard>());
+
+        // Act
+        await _viewModel.SaveAsync();
+
+        // Assert
+        _operationLogRepositoryMock.Verify(r => r.InsertAsync(It.Is<OperationLog>(log =>
+            log.TargetTable == OperationLogger.Tables.IcCard &&
+            log.TargetId == idm &&
+            log.Action == OperationLogger.Actions.Update &&
+            log.BeforeData!.Contains("更新前のメモ") &&
+            log.AfterData!.Contains("更新後のメモ"))), Times.Once);
+    }
+
+    /// <summary>
+    /// Issue #1760: 払い戻し前データを読めなかったときは払い戻し自体を行わないこと
+    /// </summary>
+    /// <remarks>
+    /// カード更新と同じ競合（読み取りが null → 他 PC が復元 → <c>SetRefundedAsync</c> が成功）で、
+    /// 払戻済への変更が監査記録に残らないまま確定してしまう。あわせて、払戻台帳だけが作られて
+    /// カードは払戻済にならない中途半端な状態も防ぐため、台帳の作成より前に判定する。
+    /// </remarks>
+    [Fact]
+    public async Task RefundAsync_WhenTargetRowMissing_ShouldNotRefundWithoutAuditLog()
+    {
+        // Arrange
+        const string idm = "0102030405060708";
+        _viewModel.SelectedCard = new CardDto
+        {
+            CardIdm = idm,
+            CardType = "はやかけん",
+            CardNumber = "H-001",
+            IsLent = false,
+            IsRefunded = false
+        };
+
+        _ledgerRepositoryMock.Setup(r => r.GetLatestLedgerAsync(idm))
+            .ReturnsAsync(new Ledger { CardIdm = idm, Balance = 3000 });
+        _ledgerRepositoryMock.Setup(r => r.InsertAsync(It.IsAny<Ledger>())).ReturnsAsync(1);
+        // 読み取り時点では他 PC が論理削除済み
+        _cardRepositoryMock.Setup(r => r.GetByIdmAsync(idm, false)).ReturnsAsync((IcCard?)null);
+        // その直後に他 PC が復元した → 払戻済への更新は成功し得る
+        _cardRepositoryMock.Setup(r => r.SetRefundedAsync(idm))
+            .ReturnsAsync(ICCardManager.Data.Repositories.CardOperationResult.Success);
+        _cardRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<IcCard>());
+
+        // Act
+        await _viewModel.RefundAsync();
+
+        // Assert
+        _cardRepositoryMock.Verify(r => r.SetRefundedAsync(idm), Times.Never,
+            "払い戻し前データを読めていない状態で払戻済にすると、変更が監査記録に残らない");
+        _ledgerRepositoryMock.Verify(r => r.InsertAsync(It.IsAny<Ledger>()), Times.Never,
+            "払戻台帳だけが残る中途半端な状態を作らないこと");
+        _operationLogRepositoryMock.Verify(r => r.InsertAsync(It.IsAny<OperationLog>()), Times.Never);
+
+        _viewModel.IsStatusError.Should().BeTrue();
+        _viewModel.StatusMessage.Should().Contain("H-001");
+        _viewModel.StatusMessage.Should().Contain("払い戻しできませんでした",
+            "「何が」は利用者が実際に行った操作で述べること（更新ではない）");
+        _viewModel.StatusMessage.Should().EndWith("やり直してください。");
+    }
+
+    /// <summary>
+    /// Issue #1760: 払い戻し直後に他 PC がカードを削除しても、操作ログは残ること
+    /// </summary>
+    /// <remarks>
+    /// <c>SetRefundedAsync</c> の成功後に行う再読取が null になるのは、その直後に
+    /// 他 PC がカードを論理削除した場合だけ。払い戻しは既に確定しているため、
+    /// 再読取の失敗を理由に記録を落としてはならない。
+    /// </remarks>
+    [Fact]
+    public async Task RefundAsync_WhenCardDeletedRightAfterRefund_ShouldStillWriteAuditLog()
+    {
+        // Arrange
+        const string idm = "0102030405060708";
+        _viewModel.SelectedCard = new CardDto
+        {
+            CardIdm = idm,
+            CardType = "はやかけん",
+            CardNumber = "H-001",
+            IsLent = false,
+            IsRefunded = false
+        };
+
+        _ledgerRepositoryMock.Setup(r => r.GetLatestLedgerAsync(idm))
+            .ReturnsAsync(new Ledger { CardIdm = idm, Balance = 3000 });
+        _ledgerRepositoryMock.Setup(r => r.InsertAsync(It.IsAny<Ledger>())).ReturnsAsync(1);
+        _cardRepositoryMock.SetupSequence(r => r.GetByIdmAsync(idm, false))
+            .ReturnsAsync(new IcCard
+            {
+                CardIdm = idm,
+                CardType = "はやかけん",
+                CardNumber = "H-001",
+                StartingPageNumber = 7,
+                IsRefunded = false
+            })
+            .ReturnsAsync((IcCard?)null);   // 払戻の直後に他 PC が削除した
+        _cardRepositoryMock.Setup(r => r.SetRefundedAsync(idm))
+            .ReturnsAsync(ICCardManager.Data.Repositories.CardOperationResult.Success);
+        _cardRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<IcCard>());
+
+        OperationLog? recorded = null;
+        _operationLogRepositoryMock.Setup(r => r.InsertAsync(It.IsAny<OperationLog>()))
+            .Callback<OperationLog>(log => recorded = log)
+            .ReturnsAsync(1);
+
+        // Act
+        await _viewModel.RefundAsync();
+
+        // Assert
+        recorded.Should().NotBeNull("払い戻しが確定した以上、監査記録を落としてはならない");
+        recorded!.Action.Should().Be(OperationLogger.Actions.Update);
+        recorded.TargetId.Should().Be(idm);
+
+        var before = JsonSerializer.Deserialize<IcCard>(recorded.BeforeData!)!;
+        var after = JsonSerializer.Deserialize<IcCard>(recorded.AfterData!)!;
+        before.IsRefunded.Should().BeFalse();
+        after.IsRefunded.Should().BeTrue("この操作が変えたのは払戻状態であること");
+        after.RefundedAt.Should().NotBeNull();
+        after.StartingPageNumber.Should().Be(7, "この操作が変えていない列は払戻前の値を保つこと");
     }
 
     #endregion

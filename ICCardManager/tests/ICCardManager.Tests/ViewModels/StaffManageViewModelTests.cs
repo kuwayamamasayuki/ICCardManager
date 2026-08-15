@@ -27,6 +27,12 @@ public class StaffManageViewModelTests
     private readonly Mock<ICardReader> _cardReaderMock;
     private readonly Mock<IValidationService> _validationServiceMock;
     private readonly Mock<OperationLogger> _operationLoggerMock;
+    /// <summary>
+    /// 操作ログの記録先。<see cref="OperationLogger"/> のログ記録メソッドは virtual ではないため
+    /// <see cref="_operationLoggerMock"/> では検証できない（モックの実体が本物の実装を実行する）。
+    /// 「ログが残ったか」は本物の実装が書き込むこのリポジトリで検証する（Issue #1760）。
+    /// </summary>
+    private readonly Mock<IOperationLogRepository> _operationLogRepositoryMock;
     private readonly Mock<IDialogService> _dialogServiceMock;
     private readonly Mock<IStaffAuthService> _staffAuthServiceMock;
     private readonly StaffManageViewModel _viewModel;
@@ -40,8 +46,8 @@ public class StaffManageViewModelTests
         _staffAuthServiceMock = new Mock<IStaffAuthService>();
 
         // OperationLoggerのモック（コンストラクタ引数が必要なためMock.Ofで作成）
-        var operationLogRepositoryMock = new Mock<IOperationLogRepository>();
-        _operationLoggerMock = new Mock<OperationLogger>(operationLogRepositoryMock.Object, Mock.Of<ICurrentOperatorContext>());
+        _operationLogRepositoryMock = new Mock<IOperationLogRepository>();
+        _operationLoggerMock = new Mock<OperationLogger>(_operationLogRepositoryMock.Object, Mock.Of<ICurrentOperatorContext>());
 
         // バリデーションはデフォルトで成功を返す
         _validationServiceMock.Setup(v => v.ValidateStaffIdm(It.IsAny<string>())).Returns(ValidationResult.Success());
@@ -343,6 +349,10 @@ public class StaffManageViewModelTests
         _viewModel.EditName = "田中花子"; // 名前を変更
         _viewModel.EditNote = "更新後のメモ";
 
+        // Issue #1760: 更新前データを読めないと更新自体を行わないため、
+        // 対象行が存在する（実 DB で成立する）状態を仕掛ける
+        _staffRepositoryMock.Setup(r => r.GetByIdmAsync("FFFF000000000001", false))
+            .ReturnsAsync(new Staff { StaffIdm = "FFFF000000000001", Name = "田中太郎", Number = "S-001" });
         _staffRepositoryMock.Setup(r => r.UpdateAsync(It.IsAny<Staff>())).ReturnsAsync(true);
         _staffRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<Staff>());
 
@@ -534,6 +544,10 @@ public class StaffManageViewModelTests
         _viewModel.StartEdit();
         _viewModel.EditName = "田中花子";
 
+        // Issue #1760: 更新前データを読めないと更新自体を行わないため、
+        // 対象行が存在する（実 DB で成立する）状態を仕掛ける
+        _staffRepositoryMock.Setup(r => r.GetByIdmAsync(idm, false))
+            .ReturnsAsync(new Staff { StaffIdm = idm, Name = "田中太郎", Number = "S-001" });
         _staffRepositoryMock.Setup(r => r.UpdateAsync(It.IsAny<Staff>())).ReturnsAsync(true);
         _staffRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<Staff>
         {
@@ -582,6 +596,10 @@ public class StaffManageViewModelTests
         _viewModel.SelectedStaff = existingStaff;
         _viewModel.StartEdit();
         _viewModel.EditName = "田中花子";
+        // Issue #1760: 更新前データを読めないと更新自体を行わないため、
+        // 対象行が存在する（実 DB で成立する）状態を仕掛ける
+        _staffRepositoryMock.Setup(r => r.GetByIdmAsync(idm, false))
+            .ReturnsAsync(new Staff { StaffIdm = idm, Name = "田中太郎" });
         _staffRepositoryMock.Setup(r => r.UpdateAsync(It.IsAny<Staff>())).ReturnsAsync(true);
         await _viewModel.SaveAsync();
 
@@ -1042,6 +1060,92 @@ public class StaffManageViewModelTests
         // Assert
         _viewModel.StatusMessage.Should().Be("田中太郎（001） を復元しました");
         _viewModel.IsStatusError.Should().BeFalse();
+    }
+
+    #endregion
+
+    #region Issue #1760: 監査ログを残せない書き込みを行わないこと
+
+    /// <summary>
+    /// Issue #1760: 更新前データを読めなかったときは更新自体を行わないこと
+    /// </summary>
+    /// <remarks>
+    /// カード側（<c>CardManageViewModel</c>）と同型の欠陥。<c>GetByIdmAsync</c>
+    /// （<c>is_deleted = 0</c>）が null を返した後に他 PC がその職員を復元すると、
+    /// <c>UpdateAsync</c> が 1 行に一致して成功する一方で
+    /// <c>if (beforeStaff != null)</c> により <c>operation_log</c> に 1 行も残らない。
+    /// </remarks>
+    [Fact]
+    public async Task SaveAsync_ExistingStaff_WhenTargetRowMissing_ShouldNotUpdateWithoutAuditLog()
+    {
+        // Arrange
+        const string idm = "FFFF000000000001";
+        _viewModel.SelectedStaff = new StaffDto
+        {
+            StaffIdm = idm,
+            Name = "田中太郎",
+            Number = "S-001"
+        };
+        _viewModel.StartEdit();
+        _viewModel.EditName = "田中花子";
+
+        // 読み取り時点では他 PC が論理削除済み
+        _staffRepositoryMock.Setup(r => r.GetByIdmAsync(idm, false)).ReturnsAsync((Staff?)null);
+        // その直後に他 PC が復元した → UPDATE は 1 行に一致して成功し得る
+        _staffRepositoryMock.Setup(r => r.UpdateAsync(It.IsAny<Staff>())).ReturnsAsync(true);
+        _staffRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<Staff>());
+
+        // Act
+        await _viewModel.SaveAsync();
+
+        // Assert
+        _staffRepositoryMock.Verify(r => r.UpdateAsync(It.IsAny<Staff>()), Times.Never,
+            "更新前データを読めていない状態で書き込むと、変更が監査記録に残らない");
+        _operationLogRepositoryMock.Verify(r => r.InsertAsync(It.IsAny<OperationLog>()), Times.Never);
+
+        _viewModel.IsStatusError.Should().BeTrue();
+        _viewModel.StatusMessage.Should().Contain("田中太郎");
+        _viewModel.StatusMessage.Should().EndWith("やり直してください。");
+        _staffRepositoryMock.Verify(r => r.GetAllAsync(), Times.Once);
+        _viewModel.EditName.Should().Be("田中花子", "入力内容は消さないこと");
+    }
+
+    /// <summary>
+    /// Issue #1760: 更新が成功した経路では必ず操作ログが 1 行残ること（正常系の回帰固定）
+    /// </summary>
+    [Fact]
+    public async Task SaveAsync_ExistingStaff_WhenUpdateSucceeds_ShouldWriteAuditLog()
+    {
+        // Arrange
+        const string idm = "FFFF000000000001";
+        _viewModel.SelectedStaff = new StaffDto
+        {
+            StaffIdm = idm,
+            Name = "田中太郎",
+            Number = "S-001"
+        };
+        _viewModel.StartEdit();
+        _viewModel.EditName = "田中花子";
+
+        _staffRepositoryMock.Setup(r => r.GetByIdmAsync(idm, false)).ReturnsAsync(new Staff
+        {
+            StaffIdm = idm,
+            Name = "田中太郎",
+            Number = "S-001"
+        });
+        _staffRepositoryMock.Setup(r => r.UpdateAsync(It.IsAny<Staff>())).ReturnsAsync(true);
+        _staffRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<Staff>());
+
+        // Act
+        await _viewModel.SaveAsync();
+
+        // Assert
+        _operationLogRepositoryMock.Verify(r => r.InsertAsync(It.Is<OperationLog>(log =>
+            log.TargetTable == OperationLogger.Tables.Staff &&
+            log.TargetId == idm &&
+            log.Action == OperationLogger.Actions.Update &&
+            log.BeforeData!.Contains("田中太郎") &&
+            log.AfterData!.Contains("田中花子"))), Times.Once);
     }
 
     #endregion
