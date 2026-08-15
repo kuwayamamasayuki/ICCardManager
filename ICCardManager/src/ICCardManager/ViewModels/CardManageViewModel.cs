@@ -756,6 +756,13 @@ namespace ICCardManager.ViewModels
             var conflictLabel = SelectedCard != null
                 ? FormatCardLabel(SelectedCard.CardType, SelectedCard.CardNumber)
                 : FormatCardLabel(fallbackCardType, fallbackCardNumber);
+
+            // Issue #1760: 更新前データを読めずに書き込みを中止した経路は、リポジトリの
+            // 書き込みを 1 回も通らないため、影響行数 0 でのキャッシュ破棄（Issue #1759）が
+            // 働かない。LoadCardsAsync() は GetAllAsync のキャッシュ（既定 TTL 60 秒／
+            // 共有モード 15 秒）を読むため、ここで破棄しないと削除済みのカードを含む
+            // 古い一覧が返り、「一覧を再読み込みしました」という案内が事実にならない。
+            _cardRepository.InvalidateCache();
             await LoadCardsAsync();
             StatusMessage = messageFactory(conflictLabel, "カード一覧");
             IsStatusError = true;
@@ -903,8 +910,13 @@ namespace ICCardManager.ViewModels
                 // 読み取れない（is_deleted = 0 で引けない）時点で対象カードは現在存在しないが、
                 // その直後に他 PC が復元すると SetRefundedAsync は 1 行に一致して成功し得る。
                 // 従来の `if (beforeCard != null)` ガードでは、払戻済への変更だけが確定して
-                // operation_log には 1 行も残らなかった。あわせて、払戻台帳だけが作られて
-                // カードは払戻済にならない中途半端な状態も防ぐ。
+                // operation_log には 1 行も残らなかった。
+                //
+                // 副次的に「読み取り時点で既に対象カードが無い」場合の払戻台帳の作成も避けられるが、
+                // **払戻台帳だけが残る状態を完全には防げない**。この読み取りと SetRefundedAsync の
+                // 間に他 PC が削除・貸出した場合、台帳の INSERT は既にコミット済みで
+                // SetRefundedAsync だけが失敗する（下の失敗分岐はダイアログを出すのみ）。
+                // 恒久対処には台帳と払戻済更新を 1 トランザクションに束ねるか補償削除が要る（別 Issue）。
                 var beforeCard = await _cardRepository.GetByIdmAsync(refundCardIdm);
                 if (beforeCard == null)
                 {
@@ -987,6 +999,11 @@ namespace ICCardManager.ViewModels
         /// <c>SetRefundedAsync</c> が変えるのは <c>is_refunded</c> / <c>refunded_at</c> の 2 列だけなので、
         /// それ以外は払い戻し前の値をそのまま引き継ぐ（引き継がないと「開始ページ番号 7 → 1」のような
         /// 実際には起きていない変更が監査ログに残る。Issue #1726 と同じ理由）。
+        /// <para>
+        /// <paramref name="refundedAt"/> は呼び出し側が採った時刻であり、
+        /// <c>SetRefundedAsync</c> が書く <c>datetime('now','localtime')</c> とは厳密には一致しない。
+        /// 再読取が失敗した以上 DB の値は取得できず、記録を落とすより近似値で残す方が監査に資する。
+        /// </para>
         /// </remarks>
         private static IcCard CreateRefundedSnapshot(IcCard beforeCard, DateTime refundedAt)
         {

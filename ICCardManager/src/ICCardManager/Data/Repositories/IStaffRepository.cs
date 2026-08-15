@@ -23,6 +23,20 @@ namespace ICCardManager.Data.Repositories
         Task<IEnumerable<Staff>> GetAllIncludingDeletedAsync();
 
         /// <summary>
+        /// 職員関連のキャッシュを破棄する
+        /// </summary>
+        /// <remarks>
+        /// Issue #1760: 競合を検出したが<b>書き込みを 1 回も行わなかった</b>経路から呼ぶ
+        /// （更新前データを読めず更新自体を中止した等）。書き込み経路では影響行数 0 のときに
+        /// <c>UpdateAsync</c> / <c>RestoreAsync</c> が内部で破棄する（Issue #1759）が、
+        /// 書き込みを行わない経路にはその契機が無い。<see cref="GetAllAsync"/> はキャッシュ経由
+        /// （既定 TTL 60 秒／共有モード 30 秒）のため、破棄しないと UI が案内どおり一覧を
+        /// 再読込しても削除済みの職員が並んだままになり、
+        /// 「一覧を再読み込みしました」という文言が事実にならない。
+        /// </remarks>
+        void InvalidateCache();
+
+        /// <summary>
         /// IDmで職員を取得
         /// </summary>
         /// <param name="staffIdm">職員証IDm</param>

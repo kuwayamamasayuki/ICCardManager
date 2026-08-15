@@ -268,6 +268,9 @@ WHERE staff_idm = @staffIdm AND is_deleted = 1";
         }
 
         /// <inheritdoc/>
+        public void InvalidateCache() => InvalidateStaffCache();
+
+        /// <inheritdoc/>
         public async Task<bool> ExistsAsync(string staffIdm)
         {
             using var lease = await _dbContext.LeaseConnectionAsync();

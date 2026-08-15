@@ -2335,5 +2335,54 @@ public class CardManageViewModelTests
         after.StartingPageNumber.Should().Be(7, "この操作が変えていない列は払戻前の値を保つこと");
     }
 
+    /// <summary>
+    /// Issue #1760: 書き込みを行わずに競合を案内する経路でも、一覧の再読込が
+    /// キャッシュではなく DB を読むこと
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Issue #1759 は影響行数 0 のときのキャッシュ破棄を <c>CardRepository.UpdateAsync</c> の
+    /// 内側に置いた。更新前データを読めなかった経路は <b>UpdateAsync を呼ばない</b>ため
+    /// その契機が無く、<c>LoadCardsAsync()</c> が <c>GetAllAsync</c> のキャッシュ
+    /// （既定 TTL 60 秒／共有モード 15 秒）から削除済みのカードを含む古い一覧を返す。
+    /// 文言が「カード一覧を再読み込みしました」と述べる以上、事実にしなければならない。
+    /// </para>
+    /// <para>
+    /// 破棄と再読込の<b>順序</b>まで固定する。逆順だと古い一覧を読んでから破棄することになり、
+    /// 画面には削除済みのカードが残る。
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task SaveAsync_ExistingCard_WhenTargetRowMissing_ShouldInvalidateCacheBeforeReload()
+    {
+        // Arrange
+        const string idm = "0102030405060708";
+        _viewModel.SelectedCard = new CardDto
+        {
+            CardIdm = idm,
+            CardType = "はやかけん",
+            CardNumber = "H-001"
+        };
+        _viewModel.StartEdit();
+        _viewModel.EditNote = "更新後のメモ";
+
+        _cardRepositoryMock.Setup(r => r.GetByIdmAsync(idm, false)).ReturnsAsync((IcCard?)null);
+
+        var callOrder = new List<string>();
+        _cardRepositoryMock.Setup(r => r.InvalidateCache())
+            .Callback(() => callOrder.Add("invalidate"));
+        _cardRepositoryMock.Setup(r => r.GetAllAsync())
+            .Callback(() => callOrder.Add("reload"))
+            .ReturnsAsync(new List<IcCard>());
+
+        // Act
+        await _viewModel.SaveAsync();
+
+        // Assert
+        callOrder.Should().Equal(new[] { "invalidate", "reload" },
+            "書き込みを 1 回も行わない経路にはリポジトリ側のキャッシュ破棄（Issue #1759）が" +
+            "働かないため、再読込より前に ViewModel から破棄すること");
+    }
+
     #endregion
 }

@@ -470,6 +470,13 @@ namespace ICCardManager.ViewModels
             var conflictLabel = SelectedStaff != null
                 ? FormatStaffLabel(SelectedStaff.Name, SelectedStaff.Number)
                 : FormatStaffLabel(fallbackName, fallbackNumber);
+
+            // Issue #1760: 更新前データを読めずに書き込みを中止した経路は、リポジトリの
+            // 書き込みを 1 回も通らないため、影響行数 0 でのキャッシュ破棄（Issue #1759）が
+            // 働かない。LoadStaffAsync() は GetAllAsync のキャッシュ（既定 TTL 60 秒／
+            // 共有モード 30 秒）を読むため、ここで破棄しないと削除済みの職員を含む
+            // 古い一覧が返り、「一覧を再読み込みしました」という案内が事実にならない。
+            _staffRepository.InvalidateCache();
             await LoadStaffAsync();
             StatusMessage = ConcurrencyConflictMessage.ForUpdate($"職員「{conflictLabel}」", "職員一覧");
             IsStatusError = true;

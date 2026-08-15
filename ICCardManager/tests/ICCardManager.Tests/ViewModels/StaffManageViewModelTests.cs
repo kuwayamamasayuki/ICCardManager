@@ -1148,5 +1148,48 @@ public class StaffManageViewModelTests
             log.AfterData!.Contains("田中花子"))), Times.Once);
     }
 
+    /// <summary>
+    /// Issue #1760: 書き込みを行わずに競合を案内する経路でも、一覧の再読込が
+    /// キャッシュではなく DB を読むこと
+    /// </summary>
+    /// <remarks>
+    /// Issue #1759 は影響行数 0 のときのキャッシュ破棄を <c>StaffRepository.UpdateAsync</c> の
+    /// 内側に置いた。更新前データを読めなかった経路は <b>UpdateAsync を呼ばない</b>ため
+    /// その契機が無く、<c>LoadStaffAsync()</c> が <c>GetAllAsync</c> のキャッシュ
+    /// （既定 TTL 60 秒／共有モード 30 秒）から削除済みの職員を含む古い一覧を返す。
+    /// 破棄と再読込の順序まで固定する（逆順だと古い一覧を読んでから破棄することになる）。
+    /// </remarks>
+    [Fact]
+    public async Task SaveAsync_ExistingStaff_WhenTargetRowMissing_ShouldInvalidateCacheBeforeReload()
+    {
+        // Arrange
+        const string idm = "FFFF000000000001";
+        _viewModel.SelectedStaff = new StaffDto
+        {
+            StaffIdm = idm,
+            Name = "田中太郎",
+            Number = "S-001"
+        };
+        _viewModel.StartEdit();
+        _viewModel.EditName = "田中花子";
+
+        _staffRepositoryMock.Setup(r => r.GetByIdmAsync(idm, false)).ReturnsAsync((Staff?)null);
+
+        var callOrder = new List<string>();
+        _staffRepositoryMock.Setup(r => r.InvalidateCache())
+            .Callback(() => callOrder.Add("invalidate"));
+        _staffRepositoryMock.Setup(r => r.GetAllAsync())
+            .Callback(() => callOrder.Add("reload"))
+            .ReturnsAsync(new List<Staff>());
+
+        // Act
+        await _viewModel.SaveAsync();
+
+        // Assert
+        callOrder.Should().Equal(new[] { "invalidate", "reload" },
+            "書き込みを 1 回も行わない経路にはリポジトリ側のキャッシュ破棄（Issue #1759）が" +
+            "働かないため、再読込より前に ViewModel から破棄すること");
+    }
+
     #endregion
 }
