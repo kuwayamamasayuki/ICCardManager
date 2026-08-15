@@ -148,7 +148,21 @@ public class MainViewModelTests : IDisposable
     /// <summary>
     /// バックアップ健全性チェックを差し込んだ ViewModel を生成（Issue #1689）
     /// </summary>
-    private MainViewModel CreateViewModelWithBackupHealth(IBackupHealthService backupHealthService)
+    private MainViewModel CreateViewModelWithBackupHealth(IBackupHealthService backupHealthService) =>
+        CreateViewModelWithWarningDependencies(backupHealthService: backupHealthService);
+
+    /// <summary>
+    /// Issue #1758: 繰越情報消失検出を差し替えた ViewModel を構築する。
+    /// </summary>
+    private MainViewModel CreateViewModelWithCarryoverDetector(ICarryoverDataLossDetector detector) =>
+        CreateViewModelWithWarningDependencies(carryoverDataLossDetector: detector);
+
+    /// <summary>
+    /// WarningService のオプション依存だけを差し替えて ViewModel を構築する共通ヘルパー。
+    /// </summary>
+    private MainViewModel CreateViewModelWithWarningDependencies(
+        IBackupHealthService backupHealthService = null,
+        ICarryoverDataLossDetector carryoverDataLossDetector = null)
     {
         var databaseInfoMock = new Mock<IDatabaseInfo>();
         return new MainViewModel(
@@ -176,12 +190,189 @@ public class MainViewModelTests : IDisposable
                 _ledgerRepositoryMock.Object,
                 databaseInfoMock.Object,
                 updateNotificationService: null,
-                backupHealthService: backupHealthService),
+                backupHealthService: backupHealthService,
+                carryoverDataLossDetector: carryoverDataLossDetector),
             new DashboardService(_cardRepositoryMock.Object, _ledgerRepositoryMock.Object,
                 _staffRepositoryMock.Object, _settingsRepositoryMock.Object),
             new Mock<ICCardManager.Services.ISafeFileLauncher>().Object,
             _dbContext);
     }
+
+    #region 繰越情報消失警告テスト（Issue #1758）
+
+    private static ICarryoverDataLossDetector DetectorReturning(params string[] cardDisplayNames)
+    {
+        var mock = new Mock<ICarryoverDataLossDetector>();
+        mock.Setup(d => d.DetectAsync()).ReturnsAsync(
+            cardDisplayNames.Select((name, index) => new CarryoverDataLossItem
+            {
+                CardIdm = $"111122223333{index:D4}",
+                CardDisplayName = name,
+                LostStartingPageNumber = 7,
+                LostCarryoverIncomeTotal = 45000,
+                LostCarryoverExpenseTotal = 37500,
+                LostCarryoverFiscalYear = 2025,
+                LostAt = new DateTime(2026, 5, 20),
+                OperatorName = "総務 花子"
+            }).ToList());
+        return mock.Object;
+    }
+
+    [Fact]
+    public async Task CheckCarryoverDataLossAsync_被害があれば警告を追加すること()
+    {
+        var vm = CreateViewModelWithCarryoverDetector(DetectorReturning("はやかけん 001"));
+
+        await vm.CheckCarryoverDataLossAsync();
+
+        vm.WarningMessages.Should().ContainSingle(w => w.Type == WarningType.CarryoverDataLoss)
+            .Which.DisplayText.Should().Contain("はやかけん 001");
+    }
+
+    [Fact]
+    public async Task CheckCarryoverDataLossAsync_被害がなければ警告を追加しないこと()
+    {
+        var vm = CreateViewModelWithCarryoverDetector(DetectorReturning());
+
+        await vm.CheckCarryoverDataLossAsync();
+
+        vm.WarningMessages.Should().NotContain(w => w.Type == WarningType.CarryoverDataLoss);
+    }
+
+    [Fact]
+    public async Task CheckCarryoverDataLossAsync_復旧後の再判定で既存の警告を取り除くこと()
+    {
+        // DB を直接修正して復旧した後、再起動せずとも（再判定の入口を通れば）警告が消えること。
+        // 追加のみで書くと一度出た警告が復旧後も残り続ける。
+        var vm = CreateViewModelWithCarryoverDetector(DetectorReturning());
+        vm.WarningMessages.Add(new WarningItem
+        {
+            Type = WarningType.CarryoverDataLoss,
+            DisplayText = "⚠️ 復旧前の警告"
+        });
+
+        await vm.CheckCarryoverDataLossAsync();
+
+        vm.WarningMessages.Should().NotContain(w => w.Type == WarningType.CarryoverDataLoss);
+    }
+
+    [Fact]
+    public async Task CheckCarryoverDataLossAsync_繰り返し呼んでも重複しないこと()
+    {
+        var vm = CreateViewModelWithCarryoverDetector(DetectorReturning("はやかけん 001"));
+
+        await vm.CheckCarryoverDataLossAsync();
+        await vm.CheckCarryoverDataLossAsync();
+
+        vm.WarningMessages.Count(w => w.Type == WarningType.CarryoverDataLoss).Should().Be(1);
+    }
+
+    [Fact]
+    public async Task CheckCarryoverDataLossAsync_他種別の警告を消さないこと()
+    {
+        var vm = CreateViewModelWithCarryoverDetector(DetectorReturning());
+        vm.WarningMessages.Add(new WarningItem
+        {
+            Type = WarningType.BackupStale,
+            DisplayText = "⚠️ バックアップ警告"
+        });
+
+        await vm.CheckCarryoverDataLossAsync();
+
+        vm.WarningMessages.Should().ContainSingle(w => w.Type == WarningType.BackupStale);
+    }
+
+    [Fact]
+    public async Task HandleWarningClick_繰越情報消失警告で一覧ダイアログを表示すること()
+    {
+        var vm = CreateViewModelWithCarryoverDetector(DetectorReturning("はやかけん 001"));
+
+        await vm.HandleWarningClick(new WarningItem { Type = WarningType.CarryoverDataLoss });
+
+        // ShowDialog<T> は省略可能引数を持つため、式ツリーでは引数を明示する必要がある（CS0854）
+        _navigationServiceMock.Verify(
+            n => n.ShowDialog<ICCardManager.Views.Dialogs.CarryoverDataLossDialog>(
+                It.IsAny<Action<ICCardManager.Views.Dialogs.CarryoverDataLossDialog>>()),
+            Times.Once);
+    }
+
+    [Fact]
+    public async Task OpenCardManageAsync_繰越情報消失警告を再判定すること()
+    {
+        // カードを論理削除すると検出の母集団から外れる。カード管理画面が唯一その操作の入口のため、
+        // ここで再判定しないと「クリックしても対象が無い警告」が再起動まで残る（Issue #1739）。
+        // OpenCardManageAsync はダイアログを閉じた後にダッシュボードを再構築するため、設定の既定値が要る。
+        SetupWarningCheckDefaults();
+        var vm = CreateViewModelWithCarryoverDetector(DetectorReturning());
+        vm.WarningMessages.Add(new WarningItem
+        {
+            Type = WarningType.CarryoverDataLoss,
+            DisplayText = "⚠️ 削除前の警告"
+        });
+
+        await vm.OpenCardManageAsync();
+
+        vm.WarningMessages.Should().NotContain(w => w.Type == WarningType.CarryoverDataLoss);
+    }
+
+    [Fact]
+    public async Task RunStartupDataChecksAsync_1件が失敗しても後続のチェックを実行すること()
+    {
+        // fire-and-forget には「前段が落ちても後段は動く」という副次的な性質がある。
+        // DB 同時アクセスを避けるために直列 await へまとめると、この性質が失われる（Issue #1737）。
+        // 個別 catch で明示的に保存していることを表明する。
+        SetupWarningCheckDefaults();
+        _ledgerRepositoryMock.Setup(r => r.GetByDateRangeAsync(
+                It.IsAny<string>(), It.IsAny<DateTime>(), It.IsAny<DateTime>()))
+            .ThrowsAsync(new InvalidOperationException("バス停チェックの失敗を注入"));
+
+        var vm = CreateViewModelWithCarryoverDetector(DetectorReturning("はやかけん 001"));
+
+        await vm.RunStartupDataChecksAsync();
+
+        // 前段（バス停名未入力チェック）が落ちても、後段の繰越情報消失警告は立つ
+        vm.WarningMessages.Should().ContainSingle(w => w.Type == WarningType.CarryoverDataLoss);
+    }
+
+    [Fact]
+    public async Task RunStartupDataChecksAsync_DBを読むチェックを直列に実行すること()
+    {
+        // DbContext は SQLiteConnection を 1 本しか持たず LeaseConnectionAsync はセマフォを取らない
+        // （Issue #1452 の「並列起動禁止」）。起動時チェックを個別に `_ =` で捨てると、
+        // 同一接続上で SQLiteCommand が並走し SQLITE_MISUSE の原因になる。
+        SetupWarningCheckDefaults();
+
+        var concurrent = 0;
+        var maxConcurrent = 0;
+        var gate = new object();
+
+        var detectorMock = new Mock<ICarryoverDataLossDetector>();
+        detectorMock.Setup(d => d.DetectAsync()).Returns(async () =>
+        {
+            lock (gate) { maxConcurrent = Math.Max(maxConcurrent, ++concurrent); }
+            await Task.Delay(30);
+            lock (gate) { concurrent--; }
+            return (IReadOnlyList<CarryoverDataLossItem>)new List<CarryoverDataLossItem>();
+        });
+
+        _ledgerRepositoryMock.Setup(r => r.GetByDateRangeAsync(
+                It.IsAny<string>(), It.IsAny<DateTime>(), It.IsAny<DateTime>()))
+            .Returns(async () =>
+            {
+                lock (gate) { maxConcurrent = Math.Max(maxConcurrent, ++concurrent); }
+                await Task.Delay(30);
+                lock (gate) { concurrent--; }
+                return (IEnumerable<Ledger>)new List<Ledger>();
+            });
+
+        var vm = CreateViewModelWithCarryoverDetector(detectorMock.Object);
+
+        await vm.RunStartupDataChecksAsync();
+
+        maxConcurrent.Should().Be(1, "DB を読む起動時チェックは同時に 1 本までであること");
+    }
+
+    #endregion
 
     #region バックアップ健全性警告テスト（Issue #1689）
 

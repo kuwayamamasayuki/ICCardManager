@@ -21,6 +21,7 @@ namespace ICCardManager.Services
         private readonly IDatabaseInfo _databaseInfo;
         private readonly IUpdateNotificationService _updateNotificationService;
         private readonly IBackupHealthService _backupHealthService;
+        private readonly ICarryoverDataLossDetector _carryoverDataLossDetector;
 
         /// <param name="ledgerRepository">台帳リポジトリ</param>
         /// <param name="databaseInfo">DB接続情報</param>
@@ -32,16 +33,22 @@ namespace ICCardManager.Services
         /// バックアップ健全性チェック（Issue #1689）。null の場合、バックアップ警告は常に生成されない
         /// （updateNotificationService と同じ理由で省略可能）
         /// </param>
+        /// <param name="carryoverDataLossDetector">
+        /// 繰越情報消失の検出（Issue #1758）。null の場合、繰越情報消失警告は常に生成されない
+        /// （updateNotificationService と同じ理由で省略可能）
+        /// </param>
         public WarningService(
             ILedgerRepository ledgerRepository,
             IDatabaseInfo databaseInfo,
             IUpdateNotificationService updateNotificationService = null,
-            IBackupHealthService backupHealthService = null)
+            IBackupHealthService backupHealthService = null,
+            ICarryoverDataLossDetector carryoverDataLossDetector = null)
         {
             _ledgerRepository = ledgerRepository;
             _databaseInfo = databaseInfo;
             _updateNotificationService = updateNotificationService;
             _backupHealthService = backupHealthService;
+            _carryoverDataLossDetector = carryoverDataLossDetector;
         }
 
         /// <summary>
@@ -175,6 +182,59 @@ namespace ICCardManager.Services
                     "保存先フォルダーの空き容量やアクセス権に問題がある可能性があります。" +
                     "システム管理画面（F6）でバックアップ状況を確認し、手動バックアップを実行してください。"
             };
+        }
+
+        /// <summary>
+        /// 繰越情報消失警告を生成（Issue #1758）
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// Issue #1726 以前の <c>UPDATE ic_card</c> で紙出納簿移行カード（Issue #510 / #1215）の
+        /// 繰越累計・開始ページ番号が既定値へ落ちた被害を通知する。復旧手段は持たず、
+        /// 「被害の有無を利用者が自力で知れること」を価値とする（Issue #1758 の案A）。
+        /// </para>
+        /// <para>
+        /// operation_log の走査（共有モードでは SMB アクセス）を伴うため、
+        /// UI スレッドから呼ぶ場合は Task.Run 経由を推奨。
+        /// </para>
+        /// </remarks>
+        /// <returns>被害があれば WarningItem、なければ null</returns>
+        public async Task<WarningItem> CheckCarryoverDataLossWarningAsync()
+        {
+            if (_carryoverDataLossDetector == null)
+                return null;
+
+            var items = await _carryoverDataLossDetector.DetectAsync().ConfigureAwait(false);
+            if (items == null || items.Count == 0)
+                return null;
+
+            return new WarningItem
+            {
+                Type = WarningType.CarryoverDataLoss,
+                DisplayText =
+                    $"⚠️ 紙の出納簿から移行したカード{items.Count}枚（{FormatCardNames(items)}）の" +
+                    "繰越累計・開始ページ番号が失われています。" +
+                    "過去のバージョンでカード情報を編集した際に消去されたため、" +
+                    "月次帳票（物品出納簿）の年度累計とページ番号が正しく出力されません。" +
+                    "この警告をクリックして失われた値を確認し、" +
+                    "システム管理者にデータベースの修正を依頼してください。"
+            };
+        }
+
+        /// <summary>
+        /// 警告文言へ載せるカード名を組み立てる。
+        /// 先頭 <see cref="AppConstants.CarryoverDataLossWarningMaxListedCards"/> 枚を名前で示し、
+        /// 残りは「ほか○枚」に畳む。
+        /// </summary>
+        private static string FormatCardNames(IReadOnlyList<CarryoverDataLossItem> items)
+        {
+            var listed = items
+                .Take(AppConstants.CarryoverDataLossWarningMaxListedCards)
+                .Select(i => i.CardDisplayName);
+            var names = string.Join("、", listed);
+
+            var remaining = items.Count - AppConstants.CarryoverDataLossWarningMaxListedCards;
+            return remaining > 0 ? $"{names} ほか{remaining}枚" : names;
         }
     }
 }

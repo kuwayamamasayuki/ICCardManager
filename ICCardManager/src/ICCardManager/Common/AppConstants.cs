@@ -48,6 +48,16 @@ namespace ICCardManager.Common
         public const int BackupStaleWarningDays = 7;
 
         /// <summary>
+        /// 繰越情報消失警告（Issue #1758）でカード名を列挙する最大枚数
+        /// </summary>
+        /// <remarks>
+        /// 全部並べると文字サイズ「特大」で警告エリアが何行にも折り返し、他の警告を押し出す。
+        /// 一方で件数だけでは「自分の担当カードが含まれるか」を判断できないため、先頭は名前で示し
+        /// 残りは「ほか○枚」で補う。
+        /// </remarks>
+        public const int CarryoverDataLossWarningMaxListedCards = 3;
+
+        /// <summary>
         /// 中断されたバックアップの一時ファイルを削除するまでの経過時間（時間、Issue #1748）。
         /// </summary>
         /// <remarks>

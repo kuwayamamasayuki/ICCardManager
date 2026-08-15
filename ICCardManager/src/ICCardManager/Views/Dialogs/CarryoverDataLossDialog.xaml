@@ -1,0 +1,151 @@
+<Window x:Class="ICCardManager.Views.Dialogs.CarryoverDataLossDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:vm="clr-namespace:ICCardManager.ViewModels"
+        mc:Ignorable="d"
+        d:DataContext="{d:DesignInstance Type=vm:CarryoverDataLossViewModel}"
+        Title="繰越情報が失われたカード"
+        Height="500"
+        Width="950"
+        MinHeight="350"
+        MinWidth="600"
+        WindowStartupLocation="CenterOwner"
+        ResizeMode="CanResize"
+        FontSize="{DynamicResource BaseFontSize}"
+        AutomationProperties.Name="繰越情報が失われたカードの一覧ダイアログ"
+        AutomationProperties.HelpText="紙の出納簿から移行したカードの繰越累計・開始ページ番号が失われている場合に、失われた元の値を確認できます。復旧はシステム管理者によるデータベースの修正が必要です。">
+
+    <Window.Resources>
+        <BooleanToVisibilityConverter x:Key="BoolToVisibilityConverter"/>
+    </Window.Resources>
+
+    <Grid Margin="20">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <!-- ヘッダー -->
+        <StackPanel Grid.Row="0" Margin="0,0,0,10">
+            <TextBlock Text="繰越情報が失われたカード"
+                       FontSize="{DynamicResource LargeFontSize}"
+                       FontWeight="Bold"/>
+            <!-- 長文は幅ではなく折り返しで担保する（.claude/rules/development-conventions.md UI/UX原則）。
+                 親が縦 StackPanel なので幅制約があり TextWrapping が機能する。 -->
+            <TextBlock Text="過去のバージョンでカード情報を編集した際に、紙の出納簿から移行したカードの繰越累計・開始ページ番号が消去されました。この画面は失われた元の値を表示するだけで、復旧は行いません。"
+                       FontSize="{DynamicResource SmallFontSize}"
+                       Foreground="{DynamicResource SecondaryTextBrush}"
+                       TextWrapping="Wrap"
+                       Margin="0,5,0,0"/>
+        </StackPanel>
+
+        <!-- 復旧手順の案内 -->
+        <Border Grid.Row="1"
+                Background="{DynamicResource ReturnBackgroundBrush}"
+                Padding="12"
+                Margin="0,0,0,10">
+            <TextBlock TextWrapping="Wrap"
+                       FontSize="{DynamicResource SmallFontSize}"
+                       Foreground="{DynamicResource HintForegroundBrush}"
+                       Text="💡 復旧するには、以下の値をシステム管理者に伝えてデータベース（ic_card テーブルの starting_page_number / carryover_income_total / carryover_expense_total / carryover_fiscal_year）の修正を依頼してください。修正が反映されると、次回起動時にメイン画面の警告が消えます。"/>
+        </Border>
+
+        <!-- 一覧 -->
+        <DataGrid Grid.Row="2"
+                  x:Name="CarryoverDataLossDataGrid"
+                  ItemsSource="{Binding Items}"
+                  Visibility="{Binding HasItems, Converter={StaticResource BoolToVisibilityConverter}}"
+                  AutoGenerateColumns="False"
+                  IsReadOnly="True"
+                  SelectionMode="Extended"
+                  SelectionUnit="CellOrRowHeader"
+                  ClipboardCopyMode="IncludeHeader"
+                  CanUserSortColumns="True"
+                  CanUserReorderColumns="False"
+                  CanUserResizeColumns="True"
+                  HeadersVisibility="Column"
+                  RowHeaderWidth="0"
+                  GridLinesVisibility="Horizontal"
+                  BorderBrush="{DynamicResource NeutralBorderBrush}"
+                  BorderThickness="1"
+                  FontSize="{DynamicResource BaseFontSize}"
+                  AutomationProperties.Name="繰越情報が失われたカードの一覧"
+                  AutomationProperties.HelpText="セルを選択して Ctrl+C を押すと、失われた値をコピーできます。">
+
+            <DataGrid.Columns>
+                <DataGridTextColumn Header="カード"
+                                    Binding="{Binding CardDisplayName}"
+                                    Width="150"/>
+                <DataGridTextColumn Header="開始ページ番号"
+                                    Binding="{Binding LostStartingPageNumberText}"
+                                    Width="120"/>
+                <DataGridTextColumn Header="繰越累計受入"
+                                    Binding="{Binding LostCarryoverIncomeTotalText}"
+                                    Width="130"/>
+                <DataGridTextColumn Header="繰越累計払出"
+                                    Binding="{Binding LostCarryoverExpenseTotalText}"
+                                    Width="130"/>
+                <DataGridTextColumn Header="対象年度"
+                                    Binding="{Binding LostCarryoverFiscalYearText}"
+                                    Width="100"/>
+                <DataGridTextColumn Header="消去された日時"
+                                    Binding="{Binding LostAtText}"
+                                    Width="150"/>
+                <DataGridTextColumn Header="操作者"
+                                    Binding="{Binding OperatorName}"
+                                    Width="*"/>
+            </DataGrid.Columns>
+        </DataGrid>
+
+        <!-- 0件時の案内（警告クリック後に他PCで復旧された場合などに到達する）。
+             文言は ViewModel が持つ: 一覧が空になる理由には「被害が無い」と「確認できなかった」の
+             2つがあり、後者に「ありません」と出すと被害なしと誤読させるため（Issue #1758）。 -->
+        <TextBlock Grid.Row="2"
+                   Text="{Binding EmptyStateMessage}"
+                   TextWrapping="Wrap"
+                   VerticalAlignment="Center"
+                   HorizontalAlignment="Center"
+                   FontSize="{DynamicResource BaseFontSize}"
+                   Foreground="{DynamicResource SecondaryTextBrush}">
+            <TextBlock.Style>
+                <Style TargetType="TextBlock">
+                    <Setter Property="Visibility" Value="Collapsed"/>
+                    <Style.Triggers>
+                        <DataTrigger Binding="{Binding HasItems}" Value="False">
+                            <Setter Property="Visibility" Value="Visible"/>
+                        </DataTrigger>
+                    </Style.Triggers>
+                </Style>
+            </TextBlock.Style>
+        </TextBlock>
+
+        <!-- フッター -->
+        <Grid Grid.Row="3" Margin="0,15,0,0">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+
+            <TextBlock Grid.Column="0"
+                       VerticalAlignment="Center"
+                       TextWrapping="Wrap"
+                       Margin="0,0,10,0"
+                       FontSize="{DynamicResource SmallFontSize}"
+                       Foreground="{DynamicResource SecondaryTextBrush}">
+                <Run Text="{Binding Items.Count, Mode=OneWay, StringFormat={}{0}件}"/>
+            </TextBlock>
+
+            <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                <Button Content="閉じる"
+                        Click="CloseButton_Click"
+                        Padding="20,8"
+                        IsCancel="True"
+                        AutomationProperties.Name="ダイアログを閉じる"/>
+            </StackPanel>
+        </Grid>
+    </Grid>
+</Window>
