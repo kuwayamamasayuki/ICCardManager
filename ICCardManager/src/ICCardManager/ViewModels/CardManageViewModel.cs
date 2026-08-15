@@ -846,10 +846,15 @@ namespace ICCardManager.ViewModels
             }
 
             // Issue #1760: 識別情報は再読込より前に確定させる（再読込で選択が解除されるため）
-            // Issue #1761: 確定させる位置を **最初の await より前** へ移した。認証ダイアログ・
-            // 削除確認ダイアログの待機中に選択が外れると（一覧の再読込、選択行の Ctrl+クリック）
-            // SelectedCard は null になり、後段の逆参照が NullReferenceException になる。
+            // Issue #1761: 確定させる位置を **最初の await より前** へ移した。
             // 「削除するのはボタンを押した時点で選択されていた行」であり、その後の選択状態には依存しない。
+            //
+            // なお現行の StaffAuthService.RequestAuthenticationAsync は内部に await を持たず
+            // （モーダルの ShowDialog() 後に Task.FromResult を返す）、モーダル表示中は
+            // アプリの他ウィンドウが無効化されるため、この認証待ちで選択が外れる経路は**現時点では無い**。
+            // ここでの確定は「await をまたいで Selected* を参照しない」という不変条件の遵守であり、
+            // 認証サービスが将来ほんとうに非同期化されたときの退行を防ぐためのもの
+            // （実際に選択が外れ得るのは RefundAsync の残高取得＝真の await 点。そちらは同型で是正済み）。
             var targetIdm = SelectedCard.CardIdm;
             var targetCardType = SelectedCard.CardType;
             var targetCardNumber = SelectedCard.CardNumber;

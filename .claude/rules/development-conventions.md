@@ -157,7 +157,8 @@
   - **`Selected*` の逆参照を `await` をまたがせない**。認証ダイアログ（職員証タッチ待ち）や DB 読み取りの待機中に UI スレッドは入力を処理するため、継続の実行時点で選択状態は変わり得る。`if (Selected == null) return;` の直後、**最初の `await` より前**にローカル変数へ確定させる（#1759 が `StaffManageViewModel.DeleteAsync` で先行して確立した形）。`CanExecute` でボタンが無効化されても、**実行中のコマンドは止まらない**
   - **本プロジェクトは nullable 参照型が有効でないため `SelectedX!` の `!` はコンパイル後に何も残らない**（実行時チェックにならない）。「`!` を付けたから安全」は成立しない
   - **フォールバックの優先順位が、その規約自身の禁止事項へ落ちていないか確かめる**。#1759 は「エラー文言で対象を名指しするときは未保存の入力値を使わない」を定めたが、実装は `Selected != null ? 一覧の値 : 未保存の入力値` で、**選択が外れた瞬間にまさに禁じた形へ落ちていた**。必要な値（一覧の表記）は**編集開始時に退避する**（`.claude/rules/development-conventions.md` #1728 の「フォールバックが書いてあることは、それが機能していることを意味しない」の再演）
-  - 対象は `IsEditing` を持つ ViewModel（現状 `CardManageViewModel` / `StaffManageViewModel` の 2 つ。`grep -rl "IsEditing" src` で列挙できる）。**片方だけ直すと再発する**
+  - **洗い出しの単位は「画面の種類」ではなく「`Selected*` を `await` の後ろで参照している箇所」**。#1761 の初版は対象を「`IsEditing` を持つ ViewModel」（`CardManageViewModel` / `StaffManageViewModel` の 2 つ）と定義したが、編集フォームの有無はこの欠陥の条件ではない。**編集を伴わない `SystemManageViewModel.RestoreAsync`（`SelectedBackup`）が同型で残っていた** — リストア前バックアップの作成を挟んだあとに `SelectedBackup.FilePath` を読むため、確認ダイアログで名指ししたのとは別のバックアップで 6 年保存の台帳 DB を上書きし得た。**これは #1760 が「画面の動詞ではなくテーブルへの書き込み文で数える」で記録したのと同じ数え間違い**。横断で洗うときは `grep -n "Selected[A-Za-z]*\." src/**/ViewModels/*.cs` で参照箇所を列挙し、各々が最初の `await` より前かを確認すること
+  - **「処理中オーバーレイがあるから選択は変わらない」は成り立たない**。`Visibility="{Binding IsBusy}"` の `Border` が塞ぐのはマウスのヒットテストだけで、キーボードフォーカスは配下のコントロールに残る。方向キーによる選択移動は通る
 - **結果メッセージは「画面状態をリセットする処理」のあとに設定し、かつ表示領域がその状態でも生きていることを確かめる**（Issue #1727）。原因は2つ重なり得る:
   - **順序**: `CardManageViewModel.CancelEdit()` のような編集終了処理は `StatusMessage` / `IsStatusError` もクリアするため、`StatusMessage = "登録しました"` → `CancelEdit()` の順に書くと**メッセージは一度も表示されない**
   - **所在**: ステータス欄の `TextBlock` が `Visibility="{Binding IsEditing}"` のパネルの内側にあると、`CancelEdit()`（`IsEditing = false`）で**パネルごと Collapsed になり、順序を直しても見えない**。完了メッセージを出す欄は、その完了処理で消える表示条件に紐付けないこと
