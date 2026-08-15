@@ -343,6 +343,17 @@ public partial class SystemManageViewModel : ViewModelBase
             return;
         }
 
+        // Issue #1761: 一覧の選択（SelectedItem="{Binding SelectedBackup}" は TwoWay）を
+        // 「操作対象の識別子」として await をまたいで参照しない。リストアするのは
+        // **ボタンを押した時点で選択されていたファイル**であり、その後の選択状態には依存しない。
+        // 処理中オーバーレイはマウス入力しか塞がないため、リストア前バックアップの作成中
+        // （共有フォルダー上では数十秒かかり得る）にキーボード操作で選択が動くと、
+        // 確認ダイアログで名指ししたファイルとは別のバックアップで DB を上書きし得た。
+        // 選択が外れた場合は SelectedBackup.FilePath が NullReferenceException になる。
+        var targetBackupPath = SelectedBackup.FilePath;
+        var targetBackupFileName = SelectedBackup.FileName;
+        var targetBackupCreatedAt = SelectedBackup.CreatedAt;
+
         // Issue #1705: DB リストアは全レコード（台帳・残高・職員・カード）を置換する破壊的操作のため、
         // 単一台帳行の削除（#635）と同様に職員認証を必須とする。認可の非対称性
         // （1 行削除には認証を課すのに DB 全体置換は無認証）を解消する。
@@ -362,8 +373,8 @@ public partial class SystemManageViewModel : ViewModelBase
 
         var result = MessageBox.Show(
             $"以下のバックアップからデータを復元します。\n\n" +
-            $"ファイル: {SelectedBackup.FileName}\n" +
-            $"作成日時: {DisplayFormatters.FormatTimestamp(SelectedBackup.CreatedAt)}\n\n" +
+            $"ファイル: {targetBackupFileName}\n" +
+            $"作成日時: {DisplayFormatters.FormatTimestamp(targetBackupCreatedAt)}\n\n" +
             sharedModeWarning +
             $"現在のデータは上書きされます。\n" +
             $"（復元前に現在のデータは自動バックアップされます）\n\n" +
@@ -407,13 +418,13 @@ public partial class SystemManageViewModel : ViewModelBase
                 }
 
                 // リストア実行
-                restoreSuccess = _backupService.RestoreFromBackup(SelectedBackup.FilePath);
+                restoreSuccess = _backupService.RestoreFromBackup(targetBackupPath);
                 if (restoreSuccess)
                 {
                     SetStatus("リストアが完了しました。アプリケーションを再起動してください。", false);
 
                     // Issue #1302: 監査ログ記録 (リストア後の新DB上に痕跡を残す)
-                    await _operationLogger.LogRestoreAsync(SelectedBackup.FilePath);
+                    await _operationLogger.LogRestoreAsync(targetBackupPath);
                 }
                 else
                 {

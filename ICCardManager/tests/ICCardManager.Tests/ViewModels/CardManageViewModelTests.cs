@@ -2522,4 +2522,334 @@ public class CardManageViewModelTests
     }
 
     #endregion
+
+    #region Issue #1761: 一覧の選択が外れても編集を継続できること（SelectedCard 非依存）
+
+    /// <summary>
+    /// Issue #1761: 編集中に一覧の選択が外れても、編集フォームと入力内容が保持されること
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>SelectedItem="{Binding SelectedCard}"</c> は TwoWay バインドのため、選択行の
+    /// Ctrl+クリック（<c>SelectionMode=Single</c> でも選択解除できる）や <c>Cards.Clear()</c>
+    /// による選択解除の書き戻しで <see cref="CardManageViewModel.SelectedCard"/> だけが null に戻る。
+    /// 編集フォームは <c>IsEditing</c> にのみ連動するため開いたままになる。
+    /// </para>
+    /// <para>
+    /// 本 Issue の方針（案A）は「編集対象は <c>EditCardIdm</c>（主キー）であり
+    /// <c>SelectedCard</c> ではない」を不変条件にすることであって、フォームを閉じることではない。
+    /// 閉じる案は入力途中の備考が予告なく消えるため採らない。
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void OnSelectedCardChanged_WhenSelectionClearedDuringEdit_ShouldKeepEditFormAndInput()
+    {
+        // Arrange
+        const string idm = "0102030405060708";
+        _viewModel.SelectedCard = new CardDto
+        {
+            CardIdm = idm,
+            CardType = "はやかけん",
+            CardNumber = "H-001",
+            Note = "編集前のメモ"
+        };
+        _viewModel.StartEdit();
+        _viewModel.EditNote = "入力途中のメモ";
+
+        // Act - 選択行を Ctrl+クリックして選択解除した
+        _viewModel.SelectedCard = null;
+
+        // Assert - 編集は継続し、編集対象は EditCardIdm が保持している
+        _viewModel.IsEditing.Should().BeTrue("選択解除でフォームを閉じると入力内容が予告なく消える");
+        _viewModel.IsNewCard.Should().BeFalse("既存カードの編集モードのままであること");
+        _viewModel.EditCardIdm.Should().Be(idm, "編集対象を特定するのは主キーであること");
+        _viewModel.EditCardType.Should().Be("はやかけん");
+        _viewModel.EditCardNumber.Should().Be("H-001");
+        _viewModel.EditNote.Should().Be("入力途中のメモ");
+    }
+
+    /// <summary>
+    /// Issue #1761: 選択が外れた状態で保存しても、<c>EditCardIdm</c> のカードが更新され
+    /// 監査ログも残ること（例外にならないこと）
+    /// </summary>
+    /// <remarks>
+    /// 「例外が出ない」だけでは何も検証していない（<c>.claude/rules/testing.md</c>）ため、
+    /// 更新対象の IDm と <c>operation_log</c> の中身まで具体値で表明する。
+    /// </remarks>
+    [Fact]
+    public async Task SaveAsync_WhenSelectionClearedDuringEdit_ShouldUpdateTargetIdentifiedByEditCardIdm()
+    {
+        // Arrange
+        const string idm = "0102030405060708";
+        _viewModel.SelectedCard = new CardDto
+        {
+            CardIdm = idm,
+            CardType = "はやかけん",
+            CardNumber = "H-001"
+        };
+        _viewModel.StartEdit();
+        _viewModel.EditNote = "更新後のメモ";
+
+        _cardRepositoryMock.Setup(r => r.GetByIdmAsync(idm, false)).ReturnsAsync(new IcCard
+        {
+            CardIdm = idm,
+            CardType = "はやかけん",
+            CardNumber = "H-001",
+            Note = "更新前のメモ"
+        });
+        _cardRepositoryMock.Setup(r => r.UpdateAsync(It.IsAny<IcCard>())).ReturnsAsync(true);
+        _cardRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<IcCard>());
+
+        // 保存を押す直前に一覧の選択が外れた
+        _viewModel.SelectedCard = null;
+
+        // Act
+        await _viewModel.SaveAsync();
+
+        // Assert - EditCardIdm のカードが更新される
+        _cardRepositoryMock.Verify(r => r.UpdateAsync(It.Is<IcCard>(c =>
+            c.CardIdm == idm && c.Note == "更新後のメモ")), Times.Once);
+
+        // 監査ログも欠けない
+        _operationLogRepositoryMock.Verify(r => r.InsertAsync(It.Is<OperationLog>(log =>
+            log.TargetTable == OperationLogger.Tables.IcCard &&
+            log.TargetId == idm &&
+            log.Action == OperationLogger.Actions.Update &&
+            log.AfterData!.Contains("更新後のメモ"))), Times.Once);
+
+        _viewModel.StatusMessage.Should().Be("更新しました");
+        _viewModel.IsStatusError.Should().BeFalse();
+    }
+
+    /// <summary>
+    /// Issue #1761: 選択が外れた状態で競合しても、案内は<b>一覧に載っていた管理番号</b>で
+    /// 対象を名指しすること
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Issue #1759 で「未保存の入力値で名指ししない」ことを固定したが、その実装は
+    /// <c>SelectedCard</c> を優先し null のときだけ入力値へ退避する形だった。
+    /// つまり<b>選択が外れた瞬間に、まさに禁じた「未保存の入力値による名指し」へ落ちていた</b>。
+    /// </para>
+    /// <para>
+    /// 編集開始時に一覧の表記を退避しておけば、選択状態に関係なく正しく名指しできる。
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task SaveAsync_WhenSelectionClearedAndUpdateConflicts_ShouldNameTargetByItsListedNumber()
+    {
+        // Arrange
+        const string idm = "0102030405060708";
+        _viewModel.SelectedCard = new CardDto
+        {
+            CardIdm = idm,
+            CardType = "はやかけん",
+            CardNumber = "H-001"
+        };
+        _viewModel.StartEdit();
+        _viewModel.EditCardNumber = "H-777";  // 番号を打ち直した
+
+        _cardRepositoryMock.Setup(r => r.GetByIdmAsync(idm, false)).ReturnsAsync((IcCard?)null);
+        _cardRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<IcCard>());
+
+        // 一覧の再読込などで選択が外れた
+        _viewModel.SelectedCard = null;
+
+        // Act
+        await _viewModel.SaveAsync();
+
+        // Assert
+        _viewModel.StatusMessage.Should().Contain("H-001",
+            "選択が外れていても、編集開始時に一覧へ載っていた管理番号で名指しすること");
+        _viewModel.StatusMessage.Should().NotContain("H-777",
+            "未保存の入力値は一覧のどこにも存在せず、案内どおりの確認ができない");
+        _viewModel.StatusMessage.Should().EndWith("やり直してください。");
+        _viewModel.EditCardNumber.Should().Be("H-777", "入力内容は消さないこと");
+    }
+
+    /// <summary>
+    /// Issue #1761: 編集中に一覧で別の行を選び直したら、名指しに使う表記も切替後の行に追随すること
+    /// </summary>
+    /// <remarks>
+    /// 退避値の更新漏れは「選択解除の場合だけ」を直したときに残りやすい。
+    /// <c>OnSelectedCardChanged</c> は編集中の選択切替でフォームの中身を差し替えるため、
+    /// 退避値だけ古いままだと切替前のカードで名指しすることになる。
+    /// </remarks>
+    [Fact]
+    public async Task SaveAsync_WhenEditTargetSwitchedThenConflicts_ShouldNameSwitchedTarget()
+    {
+        // Arrange
+        const string firstIdm = "0102030405060708";
+        const string secondIdm = "0807060504030201";
+        _viewModel.SelectedCard = new CardDto
+        {
+            CardIdm = firstIdm,
+            CardType = "はやかけん",
+            CardNumber = "H-001"
+        };
+        _viewModel.StartEdit();
+
+        // 編集中に一覧で別のカードを選び直した（フォームの中身も差し替わる）
+        _viewModel.SelectedCard = new CardDto
+        {
+            CardIdm = secondIdm,
+            CardType = "nimoca",
+            CardNumber = "N-002"
+        };
+        _viewModel.EditCardIdm.Should().Be(secondIdm, "前提: 選択切替で編集対象が差し替わること");
+
+        _cardRepositoryMock.Setup(r => r.GetByIdmAsync(secondIdm, false)).ReturnsAsync((IcCard?)null);
+        _cardRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<IcCard>());
+
+        // 保存直前に選択が外れる（再読込による書き戻し）
+        _viewModel.SelectedCard = null;
+
+        // Act
+        await _viewModel.SaveAsync();
+
+        // Assert
+        _viewModel.StatusMessage.Should().Contain("N-002", "切替後のカードで名指しすること");
+        _viewModel.StatusMessage.Should().NotContain("H-001", "切替前のカードで名指ししないこと");
+    }
+
+    /// <summary>
+    /// Issue #1761: 認証ダイアログの待機中に選択が外れても、削除は開始時点の対象に対して行われること
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>DeleteAsync</c> は <c>RequestAuthenticationAsync</c>（職員証タッチ待ち）を挟んでから
+    /// 確認ダイアログの文言で <c>SelectedCard</c> を逆参照していた。待機中に選択が外れると
+    /// <c>NullReferenceException</c> になり、非同期コマンドから例外が抜けて致命的エラーダイアログになる。
+    /// </para>
+    /// <para>
+    /// 「削除するのはボタンを押した時点で選択されていた行」であり、その後の選択状態には依存しない。
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task DeleteAsync_WhenSelectionClearedDuringAuthentication_ShouldStillDeleteInitialTarget()
+    {
+        // Arrange
+        const string idm = "0102030405060708";
+        _viewModel.SelectedCard = new CardDto
+        {
+            CardIdm = idm,
+            CardType = "はやかけん",
+            CardNumber = "H-001",
+            IsLent = false
+        };
+
+        // 認証（職員証タッチ待ち）の最中に一覧の選択が外れた
+        _staffAuthServiceMock.Setup(s => s.RequestAuthenticationAsync(It.IsAny<string>()))
+            .Callback(() => _viewModel.SelectedCard = null)
+            .ReturnsAsync(new StaffAuthResult { Idm = "TEST_OPERATOR_IDM", StaffName = "テスト操作者" });
+
+        _cardRepositoryMock.Setup(r => r.GetByIdmAsync(idm, false))
+            .ReturnsAsync(new IcCard { CardIdm = idm, CardType = "はやかけん", CardNumber = "H-001" });
+        _cardRepositoryMock.Setup(r => r.DeleteAsync(idm))
+            .ReturnsAsync(ICCardManager.Data.Repositories.CardOperationResult.Success);
+        _cardRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<IcCard>());
+
+        // Act
+        await _viewModel.DeleteAsync();
+
+        // Assert - 確認ダイアログは開始時点の対象を名指しできている
+        _dialogServiceMock.Verify(d => d.ShowWarningConfirmation(
+            It.Is<string>(s => s.Contains("はやかけん") && s.Contains("H-001")),
+            It.IsAny<string>()), Times.Once);
+
+        _cardRepositoryMock.Verify(r => r.DeleteAsync(idm), Times.Once);
+        _operationLogRepositoryMock.Verify(r => r.InsertAsync(It.Is<OperationLog>(log =>
+            log.TargetTable == OperationLogger.Tables.IcCard &&
+            log.TargetId == idm &&
+            log.Action == OperationLogger.Actions.Delete)), Times.Once);
+    }
+
+    /// <summary>
+    /// Issue #1761: 残高取得の待機中に選択が外れても、払い戻しは開始時点の対象に対して行われること
+    /// </summary>
+    /// <remarks>
+    /// <c>RefundAsync</c> は残高取得（await）のあと確認ダイアログの文言と
+    /// <c>refundCardIdm</c> の決定で <c>SelectedCard</c> を逆参照していた。
+    /// 削除と同型のため同じ扱いにする（<c>.claude/rules/development-conventions.md</c> の横断洗い出し）。
+    /// </remarks>
+    [Fact]
+    public async Task RefundAsync_WhenSelectionClearedDuringBalanceLookup_ShouldStillRefundInitialTarget()
+    {
+        // Arrange
+        const string idm = "0102030405060708";
+        _viewModel.SelectedCard = new CardDto
+        {
+            CardIdm = idm,
+            CardType = "はやかけん",
+            CardNumber = "H-001",
+            IsLent = false,
+            IsRefunded = false
+        };
+
+        // 残高取得の最中に一覧の選択が外れた
+        _ledgerRepositoryMock.Setup(r => r.GetLatestLedgerAsync(idm))
+            .Callback(() => _viewModel.SelectedCard = null)
+            .ReturnsAsync(new Ledger { CardIdm = idm, Balance = 3000 });
+        _ledgerRepositoryMock.Setup(r => r.InsertAsync(It.IsAny<Ledger>())).ReturnsAsync(1);
+        _cardRepositoryMock.Setup(r => r.GetByIdmAsync(idm, It.IsAny<bool>()))
+            .ReturnsAsync(new IcCard { CardIdm = idm, CardType = "はやかけん", CardNumber = "H-001" });
+        _cardRepositoryMock.Setup(r => r.SetRefundedAsync(idm))
+            .ReturnsAsync(ICCardManager.Data.Repositories.CardOperationResult.Success);
+        _cardRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<IcCard>());
+
+        // Act
+        await _viewModel.RefundAsync();
+
+        // Assert - 確認ダイアログは開始時点の対象を名指しできている
+        _dialogServiceMock.Verify(d => d.ShowWarningConfirmation(
+            It.Is<string>(s => s.Contains("はやかけん") && s.Contains("H-001")),
+            It.IsAny<string>()), Times.Once);
+
+        _ledgerRepositoryMock.Verify(r => r.InsertAsync(It.Is<Ledger>(l =>
+            l.CardIdm == idm && l.Expense == 3000 && l.Balance == 0)), Times.Once);
+        _cardRepositoryMock.Verify(r => r.SetRefundedAsync(idm), Times.Once);
+    }
+
+    /// <summary>
+    /// Issue #1761: 払い戻しの競合案内も、選択状態ではなく開始時点の対象で名指しすること
+    /// </summary>
+    /// <remarks>
+    /// 「なぜ」は更新と同じでも「何が」は利用者が行った操作で述べる（Issue #1760 の <c>ForRefund</c>）。
+    /// 選択が外れた状態でも操作名と対象が食い違わないことを固定する。
+    /// </remarks>
+    [Fact]
+    public async Task RefundAsync_WhenSelectionClearedAndTargetRowMissing_ShouldNameTargetByItsListedNumber()
+    {
+        // Arrange
+        const string idm = "0102030405060708";
+        _viewModel.SelectedCard = new CardDto
+        {
+            CardIdm = idm,
+            CardType = "はやかけん",
+            CardNumber = "H-001",
+            IsLent = false,
+            IsRefunded = false
+        };
+
+        _ledgerRepositoryMock.Setup(r => r.GetLatestLedgerAsync(idm))
+            .Callback(() => _viewModel.SelectedCard = null)
+            .ReturnsAsync(new Ledger { CardIdm = idm, Balance = 3000 });
+        // 払い戻し前データが読めない（他 PC が論理削除した）
+        _cardRepositoryMock.Setup(r => r.GetByIdmAsync(idm, false)).ReturnsAsync((IcCard?)null);
+        _cardRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<IcCard>());
+
+        // Act
+        await _viewModel.RefundAsync();
+
+        // Assert
+        _cardRepositoryMock.Verify(r => r.SetRefundedAsync(It.IsAny<string>()), Times.Never);
+        _ledgerRepositoryMock.Verify(r => r.InsertAsync(It.IsAny<Ledger>()), Times.Never);
+
+        _viewModel.IsStatusError.Should().BeTrue();
+        _viewModel.StatusMessage.Should().Contain("H-001", "選択が外れていても対象を名指しできること");
+        _viewModel.StatusMessage.Should().Contain("払い戻し", "利用者が行った操作で述べること");
+        _viewModel.StatusMessage.Should().EndWith("やり直してください。");
+    }
+
+    #endregion
 }

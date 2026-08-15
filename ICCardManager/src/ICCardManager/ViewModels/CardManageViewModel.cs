@@ -103,6 +103,27 @@ namespace ICCardManager.ViewModels
         private Views.Dialogs.CardRegistrationModeResult? _registrationModeResult;
 
         /// <summary>
+        /// 編集中の対象を「一覧に載っている表記」で名指しするための退避値（Issue #1761）
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// <b>編集フォームが開いている間、編集対象を指すのは <see cref="EditCardIdm"/>（主キー）であって
+        /// <see cref="SelectedCard"/> ではない。</b> <c>SelectedItem="{Binding SelectedCard}"</c> は
+        /// TwoWay バインドのため、選択行の Ctrl+クリック（<c>SelectionMode=Single</c> でも選択解除できる）や
+        /// <c>Cards.Clear()</c>（一覧の再読込）によって <see cref="SelectedCard"/> <b>だけ</b>が null に戻る。
+        /// 編集フォームは <c>IsEditing</c> にのみ連動するのでそのまま開いており、入力内容も残っている。
+        /// </para>
+        /// <para>
+        /// 競合の案内は<b>一覧に載っている値</b>で対象を名指しする必要がある（Issue #1759）。
+        /// 未保存の入力値で代替すると、管理番号を書き換えている途中に競合したとき
+        /// 「一覧のどこにも存在しない番号」で「カード一覧で状態を確認してください」と案内することになる。
+        /// 編集開始時（および編集中の対象切替時）に確定させておけば、選択が外れた後でも正しく名指しできる。
+        /// </para>
+        /// </remarks>
+        private string _editTargetCardType = string.Empty;
+        private string _editTargetCardNumber = string.Empty;
+
+        /// <summary>
         /// カード種別の選択肢
         /// </summary>
         public ObservableCollection<string> CardTypes { get; } = new()
@@ -185,6 +206,8 @@ namespace ICCardManager.ViewModels
             EditCardType = "nimoca";
             EditCardNumber = string.Empty;
             EditNote = string.Empty;
+            // Issue #1761: 新規登録には「一覧に載っている表記」が存在しない
+            ClearEditTarget();
             StatusMessage = "カードをタッチするとIDmを読み取ります";
             IsStatusError = false;
             IsWaitingForCard = true;
@@ -268,6 +291,8 @@ namespace ICCardManager.ViewModels
 
             EditCardNumber = string.Empty;
             EditNote = string.Empty;
+            // Issue #1761: 新規登録には「一覧に載っている表記」が存在しない
+            ClearEditTarget();
             StatusMessage = "カードを読み取りました。カード種別を確認してください。";
             IsStatusError = false;
             IsWaitingForCard = false; // すでにIDmがあるので待機しない
@@ -313,6 +338,30 @@ namespace ICCardManager.ViewModels
             => $"交通系ICカード「{cardType} {cardNumber}」";
 
         /// <summary>
+        /// 編集中の対象を、編集開始時に一覧へ載っていた表記で名指しする（Issue #1761）
+        /// </summary>
+        private string EditTargetLabel => FormatCardLabel(_editTargetCardType, _editTargetCardNumber);
+
+        /// <summary>
+        /// 編集対象の退避値を確定させる（Issue #1761）
+        /// </summary>
+        /// <param name="card">編集対象として一覧から選ばれたカード</param>
+        private void SetEditTarget(CardDto card)
+        {
+            _editTargetCardType = card.CardType;
+            _editTargetCardNumber = card.CardNumber;
+        }
+
+        /// <summary>
+        /// 編集対象の退避値を破棄する（新規登録の開始時・編集の終了時。Issue #1761）
+        /// </summary>
+        private void ClearEditTarget()
+        {
+            _editTargetCardType = string.Empty;
+            _editTargetCardNumber = string.Empty;
+        }
+
+        /// <summary>
         /// 編集コマンドが実行可能かどうか
         /// </summary>
         private bool CanEdit() => SelectedCard != null;
@@ -331,6 +380,9 @@ namespace ICCardManager.ViewModels
             EditCardType = SelectedCard.CardType;
             EditCardNumber = SelectedCard.CardNumber;
             EditNote = SelectedCard.Note ?? string.Empty;
+            // Issue #1761: 以降 SelectedCard は参照しない。編集対象は EditCardIdm、
+            // 名指しに使う表記はここで確定させた退避値が担う。
+            SetEditTarget(SelectedCard);
             StatusMessage = string.Empty;
             IsStatusError = false;
             IsWaitingForCard = false;
@@ -629,7 +681,7 @@ namespace ICCardManager.ViewModels
                     // 残ることは、誤った記録が残るのと同等以上に問題になる。
                     if (beforeCard == null)
                     {
-                        await NotifyUpdateConflictAsync(EditCardType, sanitizedCardNumber);
+                        await NotifyUpdateConflictAsync(EditTargetLabel);
                         return;
                     }
 
@@ -695,7 +747,7 @@ namespace ICCardManager.ViewModels
                         // UPDATE ... WHERE card_idm = @cardIdm AND is_deleted = 0 が
                         // 0 行に一致した場合だけ（Issue #1753）。つまり編集中に対象カードが
                         // 論理削除されたことを意味する。
-                        await NotifyUpdateConflictAsync(EditCardType, sanitizedCardNumber);
+                        await NotifyUpdateConflictAsync(EditTargetLabel);
                     }
                 }
             }
@@ -704,8 +756,7 @@ namespace ICCardManager.ViewModels
         /// <summary>
         /// 更新対象のカードが見つからなかった（競合）ことを案内し、カード一覧を再読込する
         /// </summary>
-        /// <param name="fallbackCardType">一覧に対象が残っていないときに名指しへ使うカード種別</param>
-        /// <param name="fallbackCardNumber">同じく管理番号</param>
+        /// <param name="targetLabel">対象カードの表示名（一覧に載っていた表記で確定させたもの）</param>
         /// <remarks>
         /// <para>
         /// Issue #1753: 一覧を再読込しないと削除済みのカードが選択されたまま残り、
@@ -717,46 +768,43 @@ namespace ICCardManager.ViewModels
         /// 「何が」は<b>編集後の入力値ではなく一覧に載っている値</b>で名指しする。
         /// 管理番号や種別を書き換えている途中なら、編集後の値は一覧のどこにも
         /// 存在せず「一覧で状態を確認して」という案内が実行できなくなる。
-        /// 一覧の再読込で DataGrid の選択が解除され <see cref="SelectedCard"/> は null に
-        /// なる（<c>SelectedItem</c> は TwoWay バインド）ため、再読込より前に確定させる。
         /// </para>
         /// <para>
         /// Issue #1760: この「ラベル確定 → 再読込 → 文言設定」の順序を守る箇所が
         /// 複数（更新前データの欠落・更新の影響行数 0・払戻前データの欠落）に増えたため、
         /// 呼び出し側へ書き写さずここへ集約する。
         /// </para>
+        /// <para>
+        /// Issue #1761: ラベルの決定は<b>呼び出し側の責任</b>にした。以前はここで
+        /// <see cref="SelectedCard"/> を優先し、null のときだけ引数（未保存の入力値）へ
+        /// 退避していたため、編集中に選択が外れると<b>一覧に存在しない番号で名指し</b>していた。
+        /// 編集経路は <see cref="EditTargetLabel"/>、払い戻し経路は操作開始時に確定させたラベルを渡す。
+        /// </para>
         /// </remarks>
-        private Task NotifyUpdateConflictAsync(string fallbackCardType, string fallbackCardNumber)
-            => NotifyConflictAsync(ConcurrencyConflictMessage.ForUpdate, fallbackCardType, fallbackCardNumber);
+        private Task NotifyUpdateConflictAsync(string targetLabel)
+            => NotifyConflictAsync(ConcurrencyConflictMessage.ForUpdate, targetLabel);
 
         /// <summary>
         /// 払い戻し対象のカードが見つからなかった（競合）ことを案内し、カード一覧を再読込する
         /// </summary>
-        /// <param name="fallbackCardType">一覧に対象が残っていないときに名指しへ使うカード種別</param>
-        /// <param name="fallbackCardNumber">同じく管理番号</param>
+        /// <param name="targetLabel">対象カードの表示名（払い戻し開始時に確定させたもの）</param>
         /// <remarks>
         /// Issue #1760: 「なぜ」は更新と同じ（対象行が削除された）だが、「何が」は利用者が
         /// 実際に行った操作で述べる。<see cref="NotifyUpdateConflictAsync"/> を流用すると
         /// 払い戻しを試みた職員に「更新できませんでした」と案内することになる。
         /// </remarks>
-        private Task NotifyRefundConflictAsync(string fallbackCardType, string fallbackCardNumber)
-            => NotifyConflictAsync(ConcurrencyConflictMessage.ForRefund, fallbackCardType, fallbackCardNumber);
+        private Task NotifyRefundConflictAsync(string targetLabel)
+            => NotifyConflictAsync(ConcurrencyConflictMessage.ForRefund, targetLabel);
 
         /// <summary>
-        /// 競合の案内文言を組み立てて表示する（ラベル確定 → 一覧再読込 → 文言設定の順序を守る）
+        /// 競合の案内文言を組み立てて表示する（一覧再読込 → 文言設定の順序を守る）
         /// </summary>
         /// <param name="messageFactory">操作に対応する <see cref="ConcurrencyConflictMessage"/> のファクトリ</param>
-        /// <param name="fallbackCardType">一覧に対象が残っていないときに名指しへ使うカード種別</param>
-        /// <param name="fallbackCardNumber">同じく管理番号</param>
+        /// <param name="conflictLabel">対象カードの表示名（呼び出し側が再読込より前に確定させたもの）</param>
         private async Task NotifyConflictAsync(
             Func<string, string, string> messageFactory,
-            string fallbackCardType,
-            string fallbackCardNumber)
+            string conflictLabel)
         {
-            var conflictLabel = SelectedCard != null
-                ? FormatCardLabel(SelectedCard.CardType, SelectedCard.CardNumber)
-                : FormatCardLabel(fallbackCardType, fallbackCardNumber);
-
             // Issue #1760: 更新前データを読めずに書き込みを中止した経路は、リポジトリの
             // 書き込みを 1 回も通らないため、影響行数 0 でのキャッシュ破棄（Issue #1759）が
             // 働かない。LoadCardsAsync() は GetAllAsync のキャッシュ（既定 TTL 60 秒／
@@ -797,6 +845,21 @@ namespace ICCardManager.ViewModels
                 return;
             }
 
+            // Issue #1760: 識別情報は再読込より前に確定させる（再読込で選択が解除されるため）
+            // Issue #1761: 確定させる位置を **最初の await より前** へ移した。
+            // 「削除するのはボタンを押した時点で選択されていた行」であり、その後の選択状態には依存しない。
+            //
+            // なお現行の StaffAuthService.RequestAuthenticationAsync は内部に await を持たず
+            // （モーダルの ShowDialog() 後に Task.FromResult を返す）、モーダル表示中は
+            // アプリの他ウィンドウが無効化されるため、この認証待ちで選択が外れる経路は**現時点では無い**。
+            // ここでの確定は「await をまたいで Selected* を参照しない」という不変条件の遵守であり、
+            // 認証サービスが将来ほんとうに非同期化されたときの退行を防ぐためのもの
+            // （実際に選択が外れ得るのは RefundAsync の残高取得＝真の await 点。そちらは同型で是正済み）。
+            var targetIdm = SelectedCard.CardIdm;
+            var targetCardType = SelectedCard.CardType;
+            var targetCardNumber = SelectedCard.CardNumber;
+            var targetLabel = FormatCardLabel(targetCardType, targetCardNumber);
+
             // Issue #429: ICカードの削除は認証が必要
             var authResult = await _staffAuthService.RequestAuthenticationAsync("交通系ICカードの削除");
             if (authResult == null)
@@ -807,7 +870,7 @@ namespace ICCardManager.ViewModels
 
             // 削除確認ダイアログを表示
             var confirmed = _dialogService.ShowWarningConfirmation(
-                $"カード「{SelectedCard.CardType} {SelectedCard.CardNumber}」を削除しますか？\n\n※削除後も履歴データは保持されます。",
+                $"カード「{targetCardType} {targetCardNumber}」を削除しますか？\n\n※削除後も履歴データは保持されます。",
                 "削除確認");
 
             if (!confirmed)
@@ -817,10 +880,6 @@ namespace ICCardManager.ViewModels
 
             using (BeginBusy("削除中..."))
             {
-                // Issue #1760: 識別情報は再読込より前に確定させる（再読込で選択が解除されるため）
-                var targetIdm = SelectedCard.CardIdm;
-                var targetLabel = FormatCardLabel(SelectedCard.CardType, SelectedCard.CardNumber);
-
                 // 削除前のデータを取得（操作ログ用）
                 //
                 // Issue #1760: 読めなければ削除自体を行わない。読み取れない時点で対象カードは
@@ -921,14 +980,22 @@ namespace ICCardManager.ViewModels
                 return;
             }
 
+            // Issue #1761: 識別情報は **最初の await より前** に確定させる。残高取得の待機中や
+            // 確認ダイアログの表示中に選択が外れると（一覧の再読込、選択行の Ctrl+クリック）
+            // SelectedCard は null になり、後段の逆参照が NullReferenceException になる。
+            // 「払い戻すのはボタンを押した時点で選択されていた行」であり、その後の選択状態には依存しない。
+            var refundCardIdm = SelectedCard.CardIdm;
+            var refundCardType = SelectedCard.CardType;
+            var refundCardNumber = SelectedCard.CardNumber;
+
             // 最新の残高を取得
-            var latestLedger = await _ledgerRepository.GetLatestLedgerAsync(SelectedCard.CardIdm);
+            var latestLedger = await _ledgerRepository.GetLatestLedgerAsync(refundCardIdm);
             var currentBalance = latestLedger?.Balance ?? 0;
 
             // 払い戻し確認ダイアログを表示（Issue #530: 削除ではなく払戻済状態になることを明記）
             var message = currentBalance > 0
-                ? $"カード「{SelectedCard.CardType} {SelectedCard.CardNumber}」を払い戻しますか？\n\n現在の残高: ¥{currentBalance:N0}\n\n※払い戻し後、このカードは「払戻済」となり、貸出対象外になります。\n　帳票の作成には引き続き使用できます。"
-                : $"カード「{SelectedCard.CardType} {SelectedCard.CardNumber}」を払い戻しますか？\n\n現在の残高: ¥0（残高なし）\n\n※払い戻し後、このカードは「払戻済」となり、貸出対象外になります。\n　帳票の作成には引き続き使用できます。";
+                ? $"カード「{refundCardType} {refundCardNumber}」を払い戻しますか？\n\n現在の残高: ¥{currentBalance:N0}\n\n※払い戻し後、このカードは「払戻済」となり、貸出対象外になります。\n　帳票の作成には引き続き使用できます。"
+                : $"カード「{refundCardType} {refundCardNumber}」を払い戻しますか？\n\n現在の残高: ¥0（残高なし）\n\n※払い戻し後、このカードは「払戻済」となり、貸出対象外になります。\n　帳票の作成には引き続き使用できます。";
 
             var confirmed = _dialogService.ShowWarningConfirmation(message, "払い戻し確認");
 
@@ -939,8 +1006,6 @@ namespace ICCardManager.ViewModels
 
             using (BeginBusy("払い戻し処理中..."))
             {
-                var refundCardIdm = SelectedCard.CardIdm;
-
                 // 払い戻し前のデータを取得（操作ログ用）
                 //
                 // Issue #1760: 書き込みより**前**に取得し、読めなければ払い戻し自体を行わない。
@@ -957,7 +1022,7 @@ namespace ICCardManager.ViewModels
                 var beforeCard = await _cardRepository.GetByIdmAsync(refundCardIdm);
                 if (beforeCard == null)
                 {
-                    await NotifyRefundConflictAsync(SelectedCard.CardType, SelectedCard.CardNumber);
+                    await NotifyRefundConflictAsync(FormatCardLabel(refundCardType, refundCardNumber));
                     return;
                 }
 
@@ -1124,6 +1189,8 @@ namespace ICCardManager.ViewModels
             EditCardType = string.Empty;
             EditCardNumber = string.Empty;
             EditNote = string.Empty;
+            // Issue #1761: 編集対象の退避値も他の編集状態と同じタイミングで破棄する
+            ClearEditTarget();
             StatusMessage = string.Empty;
             IsStatusError = false;
 
@@ -1248,6 +1315,21 @@ namespace ICCardManager.ViewModels
         /// <summary>
         /// 選択カード変更時の処理
         /// </summary>
+        /// <remarks>
+        /// <para>
+        /// <b>選択が外れた（<paramref name="value"/> が null）ときに編集フォームは閉じない</b>（Issue #1761）。
+        /// 編集中の対象は <see cref="EditCardIdm"/>（主キー）で特定されており、
+        /// <see cref="SelectedCard"/> は一覧の選択状態を表すだけなので、選択が外れても編集は継続できる。
+        /// </para>
+        /// <para>
+        /// 選択は利用者の明示的な操作以外でも外れる（選択行の Ctrl+クリック、
+        /// <c>LoadCardsAsync</c> の <c>Cards.Clear()</c> による <c>SelectedItem</c> の書き戻し）。
+        /// ここでフォームを閉じると<b>入力途中の備考が予告なく消える</b>ため、閉じる案は採らない。
+        /// 代わりに「編集中に <see cref="SelectedCard"/> を参照しない」ことを不変条件とし、
+        /// 名指しに要る表記は <see cref="_editTargetCardType"/> / <see cref="_editTargetCardNumber"/> に
+        /// 退避しておく。この不変条件は <c>CardManageViewModelTests</c> の Issue #1761 region で固定している。
+        /// </para>
+        /// </remarks>
         partial void OnSelectedCardChanged(CardDto? value)
         {
             // コマンドの実行可否を再評価
@@ -1265,6 +1347,8 @@ namespace ICCardManager.ViewModels
                 EditCardType = value.CardType;
                 EditCardNumber = value.CardNumber;
                 EditNote = value.Note ?? string.Empty;
+                // Issue #1761: 編集対象が切り替わったので、名指しに使う表記も追随させる
+                SetEditTarget(value);
                 StatusMessage = string.Empty;
                 IsStatusError = false;
             }
