@@ -110,18 +110,26 @@ public class DialogServiceOwnerTests
         RunOnSta(() =>
         {
             var owner = new Window();
-            var sut = new RecordingDialogService(owner);
+            try
+            {
+                var sut = new RecordingDialogService(owner);
 
-            sut.ShowInformation("情報", "情報タイトル");
-            sut.ShowWarning("警告", "警告タイトル");
-            sut.ShowError("エラー", "エラータイトル");
-            sut.ShowConfirmation("確認", "確認タイトル");
-            sut.ShowWarningConfirmation("警告確認", "警告確認タイトル");
+                sut.ShowInformation("情報", "情報タイトル");
+                sut.ShowWarning("警告", "警告タイトル");
+                sut.ShowError("エラー", "エラータイトル");
+                sut.ShowConfirmation("確認", "確認タイトル");
+                sut.ShowWarningConfirmation("警告確認", "警告確認タイトル");
 
-            sut.Calls.Should().HaveCount(5, "5 つのメッセージ表示メソッドすべてが継ぎ目を経由すること");
-            sut.ResolveOwnerCallCount.Should().Be(5, "表示のたびにオーナーを解決し直すこと（アクティブなウィンドウは変わり得る）");
-            sut.Calls.Should().OnlyContain(c => ReferenceEquals(c.Owner, owner),
-                "解決したオーナーがそのまま MessageBox へ渡ること");
+                sut.Calls.Should().HaveCount(5, "5 つのメッセージ表示メソッドすべてが継ぎ目を経由すること");
+                sut.ResolveOwnerCallCount.Should().Be(5, "表示のたびにオーナーを解決し直すこと（アクティブなウィンドウは変わり得る）");
+                sut.Calls.Should().OnlyContain(c => ReferenceEquals(c.Owner, owner),
+                    "解決したオーナーがそのまま MessageBox へ渡ること");
+            }
+            finally
+            {
+                // アサーションが落ちても WPF のリソースを残さない
+                owner.Close();
+            }
         });
     }
 

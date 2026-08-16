@@ -1,3 +1,4 @@
+using System.Windows;
 using FluentAssertions;
 using ICCardManager.Common;
 using Xunit;
@@ -15,9 +16,18 @@ namespace ICCardManager.Tests.Common;
 /// </para>
 /// <para>
 /// 「ownerless になったか」は xUnit から観測できないため、<b>オーナーを選ぶ判断だけを
-/// WPF 非依存の純関数（<see cref="DialogOwnerResolver.SelectOwner{T}"/>）へ切り出し、
+/// WPF 非依存の純関数（<see cref="DialogOwnerResolver.SelectOwner{T}"/> と
+/// <see cref="DialogOwnerResolver.IsUsableOwnerState"/>）へ切り出し、
 /// その規則をここで固定する</b>。<c>Window</c> の実体を要する検証は
 /// <c>DialogServiceOwnerTests</c> が「継ぎ目を通っているか」の 1 点に絞って担う。
+/// </para>
+/// <para>
+/// <b>候補を絞る述語（<c>IsUsableOwnerState</c>）も検査対象に含める。</b>
+/// 優先順位がどれだけ正しくても、候補の絞り込みが緩ければ誤ったウィンドウが選ばれる。
+/// 初版はここが「表示済み＋ハンドルあり」だけだったため、
+/// <c>ShowActivated="False"</c> の <c>ToastNotificationWindow</c> が候補に残り、
+/// アプリが非フォアグラウンドのとき（＝ #1794 の故障シナリオ）にトーストが
+/// オーナーとして選ばれていた。
 /// </para>
 /// </remarks>
 public class DialogOwnerResolverTests
@@ -85,6 +95,35 @@ public class DialogOwnerResolverTests
     }
 
     [Fact]
+    public void 非アクティブのとき最後のウィンドウがトースト通知でもオーナーにしないこと()
+    {
+        // ToastNotificationWindow は貸出・返却のたびに最後に生成され Application.Windows に載る。
+        // 除外しないと「アクティブが無い → 有効なウィンドウのうち最後」でトーストが選ばれ、
+        // Win32 の MessageBox はオーナーだけを無効化するため #1794 の欠陥が是正されない。
+        var main = new FakeWindow("main", enabled: false);
+        var dialog = new FakeWindow("dialog");
+        var toast = new FakeWindow("toast", usable: false);
+
+        Select(main, dialog, toast).Should().BeSameAs(dialog);
+    }
+
+    [Theory]
+    // 表示中・ハンドルあり・アクティブ化する → オーナーにできる
+    [InlineData(true, true, true, true)]
+    // 未表示（生成しただけ／クローズ済み）
+    [InlineData(false, true, true, false)]
+    // ハンドルを持たない（MessageBox.Show(owner, ...) が InvalidOperationException になる）
+    [InlineData(true, false, true, false)]
+    // ShowActivated=False（ToastNotificationWindow。モーダルの親としての資格を持たない）
+    [InlineData(true, true, false, false)]
+    public void 表示済みハンドルありかつアクティブ化するウィンドウだけをオーナー候補にすること(
+        bool isVisible, bool hasHandle, bool showActivated, bool expected)
+    {
+        DialogOwnerResolver.IsUsableOwnerState(isVisible, hasHandle, showActivated)
+            .Should().Be(expected);
+    }
+
+    [Fact]
     public void すべて無効化されていても使用可能な最後のウィンドウを返すこと()
     {
         var first = new FakeWindow("first", enabled: false);
@@ -117,7 +156,13 @@ public class DialogOwnerResolverTests
     [Fact]
     public void Applicationが存在しないときはnullを返し例外にしないこと()
     {
-        // 単体テスト実行時は Application.Current が null。
+        // 前提（Application.Current == null）はプロセス全体の環境依存であり、
+        // このテストが作り出したものではない。将来どこかのテストが Application を
+        // 生成すると、本テストは黙って別の分岐を検査し始めて**それでも緑になる**。
+        // 前提が崩れたことをテスト自身が申告できるよう、先に表明しておく。
+        Application.Current.Should().BeNull(
+            "本テストは Application 未生成を前提とする。生成するテストが増えたら本テストを設計し直すこと");
+
         // オーナーを解決できない状況でも例外にせず、従来どおり ownerless で表示できること。
         DialogOwnerResolver.Resolve().Should().BeNull();
     }

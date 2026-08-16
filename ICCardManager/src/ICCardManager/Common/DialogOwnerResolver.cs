@@ -28,6 +28,12 @@ namespace ICCardManager.Common
     /// クリックシールドとして兼用する必要がなくなる。副次的に、タスクバー上で親と
     /// 分離して見える問題やマルチモニタ環境で親と別の画面に出る問題も解消する。
     /// </para>
+    /// <para>
+    /// <b>本クラスの利用者は <c>MessageBox</c> 経路に限る。</b><c>Window.ShowDialog()</c> は
+    /// アプリケーション内の他ウィンドウをすべて無効化するため本 Issue の欠陥を持たず、
+    /// 現状は <c>Owner</c> に <c>Application.Current.MainWindow</c> を設定している
+    /// （その是正は Issue #1837）。
+    /// </para>
     /// </remarks>
     public static class DialogOwnerResolver
     {
@@ -57,7 +63,13 @@ namespace ICCardManager.Common
             }
             catch (InvalidOperationException)
             {
-                // 列挙中にウィンドウが開閉された場合。オーナー無しで表示を続ける
+                // 防御的なガードであり、既知の到達経路は無い（上で CheckAccess() 済みのため
+                // 列挙は UI スレッド上で同期実行され、その最中に他スレッドが
+                // Application.Windows を変更することはない）。
+                // 「競合を手当てしている」と読まれないようここに明記する
+                // （.claude/rules/development-conventions.md #1726）。
+                // それでも残すのは、本メソッドが**エラーダイアログの表示経路**で呼ばれるため。
+                // ここで例外が漏れると、エラーを伝えようとした操作自体が二次例外で落ちる。
                 return null;
             }
 
@@ -90,7 +102,10 @@ namespace ICCardManager.Common
         /// </para>
         /// </remarks>
         /// <param name="windows">候補のウィンドウ（生成順）</param>
-        /// <param name="isUsable">表示済みでハンドルを持ち、オーナーに指定できるか</param>
+        /// <param name="isUsable">
+        /// オーナーに指定できるか（<see cref="IsUsableOwnerState"/> を参照）。
+        /// <b>この述語が緩いと、優先順位がどれだけ正しくても誤ったウィンドウが選ばれる</b>
+        /// </param>
         /// <param name="isActive">アクティブか</param>
         /// <param name="isEnabled">有効か（false はモーダル子ウィンドウに塞がれている）</param>
         internal static T SelectOwner<T>(
@@ -126,15 +141,53 @@ namespace ICCardManager.Common
         }
 
         /// <summary>
-        /// オーナーに指定できるウィンドウか（表示済みでウィンドウハンドルを持つか）
+        /// オーナーに指定できるウィンドウ状態か（WPF に依存しない判断部分）
         /// </summary>
         /// <remarks>
+        /// <para>
         /// <c>MessageBox.Show(owner, ...)</c> はオーナーのハンドルを要求するため、
         /// 未表示・クローズ済みのウィンドウを渡すと <c>InvalidOperationException</c> になる。
         /// <c>IsLoaded</c> ではなくハンドルの有無で判定するのは、クローズ後に
         /// <c>IsLoaded</c> が true のまま残る場合があるため。
+        /// </para>
+        /// <para>
+        /// <b><c>ShowActivated=False</c> のウィンドウは除外する。</b>
+        /// <c>ToastNotificationWindow</c>（トースト通知）は <c>Topmost</c> かつ
+        /// <c>ShowActivated="False"</c> の非モーダルウィンドウで、貸出・返却のたびに
+        /// <b>最後に生成されて</b> <c>Application.Windows</c> に載る。除外しないと、
+        /// アプリが非フォアグラウンドのとき（＝ Issue #1794 の故障シナリオそのもの）
+        /// 「アクティブなウィンドウが無い → 有効なウィンドウのうち最後」の分岐で
+        /// <b>トーストがオーナーに選ばれる</b>。その害は 3 つある:
+        /// </para>
+        /// <list type="number">
+        /// <item>Win32 の <c>MessageBox</c> は<b>オーナーだけ</b>を無効化するため、
+        /// メイン画面や業務ダイアログは有効なまま残り、#1794 の欠陥が是正されない</item>
+        /// <item>トーストは 3 秒（<c>DefaultDisplayDurationMs</c>）で自動的に閉じる。
+        /// オーナーウィンドウが破棄されると Win32 は<b>その所有ウィンドウも破棄する</b>ため、
+        /// 表示中の <c>MessageBox</c> が消え、<c>ShowConfirmation</c> は
+        /// <c>MessageBoxResult</c> 0 を受け取って<b>無言で「いいえ」を返す</b></item>
+        /// <item>エラー通知のトーストは <c>autoClose: false</c> で閉じるまで残るため、
+        /// 上記が一過性ではなく持続する</item>
+        /// </list>
+        /// <para>
+        /// 「アクティブ化しないウィンドウ」は設計上ユーザー操作の焦点ではなく、
+        /// モーダルの親としての資格を持たない。判定を型名（<c>ToastNotificationWindow</c>）で
+        /// 行わないのは、同種のウィンドウが増えたときに追随漏れが起きるため。
+        /// </para>
         /// </remarks>
+        /// <param name="isVisible">表示中か（<c>Window.IsVisible</c>）</param>
+        /// <param name="hasHandle">ウィンドウハンドルを持つか</param>
+        /// <param name="showActivated">表示時にアクティブ化するか（<c>Window.ShowActivated</c>）</param>
+        internal static bool IsUsableOwnerState(bool isVisible, bool hasHandle, bool showActivated)
+            => isVisible && hasHandle && showActivated;
+
+        /// <summary>
+        /// オーナーに指定できるウィンドウか（WPF の状態を読み取って <see cref="IsUsableOwnerState"/> へ渡す）
+        /// </summary>
         private static bool IsUsableOwner(Window window)
-            => window.IsVisible && new WindowInteropHelper(window).Handle != IntPtr.Zero;
+            => IsUsableOwnerState(
+                window.IsVisible,
+                new WindowInteropHelper(window).Handle != IntPtr.Zero,
+                window.ShowActivated);
     }
 }
