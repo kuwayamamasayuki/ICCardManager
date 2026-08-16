@@ -60,6 +60,9 @@ public class ViewModelBaseTests
         /// </summary>
         public void ScopeReportProgress(double value, double max, string? message = null)
             => _currentScope?.ReportProgress(value, max, message);
+
+        public new IDisposable SuspendBusy()
+            => base.SuspendBusy();
     }
 
     private readonly TestViewModel _viewModel;
@@ -471,6 +474,123 @@ public class ViewModelBaseTests
         // Assert - CancellationTokenSourceがnullなので何も起きない
         _viewModel.IsCancellationRequested.Should().BeFalse();
         _viewModel.CanCancel.Should().BeFalse();
+    }
+
+    #endregion
+
+    #region SuspendBusy テスト（Issue #1793）
+
+    // BeginBusy スコープの内側からモーダルダイアログを表示する経路のための一時中断。
+    // IDialogService の実装は同期モーダル（MessageBox.Show）で職員が閉じるまで
+    // 呼び出しスレッドをブロックするため、BusyScope.Dispose() が走らず
+    // 全面オーバーレイと不確定 ProgressBar がダイアログの背後で回り続ける。
+
+    [Fact]
+    public void SuspendBusy_中断中はIsBusyがfalseになること()
+    {
+        using var busy = _viewModel.BeginBusy("保存中...");
+
+        using (_viewModel.SuspendBusy())
+        {
+            _viewModel.IsBusy.Should().BeFalse("中断中はオーバーレイを退避する（この間にモーダルを表示する）");
+        }
+    }
+
+    [Fact]
+    public void SuspendBusy_中断を抜けるとIsBusyとBusyMessageが復元されること()
+    {
+        using var busy = _viewModel.BeginBusy("保存中...");
+
+        using (_viewModel.SuspendBusy())
+        {
+        }
+
+        _viewModel.IsBusy.Should().BeTrue("ダイアログを閉じた後は処理が続くのでオーバーレイを戻す");
+        _viewModel.BusyMessage.Should().Be("保存中...");
+    }
+
+    [Fact]
+    public void SuspendBusy_中断中はBusyMessageを伏せること()
+    {
+        using var busy = _viewModel.BeginBusy("保存中...");
+
+        using (_viewModel.SuspendBusy())
+        {
+            _viewModel.BusyMessage.Should().BeNull(
+                "オーバーレイを隠しても BusyMessage が残ると、別の表示領域に「保存中...」が出続ける");
+        }
+    }
+
+    [Fact]
+    public void SuspendBusy_キャンセルトークンを破棄しないこと()
+    {
+        // SetBusy(false) は ResetProgress() 経由で CancellationTokenSource を Dispose する。
+        // 中断でそれをやると、ダイアログを閉じた後にキャンセルが効かなくなる。
+        using var busy = _viewModel.StartCancellableBusy("処理中...");
+        var token = _viewModel.GetScopeCancellationToken();
+
+        using (_viewModel.SuspendBusy())
+        {
+        }
+
+        _viewModel.CanCancel.Should().BeTrue("中断の前後でキャンセル可否は変わらない");
+        _viewModel.CancelOperation();
+        token.IsCancellationRequested.Should().BeTrue("中断後もキャンセルが効くこと");
+        _viewModel.IsCancellationRequested.Should().BeTrue();
+    }
+
+    [Fact]
+    public void SuspendBusy_中断中はキャンセルボタンも伏せること()
+    {
+        using var busy = _viewModel.StartCancellableBusy("処理中...");
+
+        using (_viewModel.SuspendBusy())
+        {
+            _viewModel.CanCancel.Should().BeFalse(
+                "オーバーレイごと退避するので、その中のキャンセルボタンも押せない状態にする");
+        }
+    }
+
+    [Fact]
+    public void SuspendBusy_確定プログレスの進捗を復元すること()
+    {
+        using var busy = _viewModel.BeginBusy("処理中...");
+        _viewModel.SetProgress(30, 200, "30/200 件");
+
+        using (_viewModel.SuspendBusy())
+        {
+        }
+
+        _viewModel.ProgressValue.Should().Be(30);
+        _viewModel.ProgressMax.Should().Be(200);
+        _viewModel.IsIndeterminate.Should().BeFalse("確定プログレスが不定に戻ると進捗表示が巻き戻る");
+        _viewModel.BusyMessage.Should().Be("30/200 件");
+    }
+
+    [Fact]
+    public void SuspendBusy_Busyでないときに使っても状態を壊さないこと()
+    {
+        // ヘルパーメソッド内で使うため、BeginBusy の外から呼ばれる経路が実在する
+        using (_viewModel.SuspendBusy())
+        {
+            _viewModel.IsBusy.Should().BeFalse();
+        }
+
+        _viewModel.IsBusy.Should().BeFalse("元が false なら false のまま");
+        _viewModel.BusyMessage.Should().BeNull();
+    }
+
+    [Fact]
+    public void SuspendBusy_二重Disposeで状態が壊れないこと()
+    {
+        using var busy = _viewModel.BeginBusy("保存中...");
+        var suspension = _viewModel.SuspendBusy();
+
+        suspension.Dispose();
+        _viewModel.IsBusy = false;
+        suspension.Dispose();
+
+        _viewModel.IsBusy.Should().BeFalse("2 回目の Dispose は何もしない（1 回目の復元値で上書きしない）");
     }
 
     #endregion

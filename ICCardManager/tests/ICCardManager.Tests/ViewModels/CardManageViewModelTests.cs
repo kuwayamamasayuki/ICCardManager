@@ -3050,4 +3050,130 @@ public class CardManageViewModelTests
     }
 
     #endregion
+
+    #region モーダル表示中は処理中オーバーレイを出さないこと（Issue #1793）
+
+    // IDialogService の実装は同期モーダル（MessageBox.Show）で、職員が閉じるまで
+    // 呼び出しスレッドをブロックする。BeginBusy スコープの内側から呼ぶと BusyScope.Dispose() が
+    // 走らず IsBusy=true のまま残り、全面オーバーレイと不確定 ProgressBar が
+    // ダイアログの背後で回り続ける。
+    //
+    // 「値」ではなく「呼び出し時点のスナップショット」を見る必要があるため、
+    // Callback で IsBusy を捕捉する（メソッド終了後に見ても IsBusy は false に戻っている）。
+    //
+    // 静的検査（BusyScopeDialogConventionTests）はヘルパーメソッド経由の経路を見られない。
+    // No.2 / No.3 がその 2 経路を挙動側で守る。
+
+    [Fact]
+    public async Task SaveAsync_削除済みカードの復元確認ダイアログ表示中はIsBusyがfalseであること()
+    {
+        // Arrange - 復元を提案する確認ダイアログ（Issue #1793 の故障シナリオそのもの）
+        const string idm = "0102030405060708";
+        bool? isBusyAtDialog = null;
+
+        _cardRepositoryMock.Setup(r => r.GetByIdmAsync(idm, true)).ReturnsAsync(new IcCard
+        {
+            CardIdm = idm,
+            CardType = "はやかけん",
+            CardNumber = "H-001",
+            IsDeleted = true
+        });
+        _cardRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<IcCard>());
+        _dialogServiceMock
+            .Setup(d => d.ShowConfirmation(It.IsAny<string>(), It.IsAny<string>()))
+            .Callback(() => isBusyAtDialog = _viewModel.IsBusy)
+            .Returns(false);
+
+        _viewModel.StartNewCard();
+        _viewModel.EditCardIdm = idm;
+        _viewModel.EditCardNumber = "H-002";
+
+        // Act
+        await _viewModel.SaveAsync();
+
+        // Assert
+        isBusyAtDialog.Should().BeFalse(
+            "確認ダイアログは職員の判断を待つ設計であり、背後で回り続ける「保存中...」の表示はその判断を妨げる");
+    }
+
+    [Fact]
+    public async Task SaveAsync_登録モード選択ダイアログ表示中はIsBusyがfalseであること()
+    {
+        // ヘルパー（ShowRegistrationModeDialog）経由の経路。静的検査では検出できない。
+        const string idm = "0102030405060708";
+        bool? isBusyAtDialog = null;
+
+        _cardRepositoryMock.Setup(r => r.GetByIdmAsync(idm, true)).ReturnsAsync((IcCard)null);
+        _cardRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<IcCard>());
+        _dialogServiceMock
+            .Setup(d => d.ShowCardRegistrationModeDialog(It.IsAny<int?>()))
+            .Callback(() => isBusyAtDialog = _viewModel.IsBusy)
+            .Returns((ICCardManager.Views.Dialogs.CardRegistrationModeResult)null);
+
+        _viewModel.StartNewCard();
+        _viewModel.EditCardIdm = idm;
+        _viewModel.EditCardNumber = "H-002";
+
+        // Act
+        await _viewModel.SaveAsync();
+
+        // Assert
+        isBusyAtDialog.Should().BeFalse(
+            "登録モードの選択も職員の判断を待つ。ヘルパーの内側で SuspendBusy すること");
+    }
+
+    // NotifyDeleteConflictAsync（もう 1 つのヘルパー経由の経路）には挙動テストを置かない。
+    //
+    // このヘルパーは冒頭で LoadCardsAsync() を呼び、LoadCardsAsync は自前の
+    // BeginBusy("読み込み中...") を持つ。BusyScope.Dispose() は入れ子の深さを数えず
+    // 無条件に SetBusy(false) するため、**内側スコープの Dispose が外側（削除中...）の
+    // IsBusy まで落とす**。結果、修正前のコードでも呼び出し時点の IsBusy は false になり、
+    // 「IsBusy を捕捉する」テストは修正の有無にかかわらず緑になる＝回帰を守れない
+    // （実際に修正前のコードへ当てて緑になることを確認済み）。
+    //
+    // この入れ子の取り扱いは ViewModelBase 側の別の欠陥であり、本 Issue のスコープ外。
+    // 当該経路は静的検査（BusyScopeDialogConventionTests）が SuspendBusy の有無で守る。
+
+    [Fact]
+    public async Task SaveAsync_ダイアログを閉じた後は処理中オーバーレイが戻ること()
+    {
+        // SuspendBusy は「一時中断」であって「終了」ではない。復元しないと、
+        // ダイアログ以降の DB 書き込み中にオーバーレイが消えて操作を受け付けてしまう。
+        const string idm = "0102030405060708";
+        bool? isBusyAfterDialog = null;
+
+        _cardRepositoryMock.Setup(r => r.GetByIdmAsync(idm, true)).ReturnsAsync(new IcCard
+        {
+            CardIdm = idm,
+            CardType = "はやかけん",
+            CardNumber = "H-001",
+            IsDeleted = true
+        });
+        _cardRepositoryMock.Setup(r => r.RestoreAsync(idm))
+            .Callback(() => isBusyAfterDialog = _viewModel.IsBusy)
+            .ReturnsAsync(true);
+        _cardRepositoryMock.Setup(r => r.GetByIdmAsync(idm, false)).ReturnsAsync(new IcCard
+        {
+            CardIdm = idm,
+            CardType = "はやかけん",
+            CardNumber = "H-001"
+        });
+        _cardRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<IcCard>());
+        _dialogServiceMock
+            .Setup(d => d.ShowConfirmation(It.IsAny<string>(), It.IsAny<string>()))
+            .Returns(true);
+
+        _viewModel.StartNewCard();
+        _viewModel.EditCardIdm = idm;
+        _viewModel.EditCardNumber = "H-002";
+
+        // Act
+        await _viewModel.SaveAsync();
+
+        // Assert
+        isBusyAfterDialog.Should().BeTrue(
+            "「はい」を押した後の復元処理中はオーバーレイを戻すこと（中断であって終了ではない）");
+    }
+
+    #endregion
 }

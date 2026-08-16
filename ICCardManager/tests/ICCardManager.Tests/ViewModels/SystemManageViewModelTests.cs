@@ -32,6 +32,7 @@ public class SystemManageViewModelTests : IDisposable
     private readonly Mock<IDatabaseInfo> _databaseInfoMock;
     private readonly Mock<IStaffAuthService> _staffAuthServiceMock;
     private readonly Mock<IBackupHealthService> _backupHealthServiceMock;
+    private readonly Mock<IDialogService> _dialogServiceMock;
     private readonly SystemManageViewModel _viewModel;
 
     private const string TestDatabasePath = @"C:\ProgramData\ICCardManager\iccard.db";
@@ -79,6 +80,14 @@ public class SystemManageViewModelTests : IDisposable
             .Setup(s => s.GetHealthAsync())
             .ReturnsAsync(new BackupHealthInfo { MaxGenerations = AppConstants.MaxBackupGenerations });
 
+        // Issue #1793: リストア前バックアップ失敗時の続行確認を MessageBox 直呼びから
+        // IDialogService へ移した。既定は「続行しない」（＝リストアを実行しない安全側）を返す。
+        // 続行するケースは個別テストで上書きする。
+        _dialogServiceMock = new Mock<IDialogService>();
+        _dialogServiceMock
+            .Setup(d => d.ShowWarningConfirmation(It.IsAny<string>(), It.IsAny<string>()))
+            .Returns(false);
+
         _viewModel = new SystemManageViewModel(
             _backupServiceMock.Object,
             _settingsRepositoryMock.Object,
@@ -87,7 +96,8 @@ public class SystemManageViewModelTests : IDisposable
             _safeFileLauncherMock.Object,
             _databaseInfoMock.Object,
             _staffAuthServiceMock.Object,
-            _backupHealthServiceMock.Object);
+            _backupHealthServiceMock.Object,
+            _dialogServiceMock.Object);
     }
 
     /// <summary>
@@ -111,7 +121,8 @@ public class SystemManageViewModelTests : IDisposable
             _safeFileLauncherMock.Object,
             sharedInfoMock.Object,
             _staffAuthServiceMock.Object,
-            _backupHealthServiceMock.Object);
+            _backupHealthServiceMock.Object,
+            _dialogServiceMock.Object);
     }
 
     public void Dispose()
@@ -833,6 +844,51 @@ public class SystemManageViewModelTests : IDisposable
         await _viewModel.LoadBackupsAsync();
 
         _backupHealthServiceMock.Verify(s => s.GetHealthAsync(), Times.AtLeastOnce);
+    }
+
+    #endregion
+
+    #region モーダル表示中は処理中オーバーレイを出さないこと（Issue #1793）
+
+    [Fact]
+    public async Task RestoreAsync_バックアップ失敗時の続行確認ダイアログ表示中はIsBusyがfalseであること()
+    {
+        // Arrange - リストア前バックアップに失敗させ、BeginBusy("リストア中...") の内側の
+        // 続行確認へ到達させる。この確認はスコープの前へ移せない（直前の CreateBackupAsync の
+        // 結果を見て初めて必要性が決まる）ため、SuspendBusy による一時中断が要る。
+        const string backupPath = "/backups/backup_20260501_120000.db";
+        bool? isBusyAtContinueDialog = null;
+
+        _viewModel.SelectedBackup = new BackupFileInfo
+        {
+            FileName = "backup_20260501_120000.db",
+            FilePath = backupPath,
+            CreatedAt = DateTime.Now
+        };
+        // GetPreRestoreBackupPathAsync が GetAppSettingsAsync を呼ぶ。未設定のままだと
+        // null 参照で catch に落ち、検証したい続行確認へ到達しない
+        var backupFolder = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "ICCardManagerTests_1793");
+        System.IO.Directory.CreateDirectory(backupFolder);
+        _settingsRepositoryMock.Setup(r => r.GetAppSettingsAsync())
+            .ReturnsAsync(new AppSettings { BackupPath = backupFolder });
+        _backupServiceMock.Setup(s => s.CreateBackupAsync(It.IsAny<string>())).ReturnsAsync(false);
+        _backupServiceMock.Setup(s => s.GetBackupFilesAsync())
+            .ReturnsAsync(Enumerable.Empty<BackupFileInfo>());
+
+        _dialogServiceMock
+            .Setup(d => d.ShowWarningConfirmation(It.IsAny<string>(), It.Is<string>(t => t == "リストアの確認")))
+            .Returns(true);
+        _dialogServiceMock
+            .Setup(d => d.ShowWarningConfirmation(It.IsAny<string>(), It.Is<string>(t => t == "警告")))
+            .Callback(() => isBusyAtContinueDialog = _viewModel.IsBusy)
+            .Returns(false);
+
+        // Act
+        await _viewModel.RestoreAsync();
+
+        // Assert
+        isBusyAtContinueDialog.Should().BeFalse(
+            "6 年保存の台帳 DB を上書きするか否かの決定を、背後で「リストア中...」が回っている状態で迫ってはいけない");
     }
 
     #endregion

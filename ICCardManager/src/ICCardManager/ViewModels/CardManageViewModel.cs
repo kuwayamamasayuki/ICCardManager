@@ -441,9 +441,18 @@ namespace ICCardManager.ViewModels
                         if (existing.IsDeleted)
                         {
                             // 削除済みカードの場合は復元を提案
-                            var confirmed = _dialogService.ShowConfirmation(
-                                $"このカードは以前 {existing.CardNumber} として登録されていましたが、削除されています。\n\n復元しますか？",
-                                "削除済みカード");
+                            //
+                            // Issue #1793: BeginBusy スコープの内側でモーダルを出すと、
+                            // 全面オーバーレイと「保存中...」の不確定プログレスバーが
+                            // ダイアログの背後で回り続ける。確認ダイアログは職員の判断を待つ設計であり、
+                            // 背後の「処理中」表示はその判断を妨げる。
+                            bool confirmed;
+                            using (SuspendBusy())
+                            {
+                                confirmed = _dialogService.ShowConfirmation(
+                                    $"このカードは以前 {existing.CardNumber} として登録されていましたが、削除されています。\n\n復元しますか？",
+                                    "削除済みカード");
+                            }
 
                             if (confirmed)
                             {
@@ -481,10 +490,14 @@ namespace ICCardManager.ViewModels
                             else
                             {
                                 // Issue #314: 復元しない場合は案内メッセージを表示
-                                _dialogService.ShowInformation(
-                                    $"このカードは以前 {existing.CardNumber} として登録されていたため、新規登録はできません。\n\n" +
-                                    "異なるカード番号等で登録したい場合は、先に復元を行い、その後に編集してください。",
-                                    "ご案内");
+                                // Issue #1793: BeginBusy スコープ内のモーダル表示は SuspendBusy で囲む
+                                using (SuspendBusy())
+                                {
+                                    _dialogService.ShowInformation(
+                                        $"このカードは以前 {existing.CardNumber} として登録されていたため、新規登録はできません。\n\n" +
+                                        "異なるカード番号等で登録したい場合は、先に復元を行い、その後に編集してください。",
+                                        "ご案内");
+                                }
                                 CancelEdit();
                             }
                             return;
@@ -604,10 +617,14 @@ namespace ICCardManager.ViewModels
                                 var monthText = importResult.EarliestHistoryDate.HasValue
                                     ? $"{importResult.EarliestHistoryDate.Value.Month}月以降分"
                                     : "今月分";
-                                _dialogService.ShowInformation(
-                                    $"交通系ICカード内の履歴が{monthText}のため、それより前の履歴が不足している可能性があります。\n" +
-                                    "不足分はCSVインポートで補完してください。",
-                                    "履歴インポートの注意");
+                                // Issue #1793: BeginBusy スコープ内のモーダル表示は SuspendBusy で囲む
+                                using (SuspendBusy())
+                                {
+                                    _dialogService.ShowInformation(
+                                        $"交通系ICカード内の履歴が{monthText}のため、それより前の履歴が不足している可能性があります。\n" +
+                                        "不足分はCSVインポートで補完してください。",
+                                        "履歴インポートの注意");
+                                }
                             }
                         }
                         else
@@ -670,7 +687,11 @@ namespace ICCardManager.ViewModels
                         // 結果の表示は必ず後処理のあとに行う（先に設定すると消えて何も表示されない）。
                         if (ledgerFailure != null)
                         {
-                            _dialogService.ShowError(ledgerFailure.DialogMessage, ledgerFailure.DialogTitle);
+                            // Issue #1793: BeginBusy スコープ内のモーダル表示は SuspendBusy で囲む
+                            using (SuspendBusy())
+                            {
+                                _dialogService.ShowError(ledgerFailure.DialogMessage, ledgerFailure.DialogTitle);
+                            }
                             StatusMessage = ledgerFailure.StatusMessage;
                             IsStatusError = true;
                         }
@@ -939,7 +960,11 @@ namespace ICCardManager.ViewModels
                     // Issue #1109: 失敗原因に応じた具体的なメッセージをダイアログで表示
                     // （編集フォーム非表示時はStatusMessageが見えないため）
                     var failureMessage = GetOperationFailureMessage(deleteResult, "削除");
-                    _dialogService.ShowError(failureMessage, "削除できません");
+                    // Issue #1793: BeginBusy スコープ内のモーダル表示は SuspendBusy で囲む
+                    using (SuspendBusy())
+                    {
+                        _dialogService.ShowError(failureMessage, "削除できません");
+                    }
                     await LoadCardsAsync();
                 }
             }
@@ -958,9 +983,16 @@ namespace ICCardManager.ViewModels
         {
             _cardRepository.InvalidateCache();
             await LoadCardsAsync();
-            _dialogService.ShowError(
-                ConcurrencyConflictMessage.ForDelete(targetLabel, "カード一覧"),
-                "削除できません");
+
+            // Issue #1793: 本メソッドは BeginBusy("削除中...") スコープの内側から呼ばれるため、
+            // モーダル表示を SuspendBusy で囲む。囲むのは**ヘルパーの内側**（ダイアログ呼び出しだけ）で、
+            // 呼び出し側でまとめて囲むと直前の一覧再読込中もオーバーレイが外れる。
+            using (SuspendBusy())
+            {
+                _dialogService.ShowError(
+                    ConcurrencyConflictMessage.ForDelete(targetLabel, "カード一覧"),
+                    "削除できません");
+            }
         }
 
         /// <summary>
@@ -1099,7 +1131,11 @@ namespace ICCardManager.ViewModels
                     {
                         // Issue #1109: 失敗原因に応じた具体的なメッセージをダイアログで表示
                         var failureMessage = GetOperationFailureMessage(refundResult, "払い戻し");
-                        _dialogService.ShowError(failureMessage, "払い戻しできません");
+                        // Issue #1793: BeginBusy スコープ内のモーダル表示は SuspendBusy で囲む
+                        using (SuspendBusy())
+                        {
+                            _dialogService.ShowError(failureMessage, "払い戻しできません");
+                        }
                         await LoadCardsAsync();
                     }
                 }
@@ -1398,7 +1434,13 @@ namespace ICCardManager.ViewModels
         /// <returns>選択結果。キャンセル時はnull</returns>
         private Views.Dialogs.CardRegistrationModeResult? ShowRegistrationModeDialog()
         {
-            return _dialogService.ShowCardRegistrationModeDialog(_preReadBalance);
+            // Issue #1793: 本メソッドは BeginBusy("保存中...") スコープの内側から呼ばれる。
+            // 登録モードの選択は職員の判断を待つため、確認ダイアログと同じく
+            // 背後で「保存中...」のオーバーレイを回したままにしてはいけない。
+            using (SuspendBusy())
+            {
+                return _dialogService.ShowCardRegistrationModeDialog(_preReadBalance);
+            }
         }
 
         /// <summary>
