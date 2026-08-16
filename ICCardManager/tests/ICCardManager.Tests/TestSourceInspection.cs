@@ -15,6 +15,11 @@ namespace ICCardManager.Tests;
 /// 空振りする（Issue #1742 のコードレビュー指摘）。
 /// </para>
 /// <para>
+/// 行番号を報告する検査（<c>CompletionMessageOrderConventionTests</c> 等）は
+/// <see cref="ToCodeOnlyPreservingLines"/> を使う。<see cref="ToCodeOnly"/> は
+/// 複数行のブロックコメントを空白 1 文字へ畳むため行番号がずれる。
+/// </para>
+/// <para>
 /// 同種の波括弧抽出は <c>DataExportImportViewModelImportPathSharingTests</c> /
 /// <c>DialogAutomationPropertiesCoverageTests</c> にも私的コピーが存在する。
 /// 新規の規約テストは本ヘルパーを使い、複製をこれ以上増やさないこと
@@ -158,6 +163,207 @@ internal static class TestSourceInspection
         }
 
         return result.ToString();
+    }
+
+    /// <summary>
+    /// <see cref="ToCodeOnly"/> と同じ除去を行いつつ、<b>行数と行の対応を保った</b>
+    /// 「コードのみ」のテキストを返す（改行は複数行コメント／逐語的文字列の内側でも保存する）。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 違反箇所を<b>行番号で報告する</b>検査はこちらを使うこと。<see cref="ToCodeOnly"/> は
+    /// 複数行のブロックコメントを空白 1 文字へ畳むため、以降の行番号がすべてずれる。
+    /// </para>
+    /// <para>
+    /// 行単位に分割してから 1 行ずつ除去する実装（各テストの私的コピー）では
+    /// <b>複数行にまたがる逐語的文字列</b>（<c>@"..."</c> / <c>$@"..."</c>）を追えない。
+    /// 2 行目以降がコードとして扱われ、その中の <c>{</c> <c>}</c> が波括弧の対応を
+    /// ファイル末尾まで狂わせて<b>検査が黙って別の場所を見る</b>。本メソッドは
+    /// ソース全体を 1 パスで走査するためこの状態が起きない。
+    /// </para>
+    /// </remarks>
+    public static string ToCodeOnlyPreservingLines(string source)
+    {
+        if (source == null)
+        {
+            throw new ArgumentNullException(nameof(source));
+        }
+
+        var normalized = source.Replace("\r\n", "\n");
+        var result = new StringBuilder(normalized.Length);
+        var i = 0;
+
+        while (i < normalized.Length)
+        {
+            var c = normalized[i];
+            var next = i + 1 < normalized.Length ? normalized[i + 1] : '\0';
+
+            if (c == '/' && next == '/')
+            {
+                // 行コメント: 改行の手前まで読み飛ばす（改行自体は次の周回で出力される）
+                while (i < normalized.Length && normalized[i] != '\n')
+                {
+                    i++;
+                }
+
+                continue;
+            }
+
+            if (c == '/' && next == '*')
+            {
+                // ブロックコメント: */ まで読み飛ばす。内側の改行は行番号を保つため出力する
+                i += 2;
+                while (i + 1 < normalized.Length && !(normalized[i] == '*' && normalized[i + 1] == '/'))
+                {
+                    if (normalized[i] == '\n')
+                    {
+                        result.Append('\n');
+                    }
+
+                    i++;
+                }
+
+                i = Math.Min(i + 2, normalized.Length);
+                result.Append(' ');
+                continue;
+            }
+
+            var verbatimContentStart = GetVerbatimStringContentStart(normalized, i);
+            if (verbatimContentStart != null)
+            {
+                // 逐語的文字列: "" が引用符のエスケープ。複数行にまたがるため改行は出力する
+                result.Append("@\"");
+                i = verbatimContentStart.Value;
+                while (i < normalized.Length)
+                {
+                    if (normalized[i] == '"')
+                    {
+                        if (i + 1 < normalized.Length && normalized[i + 1] == '"')
+                        {
+                            i += 2;
+                            continue;
+                        }
+
+                        break;
+                    }
+
+                    if (normalized[i] == '\n')
+                    {
+                        result.Append('\n');
+                    }
+
+                    i++;
+                }
+
+                result.Append('"');
+                i++;
+                continue;
+            }
+
+            if (c == '"' || (c == '$' && next == '"'))
+            {
+                // 通常の文字列・補間文字列: \ がエスケープ。中身（補間式の波括弧を含む）は捨てる。
+                // C# の非逐語的文字列は行をまたげないため、改行に達したら未閉じとみなして打ち切る
+                if (c == '$')
+                {
+                    result.Append('$');
+                    i++;
+                }
+
+                result.Append('"');
+                i++;
+                while (i < normalized.Length && normalized[i] != '"' && normalized[i] != '\n')
+                {
+                    if (normalized[i] == '\\')
+                    {
+                        i++;
+                    }
+
+                    i++;
+                }
+
+                result.Append('"');
+                if (i < normalized.Length && normalized[i] == '\n')
+                {
+                    continue;
+                }
+
+                i++;
+                continue;
+            }
+
+            if (c == '\'')
+            {
+                // 文字リテラル: \ がエスケープ
+                result.Append('\'');
+                i++;
+                while (i < normalized.Length && normalized[i] != '\'' && normalized[i] != '\n')
+                {
+                    if (normalized[i] == '\\')
+                    {
+                        i++;
+                    }
+
+                    i++;
+                }
+
+                result.Append('\'');
+                if (i < normalized.Length && normalized[i] == '\n')
+                {
+                    continue;
+                }
+
+                i++;
+                continue;
+            }
+
+            result.Append(c);
+            i++;
+        }
+
+        return result.ToString();
+    }
+
+    /// <summary>
+    /// <paramref name="index"/> から逐語的文字列（<c>@"</c> / <c>$@"</c> / <c>@$"</c>）が
+    /// 始まるなら、その中身の先頭位置を返す。始まらないなら <c>null</c>。
+    /// </summary>
+    private static int? GetVerbatimStringContentStart(string source, int index)
+    {
+        var i = index;
+        var sawAt = false;
+        var sawDollar = false;
+
+        while (i < source.Length && (source[i] == '@' || source[i] == '$'))
+        {
+            if (source[i] == '@')
+            {
+                if (sawAt)
+                {
+                    return null;
+                }
+
+                sawAt = true;
+            }
+            else
+            {
+                if (sawDollar)
+                {
+                    return null;
+                }
+
+                sawDollar = true;
+            }
+
+            i++;
+        }
+
+        if (!sawAt || i >= source.Length || source[i] != '"')
+        {
+            return null;
+        }
+
+        return i + 1;
     }
 
     /// <summary>

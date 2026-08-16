@@ -2,7 +2,6 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using System.Text;
 using System.Text.RegularExpressions;
 using FluentAssertions;
 using Xunit;
@@ -48,9 +47,14 @@ public class CompletionMessageOrderConventionTests
     private static readonly Regex StatusMessageAssignment =
         new Regex(@"(?<![.\w])StatusMessage\s*=(?!=)", RegexOptions.Compiled);
 
-    /// <summary><c>CancelEdit();</c> の呼び出し（メソッド定義そのものは末尾の <c>;</c> が無いため一致しない）。</summary>
+    /// <summary>
+    /// <c>CancelEdit();</c> の呼び出し（メソッド定義そのものは末尾の <c>;</c> が無いため一致しない）。
+    /// <c>this.</c> 修飾も同じ自己呼び出しなので拾う。ここを拾い損ねると、その形しか
+    /// 持たないファイルは <see cref="EnumerateTargetFiles"/> の対象から丸ごと外れ、
+    /// <b>テストは緑のまま</b>検査されなくなる。
+    /// </summary>
     private static readonly Regex CancelEditCall =
-        new Regex(@"(?<![.\w])CancelEdit\s*\(\s*\)\s*;", RegexOptions.Compiled);
+        new Regex(@"(?:(?<![.\w])|(?<=this\.))CancelEdit\s*\(\s*\)\s*;", RegexOptions.Compiled);
 
     /// <summary>
     /// 完了メッセージの設定が <c>CancelEdit()</c> に消されていないことを、本番ソース全体で表明する。
@@ -205,15 +209,91 @@ if (restored)
     }
 
     /// <summary>
+    /// 検査ロジックが、複数行にまたがる逐語的文字列の波括弧に影響されないことを固定する。
+    /// </summary>
+    /// <remarks>
+    /// 行単位でリテラルを剥がす実装では、<c>@"</c> が閉じないまま行が終わったことを
+    /// 次の行へ引き継げない。2 行目以降がコードとして扱われ、その中の <c>{</c> が
+    /// ブロックを 1 段深くするため、以降の <c>CancelEdit()</c> は別ブロックとみなされて
+    /// <b>違反が黙って見逃される</b>（ガードは緑のまま無力化する）。
+    /// </remarks>
+    [Fact]
+    public void 検査ロジックが複数行の逐語的文字列に影響されないこと()
+    {
+        const string multiLineVerbatim = @"
+if (success)
+{
+    StatusMessage = ""更新しました"";
+    var template = @""1行目
+    { 括弧を含む2行目
+    3行目"";
+    CancelEdit();
+}";
+
+        FindViolations(multiLineVerbatim).Should().ContainSingle(
+            "複数行の逐語的文字列を行またぎで追わないと、その中の { } がブロック対応を崩し検査が空振りする");
+    }
+
+    /// <summary>
+    /// 検査ロジックが、<c>CancelEdit()</c> のあとで設定し直すメッセージを違反としないことを固定する。
+    /// </summary>
+    /// <remarks>
+    /// 前回のエラー表示を消してから長い処理へ入る（<c>StatusMessage = string.Empty;</c>）形は
+    /// 正当で、完了メッセージは <c>CancelEdit()</c> のあとに設定されるため表示は生きている。
+    /// これを違反にすると、規約を守っているコードでテストが赤になり、
+    /// 修正者を「対象から外す」方向へ誘導する（Issue #1786 で確立した作法）。
+    /// </remarks>
+    [Fact]
+    public void 検査ロジックが打ち消し後に設定し直す形を違反としないこと()
+    {
+        const string resetThenSet = @"
+if (success)
+{
+    StatusMessage = string.Empty;
+    IsStatusError = false;
+    await LoadCardsAsync();
+    CancelEdit();
+    StatusMessage = ""更新しました"";
+}";
+
+        FindViolations(resetThenSet).Should().BeEmpty(
+            "CancelEdit() のあとで設定し直しているなら完了メッセージは表示される（欠陥ではない）");
+    }
+
+    /// <summary>
+    /// 検査ロジックが <c>this.</c> 修飾の自己呼び出しも検出することを固定する。
+    /// </summary>
+    /// <remarks>
+    /// メンバーアクセスを一律に除外すると、<c>this.CancelEdit();</c> しか持たない
+    /// ViewModel は <see cref="EnumerateTargetFiles"/> の対象から丸ごと外れ、
+    /// <b>1 件も検査されないままテストが緑になる</b>。
+    /// </remarks>
+    [Fact]
+    public void 検査ロジックがthis修飾の呼び出しも検出すること()
+    {
+        const string qualified = @"
+if (success)
+{
+    StatusMessage = ""更新しました"";
+    this.CancelEdit();
+}";
+
+        FindViolations(qualified).Should().ContainSingle(
+            "this.CancelEdit(); も同じ自己呼び出しであり、同じ欠陥を起こす");
+    }
+
+    /// <summary>
     /// <c>CancelEdit();</c> を呼ぶ本番 ViewModel を列挙する。
     /// </summary>
     private static IEnumerable<string> EnumerateTargetFiles()
         => Directory.EnumerateFiles(ViewModelDirectory, "*.cs", SearchOption.AllDirectories)
-            .Where(path => CancelEditCall.IsMatch(StripCommentsAndLiterals(File.ReadAllText(path))))
+            .Where(path => CancelEditCall.IsMatch(
+                TestSourceInspection.ToCodeOnlyPreservingLines(File.ReadAllText(path))))
             .OrderBy(path => path, StringComparer.Ordinal);
 
     /// <summary>
-    /// 同一ブロック内で <c>StatusMessage</c> の代入が <c>CancelEdit();</c> より前にある箇所を返す。
+    /// 同一ブロック内で、<b>そのブロック最後の</b> <c>StatusMessage</c> 代入より後ろに
+    /// <c>CancelEdit();</c> がある箇所を返す。
     /// </summary>
     /// <param name="source">C# ソーステキスト</param>
     /// <returns>違反箇所の説明（行番号付き）。違反が無ければ空。</returns>
@@ -226,6 +306,14 @@ if (restored)
     /// 設定と <c>CancelEdit()</c> が同一ブロックに並ぶ形だった。
     /// </para>
     /// <para>
+    /// 判定を<b>ブロックの終わりまで遅らせる</b>のは、<c>CancelEdit()</c> を見た時点で
+    /// 確定させると「先に <c>StatusMessage = string.Empty;</c> で前回のエラーを消し、
+    /// 後処理と <c>CancelEdit()</c> のあとで完了メッセージを設定する」という<b>正しい形</b>まで
+    /// 違反になるため。欠陥は「その代入が表示されないこと」であり、後から同じブロックで
+    /// 設定し直しているなら表示は生きている。誤検出は修正者を
+    /// 「対象から外す」方向へ誘導するので、ガード自体の寿命を縮める。
+    /// </para>
+    /// <para>
     /// 行単位でブロックを追うため、<c>if (x) { StatusMessage = ...; }</c> のように
     /// 開き波括弧と文が同一行にある書き方は正確に扱えない。本プロジェクトは
     /// Allman スタイル（波括弧を独立行に置く）で統一されているため実害はないが、
@@ -234,166 +322,71 @@ if (restored)
     /// </remarks>
     private static IReadOnlyList<string> FindViolations(string source)
     {
-        var lines = source.Replace("\r\n", "\n").Split('\n');
+        // 行番号を報告するため、行数を保つサニタイズを使う（ToCodeOnly はブロックコメントで行がずれる）。
+        var lines = TestSourceInspection.ToCodeOnlyPreservingLines(source).Split('\n');
         var violations = new List<string>();
 
-        // 各ブロックについて「そのブロック内で最後に見つかった StatusMessage 代入の行番号」を持つ。
-        var blocks = new Stack<int?>();
-        blocks.Push(null);
-
-        var inBlockComment = false;
+        var blocks = new Stack<BlockState>();
+        blocks.Push(new BlockState());
 
         for (var i = 0; i < lines.Length; i++)
         {
-            var code = StripCommentsAndLiterals(lines[i], ref inBlockComment);
+            var code = lines[i];
             var lineNumber = i + 1;
+            var current = blocks.Peek();
 
-            if (CancelEditCall.IsMatch(code) && blocks.Peek() is int pendingLine)
+            if (CancelEditCall.IsMatch(code) && current.AssignmentLine != null)
             {
-                violations.Add(
-                    $"{pendingLine} 行目で設定した StatusMessage が {lineNumber} 行目の CancelEdit() で消える");
+                current.CancelledAtLine = lineNumber;
             }
 
             if (StatusMessageAssignment.IsMatch(code))
             {
-                blocks.Pop();
-                blocks.Push(lineNumber);
+                current.AssignmentLine = lineNumber;
+                current.CancelledAtLine = null;
             }
 
             foreach (var ch in code)
             {
                 if (ch == '{')
                 {
-                    blocks.Push(null);
+                    blocks.Push(new BlockState());
                 }
                 else if (ch == '}' && blocks.Count > 1)
                 {
-                    blocks.Pop();
+                    Report(blocks.Pop(), violations);
                 }
             }
+        }
+
+        while (blocks.Count > 0)
+        {
+            Report(blocks.Pop(), violations);
         }
 
         return violations;
     }
 
-    /// <summary>ソース全体からコメントと文字列・文字リテラルを取り除く。</summary>
-    private static string StripCommentsAndLiterals(string source)
+    /// <summary>ブロックを抜けた時点で、打ち消されたままの代入を違反として記録する。</summary>
+    private static void Report(BlockState block, ICollection<string> violations)
     {
-        var inBlockComment = false;
-        return string.Join("\n", source.Replace("\r\n", "\n").Split('\n')
-            .Select(line => StripCommentsAndLiterals(line, ref inBlockComment)));
+        if (block.AssignmentLine is int assignedAt && block.CancelledAtLine is int cancelledAt)
+        {
+            violations.Add(
+                $"{assignedAt} 行目で設定した StatusMessage が {cancelledAt} 行目の CancelEdit() で消える");
+        }
     }
 
-    /// <summary>
-    /// 1 行からコメントと文字列・文字リテラルを取り除く。
-    /// </summary>
-    /// <param name="line">対象行</param>
-    /// <param name="inBlockComment">ブロックコメントの継続状態（行をまたいで引き継ぐ）</param>
-    /// <remarks>
-    /// 剥がす対象は 3 つとも検査を狂わせる: コメントは規約の由来を述べた文章が違反に見え、
-    /// 文字列リテラルは補間の <c>{ }</c> がブロック対応を崩し、
-    /// 文字リテラルは <c>'{'</c> のような表現が同じ影響を持つ。
-    /// </remarks>
-    private static string StripCommentsAndLiterals(string line, ref bool inBlockComment)
+    /// <summary>1 ブロック分の追跡状態。</summary>
+    private sealed class BlockState
     {
-        var result = new StringBuilder(line.Length);
+        /// <summary>そのブロックで最後に見つかった <c>StatusMessage</c> 代入の行番号。</summary>
+        public int? AssignmentLine { get; set; }
 
-        for (var i = 0; i < line.Length; i++)
-        {
-            if (inBlockComment)
-            {
-                if (line[i] == '*' && i + 1 < line.Length && line[i + 1] == '/')
-                {
-                    inBlockComment = false;
-                    i++;
-                }
-
-                continue;
-            }
-
-            if (line[i] == '/' && i + 1 < line.Length)
-            {
-                if (line[i + 1] == '/')
-                {
-                    break;
-                }
-
-                if (line[i + 1] == '*')
-                {
-                    inBlockComment = true;
-                    i++;
-                    continue;
-                }
-            }
-
-            if (line[i] == '@' && i + 1 < line.Length && line[i + 1] == '"')
-            {
-                i = SkipVerbatimString(line, i + 1);
-                continue;
-            }
-
-            if (line[i] == '"')
-            {
-                i = SkipQuoted(line, i, '"');
-                continue;
-            }
-
-            if (line[i] == '\'')
-            {
-                i = SkipQuoted(line, i, '\'');
-                continue;
-            }
-
-            result.Append(line[i]);
-        }
-
-        return result.ToString();
-    }
-
-    /// <summary>
-    /// 通常の文字列・文字リテラルを読み飛ばし、閉じ引用符の位置を返す
-    /// （閉じないまま行が終わる場合は行末を返す）。
-    /// </summary>
-    private static int SkipQuoted(string line, int openIndex, char quote)
-    {
-        for (var i = openIndex + 1; i < line.Length; i++)
-        {
-            if (line[i] == '\\')
-            {
-                i++;
-                continue;
-            }
-
-            if (line[i] == quote)
-            {
-                return i;
-            }
-        }
-
-        return line.Length;
-    }
-
-    /// <summary>
-    /// 逐語的文字列（<c>@"..."</c>）を読み飛ばす。<c>""</c> は閉じずにエスケープとして扱う。
-    /// </summary>
-    private static int SkipVerbatimString(string line, int openIndex)
-    {
-        for (var i = openIndex + 1; i < line.Length; i++)
-        {
-            if (line[i] != '"')
-            {
-                continue;
-            }
-
-            if (i + 1 < line.Length && line[i + 1] == '"')
-            {
-                i++;
-                continue;
-            }
-
-            return i;
-        }
-
-        return line.Length;
+        /// <summary>
+        /// 上記の代入を打ち消した <c>CancelEdit();</c> の行番号。
+        /// 打ち消しのあとで設定し直されたら <c>null</c> に戻る。
+        /// </summary>
+        public int? CancelledAtLine { get; set; }
     }
 }
