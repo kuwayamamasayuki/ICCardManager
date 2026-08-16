@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Data;
+using System.Globalization;
 using System.Linq;
 using System.Threading.Tasks;
 using ICCardManager.Dtos;
@@ -709,9 +710,11 @@ ORDER BY date ASC, id ASC";
         /// 貸出中レコード（is_lent_record = 1）をシードの母集団から除外するか。
         /// グラフ用集計（Issue #1770）は貸出中レコードを存在しないものとして扱うため true を渡し、
         /// 本体クエリとシードで母集団を揃える。
+        /// **既定値は与えない** — 呼び出し元に母集団の選択を必ず書かせるため
+        /// （既定値があると「書かずに済ませる」経路ができ、本体クエリとの不一致が静かに入り込む）。
         /// </param>
         private static async Task<int?> GetPrecedingBalanceAsync(
-            SQLiteConnection connection, string cardIdm, DateTime day, bool excludeLentRecords = false)
+            SQLiteConnection connection, string cardIdm, DateTime day, bool excludeLentRecords)
         {
             var lentFilter = excludeLentRecords ? "AND is_lent_record = 0" : string.Empty;
 
@@ -985,12 +988,11 @@ ORDER BY ym, staff";
             // 集約関数と同じ行の他列が返る SQLite 固有の bare column 仕様には依存しない。
             // 最終日の 1 行ではなく全行を取るのは、同一日内の順序を残高チェーンで確定するため（Issue #1770）。
             // 台帳は 6 年分保持されるため、全件を C# へ読み出さず「最終日の行だけ」に絞る（Issue #1692 の設計判断）。
-            var lastDayLedgers = new List<(string YearMonth, Ledger Ledger)>();
+            var lastDayLedgers = new List<Ledger>();
             using (var command = connection.CreateCommand())
             {
                 command.CommandText = @"SELECT l.id, l.card_idm, l.lender_idm, l.date, l.summary, l.income, l.expense, l.balance,
-       l.staff_name, l.note, l.returner_idm, l.lent_at, l.returned_at, l.is_lent_record,
-       strftime('%Y-%m', l.date) AS ym
+       l.staff_name, l.note, l.returner_idm, l.lent_at, l.returned_at, l.is_lent_record
 FROM ledger l
 WHERE l.date BETWEEN @fromDate AND @toDate
   AND l.is_lent_record = 0
@@ -1001,20 +1003,23 @@ WHERE l.date BETWEEN @fromDate AND @toDate
         AND l2.date BETWEEN @fromDate AND @toDate
         AND strftime('%Y-%m', l2.date) = strftime('%Y-%m', l.date)
   )
-ORDER BY l.card_idm, ym, l.date, l.id";
+ORDER BY l.card_idm, l.date, l.id";
 
                 AddDateRangeParameters(command, fromDate, toDate);
 
                 using var reader = await command.ExecuteReaderAsync().ConfigureAwait(false);
                 while (await reader.ReadAsync().ConfigureAwait(false))
                 {
-                    lastDayLedgers.Add((reader.GetString(14), MapToLedger(reader)));
+                    lastDayLedgers.Add(MapToLedger(reader));
                 }
             }
 
-            // チェーン開始点のシード取得は同じ接続上の別クエリになるため、リーダーを閉じてから行う
+            // チェーン開始点のシード取得は同じ接続上の別クエリになるため、リーダーを閉じてから行う。
+            // 年月キーは SELECT に strftime を足さず Ledger.Date から導出する
+            // （MapToLedger の列順に依存する位置指定 reader.GetString(14) を持ち込まないため。
+            //   書式は AdminDashboardService.EnumerateMonthKeys と同じ InvariantCulture の "yyyy-MM"）
             var result = new List<MonthEndBalanceRow>();
-            foreach (var group in lastDayLedgers.GroupBy(r => (r.Ledger.CardIdm, r.YearMonth)))
+            foreach (var group in lastDayLedgers.GroupBy(l => (l.CardIdm, YearMonth: ToYearMonthKey(l.Date))))
             {
                 result.Add(new MonthEndBalanceRow
                 {
@@ -1022,7 +1027,7 @@ ORDER BY l.card_idm, ym, l.date, l.id";
                     YearMonth = group.Key.YearMonth,
                     Balance = (await ResolveChainFinalLedgerAsync(
                         connection,
-                        group.Select(r => r.Ledger).ToList(),
+                        group.ToList(),
                         excludeLentRecordsFromSeed: true).ConfigureAwait(false)).Balance
                 });
             }
@@ -1076,6 +1081,17 @@ ORDER BY l.card_idm, l.date, l.id";
 
             return result;
         }
+
+        /// <summary>
+        /// 台帳日付から <see cref="MonthEndBalanceRow.YearMonth"/> の年月キー（"yyyy-MM"）を作る。
+        /// </summary>
+        /// <remarks>
+        /// 折れ線の X 軸キー（<c>AdminDashboardService.EnumerateMonthKeys</c>）と同じ
+        /// <see cref="CultureInfo.InvariantCulture"/> で整形すること。和暦カレンダーが既定の
+        /// カルチャで実行されると現在カルチャ指定では年が一致しなくなる。
+        /// </remarks>
+        private static string ToYearMonthKey(DateTime date)
+            => date.ToString("yyyy-MM", CultureInfo.InvariantCulture);
 
         /// <summary>
         /// 集計クエリ共通の日付範囲パラメータを設定する。

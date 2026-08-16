@@ -565,7 +565,7 @@ public class LedgerRepositoryAggregationTests : IDisposable
         // 利用行の方が先に INSERT されている（id が小さい = 挿入順が時系列と逆）
         await InsertLedgerAsync(CardA, new DateTime(2026, 5, 10), expense: 260, balance: 7740);
         await InsertLedgerAsync(CardA, new DateTime(2026, 5, 10), income: 3000, balance: 8000,
-            summary: "チャージ");
+            summary: SummaryGenerator.GetChargeSummary());
 
         var result = await _ledgerRepository.GetMonthEndBalancesByCardAsync(
             new DateTime(2026, 5, 1), new DateTime(2026, 5, 31));
@@ -592,7 +592,7 @@ public class LedgerRepositoryAggregationTests : IDisposable
 
         // 5/10: 時系列は 利用(1696→1456) → 還元(1456→1696) だが、還元行の方が id が小さい
         await InsertLedgerAsync(CardA, new DateTime(2026, 5, 10), income: 240, balance: 1696,
-            summary: "ポイント還元");
+            summary: SummaryGenerator.GetPointRedemptionSummary());
         await InsertLedgerAsync(CardA, new DateTime(2026, 5, 10), expense: 240, balance: 1456);
 
         var result = await _ledgerRepository.GetMonthEndBalancesByCardAsync(
@@ -613,11 +613,11 @@ public class LedgerRepositoryAggregationTests : IDisposable
         // CardA 5月: 利用(7740) を先、チャージ(8000) を後に INSERT
         await InsertLedgerAsync(CardA, new DateTime(2026, 5, 10), expense: 260, balance: 7740);
         await InsertLedgerAsync(CardA, new DateTime(2026, 5, 10), income: 3000, balance: 8000,
-            summary: "チャージ");
+            summary: SummaryGenerator.GetChargeSummary());
         // CardA 6月: 利用(2450) を先、チャージ(2500) を後に INSERT
         await InsertLedgerAsync(CardA, new DateTime(2026, 6, 20), expense: 50, balance: 2450);
         await InsertLedgerAsync(CardA, new DateTime(2026, 6, 20), income: 500, balance: 2500,
-            summary: "チャージ");
+            summary: SummaryGenerator.GetChargeSummary());
         // CardB 5月: 逆転なし
         await InsertLedgerAsync(CardB, new DateTime(2026, 5, 15), expense: 200, balance: 900);
 
@@ -809,7 +809,7 @@ public class LedgerRepositoryAggregationTests : IDisposable
         // 利用行の方が先に INSERT されている（id が小さい = 挿入順が時系列と逆）
         await InsertLedgerAsync(CardA, new DateTime(2026, 4, 10), expense: 260, balance: 7740);
         await InsertLedgerAsync(CardA, new DateTime(2026, 4, 10), income: 3000, balance: 8000,
-            summary: "チャージ");
+            summary: SummaryGenerator.GetChargeSummary());
 
         var result = await _ledgerRepository.GetBalancesBeforeAsync(new DateTime(2026, 5, 1));
 
@@ -830,7 +830,7 @@ public class LedgerRepositoryAggregationTests : IDisposable
 
         // 4/10: 時系列は 利用(1696→1456) → 還元(1456→1696) だが、還元行の方が id が小さい
         await InsertLedgerAsync(CardA, new DateTime(2026, 4, 10), income: 240, balance: 1696,
-            summary: "ポイント還元");
+            summary: SummaryGenerator.GetPointRedemptionSummary());
         await InsertLedgerAsync(CardA, new DateTime(2026, 4, 10), expense: 240, balance: 1456);
 
         var result = await _ledgerRepository.GetBalancesBeforeAsync(new DateTime(2026, 5, 1));
