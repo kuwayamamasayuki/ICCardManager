@@ -350,9 +350,18 @@ namespace ICCardManager.ViewModels
                             if (existing.IsDeleted)
                             {
                                 // 削除済み職員の場合は復元を提案
-                                var confirmed = _dialogService.ShowConfirmation(
-                                    $"この職員証は以前 {identifier} として登録されていましたが、削除されています。\n\n復元しますか？",
-                                    "削除済み職員");
+                                //
+                                // Issue #1793: BeginBusy スコープの内側でモーダルを出すと、
+                                // 全面オーバーレイと「保存中...」の不確定プログレスバーが
+                                // ダイアログの背後で回り続ける。確認ダイアログは職員の判断を待つ設計であり、
+                                // 背後の「処理中」表示はその判断を妨げる。
+                                bool confirmed;
+                                using (SuspendBusy())
+                                {
+                                    confirmed = _dialogService.ShowConfirmation(
+                                        $"この職員証は以前 {identifier} として登録されていましたが、削除されています。\n\n復元しますか？",
+                                        "削除済み職員");
+                                }
 
                                 if (confirmed)
                                 {
@@ -389,10 +398,14 @@ namespace ICCardManager.ViewModels
                                 else
                                 {
                                     // Issue #314: 復元しない場合は案内メッセージを表示
-                                    _dialogService.ShowInformation(
-                                        $"この職員証は以前 {identifier} として登録されていたため、新規登録はできません。\n\n" +
-                                        "異なる名前等で登録したい場合は、先に復元を行い、その後に編集してください。",
-                                        "ご案内");
+                                    // Issue #1793: BeginBusy スコープ内のモーダル表示は SuspendBusy で囲む
+                                    using (SuspendBusy())
+                                    {
+                                        _dialogService.ShowInformation(
+                                            $"この職員証は以前 {identifier} として登録されていたため、新規登録はできません。\n\n" +
+                                            "異なる名前等で登録したい場合は、先に復元を行い、その後に編集してください。",
+                                            "ご案内");
+                                    }
                                     CancelEdit();
                                 }
                                 return;

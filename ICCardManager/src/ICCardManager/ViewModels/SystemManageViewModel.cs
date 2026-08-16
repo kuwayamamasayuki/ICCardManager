@@ -27,6 +27,19 @@ public partial class SystemManageViewModel : ViewModelBase
     private readonly IStaffAuthService _staffAuthService;
     private readonly IBackupHealthService _backupHealthService;
 
+    /// <summary>
+    /// ダイアログ表示（Issue #1793 で <c>MessageBox.Show</c> 直呼びから移行）
+    /// </summary>
+    /// <remarks>
+    /// 移行したのはリストア経路の確認 4 か所。内訳は <c>BeginBusy</c> スコープの内側から出す
+    /// 2 か所（リストア前バックアップ失敗時の続行確認。本 Issue の対象）と、その手前の
+    /// 入口の確認 2 か所。入口も併せて移したのは、そこが <c>MessageBox</c> 直呼びのままだと
+    /// 単体テストが実モーダルに入って止まり、<b>スコープ内側の続行確認へ到達するテストが
+    /// 1 件も書けない</b>ため。リストア完了の通知（スコープ外の 2 か所）は本 Issue の
+    /// 対象ではないので触れていない（移行するなら別 Issue）。
+    /// </remarks>
+    private readonly IDialogService _dialogService;
+
     [ObservableProperty]
     private ObservableCollection<BackupFileInfo> _backupFiles = new();
 
@@ -186,7 +199,8 @@ public partial class SystemManageViewModel : ViewModelBase
         ISafeFileLauncher safeFileLauncher,
         IDatabaseInfo databaseInfo,
         IStaffAuthService staffAuthService,
-        IBackupHealthService backupHealthService)
+        IBackupHealthService backupHealthService,
+        IDialogService dialogService)
     {
         _backupService = backupService;
         _settingsRepository = settingsRepository;
@@ -196,6 +210,7 @@ public partial class SystemManageViewModel : ViewModelBase
         _databaseInfo = databaseInfo;
         _staffAuthService = staffAuthService;
         _backupHealthService = backupHealthService;
+        _dialogService = dialogService;
     }
 
     /// <summary>
@@ -371,7 +386,10 @@ public partial class SystemManageViewModel : ViewModelBase
               "他のPCが接続中の場合、リストアは実行できません。\n\n"
             : "";
 
-        var result = MessageBox.Show(
+        // Issue #1793: リストア経路の入口の確認も IDialogService 経由にする。
+        // MessageBox 直呼びのままだと、この確認で単体テストが実モーダルに入って止まり、
+        // **スコープ内側の続行確認（本 Issue の対象）へ到達するテストが書けない**。
+        var result = _dialogService.ShowWarningConfirmation(
             $"以下のバックアップからデータを復元します。\n\n" +
             $"ファイル: {targetBackupFileName}\n" +
             $"作成日時: {DisplayFormatters.FormatTimestamp(targetBackupCreatedAt)}\n\n" +
@@ -379,11 +397,9 @@ public partial class SystemManageViewModel : ViewModelBase
             $"現在のデータは上書きされます。\n" +
             $"（復元前に現在のデータは自動バックアップされます）\n\n" +
             $"続行しますか？",
-            "リストアの確認",
-            MessageBoxButton.YesNo,
-            MessageBoxImage.Warning);
+            "リストアの確認");
 
-        if (result != MessageBoxResult.Yes)
+        if (!result)
         {
             return;
         }
@@ -404,13 +420,22 @@ public partial class SystemManageViewModel : ViewModelBase
                 if (!backupSuccess)
                 {
                     // バックアップ失敗時はユーザーに確認
-                    var continueResult = MessageBox.Show(
-                        "現在のデータのバックアップに失敗しました。\n" +
-                        "バックアップなしでリストアを続行しますか？",
-                        "警告",
-                        MessageBoxButton.YesNo,
-                        MessageBoxImage.Warning);
-                    if (continueResult != MessageBoxResult.Yes)
+                    //
+                    // Issue #1793: この確認は BeginBusy("リストア中...") スコープの内側にある。
+                    // スコープの前へ移すことはできない（直前の CreateBackupAsync の結果を見て
+                    // 初めて必要性が決まる）ため、SuspendBusy で一時中断してから表示する。
+                    // 中断しないと全面オーバーレイと「リストア中...」のプログレスバーが
+                    // ダイアログの背後で回り続け、職員は 6 年保存の台帳 DB を上書きするか否かの
+                    // 決定を「処理が続いているのか分からない」状態で迫られる。
+                    bool continueWithoutBackup;
+                    using (SuspendBusy())
+                    {
+                        continueWithoutBackup = _dialogService.ShowWarningConfirmation(
+                            "現在のデータのバックアップに失敗しました。\n" +
+                            "バックアップなしでリストアを続行しますか？",
+                            "警告");
+                    }
+                    if (!continueWithoutBackup)
                     {
                         SetStatus("リストアをキャンセルしました", false);
                         return;
@@ -517,18 +542,19 @@ public partial class SystemManageViewModel : ViewModelBase
               "他のPCが接続中の場合、リストアは実行できません。\n\n"
             : "";
 
-        var result = MessageBox.Show(
+        // Issue #1793: リストア経路の入口の確認も IDialogService 経由にする。
+        // MessageBox 直呼びのままだと、この確認で単体テストが実モーダルに入って止まり、
+        // **スコープ内側の続行確認（本 Issue の対象）へ到達するテストが書けない**。
+        var result = _dialogService.ShowWarningConfirmation(
             $"以下のファイルからデータを復元します。\n\n" +
             $"ファイル: {Path.GetFileName(dialog.FileName)}\n\n" +
             sharedModeWarning2 +
             $"現在のデータは上書きされます。\n" +
             $"（復元前に現在のデータは自動バックアップされます）\n\n" +
             $"続行しますか？",
-            "リストアの確認",
-            MessageBoxButton.YesNo,
-            MessageBoxImage.Warning);
+            "リストアの確認");
 
-        if (result != MessageBoxResult.Yes)
+        if (!result)
         {
             return;
         }
@@ -549,13 +575,22 @@ public partial class SystemManageViewModel : ViewModelBase
                 if (!backupSuccess)
                 {
                     // バックアップ失敗時はユーザーに確認
-                    var continueResult = MessageBox.Show(
-                        "現在のデータのバックアップに失敗しました。\n" +
-                        "バックアップなしでリストアを続行しますか？",
-                        "警告",
-                        MessageBoxButton.YesNo,
-                        MessageBoxImage.Warning);
-                    if (continueResult != MessageBoxResult.Yes)
+                    //
+                    // Issue #1793: この確認は BeginBusy("リストア中...") スコープの内側にある。
+                    // スコープの前へ移すことはできない（直前の CreateBackupAsync の結果を見て
+                    // 初めて必要性が決まる）ため、SuspendBusy で一時中断してから表示する。
+                    // 中断しないと全面オーバーレイと「リストア中...」のプログレスバーが
+                    // ダイアログの背後で回り続け、職員は 6 年保存の台帳 DB を上書きするか否かの
+                    // 決定を「処理が続いているのか分からない」状態で迫られる。
+                    bool continueWithoutBackup;
+                    using (SuspendBusy())
+                    {
+                        continueWithoutBackup = _dialogService.ShowWarningConfirmation(
+                            "現在のデータのバックアップに失敗しました。\n" +
+                            "バックアップなしでリストアを続行しますか？",
+                            "警告");
+                    }
+                    if (!continueWithoutBackup)
                     {
                         SetStatus("リストアをキャンセルしました", false);
                         return;

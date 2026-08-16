@@ -1,5 +1,7 @@
 using System;
+using System.Collections.Generic;
 using System.Text;
+using System.Text.RegularExpressions;
 
 namespace ICCardManager.Tests;
 
@@ -415,5 +417,212 @@ internal static class TestSourceInspection
         }
 
         throw new InvalidOperationException($"「{signatureMarker}」の本体の波括弧が閉じていない。");
+    }
+
+    /// <summary>
+    /// <c>using (Factory(...)) { ... }</c> 形のスコープ本体（<c>{ }</c> を含む範囲）を列挙する。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Issue #1793 の <c>BusyScopeDialogConventionTests</c> 用。<c>using</c> の丸括弧は
+    /// <b>ファクトリ呼び出しの丸括弧と入れ子になる</b>ため（<c>using (BeginBusy("..."))</c>）、
+    /// 「最初に現れる <c>)</c>」で本体の開始位置を探すと 1 つ内側の括弧で止まり、
+    /// 直後が <c>{</c> にならないので<b>スコープが 1 つも見つからないまま緑になる</b>。
+    /// 対応は必ず <c>using</c> 直後の <c>(</c> から取ること。
+    /// </para>
+    /// <para>
+    /// <b>波括弧を伴わない <c>using var x = Factory();</c> 形（using 宣言）も列挙する。</b>
+    /// C# の using 宣言はスコープが<b>宣言位置から囲みブロックの末尾まで</b>と決まっており、
+    /// その間に表示されるモーダルはすべて処理中スコープの内側にある。この形を対象外にすると、
+    /// <c>ReportViewModel.CreateReportsAsync</c>（<c>using var busyScope = BeginCancellableBusy(...)</c>）の
+    /// ように<b>実際に違反しているコードが 1 件も検査されないまま緑になる</b>
+    /// （<c>.claude/rules/testing.md</c>「ガードの検出漏れは緑になる — 対象の絞り込みが
+    /// fail-open になっていないか確認する」）。範囲の開始は宣言文の先頭とする。
+    /// </para>
+    /// </remarks>
+    /// <param name="codeOnlySource"><see cref="ToCodeOnly"/> / <see cref="ToCodeOnlyPreservingLines"/> を通したソース。</param>
+    /// <param name="factoryName">スコープを作るメソッド名（例: <c>"BeginBusy"</c>）。前方一致で照合する。</param>
+    /// <returns>スコープの範囲（開始位置、終了 <c>}</c> の位置）。出現順ではなく開始位置順。</returns>
+    public static IReadOnlyList<(int Start, int End)> ExtractUsingScopeBodies(
+        string codeOnlySource, string factoryName)
+    {
+        if (codeOnlySource == null)
+        {
+            throw new ArgumentNullException(nameof(codeOnlySource));
+        }
+
+        if (string.IsNullOrEmpty(factoryName))
+        {
+            throw new ArgumentException("スコープを作るメソッド名を指定すること。", nameof(factoryName));
+        }
+
+        var scopes = new List<(int Start, int End)>();
+        var pattern = new Regex(
+            @"using\s*\(\s*(?:var\s+\w+\s*=\s*)?" + Regex.Escape(factoryName) + @"\w*\s*\(");
+
+        foreach (Match match in pattern.Matches(codeOnlySource))
+        {
+            // using 直後の '(' から括弧の対応を取る（ファクトリ側の '(' から取ると 1 つ内側で閉じる）
+            var openParen = codeOnlySource.IndexOf('(', match.Index);
+            if (openParen < 0)
+            {
+                continue;
+            }
+
+            var depth = 0;
+            var closeParen = -1;
+            for (var i = openParen; i < codeOnlySource.Length; i++)
+            {
+                if (codeOnlySource[i] == '(')
+                {
+                    depth++;
+                }
+                else if (codeOnlySource[i] == ')')
+                {
+                    depth--;
+                    if (depth == 0)
+                    {
+                        closeParen = i;
+                        break;
+                    }
+                }
+            }
+
+            if (closeParen < 0)
+            {
+                continue;
+            }
+
+            var braceStart = closeParen + 1;
+            while (braceStart < codeOnlySource.Length && char.IsWhiteSpace(codeOnlySource[braceStart]))
+            {
+                braceStart++;
+            }
+
+            if (braceStart >= codeOnlySource.Length || codeOnlySource[braceStart] != '{')
+            {
+                // 波括弧を伴わないスコープ（式形式の using など）。宣言形は下で別途拾う。
+                continue;
+            }
+
+            var block = TryMatchBlock(codeOnlySource, braceStart);
+            if (block != null)
+            {
+                scopes.Add(block.Value);
+            }
+        }
+
+        // using 宣言形（`using var x = Factory(...);`）: 宣言位置から囲みブロックの末尾まで
+        var declarationPattern = new Regex(
+            @"using\s+var\s+\w+\s*=\s*" + Regex.Escape(factoryName) + @"\w*\s*\(");
+
+        foreach (Match match in declarationPattern.Matches(codeOnlySource))
+        {
+            var enclosingEnd = FindEnclosingBlockEnd(codeOnlySource, match.Index);
+            if (enclosingEnd >= 0)
+            {
+                scopes.Add((match.Index, enclosingEnd));
+            }
+        }
+
+        scopes.Sort((a, b) => a.Start.CompareTo(b.Start));
+        return scopes;
+    }
+
+    /// <summary>
+    /// <paramref name="from"/> を含むブロックの閉じ <c>}</c> の位置を返す。見つからないなら -1。
+    /// </summary>
+    /// <remarks>
+    /// using 宣言（<c>using var x = Factory();</c>）のスコープ終端の算出に使う。
+    /// 開始位置から前方へ走査し、深さ 0 で現れた <c>}</c> が囲みブロックの終わり。
+    /// </remarks>
+    private static int FindEnclosingBlockEnd(string codeOnlySource, int from)
+    {
+        var depth = 0;
+        for (var i = from; i < codeOnlySource.Length; i++)
+        {
+            if (codeOnlySource[i] == '{')
+            {
+                depth++;
+            }
+            else if (codeOnlySource[i] == '}')
+            {
+                if (depth == 0)
+                {
+                    return i;
+                }
+
+                depth--;
+            }
+        }
+
+        return -1;
+    }
+
+    /// <summary>
+    /// ブロック本体を持つラムダ（<c>=&gt; { ... }</c>）の本体範囲を列挙する。
+    /// </summary>
+    /// <remarks>
+    /// Issue #1793 の <c>BusyScopeDialogConventionTests</c> 用。ラムダの中身は<b>その場では実行されない</b>ため、
+    /// 「スコープの内側に構文上あるか」で判定する検査は、遅延実行される呼び出しを誤検出する。
+    /// 式形式（<c>=&gt; Foo()</c>）は呼び出しの直前が <c>=&gt;</c> であることで判別できるが、
+    /// ブロック形式は範囲を取らないと判別できない。
+    /// </remarks>
+    /// <param name="codeOnlySource"><see cref="ToCodeOnly"/> / <see cref="ToCodeOnlyPreservingLines"/> を通したソース。</param>
+    /// <returns>ラムダ本体の範囲（開始 <c>{</c> の位置、終了 <c>}</c> の位置）。出現順。</returns>
+    public static IReadOnlyList<(int Start, int End)> ExtractLambdaBlockBodies(string codeOnlySource)
+    {
+        if (codeOnlySource == null)
+        {
+            throw new ArgumentNullException(nameof(codeOnlySource));
+        }
+
+        var bodies = new List<(int Start, int End)>();
+
+        foreach (Match match in Regex.Matches(codeOnlySource, @"=>\s*\{"))
+        {
+            var braceStart = codeOnlySource.IndexOf('{', match.Index);
+            var block = TryMatchBlock(codeOnlySource, braceStart);
+            if (block != null)
+            {
+                bodies.Add(block.Value);
+            }
+        }
+
+        return bodies;
+    }
+
+    /// <summary>
+    /// <paramref name="braceStart"/> の <c>{</c> に対応する <c>}</c> までの範囲を返す。閉じないなら <c>null</c>。
+    /// </summary>
+    /// <remarks>
+    /// 波括弧の対応はこのメソッドに集約する（数え方が複数箇所へ分かれると片方だけ直る）。
+    /// 呼び出し側は必ずサニタイズ済みのテキストを渡すこと。
+    /// </remarks>
+    private static (int Start, int End)? TryMatchBlock(string codeOnlySource, int braceStart)
+    {
+        if (braceStart < 0 || braceStart >= codeOnlySource.Length || codeOnlySource[braceStart] != '{')
+        {
+            return null;
+        }
+
+        var depth = 0;
+        for (var i = braceStart; i < codeOnlySource.Length; i++)
+        {
+            if (codeOnlySource[i] == '{')
+            {
+                depth++;
+            }
+            else if (codeOnlySource[i] == '}')
+            {
+                depth--;
+                if (depth == 0)
+                {
+                    return (braceStart, i);
+                }
+            }
+        }
+
+        return null;
     }
 }
