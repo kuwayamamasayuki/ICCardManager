@@ -1840,6 +1840,204 @@ public class CardManageViewModelTests
 
     #endregion
 
+    #region Issue #1763: カード内履歴が無い登録での初期残高行の書込み失敗の通知
+
+    /// <summary>
+    /// 新規登録用の入力を整える（履歴なし・新規購入モード）。
+    /// </summary>
+    /// <remarks>
+    /// 事前読み取り履歴を設定せず、カードからの読み取りも空にすることで
+    /// 「カード内に取り込む履歴が無い」経路（<c>filteredHistory</c> が空）へ入れる。
+    /// </remarks>
+    private void ArrangeNewCardWithoutHistory(string idm, string cardNumber, int balance = 5000)
+    {
+        _cardRepositoryMock.Setup(r => r.GetByIdmAsync(idm, true)).ReturnsAsync((IcCard?)null);
+        _cardRepositoryMock.Setup(r => r.InsertAsync(It.IsAny<IcCard>())).ReturnsAsync(true);
+        _cardReaderMock.Setup(r => r.ReadHistoryAsync(idm)).ReturnsAsync(new List<LedgerDetail>());
+
+        _viewModel.SetPreReadBalance(balance);
+
+        _viewModel.StartNewCard();
+        _viewModel.EditCardIdm = idm;
+        _viewModel.EditCardType = "はやかけん";
+        _viewModel.EditCardNumber = cardNumber;
+    }
+
+    /// <summary>
+    /// 初期残高行の書込みが失敗した場合、「登録しました」と成功扱いで表示しないこと。
+    /// </summary>
+    /// <remarks>
+    /// Issue #1763: 修正前はこの経路だけ <c>_ledgerRepository.InsertAsync</c> を直接呼び、
+    /// 例外を <c>LogWarning</c> で握りつぶして「登録しました」と表示していた。
+    /// ここで失われる行は「新規購入 / ○月から繰越」＝<b>そのカード唯一の受入行</b>で、
+    /// 欠落すると台帳が 0 行のまま払出だけが積み上がり、月次帳票で
+    /// 「受入 − 払出 = 残額」が年度を通して成立しなくなる。
+    /// </remarks>
+    [Fact]
+    public async Task SaveAsync_NewCard_WithoutHistory_WhenInitialLedgerWriteFails_ShouldNotReportSuccess()
+    {
+        // Arrange
+        var idm = "0102030405060708";
+        ArrangeNewCardWithoutHistory(idm, "H-002");
+        _ledgerRepositoryMock.Setup(r => r.InsertAsync(It.IsAny<Ledger>()))
+            .ThrowsAsync(new InvalidOperationException("database is locked"));
+
+        // Act
+        await _viewModel.SaveAsync();
+
+        // Assert
+        _viewModel.StatusMessage.Should().NotBe("登録しました",
+            "唯一の受入行が記録できていないため成功として表示してはならない");
+        _viewModel.IsStatusError.Should().BeTrue(
+            "書込み失敗はエラーとして識別できる状態で表示する必要がある");
+    }
+
+    /// <summary>
+    /// 初期残高行の書込みが失敗した場合、復旧手段を示すエラーダイアログを表示すること。
+    /// </summary>
+    [Fact]
+    public async Task SaveAsync_NewCard_WithoutHistory_WhenInitialLedgerWriteFails_ShouldShowErrorDialogWithRecoveryGuidance()
+    {
+        // Arrange
+        var idm = "0102030405060708";
+        ArrangeNewCardWithoutHistory(idm, "H-002");
+        _ledgerRepositoryMock.Setup(r => r.InsertAsync(It.IsAny<Ledger>()))
+            .ThrowsAsync(new InvalidOperationException("database is locked"));
+
+        string? shownMessage = null;
+        _dialogServiceMock.Setup(d => d.ShowError(It.IsAny<string>(), It.IsAny<string>()))
+            .Callback<string, string>((message, _) => shownMessage = message);
+
+        // Act
+        await _viewModel.SaveAsync();
+
+        // Assert
+        _dialogServiceMock.Verify(d => d.ShowError(It.IsAny<string>(), It.IsAny<string>()), Times.Once);
+        shownMessage.Should().NotBeNull();
+        shownMessage!.Should().Contain("H-002", "どの交通系ICカードで起きたかを特定できる必要がある");
+        shownMessage.Should().Contain("残高の行を手動で追加してください", "復旧手段を提示する必要がある");
+
+        // 生の例外メッセージを露出しない（Issue #1614）
+        shownMessage.Should().NotContain("database is locked");
+
+        // 取り込む利用履歴が存在しないため、CSVインポートは実行できない指示になる
+        shownMessage.Should().NotContain("CSVインポート");
+    }
+
+    /// <summary>
+    /// 初期残高行の書込みが失敗しても、カード自体は登録済みのため一覧を更新し編集を終了すること。
+    /// </summary>
+    [Fact]
+    public async Task SaveAsync_NewCard_WithoutHistory_WhenInitialLedgerWriteFails_ShouldStillRefreshListAndExitEditMode()
+    {
+        // Arrange
+        var idm = "0102030405060708";
+        ArrangeNewCardWithoutHistory(idm, "H-002");
+        _ledgerRepositoryMock.Setup(r => r.InsertAsync(It.IsAny<Ledger>()))
+            .ThrowsAsync(new InvalidOperationException("database is locked"));
+
+        // Act
+        await _viewModel.SaveAsync();
+
+        // Assert
+        _viewModel.IsEditing.Should().BeFalse("カード行は登録済みのため編集モードは終了する");
+        _cardRepositoryMock.Verify(r => r.GetAllAsync(), Times.AtLeastOnce(),
+            "登録済みのカードを一覧に反映する必要がある");
+    }
+
+    /// <summary>
+    /// 一覧の再読込が失敗しても、初期残高行の書込み失敗の通知は行われること。
+    /// </summary>
+    /// <remarks>
+    /// Issue #1727 と同じ理由。書込みが失敗する原因（共有フォルダの切断・DB のロック）は
+    /// 直後の <c>LoadCardsAsync</c>（<c>GetAllAsync</c>）でも同じく例外になるため、
+    /// 通知を後処理のあとに置いたままだと本修正が対象とする状況でだけ通知が失われる。
+    /// </remarks>
+    [Fact]
+    public async Task SaveAsync_NewCard_WithoutHistory_WhenWriteFailsAndRefreshAlsoFails_StillNotifiesFailure()
+    {
+        // Arrange
+        var idm = "0102030405060708";
+        ArrangeNewCardWithoutHistory(idm, "H-002");
+        _ledgerRepositoryMock.Setup(r => r.InsertAsync(It.IsAny<Ledger>()))
+            .ThrowsAsync(new InvalidOperationException("database is locked"));
+        _cardRepositoryMock.Setup(r => r.GetAllAsync())
+            .ThrowsAsync(new InvalidOperationException("database is locked"));
+
+        string? shownMessage = null;
+        _dialogServiceMock.Setup(d => d.ShowError(It.IsAny<string>(), It.IsAny<string>()))
+            .Callback<string, string>((message, _) => shownMessage = message);
+
+        // Act
+        Func<Task> act = async () => await _viewModel.SaveAsync();
+
+        // Assert
+        await act.Should().NotThrowAsync("後処理の失敗で未処理例外にしない");
+        shownMessage.Should().NotBeNull("一覧の再読込が失敗しても書込み失敗は通知する");
+        _viewModel.IsStatusError.Should().BeTrue();
+        _viewModel.IsEditing.Should().BeFalse("カード行は登録済みのため編集モードは終了する");
+    }
+
+    /// <summary>
+    /// 初期残高行の書込みが成功した場合は従来どおり「登録しました」と表示し、
+    /// エラーダイアログを出さないこと（回帰防止）。
+    /// </summary>
+    [Fact]
+    public async Task SaveAsync_NewCard_WithoutHistory_WhenInitialLedgerSucceeds_ShouldReportSuccess()
+    {
+        // Arrange
+        var idm = "0102030405060708";
+        ArrangeNewCardWithoutHistory(idm, "H-002");
+        _ledgerRepositoryMock.Setup(r => r.InsertAsync(It.IsAny<Ledger>())).ReturnsAsync(1);
+
+        // Act
+        await _viewModel.SaveAsync();
+
+        // Assert
+        _viewModel.StatusMessage.Should().Be("登録しました");
+        _viewModel.IsStatusError.Should().BeFalse();
+        _dialogServiceMock.Verify(d => d.ShowError(It.IsAny<string>(), It.IsAny<string>()), Times.Never);
+        _ledgerRepositoryMock.Verify(r => r.InsertAsync(It.Is<Ledger>(l =>
+            l.CardIdm == idm && l.Summary == "新規購入" && l.Balance == 5000
+        )), Times.Once, "初期残高行は従来どおり登録される");
+    }
+
+    /// <summary>
+    /// 残額を読み取れなかった場合は、初期レコードを作らずカード登録のみ成功させること（Issue #1282 の維持）。
+    /// </summary>
+    /// <remarks>
+    /// <c>BuildInitialLedgerAsync</c> が返す null は「残額の読み取りに失敗した」の表現であり、
+    /// DB 書き込みの失敗ではない。Issue #1763 で書込み失敗を通知するようにしたあとも、
+    /// こちらは通知の対象にしない（Issue #1282 の判断）。
+    /// </remarks>
+    [Fact]
+    public async Task SaveAsync_NewCard_WithoutHistory_WhenBalanceUnavailable_ShouldReportSuccessWithoutLedger()
+    {
+        // Arrange
+        var idm = "0102030405060708";
+        _cardRepositoryMock.Setup(r => r.GetByIdmAsync(idm, true)).ReturnsAsync((IcCard?)null);
+        _cardRepositoryMock.Setup(r => r.InsertAsync(It.IsAny<IcCard>())).ReturnsAsync(true);
+        _cardReaderMock.Setup(r => r.ReadHistoryAsync(idm)).ReturnsAsync(new List<LedgerDetail>());
+        _cardReaderMock.Setup(r => r.ReadBalanceAsync(idm)).ReturnsAsync((int?)null);
+
+        _viewModel.StartNewCard();
+        _viewModel.EditCardIdm = idm;
+        _viewModel.EditCardType = "はやかけん";
+        _viewModel.EditCardNumber = "H-002";
+
+        // Act
+        await _viewModel.SaveAsync();
+
+        // Assert
+        _viewModel.StatusMessage.Should().Be("登録しました");
+        _viewModel.IsStatusError.Should().BeFalse();
+        _dialogServiceMock.Verify(d => d.ShowError(It.IsAny<string>(), It.IsAny<string>()), Times.Never);
+        _ledgerRepositoryMock.Verify(r => r.InsertAsync(It.IsAny<Ledger>()), Times.Never,
+            "残額が取得できない場合は初期レコードを作らない（Issue #1282）");
+    }
+
+    #endregion
+
     #region Issue #1759: 影響行数0（競合）を検出したときの案内と一覧再読込
 
     /// <summary>

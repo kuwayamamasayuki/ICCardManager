@@ -78,7 +78,7 @@ namespace ICCardManager.ViewModels
         /// </summary>
         /// <remarks>
         /// 未登録カード検出時にMainViewModelで残高を読み取り、この値に設定する。
-        /// CreateNewPurchaseLedgerAsyncでこの値を使用することで、カードがリーダーから
+        /// <see cref="BuildInitialLedgerAsync"/> でこの値を使用することで、カードがリーダーから
         /// 離れた後でも正しい残高で「新規購入」レコードを作成できる。
         /// </remarks>
         private int? _preReadBalance;
@@ -574,8 +574,8 @@ namespace ICCardManager.ViewModels
                             .ThenByDescending(d => d.Balance)
                             .ToList();
 
-                        // Issue #1727: 履歴インポートが失敗した場合の理由（成功時は null）
-                        string historyImportFailureReason = null;
+                        // Issue #1727 / #1763: 登録直後の台帳書き込みに失敗した場合の通知内容（成功時は null）
+                        RegistrationLedgerFailureMessage ledgerFailure = null;
 
                         if (filteredHistory != null && filteredHistory.Count > 0)
                         {
@@ -595,9 +595,8 @@ namespace ICCardManager.ViewModels
                             {
                                 // Issue #1727: 以前はここで Success を見ておらず「登録しました」と表示していた。
                                 // 台帳には 1 行も入っていないため、必ずユーザーへ通知する。
-                                historyImportFailureReason = string.IsNullOrWhiteSpace(importResult.FailureReason)
-                                    ? "データベースへの書き込み中に問題が発生しました。"
-                                    : importResult.FailureReason;
+                                ledgerFailure = RegistrationLedgerFailureMessage.ForHistoryImport(
+                                    sanitizedCardNumber, importResult.FailureReason);
                             }
                             else if (importResult.MayHaveIncompleteHistory)
                             {
@@ -613,8 +612,38 @@ namespace ICCardManager.ViewModels
                         }
                         else
                         {
-                            // 履歴がない場合: 従来どおり
-                            await CreateInitialLedgerAsync(EditCardIdm, modeResult);
+                            // 履歴がない場合: 初期残高行だけを登録する。
+                            //
+                            // Issue #1763: 以前はここだけ `_ledgerRepository.InsertAsync` を直接呼び、
+                            // 例外を LogWarning で握りつぶして「登録しました」と表示していた。
+                            // ここで失われる行は「新規購入 / ○月から繰越」＝**そのカード唯一の受入行**で、
+                            // 欠落すると台帳が 0 行のまま払出だけが積み上がり、月次帳票で
+                            // 「受入 − 払出 = 残額」が年度を通して成立しなくなる。
+                            //
+                            // 履歴あり経路と同じ ImportHistoryForRegistrationAsync に寄せることで、
+                            // リトライ（ExecuteWithRetryAsync）・トランザクション・FailureReason を
+                            // そのまま再利用する。同メソッドは
+                            // 「filtered.Count == 0 かつ initialLedger != null」の分岐を既に持つ。
+                            var initialLedger = await BuildInitialLedgerAsync(EditCardIdm, modeResult);
+
+                            // Issue #1282: 残額を読み取れなかった場合（カード未タッチ・読み取りエラー）は
+                            // 初期レコードを作らずカード登録のみ成功させる。null は「読み取り失敗」の
+                            // 表現であって書き込みの失敗ではないため、ここは通知の対象にしない。
+                            if (initialLedger != null)
+                            {
+                                // 履歴は空リストを渡す。filteredHistory が null の場合も
+                                // 「対象期間内の履歴が 0 件」であることに変わりはなく、
+                                // 空リストなら履歴の完全性チェック（MayHaveIncompleteHistory）も
+                                // 従来どおり働かない＝この経路の挙動を変えない。
+                                var initialLedgerResult = await _lendingService.ImportHistoryForRegistrationAsync(
+                                    EditCardIdm, new List<LedgerDetail>(), importFromDate, initialLedger);
+
+                                if (!initialLedgerResult.Success)
+                                {
+                                    ledgerFailure = RegistrationLedgerFailureMessage.ForInitialBalance(
+                                        sanitizedCardNumber, initialLedgerResult.FailureReason);
+                                }
+                            }
                         }
 
                         var savedIdm = EditCardIdm;
@@ -622,36 +651,27 @@ namespace ICCardManager.ViewModels
                         {
                             await LoadCardsAsync();
                         }
-                        catch (Exception ex) when (historyImportFailureReason != null)
+                        catch (Exception ex) when (ledgerFailure != null)
                         {
-                            // Issue #1727: 取込が失敗する原因（共有フォルダの切断・DB のロック）は、
+                            // Issue #1727: 書き込みが失敗する原因（共有フォルダの切断・DB のロック）は、
                             // 直後の一覧再読込でも同じく例外になる。ここで例外を通すと
                             // **失敗の通知そのものが失われ**、無言失敗に逆戻りする
                             // （カード行と操作ログはコミット済みなので、職員は登録失敗と誤解して
                             // 再登録し「既に登録されています」に突き当たる）。
                             // 例外フィルタで失敗時のみ握るため、成功時の挙動は変えない。
                             _logger?.LogWarning(ex,
-                                "履歴取込失敗の通知前に行うカード一覧の再読込に失敗しました。" +
-                                "一覧は古い可能性がありますが、取込失敗の通知は続行します。");
+                                "台帳書き込み失敗の通知前に行うカード一覧の再読込に失敗しました。" +
+                                "一覧は古い可能性がありますが、書き込み失敗の通知は続行します。");
                         }
                         CancelEdit();
                         SelectAndHighlight(savedIdm);
 
                         // Issue #1727: CancelEdit() は StatusMessage / IsStatusError をクリアするため、
                         // 結果の表示は必ず後処理のあとに行う（先に設定すると消えて何も表示されない）。
-                        if (historyImportFailureReason != null)
+                        if (ledgerFailure != null)
                         {
-                            _dialogService.ShowError(
-                                $"交通系ICカード（管理番号 {sanitizedCardNumber}）の登録は完了しました。\n\n" +
-                                $"ただし、カード内の利用履歴を台帳に取り込めませんでした。{historyImportFailureReason}\n\n" +
-                                "取込は取り消されたため、この交通系ICカードの台帳には利用履歴の行も" +
-                                "登録時の残高の行も記録されていません。このままでは月次帳票の残額が" +
-                                "実際のカード残高と一致しません。\n\n" +
-                                "履歴画面のCSVインポートで利用履歴を取り込むか、" +
-                                "履歴画面から残高の行を手動で追加してください。",
-                                "利用履歴の取込に失敗");
-                            StatusMessage = "カードは登録しましたが利用履歴を取り込めませんでした。" +
-                                "履歴画面のCSVインポートで補完してください。";
+                            _dialogService.ShowError(ledgerFailure.DialogMessage, ledgerFailure.DialogTitle);
+                            StatusMessage = ledgerFailure.StatusMessage;
                             IsStatusError = true;
                         }
                         else
@@ -1382,54 +1402,19 @@ namespace ICCardManager.ViewModels
         }
 
         /// <summary>
-        /// 初期レコード（新規購入または繰越）を作成して登録（Issue #510）
+        /// 初期レコード（新規購入または繰越）を組み立てる（Issue #510 / Issue #1727 で組み立てと登録を分離）
         /// </summary>
         /// <remarks>
-        /// 履歴インポートを伴わない経路（カード内に対象履歴が無い場合）で使用する。
-        /// 履歴がある場合は <see cref="BuildInitialLedgerAsync"/> で組み立てたものを
-        /// <c>LendingService.ImportHistoryForRegistrationAsync</c> へ渡し、
-        /// 履歴行と同一トランザクションで登録すること（Issue #1727）。
-        /// </remarks>
-        /// <param name="cardIdm">カードのIDm</param>
-        /// <param name="modeResult">登録モードの選択結果</param>
-        private async Task CreateInitialLedgerAsync(
-            string cardIdm,
-            Views.Dialogs.CardRegistrationModeResult modeResult)
-        {
-            var ledger = await BuildInitialLedgerAsync(cardIdm, modeResult);
-            if (ledger == null)
-            {
-                // 残額が取得できなかった場合は、初期レコードは作成しない
-                // （カードがタッチされていない、または読み取りエラー）
-                return;
-            }
-
-            try
-            {
-                await _ledgerRepository.InsertAsync(ledger);
-            }
-            catch (Exception ex)
-            {
-                // Issue #1282: 初期レコードの登録に失敗しても、カード登録自体は成功させる。
-                //
-                // **注意（Issue #1727 のレビュー指摘）**: この握りつぶしは「軽微だから」ではない。
-                // ここで失われる行は「新規購入 / ○月から繰越」＝**そのカード唯一の受入行**であり、
-                // 欠落すると月次帳票で「受入 − 払出 = 残額」が年度を通して成立しなくなる。
-                // 履歴インポート経路（#1727 で修正済み）と同じ無言のデータ欠損が、
-                // この分岐にはまだ残っている。加えてこの経路は ExecuteWithRetryAsync で
-                // 包まれていないため、共有モードの一過性 SQLITE_BUSY で一発失敗し得る。
-                // 是正には失敗をユーザーへ通知する経路が必要なため、Issue #1763 で扱う。
-                _logger?.LogWarning(ex,
-                    "カード登録後の初期残額レコードの登録に失敗しました。" +
-                    "カード登録自体は成功しており、初期レコードは後から手動で追加できます。");
-            }
-        }
-
-        /// <summary>
-        /// 初期レコード（新規購入または繰越）を組み立てる（Issue #1727 で <see cref="CreateInitialLedgerAsync"/> から分離）
-        /// </summary>
-        /// <remarks>
-        /// DB へは書き込まない。呼び出し元が登録タイミング（単独 / 履歴インポートと同一トランザクション）を決める。
+        /// <para>
+        /// DB へは書き込まない。登録は呼び出し元（<c>SaveAsync</c>）が
+        /// <c>LendingService.ImportHistoryForRegistrationAsync</c> に委ね、
+        /// カード内の履歴の有無にかかわらず**リトライとトランザクションで包む**
+        /// （履歴あり＝Issue #1727／履歴なし＝Issue #1763）。
+        /// </para>
+        /// <para>
+        /// 戻り値の null は「残額を読み取れなかった」の表現であって書き込みの失敗ではない。
+        /// この場合は初期レコードを作らずカード登録のみ成功させる（Issue #1282）。
+        /// </para>
         /// </remarks>
         /// <param name="cardIdm">カードのIDm</param>
         /// <param name="modeResult">登録モードの選択結果</param>
