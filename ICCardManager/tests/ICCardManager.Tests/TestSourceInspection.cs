@@ -431,13 +431,18 @@ internal static class TestSourceInspection
     /// 対応は必ず <c>using</c> 直後の <c>(</c> から取ること。
     /// </para>
     /// <para>
-    /// 波括弧を伴わない <c>using var x = Factory();</c> 形は対象外（範囲がステートメント単位で
-    /// 決まらないため）。検査側で別途禁止するか、対象コードで使わないこと。
+    /// <b>波括弧を伴わない <c>using var x = Factory();</c> 形（using 宣言）も列挙する。</b>
+    /// C# の using 宣言はスコープが<b>宣言位置から囲みブロックの末尾まで</b>と決まっており、
+    /// その間に表示されるモーダルはすべて処理中スコープの内側にある。この形を対象外にすると、
+    /// <c>ReportViewModel.CreateReportsAsync</c>（<c>using var busyScope = BeginCancellableBusy(...)</c>）の
+    /// ように<b>実際に違反しているコードが 1 件も検査されないまま緑になる</b>
+    /// （<c>.claude/rules/testing.md</c>「ガードの検出漏れは緑になる — 対象の絞り込みが
+    /// fail-open になっていないか確認する」）。範囲の開始は宣言文の先頭とする。
     /// </para>
     /// </remarks>
     /// <param name="codeOnlySource"><see cref="ToCodeOnly"/> / <see cref="ToCodeOnlyPreservingLines"/> を通したソース。</param>
     /// <param name="factoryName">スコープを作るメソッド名（例: <c>"BeginBusy"</c>）。前方一致で照合する。</param>
-    /// <returns>スコープ本体の範囲（開始 <c>{</c> の位置、終了 <c>}</c> の位置）。出現順。</returns>
+    /// <returns>スコープの範囲（開始位置、終了 <c>}</c> の位置）。出現順ではなく開始位置順。</returns>
     public static IReadOnlyList<(int Start, int End)> ExtractUsingScopeBodies(
         string codeOnlySource, string factoryName)
     {
@@ -496,7 +501,7 @@ internal static class TestSourceInspection
 
             if (braceStart >= codeOnlySource.Length || codeOnlySource[braceStart] != '{')
             {
-                // using var 形など、波括弧を伴わないスコープ
+                // 波括弧を伴わないスコープ（式形式の using など）。宣言形は下で別途拾う。
                 continue;
             }
 
@@ -507,7 +512,51 @@ internal static class TestSourceInspection
             }
         }
 
+        // using 宣言形（`using var x = Factory(...);`）: 宣言位置から囲みブロックの末尾まで
+        var declarationPattern = new Regex(
+            @"using\s+var\s+\w+\s*=\s*" + Regex.Escape(factoryName) + @"\w*\s*\(");
+
+        foreach (Match match in declarationPattern.Matches(codeOnlySource))
+        {
+            var enclosingEnd = FindEnclosingBlockEnd(codeOnlySource, match.Index);
+            if (enclosingEnd >= 0)
+            {
+                scopes.Add((match.Index, enclosingEnd));
+            }
+        }
+
+        scopes.Sort((a, b) => a.Start.CompareTo(b.Start));
         return scopes;
+    }
+
+    /// <summary>
+    /// <paramref name="from"/> を含むブロックの閉じ <c>}</c> の位置を返す。見つからないなら -1。
+    /// </summary>
+    /// <remarks>
+    /// using 宣言（<c>using var x = Factory();</c>）のスコープ終端の算出に使う。
+    /// 開始位置から前方へ走査し、深さ 0 で現れた <c>}</c> が囲みブロックの終わり。
+    /// </remarks>
+    private static int FindEnclosingBlockEnd(string codeOnlySource, int from)
+    {
+        var depth = 0;
+        for (var i = from; i < codeOnlySource.Length; i++)
+        {
+            if (codeOnlySource[i] == '{')
+            {
+                depth++;
+            }
+            else if (codeOnlySource[i] == '}')
+            {
+                if (depth == 0)
+                {
+                    return i;
+                }
+
+                depth--;
+            }
+        }
+
+        return -1;
     }
 
     /// <summary>

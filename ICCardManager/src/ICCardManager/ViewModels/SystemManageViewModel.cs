@@ -31,9 +31,11 @@ public partial class SystemManageViewModel : ViewModelBase
     /// ダイアログ表示（Issue #1793 で <c>MessageBox.Show</c> 直呼びから移行）
     /// </summary>
     /// <remarks>
-    /// 移行したのは <c>BeginBusy</c> スコープの内側から出す 2 か所（リストア前バックアップ失敗時の
-    /// 続行確認）のみ。直呼びのままでは呼び出し時点の <c>IsBusy</c> をテストで捕捉できず、
-    /// Issue #1793 の回帰を挙動テストで固定できないため。スコープ外の 4 か所は本 Issue の
+    /// 移行したのはリストア経路の確認 4 か所。内訳は <c>BeginBusy</c> スコープの内側から出す
+    /// 2 か所（リストア前バックアップ失敗時の続行確認。本 Issue の対象）と、その手前の
+    /// 入口の確認 2 か所。入口も併せて移したのは、そこが <c>MessageBox</c> 直呼びのままだと
+    /// 単体テストが実モーダルに入って止まり、<b>スコープ内側の続行確認へ到達するテストが
+    /// 1 件も書けない</b>ため。リストア完了の通知（スコープ外の 2 か所）は本 Issue の
     /// 対象ではないので触れていない（移行するなら別 Issue）。
     /// </remarks>
     private readonly IDialogService _dialogService;

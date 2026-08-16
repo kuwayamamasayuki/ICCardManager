@@ -736,11 +736,18 @@ public partial class ReportViewModel : ViewModelBase
                     // テンプレートエラーの場合は中断
                     if (result.ErrorMessage?.Contains("テンプレート") == true)
                     {
-                        MessageBox.Show(
-                            result.DetailedErrorMessage ?? result.ErrorMessage,
-                            "テンプレートエラー",
-                            MessageBoxButton.OK,
-                            MessageBoxImage.Error);
+                        // Issue #1793: 本メソッドの処理中スコープは using 宣言形
+                        // （`using var busyScope = ...`）でメソッド末尾まで続くため、
+                        // ここは BeginCancellableBusy スコープの内側にあたる。囲まないと
+                        // 全面オーバーレイと「帳票を作成中...」の進捗バーがダイアログの背後で回り続ける。
+                        using (SuspendBusy())
+                        {
+                            MessageBox.Show(
+                                result.DetailedErrorMessage ?? result.ErrorMessage,
+                                "テンプレートエラー",
+                                MessageBoxButton.OK,
+                                MessageBoxImage.Error);
+                        }
                         SetStatus("テンプレートエラーにより中断しました", true);
                         return;
                     }
@@ -762,11 +769,15 @@ public partial class ReportViewModel : ViewModelBase
                 if (failedCards.Count > 0)
                 {
                     var failedMessage = string.Join("\n", failedCards.Select(f => $"・{f.CardName}: {f.ErrorMessage}"));
-                    MessageBox.Show(
-                        $"以下のカードで帳票作成に失敗しました:\n\n{failedMessage}",
-                        "帳票作成エラー",
-                        MessageBoxButton.OK,
-                        MessageBoxImage.Warning);
+                    // Issue #1793: 上と同じく using 宣言形の処理中スコープの内側。
+                    using (SuspendBusy())
+                    {
+                        MessageBox.Show(
+                            $"以下のカードで帳票作成に失敗しました:\n\n{failedMessage}",
+                            "帳票作成エラー",
+                            MessageBoxButton.OK,
+                            MessageBoxImage.Warning);
+                    }
                 }
             }
         }
@@ -928,13 +939,18 @@ public partial class ReportViewModel : ViewModelBase
             var documentTitle = $"物品出納簿_{card.CardType}_{card.CardNumber}_{SelectedYear}年{SelectedMonth}月";
 
             // プレビューダイアログを表示（ReportPrintDataを渡して用紙方向変更時に再生成可能に）
-            _navigationService.ShowDialog<Views.Dialogs.PrintPreviewDialog>(d =>
+            // Issue #1793: ShowDialog は同期モーダル。囲まないと職員がプレビューを見ている間ずっと
+            // 「プレビューを準備中...」のオーバーレイが背後で回り続ける（準備は既に終わっている）。
+            using (SuspendBusy())
             {
-                d.ViewModel.SetDocument(reportData, documentTitle);
-                // 印刷プレビューはアクティブウィンドウ（ReportDialog）をOwnerにする
-                d.Owner = Application.Current.Windows.OfType<Window>().FirstOrDefault(w => w.IsActive)
-                          ?? Application.Current.MainWindow;
-            });
+                _navigationService.ShowDialog<Views.Dialogs.PrintPreviewDialog>(d =>
+                {
+                    d.ViewModel.SetDocument(reportData, documentTitle);
+                    // 印刷プレビューはアクティブウィンドウ（ReportDialog）をOwnerにする
+                    d.Owner = Application.Current.Windows.OfType<Window>().FirstOrDefault(w => w.IsActive)
+                              ?? Application.Current.MainWindow;
+                });
+            }
         }
     }
 
@@ -986,13 +1002,17 @@ public partial class ReportViewModel : ViewModelBase
                 : $"物品出納簿_{orderedSelectedCards.Count}件_{SelectedYear}年{SelectedMonth}月";
 
             // プレビューダイアログを表示（List<ReportPrintData>を渡して用紙方向変更時に再生成可能に）
-            _navigationService.ShowDialog<Views.Dialogs.PrintPreviewDialog>(d =>
+            // Issue #1793: 単票プレビューと同じ理由で SuspendBusy で囲む。
+            using (SuspendBusy())
             {
-                d.ViewModel.SetDocument(reportDataList, documentTitle);
-                // 印刷プレビューはアクティブウィンドウ（ReportDialog）をOwnerにする
-                d.Owner = Application.Current.Windows.OfType<Window>().FirstOrDefault(w => w.IsActive)
-                          ?? Application.Current.MainWindow;
-            });
+                _navigationService.ShowDialog<Views.Dialogs.PrintPreviewDialog>(d =>
+                {
+                    d.ViewModel.SetDocument(reportDataList, documentTitle);
+                    // 印刷プレビューはアクティブウィンドウ（ReportDialog）をOwnerにする
+                    d.Owner = Application.Current.Windows.OfType<Window>().FirstOrDefault(w => w.IsActive)
+                              ?? Application.Current.MainWindow;
+                });
+            }
         }
     }
 

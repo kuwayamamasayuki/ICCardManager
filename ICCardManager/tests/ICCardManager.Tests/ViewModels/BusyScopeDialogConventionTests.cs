@@ -39,11 +39,18 @@ public class BusyScopeDialogConventionTests
 {
     /// <summary>
     /// モーダル表示とみなす呼び出し。<c>MessageBox.Show</c> の直呼びも対象に含める
-    /// （Issue #1793 で <c>SystemManageViewModel</c> の 2 か所を <c>IDialogService</c> へ移したが、
+    /// （Issue #1793 で <c>SystemManageViewModel</c> の一部を <c>IDialogService</c> へ移したが、
     /// 直呼びが再び持ち込まれても検出できるようにする）。
     /// </summary>
+    /// <remarks>
+    /// <b>モーダルは <c>IDialogService</c> 経由だけではない。</b><c>INavigationService.ShowDialog&lt;T&gt;()</c> は
+    /// <c>Window.ShowDialog()</c> を呼ぶ同期モーダルで、<c>OpenFileDialog</c> / <c>SaveFileDialog</c> /
+    /// <c>FolderBrowserDialog</c> の <c>ShowDialog()</c> も同じ。<c>_dialogService.Show*</c> だけを見ると
+    /// <c>ReportViewModel</c> の印刷プレビュー（<c>_navigationService.ShowDialog&lt;PrintPreviewDialog&gt;</c>）が
+    /// <b>スコープ内にあるのに 1 件も検出されない</b>ため、<c>X.ShowDialog[Async]&lt;T&gt;(</c> 形も対象にする。
+    /// </remarks>
     private static readonly Regex ModalCallPattern = new Regex(
-        @"(_dialogService\.Show\w+|MessageBox\.Show)\s*\(");
+        @"(_dialogService\.Show\w+|MessageBox\.Show|\w+\.ShowDialog\w*)\s*(?:<[^<>()]*>\s*)?\(");
 
     /// <summary>
     /// 処理中スコープの範囲を列挙する。
@@ -86,7 +93,30 @@ public class BusyScopeDialogConventionTests
         => code.Take(index).Count(c => c == '\n') + 1;
 
     /// <summary>
-    /// その呼び出しが「遅延実行される（ラムダの中にある）」か
+    /// 「変数へ代入される／<c>return</c> される」ラムダの直前形。末尾が <c>=&gt;</c> であること。
+    /// </summary>
+    /// <remarks>
+    /// <b>「ラムダの中にある」だけでは遅延実行の根拠にならない。</b>
+    /// <c>Dispatcher.InvokeAsync(async () =&gt; { ... })</c> や <c>Task.Run(() =&gt; { ... })</c> の本体は
+    /// その場（＝<c>IsBusy=true</c> のまま）で走るため、ラムダを一律に除外すると
+    /// <b>ガードが fail-open になる</b>（<c>.claude/rules/testing.md</c>「ガードの検出漏れは緑になる」）。
+    /// 除外してよいのは Issue #1784 の遅延 <c>Action</c> 方式、すなわち
+    /// <c>pending = () =&gt; ...</c> / <c>return () =&gt; ...</c> のように<b>後で呼ぶために保持される</b>形だけ。
+    /// </remarks>
+    private static readonly Regex HeldLambdaTailPattern = new Regex(
+        @"(?:(?<![=!<>+\-*/%&|^])=|\breturn\b)\s*(?:async\s+)?(?:\(\s*\)|\w+|\([^()]*\))\s*=>\s*\z");
+
+    /// <summary>
+    /// <paramref name="index"/> の直前が「保持されるラムダの本体開始位置」か
+    /// </summary>
+    private static bool IsHeldForLaterInvocation(string code, int index)
+    {
+        var from = Math.Max(0, index - 160);
+        return HeldLambdaTailPattern.IsMatch(code.Substring(from, index - from));
+    }
+
+    /// <summary>
+    /// その呼び出しが「遅延実行される（後で呼ぶために保持されたラムダの中にある）」か
     /// </summary>
     /// <remarks>
     /// <para>
@@ -97,25 +127,21 @@ public class BusyScopeDialogConventionTests
     /// </para>
     /// <para>
     /// この除外を入れないと、<b>規約を守っている実装（#1784）で赤になる</b>。誤検出はガード自体の
-    /// 寿命を縮める（<c>.claude/rules/testing.md</c>「違反の確定を早まらない」）。
+    /// 寿命を縮める（<c>.claude/rules/testing.md</c>「違反の確定を早まらない」）。ただし
+    /// <b>除外を「ラムダ全般」へ広げると今度は fail-open になる</b>ため、
+    /// <see cref="HeldLambdaTailPattern"/> で保持されるラムダに限定する。
     /// </para>
     /// </remarks>
-    private static bool IsDeferred(string code, int callIndex, IReadOnlyList<(int Start, int End)> lambdaBlocks)
-    {
-        if (IsInsideAny(lambdaBlocks, callIndex))
-        {
-            return true;
-        }
+    private static bool IsDeferred(string code, int callIndex, IReadOnlyList<(int Start, int End)> heldLambdaBlocks)
+        => IsInsideAny(heldLambdaBlocks, callIndex) || IsHeldForLaterInvocation(code, callIndex);
 
-        // 式形式のラムダ（`() => _dialogService.ShowXxx(...)`）: 直前の非空白が "=>"
-        var i = callIndex - 1;
-        while (i >= 0 && char.IsWhiteSpace(code[i]))
-        {
-            i--;
-        }
-
-        return i >= 1 && code[i] == '>' && code[i - 1] == '=';
-    }
+    /// <summary>
+    /// 後で呼ぶために保持されるラムダ（ブロック本体）の範囲を列挙する
+    /// </summary>
+    private static IReadOnlyList<(int Start, int End)> ExtractHeldLambdaBlocks(string code)
+        => TestSourceInspection.ExtractLambdaBlockBodies(code)
+            .Where(b => IsHeldForLaterInvocation(code, b.Start))
+            .ToList();
 
     /// <summary>
     /// 指定位置を含む最も内側のスコープがあるか
@@ -132,7 +158,7 @@ public class BusyScopeDialogConventionTests
         {
             var busyScopes = ExtractBusyScopes(code);
             var suspendScopes = TestSourceInspection.ExtractUsingScopeBodies(code, "SuspendBusy");
-            var lambdaBlocks = TestSourceInspection.ExtractLambdaBlockBodies(code);
+            var lambdaBlocks = ExtractHeldLambdaBlocks(code);
 
             foreach (Match call in ModalCallPattern.Matches(code))
             {
@@ -167,9 +193,15 @@ public class BusyScopeDialogConventionTests
 
         files.Should().NotBeEmpty("BeginBusy を使う ViewModel が 1 つも見つからないのは絞り込みの不具合");
 
-        var scopeTotal = files.Sum(f =>
-            TestSourceInspection.ExtractUsingScopeBodies(f.Code, "BeginBusy").Count);
-        scopeTotal.Should().BeGreaterThan(5, "BeginBusy スコープの総数が極端に少ないのは抽出の不具合");
+        // 数え方は検出側（ExtractBusyScopes）と揃える。BeginBusy だけを数えると、
+        // BeginCancellableBusy／using 宣言形しか持たないファイルの抽出が壊れても気付けない。
+        var scopeTotal = files.Sum(f => ExtractBusyScopes(f.Code).Count);
+        scopeTotal.Should().BeGreaterThan(5, "処理中スコープの総数が極端に少ないのは抽出の不具合");
+
+        // using 宣言形（`using var busyScope = BeginCancellableBusy(...)`）が
+        // 抽出から落ちていないことを実データで表明する（落ちると違反が 1 件も検査されない）。
+        files.Sum(f => TestSourceInspection.ExtractUsingScopeBodies(f.Code, "BeginCancellableBusy").Count)
+            .Should().BeGreaterThan(0, "BeginCancellableBusy のスコープが 0 件なのは抽出の不具合");
     }
 
     [Fact]
@@ -258,6 +290,40 @@ void M()
     }
 }";
 
+        // using 宣言形（波括弧を伴わない）。スコープは宣言位置から囲みブロックの末尾まで。
+        // 対象外にすると ReportViewModel.CreateReportsAsync が丸ごと検査から外れる。
+        const string usingDeclarationScope = @"
+void M()
+{
+    using var busyScope = BeginCancellableBusy(""処理中..."");
+    MessageBox.Show(""ng"", ""t"");
+}";
+
+        // INavigationService 経由のモーダル（Window.ShowDialog）。
+        // _dialogService.Show* だけを見ると印刷プレビューが検出できない。
+        const string navigationDialog = @"
+void M()
+{
+    using (BeginBusy(""準備中...""))
+    {
+        _navigationService.ShowDialog<PrintPreviewDialog>(d =>
+        {
+            d.Owner = null;
+        });
+    }
+}";
+
+        // その場で実行されるラムダ（Dispatcher / Task.Run）は遅延ではない。
+        // 一律にラムダを除外すると、ここが素通りして fail-open になる。
+        const string immediateLambda = @"
+void M()
+{
+    using (BeginBusy(""保存中...""))
+    {
+        Dispatcher.InvokeAsync(() => { _dialogService.ShowError(""ng"", ""t""); });
+    }
+}";
+
         DetectViolations(violating).Should().Be(1, "SuspendBusy で囲まれていない呼び出しを検出すること");
         DetectViolations(compliant).Should().Be(0, "SuspendBusy で囲めば違反ではない");
         DetectViolations(outsideScope).Should().Be(0, "BeginBusy スコープの外は対象外");
@@ -266,6 +332,12 @@ void M()
         DetectViolations(deferredBlock).Should().Be(0, "ブロック形式の遅延ラムダも同様");
         DetectViolations(cancellableScope).Should().Be(1,
             "BeginCancellableBusy も処理中スコープなので検査対象に含めること");
+        DetectViolations(usingDeclarationScope).Should().Be(1,
+            "using 宣言形（using var x = Factory();）のスコープも検査対象に含めること");
+        DetectViolations(navigationDialog).Should().Be(1,
+            "INavigationService.ShowDialog<T>() も同期モーダルなので検査対象に含めること");
+        DetectViolations(immediateLambda).Should().Be(1,
+            "その場で実行されるラムダ（Dispatcher / Task.Run）は遅延ではないので除外しないこと");
     }
 
     private static int DetectViolations(string source)
@@ -273,7 +345,7 @@ void M()
         var code = TestSourceInspection.ToCodeOnlyPreservingLines(source);
         var busyScopes = ExtractBusyScopes(code);
         var suspendScopes = TestSourceInspection.ExtractUsingScopeBodies(code, "SuspendBusy");
-        var lambdaBlocks = TestSourceInspection.ExtractLambdaBlockBodies(code);
+        var lambdaBlocks = ExtractHeldLambdaBlocks(code);
 
         return ModalCallPattern.Matches(code)
             .Cast<Match>()

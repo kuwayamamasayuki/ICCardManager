@@ -37,6 +37,12 @@ public class SystemManageViewModelTests : IDisposable
 
     private const string TestDatabasePath = @"C:\ProgramData\ICCardManager\iccard.db";
 
+    /// <summary>
+    /// Issue #1793 のテストが使う一時バックアップ保存先（<see cref="Dispose"/> で削除する）
+    /// </summary>
+    private static readonly string TempBackupFolder =
+        System.IO.Path.Combine(System.IO.Path.GetTempPath(), "ICCardManagerTests_1793");
+
     public SystemManageViewModelTests()
     {
         _dbContext = new DbContext(":memory:");
@@ -128,6 +134,20 @@ public class SystemManageViewModelTests : IDisposable
     public void Dispose()
     {
         _dbContext?.Dispose();
+
+        // Issue #1793 のテストが作る一時フォルダを後始末する
+        // （作成だけして消さないと、テスト実行のたびに %TEMP% に残り続ける）
+        try
+        {
+            if (System.IO.Directory.Exists(TempBackupFolder))
+            {
+                System.IO.Directory.Delete(TempBackupFolder, recursive: true);
+            }
+        }
+        catch (System.IO.IOException)
+        {
+            // 後始末の失敗はテスト結果に影響させない
+        }
     }
 
     #region 初期状態テスト
@@ -867,10 +887,9 @@ public class SystemManageViewModelTests : IDisposable
         };
         // GetPreRestoreBackupPathAsync が GetAppSettingsAsync を呼ぶ。未設定のままだと
         // null 参照で catch に落ち、検証したい続行確認へ到達しない
-        var backupFolder = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "ICCardManagerTests_1793");
-        System.IO.Directory.CreateDirectory(backupFolder);
+        System.IO.Directory.CreateDirectory(TempBackupFolder);
         _settingsRepositoryMock.Setup(r => r.GetAppSettingsAsync())
-            .ReturnsAsync(new AppSettings { BackupPath = backupFolder });
+            .ReturnsAsync(new AppSettings { BackupPath = TempBackupFolder });
         _backupServiceMock.Setup(s => s.CreateBackupAsync(It.IsAny<string>())).ReturnsAsync(false);
         _backupServiceMock.Setup(s => s.GetBackupFilesAsync())
             .ReturnsAsync(Enumerable.Empty<BackupFileInfo>());
