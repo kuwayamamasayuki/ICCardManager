@@ -147,6 +147,9 @@ namespace ICCardManager.Data.Repositories
         /// </summary>
         /// <remarks>
         /// 取引が無かった月は行が返らない。折れ線グラフでは前月の残高を引き継ぐこと。
+        /// Issue #1770: 月末残高は「その月の最終稼働日」の全レコードを id 順ではなく残高チェーン
+        /// （<c>LedgerOrderHelper.ReorderByBalanceChain</c>）で確定した最終レコードの残高を返す
+        /// （<see cref="GetLatestBeforeDateAsync"/> と同じ規則）。貸出中レコードは母集団から除外する。
         /// </remarks>
         Task<IReadOnlyList<MonthEndBalanceRow>> GetMonthEndBalancesByCardAsync(DateTime fromDate, DateTime toDate);
 
@@ -156,6 +159,9 @@ namespace ICCardManager.Data.Repositories
         /// <remarks>
         /// 残高推移グラフの起点に使う。集計期間の先頭に取引が無いだけのカードを
         /// 「まだ残高が無かった」と誤読させないため、期間前の残高を引き継ぐ。
+        /// Issue #1770: 指定日より前の「最終稼働日」の全レコードを id 順ではなく残高チェーン
+        /// （<c>LedgerOrderHelper.ReorderByBalanceChain</c>）で確定した最終レコードの残高を返す
+        /// （<see cref="GetMonthEndBalancesByCardAsync"/> と同じ規則）。貸出中レコードは母集団から除外する。
         /// </remarks>
         Task<Dictionary<string, int>> GetBalancesBeforeAsync(DateTime beforeDate);
     }

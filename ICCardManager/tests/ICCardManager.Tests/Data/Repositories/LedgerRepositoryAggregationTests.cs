@@ -536,10 +536,11 @@ public class LedgerRepositoryAggregationTests : IDisposable
     }
 
     [Fact]
-    public async Task GetMonthEndBalancesByCardAsync_WithSameDayRecords_PrefersTheLaterInsertedRow()
+    public async Task GetMonthEndBalancesByCardAsync_WithSameDayRecords_ReturnsChainFinalBalance()
     {
         await SeedMastersAsync();
-        // 同一日時の複数レコード。id の大きい方＝後から記録された方を採る（Issue #1068 と同じ順序）
+        // 同一日時の複数レコード。残高チェーン（Issue #784）で確定した最終レコードを採る（Issue #1770）。
+        // この形状はチェーン順（4790 → 4490）と id 順が一致する。
         await InsertLedgerAsync(CardA, new DateTime(2026, 5, 28, 10, 0, 0), expense: 210, balance: 4790);
         await InsertLedgerAsync(CardA, new DateTime(2026, 5, 28, 10, 0, 0), expense: 300, balance: 4490);
 
@@ -547,6 +548,86 @@ public class LedgerRepositoryAggregationTests : IDisposable
             new DateTime(2026, 5, 1), new DateTime(2026, 5, 31));
 
         result.Single().Balance.Should().Be(4490);
+    }
+
+    /// <summary>
+    /// Issue #1770: 同日統合（Issue #837）で id 順が時系列と逆転した日が月の最終稼働日でも、
+    /// 残高チェーン最終の残高が月末残高になることを確認
+    /// </summary>
+    [Fact]
+    public async Task GetMonthEndBalancesByCardAsync_SameDayIdOrderReversed_ReturnsChainFinalBalance()
+    {
+        await SeedMastersAsync();
+        // 月内の先行日 5/9: 残高5000
+        await InsertLedgerAsync(CardA, new DateTime(2026, 5, 9), expense: 260, balance: 5000);
+
+        // 月の最終稼働日 5/10: 時系列は チャージ(5000→8000) → 利用(8000→7740) だが、
+        // 利用行の方が先に INSERT されている（id が小さい = 挿入順が時系列と逆）
+        await InsertLedgerAsync(CardA, new DateTime(2026, 5, 10), expense: 260, balance: 7740);
+        await InsertLedgerAsync(CardA, new DateTime(2026, 5, 10), income: 3000, balance: 8000,
+            summary: SummaryGenerator.GetChargeSummary());
+
+        var result = await _ledgerRepository.GetMonthEndBalancesByCardAsync(
+            new DateTime(2026, 5, 1), new DateTime(2026, 5, 31));
+
+        result.Single().Balance.Should().Be(7740,
+            "id 最大のチャージ行（8,000円＝チャージ直後の中間残高）ではなく残高チェーン最終の利用行を採るべき");
+    }
+
+    /// <summary>
+    /// Issue #1770: 同額のポイント還元と利用で残高が循環する日（Issue #1004 形状）でも、
+    /// 集計期間より前の残高をチェーン開始点として時系列順を確定できることを確認
+    /// </summary>
+    /// <remarks>
+    /// 還元(+240)と利用(-240)が同額だと当日の行だけからは開始点を特定できない。
+    /// 開始点のシードを集計期間（5/1〜5/31）に限定すると 4/30 の残高が拾えず、
+    /// id 順フォールバックに落ちて修正前と同じ値（1,456円）を返す。
+    /// </remarks>
+    [Fact]
+    public async Task GetMonthEndBalancesByCardAsync_SameDayBalanceCycle_ResolvesChainStartFromOutsideTheRange()
+    {
+        await SeedMastersAsync();
+        // 集計期間の直前 4/30: 残高1696
+        await InsertLedgerAsync(CardA, new DateTime(2026, 4, 30), expense: 260, balance: 1696);
+
+        // 5/10: 時系列は 利用(1696→1456) → 還元(1456→1696) だが、還元行の方が id が小さい
+        await InsertLedgerAsync(CardA, new DateTime(2026, 5, 10), income: 240, balance: 1696,
+            summary: SummaryGenerator.GetPointRedemptionSummary());
+        await InsertLedgerAsync(CardA, new DateTime(2026, 5, 10), expense: 240, balance: 1456);
+
+        var result = await _ledgerRepository.GetMonthEndBalancesByCardAsync(
+            new DateTime(2026, 5, 1), new DateTime(2026, 5, 31));
+
+        result.Single().Balance.Should().Be(1696,
+            "残高が循環する日は集計期間外の直前残高を開始点にチェーンを解決すべき");
+    }
+
+    /// <summary>
+    /// Issue #1770: id 逆転が複数カード・複数月に同時に存在しても、
+    /// （カード × 月）ごとに独立してチェーンを解決することを確認
+    /// </summary>
+    [Fact]
+    public async Task GetMonthEndBalancesByCardAsync_SameDayIdOrderReversed_ResolvesEachCardAndMonthIndependently()
+    {
+        await SeedMastersAsync();
+        // CardA 5月: 利用(7740) を先、チャージ(8000) を後に INSERT
+        await InsertLedgerAsync(CardA, new DateTime(2026, 5, 10), expense: 260, balance: 7740);
+        await InsertLedgerAsync(CardA, new DateTime(2026, 5, 10), income: 3000, balance: 8000,
+            summary: SummaryGenerator.GetChargeSummary());
+        // CardA 6月: 利用(2450) を先、チャージ(2500) を後に INSERT
+        await InsertLedgerAsync(CardA, new DateTime(2026, 6, 20), expense: 50, balance: 2450);
+        await InsertLedgerAsync(CardA, new DateTime(2026, 6, 20), income: 500, balance: 2500,
+            summary: SummaryGenerator.GetChargeSummary());
+        // CardB 5月: 逆転なし
+        await InsertLedgerAsync(CardB, new DateTime(2026, 5, 15), expense: 200, balance: 900);
+
+        var result = await _ledgerRepository.GetMonthEndBalancesByCardAsync(
+            new DateTime(2026, 5, 1), new DateTime(2026, 6, 30));
+
+        result.Should().HaveCount(3);
+        result.Single(r => r.CardIdm == CardA && r.YearMonth == "2026-05").Balance.Should().Be(7740);
+        result.Single(r => r.CardIdm == CardA && r.YearMonth == "2026-06").Balance.Should().Be(2450);
+        result.Single(r => r.CardIdm == CardB && r.YearMonth == "2026-05").Balance.Should().Be(900);
     }
 
     [Fact]
@@ -711,6 +792,51 @@ public class LedgerRepositoryAggregationTests : IDisposable
 
         result.Should().HaveCount(1);
         result[CardA].Should().Be(8000);
+    }
+
+    /// <summary>
+    /// Issue #1770: 同日統合（Issue #837）で id 順が時系列と逆転した日が基準日直前の最終稼働日でも、
+    /// 残高チェーン最終の残高が折れ線の起点になることを確認
+    /// </summary>
+    [Fact]
+    public async Task GetBalancesBeforeAsync_SameDayIdOrderReversed_ReturnsChainFinalBalance()
+    {
+        await SeedMastersAsync();
+        // 先行日 4/9: 残高5000
+        await InsertLedgerAsync(CardA, new DateTime(2026, 4, 9), expense: 260, balance: 5000);
+
+        // 基準日直前の最終稼働日 4/10: 時系列は チャージ(5000→8000) → 利用(8000→7740) だが、
+        // 利用行の方が先に INSERT されている（id が小さい = 挿入順が時系列と逆）
+        await InsertLedgerAsync(CardA, new DateTime(2026, 4, 10), expense: 260, balance: 7740);
+        await InsertLedgerAsync(CardA, new DateTime(2026, 4, 10), income: 3000, balance: 8000,
+            summary: SummaryGenerator.GetChargeSummary());
+
+        var result = await _ledgerRepository.GetBalancesBeforeAsync(new DateTime(2026, 5, 1));
+
+        result[CardA].Should().Be(7740,
+            "id 最大のチャージ行（8,000円＝チャージ直後の中間残高）を起点にすると折れ線の起点がずれる");
+    }
+
+    /// <summary>
+    /// Issue #1770: 同額のポイント還元と利用で残高が循環する日（Issue #1004 形状）でも、
+    /// その前日の残高をチェーン開始点として時系列順を確定できることを確認
+    /// </summary>
+    [Fact]
+    public async Task GetBalancesBeforeAsync_SameDayBalanceCycle_ResolvesChainStartFromPrecedingDay()
+    {
+        await SeedMastersAsync();
+        // 前日 4/9: 残高1696
+        await InsertLedgerAsync(CardA, new DateTime(2026, 4, 9), expense: 260, balance: 1696);
+
+        // 4/10: 時系列は 利用(1696→1456) → 還元(1456→1696) だが、還元行の方が id が小さい
+        await InsertLedgerAsync(CardA, new DateTime(2026, 4, 10), income: 240, balance: 1696,
+            summary: SummaryGenerator.GetPointRedemptionSummary());
+        await InsertLedgerAsync(CardA, new DateTime(2026, 4, 10), expense: 240, balance: 1456);
+
+        var result = await _ledgerRepository.GetBalancesBeforeAsync(new DateTime(2026, 5, 1));
+
+        result[CardA].Should().Be(1696,
+            "残高が循環する日は前日残高を開始点にチェーンを解決すべき");
     }
 
     [Fact]
