@@ -1342,7 +1342,8 @@ public partial class MainViewModel : ViewModelBase
     /// <item><description>状態を <see cref="AppState.Processing"/> に変更</description></item>
     /// <item><description>カードリーダーで利用履歴を読み取り</description></item>
     /// <item><description><see cref="LendingService.ReturnAsync"/> を呼び出して返却処理</description></item>
-    /// <item><description>成功時: 返却音を再生、トースト通知を表示、画面を薄い水色に</description></item>
+    /// <item><description>成功時: 返却音を再生、残額付きのトースト通知を表示（メイン画面は変更しない。Issue #186）</description></item>
+    /// <item><description>成功したがコミット後の付帯情報（残額・残額警告）を取得できなかった場合（<see cref="LendingResult.HasPostCommitFailure"/>、Issue #1805）: 警告音＋「返却は記録済み・再タッチしないでください」の警告トーストを表示し、残額付きの通知は出さない</description></item>
     /// <item><description>バス利用がある場合: バス停入力ダイアログを表示</description></item>
     /// <item><description>残額が警告閾値未満の場合: 警告メッセージを表示</description></item>
     /// <item><description>失敗時: エラー音を再生、エラーメッセージを表示</description></item>
@@ -1355,6 +1356,8 @@ public partial class MainViewModel : ViewModelBase
 
         // Issue #1725: 台帳への記録が確定したかを追跡する（ProcessLendAsync と同じ理由）
         var recorded = false;
+        // Issue #1805: LendingService 側で「記録済み・再タッチしない」を案内済みかを追跡する
+        var recordedNotified = false;
         try
         {
             // Issue #1169: カードから履歴を読み取る（リーダーエラーと履歴ゼロ件を区別）
@@ -1375,6 +1378,9 @@ public partial class MainViewModel : ViewModelBase
             if (result.Success)
             {
                 recorded = true;
+                // HandleReturnSuccessAsync の冒頭で HasPostCommitFailure の案内を出すため、
+                // その後の画面更新が同じ原因で失敗しても NotifyProcessingFailure が同題の案内を重ねない
+                recordedNotified = result.HasPostCommitFailure;
 
                 // 30秒ルール用に職員情報を保存（Issue #1725: 後処理より前に確定させる）
                 _lastProcessedStaffIdm = _currentStaffIdm;
@@ -1394,7 +1400,7 @@ public partial class MainViewModel : ViewModelBase
         }
         catch (Exception ex)
         {
-            NotifyProcessingFailure(ex, "返却", card, recorded);
+            NotifyProcessingFailure(ex, "返却", card, recorded, recordedNotified);
         }
         finally
         {
@@ -1413,6 +1419,11 @@ public partial class MainViewModel : ViewModelBase
     /// 台帳への記録が確定済みかどうか。<c>true</c> の場合は「記録済み」として案内し、
     /// 再タッチを促さない。
     /// </param>
+    /// <param name="alreadyNotified">
+    /// 「記録済み・再タッチしない」の案内を既に出しているか（Issue #1805。
+    /// <see cref="LendingResult.HasPostCommitFailure"/> の案内後に同じ原因で画面更新も失敗した場合）。
+    /// <c>true</c> かつ <paramref name="recorded"/> のときはログのみ残し、同題のトーストと警告音を重ねない。
+    /// </param>
     /// <remarks>
     /// <para>
     /// <b>記録済みのときに「もう一度タッチしてください」と案内してはならない。</b>
@@ -1430,7 +1441,7 @@ public partial class MainViewModel : ViewModelBase
     /// 障害調査で経路を追えない（Issue #1716 の教訓）。
     /// </para>
     /// </remarks>
-    private void NotifyProcessingFailure(Exception ex, string operationName, IcCard card, bool recorded)
+    private void NotifyProcessingFailure(Exception ex, string operationName, IcCard card, bool recorded, bool alreadyNotified = false)
     {
         _logger?.LogError(
             ex,
@@ -1441,10 +1452,13 @@ public partial class MainViewModel : ViewModelBase
 
         if (recorded)
         {
-            _soundPlayer.Play(SoundType.Warning);
-            _toastNotificationService.ShowWarning(
-                $"{operationName}は記録済み",
-                "画面の更新に失敗しました。再タッチしないでください。");
+            // Issue #1805: LendingService 側の付帯情報の欠落（HasPostCommitFailure）で既に
+            // 「記録済み・再タッチしない」を案内済みなら、同じ原因（DB ロック・共有フォルダー断）で
+            // 続く画面更新も失敗したときに同題の警告トーストと警告音を重ねて出さない（ログには残す）。
+            if (!alreadyNotified)
+            {
+                NotifyRecordedButIncomplete(operationName, "画面の更新に失敗しました。");
+            }
         }
         else
         {
@@ -1453,6 +1467,24 @@ public partial class MainViewModel : ViewModelBase
                 "エラー",
                 $"{operationName}処理に失敗しました。もう一度タッチしてください。");
         }
+    }
+
+    /// <summary>
+    /// 「台帳への記録は確定したが後処理が完了しなかった」ことを案内します（Issue #1725 / #1805）。
+    /// </summary>
+    /// <param name="operationName">ユーザー視点の操作名（「貸出」「返却」）</param>
+    /// <param name="reason">何が得られなかったか（「画面の更新に失敗しました。」「残額を確認できませんでした。」等。句点で終える）</param>
+    /// <remarks>
+    /// 中立的な <see cref="SoundType.Warning"/> と「{操作}は記録済み」＋「再タッチしないでください」の組を
+    /// 1 か所に集約する。「もう一度タッチ」と案内すると30秒ルールの逆処理で記録済みの操作が取り消されるため、
+    /// 記録済みの案内はすべてここを通す（文言・音の変更が片方だけに入る事故を防ぐ）。
+    /// </remarks>
+    private void NotifyRecordedButIncomplete(string operationName, string reason)
+    {
+        _soundPlayer.Play(SoundType.Warning);
+        _toastNotificationService.ShowWarning(
+            $"{operationName}は記録済み",
+            $"{reason}再タッチしないでください。");
     }
 
     /// <summary>
@@ -1469,11 +1501,22 @@ public partial class MainViewModel : ViewModelBase
     /// </remarks>
     internal async Task HandleReturnSuccessAsync(IcCard card, LendingResult result)
     {
-        // 残高はLendingServiceで設定済み（カードから直接読み取った値を優先）
-        _soundPlayer.Play(SoundType.Return);
+        if (result.HasPostCommitFailure)
+        {
+            // Issue #1805: 返却は台帳に記録済みだが、コミット後の付帯情報（残額・残額警告）を取得できなかった。
+            // result.Balance / IsLowBalance / WarningBalance は信頼できないため残額付きの返却通知は出さない。
+            // 「もう一度タッチ」と案内すると30秒ルールの逆処理で記録済みの返却が取り消される（#1725 と同じ判断）ため、
+            // 「記録済み」＋「再タッチしないでください」＋中立的な警告音で案内する（エラー音は事実と矛盾する）。
+            NotifyRecordedButIncomplete("返却", "残額を確認できませんでした。");
+        }
+        else
+        {
+            // 残高はLendingServiceで設定済み（カードから直接読み取った値を優先）
+            _soundPlayer.Play(SoundType.Return);
 
-        // トースト通知を表示（表示位置は設定に従う、フォーカスを奪わない）
-        _toastNotificationService.ShowReturnNotification(card.CardType, card.CardNumber, result.Balance, result.IsLowBalance, result.WarningBalance);
+            // トースト通知を表示（表示位置は設定に従う、フォーカスを奪わない）
+            _toastNotificationService.ShowReturnNotification(card.CardType, card.CardNumber, result.Balance, result.IsLowBalance, result.WarningBalance);
+        }
 
         // メイン画面は変更しない（Issue #186: 職員の操作を妨げない）
 

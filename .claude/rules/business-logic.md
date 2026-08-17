@@ -30,6 +30,7 @@
 - **「意図が補完なら、補完の条件を書く」**。`if (string.IsNullOrEmpty(_currentStaffIdm))` を付けるだけで意図とコードが一致する。コメントで意図を書いても、コードが無条件なら無条件に動く
 - **null 判定を経路判定の代理に使うなら、その等価性を確かめて明記する**。`AppState.WaitingForStaffCard` へ遷移する経路は `MainViewModel.ResetState()` ただ 1 つで、そこで `_currentStaffIdm` は必ず null になるため「未確定＝職員証タッチ待ち経路」が成立する。この前提が崩れる遷移を足すときは本規則を見直すこと
 - **エラー分岐（操作者が現在も前回も不明）は到達可能**。仮想タッチ（Issue #1577）は `LendingService.ReturnAsync` を直接呼ぶため `LastProcessedCardIdm` は立つが `MainViewModel` の前回操作者は立たない。「到達不能だから」と削らない
+- **30秒ルールの武装（`LastProcessedCardIdm` / `LastProcessedTime` / `LastOperationType`）は台帳への記録が確定した直後に行う**（Issue #1805）。`ReturnAsync` はコミット後に残額の解決・残額警告の DB I/O を持つため、その後ろに置くと後処理の失敗で「返却は記録済みなのに未武装・`Success=false`」になり、「返却失敗・もう一度タッチ」の案内どおりに再タッチした職員の操作が貸出として新規に記録される。`Success` は「記録が確定した」ことだけを表し、付帯情報（残額・残額警告）の欠落は `LendingResult.HasPostCommitFailure` で別途伝える（詳細は `development-conventions.md` の「コミット確定後の後処理を、成否の判定に巻き込まない」）
 - **操作者の帰属はテストで表明する**。`CurrentState` や「例外が出ない」ではなく、**台帳に記録された IDm・氏名**（`ledger.LenderIdm` / `StaffName`）と `UpdateLentStatusAsync` の第4引数を具体値で検証する（`MainViewModelIntegrationTests` の `Retouch30Sec_*` 3件が参考実装）
 
 ## バス利用判別ロジック
