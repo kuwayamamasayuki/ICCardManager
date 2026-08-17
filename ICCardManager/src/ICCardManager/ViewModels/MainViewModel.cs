@@ -2626,8 +2626,21 @@ public partial class MainViewModel : ViewModelBase
             // 失敗要因は「統合後の編集・削除」「他 PC の先行取り消し」で、いずれも一覧が古いままだと
             // 利用者は案内どおりに履歴を確認できない。通知を先に出すのは、再読込が同じ原因
             // （共有フォルダーの切断・DB ロック）で失敗しても案内を届けるため（#1727）。
-            await LoadHistoryLedgersAsync();
-            await RefreshUndoMergeAvailabilityAsync();
+            // 再読込自体の失敗は上の案内と同じ原因なので、ここで握って二重のエラーダイアログにしない。
+            try
+            {
+                // LoadHistoryLedgersAsync は履歴カード選択中なら末尾で RefreshUndoMergeAvailabilityAsync を呼ぶ。
+                // 未選択（早期 return）のときだけボタン状態を別途更新する（同じ問い合わせを 2 回投げない）。
+                await LoadHistoryLedgersAsync();
+                if (HistoryCard == null)
+                {
+                    await RefreshUndoMergeAvailabilityAsync();
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogWarning(ex, "Failed to reload history after unmerge failure (history {HistoryId})", mergeHistoryId);
+            }
         }
     }
 

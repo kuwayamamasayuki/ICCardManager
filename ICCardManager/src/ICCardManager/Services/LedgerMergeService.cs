@@ -378,10 +378,11 @@ namespace ICCardManager.Services
                     var restored = await _ledgerRepository.UnmergeLedgersAsync(entry.UndoData, scope.Transaction).ConfigureAwait(false);
                     if (!restored)
                     {
-                        scope.Rollback();
+                        // ログはロールバックより先に書く（Rollback が失敗しても診断の手掛かりを残す。#1745）
                         _logger.LogWarning(
                             "Unmerge aborted: undo data of history {HistoryId} no longer matches ledger {TargetId} (details edited/replaced or target deleted after merge)",
                             mergeHistoryId, entry.TargetLedgerId);
+                        scope.Rollback();
                         return new LedgerMergeResult
                         {
                             Success = false,
@@ -397,10 +398,10 @@ namespace ICCardManager.Services
                     var marked = await _ledgerRepository.MarkMergeHistoryUndoneAsync(mergeHistoryId, scope.Transaction).ConfigureAwait(false);
                     if (!marked)
                     {
-                        scope.Rollback();
                         _logger.LogWarning(
                             "Unmerge aborted: history {HistoryId} was already marked undone by another operation",
                             mergeHistoryId);
+                        scope.Rollback();
                         return new LedgerMergeResult
                         {
                             Success = false,

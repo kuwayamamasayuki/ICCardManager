@@ -850,6 +850,31 @@ END";
     }
 
     /// <summary>
+    /// Issue #1806（コードレビュー指摘）: Undo データの明細マップが DeletedSources に無い台帳を指していたら
+    /// （保存された JSON の欠損・破損）、読み飛ばして true を返さず、競合と同じく false で中止すること。
+    /// </summary>
+    /// <remarks>
+    /// 読み飛ばすと明細は統合先に残ったまま統合元だけが明細ゼロで復活し、「取り消し済み」まで確定して
+    /// やり直せなくなる。他の 2 つのガード（明細移動 0 行・統合先 UPDATE 0 行）と同じ fail-closed に揃える。
+    /// </remarks>
+    [Fact]
+    public async Task UnmergeLedgersAsync_WhenUndoDataReferencesUnknownSource_ReturnsFalseAndChangesNothing()
+    {
+        var (targetId, _, undoData) = await MergeForUndoAsync();
+
+        // 統合元のスナップショットだけが欠落した Undo データ（明細マップは元の統合元 ID を指したまま）
+        undoData.DeletedSources.Clear();
+
+        var result = await UnmergeWithScopeAsync(undoData);
+
+        result.Should().BeFalse("明細の戻し先が特定できない Undo データは中止するべき（読み飛ばして成功にしない）");
+        (await CountLedgersAsync()).Should().Be(1, "統合先 1 行のまま。何も復活させないべき");
+        var target = await _repository.GetByIdAsync(targetId);
+        target!.Summary.Should().Be("鉄道（薬院～博多 往復）", "統合先も統合後のままであるべき");
+        target.Details.Should().HaveCount(2, "明細も統合先に残ったままであるべき");
+    }
+
+    /// <summary>
     /// tx を渡した取り消しは Rollback で残らないこと（他の tx オーバーロードと同じ契約）。
     /// </summary>
     [Fact]

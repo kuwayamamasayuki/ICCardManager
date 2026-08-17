@@ -1733,7 +1733,17 @@ WHERE id = @id";
             }
             catch
             {
-                scope.Rollback();
+                // Issue #1745: Commit が SQLITE_BUSY 等で失敗した後の Rollback は二次例外を投げ、
+                // 本来の SQLiteException を置き換えて上位の型別分岐（リトライ・文言変換）を外す。
+                // 未コミットの tx は scope の Dispose でも巻き戻るため、ここでの失敗は握りつぶしてよい。
+                try
+                {
+                    scope.Rollback();
+                }
+                catch (Exception)
+                {
+                    // Dispose の自動ロールバックに委ねる
+                }
                 throw;
             }
         }
@@ -1788,28 +1798,33 @@ SELECT last_insert_rowid();";
                 if (originalLedgerId != undoData.OriginalTarget.Id)
                 {
                     int newLedgerId;
-                    if (idMapping.TryGetValue(originalLedgerId, out newLedgerId))
+                    if (!idMapping.TryGetValue(originalLedgerId, out newLedgerId))
                     {
-                        using var moveCommand = connection.CreateCommand();
-                        moveCommand.Transaction = transaction;
-                        // Issue #1806: rowid だけでなく「いま統合先に属していること」も条件にする。
-                        // ledger_detail は暗黙 rowid（AUTOINCREMENT なし）のため、統合後に統合先の明細が
-                        // 編集（ReplaceDetailsAsync の DELETE + INSERT）されると rowid は振り直され、
-                        // 空いた rowid は無関係な別台帳の明細に再利用され得る。rowid だけで UPDATE すると
-                        // その明細を復活先へ移してしまう（交差破損）。UpdateDetailBusStopsAsync と同じスコープ。
-                        moveCommand.CommandText =
-                            "UPDATE ledger_detail SET ledger_id = @newLedgerId WHERE rowid = @rowid AND ledger_id = @targetId";
-                        moveCommand.Parameters.AddWithValue("@newLedgerId", newLedgerId);
-                        moveCommand.Parameters.AddWithValue("@rowid", sequenceNumber);
-                        moveCommand.Parameters.AddWithValue("@targetId", undoData.OriginalTarget.Id);
+                        // Undo データが指す元台帳が DeletedSources に無い（保存された JSON が欠損・破損している）。
+                        // 読み飛ばすと明細は統合先に残ったまま統合元だけが明細ゼロで復活し、
+                        // 「取り消し済み」まで確定してやり直せなくなる。他の 2 つのガードと同じく fail-closed にする。
+                        return false;
+                    }
 
-                        // 0 行は「Undo データが指す明細がもう統合先に無い」＝競合（Issue #1753 の作法）。
-                        // 旧実装は戻り値を捨てて true を返し、統合元が明細ゼロで復活していた。
-                        var moved = await moveCommand.ExecuteNonQueryAsync().ConfigureAwait(false);
-                        if (moved != 1)
-                        {
-                            return false;
-                        }
+                    using var moveCommand = connection.CreateCommand();
+                    moveCommand.Transaction = transaction;
+                    // Issue #1806: rowid だけでなく「いま統合先に属していること」も条件にする。
+                    // ledger_detail は暗黙 rowid（AUTOINCREMENT なし）のため、統合後に統合先の明細が
+                    // 編集（ReplaceDetailsAsync の DELETE + INSERT）されると rowid は振り直され、
+                    // 空いた rowid は無関係な別台帳の明細に再利用され得る。rowid だけで UPDATE すると
+                    // その明細を復活先へ移してしまう（交差破損）。UpdateDetailBusStopsAsync と同じスコープ。
+                    moveCommand.CommandText =
+                        "UPDATE ledger_detail SET ledger_id = @newLedgerId WHERE rowid = @rowid AND ledger_id = @targetId";
+                    moveCommand.Parameters.AddWithValue("@newLedgerId", newLedgerId);
+                    moveCommand.Parameters.AddWithValue("@rowid", sequenceNumber);
+                    moveCommand.Parameters.AddWithValue("@targetId", undoData.OriginalTarget.Id);
+
+                    // 0 行は「Undo データが指す明細がもう統合先に無い」＝競合（Issue #1753 の作法）。
+                    // 旧実装は戻り値を捨てて true を返し、統合元が明細ゼロで復活していた。
+                    var moved = await moveCommand.ExecuteNonQueryAsync().ConfigureAwait(false);
+                    if (moved != 1)
+                    {
+                        return false;
                     }
                 }
             }
