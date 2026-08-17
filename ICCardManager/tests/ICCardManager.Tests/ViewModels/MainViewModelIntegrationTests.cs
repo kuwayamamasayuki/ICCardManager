@@ -1244,6 +1244,142 @@ public class MainViewModelIntegrationTests
 
     #endregion
 
+    #region 返却のコミット確定後の後処理の失敗（Issue #1805）
+
+    /// <summary>
+    /// 返却の記録が確定したあとの付帯情報取得（残額警告設定の読み取り）が失敗しても、
+    /// 「返却は記録済み」と伝え、再タッチを促さないこと。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Issue #1805 の中核。<c>LendingService.ReturnAsync</c> は <c>PersistReturnAsync</c> で
+    /// コミットを済ませたあとに残額解決・残額警告の DB I/O を行う。修正前はここで例外が出ると
+    /// <c>Success = false</c> が返り、<see cref="MainViewModel"/> 側の #1725 の「記録済み」判定
+    /// （<c>result.Success</c> 依存）も働かず、「返却処理に失敗しました。もう一度タッチしてください」と
+    /// 案内された。案内どおり再タッチすると <c>ic_card.is_lent = 0</c> のため貸出として記録され、
+    /// 手元に無いカードが「貸出中」になる。
+    /// </para>
+    /// <para>
+    /// 残額は取得できていないため残額付きの返却通知（<c>ShowReturnNotification</c>）は出さず、
+    /// 音も中立的な <see cref="SoundType.Warning"/> を使う（記録は成功しているためエラー音は事実と矛盾する）。
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task PostCommitFailure_返却は記録済みを伝える警告を表示し再タッチを促さないこと()
+    {
+        ArrangeSuccessfulReturn();
+
+        RaiseCardRead(StaffIdm);
+        await _dispatcherService.WaitForPendingAsync();
+
+        // 返却の記録（コミット）は成功させ、その直後の残額警告設定の読み取りだけを 1 回失敗させる。
+        // 以降の呼び出し（ダッシュボード更新等）は成功させ、後処理の失敗を残額警告の取得だけに絞る。
+        ArrangeSettingsReadFailsOnce();
+
+        // Act
+        RaiseCardRead(CardIdmA);
+        await _dispatcherService.WaitForPendingAsync();
+
+        // Assert: 返却は成立している（貸出中レコードが削除済み）
+        _ledgerRepositoryMock.Verify(r => r.DeleteAllLentRecordsAsync(CardIdmA), Times.Once);
+
+        // 「記録済み」を伝える警告トーストが出て、再タッチを促す文言は出ない
+        _toastMock.Verify(t => t.ShowWarning(
+            It.Is<string>(title => title.Contains("記録済み")),
+            It.Is<string>(m => m.Contains("再タッチしないでください"))), Times.Once);
+        _toastMock.Verify(t => t.ShowError(It.IsAny<string>(), It.IsAny<string>()), Times.Never,
+            "返却は記録済みであり、エラーとして案内すると再タッチで貸出として再記録される");
+        // 残額は取得できていないので残額付きの返却通知は出さない
+        _toastMock.Verify(t => t.ShowReturnNotification(
+            It.IsAny<string>(), It.IsAny<string>(), It.IsAny<int>(), It.IsAny<bool>(), It.IsAny<int>()), Times.Never);
+        // 音は中立的な警告音
+        _soundPlayerMock.Verify(s => s.Play(SoundType.Error), Times.Never);
+        _soundPlayerMock.Verify(s => s.Play(SoundType.Return), Times.Never);
+        _soundPlayerMock.Verify(s => s.Play(SoundType.Warning), Times.Once);
+        _viewModel.CurrentState.Should().Be(AppState.WaitingForStaffCard);
+    }
+
+    /// <summary>
+    /// 返却の記録が確定したあとの付帯情報取得が失敗しても、30秒ルールの処理情報
+    /// （<c>LendingService</c> 側・<c>MainViewModel</c> 側の両方）が成功した返却と同じ状態になること。
+    /// </summary>
+    /// <remarks>
+    /// 修正前は <c>LendingService.LastProcessedCardIdm</c> 等の設定が後処理より後にあり未設定のまま残った。
+    /// <c>MainViewModel</c> 側の <c>_lastProcessedStaffIdm</c> も <c>result.Success</c> 依存のため保存されなかった。
+    /// </remarks>
+    [Fact]
+    public async Task PostCommitFailure_返却後も30秒ルールの処理情報が確定していること()
+    {
+        ArrangeSuccessfulReturn();
+
+        RaiseCardRead(StaffIdm);
+        await _dispatcherService.WaitForPendingAsync();
+
+        ArrangeSettingsReadFailsOnce();
+
+        // Act
+        RaiseCardRead(CardIdmA);
+        await _dispatcherService.WaitForPendingAsync();
+
+        // Assert: LendingService 側
+        _lendingService.IsRetouchWithinTimeout(CardIdmA).Should().BeTrue(
+            "記録が確定した時点で処理情報を確定させないと、成功した返却と挙動が食い違う");
+        _lendingService.LastOperationType.Should().Be(LendingOperationType.Return);
+
+        // MainViewModel 側
+        var field = typeof(MainViewModel).GetField("_lastProcessedStaffIdm",
+            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+        field!.GetValue(_viewModel).Should().Be(StaffIdm);
+    }
+
+    /// <summary>
+    /// 後処理まで成功した通常の返却では、従来どおり残額付きの返却通知と返却音が出ること（回帰防止）。
+    /// </summary>
+    [Fact]
+    public async Task PostCommitFailure_後処理まで成功した返却では従来どおり残額付きの返却通知を出すこと()
+    {
+        ArrangeSuccessfulReturn();
+
+        RaiseCardRead(StaffIdm);
+        await _dispatcherService.WaitForPendingAsync();
+
+        // Act
+        RaiseCardRead(CardIdmA);
+        await _dispatcherService.WaitForPendingAsync();
+
+        // Assert
+        _toastMock.Verify(t => t.ShowReturnNotification(
+            It.IsAny<string>(), It.IsAny<string>(), 2500, It.IsAny<bool>(), It.IsAny<int>()), Times.Once);
+        _soundPlayerMock.Verify(s => s.Play(SoundType.Return), Times.Once);
+        _toastMock.Verify(t => t.ShowWarning(
+            It.Is<string>(title => title.Contains("記録済み")),
+            It.IsAny<string>()), Times.Never);
+    }
+
+    /// <summary>
+    /// 残額警告設定の読み取り（<c>ISettingsRepository.GetAppSettingsAsync</c>）を最初の 1 回だけ失敗させる。
+    /// </summary>
+    /// <remarks>
+    /// <c>ArrangeSuccessfulReturn</c> の履歴は鉄道利用（チャージなし）のため、返却の記録（コミット）前に
+    /// 設定は読まれない。最初の呼び出しは <c>LendingService.ApplyBalanceWarningAsync</c>（コミット直後）になる。
+    /// 2 回目以降（ダッシュボード更新・警告チェック等）は成功させ、失敗を残額警告の取得だけに絞る。
+    /// </remarks>
+    private void ArrangeSettingsReadFailsOnce()
+    {
+        var appSettings = new AppSettings { WarningBalance = 1000, SkipBusStopInputOnReturn = false };
+        var calls = 0;
+        _settingsRepositoryMock.Setup(r => r.GetAppSettingsAsync()).Returns(() =>
+        {
+            if (calls++ == 0)
+            {
+                throw new InvalidOperationException("database is locked");
+            }
+            return Task.FromResult(appSettings);
+        });
+    }
+
+    #endregion
+
     #region タイムアウト60秒での状態リセット
 
     /// <summary>

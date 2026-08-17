@@ -67,6 +67,25 @@ namespace ICCardManager.Services
         /// trueの場合、CSVインポートで不足分を補完する必要がある旨をユーザーに通知する。
         /// </remarks>
         public bool MayHaveIncompleteHistory { get; set; }
+
+        /// <summary>
+        /// 台帳への記録は確定した（<see cref="Success"/> = true）が、コミット確定後の付帯情報の取得に
+        /// 失敗したかどうか（Issue #1805。返却時のみ）
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// true のとき <see cref="Balance"/> / <see cref="IsLowBalance"/> / <see cref="WarningBalance"/> は
+        /// 信頼できない（既定値のまま、または途中まで解決された値）。呼び出し元は残額を表示せず、
+        /// 「記録済み」であることと「再タッチしないこと」を案内する（再タッチは30秒ルールの逆処理として扱われる）。
+        /// </para>
+        /// <para>
+        /// <see cref="Success"/> は「台帳への記録が確定した」ことだけを表す。コミット後の後処理の失敗で
+        /// <see cref="Success"/> を落とすと、記録済みなのに「失敗・再タッチ」と案内され、案内どおりの
+        /// 再タッチが貸出として新規に記録される（<c>.claude/rules/development-conventions.md</c>
+        /// 「コミット確定後の後処理を、成否の判定に巻き込まない」）。
+        /// </para>
+        /// </remarks>
+        public bool HasPostCommitFailure { get; set; }
     }
 
     /// <summary>
@@ -669,12 +688,19 @@ namespace ICCardManager.Services
         /// <item><description>貸出時刻以降の利用履歴のみを抽出</description></item>
         /// <item><description>日付ごとに利用履歴レコードを作成（<see cref="SummaryGenerator"/> で摘要生成）</description></item>
         /// <item><description>貸出レコードを更新（返却者・返却時刻を記録）</description></item>
-        /// <item><description>カードの貸出状態を解除</description></item>
-        /// <item><description>残額警告チェック</description></item>
+        /// <item><description>カードの貸出状態を解除（ここまでが単一トランザクション。コミットで返却が確定）</description></item>
+        /// <item><description>30秒ルール用の処理情報を記録し <see cref="LendingResult.Success"/> を確定（Issue #1805）</description></item>
+        /// <item><description>残額の解決と残額警告チェック（コミット後の付帯情報）</description></item>
         /// </list>
         /// <para>
         /// <see cref="LendingResult.HasBusUsage"/> でバス利用の有無を確認できます。
         /// バス利用がある場合は、呼び出し元でバス停名入力ダイアログを表示してください。
+        /// </para>
+        /// <para>
+        /// Issue #1805: コミット後の付帯情報の取得（残額・残額警告）で例外が出ても
+        /// <see cref="LendingResult.Success"/> は true のまま返り、
+        /// <see cref="LendingResult.HasPostCommitFailure"/> が true になります。
+        /// 呼び出し元は残額を表示せず「記録済み・再タッチしない」ことを案内してください。
         /// </para>
         /// </remarks>
         public async Task<LendingResult> ReturnAsync(string staffIdm, string cardIdm, IEnumerable<LedgerDetail> usageDetails, bool skipDuplicateCheck = false)
@@ -738,25 +764,39 @@ namespace ICCardManager.Services
                 // トランザクション内で履歴作成 + 貸出レコード削除 + カード状態更新
                 await PersistReturnAsync(cardIdm, lentRecord, usageSinceLent, skipDuplicateCheck, result).ConfigureAwait(false);
 
-                // 残額チェック（トランザクション外）
-                // カードから直接読み取った残高を優先（履歴の先頭が最新）
-                // FelicaCardReaderで読み取った場合、各LedgerDetail.Balanceには実際の残高が設定されている
-                result.Balance = await ResolveReturnBalanceAsync(detailList, result.CreatedLedgers, cardIdm).ConfigureAwait(false);
-
-                await ApplyBalanceWarningAsync(result).ConfigureAwait(false);
-
-                // 処理情報を記録
+                // Issue #1805: ここから先は台帳への記録が確定している。
+                // 30秒ルール用の処理情報と Success は後処理（残高解決・残額警告の DB I/O）より前に確定させる。
+                // 後処理より後に置くと、後処理の例外で「返却失敗・再タッチ」と案内され、案内どおりの
+                // 再タッチが（is_lent=0 のため）貸出として新規に記録される。以降で例外が出ても
+                // 下の catch (when result.Success) が付帯情報の欠落として扱い、Success は落とさない。
                 LastProcessedCardIdm = cardIdm;
                 LastProcessedTime = now;
                 LastOperationType = LendingOperationType.Return;
 
                 result.Success = true;
 
-                // Issue #596: 今月の履歴が不完全な可能性をチェック
+                // Issue #596: 今月の履歴が不完全な可能性をチェック（純粋計算。DB I/O なし）
                 if (!hadExistingCurrentMonthRecords)
                 {
                     result.MayHaveIncompleteHistory = CheckHistoryCompleteness(detailList, currentMonthStart);
                 }
+
+                // 残額チェック（トランザクション外）
+                // カードから直接読み取った残高を優先（履歴の先頭が最新）
+                // FelicaCardReaderで読み取った場合、各LedgerDetail.Balanceには実際の残高が設定されている
+                result.Balance = await ResolveReturnBalanceAsync(detailList, result.CreatedLedgers, cardIdm).ConfigureAwait(false);
+
+                await ApplyBalanceWarningAsync(result).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (result.Success)
+            {
+                // Issue #1805: 台帳への記録は確定済み。付帯情報（残額・残額警告）が得られなかっただけとして扱い、
+                // Success と ErrorMessage は変えない（呼び出し元は HasPostCommitFailure で残額表示を抑止する）。
+                // 返却自体は成功しているため Error ではなく Warning。本番の Logging:LogLevel=Information でも出力される
+                _logger.LogWarning(ex,
+                    "返却は記録済みですが、コミット後の付帯情報（残額・残額警告）の取得に失敗しました（CardIdm={CardIdm}）",
+                    IdmMasker.Mask(cardIdm));
+                result.HasPostCommitFailure = true;
             }
             catch (Exception ex)
             {

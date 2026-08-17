@@ -1469,11 +1469,25 @@ public partial class MainViewModel : ViewModelBase
     /// </remarks>
     internal async Task HandleReturnSuccessAsync(IcCard card, LendingResult result)
     {
-        // 残高はLendingServiceで設定済み（カードから直接読み取った値を優先）
-        _soundPlayer.Play(SoundType.Return);
+        if (result.HasPostCommitFailure)
+        {
+            // Issue #1805: 返却は台帳に記録済みだが、コミット後の付帯情報（残額・残額警告）を取得できなかった。
+            // result.Balance / IsLowBalance / WarningBalance は信頼できないため残額付きの返却通知は出さない。
+            // 「もう一度タッチ」と案内すると30秒ルールの逆処理で記録済みの返却が取り消される（#1725 と同じ判断）ため、
+            // 「記録済み」＋「再タッチしないでください」＋中立的な警告音で案内する（エラー音は事実と矛盾する）。
+            _soundPlayer.Play(SoundType.Warning);
+            _toastNotificationService.ShowWarning(
+                "返却は記録済み",
+                "残額を確認できませんでした。再タッチしないでください。");
+        }
+        else
+        {
+            // 残高はLendingServiceで設定済み（カードから直接読み取った値を優先）
+            _soundPlayer.Play(SoundType.Return);
 
-        // トースト通知を表示（表示位置は設定に従う、フォーカスを奪わない）
-        _toastNotificationService.ShowReturnNotification(card.CardType, card.CardNumber, result.Balance, result.IsLowBalance, result.WarningBalance);
+            // トースト通知を表示（表示位置は設定に従う、フォーカスを奪わない）
+            _toastNotificationService.ShowReturnNotification(card.CardType, card.CardNumber, result.Balance, result.IsLowBalance, result.WarningBalance);
+        }
 
         // メイン画面は変更しない（Issue #186: 職員の操作を妨げない）
 

@@ -672,6 +672,172 @@ public class LendingServiceTests : IDisposable
 
     #endregion
 
+    #region ReturnAsync コミット確定後の後処理の失敗（Issue #1805）
+
+    /// <summary>
+    /// コミット確定後の残額警告取得（<c>SettingsRepository.GetAppSettingsAsync</c>）で例外が出ても、
+    /// 返却は記録済みとして <c>Success = true</c> を返すこと。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Issue #1805 の中核。<c>PersistReturnAsync</c> が <c>scope.Commit()</c> を済ませたあとの
+    /// DB I/O で例外が出ると、修正前は外側の <c>catch</c> が <c>Success = false</c> と
+    /// エラー文言を返し、台帳に記録済みなのに「返却に失敗しました。もう一度タッチしてください」と
+    /// 案内された。案内どおり再タッチすると <c>ic_card.is_lent = 0</c> のため貸出として
+    /// 新規に記録され、手元に無いカードが「貸出中」になる。
+    /// </para>
+    /// <para>
+    /// <c>Success</c> は「台帳への記録が確定した」ことを表し、付帯情報（残額・残額警告）の
+    /// 欠落は <see cref="LendingResult.HasPostCommitFailure"/> で別途伝える
+    /// （<c>.claude/rules/development-conventions.md</c>「コミット確定後の後処理を、成否の判定に巻き込まない」）。
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task ReturnAsync_コミット後の残額警告取得で例外_返却は成功として返り付帯情報の欠落だけを伝えること()
+    {
+        // Arrange
+        var card = CreateTestCard(isLent: true);
+        var staff = CreateTestStaff();
+        var lentRecord = CreateTestLentRecord();
+
+        SetupReturnMocks(card, staff, lentRecord);
+        // コミット後にだけ呼ばれる残額警告設定の取得を失敗させる
+        // （利用履歴なし＝チャージ摘要生成の GetAppSettingsAsync はコミット前に呼ばれない）
+        _settingsRepositoryMock.Setup(x => x.GetAppSettingsAsync())
+            .ThrowsAsync(new InvalidOperationException("database is locked"));
+
+        // Act
+        var result = await _service.ReturnAsync(TestStaffIdm, TestCardIdm, new List<LedgerDetail>());
+
+        // Assert: 記録は確定している（貸出中レコード削除＋カード状態解除まで到達）
+        _ledgerRepositoryMock.Verify(x => x.DeleteAllLentRecordsAsync(TestCardIdm), Times.Once);
+        _cardRepositoryMock.Verify(x => x.UpdateLentStatusAsync(TestCardIdm, false, null, null), Times.Once);
+
+        result.Success.Should().BeTrue("台帳への記録は確定しており、後処理の失敗で「返却失敗」と案内してはならない");
+        result.ErrorMessage.Should().BeNull();
+        result.HasPostCommitFailure.Should().BeTrue("残額・残額警告が得られなかったことは呼び出し元へ伝える");
+    }
+
+    /// <summary>
+    /// コミット確定後の後処理が失敗しても、30秒ルール用の処理情報が確定していること。
+    /// </summary>
+    /// <remarks>
+    /// 修正前は <c>LastProcessedCardIdm</c> / <c>LastProcessedTime</c> / <c>LastOperationType</c> の
+    /// 設定が後処理より後にあり、後処理の例外で未設定のまま残った。
+    /// 記録が確定した時点（<c>PersistReturnAsync</c> 直後）で確定させ、
+    /// 成功した返却と同じ状態にする（<c>MainViewModel</c> 側の #1725 と同じ判断）。
+    /// </remarks>
+    [Fact]
+    public async Task ReturnAsync_コミット後の後処理で例外_30秒ルール用の処理情報が確定していること()
+    {
+        // Arrange
+        var card = CreateTestCard(isLent: true);
+        var staff = CreateTestStaff();
+        var lentRecord = CreateTestLentRecord();
+
+        SetupReturnMocks(card, staff, lentRecord);
+        _settingsRepositoryMock.Setup(x => x.GetAppSettingsAsync())
+            .ThrowsAsync(new InvalidOperationException("database is locked"));
+
+        // Act
+        await _service.ReturnAsync(TestStaffIdm, TestCardIdm, new List<LedgerDetail>());
+
+        // Assert
+        _service.LastProcessedCardIdm.Should().Be(TestCardIdm,
+            "記録が確定した時点で確定させないと、後処理の失敗で30秒ルールが武装されない");
+        _service.LastProcessedTime.Should().NotBeNull();
+        _service.LastOperationType.Should().Be(LendingOperationType.Return);
+        _service.IsRetouchWithinTimeout(TestCardIdm).Should().BeTrue();
+    }
+
+    /// <summary>
+    /// 残高解決カスケードの DB フォールバック（<c>GetLatestLedgerAsync</c>）で例外が出ても、
+    /// 返却は成功として返ること。
+    /// </summary>
+    /// <remarks>
+    /// <c>ResolveReturnBalanceAsync</c> は (1)カード読取値 (2)作成 ledger 末尾 (3)DB 直近 ledger の順に
+    /// 残高を解決する。(1)(2) が無い返却（履歴なし・残高未読取）でだけ (3) の DB I/O へ到達するため、
+    /// 残額警告とは別の後処理経路として個別に固定する。
+    /// </remarks>
+    [Fact]
+    public async Task ReturnAsync_コミット後の残高解決で例外_返却は成功として返ること()
+    {
+        // Arrange
+        var card = CreateTestCard(isLent: true);
+        var staff = CreateTestStaff();
+        var lentRecord = CreateTestLentRecord();
+
+        SetupReturnMocks(card, staff, lentRecord);
+        _ledgerRepositoryMock.Setup(x => x.GetLatestLedgerAsync(TestCardIdm))
+            .ThrowsAsync(new InvalidOperationException("database is locked"));
+
+        // Act（履歴なし＝作成 ledger も無く、DB フォールバックへ到達する）
+        var result = await _service.ReturnAsync(TestStaffIdm, TestCardIdm, new List<LedgerDetail>());
+
+        // Assert
+        _ledgerRepositoryMock.Verify(x => x.GetLatestLedgerAsync(TestCardIdm), Times.Once,
+            "前提: 残高解決の DB フォールバックへ到達していること");
+        result.Success.Should().BeTrue();
+        result.ErrorMessage.Should().BeNull();
+        result.HasPostCommitFailure.Should().BeTrue();
+        _service.LastProcessedCardIdm.Should().Be(TestCardIdm);
+    }
+
+    /// <summary>
+    /// コミット確定<b>前</b>の例外では、従来どおり失敗として返り処理情報も残さないこと（回帰防止）。
+    /// </summary>
+    /// <remarks>
+    /// 「記録済み」判定を入れたことで、本当に失敗したケースまで成功扱いにすると返却漏れになる。
+    /// トランザクション内（コミット前）で失敗する経路で確認する。
+    /// 失敗注入は <c>SQLiteException(Busy)</c> ではなく <c>InvalidOperationException</c> を使い、
+    /// <c>ExecuteWithRetryAsync</c> のリトライ待機を挟まず 1 回で確定させる。
+    /// </remarks>
+    [Fact]
+    public async Task ReturnAsync_コミット前の例外_従来どおり失敗として返り処理情報は残さないこと()
+    {
+        // Arrange
+        var card = CreateTestCard(isLent: true);
+        var staff = CreateTestStaff();
+        var lentRecord = CreateTestLentRecord();
+
+        SetupReturnMocks(card, staff, lentRecord);
+        _ledgerRepositoryMock.Setup(x => x.DeleteAllLentRecordsAsync(TestCardIdm))
+            .ThrowsAsync(new InvalidOperationException("database is locked"));
+
+        // Act
+        var result = await _service.ReturnAsync(TestStaffIdm, TestCardIdm, new List<LedgerDetail>());
+
+        // Assert
+        result.Success.Should().BeFalse();
+        result.ErrorMessage.Should().NotBeNullOrEmpty();
+        result.HasPostCommitFailure.Should().BeFalse("記録前の失敗は「付帯情報の欠落」ではない");
+        _service.LastProcessedCardIdm.Should().BeNull("記録されていない操作を30秒ルールの対象にしない");
+        _service.LastProcessedTime.Should().BeNull();
+    }
+
+    /// <summary>
+    /// 後処理まで成功した通常の返却では <see cref="LendingResult.HasPostCommitFailure"/> が false であること。
+    /// </summary>
+    [Fact]
+    public async Task ReturnAsync_後処理まで成功_HasPostCommitFailureはfalseであること()
+    {
+        // Arrange
+        var card = CreateTestCard(isLent: true);
+        var staff = CreateTestStaff();
+        var lentRecord = CreateTestLentRecord();
+
+        SetupReturnMocks(card, staff, lentRecord);
+
+        // Act
+        var result = await _service.ReturnAsync(TestStaffIdm, TestCardIdm, new List<LedgerDetail>());
+
+        // Assert
+        result.Success.Should().BeTrue();
+        result.HasPostCommitFailure.Should().BeFalse();
+    }
+
+    #endregion
+
     #region ReturnAsync 異常系テスト
 
     /// <summary>
