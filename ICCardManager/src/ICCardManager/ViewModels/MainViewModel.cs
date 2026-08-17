@@ -2621,6 +2621,13 @@ public partial class MainViewModel : ViewModelBase
                 "取り消しエラー",
                 MessageBoxButton.OK,
                 MessageBoxImage.Error);
+
+            // Issue #1806: 失敗時も一覧を再読込する（統合の失敗分岐と同じ #1753 の作法）。
+            // 失敗要因は「統合後の編集・削除」「他 PC の先行取り消し」で、いずれも一覧が古いままだと
+            // 利用者は案内どおりに履歴を確認できない。通知を先に出すのは、再読込が同じ原因
+            // （共有フォルダーの切断・DB ロック）で失敗しても案内を届けるため（#1727）。
+            await LoadHistoryLedgersAsync();
+            await RefreshUndoMergeAvailabilityAsync();
         }
     }
 

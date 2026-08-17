@@ -1117,21 +1117,180 @@ public class LedgerMergeServiceTests : IDisposable
                 (1, DateTime.Now, 1, "テスト統合", undoJson, false)
             });
 
-        _ledgerRepositoryMock
-            .Setup(x => x.UnmergeLedgersAsync(It.IsAny<LedgerMergeUndoData>()))
-            .ReturnsAsync(true);
-
-        _ledgerRepositoryMock
-            .Setup(x => x.MarkMergeHistoryUndoneAsync(1))
-            .Returns(Task.CompletedTask);
+        SetupUnmergeMockSuccess(historyId: 1);
 
         // Act
         var result = await _service.UnmergeAsync(1);
 
         // Assert
         result.Success.Should().BeTrue();
-        _ledgerRepositoryMock.Verify(x => x.UnmergeLedgersAsync(It.IsAny<LedgerMergeUndoData>()), Times.Once);
-        _ledgerRepositoryMock.Verify(x => x.MarkMergeHistoryUndoneAsync(1), Times.Once);
+        // Issue #1806: 台帳の復元と「取り消し済み」マークは同一トランザクション（tx オーバーロード）で行う。
+        // 旧オーバーロード（tx なし＝各自がコミット）を呼んでいないことも表明する
+        // （.claude/rules/testing.md #1745「切り替え元のオーバーロードも見る」）。
+        _ledgerRepositoryMock.Verify(
+            x => x.UnmergeLedgersAsync(It.IsAny<LedgerMergeUndoData>(), It.IsNotNull<SQLiteTransaction>()), Times.Once);
+        _ledgerRepositoryMock.Verify(
+            x => x.MarkMergeHistoryUndoneAsync(1, It.IsNotNull<SQLiteTransaction>()), Times.Once);
+        _ledgerRepositoryMock.Verify(
+            x => x.UnmergeLedgersAsync(It.IsAny<LedgerMergeUndoData>()), Times.Never,
+            "tx なしオーバーロードは内部でコミットするため、マークと同一 tx にならない");
+        _ledgerRepositoryMock.Verify(
+            x => x.MarkMergeHistoryUndoneAsync(It.IsAny<int>()), Times.Never,
+            "tx なしオーバーロードは別接続で確定するため、復元と同一 tx にならない");
+    }
+
+    /// <summary>
+    /// Issue #1806: 復元と「取り消し済み」マークが同じ <see cref="SQLiteTransaction"/> 上で呼ばれること。
+    /// </summary>
+    [Fact]
+    [Trait("Category", "Unit")]
+    public async Task UnmergeAsync_RestoreAndMarkUndone_ShareOneTransaction()
+    {
+        // Arrange
+        SetupUnmergeHistoryMock(historyId: 1);
+        SQLiteTransaction? restoreTx = null;
+        SQLiteTransaction? markTx = null;
+        _ledgerRepositoryMock
+            .Setup(x => x.UnmergeLedgersAsync(It.IsAny<LedgerMergeUndoData>(), It.IsAny<SQLiteTransaction>()))
+            .Callback<LedgerMergeUndoData, SQLiteTransaction>((_, tx) => restoreTx = tx)
+            .ReturnsAsync(true);
+        _ledgerRepositoryMock
+            .Setup(x => x.MarkMergeHistoryUndoneAsync(1, It.IsAny<SQLiteTransaction>()))
+            .Callback<int, SQLiteTransaction>((_, tx) => markTx = tx)
+            .ReturnsAsync(true);
+
+        // Act
+        var result = await _service.UnmergeAsync(1);
+
+        // Assert
+        result.Success.Should().BeTrue();
+        restoreTx.Should().NotBeNull();
+        markTx.Should().BeSameAs(restoreTx, "復元とマークは同一トランザクションで確定させる（片方だけが残る状態を作らない）");
+    }
+
+    /// <summary>
+    /// Issue #1806: 「取り消し済み」マークが 0 行（他 PC が先に取り消した競合）なら、
+    /// 失敗として報告し、原因（既に取り消し済み）と対処を案内すること。
+    /// </summary>
+    [Fact]
+    [Trait("Category", "Unit")]
+    public async Task UnmergeAsync_MarkUndoneReturnsFalse_ReturnsConflictError()
+    {
+        // Arrange
+        SetupUnmergeHistoryMock(historyId: 1);
+        _ledgerRepositoryMock
+            .Setup(x => x.UnmergeLedgersAsync(It.IsAny<LedgerMergeUndoData>(), It.IsAny<SQLiteTransaction>()))
+            .ReturnsAsync(true);
+        _ledgerRepositoryMock
+            .Setup(x => x.MarkMergeHistoryUndoneAsync(1, It.IsAny<SQLiteTransaction>()))
+            .ReturnsAsync(false);
+
+        // Act
+        var result = await _service.UnmergeAsync(1);
+
+        // Assert
+        result.Success.Should().BeFalse("マークが 0 行なら復元も確定させず失敗として報告する");
+        result.ErrorMessage.Should().Contain("既に取り消", "「なぜ」: 先に取り消されていたことを名指しする");
+        result.ErrorMessage.Should().EndWith("してください。", "「どうすれば」: 行動指示で終える");
+        result.ErrorMessage.Should().NotContain("失敗しました:", "内部の例外文言を連結する形式にしない");
+    }
+
+    /// <summary>
+    /// Issue #1806 / #1614: 例外時のエラー文言に生の <c>ex.Message</c> を露出しないこと。
+    /// </summary>
+    [Fact]
+    [Trait("Category", "Unit")]
+    public async Task UnmergeAsync_RepositoryThrows_DoesNotExposeRawExceptionMessage()
+    {
+        // Arrange
+        SetupUnmergeHistoryMock(historyId: 1);
+        _ledgerRepositoryMock
+            .Setup(x => x.UnmergeLedgersAsync(It.IsAny<LedgerMergeUndoData>(), It.IsAny<SQLiteTransaction>()))
+            .ThrowsAsync(new InvalidOperationException("database is locked"));
+
+        // Act
+        var result = await _service.UnmergeAsync(1);
+
+        // Assert
+        result.Success.Should().BeFalse();
+        result.ErrorMessage.Should().NotContain("database is locked", "生の例外メッセージを UI へ出さない（Issue #1614）");
+        result.ErrorMessage.Should().Contain("統合の取り消し", "「何が」を操作名で示す");
+        result.ErrorMessage.Should().EndWith("してください。", "「どうすれば」で終える");
+    }
+
+    /// <summary>
+    /// Issue #1806: 復元が競合（false）で終わったときの文言が、原因の候補と対処を含むこと。
+    /// </summary>
+    [Fact]
+    [Trait("Category", "Unit")]
+    public async Task UnmergeAsync_RepositoryReturnsFalse_ErrorMessageExplainsCauseAndAction()
+    {
+        // Arrange
+        SetupUnmergeHistoryMock(historyId: 1);
+        _ledgerRepositoryMock
+            .Setup(x => x.UnmergeLedgersAsync(It.IsAny<LedgerMergeUndoData>(), It.IsAny<SQLiteTransaction>()))
+            .ReturnsAsync(false);
+
+        // Act
+        var result = await _service.UnmergeAsync(1);
+
+        // Assert
+        result.Success.Should().BeFalse();
+        result.ErrorMessage.Should().Contain("編集", "「なぜ」: 統合後の編集・分割・削除で Undo データと食い違った可能性を示す");
+        result.ErrorMessage.Should().Contain("他のPC", "「なぜ」: 共有モードで先に取り消された可能性を示す");
+        result.ErrorMessage.Should().EndWith("してください。", "「どうすれば」で終える");
+        result.ErrorMessage.Length.Should().BeGreaterThanOrEqualTo(20);
+    }
+
+    /// <summary>
+    /// UnmergeAsync 用: 取り消し可能な統合履歴 1 件（統合元 1 行・明細 2 行）をモックに用意する。
+    /// </summary>
+    private void SetupUnmergeHistoryMock(int historyId)
+    {
+        var undoData = new LedgerMergeUndoData
+        {
+            OriginalTarget = new LedgerSnapshot
+            {
+                Id = 1,
+                CardIdm = TestCardIdm,
+                DateText = "2026-02-03 00:00:00",
+                Summary = "鉄道（A～B）",
+                Expense = 200,
+                Balance = 800
+            },
+            DeletedSources = new List<LedgerSnapshot>
+            {
+                new LedgerSnapshot
+                {
+                    Id = 2,
+                    CardIdm = TestCardIdm,
+                    DateText = "2026-02-03 00:00:00",
+                    Summary = "鉄道（C～D）",
+                    Expense = 210,
+                    Balance = 590
+                }
+            },
+            DetailOriginalLedgerMap = new Dictionary<string, int> { { "1", 1 }, { "2", 2 } }
+        };
+        _ledgerRepositoryMock
+            .Setup(x => x.GetMergeHistoriesAsync(false))
+            .ReturnsAsync(new List<(int, DateTime, int, string, string, bool)>
+            {
+                (historyId, DateTime.Now, 1, "テスト統合", JsonSerializer.Serialize(undoData, JsonOptions), false)
+            });
+    }
+
+    /// <summary>
+    /// UnmergeAsync 用: 復元・マークとも成功する tx オーバーロードをモックに用意する（Issue #1806）。
+    /// </summary>
+    private void SetupUnmergeMockSuccess(int historyId)
+    {
+        _ledgerRepositoryMock
+            .Setup(x => x.UnmergeLedgersAsync(It.IsAny<LedgerMergeUndoData>(), It.IsAny<SQLiteTransaction>()))
+            .ReturnsAsync(true);
+        _ledgerRepositoryMock
+            .Setup(x => x.MarkMergeHistoryUndoneAsync(historyId, It.IsAny<SQLiteTransaction>()))
+            .ReturnsAsync(true);
     }
 
     /// <summary>
@@ -1205,7 +1364,7 @@ public class LedgerMergeServiceTests : IDisposable
             });
 
         _ledgerRepositoryMock
-            .Setup(x => x.UnmergeLedgersAsync(It.IsAny<LedgerMergeUndoData>()))
+            .Setup(x => x.UnmergeLedgersAsync(It.IsAny<LedgerMergeUndoData>(), It.IsAny<SQLiteTransaction>()))
             .ReturnsAsync(false);
 
         // Act
@@ -1238,7 +1397,7 @@ public class LedgerMergeServiceTests : IDisposable
             });
 
         _ledgerRepositoryMock
-            .Setup(x => x.UnmergeLedgersAsync(It.IsAny<LedgerMergeUndoData>()))
+            .Setup(x => x.UnmergeLedgersAsync(It.IsAny<LedgerMergeUndoData>(), It.IsAny<SQLiteTransaction>()))
             .ThrowsAsync(new Exception("DB failure"));
 
         // Act
@@ -1246,7 +1405,9 @@ public class LedgerMergeServiceTests : IDisposable
 
         // Assert
         result.Success.Should().BeFalse();
-        result.ErrorMessage.Should().Contain("エラーが発生");
+        // Issue #1806 / #1614: 生の ex.Message ではなく ExceptionMessageFormatter の 3 要素文言を返す
+        result.ErrorMessage.Should().Contain("統合の取り消しに失敗しました");
+        result.ErrorMessage.Should().NotContain("DB failure");
     }
 
     #endregion
@@ -1918,12 +2079,7 @@ public class LedgerMergeServiceTests : IDisposable
             {
                 (1, DateTime.Now, 1, "初回統合", firstMergeJson!, false)
             });
-        _ledgerRepositoryMock
-            .Setup(x => x.UnmergeLedgersAsync(It.IsAny<LedgerMergeUndoData>()))
-            .ReturnsAsync(true);
-        _ledgerRepositoryMock
-            .Setup(x => x.MarkMergeHistoryUndoneAsync(1))
-            .Returns(Task.CompletedTask);
+        SetupUnmergeMockSuccess(historyId: 1);
 
         var unmergeResult = await _service.UnmergeAsync(1);
         unmergeResult.Success.Should().BeTrue();
@@ -2007,7 +2163,7 @@ public class LedgerMergeServiceTests : IDisposable
                 (1, DateTime.Now, 1, "テスト", JsonSerializer.Serialize(undoData, JsonOptions), false)
             });
         _ledgerRepositoryMock
-            .Setup(x => x.UnmergeLedgersAsync(It.IsAny<LedgerMergeUndoData>()))
+            .Setup(x => x.UnmergeLedgersAsync(It.IsAny<LedgerMergeUndoData>(), It.IsAny<SQLiteTransaction>()))
             .ReturnsAsync(false);
 
         // Act
@@ -2016,9 +2172,12 @@ public class LedgerMergeServiceTests : IDisposable
         // Assert
         result.Success.Should().BeFalse();
         _ledgerRepositoryMock.Verify(
-            x => x.MarkMergeHistoryUndoneAsync(It.IsAny<int>()),
+            x => x.MarkMergeHistoryUndoneAsync(It.IsAny<int>(), It.IsAny<SQLiteTransaction>()),
             Times.Never,
             "復旧失敗時は履歴を取消済みマークしない（再試行可能に保つ）");
+        _ledgerRepositoryMock.Verify(
+            x => x.MarkMergeHistoryUndoneAsync(It.IsAny<int>()),
+            Times.Never);
     }
 
     /// <summary>
@@ -2042,7 +2201,7 @@ public class LedgerMergeServiceTests : IDisposable
                 (1, DateTime.Now, 1, "テスト", JsonSerializer.Serialize(undoData, JsonOptions), false)
             });
         _ledgerRepositoryMock
-            .Setup(x => x.UnmergeLedgersAsync(It.IsAny<LedgerMergeUndoData>()))
+            .Setup(x => x.UnmergeLedgersAsync(It.IsAny<LedgerMergeUndoData>(), It.IsAny<SQLiteTransaction>()))
             .ThrowsAsync(new Exception("Transaction rollback"));
 
         // Act
@@ -2051,9 +2210,12 @@ public class LedgerMergeServiceTests : IDisposable
         // Assert
         result.Success.Should().BeFalse();
         _ledgerRepositoryMock.Verify(
-            x => x.MarkMergeHistoryUndoneAsync(It.IsAny<int>()),
+            x => x.MarkMergeHistoryUndoneAsync(It.IsAny<int>(), It.IsAny<SQLiteTransaction>()),
             Times.Never,
             "例外発生時も履歴マーク更新は呼ばれず、再試行に備える");
+        _ledgerRepositoryMock.Verify(
+            x => x.MarkMergeHistoryUndoneAsync(It.IsAny<int>()),
+            Times.Never);
     }
 
     /// <summary>
@@ -2108,12 +2270,12 @@ public class LedgerMergeServiceTests : IDisposable
 
         LedgerMergeUndoData? receivedUndoData = null;
         _ledgerRepositoryMock
-            .Setup(x => x.UnmergeLedgersAsync(It.IsAny<LedgerMergeUndoData>()))
-            .Callback<LedgerMergeUndoData>(d => receivedUndoData = d)
+            .Setup(x => x.UnmergeLedgersAsync(It.IsAny<LedgerMergeUndoData>(), It.IsAny<SQLiteTransaction>()))
+            .Callback<LedgerMergeUndoData, SQLiteTransaction>((d, _) => receivedUndoData = d)
             .ReturnsAsync(true);
         _ledgerRepositoryMock
-            .Setup(x => x.MarkMergeHistoryUndoneAsync(1))
-            .Returns(Task.CompletedTask);
+            .Setup(x => x.MarkMergeHistoryUndoneAsync(1, It.IsAny<SQLiteTransaction>()))
+            .ReturnsAsync(true);
 
         // Act
         var result = await _service.UnmergeAsync(1);

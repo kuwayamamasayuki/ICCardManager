@@ -1691,86 +1691,148 @@ WHERE id = @id";
         }
 
         /// <inheritdoc/>
-        public async Task<bool> UnmergeLedgersAsync(Services.LedgerMergeUndoData undoData)
+        public Task<bool> UnmergeLedgersAsync(Services.LedgerMergeUndoData undoData)
+            => UnmergeLedgersAsync(undoData, transaction: null);
+
+        /// <inheritdoc/>
+        public async Task<bool> UnmergeLedgersAsync(Services.LedgerMergeUndoData undoData, SQLiteTransaction transaction)
         {
-            using var scope = await _dbContext.BeginTransactionAsync();
-            var connection = scope.Lease.Connection;
-            var transaction = scope.Transaction;
+            // Issue #1806: 統合元の INSERT・明細の移動・統合先の UPDATE は必ず同一トランザクションで実行し、
+            // 呼び出し元（LedgerMergeService.UnmergeAsync）が「取り消し済み」マークと同じ tx に束ねられるよう
+            // tx を受け取る。旧実装は内部でコミットして返していたため、その後のマークだけが失敗すると
+            // 「台帳は復元済み・履歴は未取消」の状態が残り、再実行で統合元が二重に INSERT された。
+            // ReplaceDetailsAsync / DeleteAsync と同じ 3 分岐（05_クラス設計書 §5.5b）:
+            //   1. tx 指定           … 呼び出し元の tx を共有し、commit/rollback には介入しない
+            //   2. 外側 tx スコープ内 … 既存接続の活性トランザクションへ暗黙参加する（自前で
+            //                          BeginTransactionAsync するとセマフォの再取得でデッドロックするため）
+            //   3. それ以外           … 自前で BeginTransactionAsync し commit/rollback まで責任を持つ
+            if (transaction != null)
+            {
+                return await UnmergeLedgersCore(undoData, (SQLiteConnection)transaction.Connection, transaction).ConfigureAwait(false);
+            }
+
+            if (_dbContext.HasActiveTransactionScope)
+            {
+                using var lease = await _dbContext.LeaseConnectionAsync().ConfigureAwait(false);
+                return await UnmergeLedgersCore(undoData, lease.Connection, transaction: null).ConfigureAwait(false);
+            }
+
+            using var scope = await _dbContext.BeginTransactionAsync().ConfigureAwait(false);
             try
             {
-                // 1. ソースLedgerを再作成し、新IDを取得
-                var idMapping = new Dictionary<int, int>();
-                foreach (var source in undoData.DeletedSources)
+                var ok = await UnmergeLedgersCore(undoData, scope.Lease.Connection, scope.Transaction).ConfigureAwait(false);
+                if (ok)
                 {
-                    using var insertCommand = connection.CreateCommand();
-                    insertCommand.CommandText = @"INSERT INTO ledger (card_idm, lender_idm, date, summary, income, expense, balance,
-                           staff_name, note, returner_idm, lent_at, returned_at, is_lent_record)
-VALUES (@cardIdm, @lenderIdm, @date, @summary, @income, @expense, @balance,
-       @staffName, @note, @returnerIdm, @lentAt, @returnedAt, @isLentRecord);
-SELECT last_insert_rowid();";
-
-                    insertCommand.Parameters.AddWithValue("@cardIdm", source.CardIdm);
-                    insertCommand.Parameters.AddWithValue("@lenderIdm", (object)source.LenderIdm ?? DBNull.Value);
-                    insertCommand.Parameters.AddWithValue("@date", source.DateText);
-                    insertCommand.Parameters.AddWithValue("@summary", source.Summary);
-                    insertCommand.Parameters.AddWithValue("@income", source.Income);
-                    insertCommand.Parameters.AddWithValue("@expense", source.Expense);
-                    insertCommand.Parameters.AddWithValue("@balance", source.Balance);
-                    insertCommand.Parameters.AddWithValue("@staffName", (object)source.StaffName ?? DBNull.Value);
-                    insertCommand.Parameters.AddWithValue("@note", (object)source.Note ?? DBNull.Value);
-                    insertCommand.Parameters.AddWithValue("@returnerIdm", (object)source.ReturnerIdm ?? DBNull.Value);
-                    insertCommand.Parameters.AddWithValue("@lentAt", (object)source.LentAtText ?? DBNull.Value);
-                    insertCommand.Parameters.AddWithValue("@returnedAt", (object)source.ReturnedAtText ?? DBNull.Value);
-                    insertCommand.Parameters.AddWithValue("@isLentRecord", source.IsLentRecord ? 1 : 0);
-
-                    var newId = Convert.ToInt32(await insertCommand.ExecuteScalarAsync());
-                    idMapping[source.Id] = newId;
+                    scope.Commit();
                 }
-
-                // 2. Detailを元のLedgerに戻す（SequenceNumber=rowidでマッピング）
-                foreach (var entry in undoData.DetailOriginalLedgerMap)
+                else
                 {
-                    var sequenceNumber = int.Parse(entry.Key);
-                    var originalLedgerId = entry.Value;
-
-                    // ターゲットLedgerに属するDetailのうち、ソースに属していたものを移動
-                    if (originalLedgerId != undoData.OriginalTarget.Id)
-                    {
-                        int newLedgerId;
-                        if (idMapping.TryGetValue(originalLedgerId, out newLedgerId))
-                        {
-                            using var moveCommand = connection.CreateCommand();
-                            moveCommand.CommandText = "UPDATE ledger_detail SET ledger_id = @newLedgerId WHERE rowid = @rowid";
-                            moveCommand.Parameters.AddWithValue("@newLedgerId", newLedgerId);
-                            moveCommand.Parameters.AddWithValue("@rowid", sequenceNumber);
-                            await moveCommand.ExecuteNonQueryAsync();
-                        }
-                    }
+                    scope.Rollback();
                 }
-
-                // 3. ターゲットLedgerを元の状態に復元
-                var original = undoData.OriginalTarget;
-                using var updateCommand = connection.CreateCommand();
-                updateCommand.CommandText = @"UPDATE ledger
-SET summary = @summary, income = @income, expense = @expense,
-    balance = @balance, note = @note
-WHERE id = @id";
-                updateCommand.Parameters.AddWithValue("@summary", original.Summary);
-                updateCommand.Parameters.AddWithValue("@income", original.Income);
-                updateCommand.Parameters.AddWithValue("@expense", original.Expense);
-                updateCommand.Parameters.AddWithValue("@balance", original.Balance);
-                updateCommand.Parameters.AddWithValue("@note", (object)original.Note ?? DBNull.Value);
-                updateCommand.Parameters.AddWithValue("@id", original.Id);
-                await updateCommand.ExecuteNonQueryAsync();
-
-                scope.Commit();
-                return true;
+                return ok;
             }
             catch
             {
                 scope.Rollback();
                 throw;
             }
+        }
+
+        /// <summary>
+        /// 統合の取り消し本体。呼び出し元が用意した単一の接続・トランザクション上で実行し、commit/rollback には介入しない。
+        /// </summary>
+        /// <returns>
+        /// 3 段階すべてが想定どおりの行数で完了したら true。競合（Undo データが指す行が既に無い）を検出したら false。
+        /// false の場合、途中まで書き込んだ内容は呼び出し元のロールバックで巻き戻る前提。
+        /// </returns>
+        private static async Task<bool> UnmergeLedgersCore(
+            Services.LedgerMergeUndoData undoData, SQLiteConnection connection, SQLiteTransaction transaction)
+        {
+            // 1. ソースLedgerを再作成し、新IDを取得
+            var idMapping = new Dictionary<int, int>();
+            foreach (var source in undoData.DeletedSources)
+            {
+                using var insertCommand = connection.CreateCommand();
+                insertCommand.Transaction = transaction;
+                insertCommand.CommandText = @"INSERT INTO ledger (card_idm, lender_idm, date, summary, income, expense, balance,
+                           staff_name, note, returner_idm, lent_at, returned_at, is_lent_record)
+VALUES (@cardIdm, @lenderIdm, @date, @summary, @income, @expense, @balance,
+       @staffName, @note, @returnerIdm, @lentAt, @returnedAt, @isLentRecord);
+SELECT last_insert_rowid();";
+
+                insertCommand.Parameters.AddWithValue("@cardIdm", source.CardIdm);
+                insertCommand.Parameters.AddWithValue("@lenderIdm", (object)source.LenderIdm ?? DBNull.Value);
+                insertCommand.Parameters.AddWithValue("@date", source.DateText);
+                insertCommand.Parameters.AddWithValue("@summary", source.Summary);
+                insertCommand.Parameters.AddWithValue("@income", source.Income);
+                insertCommand.Parameters.AddWithValue("@expense", source.Expense);
+                insertCommand.Parameters.AddWithValue("@balance", source.Balance);
+                insertCommand.Parameters.AddWithValue("@staffName", (object)source.StaffName ?? DBNull.Value);
+                insertCommand.Parameters.AddWithValue("@note", (object)source.Note ?? DBNull.Value);
+                insertCommand.Parameters.AddWithValue("@returnerIdm", (object)source.ReturnerIdm ?? DBNull.Value);
+                insertCommand.Parameters.AddWithValue("@lentAt", (object)source.LentAtText ?? DBNull.Value);
+                insertCommand.Parameters.AddWithValue("@returnedAt", (object)source.ReturnedAtText ?? DBNull.Value);
+                insertCommand.Parameters.AddWithValue("@isLentRecord", source.IsLentRecord ? 1 : 0);
+
+                var newId = Convert.ToInt32(await insertCommand.ExecuteScalarAsync().ConfigureAwait(false));
+                idMapping[source.Id] = newId;
+            }
+
+            // 2. Detailを元のLedgerに戻す（SequenceNumber=rowidでマッピング）
+            foreach (var entry in undoData.DetailOriginalLedgerMap)
+            {
+                var sequenceNumber = int.Parse(entry.Key);
+                var originalLedgerId = entry.Value;
+
+                // ターゲットLedgerに属するDetailのうち、ソースに属していたものを移動
+                if (originalLedgerId != undoData.OriginalTarget.Id)
+                {
+                    int newLedgerId;
+                    if (idMapping.TryGetValue(originalLedgerId, out newLedgerId))
+                    {
+                        using var moveCommand = connection.CreateCommand();
+                        moveCommand.Transaction = transaction;
+                        // Issue #1806: rowid だけでなく「いま統合先に属していること」も条件にする。
+                        // ledger_detail は暗黙 rowid（AUTOINCREMENT なし）のため、統合後に統合先の明細が
+                        // 編集（ReplaceDetailsAsync の DELETE + INSERT）されると rowid は振り直され、
+                        // 空いた rowid は無関係な別台帳の明細に再利用され得る。rowid だけで UPDATE すると
+                        // その明細を復活先へ移してしまう（交差破損）。UpdateDetailBusStopsAsync と同じスコープ。
+                        moveCommand.CommandText =
+                            "UPDATE ledger_detail SET ledger_id = @newLedgerId WHERE rowid = @rowid AND ledger_id = @targetId";
+                        moveCommand.Parameters.AddWithValue("@newLedgerId", newLedgerId);
+                        moveCommand.Parameters.AddWithValue("@rowid", sequenceNumber);
+                        moveCommand.Parameters.AddWithValue("@targetId", undoData.OriginalTarget.Id);
+
+                        // 0 行は「Undo データが指す明細がもう統合先に無い」＝競合（Issue #1753 の作法）。
+                        // 旧実装は戻り値を捨てて true を返し、統合元が明細ゼロで復活していた。
+                        var moved = await moveCommand.ExecuteNonQueryAsync().ConfigureAwait(false);
+                        if (moved != 1)
+                        {
+                            return false;
+                        }
+                    }
+                }
+            }
+
+            // 3. ターゲットLedgerを元の状態に復元
+            var original = undoData.OriginalTarget;
+            using var updateCommand = connection.CreateCommand();
+            updateCommand.Transaction = transaction;
+            updateCommand.CommandText = @"UPDATE ledger
+SET summary = @summary, income = @income, expense = @expense,
+    balance = @balance, note = @note
+WHERE id = @id";
+            updateCommand.Parameters.AddWithValue("@summary", original.Summary);
+            updateCommand.Parameters.AddWithValue("@income", original.Income);
+            updateCommand.Parameters.AddWithValue("@expense", original.Expense);
+            updateCommand.Parameters.AddWithValue("@balance", original.Balance);
+            updateCommand.Parameters.AddWithValue("@note", (object)original.Note ?? DBNull.Value);
+            updateCommand.Parameters.AddWithValue("@id", original.Id);
+
+            // 0 行は「統合先が統合後に削除された」＝競合。統合元だけを復活させると
+            // 残高チェーンの起点を持たない行になるため、ここで打ち切る（呼び出し元がロールバック）。
+            var updated = await updateCommand.ExecuteNonQueryAsync().ConfigureAwait(false);
+            return updated == 1;
         }
 
         /// <inheritdoc/>
@@ -1820,16 +1882,37 @@ VALUES (@mergedAt, @targetLedgerId, @description, @undoData)";
         }
 
         /// <inheritdoc/>
-        public async Task MarkMergeHistoryUndoneAsync(int historyId)
-        {
-            using var lease = await _dbContext.LeaseConnectionAsync();
-            var connection = lease.Connection;
+        public Task<bool> MarkMergeHistoryUndoneAsync(int historyId)
+            => MarkMergeHistoryUndoneAsync(historyId, transaction: null);
 
+        /// <inheritdoc/>
+        public async Task<bool> MarkMergeHistoryUndoneAsync(int historyId, SQLiteTransaction transaction)
+        {
+            // 単文のため 3 分岐は不要（tx があればそれに参加、無ければ接続を借りて autocommit）。
+            // tx=null で外側スコープが活性でも、借りた接続の活性トランザクションへ暗黙参加するだけで
+            // 新たに BeginTransactionAsync はしないためデッドロックしない。
+            if (transaction != null)
+            {
+                return await MarkMergeHistoryUndoneCore(historyId, (SQLiteConnection)transaction.Connection, transaction).ConfigureAwait(false);
+            }
+
+            using var lease = await _dbContext.LeaseConnectionAsync().ConfigureAwait(false);
+            return await MarkMergeHistoryUndoneCore(historyId, lease.Connection, transaction: null).ConfigureAwait(false);
+        }
+
+        private static async Task<bool> MarkMergeHistoryUndoneCore(int historyId, SQLiteConnection connection, SQLiteTransaction transaction)
+        {
             using var command = connection.CreateCommand();
-            command.CommandText = "UPDATE ledger_merge_history SET is_undone = 1 WHERE id = @id";
+            command.Transaction = transaction;
+            // Issue #1806: is_undone = 0 を条件に含め、影響行数で競合を検出する（Issue #1753 の作法）。
+            // 共有モードで 2 台が同じ履歴を同時に取り消すと、両方が「未取消」を読んでから書き込みに来る。
+            // 後着の UPDATE を 0 行にして false を返し、呼び出し元が台帳の復元ごとロールバックすることで
+            // 統合元の二重 INSERT を防ぐ。
+            command.CommandText = "UPDATE ledger_merge_history SET is_undone = 1 WHERE id = @id AND is_undone = 0";
             command.Parameters.AddWithValue("@id", historyId);
 
-            await command.ExecuteNonQueryAsync();
+            var affected = await command.ExecuteNonQueryAsync().ConfigureAwait(false);
+            return affected == 1;
         }
 
         /// <inheritdoc/>
