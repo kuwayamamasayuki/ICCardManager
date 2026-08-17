@@ -42,9 +42,21 @@ namespace ICCardManager.Data.Repositories
             SQLiteTransaction transaction);
 
         /// <summary>
-        /// 統合を元に戻す
+        /// 統合を元に戻す（自前のトランザクションで確定する）
         /// </summary>
+        /// <returns>
+        /// 復元が確定したら true。統合後に統合先の明細が編集（rowid 振り直し）・削除されていた、
+        /// または統合先そのものが削除されていた場合は競合として false（何も書き込まない。Issue #1806）
+        /// </returns>
         Task<bool> UnmergeLedgersAsync(Services.LedgerMergeUndoData undoData);
+
+        /// <summary>
+        /// 統合を既存トランザクション内で元に戻す（Issue #1806）。
+        /// 「取り消し済み」マーク（<see cref="MarkMergeHistoryUndoneAsync(int, SQLiteTransaction)"/>）と
+        /// 同一トランザクションで確定させるために使う。commit / rollback は呼び出し元の責務。
+        /// </summary>
+        /// <returns><see cref="UnmergeLedgersAsync(Services.LedgerMergeUndoData)"/> と同じ</returns>
+        Task<bool> UnmergeLedgersAsync(Services.LedgerMergeUndoData undoData, SQLiteTransaction transaction);
 
         /// <summary>
         /// 統合履歴をDBに保存
@@ -59,6 +71,17 @@ namespace ICCardManager.Data.Repositories
         /// <summary>
         /// 統合履歴を取り消し済みにマーク
         /// </summary>
-        Task MarkMergeHistoryUndoneAsync(int historyId);
+        /// <returns>
+        /// 1 行更新できたら true。既に取り消し済み（他の PC・他の操作が先にマークした競合）なら false（Issue #1806）
+        /// </returns>
+        Task<bool> MarkMergeHistoryUndoneAsync(int historyId);
+
+        /// <summary>
+        /// 統合履歴を既存トランザクション内で取り消し済みにマーク（Issue #1806）。
+        /// 台帳の復元（<see cref="UnmergeLedgersAsync(Services.LedgerMergeUndoData, SQLiteTransaction)"/>）と
+        /// 同一トランザクションで確定させるために使う。commit / rollback は呼び出し元の責務。
+        /// </summary>
+        /// <returns><see cref="MarkMergeHistoryUndoneAsync(int)"/> と同じ</returns>
+        Task<bool> MarkMergeHistoryUndoneAsync(int historyId, SQLiteTransaction transaction);
     }
 }

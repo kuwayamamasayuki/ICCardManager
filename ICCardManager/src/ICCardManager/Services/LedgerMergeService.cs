@@ -362,23 +362,56 @@ namespace ICCardManager.Services
                     return new LedgerMergeResult
                     {
                         Success = false,
-                        ErrorMessage = "統合履歴が見つかりません"
+                        // 内部 ID は出さず「なぜ／どうすれば」を伝える（.claude/rules/error-messages.md）。
+                        // 共有モードでは他 PC が先に同じ統合を取り消したときに実際に発生する。
+                        ErrorMessage = "統合履歴が見つかりません。他のPCまたは他の操作で既に取り消された可能性があります。" +
+                                       "画面を最新の状態に更新して履歴を確認してください。"
                     };
                 }
 
-                var success = await _ledgerRepository.UnmergeLedgersAsync(entry.UndoData).ConfigureAwait(false);
-
-                if (!success)
+                // Issue #1806: 台帳の復元と「取り消し済み」マークを同一トランザクションで確定させる。
+                // 旧実装は復元を内部でコミットしてから別接続でマークしていたため、マークだけが失敗
+                // （共有モードの SQLITE_BUSY / UNC 断）すると「台帳は復元済み・履歴は未取消」が残り、
+                // 案内どおりの再実行で統合元が二重に INSERT された（月次帳票の二重計上）。
+                using (var scope = await _dbContext.BeginTransactionAsync().ConfigureAwait(false))
                 {
-                    return new LedgerMergeResult
+                    var restored = await _ledgerRepository.UnmergeLedgersAsync(entry.UndoData, scope.Transaction).ConfigureAwait(false);
+                    if (!restored)
                     {
-                        Success = false,
-                        ErrorMessage = "統合の取り消しに失敗しました"
-                    };
-                }
+                        // ログはロールバックより先に書く（Rollback が失敗しても診断の手掛かりを残す。#1745）
+                        _logger.LogWarning(
+                            "Unmerge aborted: undo data of history {HistoryId} no longer matches ledger {TargetId} (details edited/replaced or target deleted after merge)",
+                            mergeHistoryId, entry.TargetLedgerId);
+                        scope.Rollback();
+                        return new LedgerMergeResult
+                        {
+                            Success = false,
+                            // 復元の 0 行は「Undo データが指す明細・統合先がもう無い」。統合後の編集（明細の
+                            // 保存は DELETE + INSERT で rowid が変わる）・分割・削除、または他 PC の先行取り消し。
+                            ErrorMessage = "統合の取り消しに失敗しました。統合後にこの履歴の内容が編集・分割・削除されたか、" +
+                                           "他のPCまたは他の操作で先に取り消された可能性があります。" +
+                                           "画面を最新の状態に更新して履歴を確認してください。"
+                        };
+                    }
 
-                // 履歴を取り消し済みにマーク
-                await _ledgerRepository.MarkMergeHistoryUndoneAsync(mergeHistoryId).ConfigureAwait(false);
+                    // 履歴を取り消し済みにマーク（0 行＝他 PC が先にマークした競合。復元ごと巻き戻す）
+                    var marked = await _ledgerRepository.MarkMergeHistoryUndoneAsync(mergeHistoryId, scope.Transaction).ConfigureAwait(false);
+                    if (!marked)
+                    {
+                        _logger.LogWarning(
+                            "Unmerge aborted: history {HistoryId} was already marked undone by another operation",
+                            mergeHistoryId);
+                        scope.Rollback();
+                        return new LedgerMergeResult
+                        {
+                            Success = false,
+                            ErrorMessage = "統合の取り消しに失敗しました。この統合は他のPCまたは他の操作で既に取り消されています。" +
+                                           "画面を最新の状態に更新して履歴を確認してください。"
+                        };
+                    }
+
+                    scope.Commit();
+                }
 
                 _logger.LogInformation(
                     "Unmerged merge history {HistoryId}: restored ledger {TargetId}",
@@ -395,7 +428,8 @@ namespace ICCardManager.Services
                 return new LedgerMergeResult
                 {
                     Success = false,
-                    ErrorMessage = $"統合の取り消し中にエラーが発生しました: {ex.Message}"
+                    // 技術的詳細はログ（上の LogError）へ。UI には 3 要素のユーザー向け文言を返す（Issue #1614）。
+                    ErrorMessage = ExceptionMessageFormatter.ToUserMessage(ex, "統合の取り消し")
                 };
             }
         }
