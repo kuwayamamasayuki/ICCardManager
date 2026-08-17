@@ -1333,6 +1333,47 @@ public class MainViewModelIntegrationTests
     }
 
     /// <summary>
+    /// 付帯情報の欠落を案内したあと、同じ原因で画面更新（警告チェックの設定読み取り）まで失敗しても、
+    /// 「記録済み・再タッチしない」の警告トーストと警告音を重ねて出さないこと。
+    /// </summary>
+    /// <remarks>
+    /// <c>HasPostCommitFailure</c> の原因（DB ロック・共有フォルダー断）は一時的とは限らず、
+    /// <c>HandleReturnSuccessAsync</c> の後続の画面更新も同じ原因で例外になり得る。その例外は
+    /// <c>ProcessReturnAsync</c> の catch → <c>NotifyProcessingFailure(recorded: true)</c> に流れるが、
+    /// 案内は既に済んでいるためログだけ残して同題のトーストは重ねない。
+    /// </remarks>
+    [Fact]
+    public async Task PostCommitFailure_同じ原因で画面更新も失敗しても記録済みの案内を重ねて出さないこと()
+    {
+        ArrangeSuccessfulReturn();
+
+        RaiseCardRead(StaffIdm);
+        await _dispatcherService.WaitForPendingAsync();
+
+        // 設定の読み取りを恒常的に失敗させる（残額警告の取得＝付帯情報の欠落、続く警告チェック＝画面更新の失敗）
+        _settingsRepositoryMock.Setup(r => r.GetAppSettingsAsync())
+            .ThrowsAsync(new InvalidOperationException("database is locked"));
+
+        // Act
+        RaiseCardRead(CardIdmA);
+        await _dispatcherService.WaitForPendingAsync();
+
+        // Assert: 返却は成立している
+        _ledgerRepositoryMock.Verify(r => r.DeleteAllLentRecordsAsync(CardIdmA), Times.Once);
+
+        // 「記録済み・再タッチしない」の案内は 1 回だけ
+        _toastMock.Verify(t => t.ShowWarning(
+            It.Is<string>(title => title.Contains("記録済み")),
+            It.Is<string>(m => m.Contains("再タッチしないでください"))), Times.Once);
+        _soundPlayerMock.Verify(s => s.Play(SoundType.Warning), Times.Once);
+        _toastMock.Verify(t => t.ShowError(It.IsAny<string>(), It.IsAny<string>()), Times.Never);
+        _soundPlayerMock.Verify(s => s.Play(SoundType.Error), Times.Never);
+
+        // 例外経路でも Processing は解除される（#1725）
+        _viewModel.CurrentState.Should().Be(AppState.WaitingForStaffCard);
+    }
+
+    /// <summary>
     /// 後処理まで成功した通常の返却では、従来どおり残額付きの返却通知と返却音が出ること（回帰防止）。
     /// </summary>
     [Fact]
