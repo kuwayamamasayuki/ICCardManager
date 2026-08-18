@@ -72,12 +72,11 @@ namespace ICCardManager.Services
                 }
 
                 var staffIdm = fields[0].Trim().ToUpperInvariant(); // IDmは大文字に正規化
-                var name = fields[1].Trim();
-                var number = fields.Count > 2 ? fields[2].Trim() : "";
-                // Issue #1267: note はユーザー自由記述のため式インジェクション対策を適用
-                var note = fields.Count > 3
-                    ? Infrastructure.Security.FormulaInjectionSanitizer.Sanitize(fields[3].Trim())
-                    : "";
+                // Issue #1808: テキスト列はエクスポート由来の先頭 ' を取り除いて自然な値で保存する
+                //（式インジェクション対策は sink 側のエクスポート／帳票出力が担う。ReadTextField を参照）
+                var name = ReadTextField(fields, 1);
+                var number = ReadTextField(fields, 2);
+                var note = ReadTextField(fields, 3);
 
                 // バリデーション（共通メソッドを使用）
                 if (!ValidateIdm(staffIdm, lineNumber, "職員IDm", line, errors, isStaff: true))
@@ -288,12 +287,11 @@ namespace ICCardManager.Services
                 }
 
                 var staffIdm = fields[0].Trim().ToUpperInvariant(); // IDmは大文字に正規化
-                var name = fields[1].Trim();
-                var number = fields.Count > 2 ? fields[2].Trim() : "";
                 // Issue #1370: プレビューでも備考差分検出のため note を読み取る
-                var note = fields.Count > 3
-                    ? Infrastructure.Security.FormulaInjectionSanitizer.Sanitize(fields[3].Trim())
-                    : "";
+                // Issue #1808: インポート本体と同じ ReadTextField（先頭 ' の除去）で読む
+                var name = ReadTextField(fields, 1);
+                var number = ReadTextField(fields, 2);
+                var note = ReadTextField(fields, 3);
 
                 // バリデーション（共通メソッドを使用）
                 if (!ValidateIdm(staffIdm, lineNumber, "職員IDm", line, errors, isStaff: true))
@@ -399,13 +397,20 @@ namespace ICCardManager.Services
                 });
             }
 
-            if (existingStaff.Number != newNumber)
+            // Issue #1808: 職員番号は保存時に IsNullOrWhiteSpace → null へ正規化されるため
+            // （本ファイルの Number = string.IsNullOrWhiteSpace(number) ? null : number）、
+            // CSV の空欄 "" と DB の null を生で比較すると常に不一致になり、職員番号未設定の
+            // 職員が同一 CSV の再取り込みで毎回「更新」に数えられ、プレビューに実在しない差分
+            // 「職員番号: (なし) → （空）」が出ていた。備考（Issue #1370）と同じ形で正規化してから比較する。
+            var existingNumber = string.IsNullOrWhiteSpace(existingStaff.Number) ? null : existingStaff.Number;
+            var normalizedNewNumber = string.IsNullOrWhiteSpace(newNumber) ? null : newNumber;
+            if (existingNumber != normalizedNewNumber)
             {
                 changes.Add(new FieldChange
                 {
                     FieldName = "職員番号",
-                    OldValue = existingStaff.Number ?? "(なし)",
-                    NewValue = newNumber
+                    OldValue = existingNumber ?? "(なし)",
+                    NewValue = normalizedNewNumber ?? "(なし)"
                 });
             }
 

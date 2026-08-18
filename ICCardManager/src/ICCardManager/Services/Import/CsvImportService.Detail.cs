@@ -469,7 +469,12 @@ namespace ICCardManager.Services
                     if (success)
                     {
                         // Issue #918: 詳細置換後、親Ledgerの金額を再計算して更新
+                        // Issue #1808: 親 Ledger の再読取が null／UpdateAsync が 0 行（他 PC や別操作で
+                        // 履歴が削除された競合）のとき、旧実装は戻り値を捨てて「インポート完了」に
+                        // していた。明細だけ差し替わり親の摘要・金額が旧値のまま残る（または CASCADE で
+                        // 明細ごと消えている）ため、エラーとして報告しインポート件数に含めない。
                         var ledger = await _ledgerRepository.GetByIdAsync(ledgerId).ConfigureAwait(false);
+                        var parentUpdated = false;
                         if (ledger != null)
                         {
                             var summaryGenerator = new SummaryGenerator();
@@ -480,10 +485,22 @@ namespace ICCardManager.Services
                             ledger.Income = income;
                             ledger.Expense = expense;
                             ledger.Balance = balance;
-                            await _ledgerRepository.UpdateAsync(ledger).ConfigureAwait(false);
+                            parentUpdated = await _ledgerRepository.UpdateAsync(ledger).ConfigureAwait(false);
                         }
 
-                        importedCount += detailRows.Count;
+                        if (parentUpdated)
+                        {
+                            importedCount += detailRows.Count;
+                        }
+                        else
+                        {
+                            errors.Add(new CsvImportError
+                            {
+                                LineNumber = firstLineNumber,
+                                Message = BuildParentLedgerConflictMessage(ledgerId),
+                                Data = ledgerId.ToString()
+                            });
+                        }
                     }
                     else
                     {
@@ -515,6 +532,22 @@ namespace ICCardManager.Services
                 Errors = errors
             };
         }
+
+        /// <summary>
+        /// 明細の置換後に親 Ledger を更新できなかった（再読取が null／UPDATE が 0 行）ときの
+        /// エラー文言を組み立てる（Issue #1808）。
+        /// </summary>
+        /// <remarks>
+        /// <c>LedgerRepository.UpdateAsync</c> の WHERE は <c>id = @id</c> だけなので、0 行は
+        /// 「その id の行が無い」ことに特定できる（Issue #1759「影響行数 0 は競合 — 原因を名指しできる」）。
+        /// ただし共有モードでもローカルモードでも起こり得るため、モード中立に「他のパソコンや別の操作」と
+        /// 「可能性があります」で述べる。<c>ledger_detail</c> は <c>ON DELETE CASCADE</c> なので、
+        /// 置き換えた明細も親と一緒に消えている。
+        /// </remarks>
+        private static string BuildParentLedgerConflictMessage(int ledgerId)
+            => $"利用履歴ID {ledgerId} の明細を置き換えたあと、親の履歴が見つからず摘要・金額を更新できませんでした。" +
+               "他のパソコンや別の操作でこの履歴が削除された可能性があります。" +
+               "履歴画面でこの履歴の有無を確認し、残っている場合は明細CSVを再度インポートしてください。";
 
         private static void DetectLedgerDetailChanges(
             List<LedgerDetail> existingDetails,

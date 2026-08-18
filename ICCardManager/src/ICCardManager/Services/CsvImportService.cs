@@ -574,6 +574,43 @@ namespace ICCardManager.Services
         }
 
         /// <summary>
+        /// CSV のテキスト列を読み取り、DB へ保存する自然な値へ正規化する（Issue #1808）。
+        /// </summary>
+        /// <param name="fields">パース済みのフィールド</param>
+        /// <param name="index">列インデックス（範囲外なら空文字列）</param>
+        /// <returns>前後の空白を除き、エクスポート由来の先頭 <c>'</c> を取り除いた値</returns>
+        /// <remarks>
+        /// <para>
+        /// <see cref="CsvExportService"/> は式インジェクション対策（Issue #1267）として全テキスト列に
+        /// <see cref="Infrastructure.Security.FormulaInjectionSanitizer.Sanitize"/> を適用し、
+        /// <c>=</c> / <c>+</c> / <c>-</c> / <c>@</c> 等で始まる値の先頭に <c>'</c> を付ける。
+        /// 取り込み側が同じ <c>Sanitize</c> を掛けていた頃は、UI から入力した <c>-異動予定</c> が
+        /// エクスポート→再取り込みで <c>'-異動予定</c> に恒久変化し、管理者マニュアル §5.6.5 が
+        /// 推奨する「エクスポート CSV を編集して取り込む」運用がそのまま汚染経路になっていた。
+        /// </para>
+        /// <para>
+        /// 取り込み側では <see cref="Infrastructure.Security.FormulaInjectionSanitizer.Unsanitize"/> で
+        /// <c>'</c> を取り除き、DB には UI 入力と同じ自然な値を保存する。式インジェクションの防御は
+        /// sink 側（CSV／Excel エクスポート・帳票・操作ログ・ダッシュボード出力）が全て自前で
+        /// <c>Sanitize</c> しており、UI 入力は元々サニタイズしないため、取り込み側の <c>Sanitize</c> は
+        /// 実効防御ではなく往復非対称の原因でしかなかった。
+        /// </para>
+        /// <para>
+        /// エクスポートが全テキスト列を <c>Sanitize</c> する以上、取り込みも<b>備考だけでなく
+        /// エクスポート対象のテキスト列すべて</b>で本メソッドを使うこと（往復対称性）。
+        /// </para>
+        /// </remarks>
+        internal static string ReadTextField(List<string> fields, int index)
+        {
+            if (index < 0 || index >= fields.Count)
+            {
+                return string.Empty;
+            }
+
+            return Infrastructure.Security.FormulaInjectionSanitizer.Unsanitize(fields[index].Trim());
+        }
+
+        /// <summary>
         /// CSV行をパースし、フィールドのリストとして返す（ダブルクォート対応）
         /// </summary>
         /// <param name="line">CSV行文字列</param>

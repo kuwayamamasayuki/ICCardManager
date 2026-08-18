@@ -72,12 +72,11 @@ namespace ICCardManager.Services
                 }
 
                 var cardIdm = fields[0].Trim().ToUpperInvariant(); // IDmは大文字に正規化
-                var cardType = fields[1].Trim();
-                var cardNumber = fields[2].Trim();
-                // Issue #1267: note はユーザー自由記述のため式インジェクション対策を適用
-                var note = fields.Count > 3
-                    ? Infrastructure.Security.FormulaInjectionSanitizer.Sanitize(fields[3].Trim())
-                    : "";
+                // Issue #1808: テキスト列はエクスポート由来の先頭 ' を取り除いて自然な値で保存する
+                //（式インジェクション対策は sink 側のエクスポート／帳票出力が担う。ReadTextField を参照）
+                var cardType = ReadTextField(fields, 1);
+                var cardNumber = ReadTextField(fields, 2);
+                var note = ReadTextField(fields, 3);
 
                 // バリデーション（共通メソッドを使用）
                 if (!ValidateIdm(cardIdm, lineNumber, "カードIDm", line, errors))
@@ -303,13 +302,11 @@ namespace ICCardManager.Services
                 }
 
                 var cardIdm = fields[0].Trim().ToUpperInvariant(); // IDmは大文字に正規化
-                var cardType = fields[1].Trim();
-                var cardNumber = fields[2].Trim();
                 // Issue #1370: プレビューでも備考差分検出のため note を読み取る
-                // (インポート本体と同じ式インジェクション対策を適用)
-                var note = fields.Count > 3
-                    ? Infrastructure.Security.FormulaInjectionSanitizer.Sanitize(fields[3].Trim())
-                    : "";
+                // Issue #1808: インポート本体と同じ ReadTextField（先頭 ' の除去）で読む
+                var cardType = ReadTextField(fields, 1);
+                var cardNumber = ReadTextField(fields, 2);
+                var note = ReadTextField(fields, 3);
 
                 // バリデーション（共通メソッドを使用）
                 if (!ValidateIdm(cardIdm, lineNumber, "カードIDm", line, errors))

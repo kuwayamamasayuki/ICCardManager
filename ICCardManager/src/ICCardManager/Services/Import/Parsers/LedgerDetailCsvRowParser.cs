@@ -31,11 +31,11 @@ namespace ICCardManager.Services.Import.Parsers
             var useDateStr = fields[1].Trim();
             // fields[2] カードIDm（利用履歴ID空欄時の自動作成で使用）
             // fields[3] 管理番号（参照用）
-            // Issue #1267: entry_station / exit_station / bus_stops は
-            // ユーザー編集可能テキストのため式インジェクション対策を適用
-            var entryStation = Infrastructure.Security.FormulaInjectionSanitizer.Sanitize(fields[4].Trim());
-            var exitStation = Infrastructure.Security.FormulaInjectionSanitizer.Sanitize(fields[5].Trim());
-            var busStops = Infrastructure.Security.FormulaInjectionSanitizer.Sanitize(fields[6].Trim());
+            // Issue #1808: entry_station / exit_station / bus_stops はエクスポート由来の先頭 ' を
+            // 取り除いて自然な値で保存する（CsvImportService.ReadTextField を参照）
+            var entryStation = CsvImportService.ReadTextField(fields, 4);
+            var exitStation = CsvImportService.ReadTextField(fields, 5);
+            var busStops = CsvImportService.ReadTextField(fields, 6);
             var amountStr = fields[7].Trim();
             var balanceStr = fields[8].Trim();
             var isChargeStr = fields[9].Trim();
