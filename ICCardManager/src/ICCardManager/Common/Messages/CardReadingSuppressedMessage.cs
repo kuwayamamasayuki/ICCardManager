@@ -31,7 +31,19 @@ namespace ICCardManager.Common.Messages
         /// DataExportImportViewModel 側の「未登録カード」MessageBox が二重表示されてしまうため、
         /// データインポート画面側で MainViewModel.OnCardRead を抑制する用途で使用する。
         /// </remarks>
-        DataImport
+        DataImport,
+
+        /// <summary>
+        /// 未登録カードの種別選択〜登録ダイアログ（MainViewModel.HandleUnregisteredCardAsync）
+        /// </summary>
+        /// <remarks>
+        /// Issue #1807: 種別選択ダイアログ（<c>ShowDialog</c> ＝ 入れ子のメッセージポンプ）を表示している間も
+        /// <c>MainViewModel.HandleCardReadAsync</c> は実行されるため、別カードのタッチでダイアログが多重に開いたり
+        /// 背後で貸出・返却が進んだりしていた。MainViewModel 自身が未登録カード処理の全区間
+        /// （残高・履歴の事前読み取り〜種別選択〜登録ダイアログ）を抑制するために使用する。
+        /// メッセージ経由ではなく MainViewModel が自身の抑制ソース集合を直接操作する（発生源の識別子としてのみ用いる）。
+        /// </remarks>
+        UnregisteredCardDialog
     }
 
     /// <summary>

@@ -223,6 +223,11 @@ namespace ICCardManager.ViewModels
         /// <returns>処理が完了したかどうか（削除済みカードの復元で完了した場合はtrue）</returns>
         public async Task<bool> StartNewCardWithIdmAsync(string idm)
         {
+            // MainViewModelでの未登録カード処理を抑制（Issue #852）
+            // Issue #1807: 「新規登録」ボタン経由（StartNewCard）と同じく登録モードの入口で取得し、
+            // 解放は CancelEdit / Cleanup に限る（StaffManageViewModel.StartNewStaffWithIdmAsync と同型）。
+            _messenger.Send(new CardReadingSuppressedMessage(true, CardReadingSource.CardRegistration));
+
             // Issue #284対応: タッチ時点で削除済みカードチェックを行う
             var existing = await _cardRepository.GetByIdmAsync(idm, includeDeleted: true);
             if (existing != null)

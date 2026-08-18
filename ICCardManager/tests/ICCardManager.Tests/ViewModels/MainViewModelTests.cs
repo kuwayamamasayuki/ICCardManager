@@ -114,11 +114,14 @@ public class MainViewModelTests : IDisposable
         _viewModel = CreateViewModel();
     }
 
-    private MainViewModel CreateViewModel(int timeoutSeconds = 60)
+    private MainViewModel CreateViewModel(
+        int timeoutSeconds = 60,
+        IDispatcherService dispatcherService = null,
+        ICardReader cardReader = null)
     {
         var databaseInfoMock = new Mock<IDatabaseInfo>();
         return new MainViewModel(
-            _cardReaderMock.Object,
+            cardReader ?? _cardReaderMock.Object,
             _soundPlayerMock.Object,
             _staffRepositoryMock.Object,
             _cardRepositoryMock.Object,
@@ -134,7 +137,7 @@ public class MainViewModelTests : IDisposable
             _ledgerConsistencyChecker,
             Options.Create(new AppOptions { StaffCardTimeoutSeconds = timeoutSeconds }),
             _timerFactory,
-            _dispatcherService,
+            dispatcherService ?? _dispatcherService,
             databaseInfoMock.Object,
             new Mock<ICacheService>().Object,
             new SharedModeMonitor(databaseInfoMock.Object, _timerFactory, new SystemClock()),
@@ -1665,6 +1668,265 @@ public class MainViewModelTests : IDisposable
     {
         // Assert - 初期状態では抑制されていない
         _viewModel.IsCardReadingSuppressed.Should().BeFalse();
+    }
+
+    /// <summary>
+    /// 未登録カードの経路（職員でも交通系ICカードでもない IDm）を仕込む。
+    /// </summary>
+    private void ArrangeUnregisteredCards()
+    {
+        _staffRepositoryMock.Setup(r => r.GetByIdmAsync(It.IsAny<string>(), It.IsAny<bool>()))
+            .ReturnsAsync((Staff)null);
+        _cardRepositoryMock.Setup(r => r.GetByIdmAsync(It.IsAny<string>(), It.IsAny<bool>()))
+            .ReturnsAsync((IcCard)null);
+    }
+
+    /// <summary>
+    /// 種別選択ダイアログ（モーダル）の表示中に別カードがタッチされる状況を再現する。
+    /// <c>ShowDialog</c> は入れ子のメッセージポンプなので、その最中に <c>OnCardRead</c> は実行される。
+    /// テストでは <c>ShowDialog</c> のモックの Callback 内でカード読み取りイベントを 1 回だけ発火させる。
+    /// </summary>
+    /// <returns>ダイアログ表示中に観測した <see cref="MainViewModel.IsCardReadingSuppressed"/></returns>
+    private Func<bool?> ArrangeCardTouchDuringCardTypeSelectionDialog(string idmTouchedDuringDialog)
+    {
+        bool? suppressedDuringDialog = null;
+        var raised = false;
+        _navigationServiceMock
+            .Setup(n => n.ShowDialog<ICCardManager.Views.Dialogs.CardTypeSelectionDialog>(
+                It.IsAny<Action<ICCardManager.Views.Dialogs.CardTypeSelectionDialog>>()))
+            .Callback(() =>
+            {
+                suppressedDuringDialog ??= _viewModel.IsCardReadingSuppressed;
+                if (raised) return; // 修正前のコードで無限に入れ子になるのを防ぐ
+                raised = true;
+                _cardReaderMock.Raise(r => r.CardRead += null,
+                    _cardReaderMock.Object, new CardReadEventArgs { Idm = idmTouchedDuringDialog });
+            })
+            .Returns((bool?)null);
+        return () => suppressedDuringDialog;
+    }
+
+    /// <summary>
+    /// Issue #1807 (1): 未登録カードの種別選択ダイアログを表示している間は、別の未登録カードが
+    /// タッチされても種別選択ダイアログを重ねて開かないこと（表示中は読み取りを抑制する）。
+    /// </summary>
+    [Fact]
+    public async Task UnregisteredCard_種別選択ダイアログ表示中は別カードのタッチで多重に開かないこと()
+    {
+        // Arrange
+        var firstIdm = "0102030405060708";
+        var secondIdm = "1112131415161718";
+        ArrangeUnregisteredCards();
+        var suppressedDuringDialog = ArrangeCardTouchDuringCardTypeSelectionDialog(secondIdm);
+
+        // Act
+        _cardReaderMock.Raise(r => r.CardRead += null,
+            _cardReaderMock.Object, new CardReadEventArgs { Idm = firstIdm });
+        await _dispatcherService.WaitForPendingAsync();
+
+        // Assert
+        suppressedDuringDialog().Should().BeTrue("ダイアログ表示中は MainViewModel の読み取りを抑制する");
+        _navigationServiceMock.Verify(
+            n => n.ShowDialog<ICCardManager.Views.Dialogs.CardTypeSelectionDialog>(
+                It.IsAny<Action<ICCardManager.Views.Dialogs.CardTypeSelectionDialog>>()),
+            Times.Once, "2 枚目のタッチで種別選択ダイアログを重ねて開かない");
+        _cardRepositoryMock.Verify(r => r.GetByIdmAsync(secondIdm, It.IsAny<bool>()), Times.Never,
+            "抑制中のタッチは判定にも進まない");
+    }
+
+    /// <summary>
+    /// Issue #1807 (1): 種別選択ダイアログの表示中に登録済みの職員証がタッチされても、
+    /// 背後で職員証認識（貸出・返却の起点）を進めないこと。
+    /// </summary>
+    [Fact]
+    public async Task UnregisteredCard_種別選択ダイアログ表示中は職員証タッチも背後で処理しないこと()
+    {
+        // Arrange
+        var unregisteredIdm = "0102030405060708";
+        var staffIdm = "AAAA030405060708";
+        ArrangeUnregisteredCards();
+        _staffRepositoryMock.Setup(r => r.GetByIdmAsync(staffIdm, It.IsAny<bool>()))
+            .ReturnsAsync(new Staff { StaffIdm = staffIdm, Name = "テスト職員" });
+        ArrangeCardTouchDuringCardTypeSelectionDialog(staffIdm);
+
+        // Act
+        _cardReaderMock.Raise(r => r.CardRead += null,
+            _cardReaderMock.Object, new CardReadEventArgs { Idm = unregisteredIdm });
+        await _dispatcherService.WaitForPendingAsync();
+
+        // Assert
+        _toastMock.Verify(t => t.ShowStaffRecognizedNotification(It.IsAny<string>()), Times.Never,
+            "ダイアログの背後で職員証認識を進めない");
+        _soundPlayerMock.Verify(s => s.Play(SoundType.Notify), Times.Never);
+    }
+
+    /// <summary>
+    /// Issue #1807: 種別選択ダイアログを閉じたあとは抑制が解放され、次のタッチが通常どおり処理されること
+    /// （解放は finally で保証する。Issue #1725 と同じ判断）。
+    /// </summary>
+    [Fact]
+    public async Task UnregisteredCard_ダイアログを閉じた後は抑制が解放され次のタッチを処理すること()
+    {
+        // Arrange
+        var unregisteredIdm = "0102030405060708";
+        var staffIdm = "AAAA030405060708";
+        ArrangeUnregisteredCards();
+        _staffRepositoryMock.Setup(r => r.GetByIdmAsync(staffIdm, It.IsAny<bool>()))
+            .ReturnsAsync(new Staff { StaffIdm = staffIdm, Name = "テスト職員" });
+        ArrangeCardTouchDuringCardTypeSelectionDialog(staffIdm);
+
+        _cardReaderMock.Raise(r => r.CardRead += null,
+            _cardReaderMock.Object, new CardReadEventArgs { Idm = unregisteredIdm });
+        await _dispatcherService.WaitForPendingAsync();
+        _viewModel.IsCardReadingSuppressed.Should().BeFalse("ダイアログを閉じたら抑制を解放する");
+
+        // Act - ダイアログを閉じた後の職員証タッチ
+        _cardReaderMock.Raise(r => r.CardRead += null,
+            _cardReaderMock.Object, new CardReadEventArgs { Idm = staffIdm });
+        await _dispatcherService.WaitForPendingAsync();
+
+        // Assert
+        _viewModel.CurrentState.Should().Be(AppState.WaitingForIcCard);
+        _toastMock.Verify(t => t.ShowStaffRecognizedNotification("テスト職員"), Times.Once);
+    }
+
+    /// <summary>
+    /// <see cref="SynchronousDispatcherService"/> は <c>InvokeAsync(Func&lt;Task&gt;)</c> をブロッキングで完了させるため
+    /// 「1 件目の await 中に 2 件目が割り込み、その後 1 件目が先に再開する」交錯を表現できない。
+    /// 本ディスパッチャはタスクを開始して記録するだけで待たず、<see cref="TaskCompletionSource{TResult}"/> で
+    /// 再開順を制御できるようにする（本番の WPF Dispatcher と同じく await 中に他のタッチが処理される形）。
+    /// </summary>
+    private sealed class NonBlockingDispatcherService : IDispatcherService
+    {
+        public List<Task> Tasks { get; } = new();
+        public void InvokeAsync(Action action) => action();
+        public void InvokeAsync(Func<Task> asyncAction) => Tasks.Add(asyncAction());
+        public Task WhenAllAsync() => Task.WhenAll(Tasks);
+    }
+
+    /// <summary>
+    /// 条件が成立するまで待つ（await の継続がテストスレッド外で再開される場合に備える）
+    /// </summary>
+    private static async Task WaitUntilAsync(Func<bool> condition, string because)
+    {
+        var deadline = DateTime.UtcNow.AddSeconds(5);
+        while (!condition())
+        {
+            if (DateTime.UtcNow > deadline)
+            {
+                throw new TimeoutException($"条件が 5 秒以内に成立しませんでした: {because}");
+            }
+            await Task.Delay(10);
+        }
+    }
+
+    /// <summary>
+    /// Issue #1807: 抑制ゲート（HandleCardReadAsync 入口）を通過したあと、未登録判定の
+    /// <c>GetByIdmAsync</c> を待っている間に別カードがタッチされても、未登録カード処理へ再入しないこと。
+    /// この待機中に届いた 2 件目は入口ゲートを通過済みなので、<c>HandleUnregisteredCardAsync</c> 側で
+    /// 改めて抑制を判定しないと、1 件目の事前読み取り中に 2 件目が種別選択ダイアログを重ね、
+    /// Error ハンドラも二重購読になる。2 件のカード判定と 1 件目の事前読み取りを
+    /// <see cref="TaskCompletionSource{TResult}"/> で止め、本番と同じ交錯順
+    /// （1 件目 判定待ち → 2 件目 入口通過・判定待ち → 1 件目 抑制取得 → 2 件目 判定完了 → 1 件目 完了）を再現する。
+    /// </summary>
+    [Fact]
+    public async Task UnregisteredCard_未登録判定の待機中の別カードタッチで種別選択ダイアログが重ならないこと()
+    {
+        // Arrange
+        // 共有の _cardReaderMock には既定の _viewModel（同期ディスパッチャ）も購読しているため、
+        // 待機を伴う本テストでは専用のリーダーモックと非ブロッキングのディスパッチャで VM を分離する
+        var dispatcher = new NonBlockingDispatcherService();
+        var cardReaderMock = new Mock<ICardReader>();
+        var vm = CreateViewModel(dispatcherService: dispatcher, cardReader: cardReaderMock.Object);
+        var firstIdm = "0102030405060708";
+        var secondIdm = "1112131415161718";
+        ArrangeUnregisteredCards();
+        var firstLookup = new TaskCompletionSource<IcCard>();
+        var secondLookup = new TaskCompletionSource<IcCard>();
+        var firstBalanceRead = new TaskCompletionSource<int?>();
+        _cardRepositoryMock.Setup(r => r.GetByIdmAsync(firstIdm, It.IsAny<bool>()))
+            .Returns(firstLookup.Task);
+        _cardRepositoryMock.Setup(r => r.GetByIdmAsync(secondIdm, It.IsAny<bool>()))
+            .Returns(secondLookup.Task);
+        cardReaderMock.Setup(r => r.ReadBalanceAsync(firstIdm))
+            .Returns(firstBalanceRead.Task);
+        _navigationServiceMock
+            .Setup(n => n.ShowDialog<ICCardManager.Views.Dialogs.CardTypeSelectionDialog>(
+                It.IsAny<Action<ICCardManager.Views.Dialogs.CardTypeSelectionDialog>>()))
+            .Returns((bool?)null);
+
+        // Act
+        // 1 件目: 入口ゲート通過 → カード判定待ちで停止（まだ抑制は取得していない）
+        cardReaderMock.Raise(r => r.CardRead += null,
+            cardReaderMock.Object, new CardReadEventArgs { Idm = firstIdm });
+        vm.IsCardReadingSuppressed.Should().BeFalse("前提: 1 件目は判定待ちで抑制未取得");
+        // 2 件目: 1 件目の判定待ち中に届く → 入口ゲートを通過し、カード判定待ちで停止
+        cardReaderMock.Raise(r => r.CardRead += null,
+            cardReaderMock.Object, new CardReadEventArgs { Idm = secondIdm });
+        dispatcher.Tasks.Should().HaveCount(2, "前提: 2 件目も入口ゲートを通過して判定待ちに入っている");
+
+        // 1 件目の判定完了 → 未登録 → 抑制取得 → 事前読み取り待ちで停止
+        firstLookup.SetResult(null);
+        await WaitUntilAsync(() => vm.IsCardReadingSuppressed, "1 件目が抑制を取得して事前読み取り中");
+
+        // 2 件目の判定完了 → 1 件目の抑制中に HandleUnregisteredCardAsync へ到達する
+        secondLookup.SetResult(null);
+        await WaitUntilAsync(() => dispatcher.Tasks[1].IsCompleted, "2 件目の処理が終わる");
+
+        // 1 件目の事前読み取り完了 → 種別選択ダイアログ表示 → 解放
+        firstBalanceRead.SetResult(null);
+        await dispatcher.WhenAllAsync();
+
+        cardReaderMock.Raise(r => r.Error += null,
+            cardReaderMock.Object, new InvalidOperationException("reader error"));
+
+        // Assert
+        _navigationServiceMock.Verify(
+            n => n.ShowDialog<ICCardManager.Views.Dialogs.CardTypeSelectionDialog>(
+                It.IsAny<Action<ICCardManager.Views.Dialogs.CardTypeSelectionDialog>>()),
+            Times.Once, "抑制中に判定を終えた 2 件目は種別選択ダイアログを重ねて開かない");
+        vm.WarningMessages.Count(w => w.Type == WarningType.CardReaderError)
+            .Should().Be(1, "Error ハンドラは 1 回だけ購読されている");
+        vm.IsCardReadingSuppressed.Should().BeFalse("処理が終われば抑制は解放される");
+    }
+
+    /// <summary>
+    /// Issue #1807 (2): 残高・履歴の事前読み取り中（数百ミリ秒）に別カードがタッチされても
+    /// 未登録カード処理へ再入しないこと。再入すると Error ハンドラの <c>-=</c> が no-op になり
+    /// <c>finally</c> の <c>+=</c> が 2 回走って二重購読になる（1 回のエラーが 2 件の警告になる）。
+    /// </summary>
+    [Fact]
+    public async Task UnregisteredCard_事前読み取り中の別カードタッチでErrorハンドラが二重購読されないこと()
+    {
+        // Arrange
+        var firstIdm = "0102030405060708";
+        var secondIdm = "1112131415161718";
+        ArrangeUnregisteredCards();
+        var raised = false;
+        _cardReaderMock.Setup(r => r.ReadBalanceAsync(firstIdm))
+            .Callback(() =>
+            {
+                if (raised) return;
+                raised = true;
+                _cardReaderMock.Raise(r => r.CardRead += null,
+                    _cardReaderMock.Object, new CardReadEventArgs { Idm = secondIdm });
+            })
+            .ReturnsAsync((int?)null);
+
+        _cardReaderMock.Raise(r => r.CardRead += null,
+            _cardReaderMock.Object, new CardReadEventArgs { Idm = firstIdm });
+        await _dispatcherService.WaitForPendingAsync();
+
+        // Act - 未登録カード処理が終わった後にリーダーエラーを 1 回発生させる
+        _cardReaderMock.Raise(r => r.Error += null,
+            _cardReaderMock.Object, new InvalidOperationException("reader error"));
+        await _dispatcherService.WaitForPendingAsync();
+
+        // Assert
+        _viewModel.WarningMessages.Count(w => w.Type == WarningType.CardReaderError)
+            .Should().Be(1, "Error ハンドラは 1 回だけ購読されている");
+        _cardRepositoryMock.Verify(r => r.GetByIdmAsync(secondIdm, It.IsAny<bool>()), Times.Never,
+            "事前読み取り中のタッチは未登録カード処理へ再入しない");
     }
 
     #endregion
