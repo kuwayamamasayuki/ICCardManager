@@ -206,6 +206,13 @@ namespace ICCardManager.ViewModels
         /// <returns>処理が完了したかどうか（削除済み職員の復元で完了した場合はtrue）</returns>
         public async Task<bool> StartNewStaffWithIdmAsync(string idm)
         {
+            // MainViewModelでの未登録カード処理を抑制（Issue #852）
+            // Issue #1807: この経路（未登録カード → 種別選択 → 職員登録）は抑制を一度も送っておらず、
+            // 氏名入力中の別カードタッチが背後の貸出・返却や 2 枚目のダイアログを引き起こしていた。
+            // 「新規登録」ボタン経由（StartNewStaff）と同じく入口で取得し、解放は CancelEdit / Cleanup に限る
+            // （登録済み等でダイアログを閉じる経路は Cleanup が回収する）。
+            _messenger.Send(new CardReadingSuppressedMessage(true, CardReadingSource.StaffRegistration));
+
             // Issue #284対応: タッチ時点で削除済み職員チェックを行う
             var existing = await _staffRepository.GetByIdmAsync(idm, includeDeleted: true);
             if (existing != null)
@@ -694,85 +701,95 @@ namespace ICCardManager.ViewModels
             if (!IsWaitingForCard) return;
 
             // UIスレッドで非同期実行（登録済みチェックを即座に行うため）
-            System.Windows.Application.Current.Dispatcher.InvokeAsync(async () =>
+            System.Windows.Application.Current.Dispatcher.InvokeAsync(() => HandleCardReadAsync(e.Idm));
+        }
+
+        /// <summary>
+        /// 職員証タッチ待ち中に読み取った IDm を新規登録フォームへ反映する
+        /// </summary>
+        /// <remarks>
+        /// <see cref="OnCardRead"/> から UI スレッドで呼ばれる本体。
+        /// テストから直接呼べるよう分離している（Issue #1807）。
+        /// </remarks>
+        internal async Task HandleCardReadAsync(string idm)
+        {
+            EditStaffIdm = idm;
+            IsWaitingForCard = false;
+
+            // 即座に登録済みチェックを実行（Issue #284）
+            var existing = await _staffRepository.GetByIdmAsync(idm, includeDeleted: true);
+            if (existing != null)
             {
-                EditStaffIdm = e.Idm;
-                IsWaitingForCard = false;
+                var identifier = FormatStaffLabel(existing.Name, existing.Number);
 
-                // 即座に登録済みチェックを実行（Issue #284）
-                var existing = await _staffRepository.GetByIdmAsync(e.Idm, includeDeleted: true);
-                if (existing != null)
+                if (existing.IsDeleted)
                 {
-                    var identifier = FormatStaffLabel(existing.Name, existing.Number);
+                    // 削除済み職員の場合は復元を提案
+                    var confirmed = _dialogService.ShowConfirmation(
+                        $"この職員証は以前 {identifier} として登録されていましたが、削除されています。\n\n復元しますか？",
+                        "削除済み職員");
 
-                    if (existing.IsDeleted)
+                    if (confirmed)
                     {
-                        // 削除済み職員の場合は復元を提案
-                        var confirmed = _dialogService.ShowConfirmation(
-                            $"この職員証は以前 {identifier} として登録されていましたが、削除されています。\n\n復元しますか？",
-                            "削除済み職員");
-
-                        if (confirmed)
+                        var restored = await _staffRepository.RestoreAsync(idm);
+                        if (restored)
                         {
-                            var restored = await _staffRepository.RestoreAsync(e.Idm);
-                            if (restored)
-                            {
-                                // 操作ログを記録（復元後のデータを取得）
-                                // Issue #1760: 再読取が null になるのは復元の直後に他 PC が削除した場合だけ。
-                                // 復元は確定済みなので記録を落とさず、復元前のデータで補う。
-                                var restoredStaff = await _staffRepository.GetByIdmAsync(e.Idm)
-                                    ?? CreateRestoredSnapshot(existing);
-                                await _operationLogger.LogStaffRestoreAsync(restoredStaff);
+                            // 操作ログを記録（復元後のデータを取得）
+                            // Issue #1760: 再読取が null になるのは復元の直後に他 PC が削除した場合だけ。
+                            // 復元は確定済みなので記録を落とさず、復元前のデータで補う。
+                            var restoredStaff = await _staffRepository.GetByIdmAsync(idm)
+                                ?? CreateRestoredSnapshot(existing);
+                            await _operationLogger.LogStaffRestoreAsync(restoredStaff);
 
-                                var restoredIdm = e.Idm;
-                                await LoadStaffAsync();
-                                CancelEdit();
-                                SelectAndHighlight(restoredIdm);
-                                // Issue #1759: CancelEdit() は StatusMessage / IsStatusError をクリアするため、
-                                // 完了メッセージは必ず後処理のあとに設定する（先に設定すると一度も表示されない）。
-                                StatusMessage = $"{identifier} を復元しました";
-                                IsStatusError = false;
-                            }
-                            else
-                            {
-                                // Issue #1759: 保存経路（SaveAsync）の復元分岐と同じ扱い。
-                                // false は「他 PC が先に復元した」ことを意味する。
-                                await LoadStaffAsync();
-                                StatusMessage = ConcurrencyConflictMessage.ForRestore(
-                                    $"職員「{identifier}」", "職員一覧");
-                                IsStatusError = true;
-                            }
+                            var restoredIdm = idm;
+                            await LoadStaffAsync();
+                            CancelEdit();
+                            SelectAndHighlight(restoredIdm);
+                            // Issue #1759: CancelEdit() は StatusMessage / IsStatusError をクリアするため、
+                            // 完了メッセージは必ず後処理のあとに設定する（先に設定すると一度も表示されない）。
+                            StatusMessage = $"{identifier} を復元しました";
+                            IsStatusError = false;
                         }
                         else
                         {
-                            // Issue #314: 復元しない場合は案内メッセージを表示
-                            _dialogService.ShowInformation(
-                                $"この職員証は以前 {identifier} として登録されていたため、新規登録はできません。\n\n" +
-                                "異なる名前等で登録したい場合は、先に復元を行い、その後に編集してください。",
-                                "ご案内");
-                            CancelEdit();
+                            // Issue #1759: 保存経路（SaveAsync）の復元分岐と同じ扱い。
+                            // false は「他 PC が先に復元した」ことを意味する。
+                            await LoadStaffAsync();
+                            StatusMessage = ConcurrencyConflictMessage.ForRestore(
+                                $"職員「{identifier}」", "職員一覧");
+                            IsStatusError = true;
                         }
                     }
                     else
                     {
-                        // 既に登録済みの場合はメッセージを表示（赤色で目立たせる: Issue #286）
-                        StatusMessage = $"この職員証は {identifier} として既に登録されています";
-                        IsStatusError = true;
-                        // フォームはそのままにして、ユーザーが確認できるようにする
+                        // Issue #314: 復元しない場合は案内メッセージを表示
+                        _dialogService.ShowInformation(
+                            $"この職員証は以前 {identifier} として登録されていたため、新規登録はできません。\n\n" +
+                            "異なる名前等で登録したい場合は、先に復元を行い、その後に編集してください。",
+                            "ご案内");
+                        CancelEdit();
                     }
-
-                    // カード読み取り完了後、抑制を解除（Issue #852）
-                    _messenger.Send(new CardReadingSuppressedMessage(false, CardReadingSource.StaffRegistration));
-                    return;
+                }
+                else
+                {
+                    // 既に登録済みの場合はメッセージを表示（赤色で目立たせる: Issue #286）
+                    StatusMessage = $"この職員証は {identifier} として既に登録されています";
+                    IsStatusError = true;
+                    // フォームはそのままにして、ユーザーが確認できるようにする
                 }
 
-                // 未登録職員証の場合は通常処理
-                StatusMessage = "職員証を読み取りました";
-                IsStatusError = false;
+                return;
+            }
 
-                // カード読み取り完了後、抑制を解除（Issue #852）
-                _messenger.Send(new CardReadingSuppressedMessage(false, CardReadingSource.StaffRegistration));
-            });
+            // 未登録職員証の場合は通常処理
+            StatusMessage = "職員証を読み取りました";
+            IsStatusError = false;
+
+            // 注意: StaffRegistration 抑制はここで解除しない（Issue #1807）
+            // IDm を読み取ってもダイアログはモーダルのまま氏名入力を待っており、ここで解除すると
+            // 別カードのタッチが MainViewModel へ届いて背後で貸出・返却が進む。
+            // CardManageViewModel.OnCardRead と同じく、ダイアログが開いている間は抑制を維持し、
+            // CancelEdit() または Cleanup() でのみ解除する。
         }
 
         /// <summary>

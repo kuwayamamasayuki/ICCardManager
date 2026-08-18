@@ -1,5 +1,6 @@
 using CommunityToolkit.Mvvm.Messaging;
 using FluentAssertions;
+using ICCardManager.Common.Messages;
 using ICCardManager.Data.Repositories;
 using ICCardManager.Dtos;
 using ICCardManager.Infrastructure.CardReader;
@@ -35,6 +36,11 @@ public class StaffManageViewModelTests
     private readonly Mock<IOperationLogRepository> _operationLogRepositoryMock;
     private readonly Mock<IDialogService> _dialogServiceMock;
     private readonly Mock<IStaffAuthService> _staffAuthServiceMock;
+    /// <summary>
+    /// ViewModel が MainViewModel へ送るカード読み取り抑制メッセージ（Issue #852）を記録する。
+    /// 抑制の取得／解放がダイアログの表示範囲と一致していることを表明するために使う（Issue #1807）。
+    /// </summary>
+    private readonly List<CardReadingSuppressedMessage> _suppressionMessages = new();
     private readonly StaffManageViewModel _viewModel;
 
     public StaffManageViewModelTests()
@@ -61,6 +67,9 @@ public class StaffManageViewModelTests
         _staffAuthServiceMock.Setup(s => s.RequestAuthenticationAsync(It.IsAny<string>()))
             .ReturnsAsync(new StaffAuthResult { Idm = "TEST_OPERATOR_IDM", StaffName = "テスト操作者" });
 
+        var messenger = new WeakReferenceMessenger();
+        messenger.Register<CardReadingSuppressedMessage>(this, (_, message) => _suppressionMessages.Add(message));
+
         _viewModel = new StaffManageViewModel(
             _staffRepositoryMock.Object,
             _cardReaderMock.Object,
@@ -68,7 +77,7 @@ public class StaffManageViewModelTests
             _operationLoggerMock.Object,
             _dialogServiceMock.Object,
             _staffAuthServiceMock.Object,
-            new WeakReferenceMessenger());
+            messenger);
     }
 
     #region 職員一覧読み込みテスト
@@ -1517,6 +1526,119 @@ public class StaffManageViewModelTests
             log.TargetId == idm &&
             log.Action == OperationLogger.Actions.Delete)), Times.Once);
         _viewModel.StatusMessage.Should().Be("削除しました");
+    }
+
+    #endregion
+
+    #region Issue #1807: 抑制の取得／解放を職員登録ダイアログの表示範囲と一致させること
+
+    /// <summary>
+    /// 未登録カード経由（<see cref="StaffManageViewModel.StartNewStaffWithIdmAsync"/>）で
+    /// 職員登録モードに入ったときも、MainViewModel のカード読み取りを抑制すること。
+    /// この経路は #852 の抑制を一度も送っておらず、氏名入力中の別カードタッチが
+    /// 背後の貸出・返却や 2 枚目のダイアログを引き起こしていた（Issue #1807 の 3）。
+    /// </summary>
+    [Fact]
+    public async Task StartNewStaffWithIdmAsync_未登録職員証では抑制を取得したまま氏名入力を待つこと()
+    {
+        // Arrange
+        var idm = "0102030405060708";
+        _staffRepositoryMock.Setup(r => r.GetByIdmAsync(idm, true)).ReturnsAsync((Staff)null);
+
+        // Act
+        var shouldClose = await _viewModel.StartNewStaffWithIdmAsync(idm);
+
+        // Assert
+        shouldClose.Should().BeFalse("ダイアログは氏名入力のために開いたまま");
+        _suppressionMessages.Should().Contain(m => m.Value && m.Source == CardReadingSource.StaffRegistration,
+            "登録モードに入った時点で抑制を取得する");
+        _suppressionMessages.Should().NotContain(m => !m.Value,
+            "ダイアログが開いている間は抑制を解放しない（解放は CancelEdit / Cleanup のみ）");
+    }
+
+    /// <summary>
+    /// 「新規登録」→ 職員証タッチで IDm を読み取った直後に抑制を解放しないこと。
+    /// ダイアログはモーダルのまま氏名入力を待っているため、ここで解放すると
+    /// 別カードのタッチが MainViewModel へ届き、背後で貸出・返却が進む（Issue #1807 の 3）。
+    /// </summary>
+    [Fact]
+    public async Task HandleCardReadAsync_未登録職員証を読み取っても抑制を解放しないこと()
+    {
+        // Arrange
+        var idm = "0102030405060708";
+        _staffRepositoryMock.Setup(r => r.GetByIdmAsync(idm, true)).ReturnsAsync((Staff)null);
+        _viewModel.StartNewStaff();
+        _suppressionMessages.Should().ContainSingle(m => m.Value, "前提: 新規登録開始で抑制を取得している");
+
+        // Act
+        await _viewModel.HandleCardReadAsync(idm);
+
+        // Assert
+        _viewModel.EditStaffIdm.Should().Be(idm);
+        _viewModel.IsEditing.Should().BeTrue("氏名入力のためフォームは開いたまま");
+        _suppressionMessages.Should().NotContain(m => !m.Value,
+            "IDm 読み取り後もダイアログは開いているので抑制を維持する");
+    }
+
+    /// <summary>
+    /// 登録済み職員証を読み取った場合（フォームはそのまま残す）も抑制を解放しないこと。
+    /// </summary>
+    [Fact]
+    public async Task HandleCardReadAsync_登録済み職員証を読み取っても抑制を解放しないこと()
+    {
+        // Arrange
+        var idm = "0102030405060708";
+        _staffRepositoryMock.Setup(r => r.GetByIdmAsync(idm, true))
+            .ReturnsAsync(new Staff { StaffIdm = idm, Name = "田中太郎", Number = "001", IsDeleted = false });
+        _viewModel.StartNewStaff();
+
+        // Act
+        await _viewModel.HandleCardReadAsync(idm);
+
+        // Assert
+        _viewModel.IsStatusError.Should().BeTrue("登録済みの案内は赤色で表示する（Issue #286）");
+        _viewModel.IsEditing.Should().BeTrue("フォームはそのまま残す");
+        _suppressionMessages.Should().NotContain(m => !m.Value);
+    }
+
+    /// <summary>
+    /// 編集キャンセル（登録モードの終了）で抑制を解放すること。
+    /// </summary>
+    [Fact]
+    public void CancelEdit_登録モード終了時に抑制を解放すること()
+    {
+        // Arrange
+        _viewModel.StartNewStaff();
+
+        // Act
+        _viewModel.CancelEdit();
+
+        // Assert
+        _suppressionMessages.Last().Value.Should().BeFalse();
+        _suppressionMessages.Last().Source.Should().Be(CardReadingSource.StaffRegistration);
+    }
+
+    /// <summary>
+    /// ダイアログ終了（Cleanup）で抑制を解放すること。
+    /// 未登録カード経由で入口の抑制を取得しても、登録済み等でダイアログを閉じる経路は
+    /// この解放で必ず回収される。
+    /// </summary>
+    [Fact]
+    public async Task Cleanup_ダイアログ終了時に抑制を解放すること()
+    {
+        // Arrange - 登録済み職員証で StartNewStaffWithIdmAsync がダイアログを閉じる経路
+        var idm = "0102030405060708";
+        _staffRepositoryMock.Setup(r => r.GetByIdmAsync(idm, true))
+            .ReturnsAsync(new Staff { StaffIdm = idm, Name = "田中太郎", Number = "001" });
+        var shouldClose = await _viewModel.StartNewStaffWithIdmAsync(idm);
+        shouldClose.Should().BeTrue("前提: 登録済みなのでダイアログを閉じる");
+
+        // Act
+        _viewModel.Cleanup();
+
+        // Assert
+        _suppressionMessages.Last().Value.Should().BeFalse();
+        _suppressionMessages.Last().Source.Should().Be(CardReadingSource.StaffRegistration);
     }
 
     #endregion

@@ -43,6 +43,10 @@ public class CardManageViewModelTests
     private readonly Mock<IDialogService> _dialogServiceMock;
     private readonly Mock<IStaffAuthService> _staffAuthServiceMock;
     private readonly LendingService _lendingService;
+    /// <summary>
+    /// ViewModel が MainViewModel へ送るカード読み取り抑制メッセージ（Issue #852）を記録する（Issue #1807）。
+    /// </summary>
+    private readonly List<ICCardManager.Common.Messages.CardReadingSuppressedMessage> _suppressionMessages = new();
     private readonly CardManageViewModel _viewModel;
 
     public CardManageViewModelTests()
@@ -98,6 +102,10 @@ public class CardManageViewModelTests
         _staffAuthServiceMock.Setup(s => s.RequestAuthenticationAsync(It.IsAny<string>()))
             .ReturnsAsync(new StaffAuthResult { Idm = "TEST_OPERATOR_IDM", StaffName = "テスト操作者" });
 
+        var messenger = new WeakReferenceMessenger();
+        messenger.Register<ICCardManager.Common.Messages.CardReadingSuppressedMessage>(
+            this, (_, message) => _suppressionMessages.Add(message));
+
         _viewModel = new CardManageViewModel(
             _cardRepositoryMock.Object,
             _ledgerRepositoryMock.Object,
@@ -107,7 +115,7 @@ public class CardManageViewModelTests
             _dialogServiceMock.Object,
             _staffAuthServiceMock.Object,
             _lendingService,
-            new WeakReferenceMessenger());
+            messenger);
     }
 
     #region カード一覧読み込みテスト
@@ -213,6 +221,30 @@ public class CardManageViewModelTests
         // カード種別はIDmから自動判定できないため、デフォルト値（nimoca）が設定される
         // ※利用頻度が最も高いためnimocaがデフォルト
         _viewModel.EditCardType.Should().Be("nimoca");
+    }
+
+    /// <summary>
+    /// Issue #1807: 未登録カード経由（<see cref="CardManageViewModel.StartNewCardWithIdmAsync"/>）で
+    /// 登録モードに入ったときも、「新規登録」ボタン経由（<see cref="CardManageViewModel.StartNewCard"/>）と同様に
+    /// MainViewModel のカード読み取りを抑制すること。解放は CancelEdit / Cleanup のみ。
+    /// </summary>
+    [Fact]
+    public async Task StartNewCardWithIdmAsync_未登録カードでは抑制を取得したまま入力を待つこと()
+    {
+        // Arrange
+        var idm = "0102030405060708";
+        _cardRepositoryMock.Setup(r => r.GetByIdmAsync(idm, true)).ReturnsAsync((IcCard?)null);
+
+        // Act
+        var completed = await _viewModel.StartNewCardWithIdmAsync(idm);
+
+        // Assert
+        completed.Should().BeFalse("ダイアログは入力のために開いたまま");
+        _suppressionMessages.Should().Contain(
+            m => m.Value && m.Source == ICCardManager.Common.Messages.CardReadingSource.CardRegistration,
+            "登録モードに入った時点で抑制を取得する");
+        _suppressionMessages.Should().NotContain(m => !m.Value,
+            "ダイアログが開いている間は抑制を解放しない");
     }
 
     #endregion

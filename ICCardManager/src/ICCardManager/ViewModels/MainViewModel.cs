@@ -129,6 +129,48 @@ public partial class MainViewModel : ViewModelBase
     internal bool IsCardReadingSuppressed => _suppressionSources.Count > 0;
 
     /// <summary>
+    /// 自身の処理範囲に限ってカード読み取りを抑制するスコープを開始する（Issue #1807）
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// ダイアログ側の ViewModel はメッセージ（<see cref="CardReadingSuppressedMessage"/>）で抑制を送るが、
+    /// MainViewModel 自身がモーダルダイアログを表示する経路（未登録カードの種別選択〜登録）では
+    /// 抑制ソース集合を直接操作する。戻り値を <c>using</c> で保持し、処理範囲の終わりで必ず解放する
+    /// （早期 return や例外でも解放が漏れない。Issue #1725 の「解除は finally で保証する」と同じ判断）。
+    /// </para>
+    /// <para>
+    /// 同一 <paramref name="source"/> の入れ子には対応していない（内側の Dispose が外側の抑制も解く）。
+    /// 現在の呼び出し元（<see cref="HandleUnregisteredCardAsync"/>）は抑制中に再入しないため入れ子は起きない。
+    /// </para>
+    /// </remarks>
+    private IDisposable BeginCardReadingSuppression(CardReadingSource source)
+    {
+        _suppressionSources.Add(source);
+        return new CardReadingSuppressionScope(this, source);
+    }
+
+    /// <summary>
+    /// <see cref="BeginCardReadingSuppression"/> が返す解放スコープ
+    /// </summary>
+    private sealed class CardReadingSuppressionScope : IDisposable
+    {
+        private MainViewModel? _owner;
+        private readonly CardReadingSource _source;
+
+        public CardReadingSuppressionScope(MainViewModel owner, CardReadingSource source)
+        {
+            _owner = owner;
+            _source = source;
+        }
+
+        public void Dispose()
+        {
+            _owner?._suppressionSources.Remove(_source);
+            _owner = null;
+        }
+    }
+
+    /// <summary>
     /// 共有モード（ネットワーク共有フォルダ上のDB）かどうか
     /// </summary>
     public bool IsSharedMode => _databaseInfo.IsSharedMode;
@@ -1593,6 +1635,14 @@ public partial class MainViewModel : ViewModelBase
         {
             return;
         }
+
+        // Issue #1807: 以降の全区間（残高・履歴の事前読み取り〜種別選択ダイアログ〜登録ダイアログ）で
+        // 自身のカード読み取りを抑制する。ShowDialog は入れ子のメッセージポンプなので、抑制しないと
+        // 表示中の別カードタッチが HandleCardReadAsync に届き、種別選択ダイアログが多重に開いたり
+        // 背後で貸出・返却が進んだりする。事前読み取り中の再入も同じ経路で防ぐ
+        // （再入すると Error ハンドラの -= が no-op になり finally の += が 2 回走って二重購読になる）。
+        // 解放は Dispose（finally 相当）で保証する（Issue #1725 と同じ判断）。
+        using var suppression = BeginCardReadingSuppression(CardReadingSource.UnregisteredCardDialog);
 
         _soundPlayer.Play(SoundType.Warning);
         // メイン画面は変更しない（Issue #186）
