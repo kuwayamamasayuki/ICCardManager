@@ -741,10 +741,9 @@ namespace ICCardManager.ViewModels
                                 ?? CreateRestoredSnapshot(existing);
                             await _operationLogger.LogStaffRestoreAsync(restoredStaff);
 
-                            var restoredIdm = idm;
                             await LoadStaffAsync();
                             CancelEdit();
-                            SelectAndHighlight(restoredIdm);
+                            SelectAndHighlight(idm);
                             // Issue #1759: CancelEdit() は StatusMessage / IsStatusError をクリアするため、
                             // 完了メッセージは必ず後処理のあとに設定する（先に設定すると一度も表示されない）。
                             StatusMessage = $"{identifier} を復元しました";

@@ -1613,9 +1613,13 @@ public class StaffManageViewModelTests
         // Act
         _viewModel.CancelEdit();
 
-        // Assert
+        // Assert - 取得（true）→ 解放（false）の順で送られていること
+        var acquireIndex = _suppressionMessages.FindIndex(
+            m => m.Value && m.Source == CardReadingSource.StaffRegistration);
+        acquireIndex.Should().BeGreaterOrEqualTo(0, "新規登録開始で抑制を取得している");
         _suppressionMessages.Last().Value.Should().BeFalse();
         _suppressionMessages.Last().Source.Should().Be(CardReadingSource.StaffRegistration);
+        (_suppressionMessages.Count - 1).Should().BeGreaterThan(acquireIndex, "解放は取得の後に送られる");
     }
 
     /// <summary>
@@ -1636,9 +1640,13 @@ public class StaffManageViewModelTests
         // Act
         _viewModel.Cleanup();
 
-        // Assert
+        // Assert - 入口で取得（true）したものを Cleanup の解放（false）が回収していること
+        var acquireIndex = _suppressionMessages.FindIndex(
+            m => m.Value && m.Source == CardReadingSource.StaffRegistration);
+        acquireIndex.Should().BeGreaterOrEqualTo(0, "登録済みで閉じる経路でも入口で抑制を取得している");
         _suppressionMessages.Last().Value.Should().BeFalse();
         _suppressionMessages.Last().Source.Should().Be(CardReadingSource.StaffRegistration);
+        (_suppressionMessages.Count - 1).Should().BeGreaterThan(acquireIndex, "解放は取得の後に送られる");
     }
 
     #endregion

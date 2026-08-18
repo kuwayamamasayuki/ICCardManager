@@ -144,7 +144,8 @@
 
 上の規則の裏面。**モーダルダイアログ（`Window.ShowDialog()` / `MessageBox.Show`）は「止まる」のではなく入れ子のメッセージポンプで「回り続ける」**ため、表示中もカードリーダーのイベント購読は生きている。「モーダルだから他は動かない」という直感で抑制を省くと、表示中の別カードタッチが `MainViewModel.HandleCardReadAsync` に届き、種別選択ダイアログが多重に開く／背後で貸出・返却が進む／事前読み取り中の再入で `Error -=` が no-op になり `finally` の `+=` が二重購読になる。
 
-- **抑制（`CardReadingSuppressedMessage` / `_suppressionSources`）の取得と解放は、ダイアログの表示範囲と一致させる**。「1 枚読み取ったら解放」は、ダイアログがまだ開いている限り早すぎる（`StaffManageViewModel` は IDm 読み取り直後に解放し、氏名入力中のタッチが背後で処理された）。解放は `CancelEdit` / `Cleanup` のような「ダイアログの終わり」に限る（`CardManageViewModel.OnCardRead` が参考実装）
+- **抑制（`CardReadingSuppressedMessage` / `_suppressionSources`）の取得と解放は、ダイアログの表示範囲と一致させる**。「1 枚読み取ったら解放」は、ダイアログがまだ開いている限り早すぎる（`StaffManageViewModel` は IDm 読み取り直後に解放し、氏名入力中のタッチが背後で処理された）。解放は `CancelEdit` / `Cleanup` のような「登録モードの終わり」に限る（`CardManageViewModel.OnCardRead` が参考実装。保存成功時も `CancelEdit` を経て解放され、一覧だけのアイドル状態に戻ったダイアログの背後ではメイン画面がタッチを処理する ― これは #852 以来の意図で、本項の「表示範囲」は登録モードの範囲を指す）
+- **抑制の判定は「入口 1 か所」で終わらせない**。`HandleCardReadAsync` の入口ゲートから抑制を取得する地点までに await（職員・カードの `GetByIdmAsync`）が挟まるなら、その待機中に届いた 2 件目は入口ゲートを通過済みで、1 件目が取得した抑制をすり抜ける。取得地点の直前で `IsCardReadingSuppressed` を再判定し、`BeginCardReadingSuppression` は同一ソースの二重取得を no-op スコープにする（内側の Dispose が外側の抑制を解かない）
 - **同じ画面へ入る経路が複数あるなら、全経路で取得する**。「新規登録」ボタン（`StartNewStaff`）は取得していたが、未登録カード経由（`StartNewStaffWithIdmAsync` / `StartNewCardWithIdmAsync`）は一度も送っていなかった。#1760 の「画面の動詞ではなく書き込み文で数える」と同じで、**取得の有無は「モードに入る関数」を grep で列挙して確かめる**
 - **ViewModel 自身がモーダルを出す経路は `IDisposable` スコープ（`using`）で囲む**（`MainViewModel.BeginCardReadingSuppression`）。解放が Dispose で保証され、早期 return や後から足す分岐で漏れない
 - **モーダル中の再入はテストで再現できる**。`ShowDialog` モックの `Callback` 内でカード読み取りイベントを発火すると、`SynchronousDispatcherService` が本番と同じ「ダイアログ呼び出しの最中に別のタッチが処理される」形になる。修正前のコードでは Callback → 再入 → `ShowDialog` → Callback… と無限に入れ子になるため、発火は 1 回に限定するフラグを置く。二重購読は「`Error` を 1 回 Raise して警告が 2 件」で観測できる（`MainViewModelTests` の「カード読み取り抑制テスト」region）

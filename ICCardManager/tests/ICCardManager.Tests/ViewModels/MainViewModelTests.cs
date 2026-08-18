@@ -114,11 +114,14 @@ public class MainViewModelTests : IDisposable
         _viewModel = CreateViewModel();
     }
 
-    private MainViewModel CreateViewModel(int timeoutSeconds = 60)
+    private MainViewModel CreateViewModel(
+        int timeoutSeconds = 60,
+        IDispatcherService dispatcherService = null,
+        ICardReader cardReader = null)
     {
         var databaseInfoMock = new Mock<IDatabaseInfo>();
         return new MainViewModel(
-            _cardReaderMock.Object,
+            cardReader ?? _cardReaderMock.Object,
             _soundPlayerMock.Object,
             _staffRepositoryMock.Object,
             _cardRepositoryMock.Object,
@@ -134,7 +137,7 @@ public class MainViewModelTests : IDisposable
             _ledgerConsistencyChecker,
             Options.Create(new AppOptions { StaffCardTimeoutSeconds = timeoutSeconds }),
             _timerFactory,
-            _dispatcherService,
+            dispatcherService ?? _dispatcherService,
             databaseInfoMock.Object,
             new Mock<ICacheService>().Object,
             new SharedModeMonitor(databaseInfoMock.Object, _timerFactory, new SystemClock()),
@@ -1785,6 +1788,106 @@ public class MainViewModelTests : IDisposable
         // Assert
         _viewModel.CurrentState.Should().Be(AppState.WaitingForIcCard);
         _toastMock.Verify(t => t.ShowStaffRecognizedNotification("テスト職員"), Times.Once);
+    }
+
+    /// <summary>
+    /// <see cref="SynchronousDispatcherService"/> は <c>InvokeAsync(Func&lt;Task&gt;)</c> をブロッキングで完了させるため
+    /// 「1 件目の await 中に 2 件目が割り込み、その後 1 件目が先に再開する」交錯を表現できない。
+    /// 本ディスパッチャはタスクを開始して記録するだけで待たず、<see cref="TaskCompletionSource{TResult}"/> で
+    /// 再開順を制御できるようにする（本番の WPF Dispatcher と同じく await 中に他のタッチが処理される形）。
+    /// </summary>
+    private sealed class NonBlockingDispatcherService : IDispatcherService
+    {
+        public List<Task> Tasks { get; } = new();
+        public void InvokeAsync(Action action) => action();
+        public void InvokeAsync(Func<Task> asyncAction) => Tasks.Add(asyncAction());
+        public Task WhenAllAsync() => Task.WhenAll(Tasks);
+    }
+
+    /// <summary>
+    /// 条件が成立するまで待つ（await の継続がテストスレッド外で再開される場合に備える）
+    /// </summary>
+    private static async Task WaitUntilAsync(Func<bool> condition, string because)
+    {
+        var deadline = DateTime.UtcNow.AddSeconds(5);
+        while (!condition())
+        {
+            if (DateTime.UtcNow > deadline)
+            {
+                throw new TimeoutException($"条件が 5 秒以内に成立しませんでした: {because}");
+            }
+            await Task.Delay(10);
+        }
+    }
+
+    /// <summary>
+    /// Issue #1807: 抑制ゲート（HandleCardReadAsync 入口）を通過したあと、未登録判定の
+    /// <c>GetByIdmAsync</c> を待っている間に別カードがタッチされても、未登録カード処理へ再入しないこと。
+    /// この待機中に届いた 2 件目は入口ゲートを通過済みなので、<c>HandleUnregisteredCardAsync</c> 側で
+    /// 改めて抑制を判定しないと、1 件目の事前読み取り中に 2 件目が種別選択ダイアログを重ね、
+    /// Error ハンドラも二重購読になる。2 件のカード判定と 1 件目の事前読み取りを
+    /// <see cref="TaskCompletionSource{TResult}"/> で止め、本番と同じ交錯順
+    /// （1 件目 判定待ち → 2 件目 入口通過・判定待ち → 1 件目 抑制取得 → 2 件目 判定完了 → 1 件目 完了）を再現する。
+    /// </summary>
+    [Fact]
+    public async Task UnregisteredCard_未登録判定の待機中の別カードタッチで種別選択ダイアログが重ならないこと()
+    {
+        // Arrange
+        // 共有の _cardReaderMock には既定の _viewModel（同期ディスパッチャ）も購読しているため、
+        // 待機を伴う本テストでは専用のリーダーモックと非ブロッキングのディスパッチャで VM を分離する
+        var dispatcher = new NonBlockingDispatcherService();
+        var cardReaderMock = new Mock<ICardReader>();
+        var vm = CreateViewModel(dispatcherService: dispatcher, cardReader: cardReaderMock.Object);
+        var firstIdm = "0102030405060708";
+        var secondIdm = "1112131415161718";
+        ArrangeUnregisteredCards();
+        var firstLookup = new TaskCompletionSource<IcCard>();
+        var secondLookup = new TaskCompletionSource<IcCard>();
+        var firstBalanceRead = new TaskCompletionSource<int?>();
+        _cardRepositoryMock.Setup(r => r.GetByIdmAsync(firstIdm, It.IsAny<bool>()))
+            .Returns(firstLookup.Task);
+        _cardRepositoryMock.Setup(r => r.GetByIdmAsync(secondIdm, It.IsAny<bool>()))
+            .Returns(secondLookup.Task);
+        cardReaderMock.Setup(r => r.ReadBalanceAsync(firstIdm))
+            .Returns(firstBalanceRead.Task);
+        _navigationServiceMock
+            .Setup(n => n.ShowDialog<ICCardManager.Views.Dialogs.CardTypeSelectionDialog>(
+                It.IsAny<Action<ICCardManager.Views.Dialogs.CardTypeSelectionDialog>>()))
+            .Returns((bool?)null);
+
+        // Act
+        // 1 件目: 入口ゲート通過 → カード判定待ちで停止（まだ抑制は取得していない）
+        cardReaderMock.Raise(r => r.CardRead += null,
+            cardReaderMock.Object, new CardReadEventArgs { Idm = firstIdm });
+        vm.IsCardReadingSuppressed.Should().BeFalse("前提: 1 件目は判定待ちで抑制未取得");
+        // 2 件目: 1 件目の判定待ち中に届く → 入口ゲートを通過し、カード判定待ちで停止
+        cardReaderMock.Raise(r => r.CardRead += null,
+            cardReaderMock.Object, new CardReadEventArgs { Idm = secondIdm });
+        dispatcher.Tasks.Should().HaveCount(2, "前提: 2 件目も入口ゲートを通過して判定待ちに入っている");
+
+        // 1 件目の判定完了 → 未登録 → 抑制取得 → 事前読み取り待ちで停止
+        firstLookup.SetResult(null);
+        await WaitUntilAsync(() => vm.IsCardReadingSuppressed, "1 件目が抑制を取得して事前読み取り中");
+
+        // 2 件目の判定完了 → 1 件目の抑制中に HandleUnregisteredCardAsync へ到達する
+        secondLookup.SetResult(null);
+        await WaitUntilAsync(() => dispatcher.Tasks[1].IsCompleted, "2 件目の処理が終わる");
+
+        // 1 件目の事前読み取り完了 → 種別選択ダイアログ表示 → 解放
+        firstBalanceRead.SetResult(null);
+        await dispatcher.WhenAllAsync();
+
+        cardReaderMock.Raise(r => r.Error += null,
+            cardReaderMock.Object, new InvalidOperationException("reader error"));
+
+        // Assert
+        _navigationServiceMock.Verify(
+            n => n.ShowDialog<ICCardManager.Views.Dialogs.CardTypeSelectionDialog>(
+                It.IsAny<Action<ICCardManager.Views.Dialogs.CardTypeSelectionDialog>>()),
+            Times.Once, "抑制中に判定を終えた 2 件目は種別選択ダイアログを重ねて開かない");
+        vm.WarningMessages.Count(w => w.Type == WarningType.CardReaderError)
+            .Should().Be(1, "Error ハンドラは 1 回だけ購読されている");
+        vm.IsCardReadingSuppressed.Should().BeFalse("処理が終われば抑制は解放される");
     }
 
     /// <summary>

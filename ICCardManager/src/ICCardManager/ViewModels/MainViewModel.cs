@@ -139,14 +139,15 @@ public partial class MainViewModel : ViewModelBase
     /// （早期 return や例外でも解放が漏れない。Issue #1725 の「解除は finally で保証する」と同じ判断）。
     /// </para>
     /// <para>
-    /// 同一 <paramref name="source"/> の入れ子には対応していない（内側の Dispose が外側の抑制も解く）。
-    /// 現在の呼び出し元（<see cref="HandleUnregisteredCardAsync"/>）は抑制中に再入しないため入れ子は起きない。
+    /// 同一 <paramref name="source"/> を既に保持している状態で呼ばれた場合（入れ子）は、抑制を追加せず
+    /// 解放も行わない no-op スコープを返す。抑制ソースは <see cref="HashSet{T}"/> で参照カウントを持たないため、
+    /// 内側の Dispose が外側の抑制まで解いてしまう形を構造的に防ぐ（外側のスコープだけが解放責任を持つ）。
     /// </para>
     /// </remarks>
     private IDisposable BeginCardReadingSuppression(CardReadingSource source)
     {
-        _suppressionSources.Add(source);
-        return new CardReadingSuppressionScope(this, source);
+        var acquired = _suppressionSources.Add(source);
+        return new CardReadingSuppressionScope(this, source, acquired);
     }
 
     /// <summary>
@@ -154,19 +155,26 @@ public partial class MainViewModel : ViewModelBase
     /// </summary>
     private sealed class CardReadingSuppressionScope : IDisposable
     {
-        private MainViewModel? _owner;
+        private readonly MainViewModel _owner;
         private readonly CardReadingSource _source;
+        private readonly bool _acquired;
+        private bool _disposed;
 
-        public CardReadingSuppressionScope(MainViewModel owner, CardReadingSource source)
+        public CardReadingSuppressionScope(MainViewModel owner, CardReadingSource source, bool acquired)
         {
             _owner = owner;
             _source = source;
+            _acquired = acquired;
         }
 
         public void Dispose()
         {
-            _owner?._suppressionSources.Remove(_source);
-            _owner = null;
+            if (_disposed) return;
+            _disposed = true;
+            if (_acquired)
+            {
+                _owner._suppressionSources.Remove(_source);
+            }
         }
     }
 
@@ -1624,14 +1632,13 @@ public partial class MainViewModel : ViewModelBase
     /// </remarks>
     private async Task HandleUnregisteredCardAsync(string idm)
     {
-        // 職員証登録モード中は処理をスキップ（StaffManageViewModelが処理する）
-        if (_suppressionSources.Contains(CardReadingSource.StaffRegistration))
-        {
-            return;
-        }
-
-        // ICカード登録モード中は処理をスキップ（CardManageViewModelが処理する）
-        if (_suppressionSources.Contains(CardReadingSource.CardRegistration))
+        // 抑制中は処理をスキップ（登録モード中は StaffManageViewModel / CardManageViewModel が処理する）。
+        // HandleCardReadAsync の入口ゲート（_suppressionSources.Count > 0）から本メソッドへ到達するまでには
+        // 呼び出し元の GetByIdmAsync（職員・カードの判定）の await が挟まる。その待機中に届いた 2 件目の
+        // タッチは入口ゲートを通過済みなので、ここで改めて判定しないと 1 件目が下で取得する抑制
+        // （UnregisteredCardDialog）をすり抜けて種別選択ダイアログが重なり、Error ハンドラも二重購読になる。
+        // 特定のソースを列挙せず「何かが抑制中なら処理しない」で判定する（新しいソースの追随漏れを防ぐ）。
+        if (IsCardReadingSuppressed)
         {
             return;
         }
