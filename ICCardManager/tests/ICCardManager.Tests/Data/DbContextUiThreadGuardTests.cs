@@ -85,6 +85,26 @@ public class DbContextUiThreadGuardTests : IDisposable
     }
 
     /// <summary>
+    /// Issue #1809: <c>SuspendConnections()</c> は進行中のリースを待つためにセマフォを
+    /// 同期取得する。UI スレッドから呼ぶと <c>LeaseConnection()</c> と同じデッドロック経路
+    /// （Issue #1281）になるため、同じガードで拒否されること。
+    /// </summary>
+    [Fact]
+    public void SuspendConnections_UIスレッド模擬時は_InvalidOperationException_をスローすること()
+    {
+        DbContext.IsOnUiThread = () => true;
+        using var dbContext = new DbContext(_dbPath);
+
+        Action act = () => { using var suspension = dbContext.SuspendConnections(); };
+
+        act.Should().Throw<InvalidOperationException>()
+            .WithMessage("*UI スレッドから呼び出せません*",
+                "SuspendConnections はセマフォを同期取得するため UI スレッドから呼べない旨を明示すべき");
+        dbContext.IsConnectionSuspended.Should().BeFalse(
+            "ガードで拒否されたとき一時停止状態を残してはいけない");
+    }
+
+    /// <summary>
     /// バックグラウンドスレッドから呼ぶ場合は例外にならず、通常通りリースが取得できる。
     /// </summary>
     [Fact]

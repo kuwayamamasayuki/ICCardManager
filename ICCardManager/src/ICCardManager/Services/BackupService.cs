@@ -328,9 +328,15 @@ namespace ICCardManager.Services
         }
 
         /// <summary>
-        /// バックアップからリストア
+        /// バックアップからリストア（同期版）
         /// </summary>
         /// <param name="backupFilePath">リストアするバックアップファイルのパス</param>
+        /// <remarks>
+        /// Issue #1809: 内部で <see cref="DbContext.SuspendConnections"/>（接続セマフォの同期取得）を
+        /// 呼ぶため、UI スレッドから呼ぶと Issue #1281 のガードで失敗する。UI 層からは
+        /// <see cref="RestoreFromBackupAsync"/> を使うこと。同期版は <see cref="CreateBackup"/> と同じく
+        /// テスト経路（xUnit は <c>DispatcherSynchronizationContext</c> を持たない）での継続利用のため残置。
+        /// </remarks>
         public virtual bool RestoreFromBackup(string backupFilePath)
         {
             var targetPath = _dbContext.DatabasePath;
@@ -455,6 +461,23 @@ namespace ICCardManager.Services
                     backupFilePath);
                 return false;
             }
+        }
+
+        /// <summary>
+        /// バックアップからリストア（非同期版）
+        /// </summary>
+        /// <param name="backupFilePath">リストアするバックアップファイルのパス</param>
+        /// <returns>成功時はtrue、失敗時はfalse</returns>
+        /// <remarks>
+        /// Issue #1809: UI スレッドから呼ぶ場合は必ずこちらを使用すること。
+        /// 同期版 <see cref="RestoreFromBackup"/> は内部で <see cref="DbContext.SuspendConnections"/> を呼び、
+        /// 進行中のトランザクション・リースの完了を接続セマフォで<b>同期</b>待機する。UI スレッド上で待つと、
+        /// セマフォ保持側の非同期継続が Dispatcher 経由で UI スレッドへ戻れずデッドロックする（Issue #1281）。
+        /// <see cref="CreateBackupAsync"/>（Issue #1361）と同じく <c>Task.Run</c> でバックグラウンドへ委譲する。
+        /// </remarks>
+        public virtual Task<bool> RestoreFromBackupAsync(string backupFilePath)
+        {
+            return Task.Run(() => RestoreFromBackup(backupFilePath));
         }
 
         /// <summary>

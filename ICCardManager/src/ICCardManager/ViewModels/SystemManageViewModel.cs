@@ -443,7 +443,10 @@ public partial class SystemManageViewModel : ViewModelBase
                 }
 
                 // リストア実行
-                restoreSuccess = _backupService.RestoreFromBackup(targetBackupPath);
+                // Issue #1809: 同期版は内部で DbContext.SuspendConnections（接続セマフォの同期取得）を呼び、
+                // UI スレッドから呼ぶと #1281 のガードで常に失敗する。CreateBackupAsync と同じく
+                // Task.Run で委譲する非同期版を使う
+                restoreSuccess = await _backupService.RestoreFromBackupAsync(targetBackupPath);
                 if (restoreSuccess)
                 {
                     SetStatus("リストアが完了しました。アプリケーションを再起動してください。", false);
@@ -597,8 +600,8 @@ public partial class SystemManageViewModel : ViewModelBase
                     }
                 }
 
-                // リストア実行
-                restoreFromFileSuccess = _backupService.RestoreFromBackup(dialog.FileName);
+                // リストア実行（Issue #1809: 非同期版を使う理由は RestoreAsync と同じ）
+                restoreFromFileSuccess = await _backupService.RestoreFromBackupAsync(dialog.FileName);
                 if (restoreFromFileSuccess)
                 {
                     SetStatus("リストアが完了しました。アプリケーションを再起動してください。", false);
