@@ -127,7 +127,9 @@ namespace ICCardManager.Infrastructure.Security
             if (string.IsNullOrEmpty(value) || value.Length < 2 || value[0] != '\'')
                 return value;
 
-            return IsDangerous(value.Substring(1)) ? value.Substring(1) : value;
+            // IsDangerous は先頭 1 文字しか見ないため、部分文字列を作らず 2 文字目だけで判定する
+            //（CSV 取り込みでは全テキスト列×全行に対して呼ばれる）
+            return Array.IndexOf(DangerousStartChars, value[1]) >= 0 ? value.Substring(1) : value;
         }
     }
 }

@@ -611,6 +611,34 @@ namespace ICCardManager.Services
         }
 
         /// <summary>
+        /// 任意入力のテキスト列（職員番号・備考など）を、保存時と同じ規則で正規化する
+        /// （空白のみ・空文字は null）。保存時の <c>Number = …</c> / <c>Note = …</c> と
+        /// <c>Detect*Changes</c> の比較で同じ式を使うため（Issue #1808 の「幻の差分」再発防止）。
+        /// </summary>
+        internal static string NormalizeOptionalText(string value)
+            => string.IsNullOrWhiteSpace(value) ? null : value;
+
+        /// <summary>
+        /// 任意入力のテキスト列を <see cref="NormalizeOptionalText"/> で揃えて比較し、
+        /// 差があれば <see cref="FieldChange"/> を追加する（Issue #1370 / #1808）。
+        /// </summary>
+        private static void AddOptionalTextChangeIfDiffers(
+            string fieldName, string existingValue, string newValue, List<FieldChange> changes)
+        {
+            var existing = NormalizeOptionalText(existingValue);
+            var incoming = NormalizeOptionalText(newValue);
+            if (existing != incoming)
+            {
+                changes.Add(new FieldChange
+                {
+                    FieldName = fieldName,
+                    OldValue = existing ?? "(なし)",
+                    NewValue = incoming ?? "(なし)"
+                });
+            }
+        }
+
+        /// <summary>
         /// CSV行をパースし、フィールドのリストとして返す（ダブルクォート対応）
         /// </summary>
         /// <param name="line">CSV行文字列</param>

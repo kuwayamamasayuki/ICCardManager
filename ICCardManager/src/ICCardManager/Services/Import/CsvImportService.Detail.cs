@@ -14,6 +14,7 @@ using ICCardManager.Models;
 using ICCardManager.Services.Import.Builders;
 using ICCardManager.Services.Import.Parsers;
 using System.Data.SQLite;
+using Microsoft.Extensions.Logging;
 
 namespace ICCardManager.Services
 {
@@ -445,11 +446,16 @@ namespace ICCardManager.Services
 
             // 既存ledger_idごとにReplaceDetailsAsyncで全置換（変更がある場合のみ）
             var skippedCount = 0;
+            var summaryGenerator = new SummaryGenerator();
             foreach (var kvp in detailsByLedgerId)
             {
                 var ledgerId = kvp.Key;
                 var detailRows = kvp.Value;
                 var firstLineNumber = detailRows.First().LineNumber;
+                // 明細の置換が確定したか（catch でどこまで進んだかを文言に反映するため）。
+                // ReplaceDetailsAsync は自前 tx で確定し、親 Ledger の UpdateAsync は別 tx のため、
+                // 後者の例外時は「明細は差し替わり、親の摘要・金額だけ旧値」の状態になる。
+                var detailsReplaced = false;
 
                 // 変更検出：既存データと同一ならスキップ
                 var newDetails = detailRows.Select(r => r.Detail).ToList();
@@ -468,6 +474,7 @@ namespace ICCardManager.Services
 
                     if (success)
                     {
+                        detailsReplaced = true;
                         // Issue #918: 詳細置換後、親Ledgerの金額を再計算して更新
                         // Issue #1808: 親 Ledger の再読取が null／UpdateAsync が 0 行（他 PC や別操作で
                         // 履歴が削除された競合）のとき、旧実装は戻り値を捨てて「インポート完了」に
@@ -477,7 +484,6 @@ namespace ICCardManager.Services
                         var parentUpdated = false;
                         if (ledger != null)
                         {
-                            var summaryGenerator = new SummaryGenerator();
                             var summary = summaryGenerator.Generate(newDetails);
                             var (income, expense, balance) = LedgerSplitService.CalculateGroupFinancials(newDetails);
 
@@ -514,10 +520,17 @@ namespace ICCardManager.Services
                 }
                 catch (Exception ex)
                 {
+                    // 生の ex.Message は UI へ出さずログへ逃がす（Issue #1614）。
+                    // 親 Ledger が ReplaceDetailsAsync より前に削除されていると、明細 INSERT が
+                    // FOREIGN KEY 制約違反（SQLiteErrorCode.Constraint）で失敗してここへ来る
+                    // （foreign_keys=ON）。これは上の parentUpdated=false と同じ「親の履歴が消えた」競合。
+                    _logger?.LogError(ex,
+                        "Failed to import ledger details for ledger {LedgerId} (line {LineNumber}, detailsReplaced={DetailsReplaced})",
+                        ledgerId, firstLineNumber, detailsReplaced);
                     errors.Add(new CsvImportError
                     {
                         LineNumber = firstLineNumber,
-                        Message = $"利用履歴ID {ledgerId} の詳細の置換中にエラーが発生しました: {ex.Message}",
+                        Message = BuildDetailReplaceFailureMessage(ledgerId, ex, detailsReplaced),
                         Data = ledgerId.ToString()
                     });
                 }
@@ -546,8 +559,43 @@ namespace ICCardManager.Services
         /// </remarks>
         private static string BuildParentLedgerConflictMessage(int ledgerId)
             => $"利用履歴ID {ledgerId} の明細を置き換えたあと、親の履歴が見つからず摘要・金額を更新できませんでした。" +
-               "他のパソコンや別の操作でこの履歴が削除された可能性があります。" +
-               "履歴画面でこの履歴の有無を確認し、残っている場合は明細CSVを再度インポートしてください。";
+               "他のパソコンや別の操作でこの履歴が削除された可能性があります（その場合、置き換えた明細も履歴と一緒に削除されています）。" +
+               "履歴画面でこの履歴の有無を確認し、必要な場合は利用履歴IDを空欄にした明細CSVを再度インポートして新規の履歴として登録してください。";
+
+        /// <summary>
+        /// 明細の置換／親 Ledger の更新が例外で中断したときのエラー文言を組み立てる（Issue #1614 / #1808）。
+        /// </summary>
+        /// <param name="ledgerId">対象の利用履歴ID</param>
+        /// <param name="ex">捕捉した例外</param>
+        /// <param name="detailsReplaced">
+        /// <c>ReplaceDetailsAsync</c> が確定した後の例外か。true なら明細は差し替わっており、
+        /// 親の摘要・金額だけが旧値のまま残っている（再インポートは変更なしとしてスキップされるため、
+        /// 履歴画面での確認を案内する）。
+        /// </param>
+        /// <remarks>
+        /// <c>SQLiteErrorCode.Constraint</c>（明細 INSERT の FOREIGN KEY 制約違反）は「親の履歴が消えた」
+        /// 競合と同じ原因なので、<see cref="BuildParentLedgerConflictMessage"/> と同じ「なぜ」を名指しする。
+        /// それ以外の SQLite 例外（Busy / Locked 等）は <see cref="DatabaseException.QueryFailed"/> の
+        /// 整備済み文言、その他は <see cref="ToUserFacingErrorMessage"/> の対応表へ寄せる。
+        /// </remarks>
+        private static string BuildDetailReplaceFailureMessage(int ledgerId, Exception ex, bool detailsReplaced)
+        {
+            if (!detailsReplaced && ex is SQLiteException { ResultCode: SQLiteErrorCode.Constraint })
+            {
+                return $"利用履歴ID {ledgerId} の明細を置き換えられませんでした。" +
+                       "他のパソコンや別の操作でこの履歴が削除された可能性があります。" +
+                       "履歴画面でこの履歴の有無を確認し、必要な場合は利用履歴IDを空欄にした明細CSVを再度インポートして新規の履歴として登録してください。";
+            }
+
+            var reason = ex is SQLiteException sqliteEx
+                ? DatabaseException.QueryFailed("ledger detail import", sqliteEx).UserFriendlyMessage
+                : ToUserFacingErrorMessage(ex);
+
+            return detailsReplaced
+                ? $"利用履歴ID {ledgerId} の明細は置き換えましたが、親の履歴の摘要・金額を更新できませんでした。{reason}" +
+                  "履歴画面でこの履歴の摘要・金額を確認し、必要な場合は修正してください。"
+                : $"利用履歴ID {ledgerId} の明細を置き換えられませんでした。{reason}";
+        }
 
         private static void DetectLedgerDetailChanges(
             List<LedgerDetail> existingDetails,

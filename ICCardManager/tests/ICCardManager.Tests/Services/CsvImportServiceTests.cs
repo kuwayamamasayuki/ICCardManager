@@ -4075,6 +4075,80 @@ FEDCBA9876543210,鈴木花子,002,テスト2";
     }
 
     /// <summary>
+    /// 親 Ledger が <c>ReplaceDetailsAsync</c> より前に削除されていると、明細 INSERT が
+    /// FOREIGN KEY 制約違反で例外になる（foreign_keys=ON）。この経路でも生の <c>ex.Message</c> を
+    /// UI へ出さず（Issue #1614）、「履歴が削除された可能性」を名指しした行動指示で終わる文言にすること。
+    /// </summary>
+    [Fact]
+    public async Task ImportLedgerDetailsAsync_置換が外部キー制約違反_生の例外メッセージを出さず削除競合として案内()
+    {
+        // Arrange
+        var csvContent = DetailCsvHeader + @"
+1,2024-01-15 10:30:00,0123456789ABCDEF,001,博多,天神,,300,9700,0,0,0,";
+        var filePath = Path.Combine(_testDirectory, "details_parent_fk_violation.csv");
+        await Task.Run(() => File.WriteAllText(filePath, csvContent, CsvEncoding));
+
+        var existingLedger = new Ledger
+        {
+            Id = 1, CardIdm = "0123456789ABCDEF", Date = new DateTime(2024, 1, 15),
+            Summary = "鉄道（博多～天神）", Income = 0, Expense = 260, Balance = 9740
+        };
+        _ledgerRepositoryMock.Setup(x => x.GetByIdAsync(1)).ReturnsAsync(existingLedger);
+        _ledgerRepositoryMock.Setup(x => x.ReplaceDetailsAsync(1, It.IsAny<IEnumerable<LedgerDetail>>()))
+            .ThrowsAsync(new SQLiteException(SQLiteErrorCode.Constraint, "constraint failed\r\nFOREIGN KEY constraint failed"));
+
+        // Act
+        var result = await _service.ImportLedgerDetailsAsync(filePath);
+
+        // Assert
+        result.Success.Should().BeFalse();
+        result.ImportedCount.Should().Be(0);
+        var error = result.Errors.Should().ContainSingle().Subject;
+        error.LineNumber.Should().Be(2);
+        error.Message.Should().Contain("利用履歴ID 1");
+        error.Message.Should().Contain("削除された可能性");
+        error.Message.Should().NotContain("FOREIGN KEY");
+        error.Message.Should().NotContain("constraint");
+        error.Message.Should().MatchRegex("してください。?$");
+        _ledgerRepositoryMock.Verify(x => x.UpdateAsync(It.IsAny<Ledger>()), Times.Never);
+    }
+
+    /// <summary>
+    /// 明細の置換は確定したが親 Ledger の <c>UpdateAsync</c> が例外（共有モードの SQLITE_BUSY 等）のとき、
+    /// 「明細は置き換えた・親の摘要・金額は未更新」という実際の状態を案内し、生の <c>ex.Message</c> を出さないこと。
+    /// </summary>
+    [Fact]
+    public async Task ImportLedgerDetailsAsync_親Ledger更新が例外_明細は置換済みと案内し生の例外メッセージを出さない()
+    {
+        // Arrange
+        var csvContent = DetailCsvHeader + @"
+1,2024-01-15 10:30:00,0123456789ABCDEF,001,博多,天神,,300,9700,0,0,0,";
+        var filePath = Path.Combine(_testDirectory, "details_parent_update_busy.csv");
+        await Task.Run(() => File.WriteAllText(filePath, csvContent, CsvEncoding));
+
+        var existingLedger = new Ledger
+        {
+            Id = 1, CardIdm = "0123456789ABCDEF", Date = new DateTime(2024, 1, 15),
+            Summary = "鉄道（博多～天神）", Income = 0, Expense = 260, Balance = 9740
+        };
+        _ledgerRepositoryMock.Setup(x => x.GetByIdAsync(1)).ReturnsAsync(existingLedger);
+        _ledgerRepositoryMock.Setup(x => x.ReplaceDetailsAsync(1, It.IsAny<IEnumerable<LedgerDetail>>()))
+            .ReturnsAsync(true);
+        _ledgerRepositoryMock.Setup(x => x.UpdateAsync(It.IsAny<Ledger>()))
+            .ThrowsAsync(new SQLiteException(SQLiteErrorCode.Busy, "database is locked"));
+
+        // Act
+        var result = await _service.ImportLedgerDetailsAsync(filePath);
+
+        // Assert
+        result.Success.Should().BeFalse();
+        var error = result.Errors.Should().ContainSingle().Subject;
+        error.Message.Should().Contain("明細は置き換えました");
+        error.Message.Should().NotContain("database is locked");
+        error.Message.Should().MatchRegex("してください。?$");
+    }
+
+    /// <summary>
     /// 競合エラーの文言が「何が／なぜ／どうすれば」を満たすこと（.claude/rules/error-messages.md）。
     /// 「影響行数 0」の原因は行の消失に特定できるため、それを名指しし、モード中立に「可能性」で述べる（Issue #1759）。
     /// </summary>

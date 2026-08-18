@@ -104,7 +104,7 @@ namespace ICCardManager.Services
                         // 削除済みカードは復元して更新する（skipExistingでもスキップしない）
                         existingCard.CardType = cardType;
                         existingCard.CardNumber = cardNumber;
-                        existingCard.Note = string.IsNullOrWhiteSpace(note) ? null : note;
+                        existingCard.Note = NormalizeOptionalText(note);
                         validRecords.Add((lineNumber, existingCard, true, true)); // isRestore = true
                     }
                     else
@@ -121,7 +121,7 @@ namespace ICCardManager.Services
                         }
                         existingCard.CardType = cardType;
                         existingCard.CardNumber = cardNumber;
-                        existingCard.Note = string.IsNullOrWhiteSpace(note) ? null : note;
+                        existingCard.Note = NormalizeOptionalText(note);
                         validRecords.Add((lineNumber, existingCard, true, false)); // isRestore = false
                     }
                 }
@@ -133,7 +133,7 @@ namespace ICCardManager.Services
                         CardIdm = cardIdm,
                         CardType = cardType,
                         CardNumber = cardNumber,
-                        Note = string.IsNullOrWhiteSpace(note) ? null : note
+                        Note = NormalizeOptionalText(note)
                     };
                     validRecords.Add((lineNumber, card, false, false));
                 }
@@ -430,17 +430,7 @@ namespace ICCardManager.Services
             // Issue #1370: 備考の差分検出
             // インポート本体と同じ正規化（空白のみは null 扱い）で比較することで、
             // Preview の判定と実インポートの結果を一致させる
-            var existingNote = string.IsNullOrWhiteSpace(existingCard.Note) ? null : existingCard.Note;
-            var normalizedNewNote = string.IsNullOrWhiteSpace(newNote) ? null : newNote;
-            if (existingNote != normalizedNewNote)
-            {
-                changes.Add(new FieldChange
-                {
-                    FieldName = "備考",
-                    OldValue = existingNote ?? "(なし)",
-                    NewValue = normalizedNewNote ?? "(なし)"
-                });
-            }
+            AddOptionalTextChangeIfDiffers("備考", existingCard.Note, newNote, changes);
         }
     }
 }

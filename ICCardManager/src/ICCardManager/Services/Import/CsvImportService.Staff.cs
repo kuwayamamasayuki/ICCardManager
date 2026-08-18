@@ -98,8 +98,8 @@ namespace ICCardManager.Services
                     {
                         // 削除済み職員は復元して更新する（skipExistingでもスキップしない）
                         existingStaff.Name = name;
-                        existingStaff.Number = string.IsNullOrWhiteSpace(number) ? null : number;
-                        existingStaff.Note = string.IsNullOrWhiteSpace(note) ? null : note;
+                        existingStaff.Number = NormalizeOptionalText(number);
+                        existingStaff.Note = NormalizeOptionalText(note);
                         validRecords.Add((lineNumber, existingStaff, true, true)); // isRestore = true
                     }
                     else
@@ -114,8 +114,8 @@ namespace ICCardManager.Services
                             continue;
                         }
                         existingStaff.Name = name;
-                        existingStaff.Number = string.IsNullOrWhiteSpace(number) ? null : number;
-                        existingStaff.Note = string.IsNullOrWhiteSpace(note) ? null : note;
+                        existingStaff.Number = NormalizeOptionalText(number);
+                        existingStaff.Note = NormalizeOptionalText(note);
                         validRecords.Add((lineNumber, existingStaff, true, false)); // isRestore = false
                     }
                 }
@@ -126,8 +126,8 @@ namespace ICCardManager.Services
                     {
                         StaffIdm = staffIdm,
                         Name = name,
-                        Number = string.IsNullOrWhiteSpace(number) ? null : number,
-                        Note = string.IsNullOrWhiteSpace(note) ? null : note
+                        Number = NormalizeOptionalText(number),
+                        Note = NormalizeOptionalText(note)
                     };
                     validRecords.Add((lineNumber, staff, false, false));
                 }
@@ -354,7 +354,7 @@ namespace ICCardManager.Services
                     LineNumber = lineNumber,
                     Idm = staffIdm,
                     Name = name,
-                    AdditionalInfo = string.IsNullOrWhiteSpace(number) ? null : number,
+                    AdditionalInfo = NormalizeOptionalText(number),
                     Action = action,
                     Changes = changes
                 });
@@ -397,35 +397,15 @@ namespace ICCardManager.Services
                 });
             }
 
-            // Issue #1808: 職員番号は保存時に IsNullOrWhiteSpace → null へ正規化されるため
-            // （本ファイルの Number = string.IsNullOrWhiteSpace(number) ? null : number）、
-            // CSV の空欄 "" と DB の null を生で比較すると常に不一致になり、職員番号未設定の
-            // 職員が同一 CSV の再取り込みで毎回「更新」に数えられ、プレビューに実在しない差分
-            // 「職員番号: (なし) → （空）」が出ていた。備考（Issue #1370）と同じ形で正規化してから比較する。
-            var existingNumber = string.IsNullOrWhiteSpace(existingStaff.Number) ? null : existingStaff.Number;
-            var normalizedNewNumber = string.IsNullOrWhiteSpace(newNumber) ? null : newNumber;
-            if (existingNumber != normalizedNewNumber)
-            {
-                changes.Add(new FieldChange
-                {
-                    FieldName = "職員番号",
-                    OldValue = existingNumber ?? "(なし)",
-                    NewValue = normalizedNewNumber ?? "(なし)"
-                });
-            }
+            // Issue #1808: 職員番号は保存時に NormalizeOptionalText（IsNullOrWhiteSpace → null）で
+            // 正規化されるため、CSV の空欄 "" と DB の null を生で比較すると常に不一致になり、
+            // 職員番号未設定の職員が同一 CSV の再取り込みで毎回「更新」に数えられ、プレビューに
+            // 実在しない差分「職員番号: (なし) → （空）」が出ていた。備考（Issue #1370）と同じ
+            // 正規化で比較する（保存側と比較側で同じヘルパーを使う）。
+            AddOptionalTextChangeIfDiffers("職員番号", existingStaff.Number, newNumber, changes);
 
             // Issue #1370: 備考の差分検出
-            var existingNote = string.IsNullOrWhiteSpace(existingStaff.Note) ? null : existingStaff.Note;
-            var normalizedNewNote = string.IsNullOrWhiteSpace(newNote) ? null : newNote;
-            if (existingNote != normalizedNewNote)
-            {
-                changes.Add(new FieldChange
-                {
-                    FieldName = "備考",
-                    OldValue = existingNote ?? "(なし)",
-                    NewValue = normalizedNewNote ?? "(なし)"
-                });
-            }
+            AddOptionalTextChangeIfDiffers("備考", existingStaff.Note, newNote, changes);
         }
     }
 }
