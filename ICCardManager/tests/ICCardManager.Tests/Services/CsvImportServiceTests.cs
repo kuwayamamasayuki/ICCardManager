@@ -2412,6 +2412,8 @@ FEDCBA9876543210,鈴木花子,002,テスト2";
         });
         _ledgerRepositoryMock.Setup(x => x.ReplaceDetailsAsync(1, It.IsAny<IEnumerable<LedgerDetail>>()))
             .ReturnsAsync(true);
+        // Issue #1808: 親 Ledger の UpdateAsync の戻り値を確認するようになったため、成功を明示する
+        _ledgerRepositoryMock.Setup(x => x.UpdateAsync(It.IsAny<Ledger>())).ReturnsAsync(true);
 
         // Act
         var result = await _service.ImportLedgerDetailsAsync(filePath);
@@ -2472,6 +2474,8 @@ FEDCBA9876543210,鈴木花子,002,テスト2";
         });
         _ledgerRepositoryMock.Setup(x => x.ReplaceDetailsAsync(It.IsAny<int>(), It.IsAny<IEnumerable<LedgerDetail>>()))
             .ReturnsAsync(true);
+        // Issue #1808: 親 Ledger の UpdateAsync の戻り値を確認するようになったため、成功を明示する
+        _ledgerRepositoryMock.Setup(x => x.UpdateAsync(It.IsAny<Ledger>())).ReturnsAsync(true);
 
         // Act
         var result = await _service.ImportLedgerDetailsAsync(filePath);
@@ -2507,6 +2511,8 @@ FEDCBA9876543210,鈴木花子,002,テスト2";
         });
         _ledgerRepositoryMock.Setup(x => x.ReplaceDetailsAsync(1, It.IsAny<IEnumerable<LedgerDetail>>()))
             .ReturnsAsync(true);
+        // Issue #1808: 親 Ledger の UpdateAsync の戻り値を確認するようになったため、成功を明示する
+        _ledgerRepositoryMock.Setup(x => x.UpdateAsync(It.IsAny<Ledger>())).ReturnsAsync(true);
 
         // Act
         var result = await _service.ImportLedgerDetailsAsync(filePath);
@@ -3063,6 +3069,8 @@ FEDCBA9876543210,鈴木花子,002,テスト2";
         });
         _ledgerRepositoryMock.Setup(x => x.ReplaceDetailsAsync(1, It.IsAny<IEnumerable<LedgerDetail>>()))
             .ReturnsAsync(true);
+        // Issue #1808: 親 Ledger の UpdateAsync の戻り値を確認するようになったため、成功を明示する
+        _ledgerRepositoryMock.Setup(x => x.UpdateAsync(It.IsAny<Ledger>())).ReturnsAsync(true);
 
         // 新規カード
         _cardRepositoryMock.Setup(x => x.GetByIdmAsync("AAAA456789ABCDEF", true))
@@ -3897,6 +3905,8 @@ FEDCBA9876543210,鈴木花子,002,テスト2";
         });
         _ledgerRepositoryMock.Setup(x => x.ReplaceDetailsAsync(1, It.IsAny<IEnumerable<LedgerDetail>>()))
             .ReturnsAsync(true);
+        // Issue #1808: 親 Ledger の UpdateAsync の戻り値を確認するようになったため、成功を明示する
+        _ledgerRepositoryMock.Setup(x => x.UpdateAsync(It.IsAny<Ledger>())).ReturnsAsync(true);
 
         // Act
         var previewResult = await _service.PreviewLedgerDetailsAsync(filePath);
@@ -3983,6 +3993,441 @@ FEDCBA9876543210,鈴木花子,002,テスト2";
         (previewResult.NewCount + previewResult.UpdateCount + previewResult.SkipCount)
             .Should().Be(importResult.ImportedCount + importResult.SkippedCount,
                 "Issue #1379: プレビュー合計とインポート合計は CSV 行数で一致する必要がある");
+    }
+
+    #endregion
+
+    #region Issue #1808: CSVインポートの無言欠陥（親Ledger更新の握りつぶし・職員番号の幻の差分・往復クォート混入）
+
+    private const string DetailCsvHeader =
+        "利用履歴ID,利用日時,カードIDm,管理番号,乗車駅,降車駅,バス停,金額,残額,チャージ,ポイント還元,バス利用,グループID";
+
+    /// <summary>
+    /// 明細インポートで親 Ledger の <c>UpdateAsync</c> が 0 行（他 PC が履歴を削除済み）を返したとき、
+    /// エラーとして報告しインポート件数に含めないこと。旧実装は戻り値を捨てて「インポート完了」にしていた。
+    /// </summary>
+    [Fact]
+    public async Task ImportLedgerDetailsAsync_親Ledgerの更新が0行_エラーとして報告しインポート件数に含めない()
+    {
+        // Arrange
+        var csvContent = DetailCsvHeader + @"
+1,2024-01-15 10:30:00,0123456789ABCDEF,001,博多,天神,,300,9700,0,0,0,";
+        var filePath = Path.Combine(_testDirectory, "details_parent_update_conflict.csv");
+        await Task.Run(() => File.WriteAllText(filePath, csvContent, CsvEncoding));
+
+        var existingLedger = new Ledger
+        {
+            Id = 1, CardIdm = "0123456789ABCDEF", Date = new DateTime(2024, 1, 15),
+            Summary = "鉄道（博多～天神）", Income = 0, Expense = 260, Balance = 9740
+        };
+        _ledgerRepositoryMock.Setup(x => x.GetByIdAsync(1)).ReturnsAsync(existingLedger);
+        _ledgerRepositoryMock.Setup(x => x.ReplaceDetailsAsync(1, It.IsAny<IEnumerable<LedgerDetail>>()))
+            .ReturnsAsync(true);
+        // 競合: WHERE id = 1 に一致する行が無い（Issue #1753 の影響行数検出）
+        _ledgerRepositoryMock.Setup(x => x.UpdateAsync(It.IsAny<Ledger>())).ReturnsAsync(false);
+
+        // Act
+        var result = await _service.ImportLedgerDetailsAsync(filePath);
+
+        // Assert
+        result.Success.Should().BeFalse();
+        result.ImportedCount.Should().Be(0, "親 Ledger を更新できなかった明細は取り込めていない");
+        result.ErrorCount.Should().Be(1);
+        var error = result.Errors.Single();
+        error.LineNumber.Should().Be(2);
+        AssertParentLedgerConflictMessage(error.Message, ledgerId: 1);
+    }
+
+    /// <summary>
+    /// 明細を置き換えたあとの再読取で親 Ledger が見つからない（置換と読取の間に削除された）ときも、
+    /// 同じくエラーとして報告し、存在しない行への <c>UpdateAsync</c> は呼ばないこと。
+    /// </summary>
+    [Fact]
+    public async Task ImportLedgerDetailsAsync_置換後に親Ledgerが見つからない_エラーとして報告しUpdateAsyncを呼ばない()
+    {
+        // Arrange
+        var csvContent = DetailCsvHeader + @"
+1,2024-01-15 10:30:00,0123456789ABCDEF,001,博多,天神,,300,9700,0,0,0,";
+        var filePath = Path.Combine(_testDirectory, "details_parent_missing_after_replace.csv");
+        await Task.Run(() => File.WriteAllText(filePath, csvContent, CsvEncoding));
+
+        var existingLedger = new Ledger
+        {
+            Id = 1, CardIdm = "0123456789ABCDEF", Date = new DateTime(2024, 1, 15),
+            Summary = "鉄道（博多～天神）", Income = 0, Expense = 260, Balance = 9740
+        };
+        // 1 回目（存在チェック）は見つかり、2 回目（置換後の再読取）は削除済み
+        _ledgerRepositoryMock.SetupSequence(x => x.GetByIdAsync(1))
+            .ReturnsAsync(existingLedger)
+            .ReturnsAsync((Ledger?)null);
+        _ledgerRepositoryMock.Setup(x => x.ReplaceDetailsAsync(1, It.IsAny<IEnumerable<LedgerDetail>>()))
+            .ReturnsAsync(true);
+
+        // Act
+        var result = await _service.ImportLedgerDetailsAsync(filePath);
+
+        // Assert
+        result.Success.Should().BeFalse();
+        result.ImportedCount.Should().Be(0);
+        result.ErrorCount.Should().Be(1);
+        AssertParentLedgerConflictMessage(result.Errors.Single().Message, ledgerId: 1);
+        _ledgerRepositoryMock.Verify(x => x.UpdateAsync(It.IsAny<Ledger>()), Times.Never);
+    }
+
+    /// <summary>
+    /// 親 Ledger が <c>ReplaceDetailsAsync</c> より前に削除されていると、明細 INSERT が
+    /// FOREIGN KEY 制約違反で例外になる（foreign_keys=ON）。この経路でも生の <c>ex.Message</c> を
+    /// UI へ出さず（Issue #1614）、「履歴が削除された可能性」を名指しした行動指示で終わる文言にすること。
+    /// </summary>
+    [Fact]
+    public async Task ImportLedgerDetailsAsync_置換が外部キー制約違反_生の例外メッセージを出さず削除競合として案内()
+    {
+        // Arrange
+        var csvContent = DetailCsvHeader + @"
+1,2024-01-15 10:30:00,0123456789ABCDEF,001,博多,天神,,300,9700,0,0,0,";
+        var filePath = Path.Combine(_testDirectory, "details_parent_fk_violation.csv");
+        await Task.Run(() => File.WriteAllText(filePath, csvContent, CsvEncoding));
+
+        var existingLedger = new Ledger
+        {
+            Id = 1, CardIdm = "0123456789ABCDEF", Date = new DateTime(2024, 1, 15),
+            Summary = "鉄道（博多～天神）", Income = 0, Expense = 260, Balance = 9740
+        };
+        _ledgerRepositoryMock.Setup(x => x.GetByIdAsync(1)).ReturnsAsync(existingLedger);
+        _ledgerRepositoryMock.Setup(x => x.ReplaceDetailsAsync(1, It.IsAny<IEnumerable<LedgerDetail>>()))
+            .ThrowsAsync(new SQLiteException(SQLiteErrorCode.Constraint, "constraint failed\r\nFOREIGN KEY constraint failed"));
+
+        // Act
+        var result = await _service.ImportLedgerDetailsAsync(filePath);
+
+        // Assert
+        result.Success.Should().BeFalse();
+        result.ImportedCount.Should().Be(0);
+        var error = result.Errors.Should().ContainSingle().Subject;
+        error.LineNumber.Should().Be(2);
+        error.Message.Should().Contain("利用履歴ID 1");
+        error.Message.Should().Contain("削除された可能性");
+        error.Message.Should().NotContain("FOREIGN KEY");
+        error.Message.Should().NotContain("constraint");
+        error.Message.Should().MatchRegex("してください。?$");
+        _ledgerRepositoryMock.Verify(x => x.UpdateAsync(It.IsAny<Ledger>()), Times.Never);
+    }
+
+    /// <summary>
+    /// 明細の置換は確定したが親 Ledger の <c>UpdateAsync</c> が例外（共有モードの SQLITE_BUSY 等）のとき、
+    /// 「明細は置き換えた・親の摘要・金額は未更新」という実際の状態を案内し、生の <c>ex.Message</c> を出さないこと。
+    /// </summary>
+    [Fact]
+    public async Task ImportLedgerDetailsAsync_親Ledger更新が例外_明細は置換済みと案内し生の例外メッセージを出さない()
+    {
+        // Arrange
+        var csvContent = DetailCsvHeader + @"
+1,2024-01-15 10:30:00,0123456789ABCDEF,001,博多,天神,,300,9700,0,0,0,";
+        var filePath = Path.Combine(_testDirectory, "details_parent_update_busy.csv");
+        await Task.Run(() => File.WriteAllText(filePath, csvContent, CsvEncoding));
+
+        var existingLedger = new Ledger
+        {
+            Id = 1, CardIdm = "0123456789ABCDEF", Date = new DateTime(2024, 1, 15),
+            Summary = "鉄道（博多～天神）", Income = 0, Expense = 260, Balance = 9740
+        };
+        _ledgerRepositoryMock.Setup(x => x.GetByIdAsync(1)).ReturnsAsync(existingLedger);
+        _ledgerRepositoryMock.Setup(x => x.ReplaceDetailsAsync(1, It.IsAny<IEnumerable<LedgerDetail>>()))
+            .ReturnsAsync(true);
+        _ledgerRepositoryMock.Setup(x => x.UpdateAsync(It.IsAny<Ledger>()))
+            .ThrowsAsync(new SQLiteException(SQLiteErrorCode.Busy, "database is locked"));
+
+        // Act
+        var result = await _service.ImportLedgerDetailsAsync(filePath);
+
+        // Assert
+        result.Success.Should().BeFalse();
+        var error = result.Errors.Should().ContainSingle().Subject;
+        error.Message.Should().Contain("明細は置き換えました");
+        error.Message.Should().NotContain("database is locked");
+        error.Message.Should().MatchRegex("してください。?$");
+    }
+
+    /// <summary>
+    /// 競合エラーの文言が「何が／なぜ／どうすれば」を満たすこと（.claude/rules/error-messages.md）。
+    /// 「影響行数 0」の原因は行の消失に特定できるため、それを名指しし、モード中立に「可能性」で述べる（Issue #1759）。
+    /// </summary>
+    private static void AssertParentLedgerConflictMessage(string message, int ledgerId)
+    {
+        message.Should().Contain($"利用履歴ID {ledgerId}", "何が: どの履歴か");
+        message.Should().Contain("削除された可能性", "なぜ: 行が消えた（競合）ことを名指しする");
+        message.Should().NotContain("失敗しました", "原因を特定できる以上、汎用の失敗文言にしない");
+        message.Should().MatchRegex("してください。?$", "どうすれば: 行動指示で終わる");
+        message.Length.Should().BeGreaterThanOrEqualTo(20);
+    }
+
+    /// <summary>
+    /// 職員番号が未設定（DB は null）の職員は、CSV の空欄（"" や空白のみ）と一致し、
+    /// 他項目が同一なら Skip になること。旧実装は <c>null != ""</c> で毎回「更新」に数え、
+    /// 実在しない差分「職員番号: (なし) → （空）」をプレビューに出していた。
+    /// </summary>
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    public async Task PreviewStaffAsync_職員番号が未設定の職員とCSVの空欄_差分なしとしてSkip(string csvNumberCell)
+    {
+        // Arrange
+        var csvContent = "職員IDm,氏名,職員番号,備考\n" +
+                         $"0123456789ABCDEF,山田太郎,{csvNumberCell},同じ備考";
+        var filePath = Path.Combine(_testDirectory, $"staff_preview_null_number_{csvNumberCell.Length}.csv");
+        await Task.Run(() => File.WriteAllText(filePath, csvContent, CsvEncoding));
+
+        var existingStaff = new Staff
+        {
+            StaffIdm = "0123456789ABCDEF",
+            Name = "山田太郎",
+            Number = null, // 保存時に IsNullOrWhiteSpace → null へ正規化されている
+            Note = "同じ備考"
+        };
+        _staffRepositoryMock.Setup(x => x.GetByIdmAsync("0123456789ABCDEF", true)).ReturnsAsync(existingStaff);
+
+        // Act
+        var result = await _service.PreviewStaffAsync(filePath, skipExisting: true);
+
+        // Assert
+        result.IsValid.Should().BeTrue();
+        result.UpdateCount.Should().Be(0);
+        result.SkipCount.Should().Be(1);
+        var item = result.Items.Should().ContainSingle().Subject;
+        item.Action.Should().Be(ImportAction.Skip);
+        item.Changes.Should().BeEmpty("職員番号 null と空欄は同じ「未設定」であり差分ではない");
+    }
+
+    /// <summary>
+    /// 職員番号が未設定でも、備考が実際に変わっていれば従来どおり Update と判定し、
+    /// 差分一覧に「職員番号」の幻の行が混ざらないこと（是正が正当な差分検出を塞いでいないこと）。
+    /// </summary>
+    [Fact]
+    public async Task PreviewStaffAsync_職員番号が未設定で備考のみ変更_職員番号の差分は出さずUpdate()
+    {
+        // Arrange
+        var csvContent = @"職員IDm,氏名,職員番号,備考
+0123456789ABCDEF,山田太郎,,新備考";
+        var filePath = Path.Combine(_testDirectory, "staff_preview_null_number_note_changed.csv");
+        await Task.Run(() => File.WriteAllText(filePath, csvContent, CsvEncoding));
+
+        var existingStaff = new Staff
+        {
+            StaffIdm = "0123456789ABCDEF",
+            Name = "山田太郎",
+            Number = null,
+            Note = "旧備考"
+        };
+        _staffRepositoryMock.Setup(x => x.GetByIdmAsync("0123456789ABCDEF", true)).ReturnsAsync(existingStaff);
+
+        // Act
+        var result = await _service.PreviewStaffAsync(filePath, skipExisting: true);
+
+        // Assert
+        result.UpdateCount.Should().Be(1);
+        var item = result.Items.Should().ContainSingle().Subject;
+        item.Action.Should().Be(ImportAction.Update);
+        item.Changes.Should().ContainSingle(c => c.FieldName == "備考");
+        item.Changes.Should().NotContain(c => c.FieldName == "職員番号");
+    }
+
+    /// <summary>
+    /// インポート本体（<c>ImportStaffAsync</c>）でも同じ差分検出を通るため、
+    /// 職員番号未設定＋他項目一致の職員は skipExisting=true で Skip され、更新が発行されないこと。
+    /// </summary>
+    [Fact]
+    public async Task ImportStaffAsync_職員番号が未設定で他項目一致_skipExistingTrueでSkipされUpdateAsyncを呼ばない()
+    {
+        // Arrange
+        var csvContent = @"職員IDm,氏名,職員番号,備考
+0123456789ABCDEF,山田太郎,,同じ備考";
+        var filePath = Path.Combine(_testDirectory, "staff_import_null_number_identical.csv");
+        await Task.Run(() => File.WriteAllText(filePath, csvContent, CsvEncoding));
+
+        var existingStaff = new Staff
+        {
+            StaffIdm = "0123456789ABCDEF",
+            Name = "山田太郎",
+            Number = null,
+            Note = "同じ備考"
+        };
+        _staffRepositoryMock.Setup(x => x.GetByIdmAsync("0123456789ABCDEF", true)).ReturnsAsync(existingStaff);
+        _staffRepositoryMock.Setup(x => x.UpdateAsync(It.IsAny<Staff>(), It.IsAny<SQLiteTransaction>())).ReturnsAsync(true);
+
+        // Act
+        var result = await _service.ImportStaffAsync(filePath, skipExisting: true);
+
+        // Assert
+        result.Success.Should().BeTrue();
+        result.ImportedCount.Should().Be(0);
+        result.SkippedCount.Should().Be(1);
+        _staffRepositoryMock.Verify(
+            x => x.UpdateAsync(It.IsAny<Staff>(), It.IsAny<SQLiteTransaction>()), Times.Never);
+    }
+
+    /// <summary>
+    /// 往復対称性: <c>CsvExportService</c> がエクスポートした職員 CSV（備考 <c>-異動予定</c> は
+    /// 式インジェクション対策で <c>'-異動予定</c> と出力される）をそのまま取り込むと、
+    /// 全項目一致として Skip になること。旧実装はエクスポート由来の <c>'</c> を DB へ持ち込み、
+    /// 管理者マニュアル §5.6.5 が推奨する「エクスポート CSV を編集して取り込む」運用が汚染経路になっていた。
+    /// </summary>
+    [Fact]
+    public async Task PreviewStaffAsync_エクスポートしたCSVをそのまま取り込む_全項目一致でSkip()
+    {
+        // Arrange: DB には UI から入力された自然な値が入っている
+        var staff = new Staff
+        {
+            StaffIdm = "0123456789ABCDEF",
+            Name = "山田太郎",
+            Number = "001",
+            Note = "-異動予定"
+        };
+        _staffRepositoryMock.Setup(x => x.GetAllAsync()).ReturnsAsync(new List<Staff> { staff });
+        _staffRepositoryMock.Setup(x => x.GetByIdmAsync("0123456789ABCDEF", true)).ReturnsAsync(staff);
+
+        var exportService = new CsvExportService(
+            _cardRepositoryMock.Object, _staffRepositoryMock.Object, _ledgerRepositoryMock.Object);
+        var filePath = Path.Combine(_testDirectory, "staff_roundtrip.csv");
+        var exportResult = await exportService.ExportStaffAsync(filePath);
+        exportResult.Success.Should().BeTrue();
+        // 前提の確認: エクスポート側は Excel 安全性のため ' を付与している（Issue #1267）
+        (await Task.Run(() => File.ReadAllText(filePath, CsvEncoding))).Should().Contain("'-異動予定");
+
+        // Act
+        var result = await _service.PreviewStaffAsync(filePath, skipExisting: true);
+
+        // Assert
+        result.IsValid.Should().BeTrue();
+        result.UpdateCount.Should().Be(0);
+        result.SkipCount.Should().Be(1);
+        result.Items.Should().ContainSingle().Which.Changes.Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// 職員 CSV の備考先頭にあるサニタイズ由来の <c>'</c>（直後が危険文字）は取り除いて保存し、
+    /// 危険文字で始まる値そのものはサニタイズせず自然な形で保存すること（防御は sink 側の
+    /// エクスポート／帳票出力が担う。UI 入力と同じ扱いに揃える）。
+    /// 一方 <c>'</c> の直後が安全文字なら利用者の入力としてそのまま保存する。
+    /// </summary>
+    [Theory]
+    [InlineData("'-異動予定", "-異動予定")]  // エクスポート由来の ' を除去
+    [InlineData("-異動予定", "-異動予定")]   // 危険文字始まりでも ' を付けない
+    [InlineData("'メモ", "'メモ")]           // 利用者が入力した ' はそのまま
+    public async Task ImportStaffAsync_備考のサニタイズ由来クォート_取り除いて自然な値で保存(string csvNote, string expectedNote)
+    {
+        // Arrange
+        var csvContent = "職員IDm,氏名,職員番号,備考\n" +
+                         $"0123456789ABCDEF,山田太郎,001,{csvNote}";
+        var filePath = Path.Combine(_testDirectory, $"staff_import_unsanitize_{Guid.NewGuid():N}.csv");
+        await Task.Run(() => File.WriteAllText(filePath, csvContent, CsvEncoding));
+
+        _staffRepositoryMock.Setup(x => x.GetByIdmAsync(It.IsAny<string>(), true)).ReturnsAsync((Staff?)null);
+        _staffRepositoryMock.Setup(x => x.InsertAsync(It.IsAny<Staff>(), It.IsAny<SQLiteTransaction>())).ReturnsAsync(true);
+
+        // Act
+        var result = await _service.ImportStaffAsync(filePath);
+
+        // Assert
+        result.Success.Should().BeTrue();
+        _staffRepositoryMock.Verify(
+            x => x.InsertAsync(It.Is<Staff>(s => s.Note == expectedNote), It.IsAny<SQLiteTransaction>()),
+            Times.Once);
+    }
+
+    /// <summary>
+    /// カード CSV の備考も同じ往復対称性を持つこと（管理番号・種別も含めエクスポートが全列を
+    /// サニタイズするため、取り込み側もテキスト列すべてで <c>'</c> を取り除く）。
+    /// </summary>
+    [Fact]
+    public async Task ImportCardsAsync_テキスト列のサニタイズ由来クォート_取り除いて保存()
+    {
+        // Arrange
+        var csvContent = @"カードIDm,カード種別,管理番号,備考
+0123456789ABCDEF,はやかけん,'-01,'-予備機";
+        var filePath = Path.Combine(_testDirectory, "cards_import_unsanitize.csv");
+        await Task.Run(() => File.WriteAllText(filePath, csvContent, CsvEncoding));
+
+        _cardRepositoryMock.Setup(x => x.GetByIdmAsync(It.IsAny<string>(), true)).ReturnsAsync((IcCard?)null);
+        _cardRepositoryMock.Setup(x => x.InsertAsync(It.IsAny<IcCard>(), It.IsAny<SQLiteTransaction>())).ReturnsAsync(true);
+
+        // Act
+        var result = await _service.ImportCardsAsync(filePath);
+
+        // Assert
+        result.Success.Should().BeTrue();
+        _cardRepositoryMock.Verify(
+            x => x.InsertAsync(It.Is<IcCard>(c => c.CardNumber == "-01" && c.Note == "-予備機"), It.IsAny<SQLiteTransaction>()),
+            Times.Once);
+    }
+
+    /// <summary>
+    /// 履歴 CSV の摘要・備考も同じ往復対称性を持つこと。
+    /// エクスポート由来の <c>'</c> が付いた備考は、既存の値（自然な形）と一致すれば差分にならない。
+    /// </summary>
+    [Fact]
+    public async Task ImportLedgersAsync_備考がエクスポート由来のクォート付き_既存の自然な値と一致してSkip()
+    {
+        // Arrange: 備考 "-立替" は CSV 上では "'-立替"（エクスポート由来）
+        var csvContent = @"ID,日時,カードIDm,管理番号,摘要,受入金額,払出金額,残額,利用者,備考
+1,2025-02-01 00:00:00,0123456789ABCDEF,001,12月から繰越,8806,,8806,,'-立替";
+        var filePath = Path.Combine(_testDirectory, "ledgers_import_unsanitize_skip.csv");
+        await Task.Run(() => File.WriteAllText(filePath, csvContent, CsvEncoding));
+
+        _cardRepositoryMock.Setup(x => x.GetAllIncludingDeletedAsync()).ReturnsAsync(new List<IcCard>
+        {
+            new IcCard { CardIdm = "0123456789ABCDEF", CardType = "はやかけん", CardNumber = "001" }
+        });
+        var existingLedger = new Ledger
+        {
+            Id = 1, CardIdm = "0123456789ABCDEF", Date = new DateTime(2025, 2, 1),
+            Summary = "12月から繰越", Income = 8806, Expense = 0, Balance = 8806, Note = "-立替"
+        };
+        _ledgerRepositoryMock.Setup(x => x.GetByIdAsync(1)).ReturnsAsync(existingLedger);
+
+        // Act
+        var result = await _service.ImportLedgersAsync(filePath);
+
+        // Assert
+        result.Success.Should().BeTrue();
+        result.SkippedCount.Should().Be(1);
+        result.ImportedCount.Should().Be(0);
+        _ledgerRepositoryMock.Verify(x => x.UpdateAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>()), Times.Never);
+    }
+
+    /// <summary>
+    /// 明細 CSV の乗車駅・降車駅・バス停も同じ往復対称性を持つこと。
+    /// </summary>
+    [Fact]
+    public async Task ImportLedgerDetailsAsync_駅名バス停のサニタイズ由来クォート_取り除いて保存()
+    {
+        // Arrange
+        var csvContent = DetailCsvHeader + @"
+1,2024-01-15 10:30:00,0123456789ABCDEF,001,'-博多,'@天神,'=中央,300,9700,0,0,0,";
+        var filePath = Path.Combine(_testDirectory, "details_import_unsanitize.csv");
+        await Task.Run(() => File.WriteAllText(filePath, csvContent, CsvEncoding));
+
+        var existingLedger = new Ledger
+        {
+            Id = 1, CardIdm = "0123456789ABCDEF", Date = new DateTime(2024, 1, 15),
+            Summary = "鉄道（博多～天神）", Income = 0, Expense = 260, Balance = 9740
+        };
+        _ledgerRepositoryMock.Setup(x => x.GetByIdAsync(1)).ReturnsAsync(existingLedger);
+        List<LedgerDetail>? captured = null;
+        _ledgerRepositoryMock.Setup(x => x.ReplaceDetailsAsync(1, It.IsAny<IEnumerable<LedgerDetail>>()))
+            .Callback<int, IEnumerable<LedgerDetail>>((_, d) => captured = d.ToList())
+            .ReturnsAsync(true);
+        _ledgerRepositoryMock.Setup(x => x.UpdateAsync(It.IsAny<Ledger>())).ReturnsAsync(true);
+
+        // Act
+        var result = await _service.ImportLedgerDetailsAsync(filePath);
+
+        // Assert
+        result.Success.Should().BeTrue();
+        captured.Should().NotBeNull();
+        var detail = captured!.Should().ContainSingle().Subject;
+        detail.EntryStation.Should().Be("-博多");
+        detail.ExitStation.Should().Be("@天神");
+        detail.BusStops.Should().Be("=中央");
     }
 
     #endregion

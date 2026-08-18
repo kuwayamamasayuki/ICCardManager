@@ -50,12 +50,14 @@ namespace ICCardManager.Services.Import.Parsers
             var idStr = hasIdColumn ? fields[0].Trim() : string.Empty;
             var dateStr = fields[0 + offset].Trim();
             var cardIdm = fields[1 + offset].Trim().ToUpperInvariant();
-            var summary = Infrastructure.Security.FormulaInjectionSanitizer.Sanitize(fields[3 + offset].Trim());
+            // Issue #1808: テキスト列（摘要・利用者・備考）はエクスポート由来の先頭 ' を取り除いて
+            // 自然な値で保存する（CsvImportService.ReadTextField を参照）
+            var summary = CsvImportService.ReadTextField(fields, 3 + offset);
             var incomeStr = fields[4 + offset].Trim();
             var expenseStr = fields[5 + offset].Trim();
             var balanceStr = fields[6 + offset].Trim();
-            var staffName = fields[7 + offset].Trim();
-            var note = Infrastructure.Security.FormulaInjectionSanitizer.Sanitize(fields[8 + offset].Trim());
+            var staffName = CsvImportService.ReadTextField(fields, 7 + offset);
+            var note = CsvImportService.ReadTextField(fields, 8 + offset);
 
             int? ledgerId = null;
             if (hasIdColumn && !string.IsNullOrWhiteSpace(idStr))

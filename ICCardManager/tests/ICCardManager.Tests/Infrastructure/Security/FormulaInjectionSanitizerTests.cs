@@ -134,4 +134,72 @@ public class FormulaInjectionSanitizerTests
     }
 
     #endregion
+
+    #region Unsanitize (Issue #1808)
+
+    /// <summary>
+    /// Issue #1808: エクスポートが付与した先頭 <c>'</c>（直後が危険文字）を 1 文字だけ取り除くこと。
+    /// </summary>
+    [Theory]
+    [InlineData("'=SUM(1,2)", "=SUM(1,2)")]
+    [InlineData("'+1+1", "+1+1")]
+    [InlineData("'-異動予定", "-異動予定")]
+    [InlineData("'@foo", "@foo")]
+    [InlineData("'\t=1+1", "\t=1+1")]
+    [InlineData("'\r=1+1", "\r=1+1")]
+    public void Unsanitize_QuoteFollowedByDangerousChar_RemovesOnlyTheQuote(string input, string expected)
+    {
+        FormulaInjectionSanitizer.Unsanitize(input).Should().Be(expected);
+    }
+
+    /// <summary>
+    /// Issue #1808: サニタイズ由来ではない値は変更しないこと。
+    /// 先頭が <c>'</c> でも直後が危険文字でなければ利用者が入力した正当な文字列とみなす。
+    /// </summary>
+    [Theory]
+    [InlineData("hello")]
+    [InlineData("=SUM(1,2)")]     // 未サニタイズの値はそのまま
+    [InlineData("'hello")]        // ' の直後が安全文字
+    [InlineData("'")]             // ' のみ
+    [InlineData("''")]            // '' （2 文字目が ' で危険文字ではない）
+    [InlineData("''=foo")]        // Sanitize は '' を作らない（冪等）ため、これは利用者の入力
+    [InlineData("  '=1")]         // 先頭がスペース
+    [InlineData("")]
+    [InlineData(null)]
+    public void Unsanitize_NotSanitizedValue_ReturnsUnchanged(string input)
+    {
+        FormulaInjectionSanitizer.Unsanitize(input).Should().Be(input);
+    }
+
+    /// <summary>
+    /// Issue #1808: Sanitize → Unsanitize で元の値に戻ること（往復対称性）。
+    /// エクスポート（Sanitize）→ インポート（Unsanitize）の経路で DB 値が変質しないための性質。
+    /// </summary>
+    [Theory]
+    [InlineData("=SUM(1,2)")]
+    [InlineData("-異動予定")]
+    [InlineData("+81-90")]
+    [InlineData("@channel")]
+    [InlineData("hello")]
+    [InlineData("日本語")]
+    [InlineData("")]
+    public void Unsanitize_AfterSanitize_RoundTripsToOriginal(string original)
+    {
+        FormulaInjectionSanitizer.Unsanitize(FormulaInjectionSanitizer.Sanitize(original))
+            .Should().Be(original);
+    }
+
+    /// <summary>
+    /// Issue #1808: 冪等性。2 回適用しても 1 回目と同じ結果になる
+    /// （Sanitize が二重付与しないことの対。取り除いた後の値は <c>'</c> で始まらないため）。
+    /// </summary>
+    [Fact]
+    public void Unsanitize_IsIdempotent()
+    {
+        var once = FormulaInjectionSanitizer.Unsanitize("'=foo");
+        once.Should().Be("=foo");
+        FormulaInjectionSanitizer.Unsanitize(once).Should().Be(once);
+    }
+
+    #endregion
 }

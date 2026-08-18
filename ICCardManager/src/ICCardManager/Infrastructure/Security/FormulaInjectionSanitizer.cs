@@ -20,8 +20,13 @@ namespace ICCardManager.Infrastructure.Security
     /// <para>
     /// 対応箇所:
     /// <list type="bullet">
-    /// <item><description>CSV インポート時に DB 保存前の値をサニタイズ（入力側防御）</description></item>
-    /// <item><description>CSV / Excel エクスポート時にセル出力値をサニタイズ（出力側防御）</description></item>
+    /// <item><description>CSV / Excel エクスポート時にセル出力値をサニタイズ（出力側＝sink 側の防御。
+    /// <c>CsvExportService</c> / <c>ReportService</c> / <c>OperationLogExcelExportService</c> /
+    /// <c>AdminDashboardExcelExportService</c>）</description></item>
+    /// <item><description>CSV インポート時は <see cref="Unsanitize"/> でエクスポート由来の <c>'</c> を取り除き、
+    /// DB には UI 入力と同じ自然な値を保存する（Issue #1808。当初は取り込み側でも <see cref="Sanitize"/> を
+    /// 掛けていたが、UI 入力は元々サニタイズしないため実効防御にならず、エクスポート→取り込みの往復で
+    /// 値が変質する原因になっていた）</description></item>
     /// </list>
     /// </para>
     /// <para>
@@ -61,7 +66,7 @@ namespace ICCardManager.Infrastructure.Security
         }
 
         /// <summary>
-        /// CSV / Excel への出力または DB 保存前の値をサニタイズする。
+        /// CSV / Excel への出力値をサニタイズする。
         /// 危険な開始文字を持つ場合、先頭にシングルクォートを付与する。
         /// </summary>
         /// <param name="value">
@@ -86,6 +91,45 @@ namespace ICCardManager.Infrastructure.Security
         public static string SanitizeOrEmpty(string value)
         {
             return Sanitize(value ?? string.Empty);
+        }
+
+        /// <summary>
+        /// <see cref="Sanitize"/> が付与した先頭のシングルクォートを取り除き、元の値へ戻す
+        /// （CSV インポート側で使用。Issue #1808）。
+        /// </summary>
+        /// <param name="value">CSV から読み取った文字列（null/空はそのまま返す）</param>
+        /// <returns>
+        /// 先頭が <c>'</c> で、その直後が <see cref="DangerousStartChars"/> のいずれかであれば
+        /// <c>'</c> を 1 文字だけ除いた文字列。それ以外は入力をそのまま返す。
+        /// </returns>
+        /// <remarks>
+        /// <para>
+        /// エクスポート（<see cref="Sanitize"/>）→ 取り込み（本メソッド）の往復で DB の値が
+        /// 変質しないための対（<c>Unsanitize(Sanitize(x)) == x</c>）。取り除く条件を
+        /// 「直後が危険文字」に限るのは、<c>'メモ</c> のように利用者が入力した正当な
+        /// <c>'</c> を巻き添えにしないため。<see cref="Sanitize"/> は <c>'</c> で始まる値には
+        /// 何もしない（冪等）ので、<c>''=foo</c> はサニタイズ由来ではなく利用者の入力と判断して
+        /// 変更しない。
+        /// </para>
+        /// <para>
+        /// 本メソッドも冪等: 取り除いた後の値は <c>'</c> で始まらないため、2 回適用しても
+        /// 結果は変わらない。
+        /// </para>
+        /// <para>
+        /// 既知の限界: DB に <c>'-foo</c>（<c>'</c> ＋危険文字で始まる値）が入っていた場合、
+        /// エクスポートは <c>'-foo</c> のまま出力し（<c>'</c> は危険文字ではない）、取り込みで
+        /// <c>-foo</c> になる。Excel が同じ入力を同じ形で扱うのと同じ非可逆性で、
+        /// 業務データでこの形が現れる可能性は極めて低いため許容する。
+        /// </para>
+        /// </remarks>
+        public static string Unsanitize(string value)
+        {
+            if (string.IsNullOrEmpty(value) || value.Length < 2 || value[0] != '\'')
+                return value;
+
+            // IsDangerous は先頭 1 文字しか見ないため、部分文字列を作らず 2 文字目だけで判定する
+            //（CSV 取り込みでは全テキスト列×全行に対して呼ばれる）
+            return Array.IndexOf(DangerousStartChars, value[1]) >= 0 ? value.Substring(1) : value;
         }
     }
 }

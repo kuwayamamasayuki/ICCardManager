@@ -72,12 +72,11 @@ namespace ICCardManager.Services
                 }
 
                 var staffIdm = fields[0].Trim().ToUpperInvariant(); // IDmは大文字に正規化
-                var name = fields[1].Trim();
-                var number = fields.Count > 2 ? fields[2].Trim() : "";
-                // Issue #1267: note はユーザー自由記述のため式インジェクション対策を適用
-                var note = fields.Count > 3
-                    ? Infrastructure.Security.FormulaInjectionSanitizer.Sanitize(fields[3].Trim())
-                    : "";
+                // Issue #1808: テキスト列はエクスポート由来の先頭 ' を取り除いて自然な値で保存する
+                //（式インジェクション対策は sink 側のエクスポート／帳票出力が担う。ReadTextField を参照）
+                var name = ReadTextField(fields, 1);
+                var number = ReadTextField(fields, 2);
+                var note = ReadTextField(fields, 3);
 
                 // バリデーション（共通メソッドを使用）
                 if (!ValidateIdm(staffIdm, lineNumber, "職員IDm", line, errors, isStaff: true))
@@ -99,8 +98,8 @@ namespace ICCardManager.Services
                     {
                         // 削除済み職員は復元して更新する（skipExistingでもスキップしない）
                         existingStaff.Name = name;
-                        existingStaff.Number = string.IsNullOrWhiteSpace(number) ? null : number;
-                        existingStaff.Note = string.IsNullOrWhiteSpace(note) ? null : note;
+                        existingStaff.Number = NormalizeOptionalText(number);
+                        existingStaff.Note = NormalizeOptionalText(note);
                         validRecords.Add((lineNumber, existingStaff, true, true)); // isRestore = true
                     }
                     else
@@ -115,8 +114,8 @@ namespace ICCardManager.Services
                             continue;
                         }
                         existingStaff.Name = name;
-                        existingStaff.Number = string.IsNullOrWhiteSpace(number) ? null : number;
-                        existingStaff.Note = string.IsNullOrWhiteSpace(note) ? null : note;
+                        existingStaff.Number = NormalizeOptionalText(number);
+                        existingStaff.Note = NormalizeOptionalText(note);
                         validRecords.Add((lineNumber, existingStaff, true, false)); // isRestore = false
                     }
                 }
@@ -127,8 +126,8 @@ namespace ICCardManager.Services
                     {
                         StaffIdm = staffIdm,
                         Name = name,
-                        Number = string.IsNullOrWhiteSpace(number) ? null : number,
-                        Note = string.IsNullOrWhiteSpace(note) ? null : note
+                        Number = NormalizeOptionalText(number),
+                        Note = NormalizeOptionalText(note)
                     };
                     validRecords.Add((lineNumber, staff, false, false));
                 }
@@ -288,12 +287,11 @@ namespace ICCardManager.Services
                 }
 
                 var staffIdm = fields[0].Trim().ToUpperInvariant(); // IDmは大文字に正規化
-                var name = fields[1].Trim();
-                var number = fields.Count > 2 ? fields[2].Trim() : "";
                 // Issue #1370: プレビューでも備考差分検出のため note を読み取る
-                var note = fields.Count > 3
-                    ? Infrastructure.Security.FormulaInjectionSanitizer.Sanitize(fields[3].Trim())
-                    : "";
+                // Issue #1808: インポート本体と同じ ReadTextField（先頭 ' の除去）で読む
+                var name = ReadTextField(fields, 1);
+                var number = ReadTextField(fields, 2);
+                var note = ReadTextField(fields, 3);
 
                 // バリデーション（共通メソッドを使用）
                 if (!ValidateIdm(staffIdm, lineNumber, "職員IDm", line, errors, isStaff: true))
@@ -356,7 +354,7 @@ namespace ICCardManager.Services
                     LineNumber = lineNumber,
                     Idm = staffIdm,
                     Name = name,
-                    AdditionalInfo = string.IsNullOrWhiteSpace(number) ? null : number,
+                    AdditionalInfo = NormalizeOptionalText(number),
                     Action = action,
                     Changes = changes
                 });
@@ -399,28 +397,15 @@ namespace ICCardManager.Services
                 });
             }
 
-            if (existingStaff.Number != newNumber)
-            {
-                changes.Add(new FieldChange
-                {
-                    FieldName = "職員番号",
-                    OldValue = existingStaff.Number ?? "(なし)",
-                    NewValue = newNumber
-                });
-            }
+            // Issue #1808: 職員番号は保存時に NormalizeOptionalText（IsNullOrWhiteSpace → null）で
+            // 正規化されるため、CSV の空欄 "" と DB の null を生で比較すると常に不一致になり、
+            // 職員番号未設定の職員が同一 CSV の再取り込みで毎回「更新」に数えられ、プレビューに
+            // 実在しない差分「職員番号: (なし) → （空）」が出ていた。備考（Issue #1370）と同じ
+            // 正規化で比較する（保存側と比較側で同じヘルパーを使う）。
+            AddOptionalTextChangeIfDiffers("職員番号", existingStaff.Number, newNumber, changes);
 
             // Issue #1370: 備考の差分検出
-            var existingNote = string.IsNullOrWhiteSpace(existingStaff.Note) ? null : existingStaff.Note;
-            var normalizedNewNote = string.IsNullOrWhiteSpace(newNote) ? null : newNote;
-            if (existingNote != normalizedNewNote)
-            {
-                changes.Add(new FieldChange
-                {
-                    FieldName = "備考",
-                    OldValue = existingNote ?? "(なし)",
-                    NewValue = normalizedNewNote ?? "(なし)"
-                });
-            }
+            AddOptionalTextChangeIfDiffers("備考", existingStaff.Note, newNote, changes);
         }
     }
 }
