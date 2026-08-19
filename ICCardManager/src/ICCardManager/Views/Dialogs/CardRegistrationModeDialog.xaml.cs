@@ -1,7 +1,10 @@
 using System;
 using System.Collections.Generic;
 using System.Windows;
+using System.Windows.Automation;
+using System.Windows.Controls;
 using System.Windows.Input;
+using ICCardManager.Services;
 
 namespace ICCardManager.Views.Dialogs
 {
@@ -119,6 +122,43 @@ namespace ICCardManager.Views.Dialogs
             var currentMonth = System.DateTime.Now.Month;
             var previousMonth = currentMonth == 1 ? 12 : currentMonth - 1;
             CarryoverMonthCombo.SelectedValue = previousMonth;
+            UpdateCarryoverDatePreview();
+        }
+
+        /// <summary>
+        /// 繰越月の選択変更時（Issue #1812）
+        /// </summary>
+        private void CarryoverMonthCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+            UpdateCarryoverDatePreview();
+        }
+
+        /// <summary>
+        /// 選択中の繰越月から生成される繰越レコード日付のプレビューを更新（Issue #1812）
+        /// </summary>
+        /// <remarks>
+        /// 繰越月が登録月より後の場合は前年扱いになるが、これは正当な運用
+        /// （2月登録で「11月から繰越」）と誤選択（2月登録で「5月から繰越」）の両方を含むため、
+        /// コンボから除外せず解決結果を提示して職員に判断させる。
+        /// </remarks>
+        private void UpdateCarryoverDatePreview()
+        {
+            // SelectionChanged は XAML 読み込み中にも発火し得る。
+            // 本文の TextBlock はコンボより後に生成されるため、その時点では null になる
+            if (CarryoverDatePreviewText == null)
+            {
+                return;
+            }
+
+            var description = CarryoverMonthCombo.SelectedValue is int carryoverMonth
+                ? SummaryGenerator.GetMidYearCarryoverDateDescription(carryoverMonth, DateTime.Today)
+                : string.Empty;
+
+            CarryoverDatePreviewText.Text = description;
+
+            // AutomationProperties.Name は TextBlock の既定の読み上げ内容（Text）を上書きするため、
+            // 固定文言のままにすると解決結果も注意書きも読み上げられない。本文と同じ値を都度設定する
+            AutomationProperties.SetName(CarryoverDatePreviewText, description);
         }
 
         private void NewPurchaseRadio_Checked(object sender, RoutedEventArgs e)

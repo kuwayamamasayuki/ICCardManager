@@ -170,6 +170,143 @@ public class SummaryGeneratorTests : IDisposable
 
     #endregion
 
+    #region Issue #1812: 繰越月＝登録月・繰越月＞登録月の境界
+
+    [Fact]
+    public void GetMidYearCarryoverDate_CarryoverMonthEqualsRegistrationMonth_ReturnsNextMonthOfSameYear()
+    {
+        // Arrange: 2026年2月20日に「2月から繰越」（2月まで紙・3月からアプリ運用）
+        // → 繰越レコードは当年3月1日。旧実装は1年前（2025年3月1日）へ落ちていた
+        var registrationDate = new DateTime(2026, 2, 20);
+
+        // Act
+        var result = SummaryGenerator.GetMidYearCarryoverDate(2, registrationDate);
+
+        // Assert
+        result.Should().Be(new DateTime(2026, 3, 1));
+    }
+
+    [Fact]
+    public void GetMidYearCarryoverDate_DecemberCarryoverInDecember_ReturnsNextYearJanuaryFirst()
+    {
+        // Arrange: 2026年12月5日に「12月から繰越」→ 翌年1月1日
+        // 旧実装は当年1月1日（約11か月前）へ落ちていた
+        var registrationDate = new DateTime(2026, 12, 5);
+
+        // Act
+        var result = SummaryGenerator.GetMidYearCarryoverDate(12, registrationDate);
+
+        // Assert
+        result.Should().Be(new DateTime(2027, 1, 1));
+    }
+
+    [Fact]
+    public void GetMidYearCarryoverDate_CarryoverMonthAfterRegistrationMonth_ResolvesToPreviousYear()
+    {
+        // Arrange: 2026年2月20日に「5月から繰越」→ 前年5月が繰越月なので前年6月1日
+        var registrationDate = new DateTime(2026, 2, 20);
+
+        // Act
+        var result = SummaryGenerator.GetMidYearCarryoverDate(5, registrationDate);
+
+        // Assert
+        result.Should().Be(new DateTime(2025, 6, 1));
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(13)]
+    [InlineData(-1)]
+    public void GetMidYearCarryoverDate_InvalidMonth_Throws(int carryoverMonth)
+    {
+        // Arrange
+        var registrationDate = new DateTime(2026, 2, 20);
+
+        // Act
+        Action act = () => SummaryGenerator.GetMidYearCarryoverDate(carryoverMonth, registrationDate);
+
+        // Assert
+        act.Should().Throw<ArgumentOutOfRangeException>();
+    }
+
+    /// <summary>
+    /// 全ての繰越月について「繰越レコード日付の前月」が
+    /// 登録日以前に最後に現れた繰越月と一致すること（不変条件）
+    /// </summary>
+    [Theory]
+    [InlineData(1)]
+    [InlineData(2)]
+    [InlineData(3)]
+    [InlineData(4)]
+    [InlineData(5)]
+    [InlineData(6)]
+    [InlineData(7)]
+    [InlineData(8)]
+    [InlineData(9)]
+    [InlineData(10)]
+    [InlineData(11)]
+    [InlineData(12)]
+    public void GetMidYearCarryoverDate_AllMonths_PreviousMonthIsLatestOccurrenceNotAfterRegistrationMonth(int carryoverMonth)
+    {
+        // Arrange
+        var registrationDate = new DateTime(2026, 6, 15);
+
+        // Act
+        var result = SummaryGenerator.GetMidYearCarryoverDate(carryoverMonth, registrationDate);
+        var carryoverMonthDate = result.AddMonths(-1);
+
+        // Assert - 日付は必ず1日、前月は選択した繰越月、その年は登録月以前の直近
+        result.Day.Should().Be(1);
+        carryoverMonthDate.Month.Should().Be(carryoverMonth);
+        carryoverMonthDate.Year.Should().Be(
+            carryoverMonth <= registrationDate.Month ? registrationDate.Year : registrationDate.Year - 1);
+    }
+
+    [Fact]
+    public void GetMidYearCarryoverDateDescription_PastMonth_ShowsResolvedDateWithoutCaution()
+    {
+        // Arrange: 2026年2月20日に「1月から繰越」→ 当年2月1日、注意書きなし
+        var registrationDate = new DateTime(2026, 2, 20);
+
+        // Act
+        var result = SummaryGenerator.GetMidYearCarryoverDateDescription(1, registrationDate);
+
+        // Assert
+        result.Should().Contain("2026年2月1日");
+        result.Should().NotContain("※");
+    }
+
+    [Fact]
+    public void GetMidYearCarryoverDateDescription_SameMonth_ShowsNextMonthWithoutCaution()
+    {
+        // Arrange: 繰越月＝登録月は正当な運用なので注意書きを出さない
+        var registrationDate = new DateTime(2026, 2, 20);
+
+        // Act
+        var result = SummaryGenerator.GetMidYearCarryoverDateDescription(2, registrationDate);
+
+        // Assert
+        result.Should().Contain("2026年3月1日");
+        result.Should().NotContain("※");
+    }
+
+    [Fact]
+    public void GetMidYearCarryoverDateDescription_FutureMonth_ShowsCautionWithReasonAndAction()
+    {
+        // Arrange: 2026年2月20日に「5月から繰越」→ 前年扱いになることを提示する
+        var registrationDate = new DateTime(2026, 2, 20);
+
+        // Act
+        var result = SummaryGenerator.GetMidYearCarryoverDateDescription(5, registrationDate);
+
+        // Assert - 何が／なぜ／どうすれば
+        result.Should().Contain("2025年6月1日");           // 何が（実際に生成される日付）
+        result.Should().Contain("前年（2025年）の5月");     // なぜ
+        result.Should().Contain("2月以前の月を選択してください"); // どうすれば
+    }
+
+    #endregion
+
     #region Issue #633: GroupIdによる分割が摘要に反映される
 
     [Fact]

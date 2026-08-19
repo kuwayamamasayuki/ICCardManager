@@ -106,11 +106,21 @@
                         <ComboBox x:Name="CarryoverMonthCombo"
                                   Width="80"
                                   FontSize="{DynamicResource BaseFontSize}"
+                                  SelectionChanged="CarryoverMonthCombo_SelectionChanged"
                                   AutomationProperties.Name="繰越月の選択"/>
                         <TextBlock Text=" から繰越"
                                    FontSize="{DynamicResource BaseFontSize}"
                                    VerticalAlignment="Center"/>
                     </StackPanel>
+                    <!-- Issue #1812: 選択した繰越月から実際に生成される繰越レコード日付を提示する。
+                         繰越月が登録月より後の場合は前年扱いになるため注意書きを併記する。
+                         文字サイズが4段階で変わるためTextWrapping="Wrap"で折り返しを担保する。 -->
+                    <TextBlock x:Name="CarryoverDatePreviewText"
+                               FontSize="{DynamicResource SmallFontSize}"
+                               Foreground="{DynamicResource HintForegroundBrush}"
+                               TextWrapping="Wrap"
+                               Margin="0,0,0,8"
+                               AutomationProperties.Name="繰越レコードの日付"/>
                     <StackPanel Orientation="Horizontal">
                         <TextBlock Text="開始ページ:"
                                    FontSize="{DynamicResource BaseFontSize}"
