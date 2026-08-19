@@ -84,7 +84,11 @@ public class SystemManageViewModelTests : IDisposable
         _backupHealthServiceMock = new Mock<IBackupHealthService>();
         _backupHealthServiceMock
             .Setup(s => s.GetHealthAsync())
-            .ReturnsAsync(new BackupHealthInfo { MaxGenerations = AppConstants.MaxBackupGenerations });
+            .ReturnsAsync(new BackupHealthInfo
+            {
+                RetentionDays = AppConstants.BackupRetentionDays,
+                MaxManualGenerations = AppConstants.MaxManualBackupGenerations
+            });
 
         // Issue #1793: リストア前バックアップ失敗時の続行確認を MessageBox 直呼びから
         // IDialogService へ移した。既定は「続行しない」（＝リストアを実行しない安全側）を返す。
@@ -799,13 +803,20 @@ public class SystemManageViewModelTests : IDisposable
     }
 
     [Fact]
-    public async Task バックアップ状況_世代数が上限とともに表示されること()
+    public async Task バックアップ状況_世代数が保持ルールとともに表示されること()
     {
-        SetupHealth(new BackupHealthInfo { GenerationCount = 12, MaxGenerations = 30 });
+        // Issue #1813: 上限を単一の件数で示すと、共有モードで 1 日に何世代も生まれる実態と
+        // 表示が食い違う。現存件数と保持ルール（自動＝日数 / 手動＝件数）の両方を示す。
+        SetupHealth(new BackupHealthInfo
+        {
+            GenerationCount = 12,
+            RetentionDays = 30,
+            MaxManualGenerations = 10
+        });
 
         await _viewModel.LoadBackupHealthAsync();
 
-        _viewModel.BackupGenerationText.Should().Be("保持世代: 12 / 30");
+        _viewModel.BackupGenerationText.Should().Be("保持世代: 12件（自動: 直近30日分 / 手動: 最新10件）");
     }
 
     [Fact]

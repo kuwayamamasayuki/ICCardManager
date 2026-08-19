@@ -1,5 +1,6 @@
 using System.IO;
 using FluentAssertions;
+using ICCardManager.Common;
 using ICCardManager.Data;
 using ICCardManager.Data.Repositories;
 using ICCardManager.Models;
@@ -670,21 +671,29 @@ public class BackupServiceTests : IDisposable
     #region CleanupOldBackups 統合テスト（ExecuteAutoBackupAsync経由）
 
     /// <summary>
-    /// 30世代以下のバックアップは削除されないことを確認
+    /// 同じ日に何度起動しても、その日に残るのは最新 1 世代だけであることを確認（Issue #1813）
     /// </summary>
+    /// <remarks>
+    /// 旧ルール（ファイル数で 30 世代）では、共有フォルダーへ最大 20 台が書き込む運用で
+    /// 1 日あたり 20 世代前後が生まれ、実効保持期間が約 1.5 日にしかならなかった。
+    /// </remarks>
     [Fact]
-    public async Task ExecuteAutoBackupAsync_Under30Generations_KeepsAllBackups()
+    public async Task ExecuteAutoBackupAsync_同日の古い世代を削除して最新1世代だけ残すこと()
     {
-        // Arrange - 29個のダミーバックアップを作成
-        for (int i = 0; i < 29; i++)
+        // Arrange - 同じ日の古い自動バックアップを 20 個作成（20 台運用の再現）。
+        // 時刻は「本日の 0 時から現在まで」を等分した点に置く。固定時刻（6 時など）にすると、
+        // その時刻より前にテストを実行したときだけダミーが最新世代になり、結果が実行時刻に依存する。
+        var now = DateTime.Now;
+        const int ExistingGenerations = 20;
+        for (int i = 0; i < ExistingGenerations; i++)
         {
-            var timestamp = DateTime.Now.AddMinutes(-(i + 1)).ToString("yyyyMMdd_HHmmss");
+            var elapsed = TimeSpan.FromTicks(now.TimeOfDay.Ticks * (i + 1) / (ExistingGenerations + 1));
+            var timestamp = (now.Date + elapsed).ToString("yyyyMMdd_HHmmss");
             var dummyBackupPath = Path.Combine(_backupDirectory, $"backup_{timestamp}.db");
             await Task.Run(() => File.WriteAllText(dummyBackupPath, "dummy"));
-            File.SetCreationTime(dummyBackupPath, DateTime.Now.AddMinutes(-(i + 1)));
         }
 
-        // Act - 新しいバックアップを作成（合計30個）
+        // Act - 新しいバックアップを作成
         var result = await _service.ExecuteAutoBackupAsync();
 
         // Assert
@@ -692,25 +701,26 @@ public class BackupServiceTests : IDisposable
 
         result.Should().NotBeNull();
         var backupFiles = Directory.GetFiles(_backupDirectory, "backup_*.db");
-        backupFiles.Length.Should().Be(30);
+        backupFiles.Length.Should().Be(1);
+        backupFiles[0].Should().Be(result, "残るのは今回作成した最新世代");
     }
 
     /// <summary>
-    /// ちょうど30世代のバックアップは削除されないことを確認
+    /// 日をまたいだ世代は保持日数分だけ残ることを確認（Issue #1813）
     /// </summary>
     [Fact]
-    public async Task ExecuteAutoBackupAsync_Exactly30Generations_DeletesOldest()
+    public async Task ExecuteAutoBackupAsync_保持日数を超える古い日の世代を削除すること()
     {
-        // Arrange - 30個のダミーバックアップを作成
-        for (int i = 0; i < 30; i++)
+        // Arrange - 過去 30 日分（各日 1 世代）を作成。今回の作成分を加えると 31 日分になる。
+        var today = DateTime.Now.Date;
+        for (int i = 1; i <= AppConstants.BackupRetentionDays; i++)
         {
-            var timestamp = DateTime.Now.AddMinutes(-(i + 1)).ToString("yyyyMMdd_HHmmss");
+            var timestamp = today.AddDays(-i).AddHours(9).ToString("yyyyMMdd_HHmmss");
             var dummyBackupPath = Path.Combine(_backupDirectory, $"backup_{timestamp}.db");
             await Task.Run(() => File.WriteAllText(dummyBackupPath, "dummy"));
-            File.SetCreationTime(dummyBackupPath, DateTime.Now.AddMinutes(-(i + 1)));
         }
 
-        // Act - 新しいバックアップを作成（合計31個だが、古いものが削除される）
+        // Act
         var result = await _service.ExecuteAutoBackupAsync();
 
         // Assert
@@ -718,7 +728,36 @@ public class BackupServiceTests : IDisposable
 
         result.Should().NotBeNull();
         var backupFiles = Directory.GetFiles(_backupDirectory, "backup_*.db");
-        backupFiles.Length.Should().Be(30);
+        backupFiles.Length.Should().Be(AppConstants.BackupRetentionDays);
+        backupFiles.Should().Contain(result);
+        backupFiles.Should().NotContain(
+            Path.Combine(
+                _backupDirectory,
+                $"backup_{today.AddDays(-AppConstants.BackupRetentionDays).AddHours(9):yyyyMMdd_HHmmss}.db"),
+            "保持日数を超えた最古の日は削除される");
+    }
+
+    /// <summary>
+    /// リストア前バックアップが同じ日の自動バックアップに巻き込まれて消えないことを確認（Issue #1813）
+    /// </summary>
+    [Fact]
+    public async Task ExecuteAutoBackupAsync_リストア前バックアップを削除しないこと()
+    {
+        // Arrange - リストア直前に取られた退避（同じ日）
+        var preRestorePath = Path.Combine(
+            _backupDirectory,
+            $"backup_pre_restore_{DateTime.Now:yyyyMMdd_HHmmss}.db");
+        await Task.Run(() => File.WriteAllText(preRestorePath, "pre-restore"));
+
+        // Act
+        var result = await _service.ExecuteAutoBackupAsync();
+
+        // Assert
+        await Task.Delay(500);
+
+        result.Should().NotBeNull();
+        File.Exists(preRestorePath).Should().BeTrue(
+            "リストア → 再起動 → 自動バックアップの流れで唯一の退避が同日中に消えてはならない");
     }
 
     /// <summary>
@@ -746,9 +785,8 @@ public class BackupServiceTests : IDisposable
     #region マニュアル記載値との同期（Issue #1408）
 
     /// <summary>
-    /// Issue #1408: マニュアルに「最大 30 世代」と明記しているため、
-    /// 実装定数 <c>MaxBackupGenerations</c> が 30 から変わったらテストが落ちて
-    /// マニュアル更新を強制する。
+    /// Issue #1408 / #1813: マニュアルに保持ルールを明記しているため、
+    /// 実装定数が変わったらテストが落ちてマニュアル更新を強制する。
     /// </summary>
     /// <remarks>
     /// 同期更新が必要な箇所:
@@ -757,19 +795,15 @@ public class BackupServiceTests : IDisposable
     /// - ICCardManager/docs/manual/管理者マニュアル.md §6.1「バックアップとリストア」自動バックアップ
     /// </remarks>
     [Fact]
-    public void MaxBackupGenerations_MatchesDocumentedValue()
+    public void BackupRetentionConstants_MatchDocumentedValues()
     {
-        var field = typeof(BackupService).GetField(
-            "MaxBackupGenerations",
-            BindingFlags.NonPublic | BindingFlags.Static);
+        AppConstants.BackupRetentionDays.Should().Be(30,
+            "マニュアル §3.3 / §6.1 / ユーザーマニュアル §7.2 で「直近 30 日分」と明記しているため、" +
+            "値を変更する場合は両マニュアルも同期更新が必要です（Issue #1408 / #1813）。");
 
-        field.Should().NotBeNull(
-            "MaxBackupGenerations 定数が見つかりません。リネームした場合はマニュアルとこのテストを同期更新してください。");
-
-        var value = (int)field!.GetRawConstantValue()!;
-        value.Should().Be(30,
-            "マニュアル §3.3 / §6.1 / ユーザーマニュアル §7.2 で 30 世代と明記しているため、" +
-            "値を変更する場合は両マニュアルも同期更新が必要です（Issue #1408）。");
+        AppConstants.MaxManualBackupGenerations.Should().Be(10,
+            "マニュアル §3.3 / §6.1 / ユーザーマニュアル §7.2 で手動バックアップは「最新 10 件」と" +
+            "明記しているため、値を変更する場合は両マニュアルも同期更新が必要です（Issue #1813）。");
     }
 
     #endregion

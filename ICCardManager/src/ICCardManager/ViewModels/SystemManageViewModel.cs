@@ -121,10 +121,17 @@ public partial class SystemManageViewModel : ViewModelBase
     public string BackupHealthIcon => IsBackupStale ? "⚠" : "✔";
 
     /// <summary>
-    /// 保持世代数の表示テキスト（例: 「保持世代: 12 / 30」）
+    /// 保持世代数の表示テキスト（例: 「保持世代: 12件（自動: 直近30日分 / 手動: 最新10件）」）
     /// </summary>
+    /// <remarks>
+    /// Issue #1813: 上限を単一の件数で示すと、共有モードで 1 日に何世代も生まれる実態と
+    /// 「◯/30」という表示が食い違う（30 世代でも実効 1.5 日分にしかならない）。
+    /// 現存件数と保持ルールの両方を示し、何がどれだけ遡れるのかを画面から読み取れるようにする。
+    /// </remarks>
     public string BackupGenerationText =>
-        $"保持世代: {BackupHealth?.GenerationCount ?? 0} / {BackupHealth?.MaxGenerations ?? AppConstants.MaxBackupGenerations}";
+        $"保持世代: {BackupHealth?.GenerationCount ?? 0}件" +
+        $"（自動: 直近{BackupHealth?.RetentionDays ?? AppConstants.BackupRetentionDays}日分" +
+        $" / 手動: 最新{BackupHealth?.MaxManualGenerations ?? AppConstants.MaxManualBackupGenerations}件）";
 
     /// <summary>
     /// 保存先の空き容量の表示テキスト

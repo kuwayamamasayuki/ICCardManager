@@ -575,7 +575,8 @@ public class ConnectionDiagnosticsServiceTests : IDisposable
         var item = await RunAndGet(DiagnosticItemKind.DiskFreeSpace, service);
 
         item.Status.Should().Be(DiagnosticStatus.Warning);
-        item.DetailText.Should().Contain(AppConstants.MaxBackupGenerations.ToString());
+        item.DetailText.Should().Contain(AppConstants.BackupRetentionDays.ToString());
+        item.DetailText.Should().Contain(AppConstants.MaxManualBackupGenerations.ToString());
     }
 
     [Fact]

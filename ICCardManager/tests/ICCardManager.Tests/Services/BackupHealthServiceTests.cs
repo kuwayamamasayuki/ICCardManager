@@ -129,12 +129,13 @@ public class BackupHealthServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task GetHealthAsync_ReturnsMaxGenerationsFromAppConstants()
+    public async Task GetHealthAsync_ReturnsRetentionRuleFromAppConstants()
     {
-        // 「◯/30 世代」表示と実際の削除しきい値が同じ定数から導かれることを固定する
+        // 画面に出す保持ルールと実際の削除しきい値が同じ定数から導かれることを固定する（Issue #1813）
         var health = await _service.GetHealthAsync();
 
-        health.MaxGenerations.Should().Be(AppConstants.MaxBackupGenerations);
+        health.RetentionDays.Should().Be(AppConstants.BackupRetentionDays);
+        health.MaxManualGenerations.Should().Be(AppConstants.MaxManualBackupGenerations);
     }
 
     [Fact]

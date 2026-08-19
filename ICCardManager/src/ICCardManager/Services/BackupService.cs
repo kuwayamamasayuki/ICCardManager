@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Data.SQLite;
+using System.Globalization;
 using System.Linq;
 using System.Threading.Tasks;
 using System.IO;
@@ -23,10 +24,21 @@ namespace ICCardManager.Services
         private readonly ILogger<BackupService> _logger;
 
         /// <summary>
-        /// バックアップファイル保持世代数（Issue #1689 で <see cref="AppConstants"/> に集約。
-        /// システム管理画面の「◯/30 世代」表示と実際の削除しきい値を同一の値から導くため）
+        /// 自動バックアップの保持日数（Issue #1689 で <see cref="AppConstants"/> に集約。
+        /// システム管理画面の保持世代表示と実際の削除しきい値を同一の値から導くため。
+        /// Issue #1813 で「ファイル数」から「日数」へ変更）
         /// </summary>
-        private const int MaxBackupGenerations = AppConstants.MaxBackupGenerations;
+        private const int BackupRetentionDays = AppConstants.BackupRetentionDays;
+
+        /// <summary>
+        /// 手動バックアップ・リストア前バックアップの保持件数（Issue #1813）
+        /// </summary>
+        private const int MaxManualBackupGenerations = AppConstants.MaxManualBackupGenerations;
+
+        /// <summary>
+        /// バックアップファイル名の末尾に付くタイムスタンプの書式（Issue #1813）
+        /// </summary>
+        internal const string BackupTimestampFormat = "yyyyMMdd_HHmmss";
 
         /// <summary>
         /// バックアップファイル名のプレフィックス
@@ -96,7 +108,9 @@ namespace ICCardManager.Services
                 EnsureDirectoryExists(backupPath);
 
                 // バックアップファイル名を生成
-                var timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
+                // Issue #1813: 世代削除は「ファイル名のタイムスタンプ」で日をまとめるため、
+                // 書き込み側と判定側が同じ書式定数を共有する。
+                var timestamp = DateTime.Now.ToString(BackupTimestampFormat, CultureInfo.InvariantCulture);
                 var backupFileName = $"{BackupFilePrefix}{timestamp}{BackupFileExtension}";
                 var backupFilePath = Path.Combine(backupPath, backupFileName);
 
@@ -878,6 +892,11 @@ namespace ICCardManager.Services
         /// 「バックアップの失敗」に混ぜてはならない（→ <see cref="ExecuteAutoBackupAsync"/>）。
         /// その分岐は実機でしか起きないため、単体テストが差し替えられるよう
         /// <c>internal virtual</c> にしている（<see cref="CopyDatabaseTo"/> と同じ理由）。
+        /// <para>
+        /// Issue #1813: 保持の単位は「ファイル数」ではなく「日数」。判定そのものは
+        /// <see cref="SelectBackupsToDelete"/> に切り出してある（ファイル I/O を伴わない純関数にして、
+        /// 20台運用・1日複数回起動といった組み合わせを単体テストで網羅できるようにするため）。
+        /// </para>
         /// </remarks>
         /// <param name="backupPath">バックアップ保存先フォルダー</param>
         internal virtual Task CleanupOldBackupsAsync(string backupPath)
@@ -889,41 +908,174 @@ namespace ICCardManager.Services
                 // 一時ファイルは世代の列挙対象外なので、ここでの世代数には影響しない。
                 var backupFiles = EnumerateBackupFiles(backupPath);
 
-                // 保持世代数を超えるファイルを削除
-                if (backupFiles.Count > MaxBackupGenerations)
+                foreach (var file in SelectBackupsToDelete(backupFiles))
                 {
-                    var filesToDelete = backupFiles.Skip(MaxBackupGenerations);
-                    foreach (var file in filesToDelete)
+                    try
                     {
-                        try
-                        {
-                            file.Delete();
-                            _logger.LogDebug("古いバックアップファイルを削除しました: {Path}", file.FullName);
-                        }
-                        catch (UnauthorizedAccessException ex)
-                        {
-                            // 削除に失敗しても続行（クリーンアップは最善努力）
-                            _logger.LogWarning(ex,
-                                "古いバックアップファイルの削除に失敗しました（アクセス権限エラー）: {Path}",
-                                file.FullName);
-                        }
-                        catch (IOException ex)
-                        {
-                            // 削除に失敗しても続行（ファイルが使用中など）
-                            _logger.LogWarning(ex,
-                                "古いバックアップファイルの削除に失敗しました（I/Oエラー）: {Path}",
-                                file.FullName);
-                        }
-                        catch (Exception ex)
-                        {
-                            // 予期しないエラーでも続行
-                            _logger.LogWarning(ex,
-                                "古いバックアップファイルの削除に失敗しました: {Path}",
-                                file.FullName);
-                        }
+                        file.Delete();
+                        _logger.LogDebug("古いバックアップファイルを削除しました: {Path}", file.FullName);
+                    }
+                    catch (UnauthorizedAccessException ex)
+                    {
+                        // 削除に失敗しても続行（クリーンアップは最善努力）
+                        _logger.LogWarning(ex,
+                            "古いバックアップファイルの削除に失敗しました（アクセス権限エラー）: {Path}",
+                            file.FullName);
+                    }
+                    catch (IOException ex)
+                    {
+                        // 削除に失敗しても続行（ファイルが使用中など）
+                        _logger.LogWarning(ex,
+                            "古いバックアップファイルの削除に失敗しました（I/Oエラー）: {Path}",
+                            file.FullName);
+                    }
+                    catch (Exception ex)
+                    {
+                        // 予期しないエラーでも続行
+                        _logger.LogWarning(ex,
+                            "古いバックアップファイルの削除に失敗しました: {Path}",
+                            file.FullName);
                     }
                 }
             });
+        }
+
+        /// <summary>
+        /// 保持ルールに従って削除対象のバックアップを選ぶ（Issue #1813）
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// 保持ルールは 2 系統に分かれる。
+        /// </para>
+        /// <list type="bullet">
+        /// <item>
+        /// <b>自動バックアップ</b>（<c>backup_yyyyMMdd_HHmmss.db</c>）:
+        /// バックアップが存在する日を新しい順に <see cref="AppConstants.BackupRetentionDays"/> 日分残し、
+        /// 各日については最新の 1 世代だけを残す。
+        /// 「起動ごとに 1 世代」で数えると、共有フォルダーへ最大 20 台が書き込む運用では
+        /// 1 日あたり 20 世代前後が生まれ、実効保持期間が約 1.5 日に縮む。
+        /// </item>
+        /// <item>
+        /// <b>手動バックアップ・リストア前バックアップ</b>（<c>backup_manual_*</c> / <c>backup_pre_restore_*</c>）:
+        /// 日単位の間引きの対象外とし、新しい順に <see cref="AppConstants.MaxManualBackupGenerations"/> 件だけ残す。
+        /// 日単位で間引くと「リストア → 再起動 → 自動バックアップ」の流れで、
+        /// リストア直前の唯一の退避が同じ日のうちに消えてしまう。
+        /// </item>
+        /// </list>
+        /// <para>
+        /// 日の判定に <c>CreationTime</c> ではなくファイル名のタイムスタンプを使うのは、
+        /// 共有フォルダーへコピー／移動された時点で作成日時が書き換わり得るのに対し、
+        /// ファイル名は書いた側が意図した日時をそのまま保つため。
+        /// 解析できない名前のものは <c>CreationTime</c> へフォールバックし、
+        /// かつ自動バックアップとは見なさない（＝日単位の間引きで消さない）。
+        /// 未知の命名のファイルを取りこぼす側に倒すのは、消してしまうと復旧手段が無いため。
+        /// </para>
+        /// </remarks>
+        /// <param name="backupFiles">保存先フォルダーに現存するバックアップファイル</param>
+        /// <returns>削除すべきファイル</returns>
+        internal static List<FileInfo> SelectBackupsToDelete(IEnumerable<FileInfo> backupFiles)
+        {
+            var automatic = new List<KeyValuePair<FileInfo, DateTime>>();
+            var manual = new List<KeyValuePair<FileInfo, DateTime>>();
+
+            foreach (var file in backupFiles ?? Enumerable.Empty<FileInfo>())
+            {
+                if (TryParseAutomaticBackupTimestamp(file.Name, out var timestamp))
+                {
+                    automatic.Add(new KeyValuePair<FileInfo, DateTime>(file, timestamp));
+                }
+                else
+                {
+                    manual.Add(new KeyValuePair<FileInfo, DateTime>(file, ResolveBackupTimestamp(file)));
+                }
+            }
+
+            // 自動: 直近 N 日分について、各日の最新 1 世代だけを残す
+            var keptAutomatic = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var day in automatic
+                .GroupBy(x => x.Value.Date)
+                .OrderByDescending(g => g.Key)
+                .Take(BackupRetentionDays))
+            {
+                keptAutomatic.Add(day.OrderByDescending(x => x.Value).First().Key.FullName);
+            }
+
+            var toDelete = automatic
+                .Where(x => !keptAutomatic.Contains(x.Key.FullName))
+                .Select(x => x.Key)
+                .ToList();
+
+            // 手動・リストア前: 新しい順に上限件数だけ残す
+            toDelete.AddRange(manual
+                .OrderByDescending(x => x.Value)
+                .Skip(MaxManualBackupGenerations)
+                .Select(x => x.Key));
+
+            return toDelete;
+        }
+
+        /// <summary>
+        /// 自動バックアップのファイル名からタイムスタンプを取り出す（Issue #1813）
+        /// </summary>
+        /// <remarks>
+        /// <c>backup_yyyyMMdd_HHmmss.db</c> に<b>完全一致</b>する名前だけを自動バックアップと見なす。
+        /// 前方一致で判定すると <c>backup_manual_…</c> / <c>backup_pre_restore_…</c> まで
+        /// 日単位の間引きに巻き込む。
+        /// </remarks>
+        /// <param name="fileName">拡張子を含むファイル名</param>
+        /// <param name="timestamp">解析できた日時</param>
+        /// <returns>自動バックアップの命名に一致すれば true</returns>
+        internal static bool TryParseAutomaticBackupTimestamp(string fileName, out DateTime timestamp)
+        {
+            timestamp = default;
+
+            if (string.IsNullOrEmpty(fileName) ||
+                !fileName.EndsWith(BackupFileExtension, StringComparison.OrdinalIgnoreCase) ||
+                !fileName.StartsWith(BackupFilePrefix, StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            var body = fileName.Substring(
+                BackupFilePrefix.Length,
+                fileName.Length - BackupFilePrefix.Length - BackupFileExtension.Length);
+
+            return DateTime.TryParseExact(
+                body,
+                BackupTimestampFormat,
+                CultureInfo.InvariantCulture,
+                DateTimeStyles.None,
+                out timestamp);
+        }
+
+        /// <summary>
+        /// バックアップファイルの日時を解決する（Issue #1813）
+        /// </summary>
+        /// <remarks>
+        /// 末尾が <c>yyyyMMdd_HHmmss</c> ならそれを採る（手動・リストア前バックアップも同じ書式で命名される）。
+        /// 解析できない場合のみ <c>CreationTime</c> へフォールバックする。
+        /// </remarks>
+        /// <param name="file">バックアップファイル</param>
+        /// <returns>解決した日時</returns>
+        internal static DateTime ResolveBackupTimestamp(FileInfo file)
+        {
+            var name = Path.GetFileNameWithoutExtension(file.Name);
+
+            if (name != null && name.Length >= BackupTimestampFormat.Length)
+            {
+                var tail = name.Substring(name.Length - BackupTimestampFormat.Length);
+                if (DateTime.TryParseExact(
+                        tail,
+                        BackupTimestampFormat,
+                        CultureInfo.InvariantCulture,
+                        DateTimeStyles.None,
+                        out var parsed))
+                {
+                    return parsed;
+                }
+            }
+
+            return file.CreationTime;
         }
 
         /// <summary>
