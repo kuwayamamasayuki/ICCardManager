@@ -810,6 +810,7 @@ public class MainViewModelTests : IDisposable
         warning.DisplayText.Should().Contain("利用履歴を読み取れませんでした");
         warning.DisplayText.Should().NotContain("Failed to read");
         warning.DisplayText.Should().NotContain("felica timeout");
+        warning.DisplayText.Should().NotContain("1回", "初回は回数を省き、繰り返してから回数を出す");
     }
 
     /// <summary>

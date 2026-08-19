@@ -2847,7 +2847,11 @@ public partial class MainViewModel : ViewModelBase
     /// </summary>
     internal static string BuildCardReaderErrorWarningText(string reason, int count, DateTime lastOccurredAt)
     {
-        return $"⚠️ カードリーダーエラー（{count}回、最終 {lastOccurredAt:HH:mm}）: {reason} " +
+        // 初回は「1回」を省き、繰り返してから回数と最終発生時刻を出す（コードレビュー指摘）
+        var occurrence = count <= 1
+            ? $"{lastOccurredAt:HH:mm}"
+            : $"{count}回、最終 {lastOccurredAt:HH:mm}";
+        return $"⚠️ カードリーダーエラー（{occurrence}）: {reason} " +
                "続く場合はカードリーダーを抜き差しし、それでも直らなければアプリを再起動してください。";
     }
 
