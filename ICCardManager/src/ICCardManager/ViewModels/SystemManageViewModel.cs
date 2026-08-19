@@ -1,5 +1,6 @@
 using System;
 using System.Collections.ObjectModel;
+using System.Globalization;
 using System.IO;
 using System.Windows;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -304,7 +305,11 @@ public partial class SystemManageViewModel : ViewModelBase
         {
             Filter = "データベースファイル (*.db)|*.db",
             DefaultExt = ".db",
-            FileName = $"backup_manual_{DateTime.Now:yyyyMMdd_HHmmss}.db",
+            // Issue #1813: 世代の間引きはファイル名末尾のタイムスタンプを
+            // BackupService.BackupTimestampFormat / InvariantCulture で解析する。
+            // 書式・カルチャを書き込み側と揃えないと、既定カレンダーが西暦でない環境で
+            // 解析結果が実際の作成日時とずれ、保持件数の並び順が壊れる。
+            FileName = $"backup_manual_{DateTime.Now.ToString(BackupService.BackupTimestampFormat, CultureInfo.InvariantCulture)}.db",
             Title = "バックアップファイルの保存先を選択",
             InitialDirectory = Directory.Exists(defaultBackupFolder) ? defaultBackupFolder : null
         };
@@ -667,9 +672,11 @@ public partial class SystemManageViewModel : ViewModelBase
             Directory.CreateDirectory(backupFolder);
         }
 
+        // Issue #1813: 書式・カルチャは自動バックアップ（BackupService）と揃える。
+        // 保持件数の間引きが ResolveBackupTimestamp でこの名前を解析するため。
         return Path.Combine(
             backupFolder,
-            $"backup_pre_restore_{DateTime.Now:yyyyMMdd_HHmmss}.db");
+            $"backup_pre_restore_{DateTime.Now.ToString(BackupService.BackupTimestampFormat, CultureInfo.InvariantCulture)}.db");
     }
 
     /// <summary>

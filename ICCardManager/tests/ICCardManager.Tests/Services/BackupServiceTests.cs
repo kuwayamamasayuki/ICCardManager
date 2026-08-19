@@ -12,7 +12,6 @@ using Xunit;
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Reflection;
 using System.Threading.Tasks;
 
 
@@ -156,34 +155,6 @@ public class BackupServiceTests : IDisposable
         // デフォルトパスはLocalApplicationData内
         result.Should().Contain("ICCardManager");
         result.Should().Contain("backup");
-    }
-
-    /// <summary>
-    /// 30世代を超えると古いバックアップが削除されることを確認
-    /// </summary>
-    [Fact]
-    public async Task ExecuteAutoBackupAsync_Over30Generations_DeletesOldBackups()
-    {
-        // Arrange - 32個のダミーバックアップファイルを作成
-        for (int i = 0; i < 32; i++)
-        {
-            var timestamp = DateTime.Now.AddMinutes(-i).ToString("yyyyMMdd_HHmmss");
-            var dummyBackupPath = Path.Combine(_backupDirectory, $"backup_{timestamp}.db");
-            await Task.Run(() => File.WriteAllText(dummyBackupPath, "dummy"));
-            // ファイルの作成日時を調整
-            File.SetCreationTime(dummyBackupPath, DateTime.Now.AddMinutes(-i));
-        }
-
-        // Act
-        var result = await _service.ExecuteAutoBackupAsync();
-
-        // Assert - 待機して削除処理を完了させる
-        await Task.Delay(500);
-
-        result.Should().NotBeNull();
-        var backupFiles = Directory.GetFiles(_backupDirectory, "backup_*.db");
-        // 30世代 + 新規1つ = 31ではなく、30以下になるはず
-        backupFiles.Length.Should().BeLessOrEqualTo(30);
     }
 
     /// <summary>

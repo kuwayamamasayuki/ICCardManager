@@ -51,7 +51,7 @@ namespace ICCardManager.Common
         /// </para>
         /// <para>
         /// 「直近30日」は暦日ではなく<b>バックアップが存在する日</b>を新しい順に30日分である。
-        /// 長期休暇などで起動しなかった期間があっても、最後の30営業日分が残る。
+        /// 長期休暇などで起動しなかった期間があっても、最後の30稼働日分が残る。
         /// </para>
         /// </remarks>
         public const int BackupRetentionDays = 30;
@@ -64,6 +64,13 @@ namespace ICCardManager.Common
         /// 唯一の退避（<c>backup_pre_restore_*</c>）であり、自動バックアップと同じ「日ごとに1世代」で
         /// 間引くと、リストア→再起動→自動バックアップの流れで同日中に消えてしまう。
         /// そのため日単位の間引きの対象外とし、件数だけを上限で抑える。
+        /// <para>
+        /// この件数上限は「<c>backup_yyyyMMdd_HHmmss.db</c> に完全一致しない <c>backup_*.db</c>」の
+        /// <b>すべて</b>に掛かる。手動・リストア前バックアップだけでなく、管理者が手で付けた名前
+        /// （例: <c>backup_2026年度上期.db</c>）も同じ枠を共有し、古い側から削除される。
+        /// 長期保管したいファイルはバックアップ保存先フォルダーの外へ退避すること
+        /// （管理者マニュアル §3.3 / ユーザーマニュアル §7.2 に同じ案内がある）。
+        /// </para>
         /// </remarks>
         public const int MaxManualBackupGenerations = 10;
 
