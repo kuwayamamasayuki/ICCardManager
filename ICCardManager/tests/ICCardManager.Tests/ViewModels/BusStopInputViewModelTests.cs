@@ -423,6 +423,25 @@ public class BusStopInputViewModelTests
     }
 
     /// <summary>
+    /// Issue #1811（コードレビュー指摘）: 同じバス停名を複数行に入力した場合（同一路線を1日に2回利用する等）、
+    /// 行ごとに同じ警告文言が生成される。重複したまま列挙すると確認ダイアログに同じ行が並び、
+    /// 上限件数と「ほか N 件」の残数も重複分で水増しされる。
+    /// </summary>
+    [Fact]
+    public void CollectSaveWarnings_同一文言の類似警告は重複しないこと()
+    {
+        // Arrange: 同じ「天神」を2行に入力（既存「天神南～博多」と部分包含で類似）
+        _viewModel.BusStopSuggestions = new List<string> { "天神南～博多" };
+        ArrangeSaveWithBusStops("天神", "天神");
+
+        // Act
+        var warnings = _viewModel.CollectSaveWarnings();
+
+        // Assert
+        warnings.Should().ContainSingle(w => w.Contains("「天神」は既存の「天神南～博多」と類似"));
+    }
+
+    /// <summary>
     /// Issue #1811: 類似警告が多数になるとき（「天神」が天神を含む既存候補すべてに一致する等）、
     /// 確認ダイアログには上限件数まで列挙し、残りは件数で要約すること。
     /// </summary>
@@ -1201,6 +1220,45 @@ public class BusStopInputItemTests
 
         // Assert
         warnings.Should().BeEmpty("完全一致は類似警告の対象外");
+    }
+
+    /// <summary>
+    /// Issue #1811（コードレビュー指摘）: 「↑往復」ボタン（Issue #1570）は前行の「A～B」から
+    /// 「B～A」を意図的に生成するため、完全な逆順は取り違えではなく正当な往復入力である。
+    /// これを類似警告に含めると、往復入力のたびに保存前の確認ダイアログが出て
+    /// 本来見せたい取り違え警告（天神／天神南）が埋もれる。
+    /// </summary>
+    [Fact]
+    public void DetectSimilarBusStops_完全な逆順は往復として検出しないこと()
+    {
+        // Arrange: 「往復」ボタンで生成される値
+        var existing = new List<string> { "天神～博多" };
+        var newEntries = new List<string> { "博多～天神" };
+
+        // Act
+        var warnings = BusStopInputViewModel.DetectSimilarBusStops(existing, newEntries);
+
+        // Assert
+        warnings.Should().BeEmpty("完全な逆順はアプリ自身が「往復」ボタンで生成する正当な入力");
+    }
+
+    /// <summary>
+    /// Issue #1811（コードレビュー指摘）: 逆順の除外が広すぎず、取り違えの疑い（部分包含）は
+    /// 引き続き警告されること。除外だけを足すと対象の入力を無条件に通す実装でも緑になるため対で固定する。
+    /// </summary>
+    [Fact]
+    public void DetectSimilarBusStops_逆順を除外しても部分包含は検出すること()
+    {
+        // Arrange: 「天神」と「天神南～博多」の取り違え（Issue #1811 の故障シナリオ）
+        var existing = new List<string> { "天神南～博多" };
+        var newEntries = new List<string> { "天神" };
+
+        // Act
+        var warnings = BusStopInputViewModel.DetectSimilarBusStops(existing, newEntries);
+
+        // Assert
+        warnings.Should().ContainSingle()
+            .Which.Should().Contain("天神").And.Contain("天神南～博多");
     }
 
     [Fact]

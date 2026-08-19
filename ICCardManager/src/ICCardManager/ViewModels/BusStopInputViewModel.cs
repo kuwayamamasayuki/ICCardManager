@@ -278,9 +278,16 @@ public partial class BusStopInputViewModel : ViewModelBase
                 continue;
 
             // 完全一致は除外（既存エントリと同じなら問題なし）
+            // 完全な逆順（「A～B」⇔「B～A」）も除外する（Issue #1811）:
+            // 「↑往復」ボタン（Issue #1570）が前行の値を反転して生成する正当な入力であり、
+            // 取り違えではない。含めると往復入力のたびに保存前の確認ダイアログが出て、
+            // 本来見せたい取り違え警告（「天神」と「天神南」）が埋もれる。
+            // なお逆順の2文字列は長さが等しいため、部分包含による類似と同時に成立することはない
+            // （等しい長さで互いを含むのは完全一致のときだけで、それは上で除外済み）。
             var similar = existing
                 .Where(s => !s.Equals(entry, StringComparison.Ordinal))
                 .Where(s => IsSimilar(entry, s))
+                .Where(s => !IsRoundTripReversal(entry, s))
                 .ToList();
 
             foreach (var s in similar)
@@ -290,6 +297,28 @@ public partial class BusStopInputViewModel : ViewModelBase
         }
 
         return warnings;
+    }
+
+    /// <summary>
+    /// Issue #1811: 2つのバス停名が「A～B」と「B～A」の完全な逆順の関係にあるか判定する。
+    /// </summary>
+    /// <remarks>
+    /// <see cref="IsSimilar"/> は乗降逆転を類似とみなす（Issue #1133）が、
+    /// 「↑往復」ボタン（Issue #1570）はこの逆転値を意図的に生成する。
+    /// 判定は <see cref="IsSimilar"/> の乗降逆転分岐と同じ（前後空白をトリムして比較）。
+    /// </remarks>
+    internal static bool IsRoundTripReversal(string a, string b)
+    {
+        if (string.IsNullOrEmpty(a) || string.IsNullOrEmpty(b))
+            return false;
+
+        var aParts = a.Split('～');
+        var bParts = b.Split('～');
+        if (aParts.Length != 2 || bParts.Length != 2)
+            return false;
+
+        return aParts[0].Trim() == bParts[1].Trim()
+            && aParts[1].Trim() == bParts[0].Trim();
     }
 
     /// <summary>
@@ -350,7 +379,13 @@ public partial class BusStopInputViewModel : ViewModelBase
             .Where(b => !string.IsNullOrWhiteSpace(b.BusStops) && b.BusStops != "★")
             .Select(b => b.BusStops)
             .ToList();
-        var similarWarnings = DetectSimilarBusStops(BusStopSuggestions, newEntries);
+        // 同じバス停名を複数行に入力した場合（同一路線を1日に2回利用する等）、
+        // DetectSimilarBusStops は行ごとに同じ文言を返す。重複したまま列挙すると
+        // 確認ダイアログに同じ行が並び、上限（MaxListedSimilarWarnings）と
+        // 「ほか N 件」の件数も重複分で水増しされるため、ここで一意化する。
+        var similarWarnings = DetectSimilarBusStops(BusStopSuggestions, newEntries)
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
         warnings.AddRange(similarWarnings.Take(MaxListedSimilarWarnings));
         if (similarWarnings.Count > MaxListedSimilarWarnings)
         {

@@ -2815,6 +2815,9 @@ public partial class MainViewModel : ViewModelBase
     /// 英語の <c>Exception.Message</c>（<c>Failed to read card history: …</c>）を職員に見せない（Issue #1614）。
     /// 本番のリーダー（<c>FelicaCardReader</c>）が発火する例外はすべて <c>CardReaderException</c> のため、
     /// それ以外（開発用モック等）は汎用文言へ倒す。
+    /// 回数は<b>種別</b>単位で数え、原因が異なっても合算する（文言の理由は最新の原因）。
+    /// 対処はいずれも同じ（抜き差し・再起動）で利用者の行動は変わらず、切断は
+    /// <see cref="WarningType.CardReaderConnection"/> として別の行に出るため隠れない。
     /// </remarks>
     private void OnCardReaderError(object? sender, Exception e)
     {
