@@ -352,13 +352,14 @@ public class BackupServiceTests : IDisposable
         File.WriteAllText(restoreTargetPath, "initial content");
         var initialSize = new FileInfo(restoreTargetPath).Length;
 
-        // DbContextを作成して即座に破棄（接続を開かずにパスだけ設定）
-        var restoreDbContext = new DbContext(restoreTargetPath);
+        // DbContextはパスだけ設定し接続は開かない（初回リースまで接続は作られない）。
+        // Issue #1809: SuspendConnections が接続セマフォを取得するようになったため、
+        // リストア前に Dispose（＝セマフォ破棄）してはいけない。破棄はテスト終了時に行う
+        using var restoreDbContext = new DbContext(restoreTargetPath);
         var restoreService = new BackupService(
             restoreDbContext,
             _settingsRepositoryMock.Object,
             NullLogger<BackupService>.Instance);
-        restoreDbContext.Dispose(); // 接続を開く前に破棄
 
         // Act
         var result = restoreService.RestoreFromBackup(latestBackup);
@@ -483,12 +484,12 @@ public class BackupServiceTests : IDisposable
         var restoreTargetPath = Path.Combine(_testDirectory, "overwrite_target.db");
         File.WriteAllText(restoreTargetPath, "different content that should be overwritten");
 
-        var restoreDbContext = new DbContext(restoreTargetPath);
+        // Issue #1809: リストア前に Dispose（＝接続セマフォ破棄）しない。破棄はテスト終了時
+        using var restoreDbContext = new DbContext(restoreTargetPath);
         var restoreService = new BackupService(
             restoreDbContext,
             _settingsRepositoryMock.Object,
             NullLogger<BackupService>.Instance);
-        restoreDbContext.Dispose();
 
         // Act
         var result = restoreService.RestoreFromBackup(latestBackup);

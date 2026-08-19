@@ -88,14 +88,21 @@ namespace ICCardManager.Data
     /// リストア中にバックグラウンドタスクが接続を再オープンすることを防止する。
     /// Disposeで自動的に停止を解除する。
     /// </summary>
+    /// <remarks>
+    /// Issue #1809: 一時停止中は <see cref="DbContext"/> の接続セマフォを保持し続ける
+    /// （進行中のリースを待ってから閉じ、停止中に到着した書き込みは解除まで待たせる）。
+    /// Dispose で停止解除と同時にセマフォも返す。
+    /// </remarks>
     public sealed class ConnectionSuspensionScope : IDisposable
     {
         private readonly DbContext _dbContext;
+        private readonly bool _releaseSemaphore;
         private bool _disposed;
 
-        internal ConnectionSuspensionScope(DbContext dbContext)
+        internal ConnectionSuspensionScope(DbContext dbContext, bool releaseSemaphore)
         {
             _dbContext = dbContext;
+            _releaseSemaphore = releaseSemaphore;
         }
 
         public void Dispose()
@@ -103,7 +110,7 @@ namespace ICCardManager.Data
             if (!_disposed)
             {
                 _disposed = true;
-                _dbContext.ResumeConnections();
+                _dbContext.ResumeConnections(_releaseSemaphore);
             }
         }
     }
@@ -122,7 +129,35 @@ namespace ICCardManager.Data
         /// <summary>
         /// DB操作の直列化用セマフォ。同一接続への並行アクセスを防止する。
         /// </summary>
+        /// <remarks>
+        /// 取得するのは <see cref="LeaseConnection"/>（同期）・<see cref="BeginTransactionAsync"/>・
+        /// <see cref="SuspendConnections"/>（Issue #1809）。<see cref="LeaseConnectionAsync"/> は取得しない
+        /// （代わりに <see cref="_activeAsyncLeaseCount"/> で進行中件数だけを数える）。
+        /// </remarks>
         private readonly SemaphoreSlim _semaphore = new SemaphoreSlim(1, 1);
+
+        /// <summary>
+        /// Issue #1809: 進行中の <see cref="LeaseConnectionAsync"/> リース数。
+        /// セマフォを取らない読み取り経路の接続を、<see cref="SuspendConnections"/> が
+        /// 他スレッドから閉じてしまわないよう、解放を待つための計数。<see cref="Interlocked"/> で更新する。
+        /// </summary>
+        private int _activeAsyncLeaseCount;
+
+        /// <summary>
+        /// Issue #1809: <see cref="SuspendConnections"/> が進行中の非同期リースの解放を待つ上限の既定値。
+        /// </summary>
+        /// <remarks>
+        /// 上限を設けるのは、リースの解放漏れが 1 か所でもあるとリストアが永久に止まるのを避けるため。
+        /// 上限に達した場合は警告ログを残して従来どおり接続を閉じる（進行中の読み取りが失敗し得る
+        /// 従来の挙動へ退化するだけで、データは壊れない）。
+        /// </remarks>
+        internal static readonly TimeSpan DefaultAsyncLeaseDrainTimeout = TimeSpan.FromSeconds(10);
+
+        /// <summary>
+        /// Issue #1809: <see cref="SuspendConnections"/> が進行中の非同期リースの解放を待つ上限。
+        /// 既定は <see cref="DefaultAsyncLeaseDrainTimeout"/>。テストから短縮するために設定可能。
+        /// </summary>
+        internal TimeSpan AsyncLeaseDrainTimeout { get; set; } = DefaultAsyncLeaseDrainTimeout;
 
         /// <summary>
         /// リエントラントカウント。同一非同期フロー内のネスト呼び出しでセマフォ再取得をスキップする。
@@ -447,7 +482,22 @@ namespace ICCardManager.Data
         public virtual Task<ConnectionLease> LeaseConnectionAsync(CancellationToken ct = default)
         {
             ct.ThrowIfCancellationRequested();
-            var lease = new ConnectionLease(GetConnectionInternal(), () => { });
+
+            // Issue #1809: 接続を取る前に計数する。取った後に増やすと、その隙間に SuspendConnections が
+            // 「進行中リース 0 件」と判定して接続を閉じ得る（_isSuspended の設定順と合わせて閉塞のない順序）。
+            Interlocked.Increment(ref _activeAsyncLeaseCount);
+            SQLiteConnection connection;
+            try
+            {
+                connection = GetConnectionInternal();
+            }
+            catch
+            {
+                Interlocked.Decrement(ref _activeAsyncLeaseCount);
+                throw;
+            }
+
+            var lease = new ConnectionLease(connection, () => Interlocked.Decrement(ref _activeAsyncLeaseCount));
             return Task.FromResult(lease);
         }
 
@@ -470,25 +520,42 @@ namespace ICCardManager.Data
         public ConnectionLease LeaseConnection()
         {
             // Issue #1281: UI スレッドからの呼び出しを検出して拒否する
-            ThrowIfOnUiThread();
+            ThrowIfOnUiThread(
+                nameof(LeaseConnection),
+                "UI 層からは LeaseConnectionAsync() を使用するか、" +
+                "Task.Run でバックグラウンドスレッドにオフロードしてから呼び出してください。");
 
             if (_reentrancyCount.Value > 0)
             {
+                // Issue #1809: 接続の確立に失敗したときカウントを増やしたままにしない（先に取得してから増やす）
+                var nestedConnection = GetConnectionInternal();
                 _reentrancyCount.Value++;
-                return new ConnectionLease(GetConnectionInternal(), () => _reentrancyCount.Value--);
+                return new ConnectionLease(nestedConnection, () => _reentrancyCount.Value--);
             }
 
             _semaphore.Wait();
-            _reentrancyCount.Value = 1;
-            return new ConnectionLease(GetConnectionInternal(), () =>
+            try
             {
-                _reentrancyCount.Value--;
-                if (_reentrancyCount.Value == 0)
+                // Issue #1809: 接続の確立（Open / PRAGMA）に失敗したら取得済みのセマフォを必ず返す。
+                // 返さないと以後の BeginTransactionAsync（全書き込み）が永久に待機する。
+                // BeginTransactionAsync には同じ catch が元からあり、こちらだけ欠けていた。
+                var connection = GetConnectionInternal();
+                _reentrancyCount.Value = 1;
+                return new ConnectionLease(connection, () =>
                 {
-                    try { _semaphore.Release(); }
-                    catch (ObjectDisposedException) { /* DbContext.Dispose()後のリース解放 */ }
-                }
-            });
+                    _reentrancyCount.Value--;
+                    if (_reentrancyCount.Value == 0)
+                    {
+                        try { _semaphore.Release(); }
+                        catch (ObjectDisposedException) { /* DbContext.Dispose()後のリース解放 */ }
+                    }
+                });
+            }
+            catch
+            {
+                _semaphore.Release();
+                throw;
+            }
         }
 
         /// <summary>
@@ -524,17 +591,18 @@ namespace ICCardManager.Data
         /// <summary>
         /// UI スレッドから呼び出されていた場合に <see cref="InvalidOperationException"/> をスローする。
         /// </summary>
-        private static void ThrowIfOnUiThread()
+        /// <param name="methodName">セマフォを同期取得するメソッド名（文言の「何が」）</param>
+        /// <param name="alternative">呼び出し元が取れる代替手段（文言の「どうすれば」）</param>
+        private static void ThrowIfOnUiThread(string methodName, string alternative)
         {
             if (IsOnUiThread())
             {
                 throw new InvalidOperationException(
-                    "DbContext.LeaseConnection() は WPF UI スレッドから呼び出せません。" +
+                    $"DbContext.{methodName}() は WPF UI スレッドから呼び出せません。" +
                     "内部の SemaphoreSlim.Wait() が UI スレッドをブロックし、" +
                     "バックグラウンドで進行中の非同期トランザクション継続が Dispatcher 経由で " +
                     "UI スレッドに戻ろうとした際にデッドロックを引き起こす危険があります。" +
-                    "UI 層からは LeaseConnectionAsync() を使用するか、" +
-                    "Task.Run でバックグラウンドスレッドにオフロードしてから呼び出してください。");
+                    alternative);
             }
         }
 
@@ -613,9 +681,23 @@ namespace ICCardManager.Data
 
                 if (_connection == null)
                 {
-                    _connection = new SQLiteConnection(_connectionString);
-                    _connection.Open();
-                    ConfigurePragmas(_connection);
+                    // Issue #1809: PRAGMA の適用まで済んでから _connection へ代入する。
+                    // 先に代入すると、ConfigurePragmas が throw（共有モードの SQLITE_BUSY 等）しても
+                    // Open 済みの接続がフィールドに残り、次回以降 busy_timeout 未設定（既定 0）／
+                    // journal_mode 未確認のまま同じ接続がプロセス全体で再利用され続ける。
+                    // 失敗した接続は破棄して null のままにし、次回の取得で再構成させる。
+                    var connection = new SQLiteConnection(_connectionString);
+                    try
+                    {
+                        connection.Open();
+                        ConfigurePragmas(connection);
+                    }
+                    catch
+                    {
+                        connection.Dispose();
+                        throw;
+                    }
+                    _connection = connection;
                 }
 
                 return _connection;
@@ -625,7 +707,12 @@ namespace ICCardManager.Data
         /// <summary>
         /// 接続に対してPRAGMA設定を適用
         /// </summary>
-        private void ConfigurePragmas(SQLiteConnection connection)
+        /// <remarks>
+        /// <c>protected virtual</c> なのは、PRAGMA 適用の失敗（共有モードの SQLITE_BUSY 等）を
+        /// テストから注入するための継ぎ目（<c>ProbeDatabaseFileReachable</c> と同じ設計、Issue #1809）。
+        /// 例外を投げた場合、呼び出し元の <see cref="GetConnectionInternal"/> はその接続を破棄して再スローする。
+        /// </remarks>
+        protected virtual void ConfigurePragmas(SQLiteConnection connection)
         {
             // foreign_keysとbusy_timeoutは1コマンドにまとめてラウンドトリップを削減
             // ローカルモードでもbusy_timeoutを設定する（実害なし、コードパス統一）
@@ -715,28 +802,113 @@ namespace ICCardManager.Data
         /// リストア処理でDBファイルを安全に置き換えるために使用する。
         /// </summary>
         /// <remarks>
+        /// <para>
         /// 戻り値のConnectionSuspensionScopeをDisposeすると停止が解除される。
         /// using文で使用することで、例外発生時も確実に解除される。
-        /// 停止中にGetConnection()を呼ぶとInvalidOperationExceptionがスローされる。
+        /// 停止中に <see cref="GetConnection"/> / <see cref="LeaseConnectionAsync"/> を呼ぶと
+        /// InvalidOperationExceptionがスローされる。
+        /// </para>
+        /// <para>
+        /// <b>Issue #1809 — 使用中の接続を閉じない:</b> 本メソッドは接続を閉じる前に
+        /// (1) 接続セマフォを取得して進行中の <see cref="BeginTransactionAsync"/> / <see cref="LeaseConnection"/>
+        /// の完了を待ち、(2) セマフォを取らない <see cref="LeaseConnectionAsync"/> の進行中リースが
+        /// 解放されるまで（上限 <see cref="AsyncLeaseDrainTimeout"/>）待つ。セマフォはスコープの
+        /// Dispose まで保持し続けるため、停止中に到着した <see cref="BeginTransactionAsync"/> /
+        /// <see cref="LeaseConnection"/> は失敗せず、解除後に成功する。
+        /// </para>
+        /// <para>
+        /// <b>UI スレッドから呼ばないこと:</b> セマフォを同期取得するため <see cref="LeaseConnection"/> と
+        /// 同じデッドロック経路（Issue #1281）になる。UI 層からは
+        /// <c>BackupService.RestoreFromBackupAsync</c>（Task.Run でオフロード）を使う。
+        /// 同一非同期フロー内で <see cref="LeaseConnection"/> のリースを保持したまま呼んだ場合は
+        /// リエントラント扱い（セマフォを再取得しない）だが、そのリースの接続は閉じられる。
+        /// </para>
         /// </remarks>
         /// <returns>停止スコープ（Disposeで停止解除）</returns>
+        /// <exception cref="InvalidOperationException">WPF の UI スレッドから呼び出された場合</exception>
         public ConnectionSuspensionScope SuspendConnections()
         {
-            lock (_connectionLock)
+            ThrowIfOnUiThread(
+                nameof(SuspendConnections),
+                "BackupService.RestoreFromBackupAsync() のように " +
+                "Task.Run でバックグラウンドスレッドにオフロードしてから呼び出してください。");
+
+            // 同一フローが LeaseConnection() のセマフォを既に保持しているならリエントラント扱い
+            var ownsSemaphore = _reentrancyCount.Value == 0;
+            if (ownsSemaphore)
             {
-                _isSuspended = true;
-                CloseConnectionInternal();
+                _semaphore.Wait();
             }
+
+            try
+            {
+                // 新規リースの取得を止めてから進行中の非同期リースの解放を待つ。
+                // 逆順だと待っている間に新しいリースが入り続けて件数が 0 にならない。
+                _isSuspended = true;
+                // 「フラグの書き込み → 件数の読み取り」と、LeaseConnectionAsync 側の
+                // 「件数の増加（Interlocked）→ フラグの読み取り」が交差しないよう全順序バリアを置く
+                // （volatile 書き込みの後ろへ後続の読み取りが追い越すと、双方が「相手はまだ」と判断して
+                // 接続の取得と Close が同時に成立し得る）。
+                Interlocked.MemoryBarrier();
+                WaitForAsyncLeasesToDrain();
+
+                lock (_connectionLock)
+                {
+                    CloseConnectionInternal();
+                }
+            }
+            catch
+            {
+                _isSuspended = false;
+                if (ownsSemaphore)
+                {
+                    _semaphore.Release();
+                }
+                throw;
+            }
+
             _logger?.LogDebug("Issue #1166: DB接続を一時停止しました");
-            return new ConnectionSuspensionScope(this);
+            return new ConnectionSuspensionScope(this, releaseSemaphore: ownsSemaphore);
+        }
+
+        /// <summary>
+        /// Issue #1809: 進行中の <see cref="LeaseConnectionAsync"/> リースが解放されるまで待つ（上限付き）。
+        /// 上限に達した場合は警告ログを残して戻る（呼び出し元は従来どおり接続を閉じる）。
+        /// </summary>
+        private void WaitForAsyncLeasesToDrain()
+        {
+            var timeout = AsyncLeaseDrainTimeout;
+            if (SpinWait.SpinUntil(() => Volatile.Read(ref _activeAsyncLeaseCount) == 0, timeout))
+            {
+                return;
+            }
+
+            // Issue #1716 と同じ判断: 障害調査で「進行中の読み取りを巻き込んだかもしれない」と
+            // 分かる痕跡が要るため Warning（LogDebug は本番のログファイルに残らない）
+            _logger?.LogWarning(
+                "Issue #1809: 進行中の非同期リース {RemainingLeases} 件が {Timeout} 以内に解放されなかったため、" +
+                "接続を閉じて一時停止を続行します。進行中の読み取りが失敗する可能性があります。{DatabasePath}",
+                Volatile.Read(ref _activeAsyncLeaseCount),
+                timeout,
+                DatabasePath);
         }
 
         /// <summary>
         /// Issue #1166: 接続の一時停止を解除する（ConnectionSuspensionScope.Disposeから呼び出される）
         /// </summary>
-        internal void ResumeConnections()
+        /// <param name="releaseSemaphore">
+        /// Issue #1809: <see cref="SuspendConnections"/> が接続セマフォを取得していた場合 true。
+        /// 停止解除（<c>_isSuspended = false</c>）の<b>後</b>に返すことで、待機していた
+        /// <see cref="BeginTransactionAsync"/> / <see cref="LeaseConnection"/> が解除済みの状態で再開する。
+        /// </param>
+        internal void ResumeConnections(bool releaseSemaphore)
         {
             _isSuspended = false;
+            if (releaseSemaphore)
+            {
+                try { _semaphore.Release(); }
+                catch (ObjectDisposedException) { /* DbContext.Dispose()後のスコープ解放 */ }
+            }
             _logger?.LogDebug("Issue #1166: DB接続の一時停止を解除しました");
         }
 

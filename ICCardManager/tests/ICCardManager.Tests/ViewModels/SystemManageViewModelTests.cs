@@ -203,8 +203,49 @@ public class SystemManageViewModelTests : IDisposable
         await _viewModel.RestoreAsync();
 
         // Assert: 認証がなければ DB は一切上書きされない（破壊的操作の認可ゲート）
+        _backupServiceMock.Verify(b => b.RestoreFromBackupAsync(It.IsAny<string>()), Times.Never);
         _backupServiceMock.Verify(b => b.RestoreFromBackup(It.IsAny<string>()), Times.Never);
         _viewModel.StatusMessage.Should().Contain("職員認証");
+    }
+
+    /// <summary>
+    /// Issue #1809: リストアの実行は <c>RestoreFromBackupAsync</c>（Task.Run でバックグラウンドへ
+    /// オフロード）経由で行うこと。同期版 <c>RestoreFromBackup</c> を UI スレッドから呼ぶと、
+    /// 内部の <c>DbContext.SuspendConnections()</c>（セマフォ同期取得）が UI スレッドガードで
+    /// 拒否され、リストアが常に「失敗」になる。
+    /// </summary>
+    [Fact]
+    public async Task RestoreAsync_リストアの実行は非同期版RestoreFromBackupAsync経由で行うこと()
+    {
+        // Arrange: 認証成功（既定）・確認ダイアログ承諾・リストア前バックアップ成功で実行まで到達させる
+        const string backupPath = "/backups/backup_20260601_090000.db";
+        _viewModel.SelectedBackup = new BackupFileInfo
+        {
+            FileName = "backup_20260601_090000.db",
+            FilePath = backupPath,
+            CreatedAt = DateTime.Now
+        };
+        System.IO.Directory.CreateDirectory(TempBackupFolder);
+        _settingsRepositoryMock.Setup(r => r.GetAppSettingsAsync())
+            .ReturnsAsync(new AppSettings { BackupPath = TempBackupFolder });
+        _backupServiceMock.Setup(s => s.CreateBackupAsync(It.IsAny<string>())).ReturnsAsync(true);
+        _backupServiceMock.Setup(s => s.GetBackupFilesAsync())
+            .ReturnsAsync(Enumerable.Empty<BackupFileInfo>());
+        _dialogServiceMock
+            .Setup(d => d.ShowWarningConfirmation(It.IsAny<string>(), It.Is<string>(t => t == "リストアの確認")))
+            .Returns(true);
+        // 成功にすると完了 MessageBox（実モーダル）へ進むため、失敗を返して呼び出し経路だけを検証する
+        _backupServiceMock.Setup(s => s.RestoreFromBackupAsync(backupPath)).ReturnsAsync(false);
+
+        // Act
+        await _viewModel.RestoreAsync();
+
+        // Assert
+        _backupServiceMock.Verify(b => b.RestoreFromBackupAsync(backupPath), Times.Once,
+            "UI スレッドからのリストアは Task.Run でオフロードする非同期版を使うべき");
+        _backupServiceMock.Verify(b => b.RestoreFromBackup(It.IsAny<string>()), Times.Never,
+            "同期版は UI スレッドガードに抵触するため ViewModel から直接呼ばない");
+        _viewModel.StatusMessage.Should().Contain("リストアに失敗しました");
     }
 
     [Fact]

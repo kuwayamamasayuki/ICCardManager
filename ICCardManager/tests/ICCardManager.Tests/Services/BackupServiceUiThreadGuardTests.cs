@@ -146,6 +146,67 @@ public class BackupServiceUiThreadGuardTests : IDisposable
     }
 
     /// <summary>
+    /// Issue #1809: 同期 <see cref="BackupService.RestoreFromBackup"/> を UI スレッド模擬で呼ぶと、
+    /// 内部の <c>DbContext.SuspendConnections()</c>（セマフォ同期取得）が UI スレッドガードで
+    /// 拒否され、catch 節で握って <c>false</c> を返し、本番 DB には触れないこと。
+    /// </summary>
+    [Fact]
+    public void RestoreFromBackup_sync_UIスレッド模擬時はガードが発火しfalseを返すこと()
+    {
+        using var dbContext = new DbContext(_dbPath);
+        dbContext.InitializeDatabase();
+
+        var backupPath = Path.Combine(_backupDirectory, "restore_source_sync.db");
+        File.Copy(_dbPath, backupPath);
+
+        var uiThreadId = Thread.CurrentThread.ManagedThreadId;
+        DbContext.IsOnUiThread = () => Thread.CurrentThread.ManagedThreadId == uiThreadId;
+
+        var service = new BackupService(
+            dbContext,
+            CreateSettingsRepositoryMock().Object,
+            NullLogger<BackupService>.Instance);
+
+        var result = service.RestoreFromBackup(backupPath);
+
+        result.Should().BeFalse(
+            "sync 版 RestoreFromBackup は UI スレッドから呼ぶと DbContext.SuspendConnections の "
+            + "UI スレッドガード (Issue #1281 / #1809) で InvalidOperationException が発生し、"
+            + "BackupService はこれを catch して false を返すべき");
+        dbContext.IsConnectionSuspended.Should().BeFalse("ガード発火時は一時停止状態を残さない");
+    }
+
+    /// <summary>
+    /// Issue #1809: UI スレッド模擬時でも <see cref="BackupService.RestoreFromBackupAsync"/> は
+    /// Task.Run でバックグラウンドにオフロードし、ガードに抵触せずリストアが成功すること。
+    /// 本番の <c>SystemManageViewModel.RestoreAsync</c>（UI スレッド）はこちらを使う。
+    /// </summary>
+    [Fact]
+    public async Task RestoreFromBackupAsync_UIスレッド模擬時でも成功すること()
+    {
+        using var dbContext = new DbContext(_dbPath);
+        dbContext.InitializeDatabase();
+
+        var backupPath = Path.Combine(_backupDirectory, "restore_source_async.db");
+        File.Copy(_dbPath, backupPath);
+
+        var uiThreadId = Thread.CurrentThread.ManagedThreadId;
+        DbContext.IsOnUiThread = () => Thread.CurrentThread.ManagedThreadId == uiThreadId;
+
+        var service = new BackupService(
+            dbContext,
+            CreateSettingsRepositoryMock().Object,
+            NullLogger<BackupService>.Instance);
+
+        var result = await service.RestoreFromBackupAsync(backupPath);
+
+        result.Should().BeTrue(
+            "RestoreFromBackupAsync は Task.Run 経由で SuspendConnections（セマフォ同期取得）を "
+            + "バックグラウンドへオフロードし、UI スレッドガードに抵触しないべき (Issue #1809)");
+        dbContext.IsConnectionSuspended.Should().BeFalse("リストア完了後は一時停止が解除されているべき");
+    }
+
+    /// <summary>
     /// UI スレッド模擬時でも <see cref="BackupService.ExecuteAutoBackupAsync"/> は
     /// 内部で Task.Run を使用して UI スレッドガードに抵触せず完了する。
     /// 本番では <c>StartupTaskRunner</c> から UI スレッド上で起動される経路を模擬。
