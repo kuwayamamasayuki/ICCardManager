@@ -199,7 +199,7 @@ namespace ICCardManager.Services
                 if (data.CarryoverToNextYear.HasValue) summaryRowCount++;
 
                 // コンテンツの高さに基づいてページをグループ化
-                var pageGroups = GroupRowsByPage(data.Rows, pageWidth, pageHeight, summaryRowCount, false);
+                var pageGroups = GroupRowsByPage(data.Rows, pageWidth, pageHeight, summaryRowCount);
 
                 // 1ページに収まる場合
                 if (pageGroups.Count <= 1)
@@ -291,8 +291,7 @@ namespace ICCardManager.Services
             List<ReportRow> rows,
             double pageWidth,
             double pageHeight,
-            int summaryRowCount,
-            bool isFirstCard)
+            int summaryRowCount)
         {
             var isLandscape = pageWidth > pageHeight;
             var availableHeight = GetAvailableDataHeight(pageHeight);
@@ -307,18 +306,15 @@ namespace ICCardManager.Services
                 var row = rows[i];
                 var rowHeight = GetDataRowHeight(row, isLandscape);
 
-                // この行を追加した後の残り行の合計高さを計算
-                double remainingRowsHeight = 0;
-                for (int j = i + 1; j < rows.Count; j++)
-                {
-                    remainingRowsHeight += GetDataRowHeight(rows[j], isLandscape);
-                }
-
-                // 残り全部を入れても収まるか？（最終ページ判定）
-                var canFitAll = accumulatedHeight + rowHeight + remainingRowsHeight + summaryTotalHeight <= availableHeight;
-
-                // 最終ページでない場合は合計行のスペースは不要
-                var spaceForSummary = canFitAll ? summaryTotalHeight : 0;
+                // Issue #1810: 最終行では合計行（月計・累計・繰越）の高さを常に予約する。
+                // 予約しないと本文だけでページが確定し、合計行が FlowDocument の自動送りで
+                // タイトル・カード情報・列ヘッダーのない次ページへ単独ではみ出す。
+                // 途中行での予約は不要 — かつての先読み判定（「残り全行＋合計行が収まるか」＝
+                // canFitAll）による予約は、収まる場合には直後の溢れ判定が必ず偽になるため
+                // 改ページに一度も影響しないデッドロジックだった。予約が意味を持つのは
+                // 「このページが最終ページと確定する」最終行のみである
+                var isLastRow = i == rows.Count - 1;
+                var spaceForSummary = isLastRow ? summaryTotalHeight : 0;
 
                 // この行を追加すると溢れるか？
                 if (accumulatedHeight + rowHeight + spaceForSummary > availableHeight && currentPage.Count > 0)
@@ -384,7 +380,7 @@ namespace ICCardManager.Services
             if (data.CarryoverToNextYear.HasValue) summaryRowCount++;
 
             // コンテンツの高さに基づいてページをグループ化
-            var pageGroups = GroupRowsByPage(data.Rows, pageWidth, pageHeight, summaryRowCount, true);
+            var pageGroups = GroupRowsByPage(data.Rows, pageWidth, pageHeight, summaryRowCount);
 
             // 1ページに収まる場合
             if (pageGroups.Count <= 1)
