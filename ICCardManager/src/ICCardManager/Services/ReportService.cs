@@ -432,10 +432,22 @@ namespace ICCardManager.Services
         }
 
         /// <summary>
-        /// ワークシートのデータ部分をクリア（5行目以降）
+        /// ワークシートのデータ部分をクリア（5行目以降）し、前回生成時の改ページを撤去する
         /// </summary>
+        /// <remarks>
+        /// Issue #1810: セル値のクリアだけでは <see cref="CheckAndInsertPageBreak"/> が
+        /// 前回の生成で挿入した改ページ（PageSetup.RowBreaks）が残留する。
+        /// 帳票は毎月同一ファイルへ上書きされる（Issue #477）ため、行数が減る再生成
+        /// （Issue #635 の履歴個別削除、Issue #1458 の履歴統合）で旧改ページが残ると、
+        /// <see cref="GetLastPageNumberFromWorksheet"/>（L2 + RowBreaks.Count）が過大になって
+        /// 翌月シートの開始ページ番号が飛び、空白領域の改ページで印刷時に白紙ページが出る。
+        /// 改ページはデータ出力時に毎回作り直されるため、ここで全撤去してよい。
+        /// </remarks>
         private static void ClearWorksheetData(IXLWorksheet worksheet)
         {
+            // 前回生成時の改ページを撤去（データ量に応じて再挿入される）
+            worksheet.PageSetup.RowBreaks.Clear();
+
             // 5行目から使用されている最終行までをクリア
             var lastRowUsed = worksheet.LastRowUsed()?.RowNumber() ?? 4;
             if (lastRowUsed >= 5)

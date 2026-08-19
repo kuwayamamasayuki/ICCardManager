@@ -317,8 +317,14 @@ namespace ICCardManager.Services
                 // 残り全部を入れても収まるか？（最終ページ判定）
                 var canFitAll = accumulatedHeight + rowHeight + remainingRowsHeight + summaryTotalHeight <= availableHeight;
 
-                // 最終ページでない場合は合計行のスペースは不要
-                var spaceForSummary = canFitAll ? summaryTotalHeight : 0;
+                // 最終ページでない場合は合計行のスペースは不要。
+                // Issue #1810: ただし残り行が無い（＝この行が最終行で、このページが必ず
+                // 最終ページになる）場合は、canFitAll が false（本文は収まるが合計行が
+                // 収まらない）でも合計行の高さを常に予約する。予約しないと本文だけで
+                // ページが確定し、合計行（月計・累計・繰越）が FlowDocument の自動送りで
+                // タイトル・列ヘッダーのない次ページへ単独ではみ出す
+                var isLastRow = i == rows.Count - 1;
+                var spaceForSummary = (canFitAll || isLastRow) ? summaryTotalHeight : 0;
 
                 // この行を追加すると溢れるか？
                 if (accumulatedHeight + rowHeight + spaceForSummary > availableHeight && currentPage.Count > 0)

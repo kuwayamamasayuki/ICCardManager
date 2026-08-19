@@ -2916,6 +2916,96 @@ public class ReportServiceTests : IDisposable
 
     #endregion
 
+    #region Issue #1810: 再生成時の旧改ページ残留
+
+    /// <summary>
+    /// Issue #1810: 行数が減る再生成で旧改ページが残留しないこと。
+    /// </summary>
+    /// <remarks>
+    /// ClearWorksheetData はセル値しかクリアしないため、修正前は
+    /// CheckAndInsertPageBreak が追加した改ページが PageSetup.RowBreaks に蓄積し、
+    /// GetLastPageNumberFromWorksheet（L2 + RowBreaks.Count）が過大になって
+    /// 翌月シートの開始ページ番号が飛んでいた（Issue #635 の履歴個別削除や
+    /// Issue #1458 の履歴統合で行数が減った月を再出力すると発生）。
+    /// </remarks>
+    [Fact]
+    public async Task CreateMonthlyReportAsync_RegenerateWithFewerRows_ClearsStaleRowBreaksAndKeepsPageNumberContinuity()
+    {
+        // Arrange
+        var cardIdm = "0102030405060708";
+        var card = CreateTestCard(cardIdm);
+        card.StartingPageNumber = 5;
+        var outputPath = CreateTempFilePath();
+        var year = 2024;
+
+        // 4月(1回目): 13件 → 12行/ページを超えて2ページ（改ページ1）になる行数
+        var aprilLedgersLarge = Enumerable.Range(1, 13)
+            .Select(i => CreateTestLedger(
+                i, cardIdm, new DateTime(year, 4, Math.Min(i, 28)),
+                $"鉄道（駅{i}～駅{i + 1}）", 0, 100, 10000 - i * 100))
+            .ToList();
+
+        // 4月(2回目・再生成): 1件 → 1ページ（改ページ0）に縮小
+        var aprilLedgersSmall = new List<Ledger>
+        {
+            CreateTestLedger(1, cardIdm, new DateTime(year, 4, 10), "鉄道（博多～天神）", 0, 300, 9700)
+        };
+
+        var mayLedgers = new List<Ledger>
+        {
+            CreateTestLedger(20, cardIdm, new DateTime(year, 5, 10), "鉄道（天神～博多）", 0, 200, 9500)
+        };
+
+        _cardRepositoryMock
+            .Setup(r => r.GetByIdmAsync(cardIdm, true))
+            .ReturnsAsync(card);
+        _ledgerRepositoryMock
+            .Setup(r => r.GetByMonthAsync(cardIdm, year, 5))
+            .ReturnsAsync(mayLedgers);
+        _ledgerRepositoryMock
+            .Setup(r => r.GetCarryoverBalanceAsync(cardIdm, year - 1))
+            .ReturnsAsync(10000);
+        _ledgerRepositoryMock
+            .Setup(r => r.GetByDateRangeAsync(cardIdm, It.IsAny<DateTime>(), It.IsAny<DateTime>()))
+            .ReturnsAsync(aprilLedgersLarge.Concat(mayLedgers).ToList());
+
+        // Act 1 - 4月を13件で生成（2ページ・改ページあり）
+        _ledgerRepositoryMock
+            .Setup(r => r.GetByMonthAsync(cardIdm, year, 4))
+            .ReturnsAsync(aprilLedgersLarge);
+        await _reportService.CreateMonthlyReportAsync(cardIdm, year, 4, outputPath);
+
+        // Act 2 - 同じ4月を1件へ減らして再生成（1ページに縮小）
+        _ledgerRepositoryMock
+            .Setup(r => r.GetByMonthAsync(cardIdm, year, 4))
+            .ReturnsAsync(aprilLedgersSmall);
+        await _reportService.CreateMonthlyReportAsync(cardIdm, year, 4, outputPath);
+
+        // Act 3 - 5月を同じファイルに追加
+        var result = await _reportService.CreateMonthlyReportAsync(cardIdm, year, 5, outputPath);
+
+        // Assert
+        result.Success.Should().BeTrue();
+
+        using var workbook = new XLWorkbook(outputPath);
+        var aprilSheet = workbook.Worksheet("4月");
+        var maySheet = workbook.Worksheet("5月");
+
+        // 再生成後の4月は1ページ → 1回目の生成が挿入した改ページが残っていないこと
+        aprilSheet.PageSetup.RowBreaks.Count.Should().Be(0,
+            "行数が減る再生成では旧改ページをクリアして作り直す");
+
+        // 最終ページ番号 = L2(5) + 改ページ0 = 5（修正前は残留改ページで 6 に膨らんだ）
+        ReportService.GetLastPageNumberFromWorksheet(aprilSheet).Should().Be(5,
+            "再生成後の実ページ数（1ページ）を反映する");
+
+        // 5月の開始ページ番号 = 4月の最終ページ(5) + 1 = 6（修正前は 7 に飛んだ）
+        maySheet.Cell(2, 12).GetValue<int>().Should().Be(6,
+            "翌月の開始ページ番号は再生成後の実ページ数から継続する");
+    }
+
+    #endregion
+
     #region 4月累計行省略テスト（Issue #813）
 
     /// <summary>

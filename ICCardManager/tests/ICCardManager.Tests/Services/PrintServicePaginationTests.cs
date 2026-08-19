@@ -520,4 +520,81 @@ public class PrintServicePaginationTests
     }
 
     #endregion
+
+    #region Issue #1810: 最終ページの合計行スペース確保
+
+    /// <summary>
+    /// Issue #1810: A4横向き実寸で16行（短摘要）＋合計1行のとき、本文だけなら
+    /// 1ページに収まる（16×22=352 ≤ 365）が合計行を含めると収まらない
+    /// （352+22=374 > 365）。最終行の判定で合計行の高さが常に予約され、
+    /// 2ページに分割されること。
+    /// </summary>
+    /// <remarks>
+    /// 修正前は canFitAll=false → spaceForSummary=0 となり1ページに確定し、
+    /// CreateFlowDocument が pageGroups.Count &lt;= 1 と判定 → FlowDocument の
+    /// 自動送りで月計・累計行だけがタイトル・列ヘッダーのない次ページに孤立していた。
+    /// </remarks>
+    [Fact]
+    public void GroupRowsByPage_A4Landscape_16RowsWithOneSummary_SplitsIntoTwoPages()
+    {
+        var rows = Enumerable.Range(0, 16).Select(i => Row($"行{i:D2}")).ToList();
+
+        var pages = PrintService.GroupRowsByPage(
+            rows,
+            pageWidth: A4LandscapeWidth,
+            pageHeight: A4LandscapeHeight,
+            summaryRowCount: 1, // 月計のみ
+            isFirstCard: true);
+
+        pages.Should().HaveCount(2,
+            "本文16行は収まるが合計行が収まらないため、最終行を合計行と一緒に次ページへ送る");
+        pages[0].Should().HaveCount(15);
+        pages[1].Should().HaveCount(1);
+        pages.SelectMany(p => p).Select(r => r.Summary)
+            .Should().Equal(rows.Select(r => r.Summary));
+    }
+
+    /// <summary>
+    /// Issue #1810: 合計行が2行（月計＋累計）の場合は15行でも溢れる
+    /// （15×22=330, 330+44=374 > 365）。最終行が合計行と一緒に次ページへ送られること。
+    /// </summary>
+    [Fact]
+    public void GroupRowsByPage_A4Landscape_15RowsWithTwoSummaries_SplitsIntoTwoPages()
+    {
+        var rows = Enumerable.Range(0, 15).Select(i => Row($"行{i:D2}")).ToList();
+
+        var pages = PrintService.GroupRowsByPage(
+            rows,
+            pageWidth: A4LandscapeWidth,
+            pageHeight: A4LandscapeHeight,
+            summaryRowCount: 2, // 月計 + 累計
+            isFirstCard: true);
+
+        pages.Should().HaveCount(2,
+            "本文15行＋合計2行は1ページに収まらないため2ページに分割される");
+        pages[0].Should().HaveCount(14);
+        pages[1].Should().HaveCount(1);
+    }
+
+    /// <summary>
+    /// Issue #1810: 本文＋合計行がちょうど収まる場合（15×22+22=352 ≤ 365）は
+    /// 従来どおり1ページに収まること（過剰分割しない）。
+    /// </summary>
+    [Fact]
+    public void GroupRowsByPage_A4Landscape_15RowsWithOneSummary_StaysSinglePage()
+    {
+        var rows = Enumerable.Range(0, 15).Select(i => Row($"行{i:D2}")).ToList();
+
+        var pages = PrintService.GroupRowsByPage(
+            rows,
+            pageWidth: A4LandscapeWidth,
+            pageHeight: A4LandscapeHeight,
+            summaryRowCount: 1,
+            isFirstCard: true);
+
+        pages.Should().HaveCount(1, "本文15行＋合計1行=352pt は 365pt に収まる");
+        pages[0].Should().HaveCount(15);
+    }
+
+    #endregion
 }
