@@ -122,6 +122,14 @@ public partial class MainViewModel : ViewModelBase
     private readonly DashboardService _dashboardService;
     private readonly ISafeFileLauncher _safeFileLauncher;
     private readonly ILogger<MainViewModel>? _logger;
+
+    /// <summary>
+    /// Issue #1814: 履歴ページ番号のクランプによる再取得の上限回数。
+    /// クランプは通常 1 回で収束する（総件数から求めた有効ページで取り直すため）。
+    /// 共有モードで他 PC の削除が連続した場合に無限ループさせないための上限であり、
+    /// 到達しても修正前と同じ表示（空一覧＋クランプ済みページ）へ退化するだけでデータは壊れない。
+    /// </summary>
+    private const int MaxHistoryPageClampRetries = 3;
     private readonly HashSet<CardReadingSource> _suppressionSources = new();
 
     /// <summary>
@@ -1747,7 +1755,10 @@ public partial class MainViewModel : ViewModelBase
     /// <summary>
     /// 履歴データを読み込み
     /// </summary>
-    private async Task LoadHistoryLedgersAsync()
+    /// <remarks>
+    /// Issue #1814: ページ番号のクランプと再取得を検証するため internal で公開している。
+    /// </remarks>
+    internal async Task LoadHistoryLedgersAsync()
     {
         if (HistoryCard == null) return;
 
@@ -1756,9 +1767,44 @@ public partial class MainViewModel : ViewModelBase
             HistoryLedgers.Clear();
 
             // ページングされた履歴を取得
-            // 注: 日付はyyyy-MM-dd形式で保存されているため、AddDays(1)は不要
-            var (rawLedgers, totalCount) = await _ledgerRepository.GetPagedAsync(
-                HistoryCard.CardIdm, HistoryFromDate, HistoryToDate, HistoryCurrentPage, HistoryPageSize);
+            //
+            // Issue #1814: 総ページ数は取得結果（totalCount）からしか分からないため、
+            // ページ番号のクランプは取得の「後」にしかできない。クランプしただけで取り直さないと、
+            // 履歴の個別削除（Issue #635）や統合（Issue #1458）で総件数が減った直後に
+            // 「一覧は空（削除前のページ番号で問い合わせたため）なのに、件数表示とページ番号は
+            // クランプ後の有効値」という食い違いが残る。ページ送りボタンも CanExecute=false で
+            // 無効になるため、期間変更か履歴の開き直し以外に復旧手段が無い。
+            // → クランプが起きたら取り直す。通常は 1 回で収束する（有効なページ番号で問い合わせ直すため）が、
+            //    共有モードでは取り直しの最中にも他 PC の削除で総件数がさらに減り得るため上限を設ける。
+            //    上限到達時はクランプ済みページ番号＋実際の総件数で表示され（＝修正前と同じ状態）、
+            //    ページ送りで復旧できる。データは壊れない。
+            IEnumerable<Ledger> rawLedgers;
+            int totalCount;
+            var clampAttempts = 0;
+            while (true)
+            {
+                // 注: 日付はyyyy-MM-dd形式で保存されているため、AddDays(1)は不要
+                (rawLedgers, totalCount) = await _ledgerRepository.GetPagedAsync(
+                    HistoryCard.CardIdm, HistoryFromDate, HistoryToDate, HistoryCurrentPage, HistoryPageSize);
+
+                // ページ情報を更新
+                var totalPages = Math.Max(1, (int)Math.Ceiling((double)totalCount / HistoryPageSize));
+                HistoryTotalCount = totalCount;
+                HistoryTotalPages = totalPages;
+
+                // 現在のページが総ページ数を超えている場合は調整し、調整後のページで取り直す
+                if (HistoryCurrentPage <= totalPages) break;
+                HistoryCurrentPage = totalPages;
+
+                if (++clampAttempts >= MaxHistoryPageClampRetries)
+                {
+                    _logger?.LogWarning(
+                        "履歴ページのクランプが {Attempts} 回連続で発生したため再取得を打ち切りました。" +
+                        "カード={CardIdm} 期間={From:yyyy-MM-dd}～{To:yyyy-MM-dd} 総件数={TotalCount}",
+                        clampAttempts, HistoryCard.CardIdm, HistoryFromDate, HistoryToDate, totalCount);
+                    break;
+                }
+            }
 
             // Issue #1740: 表示期間の直前残高をチェーン開始点のシードとして渡す。
             // シードが無いと、同額のポイント還元と利用が同日にある形状（Issue #1004）で
@@ -1791,16 +1837,6 @@ public partial class MainViewModel : ViewModelBase
                 var dto = ledger.ToDto();
                 SubscribeLedgerCheckedChanged(dto);
                 HistoryLedgers.Add(dto);
-            }
-
-            // ページ情報を更新
-            HistoryTotalCount = totalCount;
-            HistoryTotalPages = Math.Max(1, (int)Math.Ceiling((double)totalCount / HistoryPageSize));
-
-            // 現在のページが総ページ数を超えている場合は調整
-            if (HistoryCurrentPage > HistoryTotalPages)
-            {
-                HistoryCurrentPage = HistoryTotalPages;
             }
 
             // 最新の残高を取得

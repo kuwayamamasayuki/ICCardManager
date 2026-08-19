@@ -2830,6 +2830,152 @@ public class MainViewModelTests : IDisposable
     }
 
     #endregion
+
+    #region Issue #1814: 履歴ページ番号のクランプ後の再取得テスト
+
+    /// <summary>
+    /// 履歴ページングテストの共通アレンジ。
+    /// 「呼び出し時点の totalCount」を返す関数を受け取り、GetPagedAsync を
+    /// 「要求ページが総ページ数を超えていれば空、そうでなければ pageSize 件」で応答させる。
+    /// これは実装（LedgerRepository.GetPagedAsync の OFFSET/LIMIT）と同じ振る舞い。
+    /// </summary>
+    private List<int> ArrangeHistoryPaging(Func<int, int> totalCountForCall, int pageSize)
+    {
+        var requestedPages = new List<int>();
+
+        _viewModel.HistoryCard = new CardDto { CardIdm = "0123456789ABCDEF", CardNumber = "A-1" };
+        _viewModel.HistoryFromDate = new DateTime(2026, 8, 1);
+        _viewModel.HistoryToDate = new DateTime(2026, 8, 31);
+        _viewModel.HistoryPageSize = pageSize;
+
+        // LoadHistoryLedgersAsync は末尾で統合取り消しボタンの可否を問い合わせる
+        _ledgerRepositoryMock
+            .Setup(r => r.GetMergeHistoriesAsync(It.IsAny<bool>()))
+            .ReturnsAsync(new List<(int, DateTime, int, string, string, bool)>());
+
+        _ledgerRepositoryMock
+            .Setup(r => r.GetPagedAsync(
+                It.IsAny<string>(), It.IsAny<DateTime>(), It.IsAny<DateTime>(),
+                It.IsAny<int>(), It.IsAny<int>()))
+            .ReturnsAsync((string _, DateTime _, DateTime _, int page, int size) =>
+            {
+                var totalCount = totalCountForCall(requestedPages.Count);
+                requestedPages.Add(page);
+
+                var offset = (page - 1) * size;
+                var take = Math.Max(0, Math.Min(size, totalCount - offset));
+                var items = Enumerable.Range(0, take)
+                    .Select(i => new Ledger
+                    {
+                        Id = offset + i + 1,
+                        CardIdm = "0123456789ABCDEF",
+                        Date = new DateTime(2026, 8, 10),
+                        Summary = "鉄道（A駅～B駅）",
+                        Expense = 210,
+                        Balance = 1000 - (offset + i) * 210,
+                    })
+                    .ToList();
+
+                return ((IEnumerable<Ledger>)items, totalCount);
+            });
+
+        return requestedPages;
+    }
+
+    /// <summary>
+    /// Issue #1814 の中核。総件数が減って現在ページが無効になったら、
+    /// クランプしたページで取り直し「一覧が空なのに件数表示は全件」という
+    /// 食い違いを残さないこと。
+    /// </summary>
+    [Fact]
+    public async Task LoadHistoryLedgersAsync_総件数減少でクランプされたら再取得して一覧と件数表示を一致させること()
+    {
+        // Arrange: 2ページ目を表示中に、総件数が 60 件 → 30 件（＝1ページ分）へ減った
+        var requestedPages = ArrangeHistoryPaging(_ => 30, pageSize: 30);
+        _viewModel.HistoryCurrentPage = 2;
+
+        // Act
+        await _viewModel.LoadHistoryLedgersAsync();
+
+        // Assert: クランプ後のページで取り直している
+        requestedPages.Should().Equal(new[] { 2, 1 },
+            "クランプ前のページで空の結果を受け取ったら、クランプ後のページで取り直すこと");
+        _viewModel.HistoryCurrentPage.Should().Be(1);
+        _viewModel.HistoryTotalPages.Should().Be(1);
+
+        // Assert: 一覧が空のまま残らない（Issue #1814 の実害）
+        _viewModel.HistoryLedgers.Should().HaveCount(30,
+            "クランプ後のページの行が表示されること");
+
+        // Assert: 件数表示・ページ表示と一覧の中身が一致する
+        _viewModel.HistoryStatusMessage.Should().Be("1～30件を表示（全30件）");
+        _viewModel.HistoryPageDisplay.Should().Be("1 / 1");
+    }
+
+    /// <summary>
+    /// クランプが不要な通常のページ読み込みでは取り直さないこと。
+    /// （再取得ロジックが常に 2 回問い合わせる実装へ退行していないことを固定する）
+    /// </summary>
+    [Fact]
+    public async Task LoadHistoryLedgersAsync_クランプ不要なら再取得しないこと()
+    {
+        // Arrange: 全 60 件（2 ページ）の 2 ページ目
+        var requestedPages = ArrangeHistoryPaging(_ => 60, pageSize: 30);
+        _viewModel.HistoryCurrentPage = 2;
+
+        // Act
+        await _viewModel.LoadHistoryLedgersAsync();
+
+        // Assert
+        requestedPages.Should().Equal(new[] { 2 }, "クランプが起きなければ 1 回だけ問い合わせること");
+        _viewModel.HistoryCurrentPage.Should().Be(2);
+        _viewModel.HistoryLedgers.Should().HaveCount(30);
+        _viewModel.HistoryStatusMessage.Should().Be("31～60件を表示（全60件）");
+    }
+
+    /// <summary>
+    /// 共有モードで他 PC の削除が連続してもループが止まること（上限で打ち切る）。
+    /// 上限到達時は修正前と同じ表示へ退化するだけで、無限ループやハングにはならない。
+    /// </summary>
+    [Fact]
+    public async Task LoadHistoryLedgersAsync_クランプが連続しても上限で再取得を打ち切ること()
+    {
+        // Arrange: 取得のたびに総件数が減り続ける（40 → 30 → 20 → 10 …）
+        var totalCounts = new[] { 40, 30, 20, 10, 10, 10 };
+        var requestedPages = ArrangeHistoryPaging(call => totalCounts[Math.Min(call, totalCounts.Length - 1)], pageSize: 10);
+        _viewModel.HistoryCurrentPage = 5;
+
+        // Act
+        await _viewModel.LoadHistoryLedgersAsync();
+
+        // Assert: 上限 3 回で打ち切る（無限ループしない）
+        requestedPages.Should().Equal(new[] { 5, 4, 3 },
+            "クランプ 3 回で打ち切り、それ以上は問い合わせないこと");
+        _viewModel.HistoryCurrentPage.Should().Be(2, "最後のクランプ結果が現在ページになること");
+    }
+
+    /// <summary>
+    /// 履歴が 0 件になった場合はページ 1 へ戻し、「該当する履歴がありません」を表示すること。
+    /// </summary>
+    [Fact]
+    public async Task LoadHistoryLedgersAsync_総件数0ならページ1へ戻すこと()
+    {
+        // Arrange
+        var requestedPages = ArrangeHistoryPaging(_ => 0, pageSize: 30);
+        _viewModel.HistoryCurrentPage = 3;
+
+        // Act
+        await _viewModel.LoadHistoryLedgersAsync();
+
+        // Assert
+        requestedPages.Should().Equal(new[] { 3, 1 });
+        _viewModel.HistoryCurrentPage.Should().Be(1);
+        _viewModel.HistoryTotalPages.Should().Be(1);
+        _viewModel.HistoryLedgers.Should().BeEmpty();
+        _viewModel.HistoryStatusMessage.Should().Be("該当する履歴がありません");
+    }
+
+    #endregion
 }
 
 /*
