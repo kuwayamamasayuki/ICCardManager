@@ -1190,8 +1190,9 @@ namespace ICCardManager.Services
 
             if (carryoverMonth > registrationDate.Month)
             {
-                // 繰越月そのものの年（＝繰越レコード日付の前月の年）
-                var carryoverYear = recordDate.AddMonths(-1).Year;
+                // この分岐は GetMidYearCarryoverDate が前年へ解決する条件そのものなので、
+                // 繰越月が属する年は必ず登録日の前年になる
+                var carryoverYear = registrationDate.Year - 1;
                 description +=
                     Environment.NewLine +
                     $"※ 選択した{carryoverMonth}月は登録日（{registrationDate:yyyy年M月d日}）より後の月のため、" +
