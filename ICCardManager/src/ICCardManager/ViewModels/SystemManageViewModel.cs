@@ -1,5 +1,6 @@
 using System;
 using System.Collections.ObjectModel;
+using System.Globalization;
 using System.IO;
 using System.Windows;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -121,10 +122,17 @@ public partial class SystemManageViewModel : ViewModelBase
     public string BackupHealthIcon => IsBackupStale ? "⚠" : "✔";
 
     /// <summary>
-    /// 保持世代数の表示テキスト（例: 「保持世代: 12 / 30」）
+    /// 保持世代数の表示テキスト（例: 「保持世代: 12件（自動: 直近30日分 / 手動: 最新10件）」）
     /// </summary>
+    /// <remarks>
+    /// Issue #1813: 上限を単一の件数で示すと、共有モードで 1 日に何世代も生まれる実態と
+    /// 「◯/30」という表示が食い違う（30 世代でも実効 1.5 日分にしかならない）。
+    /// 現存件数と保持ルールの両方を示し、何がどれだけ遡れるのかを画面から読み取れるようにする。
+    /// </remarks>
     public string BackupGenerationText =>
-        $"保持世代: {BackupHealth?.GenerationCount ?? 0} / {BackupHealth?.MaxGenerations ?? AppConstants.MaxBackupGenerations}";
+        $"保持世代: {BackupHealth?.GenerationCount ?? 0}件" +
+        $"（自動: 直近{BackupHealth?.RetentionDays ?? AppConstants.BackupRetentionDays}日分" +
+        $" / 手動: 最新{BackupHealth?.MaxManualGenerations ?? AppConstants.MaxManualBackupGenerations}件）";
 
     /// <summary>
     /// 保存先の空き容量の表示テキスト
@@ -297,7 +305,11 @@ public partial class SystemManageViewModel : ViewModelBase
         {
             Filter = "データベースファイル (*.db)|*.db",
             DefaultExt = ".db",
-            FileName = $"backup_manual_{DateTime.Now:yyyyMMdd_HHmmss}.db",
+            // Issue #1813: 世代の間引きはファイル名末尾のタイムスタンプを
+            // BackupService.BackupTimestampFormat / InvariantCulture で解析する。
+            // 書式・カルチャを書き込み側と揃えないと、既定カレンダーが西暦でない環境で
+            // 解析結果が実際の作成日時とずれ、保持件数の並び順が壊れる。
+            FileName = $"backup_manual_{DateTime.Now.ToString(BackupService.BackupTimestampFormat, CultureInfo.InvariantCulture)}.db",
             Title = "バックアップファイルの保存先を選択",
             InitialDirectory = Directory.Exists(defaultBackupFolder) ? defaultBackupFolder : null
         };
@@ -660,9 +672,11 @@ public partial class SystemManageViewModel : ViewModelBase
             Directory.CreateDirectory(backupFolder);
         }
 
+        // Issue #1813: 書式・カルチャは自動バックアップ（BackupService）と揃える。
+        // 保持件数の間引きが ResolveBackupTimestamp でこの名前を解析するため。
         return Path.Combine(
             backupFolder,
-            $"backup_pre_restore_{DateTime.Now:yyyyMMdd_HHmmss}.db");
+            $"backup_pre_restore_{DateTime.Now.ToString(BackupService.BackupTimestampFormat, CultureInfo.InvariantCulture)}.db");
     }
 
     /// <summary>

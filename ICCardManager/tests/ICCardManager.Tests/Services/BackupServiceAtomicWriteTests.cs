@@ -200,35 +200,37 @@ public class BackupServiceAtomicWriteTests : IDisposable
     [Fact]
     public async Task ExecuteAutoBackupAsync_一時ファイルが世代数を消費しないこと()
     {
-        // Arrange: 保持上限ちょうどの世代を作る（古い順に作成日時を割り当てる）
-        var baseTime = DateTime.Now.AddDays(-AppConstants.MaxBackupGenerations - 1);
-        for (int i = 0; i < AppConstants.MaxBackupGenerations; i++)
+        // Arrange: 保持上限ちょうどの日数分の世代を作る（1 日 1 世代、Issue #1813）
+        var baseDay = DateTime.Now.Date.AddDays(-AppConstants.BackupRetentionDays);
+        for (int i = 0; i < AppConstants.BackupRetentionDays; i++)
         {
-            var path = Path.Combine(_backupDirectory, $"backup_2026070{i % 10}_{i:D6}.db");
+            var path = Path.Combine(
+                _backupDirectory,
+                $"backup_{baseDay.AddDays(i).AddHours(9):yyyyMMdd_HHmmss}.db");
             File.WriteAllText(path, "dummy");
-            File.SetCreationTime(path, baseTime.AddDays(i));
         }
 
-        // 一時ファイルは最新の作成日時を持たせる（世代として数えられたら実在世代が削られる）
+        // 一時ファイルは「まだ世代の無い日」の名前を持たせる
+        // （世代として数えられたら、その分だけ実在の最古世代が削られる）
         const int TempFileCount = 3;
         for (int i = 0; i < TempFileCount; i++)
         {
             var temp = Path.Combine(
                 _backupDirectory,
-                $"backup_20260813_00000{i}.db.{Guid.NewGuid():N}{BackupService.BackupTempFileExtension}");
+                $"backup_{baseDay.AddDays(-(i + 1)).AddHours(9):yyyyMMdd_HHmmss}.db.{Guid.NewGuid():N}{BackupService.BackupTempFileExtension}");
             File.WriteAllText(temp, "dummy");
             File.SetCreationTime(temp, DateTime.Now);
             File.SetLastWriteTime(temp, DateTime.Now);
         }
 
-        // Act: 1 世代増える → 上限超過分の 1 件だけが削除されるはず
+        // Act: 本日分が 1 世代増える → 保持日数を超えた最古の 1 日だけが削除されるはず
         var created = await _service.ExecuteAutoBackupAsync();
 
         // Assert
         created.Should().NotBeNull();
         ListBackupGenerations().Should().HaveCount(
-            AppConstants.MaxBackupGenerations,
-            "一時ファイルは世代に数えないため、超過分の 1 件だけが削除されること");
+            AppConstants.BackupRetentionDays,
+            "一時ファイルは世代に数えないため、保持日数を超えた 1 日分だけが削除されること");
         ListTempFiles().Should().HaveCount(TempFileCount, "書き込み中の可能性がある一時ファイルは残すこと");
     }
 

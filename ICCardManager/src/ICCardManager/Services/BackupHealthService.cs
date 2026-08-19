@@ -44,7 +44,8 @@ namespace ICCardManager.Services
         {
             var info = new BackupHealthInfo
             {
-                MaxGenerations = AppConstants.MaxBackupGenerations,
+                RetentionDays = AppConstants.BackupRetentionDays,
+                MaxManualGenerations = AppConstants.MaxManualBackupGenerations,
                 IsSharedMode = _backupService.IsSharedMode
             };
 

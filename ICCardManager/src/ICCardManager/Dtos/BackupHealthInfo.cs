@@ -33,9 +33,14 @@ namespace ICCardManager.Dtos
         public int GenerationCount { get; set; }
 
         /// <summary>
-        /// 保持世代数の上限
+        /// 自動バックアップの保持日数（Issue #1813。バックアップのある日を新しい順にこの日数だけ残す）
         /// </summary>
-        public int MaxGenerations { get; set; }
+        public int RetentionDays { get; set; }
+
+        /// <summary>
+        /// 手動バックアップ・リストア前バックアップの保持件数の上限（Issue #1813）
+        /// </summary>
+        public int MaxManualGenerations { get; set; }
 
         /// <summary>
         /// バックアップ保存先フォルダのパス（実際に使用される正規化済みパス）

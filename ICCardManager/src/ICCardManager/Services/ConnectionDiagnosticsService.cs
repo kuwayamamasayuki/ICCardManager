@@ -449,7 +449,8 @@ namespace ICCardManager.Services
                 return Warning(DiagnosticItemKind.DiskFreeSpace, DiskFreeSpaceTitle,
                     formatted,
                     $"バックアップ保存先（{folder}）の空き容量が {formatted} しかありません。" +
-                    $"バックアップは最大 {AppConstants.MaxBackupGenerations} 世代を保持するため、" +
+                    $"バックアップは自動分を直近 {AppConstants.BackupRetentionDays} 日分、" +
+                    $"手動分を最新 {AppConstants.MaxManualBackupGenerations} 件まで保持するため、" +
                     "このままではバックアップが失敗するおそれがあります。" +
                     $"不要なファイルを削除して、{threshold} 以上の空きを確保してください。");
             }
