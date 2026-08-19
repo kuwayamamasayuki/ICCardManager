@@ -43,6 +43,47 @@ public class MainWindowWarningAreaLayoutTests
     }
 
     /// <summary>
+    /// Issue #1811: 右端のクリックヒントは種別ごとの DataTrigger で Visibility と Text を併せて設定する。
+    /// Text をローカル値で与えると依存関係プロパティの優先順位でスタイルのトリガーが上書きできず、
+    /// 種別を増やしても常に最初の文言（「クリックして再接続」）が出る。
+    /// </summary>
+    [Fact]
+    public void Warning_click_hint_should_be_driven_by_type_triggers()
+    {
+        var hintTextBlock = ExtractClickHintTextBlock();
+
+        hintTextBlock.Should().NotMatchRegex(
+            @"<TextBlock\b[^>]*\sText\s*=",
+            "ヒントの Text はローカル値ではなく種別ごとのトリガーで設定する（Issue #1811）");
+
+        hintTextBlock.Should().MatchRegex(
+            @"<DataTrigger\s+Binding\s*=\s*""\{Binding\s+Type\}""\s+Value\s*=\s*""DatabaseConnectionLost"">" +
+            @"(?:(?!</DataTrigger>)[\s\S])*?<Setter\s+Property\s*=\s*""Text""\s+Value\s*=\s*""（クリックして再接続）""",
+            "DB接続断の警告には「クリックして再接続」のヒントを出す（Issue #1110）");
+
+        hintTextBlock.Should().MatchRegex(
+            @"<DataTrigger\s+Binding\s*=\s*""\{Binding\s+Type\}""\s+Value\s*=\s*""CardReaderError"">" +
+            @"(?:(?!</DataTrigger>)[\s\S])*?<Setter\s+Property\s*=\s*""Text""\s+Value\s*=\s*""（クリックして消去）""",
+            "カードリーダーエラーの警告はクリックで取り除けるため、そのヒントを出す（Issue #1811）");
+    }
+
+    /// <summary>
+    /// 警告行の右端に置くクリックヒント（DockPanel.Dock="Right" の TextBlock）の定義全文を抽出する。
+    /// </summary>
+    private static string ExtractClickHintTextBlock()
+    {
+        var warningTemplate = ExtractWarningItemsControl();
+
+        var pattern = new Regex(
+            @"<TextBlock\s+DockPanel\.Dock\s*=\s*""Right""[\s\S]*?</TextBlock>",
+            RegexOptions.Compiled);
+
+        var match = pattern.Match(warningTemplate);
+        match.Success.Should().BeTrue("警告行の右端にクリックヒント用の TextBlock（DockPanel.Dock=Right）が存在すべき");
+        return match.Value;
+    }
+
+    /// <summary>
     /// 警告エリアの ItemsControl（ItemsSource=WarningMessages）の定義全文を抽出する。
     /// </summary>
     private static string ExtractWarningItemsControl()

@@ -61,5 +61,15 @@ namespace ICCardManager.Dtos
         /// 対象カードIDm（LowBalance・BalanceInconsistency時に使用）
         /// </summary>
         public string CardIdm { get; set; }
+
+        /// <summary>
+        /// 同じ事象が繰り返し発生した回数（既定 1）。
+        /// </summary>
+        /// <remarks>
+        /// Issue #1811: <see cref="WarningType.CardReaderError"/> は発生のたびに行を追加すると
+        /// 無限に積み上がるため 1 行に集約し、繰り返し回数をこのプロパティと表示文言に載せる。
+        /// 回数の状態を警告行自身が持つことで、クリックで取り除いた時点で回数も振り出しに戻る。
+        /// </remarks>
+        public int OccurrenceCount { get; set; } = 1;
     }
 }
