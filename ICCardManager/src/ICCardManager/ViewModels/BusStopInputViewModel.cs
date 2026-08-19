@@ -21,6 +21,14 @@ public partial class BusStopInputViewModel : ViewModelBase
 {
     private readonly ILedgerRepository _ledgerRepository;
     private readonly ISettingsRepository _settingsRepository;
+    private readonly IDialogService _dialogService;
+
+    /// <summary>
+    /// Issue #1811: 保存前の確認ダイアログに列挙する類似警告の上限件数。
+    /// 「天神」のような短い入力は「天神」を含む既存候補すべてに一致するため、
+    /// 超過分は「ほか N 件」に要約してダイアログが画面からはみ出さないようにする。
+    /// </summary>
+    internal const int MaxListedSimilarWarnings = 5;
 
     [ObservableProperty]
     private Ledger? _ledger;
@@ -52,10 +60,14 @@ public partial class BusStopInputViewModel : ViewModelBase
     [ObservableProperty]
     private bool _isSaved;
 
-    public BusStopInputViewModel(ILedgerRepository ledgerRepository, ISettingsRepository settingsRepository)
+    public BusStopInputViewModel(
+        ILedgerRepository ledgerRepository,
+        ISettingsRepository settingsRepository,
+        IDialogService dialogService)
     {
         _ledgerRepository = ledgerRepository;
         _settingsRepository = settingsRepository;
+        _dialogService = dialogService;
     }
 
     /// <summary>
@@ -266,9 +278,16 @@ public partial class BusStopInputViewModel : ViewModelBase
                 continue;
 
             // 完全一致は除外（既存エントリと同じなら問題なし）
+            // 完全な逆順（「A～B」⇔「B～A」）も除外する（Issue #1811）:
+            // 「↑往復」ボタン（Issue #1570）が前行の値を反転して生成する正当な入力であり、
+            // 取り違えではない。含めると往復入力のたびに保存前の確認ダイアログが出て、
+            // 本来見せたい取り違え警告（「天神」と「天神南」）が埋もれる。
+            // なお逆順の2文字列は長さが等しいため、部分包含による類似と同時に成立することはない
+            // （等しい長さで互いを含むのは完全一致のときだけで、それは上で除外済み）。
             var similar = existing
                 .Where(s => !s.Equals(entry, StringComparison.Ordinal))
                 .Where(s => IsSimilar(entry, s))
+                .Where(s => !IsRoundTripReversal(entry, s))
                 .ToList();
 
             foreach (var s in similar)
@@ -278,6 +297,28 @@ public partial class BusStopInputViewModel : ViewModelBase
         }
 
         return warnings;
+    }
+
+    /// <summary>
+    /// Issue #1811: 2つのバス停名が「A～B」と「B～A」の完全な逆順の関係にあるか判定する。
+    /// </summary>
+    /// <remarks>
+    /// <see cref="IsSimilar"/> は乗降逆転を類似とみなす（Issue #1133）が、
+    /// 「↑往復」ボタン（Issue #1570）はこの逆転値を意図的に生成する。
+    /// 判定は <see cref="IsSimilar"/> の乗降逆転分岐と同じ（前後空白をトリムして比較）。
+    /// </remarks>
+    internal static bool IsRoundTripReversal(string a, string b)
+    {
+        if (string.IsNullOrEmpty(a) || string.IsNullOrEmpty(b))
+            return false;
+
+        var aParts = a.Split('～');
+        var bParts = b.Split('～');
+        if (aParts.Length != 2 || bParts.Length != 2)
+            return false;
+
+        return aParts[0].Trim() == bParts[1].Trim()
+            && aParts[1].Trim() == bParts[0].Trim();
     }
 
     /// <summary>
@@ -306,19 +347,23 @@ public partial class BusStopInputViewModel : ViewModelBase
     }
 
     /// <summary>
-    /// 保存
+    /// Issue #1811: 保存前に利用者へ提示する警告（未入力・形式・類似）を集める。
+    /// いずれも保存をブロックしない「確認してほしい点」であり、空なら確認なしで保存してよい。
     /// </summary>
-    [RelayCommand]
-    public async Task SaveAsync()
+    /// <remarks>
+    /// 以前はこれらを順に <see cref="StatusMessage"/> へ代入していたため、後の警告が前を上書きし、
+    /// 保存成功時はさらに「保存しました」で上書きされた直後に <see cref="IsSaved"/> でダイアログが閉じ、
+    /// 3 つのうち少なくとも 2 つは一度も職員の目に触れないまま台帳へ確定していた。
+    /// </remarks>
+    internal List<string> CollectSaveWarnings()
     {
-        if (Ledger == null) return;
+        var warnings = new List<string>();
 
-        // 入力検証
+        // 未入力は保存可能（★マークが付き、後でバス停名未入力警告から入力する）
         var emptyCount = BusUsages.Count(b => string.IsNullOrWhiteSpace(b.BusStops));
         if (emptyCount > 0)
         {
-            StatusMessage = $"未入力のバス停が{emptyCount}件あります";
-            // 未入力でも保存は可能（★マークが付く）
+            warnings.Add($"未入力のバス停が{emptyCount}件あります（「★」として保存され、後で入力が必要になります）");
         }
 
         // ソフトバリデーション: 「～」区切りの形式チェック
@@ -326,20 +371,59 @@ public partial class BusStopInputViewModel : ViewModelBase
             !string.IsNullOrWhiteSpace(b.BusStops) && !b.BusStops.Contains("～"));
         if (missingTildeCount > 0)
         {
-            StatusMessage = "「○○～△△」の形式での入力を推奨します";
-            // 警告のみ — 保存はブロックしない
+            warnings.Add($"「○○～△△」の形式になっていない入力が{missingTildeCount}件あります（乗車バス停～降車バス停の形式を推奨します）");
         }
 
-        // Issue #1133: 類似バス停名の検出（警告のみ）
+        // Issue #1133: 類似バス停名の検出（取り違え・表記ゆれの疑い）
         var newEntries = BusUsages
             .Where(b => !string.IsNullOrWhiteSpace(b.BusStops) && b.BusStops != "★")
             .Select(b => b.BusStops)
             .ToList();
-        var similarWarnings = DetectSimilarBusStops(BusStopSuggestions, newEntries);
-        if (similarWarnings.Count > 0)
+        // 同じバス停名を複数行に入力した場合（同一路線を1日に2回利用する等）、
+        // DetectSimilarBusStops は行ごとに同じ文言を返す。重複したまま列挙すると
+        // 確認ダイアログに同じ行が並び、上限（MaxListedSimilarWarnings）と
+        // 「ほか N 件」の件数も重複分で水増しされるため、ここで一意化する。
+        var similarWarnings = DetectSimilarBusStops(BusStopSuggestions, newEntries)
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+        warnings.AddRange(similarWarnings.Take(MaxListedSimilarWarnings));
+        if (similarWarnings.Count > MaxListedSimilarWarnings)
         {
-            StatusMessage = similarWarnings.First();
-            // 警告のみ — 保存はブロックしない
+            warnings.Add($"類似するバス停名がほか{similarWarnings.Count - MaxListedSimilarWarnings}件あります");
+        }
+
+        return warnings;
+    }
+
+    /// <summary>
+    /// 保存
+    /// </summary>
+    /// <remarks>
+    /// Issue #1811: 警告があるときは保存の<b>前</b>に確認ダイアログで全件を提示し、続行するかを職員に委ねる。
+    /// 「いいえ」なら何も書かずに入力画面へ戻り、修正の手掛かりとして警告の全文をステータス欄に残す。
+    /// 確認ダイアログは同期モーダルのため、処理中スコープ（<see cref="ViewModelBase.BeginBusy"/>）の
+    /// 外で出す（Issue #1793）。
+    /// </remarks>
+    [RelayCommand]
+    public async Task SaveAsync()
+    {
+        if (Ledger == null) return;
+
+        var warnings = CollectSaveWarnings();
+        if (warnings.Count > 0)
+        {
+            // 確認ダイアログを閉じた後も見直せるよう、先にステータス欄へ全件を出しておく
+            StatusMessage = string.Join(Environment.NewLine, warnings);
+
+            var message = "入力内容に確認が必要な点があります。" + Environment.NewLine + Environment.NewLine +
+                          string.Join(Environment.NewLine, warnings.Select(w => "・" + w)) +
+                          Environment.NewLine + Environment.NewLine +
+                          "このまま保存しますか？" + Environment.NewLine +
+                          "「いいえ」を選ぶと入力画面に戻って修正できます。";
+            if (!_dialogService.ShowWarningConfirmation(message, "バス停名の確認"))
+            {
+                return;
+            }
         }
 
         using (BeginBusy("保存中..."))

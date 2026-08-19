@@ -8,6 +8,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using CommunityToolkit.Mvvm.Messaging;
 using ICCardManager.Common;
+using ICCardManager.Common.Exceptions;
 using ICCardManager.Common.Messages;
 using ICCardManager.Data;
 using ICCardManager.Data.Repositories;
@@ -2804,16 +2805,57 @@ public partial class MainViewModel : ViewModelBase
     /// <summary>
     /// カードリーダーエラー
     /// </summary>
+    /// <remarks>
+    /// Issue #1811: 発生のたびに行を足すと、読み取り不良のカードを何度も試しただけで同文言の警告が
+    /// 無限に積み上がり、残額不足・長期未返却などの他の警告をスクロール外へ押し出す。
+    /// <see cref="ReplaceWarnings"/> で自分の種別だけを 1 行に入れ替え、繰り返し回数と最終発生時刻を
+    /// 文言に載せる（04_機能設計書 §7.4）。回数は取り除く前の行の <see cref="WarningItem.OccurrenceCount"/>
+    /// から引き継ぐため、<see cref="HandleWarningClick"/> で取り除いた後は 1 回目として数え直される。
+    /// 文言の理由部分は <see cref="AppException.UserFriendlyMessage"/> から取り、
+    /// 英語の <c>Exception.Message</c>（<c>Failed to read card history: …</c>）を職員に見せない（Issue #1614）。
+    /// 本番のリーダー（<c>FelicaCardReader</c>）が発火する例外はすべて <c>CardReaderException</c> のため、
+    /// それ以外（開発用モック等）は汎用文言へ倒す。
+    /// 回数は<b>種別</b>単位で数え、原因が異なっても合算する（文言の理由は最新の原因）。
+    /// 対処はいずれも同じ（抜き差し・再起動）で利用者の行動は変わらず、切断は
+    /// <see cref="WarningType.CardReaderConnection"/> として別の行に出るため隠れない。
+    /// </remarks>
     private void OnCardReaderError(object? sender, Exception e)
     {
         _dispatcherService.InvokeAsync(() =>
         {
-            WarningMessages.Add(new WarningItem
-            {
-                DisplayText = $"⚠️ カードリーダーエラー: {e.Message}",
-                Type = WarningType.CardReaderError
-            });
+            var previous = WarningMessages.FirstOrDefault(w => w.Type == WarningType.CardReaderError);
+            var count = (previous?.OccurrenceCount ?? 0) + 1;
+            var reason = e is AppException appException && !string.IsNullOrWhiteSpace(appException.UserFriendlyMessage)
+                ? appException.UserFriendlyMessage
+                : "カードの読み取りに失敗しました。";
+
+            ReplaceWarnings(
+                w => w.Type == WarningType.CardReaderError,
+                new[]
+                {
+                    new WarningItem
+                    {
+                        DisplayText = BuildCardReaderErrorWarningText(reason, count, DateTime.Now),
+                        Type = WarningType.CardReaderError,
+                        OccurrenceCount = count
+                    }
+                });
         });
+    }
+
+    /// <summary>
+    /// Issue #1811: カードリーダーエラー警告の表示文言を組み立てる。
+    /// 「何が」（カードリーダーエラー・回数・最終発生時刻）「なぜ」（<paramref name="reason"/>）
+    /// 「どうすれば」（抜き差し・再起動）の 3 要素で構成する（error-messages.md）。
+    /// </summary>
+    internal static string BuildCardReaderErrorWarningText(string reason, int count, DateTime lastOccurredAt)
+    {
+        // 初回は「1回」を省き、繰り返してから回数と最終発生時刻を出す（コードレビュー指摘）
+        var occurrence = count <= 1
+            ? $"{lastOccurredAt:HH:mm}"
+            : $"{count}回、最終 {lastOccurredAt:HH:mm}";
+        return $"⚠️ カードリーダーエラー（{occurrence}）: {reason} " +
+               "続く場合はカードリーダーを抜き差しし、それでも直らなければアプリを再起動してください。";
     }
 
     /// <summary>
@@ -3142,6 +3184,13 @@ public partial class MainViewModel : ViewModelBase
                 // 警告文言が案内する「システム管理画面（F6）」へ、キー操作を覚えていなくても到達できるようにする。
                 // Issue #1739: 画面表示と再判定は F6 と同一の経路（OpenSystemManage）に集約する。
                 await OpenSystemManage();
+                break;
+
+            case WarningType.CardReaderError:
+                // Issue #1811: カードリーダーエラー警告は利用者が確認したらクリックで取り除く。
+                // 自動で解消する契機が無いため、これが唯一の除去経路（04_機能設計書 §7.4）。
+                // 取り除くと繰り返し回数も振り出しに戻る（回数は警告行自身が持つ）。
+                ReplaceWarnings(w => w.Type == WarningType.CardReaderError);
                 break;
         }
     }

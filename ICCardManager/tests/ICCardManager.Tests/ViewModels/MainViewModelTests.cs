@@ -760,6 +760,108 @@ public class MainViewModelTests : IDisposable
 
     #endregion
 
+    #region カードリーダーエラー警告の集約と消去（Issue #1811）
+
+    /// <summary>
+    /// カードリーダーの Error イベントを発火させ、ディスパッチャの継続まで流す。
+    /// </summary>
+    private async Task RaiseCardReaderErrorAsync(Exception error)
+    {
+        _cardReaderMock.Raise(r => r.Error += null, _cardReaderMock.Object, error);
+        await _dispatcherService.WaitForPendingAsync();
+    }
+
+    /// <summary>
+    /// Issue #1811: 読み取り不良のカードを何度も試しても、カードリーダーエラー警告は 1 行に集約され、
+    /// 繰り返し回数が文言と <see cref="WarningItem.OccurrenceCount"/> に載ること。
+    /// </summary>
+    /// <remarks>
+    /// 修正前は <c>OnCardReaderError</c> が無条件に <c>Add</c> していたため、同文言の警告が
+    /// 無限に積み上がり、残額不足・長期未返却などの他の警告をスクロール外へ押し出していた。
+    /// </remarks>
+    [Fact]
+    public async Task OnCardReaderError_繰り返し発生しても警告は1件に集約され回数が増えること()
+    {
+        for (var i = 0; i < 3; i++)
+        {
+            await RaiseCardReaderErrorAsync(
+                ICCardManager.Common.Exceptions.CardReaderException.HistoryReadFailed("boom"));
+        }
+
+        var warning = _viewModel.WarningMessages.Should()
+            .ContainSingle(w => w.Type == WarningType.CardReaderError).Which;
+        warning.OccurrenceCount.Should().Be(3);
+        warning.DisplayText.Should().Contain("3回");
+    }
+
+    /// <summary>
+    /// Issue #1811: 警告文言は例外の英語メッセージ（<c>Failed to read card history: …</c>）ではなく、
+    /// <c>AppException.UserFriendlyMessage</c> のユーザー向け文言で組み立てること（Issue #1614 と同方針）。
+    /// </summary>
+    [Fact]
+    public async Task OnCardReaderError_文言はユーザー向けの理由で組み立て英語の例外メッセージを出さないこと()
+    {
+        await RaiseCardReaderErrorAsync(
+            ICCardManager.Common.Exceptions.CardReaderException.HistoryReadFailed("felica timeout"));
+
+        var warning = _viewModel.WarningMessages.Should()
+            .ContainSingle(w => w.Type == WarningType.CardReaderError).Which;
+        warning.DisplayText.Should().Contain("カードリーダーエラー");
+        warning.DisplayText.Should().Contain("利用履歴を読み取れませんでした");
+        warning.DisplayText.Should().NotContain("Failed to read");
+        warning.DisplayText.Should().NotContain("felica timeout");
+        warning.DisplayText.Should().NotContain("1回", "初回は回数を省き、繰り返してから回数を出す");
+    }
+
+    /// <summary>
+    /// Issue #1811: カードリーダーエラー警告はクリックで取り除け、取り除いた後の次のエラーは
+    /// 1 回目として数え直されること。
+    /// </summary>
+    /// <remarks>
+    /// 修正前は <c>HandleWarningClick</c> に <c>CardReaderError</c> の case が無く、
+    /// ソース全体にも除去経路が無かったため再起動まで消せなかった。
+    /// </remarks>
+    [Fact]
+    public async Task HandleWarningClick_カードリーダーエラー警告がクリックで取り除かれ回数が振り出しに戻ること()
+    {
+        await RaiseCardReaderErrorAsync(new InvalidOperationException("reader error"));
+        await RaiseCardReaderErrorAsync(new InvalidOperationException("reader error"));
+        var warning = _viewModel.WarningMessages.Single(w => w.Type == WarningType.CardReaderError);
+        warning.OccurrenceCount.Should().Be(2, "前提: 2 回のエラーが 1 件に集約されている");
+
+        await _viewModel.HandleWarningClick(warning);
+
+        _viewModel.WarningMessages.Should().NotContain(w => w.Type == WarningType.CardReaderError);
+
+        await RaiseCardReaderErrorAsync(new InvalidOperationException("reader error"));
+        _viewModel.WarningMessages.Should()
+            .ContainSingle(w => w.Type == WarningType.CardReaderError)
+            .Which.OccurrenceCount.Should().Be(1, "消去後のエラーは 1 回目として数え直す");
+    }
+
+    /// <summary>
+    /// Issue #1811: 集約の入れ替えは自分の種別だけを対象にし、他の種別の警告を巻き添えにしないこと
+    /// （04_機能設計書 §7.4「各チェックメソッドは自分が生成する種別だけを入れ替える」）。
+    /// </summary>
+    [Fact]
+    public async Task OnCardReaderError_他の種別の警告を巻き添えにしないこと()
+    {
+        _viewModel.WarningMessages.Add(new WarningItem
+        {
+            Type = WarningType.BalanceInconsistency,
+            CardIdm = "1111222233334444",
+            DisplayText = "⚠️ 残高の不整合が2件あります（はやかけん 5042）"
+        });
+
+        await RaiseCardReaderErrorAsync(new InvalidOperationException("reader error"));
+        await RaiseCardReaderErrorAsync(new InvalidOperationException("reader error"));
+
+        _viewModel.WarningMessages.Should().ContainSingle(w => w.Type == WarningType.BalanceInconsistency);
+        _viewModel.WarningMessages.Should().ContainSingle(w => w.Type == WarningType.CardReaderError);
+    }
+
+    #endregion
+
     #region AppState列挙型テスト
 
     /// <summary>
@@ -1885,8 +1987,10 @@ public class MainViewModelTests : IDisposable
             n => n.ShowDialog<ICCardManager.Views.Dialogs.CardTypeSelectionDialog>(
                 It.IsAny<Action<ICCardManager.Views.Dialogs.CardTypeSelectionDialog>>()),
             Times.Once, "抑制中に判定を終えた 2 件目は種別選択ダイアログを重ねて開かない");
-        vm.WarningMessages.Count(w => w.Type == WarningType.CardReaderError)
-            .Should().Be(1, "Error ハンドラは 1 回だけ購読されている");
+        // Issue #1811: 同種の警告は 1 件に集約されるため、購読の多重度は件数ではなく
+        // OccurrenceCount（1 回の Error が何回として数えられたか）で見る
+        vm.WarningMessages.Should().ContainSingle(w => w.Type == WarningType.CardReaderError)
+            .Which.OccurrenceCount.Should().Be(1, "Error ハンドラは 1 回だけ購読されている");
         vm.IsCardReadingSuppressed.Should().BeFalse("処理が終われば抑制は解放される");
     }
 
@@ -1923,8 +2027,10 @@ public class MainViewModelTests : IDisposable
         await _dispatcherService.WaitForPendingAsync();
 
         // Assert
-        _viewModel.WarningMessages.Count(w => w.Type == WarningType.CardReaderError)
-            .Should().Be(1, "Error ハンドラは 1 回だけ購読されている");
+        // Issue #1811: 同種の警告は 1 件に集約されるため、購読の多重度は件数ではなく
+        // OccurrenceCount（1 回の Error が何回として数えられたか）で見る
+        _viewModel.WarningMessages.Should().ContainSingle(w => w.Type == WarningType.CardReaderError)
+            .Which.OccurrenceCount.Should().Be(1, "Error ハンドラは 1 回だけ購読されている");
         _cardRepositoryMock.Verify(r => r.GetByIdmAsync(secondIdm, It.IsAny<bool>()), Times.Never,
             "事前読み取り中のタッチは未登録カード処理へ再入しない");
     }

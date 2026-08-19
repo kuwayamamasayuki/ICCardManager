@@ -166,9 +166,12 @@
             </ListView.ItemContainerStyle>
         </ListView>
 
-        <!-- ステータスメッセージ -->
+        <!-- ステータスメッセージ
+             Issue #1811: 保存前確認で「いいえ」を選んだ後は未入力・形式・類似の警告が複数行で残るため、
+             幅ではなく折り返し（TextWrapping）で担保する（development-conventions.md UI/UX原則） -->
         <TextBlock Grid.Row="2"
                    Text="{Binding StatusMessage}"
+                   TextWrapping="Wrap"
                    Foreground="{DynamicResource PrimaryBrush}"
                    FontWeight="Bold"
                    FontSize="{DynamicResource SmallFontSize}"

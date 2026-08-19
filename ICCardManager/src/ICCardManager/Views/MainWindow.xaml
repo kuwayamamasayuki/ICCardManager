@@ -951,9 +951,11 @@
                                         <!-- Issue #1687: 横方向StackPanelは子を無限幅で測定しWrapが効かないため、
                                              DockPanel（ヒント右端＋本文が残り幅で折り返し）で長文警告のはみ出しを防ぐ -->
                                         <DockPanel>
-                                            <!-- Issue #1110: DB接続断時に「クリックして再接続」ヒントを表示 -->
+                                            <!-- Issue #1110: DB接続断時に「クリックして再接続」ヒントを表示
+                                                 Issue #1811: カードリーダーエラーは「クリックして消去」。
+                                                 Text はローカル値にするとスタイルのトリガーで上書きできないため、
+                                                 種別ごとのトリガーで Visibility と Text を併せて設定する -->
                                             <TextBlock DockPanel.Dock="Right"
-                                                       Text="（クリックして再接続）"
                                                        FontSize="{DynamicResource SmallFontSize}"
                                                        Foreground="{DynamicResource SecondaryTextBrush}"
                                                        VerticalAlignment="Center"
@@ -964,6 +966,11 @@
                                                         <Style.Triggers>
                                                             <DataTrigger Binding="{Binding Type}" Value="DatabaseConnectionLost">
                                                                 <Setter Property="Visibility" Value="Visible"/>
+                                                                <Setter Property="Text" Value="（クリックして再接続）"/>
+                                                            </DataTrigger>
+                                                            <DataTrigger Binding="{Binding Type}" Value="CardReaderError">
+                                                                <Setter Property="Visibility" Value="Visible"/>
+                                                                <Setter Property="Text" Value="（クリックして消去）"/>
                                                             </DataTrigger>
                                                         </Style.Triggers>
                                                     </Style>

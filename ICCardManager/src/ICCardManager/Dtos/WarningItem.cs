@@ -61,5 +61,22 @@ namespace ICCardManager.Dtos
         /// 対象カードIDm（LowBalance・BalanceInconsistency時に使用）
         /// </summary>
         public string CardIdm { get; set; }
+
+        /// <summary>
+        /// 同じ種別の警告が繰り返し発生した回数（既定 1）。
+        /// </summary>
+        /// <remarks>
+        /// Issue #1811: <see cref="WarningType.CardReaderError"/> は発生のたびに行を追加すると
+        /// 無限に積み上がるため 1 行に集約し、繰り返し回数をこのプロパティと表示文言に載せる。
+        /// 回数の状態を警告行自身が持つことで、クリックで取り除いた時点で回数も振り出しに戻る。
+        /// <para>
+        /// 数えるのは<b>種別</b>単位であり、原因（履歴の読み取り失敗／残高の読み取り失敗など）が
+        /// 異なっても合算する。文言に載る理由は<b>最新の原因</b>で、いずれも対処は同じ
+        /// （抜き差し・再起動）ため利用者の行動は変わらない。なおカードリーダーの切断は
+        /// <see cref="WarningType.CardReaderConnection"/> として<b>別の行</b>に表示されるため、
+        /// 合算によって切断が隠れることはない。
+        /// </para>
+        /// </remarks>
+        public int OccurrenceCount { get; set; } = 1;
     }
 }

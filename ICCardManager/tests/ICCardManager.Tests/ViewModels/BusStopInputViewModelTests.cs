@@ -1,6 +1,7 @@
 using FluentAssertions;
 using ICCardManager.Data.Repositories;
 using ICCardManager.Models;
+using ICCardManager.Services;
 using ICCardManager.ViewModels;
 using Moq;
 using Xunit;
@@ -20,20 +21,28 @@ public class BusStopInputViewModelTests
 {
     private readonly Mock<ILedgerRepository> _ledgerRepoMock;
     private readonly Mock<ISettingsRepository> _settingsRepoMock;
+    private readonly Mock<IDialogService> _dialogServiceMock;
     private readonly BusStopInputViewModel _viewModel;
 
     public BusStopInputViewModelTests()
     {
         _ledgerRepoMock = new Mock<ILedgerRepository>();
         _settingsRepoMock = new Mock<ISettingsRepository>();
+        _dialogServiceMock = new Mock<IDialogService>();
 
         // バス停サジェストのデフォルト: 空
         _ledgerRepoMock.Setup(r => r.GetBusStopSuggestionsAsync())
             .ReturnsAsync(Enumerable.Empty<(string BusStops, int UsageCount, DateTime? LastUsedDate)>());
 
+        // Issue #1811: 保存前の確認ダイアログは既定で「はい」（警告を承知で保存する）。
+        // 「いいえ」の挙動は各テストで個別に上書きする
+        _dialogServiceMock.Setup(d => d.ShowWarningConfirmation(It.IsAny<string>(), It.IsAny<string>()))
+            .Returns(true);
+
         _viewModel = new BusStopInputViewModel(
             _ledgerRepoMock.Object,
-            _settingsRepoMock.Object);
+            _settingsRepoMock.Object,
+            _dialogServiceMock.Object);
     }
 
     #region InitializeWithDetails（同期版）
@@ -304,6 +313,163 @@ public class BusStopInputViewModelTests
         // Assert
         _viewModel.IsSaved.Should().BeFalse();
         _viewModel.StatusMessage.Should().Be("保存に失敗しました");
+    }
+
+    #endregion
+
+    #region SaveAsync の保存前確認（Issue #1811）
+
+    /// <summary>
+    /// 保存系リポジトリのモックを成功で設定し、指定のバス停名で初期化する。
+    /// </summary>
+    private Ledger ArrangeSaveWithBusStops(params string[] busStops)
+    {
+        var details = busStops
+            .Select((stops, i) => new LedgerDetail
+            {
+                IsBus = true, BusStops = stops, Amount = 200, SequenceNumber = i + 1
+            })
+            .ToList();
+        var ledger = new Ledger { Id = 1, Details = details };
+
+        _settingsRepoMock.Setup(s => s.GetAppSettingsAsync()).ReturnsAsync(new AppSettings());
+        _ledgerRepoMock.Setup(r => r.UpdateDetailBusStopsAsync(
+                It.IsAny<int>(), It.IsAny<List<(int, string)>>()))
+            .Returns(Task.CompletedTask);
+        _ledgerRepoMock.Setup(r => r.UpdateAsync(It.IsAny<Ledger>())).ReturnsAsync(true);
+
+        _viewModel.InitializeWithDetails(ledger, details);
+        return ledger;
+    }
+
+    /// <summary>
+    /// Issue #1811: 未入力・形式・類似の 3 種類の警告は、保存前に 1 つの確認ダイアログへ
+    /// すべて載せて提示すること（修正前は <c>StatusMessage</c> へ順に代入して後の警告が前を上書きし、
+    /// 直後の「保存しました」と <c>IsSaved</c> による Close で読める時間が無かった）。
+    /// 確認ダイアログは処理中スコープの外（<c>IsBusy == false</c>）で出すこと（Issue #1793）。
+    /// </summary>
+    [Fact]
+    public async Task SaveAsync_警告があるときは保存前の確認ダイアログに全警告が載ること()
+    {
+        // Arrange: 未入力 1 件・「～」なし 1 件（「天神」は既存「天神南～博多」とも類似）
+        _viewModel.BusStopSuggestions = new List<string> { "天神南～博多" };
+        ArrangeSaveWithBusStops("", "天神");
+        string? shownMessage = null;
+        bool? busyAtDialog = null;
+        _dialogServiceMock.Setup(d => d.ShowWarningConfirmation(It.IsAny<string>(), It.IsAny<string>()))
+            .Callback<string, string>((m, _) => { shownMessage = m; busyAtDialog = _viewModel.IsBusy; })
+            .Returns(true);
+
+        // Act
+        await _viewModel.SaveAsync();
+
+        // Assert
+        shownMessage.Should().NotBeNull("警告があるときは保存前に確認ダイアログを出す");
+        shownMessage.Should().Contain("未入力のバス停が1件");
+        shownMessage.Should().Contain("「○○～△△」の形式");
+        shownMessage.Should().Contain("「天神」は既存の「天神南～博多」と類似");
+        shownMessage.Should().Contain("保存しますか");
+        busyAtDialog.Should().BeFalse("確認ダイアログは処理中オーバーレイの外で出す（Issue #1793）");
+        _viewModel.IsSaved.Should().BeTrue("「はい」なら保存する");
+    }
+
+    /// <summary>
+    /// Issue #1811: 確認ダイアログで「いいえ」を選ぶと何も保存せず入力画面に留まり、
+    /// 修正の手掛かりとして警告の全文がステータス欄に残ること。
+    /// </summary>
+    [Fact]
+    public async Task SaveAsync_確認ダイアログでいいえを選ぶと保存せず警告がステータス欄に残ること()
+    {
+        // Arrange
+        _viewModel.BusStopSuggestions = new List<string> { "天神南～博多" };
+        var ledger = ArrangeSaveWithBusStops("", "天神");
+        _dialogServiceMock.Setup(d => d.ShowWarningConfirmation(It.IsAny<string>(), It.IsAny<string>()))
+            .Returns(false);
+
+        // Act
+        await _viewModel.SaveAsync();
+
+        // Assert: 保存されない（ダイアログは閉じない）
+        _viewModel.IsSaved.Should().BeFalse();
+        _ledgerRepoMock.Verify(r => r.UpdateDetailBusStopsAsync(It.IsAny<int>(), It.IsAny<List<(int, string)>>()), Times.Never);
+        _ledgerRepoMock.Verify(r => r.UpdateAsync(It.IsAny<Ledger>()), Times.Never);
+        ledger.Details[0].BusStops.Should().Be("", "「いいえ」では★への変換も行わない");
+
+        // Assert: 3 つの警告がすべてステータス欄に残る（上書きされない）
+        _viewModel.StatusMessage.Should().Contain("未入力のバス停が1件");
+        _viewModel.StatusMessage.Should().Contain("「○○～△△」の形式");
+        _viewModel.StatusMessage.Should().Contain("「天神」は既存の「天神南～博多」と類似");
+    }
+
+    /// <summary>
+    /// Issue #1811: 警告が 1 つも無いときは確認ダイアログを挟まず、従来どおり即座に保存すること
+    /// （過剰な確認で返却フローを遅くしない）。
+    /// </summary>
+    [Fact]
+    public async Task SaveAsync_警告がないときは確認ダイアログを出さずに保存すること()
+    {
+        // Arrange: すべて入力済み・形式どおり・類似なし
+        _viewModel.BusStopSuggestions = new List<string> { "薬院～大橋" };
+        ArrangeSaveWithBusStops("天神～博多", "博多～天神");
+
+        // Act
+        await _viewModel.SaveAsync();
+
+        // Assert
+        _dialogServiceMock.Verify(
+            d => d.ShowWarningConfirmation(It.IsAny<string>(), It.IsAny<string>()), Times.Never);
+        _viewModel.IsSaved.Should().BeTrue();
+        _viewModel.StatusMessage.Should().Be("保存しました");
+    }
+
+    /// <summary>
+    /// Issue #1811（コードレビュー指摘）: 同じバス停名を複数行に入力した場合（同一路線を1日に2回利用する等）、
+    /// 行ごとに同じ警告文言が生成される。重複したまま列挙すると確認ダイアログに同じ行が並び、
+    /// 上限件数と「ほか N 件」の残数も重複分で水増しされる。
+    /// </summary>
+    [Fact]
+    public void CollectSaveWarnings_同一文言の類似警告は重複しないこと()
+    {
+        // Arrange: 同じ「天神」を2行に入力（既存「天神南～博多」と部分包含で類似）
+        _viewModel.BusStopSuggestions = new List<string> { "天神南～博多" };
+        ArrangeSaveWithBusStops("天神", "天神");
+
+        // Act
+        var warnings = _viewModel.CollectSaveWarnings();
+
+        // Assert
+        warnings.Should().ContainSingle(w => w.Contains("「天神」は既存の「天神南～博多」と類似"));
+    }
+
+    /// <summary>
+    /// Issue #1811: 類似警告が多数になるとき（「天神」が天神を含む既存候補すべてに一致する等）、
+    /// 確認ダイアログには上限件数まで列挙し、残りは件数で要約すること。
+    /// </summary>
+    [Fact]
+    public async Task SaveAsync_類似警告が上限を超えると残りは件数で要約されること()
+    {
+        // Arrange: 「天神」を含む既存候補を上限 + 2 件用意する
+        var limit = BusStopInputViewModel.MaxListedSimilarWarnings;
+        _viewModel.BusStopSuggestions = Enumerable.Range(1, limit + 2)
+            .Select(i => $"天神～候補{i}")
+            .ToList();
+        ArrangeSaveWithBusStops("天神");
+        string? shownMessage = null;
+        _dialogServiceMock.Setup(d => d.ShowWarningConfirmation(It.IsAny<string>(), It.IsAny<string>()))
+            .Callback<string, string>((m, _) => shownMessage = m)
+            .Returns(true);
+
+        // Act
+        await _viewModel.SaveAsync();
+
+        // Assert
+        shownMessage.Should().NotBeNull();
+        for (var i = 1; i <= limit; i++)
+        {
+            shownMessage.Should().Contain($"「天神～候補{i}」と類似");
+        }
+        shownMessage.Should().NotContain($"「天神～候補{limit + 1}」と類似");
+        shownMessage.Should().Contain("ほか2件");
     }
 
     #endregion
@@ -1054,6 +1220,45 @@ public class BusStopInputItemTests
 
         // Assert
         warnings.Should().BeEmpty("完全一致は類似警告の対象外");
+    }
+
+    /// <summary>
+    /// Issue #1811（コードレビュー指摘）: 「↑往復」ボタン（Issue #1570）は前行の「A～B」から
+    /// 「B～A」を意図的に生成するため、完全な逆順は取り違えではなく正当な往復入力である。
+    /// これを類似警告に含めると、往復入力のたびに保存前の確認ダイアログが出て
+    /// 本来見せたい取り違え警告（天神／天神南）が埋もれる。
+    /// </summary>
+    [Fact]
+    public void DetectSimilarBusStops_完全な逆順は往復として検出しないこと()
+    {
+        // Arrange: 「往復」ボタンで生成される値
+        var existing = new List<string> { "天神～博多" };
+        var newEntries = new List<string> { "博多～天神" };
+
+        // Act
+        var warnings = BusStopInputViewModel.DetectSimilarBusStops(existing, newEntries);
+
+        // Assert
+        warnings.Should().BeEmpty("完全な逆順はアプリ自身が「往復」ボタンで生成する正当な入力");
+    }
+
+    /// <summary>
+    /// Issue #1811（コードレビュー指摘）: 逆順の除外が広すぎず、取り違えの疑い（部分包含）は
+    /// 引き続き警告されること。除外だけを足すと対象の入力を無条件に通す実装でも緑になるため対で固定する。
+    /// </summary>
+    [Fact]
+    public void DetectSimilarBusStops_逆順を除外しても部分包含は検出すること()
+    {
+        // Arrange: 「天神」と「天神南～博多」の取り違え（Issue #1811 の故障シナリオ）
+        var existing = new List<string> { "天神南～博多" };
+        var newEntries = new List<string> { "天神" };
+
+        // Act
+        var warnings = BusStopInputViewModel.DetectSimilarBusStops(existing, newEntries);
+
+        // Assert
+        warnings.Should().ContainSingle()
+            .Which.Should().Contain("天神").And.Contain("天神南～博多");
     }
 
     [Fact]
