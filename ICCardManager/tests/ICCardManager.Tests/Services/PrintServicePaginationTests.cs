@@ -164,7 +164,7 @@ public class PrintServicePaginationTests
         var pages = PrintService.GroupRowsByPage(
             new List<ReportRow>(),
             pageWidth: 800, pageHeight: 600,
-            summaryRowCount: 0, isFirstCard: true);
+            summaryRowCount: 0);
 
         pages.Should().BeEmpty();
     }
@@ -180,7 +180,7 @@ public class PrintServicePaginationTests
 
         var pages = PrintService.GroupRowsByPage(
             rows, pageWidth: 800, pageHeight: 600,
-            summaryRowCount: 2, isFirstCard: true);
+            summaryRowCount: 2);
 
         pages.Should().HaveCount(1);
         pages[0].Should().HaveCount(5);
@@ -198,7 +198,7 @@ public class PrintServicePaginationTests
 
         var pages = PrintService.GroupRowsByPage(
             rows, pageWidth: 800, pageHeight: 400,
-            summaryRowCount: 2, isFirstCard: true);
+            summaryRowCount: 2);
 
         pages.Count.Should().BeGreaterThan(1);
         // すべての行が漏れなく含まれること
@@ -217,7 +217,7 @@ public class PrintServicePaginationTests
 
         var pages = PrintService.GroupRowsByPage(
             rows, pageWidth: 800, pageHeight: 400,
-            summaryRowCount: 2, isFirstCard: true);
+            summaryRowCount: 2);
 
         var flattened = pages.SelectMany(p => p).Select(r => r.Summary).ToList();
         flattened.Should().Equal(rows.Select(r => r.Summary));
@@ -238,12 +238,12 @@ public class PrintServicePaginationTests
         // 横向き: 800x600
         var landscapePages = PrintService.GroupRowsByPage(
             rows, pageWidth: 800, pageHeight: 600,
-            summaryRowCount: 0, isFirstCard: true);
+            summaryRowCount: 0);
 
         // 縦向き: 600x800（同じ面積）
         var portraitPages = PrintService.GroupRowsByPage(
             rows, pageWidth: 600, pageHeight: 800,
-            summaryRowCount: 0, isFirstCard: true);
+            summaryRowCount: 0);
 
         // 縦向きの方が行高さが大きいため、ページ数は同じか多くなる
         portraitPages.Count.Should().BeGreaterThanOrEqualTo(landscapePages.Count);
@@ -267,12 +267,12 @@ public class PrintServicePaginationTests
         // 合計行0個: 全4行が1ページに
         var pagesNoSummary = PrintService.GroupRowsByPage(
             rows, pageWidth: 800, pageHeight: 320,
-            summaryRowCount: 0, isFirstCard: true);
+            summaryRowCount: 0);
 
         // 合計行5個: 合計分110pt確保 → 1ページに収まる行数が減る
         var pagesManySummary = PrintService.GroupRowsByPage(
             rows, pageWidth: 800, pageHeight: 320,
-            summaryRowCount: 5, isFirstCard: true);
+            summaryRowCount: 5);
 
         // 全行は両方で保持
         pagesNoSummary.SelectMany(p => p).Should().HaveCount(4);
@@ -291,7 +291,7 @@ public class PrintServicePaginationTests
 
         var pages = PrintService.GroupRowsByPage(
             rows, pageWidth: 800, pageHeight: 600,
-            summaryRowCount: 0, isFirstCard: true);
+            summaryRowCount: 0);
 
         pages.Should().HaveCount(1);
         pages[0].Should().ContainSingle();
@@ -314,7 +314,7 @@ public class PrintServicePaginationTests
 
         var pages = PrintService.GroupRowsByPage(
             rows, pageWidth: 800, pageHeight: 400,
-            summaryRowCount: 1, isFirstCard: true);
+            summaryRowCount: 1);
 
         pages.SelectMany(p => p).Should().HaveCount(5);
     }
@@ -343,8 +343,7 @@ public class PrintServicePaginationTests
             rows,
             pageWidth: A4LandscapeWidth,
             pageHeight: A4LandscapeHeight,
-            summaryRowCount: 2, // 月計 + 累計
-            isFirstCard: true);
+            summaryRowCount: 2); // 月計 + 累計
 
         pages.Count.Should().Be(2,
             "A4横向きで30行（短摘要）は2ページに分割される");
@@ -365,8 +364,7 @@ public class PrintServicePaginationTests
             rows,
             pageWidth: A4LandscapeWidth,
             pageHeight: A4LandscapeHeight,
-            summaryRowCount: 2,
-            isFirstCard: true);
+            summaryRowCount: 2);
 
         // 45行が複数ページに分割される
         pages.Count.Should().BeGreaterThan(1);
@@ -391,8 +389,7 @@ public class PrintServicePaginationTests
         var pages = PrintService.GroupRowsByPage(
             rows,
             pageWidth: 800, pageHeight: 400,
-            summaryRowCount: 2,
-            isFirstCard: true);
+            summaryRowCount: 2);
 
         pages.Count.Should().BeGreaterThan(1);
         // 最終ページは空であってはならない
@@ -425,12 +422,12 @@ public class PrintServicePaginationTests
         // summary なし（月計なし相当）
         var pagesNoSummary = PrintService.GroupRowsByPage(
             rows, pageWidth: 800, pageHeight: 300,
-            summaryRowCount: 0, isFirstCard: true);
+            summaryRowCount: 0);
 
         // summary 3行（月計+累計+繰越）を最終ページに確保
         var pagesWithSummary = PrintService.GroupRowsByPage(
             rows, pageWidth: 800, pageHeight: 300,
-            summaryRowCount: 3, isFirstCard: true);
+            summaryRowCount: 3);
 
         // 両方とも20行を保持
         pagesNoSummary.SelectMany(p => p).Should().HaveCount(20);
@@ -454,12 +451,12 @@ public class PrintServicePaginationTests
         var landscapePages = PrintService.GroupRowsByPage(
             rows,
             pageWidth: A4LandscapeWidth, pageHeight: A4LandscapeHeight,
-            summaryRowCount: 2, isFirstCard: true);
+            summaryRowCount: 2);
 
         var portraitPages = PrintService.GroupRowsByPage(
             rows,
             pageWidth: A4PortraitWidth, pageHeight: A4PortraitHeight,
-            summaryRowCount: 2, isFirstCard: true);
+            summaryRowCount: 2);
 
         // 縦向きは1ページあたり行数が多いため、ページ数は少ないか同じ
         portraitPages.Count.Should().BeLessThanOrEqualTo(landscapePages.Count,
@@ -490,7 +487,7 @@ public class PrintServicePaginationTests
 
         var pages = PrintService.GroupRowsByPage(
             rows, pageWidth: 800, pageHeight: nearZeroDataHeight,
-            summaryRowCount: 0, isFirstCard: true);
+            summaryRowCount: 0);
 
         // 1ページあたり1行しか入らないため、5行なら5ページに分割される
         pages.Should().HaveCount(5,
@@ -511,7 +508,7 @@ public class PrintServicePaginationTests
         // summaryRowCount=100 → summary 分だけで 2200pt 必要（ページ容量超過）
         var pages = PrintService.GroupRowsByPage(
             rows, pageWidth: 800, pageHeight: 600,
-            summaryRowCount: 100, isFirstCard: true);
+            summaryRowCount: 100);
 
         // 10行は欠落なく分割される
         pages.SelectMany(p => p).Should().HaveCount(10);
@@ -543,8 +540,7 @@ public class PrintServicePaginationTests
             rows,
             pageWidth: A4LandscapeWidth,
             pageHeight: A4LandscapeHeight,
-            summaryRowCount: 1, // 月計のみ
-            isFirstCard: true);
+            summaryRowCount: 1); // 月計のみ
 
         pages.Should().HaveCount(2,
             "本文16行は収まるが合計行が収まらないため、最終行を合計行と一緒に次ページへ送る");
@@ -567,8 +563,7 @@ public class PrintServicePaginationTests
             rows,
             pageWidth: A4LandscapeWidth,
             pageHeight: A4LandscapeHeight,
-            summaryRowCount: 2, // 月計 + 累計
-            isFirstCard: true);
+            summaryRowCount: 2); // 月計 + 累計
 
         pages.Should().HaveCount(2,
             "本文15行＋合計2行は1ページに収まらないため2ページに分割される");
@@ -589,8 +584,7 @@ public class PrintServicePaginationTests
             rows,
             pageWidth: A4LandscapeWidth,
             pageHeight: A4LandscapeHeight,
-            summaryRowCount: 1,
-            isFirstCard: true);
+            summaryRowCount: 1);
 
         pages.Should().HaveCount(1, "本文15行＋合計1行=352pt は 365pt に収まる");
         pages[0].Should().HaveCount(15);

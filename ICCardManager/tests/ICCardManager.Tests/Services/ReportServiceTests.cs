@@ -2976,9 +2976,15 @@ public class ReportServiceTests : IDisposable
         await _reportService.CreateMonthlyReportAsync(cardIdm, year, 4, outputPath);
 
         // Act 2 - 同じ4月を1件へ減らして再生成（1ページに縮小）
+        // 履歴の削除（#635）は ledger 行の物理削除なので、年度範囲クエリ
+        // （GetByDateRangeAsync）も月次クエリと同時に縮小する — 実 DB で
+        // 成立し得ない「月次は1件・年度範囲は13件」という組み合わせを作らない
         _ledgerRepositoryMock
             .Setup(r => r.GetByMonthAsync(cardIdm, year, 4))
             .ReturnsAsync(aprilLedgersSmall);
+        _ledgerRepositoryMock
+            .Setup(r => r.GetByDateRangeAsync(cardIdm, It.IsAny<DateTime>(), It.IsAny<DateTime>()))
+            .ReturnsAsync(aprilLedgersSmall.Concat(mayLedgers).ToList());
         await _reportService.CreateMonthlyReportAsync(cardIdm, year, 4, outputPath);
 
         // Act 3 - 5月を同じファイルに追加
