@@ -1650,4 +1650,121 @@ public class StaffManageViewModelTests
     }
 
     #endregion
+
+    #region Issue #1816: 職員証読み取りの fire-and-forget が例外を握りつぶさないこと
+
+    /// <summary>
+    /// 読み取り中に DB 例外が出たら、例外を呼び出し元へ抜かずステータスへ案内すること
+    /// </summary>
+    [Fact]
+    public async Task HandleCardReadAsync_読み取り中の例外_ステータスへ案内し例外を伝播しないこと()
+    {
+        // Arrange
+        var idm = "0102030405060708";
+        _staffRepositoryMock.Setup(r => r.GetByIdmAsync(idm, true))
+            .ThrowsAsync(new InvalidOperationException("database is locked"));
+        _viewModel.StartNewStaff();
+
+        // Act
+        Func<Task> act = () => _viewModel.HandleCardReadAsync(idm);
+
+        // Assert
+        await act.Should().NotThrowAsync("fire-and-forget の呼び出し元は例外を観測できないため");
+        _viewModel.IsStatusError.Should().BeTrue();
+        _viewModel.StatusMessage.Should().NotContain(
+            "database is locked", "生の例外メッセージを職員へ出さないこと（Issue #1614）");
+        _viewModel.StatusMessage.Should().EndWith("してください。");
+        _viewModel.IsWaitingForCard.Should().BeTrue("タッチ待ちへ戻して再試行できること");
+        _viewModel.EditStaffIdm.Should().BeEmpty("確認の済んでいない IDm をフォームに残さないこと");
+    }
+
+    /// <summary>
+    /// 復元が確定した後の後処理で例外が出ても、読み取り失敗として案内しないこと
+    /// </summary>
+    /// <remarks>
+    /// Issue #1816 のコードレビューで判明。<c>RestoreAsync</c> は既にコミット済みなので、
+    /// 「もう一度職員証をタッチしてください」と案内すると、職員は復元済みの職員証を再タッチして
+    /// 「既に登録されています」を見ることになる（#1727 / #1805）。
+    /// </remarks>
+    [Fact]
+    public async Task HandleCardReadAsync_復元後の後処理で例外_復元は記録済みと案内し再タッチを促さないこと()
+    {
+        // Arrange
+        var idm = "FFFF000000000001";
+        _staffRepositoryMock.Setup(r => r.GetByIdmAsync(idm, true)).ReturnsAsync(new Staff
+        {
+            StaffIdm = idm,
+            Name = "田中太郎",
+            Number = "001",
+            IsDeleted = true
+        });
+        _staffRepositoryMock.Setup(r => r.RestoreAsync(idm)).ReturnsAsync(true);
+        _staffRepositoryMock.Setup(r => r.GetByIdmAsync(idm, false)).ReturnsAsync(new Staff
+        {
+            StaffIdm = idm,
+            Name = "田中太郎",
+            Number = "001"
+        });
+        // 復元は確定済み。その後の一覧再読込が共有モードのロックで失敗する
+        _staffRepositoryMock.Setup(r => r.GetAllAsync())
+            .ThrowsAsync(new InvalidOperationException("database is locked"));
+        _viewModel.StartNewStaff();
+
+        // Act
+        Func<Task> act = () => _viewModel.HandleCardReadAsync(idm);
+
+        // Assert
+        await act.Should().NotThrowAsync();
+        _viewModel.StatusMessage.Should().Contain(
+            "記録済み", "復元は確定しているため、失敗したかのように案内しないこと");
+        _viewModel.StatusMessage.Should().NotContain(
+            "もう一度職員証をタッチ", "再タッチを促すと「既に登録されています」に行き着く");
+        _viewModel.StatusMessage.Should().NotContain(
+            "database is locked", "生の例外メッセージを職員へ出さないこと（Issue #1614）");
+        _viewModel.StatusMessage.Should().EndWith("してください。", "行動指示で終わること");
+        _viewModel.IsWaitingForCard.Should().BeFalse("再タッチを待たないこと");
+    }
+
+    /// <summary>
+    /// 対のテスト: 正常に読み取れた場合はタッチ待ちを解除しエラーにしないこと
+    /// </summary>
+    [Fact]
+    public async Task HandleCardReadAsync_未登録職員証_タッチ待ちを解除しエラーにしないこと()
+    {
+        // Arrange
+        var idm = "0102030405060708";
+        _staffRepositoryMock.Setup(r => r.GetByIdmAsync(idm, true)).ReturnsAsync((Staff?)null);
+        _viewModel.StartNewStaff();
+
+        // Act
+        await _viewModel.HandleCardReadAsync(idm);
+
+        // Assert
+        _viewModel.IsStatusError.Should().BeFalse();
+        _viewModel.IsWaitingForCard.Should().BeFalse();
+        _viewModel.EditStaffIdm.Should().Be(idm);
+    }
+
+    /// <summary>
+    /// Issue #1816: タッチ待ちでない状態で本体が実行されても、状態を書き換えないこと
+    /// </summary>
+    [Fact]
+    public async Task HandleCardReadAsync_タッチ待ちでなければ何もしないこと()
+    {
+        // Arrange
+        var firstIdm = "0102030405060708";
+        _staffRepositoryMock.Setup(r => r.GetByIdmAsync(It.IsAny<string>(), true)).ReturnsAsync((Staff?)null);
+        _viewModel.StartNewStaff();
+        await _viewModel.HandleCardReadAsync(firstIdm);
+        _viewModel.IsWaitingForCard.Should().BeFalse("前提: 1 件目の読み取りでタッチ待ちが解除される");
+
+        // Act
+        await _viewModel.HandleCardReadAsync("0807060504030201");
+
+        // Assert
+        _viewModel.EditStaffIdm.Should().Be(firstIdm, "2 件目が 1 件目の読み取り結果を上書きしないこと");
+        _staffRepositoryMock.Verify(r => r.GetByIdmAsync("0807060504030201", true), Times.Never);
+    }
+
+    #endregion
 }

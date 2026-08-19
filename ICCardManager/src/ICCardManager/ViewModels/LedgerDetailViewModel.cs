@@ -380,6 +380,11 @@ namespace ICCardManager.ViewModels
         }
 
         /// <summary>
+        /// 「すべて統合」で全項目へ付与するグループ番号（Issue #1816）
+        /// </summary>
+        internal const int MergedGroupId = 1;
+
+        /// <summary>
         /// 分割線の状態からGroupIdを再計算
         /// 連続する分割線なしのアイテムは同じグループになる
         /// </summary>
@@ -387,16 +392,22 @@ namespace ICCardManager.ViewModels
         /// Issue #633: 分割線が1つでも存在する場合、単独アイテムにもGroupIdを付与する。
         /// これにより、SummaryGeneratorがGroupIdベースの摘要生成パスを使用し、
         /// ユーザーの明示的な分割操作が摘要に正しく反映される。
-        /// 分割線がない場合はすべてのGroupIdをnullにして自動検出モードに戻す。
+        /// <para>
+        /// Issue #1816: <b>分割線が 1 本も無い状態も「利用者が指定した単一グループ」として扱う</b>
+        /// （全項目に <see cref="MergedGroupId"/>）。本メソッドを呼ぶのは分割線の操作
+        /// （<c>ToggleDividerAt</c> / <c>SplitAll</c>）だけであり、そこへ至った時点で利用者は
+        /// グループ分けを明示的に指定している。ここで null（自動検出）へ落とすと、
+        /// 「すべて統合」の直後に分割線を 1 回 ON→OFF しただけで統合が黙って取り消され、
+        /// 画面の見た目（分割線なし）は同じまま保存時の摘要だけが分かれる。
+        /// 自動検出へ戻す唯一の経路は <see cref="ResetToAutoDetect"/> であり、
+        /// 「分割線が無い」という 1 つの見た目に 2 つの意味を持たせない。
+        /// </para>
         /// </remarks>
         private void RecalculateGroupsFromDividers()
         {
             if (Items.Count == 0) return;
 
-            // 分割線が存在するかチェック
-            bool hasDividers = Items.Any(item => item.ShowDividerBelow);
-
-            int currentGroupId = 1;
+            int currentGroupId = MergedGroupId;
             int groupStartIndex = 0;
 
             for (int i = 0; i < Items.Count; i++)
@@ -405,24 +416,14 @@ namespace ICCardManager.ViewModels
 
                 if (item.ShowDividerBelow || i == Items.Count - 1)
                 {
-                    if (hasDividers)
+                    // 全アイテムにGroupIdを付与する（単独アイテムも含む。これにより
+                    // 摘要生成でGroupIdパスが使われる）。分割線が 1 本も無い場合は
+                    // ループが最終行で 1 度だけ回り、全項目が MergedGroupId になる（Issue #1816）
+                    for (int j = groupStartIndex; j <= i; j++)
                     {
-                        // 分割線が存在する場合: 全アイテムにGroupIdを付与
-                        // （単独アイテムも含む。これにより摘要生成でGroupIdパスが使われる）
-                        for (int j = groupStartIndex; j <= i; j++)
-                        {
-                            Items[j].GroupId = currentGroupId;
-                        }
-                        currentGroupId++;
+                        Items[j].GroupId = currentGroupId;
                     }
-                    else
-                    {
-                        // 分割線なし: GroupIdをクリアして自動検出モードに戻す
-                        for (int j = groupStartIndex; j <= i; j++)
-                        {
-                            Items[j].GroupId = null;
-                        }
-                    }
+                    currentGroupId++;
 
                     // 次のグループの開始位置
                     groupStartIndex = i + 1;
@@ -503,8 +504,18 @@ namespace ICCardManager.ViewModels
         }
 
         /// <summary>
-        /// すべて統合（すべての分割線を削除してグループ化）
+        /// すべて統合（すべての分割線を削除し、全項目を1つのグループにする）
         /// </summary>
+        /// <remarks>
+        /// Issue #1816: 分割線を消したうえで <c>RecalculateGroupsFromDividers()</c> を呼ぶと、
+        /// 「分割線なし＝自動検出モード」の分岐に落ちて全項目の <c>GroupId</c> が null になり、
+        /// <see cref="ResetToAutoDetect"/> と同一の動作になっていた。
+        /// 自動検出では非連続区間が「鉄道（A駅～B駅、C駅～D駅）」のまま分かれるため、
+        /// 「1つのグループに統合しました」という案内と実際の摘要が食い違う。
+        /// ここでは <c>GroupId = 1</c> を明示付与して「利用者が1グループを指定した」ことを表し、
+        /// <c>SummaryGenerator</c> の GroupId パス（Issue #484）へ載せる。
+        /// 自動検出へ戻したい場合は <see cref="ResetToAutoDetect"/>（GroupId = null）を使う。
+        /// </remarks>
         [RelayCommand]
         private void MergeAll()
         {
@@ -514,14 +525,13 @@ namespace ICCardManager.ViewModels
                 return;
             }
 
-            // すべての分割線を削除
+            // すべての分割線を削除し、全項目を単一グループとして明示する
             foreach (var item in Items)
             {
                 item.ShowDividerBelow = false;
+                item.GroupId = MergedGroupId;
             }
 
-            // グループを再計算（すべてが1つのグループになる）
-            RecalculateGroupsFromDividers();
             UpdateGroupColors();
             UpdateDetailCountDisplay();
             HasChanges = true;

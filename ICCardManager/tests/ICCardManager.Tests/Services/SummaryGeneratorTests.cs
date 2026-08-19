@@ -760,4 +760,313 @@ public class SummaryGeneratorTests : IDisposable
     }
 
     #endregion
+
+    #region Issue #1816: 「すべて統合」で指定した単一グループの摘要
+
+    /// <summary>
+    /// 同一 GroupId の非連続区間は1区間（始発～終着）へ統合されること
+    /// </summary>
+    /// <remarks>
+    /// 履歴詳細画面の「すべて統合」（Issue #1816）は全項目へ同一 GroupId を付ける。
+    /// グループ内は自動判定に委ねている（Issue #548）ため、乗継でも往復でもない
+    /// 非連続区間は「博多～天神、薬院～大橋」と分かれたままだった。
+    /// 利用者が明示的に1グループを指定した以上、摘要も1区間に畳む。
+    /// </remarks>
+    [Fact]
+    public void Generate_同一GroupIdの非連続区間_始発から終着の1区間に統合される()
+    {
+        // Arrange: FeliCa順（新しい順）。2区間目（新しい）が先
+        var details = new List<LedgerDetail>
+        {
+            new()
+            {
+                EntryStation = "薬院",
+                ExitStation = "大橋",
+                Amount = 210,
+                UseDate = new DateTime(2026, 2, 10, 15, 0, 0),
+                Balance = 530,
+                SequenceNumber = 1,
+                GroupId = 1
+            },
+            new()
+            {
+                EntryStation = "博多",
+                ExitStation = "天神",
+                Amount = 260,
+                UseDate = new DateTime(2026, 2, 10, 10, 0, 0),
+                Balance = 740,
+                SequenceNumber = 2,
+                GroupId = 1
+            }
+        };
+
+        // Act
+        var result = _generator.Generate(details);
+
+        // Assert
+        result.Should().Be("鉄道（博多～大橋）");
+    }
+
+    /// <summary>
+    /// 対のテスト: GroupId なし（自動検出）の非連続区間は従来どおり複数区間のまま
+    /// </summary>
+    /// <remarks>
+    /// 統合の畳み込みが「明示的なグループ」に限定されていることを固定する。
+    /// これが無いと、自動検出まで1区間へ畳む実装でも緑になる。
+    /// </remarks>
+    [Fact]
+    public void Generate_GroupIdなしの非連続区間_従来どおり複数区間のまま()
+    {
+        // Arrange
+        var details = new List<LedgerDetail>
+        {
+            new()
+            {
+                EntryStation = "薬院",
+                ExitStation = "大橋",
+                Amount = 210,
+                UseDate = new DateTime(2026, 2, 10, 15, 0, 0),
+                Balance = 530,
+                SequenceNumber = 1,
+                GroupId = null
+            },
+            new()
+            {
+                EntryStation = "博多",
+                ExitStation = "天神",
+                Amount = 260,
+                UseDate = new DateTime(2026, 2, 10, 10, 0, 0),
+                Balance = 740,
+                SequenceNumber = 2,
+                GroupId = null
+            }
+        };
+
+        // Act
+        var result = _generator.Generate(details);
+
+        // Assert
+        result.Should().Be("鉄道（博多～天神、薬院～大橋）");
+    }
+
+    /// <summary>
+    /// 対のテスト: 同一 GroupId の往復は「往復」表記を維持する（畳み込みで情報を失わない）
+    /// </summary>
+    /// <remarks>
+    /// Issue #548 が「グループ内でも往復を自動判定する」ことにした理由（first/last だと「A～A」）を
+    /// Issue #1816 の畳み込みが壊していないことを固定する。
+    /// </remarks>
+    [Fact]
+    public void Generate_同一GroupIdの往復_往復表記を維持する()
+    {
+        // Arrange
+        var details = new List<LedgerDetail>
+        {
+            new()
+            {
+                EntryStation = "天神",
+                ExitStation = "博多",
+                Amount = 260,
+                UseDate = new DateTime(2026, 2, 10, 15, 0, 0),
+                Balance = 740,
+                SequenceNumber = 1,
+                GroupId = 1
+            },
+            new()
+            {
+                EntryStation = "博多",
+                ExitStation = "天神",
+                Amount = 260,
+                UseDate = new DateTime(2026, 2, 10, 10, 0, 0),
+                Balance = 1000,
+                SequenceNumber = 2,
+                GroupId = 1
+            }
+        };
+
+        // Act
+        var result = _generator.Generate(details);
+
+        // Assert
+        result.Should().Be("鉄道（博多～天神 往復）");
+    }
+
+    /// <summary>
+    /// 同一 GroupId に往復と別区間が混在する場合、往復表記を維持し畳み込まないこと
+    /// </summary>
+    /// <remarks>
+    /// Issue #1816 のコードレビューで判明。畳み込みの条件を「区切り文字『、』が残っているか」
+    /// で書くと、「A～B 往復、C～D」も畳み込みの対象になる。畳むと往復の情報が失われるうえ、
+    /// 「博多～大橋」という<b>実際には乗っていない区間</b>が 6 年保存の台帳へ記録される。
+    /// </remarks>
+    [Fact]
+    public void Generate_同一GroupIdに往復と別区間が混在_往復表記を維持し畳み込まないこと()
+    {
+        // Arrange: FeliCa順（新しい順）。博多→天神→博多（往復）のあとに薬院→大橋
+        var details = new List<LedgerDetail>
+        {
+            new()
+            {
+                EntryStation = "薬院",
+                ExitStation = "大橋",
+                Amount = 210,
+                UseDate = new DateTime(2026, 2, 10, 18, 0, 0),
+                Balance = 320,
+                SequenceNumber = 1,
+                GroupId = 1
+            },
+            new()
+            {
+                EntryStation = "天神",
+                ExitStation = "博多",
+                Amount = 260,
+                UseDate = new DateTime(2026, 2, 10, 15, 0, 0),
+                Balance = 530,
+                SequenceNumber = 2,
+                GroupId = 1
+            },
+            new()
+            {
+                EntryStation = "博多",
+                ExitStation = "天神",
+                Amount = 260,
+                UseDate = new DateTime(2026, 2, 10, 10, 0, 0),
+                Balance = 790,
+                SequenceNumber = 3,
+                GroupId = 1
+            }
+        };
+
+        // Act
+        var result = _generator.Generate(details);
+
+        // Assert
+        result.Should().Contain("往復", "往復の情報を畳み込みで失わないこと");
+        result.Should().NotBe("鉄道（博多～大橋）", "乗っていない区間を作らないこと");
+    }
+
+    /// <summary>
+    /// 同一 GroupId で始点と終点が同一駅の場合、「A駅～A駅」へ畳み込まないこと
+    /// </summary>
+    /// <remarks>
+    /// Issue #1816 のコードレビューで判明。往路は鉄道、復路は別路線で戻る（間に徒歩・バスが入る）
+    /// ケースでは始点＝終点になる。畳むと Issue #548 が自動判定パスを導入して避けたはずの
+    /// 無意味な摘要「博多～博多」が台帳・物品出納簿へ記録される。
+    /// </remarks>
+    [Fact]
+    public void Generate_同一GroupIdで始点と終点が同一駅_畳み込まないこと()
+    {
+        // Arrange: 博多→天神（往路）／薬院→博多（復路。天神から薬院までは徒歩）
+        var details = new List<LedgerDetail>
+        {
+            new()
+            {
+                EntryStation = "薬院",
+                ExitStation = "博多",
+                Amount = 260,
+                UseDate = new DateTime(2026, 2, 10, 15, 0, 0),
+                Balance = 530,
+                SequenceNumber = 1,
+                GroupId = 1
+            },
+            new()
+            {
+                EntryStation = "博多",
+                ExitStation = "天神",
+                Amount = 260,
+                UseDate = new DateTime(2026, 2, 10, 10, 0, 0),
+                Balance = 790,
+                SequenceNumber = 2,
+                GroupId = 1
+            }
+        };
+
+        // Act
+        var result = _generator.Generate(details);
+
+        // Assert
+        result.Should().Be("鉄道（博多～天神、薬院～博多）");
+    }
+
+    /// <summary>
+    /// 対のテスト: 同一 GroupId の乗継は従来どおり始発～終着（畳み込みの有無で結果が変わらない）
+    /// </summary>
+    [Fact]
+    public void Generate_同一GroupIdの乗継_始発から終着のまま()
+    {
+        // Arrange
+        var details = new List<LedgerDetail>
+        {
+            new()
+            {
+                EntryStation = "天神",
+                ExitStation = "薬院",
+                Amount = 210,
+                UseDate = new DateTime(2026, 2, 10, 10, 30, 0),
+                Balance = 530,
+                SequenceNumber = 1,
+                GroupId = 1
+            },
+            new()
+            {
+                EntryStation = "博多",
+                ExitStation = "天神",
+                Amount = 260,
+                UseDate = new DateTime(2026, 2, 10, 10, 0, 0),
+                Balance = 740,
+                SequenceNumber = 2,
+                GroupId = 1
+            }
+        };
+
+        // Act
+        var result = _generator.Generate(details);
+
+        // Assert
+        result.Should().Be("鉄道（博多～薬院）");
+    }
+
+    /// <summary>
+    /// 対のテスト: 端点の駅名が解決できていない場合は畳まない（解決済みの駅名を捨てない）
+    /// </summary>
+    /// <remarks>
+    /// Issue #1816 のコードレビュー: 「博多～?、薬院～大橋」を畳むと端点が「?」になり、
+    /// 解決できていた駅名まで失った摘要が 6 年保存の台帳へ入る。畳まない側へ倒す。
+    /// </remarks>
+    [Fact]
+    public void Generate_同一GroupIdで端点の駅名が不明_畳み込まないこと()
+    {
+        // Arrange: 時系列で最も古いのが「薬院→大橋」、新しいのが「博多→?」（運賃ありの片側欠落）
+        var details = new List<LedgerDetail>
+        {
+            new()
+            {
+                EntryStation = "博多",
+                ExitStation = null,
+                Amount = 260,
+                UseDate = new DateTime(2026, 2, 10, 15, 0, 0),
+                Balance = 530,
+                SequenceNumber = 1,
+                GroupId = 1
+            },
+            new()
+            {
+                EntryStation = "薬院",
+                ExitStation = "大橋",
+                Amount = 210,
+                UseDate = new DateTime(2026, 2, 10, 10, 0, 0),
+                Balance = 790,
+                SequenceNumber = 2,
+                GroupId = 1
+            }
+        };
+
+        // Act
+        var result = _generator.Generate(details);
+
+        // Assert
+        result.Should().Be("鉄道（薬院～大橋、博多～?）");
+    }
+
+    #endregion
 }
