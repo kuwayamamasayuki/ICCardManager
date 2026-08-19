@@ -1798,10 +1798,13 @@ public partial class MainViewModel : ViewModelBase
 
                 if (++clampAttempts >= MaxHistoryPageClampRetries)
                 {
+                    // IDm はログへ生で出さない（IdmMasker を通す）。
+                    // 障害調査で必要なのはカードの特定であり、管理番号があれば足りる。
                     _logger?.LogWarning(
                         "履歴ページのクランプが {Attempts} 回連続で発生したため再取得を打ち切りました。" +
-                        "カード={CardIdm} 期間={From:yyyy-MM-dd}～{To:yyyy-MM-dd} 総件数={TotalCount}",
-                        clampAttempts, HistoryCard.CardIdm, HistoryFromDate, HistoryToDate, totalCount);
+                        "カード={CardIdm}（管理番号={CardNumber}） 期間={From:yyyy-MM-dd}～{To:yyyy-MM-dd} 総件数={TotalCount}",
+                        clampAttempts, IdmMasker.Mask(HistoryCard.CardIdm), HistoryCard.CardNumber,
+                        HistoryFromDate, HistoryToDate, totalCount);
                     break;
                 }
             }
