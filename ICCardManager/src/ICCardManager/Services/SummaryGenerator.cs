@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
+using ICCardManager.Common;
 using ICCardManager.Models;
 
 namespace ICCardManager.Services
@@ -1140,21 +1141,65 @@ namespace ICCardManager.Services
         /// <remarks>
         /// 繰越レコードの日付は「繰越月の翌月1日」とする。
         /// 例: 2月9日に「1月から繰越」→ 2月1日、1月15日に「12月から繰越」→ 1月1日。
-        /// 翌月が登録月より後の場合は前年のデータとみなす。
-        /// 例: 2月15日に「11月から繰越」→ 前年12月1日。
+        /// 繰越月は「登録月以前に最後に現れた同月」とみなす。
+        /// 例: 2月15日に「11月から繰越」→ 前年11月が繰越月なので前年12月1日。
+        /// 例: 2月20日に「2月から繰越」→ 当年2月が繰越月なので当年3月1日（Issue #1812）。
+        ///
+        /// Issue #1812: 旧実装は先に「翌月」を求めてから年を判定していたため、
+        /// 12月→1月の折り返し後の値で大小比較することになり、
+        /// 繰越月＝登録月（翌月が必ず登録月より後になる）で1年前へ落ちていた。
+        /// 繰越月そのものの年を先に確定し、AddMonths(1) に桁上がりを任せる。
         /// </remarks>
+        /// <exception cref="ArgumentOutOfRangeException">carryoverMonthが1〜12の範囲外の場合</exception>
         public static DateTime GetMidYearCarryoverDate(int carryoverMonth, DateTime registrationDate)
         {
-            var nextMonth = (carryoverMonth % 12) + 1;
-            var recordYear = registrationDate.Year;
-
-            // 翌月が登録月より後の場合、前年のデータ
-            if (nextMonth > registrationDate.Month)
+            if (carryoverMonth < 1 || carryoverMonth > 12)
             {
-                recordYear--;
+                throw new ArgumentOutOfRangeException(
+                    nameof(carryoverMonth),
+                    carryoverMonth,
+                    "繰越月は1〜12の範囲で指定してください。");
             }
 
-            return new DateTime(recordYear, nextMonth, 1);
+            // 繰越月が属する年を先に確定する（登録月以前に最後に現れた同月）
+            var carryoverYear = carryoverMonth <= registrationDate.Month
+                ? registrationDate.Year
+                : registrationDate.Year - 1;
+
+            return new DateTime(carryoverYear, carryoverMonth, 1).AddMonths(1);
+        }
+
+        /// <summary>
+        /// 繰越月の選択に対して実際に生成される繰越レコード日付の説明文を生成（Issue #1812）
+        /// </summary>
+        /// <param name="carryoverMonth">繰越元の月（1-12）</param>
+        /// <param name="registrationDate">登録日</param>
+        /// <returns>カード登録モードダイアログに表示する説明文（前年扱いの場合は注意書きを含む）</returns>
+        /// <remarks>
+        /// 【汎用】物品出納簿の繰越様式に属し、交通系固有の知識を含まない（Issue #1695 の境界分類）。
+        ///
+        /// 繰越月が登録月より後の場合は「前年の同月」として解決されるが、
+        /// これは正当な運用（2月登録で「11月から繰越」）と誤選択（2月登録で「5月から繰越」）の
+        /// 両方を含むため、コンボから除外せず解決結果を画面に提示して職員に判断させる。
+        /// </remarks>
+        public static string GetMidYearCarryoverDateDescription(int carryoverMonth, DateTime registrationDate)
+        {
+            var recordDate = GetMidYearCarryoverDate(carryoverMonth, registrationDate);
+            var description =
+                $"繰越レコードの日付: {recordDate:yyyy年M月d日}（{WarekiConverter.ToWareki(recordDate)}）";
+
+            if (carryoverMonth > registrationDate.Month)
+            {
+                // 繰越月そのものの年（＝繰越レコード日付の前月の年）
+                var carryoverYear = recordDate.AddMonths(-1).Year;
+                description +=
+                    Environment.NewLine +
+                    $"※ 選択した{carryoverMonth}月は登録日（{registrationDate:yyyy年M月d日}）より後の月のため、" +
+                    $"前年（{carryoverYear}年）の{carryoverMonth}月として扱われます。" +
+                    $"当年の月を指定する場合は、{registrationDate.Month}月以前の月を選択してください。";
+            }
+
+            return description;
         }
 
         /// <summary>

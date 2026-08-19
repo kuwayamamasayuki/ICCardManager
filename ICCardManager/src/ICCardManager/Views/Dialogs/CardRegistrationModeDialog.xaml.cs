@@ -1,7 +1,9 @@
 using System;
 using System.Collections.Generic;
 using System.Windows;
+using System.Windows.Controls;
 using System.Windows.Input;
+using ICCardManager.Services;
 
 namespace ICCardManager.Views.Dialogs
 {
@@ -119,6 +121,42 @@ namespace ICCardManager.Views.Dialogs
             var currentMonth = System.DateTime.Now.Month;
             var previousMonth = currentMonth == 1 ? 12 : currentMonth - 1;
             CarryoverMonthCombo.SelectedValue = previousMonth;
+            UpdateCarryoverDatePreview();
+        }
+
+        /// <summary>
+        /// 繰越月の選択変更時（Issue #1812）
+        /// </summary>
+        private void CarryoverMonthCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+            UpdateCarryoverDatePreview();
+        }
+
+        /// <summary>
+        /// 選択中の繰越月から生成される繰越レコード日付のプレビューを更新（Issue #1812）
+        /// </summary>
+        /// <remarks>
+        /// 繰越月が登録月より後の場合は前年扱いになるが、これは正当な運用
+        /// （2月登録で「11月から繰越」）と誤選択（2月登録で「5月から繰越」）の両方を含むため、
+        /// コンボから除外せず解決結果を提示して職員に判断させる。
+        /// </remarks>
+        private void UpdateCarryoverDatePreview()
+        {
+            // InitializeMonthComboBox から呼ばれる時点では XAML の要素が未生成の場合がある
+            if (CarryoverDatePreviewText == null)
+            {
+                return;
+            }
+
+            if (CarryoverMonthCombo.SelectedValue is int carryoverMonth)
+            {
+                CarryoverDatePreviewText.Text =
+                    SummaryGenerator.GetMidYearCarryoverDateDescription(carryoverMonth, DateTime.Today);
+            }
+            else
+            {
+                CarryoverDatePreviewText.Text = string.Empty;
+            }
         }
 
         private void NewPurchaseRadio_Checked(object sender, RoutedEventArgs e)
