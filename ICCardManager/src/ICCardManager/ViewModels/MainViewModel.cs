@@ -124,12 +124,15 @@ public partial class MainViewModel : ViewModelBase
     private readonly ILogger<MainViewModel>? _logger;
 
     /// <summary>
-    /// Issue #1814: 履歴ページ番号のクランプによる再取得の上限回数。
+    /// Issue #1814: 履歴ページ番号を 1 回の読み込みでクランプできる上限回数。
+    /// 数えるのは「クランプした回数」であって再取得回数ではない。
     /// クランプは通常 1 回で収束する（総件数から求めた有効ページで取り直すため）。
     /// 共有モードで他 PC の削除が連続した場合に無限ループさせないための上限であり、
-    /// 到達しても修正前と同じ表示（空一覧＋クランプ済みページ）へ退化するだけでデータは壊れない。
+    /// 到達すると 1 ページ目へ戻して取得を確定する（<see cref="LoadHistoryLedgersAsync"/> 参照）。
+    /// したがって 1 回の読み込みが発行する <c>GetPagedAsync</c> は最大
+    /// <c>MaxHistoryPageClampAttempts + 1</c>（=4）回。
     /// </summary>
-    private const int MaxHistoryPageClampRetries = 3;
+    private const int MaxHistoryPageClampAttempts = 3;
     private readonly HashSet<CardReadingSource> _suppressionSources = new();
 
     /// <summary>
@@ -1753,6 +1756,14 @@ public partial class MainViewModel : ViewModelBase
     }
 
     /// <summary>
+    /// Issue #1814: 総件数から履歴の総ページ数を求める。
+    /// 0 件でも 1 ページ（＝空の 1 ページ目）として扱う。
+    /// ループ内の 2 箇所で同じ式を使うため、式の重複を避けて切り出している。
+    /// </summary>
+    private int CalculateHistoryTotalPages(int totalCount) =>
+        Math.Max(1, (int)Math.Ceiling((double)totalCount / HistoryPageSize));
+
+    /// <summary>
     /// 履歴データを読み込み
     /// </summary>
     /// <remarks>
@@ -1776,11 +1787,20 @@ public partial class MainViewModel : ViewModelBase
             // 無効になるため、期間変更か履歴の開き直し以外に復旧手段が無い。
             // → クランプが起きたら取り直す。通常は 1 回で収束する（有効なページ番号で問い合わせ直すため）が、
             //    共有モードでは取り直しの最中にも他 PC の削除で総件数がさらに減り得るため上限を設ける。
-            //    上限到達時はクランプ済みページ番号＋実際の総件数で表示され（＝修正前と同じ状態）、
-            //    ページ送りで復旧できる。データは壊れない。
+            //
+            // ループを抜けるときの不変条件:
+            //   「一覧（rawLedgers）・件数表示（totalCount）・ページ番号（HistoryCurrentPage）が
+            //     すべて同じ 1 回の取得に由来する」
+            // これは #1814 の欠陥そのものの否定であり、打ち切り経路でも必ず成立させる。
+            // **クランプしてから取り直さずに抜けると、この不変条件が破れる** — 一覧はクランプ前の
+            // 無効なページの結果（＝空）で、ページ番号だけがクランプ後になるため、クランプ先が
+            // 1 ページ目だとページ送りが全て CanExecute=false になり #1814 の状態に着地する。
+            // したがって打ち切り時は 1 ページ目へ落として最後に 1 回だけ取り直す。
+            // **1 ページ目は totalCount > 0 なら必ず行を返す（OFFSET 0）**ため、この 1 回で
+            // 決定的に整合した状態へ着地でき、以降の再取得は要らない。
             IEnumerable<Ledger> rawLedgers;
             int totalCount;
-            var clampAttempts = 0;
+            var clampCount = 0;
             while (true)
             {
                 // 注: 日付はyyyy-MM-dd形式で保存されているため、AddDays(1)は不要
@@ -1788,25 +1808,31 @@ public partial class MainViewModel : ViewModelBase
                     HistoryCard.CardIdm, HistoryFromDate, HistoryToDate, HistoryCurrentPage, HistoryPageSize);
 
                 // ページ情報を更新
-                var totalPages = Math.Max(1, (int)Math.Ceiling((double)totalCount / HistoryPageSize));
                 HistoryTotalCount = totalCount;
-                HistoryTotalPages = totalPages;
+                HistoryTotalPages = CalculateHistoryTotalPages(totalCount);
 
-                // 現在のページが総ページ数を超えている場合は調整し、調整後のページで取り直す
-                if (HistoryCurrentPage <= totalPages) break;
-                HistoryCurrentPage = totalPages;
+                // 現在のページが総ページ数以内なら、上記の不変条件が成立している
+                if (HistoryCurrentPage <= HistoryTotalPages) break;
 
-                if (++clampAttempts >= MaxHistoryPageClampRetries)
+                if (++clampCount >= MaxHistoryPageClampAttempts)
                 {
                     // IDm はログへ生で出さない（IdmMasker を通す）。
                     // 障害調査で必要なのはカードの特定であり、管理番号があれば足りる。
                     _logger?.LogWarning(
-                        "履歴ページのクランプが {Attempts} 回連続で発生したため再取得を打ち切りました。" +
+                        "履歴ページのクランプが {ClampCount} 回連続で発生したため、1 ページ目へ戻して取得を確定します。" +
                         "カード={CardIdm}（管理番号={CardNumber}） 期間={From:yyyy-MM-dd}～{To:yyyy-MM-dd} 総件数={TotalCount}",
-                        clampAttempts, IdmMasker.Mask(HistoryCard.CardIdm), HistoryCard.CardNumber,
+                        clampCount, IdmMasker.Mask(HistoryCard.CardIdm), HistoryCard.CardNumber,
                         HistoryFromDate, HistoryToDate, totalCount);
+
+                    HistoryCurrentPage = 1;
+                    (rawLedgers, totalCount) = await _ledgerRepository.GetPagedAsync(
+                        HistoryCard.CardIdm, HistoryFromDate, HistoryToDate, 1, HistoryPageSize);
+                    HistoryTotalCount = totalCount;
+                    HistoryTotalPages = CalculateHistoryTotalPages(totalCount);
                     break;
                 }
+
+                HistoryCurrentPage = HistoryTotalPages;
             }
 
             // Issue #1740: 表示期間の直前残高をチェーン開始点のシードとして渡す。

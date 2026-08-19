@@ -2934,11 +2934,17 @@ public class MainViewModelTests : IDisposable
     }
 
     /// <summary>
-    /// 共有モードで他 PC の削除が連続してもループが止まること（上限で打ち切る）。
-    /// 上限到達時は修正前と同じ表示へ退化するだけで、無限ループやハングにはならない。
+    /// 共有モードで他 PC の削除が連続してもループが止まり、かつ**復旧不能な状態に着地しない**こと。
+    /// 上限到達時は 1 ページ目へ戻して取得を確定する。
     /// </summary>
+    /// <remarks>
+    /// クランプしたページで取り直さずに抜けると、一覧はクランプ前の無効なページの結果（＝空）で
+    /// ページ番号だけがクランプ後になる。クランプ先が 1 ページ目だとページ送りが全て
+    /// CanExecute=false になり、**Issue #1814 が直そうとしている状態そのもの**に着地する。
+    /// 1 ページ目は totalCount &gt; 0 なら必ず行を返す（OFFSET 0）ため、そこへ落とせば決定的に収束する。
+    /// </remarks>
     [Fact]
-    public async Task LoadHistoryLedgersAsync_クランプが連続しても上限で再取得を打ち切ること()
+    public async Task LoadHistoryLedgersAsync_クランプが連続しても1ページ目へ戻して整合した状態で確定すること()
     {
         // Arrange: 取得のたびに総件数が減り続ける（40 → 30 → 20 → 10 …）
         var totalCounts = new[] { 40, 30, 20, 10, 10, 10 };
@@ -2948,10 +2954,17 @@ public class MainViewModelTests : IDisposable
         // Act
         await _viewModel.LoadHistoryLedgersAsync();
 
-        // Assert: 上限 3 回で打ち切る（無限ループしない）
-        requestedPages.Should().Equal(new[] { 5, 4, 3 },
-            "クランプ 3 回で打ち切り、それ以上は問い合わせないこと");
-        _viewModel.HistoryCurrentPage.Should().Be(2, "最後のクランプ結果が現在ページになること");
+        // Assert: クランプ 3 回で打ち切り、最後に 1 ページ目を取得して確定する（無限ループしない）
+        requestedPages.Should().Equal(new[] { 5, 4, 3, 1 },
+            "クランプ上限に達したら 1 ページ目へ戻して 1 回だけ取り直すこと");
+        _viewModel.HistoryCurrentPage.Should().Be(1);
+
+        // Assert: 一覧・件数表示・ページ番号がすべて同じ取得に由来する（#1814 の不変条件）
+        _viewModel.HistoryLedgers.Should().HaveCount(10,
+            "打ち切り経路でも一覧が空のまま残らないこと");
+        _viewModel.HistoryTotalCount.Should().Be(10);
+        _viewModel.HistoryTotalPages.Should().Be(1);
+        _viewModel.HistoryStatusMessage.Should().Be("1～10件を表示（全10件）");
     }
 
     /// <summary>
