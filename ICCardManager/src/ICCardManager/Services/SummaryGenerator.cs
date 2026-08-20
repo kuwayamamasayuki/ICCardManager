@@ -587,7 +587,7 @@ namespace ICCardManager.Services
                     var groupSummary = GenerateRailwaySummaryAutomatic(groupTrips);
                     if (!string.IsNullOrEmpty(groupSummary))
                     {
-                        result.Add(groupSummary);
+                        result.Add(CollapseExplicitGroupSummary(groupTrips, groupSummary));
                     }
                 }
             }
@@ -604,6 +604,88 @@ namespace ICCardManager.Services
 
             return string.Join("、", result);
         }
+
+        /// <summary>
+        /// 明示的なグループの摘要を1区間へ畳む（Issue #1816）
+        /// </summary>
+        /// <param name="groupTrips">時系列に並べ替え済みの、同一グループの明細</param>
+        /// <param name="automaticSummary">グループ内で自動判定した結果の摘要</param>
+        /// <returns>区間が複数残っている場合は「始発駅～終着駅」、それ以外は <paramref name="automaticSummary"/></returns>
+        /// <remarks>
+        /// <para>
+        /// GroupId は「利用者がこの明細群を1つの利用として指定した」ことを表す（Issue #484 / #633、
+        /// 履歴詳細画面の「すべて統合」は Issue #1816 で全項目に同一 GroupId を付与するようになった）。
+        /// ところがグループ内の生成は自動判定に委ねているため（Issue #548: 往復を「A～A」にしないため）、
+        /// 乗り継ぎでも往復でもない非連続区間は「A駅～B駅、C駅～D駅」と分かれたままだった。
+        /// これでは「1つのグループに統合しました」という案内と摘要が食い違う。
+        /// </para>
+        /// <para>
+        /// 自動判定の結果に区間の区切り（<see cref="RouteSeparator"/>）が残っている場合だけ、
+        /// 始発駅～終着駅へ畳む。<b>往復（「A駅～B駅 往復」）と乗継統合（単一区間）はそのまま維持する</b> —
+        /// これらは自動判定が既に1区間へまとめており、畳むと「往復」の情報が失われるため。
+        /// </para>
+        /// <para>
+        /// 畳まない条件は2つある（いずれも Issue #1816 のコードレビューで判明）。
+        /// <list type="number">
+        /// <item><description>
+        /// 自動判定の結果に往復（<c>SummaryText.RoundTripSuffix</c>）が含まれる場合。「、」は
+        /// 「往復＋別区間」（A～B 往復、C～D）でも現れるため、区切りの有無だけで畳むと
+        /// 往復の情報が失われ、さらに「A～D」という**実際には乗っていない区間**が生成される
+        /// </description></item>
+        /// <item><description>
+        /// 始発駅と終着駅が同一（乗り継ぎ駅としての同一視を含む）の場合。畳むと「A駅～A駅」となり、
+        /// Issue #548 が自動判定パスを導入して避けたはずの無意味な摘要が、
+        /// 6年保存の台帳・物品出納簿へそのまま記録される
+        /// </description></item>
+        /// </list>
+        /// どちらも「畳まない」＝従来どおり自動判定の結果を使う側へ倒す。
+        /// </para>
+        /// </remarks>
+        private string CollapseExplicitGroupSummary(List<LedgerDetail> groupTrips, string automaticSummary)
+        {
+            if (!automaticSummary.Contains(RouteSeparator))
+            {
+                return automaticSummary;
+            }
+
+            // 往復が含まれる場合は畳まない（往復の情報が失われ、未乗車の区間を作るため）
+            // 接尾辞が空に設定されている場合は Contains が常に true になるため除外する
+            var roundTripSuffix = _options.SummaryText.RoundTripSuffix;
+            if (!string.IsNullOrEmpty(roundTripSuffix) && automaticSummary.Contains(roundTripSuffix))
+            {
+                return automaticSummary;
+            }
+
+            var routes = groupTrips.Where(IsSummarizableTrip).Select(ToRoute).ToList();
+            if (routes.Count == 0)
+            {
+                return automaticSummary;
+            }
+
+            var start = routes[0].Entry;
+            var end = routes[routes.Count - 1].Exit;
+
+            // 端点の駅名が解決できていない場合は畳まない（Issue #1816 のコードレビュー）。
+            // 「博多～?、薬院～大橋」を畳むと「?～大橋」になり、解決できていた駅名まで捨てて
+            // 情報量が減った摘要が 6 年保存の台帳へ入る。畳まなければ「?」は片側だけに留まる
+            if (start == UnknownStationPlaceholder || end == UnknownStationPlaceholder)
+            {
+                return automaticSummary;
+            }
+
+            // 始点＝終点は「A駅～A駅」になるため畳まない（Issue #548 の循環移動と同じ扱い）
+            if (AreTransferStations(start, end))
+            {
+                return automaticSummary;
+            }
+
+            return $"{start}～{end}";
+        }
+
+        /// <summary>
+        /// 摘要中で複数区間を区切る文字（Issue #1816）
+        /// </summary>
+        private const string RouteSeparator = "、";
 
         /// <summary>
         /// 自動判定で鉄道利用の摘要を生成（従来のロジック）

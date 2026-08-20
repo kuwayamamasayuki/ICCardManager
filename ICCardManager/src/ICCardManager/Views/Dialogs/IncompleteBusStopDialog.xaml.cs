@@ -3,6 +3,7 @@ using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Input;
 using System.Windows.Threading;
+using ICCardManager.Common;
 using ICCardManager.ViewModels;
 using ICCardManager.Views.Helpers;
 using Microsoft.Extensions.DependencyInjection;
@@ -61,7 +62,23 @@ namespace ICCardManager.Views.Dialogs
                     {
                         DataGridHighlightHelper.HighlightRow(BusStopDataGrid, updatedItem, 2.0, () =>
                         {
-                            _ = Dispatcher.InvokeAsync(async () => await _viewModel.InitializeAsync());
+                            // Issue #1816: fire-and-forget の本体は、それ自体が最後の受け皿
+                            //（.claude/rules/development-conventions.md「fire-and-forget の本体は、
+                            // それ自体が最後の受け皿」）。戻り値を捨てているため、ここで受けないと
+                            // 一覧の再読み込み失敗（共有モードの DB ロック・UNC 断）は
+                            // GC 契機の TaskScheduler.UnobservedTaskException まで誰にも届かず、
+                            // 画面には入力済みの行が残ったままになる。
+                            _ = Dispatcher.InvokeAsync(async () =>
+                            {
+                                try
+                                {
+                                    await _viewModel.InitializeAsync();
+                                }
+                                catch (Exception ex)
+                                {
+                                    ErrorDialogHelper.LogException(ex, "バス停名未入力一覧の再読み込み");
+                                }
+                            });
                         });
                     }, DispatcherPriority.ContextIdle);
                 }

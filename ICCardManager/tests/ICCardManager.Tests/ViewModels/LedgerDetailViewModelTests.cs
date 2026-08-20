@@ -121,8 +121,17 @@ public class LedgerDetailViewModelTests : IDisposable
         _viewModel.Items[2].GroupId.Should().Be(2, "2番目と3番目は同じグループ");
     }
 
+    /// <summary>
+    /// Issue #1816: 分割線を外して 1 グループに戻しても、自動検出モードへは戻さない
+    /// </summary>
+    /// <remarks>
+    /// 修正前は「分割線なし」を自動検出（GroupId=null）として扱っていたため、
+    /// 「すべて統合」の直後に分割線を 1 回 ON→OFF しただけで統合が黙って取り消され、
+    /// 画面の見た目（分割線なし）は同じまま保存時の摘要だけが分かれた。
+    /// 自動検出へ戻す経路は `ResetToAutoDetect` だけにする。
+    /// </remarks>
     [Fact]
-    public void ToggleDividerAt_Toggle_RemovesDivider_ClearsGroupIds()
+    public void ToggleDividerAt_Toggle_RemovesDivider_KeepsSingleGroup()
     {
         // Arrange
         AddItems(2);
@@ -131,9 +140,32 @@ public class LedgerDetailViewModelTests : IDisposable
         // Act: もう一度トグルして分割線を削除
         _viewModel.ToggleDividerAt(0);
 
-        // Assert: 分割線がなくなったのでGroupIdはnull（自動検出モード）
-        _viewModel.Items[0].GroupId.Should().BeNull("分割線なしではGroupIdはnull");
-        _viewModel.Items[1].GroupId.Should().BeNull("分割線なしではGroupIdはnull");
+        // Assert: 1つのグループとして明示される（自動検出へは戻さない）
+        _viewModel.Items.Should().OnlyContain(
+            i => i.GroupId == LedgerDetailViewModel.MergedGroupId,
+            "分割線なしは「利用者が指定した単一グループ」として扱う");
+        _viewModel.HasMultipleGroups.Should().BeFalse();
+    }
+
+    /// <summary>
+    /// Issue #1816: 「すべて統合」のあとに分割線を往復させても統合が取り消されないこと
+    /// </summary>
+    [Fact]
+    public void MergeAll_ThenToggleDividerRoundTrip_KeepsMergedGroup()
+    {
+        // Arrange
+        AddItems(3);
+        _viewModel.MergeAllCommand.Execute(null);
+
+        // Act: 分割線を入れて、すぐ外す（画面上は統合直後と同じ見た目に戻る）
+        _viewModel.ToggleDividerAt(0);
+        _viewModel.ToggleDividerAt(0);
+
+        // Assert
+        _viewModel.Items.Should().OnlyContain(
+            i => i.GroupId == LedgerDetailViewModel.MergedGroupId,
+            "見た目が統合直後と同じなら、保存される内容も同じであること");
+        _viewModel.DetailCountDisplay.Should().Be("3件の詳細（1グループ）");
     }
 
     #endregion
@@ -174,23 +206,67 @@ public class LedgerDetailViewModelTests : IDisposable
 
     #region MergeAll テスト
 
+    /// <summary>
+    /// Issue #1816: 「すべて統合」は全項目に同一の GroupId を明示付与する。
+    /// </summary>
+    /// <remarks>
+    /// 修正前は分割線を消して <c>RecalculateGroupsFromDividers()</c> を呼ぶだけで、
+    /// 「分割線なし＝自動検出」の分岐に落ちて GroupId が null になっていた
+    /// （＝「自動検出に戻す」と同一動作）。この表明は両者の区別を固定する。
+    /// </remarks>
     [Fact]
-    public void MergeAll_AfterSplit_ClearsAllGroupIds()
+    public void MergeAll_AfterSplit_AssignsSingleGroupIdToAllItems()
     {
         // Arrange
         AddItems(3);
         _viewModel.SplitAllCommand.Execute(null);
 
-        // すべてにGroupIdが設定されていることを確認
-        _viewModel.Items.All(i => i.GroupId.HasValue).Should().BeTrue();
+        // すべてに別々のGroupIdが設定されていることを確認
+        _viewModel.Items.Select(i => i.GroupId).Distinct().Should().HaveCount(3);
 
         // Act: すべてを統合
         _viewModel.MergeAllCommand.Execute(null);
 
-        // Assert: 分割線がないのでGroupIdはすべてnull（自動検出モード）
-        _viewModel.Items[0].GroupId.Should().BeNull("統合後はGroupIdがクリアされる");
-        _viewModel.Items[1].GroupId.Should().BeNull("統合後はGroupIdがクリアされる");
-        _viewModel.Items[2].GroupId.Should().BeNull("統合後はGroupIdがクリアされる");
+        // Assert: 全項目が同一の非nullグループになる（自動検出モードには戻さない）
+        _viewModel.Items.Should().OnlyContain(
+            i => i.GroupId == LedgerDetailViewModel.MergedGroupId,
+            "統合後は「利用者が1グループを指定した」ことをGroupIdで表す");
+        _viewModel.Items.Should().OnlyContain(i => !i.ShowDividerBelow, "分割線はすべて削除される");
+    }
+
+    /// <summary>
+    /// Issue #1816: 統合後は件数表示が「1グループ」を示す（対のテスト: 自動検出はグループ表示なし）。
+    /// </summary>
+    [Fact]
+    public void MergeAll_DetailCountDisplay_ShowsSingleGroup()
+    {
+        // Arrange
+        AddItems(3);
+
+        // Act
+        _viewModel.MergeAllCommand.Execute(null);
+
+        // Assert
+        _viewModel.DetailCountDisplay.Should().Be("3件の詳細（1グループ）");
+    }
+
+    /// <summary>
+    /// Issue #1816: 「自動検出に戻す」は従来どおり GroupId を null にする（統合と区別する）。
+    /// </summary>
+    [Fact]
+    public void ResetToAutoDetect_AfterMergeAll_ClearsAllGroupIds()
+    {
+        // Arrange
+        AddItems(3);
+        _viewModel.MergeAllCommand.Execute(null);
+        _viewModel.Items.Should().OnlyContain(i => i.GroupId.HasValue);
+
+        // Act
+        _viewModel.ResetToAutoDetectCommand.Execute(null);
+
+        // Assert
+        _viewModel.Items.Should().OnlyContain(i => i.GroupId == null, "自動検出モードはGroupIdなし");
+        _viewModel.DetailCountDisplay.Should().Be("3件の詳細");
     }
 
     #endregion
@@ -518,6 +594,67 @@ public class LedgerDetailViewModelTests : IDisposable
         // Assert: View 側で OnCloseRequested = Close を設定するため、
         // この経路が Window.Close() → OnClosing の破棄確認へ届く
         closeRequests.Should().Be(1, "Escape キーからウィンドウの Close() へ届く唯一の経路");
+    }
+
+    #endregion
+
+    #region Issue #1816: 統合したグループが保存経路まで届くこと
+
+    /// <summary>
+    /// 「すべて統合」で付けた GroupId が <c>ReplaceDetailsAsync</c> まで届き、摘要も畳まれること
+    /// </summary>
+    /// <remarks>
+    /// Issue #1816: ViewModel の <c>Items</c> だけを見るテストでは、保存経路が GroupId を落としても緑になる。
+    /// 「画面で統合した内容が DB へ渡る」ことと「その内容から再生成される摘要」を同じテストで固定する。
+    /// </remarks>
+    [Fact]
+    public async Task SaveAsync_MergeAll後_統合したGroupIdと畳んだ摘要が保存されること()
+    {
+        // Arrange: 乗り継ぎでも往復でもない 2 区間（自動検出では 2 区間に分かれる）
+        var ledger = new Ledger
+        {
+            Id = 7,
+            CardIdm = "0102030405060708",
+            Date = new DateTime(2026, 2, 10),
+            Summary = "鉄道（博多～天神、薬院～大橋）",
+            Expense = 470,
+            Balance = 530,
+            Details = new List<LedgerDetail>
+            {
+                // FeliCa 互換: 小さい SequenceNumber が新しい利用（＝薬院～大橋があと）
+                new() { LedgerId = 7, SequenceNumber = 1, EntryStation = "薬院", ExitStation = "大橋", Amount = 210, UseDate = new DateTime(2026, 2, 10), Balance = 530 },
+                new() { LedgerId = 7, SequenceNumber = 2, EntryStation = "博多", ExitStation = "天神", Amount = 260, UseDate = new DateTime(2026, 2, 10), Balance = 740 }
+            }
+        };
+        _ledgerRepoMock.Setup(r => r.GetByIdAsync(7)).ReturnsAsync(ledger);
+
+        List<LedgerDetail>? savedDetails = null;
+        _ledgerRepoMock
+            .Setup(r => r.ReplaceDetailsAsync(7, It.IsAny<IEnumerable<LedgerDetail>>()))
+            .Callback<int, IEnumerable<LedgerDetail>>((_, details) => savedDetails = details.ToList())
+            .ReturnsAsync(true);
+
+        Ledger? savedLedger = null;
+        _ledgerRepoMock
+            .Setup(r => r.UpdateAsync(It.IsAny<Ledger>()))
+            .Callback<Ledger>(l => savedLedger = l)
+            .ReturnsAsync(true);
+
+        await _viewModel.InitializeAsync(7);
+
+        // Act
+        _viewModel.MergeAllCommand.Execute(null);
+        await _viewModel.SaveCommand.ExecuteAsync(null);
+
+        // Assert
+        savedDetails.Should().NotBeNull("統合内容は明細の置換として保存される");
+        savedDetails!.Should().OnlyContain(
+            d => d.GroupId == LedgerDetailViewModel.MergedGroupId,
+            "画面で指定した単一グループが DB まで届くこと");
+        savedLedger.Should().NotBeNull();
+        savedLedger!.Summary.Should().Be(
+            "鉄道（博多～大橋）",
+            "明示グループの摘要は 1 区間へ畳まれること");
     }
 
     #endregion

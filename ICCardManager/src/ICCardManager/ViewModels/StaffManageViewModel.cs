@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Runtime.CompilerServices;
 using System.Threading.Tasks;
 using System.Collections.ObjectModel;
 using System.Windows;
@@ -710,9 +711,77 @@ namespace ICCardManager.ViewModels
         /// <remarks>
         /// <see cref="OnCardRead"/> から UI スレッドで呼ばれる本体。
         /// テストから直接呼べるよう分離している（Issue #1807）。
+        /// <para>
+        /// <b>本体全体を try/catch で包む</b>（Issue #1816）。<see cref="OnCardRead"/> は
+        /// <c>Dispatcher.InvokeAsync</c> の戻り値を破棄する fire-and-forget であり、
+        /// ここで例外が抜けると <see cref="EditStaffIdm"/> と <c>IsWaitingForCard = false</c> だけが
+        /// 確定した「読み取れたように見える」状態で止まる（Issue #1725 / #1742）。
+        /// 失敗時はタッチ待ちへ戻し、確認の済んでいない IDm をフォームに残さない。
+        /// </para>
         /// </remarks>
         internal async Task HandleCardReadAsync(string idm)
         {
+            // Issue #1816: 「復元が確定したか」は 1 回の読み取りに閉じた情報なので、
+            // インスタンスフィールドではなく呼び出しごとのローカルで持つ。フィールドに置くと、
+            // 後処理の await 中に別の読み取りが始まった場合（利用者が一覧再読込の最中に
+            // 「新規登録」を押して次の職員証をタッチする／連続タッチで 2 件目が queue される）に
+            // その呼び出しの先頭で false へ戻され、確定済みの復元が「読み取り失敗・もう一度タッチ」
+            // として案内される＝この修正が防ごうとしている状態そのものに落ちる。
+            var restoreCommitted = new StrongBox<bool>(false);
+
+            try
+            {
+                await HandleCardReadCoreAsync(idm, restoreCommitted);
+            }
+            catch (Exception ex) when (restoreCommitted.Value)
+            {
+                // Issue #1816: 復元は確定済み。ここでの失敗は後処理（操作ログ・一覧再読込）の
+                // 失敗であり、「もう一度タッチしてください」と案内すると、職員は既に復元済みの
+                // 職員証を再タッチして「既に登録されています」を見ることになる
+                // （.claude/rules/development-conventions.md「コミット確定後の後処理を、
+                // 成否の判定に巻き込まない」#1727 / #1805）
+                ErrorDialogHelper.LogException(ex, "職員の復元後の処理");
+
+                // Issue #1816: 登録モードを終える。CancelEdit() は IsEditing / IsNewStaff を落とし、
+                // StaffRegistration 抑制も解除する（#1807）。ここを飛ばすと、案内どおり画面を開き直すまで
+                // メイン画面のカードタッチが抑制されたまま残り、フォームには空の IDm だけが残る。
+                CancelEdit();
+
+                // Issue #1759: CancelEdit() は StatusMessage / IsStatusError をクリアするため、
+                // 完了・案内メッセージは必ず後処理のあとに設定する。
+                StatusMessage = "職員の復元は記録済みですが、その後の画面の更新に失敗しました。" +
+                    "もう一度タッチせず、職員管理画面を開き直して一覧を確認してください。";
+                IsStatusError = true;
+            }
+            catch (Exception ex)
+            {
+                ErrorDialogHelper.LogException(ex, "職員証の読み取り");
+
+                // Issue #1614: 生の ex.Message は出さず、3要素の文言へ変換する
+                EditStaffIdm = string.Empty;
+                IsWaitingForCard = true;
+                StatusMessage = ExceptionMessageFormatter.ToUserMessage(ex, "職員証の読み取り") +
+                    " 復旧したら、もう一度職員証をタッチしてください。";
+                IsStatusError = true;
+            }
+        }
+
+        /// <summary>
+        /// 職員証読み取り処理の本体（例外は呼び出し元 <see cref="HandleCardReadAsync"/> が受け止める）
+        /// </summary>
+        /// <param name="idm">読み取った IDm</param>
+        /// <param name="restoreCommitted">
+        /// 復元の DB 更新が確定したら true を書き込む（Issue #1816）。
+        /// コミット後の後処理で例外が出た場合に、読み取り失敗と区別して案内するために使う。
+        /// 呼び出しごとのローカルとして渡し、並行する別の読み取りに書き換えられないようにする
+        /// </param>
+        private async Task HandleCardReadCoreAsync(string idm, StrongBox<bool> restoreCommitted)
+        {
+            // Issue #1816: 入口ゲート（OnCardRead）はカードリーダースレッドで判定され、
+            // 解除は UI スレッドのここで初めて行われる。連続タッチでは 2 件目もゲートを
+            // 通過済みで queue されているため、取得地点で再判定する（#1807 と同じ形）
+            if (!IsWaitingForCard) return;
+
             EditStaffIdm = idm;
             IsWaitingForCard = false;
 
@@ -737,6 +806,10 @@ namespace ICCardManager.ViewModels
                             // 操作ログを記録（復元後のデータを取得）
                             // Issue #1760: 再読取が null になるのは復元の直後に他 PC が削除した場合だけ。
                             // 復元は確定済みなので記録を落とさず、復元前のデータで補う。
+                            // Issue #1816: ここから先は「復元が確定した後の後処理」。
+                            // 失敗しても復元は取り消されないため、読み取り失敗と混同する案内を出さない
+                            restoreCommitted.Value = true;
+
                             var restoredStaff = await _staffRepository.GetByIdmAsync(idm)
                                 ?? CreateRestoredSnapshot(existing);
                             await _operationLogger.LogStaffRestoreAsync(restoredStaff);

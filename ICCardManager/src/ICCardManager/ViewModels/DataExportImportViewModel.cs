@@ -1155,34 +1155,89 @@ public partial class DataExportImportViewModel : ViewModelBase
         }
 
         // UIスレッドで実行
-        await System.Windows.Application.Current.Dispatcher.InvokeAsync(async () =>
+        // Issue #1816: InvokeAsync(async () => ...) は DispatcherOperation<Task> を返すため、
+        // await しても内側の Task の例外は観測できない（Unwrap していない）。
+        // 例外の受け止めは本体（HandleCardReadAsync）の try/catch が担う。
+        await System.Windows.Application.Current.Dispatcher.InvokeAsync(() => HandleCardReadAsync(e.Idm));
+    }
+
+    /// <summary>
+    /// カードタッチ待ち中に読み取った IDm を照合してカード指定へ反映する
+    /// </summary>
+    /// <remarks>
+    /// 本体全体を try/catch で包む（Issue #1816）。例外が抜けると
+    /// <c>IsWaitingForCardTouch = false</c> だけが確定した「読み取れたように見える」状態で止まり、
+    /// 通知は GC 契機の <c>TaskScheduler.UnobservedTaskException</c> まで遅れる（Issue #1725 / #1742）。
+    /// 失敗時はタッチ待ちへ戻し、もう一度タッチすれば再試行できるようにする。
+    /// </remarks>
+    internal async Task HandleCardReadAsync(string idm)
+    {
+        try
         {
-            IsWaitingForCardTouch = false;
+            await HandleCardReadCoreAsync(idm);
+        }
+        catch (Exception ex)
+        {
+            ErrorDialogHelper.LogException(ex, "交通系ICカードの読み取り");
 
-            // 読み取ったIDmで登録済みカードを検索
-            var card = await _cardRepository.GetByIdmAsync(e.Idm);
+            // Issue #1614: 生の ex.Message は出さず、3要素の文言へ変換する
+            TouchedCardIdm = string.Empty;
+            TouchedCardInfo = string.Empty;
 
-            if (card != null)
+            // Issue #1816: タッチ待ちへ戻すのは、ダイアログがまだ開いているときだけ。
+            // IsWaitingForCardTouch = true は OnIsWaitingForCardTouchChanged 経由で
+            // CardReadingSuppressedMessage(true, DataImport) を送るため、Cleanup（ダイアログの Closing）が
+            // 既に走ったあとで立てると、抑制を解除する経路がどこにも残らない。
+            // その結果 MainViewModel の _suppressionSources に DataImport が残り続け、
+            // メイン画面のカードタッチがアプリ再起動まで一切無視される（#1807 と同じ固着）。
+            // 読み取りの失敗は共有モードの DB ロック／UNC 断で起き、ダイアログを閉じる操作と同時に起こり得る。
+            if (!_isCleanedUp)
             {
-                // 登録済みカードが見つかった
-                TouchedCardIdm = card.CardIdm;
-                var shortIdm = card.CardIdm.Length > 8
-                    ? card.CardIdm.Substring(0, 8) + "..."
-                    : card.CardIdm;
-                TouchedCardInfo = $"{card.CardType} {card.CardNumber} ({shortIdm})";
-                SetStatus($"カードを読み取りました: {card.CardType} {card.CardNumber}", false);
+                IsWaitingForCardTouch = true;
             }
-            else
-            {
-                // 未登録カード
-                TouchedCardIdm = string.Empty;
-                TouchedCardInfo = "未登録のカードです";
-                SetStatus("このカードはシステムに登録されていません。先にカード管理で登録してください。", true);
-                _dialogService.ShowWarning(
-                    "タッチされたカードはシステムに登録されていません。\n\n利用履歴をインポートするには、先にカード管理で対象の交通系ICカードを登録してください。",
-                    "未登録カード");
-            }
-        });
+
+            SetStatus(
+                ExceptionMessageFormatter.ToUserMessage(ex, "交通系ICカードの読み取り") +
+                " 復旧したら、もう一度カードをタッチしてください。",
+                true);
+        }
+    }
+
+    /// <summary>
+    /// カード読み取り処理の本体（例外は呼び出し元 <see cref="HandleCardReadAsync"/> が受け止める）
+    /// </summary>
+    private async Task HandleCardReadCoreAsync(string idm)
+    {
+        // Issue #1816: 入口ゲート（OnCardRead）はカードリーダースレッドで判定され、
+        // 解除は UI スレッドのここで初めて行われる。連続タッチでは 2 件目もゲートを
+        // 通過済みで queue されているため、取得地点で再判定する（#1807 と同じ形）
+        if (!IsWaitingForCardTouch) return;
+
+        IsWaitingForCardTouch = false;
+
+        // 読み取ったIDmで登録済みカードを検索
+        var card = await _cardRepository.GetByIdmAsync(idm);
+
+        if (card != null)
+        {
+            // 登録済みカードが見つかった
+            TouchedCardIdm = card.CardIdm;
+            var shortIdm = card.CardIdm.Length > 8
+                ? card.CardIdm.Substring(0, 8) + "..."
+                : card.CardIdm;
+            TouchedCardInfo = $"{card.CardType} {card.CardNumber} ({shortIdm})";
+            SetStatus($"カードを読み取りました: {card.CardType} {card.CardNumber}", false);
+        }
+        else
+        {
+            // 未登録カード
+            TouchedCardIdm = string.Empty;
+            TouchedCardInfo = "未登録のカードです";
+            SetStatus("このカードはシステムに登録されていません。先にカード管理で登録してください。", true);
+            _dialogService.ShowWarning(
+                "タッチされたカードはシステムに登録されていません。\n\n利用履歴をインポートするには、先にカード管理で対象の交通系ICカードを登録してください。",
+                "未登録カード");
+        }
     }
 
     /// <summary>
@@ -1202,12 +1257,22 @@ public partial class DataExportImportViewModel : ViewModelBase
     /// </summary>
     public void Cleanup()
     {
+        // Issue #1816: 以降は「抑制を解除する経路が無い」状態。
+        // 読み取りの後始末（例外経路）がタッチ待ちを立て直さないようにする。
+        _isCleanedUp = true;
+
         if (_cardReader != null)
         {
             _cardReader.CardRead -= OnCardRead;
         }
         IsWaitingForCardTouch = false;
     }
+
+    /// <summary>
+    /// ダイアログが閉じられ <see cref="Cleanup"/> が済んだか（Issue #1816）。
+    /// 済んだあとにタッチ待ちを立て直すと、カード読み取り抑制が解除されないまま残る
+    /// </summary>
+    private bool _isCleanedUp;
 
     #endregion
 

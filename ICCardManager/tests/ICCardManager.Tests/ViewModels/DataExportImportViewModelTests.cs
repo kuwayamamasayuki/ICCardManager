@@ -1996,4 +1996,80 @@ public class DataExportImportViewModelTests : IDisposable
     }
 
     #endregion
+
+    #region Issue #1816: カード読み取りの fire-and-forget が例外を握りつぶさないこと
+
+    /// <summary>
+    /// 読み取り中に DB 例外が出たら、例外を呼び出し元へ抜かずステータスへ案内すること
+    /// </summary>
+    [Fact]
+    public async Task HandleCardReadAsync_読み取り中の例外_ステータスへ案内し例外を伝播しないこと()
+    {
+        // Arrange
+        var idm = "0102030405060708";
+        _cardRepositoryMock.Setup(r => r.GetByIdmAsync(idm, false))
+            .ThrowsAsync(new InvalidOperationException("database is locked"));
+        _viewModel.IsWaitingForCardTouch = true;
+
+        // Act
+        Func<Task> act = () => _viewModel.HandleCardReadAsync(idm);
+
+        // Assert
+        await act.Should().NotThrowAsync("fire-and-forget の呼び出し元は例外を観測できないため");
+        _viewModel.IsStatusError.Should().BeTrue();
+        _viewModel.StatusMessage.Should().NotContain(
+            "database is locked", "生の例外メッセージを職員へ出さないこと（Issue #1614）");
+        _viewModel.StatusMessage.Should().EndWith("してください。");
+        _viewModel.IsWaitingForCardTouch.Should().BeTrue("タッチ待ちへ戻して再試行できること");
+        _viewModel.TouchedCardIdm.Should().BeEmpty("確認の済んでいないカードを指定に残さないこと");
+    }
+
+    /// <summary>
+    /// 対のテスト: 登録済みカードを読み取れた場合はタッチ待ちを解除しエラーにしないこと
+    /// </summary>
+    [Fact]
+    public async Task HandleCardReadAsync_登録済みカード_タッチ待ちを解除しエラーにしないこと()
+    {
+        // Arrange
+        var idm = "0102030405060708";
+        _cardRepositoryMock.Setup(r => r.GetByIdmAsync(idm, false)).ReturnsAsync(new ICCardManager.Models.IcCard
+        {
+            CardIdm = idm,
+            CardType = "はやかけん",
+            CardNumber = "H-001"
+        });
+        _viewModel.IsWaitingForCardTouch = true;
+
+        // Act
+        await _viewModel.HandleCardReadAsync(idm);
+
+        // Assert
+        _viewModel.IsStatusError.Should().BeFalse();
+        _viewModel.IsWaitingForCardTouch.Should().BeFalse();
+        _viewModel.TouchedCardIdm.Should().Be(idm);
+    }
+
+    /// <summary>
+    /// Issue #1816: タッチ待ちでない状態で本体が実行されても、状態を書き換えないこと
+    /// </summary>
+    [Fact]
+    public async Task HandleCardReadAsync_タッチ待ちでなければ何もしないこと()
+    {
+        // Arrange
+        var firstIdm = "0102030405060708";
+        _cardRepositoryMock.Setup(r => r.GetByIdmAsync(It.IsAny<string>(), false)).ReturnsAsync(
+            new ICCardManager.Models.IcCard { CardIdm = firstIdm, CardType = "はやかけん", CardNumber = "H-001" });
+        _viewModel.IsWaitingForCardTouch = true;
+        await _viewModel.HandleCardReadAsync(firstIdm);
+        _viewModel.IsWaitingForCardTouch.Should().BeFalse("前提: 1 件目の読み取りでタッチ待ちが解除される");
+
+        // Act
+        await _viewModel.HandleCardReadAsync("0807060504030201");
+
+        // Assert
+        _viewModel.TouchedCardIdm.Should().Be(firstIdm, "2 件目が 1 件目の読み取り結果を上書きしないこと");
+        _cardRepositoryMock.Verify(r => r.GetByIdmAsync("0807060504030201", false), Times.Never);
+    }
+
+    #endregion
 }

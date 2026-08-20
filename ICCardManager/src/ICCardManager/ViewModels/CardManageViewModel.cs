@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Runtime.CompilerServices;
 using System.Threading.Tasks;
 using System.Collections.ObjectModel;
 using System.Windows;
@@ -1267,110 +1268,201 @@ namespace ICCardManager.ViewModels
             if (!IsWaitingForCard) return;
 
             // UIスレッドで非同期実行（登録済みチェックを即座に行うため）
-            System.Windows.Application.Current.Dispatcher.InvokeAsync(async () =>
+            // Issue #1816: 戻り値（DispatcherOperation<Task>）はここでは観測できないため、
+            // 例外の受け止めは本体（HandleCardReadAsync）の try/catch が担う。
+            System.Windows.Application.Current.Dispatcher.InvokeAsync(() => HandleCardReadAsync(e.Idm));
+        }
+
+        /// <summary>
+        /// 交通系ICカードのタッチ待ち中に読み取った IDm を新規登録フォームへ反映する
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// <see cref="OnCardRead"/> から UI スレッドで呼ばれる本体。テストから直接呼べるよう
+        /// 分離している（<c>StaffManageViewModel.HandleCardReadAsync</c> と同型）。
+        /// </para>
+        /// <para>
+        /// <b>本体全体を try/catch で包む</b>（Issue #1816）。呼び出し元は
+        /// <c>Dispatcher.InvokeAsync</c> の戻り値を破棄する fire-and-forget であり、
+        /// ここで例外が抜けると <see cref="EditCardIdm"/> と <c>IsWaitingForCard = false</c> だけが
+        /// 確定した「読み取れたように見える」状態で止まる（通知は GC 契機の
+        /// <c>TaskScheduler.UnobservedTaskException</c> まで遅れる。Issue #1725 / #1742）。
+        /// 失敗時はタッチ待ちへ戻し、確認の済んでいない IDm をフォームに残さない。
+        /// </para>
+        /// </remarks>
+        internal async Task HandleCardReadAsync(string idm)
+        {
+            // Issue #1816: 「復元が確定したか」は 1 回の読み取りに閉じた情報なので、
+            // インスタンスフィールドではなく呼び出しごとのローカルで持つ。フィールドに置くと、
+            // 後処理の await 中に別の読み取りが始まった場合（利用者が一覧再読込の最中に
+            // 「新規登録」を押して次のカードをタッチする／連続タッチで 2 件目が queue される）に
+            // その呼び出しの先頭で false へ戻され、確定済みの復元が「読み取り失敗・もう一度タッチ」
+            // として案内される＝この修正が防ごうとしている状態そのものに落ちる。
+            var restoreCommitted = new StrongBox<bool>(false);
+
+            try
             {
-                EditCardIdm = e.Idm;
-                IsWaitingForCard = false;
+                await HandleCardReadCoreAsync(idm, restoreCommitted);
+            }
+            catch (Exception ex) when (restoreCommitted.Value)
+            {
+                // Issue #1816: 復元は確定済み。ここでの失敗は後処理（操作ログ・一覧再読込）の
+                // 失敗であり、「もう一度タッチしてください」と案内すると、職員は既に復元済みの
+                // カードを再タッチして「既に登録されています」を見ることになる。
+                _logger?.LogError(ex, "Card restore succeeded but post-commit processing failed");
 
-                // 即座に登録済みチェックを実行（Issue #284）
-                var existing = await _cardRepository.GetByIdmAsync(e.Idm, includeDeleted: true);
-                if (existing != null)
+                _preReadBalance = null;
+                _preReadHistory = null;
+
+                // Issue #1816: 登録モードを終える。CancelEdit() は IsEditing / IsNewCard を落とし、
+                // CardRegistration 抑制も解除する（#1807）。ここを飛ばすと、案内どおり画面を開き直すまで
+                // メイン画面のカードタッチが抑制されたまま残り、フォームには空の IDm だけが残る。
+                CancelEdit();
+
+                // Issue #1759: CancelEdit() は StatusMessage / IsStatusError をクリアするため、
+                // 完了・案内メッセージは必ず後処理のあとに設定する。
+                StatusMessage = "交通系ICカードの復元は記録済みですが、その後の画面の更新に失敗しました。" +
+                    "もう一度タッチせず、カード管理画面を開き直して一覧を確認してください。";
+                IsStatusError = true;
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogError(ex, "Failed to handle card read during card registration");
+
+                // Issue #1614: 生の ex.Message は出さず、3要素の文言へ変換する
+                EditCardIdm = string.Empty;
+                _preReadBalance = null;
+                _preReadHistory = null;
+                IsWaitingForCard = true;
+                StatusMessage = ExceptionMessageFormatter.ToUserMessage(ex, "交通系ICカードの読み取り") +
+                    " 復旧したら、もう一度カードをタッチしてください。";
+                IsStatusError = true;
+            }
+        }
+
+        /// <summary>
+        /// カード読み取り処理の本体（例外は呼び出し元 <see cref="HandleCardReadAsync"/> が受け止める）
+        /// </summary>
+        /// <param name="idm">読み取った IDm</param>
+        /// <param name="restoreCommitted">
+        /// 復元の DB 更新が確定したら true を書き込む（Issue #1816）。
+        /// コミット後の後処理で例外が出た場合に、読み取り失敗と区別して案内するために使う。
+        /// 呼び出しごとのローカルとして渡し、並行する別の読み取りに書き換えられないようにする
+        /// </param>
+        private async Task HandleCardReadCoreAsync(string idm, StrongBox<bool> restoreCommitted)
+        {
+            // Issue #1816: 入口ゲート（OnCardRead）はカードリーダースレッドで判定され、
+            // 解除は UI スレッドのここで初めて行われる。連続タッチでは 2 件目もゲートを
+            // 通過済みで queue されているため、取得地点で再判定する（#1807 と同じ形）
+            if (!IsWaitingForCard) return;
+
+            EditCardIdm = idm;
+            IsWaitingForCard = false;
+
+            // 即座に登録済みチェックを実行（Issue #284）
+            var existing = await _cardRepository.GetByIdmAsync(idm, includeDeleted: true);
+            if (existing != null)
+            {
+                if (existing.IsDeleted)
                 {
-                    if (existing.IsDeleted)
+                    // 削除済みカードの場合は復元を提案
+                    var confirmed = _dialogService.ShowConfirmation(
+                        $"このカードは以前 {existing.CardNumber} として登録されていましたが、削除されています。\n\n復元しますか？",
+                        "削除済みカード");
+
+                    if (confirmed)
                     {
-                        // 削除済みカードの場合は復元を提案
-                        var confirmed = _dialogService.ShowConfirmation(
-                            $"このカードは以前 {existing.CardNumber} として登録されていましたが、削除されています。\n\n復元しますか？",
-                            "削除済みカード");
-
-                        if (confirmed)
+                        var restored = await _cardRepository.RestoreAsync(idm);
+                        if (restored)
                         {
-                            var restored = await _cardRepository.RestoreAsync(e.Idm);
-                            if (restored)
-                            {
-                                // 操作ログを記録（復元後のデータを取得）
-                                // Issue #1760: 再読取が null になるのは復元の直後に他 PC が
-                                // 削除した場合だけ。復元は確定済みなので記録を落とさない。
-                                var restoredCard = await _cardRepository.GetByIdmAsync(e.Idm)
-                                    ?? CreateRestoredSnapshot(existing);
-                                await _operationLogger.LogCardRestoreAsync(restoredCard);
+                            // Issue #1816: ここから先は「復元が確定した後の後処理」。
+                            // 失敗しても復元は取り消されないため、読み取り失敗と混同する案内を出さない
+                            // （.claude/rules/development-conventions.md「コミット確定後の後処理を、
+                            // 成否の判定に巻き込まない」#1727 / #1805）
+                            restoreCommitted.Value = true;
 
-                                var restoredIdm = e.Idm;
-                                var restoredNumber = existing.CardNumber;
-                                await LoadCardsAsync();
-                                CancelEdit();
-                                SelectAndHighlight(restoredIdm);
-                                // Issue #1759: CancelEdit() は StatusMessage / IsStatusError をクリアするため、
-                                // 完了メッセージは必ず後処理のあとに設定する（先に設定すると一度も表示されない）。
-                                StatusMessage = $"{restoredNumber} を復元しました";
-                                IsStatusError = false;
-                            }
-                            else
-                            {
-                                // Issue #1759: 保存経路（SaveAsync）の復元分岐と同じ扱い。
-                                // false は「他 PC が先に復元した」ことを意味する。
-                                await LoadCardsAsync();
-                                StatusMessage = ConcurrencyConflictMessage.ForRestore(
-                                    FormatCardLabel(existing.CardType, existing.CardNumber), "カード一覧");
-                                IsStatusError = true;
-                            }
+                            // 操作ログを記録（復元後のデータを取得）
+                            // Issue #1760: 再読取が null になるのは復元の直後に他 PC が
+                            // 削除した場合だけ。復元は確定済みなので記録を落とさない。
+                            var restoredCard = await _cardRepository.GetByIdmAsync(idm)
+                                ?? CreateRestoredSnapshot(existing);
+                            await _operationLogger.LogCardRestoreAsync(restoredCard);
+
+                            var restoredIdm = idm;
+                            var restoredNumber = existing.CardNumber;
+                            await LoadCardsAsync();
+                            CancelEdit();
+                            SelectAndHighlight(restoredIdm);
+                            // Issue #1759: CancelEdit() は StatusMessage / IsStatusError をクリアするため、
+                            // 完了メッセージは必ず後処理のあとに設定する（先に設定すると一度も表示されない）。
+                            StatusMessage = $"{restoredNumber} を復元しました";
+                            IsStatusError = false;
                         }
                         else
                         {
-                            // Issue #314: 復元しない場合は案内メッセージを表示
-                            _dialogService.ShowInformation(
-                                $"このカードは以前 {existing.CardNumber} として登録されていたため、新規登録はできません。\n\n" +
-                                "異なるカード番号等で登録したい場合は、先に復元を行い、その後に編集してください。",
-                                "ご案内");
-                            CancelEdit();
+                            // Issue #1759: 保存経路（SaveAsync）の復元分岐と同じ扱い。
+                            // false は「他 PC が先に復元した」ことを意味する。
+                            await LoadCardsAsync();
+                            StatusMessage = ConcurrencyConflictMessage.ForRestore(
+                                FormatCardLabel(existing.CardType, existing.CardNumber), "カード一覧");
+                            IsStatusError = true;
                         }
                     }
                     else
                     {
-                        // 既に登録済みの場合はメッセージを表示（赤色で目立たせる: Issue #286）
-                        StatusMessage = $"このカードは {existing.CardNumber} として既に登録されています";
-                        IsStatusError = true;
-                        // フォームはそのままにして、ユーザーが確認できるようにする
+                        // Issue #314: 復元しない場合は案内メッセージを表示
+                        _dialogService.ShowInformation(
+                            $"このカードは以前 {existing.CardNumber} として登録されていたため、新規登録はできません。\n\n" +
+                            "異なるカード番号等で登録したい場合は、先に復元を行い、その後に編集してください。",
+                            "ご案内");
+                        CancelEdit();
                     }
-                    return;
                 }
-
-                // 未登録カードの場合は通常処理
-                // カード種別はユーザーに手動選択させる（IDmからの自動判定は技術的に不可能なため）
-                // デフォルトはnimoca（利用頻度が最も高いため）
-                EditCardType = "nimoca";
-                StatusMessage = "カードを読み取りました。カード種別を確認してください。";
-                IsStatusError = false;
-
-                // Issue #443対応: カード読み取り時点で残高を事前取得
-                // カードがリーダーにある間に残高を読み取り、保存時に使用する
-                // これにより、ユーザーがフォーム入力中にカードを離しても正しい残高で登録できる
-                try
+                else
                 {
-                    _preReadBalance = await _cardReader.ReadBalanceAsync(e.Idm);
+                    // 既に登録済みの場合はメッセージを表示（赤色で目立たせる: Issue #286）
+                    StatusMessage = $"このカードは {existing.CardNumber} として既に登録されています";
+                    IsStatusError = true;
+                    // フォームはそのままにして、ユーザーが確認できるようにする
                 }
-                catch
-                {
-                    // 残高読み取り失敗時はnullのまま（CreateNewPurchaseLedgerAsyncで再試行される）
-                    _preReadBalance = null;
-                }
+                return;
+            }
 
-                // Issue #665: カード読み取り時点で履歴も事前取得
-                // カードがリーダーにある間に履歴を読み取り、保存時に使用する
-                // これにより、ユーザーがカードを離しても正しく履歴をインポートできる
-                try
-                {
-                    _preReadHistory = (await _cardReader.ReadHistoryAsync(e.Idm))?.ToList();
-                }
-                catch
-                {
-                    _preReadHistory = null;
-                }
+            // 未登録カードの場合は通常処理
+            // カード種別はユーザーに手動選択させる（IDmからの自動判定は技術的に不可能なため）
+            // デフォルトはnimoca（利用頻度が最も高いため）
+            EditCardType = "nimoca";
+            StatusMessage = "カードを読み取りました。カード種別を確認してください。";
+            IsStatusError = false;
 
-                // 注意: CardRegistration抑制はここで解除しない
-                // ダイアログが開いている間は常に抑制を維持し、
-                // CancelEdit() または Cleanup() でのみ解除する
-            });
+            // Issue #443対応: カード読み取り時点で残高を事前取得
+            // カードがリーダーにある間に残高を読み取り、保存時に使用する
+            // これにより、ユーザーがフォーム入力中にカードを離しても正しい残高で登録できる
+            try
+            {
+                _preReadBalance = await _cardReader.ReadBalanceAsync(idm);
+            }
+            catch
+            {
+                // 残高読み取り失敗時はnullのまま（CreateNewPurchaseLedgerAsyncで再試行される）
+                _preReadBalance = null;
+            }
+
+            // Issue #665: カード読み取り時点で履歴も事前取得
+            // カードがリーダーにある間に履歴を読み取り、保存時に使用する
+            // これにより、ユーザーがカードを離しても正しく履歴をインポートできる
+            try
+            {
+                _preReadHistory = (await _cardReader.ReadHistoryAsync(idm))?.ToList();
+            }
+            catch
+            {
+                _preReadHistory = null;
+            }
+
+            // 注意: CardRegistration抑制はここで解除しない
+            // ダイアログが開いている間は常に抑制を維持し、
+            // CancelEdit() または Cleanup() でのみ解除する
         }
 
         /// <summary>
