@@ -67,7 +67,7 @@ public class AdminDashboardViewModelTests
         };
 
     private static AdminDashboardAnalytics CreateAnalytics(
-        int cardCount = 2, int monthCount = 3, int seriesCount = 2)
+        int cardCount = 2, int monthCount = 3, int seriesCount = 2, bool includeOtherSeries = false)
     {
         var months = Enumerable.Range(1, monthCount).Select(i => $"2026/{i:D2}").ToList();
 
@@ -86,9 +86,12 @@ public class AdminDashboardViewModelTests
                 UsageCount = i * 5,
                 TotalExpense = i * 1000
             }).ToList(),
+            // includeOtherSeries: 上位以外を集約した「その他」を末尾に付ける
+            // （AdminDashboardService.BuildUsageSeries が上限超過時に返す形）
             UsageSeries = Enumerable.Range(1, seriesCount).Select(i => new MonthlyUsageSeries
             {
-                Name = "職員" + i,
+                Name = includeOtherSeries && i == seriesCount ? "その他" : "職員" + i,
+                IsOther = includeOtherSeries && i == seriesCount,
                 MonthlyExpenses = Enumerable.Range(1, monthCount).Select(m => m * 100 * i).ToList(),
                 TotalExpense = Enumerable.Range(1, monthCount).Sum(m => m * 100 * i)
             }).ToList(),
@@ -334,6 +337,74 @@ public class AdminDashboardViewModelTests
             "色相差が確保できないと凡例が読み取れず、色覚多様性への配慮も破綻する");
         vm.UsageLegend.Select(l => l.BrushKey).Should().OnlyContain(k => !k.StartsWith("#"),
             "色値リテラルではなくリソースキーで渡す");
+    }
+
+    [Fact]
+    public async Task LoadAnalyticsAsync_UsesADedicatedColorForTheOtherSeries()
+    {
+        // Issue #1815: 上位 5 系列 + 「その他」の 6 系列。
+        // 剰余で色を選ぶと 6 本目が最上位系列と同色になり、凡例でも棒でも区別できない
+        SetupAnalytics(CreateAnalytics(
+            seriesCount: AppConstants.AdminDashboardMaxSeries + 1, includeOtherSeries: true));
+        var vm = CreateViewModel();
+
+        await vm.LoadAnalyticsAsync();
+
+        vm.UsageLegend.Should().HaveCount(AppConstants.AdminDashboardMaxSeries + 1);
+        vm.UsageLegend.Select(l => l.BrushKey).Should().OnlyHaveUniqueItems(
+            "色相差が確保できないと凡例が読み取れず、色覚多様性への配慮も破綻する");
+        vm.UsageLegend.Last().BrushKey.Should().Be(AdminDashboardViewModel.OtherSeriesBrushKey);
+
+        // 凡例だけ直しても、棒が同色のままなら積み上げ区画は読み取れない
+        var otherIndex = AppConstants.AdminDashboardMaxSeries;
+        vm.UsageBars.Where(b => b.SeriesIndex == otherIndex)
+            .Should().NotBeEmpty()
+            .And.OnlyContain(b => b.BrushKey == AdminDashboardViewModel.OtherSeriesBrushKey);
+        vm.UsageBars.Where(b => b.SeriesIndex == 0)
+            .Should().OnlyContain(b => b.BrushKey != AdminDashboardViewModel.OtherSeriesBrushKey);
+    }
+
+    [Fact]
+    public async Task LoadAnalyticsAsync_DoesNotUseTheOtherColorWhenNoSeriesIsAggregated()
+    {
+        // 対の表明。「その他」が無いのに専用色を使うと、上位系列が集約結果に見える
+        SetupAnalytics(CreateAnalytics(seriesCount: AppConstants.AdminDashboardMaxSeries));
+        var vm = CreateViewModel();
+
+        await vm.LoadAnalyticsAsync();
+
+        vm.UsageLegend.Select(l => l.BrushKey).Should()
+            .NotContain(AdminDashboardViewModel.OtherSeriesBrushKey);
+        vm.UsageBars.Should().OnlyContain(b => b.BrushKey != AdminDashboardViewModel.OtherSeriesBrushKey);
+    }
+
+    [Fact]
+    public void BuildUsageSeriesBrushKeys_DoesNotCountTheOtherSeriesAsATopSeries()
+    {
+        // 「その他」が末尾以外に来ても、上位系列の色番号がずれないこと
+        var series = new List<MonthlyUsageSeries>
+        {
+            new MonthlyUsageSeries { Name = "職員1" },
+            new MonthlyUsageSeries { Name = "その他", IsOther = true },
+            new MonthlyUsageSeries { Name = "職員2" }
+        };
+
+        var keys = AdminDashboardViewModel.BuildUsageSeriesBrushKeys(series);
+
+        keys.Should().Equal(new[]
+        {
+            AdminDashboardViewModel.SeriesBrushKeys[0],
+            AdminDashboardViewModel.OtherSeriesBrushKey,
+            AdminDashboardViewModel.SeriesBrushKeys[1]
+        });
+    }
+
+    [Fact]
+    public void OtherSeriesBrushKey_IsNotOneOfTheTopSeriesColors()
+    {
+        AdminDashboardViewModel.SeriesBrushKeys.Should()
+            .NotContain(AdminDashboardViewModel.OtherSeriesBrushKey,
+                "上位系列と同じキーを充てると Issue #1815 の同色問題がそのまま残る");
     }
 
     [Fact]
