@@ -90,7 +90,9 @@ public class AdminDashboardViewModelTests
             // （AdminDashboardService.BuildUsageSeries が上限超過時に返す形）
             UsageSeries = Enumerable.Range(1, seriesCount).Select(i => new MonthlyUsageSeries
             {
-                Name = includeOtherSeries && i == seriesCount ? "その他" : "職員" + i,
+                Name = includeOtherSeries && i == seriesCount
+                    ? AdminDashboardService.OtherSeriesName
+                    : "職員" + i,
                 IsOther = includeOtherSeries && i == seriesCount,
                 MonthlyExpenses = Enumerable.Range(1, monthCount).Select(m => m * 100 * i).ToList(),
                 TotalExpense = Enumerable.Range(1, monthCount).Sum(m => m * 100 * i)
@@ -385,7 +387,7 @@ public class AdminDashboardViewModelTests
         var series = new List<MonthlyUsageSeries>
         {
             new MonthlyUsageSeries { Name = "職員1" },
-            new MonthlyUsageSeries { Name = "その他", IsOther = true },
+            new MonthlyUsageSeries { Name = AdminDashboardService.OtherSeriesName, IsOther = true },
             new MonthlyUsageSeries { Name = "職員2" }
         };
 
@@ -400,11 +402,18 @@ public class AdminDashboardViewModelTests
     }
 
     [Fact]
-    public void OtherSeriesBrushKey_IsNotOneOfTheTopSeriesColors()
+    public void SeriesPalette_HasEnoughColorsForTheCapAndExcludesTheOtherColor()
     {
         AdminDashboardViewModel.SeriesBrushKeys.Should()
             .NotContain(AdminDashboardViewModel.OtherSeriesBrushKey,
                 "上位系列と同じキーを充てると Issue #1815 の同色問題がそのまま残る");
+
+        // 上位系列の色は今も `SeriesBrushKeys[topSeriesIndex % Length]` で選ぶため、
+        // 上限が色数を超えた瞬間に 6 本目が 1 本目と同色になる（#1815 と同じ形の再発）。
+        // 上限側の定数だけを引き上げても静かに壊れないよう、両者の関係を表明しておく
+        AdminDashboardViewModel.SeriesBrushKeys.Length.Should()
+            .BeGreaterOrEqualTo(AppConstants.AdminDashboardMaxSeries,
+                "上位系列の上限を色数より大きくすると剰余で色が一周し、Issue #1815 が別の形で再発する");
     }
 
     [Fact]

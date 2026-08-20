@@ -556,10 +556,11 @@ namespace ICCardManager.ViewModels
         /// </remarks>
         internal static IReadOnlyList<string> BuildUsageSeriesBrushKeys(IReadOnlyList<MonthlyUsageSeries> series)
         {
-            var keys = new List<string>(series?.Count ?? 0);
+            var items = series ?? new MonthlyUsageSeries[0];
+            var keys = new List<string>(items.Count);
             var topSeriesIndex = 0;
 
-            foreach (var s in series ?? new MonthlyUsageSeries[0])
+            foreach (var s in items)
             {
                 if (s != null && s.IsOther)
                 {
