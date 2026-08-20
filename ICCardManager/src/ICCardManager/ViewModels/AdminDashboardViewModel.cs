@@ -162,6 +162,16 @@ namespace ICCardManager.ViewModels
             "PrimaryBrush", "SuccessActionBrush", "WarningActionBrush", "DangerTextBrush", "InfoTextBrush"
         };
 
+        /// <summary>
+        /// 「その他」系列に固定で割り当てる色のリソースキー（Issue #1815）。
+        /// </summary>
+        /// <remarks>
+        /// 上位系列の <see cref="SeriesBrushKeys"/> とは別枠で持つ。剰余で選ぶと
+        /// 6 系列目（その他）が最上位系列と同色になり、積み上げ棒でも凡例でも
+        /// 区別できなくなるため。集約された残りであることが色からも伝わるよう無彩色を充てる。
+        /// </remarks>
+        internal const string OtherSeriesBrushKey = "MutedTextBrush";
+
         #endregion
 
         #region 状態
@@ -509,8 +519,11 @@ namespace ICCardManager.ViewModels
 
             var scale = ChartScale.CreateLinearScale(0.0, monthTotals.Count > 0 ? monthTotals.Max() : 0.0, TargetTickCount);
 
+            // 棒と凡例が食い違わないよう、色は系列ごとに 1 度だけ決めて双方で使う
+            var brushKeys = BuildUsageSeriesBrushKeys(series);
+
             foreach (var bar in ChartGeometryCalculator.CalculateStackedVerticalBars(
-                valuesByMonth, area, scale, BarGapRatio, SeriesBrushKeys))
+                valuesByMonth, area, scale, BarGapRatio, brushKeys))
             {
                 UsageBars.Add(bar);
             }
@@ -530,9 +543,36 @@ namespace ICCardManager.ViewModels
                 UsageLegend.Add(new ChartLegendItem
                 {
                     Label = series[i].Name,
-                    BrushKey = SeriesBrushKeys[i % SeriesBrushKeys.Length]
+                    BrushKey = brushKeys[i]
                 });
             }
+        }
+
+        /// <summary>
+        /// 月別利用額グラフの系列色を、系列と同じ並び・同じ長さで返す（Issue #1815）。
+        /// </summary>
+        /// <remarks>
+        /// 「その他」は <see cref="OtherSeriesBrushKey"/> 固定で、上位系列の色番号としては数えない。
+        /// </remarks>
+        internal static IReadOnlyList<string> BuildUsageSeriesBrushKeys(IReadOnlyList<MonthlyUsageSeries> series)
+        {
+            var items = series ?? new MonthlyUsageSeries[0];
+            var keys = new List<string>(items.Count);
+            var topSeriesIndex = 0;
+
+            foreach (var s in items)
+            {
+                if (s != null && s.IsOther)
+                {
+                    keys.Add(OtherSeriesBrushKey);
+                    continue;
+                }
+
+                keys.Add(SeriesBrushKeys[topSeriesIndex % SeriesBrushKeys.Length]);
+                topSeriesIndex++;
+            }
+
+            return keys;
         }
 
         private void RenderBalanceChart(AdminDashboardAnalytics source)
