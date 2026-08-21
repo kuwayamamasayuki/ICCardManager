@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Data.SQLite;
 using System.Linq;
 using System.Threading.Tasks;
+using ICCardManager.Common;
 using ICCardManager.Data;
 using ICCardManager.Data.Repositories;
 using ICCardManager.Infrastructure.Security;
@@ -1544,7 +1545,6 @@ namespace ICCardManager.Services
         /// <see cref="GetUserFriendlyErrorMessage"/>（Issue #1110）を流用しないのは、
         /// あちらが「再度○○をお試しください」で終わるため。カード登録直後の履歴インポートは
         /// 同じ操作をやり直せない（カード行は既に登録済み）ので、行動指示としては誤りになる。
-        /// また既定分岐が生の <see cref="Exception.Message"/> を含む点も Issue #1614 に反する。
         /// </para>
         /// <para>
         /// 「どうすれば」は復旧手段を知っている呼び出し元が付ける
@@ -1600,6 +1600,10 @@ namespace ICCardManager.Services
         /// <remarks>
         /// SQLiteの技術的なエラーメッセージ（SQLITE_BUSY等）をユーザーが理解できる
         /// メッセージに変換する。共有モードでの一般的なエラーシナリオをカバーする。
+        /// <para>
+        /// 既定分岐（SQLite / IO 以外の例外）は <see cref="ExceptionMessageFormatter.ToUserMessage"/>
+        /// へ委譲する。生の <see cref="Exception.Message"/> を返さないこと（Issue #1614、#1817）。
+        /// </para>
         /// </remarks>
         internal static string GetUserFriendlyErrorMessage(Exception ex, string operationName)
         {
@@ -1621,7 +1625,11 @@ namespace ICCardManager.Services
                 return $"ネットワーク共有フォルダへの接続に失敗しました。ネットワーク接続を確認してください。";
             }
 
-            return $"{operationName}処理でエラーが発生しました: {ex.Message}";
+            // Issue #1817: 既定分岐で生の ex.Message を返すと、.NET／SQLite の英語文言が
+            // そのままトースト・ステータスへ出る（Issue #1614 違反）。技術的詳細は
+            // 呼び出し元（LendAsync / ReturnAsync）の LogError が残しているため、
+            // ここでは 3 要素のユーザー向け文言だけを返す。
+            return ExceptionMessageFormatter.ToUserMessage(ex, $"{operationName}処理");
         }
 
         /// <summary>

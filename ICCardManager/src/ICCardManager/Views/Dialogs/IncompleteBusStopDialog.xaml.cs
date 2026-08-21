@@ -32,8 +32,12 @@ namespace ICCardManager.Views.Dialogs
                 }
                 catch (Exception ex)
                 {
+                    // Issue #1817: 生の ex.Message（.NET／SQLite の英語文言）を職員へ見せない（Issue #1614）。
+                    // 技術的詳細は ErrorDialogHelper.LogException でファイルログへ逃がす
+                    // （この経路には ILogger が無く、修正前は UI にも出るがログには一切残らなかった）。
+                    ErrorDialogHelper.LogException(ex, "バス停名未入力一覧の読み込み");
                     MessageBox.Show(
-                        $"データの読み込み中にエラーが発生しました。\n\n{ex.Message}",
+                        ExceptionMessageFormatter.ToUserMessage(ex, "バス停名未入力一覧の読み込み"),
                         "エラー",
                         MessageBoxButton.OK,
                         MessageBoxImage.Error);

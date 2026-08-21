@@ -1127,7 +1127,11 @@ public partial class DataExportImportViewModel : ViewModelBase
         {
             IsWaitingForCardTouch = false;
             TouchedCardInfo = string.Empty;
-            SetStatus($"カードリーダーの開始に失敗しました: {ex.Message}", true);
+            // Issue #1817: カードリーダーの失敗はネイティブ由来（DllNotFound / SEH / Win32）で
+            // ex.Message が英語になる。生のまま出さず（Issue #1614）、技術的詳細は
+            // ErrorDialogHelper.LogException でファイルログへ逃がす（当 ViewModel は ILogger 非注入）。
+            ErrorDialogHelper.LogException(ex, "カードリーダーの開始");
+            SetStatus(ExceptionMessageFormatter.ToUserMessage(ex, "カードリーダーの開始"), true);
         }
     }
 

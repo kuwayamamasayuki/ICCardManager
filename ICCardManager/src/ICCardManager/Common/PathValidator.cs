@@ -516,6 +516,36 @@ namespace ICCardManager.Common
         }
 
         /// <summary>
+        /// 書き込みプローブが <see cref="IOException"/> で失敗したときの検証エラーを生成する（Issue #1817）。
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// 修正前は <c>$"フォルダへのアクセスエラー: {ex.Message}"</c> を返しており、
+        /// F5 設定画面（<c>SettingsViewModel</c>）が生の .NET 例外文言をそのまま表示していた
+        /// （Issue #1614 違反）。技術的詳細はファイルログへ逃がし、UI には
+        /// 「何が／なぜ／どうすれば」3 要素の文言だけを返す。
+        /// </para>
+        /// <para>
+        /// <see cref="ExceptionMessageFormatter.ToUserMessage"/> へ委譲せず専用文言を持つのは、
+        /// あちらの <see cref="IOException"/> 分岐が「対象のファイルが他のプログラムで
+        /// 開かれていないか確認し」と案内するため。ここで失敗しているのは<b>バックアップ先
+        /// フォルダーへの書き込みプローブ</b>であり、原因はネットワーク共有の切断・
+        /// ディスク満杯・オフライン状態で、その行動指示は実行できない
+        /// （<c>.claude/rules/error-messages.md</c>「取れる行動が違う経路には専用の文言」）。
+        /// 同メソッド内の <see cref="UnauthorizedAccessException"/> 分岐も同じ理由で専用文言を持つ。
+        /// </para>
+        /// </remarks>
+        internal static ValidationResult CreateWriteProbeIoFailure(IOException ex)
+        {
+            ErrorDialogHelper.LogException(ex, "バックアップ先フォルダへの書き込み確認");
+
+            return ValidationResult.Failure(
+                "指定されたフォルダへの書き込み確認中に入出力エラーが発生しました。" +
+                "ネットワーク共有の切断やディスクの空き容量不足が考えられるため、" +
+                "接続状態と空き容量を確認するか、書き込み可能な別のフォルダを指定してください。");
+        }
+
+        /// <summary>
         /// 書き込み権限をチェック
         /// </summary>
         private static ValidationResult CheckWritePermission(string path)
@@ -541,7 +571,7 @@ namespace ICCardManager.Common
                     }
                     catch (IOException ex)
                     {
-                        return ValidationResult.Failure($"フォルダへのアクセスエラー: {ex.Message}");
+                        return CreateWriteProbeIoFailure(ex);
                     }
                 }
                 else

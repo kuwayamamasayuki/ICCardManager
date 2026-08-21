@@ -249,4 +249,30 @@ public class PathValidatorErrorMessageQualityTests : IDisposable
         result.ErrorMessage.Should().Contain("親ディレクトリ",
             "なぜ問題か: 親ディレクトリへの移動");
     }
+
+    /// <summary>
+    /// Issue #1817: 書き込みプローブが <see cref="IOException"/> で失敗したときの文言が
+    /// 生の <c>ex.Message</c> を含まず、3 要素を満たすこと。
+    /// </summary>
+    /// <remarks>
+    /// この分岐は「共有フォルダーの切断」「ディスク満杯」といった実機でのみ再現する状態でしか
+    /// 通らず、<c>ValidateBackupPath</c> 経由では単体テストから到達できない。
+    /// そのため文言の生成を <c>PathValidator.CreateWriteProbeIoFailure</c> へ切り出し、
+    /// そこを直接検証する（判断を純関数へ切り出して検査する形は Issue #1794 と同じ）。
+    /// </remarks>
+    [Fact]
+    public void CreateWriteProbeIoFailure_MeetsQualityAndHidesRawExceptionMessage()
+    {
+        var result = PathValidator.CreateWriteProbeIoFailure(
+            new IOException("The specified network name is no longer available"));
+
+        result.IsValid.Should().BeFalse();
+        AssertQualityCriteria(result.ErrorMessage);
+        result.ErrorMessage.Should().NotContain("network name",
+            "生の ex.Message は英語・技術用語を含みうるため UI へ出さない（Issue #1614）");
+        result.ErrorMessage.Should().Contain("入出力エラー",
+            "なぜ問題か: 書き込み確認が I/O エラーで失敗した");
+        result.ErrorMessage.Should().NotContain("他のプログラムで開かれていないか",
+            "対象はファイルではなくバックアップ先フォルダーであり、その行動指示は実行できない");
+    }
 }
