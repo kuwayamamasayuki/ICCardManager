@@ -1,4 +1,4 @@
-using FluentAssertions;
+﻿using FluentAssertions;
 using ICCardManager.Services;
 using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
@@ -475,7 +475,9 @@ public class CardLockManagerTests : IDisposable
             _lockManager.ReleaseLockReference($"card{i}");
         }
 
-        Thread.Sleep(10); // 期限切れを待つ
+        // 期限切れを待つ。DateTime.UtcNow の分解能（Windows で約 15.6ms）より
+        // 十分長く待たないと LastUsed が cutoffTime と同値のままになり得る
+        Thread.Sleep(50);
 
         // Act - 複数のタスクで同時にクリーンアップ
         var tasks = Enumerable.Range(0, 10)
@@ -485,6 +487,16 @@ public class CardLockManagerTests : IDisposable
         // Assert - 例外なく完了
         var action = async () => await Task.WhenAll(tasks);
         await action.Should().NotThrowAsync();
+
+        // Issue #1821: 「例外が出ない」だけでは、1 件も削除しなくなる退行
+        // （_cleanupLock の条件式の改変等）を素通りさせる。
+        // 10 件すべて参照カウント 0・期限切れ・Semaphore 未使用なので、
+        // 同時実行の有無にかかわらず削除結果は決定的に 0 件残りになる。
+        _lockManager.LockCount.Should().Be(0, "期限切れかつ未使用のロックは全件削除されるべき");
+        for (var i = 0; i < 10; i++)
+        {
+            _lockManager.HasLock($"card{i}").Should().BeFalse($"card{i} は削除されているべき");
+        }
     }
 
     #endregion

@@ -1,4 +1,4 @@
-using System.IO;
+﻿using System.IO;
 using FluentAssertions;
 using ICCardManager.Data.Repositories;
 using ICCardManager.Dtos;
@@ -802,18 +802,22 @@ public class ReportViewModelTests
     public async Task OutputFolder_AfterInitialize_WhenChanged_ShouldSaveToSettings()
     {
         // Arrange
+        const string expectedFolder = @"\\server\share\reports";
         _cardRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<IcCard>());
         _settingsRepositoryMock.Setup(s => s.SaveAppSettingsAsync(It.IsAny<AppSettings>())).ReturnsAsync(true);
         await _viewModel.InitializeAsync();
 
+        // Issue #1821: fire-and-forget の完了は固定時間ではなく Callback のシグナルで待つ
+        var saved = CreateSaveSignal(expectedFolder);
+
         // Act - ユーザーがテキストボックスに直接入力した場合をシミュレート
-        _viewModel.OutputFolder = @"\\server\share\reports";
+        _viewModel.OutputFolder = expectedFolder;
 
         // Assert - 設定が保存されること
-        // fire-and-forgetのため少し待つ
-        await Task.Delay(100);
+        (await WaitForSignalAsync(saved)).Should().BeTrue(
+            "OutputFolder の変更は SaveOutputFolderAsync により設定へ保存されるべき");
         _settingsRepositoryMock.Verify(
-            s => s.SaveAppSettingsAsync(It.Is<AppSettings>(a => a.ReportOutputFolder == @"\\server\share\reports")),
+            s => s.SaveAppSettingsAsync(It.Is<AppSettings>(a => a.ReportOutputFolder == expectedFolder)),
             Times.AtLeastOnce);
     }
 
@@ -839,18 +843,23 @@ public class ReportViewModelTests
     public async Task OutputFolder_WithUncPath_ShouldAcceptAndSave()
     {
         // Arrange
+        const string expectedFolder = @"\\192.168.1.100\共有フォルダ\帳票";
         _cardRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<IcCard>());
         _settingsRepositoryMock.Setup(s => s.SaveAppSettingsAsync(It.IsAny<AppSettings>())).ReturnsAsync(true);
         await _viewModel.InitializeAsync();
 
+        // Issue #1821: fire-and-forget の完了は固定時間ではなく Callback のシグナルで待つ
+        var saved = CreateSaveSignal(expectedFolder);
+
         // Act
-        _viewModel.OutputFolder = @"\\192.168.1.100\共有フォルダ\帳票";
+        _viewModel.OutputFolder = expectedFolder;
 
         // Assert
-        _viewModel.OutputFolder.Should().Be(@"\\192.168.1.100\共有フォルダ\帳票");
-        await Task.Delay(100);
+        _viewModel.OutputFolder.Should().Be(expectedFolder);
+        (await WaitForSignalAsync(saved)).Should().BeTrue(
+            "UNC パスも SaveOutputFolderAsync により設定へ保存されるべき");
         _settingsRepositoryMock.Verify(
-            s => s.SaveAppSettingsAsync(It.Is<AppSettings>(a => a.ReportOutputFolder == @"\\192.168.1.100\共有フォルダ\帳票")),
+            s => s.SaveAppSettingsAsync(It.Is<AppSettings>(a => a.ReportOutputFolder == expectedFolder)),
             Times.AtLeastOnce);
     }
 
@@ -1434,6 +1443,45 @@ public class ReportViewModelTests
 
         // Assert
         _viewModel.Cards.Should().OnlyContain(c => c.PreflightWarningCount == 0);
+    }
+
+    #endregion
+
+    #region ヘルパーメソッド（Issue #1821）
+
+    /// <summary>
+    /// fire-and-forget の完了待ちに使うタイムアウト。
+    /// 遅い CI ランナーでも余裕を持って完了できる長さを取る（正常時はシグナルで即座に抜ける）。
+    /// </summary>
+    private static readonly TimeSpan SignalTimeout = TimeSpan.FromSeconds(5);
+
+    /// <summary>
+    /// 指定した出力先フォルダーで <see cref="ISettingsRepository.SaveAppSettingsAsync"/> が
+    /// 呼ばれたことを知らせるシグナルを仕込む。
+    /// </summary>
+    /// <remarks>
+    /// Issue #1821: <c>OnOutputFolderChanged</c> は <c>SaveOutputFolderAsync</c> を
+    /// fire-and-forget で起動するため、呼び出し側は完了を await できない。
+    /// 固定時間の <c>Task.Delay</c> で待つと遅いマシンで散発的に赤くなり、
+    /// かつ常にその時間だけ待つので実行時間も無駄になる（.claude/rules/testing.md）。
+    /// </remarks>
+    private TaskCompletionSource<bool> CreateSaveSignal(string expectedFolder)
+    {
+        var signal = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        _settingsRepositoryMock
+            .Setup(s => s.SaveAppSettingsAsync(It.Is<AppSettings>(a => a.ReportOutputFolder == expectedFolder)))
+            .Callback(() => signal.TrySetResult(true))
+            .ReturnsAsync(true);
+        return signal;
+    }
+
+    /// <summary>
+    /// シグナルが立つまで待つ。タイムアウトした場合は false を返す。
+    /// </summary>
+    private static async Task<bool> WaitForSignalAsync(TaskCompletionSource<bool> signal)
+    {
+        var completed = await Task.WhenAny(signal.Task, Task.Delay(SignalTimeout));
+        return completed == signal.Task && await signal.Task;
     }
 
     #endregion
