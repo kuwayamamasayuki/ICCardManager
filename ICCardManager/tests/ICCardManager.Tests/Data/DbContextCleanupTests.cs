@@ -274,7 +274,9 @@ public class DbContextCleanupTests : IDisposable
         // Act - SQLite に同じ年減算をさせる
         using var lease = _dbContext.LeaseConnection();
         using var command = lease.Connection.CreateCommand();
-        command.CommandText = "SELECT date('2028-02-29', '-6 years')";
+        // 日付リテラルを二重に書かない（片方だけ書き換わる形を残さない）
+        command.CommandText = "SELECT date(@leapDay, '-6 years')";
+        command.Parameters.AddWithValue("@leapDay", leapDay.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture));
         var sqliteResult = command.ExecuteScalar() as string;
 
         // Assert - SQLite は 2022-02-29 を 2022-03-01 へ正規化し、.NET は 2022-02-28 へ丸める

@@ -11,6 +11,7 @@ using Xunit;
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 
 
@@ -1480,7 +1481,11 @@ public class ReportViewModelTests
     /// </summary>
     private static async Task<bool> WaitForSignalAsync(TaskCompletionSource<bool> signal)
     {
-        var completed = await Task.WhenAny(signal.Task, Task.Delay(SignalTimeout));
+        using var timeoutCts = new CancellationTokenSource();
+        var timeout = Task.Delay(SignalTimeout, timeoutCts.Token);
+        var completed = await Task.WhenAny(signal.Task, timeout);
+        // シグナルが先に立ったらタイマーを畳む（5 秒ぶんのタイマーを残さない）
+        timeoutCts.Cancel();
         return completed == signal.Task && await signal.Task;
     }
 
