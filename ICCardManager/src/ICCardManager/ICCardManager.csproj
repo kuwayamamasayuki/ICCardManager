@@ -99,7 +99,9 @@
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
     <!-- FeliCa ネイティブライブラリ (Sony PaSoRi用)
-         出自: https://github.com/tmurakam/felicalib (MIT License)
+         出自: https://github.com/tmurakam/felicalib
+         ライセンス: BSD-3-Clause License (Copyright (c) 2007 Takuya Murakami)
+         ※正典は ICCardManager/docs/THIRD_PARTY_LICENSES.md（Issue #1822 で MIT 表記の誤りを訂正）
          SHA-256: f49c3af37dadf3d8a309492a2eb7fcded8c66dd3bb1bec855597bd65f9d9460d
          x86ネイティブDLL。NuGetパッケージ管理外のため、ハッシュで整合性を管理 -->
     <None Include="felicalib.dll">

@@ -996,9 +996,15 @@ namespace ICCardManager.Services
                     // Issue #978: チャージ詳細と利用詳細の両方を登録
                     // チャージ詳細も登録しないと重複チェック（GetExistingDetailKeysAsync）で
                     // 検出されず、次回返却時にチャージが再処理されてしまう
-                    // チャージを先に挿入し、利用を後に挿入することで
-                    // rowidベースのSequenceNumberが利用側で大きくなり、
-                    // LedgerMergeService等の「最新Detail＝最大SequenceNumber」ロジックと整合する
+                    //
+                    // Issue #1822: 挿入順は「チャージ → 利用」で、rowid ベースの SequenceNumber は
+                    // 利用側が大きくなる。これは LedgerDetail.SequenceNumber の既定規約
+                    // （FeliCa 互換で小さい値ほど新しい。下の通常経路が Reverse() で維持している）の
+                    // 例外にあたる。残高不足マージで作る台帳の残高は上の mergedLedger.Balance で
+                    // 利用後の実残高を直接持たせており、明細の並びからは決めていないため実害はない。
+                    // LedgerMergeService.MergeAsync の残高選択（最大 SequenceNumber を最新とみなす）は
+                    // この並びとだけ整合する。両者の食い違いは本 Issue のスコープ外で、
+                    // 挙動を伴う整理は別 Issue で扱う。
                     charge.LedgerId = ledgerId;
                     await InsertDetail(charge).ConfigureAwait(false);
                     usage.LedgerId = ledgerId;

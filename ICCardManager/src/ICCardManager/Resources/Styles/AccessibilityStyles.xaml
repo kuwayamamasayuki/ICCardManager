@@ -73,6 +73,25 @@
     <SolidColorBrush x:Key="WarningActionBrush" Color="#FF9800"/>
     <SolidColorBrush x:Key="OverlayBrush" Color="#80000000"/>
 
+    <!-- ===== 明細グループ配色（履歴詳細ダイアログ） ===== -->
+    <!-- Issue #1822: LedgerDetailDialog.xaml 内で色値リテラルを直書きしていたものを SSOT へ集約。
+         状態ブラシ（Lending/Return/Error 等）とは意味が異なるため流用せず専用キーとして定義する。
+         GroupColorIndex 1-5（グループ番号）に対応する 5 色サイクル。
+         0（自動検出）はスタイル既定値の Transparent が使われるためキーを持たない
+         （移設前の GroupColor0 はどこからも参照されていなかったため引き継がない）。 -->
+    <!-- 行背景（淡色） -->
+    <SolidColorBrush x:Key="LedgerGroupBackground1Brush" Color="#E3F2FD"/>
+    <SolidColorBrush x:Key="LedgerGroupBackground2Brush" Color="#E8F5E9"/>
+    <SolidColorBrush x:Key="LedgerGroupBackground3Brush" Color="#FFF3E0"/>
+    <SolidColorBrush x:Key="LedgerGroupBackground4Brush" Color="#F3E5F5"/>
+    <SolidColorBrush x:Key="LedgerGroupBackground5Brush" Color="#FFEBEE"/>
+    <!-- グループバッジ（同サイクルの濃色） -->
+    <SolidColorBrush x:Key="LedgerGroupBadge1Brush" Color="#1976D2"/>
+    <SolidColorBrush x:Key="LedgerGroupBadge2Brush" Color="#388E3C"/>
+    <SolidColorBrush x:Key="LedgerGroupBadge3Brush" Color="#F57C00"/>
+    <SolidColorBrush x:Key="LedgerGroupBadge4Brush" Color="#7B1FA2"/>
+    <SolidColorBrush x:Key="LedgerGroupBadge5Brush" Color="#D32F2F"/>
+
     <!-- ===== アニメーション用カラー ===== -->
     <!-- ColorAnimation は Brush ではなく Color を直接補間するため、SolidColorBrush ではなく Color で定義する。 -->
     <!-- 行ハイライト（薄い黄色）: 新規登録・更新・復元後に該当行を一瞬ハイライトしてフェードアウト（Issue #1613） -->

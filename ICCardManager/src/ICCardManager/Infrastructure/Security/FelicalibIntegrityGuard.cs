@@ -25,8 +25,15 @@ namespace ICCardManager.Infrastructure.Security
         /// アプリディレクトリに配置する felicalib.dll の既知正規ハッシュ（SHA-256 16進小文字）。
         /// </summary>
         /// <remarks>
-        /// tmurakam/felicalib (MIT License) 由来の x86 バイナリ。<c>ICCardManager.csproj</c>
-        /// の None 宣言コメントと一致する。DLL を更新する場合はここも同期更新が必要。
+        /// tmurakam/felicalib (BSD-3-Clause License, Copyright (c) 2007 Takuya Murakami) 由来の
+        /// x86 バイナリ。<c>ICCardManager.csproj</c> の None 宣言コメントと一致する。
+        /// DLL を更新する場合はここも同期更新が必要。
+        /// <para>
+        /// Issue #1822: 以前は「MIT License」と記載していたが誤り。再配布している felicalib.dll は
+        /// tmurakam オリジナル側のため BSD-3-Clause。ライセンス表記の正典は
+        /// <c>ICCardManager/docs/THIRD_PARTY_LICENSES.md</c>（NuGet の FelicaLib.DotNet は
+        /// Remodeled 部分が MIT、オリジナル felicalib 部分が BSD-3-Clause のデュアルライセンス）。
+        /// </para>
         /// </remarks>
         public const string ExpectedSha256 =
             "f49c3af37dadf3d8a309492a2eb7fcded8c66dd3bb1bec855597bd65f9d9460d";
