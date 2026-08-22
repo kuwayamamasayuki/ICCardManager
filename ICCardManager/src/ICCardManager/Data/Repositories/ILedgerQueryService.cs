@@ -75,7 +75,17 @@ namespace ICCardManager.Data.Repositories
         /// <summary>
         /// 過去に入力されたバス停名をスコア順で取得（オートコンプリート用）
         /// </summary>
-        Task<IEnumerable<(string BusStops, int UsageCount, DateTime? LastUsedDate)>> GetBusStopSuggestionsAsync();
+        /// <param name="busStopPlaceholder">
+        /// 候補から除外する未入力プレースホルダ（既定「★」。Issue #1818）。
+        /// 値は組織設定（<c>SummaryText.BusPlaceholder</c>）由来のため、永続化層では判断せず
+        /// 呼び出し元から受け取る（設計書 05 §2a.5 の境界。<c>SummaryGenerator.BusPlaceholder</c> を渡すこと）。
+        /// null／空文字は <see cref="System.ArgumentException"/>。
+        /// </param>
+        /// <exception cref="System.ArgumentException">
+        /// <paramref name="busStopPlaceholder"/> が null または空文字の場合。
+        /// </exception>
+        Task<IEnumerable<(string BusStops, int UsageCount, DateTime? LastUsedDate)>> GetBusStopSuggestionsAsync(
+            string busStopPlaceholder);
 
         /// <summary>
         /// 指定期間の利用履歴をページング付きで取得

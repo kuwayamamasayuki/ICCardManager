@@ -928,11 +928,9 @@ namespace ICCardManager.ViewModels
             var busDetails = ledger.Details.Where(d => d.IsBus).ToList();
             if (busDetails.Count == 0) return;
 
-            var match = System.Text.RegularExpressions.Regex.Match(
-                ledger.Summary ?? "", @"バス（(.+?)）");
-            if (!match.Success) return;
+            // Issue #1818: 抽出パターンは組織設定 BusLabel から導出する
+            if (!SummaryGenerator.TryExtractBusStops(ledger.Summary, out var busStopText)) return;
 
-            var busStopText = match.Groups[1].Value;
             var busStopUpdates = new List<(int SequenceNumber, string BusStops)>();
 
             if (busDetails.Count == 1)

@@ -543,10 +543,9 @@ namespace ICCardManager.Services
                 var busDetails = ledger.Details.Where(d => d.IsBus).ToList();
                 if (busDetails.Count == 0) continue;
 
-                var match = Regex.Match(ledger.Summary ?? "", @"バス（(.+?)）");
-                if (!match.Success) continue;
-
-                var busStopText = match.Groups[1].Value;
+                // Issue #1818: 抽出パターンは組織設定 BusLabel から導出する
+                //（生成側だけが設定値を使い、抽出側がリテラルを直書きする乖離の防止）
+                if (!SummaryGenerator.TryExtractBusStops(ledger.Summary, out var busStopText)) continue;
 
                 if (busDetails.Count == 1)
                 {

@@ -6,6 +6,7 @@ using System.Threading.Tasks;
 using CommunityToolkit.Mvvm.ComponentModel;
 using ICCardManager.Data.Repositories;
 using ICCardManager.Dtos;
+using ICCardManager.Services;
 
 namespace ICCardManager.ViewModels
 {
@@ -55,6 +56,18 @@ namespace ICCardManager.ViewModels
         public string SelectedCardIdm => SelectedItem?.CardIdm;
 
         /// <summary>
+        /// ヘッダーの説明文（Issue #1818）
+        /// </summary>
+        /// <remarks>
+        /// プレースホルダ記号は組織設定（<c>SummaryText.BusPlaceholder</c>）由来のため、
+        /// XAML に「★」を直書きせず設定値から組み立てる。画面の説明と実際に保存される
+        /// 記号が食い違うと、職員は一覧の意味を取り違える。
+        /// </remarks>
+        public string HeaderDescription =>
+            $"バス停名が未入力（{SummaryGenerator.BusPlaceholder}マーク）の利用履歴です。" +
+            "項目を選択して「バス停名を入力」を押すと、バス停名入力画面に遷移します。";
+
+        /// <summary>
         /// 選択された履歴のID
         /// </summary>
         public int? SelectedLedgerId => SelectedItem?.LedgerId;
@@ -80,7 +93,9 @@ namespace ICCardManager.ViewModels
 
                 var ledgers = await _ledgerRepository.GetByDateRangeAsync(
                     null, DateTime.Now.AddYears(-1), DateTime.Now);
-                var incompleteLedgers = ledgers.Where(l => l.Summary?.Contains("★") == true).ToList();
+                // Issue #1818: プレースホルダは組織設定（SummaryText.BusPlaceholder）由来のため直書きしない
+                var incompleteLedgers = ledgers
+                    .Where(l => SummaryGenerator.HasIncompleteBusStop(l.Summary)).ToList();
 
                 var cards = await _cardRepository.GetAllAsync();
                 var cardMap = cards.ToDictionary(c => c.CardIdm, c => $"{c.CardType} {c.CardNumber}");

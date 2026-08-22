@@ -248,7 +248,10 @@ public partial class BusStopInputViewModel : ViewModelBase
     {
         try
         {
-            var suggestions = await _ledgerRepository.GetBusStopSuggestionsAsync();
+            // Issue #1818: 除外するプレースホルダは組織設定由来のため、Data 層へ値として渡す
+            //（永続化層に交通系固有の判断を持ち込まないため。設計書 05 §2a.5）
+            var suggestions = await _ledgerRepository.GetBusStopSuggestionsAsync(
+                SummaryGenerator.BusPlaceholder);
             BusStopSuggestions = suggestions.Select(s => s.BusStops).ToList();
 #if DEBUG
             System.Diagnostics.Debug.WriteLine($"[BusStopInput] {BusStopSuggestions.Count}件のバス停名候補を読み込みました");
@@ -274,7 +277,7 @@ public partial class BusStopInputViewModel : ViewModelBase
 
         foreach (var entry in newEntries)
         {
-            if (string.IsNullOrWhiteSpace(entry) || entry == "★")
+            if (string.IsNullOrWhiteSpace(entry) || SummaryGenerator.IsBusStopPlaceholder(entry))
                 continue;
 
             // 完全一致は除外（既存エントリと同じなら問題なし）
@@ -363,7 +366,9 @@ public partial class BusStopInputViewModel : ViewModelBase
         var emptyCount = BusUsages.Count(b => string.IsNullOrWhiteSpace(b.BusStops));
         if (emptyCount > 0)
         {
-            warnings.Add($"未入力のバス停が{emptyCount}件あります（「★」として保存され、後で入力が必要になります）");
+            warnings.Add(
+                $"未入力のバス停が{emptyCount}件あります" +
+                $"（「{SummaryGenerator.BusPlaceholder}」として保存され、後で入力が必要になります）");
         }
 
         // ソフトバリデーション: 「～」区切りの形式チェック
@@ -376,7 +381,8 @@ public partial class BusStopInputViewModel : ViewModelBase
 
         // Issue #1133: 類似バス停名の検出（取り違え・表記ゆれの疑い）
         var newEntries = BusUsages
-            .Where(b => !string.IsNullOrWhiteSpace(b.BusStops) && b.BusStops != "★")
+            .Where(b => !string.IsNullOrWhiteSpace(b.BusStops)
+                && !SummaryGenerator.IsBusStopPlaceholder(b.BusStops))
             .Select(b => b.BusStops)
             .ToList();
         // 同じバス停名を複数行に入力した場合（同一路線を1日に2回利用する等）、
@@ -432,7 +438,7 @@ public partial class BusStopInputViewModel : ViewModelBase
             foreach (var item in BusUsages)
             {
                 item.Detail.BusStops = string.IsNullOrWhiteSpace(item.BusStops)
-                    ? "★" // 未入力の場合は★マーク
+                    ? SummaryGenerator.BusPlaceholder // 未入力の場合はプレースホルダ
                     : item.BusStops;
             }
 
@@ -497,11 +503,11 @@ public partial class BusStopInputViewModel : ViewModelBase
 
         using (BeginBusy("保存中..."))
         {
-            // Issue #1156: スキップ時は入力済みの内容も破棄し、すべて★マークにする
+            // Issue #1156: スキップ時は入力済みの内容も破棄し、すべてプレースホルダにする
             foreach (var item in BusUsages)
             {
-                item.BusStops = "★";
-                item.Detail.BusStops = "★";
+                item.BusStops = SummaryGenerator.BusPlaceholder;
+                item.Detail.BusStops = SummaryGenerator.BusPlaceholder;
             }
 
             var success = await PersistBusStopsAsync();
@@ -571,12 +577,13 @@ public partial class BusStopInputItem : ObservableObject
     public BusStopInputItem(LedgerDetail detail)
     {
         Detail = detail;
-        // Issue #1205: 既存値が "★"（未入力プレースホルダー）のみの場合は、
-        // ユーザーがわざわざ★を削除しなくても入力できるよう空欄として初期化する。
+        // Issue #1205: 既存値が未入力プレースホルダー（既定「★」）のみの場合は、
+        // ユーザーがわざわざ削除しなくても入力できるよう空欄として初期化する。
         // backing field への直接代入のため Detail.BusStops には書き戻さず、
-        // 保存時の「空欄→★」変換ロジック（SaveAsync）で元の★状態が維持される。
+        // 保存時の「空欄→プレースホルダ」変換ロジック（SaveAsync）で元の状態が維持される。
+        // Issue #1818: プレースホルダは組織設定（SummaryText.BusPlaceholder）由来のため直書きしない。
         var initial = detail.BusStops ?? string.Empty;
-        _busStops = initial == "★" ? string.Empty : initial;
+        _busStops = SummaryGenerator.IsBusStopPlaceholder(initial) ? string.Empty : initial;
     }
 
     /// <summary>
@@ -675,7 +682,8 @@ public partial class BusStopInputItem : ObservableObject
 
     /// <summary>
     /// Issue #1570: 一つ前の行の起点と終点を入れ替えた値を当該行にセットする（往復ボタン）。
-    /// 前の行が空欄／「★」のみ／「～」を含まない／「～」で分割して2要素にならない場合は何もしない。
+    /// 前の行が空欄／プレースホルダ（既定「★」）のみ／「～」を含まない／
+    /// 「～」で分割して2要素にならない場合は何もしない。
     /// </summary>
     [RelayCommand]
     public void ApplyRoundTrip()

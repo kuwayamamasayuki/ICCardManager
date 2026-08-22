@@ -1107,15 +1107,29 @@ ORDER BY l.card_idm, l.date, l.id";
         }
 
         /// <inheritdoc/>
-        public async Task<IEnumerable<(string BusStops, int UsageCount, DateTime? LastUsedDate)>> GetBusStopSuggestionsAsync()
+        public async Task<IEnumerable<(string BusStops, int UsageCount, DateTime? LastUsedDate)>> GetBusStopSuggestionsAsync(
+            string busStopPlaceholder)
         {
+            // Issue #1818: null／空文字を黙って受けると `bus_stops != NULL` が常に NULL 評価となり、
+            // 候補が 1 件も返らない（＝オートコンプリートが静かに死ぬ）。呼び出し側の渡し忘れを
+            // 無言の空結果ではなくその場の失敗として表面化させる
+            if (string.IsNullOrEmpty(busStopPlaceholder))
+            {
+                throw new ArgumentException(
+                    "除外する未入力プレースホルダが未指定です。" +
+                    "組織設定から解決した記号を渡してください。",
+                    nameof(busStopPlaceholder));
+            }
+
             using var lease = await _dbContext.LeaseConnectionAsync();
             var connection = lease.Connection;
             var result = new List<(string BusStops, int UsageCount, DateTime? LastUsedDate)>();
 
             using var command = connection.CreateCommand();
             // Issue #1133: バス停名を重複排除し、頻度＋直近利用のスコア順でソート
-            // ★マークや空文字は除外
+            // 未入力プレースホルダ（既定「★」）や空文字は除外。
+            // Issue #1818: プレースホルダは組織設定由来のためリテラルを直書きせず、
+            // 呼び出し元から受け取った値をパラメータバインドする
             // スコア = 使用回数 + 直近30日以内の利用で+50ボーナス + 直近7日以内で+100ボーナス
             command.CommandText = @"SELECT bus_stops, COUNT(*) as usage_count, MAX(use_date) as last_used_date,
   COUNT(*) +
@@ -1127,10 +1141,11 @@ FROM ledger_detail
 WHERE is_bus = 1
   AND bus_stops IS NOT NULL
   AND bus_stops != ''
-  AND bus_stops != '★'
+  AND bus_stops != @busStopPlaceholder
 GROUP BY bus_stops
 ORDER BY score DESC, usage_count DESC, bus_stops
 LIMIT 100";
+            command.Parameters.AddWithValue("@busStopPlaceholder", busStopPlaceholder);
 
             using var reader = await command.ExecuteReaderAsync();
             while (await reader.ReadAsync())

@@ -390,7 +390,8 @@ namespace ICCardManager.Services
                         {
                             CardIdm = card.CardIdm,
                             Date = date,
-                            Summary = "バス（★）",
+                            // Issue #1818: 摘要はラベル・プレースホルダの設定値から組み立てる
+                            Summary = SummaryGenerator.FormatBusSummary(SummaryGenerator.BusPlaceholder),
                             Income = 0,
                             Expense = busFare,
                             Balance = balance,
