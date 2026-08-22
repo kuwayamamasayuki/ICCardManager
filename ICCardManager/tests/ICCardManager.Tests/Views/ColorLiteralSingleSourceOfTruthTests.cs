@@ -1,6 +1,7 @@
 using System;
 using System.IO;
 using System.Linq;
+using System.Text.RegularExpressions;
 using FluentAssertions;
 using ICCardManager.Tests.Views.Helpers;
 using Xunit;
@@ -42,6 +43,22 @@ public class ColorLiteralSingleSourceOfTruthTests
         "LedgerGroupBadge5Brush",
     };
 
+    /// <summary>
+    /// 属性値として書かれた色値リテラル（<c>Foo="#RGB"</c>〜<c>Foo="#AARRGGBB"</c>）。
+    /// </summary>
+    private static readonly Regex ColorLiteralPattern =
+        new Regex("[A-Za-z0-9_.:]+\\s*=\\s*\"#[0-9A-Fa-f]{3,8}\"", RegexOptions.Compiled);
+
+    /// <summary>
+    /// XAML コメントを除去する。
+    /// </summary>
+    /// <remarks>
+    /// 「色値リテラルを直書きしない」という規約の理由を述べたコメント自体が違反として
+    /// 検出される極性の反転を避けるため（<c>.claude/rules/development-conventions.md</c> #1692）。
+    /// </remarks>
+    private static string StripXamlComments(string xaml)
+        => Regex.Replace(xaml, "<!--.*?-->", string.Empty, RegexOptions.Singleline);
+
     [Fact]
     public void Views配下のXamlに色値リテラルが直書きされていないこと()
     {
@@ -55,8 +72,11 @@ public class ColorLiteralSingleSourceOfTruthTests
             10, "Views 配下の XAML 走査が空振りしていないこと");
 
         var violations = xamlFiles
-            .Select(path => (Path: path, Text: File.ReadAllText(path)))
-            .Where(f => f.Text.IndexOf("Color=\"#", StringComparison.Ordinal) >= 0)
+            .Select(path => (Path: path, Text: StripXamlComments(File.ReadAllText(path))))
+            // Color="#..." だけでなく Background / Foreground / BorderBrush 等、
+            // ブラシを取りうる全属性の色値リテラルを対象にする
+            // （検査を Color= に絞ると、より一般的な Background="#FFF3E0" の形が素通りする）。
+            .Where(f => ColorLiteralPattern.IsMatch(f.Text))
             .Select(f => Path.GetFileName(f.Path))
             .ToList();
 
