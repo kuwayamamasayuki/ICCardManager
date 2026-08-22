@@ -5,6 +5,8 @@ using System.Threading.Tasks;
 using System.IO;
 using System.Reflection;
 using ICCardManager.Common;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 
 namespace ICCardManager.Services
@@ -87,11 +89,28 @@ namespace ICCardManager.Services
         private readonly OrganizationOptions _orgOptions;
 
         /// <summary>
+        /// ロガー（Issue #1819）
+        /// </summary>
+        private readonly ILogger<StationMasterService> _logger;
+
+        /// <summary>
+        /// 駅コードマスタの埋め込みリソース名。
+        /// </summary>
+        /// <remarks>
+        /// テストから読み込み失敗経路（リソース欠落＝ビルド・パッケージング退行）を再現するために
+        /// 差し替え可能にしている（Issue #1819）。本番では既定値以外を渡さない。
+        /// </remarks>
+        internal const string StationCodeResourceName = "ICCardManager.Resources.StationCode.csv";
+
+        private readonly string _resourceName;
+
+        /// <summary>
         /// DI用コンストラクタ
         /// </summary>
         /// <param name="orgOptions">組織固有設定</param>
-        public StationMasterService(IOptions<OrganizationOptions> orgOptions)
-            : this(orgOptions?.Value ?? new OrganizationOptions())
+        /// <param name="logger">ロガー（省略時は出力しない）</param>
+        public StationMasterService(IOptions<OrganizationOptions> orgOptions, ILogger<StationMasterService> logger = null)
+            : this(orgOptions?.Value ?? new OrganizationOptions(), logger)
         {
         }
 
@@ -99,9 +118,16 @@ namespace ICCardManager.Services
         /// テスト・直接利用向けコンストラクタ（デフォルト設定で初期化）
         /// </summary>
         /// <param name="orgOptions">組織固有設定（nullの場合はデフォルト設定を使用）</param>
-        internal StationMasterService(OrganizationOptions orgOptions = null)
+        /// <param name="logger">ロガー（nullの場合は出力しない）</param>
+        /// <param name="resourceName">駅コードマスタの埋め込みリソース名（nullの場合は既定値）</param>
+        internal StationMasterService(
+            OrganizationOptions orgOptions = null,
+            ILogger<StationMasterService> logger = null,
+            string resourceName = null)
         {
             _orgOptions = orgOptions ?? new OrganizationOptions();
+            _logger = logger ?? NullLogger<StationMasterService>.Instance;
+            _resourceName = string.IsNullOrWhiteSpace(resourceName) ? StationCodeResourceName : resourceName;
         }
 
         /// <summary>
@@ -119,18 +145,36 @@ namespace ICCardManager.Services
                 {
                     LoadFromEmbeddedResource();
                     _isLoaded = true;
+                    // Issue #1819: 読み込み件数を本番ログへ残す。フォールバック（約136駅）へ縮退したことを
+                    // 件数で判別できるようにするため、成功時も Information で出す（起動時に1回だけ）。
+                    _logger.LogInformation(
+                        "StationMasterService: 駅マスタを読み込みました（駅数={StationCount}, 路線数={LineCount}, リソース={ResourceName}）",
+                        _stations.Count, _lineNames.Count, _resourceName);
 #if DEBUG
                     System.Diagnostics.Debug.WriteLine($"駅マスタ読み込み完了: {_stations.Count}件, {_lineNames.Count}路線");
 #endif
                 }
                 catch (Exception ex)
                 {
-                    _ = ex; // 警告抑制（DEBUGビルドでのみ使用）
 #if DEBUG
                     System.Diagnostics.Debug.WriteLine($"駅マスタ読み込みエラー: {ex.Message}");
 #endif
+                    // Issue #1819: 従来は Release ビルドで完全に無言だった。埋め込みリソースの欠落
+                    // （csproj の EmbeddedResource 削除等のビルド・パッケージング退行）を本番ログから
+                    // 追跡できるよう、例外オブジェクトごと Error で残す。
+                    _logger.LogError(ex,
+                        "StationMasterService: 駅マスタの読み込みに失敗しました（リソース={ResourceName}）。フォールバックの主要駅データへ縮退します",
+                        _resourceName);
+
                     LoadFallbackData();
                     _isLoaded = true;
+
+                    // 縮退後の規模を件数で示す（正常時の Information と突き合わせて縮退が判別できる）。
+                    _logger.LogWarning(
+                        "StationMasterService: フォールバックの主要駅データで動作します（駅数={StationCount}, 路線数={LineCount}）。" +
+                        "未収録の駅は「駅XX-YY」と表示され、摘要が「鉄道（A駅～?）」で台帳に記録されます。" +
+                        "アプリケーションを再インストールしても解消しない場合は開発元へ連絡してください",
+                        _stations.Count, _lineNames.Count);
                 }
             }
         }
@@ -286,11 +330,11 @@ namespace ICCardManager.Services
         private void LoadFromEmbeddedResource()
         {
             var assembly = Assembly.GetExecutingAssembly();
-            using var stream = assembly.GetManifestResourceStream("ICCardManager.Resources.StationCode.csv");
+            using var stream = assembly.GetManifestResourceStream(_resourceName);
 
             if (stream == null)
             {
-                throw new InvalidOperationException("駅コードマスタリソースが見つかりません");
+                throw new InvalidOperationException($"駅コードマスタリソースが見つかりません（リソース名={_resourceName}）");
             }
 
             using var reader = new StreamReader(stream);

@@ -776,6 +776,17 @@ namespace ICCardManager.Services
 
                 result.Success = true;
 
+                // Issue #1819: 返却は記録されたのに台帳行が 1 行も作られなかったことを本番ログへ残す。
+                // 内訳（重複除外・貸出後フィルタ）は LogDebug で本番に出ないため、
+                // 「返却したのに履歴が増えない」という問い合わせの切り分けに必要な値をここへ集約する。
+                if (result.CreatedLedgers.Count == 0)
+                {
+                    _logger.LogInformation(
+                        "LendingService: 返却を記録しましたが台帳行は作成されませんでした" +
+                        "（CardIdm={CardIdm}, 受け取った履歴件数={ReceivedCount}, 貸出後の抽出件数={FilteredCount}, 重複チェック省略={SkipDuplicateCheck}）",
+                        IdmMasker.Mask(cardIdm), detailList.Count, usageSinceLent.Count, skipDuplicateCheck);
+                }
+
                 // Issue #596: 今月の履歴が不完全な可能性をチェック（純粋計算。DB I/O なし）
                 if (!hadExistingCurrentMonthRecords)
                 {
