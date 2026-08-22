@@ -2,6 +2,8 @@ using FluentAssertions;
 using ICCardManager.Infrastructure.CardReader;
 using Xunit;
 
+using System.IO;
+
 namespace ICCardManager.Tests.Infrastructure.CardReader;
 
 /// <summary>
@@ -32,7 +34,7 @@ public class FelicaCardReaderHealthCheckLoggingTests
     [Theory]
     [InlineData(2)]
     [InlineData(3)]
-    [InlineData(29)]
+    [InlineData(FelicaCardReader.HealthCheckFailureLogIntervalCount - 1)]
     public void ShouldLogHealthCheckFailure_間隔未満の連続失敗は出力しないこと(int count)
     {
         FelicaCardReader.ShouldLogHealthCheckFailure(count).Should().BeFalse(
@@ -66,4 +68,44 @@ public class FelicaCardReaderHealthCheckLoggingTests
         FelicaCardReader.HealthCheckFailureLogIntervalCount.Should().BeInRange(6, 360,
             "ヘルスチェック周期 10 秒に対して 1 分～1 時間に 1 回の水準に収める");
     }
+
+    #region 監視セッションの区切りでカウンタを戻すこと（ソーステキストの静的検査）
+
+    /// <summary>
+    /// 読み取り開始（<c>StartHealthCheckTimer</c>）で連続失敗回数を 0 に戻すことを検査する。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 持ち越すと「初回は必ず本番ログへ残す」保証が効かない。再接続ボタン（<c>ReconnectAsync</c>）で
+    /// 監視が再開されても、持ち越した回数が <see cref="FelicaCardReader.HealthCheckFailureLogIntervalCount"/>
+    /// の倍数に達するまで無言になり、「連続N回目」も再接続をまたいだ値になって継続期間を追えなくなる。
+    /// </para>
+    /// <para>
+    /// カウンタもタイマー起動も private かつ実機（PaSoRi / felicalib）依存で単体テストから踏めないため、
+    /// ソーステキスト上の静的検査で固定する。抽出が空振りしたまま緑になるのを防ぐため、
+    /// 抽出範囲の妥当性（本体に既知の行が含まれること）も併せて表明する（Issue #1794 の教訓）。
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void StartHealthCheckTimer_連続失敗回数を0に戻すこと()
+    {
+        // Arrange
+        var sourcePath = Path.Combine(
+            ICCardManager.Tests.TestPaths.GetProductionSourceRoot(),
+            "Infrastructure", "CardReader", "FelicaCardReader.cs");
+        File.Exists(sourcePath).Should().BeTrue($"検査対象のソースが見つからない: {sourcePath}");
+
+        var codeOnly = TestSourceInspection.ToCodeOnly(File.ReadAllText(sourcePath));
+        var body = TestSourceInspection.ExtractMethodBody(codeOnly, "private void StartHealthCheckTimer");
+
+        // Assert: 抽出範囲の妥当性（メソッドを式形式へ変えた等で別ブロックを掴んでいないこと）
+        body.Should().Contain("_healthCheckTimer.Start",
+            "StartHealthCheckTimer の本体を抽出できていない。抽出が空振りすると以降の検査が無意味になる");
+
+        // Assert: 監視セッションの開始でカウンタを戻す
+        body.Should().Contain("_consecutiveHealthCheckFailures = 0",
+            "読み取り開始は新しい監視セッションの始まり。持ち越すと「初回は必ず残す」保証が破れる");
+    }
+
+    #endregion
 }

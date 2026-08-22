@@ -656,6 +656,12 @@ namespace ICCardManager.Infrastructure.CardReader
         {
             StopHealthCheckTimer();
 
+            // Issue #1819: 読み取り開始（再接続ボタン等）は新しい監視セッションの始まり。
+            // 連続失敗回数を持ち越すと「初回は必ず本番ログへ残す」保証が効かず
+            // （持ち越した回数が間隔の倍数に当たるまで無言になる）、
+            // 「連続N回目」が再接続をまたいだ値になって継続期間の追跡もできなくなる。
+            _consecutiveHealthCheckFailures = 0;
+
             _healthCheckTimer = new Timer(HealthCheckIntervalMs);
             _healthCheckTimer.Elapsed += OnHealthCheckTimerElapsed;
             _healthCheckTimer.AutoReset = true;

@@ -162,9 +162,15 @@ namespace ICCardManager.Services
                     // Issue #1819: 従来は Release ビルドで完全に無言だった。埋め込みリソースの欠落
                     // （csproj の EmbeddedResource 削除等のビルド・パッケージング退行）を本番ログから
                     // 追跡できるよう、例外オブジェクトごと Error で残す。
+                    // 解析の途中で失敗した場合（リソースの破損・切り詰め等）は、失敗時点までの
+                    // 駅が既に _stations に入っており、後続の LoadFallbackData でフォールバック分が
+                    // 上積みされる。縮退後の Warning に出る件数だけでは「フォールバックの件数」と
+                    // 区別できないため、失敗時点の部分読み込み件数をここで併記する。
+                    var partialStationCount = _stations.Count;
+
                     _logger.LogError(ex,
-                        "StationMasterService: 駅マスタの読み込みに失敗しました（リソース={ResourceName}）。フォールバックの主要駅データへ縮退します",
-                        _resourceName);
+                        "StationMasterService: 駅マスタの読み込みに失敗しました（リソース={ResourceName}, 失敗時点の読み込み済み駅数={PartialStationCount}）。フォールバックの主要駅データへ縮退します",
+                        _resourceName, partialStationCount);
 
                     LoadFallbackData();
                     _isLoaded = true;
