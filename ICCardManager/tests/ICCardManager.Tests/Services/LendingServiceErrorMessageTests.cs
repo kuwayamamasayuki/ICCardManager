@@ -86,6 +86,16 @@ public class LendingServiceErrorMessageTests
             "何が: 失敗した操作を職員の言葉で示す");
         message.Should().MatchRegex("してください。?$",
             "どうすれば: 行動指示で終わる");
+
+        // #1817 のコードレビュー指摘: この戻り値はトーストへ渡るため、
+        // ExceptionMessageFormatter.ToUserMessage のフル文言（58文字）を返してはならない。
+        message.Should().Contain("もう一度タッチしてください",
+            "error-messages.md はトーストで簡潔な行動指示を優先すると定め、この文言を例示している。"
+            + "MainViewModel の null フォールバックとも揃える");
+        message.Should().NotContain("画面を最新の状態に更新",
+            "カードをタッチした職員に実行できない行動指示を出さない（取れる行動が違う経路には専用の文言）");
+        message.Length.Should().BeLessThan(40,
+            "文字サイズ「大」以上でトーストの末尾が切れるため簡潔に保つ");
     }
 
     /// <summary>

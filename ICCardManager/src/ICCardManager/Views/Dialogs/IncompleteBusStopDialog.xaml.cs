@@ -36,7 +36,11 @@ namespace ICCardManager.Views.Dialogs
                     // 技術的詳細は ErrorDialogHelper.LogException でファイルログへ逃がす
                     // （この経路には ILogger が無く、修正前は UI にも出るがログには一切残らなかった）。
                     ErrorDialogHelper.LogException(ex, "バス停名未入力一覧の読み込み");
+                    // Issue #1794: オーナーを渡さないと WPF は GetActiveWindow() で解決するため、
+                    // アプリが非フォアグラウンドのときは ownerless になり、背後のこのダイアログが
+                    // 無効化されない。ここは自ウィンドウが正しいオーナーなので this を渡す。
                     MessageBox.Show(
+                        this,
                         ExceptionMessageFormatter.ToUserMessage(ex, "バス停名未入力一覧の読み込み"),
                         "エラー",
                         MessageBoxButton.OK,

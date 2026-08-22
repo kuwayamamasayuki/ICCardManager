@@ -141,6 +141,14 @@ public class DataExportImportViewModelMessagingTests : IDisposable
             "何が: 失敗した操作を職員の言葉で示す");
         _viewModel.StatusMessage.Should().MatchRegex("してください。?$",
             "どうすれば: 行動指示で終わる");
+
+        // #1817 のコードレビュー指摘: ネイティブ由来の失敗は ToUserMessage の default 分岐
+        //（「しばらく待ってから再度実行してください」）へ落ちるが、PaSoRi の未接続や
+        // felicalib.dll の欠落は待っても解消しない＝実行できない行動指示になる。
+        _viewModel.StatusMessage.Should().NotContain("しばらく待って",
+            "待っても解消しない失敗に「待ってください」と案内しない");
+        _viewModel.StatusMessage.Should().Contain("接続",
+            "どうすれば: カードリーダーの接続確認という実行可能な行動を示す");
         _viewModel.IsStatusError.Should().BeTrue();
         _viewModel.IsWaitingForCardTouch.Should().BeFalse(
             "開始に失敗したらタッチ待機を解除する（既存挙動の維持）");

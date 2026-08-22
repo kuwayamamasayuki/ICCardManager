@@ -51,6 +51,19 @@ public class IncompleteBusStopDialogErrorHandlingTests
     private static string CodeOnlySource()
         => TestSourceInspection.ToCodeOnly(File.ReadAllText(SourcePath));
 
+    /// <summary>
+    /// <c>Loaded</c> ハンドラーを含むコンストラクター本体だけを取り出す。
+    /// </summary>
+    /// <remarks>
+    /// ファイル全体を対象にすると、<c>OpenBusStopInputAsync</c> の再読み込み失敗用に
+    /// 別途置かれている <c>ErrorDialogHelper.LogException</c>（Issue #1816）が
+    /// 「存在」の検査を満たしてしまい、<b><c>Loaded</c> のログを消しても緑になる</b>。
+    /// 検査対象は必ず <c>Loaded</c> ハンドラーを含むブロックへ絞ること。
+    /// </remarks>
+    private static string ConstructorBody()
+        => TestSourceInspection.ExtractMethodBody(
+            CodeOnlySource(), "public IncompleteBusStopDialog(");
+
     [Fact]
     [Trait("Category", "Unit")]
     public void Loaded失敗時に生の例外メッセージをUIへ出さないこと()
@@ -67,11 +80,11 @@ public class IncompleteBusStopDialogErrorHandlingTests
     [Trait("Category", "Unit")]
     public void Loaded失敗時にユーザー向け文言とログの両方を経由すること()
     {
-        var code = CodeOnlySource();
+        var constructorBody = ConstructorBody();
 
-        code.Should().Contain("ExceptionMessageFormatter.ToUserMessage",
+        constructorBody.Should().Contain("ExceptionMessageFormatter.ToUserMessage",
             "UI 文言は 3 要素へ変換してから表示する（Issue #1614）");
-        code.Should().Contain("ErrorDialogHelper.LogException",
+        constructorBody.Should().Contain("ErrorDialogHelper.LogException",
             "この経路には ILogger が無いため、技術的詳細はファイルログへ逃がす。"
             + "ログが無いと『エラーが出た』という申告だけが残り調査の起点が無くなる（Issue #1817）");
     }
@@ -96,5 +109,13 @@ public class IncompleteBusStopDialogErrorHandlingTests
             "コメント・文字列を剥がした後も本文が残っていること");
         code.Should().Contain("MessageBox.Show",
             "検査したい失敗通知そのものが残っていること");
+
+        var constructorBody = ConstructorBody();
+
+        constructorBody.Should().Contain("Loaded +=",
+            "抽出したコンストラクター本体に Loaded ハンドラーが含まれていること"
+            + "（含まれないと『両方を経由すること』の検査が別の場所を見る）");
+        constructorBody.Should().Contain("MessageBox.Show",
+            "検査対象の失敗通知がコンストラクター本体の中にあること");
     }
 }

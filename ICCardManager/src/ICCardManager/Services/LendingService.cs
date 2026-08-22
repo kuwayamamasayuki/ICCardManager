@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using System.Data.SQLite;
 using System.Linq;
 using System.Threading.Tasks;
-using ICCardManager.Common;
+using ICCardManager.Common.Exceptions;
 using ICCardManager.Data;
 using ICCardManager.Data.Repositories;
 using ICCardManager.Infrastructure.Security;
@@ -1601,8 +1601,9 @@ namespace ICCardManager.Services
         /// SQLiteの技術的なエラーメッセージ（SQLITE_BUSY等）をユーザーが理解できる
         /// メッセージに変換する。共有モードでの一般的なエラーシナリオをカバーする。
         /// <para>
-        /// 既定分岐（SQLite / IO 以外の例外）は <see cref="ExceptionMessageFormatter.ToUserMessage"/>
-        /// へ委譲する。生の <see cref="Exception.Message"/> を返さないこと（Issue #1614、#1817）。
+        /// 既定分岐（SQLite / IO 以外の例外）は生の <see cref="Exception.Message"/> を返さず
+        /// （Issue #1614、#1817）、トーストに収まる簡潔な行動指示を返す。
+        /// <see cref="AppException"/> は整備済みの <see cref="AppException.UserFriendlyMessage"/> を尊重する。
         /// </para>
         /// </remarks>
         internal static string GetUserFriendlyErrorMessage(Exception ex, string operationName)
@@ -1626,10 +1627,30 @@ namespace ICCardManager.Services
             }
 
             // Issue #1817: 既定分岐で生の ex.Message を返すと、.NET／SQLite の英語文言が
-            // そのままトースト・ステータスへ出る（Issue #1614 違反）。技術的詳細は
-            // 呼び出し元（LendAsync / ReturnAsync）の LogError が残しているため、
-            // ここでは 3 要素のユーザー向け文言だけを返す。
-            return ExceptionMessageFormatter.ToUserMessage(ex, $"{operationName}処理");
+            // そのままトーストへ出る（Issue #1614 違反）。技術的詳細は呼び出し元
+            // （LendAsync / ReturnAsync）の LogError が残しているため、ここでは文言だけを返す。
+
+            // AppException は整備済みの UserFriendlyMessage を尊重する。
+            if (ex is AppException appException &&
+                !string.IsNullOrWhiteSpace(appException.UserFriendlyMessage))
+            {
+                return appException.UserFriendlyMessage;
+            }
+
+            // ExceptionMessageFormatter.ToUserMessage のフル文言を使わないのは2つの理由による
+            // （#1817 のコードレビュー指摘）。
+            // ① この戻り値は LendingResult.ErrorMessage を経て
+            //    MainViewModel の _toastNotificationService.ShowError へ渡る。
+            //    error-messages.md は「トースト通知は文字数制約があるため、ToUserMessage の
+            //    フル文言ではなく簡潔な行動指示（「もう一度タッチしてください」等）を優先してよい」
+            //    と定めている。ToUserMessage 版は 58 文字で、文字サイズ「大」以上では末尾が切れる。
+            // ② ToUserMessage の InvalidOperationException 分岐は「画面を最新の状態に更新してから
+            //    再度実行してください」と案内するが、カードをタッチした職員に実行できる操作ではない。
+            //    取れる行動が違う経路には専用の文言を置く（#1757）。
+            // Success=false は「台帳へ記録されていない」ことだけを意味する（#1805。コミット後の
+            // 後処理の失敗は HasPostCommitFailure で別に伝える）ため、再タッチは安全。
+            // 文言は MainViewModel の null フォールバックと同一に揃える。
+            return $"{operationName}処理に失敗しました。もう一度タッチしてください。";
         }
 
         /// <summary>

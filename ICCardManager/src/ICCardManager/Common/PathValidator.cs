@@ -534,11 +534,16 @@ namespace ICCardManager.Common
         /// （<c>.claude/rules/error-messages.md</c>「取れる行動が違う経路には専用の文言」）。
         /// 同メソッド内の <see cref="UnauthorizedAccessException"/> 分岐も同じ理由で専用文言を持つ。
         /// </para>
+        /// <para>
+        /// 技術的詳細のログ出力は呼び出し元（<see cref="CheckWritePermission"/> の
+        /// <c>catch</c>）が行う。本メソッドは<b>副作用を持たない文言生成</b>に徹する
+        /// — ここでログを書くと、文言だけを検証する単体テストが実行のたびに
+        /// 共有ログディレクトリ（<c>%ProgramData%\ICCardManager\Logs</c>）へ
+        /// 実在しない ERROR 行を書き足し、管理者が障害調査で読むログを汚す。
+        /// </para>
         /// </remarks>
         internal static ValidationResult CreateWriteProbeIoFailure(IOException ex)
         {
-            ErrorDialogHelper.LogException(ex, "バックアップ先フォルダへの書き込み確認");
-
             return ValidationResult.Failure(
                 "指定されたフォルダへの書き込み確認中に入出力エラーが発生しました。" +
                 "ネットワーク共有の切断やディスクの空き容量不足が考えられるため、" +
@@ -571,6 +576,7 @@ namespace ICCardManager.Common
                     }
                     catch (IOException ex)
                     {
+                        ErrorDialogHelper.LogException(ex, "バックアップ先フォルダへの書き込み確認");
                         return CreateWriteProbeIoFailure(ex);
                     }
                 }
@@ -593,9 +599,13 @@ namespace ICCardManager.Common
                                 "親フォルダ内に新しいフォルダを作成できないため、" +
                                 "親フォルダのアクセス権を確認するか、書き込み可能な別の場所を指定してください。");
                         }
-                        catch (IOException)
+                        catch (IOException ex)
                         {
-                            // 親ディレクトリへのアクセスエラーは警告程度で通過させる
+                            // 親ディレクトリへのアクセスエラーは警告程度で通過させる。
+                            // ただし無言では握りつぶさない（Issue #1817）: 検証は成功として通すため
+                            // UI には何も出ないので、ここで記録しないと「バックアップ先を設定できたのに
+                            // 実際の書き込みで失敗する」経路の手掛かりが一切残らない。
+                            ErrorDialogHelper.LogException(ex, "バックアップ先の親フォルダへの書き込み確認");
                         }
                     }
                 }
