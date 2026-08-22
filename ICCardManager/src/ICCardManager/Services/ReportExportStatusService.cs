@@ -10,12 +10,30 @@ namespace ICCardManager.Services
     /// 出力先フォルダの実ファイルを走査して帳票の出力済み / 未出力を判定する（Issue #1691）
     /// </summary>
     /// <remarks>
-    /// ファイル名（年度ファイル）とシート名（「N月」）の決め方は <see cref="ReportService"/> の
-    /// 生成ロジックをそのまま呼び出す。ここで書式を再実装すると、帳票側の命名規則を変えたときに
-    /// 「出力したのに未出力と表示される」形で静かに乖離するため。
+    /// ファイル名（年度ファイル）は <see cref="IReportFileNameFactory"/>、シート名（「N月」）は
+    /// <see cref="ReportService.GetMonthSheetName"/> と、帳票の生成側と同じロジックを呼び出す。
+    /// ここで書式を再実装すると、帳票側の命名規則を変えたときに
+    /// 「出力したのに未出力と表示される」形で静かに乖離するため（Issue #1820 で
+    /// ファイル名は組織設定 <c>ReportLayout.FileNameFormat</c> に追従するようになった）。
     /// </remarks>
     public class ReportExportStatusService : IReportExportStatusService
     {
+        private readonly IReportFileNameFactory _fileNameFactory;
+
+        /// <summary>
+        /// コンストラクタ
+        /// </summary>
+        /// <param name="fileNameFactory">
+        /// ファイル名生成（Issue #1820）。
+        /// <b>省略可能にしない</b> — 既定値で組み立てるフォールバックを置くと、DI の配線漏れが
+        /// 「設定した書式が静かに無視される」形で潜在化し、本 Issue が是正した状態へ戻る。
+        /// </param>
+        public ReportExportStatusService(IReportFileNameFactory fileNameFactory)
+        {
+            _fileNameFactory = fileNameFactory
+                ?? throw new ArgumentNullException(nameof(fileNameFactory));
+        }
+
         /// <inheritdoc/>
         public IReadOnlyList<ReportExportStatus> GetStatuses(
             IEnumerable<ReportExportTarget> targets, string outputFolder, int year, int month)
@@ -45,7 +63,7 @@ namespace ICCardManager.Services
         /// <summary>
         /// カード1枚ぶんの出力状況を判定する
         /// </summary>
-        private static ReportExportStatus GetStatus(
+        private ReportExportStatus GetStatus(
             ReportExportTarget target,
             string outputFolder,
             bool isFolderReadable,
@@ -66,7 +84,7 @@ namespace ICCardManager.Services
             string filePath;
             try
             {
-                var fileName = ReportService.GetFiscalYearFileName(
+                var fileName = _fileNameFactory.GetFiscalYearFileName(
                     target.CardType, target.CardNumber, fiscalYear);
                 filePath = Path.Combine(outputFolder, fileName);
             }

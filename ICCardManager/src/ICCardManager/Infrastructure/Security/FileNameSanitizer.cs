@@ -14,7 +14,8 @@ namespace ICCardManager.Infrastructure.Security
     /// 他 PC による DB 直接書き込み経由でパス区切り文字を含みうる。これらが
     /// <c>string.Format</c> でファイル名に素通しされると <c>Path.Combine</c> +
     /// <c>SaveAs</c> の解決時に選択フォルダを脱出しうるため、名前生成の単一チョークポイント
-    /// （<c>ReportService.GetFiscalYearFileName</c>）でサニタイズする。入力側検証だけでは
+    /// （<c>ReportFileNameFactory.Build</c>。Issue #1820 で <c>ReportService.GetFiscalYearFileName</c>
+    /// から移設）でサニタイズする。入力側検証だけでは
     /// 共有 DB 書き込み経路を塞げないため、sink 側での無害化を主防御とする。
     /// </para>
     /// <para>
