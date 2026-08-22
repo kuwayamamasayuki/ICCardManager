@@ -1127,7 +1127,20 @@ public partial class DataExportImportViewModel : ViewModelBase
         {
             IsWaitingForCardTouch = false;
             TouchedCardInfo = string.Empty;
-            SetStatus($"カードリーダーの開始に失敗しました: {ex.Message}", true);
+            // Issue #1817: カードリーダーの失敗はネイティブ由来（DllNotFound / SEH / Win32）で
+            // ex.Message が英語になる。生のまま出さず（Issue #1614）、技術的詳細は
+            // ErrorDialogHelper.LogException でファイルログへ逃がす（当 ViewModel は ILogger 非注入）。
+            ErrorDialogHelper.LogException(ex, "カードリーダーの開始");
+            // ExceptionMessageFormatter.ToUserMessage へ委譲しないのは、この失敗が
+            // ネイティブ由来（DllNotFound / SEH / Win32）で必ず default 分岐
+            //（「しばらく待ってから再度実行してください」）へ落ちるため（#1817 のコードレビュー指摘）。
+            // PaSoRi の未接続や felicalib.dll の欠落は待っても解消しない＝実行できない行動指示になる。
+            // 取れる行動が違う経路には専用の文言を置く（#1757）。語彙は同メソッド冒頭の
+            // 「カードリーダーが接続されていません」と揃える。
+            SetStatus(
+                "カードリーダーの開始に失敗しました。" +
+                "カードリーダーが正しく接続されているか確認してから、もう一度実行してください。",
+                true);
         }
     }
 

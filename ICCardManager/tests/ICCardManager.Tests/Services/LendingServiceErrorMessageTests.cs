@@ -2,6 +2,7 @@ using System;
 using System.Data.SQLite;
 using System.IO;
 using FluentAssertions;
+using ICCardManager.Common.Exceptions;
 using ICCardManager.Services;
 using Xunit;
 
@@ -61,15 +62,55 @@ public class LendingServiceErrorMessageTests
         message.Should().Contain("ネットワーク");
     }
 
+    /// <summary>
+    /// Issue #1817: 既定分岐（SQLite / IO 以外）で生の <c>ex.Message</c> を返さないこと。
+    /// </summary>
+    /// <remarks>
+    /// 修正前は <c>$"{operationName}処理でエラーが発生しました: {ex.Message}"</c> を返しており、
+    /// .NET／SQLite の英語文言がそのままトースト・ステータスへ出ていた（Issue #1614 違反）。
+    /// 本テストは #1817 以前は「元メッセージを含むこと」として現挙動をピン留めしていたもので、
+    /// 規約に合わせて<b>反転</b>させている。技術的詳細は呼び出し元
+    /// （<c>LendAsync</c> / <c>ReturnAsync</c>）の <c>LogError</c> がログへ残す。
+    /// </remarks>
     [Fact]
     [Trait("Category", "Unit")]
-    public void GetUserFriendlyErrorMessage_その他の例外_元メッセージを含むこと()
+    public void GetUserFriendlyErrorMessage_その他の例外_生の例外メッセージを含まないこと()
     {
         var ex = new InvalidOperationException("unexpected error");
 
         var message = LendingService.GetUserFriendlyErrorMessage(ex, "貸出");
 
-        message.Should().Contain("貸出処理でエラーが発生しました");
-        message.Should().Contain("unexpected error");
+        message.Should().NotContain("unexpected error",
+            "生の ex.Message は英語・技術用語を含みうるため UI へ出さない（Issue #1614）");
+        message.Should().Contain("貸出処理に失敗しました",
+            "何が: 失敗した操作を職員の言葉で示す");
+        message.Should().MatchRegex("してください。?$",
+            "どうすれば: 行動指示で終わる");
+
+        // #1817 のコードレビュー指摘: この戻り値はトーストへ渡るため、
+        // ExceptionMessageFormatter.ToUserMessage のフル文言（58文字）を返してはならない。
+        message.Should().Contain("もう一度タッチしてください",
+            "error-messages.md はトーストで簡潔な行動指示を優先すると定め、この文言を例示している。"
+            + "MainViewModel の null フォールバックとも揃える");
+        message.Should().NotContain("画面を最新の状態に更新",
+            "カードをタッチした職員に実行できない行動指示を出さない（取れる行動が違う経路には専用の文言）");
+        message.Length.Should().BeLessThan(40,
+            "文字サイズ「大」以上でトーストの末尾が切れるため簡潔に保つ");
+    }
+
+    /// <summary>
+    /// Issue #1817: <see cref="AppException"/> 派生は整備済みの
+    /// <c>UserFriendlyMessage</c> がそのまま使われること（既定分岐へ落ちないこと）。
+    /// </summary>
+    [Fact]
+    [Trait("Category", "Unit")]
+    public void GetUserFriendlyErrorMessage_AppException_整備済み文言を返すこと()
+    {
+        var ex = DatabaseException.QueryFailed("SELECT", new InvalidOperationException("raw detail"));
+
+        var message = LendingService.GetUserFriendlyErrorMessage(ex, "返却");
+
+        message.Should().Be(ex.UserFriendlyMessage);
+        message.Should().NotContain("raw detail");
     }
 }

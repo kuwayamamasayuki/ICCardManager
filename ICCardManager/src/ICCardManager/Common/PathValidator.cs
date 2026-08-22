@@ -516,6 +516,41 @@ namespace ICCardManager.Common
         }
 
         /// <summary>
+        /// 書き込みプローブが <see cref="IOException"/> で失敗したときの検証エラーを生成する（Issue #1817）。
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// 修正前は <c>$"フォルダへのアクセスエラー: {ex.Message}"</c> を返しており、
+        /// F5 設定画面（<c>SettingsViewModel</c>）が生の .NET 例外文言をそのまま表示していた
+        /// （Issue #1614 違反）。技術的詳細はファイルログへ逃がし、UI には
+        /// 「何が／なぜ／どうすれば」3 要素の文言だけを返す。
+        /// </para>
+        /// <para>
+        /// <see cref="ExceptionMessageFormatter.ToUserMessage"/> へ委譲せず専用文言を持つのは、
+        /// あちらの <see cref="IOException"/> 分岐が「対象のファイルが他のプログラムで
+        /// 開かれていないか確認し」と案内するため。ここで失敗しているのは<b>バックアップ先
+        /// フォルダーへの書き込みプローブ</b>であり、原因はネットワーク共有の切断・
+        /// ディスク満杯・オフライン状態で、その行動指示は実行できない
+        /// （<c>.claude/rules/error-messages.md</c>「取れる行動が違う経路には専用の文言」）。
+        /// 同メソッド内の <see cref="UnauthorizedAccessException"/> 分岐も同じ理由で専用文言を持つ。
+        /// </para>
+        /// <para>
+        /// 技術的詳細のログ出力は呼び出し元（<see cref="CheckWritePermission"/> の
+        /// <c>catch</c>）が行う。本メソッドは<b>副作用を持たない文言生成</b>に徹する
+        /// — ここでログを書くと、文言だけを検証する単体テストが実行のたびに
+        /// 共有ログディレクトリ（<c>%ProgramData%\ICCardManager\Logs</c>）へ
+        /// 実在しない ERROR 行を書き足し、管理者が障害調査で読むログを汚す。
+        /// </para>
+        /// </remarks>
+        internal static ValidationResult CreateWriteProbeIoFailure(IOException ex)
+        {
+            return ValidationResult.Failure(
+                "指定されたフォルダへの書き込み確認中に入出力エラーが発生しました。" +
+                "ネットワーク共有の切断やディスクの空き容量不足が考えられるため、" +
+                "接続状態と空き容量を確認するか、書き込み可能な別のフォルダを指定してください。");
+        }
+
+        /// <summary>
         /// 書き込み権限をチェック
         /// </summary>
         private static ValidationResult CheckWritePermission(string path)
@@ -541,7 +576,8 @@ namespace ICCardManager.Common
                     }
                     catch (IOException ex)
                     {
-                        return ValidationResult.Failure($"フォルダへのアクセスエラー: {ex.Message}");
+                        ErrorDialogHelper.LogException(ex, "バックアップ先フォルダへの書き込み確認");
+                        return CreateWriteProbeIoFailure(ex);
                     }
                 }
                 else
@@ -563,9 +599,13 @@ namespace ICCardManager.Common
                                 "親フォルダ内に新しいフォルダを作成できないため、" +
                                 "親フォルダのアクセス権を確認するか、書き込み可能な別の場所を指定してください。");
                         }
-                        catch (IOException)
+                        catch (IOException ex)
                         {
-                            // 親ディレクトリへのアクセスエラーは警告程度で通過させる
+                            // 親ディレクトリへのアクセスエラーは警告程度で通過させる。
+                            // ただし無言では握りつぶさない（Issue #1817）: 検証は成功として通すため
+                            // UI には何も出ないので、ここで記録しないと「バックアップ先を設定できたのに
+                            // 実際の書き込みで失敗する」経路の手掛かりが一切残らない。
+                            ErrorDialogHelper.LogException(ex, "バックアップ先の親フォルダへの書き込み確認");
                         }
                     }
                 }

@@ -116,6 +116,45 @@ public class DataExportImportViewModelMessagingTests : IDisposable
     }
 
     /// <summary>
+    /// Issue #1817: カードリーダーの開始に失敗しても、生の <c>ex.Message</c> を
+    /// ステータスへ出さないこと（Issue #1614）。
+    /// </summary>
+    /// <remarks>
+    /// PaSoRi の開始失敗はネイティブ由来（<c>DllNotFoundException</c> / SEH / Win32）で
+    /// <c>ex.Message</c> が英語になるため、職員には解読できない。
+    /// 修正前は <c>$"カードリーダーの開始に失敗しました: {ex.Message}"</c> をそのまま表示し、
+    /// かつログにも一切残していなかった。
+    /// </remarks>
+    [Fact]
+    public async Task StartCardTouchAsync_開始失敗時_生の例外メッセージを表示しないこと()
+    {
+        _cardReaderMock.SetupGet(r => r.IsReading).Returns(false);
+        _cardReaderMock.Setup(r => r.StartReadingAsync())
+            .ThrowsAsync(new DllNotFoundException("Unable to load DLL 'felicalib.dll'"));
+
+        await _viewModel.StartCardTouchAsync();
+
+        _viewModel.StatusMessage.Should().NotContain("felicalib.dll",
+            "生の ex.Message は英語・技術用語を含みうるため UI へ出さない（Issue #1614）");
+        _viewModel.StatusMessage.Should().NotContain("Unable to load");
+        _viewModel.StatusMessage.Should().Contain("カードリーダーの開始に失敗しました",
+            "何が: 失敗した操作を職員の言葉で示す");
+        _viewModel.StatusMessage.Should().MatchRegex("してください。?$",
+            "どうすれば: 行動指示で終わる");
+
+        // #1817 のコードレビュー指摘: ネイティブ由来の失敗は ToUserMessage の default 分岐
+        //（「しばらく待ってから再度実行してください」）へ落ちるが、PaSoRi の未接続や
+        // felicalib.dll の欠落は待っても解消しない＝実行できない行動指示になる。
+        _viewModel.StatusMessage.Should().NotContain("しばらく待って",
+            "待っても解消しない失敗に「待ってください」と案内しない");
+        _viewModel.StatusMessage.Should().Contain("接続",
+            "どうすれば: カードリーダーの接続確認という実行可能な行動を示す");
+        _viewModel.IsStatusError.Should().BeTrue();
+        _viewModel.IsWaitingForCardTouch.Should().BeFalse(
+            "開始に失敗したらタッチ待機を解除する（既存挙動の維持）");
+    }
+
+    /// <summary>
     /// カードリーダー未接続時はカードタッチ待機が開始されず、抑制メッセージも送信されないこと。
     /// </summary>
     [Fact]

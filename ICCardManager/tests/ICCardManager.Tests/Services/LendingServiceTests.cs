@@ -260,7 +260,11 @@ public class LendingServiceTests : IDisposable
 
         // Assert
         result.Success.Should().BeFalse();
-        result.ErrorMessage.Should().Contain("エラーが発生しました");
+        // Issue #1817: 既定分岐は ExceptionMessageFormatter.ToUserMessage へ委譲する。
+        // 生の ex.Message（"Database error"）を UI へ出さないこと（Issue #1614）。
+        result.ErrorMessage.Should().NotContain("Database error");
+        result.ErrorMessage.Should().Contain("貸出処理に失敗しました");
+        result.ErrorMessage.Should().MatchRegex("してください。?$");
     }
 
     /// <summary>
