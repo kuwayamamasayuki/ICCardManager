@@ -53,7 +53,7 @@ namespace ICCardManager.Infrastructure.Caching
             // factory() を実行し、残りはキャッシュ済みの結果を取得する。
             var keyLock = _keyLocks.GetOrAdd(key, _ => new SemaphoreSlim(1, 1));
 
-            await keyLock.WaitAsync();
+            await keyLock.WaitAsync().ConfigureAwait(false);
             try
             {
                 // 2段目チェック（ロック取得後）
@@ -65,7 +65,7 @@ namespace ICCardManager.Infrastructure.Caching
 
                 // キャッシュミス - ファクトリを実行
                 _logger.LogTrace("キャッシュミス: {Key}", key);
-                var value = await factory();
+                var value = await factory().ConfigureAwait(false);
 
                 Set(key, value, absoluteExpiration);
 

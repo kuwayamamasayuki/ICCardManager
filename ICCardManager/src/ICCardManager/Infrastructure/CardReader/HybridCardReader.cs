@@ -62,7 +62,7 @@ namespace ICCardManager.Infrastructure.CardReader
             }
 
             // カスタムデータがなければ実カードリーダーに委譲
-            return await _realReader.ReadHistoryAsync(idm);
+            return await _realReader.ReadHistoryAsync(idm).ConfigureAwait(false);
         }
 
         /// <inheritdoc/>
@@ -74,7 +74,7 @@ namespace ICCardManager.Infrastructure.CardReader
                 return CardReadResult<IReadOnlyList<LedgerDetail>>.Ok(customHistory.ToList());
             }
 
-            return await _realReader.TryReadHistoryAsync(idm);
+            return await _realReader.TryReadHistoryAsync(idm).ConfigureAwait(false);
         }
 
         /// <inheritdoc/>
@@ -87,7 +87,7 @@ namespace ICCardManager.Infrastructure.CardReader
             }
 
             // カスタムデータがなければ実カードリーダーに委譲
-            return await _realReader.ReadBalanceAsync(idm);
+            return await _realReader.ReadBalanceAsync(idm).ConfigureAwait(false);
         }
 
         /// <inheritdoc/>

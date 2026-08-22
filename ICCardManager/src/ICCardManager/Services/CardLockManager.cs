@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
@@ -221,13 +221,25 @@ namespace ICCardManager.Services
 
                 foreach (var kvp in _locks)
                 {
-                    try
+                    var entry = kvp.Value;
+
+                    // Issue #1823: Dispose 済みフラグを立ててから Dispose する。
+                    // ここで立てないと、Dispose 済みだが _locks.Clear() 前のエントリを
+                    // GetLock が「有効」と判定して返し（IsDisposed == false のまま）、
+                    // 直後の WaitAsync が ObjectDisposedException になる。
+                    // Issue #1171 が CleanupExpiredLocks で塞いだ TOCTOU が、この経路にだけ残っていた。
+                    lock (entry)
                     {
-                        kvp.Value.Semaphore.Dispose();
-                    }
-                    catch (ObjectDisposedException)
-                    {
-                        // 既にDisposeされている場合は無視
+                        entry.IsDisposed = true;
+
+                        try
+                        {
+                            entry.Semaphore.Dispose();
+                        }
+                        catch (ObjectDisposedException)
+                        {
+                            // 既にDisposeされている場合は無視
+                        }
                     }
                 }
 
@@ -246,13 +258,21 @@ namespace ICCardManager.Services
         {
             if (_locks.TryRemove(cardIdm, out var entry))
             {
-                try
+                // Issue #1823: ClearAllLocks と同じ理由で、Dispose の前に lock(entry) 内で
+                // IsDisposed を立てる。辞書からの除去が先でも、除去前に GetOrAdd で
+                // 同じエントリを取得したスレッドが lock(entry) の獲得を待っている可能性があるため。
+                lock (entry)
                 {
-                    entry.Semaphore.Dispose();
-                }
-                catch (ObjectDisposedException)
-                {
-                    // 既にDisposeされている場合は無視
+                    entry.IsDisposed = true;
+
+                    try
+                    {
+                        entry.Semaphore.Dispose();
+                    }
+                    catch (ObjectDisposedException)
+                    {
+                        // 既にDisposeされている場合は無視
+                    }
                 }
                 return true;
             }

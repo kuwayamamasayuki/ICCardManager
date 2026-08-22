@@ -4,8 +4,10 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
 
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
+using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -722,6 +724,108 @@ public class CardLockManagerTests : IDisposable
         {
             lockManager.Dispose();
         }
+    }
+
+    #endregion
+
+    #region Dispose 済みエントリの TOCTOU テスト（Issue #1823）
+
+    /// <summary>
+    /// 内部辞書（_locks）を非公開フィールドから取得する
+    /// </summary>
+    private static IDictionary GetLocksDictionary(CardLockManager manager)
+    {
+        var field = typeof(CardLockManager).GetField(
+            "_locks",
+            BindingFlags.NonPublic | BindingFlags.Instance);
+        field.Should().NotBeNull("CardLockManager は _locks でロックエントリを保持する");
+        return (IDictionary)field!.GetValue(manager)!;
+    }
+
+    /// <summary>
+    /// LockEntry.IsDisposed を非公開プロパティから読み出す
+    /// </summary>
+    private static bool GetIsDisposed(object entry)
+    {
+        var property = entry.GetType().GetProperty(
+            "IsDisposed",
+            BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+        property.Should().NotBeNull("LockEntry は Issue #1171 で IsDisposed を導入している");
+        return (bool)property!.GetValue(entry)!;
+    }
+
+    /// <summary>
+    /// ClearAllLocks が Dispose 済みフラグを立てることを確認
+    /// </summary>
+    /// <remarks>
+    /// Issue #1823: 是正前は Semaphore.Dispose() → _locks.Clear() の順で
+    /// IsDisposed を立てていなかったため、Dispose 済みだが Clear 前のエントリが
+    /// GetLock から「有効」と判定されて返り得た（Issue #1171 が塞いだ TOCTOU の残存）。
+    /// </remarks>
+    [Fact]
+    public void ClearAllLocks_Dispose済みフラグを立てること()
+    {
+        // Arrange
+        _lockManager.GetLock("card1");
+        _lockManager.GetLock("card2");
+        var entries = GetLocksDictionary(_lockManager).Values.Cast<object>().ToList();
+        entries.Should().HaveCount(2);
+
+        // Act
+        _lockManager.ClearAllLocks();
+
+        // Assert
+        entries.Should().OnlyContain(entry => GetIsDisposed(entry));
+    }
+
+    /// <summary>
+    /// Dispose 済みエントリが辞書に残っていても、GetLock が使用可能なセマフォを返すことを確認
+    /// </summary>
+    /// <remarks>
+    /// ClearAllLocks の「Dispose 済みだが Clear 前」という一瞬の窓は、そのままでは
+    /// テストから決定的に踏めない。ここでは ClearAllLocks が生んだ Dispose 済みエントリを
+    /// 辞書へ戻すことで同じ状態を再現し、GetLock が stale 判定で破棄して作り直すことを表明する。
+    /// 是正前は IsDisposed が false のままなので、Dispose 済みのセマフォがそのまま返り
+    /// 直後の Wait が ObjectDisposedException になる。
+    /// </remarks>
+    [Fact]
+    public void GetLock_Dispose済みエントリが残っていても使用可能なセマフォを返すこと()
+    {
+        // Arrange: ClearAllLocks で Dispose 済みになったエントリを辞書へ戻す
+        _lockManager.GetLock("card1");
+        var staleEntry = GetLocksDictionary(_lockManager).Values.Cast<object>().Single();
+        _lockManager.ClearAllLocks();
+        GetLocksDictionary(_lockManager)["card1"] = staleEntry;
+
+        // Act
+        var semaphore = _lockManager.GetLock("card1");
+
+        // Assert
+        Action act = () => semaphore.Wait(0);
+        act.Should().NotThrow<ObjectDisposedException>();
+        semaphore.Wait(0).Should().BeFalse("直前の Wait で取得済みのため、同じセマフォは再取得できない");
+        semaphore.Release();
+    }
+
+    /// <summary>
+    /// RemoveLock が Dispose 済みフラグを立てることを確認
+    /// </summary>
+    /// <remarks>
+    /// 辞書からの除去が Dispose より先でも、除去前に GetOrAdd で同じエントリを取得し
+    /// lock(entry) の獲得を待っているスレッドが存在し得るため、ClearAllLocks と同じ手当てが要る。
+    /// </remarks>
+    [Fact]
+    public void RemoveLock_Dispose済みフラグを立てること()
+    {
+        // Arrange
+        _lockManager.GetLock("card1");
+        var entry = GetLocksDictionary(_lockManager).Values.Cast<object>().Single();
+
+        // Act
+        _lockManager.RemoveLock("card1").Should().BeTrue();
+
+        // Assert
+        GetIsDisposed(entry).Should().BeTrue();
     }
 
     #endregion
