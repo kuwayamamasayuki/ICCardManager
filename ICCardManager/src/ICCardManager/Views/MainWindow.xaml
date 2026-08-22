@@ -817,13 +817,16 @@
                                                       Command="{Binding DataContext.OpenCardHistoryFromDashboardCommand, RelativeSource={RelativeSource AncestorType=ListView}}"
                                                       CommandParameter="{Binding}"/>
                                     </Border.InputBindings>
+                                    <!-- Issue #1822: 行の背景色は上の Background（ローカル値）が
+                                         RowBackgroundResourceKey → ResourceKeyToBrushConverter で決めている（Issue #1461）。
+                                         WPF の依存関係プロパティ値優先順位ではローカル値が Style Setter / DataTrigger より
+                                         強いため、ここに Background の Setter や IsBalanceWarning の DataTrigger を書いても
+                                         恒久的に効かない（#1461 の移行時に残っていた死にコードを除去）。
+                                         行の背景色を変えたいときは CardBalanceDashboardItem.RowBackgroundResourceKey を直すこと。
+                                         Background を触らない IsMouseOver トリガーは有効。 -->
                                     <Border.Style>
                                         <Style TargetType="Border">
-                                            <Setter Property="Background" Value="White"/>
                                             <Style.Triggers>
-                                                <DataTrigger Binding="{Binding IsBalanceWarning}" Value="True">
-                                                    <Setter Property="Background" Value="{DynamicResource ErrorBackgroundBrush}"/>
-                                                </DataTrigger>
                                                 <Trigger Property="IsMouseOver" Value="True">
                                                     <Setter Property="BorderBrush" Value="{DynamicResource HeaderBackgroundBrush}"/>
                                                     <Setter Property="BorderThickness" Value="1"/>

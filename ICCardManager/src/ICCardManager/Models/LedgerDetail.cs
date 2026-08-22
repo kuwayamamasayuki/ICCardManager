@@ -79,8 +79,24 @@ namespace ICCardManager.Models
         /// シーケンス番号（時系列順序）
         /// </summary>
         /// <remarks>
-        /// Issue #548: チャージが間に入っても正しい時系列順を保持するため。
-        /// DBのrowidから取得。小さい値ほど先（古い）の利用。
+        /// <para>
+        /// Issue #548: チャージが間に入っても正しい時系列順を保持するため。DB の rowid から取得する。
+        /// </para>
+        /// <para>
+        /// <b>小さい値ほど新しい（＝後に利用した）</b>。交通系ICカードの利用履歴サービスが
+        /// 新しい順（block 0 ＝ 最新）で返す並びをそのまま rowid へ写すためで、
+        /// <see cref="ICCardManager.Infrastructure.CardReader.FelicaCardReader"/> の読み取り順に由来する
+        /// FeliCa 互換の規約である（Issue #880）。<c>LendingService</c> は DB へ挿入する際に
+        /// 時系列順（古い順）の並びを <c>Reverse()</c> してこの順序を維持している。
+        /// </para>
+        /// <para>
+        /// したがって「最新の明細」は<b>最小</b>の <see cref="SequenceNumber"/> であり、時系列（古い順）へ
+        /// 並べ替えるには降順ソートが要る。実装は <c>SummaryGenerator.SortChronologically</c> を参照。
+        /// </para>
+        /// <para>
+        /// <b>例外</b>: 残高不足マージ（Issue #978。<c>LendingService.CreateUsageLedgersAsync</c>）で作られる
+        /// 台帳だけは、チャージ明細を先に挿入するため利用明細の側が大きい値になる。
+        /// </para>
         /// </remarks>
         public int SequenceNumber { get; set; }
 

@@ -29,20 +29,9 @@
         <BooleanToVisibilityConverter x:Key="BoolToVisibilityConverter"/>
         <common:StringToVisibilityConverter x:Key="StringToVisibilityConverter" xmlns:common="clr-namespace:ICCardManager.Common"/>
 
-        <!-- グループ行背景色（5色サイクル、淡色） -->
-        <SolidColorBrush x:Key="GroupColor0" Color="Transparent"/>
-        <SolidColorBrush x:Key="GroupColor1" Color="#E3F2FD"/>
-        <SolidColorBrush x:Key="GroupColor2" Color="#E8F5E9"/>
-        <SolidColorBrush x:Key="GroupColor3" Color="#FFF3E0"/>
-        <SolidColorBrush x:Key="GroupColor4" Color="#F3E5F5"/>
-        <SolidColorBrush x:Key="GroupColor5" Color="#FFEBEE"/>
-
-        <!-- グループバッジ色（同サイクル、濃色） Issue #1461 -->
-        <SolidColorBrush x:Key="GroupBadgeColor1" Color="#1976D2"/>
-        <SolidColorBrush x:Key="GroupBadgeColor2" Color="#388E3C"/>
-        <SolidColorBrush x:Key="GroupBadgeColor3" Color="#F57C00"/>
-        <SolidColorBrush x:Key="GroupBadgeColor4" Color="#7B1FA2"/>
-        <SolidColorBrush x:Key="GroupBadgeColor5" Color="#D32F2F"/>
+        <!-- グループ行背景色・バッジ色は AccessibilityStyles.xaml の
+             LedgerGroupBackground1-5Brush / LedgerGroupBadge1-5Brush を DynamicResource で参照する
+             （Issue #1392 / #1461 の色値 SSOT 原則。色値リテラルの直書きは Issue #1822 で解消）。 -->
     </Window.Resources>
 
     <Grid Margin="15">
@@ -216,19 +205,19 @@
                                                 <Setter Property="Background" Value="Transparent"/>
                                                 <Style.Triggers>
                                                     <DataTrigger Binding="{Binding GroupColorIndex}" Value="1">
-                                                        <Setter Property="Background" Value="{StaticResource GroupColor1}"/>
+                                                        <Setter Property="Background" Value="{DynamicResource LedgerGroupBackground1Brush}"/>
                                                     </DataTrigger>
                                                     <DataTrigger Binding="{Binding GroupColorIndex}" Value="2">
-                                                        <Setter Property="Background" Value="{StaticResource GroupColor2}"/>
+                                                        <Setter Property="Background" Value="{DynamicResource LedgerGroupBackground2Brush}"/>
                                                     </DataTrigger>
                                                     <DataTrigger Binding="{Binding GroupColorIndex}" Value="3">
-                                                        <Setter Property="Background" Value="{StaticResource GroupColor3}"/>
+                                                        <Setter Property="Background" Value="{DynamicResource LedgerGroupBackground3Brush}"/>
                                                     </DataTrigger>
                                                     <DataTrigger Binding="{Binding GroupColorIndex}" Value="4">
-                                                        <Setter Property="Background" Value="{StaticResource GroupColor4}"/>
+                                                        <Setter Property="Background" Value="{DynamicResource LedgerGroupBackground4Brush}"/>
                                                     </DataTrigger>
                                                     <DataTrigger Binding="{Binding GroupColorIndex}" Value="5">
-                                                        <Setter Property="Background" Value="{StaticResource GroupColor5}"/>
+                                                        <Setter Property="Background" Value="{DynamicResource LedgerGroupBackground5Brush}"/>
                                                     </DataTrigger>
                                                 </Style.Triggers>
                                             </Style>
@@ -249,19 +238,19 @@
                                                         <Setter Property="Background" Value="Transparent"/>
                                                         <Style.Triggers>
                                                             <DataTrigger Binding="{Binding GroupColorIndex}" Value="1">
-                                                                <Setter Property="Background" Value="{StaticResource GroupBadgeColor1}"/>
+                                                                <Setter Property="Background" Value="{DynamicResource LedgerGroupBadge1Brush}"/>
                                                             </DataTrigger>
                                                             <DataTrigger Binding="{Binding GroupColorIndex}" Value="2">
-                                                                <Setter Property="Background" Value="{StaticResource GroupBadgeColor2}"/>
+                                                                <Setter Property="Background" Value="{DynamicResource LedgerGroupBadge2Brush}"/>
                                                             </DataTrigger>
                                                             <DataTrigger Binding="{Binding GroupColorIndex}" Value="3">
-                                                                <Setter Property="Background" Value="{StaticResource GroupBadgeColor3}"/>
+                                                                <Setter Property="Background" Value="{DynamicResource LedgerGroupBadge3Brush}"/>
                                                             </DataTrigger>
                                                             <DataTrigger Binding="{Binding GroupColorIndex}" Value="4">
-                                                                <Setter Property="Background" Value="{StaticResource GroupBadgeColor4}"/>
+                                                                <Setter Property="Background" Value="{DynamicResource LedgerGroupBadge4Brush}"/>
                                                             </DataTrigger>
                                                             <DataTrigger Binding="{Binding GroupColorIndex}" Value="5">
-                                                                <Setter Property="Background" Value="{StaticResource GroupBadgeColor5}"/>
+                                                                <Setter Property="Background" Value="{DynamicResource LedgerGroupBadge5Brush}"/>
                                                             </DataTrigger>
                                                         </Style.Triggers>
                                                     </Style>
