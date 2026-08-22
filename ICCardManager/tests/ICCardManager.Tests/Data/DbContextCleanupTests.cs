@@ -1,4 +1,5 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
+using System.Globalization;
 using FluentAssertions;
 using ICCardManager.Data;
 using ICCardManager.Data.Repositories;
@@ -191,8 +192,9 @@ public class DbContextCleanupTests : IDisposable
     [Fact]
     public async Task CleanupOldData_LedgerExactly6YearsAgo_KeepsRecord()
     {
-        // Arrange - ちょうど6年前のデータを作成
-        var sixYearsAgo = DateTime.Now.AddYears(-6);
+        // Arrange - ちょうど保持期間の境界日のデータを作成
+        // Issue #1821: 境界日は本番 SQL と同じ式を SQLite に評価させて取得する
+        var sixYearsAgo = GetRetentionThresholdDate();
         var ledger = CreateTestLedger(sixYearsAgo, "6年前のデータ");
         await _ledgerRepository.InsertAsync(ledger);
 
@@ -218,7 +220,7 @@ public class DbContextCleanupTests : IDisposable
     public async Task CleanupOldData_Ledger6YearsMinus1Day_KeepsRecord()
     {
         // Arrange - 6年前から1日少ないデータを作成
-        var justUnder6Years = DateTime.Now.AddYears(-6).AddDays(1);
+        var justUnder6Years = GetRetentionThresholdDate().AddDays(1);
         var ledger = CreateTestLedger(justUnder6Years, "6年未満のデータ");
         await _ledgerRepository.InsertAsync(ledger);
 
@@ -242,7 +244,7 @@ public class DbContextCleanupTests : IDisposable
     public async Task CleanupOldData_Ledger6YearsPlus1Day_DeletesRecord()
     {
         // Arrange - 6年より1日古いデータを作成
-        var justOver6Years = DateTime.Now.AddYears(-6).AddDays(-1);
+        var justOver6Years = GetRetentionThresholdDate().AddDays(-1);
         var ledger = CreateTestLedger(justOver6Years, "6年超過のデータ");
         await _ledgerRepository.InsertAsync(ledger);
 
@@ -251,6 +253,36 @@ public class DbContextCleanupTests : IDisposable
 
         // Assert
         ledgerCount.Should().Be(1);
+    }
+
+    /// <summary>
+    /// うるう日の 6 年前の解釈が .NET と SQLite で 1 日ずれることを固定する。
+    /// 境界日を C# 側で組み立ててはならない根拠（Issue #1821）。
+    /// </summary>
+    /// <remarks>
+    /// このずれがあるため、2028-02-29 に実行すると
+    /// 「ちょうど 6 年前のデータは保持される」テストが C# 基準では削除側へ倒れる。
+    /// <see cref="GetRetentionThresholdDate"/> が本番 SQL と同じ場所から境界日を取ることで回避している。
+    /// 'localtime' はタイムゾーンに依存するため、ここでは年の減算の正規化だけを検証する。
+    /// </remarks>
+    [Fact]
+    public void RetentionThreshold_OnLeapDay_SqliteAndDotNetDisagree()
+    {
+        // Arrange
+        var leapDay = new DateTime(2028, 2, 29);
+
+        // Act - SQLite に同じ年減算をさせる
+        using var lease = _dbContext.LeaseConnection();
+        using var command = lease.Connection.CreateCommand();
+        // 日付リテラルを二重に書かない（片方だけ書き換わる形を残さない）
+        command.CommandText = "SELECT date(@leapDay, '-6 years')";
+        command.Parameters.AddWithValue("@leapDay", leapDay.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture));
+        var sqliteResult = command.ExecuteScalar() as string;
+
+        // Assert - SQLite は 2022-02-29 を 2022-03-01 へ正規化し、.NET は 2022-02-28 へ丸める
+        sqliteResult.Should().Be("2022-03-01");
+        leapDay.AddYears(-6).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)
+            .Should().Be("2022-02-28");
     }
 
     #endregion
@@ -264,12 +296,13 @@ public class DbContextCleanupTests : IDisposable
     public async Task CleanupOldData_MixedLedgerData_DeletesOnlyOldRecords()
     {
         // Arrange - 様々な日付のデータを作成
+        var threshold = GetRetentionThresholdDate();
         var testData = new[]
         {
             (DateTime.Now.AddYears(-10), "10年前", true),   // 削除対象
             (DateTime.Now.AddYears(-7), "7年前", true),    // 削除対象
-            (DateTime.Now.AddYears(-6).AddDays(-1), "6年1日前", true), // 削除対象
-            (DateTime.Now.AddYears(-6).AddDays(1), "5年364日前", false), // 保持
+            (threshold.AddDays(-1), "6年1日前", true), // 削除対象
+            (threshold.AddDays(1), "5年364日前", false), // 保持
             (DateTime.Now.AddYears(-5), "5年前", false),   // 保持
             (DateTime.Now.AddYears(-3), "3年前", false),   // 保持
             (DateTime.Now.AddYears(-1), "1年前", false),   // 保持
@@ -481,7 +514,7 @@ public class DbContextCleanupTests : IDisposable
     public async Task CleanupOldData_OperationLogExactly6YearsAgo_KeepsRecord()
     {
         // Arrange
-        var sixYearsAgo = DateTime.Now.AddYears(-6);
+        var sixYearsAgo = GetRetentionThresholdDate();
         var log = CreateTestOperationLog(sixYearsAgo, "UPDATE");
         await _operationLogRepository.InsertAsync(log);
 
@@ -499,7 +532,7 @@ public class DbContextCleanupTests : IDisposable
     public async Task CleanupOldData_OperationLog6YearsPlus1Day_DeletesRecord()
     {
         // Arrange
-        var justOver6Years = DateTime.Now.AddYears(-6).AddDays(-1);
+        var justOver6Years = GetRetentionThresholdDate().AddDays(-1);
         var log = CreateTestOperationLog(justOver6Years, "DELETE");
         await _operationLogRepository.InsertAsync(log);
 
@@ -521,12 +554,13 @@ public class DbContextCleanupTests : IDisposable
     public async Task CleanupOldData_MixedOperationLogData_DeletesOnlyOldRecords()
     {
         // Arrange
+        var threshold = GetRetentionThresholdDate();
         var testData = new[]
         {
             (DateTime.Now.AddYears(-10), true),   // 削除対象
             (DateTime.Now.AddYears(-7), true),    // 削除対象
-            (DateTime.Now.AddYears(-6).AddDays(-1), true), // 削除対象
-            (DateTime.Now.AddYears(-6).AddDays(1), false), // 保持
+            (threshold.AddDays(-1), true), // 削除対象
+            (threshold.AddDays(1), false), // 保持
             (DateTime.Now.AddYears(-3), false),   // 保持
             (DateTime.Now, false),                 // 保持
         };
@@ -678,6 +712,27 @@ public class DbContextCleanupTests : IDisposable
     #endregion
 
     #region ヘルパーメソッド
+
+    /// <summary>
+    /// 本番の削除条件と同じ式（<c>date('now', '-6 years', 'localtime')</c>）を SQLite 自身に評価させ、
+    /// 保持期間の境界日を取得する。
+    /// </summary>
+    /// <remarks>
+    /// Issue #1821: 境界日を C# 側の <c>DateTime.Now.AddYears(-6)</c> で組み立てると、
+    /// うるう日（2/29）に実行したときだけ SQLite と 1〜2 日ずれてテストが落ちる。
+    /// .NET は 2028-02-29 の 6 年前を 2022-02-28 へ丸めるが、SQLite は 2022-02-29 を
+    /// 2022-03-01 へ正規化するため、「ちょうど 6 年前」のレコードが削除対象に入ってしまう。
+    /// 判定の基準を本番 SQL と同じ場所（SQLite）から取ることで、この乖離ごと無くす。
+    /// </remarks>
+    private DateTime GetRetentionThresholdDate()
+    {
+        using var lease = _dbContext.LeaseConnection();
+        using var command = lease.Connection.CreateCommand();
+        command.CommandText = "SELECT date('now', '-6 years', 'localtime')";
+        var value = command.ExecuteScalar() as string;
+        value.Should().NotBeNullOrEmpty("本番の削除条件と同じ式が評価できること");
+        return DateTime.ParseExact(value!, "yyyy-MM-dd", CultureInfo.InvariantCulture);
+    }
 
     /// <summary>
     /// テスト用のLedgerを作成
