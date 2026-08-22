@@ -656,6 +656,12 @@ namespace ICCardManager.Infrastructure.CardReader
         {
             StopHealthCheckTimer();
 
+            // Issue #1819: 読み取り開始（再接続ボタン等）は新しい監視セッションの始まり。
+            // 連続失敗回数を持ち越すと「初回は必ず本番ログへ残す」保証が効かず
+            // （持ち越した回数が間隔の倍数に当たるまで無言になる）、
+            // 「連続N回目」が再接続をまたいだ値になって継続期間の追跡もできなくなる。
+            _consecutiveHealthCheckFailures = 0;
+
             _healthCheckTimer = new Timer(HealthCheckIntervalMs);
             _healthCheckTimer.Elapsed += OnHealthCheckTimerElapsed;
             _healthCheckTimer.AutoReset = true;
@@ -674,6 +680,40 @@ namespace ICCardManager.Infrastructure.CardReader
                 _healthCheckTimer.Dispose();
                 _healthCheckTimer = null;
             }
+        }
+
+        /// <summary>
+        /// ヘルスチェック例外の連続発生回数（Issue #1819）
+        /// </summary>
+        private int _consecutiveHealthCheckFailures;
+
+        /// <summary>
+        /// ヘルスチェック失敗を本番ログへ残す間隔（回数）。
+        /// </summary>
+        /// <remarks>
+        /// ヘルスチェックは <see cref="HealthCheckIntervalMs"/> 周期で走るため、30 回はおよそ 5 分に相当する。
+        /// </remarks>
+        internal const int HealthCheckFailureLogIntervalCount = 30;
+
+        /// <summary>
+        /// ヘルスチェック失敗を本番ログ（Warning）へ残すべきかを判定する（Issue #1819）。
+        /// </summary>
+        /// <param name="consecutiveFailureCount">連続失敗回数（1 始まり）</param>
+        /// <returns>初回、および <see cref="HealthCheckFailureLogIntervalCount"/> 回ごとに true</returns>
+        /// <remarks>
+        /// 10 秒周期で毎回出すとログが肥大化して他の事象が埋もれるため、
+        /// 「発生した事実」（初回）と「続いている事実」（一定間隔）だけを残す。
+        /// 実機 felicalib に依存せず検証できるよう純粋関数として切り出している。
+        /// </remarks>
+        internal static bool ShouldLogHealthCheckFailure(int consecutiveFailureCount)
+        {
+            if (consecutiveFailureCount <= 0)
+            {
+                return false;
+            }
+
+            return consecutiveFailureCount == 1
+                || consecutiveFailureCount % HealthCheckFailureLogIntervalCount == 0;
         }
 
         /// <summary>
@@ -702,11 +742,34 @@ namespace ICCardManager.Infrastructure.CardReader
                     _logger.LogInformation("FelicaCardReader: 接続が回復しました");
                     SetConnectionState(CardReaderConnectionState.Connected, "接続が回復しました");
                 }
+
+                // Issue #1819: 例外が止んだことも本番ログへ残す（失敗の Warning と対で調査できるようにする）。
+                if (_consecutiveHealthCheckFailures > 0)
+                {
+                    _logger.LogInformation(
+                        "FelicaCardReader: ヘルスチェックが回復しました（連続失敗={FailureCount}回で終了, 接続状態={State}）",
+                        _consecutiveHealthCheckFailures, _connectionState);
+                    _consecutiveHealthCheckFailures = 0;
+                }
             }
             catch (Exception ex)
             {
-                // ヘルスチェックの例外はアプリをクラッシュさせない（Traceレベルでログ出力）
+                // ヘルスチェックの例外はアプリをクラッシュさせない。
+                // Issue #1730: LogTrace は本番（Logging:LogLevel:Default=Information）でファイル出力されないが、
+                // 例外オブジェクトごと残せる開発時の価値があるため消さずに併設する。
                 _logger.LogTrace("FelicaCardReader: ヘルスチェック例外: {Message}", ex.Message);
+
+                _consecutiveHealthCheckFailures++;
+
+                // Issue #1819: 10 秒周期のため毎回 Warning を出すとログが肥大化する。
+                // 初回と一定間隔ごとに限って本番ログへ残す（判定は ShouldLogHealthCheckFailure）。
+                if (ShouldLogHealthCheckFailure(_consecutiveHealthCheckFailures))
+                {
+                    _logger.LogWarning(ex,
+                        "FelicaCardReader: ヘルスチェックに失敗しました（連続{FailureCount}回目, 接続状態={State}, 例外={ExceptionType}）。" +
+                        "接続状態の表示が実際のカードリーダーと食い違っている可能性があります",
+                        _consecutiveHealthCheckFailures, _connectionState, ex.GetType().Name);
+                }
             }
         }
 
