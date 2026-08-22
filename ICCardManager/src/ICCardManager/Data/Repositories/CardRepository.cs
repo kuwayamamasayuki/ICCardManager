@@ -31,8 +31,8 @@ namespace ICCardManager.Data.Repositories
         {
             return await _cacheService.GetOrCreateAsync(
                 CacheKeys.AllCards,
-                async () => await GetAllFromDbAsync(),
-                TimeSpan.FromSeconds(_cacheOptions.CardListSeconds));
+                async () => await GetAllFromDbAsync().ConfigureAwait(false),
+                TimeSpan.FromSeconds(_cacheOptions.CardListSeconds)).ConfigureAwait(false);
         }
 
         /// <summary>
@@ -40,7 +40,7 @@ namespace ICCardManager.Data.Repositories
         /// </summary>
         private async Task<IEnumerable<IcCard>> GetAllFromDbAsync()
         {
-            using var lease = await _dbContext.LeaseConnectionAsync();
+            using var lease = await _dbContext.LeaseConnectionAsync().ConfigureAwait(false);
             var connection = lease.Connection;
             var cardList = new List<IcCard>();
 
@@ -53,8 +53,8 @@ FROM ic_card
 WHERE is_deleted = 0
 ORDER BY card_type, card_number";
 
-            using var reader = await command.ExecuteReaderAsync();
-            while (await reader.ReadAsync())
+            using var reader = await command.ExecuteReaderAsync().ConfigureAwait(false);
+            while (await reader.ReadAsync().ConfigureAwait(false))
             {
                 cardList.Add(MapToIcCard(reader));
             }
@@ -65,7 +65,7 @@ ORDER BY card_type, card_number";
         /// <inheritdoc/>
         public async Task<IEnumerable<IcCard>> GetAllIncludingDeletedAsync()
         {
-            using var lease = await _dbContext.LeaseConnectionAsync();
+            using var lease = await _dbContext.LeaseConnectionAsync().ConfigureAwait(false);
             var connection = lease.Connection;
             var cardList = new List<IcCard>();
 
@@ -77,8 +77,8 @@ ORDER BY card_type, card_number";
 FROM ic_card
 ORDER BY card_type, card_number";
 
-            using var reader = await command.ExecuteReaderAsync();
-            while (await reader.ReadAsync())
+            using var reader = await command.ExecuteReaderAsync().ConfigureAwait(false);
+            while (await reader.ReadAsync().ConfigureAwait(false))
             {
                 cardList.Add(MapToIcCard(reader));
             }
@@ -94,13 +94,13 @@ ORDER BY card_type, card_number";
             if (bypassCache)
             {
                 _cacheService.Invalidate(CacheKeys.AvailableCards);
-                return await GetAvailableFromDbAsync();
+                return await GetAvailableFromDbAsync().ConfigureAwait(false);
             }
 
             return await _cacheService.GetOrCreateAsync(
                 CacheKeys.AvailableCards,
-                async () => await GetAvailableFromDbAsync(),
-                TimeSpan.FromSeconds(_cacheOptions.CardListSeconds));
+                async () => await GetAvailableFromDbAsync().ConfigureAwait(false),
+                TimeSpan.FromSeconds(_cacheOptions.CardListSeconds)).ConfigureAwait(false);
         }
 
         /// <summary>
@@ -114,7 +114,7 @@ ORDER BY card_type, card_number";
         /// </remarks>
         private async Task<IEnumerable<IcCard>> GetAvailableFromDbAsync()
         {
-            using var lease = await _dbContext.LeaseConnectionAsync();
+            using var lease = await _dbContext.LeaseConnectionAsync().ConfigureAwait(false);
             var connection = lease.Connection;
             var cardList = new List<IcCard>();
 
@@ -127,8 +127,8 @@ FROM ic_card
 WHERE is_deleted = 0 AND is_refunded = 0 AND is_lent = 0
 ORDER BY card_type, card_number";
 
-            using var reader = await command.ExecuteReaderAsync();
-            while (await reader.ReadAsync())
+            using var reader = await command.ExecuteReaderAsync().ConfigureAwait(false);
+            while (await reader.ReadAsync().ConfigureAwait(false))
             {
                 cardList.Add(MapToIcCard(reader));
             }
@@ -143,13 +143,13 @@ ORDER BY card_type, card_number";
             if (bypassCache)
             {
                 _cacheService.Invalidate(CacheKeys.LentCards);
-                return await GetLentFromDbAsync();
+                return await GetLentFromDbAsync().ConfigureAwait(false);
             }
 
             return await _cacheService.GetOrCreateAsync(
                 CacheKeys.LentCards,
-                async () => await GetLentFromDbAsync(),
-                TimeSpan.FromSeconds(_cacheOptions.LentCardsSeconds));
+                async () => await GetLentFromDbAsync().ConfigureAwait(false),
+                TimeSpan.FromSeconds(_cacheOptions.LentCardsSeconds)).ConfigureAwait(false);
         }
 
         /// <summary>
@@ -157,7 +157,7 @@ ORDER BY card_type, card_number";
         /// </summary>
         private async Task<IEnumerable<IcCard>> GetLentFromDbAsync()
         {
-            using var lease = await _dbContext.LeaseConnectionAsync();
+            using var lease = await _dbContext.LeaseConnectionAsync().ConfigureAwait(false);
             var connection = lease.Connection;
             var cardList = new List<IcCard>();
 
@@ -170,8 +170,8 @@ FROM ic_card
 WHERE is_deleted = 0 AND is_lent = 1
 ORDER BY last_lent_at DESC";
 
-            using var reader = await command.ExecuteReaderAsync();
-            while (await reader.ReadAsync())
+            using var reader = await command.ExecuteReaderAsync().ConfigureAwait(false);
+            while (await reader.ReadAsync().ConfigureAwait(false))
             {
                 cardList.Add(MapToIcCard(reader));
             }
@@ -182,7 +182,7 @@ ORDER BY last_lent_at DESC";
         /// <inheritdoc/>
         public async Task<IcCard> GetByIdmAsync(string cardIdm, bool includeDeleted = false)
         {
-            using var lease = await _dbContext.LeaseConnectionAsync();
+            using var lease = await _dbContext.LeaseConnectionAsync().ConfigureAwait(false);
             var connection = lease.Connection;
 
             using var command = connection.CreateCommand();
@@ -202,8 +202,8 @@ WHERE card_idm = @cardIdm AND is_deleted = 0";
 
             command.Parameters.AddWithValue("@cardIdm", cardIdm);
 
-            using var reader = await command.ExecuteReaderAsync();
-            if (await reader.ReadAsync())
+            using var reader = await command.ExecuteReaderAsync().ConfigureAwait(false);
+            if (await reader.ReadAsync().ConfigureAwait(false))
             {
                 return MapToIcCard(reader);
             }
@@ -214,13 +214,13 @@ WHERE card_idm = @cardIdm AND is_deleted = 0";
         /// <inheritdoc/>
         public async Task<bool> InsertAsync(IcCard card)
         {
-            return await InsertAsyncInternal(card, null);
+            return await InsertAsyncInternal(card, null).ConfigureAwait(false);
         }
 
         /// <inheritdoc/>
         public async Task<bool> InsertAsync(IcCard card, SQLiteTransaction transaction)
         {
-            return await InsertAsyncInternal(card, transaction);
+            return await InsertAsyncInternal(card, transaction).ConfigureAwait(false);
         }
 
         /// <summary>
@@ -231,7 +231,7 @@ WHERE card_idm = @cardIdm AND is_deleted = 0";
         /// </exception>
         private async Task<bool> InsertAsyncInternal(IcCard card, SQLiteTransaction? transaction)
         {
-            using var lease = await _dbContext.LeaseConnectionAsync();
+            using var lease = await _dbContext.LeaseConnectionAsync().ConfigureAwait(false);
             var connection = lease.Connection;
 
             using var command = connection.CreateCommand();
@@ -254,7 +254,7 @@ VALUES (@cardIdm, @cardType, @cardNumber, @note, 0, NULL, 0, NULL, NULL, @starti
 
             try
             {
-                var result = await command.ExecuteNonQueryAsync();
+                var result = await command.ExecuteNonQueryAsync().ConfigureAwait(false);
                 if (result > 0 && transaction == null)
                 {
                     // トランザクション外の場合のみキャッシュ無効化
@@ -289,13 +289,13 @@ VALUES (@cardIdm, @cardType, @cardNumber, @note, 0, NULL, 0, NULL, NULL, @starti
         /// <inheritdoc/>
         public async Task<bool> UpdateAsync(IcCard card)
         {
-            return await UpdateAsyncInternal(card, null);
+            return await UpdateAsyncInternal(card, null).ConfigureAwait(false);
         }
 
         /// <inheritdoc/>
         public async Task<bool> UpdateAsync(IcCard card, SQLiteTransaction transaction)
         {
-            return await UpdateAsyncInternal(card, transaction);
+            return await UpdateAsyncInternal(card, transaction).ConfigureAwait(false);
         }
 
         /// <summary>
@@ -314,7 +314,7 @@ VALUES (@cardIdm, @cardType, @cardNumber, @note, 0, NULL, 0, NULL, NULL, @starti
         /// </exception>
         private async Task<bool> UpdateAsyncInternal(IcCard card, SQLiteTransaction? transaction)
         {
-            using var lease = await _dbContext.LeaseConnectionAsync();
+            using var lease = await _dbContext.LeaseConnectionAsync().ConfigureAwait(false);
             var connection = lease.Connection;
 
             using var command = connection.CreateCommand();
@@ -330,7 +330,7 @@ WHERE card_idm = @cardIdm AND is_deleted = 0";
 
             try
             {
-                var result = await command.ExecuteNonQueryAsync();
+                var result = await command.ExecuteNonQueryAsync().ConfigureAwait(false);
                 if (transaction == null)
                 {
                     // トランザクション外の場合のみキャッシュ無効化。
@@ -359,7 +359,7 @@ WHERE card_idm = @cardIdm AND is_deleted = 0";
         /// <inheritdoc/>
         public async Task<bool> UpdateLentStatusAsync(string cardIdm, bool isLent, DateTime? lentAt, string staffIdm)
         {
-            using var lease = await _dbContext.LeaseConnectionAsync();
+            using var lease = await _dbContext.LeaseConnectionAsync().ConfigureAwait(false);
             var connection = lease.Connection;
 
             using var command = connection.CreateCommand();
@@ -372,7 +372,7 @@ WHERE card_idm = @cardIdm AND is_deleted = 0";
             command.Parameters.AddWithValue("@lentAt", lentAt.HasValue ? lentAt.Value.ToString("yyyy-MM-dd HH:mm:ss") : DBNull.Value);
             command.Parameters.AddWithValue("@staffIdm", (object)staffIdm ?? DBNull.Value);
 
-            var result = await command.ExecuteNonQueryAsync();
+            var result = await command.ExecuteNonQueryAsync().ConfigureAwait(false);
             if (result > 0)
             {
                 // 貸出状態変更時は即座にキャッシュを無効化
@@ -384,7 +384,7 @@ WHERE card_idm = @cardIdm AND is_deleted = 0";
         /// <inheritdoc/>
         public async Task<CardOperationResult> DeleteAsync(string cardIdm)
         {
-            using var lease = await _dbContext.LeaseConnectionAsync();
+            using var lease = await _dbContext.LeaseConnectionAsync().ConfigureAwait(false);
             var connection = lease.Connection;
 
             // Issue #1109: check-then-act を排除し、WHERE句のDBガードに一元化。
@@ -396,7 +396,7 @@ WHERE card_idm = @cardIdm AND is_deleted = 0 AND is_lent = 0";
 
             command.Parameters.AddWithValue("@cardIdm", cardIdm);
 
-            var result = await command.ExecuteNonQueryAsync();
+            var result = await command.ExecuteNonQueryAsync().ConfigureAwait(false);
             if (result > 0)
             {
                 InvalidateCardCache();
@@ -404,19 +404,19 @@ WHERE card_idm = @cardIdm AND is_deleted = 0 AND is_lent = 0";
             }
 
             // 失敗原因を特定するためDBから最新状態を取得（キャッシュバイパス）
-            return await DiagnoseFailureAsync(cardIdm);
+            return await DiagnoseFailureAsync(cardIdm).ConfigureAwait(false);
         }
 
         /// <inheritdoc/>
         public async Task<bool> RestoreAsync(string cardIdm)
         {
-            return await RestoreAsyncInternal(cardIdm, null);
+            return await RestoreAsyncInternal(cardIdm, null).ConfigureAwait(false);
         }
 
         /// <inheritdoc/>
         public async Task<bool> RestoreAsync(string cardIdm, SQLiteTransaction transaction)
         {
-            return await RestoreAsyncInternal(cardIdm, transaction);
+            return await RestoreAsyncInternal(cardIdm, transaction).ConfigureAwait(false);
         }
 
         /// <summary>
@@ -434,7 +434,7 @@ WHERE card_idm = @cardIdm AND is_deleted = 0 AND is_lent = 0";
         /// </exception>
         private async Task<bool> RestoreAsyncInternal(string cardIdm, SQLiteTransaction? transaction)
         {
-            using var lease = await _dbContext.LeaseConnectionAsync();
+            using var lease = await _dbContext.LeaseConnectionAsync().ConfigureAwait(false);
             var connection = lease.Connection;
 
             using var command = connection.CreateCommand();
@@ -447,7 +447,7 @@ WHERE card_idm = @cardIdm AND is_deleted = 1";
 
             try
             {
-                var result = await command.ExecuteNonQueryAsync();
+                var result = await command.ExecuteNonQueryAsync().ConfigureAwait(false);
                 if (transaction == null)
                 {
                     // トランザクション外の場合のみキャッシュ無効化。
@@ -465,7 +465,7 @@ WHERE card_idm = @cardIdm AND is_deleted = 1";
                 // カード管理画面では「予期しないエラー（SYS999）」として案内される。
                 // 復元は引数に IDm しか持たないため、文言に載せる種別・番号は失敗時だけ読み直す。
                 var (cardType, cardNumber) =
-                    await ReadCardTypeAndNumberAsync(connection, transaction, cardIdm);
+                    await ReadCardTypeAndNumberAsync(connection, transaction, cardIdm).ConfigureAwait(false);
                 throw DuplicateCardNumberException.ForRestore(cardType, cardNumber, ex);
             }
         }
@@ -488,8 +488,8 @@ WHERE card_idm = @cardIdm AND is_deleted = 1";
                 command.CommandText = "SELECT card_type, card_number FROM ic_card WHERE card_idm = @cardIdm";
                 command.Parameters.AddWithValue("@cardIdm", cardIdm);
 
-                using var reader = await command.ExecuteReaderAsync();
-                if (await reader.ReadAsync())
+                using var reader = await command.ExecuteReaderAsync().ConfigureAwait(false);
+                if (await reader.ReadAsync().ConfigureAwait(false))
                 {
                     return (
                         reader.IsDBNull(0) ? string.Empty : reader.GetString(0),
@@ -515,7 +515,7 @@ WHERE card_idm = @cardIdm AND is_deleted = 1";
         {
             // キャッシュを無効化してからDBから直接取得
             InvalidateCardCache();
-            var currentCard = await GetByIdmAsync(cardIdm, includeDeleted: true);
+            var currentCard = await GetByIdmAsync(cardIdm, includeDeleted: true).ConfigureAwait(false);
 
             if (currentCard == null)
                 return CardOperationResult.NotFound;
@@ -541,21 +541,21 @@ WHERE card_idm = @cardIdm AND is_deleted = 1";
         /// <inheritdoc/>
         public async Task<bool> ExistsAsync(string cardIdm)
         {
-            using var lease = await _dbContext.LeaseConnectionAsync();
+            using var lease = await _dbContext.LeaseConnectionAsync().ConfigureAwait(false);
             var connection = lease.Connection;
 
             using var command = connection.CreateCommand();
             command.CommandText = "SELECT COUNT(1) FROM ic_card WHERE card_idm = @cardIdm";
             command.Parameters.AddWithValue("@cardIdm", cardIdm);
 
-            var result = await command.ExecuteScalarAsync();
+            var result = await command.ExecuteScalarAsync().ConfigureAwait(false);
             return Convert.ToInt32(result) > 0;
         }
 
         /// <inheritdoc/>
         public async Task<string> GetNextCardNumberAsync(string cardType)
         {
-            using var lease = await _dbContext.LeaseConnectionAsync();
+            using var lease = await _dbContext.LeaseConnectionAsync().ConfigureAwait(false);
             var connection = lease.Connection;
 
             using var command = connection.CreateCommand();
@@ -565,7 +565,7 @@ WHERE card_type = @cardType";
 
             command.Parameters.AddWithValue("@cardType", cardType);
 
-            var result = await command.ExecuteScalarAsync();
+            var result = await command.ExecuteScalarAsync().ConfigureAwait(false);
             var maxNumber = result == DBNull.Value ? 0 : Convert.ToInt32(result);
 
             return (maxNumber + 1).ToString();
@@ -599,7 +599,7 @@ WHERE card_type = @cardType";
         /// <inheritdoc/>
         public async Task<CardOperationResult> SetRefundedAsync(string cardIdm)
         {
-            using var lease = await _dbContext.LeaseConnectionAsync();
+            using var lease = await _dbContext.LeaseConnectionAsync().ConfigureAwait(false);
             var connection = lease.Connection;
 
             // Issue #1109: check-then-act を排除し、WHERE句のDBガードに一元化。
@@ -610,7 +610,7 @@ WHERE card_idm = @cardIdm AND is_deleted = 0 AND is_refunded = 0 AND is_lent = 0
 
             command.Parameters.AddWithValue("@cardIdm", cardIdm);
 
-            var result = await command.ExecuteNonQueryAsync();
+            var result = await command.ExecuteNonQueryAsync().ConfigureAwait(false);
             if (result > 0)
             {
                 InvalidateCardCache();
@@ -618,7 +618,7 @@ WHERE card_idm = @cardIdm AND is_deleted = 0 AND is_refunded = 0 AND is_lent = 0
             }
 
             // 失敗原因を特定するためDBから最新状態を取得（キャッシュバイパス）
-            return await DiagnoseFailureAsync(cardIdm);
+            return await DiagnoseFailureAsync(cardIdm).ConfigureAwait(false);
         }
     }
 }

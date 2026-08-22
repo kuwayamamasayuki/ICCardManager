@@ -290,7 +290,7 @@ namespace ICCardManager.Infrastructure.CardReader
                         Error?.Invoke(this, CardReaderException.HistoryReadFailed(ex.Message, ex));
                     }
                 }
-            });
+            }).ConfigureAwait(false);
 
             return details;
         }
@@ -310,7 +310,7 @@ namespace ICCardManager.Infrastructure.CardReader
             Error += handler;
             try
             {
-                var details = (await ReadHistoryAsync(idm)).ToList();
+                var details = (await ReadHistoryAsync(idm).ConfigureAwait(false)).ToList();
                 if (capturedError != null)
                 {
                     return CardReadResult<IReadOnlyList<LedgerDetail>>.Fail(capturedError);
@@ -393,7 +393,7 @@ namespace ICCardManager.Infrastructure.CardReader
                         return null;
                     }
                 }
-            });
+            }).ConfigureAwait(false);
         }
 
         /// <summary>
@@ -422,11 +422,11 @@ namespace ICCardManager.Infrastructure.CardReader
         {
             _logger.LogInformation("FelicaCardReader: 再接続を試行します");
 
-            await StopReadingAsync();
+            await StopReadingAsync().ConfigureAwait(false);
 
             try
             {
-                await StartReadingAsync();
+                await StartReadingAsync().ConfigureAwait(false);
             }
             catch (Exception ex)
             {

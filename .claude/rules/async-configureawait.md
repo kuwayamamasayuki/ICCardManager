@@ -42,6 +42,20 @@ ViewModel と同じ理由で付けない。
 
 要は「SUT が UI 文脈を不要に要求していないか」を検出する目的に資する `await` が対象であり、テスト基盤やダブルの内部実装は対象外。
 
+## ガード（Issue #1823）
+
+`ConfigureAwaitConventionTests` が `src/ICCardManager` の `Common` / `Data` / `Dtos` /
+`Infrastructure` / `Models` / `Services` 配下を走査し、`.ConfigureAwait(false)` を伴わない
+`await` を検出する。走査対象は**ディレクトリから導出**するため、新規ファイルは自動的に検査対象へ入る。
+
+未是正のファイルは同テストの `KnownUnfixedFiles` で明示的に除外している。除外は
+**減らす方向にのみ変更する**こと（除外ファイルへ新たな `await` を足しても検出されない）。
+除外が是正済みになったらテストが赤くなり、エントリの削除を促す。
+
+> Issue #1287 で規約を定めてからガードが無く、Issue #1823 の時点で
+> `CardRepository` 0/51・`StaffRepository` 0/27・`Infrastructure/` 配下 0 件・
+> `CsvExportService` の三項演算子 2 か所の付与漏れが蓄積していた。
+
 ## アナライザ
 
 `.editorconfig` で `CA2007` を `severity=suggestion` として設定。`src/ICCardManager` 配下全体が対象（Common / Data / Dtos / Infrastructure / Models / Services 等）で、ViewModels / Views / tests のみ `none` で無効化。

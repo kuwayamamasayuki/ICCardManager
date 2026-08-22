@@ -59,7 +59,7 @@ namespace ICCardManager.Services
             try
             {
                 var cards = includeDeleted
-                    ? await _cardRepository.GetAllIncludingDeletedAsync()
+                    ? await _cardRepository.GetAllIncludingDeletedAsync().ConfigureAwait(false)
                     : await _cardRepository.GetAllAsync().ConfigureAwait(false);
 
                 var lines = new List<string>
@@ -108,7 +108,7 @@ namespace ICCardManager.Services
             try
             {
                 var staffList = includeDeleted
-                    ? await _staffRepository.GetAllIncludingDeletedAsync()
+                    ? await _staffRepository.GetAllIncludingDeletedAsync().ConfigureAwait(false)
                     : await _staffRepository.GetAllAsync().ConfigureAwait(false);
 
                 var lines = new List<string>
