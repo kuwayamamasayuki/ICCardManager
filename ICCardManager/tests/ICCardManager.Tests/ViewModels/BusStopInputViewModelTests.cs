@@ -31,7 +31,7 @@ public class BusStopInputViewModelTests
         _dialogServiceMock = new Mock<IDialogService>();
 
         // バス停サジェストのデフォルト: 空
-        _ledgerRepoMock.Setup(r => r.GetBusStopSuggestionsAsync())
+        _ledgerRepoMock.Setup(r => r.GetBusStopSuggestionsAsync(It.IsAny<string>()))
             .ReturnsAsync(Enumerable.Empty<(string BusStops, int UsageCount, DateTime? LastUsedDate)>());
 
         // Issue #1811: 保存前の確認ダイアログは既定で「はい」（警告を承知で保存する）。
@@ -149,7 +149,7 @@ public class BusStopInputViewModelTests
             ("天神バス停～博多駅前", 5, DateTime.Today),
             ("薬院駅前～大橋駅前", 3, DateTime.Today.AddDays(-10)),
         };
-        _ledgerRepoMock.Setup(r => r.GetBusStopSuggestionsAsync())
+        _ledgerRepoMock.Setup(r => r.GetBusStopSuggestionsAsync(It.IsAny<string>()))
             .ReturnsAsync(suggestions);
 
         var ledger = new Ledger { Id = 1 };
@@ -175,7 +175,7 @@ public class BusStopInputViewModelTests
             ("天神バス停～博多駅前", 5, DateTime.Today),
             ("薬院駅前～大橋駅前", 3, DateTime.Today.AddDays(-10)),
         };
-        _ledgerRepoMock.Setup(r => r.GetBusStopSuggestionsAsync())
+        _ledgerRepoMock.Setup(r => r.GetBusStopSuggestionsAsync(It.IsAny<string>()))
             .ReturnsAsync(suggestions);
 
         var ledger = new Ledger { Id = 1 };
@@ -195,7 +195,7 @@ public class BusStopInputViewModelTests
     public async Task InitializeWithDetailsAsync_サジェスト取得失敗時に空リストになること()
     {
         // Arrange
-        _ledgerRepoMock.Setup(r => r.GetBusStopSuggestionsAsync())
+        _ledgerRepoMock.Setup(r => r.GetBusStopSuggestionsAsync(It.IsAny<string>()))
             .ThrowsAsync(new Exception("DB error"));
 
         var ledger = new Ledger { Id = 1 };

@@ -1603,7 +1603,8 @@ public partial class MainViewModel : ViewModelBase
                 // Issue #593: バス利用を含むLedgerをすべて取得（Summaryで判定）
                 // LastOrDefaultでは最後のLedgerのみ取得されるため、バス利用が別日にある場合に空ダイアログになる
                 var busLedgers = result.CreatedLedgers
-                    .Where(l => !l.IsLentRecord && l.Summary != null && l.Summary.Contains("バス"))
+                    // Issue #1818: バスラベルは組織設定（SummaryText.BusLabel）由来のため直書きしない
+                    .Where(l => !l.IsLentRecord && SummaryGenerator.ContainsBusLabel(l.Summary))
                     .ToList();
 
                 // Issue #1203: 複数のバス利用がある場合でも1つのダイアログでまとめて入力できるようにする

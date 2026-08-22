@@ -4,6 +4,7 @@ using System.Windows;
 using System.Windows.Input;
 using System.Windows.Threading;
 using ICCardManager.Common;
+using ICCardManager.Services;
 using ICCardManager.ViewModels;
 using ICCardManager.Views.Helpers;
 using Microsoft.Extensions.DependencyInjection;
@@ -63,7 +64,8 @@ namespace ICCardManager.Views.Dialogs
             {
                 // Issue #709: 更新済み摘要を表示してからハイライト→削除
                 var updatedItem = await _viewModel.UpdateItemSummaryAsync(ledgerId);
-                if (updatedItem != null && updatedItem.Summary?.Contains("★") != true)
+                // Issue #1818: プレースホルダは組織設定（SummaryText.BusPlaceholder）由来のため直書きしない
+                if (updatedItem != null && !SummaryGenerator.HasIncompleteBusStop(updatedItem.Summary))
                 {
                     // 摘要が完全に更新された場合：ハイライト→2秒後に一覧から削除
                     await Dispatcher.InvokeAsync(() =>
@@ -92,7 +94,7 @@ namespace ICCardManager.Views.Dialogs
                 }
                 else
                 {
-                    // 摘要にまだ★が残る場合（一部のみ入力）：通常の再読み込み
+                    // 摘要にまだプレースホルダが残る場合（一部のみ入力）：通常の再読み込み
                     await _viewModel.InitializeAsync();
                 }
             }

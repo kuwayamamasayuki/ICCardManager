@@ -184,6 +184,152 @@ internal static class TestSourceInspection
     /// ソース全体を 1 パスで走査するためこの状態が起きない。
     /// </para>
     /// </remarks>
+    /// <summary>
+    /// コメントだけを除去し、<b>文字列リテラルの中身は残した</b>まま、行数と行の対応を保った
+    /// テキストを返す（Issue #1818）。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 「リテラルを直書きしていないか」を検査する規約テスト用。
+    /// <see cref="ToCodeOnly"/> / <see cref="ToCodeOnlyPreservingLines"/> はリテラルの中身を
+    /// 捨てるため、この用途には使えない。一方でコメントを残したまま検査すると、
+    /// <b>規約の理由を説明したコメント自体</b>（「『★』を直書きしない」等）が違反として
+    /// 検出される（極性の反転。<c>.claude/rules/development-conventions.md</c> の
+    /// 「禁止された要素の不在を検査するときは〜」と同じ罠）。
+    /// </para>
+    /// <para>
+    /// 逐語的文字列（<c>@"..."</c>）・補間文字列（<c>$"..."</c>）・文字リテラルは
+    /// 中身を保ったまま読み飛ばす。読み飛ばすのは「その内側の <c>//</c> を
+    /// コメント開始と誤認しない」ためで、中身は出力に含める。
+    /// </para>
+    /// </remarks>
+    public static string RemoveCommentsPreservingLines(string source)
+    {
+        if (source == null)
+        {
+            throw new ArgumentNullException(nameof(source));
+        }
+
+        var normalized = source.Replace("\r\n", "\n");
+        var result = new StringBuilder(normalized.Length);
+        var i = 0;
+
+        while (i < normalized.Length)
+        {
+            var c = normalized[i];
+            var next = i + 1 < normalized.Length ? normalized[i + 1] : '\0';
+
+            if (c == '/' && next == '/')
+            {
+                while (i < normalized.Length && normalized[i] != '\n')
+                {
+                    i++;
+                }
+
+                continue;
+            }
+
+            if (c == '/' && next == '*')
+            {
+                i += 2;
+                while (i + 1 < normalized.Length && !(normalized[i] == '*' && normalized[i + 1] == '/'))
+                {
+                    // 改行は保存して行番号のずれを防ぐ
+                    if (normalized[i] == '\n')
+                    {
+                        result.Append('\n');
+                    }
+
+                    i++;
+                }
+
+                i = Math.Min(i + 2, normalized.Length);
+                result.Append(' ');
+                continue;
+            }
+
+            if (c == '@' && next == '"')
+            {
+                result.Append("@\"");
+                i += 2;
+                while (i < normalized.Length)
+                {
+                    if (normalized[i] == '"')
+                    {
+                        if (i + 1 < normalized.Length && normalized[i + 1] == '"')
+                        {
+                            result.Append("\"\"");
+                            i += 2;
+                            continue;
+                        }
+
+                        break;
+                    }
+
+                    result.Append(normalized[i]);
+                    i++;
+                }
+
+                result.Append('"');
+                i++;
+                continue;
+            }
+
+            if ((c == '"') || (c == '$' && next == '"'))
+            {
+                if (c == '$')
+                {
+                    result.Append('$');
+                    i++;
+                }
+
+                result.Append('"');
+                i++;
+                while (i < normalized.Length && normalized[i] != '"')
+                {
+                    if (normalized[i] == '\\' && i + 1 < normalized.Length)
+                    {
+                        result.Append(normalized[i]);
+                        i++;
+                    }
+
+                    result.Append(normalized[i]);
+                    i++;
+                }
+
+                result.Append('"');
+                i++;
+                continue;
+            }
+
+            if (c == '\'')
+            {
+                result.Append('\'');
+                i++;
+                while (i < normalized.Length && normalized[i] != '\'')
+                {
+                    if (normalized[i] == '\\' && i + 1 < normalized.Length)
+                    {
+                        result.Append(normalized[i]);
+                        i++;
+                    }
+
+                    result.Append(normalized[i]);
+                    i++;
+                }
+
+                result.Append('\'');
+                i++;
+                continue;
+            }
+
+            result.Append(c);
+            i++;
+        }
+
+        return result.ToString();
+    }
+
     public static string ToCodeOnlyPreservingLines(string source)
     {
         if (source == null)

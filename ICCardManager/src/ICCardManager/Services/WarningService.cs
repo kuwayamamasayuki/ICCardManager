@@ -90,7 +90,8 @@ namespace ICCardManager.Services
             var ledgers = await _ledgerRepository.GetByDateRangeAsync(
                 null, DateTime.Now.AddYears(-1), DateTime.Now).ConfigureAwait(false);
 
-            var incompleteCount = ledgers.Count(l => l.Summary?.Contains("★") == true);
+            // Issue #1818: プレースホルダは組織設定（SummaryText.BusPlaceholder）由来のため直書きしない
+            var incompleteCount = ledgers.Count(l => SummaryGenerator.HasIncompleteBusStop(l.Summary));
             if (incompleteCount > 0)
             {
                 return new WarningItem

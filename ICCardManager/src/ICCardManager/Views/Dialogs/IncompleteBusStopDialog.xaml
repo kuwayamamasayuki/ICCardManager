@@ -34,7 +34,8 @@
             <TextBlock Text="バス停名未入力の履歴一覧"
                        FontSize="{DynamicResource LargeFontSize}"
                        FontWeight="Bold"/>
-            <TextBlock Text="バス停名が未入力（★マーク）の利用履歴です。項目を選択して「バス停名を入力」を押すと、バス停名入力画面に遷移します。"
+            <!-- Issue #1818: プレースホルダ記号は組織設定由来のため ViewModel から取得する -->
+            <TextBlock Text="{Binding HeaderDescription}"
                        FontSize="{DynamicResource SmallFontSize}"
                        Foreground="{DynamicResource SecondaryTextBrush}"
                        TextWrapping="Wrap"

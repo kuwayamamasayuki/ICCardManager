@@ -817,7 +817,10 @@ namespace ICCardManager.Services
             }
             else if (detail.IsBus)
             {
-                var busStop = !string.IsNullOrEmpty(detail.BusStops) ? $"バス（{detail.BusStops}）" : "バス";
+                // Issue #1818: バスラベルは組織設定（SummaryText.BusLabel）由来のため直書きしない
+                var busStop = !string.IsNullOrEmpty(detail.BusStops)
+                    ? SummaryGenerator.FormatBusSummary(detail.BusStops)
+                    : SummaryGenerator.BusLabel;
                 parts.Add(busStop);
             }
             else

@@ -109,6 +109,15 @@ namespace ICCardManager.Services
         private static OrganizationOptions _options = new();
 
         /// <summary>
+        /// 設定値が空だった場合のフォールバック元（既定値の単一の真実源、Issue #1818）
+        /// </summary>
+        /// <remarks>
+        /// リテラル（「バス」「★」）を直書きせず <see cref="SummaryTextOptions"/> の
+        /// 既定値を参照する（<see cref="GetMidYearCarryoverLikePattern"/> のフォールバックと同じ流儀）。
+        /// </remarks>
+        private static readonly SummaryTextOptions DefaultSummaryText = new();
+
+        /// <summary>
         /// TransferStationGroups のHashSet版キャッシュ
         /// </summary>
         private static List<HashSet<string>> _transferStationGroups = BuildTransferStationGroups(new OrganizationOptions());
@@ -130,6 +139,142 @@ namespace ICCardManager.Services
             _options = new OrganizationOptions();
             _transferStationGroups = BuildTransferStationGroups(_options);
         }
+
+        /// <summary>
+        /// バス利用のラベル（組織設定 <c>SummaryText.BusLabel</c> 由来、Issue #1818）
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// 摘要の生成・判定・抽出は、いずれもこのプロパティ（および本プロパティから導出する
+        /// <see cref="FormatBusSummary"/> / <see cref="GetBusStopExtractionPattern"/> /
+        /// <see cref="TryExtractBusStops"/> / <see cref="ContainsBusLabel"/>）を経由すること。
+        /// 生成側だけが設定値を使い判定側がリテラルを直書きすると、ラベルを
+        /// 「乗合自動車」等へ変更した組織で判定だけが追従しない（Issue #1604 / #1749 と同型の乖離）。
+        /// </para>
+        /// <para>
+        /// 空文字・空白のみの設定は既定値へフォールバックする。空ラベルを許すと
+        /// <see cref="GetBusStopExtractionPattern"/> が <c>（(.+?)）</c> に退化し、
+        /// 鉄道の括弧（「鉄道（A駅～B駅）」）まで拾ってバス停名として取り込むため
+        /// （<see cref="IsMidYearCarryoverSummary"/> の不正正規表現フォールバックと同じ方針）。
+        /// </para>
+        /// <para>
+        /// 汎用/固有の別: 交通系固有（バス混在表記）。
+        /// </para>
+        /// </remarks>
+        public static string BusLabel => Coalesce(
+            _options.SummaryText?.BusLabel, DefaultSummaryText.BusLabel);
+
+        /// <summary>
+        /// バス停名未入力時のプレースホルダ（組織設定 <c>SummaryText.BusPlaceholder</c> 由来、Issue #1818）
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// 未入力判定（<see cref="HasIncompleteBusStop"/> / <see cref="IsBusStopPlaceholder"/>）も
+        /// 本プロパティから導出する。判定側が「★」を直書きすると、プレースホルダを
+        /// 「※」等へ変更した組織でバス停名未入力の警告が常に 0 件になる。
+        /// </para>
+        /// <para>
+        /// 空文字・空白のみの設定は既定値へフォールバックする。空プレースホルダを許すと
+        /// <c>Contains("")</c> が常に true になり、すべての履歴が「未入力」と判定される。
+        /// </para>
+        /// <para>
+        /// 汎用/固有の別: 交通系固有（バス混在表記）。
+        /// </para>
+        /// </remarks>
+        public static string BusPlaceholder => Coalesce(
+            _options.SummaryText?.BusPlaceholder, DefaultSummaryText.BusPlaceholder);
+
+        /// <summary>
+        /// 設定値が空（null／空白のみ）なら既定値へフォールバックする
+        /// </summary>
+        private static string Coalesce(string? configured, string fallback)
+            => string.IsNullOrWhiteSpace(configured) ? fallback : configured;
+
+        /// <summary>
+        /// バス区間の摘要表記を生成（Issue #1818）
+        /// </summary>
+        /// <param name="busStops">バス停名（未入力の場合は <see cref="BusPlaceholder"/> を渡す）</param>
+        /// <returns>「バス（A～B）」形式の文字列</returns>
+        /// <remarks>
+        /// 摘要生成だけでなく、表示整形（<c>Common.RouteDisplayFormatter</c>）・
+        /// CSVインポートの明細説明文・テストデータ生成も本メソッドを通す。
+        /// 書式（ラベル＋全角括弧）を 1 か所に閉じることで、
+        /// <see cref="GetBusStopExtractionPattern"/> の抽出対象と生成物が必ず対応する。
+        /// 汎用/固有の別: 交通系固有。
+        /// </remarks>
+        public static string FormatBusSummary(string busStops)
+            => $"{BusLabel}（{busStops}）";
+
+        /// <summary>
+        /// 摘要からバス停名を抽出する正規表現パターンを導出（Issue #1818）
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// ラベルは <see cref="Regex.Escape(string)"/> でエスケープする。設定値に
+        /// 正規表現メタ文字（<c>(</c> <c>.</c> <c>*</c> 等）が含まれていてもパターンが壊れず、
+        /// リテラルとして一致するようにするため。
+        /// </para>
+        /// <para>
+        /// 非アンカーの部分一致である点は従来のハードコードと同じ（「鉄道（…）、バス（…）」の
+        /// 混在摘要から後半だけを取り出すため）。抽出そのものは
+        /// <see cref="TryExtractBusStops"/> を使い、呼び出し側で <c>Regex.Match</c> を
+        /// 書き写さないこと。
+        /// </para>
+        /// <para>
+        /// 汎用/固有の別: 交通系固有。
+        /// </para>
+        /// </remarks>
+        public static string GetBusStopExtractionPattern()
+            => $"{Regex.Escape(BusLabel)}（(.+?)）";
+
+        /// <summary>
+        /// 摘要からバス停名部分を抽出（Issue #1818）
+        /// </summary>
+        /// <param name="summary">摘要文字列</param>
+        /// <param name="busStops">抽出したバス停名（「、」区切りの複数件を含む）。失敗時は空文字</param>
+        /// <returns>抽出できた場合 true</returns>
+        /// <remarks>
+        /// 摘要の直接編集で <c>LedgerDetail.BusStops</c> が取り残される問題（Issue #983）の
+        /// 同期処理から使う。汎用/固有の別: 交通系固有。
+        /// </remarks>
+        public static bool TryExtractBusStops(string? summary, out string busStops)
+        {
+            var match = Regex.Match(summary ?? string.Empty, GetBusStopExtractionPattern());
+            busStops = match.Success ? match.Groups[1].Value : string.Empty;
+            return match.Success;
+        }
+
+        /// <summary>
+        /// 摘要にバス利用が含まれるかを判定（Issue #1818）
+        /// </summary>
+        /// <remarks>
+        /// バス停入力ダイアログの起動判定（<c>MainViewModel</c>）から使う。
+        /// 汎用/固有の別: 交通系固有。
+        /// </remarks>
+        public static bool ContainsBusLabel(string? summary)
+            => summary?.Contains(BusLabel) == true;
+
+        /// <summary>
+        /// 摘要にバス停名未入力のプレースホルダが残っているかを判定（Issue #1818）
+        /// </summary>
+        /// <remarks>
+        /// バス停名未入力警告の集計（<c>WarningService</c> / <c>IncompleteBusStopViewModel</c>）と
+        /// 入力後の一覧更新判定（<c>IncompleteBusStopDialog</c>）から使う。
+        /// 汎用/固有の別: 交通系固有。
+        /// </remarks>
+        public static bool HasIncompleteBusStop(string? summary)
+            => summary?.Contains(BusPlaceholder) == true;
+
+        /// <summary>
+        /// バス停名がプレースホルダ（未入力）そのものかを判定（Issue #1818）
+        /// </summary>
+        /// <remarks>
+        /// <see cref="HasIncompleteBusStop"/> が摘要に対する部分一致であるのに対し、
+        /// 本メソッドは <c>LedgerDetail.BusStops</c> 単体に対する完全一致。
+        /// 汎用/固有の別: 交通系固有。
+        /// </remarks>
+        public static bool IsBusStopPlaceholder(string? busStops)
+            => busStops == BusPlaceholder;
 
         /// <summary>
         /// TransferStationGroups を List&lt;List&lt;string&gt;&gt; から List&lt;HashSet&lt;string&gt;&gt; に変換
@@ -382,7 +527,7 @@ namespace ICCardManager.Services
             if (busTrips.Count > 0)
             {
                 var busSummary = GenerateBusSummary(busTrips);
-                summaryParts.Add($"{_options.SummaryText.BusLabel}（{busSummary}）");
+                summaryParts.Add(FormatBusSummary(busSummary));
             }
 
             return string.Join("、", summaryParts);
@@ -447,7 +592,7 @@ namespace ICCardManager.Services
             if (busTrips.Count > 0)
             {
                 var busSummary = GenerateBusSummary(busTrips);
-                summaryParts.Add($"{_options.SummaryText.BusLabel}（{busSummary}）");
+                summaryParts.Add(FormatBusSummary(busSummary));
             }
 
             return string.Join("、", summaryParts);
@@ -1051,7 +1196,7 @@ namespace ICCardManager.Services
             if (allBusStops.Count == 0)
             {
                 // 未入力の場合はプレースホルダ
-                return _options.SummaryText.BusPlaceholder;
+                return BusPlaceholder;
             }
 
             // Issue #985: 「A～B」形式のバス停名から乗り継ぎ統合・往復検出を行う

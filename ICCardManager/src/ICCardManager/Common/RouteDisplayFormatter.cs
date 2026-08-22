@@ -1,3 +1,5 @@
+using ICCardManager.Services;
+
 namespace ICCardManager.Common
 {
     /// <summary>
@@ -46,7 +48,9 @@ namespace ICCardManager.Common
 
             if (isBus)
             {
-                return string.IsNullOrEmpty(busStops) ? "バス（★）" : $"バス（{busStops}）";
+                // Issue #1818: ラベル・プレースホルダは組織設定（SummaryText）由来のため直書きしない
+                return SummaryGenerator.FormatBusSummary(
+                    string.IsNullOrEmpty(busStops) ? SummaryGenerator.BusPlaceholder : busStops);
             }
 
             if (!string.IsNullOrEmpty(entryStation) && !string.IsNullOrEmpty(exitStation))
