@@ -1,6 +1,7 @@
 using System;
 using System.IO;
 using ICCardManager.Infrastructure.Security;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 namespace ICCardManager.Services
@@ -11,6 +12,17 @@ namespace ICCardManager.Services
     public class ReportFileNameFactory : IReportFileNameFactory
     {
         private readonly OrganizationOptions _orgOptions;
+        private readonly ILogger<ReportFileNameFactory> _logger;
+
+        /// <summary>
+        /// 既定書式へフォールバックしたことを記録済みの書式（同一書式で毎回ログを出さないため）
+        /// </summary>
+        /// <remarks>
+        /// 帳票の一括出力ではカード枚数ぶん呼ばれるため、無条件に出すとログが肥大化する。
+        /// 「初回だけ残す」判定は Issue #1819（FelicaCardReader のヘルスチェック）と同じ考え方。
+        /// </remarks>
+        private string _loggedFallbackFormat;
+        private bool _hasLoggedFallback;
 
         /// <summary>
         /// 既定のファイル名フォーマット（設定が空・不正なときのフォールバック先）
@@ -24,14 +36,54 @@ namespace ICCardManager.Services
         internal static readonly string DefaultFileNameFormat =
             new ReportLayoutOptions().FileNameFormat;
 
-        public ReportFileNameFactory(IOptions<OrganizationOptions> orgOptions = null)
+        public ReportFileNameFactory(
+            IOptions<OrganizationOptions> orgOptions = null,
+            ILogger<ReportFileNameFactory> logger = null)
         {
             _orgOptions = orgOptions?.Value ?? new OrganizationOptions();
+            _logger = logger;
         }
 
         /// <inheritdoc/>
         public string GetFiscalYearFileName(string cardType, string cardNumber, int fiscalYear)
-            => Build(_orgOptions.ReportLayout?.FileNameFormat, cardType, cardNumber, fiscalYear);
+        {
+            var configuredFormat = _orgOptions.ReportLayout?.FileNameFormat;
+            var fileName = Build(configuredFormat, cardType, cardNumber, fiscalYear, out var usedFallback);
+
+            if (usedFallback)
+            {
+                LogFallbackOnce(configuredFormat, fileName);
+            }
+
+            return fileName;
+        }
+
+        /// <summary>
+        /// 既定書式へ倒したことを Information で 1 回だけ記録する
+        /// </summary>
+        /// <remarks>
+        /// Issue #1819: 縮退（フォールバック）は正常終了するため、記録しないと管理者から見て
+        /// 「設定したのに反映されない」＝本 Issue が是正した状態と区別が付かない。
+        /// LogDebug は本番のログファイルに出力されないため Information にする。
+        /// </remarks>
+        private void LogFallbackOnce(string configuredFormat, string fileName)
+        {
+            if (_hasLoggedFallback && _loggedFallbackFormat == configuredFormat)
+            {
+                return;
+            }
+
+            _hasLoggedFallback = true;
+            _loggedFallbackFormat = configuredFormat;
+
+            _logger?.LogInformation(
+                "帳票ファイル名の書式 ReportLayout.FileNameFormat=\"{ConfiguredFormat}\" は使用できないため、" +
+                "既定の書式 \"{DefaultFormat}\" で出力します（生成例: {FileName}）。" +
+                "プレースホルダは {{0}} {{1}} {{2}} のみ、フォルダー区切りとファイル名に使えない文字は指定できません。",
+                configuredFormat,
+                DefaultFileNameFormat,
+                fileName);
+        }
 
         /// <summary>
         /// ファイル名を組み立てる純関数（Issue #1820）
@@ -54,7 +106,9 @@ namespace ICCardManager.Services
         /// <param name="cardType">カード種別</param>
         /// <param name="cardNumber">カード番号（管理番号）</param>
         /// <param name="fiscalYear">年度</param>
-        internal static string Build(string fileNameFormat, string cardType, string cardNumber, int fiscalYear)
+        /// <param name="usedFallback">既定書式へ倒したかどうか（呼び出し元がログに残すため）</param>
+        internal static string Build(
+            string fileNameFormat, string cardType, string cardNumber, int fiscalYear, out bool usedFallback)
         {
             var safeCardType = FileNameSanitizer.SanitizeComponent(cardType);
             var safeCardNumber = FileNameSanitizer.SanitizeComponent(cardNumber);
@@ -66,8 +120,9 @@ namespace ICCardManager.Services
             var fileName = TryFormat(format, safeCardType, safeCardNumber, fiscalYear);
 
             // 書式由来のパス構造（"..\\evil\\{0}.xlsx" 等）は #1703 の保証を破るため既定書式へ倒す。
-            // 「判定できない」を異常に丸めないため、判定は Path.GetFileName との一致のみで行う。
-            if (fileName == null || !IsSingleFileName(fileName))
+            // ファイル名として使えない文字を含む書式も、SaveAs の時点で例外になるためここで倒す。
+            usedFallback = fileName == null || !IsSingleFileName(fileName);
+            if (usedFallback)
             {
                 fileName = TryFormat(DefaultFileNameFormat, safeCardType, safeCardNumber, fiscalYear);
             }
@@ -97,6 +152,14 @@ namespace ICCardManager.Services
         private static bool IsSingleFileName(string fileName)
         {
             if (string.IsNullOrWhiteSpace(fileName))
+            {
+                return false;
+            }
+
+            // ファイル名として使えない文字（'*' '?' 等）は Path.GetInvalidPathChars に含まれないため
+            // Path.GetFileName を通り抜ける。ここで弾かないと SaveAs / Path.Combine の時点で
+            // 例外になり、「管理者の設定ミスで帳票作成を止めない」という本 Issue の目的が果たせない。
+            if (fileName.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0)
             {
                 return false;
             }

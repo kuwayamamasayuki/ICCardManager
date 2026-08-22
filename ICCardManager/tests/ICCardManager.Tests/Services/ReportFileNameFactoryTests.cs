@@ -110,6 +110,31 @@ public class ReportFileNameFactoryTests
         Path.GetFileName(fileName).Should().Be(fileName);
     }
 
+    [Theory]
+    [InlineData("物品出納簿_{0}_{1}_{2}年度*.xlsx")]   // ワイルドカード
+    [InlineData("物品出納簿_{0}_{1}_{2}年度?.xlsx")]   // ワイルドカード
+    [InlineData("物品出納簿_{0}_{1}_{2}年度|.xlsx")]   // パイプ
+    public void ファイル名に使えない文字を含む書式は既定へフォールバックする(string format)
+    {
+        // '*' / '?' は Path.GetInvalidPathChars に含まれないため Path.GetFileName を通り抜ける。
+        // ここで倒しておかないと SaveAs の時点で例外になり、帳票作成が止まる。
+        var fileName = CreateFactory(format)
+            .GetFiscalYearFileName("はやかけん", "H001", 2024);
+
+        fileName.Should().Be("物品出納簿_はやかけん_H001_2024年度.xlsx");
+        fileName.IndexOfAny(Path.GetInvalidFileNameChars()).Should().BeLessThan(0);
+    }
+
+    [Fact]
+    public void 正当な書式はフォールバックせずそのまま使われる()
+    {
+        // 対のテスト: 検査が広すぎて正当な書式まで倒していないこと
+        var fileName = CreateFactory(CustomFormat)
+            .GetFiscalYearFileName("はやかけん", "H001", 2024);
+
+        fileName.Should().Be("出納簿【はやかけん】H001（2024年度）.xlsx");
+    }
+
     #endregion
 
     #region Issue #1703 のサニタイズが書式変更後も効くこと
