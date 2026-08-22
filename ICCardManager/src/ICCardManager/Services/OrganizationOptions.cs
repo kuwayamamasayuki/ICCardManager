@@ -234,75 +234,29 @@ namespace ICCardManager.Services
     /// テンプレート列マッピングの設定
     /// </summary>
     /// <remarks>
-    /// Excelテンプレートの列・行配置を組織独自のテンプレートに合わせてカスタマイズできます。
+    /// <para>
+    /// Excel テンプレートの<b>ヘッダー行（2行目）</b>のセル配置を、組織独自のテンプレートに
+    /// 合わせてカスタマイズできます。<see cref="ReportService"/> の <c>SetHeaderInfo</c> が
+    /// これらの列番号を読みます。
+    /// </para>
+    /// <para>
+    /// <b>明細行（出納年月日・摘要・受入・払出・残額・氏名・備考）の配置はここでは変更できません。</b>
+    /// 明細行のレイアウトは列番号だけでは決まらず、結合セル（摘要 B～D 列・備考 I～L 列）・
+    /// 罫線・改ページ位置（1ページ＝22行、ヘッダー1-4行／データ5-16行／備考17-22行）と
+    /// 一体でテンプレートファイル自体に埋め込まれているためです。
+    /// </para>
+    /// <para>
+    /// Issue #1820: 以前は <c>DataStartRow</c> / <c>RowsPerPage</c> / <c>DateColumn</c> 等
+    /// 13 項目が定義されていましたが、<b>本番コードから一度も読まれていませんでした</b>
+    /// （<c>ReportService</c> は同名のローカル <c>const</c> と列リテラルを使っていた）。
+    /// 管理者マニュアル §7.4 が設定可能と案内していたため、設定しても反映されないという
+    /// 状態になっていたので削除しました。明細行の配置を可変にする要件が出た場合は、
+    /// <c>ExcelStyleFormatter</c> の結合・罫線・印刷範囲まで含めて設計し直したうえで
+    /// 追加してください（使われない設定項目を先に作らない）。
+    /// </para>
     /// </remarks>
     public class TemplateMappingOptions
     {
-        /// <summary>
-        /// データ開始行
-        /// </summary>
-        public int DataStartRow { get; set; } = 5;
-
-        /// <summary>
-        /// ヘッダー情報行（開始行からの相対位置+1）
-        /// </summary>
-        public int HeaderInfoRow { get; set; } = 2;
-
-        /// <summary>
-        /// 1ページあたりの最大データ行数
-        /// </summary>
-        public int RowsPerPage { get; set; } = 12;
-
-        /// <summary>
-        /// 総列数
-        /// </summary>
-        public int TotalColumns { get; set; } = 12;
-
-        /// <summary>
-        /// 出納日の列番号
-        /// </summary>
-        public int DateColumn { get; set; } = 1;
-
-        /// <summary>
-        /// 摘要の開始列番号
-        /// </summary>
-        public int SummaryColumn { get; set; } = 2;
-
-        /// <summary>
-        /// 摘要の終了列番号
-        /// </summary>
-        public int SummaryEndColumn { get; set; } = 4;
-
-        /// <summary>
-        /// 受入金額の列番号
-        /// </summary>
-        public int IncomeColumn { get; set; } = 5;
-
-        /// <summary>
-        /// 払出金額の列番号
-        /// </summary>
-        public int ExpenseColumn { get; set; } = 6;
-
-        /// <summary>
-        /// 残額の列番号
-        /// </summary>
-        public int BalanceColumn { get; set; } = 7;
-
-        /// <summary>
-        /// 氏名の列番号
-        /// </summary>
-        public int StaffNameColumn { get; set; } = 8;
-
-        /// <summary>
-        /// 備考の開始列番号
-        /// </summary>
-        public int NoteColumn { get; set; } = 9;
-
-        /// <summary>
-        /// 備考の終了列番号
-        /// </summary>
-        public int NoteEndColumn { get; set; } = 12;
-
         /// <summary>
         /// カード種別の列番号（ヘッダー内）
         /// </summary>

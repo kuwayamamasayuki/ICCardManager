@@ -2038,7 +2038,7 @@ public class ReportServiceTests : IDisposable
         var fiscalYear = 2024;
 
         // Act
-        var result = ReportService.GetFiscalYearFileName(cardType, cardNumber, fiscalYear);
+        var result = _reportService.GetFiscalYearFileName(cardType, cardNumber, fiscalYear);
 
         // Assert
         result.Should().Be("物品出納簿_はやかけん_H001_2024年度.xlsx");

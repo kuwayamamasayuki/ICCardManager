@@ -191,19 +191,24 @@ namespace ICCardManager.Services
         private readonly ISettingsRepository _settingsRepository;
         private readonly IReportDataBuilder _reportDataBuilder;
         private readonly OrganizationOptions _orgOptions;
+        private readonly IReportFileNameFactory _fileNameFactory;
 
         public ReportService(
             ICardRepository cardRepository,
             ILedgerRepository ledgerRepository,
             ISettingsRepository settingsRepository,
             IReportDataBuilder reportDataBuilder,
-            IOptions<OrganizationOptions> orgOptions = null)
+            IOptions<OrganizationOptions> orgOptions = null,
+            IReportFileNameFactory fileNameFactory = null)
         {
             _cardRepository = cardRepository;
             _ledgerRepository = ledgerRepository;
             _settingsRepository = settingsRepository;
             _reportDataBuilder = reportDataBuilder;
             _orgOptions = orgOptions?.Value ?? new OrganizationOptions();
+            // Issue #1820: 同じ組織設定から導出する。DI 未指定でも本サービスの _orgOptions と
+            // 同じ設定値を使うため、書式が経路によって食い違うことはない。
+            _fileNameFactory = fileNameFactory ?? new ReportFileNameFactory(orgOptions);
         }
 
         /// <summary>
@@ -331,6 +336,12 @@ namespace ICCardManager.Services
                     worksheet.SheetView.ZoomScale = 100;
 
                     // Issue #457: データ出力（5～16行に内容を記載、それを超える場合は改ページ）
+                    // Issue #1820: この 2 つは組織設定ではなくローカル const のままにしている。
+                    // 明細行のレイアウトは行番号・列番号だけでは決まらず、結合セル（摘要 B～D 列・
+                    // 備考 I～L 列）・罫線・印刷範囲（ExcelStyleFormatter）・改ページ時のヘッダー／
+                    // 備考欄コピー（1-4行 / 17-22行）と一体でテンプレートファイルに埋め込まれている。
+                    // 行数だけを設定可能にすると「行位置は動くが結合・罫線は元のまま」という
+                    // 半端な状態になるため、TemplateMappingOptions からは同名の項目を削除した。
                     const int DataStartRow = 5;      // データ開始行
                     const int RowsPerPage = 12;      // 1ページあたりの最大データ行数（5～16行目）
                     var currentRow = DataStartRow;
@@ -697,18 +708,14 @@ namespace ICCardManager.Services
         /// <param name="cardType">カード種別</param>
         /// <param name="cardNumber">カード番号</param>
         /// <param name="fiscalYear">年度</param>
-        /// <returns>ファイル名（例: 物品出納簿_はやかけん_H001_2024年度.xlsx）</returns>
-        public static string GetFiscalYearFileName(string cardType, string cardNumber, int fiscalYear)
-        {
-            // Issue #1703: CardType / CardNumber は CSV 取込・共有DB 経由でパス区切りを含みうる。
-            // ファイル名構成要素としてサニタイズし、Path.Combine + SaveAs 解決時の
-            // 出力フォルダ外へのパストラバーサルを防ぐ（名前生成の単一チョークポイント）。
-            var safeCardType = FileNameSanitizer.SanitizeComponent(cardType);
-            var safeCardNumber = FileNameSanitizer.SanitizeComponent(cardNumber);
-            return string.Format(
-                new OrganizationOptions().ReportLayout.FileNameFormat,
-                safeCardType, safeCardNumber, fiscalYear);
-        }
+        /// <returns>ファイル名（既定書式の例: 物品出納簿_はやかけん_H001_2024年度.xlsx）</returns>
+        /// <remarks>
+        /// Issue #1820: 以前は <c>static</c> だったため注入済みの <see cref="OrganizationOptions"/> を
+        /// 参照できず、組織設定 <c>ReportLayout.FileNameFormat</c> が無視されていた。
+        /// 生成は <see cref="IReportFileNameFactory"/> に集約している。
+        /// </remarks>
+        public string GetFiscalYearFileName(string cardType, string cardNumber, int fiscalYear)
+            => _fileNameFactory.GetFiscalYearFileName(cardType, cardNumber, fiscalYear);
 
         /// <summary>
         /// ヘッダ情報を設定

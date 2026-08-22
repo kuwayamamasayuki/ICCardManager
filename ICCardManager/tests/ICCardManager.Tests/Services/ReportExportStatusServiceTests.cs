@@ -31,7 +31,7 @@ public class ReportExportStatusServiceTests : IDisposable
     {
         _testDirectory = Path.Combine(Path.GetTempPath(), $"ReportExportStatusTests_{Guid.NewGuid():N}");
         Directory.CreateDirectory(_testDirectory);
-        _service = new ReportExportStatusService();
+        _service = new ReportExportStatusService(new ReportFileNameFactory());
     }
 
     public void Dispose()
@@ -65,7 +65,7 @@ public class ReportExportStatusServiceTests : IDisposable
         string cardType, string cardNumber, int year, int month, params int[] sheetMonths)
     {
         var fiscalYear = ReportService.GetFiscalYear(year, month);
-        var fileName = ReportService.GetFiscalYearFileName(cardType, cardNumber, fiscalYear);
+        var fileName = new ReportFileNameFactory().GetFiscalYearFileName(cardType, cardNumber, fiscalYear);
         var path = Path.Combine(_testDirectory, fileName);
 
         using (var workbook = new XLWorkbook())
@@ -180,7 +180,7 @@ public class ReportExportStatusServiceTests : IDisposable
     {
         // Arrange: 年度ファイル名だが中身が壊れている
         var fiscalYear = ReportService.GetFiscalYear(2026, 6);
-        var fileName = ReportService.GetFiscalYearFileName(CardType, CardNumber, fiscalYear);
+        var fileName = new ReportFileNameFactory().GetFiscalYearFileName(CardType, CardNumber, fiscalYear);
         File.WriteAllText(Path.Combine(_testDirectory, fileName), "壊れたファイル");
 
         // Act

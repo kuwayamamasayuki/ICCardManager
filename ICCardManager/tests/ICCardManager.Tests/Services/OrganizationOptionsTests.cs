@@ -67,11 +67,14 @@ public class OrganizationOptionsTests : IDisposable
         options.ReportLayout.TitleText.Should().Be("物品出納簿");
         options.ReportLayout.ClassificationText.Should().Be("雑品（金券類）");
         options.ReportLayout.UnitText.Should().Be("円");
+        options.ReportLayout.FileNameFormat.Should().Be("物品出納簿_{0}_{1}_{2}年度.xlsx");
 
-        // テンプレートマッピング
-        options.TemplateMapping.DataStartRow.Should().Be(5);
-        options.TemplateMapping.RowsPerPage.Should().Be(12);
-        options.TemplateMapping.TotalColumns.Should().Be(12);
+        // テンプレートマッピング（Issue #1820: 本番コードが読むヘッダー配置の5項目のみ）
+        options.TemplateMapping.ClassificationColumn.Should().Be(2);
+        options.TemplateMapping.CardTypeColumn.Should().Be(5);
+        options.TemplateMapping.CardNumberColumn.Should().Be(8);
+        options.TemplateMapping.UnitColumn.Should().Be(10);
+        options.TemplateMapping.PageNumberColumn.Should().Be(12);
     }
 
     #endregion

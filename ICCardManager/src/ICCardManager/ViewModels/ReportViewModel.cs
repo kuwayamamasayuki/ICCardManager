@@ -648,7 +648,7 @@ public partial class ReportViewModel : ViewModelBase
 
         foreach (var card in SelectedCards)
         {
-            var fileName = ReportService.GetFiscalYearFileName(card.CardType, card.CardNumber, fiscalYear);
+            var fileName = _reportService.GetFiscalYearFileName(card.CardType, card.CardNumber, fiscalYear);
             var outputPath = Path.Combine(OutputFolder, fileName);
             outputPaths[card.CardIdm] = outputPath;
 
