@@ -1110,6 +1110,17 @@ ORDER BY l.card_idm, l.date, l.id";
         public async Task<IEnumerable<(string BusStops, int UsageCount, DateTime? LastUsedDate)>> GetBusStopSuggestionsAsync(
             string busStopPlaceholder)
         {
+            // Issue #1818: null／空文字を黙って受けると `bus_stops != NULL` が常に NULL 評価となり、
+            // 候補が 1 件も返らない（＝オートコンプリートが静かに死ぬ）。呼び出し側の渡し忘れを
+            // 無言の空結果ではなくその場の失敗として表面化させる
+            if (string.IsNullOrEmpty(busStopPlaceholder))
+            {
+                throw new ArgumentException(
+                    "除外する未入力プレースホルダが未指定です。" +
+                    "組織設定から解決した記号を渡してください。",
+                    nameof(busStopPlaceholder));
+            }
+
             using var lease = await _dbContext.LeaseConnectionAsync();
             var connection = lease.Connection;
             var result = new List<(string BusStops, int UsageCount, DateTime? LastUsedDate)>();

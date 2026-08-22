@@ -79,7 +79,11 @@ namespace ICCardManager.Data.Repositories
         /// 候補から除外する未入力プレースホルダ（既定「★」。Issue #1818）。
         /// 値は組織設定（<c>SummaryText.BusPlaceholder</c>）由来のため、永続化層では判断せず
         /// 呼び出し元から受け取る（設計書 05 §2a.5 の境界。<c>SummaryGenerator.BusPlaceholder</c> を渡すこと）。
+        /// null／空文字は <see cref="System.ArgumentException"/>。
         /// </param>
+        /// <exception cref="System.ArgumentException">
+        /// <paramref name="busStopPlaceholder"/> が null または空文字の場合。
+        /// </exception>
         Task<IEnumerable<(string BusStops, int UsageCount, DateTime? LastUsedDate)>> GetBusStopSuggestionsAsync(
             string busStopPlaceholder);
 

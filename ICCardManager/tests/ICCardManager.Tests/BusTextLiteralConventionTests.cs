@@ -94,12 +94,64 @@ public class BusTextLiteralConventionTests
     }
 
     [Fact]
+    public void 画面定義XAMLがバスラベルとプレースホルダを直書きしていないこと()
+    {
+        // Issue #1818 で是正したうちの 1 件（IncompleteBusStopDialog.xaml の「★マーク」）は
+        // XAML 側にあった。*.cs だけを走査すると、まさにこの種類の再発を検出できない
+        //（.claude/rules/development-conventions.md「ガードを書くときは経路を列挙する」）。
+        var sourceRoot = TestPaths.GetProductionSourceRoot();
+        var violations = new List<string>();
+
+        foreach (var path in EnumerateInspectedXamlFiles(sourceRoot))
+        {
+            var relativePath = ToRelativePath(sourceRoot, path);
+            var markup = RemoveXamlComments(File.ReadAllText(path));
+            var lines = markup.Split('\n');
+
+            for (var i = 0; i < lines.Length; i++)
+            {
+                foreach (var (literal, replacement) in ForbiddenBusTextLiterals)
+                {
+                    if (lines[i].Contains(literal))
+                    {
+                        violations.Add(
+                            $"{relativePath}({i + 1}): 「{literal}」の直書き。" +
+                            $"ViewModel 側で {replacement} から組み立ててバインドすること。");
+                    }
+                }
+            }
+        }
+
+        violations.Should().BeEmpty(
+            "画面文言のプレースホルダ記号・バスラベルも組織設定（SummaryText）由来のため、" +
+            "XAML へ直書きせず ViewModel から供給すること（Issue #1818）。\n" +
+            string.Join("\n", violations));
+    }
+
+    [Theory]
+    // マークアップ中のリテラルは検出する
+    [InlineData("<TextBlock Text=\"★マーク\"/>", true)]
+    // コメントは検出しない（規約の理由を書けるようにする）
+    [InlineData("<!-- 「★」は直書きせず ViewModel から供給する -->", false)]
+    [InlineData("<!-- バス（★）の形式 -->\n<TextBlock Text=\"{Binding Header}\"/>", false)]
+    public void XAMLの検出ロジックが既知のサンプルで期待どおり動くこと(string markup, bool shouldBeDetected)
+    {
+        // 実データが空でも検査ロジック自体は固定される（#1786 の「空振り検出」）
+        var stripped = RemoveXamlComments(markup);
+
+        var detected = ForbiddenBusTextLiterals.Any(f => stripped.Contains(f.Literal));
+
+        detected.Should().Be(shouldBeDetected);
+    }
+
+    [Fact]
     public void 検査対象に実ファイルが含まれていること()
     {
         // 空振り検出。走査条件が壊れて 0 件になっても上のテストは緑になる
         var sourceRoot = TestPaths.GetProductionSourceRoot();
 
         EnumerateInspectedFiles(sourceRoot).Should().HaveCountGreaterThan(100);
+        EnumerateInspectedXamlFiles(sourceRoot).Should().HaveCountGreaterThan(10);
 
         foreach (var allowed in AllowedFiles.Keys)
         {
@@ -126,6 +178,47 @@ public class BusTextLiteralConventionTests
         var detected = ForbiddenBusTextLiterals.Any(f => code.Contains(f.Literal));
 
         detected.Should().Be(shouldBeDetected);
+    }
+
+    [Fact]
+    public void 逐語的補間文字列の後ろのコメントを取りこぼさないこと()
+    {
+        // 逐語的文字列のプレフィックスは @" / $@" / @$" の 3 通りある。@$" を取りこぼすと
+        // 「\ はエスケープ」とみなす通常文字列の分岐へ落ち、末尾の \" を文字列の終わりと
+        // 認識できずに走査が**ファイル末尾まで**ずれる。ずれた先ではコメントが文字列の
+        // 内側として扱われるため、コメント内の「★」を違反として誤検出する（極性の反転）。
+        var source = "var a = @$\"C:\\\"; // ★ は直書きしない\n";
+
+        var code = TestSourceInspection.RemoveCommentsPreservingLines(source);
+
+        code.Should().NotContain("★", "コメントは除去されるため違反として現れない");
+        code.Should().Contain("C:", "逐語的文字列の中身は残る");
+    }
+
+    private static IReadOnlyList<string> EnumerateInspectedXamlFiles(string sourceRoot)
+    {
+        return Directory
+            .GetFiles(sourceRoot, "*.xaml", SearchOption.AllDirectories)
+            .Where(p => !IsGeneratedOrIntermediate(p))
+            .OrderBy(p => p, StringComparer.Ordinal)
+            .ToList();
+    }
+
+    /// <summary>
+    /// XAML のコメント（<c>&lt;!-- --&gt;</c>）だけを除去する。行数と行の対応は保つ。
+    /// </summary>
+    /// <remarks>
+    /// C# 用の <see cref="TestSourceInspection.RemoveCommentsPreservingLines"/> は
+    /// <c>//</c> をコメント開始とみなすため XAML には使えない（属性値の URL や
+    /// <c>{Binding}</c> 中のパスを削ってしまう）。
+    /// </remarks>
+    private static string RemoveXamlComments(string markup)
+    {
+        return Regex.Replace(
+            markup.Replace("\r\n", "\n"),
+            "<!--.*?-->",
+            m => new string('\n', m.Value.Count(ch => ch == '\n')),
+            RegexOptions.Singleline);
     }
 
     private static IReadOnlyList<string> EnumerateInspectedFiles(string sourceRoot)

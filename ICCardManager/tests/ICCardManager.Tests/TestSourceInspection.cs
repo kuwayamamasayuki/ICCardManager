@@ -168,23 +168,6 @@ internal static class TestSourceInspection
     }
 
     /// <summary>
-    /// <see cref="ToCodeOnly"/> と同じ除去を行いつつ、<b>行数と行の対応を保った</b>
-    /// 「コードのみ」のテキストを返す（改行は複数行コメント／逐語的文字列の内側でも保存する）。
-    /// </summary>
-    /// <remarks>
-    /// <para>
-    /// 違反箇所を<b>行番号で報告する</b>検査はこちらを使うこと。<see cref="ToCodeOnly"/> は
-    /// 複数行のブロックコメントを空白 1 文字へ畳むため、以降の行番号がすべてずれる。
-    /// </para>
-    /// <para>
-    /// 行単位に分割してから 1 行ずつ除去する実装（各テストの私的コピー）では
-    /// <b>複数行にまたがる逐語的文字列</b>（<c>@"..."</c> / <c>$@"..."</c>）を追えない。
-    /// 2 行目以降がコードとして扱われ、その中の <c>{</c> <c>}</c> が波括弧の対応を
-    /// ファイル末尾まで狂わせて<b>検査が黙って別の場所を見る</b>。本メソッドは
-    /// ソース全体を 1 パスで走査するためこの状態が起きない。
-    /// </para>
-    /// </remarks>
-    /// <summary>
     /// コメントだけを除去し、<b>文字列リテラルの中身は残した</b>まま、行数と行の対応を保った
     /// テキストを返す（Issue #1818）。
     /// </summary>
@@ -248,10 +231,21 @@ internal static class TestSourceInspection
                 continue;
             }
 
-            if (c == '@' && next == '"')
+            // 逐語的文字列（@"..." / $@"..." / @$"..."）。
+            // $@" は '$' がフォールスルーしたあと本分岐の @" として読まれるが、
+            // @$" は '$' を先に読む経路が無いため 3 文字のプレフィックスとして扱う。
+            // 取りこぼすと \ を通常のエスケープとみなす分岐へ落ち、
+            // 以降の文字列／コメントの区別がファイル末尾まで狂う。
+            var afterNext = i + 2 < normalized.Length ? normalized[i + 2] : '\0';
+            var verbatimPrefixLength =
+                (c == '@' && next == '"') ? 2
+                : (c == '@' && next == '$' && afterNext == '"') ? 3
+                : 0;
+
+            if (verbatimPrefixLength > 0)
             {
-                result.Append("@\"");
-                i += 2;
+                result.Append(normalized, i, verbatimPrefixLength);
+                i += verbatimPrefixLength;
                 while (i < normalized.Length)
                 {
                     if (normalized[i] == '"')
@@ -330,6 +324,23 @@ internal static class TestSourceInspection
         return result.ToString();
     }
 
+    /// <summary>
+    /// <see cref="ToCodeOnly"/> と同じ除去を行いつつ、<b>行数と行の対応を保った</b>
+    /// 「コードのみ」のテキストを返す（改行は複数行コメント／逐語的文字列の内側でも保存する）。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 違反箇所を<b>行番号で報告する</b>検査はこちらを使うこと。<see cref="ToCodeOnly"/> は
+    /// 複数行のブロックコメントを空白 1 文字へ畳むため、以降の行番号がすべてずれる。
+    /// </para>
+    /// <para>
+    /// 行単位に分割してから 1 行ずつ除去する実装（各テストの私的コピー）では
+    /// <b>複数行にまたがる逐語的文字列</b>（<c>@"..."</c> / <c>$@"..."</c>）を追えない。
+    /// 2 行目以降がコードとして扱われ、その中の <c>{</c> <c>}</c> が波括弧の対応を
+    /// ファイル末尾まで狂わせて<b>検査が黙って別の場所を見る</b>。本メソッドは
+    /// ソース全体を 1 パスで走査するためこの状態が起きない。
+    /// </para>
+    /// </remarks>
     public static string ToCodeOnlyPreservingLines(string source)
     {
         if (source == null)
