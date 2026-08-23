@@ -1134,8 +1134,12 @@ public partial class MainViewModel : ViewModelBase
     {
         // Issue #1452: 同一の SQLiteConnection 上で SQLiteCommand が並列実行されると
         // SQLITE_MISUSE 不定動作の原因となるため、リポジトリ呼び出しは直列化する。
+        // Issue #1842: card は職員証でなかったときにしか使わないため、
+        // HandleCardInIcCardWaitingStateAsync と同じく職員証判定が null のときだけ問い合わせる。
+        // 待機（await）を 1 つ減らすことは、この直後の再判定が守る「前提が変わり得る窓」を
+        // 狭めることでもある（共有モードでは 1 クエリが数十〜数百 ms かかる）。
         var staff = await _staffRepository.GetByIdmAsync(idm);
-        var card = await _cardRepository.GetByIdmAsync(idm);
+        var card = staff == null ? await _cardRepository.GetByIdmAsync(idm) : null;
 
         // Issue #1842: 上の await 中に届いた別のタッチは HandleCardReadAsync の入口ゲートを
         // 通過済みであり、その 2 件目が先に処理を終えると本メソッドの継続は「古い前提」で走る。
