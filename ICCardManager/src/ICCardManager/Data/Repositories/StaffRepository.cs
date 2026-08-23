@@ -31,8 +31,8 @@ namespace ICCardManager.Data.Repositories
         {
             return await _cacheService.GetOrCreateAsync(
                 CacheKeys.AllStaff,
-                async () => await GetAllFromDbAsync(),
-                TimeSpan.FromSeconds(_cacheOptions.StaffListSeconds));
+                async () => await GetAllFromDbAsync().ConfigureAwait(false),
+                TimeSpan.FromSeconds(_cacheOptions.StaffListSeconds)).ConfigureAwait(false);
         }
 
         /// <summary>
@@ -40,7 +40,7 @@ namespace ICCardManager.Data.Repositories
         /// </summary>
         private async Task<IEnumerable<Staff>> GetAllFromDbAsync()
         {
-            using var lease = await _dbContext.LeaseConnectionAsync();
+            using var lease = await _dbContext.LeaseConnectionAsync().ConfigureAwait(false);
             var connection = lease.Connection;
             var staffList = new List<Staff>();
 
@@ -50,8 +50,8 @@ FROM staff
 WHERE is_deleted = 0
 ORDER BY name";
 
-            using var reader = await command.ExecuteReaderAsync();
-            while (await reader.ReadAsync())
+            using var reader = await command.ExecuteReaderAsync().ConfigureAwait(false);
+            while (await reader.ReadAsync().ConfigureAwait(false))
             {
                 staffList.Add(MapToStaff(reader));
             }
@@ -62,7 +62,7 @@ ORDER BY name";
         /// <inheritdoc/>
         public async Task<IEnumerable<Staff>> GetAllIncludingDeletedAsync()
         {
-            using var lease = await _dbContext.LeaseConnectionAsync();
+            using var lease = await _dbContext.LeaseConnectionAsync().ConfigureAwait(false);
             var connection = lease.Connection;
             var staffList = new List<Staff>();
 
@@ -71,8 +71,8 @@ ORDER BY name";
 FROM staff
 ORDER BY name";
 
-            using var reader = await command.ExecuteReaderAsync();
-            while (await reader.ReadAsync())
+            using var reader = await command.ExecuteReaderAsync().ConfigureAwait(false);
+            while (await reader.ReadAsync().ConfigureAwait(false))
             {
                 staffList.Add(MapToStaff(reader));
             }
@@ -83,7 +83,7 @@ ORDER BY name";
         /// <inheritdoc/>
         public async Task<Staff> GetByIdmAsync(string staffIdm, bool includeDeleted = false)
         {
-            using var lease = await _dbContext.LeaseConnectionAsync();
+            using var lease = await _dbContext.LeaseConnectionAsync().ConfigureAwait(false);
             var connection = lease.Connection;
 
             using var command = connection.CreateCommand();
@@ -97,8 +97,8 @@ WHERE staff_idm = @staffIdm AND is_deleted = 0";
 
             command.Parameters.AddWithValue("@staffIdm", staffIdm);
 
-            using var reader = await command.ExecuteReaderAsync();
-            if (await reader.ReadAsync())
+            using var reader = await command.ExecuteReaderAsync().ConfigureAwait(false);
+            if (await reader.ReadAsync().ConfigureAwait(false))
             {
                 return MapToStaff(reader);
             }
@@ -109,13 +109,13 @@ WHERE staff_idm = @staffIdm AND is_deleted = 0";
         /// <inheritdoc/>
         public async Task<bool> InsertAsync(Staff staff)
         {
-            return await InsertAsyncInternal(staff, null);
+            return await InsertAsyncInternal(staff, null).ConfigureAwait(false);
         }
 
         /// <inheritdoc/>
         public async Task<bool> InsertAsync(Staff staff, SQLiteTransaction transaction)
         {
-            return await InsertAsyncInternal(staff, transaction);
+            return await InsertAsyncInternal(staff, transaction).ConfigureAwait(false);
         }
 
         /// <summary>
@@ -123,7 +123,7 @@ WHERE staff_idm = @staffIdm AND is_deleted = 0";
         /// </summary>
         private async Task<bool> InsertAsyncInternal(Staff staff, SQLiteTransaction? transaction)
         {
-            using var lease = await _dbContext.LeaseConnectionAsync();
+            using var lease = await _dbContext.LeaseConnectionAsync().ConfigureAwait(false);
             var connection = lease.Connection;
 
             using var command = connection.CreateCommand();
@@ -138,7 +138,7 @@ VALUES (@staffIdm, @name, @number, @note, 0, NULL)";
 
             try
             {
-                var result = await command.ExecuteNonQueryAsync();
+                var result = await command.ExecuteNonQueryAsync().ConfigureAwait(false);
                 if (result > 0 && transaction == null)
                 {
                     // トランザクション外の場合のみキャッシュ無効化
@@ -155,13 +155,13 @@ VALUES (@staffIdm, @name, @number, @note, 0, NULL)";
         /// <inheritdoc/>
         public async Task<bool> UpdateAsync(Staff staff)
         {
-            return await UpdateAsyncInternal(staff, null);
+            return await UpdateAsyncInternal(staff, null).ConfigureAwait(false);
         }
 
         /// <inheritdoc/>
         public async Task<bool> UpdateAsync(Staff staff, SQLiteTransaction transaction)
         {
-            return await UpdateAsyncInternal(staff, transaction);
+            return await UpdateAsyncInternal(staff, transaction).ConfigureAwait(false);
         }
 
         /// <summary>
@@ -169,7 +169,7 @@ VALUES (@staffIdm, @name, @number, @note, 0, NULL)";
         /// </summary>
         private async Task<bool> UpdateAsyncInternal(Staff staff, SQLiteTransaction? transaction)
         {
-            using var lease = await _dbContext.LeaseConnectionAsync();
+            using var lease = await _dbContext.LeaseConnectionAsync().ConfigureAwait(false);
             var connection = lease.Connection;
 
             using var command = connection.CreateCommand();
@@ -183,7 +183,7 @@ WHERE staff_idm = @staffIdm AND is_deleted = 0";
             command.Parameters.AddWithValue("@number", (object)staff.Number ?? DBNull.Value);
             command.Parameters.AddWithValue("@note", (object)staff.Note ?? DBNull.Value);
 
-            var result = await command.ExecuteNonQueryAsync();
+            var result = await command.ExecuteNonQueryAsync().ConfigureAwait(false);
             if (transaction == null)
             {
                 // トランザクション外の場合のみキャッシュ無効化。
@@ -201,7 +201,7 @@ WHERE staff_idm = @staffIdm AND is_deleted = 0";
         /// <inheritdoc/>
         public async Task<bool> DeleteAsync(string staffIdm)
         {
-            using var lease = await _dbContext.LeaseConnectionAsync();
+            using var lease = await _dbContext.LeaseConnectionAsync().ConfigureAwait(false);
             var connection = lease.Connection;
 
             using var command = connection.CreateCommand();
@@ -211,7 +211,7 @@ WHERE staff_idm = @staffIdm AND is_deleted = 0";
 
             command.Parameters.AddWithValue("@staffIdm", staffIdm);
 
-            var result = await command.ExecuteNonQueryAsync();
+            var result = await command.ExecuteNonQueryAsync().ConfigureAwait(false);
             // Issue #1759: 影響行数 0（＝他 PC が先に削除した）のときも無効化する。
             // 古い職員一覧を返すと、競合を案内された利用者が一覧を確認しても
             // 削除済みの職員が並んだままになる。
@@ -222,13 +222,13 @@ WHERE staff_idm = @staffIdm AND is_deleted = 0";
         /// <inheritdoc/>
         public async Task<bool> RestoreAsync(string staffIdm)
         {
-            return await RestoreAsyncInternal(staffIdm, null);
+            return await RestoreAsyncInternal(staffIdm, null).ConfigureAwait(false);
         }
 
         /// <inheritdoc/>
         public async Task<bool> RestoreAsync(string staffIdm, SQLiteTransaction transaction)
         {
-            return await RestoreAsyncInternal(staffIdm, transaction);
+            return await RestoreAsyncInternal(staffIdm, transaction).ConfigureAwait(false);
         }
 
         /// <summary>
@@ -236,7 +236,7 @@ WHERE staff_idm = @staffIdm AND is_deleted = 0";
         /// </summary>
         private async Task<bool> RestoreAsyncInternal(string staffIdm, SQLiteTransaction? transaction)
         {
-            using var lease = await _dbContext.LeaseConnectionAsync();
+            using var lease = await _dbContext.LeaseConnectionAsync().ConfigureAwait(false);
             var connection = lease.Connection;
 
             using var command = connection.CreateCommand();
@@ -247,7 +247,7 @@ WHERE staff_idm = @staffIdm AND is_deleted = 1";
 
             command.Parameters.AddWithValue("@staffIdm", staffIdm);
 
-            var result = await command.ExecuteNonQueryAsync();
+            var result = await command.ExecuteNonQueryAsync().ConfigureAwait(false);
             if (transaction == null)
             {
                 // トランザクション外の場合のみキャッシュ無効化。
@@ -273,14 +273,14 @@ WHERE staff_idm = @staffIdm AND is_deleted = 1";
         /// <inheritdoc/>
         public async Task<bool> ExistsAsync(string staffIdm)
         {
-            using var lease = await _dbContext.LeaseConnectionAsync();
+            using var lease = await _dbContext.LeaseConnectionAsync().ConfigureAwait(false);
             var connection = lease.Connection;
 
             using var command = connection.CreateCommand();
             command.CommandText = "SELECT COUNT(1) FROM staff WHERE staff_idm = @staffIdm";
             command.Parameters.AddWithValue("@staffIdm", staffIdm);
 
-            var result = await command.ExecuteScalarAsync();
+            var result = await command.ExecuteScalarAsync().ConfigureAwait(false);
             return Convert.ToInt32(result) > 0;
         }
 

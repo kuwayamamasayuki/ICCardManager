@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Data;
 using System.Linq;
@@ -190,11 +190,6 @@ namespace ICCardManager.Data
         /// リストア中にバックグラウンドタスクが接続を再オープンすることを防止する。
         /// </summary>
         private volatile bool _isSuspended;
-
-        /// <summary>
-        /// ジッター生成用の乱数。thundering herd問題を防止するためリトライ待機に使用
-        /// </summary>
-        private static readonly Random _jitterRandom = new Random();
 
         /// <summary>
         /// Issue #1716: 進行中の疎通確認。上限時間で打ち切っても下位の呼び出しは中断できないため、
@@ -1274,7 +1269,7 @@ ON CONFLICT(key) DO UPDATE SET value = excluded.value";
                     (ex.ResultCode == SQLiteErrorCode.Busy || ex.ResultCode == SQLiteErrorCode.Locked))
                 {
                     var baseDelay = delays[attempt];
-                    var jitter = IsSharedMode ? _jitterRandom.Next(0, baseDelay / 2) : 0;
+                    var jitter = IsSharedMode ? RetryJitter.GetJitter(baseDelay) : 0;
                     var totalDelay = baseDelay + jitter;
 
                     _logger?.LogWarning(
@@ -1466,7 +1461,7 @@ ON CONFLICT(key) DO UPDATE SET value = excluded.value";
                 {
                     // 基本待機時間 + ジッター（0〜50%の追加遅延）で thundering herd を緩和
                     var baseDelay = delays[attempt];
-                    var jitter = IsSharedMode ? _jitterRandom.Next(0, baseDelay / 2) : 0;
+                    var jitter = IsSharedMode ? RetryJitter.GetJitter(baseDelay) : 0;
                     var totalDelay = baseDelay + jitter;
 
                     _logger?.LogWarning(
