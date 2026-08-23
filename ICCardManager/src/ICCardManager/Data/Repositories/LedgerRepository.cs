@@ -988,25 +988,36 @@ ORDER BY ym, staff";
             using var lease = await _dbContext.LeaseConnectionAsync().ConfigureAwait(false);
             var connection = lease.Connection;
 
-            // 「その（カード × 月）の最終稼働日」を相関サブクエリで特定し、その日の**全行**を取得する。
+            // 「その（カード × 月）の最終稼働日」を CTE の 1 回の GROUP BY で求め、その日の**全行**を JOIN で取得する。
             // 集約関数と同じ行の他列が返る SQLite 固有の bare column 仕様には依存しない。
             // 最終日の 1 行ではなく全行を取るのは、同一日内の順序を残高チェーンで確定するため（Issue #1770）。
             // 台帳は 6 年分保持されるため、全件を C# へ読み出さず「最終日の行だけ」に絞る（Issue #1692 の設計判断）。
+            //
+            // 相関サブクエリ（`strftime('%Y-%m', l2.date) = strftime('%Y-%m', l.date)`）で書くと、
+            // 両辺とも列に関数を掛けた比較でインデックスの探索キーにできず（非 sargable）、
+            // 外側の全行ごとにサブクエリが評価されて O(n × m) になる。
+            // 28,800 行（20 枚 × 36 か月）の実測で約 24.6 秒 → 約 0.3 秒（約 80 倍）。Issue #1834。
+            // 年月キーの導出に strftime を使うこと自体は問題なく、問題は「相関させて行ごとに評価させる」形。
+            // JOIN 条件に年月キー（ym）は不要 — 1 つの日付が属する月は 1 つだけなので
+            // `last_day.d = DATE(l.date)` が月の一致も含意する（ym は GROUP BY の粒度としてのみ必要）。
+            // 日付は ISO 8601 の TEXT（YYYY-MM-DD HH:MM:SS）で辞書順＝時系列順のため、
+            // 旧実装の DATE(MAX(date)) と MAX(DATE(date)) は同値。
             var lastDayLedgers = new List<Ledger>();
             using (var command = connection.CreateCommand())
             {
-                command.CommandText = @"SELECT l.id, l.card_idm, l.lender_idm, l.date, l.summary, l.income, l.expense, l.balance,
+                command.CommandText = @"WITH last_day AS (
+    SELECT card_idm AS c, strftime('%Y-%m', date) AS ym, MAX(DATE(date)) AS d
+    FROM ledger
+    WHERE date BETWEEN @fromDate AND @toDate
+      AND is_lent_record = 0
+    GROUP BY c, ym
+)
+SELECT l.id, l.card_idm, l.lender_idm, l.date, l.summary, l.income, l.expense, l.balance,
        l.staff_name, l.note, l.returner_idm, l.lent_at, l.returned_at, l.is_lent_record
 FROM ledger l
+JOIN last_day ON last_day.c = l.card_idm AND last_day.d = DATE(l.date)
 WHERE l.date BETWEEN @fromDate AND @toDate
   AND l.is_lent_record = 0
-  AND DATE(l.date) = (
-      SELECT DATE(MAX(l2.date)) FROM ledger l2
-      WHERE l2.card_idm = l.card_idm
-        AND l2.is_lent_record = 0
-        AND l2.date BETWEEN @fromDate AND @toDate
-        AND strftime('%Y-%m', l2.date) = strftime('%Y-%m', l.date)
-  )
 ORDER BY l.card_idm, l.date, l.id";
 
                 AddDateRangeParameters(command, fromDate, toDate);
