@@ -223,6 +223,28 @@ namespace ICCardManager.ViewModels
             // （登録済み等でダイアログを閉じる経路は Cleanup が回収する）。
             _messenger.Send(new CardReadingSuppressedMessage(true, CardReadingSource.StaffRegistration));
 
+            try
+            {
+                return await StartNewStaffWithIdmCoreAsync(idm);
+            }
+            catch
+            {
+                // Issue #1844: 例外で抜けると、登録モードにも「ダイアログを閉じる」経路にも到達しないため、
+                // 抑制を解放する CancelEdit / Cleanup のどちらも走らない。
+                // その間メイン画面は全カードタッチを無言で無視する（音も出ない）ため、
+                // 「取得したが登録モードへ入れなかった」ときは取得側で取り消す。
+                // 解放は HashSet からの除去であり、View 側（Loaded の catch → Close → Cleanup）と
+                // 二重に走っても副作用はない。
+                _messenger.Send(new CardReadingSuppressedMessage(false, CardReadingSource.StaffRegistration));
+                throw;
+            }
+        }
+
+        /// <summary>
+        /// <see cref="StartNewStaffWithIdmAsync"/> の本体（抑制の取得・取り消しは呼び出し元が担う）
+        /// </summary>
+        private async Task<bool> StartNewStaffWithIdmCoreAsync(string idm)
+        {
             // Issue #284対応: タッチ時点で削除済み職員チェックを行う
             var existing = await _staffRepository.GetByIdmAsync(idm, includeDeleted: true);
             if (existing != null)

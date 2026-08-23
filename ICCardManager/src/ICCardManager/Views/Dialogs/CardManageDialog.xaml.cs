@@ -65,7 +65,34 @@ namespace ICCardManager.Views.Dialogs
             }
             catch (Exception ex)
             {
-                ErrorDialogHelper.ShowError(ex, "初期化エラー");
+                // Issue #1844: 初期化に失敗したまま開いたままにすると、
+                // StartNewCardWithIdmAsync が入口で取得したカード読み取り抑制（#1807）と、
+                // メイン画面側の UnregisteredCardDialog 抑制（ShowDialog を囲む using スコープ）が
+                // どちらもダイアログを閉じるまで保持され、その間メイン画面は全カードタッチを無言で無視する。
+                // 復帰手段が「職員が自分でダイアログを閉じる」1つしかない状態を残さない（#1725）。
+                try
+                {
+                    // Issue #1614 / #1817: 生の ex.Message は出さず 3 要素の文言へ変換し、技術的詳細はログへ残す。
+                    // 復旧可能な通常エラーのため ShowError（致命エラー用の GetErrorInfo）は使わない。
+                    ErrorDialogHelper.LogException(ex, "交通系ICカード管理画面の初期化");
+                    // Issue #1794 / #1837: MessageBox を表示する 3 つの手段のうち、Window の
+                    // コードビハインドは自ウィンドウ（this）をオーナーに渡す形を使う。
+                    // OwnedMessageBox（DialogOwnerResolver）は「this を渡せない層」のための集約先で、
+                    // 解決に失敗すると ownerless へ退化する（このダイアログの背後が押せる状態が残る）。
+                    MessageBox.Show(
+                        this,
+                        ExceptionMessageFormatter.ToUserMessage(ex, "交通系ICカード管理画面の初期化") +
+                        "\n\n交通系ICカード管理画面を閉じます。復旧したら、もう一度開いてください。",
+                        "初期化エラー",
+                        MessageBoxButton.OK,
+                        MessageBoxImage.Error);
+                }
+                finally
+                {
+                    // Issue #1745: catch の中の後始末は、それ自体が失敗し得る。
+                    // 案内の表示が失敗しても、抑制の回収（Closed → Cleanup）は必ず行う。
+                    Close();
+                }
             }
         }
 
