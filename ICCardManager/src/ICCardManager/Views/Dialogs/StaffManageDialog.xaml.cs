@@ -68,7 +68,12 @@ namespace ICCardManager.Views.Dialogs
                     // Issue #1614 / #1817: 生の ex.Message は出さず 3 要素の文言へ変換し、技術的詳細はログへ残す。
                     // 復旧可能な通常エラーのため ShowError（致命エラー用の GetErrorInfo）は使わない。
                     ErrorDialogHelper.LogException(ex, "職員管理画面の初期化");
-                    OwnedMessageBox.Show(
+                    // Issue #1794 / #1837: MessageBox を表示する 3 つの手段のうち、Window の
+                    // コードビハインドは自ウィンドウ（this）をオーナーに渡す形を使う。
+                    // OwnedMessageBox（DialogOwnerResolver）は「this を渡せない層」のための集約先で、
+                    // 解決に失敗すると ownerless へ退化する（このダイアログの背後が押せる状態が残る）。
+                    MessageBox.Show(
+                        this,
                         ExceptionMessageFormatter.ToUserMessage(ex, "職員管理画面の初期化") +
                         "\n\n職員管理画面を閉じます。復旧したら、もう一度開いてください。",
                         "初期化エラー",

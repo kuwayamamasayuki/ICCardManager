@@ -26,7 +26,7 @@ namespace ICCardManager.Tests.Views.Dialogs;
 /// .claude/rules/development-conventions.md Issue #1725 が禁じた形そのものである。
 /// </para>
 /// <para>
-/// <c>Close()</c> は <c>catch</c> の中の <c>finally</c> に置く。案内の表示（<c>OwnedMessageBox</c>）
+/// <c>Close()</c> は <c>catch</c> の中の <c>finally</c> に置く。案内の表示（<c>MessageBox</c>）
 /// 自体が失敗し得るため、後始末をその後ろに置くと二次例外で飛ばされる
 /// （同 Issue #1745「catch の中の後始末は、それ自体が失敗し得ることを前提に書く」）。
 /// </para>
@@ -151,7 +151,7 @@ public class RegistrationDialogInitializationFailureConventionTests
             try { await _viewModel.InitializeAsync(); }
             catch (Exception ex)
             {
-                OwnedMessageBox.Show(ExceptionMessageFormatter.ToUserMessage(ex, ""初期化""));
+                MessageBox.Show(this, ExceptionMessageFormatter.ToUserMessage(ex, ""初期化""));
                 Close();
             }
         ";
@@ -166,7 +166,29 @@ public class RegistrationDialogInitializationFailureConventionTests
             try { await _viewModel.InitializeAsync(); }
             catch (Exception ex)
             {
-                try { OwnedMessageBox.Show(ExceptionMessageFormatter.ToUserMessage(ex, ""初期化"")); }
+                try { MessageBox.Show(this, ExceptionMessageFormatter.ToUserMessage(ex, ""初期化"")); }
+                finally { Close(); }
+            }
+        ";
+
+        HasGuaranteedCloseOnFailure(body).Should().BeTrue();
+    }
+
+    [Fact]
+    public void 検査ロジック_入れ子のcatchは判定対象にしないこと()
+    {
+        // 事前読み取りの失敗を意図的に無視する try/catch を足しても、
+        // メソッド直下の catch が要件を満たしていれば適合（正当な実装を塞がない）。
+        const string body = @"
+            try
+            {
+                try { preRead = await ReadBalanceAsync(); }
+                catch { }
+                await _viewModel.InitializeAsync();
+            }
+            catch (Exception ex)
+            {
+                try { MessageBox.Show(this, ExceptionMessageFormatter.ToUserMessage(ex, ""初期化"")); }
                 finally { Close(); }
             }
         ";
@@ -204,9 +226,17 @@ public class RegistrationDialogInitializationFailureConventionTests
     }
 
     /// <summary>
-    /// すべての <c>catch</c> ブロックが、内側の <c>finally</c> で <c>Close()</c> を呼んでいるか。
-    /// <c>catch</c> が 1 つも無い場合は false（初期化失敗を受け止めていない）。
+    /// メソッド直下（入れ子でない）の <c>catch</c> ブロックが、
+    /// 内側の <c>finally</c> で <c>Close()</c> を呼んでいるか。
+    /// 該当する <c>catch</c> が 1 つも無い場合は false（初期化失敗を受け止めていない）。
     /// </summary>
+    /// <remarks>
+    /// <b>判定対象はメソッド直下の <c>catch</c> に限る。</b>入れ子の <c>catch</c>
+    /// （例: 事前読み取りの失敗を意図的に無視する <c>try/catch</c>）まで対象にすると、
+    /// 正当な実装が違反として検出され、修正者を「その <c>catch</c> を消す」方向へ誘導する
+    /// （.claude/rules/development-conventions.md #1786 の「空振り検出を『各対象が非空であること』で
+    /// 書かない」と同じ、ガードが正当な変更を塞ぐ形）。
+    /// </remarks>
     internal static bool HasGuaranteedCloseOnFailure(string methodBody)
     {
         var catchBodies = ExtractCatchBodies(methodBody);
@@ -220,21 +250,27 @@ public class RegistrationDialogInitializationFailureConventionTests
     }
 
     private static IReadOnlyList<string> ExtractCatchBodies(string source) =>
-        ExtractKeywordBlocks(source, "catch", allowFilterParentheses: true);
+        ExtractKeywordBlocks(source, "catch", allowFilterParentheses: true, topLevelOnly: true);
 
     private static IReadOnlyList<string> ExtractFinallyBodies(string source) =>
-        ExtractKeywordBlocks(source, "finally", allowFilterParentheses: false);
+        ExtractKeywordBlocks(source, "finally", allowFilterParentheses: false, topLevelOnly: false);
 
     private static IReadOnlyList<string> ExtractKeywordBlocks(
         string source,
         string keyword,
-        bool allowFilterParentheses)
+        bool allowFilterParentheses,
+        bool topLevelOnly)
     {
         var results = new List<string>();
         var pattern = new Regex($@"(?<![A-Za-z0-9_]){keyword}(?![A-Za-z0-9_])");
 
         foreach (Match match in pattern.Matches(source))
         {
+            if (topLevelOnly && GetBraceDepthAt(source, match.Index) != 0)
+            {
+                continue;
+            }
+
             var index = match.Index + keyword.Length;
 
             // catch (Exception ex) when (...) のような括弧を読み飛ばす
@@ -266,6 +302,27 @@ public class RegistrationDialogInitializationFailureConventionTests
         }
 
         return results;
+    }
+
+    /// <summary>
+    /// <paramref name="index"/> 時点の波括弧の深さ（0 なら走査対象の直下）。
+    /// </summary>
+    private static int GetBraceDepthAt(string source, int index)
+    {
+        var depth = 0;
+        for (var i = 0; i < index && i < source.Length; i++)
+        {
+            if (source[i] == '{')
+            {
+                depth++;
+            }
+            else if (source[i] == '}')
+            {
+                depth--;
+            }
+        }
+
+        return depth;
     }
 
     private static int SkipParentheses(string source, int openIndex)
