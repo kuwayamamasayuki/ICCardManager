@@ -1,5 +1,6 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Text;
 using System.Text.RegularExpressions;
 
@@ -341,7 +342,16 @@ internal static class TestSourceInspection
     /// ソース全体を 1 パスで走査するためこの状態が起きない。
     /// </para>
     /// </remarks>
-    public static string ToCodeOnlyPreservingLines(string source)
+    /// <param name="source">対象のソーステキスト。</param>
+    /// <param name="preserveInterpolationHoles">
+    /// <c>true</c> のとき、補間文字列（<c>$"..."</c> / <c>$@"..."</c>）の<b>補間式（<c>{ }</c> の中身）だけ</b>を
+    /// 丸括弧で包んで残す（Issue #1852 のコードレビュー指摘）。既定の <c>false</c> では補間式も
+    /// リテラルの一部として捨てるため、<c>$"IDm={card.CardIdm}"</c> のように<b>補間式へ直接値を埋めた</b>
+    /// 形が検査を素通りする。値の露出を見張る検査（<c>IdmLoggingMaskConventionTests</c>）はこちらを使うこと。
+    /// 丸括弧で包むのは、補間式の中のカンマ（<c>{x,10}</c> の桁揃え等）が
+    /// <see cref="ExtractInvocationArguments"/> の引数分割を狂わせないようにするため。
+    /// </param>
+    public static string ToCodeOnlyPreservingLines(string source, bool preserveInterpolationHoles = false)
     {
         if (source == null)
         {
@@ -391,6 +401,8 @@ internal static class TestSourceInspection
             if (verbatimContentStart != null)
             {
                 // 逐語的文字列: "" が引用符のエスケープ。複数行にまたがるため改行は出力する
+                var verbatimIsInterpolated = normalized[i] == '$'
+                    || (i + 1 < normalized.Length && normalized[i + 1] == '$');
                 result.Append("@\"");
                 i = verbatimContentStart.Value;
                 while (i < normalized.Length)
@@ -404,6 +416,19 @@ internal static class TestSourceInspection
                         }
 
                         break;
+                    }
+
+                    if (preserveInterpolationHoles && verbatimIsInterpolated && normalized[i] == '{')
+                    {
+                        if (i + 1 < normalized.Length && normalized[i + 1] == '{')
+                        {
+                            // {{ は '{' のエスケープ（補間式ではない）
+                            i += 2;
+                            continue;
+                        }
+
+                        i = AppendInterpolationHole(normalized, i, result);
+                        continue;
                     }
 
                     if (normalized[i] == '\n')
@@ -429,13 +454,28 @@ internal static class TestSourceInspection
                     i++;
                 }
 
+                var isInterpolated = c == '$';
                 result.Append('"');
                 i++;
                 while (i < normalized.Length && normalized[i] != '"' && normalized[i] != '\n')
                 {
                     if (normalized[i] == '\\')
                     {
-                        i++;
+                        i += 2;
+                        continue;
+                    }
+
+                    if (preserveInterpolationHoles && isInterpolated && normalized[i] == '{')
+                    {
+                        if (i + 1 < normalized.Length && normalized[i + 1] == '{')
+                        {
+                            // {{ は '{' のエスケープ（補間式ではない）
+                            i += 2;
+                            continue;
+                        }
+
+                        i = AppendInterpolationHole(normalized, i, result);
+                        continue;
                     }
 
                     i++;
@@ -481,6 +521,51 @@ internal static class TestSourceInspection
         }
 
         return result.ToString();
+    }
+
+    /// <summary>
+    /// 補間文字列の補間式（<c>{ ... }</c>）の中身を丸括弧で包んで <paramref name="result"/> へ出力し、
+    /// 対応する <c>}</c> の次の位置を返す。
+    /// </summary>
+    /// <remarks>
+    /// 補間式の中身は<b>コードそのもの</b>であり、リテラルとして捨てると
+    /// <c>$"IDm={card.CardIdm}"</c> のような値の露出を検査が見逃す（Issue #1852）。
+    /// 丸括弧で包むのは、補間式の中のカンマ（<c>{x,10}</c> の桁揃え、<c>{Foo(a, b)}</c> 等）が
+    /// <see cref="ExtractInvocationArguments"/> の引数分割を狂わせないようにするため。
+    /// 改行はそのまま出力するので行番号は保たれる（逐語的補間文字列 <c>$@"..."</c> は行をまたぐ）。
+    /// </remarks>
+    private static int AppendInterpolationHole(string source, int openBraceIndex, StringBuilder result)
+    {
+        var i = openBraceIndex + 1;
+        var depth = 1;
+
+        result.Append('(');
+
+        while (i < source.Length && depth > 0)
+        {
+            var c = source[i];
+
+            if (c == '{')
+            {
+                depth++;
+            }
+            else if (c == '}')
+            {
+                depth--;
+                if (depth == 0)
+                {
+                    break;
+                }
+            }
+
+            result.Append(c);
+            i++;
+        }
+
+        result.Append(')');
+
+        // 対応する '}' の次へ（閉じていないなら末尾）
+        return i < source.Length ? i + 1 : source.Length;
     }
 
     /// <summary>
@@ -747,6 +832,104 @@ internal static class TestSourceInspection
         }
 
         return bodies;
+    }
+
+    /// <summary>
+    /// メソッド呼び出しの<b>引数リスト全体</b>を丸括弧の対応で切り出し、最上位のカンマで分割して返す。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Issue #1852 の <c>IdmLoggingMaskConventionTests</c> 用。ログ呼び出しの引数は
+    /// <b>複数行にまたがる</b>のが常であり（書式文字列と値の行が分かれる）、
+    /// 1 行単位の grep では引数を見られない。実際 PR #1851 の規約違反は
+    /// <c>LogWarning(</c> と IDm 引数が別行にあり、行単位の検査を素通りした。
+    /// </para>
+    /// <para>
+    /// 引数の区切りは丸括弧・角括弧・波括弧の深さが 0 のカンマだけを見る
+    /// （<c>Mask(a, b)</c> の内側のカンマで割らないため）。ジェネリック実引数の
+    /// <c>&lt; &gt;</c> は比較演算子と区別できないため深さに数えない —
+    /// <c>Foo&lt;A, B&gt;(x)</c> のような<b>引数の内側</b>にジェネリックを書く形は
+    /// 分割位置がずれるので、検査側でその形を想定しないこと。
+    /// </para>
+    /// </remarks>
+    /// <param name="codeOnlySource">
+    /// <see cref="ToCodeOnly"/> / <see cref="ToCodeOnlyPreservingLines"/> を通したソース。
+    /// 生のソースを渡すと文字列リテラル内の丸括弧・カンマが対応を狂わせる。
+    /// </param>
+    /// <param name="invocationPattern">
+    /// メソッド名までを照合する正規表現（丸括弧は含めない。例: <c>\.Log\w*</c>）。
+    /// </param>
+    /// <returns>照合位置（<paramref name="codeOnlySource"/> 上のオフセット）と引数の並び。</returns>
+    public static IReadOnlyList<(int Index, IReadOnlyList<string> Arguments)> ExtractInvocationArguments(
+        string codeOnlySource, Regex invocationPattern)
+    {
+        if (codeOnlySource == null)
+        {
+            throw new ArgumentNullException(nameof(codeOnlySource));
+        }
+
+        if (invocationPattern == null)
+        {
+            throw new ArgumentNullException(nameof(invocationPattern));
+        }
+
+        var results = new List<(int, IReadOnlyList<string>)>();
+
+        foreach (Match match in invocationPattern.Matches(codeOnlySource))
+        {
+            var i = match.Index + match.Length;
+            while (i < codeOnlySource.Length && char.IsWhiteSpace(codeOnlySource[i]))
+            {
+                i++;
+            }
+
+            if (i >= codeOnlySource.Length || codeOnlySource[i] != '(')
+            {
+                // 呼び出しではない（メソッドグループの参照など）
+                continue;
+            }
+
+            var depth = 0;
+            var argStart = i + 1;
+            var arguments = new List<string>();
+            var closed = false;
+
+            for (var j = i; j < codeOnlySource.Length; j++)
+            {
+                var c = codeOnlySource[j];
+
+                if (c == '(' || c == '[' || c == '{')
+                {
+                    depth++;
+                }
+                else if (c == ')' || c == ']' || c == '}')
+                {
+                    depth--;
+                    if (depth == 0)
+                    {
+                        arguments.Add(codeOnlySource.Substring(argStart, j - argStart));
+                        closed = true;
+                        break;
+                    }
+                }
+                else if (c == ',' && depth == 1)
+                {
+                    arguments.Add(codeOnlySource.Substring(argStart, j - argStart));
+                    argStart = j + 1;
+                }
+            }
+
+            if (!closed)
+            {
+                continue;
+            }
+
+            results.Add((
+                match.Index,
+                arguments.Select(a => a.Trim()).Where(a => a.Length > 0).ToList()));
+        }
+
+        return results;
     }
 
     /// <summary>
