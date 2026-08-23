@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -73,9 +73,12 @@ public class IdmLoggingMaskConventionTests
     /// この形で 11 件ある。呼び出し側の実引数は「型 名前」の 2 トークンにならないため、
     /// この除外で実際の違反を取りこぼすことはない
     /// （<c>ex</c> / <c>card.CardIdm</c> / <c>IdmMasker.Mask(idm)</c> のいずれも一致しない）。
+    /// 既定値付きの仮引数（<c>string cardIdm = null</c>）・属性付きの仮引数も同じ「定義」であり、
+    /// 除外しないと <b>準拠しているコードが違反として赤になる</b>（Issue #1852 のコードレビュー指摘）。
+    /// 呼び出しの実引数がこの形に一致することはない（名前付き引数は <c>=</c> ではなく <c>:</c>）。
     /// </remarks>
     private static readonly Regex ParameterDeclarationPattern = new(
-        @"^(?:(?:this|ref|out|in|params)\s+)?[A-Za-z0-9_.<>\[\],?]+\s+[A-Za-z_][A-Za-z0-9_]*$",
+        @"^(?:\[[^\]]*\]\s*)*(?:(?:this|ref|out|in|params)\s+)?[A-Za-z0-9_.<>\[\],?]+\s+[A-Za-z_][A-Za-z0-9_]*(?:\s*=\s*[^,]+)?$",
         RegexOptions.Compiled);
 
     /// <summary>
@@ -113,7 +116,9 @@ public class IdmLoggingMaskConventionTests
     /// </remarks>
     internal static IReadOnlyList<string> FindUnmaskedIdmLogArguments(string fileName, string source)
     {
-        var codeOnly = TestSourceInspection.ToCodeOnlyPreservingLines(source);
+        // 補間式（$"...{card.CardIdm}..."）の中身は残す。捨てると、値を書式文字列へ直接
+        // 埋め込んだ形が検査を素通りする（Issue #1852 のコードレビュー指摘）
+        var codeOnly = TestSourceInspection.ToCodeOnlyPreservingLines(source, preserveInterpolationHoles: true);
         var violations = new List<string>();
 
         foreach (var (index, arguments) in
@@ -212,8 +217,12 @@ public class IdmLoggingMaskConventionTests
         true)]
     // 違反: ログを包む自前ヘルパーへ生で渡す形
     [InlineData("LogCardOutcome(idm, result);", true)]
+    // 違反: 補間文字列の補間式へ生の IDm を埋め込む形
+    [InlineData("_logger.LogWarning($\"修復しました: {card.CardIdm}\");", true)]
     // 準拠: マスクを通している
     [InlineData("_logger.LogInformation(\"カード検出 IDm={Idm}\", IdmMasker.Mask(idm));", false)]
+    // 準拠: 補間文字列でもマスクを通している
+    [InlineData("_logger.LogInformation($\"カード検出 IDm={IdmMasker.Mask(idm)}\");", false)]
     // 準拠: 上流でマスク済みの変数
     [InlineData("_logger.LogInformation(\"IDm={Idm}\", maskedIdm);", false)]
     // 準拠: 書式文字列にだけ Idm が現れる（値は IDm ではない）
@@ -224,6 +233,8 @@ public class IdmLoggingMaskConventionTests
     [InlineData("Catalog(card.CardIdm);", false)]
     // 準拠: Log… で始まるメソッドの「定義」（呼び出しではない。OperationLogger の旧 API）
     [InlineData("public Task LogStaffInsertAsync(string? operatorIdm, Staff staff) => LogStaffInsertAsync(staff);", false)]
+    // 準拠: 既定値付きの仮引数を持つ「定義」（呼び出しではない）
+    [InlineData("private void LogTouch(string cardIdm = null, bool ok = false) { }", false)]
     public void 検出ロジックはサンプル入力で固定されていること(string snippet, bool expectedViolation)
     {
         // Act

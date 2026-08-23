@@ -73,7 +73,7 @@
 - Issue #1852 **貸出状態の整合性修復ログが交通系ICカードの IDm を生のまま出力していた**のを是正し、あわせて規約の**静的検査**を新設した（情報漏えい CWE-532。Issue #1704 の残課題）。`LendingService.RepairLentStatusConsistencyAsync`（Issue #790）は**起動時に毎回**実行され、共有モードでは他 PC の返却が反映されていない状態で不整合が起きやすい。ログ格納先 `C:\ProgramData\ICCardManager\Logs`（インストーラが `users-full` ACL を付与）は業務 PC 上の平文ファイルであり、IDm を生で残す例外を作る理由がない。
   - **対策**: 修復ログ 2 箇所（`is_lent: 0→1` / `1→0`）を `IdmMasker.Mask()` 経由へ変更した。既存の準拠箇所（`FelicaCardReader` 3 箇所・`LendingService` の貸出／返却エラー）と同じ形。
   - **再発防止**: 規約を守らせる検査が存在せず、PR #1851 で新規追加されたログも同じ違反を含んだまま全テストを通過していた（セキュリティレビューで検出）。`IdmLoggingMaskConventionTests` を新設し、`src/` 配下の全 `.cs` について `Log*` 呼び出しの**引数リスト全体**を丸括弧の対応で切り出して判定する（単一行の grep では検出できない — #1851 の違反は `LogWarning(` と IDm 引数が別行にあった）。引数の抽出は `TestSourceInspection.ExtractInvocationArguments` へ集約した。
-  - 検証: `IdmLoggingMaskConventionTests`（11件）・`LendingServiceRepairLoggingTests`（2件）を新設。07_テスト設計書 §1.1a（単体 5,432→5,445・合計 5,458→5,471 件）・§2 UT-099 を同期更新（#1852）
+  - 検証: `IdmLoggingMaskConventionTests`（14件）・`LendingServiceRepairLoggingTests`（2件）を新設。検査の前処理は**補間文字列の補間式の中身を残す**（`ToCodeOnlyPreservingLines(preserveInterpolationHoles: true)` を新設。リテラルごと捨てる初版は `$"…{card.CardIdm}"` の形を素通りさせていた）。`Log…` で始まるメソッドの**定義**は既定値付きの仮引数も除外する（規約を守っている定義で赤にしない）。07_テスト設計書 §1.1a（単体 5,432→5,448・合計 5,458→5,474 件）・§2 UT-099 を同期更新（#1852）
 
 **バグ修正**
 - Issue #1844 **未登録カード経由の登録ダイアログが初期化に失敗したとき、メイン画面のカード読み取り抑制を回収するようにした**（Issue #1807 / PR #1841 の残課題）。未登録カード → 種別選択 → 登録ダイアログの経路は、入口（`StartNewStaffWithIdmAsync` / `StartNewCardWithIdmAsync`）でカード読み取り抑制を取得する。その直後の `GetByIdmAsync` が共有フォルダーの一時断・DB のロックで失敗すると、`Loaded` の `catch` はエラーを表示するだけでダイアログは開いたまま残り、**抑制は職員が自分でダイアログを閉じるまで保持された**。その間メイン画面は全カードタッチを無言で無視する（音も出ない）ため、職員には「カードリーダーが壊れた」ようにしか見えない。

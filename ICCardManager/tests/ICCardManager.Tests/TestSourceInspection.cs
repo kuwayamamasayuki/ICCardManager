@@ -342,7 +342,16 @@ internal static class TestSourceInspection
     /// ソース全体を 1 パスで走査するためこの状態が起きない。
     /// </para>
     /// </remarks>
-    public static string ToCodeOnlyPreservingLines(string source)
+    /// <param name="source">対象のソーステキスト。</param>
+    /// <param name="preserveInterpolationHoles">
+    /// <c>true</c> のとき、補間文字列（<c>$"..."</c> / <c>$@"..."</c>）の<b>補間式（<c>{ }</c> の中身）だけ</b>を
+    /// 丸括弧で包んで残す（Issue #1852 のコードレビュー指摘）。既定の <c>false</c> では補間式も
+    /// リテラルの一部として捨てるため、<c>$"IDm={card.CardIdm}"</c> のように<b>補間式へ直接値を埋めた</b>
+    /// 形が検査を素通りする。値の露出を見張る検査（<c>IdmLoggingMaskConventionTests</c>）はこちらを使うこと。
+    /// 丸括弧で包むのは、補間式の中のカンマ（<c>{x,10}</c> の桁揃え等）が
+    /// <see cref="ExtractInvocationArguments"/> の引数分割を狂わせないようにするため。
+    /// </param>
+    public static string ToCodeOnlyPreservingLines(string source, bool preserveInterpolationHoles = false)
     {
         if (source == null)
         {
@@ -392,6 +401,8 @@ internal static class TestSourceInspection
             if (verbatimContentStart != null)
             {
                 // 逐語的文字列: "" が引用符のエスケープ。複数行にまたがるため改行は出力する
+                var verbatimIsInterpolated = normalized[i] == '$'
+                    || (i + 1 < normalized.Length && normalized[i + 1] == '$');
                 result.Append("@\"");
                 i = verbatimContentStart.Value;
                 while (i < normalized.Length)
@@ -405,6 +416,19 @@ internal static class TestSourceInspection
                         }
 
                         break;
+                    }
+
+                    if (preserveInterpolationHoles && verbatimIsInterpolated && normalized[i] == '{')
+                    {
+                        if (i + 1 < normalized.Length && normalized[i + 1] == '{')
+                        {
+                            // {{ は '{' のエスケープ（補間式ではない）
+                            i += 2;
+                            continue;
+                        }
+
+                        i = AppendInterpolationHole(normalized, i, result);
+                        continue;
                     }
 
                     if (normalized[i] == '\n')
@@ -430,13 +454,28 @@ internal static class TestSourceInspection
                     i++;
                 }
 
+                var isInterpolated = c == '$';
                 result.Append('"');
                 i++;
                 while (i < normalized.Length && normalized[i] != '"' && normalized[i] != '\n')
                 {
                     if (normalized[i] == '\\')
                     {
-                        i++;
+                        i += 2;
+                        continue;
+                    }
+
+                    if (preserveInterpolationHoles && isInterpolated && normalized[i] == '{')
+                    {
+                        if (i + 1 < normalized.Length && normalized[i + 1] == '{')
+                        {
+                            // {{ は '{' のエスケープ（補間式ではない）
+                            i += 2;
+                            continue;
+                        }
+
+                        i = AppendInterpolationHole(normalized, i, result);
+                        continue;
                     }
 
                     i++;
@@ -482,6 +521,51 @@ internal static class TestSourceInspection
         }
 
         return result.ToString();
+    }
+
+    /// <summary>
+    /// 補間文字列の補間式（<c>{ ... }</c>）の中身を丸括弧で包んで <paramref name="result"/> へ出力し、
+    /// 対応する <c>}</c> の次の位置を返す。
+    /// </summary>
+    /// <remarks>
+    /// 補間式の中身は<b>コードそのもの</b>であり、リテラルとして捨てると
+    /// <c>$"IDm={card.CardIdm}"</c> のような値の露出を検査が見逃す（Issue #1852）。
+    /// 丸括弧で包むのは、補間式の中のカンマ（<c>{x,10}</c> の桁揃え、<c>{Foo(a, b)}</c> 等）が
+    /// <see cref="ExtractInvocationArguments"/> の引数分割を狂わせないようにするため。
+    /// 改行はそのまま出力するので行番号は保たれる（逐語的補間文字列 <c>$@"..."</c> は行をまたぐ）。
+    /// </remarks>
+    private static int AppendInterpolationHole(string source, int openBraceIndex, StringBuilder result)
+    {
+        var i = openBraceIndex + 1;
+        var depth = 1;
+
+        result.Append('(');
+
+        while (i < source.Length && depth > 0)
+        {
+            var c = source[i];
+
+            if (c == '{')
+            {
+                depth++;
+            }
+            else if (c == '}')
+            {
+                depth--;
+                if (depth == 0)
+                {
+                    break;
+                }
+            }
+
+            result.Append(c);
+            i++;
+        }
+
+        result.Append(')');
+
+        // 対応する '}' の次へ（閉じていないなら末尾）
+        return i < source.Length ? i + 1 : source.Length;
     }
 
     /// <summary>
