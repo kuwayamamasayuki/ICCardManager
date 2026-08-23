@@ -13,6 +13,7 @@ using ICCardManager.Common.Messages;
 using ICCardManager.Data.Repositories;
 using ICCardManager.Dtos;
 using ICCardManager.Infrastructure.CardReader;
+using ICCardManager.Infrastructure.Timing;
 using ICCardManager.Models;
 using ICCardManager.Services;
 
@@ -30,6 +31,12 @@ namespace ICCardManager.ViewModels
         private readonly IDialogService _dialogService;
         private readonly IStaffAuthService _staffAuthService;
         private readonly IMessenger _messenger;
+        /// <summary>
+        /// UI スレッドへのディスパッチ。Issue #1843: 生の <c>Dispatcher.InvokeAsync</c> は
+        /// <c>DispatcherOperation&lt;Task&gt;</c> を返すため内側の <c>Task</c> の例外を観測できない。
+        /// この実装（<c>WpfDispatcherService</c>）は <c>Unwrap()</c> して観測しログへ残す（Issue #1725）。
+        /// </summary>
+        private readonly IDispatcherService _dispatcherService;
 
         [ObservableProperty]
         private ObservableCollection<StaffDto> _staffList = new();
@@ -104,7 +111,8 @@ namespace ICCardManager.ViewModels
             OperationLogger operationLogger,
             IDialogService dialogService,
             IStaffAuthService staffAuthService,
-            IMessenger messenger)
+            IMessenger messenger,
+            IDispatcherService dispatcherService)
         {
             _staffRepository = staffRepository;
             _cardReader = cardReader;
@@ -113,6 +121,7 @@ namespace ICCardManager.ViewModels
             _dialogService = dialogService;
             _staffAuthService = staffAuthService;
             _messenger = messenger;
+            _dispatcherService = dispatcherService;
 
             // カード読み取りイベント
             _cardReader.CardRead += OnCardRead;
@@ -702,7 +711,12 @@ namespace ICCardManager.ViewModels
             if (!IsWaitingForCard) return;
 
             // UIスレッドで非同期実行（登録済みチェックを即座に行うため）
-            System.Windows.Application.Current.Dispatcher.InvokeAsync(() => HandleCardReadAsync(e.Idm));
+            // Issue #1843: 生の Dispatcher.InvokeAsync は DispatcherOperation<Task> を返すため、
+            // 戻り値を await しても内側の Task の例外は観測されない（Unwrap() が要る。Issue #1725）。
+            // IDispatcherService 経由なら Unwrap 済みの Task が観測され、失敗はログへ残る。
+            // 本体（HandleCardReadAsync）の try/catch は受け皿として残すが、catch ブロック自身が
+            // 失敗し得る（#1745）ため、ディスパッチ側の観測と二重に守る。
+            _dispatcherService.InvokeAsync(() => HandleCardReadAsync(e.Idm));
         }
 
         /// <summary>
@@ -713,10 +727,14 @@ namespace ICCardManager.ViewModels
         /// テストから直接呼べるよう分離している（Issue #1807）。
         /// <para>
         /// <b>本体全体を try/catch で包む</b>（Issue #1816）。<see cref="OnCardRead"/> は
-        /// <c>Dispatcher.InvokeAsync</c> の戻り値を破棄する fire-and-forget であり、
-        /// ここで例外が抜けると <see cref="EditStaffIdm"/> と <c>IsWaitingForCard = false</c> だけが
-        /// 確定した「読み取れたように見える」状態で止まる（Issue #1725 / #1742）。
+        /// 戻り値を待たない fire-and-forget であり、ここで例外が抜けると
+        /// <see cref="EditStaffIdm"/> と <c>IsWaitingForCard = false</c> だけが確定した
+        /// 「読み取れたように見える」状態で止まる。
         /// 失敗時はタッチ待ちへ戻し、確認の済んでいない IDm をフォームに残さない。
+        /// なお Issue #1843 以降、ディスパッチは <c>IDispatcherService</c> 経由となり、
+        /// ここを抜けた例外も呼び出し側（<c>WpfDispatcherService</c>）が観測してログへ残す
+        /// （生の <c>Dispatcher.InvokeAsync</c> の頃は GC 契機の
+        /// <c>TaskScheduler.UnobservedTaskException</c> まで遅れていた。Issue #1725 / #1742）。
         /// </para>
         /// </remarks>
         internal async Task HandleCardReadAsync(string idm)

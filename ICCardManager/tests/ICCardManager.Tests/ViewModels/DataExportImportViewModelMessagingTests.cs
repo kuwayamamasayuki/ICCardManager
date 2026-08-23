@@ -42,6 +42,12 @@ public class DataExportImportViewModelMessagingTests : IDisposable
     private readonly WeakReferenceMessenger _messenger;
     private readonly List<CardReadingSuppressedMessage> _receivedMessages = new();
     private readonly object _recipient = new();
+    /// <summary>
+    /// Issue #1843: OnCardRead は fire-and-forget でディスパッチするため、例外を観測するのは
+    /// 呼び出し元（IDispatcherService）の責務。本番の WpfDispatcherService と同じく
+    /// 「記録して再スローしない」代役を使う。
+    /// </summary>
+    private readonly ICCardManager.Tests.Infrastructure.Timing.RecordingDispatcherService _dispatcher = new();
     private readonly DataExportImportViewModel _viewModel;
 
     public DataExportImportViewModelMessagingTests()
@@ -92,6 +98,7 @@ public class DataExportImportViewModelMessagingTests : IDisposable
             operationLogger,
             _messenger,
             new Mock<ICCardManager.Services.ISafeFileLauncher>().Object,
+            _dispatcher,
             _cardReaderMock.Object);
     }
 
@@ -253,4 +260,74 @@ public class DataExportImportViewModelMessagingTests : IDisposable
         _receivedMessages[1].Value.Should().BeFalse();
         _receivedMessages[1].Source.Should().Be(CardReadingSource.DataImport);
     }
+
+    #region Issue #1843: 読み取りのディスパッチ自体が例外を観測すること
+
+    /// <summary>
+    /// カード読み取りイベントが IDispatcherService 経由でディスパッチされ、
+    /// 本体の catch 自体が失敗しても例外が観測される（無言で失われない）こと
+    /// </summary>
+    /// <remarks>
+    /// Issue #1843: 生の <c>Application.Current.Dispatcher.InvokeAsync</c> は
+    /// <c>DispatcherOperation&lt;Task&gt;</c> を返すため、await しても内側の Task の例外は
+    /// 観測されない（<c>Unwrap()</c> が要る。Issue #1725）。Issue #1816 の「本体全体を try/catch」は
+    /// 受け皿としては正しいが、catch ブロック自身が投げれば再び無言になる（#1745）。
+    /// </remarks>
+    [Fact]
+    public void OnCardRead_本体のcatchが失敗しても_ディスパッチャが例外を観測すること()
+    {
+        // Arrange
+        var idm = "0102030405060708";
+        _cardRepositoryMock.Setup(r => r.GetByIdmAsync(idm, false))
+            .ThrowsAsync(new InvalidOperationException("database is locked"));
+        _viewModel.IsWaitingForCardTouch = true;
+
+        // catch ブロック末尾の IsStatusError = true で例外が出る状況を作る
+        // （バインディング側の失敗に相当。catch の中の後始末は、それ自体が失敗し得る＝#1745）
+        _viewModel.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName == nameof(DataExportImportViewModel.IsStatusError) && _viewModel.IsStatusError)
+            {
+                throw new InvalidOperationException("binding failure");
+            }
+        };
+
+        // Act
+        _cardReaderMock.Raise(r => r.CardRead += null, new CardReadEventArgs { Idm = idm });
+
+        // Assert
+        _dispatcher.InvokeAsyncFuncCallCount.Should().Be(
+            1, "OnCardRead は IDispatcherService 経由でディスパッチすること（生の Dispatcher を使わない）");
+        _dispatcher.ObservedExceptions.Should().ContainSingle(
+            "本体の catch が失敗しても、ディスパッチした側が例外を観測すること")
+            .Which.Message.Should().Be("binding failure");
+    }
+
+    /// <summary>
+    /// 正常な読み取りではディスパッチャが例外を観測しないこと（対のテスト）
+    /// </summary>
+    [Fact]
+    public void OnCardRead_正常な読み取り_例外を観測せずIDmを反映すること()
+    {
+        // Arrange
+        var idm = "0102030405060708";
+        _cardRepositoryMock.Setup(r => r.GetByIdmAsync(idm, false))
+            .ReturnsAsync(new ICCardManager.Models.IcCard
+            {
+                CardIdm = idm,
+                CardType = "はやかけん",
+                CardNumber = "H-001"
+            });
+        _viewModel.IsWaitingForCardTouch = true;
+
+        // Act
+        _cardReaderMock.Raise(r => r.CardRead += null, new CardReadEventArgs { Idm = idm });
+
+        // Assert
+        _dispatcher.ObservedExceptions.Should().BeEmpty();
+        _viewModel.TouchedCardIdm.Should().Be(idm);
+        _viewModel.IsWaitingForCardTouch.Should().BeFalse();
+    }
+
+    #endregion
 }
