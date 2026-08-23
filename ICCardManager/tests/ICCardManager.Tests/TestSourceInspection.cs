@@ -1,5 +1,6 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Text;
 using System.Text.RegularExpressions;
 
@@ -747,6 +748,104 @@ internal static class TestSourceInspection
         }
 
         return bodies;
+    }
+
+    /// <summary>
+    /// メソッド呼び出しの<b>引数リスト全体</b>を丸括弧の対応で切り出し、最上位のカンマで分割して返す。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Issue #1852 の <c>IdmLoggingMaskConventionTests</c> 用。ログ呼び出しの引数は
+    /// <b>複数行にまたがる</b>のが常であり（書式文字列と値の行が分かれる）、
+    /// 1 行単位の grep では引数を見られない。実際 PR #1851 の規約違反は
+    /// <c>LogWarning(</c> と IDm 引数が別行にあり、行単位の検査を素通りした。
+    /// </para>
+    /// <para>
+    /// 引数の区切りは丸括弧・角括弧・波括弧の深さが 0 のカンマだけを見る
+    /// （<c>Mask(a, b)</c> の内側のカンマで割らないため）。ジェネリック実引数の
+    /// <c>&lt; &gt;</c> は比較演算子と区別できないため深さに数えない —
+    /// <c>Foo&lt;A, B&gt;(x)</c> のような<b>引数の内側</b>にジェネリックを書く形は
+    /// 分割位置がずれるので、検査側でその形を想定しないこと。
+    /// </para>
+    /// </remarks>
+    /// <param name="codeOnlySource">
+    /// <see cref="ToCodeOnly"/> / <see cref="ToCodeOnlyPreservingLines"/> を通したソース。
+    /// 生のソースを渡すと文字列リテラル内の丸括弧・カンマが対応を狂わせる。
+    /// </param>
+    /// <param name="invocationPattern">
+    /// メソッド名までを照合する正規表現（丸括弧は含めない。例: <c>\.Log\w*</c>）。
+    /// </param>
+    /// <returns>照合位置（<paramref name="codeOnlySource"/> 上のオフセット）と引数の並び。</returns>
+    public static IReadOnlyList<(int Index, IReadOnlyList<string> Arguments)> ExtractInvocationArguments(
+        string codeOnlySource, Regex invocationPattern)
+    {
+        if (codeOnlySource == null)
+        {
+            throw new ArgumentNullException(nameof(codeOnlySource));
+        }
+
+        if (invocationPattern == null)
+        {
+            throw new ArgumentNullException(nameof(invocationPattern));
+        }
+
+        var results = new List<(int, IReadOnlyList<string>)>();
+
+        foreach (Match match in invocationPattern.Matches(codeOnlySource))
+        {
+            var i = match.Index + match.Length;
+            while (i < codeOnlySource.Length && char.IsWhiteSpace(codeOnlySource[i]))
+            {
+                i++;
+            }
+
+            if (i >= codeOnlySource.Length || codeOnlySource[i] != '(')
+            {
+                // 呼び出しではない（メソッドグループの参照など）
+                continue;
+            }
+
+            var depth = 0;
+            var argStart = i + 1;
+            var arguments = new List<string>();
+            var closed = false;
+
+            for (var j = i; j < codeOnlySource.Length; j++)
+            {
+                var c = codeOnlySource[j];
+
+                if (c == '(' || c == '[' || c == '{')
+                {
+                    depth++;
+                }
+                else if (c == ')' || c == ']' || c == '}')
+                {
+                    depth--;
+                    if (depth == 0)
+                    {
+                        arguments.Add(codeOnlySource.Substring(argStart, j - argStart));
+                        closed = true;
+                        break;
+                    }
+                }
+                else if (c == ',' && depth == 1)
+                {
+                    arguments.Add(codeOnlySource.Substring(argStart, j - argStart));
+                    argStart = j + 1;
+                }
+            }
+
+            if (!closed)
+            {
+                continue;
+            }
+
+            results.Add((
+                match.Index,
+                arguments.Select(a => a.Trim()).Where(a => a.Length > 0).ToList()));
+        }
+
+        return results;
     }
 
     /// <summary>

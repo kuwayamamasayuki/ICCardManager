@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Data.SQLite;
 using System.Linq;
@@ -308,7 +308,7 @@ namespace ICCardManager.Services
                                 card.CardIdm, true, lentRecord.LentAt, lentRecord.LenderIdm).ConfigureAwait(false);
                             _logger.LogWarning(
                                 "Issue #790: 貸出状態の不整合を修復しました（is_lent: 0→1）: CardIdm={CardIdm}, LentAt={LentAt}",
-                                card.CardIdm, lentRecord.LentAt);
+                                IdmMasker.Mask(card.CardIdm), lentRecord.LentAt);
                             repairCount++;
                         }
                         else if (!hasLentRecord && card.IsLent)
@@ -318,7 +318,7 @@ namespace ICCardManager.Services
                                 card.CardIdm, false, null, null).ConfigureAwait(false);
                             _logger.LogWarning(
                                 "Issue #790: 貸出状態の不整合を修復しました（is_lent: 1→0）: CardIdm={CardIdm}",
-                                card.CardIdm);
+                                IdmMasker.Mask(card.CardIdm));
                             repairCount++;
                         }
                     }

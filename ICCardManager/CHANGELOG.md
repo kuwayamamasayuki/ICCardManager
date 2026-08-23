@@ -69,6 +69,12 @@
   - 検証: `OperationLogDisplayNamesTests`（24件）・`OperationLogDialogColumnWidthLayoutTests`（12件）を新設、`OperationLogSearchViewModelTests` +11件、`OperationLogExcelExportServiceTests` は重複 Theory の統合で −4件（+43）。`OperationLogger.Actions` / `Tables` の**全定数が表示名を持つことを定数リフレクション走査で固定**する（定数クラスのため `Enum.GetValues` の代わりに `FieldInfo.IsLiteral` で走査）。空振り検出は**本番の実件数ではなくテスト内の既知サンプル**を走査する形にした（実件数のピン留めは、種別を正しく追加しただけで無関係な赤が出て修正者を期待値の機械的な書き換えへ誘導するため。#1786 の方針）。xlsx への書き出し E2E は**テストデータを SSOT から導出**し、種別追加に自動追随させる（初版は6種別のリテラル列挙で、`GetActionColor` が null を返す唯一の経路である IMPORT/EXPORT/BACKUP が一度も `WriteDataRow` を通っていなかった）。XAML 静的検証の**検出力は XAML を一時的に壊して3件が赤くなることを実測**して確認した。
   - 03_画面設計書 §3.13／04_機能設計書 §10.2・§10.3／05_クラス設計書 §3.3／07_テスト設計書 §1.1a（単体 4,637→4,680・合計 4,663→4,706 件）・§2.25 UT-033c／管理者マニュアル §8.3 を同期更新（#1787）
 
+**セキュリティ**
+- Issue #1852 **貸出状態の整合性修復ログが交通系ICカードの IDm を生のまま出力していた**のを是正し、あわせて規約の**静的検査**を新設した（情報漏えい CWE-532。Issue #1704 の残課題）。`LendingService.RepairLentStatusConsistencyAsync`（Issue #790）は**起動時に毎回**実行され、共有モードでは他 PC の返却が反映されていない状態で不整合が起きやすい。ログ格納先 `C:\ProgramData\ICCardManager\Logs`（インストーラが `users-full` ACL を付与）は業務 PC 上の平文ファイルであり、IDm を生で残す例外を作る理由がない。
+  - **対策**: 修復ログ 2 箇所（`is_lent: 0→1` / `1→0`）を `IdmMasker.Mask()` 経由へ変更した。既存の準拠箇所（`FelicaCardReader` 3 箇所・`LendingService` の貸出／返却エラー）と同じ形。
+  - **再発防止**: 規約を守らせる検査が存在せず、PR #1851 で新規追加されたログも同じ違反を含んだまま全テストを通過していた（セキュリティレビューで検出）。`IdmLoggingMaskConventionTests` を新設し、`src/` 配下の全 `.cs` について `Log*` 呼び出しの**引数リスト全体**を丸括弧の対応で切り出して判定する（単一行の grep では検出できない — #1851 の違反は `LogWarning(` と IDm 引数が別行にあった）。引数の抽出は `TestSourceInspection.ExtractInvocationArguments` へ集約した。
+  - 検証: `IdmLoggingMaskConventionTests`（11件）・`LendingServiceRepairLoggingTests`（2件）を新設。07_テスト設計書 §1.1a（単体 5,432→5,445・合計 5,458→5,471 件）・§2 UT-099 を同期更新（#1852）
+
 **バグ修正**
 - Issue #1844 **未登録カード経由の登録ダイアログが初期化に失敗したとき、メイン画面のカード読み取り抑制を回収するようにした**（Issue #1807 / PR #1841 の残課題）。未登録カード → 種別選択 → 登録ダイアログの経路は、入口（`StartNewStaffWithIdmAsync` / `StartNewCardWithIdmAsync`）でカード読み取り抑制を取得する。その直後の `GetByIdmAsync` が共有フォルダーの一時断・DB のロックで失敗すると、`Loaded` の `catch` はエラーを表示するだけでダイアログは開いたまま残り、**抑制は職員が自分でダイアログを閉じるまで保持された**。その間メイン画面は全カードタッチを無言で無視する（音も出ない）ため、職員には「カードリーダーが壊れた」ようにしか見えない。
   - **復帰手段が 1 つしかない状態を残さない**（Issue #1725）。解放を担う `CancelEdit` / `Cleanup` はいずれも「登録モードに入った」「ダイアログを閉じた」ことを前提にしており、その手前で例外が抜けるとどちらも走らない。
