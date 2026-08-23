@@ -973,7 +973,9 @@ namespace ICCardManager.Data
                 }
                 catch
                 {
-                    transaction.Rollback();
+                    // Issue #1831: 素の Rollback() を呼ばない（詳細は SafeRollback の XML doc）
+                    SafeRollback.TryRollback(
+                        () => transaction.Rollback(), _logger, "既存データベースの移行");
                     throw;
                 }
             }
@@ -1323,7 +1325,8 @@ ON CONFLICT(key) DO UPDATE SET value = excluded.value";
             catch
             {
                 // Issue #1170: 片方が失敗したら両方ロールバックして整合性を維持
-                try { transaction.Rollback(); } catch { /* ロールバック失敗は無視 */ }
+                // Issue #1831: 巻き戻しの手段は SafeRollback へ寄せる
+                SafeRollback.TryRollback(() => transaction.Rollback(), _logger, "古いデータの削除");
                 throw;
             }
         }

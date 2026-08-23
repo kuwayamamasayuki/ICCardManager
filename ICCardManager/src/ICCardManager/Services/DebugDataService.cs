@@ -95,7 +95,10 @@ namespace ICCardManager.Services
             }
             catch
             {
-                scope.Rollback();
+                // Issue #1831: 素の Rollback() を呼ばない（詳細は SafeRollback の XML doc）。
+                // DEBUG ビルド専用の経路だが、手段を 1 つに寄せる（例外の型が変わると
+                // 上位の分岐が外れるという性質はビルド構成に依存しない）
+                SafeRollback.TryRollback(() => scope.Rollback(), logger: null, "テストデータの一括登録");
                 throw;
             }
         }

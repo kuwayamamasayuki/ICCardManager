@@ -4,6 +4,7 @@ using System.Linq;
 using System.Threading.Tasks;
 using System.Reflection;
 using System.Data.SQLite;
+using ICCardManager.Common;
 
 namespace ICCardManager.Data.Migrations
 {
@@ -241,7 +242,12 @@ namespace ICCardManager.Data.Migrations
 #if DEBUG
                 System.Diagnostics.Debug.WriteLine($"[Migration] Failed to apply migration {migration.Version}: {ex.Message}");
 #endif
-                transaction.Rollback();
+                // Issue #1831: 素の Rollback() を呼ばない。二次例外で抜けると、この後の
+                // 失敗ログ（migration_history）も MigrationException へのラップも実行されず、
+                // 起動できない原因を追う手掛かりが残らない（詳細は SafeRollback の XML doc）
+                SafeRollback.TryRollback(
+                    () => transaction.Rollback(), logger: null,
+                    $"マイグレーション {migration.Version} の適用");
 
                 // 失敗ログを記録
                 LogMigrationAction("MIGRATION_UP", migration, success: false, ex.Message);
@@ -281,7 +287,10 @@ namespace ICCardManager.Data.Migrations
 #if DEBUG
                 System.Diagnostics.Debug.WriteLine($"[Migration] Failed to rollback migration {migration.Version}: {ex.Message}");
 #endif
-                transaction.Rollback();
+                // Issue #1831: 素の Rollback() を呼ばない（詳細は SafeRollback の XML doc）
+                SafeRollback.TryRollback(
+                    () => transaction.Rollback(), logger: null,
+                    $"マイグレーション {migration.Version} の取り消し");
 
                 // 失敗ログを記録
                 LogMigrationAction("MIGRATION_DOWN", migration, success: false, ex.Message);
