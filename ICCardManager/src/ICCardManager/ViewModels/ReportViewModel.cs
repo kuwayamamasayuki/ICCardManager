@@ -667,24 +667,22 @@ public partial class ReportViewModel : ViewModelBase
                 ? string.Join("\n", existingFiles.Select(f => $"・{f}"))
                 : string.Join("\n", existingFiles.Take(5).Select(f => $"・{f}")) + $"\n・...他 {existingFiles.Count - 5} 件";
 
-            var result = MessageBox.Show(
+            var result = _navigationService.ShowThreeWayConfirmation(
                 $"以下のファイルが既に存在します:\n\n{fileList}\n\n" +
                 $"{SelectedMonth}月のシートを更新しますか？\n" +
                 $"（他の月のシートは変更されません）\n\n" +
                 "「はい」: 更新する\n" +
                 "「いいえ」: 別名で保存する（日時を付加）\n" +
                 "「キャンセル」: 中止する",
-                "ファイル更新確認",
-                MessageBoxButton.YesNoCancel,
-                MessageBoxImage.Question);
+                "ファイル更新確認");
 
-            if (result == MessageBoxResult.Cancel)
+            if (result == null)
             {
                 SetStatus("帳票作成をキャンセルしました", false);
                 return;
             }
 
-            useAlternativeNames = (result == MessageBoxResult.No);
+            useAlternativeNames = (result == false);
         }
 
         CreatedFiles.Clear();
@@ -742,11 +740,9 @@ public partial class ReportViewModel : ViewModelBase
                         // 全面オーバーレイと「帳票を作成中...」の進捗バーがダイアログの背後で回り続ける。
                         using (SuspendBusy())
                         {
-                            MessageBox.Show(
+                            _navigationService.ShowError(
                                 result.DetailedErrorMessage ?? result.ErrorMessage,
-                                "テンプレートエラー",
-                                MessageBoxButton.OK,
-                                MessageBoxImage.Error);
+                                "テンプレートエラー");
                         }
                         SetStatus("テンプレートエラーにより中断しました", true);
                         return;
@@ -772,11 +768,9 @@ public partial class ReportViewModel : ViewModelBase
                     // Issue #1793: 上と同じく using 宣言形の処理中スコープの内側。
                     using (SuspendBusy())
                     {
-                        MessageBox.Show(
+                        _navigationService.ShowWarning(
                             $"以下のカードで帳票作成に失敗しました:\n\n{failedMessage}",
-                            "帳票作成エラー",
-                            MessageBoxButton.OK,
-                            MessageBoxImage.Warning);
+                            "帳票作成エラー");
                     }
                 }
             }

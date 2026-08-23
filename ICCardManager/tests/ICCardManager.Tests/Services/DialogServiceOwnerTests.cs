@@ -119,9 +119,10 @@ public class DialogServiceOwnerTests
                 sut.ShowError("エラー", "エラータイトル");
                 sut.ShowConfirmation("確認", "確認タイトル");
                 sut.ShowWarningConfirmation("警告確認", "警告確認タイトル");
+                sut.ShowThreeWayConfirmation("3 択確認", "3 択確認タイトル");
 
-                sut.Calls.Should().HaveCount(5, "5 つのメッセージ表示メソッドすべてが継ぎ目を経由すること");
-                sut.ResolveOwnerCallCount.Should().Be(5, "表示のたびにオーナーを解決し直すこと（アクティブなウィンドウは変わり得る）");
+                sut.Calls.Should().HaveCount(6, "6 つのメッセージ表示メソッドすべてが継ぎ目を経由すること");
+                sut.ResolveOwnerCallCount.Should().Be(6, "表示のたびにオーナーを解決し直すこと（アクティブなウィンドウは変わり得る）");
                 sut.Calls.Should().OnlyContain(c => ReferenceEquals(c.Owner, owner),
                     "解決したオーナーがそのまま MessageBox へ渡ること");
             }
@@ -140,6 +141,7 @@ public class DialogServiceOwnerTests
         new object[] { "ShowError", MessageBoxButton.OK, MessageBoxImage.Error },
         new object[] { "ShowConfirmation", MessageBoxButton.YesNo, MessageBoxImage.Question },
         new object[] { "ShowWarningConfirmation", MessageBoxButton.YesNo, MessageBoxImage.Warning },
+        new object[] { "ShowThreeWayConfirmation", MessageBoxButton.YesNoCancel, MessageBoxImage.Question },
     };
 
     [Theory]
@@ -197,7 +199,7 @@ public class DialogServiceOwnerTests
     /// 静的検査と挙動テストは対で置く（<c>.claude/rules/development-conventions.md</c> #1793）。
     /// </remarks>
     [Fact]
-    public void MessageBoxの直呼びが継ぎ目の内側だけにあること()
+    public void MessageBoxの表示が継ぎ目の内側だけにあること()
     {
         var path = Path.Combine(TestPaths.GetProductionSourceRoot(), "Services", "DialogService.cs");
         var code = TestSourceInspection.ToCodeOnly(File.ReadAllText(path));
@@ -208,15 +210,36 @@ public class DialogServiceOwnerTests
         // 抽出範囲の妥当性を先に固定する。式形式（=> ...）へ変えると波括弧が無く、
         // ExtractMethodBody は「次に現れた別のブロック」を静かに返すため、
         // これを表明しないと検査が空振りしたまま緑になる。
-        seamBody.Should().Contain("owner != null", "継ぎ目メソッドの本体が抽出できていること");
+        seamBody.Should().Contain("OwnedMessageBox.Show", "継ぎ目メソッドの本体が抽出できていること");
 
-        var pattern = new Regex(@"MessageBox\.Show\s*\(");
-        var totalCalls = pattern.Matches(code).Count;
-        var seamCalls = pattern.Matches(seamBody).Count;
+        // Issue #1837: ownerless フォールバックは Common/OwnedMessageBox ただ 1 か所に集約したため、
+        // 継ぎ目はそこへ委譲する 1 文だけを持つ。ここで直接 MessageBox.Show を呼ぶ形に戻ると、
+        // 「解決できなければ ownerless」の分岐がアプリ内に 2 つできる（#1831 と同じ形の再発）。
+        var directCalls = new Regex(@"(?<!Owned)MessageBox\.Show\s*\(").Matches(code).Count;
+        directCalls.Should().Be(0,
+            "DialogService は MessageBox を直呼びせず OwnedMessageBox へ委譲すること（Issue #1837）");
 
-        seamCalls.Should().Be(2, "継ぎ目はオーナー有無の 2 分岐を持つこと");
-        totalCalls.Should().Be(seamCalls,
-            "DialogService 内の MessageBox.Show は継ぎ目の内側だけに存在すること（Issue #1794）");
+        var seamCalls = new Regex(@"OwnedMessageBox\.Show\s*\(").Matches(seamBody).Count;
+        new Regex(@"OwnedMessageBox\.Show\s*\(").Matches(code).Count.Should().Be(seamCalls,
+            "DialogService 内の MessageBox 表示は継ぎ目の内側だけに存在すること（Issue #1794）");
+        seamCalls.Should().Be(1, "継ぎ目は集約先へ委譲する 1 文だけを持つこと");
+    }
+
+    /// <summary>
+    /// 3 択確認の戻り値（Issue #1837）。「いいえ」は<b>処理を進める選択肢</b>であり
+    /// 中止（キャンセル）と区別されること、閉じるボタン（<c>MessageBoxResult.None</c>）は
+    /// 中止として扱われることを固定する。
+    /// </summary>
+    [Theory]
+    [InlineData(MessageBoxResult.Yes, true)]
+    [InlineData(MessageBoxResult.No, false)]
+    [InlineData(MessageBoxResult.Cancel, null)]
+    [InlineData(MessageBoxResult.None, null)]
+    public void 三択確認ははいといいえと中止を区別すること(MessageBoxResult raw, bool? expected)
+    {
+        var sut = new RecordingDialogService { NextResult = raw };
+
+        sut.ShowThreeWayConfirmation("確認", "タイトル").Should().Be(expected);
     }
 
     private static object Invoke(DialogService sut, string methodName, string message, string title)

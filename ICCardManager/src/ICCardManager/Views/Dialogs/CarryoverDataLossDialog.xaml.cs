@@ -32,7 +32,10 @@ namespace ICCardManager.Views.Dialogs
                 {
                     // Issue #1614: 生の例外メッセージをユーザーへ出さない。技術的詳細はログへ逃がす。
                     ErrorDialogHelper.LogException(ex, "繰越情報消失一覧の読み込み");
+                    // Issue #1837: オーナーを渡さないと ownerless になり、背後のこのダイアログが
+                    // 無効化されない。自ウィンドウが正しいオーナーなので this を渡す。
                     MessageBox.Show(
+                        this,
                         ExceptionMessageFormatter.ToUserMessage(ex, "繰越情報消失一覧の読み込み"),
                         "エラー",
                         MessageBoxButton.OK,

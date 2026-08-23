@@ -64,12 +64,15 @@ namespace ICCardManager.Common
             {
                 Application.Current.Dispatcher.Invoke(() =>
                 {
-                    MessageBox.Show(message, dialogTitle, MessageBoxButton.OK, MessageBoxImage.Warning);
+                    OwnedMessageBox.Show(message, dialogTitle, MessageBoxButton.OK, MessageBoxImage.Warning);
                 });
             }
             else
             {
-                MessageBox.Show(message, dialogTitle, MessageBoxButton.OK, MessageBoxImage.Warning);
+                // Application.Current が無い（起動前・シャットダウン後）状況。
+                // DialogOwnerResolver.Resolve() はこの場合 null を返すため、
+                // OwnedMessageBox は従来どおり ownerless で表示する（Issue #1837）
+                OwnedMessageBox.Show(message, dialogTitle, MessageBoxButton.OK, MessageBoxImage.Warning);
             }
         }
 
@@ -155,7 +158,7 @@ namespace ICCardManager.Common
             }
     #endif
 
-            MessageBox.Show(displayMessage, title, MessageBoxButton.OK, MessageBoxImage.Error);
+            OwnedMessageBox.Show(displayMessage, title, MessageBoxButton.OK, MessageBoxImage.Error);
         }
 
         /// <summary>
@@ -173,7 +176,7 @@ namespace ICCardManager.Common
                                    $"メッセージ: {exception.InnerException.Message}";
             }
 
-            var result = MessageBox.Show(
+            var result = OwnedMessageBox.Show(
                 $"{message}\n\n" +
                 $"[はい]をクリックするとエラー詳細をクリップボードにコピーします。",
                 title,

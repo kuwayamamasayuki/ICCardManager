@@ -34,7 +34,14 @@ namespace ICCardManager.Common
     /// アプリケーション内の他ウィンドウをすべて無効化するため本 Issue の欠陥を持たず、
     /// 現状は <c>Owner</c> に <c>Application.Current.MainWindow</c>（<c>NavigationService</c>）または
     /// 「アクティブなウィンドウ ?? <c>MainWindow</c>」（<c>ReportViewModel</c> の印刷プレビュー等）を
-    /// 設定している（その是正は Issue #1837）。
+    /// 設定している（Issue #1837 でも変更していない。<c>ShowDialog</c> は本 Issue の欠陥を持たない）。
+    /// </para>
+    /// <para>
+    /// <b>Issue #1837 で、本クラスの利用者は <c>DialogService</c> と
+    /// <c>Common.OwnedMessageBox</c> の 2 つになった。</b><c>MessageBox</c> を表示する手段は
+    /// 「<c>Window</c> コードビハインドは <c>this</c>／ViewModel は <c>IDialogService</c>／
+    /// どちらも使えない層は <c>OwnedMessageBox</c>」の 3 つに限る
+    /// （回帰は <c>MessageBoxOwnerConventionTests</c> がリポジトリ全体で固定する）。
     /// </para>
     /// </remarks>
     public static class DialogOwnerResolver

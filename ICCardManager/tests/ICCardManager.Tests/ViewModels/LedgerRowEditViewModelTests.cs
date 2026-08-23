@@ -29,6 +29,13 @@ public class LedgerRowEditViewModelTests : IDisposable
     private readonly DbContext _dbContext;
     private readonly LedgerRowEditViewModel _viewModel;
 
+    /// <summary>
+    /// 確認ダイアログ（Issue #1837 で <c>MessageBox.Show</c> 直呼びから <c>IDialogService</c> へ移行）。
+    /// 既定では <c>ShowWarningConfirmation</c> が false（＝「いいえ」）を返すため、
+    /// 確認を伴う操作を検証するテストは明示的に true を返すよう設定すること。
+    /// </summary>
+    private readonly Mock<IDialogService> _dialogServiceMock;
+
     private const string TestCardIdm = "0102030405060708";
     private const string TestOperatorIdm = "FFFF000000000001";
 
@@ -38,6 +45,7 @@ public class LedgerRowEditViewModelTests : IDisposable
     public LedgerRowEditViewModelTests()
     {
         _ledgerRepoMock = new Mock<ILedgerRepository>();
+        _dialogServiceMock = new Mock<IDialogService>();
         _staffRepoMock = new Mock<IStaffRepository>();
         _operationLogRepoMock = new Mock<IOperationLogRepository>();
         _operationLogger = new OperationLogger(
@@ -54,7 +62,8 @@ public class LedgerRowEditViewModelTests : IDisposable
             _ledgerRepoMock.Object,
             _staffRepoMock.Object,
             _operationLogger,
-            _dbContext);
+            _dbContext,
+            _dialogServiceMock.Object);
     }
 
     public void Dispose()
@@ -1324,6 +1333,99 @@ public class LedgerRowEditViewModelTests : IDisposable
 
         // Assert: 確認なしで戻れた
         _viewModel.IsBackRequested.Should().BeTrue("未変更時は確認なしで戻れる");
+    }
+
+    #endregion
+
+    #region Issue #1837: 確認ダイアログの IDialogService 移行
+
+    /*
+     * 移行前は MessageBox.Show の直呼びだったため、これら 3 経路の単体テストは
+     * 1 件も書けなかった（実モーダルが開いてテストランナーが止まる）。
+     * IDialogService へ移した副次的な利得として、「確認で『いいえ』を選んだら
+     * 破壊的な要求を立てない」というガードをここで初めて固定できる。
+     */
+
+    [Theory]
+    [InlineData(true, true)]
+    [InlineData(false, false)]
+    public async Task RequestDelete_確認の結果に従って削除要求を立てること(bool confirmed, bool expected)
+    {
+        _ledgerRepoMock.Setup(r => r.GetByIdAsync(1)).ReturnsAsync(new Ledger
+        {
+            Id = 1, CardIdm = TestCardIdm, Date = new DateTime(2026, 1, 10),
+            Summary = "鉄道（天神～博多）", Income = 0, Expense = 210, Balance = 2300
+        });
+        await _viewModel.InitializeForEditAsync(
+            new LedgerDto
+            {
+                Id = 1, CardIdm = TestCardIdm, DateDisplay = "R8.1.10",
+                Summary = "鉄道（天神～博多）", Income = 0, Expense = 210, Balance = 2300,
+                StaffName = _staffA.Name
+            },
+            TestOperatorIdm);
+        _viewModel.CanDelete.Should().BeTrue("編集モードの初期化が成立していること（前提の表明）");
+        _dialogServiceMock
+            .Setup(d => d.ShowWarningConfirmation(It.IsAny<string>(), "履歴の削除"))
+            .Returns(confirmed);
+
+        _viewModel.RequestDeleteCommand.Execute(null);
+
+        _viewModel.IsDeleteRequested.Should().Be(expected);
+        _dialogServiceMock.Verify(
+            d => d.ShowWarningConfirmation(It.IsAny<string>(), "履歴の削除"), Times.Once,
+            "確認は IDialogService 経由で行うこと（MessageBox 直呼びはオーナー無しになる。Issue #1837）");
+    }
+
+    [Theory]
+    [InlineData(true, true)]
+    [InlineData(false, false)]
+    public void SkipToNext_未保存の変更がある場合は確認の結果に従うこと(bool confirmed, bool expected)
+    {
+        _viewModel.Mode = LedgerRowEditMode.Add;
+        _viewModel.Summary = "入力途中";
+        _dialogServiceMock
+            .Setup(d => d.ShowWarningConfirmation(It.IsAny<string>(), "確認"))
+            .Returns(confirmed);
+
+        _viewModel.SkipToNextCommand.Execute(null);
+
+        _viewModel.IsSkipToNextRequested.Should().Be(expected);
+    }
+
+    [Theory]
+    [InlineData(true, true)]
+    [InlineData(false, false)]
+    public void Back_未保存の変更がある場合は確認の結果に従うこと(bool confirmed, bool expected)
+    {
+        _viewModel.Mode = LedgerRowEditMode.Add;
+        _viewModel.Summary = "入力途中";
+        _dialogServiceMock
+            .Setup(d => d.ShowWarningConfirmation(It.IsAny<string>(), "確認"))
+            .Returns(confirmed);
+
+        _viewModel.BackCommand.Execute(null);
+
+        _viewModel.IsBackRequested.Should().Be(expected);
+    }
+
+    /// <summary>
+    /// 対の表明: 未保存の変更が無いときは確認を出さずに進むこと。
+    /// これが無いと「常に確認する」実装でも上のテストは緑になる。
+    /// </summary>
+    [Fact]
+    public void SkipToNext_未保存の変更が無ければ確認を出さずに進むこと()
+    {
+        _viewModel.Mode = LedgerRowEditMode.Add;
+        _viewModel.Summary = string.Empty;
+        _viewModel.Income = 0;
+        _viewModel.Expense = 0;
+
+        _viewModel.SkipToNextCommand.Execute(null);
+
+        _viewModel.IsSkipToNextRequested.Should().BeTrue();
+        _dialogServiceMock.Verify(
+            d => d.ShowWarningConfirmation(It.IsAny<string>(), It.IsAny<string>()), Times.Never);
     }
 
     #endregion

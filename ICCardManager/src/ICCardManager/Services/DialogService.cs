@@ -29,15 +29,14 @@ namespace ICCardManager.Services
         /// MessageBox を実際に表示する（テスト用の継ぎ目。<see cref="ResolveOwner"/> と同じ理由）
         /// </summary>
         /// <remarks>
-        /// オーナーを解決できないときは従来どおりオーナー無しで表示する。
-        /// 表示しないより、クリックシールドが無い状態でも表示するほうが望ましい。
+        /// 実際の表示は <c>Common.OwnedMessageBox</c> へ委譲する（Issue #1837）。
+        /// オーナーを解決できないときの ownerless フォールバックは、経路ごとに書き写すと
+        /// 取りこぼしが起きるためアプリ全体でそこ 1 か所に集約している。
         /// </remarks>
         protected virtual MessageBoxResult ShowMessageBoxCore(
             Window owner, string message, string title, MessageBoxButton button, MessageBoxImage image)
         {
-            return owner != null
-                ? MessageBox.Show(owner, message, title, button, image)
-                : MessageBox.Show(message, title, button, image);
+            return Common.OwnedMessageBox.Show(owner, message, title, button, image);
         }
 
         /// <summary>
@@ -55,6 +54,17 @@ namespace ICCardManager.Services
         /// <inheritdoc/>
         public bool ShowWarningConfirmation(string message, string title)
             => Show(message, title, MessageBoxButton.YesNo, MessageBoxImage.Warning) == MessageBoxResult.Yes;
+
+        /// <inheritdoc/>
+        public bool? ShowThreeWayConfirmation(string message, string title)
+        {
+            var result = Show(message, title, MessageBoxButton.YesNoCancel, MessageBoxImage.Question);
+            if (result == MessageBoxResult.Yes) return true;
+            if (result == MessageBoxResult.No) return false;
+
+            // Cancel および閉じるボタン（MessageBoxResult.None）はいずれも中止として扱う
+            return null;
+        }
 
         /// <inheritdoc/>
         public void ShowInformation(string message, string title)

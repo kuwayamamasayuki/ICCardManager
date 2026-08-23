@@ -59,6 +59,16 @@ namespace ICCardManager.ViewModels
         private readonly OperationLogger _operationLogger;
         private readonly DbContext _dbContext;
 
+        /// <summary>
+        /// 確認ダイアログの表示（Issue #1837 で <c>MessageBox.Show</c> 直呼びから移行）
+        /// </summary>
+        /// <remarks>
+        /// オーナーを渡さない <c>MessageBox</c> は WPF が <c>GetActiveWindow()</c> で解決するため、
+        /// アプリが非フォアグラウンドのときは ownerless になり背後のウィンドウが無効化されない
+        /// （Issue #1794）。<c>IDialogService</c> は <c>DialogOwnerResolver</c> でオーナーを解決する。
+        /// </remarks>
+        private readonly IDialogService _dialogService;
+
         private string _cardIdm = string.Empty;
         private string? _operatorIdm;
         private int _editLedgerId;
@@ -329,12 +339,14 @@ namespace ICCardManager.ViewModels
             ILedgerRepository ledgerRepository,
             IStaffRepository staffRepository,
             OperationLogger operationLogger,
-            DbContext dbContext)
+            DbContext dbContext,
+            IDialogService dialogService)
         {
             _ledgerRepository = ledgerRepository;
             _staffRepository = staffRepository;
             _operationLogger = operationLogger;
             _dbContext = dbContext;
+            _dialogService = dialogService;
         }
 
         /// <summary>
@@ -977,10 +989,7 @@ namespace ICCardManager.ViewModels
                   "削除した履歴は元に戻せません。"
                 : "この履歴を削除してよろしいですか？\n\n削除した履歴は元に戻せません。";
 
-            var result = System.Windows.MessageBox.Show(
-                message,
-                "履歴の削除", System.Windows.MessageBoxButton.YesNo, System.Windows.MessageBoxImage.Warning);
-            if (result != System.Windows.MessageBoxResult.Yes) return;
+            if (!_dialogService.ShowWarningConfirmation(message, "履歴の削除")) return;
 
             IsDeleteRequested = true;
         }
@@ -1052,10 +1061,8 @@ namespace ICCardManager.ViewModels
         {
             if (HasUnsavedChanges())
             {
-                var result = System.Windows.MessageBox.Show(
-                    "変更が保存されていません。破棄して次へ進みますか？",
-                    "確認", System.Windows.MessageBoxButton.YesNo, System.Windows.MessageBoxImage.Warning);
-                if (result != System.Windows.MessageBoxResult.Yes) return;
+                if (!_dialogService.ShowWarningConfirmation(
+                    "変更が保存されていません。破棄して次へ進みますか？", "確認")) return;
             }
             IsSkipToNextRequested = true;
         }
@@ -1068,10 +1075,8 @@ namespace ICCardManager.ViewModels
         {
             if (HasUnsavedChanges())
             {
-                var result = System.Windows.MessageBox.Show(
-                    "変更が保存されていません。破棄して前へ戻りますか？",
-                    "確認", System.Windows.MessageBoxButton.YesNo, System.Windows.MessageBoxImage.Warning);
-                if (result != System.Windows.MessageBoxResult.Yes) return;
+                if (!_dialogService.ShowWarningConfirmation(
+                    "変更が保存されていません。破棄して前へ戻りますか？", "確認")) return;
             }
             IsBackRequested = true;
         }
