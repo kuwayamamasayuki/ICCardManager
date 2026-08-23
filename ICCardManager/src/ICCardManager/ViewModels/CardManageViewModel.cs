@@ -238,6 +238,28 @@ namespace ICCardManager.ViewModels
             // 解放は CancelEdit / Cleanup に限る（StaffManageViewModel.StartNewStaffWithIdmAsync と同型）。
             _messenger.Send(new CardReadingSuppressedMessage(true, CardReadingSource.CardRegistration));
 
+            try
+            {
+                return await StartNewCardWithIdmCoreAsync(idm);
+            }
+            catch
+            {
+                // Issue #1844: 例外で抜けると、登録モードにも「ダイアログを閉じる」経路にも到達しないため、
+                // 抑制を解放する CancelEdit / Cleanup のどちらも走らない。
+                // その間メイン画面は全カードタッチを無言で無視する（音も出ない）ため、
+                // 「取得したが登録モードへ入れなかった」ときは取得側で取り消す。
+                // 解放は HashSet からの除去であり、View 側（Loaded の catch → Close → Cleanup）と
+                // 二重に走っても副作用はない。
+                _messenger.Send(new CardReadingSuppressedMessage(false, CardReadingSource.CardRegistration));
+                throw;
+            }
+        }
+
+        /// <summary>
+        /// <see cref="StartNewCardWithIdmAsync"/> の本体（抑制の取得・取り消しは呼び出し元が担う）
+        /// </summary>
+        private async Task<bool> StartNewCardWithIdmCoreAsync(string idm)
+        {
             // Issue #284対応: タッチ時点で削除済みカードチェックを行う
             var existing = await _cardRepository.GetByIdmAsync(idm, includeDeleted: true);
             if (existing != null)

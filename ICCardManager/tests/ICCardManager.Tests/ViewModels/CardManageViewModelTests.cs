@@ -256,6 +256,32 @@ public class CardManageViewModelTests
             "ダイアログが開いている間は抑制を解放しない");
     }
 
+    /// <summary>
+    /// Issue #1844: 判定（<c>GetByIdmAsync</c>）が失敗すると登録モードにも
+    /// 「ダイアログを閉じる」経路にも到達しないため、解放を担う CancelEdit / Cleanup が走らない。
+    /// 抑制を取得したまま抜けると、メイン画面は全カードタッチを無言で無視する。
+    /// 取得側で取り消すこと。
+    /// </summary>
+    [Fact]
+    public async Task StartNewCardWithIdmAsync_判定に失敗したら取得した抑制を取り消すこと()
+    {
+        // Arrange
+        var idm = "0102030405060708";
+        _cardRepositoryMock.Setup(r => r.GetByIdmAsync(idm, true))
+            .ThrowsAsync(new InvalidOperationException("database is locked"));
+
+        // Act
+        Func<Task> act = async () => await _viewModel.StartNewCardWithIdmAsync(idm);
+
+        // Assert
+        await act.Should().ThrowAsync<InvalidOperationException>(
+            "呼び出し元（ダイアログの Loaded）が失敗を観測して閉じられるよう、例外は握りつぶさない");
+        _suppressionMessages.Should().Contain(
+            m => !m.Value && m.Source == ICCardManager.Common.Messages.CardReadingSource.CardRegistration,
+            "登録モードへ入れなかったので、入口で取得した抑制を取り消す");
+        _viewModel.IsEditing.Should().BeFalse("登録モードには入っていない");
+    }
+
     #endregion
 
     #region 編集モードテスト
