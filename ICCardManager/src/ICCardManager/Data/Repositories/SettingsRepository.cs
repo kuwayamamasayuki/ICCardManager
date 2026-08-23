@@ -4,6 +4,7 @@ using System.Data.SQLite;
 using System.Linq;
 using System.Threading.Tasks;
 using System.IO;
+using ICCardManager.Common;
 using ICCardManager.Infrastructure.Caching;
 using ICCardManager.Models;
 using Microsoft.Extensions.Options;
@@ -504,7 +505,8 @@ WHERE settings.value IS NULL OR substr(settings.value, 1, 7) <> @currentMonth";
                 }
                 catch
                 {
-                    scope.Rollback();
+                    // Issue #1831: 素の Rollback() を呼ばない（詳細は SafeRollback の XML doc）
+                    SafeRollback.TryRollback(() => scope.Rollback(), logger: null, "アプリ設定の保存");
                     throw;
                 }
             });

@@ -4,6 +4,7 @@ using System.Data;
 using System.Globalization;
 using System.Linq;
 using System.Threading.Tasks;
+using ICCardManager.Common;
 using ICCardManager.Dtos;
 using ICCardManager.Models;
 using ICCardManager.Services;
@@ -316,7 +317,8 @@ WHERE id = @id";
             }
             catch
             {
-                scope.Rollback();
+                // Issue #1831: 素の Rollback() を呼ばない（詳細は SafeRollback の XML doc）
+                SafeRollback.TryRollback(() => scope.Rollback(), logger: null, "台帳の削除");
                 throw;
             }
         }
@@ -366,7 +368,8 @@ WHERE id = @id";
             }
             catch
             {
-                scope.Rollback();
+                // Issue #1831: 素の Rollback() を呼ばない（詳細は SafeRollback の XML doc）
+                SafeRollback.TryRollback(() => scope.Rollback(), logger: null, "貸出中レコードの削除");
                 throw;
             }
         }
@@ -518,7 +521,8 @@ VALUES (@ledgerId, @useDate, @entryStation, @exitStation,
             }
             catch
             {
-                scope.Rollback();
+                // Issue #1831: 素の Rollback() を呼ばない（詳細は SafeRollback の XML doc）
+                SafeRollback.TryRollback(() => scope.Rollback(), logger: null, "利用明細の追加");
                 throw;
             }
         }
@@ -1570,7 +1574,8 @@ WHERE card_idm IN ({string.Join(", ", parameters)})";
             }
             catch
             {
-                scope.Rollback();
+                // Issue #1831: 素の Rollback() を呼ばない（詳細は SafeRollback の XML doc）
+                SafeRollback.TryRollback(() => scope.Rollback(), logger: null, "利用明細の全置換");
                 throw;
             }
         }
@@ -1626,7 +1631,8 @@ WHERE card_idm IN ({string.Join(", ", parameters)})";
             }
             catch
             {
-                scope.Rollback();
+                // Issue #1831: 素の Rollback() を呼ばない（詳細は SafeRollback の XML doc）
+                SafeRollback.TryRollback(() => scope.Rollback(), logger: null, "台帳の統合");
                 throw;
             }
         }
@@ -1751,14 +1757,8 @@ WHERE id = @id";
                 // Issue #1745: Commit が SQLITE_BUSY 等で失敗した後の Rollback は二次例外を投げ、
                 // 本来の SQLiteException を置き換えて上位の型別分岐（リトライ・文言変換）を外す。
                 // 未コミットの tx は scope の Dispose でも巻き戻るため、ここでの失敗は握りつぶしてよい。
-                try
-                {
-                    scope.Rollback();
-                }
-                catch (Exception)
-                {
-                    // Dispose の自動ロールバックに委ねる
-                }
+                // Issue #1831: 巻き戻しの手段は SafeRollback へ寄せる
+                SafeRollback.TryRollback(() => scope.Rollback(), logger: null, "統合の取り消し");
                 throw;
             }
         }

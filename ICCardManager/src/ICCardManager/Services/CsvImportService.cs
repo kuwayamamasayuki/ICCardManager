@@ -394,17 +394,9 @@ namespace ICCardManager.Services
         /// <param name="scope">巻き戻すトランザクションスコープ</param>
         private void TryRollbackImportTransaction(TransactionScope scope)
         {
-            try
-            {
-                scope.Rollback();
-            }
-            catch (Exception rollbackException)
-            {
-                // 本来の失敗要因は呼び出し元の catch が既にログ済み。ここは補足情報として残す
-                // （LogDebug は本番で出力されないため Warning。development-conventions.md 参照）
-                _logger?.LogWarning(rollbackException,
-                    "インポートのロールバックに失敗（未コミットのためデータは確定しない）");
-            }
+            // Issue #1831: 巻き戻しの手段は SafeRollback へ寄せる（クラスごとに同じヘルパーを
+            // 増やすと、次に規約を変える人が一部を取りこぼす）
+            SafeRollback.TryRollback(() => scope.Rollback(), _logger, "CSVインポート");
         }
 
         /// <summary>

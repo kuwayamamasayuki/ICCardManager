@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Data.SQLite;
 using System.Linq;
 using System.Threading.Tasks;
+using ICCardManager.Common;
 using ICCardManager.Common.Exceptions;
 using ICCardManager.Data;
 using ICCardManager.Data.Repositories;
@@ -326,7 +327,9 @@ namespace ICCardManager.Services
                 }
                 catch
                 {
-                    scope.Rollback();
+                    // Issue #1831: 素の Rollback() を呼ばない（二次例外が本来の SQLITE_BUSY を
+                    // 置き換えると ExecuteWithRetryAsync のリトライが効かなくなる）
+                    SafeRollback.TryRollback(() => scope.Rollback(), _logger, "貸出状態の整合性修復");
                     throw;
                 }
             }).ConfigureAwait(false);
@@ -469,7 +472,10 @@ namespace ICCardManager.Services
                 }
                 catch
                 {
-                    scope.Rollback();
+                    // Issue #1831: 素の Rollback() を呼ばない（二次例外が本来の SQLITE_BUSY を
+                    // 置き換えると ExecuteWithRetryAsync のリトライが効かず、共有モードの一過性の
+                    // 競合で貸出が一発失敗する。#1734 で足した LogError も実行されない）
+                    SafeRollback.TryRollback(() => scope.Rollback(), _logger, "貸出の記録");
                     throw;
                 }
             }).ConfigureAwait(false);
@@ -566,7 +572,10 @@ namespace ICCardManager.Services
                 }
                 catch
                 {
-                    scope.Rollback();
+                    // Issue #1831: 素の Rollback() を呼ばない（二次例外が本来の SQLITE_BUSY を
+                    // 置き換えるとリトライが効かず、返却が一発失敗する。職員は案内どおり再タッチし、
+                    // is_lent=0 のため手元に無いカードが新規の貸出として記録される）
+                    SafeRollback.TryRollback(() => scope.Rollback(), _logger, "返却の記録");
                     throw;
                 }
             }).ConfigureAwait(false);
@@ -1539,18 +1548,13 @@ namespace ICCardManager.Services
         /// </remarks>
         private void TryRollbackRegistrationImport(TransactionScope scope, string cardIdm)
         {
-            try
-            {
-                scope.Rollback();
-            }
-            catch (Exception rollbackException)
-            {
-                // 本来の失敗要因は呼び出し元の catch が LogError で記録する。ここは補足情報
-                _logger?.LogWarning(rollbackException,
-                    "カード登録時の台帳書き込みのロールバックに失敗しました" +
-                    "（未コミットのためデータは確定しない。CardIdm={CardIdm}）",
-                    IdmMasker.Mask(cardIdm));
-            }
+            // Issue #1831: 巻き戻しの手段は SafeRollback へ寄せる（クラスごとに同じヘルパーを
+            // 増やすと、次に規約を変える人が一部を取りこぼす）。
+            // Issue #1704: IDm は認証クレデンシャルのためログにはマスクして出力する
+            SafeRollback.TryRollback(
+                () => scope.Rollback(),
+                _logger,
+                $"カード登録時の台帳書き込み（CardIdm={IdmMasker.Mask(cardIdm)}）");
         }
 
         /// <summary>
