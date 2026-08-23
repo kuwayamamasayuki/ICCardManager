@@ -45,7 +45,8 @@ public class StaffManageViewModelMessagingTests
             _operationLoggerMock.Object,
             _dialogServiceMock.Object,
             _staffAuthServiceMock.Object,
-            _messenger);
+            _messenger,
+            new ICCardManager.Tests.Infrastructure.Timing.RecordingDispatcherService());
     }
 
     /// <summary>

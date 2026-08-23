@@ -71,7 +71,8 @@ public class CardManageViewModelMessagingTests
             _dialogServiceMock.Object,
             _staffAuthServiceMock.Object,
             _lendingService,
-            _messenger);
+            _messenger,
+            new ICCardManager.Tests.Infrastructure.Timing.RecordingDispatcherService());
     }
 
     /// <summary>

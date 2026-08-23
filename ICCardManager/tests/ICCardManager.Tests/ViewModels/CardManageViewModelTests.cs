@@ -6,6 +6,7 @@ using ICCardManager.Infrastructure.CardReader;
 using ICCardManager.Models;
 using ICCardManager.Data;
 using ICCardManager.Services;
+using ICCardManager.Tests.Infrastructure.Timing;
 using ICCardManager.ViewModels;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -47,6 +48,12 @@ public class CardManageViewModelTests
     /// ViewModel が MainViewModel へ送るカード読み取り抑制メッセージ（Issue #852）を記録する（Issue #1807）。
     /// </summary>
     private readonly List<ICCardManager.Common.Messages.CardReadingSuppressedMessage> _suppressionMessages = new();
+    /// <summary>
+    /// Issue #1843: OnCardRead は fire-and-forget でディスパッチするため、例外を観測するのは
+    /// 呼び出し元（IDispatcherService）の責務。本番の WpfDispatcherService と同じく
+    /// 「記録して再スローしない」代役を使う。
+    /// </summary>
+    private readonly RecordingDispatcherService _dispatcher = new();
     private readonly CardManageViewModel _viewModel;
 
     public CardManageViewModelTests()
@@ -115,7 +122,8 @@ public class CardManageViewModelTests
             _dialogServiceMock.Object,
             _staffAuthServiceMock.Object,
             _lendingService,
-            messenger);
+            messenger,
+            _dispatcher);
     }
 
     #region カード一覧読み込みテスト
@@ -3394,6 +3402,81 @@ public class CardManageViewModelTests
         _viewModel.EditCardIdm.Should().Be(firstIdm, "2 件目が 1 件目の読み取り結果を上書きしないこと");
         _cardRepositoryMock.Verify(r => r.GetByIdmAsync("0807060504030201", true), Times.Never);
     }
+
+    #region Issue #1843: 読み取りのディスパッチ自体が例外を観測すること
+
+    /// <summary>
+    /// カード読み取りイベントが <see cref="IDispatcherService"/> 経由でディスパッチされ、
+    /// 本体の catch 自体が失敗しても例外が観測される（無言で失われない）こと
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Issue #1843: <c>OnCardRead</c> が生の <c>Application.Current.Dispatcher.InvokeAsync</c> を
+    /// 使っていた頃は、戻り値の <c>DispatcherOperation&lt;Task&gt;</c> も内側の <c>Task</c> も
+    /// 観測されず、例外は GC 契機の <c>TaskScheduler.UnobservedTaskException</c> まで遅れていた。
+    /// </para>
+    /// <para>
+    /// Issue #1816 の「本体全体を try/catch で包む」は受け皿としては正しいが fail-safe ではない。
+    /// <c>catch</c> ブロック自身が投げれば再び無言になる
+    /// （.claude/rules/development-conventions.md Issue #1745）。
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void OnCardRead_本体のcatchが失敗しても_ディスパッチャが例外を観測すること()
+    {
+        // Arrange
+        var idm = "0102030405060708";
+        _cardRepositoryMock.Setup(r => r.GetByIdmAsync(idm, true))
+            .ThrowsAsync(new InvalidOperationException("database is locked"));
+        _viewModel.StartNewCard();
+
+        // catch ブロック末尾の IsStatusError = true で例外が出る状況を作る
+        // （バインディング側の失敗に相当。catch の中の後始末は、それ自体が失敗し得る＝#1745）
+        _viewModel.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName == nameof(CardManageViewModel.IsStatusError) && _viewModel.IsStatusError)
+            {
+                throw new InvalidOperationException("binding failure");
+            }
+        };
+
+        // Act
+        _cardReaderMock.Raise(r => r.CardRead += null, new CardReadEventArgs { Idm = idm });
+
+        // Assert
+        _dispatcher.InvokeAsyncFuncCallCount.Should().Be(
+            1, "OnCardRead は IDispatcherService 経由でディスパッチすること（生の Dispatcher を使わない）");
+        _dispatcher.ObservedExceptions.Should().ContainSingle(
+            "本体の catch が失敗しても、ディスパッチした側が例外を観測すること")
+            .Which.Message.Should().Be("binding failure");
+    }
+
+    /// <summary>
+    /// 正常な読み取りではディスパッチャが例外を観測しないこと（対のテスト）
+    /// </summary>
+    /// <remarks>
+    /// 片側だけだと「常に例外が出る」実装でも緑になる
+    /// （.claude/rules/error-messages.md Issue #1757）。
+    /// </remarks>
+    [Fact]
+    public void OnCardRead_正常な読み取り_例外を観測せずIDmを反映すること()
+    {
+        // Arrange
+        var idm = "0102030405060708";
+        _cardRepositoryMock.Setup(r => r.GetByIdmAsync(idm, true))
+            .ReturnsAsync((ICCardManager.Models.IcCard)null);
+        _viewModel.StartNewCard();
+
+        // Act
+        _cardReaderMock.Raise(r => r.CardRead += null, new CardReadEventArgs { Idm = idm });
+
+        // Assert
+        _dispatcher.ObservedExceptions.Should().BeEmpty();
+        _viewModel.EditCardIdm.Should().Be(idm);
+        _viewModel.IsWaitingForCard.Should().BeFalse();
+    }
+
+    #endregion
 
     #endregion
 }

@@ -10,6 +10,7 @@ using ICCardManager.Common.Messages;
 using ICCardManager.Data.Repositories;
 using ICCardManager.Dtos;
 using ICCardManager.Infrastructure.CardReader;
+using ICCardManager.Infrastructure.Timing;
 using ICCardManager.Models;
 using ICCardManager.Services;
 using Microsoft.Win32;
@@ -99,6 +100,12 @@ public partial class DataExportImportViewModel : ViewModelBase
     private readonly ICardReader? _cardReader;
     private readonly OperationLogger _operationLogger;
     private readonly IMessenger _messenger;
+    /// <summary>
+    /// UI スレッドへのディスパッチ。Issue #1843: 生の <c>Dispatcher.InvokeAsync</c> は
+    /// <c>DispatcherOperation&lt;Task&gt;</c> を返すため内側の <c>Task</c> の例外を観測できない。
+    /// この実装（<c>WpfDispatcherService</c>）は <c>Unwrap()</c> して観測しログへ残す（Issue #1725）。
+    /// </summary>
+    private readonly IDispatcherService _dispatcherService;
     private readonly ISafeFileLauncher _safeFileLauncher;
 
     [ObservableProperty]
@@ -307,6 +314,7 @@ public partial class DataExportImportViewModel : ViewModelBase
         OperationLogger operationLogger,
         IMessenger messenger,
         ISafeFileLauncher safeFileLauncher,
+        IDispatcherService dispatcherService,
         ICardReader? cardReader = null)
     {
         _exportService = exportService;
@@ -316,6 +324,7 @@ public partial class DataExportImportViewModel : ViewModelBase
         _operationLogger = operationLogger;
         _messenger = messenger;
         _safeFileLauncher = safeFileLauncher;
+        _dispatcherService = dispatcherService;
         _cardReader = cardReader;
 
         // カードリーダーイベント購読
@@ -1160,7 +1169,7 @@ public partial class DataExportImportViewModel : ViewModelBase
     /// <summary>
     /// カード読み取りイベントハンドラ
     /// </summary>
-    private async void OnCardRead(object? sender, CardReadEventArgs e)
+    private void OnCardRead(object? sender, CardReadEventArgs e)
     {
         if (!IsWaitingForCardTouch)
         {
@@ -1168,10 +1177,13 @@ public partial class DataExportImportViewModel : ViewModelBase
         }
 
         // UIスレッドで実行
-        // Issue #1816: InvokeAsync(async () => ...) は DispatcherOperation<Task> を返すため、
-        // await しても内側の Task の例外は観測できない（Unwrap していない）。
-        // 例外の受け止めは本体（HandleCardReadAsync）の try/catch が担う。
-        await System.Windows.Application.Current.Dispatcher.InvokeAsync(() => HandleCardReadAsync(e.Idm));
+        // Issue #1843: 生の Dispatcher.InvokeAsync は DispatcherOperation<Task> を返すため、
+        // await しても内側の Task の例外は観測できない（Unwrap() が要る。Issue #1725）。
+        // IDispatcherService 経由なら Unwrap 済みの Task が観測され、失敗はログへ残る。
+        // 本体（HandleCardReadAsync）の try/catch は受け皿として残すが、catch ブロック自身が
+        // 失敗し得る（#1745）ため、ディスパッチ側の観測と二重に守る。
+        // あわせて async void を解消している（例外の逃げ道をもう 1 つ塞ぐ）。
+        _dispatcherService.InvokeAsync(() => HandleCardReadAsync(e.Idm));
     }
 
     /// <summary>

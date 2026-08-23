@@ -9,6 +9,7 @@ using ICCardManager.Infrastructure.Timing;
 using ICCardManager.Services;
 using ICCardManager.ViewModels;
 using Moq;
+using ICCardManager.Tests.Infrastructure.Timing;
 using Xunit;
 
 using System;
@@ -39,6 +40,12 @@ public class DataExportImportViewModelTests : IDisposable
     private readonly SQLiteConnection _connection;
     private readonly DbContext _realDbContext;
     private readonly OperationLogRepository _operationLogRepository;
+    /// <summary>
+    /// Issue #1843: OnCardRead は fire-and-forget でディスパッチするため、例外を観測するのは
+    /// 呼び出し元（IDispatcherService）の責務。本番の WpfDispatcherService と同じく
+    /// 「記録して再スローしない」代役を使う。
+    /// </summary>
+    private readonly RecordingDispatcherService _dispatcher = new();
     private readonly DataExportImportViewModel _viewModel;
 
     public DataExportImportViewModelTests()
@@ -98,7 +105,8 @@ public class DataExportImportViewModelTests : IDisposable
             _cardRepositoryMock.Object,
             operationLogger,
             new WeakReferenceMessenger(),
-            _safeFileLauncherMock.Object);
+            _safeFileLauncherMock.Object,
+            _dispatcher);
     }
 
     public void Dispose()
@@ -895,7 +903,8 @@ public class DataExportImportViewModelTests : IDisposable
             _cardRepositoryMock.Object,
             operationLogger,
             new WeakReferenceMessenger(),
-            _safeFileLauncherMock.Object);
+            _safeFileLauncherMock.Object,
+            _dispatcher);
     }
 
     /// <summary>
