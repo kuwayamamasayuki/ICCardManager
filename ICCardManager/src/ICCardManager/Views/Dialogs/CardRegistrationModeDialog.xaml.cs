@@ -204,7 +204,11 @@ namespace ICCardManager.Views.Dialogs
                 // 開始ページ番号のバリデーション
                 if (!int.TryParse(StartingPageTextBox.Text, out var startingPage) || startingPage < 1)
                 {
+                    // Issue #1837: オーナーを渡さないと WPF は GetActiveWindow() で解決するため、
+                    // アプリが非フォアグラウンドのときは ownerless になり、背後のこのダイアログが
+                    // 無効化されない。以下 4 か所とも自ウィンドウが正しいオーナーなので this を渡す。
                     MessageBox.Show(
+                        this,
                         "開始ページ番号は1以上の整数を入力してください。",
                         "入力エラー",
                         MessageBoxButton.OK,
@@ -221,6 +225,7 @@ namespace ICCardManager.Views.Dialogs
                     if (!int.TryParse(CarryoverBalanceTextBox.Text, out var carryoverBalance) || carryoverBalance < 0)
                     {
                         MessageBox.Show(
+                            this,
                             "繰越額は0以上の整数を入力してください。",
                             "入力エラー",
                             MessageBoxButton.OK,
@@ -236,6 +241,7 @@ namespace ICCardManager.Views.Dialogs
                 if (!int.TryParse(CarryoverIncomeTotalTextBox.Text, out var carryoverIncomeTotal) || carryoverIncomeTotal < 0)
                 {
                     MessageBox.Show(
+                        this,
                         "累計受入は0以上の整数を入力してください。",
                         "入力エラー",
                         MessageBoxButton.OK,
@@ -250,6 +256,7 @@ namespace ICCardManager.Views.Dialogs
                 if (!int.TryParse(CarryoverExpenseTotalTextBox.Text, out var carryoverExpenseTotal) || carryoverExpenseTotal < 0)
                 {
                     MessageBox.Show(
+                        this,
                         "累計払出は0以上の整数を入力してください。",
                         "入力エラー",
                         MessageBoxButton.OK,

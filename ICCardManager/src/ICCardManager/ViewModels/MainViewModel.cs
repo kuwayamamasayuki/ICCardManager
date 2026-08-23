@@ -2206,10 +2206,7 @@ public partial class MainViewModel : ViewModelBase
               "行うのが正しい復旧方法です。それでも削除しますか？"
             : $"以下の履歴を削除してよろしいですか？\n\n日付: {ledger.DateDisplay}\n摘要: {ledger.Summary}\n残高: {ledger.BalanceDisplay}円";
 
-        var result = MessageBox.Show(
-            confirmMessage,
-            "履歴の削除", MessageBoxButton.YesNo, MessageBoxImage.Warning);
-        if (result != MessageBoxResult.Yes) return;
+        if (!_navigationService.ShowWarningConfirmation(confirmMessage, "履歴の削除")) return;
 
         // 削除実行
         var fullLedger = await _ledgerRepository.GetByIdAsync(ledger.Id);
@@ -2578,11 +2575,9 @@ public partial class MainViewModel : ViewModelBase
         {
             if (indices[i] != indices[i - 1] + 1)
             {
-                MessageBox.Show(
+                _navigationService.ShowWarning(
                     "隣接する履歴のみ統合できます。\n連続した行にチェックを入れてください。",
-                    "統合できません",
-                    MessageBoxButton.OK,
-                    MessageBoxImage.Warning);
+                    "統合できません");
                 return;
             }
         }
@@ -2603,13 +2598,7 @@ public partial class MainViewModel : ViewModelBase
         }
         message += "\n統合してよろしいですか？（統合後に「元に戻す」ことができます）";
 
-        var result = MessageBox.Show(
-            message,
-            "履歴の統合",
-            MessageBoxButton.YesNo,
-            MessageBoxImage.Question);
-
-        if (result != MessageBoxResult.Yes) return;
+        if (!_navigationService.ShowConfirmation(message, "履歴の統合")) return;
 
         // 統合実行
         var ledgerIds = sortedDtos.Select(dto => dto.Id).ToList();
@@ -2620,11 +2609,9 @@ public partial class MainViewModel : ViewModelBase
             await LoadHistoryLedgersAsync();
             await RefreshDashboardAsync();
             UndoMergeHistoryLedgersCommand.NotifyCanExecuteChanged();
-            MessageBox.Show(
+            _navigationService.ShowInformation(
                 "履歴を統合しました。\n「統合を元に戻す」ボタンで取り消せます。",
-                "統合完了",
-                MessageBoxButton.OK,
-                MessageBoxImage.Information);
+                "統合完了");
         }
         else
         {
@@ -2633,11 +2620,7 @@ public partial class MainViewModel : ViewModelBase
             // エラー文言（「画面を最新の状態に更新してから再度お試しください」）とも整合させる。
             await LoadHistoryLedgersAsync();
 
-            MessageBox.Show(
-                mergeResult.ErrorMessage,
-                "統合エラー",
-                MessageBoxButton.OK,
-                MessageBoxImage.Error);
+            _navigationService.ShowError(mergeResult.ErrorMessage, "統合エラー");
         }
     }
 
@@ -2732,19 +2715,11 @@ public partial class MainViewModel : ViewModelBase
             await LoadHistoryLedgersAsync();
             await RefreshDashboardAsync();
             UndoMergeHistoryLedgersCommand.NotifyCanExecuteChanged();
-            MessageBox.Show(
-                "統合を元に戻しました。",
-                "取り消し完了",
-                MessageBoxButton.OK,
-                MessageBoxImage.Information);
+            _navigationService.ShowInformation("統合を元に戻しました。", "取り消し完了");
         }
         else
         {
-            MessageBox.Show(
-                undoResult.ErrorMessage,
-                "取り消しエラー",
-                MessageBoxButton.OK,
-                MessageBoxImage.Error);
+            _navigationService.ShowError(undoResult.ErrorMessage, "取り消しエラー");
 
             // Issue #1806: 失敗時も一覧を再読込する（統合の失敗分岐と同じ #1753 の作法）。
             // 失敗要因は「統合後の編集・削除」「他 PC の先行取り消し」で、いずれも一覧が古いままだと
@@ -3161,11 +3136,9 @@ public partial class MainViewModel : ViewModelBase
         var result = _safeFileLauncher.LaunchFolder(docsPath);
         if (!result.Success)
         {
-            MessageBox.Show(
+            _navigationService.ShowWarning(
                 result.ErrorMessage + "\n\nアプリケーションの再インストールで復旧する可能性があります。",
-                "ヘルプ",
-                MessageBoxButton.OK,
-                MessageBoxImage.Warning);
+                "ヘルプ");
         }
     }
 
@@ -3338,8 +3311,8 @@ public partial class MainViewModel : ViewModelBase
 
                 if (card == null)
                 {
-                    MessageBox.Show($"カードがデータベースに登録されていません。\nIDm: {cardIdm}",
-                        "仮想タッチ", MessageBoxButton.OK, MessageBoxImage.Error);
+                    _navigationService.ShowError(
+                        $"カードがデータベースに登録されていません。\nIDm: {cardIdm}", "仮想タッチ");
                     return;
                 }
 
@@ -3348,8 +3321,8 @@ public partial class MainViewModel : ViewModelBase
                     var lendResult = await _lendingService.LendAsync(staffIdm, cardIdm, touchResult.CurrentBalance);
                     if (!lendResult.Success)
                     {
-                        MessageBox.Show($"貸出処理に失敗しました: {lendResult.ErrorMessage}", "仮想タッチ",
-                            MessageBoxButton.OK, MessageBoxImage.Error);
+                        _navigationService.ShowError(
+                            $"貸出処理に失敗しました: {lendResult.ErrorMessage}", "仮想タッチ");
                         return;
                     }
                 }
@@ -3358,8 +3331,8 @@ public partial class MainViewModel : ViewModelBase
                 var returnResult = await _lendingService.ReturnAsync(staffIdm, cardIdm, touchResult.HistoryDetails, skipDuplicateCheck: true);
                 if (!returnResult.Success)
                 {
-                    MessageBox.Show($"返却処理に失敗しました: {returnResult.ErrorMessage}", "仮想タッチ",
-                        MessageBoxButton.OK, MessageBoxImage.Error);
+                    _navigationService.ShowError(
+                        $"返却処理に失敗しました: {returnResult.ErrorMessage}", "仮想タッチ");
                     return;
                 }
 
@@ -3379,8 +3352,8 @@ public partial class MainViewModel : ViewModelBase
         }
         catch (Exception ex)
         {
-            MessageBox.Show($"仮想タッチ処理でエラーが発生しました:\n{ex.Message}", "仮想タッチエラー",
-                MessageBoxButton.OK, MessageBoxImage.Error);
+            _navigationService.ShowError(
+                $"仮想タッチ処理でエラーが発生しました:\n{ex.Message}", "仮想タッチエラー");
         }
     }
 #endif

@@ -93,8 +93,16 @@ public partial class VirtualCardViewModel : ObservableObject
     /// <summary>
     /// メッセージ表示用デリゲート（テストでの差し替え用）
     /// </summary>
+    /// <remarks>
+    /// 既定の表示は <c>Common.OwnedMessageBox</c> を経由する（Issue #1837）。
+    /// オーナーを渡さない <c>MessageBox</c> は WPF が <c>GetActiveWindow()</c> で解決するため、
+    /// アプリが非フォアグラウンドのときは ownerless になり背後のウィンドウが無効化されない。
+    /// 本クラスはデバッグ機能専用で DI から <c>IDialogService</c> を受け取っていないため、
+    /// ViewModel の正規手段（<c>IDialogService</c>）ではなく静的ヘルパーを使う。
+    /// </remarks>
     internal Action<string, string> ShowMessage { get; set; } =
-        (message, title) => MessageBox.Show(message, title, MessageBoxButton.OK, MessageBoxImage.Warning);
+        (message, title) => Common.OwnedMessageBox.Show(
+            message, title, MessageBoxButton.OK, MessageBoxImage.Warning);
 
     /// <summary>
     /// タッチ実行結果（ダイアログ閉鎖後にMainViewModelが参照する）

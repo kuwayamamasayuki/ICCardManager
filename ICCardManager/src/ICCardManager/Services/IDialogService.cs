@@ -31,6 +31,19 @@ namespace ICCardManager.Services
         bool ShowWarningConfirmation(string message, string title);
 
         /// <summary>
+        /// 3 択の確認ダイアログを表示（はい / いいえ / キャンセル。Issue #1837）
+        /// </summary>
+        /// <remarks>
+        /// 「はい」と「いいえ」がどちらも処理を進める選択肢で、加えて中止を選べる場面に使う
+        /// （帳票作成の「更新する／別名で保存する／中止する」）。
+        /// 2 択で足りる場面では <see cref="ShowConfirmation"/> を使うこと。
+        /// </remarks>
+        /// <param name="message">メッセージ</param>
+        /// <param name="title">タイトル</param>
+        /// <returns>はい=true、いいえ=false、キャンセル（および閉じるボタン）=null</returns>
+        bool? ShowThreeWayConfirmation(string message, string title);
+
+        /// <summary>
         /// 情報ダイアログを表示
         /// </summary>
         /// <param name="message">メッセージ</param>

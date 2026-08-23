@@ -141,7 +141,11 @@ namespace ICCardManager
                 // データ不整合防止のため明示的にブロックして終了する
                 ErrorDialogHelper.LogException(ex, "起動時のデータベースバージョン確認");
 
-                MessageBox.Show(
+                // Issue #1837: オーナー無しの MessageBox は WPF が GetActiveWindow() で解決するため
+                // 非フォアグラウンド時は ownerless になる。OwnedMessageBox が
+                // DialogOwnerResolver でオーナーを解決する（この時点では MainWindow 未生成の
+                // ことがあるが、Resolve() は候補が無ければ null を返し従来どおり表示される）。
+                Common.OwnedMessageBox.Show(
                     ex.UserFriendlyMessage,
                     "ピッすいの更新が必要です",
                     MessageBoxButton.OK,
@@ -168,7 +172,7 @@ namespace ICCardManager
 #endif
 
                 // クリップボードにコピー可能なエラーダイアログを表示
-                var result = MessageBox.Show(
+                var result = Common.OwnedMessageBox.Show(
                     $"{errorMessage}\n\n[はい]をクリックするとエラー内容をクリップボードにコピーします。",
                     "エラー",
                     MessageBoxButton.YesNo,
@@ -244,7 +248,7 @@ namespace ICCardManager
                 return;
             }
 
-            MessageBox.Show(
+            Common.OwnedMessageBox.Show(
                 $"設定ファイル（database_config.txt）のデータベース保存先「{_rejectedDatabaseConfigPath}」が" +
                 "無効な形式（相対パス・不正な文字を含む等）のため、既定の保存先を使用して起動しました。\n\n" +
                 "意図した保存先と異なる場合は、設定画面（F5）でドライブ文字から始まる絶対パス、" +

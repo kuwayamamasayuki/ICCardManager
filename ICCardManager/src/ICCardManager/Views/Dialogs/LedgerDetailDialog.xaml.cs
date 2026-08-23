@@ -133,9 +133,16 @@ namespace ICCardManager.Views.Dialogs
         /// 未保存の変更を破棄してよいかをユーザーに確認する
         /// </summary>
         /// <returns>破棄してよい場合 true</returns>
-        private static bool ConfirmDiscardChanges()
+        /// <remarks>
+        /// Issue #1837: オーナーを渡さない <c>MessageBox</c> は WPF が <c>GetActiveWindow()</c> で
+        /// 解決するため、アプリが非フォアグラウンドのときは ownerless になり背後のこのダイアログが
+        /// 無効化されない。自ウィンドウが正しいオーナーなので <c>this</c> を渡す
+        /// （そのため <c>static</c> ではなくインスタンスメソッドにしている）。
+        /// </remarks>
+        private bool ConfirmDiscardChanges()
         {
             var result = MessageBox.Show(
+                this,
                 "保存されていない変更があります。破棄してよろしいですか？",
                 "確認",
                 MessageBoxButton.YesNo,

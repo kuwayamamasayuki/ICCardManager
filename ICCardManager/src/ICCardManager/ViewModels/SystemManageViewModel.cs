@@ -36,8 +36,8 @@ public partial class SystemManageViewModel : ViewModelBase
     /// 2 か所（リストア前バックアップ失敗時の続行確認。本 Issue の対象）と、その手前の
     /// 入口の確認 2 か所。入口も併せて移したのは、そこが <c>MessageBox</c> 直呼びのままだと
     /// 単体テストが実モーダルに入って止まり、<b>スコープ内側の続行確認へ到達するテストが
-    /// 1 件も書けない</b>ため。リストア完了の通知（スコープ外の 2 か所）は本 Issue の
-    /// 対象ではないので触れていない（移行するなら別 Issue）。
+    /// 1 件も書けない</b>ため。リストア完了の通知（スコープ外の 2 か所）は Issue #1837 で
+    /// 併せて移行し、本クラスに <c>MessageBox</c> の直呼びは残っていない。
     /// </remarks>
     private readonly IDialogService _dialogService;
 
@@ -488,12 +488,10 @@ public partial class SystemManageViewModel : ViewModelBase
         // プログレスバーを非表示にしてから再起動を促すダイアログを表示
         if (restoreSuccess)
         {
-            MessageBox.Show(
+            _navigationService.ShowInformation(
                 "リストアが完了しました。\n\n" +
                 "変更を反映するには、アプリケーションを再起動してください。",
-                "リストア完了",
-                MessageBoxButton.OK,
-                MessageBoxImage.Information);
+                "リストア完了");
         }
     }
 
@@ -643,12 +641,10 @@ public partial class SystemManageViewModel : ViewModelBase
         // プログレスバーを非表示にしてから再起動を促すダイアログを表示
         if (restoreFromFileSuccess)
         {
-            MessageBox.Show(
+            _navigationService.ShowInformation(
                 "リストアが完了しました。\n\n" +
                 "変更を反映するには、アプリケーションを再起動してください。",
-                "リストア完了",
-                MessageBoxButton.OK,
-                MessageBoxImage.Information);
+                "リストア完了");
 
             // バックアップ一覧を更新
             await LoadBackupsAsync();

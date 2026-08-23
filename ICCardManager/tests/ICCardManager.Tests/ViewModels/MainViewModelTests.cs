@@ -2989,6 +2989,73 @@ public class MainViewModelTests : IDisposable
     }
 
     #endregion
+
+    #region Issue #1837: 履歴削除の確認ダイアログ（MessageBox 直呼びから IDialogService へ移行）
+
+    /*
+     * 移行前は MessageBox.Show の直呼びだったため、この経路の単体テストは 1 件も書けなかった
+     * （実モーダルが開いてテストランナーが止まる）。IDialogService へ移した副次的な利得として、
+     * 「確認で『いいえ』を選んだら 6 年保存の台帳を消さない」というガードを固定できる。
+     */
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task DeleteLedgerRow_確認の結果に従って削除すること(bool confirmed)
+    {
+        // Arrange
+        _staffAuthServiceMock
+            .Setup(a => a.RequestAuthenticationAsync(It.IsAny<string>()))
+            .ReturnsAsync(new StaffAuthResult { Idm = "AABBCCDDEEFF0011", StaffName = "田中太郎" });
+        _navigationServiceMock
+            .Setup(d => d.ShowWarningConfirmation(It.IsAny<string>(), "履歴の削除"))
+            .Returns(confirmed);
+        _ledgerRepositoryMock
+            .Setup(r => r.GetByIdAsync(It.IsAny<int>()))
+            .ReturnsAsync((Ledger)null);
+
+        var dto = new LedgerDto
+        {
+            Id = 42,
+            Date = new DateTime(2026, 1, 10),
+            DateDisplay = "R8.1.10",
+            Summary = "鉄道（天神～博多）",
+            Balance = 2300
+        };
+
+        // Act
+        await _viewModel.DeleteLedgerRow(dto);
+
+        // Assert: 確認は IDialogService 経由で 1 度だけ行う
+        _navigationServiceMock.Verify(
+            d => d.ShowWarningConfirmation(It.IsAny<string>(), "履歴の削除"), Times.Once,
+            "確認は MessageBox 直呼びではなく IDialogService 経由で行うこと（Issue #1837）");
+
+        // 「いいえ」なら対象行の読み取りにすら進まない（＝何も消さない）
+        _ledgerRepositoryMock.Verify(
+            r => r.GetByIdAsync(It.IsAny<int>()),
+            confirmed ? Times.Once() : Times.Never(),
+            "確認で「いいえ」を選んだら削除処理へ進まないこと");
+    }
+
+    /// <summary>
+    /// 認証をキャンセルした場合は確認ダイアログを出さないこと（対の表明）。
+    /// これが無いと「認証を無視して必ず確認する」実装でも上のテストは緑になる。
+    /// </summary>
+    [Fact]
+    public async Task DeleteLedgerRow_認証をキャンセルしたら確認を出さないこと()
+    {
+        _staffAuthServiceMock
+            .Setup(a => a.RequestAuthenticationAsync(It.IsAny<string>()))
+            .ReturnsAsync((StaffAuthResult)null);
+
+        await _viewModel.DeleteLedgerRow(new LedgerDto { Id = 42 });
+
+        _navigationServiceMock.Verify(
+            d => d.ShowWarningConfirmation(It.IsAny<string>(), It.IsAny<string>()), Times.Never);
+    }
+
+    #endregion
 }
 
 /*
