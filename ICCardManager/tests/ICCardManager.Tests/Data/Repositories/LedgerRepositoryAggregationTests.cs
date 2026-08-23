@@ -731,6 +731,71 @@ public class LedgerRepositoryAggregationTests : IDisposable
         result.Single().Balance.Should().Be(0, "残高 0 は欠測ではなく「使い切った」という意味を持つ");
     }
 
+    /// <summary>
+    /// Issue #1834: 最終稼働日を CTE ＋ JOIN で求める形にしても、別カードの日付と交差しないことを確認
+    /// </summary>
+    /// <remarks>
+    /// JOIN 条件から <c>card_idm</c> の一致が抜けると、CardB の最終稼働日（5/10）が
+    /// CardA の 5/10 の行にも一致して、CardA の月末残高が最終稼働日（5/20）以外の行を含む形になる。
+    /// </remarks>
+    [Fact]
+    public async Task GetMonthEndBalancesByCardAsync_CardsSharingTheSameDate_DoesNotCrossJoin()
+    {
+        await SeedMastersAsync();
+        // CardA は 5/10 と 5/20 に稼働（最終稼働日は 5/20）
+        await InsertLedgerAsync(CardA, new DateTime(2026, 5, 10), expense: 210, balance: 4790);
+        await InsertLedgerAsync(CardA, new DateTime(2026, 5, 20), expense: 300, balance: 4490);
+        // CardB は 5/10 のみ（最終稼働日は CardA の非最終日と同一）
+        await InsertLedgerAsync(CardB, new DateTime(2026, 5, 10), expense: 100, balance: 900);
+
+        var result = await _ledgerRepository.GetMonthEndBalancesByCardAsync(
+            new DateTime(2026, 5, 1), new DateTime(2026, 5, 31));
+
+        result.Should().HaveCount(2);
+        result.Single(r => r.CardIdm == CardA).Balance.Should().Be(4490,
+            "他カードの最終稼働日を自カードの行に一致させてはならない");
+        result.Single(r => r.CardIdm == CardB).Balance.Should().Be(900);
+    }
+
+    /// <summary>
+    /// Issue #1834: 最終稼働日に複数行があっても（カード × 月）の行が重複しないことを確認
+    /// </summary>
+    [Fact]
+    public async Task GetMonthEndBalancesByCardAsync_MultipleRowsOnLastDay_ReturnsSingleRowPerCardAndMonth()
+    {
+        await SeedMastersAsync();
+        await InsertLedgerAsync(CardA, new DateTime(2026, 5, 28, 9, 0, 0), expense: 210, balance: 4790);
+        await InsertLedgerAsync(CardA, new DateTime(2026, 5, 28, 12, 0, 0), expense: 300, balance: 4490);
+        await InsertLedgerAsync(CardA, new DateTime(2026, 5, 28, 18, 0, 0), expense: 190, balance: 4300);
+
+        var result = await _ledgerRepository.GetMonthEndBalancesByCardAsync(
+            new DateTime(2026, 5, 1), new DateTime(2026, 5, 31));
+
+        result.Should().HaveCount(1, "最終稼働日の行数だけ月末残高の行が増えてはならない");
+        result.Single().Balance.Should().Be(4300);
+    }
+
+    /// <summary>
+    /// Issue #1834: 月の途中で稼働が止まるカードと続くカードが混在しても、行が欠落しないことを確認
+    /// </summary>
+    [Fact]
+    public async Task GetMonthEndBalancesByCardAsync_CardStoppedMidRange_KeepsRowsOfActiveMonthsOnly()
+    {
+        await SeedMastersAsync();
+        // CardA: 5月・6月とも稼働
+        await InsertLedgerAsync(CardA, new DateTime(2026, 5, 10), balance: 5000);
+        await InsertLedgerAsync(CardA, new DateTime(2026, 6, 15), balance: 4000);
+        // CardB: 5月で稼働が止まる
+        await InsertLedgerAsync(CardB, new DateTime(2026, 5, 20), balance: 900);
+
+        var result = await _ledgerRepository.GetMonthEndBalancesByCardAsync(
+            new DateTime(2026, 5, 1), new DateTime(2026, 6, 30));
+
+        result.Select(r => r.CardIdm + "/" + r.YearMonth)
+            .Should().Equal(CardA + "/2026-05", CardA + "/2026-06", CardB + "/2026-05");
+        result.Single(r => r.CardIdm == CardB).Balance.Should().Be(900);
+    }
+
     #endregion
 
     #region GetBalancesBeforeAsync
