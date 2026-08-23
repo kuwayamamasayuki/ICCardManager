@@ -101,8 +101,14 @@ public class SafeRollbackConventionTests
     [InlineData("void M() { try { X(); } catch (Exception ex) { transaction.Rollback(); throw; } }", 1)]
     // 正常: 正規手段（ラムダは新しいブロックを作らないため、経由の有無で判定する）
     [InlineData("void M() { try { X(); } catch { SafeRollback.TryRollback(() => scope.Rollback(), null, \"a\"); throw; } }", 0)]
+    // 違反: 例外フィルタ（when 句）付きの catch も catch（丸括弧が 2 段になるだけ）
+    [InlineData("void M() { try { X(); } catch (Exception ex) when (f) { scope.Rollback(); throw; } }", 1)]
+    // 違反: catch の中の別ブロック（if / using / foreach）へ入れ子にしても二次例外は同じく漏れる
+    [InlineData("void M() { try { X(); } catch { if (f) { scope.Rollback(); } throw; } }", 1)]
     // 正常: catch の中でも内側の try で包まれていれば二次例外は漏れない
     [InlineData("void M() { try { X(); } catch { try { scope.Rollback(); } catch { } throw; } }", 0)]
+    // 正常: ラムダ本体はその場では実行されない（catch の内側にあっても対象外）
+    [InlineData("void M() { try { X(); } catch { Register(() => { scope.Rollback(); }); throw; } }", 0)]
     // 正常: catch の外（業務的失敗による巻き戻し）は対象外
     [InlineData("void M() { try { if (ok) scope.Commit(); else scope.Rollback(); } catch { throw; } }", 0)]
     // 正常: catch の後ろの finally も対象外
@@ -161,7 +167,11 @@ public class SafeRollbackConventionTests
                 continue;
             }
 
-            if (blockKinds.Count == 0 || blockKinds.Peek() != "catch")
+            // 最内が catch とは限らない。catch の中の if / using / foreach / lock 等は
+            // 「二次例外が漏れる」性質を何も変えないため素通りさせ、最初に見つかった
+            // try / catch / lambda で判定する（try = 内側で包まれている、
+            // lambda = その場では実行されない）
+            if (FindEnclosingGuard(blockKinds) != "catch")
             {
                 continue;
             }
@@ -175,6 +185,29 @@ public class SafeRollbackConventionTests
         }
 
         return violations;
+    }
+
+    /// <summary>
+    /// スタックの内側から順に見て、最初に現れた <c>try</c> / <c>catch</c> / <c>lambda</c> を返す
+    /// （見つからなければ <c>"none"</c>）
+    /// </summary>
+    /// <remarks>
+    /// <c>catch { if (x) { scope.Rollback(); } }</c> のように <c>catch</c> の中の別ブロックへ
+    /// 入れ子にしても二次例外は同じように漏れる。最内ブロックだけを見る判定は、この形を
+    /// 素通りさせる（testing.md「ガードの検出漏れは緑になる」）。
+    /// </remarks>
+    private static string FindEnclosingGuard(Stack<string> blockKinds)
+    {
+        // Stack<T> の列挙は内側（push 順の逆）から
+        foreach (var kind in blockKinds)
+        {
+            if (kind != "other")
+            {
+                return kind;
+            }
+        }
+
+        return "none";
     }
 
     /// <summary>
@@ -194,9 +227,14 @@ public class SafeRollbackConventionTests
             return "other";
         }
 
+        // ラムダ本体（=> { … }）はその場では実行されないため catch の内側でも対象外
+        if (source[end] == '>' && end - 1 >= 0 && source[end - 1] == '=')
+        {
+            return "lambda";
+        }
+
         // catch (Exception ex) { … } / catch { … } のいずれも直前は ')' か 'h'
-        var headerStart = Math.Max(0, end - 200);
-        var header = source.Substring(headerStart, end - headerStart + 1);
+        var header = HeaderEndingAt(source, end);
 
         if (EndsWithKeyword(header, "try"))
         {
@@ -208,29 +246,83 @@ public class SafeRollbackConventionTests
             return "catch";
         }
 
-        // catch (…) の閉じ括弧で終わる場合は、対応する開き括弧の直前を見る
-        if (header.EndsWith(")", StringComparison.Ordinal))
+        // catch (…) { … } / catch (…) when (…) { … }。when を挟む形では丸括弧が 2 段になるため、
+        // 「when の直前がまた丸括弧」である限り遡る。1 段しか見ない実装は例外フィルタ付きの
+        // catch を "other" と誤分類し、その中の素の Rollback() を見逃す
+        while (end >= 0 && source[end] == ')')
         {
-            var depth = 0;
-            for (var i = end; i >= 0; i--)
+            var open = FindMatchingOpenParen(source, end);
+            if (open <= 0)
             {
-                if (source[i] == ')')
-                {
-                    depth++;
-                }
-                else if (source[i] == '(')
-                {
-                    depth--;
-                    if (depth == 0)
-                    {
-                        var beforeParen = source.Substring(Math.Max(0, i - 200), i - Math.Max(0, i - 200));
-                        return EndsWithKeyword(beforeParen.TrimEnd(), "catch") ? "catch" : "other";
-                    }
-                }
+                break;
+            }
+
+            var beforeParen = HeaderEndingAt(source, open - 1).TrimEnd();
+
+            if (EndsWithKeyword(beforeParen, "catch"))
+            {
+                return "catch";
+            }
+
+            if (!EndsWithKeyword(beforeParen, "when"))
+            {
+                break;
+            }
+
+            // "when" を剥がしてさらに手前（catch (…) の閉じ括弧）へ
+            end = open - 1;
+            while (end >= 0 && char.IsWhiteSpace(source[end]))
+            {
+                end--;
+            }
+
+            end -= "when".Length;
+            while (end >= 0 && char.IsWhiteSpace(source[end]))
+            {
+                end--;
             }
         }
 
         return "other";
+    }
+
+    /// <summary>
+    /// <paramref name="end"/> で終わる（最大 200 文字の）ヘッダー文字列を返す
+    /// </summary>
+    private static string HeaderEndingAt(string source, int end)
+    {
+        if (end < 0)
+        {
+            return string.Empty;
+        }
+
+        var headerStart = Math.Max(0, end - 200);
+        return source.Substring(headerStart, end - headerStart + 1);
+    }
+
+    /// <summary>
+    /// <paramref name="closeParen"/> の <c>)</c> に対応する <c>(</c> の位置を返す（無ければ -1）
+    /// </summary>
+    private static int FindMatchingOpenParen(string source, int closeParen)
+    {
+        var depth = 0;
+        for (var i = closeParen; i >= 0; i--)
+        {
+            if (source[i] == ')')
+            {
+                depth++;
+            }
+            else if (source[i] == '(')
+            {
+                depth--;
+                if (depth == 0)
+                {
+                    return i;
+                }
+            }
+        }
+
+        return -1;
     }
 
     /// <summary>語境界付きで <paramref name="keyword"/> で終わるか</summary>

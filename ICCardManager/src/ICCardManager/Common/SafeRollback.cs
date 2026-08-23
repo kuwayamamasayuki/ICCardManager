@@ -69,19 +69,35 @@ namespace ICCardManager.Common
             {
                 // 本来の失敗要因は呼び出し元の catch が記録する（あるいは再スローされて上位が記録する）。
                 // ここは補足情報。LogDebug は本番のファイルに出力されないため Warning
-                // （development-conventions.md「ロギング」#1716 / #1730）
-                if (logger != null)
+                // （development-conventions.md「ロギング」#1716 / #1730）。
+                //
+                // このログ出力自体も失敗し得る（ILogger の実装・プロバイダ次第）。ここで二次例外を
+                // 漏らすと、本メソッドが防いでいるはずの「本来の失敗要因が置き換わる」状態を
+                // このクラス自身が作ることになるため、ログの失敗は握りつぶす
+                // （development-conventions.md「catch の中の後始末は、それ自体が失敗し得ることを
+                // 前提に書く」）
+                try
                 {
-                    logger.LogWarning(rollbackException,
-                        "{Operation}のロールバックに失敗しました（未コミットのためデータは確定しません）",
-                        operationName);
+                    if (logger != null)
+                    {
+                        logger.LogWarning(rollbackException,
+                            "{Operation}のロールバックに失敗しました（未コミットのためデータは確定しません）",
+                            operationName);
+                    }
+                    else
+                    {
+                        // ILogger を注入していない層（リポジトリ・マイグレーション等）でも
+                        // 痕跡を残す。既存のファイルログ機構を再利用する（ダイアログは出さない）
+                        ErrorDialogHelper.LogException(
+                            rollbackException, $"{operationName}のロールバック");
+                    }
                 }
-                else
+                catch (Exception loggingException)
                 {
-                    // ILogger を注入していない層（リポジトリ・マイグレーション等）でも
-                    // 痕跡を残す。既存のファイルログ機構を再利用する（ダイアログは出さない）
-                    ErrorDialogHelper.LogException(
-                        rollbackException, $"{operationName}のロールバック");
+                    // ログ出力の失敗は最後の手段（デバッグ出力）だけに留める。
+                    // これ以上の後始末は無く、呼び出し元の catch の続行が最優先
+                    System.Diagnostics.Debug.WriteLine(
+                        $"[SafeRollback] Failed to log rollback failure: {loggingException.Message}");
                 }
             }
         }
