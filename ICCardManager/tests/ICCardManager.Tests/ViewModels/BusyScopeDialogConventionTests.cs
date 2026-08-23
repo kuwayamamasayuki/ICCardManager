@@ -43,14 +43,30 @@ public class BusyScopeDialogConventionTests
     /// 直呼びが再び持ち込まれても検出できるようにする）。
     /// </summary>
     /// <remarks>
+    /// <para>
     /// <b>モーダルは <c>IDialogService</c> 経由だけではない。</b><c>INavigationService.ShowDialog&lt;T&gt;()</c> は
     /// <c>Window.ShowDialog()</c> を呼ぶ同期モーダルで、<c>OpenFileDialog</c> / <c>SaveFileDialog</c> /
     /// <c>FolderBrowserDialog</c> の <c>ShowDialog()</c> も同じ。<c>_dialogService.Show*</c> だけを見ると
     /// <c>ReportViewModel</c> の印刷プレビュー（<c>_navigationService.ShowDialog&lt;PrintPreviewDialog&gt;</c>）が
     /// <b>スコープ内にあるのに 1 件も検出されない</b>ため、<c>X.ShowDialog[Async]&lt;T&gt;(</c> 形も対象にする。
+    /// </para>
+    /// <para>
+    /// <b><c>_navigationService.Show*</c> も対象に含める（Issue #1837）。</b>
+    /// <c>INavigationService</c> は <c>IDialogService</c> を継承しており、
+    /// <c>ShowInformation</c> / <c>ShowWarning</c> / <c>ShowError</c> / <c>ShowConfirmation</c> /
+    /// <c>ShowWarningConfirmation</c> / <c>ShowThreeWayConfirmation</c> はいずれも同期モーダルである。
+    /// #1837 は <c>MessageBox.Show</c> の直呼び（本パターンで検出できていた形）を
+    /// <c>_navigationService.Show*</c> へ移したため、<c>_dialogService.Show*</c> だけを見ると
+    /// <b>是正済みの <c>ReportViewModel</c> の 2 か所（<c>SuspendBusy</c> で囲んだテンプレートエラー・
+    /// 帳票作成エラー）が検査対象から静かに落ち</b>、<c>SuspendBusy</c> を外す退行を検出できなくなる。
+    /// </para>
+    /// <para>
+    /// フィールド名で限定するのは、<c>_toastNotificationService.ShowError</c> のような
+    /// <b>非モーダル</b>の通知を誤検出しないため（誤検出はガード自体の寿命を縮める）。
+    /// </para>
     /// </remarks>
     private static readonly Regex ModalCallPattern = new Regex(
-        @"(_dialogService\.Show\w+|MessageBox\.Show|\w+\.ShowDialog\w*)\s*(?:<[^<>()]*>\s*)?\(");
+        @"((?:_dialogService|_navigationService)\.Show\w+|MessageBox\.Show|\w+\.ShowDialog\w*)\s*(?:<[^<>()]*>\s*)?\(");
 
     /// <summary>
     /// 処理中スコープの範囲を列挙する。
@@ -313,6 +329,29 @@ void M()
     }
 }";
 
+        // INavigationService は IDialogService を継承しており、_navigationService.Show* も同期モーダル。
+        // Issue #1837 で MessageBox.Show の直呼びがこの形へ移ったため、対象に含めないと
+        // 是正済みの ReportViewModel の 2 か所が検査から静かに落ちる。
+        const string navigationMessageBox = @"
+void M()
+{
+    using (BeginBusy(""帳票を作成中...""))
+    {
+        _navigationService.ShowError(""ng"", ""t"");
+    }
+}";
+
+        // 非モーダルの通知（トースト）は誤検出しないこと（対の表明）。
+        // 誤検出すると規約を守っている実装で赤になり、ガード自体の寿命を縮める。
+        const string toastNotification = @"
+void M()
+{
+    using (BeginBusy(""処理中...""))
+    {
+        _toastNotificationService.ShowError(""ng"", ""t"");
+    }
+}";
+
         // その場で実行されるラムダ（Dispatcher / Task.Run）は遅延ではない。
         // 一律にラムダを除外すると、ここが素通りして fail-open になる。
         const string immediateLambda = @"
@@ -338,6 +377,10 @@ void M()
             "INavigationService.ShowDialog<T>() も同期モーダルなので検査対象に含めること");
         DetectViolations(immediateLambda).Should().Be(1,
             "その場で実行されるラムダ（Dispatcher / Task.Run）は遅延ではないので除外しないこと");
+        DetectViolations(navigationMessageBox).Should().Be(1,
+            "_navigationService.Show* も同期モーダルなので検査対象に含めること（Issue #1837）");
+        DetectViolations(toastNotification).Should().Be(0,
+            "非モーダルのトースト通知は誤検出しないこと（Issue #1837 の対の表明）");
     }
 
     private static int DetectViolations(string source)

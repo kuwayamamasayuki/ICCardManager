@@ -52,14 +52,24 @@ public class MessageBoxOwnerConventionTests
 
     /// <summary>
     /// <c>MessageBox.Show(</c> の呼び出し。<c>OwnedMessageBox.Show(</c> は別物なので除外する
-    /// （<c>(?&lt;!Owned)</c> が無いと集約先への委譲まで違反として数えてしまう＝極性の反転）。
+    /// （直前の識別子文字を見る否定先読みが無いと、集約先への委譲まで違反として
+    /// 数えてしまう＝極性の反転）。
     /// </summary>
-    private static readonly Regex DirectCallPattern = new Regex(@"(?<![\w.])MessageBox\.Show\s*\(");
+    /// <remarks>
+    /// <b>否定先読みに <c>.</c> を含めない。</b>含めると
+    /// <c>System.Windows.MessageBox.Show(msg, title, button, image)</c> のような
+    /// <b>完全修飾の直呼び</b>が検出対象から外れる。この形は Issue #1837 の是正前に
+    /// <c>LedgerRowEditViewModel</c> が実際に使っていた書き方であり、除外すると
+    /// 「移行したのに同じ形で戻せる」抜け道をそのまま残すことになる。
+    /// <c>[\w]</c> だけを見れば <c>OwnedMessageBox</c>（直前が <c>d</c>）は除外され、
+    /// <c>Common.OwnedMessageBox</c> も同様に除外される。
+    /// </remarks>
+    private static readonly Regex DirectCallPattern = new Regex(@"(?<!\w)MessageBox\.Show\s*\(");
 
     /// <summary>
     /// 第 1 引数に <c>this</c>（自ウィンドウ）を渡している呼び出し
     /// </summary>
-    private static readonly Regex OwnedByThisPattern = new Regex(@"(?<![\w.])MessageBox\.Show\s*\(\s*this\s*,");
+    private static readonly Regex OwnedByThisPattern = new Regex(@"(?<!\w)MessageBox\.Show\s*\(\s*this\s*,");
 
     private static IReadOnlyList<string> GetProductionSourceFiles()
         => Directory.GetFiles(TestPaths.GetProductionSourceRoot(), "*.cs", SearchOption.AllDirectories)
@@ -144,13 +154,13 @@ public class MessageBoxOwnerConventionTests
 
         DirectCallPattern.Matches(code).Count.Should().Be(2,
             "集約先はオーナー有りと ownerless の 2 分岐だけを持つこと");
-        new Regex(@"(?<![\w.])MessageBox\.Show\s*\(\s*owner\s*,").Matches(code).Count.Should().Be(1,
+        new Regex(@"(?<!\w)MessageBox\.Show\s*\(\s*owner\s*,").Matches(code).Count.Should().Be(1,
             "解決済みオーナーを渡す分岐が 1 つあること");
 
         // 他のファイルは上のテストで「オーナー無しの呼び出しがゼロ」と表明済み。
         // したがってアプリ全体の ownerless フォールバックはここの 1 分岐だけになる。
         (DirectCallPattern.Matches(code).Count
-            - new Regex(@"(?<![\w.])MessageBox\.Show\s*\(\s*owner\s*,").Matches(code).Count)
+            - new Regex(@"(?<!\w)MessageBox\.Show\s*\(\s*owner\s*,").Matches(code).Count)
             .Should().Be(1, "ownerless フォールバックはアプリ全体で 1 か所であること（Issue #1837）");
     }
 
@@ -165,6 +175,11 @@ public class MessageBoxOwnerConventionTests
     [Theory]
     // 違反: オーナー無しのオーバーロード
     [InlineData("MessageBox.Show(msg, title, MessageBoxButton.OK, MessageBoxImage.Error);", 1)]
+    // 違反: 完全修飾の直呼び（Issue #1837 の是正前に LedgerRowEditViewModel が使っていた形）。
+    // 否定先読みに '.' を含めるとこの形が静かに検査から落ちる。
+    [InlineData("System.Windows.MessageBox.Show(msg, title, System.Windows.MessageBoxButton.YesNo, System.Windows.MessageBoxImage.Warning);", 1)]
+    // 適合: 完全修飾でも自ウィンドウをオーナーに渡していれば違反ではない
+    [InlineData("System.Windows.MessageBox.Show(this, msg, title, System.Windows.MessageBoxButton.YesNo, System.Windows.MessageBoxImage.Warning);", 0)]
     // 適合: 自ウィンドウをオーナーに渡す（改行を挟む実際の書き方も含む）
     [InlineData("MessageBox.Show(this, msg, title, MessageBoxButton.OK, MessageBoxImage.Error);", 0)]
     [InlineData("MessageBox.Show(\n    this,\n    msg, title, MessageBoxButton.OK, MessageBoxImage.Error);", 0)]
