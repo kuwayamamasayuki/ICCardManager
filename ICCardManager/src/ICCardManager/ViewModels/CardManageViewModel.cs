@@ -1294,12 +1294,14 @@ namespace ICCardManager.ViewModels
         /// 分離している（<c>StaffManageViewModel.HandleCardReadAsync</c> と同型）。
         /// </para>
         /// <para>
-        /// <b>本体全体を try/catch で包む</b>（Issue #1816）。呼び出し元は
-        /// <c>Dispatcher.InvokeAsync</c> の戻り値を破棄する fire-and-forget であり、
-        /// ここで例外が抜けると <see cref="EditCardIdm"/> と <c>IsWaitingForCard = false</c> だけが
-        /// 確定した「読み取れたように見える」状態で止まる（通知は GC 契機の
-        /// <c>TaskScheduler.UnobservedTaskException</c> まで遅れる。Issue #1725 / #1742）。
+        /// <b>本体全体を try/catch で包む</b>（Issue #1816）。呼び出し元は戻り値を待たない
+        /// fire-and-forget であり、ここで例外が抜けると <see cref="EditCardIdm"/> と
+        /// <c>IsWaitingForCard = false</c> だけが確定した「読み取れたように見える」状態で止まる。
         /// 失敗時はタッチ待ちへ戻し、確認の済んでいない IDm をフォームに残さない。
+        /// なお Issue #1843 以降、ディスパッチは <c>IDispatcherService</c> 経由となり、
+        /// ここを抜けた例外も呼び出し側（<c>WpfDispatcherService</c>）が観測してログへ残す
+        /// （生の <c>Dispatcher.InvokeAsync</c> の頃は GC 契機の
+        /// <c>TaskScheduler.UnobservedTaskException</c> まで遅れていた。Issue #1725 / #1742）。
         /// </para>
         /// </remarks>
         internal async Task HandleCardReadAsync(string idm)

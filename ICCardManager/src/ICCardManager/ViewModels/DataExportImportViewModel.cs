@@ -1191,9 +1191,12 @@ public partial class DataExportImportViewModel : ViewModelBase
     /// </summary>
     /// <remarks>
     /// 本体全体を try/catch で包む（Issue #1816）。例外が抜けると
-    /// <c>IsWaitingForCardTouch = false</c> だけが確定した「読み取れたように見える」状態で止まり、
-    /// 通知は GC 契機の <c>TaskScheduler.UnobservedTaskException</c> まで遅れる（Issue #1725 / #1742）。
+    /// <c>IsWaitingForCardTouch = false</c> だけが確定した「読み取れたように見える」状態で止まる。
     /// 失敗時はタッチ待ちへ戻し、もう一度タッチすれば再試行できるようにする。
+    /// なお Issue #1843 以降、ディスパッチは <c>IDispatcherService</c> 経由となり、
+    /// ここを抜けた例外も呼び出し側（<c>WpfDispatcherService</c>）が観測してログへ残す
+    /// （生の <c>Dispatcher.InvokeAsync</c> の頃は GC 契機の
+    /// <c>TaskScheduler.UnobservedTaskException</c> まで遅れていた。Issue #1725 / #1742）。
     /// </remarks>
     internal async Task HandleCardReadAsync(string idm)
     {

@@ -40,8 +40,26 @@ public class CardReadDispatchConventionTests
     /// 非同期ラムダを渡す生の Dispatcher ディスパッチ。
     /// <c>Invoke</c>（同期・戻り値なし）は呼び出し元スレッドで実行され例外もそのまま伝播するため対象外。
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 受け手（<c>Dispatcher</c>）を起点に照合し、<c>Application.Current.Dispatcher</c> という
+    /// 特定の参照経路には依存しない。経路を直書きすると、
+    /// <c>Application.Current?.Dispatcher</c>（本リポジトリでは <c>App.xaml.cs</c> が使用）や、
+    /// <c>Dispatcher</c> をフィールド／プロパティへ退避した形が同じ欠陥のまま検査を素通りする
+    /// （.claude/rules/development-conventions.md Issue #1786
+    /// 「ガードを書くときは『守りたい性質』ではなく『その性質を破れる全経路』を列挙する」）。
+    /// </para>
+    /// <para>
+    /// <c>BeginInvoke</c> も対象。非同期ラムダを渡すと <c>async void</c> と等価になり、
+    /// 例外の観測経路が <c>InvokeAsync</c> 以上に無い。
+    /// </para>
+    /// <para>
+    /// <c>_dispatcherService.InvokeAsync</c>（正しい形）は受け手が <c>Dispatcher</c> で
+    /// 終わらないため一致しない。
+    /// </para>
+    /// </remarks>
     private static readonly Regex RawDispatcherInvokeAsyncPattern = new(
-        @"Application\s*\.\s*Current\s*\.\s*Dispatcher\s*\.\s*InvokeAsync",
+        @"(?<![A-Za-z0-9_])Dispatcher\s*\??\s*\.\s*(?:InvokeAsync|BeginInvoke)",
         RegexOptions.Compiled);
 
     private static string ViewModelsDirectory =>
@@ -119,6 +137,12 @@ public class CardReadDispatchConventionTests
     [Theory]
     [InlineData("System.Windows.Application.Current.Dispatcher.InvokeAsync(() => X());", true)]
     [InlineData("Application.Current.Dispatcher.InvokeAsync(async () => await X());", true)]
+    // 参照経路が変わっても検出すること（経路の直書きに戻さないための固定）
+    [InlineData("Application.Current?.Dispatcher.InvokeAsync(() => X());", true)]
+    [InlineData("Application.Current.Dispatcher?.InvokeAsync(() => X());", true)]
+    [InlineData("_dispatcher.InvokeAsync(() => X());", false)]
+    [InlineData("Dispatcher.InvokeAsync(async () => await X());", true)]
+    [InlineData("Dispatcher.BeginInvoke(new Action(async () => await X()));", true)]
     [InlineData("_dispatcherService.InvokeAsync(() => HandleCardReadAsync(e.Idm));", false)]
     [InlineData("Application.Current.Dispatcher.Invoke(() => X());", false)]
     public void 検出パターンはサンプル入力で固定されていること(string line, bool expected)

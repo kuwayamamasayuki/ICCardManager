@@ -3,6 +3,7 @@ using FluentAssertions;
 using ICCardManager.Data.Repositories;
 using ICCardManager.Dtos;
 using ICCardManager.Infrastructure.CardReader;
+using ICCardManager.Infrastructure.Timing;
 using ICCardManager.Models;
 using ICCardManager.Data;
 using ICCardManager.Services;

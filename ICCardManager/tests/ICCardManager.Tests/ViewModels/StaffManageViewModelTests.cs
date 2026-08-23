@@ -4,6 +4,7 @@ using ICCardManager.Common.Messages;
 using ICCardManager.Data.Repositories;
 using ICCardManager.Dtos;
 using ICCardManager.Infrastructure.CardReader;
+using ICCardManager.Infrastructure.Timing;
 using ICCardManager.Models;
 using ICCardManager.Services;
 using ICCardManager.Tests.Infrastructure.Timing;
