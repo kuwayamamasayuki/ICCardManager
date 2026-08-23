@@ -79,7 +79,7 @@
   - **`Window.ShowDialog()` は対象外**。WPF の `ShowDialog` はアプリ内の他ウィンドウをすべて無効化するため本欠陥を持たない。マルチモニタでの配置（`Owner` が `Application.Current.MainWindow` 固定）は本 Issue でも未対応のまま。
   - **Issue に列挙された箇所は起票時点のスナップショット**であり、`IncompleteBusStopDialog` は #1817 で既に是正済みだった（着手前に main で検算した）。
   - 検証: `MessageBoxOwnerConventionTests`（新設 9）／`DialogServiceOwnerTests`（+5）／`MainViewModelTests`（+3）／`LedgerRowEditViewModelTests`（+7）。Release / Debug とも 0 警告、全 5,459 件パス。
-  - 03_画面設計書 §3.10／05_クラス設計書 §5.18a・§5.18b（新設）／07_テスト設計書 §1.1a（単体 5,378→5,398・合計 5,404→5,424 件）・UT-089・UT-096（新設）を同期更新（#1837）
+  - 03_画面設計書 §3.10／05_クラス設計書 §5.18a・§5.18b（新設）／07_テスト設計書 §1.1a（単体 5,378→5,398・合計 5,404→5,424 件）・UT-089・UT-096（新設）／開発者ガイド §2.5.11 を同期更新（#1837）
 - Issue #1836 **`BusyScope` を入れ子に対応させた**（`ViewModelBase`）。`Dispose()` が入れ子の深さを数えず無条件に `SetBusy(false)` していたため、`BeginBusy` スコープの内側から一覧再読込メソッド（自身も `BeginBusy` を開く）を呼ぶと**内側スコープの Dispose が外側の処理中状態まで解除**していた。「書き込み → 一覧再読込 → 結果表示」（#1753 / #1759 で確立した順序）に由来する形で、`CardManageViewModel` 8 / `StaffManageViewModel` 5 / `SystemManageViewModel` 1 の計 14 か所が該当する。
   - **害①: 処理中オーバーレイが処理の途中で消える**。カード削除（F2）では「削除中...」の最中に一覧再読込が閉じた時点でオーバーレイが消え、外側の処理（操作ログ記録・結果表示）が続いている間**画面が実際に操作できる**（#1761: オーバーレイが塞ぐのはマウスのヒットテストだけ）。共有モードで SMB 越しの再読込に数秒かかる環境ほど露見しやすい。
   - **害②: キャンセル機構が壊れる（潜在）**。`SetBusy(false)` は `ResetProgress()` 経由で `CancellationTokenSource` を Dispose するため、外側が `BeginCancellableBusy` だと `CancelOperation()` が無言で何もしなくなり `IsCancellationRequested` が常に false になる。現状 `BeginCancellableBusy` は帳票の一括作成 1 か所のみで内側スコープを持たないが、そこに一覧再読込を足すと即座に顕在化する。
