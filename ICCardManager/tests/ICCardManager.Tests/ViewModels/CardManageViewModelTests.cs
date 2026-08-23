@@ -3207,7 +3207,6 @@ public class CardManageViewModelTests
     public async Task DeleteAsync_競合案内のあとも処理中オーバーレイが戻ること()
     {
         const string idm = "0102030405060708";
-        bool? isBusyAfterDialog = null;
 
         _viewModel.SelectedCard = new CardDto
         {
@@ -3218,14 +3217,10 @@ public class CardManageViewModelTests
         };
         _cardRepositoryMock.Setup(r => r.GetByIdmAsync(idm, false)).ReturnsAsync((IcCard?)null);
         _cardRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<IcCard>());
-        _dialogServiceMock
-            .Setup(d => d.ShowError(It.IsAny<string>(), It.IsAny<string>()))
-            .Callback(() => { });
 
         await _viewModel.DeleteAsync();
-        isBusyAfterDialog = _viewModel.IsBusy;
 
-        isBusyAfterDialog.Should().BeFalse(
+        _viewModel.IsBusy.Should().BeFalse(
             "最外スコープを抜けた後は処理中状態が確実に解除されていること（深さが漏れていない）");
     }
 

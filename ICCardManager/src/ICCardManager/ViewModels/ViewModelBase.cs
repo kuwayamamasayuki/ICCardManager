@@ -232,7 +232,7 @@ namespace ICCardManager.ViewModels
             public BusyScope(ViewModelBase viewModel, string message, bool canCancel)
             {
                 _viewModel = viewModel;
-                var isOutermost = ++_viewModel._busyDepth == 1;
+                var isOutermost = _viewModel._busyDepth == 0;
 
                 if (isOutermost)
                 {
@@ -244,6 +244,13 @@ namespace ICCardManager.ViewModels
                         _viewModel._cancellationTokenSource = new CancellationTokenSource();
                     }
                 }
+
+                // 深さの加算は状態設定のあと。SetBusy が PropertyChanged 経由で例外を投げると
+                // コンストラクタは戻らず `using` も成立しないため、先に加算すると深さが恒久的に
+                // 漏れ、以後この ViewModel では最外の Dispose が二度と来ない（長命な
+                // MainViewModel ではオーバーレイが出たままになる）。あとから加算すれば、
+                // 漏れは「次のスコープが最外として扱われて復旧する」従来どおりの挙動に留まる。
+                _viewModel._busyDepth++;
 
                 // Issue #1836: 内側スコープは表示にもキャンセル機構にも触れない（外側優先）。
                 // 触れると「削除中...」が「読み込み中...」で上書きされ、Dispose 側だけ直しても
