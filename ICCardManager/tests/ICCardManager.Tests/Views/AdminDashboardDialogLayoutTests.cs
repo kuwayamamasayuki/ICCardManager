@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.IO;
 using System.Linq;
 using System.Text.RegularExpressions;
@@ -94,6 +94,34 @@ public class AdminDashboardDialogLayoutTests
             @"Fill\s*=\s*""\{Binding\s+BrushKey,\s*Converter=\{StaticResource\s+ResourceKeyToBrushConverter\}\}""");
         Xaml.Should().MatchRegex(
             @"Stroke\s*=\s*""\{Binding\s+BrushKey,\s*Converter=\{StaticResource\s+ResourceKeyToBrushConverter\}\}""");
+    }
+
+    [Fact]
+    public void Stacked_usage_bars_should_have_separator_stroke()
+    {
+        // 色は唯一の手掛かりであってはならない（Issue #1274 の 4 要素原則）。
+        // 積み上げ棒は区画どうしが接するため、隣接する系列の相対輝度が近いと
+        // グレースケール印刷・ロービジョン・色覚多様性で 1 本の帯に見える（Issue #1855）
+        var bars = ExtractBlock(@"<ItemsControl\s+ItemsSource\s*=\s*""\{Binding\s+UsageBars\}"".*?</ItemsControl>");
+
+        bars.Should().MatchRegex(
+            @"<Rectangle[^>]*Stroke\s*=\s*""\{DynamicResource\s+ChartSeriesSeparatorBrush\}""",
+            "積み上げ棒の区画には区切り線が要る");
+        bars.Should().MatchRegex(
+            @"<Rectangle[^>]*StrokeThickness\s*=\s*""1""",
+            "区切り線は太さを指定しないと描画されない");
+    }
+
+    [Fact]
+    public void Legend_swatches_should_have_outline()
+    {
+        // 白背景に対するコントラストが低い系列色（Okabe-Ito の橙は 2.25:1）でも
+        // スウォッチの矩形そのものが見えるよう、輪郭線を引く（Issue #1855）
+        var legend = ExtractBlock(@"<ItemsControl\s+Grid\.Row=""2""\s+ItemsSource\s*=\s*""\{Binding\s+UsageLegend\}"".*?</ItemsControl>");
+
+        legend.Should().MatchRegex(
+            @"<Rectangle[^>]*Stroke\s*=\s*""\{DynamicResource\s+\w+Brush\}""",
+            "凡例スウォッチには輪郭線が要る");
     }
 
     [Fact]

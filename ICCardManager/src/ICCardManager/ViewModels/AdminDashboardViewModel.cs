@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.ComponentModel;
@@ -154,12 +154,25 @@ namespace ICCardManager.ViewModels
         /// 系列の色として使うリソースキー。色相差を確保できる 5 色に限る。
         /// </summary>
         /// <remarks>
+        /// <para>
         /// 色値リテラルは使わず、AccessibilityStyles.xaml のブラシキーを
         /// ResourceKeyToBrushConverter 経由で解決する（Issue #1392、#1461 の方針）。
+        /// </para>
+        /// <para>
+        /// グラフ系列専用のキー（<c>ChartSeries*Brush</c>）を使い、業務画面の意味色
+        /// （<c>PrimaryBrush</c> / <c>SuccessActionBrush</c> 等）は流用しない（Issue #1855）。
+        /// 意味色は「成功＝緑・警告＝橙・危険＝赤」という意味を担うため色数を自由に増やせず、
+        /// 流用していた頃は 1 番目（<c>PrimaryBrush</c> #1976D2）と 5 番目
+        /// （<c>InfoTextBrush</c> #1565C0）の ΔE が 7.1 しかなく肉眼では同色だった。
+        /// </para>
+        /// <para>
+        /// 並び順は「先頭から n 色を採ったときの識別性」で決めている。系列が 5 本に満たない
+        /// 期間では先頭から順に消費されるため、先に来る色ほど互いに離れている必要がある。
+        /// </para>
         /// </remarks>
         internal static readonly string[] SeriesBrushKeys =
         {
-            "PrimaryBrush", "SuccessActionBrush", "WarningActionBrush", "DangerTextBrush", "InfoTextBrush"
+            "ChartSeries1Brush", "ChartSeries2Brush", "ChartSeries3Brush", "ChartSeries4Brush", "ChartSeries5Brush"
         };
 
         /// <summary>
@@ -169,8 +182,11 @@ namespace ICCardManager.ViewModels
         /// 上位系列の <see cref="SeriesBrushKeys"/> とは別枠で持つ。剰余で選ぶと
         /// 6 系列目（その他）が最上位系列と同色になり、積み上げ棒でも凡例でも
         /// 区別できなくなるため。集約された残りであることが色からも伝わるよう無彩色を充てる。
+        /// 旧 <c>MutedTextBrush</c>（#666666）は <c>ChartSeries1Brush</c>（#0072B2）と
+        /// 相対輝度がほぼ同一（0.133 / 0.152）で、積み上げ棒で隣接するとグレースケール印刷・
+        /// ロービジョン・第三色覚異常のいずれでも境界が見えなかった（Issue #1855）。
         /// </remarks>
-        internal const string OtherSeriesBrushKey = "MutedTextBrush";
+        internal const string OtherSeriesBrushKey = "ChartSeriesOtherBrush";
 
         #endregion
 
