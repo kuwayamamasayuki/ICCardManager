@@ -63,6 +63,24 @@ public class ViewModelBaseTests
 
         public new IDisposable SuspendBusy()
             => base.SuspendBusy();
+
+        private BusyScope? _innerScope;
+
+        /// <summary>
+        /// 入れ子の内側で開くキャンセル可能スコープ（Issue #1836）。
+        /// 外側の <see cref="StartCancellableBusy"/> の保持を壊さないよう別フィールドに持つ。
+        /// </summary>
+        public IDisposable StartInnerCancellableBusy(string? message = null)
+        {
+            _innerScope = base.BeginCancellableBusy(message);
+            return _innerScope;
+        }
+
+        /// <summary>
+        /// 内側スコープの CancellationToken を取得
+        /// </summary>
+        public CancellationToken GetInnerScopeCancellationToken()
+            => _innerScope?.CancellationToken ?? CancellationToken.None;
     }
 
     private readonly TestViewModel _viewModel;
@@ -591,6 +609,197 @@ public class ViewModelBaseTests
         suspension.Dispose();
 
         _viewModel.IsBusy.Should().BeFalse("2 回目の Dispose は何もしない（1 回目の復元値で上書きしない）");
+    }
+
+    #endregion
+
+    #region BusyScope 入れ子テスト（Issue #1836）
+
+    // 「書き込み → 一覧再読込 → 結果表示」（Issue #1753 / #1759）の順序では、BeginBusy スコープの
+    // 内側から一覧再読込メソッド（自身も BeginBusy を開く）を呼ぶ形が生まれる。深さを数えないと
+    // 内側の Dispose が外側の処理中状態まで解除し、外側の処理が続く間オーバーレイが消える。
+
+    [Fact]
+    public void 入れ子_内側スコープを閉じても処理中状態が続くこと()
+    {
+        using var outer = _viewModel.BeginBusy("削除中...");
+
+        using (_viewModel.BeginBusy("読み込み中..."))
+        {
+            _viewModel.IsBusy.Should().BeTrue();
+        }
+
+        _viewModel.IsBusy.Should().BeTrue("外側スコープはまだ生きている");
+    }
+
+    [Fact]
+    public void 入れ子_最外スコープが閉じて初めて処理中状態が解除されること()
+    {
+        var outer = _viewModel.BeginBusy("削除中...");
+        var inner = _viewModel.BeginBusy("読み込み中...");
+
+        inner.Dispose();
+        _viewModel.IsBusy.Should().BeTrue();
+
+        outer.Dispose();
+        _viewModel.IsBusy.Should().BeFalse();
+        _viewModel.BusyMessage.Should().BeNull();
+    }
+
+    [Fact]
+    public void 入れ子_内側スコープはBusyMessageを上書きしないこと()
+    {
+        using var outer = _viewModel.BeginBusy("削除中...");
+
+        using (_viewModel.BeginBusy("読み込み中..."))
+        {
+            _viewModel.BusyMessage.Should().Be("削除中...", "外側のメッセージを優先する");
+        }
+
+        _viewModel.BusyMessage.Should().Be("削除中...", "内側の Dispose でも巻き戻らない");
+    }
+
+    [Fact]
+    public void 入れ子_3段でも最外が閉じたときだけ解除されること()
+    {
+        var s1 = _viewModel.BeginBusy("1段目");
+        var s2 = _viewModel.BeginBusy("2段目");
+        var s3 = _viewModel.BeginBusy("3段目");
+
+        s3.Dispose();
+        _viewModel.IsBusy.Should().BeTrue();
+        s2.Dispose();
+        _viewModel.IsBusy.Should().BeTrue();
+        s1.Dispose();
+        _viewModel.IsBusy.Should().BeFalse();
+    }
+
+    [Fact]
+    public void 入れ子_内側スコープの二重Disposeで深さが壊れないこと()
+    {
+        using var outer = _viewModel.BeginBusy("削除中...");
+        var inner = _viewModel.BeginBusy("読み込み中...");
+
+        inner.Dispose();
+        inner.Dispose();
+
+        _viewModel.IsBusy.Should().BeTrue("2 回目の Dispose は深さを二重に減らさない");
+    }
+
+    [Fact]
+    public void 入れ子_外側がキャンセル可能なとき内側を閉じてもキャンセルが効くこと()
+    {
+        // 故障シナリオ (b): 内側の Dispose が SetBusy(false) → ResetProgress() を通ると
+        // 外側の CancellationTokenSource が Dispose されてキャンセルが無効化される。
+        using var outer = _viewModel.StartCancellableBusy("帳票を作成中...");
+        var token = _viewModel.GetScopeCancellationToken();
+
+        using (_viewModel.BeginBusy("読み込み中..."))
+        {
+        }
+
+        _viewModel.CancelOperation();
+
+        _viewModel.IsCancellationRequested.Should().BeTrue();
+        token.IsCancellationRequested.Should().BeTrue("外側スコープのトークンへ伝播する");
+    }
+
+    [Fact]
+    public void 入れ子_内側を閉じても外側のキャンセルボタン表示が残ること()
+    {
+        using var outer = _viewModel.StartCancellableBusy("帳票を作成中...");
+
+        using (_viewModel.BeginBusy("読み込み中..."))
+        {
+            _viewModel.CanCancel.Should().BeTrue("内側スコープは CanCancel を伏せない");
+        }
+
+        _viewModel.CanCancel.Should().BeTrue();
+    }
+
+    [Fact]
+    public void 入れ子_内側の確定プログレスが内側のDisposeで巻き戻らないこと()
+    {
+        using var outer = _viewModel.StartCancellableBusy("帳票を作成中...");
+        _viewModel.ScopeReportProgress(3, 10);
+
+        using (_viewModel.BeginBusy("読み込み中..."))
+        {
+        }
+
+        _viewModel.ProgressValue.Should().Be(3);
+        _viewModel.ProgressMax.Should().Be(10);
+        _viewModel.IsIndeterminate.Should().BeFalse();
+    }
+
+    [Fact]
+    public void 入れ子_内側のキャンセル可能スコープは外側のトークンを引き継ぐこと()
+    {
+        using var outer = _viewModel.StartCancellableBusy("外側");
+
+        using (_viewModel.StartInnerCancellableBusy("内側"))
+        {
+            _viewModel.CancelOperation();
+
+            _viewModel.GetInnerScopeCancellationToken().IsCancellationRequested
+                .Should().BeTrue("内側は新しい CancellationTokenSource を作らない");
+        }
+    }
+
+    [Fact]
+    public void 入れ子_外側がキャンセル不可なら内側のトークンはNoneであること()
+    {
+        using var outer = _viewModel.BeginBusy("削除中...");
+
+        using (_viewModel.StartInnerCancellableBusy("内側"))
+        {
+            _viewModel.GetInnerScopeCancellationToken().CanBeCanceled
+                .Should().BeFalse("キャンセル手段が無い従来どおりの状態にする");
+        }
+    }
+
+    [Fact]
+    public void 入れ子_SuspendBusyの復元が深さと矛盾しないこと()
+    {
+        // SuspendBusy（Issue #1793）は表示状態の退避・復元であり、深さには関与しない。
+        using var outer = _viewModel.BeginBusy("削除中...");
+
+        using (var inner = _viewModel.BeginBusy("読み込み中..."))
+        {
+            using (_viewModel.SuspendBusy())
+            {
+                _viewModel.IsBusy.Should().BeFalse("モーダル表示中はオーバーレイを外す");
+            }
+
+            _viewModel.IsBusy.Should().BeTrue();
+            _viewModel.BusyMessage.Should().Be("削除中...");
+        }
+
+        _viewModel.IsBusy.Should().BeTrue("内側を閉じても外側は生きている");
+
+        outer.Dispose();
+        _viewModel.IsBusy.Should().BeFalse();
+    }
+
+    [Fact]
+    public void 入れ子_解除後に再度スコープを開けること()
+    {
+        using (_viewModel.BeginBusy("1回目"))
+        {
+            using (_viewModel.BeginBusy("内側"))
+            {
+            }
+        }
+
+        _viewModel.IsBusy.Should().BeFalse();
+
+        using (_viewModel.BeginBusy("2回目"))
+        {
+            _viewModel.IsBusy.Should().BeTrue("深さが 0 に戻っているので再び最外として扱われる");
+            _viewModel.BusyMessage.Should().Be("2回目");
+        }
+
+        _viewModel.IsBusy.Should().BeFalse();
     }
 
     #endregion

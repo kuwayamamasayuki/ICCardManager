@@ -22,6 +22,23 @@ namespace ICCardManager.ViewModels
         private CancellationTokenSource _cancellationTokenSource;
 
         /// <summary>
+        /// <see cref="BusyScope"/> の入れ子の深さ（Issue #1836）
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// 「書き込み → 一覧再読込 → 結果表示」（Issue #1753 / #1759 で確立した順序）では、
+        /// <see cref="BeginBusy"/> スコープの内側から、自身も <see cref="BeginBusy"/> を開く
+        /// 一覧再読込メソッドを呼ぶ形が生まれる。深さを数えないと<b>内側スコープの
+        /// <see cref="BusyScope.Dispose"/> が外側の処理中状態まで解除</b>してしまい、
+        /// 外側の処理（操作ログ記録・結果表示）が続いている間にオーバーレイが消える。
+        /// </para>
+        /// <para>
+        /// UI スレッド専用のため排他は不要（<see cref="_cancellationTokenSource"/> と同じ前提）。
+        /// </para>
+        /// </remarks>
+        private int _busyDepth;
+
+        /// <summary>
         /// 処理中かどうか
         /// </summary>
         public bool IsBusy
@@ -124,6 +141,12 @@ namespace ICCardManager.ViewModels
         /// <summary>
         /// 処理中にスコープを作成
         /// </summary>
+        /// <remarks>
+        /// Issue #1836: 入れ子に対応する。既にスコープが開いている場合、本スコープは
+        /// <b>表示にもキャンセル機構にも触れない</b>（<paramref name="message"/> は無視され、
+        /// 外側のメッセージが表示され続ける）。処理中状態が解除されるのは最も外側の
+        /// スコープが Dispose されたときだけ。
+        /// </remarks>
         protected IDisposable BeginBusy(string message = null)
         {
             return new BusyScope(this, message, false);
@@ -132,6 +155,11 @@ namespace ICCardManager.ViewModels
         /// <summary>
         /// キャンセル可能な処理中スコープを作成
         /// </summary>
+        /// <remarks>
+        /// Issue #1836: 入れ子の内側で呼ばれた場合は新しい
+        /// <see cref="CancellationTokenSource"/> を作らず、外側のトークンを引き継ぐ
+        /// （外側がキャンセル不可なら <see cref="CancellationToken.None"/>）。
+        /// </remarks>
         protected BusyScope BeginCancellableBusy(string message = null)
         {
             return new BusyScope(this, message, true);
@@ -204,18 +232,27 @@ namespace ICCardManager.ViewModels
             public BusyScope(ViewModelBase viewModel, string message, bool canCancel)
             {
                 _viewModel = viewModel;
-                _viewModel.SetBusy(true, message);
-                _viewModel.CanCancel = canCancel;
+                var isOutermost = ++_viewModel._busyDepth == 1;
 
-                if (canCancel)
+                if (isOutermost)
                 {
-                    _viewModel._cancellationTokenSource = new CancellationTokenSource();
-                    CancellationToken = _viewModel._cancellationTokenSource.Token;
+                    _viewModel.SetBusy(true, message);
+                    _viewModel.CanCancel = canCancel;
+
+                    if (canCancel)
+                    {
+                        _viewModel._cancellationTokenSource = new CancellationTokenSource();
+                    }
                 }
-                else
-                {
-                    CancellationToken = CancellationToken.None;
-                }
+
+                // Issue #1836: 内側スコープは表示にもキャンセル機構にも触れない（外側優先）。
+                // 触れると「削除中...」が「読み込み中...」で上書きされ、Dispose 側だけ直しても
+                // 外側の処理が終わるまで内側のメッセージが残ることになる。
+                // キャンセル可能を要求された内側スコープは、外側が持つトークンを引き継ぐ
+                // （外側がキャンセル不可なら None ＝ キャンセル手段が無い従来どおりの状態）。
+                CancellationToken = canCancel
+                    ? _viewModel._cancellationTokenSource?.Token ?? CancellationToken.None
+                    : CancellationToken.None;
             }
 
             /// <summary>
@@ -236,10 +273,21 @@ namespace ICCardManager.ViewModels
 
             public void Dispose()
             {
-                if (!_disposed)
+                if (_disposed)
+                {
+                    return;
+                }
+
+                _disposed = true;
+
+                // Issue #1836: 最も外側のスコープが閉じたときだけ処理中状態を解除する。
+                // 内側で解除すると、外側の処理が続いている間オーバーレイが消えて画面が
+                // 操作可能になり（Issue #1761: オーバーレイが塞ぐのはマウスのヒットテストだけ）、
+                // さらに SetBusy(false) → ResetProgress() が外側のキャンセル機構
+                // （_cancellationTokenSource）まで破棄する。
+                if (--_viewModel._busyDepth == 0)
                 {
                     _viewModel.SetBusy(false);
-                    _disposed = true;
                 }
             }
         }
