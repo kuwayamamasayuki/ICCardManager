@@ -165,6 +165,8 @@
   - **生の `Dispatcher` は ViewModel をテスト不能にする**。`Application.Current` に依存する `OnCardRead` は ViewModel 単体テストから 1 件も踏めず、#1816 / #1807 の回帰テストはいずれも本体（`HandleCardReadAsync`）を直接呼ぶしかなかった。**入口ゲートを含む経路が 1 件も検査されていない**状態は、抑制や再判定を足すたびに広がる
   - **テスト用の代役は本番と同じ失敗の伝え方にする**。`SynchronousDispatcherService` は例外を再スローするため、「本体の `catch` 自体が失敗した」ケースで例外がテストメソッドまで伝播し、「観測されたか」を表明できない。本番（記録して再スローしない）と同じ `RecordingDispatcherService` を使う（#1737「本番が示し得ない性質を表明しない」）
   - 回帰は `CardReadDispatchConventionTests` が「生の `InvokeAsync` の不在」と「`_dispatcherService.InvokeAsync` の存在」を**対で**静的検査する。不在だけを見ると、ディスパッチごと消して同期実行へ倒した実装でも緑になる
+  - **ガードは「受け手」を起点に照合し、そこへ至る参照経路を直書きしない**（#1843 のコードレビューで判明）。初版は `Application\.Current\.Dispatcher\.InvokeAsync` を直書きしていたため、`Application.Current?.Dispatcher`（本リポジトリでは `App.xaml.cs` が使用）・`Dispatcher` をフィールドへ退避した形・`BeginInvoke` が**同じ欠陥のままガードを素通り**した。**同じ資源へ別の綴りで到達できるなら、ガードは綴りではなく資源で書く**（#1786「その性質を破れる全経路を列挙する」／#1837「移行前後の両方の綴りで grep する」の再演。**規約を引用しながら同じ誤りを犯し得る**ことに注意）
+  - **View コードビハインドには同型の欠陥が残っている**（Issue #1873）。`Views/` は `IDispatcherService` を注入できず別の観測手段が要るため、走査対象を `Views/` へ広げるのは是正と同時に行う（先に広げると既存違反で赤になり、抑制を積む形＝#1786 の形骸化を招く）
 
 ### 同じ状態表現に 2 つの意味を持たせない（同 Issue）
 
