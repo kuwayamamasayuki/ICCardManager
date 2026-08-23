@@ -3154,17 +3154,75 @@ public class CardManageViewModelTests
             "登録モードの選択も職員の判断を待つ。ヘルパーの内側で SuspendBusy すること");
     }
 
-    // NotifyDeleteConflictAsync（もう 1 つのヘルパー経由の経路）には挙動テストを置かない。
-    //
-    // このヘルパーは冒頭で LoadCardsAsync() を呼び、LoadCardsAsync は自前の
-    // BeginBusy("読み込み中...") を持つ。BusyScope.Dispose() は入れ子の深さを数えず
-    // 無条件に SetBusy(false) するため、**内側スコープの Dispose が外側（削除中...）の
-    // IsBusy まで落とす**。結果、修正前のコードでも呼び出し時点の IsBusy は false になり、
-    // 「IsBusy を捕捉する」テストは修正の有無にかかわらず緑になる＝回帰を守れない
-    // （実際に修正前のコードへ当てて緑になることを確認済み）。
-    //
-    // この入れ子の取り扱いは ViewModelBase 側の別の欠陥であり、本 Issue のスコープ外。
-    // 当該経路は静的検査（BusyScopeDialogConventionTests）が SuspendBusy の有無で守る。
+    /// <summary>
+    /// Issue #1836: NotifyDeleteConflictAsync（ヘルパー経由の経路）の挙動テスト。
+    /// </summary>
+    /// <remarks>
+    /// このヘルパーは冒頭で LoadCardsAsync() を呼び、LoadCardsAsync は自前の
+    /// BeginBusy("読み込み中...") を持つ。Issue #1836 以前の BusyScope.Dispose() は入れ子の深さを
+    /// 数えず無条件に SetBusy(false) していたため、内側スコープの Dispose が外側（削除中...）の
+    /// IsBusy まで落としており、「ダイアログ表示時点の IsBusy」だけを見るテストは
+    /// SuspendBusy の有無にかかわらず緑になった（Issue #1793 で挙動テストを置けなかった理由）。
+    /// そこで<b>一覧再読込中は IsBusy=true であること</b>を併せて表明し、入れ子の解除が
+    /// 退行したときに赤になるようにする。
+    /// </remarks>
+    [Fact]
+    public async Task DeleteAsync_競合エラーダイアログ表示中はIsBusyがfalseであること()
+    {
+        // Arrange - 読み取り時点で対象行が消えている（他 PC が先に削除した）
+        const string idm = "0102030405060708";
+        bool? isBusyDuringReload = null;
+        bool? isBusyAtDialog = null;
+
+        _viewModel.SelectedCard = new CardDto
+        {
+            CardIdm = idm,
+            CardType = "はやかけん",
+            CardNumber = "H-001",
+            IsLent = false
+        };
+        _cardRepositoryMock.Setup(r => r.GetByIdmAsync(idm, false)).ReturnsAsync((IcCard?)null);
+        _cardRepositoryMock.Setup(r => r.GetAllAsync())
+            .Callback(() => isBusyDuringReload = _viewModel.IsBusy)
+            .ReturnsAsync(new List<IcCard>());
+        _dialogServiceMock
+            .Setup(d => d.ShowError(It.IsAny<string>(), It.IsAny<string>()))
+            .Callback(() => isBusyAtDialog = _viewModel.IsBusy);
+
+        // Act
+        await _viewModel.DeleteAsync();
+
+        // Assert
+        isBusyDuringReload.Should().BeTrue(
+            "内側スコープ（読み込み中...）は外側の処理中状態を解除しない（Issue #1836）");
+        isBusyAtDialog.Should().BeFalse(
+            "競合の案内も職員の判断を待つ。ヘルパーの内側で SuspendBusy すること（Issue #1793）");
+    }
+
+    /// <summary>
+    /// Issue #1836: 一覧再読込を挟んだ後もオーバーレイが戻っていること
+    /// （SuspendBusy は中断であって終了ではない、の入れ子版）
+    /// </summary>
+    [Fact]
+    public async Task DeleteAsync_競合案内のあとも処理中オーバーレイが戻ること()
+    {
+        const string idm = "0102030405060708";
+
+        _viewModel.SelectedCard = new CardDto
+        {
+            CardIdm = idm,
+            CardType = "はやかけん",
+            CardNumber = "H-001",
+            IsLent = false
+        };
+        _cardRepositoryMock.Setup(r => r.GetByIdmAsync(idm, false)).ReturnsAsync((IcCard?)null);
+        _cardRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<IcCard>());
+
+        await _viewModel.DeleteAsync();
+
+        _viewModel.IsBusy.Should().BeFalse(
+            "最外スコープを抜けた後は処理中状態が確実に解除されていること（深さが漏れていない）");
+    }
 
     [Fact]
     public async Task SaveAsync_ダイアログを閉じた後は処理中オーバーレイが戻ること()
