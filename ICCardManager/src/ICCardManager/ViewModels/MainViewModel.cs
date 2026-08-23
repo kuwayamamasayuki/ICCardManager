@@ -1134,8 +1134,26 @@ public partial class MainViewModel : ViewModelBase
     {
         // Issue #1452: 同一の SQLiteConnection 上で SQLiteCommand が並列実行されると
         // SQLITE_MISUSE 不定動作の原因となるため、リポジトリ呼び出しは直列化する。
+        // Issue #1842: card は職員証でなかったときにしか使わないため、
+        // HandleCardInIcCardWaitingStateAsync と同じく職員証判定が null のときだけ問い合わせる。
+        // 待機（await）を 1 つ減らすことは、この直後の再判定が守る「前提が変わり得る窓」を
+        // 狭めることでもある（共有モードでは 1 クエリが数十〜数百 ms かかる）。
         var staff = await _staffRepository.GetByIdmAsync(idm);
-        var card = await _cardRepository.GetByIdmAsync(idm);
+        var card = staff == null ? await _cardRepository.GetByIdmAsync(idm) : null;
+
+        // Issue #1842: 上の await 中に届いた別のタッチは HandleCardReadAsync の入口ゲートを
+        // 通過済みであり、その 2 件目が先に処理を終えると本メソッドの継続は「古い前提」で走る。
+        // ここで前提（抑制なし・職員証待ち）を取り直さないと次の 2 つが起きる。
+        //   ・2 件目が未登録カードだった場合: 抑制と種別選択ダイアログを取得済みなので、
+        //     本メソッドがその背後で職員証認識や履歴表示を進めてしまう（#1807 の趣旨に反する）
+        //   ・2 件目が職員証だった場合: 状態は WaitingForIcCard・操作者は確定済みなのに、
+        //     本メソッドが未登録カード処理へ進み、末尾の ResetState() が確定済みの操作者を消す
+        // タイムアウト発火（ResetState）で状態が戻った場合も同じ判定で中止できる。
+        // 中止したタッチは再タッチで通常どおり処理される（副作用を残さない側へ倒す）。
+        if (IsCardReadingSuppressed || CurrentState != AppState.WaitingForStaffCard)
+        {
+            return;
+        }
 
         // 職員証かどうか確認
         if (staff != null)
@@ -1181,8 +1199,6 @@ public partial class MainViewModel : ViewModelBase
     /// </summary>
     private async Task HandleCardInIcCardWaitingStateAsync(string idm)
     {
-        StopTimeout();
-
         // Issue #1211: ICカード待ち状態で職員証がタッチされた場合の処理。
         // 運用上、ICカードリーダー上に職員証を置きっぱなしにしている職員がおり、
         // 他の職員が操作しようとすると置きっぱなしの職員証が先に反応してしまう。
@@ -1190,6 +1206,19 @@ public partial class MainViewModel : ViewModelBase
         // 扱い、操作者を上書きする（Notify 音 + 認識トースト）。同一/別職員の
         // 区別はせず、毎回通常の職員証認識フローを通す。
         var staff = await _staffRepository.GetByIdmAsync(idm);
+        var card = staff == null ? await _cardRepository.GetByIdmAsync(idm) : null;
+
+        // Issue #1842: 上の await 中に届いた別のタッチが先に処理を終えている場合は中止する
+        // （判断の根拠は HandleCardInStaffWaitingStateAsync のコメントを参照）。
+        // StopTimeout() はこの判定の後に置く。前に置くと、中止する経路でタイマーだけが止まり
+        // WaitingForIcCard から抜ける手段（タイムアウト）を失った状態で放置される。
+        if (IsCardReadingSuppressed || CurrentState != AppState.WaitingForIcCard)
+        {
+            return;
+        }
+
+        StopTimeout();
+
         if (staff != null)
         {
             _currentStaffIdm = idm;
@@ -1205,8 +1234,7 @@ public partial class MainViewModel : ViewModelBase
             return;
         }
 
-        // 交通系ICカードかどうか確認
-        var card = await _cardRepository.GetByIdmAsync(idm);
+        // 交通系ICカードかどうか確認（card は上のガード前に取得済み）
         if (card == null)
         {
             // 未登録カード

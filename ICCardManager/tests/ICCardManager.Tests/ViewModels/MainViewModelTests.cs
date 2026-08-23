@@ -2035,6 +2035,168 @@ public class MainViewModelTests : IDisposable
             "事前読み取り中のタッチは未登録カード処理へ再入しない");
     }
 
+
+    /// <summary>
+    /// Issue #1842 (1): 未登録カードの判定を待っている間に職員証が先に認識された場合、
+    /// あとから再開した未登録カード処理が確定済みの操作者と状態を消さないこと。
+    /// 入口ゲート（HandleCardReadAsync 冒頭）を通過した 2 件目は、1 件目の
+    /// <c>GetByIdmAsync</c> 待機中に職員証として認識されて <c>WaitingForIcCard</c> へ進む。
+    /// 1 件目の継続がその前提を取り直さないと、種別選択ダイアログのあとの
+    /// <c>ResetState()</c>（IC カード待ち分岐）や未登録カード処理そのものが
+    /// 「認識されたはずの職員」を消し、次の交通系ICカードタッチが履歴表示になる。
+    /// </summary>
+    [Fact]
+    public async Task 未登録カード判定の待機中に職員証が認識されたら再開後の処理を中止すること()
+    {
+        // Arrange
+        var dispatcher = new NonBlockingDispatcherService();
+        var cardReaderMock = new Mock<ICardReader>();
+        var vm = CreateViewModel(dispatcherService: dispatcher, cardReader: cardReaderMock.Object);
+        var unregisteredIdm = "0102030405060708";
+        var staffIdm = "AAAA030405060708";
+        ArrangeUnregisteredCards();
+        var unregisteredLookup = new TaskCompletionSource<IcCard>();
+        _cardRepositoryMock.Setup(r => r.GetByIdmAsync(unregisteredIdm, It.IsAny<bool>()))
+            .Returns(unregisteredLookup.Task);
+        _staffRepositoryMock.Setup(r => r.GetByIdmAsync(staffIdm, It.IsAny<bool>()))
+            .ReturnsAsync(new Staff { StaffIdm = staffIdm, Name = "テスト職員" });
+        _navigationServiceMock
+            .Setup(n => n.ShowDialog<ICCardManager.Views.Dialogs.CardTypeSelectionDialog>(
+                It.IsAny<Action<ICCardManager.Views.Dialogs.CardTypeSelectionDialog>>()))
+            .Returns((bool?)null);
+
+        // Act
+        // 1 件目（未登録カード）: 入口ゲート通過 → カード判定待ちで停止
+        cardReaderMock.Raise(r => r.CardRead += null,
+            cardReaderMock.Object, new CardReadEventArgs { Idm = unregisteredIdm });
+        vm.IsCardReadingSuppressed.Should().BeFalse("前提: 1 件目は判定待ちで抑制未取得");
+
+        // 2 件目（職員証）: 入口ゲートを通過し、そのまま認識まで完了する
+        cardReaderMock.Raise(r => r.CardRead += null,
+            cardReaderMock.Object, new CardReadEventArgs { Idm = staffIdm });
+        await WaitUntilAsync(() => dispatcher.Tasks.Count == 2 && dispatcher.Tasks[1].IsCompleted,
+            "2 件目（職員証）の認識が完了する");
+        vm.CurrentState.Should().Be(AppState.WaitingForIcCard, "前提: 職員証が先に認識されている");
+
+        // 1 件目の判定完了 → 未登録と分かるが、前提はすでに変わっている
+        unregisteredLookup.SetResult(null);
+        await dispatcher.WhenAllAsync();
+
+        // Assert
+        _navigationServiceMock.Verify(
+            n => n.ShowDialog<ICCardManager.Views.Dialogs.CardTypeSelectionDialog>(
+                It.IsAny<Action<ICCardManager.Views.Dialogs.CardTypeSelectionDialog>>()),
+            Times.Never, "職員証が認識済みなら、待機していた未登録カード処理は進めない");
+        vm.CurrentState.Should().Be(AppState.WaitingForIcCard, "確定済みの状態を巻き戻さない");
+        vm.NextActionMessage.Should().Contain("テスト職員", "確定済みの操作者を消さない");
+        _timerFactory.LastCreatedTimer.Should().NotBeNull();
+        _timerFactory.LastCreatedTimer!.IsRunning.Should().BeTrue(
+            "職員証認識で開始したタイムアウトを止めない");
+    }
+
+    /// <summary>
+    /// Issue #1842 (2): 逆の交錯順（未登録カードが先に抑制を取得し、そのあとで職員証の判定が完了する）でも、
+    /// 種別選択ダイアログの背後で職員証認識を進めないこと。
+    /// 2 件目は入口ゲートを通過済みなので、判定の await の直後に抑制を取り直さないとすり抜ける。
+    /// </summary>
+    [Fact]
+    public async Task 職員証判定の待機中に未登録カードが抑制を取得したら再開後の認識を中止すること()
+    {
+        // Arrange
+        var dispatcher = new NonBlockingDispatcherService();
+        var cardReaderMock = new Mock<ICardReader>();
+        var vm = CreateViewModel(dispatcherService: dispatcher, cardReader: cardReaderMock.Object);
+        var unregisteredIdm = "0102030405060708";
+        var staffIdm = "AAAA030405060708";
+        ArrangeUnregisteredCards();
+        var unregisteredLookup = new TaskCompletionSource<IcCard>();
+        var staffLookup = new TaskCompletionSource<Staff>();
+        var preReadBalance = new TaskCompletionSource<int?>();
+        _cardRepositoryMock.Setup(r => r.GetByIdmAsync(unregisteredIdm, It.IsAny<bool>()))
+            .Returns(unregisteredLookup.Task);
+        _staffRepositoryMock.Setup(r => r.GetByIdmAsync(staffIdm, It.IsAny<bool>()))
+            .Returns(staffLookup.Task);
+        cardReaderMock.Setup(r => r.ReadBalanceAsync(unregisteredIdm))
+            .Returns(preReadBalance.Task);
+        _navigationServiceMock
+            .Setup(n => n.ShowDialog<ICCardManager.Views.Dialogs.CardTypeSelectionDialog>(
+                It.IsAny<Action<ICCardManager.Views.Dialogs.CardTypeSelectionDialog>>()))
+            .Returns((bool?)null);
+
+        // Act
+        cardReaderMock.Raise(r => r.CardRead += null,
+            cardReaderMock.Object, new CardReadEventArgs { Idm = unregisteredIdm });
+        cardReaderMock.Raise(r => r.CardRead += null,
+            cardReaderMock.Object, new CardReadEventArgs { Idm = staffIdm });
+        dispatcher.Tasks.Should().HaveCount(2, "前提: 2 件とも入口ゲートを通過して判定待ちに入っている");
+
+        // 1 件目の判定完了 → 未登録 → 抑制取得 → 事前読み取り待ちで停止
+        unregisteredLookup.SetResult(null);
+        await WaitUntilAsync(() => vm.IsCardReadingSuppressed, "1 件目が抑制を取得して事前読み取り中");
+
+        // 2 件目（職員証）の判定完了 → 抑制中に再開する
+        staffLookup.SetResult(new Staff { StaffIdm = staffIdm, Name = "テスト職員" });
+        await WaitUntilAsync(() => dispatcher.Tasks[1].IsCompleted, "2 件目の処理が終わる");
+
+        // 1 件目の事前読み取り完了 → 種別選択ダイアログ表示 → 抑制解放
+        preReadBalance.SetResult(null);
+        await dispatcher.WhenAllAsync();
+
+        // Assert
+        _toastMock.Verify(t => t.ShowStaffRecognizedNotification(It.IsAny<string>()), Times.Never,
+            "抑制中に判定を終えた職員証を背後で認識しない");
+        _soundPlayerMock.Verify(s => s.Play(SoundType.Notify), Times.Never);
+        vm.CurrentState.Should().Be(AppState.WaitingForStaffCard);
+        vm.IsCardReadingSuppressed.Should().BeFalse("処理が終われば抑制は解放される");
+    }
+
+    /// <summary>
+    /// Issue #1842 (3): 交通系ICカード待ち状態での判定中にタイムアウトで状態が戻った場合、
+    /// 再開した処理が「操作者が確定している」という古い前提のまま貸出・返却へ進まないこと。
+    /// <c>StopTimeout()</c> をこの判定より後ろへ置いたため、中止する経路では
+    /// タイマーにも触れない（タイマーだけ止めて状態機械が止まる形を作らない）。
+    /// </summary>
+    [Fact]
+    public async Task ICカード待ちの判定中にタイムアウトしたら再開後の貸出処理を中止すること()
+    {
+        // Arrange
+        var dispatcher = new NonBlockingDispatcherService();
+        var cardReaderMock = new Mock<ICardReader>();
+        var vm = CreateViewModel(dispatcherService: dispatcher, cardReader: cardReaderMock.Object);
+        var staffIdm = "AAAA030405060708";
+        var cardIdm = "0102030405060708";
+        ArrangeUnregisteredCards();
+        _staffRepositoryMock.Setup(r => r.GetByIdmAsync(staffIdm, It.IsAny<bool>()))
+            .ReturnsAsync(new Staff { StaffIdm = staffIdm, Name = "テスト職員" });
+        var cardStaffLookup = new TaskCompletionSource<Staff>();
+        _staffRepositoryMock.Setup(r => r.GetByIdmAsync(cardIdm, It.IsAny<bool>()))
+            .Returns(cardStaffLookup.Task);
+        _cardRepositoryMock.Setup(r => r.GetByIdmAsync(cardIdm, It.IsAny<bool>()))
+            .ReturnsAsync(new IcCard { CardIdm = cardIdm, CardType = "はやかけん", CardNumber = "A-1", IsLent = false });
+
+        // 職員証を認識させて交通系ICカード待ちにする
+        cardReaderMock.Raise(r => r.CardRead += null,
+            cardReaderMock.Object, new CardReadEventArgs { Idm = staffIdm });
+        await WaitUntilAsync(() => dispatcher.Tasks.Count == 1 && dispatcher.Tasks[0].IsCompleted,
+            "職員証の認識が完了する");
+        vm.CurrentState.Should().Be(AppState.WaitingForIcCard);
+
+        // Act - 交通系ICカードをタッチ（職員判定待ちで停止）→ その間にタイムアウトが発火
+        cardReaderMock.Raise(r => r.CardRead += null,
+            cardReaderMock.Object, new CardReadEventArgs { Idm = cardIdm });
+        _timerFactory.LastCreatedTimer!.SimulateTicks(60);
+        vm.CurrentState.Should().Be(AppState.WaitingForStaffCard, "前提: 待機中にタイムアウトで状態が戻る");
+
+        cardStaffLookup.SetResult(null);
+        await dispatcher.WhenAllAsync();
+
+        // Assert
+        _cardRepositoryMock.Verify(
+            r => r.UpdateLentStatusAsync(It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<DateTime?>(), It.IsAny<string>()),
+            Times.Never, "操作者が失われた状態で貸出を記録しない");
+        vm.CurrentState.Should().Be(AppState.WaitingForStaffCard);
+    }
+
     #endregion
 
     #region 履歴行編集の自動計算の起点（Issue #1740）
