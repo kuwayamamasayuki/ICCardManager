@@ -49,15 +49,6 @@ namespace ICCardManager.Services
         /// <summary>職員名を特定できない台帳行の表示名</summary>
         internal const string UnknownStaffName = "（職員名なし）";
 
-        /// <summary>
-        /// 上位以外の職員を集約した系列の基底の表示名（人数を添えない形）
-        /// </summary>
-        /// <remarks>
-        /// 実際に系列へ載せる名前は <see cref="ChartSeriesNameFormatter.BuildOtherSeriesName"/> が
-        /// 人数を添えて組み立てる。氏名が「その他」の職員と同一表記になるのを避けるため（Issue #1858）。
-        /// </remarks>
-        internal const string OtherSeriesName = ChartSeriesNameFormatter.OtherSeriesBaseName;
-
         public AdminDashboardService(
             ICardRepository cardRepository,
             ILedgerRepository ledgerRepository,
@@ -368,14 +359,17 @@ namespace ICCardManager.Services
             // 名前に人数を添えるのは、氏名が「その他」の職員（職員マスタに無い staff_name を
             // そのまま系列名に使う経路がある）と凡例上で同一表記になるのを避けるため（Issue #1858）。
             // 組み立てを消費側（凡例・代替一覧・Excel）へ配らず、ここ 1 か所で確定させる。
-            top.Add(new MonthlyUsageSeries
+            // 件数は DTO を唯一の情報源にし、名前はそこから導出する。
+            // rest.Count を 2 か所へ別々に書くと、片方だけ変わる日が来る。
+            var otherSeries = new MonthlyUsageSeries
             {
-                Name = ChartSeriesNameFormatter.BuildOtherSeriesName(rest.Count),
                 IsOther = true,
                 AggregatedSeriesCount = rest.Count,
                 MonthlyExpenses = otherValues,
                 TotalExpense = otherValues.Sum()
-            });
+            };
+            otherSeries.Name = ChartSeriesNameFormatter.BuildOtherSeriesName(otherSeries.AggregatedSeriesCount);
+            top.Add(otherSeries);
 
             return top;
         }

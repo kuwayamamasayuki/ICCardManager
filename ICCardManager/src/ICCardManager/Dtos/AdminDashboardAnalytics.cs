@@ -86,8 +86,14 @@ namespace ICCardManager.Dtos
         public bool IsOther { get; set; }
 
         /// <summary>
-        /// 集約された系列（職員）の数。<see cref="IsOther"/> が false の系列では 0（Issue #1858）
+        /// 集約された系列の数。<see cref="IsOther"/> が false の系列では 0（Issue #1858）
         /// </summary>
+        /// <remarks>
+        /// 数えているのは<b>系列</b>であり、職員の同一性の解決結果に乗る。
+        /// <c>lender_idm</c> を持つ行と持たない行が同じ職員に混在する過去のインポートデータでは
+        /// 1 人が 2 系列に分かれ、実人数より大きくなり得る（同じ状況では上位系列の凡例にも
+        /// 同名の行が 2 つ並ぶ。本グラフ全体の identity モデルの近似）。
+        /// </remarks>
         public int AggregatedSeriesCount { get; set; }
 
         /// <summary>月ごとの払出金額（<see cref="AdminDashboardAnalytics.MonthLabels"/> と同じ並び・長さ）</summary>
