@@ -4,6 +4,7 @@ using System.Linq;
 using System.Threading.Tasks;
 using FluentAssertions;
 using ICCardManager.Common;
+using ICCardManager.Common.Charting;
 using ICCardManager.Data.Repositories;
 using ICCardManager.Dtos;
 using ICCardManager.Models;
@@ -790,9 +791,68 @@ public class AdminDashboardServiceTests
 
         result.UsageSeries.Should().HaveCount(AppConstants.AdminDashboardMaxSeries + 1);
         result.UsageSeries.Last().IsOther.Should().BeTrue();
-        result.UsageSeries.Last().Name.Should().Be(AdminDashboardService.OtherSeriesName);
+        // 集約系列の名前には人数が入る（氏名「その他」の職員との同一表記を避ける。Issue #1858）
+        result.UsageSeries.Last().Name.Should().Be(ChartSeriesNameFormatter.BuildOtherSeriesName(3));
+        result.UsageSeries.Last().AggregatedSeriesCount.Should().Be(3);
         // 上位 5 名は 8000/7000/6000/5000/4000 円、残りは 3000+2000+1000 = 6000 円
         result.UsageSeries.Last().TotalExpense.Should().Be(6000);
+    }
+
+    [Fact]
+    public async Task GetAnalyticsAsync_氏名がその他の職員がいても集約系列と同一表記にならないこと()
+    {
+        // Issue #1858 の故障シナリオ:
+        // 氏名「その他」の職員（職員マスタに無い staff_name をそのまま系列名に使う経路）が
+        // 上位 5 名に入り、かつ職員が 6 人以上いると、凡例に「その他」が 2 行並んで
+        // どちらが集約分か判別できなくなる。
+        var rows = new List<MonthlyUsageRow>
+        {
+            new MonthlyUsageRow { YearMonth = "2026-05", LenderIdm = "", StaffName = "その他", TotalExpense = 9000 }
+        };
+        rows.AddRange(Enumerable.Range(1, AppConstants.AdminDashboardMaxSeries + 2)
+            .Select(i => new MonthlyUsageRow
+            {
+                YearMonth = "2026-05",
+                LenderIdm = "STAFF" + i.ToString("D11"),
+                StaffName = "職員" + i,
+                TotalExpense = i * 1000
+            }));
+        SetupAnalyticsDefaults(monthlyUsage: rows);
+
+        var result = await CreateService().GetAnalyticsAsync(
+            new DateTime(2026, 5, 1), new DateTime(2026, 5, 31), AsOf);
+
+        // 氏名「その他」の職員は上位 5 名に入り、名前はそのまま
+        result.UsageSeries.Should().ContainSingle(s => !s.IsOther && s.Name == "その他");
+        // 集約系列は人数付きなので、表示名が衝突しない
+        result.UsageSeries.Select(s => s.Name).Should().OnlyHaveUniqueItems();
+        var other = result.UsageSeries.Single(s => s.IsOther);
+        other.Name.Should().Be(ChartSeriesNameFormatter.BuildOtherSeriesName(other.AggregatedSeriesCount));
+        other.Name.Should().NotBe("その他");
+    }
+
+    [Fact]
+    public async Task GetAnalyticsAsync_集約系列の人数が実際に集約した系列数と一致すること()
+    {
+        // 人数はラベルの飾りではなく集計の事実なので、集約された系列の数と一致させる
+        const int extra = 4;
+        var rows = Enumerable.Range(1, AppConstants.AdminDashboardMaxSeries + extra)
+            .Select(i => new MonthlyUsageRow
+            {
+                YearMonth = "2026-05",
+                LenderIdm = "STAFF" + i.ToString("D11"),
+                StaffName = "職員" + i,
+                TotalExpense = i * 1000
+            })
+            .ToList();
+        SetupAnalyticsDefaults(monthlyUsage: rows);
+
+        var result = await CreateService().GetAnalyticsAsync(
+            new DateTime(2026, 5, 1), new DateTime(2026, 5, 31), AsOf);
+
+        var other = result.UsageSeries.Single(s => s.IsOther);
+        other.AggregatedSeriesCount.Should().Be(extra);
+        other.Name.Should().Contain(extra.ToString());
     }
 
     [Fact]

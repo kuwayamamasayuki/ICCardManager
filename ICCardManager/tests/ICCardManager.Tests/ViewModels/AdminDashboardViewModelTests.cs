@@ -5,6 +5,7 @@ using System.Linq;
 using System.Threading.Tasks;
 using FluentAssertions;
 using ICCardManager.Common;
+using ICCardManager.Common.Charting;
 using ICCardManager.Dtos;
 using ICCardManager.Services;
 using ICCardManager.ViewModels;
@@ -27,6 +28,9 @@ public class AdminDashboardViewModelTests
     private readonly Mock<AdminDashboardExcelExportService> _exportService = new();
     private readonly Mock<IDialogService> _dialogService = new();
     private readonly Mock<ISafeFileLauncher> _safeFileLauncher = new();
+
+    /// <summary>テストデータの「その他」系列が集約した人数（Issue #1858）</summary>
+    private const int OtherAggregatedCount = 3;
 
     private AdminDashboardViewModel CreateViewModel() => new AdminDashboardViewModel(
         _service.Object, _exportService.Object, _dialogService.Object, _safeFileLauncher.Object);
@@ -88,12 +92,15 @@ public class AdminDashboardViewModelTests
             }).ToList(),
             // includeOtherSeries: 上位以外を集約した「その他」を末尾に付ける
             // （AdminDashboardService.BuildUsageSeries が上限超過時に返す形）
+            // 名前は本番と同じ組み立て（人数付き）にする。ここでリテラルを使うと、
+            // 本番だけが変わっても緑のまま通る（Issue #1858）
             UsageSeries = Enumerable.Range(1, seriesCount).Select(i => new MonthlyUsageSeries
             {
                 Name = includeOtherSeries && i == seriesCount
-                    ? AdminDashboardService.OtherSeriesName
+                    ? ChartSeriesNameFormatter.BuildOtherSeriesName(OtherAggregatedCount)
                     : "職員" + i,
                 IsOther = includeOtherSeries && i == seriesCount,
+                AggregatedSeriesCount = includeOtherSeries && i == seriesCount ? OtherAggregatedCount : 0,
                 MonthlyExpenses = Enumerable.Range(1, monthCount).Select(m => m * 100 * i).ToList(),
                 TotalExpense = Enumerable.Range(1, monthCount).Sum(m => m * 100 * i)
             }).ToList(),
@@ -342,6 +349,28 @@ public class AdminDashboardViewModelTests
     }
 
     [Fact]
+    public async Task LoadAnalyticsAsync_凡例で氏名その他と集約系列が別表記になること()
+    {
+        // Issue #1858: 色（#1815）だけを分けてもラベルが同一だと、
+        // 凡例に「その他」が 2 行並んでどちらが集約分か判別できない
+        var analytics = CreateAnalytics(monthCount: 2, seriesCount: 3, includeOtherSeries: true);
+        analytics.UsageSeries[0].Name = ChartSeriesNameFormatter.OtherSeriesBaseName;
+        SetupAnalytics(analytics);
+        var vm = CreateViewModel();
+
+        await vm.LoadAnalyticsAsync();
+
+        vm.UsageLegend.Select(l => l.Label).Should().OnlyHaveUniqueItems(
+            "同一表記の凡例が並ぶと、どちらが集約分か利用者には判別できない");
+        vm.UsageLegend.Last().Label.Should()
+            .Be(ChartSeriesNameFormatter.BuildOtherSeriesName(OtherAggregatedCount));
+
+        // 代替一覧（アクセシビリティ経路）も同じ名前を使う
+        vm.UsageTableRows.Select(r => r.SeriesName).Should()
+            .Contain(ChartSeriesNameFormatter.BuildOtherSeriesName(OtherAggregatedCount));
+    }
+
+    [Fact]
     public async Task LoadAnalyticsAsync_UsesADedicatedColorForTheOtherSeries()
     {
         // Issue #1815: 上位 5 系列 + 「その他」の 6 系列。
@@ -387,7 +416,12 @@ public class AdminDashboardViewModelTests
         var series = new List<MonthlyUsageSeries>
         {
             new MonthlyUsageSeries { Name = "職員1" },
-            new MonthlyUsageSeries { Name = AdminDashboardService.OtherSeriesName, IsOther = true },
+            new MonthlyUsageSeries
+            {
+                Name = ChartSeriesNameFormatter.BuildOtherSeriesName(OtherAggregatedCount),
+                IsOther = true,
+                AggregatedSeriesCount = OtherAggregatedCount
+            },
             new MonthlyUsageSeries { Name = "職員2" }
         };
 
@@ -666,7 +700,7 @@ public class AdminDashboardViewModelTests
 
         // 「その他」もグラフに積まれる以上、一覧から落とすと合計が合わない（Issue #1815）
         vm.UsageTableRows.Select(r => r.SeriesName).Should()
-            .Contain(AdminDashboardService.OtherSeriesName);
+            .Contain(ChartSeriesNameFormatter.BuildOtherSeriesName(OtherAggregatedCount));
         vm.UsageTableRows.Should().HaveCount(6, "2 か月 × 3 系列");
     }
 

@@ -4,6 +4,7 @@ using System.Linq;
 using System.Threading.Tasks;
 using ClosedXML.Excel;
 using FluentAssertions;
+using ICCardManager.Common.Charting;
 using ICCardManager.Dtos;
 using ICCardManager.Services;
 using Xunit;
@@ -20,6 +21,9 @@ namespace ICCardManager.Tests.Services;
 /// </remarks>
 public class AdminDashboardExcelExportServiceTests : IDisposable
 {
+    /// <summary>テストデータの「その他」系列が集約した人数（Issue #1858）</summary>
+    private const int OtherAggregatedCount = 3;
+
     private readonly string _outputPath;
 
     public AdminDashboardExcelExportServiceTests()
@@ -112,8 +116,10 @@ public class AdminDashboardExcelExportServiceTests : IDisposable
                 },
                 new MonthlyUsageSeries
                 {
-                    Name = "その他",
+                    // 名前は本番と同じ組み立て（人数付き）。Issue #1858
+                    Name = ChartSeriesNameFormatter.BuildOtherSeriesName(OtherAggregatedCount),
                     IsOther = true,
+                    AggregatedSeriesCount = OtherAggregatedCount,
                     MonthlyExpenses = new[] { 500, 0, 100 },
                     TotalExpense = 600
                 }
@@ -290,7 +296,10 @@ public class AdminDashboardExcelExportServiceTests : IDisposable
         var sheet = workbook.Worksheet(AdminDashboardExcelExportService.MonthlyUsageSheetName);
         sheet.Cell(1, 1).GetString().Should().Be("年月");
         sheet.Cell(1, 2).GetString().Should().Be("福岡 太郎");
-        sheet.Cell(1, 3).GetString().Should().Be("その他");
+        // 集約系列の見出しは画面の凡例と同じ名前（人数付き）。Issue #1858
+        sheet.Cell(1, 3).GetString()
+            .Should().Be(ChartSeriesNameFormatter.BuildOtherSeriesName(OtherAggregatedCount));
+        sheet.Cell(1, 3).GetString().Should().NotBe(ChartSeriesNameFormatter.OtherSeriesBaseName);
         sheet.Cell(1, 4).GetString().Should().Be("合計");
         sheet.Cell(2, 1).GetString().Should().Be("2026/06");
         sheet.Cell(2, 2).GetDouble().Should().Be(1000);
