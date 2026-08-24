@@ -178,7 +178,7 @@
   - **テスト用の代役は本番と同じ失敗の伝え方にする**。`SynchronousDispatcherService` は例外を再スローするため、「本体の `catch` 自体が失敗した」ケースで例外がテストメソッドまで伝播し、「観測されたか」を表明できない。本番（記録して再スローしない）と同じ `RecordingDispatcherService` を使う（#1737「本番が示し得ない性質を表明しない」）
   - 回帰は `CardReadDispatchConventionTests` が「生の `InvokeAsync` の不在」と「`_dispatcherService.InvokeAsync` の存在」を**対で**静的検査する。不在だけを見ると、ディスパッチごと消して同期実行へ倒した実装でも緑になる
   - **ガードは「受け手」を起点に照合し、そこへ至る参照経路を直書きしない**（#1843 のコードレビューで判明）。初版は `Application\.Current\.Dispatcher\.InvokeAsync` を直書きしていたため、`Application.Current?.Dispatcher`（本リポジトリでは `App.xaml.cs` が使用）・`Dispatcher` をフィールドへ退避した形・`BeginInvoke` が**同じ欠陥のままガードを素通り**した。**同じ資源へ別の綴りで到達できるなら、ガードは綴りではなく資源で書く**（#1786「その性質を破れる全経路を列挙する」／#1837「移行前後の両方の綴りで grep する」の再演。**規約を引用しながら同じ誤りを犯し得る**ことに注意）
-  - **View コードビハインドには同型の欠陥が残っている**（Issue #1873）。`Views/` は `IDispatcherService` を注入できず別の観測手段が要るため、走査対象を `Views/` へ広げるのは是正と同時に行う（先に広げると既存違反で赤になり、抑制を積む形＝#1786 の形骸化を招く）
+  - **View コードビハインドは `Common/DispatcherObservation` へ寄せる**（Issue #1873）。`Views/` は `IDispatcherService` を注入できない（`Window` は自分自身の `Dispatcher` を持つ）ため、`Dispatcher.InvokeAsyncObserved(…, operationName, priority)` を唯一の観測手段とする。観測の実体は `WpfDispatcherService.ObserveTask` からも呼ばれる同一の `Observe` で、層ごとに違うのは記録先だけ（ViewModels は `ILogger`、Views は `ErrorDialogHelper.LogException`。#1817）。`CardReadDispatchConventionTests` の走査対象は `Views/` を含む。**是正と走査拡大は同じ PR で行う** — 先に広げると既存違反で赤になり抑制を積む形（＝#1786 の形骸化）を招くため、`grep` で `Views/` の全 10 か所を列挙して一度に寄せた（同期ラムダを渡す `InvokeAsync(Action)` / `BeginInvoke` も例外を `DispatcherOperation` の `Task` へ格納するだけで誰も観測しない点は同じ）
 
 ### 同じ状態表現に 2 つの意味を持たせない（同 Issue）
 

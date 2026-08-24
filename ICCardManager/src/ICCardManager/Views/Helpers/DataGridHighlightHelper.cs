@@ -5,6 +5,7 @@ using System.Windows.Controls.Primitives;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
 using System.Windows.Threading;
+using ICCardManager.Common;
 
 namespace ICCardManager.Views.Helpers
 {
@@ -44,7 +45,8 @@ namespace ICCardManager.Views.Helpers
             if (row == null)
             {
                 // コンテナがまだ未生成の場合、低優先度で再試行
-                dataGrid.Dispatcher.InvokeAsync(() =>
+                // Issue #1873: ディスパッチした処理の例外を観測してログへ残す
+                dataGrid.Dispatcher.InvokeAsyncObserved(() =>
                 {
                     dataGrid.ScrollIntoView(item);
                     dataGrid.UpdateLayout();
@@ -53,7 +55,7 @@ namespace ICCardManager.Views.Helpers
                     {
                         AnimateRow(retryRow, durationSeconds, onCompleted);
                     }
-                }, DispatcherPriority.ContextIdle);
+                }, "ハイライト対象行の再検索", DispatcherPriority.ContextIdle);
                 return;
             }
 

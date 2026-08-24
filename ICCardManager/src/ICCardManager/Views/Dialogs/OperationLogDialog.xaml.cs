@@ -129,12 +129,16 @@ namespace ICCardManager.Views.Dialogs
             // ApplicationIdle はフォーカス関連の Narrator 処理を含むすべての処理が完了したアイドル状態で走る。
             // ただし Narrator はフォーカス位置のキー操作フィードバック中は Live Region 通知を抑制する
             // 仕様があり、ページ送りの中間ページでは完全に読み上げられない既知制約あり（PR #1555 参照）。
-            element.Dispatcher.BeginInvoke(DispatcherPriority.ApplicationIdle, new Action(() =>
-            {
-                var peer = UIElementAutomationPeer.FromElement(element)
-                           ?? UIElementAutomationPeer.CreatePeerForElement(element);
-                peer?.RaiseAutomationEvent(AutomationEvents.LiveRegionChanged);
-            }));
+            // Issue #1873: ディスパッチした処理の例外を観測してログへ残す
+            element.Dispatcher.InvokeAsyncObserved(
+                () =>
+                {
+                    var peer = UIElementAutomationPeer.FromElement(element)
+                               ?? UIElementAutomationPeer.CreatePeerForElement(element);
+                    peer?.RaiseAutomationEvent(AutomationEvents.LiveRegionChanged);
+                },
+                "操作ログのスクリーンリーダー通知",
+                DispatcherPriority.ApplicationIdle);
         }
 
         private void OnClosed(object? sender, EventArgs e)

@@ -1,6 +1,6 @@
 using System;
-using System.Threading;
 using System.Threading.Tasks;
+using ICCardManager.Common;
 using Microsoft.Extensions.Logging;
 
 namespace ICCardManager.Infrastructure.Timing
@@ -25,6 +25,9 @@ namespace ICCardManager.Infrastructure.Timing
     /// </remarks>
     public class WpfDispatcherService : IDispatcherService
     {
+        /// <summary>ログに載せる操作名（Issue #1730: 障害調査を先に進める値を載せる）</summary>
+        private const string DispatchOperationName = "UIスレッドへディスパッチした処理";
+
         private readonly ILogger<WpfDispatcherService> _logger;
 
         /// <summary>
@@ -87,13 +90,18 @@ namespace ICCardManager.Infrastructure.Timing
                 return;
             }
 
-            task.ContinueWith(
-                t => _logger?.LogError(
-                    t.Exception,
-                    "UIスレッドへディスパッチした処理が例外で終了しました"),
-                CancellationToken.None,
-                TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously,
-                TaskScheduler.Default);
+            // 観測の実体は Common/DispatcherObservation に 1 つだけ置く（Issue #1873）。
+            // View コードビハインドは IDispatcherService を注入できないため同じ観測を
+            // 拡張メソッドとして使う。継続の登録方法を 2 通り持つと、片方だけ変わる日が来る
+            // （development-conventions.md Issue #1831「手段を 1 つに寄せる」）。
+            // 記録先だけがこの層の関心事（ILogger 注入済み）なので、そこを差し替える。
+            DispatcherObservation.Observe(
+                task,
+                DispatchOperationName,
+                (exception, operationName) => _logger?.LogError(
+                    exception,
+                    "{Operation}が例外で終了しました",
+                    operationName));
         }
     }
 }

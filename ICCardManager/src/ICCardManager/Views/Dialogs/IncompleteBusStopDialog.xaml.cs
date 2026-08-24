@@ -68,7 +68,9 @@ namespace ICCardManager.Views.Dialogs
                 if (updatedItem != null && !SummaryGenerator.HasIncompleteBusStop(updatedItem.Summary))
                 {
                     // 摘要が完全に更新された場合：ハイライト→2秒後に一覧から削除
-                    await Dispatcher.InvokeAsync(() =>
+                    // Issue #1873: 生の Dispatcher.InvokeAsync は例外を DispatcherOperation の Task へ
+                    // 格納するだけで、誰も観測しないとログにも画面にも何も残らない。
+                    Dispatcher.InvokeAsyncObserved(() =>
                     {
                         DataGridHighlightHelper.HighlightRow(BusStopDataGrid, updatedItem, 2.0, () =>
                         {
@@ -78,7 +80,7 @@ namespace ICCardManager.Views.Dialogs
                             // 一覧の再読み込み失敗（共有モードの DB ロック・UNC 断）は
                             // GC 契機の TaskScheduler.UnobservedTaskException まで誰にも届かず、
                             // 画面には入力済みの行が残ったままになる。
-                            _ = Dispatcher.InvokeAsync(async () =>
+                            Dispatcher.InvokeAsyncObserved(async () =>
                             {
                                 try
                                 {
@@ -88,9 +90,9 @@ namespace ICCardManager.Views.Dialogs
                                 {
                                     ErrorDialogHelper.LogException(ex, "バス停名未入力一覧の再読み込み");
                                 }
-                            });
+                            }, "バス停名未入力一覧の再読み込み");
                         });
-                    }, DispatcherPriority.ContextIdle);
+                    }, "バス停名入力後のハイライト表示", DispatcherPriority.ContextIdle);
                 }
                 else
                 {

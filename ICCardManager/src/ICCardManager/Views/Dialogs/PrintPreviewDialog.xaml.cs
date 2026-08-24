@@ -9,6 +9,7 @@ using System.Windows.Controls.Primitives;
 using System.Windows.Documents;
 using System.Windows.Input;
 using System.Windows.Threading;
+using ICCardManager.Common;
 using ICCardManager.ViewModels;
 
 namespace ICCardManager.Views.Dialogs
@@ -172,7 +173,8 @@ namespace ICCardManager.Views.Dialogs
             }
 
             // ページ数を再計算（レンダリング完了後に実行、ContextIdleで確実にUI更新後）
-            Dispatcher.BeginInvoke(new Action(() =>
+            // Issue #1873: ディスパッチした処理の例外を観測してログへ残す
+            Dispatcher.InvokeAsyncObserved(() =>
             {
                 ViewModel.RecalculatePageCount();
 
@@ -203,7 +205,7 @@ namespace ICCardManager.Views.Dialogs
 
                 // 初期化完了後にMasterPageNumber監視を開始
                 SubscribeToMasterPageNumberChanges();
-            }), System.Windows.Threading.DispatcherPriority.ContextIdle);
+            }, "印刷プレビューのページ数再計算", DispatcherPriority.ContextIdle);
         }
 
         /// <summary>

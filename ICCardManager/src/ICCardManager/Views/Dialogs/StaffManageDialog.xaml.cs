@@ -120,8 +120,9 @@ namespace ICCardManager.Views.Dialogs
         {
             if (NameTextBox.IsVisible)
             {
-                Dispatcher.BeginInvoke(
-                    new Action(() =>
+                // Issue #1873: ディスパッチした処理の例外を観測してログへ残す
+                Dispatcher.InvokeAsyncObserved(
+                    () =>
                     {
                         if (!IsActive)
                         {
@@ -131,7 +132,8 @@ namespace ICCardManager.Views.Dialogs
                         FocusManager.SetFocusedElement(this, NameTextBox);
                         Keyboard.Focus(NameTextBox);
                         NameTextBox.Focus();
-                    }),
+                    },
+                    "氏名入力欄へのフォーカス設定",
                     DispatcherPriority.ApplicationIdle);
             }
         }
@@ -162,8 +164,9 @@ namespace ICCardManager.Views.Dialogs
                 return;
             }
 
-            Dispatcher.BeginInvoke(
-                new Action(() =>
+            // Issue #1873: ディスパッチした処理の例外を観測してログへ残す
+            Dispatcher.InvokeAsyncObserved(
+                () =>
                 {
                     if (!IsActive)
                     {
@@ -173,7 +176,8 @@ namespace ICCardManager.Views.Dialogs
                     FocusManager.SetFocusedElement(this, NameTextBox);
                     Keyboard.Focus(NameTextBox);
                     NameTextBox.Focus();
-                }),
+                },
+                "氏名入力欄へのフォーカス設定",
                 DispatcherPriority.ApplicationIdle);
         }
 
@@ -187,14 +191,15 @@ namespace ICCardManager.Views.Dialogs
             {
                 var idm = _viewModel.NewlyRegisteredIdm;
                 // DataGridの描画完了を待ってからハイライト実行
-                Dispatcher.InvokeAsync(() =>
+                // Issue #1873: ディスパッチした処理の例外を観測してログへ残す
+                Dispatcher.InvokeAsyncObserved(() =>
                 {
                     var item = _viewModel.StaffList.FirstOrDefault(s => s.StaffIdm == idm);
                     if (item != null)
                     {
                         DataGridHighlightHelper.HighlightRow(StaffDataGrid, item);
                     }
-                }, DispatcherPriority.ContextIdle);
+                }, "登録済み職員のハイライト表示", DispatcherPriority.ContextIdle);
             }
         }
 

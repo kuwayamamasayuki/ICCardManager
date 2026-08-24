@@ -112,14 +112,15 @@ namespace ICCardManager.Views.Dialogs
             {
                 var idm = _viewModel.NewlyRegisteredIdm;
                 // DataGridの描画完了を待ってからハイライト実行
-                Dispatcher.InvokeAsync(() =>
+                // Issue #1873: ディスパッチした処理の例外を観測してログへ残す
+                Dispatcher.InvokeAsyncObserved(() =>
                 {
                     var item = _viewModel.Cards.FirstOrDefault(c => c.CardIdm == idm);
                     if (item != null)
                     {
                         DataGridHighlightHelper.HighlightRow(CardDataGrid, item);
                     }
-                }, DispatcherPriority.ContextIdle);
+                }, "登録済みカードのハイライト表示", DispatcherPriority.ContextIdle);
             }
         }
 
