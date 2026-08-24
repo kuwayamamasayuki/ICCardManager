@@ -72,11 +72,23 @@ namespace ICCardManager.Dtos
     /// </summary>
     public class MonthlyUsageSeries
     {
-        /// <summary>系列名（職員名、または「その他」）</summary>
+        /// <summary>
+        /// 系列名（職員名、または集約系列の「その他（N 名）」）
+        /// </summary>
+        /// <remarks>
+        /// 集約系列の名前は <see cref="Common.Charting.ChartSeriesNameFormatter.BuildOtherSeriesName"/>
+        /// が組み立てる。凡例・代替一覧・Excel はこの値をそのまま表示するため、
+        /// 消費側で接尾辞を足さないこと（Issue #1858）。
+        /// </remarks>
         public string Name { get; set; } = string.Empty;
 
         /// <summary>上位以外を集約した「その他」系列かどうか</summary>
         public bool IsOther { get; set; }
+
+        /// <summary>
+        /// 集約された系列（職員）の数。<see cref="IsOther"/> が false の系列では 0（Issue #1858）
+        /// </summary>
+        public int AggregatedSeriesCount { get; set; }
 
         /// <summary>月ごとの払出金額（<see cref="AdminDashboardAnalytics.MonthLabels"/> と同じ並び・長さ）</summary>
         public IReadOnlyList<int> MonthlyExpenses { get; set; } = new int[0];
