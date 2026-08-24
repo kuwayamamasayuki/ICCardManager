@@ -97,6 +97,15 @@
 - 逆に、正常時も高頻度で出る内容（毎ループの経過報告等）は `LogDebug` のままでよい（本番では出力されない前提を織り込む）
 - ログレベルを変更したら、その理由をコード上のコメントに残す（後から「なぜ Information なのか」を再検討させない）
 
+### 「観測している」ことと「調査に使えるログが残る」ことは別（Issue #1873）
+
+`Task.Exception` が返す `AggregateException` は **TPL が組み立てたもので一度も throw されていない**ため `StackTrace` が `null`。これをそのままログ機構へ渡すと、残るのは `AggregateException: One or more errors occurred.` ＋**空のスタックトレース**だけになる。
+
+- **例外の種別で分岐する下流（`ErrorDialogHelper.GetErrorInfo` の `SYS00x` 分類、`AppException` の `ErrorCode` / `UserFriendlyMessage`）はすべて既定分岐へ落ちる**。#1757 が「例外型の変更は、その型を前提にしていた上位の分岐を静かに外す」で記録したのと同じ形が、**ラップした型を渡す側からも起きる**
+- `AggregateException` は `Flatten()` してから、失敗要因が 1 つならその例外を記録する（`Common/DispatcherObservation.UnwrapAggregate`）。複数なら情報を落とさないよう平坦化した集約のまま渡す
+- **「無言だった失敗を可視化する」修正では、可視化した先に何が残るかまで見る**。#1873 の初版は観測経路を通すところで満足しており、残るログが `SYS999` ＋空のスタックトレースであることに気付いていなかった（コードレビューで検出）。**この Issue が消そうとしていた状態そのもの**に着地しかけた
+- **その欠陥はテストの表明にも写る**。#1873 の初版のテストは `log[0].Exception.InnerException.Should().BeOfType<InvalidOperationException>()` と書かれており、**`AggregateException` で記録されることを前提に置いて欠陥を追認していた**。記録されたものを「そのまま」表明する形（`log[0].Exception.Should().BeOfType<InvalidOperationException>()`）にすると、この取り違えが表面化する
+
 ### IDm はログへ生で出さない — 規約は静的検査で固定する（Issue #1852）
 
 職員証の IDm は本システム唯一の認証要素であり、平文のログファイル（インストーラが `users-full` ACL を付与）へ生で残すとローカルユーザーが認証クレデンシャルを収集できる（CWE-532）。ログへ出す IDm は必ず `IdmMasker.Mask()`（Issue #1704）を通す。
