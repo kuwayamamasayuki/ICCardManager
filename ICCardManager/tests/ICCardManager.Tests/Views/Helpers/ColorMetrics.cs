@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Globalization;
 
 namespace ICCardManager.Tests.Views.Helpers;
@@ -83,9 +83,17 @@ internal static class ColorMetrics
         }
 
         var body = hex.StartsWith("#", StringComparison.Ordinal) ? hex.Substring(1) : hex;
+
+        // WPF は #AARRGGBB も受け付ける。将来その形で系列色が定義されたとき、
+        // ここで弾くと呼び出し元には「キーが見つからない」としか見えず原因に辿り着けない
+        if (body.Length == 8)
+        {
+            body = body.Substring(2);
+        }
+
         if (body.Length != 6)
         {
-            throw new FormatException($"#RRGGBB 形式ではありません: {hex}");
+            throw new FormatException($"#RRGGBB または #AARRGGBB 形式ではありません: {hex}");
         }
 
         return (
@@ -107,7 +115,7 @@ internal static class ColorMetrics
     /// 白背景（#FFFFFF）に対する WCAG コントラスト比。
     /// </summary>
     public static double ContrastAgainstWhite(string hex)
-        => 1.05 / (RelativeLuminance(hex) + 0.05);
+        => Contrast(hex, "#FFFFFF");
 
     /// <summary>
     /// CIE76 の色差 ΔE（CIE L*a*b*、D65）。
@@ -125,16 +133,35 @@ internal static class ColorMetrics
     /// <summary>
     /// 指定した色覚型でシミュレーションした色を <c>#RRGGBB</c> で返す。
     /// </summary>
+    /// <remarks>
+    /// <b>変換行列は線形 RGB 上で定義されている</b>ため、ガンマ補正された sRGB 値へ
+    /// そのまま掛けてはいけない（Machado et al. 2009）。逆ガンマ → 行列 → 再ガンマの順で適用する。
+    /// ガンマ空間で掛けると別のモデルを計算していることになり、しきい値の根拠が失われる。
+    /// </remarks>
     public static string Simulate(string hex, ColorVisionType type)
     {
         var m = GetMatrix(type);
         var (r, g, b) = ParseHex(hex);
 
-        var sr = Clamp255((m[0][0] * r) + (m[0][1] * g) + (m[0][2] * b));
-        var sg = Clamp255((m[1][0] * r) + (m[1][1] * g) + (m[1][2] * b));
-        var sb = Clamp255((m[2][0] * r) + (m[2][1] * g) + (m[2][2] * b));
+        var lr = ToLinear(r);
+        var lg = ToLinear(g);
+        var lb = ToLinear(b);
+
+        var sr = ToSrgb255((m[0][0] * lr) + (m[0][1] * lg) + (m[0][2] * lb));
+        var sg = ToSrgb255((m[1][0] * lr) + (m[1][1] * lg) + (m[1][2] * lb));
+        var sb = ToSrgb255((m[2][0] * lr) + (m[2][1] * lg) + (m[2][2] * lb));
 
         return string.Format(CultureInfo.InvariantCulture, "#{0:X2}{1:X2}{2:X2}", sr, sg, sb);
+    }
+
+    /// <summary>
+    /// 2 色の WCAG コントラスト比（明暗どちらが引数でも同じ値）。
+    /// </summary>
+    public static double Contrast(string hexA, string hexB)
+    {
+        var a = RelativeLuminance(hexA);
+        var b = RelativeLuminance(hexB);
+        return (Math.Max(a, b) + 0.05) / (Math.Min(a, b) + 0.05);
     }
 
     /// <summary>
@@ -185,9 +212,16 @@ internal static class ColorMetrics
         return c <= 0.04045 ? c / 12.92 : Math.Pow((c + 0.055) / 1.055, 2.4);
     }
 
+    /// <summary>
+    /// 線形 RGB（0〜1）を sRGB の 0〜255 へ戻す。
+    /// </summary>
     // .NET Framework 4.8 には Math.Clamp が無い
-    private static int Clamp255(double v)
-        => (int)Math.Round(Math.Max(0.0, Math.Min(255.0, v)), MidpointRounding.AwayFromZero);
+    private static int ToSrgb255(double linear)
+    {
+        var v = Math.Max(0.0, Math.Min(1.0, linear));
+        var encoded = v <= 0.0031308 ? v * 12.92 : (1.055 * Math.Pow(v, 1.0 / 2.4)) - 0.055;
+        return (int)Math.Round(encoded * 255.0, MidpointRounding.AwayFromZero);
+    }
 
     private static double[][] GetMatrix(ColorVisionType type)
     {

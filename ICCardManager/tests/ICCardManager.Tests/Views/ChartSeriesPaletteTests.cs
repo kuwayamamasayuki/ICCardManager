@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -47,9 +47,18 @@ public class ChartSeriesPaletteTests
     private const double MinRelativeLuminanceDelta = 0.03;
 
     /// <summary>
-    /// P/D/T 型の色覚シミュレーション後に最低限確保する色差。現行実測最小は 15.1。
+    /// P/D/T 型の色覚シミュレーション後に最低限確保する色差。現行実測最小は 16.5。
     /// </summary>
     private const double MinDeltaEUnderColorVisionDeficiency = 12.0;
+
+    /// <summary>
+    /// 区切り線・輪郭線が、隣接する塗りおよび地色（白）に対して確保するコントラスト比。
+    /// </summary>
+    /// <remarks>
+    /// 現行の <c>ChartSeriesOutlineBrush</c>(#000000) の実測最小は 2.09（対 `ChartSeriesOtherBrush` #424242）、
+    /// 地色に対しては 21.0。白い線は地色に対して <b>1.00</b> となりここで落ちる。
+    /// </remarks>
+    private const double MinStrokeContrast = 1.8;
 
     /// <summary>
     /// 系列色として使うキー（上位 5 系列 ＋「その他」）。本番の定義から導出する。
@@ -119,6 +128,45 @@ public class ChartSeriesPaletteTests
         PaletteKeys.Should().NotIntersectWith(semanticKeys);
     }
 
+    [Fact]
+    public void 区切り線と輪郭線は塗りからも地色からも見分けられること()
+    {
+        // 区切り線が満たすべき条件は 2 つあり、片方だけでは足りない（Issue #1855 のレビュー指摘）。
+        //   ①隣接する 2 つの塗りから見分けられること
+        //   ②プロット領域の地色（白）から見分けられること
+        // 白い区切り線は ① を満たすが ② が 1.00 で、`CalculateStackedVerticalBars` が
+        // 最小高さを設けないため 1px 未満の区画が線に覆われて消える。「値が小さい」ではなく
+        // 「データが無い」と読めてしまい、本 Issue の目的と逆になる。
+        //
+        // 検査対象のブラシ名を許可リストで書くと、名前を変えただけで素通りする（fail-open）。
+        // XAML から実際に使われているキーを取り出して色値で判定する。
+        var fills = ResolvePalette().Values.ToList();
+        var brushes = LoadBrushes();
+        var strokeKeys = ExtractStrokeResourceKeys();
+
+        strokeKeys.Should().HaveCountGreaterThanOrEqualTo(
+            2, "積み上げ棒の区切り線と凡例スウォッチの輪郭線の 2 つが取り出せるべき（抽出の空振り検出）");
+
+        foreach (var key in strokeKeys.Distinct(StringComparer.Ordinal))
+        {
+            brushes.Should().ContainKey(key);
+            var stroke = brushes[key];
+
+            ColorMetrics.ContrastAgainstWhite(stroke).Should().BeGreaterThanOrEqualTo(
+                MinStrokeContrast,
+                "線 {0}({1}) は地色（白）から見分けられないと、極薄の区画や矩形の輪郭が消える",
+                key, stroke);
+
+            foreach (var fill in fills)
+            {
+                ColorMetrics.Contrast(stroke, fill).Should().BeGreaterThanOrEqualTo(
+                    MinStrokeContrast,
+                    "線 {0}({1}) は系列色 {2} と接するため、そこから見分けられないと境界にならない",
+                    key, stroke, fill);
+            }
+        }
+    }
+
     #endregion
 
     #region 検出力（しきい値と抽出が空振りしていないこと）
@@ -133,8 +181,8 @@ public class ChartSeriesPaletteTests
         Math.Abs(ColorMetrics.RelativeLuminance("#1565C0") - ColorMetrics.RelativeLuminance("#666666"))
             .Should().BeLessThan(MinRelativeLuminanceDelta);
 
-        // 橙を暗くして白背景コントラスト 3:1 を満たそうとすると、赤緑色覚で朱色と混同域に入る。
-        // Okabe-Ito の明るい橙を維持している理由を、値として残しておく
+        // 橙を暗くして白背景コントラスト 3:1 を満たそうとすると、赤緑色覚で朱色と混同域に入る
+        //（実測 16.5 → 1.3）。Okabe-Ito の明るい橙を維持している理由を、値として残しておく
         ColorMetrics.MinDeltaEAcrossColorVisionTypes("#B87A00", "#D55E00")
             .Should().BeLessThan(MinDeltaEUnderColorVisionDeficiency);
     }
@@ -154,6 +202,10 @@ public class ChartSeriesPaletteTests
         // 2 型色覚では赤と緑が近づく（正常視の ΔE より小さくなる）
         ColorMetrics.MinDeltaEAcrossColorVisionTypes("#FF0000", "#00FF00")
             .Should().BeLessThan(ColorMetrics.DeltaE("#FF0000", "#00FF00"));
+
+        // #AARRGGBB（WPF が受け付けるもう 1 つの形）でも同じ色として扱えること
+        ColorMetrics.RelativeLuminance("#FF0072B2")
+            .Should().Be(ColorMetrics.RelativeLuminance("#0072B2"));
     }
 
     [Fact]
@@ -165,7 +217,7 @@ public class ChartSeriesPaletteTests
 
         colors.Should().HaveCount(PaletteKeys.Count);
         colors.Should().HaveCountGreaterThan(1);
-        colors.Values.Should().OnlyContain(v => Regex.IsMatch(v, "^#[0-9A-Fa-f]{6}$"));
+        colors.Values.Should().OnlyContain(v => Regex.IsMatch(v, "^#[0-9A-Fa-f]{6,8}$"));
 
         // 抽出器そのものが動いていることを、パレット以外の既知のキーでも確かめる
         LoadBrushes().Should().ContainKey("PrimaryBrush")
@@ -209,12 +261,36 @@ public class ChartSeriesPaletteTests
         var result = new Dictionary<string, string>(StringComparer.Ordinal);
         foreach (Match m in Regex.Matches(
             xaml,
-            "<SolidColorBrush\\s+x:Key=\"(?<key>[^\"]+)\"\\s+Color=\"(?<color>#[0-9A-Fa-f]{6})\"\\s*/>"))
+            "<SolidColorBrush\\s+x:Key=\"(?<key>[^\"]+)\"\\s+Color=\"(?<color>#[0-9A-Fa-f]{6,8})\"\\s*/>"))
         {
             result[m.Groups["key"].Value] = m.Groups["color"].Value.ToUpperInvariant();
         }
 
         return result;
+    }
+
+    /// <summary>
+    /// <c>AdminDashboardDialog.xaml</c> が <c>Stroke</c> に指定している
+    /// <c>DynamicResource</c> のキーを、実際に書かれているものだけ取り出す。
+    /// </summary>
+    /// <remarks>
+    /// 検査対象をテスト側の許可リストで持つと、本番がブラシを差し替えたときに
+    /// 検査が素通りする（fail-open）。本番の記述から導出する。
+    /// なお `Stroke="{Binding BrushKey, ...}"`（残高推移の折れ線＝系列色そのもの）は
+    /// `DynamicResource` ではないためここには含まれない。
+    /// </remarks>
+    private static IReadOnlyList<string> ExtractStrokeResourceKeys()
+    {
+        var path = Path.Combine(
+            TestPaths.GetProductionSourceRoot(), "Views", "Dialogs", "AdminDashboardDialog.xaml");
+        var xaml = Regex.Replace(File.ReadAllText(path), "<!--.*?-->", string.Empty, RegexOptions.Singleline);
+
+        // 重複は畳まない。畳むと「2 か所とも同じブラシを指している」正常な状態と
+        // 「1 か所しか抽出できていない」空振りが同じ件数になり、空振り検出が効かなくなる
+        return Regex.Matches(xaml, "Stroke\\s*=\\s*\"\\{DynamicResource\\s+(?<key>\\w+)\\}\"")
+            .Cast<Match>()
+            .Select(m => m.Groups["key"].Value)
+            .ToList();
     }
 
     private static IEnumerable<(KeyValuePair<string, string> A, KeyValuePair<string, string> B)> Pairs(

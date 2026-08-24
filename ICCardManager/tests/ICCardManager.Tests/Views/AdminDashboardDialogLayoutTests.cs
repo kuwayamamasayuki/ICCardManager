@@ -105,7 +105,7 @@ public class AdminDashboardDialogLayoutTests
         var bars = ExtractBlock(@"<ItemsControl\s+ItemsSource\s*=\s*""\{Binding\s+UsageBars\}"".*?</ItemsControl>");
 
         bars.Should().MatchRegex(
-            @"<Rectangle[^>]*Stroke\s*=\s*""\{DynamicResource\s+ChartSeriesSeparatorBrush\}""",
+            @"<Rectangle[^>]*Stroke\s*=\s*""\{DynamicResource\s+ChartSeriesOutlineBrush\}""",
             "積み上げ棒の区画には区切り線が要る");
         bars.Should().MatchRegex(
             @"<Rectangle[^>]*StrokeThickness\s*=\s*""1""",
@@ -122,6 +122,11 @@ public class AdminDashboardDialogLayoutTests
         legend.Should().MatchRegex(
             @"<Rectangle[^>]*Stroke\s*=\s*""\{DynamicResource\s+\w+Brush\}""",
             "凡例スウォッチには輪郭線が要る");
+
+        // ここで見るのは「輪郭線が引かれているか」という構造だけ。どのブラシなら輪郭として
+        // 機能するかは色値でしか判定できないため、XAML から実際に使われているキーを取り出して
+        // 解決する ChartSeriesPaletteTests が対で担う（ブラシ名の許可リストで書くと、
+        // 名前を変えただけで検査が素通りする）
     }
 
     [Fact]

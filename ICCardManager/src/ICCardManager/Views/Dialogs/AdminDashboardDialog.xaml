@@ -446,7 +446,7 @@
                                             <Rectangle Width="{Binding Width}"
                                                        Height="{Binding Height}"
                                                        Fill="{Binding BrushKey, Converter={StaticResource ResourceKeyToBrushConverter}}"
-                                                       Stroke="{DynamicResource ChartSeriesSeparatorBrush}"
+                                                       Stroke="{DynamicResource ChartSeriesOutlineBrush}"
                                                        StrokeThickness="1"/>
                                         </DataTemplate>
                                     </ItemsControl.ItemTemplate>
@@ -483,13 +483,15 @@
                                 <DataTemplate>
                                     <Border Margin="0,0,14,4" Padding="0">
                                         <DockPanel LastChildFill="True">
-                                            <!-- 輪郭線でスウォッチの境界を白背景から切り離す（Issue #1855） -->
+                                            <!-- 輪郭線でスウォッチの境界を白背景から切り離す（Issue #1855）。
+                                                 積み上げ棒の区切り線と同じブラシを使う。淡い灰（MutedTextBrush）は
+                                                 「その他」の塗り（#424242）とのコントラストが 1.75 しかなく輪郭にならない -->
                                             <Rectangle DockPanel.Dock="Left"
                                                        Width="14" Height="14"
                                                        Margin="0,0,6,0"
                                                        VerticalAlignment="Center"
                                                        Fill="{Binding BrushKey, Converter={StaticResource ResourceKeyToBrushConverter}}"
-                                                       Stroke="{DynamicResource MutedTextBrush}"
+                                                       Stroke="{DynamicResource ChartSeriesOutlineBrush}"
                                                        StrokeThickness="1"/>
                                             <TextBlock Text="{Binding Label}"
                                                        TextWrapping="Wrap"

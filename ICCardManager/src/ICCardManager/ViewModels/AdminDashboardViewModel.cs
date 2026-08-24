@@ -182,9 +182,10 @@ namespace ICCardManager.ViewModels
         /// 上位系列の <see cref="SeriesBrushKeys"/> とは別枠で持つ。剰余で選ぶと
         /// 6 系列目（その他）が最上位系列と同色になり、積み上げ棒でも凡例でも
         /// 区別できなくなるため。集約された残りであることが色からも伝わるよう無彩色を充てる。
-        /// 旧 <c>MutedTextBrush</c>（#666666）は <c>ChartSeries1Brush</c>（#0072B2）と
-        /// 相対輝度がほぼ同一（0.133 / 0.152）で、積み上げ棒で隣接するとグレースケール印刷・
-        /// ロービジョン・第三色覚異常のいずれでも境界が見えなかった（Issue #1855）。
+        /// 旧 <c>MutedTextBrush</c>（#666666）は、当時 5 番目の系列だった
+        /// <c>InfoTextBrush</c>（#1565C0）と相対輝度がほぼ同一（0.133 / 0.133）で、
+        /// 積み上げ棒で隣接するとグレースケール印刷・ロービジョン・第三色覚異常の
+        /// いずれでも境界が見えなかった（Issue #1855）。
         /// </remarks>
         internal const string OtherSeriesBrushKey = "ChartSeriesOtherBrush";
 
