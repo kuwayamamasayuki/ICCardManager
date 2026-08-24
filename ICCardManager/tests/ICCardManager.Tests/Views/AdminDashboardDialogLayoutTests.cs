@@ -240,6 +240,55 @@ public class AdminDashboardDialogLayoutTests
             .Distinct()
             .ToList();
 
+    #region 残高推移グラフの凡例（Issue #1857）
+
+    [Fact]
+    public void Balance_series_option_should_show_a_color_swatch()
+    {
+        var block = ExtractBalanceSeriesOptionsBlock();
+
+        // 選択リストがそのまま凡例を兼ねる。色見本が無いと、どの折れ線がどのカードか分からない
+        block.Should().MatchRegex(
+            @"<Line\b[^>]*Stroke\s*=\s*""\{Binding\s+BrushKey,\s*Converter=\{StaticResource\s+ResourceKeyToBrushConverter\}\}""",
+            "カード選択リストの各行は、折れ線と同じ色の見本を持つべき（Issue #1857）");
+    }
+
+    [Fact]
+    public void Balance_series_swatch_should_show_the_dash_pattern()
+    {
+        var block = ExtractBalanceSeriesOptionsBlock();
+
+        // 色見本が実線固定だと、色が一巡した 6 枚目以降を見本から区別できない
+        block.Should().MatchRegex(
+            @"<Line\b[^>]*StrokeDashArray\s*=\s*""\{Binding\s+DashPattern\}""",
+            "色見本は線種も折れ線と揃えるべき（Issue #1857）");
+    }
+
+    [Fact]
+    public void Balance_chart_polyline_should_bind_the_dash_pattern()
+    {
+        // 色だけを手掛かりにしない（development-conventions.md「色は唯一の手掛かりであってはならない」）
+        Xaml.Should().MatchRegex(
+            @"<Polyline\b[^>]*StrokeDashArray\s*=\s*""\{Binding\s+DashPattern\}""",
+            "残高推移の折れ線は線種をカードごとに変えるべき（Issue #1857）");
+    }
+
+    /// <remarks>
+    /// 抽出そのものが空振りしていないことを併せて表明する。抽出範囲が縮むと、
+    /// 上の検査は「違反が無い」ではなく「何も見ていない」状態で緑になる。
+    /// </remarks>
+    private static string ExtractBalanceSeriesOptionsBlock()
+    {
+        var block = ExtractBlock(
+            @"<ItemsControl[^>]*ItemsSource\s*=\s*""\{Binding\s+BalanceSeriesOptions\}"".*?</ItemsControl>");
+
+        block.Should().Contain("<CheckBox", "抽出した範囲がカード選択リストであること");
+        block.Should().Contain("{Binding DisplayName}", "抽出した範囲がカード名を表示していること");
+        return block;
+    }
+
+    #endregion
+
     private static string ExtractBlock(string pattern)
     {
         var match = Regex.Match(Xaml, pattern, RegexOptions.Singleline);

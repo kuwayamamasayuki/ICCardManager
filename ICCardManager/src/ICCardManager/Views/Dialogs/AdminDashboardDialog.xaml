@@ -566,8 +566,11 @@
                                     <ItemsControl.ItemTemplate>
                                         <DataTemplate>
                                             <Canvas>
+                                                <!-- 線種はカードごとに固定（Issue #1857）。カード枚数が色数を超えると
+                                                     色は一巡するため、色だけを手掛かりにしない -->
                                                 <Polyline Points="{Binding Points}"
                                                           StrokeThickness="2"
+                                                          StrokeDashArray="{Binding DashPattern}"
                                                           Stroke="{Binding BrushKey, Converter={StaticResource ResourceKeyToBrushConverter}}"/>
                                                 <ItemsControl ItemsSource="{Binding Markers}">
                                                     <ItemsControl.ItemsPanel>
@@ -620,12 +623,27 @@
                             </ItemsControl.ItemsPanel>
                             <ItemsControl.ItemTemplate>
                                 <DataTemplate>
+                                    <!-- 選択リストがそのまま凡例を兼ねる（Issue #1857）。折れ線側にラベルを置くと
+                                         線が重なる期間で読めないため、色見本は選択肢の側へ置く。
+                                         色見本は線と同じ色・同じ線種で描く（Rectangle では線種が表せない） -->
                                     <CheckBox IsChecked="{Binding IsSelected, Mode=TwoWay}"
                                               Margin="0,0,14,4"
                                               VerticalContentAlignment="Center"
                                               AutomationProperties.Name="{Binding DisplayName}"
                                               AutomationProperties.HelpText="残高推移グラフに描画するかどうかを切り替えます。">
-                                        <TextBlock Text="{Binding DisplayName}" TextWrapping="Wrap"/>
+                                        <DockPanel LastChildFill="True">
+                                            <Line DockPanel.Dock="Left"
+                                                  X1="0" Y1="7" X2="24" Y2="7"
+                                                  Width="24" Height="14"
+                                                  Margin="0,0,6,0"
+                                                  VerticalAlignment="Center"
+                                                  StrokeThickness="3"
+                                                  StrokeDashArray="{Binding DashPattern}"
+                                                  Stroke="{Binding BrushKey, Converter={StaticResource ResourceKeyToBrushConverter}}"/>
+                                            <TextBlock Text="{Binding DisplayName}"
+                                                       TextWrapping="Wrap"
+                                                       VerticalAlignment="Center"/>
+                                        </DockPanel>
                                     </CheckBox>
                                 </DataTemplate>
                             </ItemsControl.ItemTemplate>

@@ -48,6 +48,27 @@ namespace ICCardManager.ViewModels
         /// <summary>表示用のカード名</summary>
         public string DisplayName { get; set; } = string.Empty;
 
+        /// <summary>
+        /// この選択肢（＝このカード）の線色のリソースキー名（Issue #1857）。
+        /// </summary>
+        /// <remarks>
+        /// カードごとに固定で、選択の増減では変わらない。以前は描画時に
+        /// 「選択済みだけを詰め直したリストの添字」で選んでいたため、1 枚チェックを外すと
+        /// 残りのカードの色が順送りに入れ替わり、利用者が覚えた「青い線＝カード B」が崩れた。
+        /// </remarks>
+        public string BrushKey { get; set; } = string.Empty;
+
+        /// <summary>
+        /// この選択肢（＝このカード）の破線パターン（Issue #1857）。実線は空。
+        /// </summary>
+        /// <remarks>
+        /// 色数（<see cref="AdminDashboardViewModel.SeriesBrushKeys"/>）より多いカードがあると
+        /// 色は必ず一巡する。色だけを手掛かりにすると同色の 2 枚を同時に選んだときに
+        /// 区別できないため、一巡ごとに線種を変えて色以外の手掛かりを併置する
+        /// （development-conventions.md「色は唯一の手掛かりであってはならない」）。
+        /// </remarks>
+        public DoubleCollection DashPattern { get; set; } = AdminDashboardViewModel.SolidDashPattern;
+
         /// <summary>グラフに描画するかどうか</summary>
         [ObservableProperty]
         private bool isSelected;
@@ -103,6 +124,9 @@ namespace ICCardManager.ViewModels
 
         /// <summary>線の色のリソースキー名</summary>
         public string BrushKey { get; set; } = string.Empty;
+
+        /// <summary>線種（Issue #1857）。実線は空。</summary>
+        public DoubleCollection DashPattern { get; set; } = AdminDashboardViewModel.SolidDashPattern;
 
         /// <summary>折れ線の頂点（欠測で分断された 1 セグメント分）</summary>
         public PointCollection Points { get; set; } = new PointCollection();
@@ -228,6 +252,79 @@ namespace ICCardManager.ViewModels
         /// いずれでも境界が見えなかった（Issue #1855）。
         /// </remarks>
         internal const string OtherSeriesBrushKey = "ChartSeriesOtherBrush";
+
+        /// <summary>
+        /// 実線を表す空の破線パターン（Issue #1857）。
+        /// </summary>
+        /// <remarks>
+        /// <c>null</c> ではなく空の凍結済みコレクションを既定にする。XAML の
+        /// <c>StrokeDashArray</c> へ null を流すと既定値へ戻る挙動が WPF のバージョンに依存するため、
+        /// 「実線」を明示的な値として持つ。
+        /// </remarks>
+        internal static readonly DoubleCollection SolidDashPattern = CreateFrozenDashPattern(new double[0]);
+
+        /// <summary>
+        /// 系列の線種（Issue #1857）。色が一巡するたびに次の線種へ進む。
+        /// </summary>
+        /// <remarks>
+        /// 単位は <c>StrokeThickness</c> 倍であることに注意（線の太さ 2 で <c>4,2</c> なら 8px 実／4px 空）。
+        /// 実線・破線・点線・一点鎖線の順で、細い線でも見分けが付く差を優先している。
+        /// </remarks>
+        internal static readonly IReadOnlyList<DoubleCollection> SeriesDashPatterns = new[]
+        {
+            SolidDashPattern,
+            CreateFrozenDashPattern(new[] { 4.0, 2.0 }),
+            CreateFrozenDashPattern(new[] { 1.0, 2.0 }),
+            CreateFrozenDashPattern(new[] { 4.0, 2.0, 1.0, 2.0 })
+        };
+
+        private static DoubleCollection CreateFrozenDashPattern(IEnumerable<double> values)
+        {
+            var pattern = new DoubleCollection(values);
+            pattern.Freeze();
+            return pattern;
+        }
+
+        /// <summary>
+        /// 残高推移グラフの系列色を、カードの通し番号から決める（Issue #1857）。
+        /// </summary>
+        /// <param name="cardIndex">全カードを並べたときの 0 始まりの位置。選択の有無では変わらない。</param>
+        /// <remarks>
+        /// <para>
+        /// 色を「選択済みだけを詰め直したリストの添字」で選ぶと、1 枚チェックを外しただけで
+        /// 残りの色が順送りに入れ替わる。カードそのものに紐付けることで、選択を変えても
+        /// 「この色＝このカード」が保たれる。
+        /// </para>
+        /// <para>
+        /// カード枚数が色数を超えると色は一巡するため、同色になる 2 枚を同時に選ぶことがあり得る。
+        /// その区別は <see cref="GetBalanceSeriesDashPattern"/> の線種が担う。
+        /// </para>
+        /// </remarks>
+        internal static string GetBalanceSeriesBrushKey(int cardIndex)
+        {
+            if (cardIndex < 0)
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(cardIndex), cardIndex, "カードの通し番号は 0 以上である必要があります。");
+            }
+
+            return SeriesBrushKeys[cardIndex % SeriesBrushKeys.Length];
+        }
+
+        /// <summary>
+        /// 残高推移グラフの線種を、カードの通し番号から決める（Issue #1857）。
+        /// </summary>
+        /// <param name="cardIndex">全カードを並べたときの 0 始まりの位置。選択の有無では変わらない。</param>
+        internal static DoubleCollection GetBalanceSeriesDashPattern(int cardIndex)
+        {
+            if (cardIndex < 0)
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(cardIndex), cardIndex, "カードの通し番号は 0 以上である必要があります。");
+            }
+
+            return SeriesDashPatterns[(cardIndex / SeriesBrushKeys.Length) % SeriesDashPatterns.Count];
+        }
 
         #endregion
 
@@ -663,10 +760,22 @@ namespace ICCardManager.ViewModels
             BalanceTableRows.Clear();
 
             var labels = source?.MonthLabels ?? new string[0];
-            var selectedIdms = BalanceSeriesOptions.Where(o => o.IsSelected).Select(o => o.CardIdm).ToList();
-            var selected = (source?.BalanceSeries ?? new MonthlyBalanceSeries[0])
-                .Where(s => selectedIdms.Contains(s.CardIdm))
+
+            // 色・線種は選択肢（＝カード）側に確定済みなので、描画も選択肢を起点に並べる。
+            // 系列側の添字から色を選ぶと、選択の増減でカードと色の対応が動く（Issue #1857）
+            var seriesByIdm = new Dictionary<string, MonthlyBalanceSeries>(StringComparer.OrdinalIgnoreCase);
+            foreach (var s in source?.BalanceSeries ?? new MonthlyBalanceSeries[0])
+            {
+                if (s != null && !string.IsNullOrEmpty(s.CardIdm))
+                {
+                    seriesByIdm[s.CardIdm] = s;
+                }
+            }
+
+            var selected = BalanceSeriesOptions
+                .Where(o => o.IsSelected && seriesByIdm.ContainsKey(o.CardIdm))
                 .Take(AppConstants.AdminDashboardMaxSeries)
+                .Select(o => new { Option = o, Series = seriesByIdm[o.CardIdm] })
                 .ToList();
 
             if (labels.Count == 0 || selected.Count == 0)
@@ -677,25 +786,25 @@ namespace ICCardManager.ViewModels
             var area = CreateTrendPlotArea();
 
             var maxBalance = selected
-                .SelectMany(s => s.MonthlyBalances)
+                .SelectMany(s => s.Series.MonthlyBalances)
                 .Where(v => v.HasValue)
                 .Select(v => v.Value)
                 .DefaultIfEmpty(0.0)
                 .Max();
             var scale = ChartScale.CreateLinearScale(0.0, maxBalance, TargetTickCount);
 
-            for (var i = 0; i < selected.Count; i++)
+            foreach (var item in selected)
             {
-                var brushKey = SeriesBrushKeys[i % SeriesBrushKeys.Length];
                 var segments = ChartGeometryCalculator.CalculateLineSegments(
-                    selected[i].MonthlyBalances, area, scale, MarkerSize);
+                    item.Series.MonthlyBalances, area, scale, MarkerSize);
 
                 foreach (var segment in segments)
                 {
                     BalanceLines.Add(new BalanceLine
                     {
-                        DisplayName = selected[i].DisplayName,
-                        BrushKey = brushKey,
+                        DisplayName = item.Series.DisplayName,
+                        BrushKey = item.Option.BrushKey,
+                        DashPattern = item.Option.DashPattern,
                         Points = new PointCollection(segment.Select(p => new Point(p.X, p.Y))),
                         Markers = segment
                     });
@@ -758,12 +867,17 @@ namespace ICCardManager.ViewModels
                 .Select(s => s.CardIdm)
                 .ToList();
 
-            foreach (var s in series)
+            for (var i = 0; i < series.Count; i++)
             {
+                var s = series[i];
+
+                // 色・線種はここで全カードへ確定させる。選択の増減では動かない（Issue #1857）
                 var option = new BalanceSeriesOption
                 {
                     CardIdm = s.CardIdm,
                     DisplayName = s.DisplayName,
+                    BrushKey = GetBalanceSeriesBrushKey(i),
+                    DashPattern = GetBalanceSeriesDashPattern(i),
                     IsSelected = defaultSelection.Contains(s.CardIdm)
                 };
                 option.PropertyChanged += OnBalanceSeriesOptionChanged;
