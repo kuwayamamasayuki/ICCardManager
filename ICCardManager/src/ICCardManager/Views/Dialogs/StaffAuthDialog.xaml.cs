@@ -147,43 +147,57 @@ namespace ICCardManager.Views.Dialogs
             }
         }
 
-        private async void OnCardRead(object? sender, CardReadEventArgs e)
+        private void OnCardRead(object? sender, CardReadEventArgs e)
         {
-            await Dispatcher.InvokeAsync(async () =>
+            // Issue #1873: 生の Dispatcher.InvokeAsync(async () => …) は DispatcherOperation<Task> を
+            // 返すため、await しても内側ラムダの最初の await 以降の例外を観測できない（Unwrap() が要る。
+            // Issue #1725）。本体の try/catch（下の HandleCardReadAsync）は受け皿の 1 枚目にすぎず、
+            // catch 自身（ShowStatus の FindResource / AutomationPeer）が投げれば再び無言になる
+            // （Issue #1745）。ディスパッチした側でも観測する。
+            Dispatcher.InvokeAsyncObserved(() => HandleCardReadAsync(e.Idm), "職員証の認証");
+        }
+
+        /// <summary>
+        /// カード読み取りの本体（UI スレッドで実行される）
+        /// </summary>
+        /// <remarks>
+        /// Issue #1873: <c>OnCardRead</c> はカードリーダースレッドから呼ばれるイベントハンドラーのため
+        /// <c>void</c> のままとし、本体をメソッドへ切り出して観測経路（<c>InvokeAsyncObserved</c>）へ渡す。
+        /// </remarks>
+        private async Task HandleCardReadAsync(string idm)
+        {
+            try
             {
-                try
+                // 職員として登録されているか確認
+                var staff = await _staffRepository.GetByIdmAsync(idm);
+
+                if (staff != null)
                 {
-                    // 職員として登録されているか確認
-                    var staff = await _staffRepository.GetByIdmAsync(e.Idm);
+                    // 職員として登録されている → 認証成功
+                    AuthenticatedIdm = idm;
+                    AuthenticatedStaffName = staff.Name;
 
-                    if (staff != null)
-                    {
-                        // 職員として登録されている → 認証成功
-                        AuthenticatedIdm = e.Idm;
-                        AuthenticatedStaffName = staff.Name;
+                    _soundPlayer.Play(SoundType.Notify);
+                    _timeoutTimer.Stop();
 
-                        _soundPlayer.Play(SoundType.Notify);
-                        _timeoutTimer.Stop();
-
-                        // Issue #1509: 成功時もステータス表示してスクリーンリーダーに通知。
-                        // 700ms 後にクローズ（タイムアウト失敗側と同じ CloseAfterDelay テンプレート）。
-                        ShowStatus($"認証に成功しました（{staff.Name}）", isError: false);
-                        CloseAfterDelay(TimeSpan.FromMilliseconds(700), dialogResult: true);
-                    }
-                    else
-                    {
-                        // 職員として登録されていない → エラー
-                        _soundPlayer.Play(SoundType.Error);
-                        ShowStatus("このカードは職員証として登録されていません。\n登録済みの職員証をタッチしてください。", isError: true);
-                    }
+                    // Issue #1509: 成功時もステータス表示してスクリーンリーダーに通知。
+                    // 700ms 後にクローズ（タイムアウト失敗側と同じ CloseAfterDelay テンプレート）。
+                    ShowStatus($"認証に成功しました（{staff.Name}）", isError: false);
+                    CloseAfterDelay(TimeSpan.FromMilliseconds(700), dialogResult: true);
                 }
-                catch (Exception ex)
+                else
                 {
-                    // 技術的詳細はログへ。UI には 3 要素のユーザー向け文言を表示（Issue #1614）。
-                    ErrorDialogHelper.LogException(ex, "職員証の認証");
-                    ShowStatus(ExceptionMessageFormatter.ToUserMessage(ex, "職員証の認証"), isError: true);
+                    // 職員として登録されていない → エラー
+                    _soundPlayer.Play(SoundType.Error);
+                    ShowStatus("このカードは職員証として登録されていません。\n登録済みの職員証をタッチしてください。", isError: true);
                 }
-            });
+            }
+            catch (Exception ex)
+            {
+                // 技術的詳細はログへ。UI には 3 要素のユーザー向け文言を表示（Issue #1614）。
+                ErrorDialogHelper.LogException(ex, "職員証の認証");
+                ShowStatus(ExceptionMessageFormatter.ToUserMessage(ex, "職員証の認証"), isError: true);
+            }
         }
 
         /// <summary>

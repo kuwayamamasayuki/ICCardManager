@@ -97,6 +97,15 @@
 - 逆に、正常時も高頻度で出る内容（毎ループの経過報告等）は `LogDebug` のままでよい（本番では出力されない前提を織り込む）
 - ログレベルを変更したら、その理由をコード上のコメントに残す（後から「なぜ Information なのか」を再検討させない）
 
+### 「観測している」ことと「調査に使えるログが残る」ことは別（Issue #1873）
+
+`Task.Exception` が返す `AggregateException` は **TPL が組み立てたもので一度も throw されていない**ため `StackTrace` が `null`。これをそのままログ機構へ渡すと、残るのは `AggregateException: One or more errors occurred.` ＋**空のスタックトレース**だけになる。
+
+- **例外の種別で分岐する下流（`ErrorDialogHelper.GetErrorInfo` の `SYS00x` 分類、`AppException` の `ErrorCode` / `UserFriendlyMessage`）はすべて既定分岐へ落ちる**。#1757 が「例外型の変更は、その型を前提にしていた上位の分岐を静かに外す」で記録したのと同じ形が、**ラップした型を渡す側からも起きる**
+- `AggregateException` は `Flatten()` してから、失敗要因が 1 つならその例外を記録する（`Common/DispatcherObservation.UnwrapAggregate`）。複数なら情報を落とさないよう平坦化した集約のまま渡す
+- **「無言だった失敗を可視化する」修正では、可視化した先に何が残るかまで見る**。#1873 の初版は観測経路を通すところで満足しており、残るログが `SYS999` ＋空のスタックトレースであることに気付いていなかった（コードレビューで検出）。**この Issue が消そうとしていた状態そのもの**に着地しかけた
+- **その欠陥はテストの表明にも写る**。#1873 の初版のテストは `log[0].Exception.InnerException.Should().BeOfType<InvalidOperationException>()` と書かれており、**`AggregateException` で記録されることを前提に置いて欠陥を追認していた**。記録されたものを「そのまま」表明する形（`log[0].Exception.Should().BeOfType<InvalidOperationException>()`）にすると、この取り違えが表面化する
+
 ### IDm はログへ生で出さない — 規約は静的検査で固定する（Issue #1852）
 
 職員証の IDm は本システム唯一の認証要素であり、平文のログファイル（インストーラが `users-full` ACL を付与）へ生で残すとローカルユーザーが認証クレデンシャルを収集できる（CWE-532）。ログへ出す IDm は必ず `IdmMasker.Mask()`（Issue #1704）を通す。
@@ -178,7 +187,7 @@
   - **テスト用の代役は本番と同じ失敗の伝え方にする**。`SynchronousDispatcherService` は例外を再スローするため、「本体の `catch` 自体が失敗した」ケースで例外がテストメソッドまで伝播し、「観測されたか」を表明できない。本番（記録して再スローしない）と同じ `RecordingDispatcherService` を使う（#1737「本番が示し得ない性質を表明しない」）
   - 回帰は `CardReadDispatchConventionTests` が「生の `InvokeAsync` の不在」と「`_dispatcherService.InvokeAsync` の存在」を**対で**静的検査する。不在だけを見ると、ディスパッチごと消して同期実行へ倒した実装でも緑になる
   - **ガードは「受け手」を起点に照合し、そこへ至る参照経路を直書きしない**（#1843 のコードレビューで判明）。初版は `Application\.Current\.Dispatcher\.InvokeAsync` を直書きしていたため、`Application.Current?.Dispatcher`（本リポジトリでは `App.xaml.cs` が使用）・`Dispatcher` をフィールドへ退避した形・`BeginInvoke` が**同じ欠陥のままガードを素通り**した。**同じ資源へ別の綴りで到達できるなら、ガードは綴りではなく資源で書く**（#1786「その性質を破れる全経路を列挙する」／#1837「移行前後の両方の綴りで grep する」の再演。**規約を引用しながら同じ誤りを犯し得る**ことに注意）
-  - **View コードビハインドには同型の欠陥が残っている**（Issue #1873）。`Views/` は `IDispatcherService` を注入できず別の観測手段が要るため、走査対象を `Views/` へ広げるのは是正と同時に行う（先に広げると既存違反で赤になり、抑制を積む形＝#1786 の形骸化を招く）
+  - **View コードビハインドは `Common/DispatcherObservation` へ寄せる**（Issue #1873）。`Views/` は `IDispatcherService` を注入できない（`Window` は自分自身の `Dispatcher` を持つ）ため、`Dispatcher.InvokeAsyncObserved(…, operationName, priority)` を唯一の観測手段とする。観測の実体は `WpfDispatcherService.ObserveTask` からも呼ばれる同一の `Observe` で、層ごとに違うのは記録先だけ（ViewModels は `ILogger`、Views は `ErrorDialogHelper.LogException`。#1817）。`CardReadDispatchConventionTests` の走査対象は `Views/` を含む。**是正と走査拡大は同じ PR で行う** — 先に広げると既存違反で赤になり抑制を積む形（＝#1786 の形骸化）を招くため、`grep` で `Views/` の全 10 か所を列挙して一度に寄せた（同期ラムダを渡す `InvokeAsync(Action)` / `BeginInvoke` も例外を `DispatcherOperation` の `Task` へ格納するだけで誰も観測しない点は同じ）
 
 ### 同じ状態表現に 2 つの意味を持たせない（同 Issue）
 
