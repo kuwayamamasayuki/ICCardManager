@@ -426,6 +426,19 @@ namespace ICCardManager.ViewModels
         /// <summary>残高推移グラフの代替一覧（Issue #1856）</summary>
         public ObservableCollection<ChartTableRow> BalanceTableRows { get; } = new();
 
+        /// <summary>
+        /// カードごとの色番号（Issue #1857）。IDm → 通し番号。
+        /// </summary>
+        /// <remarks>
+        /// 番号を「そのときの <c>BalanceSeries</c> の並びの添字」から採ると、期間（<see cref="AnalysisMonths"/>）を
+        /// 変えるたびに色が入れ替わる。<c>AdminDashboardService.BuildBalanceSeries</c> は
+        /// **期間内にも期間前にも残高が無いカードを系列ごと落とす**ため、期間を広げ／狭めると母集団が動き、
+        /// 落ちたカードより後ろのカードの添字がすべてずれるからである（選択解除で色が動いた元の欠陥と同じ形）。
+        /// 一度割り当てた番号は画面を閉じるまで保持し、母集団の増減では動かさない。
+        /// </remarks>
+        private readonly Dictionary<string, int> _balanceSeriesColorSlots =
+            new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+
         /// <summary>推移グラフの幅（XAML の Canvas にバインドする）</summary>
         public double TrendCanvasWidth => TrendChartWidth;
 
@@ -867,22 +880,44 @@ namespace ICCardManager.ViewModels
                 .Select(s => s.CardIdm)
                 .ToList();
 
-            for (var i = 0; i < series.Count; i++)
+            foreach (var s in series)
             {
-                var s = series[i];
-
-                // 色・線種はここで全カードへ確定させる。選択の増減では動かない（Issue #1857）
+                // 色・線種はここで全カードへ確定させる。選択の増減でも、期間変更による
+                // 系列の増減でも動かない（Issue #1857）
+                var slot = GetOrAssignBalanceSeriesColorSlot(s.CardIdm);
                 var option = new BalanceSeriesOption
                 {
                     CardIdm = s.CardIdm,
                     DisplayName = s.DisplayName,
-                    BrushKey = GetBalanceSeriesBrushKey(i),
-                    DashPattern = GetBalanceSeriesDashPattern(i),
+                    BrushKey = GetBalanceSeriesBrushKey(slot),
+                    DashPattern = GetBalanceSeriesDashPattern(slot),
                     IsSelected = defaultSelection.Contains(s.CardIdm)
                 };
                 option.PropertyChanged += OnBalanceSeriesOptionChanged;
                 BalanceSeriesOptions.Add(option);
             }
+        }
+
+        /// <summary>
+        /// カードの色番号を引く。未割り当てなら次の番号を採番する（Issue #1857）。
+        /// </summary>
+        /// <remarks>
+        /// 初回の集計では系列の並び順そのまま（0,1,2,…）になる。2 回目以降は既に見たカードの番号を
+        /// 再利用するため、期間変更で系列が増減しても既存カードの色・線種は動かない。
+        /// </remarks>
+        private int GetOrAssignBalanceSeriesColorSlot(string cardIdm)
+        {
+            // null を 0 番へ丸めない（先頭のカードと同じ色になる）。空文字と同じ 1 枠へ寄せ、
+            // 「IDm を持たない系列」も他のカードとは別の色を得る
+            var key = cardIdm ?? string.Empty;
+
+            if (!_balanceSeriesColorSlots.TryGetValue(key, out var slot))
+            {
+                slot = _balanceSeriesColorSlots.Count;
+                _balanceSeriesColorSlots[key] = slot;
+            }
+
+            return slot;
         }
 
         private void OnBalanceSeriesOptionChanged(object sender, PropertyChangedEventArgs e)

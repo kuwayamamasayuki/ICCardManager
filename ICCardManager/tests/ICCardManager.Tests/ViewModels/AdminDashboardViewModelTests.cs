@@ -486,6 +486,33 @@ public class AdminDashboardViewModelTests
     }
 
     [Fact]
+    public async Task ReloadingWithADifferentPeriod_KeepsTheColorOfTheRemainingCards()
+    {
+        // AdminDashboardService.BuildBalanceSeries は期間内にも期間前にも残高が無いカードを
+        // 系列ごと落とすため、期間を変えると母集団が動く。そのときの並びの添字で色を選ぶと、
+        // 落ちたカードより後ろのカードの色がすべてずれる（Issue #1857 と同じ形）
+        SetupAnalytics(CreateAnalytics(cardCount: 3));
+        var vm = CreateViewModel();
+        await vm.LoadAnalyticsAsync();
+
+        var before = vm.BalanceSeriesOptions.ToDictionary(o => o.CardIdm, o => o.BrushKey);
+        var dropped = vm.BalanceSeriesOptions[0].CardIdm;
+
+        // 期間を変えて先頭カードが集計対象から外れた状態を再現する
+        var narrowed = CreateAnalytics(cardCount: 3);
+        narrowed.BalanceSeries = narrowed.BalanceSeries.Where(s => s.CardIdm != dropped).ToList();
+        SetupAnalytics(narrowed);
+        await vm.LoadAnalyticsAsync();
+
+        vm.BalanceSeriesOptions.Should().NotContain(o => o.CardIdm == dropped);
+        foreach (var option in vm.BalanceSeriesOptions)
+        {
+            option.BrushKey.Should().Be(before[option.CardIdm],
+                "カードの色は期間変更による系列の増減でも動かないこと（Issue #1857）");
+        }
+    }
+
+    [Fact]
     public async Task BalanceLines_UseTheColorAndDashPatternAssignedToTheirCard()
     {
         SetupAnalytics(CreateAnalytics(cardCount: AdminDashboardViewModel.SeriesBrushKeys.Length + 3));

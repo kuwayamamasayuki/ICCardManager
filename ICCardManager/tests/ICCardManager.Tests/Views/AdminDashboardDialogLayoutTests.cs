@@ -268,7 +268,11 @@ public class AdminDashboardDialogLayoutTests
     public void Balance_chart_polyline_should_bind_the_dash_pattern()
     {
         // 色だけを手掛かりにしない（development-conventions.md「色は唯一の手掛かりであってはならない」）
-        Xaml.Should().MatchRegex(
+        // 全文ではなく残高推移の折れ線の範囲で見る。全文だと、この折れ線がバインドを失っても
+        // 別のグラフに同じバインドがあれば緑になる
+        var block = ExtractBalanceLinesBlock();
+
+        block.Should().MatchRegex(
             @"<Polyline\b[^>]*StrokeDashArray\s*=\s*""\{Binding\s+DashPattern\}""",
             "残高推移の折れ線は線種をカードごとに変えるべき（Issue #1857）");
     }
@@ -284,6 +288,21 @@ public class AdminDashboardDialogLayoutTests
 
         block.Should().Contain("<CheckBox", "抽出した範囲がカード選択リストであること");
         block.Should().Contain("{Binding DisplayName}", "抽出した範囲がカード名を表示していること");
+        return block;
+    }
+
+    /// <remarks>
+    /// 残高推移の折れ線のテンプレート。内側に別の <c>ItemsControl</c>（マーカー）があるため、
+    /// 最初の閉じタグまでで切れるが <c>Polyline</c> はその手前にあるので検査には足りる。
+    /// 抽出が空振りしていないことを併せて表明する。
+    /// </remarks>
+    private static string ExtractBalanceLinesBlock()
+    {
+        var block = ExtractBlock(
+            @"<ItemsControl[^>]*ItemsSource\s*=\s*""\{Binding\s+BalanceLines\}"".*?</ItemsControl>");
+
+        block.Should().Contain("<Polyline", "抽出した範囲が残高推移の折れ線であること");
+        block.Should().Contain("{Binding Points}", "抽出した範囲が折れ線の頂点をバインドしていること");
         return block;
     }
 
