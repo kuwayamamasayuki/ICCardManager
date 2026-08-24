@@ -838,8 +838,9 @@ namespace ICCardManager.ViewModels
             // 一覧だけ全件にすると、グラフに描かれていない系列が並んで「同じ内容」でなくなる（Issue #1856）
             for (var monthIndex = 0; monthIndex < labels.Count; monthIndex++)
             {
-                foreach (var s in selected)
+                foreach (var item in selected)
                 {
+                    var s = item.Series;
                     BalanceTableRows.Add(new ChartTableRow
                     {
                         MonthLabel = labels[monthIndex],
