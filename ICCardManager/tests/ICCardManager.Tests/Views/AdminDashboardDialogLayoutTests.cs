@@ -188,6 +188,10 @@ public class AdminDashboardDialogLayoutTests
     {
         // 案内どおり辿っても同じ内容が得られない HelpText は、
         // スクリーンリーダー利用者を誤った代替手段へ誘導する（Issue #1856）
+        // 走査対象はグラフ側の検査と同じく XAML から導出する。件数をリテラルで持つと、
+        // グラフが増えたときに「HelpText を付け忘れた」のか「件数の更新漏れ」なのか区別できない
+        var chartNames = ExtractChartAutomationNames();
+
         var helpTexts = Regex.Matches(
                 Xaml,
                 @"AutomationProperties\.Name\s*=\s*""[^""]*グラフ""\s*\r?\n?\s*AutomationProperties\.HelpText\s*=\s*""(?<help>[^""]+)""",
@@ -196,7 +200,8 @@ public class AdminDashboardDialogLayoutTests
             .Select(m => m.Groups["help"].Value)
             .ToList();
 
-        helpTexts.Should().HaveCount(3, "3 つのグラフすべてに HelpText を付けること");
+        helpTexts.Should().HaveCount(chartNames.Count,
+            "すべてのグラフに（AutomationProperties.Name の直後へ）HelpText を付けること");
         helpTexts.Should().OnlyContain(h => h.Contains("一覧"),
             "代替手段（直下の一覧）を必ず案内すること");
         helpTexts.Should().NotContain(h => h.Contains("凡例"),

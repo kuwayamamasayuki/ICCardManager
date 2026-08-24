@@ -521,7 +521,7 @@
                             <DataGrid.Columns>
                                 <DataGridTextColumn Header="年月" Binding="{Binding MonthLabel}" Width="1*"/>
                                 <DataGridTextColumn Header="職員" Binding="{Binding SeriesName}" Width="2*"/>
-                                <DataGridTextColumn Header="利用額" Binding="{Binding Value, StringFormat='{}{0:N0}円'}" Width="1.2*"/>
+                                <DataGridTextColumn Header="利用額" Binding="{Binding ValueText}" SortMemberPath="Value" Width="1.2*"/>
                             </DataGrid.Columns>
                         </DataGrid>
 
@@ -647,7 +647,9 @@
                             <DataGrid.Columns>
                                 <DataGridTextColumn Header="年月" Binding="{Binding MonthLabel}" Width="1*"/>
                                 <DataGridTextColumn Header="カード" Binding="{Binding SeriesName}" Width="2*"/>
-                                <DataGridTextColumn Header="月末残高" Binding="{Binding Value, StringFormat='{}{0:N0}円'}" Width="1.2*"/>
+                                <!-- 取引開始前の月は空欄。StringFormat に null を渡すと「円」だけが残るため、
+                                     書式は ViewModel の ValueText で確定させ、並べ替えだけ数値の Value に委ねる -->
+                                <DataGridTextColumn Header="月末残高" Binding="{Binding ValueText}" SortMemberPath="Value" Width="1.2*"/>
                             </DataGrid.Columns>
                         </DataGrid>
                     </Grid>

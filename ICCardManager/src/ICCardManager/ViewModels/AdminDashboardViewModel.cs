@@ -80,6 +80,17 @@ namespace ICCardManager.ViewModels
         /// 残高で取引開始前の月は null（0 を入れると「残高が 0 になった」と誤読される）。
         /// </summary>
         public double? Value { get; set; }
+
+        /// <summary>
+        /// 一覧に表示する金額文字列。値が無い月（取引開始前）は空欄。
+        /// </summary>
+        /// <remarks>
+        /// XAML の <c>StringFormat="{}{0:N0}円"</c> に null を渡すと単位の「円」だけが残り、
+        /// 「残高が 0 円」とも「値が無い」とも読めない行になる（設計書 §3.23.4 は空欄と定めている）。
+        /// 書式の適用有無を WPF のバインディングの挙動に委ねず、ここで確定させる。
+        /// 数値としての並べ替えは <see cref="Value"/> を <c>SortMemberPath</c> に指定して保つ。
+        /// </remarks>
+        public string ValueText => Value.HasValue ? Value.Value.ToString("N0") + "円" : string.Empty;
     }
 
     /// <summary>

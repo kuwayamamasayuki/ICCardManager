@@ -569,6 +569,10 @@ public class AdminDashboardViewModelTests
 
         // 取引開始前の月に 0 を入れると「残高が 0 になった」と誤読される（Excel 出力と同じ扱い）
         vm.BalanceTableRows.Select(r => r.Value).Should().Equal(new double?[] { null, 2000.0, 3000.0 });
+
+        // 表示文字列も空欄にする。XAML の StringFormat に委ねると単位の「円」だけが残り得る
+        vm.BalanceTableRows.Select(r => r.ValueText).Should()
+            .Equal(new[] { string.Empty, "2,000円", "3,000円" });
     }
 
     [Fact]
