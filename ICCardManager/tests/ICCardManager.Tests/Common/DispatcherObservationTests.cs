@@ -46,8 +46,11 @@ public class DispatcherObservationTests
         // （development-conventions.md Issue #1730）
         log.Should().HaveCount(1);
         log[0].Operation.Should().Be("職員証の認証");
-        log[0].Exception.Should().NotBeNull();
-        log[0].Exception!.InnerException.Should().BeOfType<InvalidOperationException>();
+        // Task.Exception が返す AggregateException は一度も throw されていないため StackTrace が null。
+        // そのまま記録すると ErrorDialogHelper のログには空のスタックトレースと SYS999 しか残らないため、
+        // 実際の失敗要因まで解いてから記録すること。
+        log[0].Exception.Should().BeOfType<InvalidOperationException>();
+        log[0].Exception!.Message.Should().Be("database is locked");
     }
 
     [Fact]

@@ -134,14 +134,14 @@ namespace ICCardManager.Common
         /// </remarks>
         internal static void Observe(Task task, string operationName, Action<Exception, string> logException)
         {
-            if (task == null)
-            {
-                return;
-            }
-
             if (logException == null)
             {
                 throw new ArgumentNullException(nameof(logException));
+            }
+
+            if (task == null)
+            {
+                return;
             }
 
             task.ContinueWith(
@@ -149,7 +149,7 @@ namespace ICCardManager.Common
                 {
                     try
                     {
-                        logException(t.Exception, operationName);
+                        logException(UnwrapAggregate(t.Exception), operationName);
                     }
                     catch (Exception loggingException)
                     {
@@ -160,6 +160,38 @@ namespace ICCardManager.Common
                 CancellationToken.None,
                 TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously,
                 TaskScheduler.Default);
+        }
+
+        /// <summary>
+        /// <see cref="Task.Exception"/> の <see cref="AggregateException"/> を、実際の失敗要因まで解く
+        /// </summary>
+        /// <param name="aggregate">タスクが保持する例外。<c>null</c> の場合は <c>null</c> を返す</param>
+        /// <remarks>
+        /// <para>
+        /// <c>Task.Exception</c> が返す <see cref="AggregateException"/> は TPL が組み立てたもので
+        /// <b>一度も throw されていないため <c>StackTrace</c> が <c>null</c></b>。これをそのまま
+        /// <see cref="ErrorDialogHelper.LogException"/> へ渡すと、ログには
+        /// <c>AggregateException: One or more errors occurred.</c> と<b>空のスタックトレース</b>しか残らず、
+        /// 種別による分類（<c>ErrorDialogHelper.GetErrorInfo</c>）も必ず <c>SYS999</c> へ落ちて
+        /// <c>AppException</c> が持つ <c>ErrorCode</c> / <c>UserFriendlyMessage</c> が使われない。
+        /// 「障害調査に使えるログを残す」という本クラスの目的そのものが失われるため、実際の失敗要因まで解く。
+        /// </para>
+        /// <para>
+        /// 失敗要因が複数ある場合（<c>WhenAll</c> 等）は情報を落とさないよう
+        /// <see cref="AggregateException.Flatten"/> した集約のまま渡す。
+        /// </para>
+        /// </remarks>
+        private static Exception UnwrapAggregate(AggregateException aggregate)
+        {
+            if (aggregate == null)
+            {
+                return null;
+            }
+
+            var flattened = aggregate.Flatten();
+            return flattened.InnerExceptions.Count == 1
+                ? flattened.InnerExceptions[0]
+                : flattened;
         }
     }
 }
