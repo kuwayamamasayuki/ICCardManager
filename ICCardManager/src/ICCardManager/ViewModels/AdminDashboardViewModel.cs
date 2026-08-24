@@ -54,6 +54,46 @@ namespace ICCardManager.ViewModels
     }
 
     /// <summary>
+    /// グラフの代替一覧（DataGrid）の 1 行（Issue #1856）
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 03_画面設計書 §3.23.4 の「各グラフの直下に同じ内容の一覧を必ず併置する」を満たすための行。
+    /// 色・図形だけに依存せず、グレースケール印刷やスクリーンリーダーからも同じ内容を読める。
+    /// </para>
+    /// <para>
+    /// Excel 出力（行＝年月・列＝系列）と違い「年月・系列・値」の縦持ちにしている。
+    /// 集計期間が 3〜36 か月で可変なため列を横に並べると動的な列生成が要り、
+    /// 36 列の表はそもそも読めない。縦持ちなら 1 行が自己完結し読み上げにも適する。
+    /// </para>
+    /// </remarks>
+    public class ChartTableRow
+    {
+        /// <summary>年月ラベル（"yyyy/MM"）</summary>
+        public string MonthLabel { get; set; } = string.Empty;
+
+        /// <summary>系列名（職員名／カード名。月別利用額では「その他」を含む）</summary>
+        public string SeriesName { get; set; } = string.Empty;
+
+        /// <summary>
+        /// その月の値（利用額または月末残高）。
+        /// 残高で取引開始前の月は null（0 を入れると「残高が 0 になった」と誤読される）。
+        /// </summary>
+        public double? Value { get; set; }
+
+        /// <summary>
+        /// 一覧に表示する金額文字列。値が無い月（取引開始前）は空欄。
+        /// </summary>
+        /// <remarks>
+        /// XAML の <c>StringFormat="{}{0:N0}円"</c> に null を渡すと単位の「円」だけが残り、
+        /// 「残高が 0 円」とも「値が無い」とも読めない行になる（設計書 §3.23.4 は空欄と定めている）。
+        /// 書式の適用有無を WPF のバインディングの挙動に委ねず、ここで確定させる。
+        /// 数値としての並べ替えは <see cref="Value"/> を <c>SortMemberPath</c> に指定して保つ。
+        /// </remarks>
+        public string ValueText => Value.HasValue ? Value.Value.ToString("N0") + "円" : string.Empty;
+    }
+
+    /// <summary>
     /// 残高推移グラフの 1 本の折れ線（Issue #1692）
     /// </summary>
     public class BalanceLine
@@ -271,6 +311,9 @@ namespace ICCardManager.ViewModels
         /// <summary>月別利用額グラフの凡例</summary>
         public ObservableCollection<ChartLegendItem> UsageLegend { get; } = new();
 
+        /// <summary>月別利用額グラフの代替一覧（Issue #1856）</summary>
+        public ObservableCollection<ChartTableRow> UsageTableRows { get; } = new();
+
         /// <summary>残高推移グラフの折れ線</summary>
         public ObservableCollection<BalanceLine> BalanceLines { get; } = new();
 
@@ -282,6 +325,9 @@ namespace ICCardManager.ViewModels
 
         /// <summary>残高推移グラフに描画するカードの選択肢</summary>
         public ObservableCollection<BalanceSeriesOption> BalanceSeriesOptions { get; } = new();
+
+        /// <summary>残高推移グラフの代替一覧（Issue #1856）</summary>
+        public ObservableCollection<ChartTableRow> BalanceTableRows { get; } = new();
 
         /// <summary>推移グラフの幅（XAML の Canvas にバインドする）</summary>
         public double TrendCanvasWidth => TrendChartWidth;
@@ -512,6 +558,7 @@ namespace ICCardManager.ViewModels
             UsageAxisTicks.Clear();
             UsageMonthLabels.Clear();
             UsageLegend.Clear();
+            UsageTableRows.Clear();
 
             var series = source?.UsageSeries ?? new MonthlyUsageSeries[0];
             var labels = source?.MonthLabels ?? new string[0];
@@ -563,6 +610,22 @@ namespace ICCardManager.ViewModels
                     BrushKey = brushKeys[i]
                 });
             }
+
+            // 代替一覧はグラフと同じメソッドで作る。別メソッドに分けると、
+            // 系列の絞り込みや並びを片方だけ変えたときに「同じ内容」でなくなる（Issue #1856）。
+            // 並びは積み上げ棒の読み取り順（月ごとに系列が積み上がる）へ揃える
+            for (var monthIndex = 0; monthIndex < labels.Count; monthIndex++)
+            {
+                for (var seriesIndex = 0; seriesIndex < series.Count; seriesIndex++)
+                {
+                    UsageTableRows.Add(new ChartTableRow
+                    {
+                        MonthLabel = labels[monthIndex],
+                        SeriesName = series[seriesIndex].Name,
+                        Value = valuesByMonth[monthIndex][seriesIndex]
+                    });
+                }
+            }
         }
 
         /// <summary>
@@ -597,6 +660,7 @@ namespace ICCardManager.ViewModels
             BalanceLines.Clear();
             BalanceAxisTicks.Clear();
             BalanceMonthLabels.Clear();
+            BalanceTableRows.Clear();
 
             var labels = source?.MonthLabels ?? new string[0];
             var selectedIdms = BalanceSeriesOptions.Where(o => o.IsSelected).Select(o => o.CardIdm).ToList();
@@ -646,6 +710,21 @@ namespace ICCardManager.ViewModels
             foreach (var tick in ChartGeometryCalculator.CalculateXAxisLabels(labels, area, MaxXAxisLabels))
             {
                 BalanceMonthLabels.Add(tick);
+            }
+
+            // 一覧の母集団は折れ線と同じ selected（チェックボックスの選択と上限の両方が効いた後）。
+            // 一覧だけ全件にすると、グラフに描かれていない系列が並んで「同じ内容」でなくなる（Issue #1856）
+            for (var monthIndex = 0; monthIndex < labels.Count; monthIndex++)
+            {
+                foreach (var s in selected)
+                {
+                    BalanceTableRows.Add(new ChartTableRow
+                    {
+                        MonthLabel = labels[monthIndex],
+                        SeriesName = s.DisplayName,
+                        Value = monthIndex < s.MonthlyBalances.Count ? s.MonthlyBalances[monthIndex] : null
+                    });
+                }
             }
         }
 

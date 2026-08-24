@@ -156,12 +156,58 @@ public class AdminDashboardDialogLayoutTests
     }
 
     [Fact]
-    public void Utilization_chart_should_be_accompanied_by_a_data_grid()
+    public void Every_chart_should_be_accompanied_by_a_data_grid()
     {
-        // 色・図形だけに依存しないよう、グラフと同じ内容を一覧でも提供する
-        Xaml.Should().MatchRegex(
-            @"<DataGrid[^>]*ItemsSource\s*=\s*""\{Binding\s+Analytics\.Utilizations\}""",
-            "稼働率グラフと同じ内容を読み取れる一覧を併置すること");
+        // 03_画面設計書 §3.23.4:「各グラフの直下に同じ内容の一覧（DataGrid）を必ず併置する」。
+        // 検査対象をファイル内のグラフから導出するので、グラフを増やした人が
+        // 検査の追加を忘れても自動的に対象へ入る（Issue #1856。#1786 と同じ作法）。
+        // 対応する一覧は名前の規約（「〜グラフ」→「〜一覧」）で引く
+        var chartNames = ExtractChartAutomationNames();
+
+        // 抽出が空振りしていないことを先に表明する（命名を変えたときに静かに緑にならないように）
+        chartNames.Should().HaveCountGreaterOrEqualTo(3,
+            "稼働率・月次利用額・残高推移の 3 グラフが少なくとも存在するはず");
+
+        var gridNames = Regex.Matches(
+                Xaml, @"<DataGrid\b[^>]*?AutomationProperties\.Name\s*=\s*""(?<name>[^""]+)""",
+                RegexOptions.Singleline)
+            .Cast<Match>()
+            .Select(m => m.Groups["name"].Value)
+            .ToList();
+
+        foreach (var chartName in chartNames)
+        {
+            var expectedGridName = chartName.Substring(0, chartName.Length - "グラフ".Length) + "一覧";
+            gridNames.Should().Contain(expectedGridName,
+                $"「{chartName}」と同じ内容を色に依存せず読み取れる一覧を併置すること");
+        }
+    }
+
+    [Fact]
+    public void Chart_help_text_should_point_at_the_adjacent_data_grid()
+    {
+        // 案内どおり辿っても同じ内容が得られない HelpText は、
+        // スクリーンリーダー利用者を誤った代替手段へ誘導する（Issue #1856）
+        // 走査対象はグラフ側の検査と同じく XAML から導出する。件数をリテラルで持つと、
+        // グラフが増えたときに「HelpText を付け忘れた」のか「件数の更新漏れ」なのか区別できない
+        var chartNames = ExtractChartAutomationNames();
+
+        var helpTexts = Regex.Matches(
+                Xaml,
+                @"AutomationProperties\.Name\s*=\s*""[^""]*グラフ""\s*\r?\n?\s*AutomationProperties\.HelpText\s*=\s*""(?<help>[^""]+)""",
+                RegexOptions.Singleline)
+            .Cast<Match>()
+            .Select(m => m.Groups["help"].Value)
+            .ToList();
+
+        helpTexts.Should().HaveCount(chartNames.Count,
+            "すべてのグラフに（AutomationProperties.Name の直後へ）HelpText を付けること");
+        helpTexts.Should().OnlyContain(h => h.Contains("一覧"),
+            "代替手段（直下の一覧）を必ず案内すること");
+        helpTexts.Should().NotContain(h => h.Contains("凡例"),
+            "凡例には金額が無いため、代替手段として案内すると誤案内になる");
+        helpTexts.Should().NotContain(h => h.Contains("稼働状況タブ"),
+            "稼働状況タブの一覧はカード別で、職員別の月次利用額を含まない");
     }
 
     [Fact]
@@ -186,6 +232,13 @@ public class AdminDashboardDialogLayoutTests
     // UserFacingTextConventionTests が Views/ 配下の *.xaml を再帰的に走査しており、
     // 本画面も自動で対象になる。ここに簡易版を重ねると許容複合語の定義が 2 か所に分かれ、
     // 片方だけ更新されたときに検査が食い違う。
+
+    private static System.Collections.Generic.List<string> ExtractChartAutomationNames()
+        => Regex.Matches(Xaml, @"AutomationProperties\.Name\s*=\s*""(?<name>[^""]*グラフ)""")
+            .Cast<Match>()
+            .Select(m => m.Groups["name"].Value)
+            .Distinct()
+            .ToList();
 
     private static string ExtractBlock(string pattern)
     {

@@ -494,6 +494,127 @@ public class AdminDashboardViewModelTests
 
     #endregion
 
+    #region グラフの代替一覧（Issue #1856）
+
+    [Fact]
+    public async Task LoadAnalyticsAsync_BuildsUsageTableMatchingTheChart()
+    {
+        SetupAnalytics(CreateAnalytics(monthCount: 3, seriesCount: 2));
+        var vm = CreateViewModel();
+
+        await vm.LoadAnalyticsAsync();
+
+        // グラフと同じ内容（3 か月 × 2 系列）を、色に依存せず読み取れる形で持つ
+        vm.UsageTableRows.Should().HaveCount(6);
+        vm.UsageTableRows.Select(r => r.MonthLabel).Should()
+            .Equal(new[] { "2026/01", "2026/01", "2026/02", "2026/02", "2026/03", "2026/03" },
+                "積み上げ棒の読み取り順（月ごとに系列が積み上がる）と一致させる");
+        vm.UsageTableRows.Select(r => r.SeriesName).Should()
+            .Equal(new[] { "職員1", "職員2", "職員1", "職員2", "職員1", "職員2" });
+
+        // 値は棒の高さの元データそのもの（CreateAnalytics は m * 100 * i 円）
+        vm.UsageTableRows[0].Value.Should().Be(100);
+        vm.UsageTableRows[1].Value.Should().Be(200);
+        vm.UsageTableRows[5].Value.Should().Be(600);
+    }
+
+    [Fact]
+    public async Task LoadAnalyticsAsync_UsageTableIncludesTheOtherSeries()
+    {
+        SetupAnalytics(CreateAnalytics(monthCount: 2, seriesCount: 3, includeOtherSeries: true));
+        var vm = CreateViewModel();
+
+        await vm.LoadAnalyticsAsync();
+
+        // 「その他」もグラフに積まれる以上、一覧から落とすと合計が合わない（Issue #1815）
+        vm.UsageTableRows.Select(r => r.SeriesName).Should()
+            .Contain(AdminDashboardService.OtherSeriesName);
+        vm.UsageTableRows.Should().HaveCount(6, "2 か月 × 3 系列");
+    }
+
+    [Fact]
+    public async Task LoadAnalyticsAsync_BuildsBalanceTableForSelectedSeriesOnly()
+    {
+        SetupAnalytics(CreateAnalytics(cardCount: 2, monthCount: 3));
+        var vm = CreateViewModel();
+
+        await vm.LoadAnalyticsAsync();
+
+        vm.BalanceTableRows.Should().HaveCount(6, "3 か月 × 選択中 2 カード");
+
+        vm.BalanceSeriesOptions.First().IsSelected = false;
+
+        // グラフと一覧が別々の母集団になると「同じ内容」でなくなる
+        vm.BalanceTableRows.Should().HaveCount(3, "3 か月 × 選択中 1 カード");
+        vm.BalanceTableRows.Should().OnlyContain(r => r.SeriesName == "カード2");
+    }
+
+    [Fact]
+    public async Task LoadAnalyticsAsync_BalanceTableKeepsMissingMonthsEmpty()
+    {
+        var analytics = CreateAnalytics(cardCount: 1, monthCount: 3);
+        analytics.BalanceSeries = new[]
+        {
+            new MonthlyBalanceSeries
+            {
+                CardIdm = "CARD000000000001",
+                DisplayName = "カード1",
+                MonthlyBalances = new double?[] { null, 2000.0, 3000.0 }
+            }
+        };
+        SetupAnalytics(analytics);
+        var vm = CreateViewModel();
+
+        await vm.LoadAnalyticsAsync();
+
+        // 取引開始前の月に 0 を入れると「残高が 0 になった」と誤読される（Excel 出力と同じ扱い）
+        vm.BalanceTableRows.Select(r => r.Value).Should().Equal(new double?[] { null, 2000.0, 3000.0 });
+
+        // 表示文字列も空欄にする。XAML の StringFormat に委ねると単位の「円」だけが残り得る
+        vm.BalanceTableRows.Select(r => r.ValueText).Should()
+            .Equal(new[] { string.Empty, "2,000円", "3,000円" });
+    }
+
+    [Fact]
+    public async Task LoadAnalyticsAsync_BalanceTableRespectsTheSeriesCap()
+    {
+        SetupAnalytics(CreateAnalytics(cardCount: AppConstants.AdminDashboardMaxSeries + 3, monthCount: 2));
+        var vm = CreateViewModel();
+
+        await vm.LoadAnalyticsAsync();
+
+        // 折れ線は上限で打ち切られるため、一覧だけ全件だとグラフに無い系列が並ぶ
+        vm.BalanceTableRows.Select(r => r.SeriesName).Distinct()
+            .Should().HaveCount(AppConstants.AdminDashboardMaxSeries);
+    }
+
+    [Fact]
+    public async Task LoadAnalyticsAsync_WithNoData_LeavesTablesEmpty()
+    {
+        SetupAnalytics(new AdminDashboardAnalytics());
+        var vm = CreateViewModel();
+
+        await vm.LoadAnalyticsAsync();
+
+        vm.UsageTableRows.Should().BeEmpty();
+        vm.BalanceTableRows.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task ReloadingAnalytics_DoesNotAccumulateTableRows()
+    {
+        SetupAnalytics(CreateAnalytics(cardCount: 2, monthCount: 3, seriesCount: 2));
+        var vm = CreateViewModel();
+
+        await vm.LoadAnalyticsAsync();
+        await vm.LoadAnalyticsAsync();
+
+        vm.UsageTableRows.Should().HaveCount(6);
+        vm.BalanceTableRows.Should().HaveCount(6);
+    }
+
+    #endregion
+
     #region エラー処理
 
     [Fact]
