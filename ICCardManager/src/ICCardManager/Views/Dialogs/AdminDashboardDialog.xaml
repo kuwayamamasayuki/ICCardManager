@@ -1,4 +1,4 @@
-<Window x:Class="ICCardManager.Views.Dialogs.AdminDashboardDialog"
+﻿<Window x:Class="ICCardManager.Views.Dialogs.AdminDashboardDialog"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
@@ -441,9 +441,13 @@
                                     </ItemsControl.ItemContainerStyle>
                                     <ItemsControl.ItemTemplate>
                                         <DataTemplate>
+                                            <!-- 区切り線は色以外の手掛かり。隣接する区画の相対輝度が近くても
+                                                 （グレースケール印刷・ロービジョン・色覚多様性）境界が読める（Issue #1855） -->
                                             <Rectangle Width="{Binding Width}"
                                                        Height="{Binding Height}"
-                                                       Fill="{Binding BrushKey, Converter={StaticResource ResourceKeyToBrushConverter}}"/>
+                                                       Fill="{Binding BrushKey, Converter={StaticResource ResourceKeyToBrushConverter}}"
+                                                       Stroke="{DynamicResource ChartSeriesOutlineBrush}"
+                                                       StrokeThickness="1"/>
                                         </DataTemplate>
                                     </ItemsControl.ItemTemplate>
                                 </ItemsControl>
@@ -479,11 +483,16 @@
                                 <DataTemplate>
                                     <Border Margin="0,0,14,4" Padding="0">
                                         <DockPanel LastChildFill="True">
+                                            <!-- 輪郭線でスウォッチの境界を白背景から切り離す（Issue #1855）。
+                                                 積み上げ棒の区切り線と同じブラシを使う。淡い灰（MutedTextBrush）は
+                                                 「その他」の塗り（#424242）とのコントラストが 1.75 しかなく輪郭にならない -->
                                             <Rectangle DockPanel.Dock="Left"
                                                        Width="14" Height="14"
                                                        Margin="0,0,6,0"
                                                        VerticalAlignment="Center"
-                                                       Fill="{Binding BrushKey, Converter={StaticResource ResourceKeyToBrushConverter}}"/>
+                                                       Fill="{Binding BrushKey, Converter={StaticResource ResourceKeyToBrushConverter}}"
+                                                       Stroke="{DynamicResource ChartSeriesOutlineBrush}"
+                                                       StrokeThickness="1"/>
                                             <TextBlock Text="{Binding Label}"
                                                        TextWrapping="Wrap"
                                                        VerticalAlignment="Center"/>
