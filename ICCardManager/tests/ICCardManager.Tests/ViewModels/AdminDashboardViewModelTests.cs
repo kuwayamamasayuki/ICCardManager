@@ -443,6 +443,144 @@ public class AdminDashboardViewModelTests
     }
 
     [Fact]
+    public async Task LoadAnalyticsAsync_AssignsAColorAndDashPatternToEveryCard()
+    {
+        SetupAnalytics(CreateAnalytics(cardCount: AppConstants.AdminDashboardMaxSeries + 3));
+        var vm = CreateViewModel();
+
+        await vm.LoadAnalyticsAsync();
+
+        // 選択されていないカードにも色が確定していること。
+        // 「選択されたときに決める」形だと、選択の増減で色が動く元の欠陥へ戻る
+        vm.BalanceSeriesOptions.Should().OnlyContain(o => !string.IsNullOrEmpty(o.BrushKey));
+        vm.BalanceSeriesOptions.Should().OnlyContain(o => o.DashPattern != null);
+
+        // 色数以内のカードは互いに異なる色（対のテスト。全部同じ色を返す実装を弾く）
+        vm.BalanceSeriesOptions
+            .Take(AdminDashboardViewModel.SeriesBrushKeys.Length)
+            .Select(o => o.BrushKey)
+            .Should().OnlyHaveUniqueItems();
+    }
+
+    [Fact]
+    public async Task DeselectingABalanceSeries_KeepsTheColorOfTheRemainingCards()
+    {
+        SetupAnalytics(CreateAnalytics(cardCount: 3));
+        var vm = CreateViewModel();
+        await vm.LoadAnalyticsAsync();
+
+        // Issue #1857 の故障シナリオ: A を外すと B・C の色が順送りに入れ替わっていた
+        var before = vm.BalanceLines
+            .GroupBy(l => l.DisplayName)
+            .ToDictionary(g => g.Key, g => g.First().BrushKey);
+        var removed = vm.BalanceSeriesOptions.First();
+
+        removed.IsSelected = false;
+
+        vm.BalanceLines.Should().NotContain(l => l.DisplayName == removed.DisplayName);
+        foreach (var line in vm.BalanceLines)
+        {
+            line.BrushKey.Should().Be(before[line.DisplayName],
+                "カードの色は選択の増減では動かないこと（Issue #1857）");
+        }
+    }
+
+    [Fact]
+    public async Task ReloadingWithADifferentPeriod_KeepsTheColorOfTheRemainingCards()
+    {
+        // AdminDashboardService.BuildBalanceSeries は期間内にも期間前にも残高が無いカードを
+        // 系列ごと落とすため、期間を変えると母集団が動く。そのときの並びの添字で色を選ぶと、
+        // 落ちたカードより後ろのカードの色がすべてずれる（Issue #1857 と同じ形）
+        SetupAnalytics(CreateAnalytics(cardCount: 3));
+        var vm = CreateViewModel();
+        await vm.LoadAnalyticsAsync();
+
+        var before = vm.BalanceSeriesOptions.ToDictionary(o => o.CardIdm, o => o.BrushKey);
+        var dropped = vm.BalanceSeriesOptions[0].CardIdm;
+
+        // 期間を変えて先頭カードが集計対象から外れた状態を再現する
+        var narrowed = CreateAnalytics(cardCount: 3);
+        narrowed.BalanceSeries = narrowed.BalanceSeries.Where(s => s.CardIdm != dropped).ToList();
+        SetupAnalytics(narrowed);
+        await vm.LoadAnalyticsAsync();
+
+        vm.BalanceSeriesOptions.Should().NotContain(o => o.CardIdm == dropped);
+        foreach (var option in vm.BalanceSeriesOptions)
+        {
+            option.BrushKey.Should().Be(before[option.CardIdm],
+                "カードの色は期間変更による系列の増減でも動かないこと（Issue #1857）");
+        }
+    }
+
+    [Fact]
+    public async Task BalanceLines_UseTheColorAndDashPatternAssignedToTheirCard()
+    {
+        SetupAnalytics(CreateAnalytics(cardCount: AdminDashboardViewModel.SeriesBrushKeys.Length + 3));
+        var vm = CreateViewModel();
+        await vm.LoadAnalyticsAsync();
+
+        // 選択を「先頭から連続」から外す。連続したままだと、選択リストの添字と
+        // カードの通し番号が偶然一致し、旧実装（選択順で色を選ぶ）でも緑になる
+        vm.BalanceSeriesOptions[0].IsSelected = false;
+        vm.BalanceSeriesOptions[AdminDashboardViewModel.SeriesBrushKeys.Length].IsSelected = true;
+
+        // 折れ線と選択リスト（＝凡例）が食い違うと、色見本を置いた意味が無くなる
+        vm.BalanceSeriesOptions.Count(o => o.IsSelected).Should().Be(AppConstants.AdminDashboardMaxSeries);
+        foreach (var option in vm.BalanceSeriesOptions.Where(o => o.IsSelected))
+        {
+            var lines = vm.BalanceLines.Where(l => l.DisplayName == option.DisplayName).ToList();
+            lines.Should().NotBeEmpty();
+            lines.Should().OnlyContain(l => l.BrushKey == option.BrushKey);
+            lines.Should().OnlyContain(l => ReferenceEquals(l.DashPattern, option.DashPattern));
+        }
+    }
+
+    [Fact]
+    public void GetBalanceSeriesBrushKey_CyclesTheColorsAndChangesTheDashPatternEachLap()
+    {
+        var paletteSize = AdminDashboardViewModel.SeriesBrushKeys.Length;
+
+        // 色は一巡する（カード枚数に上限が無いため避けられない）
+        AdminDashboardViewModel.GetBalanceSeriesBrushKey(paletteSize)
+            .Should().Be(AdminDashboardViewModel.GetBalanceSeriesBrushKey(0));
+
+        // 一巡した先は線種で区別が付くこと（色だけを手掛かりにしない）
+        AdminDashboardViewModel.GetBalanceSeriesDashPattern(0)
+            .Should().BeSameAs(AdminDashboardViewModel.SolidDashPattern);
+        AdminDashboardViewModel.GetBalanceSeriesDashPattern(paletteSize)
+            .Should().NotBeSameAs(AdminDashboardViewModel.GetBalanceSeriesDashPattern(0));
+
+        // 同じ一巡の中では線種は変わらない（線種だけで色の違いを打ち消さない）
+        AdminDashboardViewModel.GetBalanceSeriesDashPattern(paletteSize - 1)
+            .Should().BeSameAs(AdminDashboardViewModel.GetBalanceSeriesDashPattern(0));
+    }
+
+    [Fact]
+    public void SeriesDashPatterns_AreDistinctAndFrozen()
+    {
+        AdminDashboardViewModel.SeriesDashPatterns.Should().HaveCountGreaterThan(1);
+
+        // 凍結していないと、バインド先が同じインスタンスを共有して互いに書き換え得る
+        AdminDashboardViewModel.SeriesDashPatterns.Should().OnlyContain(p => p.IsFrozen);
+
+        AdminDashboardViewModel.SeriesDashPatterns
+            .Select(p => string.Join(",", p))
+            .Should().OnlyHaveUniqueItems();
+    }
+
+    [Theory]
+    [InlineData(-1)]
+    [InlineData(int.MinValue)]
+    public void GetBalanceSeriesBrushKey_RejectsANegativeIndex(int cardIndex)
+    {
+        // 剰余は負の添字で負を返すため、黙って別の色へ丸めず弾く
+        Assert.Throws<ArgumentOutOfRangeException>(
+            () => AdminDashboardViewModel.GetBalanceSeriesBrushKey(cardIndex));
+        Assert.Throws<ArgumentOutOfRangeException>(
+            () => AdminDashboardViewModel.GetBalanceSeriesDashPattern(cardIndex));
+    }
+
+    [Fact]
     public async Task LoadAnalyticsAsync_SplitsBalanceLineAtMissingMonths()
     {
         var analytics = CreateAnalytics(cardCount: 1, monthCount: 4);
