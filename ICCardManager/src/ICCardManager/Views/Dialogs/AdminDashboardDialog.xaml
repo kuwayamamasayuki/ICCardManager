@@ -362,7 +362,7 @@
                               GridLinesVisibility="Horizontal"
                               RowHeaderWidth="0"
                               AlternatingRowBackground="{DynamicResource AlternatingRowBrush}"
-                              AutomationProperties.Name="カード別の稼働状況一覧">
+                              AutomationProperties.Name="カード別の稼働率一覧">
                         <DataGrid.Columns>
                             <DataGridTextColumn Header="カード" Binding="{Binding DisplayName}" Width="1.8*"/>
                             <DataGridTextColumn Header="稼働率" Binding="{Binding UtilizationRate, StringFormat='{}{0:P1}'}" Width="1*"/>
@@ -393,6 +393,8 @@
                             <RowDefinition Height="Auto"/>
                             <RowDefinition Height="Auto"/>
                             <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
                         </Grid.RowDefinitions>
 
                         <TextBlock Grid.Row="0"
@@ -407,7 +409,7 @@
                             <Grid Width="{Binding TrendCanvasWidth, Mode=OneWay}"
                                   Height="{Binding TrendCanvasHeight, Mode=OneWay}"
                                   AutomationProperties.Name="職員別の月次利用額グラフ"
-                                  AutomationProperties.HelpText="同じ内容を下の凡例と稼働状況タブの一覧でも確認できます。">
+                                  AutomationProperties.HelpText="同じ内容をグラフの下の「職員別の月次利用額一覧」でも確認できます。">
 
                                 <ItemsControl ItemsSource="{Binding UsageAxisTicks}">
                                     <ItemsControl.ItemsPanel>
@@ -502,19 +504,40 @@
                             </ItemsControl.ItemTemplate>
                         </ItemsControl>
 
-                        <TextBlock Grid.Row="3"
+                        <!-- グラフと同じ内容の一覧（03_画面設計書 §3.23.4、Issue #1856）。
+                             集計期間が 3〜36 か月で可変なため、月を列に並べず「年月・職員・利用額」の
+                             縦持ちにしている。行数が伸びるので一覧自体をスクロールさせる -->
+                        <DataGrid Grid.Row="3"
+                                  ItemsSource="{Binding UsageTableRows}"
+                                  Style="{DynamicResource AccessibleDataGridStyle}"
+                                  AutoGenerateColumns="False"
+                                  IsReadOnly="True"
+                                  MaxHeight="240"
+                                  GridLinesVisibility="Horizontal"
+                                  RowHeaderWidth="0"
+                                  Margin="0,0,0,16"
+                                  AlternatingRowBackground="{DynamicResource AlternatingRowBrush}"
+                                  AutomationProperties.Name="職員別の月次利用額一覧">
+                            <DataGrid.Columns>
+                                <DataGridTextColumn Header="年月" Binding="{Binding MonthLabel}" Width="1*"/>
+                                <DataGridTextColumn Header="職員" Binding="{Binding SeriesName}" Width="2*"/>
+                                <DataGridTextColumn Header="利用額" Binding="{Binding Value, StringFormat='{}{0:N0}円'}" Width="1.2*"/>
+                            </DataGrid.Columns>
+                        </DataGrid>
+
+                        <TextBlock Grid.Row="4"
                                    Text="カード別の残高推移"
                                    FontWeight="Bold"
                                    TextWrapping="Wrap"
                                    Margin="0,0,0,6"/>
 
-                        <ScrollViewer Grid.Row="4"
+                        <ScrollViewer Grid.Row="5"
                                       HorizontalScrollBarVisibility="Auto"
                                       VerticalScrollBarVisibility="Disabled">
                             <Grid Width="{Binding TrendCanvasWidth, Mode=OneWay}"
                                   Height="{Binding TrendCanvasHeight, Mode=OneWay}"
                                   AutomationProperties.Name="カード別の残高推移グラフ"
-                                  AutomationProperties.HelpText="描画するカードは下のチェックボックスで選べます。">
+                                  AutomationProperties.HelpText="同じ内容をグラフの下の「カード別の残高推移一覧」でも確認できます。描画するカードはチェックボックスで選べます。">
 
                                 <ItemsControl ItemsSource="{Binding BalanceAxisTicks}">
                                     <ItemsControl.ItemsPanel>
@@ -591,7 +614,7 @@
                             </Grid>
                         </ScrollViewer>
 
-                        <ItemsControl Grid.Row="5" ItemsSource="{Binding BalanceSeriesOptions}" Margin="0,6,0,0">
+                        <ItemsControl Grid.Row="6" ItemsSource="{Binding BalanceSeriesOptions}" Margin="0,6,0,0">
                             <ItemsControl.ItemsPanel>
                                 <ItemsPanelTemplate><WrapPanel/></ItemsPanelTemplate>
                             </ItemsControl.ItemsPanel>
@@ -607,6 +630,26 @@
                                 </DataTemplate>
                             </ItemsControl.ItemTemplate>
                         </ItemsControl>
+
+                        <!-- 一覧の母集団は折れ線と同じ（チェックボックスの選択が効いた後）。
+                             取引開始前の月は空欄。0 を出すと「残高が 0 になった」と誤読される -->
+                        <DataGrid Grid.Row="7"
+                                  ItemsSource="{Binding BalanceTableRows}"
+                                  Style="{DynamicResource AccessibleDataGridStyle}"
+                                  AutoGenerateColumns="False"
+                                  IsReadOnly="True"
+                                  MaxHeight="240"
+                                  GridLinesVisibility="Horizontal"
+                                  RowHeaderWidth="0"
+                                  Margin="0,10,0,0"
+                                  AlternatingRowBackground="{DynamicResource AlternatingRowBrush}"
+                                  AutomationProperties.Name="カード別の残高推移一覧">
+                            <DataGrid.Columns>
+                                <DataGridTextColumn Header="年月" Binding="{Binding MonthLabel}" Width="1*"/>
+                                <DataGridTextColumn Header="カード" Binding="{Binding SeriesName}" Width="2*"/>
+                                <DataGridTextColumn Header="月末残高" Binding="{Binding Value, StringFormat='{}{0:N0}円'}" Width="1.2*"/>
+                            </DataGrid.Columns>
+                        </DataGrid>
                     </Grid>
                 </ScrollViewer>
             </TabItem>
