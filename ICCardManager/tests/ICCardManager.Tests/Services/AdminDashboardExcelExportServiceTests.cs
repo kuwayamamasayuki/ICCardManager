@@ -313,7 +313,7 @@ public class AdminDashboardExcelExportServiceTests : IDisposable
         // 集約系列の見出しは画面の凡例と同じ名前（人数付き）。Issue #1858
         sheet.Cell(1, 3).GetString()
             .Should().Be(ChartSeriesNameFormatter.BuildOtherSeriesName(OtherAggregatedCount));
-        sheet.Cell(1, 3).GetString().Should().NotBe(ChartSeriesNameFormatter.OtherSeriesBaseName);
+        sheet.Cell(1, 3).GetString().Should().NotBe("その他");
         sheet.Cell(1, 4).GetString().Should().Be("合計");
         sheet.Cell(2, 1).GetString().Should().Be("2026/06");
         sheet.Cell(2, 2).GetDouble().Should().Be(1000);

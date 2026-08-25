@@ -41,14 +41,16 @@ public class ChartSeriesNameFormatterTests
         // それを定義域内のどこでも生まないことが本来の不変条件。
         // 1 名の 1 点だけを見る表明では、書式から接尾辞が落ちる退行や、
         // 大きな件数だけ別経路へ落ちる実装を見逃す。
+        // Issue #1884: 比較対象はリテラルで書く。禁止したい値を本番の定数から引くと、
+        // 本番側で基底名を変えたときに期待値も一緒に動き、表明が自己充足して常に緑になる。
         for (var count = 1; count <= 100; count++)
         {
             ChartSeriesNameFormatter.BuildOtherSeriesName(count)
-                .Should().NotBe(ChartSeriesNameFormatter.OtherSeriesBaseName);
+                .Should().NotBe("その他");
         }
 
         ChartSeriesNameFormatter.BuildOtherSeriesName(int.MaxValue)
-            .Should().NotBe(ChartSeriesNameFormatter.OtherSeriesBaseName);
+            .Should().NotBe("その他");
     }
 
     [Fact]
@@ -65,7 +67,7 @@ public class ChartSeriesNameFormatterTests
     {
         // Issue #1858 の目的。人数が 1 名でも、氏名「その他」の職員とは別の文字列になる
         ChartSeriesNameFormatter.BuildOtherSeriesName(1)
-            .Should().NotBe(ChartSeriesNameFormatter.OtherSeriesBaseName);
+            .Should().NotBe("その他");
     }
 
     [Fact]
@@ -74,6 +76,6 @@ public class ChartSeriesNameFormatterTests
         // 対の表明。衝突を避けるために「その他」という語ごと変えてしまうと、
         // 凡例から「上位以外の合算」という意味が読み取れなくなる
         ChartSeriesNameFormatter.BuildOtherSeriesName(5)
-            .Should().StartWith(ChartSeriesNameFormatter.OtherSeriesBaseName);
+            .Should().StartWith("その他");
     }
 }

@@ -41,9 +41,9 @@ public class MonthlyUsageSeriesTests
     {
         // Issue #1858 の前提。職員マスタに無い staff_name をそのまま系列名に使う経路があるため、
         // 氏名「その他」の職員系列は存在し得る。導出はこれを集約系列と取り違えてはならない。
-        var series = new MonthlyUsageSeries { Name = ChartSeriesNameFormatter.OtherSeriesBaseName };
+        var series = new MonthlyUsageSeries { Name = "その他" };
 
-        series.Name.Should().Be(ChartSeriesNameFormatter.OtherSeriesBaseName);
+        series.Name.Should().Be("その他");
         series.IsOther.Should().BeFalse();
     }
 

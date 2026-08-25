@@ -19,8 +19,18 @@ namespace ICCardManager.Common.Charting
     /// </remarks>
     internal static class ChartSeriesNameFormatter
     {
-        /// <summary>集約系列の基底の表示名（人数を添えない形）</summary>
-        internal const string OtherSeriesBaseName = "その他";
+        /// <summary>
+        /// 集約系列の基底の表示名（人数を添えない形）。
+        /// </summary>
+        /// <remarks>
+        /// Issue #1884: この値は<b>どの系列の <c>Name</c> とも一致しない</b>。本番は必ず
+        /// <see cref="BuildOtherSeriesName(int)"/> を 1 以上の件数で呼ぶため、集約系列の名前は
+        /// 常に「その他（N 名）」になる。外部へ公開すると <c>series.Name == OtherSeriesBaseName</c>
+        /// のような<b>静かに常に偽になる判定</b>を書けてしまい、次に読む人へ誤った契約を提示する
+        /// （Issue #1858 が <c>AdminDashboardService.OtherSeriesName</c> を削除したのと同じ理由）。
+        /// 書式の組み立て以外の用途を持たせないため <c>private</c> に閉じる。
+        /// </remarks>
+        private const string OtherSeriesBaseName = "その他";
 
         /// <summary>
         /// 上位以外を集約した系列の表示名を組み立てる。
