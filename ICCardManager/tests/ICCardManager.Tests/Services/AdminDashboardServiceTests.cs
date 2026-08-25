@@ -971,11 +971,64 @@ public class AdminDashboardServiceTests
 
         // 氏名「その他」の職員は上位 5 名に入り、名前はそのまま
         result.UsageSeries.Should().ContainSingle(s => !s.IsOther && s.Name == "その他");
-        // 集約系列は人数付きなので、表示名が衝突しない
-        result.UsageSeries.Select(s => s.Name).Should().OnlyHaveUniqueItems();
         var other = result.UsageSeries.Single(s => s.IsOther);
+        // Issue #1887: 表明は本テストの検査対象（集約ラベルの衝突）に絞る。
+        // 「全系列の名前が一意」は #1886 の一意化が別に担保している性質であり、
+        // ここで併せて表明すると、フィクスチャに正当な同名職員を足したときに
+        // 本テストが本来の対象と無関係な理由で赤くなり得る。
+        result.UsageSeries.Where(s => !s.IsOther)
+            .Should().NotContain(s => s.Name == other.Name);
         other.Name.Should().Be(ChartSeriesNameFormatter.BuildOtherSeriesName(other.AggregatedSeriesCount));
         other.Name.Should().NotBe("その他");
+    }
+
+    [Fact]
+    public async Task GetAnalyticsAsync_同名職員が上位に居ても集約系列の表記は衝突しないこと()
+    {
+        // Issue #1887 の対の表明。上のテストの表明を「集約系列 vs 他の系列」へ絞ったので、
+        // 絞ったあとも故障を検出できること（＝同名職員という無関係な要因が混ざっても
+        // 検査対象が壊れていないこと）を、同名職員を含むフィクスチャで実測する。
+        // 全系列の一意性は #1886 の一意化が担保する別の性質であり、ここでは
+        // 「同名職員が居る」ことがこのテストを赤にしないことも併せて示している。
+        var rows = new List<MonthlyUsageRow>
+        {
+            new MonthlyUsageRow { YearMonth = "2026-05", LenderIdm = "", StaffName = "その他", TotalExpense = 9000 },
+            new MonthlyUsageRow { YearMonth = "2026-05", LenderIdm = StaffA, StaffName = "福岡 太郎", TotalExpense = 8000 },
+            new MonthlyUsageRow { YearMonth = "2026-05", LenderIdm = StaffB, StaffName = "福岡 太郎", TotalExpense = 7000 }
+        };
+        // 上位枠の残りと、「その他」へ畳まれる 3 名。
+        // 件数は AppConstants.AdminDashboardMaxSeries から導く（リテラルで書くと、
+        // 上限を変えたときに HaveCount の表明だけが追随して原因の分かりにくい赤になる）。
+        rows.AddRange(Enumerable.Range(1, AppConstants.AdminDashboardMaxSeries)
+            .Select(i => new MonthlyUsageRow
+            {
+                YearMonth = "2026-05",
+                // StaffA / StaffB と衝突しない IDm にする（同じ IDm はバケットが統合され、
+                // 集約される系列数が変わってしまう）。
+                LenderIdm = "OTHER" + i.ToString("D11"),
+                StaffName = "職員" + i,
+                TotalExpense = i * 1000
+            }));
+        SetupAnalyticsDefaults(
+            monthlyUsage: rows,
+            staff: new[]
+            {
+                new Staff { StaffIdm = StaffA, Name = "福岡 太郎", Number = "A001" },
+                new Staff { StaffIdm = StaffB, Name = "福岡 太郎", Number = "A002" }
+            });
+
+        var result = await CreateService().GetAnalyticsAsync(
+            new DateTime(2026, 5, 1), new DateTime(2026, 5, 31), AsOf);
+
+        result.UsageSeries.Should().HaveCount(AppConstants.AdminDashboardMaxSeries + 1);
+        // 同名職員は #1886 の一意化で職員番号が添えられ、氏名「その他」の職員はそのまま残る
+        result.UsageSeries.Should().ContainSingle(s => !s.IsOther && s.Name == "その他");
+        result.UsageSeries.Select(s => s.Name).Should().Contain("福岡 太郎（職員番号 A001）");
+        // 検査対象: 集約系列の名前が、他のどの系列の名前とも異なること
+        var other = result.UsageSeries.Single(s => s.IsOther);
+        result.UsageSeries.Where(s => !s.IsOther)
+            .Should().NotContain(s => s.Name == other.Name);
+        other.Name.Should().Be(ChartSeriesNameFormatter.BuildOtherSeriesName(3));
     }
 
     [Fact]
