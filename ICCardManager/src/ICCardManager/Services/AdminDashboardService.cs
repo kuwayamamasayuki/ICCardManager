@@ -49,6 +49,12 @@ namespace ICCardManager.Services
         /// <summary>職員名を特定できない台帳行の表示名</summary>
         internal const string UnknownStaffName = "（職員名なし）";
 
+        /// <summary>月次利用額の系列バケットキーの接頭辞（lender_idm を持つ行）</summary>
+        private const string IdmBucketKeyPrefix = "idm:";
+
+        /// <summary>月次利用額の系列バケットキーの接頭辞（lender_idm を持たない過去のインポート行）</summary>
+        private const string NameBucketKeyPrefix = "name:";
+
         public AdminDashboardService(
             ICardRepository cardRepository,
             ILedgerRepository ledgerRepository,
@@ -160,7 +166,8 @@ namespace ICCardManager.Services
             var monthlyUsage = await _ledgerRepository.GetMonthlyUsageByLenderAsync(fromDate, toDate).ConfigureAwait(false);
             var monthEndBalances = await _ledgerRepository.GetMonthEndBalancesByCardAsync(fromDate, toDate).ConfigureAwait(false);
             var balancesBeforePeriod = await _ledgerRepository.GetBalancesBeforeAsync(fromDate).ConfigureAwait(false);
-            var staffNames = await BuildStaffNameMapAsync().ConfigureAwait(false);
+            var staffMaps = await BuildStaffMapsAsync().ConfigureAwait(false);
+            var staffNames = staffMaps.Names;
 
             var months = EnumerateMonthKeys(fromDate, toDate);
             var periodDayCount = CardUtilizationCalculator.CalculatePeriodDayCount(fromDate, toDate);
@@ -172,7 +179,7 @@ namespace ICCardManager.Services
                 PeriodDayCount = periodDayCount,
                 MonthLabels = months.Select(FormatMonthLabel).ToList(),
                 Utilizations = BuildUtilizations(cards, usageStats, periodDayCount, asOf),
-                UsageSeries = BuildUsageSeries(monthlyUsage, months, staffNames),
+                UsageSeries = BuildUsageSeries(monthlyUsage, months, staffNames, staffMaps.Numbers),
                 BalanceSeries = BuildBalanceSeries(cards, monthEndBalances, balancesBeforePeriod, months)
             };
         }
@@ -193,15 +200,48 @@ namespace ICCardManager.Services
                 .ToList();
 
         private async Task<Dictionary<string, string>> BuildStaffNameMapAsync()
+            => (await BuildStaffMapsAsync().ConfigureAwait(false)).Names;
+
+        /// <summary>
+        /// 職員マスタから「IDm → 氏名」と「IDm → 職員番号」の対応を 1 回の取得で作る。
+        /// </summary>
+        /// <remarks>
+        /// 職員番号は同姓同名の系列を見分ける識別情報として使う（Issue #1886）。
+        /// 氏名と別々に取得すると、その間に他 PC が職員を編集したとき
+        /// 「氏名は新しいのに職員番号は古い」という組み合わせが生まれ得るため 1 回にまとめる。
+        /// 職員番号は任意入力なので、未設定の職員は Numbers に載らない。
+        /// </remarks>
+        private async Task<StaffMaps> BuildStaffMapsAsync()
         {
             var staff = await _staffRepository.GetAllAsync().ConfigureAwait(false);
-            var map = new Dictionary<string, string>();
+            var names = new Dictionary<string, string>();
+            var numbers = new Dictionary<string, string>();
             foreach (var s in staff ?? Enumerable.Empty<Staff>())
             {
-                map[s.StaffIdm] = s.Name;
+                names[s.StaffIdm] = s.Name;
+                if (!string.IsNullOrWhiteSpace(s.Number))
+                {
+                    numbers[s.StaffIdm] = s.Number;
+                }
             }
 
-            return map;
+            return new StaffMaps(names, numbers);
+        }
+
+        /// <summary>職員マスタ由来の対応表（Issue #1886）</summary>
+        private sealed class StaffMaps
+        {
+            public StaffMaps(Dictionary<string, string> names, Dictionary<string, string> numbers)
+            {
+                Names = names;
+                Numbers = numbers;
+            }
+
+            /// <summary>IDm → 氏名</summary>
+            public Dictionary<string, string> Names { get; }
+
+            /// <summary>IDm → 職員番号（未設定の職員は含まない）</summary>
+            public Dictionary<string, string> Numbers { get; }
         }
 
         /// <summary>
@@ -294,7 +334,10 @@ namespace ICCardManager.Services
         }
 
         private static IReadOnlyList<MonthlyUsageSeries> BuildUsageSeries(
-            IReadOnlyList<MonthlyUsageRow> monthlyUsage, IReadOnlyList<string> months, Dictionary<string, string> staffNames)
+            IReadOnlyList<MonthlyUsageRow> monthlyUsage,
+            IReadOnlyList<string> months,
+            Dictionary<string, string> staffNames,
+            Dictionary<string, string> staffNumbers)
         {
             var monthIndex = new Dictionary<string, int>();
             for (var i = 0; i < months.Count; i++)
@@ -314,7 +357,9 @@ namespace ICCardManager.Services
                     continue;
                 }
 
-                var key = !string.IsNullOrEmpty(row.LenderIdm) ? "idm:" + row.LenderIdm : "name:" + row.StaffName;
+                var key = !string.IsNullOrEmpty(row.LenderIdm)
+                    ? IdmBucketKeyPrefix + row.LenderIdm
+                    : NameBucketKeyPrefix + row.StaffName;
                 if (!buckets.TryGetValue(key, out var values))
                 {
                     values = new int[months.Count];
@@ -325,18 +370,45 @@ namespace ICCardManager.Services
                 values[index] += row.TotalExpense;
             }
 
-            var series = buckets
-                .Select(kv => new MonthlyUsageSeries
+            var ordered = buckets
+                .Select(kv => new
+                {
+                    Key = kv.Key,
+                    Values = kv.Value,
+                    Total = kv.Value.Sum(),
+                    BaseName = displayNames[kv.Key]
+                })
+                .OrderByDescending(e => e.Total)
+                .ThenBy(e => e.BaseName, StringComparer.Ordinal)
+                // 同名・同額の系列の並びを Dictionary の列挙順に委ねると、一意化で添える
+                // 通し番号がその順に乗ってしまう。バケットキーで決定的に固定する（Issue #1886）。
+                .ThenBy(e => e.Key, StringComparer.Ordinal)
+                .ToList();
+
+            // 凡例・代替一覧・Excel が表示するのは名前の文字列だけで、系列を内部で区別できる
+            // バケットキーは利用者に届かない。同姓同名や「（職員名なし）」が複数あると
+            // 判別できなくなるため、キーが手元にあるここで一意化する（Issue #1886）。
+            var labels = ChartSeriesLabelDisambiguator.DisambiguateDuplicateNames(
+                ordered
+                    .Select(e => new ChartSeriesLabelSource
+                    {
+                        BaseName = e.BaseName,
+                        Qualifier = ResolveSeriesQualifier(e.Key, staffNumbers)
+                    })
+                    .ToList());
+
+            var series = new List<MonthlyUsageSeries>(ordered.Count);
+            for (var i = 0; i < ordered.Count; i++)
+            {
+                series.Add(new MonthlyUsageSeries
                 {
                     // IsOther は AggregatedSeriesCount からの導出になったため設定しない（Issue #1883）。
                     // 集約していない系列は既定（件数 0）のまま IsOther = false になる。
-                    Name = displayNames[kv.Key],
-                    MonthlyExpenses = kv.Value,
-                    TotalExpense = kv.Value.Sum()
-                })
-                .OrderByDescending(s => s.TotalExpense)
-                .ThenBy(s => s.Name, StringComparer.Ordinal)
-                .ToList();
+                    Name = labels[i],
+                    MonthlyExpenses = ordered[i].Values,
+                    TotalExpense = ordered[i].Total
+                });
+            }
 
             if (series.Count <= AppConstants.AdminDashboardMaxSeries)
             {
@@ -371,6 +443,26 @@ namespace ICCardManager.Services
             top.Add(otherSeries);
 
             return top;
+        }
+
+        /// <summary>
+        /// 同名の系列を見分けるための識別情報（職員番号）を求める（Issue #1886）。
+        /// </summary>
+        /// <remarks>
+        /// <c>lender_idm</c> を持たない過去のインポート行は氏名でバケット化されるため、
+        /// 職員マスタを引く手掛かりが無く識別情報を返せない（一意化の第 2 段が通し番号で補う）。
+        /// IDm 自体を表示に使わないのは、職員証の IDm が本システム唯一の認証要素であるため
+        /// （ログに関する Issue #1852 と同じ判断）。
+        /// </remarks>
+        private static string ResolveSeriesQualifier(string bucketKey, Dictionary<string, string> staffNumbers)
+        {
+            if (staffNumbers == null || !bucketKey.StartsWith(IdmBucketKeyPrefix, StringComparison.Ordinal))
+            {
+                return null;
+            }
+
+            var idm = bucketKey.Substring(IdmBucketKeyPrefix.Length);
+            return staffNumbers.TryGetValue(idm, out var number) ? number : null;
         }
 
         private static string ResolveSeriesName(MonthlyUsageRow row, Dictionary<string, string> staffNames)
