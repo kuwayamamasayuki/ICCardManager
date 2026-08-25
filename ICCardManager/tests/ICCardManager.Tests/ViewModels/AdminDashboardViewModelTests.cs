@@ -91,9 +91,31 @@ public class AdminDashboardViewModelTests
             Cards = cards
         };
 
+    /// <summary>
+    /// 分析結果のフィクスチャ。
+    /// </summary>
+    /// <param name="includeOtherSeries">
+    /// 末尾を集約（「その他」）系列にする。本番の <c>AdminDashboardService.BuildUsageSeries</c> は
+    /// 上位 <see cref="AppConstants.AdminDashboardMaxSeries"/> 本を切り出したうえで集約系列を足すため、
+    /// 集約系列の背後には必ず上位 5 本が並ぶ。したがって
+    /// <paramref name="seriesCount"/> は上限 + 1 でなければならない（Issue #1888）。
+    /// </param>
+    /// <exception cref="ArgumentException">
+    /// 本番で到達不能な系列構成（上位が上限に満たないのに集約系列がある）を指定した場合。
+    /// 黙って上限へ丸めると、到達不能な形状を作ったことに気付けないまま緑になる（Issue #1812）。
+    /// </exception>
     private static AdminDashboardAnalytics CreateAnalytics(
         int cardCount = 2, int monthCount = 3, int seriesCount = 2, bool includeOtherSeries = false)
     {
+        if (includeOtherSeries && seriesCount != AppConstants.AdminDashboardMaxSeries + 1)
+        {
+            throw new ArgumentException(
+                $"集約系列を含む分析結果は上位 {AppConstants.AdminDashboardMaxSeries} 本を伴う。"
+                + $"seriesCount には {AppConstants.AdminDashboardMaxSeries + 1} を指定すること"
+                + $"（指定値: {seriesCount}）。",
+                nameof(seriesCount));
+        }
+
         var months = Enumerable.Range(1, monthCount).Select(i => $"2026/{i:D2}").ToList();
 
         return new AdminDashboardAnalytics
@@ -148,6 +170,57 @@ public class AdminDashboardViewModelTests
     private void SetupAnalytics(AdminDashboardAnalytics analytics)
         => _service.Setup(s => s.GetAnalyticsAsync(It.IsAny<DateTime>(), It.IsAny<DateTime>(), It.IsAny<DateTime>()))
             .ReturnsAsync(analytics);
+
+    #endregion
+
+    #region フィクスチャの形状（Issue #1888）
+
+    // 本番の AdminDashboardService.BuildUsageSeries は上位 AdminDashboardMaxSeries 本を切り出した
+    // うえで集約系列を足すため、集約系列の背後には必ず上位 5 本が並ぶ。フィクスチャがこれを外れると
+    // 「実運用で起きない状態」でしか検査されないテストになる（.claude/rules/testing.md、Issue #1728）。
+
+    /// <summary>
+    /// 到達不能な系列本数。件数は上限の定数から導く（リテラルで書くと、上限を変えたときに
+    /// 検査対象が静かにずれる）。上限 + 2 は「集約系列の背後が 6 本」＝ Take(5) と矛盾する形。
+    /// </summary>
+    public static IEnumerable<object[]> UnreachableSeriesCounts =>
+        Enumerable.Range(1, AppConstants.AdminDashboardMaxSeries)
+            .Concat(new[] { AppConstants.AdminDashboardMaxSeries + 2 })
+            .Select(n => new object[] { n });
+
+    [Theory]
+    [MemberData(nameof(UnreachableSeriesCounts))]
+    public void CreateAnalytics_RejectsSeriesShapesThatProductionCannotProduce(int seriesCount)
+    {
+        Action act = () => CreateAnalytics(seriesCount: seriesCount, includeOtherSeries: true);
+
+        act.Should().Throw<ArgumentException>(
+            "上位が上限に満たないのに集約系列がある構成は BuildUsageSeries が作り得ない");
+    }
+
+    [Fact]
+    public void CreateAnalytics_WithTheProductionShape_PutsExactlyMaxSeriesAheadOfTheAggregatedOne()
+    {
+        // 対の表明。拒否側だけだと「集約系列を常に拒む」実装でも緑になる。
+        // 併せて、通した構成が本番と同じ形（上位 5 本 + 集約 1 本、集約は末尾）であることを見る
+        var analytics = CreateAnalytics(
+            seriesCount: AppConstants.AdminDashboardMaxSeries + 1, includeOtherSeries: true);
+
+        analytics.UsageSeries.Should().HaveCount(AppConstants.AdminDashboardMaxSeries + 1);
+        analytics.UsageSeries.Count(s => s.IsOther).Should().Be(1);
+        analytics.UsageSeries.Last().IsOther.Should().BeTrue();
+        analytics.UsageSeries.Take(AppConstants.AdminDashboardMaxSeries)
+            .Should().OnlyContain(s => !s.IsOther);
+    }
+
+    [Fact]
+    public void CreateAnalytics_WithoutTheAggregatedSeries_AllowsFewerThanMaxSeries()
+    {
+        // 上位が上限未満でも、集約系列を伴わなければ本番で起き得る（利用職員が 5 人未満）
+        var analytics = CreateAnalytics(seriesCount: 2);
+
+        analytics.UsageSeries.Should().HaveCount(2).And.OnlyContain(s => !s.IsOther);
+    }
 
     #endregion
 
@@ -381,7 +454,8 @@ public class AdminDashboardViewModelTests
     {
         // Issue #1858: 色（#1815）だけを分けてもラベルが同一だと、
         // 凡例に「その他」が 2 行並んでどちらが集約分か判別できない
-        var analytics = CreateAnalytics(monthCount: 2, seriesCount: 3, includeOtherSeries: true);
+        var analytics = CreateAnalytics(
+            monthCount: 2, seriesCount: AppConstants.AdminDashboardMaxSeries + 1, includeOtherSeries: true);
         analytics.UsageSeries[0].Name = "その他";
         SetupAnalytics(analytics);
         var vm = CreateViewModel();
@@ -716,7 +790,10 @@ public class AdminDashboardViewModelTests
     [Fact]
     public async Task LoadAnalyticsAsync_UsageTableIncludesTheOtherSeries()
     {
-        SetupAnalytics(CreateAnalytics(monthCount: 2, seriesCount: 3, includeOtherSeries: true));
+        const int MonthCount = 2;
+        var seriesCount = AppConstants.AdminDashboardMaxSeries + 1;
+        SetupAnalytics(CreateAnalytics(
+            monthCount: MonthCount, seriesCount: seriesCount, includeOtherSeries: true));
         var vm = CreateViewModel();
 
         await vm.LoadAnalyticsAsync();
@@ -724,7 +801,8 @@ public class AdminDashboardViewModelTests
         // 「その他」もグラフに積まれる以上、一覧から落とすと合計が合わない（Issue #1815）
         vm.UsageTableRows.Select(r => r.SeriesName).Should()
             .Contain(ChartSeriesNameFormatter.BuildOtherSeriesName(OtherAggregatedCount));
-        vm.UsageTableRows.Should().HaveCount(6, "2 か月 × 3 系列");
+        vm.UsageTableRows.Should().HaveCount(
+            MonthCount * seriesCount, $"{MonthCount} か月 × {seriesCount} 系列");
     }
 
     [Fact]
