@@ -61,6 +61,21 @@ public class ChartNumberFormatTests
     }
 
     [Fact]
+    public void 万_億_百分率のラベルも同じ整形手段を通ること()
+    {
+        // FormatAmountLabel は 1 万円未満とそれ以上で枝が分かれる。寄せたのが片方の枝だけだと、
+        // 同じメソッドの出力の中に整形の手段が 2 通り残り、次に書式を変える人が片方だけ変える。
+        // de-DE では小数点が「,」になるため、独自の ToString(書式, CurrentCulture) が
+        // 残っていれば「12,3万」になる。
+        WithCulture(SeparatorSwappedCulture, () =>
+        {
+            ChartScale.FormatAmountLabel(123456).Should().Be("12.3万");
+            ChartScale.FormatAmountLabel(1234567890).Should().Be("12.3億");
+            ChartScale.FormatPercentLabel(0.1234).Should().Be("12.3%");
+        });
+    }
+
+    [Fact]
     public void 既定カルチャでの表記が従来と変わらないこと()
     {
         // 対の表明。カルチャ非依存にした結果、本番（ja-JP）の見え方まで

@@ -34,9 +34,30 @@ namespace ICCardManager.Common.Charting
         private const string IntegerFormat = "#,##0";
 
         /// <summary>
+        /// グラフラベル用の小数書式。小数第 1 位まで表示し、末尾が ".0" になる場合は整数表記にする。
+        /// </summary>
+        /// <remarks>
+        /// <see cref="IntegerFormat"/> と同じ理由で外へ公開しない。
+        /// </remarks>
+        private const string OneDecimalFormat = "#,##0.#";
+
+        /// <summary>
         /// 整数値をグラフラベル用に整形する（例: 1000 → "1,000"）。
         /// </summary>
         internal static string FormatInteger(double value)
             => value.ToString(IntegerFormat, CultureInfo.InvariantCulture);
+
+        /// <summary>
+        /// 小数第 1 位まで持つ値をグラフラベル用に整形する（例: 12.3 → "12.3"、12.0 → "12"）。
+        /// </summary>
+        /// <remarks>
+        /// 「万」「億」「%」に丸めたラベル（<see cref="ChartScale"/>）が使う。丸め方（何桁で丸めるか）は
+        /// ラベルの意味に属するので呼び出し側に残し、<b>書式文字列とカルチャの選択だけ</b>を本クラスへ寄せる。
+        /// これを分けておかないと、同じ <see cref="ChartScale.FormatAmountLabel"/> の中で
+        /// 1 万円未満の枝だけが本クラスを通り、1 万円以上の枝は独自の
+        /// <c>ToString(書式, 任意のカルチャ)</c> を持つ、という<b>2 通りの手段</b>が残る。
+        /// </remarks>
+        internal static string FormatOneDecimal(double value)
+            => value.ToString(OneDecimalFormat, CultureInfo.InvariantCulture);
     }
 }
