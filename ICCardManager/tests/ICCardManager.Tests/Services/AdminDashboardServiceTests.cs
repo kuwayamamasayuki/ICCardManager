@@ -996,8 +996,10 @@ public class AdminDashboardServiceTests
             new MonthlyUsageRow { YearMonth = "2026-05", LenderIdm = StaffA, StaffName = "福岡 太郎", TotalExpense = 8000 },
             new MonthlyUsageRow { YearMonth = "2026-05", LenderIdm = StaffB, StaffName = "福岡 太郎", TotalExpense = 7000 }
         };
-        // 上位 5 名の残り 2 枠と、「その他」へ畳まれる 3 名。
-        rows.AddRange(Enumerable.Range(1, 5)
+        // 上位枠の残りと、「その他」へ畳まれる 3 名。
+        // 件数は AppConstants.AdminDashboardMaxSeries から導く（リテラルで書くと、
+        // 上限を変えたときに HaveCount の表明だけが追随して原因の分かりにくい赤になる）。
+        rows.AddRange(Enumerable.Range(1, AppConstants.AdminDashboardMaxSeries)
             .Select(i => new MonthlyUsageRow
             {
                 YearMonth = "2026-05",
