@@ -2,6 +2,13 @@
 
 ### Unreleased
 
+**修正**
+- Issue #1885 **管理者ダッシュボード（F8）のグラフで、2 種類の数値ラベルが別の数値書式規則に従っていた**問題を是正した。集約系列名（`ChartSeriesNameFormatter.BuildOtherSeriesName`）の件数は `CultureInfo.CurrentCulture` ＋ `N0`、同じフォルダーの金額ラベル（`ChartScale.FormatAmountLabel`）は `InvariantCulture` ＋ `#,##0` で、分かれている理由はコードにもコメントにも書かれていなかった。件数側は桁区切りが実行環境のロケール依存で、de-DE 等では「その他（1.000 名）」となり、同じ画面の金額ラベル「1,000」と食い違う。
+  - **整形の手段を 1 つに寄せた**。`Common/Charting/ChartNumberFormat.FormatInteger` を新設し、金額ラベルと系列名の件数の双方がこれを使う。「揃った状態にする」だけでは、次に触った人が片方だけ変える余地が残る（`.claude/rules/development-conventions.md`「同じ論理的な処理に手段が 2 通りあるか」）。書式文字列そのものは公開せず整形結果だけを渡す — 配ると消費側が `ToString(書式, 任意のカルチャ)` を書けてしまい、カルチャの取り違えが再発する。
+  - **既定の ja-JP では表示は変わらない**（`N0` と `#,##0` の結果が一致するため）。この食い違いは開発環境をそのまま走らせても観測できないので、回帰テストはカルチャを de-DE へ切り替えて表明する。対の表明として ja-JP での現状維持（桁区切りを落とす実装で緑にならないこと）も固定した。
+  - **テスト側の暗黙のカルチャ依存も解消した**。`AdminDashboardServiceTests` の `other.Name.Should().Contain(extra.ToString())` は現在カルチャと桁数に静かに依存し、書式の退行を素通りさせる。期待値を書式込みのリテラル（`"その他（4 名）"`）へ改めた。
+  - 検証: `ChartNumberFormatTests`（8 件）を新設。検出力は修正前の実装（`CurrentCulture` ＋ `N0`）に当てて「金額ラベルと系列名が同じ書式規則に従うこと」が赤になることを実測済み。05_クラス設計書 §7.0／07_テスト設計書 §1.1a を同期更新（Issue #1885）
+
 **追加**
 - Issue #1758 **繰越情報が失われたカードをアプリが検知して通知する**ようにした（Issue #1726 の残課題）。#1726 で `UPDATE ic_card` の SET 句から繰越4項目を外して新規被害は止まったが、**既に値を失ったカードはアプリが何も通知しない**ままだった。CHANGELOG と管理者マニュアルに「帳票を見比べて確認し、IT 担当者に相談する」手順を書いたものの、気付くかどうかは運用者次第で、被害の有無を自力で判断できなかった。
   - **判定は現在値ではなく `operation_log` の before/after 突合で行う**。検出対象の4項目（`starting_page_number` / `carryover_income_total` / `carryover_expense_total` / `carryover_fiscal_year`）はいずれも既定値を取り得るため、現在の `ic_card` を見ても「元から既定値のカード」と「消失したカード」を区別できない。特に**開始ページ番号 1 は正当な値でもある**ため、Issue 記載の「`carryover_fiscal_year` が NULL かつ繰越レコードを持つ」案では開始ページ番号の消失を検知できない。ログ突合なら4項目すべてを検知でき、**失われた元の値も提示できる**。

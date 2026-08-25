@@ -150,7 +150,7 @@ namespace ICCardManager.Common.Charting
 
             if (absolute < 10000.0)
             {
-                return value.ToString("#,##0", CultureInfo.InvariantCulture);
+                return ChartNumberFormat.FormatInteger(value);
             }
 
             if (absolute < 100000000.0)
