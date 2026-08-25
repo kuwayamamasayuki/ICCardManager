@@ -28,6 +28,7 @@ public class AdminDashboardServiceTests
     private const string CardA = "AAAA000000000001";
     private const string CardB = "BBBB000000000002";
     private const string StaffA = "STAFF00000000001";
+    private const string StaffB = "STAFF00000000002";
 
     private readonly Mock<ICardRepository> _cardRepository = new();
     private readonly Mock<ILedgerRepository> _ledgerRepository = new();
@@ -770,6 +771,152 @@ public class AdminDashboardServiceTests
             new DateTime(2026, 5, 1), new DateTime(2026, 5, 31), AsOf);
 
         result.UsageSeries.Single().Name.Should().Be(AdminDashboardService.UnknownStaffName);
+    }
+
+    [Fact]
+    public async Task GetAnalyticsAsync_同姓同名の職員を職員番号で判別できること()
+    {
+        // Issue #1886: 凡例・代替一覧・Excel が表示するのは名前の文字列だけで、
+        // 系列を内部で区別しているバケットキー（IDm）は利用者に届かない。
+        SetupAnalyticsDefaults(
+            monthlyUsage: new[]
+            {
+                new MonthlyUsageRow { YearMonth = "2026-05", LenderIdm = StaffA, StaffName = "福岡 太郎", TotalExpense = 3000 },
+                new MonthlyUsageRow { YearMonth = "2026-05", LenderIdm = StaffB, StaffName = "福岡 太郎", TotalExpense = 1000 }
+            },
+            staff: new[]
+            {
+                new Staff { StaffIdm = StaffA, Name = "福岡 太郎", Number = "A001" },
+                new Staff { StaffIdm = StaffB, Name = "福岡 太郎", Number = "A002" }
+            });
+
+        var result = await CreateService().GetAnalyticsAsync(
+            new DateTime(2026, 5, 1), new DateTime(2026, 5, 31), AsOf);
+
+        result.UsageSeries.Select(s => s.Name)
+            .Should().Equal(new[] { "福岡 太郎（職員番号 A001）", "福岡 太郎（職員番号 A002）" });
+    }
+
+    [Fact]
+    public async Task GetAnalyticsAsync_同名でなければ職員番号を添えないこと()
+    {
+        // 対の表明。常に職員番号を添える実装でも上のテストは緑になるため、
+        // 「必要なときだけ修飾する」ことを併せて固定する。
+        SetupAnalyticsDefaults(
+            monthlyUsage: new[]
+            {
+                new MonthlyUsageRow { YearMonth = "2026-05", LenderIdm = StaffA, StaffName = "福岡 太郎", TotalExpense = 3000 },
+                new MonthlyUsageRow { YearMonth = "2026-05", LenderIdm = StaffB, StaffName = "博多 花子", TotalExpense = 1000 }
+            },
+            staff: new[]
+            {
+                new Staff { StaffIdm = StaffA, Name = "福岡 太郎", Number = "A001" },
+                new Staff { StaffIdm = StaffB, Name = "博多 花子", Number = "A002" }
+            });
+
+        var result = await CreateService().GetAnalyticsAsync(
+            new DateTime(2026, 5, 1), new DateTime(2026, 5, 31), AsOf);
+
+        result.UsageSeries.Select(s => s.Name).Should().Equal(new[] { "福岡 太郎", "博多 花子" });
+    }
+
+    [Fact]
+    public async Task GetAnalyticsAsync_職員名なしが複数あっても判別できること()
+    {
+        // lender_idm を持つが職員マスタに無く氏名も空の行は、すべて同じプレースホルダへ潰れる。
+        SetupAnalyticsDefaults(
+            monthlyUsage: new[]
+            {
+                new MonthlyUsageRow { YearMonth = "2026-05", LenderIdm = StaffA, StaffName = "", TotalExpense = 3000 },
+                new MonthlyUsageRow { YearMonth = "2026-05", LenderIdm = StaffB, StaffName = "", TotalExpense = 1000 }
+            });
+
+        var result = await CreateService().GetAnalyticsAsync(
+            new DateTime(2026, 5, 1), new DateTime(2026, 5, 31), AsOf);
+
+        result.UsageSeries.Should().HaveCount(2);
+        result.UsageSeries.Select(s => s.Name).Should().OnlyHaveUniqueItems();
+        result.UsageSeries.Select(s => s.Name)
+            .Should().OnlyContain(n => n.StartsWith(AdminDashboardService.UnknownStaffName, StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task GetAnalyticsAsync_職員番号を持たない同名は通し番号で判別できること()
+    {
+        // lender_idm を持たない過去のインポート行と、職員マスタに職員番号が無い職員。
+        // どちらも職員番号を引けないため、通し番号でしか一意にできない。
+        SetupAnalyticsDefaults(
+            monthlyUsage: new[]
+            {
+                new MonthlyUsageRow { YearMonth = "2026-05", LenderIdm = StaffA, StaffName = "福岡 太郎", TotalExpense = 3000 },
+                new MonthlyUsageRow { YearMonth = "2026-05", LenderIdm = "", StaffName = "福岡 太郎", TotalExpense = 1000 }
+            },
+            staff: new[] { new Staff { StaffIdm = StaffA, Name = "福岡 太郎", Number = "" } });
+
+        var result = await CreateService().GetAnalyticsAsync(
+            new DateTime(2026, 5, 1), new DateTime(2026, 5, 31), AsOf);
+
+        result.UsageSeries.Select(s => s.Name)
+            .Should().Equal(new[] { "福岡 太郎（1 人目）", "福岡 太郎（2 人目）" });
+    }
+
+    [Fact]
+    public async Task GetAnalyticsAsync_同名同額でもラベルの並びが決定的であること()
+    {
+        // 通し番号は表示順に乗るため、同名・同額の系列の並びが実行のたびに変わると
+        // ラベルまで入れ替わる。バケットキーで並びを固定していることを表明する。
+        SetupAnalyticsDefaults(
+            monthlyUsage: new[]
+            {
+                new MonthlyUsageRow { YearMonth = "2026-05", LenderIdm = StaffB, StaffName = "福岡 太郎", TotalExpense = 1000 },
+                new MonthlyUsageRow { YearMonth = "2026-05", LenderIdm = StaffA, StaffName = "福岡 太郎", TotalExpense = 1000 }
+            });
+
+        var result = await CreateService().GetAnalyticsAsync(
+            new DateTime(2026, 5, 1), new DateTime(2026, 5, 31), AsOf);
+
+        // StaffA < StaffB（序数比較）なので、金額が同じなら常に StaffA が先。
+        result.UsageSeries.Select(s => s.MonthlyExpenses[0]).Should().Equal(new[] { 1000, 1000 });
+        result.UsageSeries.Select(s => s.Name)
+            .Should().Equal(new[] { "福岡 太郎（1 人目）", "福岡 太郎（2 人目）" });
+    }
+
+    [Fact]
+    public async Task GetAnalyticsAsync_その他へ畳まれる同名系列で上位系列を修飾しないこと()
+    {
+        // Issue #1886: 一意化の母集団は「画面に並ぶ系列」。上限を超えて「その他」へ
+        // 畳まれる同名の系列まで数えると、相方が画面に居ないのに上位系列だけが
+        // 「（職員番号 …）」で修飾され、期間を変えるたびにラベルが揺れる。
+        var rows = new List<MonthlyUsageRow>
+        {
+            new MonthlyUsageRow { YearMonth = "2026-05", LenderIdm = StaffA, StaffName = "福岡 太郎", TotalExpense = 9000 }
+        };
+        rows.AddRange(Enumerable.Range(1, AppConstants.AdminDashboardMaxSeries - 1)
+            .Select(i => new MonthlyUsageRow
+            {
+                // StaffA / StaffB と衝突しない IDm にする（同じ IDm はバケットが統合され、
+                // 系列数が上限を超えず「その他」が生まれない）。
+                LenderIdm = "OTHER" + i.ToString("D11"),
+                YearMonth = "2026-05",
+                StaffName = "職員" + i,
+                TotalExpense = i * 1000 + 2000
+            }));
+        // 同姓同名の 2 人目は 6 位で「その他」へ畳まれ、画面には出ない。
+        rows.Add(new MonthlyUsageRow { YearMonth = "2026-05", LenderIdm = StaffB, StaffName = "福岡 太郎", TotalExpense = 500 });
+        SetupAnalyticsDefaults(
+            monthlyUsage: rows,
+            staff: new[]
+            {
+                new Staff { StaffIdm = StaffA, Name = "福岡 太郎", Number = "A001" },
+                new Staff { StaffIdm = StaffB, Name = "福岡 太郎", Number = "A002" }
+            });
+
+        var result = await CreateService().GetAnalyticsAsync(
+            new DateTime(2026, 5, 1), new DateTime(2026, 5, 31), AsOf);
+
+        result.UsageSeries.Should().HaveCount(AppConstants.AdminDashboardMaxSeries + 1);
+        result.UsageSeries[0].Name.Should().Be("福岡 太郎");
+        result.UsageSeries.Select(s => s.Name).Should().OnlyHaveUniqueItems();
     }
 
     [Fact]
