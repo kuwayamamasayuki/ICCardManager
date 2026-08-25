@@ -382,7 +382,7 @@ public class AdminDashboardViewModelTests
         // Issue #1858: 色（#1815）だけを分けてもラベルが同一だと、
         // 凡例に「その他」が 2 行並んでどちらが集約分か判別できない
         var analytics = CreateAnalytics(monthCount: 2, seriesCount: 3, includeOtherSeries: true);
-        analytics.UsageSeries[0].Name = ChartSeriesNameFormatter.OtherSeriesBaseName;
+        analytics.UsageSeries[0].Name = "その他";
         SetupAnalytics(analytics);
         var vm = CreateViewModel();
 
