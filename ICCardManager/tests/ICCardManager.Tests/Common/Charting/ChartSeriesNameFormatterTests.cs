@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using FluentAssertions;
 using ICCardManager.Common.Charting;
 using Xunit;
@@ -35,13 +35,20 @@ public class ChartSeriesNameFormatterTests
     }
 
     [Fact]
-    public void BuildOtherSeriesName_集約が起きていない値では基底名を返さないこと()
+    public void BuildOtherSeriesName_定義域内のどの件数でも基底名と一致しないこと()
     {
-        // 対の表明。例外の型だけを見ると、将来「例外は投げるが別経路で基底名も返す」
-        // 実装へ緩めたときに検出できない。衝突ラベルが出ないことを直接固定する。
-        var act = () => ChartSeriesNameFormatter.BuildOtherSeriesName(0);
+        // 対の表明。Issue #1858 が消した衝突は「基底名とまったく同じ文字列」であり、
+        // それを定義域内のどこでも生まないことが本来の不変条件。
+        // 1 名の 1 点だけを見る表明では、書式から接尾辞が落ちる退行や、
+        // 大きな件数だけ別経路へ落ちる実装を見逃す。
+        for (var count = 1; count <= 100; count++)
+        {
+            ChartSeriesNameFormatter.BuildOtherSeriesName(count)
+                .Should().NotBe(ChartSeriesNameFormatter.OtherSeriesBaseName);
+        }
 
-        act.Should().Throw<ArgumentOutOfRangeException>();
+        ChartSeriesNameFormatter.BuildOtherSeriesName(int.MaxValue)
+            .Should().NotBe(ChartSeriesNameFormatter.OtherSeriesBaseName);
     }
 
     [Fact]
