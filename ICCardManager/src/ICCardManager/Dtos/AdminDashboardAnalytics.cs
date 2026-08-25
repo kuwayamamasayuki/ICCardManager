@@ -153,7 +153,17 @@ namespace ICCardManager.Dtos
         /// 0 以下は集約が起きていない状態であり、
         /// <see cref="Common.Charting.ChartSeriesNameFormatter.BuildOtherSeriesName"/> と
         /// 同じ定義域でここでも弾く（呼び出し側の誤りを、表示に届く前に露見させる）。
+        /// <para>
+        /// 既に <see cref="Name"/> を設定済みの系列に対しても弾く。集約すると表示名は
+        /// 件数からの導出に切り替わり、設定済みの名前は<b>二度と読まれない</b>。
+        /// 「集約してから名前を設定する」順は例外にしておきながら、
+        /// 逆順（名前を設定してから集約する）を無言で捨てると、
+        /// <b>片方の順序だけが大声で、鏡像の順序は無言</b>という非対称が残る。
+        /// </para>
         /// </remarks>
+        /// <exception cref="System.InvalidOperationException">
+        /// 既に <see cref="Name"/> が設定されているとき。
+        /// </exception>
         public void MarkAsAggregated(int aggregatedSeriesCount)
         {
             if (aggregatedSeriesCount <= 0)
@@ -163,6 +173,14 @@ namespace ICCardManager.Dtos
                     aggregatedSeriesCount,
                     "集約系列には 1 以上の件数を指定してください。0 以下では集約が起きておらず、"
                         + "「その他」系列として扱えません。");
+            }
+
+            if (!string.IsNullOrEmpty(_name))
+            {
+                throw new System.InvalidOperationException(
+                    "表示名を設定済みの系列は集約系列にできません。集約系列の表示名は "
+                        + "AggregatedSeriesCount から導出されるため、設定済みの名前は読まれなくなります。"
+                        + "集約系列は表示名を設定していない系列に対して作成してください。");
             }
 
             AggregatedSeriesCount = aggregatedSeriesCount;

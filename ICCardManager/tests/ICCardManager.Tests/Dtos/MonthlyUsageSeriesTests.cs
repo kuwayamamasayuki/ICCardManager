@@ -112,6 +112,39 @@ public class MonthlyUsageSeriesTests
     }
 
     [Fact]
+    public void MarkAsAggregated_名前を設定済みの系列は集約できないこと()
+    {
+        // 鏡像の順序。「集約してから名前を設定する」を例外にしておきながら、
+        // 逆順で設定済みの名前を無言で捨てると、片方の順序だけが大声で
+        // もう片方は無言という非対称が残る（コードレビューで判明）。
+        var series = new MonthlyUsageSeries { Name = "福岡 太郎" };
+
+        var act = () => series.MarkAsAggregated(3);
+
+        act.Should().Throw<InvalidOperationException>();
+    }
+
+    [Fact]
+    public void MarkAsAggregated_名前を設定済みで弾いたとき状態が変わらないこと()
+    {
+        // 対の表明。弾いた入力で状態が中途半端に変わっていないこと。
+        var series = new MonthlyUsageSeries { Name = "福岡 太郎" };
+
+        try
+        {
+            series.MarkAsAggregated(3);
+        }
+        catch (InvalidOperationException)
+        {
+            // 想定どおり
+        }
+
+        series.IsOther.Should().BeFalse();
+        series.AggregatedSeriesCount.Should().Be(0);
+        series.Name.Should().Be("福岡 太郎");
+    }
+
+    [Fact]
     public void Name_集約系列への代入は無言で捨てずに例外にすること()
     {
         // 捨てると「設定したのに反映されない」形になり、呼び出し側は
