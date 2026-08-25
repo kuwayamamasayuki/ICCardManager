@@ -882,6 +882,44 @@ public class AdminDashboardServiceTests
     }
 
     [Fact]
+    public async Task GetAnalyticsAsync_その他へ畳まれる同名系列で上位系列を修飾しないこと()
+    {
+        // Issue #1886: 一意化の母集団は「画面に並ぶ系列」。上限を超えて「その他」へ
+        // 畳まれる同名の系列まで数えると、相方が画面に居ないのに上位系列だけが
+        // 「（職員番号 …）」で修飾され、期間を変えるたびにラベルが揺れる。
+        var rows = new List<MonthlyUsageRow>
+        {
+            new MonthlyUsageRow { YearMonth = "2026-05", LenderIdm = StaffA, StaffName = "福岡 太郎", TotalExpense = 9000 }
+        };
+        rows.AddRange(Enumerable.Range(1, AppConstants.AdminDashboardMaxSeries - 1)
+            .Select(i => new MonthlyUsageRow
+            {
+                // StaffA / StaffB と衝突しない IDm にする（同じ IDm はバケットが統合され、
+                // 系列数が上限を超えず「その他」が生まれない）。
+                LenderIdm = "OTHER" + i.ToString("D11"),
+                YearMonth = "2026-05",
+                StaffName = "職員" + i,
+                TotalExpense = i * 1000 + 2000
+            }));
+        // 同姓同名の 2 人目は 6 位で「その他」へ畳まれ、画面には出ない。
+        rows.Add(new MonthlyUsageRow { YearMonth = "2026-05", LenderIdm = StaffB, StaffName = "福岡 太郎", TotalExpense = 500 });
+        SetupAnalyticsDefaults(
+            monthlyUsage: rows,
+            staff: new[]
+            {
+                new Staff { StaffIdm = StaffA, Name = "福岡 太郎", Number = "A001" },
+                new Staff { StaffIdm = StaffB, Name = "福岡 太郎", Number = "A002" }
+            });
+
+        var result = await CreateService().GetAnalyticsAsync(
+            new DateTime(2026, 5, 1), new DateTime(2026, 5, 31), AsOf);
+
+        result.UsageSeries.Should().HaveCount(AppConstants.AdminDashboardMaxSeries + 1);
+        result.UsageSeries[0].Name.Should().Be("福岡 太郎");
+        result.UsageSeries.Select(s => s.Name).Should().OnlyHaveUniqueItems();
+    }
+
+    [Fact]
     public async Task GetAnalyticsAsync_AggregatesLowRankedStaffIntoOtherSeries()
     {
         var rows = Enumerable.Range(1, AppConstants.AdminDashboardMaxSeries + 3)

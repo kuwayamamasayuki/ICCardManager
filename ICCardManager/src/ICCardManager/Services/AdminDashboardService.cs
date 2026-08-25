@@ -385,11 +385,20 @@ namespace ICCardManager.Services
                 .ThenBy(e => e.Key, StringComparer.Ordinal)
                 .ToList();
 
+            // 一意化の母集団は「利用者の画面に並ぶ系列」に揃える（Issue #1886）。
+            // 上限を超えて「その他」へ畳まれる系列まで数に入れると、画面に相方が居ないのに
+            // 修飾だけが付く（同姓同名の片方が 6 位以下だと、上位に「（1 人目）」だけが並び
+            // 2 人目はどこにも無い）。「衝突したときだけ修飾する」の衝突は、
+            // 利用者が実際に見比べる範囲で数える。
+            var visible = ordered.Count <= AppConstants.AdminDashboardMaxSeries
+                ? ordered
+                : ordered.Take(AppConstants.AdminDashboardMaxSeries).ToList();
+
             // 凡例・代替一覧・Excel が表示するのは名前の文字列だけで、系列を内部で区別できる
             // バケットキーは利用者に届かない。同姓同名や「（職員名なし）」が複数あると
             // 判別できなくなるため、キーが手元にあるここで一意化する（Issue #1886）。
             var labels = ChartSeriesLabelDisambiguator.DisambiguateDuplicateNames(
-                ordered
+                visible
                     .Select(e => new ChartSeriesLabelSource
                     {
                         BaseName = e.BaseName,
@@ -397,35 +406,34 @@ namespace ICCardManager.Services
                     })
                     .ToList());
 
-            var series = new List<MonthlyUsageSeries>(ordered.Count);
-            for (var i = 0; i < ordered.Count; i++)
+            var series = new List<MonthlyUsageSeries>(visible.Count + 1);
+            for (var i = 0; i < visible.Count; i++)
             {
                 series.Add(new MonthlyUsageSeries
                 {
                     // IsOther は AggregatedSeriesCount からの導出になったため設定しない（Issue #1883）。
                     // 集約していない系列は既定（件数 0）のまま IsOther = false になる。
                     Name = labels[i],
-                    MonthlyExpenses = ordered[i].Values,
-                    TotalExpense = ordered[i].Total
+                    MonthlyExpenses = visible[i].Values,
+                    TotalExpense = visible[i].Total
                 });
             }
 
-            if (series.Count <= AppConstants.AdminDashboardMaxSeries)
+            if (ordered.Count <= AppConstants.AdminDashboardMaxSeries)
             {
                 return series;
             }
 
             // 色相差を確保できる本数を超えたら「その他」へ集約する。
             // 凡例が読み取れなくなるうえ、色覚多様性への配慮も破綻するため。
-            var top = series.Take(AppConstants.AdminDashboardMaxSeries).ToList();
-            var rest = series.Skip(AppConstants.AdminDashboardMaxSeries).ToList();
+            var rest = ordered.Skip(AppConstants.AdminDashboardMaxSeries).ToList();
 
             var otherValues = new int[months.Count];
-            foreach (var s in rest)
+            foreach (var e in rest)
             {
                 for (var i = 0; i < months.Count; i++)
                 {
-                    otherValues[i] += s.MonthlyExpenses[i];
+                    otherValues[i] += e.Values[i];
                 }
             }
 
@@ -440,9 +448,9 @@ namespace ICCardManager.Services
                 TotalExpense = otherValues.Sum()
             };
             otherSeries.MarkAsAggregated(rest.Count);
-            top.Add(otherSeries);
+            series.Add(otherSeries);
 
-            return top;
+            return series;
         }
 
         /// <summary>
