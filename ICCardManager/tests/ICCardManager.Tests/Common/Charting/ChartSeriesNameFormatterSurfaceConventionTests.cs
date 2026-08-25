@@ -27,8 +27,17 @@ public class ChartSeriesNameFormatterSurfaceConventionTests
 {
     private static readonly Type FormatterType = typeof(ChartSeriesNameFormatter);
 
-    /// <summary>フォーマッタが外へ出してよい唯一のメンバー名</summary>
-    private const string AllowedMemberName = nameof(ChartSeriesNameFormatter.BuildOtherSeriesName);
+    /// <summary>
+    /// フォーマッタが外へ出してよい唯一のメンバー名。
+    /// </summary>
+    /// <remarks>
+    /// <c>nameof(ChartSeriesNameFormatter.BuildOtherSeriesName)</c> で書くと、
+    /// 「正規手段が外から呼べること」の表明が<b>実行時には決して落ちない</b>
+    /// （メンバーを private にしたり消したりすると <c>nameof</c> 自体がコンパイルエラーになり、
+    /// 表明はそもそも実行されない）。公開面を固定するテストなので、
+    /// 固定したい名前はリテラルで書く（本番側の識別子から引かない）。
+    /// </remarks>
+    private const string AllowedMemberName = "BuildOtherSeriesName";
 
     [Fact]
     public void 表示名の組み立て以外のメンバーを外へ公開しないこと()
@@ -63,7 +72,9 @@ public class ChartSeriesNameFormatterSurfaceConventionTests
             nameof(SurfaceSample.PublicMethod),
             nameof(SurfaceSample.PublicField),
             nameof(SurfaceSample.PublicProperty),
+            nameof(SurfaceSample.PublicEvent),
             "InternalConst",
+            "InternalNestedType",
         });
     }
 
@@ -110,8 +121,18 @@ public class ChartSeriesNameFormatterSurfaceConventionTests
                 return property.GetAccessors(nonPublic: true).Any(
                     a => a.IsPublic || a.IsAssembly || a.IsFamilyOrAssembly);
 
+            case Type nested:
+                // 入れ子の型。private な実装補助（書式をまとめた private 入れ子クラス等）まで
+                // 「公開面が増えた」と数えると、規約を守っている変更でこのガードが赤になり、
+                // 修正者を「対象から外す」方向へ誘導する（Issue #1786）。到達できるものだけ数える。
+                return nested.IsNestedPublic || nested.IsNestedAssembly || nested.IsNestedFamORAssem;
+
+            case EventInfo evt:
+                return evt.GetAddMethod(nonPublic: true) is MethodInfo add
+                    && (add.IsPublic || add.IsAssembly || add.IsFamilyOrAssembly);
+
             default:
-                // 入れ子の型・イベント等。フォーマッタには存在しないが、
+                // 上記以外。フォーマッタには存在しないが、
                 // 追加されたら「公開面が増えた」として検出したい。
                 return true;
         }
@@ -135,6 +156,29 @@ public class ChartSeriesNameFormatterSurfaceConventionTests
         }
 
         private void PrivateMethod()
+        {
+        }
+
+        // 入れ子の型・イベントは MemberInfo の既定分岐へ落ちるため、
+        // 到達可否で数えていることを public / internal / private の 3 通りで固定する。
+        // イベントは明示アクセサで宣言する（自動実装イベントは未使用で CS0067 になる）。
+        public event EventHandler PublicEvent
+        {
+            add { }
+            remove { }
+        }
+
+        private event EventHandler PrivateEvent
+        {
+            add { }
+            remove { }
+        }
+
+        internal sealed class InternalNestedType
+        {
+        }
+
+        private sealed class PrivateNestedType
         {
         }
     }
