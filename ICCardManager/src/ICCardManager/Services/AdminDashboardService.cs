@@ -328,8 +328,9 @@ namespace ICCardManager.Services
             var series = buckets
                 .Select(kv => new MonthlyUsageSeries
                 {
+                    // IsOther は AggregatedSeriesCount からの導出になったため設定しない（Issue #1883）。
+                    // 集約していない系列は既定（件数 0）のまま IsOther = false になる。
                     Name = displayNames[kv.Key],
-                    IsOther = false,
                     MonthlyExpenses = kv.Value,
                     TotalExpense = kv.Value.Sum()
                 })
@@ -358,17 +359,15 @@ namespace ICCardManager.Services
 
             // 名前に人数を添えるのは、氏名が「その他」の職員（職員マスタに無い staff_name を
             // そのまま系列名に使う経路がある）と凡例上で同一表記になるのを避けるため（Issue #1858）。
-            // 組み立てを消費側（凡例・代替一覧・Excel）へ配らず、ここ 1 か所で確定させる。
-            // 件数は DTO を唯一の情報源にし、名前はそこから導出する。
-            // rest.Count を 2 か所へ別々に書くと、片方だけ変わる日が来る。
+            // 組み立てを消費側（凡例・代替一覧・Excel）へ配らず、DTO 1 か所で確定させる。
+            // Issue #1883: 件数・集約フラグ・表示名を別々の文で書くと片方だけ変わる日が来るため、
+            // MarkAsAggregated が 3 つをまとめて確定させる（Name と IsOther は件数からの導出）。
             var otherSeries = new MonthlyUsageSeries
             {
-                IsOther = true,
-                AggregatedSeriesCount = rest.Count,
                 MonthlyExpenses = otherValues,
                 TotalExpense = otherValues.Sum()
             };
-            otherSeries.Name = ChartSeriesNameFormatter.BuildOtherSeriesName(otherSeries.AggregatedSeriesCount);
+            otherSeries.MarkAsAggregated(rest.Count);
             top.Add(otherSeries);
 
             return top;

@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
@@ -23,6 +24,27 @@ public class AdminDashboardExcelExportServiceTests : IDisposable
 {
     /// <summary>テストデータの「その他」系列が集約した人数（Issue #1858）</summary>
     private const int OtherAggregatedCount = 3;
+
+    /// <summary>
+    /// 集約（「その他」）系列のフィクスチャ。名前は DTO が件数から導出する（Issue #1883）。
+    /// </summary>
+    /// <remarks>
+    /// 表示名をフィクスチャ側で組み立てると、本番だけが変わっても緑のまま通る（Issue #1858）。
+    /// 件数・集約フラグ・表示名を確定させる経路は本番と同じ <c>MarkAsAggregated</c> 1 つに揃える。
+    /// </remarks>
+    private static MonthlyUsageSeries CreateOtherSeries(
+        int aggregatedCount,
+        IReadOnlyList<int> monthlyExpenses = null,
+        int totalExpense = 0)
+    {
+        var series = new MonthlyUsageSeries
+        {
+            MonthlyExpenses = monthlyExpenses ?? new int[0],
+            TotalExpense = totalExpense
+        };
+        series.MarkAsAggregated(aggregatedCount);
+        return series;
+    }
 
     private readonly string _outputPath;
 
@@ -114,15 +136,7 @@ public class AdminDashboardExcelExportServiceTests : IDisposable
                     MonthlyExpenses = new[] { 1000, 2000, 3000 },
                     TotalExpense = 6000
                 },
-                new MonthlyUsageSeries
-                {
-                    // 名前は本番と同じ組み立て（人数付き）。Issue #1858
-                    Name = ChartSeriesNameFormatter.BuildOtherSeriesName(OtherAggregatedCount),
-                    IsOther = true,
-                    AggregatedSeriesCount = OtherAggregatedCount,
-                    MonthlyExpenses = new[] { 500, 0, 100 },
-                    TotalExpense = 600
-                }
+                CreateOtherSeries(OtherAggregatedCount, new[] { 500, 0, 100 }, 600)
             },
             BalanceSeries = new[]
             {

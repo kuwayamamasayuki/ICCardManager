@@ -32,6 +32,27 @@ public class AdminDashboardViewModelTests
     /// <summary>テストデータの「その他」系列が集約した人数（Issue #1858）</summary>
     private const int OtherAggregatedCount = 3;
 
+    /// <summary>
+    /// 集約（「その他」）系列のフィクスチャ。名前は DTO が件数から導出する（Issue #1883）。
+    /// </summary>
+    /// <remarks>
+    /// 表示名をフィクスチャ側で組み立てると、本番だけが変わっても緑のまま通る（Issue #1858）。
+    /// 件数・集約フラグ・表示名を確定させる経路は本番と同じ <c>MarkAsAggregated</c> 1 つに揃える。
+    /// </remarks>
+    private static MonthlyUsageSeries CreateOtherSeries(
+        int aggregatedCount,
+        IReadOnlyList<int> monthlyExpenses = null,
+        int totalExpense = 0)
+    {
+        var series = new MonthlyUsageSeries
+        {
+            MonthlyExpenses = monthlyExpenses ?? new int[0],
+            TotalExpense = totalExpense
+        };
+        series.MarkAsAggregated(aggregatedCount);
+        return series;
+    }
+
     private AdminDashboardViewModel CreateViewModel() => new AdminDashboardViewModel(
         _service.Object, _exportService.Object, _dialogService.Object, _safeFileLauncher.Object);
 
@@ -94,15 +115,22 @@ public class AdminDashboardViewModelTests
             // （AdminDashboardService.BuildUsageSeries が上限超過時に返す形）
             // 名前は本番と同じ組み立て（人数付き）にする。ここでリテラルを使うと、
             // 本番だけが変わっても緑のまま通る（Issue #1858）
-            UsageSeries = Enumerable.Range(1, seriesCount).Select(i => new MonthlyUsageSeries
+            UsageSeries = Enumerable.Range(1, seriesCount).Select(i =>
             {
-                Name = includeOtherSeries && i == seriesCount
-                    ? ChartSeriesNameFormatter.BuildOtherSeriesName(OtherAggregatedCount)
-                    : "職員" + i,
-                IsOther = includeOtherSeries && i == seriesCount,
-                AggregatedSeriesCount = includeOtherSeries && i == seriesCount ? OtherAggregatedCount : 0,
-                MonthlyExpenses = Enumerable.Range(1, monthCount).Select(m => m * 100 * i).ToList(),
-                TotalExpense = Enumerable.Range(1, monthCount).Sum(m => m * 100 * i)
+                var monthlyExpenses = Enumerable.Range(1, monthCount).Select(m => m * 100 * i).ToList();
+                var totalExpense = Enumerable.Range(1, monthCount).Sum(m => m * 100 * i);
+
+                if (includeOtherSeries && i == seriesCount)
+                {
+                    return CreateOtherSeries(OtherAggregatedCount, monthlyExpenses, totalExpense);
+                }
+
+                return new MonthlyUsageSeries
+                {
+                    Name = "職員" + i,
+                    MonthlyExpenses = monthlyExpenses,
+                    TotalExpense = totalExpense
+                };
             }).ToList(),
             BalanceSeries = Enumerable.Range(1, cardCount).Select(i => new MonthlyBalanceSeries
             {
@@ -416,12 +444,7 @@ public class AdminDashboardViewModelTests
         var series = new List<MonthlyUsageSeries>
         {
             new MonthlyUsageSeries { Name = "職員1" },
-            new MonthlyUsageSeries
-            {
-                Name = ChartSeriesNameFormatter.BuildOtherSeriesName(OtherAggregatedCount),
-                IsOther = true,
-                AggregatedSeriesCount = OtherAggregatedCount
-            },
+            CreateOtherSeries(OtherAggregatedCount),
             new MonthlyUsageSeries { Name = "職員2" }
         };
 
