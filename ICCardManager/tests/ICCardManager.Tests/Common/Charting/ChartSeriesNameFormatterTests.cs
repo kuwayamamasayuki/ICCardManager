@@ -1,3 +1,4 @@
+﻿using System;
 using FluentAssertions;
 using ICCardManager.Common.Charting;
 using Xunit;
@@ -21,11 +22,35 @@ public class ChartSeriesNameFormatterTests
     [Theory]
     [InlineData(0)]
     [InlineData(-1)]
-    public void BuildOtherSeriesName_集約が起きていない値では基底名へ倒すこと(int count)
+    [InlineData(int.MinValue)]
+    public void BuildOtherSeriesName_集約が起きていない値は例外で弾くこと(int count)
     {
-        // 「0 名」という事実と食い違う表示を出さない
-        ChartSeriesNameFormatter.BuildOtherSeriesName(count)
-            .Should().Be(ChartSeriesNameFormatter.OtherSeriesBaseName);
+        // Issue #1882: 定義域外を黙って基底名「その他」へ丸めると、
+        // Issue #1858 が消したはずの衝突ラベル（氏名が「その他」の職員と同一表記）が
+        // そのまま復活する。丸めずに弾き、呼び出し側の誤りをその場で露見させる。
+        var act = () => ChartSeriesNameFormatter.BuildOtherSeriesName(count);
+
+        act.Should().Throw<ArgumentOutOfRangeException>()
+            .And.ParamName.Should().Be("aggregatedCount");
+    }
+
+    [Fact]
+    public void BuildOtherSeriesName_集約が起きていない値では基底名を返さないこと()
+    {
+        // 対の表明。例外の型だけを見ると、将来「例外は投げるが別経路で基底名も返す」
+        // 実装へ緩めたときに検出できない。衝突ラベルが出ないことを直接固定する。
+        var act = () => ChartSeriesNameFormatter.BuildOtherSeriesName(0);
+
+        act.Should().Throw<ArgumentOutOfRangeException>();
+    }
+
+    [Fact]
+    public void BuildOtherSeriesName_下限の1名は正常に受け付けること()
+    {
+        // 対の表明。境界を締めすぎて、唯一の呼び出し元（rest.Count >= 1）が
+        // 通る値まで弾いていないことを固定する。
+        ChartSeriesNameFormatter.BuildOtherSeriesName(1)
+            .Should().Be("その他（1 名）");
     }
 
     [Fact]
