@@ -852,7 +852,11 @@ public class AdminDashboardServiceTests
 
         var other = result.UsageSeries.Single(s => s.IsOther);
         other.AggregatedSeriesCount.Should().Be(extra);
-        other.Name.Should().Contain(extra.ToString());
+
+        // Issue #1885: 期待値は書式込みのリテラルで書く。`extra.ToString()` は
+        // 現在カルチャと桁数に静かに依存し（4 桁以上で桁区切りが入る）、
+        // 「件数がラベルに載っているか」を表明したいのに書式の退行を素通りさせる。
+        other.Name.Should().Be("その他（4 名）");
     }
 
     [Fact]

@@ -1,5 +1,3 @@
-using System.Globalization;
-
 namespace ICCardManager.Common.Charting
 {
     /// <summary>
@@ -63,11 +61,9 @@ namespace ICCardManager.Common.Charting
                         + "表示名を組み立てられません。");
             }
 
-            return string.Format(
-                CultureInfo.CurrentCulture,
-                "{0}（{1:N0} 名）",
-                OtherSeriesBaseName,
-                aggregatedCount);
+            // Issue #1885: 件数の整形は金額ラベル（ChartScale）と同じ ChartNumberFormat に委ねる。
+            // 同一グラフ上の 2 種類のラベルが別の数値書式規則に従わないようにするため。
+            return $"{OtherSeriesBaseName}（{ChartNumberFormat.FormatInteger(aggregatedCount)} 名）";
         }
     }
 }

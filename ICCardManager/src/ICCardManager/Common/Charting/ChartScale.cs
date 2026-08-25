@@ -1,5 +1,4 @@
 using System;
-using System.Globalization;
 
 namespace ICCardManager.Common.Charting
 {
@@ -150,7 +149,7 @@ namespace ICCardManager.Common.Charting
 
             if (absolute < 10000.0)
             {
-                return value.ToString("#,##0", CultureInfo.InvariantCulture);
+                return ChartNumberFormat.FormatInteger(value);
             }
 
             if (absolute < 100000000.0)
@@ -180,7 +179,11 @@ namespace ICCardManager.Common.Charting
         private static string FormatScaled(double value)
         {
             var rounded = Math.Round(value, 1, MidpointRounding.AwayFromZero);
-            return rounded.ToString("#,##0.#", CultureInfo.InvariantCulture);
+
+            // Issue #1885: 書式とカルチャの選択は ChartNumberFormat に委ねる。
+            // 1 万円未満の枝（FormatAmountLabel）だけを寄せて本メソッドに独自の
+            // ToString(書式, カルチャ) を残すと、同じメソッドの出力の中に整形の手段が 2 通り残る。
+            return ChartNumberFormat.FormatOneDecimal(rounded);
         }
 
         /// <summary>
