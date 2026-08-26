@@ -3,6 +3,13 @@
 ### Unreleased
 
 **修正**
+- Issue #1889 **07_テスト設計書 §2 のクラス別件数が実測と乖離していても CI が素通りしていた**問題を是正した。`tools/check-test-count-sync.py` は §1.1a の合計 3 値しか検証しておらず、Issue #1858 が §2 へ書き忘れた `AdminDashboardServiceTests` の +2 件と、新設した `ChartSeriesNameFormatterTests` の行の欠落を誰も検出しないまま main に入っていた。
+  - **§2 の記載値を実測へ揃えた**。`Services/AdminDashboardServiceTests` 57→59（#1858 の 2 件が未反映だった）。あわせて行を持たなかった `Common/Charting/ChartSeriesNameFormatterTests`（10 件）と `Common/Charting/ChartSeriesNameFormatterSurfaceConventionTests`（3 件・Issue #1884 で新設）を追加した。
+  - **検査は既存スクリプトへ寄せた**。§2 用に別スクリプトを立てると `--list-tests` の起動が 2 通りになり、片方だけ直す日が来る（`development-conventions.md`「同じ論理的な処理に手段が 2 通りあるか」）。`count_tests` を `list_test_names` へ分解し、同じ 1 回の実行から §1.1a の合計と §2 のクラス別件数の両方を数える。**片方が失敗しても両方のレポートを出す**（1 回の CI 実行で両方直せるように）。
+  - **表記からクラスを解決するときは名前空間まで照合する**。`Common/Charting/FooTests` の接頭辞を名前空間の接尾辞として突き合わせ、同名クラスが複数あるとき・移動して該当が無いときは「件数の不一致」ではなく理由付きの問題として報告する。
+  - **検出できない範囲を黙らせない**。本検査は「表に載っている行」しか見ないため、クラスを新設して §2 へ行を足し忘れた場合は検出できない（全 5,500 件超のうち §2 に行を持つのは 16 クラスであり、「全クラスが行を持つこと」は要求できない）。この限界をスクリプトの docstring・失敗レポート・§1.1a の注記に明記した。表そのものが縮んで検査が空振りする事故は行数の下限（`MIN_CLASS_ROWS`）で止める。
+  - 検証: `tools/tests/test_check_test_count_sync.py` に **+14 件**（抽出の書式・差分行「+4」を比較対象にしないこと・件数表以外の表を拾わないこと・Theory の引数でクラスを割らないこと・名前空間による曖昧性解消・移動/削除の報告・行番号付きの差分レポート・空振り検出・限界の明記）。検出力は**修正前の設計書**に当てて `AdminDashboardServiceTests` 57 vs 59 を検出することを実測済み。
+  - 07_テスト設計書 §1.1a（CI の検証範囲）・§2（UT-073 / UT-DIAG-003 のクラス別件数）／`2026-05-18-issue-1546-test-count-ci-check-design.md` を同期更新。
 - Issue #1888 **管理者ダッシュボードのテストフィクスチャが、本番では到達不能な系列構成を組み立てていた**問題を是正した。本番の `AdminDashboardService.BuildUsageSeries` は上位 `AppConstants.AdminDashboardMaxSeries`（=5）本を切り出したうえで集約系列（「その他（N 名）」）を足すため、**集約系列の背後には必ず上位 5 本が並ぶ**。一方フィクスチャは `AdminDashboardViewModelTests` が「上位 2 本 + 集約」、`AdminDashboardExcelExportServiceTests` が「上位 1 本 + 集約」を組み立てており、実運用で起きない状態の上でグラフ・凡例・代替一覧・Excel を検査していた（`.claude/rules/testing.md`「モック構成が実 DB で成立し得るかを確かめる」／Issue #1728）。
   - **矛盾した組み合わせを構造的に作れなくした**。`CreateAnalytics` は `includeOtherSeries: true` のとき `seriesCount` が上限 + 1 でなければ `ArgumentException` を投げる。呼び出し側を直すだけでは、次に集約系列を使うテストを書いた人が同じ形を再導入できる（Issue #1883 が `MonthlyUsageSeries` で採った「食い違った状態を表現できなくする」と同じ判断）。定義域外を黙って上限へ丸めないのも同じ理由で、丸めると到達不能な形状を作ったことに気付けないまま緑になる（Issue #1812）。
   - **Excel 側のフィクスチャを本番の形（上位 5 本 + 集約 1 本）へ拡張した**。併せて、集約系列と合計列の位置をリテラルではなく `AppConstants.AdminDashboardMaxSeries` から導くようにした（上限を変えたときに列番号が静かにずれる形を残さない）。
@@ -138,7 +145,7 @@
   - **集約であることをラベル自体に含める**。表示名を「その他（N 名）」とし、合算した職員の人数を添えた。衝突回避と同時に情報量も増える — 「その他」だけでは何人分の合算なのか分からなかった。集約した系列数は `MonthlyUsageSeries.AggregatedSeriesCount` にも持たせ、ラベルの文字列を再解析させない。
   - **組み立ては 1 か所に置く**。`Common/Charting/ChartSeriesNameFormatter.BuildOtherSeriesName` を新設し、`AdminDashboardService.BuildUsageSeries` が `Name` へ載せる。消費側（凡例 `UsageLegend`・代替一覧 `UsageTableRows`・`AdminDashboardExcelExportService`）は `Name` をそのまま表示し、接尾辞を自分で足さない — 消費側それぞれが組み立てる形にすると、片方だけ変わる日が来る（Issue #1763 の「同じ論理的な処理に手段が 2 通りあるか」）。
   - **間接参照（フラグ）の一意性を、表示名の相違の代理にしない**。Issue #1855 が「リソースキーの一意性は色値の相違を意味しない」と記録したのと同じ family。
-  - 検証: `ChartSeriesNameFormatterTests`（7 件）を新設し、`AdminDashboardServiceTests` に**故障シナリオそのもの**（氏名「その他」の職員が上位 5 名に入り、かつ集約が起きる）を再現する 2 件を追加。VM / Excel のテストフィクスチャも本番と同じ組み立て（人数付き）へ揃えた（リテラルのままだと本番だけが変わっても緑のまま通る）。検出力は修正前の実装に当てて 3 件が赤になることを実測済み。04_機能設計書 §20.2／管理者マニュアル §9.4.3 を同期更新（Issue #1858）
+  - 検証: `ChartSeriesNameFormatterTests`（7 件）を新設し、`AdminDashboardServiceTests` に**故障シナリオそのもの**（氏名「その他」の職員が上位 5 名に入り、かつ集約が起きる）を再現する 2 件を追加。VM / Excel のテストフィクスチャも本番と同じ組み立て（人数付き）へ揃えた（リテラルのままだと本番だけが変わっても緑のまま通る）。検出力は修正前の実装に当てて 3 件が赤になることを実測済み。04_機能設計書 §20.2／管理者マニュアル §9.4.3 を同期更新（Issue #1858）（**補記（Issue #1889）**: 本 PR は 07_テスト設計書 §1.1a の合計だけを更新し、§2 のクラス別件数（`AdminDashboardServiceTests` 57→59）の更新と `ChartSeriesNameFormatterTests` の行追加を落としていた。#1889 で是正）
 - Issue #1856 **管理者ダッシュボード（F8）利用推移タブの 2 つのグラフに代替一覧を併置し、`AutomationProperties.HelpText` を実態へ合わせた**（PR #1854 のコードレビュー指摘）。03_画面設計書 §3.23.4 は「各グラフの直下に同じ内容の一覧（DataGrid）を必ず併置する」と定めているが、一覧があったのは運用状況タブと稼働状況タブの 2 つだけで、**職員別の月次利用額と カード別の残高推移は色のみのエンコード**だった（色覚多様性・グレースケール印刷・ロービジョン・スクリーンリーダーで内容を取り出せない）。
   - **誤案内が実装より先に書かれていた**。月別利用額グラフの HelpText は「同じ内容を下の凡例と稼働状況タブの一覧でも確認できます」と述べていたが、**凡例には金額が無く、稼働状況タブの一覧はカード別**で職員別の月次利用額を含まない。案内どおり辿っても同じ内容は得られず、スクリーンリーダー利用者を誤った代替手段へ誘導していた。残高推移グラフの HelpText は代替手段を一切案内していなかった。
   - **一覧は「年月・系列・値」の縦持ちにした**。Excel 出力（行＝年月／列＝系列）と揃えると、集計期間が 3〜36 か月で可変なため列の動的生成が要り、36 列の表はそもそも読めない。縦持ちなら 1 行が自己完結し、スクリーンリーダーの読み上げにも適する。行数が伸びるため一覧自体に `MaxHeight` を与えてスクロールさせる。
