@@ -55,7 +55,7 @@ jobs:
         working-directory: ICCardManager
         run: dotnet build --no-restore --configuration Release
 
-      - name: Verify test count sync (1.1a vs --list-tests)
+      - name: Verify test count sync (§1.1a totals and §2 per-class rows vs --list-tests)
         shell: bash
         run: |
           python tools/check-test-count-sync.py \
