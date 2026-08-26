@@ -46,9 +46,13 @@
 │                                                              │
 │   parse_doc_counts(md_path) -> dict | None                   │
 │       → §1.1a の表を正規表現で抽出                            │
-│   count_tests(csproj_path, prefix) -> int                    │
-│       → dotnet test --list-tests の出力行数をカウント         │
+│   parse_class_counts(md_path) -> ClassRowScan  ※§9a          │
+│       → §2 のクラス別件数行を抽出                             │
+│   list_test_names(csproj_path, prefix) -> list[str]          │
+│       → dotnet test --list-tests の該当行を返す               │
+│   count_class_tests(names) -> dict[fqn, int]   ※§9a          │
 │   compare(expected, actual) -> (ok: bool, report: str)       │
+│   compare_class_counts(scan, actual) -> (ok, report) ※§9a    │
 │       → 差分テーブルを生成                                    │
 │                                                              │
 │   main: 不一致なら exit 1、形式異常なら exit 2、一致なら exit 0│
@@ -85,9 +89,9 @@
 [スクリプト内部]
   (a) parse_doc_counts(--doc)
         → {unit: 3266, ui: 26, total: 3292}
-  (b) count_tests(--unit-csproj, "Tests")
-      count_tests(--ui-csproj,   "UITests")
-        → 実測値
+  (b) list_test_names(--unit-csproj, "Tests")
+      list_test_names(--ui-csproj,   "UITests")
+        → 実測のテスト名一覧（件数は len()、クラス別件数は §9a で数える）
   (c) compare(expected, actual)
         一致 → exit 0、stdout に "✅ テスト件数一致"
         乖離 → exit 1、stderr に差分テーブル + 修正手順
@@ -123,7 +127,7 @@ TOTAL_RE = re.compile(r"^\|\s*\*\*合計\*\*\s*\|\s*\*\*([\d,]+)\s*件\*\*\s*\|"
 ### 4.2 テスト件数カウント
 
 ```python
-def count_tests(csproj_path: str, prefix: str) -> int:
+def list_test_names(csproj_path: str, prefix: str) -> list:
     proc = subprocess.run(
         ["dotnet", "test", csproj_path,
          "--list-tests", "--nologo", "--verbosity", "quiet",
@@ -134,8 +138,12 @@ def count_tests(csproj_path: str, prefix: str) -> int:
         raise RuntimeError(f"dotnet test failed for {csproj_path}: {proc.stderr}")
 
     pattern = re.compile(rf"^\s+ICCardManager\.{re.escape(prefix)}\.")
-    return sum(1 for line in proc.stdout.splitlines() if pattern.match(line))
+    return [line for line in proc.stdout.splitlines() if pattern.match(line)]
 ```
+
+> Issue #1889 で `count_tests(...) -> int` から `list_test_names(...) -> list` へ分解した。
+> §1.1a の合計は `len(...)`、§2 のクラス別件数は `count_class_tests(...)` が
+> **同じ 1 回の実行結果から**数える（`--list-tests` の起動を 2 通りにしない）。
 
 prefix は `"Tests"`（単体）または `"UITests"`（UI）。
 
@@ -263,35 +271,53 @@ PR レビュー時に以下を確認：
 Issue #1858 が `AdminDashboardServiceTests` の +2 件と `ChartSeriesNameFormatterTests` の
 行追加を落としたまま main に入った。Issue #1889 で同じスクリプトへ検証を追加した。
 
-### 9a.1 検証対象の行
+### 9a.1 走査範囲
+
+走査するのは **`## 2.` 見出しから次の `##` 見出しまで**。文書全体を走査すると、他章の
+``| `AsciiName` | 12 | 説明 |`` 形の表を勝手に検査対象へ引き込んで誤検出し（誤検出は
+ガード自体の寿命を縮める）、逆に §2 の表が別章へ移っても気付けない。走査範囲は
+見出しから導出し、見出しを見つけられなければ **空振りとして fail** する。
+
+### 9a.2 検証対象の行
 
 | 形 | 例 | 扱い |
 |---|---|---|
-| 絶対値行 | `| \`Services/AdminDashboardServiceTests\` | 59 | 観点 |` | 実測と比較する |
-| 差分行 | `| \`Views/MainWindowKeyBindingTests\`（追加 4 件） | +4 | 観点 |` | 比較対象外。読み飛ばした件数をレポートに出す |
-| §1.6 等の別書式 | `| \`テスト名\` | \`FooTests.cs\` | 説明 |` | 2 列目が十進数でないため対象にならない |
+| 絶対値行 | ``\| `Services/AdminDashboardServiceTests` \| 59 \| 観点 \|`` | 実測と比較する |
+| 差分行 | ``\| `Views/MainWindowKeyBindingTests`（追加 4 件） \| +4 \| 観点 \|`` | 比較対象外。読み飛ばした行を行番号付きでレポートに列挙する |
+| 書式違反行 | ``\| `Services/FooTests` \| 12 件 \|`` / ``\| **12** \|`` / 名前セルに注記が付いた行 | **fail**。黙って読み飛ばすと、その行だけが検査対象から静かに消える |
+| §1.6 等の別書式 | ``\| `テスト名` \| `FooTests.cs` \| 説明 \|`` | 2 列目がバッククォート付きのため件数行と見なさない |
 
-### 9a.2 表記から実測クラスへの解決
+「書式違反行」を fail にするのは、読み飛ばした 1 行が `MIN_CLASS_ROWS` の余裕（現状 16 行に対し
+下限 10）に吸収され、§2 のドリフトが再び無言で通るためである。差分行との違いは
+「比較できないが意図的な表記か」で、差分行は列挙にとどめる。
+
+### 9a.3 表記から実測クラスへの解決
 
 名前セルのパス接頭辞（`Common/Charting/`）を名前空間の接尾辞（`.Common.Charting.`）として
 照合する。該当なし・同名複数はいずれも「件数の不一致」ではなく理由付きの問題として報告し、
-クラスの移動・改名で表を直し忘れた場合も fail させる。
+クラスの移動・改名で表を直し忘れた場合も fail させる。照合対象は §2 が単体テストの章である
+ことから `ICCardManager.Tests.*` に限り、その旨を「該当なし」の理由文へ明記する
+（UI テストのクラスを書いた場合に「改名した？」と誤誘導しないため）。
 
-### 9a.3 検出できない範囲（明示）
+### 9a.4 検出できない範囲（明示）
 
 本検査は **表に載っている行しか見ない**。テストクラスを新設したのに §2 へ行を足していない
 場合は検出できない。全 5,500 件超の単体テストのうち §2 に行を持つのは 16 クラスであり、
 「全テストクラスが行を持つこと」は要求できないためである。この限界はスクリプトの docstring・
 失敗レポート・07_テスト設計書 §1.1a の注記の 3 か所に明記した（`.claude/rules` の
-「No silent caps」）。表そのものが壊れて検査対象が消える事故は、行数の下限
-（`MIN_CLASS_ROWS = 10`）で fail する。
+「No silent caps」）。表そのものが壊れて検査対象が消える事故は、走査範囲の見出し検出と
+行数の下限（`MIN_CLASS_ROWS = 10`）で fail する。
 
-### 9a.4 実装上の判断
+### 9a.5 実装上の判断
 
 - **別スクリプトを立てない**。`--list-tests` の起動が 2 通りになると、片方だけ直す日が来る。
   `count_tests` を `list_test_names` へ分解し、1 回の実行から両方を数える
-- **片方が失敗しても両方のレポートを出す**。1 回の CI 実行で両方直せるようにする
-- **workflow の変更は不要**。既存の `paths` フィルタが 07_テスト設計書とスクリプトを含む
+- **片方が失敗しても両方のレポートを出す**。1 回の CI 実行で両方直せるようにする。
+  stdout はブロックバッファリングされるため、各レポートの出力後に `flush()` して
+  CI ログ上で前後が入れ替わらないようにする
+- **読み飛ばした行は成功時・失敗時の両方で列挙する**。成功時だけ出すと、失敗レポートを
+  読む人にだけ「何を見ていないか」が伏せられる
+- **workflow の変更は step 名のみ**。`paths` フィルタは 07_テスト設計書とスクリプトを既に含む
 
 ## 10. 参考
 
