@@ -540,7 +540,12 @@ namespace ICCardManager.Services
         {
             foreach (var ledger in ledgers)
             {
-                var busDetails = ledger.Details.Where(d => d.IsBus).ToList();
+                // Issue #1904: 摘要は時系列（交互ブロック）で生成され、抽出結果
+                //（TryExtractBusStops は全ブロックを出現順に結合）も時系列順になる。
+                // 対応付けの並びを揃えるため、バス明細も生成側と同じ順序
+                //（SummaryGenerator.SortChronologically）で並べる
+                var busDetails = SummaryGenerator.SortChronologically(
+                    ledger.Details.Where(d => d.IsBus).ToList());
                 if (busDetails.Count == 0) continue;
 
                 // Issue #1818: 抽出パターンは組織設定 BusLabel から導出する

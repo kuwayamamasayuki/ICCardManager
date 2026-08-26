@@ -1803,6 +1803,70 @@ public class LedgerMergeServiceTests : IDisposable
     }
 
     /// <summary>
+    /// Issue #1904: 時系列（交互ブロック）摘要ではバスブロックが複数になり得る。
+    /// 全ブロックのバス停名を摘要中の出現順（＝時系列順）に抽出し、
+    /// バスDetailを時系列順（Balance降順）に並べて対応付けること。
+    /// </summary>
+    [Fact]
+    public void SyncBusStopsFromSummary_バスブロックが複数の摘要_時系列順に対応付け()
+    {
+        // Arrange: 摘要は バス→鉄道→バス の時系列。Details はあえて非時系列順に並べ、
+        // リスト順ではなく時系列順（Balance 降順）で対応付けられることを固定する
+        var busLater = new LedgerDetail { IsBus = true, BusStops = "★", Amount = 210, Balance = 300 };
+        var busEarlier = new LedgerDetail { IsBus = true, BusStops = "★", Amount = 210, Balance = 700 };
+        var ledgers = new List<Ledger>
+        {
+            new()
+            {
+                Id = 1,
+                Summary = "バス（薬院大通～天神）、鉄道（天神～博多）、バス（博多～吉塚）",
+                Details = new List<LedgerDetail>
+                {
+                    busLater,
+                    new() { IsBus = false, EntryStation = "天神", ExitStation = "博多", Amount = 260, Balance = 500 },
+                    busEarlier
+                }
+            }
+        };
+
+        // Act
+        LedgerMergeService.SyncBusStopsFromSummary(ledgers);
+
+        // Assert: 時系列で先（Balance 700）のDetailに先頭ブロックのバス停名が入る
+        busEarlier.BusStops.Should().Be("薬院大通～天神");
+        busLater.BusStops.Should().Be("博多～吉塚");
+    }
+
+    /// <summary>
+    /// 抽出したバス停名の件数とバスDetailの件数が一致しない場合は書き戻さないこと（安全側）
+    /// </summary>
+    [Fact]
+    public void SyncBusStopsFromSummary_バス停名とDetailの件数不一致_変更なし()
+    {
+        // Arrange: 摘要のバス停は2件、バスDetailは3件
+        var ledgers = new List<Ledger>
+        {
+            new()
+            {
+                Id = 1,
+                Summary = "バス（薬院大通～天神、博多～吉塚）",
+                Details = new List<LedgerDetail>
+                {
+                    new() { IsBus = true, BusStops = "★", Amount = 210, Balance = 700 },
+                    new() { IsBus = true, BusStops = "★", Amount = 210, Balance = 500 },
+                    new() { IsBus = true, BusStops = "★", Amount = 210, Balance = 300 }
+                }
+            }
+        };
+
+        // Act
+        LedgerMergeService.SyncBusStopsFromSummary(ledgers);
+
+        // Assert
+        ledgers[0].Details.Should().OnlyContain(d => d.BusStops == "★");
+    }
+
+    /// <summary>
     /// BusStopsが既に正しい場合も上書きされるが実害なし
     /// </summary>
     [Fact]
