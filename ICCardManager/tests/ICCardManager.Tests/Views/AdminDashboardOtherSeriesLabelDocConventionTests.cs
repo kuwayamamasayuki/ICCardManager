@@ -163,60 +163,15 @@ public class AdminDashboardOtherSeriesLabelDocConventionTests
             .ToList();
 
     /// <summary>
-    /// 指定した見出しの節（次の同レベル以上の見出しまで）を切り出す。
-    /// </summary>
-    /// <exception cref="InvalidOperationException">見出しが見つからないとき。</exception>
-    private static string ExtractSection(string markdown, string heading)
-    {
-        var lines = markdown.Replace("\r\n", "\n").Split('\n');
-        var startIndex = Array.FindIndex(lines, line => line.Trim() == heading);
-        if (startIndex < 0)
-        {
-            throw new InvalidOperationException(
-                $"見出し「{heading}」が見つかりません。設計書の構成を変えた場合は本テストも更新してください。");
-        }
-
-        var headingLevel = heading.TakeWhile(c => c == '#').Count();
-        var body = new List<string>();
-        var insideFence = false;
-        for (var i = startIndex + 1; i < lines.Length; i++)
-        {
-            if (lines[i].TrimStart().StartsWith("```", StringComparison.Ordinal))
-            {
-                insideFence = !insideFence;
-            }
-            else if (!insideFence && IsHeadingAtOrAbove(lines[i], headingLevel))
-            {
-                break;
-            }
-
-            body.Add(lines[i]);
-        }
-
-        return string.Join("\n", body);
-    }
-
-    /// <summary>
-    /// 行が <paramref name="level"/> と同レベル以上（＝節の終わりを意味する）の見出しかを判定する。
+    /// 指定した見出しの節を切り出す（実体は <see cref="MarkdownDocumentInspection"/>）。
     /// </summary>
     /// <remarks>
-    /// 行頭の <c>#</c> の連なりだけで判定すると、<b>見出しではない行</b>を見出しと誤認して
-    /// 節を途中で打ち切る（行頭に来た Issue 参照の <c>#1815</c>、コードフェンス内の <c>#</c> コメント等。
-    /// 兄弟節 §3.23.1 は実際にコードフェンスを使っている）。打ち切られた残りは検査対象から
-    /// 静かに消えるため、「旧ラベルの不在」が<b>空振りしたまま緑</b>になる
-    /// ― 本テストが防ごうとしている状態そのもの。Markdown の見出しは <c>#</c> の直後に空白を
-    /// 要求するので、そこまで確かめる。
+    /// 抽出の実装は Issue #1892（管理者マニュアル §9.4.3 の検査）と共有する。
+    /// 検査クラスごとに私的コピーを置くと、見出し判定の欠陥を直したときに片方だけが直る。
+    /// 本クラスの「抽出ロジック_*」の 3 件は、その共有実装をサンプル入力で固定している。
     /// </remarks>
-    private static bool IsHeadingAtOrAbove(string line, int level)
-    {
-        var hashes = line.TakeWhile(c => c == '#').Count();
-        if (hashes == 0 || hashes > level)
-        {
-            return false;
-        }
-
-        return hashes == line.Length || line[hashes] == ' ';
-    }
+    private static string ExtractSection(string markdown, string heading)
+        => MarkdownDocumentInspection.ExtractSection(markdown, heading);
 
     /// <summary>
     /// 03_画面設計書.md の本文（テスト実行ごとに 1 回だけ読む）。
