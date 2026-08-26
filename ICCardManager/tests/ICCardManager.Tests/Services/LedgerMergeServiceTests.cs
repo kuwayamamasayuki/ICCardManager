@@ -1875,6 +1875,63 @@ public class LedgerMergeServiceTests : IDisposable
     }
 
     /// <summary>
+    /// Issue #1904（コードレビュー指摘）: 日付をまたぐ統合済み台帳では別バッチ由来の rowid が
+    /// 日付と矛盾し得る。対応付けは rowid ではなく日付を第一キーにすること。
+    /// </summary>
+    [Fact]
+    public void SyncBusStopsFromSummary_日付をまたぐ統合台帳_rowidが日付と矛盾しても日付順で対応付け()
+    {
+        // Arrange: 12/1 の明細の rowid(=2) が 12/2 の明細の rowid(=10) より小さい
+        //（rowid 第一キーだと seq=10 が「最古」と誤判定され、日付と逆順になる）
+        var busDay1 = new LedgerDetail { IsBus = true, BusStops = "★", Amount = 210, Balance = 700, SequenceNumber = 2, UseDate = new DateTime(2024, 12, 1) };
+        var busDay2 = new LedgerDetail { IsBus = true, BusStops = "★", Amount = 210, Balance = 500, SequenceNumber = 10, UseDate = new DateTime(2024, 12, 2) };
+        var ledgers = new List<Ledger>
+        {
+            new()
+            {
+                Id = 1,
+                Summary = "バス（薬院大通～天神、博多～吉塚）",
+                Details = new List<LedgerDetail> { busDay2, busDay1 }
+            }
+        };
+
+        // Act
+        LedgerMergeService.SyncBusStopsFromSummary(ledgers);
+
+        // Assert: 日付が古い 12/1 の明細に先頭のバス停名が入る
+        busDay1.BusStops.Should().Be("薬院大通～天神");
+        busDay2.BusStops.Should().Be("博多～吉塚");
+    }
+
+    /// <summary>
+    /// Issue #1904（コードレビュー指摘）: バス明細が 1 件のとき、複数ブロックの結合テキストではなく
+    /// 先頭ブロックのみを書き戻すこと（結合テキストは ParseBusRoute で解析できない値になる）
+    /// </summary>
+    [Fact]
+    public void SyncBusStopsFromSummary_バス明細1件で複数ブロックの摘要_先頭ブロックのみ書き戻す()
+    {
+        // Arrange: 手編集でバスブロックが 2 つある摘要に対し、バス明細は 1 件
+        var ledgers = new List<Ledger>
+        {
+            new()
+            {
+                Id = 1,
+                Summary = "バス（薬院大通～天神）、鉄道（天神～博多）、バス（博多～吉塚）",
+                Details = new List<LedgerDetail>
+                {
+                    new() { IsBus = true, BusStops = "★", Amount = 210, Balance = 500 }
+                }
+            }
+        };
+
+        // Act
+        LedgerMergeService.SyncBusStopsFromSummary(ledgers);
+
+        // Assert: 結合テキスト「薬院大通～天神、博多～吉塚」ではなく先頭ブロックのみ
+        ledgers[0].Details[0].BusStops.Should().Be("薬院大通～天神");
+    }
+
+    /// <summary>
     /// 抽出したバス停名の件数とバスDetailの件数が一致しない場合は書き戻さないこと（安全側）
     /// </summary>
     [Fact]

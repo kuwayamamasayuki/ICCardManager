@@ -2193,6 +2193,67 @@ public class SummaryGeneratorComprehensiveTests : IDisposable
     }
 
     /// <summary>
+    /// コードレビュー指摘: 日付をまたぐ統合済み台帳では別バッチ由来の rowid が日付と矛盾し得る。
+    /// ブロック順は rowid ではなく日付を第一キーに決めること。
+    /// </summary>
+    [Fact]
+    public void Issue1904_日付をまたぐ統合台帳_rowidが日付と矛盾しても日付順のブロックで表示する()
+    {
+        // Arrange: 12/1 の鉄道（rowid=2）と 12/2 のバス（rowid=10）。
+        // rowid 第一キーだと rowid=10 が「最古」と誤判定されバスが先頭になる
+        var rail = CreateRailwayUsage(new DateTime(2024, 12, 1), "天神", "博多", 210, 4790);
+        rail.SequenceNumber = 2;
+        var bus = CreateBusUsage(new DateTime(2024, 12, 2), 230, 4560, busStops: "天神～博多駅");
+        bus.SequenceNumber = 10;
+        var details = new List<LedgerDetail> { bus, rail };
+
+        // Act
+        var result = _generator.Generate(details);
+
+        // Assert: 日付順（12/1 鉄道 → 12/2 バス）
+        result.Should().Be("鉄道（天神～博多）、バス（天神～博多駅）");
+        _output.WriteLine($"Generate() = \"{result}\"");
+    }
+
+    /// <summary>
+    /// コードレビュー指摘: GroupId 混在のバス run は「グループ→未グループ」の順で出力されるため、
+    /// 同期（SyncBusStopsFromSummary）は時系列順ではなく生成側の出力順（GetBusStopEmissionOrder）で
+    /// 対応付ける。生成した摘要を同期に通すラウンドトリップで両者の一致を固定する。
+    /// </summary>
+    [Fact]
+    public void Issue1904_GroupId混在のバスrun_生成した摘要を同期すると各明細に元のバス停名が戻る()
+    {
+        // Arrange: 時系列は 未グループ(薬院大通～天神) → G1(博多～吉塚) → G1(天神～渡辺通)。
+        // 生成はグループ先行のため、摘要中の出現順は時系列と一致しない
+        var ungrouped = CreateBusUsage(new DateTime(2024, 12, 9), 230, 4790, busStops: "薬院大通～天神");
+        var grouped1 = CreateBusUsage(new DateTime(2024, 12, 9), 230, 4560, busStops: "博多～吉塚");
+        grouped1.GroupId = 1;
+        var grouped2 = CreateBusUsage(new DateTime(2024, 12, 9), 230, 4330, busStops: "天神～渡辺通");
+        grouped2.GroupId = 1;
+        var details = new List<LedgerDetail> { grouped2, grouped1, ungrouped };
+
+        // Act 1: 生成（グループ先行の出力順）
+        var summary = _generator.Generate(details);
+        summary.Should().Be("バス（博多～吉塚、天神～渡辺通、薬院大通～天神）");
+
+        // Act 2: バス停名を未入力に戻してから、生成した摘要で同期する
+        ungrouped.BusStops = "★";
+        grouped1.BusStops = "★";
+        grouped2.BusStops = "★";
+        var ledgers = new List<Ledger>
+        {
+            new() { Id = 1, Summary = summary, Details = details }
+        };
+        LedgerMergeService.SyncBusStopsFromSummary(ledgers);
+
+        // Assert: 各明細に元のバス停名が戻る（時系列順で対応付けるとすべて別の明細へずれる）
+        ungrouped.BusStops.Should().Be("薬院大通～天神");
+        grouped1.BusStops.Should().Be("博多～吉塚");
+        grouped2.BusStops.Should().Be("天神～渡辺通");
+        _output.WriteLine($"Generate() = \"{summary}\"");
+    }
+
+    /// <summary>
     /// GenerateByDate 経路でも同じ時系列順（交互ブロック）で表示する
     /// </summary>
     [Fact]

@@ -244,15 +244,29 @@ namespace ICCardManager.Services
         /// </remarks>
         public static bool TryExtractBusStops(string? summary, out string busStops)
         {
-            var matches = Regex.Matches(summary ?? string.Empty, GetBusStopExtractionPattern());
-            if (matches.Count == 0)
-            {
-                busStops = string.Empty;
-                return false;
-            }
+            var blocks = ExtractBusStopBlocks(summary);
+            busStops = string.Join("、", blocks);
+            return blocks.Count > 0;
+        }
 
-            busStops = string.Join("、", matches.Cast<Match>().Select(m => m.Groups[1].Value));
-            return true;
+        /// <summary>
+        /// 摘要からバス停名をブロック（「バス（…）」）単位で抽出する（Issue #1904）
+        /// </summary>
+        /// <param name="summary">摘要文字列</param>
+        /// <returns>各ブロックのバス停名を摘要中の出現順に並べたリスト。バスブロックが無ければ空</returns>
+        /// <remarks>
+        /// バス明細が 1 件の同期処理はブロック区切りを保ったまま先頭ブロックだけを
+        /// 書き戻す必要がある（結合テキスト「A～B、C～D」を 1 明細へ書き込むと
+        /// <see cref="ParseBusRoute"/> で解析できない値が台帳に残る）ため、
+        /// 結合前のブロック列を返す本メソッドを別に置く。
+        /// 汎用/固有の別: 交通系固有（バス混在表記）。
+        /// </remarks>
+        internal static List<string> ExtractBusStopBlocks(string? summary)
+        {
+            return Regex.Matches(summary ?? string.Empty, GetBusStopExtractionPattern())
+                .Cast<Match>()
+                .Select(m => m.Groups[1].Value)
+                .ToList();
         }
 
         /// <summary>
@@ -675,20 +689,94 @@ namespace ICCardManager.Services
         /// 利用履歴をSequenceNumber/UseDate/Balanceで時系列順（古い順）にソート
         /// </summary>
         /// <remarks>
+        /// <para>
         /// Issue #548, #880: FeliCa互換でrowid（=SequenceNumber）が小さいほど新しい（後に利用した）。
         /// DESCで大きいrowid（古い）を先にして時系列順に。
         /// SequenceNumberが0（未設定）の場合はBalance降順を使用。
-        /// internal なのは <c>LedgerMergeService.SyncBusStopsFromSummary</c> が
-        /// 時系列摘要（Issue #1904）とバス明細の対応付けに同じ順序を必要とするため
-        /// （並び順の定義を 2 か所に書かない）。
+        /// </para>
+        /// <para>
+        /// Issue #1904（コードレビュー指摘）: 第一キーは rowid ではなく UseDate。
+        /// 単一バッチ（1回の返却で読み取った履歴）では日付昇順と rowid 降順が一致するため
+        /// 等価だが、**統合済み台帳（Issue #837 / #1458）では別バッチ由来の rowid が日付と
+        /// 無関係に交錯し得る**。日付をまたぐ統合行で rowid を第一キーにすると、摘要の
+        /// ブロック順・バス停対応付けが日付と矛盾する。同一日付内は従来どおり rowid 降順が
+        /// 第一（同日の時刻はすべて 00:00 で保存され、残高チェーンは循環し得るため。
+        /// business-logic.md「同一日内の順序は id では決まらない」の裏面として、同日内の
+        /// タイブレークは rowid が最も強い）。
+        /// </para>
         /// </remarks>
         internal static List<LedgerDetail> SortChronologically(List<LedgerDetail> trips)
         {
             return trips
-                .OrderByDescending(t => t.SequenceNumber > 0 ? t.SequenceNumber : int.MinValue)
-                .ThenBy(t => t.UseDate ?? DateTime.MaxValue)
+                .OrderBy(t => t.UseDate ?? DateTime.MaxValue)
+                .ThenByDescending(t => t.SequenceNumber > 0 ? t.SequenceNumber : int.MinValue)
                 .ThenByDescending(t => t.Balance ?? 0)
                 .ToList();
+        }
+
+        /// <summary>
+        /// 摘要を再生成したときにバス停名が現れる順序で、バス明細を返す（Issue #1904）
+        /// </summary>
+        /// <param name="details">台帳の明細リスト（順序は問わない）</param>
+        /// <returns>バス明細のみを、摘要中のバス停名の出現順に並べたリスト</returns>
+        /// <remarks>
+        /// <para>
+        /// 摘要からバス停名を抽出して明細へ書き戻す同期処理
+        /// （<c>LedgerMergeService.SyncBusStopsFromSummary</c> /
+        /// <c>LedgerRowEditViewModel.SyncBusStopsFromSummaryAsync</c>）は、抽出した
+        /// バス停名（摘要中の出現順）と明細を位置で対応付ける。その対応が成立するのは
+        /// **明細の並びが生成側の出力順と一致するときだけ**なので、並び順の定義を
+        /// 消費側に書き写さず、生成パイプラインと同じ手順
+        /// （<see cref="SortChronologically"/> → <see cref="CoalesceExplicitGroups"/> →
+        /// <see cref="SplitIntoModeRuns"/> → run 内の GroupId 優先順）を本メソッドに集約する。
+        /// </para>
+        /// <para>
+        /// GroupId を含む run では <see cref="GenerateBusSummaryWithGroupId"/> と同じく
+        /// 「グループ（最古 UseDate 順、各グループ内は時系列）→ 未グループ」の順になる。
+        /// 往復・乗継統合（<see cref="BuildRouteSummary"/>）が起きた場合は摘要側の
+        /// バス停数が明細数より少なくなるが、同期側の件数一致ガードが書き戻しを
+        /// 抑止するため、本メソッドは統合前の順序を返せば足りる。
+        /// 汎用/固有の別: 交通系固有（バス混在表記）。
+        /// </para>
+        /// </remarks>
+        internal static List<LedgerDetail> GetBusStopEmissionOrder(IEnumerable<LedgerDetail> details)
+        {
+            var usageDetails = details
+                .Where(d => !d.IsCharge && !d.IsPointRedemption && !IsImplicitPointRedemption(d))
+                .ToList();
+
+            var runs = SplitIntoModeRuns(CoalesceExplicitGroups(SortChronologically(usageDetails)));
+
+            var result = new List<LedgerDetail>();
+            foreach (var run in runs)
+            {
+                if (!run[0].IsBus)
+                {
+                    continue;
+                }
+
+                var sortedRun = SortChronologically(run);
+                if (sortedRun.Any(t => t.GroupId.HasValue))
+                {
+                    // GenerateBusSummaryWithGroupId と同じ出力順
+                    var groupedTrips = sortedRun
+                        .Where(t => t.GroupId.HasValue)
+                        .GroupBy(t => t.GroupId!.Value)
+                        .OrderBy(g => g.Min(t => t.UseDate ?? DateTime.MaxValue));
+                    foreach (var group in groupedTrips)
+                    {
+                        result.AddRange(SortChronologically(group.ToList()));
+                    }
+
+                    result.AddRange(sortedRun.Where(t => !t.GroupId.HasValue));
+                }
+                else
+                {
+                    result.AddRange(sortedRun);
+                }
+            }
+
+            return result;
         }
 
         /// <summary>

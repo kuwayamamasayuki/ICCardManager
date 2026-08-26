@@ -540,26 +540,28 @@ namespace ICCardManager.Services
         {
             foreach (var ledger in ledgers)
             {
-                // Issue #1904: 摘要は時系列（交互ブロック）で生成され、抽出結果
-                //（TryExtractBusStops は全ブロックを出現順に結合）も時系列順になる。
-                // 対応付けの並びを揃えるため、バス明細も生成側と同じ順序
-                //（SummaryGenerator.SortChronologically）で並べる
-                var busDetails = SummaryGenerator.SortChronologically(
-                    ledger.Details.Where(d => d.IsBus).ToList());
+                // Issue #1904: 摘要は時系列（交互ブロック）で生成され、バスブロックは
+                // 複数になり得る。抽出したバス停名（摘要中の出現順）と位置で対応付けるため、
+                // バス明細は生成側の出力順そのもの（GetBusStopEmissionOrder）で並べる
+                //（並び順の定義を消費側に書き写さない）
+                var busDetails = SummaryGenerator.GetBusStopEmissionOrder(ledger.Details);
                 if (busDetails.Count == 0) continue;
 
                 // Issue #1818: 抽出パターンは組織設定 BusLabel から導出する
                 //（生成側だけが設定値を使い、抽出側がリテラルを直書きする乖離の防止）
-                if (!SummaryGenerator.TryExtractBusStops(ledger.Summary, out var busStopText)) continue;
+                var blocks = SummaryGenerator.ExtractBusStopBlocks(ledger.Summary);
+                if (blocks.Count == 0) continue;
 
                 if (busDetails.Count == 1)
                 {
-                    busDetails[0].BusStops = busStopText;
+                    // 先頭ブロックのみ書き戻す（従来挙動）。複数ブロックの結合テキストを
+                    // 1 明細へ書き込むと「A～B、C～D」となり ParseBusRoute で解析できない
+                    busDetails[0].BusStops = blocks[0];
                 }
                 else
                 {
                     // 複数件のバス利用: 「、」で分割してDetailに対応付け
-                    var parts = busStopText.Split('、');
+                    var parts = string.Join("、", blocks).Split('、');
                     if (parts.Length == busDetails.Count)
                     {
                         for (int i = 0; i < parts.Length; i++)
