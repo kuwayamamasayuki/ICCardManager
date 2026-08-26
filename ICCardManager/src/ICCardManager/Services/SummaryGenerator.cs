@@ -1186,6 +1186,13 @@ namespace ICCardManager.Services
         ///
         /// 既訪問判定は <see cref="AreTransferStations"/> による同一視を考慮する
         /// （例: 天神 と 西鉄福岡(天神) は同一駅とみなす）。
+        ///
+        /// Issue #1902: さらに、現在のチェーンが「直前に確定したチェーンの完全な逆走」
+        /// （＝往復の復路）になっている場合は、次経路への乗継延長を行わない。
+        /// 復路を次の移動と統合すると往復ペアの片割れが消費され、後段の
+        /// <see cref="DetectRoundTrips"/> が往復を検出できなくなるため
+        /// （例: A→B、B→A、C→D、D→C で復路 B→A が乗換駅グループ経由で
+        /// C→D と統合され「B～D」という実際には乗っていない区間になっていた）。
         /// </remarks>
         private List<(string Start, string End)> ConsolidateRoutes(List<(string Entry, string Exit)> routes)
         {
@@ -1200,6 +1207,10 @@ namespace ICCardManager.Services
             var currentEnd = routes[0].Exit;
             var visitedInChain = new List<string> { currentStart, currentEnd };
 
+            // Issue #1902: 直前に確定したチェーンの端点（逆走判定用）
+            string previousChainStart = null;
+            string previousChainEnd = null;
+
             for (int i = 1; i < routes.Count; i++)
             {
                 var isTransfer = AreTransferStations(currentEnd, routes[i].Entry);
@@ -1209,7 +1220,13 @@ namespace ICCardManager.Services
                 var chainLengthAfter = i - chainStartIndex + 1;
                 var isClosingCircular = nextExitEqualsStart && chainLengthAfter >= 3;
 
-                if (isTransfer && (!nextExitVisited || isClosingCircular))
+                // Issue #1902: 現在のチェーンが直前チェーンの完全な逆走（往復の復路）なら
+                // ここでチェーンを閉じ、往復ペアを DetectRoundTrips に委ねる
+                var isReturnLegOfPreviousChain = previousChainStart != null
+                    && AreTransferStations(currentStart, previousChainEnd)
+                    && AreTransferStations(currentEnd, previousChainStart);
+
+                if (isTransfer && !isReturnLegOfPreviousChain && (!nextExitVisited || isClosingCircular))
                 {
                     currentEnd = nextExit;
                     if (!nextExitVisited)
@@ -1220,6 +1237,12 @@ namespace ICCardManager.Services
                 else
                 {
                     AddConsolidatedChain(result, routes, chainStartIndex, i - 1, currentStart, currentEnd);
+
+                    // 逆走判定は「直前に result へ確定した経路」を基準にする
+                    // （循環分割で複数経路が追加された場合は末尾の経路が直前の移動）
+                    var lastEmitted = result[result.Count - 1];
+                    previousChainStart = lastEmitted.Start;
+                    previousChainEnd = lastEmitted.End;
 
                     chainStartIndex = i;
                     currentStart = routes[i].Entry;
