@@ -1838,6 +1838,43 @@ public class LedgerMergeServiceTests : IDisposable
     }
 
     /// <summary>
+    /// Issue #1904: 本番の明細（DB 由来）は必ず SequenceNumber（=rowid、小さいほど新しい）を持ち、
+    /// SortChronologically は Balance ではなく rowid で並びを決める。上のテストは
+    /// SequenceNumber=0 のフォールバック（Balance 降順）しか通らないため、
+    /// rowid 主キー経路を Balance があえて rowid と矛盾する明細で固定する
+    /// （Balance 降順で並べる誤実装ならこのテストが赤になる）。
+    /// </summary>
+    [Fact]
+    public void SyncBusStopsFromSummary_SequenceNumber設定済み_Balance順ではなくrowid順で対応付け()
+    {
+        // Arrange: 時系列は busEarlier(seq=9=最古) → 鉄道(seq=5) → busLater(seq=2)。
+        // Balance は rowid と逆転した値（busEarlier の方が小さい）にする
+        var busLater = new LedgerDetail { IsBus = true, BusStops = "★", Amount = 210, Balance = 700, SequenceNumber = 2 };
+        var busEarlier = new LedgerDetail { IsBus = true, BusStops = "★", Amount = 210, Balance = 300, SequenceNumber = 9 };
+        var ledgers = new List<Ledger>
+        {
+            new()
+            {
+                Id = 1,
+                Summary = "バス（薬院大通～天神）、鉄道（天神～博多）、バス（博多～吉塚）",
+                Details = new List<LedgerDetail>
+                {
+                    busLater,
+                    new() { IsBus = false, EntryStation = "天神", ExitStation = "博多", Amount = 260, Balance = 500, SequenceNumber = 5 },
+                    busEarlier
+                }
+            }
+        };
+
+        // Act
+        LedgerMergeService.SyncBusStopsFromSummary(ledgers);
+
+        // Assert: rowid 降順（＝時系列で先）の busEarlier に先頭ブロックが入る
+        busEarlier.BusStops.Should().Be("薬院大通～天神");
+        busLater.BusStops.Should().Be("博多～吉塚");
+    }
+
+    /// <summary>
     /// 抽出したバス停名の件数とバスDetailの件数が一致しない場合は書き戻さないこと（安全側）
     /// </summary>
     [Fact]
