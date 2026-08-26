@@ -25,8 +25,9 @@ namespace ICCardManager.Tests.Views;
 /// （<c>.claude/rules/development-conventions.md</c>「本番の判定に使う閾値をテスト側で作り直さない」）。
 /// </para>
 /// <para>
-/// 検査は<b>対で</b>行う。「正しいラベルの存在」だけを見ると当該節を丸ごと削っても緑になり、
-/// 「旧ラベルの不在」だけを見るとラベルの記述が一切無い状態でも緑になる。
+/// 検査は<b>対で</b>行う。「正しいラベルの存在」だけを見ると<b>旧ラベルが併記されたまま</b>でも緑になり、
+/// 「旧ラベルの不在」だけを見るとラベルの記述が一切無い状態でも緑になる
+/// （節そのものが消えた場合は抽出が例外になるため、どちらの表明でも赤になる）。
 /// 加えて抽出・検出ロジック自体をサンプル入力で固定し、設計書の構成が変わって
 /// 抽出範囲が空になったときに<b>空振りしたまま緑</b>にならないようにする（Issue #1786 の作法）。
 /// </para>
@@ -116,6 +117,10 @@ public class AdminDashboardOtherSeriesLabelDocConventionTests
     [InlineData("超過分は「その他（N 名）」に集約する", false)]
     [InlineData("超過分は「その他（3 名）」に集約する", false)]
     [InlineData("その他の系列は集約しない", false)]
+    // 新旧ラベルの併記。「正しいラベルの存在」の表明はこの行で満たされてしまうため、
+    // 対のもう一方（旧ラベルの不在）が守る唯一の穴がここにあたる。将来この検出へ
+    // 「同じ行に新ラベルがあれば見逃す」という除外が入ると 2 つの表明が揃って空振りする。
+    [InlineData("超過分は「その他（N 名）」に集約する（かつては「その他」だった）", true)]
     public void 検出ロジック_人数の有無で違反を判定すること(string line, bool expectedViolation)
     {
         FindBareOtherLabelLines(line).Any().Should().Be(expectedViolation);
@@ -124,13 +129,29 @@ public class AdminDashboardOtherSeriesLabelDocConventionTests
     /// <summary>
     /// 本番の書式から、設計書が使う表記（件数を <c>N</c> に置いた形）を導出する。
     /// </summary>
+    /// <remarks>
+    /// 鉤括弧は<b>設計書側の引用記法</b>であってラベルの一部ではないため、ここで付ける
+    /// （本番の書式には含まれない。この 1 文字だけがテスト側の表記で、それ以外の
+    /// 基底名・全角括弧・区切り・「名」の有無は
+    /// <see cref="ChartSeriesNameFormatter.BuildOtherSeriesName(int)"/> から導出する）。
+    /// </remarks>
     private static string BuildExpectedLabelNotation()
     {
-        // 1 桁の件数を渡し、その桁を設計書のプレースホルダ N へ置き換える。
-        // 書式（鉤括弧・全角括弧・「名」の有無）が変われば期待値も自動的に変わる。
+        // 1 桁の件数を渡し、その桁「だけ」を設計書のプレースホルダ N へ置き換える。
+        // 全置換にすると、将来ラベルの固定部に同じ数字が入ったとき（「上位 3 位以外」等）に
+        // 期待値が黙って壊れる。
         const int sampleCount = 3;
         var actual = ChartSeriesNameFormatter.BuildOtherSeriesName(sampleCount);
-        return "「" + actual.Replace(sampleCount.ToString(), "N") + "」";
+        var countText = sampleCount.ToString();
+        var countAt = actual.IndexOf(countText, StringComparison.Ordinal);
+        if (countAt < 0)
+        {
+            throw new InvalidOperationException(
+                $"集約系列名「{actual}」に件数 {countText} が現れません。"
+                + "書式を変えた場合は本テストの導出方法も更新してください。");
+        }
+
+        return "「" + actual.Remove(countAt, countText.Length).Insert(countAt, "N") + "」";
     }
 
     /// <summary>
@@ -157,10 +178,14 @@ public class AdminDashboardOtherSeriesLabelDocConventionTests
 
         var headingLevel = heading.TakeWhile(c => c == '#').Count();
         var body = new List<string>();
+        var insideFence = false;
         for (var i = startIndex + 1; i < lines.Length; i++)
         {
-            var level = lines[i].TakeWhile(c => c == '#').Count();
-            if (level > 0 && level <= headingLevel)
+            if (lines[i].TrimStart().StartsWith("```", StringComparison.Ordinal))
+            {
+                insideFence = !insideFence;
+            }
+            else if (!insideFence && IsHeadingAtOrAbove(lines[i], headingLevel))
             {
                 break;
             }
@@ -171,7 +196,34 @@ public class AdminDashboardOtherSeriesLabelDocConventionTests
         return string.Join("\n", body);
     }
 
-    private static string ReadScreenDesignDocument()
-        => File.ReadAllText(
-            Path.Combine(TestPaths.GetSolutionRoot(), "docs", "design", "03_画面設計書.md"));
+    /// <summary>
+    /// 行が <paramref name="level"/> と同レベル以上（＝節の終わりを意味する）の見出しかを判定する。
+    /// </summary>
+    /// <remarks>
+    /// 行頭の <c>#</c> の連なりだけで判定すると、<b>見出しではない行</b>を見出しと誤認して
+    /// 節を途中で打ち切る（行頭に来た Issue 参照の <c>#1815</c>、コードフェンス内の <c>#</c> コメント等。
+    /// 兄弟節 §3.23.1 は実際にコードフェンスを使っている）。打ち切られた残りは検査対象から
+    /// 静かに消えるため、「旧ラベルの不在」が<b>空振りしたまま緑</b>になる
+    /// ― 本テストが防ごうとしている状態そのもの。Markdown の見出しは <c>#</c> の直後に空白を
+    /// 要求するので、そこまで確かめる。
+    /// </remarks>
+    private static bool IsHeadingAtOrAbove(string line, int level)
+    {
+        var hashes = line.TakeWhile(c => c == '#').Count();
+        if (hashes == 0 || hashes > level)
+        {
+            return false;
+        }
+
+        return hashes == line.Length || line[hashes] == ' ';
+    }
+
+    /// <summary>
+    /// 03_画面設計書.md の本文（テスト実行ごとに 1 回だけ読む）。
+    /// </summary>
+    private static readonly Lazy<string> ScreenDesignDocument = new Lazy<string>(
+        () => File.ReadAllText(
+            Path.Combine(TestPaths.GetSolutionRoot(), "docs", "design", "03_画面設計書.md")));
+
+    private static string ReadScreenDesignDocument() => ScreenDesignDocument.Value;
 }
