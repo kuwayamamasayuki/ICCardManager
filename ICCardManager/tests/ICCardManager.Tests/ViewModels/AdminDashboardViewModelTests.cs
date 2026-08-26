@@ -116,6 +116,18 @@ public class AdminDashboardViewModelTests
                 nameof(seriesCount));
         }
 
+        // 集約系列を伴わない側も同じだけ塞ぐ。BuildUsageSeries は上位を Take(上限) で切り出すため、
+        // 集約せずに上限を超える本数を返すことはない。片側だけ塞ぐと、もう半分の
+        // パラメーター空間から同じ「到達不能なフィクスチャ」を作れてしまう。
+        if (!includeOtherSeries && seriesCount > AppConstants.AdminDashboardMaxSeries)
+        {
+            throw new ArgumentException(
+                $"集約系列を伴わない分析結果の系列は上限 {AppConstants.AdminDashboardMaxSeries} 本まで。"
+                + $"それを超える構成は集約系列を伴う（includeOtherSeries: true）"
+                + $"（指定値: {seriesCount}）。",
+                nameof(seriesCount));
+        }
+
         var months = Enumerable.Range(1, monthCount).Select(i => $"2026/{i:D2}").ToList();
 
         return new AdminDashboardAnalytics
@@ -136,11 +148,14 @@ public class AdminDashboardViewModelTests
             // includeOtherSeries: 上位以外を集約した「その他」を末尾に付ける
             // （AdminDashboardService.BuildUsageSeries が上限超過時に返す形）
             // 名前は本番と同じ組み立て（人数付き）にする。ここでリテラルを使うと、
-            // 本番だけが変わっても緑のまま通る（Issue #1858）
+            // 本番だけが変わっても緑のまま通る（Issue #1858）。
+            // 金額は先頭ほど大きくする。本番は OrderByDescending(e => e.Total) で並べるため、
+            // 昇順に積むと「添字 0 が最小の支出者」という本番に無い並びになる（Issue #1888）
             UsageSeries = Enumerable.Range(1, seriesCount).Select(i =>
             {
-                var monthlyExpenses = Enumerable.Range(1, monthCount).Select(m => m * 100 * i).ToList();
-                var totalExpense = Enumerable.Range(1, monthCount).Sum(m => m * 100 * i);
+                var rank = seriesCount - i + 1;
+                var monthlyExpenses = Enumerable.Range(1, monthCount).Select(m => m * 100 * rank).ToList();
+                var totalExpense = Enumerable.Range(1, monthCount).Sum(m => m * 100 * rank);
 
                 if (includeOtherSeries && i == seriesCount)
                 {
@@ -211,6 +226,30 @@ public class AdminDashboardViewModelTests
         analytics.UsageSeries.Last().IsOther.Should().BeTrue();
         analytics.UsageSeries.Take(AppConstants.AdminDashboardMaxSeries)
             .Should().OnlyContain(s => !s.IsOther);
+    }
+
+    [Fact]
+    public void CreateAnalytics_RejectsMoreThanMaxSeriesWithoutTheAggregatedOne()
+    {
+        // BuildUsageSeries は上位を Take(上限) で切り出すため、集約せずに上限を超えることはない
+        Action act = () => CreateAnalytics(seriesCount: AppConstants.AdminDashboardMaxSeries + 1);
+
+        act.Should().Throw<ArgumentException>(
+            "集約系列を伴わずに上限を超える系列を返す経路は本番に無い");
+    }
+
+    [Fact]
+    public void CreateAnalytics_OrdersSeriesByTotalExpenseDescending()
+    {
+        // 本番は OrderByDescending(e => e.Total) で並べる。昇順に積むと
+        // 「添字 0 が最小の支出者」という本番に無い並びの上で上位系列の意味を検査することになる
+        var analytics = CreateAnalytics(
+            seriesCount: AppConstants.AdminDashboardMaxSeries + 1, includeOtherSeries: true);
+
+        analytics.UsageSeries.Select(s => s.TotalExpense).Should()
+            .BeInDescendingOrder("上位系列は支出の多い順に並ぶ");
+        analytics.UsageSeries[0].TotalExpense.Should()
+            .BeGreaterThan(analytics.UsageSeries.Last().TotalExpense);
     }
 
     [Fact]
@@ -781,10 +820,11 @@ public class AdminDashboardViewModelTests
         vm.UsageTableRows.Select(r => r.SeriesName).Should()
             .Equal(new[] { "職員1", "職員2", "職員1", "職員2", "職員1", "職員2" });
 
-        // 値は棒の高さの元データそのもの（CreateAnalytics は m * 100 * i 円）
-        vm.UsageTableRows[0].Value.Should().Be(100);
-        vm.UsageTableRows[1].Value.Should().Be(200);
-        vm.UsageTableRows[5].Value.Should().Be(600);
+        // 値は棒の高さの元データそのもの（CreateAnalytics は先頭系列ほど大きい。
+        // 2 系列なら 職員1 = m * 200 円 / 職員2 = m * 100 円）
+        vm.UsageTableRows[0].Value.Should().Be(200);
+        vm.UsageTableRows[1].Value.Should().Be(100);
+        vm.UsageTableRows[5].Value.Should().Be(300);
     }
 
     [Fact]
