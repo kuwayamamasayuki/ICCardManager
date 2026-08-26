@@ -137,6 +137,20 @@ public class SummaryGeneratorBusTextTests : IDisposable
     }
 
     [Fact]
+    public void TryExtractBusStops_バスブロックが複数の摘要から全バス停を結合して取り出す()
+    {
+        // Issue #1904: 摘要が時系列（交互ブロック）になり、バスブロックは複数になり得る。
+        // 全ブロックのバス停名を摘要中の出現順（＝時系列順）に「、」で結合して返す。
+        ConfigureBusText("乗合自動車", "※");
+        var summary = SummaryGenerator.FormatBusSummary("天神三丁目～舞鶴一丁目") +
+                      "、鉄道（赤坂～天神）、" +
+                      SummaryGenerator.FormatBusSummary("那の川～渡辺通一丁目");
+
+        SummaryGenerator.TryExtractBusStops(summary, out var busStops).Should().BeTrue();
+        busStops.Should().Be("天神三丁目～舞鶴一丁目、那の川～渡辺通一丁目");
+    }
+
+    [Fact]
     public void GetBusStopExtractionPattern_正規表現メタ文字を含むラベルでも壊れない()
     {
         ConfigureBusText("バス(市営)", "★");

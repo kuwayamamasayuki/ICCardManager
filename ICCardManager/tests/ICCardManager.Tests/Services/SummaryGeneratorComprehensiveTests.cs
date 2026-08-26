@@ -2024,4 +2024,279 @@ public class SummaryGeneratorComprehensiveTests : IDisposable
     }
 
     #endregion
+
+    #region Issue #1904: 摘要の時系列（交互ブロック）表示
+
+    // 摘要は利用順（時系列）に「同一モードの連続区間（run）」単位で結合する。
+    // 従来は鉄道→バスの固定順だったため、バスが先の時系列でも鉄道が先頭に表示されていた。
+    // フィクスチャは SequenceNumber を持たないため、時系列は SortChronologically の
+    // Balance 降順（残額が多い＝先に利用）で表現する。入力リストは ICカード履歴の新しい順。
+
+    /// <summary>
+    /// Issue #1904 事例1: バス→鉄道の順に利用した場合、バスを先に表示する
+    /// </summary>
+    [Fact]
+    public void Issue1904_事例1_バスが先の時系列ではバスを先に表示する()
+    {
+        // Arrange: 1.バス（天神三丁目～舞鶴一丁目） → 2.鉄道（赤坂～天神）
+        var details = new List<LedgerDetail>
+        {
+            CreateRailwayUsage(new DateTime(2024, 12, 9), "赤坂", "天神", 210, 4290),
+            CreateBusUsage(new DateTime(2024, 12, 9), 230, 4500, busStops: "天神三丁目～舞鶴一丁目")
+        };
+
+        // Act
+        var result = _generator.Generate(details);
+
+        // Assert
+        result.Should().Be("バス（天神三丁目～舞鶴一丁目）、鉄道（赤坂～天神）");
+        _output.WriteLine($"Generate() = \"{result}\"");
+    }
+
+    /// <summary>
+    /// Issue #1904 事例2: バス停名の長い表記でもバスが先の時系列ではバスを先に表示する
+    /// </summary>
+    [Fact]
+    public void Issue1904_事例2_バス停名付きのバスが先の時系列ではバスを先に表示する()
+    {
+        // Arrange: 1.バス（榊田町バス停～博多駅筑紫口バス停） → 2.鉄道（博多～天神）
+        var details = new List<LedgerDetail>
+        {
+            CreateRailwayUsage(new DateTime(2024, 12, 9), "博多", "天神", 210, 4290),
+            CreateBusUsage(new DateTime(2024, 12, 9), 230, 4500, busStops: "榊田町バス停～博多駅筑紫口バス停")
+        };
+
+        // Act
+        var result = _generator.Generate(details);
+
+        // Assert
+        result.Should().Be("バス（榊田町バス停～博多駅筑紫口バス停）、鉄道（博多～天神）");
+        _output.WriteLine($"Generate() = \"{result}\"");
+    }
+
+    /// <summary>
+    /// 鉄道→バス→鉄道と利用した場合、利用順に3ブロックで表示する
+    /// </summary>
+    [Fact]
+    public void Issue1904_鉄道バス鉄道の交互利用_時系列順の3ブロックで表示する()
+    {
+        // Arrange: 1.鉄道（天神→博多） → 2.バス → 3.鉄道（西新→姪浜）
+        var details = new List<LedgerDetail>
+        {
+            CreateRailwayUsage(new DateTime(2024, 12, 9), "西新", "姪浜", 210, 4350),
+            CreateBusUsage(new DateTime(2024, 12, 9), 230, 4560, busStops: "天神～博多駅"),
+            CreateRailwayUsage(new DateTime(2024, 12, 9), "天神", "博多", 210, 4790)
+        };
+
+        // Act
+        var result = _generator.Generate(details);
+
+        // Assert
+        result.Should().Be("鉄道（天神～博多）、バス（天神～博多駅）、鉄道（西新～姪浜）");
+        _output.WriteLine($"Generate() = \"{result}\"");
+    }
+
+    /// <summary>
+    /// 仕様変更（Issue #1904）: 間にバスを挟む鉄道往復は run が分かれるため「往復」表記にしない。
+    /// 時系列忠実性を優先し、利用順の3ブロックで表示する。
+    /// </summary>
+    [Fact]
+    public void Issue1904_間にバスを挟む鉄道往復_往復表記なしの3ブロックで表示する()
+    {
+        // Arrange: 1.鉄道（天神→博多） → 2.バス → 3.鉄道（博多→天神）
+        var details = new List<LedgerDetail>
+        {
+            CreateRailwayUsage(new DateTime(2024, 12, 9), "博多", "天神", 210, 4350),
+            CreateBusUsage(new DateTime(2024, 12, 9), 230, 4560, busStops: "天神～博多駅"),
+            CreateRailwayUsage(new DateTime(2024, 12, 9), "天神", "博多", 210, 4790)
+        };
+
+        // Act
+        var result = _generator.Generate(details);
+
+        // Assert
+        result.Should().Be("鉄道（天神～博多）、バス（天神～博多駅）、鉄道（博多～天神）");
+        _output.WriteLine($"Generate() = \"{result}\"");
+    }
+
+    /// <summary>
+    /// 対のテスト: 連続する鉄道往復は run が分かれないため従来どおり「往復」表記を維持する
+    /// </summary>
+    [Fact]
+    public void Issue1904_連続する鉄道往復のあとにバス_往復表記を維持する()
+    {
+        // Arrange: 1.鉄道（天神→博多） → 2.鉄道（博多→天神） → 3.バス
+        var details = new List<LedgerDetail>
+        {
+            CreateBusUsage(new DateTime(2024, 12, 9), 230, 4350, busStops: "天神～博多駅"),
+            CreateRailwayUsage(new DateTime(2024, 12, 9), "博多", "天神", 210, 4580),
+            CreateRailwayUsage(new DateTime(2024, 12, 9), "天神", "博多", 210, 4790)
+        };
+
+        // Act
+        var result = _generator.Generate(details);
+
+        // Assert
+        result.Should().Be("鉄道（天神～博多 往復）、バス（天神～博多駅）");
+        _output.WriteLine($"Generate() = \"{result}\"");
+    }
+
+    /// <summary>
+    /// 明示グループ（GroupId）が時系列上非連続（間にバス）でも1単位として扱い、
+    /// グループ最古の位置に配置する（乗継統合・畳み込みの挙動は維持）
+    /// </summary>
+    [Fact]
+    public void Issue1904_GroupIdが間にバスを挟んで非連続_グループを1単位として最古位置に表示する()
+    {
+        // Arrange: 1.鉄道（天神→博多、G1） → 2.バス → 3.鉄道（博多→大橋、G1）
+        var rail1 = CreateRailwayUsage(new DateTime(2024, 12, 9), "天神", "博多", 210, 4790);
+        rail1.GroupId = 1;
+        var rail2 = CreateRailwayUsage(new DateTime(2024, 12, 9), "博多", "大橋", 210, 4350);
+        rail2.GroupId = 1;
+        var details = new List<LedgerDetail>
+        {
+            rail2,
+            CreateBusUsage(new DateTime(2024, 12, 9), 230, 4560, busStops: "天神～博多駅"),
+            rail1
+        };
+
+        // Act
+        var result = _generator.Generate(details);
+
+        // Assert: グループ内は乗継統合（天神～大橋）され、グループ最古（先頭）の位置に表示される
+        result.Should().Be("鉄道（天神～大橋）、バス（天神～博多駅）");
+        _output.WriteLine($"Generate() = \"{result}\"");
+    }
+
+    /// <summary>
+    /// バス停名未入力のバスが複数 run に分かれても、各 run にプレースホルダが表示され、
+    /// 未入力判定（HasIncompleteBusStop）が成立する
+    /// </summary>
+    [Fact]
+    public void Issue1904_未入力バスが複数runに分かれる_各runにプレースホルダが表示され未入力判定が成立する()
+    {
+        // Arrange: 1.バス（未入力） → 2.鉄道（天神→博多） → 3.バス（未入力）
+        var details = new List<LedgerDetail>
+        {
+            CreateBusUsage(new DateTime(2024, 12, 9), 230, 4350),
+            CreateRailwayUsage(new DateTime(2024, 12, 9), "天神", "博多", 210, 4560),
+            CreateBusUsage(new DateTime(2024, 12, 9), 230, 4790)
+        };
+
+        // Act
+        var result = _generator.Generate(details);
+
+        // Assert
+        result.Should().Be("バス（★）、鉄道（天神～博多）、バス（★）");
+        SummaryGenerator.HasIncompleteBusStop(result).Should().BeTrue();
+        _output.WriteLine($"Generate() = \"{result}\"");
+    }
+
+    /// <summary>
+    /// コードレビュー指摘: 日付をまたぐ統合済み台帳では別バッチ由来の rowid が日付と矛盾し得る。
+    /// ブロック順は rowid ではなく日付を第一キーに決めること。
+    /// </summary>
+    [Fact]
+    public void Issue1904_日付をまたぐ統合台帳_rowidが日付と矛盾しても日付順のブロックで表示する()
+    {
+        // Arrange: 12/1 の鉄道（rowid=2）と 12/2 のバス（rowid=10）。
+        // rowid 第一キーだと rowid=10 が「最古」と誤判定されバスが先頭になる
+        var rail = CreateRailwayUsage(new DateTime(2024, 12, 1), "天神", "博多", 210, 4790);
+        rail.SequenceNumber = 2;
+        var bus = CreateBusUsage(new DateTime(2024, 12, 2), 230, 4560, busStops: "天神～博多駅");
+        bus.SequenceNumber = 10;
+        var details = new List<LedgerDetail> { bus, rail };
+
+        // Act
+        var result = _generator.Generate(details);
+
+        // Assert: 日付順（12/1 鉄道 → 12/2 バス）
+        result.Should().Be("鉄道（天神～博多）、バス（天神～博多駅）");
+        _output.WriteLine($"Generate() = \"{result}\"");
+    }
+
+    /// <summary>
+    /// コードレビュー指摘: GroupId 混在のバス run は「グループ→未グループ」の順で出力されるため、
+    /// 同期（SyncBusStopsFromSummary）は時系列順ではなく生成側の出力順（GetBusStopEmissionOrder）で
+    /// 対応付ける。生成した摘要を同期に通すラウンドトリップで両者の一致を固定する。
+    /// </summary>
+    [Fact]
+    public void Issue1904_GroupId混在のバスrun_生成した摘要を同期すると各明細に元のバス停名が戻る()
+    {
+        // Arrange: 時系列は 未グループ(薬院大通～天神) → G1(博多～吉塚) → G1(天神～渡辺通)。
+        // 生成はグループ先行のため、摘要中の出現順は時系列と一致しない
+        var ungrouped = CreateBusUsage(new DateTime(2024, 12, 9), 230, 4790, busStops: "薬院大通～天神");
+        var grouped1 = CreateBusUsage(new DateTime(2024, 12, 9), 230, 4560, busStops: "博多～吉塚");
+        grouped1.GroupId = 1;
+        var grouped2 = CreateBusUsage(new DateTime(2024, 12, 9), 230, 4330, busStops: "天神～渡辺通");
+        grouped2.GroupId = 1;
+        var details = new List<LedgerDetail> { grouped2, grouped1, ungrouped };
+
+        // Act 1: 生成（グループ先行の出力順）
+        var summary = _generator.Generate(details);
+        summary.Should().Be("バス（博多～吉塚、天神～渡辺通、薬院大通～天神）");
+
+        // Act 2: バス停名を未入力に戻してから、生成した摘要で同期する
+        ungrouped.BusStops = "★";
+        grouped1.BusStops = "★";
+        grouped2.BusStops = "★";
+        var ledgers = new List<Ledger>
+        {
+            new() { Id = 1, Summary = summary, Details = details }
+        };
+        LedgerMergeService.SyncBusStopsFromSummary(ledgers);
+
+        // Assert: 各明細に元のバス停名が戻る（時系列順で対応付けるとすべて別の明細へずれる）
+        ungrouped.BusStops.Should().Be("薬院大通～天神");
+        grouped1.BusStops.Should().Be("博多～吉塚");
+        grouped2.BusStops.Should().Be("天神～渡辺通");
+        _output.WriteLine($"Generate() = \"{summary}\"");
+    }
+
+    /// <summary>
+    /// GenerateByDate 経路でも同じ時系列順（交互ブロック）で表示する
+    /// </summary>
+    [Fact]
+    public void Issue1904_GenerateByDate経路_バスが先の時系列ではバスを先に表示する()
+    {
+        // Arrange: 1.バス → 2.鉄道（赤坂～天神）（入力は ICカード履歴の新しい順）
+        var details = new List<LedgerDetail>
+        {
+            CreateRailwayUsage(new DateTime(2024, 12, 9), "赤坂", "天神", 210, 4290),
+            CreateBusUsage(new DateTime(2024, 12, 9), 230, 4500, busStops: "天神三丁目～舞鶴一丁目")
+        };
+
+        // Act
+        var results = _generator.GenerateByDate(details);
+
+        // Assert
+        results.Should().HaveCount(1);
+        results[0].Summary.Should().Be("バス（天神三丁目～舞鶴一丁目）、鉄道（赤坂～天神）");
+        OutputInputAndResult(details, results);
+    }
+
+    /// <summary>
+    /// GenerateByDate 経路でも交互3ブロックを時系列順に表示する
+    /// </summary>
+    [Fact]
+    public void Issue1904_GenerateByDate経路_鉄道バス鉄道の交互利用を時系列順に表示する()
+    {
+        // Arrange: 1.鉄道（天神→博多） → 2.バス → 3.鉄道（西新→姪浜）
+        var details = new List<LedgerDetail>
+        {
+            CreateRailwayUsage(new DateTime(2024, 12, 9), "西新", "姪浜", 210, 4350),
+            CreateBusUsage(new DateTime(2024, 12, 9), 230, 4560, busStops: "天神～博多駅"),
+            CreateRailwayUsage(new DateTime(2024, 12, 9), "天神", "博多", 210, 4790)
+        };
+
+        // Act
+        var results = _generator.GenerateByDate(details);
+
+        // Assert
+        results.Should().HaveCount(1);
+        results[0].Summary.Should().Be("鉄道（天神～博多）、バス（天神～博多駅）、鉄道（西新～姪浜）");
+        OutputInputAndResult(details, results);
+    }
+
+    #endregion
 }

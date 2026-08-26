@@ -70,7 +70,9 @@ namespace ICCardManager.Services
     /// </item>
     /// <item>
     /// <term>バス混在</term>
-    /// <description>鉄道（A駅～B駅）、バス（★）</description>
+    /// <description>鉄道（A駅～B駅）、バス（★） ※鉄道・バスのブロックは利用順（時系列）に
+    /// 並ぶため、バスが先なら「バス（★）、鉄道（A駅～B駅）」になる。鉄道→バス→鉄道のように
+    /// 交互に利用した場合はブロックも交互に並ぶ（Issue #1904）</description>
     /// </item>
     /// <item>
     /// <term>チャージ</term>
@@ -215,10 +217,11 @@ namespace ICCardManager.Services
         /// リテラルとして一致するようにするため。
         /// </para>
         /// <para>
-        /// 非アンカーの部分一致である点は従来のハードコードと同じ（「鉄道（…）、バス（…）」の
-        /// 混在摘要から後半だけを取り出すため）。抽出そのものは
-        /// <see cref="TryExtractBusStops"/> を使い、呼び出し側で <c>Regex.Match</c> を
-        /// 書き写さないこと。
+        /// 非アンカーの部分一致である点は従来のハードコードと同じ（鉄道と混在する摘要から
+        /// バス部分だけを取り出すため）。時系列摘要（Issue #1904）ではバスブロックが
+        /// 複数あり得るため、抽出そのものは全マッチを結合する
+        /// <see cref="TryExtractBusStops"/> を使い、呼び出し側で <c>Regex.Match</c>（先頭
+        /// 1 件のみ）を書き写さないこと。
         /// </para>
         /// <para>
         /// 汎用/固有の別: 交通系固有。
@@ -231,7 +234,9 @@ namespace ICCardManager.Services
         /// 摘要からバス停名部分を抽出（Issue #1818）
         /// </summary>
         /// <param name="summary">摘要文字列</param>
-        /// <param name="busStops">抽出したバス停名（「、」区切りの複数件を含む）。失敗時は空文字</param>
+        /// <param name="busStops">抽出したバス停名（「、」区切りの複数件を含む）。
+        /// バスブロックが複数ある場合（Issue #1904 の時系列摘要）は全ブロック分を
+        /// 摘要中の出現順（＝時系列順）に「、」で結合して返す。失敗時は空文字</param>
         /// <returns>抽出できた場合 true</returns>
         /// <remarks>
         /// 摘要の直接編集で <c>LedgerDetail.BusStops</c> が取り残される問題（Issue #983）の
@@ -239,9 +244,29 @@ namespace ICCardManager.Services
         /// </remarks>
         public static bool TryExtractBusStops(string? summary, out string busStops)
         {
-            var match = Regex.Match(summary ?? string.Empty, GetBusStopExtractionPattern());
-            busStops = match.Success ? match.Groups[1].Value : string.Empty;
-            return match.Success;
+            var blocks = ExtractBusStopBlocks(summary);
+            busStops = string.Join("、", blocks);
+            return blocks.Count > 0;
+        }
+
+        /// <summary>
+        /// 摘要からバス停名をブロック（「バス（…）」）単位で抽出する（Issue #1904）
+        /// </summary>
+        /// <param name="summary">摘要文字列</param>
+        /// <returns>各ブロックのバス停名を摘要中の出現順に並べたリスト。バスブロックが無ければ空</returns>
+        /// <remarks>
+        /// バス明細が 1 件の同期処理はブロック区切りを保ったまま先頭ブロックだけを
+        /// 書き戻す必要がある（結合テキスト「A～B、C～D」を 1 明細へ書き込むと
+        /// <see cref="ParseBusRoute"/> で解析できない値が台帳に残る）ため、
+        /// 結合前のブロック列を返す本メソッドを別に置く。
+        /// 汎用/固有の別: 交通系固有（バス混在表記）。
+        /// </remarks>
+        internal static List<string> ExtractBusStopBlocks(string? summary)
+        {
+            return Regex.Matches(summary ?? string.Empty, GetBusStopExtractionPattern())
+                .Cast<Match>()
+                .Select(m => m.Groups[1].Value)
+                .ToList();
         }
 
         /// <summary>
@@ -506,31 +531,109 @@ namespace ICCardManager.Services
         /// <summary>
         /// 利用（鉄道・バス）の摘要を生成
         /// </summary>
+        /// <remarks>
+        /// <para>
+        /// Issue #1904: 従来は鉄道→バスの固定順で結合していたため、バスが先の時系列でも
+        /// 摘要は鉄道が先頭になっていた。時系列順（利用順）に同一モードの連続区間（run）
+        /// 単位でブロック化し、「バス（X～Y）、鉄道（A駅～B駅）」のように利用順で結合する。
+        /// </para>
+        /// <para>
+        /// 往復・乗継統合は run 内でのみ働く（間にバスを挟む鉄道往復は run が分かれるため
+        /// 「往復」表記にならない。時系列忠実性を優先する設計判断）。
+        /// 明示グループ（GroupId）は <see cref="CoalesceExplicitGroups"/> で 1 単位として扱う。
+        /// </para>
+        /// </remarks>
         private string GenerateUsageSummary(List<LedgerDetail> usageDetails)
         {
-            var railwayTrips = usageDetails.Where(d => !d.IsBus).ToList();
-            var busTrips = usageDetails.Where(d => d.IsBus).ToList();
+            var sortedDetails = SortChronologically(usageDetails);
+            var runs = SplitIntoModeRuns(CoalesceExplicitGroups(sortedDetails));
 
             var summaryParts = new List<string>();
 
-            // 鉄道利用がある場合
-            if (railwayTrips.Count > 0)
+            foreach (var run in runs)
             {
-                var railwaySummary = GenerateRailwaySummary(railwayTrips);
-                if (!string.IsNullOrEmpty(railwaySummary))
+                if (run[0].IsBus)
                 {
-                    summaryParts.Add($"{_options.SummaryText.RailwayLabel}（{railwaySummary}）");
+                    summaryParts.Add(FormatBusSummary(GenerateBusSummary(run)));
+                }
+                else
+                {
+                    var railwaySummary = GenerateRailwaySummary(run);
+                    if (!string.IsNullOrEmpty(railwaySummary))
+                    {
+                        summaryParts.Add($"{_options.SummaryText.RailwayLabel}（{railwaySummary}）");
+                    }
                 }
             }
 
-            // バス利用がある場合
-            if (busTrips.Count > 0)
+            return string.Join("、", summaryParts);
+        }
+
+        /// <summary>
+        /// 明示グループ（GroupId）の明細を、グループ内で時系列最古の明細の位置へ隣接配置する（Issue #1904）
+        /// </summary>
+        /// <param name="sortedDetails">時系列順（古い順）にソート済みの明細リスト</param>
+        /// <remarks>
+        /// 時系列上非連続なグループ（間に別モードの利用を挟む）でも、利用者が「1つの利用」と
+        /// 指定した明細群（Issue #484 / #633 / #1816）が run 分割で分かれないようにする。
+        /// モードが混在するグループはモード別に分け、各モードの最古位置へ配置する
+        /// （鉄道とバスの摘要生成が別系統のため）。
+        /// 汎用/固有の別: 交通系固有（鉄道・バス混在の摘要組み立て）。
+        /// </remarks>
+        private static List<LedgerDetail> CoalesceExplicitGroups(List<LedgerDetail> sortedDetails)
+        {
+            if (!sortedDetails.Any(d => d.GroupId.HasValue))
             {
-                var busSummary = GenerateBusSummary(busTrips);
-                summaryParts.Add(FormatBusSummary(busSummary));
+                return sortedDetails;
             }
 
-            return string.Join("、", summaryParts);
+            var result = new List<LedgerDetail>(sortedDetails.Count);
+            var emittedGroups = new HashSet<(int GroupId, bool IsBus)>();
+
+            foreach (var detail in sortedDetails)
+            {
+                if (!detail.GroupId.HasValue)
+                {
+                    result.Add(detail);
+                    continue;
+                }
+
+                var key = (GroupId: detail.GroupId.Value, detail.IsBus);
+                if (!emittedGroups.Add(key))
+                {
+                    // 既にグループ最古の位置でまとめて追加済み
+                    continue;
+                }
+
+                result.AddRange(sortedDetails.Where(d =>
+                    d.GroupId == key.GroupId && d.IsBus == key.IsBus));
+            }
+
+            return result;
+        }
+
+        /// <summary>
+        /// 隣接する同一モード（<see cref="LedgerDetail.IsBus"/>）の明細を連続区間（run）へ分割する（Issue #1904）
+        /// </summary>
+        /// <param name="details">時系列順に並んだ明細リスト</param>
+        /// <returns>時系列順の run のリスト。各 run は同一モードの明細のみを含む</returns>
+        /// <remarks>汎用/固有の別: 交通系固有（鉄道・バス混在の摘要組み立て）。</remarks>
+        private static List<List<LedgerDetail>> SplitIntoModeRuns(List<LedgerDetail> details)
+        {
+            var runs = new List<List<LedgerDetail>>();
+
+            foreach (var detail in details)
+            {
+                var lastRun = runs.Count > 0 ? runs[runs.Count - 1] : null;
+                if (lastRun == null || lastRun[0].IsBus != detail.IsBus)
+                {
+                    lastRun = new List<LedgerDetail>();
+                    runs.Add(lastRun);
+                }
+                lastRun.Add(detail);
+            }
+
+            return runs;
         }
 
         /// <summary>
@@ -573,46 +676,107 @@ namespace ICCardManager.Services
                 return _options.SummaryText.PointRedemption;
             }
 
-            var railwayTrips = detailList.Where(d => !d.IsCharge && !d.IsPointRedemption && !IsImplicitPointRedemption(d) && !d.IsBus).ToList();
-            var busTrips = detailList.Where(d => !d.IsCharge && !d.IsPointRedemption && !IsImplicitPointRedemption(d) && d.IsBus).ToList();
+            // Issue #1904: 鉄道/バスの二分割は GenerateUsageSummary に一本化
+            //（固定順の結合をやめ、時系列順の run 単位で結合する）
+            var usageDetails = detailList
+                .Where(d => !d.IsCharge && !d.IsPointRedemption && !IsImplicitPointRedemption(d))
+                .ToList();
 
-            var summaryParts = new List<string>();
-
-            // 鉄道利用がある場合
-            if (railwayTrips.Count > 0)
-            {
-                var railwaySummary = GenerateRailwaySummary(railwayTrips);
-                if (!string.IsNullOrEmpty(railwaySummary))
-                {
-                    summaryParts.Add($"{_options.SummaryText.RailwayLabel}（{railwaySummary}）");
-                }
-            }
-
-            // バス利用がある場合
-            if (busTrips.Count > 0)
-            {
-                var busSummary = GenerateBusSummary(busTrips);
-                summaryParts.Add(FormatBusSummary(busSummary));
-            }
-
-            return string.Join("、", summaryParts);
+            return GenerateUsageSummary(usageDetails);
         }
 
         /// <summary>
         /// 利用履歴をSequenceNumber/UseDate/Balanceで時系列順（古い順）にソート
         /// </summary>
         /// <remarks>
+        /// <para>
         /// Issue #548, #880: FeliCa互換でrowid（=SequenceNumber）が小さいほど新しい（後に利用した）。
         /// DESCで大きいrowid（古い）を先にして時系列順に。
         /// SequenceNumberが0（未設定）の場合はBalance降順を使用。
+        /// </para>
+        /// <para>
+        /// Issue #1904（コードレビュー指摘）: 第一キーは rowid ではなく UseDate。
+        /// 単一バッチ（1回の返却で読み取った履歴）では日付昇順と rowid 降順が一致するため
+        /// 等価だが、**統合済み台帳（Issue #837 / #1458）では別バッチ由来の rowid が日付と
+        /// 無関係に交錯し得る**。日付をまたぐ統合行で rowid を第一キーにすると、摘要の
+        /// ブロック順・バス停対応付けが日付と矛盾する。同一日付内は従来どおり rowid 降順が
+        /// 第一（同日の時刻はすべて 00:00 で保存され、残高チェーンは循環し得るため。
+        /// business-logic.md「同一日内の順序は id では決まらない」の裏面として、同日内の
+        /// タイブレークは rowid が最も強い）。
+        /// </para>
         /// </remarks>
-        private static List<LedgerDetail> SortChronologically(List<LedgerDetail> trips)
+        internal static List<LedgerDetail> SortChronologically(List<LedgerDetail> trips)
         {
             return trips
-                .OrderByDescending(t => t.SequenceNumber > 0 ? t.SequenceNumber : int.MinValue)
-                .ThenBy(t => t.UseDate ?? DateTime.MaxValue)
+                .OrderBy(t => t.UseDate ?? DateTime.MaxValue)
+                .ThenByDescending(t => t.SequenceNumber > 0 ? t.SequenceNumber : int.MinValue)
                 .ThenByDescending(t => t.Balance ?? 0)
                 .ToList();
+        }
+
+        /// <summary>
+        /// 摘要を再生成したときにバス停名が現れる順序で、バス明細を返す（Issue #1904）
+        /// </summary>
+        /// <param name="details">台帳の明細リスト（順序は問わない）</param>
+        /// <returns>バス明細のみを、摘要中のバス停名の出現順に並べたリスト</returns>
+        /// <remarks>
+        /// <para>
+        /// 摘要からバス停名を抽出して明細へ書き戻す同期処理
+        /// （<c>LedgerMergeService.SyncBusStopsFromSummary</c> /
+        /// <c>LedgerRowEditViewModel.SyncBusStopsFromSummaryAsync</c>）は、抽出した
+        /// バス停名（摘要中の出現順）と明細を位置で対応付ける。その対応が成立するのは
+        /// **明細の並びが生成側の出力順と一致するときだけ**なので、並び順の定義を
+        /// 消費側に書き写さず、生成パイプラインと同じ手順
+        /// （<see cref="SortChronologically"/> → <see cref="CoalesceExplicitGroups"/> →
+        /// <see cref="SplitIntoModeRuns"/> → run 内の GroupId 優先順）を本メソッドに集約する。
+        /// </para>
+        /// <para>
+        /// GroupId を含む run では <see cref="GenerateBusSummaryWithGroupId"/> と同じく
+        /// 「グループ（最古 UseDate 順、各グループ内は時系列）→ 未グループ」の順になる。
+        /// 往復・乗継統合（<see cref="BuildRouteSummary"/>）が起きた場合は摘要側の
+        /// バス停数が明細数より少なくなるが、同期側の件数一致ガードが書き戻しを
+        /// 抑止するため、本メソッドは統合前の順序を返せば足りる。
+        /// 汎用/固有の別: 交通系固有（バス混在表記）。
+        /// </para>
+        /// </remarks>
+        internal static List<LedgerDetail> GetBusStopEmissionOrder(IEnumerable<LedgerDetail> details)
+        {
+            var usageDetails = details
+                .Where(d => !d.IsCharge && !d.IsPointRedemption && !IsImplicitPointRedemption(d))
+                .ToList();
+
+            var runs = SplitIntoModeRuns(CoalesceExplicitGroups(SortChronologically(usageDetails)));
+
+            var result = new List<LedgerDetail>();
+            foreach (var run in runs)
+            {
+                if (!run[0].IsBus)
+                {
+                    continue;
+                }
+
+                var sortedRun = SortChronologically(run);
+                if (sortedRun.Any(t => t.GroupId.HasValue))
+                {
+                    // GenerateBusSummaryWithGroupId と同じ出力順
+                    var groupedTrips = sortedRun
+                        .Where(t => t.GroupId.HasValue)
+                        .GroupBy(t => t.GroupId!.Value)
+                        .OrderBy(g => g.Min(t => t.UseDate ?? DateTime.MaxValue));
+                    foreach (var group in groupedTrips)
+                    {
+                        result.AddRange(SortChronologically(group.ToList()));
+                    }
+
+                    result.AddRange(sortedRun.Where(t => !t.GroupId.HasValue));
+                }
+                else
+                {
+                    result.AddRange(sortedRun);
+                }
+            }
+
+            return result;
         }
 
         /// <summary>

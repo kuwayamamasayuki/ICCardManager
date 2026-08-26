@@ -937,22 +937,28 @@ namespace ICCardManager.ViewModels
         /// </remarks>
         private async Task SyncBusStopsFromSummaryAsync(Ledger ledger)
         {
-            var busDetails = ledger.Details.Where(d => d.IsBus).ToList();
+            // Issue #1904: バス停名（摘要中の出現順）との位置対応付けは、バス明細を
+            // 生成側の出力順（GetBusStopEmissionOrder）で並べて初めて成立する
+            //（並び順の定義を消費側に書き写さない。LedgerMergeService.SyncBusStopsFromSummary と同じ）
+            var busDetails = SummaryGenerator.GetBusStopEmissionOrder(ledger.Details);
             if (busDetails.Count == 0) return;
 
             // Issue #1818: 抽出パターンは組織設定 BusLabel から導出する
-            if (!SummaryGenerator.TryExtractBusStops(ledger.Summary, out var busStopText)) return;
+            var blocks = SummaryGenerator.ExtractBusStopBlocks(ledger.Summary);
+            if (blocks.Count == 0) return;
 
             var busStopUpdates = new List<(int SequenceNumber, string BusStops)>();
 
             if (busDetails.Count == 1)
             {
-                busStopUpdates.Add((busDetails[0].SequenceNumber, busStopText));
+                // 先頭ブロックのみ書き戻す（従来挙動）。複数ブロックの結合テキストを
+                // 1 明細へ書き込むと「A～B、C～D」となり ParseBusRoute で解析できない
+                busStopUpdates.Add((busDetails[0].SequenceNumber, blocks[0]));
             }
             else
             {
                 // 複数件のバス利用: 「、」で分割してDetailに対応付け
-                var parts = busStopText.Split('、');
+                var parts = string.Join("、", blocks).Split('、');
                 if (parts.Length == busDetails.Count)
                 {
                     for (int i = 0; i < parts.Length; i++)
