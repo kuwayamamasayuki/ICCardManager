@@ -5,6 +5,7 @@ using System.Linq;
 using System.Threading.Tasks;
 using ClosedXML.Excel;
 using FluentAssertions;
+using ICCardManager.Common;
 using ICCardManager.Common.Charting;
 using ICCardManager.Dtos;
 using ICCardManager.Services;
@@ -24,6 +25,24 @@ public class AdminDashboardExcelExportServiceTests : IDisposable
 {
     /// <summary>テストデータの「その他」系列が集約した人数（Issue #1858）</summary>
     private const int OtherAggregatedCount = 3;
+
+    /// <summary>月別利用額シートで最初の系列が入る列（1 列目は年月）</summary>
+    private const int FirstSeriesColumn = 2;
+
+    /// <summary>
+    /// 集約（「その他」）系列の列。フィクスチャの系列数から導く（Issue #1888）。
+    /// </summary>
+    /// <remarks>
+    /// 上限の定数から導くと、フィクスチャ側が上位 5 本のリテラルのままなので両者が結合せず、
+    /// 上限を変えたときに列番号だけが動いて「見出しが違う」という的外れな落ち方をする。
+    /// フィクスチャが本番の形（上位 <see cref="AppConstants.AdminDashboardMaxSeries"/> 本 + 集約 1 本）
+    /// であること自体は <c>CreateAnalytics_UsesTheProductionSeriesShape</c> が別に表明する。
+    /// </remarks>
+    private static readonly int OtherSeriesColumn =
+        FirstSeriesColumn + CreateAnalytics().UsageSeries.Count - 1;
+
+    /// <summary>合計列（系列の右端の次）</summary>
+    private static readonly int TotalColumn = OtherSeriesColumn + 1;
 
     /// <summary>
     /// 集約（「その他」）系列のフィクスチャ。名前は DTO が件数から導出する（Issue #1883）。
@@ -128,6 +147,10 @@ public class AdminDashboardExcelExportServiceTests : IDisposable
                     UnusedDays = 4
                 }
             },
+            // 本番の AdminDashboardService.BuildUsageSeries は上位
+            // AppConstants.AdminDashboardMaxSeries 本を切り出したうえで集約系列を足すため、
+            // 集約系列の背後には必ず上位 5 本が並ぶ。上位 1 本 + 集約という構成は
+            // 実運用では起き得ない（Issue #1888）
             UsageSeries = new[]
             {
                 new MonthlyUsageSeries
@@ -135,6 +158,30 @@ public class AdminDashboardExcelExportServiceTests : IDisposable
                     Name = "福岡 太郎",
                     MonthlyExpenses = new[] { 1000, 2000, 3000 },
                     TotalExpense = 6000
+                },
+                new MonthlyUsageSeries
+                {
+                    Name = "博多 花子",
+                    MonthlyExpenses = new[] { 900, 900, 900 },
+                    TotalExpense = 2700
+                },
+                new MonthlyUsageSeries
+                {
+                    Name = "天神 次郎",
+                    MonthlyExpenses = new[] { 800, 700, 600 },
+                    TotalExpense = 2100
+                },
+                new MonthlyUsageSeries
+                {
+                    Name = "中洲 三郎",
+                    MonthlyExpenses = new[] { 500, 500, 500 },
+                    TotalExpense = 1500
+                },
+                new MonthlyUsageSeries
+                {
+                    Name = "大濠 四郎",
+                    MonthlyExpenses = new[] { 400, 300, 200 },
+                    TotalExpense = 900
                 },
                 CreateOtherSeries(OtherAggregatedCount, new[] { 500, 0, 100 }, 600)
             },
@@ -303,6 +350,23 @@ public class AdminDashboardExcelExportServiceTests : IDisposable
     }
 
     [Fact]
+    public void CreateAnalytics_UsesTheProductionSeriesShape()
+    {
+        // 本番の AdminDashboardService.BuildUsageSeries は上位
+        // AppConstants.AdminDashboardMaxSeries 本を切り出したうえで集約系列を足す。
+        // フィクスチャがこの形を外れると、実運用で起きない状態の上で Excel の体裁を検査することになる
+        // （.claude/rules/testing.md「モック構成が実 DB で成立し得るかを確かめる」、Issue #1888）
+        var series = CreateAnalytics().UsageSeries;
+
+        series.Should().HaveCount(AppConstants.AdminDashboardMaxSeries + 1);
+        series.Count(s => s.IsOther).Should().Be(1);
+        series.Last().IsOther.Should().BeTrue();
+        series.Take(AppConstants.AdminDashboardMaxSeries).Should().OnlyContain(s => !s.IsOther);
+        series.Select(s => s.TotalExpense).Should()
+            .BeInDescendingOrder("本番は支出の多い順に並べる（OrderByDescending）");
+    }
+
+    [Fact]
     public async Task ExportAsync_MonthlyUsageSheet_LaysOutMonthsAsRowsAndStaffAsColumns()
     {
         using var workbook = await ExportAndOpenAsync(CreateStatus(CreateCard()), CreateAnalytics());
@@ -310,11 +374,12 @@ public class AdminDashboardExcelExportServiceTests : IDisposable
         var sheet = workbook.Worksheet(AdminDashboardExcelExportService.MonthlyUsageSheetName);
         sheet.Cell(1, 1).GetString().Should().Be("年月");
         sheet.Cell(1, 2).GetString().Should().Be("福岡 太郎");
+        sheet.Cell(1, OtherSeriesColumn - 1).GetString().Should().Be("大濠 四郎");
         // 集約系列の見出しは画面の凡例と同じ名前（人数付き）。Issue #1858
-        sheet.Cell(1, 3).GetString()
+        sheet.Cell(1, OtherSeriesColumn).GetString()
             .Should().Be(ChartSeriesNameFormatter.BuildOtherSeriesName(OtherAggregatedCount));
-        sheet.Cell(1, 3).GetString().Should().NotBe("その他");
-        sheet.Cell(1, 4).GetString().Should().Be("合計");
+        sheet.Cell(1, OtherSeriesColumn).GetString().Should().NotBe("その他");
+        sheet.Cell(1, TotalColumn).GetString().Should().Be("合計");
         sheet.Cell(2, 1).GetString().Should().Be("2026/06");
         sheet.Cell(2, 2).GetDouble().Should().Be(1000);
     }
@@ -325,8 +390,10 @@ public class AdminDashboardExcelExportServiceTests : IDisposable
         using var workbook = await ExportAndOpenAsync(CreateStatus(CreateCard()), CreateAnalytics());
 
         var sheet = workbook.Worksheet(AdminDashboardExcelExportService.MonthlyUsageSheetName);
-        sheet.Cell(2, 4).GetDouble().Should().Be(1500);
-        sheet.Cell(4, 4).GetDouble().Should().Be(3100);
+        // 2026/06: 1000 + 900 + 800 + 500 + 400 +（その他）500
+        sheet.Cell(2, TotalColumn).GetDouble().Should().Be(4100);
+        // 2026/08: 3000 + 900 + 600 + 500 + 200 +（その他）100
+        sheet.Cell(4, TotalColumn).GetDouble().Should().Be(5300);
     }
 
     [Fact]
