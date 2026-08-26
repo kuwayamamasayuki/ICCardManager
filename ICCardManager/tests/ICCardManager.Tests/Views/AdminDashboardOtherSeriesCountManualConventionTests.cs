@@ -53,6 +53,34 @@ public class AdminDashboardOtherSeriesCountManualConventionTests
     private const string PersonCountAssertion = "職員の人数";
 
     /// <summary>
+    /// <see cref="PersonCountAssertion"/> の直後に来たら「断定ではなく打ち消し」とみなす語。
+    /// </summary>
+    /// <remarks>
+    /// 語を含むかどうかだけで判定すると、<b>規約が要求している書き方そのもの</b>
+    /// （「N は職員の人数ではありません」「N は職員の人数と一致しないことがあります」）が
+    /// 違反として検出される（<c>.claude/rules/development-conventions.md</c> #1786
+    /// 「禁止語がコメントに現れるかを単純な部分文字列一致で書かない。否定語を含む行を除外し…」／
+    /// Issue #1692 の「極性の反転」）。誤検出はガード自体の寿命を縮めるため、
+    /// <b>出現ごとに</b>直後の打ち消しを見る。
+    /// <para>
+    /// 除外は<b>直後に限る</b>。行のどこかに打ち消しがあれば見逃す形にすると、
+    /// 「カッコ内は合算した職員の人数です。実際とは一致しないことがあります」のような
+    /// 断定と打ち消しの併記まで通り、対のもう一方（但し書きの存在）と揃って空振りする。
+    /// </para>
+    /// </remarks>
+    private static readonly string[] NegationSuffixes =
+    {
+        "ではありません",
+        "ではない",
+        "ではなく",
+        "でなく",
+        "と一致しません",
+        "と一致しない",
+        "とは限りません",
+        "とは限らない",
+    };
+
+    /// <summary>
     /// 但し書きが備えるべき要素。両方向の近似と、値の性格（目安であること）。
     /// </summary>
     public static IEnumerable<object[]> RequiredCaveatPhrases()
@@ -109,40 +137,46 @@ public class AdminDashboardOtherSeriesCountManualConventionTests
     // 断定と但し書きの併記。「但し書きの存在」の表明はこの行で満たされてしまうため、
     // 対のもう一方（断定表現の不在）が守る唯一の穴がここにあたる。
     [InlineData("カッコ内は合算した職員の人数です（ただし目安です）", true)]
+    // 打ち消しを伴う言及は但し書きであって断定ではない。除外しないと、この Issue が
+    // 要求している書き方そのもので赤になり、次に読む人をガードの弱体化へ誘導する（#1786）。
+    [InlineData("N は職員の人数ではありません", false)]
+    [InlineData("N は職員の人数と一致しないことがあります", false)]
     public void 検出ロジック_実人数と断定する表現だけを違反とすること(string line, bool expectedViolation)
     {
         FindPersonCountAssertionLines(line).Any().Should().Be(expectedViolation);
     }
 
     /// <summary>
-    /// 本番の書式から、マニュアルが使う表記（件数を <c>N</c> に置いた形）を導出する。
+    /// 本番の書式から、マニュアルが使う表記（件数を <c>N</c> に置いた形）を導出する
+    /// （実体は <see cref="ChartSeriesLabelDocNotation"/>。Issue #1890 の設計書検査と共有）。
     /// </summary>
-    /// <remarks>
-    /// 鉤括弧は<b>マニュアル側の引用記法</b>であってラベルの一部ではないため、ここで付ける。
-    /// </remarks>
     private static string BuildExpectedLabelNotation()
-    {
-        // 1 桁の件数を渡し、その桁「だけ」を N へ置き換える。全置換にすると、
-        // 将来ラベルの固定部に同じ数字が入ったときに期待値が黙って壊れる。
-        const int sampleCount = 3;
-        var actual = ChartSeriesNameFormatter.BuildOtherSeriesName(sampleCount);
-        var countText = sampleCount.ToString();
-        var countAt = actual.IndexOf(countText, StringComparison.Ordinal);
-        if (countAt < 0)
-        {
-            throw new InvalidOperationException(
-                $"集約系列名「{actual}」に件数 {countText} が現れません。"
-                + "書式を変えた場合は本テストの導出方法も更新してください。");
-        }
+        => ChartSeriesLabelDocNotation.BuildOtherSeriesLabelNotation();
 
-        return "「" + actual.Remove(countAt, countText.Length).Insert(countAt, "N") + "」";
-    }
-
-    /// <summary>N を実人数と断定している行を返す。</summary>
+    /// <summary>N を実人数と断定している行を返す（打ち消しを伴う言及は含めない）。</summary>
     private static IReadOnlyList<string> FindPersonCountAssertionLines(string text)
         => text.Split('\n')
-            .Where(line => line.Contains(PersonCountAssertion))
+            .Where(HasUnnegatedPersonCountAssertion)
             .ToList();
+
+    /// <summary>
+    /// 行の中に「打ち消しを伴わない」<see cref="PersonCountAssertion"/> の出現があるかを判定する。
+    /// </summary>
+    private static bool HasUnnegatedPersonCountAssertion(string line)
+    {
+        for (var i = line.IndexOf(PersonCountAssertion, StringComparison.Ordinal);
+             i >= 0;
+             i = line.IndexOf(PersonCountAssertion, i + PersonCountAssertion.Length, StringComparison.Ordinal))
+        {
+            var rest = line.Substring(i + PersonCountAssertion.Length);
+            if (!NegationSuffixes.Any(suffix => rest.StartsWith(suffix, StringComparison.Ordinal)))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
 
     private static string ExtractTargetSection()
         => MarkdownDocumentInspection.ExtractSection(AdministratorManual.Value, TargetHeading);

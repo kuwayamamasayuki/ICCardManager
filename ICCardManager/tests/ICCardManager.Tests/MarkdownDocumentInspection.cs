@@ -28,8 +28,23 @@ internal static class MarkdownDocumentInspection
     /// 見出しが見つからないとき。見出しの改名で抽出が空になり、
     /// 検査が空振りしたまま緑になることを防ぐ（Issue #1786 の作法）。
     /// </exception>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="heading"/> が <c>#</c> で始まらないとき。見出しレベルが 0 になると
+    /// <see cref="IsHeadingAtOrAbove"/> がどの行でも false を返し、節の終わりを検出できないまま
+    /// <b>文書の末尾までを「その節」として返す</b>。「禁止表現の不在」は他節の本文まで巻き込んで
+    /// 誤検出し、「必要な記述の存在」は他節の本文で<b>空振りしたまま緑</b>になる
+    /// ― 本ヘルパーが防ごうとしている状態そのもの。呼び出し側の誤りとして弾く。
+    /// </exception>
     public static string ExtractSection(string markdown, string heading)
     {
+        if (heading == null || !heading.StartsWith("#", StringComparison.Ordinal))
+        {
+            throw new ArgumentException(
+                "見出しは「#」で始まる完全な形（例: \"#### 9.4.3 利用推移タブ\"）で指定してください。"
+                + $"指定値: 「{heading}」",
+                nameof(heading));
+        }
+
         var lines = markdown.Replace("\r\n", "\n").Split('\n');
         var startIndex = Array.FindIndex(lines, line => line.Trim() == heading);
         if (startIndex < 0)

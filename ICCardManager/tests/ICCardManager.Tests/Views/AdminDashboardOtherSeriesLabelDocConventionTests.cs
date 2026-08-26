@@ -127,32 +127,11 @@ public class AdminDashboardOtherSeriesLabelDocConventionTests
     }
 
     /// <summary>
-    /// 本番の書式から、設計書が使う表記（件数を <c>N</c> に置いた形）を導出する。
+    /// 本番の書式から、設計書が使う表記（件数を <c>N</c> に置いた形）を導出する
+    /// （実体は <see cref="ChartSeriesLabelDocNotation"/>。Issue #1892 の管理者マニュアル検査と共有）。
     /// </summary>
-    /// <remarks>
-    /// 鉤括弧は<b>設計書側の引用記法</b>であってラベルの一部ではないため、ここで付ける
-    /// （本番の書式には含まれない。この 1 文字だけがテスト側の表記で、それ以外の
-    /// 基底名・全角括弧・区切り・「名」の有無は
-    /// <see cref="ChartSeriesNameFormatter.BuildOtherSeriesName(int)"/> から導出する）。
-    /// </remarks>
     private static string BuildExpectedLabelNotation()
-    {
-        // 1 桁の件数を渡し、その桁「だけ」を設計書のプレースホルダ N へ置き換える。
-        // 全置換にすると、将来ラベルの固定部に同じ数字が入ったとき（「上位 3 位以外」等）に
-        // 期待値が黙って壊れる。
-        const int sampleCount = 3;
-        var actual = ChartSeriesNameFormatter.BuildOtherSeriesName(sampleCount);
-        var countText = sampleCount.ToString();
-        var countAt = actual.IndexOf(countText, StringComparison.Ordinal);
-        if (countAt < 0)
-        {
-            throw new InvalidOperationException(
-                $"集約系列名「{actual}」に件数 {countText} が現れません。"
-                + "書式を変えた場合は本テストの導出方法も更新してください。");
-        }
-
-        return "「" + actual.Remove(countAt, countText.Length).Insert(countAt, "N") + "」";
-    }
+        => ChartSeriesLabelDocNotation.BuildOtherSeriesLabelNotation();
 
     /// <summary>
     /// 人数を伴わない旧ラベルを含む行を返す。
