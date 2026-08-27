@@ -194,8 +194,8 @@ namespace ICCardManager.Services
         /// </para>
         /// <para>
         /// 空文字・空白のみの設定は既定値へフォールバックする。空ラベルを許すと
-        /// <see cref="GetBusStopExtractionPattern"/> が <c>（(.+?)）</c> に退化し、
-        /// 鉄道の括弧（「鉄道（A駅～B駅）」）まで拾ってバス停名として取り込むため
+        /// <see cref="GetBusStopExtractionPattern"/> がラベルを失って全角括弧だけの
+        /// パターンに退化し、鉄道の括弧（「鉄道（A駅～B駅）」）まで拾ってバス停名として取り込むため
         /// （<see cref="IsMidYearCarryoverSummary"/> の不正正規表現フォールバックと同じ方針）。
         /// </para>
         /// <para>
@@ -263,11 +263,20 @@ namespace ICCardManager.Services
         /// 1 件のみ）を書き写さないこと。
         /// </para>
         /// <para>
+        /// <b>本文は全角括弧を 1 段だけ入れ子にできる</b>（Issue #1905）。往復の端点を
+        /// 「天神日銀前（天神中央郵便局前）」と併記するため、
+        /// 従来の非貪欲な <c>（(.+?)）</c> では最初の <c>）</c> で切れて
+        /// 「天神日銀前（天神中央郵便局前」というバス停名が取り出されていた。
+        /// 本文は「括弧以外の文字」または「入れ子の全角括弧 1 組」の連なりとして表現し、
+        /// 最上位の <c>）</c> でのみ終端させる。<see cref="FormatRoundTrip"/> が
+        /// 生成する併記はちょうど 1 段なので、これで生成物と抽出対象が対応する。
+        /// </para>
+        /// <para>
         /// 汎用/固有の別: 交通系固有。
         /// </para>
         /// </remarks>
         public static string GetBusStopExtractionPattern()
-            => $"{Regex.Escape(BusLabel)}（(.+?)）";
+            => $"{Regex.Escape(BusLabel)}（((?:[^（）]|（[^（）]*）)+)）";
 
         /// <summary>
         /// 摘要からバス停名部分を抽出（Issue #1818）
@@ -923,7 +932,7 @@ namespace ICCardManager.Services
                 var roundTrips = DetectRoundTrips(consolidatedAsPairs);
                 if (roundTrips.Count > 0)
                 {
-                    var roundTripStrings = roundTrips.Select(rt => $"{rt.Start}～{rt.End}{_options.SummaryText.RoundTripSuffix}");
+                    var roundTripStrings = roundTrips.Select(FormatRoundTrip);
                     var remainingRoutes = GetRemainingRoutes(consolidatedAsPairs, roundTrips);
 
                     var allRoutes = roundTripStrings.Concat(
@@ -935,6 +944,73 @@ namespace ICCardManager.Services
 
             // 往復なしの場合は統合済みの経路を表示
             return string.Join("、", consolidatedRoutes.Select(r => $"{r.Start}～{r.End}"));
+        }
+
+        /// <summary>
+        /// 往復 1 組を摘要の表記へ整形する（Issue #1905）
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// 端点の名前が往路と復路で異なる場合（同一視グループへ登録された別名の
+        /// 駅・バス停で乗降した場合）は「往路の名前（復路の名前）」と併記する。
+        /// 例: 天神日銀前で乗車し、帰りは道路を挟んだ天神中央郵便局前で降車した往復は
+        /// 「天神日銀前（天神中央郵便局前）～下原中央 往復」。
+        /// </para>
+        /// <para>
+        /// 併記するのは、6 年保存される台帳から<b>実際に乗降した場所</b>が失われないようにするため。
+        /// 同一視は「往復としてまとめてよい」という判断にだけ使い、
+        /// どちらか一方の名前で代表させることはしない。
+        /// </para>
+        /// <para>
+        /// 名前が完全に一致する通常の往復では括弧を付けない（「A～B 往復」のまま）。
+        /// </para>
+        /// </remarks>
+        private string FormatRoundTrip(RoundTrip roundTrip)
+        {
+            var start = FormatEndpoint(roundTrip.Start, roundTrip.ReturnExit);
+            var end = FormatEndpoint(roundTrip.End, roundTrip.ReturnEntry);
+            return $"{start}～{end}{_options.SummaryText.RoundTripSuffix}";
+        }
+
+        /// <summary>
+        /// 往復の端点を「往路の名前（復路の名前）」形式へ整形する（Issue #1905）
+        /// </summary>
+        private static string FormatEndpoint(string outboundName, string returnName)
+            => string.Equals(outboundName, returnName, StringComparison.Ordinal)
+                ? outboundName
+                : $"{outboundName}（{returnName}）";
+
+        /// <summary>
+        /// 検出した往復 1 組（Issue #1905）
+        /// </summary>
+        /// <remarks>
+        /// <see cref="Start"/> / <see cref="End"/> は往路の乗車地・降車地で、
+        /// 往復の同一性（<see cref="GetRemainingRoutes"/> の消費枠のキー）はこの 2 つで決まる。
+        /// <see cref="ReturnEntry"/> / <see cref="ReturnExit"/> は復路の乗車地・降車地で、
+        /// 同一視グループにより <see cref="End"/> / <see cref="Start"/> と<b>同一視されるが
+        /// 名前は異なり得る</b>。摘要への併記にのみ使う。
+        /// </remarks>
+        private readonly struct RoundTrip
+        {
+            public RoundTrip(string start, string end, string returnEntry, string returnExit)
+            {
+                Start = start;
+                End = end;
+                ReturnEntry = returnEntry;
+                ReturnExit = returnExit;
+            }
+
+            /// <summary>往路の乗車地</summary>
+            public string Start { get; }
+
+            /// <summary>往路の降車地（折り返し点）</summary>
+            public string End { get; }
+
+            /// <summary>復路の乗車地（<see cref="End"/> と同一視される）</summary>
+            public string ReturnEntry { get; }
+
+            /// <summary>復路の降車地（<see cref="Start"/> と同一視される）</summary>
+            public string ReturnExit { get; }
         }
 
         /// <summary>
@@ -1179,9 +1255,9 @@ namespace ICCardManager.Services
         /// - 逆順の場合: [(博多,薬院), (薬院,博多)] → "博多～薬院 往復" (不正)
         /// </para>
         /// </remarks>
-        private List<(string Start, string End)> DetectRoundTrips(List<(string Entry, string Exit)> routes)
+        private List<RoundTrip> DetectRoundTrips(List<(string Entry, string Exit)> routes)
         {
-            var roundTrips = new List<(string Start, string End)>();
+            var roundTrips = new List<RoundTrip>();
             var usedIndices = new HashSet<int>();
 
             for (int i = 0; i < routes.Count; i++)
@@ -1206,7 +1282,14 @@ namespace ICCardManager.Services
                     if (AreTransferStations(routes[i].Entry, routes[j].Exit)
                         && AreTransferStations(routes[i].Exit, routes[j].Entry))
                     {
-                        roundTrips.Add((routes[i].Entry, routes[i].Exit));
+                        // Issue #1905: 復路の乗降地名も持ち回る。同一視グループにより
+                        // 往路の端点とは名前が異なり得るため、摘要へ併記して
+                        // 実際に乗降した場所を台帳から失わないようにする
+                        roundTrips.Add(new RoundTrip(
+                            routes[i].Entry,
+                            routes[i].Exit,
+                            routes[j].Entry,
+                            routes[j].Exit));
                         usedIndices.Add(i);
                         usedIndices.Add(j);
                         break;
@@ -1232,7 +1315,7 @@ namespace ICCardManager.Services
         /// </remarks>
         private List<(string Entry, string Exit)> GetRemainingRoutes(
             List<(string Entry, string Exit)> allRoutes,
-            List<(string Start, string End)> roundTrips)
+            List<RoundTrip> roundTrips)
         {
             // 往復の正方向ペアごとに件数を集計（例: (天神,博多) の往復が 2 件 → forwardQuotas[(天神,博多)] = 2）
             //
