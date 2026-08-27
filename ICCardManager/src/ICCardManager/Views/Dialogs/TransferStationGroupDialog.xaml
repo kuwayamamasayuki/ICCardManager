@@ -1,0 +1,229 @@
+<Window x:Class="ICCardManager.Views.Dialogs.TransferStationGroupDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:vm="clr-namespace:ICCardManager.ViewModels"
+        xmlns:conv="clr-namespace:ICCardManager.Common"
+        mc:Ignorable="d"
+        d:DataContext="{d:DesignInstance Type=vm:TransferStationGroupViewModel}"
+        Title="同一とみなす駅・バス停"
+        Height="640"
+        Width="720"
+        MinHeight="520"
+        MinWidth="560"
+        WindowStartupLocation="CenterOwner"
+        ResizeMode="CanResize"
+        Loaded="Window_Loaded"
+        FontSize="{DynamicResource BaseFontSize}"
+        AutomationProperties.Name="同一とみなす駅・バス停の設定ダイアログ"
+        AutomationProperties.HelpText="名前が異なるが実質同じ場所である駅・バス停をグループとして登録します。Escapeキーで閉じます。">
+
+    <Window.Resources>
+        <BooleanToVisibilityConverter x:Key="BoolToVisibilityConverter"/>
+        <conv:ResourceKeyToBrushConverter x:Key="ResourceKeyToBrushConverter"/>
+        <conv:StringToVisibilityConverter x:Key="StringToVisibilityConverter"/>
+    </Window.Resources>
+
+    <Grid Margin="20">
+        <Grid.RowDefinitions>
+            <!-- 説明ヘッダー -->
+            <RowDefinition Height="Auto"/>
+            <!-- グループ一覧 -->
+            <RowDefinition Height="*"/>
+            <!-- 一覧の操作ボタン -->
+            <RowDefinition Height="Auto"/>
+            <!-- 編集フォーム -->
+            <RowDefinition Height="Auto"/>
+            <!-- ステータス -->
+            <RowDefinition Height="Auto"/>
+            <!-- 閉じる -->
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <!-- 説明。アイコン・テキスト・配置で意味を伝える（色のみに依存しない） -->
+        <Border Grid.Row="0"
+                Background="{DynamicResource ReturnBackgroundBrush}"
+                BorderBrush="{DynamicResource SubtleBorderBrush}"
+                BorderThickness="1"
+                Padding="15"
+                Margin="0,0,0,12">
+            <StackPanel>
+                <TextBlock Text="💡 名前は違うが実質同じ場所である駅・バス停をグループにします"
+                           FontWeight="Bold"
+                           TextWrapping="Wrap"
+                           Foreground="{DynamicResource HintForegroundBrush}"/>
+                <TextBlock Margin="0,6,0,0"
+                           TextWrapping="Wrap"
+                           Foreground="{DynamicResource SecondaryTextBrush}"
+                           Text="道路を挟んで向かい合うバス停（例: 天神日銀前と天神中央郵便局前）や、事業者違いで名前が異なる駅（例: 天神と西鉄福岡(天神)）を登録してください。登録すると、行きと帰りで乗降場所の名前が違っても往復として認識され、目的地が摘要から消えなくなります。"/>
+                <TextBlock Margin="0,6,0,0"
+                           TextWrapping="Wrap"
+                           Foreground="{DynamicResource SecondaryTextBrush}"
+                           Text="⚠ 変更しても、既に保存されている履歴の摘要は書き換わりません。反映されるのは、以後に作成・再生成される摘要です。"/>
+            </StackPanel>
+        </Border>
+
+        <!-- グループ一覧。選択は「一覧の選択状態」を表すだけで、操作対象は行の識別子で特定する（Issue #1761） -->
+        <DataGrid Grid.Row="1"
+                  ItemsSource="{Binding Groups}"
+                  SelectedItem="{Binding SelectedGroup}"
+                  AutoGenerateColumns="False"
+                  IsReadOnly="True"
+                  SelectionMode="Single"
+                  HeadersVisibility="Column"
+                  GridLinesVisibility="Horizontal"
+                  CanUserAddRows="False"
+                  AutomationProperties.Name="同一視グループの一覧">
+            <DataGrid.Columns>
+                <DataGridTextColumn Header="同一とみなす駅・バス停"
+                                    Binding="{Binding DisplayText}"
+                                    Width="*">
+                    <DataGridTextColumn.ElementStyle>
+                        <Style TargetType="TextBlock">
+                            <Setter Property="TextWrapping" Value="Wrap"/>
+                            <Setter Property="VerticalAlignment" Value="Center"/>
+                            <Setter Property="Margin" Value="4"/>
+                        </Style>
+                    </DataGridTextColumn.ElementStyle>
+                </DataGridTextColumn>
+                <DataGridTextColumn Header="件数"
+                                    Binding="{Binding NameCount}"
+                                    Width="Auto"/>
+            </DataGrid.Columns>
+        </DataGrid>
+
+        <!-- 一覧の操作。特大文字でも折り返して破綻しないよう WrapPanel を使う -->
+        <WrapPanel Grid.Row="2" Margin="0,10,0,0">
+            <Button Content="追加"
+                    Command="{Binding NewCommand}"
+                    Padding="20,8"
+                    MinWidth="100"
+                    Margin="0,0,10,6"
+                    AutomationProperties.Name="グループを追加"
+                    AutomationProperties.HelpText="新しい同一視グループを追加します。"
+                    ToolTip="新しいグループを追加する"/>
+            <Button Content="編集"
+                    Command="{Binding EditCommand}"
+                    Padding="20,8"
+                    MinWidth="100"
+                    Margin="0,0,10,6"
+                    AutomationProperties.Name="選択したグループを編集"
+                    AutomationProperties.HelpText="一覧で選択したグループの内容を編集します。"
+                    ToolTip="選択したグループを編集する"/>
+            <Button Content="削除"
+                    Command="{Binding DeleteCommand}"
+                    Padding="20,8"
+                    MinWidth="100"
+                    Margin="0,0,10,6"
+                    AutomationProperties.Name="選択したグループを削除"
+                    AutomationProperties.HelpText="一覧で選択したグループを削除します。確認を求められます。"
+                    ToolTip="選択したグループを削除する"/>
+        </WrapPanel>
+
+        <!-- 編集フォーム -->
+        <Border Grid.Row="3"
+                Visibility="{Binding IsEditing, Converter={StaticResource BoolToVisibilityConverter}}"
+                BorderBrush="{DynamicResource SubtleBorderBrush}"
+                BorderThickness="1"
+                Padding="15"
+                Margin="0,6,0,0">
+            <StackPanel>
+                <TextBlock Text="{Binding EditFormTitle}"
+                           FontWeight="Bold"
+                           TextWrapping="Wrap"
+                           Margin="0,0,0,8"/>
+                <TextBlock Text="同一とみなす駅名・バス停名を読点（、）で区切って2つ以上入力してください。"
+                           TextWrapping="Wrap"
+                           Foreground="{DynamicResource SecondaryTextBrush}"
+                           Margin="0,0,0,6"/>
+                <TextBox Text="{Binding EditingNames, UpdateSourceTrigger=PropertyChanged}"
+                         TextWrapping="Wrap"
+                         AcceptsReturn="False"
+                         MinHeight="30"
+                         Padding="6"
+                         AutomationProperties.Name="同一とみなす駅名・バス停名"
+                         AutomationProperties.HelpText="読点で区切って2つ以上入力します。例: 天神日銀前、天神中央郵便局前"/>
+                <WrapPanel Margin="0,10,0,0">
+                    <!-- 入力欄で Enter を押したときに走るのは「保存」であること。
+                         「閉じる」に IsDefault を付けると、名前を入力して Enter を押した瞬間に
+                         ダイアログが閉じて入力が失われる（入力を持つ他のダイアログと同じ流儀） -->
+                    <Button Content="保存"
+                            Command="{Binding SaveCommand}"
+                            IsDefault="True"
+                            Padding="20,8"
+                            MinWidth="100"
+                            Margin="0,0,10,6"
+                            Background="{DynamicResource HeaderBackgroundBrush}"
+                            Foreground="{DynamicResource OnPrimaryBrush}"
+                            AutomationProperties.Name="グループを保存"
+                            AutomationProperties.HelpText="入力した内容を保存します。"
+                            ToolTip="入力した内容を保存する"/>
+                    <Button Content="キャンセル"
+                            Command="{Binding CancelEditCommand}"
+                            Padding="20,8"
+                            MinWidth="100"
+                            Margin="0,0,10,6"
+                            AutomationProperties.Name="編集をキャンセル"
+                            AutomationProperties.HelpText="編集を中止してフォームを閉じます。"
+                            ToolTip="編集を中止する"/>
+                </WrapPanel>
+            </StackPanel>
+        </Border>
+
+        <!-- ステータス。
+             Issue #1727 / #1759: 完了メッセージは編集フォームを閉じたあとに設定されるため、
+             この欄を IsEditing 配下に置いてはいけない（置くとパネルごと消えて一度も表示されない）。 -->
+        <TextBlock Grid.Row="4"
+                   Text="{Binding StatusMessage}"
+                   TextWrapping="Wrap"
+                   Margin="0,12,0,0"
+                   Visibility="{Binding StatusMessage, Converter={StaticResource StringToVisibilityConverter}}"
+                   AutomationProperties.LiveSetting="Assertive"
+                   AutomationProperties.Name="{Binding StatusMessage}">
+            <TextBlock.Style>
+                <Style TargetType="TextBlock">
+                    <Setter Property="Foreground" Value="{DynamicResource SecondaryTextBrush}"/>
+                    <Style.Triggers>
+                        <DataTrigger Binding="{Binding IsStatusError}" Value="True">
+                            <Setter Property="Foreground" Value="{DynamicResource DangerTextBrush}"/>
+                        </DataTrigger>
+                    </Style.Triggers>
+                </Style>
+            </TextBlock.Style>
+        </TextBlock>
+
+        <StackPanel Grid.Row="5"
+                    Orientation="Horizontal"
+                    HorizontalAlignment="Right"
+                    Margin="0,12,0,0">
+            <Button Content="閉じる"
+                    Padding="20,10"
+                    MinWidth="100"
+                    IsCancel="True"
+                    AutomationProperties.Name="閉じる"
+                    AutomationProperties.HelpText="ダイアログを閉じます。追加・編集・削除は操作のたびに保存されています。"
+                    ToolTip="ダイアログを閉じる (Escape)"/>
+        </StackPanel>
+
+        <!-- 処理中オーバーレイ -->
+        <Border Grid.RowSpan="6"
+                Background="{DynamicResource OverlayBrush}"
+                Visibility="{Binding IsBusy, Converter={StaticResource BoolToVisibilityConverter}}">
+            <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
+                <ProgressBar IsIndeterminate="{Binding IsIndeterminate}"
+                             Value="{Binding ProgressValue}"
+                             Maximum="{Binding ProgressMax}"
+                             Width="200" Height="20"
+                             Foreground="{DynamicResource PrimaryBrush}"/>
+                <TextBlock Text="{Binding BusyMessage}"
+                           Foreground="{DynamicResource OnPrimaryBrush}"
+                           FontSize="{DynamicResource BaseFontSize}"
+                           Margin="0,10,0,0"
+                           HorizontalAlignment="Center"
+                           AutomationProperties.LiveSetting="Assertive"
+                           AutomationProperties.Name="保存の実行状況"/>
+            </StackPanel>
+        </Border>
+    </Grid>
+</Window>

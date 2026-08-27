@@ -350,8 +350,20 @@ namespace ICCardManager
                 var repo = sp.GetRequiredService<ISettingsRepository>();
                 var settings = Task.Run(() => repo.GetAppSettings()).GetAwaiter().GetResult();
                 var orgOptions = sp.GetRequiredService<IOptions<OrganizationOptions>>().Value;
+
+                // Issue #1905: 同一視グループはシステム管理画面から編集でき DB が正。
+                // SummaryGenerator の生成前に上書きすることで、「起動直後の返却だけ
+                // 古いグループで摘要が作られる」窓を作らない
+                var groupService = sp.GetRequiredService<ITransferStationGroupService>();
+                orgOptions.SummaryRules.TransferStationGroups =
+                    Task.Run(() => groupService.GetGroupsAsync()).GetAwaiter().GetResult();
+
                 return new SummaryGenerator(settings.DepartmentType, orgOptions);
             });
+            services.AddSingleton<ITransferStationGroupService>(sp => new TransferStationGroupService(
+                sp.GetRequiredService<ISettingsRepository>(),
+                sp.GetRequiredService<IOptions<OrganizationOptions>>().Value,
+                sp.GetRequiredService<ILogger<TransferStationGroupService>>()));
             services.AddSingleton<CardLockManager>();
             services.AddSingleton<LendingService>();
             services.AddSingleton<IReportDataBuilder, ReportDataBuilder>();
@@ -439,6 +451,7 @@ namespace ICCardManager
             services.AddTransient<LedgerRowEditViewModel>();
             services.AddTransient<ReportPreflightViewModel>();
             services.AddTransient<ConnectionDiagnosticsViewModel>();
+            services.AddTransient<TransferStationGroupViewModel>();
             services.AddTransient<AdminDashboardViewModel>();
     #if DEBUG
             // Issue #640: 仮想タッチ設定ダイアログ
@@ -465,6 +478,7 @@ namespace ICCardManager
             services.AddTransient<Views.Dialogs.LedgerRowEditDialog>();
             services.AddTransient<Views.Dialogs.CardTypeSelectionDialog>();
             services.AddTransient<Views.Dialogs.ConnectionDiagnosticsDialog>();
+            services.AddTransient<Views.Dialogs.TransferStationGroupDialog>();
     #if DEBUG
             services.AddTransient<Views.Dialogs.VirtualCardDialog>();
     #endif

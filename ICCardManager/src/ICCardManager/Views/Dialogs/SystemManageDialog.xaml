@@ -31,6 +31,8 @@
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
+            <!-- 摘要の設定（Issue #1905） -->
+            <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
@@ -200,7 +202,29 @@
         </GroupBox>
 
         <!-- リストア -->
-        <GroupBox Grid.Row="3" Header="リストア（データ復元）" Padding="15">
+        <!-- 摘要の設定（Issue #1905） -->
+        <!-- 道路を挟んで向かい合うバス停のように、名前は違うが実質同じ場所を登録する。
+             登録しないと、そこで折り返した往復が乗継とみなされ目的地が摘要から消える。 -->
+        <GroupBox Grid.Row="3" Header="摘要の設定" Margin="0,0,0,15" Padding="15">
+            <StackPanel>
+                <TextBlock Text="名前は異なるが実質同じ場所である駅・バス停を登録できます。登録すると、行きと帰りで乗降場所の名前が違う移動も往復として摘要にまとまります。"
+                           TextWrapping="Wrap"
+                           Foreground="{DynamicResource SecondaryTextBrush}"
+                           FontSize="{DynamicResource SmallFontSize}"
+                           Margin="0,0,0,10"/>
+
+                <Button Content="同一とみなす駅・バス停を設定"
+                        Command="{Binding OpenTransferStationGroupsCommand}"
+                        Padding="15,10"
+                        Background="{DynamicResource HeaderBackgroundBrush}"
+                        Foreground="{DynamicResource OnPrimaryBrush}"
+                        HorizontalAlignment="Left"
+                        AutomationProperties.Name="同一とみなす駅・バス停を設定"
+                        ToolTip="名前が異なるが実質同じ場所である駅・バス停をグループとして登録します"/>
+            </StackPanel>
+        </GroupBox>
+
+        <GroupBox Grid.Row="4" Header="リストア（データ復元）" Padding="15">
             <Grid>
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto"/>
@@ -273,7 +297,7 @@
         </GroupBox>
 
         <!-- ステータスメッセージ -->
-        <Border Grid.Row="4"
+        <Border Grid.Row="5"
                 Padding="10"
                 Margin="0,15,0,0"
                 CornerRadius="5"
@@ -305,7 +329,7 @@
         </Border>
 
         <!-- 閉じるボタン -->
-        <StackPanel Grid.Row="5"
+        <StackPanel Grid.Row="6"
                     Orientation="Horizontal"
                     HorizontalAlignment="Right"
                     Margin="0,15,0,0">
@@ -319,7 +343,7 @@
         </StackPanel>
 
         <!-- 処理中オーバーレイ -->
-        <Border Grid.RowSpan="6"
+        <Border Grid.RowSpan="7"
                 Background="{DynamicResource OverlayBrush}"
                 Visibility="{Binding IsBusy, Converter={StaticResource BoolToVisibilityConverter}}">
             <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">

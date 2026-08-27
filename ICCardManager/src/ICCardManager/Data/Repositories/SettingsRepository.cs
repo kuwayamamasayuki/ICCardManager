@@ -59,6 +59,16 @@ namespace ICCardManager.Data.Repositories
         // 帳票出力先フォルダ設定キー
         public const string KeyReportOutputFolder = "report_output_folder";
 
+        /// <summary>
+        /// 同一とみなす駅・バス停のグループ（JSON 配列の配列、Issue #1905）
+        /// </summary>
+        /// <remarks>
+        /// settings は key-value テーブルのためスキーマ変更（マイグレーション）は不要。
+        /// 読み書きは <see cref="Services.ITransferStationGroupService"/> 経由で行い、
+        /// <see cref="SaveAppSettingsAsync"/> の一括保存には含めない。
+        /// </remarks>
+        public const string KeyTransferStationGroups = "transfer_station_groups";
+
         public SettingsRepository(DbContext dbContext, ICacheService cacheService, IOptions<CacheOptions> cacheOptions)
         {
             _dbContext = dbContext;

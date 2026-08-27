@@ -134,6 +134,45 @@ namespace ICCardManager.Services
         }
 
         /// <summary>
+        /// 同一視グループだけを差し替える（Issue #1905）
+        /// </summary>
+        /// <param name="groups">同一とみなす駅名・バス停名のグループ</param>
+        /// <remarks>
+        /// <see cref="Configure"/> は起動時に 1 回だけ呼ぶ想定だが、同一視グループは
+        /// システム管理画面から運用中に編集できる。<see cref="SummaryGenerator"/> は
+        /// Singleton で静的状態を持つため、保存後に本メソッドで反映しないと
+        /// アプリを再起動するまで新しいグループが効かない。
+        ///
+        /// 差し替えるのはグループだけで、<see cref="_options"/> の他の項目
+        /// （摘要テキスト・生成ルールの ON/OFF）は保持する
+        /// （<c>development-conventions.md</c>「UPDATE の SET 句は、その経路で本当に編集する列に限る」
+        /// と同じ判断。全体を差し替えると呼び出し元が組み立て損ねた項目が既定値へ落ちる）。
+        /// </remarks>
+        public static void ApplyTransferStationGroups(IEnumerable<IEnumerable<string>> groups)
+        {
+            _options.SummaryRules.TransferStationGroups = (groups ?? Enumerable.Empty<IEnumerable<string>>())
+                .Where(g => g != null)
+                .Select(g => g.ToList())
+                .ToList();
+            _transferStationGroups = BuildTransferStationGroups(_options);
+        }
+
+        /// <summary>
+        /// 現在有効な同一視グループを取得する（Issue #1905）
+        /// </summary>
+        /// <remarks>
+        /// 編集画面（<c>TransferStationGroupViewModel</c>）は DB を正とするため
+        /// <c>ITransferStationGroupService.GetGroupsAsync</c> から読み、本メソッドは使わない。
+        /// これは <see cref="ApplyTransferStationGroups"/> が静的状態へ反映されたことを
+        /// 外から確かめるための観測点（テストが使用）。呼び出し元が書き換えても
+        /// 静的状態に影響しないようコピーを返す。
+        /// </remarks>
+        public static List<List<string>> GetTransferStationGroups()
+            => _options.SummaryRules.TransferStationGroups
+                .Select(g => g.ToList())
+                .ToList();
+
+        /// <summary>
         /// 設定をデフォルトにリセット（テスト用）
         /// </summary>
         internal static void ResetToDefaults()
@@ -155,8 +194,8 @@ namespace ICCardManager.Services
         /// </para>
         /// <para>
         /// 空文字・空白のみの設定は既定値へフォールバックする。空ラベルを許すと
-        /// <see cref="GetBusStopExtractionPattern"/> が <c>（(.+?)）</c> に退化し、
-        /// 鉄道の括弧（「鉄道（A駅～B駅）」）まで拾ってバス停名として取り込むため
+        /// <see cref="GetBusStopExtractionPattern"/> がラベルを失って全角括弧だけの
+        /// パターンに退化し、鉄道の括弧（「鉄道（A駅～B駅）」）まで拾ってバス停名として取り込むため
         /// （<see cref="IsMidYearCarryoverSummary"/> の不正正規表現フォールバックと同じ方針）。
         /// </para>
         /// <para>
@@ -224,11 +263,20 @@ namespace ICCardManager.Services
         /// 1 件のみ）を書き写さないこと。
         /// </para>
         /// <para>
+        /// <b>本文は全角括弧を 1 段だけ入れ子にできる</b>（Issue #1905）。往復の端点を
+        /// 「天神日銀前（天神中央郵便局前）」と併記するため、
+        /// 従来の非貪欲な <c>（(.+?)）</c> では最初の <c>）</c> で切れて
+        /// 「天神日銀前（天神中央郵便局前」というバス停名が取り出されていた。
+        /// 本文は「括弧以外の文字」または「入れ子の全角括弧 1 組」の連なりとして表現し、
+        /// 最上位の <c>）</c> でのみ終端させる。<see cref="FormatRoundTrip"/> が
+        /// 生成する併記はちょうど 1 段なので、これで生成物と抽出対象が対応する。
+        /// </para>
+        /// <para>
         /// 汎用/固有の別: 交通系固有。
         /// </para>
         /// </remarks>
         public static string GetBusStopExtractionPattern()
-            => $"{Regex.Escape(BusLabel)}（(.+?)）";
+            => $"{Regex.Escape(BusLabel)}（((?:[^（）]|（[^（）]*）)+)）";
 
         /// <summary>
         /// 摘要からバス停名部分を抽出（Issue #1818）
@@ -304,11 +352,73 @@ namespace ICCardManager.Services
         /// <summary>
         /// TransferStationGroups を List&lt;List&lt;string&gt;&gt; から List&lt;HashSet&lt;string&gt;&gt; に変換
         /// </summary>
+        /// <remarks>
+        /// Issue #1905: 名前を共有するグループどうしは 1 つに併合し、同一視を
+        /// 真の同値関係（反射・対称・<b>推移</b>律を満たす）にする。
+        ///
+        /// 併合しないと [A, B] と [B, C] が登録されたとき A ≡ B、B ≡ C なのに
+        /// A ≢ C という非推移的な判定になり、<see cref="CanonicalStation"/> による
+        /// 正規化（<see cref="GetRemainingRoutes"/> のキー突合が依存する）が成立しない。
+        /// 既定のグループ（天神/西鉄福岡(天神)、千早/西鉄千早）は互いに素なので挙動は変わらない。
+        ///
+        /// 併合が要るのは、本 Issue で管理者が画面からグループを登録できるようになり、
+        /// 「天神日銀前と天神中央郵便局前」「天神中央郵便局前と天神北」のように
+        /// 重なるグループが実際に作られ得るため。
+        /// </remarks>
         private static List<HashSet<string>> BuildTransferStationGroups(OrganizationOptions options)
         {
-            return options.SummaryRules.TransferStationGroups
-                .Select(g => new HashSet<string>(g))
-                .ToList();
+            var merged = new List<HashSet<string>>();
+
+            foreach (var group in options.SummaryRules.TransferStationGroups)
+            {
+                var names = new HashSet<string>(group.Where(n => !string.IsNullOrWhiteSpace(n)));
+                if (names.Count == 0)
+                {
+                    continue;
+                }
+
+                // 既存グループのうち 1 つでも名前を共有するものをすべて吸収する
+                var overlapping = merged.Where(m => m.Overlaps(names)).ToList();
+                foreach (var m in overlapping)
+                {
+                    names.UnionWith(m);
+                    merged.Remove(m);
+                }
+
+                merged.Add(names);
+            }
+
+            return merged;
+        }
+
+        /// <summary>
+        /// 駅名・バス停名を同一視グループの代表名へ正規化する（Issue #1905）
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// <see cref="AreTransferStations"/> は「2 つが同一か」しか答えられないため、
+        /// 名前を辞書のキーにしている処理（<see cref="GetRemainingRoutes"/> の往復消費枠）では使えない。
+        /// 正規化を挟むと <c>CanonicalStation(a) == CanonicalStation(b)</c> が
+        /// <c>AreTransferStations(a, b)</c> と等価になり、辞書のキーとして扱えるようになる。
+        /// </para>
+        /// <para>
+        /// 代表名はグループ内で順序が安定するよう序数比較で最小のものを選ぶ。
+        /// 代表名は突合にのみ使い、<b>摘要へ出力する名前には使わない</b>
+        /// （利用者が実際に乗降した停留所の名前をそのまま表示するため）。
+        /// </para>
+        /// </remarks>
+        private static string CanonicalStation(string station)
+        {
+            foreach (var group in _transferStationGroups)
+            {
+                if (group.Contains(station))
+                {
+                    // .NET Framework 4.8 には Enumerable.Min(IComparer) のオーバーロードが無い
+                    return group.OrderBy(n => n, StringComparer.Ordinal).First();
+                }
+            }
+
+            return station;
         }
 
         /// <summary>
@@ -351,11 +461,20 @@ namespace ICCardManager.Services
         }
 
         /// <summary>
-        /// 2つの駅が乗り継ぎ駅として同一かどうかを判定
+        /// 2つの駅・バス停が同一とみなせるかどうかを判定
         /// </summary>
-        /// <param name="station1">駅名1</param>
-        /// <param name="station2">駅名2</param>
+        /// <param name="station1">駅名・バス停名1</param>
+        /// <param name="station2">駅名・バス停名2</param>
         /// <returns>同一（完全一致または同一グループ内）の場合true</returns>
+        /// <remarks>
+        /// 判定は名前の文字列比較のみで、鉄道／バスの区別を持たない。したがって
+        /// 同一視グループ（<c>SummaryRules.TransferStationGroups</c>）は
+        /// <b>バス停にもそのまま適用される</b>（Issue #1905。道路を挟んで向かい合う
+        /// 「天神日銀前」と「天神中央郵便局前」のような実質同一の停留所を登録する用途）。
+        ///
+        /// <see cref="BuildTransferStationGroups"/> がグループを同値類へ併合済みのため、
+        /// 本メソッドは <c>CanonicalStation(a) == CanonicalStation(b)</c> と等価。
+        /// </remarks>
         private static bool AreTransferStations(string station1, string station2)
         {
             // 完全一致
@@ -813,7 +932,7 @@ namespace ICCardManager.Services
                 var roundTrips = DetectRoundTrips(consolidatedAsPairs);
                 if (roundTrips.Count > 0)
                 {
-                    var roundTripStrings = roundTrips.Select(rt => $"{rt.Start}～{rt.End}{_options.SummaryText.RoundTripSuffix}");
+                    var roundTripStrings = roundTrips.Select(FormatRoundTrip);
                     var remainingRoutes = GetRemainingRoutes(consolidatedAsPairs, roundTrips);
 
                     var allRoutes = roundTripStrings.Concat(
@@ -825,6 +944,73 @@ namespace ICCardManager.Services
 
             // 往復なしの場合は統合済みの経路を表示
             return string.Join("、", consolidatedRoutes.Select(r => $"{r.Start}～{r.End}"));
+        }
+
+        /// <summary>
+        /// 往復 1 組を摘要の表記へ整形する（Issue #1905）
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// 端点の名前が往路と復路で異なる場合（同一視グループへ登録された別名の
+        /// 駅・バス停で乗降した場合）は「往路の名前（復路の名前）」と併記する。
+        /// 例: 天神日銀前で乗車し、帰りは道路を挟んだ天神中央郵便局前で降車した往復は
+        /// 「天神日銀前（天神中央郵便局前）～下原中央 往復」。
+        /// </para>
+        /// <para>
+        /// 併記するのは、6 年保存される台帳から<b>実際に乗降した場所</b>が失われないようにするため。
+        /// 同一視は「往復としてまとめてよい」という判断にだけ使い、
+        /// どちらか一方の名前で代表させることはしない。
+        /// </para>
+        /// <para>
+        /// 名前が完全に一致する通常の往復では括弧を付けない（「A～B 往復」のまま）。
+        /// </para>
+        /// </remarks>
+        private string FormatRoundTrip(RoundTrip roundTrip)
+        {
+            var start = FormatEndpoint(roundTrip.Start, roundTrip.ReturnExit);
+            var end = FormatEndpoint(roundTrip.End, roundTrip.ReturnEntry);
+            return $"{start}～{end}{_options.SummaryText.RoundTripSuffix}";
+        }
+
+        /// <summary>
+        /// 往復の端点を「往路の名前（復路の名前）」形式へ整形する（Issue #1905）
+        /// </summary>
+        private static string FormatEndpoint(string outboundName, string returnName)
+            => string.Equals(outboundName, returnName, StringComparison.Ordinal)
+                ? outboundName
+                : $"{outboundName}（{returnName}）";
+
+        /// <summary>
+        /// 検出した往復 1 組（Issue #1905）
+        /// </summary>
+        /// <remarks>
+        /// <see cref="Start"/> / <see cref="End"/> は往路の乗車地・降車地で、
+        /// 往復の同一性（<see cref="GetRemainingRoutes"/> の消費枠のキー）はこの 2 つで決まる。
+        /// <see cref="ReturnEntry"/> / <see cref="ReturnExit"/> は復路の乗車地・降車地で、
+        /// 同一視グループにより <see cref="End"/> / <see cref="Start"/> と<b>同一視されるが
+        /// 名前は異なり得る</b>。摘要への併記にのみ使う。
+        /// </remarks>
+        private readonly struct RoundTrip
+        {
+            public RoundTrip(string start, string end, string returnEntry, string returnExit)
+            {
+                Start = start;
+                End = end;
+                ReturnEntry = returnEntry;
+                ReturnExit = returnExit;
+            }
+
+            /// <summary>往路の乗車地</summary>
+            public string Start { get; }
+
+            /// <summary>往路の降車地（折り返し点）</summary>
+            public string End { get; }
+
+            /// <summary>復路の乗車地（<see cref="End"/> と同一視される）</summary>
+            public string ReturnEntry { get; }
+
+            /// <summary>復路の降車地（<see cref="Start"/> と同一視される）</summary>
+            public string ReturnExit { get; }
         }
 
         /// <summary>
@@ -1069,9 +1255,9 @@ namespace ICCardManager.Services
         /// - 逆順の場合: [(博多,薬院), (薬院,博多)] → "博多～薬院 往復" (不正)
         /// </para>
         /// </remarks>
-        private List<(string Start, string End)> DetectRoundTrips(List<(string Entry, string Exit)> routes)
+        private List<RoundTrip> DetectRoundTrips(List<(string Entry, string Exit)> routes)
         {
-            var roundTrips = new List<(string Start, string End)>();
+            var roundTrips = new List<RoundTrip>();
             var usedIndices = new HashSet<int>();
 
             for (int i = 0; i < routes.Count; i++)
@@ -1090,9 +1276,20 @@ namespace ICCardManager.Services
                     }
 
                     // A→B と B→A のパターン
-                    if (routes[i].Entry == routes[j].Exit && routes[i].Exit == routes[j].Entry)
+                    // Issue #1905: 端点の突合は同一視グループを考慮する
+                    // （道路を挟んで向かい合うバス停や、事業者違いで名前が異なる駅を
+                    // 往復の折り返し点として認識するため）
+                    if (AreTransferStations(routes[i].Entry, routes[j].Exit)
+                        && AreTransferStations(routes[i].Exit, routes[j].Entry))
                     {
-                        roundTrips.Add((routes[i].Entry, routes[i].Exit));
+                        // Issue #1905: 復路の乗降地名も持ち回る。同一視グループにより
+                        // 往路の端点とは名前が異なり得るため、摘要へ併記して
+                        // 実際に乗降した場所を台帳から失わないようにする
+                        roundTrips.Add(new RoundTrip(
+                            routes[i].Entry,
+                            routes[i].Exit,
+                            routes[j].Entry,
+                            routes[j].Exit));
                         usedIndices.Add(i);
                         usedIndices.Add(j);
                         break;
@@ -1118,13 +1315,19 @@ namespace ICCardManager.Services
         /// </remarks>
         private List<(string Entry, string Exit)> GetRemainingRoutes(
             List<(string Entry, string Exit)> allRoutes,
-            List<(string Start, string End)> roundTrips)
+            List<RoundTrip> roundTrips)
         {
             // 往復の正方向ペアごとに件数を集計（例: (天神,博多) の往復が 2 件 → forwardQuotas[(天神,博多)] = 2）
+            //
+            // Issue #1905: キーは CanonicalStation で正規化する。DetectRoundTrips が
+            // 同一視グループで往復を検出するようになったため、ここだけ完全一致のままだと
+            // 復路（例: 下原中央→天神中央郵便局前）が往路（天神日銀前→下原中央）の
+            // 逆方向キーと一致せず「余り」に残り、「A～B 往復、B～C」と重複表示になる。
+            // 突合に使う名前だけを正規化し、余りとして返す経路は元の名前のまま保つ。
             var forwardQuotas = new Dictionary<(string, string), int>();
             foreach (var rt in roundTrips)
             {
-                var key = (rt.Start, rt.End);
+                var key = (CanonicalStation(rt.Start), CanonicalStation(rt.End));
                 forwardQuotas[key] = forwardQuotas.TryGetValue(key, out var count) ? count + 1 : 1;
             }
 
@@ -1134,8 +1337,10 @@ namespace ICCardManager.Services
             var remaining = new List<(string Entry, string Exit)>();
             foreach (var route in allRoutes)
             {
-                var forwardKey = (route.Entry, route.Exit);
-                var reverseKey = (route.Exit, route.Entry);
+                var canonicalEntry = CanonicalStation(route.Entry);
+                var canonicalExit = CanonicalStation(route.Exit);
+                var forwardKey = (canonicalEntry, canonicalExit);
+                var reverseKey = (canonicalExit, canonicalEntry);
 
                 // forward 方向で消費できるか
                 if (forwardQuotas.TryGetValue(forwardKey, out var fwdQuota))
@@ -1194,12 +1399,11 @@ namespace ICCardManager.Services
         /// （例: A→B、B→A、C→D、D→C で復路 B→A が乗換駅グループ経由で
         /// C→D と統合され「B～D」という実際には乗っていない区間になっていた）。
         ///
-        /// なお逆走判定は <see cref="AreTransferStations"/> による同一視を含むが、
-        /// <see cref="DetectRoundTrips"/> の往復ペア照合は駅名の完全一致で行われる。
-        /// したがって復路の端点が乗り継ぎ駅グループ内の別名駅の場合
-        /// （例: 天神→博多 の復路が 博多→西鉄福岡(天神)）、延長の打ち切りは
-        /// 「実際には乗っていない区間」の生成を防ぐが、摘要は「往復」表記にならず
-        /// 各区間の個別表示となる（コードレビューで実測確認、Issue #1902）。
+        /// Issue #1905: かつては逆走判定が <see cref="AreTransferStations"/> による同一視を含む一方で
+        /// <see cref="DetectRoundTrips"/> の往復ペア照合は駅名の完全一致だったため、
+        /// 復路の端点が同一視グループ内の別名（例: 天神→博多 の復路が 博多→西鉄福岡(天神)）だと
+        /// 延長の打ち切りだけが働いて摘要は「往復」表記にならなかった。
+        /// 現在は往復ペア照合も同一視を考慮するため、この非対称は解消されている。
         /// </remarks>
         private List<(string Start, string End)> ConsolidateRoutes(List<(string Entry, string Exit)> routes)
         {

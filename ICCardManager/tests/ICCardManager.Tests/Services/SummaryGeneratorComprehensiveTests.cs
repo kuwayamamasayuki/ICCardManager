@@ -2390,4 +2390,276 @@ public class SummaryGeneratorComprehensiveTests : IDisposable
     }
 
     #endregion
+
+    #region Issue #1905: 実質同じ駅・バス停の同一視で目的地が消えない
+
+    /// <summary>
+    /// 同一視グループを登録していない状態では、報告事例の目的地（下原中央）が
+    /// 乗継として省略されてしまうこと（欠陥の再現）。
+    /// </summary>
+    /// <remarks>
+    /// この「対のテスト」が無いと、グループ登録の有無にかかわらず同じ結果を返す実装
+    /// （＝乗継統合を丸ごと止めた実装）でも修正版のテストが緑になってしまう。
+    /// </remarks>
+    [Fact]
+    public void TC_BUG1905_バス_同一視未登録_目的地が乗継として省略される()
+    {
+        // Arrange: 天神日銀前→下原中央→天神中央郵便局前（同日・ICカード履歴は新しい順）
+        var details = new List<LedgerDetail>
+        {
+            CreateBusUsage(new DateTime(2024, 12, 9), 230, 4330, busStops: "下原中央～天神中央郵便局前"),
+            CreateBusUsage(new DateTime(2024, 12, 9), 230, 4560, busStops: "天神日銀前～下原中央"),
+        };
+
+        // Act
+        var results = _generator.GenerateByDate(details);
+
+        // Assert: 下原中央が途中地点とみなされて消える（登録前の従来どおりの挙動）
+        results.Should().HaveCount(1);
+        results[0].Summary.Should().Be("バス（天神日銀前～天神中央郵便局前）");
+        OutputInputAndResult(details, results);
+    }
+
+    /// <summary>
+    /// Issue #1905 事例: 道路を挟んで向かい合う実質同一のバス停を同一視グループへ
+    /// 登録すると、往復として認識され目的地（下原中央）が摘要に残ること。
+    /// </summary>
+    /// <remarks>
+    /// バグ: 出発地と到着地の名前が違うため往復として検出されず、
+    /// 「降車地＝次の乗車地」の乗継統合だけが働いて
+    /// 「バス（天神日銀前～天神中央郵便局前）」となり、実際に用務のあった
+    /// 下原中央が 6 年保存の台帳から消えていた。
+    ///
+    /// 修正: 同一視グループ（<c>SummaryRules.TransferStationGroups</c>）は
+    /// バス停にも適用されるが、往復ペアの照合だけが駅名の完全一致で行われていた。
+    /// 照合を <c>AreTransferStations</c> へ揃えたことで往復として検出される。
+    /// </remarks>
+    [Fact]
+    public void TC_BUG1905_バス_同一視登録済み_往復として目的地が残る()
+    {
+        // Arrange
+        SummaryGenerator.ApplyTransferStationGroups(new[]
+        {
+            new[] { "天神日銀前", "天神中央郵便局前" }
+        });
+
+        var details = new List<LedgerDetail>
+        {
+            CreateBusUsage(new DateTime(2024, 12, 9), 230, 4330, busStops: "下原中央～天神中央郵便局前"),
+            CreateBusUsage(new DateTime(2024, 12, 9), 230, 4560, busStops: "天神日銀前～下原中央"),
+        };
+
+        // Act
+        var results = _generator.GenerateByDate(details);
+
+        // Assert: 往復として目的地が残り、帰りに降りたバス停も併記される
+        results.Should().HaveCount(1);
+        results[0].Summary.Should().Be("バス（天神日銀前（天神中央郵便局前）～下原中央 往復）");
+        OutputInputAndResult(details, results);
+    }
+
+    /// <summary>
+    /// 鉄道でも、乗り継ぎ駅グループ内の別名駅で折り返した往復が
+    /// 「往復」として表示されること（Issue #1902 が残していた非対称の解消）。
+    /// </summary>
+    /// <remarks>
+    /// 従来は「天神→博多」の復路が「博多→西鉄福岡(天神)」だと、
+    /// 乗継延長の打ち切りだけが働いて「鉄道（天神～博多、博多～西鉄福岡(天神)）」と
+    /// 各区間の個別表示になっていた。
+    /// </remarks>
+    [Fact]
+    public void TC_BUG1905_鉄道_乗換駅グループ越しの折り返し_往復と表示される()
+    {
+        // Arrange: 天神→博多、博多→西鉄福岡(天神)（既定グループで 天神 ≒ 西鉄福岡(天神)）
+        var details = new List<LedgerDetail>
+        {
+            CreateRailwayUsage(new DateTime(2024, 12, 9), "博多", "西鉄福岡(天神)", 210, 4560),
+            CreateRailwayUsage(new DateTime(2024, 12, 9), "天神", "博多", 210, 4770),
+        };
+
+        // Act
+        var results = _generator.GenerateByDate(details);
+
+        // Assert: 往復として表示され、余りの区間が重複して出ない。
+        // 帰りに降りた駅（西鉄福岡(天神)）は出発地（天神）と名前が異なるため、出発地側へ併記される
+        results.Should().HaveCount(1);
+        results[0].Summary.Should().Be("鉄道（天神（西鉄福岡(天神)）～博多 往復）");
+        OutputInputAndResult(details, results);
+    }
+
+    /// <summary>
+    /// 名前を共有する複数のグループが登録された場合、1 つの同値類として併合され、
+    /// 推移的に同一視されること。
+    /// </summary>
+    /// <remarks>
+    /// 管理者が画面から登録できるようになったことで [A,B] と [B,C] のように
+    /// 重なるグループが実際に作られ得る。併合しないと A ≡ B、B ≡ C なのに A ≢ C という
+    /// 非推移的な判定になり、<c>GetRemainingRoutes</c> の正規化キーが成立しない。
+    /// </remarks>
+    [Fact]
+    public void TC_BUG1905_名前を共有するグループ_併合されて推移的に同一視される()
+    {
+        // Arrange: [天神日銀前, 天神中央郵便局前] と [天神中央郵便局前, 天神北] が別々に登録された状態
+        SummaryGenerator.ApplyTransferStationGroups(new[]
+        {
+            new[] { "天神日銀前", "天神中央郵便局前" },
+            new[] { "天神中央郵便局前", "天神北" }
+        });
+
+        // 直接は同じグループに無い 天神日銀前 と 天神北 で折り返す
+        var details = new List<LedgerDetail>
+        {
+            CreateBusUsage(new DateTime(2024, 12, 9), 230, 4330, busStops: "下原中央～天神北"),
+            CreateBusUsage(new DateTime(2024, 12, 9), 230, 4560, busStops: "天神日銀前～下原中央"),
+        };
+
+        // Act
+        var results = _generator.GenerateByDate(details);
+
+        // Assert
+        results.Should().HaveCount(1);
+        results[0].Summary.Should().Be("バス（天神日銀前（天神北）～下原中央 往復）");
+        OutputInputAndResult(details, results);
+    }
+
+    /// <summary>
+    /// 同一視しても、実際には往復でない移動を往復にまとめないこと。
+    /// </summary>
+    /// <remarks>
+    /// 往復判定を同一視へ広げた結果が「広すぎる」実装になっていないことを
+    /// 対で固定する（<c>error-messages.md</c>「正当な操作を塞いでいないことを対で固定する」の裏返し）。
+    /// </remarks>
+    [Fact]
+    public void TC_BUG1905_同一視登録済みでも_折り返していない移動は往復にしない()
+    {
+        // Arrange
+        SummaryGenerator.ApplyTransferStationGroups(new[]
+        {
+            new[] { "天神日銀前", "天神中央郵便局前" }
+        });
+
+        // 天神日銀前→下原中央 のあと、別の場所（博多駅前）から 天神中央郵便局前 へ
+        var details = new List<LedgerDetail>
+        {
+            CreateBusUsage(new DateTime(2024, 12, 9), 230, 4330, busStops: "博多駅前～天神中央郵便局前"),
+            CreateBusUsage(new DateTime(2024, 12, 9), 230, 4560, busStops: "天神日銀前～下原中央"),
+        };
+
+        // Act
+        var results = _generator.GenerateByDate(details);
+
+        // Assert: 折り返し点が一致しないので往復にはならず、両区間が残る
+        results.Should().HaveCount(1);
+        results[0].Summary.Should().Be("バス（天神日銀前～下原中央、博多駅前～天神中央郵便局前）");
+        OutputInputAndResult(details, results);
+    }
+
+    /// <summary>
+    /// 往路と復路で乗降地の名前が同じ通常の往復では、括弧を付けないこと。
+    /// </summary>
+    /// <remarks>
+    /// 対のテスト: 併記の条件が広すぎると「天神（天神）～博多 往復」のような
+    /// 冗長な表記が 6 年保存の台帳へ入る。
+    /// </remarks>
+    [Fact]
+    public void TC_BUG1905_往路と復路で名前が同じ往復_括弧を付けないこと()
+    {
+        // Arrange: 天神→博多、博多→天神（完全一致の往復）
+        var details = new List<LedgerDetail>
+        {
+            CreateRailwayUsage(new DateTime(2024, 12, 9), "博多", "天神", 210, 4560),
+            CreateRailwayUsage(new DateTime(2024, 12, 9), "天神", "博多", 210, 4770),
+        };
+
+        // Act
+        var results = _generator.GenerateByDate(details);
+
+        // Assert
+        results.Should().HaveCount(1);
+        results[0].Summary.Should().Be("鉄道（天神～博多 往復）");
+        OutputInputAndResult(details, results);
+    }
+
+    /// <summary>
+    /// 折り返し点の名前が往路と復路で異なる場合、折り返し点側にも併記されること。
+    /// </summary>
+    [Fact]
+    public void TC_BUG1905_折り返し点の名前が異なる往復_折り返し点にも併記されること()
+    {
+        // Arrange: 下原中央 と 下原中央前 も実質同じ停留所として登録されている
+        SummaryGenerator.ApplyTransferStationGroups(new[]
+        {
+            new[] { "天神日銀前", "天神中央郵便局前" },
+            new[] { "下原中央", "下原中央前" }
+        });
+
+        var details = new List<LedgerDetail>
+        {
+            CreateBusUsage(new DateTime(2024, 12, 9), 230, 4330, busStops: "下原中央前～天神中央郵便局前"),
+            CreateBusUsage(new DateTime(2024, 12, 9), 230, 4560, busStops: "天神日銀前～下原中央"),
+        };
+
+        // Act
+        var results = _generator.GenerateByDate(details);
+
+        // Assert: 両端とも「往路の名前（復路の名前）」で併記される
+        results.Should().HaveCount(1);
+        results[0].Summary.Should().Be("バス（天神日銀前（天神中央郵便局前）～下原中央（下原中央前） 往復）");
+        OutputInputAndResult(details, results);
+    }
+
+    /// <summary>
+    /// 併記を含むバスの摘要から、バス停名を取り出せること。
+    /// </summary>
+    /// <remarks>
+    /// 摘要の本文へ全角括弧を持ち込むと、抽出（<c>GetBusStopExtractionPattern</c>）の
+    /// 非貪欲な <c>（(.+?)）</c> が最初の <c>）</c> で切れ、
+    /// 「天神日銀前（天神中央郵便局前」というバス停名が
+    /// 履歴統合（<c>LedgerMergeService</c>）と摘要の直接編集（<c>LedgerRowEditViewModel</c>）へ渡っていた。
+    /// 生成側の書式を変えたら、抽出側が対応できることを対で固定する（Issue #1818）。
+    /// </remarks>
+    [Fact]
+    public void TC_BUG1905_併記を含む摘要からバス停名を取り出せること()
+    {
+        // Arrange
+        SummaryGenerator.ApplyTransferStationGroups(new[]
+        {
+            new[] { "天神日銀前", "天神中央郵便局前" }
+        });
+
+        var details = new List<LedgerDetail>
+        {
+            CreateBusUsage(new DateTime(2024, 12, 9), 230, 4330, busStops: "下原中央～天神中央郵便局前"),
+            CreateBusUsage(new DateTime(2024, 12, 9), 230, 4560, busStops: "天神日銀前～下原中央"),
+        };
+        var summary = _generator.GenerateByDate(details)[0].Summary;
+
+        // Act
+        var extracted = SummaryGenerator.TryExtractBusStops(summary, out var busStops);
+
+        // Assert: 併記の閉じ括弧で切れず、ブロック全体が取り出される
+        extracted.Should().BeTrue();
+        busStops.Should().Be("天神日銀前（天神中央郵便局前）～下原中央 往復");
+    }
+
+    /// <summary>
+    /// 併記を含むバスブロックが鉄道と混在しても、バス部分だけを取り出せること。
+    /// </summary>
+    [Fact]
+    public void TC_BUG1905_併記を含むバスブロックが複数あっても正しく分割されること()
+    {
+        // Arrange: 実際の摘要と同じ形（鉄道ブロックと、併記を含むバスブロック 2 つ）
+        const string summary =
+            "鉄道（博多～天神）、バス（天神日銀前（天神中央郵便局前）～下原中央 往復）、バス（★）";
+
+        // Act
+        var blocks = SummaryGenerator.ExtractBusStopBlocks(summary);
+
+        // Assert: 鉄道の括弧を拾わず、バスブロックだけが最上位の括弧で分割される
+        blocks.Should().Equal(
+            "天神日銀前（天神中央郵便局前）～下原中央 往復",
+            "★");
+    }
+
+    #endregion
 }
