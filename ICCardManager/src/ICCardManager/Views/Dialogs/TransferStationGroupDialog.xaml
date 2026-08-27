@@ -145,8 +145,12 @@
                          AutomationProperties.Name="同一とみなす駅名・バス停名"
                          AutomationProperties.HelpText="読点で区切って2つ以上入力します。例: 天神日銀前、天神中央郵便局前"/>
                 <WrapPanel Margin="0,10,0,0">
+                    <!-- 入力欄で Enter を押したときに走るのは「保存」であること。
+                         「閉じる」に IsDefault を付けると、名前を入力して Enter を押した瞬間に
+                         ダイアログが閉じて入力が失われる（入力を持つ他のダイアログと同じ流儀） -->
                     <Button Content="保存"
                             Command="{Binding SaveCommand}"
+                            IsDefault="True"
                             Padding="20,8"
                             MinWidth="100"
                             Margin="0,0,10,6"
@@ -196,7 +200,6 @@
             <Button Content="閉じる"
                     Padding="20,10"
                     MinWidth="100"
-                    IsDefault="True"
                     IsCancel="True"
                     AutomationProperties.Name="閉じる"
                     AutomationProperties.HelpText="ダイアログを閉じます。追加・編集・削除は操作のたびに保存されています。"

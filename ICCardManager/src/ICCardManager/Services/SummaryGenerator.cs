@@ -151,6 +151,7 @@ namespace ICCardManager.Services
         public static void ApplyTransferStationGroups(IEnumerable<IEnumerable<string>> groups)
         {
             _options.SummaryRules.TransferStationGroups = (groups ?? Enumerable.Empty<IEnumerable<string>>())
+                .Where(g => g != null)
                 .Select(g => g.ToList())
                 .ToList();
             _transferStationGroups = BuildTransferStationGroups(_options);
@@ -160,7 +161,10 @@ namespace ICCardManager.Services
         /// 現在有効な同一視グループを取得する（Issue #1905）
         /// </summary>
         /// <remarks>
-        /// 編集画面が現在値を初期表示するために使う。呼び出し元が書き換えても
+        /// 編集画面（<c>TransferStationGroupViewModel</c>）は DB を正とするため
+        /// <c>ITransferStationGroupService.GetGroupsAsync</c> から読み、本メソッドは使わない。
+        /// これは <see cref="ApplyTransferStationGroups"/> が静的状態へ反映されたことを
+        /// 外から確かめるための観測点（テストが使用）。呼び出し元が書き換えても
         /// 静的状態に影響しないようコピーを返す。
         /// </remarks>
         public static List<List<string>> GetTransferStationGroups()

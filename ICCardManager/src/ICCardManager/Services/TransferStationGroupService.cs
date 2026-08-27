@@ -26,7 +26,19 @@ namespace ICCardManager.Services
     public class TransferStationGroupService : ITransferStationGroupService
     {
         private readonly ISettingsRepository _settingsRepository;
-        private readonly OrganizationOptions _organizationOptions;
+
+        /// <summary>
+        /// appsettings.json（未指定なら C# 既定値）由来の初期値のスナップショット
+        /// </summary>
+        /// <remarks>
+        /// <see cref="OrganizationOptions"/> のインスタンスは DI のシングルトンで、
+        /// <c>App.xaml.cs</c> の起動時反映と <see cref="SummaryGenerator.ApplyTransferStationGroups"/> が
+        /// <c>SummaryRules.TransferStationGroups</c> を**その場で書き換える**。
+        /// 参照を持ち回ると「DB に未保存のときの初期値」が「最後に保存した値」に化けて
+        /// フォールバックが初期値でなくなるため、構築時にコピーを取る。
+        /// </remarks>
+        private readonly List<List<string>> _defaultGroups;
+
         private readonly ILogger<TransferStationGroupService> _logger;
 
         /// <summary>
@@ -44,7 +56,14 @@ namespace ICCardManager.Services
             ILogger<TransferStationGroupService> logger)
         {
             _settingsRepository = settingsRepository ?? throw new ArgumentNullException(nameof(settingsRepository));
-            _organizationOptions = organizationOptions ?? throw new ArgumentNullException(nameof(organizationOptions));
+            if (organizationOptions == null)
+            {
+                throw new ArgumentNullException(nameof(organizationOptions));
+            }
+
+            _defaultGroups = organizationOptions.SummaryRules.TransferStationGroups
+                .Select(g => g.ToList())
+                .ToList();
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         }
 
@@ -182,7 +201,7 @@ namespace ICCardManager.Services
         /// 組織設定（appsettings.json ないし C# 既定値）由来の初期値をコピーで返す
         /// </summary>
         private List<List<string>> CloneFromOptions()
-            => _organizationOptions.SummaryRules.TransferStationGroups
+            => _defaultGroups
                 .Select(g => g.ToList())
                 .ToList();
     }

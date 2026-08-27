@@ -311,6 +311,121 @@ public class TransferStationGroupViewModelTests
 
     #endregion
 
+    #region DB 例外の受け皿（コードレビュー指摘）
+
+    [Fact]
+    public async Task SaveAsync_DB例外_致命エラーにせずステータスへ案内すること()
+    {
+        // Arrange: 共有フォルダーの一時断・SQLITE_BUSY で SetAsync が例外になる経路。
+        // 捕まえないと AsyncRelayCommand が UI スレッドへ再スローし
+        // 「予期しないエラー（SYS999）」の致命エラーダイアログになる
+        ArrangeGroups(new[] { "天神", "西鉄福岡(天神)" });
+        _groupService
+            .Setup(s => s.SaveGroupsAsync(It.IsAny<IEnumerable<IEnumerable<string>>>()))
+            .ThrowsAsync(new System.Data.SQLite.SQLiteException("database is locked"));
+
+        var vm = await LoadedAsync(CreateViewModel());
+        vm.New();
+        vm.EditingNames = "天神日銀前、天神中央郵便局前";
+
+        // Act
+        await vm.SaveAsync();
+
+        // Assert
+        vm.IsStatusError.Should().BeTrue();
+        vm.StatusMessage.Should().NotContain("database is locked",
+            "生の ex.Message を UI へ出さない（error-messages.md #1614）");
+        vm.StatusMessage.Should().EndWith("してください。", "行動指示で終わること");
+        vm.Groups.Should().HaveCount(1, "書き込めていないのに一覧へ反映してはいけない");
+        vm.IsBusy.Should().BeFalse("例外でも処理中表示は解除される");
+    }
+
+    [Fact]
+    public async Task DeleteAsync_DB例外_致命エラーにせずステータスへ案内すること()
+    {
+        // Arrange
+        ArrangeGroups(
+            new[] { "天神", "西鉄福岡(天神)" },
+            new[] { "千早", "西鉄千早" });
+        _groupService
+            .Setup(s => s.SaveGroupsAsync(It.IsAny<IEnumerable<IEnumerable<string>>>()))
+            .ThrowsAsync(new System.Data.SQLite.SQLiteException("database is locked"));
+        _dialogService
+            .Setup(d => d.ShowConfirmation(It.IsAny<string>(), It.IsAny<string>()))
+            .Returns(true);
+
+        var vm = await LoadedAsync(CreateViewModel());
+        vm.SelectedGroup = vm.Groups[0];
+
+        // Act
+        await vm.DeleteAsync();
+
+        // Assert
+        vm.IsStatusError.Should().BeTrue();
+        vm.StatusMessage.Should().NotContain("database is locked");
+        vm.StatusMessage.Should().EndWith("してください。");
+        vm.Groups.Should().HaveCount(2, "削除できていないのに一覧から消してはいけない");
+        vm.IsBusy.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task DeleteAsync_編集中のグループを削除_フォームを閉じること()
+    {
+        // Arrange: 編集フォームを開いたまま同じ行を削除できる（削除ボタンは IsEditing で無効化されない）。
+        // フォームが開いたままだと、その「保存」が BuildSnapshot の
+        // 「該当 Id が無ければ末尾へ追加」経路を通り、一覧に現れないグループが DB にだけ復活する
+        ArrangeGroups(
+            new[] { "天神", "西鉄福岡(天神)" },
+            new[] { "千早", "西鉄千早" });
+        ArrangeSaveResult(true);
+        _dialogService
+            .Setup(d => d.ShowConfirmation(It.IsAny<string>(), It.IsAny<string>()))
+            .Returns(true);
+
+        var vm = await LoadedAsync(CreateViewModel());
+        vm.SelectedGroup = vm.Groups[0];
+        vm.Edit();
+        vm.IsEditing.Should().BeTrue();
+
+        // Act
+        await vm.DeleteAsync();
+
+        // Assert
+        vm.IsEditing.Should().BeFalse();
+        vm.Groups.Should().HaveCount(1);
+        // CancelEdit() は StatusMessage をクリアするため、完了メッセージがそのあとに設定されていること
+        vm.StatusMessage.Should().Contain("削除しました");
+    }
+
+    [Fact]
+    public async Task DeleteAsync_編集中でない行を削除_フォームを閉じないこと()
+    {
+        // 対のテスト: 常に CancelEdit() する実装だと、無関係な行の削除で入力途中の内容が消える
+        ArrangeGroups(
+            new[] { "天神", "西鉄福岡(天神)" },
+            new[] { "千早", "西鉄千早" });
+        ArrangeSaveResult(true);
+        _dialogService
+            .Setup(d => d.ShowConfirmation(It.IsAny<string>(), It.IsAny<string>()))
+            .Returns(true);
+
+        var vm = await LoadedAsync(CreateViewModel());
+        vm.SelectedGroup = vm.Groups[0];
+        vm.Edit();
+
+        // 別の行を選び直して削除する
+        vm.SelectedGroup = vm.Groups[1];
+
+        // Act
+        await vm.DeleteAsync();
+
+        // Assert
+        vm.IsEditing.Should().BeTrue("編集中でない行の削除では入力内容を消さない");
+        vm.EditingNames.Should().Be("天神、西鉄福岡(天神)");
+    }
+
+    #endregion
+
     #region 処理中表示
 
     [Fact]

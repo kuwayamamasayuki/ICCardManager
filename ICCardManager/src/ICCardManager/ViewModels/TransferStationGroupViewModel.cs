@@ -162,19 +162,32 @@ namespace ICCardManager.ViewModels
             var isNew = !editingId.HasValue;
             var label = string.Join(NameJoiner, names);
 
-            using (BeginBusy("保存中..."))
+            // Issue #1614: DB 書き込みは共有フォルダーの一時断・SQLITE_BUSY で例外になり得る。
+            // 捕まえないと AsyncRelayCommand が UI スレッドへ再スローし、
+            // 「予期しないエラー（SYS999）」の致命エラーダイアログになる（他の管理画面と同じ流儀で受ける）
+            try
             {
-                if (!await _groupService.SaveGroupsAsync(BuildSnapshot(names, editingId)))
+                using (BeginBusy("保存中..."))
                 {
-                    SetStatus(
-                        "同一視グループを保存できませんでした。" +
-                        "データベースが他のパソコンや別の操作で使用中だった可能性があります。" +
-                        "しばらく待ってから、もう一度保存してください。",
-                        true);
-                    return;
-                }
+                    if (!await _groupService.SaveGroupsAsync(BuildSnapshot(names, editingId)))
+                    {
+                        SetStatus(
+                            "同一視グループを保存できませんでした。" +
+                            "データベースが他のパソコンや別の操作で使用中だった可能性があります。" +
+                            "しばらく待ってから、もう一度保存してください。",
+                            true);
+                        return;
+                    }
 
-                ApplyToList(names, editingId);
+                    ApplyToList(names, editingId);
+                }
+            }
+            catch (Exception ex)
+            {
+                // Issue #1614: 生の ex.Message を UI に出さず、3要素準拠の文言を表示。技術詳細はログへ逃がす
+                ErrorDialogHelper.LogException(ex, "同一視グループの保存");
+                SetStatus(ExceptionMessageFormatter.ToUserMessage(ex, "同一視グループの保存"), true);
+                return;
             }
 
             // Issue #1759: CancelEdit() は StatusMessage をクリアするため、完了メッセージは必ずそのあとに設定する
@@ -206,28 +219,47 @@ namespace ICCardManager.ViewModels
                 return;
             }
 
-            using (BeginBusy("削除中..."))
+            // Issue #1614: SaveAsync と同じ理由で DB 例外を受け止める
+            try
             {
-                var snapshot = Groups
-                    .Where(g => g.Id != targetId)
-                    .Select(g => g.Names.ToList())
-                    .ToList();
-
-                if (!await _groupService.SaveGroupsAsync(snapshot))
+                using (BeginBusy("削除中..."))
                 {
-                    SetStatus(
-                        "同一視グループを削除できませんでした。" +
-                        "データベースが他のパソコンや別の操作で使用中だった可能性があります。" +
-                        "しばらく待ってから、もう一度削除してください。",
-                        true);
-                    return;
-                }
+                    var snapshot = Groups
+                        .Where(g => g.Id != targetId)
+                        .Select(g => g.Names.ToList())
+                        .ToList();
 
-                var removed = Groups.FirstOrDefault(g => g.Id == targetId);
-                if (removed != null)
-                {
-                    Groups.Remove(removed);
+                    if (!await _groupService.SaveGroupsAsync(snapshot))
+                    {
+                        SetStatus(
+                            "同一視グループを削除できませんでした。" +
+                            "データベースが他のパソコンや別の操作で使用中だった可能性があります。" +
+                            "しばらく待ってから、もう一度削除してください。",
+                            true);
+                        return;
+                    }
+
+                    var removed = Groups.FirstOrDefault(g => g.Id == targetId);
+                    if (removed != null)
+                    {
+                        Groups.Remove(removed);
+                    }
                 }
+            }
+            catch (Exception ex)
+            {
+                ErrorDialogHelper.LogException(ex, "同一視グループの削除");
+                SetStatus(ExceptionMessageFormatter.ToUserMessage(ex, "同一視グループの削除"), true);
+                return;
+            }
+
+            // 削除したグループを編集中だった場合はフォームも閉じる。
+            // 開いたままにすると、そのフォームの「保存」が BuildSnapshot の
+            // 「該当 Id が無ければ末尾へ追加」経路を通り、一覧には現れないグループが
+            // DB にだけ復活する（次の保存・削除でそれが黙って消える）
+            if (_editingGroupId == targetId)
+            {
+                CancelEdit();
             }
 
             SetStatus($"「{label}」を削除しました", false);
