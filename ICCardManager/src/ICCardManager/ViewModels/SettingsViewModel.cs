@@ -121,6 +121,12 @@ public partial class SettingsViewModel : ViewModelBase
     private bool _skipBusStopInputOnReturn;
 
     /// <summary>
+    /// 返却時に同行者数入力ダイアログを自動スキップするかどうか（Issue #1906）
+    /// </summary>
+    [ObservableProperty]
+    private bool _skipCompanionCountInputOnReturn;
+
+    /// <summary>
     /// データベースの保存先フォルダパス（UI表示用。ファイル名は内部で自動付与）
     /// </summary>
     [ObservableProperty]
@@ -207,6 +213,7 @@ public partial class SettingsViewModel : ViewModelBase
 
             // バス停入力スキップ設定
             SkipBusStopInputOnReturn = settings.SkipBusStopInputOnReturn;
+            SkipCompanionCountInputOnReturn = settings.SkipCompanionCountInputOnReturn;
 
             // DBフォルダパス設定（appsettings.jsonから読み込み済み）
             DatabasePath = _originalDatabasePath;
@@ -263,7 +270,8 @@ public partial class SettingsViewModel : ViewModelBase
                 SoundMode = SelectedSoundModeItem?.Value ?? SoundMode.Beep,
                 ToastPosition = SelectedToastPositionItem?.Value ?? ToastPosition.TopRight,
                 DepartmentType = SelectedDepartmentTypeItem?.Value ?? DepartmentType.MayorOffice,
-                SkipBusStopInputOnReturn = SkipBusStopInputOnReturn
+                SkipBusStopInputOnReturn = SkipBusStopInputOnReturn,
+                SkipCompanionCountInputOnReturn = SkipCompanionCountInputOnReturn
             };
 
             var success = await _settingsRepository.SaveAppSettingsAsync(settings);
@@ -686,6 +694,11 @@ public partial class SettingsViewModel : ViewModelBase
     }
 
     partial void OnSkipBusStopInputOnReturnChanged(bool value)
+    {
+        HasChanges = true;
+    }
+
+    partial void OnSkipCompanionCountInputOnReturnChanged(bool value)
     {
         HasChanges = true;
     }

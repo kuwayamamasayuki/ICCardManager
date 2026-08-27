@@ -946,7 +946,8 @@ public class LedgerMergeServiceTests : IDisposable
             ReturnerIdm = "2222222222222222",
             LentAt = new DateTime(2026, 2, 3, 8, 0, 0),
             ReturnedAt = new DateTime(2026, 2, 3, 18, 0, 0),
-            IsLentRecord = false
+            IsLentRecord = false,
+            CompanionCount = 2 // Issue #1906
         };
 
         // Act
@@ -968,6 +969,7 @@ public class LedgerMergeServiceTests : IDisposable
         restored.LentAt.Should().Be(original.LentAt);
         restored.ReturnedAt.Should().Be(original.ReturnedAt);
         restored.IsLentRecord.Should().Be(original.IsLentRecord);
+        restored.CompanionCount.Should().Be(2, "Issue #1906: 統合取り消しで同行者数も復元する");
     }
 
     /// <summary>

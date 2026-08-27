@@ -71,6 +71,7 @@ namespace ICCardManager.Services
         public string? LentAtText { get; set; }
         public string? ReturnedAtText { get; set; }
         public bool IsLentRecord { get; set; }
+        public int CompanionCount { get; set; }
 
         public static LedgerSnapshot FromLedger(Ledger ledger)
         {
@@ -89,7 +90,8 @@ namespace ICCardManager.Services
                 ReturnerIdm = ledger.ReturnerIdm,
                 LentAtText = ledger.LentAt?.ToString("yyyy-MM-dd HH:mm:ss"),
                 ReturnedAtText = ledger.ReturnedAt?.ToString("yyyy-MM-dd HH:mm:ss"),
-                IsLentRecord = ledger.IsLentRecord
+                IsLentRecord = ledger.IsLentRecord,
+                CompanionCount = ledger.CompanionCount
             };
         }
 
@@ -110,7 +112,8 @@ namespace ICCardManager.Services
                 ReturnerIdm = ReturnerIdm,
                 LentAt = string.IsNullOrEmpty(LentAtText) ? null : DateTime.Parse(LentAtText),
                 ReturnedAt = string.IsNullOrEmpty(ReturnedAtText) ? null : DateTime.Parse(ReturnedAtText),
-                IsLentRecord = IsLentRecord
+                IsLentRecord = IsLentRecord,
+                CompanionCount = CompanionCount
             };
         }
     }

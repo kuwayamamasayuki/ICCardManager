@@ -23,6 +23,8 @@ namespace ICCardManager.Services.Import.Parsers
             public int Balance { get; set; }
             public string StaffName { get; set; }
             public string Note { get; set; }
+            /// <summary>同行者数（Issue #1906。列が無い旧形式 CSV では 0）</summary>
+            public int CompanionCount { get; set; }
         }
 
         public static ParsedLedgerRow TryParseRow(
@@ -58,6 +60,8 @@ namespace ICCardManager.Services.Import.Parsers
             var balanceStr = fields[6 + offset].Trim();
             var staffName = CsvImportService.ReadTextField(fields, 7 + offset);
             var note = CsvImportService.ReadTextField(fields, 8 + offset);
+            // Issue #1906: 同行者数列は末尾の任意列（旧形式の CSV には無い）
+            var companionCountStr = fields.Count > 9 + offset ? fields[9 + offset].Trim() : string.Empty;
 
             int? ledgerId = null;
             if (hasIdColumn && !string.IsNullOrWhiteSpace(idStr))
@@ -161,6 +165,20 @@ namespace ICCardManager.Services.Import.Parsers
                 return null;
             }
 
+            var companionCount = 0;
+            if (!string.IsNullOrWhiteSpace(companionCountStr) &&
+                (!int.TryParse(companionCountStr, out companionCount) ||
+                 companionCount < 0 || companionCount > Common.StaffNameFormatter.MaxCompanionCount))
+            {
+                errors.Add(new CsvImportError
+                {
+                    LineNumber = lineNumber,
+                    Message = $"同行者数「{companionCountStr}」の形式が不正です。本人を除く人数を0～{Common.StaffNameFormatter.MaxCompanionCount}の整数で入力してください",
+                    Data = companionCountStr
+                });
+                return null;
+            }
+
             return new ParsedLedgerRow
             {
                 LineNumber = lineNumber,
@@ -172,7 +190,8 @@ namespace ICCardManager.Services.Import.Parsers
                 Expense = expense,
                 Balance = balance,
                 StaffName = staffName,
-                Note = note
+                Note = note,
+                CompanionCount = companionCount
             };
         }
     }

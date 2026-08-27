@@ -1886,6 +1886,89 @@ public class LedgerRepositoryTests : IDisposable
 
     #endregion
 
+    #region 同行者数（Issue #1906）
+
+    /// <summary>
+    /// Issue #1906: companion_count が INSERT → SELECT で往復すること
+    /// </summary>
+    [Fact]
+    public async Task InsertAsync_CompanionCount_RoundTripsThroughGetById()
+    {
+        var ledger = CreateTestLedger(TestCardIdm, DateTime.Today, "鉄道（博多～天神）", expense: 260);
+        ledger.StaffName = "博多 花子";
+        ledger.CompanionCount = 2;
+        var id = await _repository.InsertAsync(ledger);
+
+        var result = await _repository.GetByIdAsync(id);
+
+        result!.CompanionCount.Should().Be(2);
+        result.StaffName.Should().Be("博多 花子", "staff_name には「外N名」を書き込まない");
+        result.DisplayStaffName.Should().Be("博多 花子 外2名");
+    }
+
+    /// <summary>
+    /// Issue #1906: UpdateAsync の SET 句に companion_count が含まれること
+    /// </summary>
+    [Fact]
+    public async Task UpdateAsync_CompanionCount_IsPersisted()
+    {
+        var ledger = CreateTestLedger(TestCardIdm, DateTime.Today, "鉄道（博多～天神）", expense: 260);
+        var id = await _repository.InsertAsync(ledger);
+        var stored = await _repository.GetByIdAsync(id);
+        stored!.CompanionCount = 3;
+
+        var ok = await _repository.UpdateAsync(stored);
+
+        ok.Should().BeTrue();
+        (await _repository.GetByIdAsync(id))!.CompanionCount.Should().Be(3);
+    }
+
+    /// <summary>
+    /// Issue #1906: 返却時ダイアログ用の単票更新。他列は変えない
+    /// </summary>
+    [Fact]
+    public async Task UpdateCompanionCountAsync_ExistingLedger_UpdatesOnlyCompanionCount()
+    {
+        var ledger = CreateTestLedger(TestCardIdm, DateTime.Today, "鉄道（博多～天神）", expense: 260);
+        ledger.StaffName = "博多 花子";
+        var id = await _repository.InsertAsync(ledger);
+
+        var ok = await _repository.UpdateCompanionCountAsync(id, 1);
+
+        ok.Should().BeTrue();
+        var result = await _repository.GetByIdAsync(id);
+        result!.CompanionCount.Should().Be(1);
+        result.StaffName.Should().Be("博多 花子");
+        result.Summary.Should().Be("鉄道（博多～天神）");
+    }
+
+    /// <summary>
+    /// Issue #1906 / #1753: 影響行数 0（行が削除済み）は競合として false
+    /// </summary>
+    [Fact]
+    public async Task UpdateCompanionCountAsync_MissingLedger_ReturnsFalse()
+    {
+        var ok = await _repository.UpdateCompanionCountAsync(99999, 1);
+        ok.Should().BeFalse();
+    }
+
+    /// <summary>
+    /// Issue #1906: ページング取得（detail_count 付きのマッパー）でも companion_count が読めること
+    /// </summary>
+    [Fact]
+    public async Task GetPagedAsync_CompanionCount_IsMapped()
+    {
+        var ledger = CreateTestLedger(TestCardIdm, DateTime.Today, "鉄道（博多～天神）", expense: 260);
+        ledger.CompanionCount = 4;
+        await _repository.InsertAsync(ledger);
+
+        var (items, _) = await _repository.GetPagedAsync(TestCardIdm, DateTime.Today.AddDays(-1), DateTime.Today.AddDays(1), 1, 10);
+
+        items.Should().ContainSingle().Which.CompanionCount.Should().Be(4);
+    }
+
+    #endregion
+
     #region ヘルパーメソッド
 
     private static Ledger CreateTestLedger(string cardIdm, DateTime date, string summary, int income = 0, int expense = 0)

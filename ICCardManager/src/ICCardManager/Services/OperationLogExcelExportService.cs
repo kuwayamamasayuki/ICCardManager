@@ -517,6 +517,7 @@ public class OperationLogExcelExportService
                 { "Balance", "残額" },
                 { "StaffName", "利用者" },
                 { "Note", "備考" },
+                { "CompanionCount", "同行者数" },
             },
             _ => new Dictionary<string, string>()
         };

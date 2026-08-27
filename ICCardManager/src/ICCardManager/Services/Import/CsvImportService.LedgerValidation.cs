@@ -28,6 +28,7 @@ namespace ICCardManager.Services
         /// <param name="newBalance">新しい残額</param>
         /// <param name="newStaffName">新しい利用者名</param>
         /// <param name="newNote">新しい備考</param>
+        /// <param name="newCompanionCount">新しい同行者数（Issue #1906）</param>
         /// <param name="changes">変更点リスト（検出結果が追加される）</param>
         private static void DetectLedgerChanges(
             Ledger existingLedger,
@@ -38,6 +39,7 @@ namespace ICCardManager.Services
             int newBalance,
             string newStaffName,
             string newNote,
+            int newCompanionCount,
             List<FieldChange> changes)
         {
             // Issue #639: 金額・日付フィールドの変更も検出
@@ -112,6 +114,16 @@ namespace ICCardManager.Services
                     NewValue = string.IsNullOrEmpty(newNote) ? "(なし)" : newNote
                 });
             }
+
+            if (existingLedger.CompanionCount != newCompanionCount)
+            {
+                changes.Add(new FieldChange
+                {
+                    FieldName = "同行者数",
+                    OldValue = existingLedger.CompanionCount.ToString(),
+                    NewValue = newCompanionCount.ToString()
+                });
+            }
         }
 
         /// <summary>
@@ -120,7 +132,7 @@ namespace ICCardManager.Services
         /// </summary>
 
         internal static void ValidateBalanceConsistency(
-            List<(int LineNumber, int? LedgerId, string CardIdm, DateTime Date, string Summary, int Income, int Expense, int Balance, string StaffName, string Note)> records,
+            List<(int LineNumber, int? LedgerId, string CardIdm, DateTime Date, string Summary, int Income, int Expense, int Balance, string StaffName, string Note, int CompanionCount)> records,
             List<CsvImportError> errors,
             Dictionary<string, int> previousBalanceByCard = null)
         {

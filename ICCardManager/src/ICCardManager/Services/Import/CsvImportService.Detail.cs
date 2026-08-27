@@ -753,7 +753,7 @@ namespace ICCardManager.Services
         /// Issue #969対応。
         /// </summary>
         internal static List<FieldChange> CreateLedgerDisplayChanges(
-            DateTime date, string summary, int income, int expense, int balance, string staffName, string note)
+            DateTime date, string summary, int income, int expense, int balance, string staffName, string note, int companionCount = 0)
         {
             var changes = new List<FieldChange>
             {
@@ -769,6 +769,8 @@ namespace ICCardManager.Services
                 changes.Add(new FieldChange { FieldName = "職員名", NewValue = staffName, IsDisplayOnly = true });
             if (!string.IsNullOrEmpty(note))
                 changes.Add(new FieldChange { FieldName = "備考", NewValue = note, IsDisplayOnly = true });
+            if (companionCount > 0)
+                changes.Add(new FieldChange { FieldName = "同行者数", NewValue = $"{companionCount}名", IsDisplayOnly = true });
             return changes;
         }
 

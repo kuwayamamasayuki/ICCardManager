@@ -41,7 +41,7 @@ namespace ICCardManager.Data.Repositories
             // Issue #784: 同一日内の順序はアプリケーション層で残高チェーンにより決定
             // Issue #590: 新規購入/繰越はsummaryベースで最優先（income額に依存しない）
             command.CommandText = $@"SELECT id, card_idm, lender_idm, date, summary, income, expense, balance,
-       staff_name, note, returner_idm, lent_at, returned_at, is_lent_record
+       staff_name, note, returner_idm, lent_at, returned_at, is_lent_record, companion_count
 FROM ledger
 {whereClause}
 ORDER BY DATE(date) ASC,
@@ -85,7 +85,7 @@ ORDER BY DATE(date) ASC,
 
             using var command = connection.CreateCommand();
             command.CommandText = @"SELECT id, card_idm, lender_idm, date, summary, income, expense, balance,
-       staff_name, note, returner_idm, lent_at, returned_at, is_lent_record
+       staff_name, note, returner_idm, lent_at, returned_at, is_lent_record, companion_count
 FROM ledger
 WHERE id = @id;
 
@@ -118,7 +118,7 @@ ORDER BY use_date ASC, is_charge DESC, is_point_redemption DESC, rowid DESC";
 
             using var command = connection.CreateCommand();
             command.CommandText = @"SELECT id, card_idm, lender_idm, date, summary, income, expense, balance,
-       staff_name, note, returner_idm, lent_at, returned_at, is_lent_record
+       staff_name, note, returner_idm, lent_at, returned_at, is_lent_record, companion_count
 FROM ledger
 WHERE card_idm = @cardIdm AND is_lent_record = 1
 ORDER BY lent_at DESC
@@ -157,7 +157,7 @@ ORDER BY use_date ASC, is_charge DESC, is_point_redemption DESC, rowid DESC";
 
             using var command = connection.CreateCommand();
             command.CommandText = @"SELECT id, card_idm, lender_idm, date, summary, income, expense, balance,
-       staff_name, note, returner_idm, lent_at, returned_at, is_lent_record
+       staff_name, note, returner_idm, lent_at, returned_at, is_lent_record, companion_count
 FROM ledger
 WHERE is_lent_record = 1
 ORDER BY lent_at DESC";
@@ -197,9 +197,9 @@ ORDER BY lent_at DESC";
                     command.Transaction = transaction;
                 }
                 command.CommandText = @"INSERT INTO ledger (card_idm, lender_idm, date, summary, income, expense, balance,
-                   staff_name, note, returner_idm, lent_at, returned_at, is_lent_record)
+                   staff_name, note, returner_idm, lent_at, returned_at, is_lent_record, companion_count)
 VALUES (@cardIdm, @lenderIdm, @date, @summary, @income, @expense, @balance,
-       @staffName, @note, @returnerIdm, @lentAt, @returnedAt, @isLentRecord);
+       @staffName, @note, @returnerIdm, @lentAt, @returnedAt, @isLentRecord, @companionCount);
 SELECT last_insert_rowid();";
 
                 command.Parameters.AddWithValue("@cardIdm", ledger.CardIdm);
@@ -215,6 +215,7 @@ SELECT last_insert_rowid();";
                 command.Parameters.AddWithValue("@lentAt", ledger.LentAt.HasValue ? ledger.LentAt.Value.ToString("yyyy-MM-dd HH:mm:ss") : DBNull.Value);
                 command.Parameters.AddWithValue("@returnedAt", ledger.ReturnedAt.HasValue ? ledger.ReturnedAt.Value.ToString("yyyy-MM-dd HH:mm:ss") : DBNull.Value);
                 command.Parameters.AddWithValue("@isLentRecord", ledger.IsLentRecord ? 1 : 0);
+                command.Parameters.AddWithValue("@companionCount", ledger.CompanionCount);
 
                 var result = await command.ExecuteScalarAsync();
                 return Convert.ToInt32(result);
@@ -254,7 +255,8 @@ SELECT last_insert_rowid();";
 SET lender_idm = @lenderIdm, date = @date, summary = @summary,
     income = @income, expense = @expense, balance = @balance,
     staff_name = @staffName, note = @note, returner_idm = @returnerIdm,
-    lent_at = @lentAt, returned_at = @returnedAt, is_lent_record = @isLentRecord
+    lent_at = @lentAt, returned_at = @returnedAt, is_lent_record = @isLentRecord,
+    companion_count = @companionCount
 WHERE id = @id";
 
                 command.Parameters.AddWithValue("@id", ledger.Id);
@@ -270,6 +272,7 @@ WHERE id = @id";
                 command.Parameters.AddWithValue("@lentAt", ledger.LentAt.HasValue ? ledger.LentAt.Value.ToString("yyyy-MM-dd HH:mm:ss") : DBNull.Value);
                 command.Parameters.AddWithValue("@returnedAt", ledger.ReturnedAt.HasValue ? ledger.ReturnedAt.Value.ToString("yyyy-MM-dd HH:mm:ss") : DBNull.Value);
                 command.Parameters.AddWithValue("@isLentRecord", ledger.IsLentRecord ? 1 : 0);
+                command.Parameters.AddWithValue("@companionCount", ledger.CompanionCount);
 
                 var result = await command.ExecuteNonQueryAsync();
                 return result > 0;
@@ -627,7 +630,7 @@ VALUES (@ledgerId, @useDate, @entryStation, @exitStation,
             using (var command = connection.CreateCommand())
             {
                 command.CommandText = $@"SELECT id, card_idm, lender_idm, date, summary, income, expense, balance,
-       staff_name, note, returner_idm, lent_at, returned_at, is_lent_record
+       staff_name, note, returner_idm, lent_at, returned_at, is_lent_record, companion_count
 FROM ledger
 WHERE card_idm = @cardIdm {beforeFilter}
   AND DATE(date) = (
@@ -766,7 +769,7 @@ LIMIT 1";
             using (var command = connection.CreateCommand())
             {
                 command.CommandText = @"SELECT id, card_idm, lender_idm, date, summary, income, expense, balance,
-       staff_name, note, returner_idm, lent_at, returned_at, is_lent_record
+       staff_name, note, returner_idm, lent_at, returned_at, is_lent_record, companion_count
 FROM ledger l
 WHERE DATE(l.date) = (
     SELECT DATE(MAX(l2.date)) FROM ledger l2
@@ -1013,7 +1016,7 @@ ORDER BY ym, staff";
     GROUP BY c, ym
 )
 SELECT l.id, l.card_idm, l.lender_idm, l.date, l.summary, l.income, l.expense, l.balance,
-       l.staff_name, l.note, l.returner_idm, l.lent_at, l.returned_at, l.is_lent_record
+       l.staff_name, l.note, l.returner_idm, l.lent_at, l.returned_at, l.is_lent_record, l.companion_count
 FROM ledger l
 JOIN last_day ON last_day.c = l.card_idm AND last_day.d = DATE(l.date)
 WHERE l.date BETWEEN @fromDate AND @toDate
@@ -1063,7 +1066,7 @@ ORDER BY l.card_idm, l.date, l.id";
             using (var command = connection.CreateCommand())
             {
                 command.CommandText = @"SELECT l.id, l.card_idm, l.lender_idm, l.date, l.summary, l.income, l.expense, l.balance,
-       l.staff_name, l.note, l.returner_idm, l.lent_at, l.returned_at, l.is_lent_record
+       l.staff_name, l.note, l.returner_idm, l.lent_at, l.returned_at, l.is_lent_record, l.companion_count
 FROM ledger l
 WHERE l.date < @beforeDate
   AND l.is_lent_record = 0
@@ -1202,6 +1205,28 @@ WHERE ledger_id = @ledgerId AND rowid = @rowid";
         }
 
         /// <inheritdoc/>
+        public async Task<bool> UpdateCompanionCountAsync(int ledgerId, int companionCount)
+        {
+            if (companionCount < 0 || companionCount > Common.StaffNameFormatter.MaxCompanionCount)
+            {
+                throw new ArgumentOutOfRangeException(nameof(companionCount), companionCount,
+                    $"同行者数は0～{Common.StaffNameFormatter.MaxCompanionCount}の範囲で指定してください。");
+            }
+
+            using var lease = await _dbContext.LeaseConnectionAsync().ConfigureAwait(false);
+            var connection = lease.Connection;
+
+            using var command = connection.CreateCommand();
+            command.CommandText = "UPDATE ledger SET companion_count = @companionCount WHERE id = @id";
+            command.Parameters.AddWithValue("@companionCount", companionCount);
+            command.Parameters.AddWithValue("@id", ledgerId);
+
+            // Issue #1753: 影響行数 0 は「行が存在しない」＝競合
+            var rows = await command.ExecuteNonQueryAsync().ConfigureAwait(false);
+            return rows > 0;
+        }
+
+        /// <inheritdoc/>
         public async Task<(IEnumerable<Ledger> Items, int TotalCount)> GetPagedAsync(
             string cardIdm,
             DateTime fromDate,
@@ -1242,7 +1267,7 @@ FROM ledger
             // Issue #1457: detail_count を相関サブクエリ（N+1）から CTE による page-scoped 集計に変更
             command.CommandText = $@"WITH paged_ledger AS (
     SELECT id, card_idm, lender_idm, date, summary, income, expense, balance,
-           staff_name, note, returner_idm, lent_at, returned_at, is_lent_record
+           staff_name, note, returner_idm, lent_at, returned_at, is_lent_record, companion_count
     FROM ledger
     {whereClause}
     ORDER BY DATE(date) ASC,
@@ -1251,7 +1276,7 @@ FROM ledger
     LIMIT @pageSize OFFSET @offset
 )
 SELECT l.id, l.card_idm, l.lender_idm, l.date, l.summary, l.income, l.expense, l.balance,
-       l.staff_name, l.note, l.returner_idm, l.lent_at, l.returned_at, l.is_lent_record,
+       l.staff_name, l.note, l.returner_idm, l.lent_at, l.returned_at, l.is_lent_record, l.companion_count,
        COALESCE(d.cnt, 0) AS detail_count
 FROM paged_ledger l
 LEFT JOIN (
@@ -1406,7 +1431,8 @@ ORDER BY ledger_id, use_date ASC, is_charge DESC, is_point_redemption DESC, rowi
                 ReturnerIdm = reader.IsDBNull(10) ? null : reader.GetString(10),
                 LentAt = reader.IsDBNull(11) ? null : DateTime.Parse(reader.GetString(11)),
                 ReturnedAt = reader.IsDBNull(12) ? null : DateTime.Parse(reader.GetString(12)),
-                IsLentRecord = reader.GetInt32(13) == 1
+                IsLentRecord = reader.GetInt32(13) == 1,
+                CompanionCount = reader.GetInt32(14)
             };
         }
 
@@ -1431,7 +1457,8 @@ ORDER BY ledger_id, use_date ASC, is_charge DESC, is_point_redemption DESC, rowi
                 LentAt = reader.IsDBNull(11) ? null : DateTime.Parse(reader.GetString(11)),
                 ReturnedAt = reader.IsDBNull(12) ? null : DateTime.Parse(reader.GetString(12)),
                 IsLentRecord = reader.GetInt32(13) == 1,
-                DetailCount = reader.GetInt32(14)
+                CompanionCount = reader.GetInt32(14),
+                DetailCount = reader.GetInt32(15)
             };
         }
 
@@ -1791,9 +1818,9 @@ WHERE id = @id";
                 using var insertCommand = connection.CreateCommand();
                 insertCommand.Transaction = transaction;
                 insertCommand.CommandText = @"INSERT INTO ledger (card_idm, lender_idm, date, summary, income, expense, balance,
-                           staff_name, note, returner_idm, lent_at, returned_at, is_lent_record)
+                           staff_name, note, returner_idm, lent_at, returned_at, is_lent_record, companion_count)
 VALUES (@cardIdm, @lenderIdm, @date, @summary, @income, @expense, @balance,
-       @staffName, @note, @returnerIdm, @lentAt, @returnedAt, @isLentRecord);
+       @staffName, @note, @returnerIdm, @lentAt, @returnedAt, @isLentRecord, @companionCount);
 SELECT last_insert_rowid();";
 
                 insertCommand.Parameters.AddWithValue("@cardIdm", source.CardIdm);
@@ -1809,6 +1836,7 @@ SELECT last_insert_rowid();";
                 insertCommand.Parameters.AddWithValue("@lentAt", (object)source.LentAtText ?? DBNull.Value);
                 insertCommand.Parameters.AddWithValue("@returnedAt", (object)source.ReturnedAtText ?? DBNull.Value);
                 insertCommand.Parameters.AddWithValue("@isLentRecord", source.IsLentRecord ? 1 : 0);
+                insertCommand.Parameters.AddWithValue("@companionCount", source.CompanionCount);
 
                 var newId = Convert.ToInt32(await insertCommand.ExecuteScalarAsync().ConfigureAwait(false));
                 idMapping[source.Id] = newId;

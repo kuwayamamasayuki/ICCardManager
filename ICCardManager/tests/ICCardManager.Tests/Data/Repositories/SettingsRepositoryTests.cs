@@ -366,6 +366,29 @@ public class SettingsRepositoryTests : IDisposable
 
     #endregion
 
+    #region SkipCompanionCountInputOnReturn テスト（Issue #1906）
+
+    [Fact]
+    public async Task GetAppSettingsAsync_Default_SkipCompanionCountInputOnReturnIsFalse()
+    {
+        var result = await _repository.GetAppSettingsAsync();
+        result.SkipCompanionCountInputOnReturn.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task SaveAndLoadAppSettings_SkipCompanionCountInputOnReturn_RoundTrip()
+    {
+        var settings = new AppSettings { WarningBalance = 10000, BackupPath = @"C:\Backup", SkipCompanionCountInputOnReturn = true };
+
+        await _repository.SaveAppSettingsAsync(settings);
+        var loaded = await _repository.GetAppSettingsAsync();
+
+        loaded.SkipCompanionCountInputOnReturn.Should().BeTrue();
+        _repository.GetAppSettings().SkipCompanionCountInputOnReturn.Should().BeTrue("同期版の読み込みも同じキーを見る");
+    }
+
+    #endregion
+
     #region SkipBusStopInputOnReturn テスト
 
     /// <summary>

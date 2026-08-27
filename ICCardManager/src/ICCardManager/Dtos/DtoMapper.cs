@@ -99,6 +99,7 @@ namespace ICCardManager.Dtos
                 Expense = ledger.Expense,
                 Balance = ledger.Balance,
                 StaffName = ledger.StaffName,
+                CompanionCount = ledger.CompanionCount,
                 Note = ledger.Note,
                 IsLentRecord = ledger.IsLentRecord,
                 Details = ledger.Details?.Select(d => d.ToDto()).ToList() ?? new List<LedgerDetailDto>(),

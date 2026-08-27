@@ -56,6 +56,9 @@ namespace ICCardManager.Data.Repositories
         // バス停入力スキップ設定キー
         public const string KeySkipBusStopInputOnReturn = "skip_bus_stop_input_on_return";
 
+        // 同行者数入力スキップ設定キー（Issue #1906）
+        public const string KeySkipCompanionCountInputOnReturn = "skip_companion_count_input_on_return";
+
         // 帳票出力先フォルダ設定キー
         public const string KeyReportOutputFolder = "report_output_folder";
 
@@ -314,6 +317,9 @@ WHERE settings.value IS NULL OR substr(settings.value, 1, 7) <> @currentMonth";
             var skipBusStopInput = Get(KeySkipBusStopInputOnReturn);
             settings.SkipBusStopInputOnReturn = skipBusStopInput?.ToLowerInvariant() == "true";
 
+            // 同行者数入力スキップ設定（Issue #1906）
+            settings.SkipCompanionCountInputOnReturn = Get(KeySkipCompanionCountInputOnReturn)?.ToLowerInvariant() == "true";
+
             // 帳票出力先フォルダ設定
             var reportOutputFolder = Get(KeyReportOutputFolder);
             settings.ReportOutputFolder = reportOutputFolder ?? string.Empty;
@@ -422,6 +428,9 @@ WHERE settings.value IS NULL OR substr(settings.value, 1, 7) <> @currentMonth";
             var skipBusStopInput = await GetAsync(KeySkipBusStopInputOnReturn);
             settings.SkipBusStopInputOnReturn = skipBusStopInput?.ToLowerInvariant() == "true";
 
+            // 同行者数入力スキップ設定（Issue #1906）
+            settings.SkipCompanionCountInputOnReturn = (await GetAsync(KeySkipCompanionCountInputOnReturn))?.ToLowerInvariant() == "true";
+
             // 帳票出力先フォルダ設定
             var reportOutputFolder = await GetAsync(KeyReportOutputFolder);
             settings.ReportOutputFolder = reportOutputFolder ?? string.Empty;
@@ -507,6 +516,9 @@ WHERE settings.value IS NULL OR substr(settings.value, 1, 7) <> @currentMonth";
 
                     // バス停入力スキップ設定を保存
                     success &= await SetAsync(KeySkipBusStopInputOnReturn, settings.SkipBusStopInputOnReturn.ToString().ToLowerInvariant(), scope);
+
+                    // 同行者数入力スキップ設定を保存（Issue #1906）
+                    success &= await SetAsync(KeySkipCompanionCountInputOnReturn, settings.SkipCompanionCountInputOnReturn.ToString().ToLowerInvariant(), scope);
 
                     // 帳票出力先フォルダ設定を保存
                     success &= await SetAsync(KeyReportOutputFolder, settings.ReportOutputFolder ?? string.Empty, scope);

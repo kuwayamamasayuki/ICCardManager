@@ -357,7 +357,33 @@ public class CsvExportServiceTests : IDisposable
         // ファイル内容を確認
         var lines = await Task.Run(() => File.ReadAllLines(filePath, Encoding.UTF8));
         lines.Should().HaveCount(3); // ヘッダー + 2行
-        lines[0].Should().Be("ID,日時,カードIDm,管理番号,摘要,受入金額,払出金額,残額,利用者,備考");
+        // Issue #1906: 同行者数列を末尾に追加（利用者列は生の氏名のまま）
+        lines[0].Should().Be("ID,日時,カードIDm,管理番号,摘要,受入金額,払出金額,残額,利用者,備考,同行者数");
+    }
+
+    /// <summary>
+    /// Issue #1906: 同行者数は利用者列に「外N名」として混ぜず、専用列に数値で出すこと（取込との往復対称、#1808）
+    /// </summary>
+    [Fact]
+    public async Task ExportLedgersAsync_CompanionCount_IsWrittenToDedicatedColumn()
+    {
+        var ledgers = new List<Ledger>
+        {
+            new Ledger { Id = 1, CardIdm = "0123456789ABCDEF", Date = new DateTime(2024, 1, 15), Summary = "鉄道（博多～天神）", Expense = 260, Balance = 9740, StaffName = "博多花子", CompanionCount = 2 },
+            new Ledger { Id = 2, CardIdm = "0123456789ABCDEF", Date = new DateTime(2024, 1, 16), Summary = "鉄道（天神～博多）", Expense = 260, Balance = 9480, StaffName = "博多花子", CompanionCount = 0 },
+        };
+        _ledgerRepositoryMock
+            .Setup(x => x.GetByDateRangeAsync(null, It.IsAny<DateTime>(), It.IsAny<DateTime>()))
+            .ReturnsAsync(ledgers);
+        var filePath = Path.Combine(_testDirectory, "ledgers_companion.csv");
+
+        var result = await _service.ExportLedgersAsync(filePath, new DateTime(2024, 1, 1), new DateTime(2024, 1, 31));
+
+        result.Success.Should().BeTrue();
+        var lines = await Task.Run(() => File.ReadAllLines(filePath, Encoding.UTF8));
+        lines[1].Should().EndWith(",博多花子,,2");
+        lines[1].Should().NotContain("外2名");
+        lines[2].Should().EndWith(",博多花子,,", "同行者 0 は空欄");
     }
 
     /// <summary>

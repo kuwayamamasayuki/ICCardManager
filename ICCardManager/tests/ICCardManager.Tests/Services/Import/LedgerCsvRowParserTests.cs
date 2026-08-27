@@ -35,6 +35,68 @@ public class LedgerCsvRowParserTests
         };
     }
 
+    #region 同行者数列（Issue #1906）
+
+    [Fact]
+    public void TryParseRow_同行者数列が無い旧形式_0として読むこと()
+    {
+        var errors = new List<CsvImportError>();
+        var row = LedgerCsvRowParser.TryParseRow(ValidNineColumnFields(), 2, "line", false, 9, ExistingCards(), null, errors);
+
+        row.Should().NotBeNull();
+        row!.CompanionCount.Should().Be(0);
+        errors.Should().BeEmpty();
+    }
+
+    [Theory]
+    [InlineData("2", 2)]
+    [InlineData("", 0)]
+    [InlineData(" 99 ", 99)]
+    public void TryParseRow_同行者数列あり_整数として読むこと(string text, int expected)
+    {
+        var fields = ValidNineColumnFields();
+        fields.Add(text);
+        var errors = new List<CsvImportError>();
+
+        var row = LedgerCsvRowParser.TryParseRow(fields, 2, "line", false, 9, ExistingCards(), null, errors);
+
+        row.Should().NotBeNull();
+        row!.CompanionCount.Should().Be(expected);
+        errors.Should().BeEmpty();
+    }
+
+    [Theory]
+    [InlineData("abc")]
+    [InlineData("-1")]
+    [InlineData("100")]
+    public void TryParseRow_同行者数が不正_行番号付きエラーで3要素の案内を返すこと(string text)
+    {
+        var fields = ValidNineColumnFields();
+        fields.Add(text);
+        var errors = new List<CsvImportError>();
+
+        var row = LedgerCsvRowParser.TryParseRow(fields, 5, "line", false, 9, ExistingCards(), null, errors);
+
+        row.Should().BeNull();
+        errors.Should().ContainSingle();
+        errors[0].LineNumber.Should().Be(5);
+        errors[0].Message.Should().Contain(text).And.Contain("0～99").And.EndWith("入力してください");
+    }
+
+    [Fact]
+    public void TryParseRow_ID列ありでも同行者数列を読むこと()
+    {
+        var fields = ValidTenColumnFields("12");
+        fields.Add("3");
+        var errors = new List<CsvImportError>();
+
+        var row = LedgerCsvRowParser.TryParseRow(fields, 2, "line", true, 10, ExistingCards(), null, errors);
+
+        row!.CompanionCount.Should().Be(3);
+    }
+
+    #endregion
+
     // 10列フォーマット（ID列あり）
     private static List<string> ValidTenColumnFields(string id)
     {

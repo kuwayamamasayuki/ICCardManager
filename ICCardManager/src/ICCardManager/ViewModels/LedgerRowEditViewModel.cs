@@ -128,6 +128,19 @@ namespace ICCardManager.ViewModels
         private string _note = string.Empty;
 
         /// <summary>
+        /// 同行者数（本人を含まない。Issue #1906）
+        /// </summary>
+        [ObservableProperty]
+        [NotifyPropertyChangedFor(nameof(DisplayStaffNamePreview))]
+        private int _companionCount;
+
+        /// <summary>
+        /// 氏名欄の表示プレビュー（「博多 花子 外1名」、Issue #1906）
+        /// </summary>
+        public string DisplayStaffNamePreview =>
+            CompanionCount < 0 ? string.Empty : StaffNameFormatter.Format(SelectedStaff?.Name, CompanionCount);
+
+        /// <summary>
         /// 職員リスト
         /// </summary>
         [ObservableProperty]
@@ -137,6 +150,7 @@ namespace ICCardManager.ViewModels
         /// 選択中の職員
         /// </summary>
         [ObservableProperty]
+        [NotifyPropertyChangedFor(nameof(DisplayStaffNamePreview))]
         private Staff? _selectedStaff;
 
         /// <summary>
@@ -431,6 +445,7 @@ namespace ICCardManager.ViewModels
             Expense = ledger.Expense;
             Balance = ledger.Balance;
             Note = ledger.Note ?? string.Empty;
+            CompanionCount = ledger.CompanionCount;
 
             await LoadStaffListAsync();
 
@@ -539,6 +554,12 @@ namespace ICCardManager.ViewModels
         partial void OnNoteChanged(string value)
         {
             TrackFieldChange();
+        }
+
+        partial void OnCompanionCountChanged(int value)
+        {
+            TrackFieldChange();
+            Validate();
         }
 
         partial void OnEditDateChanged(DateTime value)
@@ -752,6 +773,17 @@ namespace ICCardManager.ViewModels
                 return;
             }
 
+            // Issue #1906: 同行者数の範囲チェック
+            if (CompanionCount < 0 || CompanionCount > StaffNameFormatter.MaxCompanionCount)
+            {
+                ValidationMessage =
+                    $"同行者数が {CompanionCount} で範囲外です。" +
+                    $"本人を除く人数を0～{StaffNameFormatter.MaxCompanionCount}の整数で入力してください。";
+                CanSave = false;
+                FirstErrorField = nameof(CompanionCount);
+                return;
+            }
+
             // Addモードの場合の日付チェック
             if (Mode == LedgerRowEditMode.Add && _allLedgers.Count > 0)
             {
@@ -827,6 +859,7 @@ namespace ICCardManager.ViewModels
                 StaffName = SelectedStaff?.Name,
                 LenderIdm = SelectedStaff?.StaffIdm,
                 Note = Note,
+                CompanionCount = CompanionCount,
                 IsLentRecord = false
             };
 
@@ -884,6 +917,7 @@ namespace ICCardManager.ViewModels
             ledger.Expense = Expense;
             ledger.Balance = Balance;
             ledger.Note = Note;
+            ledger.CompanionCount = CompanionCount;
 
             if (SelectedStaff != null)
             {

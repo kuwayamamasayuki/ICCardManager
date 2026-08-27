@@ -72,9 +72,19 @@ namespace ICCardManager.Dtos
         public int Balance { get; set; }
 
         /// <summary>
-        /// 利用者氏名
+        /// 利用者氏名（DB の staff_name そのもの。「外N名」は含まない）
         /// </summary>
         public string StaffName { get; set; }
+
+        /// <summary>
+        /// 同行者数（本人を含まない。Issue #1906）
+        /// </summary>
+        public int CompanionCount { get; set; }
+
+        /// <summary>
+        /// 一覧表示用の氏名（同行者がいれば「氏名 外N名」、Issue #1906）
+        /// </summary>
+        public string DisplayStaffName => Common.StaffNameFormatter.Format(StaffName, CompanionCount);
 
         /// <summary>
         /// 備考

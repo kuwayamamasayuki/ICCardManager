@@ -149,5 +149,20 @@ namespace ICCardManager.Tests.Data.Migrations
             Action act = RunMigrationTwice(new Migration_009_AddCarryoverTotals());
             act.Should().NotThrow();
         }
+
+        [Fact]
+        public void Migration_010_AddCompanionCount_Up_IsIdempotent()
+        {
+            RunMigrationOnce(new Migration_002_AddPointRedemption());
+            RunMigrationOnce(new Migration_003_AddTripGroupId());
+            RunMigrationOnce(new Migration_004_AddPerformanceIndexes());
+            RunMigrationOnce(new Migration_005_AddStartingPageNumber());
+            RunMigrationOnce(new Migration_006_AddRefundedStatus());
+            RunMigrationOnce(new Migration_007_AddMergeHistory());
+            RunMigrationOnce(new Migration_008_AddCardTypeNumberUniqueIndex());
+            RunMigrationOnce(new Migration_009_AddCarryoverTotals());
+            Action act = RunMigrationTwice(new Migration_010_AddCompanionCount());
+            act.Should().NotThrow();
+        }
     }
 }

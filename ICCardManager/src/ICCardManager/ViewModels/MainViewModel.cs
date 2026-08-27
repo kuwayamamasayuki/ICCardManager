@@ -1655,12 +1655,46 @@ public partial class MainViewModel : ViewModelBase
             // スキップ時は★マークがSummaryGenerator側で自動付与されるため追加処理不要
         }
 
+        // Issue #1906: 複数名で同一の交通系ICカードを利用した場合の同行者数を入力させる。
+        // バス停名入力の後に出す（利用行が確定してから氏名欄の表記を決める）。
+        // 対象は利用行（払出 > 0）のみで、チャージ・ポイント還元だけの返却では出さない。
+        await ShowCompanionCountInputIfNeededAsync(result);
+
         // Issue #596: 今月の履歴が不完全な可能性がある場合に通知
         if (result.MayHaveIncompleteHistory)
         {
             _toastNotificationService.ShowWarning(
                 "履歴の確認",
                 "今月の利用履歴がすべて取得できていない可能性があります。\nCSVインポートで不足分を補完してください。");
+        }
+    }
+
+    /// <summary>
+    /// Issue #1906: 返却で作られた利用行に対して同行者数入力ダイアログを表示する。
+    /// 設定 <see cref="AppSettings.SkipCompanionCountInputOnReturn"/> が有効なら表示しない
+    /// （その場合も履歴の行編集から後で入力できる）。
+    /// </summary>
+    private async Task ShowCompanionCountInputIfNeededAsync(LendingResult result)
+    {
+        var targets = CompanionCountInputViewModel.SelectTargetLedgers(result.CreatedLedgers);
+        if (targets.Count == 0)
+        {
+            return;
+        }
+
+        var settings = await _settingsRepository.GetAppSettingsAsync();
+        if (settings.SkipCompanionCountInputOnReturn)
+        {
+            return;
+        }
+
+        await _navigationService.ShowDialogAsync<Views.Dialogs.CompanionCountInputDialog>(
+            async d => await d.InitializeWithLedgersAsync(targets));
+
+        // 同行者数の入力後に履歴が開いていれば再読み込み（氏名欄の「外N名」を反映）
+        if (IsHistoryVisible)
+        {
+            await LoadHistoryLedgersAsync();
         }
     }
 

@@ -56,6 +56,15 @@ namespace ICCardManager.Models
         public bool SkipBusStopInputOnReturn { get; set; } = false;
 
         /// <summary>
+        /// 返却時に同行者数入力ダイアログを自動的にスキップするかどうか（Issue #1906）
+        /// </summary>
+        /// <remarks>
+        /// 複数名で同一交通系ICカードを利用する運用が無い組織向け。
+        /// スキップしても履歴編集ダイアログから後で入力できる。
+        /// </remarks>
+        public bool SkipCompanionCountInputOnReturn { get; set; } = false;
+
+        /// <summary>
         /// 帳票出力先フォルダパス
         /// </summary>
         public string ReportOutputFolder { get; set; } = string.Empty;

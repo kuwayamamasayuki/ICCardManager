@@ -2856,11 +2856,16 @@ public class MainViewModelTests : IDisposable
     /// このセットアップは仮想タッチ（<c>ProcessVirtualTouchAsync</c>）からも同じ
     /// 共通メソッドが呼ばれることを担保するために必要。
     /// </remarks>
-    private void SetupForReturnSuccess(bool skipBusStopInputOnReturn = false)
+    private void SetupForReturnSuccess(bool skipBusStopInputOnReturn = false, bool skipCompanionCountInputOnReturn = false)
     {
         _settingsRepositoryMock
             .Setup(s => s.GetAppSettingsAsync())
-            .ReturnsAsync(new AppSettings { SkipBusStopInputOnReturn = skipBusStopInputOnReturn, WarningBalance = 500 });
+            .ReturnsAsync(new AppSettings
+            {
+                SkipBusStopInputOnReturn = skipBusStopInputOnReturn,
+                SkipCompanionCountInputOnReturn = skipCompanionCountInputOnReturn,
+                WarningBalance = 500
+            });
 
         _cardRepositoryMock
             .Setup(r => r.GetLentAsync(It.IsAny<bool>()))
@@ -2886,7 +2891,126 @@ public class MainViewModelTests : IDisposable
             .Setup(n => n.ShowDialogAsync<ICCardManager.Views.Dialogs.BusStopInputDialog>(
                 It.IsAny<Func<ICCardManager.Views.Dialogs.BusStopInputDialog, Task>>()))
             .ReturnsAsync((bool?)true);
+
+        _navigationServiceMock
+            .Setup(n => n.ShowDialogAsync<ICCardManager.Views.Dialogs.CompanionCountInputDialog>(
+                It.IsAny<Func<ICCardManager.Views.Dialogs.CompanionCountInputDialog, Task>>()))
+            .ReturnsAsync((bool?)true);
     }
+
+    #region 同行者数入力ダイアログ（Issue #1906）
+
+    /// <summary>
+    /// Issue #1906: 利用行を含む返却では同行者数入力ダイアログを 1 回表示すること
+    /// </summary>
+    [Fact]
+    public async Task HandleReturnSuccessAsync_WithUsageLedger_ShowsCompanionCountInputDialog()
+    {
+        SetupForReturnSuccess();
+        var result = new LendingResult
+        {
+            Success = true,
+            Balance = 1000,
+            CreatedLedgers = new List<Ledger>
+            {
+                new Ledger { Id = 10, Summary = "鉄道（A駅～B駅）", Expense = 260, IsLentRecord = false },
+            },
+        };
+
+        await _viewModel.HandleReturnSuccessAsync(CreateTestCard(), result);
+
+        _navigationServiceMock.Verify(
+            n => n.ShowDialogAsync<ICCardManager.Views.Dialogs.CompanionCountInputDialog>(
+                It.IsAny<Func<ICCardManager.Views.Dialogs.CompanionCountInputDialog, Task>>()),
+            Times.Once);
+    }
+
+    /// <summary>
+    /// Issue #1906: チャージ・ポイント還元だけの返却では同行者数入力ダイアログを出さないこと
+    /// </summary>
+    [Fact]
+    public async Task HandleReturnSuccessAsync_ChargeOnly_DoesNotShowCompanionCountInputDialog()
+    {
+        SetupForReturnSuccess();
+        var result = new LendingResult
+        {
+            Success = true,
+            Balance = 4000,
+            CreatedLedgers = new List<Ledger>
+            {
+                new Ledger { Id = 10, Summary = "役務費によりチャージ", Income = 3000, Expense = 0, IsLentRecord = false },
+                new Ledger { Id = 11, Summary = "ポイント還元", Income = 10, Expense = 0, IsLentRecord = false },
+            },
+        };
+
+        await _viewModel.HandleReturnSuccessAsync(CreateTestCard(), result);
+
+        _navigationServiceMock.Verify(
+            n => n.ShowDialogAsync<ICCardManager.Views.Dialogs.CompanionCountInputDialog>(
+                It.IsAny<Func<ICCardManager.Views.Dialogs.CompanionCountInputDialog, Task>>()),
+            Times.Never);
+    }
+
+    /// <summary>
+    /// Issue #1906: 設定でスキップが有効なら同行者数入力ダイアログを出さないこと
+    /// </summary>
+    [Fact]
+    public async Task HandleReturnSuccessAsync_SkipSettingEnabled_DoesNotShowCompanionCountInputDialog()
+    {
+        SetupForReturnSuccess(skipCompanionCountInputOnReturn: true);
+        var result = new LendingResult
+        {
+            Success = true,
+            Balance = 1000,
+            CreatedLedgers = new List<Ledger>
+            {
+                new Ledger { Id = 10, Summary = "鉄道（A駅～B駅）", Expense = 260, IsLentRecord = false },
+            },
+        };
+
+        await _viewModel.HandleReturnSuccessAsync(CreateTestCard(), result);
+
+        _navigationServiceMock.Verify(
+            n => n.ShowDialogAsync<ICCardManager.Views.Dialogs.CompanionCountInputDialog>(
+                It.IsAny<Func<ICCardManager.Views.Dialogs.CompanionCountInputDialog, Task>>()),
+            Times.Never);
+    }
+
+    /// <summary>
+    /// Issue #1906: バス停名入力ダイアログの後に同行者数入力ダイアログが出ること（順序）
+    /// </summary>
+    [Fact]
+    public async Task HandleReturnSuccessAsync_WithBusUsage_ShowsCompanionCountDialogAfterBusStopDialog()
+    {
+        SetupForReturnSuccess();
+        var order = new List<string>();
+        _navigationServiceMock
+            .Setup(n => n.ShowDialogAsync<ICCardManager.Views.Dialogs.BusStopInputDialog>(
+                It.IsAny<Func<ICCardManager.Views.Dialogs.BusStopInputDialog, Task>>()))
+            .Callback(() => order.Add("bus"))
+            .ReturnsAsync((bool?)true);
+        _navigationServiceMock
+            .Setup(n => n.ShowDialogAsync<ICCardManager.Views.Dialogs.CompanionCountInputDialog>(
+                It.IsAny<Func<ICCardManager.Views.Dialogs.CompanionCountInputDialog, Task>>()))
+            .Callback(() => order.Add("companion"))
+            .ReturnsAsync((bool?)true);
+        var result = new LendingResult
+        {
+            Success = true,
+            Balance = 1000,
+            HasBusUsage = true,
+            CreatedLedgers = new List<Ledger>
+            {
+                new Ledger { Id = 10, Summary = "バス（★）", Expense = 230, IsLentRecord = false },
+            },
+        };
+
+        await _viewModel.HandleReturnSuccessAsync(CreateTestCard(), result);
+
+        order.Should().Equal("bus", "companion");
+    }
+
+    #endregion
 
     private static IcCard CreateTestCard() => new IcCard
     {

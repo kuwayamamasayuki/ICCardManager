@@ -229,6 +229,7 @@ public class DtoMapperTests
             Expense = 210,
             Balance = 4790,
             StaffName = "山田太郎",
+            CompanionCount = 1, // Issue #1906
             Note = "通勤利用",
             IsLentRecord = false,
             Details = new List<LedgerDetail>
@@ -242,6 +243,9 @@ public class DtoMapperTests
 
         // Assert
         dto.Id.Should().Be(1);
+        dto.CompanionCount.Should().Be(1);
+        dto.StaffName.Should().Be("山田太郎", "DTO の StaffName は生の氏名のまま");
+        dto.DisplayStaffName.Should().Be("山田太郎 外1名", "Issue #1906: 一覧の利用者列は DisplayStaffName で導出");
         dto.CardIdm.Should().Be("07FE112233445566");
         dto.Date.Should().Be(new DateTime(2025, 1, 15));
         dto.DateDisplay.Should().Contain("R7"); // 和暦変換される（短縮形式: R7.1.15）

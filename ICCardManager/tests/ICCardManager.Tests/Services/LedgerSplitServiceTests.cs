@@ -566,6 +566,7 @@ public class LedgerSplitServiceTests : IDisposable
         originalLedger.ReturnerIdm = "BBBB000000000002";
         originalLedger.LentAt = new DateTime(2026, 2, 3, 9, 0, 0);
         originalLedger.ReturnedAt = new DateTime(2026, 2, 3, 18, 0, 0);
+        originalLedger.CompanionCount = 2; // Issue #1906
 
         SetupDefaultMocks(originalLedger, nextInsertId: 100);
 
@@ -594,6 +595,7 @@ public class LedgerSplitServiceTests : IDisposable
         insertedLedger.ReturnerIdm.Should().Be("BBBB000000000002");
         insertedLedger.LentAt.Should().Be(new DateTime(2026, 2, 3, 9, 0, 0));
         insertedLedger.ReturnedAt.Should().Be(new DateTime(2026, 2, 3, 18, 0, 0));
+        insertedLedger.CompanionCount.Should().Be(2, "Issue #1906: 同行者数は分割後の両行に引き継ぐ");
     }
 
     #endregion

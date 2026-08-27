@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Data.SQLite;
 using System.IO;
+using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 using FluentAssertions;
@@ -210,6 +211,30 @@ SELECT last_insert_rowid();";
         using var reader = await command.ExecuteReaderAsync();
         await reader.ReadAsync();
         return (reader.GetInt32(0), reader.GetInt32(1));
+    }
+
+    /// <summary>
+    /// Issue #1906: 同行者数列を持つ CSV を取り込むと companion_count に保存され、列を持たない旧形式は 0 のまま取り込めること
+    /// </summary>
+    [Fact]
+    public async Task ImportLedgersAsync_同行者数列_companion_countへ保存されること()
+    {
+        await SeedCardAsync();
+        var csvContent = @"日時,カードIDm,管理番号,摘要,受入金額,払出金額,残額,利用者,備考,同行者数
+2025-01-10 00:00:00," + TestCardIdm + @",001,役務費によりチャージ,10000,,10000,,,
+2025-01-11 00:00:00," + TestCardIdm + @",001,鉄道（天神～博多）,,210,9790,博多 花子,,2";
+        var filePath = Path.Combine(_testDirectory, "ledgers_companion.csv");
+        await Task.Run(() => File.WriteAllText(filePath, csvContent, CsvEncoding));
+        var (service, _) = CreateServiceOverRealRepository(new InsertCounter());
+
+        var result = await service.ImportLedgersAsync(filePath);
+
+        result.Success.Should().BeTrue();
+        var rows = (await _realLedgerRepository.GetByDateRangeAsync(TestCardIdm, new DateTime(2025, 1, 1), new DateTime(2025, 1, 31))).OrderBy(l => l.Date).ToList();
+        rows.Should().HaveCount(2);
+        rows[0].CompanionCount.Should().Be(0);
+        rows[1].CompanionCount.Should().Be(2);
+        rows[1].StaffName.Should().Be("博多 花子", "staff_name には「外N名」を書き込まない");
     }
 
     /// <summary>ID列なし・残高チェーンが整合した3行の履歴CSVを書き出す</summary>
