@@ -692,4 +692,18 @@ public partial class SystemManageViewModel : ViewModelBase
     {
         _navigationService.ShowDialog<Views.Dialogs.OperationLogDialog>();
     }
+
+    /// <summary>
+    /// 同一とみなす駅・バス停の設定ダイアログを開く（Issue #1905）
+    /// </summary>
+    /// <remarks>
+    /// F6 の各セクションは <c>Grid</c> の固定行に並んでおり、リストアの一覧が伸縮行を
+    /// 占めているため、編集 UI をこの画面へ直接差し込むと縦幅が足りなくなる。
+    /// 接続診断・操作ログと同じく専用ダイアログへ委ねる。
+    /// </remarks>
+    [RelayCommand]
+    public void OpenTransferStationGroups()
+    {
+        _navigationService.ShowDialog<Views.Dialogs.TransferStationGroupDialog>();
+    }
 }

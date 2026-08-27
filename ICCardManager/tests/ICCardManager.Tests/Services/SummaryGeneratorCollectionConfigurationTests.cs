@@ -69,6 +69,8 @@ public class SummaryGeneratorCollectionConfigurationTests
     [InlineData(typeof(LedgerRepositoryMidYearCarryoverPatternTests))]
     [InlineData(typeof(LedgerOrderHelperMidYearCarryoverPatternTests))]
     [InlineData(typeof(SummaryGeneratorMidYearCarryoverLikePatternTests))]
+    // Issue #1905: SaveGroupsAsync が ApplyTransferStationGroups で静的状態を書き換える
+    [InlineData(typeof(TransferStationGroupServiceTests))]
     public void SummaryGenerator関連テストクラスがCollectionに属していること(Type testClass)
     {
         // Act
@@ -102,6 +104,8 @@ public class SummaryGeneratorCollectionConfigurationTests
     [InlineData(typeof(LedgerRepositoryMidYearCarryoverPatternTests))]
     [InlineData(typeof(LedgerOrderHelperMidYearCarryoverPatternTests))]
     [InlineData(typeof(SummaryGeneratorMidYearCarryoverLikePatternTests))]
+    // Issue #1905: SaveGroupsAsync が ApplyTransferStationGroups で静的状態を書き換える
+    [InlineData(typeof(TransferStationGroupServiceTests))]
     public void Collection対象テストクラスはIDisposableを実装していること(Type testClass)
     {
         // Act
