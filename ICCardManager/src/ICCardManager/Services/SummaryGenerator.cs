@@ -1193,6 +1193,13 @@ namespace ICCardManager.Services
         /// <see cref="DetectRoundTrips"/> が往復を検出できなくなるため
         /// （例: A→B、B→A、C→D、D→C で復路 B→A が乗換駅グループ経由で
         /// C→D と統合され「B～D」という実際には乗っていない区間になっていた）。
+        ///
+        /// なお逆走判定は <see cref="AreTransferStations"/> による同一視を含むが、
+        /// <see cref="DetectRoundTrips"/> の往復ペア照合は駅名の完全一致で行われる。
+        /// したがって復路の端点が乗り継ぎ駅グループ内の別名駅の場合
+        /// （例: 天神→博多 の復路が 博多→西鉄福岡(天神)）、延長の打ち切りは
+        /// 「実際には乗っていない区間」の生成を防ぐが、摘要は「往復」表記にならず
+        /// 各区間の個別表示となる（コードレビューで実測確認、Issue #1902）。
         /// </remarks>
         private List<(string Start, string End)> ConsolidateRoutes(List<(string Entry, string Exit)> routes)
         {
