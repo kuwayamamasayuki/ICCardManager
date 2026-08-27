@@ -2025,6 +2025,97 @@ public class SummaryGeneratorComprehensiveTests : IDisposable
 
     #endregion
 
+    #region Issue #1902: 往復の復路を次の移動へ乗継統合しない
+
+    /// <summary>
+    /// Issue #1902 事例: 往復 2 組（西鉄福岡(天神)～雑餉隈 往復、天神～赤坂 往復）が
+    /// それぞれ「往復」として表示されること。
+    /// </summary>
+    /// <remarks>
+    /// バグ: 1 組目の復路（雑餉隈→西鉄福岡(天神)）から始まる乗継チェーンが、
+    /// 乗換駅グループ（西鉄福岡(天神) ≒ 天神）経由で 2 組目の往路（天神→赤坂）と
+    /// 統合され「雑餉隈～赤坂」になっていた。往復ペアが両方とも片割れを失い、
+    /// 「鉄道（西鉄福岡(天神)～雑餉隈、雑餉隈～赤坂、赤坂～天神）」と表示されていた。
+    ///
+    /// 修正: 直前に確定したチェーンの完全な逆走（＝往復の復路）となっている
+    /// チェーンは、それ以上乗継として延長しない（<c>ConsolidateRoutes</c>）。
+    /// </remarks>
+    [Fact]
+    public void TC_BUG1902_鉄道_乗換駅を挟む往復2組_それぞれ往復と表示される()
+    {
+        // Arrange: 西鉄福岡(天神)→雑餉隈→西鉄福岡(天神)、天神→赤坂→天神 の 4 経路（同日）
+        // ICカード履歴は新しい順なので逆順で投入（残額の降順＝時系列）
+        var details = new List<LedgerDetail>
+        {
+            CreateRailwayUsage(new DateTime(2024, 12, 9), "赤坂", "天神", 210, 4160),
+            CreateRailwayUsage(new DateTime(2024, 12, 9), "天神", "赤坂", 210, 4370),
+            CreateRailwayUsage(new DateTime(2024, 12, 9), "雑餉隈", "西鉄福岡(天神)", 210, 4580),
+            CreateRailwayUsage(new DateTime(2024, 12, 9), "西鉄福岡(天神)", "雑餉隈", 210, 4790),
+        };
+
+        // Act
+        var results = _generator.GenerateByDate(details);
+
+        // Assert: 2 組とも往復として表示される
+        results.Should().HaveCount(1);
+        results[0].Summary.Should().Be("鉄道（西鉄福岡(天神)～雑餉隈 往復、天神～赤坂 往復）");
+        OutputInputAndResult(details, results);
+    }
+
+    /// <summary>
+    /// 往復のあとに同じ駅から別区間へ移動した場合、復路が次の移動と
+    /// 乗継統合されず「A～B 往復、A～C」と表示されること。
+    /// </summary>
+    /// <remarks>
+    /// Issue #1902 の一般形（乗換駅グループを介さなくても起きる）。
+    /// 旧実装では復路（博多→天神）と次の移動（天神→薬院）が「博多～薬院」に
+    /// 統合され、往復情報が失われるうえ実際の移動と異なる区間が表示されていた。
+    /// </remarks>
+    [Fact]
+    public void TC_BUG1902_鉄道_往復後に別区間_復路が次の移動と統合されない()
+    {
+        // Arrange: 天神→博多→天神→薬院 の 3 経路（同日）
+        var details = new List<LedgerDetail>
+        {
+            CreateRailwayUsage(new DateTime(2024, 12, 9), "天神", "薬院", 210, 4370),
+            CreateRailwayUsage(new DateTime(2024, 12, 9), "博多", "天神", 210, 4580),
+            CreateRailwayUsage(new DateTime(2024, 12, 9), "天神", "博多", 210, 4790),
+        };
+
+        // Act
+        var results = _generator.GenerateByDate(details);
+
+        // Assert
+        results.Should().HaveCount(1);
+        results[0].Summary.Should().Be("鉄道（天神～博多 往復、天神～薬院）");
+        OutputInputAndResult(details, results);
+    }
+
+    /// <summary>
+    /// バス側でも同じバグが発生することを固定する（往復 + 別区間 = 3 経路）。
+    /// </summary>
+    [Fact]
+    public void TC_BUG1902_バス_往復後に別区間_復路が次の移動と統合されない()
+    {
+        // Arrange: 天神→博多→天神→薬院 の 3 経路（バス、同日）
+        var details = new List<LedgerDetail>
+        {
+            CreateBusUsage(new DateTime(2024, 12, 9), 200, 4400, busStops: "天神～薬院"),
+            CreateBusUsage(new DateTime(2024, 12, 9), 200, 4600, busStops: "博多～天神"),
+            CreateBusUsage(new DateTime(2024, 12, 9), 200, 4800, busStops: "天神～博多"),
+        };
+
+        // Act
+        var results = _generator.GenerateByDate(details);
+
+        // Assert
+        results.Should().HaveCount(1);
+        results[0].Summary.Should().Be("バス（天神～博多 往復、天神～薬院）");
+        OutputInputAndResult(details, results);
+    }
+
+    #endregion
+
     #region Issue #1904: 摘要の時系列（交互ブロック）表示
 
     // 摘要は利用順（時系列）に「同一モードの連続区間（run）」単位で結合する。
