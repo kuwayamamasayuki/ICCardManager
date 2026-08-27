@@ -70,6 +70,15 @@ THEN
 - **同一視は「まとめてよい」判断にだけ使い、名前を代表させない**。摘要は「往路の名前（復路の名前）～折り返し点 往復」と併記する。どちらか一方に寄せると、6 年保存の台帳から実際に乗降した場所が失われる（同一視グループは「同じ場所とみなしてよい」であって「同じ名前である」ではない）
 - **摘要の本文に括弧を持ち込んだら、摘要を読み返す側を対で直す**。`GetBusStopExtractionPattern` は非貪欲な `バス（(.+?)）` だったため最初の `）` で切れ、履歴統合（`LedgerMergeService`）と摘要の直接編集（`LedgerRowEditViewModel`）へ壊れたバス停名が渡っていた。生成（`FormatBusSummary` / `FormatRoundTrip`）と抽出は同じクラスの隣り合わせに置き、書式を変えたら両方の回帰テストを書く（#1818）
 
+## 複数名利用の「外N名」は導出であって保存値ではない（Issue #1906）
+
+複数名が同一経路を 1 枚の交通系ICカードで利用した場合、物品出納簿の氏名欄は「博多 花子 外１名」とまとめて記載する（物品会計事務の手引き）。人数は `ledger.companion_count`（本人を含まない同行者数、既定 0）に保存し、**「外N名」の文字列は `Common/StaffNameFormatter.Format` が表示時に導出する**。
+
+- **`staff_name` には「外N名」を書き込まない**。書き込むと職員マスタとの照合（行編集の `SelectedStaff` 復元、管理者ダッシュボードの系列名解決）が壊れ、CSV の往復で氏名が変質する（#1808）。消費側（履歴一覧 `LedgerDto.DisplayStaffName`・帳票 `ReportRowBuilder`）はそれぞれ導出する
+- **入力経路は返却時ダイアログ（`CompanionCountInputDialog`、バス停名入力の後）と履歴の行編集の 2 つ**。返却時は 1 以上の行だけ `UpdateCompanionCountAsync` で書く（0 は INSERT 済み）。保存に失敗しても返却は記録済みなので「再タッチ」と案内しない（#1725）
+- **摘要は変えない**。CSV は利用者列を生の氏名のまま出し、専用列「同行者数」（末尾）で往復させる。列を持たない旧形式は 0 として取り込む
+- 統合は統合先の値を保持（統合元はスナップショットに含める）、分割は両行へ引き継ぐ。`OperationLogExcelExportService.GetFieldNameMap` に `CompanionCount` を載せる（#1726）
+
 ## 共有フォルダモード（複数PC共有DB）
 - DBパスは `C:\ProgramData\ICCardManager\database_config.txt` で指定（空欄/未作成=ローカルデフォルト）。インストーラーの「データベースの保存先」ページまたは設定画面（F5）から設定。設定画面の「デフォルトに戻す」ボタンで `database_config.txt` を削除して復旧可能（Issue #1559）
 - 共有モードの判定は **UNCパス**（`\\server\share\iccard.db`）または **マップドネットワークドライブ**（`Z:\share\iccard.db` 等で `DriveInfo.DriveType == DriveType.Network`）指定時に自動的に有効化される（Issue #1559）。ローカルフルパス指定（例: `C:\Users\foo\db\iccard.db`）では共有モードにならない
