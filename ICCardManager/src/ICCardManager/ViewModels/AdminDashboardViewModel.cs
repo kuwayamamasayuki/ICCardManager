@@ -785,9 +785,13 @@ namespace ICCardManager.ViewModels
                 }
             }
 
+            // 描画は選択されたカードすべてを対象にする。枚数で切らない（Issue #1921）。
+            // 上限（AppConstants.AdminDashboardMaxSeries）が効くのは
+            // RebuildBalanceSeriesOptions の「初期選択」だけで、利用者が明示的に付けた
+            // チェックを下流で無効化してはならない。切っていた頃は 6 枚目以降のチェックが
+            // 無言で無視され、「チェックしたのに描かれない」以外の手掛かりが画面に無かった
             var selected = BalanceSeriesOptions
                 .Where(o => o.IsSelected && seriesByIdm.ContainsKey(o.CardIdm))
-                .Take(AppConstants.AdminDashboardMaxSeries)
                 .Select(o => new { Option = o, Series = seriesByIdm[o.CardIdm] })
                 .ToList();
 
@@ -834,7 +838,7 @@ namespace ICCardManager.ViewModels
                 BalanceMonthLabels.Add(tick);
             }
 
-            // 一覧の母集団は折れ線と同じ selected（チェックボックスの選択と上限の両方が効いた後）。
+            // 一覧の母集団は折れ線と同じ selected（チェックボックスの選択が効いた後）。
             // 一覧だけ全件にすると、グラフに描かれていない系列が並んで「同じ内容」でなくなる（Issue #1856）
             for (var monthIndex = 0; monthIndex < labels.Count; monthIndex++)
             {
@@ -862,8 +866,10 @@ namespace ICCardManager.ViewModels
         /// 残高推移グラフのカード選択肢を作り直す。
         /// </summary>
         /// <remarks>
-        /// 初期状態では残高の少ないカードから順に上限数まで選択する。
+        /// 初期状態では残高の少ないカードから順に <see cref="AppConstants.AdminDashboardMaxSeries"/> 枚まで選択する。
         /// 全カードを既定で描くと線が重なって読めず、色相差も確保できないため。
+        /// これは「初期選択」の枚数であって描画の上限ではない。利用者が追加でチェックしたカードは
+        /// この枚数を超えても描く（Issue #1921。<see cref="RenderBalanceChart"/> を参照）。
         /// </remarks>
         private void RebuildBalanceSeriesOptions(AdminDashboardAnalytics source)
         {
