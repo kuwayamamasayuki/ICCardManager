@@ -3276,6 +3276,121 @@ public class MainViewModelTests : IDisposable
 
     #endregion
 
+    #region Issue #1923: 定期リフレッシュで履歴のチェックが消えないこと
+
+    /// <summary>
+    /// Issue #1923 の中核。共有モードの定期リフレッシュ（15 秒周期）による再読込では、
+    /// 統合対象として入れたチェックを同じ台帳 ID の行へ引き継ぐこと。
+    /// </summary>
+    [Fact]
+    public async Task LoadHistoryLedgersAsync_引き継ぎ指定ありならチェックを同じ台帳IDの行へ戻すこと()
+    {
+        // Arrange: 全 3 件の 1 ページ目を表示し、隣接する 2 行にチェックを入れる
+        ArrangeHistoryPaging(_ => 3, pageSize: 30);
+        _viewModel.HistoryCurrentPage = 1;
+        await _viewModel.LoadHistoryLedgersAsync();
+        _viewModel.HistoryLedgers[0].IsChecked = true;
+        _viewModel.HistoryLedgers[1].IsChecked = true;
+
+        // Act: 利用者の操作とは無関係な再読込（定期リフレッシュ相当）
+        await _viewModel.LoadHistoryLedgersAsync(preserveCheckedRows: true);
+
+        // Assert: 行オブジェクトは作り直されるが、チェックは同じ台帳 ID の行へ戻る
+        _viewModel.HistoryLedgers.Where(d => d.IsChecked).Select(d => d.Id)
+            .Should().Equal(new[] { 1, 2 },
+                "再読込の前後で同じ台帳 ID の行のチェックが維持されること");
+    }
+
+    /// <summary>
+    /// 対のテスト。利用者の操作を契機とする再読込（既定）ではチェックを引き継がないこと。
+    /// これが無いと「常に引き継ぐ」実装でも上のテストが緑になり、統合直後や
+    /// ページ送りの後にも選択が残る退行を検出できない。
+    /// </summary>
+    [Fact]
+    public async Task LoadHistoryLedgersAsync_引き継ぎ指定なしならチェックを引き継がないこと()
+    {
+        // Arrange
+        ArrangeHistoryPaging(_ => 3, pageSize: 30);
+        _viewModel.HistoryCurrentPage = 1;
+        await _viewModel.LoadHistoryLedgersAsync();
+        _viewModel.HistoryLedgers[0].IsChecked = true;
+
+        // Act
+        await _viewModel.LoadHistoryLedgersAsync();
+
+        // Assert
+        _viewModel.HistoryLedgers.Should().OnlyContain(d => !d.IsChecked,
+            "利用者が起こした再読込では選択をやり直させること");
+    }
+
+    /// <summary>
+    /// チェックしていた行が他 PC の削除・統合で消えた場合、そのチェックは消える。
+    /// 位置（インデックス）ではなく台帳 ID で照合していることを表明する。
+    /// </summary>
+    [Fact]
+    public async Task LoadHistoryLedgersAsync_引き継ぎ対象の行が消えたら別の行へチェックを移さないこと()
+    {
+        // Arrange: 全 3 件のうち末尾（Id=3）にチェックを入れてから、他 PC の削除で 2 件へ減る
+        var totalCounts = new[] { 3, 2, 2 };
+        ArrangeHistoryPaging(call => totalCounts[Math.Min(call, totalCounts.Length - 1)], pageSize: 30);
+        _viewModel.HistoryCurrentPage = 1;
+        await _viewModel.LoadHistoryLedgersAsync();
+        _viewModel.HistoryLedgers.Single(d => d.Id == 3).IsChecked = true;
+
+        // Act
+        await _viewModel.LoadHistoryLedgersAsync(preserveCheckedRows: true);
+
+        // Assert
+        _viewModel.HistoryLedgers.Should().HaveCount(2);
+        _viewModel.HistoryLedgers.Should().OnlyContain(d => !d.IsChecked,
+            "消えた行のチェックが、同じ位置にある別の台帳へ移らないこと");
+    }
+
+    /// <summary>
+    /// 実経路の表明。共有モードの定期リフレッシュ（RefreshSharedDataAsync）から
+    /// 履歴が再読込されてもチェックが残ること。
+    /// LoadHistoryLedgersAsync の既定値は「引き継がない」なので、
+    /// 呼び出し側で指定し忘れると本 Issue の症状がそのまま残る。
+    /// </summary>
+    [Fact]
+    public async Task RefreshSharedDataAsync_履歴のチェックを維持すること()
+    {
+        // Arrange: RefreshSharedDataAsync は貸出中カードとダッシュボードを先に更新する。
+        // ここが例外で落ちると catch に吸われて履歴の再読込へ到達せず、
+        // 「チェックが残った」ではなく「そもそも作り直していない」だけのテストになる。
+        _cardRepositoryMock.Setup(r => r.GetLentAsync(It.IsAny<bool>()))
+            .ReturnsAsync(new List<IcCard>());
+        _cardRepositoryMock.Setup(r => r.GetAllAsync())
+            .ReturnsAsync(new List<IcCard>());
+        _staffRepositoryMock.Setup(r => r.GetAllAsync())
+            .ReturnsAsync(new List<Staff>());
+        _ledgerRepositoryMock.Setup(r => r.GetAllLatestBalancesAsync())
+            .ReturnsAsync(new Dictionary<string, (int Balance, DateTime? LastUsageDate)>());
+        _settingsRepositoryMock.Setup(r => r.GetAppSettingsAsync())
+            .ReturnsAsync(new AppSettings());
+
+        var requestedPages = ArrangeHistoryPaging(_ => 3, pageSize: 30);
+        _viewModel.HistoryCurrentPage = 1;
+        await _viewModel.LoadHistoryLedgersAsync();
+        _viewModel.HistoryLedgers[0].IsChecked = true;
+        _viewModel.HistoryLedgers[1].IsChecked = true;
+        _viewModel.IsHistoryVisible = true;
+
+        // Act
+        await _viewModel.RefreshSharedDataAsync();
+
+        // Assert: 故障の起点（履歴一覧の作り直し）が実際に起きていること。
+        // これを表明しないと、リフレッシュが途中で失敗して履歴に到達しない場合でも緑になる。
+        requestedPages.Should().HaveCount(2,
+            "定期リフレッシュが履歴一覧を再取得していること");
+
+        _viewModel.HistoryLedgers.Where(d => d.IsChecked).Select(d => d.Id)
+            .Should().Equal(new[] { 1, 2 },
+                "定期リフレッシュは利用者の選択操作を消さないこと");
+    }
+
+    #endregion
+
     #region Issue #1837: 履歴削除の確認ダイアログ（MessageBox 直呼びから IDialogService へ移行）
 
     /*
