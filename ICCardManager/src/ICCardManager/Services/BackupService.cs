@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Data.SQLite;
 using System.Globalization;
@@ -10,6 +10,7 @@ using ICCardManager.Common;
 using ICCardManager.Common.Exceptions;
 using ICCardManager.Data;
 using ICCardManager.Data.Repositories;
+using ICCardManager.Dtos;
 using Microsoft.Extensions.Logging;
 
 namespace ICCardManager.Services
@@ -211,8 +212,33 @@ namespace ICCardManager.Services
         /// <returns>正規化済みのバックアップ保存先フォルダのパス</returns>
         public virtual async Task<string> ResolveBackupFolderAsync()
         {
+            var resolution = await ResolveBackupFolderDetailAsync().ConfigureAwait(false);
+            return resolution.EffectiveFolderPath;
+        }
+
+        /// <summary>
+        /// バックアップ保存先フォルダを解決し、既定パスへ退避した場合はその理由も併せて返す（Issue #1924）
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// <see cref="ResolveBackupFolderAsync"/> は実際に使われるフォルダしか返さないため、
+        /// 「設定した共有フォルダーが使えず既定パスへ退避した」ことが呼び出し元から見えなかった。
+        /// バックアップ自体はローカルへ成功するので長期未成功の警告（Issue #1689）にも掛からず、
+        /// 管理者からは「共有フォルダーにバックアップが作成されない」という症状としてのみ観測できた。
+        /// </para>
+        /// <para>
+        /// 退避の理由を <see cref="BackupFolderResolution.FallbackReason"/> に載せ、
+        /// システム管理画面（F6）の「バックアップ状況」が提示できるようにする。
+        /// 「未設定なので既定を使う」は正常な運用なので理由を立てない。
+        /// </para>
+        /// </remarks>
+        /// <returns>解決結果（実際の保存先・設定値・退避理由）</returns>
+        public virtual async Task<BackupFolderResolution> ResolveBackupFolderDetailAsync()
+        {
             var settings = await _settingsRepository.GetAppSettingsAsync().ConfigureAwait(false);
-            var backupPath = settings?.BackupPath;
+            var configuredPath = settings?.BackupPath;
+            var backupPath = configuredPath;
+            string fallbackReason = null;
 
             if (string.IsNullOrWhiteSpace(backupPath))
             {
@@ -228,11 +254,18 @@ namespace ICCardManager.Services
                         "バックアップパスが無効です: {Path} - {Error}。デフォルトパスを使用します",
                         backupPath,
                         validationResult.ErrorMessage);
+                    fallbackReason = validationResult.ErrorMessage;
                     backupPath = PathValidator.GetDefaultBackupPath();
                 }
             }
 
-            return PathValidator.NormalizePath(backupPath) ?? PathValidator.GetDefaultBackupPath();
+            return new BackupFolderResolution
+            {
+                EffectiveFolderPath =
+                    PathValidator.NormalizePath(backupPath) ?? PathValidator.GetDefaultBackupPath(),
+                ConfiguredFolderPath = configuredPath,
+                FallbackReason = fallbackReason
+            };
         }
 
         /// <summary>

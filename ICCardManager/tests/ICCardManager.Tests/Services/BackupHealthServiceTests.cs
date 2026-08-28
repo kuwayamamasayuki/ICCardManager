@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Threading.Tasks;
@@ -6,6 +6,7 @@ using FluentAssertions;
 using ICCardManager.Common;
 using ICCardManager.Data;
 using ICCardManager.Data.Repositories;
+using ICCardManager.Dtos;
 using ICCardManager.Services;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -42,8 +43,8 @@ public class BackupHealthServiceTests : IDisposable
             new Mock<ILogger<BackupService>>().Object);
 
         // 既定: 保存先は一時フォルダ（実在するので空き容量が取得できる）、バックアップファイルなし
-        _backupServiceMock.Setup(s => s.ResolveBackupFolderAsync())
-            .ReturnsAsync(Path.GetTempPath());
+        _backupServiceMock.Setup(s => s.ResolveBackupFolderDetailAsync())
+            .ReturnsAsync(new BackupFolderResolution { EffectiveFolderPath = Path.GetTempPath() });
         _backupServiceMock.Setup(s => s.GetBackupFilesAsync())
             .ReturnsAsync(new List<BackupFileInfo>());
         _backupServiceMock.SetupGet(s => s.IsSharedMode).Returns(false);
@@ -158,12 +159,55 @@ public class BackupHealthServiceTests : IDisposable
     {
         // 画面に出るフォルダと実際に書かれるフォルダの食い違いを防ぐため、
         // BackupService の解決結果をそのまま使うことを固定する
-        _backupServiceMock.Setup(s => s.ResolveBackupFolderAsync())
-            .ReturnsAsync(@"\\fileserver\iccard\backup");
+        _backupServiceMock.Setup(s => s.ResolveBackupFolderDetailAsync())
+            .ReturnsAsync(new BackupFolderResolution
+            {
+                EffectiveFolderPath = @"\\fileserver\iccard\backup"
+            });
 
         var health = await _service.GetHealthAsync();
 
         health.BackupFolderPath.Should().Be(@"\\fileserver\iccard\backup");
+    }
+
+    /// <summary>
+    /// Issue #1924: 設定した保存先が使えず既定パスへ退避した場合、その事実と理由を健全性情報へ載せる。
+    /// </summary>
+    /// <remarks>
+    /// バックアップ自体は既定パスへ成功するため長期未成功の警告（Issue #1689）には掛からず、
+    /// この情報が無いと管理者は「共有フォルダーに世代が増えない」原因へ到達できない。
+    /// </remarks>
+    [Fact]
+    public async Task GetHealthAsync_保存先が既定へ退避したとき理由を載せること()
+    {
+        _backupServiceMock.Setup(s => s.ResolveBackupFolderDetailAsync())
+            .ReturnsAsync(new BackupFolderResolution
+            {
+                EffectiveFolderPath = Path.GetTempPath(),
+                ConfiguredFolderPath = @"\\fileserver\iccard\backup",
+                FallbackReason = "ネットワーク共有に到達できません。"
+            });
+
+        var health = await _service.GetHealthAsync();
+
+        health.IsBackupFolderFallback.Should().BeTrue();
+        health.ConfiguredFolderPath.Should().Be(@"\\fileserver\iccard\backup");
+        health.BackupFolderFallbackReason.Should().Contain("到達できません");
+    }
+
+    /// <summary>
+    /// Issue #1924 の対: 退避していないときは退避扱いにしないこと。
+    /// </summary>
+    /// <remarks>
+    /// 対の表明が無いと、常に退避として扱う実装でも上のテストが緑になる。
+    /// </remarks>
+    [Fact]
+    public async Task GetHealthAsync_退避していないときは退避扱いにしないこと()
+    {
+        var health = await _service.GetHealthAsync();
+
+        health.IsBackupFolderFallback.Should().BeFalse();
+        health.BackupFolderFallbackReason.Should().BeNull();
     }
 
     [Fact]
@@ -178,8 +222,11 @@ public class BackupHealthServiceTests : IDisposable
     [Fact]
     public async Task GetHealthAsync_WithUnreachableFolder_ReturnsNullFreeSpace()
     {
-        _backupServiceMock.Setup(s => s.ResolveBackupFolderAsync())
-            .ReturnsAsync(Path.Combine(Path.GetTempPath(), $"NotExists_{Guid.NewGuid():N}"));
+        _backupServiceMock.Setup(s => s.ResolveBackupFolderDetailAsync())
+            .ReturnsAsync(new BackupFolderResolution
+            {
+                EffectiveFolderPath = Path.Combine(Path.GetTempPath(), $"NotExists_{Guid.NewGuid():N}")
+            });
 
         var health = await _service.GetHealthAsync();
 

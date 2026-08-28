@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
@@ -151,9 +151,20 @@ namespace ICCardManager.Common
             //    CheckWritePermission より前に実行することで、到達不可時に素早く失敗させる。
             //    Directory.Exists が SMB ハンドシェイクで長時間ハングするのを防ぐため、
             //    5秒タイムアウトの Task.Run で包んで検査する。
+            //
+            //    Issue #1924: 検査対象は「保存先フォルダーそのもの」ではなく共有ルート
+            //    （\\server\share）。既定チェッカーの実体が Directory.Exists であるため、
+            //    パス全体を渡すと「共有へ到達できない」と「保存先フォルダーがまだ存在しない」を
+            //    区別できず、後者まで「ネットワーク共有に到達できません」と報告していた。
+            //    ローカルパスは未作成フォルダーを許容する（項目8はドライブ準備状態のみを見て、
+            //    項目9は親フォルダーの書き込み権限へ退避する）ため、UNC だけが非対称だった。
+            //    実際のフォルダー作成は BackupService.EnsureDirectoryExists が行う。
             if (IsUncPath(path))
             {
-                var reachable = (uncReachabilityChecker ?? DefaultUncReachabilityChecker)(path, uncTimeoutMs);
+                // ExtractUncRoot が null を返すのはサーバー名だけ等の不完全な UNC の場合だが、
+                // それは項目4（ValidateUncPathFormat）で既に弾かれている。防御としてパス全体へ倒す。
+                var probeTarget = ExtractUncRoot(path) ?? path;
+                var reachable = (uncReachabilityChecker ?? DefaultUncReachabilityChecker)(probeTarget, uncTimeoutMs);
                 if (!reachable)
                 {
                     return ValidationResult.Failure(

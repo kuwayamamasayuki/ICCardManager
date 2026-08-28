@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.ObjectModel;
 using System.Globalization;
 using System.IO;
@@ -146,6 +146,32 @@ public partial class SystemManageViewModel : ViewModelBase
     public string BackupFolderText => $"保存先: {BackupHealth?.BackupFolderPath ?? "-"}";
 
     /// <summary>
+    /// 設定したバックアップ先が使えず既定パスへ退避しているか（Issue #1924）
+    /// </summary>
+    public bool IsBackupFolderFallback => BackupHealth?.IsBackupFolderFallback == true;
+
+    /// <summary>
+    /// 退避しているときに表示する案内文（Issue #1924）
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 「何が／なぜ／どうすれば」の3要素（<c>.claude/rules/error-messages.md</c>）で組み立てる。
+    /// 「なぜ」は検証が返した理由をそのまま載せる — 退避の原因は到達不可・権限不足・
+    /// パス形式の誤りなど複数あり、ここで丸めると管理者が原因に到達できない。
+    /// </para>
+    /// <para>
+    /// バックアップ自体は既定パスへ成功しているため、長期未成功の警告（Issue #1689）は出ない。
+    /// この行が、設定した共有フォルダーに世代が増えないことの唯一の手掛かりになる。
+    /// </para>
+    /// </remarks>
+    public string BackupFolderFallbackText =>
+        !IsBackupFolderFallback
+            ? string.Empty
+            : $"⚠ 設定した保存先「{BackupHealth!.ConfiguredFolderPath}」を使用できないため、"
+              + $"上記の既定の場所に保存しています。{BackupHealth!.BackupFolderFallbackReason}"
+              + "設定画面（F5）でバックアップ先を確認し、指定し直してください。";
+
+    /// <summary>
     /// 共有モードでのみ表示する「最終実施PC」の表示テキスト（Issue #1689）。
     /// ローカルモードでは自PCしか実施し得ないため表示しない
     /// </summary>
@@ -182,6 +208,9 @@ public partial class SystemManageViewModel : ViewModelBase
         OnPropertyChanged(nameof(BackupGenerationText));
         OnPropertyChanged(nameof(BackupFreeSpaceText));
         OnPropertyChanged(nameof(BackupFolderText));
+        // Issue #1924: 保存先の退避表示も BackupHealth から導出するため、ここで通知する
+        OnPropertyChanged(nameof(IsBackupFolderFallback));
+        OnPropertyChanged(nameof(BackupFolderFallbackText));
         OnPropertyChanged(nameof(LastBackupMachineText));
         OnPropertyChanged(nameof(LastVacuumText));
     }

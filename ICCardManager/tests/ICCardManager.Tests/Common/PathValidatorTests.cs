@@ -1,4 +1,4 @@
-using System.IO;
+﻿using System.IO;
 using System.Runtime.InteropServices;
 using FluentAssertions;
 using ICCardManager.Common;
@@ -519,6 +519,93 @@ public class PathValidatorTests : IDisposable
             "タイムアウト(5秒) + 処理オーバーヘッドで7秒以内に確実に return すべき");
         // reachable の値は環境依存（多くの場合 false）のため厳密に検証しない
     }
+
+    #endregion
+
+    #region Issue #1924: UNC 到達性チェックは共有ルートに対して行う
+
+    /// <summary>
+    /// Issue #1924: 保存先フォルダーが未作成でも、共有ルートへ到達できれば有効と判定する。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 修正前は到達性チェッカーへ<b>パス全体</b>を渡しており、既定チェッカーの実体が
+    /// <c>Directory.Exists(パス全体)</c> であるため「共有へ到達できない」と
+    /// 「保存先フォルダーがまだ存在しない」を区別できなかった。共有フォルダーに
+    /// バックアップ用のサブフォルダーを作る前に設定すると、アクセス権が正しくても
+    /// 「ネットワーク共有に到達できません」と判定され、無言でローカル既定パスへ
+    /// フォールバックしていた（＝共有フォルダーにバックアップが作成されない）。
+    /// </para>
+    /// <para>
+    /// ローカルパスは未作成フォルダーを許容し（項目8はドライブ準備状態のみ、
+    /// 項目9は親フォルダーへ退避）、実際の作成は <c>BackupService.EnsureDirectoryExists</c> が行う。
+    /// UNC だけが非対称だったのを揃える。
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void ValidateBackupPath_UncSubFolderNotYetCreated_DoesNotReportUnreachable()
+    {
+        // Arrange: 共有ルートには到達できるが、サブフォルダーは存在しない共有を模す
+        var result = InvokeValidateWithStub(
+            @"\\server\share\backup",
+            reachabilityStub: (probed, _) => probed == @"\\server\share",
+            timeoutMs: 5000);
+
+        // Assert: 到達性エラーは出ない（書き込みプローブ等で false になる可能性は許容）
+        if (!result.IsValid)
+        {
+            result.ErrorMessage.Should().NotContain("到達できません",
+                "共有ルートへ到達できる以上、サブフォルダー未作成を到達不可として扱わない");
+        }
+    }
+
+    /// <summary>
+    /// Issue #1924: 到達性チェッカーへ渡すのは共有ルート（<c>\\server\share</c>）であること。
+    /// </summary>
+    [Theory]
+    [InlineData(@"\\server\share\backup", @"\\server\share")]
+    [InlineData(@"\\server\share\a\b\c", @"\\server\share")]
+    [InlineData(@"\\server\share", @"\\server\share")]
+    [InlineData(@"//server/share/backup", @"\\server\share")]
+    public void ValidateBackupPath_ReachabilityChecker_ReceivesShareRoot(string input, string expectedProbed)
+    {
+        // Arrange
+        string capturedPath = null;
+
+        // Act
+        InvokeValidateWithStub(input,
+            reachabilityStub: (probed, _) => { capturedPath = probed; return true; },
+            timeoutMs: 5000);
+
+        // Assert
+        capturedPath.Should().Be(expectedProbed,
+            "到達性チェックの対象は共有ルートであり、保存先フォルダーそのものではない");
+    }
+
+    /// <summary>
+    /// Issue #1924 の対: 共有ルートへ到達できない場合は従来どおりエラーにする。
+    /// </summary>
+    /// <remarks>
+    /// 対の表明が無いと、到達性チェックを丸ごと素通しにした実装でも
+    /// <see cref="ValidateBackupPath_UncSubFolderNotYetCreated_DoesNotReportUnreachable"/> が緑になる。
+    /// </remarks>
+    [Fact]
+    public void ValidateBackupPath_UncRootUnreachable_StillReportsUnreachable()
+    {
+        // Arrange: 共有ルートにも到達できない
+        var result = InvokeValidateWithStub(
+            @"\\nonexistent-test-server\share\backup",
+            reachabilityStub: (_, _) => false,
+            timeoutMs: 5000);
+
+        // Assert
+        result.IsValid.Should().BeFalse();
+        result.ErrorMessage.Should().Contain("ネットワーク共有に到達できません");
+    }
+
+    #endregion
+
+    #region テスト用ヘルパー
 
     /// <summary>
     /// Issue #1269 テスト用ヘルパー: internal オーバーロードをリフレクションで呼び出し、

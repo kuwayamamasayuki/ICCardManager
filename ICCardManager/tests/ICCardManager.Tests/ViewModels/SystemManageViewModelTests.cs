@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Linq;
@@ -847,6 +847,49 @@ public class SystemManageViewModelTests : IDisposable
         await _viewModel.LoadBackupHealthAsync();
 
         _viewModel.BackupFolderText.Should().Be(@"保存先: \\fileserver\iccard\backup");
+    }
+
+    /// <summary>
+    /// Issue #1924: 設定した保存先が使えず既定パスへ退避したとき、
+    /// 「何が／なぜ／どうすれば」の3要素で案内すること。
+    /// </summary>
+    [Fact]
+    public async Task バックアップ状況_保存先が既定へ退避したとき3要素で案内されること()
+    {
+        SetupHealth(new BackupHealthInfo
+        {
+            BackupFolderPath = @"C:\ProgramData\ICCardManager\backup",
+            ConfiguredFolderPath = @"\\fileserver\iccard\backup",
+            BackupFolderFallbackReason = "ネットワーク共有に到達できません。"
+        });
+
+        await _viewModel.LoadBackupHealthAsync();
+
+        _viewModel.IsBackupFolderFallback.Should().BeTrue();
+        // 何が: 設定した保存先を名指しする
+        _viewModel.BackupFolderFallbackText.Should().Contain(@"\\fileserver\iccard\backup");
+        // なぜ: 検証が返した理由をそのまま載せる（丸めると原因へ到達できない）
+        _viewModel.BackupFolderFallbackText.Should().Contain("到達できません");
+        // どうすれば: 行動指示で終わる
+        _viewModel.BackupFolderFallbackText.Should().Contain("設定画面（F5）");
+        _viewModel.BackupFolderFallbackText.Should().EndWith("してください。");
+    }
+
+    /// <summary>
+    /// Issue #1924 の対: 退避していないときは案内を出さないこと。
+    /// </summary>
+    /// <remarks>
+    /// 対の表明が無いと、常に案内を出す実装でも上のテストが緑になる。
+    /// </remarks>
+    [Fact]
+    public async Task バックアップ状況_退避していないときは案内を出さないこと()
+    {
+        SetupHealth(new BackupHealthInfo { BackupFolderPath = @"\\fileserver\iccard\backup" });
+
+        await _viewModel.LoadBackupHealthAsync();
+
+        _viewModel.IsBackupFolderFallback.Should().BeFalse();
+        _viewModel.BackupFolderFallbackText.Should().BeEmpty();
     }
 
     [Fact]

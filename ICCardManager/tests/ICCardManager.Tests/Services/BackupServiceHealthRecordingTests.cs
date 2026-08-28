@@ -1,7 +1,8 @@
-using System;
+﻿using System;
 using System.IO;
 using System.Threading.Tasks;
 using FluentAssertions;
+using ICCardManager.Common;
 using ICCardManager.Data;
 using ICCardManager.Data.Repositories;
 using ICCardManager.Models;
@@ -153,6 +154,60 @@ public class BackupServiceHealthRecordingTests : IDisposable
         var createdFile = await _service.ExecuteAutoBackupAsync();
 
         Path.GetDirectoryName(createdFile).Should().Be(folder);
+    }
+
+    /// <summary>
+    /// Issue #1924: 設定した保存先が使える場合、退避理由は立たない。
+    /// </summary>
+    [Fact]
+    public async Task ResolveBackupFolderDetailAsync_設定した保存先が使えるとき退避しないこと()
+    {
+        var resolution = await _service.ResolveBackupFolderDetailAsync();
+
+        resolution.EffectiveFolderPath.Should().Be(_backupDirectory);
+        resolution.ConfiguredFolderPath.Should().Be(_backupDirectory);
+        resolution.IsFallback.Should().BeFalse();
+        resolution.FallbackReason.Should().BeNull();
+    }
+
+    /// <summary>
+    /// Issue #1924: 設定した保存先が検証に失敗すると既定パスへ退避し、その理由を返す。
+    /// </summary>
+    /// <remarks>
+    /// 修正前は <c>ResolveBackupFolderAsync</c> が退避後のパスしか返さず、
+    /// 「設定した共有フォルダーではなくローカルへ書いている」ことが
+    /// Warning ログ以外のどこにも現れなかった。
+    /// </remarks>
+    [Fact]
+    public async Task ResolveBackupFolderDetailAsync_保存先が無効なとき既定へ退避し理由を返すこと()
+    {
+        // Arrange: 相対パス（検証で必ず弾かれる）を設定する
+        _settingsRepositoryMock.Setup(x => x.GetAppSettingsAsync())
+            .ReturnsAsync(new AppSettings { BackupPath = @"relative\backup" });
+
+        // Act
+        var resolution = await _service.ResolveBackupFolderDetailAsync();
+
+        // Assert
+        resolution.EffectiveFolderPath.Should().Be(PathValidator.GetDefaultBackupPath());
+        resolution.ConfiguredFolderPath.Should().Be(@"relative\backup");
+        resolution.IsFallback.Should().BeTrue();
+        resolution.FallbackReason.Should().NotBeNullOrWhiteSpace();
+    }
+
+    /// <summary>
+    /// Issue #1924: 保存先が未設定で既定を使うのは正常な運用なので、退避扱いにしない。
+    /// </summary>
+    [Fact]
+    public async Task ResolveBackupFolderDetailAsync_保存先が未設定のとき退避扱いにしないこと()
+    {
+        _settingsRepositoryMock.Setup(x => x.GetAppSettingsAsync())
+            .ReturnsAsync(new AppSettings { BackupPath = string.Empty });
+
+        var resolution = await _service.ResolveBackupFolderDetailAsync();
+
+        resolution.EffectiveFolderPath.Should().Be(PathValidator.GetDefaultBackupPath());
+        resolution.IsFallback.Should().BeFalse();
     }
 
     #endregion
