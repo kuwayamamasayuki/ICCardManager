@@ -153,6 +153,14 @@
                             AutomationProperties.Name="カード削除"
                             AutomationProperties.HelpText="選択したカードを削除します。削除後も履歴は保持されます。"
                             ToolTip="選択したカードを削除"/>
+                    <!-- Issue #1909: 読み取らずに持ち出されたカードを貸出中にする -->
+                    <Button Content="貸出記録の作成"
+                            Command="{Binding CreateLendRecordCommand}"
+                            Padding="15,8"
+                            Margin="0,0,10,5"
+                            AutomationProperties.Name="貸出記録の作成"
+                            AutomationProperties.HelpText="ピッすいに読み取らせずに持ち出された交通系ICカードを、貸出中の状態にします。職員証による認証が必要です。"
+                            ToolTip="読み取らずに持ち出されたカードを貸出中にする"/>
                     <Button Content="払い戻し"
                             Command="{Binding RefundCommand}"
                             Padding="15,8"

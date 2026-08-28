@@ -362,7 +362,23 @@ namespace ICCardManager.Services
         /// エラー時は <see cref="LendingResult.ErrorMessage"/> にエラー内容が設定されます。
         /// </para>
         /// </remarks>
-        public async Task<LendingResult> LendAsync(string staffIdm, string cardIdm, int? balance = null)
+        /// <param name="lentAt">
+        /// 貸出日時。null の場合は現在時刻（＝物理タッチ経路）。
+        /// Issue #1909: システム操作による貸出記録作成では、実際にカードを持ち出した日時を指定できる。
+        /// 指定した場合は <see cref="ValidateSystemLendDateTime"/> で妥当性を検証する。
+        /// </param>
+        /// <param name="armRetouchWindow">
+        /// 30秒ルール（<see cref="IsRetouchWithinTimeout"/>）を武装するかどうか。既定は true（物理タッチ経路）。
+        /// Issue #1909: システム操作による貸出記録作成では false を指定する。物理タッチが 1 度も起きていないため
+        /// 再タッチ窓を開く根拠が無く、武装すると借用者が 30 秒以内に戻ってタッチしたときに
+        /// 「返却」ではなく「貸出の逆処理（＝作成した記録の取り消し）」が走ってしまう。
+        /// </param>
+        public async Task<LendingResult> LendAsync(
+            string staffIdm,
+            string cardIdm,
+            int? balance = null,
+            DateTime? lentAt = null,
+            bool armRetouchWindow = true)
         {
             var result = new LendingResult { OperationType = LendingOperationType.Lend };
 
@@ -389,19 +405,38 @@ namespace ICCardManager.Services
 
                 var now = _clock.Now;
 
+                // Issue #1909: 貸出日時を任意指定する経路（システム操作）だけ妥当性を検証する。
+                // 物理タッチ経路（lentAt = null）は現在時刻がそのまま使われるため検証不要で、
+                // 直近履歴の追加クエリもここでは発行しない。
+                var effectiveLentAt = lentAt ?? now;
+                if (lentAt.HasValue)
+                {
+                    var latestLedger = await _ledgerRepository.GetLatestLedgerAsync(cardIdm).ConfigureAwait(false);
+                    var dateError = ValidateSystemLendDateTime(lentAt.Value, now, latestLedger?.Date);
+                    if (dateError != null)
+                    {
+                        result.ErrorMessage = dateError;
+                        return result;
+                    }
+                }
+
                 // Issue #656: カードから残高を読み取れなかった場合、直近の履歴から残高を取得
                 // READ操作はリトライ範囲の外で実行（不要な再クエリを防止）
                 var currentBalance = await ResolveInitialBalanceAsync(cardIdm, balance).ConfigureAwait(false);
 
                 // トランザクション内で貸出ledger作成 + カード状態更新
                 // 共有モード時のSQLITE_BUSY対策としてリトライでラップ（WRITE操作のみ）
-                var ledger = await InsertLendLedgerAsync(cardIdm, staffIdm, staff.Name, currentBalance, now).ConfigureAwait(false);
+                var ledger = await InsertLendLedgerAsync(cardIdm, staffIdm, staff.Name, currentBalance, effectiveLentAt).ConfigureAwait(false);
                 result.CreatedLedgers.Add(ledger);
 
-                // 処理情報を記録
-                LastProcessedCardIdm = cardIdm;
-                LastProcessedTime = now;
-                LastOperationType = LendingOperationType.Lend;
+                // 処理情報を記録（Issue #1909: システム操作では武装しない。
+                // 記録の基準時刻は「操作が行われた現在時刻」であって、遡って指定された貸出日時ではない）
+                if (armRetouchWindow)
+                {
+                    LastProcessedCardIdm = cardIdm;
+                    LastProcessedTime = now;
+                    LastOperationType = LendingOperationType.Lend;
+                }
 
                 result.Success = true;
                 result.Balance = currentBalance;
@@ -529,6 +564,44 @@ namespace ICCardManager.Services
             }
 
             return (card, staff, null);
+        }
+
+        /// <summary>
+        /// Issue #1909: システム操作で指定された貸出日時の妥当性を検証する。
+        /// </summary>
+        /// <param name="lentAt">利用者が指定した貸出日時</param>
+        /// <param name="now">現在時刻</param>
+        /// <param name="latestLedgerDate">対象カードの直近履歴の日付。履歴が 1 件も無い場合は null</param>
+        /// <returns>問題が無ければ null。問題があれば「何が／なぜ／どうすれば」を含む案内文言</returns>
+        /// <remarks>
+        /// <para>
+        /// 下限を「直近履歴の日付」に置くのは、貸出中レコードが残高チェーンの途中へ古い残額のまま
+        /// 割り込むのを防ぐため。貸出中レコードは <c>Income = Expense = 0</c> で
+        /// 直近の残額をそのまま持つため、履歴の途中に入ると利用者には残額が戻ったように見える。
+        /// </para>
+        /// <para>
+        /// DB もモックも介さない純関数にしてあるのは、境界（現在時刻ちょうど・直近履歴ちょうど）を
+        /// 決定論的に固定するため（<c>development-conventions.md</c>「判断を純関数へ切り出す」）。
+        /// </para>
+        /// </remarks>
+        internal static string ValidateSystemLendDateTime(DateTime lentAt, DateTime now, DateTime? latestLedgerDate)
+        {
+            if (lentAt > now)
+            {
+                return $"貸出日時に未来の日時（{lentAt:yyyy/MM/dd HH:mm}）が指定されています。" +
+                       $"カードを持ち出した日時が現在時刻（{now:yyyy/MM/dd HH:mm}）より後になることはありません。" +
+                       "現在時刻以前の日時を入力してください。";
+            }
+
+            if (latestLedgerDate.HasValue && lentAt < latestLedgerDate.Value)
+            {
+                return $"貸出日時（{lentAt:yyyy/MM/dd HH:mm}）が、このカードの直近の履歴の日付" +
+                       $"（{latestLedgerDate.Value:yyyy/MM/dd HH:mm}）より前です。" +
+                       "貸出中の記録が履歴の途中に入ると、残額の並びが実際と食い違って表示されます。" +
+                       $"{latestLedgerDate.Value:yyyy/MM/dd HH:mm} 以降の日時を入力してください。";
+            }
+
+            return null;
         }
 
         /// <summary>

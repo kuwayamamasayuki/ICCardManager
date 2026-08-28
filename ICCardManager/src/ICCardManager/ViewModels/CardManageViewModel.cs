@@ -40,6 +40,24 @@ namespace ICCardManager.ViewModels
         /// この実装（<c>WpfDispatcherService</c>）は <c>Unwrap()</c> して観測しログへ残す（Issue #1725）。
         /// </summary>
         private readonly IDispatcherService _dispatcherService;
+
+        /// <summary>
+        /// 貸出記録作成ダイアログ（Issue #1909）の表示に使う。
+        /// </summary>
+        private readonly INavigationService _navigationService;
+
+        /// <summary>
+        /// 貸出記録作成ダイアログの ViewModel を生成するファクトリ（Issue #1909）。
+        /// </summary>
+        /// <remarks>
+        /// ダイアログ側に DI から解決させず呼び出し元が生成するのは、作成結果の文言
+        /// （<see cref="SystemLendViewModel.ResultMessage"/>）をカード管理画面の
+        /// ステータス欄へ引き継ぐため。両者が同じインスタンスを見る必要がある。
+        /// 省略可能にすると DI の配線漏れが「ボタンを押しても何も起きない」形で
+        /// 潜在化するため必須引数にしている（Issue #1820）。
+        /// </remarks>
+        private readonly Func<SystemLendViewModel> _systemLendViewModelFactory;
+
         private readonly ILogger<CardManageViewModel>? _logger;
 
         [ObservableProperty]
@@ -160,6 +178,8 @@ namespace ICCardManager.ViewModels
             LendingService lendingService,
             IMessenger messenger,
             IDispatcherService dispatcherService,
+            INavigationService navigationService,
+            Func<SystemLendViewModel> systemLendViewModelFactory,
             ILogger<CardManageViewModel>? logger = null)
         {
             _cardRepository = cardRepository;
@@ -172,6 +192,9 @@ namespace ICCardManager.ViewModels
             _lendingService = lendingService;
             _messenger = messenger;
             _dispatcherService = dispatcherService;
+            _navigationService = navigationService ?? throw new ArgumentNullException(nameof(navigationService));
+            _systemLendViewModelFactory = systemLendViewModelFactory
+                ?? throw new ArgumentNullException(nameof(systemLendViewModelFactory));
             _logger = logger;
 
             // カード読み取りイベント
@@ -1185,6 +1208,79 @@ namespace ICCardManager.ViewModels
         }
 
         /// <summary>
+        /// 貸出記録の作成が可能かどうか（Issue #1909）
+        /// </summary>
+        /// <remarks>
+        /// 貸出中のカードは既に貸出記録があり、払戻済のカードは貸出対象外（Issue #530）。
+        /// ここでの判定は一覧に載っている値であり、実際の可否は書き込み直前に
+        /// DB から読み直して確定させる（共有モードでは他 PC が先に貸し出し得る）。
+        /// </remarks>
+        private bool CanCreateLendRecord() =>
+            SelectedCard != null && !SelectedCard.IsLent && !SelectedCard.IsRefunded;
+
+        /// <summary>
+        /// システム操作による貸出記録の作成（Issue #1909）
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// ピッすいに読み取らせずに交通系ICカードを持ち出したことに後から気付いた場合に、
+        /// 庶務担当者等が貸出中の状態を作る。職員証による操作者の認証を必須とし、
+        /// 台帳には借用者、操作ログには操作者が別々に残る。
+        /// </para>
+        /// <para>
+        /// Issue #1761: 操作対象は「ボタンを押した時点で選択されていた行」であり、
+        /// 認証ダイアログ（職員証タッチ待ち）の表示中に選択が外れても変わらない。
+        /// 識別情報は最初の await より前にローカル変数へ確定させる。
+        /// </para>
+        /// </remarks>
+        [RelayCommand(CanExecute = nameof(CanCreateLendRecord))]
+        public async Task CreateLendRecordAsync()
+        {
+            if (SelectedCard == null) return;
+
+            var targetIdm = SelectedCard.CardIdm;
+            var targetLabel = FormatCardLabel(SelectedCard.CardType, SelectedCard.CardNumber);
+
+            var authResult = await _staffAuthService.RequestAuthenticationAsync("貸出記録の作成");
+            if (authResult == null) return;
+
+            // Issue #1760: 書き込みより前に最新の状態を読み、読めなければ何も書かずに戻る。
+            // 認証の待機中に他 PC がこのカードを削除・貸出している可能性がある。
+            var card = await _cardRepository.GetByIdmAsync(targetIdm);
+            if (card == null)
+            {
+                await NotifyUpdateConflictAsync(targetLabel);
+                return;
+            }
+
+            if (card.IsLent)
+            {
+                await LoadCardsAsync();
+                StatusMessage =
+                    $"カード「{targetLabel}」は既に貸出中のため、貸出記録を作成できませんでした。" +
+                    "他のパソコンや別の操作で貸し出された可能性があります。" +
+                    "カード一覧を再読み込みしました。状態を確認してください。";
+                IsStatusError = true;
+                return;
+            }
+
+            var viewModel = _systemLendViewModelFactory();
+            await viewModel.InitializeAsync(card);
+
+            var dialogResult = _navigationService.ShowDialog<Views.Dialogs.SystemLendDialog>(
+                d => d.Bind(viewModel));
+
+            if (dialogResult != true) return;
+
+            await LoadCardsAsync();
+            CancelEdit();
+            // Issue #1727 / #1759: CancelEdit() は StatusMessage / IsStatusError をクリアするため、
+            // 完了メッセージは必ず後処理のあとに設定する（先に設定すると一度も表示されない）。
+            StatusMessage = viewModel.ResultMessage;
+            IsStatusError = false;
+        }
+
+        /// <summary>
         /// 払い戻し後のカードの状態を、払い戻し前のデータから組み立てる
         /// </summary>
         /// <param name="beforeCard">払い戻し前に読み取ったカード</param>
@@ -1525,6 +1621,7 @@ namespace ICCardManager.ViewModels
             StartEditCommand.NotifyCanExecuteChanged();
             DeleteCommand.NotifyCanExecuteChanged();
             RefundCommand.NotifyCanExecuteChanged();  // Issue #446対応: 払い戻しボタンの状態も更新
+            CreateLendRecordCommand.NotifyCanExecuteChanged();  // Issue #1909
 
             // 新規登録モード中は選択変更を無視
             if (IsNewCard) return;
