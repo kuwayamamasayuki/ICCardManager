@@ -1076,8 +1076,12 @@ public partial class MainViewModel : ViewModelBase
         // Clear() が巻き添えで消していた）。ダッシュボードは DashboardService が
         // CardRepository.GetAllAsync から組む「有効なカードの母集団」そのもののため、
         // 最新のカード集合を知れるのはここ。
+        //
+        // Issue #1908: 残額の食い違い警告（CardBalanceMismatch）も生成元が単独タッチ時に限られ、
+        // カードを論理削除・払い戻しするとその経路自体が無くなるため、同じ手当てが要る。
         var activeCardIdms = new HashSet<string>(CardBalanceDashboard.Select(i => i.CardIdm));
-        ReplaceWarnings(w => w.Type == WarningType.BalanceInconsistency
+        ReplaceWarnings(w => (w.Type == WarningType.BalanceInconsistency
+                              || w.Type == WarningType.CardBalanceMismatch)
                              && !activeCardIdms.Contains(w.CardIdm));
     }
 
@@ -1191,6 +1195,10 @@ public partial class MainViewModel : ViewModelBase
                 await Process30SecondRuleAsync(card);
                 return;
             }
+
+            // Issue #1908: 履歴を開く前に、カードの実残額とピッすいの記録の食い違いを判定する。
+            // 実残額はカードがリーダーに載っている「いま」しか読めないため、履歴の読み込み（DB I/O）より前に行う。
+            await CheckCardBalanceMismatchAsync(card);
 
             // 履歴表示画面を開く
             _balanceInconsistencies.Clear();
@@ -1397,6 +1405,13 @@ public partial class MainViewModel : ViewModelBase
                 // 直後の再タッチが「操作者情報がありません」で止まる）
                 _lastProcessedStaffIdm = _currentStaffIdm;
                 _lastProcessedStaffName = _currentStaffName;
+
+                // Issue #1908: 実残額を読み取れたときだけ食い違い警告を取り除く。
+                // 読み取れていない場合は台帳の残額が現物と一致する保証が無い。
+                if (balance.HasValue)
+                {
+                    ClearCardBalanceMismatchWarning(card.CardIdm);
+                }
 
                 await RefreshLentCardsAsync();
                 await RefreshDashboardAsync();
@@ -1617,6 +1632,10 @@ public partial class MainViewModel : ViewModelBase
 
             // トースト通知を表示（表示位置は設定に従う、フォーカスを奪わない）
             _toastNotificationService.ShowReturnNotification(card.CardType, card.CardNumber, result.Balance, result.IsLowBalance, result.WarningBalance);
+
+            // Issue #1908: 返却が完了し残額も確定したので、食い違い警告は解消している。
+            // HasPostCommitFailure（残額を解決できなかった）の側では消さない。
+            ClearCardBalanceMismatchWarning(card.CardIdm);
         }
 
         // メイン画面は変更しない（Issue #186: 職員の操作を妨げない）
@@ -1805,6 +1824,118 @@ public partial class MainViewModel : ViewModelBase
         }
 
         ResetState();
+    }
+
+    /// <summary>
+    /// Issue #1908: 登録済みの交通系ICカードを単独でタッチしたときに、
+    /// カードの実残額とピッすいが記録している残額の食い違いを判定して警告を入れ替える。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// ピッすいを通さずに利用・返却されたカードを庶務担当者が見つけられるようにするための検出。
+    /// 判定できるのは<b>カードがリーダーに載っている瞬間だけ</b>のため、他の履歴表示経路
+    /// （残額警告のクリック・ダッシュボードからの表示）では判定しない。
+    /// </para>
+    /// <para>
+    /// <b>読み取れなかったときは前回の判定を残す。</b> 残額の読み取り失敗（カードを早く離した・
+    /// リーダー断）や台帳の読み取り失敗は「差異が無い」ことを意味しないため、既存の警告行を消さない。
+    /// 「判定できなかった」ことをその場で通知もしない（カードを早く離す運用では毎回出て
+    /// 本当の警告が埋もれるため。判断材料はログに残す）。
+    /// </para>
+    /// <para>
+    /// internal: カードリーダー経由でしか到達しない経路のため、テストから直接呼び出して検証する。
+    /// </para>
+    /// </remarks>
+    internal async Task CheckCardBalanceMismatchAsync(IcCard card)
+    {
+        if (card == null) return;
+
+        int? actualBalance = null;
+
+        // Issue #656 と同じ理由でエラーイベントを一時的に抑制する
+        // （カードを離したことによるリーダーエラーを警告エリアへ出さない）。
+        _cardReader.Error -= OnCardReaderError;
+        try
+        {
+            actualBalance = await _cardReader.ReadBalanceAsync(card.CardIdm);
+        }
+        catch (Exception ex)
+        {
+            // IDm はログへ生で出さない（IdmMasker を通す。Issue #1852）
+            _logger?.LogWarning(ex,
+                "残額の食い違い判定: カードから残額を読み取れませんでした。カード={CardIdm}（管理番号={CardNumber}）",
+                IdmMasker.Mask(card.CardIdm), card.CardNumber);
+        }
+        finally
+        {
+            _cardReader.Error += OnCardReaderError;
+        }
+
+        if (actualBalance == null)
+        {
+            // 障害調査で「判定したのに一致した」と「判定できなかった」を区別できるようにする（#1716）
+            _logger?.LogInformation(
+                "残額の食い違い判定: 実残額を取得できなかったため判定を見送りました。カード={CardIdm}（管理番号={CardNumber}）",
+                IdmMasker.Mask(card.CardIdm), card.CardNumber);
+            return;
+        }
+
+        Models.Ledger latestLedger;
+        try
+        {
+            latestLedger = await _ledgerRepository.GetLatestLedgerAsync(card.CardIdm);
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogWarning(ex,
+                "残額の食い違い判定: 台帳の最新残額を取得できませんでした。カード={CardIdm}（管理番号={CardNumber}）",
+                IdmMasker.Mask(card.CardIdm), card.CardNumber);
+            return;
+        }
+
+        if (latestLedger == null)
+        {
+            // 記録が 1 行も無い（＝比較対象が無い）。「一致した」ではないので既存の警告は残す。
+            _logger?.LogInformation(
+                "残額の食い違い判定: 台帳に記録が無いため判定を見送りました。カード={CardIdm}（管理番号={CardNumber}）",
+                IdmMasker.Mask(card.CardIdm), card.CardNumber);
+            return;
+        }
+
+        var warning = _warningService.CheckCardBalanceMismatchWarning(
+            card.CardIdm, card.CardType, card.CardNumber,
+            actualBalance.Value, latestLedger.Balance, card.IsLent);
+
+        // 自分が生成する種別の、しかも同一カード分だけを入れ替える（04_機能設計書 §7.4）
+        ReplaceWarnings(
+            w => w.Type == WarningType.CardBalanceMismatch && w.CardIdm == card.CardIdm,
+            warning == null ? null : new[] { warning });
+
+        if (warning != null)
+        {
+            // 色・アイコン・テキスト・音の4要素で伝える。トーストは文字数制約があるため簡潔にし、
+            // 「なぜ／どうすれば」は警告エリアの行が担う（error-messages.md）。
+            _soundPlayer.Play(SoundType.Warning);
+            _toastNotificationService.ShowWarning(
+                "残額の食い違い",
+                $"{card.CardType} {card.CardNumber}\n" +
+                $"カード {DisplayFormatters.FormatBalanceWithUnit(actualBalance.Value)} / " +
+                $"記録 {DisplayFormatters.FormatBalanceWithUnit(latestLedger.Balance)}");
+        }
+    }
+
+    /// <summary>
+    /// Issue #1908: 貸出・返却が記録されたカードの残額食い違い警告を取り除く。
+    /// </summary>
+    /// <remarks>
+    /// 貸出・返却はどちらもカードから読み取った実残額を台帳へ書くため、
+    /// その記録が確定した時点で食い違いは解消している。
+    /// <b>実残額を読み取れなかった処理では呼ばない</b> — その場合は台帳に入った残額が
+    /// 現物と一致する保証が無く、警告を消すと「解消した」という誤った表示になる。
+    /// </remarks>
+    private void ClearCardBalanceMismatchWarning(string cardIdm)
+    {
+        ReplaceWarnings(w => w.Type == WarningType.CardBalanceMismatch && w.CardIdm == cardIdm);
     }
 
     /// <summary>
@@ -3296,6 +3427,19 @@ public partial class MainViewModel : ViewModelBase
                 if (lowBalanceCard != null)
                 {
                     await ShowHistoryAsync(lowBalanceCard);
+                }
+                break;
+
+            case WarningType.CardBalanceMismatch:
+                // Issue #1908: 残額の食い違い警告: 該当カードの履歴を表示する。
+                // 文言が「履歴を確認し」と案内する以上、クリックでその履歴へ到達できること。
+                // ここで再判定はしない（実残額はカードがリーダーに載っているときしか読めず、
+                // 読めないまま「解消した」と判断すると警告が黙って消える）。
+                _balanceInconsistencies.Clear();
+                var mismatchCard = await _cardRepository.GetByIdmAsync(warning.CardIdm);
+                if (mismatchCard != null)
+                {
+                    await ShowHistoryAsync(mismatchCard);
                 }
                 break;
 

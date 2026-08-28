@@ -39,7 +39,17 @@ namespace ICCardManager.Dtos
         /// Issue #1726 以前の <c>UPDATE ic_card</c> が繰越4項目を既定値で上書きしていたことによる被害。
         /// 検出のみで復旧手段は持たない（復旧は DB の直接修正）。
         /// </remarks>
-        CarryoverDataLoss
+        CarryoverDataLoss,
+
+        /// <summary>
+        /// 交通系ICカードの実残額と、ピッすいが記録している残額が食い違っている警告（カード単位、Issue #1908）
+        /// </summary>
+        /// <remarks>
+        /// ピッすいを通さずに利用・返却された交通系ICカードを庶務担当者が見つけられるようにするための検出。
+        /// 登録済みカードを単独でタッチしたとき（履歴表示）にだけ判定する
+        /// （カードがリーダーに載っている瞬間にしか実残額を読めないため）。
+        /// </remarks>
+        CardBalanceMismatch
     }
 
     /// <summary>
@@ -58,7 +68,7 @@ namespace ICCardManager.Dtos
         public WarningType Type { get; set; }
 
         /// <summary>
-        /// 対象カードIDm（LowBalance・BalanceInconsistency時に使用）
+        /// 対象カードIDm（LowBalance・BalanceInconsistency・CardBalanceMismatch時に使用）
         /// </summary>
         public string CardIdm { get; set; }
 
