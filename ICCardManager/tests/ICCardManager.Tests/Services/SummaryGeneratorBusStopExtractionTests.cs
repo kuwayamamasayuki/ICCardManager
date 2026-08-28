@@ -93,6 +93,26 @@ public class SummaryGeneratorBusStopExtractionTests : IDisposable
         busStops.Should().BeEmpty();
     }
 
+    [Fact]
+    public void ExtractBusStopBlocks_中身が空のブロックはバス停名として扱わないこと()
+    {
+        // コードレビュー指摘: 生成側（FormatBusSummary）は未入力でもプレースホルダを
+        // 入れるため「バス（）」は生成され得ず、摘要の手編集でのみ現れる。
+        // これをブロックとして数えると SyncBusStopsFromSummary が
+        // LedgerDetail.BusStops を空文字で上書きし、実際に乗降した場所が静かに失われる
+        //（従来の正規表現は本文を 1 文字以上要求していたため一致しなかった）。
+        var emptyBlock = SummaryGenerator.FormatBusSummary(string.Empty);
+
+        SummaryGenerator.TryExtractBusStops(emptyBlock, out var busStops).Should().BeFalse();
+        busStops.Should().BeEmpty();
+
+        // 対の表明: 空ブロックが混ざっても、残りのブロックは従来どおり取り出せる
+        SummaryGenerator.TryExtractBusStops(
+            emptyBlock + "、" + SummaryGenerator.FormatBusSummary("天神～博多"),
+            out var mixed).Should().BeTrue();
+        mixed.Should().Be("天神～博多");
+    }
+
     #endregion
 
     #region 正当な摘要を塞がない（対の表明）

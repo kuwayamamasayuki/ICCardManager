@@ -423,11 +423,6 @@ public class BusStopInputViewModelTests
     }
 
     /// <summary>
-    /// Issue #1811（コードレビュー指摘）: 同じバス停名を複数行に入力した場合（同一路線を1日に2回利用する等）、
-    /// 行ごとに同じ警告文言が生成される。重複したまま列挙すると確認ダイアログに同じ行が並び、
-    /// 上限件数と「ほか N 件」の残数も重複分で水増しされる。
-    /// </summary>
-    /// <summary>
     /// Issue #1914: 摘要は「ラベル＋全角括弧」の区切り書式のため、対応の取れない
     /// 全角括弧を含むバス停名は摘要から読み取れなくなる。入力し直せるうちに知らせること。
     /// </summary>
@@ -462,6 +457,11 @@ public class BusStopInputViewModelTests
         warnings.Should().NotContain(w => w.Contains("全角括弧"));
     }
 
+    /// <summary>
+    /// Issue #1811（コードレビュー指摘）: 同じバス停名を複数行に入力した場合（同一路線を1日に2回利用する等）、
+    /// 行ごとに同じ警告文言が生成される。重複したまま列挙すると確認ダイアログに同じ行が並び、
+    /// 上限件数と「ほか N 件」の残数も重複分で水増しされる。
+    /// </summary>
     [Fact]
     public void CollectSaveWarnings_同一文言の類似警告は重複しないこと()
     {

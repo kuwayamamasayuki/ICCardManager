@@ -279,7 +279,15 @@ namespace ICCardManager.Services
         /// <para>
         /// 局所的なマッチでは検出できない（「バス（天神）西口～博多）」は
         /// 「バス（天神）」というブロックとして<b>そのまま成立して見える</b>）が、
-        /// 摘要全体を数えれば括弧の過不足として必ず現れる。
+        /// 摘要全体を数えれば括弧の過不足として現れる。
+        /// </para>
+        /// <para>
+        /// <b>ただし過不足の検出は万能ではない。</b>バス停名の中で閉じが開きに先行し、
+        /// かつ個数が釣り合う入力（「天神）～博多（」→ 摘要「バス（天神）～博多（）」）は
+        /// 全体では対応が取れており、区切りとしても<b>「バス（天神）」＋後続の自由文</b>と
+        /// 解釈できてしまう（後続の自由文は正当な摘要なので塞げない）。この形は
+        /// 入力側（<c>BusStopInputViewModel.CollectSaveWarnings</c> /
+        /// <c>LedgerRowEditViewModel.Validate</c>）の警告で気付かせる。
         /// </para>
         /// <para>
         /// 半角括弧は対象外。摘要の書式に使うのは全角括弧だけであり、
@@ -398,8 +406,19 @@ namespace ICCardManager.Services
                 // 対応検証済みのため到達しないが、断片を返さない側へ倒す
                 if (depth != 0) break;
 
-                blocks.Add(text.Substring(contentStart, index - contentStart));
+                var content = text.Substring(contentStart, index - contentStart);
                 searchFrom = index + 1;
+
+                // 中身が空のブロック（「バス（）」）はバス停名として扱わない。
+                // 生成側（FormatBusSummary）は未入力でも BusPlaceholder を入れるため
+                // 本来は生成され得ず、摘要の手編集でのみ現れる形である。
+                // ブロックとして数えると SyncBusStopsFromSummary が
+                // LedgerDetail.BusStops を空文字で上書きし、6 年保存の台帳から
+                // 実際に乗降した場所が静かに失われる（従来の正規表現は本文を
+                // 1 文字以上要求していたため、この形には一致しなかった）。
+                if (string.IsNullOrWhiteSpace(content)) continue;
+
+                blocks.Add(content);
             }
 
             return blocks;
