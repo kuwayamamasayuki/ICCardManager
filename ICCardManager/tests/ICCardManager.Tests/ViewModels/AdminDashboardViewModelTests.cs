@@ -600,6 +600,54 @@ public class AdminDashboardViewModelTests
     }
 
     [Fact]
+    public async Task SelectingMoreCardsThanTheDefault_DrawsEveryCheckedCard()
+    {
+        // Issue #1921 の故障シナリオ: 6 枚目以降にチェックを付けても折れ線が増えず、
+        // 「なぜ描かれないのか」を伝える表示も無かった（描画側が先頭 5 枚で切っていた）
+        const int extra = 3;
+        var cardCount = AppConstants.AdminDashboardMaxSeries + extra;
+        SetupAnalytics(CreateAnalytics(cardCount: cardCount));
+        var vm = CreateViewModel();
+        await vm.LoadAnalyticsAsync();
+
+        // 対の表明: 初期状態は従来どおり上限枚数だけが選択・描画されている
+        // （これが崩れると「初期選択の上限まで消した」実装でも以降の表明が緑になる）
+        vm.BalanceLines.Select(l => l.DisplayName).Distinct()
+            .Should().HaveCount(AppConstants.AdminDashboardMaxSeries);
+
+        foreach (var option in vm.BalanceSeriesOptions)
+        {
+            option.IsSelected = true;
+        }
+
+        vm.BalanceLines.Select(l => l.DisplayName).Distinct()
+            .Should().HaveCount(cardCount, "チェックしたカードは初期選択の枚数を超えても描くこと（Issue #1921）");
+        vm.BalanceSeriesOptions.Where(o => o.IsSelected)
+            .Should().OnlyContain(o => vm.BalanceLines.Any(l => l.DisplayName == o.DisplayName));
+    }
+
+    [Fact]
+    public async Task SelectingMoreCardsThanTheDefault_KeepsTheTableInSyncWithTheChart()
+    {
+        // 一覧はグラフの代替表現（Issue #1856）。描画側だけ上限を外すと、
+        // グラフに在る系列が一覧に無い状態になり「同じ内容」でなくなる
+        const int monthCount = 3;
+        var cardCount = AppConstants.AdminDashboardMaxSeries + 3;
+        SetupAnalytics(CreateAnalytics(cardCount: cardCount, monthCount: monthCount));
+        var vm = CreateViewModel();
+        await vm.LoadAnalyticsAsync();
+
+        foreach (var option in vm.BalanceSeriesOptions)
+        {
+            option.IsSelected = true;
+        }
+
+        vm.BalanceTableRows.Should().HaveCount(monthCount * cardCount);
+        vm.BalanceTableRows.Select(r => r.SeriesName).Distinct()
+            .Should().BeEquivalentTo(vm.BalanceLines.Select(l => l.DisplayName).Distinct());
+    }
+
+    [Fact]
     public async Task TogglingBalanceSeriesOption_RedrawsTheChart()
     {
         SetupAnalytics(CreateAnalytics(cardCount: 2));
