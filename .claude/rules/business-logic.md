@@ -1,4 +1,4 @@
-# 主要な業務ロジック
+﻿# 主要な業務ロジック
 
 ## 状態遷移
 1. **職員証タッチ待ち** → 職員証タッチ → **交通系ICカードタッチ待ち**
@@ -89,6 +89,7 @@ THEN
 - DBパス変更後はアプリ再起動が必要
 - VACUUM: 毎月10日以降の最初の起動時に「先勝ち CAS ロック」で 1 台だけが試行する（`StartupTaskRunner` の `today.Day >= MonthlyVacuumStartDay` ガード、Issue #1482）。`SettingsRepository.TryAcquireMonthlyVacuumLockAsync` で `settings.last_vacuum_date` 行をアトミック更新し、`rowsAffected=1` を受け取った PC のみが VACUUM を実行。ロック獲得後の VACUUM 失敗は当月スキップとして確定し、来月まで誰も再試行しない（デッドロックスパイラル防止）。**ロックは VACUUM 実行前に消費されるため、`DbContext.Vacuum` は SQLite 由来の失敗を理由を問わず `false` に畳み、原因の `ResultCode` を Warning ログに残す**（Busy/Locked だけを catch していた頃は、それ以外の例外が起動時タスクの catch まで飛び「VACUUM が原因」と分からないログしか残らなかった。Issue #1737）。なおこの「毎月10日以降の初回起動時に1回」という月次ロック機構は**共有モード限定ではなく全モードで動作する**（本項を共有フォルダモード節に記載しているのは複数 PC 競合時の CAS ロックが主眼のため）。ローカルモード（単一 PC）では競合がないため CAS ロックは常に獲得され、実質「月1回 VACUUM を試行する」ガードとして働く（ドリフト監査 SHARED-R5-02）
 - バックアップ: SQLite Backup API使用（同時アクセス中でも安全）
+- **SQLite はバックスラッシュの UNC パスを開けない（Issue #1924）**: `Data Source=\\server\share\x.db` は `unable to open database file` になる。接続文字列の組み立ては `DbContext.BuildConnectionString`（UNC を `//server/share/x.db` へ変換）に一本化し、新たに SQLite 接続を開く箇所は必ずこれを通す。DB 本体だけが変換を持っていた頃は、**共有フォルダーで DB は開けるのにバックアップだけが必ず失敗**していた（詳細は `development-conventions.md`「SQLite の接続文字列は 1 か所で組み立てる」）
 - **バックアップの保持は「ファイル数」ではなく「日数」で数える（Issue #1813）**: 起動のたびに無条件でバックアップを作る（`StartupTaskRunner` に日次ガードは無い）ため、ファイル数の上限は保持期間を意味しない。共有モードの最大20台運用では1日あたり20世代前後が生まれ、「30世代 ≒ 1か月分」という前提が実効1.5日分まで縮んでいた。自動バックアップは**バックアップのある日を新しい順に `AppConstants.BackupRetentionDays`(=30) 日分**残し、各日は最新の1世代だけを残す。手動（`backup_manual_…`）とリストア前（`backup_pre_restore_…`）は日単位の間引きの対象外で、新しい順に `AppConstants.MaxManualBackupGenerations`(=10) 件を残す（同日で間引くと「リストア→再起動→自動バックアップ」で唯一の退避が消える）。判定は純関数 `BackupService.SelectBackupsToDelete` に集約
   - **「1回の起動＝1世代」という前提を、コメントや定数名に埋め込まない**。台数・起動回数に依存する量を上限に選ぶと、単一PCの開発環境では想定どおりに見えたまま本番だけ壊れる。**保持期間を意味する量（日数）で上限を決める**
   - **作成側ではなく削除側で間引く**。「同じ日の世代があれば作成をスキップ」にすると、その日に残るのは朝いちばんの状態になる。作ってから間引けば最新の状態が残り、復旧時の欠落が小さい

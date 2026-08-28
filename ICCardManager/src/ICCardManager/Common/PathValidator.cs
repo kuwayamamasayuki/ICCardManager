@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
@@ -151,9 +151,20 @@ namespace ICCardManager.Common
             //    CheckWritePermission より前に実行することで、到達不可時に素早く失敗させる。
             //    Directory.Exists が SMB ハンドシェイクで長時間ハングするのを防ぐため、
             //    5秒タイムアウトの Task.Run で包んで検査する。
+            //
+            //    Issue #1924: 検査対象は「保存先フォルダーそのもの」ではなく共有ルート
+            //    （\\server\share）。既定チェッカーの実体が Directory.Exists であるため、
+            //    パス全体を渡すと「共有へ到達できない」と「保存先フォルダーがまだ存在しない」を
+            //    区別できず、後者まで「ネットワーク共有に到達できません」と報告していた。
+            //    ローカルパスは未作成フォルダーを許容する（項目8はドライブ準備状態のみを見て、
+            //    項目9は親フォルダーの書き込み権限へ退避する）ため、UNC だけが非対称だった。
+            //    実際のフォルダー作成は BackupService.EnsureDirectoryExists が行う。
             if (IsUncPath(path))
             {
-                var reachable = (uncReachabilityChecker ?? DefaultUncReachabilityChecker)(path, uncTimeoutMs);
+                // ExtractUncRoot が null を返すのはサーバー名だけ等の不完全な UNC の場合だが、
+                // それは項目4（ValidateUncPathFormat）で既に弾かれている。防御としてパス全体へ倒す。
+                var probeTarget = ExtractUncRoot(path) ?? path;
+                var reachable = (uncReachabilityChecker ?? DefaultUncReachabilityChecker)(probeTarget, uncTimeoutMs);
                 if (!reachable)
                 {
                     return ValidationResult.Failure(
@@ -553,6 +564,47 @@ namespace ICCardManager.Common
         /// <summary>
         /// 書き込み権限をチェック
         /// </summary>
+        /// <summary>
+        /// 指定パスの祖先のうち、実在する最も近いものを返す（Issue #1924）
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// <see cref="Directory.CreateDirectory(string)"/> は不足している中間フォルダーをまとめて作るが、
+        /// 実際に書き込みが発生するのは「実在する最も近い祖先」の中である。
+        /// 書き込み権限の検査対象をここに合わせることで、直近の親も未作成のパスで
+        /// 検査が丸ごと省略される穴を塞ぐ。
+        /// </para>
+        /// <para>
+        /// ルートまで遡っても実在しない場合は <c>null</c> を返し、呼び出し元は検査を省略する
+        /// （検査できないことを理由に正当な設定を弾かない。実際の書き込み時にエラーになる）。
+        /// </para>
+        /// </remarks>
+        internal static string FindNearestExistingAncestor(string path)
+        {
+            var current = Path.GetDirectoryName(path);
+
+            while (!string.IsNullOrEmpty(current))
+            {
+                if (Directory.Exists(current))
+                {
+                    return current;
+                }
+
+                var parent = Path.GetDirectoryName(current);
+
+                // GetDirectoryName はルート（C:\ や \\server\share）で null を返すが、
+                // 実装差で同じ値を返し続ける入力があっても無限ループにしない。
+                if (string.Equals(parent, current, StringComparison.OrdinalIgnoreCase))
+                {
+                    return null;
+                }
+
+                current = parent;
+            }
+
+            return null;
+        }
+
         private static ValidationResult CheckWritePermission(string path)
         {
             try
@@ -582,9 +634,19 @@ namespace ICCardManager.Common
                 }
                 else
                 {
-                    // ディレクトリが存在しない場合は、親ディレクトリの書き込み権限をチェック
-                    var parentDir = Path.GetDirectoryName(path);
-                    if (!string.IsNullOrEmpty(parentDir) && Directory.Exists(parentDir))
+                    // ディレクトリが存在しない場合は、作成の起点になる
+                    // 「実在する最も近い祖先」の書き込み権限をチェックする。
+                    //
+                    // Issue #1924: 直近の親だけを見ると、\\server\share\a\b のように
+                    // 中間フォルダーごと未作成のパスで検査が丸ごと省略され、検証は成功する。
+                    // その共有が実際にはフォルダー作成を許可していない場合、
+                    // EnsureDirectoryExists が例外になり ExecuteAutoBackupAsync は null を返すため、
+                    // 「既定パスへ退避してローカルには残る」という救済も働かず
+                    // バックアップがどこにも作られない。Directory.CreateDirectory が実際に
+                    // 書き込む先は「実在する最も近い祖先」なので、そこを検査すれば
+                    // 失敗が検証の理由として表に出て、退避の案内（Issue #1924）まで届く。
+                    var parentDir = FindNearestExistingAncestor(path);
+                    if (!string.IsNullOrEmpty(parentDir))
                     {
                         var testFile = Path.Combine(parentDir, $".write_test_{Guid.NewGuid():N}");
                         try
@@ -594,10 +656,12 @@ namespace ICCardManager.Common
                         }
                         catch (UnauthorizedAccessException)
                         {
+                            // Issue #1924: 検査したのは直近の親とは限らないため、
+                            // 実際に検査したフォルダーを名指しする（error-messages.md の「何が」）。
                             return ValidationResult.Failure(
-                                "指定されたフォルダの親ディレクトリへの書き込み権限がありません。" +
-                                "親フォルダ内に新しいフォルダを作成できないため、" +
-                                "親フォルダのアクセス権を確認するか、書き込み可能な別の場所を指定してください。");
+                                $"フォルダー「{parentDir}」への書き込み権限がありません。" +
+                                "その中に指定されたフォルダを作成できないため、" +
+                                "このフォルダのアクセス権を確認するか、書き込み可能な別の場所を指定してください。");
                         }
                         catch (IOException ex)
                         {

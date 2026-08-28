@@ -43,6 +43,9 @@ public class SystemManageDialogBackupHealthLayoutTests
             "BackupGenerationText",
             "BackupFreeSpaceText",
             "BackupFolderText",
+            // Issue #1924: 退避の案内は「設定した保存先（UNC になり得る）」＋理由＋行動指示を
+            // 連結するため、この GroupBox で最も長くなる行。折り返しの担保から漏らさない
+            "BackupFolderFallbackText",
             "LastBackupMachineText",
             "LastVacuumText"
         };

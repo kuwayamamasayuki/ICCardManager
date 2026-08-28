@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 
 namespace ICCardManager.Dtos
 {
@@ -46,6 +46,28 @@ namespace ICCardManager.Dtos
         /// バックアップ保存先フォルダのパス（実際に使用される正規化済みパス）
         /// </summary>
         public string BackupFolderPath { get; set; }
+
+        /// <summary>
+        /// 設定されていたバックアップ保存先（Issue #1924）。未設定の場合は null または空文字
+        /// </summary>
+        /// <remarks>
+        /// 退避したかの判定は <see cref="IsBackupFolderFallback"/>（＝退避理由の有無）で行うこと。
+        /// <see cref="BackupFolderPath"/> は正規化済みで、本プロパティは設定された生の値のため、
+        /// 退避していなくても文字列としては食い違い得る（末尾区切り文字・相対表記の解決など）。
+        /// 理由は <see cref="BackupFolderFallbackReason"/> に入る。
+        /// </remarks>
+        public string ConfiguredFolderPath { get; set; }
+
+        /// <summary>
+        /// 設定されたバックアップ保存先が使えず既定パスへ退避した理由（Issue #1924）。
+        /// 退避していない場合は null
+        /// </summary>
+        public string BackupFolderFallbackReason { get; set; }
+
+        /// <summary>
+        /// 設定されたバックアップ保存先が使えず既定パスへ退避しているか（Issue #1924）
+        /// </summary>
+        public bool IsBackupFolderFallback => !string.IsNullOrEmpty(BackupFolderFallbackReason);
 
         /// <summary>
         /// バックアップ保存先の空きディスク容量（バイト）。取得できない場合は null（＝不明）

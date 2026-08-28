@@ -1,4 +1,4 @@
-<Window x:Class="ICCardManager.Views.Dialogs.SystemManageDialog"
+﻿<Window x:Class="ICCardManager.Views.Dialogs.SystemManageDialog"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
@@ -152,6 +152,17 @@
                            Foreground="{DynamicResource SecondaryTextBrush}"
                            FontSize="{DynamicResource SmallFontSize}"
                            AutomationProperties.Name="{Binding BackupFolderText}"/>
+
+                <!-- Issue #1924: 設定した保存先が使えず既定パスへ退避しているときだけ表示する。
+                     バックアップ自体は既定パスへ成功するため長期未成功の警告（Issue #1689）には
+                     掛からず、この行が「共有フォルダーに世代が増えない」ことの唯一の手掛かりになる。 -->
+                <TextBlock Text="{Binding BackupFolderFallbackText, Mode=OneWay}"
+                           TextWrapping="Wrap"
+                           Foreground="{DynamicResource DangerTextBrush}"
+                           FontSize="{DynamicResource SmallFontSize}"
+                           Margin="0,4,0,0"
+                           Visibility="{Binding IsBackupFolderFallback, Converter={StaticResource BoolToVisibilityConverter}}"
+                           AutomationProperties.Name="{Binding BackupFolderFallbackText}"/>
 
                 <!-- 共有モードでのみ「どのPCが実施したか」を表示（ローカルモードでは自明なため出さない） -->
                 <TextBlock Text="{Binding LastBackupMachineText, Mode=OneWay}"

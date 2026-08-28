@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Globalization;
 using System.Linq;
 using System.Threading.Tasks;
@@ -62,7 +62,13 @@ namespace ICCardManager.Services
 
             try
             {
-                info.BackupFolderPath = await _backupService.ResolveBackupFolderAsync().ConfigureAwait(false);
+                // Issue #1924: 既定パスへ退避した場合はその理由も取得する
+                //（バックアップは成功するため長期未成功の警告には掛からず、
+                //  ここで提示しないと管理者が「共有フォルダーに作られない」原因に到達できない）。
+                var resolution = await _backupService.ResolveBackupFolderDetailAsync().ConfigureAwait(false);
+                info.BackupFolderPath = resolution.EffectiveFolderPath;
+                info.ConfiguredFolderPath = resolution.ConfiguredFolderPath;
+                info.BackupFolderFallbackReason = resolution.FallbackReason;
             }
             catch (Exception ex)
             {

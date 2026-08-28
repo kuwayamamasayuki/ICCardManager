@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Data.SQLite;
 using System.Globalization;
@@ -10,6 +10,7 @@ using ICCardManager.Common;
 using ICCardManager.Common.Exceptions;
 using ICCardManager.Data;
 using ICCardManager.Data.Repositories;
+using ICCardManager.Dtos;
 using Microsoft.Extensions.Logging;
 
 namespace ICCardManager.Services
@@ -211,8 +212,33 @@ namespace ICCardManager.Services
         /// <returns>正規化済みのバックアップ保存先フォルダのパス</returns>
         public virtual async Task<string> ResolveBackupFolderAsync()
         {
+            var resolution = await ResolveBackupFolderDetailAsync().ConfigureAwait(false);
+            return resolution.EffectiveFolderPath;
+        }
+
+        /// <summary>
+        /// バックアップ保存先フォルダを解決し、既定パスへ退避した場合はその理由も併せて返す（Issue #1924）
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// <see cref="ResolveBackupFolderAsync"/> は実際に使われるフォルダしか返さないため、
+        /// 「設定した共有フォルダーが使えず既定パスへ退避した」ことが呼び出し元から見えなかった。
+        /// バックアップ自体はローカルへ成功するので長期未成功の警告（Issue #1689）にも掛からず、
+        /// 管理者からは「共有フォルダーにバックアップが作成されない」という症状としてのみ観測できた。
+        /// </para>
+        /// <para>
+        /// 退避の理由を <see cref="BackupFolderResolution.FallbackReason"/> に載せ、
+        /// システム管理画面（F6）の「バックアップ状況」が提示できるようにする。
+        /// 「未設定なので既定を使う」は正常な運用なので理由を立てない。
+        /// </para>
+        /// </remarks>
+        /// <returns>解決結果（実際の保存先・設定値・退避理由）</returns>
+        public virtual async Task<BackupFolderResolution> ResolveBackupFolderDetailAsync()
+        {
             var settings = await _settingsRepository.GetAppSettingsAsync().ConfigureAwait(false);
-            var backupPath = settings?.BackupPath;
+            var configuredPath = settings?.BackupPath;
+            var backupPath = configuredPath;
+            string fallbackReason = null;
 
             if (string.IsNullOrWhiteSpace(backupPath))
             {
@@ -228,11 +254,39 @@ namespace ICCardManager.Services
                         "バックアップパスが無効です: {Path} - {Error}。デフォルトパスを使用します",
                         backupPath,
                         validationResult.ErrorMessage);
+                    fallbackReason = validationResult.ErrorMessage;
                     backupPath = PathValidator.GetDefaultBackupPath();
                 }
             }
 
-            return PathValidator.NormalizePath(backupPath) ?? PathValidator.GetDefaultBackupPath();
+            // Issue #1924: 正規化に失敗したときの既定パスへの退避も「設定されていたのに使えなかった」
+            // 経路であり、理由を立てないと本 Issue が消そうとした無言のフォールバックがここだけ残る。
+            var normalizedPath = PathValidator.NormalizePath(backupPath);
+            if (normalizedPath == null)
+            {
+                _logger.LogWarning(
+                    "バックアップパスを正規化できません: {Path}。デフォルトパスを使用します",
+                    backupPath);
+
+                // 未設定で既定パスを選んでいる場合は「設定されていたのに使えなかった」ではないため
+                // 理由を立てない（BackupFolderResolution.FallbackReason の契約）。
+                if (fallbackReason == null && !string.IsNullOrWhiteSpace(configuredPath))
+                {
+                    fallbackReason =
+                        "指定されたパスを保存先として解釈できません。" +
+                        "「C:\\Backup」のようにドライブ文字から始まる絶対パス、" +
+                        "または「\\\\server\\share\\backup」形式のネットワークパスを指定してください。";
+                }
+
+                normalizedPath = PathValidator.GetDefaultBackupPath();
+            }
+
+            return new BackupFolderResolution
+            {
+                EffectiveFolderPath = normalizedPath,
+                ConfiguredFolderPath = configuredPath,
+                FallbackReason = fallbackReason
+            };
         }
 
         /// <summary>
@@ -499,27 +553,13 @@ namespace ICCardManager.Services
         /// </summary>
         public virtual async Task<IEnumerable<BackupFileInfo>> GetBackupFilesAsync()
         {
-            var settings = await _settingsRepository.GetAppSettingsAsync().ConfigureAwait(false);
-            var backupPath = settings.BackupPath;
-
-            if (string.IsNullOrWhiteSpace(backupPath))
-            {
-                backupPath = PathValidator.GetDefaultBackupPath();
-            }
-            else
-            {
-                // パスを検証（Issue #1746: リストア画面から UI スレッドで呼ばれるため、
-                // ResolveBackupFolderAsync と同じ理由で非同期版を使う）
-                var validationResult = await PathValidator.ValidateBackupPathAsync(backupPath).ConfigureAwait(false);
-                if (!validationResult.IsValid)
-                {
-                    _logger.LogWarning(
-                        "バックアップパスが無効です: {Path} - {Error}。デフォルトパスを使用します",
-                        backupPath,
-                        validationResult.ErrorMessage);
-                    backupPath = PathValidator.GetDefaultBackupPath();
-                }
-            }
+            // Issue #1924: 保存先の解決は ResolveBackupFolderDetailAsync ただ 1 つに寄せる。
+            // 「設定値 → 検証 → 既定パスへ退避 → 正規化」を各所で書き写すと、
+            // 一覧が見るフォルダと実際に書かれるフォルダが片方だけ変わる日が来る
+            //（正規化の有無・settings が null のときの扱いが実際に食い違っていた）。
+            // 検証は非同期版を通るため、リストア画面から UI スレッドで呼んでも
+            // UNC 到達性チェックでブロックしない（Issue #1746）。
+            var backupPath = await ResolveBackupFolderAsync().ConfigureAwait(false);
 
             if (!Directory.Exists(backupPath))
             {
@@ -661,7 +701,14 @@ namespace ICCardManager.Services
 
             using var lease = _dbContext.LeaseConnection();
             var sourceConnection = lease.Connection;
-            using var destinationConnection = new SQLiteConnection($"Data Source={destinationPath}");
+
+            // Issue #1924: 接続文字列は必ず DbContext.BuildConnectionString を通す。
+            // SQLite はバックスラッシュの UNC パスを開けず、$"Data Source={destinationPath}" を
+            // 直接組み立てていたため、共有フォルダーを保存先にすると必ず
+            // SQLiteException: unable to open database file になっていた
+            //（DB 本体は DbContext 経由なので開けるため、バックアップだけが失敗していた）。
+            using var destinationConnection =
+                new SQLiteConnection(DbContext.BuildConnectionString(destinationPath));
             destinationConnection.Open();
             sourceConnection.BackupDatabase(destinationConnection, "main", "main", -1, null, 0);
         }

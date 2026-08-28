@@ -1,4 +1,4 @@
-using System.IO;
+﻿using System.IO;
 using System.Runtime.InteropServices;
 using FluentAssertions;
 using ICCardManager.Common;
@@ -519,6 +519,160 @@ public class PathValidatorTests : IDisposable
             "タイムアウト(5秒) + 処理オーバーヘッドで7秒以内に確実に return すべき");
         // reachable の値は環境依存（多くの場合 false）のため厳密に検証しない
     }
+
+    #endregion
+
+    #region Issue #1924: UNC 到達性チェックは共有ルートに対して行う
+
+    /// <summary>
+    /// Issue #1924: 保存先フォルダーが未作成でも、共有ルートへ到達できれば有効と判定する。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 修正前は到達性チェッカーへ<b>パス全体</b>を渡しており、既定チェッカーの実体が
+    /// <c>Directory.Exists(パス全体)</c> であるため「共有へ到達できない」と
+    /// 「保存先フォルダーがまだ存在しない」を区別できなかった。共有フォルダーに
+    /// バックアップ用のサブフォルダーを作る前に設定すると、アクセス権が正しくても
+    /// 「ネットワーク共有に到達できません」と判定され、無言でローカル既定パスへ
+    /// フォールバックしていた（＝共有フォルダーにバックアップが作成されない）。
+    /// </para>
+    /// <para>
+    /// ローカルパスは未作成フォルダーを許容し（項目8はドライブ準備状態のみ、
+    /// 項目9は親フォルダーへ退避）、実際の作成は <c>BackupService.EnsureDirectoryExists</c> が行う。
+    /// UNC だけが非対称だったのを揃える。
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void ValidateBackupPath_UncSubFolderNotYetCreated_DoesNotReportUnreachable()
+    {
+        // Arrange: 共有ルートには到達できるが、サブフォルダーは存在しない共有を模す
+        var result = InvokeValidateWithStub(
+            @"\\server\share\backup",
+            reachabilityStub: (probed, _) => probed == @"\\server\share",
+            timeoutMs: 5000);
+
+        // Assert: 到達性エラーは出ない（書き込みプローブ等で false になる可能性は許容）
+        if (!result.IsValid)
+        {
+            result.ErrorMessage.Should().NotContain("到達できません",
+                "共有ルートへ到達できる以上、サブフォルダー未作成を到達不可として扱わない");
+        }
+    }
+
+    /// <summary>
+    /// Issue #1924: 到達性チェッカーへ渡すのは共有ルート（<c>\\server\share</c>）であること。
+    /// </summary>
+    [Theory]
+    [InlineData(@"\\server\share\backup", @"\\server\share")]
+    [InlineData(@"\\server\share\a\b\c", @"\\server\share")]
+    [InlineData(@"\\server\share", @"\\server\share")]
+    [InlineData(@"//server/share/backup", @"\\server\share")]
+    public void ValidateBackupPath_ReachabilityChecker_ReceivesShareRoot(string input, string expectedProbed)
+    {
+        // Arrange
+        string capturedPath = null;
+
+        // Act
+        InvokeValidateWithStub(input,
+            reachabilityStub: (probed, _) => { capturedPath = probed; return true; },
+            timeoutMs: 5000);
+
+        // Assert
+        capturedPath.Should().Be(expectedProbed,
+            "到達性チェックの対象は共有ルートであり、保存先フォルダーそのものではない");
+    }
+
+    /// <summary>
+    /// Issue #1924 の対: 共有ルートへ到達できない場合は従来どおりエラーにする。
+    /// </summary>
+    /// <remarks>
+    /// 対の表明が無いと、到達性チェックを丸ごと素通しにした実装でも
+    /// <see cref="ValidateBackupPath_UncSubFolderNotYetCreated_DoesNotReportUnreachable"/> が緑になる。
+    /// </remarks>
+    [Fact]
+    public void ValidateBackupPath_UncRootUnreachable_StillReportsUnreachable()
+    {
+        // Arrange: 共有ルートにも到達できない
+        var result = InvokeValidateWithStub(
+            @"\\nonexistent-test-server\share\backup",
+            reachabilityStub: (_, _) => false,
+            timeoutMs: 5000);
+
+        // Assert
+        result.IsValid.Should().BeFalse();
+        result.ErrorMessage.Should().Contain("ネットワーク共有に到達できません");
+    }
+
+    /// <summary>
+    /// Issue #1924: 中間フォルダーごと未作成でも、実在する最も近い祖先が書き込み権限の検査対象になる。
+    /// </summary>
+    /// <remarks>
+    /// 直近の親だけを見る実装では、`a\b\backup` のように中間ごと未作成のパスで検査が
+    /// 丸ごと省略されていた。`Directory.CreateDirectory` が実際に書き込む先は
+    /// 「実在する最も近い祖先」なので、そこを検査しないと権限不足が検証で表に出ず、
+    /// バックアップがどこにも作られない状態（既定パスへの退避も働かない）になり得る。
+    /// </remarks>
+    [Fact]
+    public void FindNearestExistingAncestor_中間フォルダーが未作成でも実在する祖先を返すこと()
+    {
+        // Arrange: _testDirectory は実在し、その下は 3 段とも未作成
+        var deepPath = Path.Combine(_testDirectory, "a", "b", "backup");
+
+        // Act
+        var ancestor = PathValidator.FindNearestExistingAncestor(deepPath);
+
+        // Assert
+        ancestor.Should().Be(_testDirectory);
+    }
+
+    /// <summary>
+    /// Issue #1924: 直近の親が実在するときはそれを返す（従来の検査対象と一致すること）。
+    /// </summary>
+    [Fact]
+    public void FindNearestExistingAncestor_直近の親が実在するときはそれを返すこと()
+    {
+        var path = Path.Combine(_testDirectory, "backup");
+
+        PathValidator.FindNearestExistingAncestor(path).Should().Be(_testDirectory);
+    }
+
+    /// <summary>
+    /// Issue #1924 の対: 返すのは必ず「実在するフォルダー」か null であること。
+    /// </summary>
+    /// <remarks>
+    /// 対の表明が無いと、常に直近の親を返す（＝実在しないフォルダーを書き込み検査の対象にする）
+    /// 実装でも上の 2 件が緑になる。検査対象が実在しなければ書き込みプローブは
+    /// DirectoryNotFoundException になり、検証は「権限あり」でも「権限なし」でもない
+    /// 別の理由で失敗して原因を取り違える。
+    /// </remarks>
+    [Theory]
+    [InlineData("a")]
+    [InlineData("a/b")]
+    [InlineData("a/b/c/backup")]
+    public void FindNearestExistingAncestor_返すのは実在するフォルダーかnullであること(string relative)
+    {
+        var path = Path.Combine(_testDirectory, relative.Replace('/', Path.DirectorySeparatorChar));
+
+        var ancestor = PathValidator.FindNearestExistingAncestor(path);
+
+        ancestor.Should().NotBeNull("_testDirectory は実在するため必ず祖先が見つかる");
+        Directory.Exists(ancestor).Should().BeTrue("書き込みプローブは実在するフォルダーに対してのみ意味を持つ");
+    }
+
+    /// <summary>
+    /// Issue #1924: ルートそのものを渡しても無限ループしないこと。
+    /// </summary>
+    [Fact]
+    public void FindNearestExistingAncestor_ルートを渡しても停止すること()
+    {
+        var act = () => PathValidator.FindNearestExistingAncestor(@"C:\");
+
+        act.Should().NotThrow();
+    }
+
+    #endregion
+
+    #region テスト用ヘルパー
 
     /// <summary>
     /// Issue #1269 テスト用ヘルパー: internal オーバーロードをリフレクションで呼び出し、

@@ -1,4 +1,5 @@
-using System;
+﻿using System;
+using System.Data.SQLite;
 using System.IO;
 using FluentAssertions;
 using ICCardManager.Data;
@@ -231,5 +232,51 @@ namespace ICCardManager.Tests.Data
                 .BeTrue("UNCパスは DriveType に関わらず共有モード");
             resolverInvoked.Should().BeFalse("UNC は短絡評価で IsNetworkDrive まで到達しない");
         }
+
+        #region Issue #1924: 接続文字列の組み立て
+
+        /// <summary>
+        /// Issue #1924: UNC パスはフォワードスラッシュへ変換して接続文字列に入れること。
+        /// </summary>
+        /// <remarks>
+        /// SQLite はバックスラッシュの UNC パス（<c>\\server\share\x.db</c>）を開けず、
+        /// <c>SQLiteException: unable to open database file</c>（SQLITE_CANTOPEN）になる。
+        /// フォワードスラッシュへ変換すると開くことができ、<c>SQLiteConnection.FileName</c> は
+        /// 元の UNC 形式に解決される（実機の共有フォルダーで確認）。
+        /// この変換は <c>DbContext</c> にしか無く、<c>BackupService.CopyDatabaseTo</c> が
+        /// 接続文字列を自前に組み立てていたため、共有フォルダーを保存先にすると
+        /// バックアップだけが必ず失敗していた。
+        /// </remarks>
+        [Theory]
+        [InlineData(@"\\server\share\iccard.db", "//server/share/iccard.db")]
+        [InlineData(@"\\fileserver\tmp\backup_20260828_170457.db", "//fileserver/tmp/backup_20260828_170457.db")]
+        public void BuildConnectionString_UNCはフォワードスラッシュへ変換されること(
+            string path, string expectedDataSource)
+        {
+            var connectionString = DbContext.BuildConnectionString(path);
+
+            var builder = new SQLiteConnectionStringBuilder(connectionString);
+            builder.DataSource.Should().Be(expectedDataSource);
+        }
+
+        /// <summary>
+        /// Issue #1924 の対: ローカルパスは変換しないこと。
+        /// </summary>
+        /// <remarks>
+        /// 対の表明が無いと、すべてのパスを一律にスラッシュへ変換する実装でも上のテストが緑になる。
+        /// ローカルパスはバックスラッシュのままで開けるため、不要な変換は加えない。
+        /// </remarks>
+        [Theory]
+        [InlineData(@"C:\ProgramData\ICCardManager\iccard.db")]
+        [InlineData(@"Z:\share\iccard.db")]
+        public void BuildConnectionString_ローカルパスは変換しないこと(string path)
+        {
+            var connectionString = DbContext.BuildConnectionString(path);
+
+            var builder = new SQLiteConnectionStringBuilder(connectionString);
+            builder.DataSource.Should().Be(path);
+        }
+
+        #endregion
     }
 }
