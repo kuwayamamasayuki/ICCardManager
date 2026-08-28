@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Linq;
@@ -885,7 +885,11 @@ public partial class MainViewModel : ViewModelBase
     /// <summary>
     /// 共有モードでの定期データリフレッシュ（他PCの変更を反映）
     /// </summary>
-    private async Task RefreshSharedDataAsync()
+    /// <remarks>
+    /// Issue #1923: 履歴一覧の再読込でチェック（統合対象の選択）を引き継ぐことを
+    /// 検証するため internal で公開している。
+    /// </remarks>
+    internal async Task RefreshSharedDataAsync()
     {
         try
         {
@@ -898,9 +902,13 @@ public partial class MainViewModel : ViewModelBase
 
             // Issue #1381: 履歴画面が開いていれば、他PCで発生した変更を反映する
             // （貸出/返却/チャージ処理後と同じ "if (IsHistoryVisible) LoadHistoryLedgersAsync" パターン）
+            //
+            // Issue #1923: この再読込は利用者の操作を契機としないため、統合対象として入れた
+            // チェックを引き継ぐ。引き継がないと、15 秒周期のリフレッシュが利用者の選択操作を
+            // 途中で消してしまい、隣接 2 行以上を選ぶ統合が事実上できなくなる。
             if (IsHistoryVisible)
             {
-                await LoadHistoryLedgersAsync();
+                await LoadHistoryLedgersAsync(preserveCheckedRows: true);
             }
 
             // Issue #1110, #1131: 最終同期時刻を記録
@@ -1396,7 +1404,10 @@ public partial class MainViewModel : ViewModelBase
                 // 履歴が開いていれば再読み込み（Issue #526）
                 if (IsHistoryVisible)
                 {
-                    await LoadHistoryLedgersAsync();
+                    // Issue #1923: 貸出は「カードをタッチした職員」の操作であり、履歴画面で行を選んでいる職員の操作ではない。
+                    // 本システムは 1 台のカードリーダーを複数職員で共有するため、
+                    // 定期リフレッシュ（RefreshSharedDataAsync）と同じ理由で統合対象のチェックを引き継ぐ。
+                    await LoadHistoryLedgersAsync(preserveCheckedRows: true);
                 }
             }
             else
@@ -1616,7 +1627,10 @@ public partial class MainViewModel : ViewModelBase
         // 履歴が開いていれば再読み込み（Issue #889）
         if (IsHistoryVisible)
         {
-            await LoadHistoryLedgersAsync();
+            // Issue #1923: 返却は「カードをタッチした職員」の操作であり、履歴画面で行を選んでいる職員の操作ではない。
+            // 本システムは 1 台のカードリーダーを複数職員で共有するため、
+            // 定期リフレッシュ（RefreshSharedDataAsync）と同じ理由で統合対象のチェックを引き継ぐ。
+            await LoadHistoryLedgersAsync(preserveCheckedRows: true);
         }
 
         await CheckWarningsAsync();
@@ -1653,7 +1667,10 @@ public partial class MainViewModel : ViewModelBase
                 // バス停名入力後に履歴が開いていれば再読み込み
                 if (busLedgers.Count > 0 && IsHistoryVisible)
                 {
-                    await LoadHistoryLedgersAsync();
+                    // Issue #1923: バス停名の入力は返却フローの一部（カードをタッチした職員の操作）。
+                    // 本システムは 1 台のカードリーダーを複数職員で共有するため、
+                    // 定期リフレッシュ（RefreshSharedDataAsync）と同じ理由で統合対象のチェックを引き継ぐ。
+                    await LoadHistoryLedgersAsync(preserveCheckedRows: true);
                 }
 
                 // Issue #660: バス停名入力後に警告メッセージを再チェック
@@ -1695,7 +1712,10 @@ public partial class MainViewModel : ViewModelBase
         // 同行者数の入力後に履歴が開いていれば再読み込み（氏名欄の「外N名」を反映）
         if (IsHistoryVisible)
         {
-            await LoadHistoryLedgersAsync();
+            // Issue #1923: 同行者数の入力は返却フローの一部（カードをタッチした職員の操作）。
+            // 本システムは 1 台のカードリーダーを複数職員で共有するため、
+            // 定期リフレッシュ（RefreshSharedDataAsync）と同じ理由で統合対象のチェックを引き継ぐ。
+            await LoadHistoryLedgersAsync(preserveCheckedRows: true);
         }
     }
 
@@ -1830,15 +1850,33 @@ public partial class MainViewModel : ViewModelBase
     /// <summary>
     /// 履歴データを読み込み
     /// </summary>
+    /// <param name="preserveCheckedRows">
+    /// true のとき、再読込の前後で同じ台帳 ID の行のチェック（統合対象の選択）を引き継ぐ。
+    /// 利用者の操作を契機としない再読込（共有モードの定期リフレッシュ・手動更新・再接続）でのみ true にする。
+    /// </param>
     /// <remarks>
     /// Issue #1814: ページ番号のクランプと再取得を検証するため internal で公開している。
+    ///
+    /// Issue #1923: 共有モードの定期リフレッシュ（ヘルスチェックと同じ 15 秒周期）が
+    /// 履歴一覧を作り直すため、統合対象として入れたチェックが利用者の操作と無関係に消えていた。
+    /// チェックは「隣接する 2 行以上」を選ぶ操作で、選び終える前に消えると統合が実行できない。
+    /// 利用者が起こした再読込（ページ送り・期間変更・統合や削除の直後）はチェックが無効に
+    /// なるのが正しいため、引き継ぎは呼び出し元が明示した経路に限る。
     /// </remarks>
-    internal async Task LoadHistoryLedgersAsync()
+    internal async Task LoadHistoryLedgersAsync(bool preserveCheckedRows = false)
     {
         if (HistoryCard == null) return;
 
         using (BeginBusy("読み込み中..."))
         {
+            // Issue #1923: 引き継ぐチェックを Clear の前に退避する。
+            // 繰越行（Issue #1155）はチェックボックス自体を表示しないため対象外。
+            var checkedLedgerIds = preserveCheckedRows
+                ? new HashSet<int>(HistoryLedgers
+                    .Where(d => d.IsChecked && !d.IsCarryoverRow)
+                    .Select(d => d.Id))
+                : new HashSet<int>();
+
             HistoryLedgers.Clear();
 
             // ページングされた履歴を取得
@@ -1928,9 +1966,29 @@ public partial class MainViewModel : ViewModelBase
             foreach (var ledger in ledgers)
             {
                 var dto = ledger.ToDto();
+
+                // Issue #1923: 退避したチェックを同じ台帳 ID の行へ戻す。
+                // 他 PC が削除・統合した行は再取得結果に現れないため、そのチェックは自然に消える
+                // （消えた行を選択対象として残しても統合は競合で失敗する）。
+                if (checkedLedgerIds.Contains(dto.Id))
+                {
+                    dto.IsChecked = true;
+                }
+
                 SubscribeLedgerCheckedChanged(dto);
                 HistoryLedgers.Add(dto);
             }
+
+            // Issue #1923: 一覧を作り直すと選択の集合が変わり得る（引き継いだ／引き継がなかった／
+            // 引き継ぐ対象の行が他 PC の削除・統合で消えた）。にもかかわらず、
+            // 　・引き継ぎは SubscribeLedgerCheckedChanged より前に行うため個々の代入では通知されない
+            // 　・引き継がない再読込では、古い DTO ごと捨てるので PropertyChanged 自体が起きない
+            // ため、ここで通知しないと CanExecute が再評価されない（AsyncRelayCommand は
+            // CommandManager の再問い合わせに乗らず、CanExecuteChanged だけがボタンを更新する）。
+            // 結果、2 行チェック済みの時点で有効になった「統合」ボタンが、選択が消えた後も
+            // 押せるまま残り、押しても MergeHistoryLedgers 冒頭の `checkedDtos.Count < 2` で
+            // 無言のまま戻る（何も起きないボタン）。作り直しのたびに 1 回通知する。
+            MergeHistoryLedgersCommand.NotifyCanExecuteChanged();
 
             // 最新の残高を取得
             var latestLedger = await _ledgerRepository.GetLatestBeforeDateAsync(
