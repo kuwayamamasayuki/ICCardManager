@@ -103,7 +103,13 @@ namespace ICCardManager.Services.Import.Builders
                     };
 
                     var newLedgerId = await _ledgerRepository.InsertAsync(newLedger).ConfigureAwait(false);
-                    var success = await _ledgerRepository.InsertDetailsAsync(newLedgerId, segmentDetails).ConfigureAwait(false);
+                    // Issue #1913: SplitAtChargeBoundaries は時系列昇順（古い→新しい）で返す。
+                    // 挿入順がそのまま rowid の並びになるため、昇順のまま渡すと
+                    // LedgerDetail.SequenceNumber の規約（FeliCa 互換で小さい rowid ＝ 新しい）が
+                    // 反転する。新しい順にしてから渡す（LendingService の同型の挿入と同じ）。
+                    // 摘要・金額（上の Generate / CalculateGroupFinancials）は昇順のまま使う。
+                    var success = await _ledgerRepository.InsertDetailsAsync(
+                        newLedgerId, segmentDetails.AsEnumerable().Reverse()).ConfigureAwait(false);
 
                     if (!success)
                     {

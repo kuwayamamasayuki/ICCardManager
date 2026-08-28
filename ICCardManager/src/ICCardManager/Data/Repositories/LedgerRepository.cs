@@ -1992,12 +1992,20 @@ VALUES (@mergedAt, @targetLedgerId, @description, @undoData)";
             var details = new List<LedgerDetail>();
 
             using var command = connection.CreateCommand();
+            // Issue #1913: ledger 内の並びは GetDetailsAsync / ReadAndSortDetailsAsync と同じ
+            // 「use_date ASC, is_charge DESC, is_point_redemption DESC, rowid DESC」にする。
+            // rowid は FeliCa 互換で「小さい値ほど新しい」（LedgerDetail.SequenceNumber の XML doc）
+            // ため、rowid 昇順は逆時系列を意味する。唯一の消費側（CsvExportService）は
+            // LedgerDetailChronologicalSorter で並べ替えるが、残高チェーンを構築できないとき
+            // （Balance が null の明細を含む・チェーンが循環する等）は preserveOrderOnFailure=true で
+            // この SQL の順序をそのまま出力するため、ここが逆順だと CSV の明細が逆時系列で出る。
             command.CommandText = @"SELECT d.ledger_id, d.use_date, d.entry_station, d.exit_station,
        d.bus_stops, d.amount, d.balance, d.is_charge, d.is_point_redemption, d.is_bus, d.group_id, d.rowid
 FROM ledger_detail d
 INNER JOIN ledger l ON d.ledger_id = l.id
 WHERE l.date BETWEEN @fromDate AND @toDate
-ORDER BY l.card_idm, l.date, l.id, d.rowid";
+ORDER BY l.card_idm, l.date, l.id,
+         d.use_date ASC, d.is_charge DESC, d.is_point_redemption DESC, d.rowid DESC";
 
             command.Parameters.AddWithValue("@fromDate", fromDate.Date.ToString("yyyy-MM-dd HH:mm:ss"));
             command.Parameters.AddWithValue("@toDate", toDate.Date.AddDays(1).AddSeconds(-1).ToString("yyyy-MM-dd HH:mm:ss"));

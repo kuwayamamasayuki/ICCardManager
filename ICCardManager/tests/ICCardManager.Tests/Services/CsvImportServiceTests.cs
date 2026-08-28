@@ -2428,6 +2428,66 @@ FEDCBA9876543210,鈴木花子,002,テスト2";
     }
 
     /// <summary>
+    /// 明細は「新しい順」で <c>ReplaceDetailsAsync</c> へ渡されること
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Issue #1913: CSV の明細行は <c>CsvExportService</c> と同じ時系列昇順（古い→新しい）で並ぶ。
+    /// <c>ReplaceDetailsAsync</c> は DELETE + INSERT で rowid を再採番し、渡された順にそのまま
+    /// INSERT するため、昇順のまま渡すと <c>LedgerDetail.SequenceNumber</c> の規約
+    /// （FeliCa 互換で<b>小さい rowid ＝ 新しい</b>）が反転する。
+    /// </para>
+    /// <para>
+    /// 反転すると、以後の摘要再生成でブロック順が逆になり、バス停名の同期（Issue #1904）は
+    /// 先頭ブロックを最後の利用へ対応付ける。
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task ImportLedgerDetailsAsync_明細は新しい順でReplaceDetailsAsyncへ渡されること()
+    {
+        // Arrange: 同一日付の 3 区間（エクスポートと同じ時系列昇順で並べる）
+        var csvContent = @"利用履歴ID,利用日時,カードIDm,管理番号,乗車駅,降車駅,バス停,金額,残額,チャージ,ポイント還元,バス利用,グループID
+1,2024-01-15 00:00:00,0123456789ABCDEF,001,博多,天神,,260,9740,0,0,0,
+1,2024-01-15 00:00:00,0123456789ABCDEF,001,薬院,大橋,,210,9530,0,0,0,
+1,2024-01-15 00:00:00,0123456789ABCDEF,001,姪浜,西新,,230,9300,0,0,0,";
+
+        var filePath = Path.Combine(_testDirectory, "details_order.csv");
+        await Task.Run(() => File.WriteAllText(filePath, csvContent, CsvEncoding));
+
+        _ledgerRepositoryMock.Setup(x => x.GetByIdAsync(1)).ReturnsAsync(new Ledger
+        {
+            Id = 1, CardIdm = "0123456789ABCDEF", Date = new DateTime(2024, 1, 15),
+            Summary = "鉄道", Income = 0, Expense = 700, Balance = 9300
+        });
+
+        List<LedgerDetail> savedDetails = null;
+        _ledgerRepositoryMock.Setup(x => x.ReplaceDetailsAsync(1, It.IsAny<IEnumerable<LedgerDetail>>()))
+            .Callback<int, IEnumerable<LedgerDetail>>((_, details) => savedDetails = details.ToList())
+            .ReturnsAsync(true);
+
+        Ledger savedLedger = null;
+        _ledgerRepositoryMock.Setup(x => x.UpdateAsync(It.IsAny<Ledger>()))
+            .Callback<Ledger>(l => savedLedger = l)
+            .ReturnsAsync(true);
+
+        // Act
+        var result = await _service.ImportLedgerDetailsAsync(filePath);
+
+        // Assert
+        result.Success.Should().BeTrue();
+        savedDetails.Should().NotBeNull();
+        savedDetails.Select(d => d.EntryStation).Should().Equal(
+            new[] { "姪浜", "薬院", "博多" },
+            "先に INSERT した明細ほど小さい rowid になるため、最新の明細から渡すこと（Issue #1913）");
+
+        // 対の表明: Reverse は DB 呼び出しにだけ適用し、摘要は時系列昇順のまま生成すること
+        savedLedger.Should().NotBeNull();
+        savedLedger.Summary.Should().Be(
+            "鉄道（博多～天神、薬院～大橋、姪浜～西新）",
+            "摘要のブロック順は CSV の並び（時系列昇順）のままであること");
+    }
+
+    /// <summary>
     /// ヘッダーのみのファイルでエラーになることを確認
     /// </summary>
     [Fact]

@@ -658,4 +658,79 @@ public class LedgerDetailViewModelTests : IDisposable
     }
 
     #endregion
+
+    #region Issue #1913: 保存時の明細は新しい順で渡すこと
+
+    /// <summary>
+    /// 保存時、明細は「新しい順」で <c>ReplaceDetailsAsync</c> へ渡されること
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Issue #1913: <c>ReplaceDetailsAsync</c> は DELETE + INSERT で rowid を再採番し、
+    /// 渡された順にそのまま INSERT する。<c>Items</c> は時系列昇順（古い→新しい）なので、
+    /// そのまま渡すと <c>LedgerDetail.SequenceNumber</c> の規約
+    /// （FeliCa 互換で<b>小さい rowid ＝ 新しい</b>）が反転する。
+    /// </para>
+    /// <para>
+    /// 反転すると、再読込後の <c>SummaryGenerator.SortChronologically</c>（同一日付内は
+    /// SequenceNumber 降順がタイブレーク）が逆順を返し、摘要のブロック順とバス停名の
+    /// 対応付け（Issue #1904）が崩れる。
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task SaveAsync_明細は新しい順でReplaceDetailsAsyncへ渡されること()
+    {
+        // Arrange: 同一日付の 3 区間（順序の決定要因を SequenceNumber だけに絞る）
+        var sameDay = new DateTime(2026, 2, 10);
+        var ledger = new Ledger
+        {
+            Id = 11,
+            CardIdm = "0102030405060708",
+            Date = sameDay,
+            // 保存で摘要が再生成される（＝UpdateAsync が呼ばれる）よう、生成結果と異なる値にしておく
+            Summary = "鉄道",
+            Details = new List<LedgerDetail>
+            {
+                // GetByIdAsync は時系列昇順（古い→新しい）で返す。
+                // FeliCa 互換のため SequenceNumber は降順になる。
+                new() { LedgerId = 11, SequenceNumber = 3, EntryStation = "博多", ExitStation = "天神", Amount = 260, UseDate = sameDay, Balance = 740 },
+                new() { LedgerId = 11, SequenceNumber = 2, EntryStation = "薬院", ExitStation = "大橋", Amount = 210, UseDate = sameDay, Balance = 530 },
+                new() { LedgerId = 11, SequenceNumber = 1, EntryStation = "姪浜", ExitStation = "西新", Amount = 230, UseDate = sameDay, Balance = 300 }
+            }
+        };
+        _ledgerRepoMock.Setup(r => r.GetByIdAsync(11)).ReturnsAsync(ledger);
+
+        List<LedgerDetail>? savedDetails = null;
+        _ledgerRepoMock
+            .Setup(r => r.ReplaceDetailsAsync(11, It.IsAny<IEnumerable<LedgerDetail>>()))
+            .Callback<int, IEnumerable<LedgerDetail>>((_, details) => savedDetails = details.ToList())
+            .ReturnsAsync(true);
+
+        Ledger? savedLedger = null;
+        _ledgerRepoMock
+            .Setup(r => r.UpdateAsync(It.IsAny<Ledger>()))
+            .Callback<Ledger>(l => savedLedger = l)
+            .ReturnsAsync(true);
+
+        await _viewModel.InitializeAsync(11);
+
+        // Act: 分割線を入れて変更を発生させ、保存する
+        _viewModel.SplitAllCommand.Execute(null);
+        await _viewModel.SaveCommand.ExecuteAsync(null);
+
+        // Assert: DB へは新しい順（＝画面の逆順）で渡る
+        savedDetails.Should().NotBeNull();
+        savedDetails!.Select(d => d.EntryStation).Should().Equal(
+            new[] { "姪浜", "薬院", "博多" },
+            "先に INSERT した明細ほど小さい rowid になるため、最新の明細から渡すこと（Issue #1913）");
+
+        // 対の表明: Reverse は DB 呼び出しにだけ適用し、摘要は時系列昇順のまま生成すること。
+        // 両方を見ないと「摘要ごと逆順にした」実装でも緑になる。
+        savedLedger.Should().NotBeNull();
+        savedLedger!.Summary.Should().Be(
+            "鉄道（博多～天神、薬院～大橋、姪浜～西新）",
+            "摘要のブロック順は時系列昇順のままであること");
+    }
+
+    #endregion
 }

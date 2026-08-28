@@ -88,6 +88,68 @@ public class NewLedgerFromSegmentsBuilderTests
             Times.Once);
     }
 
+    /// <summary>
+    /// 明細は「新しい順」で <c>InsertDetailsAsync</c> へ渡されること
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Issue #1913: <c>SplitAtChargeBoundaries</c> は時系列昇順（古い→新しい）で返し、
+    /// <c>InsertDetailsAsync</c> は渡された順にそのまま INSERT する。昇順のまま渡すと
+    /// <c>LedgerDetail.SequenceNumber</c> の規約（FeliCa 互換で<b>小さい rowid ＝ 新しい</b>）が
+    /// 反転し、以後の摘要再生成でブロック順が逆になる。
+    /// </para>
+    /// <para>
+    /// <c>LendingService</c> の同型の挿入（1367 行付近）が既に <c>Reverse()</c> しているのに、
+    /// CSV から新規 Ledger を作るこの経路だけが取り残されていた。
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task BuildAndInsertAsync_明細は新しい順でInsertDetailsAsyncへ渡されること()
+    {
+        // Arrange - 同一日の利用 3 件（時系列昇順。残高は減っていく）
+        var repoMock = new Mock<ILedgerRepository>();
+        repoMock.Setup(r => r.InsertAsync(It.IsAny<Ledger>())).ReturnsAsync(300);
+
+        List<LedgerDetail> insertedDetails = null;
+        repoMock.Setup(r => r.InsertDetailsAsync(It.IsAny<int>(), It.IsAny<IEnumerable<LedgerDetail>>()))
+            .Callback<int, IEnumerable<LedgerDetail>>((_, details) => insertedDetails = details.ToList())
+            .ReturnsAsync(true);
+
+        var useDate = new DateTime(2024, 3, 1);
+        var first = Usage(useDate, amount: 260, balance: 9740);
+        first.EntryStation = "博多";
+        first.ExitStation = "天神";
+        var second = Usage(useDate, amount: 210, balance: 9530);
+        second.EntryStation = "薬院";
+        second.ExitStation = "大橋";
+        var third = Usage(useDate, amount: 230, balance: 9300);
+        third.EntryStation = "姪浜";
+        third.ExitStation = "西新";
+
+        var builder = new NewLedgerFromSegmentsBuilder(repoMock.Object);
+        var errors = new List<CsvImportError>();
+
+        // Act
+        var count = await builder.BuildAndInsertAsync(
+            CardIdm,
+            useDate,
+            new List<(int LineNumber, LedgerDetail Detail)>
+            {
+                (LineNumber: 2, Detail: first),
+                (LineNumber: 3, Detail: second),
+                (LineNumber: 4, Detail: third)
+            },
+            errors);
+
+        // Assert
+        count.Should().Be(3);
+        errors.Should().BeEmpty();
+        insertedDetails.Should().NotBeNull();
+        insertedDetails.Select(d => d.EntryStation).Should().Equal(
+            new[] { "姪浜", "薬院", "博多" },
+            "先に INSERT した明細ほど小さい rowid になるため、最新の明細から渡すこと（Issue #1913）");
+    }
+
     [Fact]
     public async Task BuildAndInsertAsync_GroupDateMinValue_UsesDetailUseDate()
     {
