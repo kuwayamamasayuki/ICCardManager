@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -34,7 +34,7 @@ public class BusTextLiteralConventionTests
     private static readonly (string Literal, string Replacement)[] ForbiddenBusTextLiterals =
     {
         ("★", "SummaryGenerator.BusPlaceholder / HasIncompleteBusStop / IsBusStopPlaceholder"),
-        ("バス（", "SummaryGenerator.FormatBusSummary / GetBusStopExtractionPattern / TryExtractBusStops"),
+        ("バス（", "SummaryGenerator.FormatBusSummary / ExtractBusStopBlocks / TryExtractBusStops"),
     };
 
     /// <summary>

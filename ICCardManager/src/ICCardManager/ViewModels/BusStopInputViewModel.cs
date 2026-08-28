@@ -379,6 +379,21 @@ public partial class BusStopInputViewModel : ViewModelBase
             warnings.Add($"「○○～△△」の形式になっていない入力が{missingTildeCount}件あります（乗車バス停～降車バス停の形式を推奨します）");
         }
 
+        // Issue #1914: 摘要は「ラベル＋全角括弧」の区切り書式のため、バス停名に
+        // 対応の取れない全角括弧が入ると摘要からバス停名を取り出せなくなる
+        //（履歴統合・摘要の直接編集での明細同期が働かない）。保存はブロックしないが、
+        // 入力し直せる今のうちに気付けるよう確認へ載せる。
+        var unbalancedCount = BusUsages.Count(b =>
+            !string.IsNullOrWhiteSpace(b.BusStops)
+            && !SummaryGenerator.HasBalancedFullWidthParentheses(b.BusStops));
+        if (unbalancedCount > 0)
+        {
+            warnings.Add(
+                $"全角括弧「（」「）」の対応が取れていない入力が{unbalancedCount}件あります" +
+                "（摘要からバス停名を読み取れなくなります）。" +
+                "括弧を対にするか、半角「(」「)」に置き換えてください");
+        }
+
         // Issue #1133: 類似バス停名の検出（取り違え・表記ゆれの疑い）
         var newEntries = BusUsages
             .Where(b => !string.IsNullOrWhiteSpace(b.BusStops)

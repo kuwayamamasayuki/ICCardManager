@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Linq;
@@ -712,6 +712,21 @@ namespace ICCardManager.ViewModels
         }
 
         /// <summary>
+        /// 警告メッセージを追加する（Issue #1914）
+        /// </summary>
+        /// <remarks>
+        /// <see cref="WarningMessage"/> へ直接代入すると、後から立った警告が先の警告を
+        /// 消して「最後の 1 つ」しか残らない（Issue #1811 と同型）。複数該当し得る以上、
+        /// 追加は必ず本メソッドを通して改行で連結する。
+        /// </remarks>
+        private void AddWarning(string message)
+        {
+            WarningMessage = string.IsNullOrEmpty(WarningMessage)
+                ? message
+                : WarningMessage + Environment.NewLine + message;
+        }
+
+        /// <summary>
         /// バリデーション
         /// </summary>
         private void Validate()
@@ -739,7 +754,7 @@ namespace ICCardManager.ViewModels
                                    Summary == "ポイント還元";
             if (Income == 0 && Expense == 0 && !isSpecialSummary)
             {
-                WarningMessage = "受入と払出が両方0円です。繰越等でなければ金額を入力してください。";
+                AddWarning("受入と払出が両方0円です。繰越等でなければ金額を入力してください。");
             }
 
             // 残高が負になるチェック
@@ -784,17 +799,31 @@ namespace ICCardManager.ViewModels
                 return;
             }
 
+            // Issue #1914: 摘要の全角括弧の対応が取れていないと、バス停名の抽出
+            //（SummaryGenerator.ExtractBusStopBlocks）が終端を決められず、保存後の
+            // 明細への同期（Issue #983）が働かない。無言で同期を諦めると、履歴統合時に
+            // 古いバス停名から摘要が再生成され、ここでの編集が取り消されたように見える。
+            if (SummaryGenerator.ContainsBusLabel(Summary) &&
+                !SummaryGenerator.HasBalancedFullWidthParentheses(Summary))
+            {
+                AddWarning(
+                    "摘要の全角括弧「（」「）」の対応が取れていません。" +
+                    "このままではバス停名を明細へ反映できず、履歴を統合したときに" +
+                    "編集前のバス停名へ戻ります。括弧を対にするか、" +
+                    "バス停名の括弧を半角「(」「)」に置き換えてください。");
+            }
+
             // Addモードの場合の日付チェック
             if (Mode == LedgerRowEditMode.Add && _allLedgers.Count > 0)
             {
                 // 挿入位置の前後と日付の整合性をチェック
                 if (InsertIndex > 0 && _allLedgers[InsertIndex - 1].Date > EditDate)
                 {
-                    WarningMessage = "日付が前の行より古くなっています。挿入位置を確認してください。";
+                    AddWarning("日付が前の行より古くなっています。挿入位置を確認してください。");
                 }
                 if (InsertIndex < _allLedgers.Count && _allLedgers[InsertIndex].Date < EditDate)
                 {
-                    WarningMessage = "日付が次の行より新しくなっています。挿入位置を確認してください。";
+                    AddWarning("日付が次の行より新しくなっています。挿入位置を確認してください。");
                 }
             }
         }

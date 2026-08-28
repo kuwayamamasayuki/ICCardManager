@@ -1,4 +1,4 @@
-using FluentAssertions;
+﻿using FluentAssertions;
 using ICCardManager.Data.Repositories;
 using ICCardManager.Models;
 using ICCardManager.Services;
@@ -420,6 +420,41 @@ public class BusStopInputViewModelTests
             d => d.ShowWarningConfirmation(It.IsAny<string>(), It.IsAny<string>()), Times.Never);
         _viewModel.IsSaved.Should().BeTrue();
         _viewModel.StatusMessage.Should().Be("保存しました");
+    }
+
+    /// <summary>
+    /// Issue #1914: 摘要は「ラベル＋全角括弧」の区切り書式のため、対応の取れない
+    /// 全角括弧を含むバス停名は摘要から読み取れなくなる。入力し直せるうちに知らせること。
+    /// </summary>
+    [Fact]
+    public void CollectSaveWarnings_全角括弧の対応が取れていない入力を警告すること()
+    {
+        // Arrange: 「天神）西口～博多」は閉じ括弧だけが余る
+        ArrangeSaveWithBusStops("天神）西口～博多", "赤坂～大濠公園");
+
+        // Act
+        var warnings = _viewModel.CollectSaveWarnings();
+
+        // Assert: 件数と復旧手段（半角への置き換え）を示すこと
+        warnings.Should().ContainSingle(w => w.Contains("全角括弧") && w.Contains("1件"));
+        warnings.Should().ContainSingle(w => w.Contains("半角"));
+    }
+
+    /// <summary>
+    /// Issue #1914: 対応の取れている括弧（「天神（西口）」等）は正当な入力であり、
+    /// 摘要からも読み取れる。警告で塞がないこと（対の表明）。
+    /// </summary>
+    [Fact]
+    public void CollectSaveWarnings_対応の取れた括弧は警告しないこと()
+    {
+        // Arrange
+        ArrangeSaveWithBusStops("天神（西口）～博多", "赤坂(東口)～大濠公園");
+
+        // Act
+        var warnings = _viewModel.CollectSaveWarnings();
+
+        // Assert
+        warnings.Should().NotContain(w => w.Contains("全角括弧"));
     }
 
     /// <summary>

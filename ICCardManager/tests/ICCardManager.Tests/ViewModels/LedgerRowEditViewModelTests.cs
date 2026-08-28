@@ -1,4 +1,4 @@
-using FluentAssertions;
+﻿using FluentAssertions;
 using ICCardManager.Data;
 using ICCardManager.Data.Repositories;
 using ICCardManager.Dtos;
@@ -1568,6 +1568,56 @@ public class LedgerRowEditViewModelTests : IDisposable
         _dialogServiceMock.Verify(
             d => d.ShowWarningConfirmation(It.IsAny<string>(), It.IsAny<string>()), Times.Never);
     }
+
+
+    #region 摘要の全角括弧の対応（Issue #1914）
+
+    /// <summary>
+    /// Issue #1914: 摘要の全角括弧の対応が取れていないと、保存後のバス停名同期
+    /// （Issue #983）が終端を決められず無言で働かない。編集中に気付けるよう警告すること。
+    /// </summary>
+    [Fact]
+    public void Validate_バス摘要の全角括弧が不均衡なら警告すること()
+    {
+        // Arrange & Act: 「天神）西口～博多」は閉じ括弧だけが余る
+        _viewModel.Expense = 210;
+        _viewModel.Balance = 1000;
+        _viewModel.Summary = SummaryGenerator.FormatBusSummary("天神）西口～博多");
+
+        // Assert: 保存は塞がず（警告であってエラーではない）、原因と復旧手段を示す
+        _viewModel.CanSave.Should().BeTrue();
+        _viewModel.WarningMessage.Should().Contain("全角括弧");
+        _viewModel.WarningMessage.Should().Contain("半角");
+    }
+
+    /// <summary>
+    /// 対の表明: 対応の取れた括弧（Issue #1905 の往復併記）は正当な摘要であり警告しないこと。
+    /// これが無いと「バス摘要なら常に警告する」実装でも上のテストは緑になる。
+    /// </summary>
+    [Fact]
+    public void Validate_対応の取れた括弧を含むバス摘要は警告しないこと()
+    {
+        _viewModel.Expense = 210;
+        _viewModel.Balance = 1000;
+        _viewModel.Summary = SummaryGenerator.FormatBusSummary("天神日銀前（天神中央郵便局前）～下原中央 往復");
+
+        _viewModel.WarningMessage.Should().NotContain("全角括弧");
+    }
+
+    /// <summary>
+    /// 対の表明: バス以外の摘要は本チェックの対象外（バス停名の同期が無いため）。
+    /// </summary>
+    [Fact]
+    public void Validate_バス以外の摘要は括弧の対応を警告しないこと()
+    {
+        _viewModel.Expense = 210;
+        _viewModel.Balance = 1000;
+        _viewModel.Summary = "鉄道（天神）博多）";
+
+        _viewModel.WarningMessage.Should().NotContain("全角括弧");
+    }
+
+    #endregion
 
     #endregion
 }
