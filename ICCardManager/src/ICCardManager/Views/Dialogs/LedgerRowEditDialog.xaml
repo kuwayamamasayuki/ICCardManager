@@ -371,7 +371,10 @@
                     CornerRadius="4"
                     Padding="10,5"
                     Margin="0,3,0,0">
+                <!-- Issue #1914: 警告は複数件が改行で連結され得るため折り返しを明示する
+                     （文字サイズは4段階で変わるので幅の調整では担保できない） -->
                 <TextBlock Text="{Binding WarningMessage}"
+                           TextWrapping="Wrap"
                            Foreground="{DynamicResource LendingForegroundBrush}"
                            FontSize="{DynamicResource SmallFontSize}">
                     <TextBlock.Style>

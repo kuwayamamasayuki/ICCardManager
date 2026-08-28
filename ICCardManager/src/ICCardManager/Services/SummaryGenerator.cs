@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text.RegularExpressions;
@@ -187,15 +187,15 @@ namespace ICCardManager.Services
         /// <remarks>
         /// <para>
         /// 摘要の生成・判定・抽出は、いずれもこのプロパティ（および本プロパティから導出する
-        /// <see cref="FormatBusSummary"/> / <see cref="GetBusStopExtractionPattern"/> /
+        /// <see cref="FormatBusSummary"/> / <see cref="ExtractBusStopBlocks"/> /
         /// <see cref="TryExtractBusStops"/> / <see cref="ContainsBusLabel"/>）を経由すること。
         /// 生成側だけが設定値を使い判定側がリテラルを直書きすると、ラベルを
         /// 「乗合自動車」等へ変更した組織で判定だけが追従しない（Issue #1604 / #1749 と同型の乖離）。
         /// </para>
         /// <para>
         /// 空文字・空白のみの設定は既定値へフォールバックする。空ラベルを許すと
-        /// <see cref="GetBusStopExtractionPattern"/> がラベルを失って全角括弧だけの
-        /// パターンに退化し、鉄道の括弧（「鉄道（A駅～B駅）」）まで拾ってバス停名として取り込むため
+        /// <see cref="ExtractBusStopBlocks"/> がラベルを失って全角開き括弧だけを
+        /// 開始記号とし、鉄道の括弧（「鉄道（A駅～B駅）」）まで拾ってバス停名として取り込むため
         /// （<see cref="IsMidYearCarryoverSummary"/> の不正正規表現フォールバックと同じ方針）。
         /// </para>
         /// <para>
@@ -240,43 +240,74 @@ namespace ICCardManager.Services
         /// 摘要生成だけでなく、表示整形（<c>Common.RouteDisplayFormatter</c>）・
         /// CSVインポートの明細説明文・テストデータ生成も本メソッドを通す。
         /// 書式（ラベル＋全角括弧）を 1 か所に閉じることで、
-        /// <see cref="GetBusStopExtractionPattern"/> の抽出対象と生成物が必ず対応する。
+        /// <see cref="ExtractBusStopBlocks"/> の抽出対象と生成物が必ず対応する。
         /// 汎用/固有の別: 交通系固有。
         /// </remarks>
         public static string FormatBusSummary(string busStops)
-            => $"{BusLabel}（{busStops}）";
+            => $"{BusLabel}{FullWidthOpenParenthesis}{busStops}{FullWidthCloseParenthesis}";
 
         /// <summary>
-        /// 摘要からバス停名を抽出する正規表現パターンを導出（Issue #1818）
+        /// 摘要の書式に使う全角開き括弧（Issue #1914）
         /// </summary>
         /// <remarks>
+        /// 生成（<see cref="FormatBusSummary"/>）と抽出（<see cref="ExtractBusStopBlocks"/>）・
+        /// 対応判定（<see cref="HasBalancedFullWidthParentheses"/>）が同じ文字を見ることを
+        /// 定数で保証する。片方だけ半角へ変えるといった乖離を作れなくするため。
+        /// </remarks>
+        internal const char FullWidthOpenParenthesis = '（';
+
+        /// <summary>
+        /// 摘要の書式に使う全角閉じ括弧（Issue #1914）
+        /// </summary>
+        /// <remarks>
+        /// <see cref="FullWidthOpenParenthesis"/> と対。
+        /// </remarks>
+        internal const char FullWidthCloseParenthesis = '）';
+
+        /// <summary>
+        /// 全角括弧の対応が取れているかを判定する（Issue #1914）
+        /// </summary>
+        /// <param name="text">検査対象（null / 空文字は「対応が取れている」とみなす）</param>
+        /// <returns>開き括弧と閉じ括弧が対応していれば true</returns>
+        /// <remarks>
         /// <para>
-        /// ラベルは <see cref="Regex.Escape(string)"/> でエスケープする。設定値に
-        /// 正規表現メタ文字（<c>(</c> <c>.</c> <c>*</c> 等）が含まれていてもパターンが壊れず、
-        /// リテラルとして一致するようにするため。
+        /// 摘要は「ラベル＋全角括弧」の区切り書式である一方、バス停名は自由入力のため
+        /// 対応の取れない括弧（「天神）西口」等）を含み得る。この状態の摘要は
+        /// <b>どこがブロックの終端なのかを決められない</b>ため、
+        /// <see cref="ExtractBusStopBlocks"/> はこの判定が false の摘要から一切抽出しない。
         /// </para>
         /// <para>
-        /// 非アンカーの部分一致である点は従来のハードコードと同じ（鉄道と混在する摘要から
-        /// バス部分だけを取り出すため）。時系列摘要（Issue #1904）ではバスブロックが
-        /// 複数あり得るため、抽出そのものは全マッチを結合する
-        /// <see cref="TryExtractBusStops"/> を使い、呼び出し側で <c>Regex.Match</c>（先頭
-        /// 1 件のみ）を書き写さないこと。
+        /// 局所的なマッチでは検出できない（「バス（天神）西口～博多）」は
+        /// 「バス（天神）」というブロックとして<b>そのまま成立して見える</b>）が、
+        /// 摘要全体を数えれば括弧の過不足として必ず現れる。
         /// </para>
         /// <para>
-        /// <b>本文は全角括弧を 1 段だけ入れ子にできる</b>（Issue #1905）。往復の端点を
-        /// 「天神日銀前（天神中央郵便局前）」と併記するため、
-        /// 従来の非貪欲な <c>（(.+?)）</c> では最初の <c>）</c> で切れて
-        /// 「天神日銀前（天神中央郵便局前」というバス停名が取り出されていた。
-        /// 本文は「括弧以外の文字」または「入れ子の全角括弧 1 組」の連なりとして表現し、
-        /// 最上位の <c>）</c> でのみ終端させる。<see cref="FormatRoundTrip"/> が
-        /// 生成する併記はちょうど 1 段なので、これで生成物と抽出対象が対応する。
+        /// 半角括弧は対象外。摘要の書式に使うのは全角括弧だけであり、
+        /// 半角括弧はバス停名の一部として自由に使えるため。
         /// </para>
         /// <para>
-        /// 汎用/固有の別: 交通系固有。
+        /// 汎用/固有の別: 交通系固有（摘要の書式に対する判定）。
         /// </para>
         /// </remarks>
-        public static string GetBusStopExtractionPattern()
-            => $"{Regex.Escape(BusLabel)}（((?:[^（）]|（[^（）]*）)+)）";
+        public static bool HasBalancedFullWidthParentheses(string? text)
+        {
+            var depth = 0;
+            foreach (var c in text ?? string.Empty)
+            {
+                if (c == FullWidthOpenParenthesis)
+                {
+                    depth++;
+                }
+                else if (c == FullWidthCloseParenthesis)
+                {
+                    depth--;
+                    // 閉じが先行した時点で対応は取れない（「）（」を通さない）
+                    if (depth < 0) return false;
+                }
+            }
+
+            return depth == 0;
+        }
 
         /// <summary>
         /// 摘要からバス停名部分を抽出（Issue #1818）
@@ -303,18 +334,75 @@ namespace ICCardManager.Services
         /// <param name="summary">摘要文字列</param>
         /// <returns>各ブロックのバス停名を摘要中の出現順に並べたリスト。バスブロックが無ければ空</returns>
         /// <remarks>
+        /// <para>
         /// バス明細が 1 件の同期処理はブロック区切りを保ったまま先頭ブロックだけを
         /// 書き戻す必要がある（結合テキスト「A～B、C～D」を 1 明細へ書き込むと
         /// <see cref="ParseBusRoute"/> で解析できない値が台帳に残る）ため、
         /// 結合前のブロック列を返す本メソッドを別に置く。
         /// 汎用/固有の別: 交通系固有（バス混在表記）。
+        /// </para>
+        /// <para>
+        /// Issue #1914: 抽出は正規表現ではなく<b>全角括弧の深さを数える走査</b>で行う。
+        /// 従来の非貪欲パターン（<c>（(.+?)）</c>、Issue #1905 で 1 段の入れ子まで拡張）は
+        /// バス停名に対応の取れない <c>）</c> が含まれると最初の <c>）</c> で打ち切られ、
+        /// 「天神）西口～博多」から断片「天神」を返していた。断片は
+        /// <c>LedgerDetail.BusStops</c> へ書き戻されるため、6 年保存の台帳から
+        /// 実際に乗降した場所が静かに失われる。
+        /// </para>
+        /// <para>
+        /// 深さを数える方式は入れ子の段数に上限が無い（Issue #1905 の往復併記は 1 段だが、
+        /// バス停名自体が括弧を含んでも扱える）。一方で<b>対応の取れない括弧は
+        /// 原理的に終端を決められない</b>ため、
+        /// <see cref="HasBalancedFullWidthParentheses"/> が false の摘要からは
+        /// 1 ブロックも抽出しない（部分的に信じて断片を書き戻さない）。
+        /// </para>
+        /// <para>
+        /// ブロックの開始は「ラベル＋全角開き括弧」の連なりで探す。ラベル自体が
+        /// 全角括弧を含む設定（「バス（市営）」等、Issue #1818）でも本文の開始位置を
+        /// 取り違えないようにするため。
+        /// </para>
         /// </remarks>
         internal static List<string> ExtractBusStopBlocks(string? summary)
         {
-            return Regex.Matches(summary ?? string.Empty, GetBusStopExtractionPattern())
-                .Cast<Match>()
-                .Select(m => m.Groups[1].Value)
-                .ToList();
+            var blocks = new List<string>();
+            var text = summary ?? string.Empty;
+
+            // 対応が取れていない摘要は、どこがブロックの終端かを決められない
+            if (!HasBalancedFullWidthParentheses(text)) return blocks;
+
+            var opener = BusLabel + FullWidthOpenParenthesis;
+            var searchFrom = 0;
+
+            while (searchFrom < text.Length)
+            {
+                var openerIndex = text.IndexOf(opener, searchFrom, StringComparison.Ordinal);
+                if (openerIndex < 0) break;
+
+                var contentStart = openerIndex + opener.Length;
+                var depth = 1;
+                var index = contentStart;
+
+                for (; index < text.Length; index++)
+                {
+                    if (text[index] == FullWidthOpenParenthesis)
+                    {
+                        depth++;
+                    }
+                    else if (text[index] == FullWidthCloseParenthesis)
+                    {
+                        depth--;
+                        if (depth == 0) break;
+                    }
+                }
+
+                // 対応検証済みのため到達しないが、断片を返さない側へ倒す
+                if (depth != 0) break;
+
+                blocks.Add(text.Substring(contentStart, index - contentStart));
+                searchFrom = index + 1;
+            }
+
+            return blocks;
         }
 
         /// <summary>

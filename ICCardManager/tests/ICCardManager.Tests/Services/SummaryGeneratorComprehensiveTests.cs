@@ -1,4 +1,4 @@
-using FluentAssertions;
+﻿using FluentAssertions;
 using ICCardManager.Models;
 using ICCardManager.Services;
 using Xunit;
@@ -2612,7 +2612,7 @@ public class SummaryGeneratorComprehensiveTests : IDisposable
     /// 併記を含むバスの摘要から、バス停名を取り出せること。
     /// </summary>
     /// <remarks>
-    /// 摘要の本文へ全角括弧を持ち込むと、抽出（<c>GetBusStopExtractionPattern</c>）の
+    /// 摘要の本文へ全角括弧を持ち込むと、抽出（<c>ExtractBusStopBlocks</c>）の
     /// 非貪欲な <c>（(.+?)）</c> が最初の <c>）</c> で切れ、
     /// 「天神日銀前（天神中央郵便局前」というバス停名が
     /// 履歴統合（<c>LedgerMergeService</c>）と摘要の直接編集（<c>LedgerRowEditViewModel</c>）へ渡っていた。

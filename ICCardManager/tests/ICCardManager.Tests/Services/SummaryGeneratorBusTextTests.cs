@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using FluentAssertions;
 using ICCardManager.Services;
 using Xunit;
@@ -151,7 +151,7 @@ public class SummaryGeneratorBusTextTests : IDisposable
     }
 
     [Fact]
-    public void GetBusStopExtractionPattern_正規表現メタ文字を含むラベルでも壊れない()
+    public void TryExtractBusStops_正規表現メタ文字を含むラベルでも壊れない()
     {
         ConfigureBusText("バス(市営)", "★");
 
