@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
@@ -79,6 +79,66 @@ namespace ICCardManager.Services
                 }
             }
             return warnings;
+        }
+
+        /// <summary>
+        /// Issue #1908: 交通系ICカードの実残額と、ピッすいが記録している残額の食い違いを判定する。
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// ピッすいを通さずに利用・返却された交通系ICカードを庶務担当者が見つけられるようにするための検出。
+        /// 「実残額」はカードをタッチした瞬間にリーダーから読み取った値、「記録」は台帳の最新行の残額。
+        /// </para>
+        /// <para>
+        /// <b>判定は貸出中のカードも対象にする</b>。本 Issue が主目的とする「ピッすいを通さずに返却された」
+        /// カードは、DB 上は貸出中のまま残るためである（貸出時に記録した残額と現物の残額がずれる）。
+        /// 「どうすれば」は貸出状態で変わる — 貸出中なら返却操作で記録が追いつくが、
+        /// 未貸出のカードは記録を追加する手段が CSV インポートか履歴の直接編集しかない。
+        /// </para>
+        /// <para>
+        /// 残額を読み取れなかった場合はこのメソッドを呼ばないこと。読み取り失敗は「差異なし」を意味しないため、
+        /// 呼び出し元は前回の判定を残す（<c>MainViewModel.CheckCardBalanceMismatchAsync</c>）。
+        /// </para>
+        /// </remarks>
+        /// <param name="cardIdm">対象カードのIDm（警告クリックで履歴を開くために保持する）</param>
+        /// <param name="cardType">カード種別（表示用）</param>
+        /// <param name="cardNumber">管理番号（表示用）</param>
+        /// <param name="actualBalance">カードから読み取った実残額（円）</param>
+        /// <param name="recordedBalance">台帳の最新行に記録されている残額（円）</param>
+        /// <param name="isLent">対象カードが貸出中か</param>
+        /// <returns>差異がある場合は WarningItem、一致する場合は null</returns>
+        public WarningItem CheckCardBalanceMismatchWarning(
+            string cardIdm,
+            string cardType,
+            string cardNumber,
+            int actualBalance,
+            int recordedBalance,
+            bool isLent)
+        {
+            if (actualBalance == recordedBalance)
+                return null;
+
+            var difference = Math.Abs(actualBalance - recordedBalance);
+
+            // 「どうすれば」は貸出状態で変わる（貸出中は返却操作が記録を追いつかせる正規の手段）
+            var action = isLent
+                ? "貸出中のままです。職員証と交通系ICカードをタッチして返却処理を実行してください。"
+                : "履歴を確認し、CSVインポートまたは履歴の追加で不足分を補完してください。";
+
+            return new WarningItem
+            {
+                Type = WarningType.CardBalanceMismatch,
+                CardIdm = cardIdm,
+                DisplayText =
+                    // 何が
+                    $"⚠️ {cardType} {cardNumber}: カードの残額 {DisplayFormatters.FormatBalanceWithUnit(actualBalance)} と" +
+                    $"ピッすいの記録 {DisplayFormatters.FormatBalanceWithUnit(recordedBalance)} が" +
+                    $"{DisplayFormatters.FormatBalanceWithUnit(difference)}食い違っています。" +
+                    // なぜ
+                    "ピッすいを通さずに利用・返却された可能性があります。" +
+                    // どうすれば
+                    action
+            };
         }
 
         /// <summary>
