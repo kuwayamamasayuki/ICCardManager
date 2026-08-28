@@ -39,7 +39,7 @@ namespace ICCardManager.Services
             int newBalance,
             string newStaffName,
             string newNote,
-            int newCompanionCount,
+            int? newCompanionCount,
             List<FieldChange> changes)
         {
             // Issue #639: 金額・日付フィールドの変更も検出
@@ -115,13 +115,14 @@ namespace ICCardManager.Services
                 });
             }
 
-            if (existingLedger.CompanionCount != newCompanionCount)
+            // Issue #1906: 列が無い旧形式 CSV（null）は「指定なし」なので差分として出さない
+            if (newCompanionCount.HasValue && existingLedger.CompanionCount != newCompanionCount.Value)
             {
                 changes.Add(new FieldChange
                 {
                     FieldName = "同行者数",
                     OldValue = existingLedger.CompanionCount.ToString(),
-                    NewValue = newCompanionCount.ToString()
+                    NewValue = newCompanionCount.Value.ToString()
                 });
             }
         }
@@ -132,7 +133,7 @@ namespace ICCardManager.Services
         /// </summary>
 
         internal static void ValidateBalanceConsistency(
-            List<(int LineNumber, int? LedgerId, string CardIdm, DateTime Date, string Summary, int Income, int Expense, int Balance, string StaffName, string Note, int CompanionCount)> records,
+            List<(int LineNumber, int? LedgerId, string CardIdm, DateTime Date, string Summary, int Income, int Expense, int Balance, string StaffName, string Note, int? CompanionCount)> records,
             List<CsvImportError> errors,
             Dictionary<string, int> previousBalanceByCard = null)
         {

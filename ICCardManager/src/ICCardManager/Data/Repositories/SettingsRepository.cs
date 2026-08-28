@@ -429,7 +429,7 @@ WHERE settings.value IS NULL OR substr(settings.value, 1, 7) <> @currentMonth";
             settings.SkipBusStopInputOnReturn = skipBusStopInput?.ToLowerInvariant() == "true";
 
             // 同行者数入力スキップ設定（Issue #1906）
-            settings.SkipCompanionCountInputOnReturn = (await GetAsync(KeySkipCompanionCountInputOnReturn))?.ToLowerInvariant() == "true";
+            settings.SkipCompanionCountInputOnReturn = (await GetAsync(KeySkipCompanionCountInputOnReturn).ConfigureAwait(false))?.ToLowerInvariant() == "true";
 
             // 帳票出力先フォルダ設定
             var reportOutputFolder = await GetAsync(KeyReportOutputFolder);
@@ -518,7 +518,7 @@ WHERE settings.value IS NULL OR substr(settings.value, 1, 7) <> @currentMonth";
                     success &= await SetAsync(KeySkipBusStopInputOnReturn, settings.SkipBusStopInputOnReturn.ToString().ToLowerInvariant(), scope);
 
                     // 同行者数入力スキップ設定を保存（Issue #1906）
-                    success &= await SetAsync(KeySkipCompanionCountInputOnReturn, settings.SkipCompanionCountInputOnReturn.ToString().ToLowerInvariant(), scope);
+                    success &= await SetAsync(KeySkipCompanionCountInputOnReturn, settings.SkipCompanionCountInputOnReturn.ToString().ToLowerInvariant(), scope).ConfigureAwait(false);
 
                     // 帳票出力先フォルダ設定を保存
                     success &= await SetAsync(KeyReportOutputFolder, settings.ReportOutputFolder ?? string.Empty, scope);

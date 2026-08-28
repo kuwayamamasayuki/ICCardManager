@@ -237,6 +237,39 @@ SELECT last_insert_rowid();";
         rows[1].StaffName.Should().Be("博多 花子", "staff_name には「外N名」を書き込まない");
     }
 
+    /// <summary>
+    /// Issue #1906 / #1808: 同行者数列を持たない旧形式の CSV を取り込み直しても、既存の同行者数が 0 で上書きされないこと
+    /// </summary>
+    [Fact]
+    public async Task ImportLedgersAsync_同行者数列が無い旧形式CSV_既存の同行者数を消さないこと()
+    {
+        await SeedCardAsync();
+        var seeded = await _realLedgerRepository.InsertAsync(new Ledger
+        {
+            CardIdm = TestCardIdm,
+            Date = new DateTime(2025, 1, 11),
+            Summary = "鉄道（天神～博多）",
+            Expense = 210,
+            Balance = 9790,
+            StaffName = "博多 花子",
+            CompanionCount = 2
+        });
+
+        // 旧形式（同行者数列なし）。ID 列ありで既存行を更新する形にする
+        var csvContent = @"ID,日時,カードIDm,管理番号,摘要,受入金額,払出金額,残額,利用者,備考
+" + seeded + @",2025-01-11 00:00:00," + TestCardIdm + @",001,鉄道（天神～博多・修正）,,210,9790,博多 花子,";
+        var filePath = Path.Combine(_testDirectory, "ledgers_legacy_format.csv");
+        await Task.Run(() => File.WriteAllText(filePath, csvContent, CsvEncoding));
+        var (service, _) = CreateServiceOverRealRepository(new InsertCounter());
+
+        var result = await service.ImportLedgersAsync(filePath);
+
+        result.Success.Should().BeTrue();
+        var updated = await _realLedgerRepository.GetByIdAsync(seeded);
+        updated!.Summary.Should().Be("鉄道（天神～博多・修正）", "摘要の編集は反映される");
+        updated.CompanionCount.Should().Be(2, "列が無い CSV は「同行者数の指定なし」であり、0 で上書きしてはならない");
+    }
+
     /// <summary>ID列なし・残高チェーンが整合した3行の履歴CSVを書き出す</summary>
     private async Task<string> WriteThreeRowCsvAsync(string fileName)
     {

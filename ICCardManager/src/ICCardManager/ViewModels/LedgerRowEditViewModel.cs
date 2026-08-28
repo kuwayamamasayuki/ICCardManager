@@ -907,7 +907,9 @@ namespace ICCardManager.ViewModels
                 ReturnerIdm = ledger.ReturnerIdm,
                 LentAt = ledger.LentAt,
                 ReturnedAt = ledger.ReturnedAt,
-                IsLentRecord = ledger.IsLentRecord
+                IsLentRecord = ledger.IsLentRecord,
+                // Issue #1906: 載せ忘れると「同行者数 0 → N」という実際には起きていない変更が監査ログに残る（#1726）
+                CompanionCount = ledger.CompanionCount
             };
 
             // 値を更新

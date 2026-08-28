@@ -161,7 +161,7 @@ public partial class CompanionCountInputItem : ObservableObject
         _companionCountText = ledger.CompanionCount.ToString();
     }
 
-    public string UseDateDisplay => Ledger.Date.ToString("yyyy/MM/dd");
+    public string UseDateDisplay => DisplayFormatters.FormatDate(Ledger.Date);
 
     public string Summary => Ledger.Summary;
 

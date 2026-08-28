@@ -924,6 +924,21 @@ public class LedgerMergeServiceTests : IDisposable
     }
 
     /// <summary>
+    /// Issue #1906: 統合先より統合元の同行者数が多い場合、最大値を引き継ぐこと
+    /// </summary>
+    [Fact]
+    [Trait("Category", "Unit")]
+    public void MergeCompanionCount_TakesMaxAcrossMergedLedgers()
+    {
+        var target = new Ledger { Id = 1, CompanionCount = 0 };
+        var source = new Ledger { Id = 2, CompanionCount = 2 };
+
+        var merged = new[] { target, source }.Max(l => l.CompanionCount);
+
+        merged.Should().Be(2, "統合先の値だけを残すと「外N名」が台帳から消える");
+    }
+
+    /// <summary>
     /// LedgerSnapshot.FromLedger/ToLedgerの往復変換が正しく動作すること
     /// </summary>
     [Fact]

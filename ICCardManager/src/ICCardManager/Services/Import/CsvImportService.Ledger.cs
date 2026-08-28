@@ -89,7 +89,8 @@ namespace ICCardManager.Services
                             var hasChanges = existingLedger.Summary != parsed.Summary ||
                                             (existingLedger.StaffName ?? "") != parsed.StaffName ||
                                             (existingLedger.Note ?? "") != parsed.Note ||
-                                            existingLedger.CompanionCount != parsed.CompanionCount ||
+                                            // Issue #1906: 列が無い旧形式 CSV（null）は「指定なし」なので変更として数えない
+                                            (parsed.CompanionCount.HasValue && existingLedger.CompanionCount != parsed.CompanionCount.Value) ||
                                             existingLedger.Income != parsed.Income ||
                                             existingLedger.Expense != parsed.Expense ||
                                             existingLedger.Balance != parsed.Balance ||
@@ -134,7 +135,8 @@ namespace ICCardManager.Services
                         Balance = parsed.Balance,
                         StaffName = string.IsNullOrWhiteSpace(parsed.StaffName) ? null : parsed.StaffName,
                         Note = string.IsNullOrWhiteSpace(parsed.Note) ? null : parsed.Note,
-                        CompanionCount = parsed.CompanionCount,
+                        // Issue #1906: 列が無い旧形式 CSV では既存値を引き継ぐ（0 で上書きしない。#1726 / #1808）
+                        CompanionCount = parsed.CompanionCount ?? existingLedgerForUpdate?.CompanionCount ?? 0,
                         LenderIdm = existingLedgerForUpdate?.LenderIdm,
                         ReturnerIdm = existingLedgerForUpdate?.ReturnerIdm,
                         LentAt = existingLedgerForUpdate?.LentAt,
@@ -365,7 +367,7 @@ namespace ICCardManager.Services
 
                 // 仮バリデーションでカードIDmを収集（重複チェック用）
                 var cardIdmsInFile = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-                var validatedRecords = new List<(int LineNumber, int? LedgerId, string CardIdm, DateTime Date, string Summary, int Income, int Expense, int Balance, string StaffName, string Note, int CompanionCount)>();
+                var validatedRecords = new List<(int LineNumber, int? LedgerId, string CardIdm, DateTime Date, string Summary, int Income, int Expense, int Balance, string StaffName, string Note, int? CompanionCount)>();
 
                 for (var i = 1; i < lines.Count; i++)
                 {

@@ -44,7 +44,7 @@ public class LedgerCsvRowParserTests
         var row = LedgerCsvRowParser.TryParseRow(ValidNineColumnFields(), 2, "line", false, 9, ExistingCards(), null, errors);
 
         row.Should().NotBeNull();
-        row!.CompanionCount.Should().Be(0);
+        row!.CompanionCount.Should().BeNull("列が無い旧形式は「指定なし」。0 と区別しないと再取り込みで既存値が消える（#1726 / #1808）");
         errors.Should().BeEmpty();
     }
 

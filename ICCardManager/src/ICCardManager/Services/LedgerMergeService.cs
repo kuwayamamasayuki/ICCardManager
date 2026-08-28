@@ -299,6 +299,11 @@ namespace ICCardManager.Services
                 .ToList();
             target.Note = notes.Count > 0 ? string.Join("、", notes) : null;
 
+            // Issue #1906: 同行者数は統合対象の最大値を引き継ぐ。統合先の値だけを残すと、
+            // 同行者のいた行を統合しただけで「外N名」が 6 年保存の台帳から消える
+            // （Note を連結しているのと同じ判断: 統合で情報を落とさない）。
+            target.CompanionCount = ledgers.Max(l => l.CompanionCount);
+
             // 説明テキスト（UI表示用）
             var description = $"{DisplayFormatters.FormatDate(beforeLedgers[0].Date)} {string.Join(" + ", originalSummaryTexts)}";
 

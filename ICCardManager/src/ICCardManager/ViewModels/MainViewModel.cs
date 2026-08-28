@@ -1621,10 +1621,18 @@ public partial class MainViewModel : ViewModelBase
 
         await CheckWarningsAsync();
 
+        // バス停名入力（バス利用時）と同行者数入力（利用行がある場合）はどちらも AppSettings の
+        // スキップ設定を見るため、返却後の設定読み取りは 1 回にまとめる（コミット後の I/O を増やさない。#1805）
+        var needsBusStopInput = result.HasBusUsage && result.CreatedLedgers.Count > 0;
+        var companionCountTargets = CompanionCountInputViewModel.SelectTargetLedgers(result.CreatedLedgers);
+        var returnDialogSettings = needsBusStopInput || companionCountTargets.Count > 0
+            ? await _settingsRepository.GetAppSettingsAsync()
+            : null;
+
         // バス利用がある場合はバス停入力画面を表示
-        if (result.HasBusUsage && result.CreatedLedgers.Count > 0)
+        if (needsBusStopInput)
         {
-            var settings = await _settingsRepository.GetAppSettingsAsync();
+            var settings = returnDialogSettings;
 
             if (!settings.SkipBusStopInputOnReturn)
             {
@@ -1658,7 +1666,7 @@ public partial class MainViewModel : ViewModelBase
         // Issue #1906: 複数名で同一の交通系ICカードを利用した場合の同行者数を入力させる。
         // バス停名入力の後に出す（利用行が確定してから氏名欄の表記を決める）。
         // 対象は利用行（払出 > 0）のみで、チャージ・ポイント還元だけの返却では出さない。
-        await ShowCompanionCountInputIfNeededAsync(result);
+        await ShowCompanionCountInputIfNeededAsync(companionCountTargets, returnDialogSettings);
 
         // Issue #596: 今月の履歴が不完全な可能性がある場合に通知
         if (result.MayHaveIncompleteHistory)
@@ -1674,16 +1682,9 @@ public partial class MainViewModel : ViewModelBase
     /// 設定 <see cref="AppSettings.SkipCompanionCountInputOnReturn"/> が有効なら表示しない
     /// （その場合も履歴の行編集から後で入力できる）。
     /// </summary>
-    private async Task ShowCompanionCountInputIfNeededAsync(LendingResult result)
+    private async Task ShowCompanionCountInputIfNeededAsync(List<Ledger> targets, AppSettings settings)
     {
-        var targets = CompanionCountInputViewModel.SelectTargetLedgers(result.CreatedLedgers);
-        if (targets.Count == 0)
-        {
-            return;
-        }
-
-        var settings = await _settingsRepository.GetAppSettingsAsync();
-        if (settings.SkipCompanionCountInputOnReturn)
+        if (targets.Count == 0 || settings == null || settings.SkipCompanionCountInputOnReturn)
         {
             return;
         }
