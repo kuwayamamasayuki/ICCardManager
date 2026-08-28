@@ -442,6 +442,12 @@ namespace ICCardManager
 
             services.AddTransient<BusStopInputViewModel>();
             services.AddTransient<CompanionCountInputViewModel>();
+            services.AddTransient<SystemLendViewModel>();
+            // Issue #1909: カード管理画面が貸出記録作成ダイアログの ViewModel を自前で生成し、
+            // 作成結果の文言を受け取れるようにする（Microsoft.Extensions.DI は Func<T> を
+            // 自動では供給しないため明示的に登録する）
+            services.AddTransient<Func<SystemLendViewModel>>(
+                sp => () => sp.GetRequiredService<SystemLendViewModel>());
             services.AddTransient<PrintPreviewViewModel>();
             services.AddTransient<DataExportImportViewModel>();
             services.AddTransient<OperationLogSearchViewModel>();
@@ -469,6 +475,7 @@ namespace ICCardManager
 
             services.AddTransient<Views.Dialogs.BusStopInputDialog>();
             services.AddTransient<Views.Dialogs.CompanionCountInputDialog>();
+            services.AddTransient<Views.Dialogs.SystemLendDialog>();
             services.AddTransient<Views.Dialogs.PrintPreviewDialog>();
             services.AddTransient<Views.Dialogs.DataExportImportDialog>();
             services.AddTransient<Views.Dialogs.OperationLogDialog>();

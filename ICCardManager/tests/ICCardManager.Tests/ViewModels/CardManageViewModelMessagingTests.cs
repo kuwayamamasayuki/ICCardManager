@@ -1,3 +1,4 @@
+using System;
 using CommunityToolkit.Mvvm.Messaging;
 using FluentAssertions;
 using ICCardManager.Common.Messages;
@@ -72,7 +73,9 @@ public class CardManageViewModelMessagingTests
             _staffAuthServiceMock.Object,
             _lendingService,
             _messenger,
-            new ICCardManager.Tests.Infrastructure.Timing.RecordingDispatcherService());
+            new ICCardManager.Tests.Infrastructure.Timing.RecordingDispatcherService(),
+            Mock.Of<INavigationService>(),
+            () => throw new InvalidOperationException("このテストは貸出記録作成ダイアログを使用しません"));
     }
 
     /// <summary>

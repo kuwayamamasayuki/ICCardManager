@@ -66,6 +66,7 @@ public class ScreenTransitionDiagramConsistencyTests
     private static readonly string[] ExpectedStaffAuthOperations =
     {
         "交通系ICカードの削除",
+        "貸出記録の作成",
         "職員の削除",
         "履歴の分割",
         "履歴の追加",

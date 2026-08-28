@@ -1,4 +1,4 @@
-using CommunityToolkit.Mvvm.Messaging;
+﻿using CommunityToolkit.Mvvm.Messaging;
 using FluentAssertions;
 using ICCardManager.Data.Repositories;
 using ICCardManager.Dtos;
@@ -124,7 +124,9 @@ public class CardManageViewModelTests
             _staffAuthServiceMock.Object,
             _lendingService,
             messenger,
-            _dispatcher);
+            _dispatcher,
+            Mock.Of<INavigationService>(),
+            () => throw new InvalidOperationException("このテストは貸出記録作成ダイアログを使用しません"));
     }
 
     #region カード一覧読み込みテスト
