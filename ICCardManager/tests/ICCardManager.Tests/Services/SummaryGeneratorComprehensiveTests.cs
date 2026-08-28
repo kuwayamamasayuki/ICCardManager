@@ -2662,4 +2662,178 @@ public class SummaryGeneratorComprehensiveTests : IDisposable
     }
 
     #endregion
+
+    #region Issue #1916: 往復の往路が直前チェーンの乗継延長に消費される（#1902 の鏡像）
+
+    // #1902 は「往復の復路が次の移動へ統合される」形を後方参照ガードで塞いだ。
+    // #1916 はその鏡像 —「往復の往路が直前チェーンの延長に消費される」形。
+    // 局所的な先読みでは TC038（往路チェーンの統合が完成してから復路が畳まれる形）と
+    // 区別できないため、統合結果を 1 つに決め打たず候補を往復カバレッジで選び直す。
+
+    /// <summary>
+    /// Issue #1916 再現ケース: 往復の往路が直前の乗継統合に消費されないこと。
+    /// </summary>
+    /// <remarks>
+    /// バグ: 薬院→天神 と 天神→博多 が貪欲に統合されて「薬院～博多」になり、
+    /// 往路（天神→博多）が消費されるため 博多→天神 との往復が検出できなかった。
+    /// 「薬院～博多」は<b>通しでは乗っていない区間</b>であり、#1902 が排除した
+    /// 欠陥クラス（実際には乗っていない区間が 6 年保存の台帳へ入る）が残っていた。
+    /// </remarks>
+    [Fact]
+    public void Issue1916_鉄道_往復の往路が直前の乗継統合に消費されない()
+    {
+        // Arrange: 薬院→天神、天神→博多、博多→天神 の 3 経路（同日。入力は履歴の新しい順）
+        var details = new List<LedgerDetail>
+        {
+            CreateRailwayUsage(new DateTime(2024, 12, 9), "博多", "天神", 210, 4370),
+            CreateRailwayUsage(new DateTime(2024, 12, 9), "天神", "博多", 210, 4580),
+            CreateRailwayUsage(new DateTime(2024, 12, 9), "薬院", "天神", 210, 4790),
+        };
+
+        // Act
+        var results = _generator.GenerateByDate(details);
+
+        // Assert: 往復が検出され、ブロックは利用順（余りの 薬院～天神 が先）に並ぶ
+        results.Should().HaveCount(1);
+        results[0].Summary.Should().Be("鉄道（薬院～天神、天神～博多 往復）");
+        OutputInputAndResult(details, results);
+    }
+
+    /// <summary>
+    /// バス側でも同じ形が是正されること。
+    /// </summary>
+    [Fact]
+    public void Issue1916_バス_往復の往路が直前の乗継統合に消費されない()
+    {
+        // Arrange: 薬院→天神、天神→博多、博多→天神 の 3 経路（バス、同日）
+        var details = new List<LedgerDetail>
+        {
+            CreateBusUsage(new DateTime(2024, 12, 9), 200, 4400, busStops: "博多～天神"),
+            CreateBusUsage(new DateTime(2024, 12, 9), 200, 4600, busStops: "天神～博多"),
+            CreateBusUsage(new DateTime(2024, 12, 9), 200, 4800, busStops: "薬院～天神"),
+        };
+
+        // Act
+        var results = _generator.GenerateByDate(details);
+
+        // Assert
+        results.Should().HaveCount(1);
+        results[0].Summary.Should().Be("バス（薬院～天神、天神～博多 往復）");
+        OutputInputAndResult(details, results);
+    }
+
+    /// <summary>
+    /// 同一視グループ内の別名駅で折り返す場合も、往路が消費されないこと。
+    /// </summary>
+    /// <remarks>
+    /// #1916 の候補選択は乗継統合と往復検出の両方が同一視グループを通す前提に立つ。
+    /// 復路の降車地が往路の乗車地と別名（天神 / 西鉄福岡(天神)）でも往復として検出され、
+    /// 端点は「往路の名前（復路の名前）」で併記される（#1905）。
+    /// </remarks>
+    [Fact]
+    public void Issue1916_鉄道_同一視グループ経由でも往路が消費されない()
+    {
+        // Arrange: 薬院→天神、天神→博多、博多→西鉄福岡(天神)
+        var details = new List<LedgerDetail>
+        {
+            CreateRailwayUsage(new DateTime(2024, 12, 9), "博多", "西鉄福岡(天神)", 210, 4370),
+            CreateRailwayUsage(new DateTime(2024, 12, 9), "天神", "博多", 210, 4580),
+            CreateRailwayUsage(new DateTime(2024, 12, 9), "薬院", "天神", 210, 4790),
+        };
+
+        // Act
+        var results = _generator.GenerateByDate(details);
+
+        // Assert
+        results.Should().HaveCount(1);
+        results[0].Summary.Should().Be("鉄道（薬院～天神、天神（西鉄福岡(天神)）～博多 往復）");
+        OutputInputAndResult(details, results);
+    }
+
+    /// <summary>
+    /// 対の表明その 1: 往路チェーンの乗継統合が完成してから復路が畳まれる形
+    /// （TC038 と同型）は、従来どおり通しの往復として表示されること。
+    /// </summary>
+    /// <remarks>
+    /// 素朴な先読みガード「次の経路がその次と往復ペアを成すなら延長しない」は
+    /// この形を「博多～天神 往復、西鉄福岡(天神)～西鉄二日市 往復」へ分解してしまう。
+    /// 候補の比較を<b>統合後の本数ではなく元の区間数</b>で行うことで、
+    /// 4 区間ずつの同点となり、統合が進んでいる既定解が保たれる。
+    /// </remarks>
+    [Fact]
+    public void Issue1916_往路チェーンが完成してから畳まれる往復は通しのまま()
+    {
+        // Arrange: 博多→天神→西鉄福岡(天神)→西鉄二日市 と、その折り返し
+        var details = new List<LedgerDetail>
+        {
+            CreateRailwayUsage(new DateTime(2024, 12, 9), "天神", "博多", 210, 4410),
+            CreateRailwayUsage(new DateTime(2024, 12, 9), "西鉄二日市", "西鉄福岡(天神)", 380, 4620),
+            CreateRailwayUsage(new DateTime(2024, 12, 9), "西鉄福岡(天神)", "西鉄二日市", 380, 5000),
+            CreateRailwayUsage(new DateTime(2024, 12, 9), "博多", "天神", 210, 5380),
+        };
+
+        // Act
+        var results = _generator.GenerateByDate(details);
+
+        // Assert: 往復 2 組へ分解されない
+        results.Should().HaveCount(1);
+        results[0].Summary.Should().Be("鉄道（博多～西鉄二日市 往復）");
+        OutputInputAndResult(details, results);
+    }
+
+    /// <summary>
+    /// 対の表明その 2: 通し区間を作っていない既定解（奇数長の循環移動）は
+    /// 候補探索の対象にならず、#878 の個別表示のまま変わらないこと。
+    /// </summary>
+    /// <remarks>
+    /// 候補探索を無条件に回すと、この形が「天神～姪浜 往復」へ書き換わる
+    /// （実際に TC014 の 12/8 が退行した）。#1916 が消したい欠陥は
+    /// 「通しでは乗っていない区間が摘要に現れる」ことなので、
+    /// 既定解に束ねられた区間（LegCount ≥ 2）が余っているときだけ別解を探す。
+    /// </remarks>
+    [Fact]
+    public void Issue1916_通し区間を作らない循環移動は個別表示のまま()
+    {
+        // Arrange: 天神→姪浜→西新→天神 の 3 区間循環（同日）
+        var details = new List<LedgerDetail>
+        {
+            CreateRailwayUsage(new DateTime(2024, 12, 8), "西新", "天神", 260, 3050),
+            CreateRailwayUsage(new DateTime(2024, 12, 8), "姪浜", "西新", 210, 3310),
+            CreateRailwayUsage(new DateTime(2024, 12, 8), "天神", "姪浜", 260, 3520),
+        };
+
+        // Act
+        var results = _generator.GenerateByDate(details);
+
+        // Assert
+        results.Should().HaveCount(1);
+        results[0].Summary.Should().Be("鉄道（天神～姪浜、姪浜～西新、西新～天神）");
+        OutputInputAndResult(details, results);
+    }
+
+    /// <summary>
+    /// 対の表明その 3: 往復が時系列で先に来る形（#1902 の事例）では
+    /// 従来どおり往復ブロックが先頭に並ぶこと（並べ替えが常に往復を後ろへ送らない）。
+    /// </summary>
+    [Fact]
+    public void Issue1916_往復が時系列で先ならブロックも往復が先頭()
+    {
+        // Arrange: 天神→博多、博多→天神、天神→薬院
+        var details = new List<LedgerDetail>
+        {
+            CreateRailwayUsage(new DateTime(2024, 12, 9), "天神", "薬院", 210, 4370),
+            CreateRailwayUsage(new DateTime(2024, 12, 9), "博多", "天神", 210, 4580),
+            CreateRailwayUsage(new DateTime(2024, 12, 9), "天神", "博多", 210, 4790),
+        };
+
+        // Act
+        var results = _generator.GenerateByDate(details);
+
+        // Assert
+        results.Should().HaveCount(1);
+        results[0].Summary.Should().Be("鉄道（天神～博多 往復、天神～薬院）");
+        OutputInputAndResult(details, results);
+    }
+
+    #endregion
 }
