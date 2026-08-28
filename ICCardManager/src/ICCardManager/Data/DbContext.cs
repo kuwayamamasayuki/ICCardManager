@@ -287,19 +287,50 @@ namespace ICCardManager.Data
             _logger = logger;
             DatabasePath = databasePath ?? GetDefaultDatabasePath();
 
-            // SQLiteはバックスラッシュのUNCパス（\\server\share）を開けないため、
-            // フォワードスラッシュ（//server/share）に変換する
-            var effectivePath = IsUncPath(DatabasePath)
-                ? DatabasePath.Replace('\\', '/')
-                : DatabasePath;
-
-            // SQLiteConnectionStringBuilderでエスケープし、接続文字列インジェクションを防止
-            var builder = new SQLiteConnectionStringBuilder { DataSource = effectivePath };
-            _connectionString = builder.ToString();
+            _connectionString = BuildConnectionString(DatabasePath);
 
             // Issue #1559: UNCパス または マップドネットワークドライブ指定時のみ共有モード
             // （ローカルフルパス指定では共有モードにしない）。テスト時は forceSharedMode で上書き可能
             IsSharedMode = forceSharedMode ?? IsSharedModePath(databasePath);
+        }
+
+        /// <summary>
+        /// SQLite の接続文字列を組み立てる（Issue #1924 で本メソッドへ集約）
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// <b>SQLite はバックスラッシュの UNC パス（<c>\\server\share\x.db</c>）を開けない</b>。
+        /// <c>Data Source</c> にそのまま渡すと <c>SQLiteException: unable to open database file</c>
+        /// （SQLITE_CANTOPEN）になる。フォワードスラッシュ（<c>//server/share/x.db</c>）へ変換すると
+        /// 開くことができ、<c>SQLiteConnection.FileName</c> は元の UNC 形式に解決される。
+        /// この差は <c>SQLiteConnectionStringBuilder</c> を経由しても変わらない
+        /// （実機 <c>\\DESKTOP-4HFLR8J\tmp</c> で確認）。
+        /// </para>
+        /// <para>
+        /// Issue #1924: この変換は本クラスのコンストラクタにだけ存在し、
+        /// <c>BackupService.CopyDatabaseTo</c> がコピー先の接続を
+        /// <c>$"Data Source={destinationPath}"</c> で自前に組み立てていたため、
+        /// <b>共有フォルダーを指定するとバックアップだけが必ず失敗していた</b>
+        /// （DB 本体は本メソッド経由なので開ける）。接続文字列の組み立て手段を 2 つ持つと、
+        /// 片方だけが知識を持つ状態が生まれる
+        /// （<c>.claude/rules/development-conventions.md</c>「同じ論理的な処理に手段が 2 通りあるか」）。
+        /// 新たに SQLite 接続を開く箇所は必ず本メソッドを通すこと
+        /// （回帰は <c>SqliteConnectionStringConventionTests</c> が静的検査で固定する）。
+        /// </para>
+        /// <para>
+        /// <c>SQLiteConnectionStringBuilder</c> を通すのは接続文字列インジェクションの防止のため。
+        /// </para>
+        /// </remarks>
+        /// <param name="databasePath">データベースファイルのパス（UNC 可）</param>
+        /// <returns>SQLite の接続文字列</returns>
+        internal static string BuildConnectionString(string databasePath)
+        {
+            var effectivePath = IsUncPath(databasePath)
+                ? databasePath.Replace('\\', '/')
+                : databasePath;
+
+            var builder = new SQLiteConnectionStringBuilder { DataSource = effectivePath };
+            return builder.ToString();
         }
 
         /// <summary>

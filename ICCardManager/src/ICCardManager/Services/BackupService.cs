@@ -701,7 +701,14 @@ namespace ICCardManager.Services
 
             using var lease = _dbContext.LeaseConnection();
             var sourceConnection = lease.Connection;
-            using var destinationConnection = new SQLiteConnection($"Data Source={destinationPath}");
+
+            // Issue #1924: 接続文字列は必ず DbContext.BuildConnectionString を通す。
+            // SQLite はバックスラッシュの UNC パスを開けず、$"Data Source={destinationPath}" を
+            // 直接組み立てていたため、共有フォルダーを保存先にすると必ず
+            // SQLiteException: unable to open database file になっていた
+            //（DB 本体は DbContext 経由なので開けるため、バックアップだけが失敗していた）。
+            using var destinationConnection =
+                new SQLiteConnection(DbContext.BuildConnectionString(destinationPath));
             destinationConnection.Open();
             sourceConnection.BackupDatabase(destinationConnection, "main", "main", -1, null, 0);
         }
