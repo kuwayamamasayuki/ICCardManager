@@ -3650,6 +3650,28 @@ public class MainViewModelTests : IDisposable
     }
 
     [Fact]
+    public async Task CheckCardBalanceMismatchAsync_実残額の読み取り中はカード読み取りを抑制すること()
+    {
+        // Issue #1908 / #1807 / #1842: ReadBalanceAsync はハードウェア I/O で、その await 中に届いた
+        // 別のタッチは HandleCardReadAsync の入口ゲート（Processing でも抑制中でもない）を通過して並走する。
+        // 抑制しないと ①Error ハンドラの -= が no-op になり finally の += が 2 回走って二重購読になる、
+        // ②呼び出し元が #1842 の再判定を済ませた「後ろ」に待機窓ができ、職員証が認識された状態や
+        // ダイアログの背後で履歴が開く。
+        bool? suppressedDuringRead = null;
+        _cardReaderMock.Setup(r => r.ReadBalanceAsync(MismatchCardIdm))
+            .Callback(() => suppressedDuringRead = _viewModel.IsCardReadingSuppressed)
+            .ReturnsAsync(1250);
+        _ledgerRepositoryMock.Setup(r => r.GetLatestLedgerAsync(MismatchCardIdm))
+            .ReturnsAsync(new Ledger { CardIdm = MismatchCardIdm, Balance = 2500 });
+
+        await _viewModel.CheckCardBalanceMismatchAsync(MismatchTargetCard());
+
+        suppressedDuringRead.Should().BeTrue("実残額の読み取り中は別のタッチを処理しない");
+        // 対の表明: 判定が終われば抑制は解ける（解放が漏れると以後の全タッチが無言で無視される。#1725）
+        _viewModel.IsCardReadingSuppressed.Should().BeFalse();
+    }
+
+    [Fact]
     public async Task CheckCardBalanceMismatchAsync_別カードの食い違い警告は消さないこと()
     {
         // ReplaceWarnings の述語がカード単位であることの表明（種別だけで消すと他カードを巻き添えにする）
@@ -3740,11 +3762,35 @@ public class MainViewModelTests : IDisposable
         ExistingMismatchWarning();
 
         await _viewModel.HandleReturnSuccessAsync(
-            MismatchTargetCard(), new LendingResult { Success = true, Balance = 1250 });
+            MismatchTargetCard(),
+            new LendingResult { Success = true, Balance = 1250, BalanceReadFromCard = true });
 
         _viewModel.CardBalanceDashboard.Should().Contain(i => i.CardIdm == MismatchCardIdm,
             "対象カードが母集団に居ること（居ないと除去の理由が別になる）");
         _viewModel.WarningMessages.Should().NotContain(w => w.Type == WarningType.CardBalanceMismatch);
+    }
+
+    [Fact]
+    public async Task HandleReturnSuccessAsync_残額が台帳由来の返却では食い違い警告を残すこと()
+    {
+        // Issue #1908: 返却の残額解決はカスケード（カード直接読取値 > 作成 ledger 末尾 > DB 直近 ledger）で、
+        // 履歴の読み取りに成功しても使える履歴が 1 件も無ければ台帳の値へ落ちる。この経路は例外を伴わないため
+        // HasPostCommitFailure は偽のままで、それを除去条件にすると
+        // 「現物の残額を一度も確認していない返却」で未解決の食い違いが消える。
+        ArrangeReturnPostProcessing();
+        var existing = ExistingMismatchWarning();
+
+        await _viewModel.HandleReturnSuccessAsync(
+            MismatchTargetCard(),
+            new LendingResult
+            {
+                Success = true,
+                Balance = 2500,
+                HasPostCommitFailure = false,
+                BalanceReadFromCard = false
+            });
+
+        _viewModel.WarningMessages.Should().Contain(existing);
     }
 
     [Fact]

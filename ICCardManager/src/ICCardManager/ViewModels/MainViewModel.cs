@@ -1078,7 +1078,10 @@ public partial class MainViewModel : ViewModelBase
         // 最新のカード集合を知れるのはここ。
         //
         // Issue #1908: 残額の食い違い警告（CardBalanceMismatch）も生成元が単独タッチ時に限られ、
-        // カードを論理削除・払い戻しするとその経路自体が無くなるため、同じ手当てが要る。
+        // カードを論理削除するとその経路自体が無くなるため、同じ手当てが要る。
+        // 払い戻し済みカード（is_refunded = 1）は CardRepository.GetAllAsync（WHERE is_deleted = 0）が
+        // 返し続けるためダッシュボードに残り、ここでは掃除されない。払戻済カードは単独タッチでの
+        // 履歴表示（＝再判定）が可能なので、除去経路が失われるわけではない。
         var activeCardIdms = new HashSet<string>(CardBalanceDashboard.Select(i => i.CardIdm));
         ReplaceWarnings(w => (w.Type == WarningType.BalanceInconsistency
                               || w.Type == WarningType.CardBalanceMismatch)
@@ -1633,9 +1636,17 @@ public partial class MainViewModel : ViewModelBase
             // トースト通知を表示（表示位置は設定に従う、フォーカスを奪わない）
             _toastNotificationService.ShowReturnNotification(card.CardType, card.CardNumber, result.Balance, result.IsLowBalance, result.WarningBalance);
 
-            // Issue #1908: 返却が完了し残額も確定したので、食い違い警告は解消している。
-            // HasPostCommitFailure（残額を解決できなかった）の側では消さない。
-            ClearCardBalanceMismatchWarning(card.CardIdm);
+            // Issue #1908: 食い違いが解消したと言えるのは、返却が記録され、かつ台帳へ書いた残額が
+            // カードから読み取った実残額だったときだけ。返却の残額解決はカスケード
+            // （カード読取値 > 作成 ledger 末尾 > DB 直近 ledger）で、履歴の読み取りに成功しても
+            // 使える履歴が 1 件も無ければ台帳の値へ落ちる。HasPostCommitFailure は
+            // 「コミット後に例外が出た」ことしか表さないためこの区別が付かず、
+            // それで判定すると台帳由来の残額しか得ていない返却でも警告が消える
+            // （未解決の食い違いを「解消した」と表示することになる）。
+            if (result.BalanceReadFromCard)
+            {
+                ClearCardBalanceMismatchWarning(card.CardIdm);
+            }
         }
 
         // メイン画面は変更しない（Issue #186: 職員の操作を妨げない）
@@ -1849,6 +1860,15 @@ public partial class MainViewModel : ViewModelBase
     internal async Task CheckCardBalanceMismatchAsync(IcCard card)
     {
         if (card == null) return;
+
+        // Issue #1908: 実残額の読み取りはハードウェア I/O で、この await 中に届いた別のタッチは
+        // HandleCardReadAsync の入口ゲート（Processing でも抑制中でもない）を通過して並走する。
+        // 抑制しないと ①下の Error ハンドラの -= が no-op になり finally の += が 2 回走って
+        // 二重購読になる（Issue #1807 が未登録カード経路で塞いだのと同じ形）、②呼び出し元
+        // HandleCardInStaffWaitingStateAsync が Issue #1842 の再判定を済ませた「後ろ」に
+        // 新しい待機窓ができ、職員証が認識された状態やダイアログの背後で履歴が開く。
+        // 判定の全区間を抑制して両方を閉じる（解放は Dispose で保証する。Issue #1725）。
+        using var suppression = BeginCardReadingSuppression(CardReadingSource.BalanceMismatchCheck);
 
         int? actualBalance = null;
 

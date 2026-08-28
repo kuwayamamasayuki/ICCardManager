@@ -43,7 +43,21 @@ namespace ICCardManager.Common.Messages
         /// （残高・履歴の事前読み取り〜種別選択〜登録ダイアログ）を抑制するために使用する。
         /// メッセージ経由ではなく MainViewModel が自身の抑制ソース集合を直接操作する（発生源の識別子としてのみ用いる）。
         /// </remarks>
-        UnregisteredCardDialog
+        UnregisteredCardDialog,
+
+        /// <summary>
+        /// 残額の食い違い判定のためのカード読み取り（MainViewModel.CheckCardBalanceMismatchAsync）
+        /// </summary>
+        /// <remarks>
+        /// Issue #1908: 実残額の読み取り（<c>ReadBalanceAsync</c>）はハードウェア I/O で数百 ms かかる。
+        /// この await 中に届いた別のタッチは <c>HandleCardReadAsync</c> の入口ゲート
+        /// （Processing でも抑制中でもない）を通過して並走するため、抑制しないと
+        /// Issue #1807 と同じ二重購読（<c>Error -=</c> が no-op になり <c>finally</c> の
+        /// <c>+=</c> が 2 回走る）と、Issue #1842 が塞いだ「再判定より後ろで前提が変わる窓」が
+        /// そのまま再現する。判定の全区間を抑制して両方を閉じる。
+        /// メッセージ経由ではなく MainViewModel が自身の抑制ソース集合を直接操作する。
+        /// </remarks>
+        BalanceMismatchCheck
     }
 
     /// <summary>

@@ -55,10 +55,13 @@ public class WarningServiceCardBalanceMismatchTests
     }
 
     [Theory]
-    [InlineData(1250, 2500)]
-    [InlineData(2500, 1250)]
+    [InlineData(1200, 2500)]
+    [InlineData(2500, 1200)]
     public void 文言に実残額と記録と差額が含まれること(int actualBalance, int recordedBalance)
     {
+        // 差額（1,300円）がどちらの残額とも一致しない値を選ぶ。1250/2500 のように
+        // 差額が残額の一方と同じ値になる組では、差額を一切載せない実装でも
+        // Contain が残額側に当たって緑になる（表明が自己充足する）。
         var warning = Check(actualBalance, recordedBalance);
 
         // 「何が」— カードの特定と、判断に必要な 3 つの金額
@@ -66,7 +69,7 @@ public class WarningServiceCardBalanceMismatchTests
         warning.DisplayText.Should().Contain("No.3");
         warning.DisplayText.Should().Contain($"{actualBalance:N0}円");
         warning.DisplayText.Should().Contain($"{recordedBalance:N0}円");
-        warning.DisplayText.Should().Contain("1,250円", "差額（絶対値）も示す");
+        warning.DisplayText.Should().Contain("1,300円", "差額（絶対値）も示す");
     }
 
     [Fact]

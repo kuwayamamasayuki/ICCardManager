@@ -88,6 +88,25 @@ namespace ICCardManager.Services
         /// </para>
         /// </remarks>
         public bool HasPostCommitFailure { get; set; }
+
+        /// <summary>
+        /// <see cref="Balance"/> が<b>カードから読み取った実残額</b>であるかどうか（Issue #1908。返却時のみ）
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// <c>ResolveReturnBalanceAsync</c> の残額解決は「(1)カード直接読取値 &gt; (2)作成 ledger 末尾 &gt;
+        /// (3)DB 直近 ledger」のカスケードであり、(2)(3) は<b>台帳の値</b>である。履歴の読み取りに成功しても
+        /// 使える履歴が 1 件も無ければ (3) へ落ちるため、<see cref="Success"/> が true で
+        /// <see cref="HasPostCommitFailure"/> が false でも「現物の残額を確認できた」ことにはならない。
+        /// </para>
+        /// <para>
+        /// 残額の食い違い警告（<c>WarningType.CardBalanceMismatch</c>）の除去はこのフラグで判定する。
+        /// <see cref="HasPostCommitFailure"/> は「コミット後に<b>例外</b>が出た」ことしか表さないため、
+        /// これで代用すると台帳由来の残額しか得ていない返却でも警告が消え、
+        /// 未解決の食い違いが「解消した」と表示される。
+        /// </para>
+        /// </remarks>
+        public bool BalanceReadFromCard { get; set; }
     }
 
     /// <summary>
@@ -595,14 +614,35 @@ namespace ICCardManager.Services
         }
 
         /// <summary>
+        /// 読み取った履歴から「カードの実残額として使える値」を取り出す（Issue #1908）。
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// 返却時の残高解決カスケードの (1) 段そのもの。<c>ResolveReturnBalanceAsync</c> と
+        /// <see cref="LendingResult.BalanceReadFromCard"/> の両方がこの判定を必要とするため、
+        /// 条件を 2 か所に書かず 1 つの定義へ寄せる
+        /// （<c>.claude/rules/development-conventions.md</c>「同じ論理的な処理に手段が 2 通りあるか」）。
+        /// </para>
+        /// <para>
+        /// 0 円を除くのは従来どおり。履歴が読めなかった場合の既定値 0 と、
+        /// 実際に使い切った 0 円とを履歴側だけでは区別できないため、安全側（台帳へ落とす）に倒す。
+        /// </para>
+        /// </remarks>
+        internal static int? GetCardReadBalance(List<LedgerDetail> detailList)
+        {
+            var cardBalance = detailList?.FirstOrDefault()?.Balance;
+            return cardBalance.HasValue && cardBalance.Value > 0 ? cardBalance : null;
+        }
+
+        /// <summary>
         /// 返却時の残高解決カスケード。
         /// 優先順位: (1)カード直接読取値 > (2)作成ledger末尾 > (3)DB 直近 ledger(Issue #1139)。
         /// </summary>
         internal async Task<int> ResolveReturnBalanceAsync(
             List<LedgerDetail> detailList, List<Ledger> createdLedgers, string cardIdm)
         {
-            var cardBalance = detailList.FirstOrDefault()?.Balance;
-            if (cardBalance.HasValue && cardBalance.Value > 0)
+            var cardBalance = GetCardReadBalance(detailList);
+            if (cardBalance.HasValue)
             {
                 _logger.LogDebug("LendingService: カードから直接読み取った残高を使用: {Balance}円", cardBalance.Value);
                 return cardBalance.Value;
@@ -805,6 +845,10 @@ namespace ICCardManager.Services
                 // 残額チェック（トランザクション外）
                 // カードから直接読み取った残高を優先（履歴の先頭が最新）
                 // FelicaCardReaderで読み取った場合、各LedgerDetail.Balanceには実際の残高が設定されている
+                // Issue #1908: 残額が「現物から読めた値」か「台帳由来の値」かを呼び出し元へ伝える。
+                // 履歴の読み取りに成功しても使える履歴が 1 件も無ければ台帳へ落ちるため、
+                // HasPostCommitFailure（＝コミット後の例外の有無）ではこの区別が付かない。
+                result.BalanceReadFromCard = GetCardReadBalance(detailList).HasValue;
                 result.Balance = await ResolveReturnBalanceAsync(detailList, result.CreatedLedgers, cardIdm).ConfigureAwait(false);
 
                 await ApplyBalanceWarningAsync(result).ConfigureAwait(false);
