@@ -648,6 +648,54 @@ public class AdminDashboardViewModelTests
     }
 
     [Fact]
+    public async Task SelectionWithGaps_ListsEveryCheckedCardInTheTable()
+    {
+        // Issue #1922 の故障シナリオ: 7 枚中 6 枚にチェックを付けたのに、代替一覧には
+        // 5 枚分しか並ばず、最後にチェックしたカードだけがどの月にも現れなかった。
+        //
+        // 選択を「先頭から連続」にすると、選択の並びと系列の並びの添字が一致してしまい、
+        // 上限で切る実装でも「切られた 1 枚がたまたま末尾」以外の欠陥を見逃す。
+        // 途中のカードを外して隙間を作り、母集団の添字と選択の添字をずらす（Issue #1857）。
+        const int monthCount = 3;
+        var cardCount = AppConstants.AdminDashboardMaxSeries + 2;
+        SetupAnalytics(CreateAnalytics(cardCount: cardCount, monthCount: monthCount));
+        var vm = CreateViewModel();
+        await vm.LoadAnalyticsAsync();
+
+        const int unselectedIndex = 2;
+        for (var i = 0; i < vm.BalanceSeriesOptions.Count; i++)
+        {
+            vm.BalanceSeriesOptions[i].IsSelected = i != unselectedIndex;
+        }
+
+        var checkedNames = vm.BalanceSeriesOptions
+            .Where(o => o.IsSelected)
+            .Select(o => o.DisplayName)
+            .ToList();
+        checkedNames.Should().HaveCount(cardCount - 1);
+
+        // 「1 行でも現れる」ではなく「どの月にも現れる」を表明する。
+        // 一覧は月ごとに全系列を並べるため、月単位で欠けても総数だけでは気付けない
+        var byMonth = vm.BalanceTableRows.GroupBy(r => r.MonthLabel).ToList();
+        byMonth.Should().HaveCount(monthCount);
+        foreach (var month in byMonth)
+        {
+            month.Select(r => r.SeriesName).Should().BeEquivalentTo(checkedNames,
+                "チェックを付けたカードはすべて一覧に並ぶこと（Issue #1922）");
+        }
+
+        // 対の表明: チェックを外したカードは一覧にも折れ線にも現れない
+        // （これを欠くと「常に全カードを並べる」実装でも緑になる）
+        var unselectedName = vm.BalanceSeriesOptions[unselectedIndex].DisplayName;
+        vm.BalanceTableRows.Should().NotContain(r => r.SeriesName == unselectedName);
+        vm.BalanceLines.Should().NotContain(l => l.DisplayName == unselectedName);
+
+        // 一覧と折れ線の母集団が一致すること（Issue #1856）
+        vm.BalanceTableRows.Select(r => r.SeriesName).Distinct()
+            .Should().BeEquivalentTo(vm.BalanceLines.Select(l => l.DisplayName).Distinct());
+    }
+
+    [Fact]
     public async Task TogglingBalanceSeriesOption_RedrawsTheChart()
     {
         SetupAnalytics(CreateAnalytics(cardCount: 2));
