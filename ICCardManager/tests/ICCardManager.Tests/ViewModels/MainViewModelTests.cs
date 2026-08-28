@@ -3389,6 +3389,81 @@ public class MainViewModelTests : IDisposable
                 "定期リフレッシュは利用者の選択操作を消さないこと");
     }
 
+    /// <summary>
+    /// 一覧を作り直したら「統合」ボタンの可否を必ず再評価すること。
+    /// AsyncRelayCommand は CommandManager の再問い合わせに乗らないため、
+    /// NotifyCanExecuteChanged を呼ばないと「2 行チェック済み」で有効になったボタンが
+    /// 選択の消えた後も押せるまま残り、押しても無言で何も起きない。
+    /// 引き継がない再読込（既定）では PropertyChanged 自体が起きないため、
+    /// 引き継いだ件数で通知を条件付けると、まさにこの経路が漏れる。
+    /// </summary>
+    [Fact]
+    public async Task LoadHistoryLedgersAsync_チェックが引き継がれない再読込でも統合ボタンの可否を再評価すること()
+    {
+        // Arrange: 隣接 2 行にチェックを入れて「統合」を有効にする
+        ArrangeHistoryPaging(_ => 3, pageSize: 30);
+        _viewModel.HistoryCurrentPage = 1;
+        await _viewModel.LoadHistoryLedgersAsync();
+        _viewModel.HistoryLedgers[0].IsChecked = true;
+        _viewModel.HistoryLedgers[1].IsChecked = true;
+        _viewModel.MergeHistoryLedgersCommand.CanExecute(null).Should().BeTrue(
+            "故障の起点（ボタンが有効な状態）を作れていること");
+
+        var canExecuteChangedCount = 0;
+        _viewModel.MergeHistoryLedgersCommand.CanExecuteChanged += (s, e) => canExecuteChangedCount++;
+
+        // Act: 利用者の操作を契機とする再読込（期間変更・ページ送り相当）でチェックが消える
+        await _viewModel.LoadHistoryLedgersAsync();
+
+        // Assert
+        canExecuteChangedCount.Should().BeGreaterThan(0,
+            "一覧を作り直したら CanExecute の再評価を通知すること");
+        _viewModel.MergeHistoryLedgersCommand.CanExecute(null).Should().BeFalse(
+            "チェックが消えた後の「統合」ボタンは押せないこと");
+    }
+
+    /// <summary>
+    /// 本システムは 1 台のカードリーダーを複数職員で共有するため、履歴画面で行を選んでいる
+    /// 最中に別の職員がカードをタッチし得る。貸出・返却に伴う履歴の再読込（Issue #526 / #889）も
+    /// 履歴画面の利用者の操作ではないため、チェックを引き継ぐこと。
+    /// </summary>
+    [Fact]
+    public async Task HandleReturnSuccessAsync_履歴のチェックを維持すること()
+    {
+        // Arrange: 返却フローの後処理（ダッシュボード更新・設定読み取り）が通るようにする。
+        // バス停名・同行者数の入力ダイアログは本テストの対象外なので抑制する。
+        SetupForReturnSuccess(skipBusStopInputOnReturn: true, skipCompanionCountInputOnReturn: true);
+
+        var requestedPages = ArrangeHistoryPaging(_ => 3, pageSize: 30);
+        _viewModel.HistoryCurrentPage = 1;
+        await _viewModel.LoadHistoryLedgersAsync();
+        _viewModel.HistoryLedgers[0].IsChecked = true;
+        _viewModel.HistoryLedgers[1].IsChecked = true;
+        _viewModel.IsHistoryVisible = true;
+
+        var result = new LendingResult
+        {
+            Success = true,
+            Balance = 1000,
+            HasBusUsage = false,
+            CreatedLedgers = new List<Ledger>
+            {
+                new Ledger { Summary = "鉄道（A駅～B駅）", IsLentRecord = false },
+            },
+        };
+
+        // Act: 別の職員がカードをタッチして返却した
+        await _viewModel.HandleReturnSuccessAsync(CreateTestCard(), result);
+
+        // Assert: 故障の起点（履歴一覧の作り直し）が実際に起きていること
+        requestedPages.Should().HaveCount(2,
+            "返却後に履歴一覧を再取得していること");
+
+        _viewModel.HistoryLedgers.Where(d => d.IsChecked).Select(d => d.Id)
+            .Should().Equal(new[] { 1, 2 },
+                "他の職員のカードタッチで、履歴画面の選択操作を消さないこと");
+    }
+
     #endregion
 
     #region Issue #1837: 履歴削除の確認ダイアログ（MessageBox 直呼びから IDialogService へ移行）

@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Linq;
@@ -1404,7 +1404,10 @@ public partial class MainViewModel : ViewModelBase
                 // 履歴が開いていれば再読み込み（Issue #526）
                 if (IsHistoryVisible)
                 {
-                    await LoadHistoryLedgersAsync();
+                    // Issue #1923: 貸出は「カードをタッチした職員」の操作であり、履歴画面で行を選んでいる職員の操作ではない。
+                    // 本システムは 1 台のカードリーダーを複数職員で共有するため、
+                    // 定期リフレッシュ（RefreshSharedDataAsync）と同じ理由で統合対象のチェックを引き継ぐ。
+                    await LoadHistoryLedgersAsync(preserveCheckedRows: true);
                 }
             }
             else
@@ -1624,7 +1627,10 @@ public partial class MainViewModel : ViewModelBase
         // 履歴が開いていれば再読み込み（Issue #889）
         if (IsHistoryVisible)
         {
-            await LoadHistoryLedgersAsync();
+            // Issue #1923: 返却は「カードをタッチした職員」の操作であり、履歴画面で行を選んでいる職員の操作ではない。
+            // 本システムは 1 台のカードリーダーを複数職員で共有するため、
+            // 定期リフレッシュ（RefreshSharedDataAsync）と同じ理由で統合対象のチェックを引き継ぐ。
+            await LoadHistoryLedgersAsync(preserveCheckedRows: true);
         }
 
         await CheckWarningsAsync();
@@ -1661,7 +1667,10 @@ public partial class MainViewModel : ViewModelBase
                 // バス停名入力後に履歴が開いていれば再読み込み
                 if (busLedgers.Count > 0 && IsHistoryVisible)
                 {
-                    await LoadHistoryLedgersAsync();
+                    // Issue #1923: バス停名の入力は返却フローの一部（カードをタッチした職員の操作）。
+                    // 本システムは 1 台のカードリーダーを複数職員で共有するため、
+                    // 定期リフレッシュ（RefreshSharedDataAsync）と同じ理由で統合対象のチェックを引き継ぐ。
+                    await LoadHistoryLedgersAsync(preserveCheckedRows: true);
                 }
 
                 // Issue #660: バス停名入力後に警告メッセージを再チェック
@@ -1703,7 +1712,10 @@ public partial class MainViewModel : ViewModelBase
         // 同行者数の入力後に履歴が開いていれば再読み込み（氏名欄の「外N名」を反映）
         if (IsHistoryVisible)
         {
-            await LoadHistoryLedgersAsync();
+            // Issue #1923: 同行者数の入力は返却フローの一部（カードをタッチした職員の操作）。
+            // 本システムは 1 台のカードリーダーを複数職員で共有するため、
+            // 定期リフレッシュ（RefreshSharedDataAsync）と同じ理由で統合対象のチェックを引き継ぐ。
+            await LoadHistoryLedgersAsync(preserveCheckedRows: true);
         }
     }
 
@@ -1951,7 +1963,6 @@ public partial class MainViewModel : ViewModelBase
                 }
             }
 
-            var restoredCheckedCount = 0;
             foreach (var ledger in ledgers)
             {
                 var dto = ledger.ToDto();
@@ -1962,19 +1973,22 @@ public partial class MainViewModel : ViewModelBase
                 if (checkedLedgerIds.Contains(dto.Id))
                 {
                     dto.IsChecked = true;
-                    restoredCheckedCount++;
                 }
 
                 SubscribeLedgerCheckedChanged(dto);
                 HistoryLedgers.Add(dto);
             }
 
-            // Issue #1923: 引き継ぎは SubscribeLedgerCheckedChanged より前に行うため
-            // 個々の代入では CanExecute が更新されない。まとめて 1 回通知する。
-            if (restoredCheckedCount > 0)
-            {
-                MergeHistoryLedgersCommand.NotifyCanExecuteChanged();
-            }
+            // Issue #1923: 一覧を作り直すと選択の集合が変わり得る（引き継いだ／引き継がなかった／
+            // 引き継ぐ対象の行が他 PC の削除・統合で消えた）。にもかかわらず、
+            // 　・引き継ぎは SubscribeLedgerCheckedChanged より前に行うため個々の代入では通知されない
+            // 　・引き継がない再読込では、古い DTO ごと捨てるので PropertyChanged 自体が起きない
+            // ため、ここで通知しないと CanExecute が再評価されない（AsyncRelayCommand は
+            // CommandManager の再問い合わせに乗らず、CanExecuteChanged だけがボタンを更新する）。
+            // 結果、2 行チェック済みの時点で有効になった「統合」ボタンが、選択が消えた後も
+            // 押せるまま残り、押しても MergeHistoryLedgers 冒頭の `checkedDtos.Count < 2` で
+            // 無言のまま戻る（何も起きないボタン）。作り直しのたびに 1 回通知する。
+            MergeHistoryLedgersCommand.NotifyCanExecuteChanged();
 
             // 最新の残高を取得
             var latestLedger = await _ledgerRepository.GetLatestBeforeDateAsync(
