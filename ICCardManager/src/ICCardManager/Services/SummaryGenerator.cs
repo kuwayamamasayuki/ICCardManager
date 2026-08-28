@@ -792,7 +792,7 @@ namespace ICCardManager.Services
                 }
             }
 
-            return string.Join("、", summaryParts);
+            return string.Join(RouteSeparator, summaryParts);
         }
 
         /// <summary>
@@ -1025,11 +1025,48 @@ namespace ICCardManager.Services
         /// 統合を止めてはならないためである。局所的な形では優先順位を決められない。
         /// </para>
         /// <para>
-        /// そこで統合結果を 1 つに決め打たず、「延長を 1 箇所だけ抑止した候補」を並べて
-        /// 往復検出まで通し、<b>往復として説明できた元区間（明細）の件数</b>で選ぶ。
-        /// #1916 の事例では抑止した候補だけが往復を検出でき（2 区間）、
-        /// TC038 では両候補とも 4 区間で並ぶため、同点時は統合が進んでいる側
-        /// （ブロック数が少ない側＝貪欲な既定解）が選ばれて従来どおりになる。
+        /// そこで統合結果を 1 つに決め打たず、「延長を抑止した候補」を並べて往復検出まで通し、
+        /// <b>往復として説明できた元区間（明細）の件数</b>で選ぶ。
+        /// #1916 の事例では抑止した候補だけが往復を検出でき（2 区間）、既定解を上書きする。
+        /// 同点時はブロック数が少ない側を採るが、<b>「ブロック数が少ない側＝貪欲な既定解」ではない</b>
+        /// — 抑止した候補が既定解よりブロック数を減らすこともある。同点はあくまで
+        /// 「同じ回で見つかった候補どうしの優劣付け」にのみ使い、既定解を置き換える条件は
+        /// <b>カバレッジの厳密な増加</b>である（下記）。
+        /// なお TC038 型（往路チェーンの統合が完成してから復路が畳まれる形）は
+        /// <see cref="HasUnexplainedThroughRoute"/> が false になるため候補探索へ入らず、
+        /// 比較そのものに到達しない（TC038 を守っているのはゲートであって選択指標ではない）。
+        /// </para>
+        /// <para>
+        /// <b>抑止点は 1 つに限らない（コードレビューで検出）。</b> 同じ形が 1 日に 2 回起きると
+        /// （薬院→天神／天神→博多／博多→天神／天神→大橋／大橋→西鉄二日市／西鉄二日市→大橋）、
+        /// 1 箇所の抑止では片方しか救えず、ブロック数の同点処理がもう片方を切り捨てて
+        /// <b>本 Issue が消そうとしている「薬院～博多」がそのまま残っていた</b>。
+        /// 抑止点を 1 つずつ増やし、<b>カバレッジが厳密に増える間だけ</b>採用する
+        /// （増えなくなったら打ち切る）。これで既定解を置き換える条件が
+        /// 「往復としてより多く説明できた」ことだけになり、同点処理は判断の主役から外れる。
+        /// </para>
+        /// <para>
+        /// <b>4 つの判断点（カバレッジ指標・同点処理・往復のバランス判定・抑止点の累積）は、
+        /// いずれも「経路が連結していない日」でだけ結果を変える。</b>
+        /// 4 駅・3〜5 区間の全 271,296 通りを総当たりで比較した実測で、
+        /// 降車地と次の乗車地が一致する（連結する）列では 1 通りも差が出ない。
+        /// 実データでは鉄道区間の間に徒歩やバスが挟まるためこの形は現実に起こるが、
+        /// 個別の判断点を単体テストで固定するには合成的な入力が要る
+        /// （<c>Issue1916_*</c> の後半 3 件がこれにあたる）。
+        /// なお「生の経路に逆方向のペアが無ければ探索は空振りする」という足切りは
+        /// <b>不健全なので置かない</b> — 乗継統合は元の経路に無い区間（A→B→C から A～C）を
+        /// 作るため、統合後に初めて逆方向のペアが成立する日がある（実測で 72 通り）。
+        /// </para>
+        /// <para>
+        /// <b>候補が往復を捏造していないことを確かめる（コードレビューで検出）。</b>
+        /// 薬院→天神／天神→博多／博多→薬院／薬院→大橋（一方通行のループ＋後続区間）では、
+        /// 1 区間の往路（薬院→天神）と<b>2 区間へ統合された復路</b>（天神→博多→薬院）が
+        /// ペアになり「薬院～天神 往復」という<b>起きていない往復</b>が作られて、
+        /// 実際に用務のあった博多が 6 年保存の台帳から消えていた。本物の往復は行きと帰りで
+        /// 同じ場所を通るため<b>両側の区間数が一致する</b>。区間数の非対称は
+        /// 「統合が隠した場所を往復と言い張っている」合図なので、
+        /// <see cref="HasOnlyBalancedRoundTrips"/> を満たす候補だけを採用対象にする
+        /// （満たさなければ既定解のまま＝従来挙動）。
         /// </para>
         /// </remarks>
         private string BuildRouteSummary(List<(string Entry, string Exit)> routes)
@@ -1049,25 +1086,85 @@ namespace ICCardManager.Services
                 return FormatRouteBlocks(EvaluateCandidate(withoutConsolidation));
             }
 
-            var best = EvaluateCandidate(ConsolidateRoutes(routes));
+            var suppressedIndices = new HashSet<int>();
+            var best = EvaluateCandidate(ConsolidateRoutes(routes, suppressedIndices));
 
-            // Issue #1916: 延長を 1 箇所だけ抑止した候補を試し、往復カバレッジで選び直す。
+            // Issue #1916: 延長を抑止した候補を試し、往復カバレッジで選び直す。
             // 往復検出が無効なら候補を比べる意味がない（すべてカバレッジ 0 になる）。
             if (_options.SummaryRules.EnableRoundTripDetection
                 && HasUnexplainedThroughRoute(best))
             {
-                for (int suppressAt = 1; suppressAt < routes.Count; suppressAt++)
+                // 抑止点を 1 つずつ増やす。1 周で何も改善しなければ打ち切るため、
+                // 反復回数は経路数を超えない。
+                for (int round = 1; round < routes.Count; round++)
                 {
-                    var candidate = EvaluateCandidate(ConsolidateRoutes(routes, suppressAt));
-                    if (IsBetterCandidate(candidate, best))
+                    var bestIndex = -1;
+                    RouteCandidate bestCandidate = default;
+
+                    for (int suppressAt = 1; suppressAt < routes.Count; suppressAt++)
                     {
-                        best = candidate;
+                        if (suppressedIndices.Contains(suppressAt))
+                        {
+                            continue;
+                        }
+
+                        suppressedIndices.Add(suppressAt);
+                        var candidate = EvaluateCandidate(
+                            ConsolidateRoutes(routes, suppressedIndices));
+                        suppressedIndices.Remove(suppressAt);
+
+                        // 採用の条件はカバレッジの厳密な増加。同点は「同じ回で見つかった
+                        // 候補どうし」の優劣付けにのみ使う（IsBetterCandidate）。
+                        if (candidate.RoundTripLegCoverage <= best.RoundTripLegCoverage
+                            || !HasOnlyBalancedRoundTrips(candidate))
+                        {
+                            continue;
+                        }
+
+                        if (bestIndex < 0 || IsBetterCandidate(candidate, bestCandidate))
+                        {
+                            bestIndex = suppressAt;
+                            bestCandidate = candidate;
+                        }
                     }
+
+                    if (bestIndex < 0)
+                    {
+                        break;
+                    }
+
+                    suppressedIndices.Add(bestIndex);
+                    best = bestCandidate;
                 }
             }
 
             return FormatRouteBlocks(best);
         }
+
+        /// <summary>
+        /// 候補が検出した往復がすべて「行きと帰りで区間数が一致する」か（Issue #1916）
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// 本物の往復は行きと帰りで同じ場所を通るため、統合後の両側が束ねている
+        /// 元区間の件数（<see cref="ConsolidatedRoute.LegCount"/>）は一致する。
+        /// 区間数が非対称な「往復」は、片側の統合が隠した場所をもう片側が通っていないことを意味し、
+        /// <b>起きていない往復を主張しつつ実際に用務のあった場所を台帳から消す</b>。
+        /// </para>
+        /// <para>
+        /// 実例（コードレビューで検出）: 薬院→天神／天神→博多／博多→薬院／薬院→大橋 では、
+        /// 1 区間の往路（薬院→天神）と 2 区間へ統合された復路（天神→博多→薬院）がペアになり
+        /// 「鉄道（薬院～天神 往復、薬院～大橋）」となって博多が消えていた。
+        /// </para>
+        /// <para>
+        /// 判定は<b>候補の採用可否にだけ</b>使う。既定解（貪欲統合）の往復は従来どおり扱う
+        /// — ここで既定解まで弾くと、本 Issue と無関係な既存の摘要が変わってしまう。
+        /// </para>
+        /// </remarks>
+        private static bool HasOnlyBalancedRoundTrips(RouteCandidate candidate)
+            => candidate.RoundTrips.All(rt =>
+                candidate.ConsolidatedRoutes[rt.ForwardIndex].LegCount
+                    == candidate.ConsolidatedRoutes[rt.ReverseIndex].LegCount);
 
         /// <summary>
         /// 統合候補 1 つに往復検出を通した結果（Issue #1916）
@@ -1119,9 +1216,12 @@ namespace ICCardManager.Services
                     var remaining = GetRemainingRoutes(asPairs, roundTrips);
 
                     // カバレッジは統合後の本数ではなく元の区間数で数える。
-                    // 統合後の本数で数えると TC038（往路 2 区間＋復路 2 区間が
-                    // 「博多～西鉄二日市 往復」に畳まれる形）で、往復 2 組へ分解した
-                    // 候補（4 本）が正解（2 本）を上回ってしまう。
+                    // 本数で数えると「往路 2 区間＋復路 2 区間が 1 往復に畳まれた解」より
+                    // 「往復 2 組へ分解した解」のほうが高く出てしまうため。
+                    // 注意: この数え方は TC038 が守っているわけではない。TC038 は
+                    // HasUnexplainedThroughRoute が false で候補探索へ入らないため、
+                    // 本式を roundTrips.Count * 2 へ変えても既存テストは全件緑になる
+                    // （＝この指標を固定する回帰テストはまだ無い）。
                     var coverage = roundTrips.Sum(rt =>
                         consolidatedRoutes[rt.ForwardIndex].LegCount
                         + consolidatedRoutes[rt.ReverseIndex].LegCount);
@@ -1163,8 +1263,9 @@ namespace ICCardManager.Services
         /// </summary>
         /// <remarks>
         /// 第 1 指標は「往復として説明できた元区間の件数」。実際の移動をより多く
-        /// 往復として言い当てられる解を選ぶ。同点なら統合が進んでいる（ブロック数が少ない）側を採り、
-        /// それも同点なら先に評価した側＝貪欲な既定解を維持する（従来挙動の保存）。
+        /// 往復として言い当てられる解を選ぶ。同点なら統合が進んでいる（ブロック数が少ない）側を採る。
+        /// それも同点なら先に評価した側を維持する — 最初の比較では既定解が残るが、
+        /// 2 回目以降は候補どうしの比較になるため「先に評価した側＝既定解」とは限らない。
         /// </remarks>
         private static bool IsBetterCandidate(RouteCandidate candidate, RouteCandidate current)
         {
@@ -1363,7 +1464,7 @@ namespace ICCardManager.Services
                 }
             }
 
-            return string.Join("、", result);
+            return string.Join(RouteSeparator, result);
         }
 
         /// <summary>
@@ -1675,15 +1776,22 @@ namespace ICCardManager.Services
         /// 現在は往復ペア照合も同一視を考慮するため、この非対称は解消されている。
         /// </remarks>
         /// <param name="routes">経路の(Entry, Exit)タプルリスト（時系列順）</param>
-        /// <param name="suppressExtensionAt">
-        /// Issue #1916: この添字の経路では乗継延長を行わずチェーンを閉じる（-1 で抑止なし）。
-        /// <see cref="BuildRouteSummary"/> が「延長を 1 箇所だけ抑止した候補」を作るために使う。
-        /// 再帰呼び出し（循環チェーンの分割）へは引き継がない — 添字が部分リストのものになり
-        /// 意味が変わるため。候補生成は最上位の呼び出しに限る。
+        /// <param name="suppressedIndices">
+        /// Issue #1916: これらの添字の経路では乗継延長を行わずチェーンを閉じる（null で抑止なし）。
+        /// <see cref="BuildRouteSummary"/> が「延長を抑止した候補」を作るために使う。
+        /// 添字は<b>最上位の経路リスト</b>のもので、再帰呼び出し（循環チェーンの分割）へは
+        /// <paramref name="indexOffset"/> を通じて引き継がれる — 引き継がないと、抑止点が
+        /// 分割された半分の内側に落ちたときその半分が抑止点で再統合され、
+        /// 「抑止した候補」が既定解と同一物になって探索したつもりの候補が消える。
+        /// </param>
+        /// <param name="indexOffset">
+        /// Issue #1916: <paramref name="routes"/> の先頭が最上位リストの何番目かを表す。
+        /// 再帰呼び出しで抑止点の添字を対応付けるために使う。
         /// </param>
         private List<ConsolidatedRoute> ConsolidateRoutes(
             List<(string Entry, string Exit)> routes,
-            int suppressExtensionAt = -1)
+            ISet<int> suppressedIndices = null,
+            int indexOffset = 0)
         {
             if (routes.Count == 0)
             {
@@ -1715,8 +1823,9 @@ namespace ICCardManager.Services
                     && AreTransferStations(currentStart, previousChainEnd)
                     && AreTransferStations(currentEnd, previousChainStart);
 
-                // Issue #1916: 候補生成のためにこの位置だけ延長を抑止する
-                var isSuppressed = i == suppressExtensionAt;
+                // Issue #1916: 候補生成のためにこの位置の延長を抑止する
+                var isSuppressed = suppressedIndices != null
+                    && suppressedIndices.Contains(indexOffset + i);
 
                 if (isTransfer && !isReturnLegOfPreviousChain && !isSuppressed
                     && (!nextExitVisited || isClosingCircular))
@@ -1729,7 +1838,9 @@ namespace ICCardManager.Services
                 }
                 else
                 {
-                    AddConsolidatedChain(result, routes, chainStartIndex, i - 1, currentStart, currentEnd);
+                    AddConsolidatedChain(
+                        result, routes, chainStartIndex, i - 1, currentStart, currentEnd,
+                        suppressedIndices, indexOffset);
 
                     // 逆走判定は「直前に result へ確定した経路」を基準にする
                     // （循環分割で複数経路が追加された場合は末尾の経路が直前の移動）
@@ -1745,7 +1856,9 @@ namespace ICCardManager.Services
             }
 
             // 最後のチェーンを追加
-            AddConsolidatedChain(result, routes, chainStartIndex, routes.Count - 1, currentStart, currentEnd);
+            AddConsolidatedChain(
+                result, routes, chainStartIndex, routes.Count - 1, currentStart, currentEnd,
+                suppressedIndices, indexOffset);
 
             return result;
         }
@@ -1760,7 +1873,9 @@ namespace ICCardManager.Services
             int chainStart,
             int chainEnd,
             string consolidatedStart,
-            string consolidatedEnd)
+            string consolidatedEnd,
+            ISet<int> suppressedIndices = null,
+            int indexOffset = 0)
         {
             // 起点と終点が同じ場合（循環移動）
             // Issue #878: 乗り継ぎ駅も考慮して循環判定
@@ -1786,8 +1901,12 @@ namespace ICCardManager.Services
                         secondHalf.Add(routes[i]);
                     }
 
-                    result.AddRange(ConsolidateRoutes(firstHalf));
-                    result.AddRange(ConsolidateRoutes(secondHalf));
+                    // Issue #1916: 抑止点の添字は最上位リスト基準なので、分割後の
+                    // 部分リストへはそれぞれの先頭位置をオフセットとして渡す
+                    result.AddRange(ConsolidateRoutes(
+                        firstHalf, suppressedIndices, indexOffset + chainStart));
+                    result.AddRange(ConsolidateRoutes(
+                        secondHalf, suppressedIndices, indexOffset + mid + 1));
                 }
                 else
                 {
@@ -1887,7 +2006,7 @@ namespace ICCardManager.Services
                 }
             }
 
-            return string.Join("、", result);
+            return string.Join(RouteSeparator, result);
         }
 
         /// <summary>
@@ -1927,13 +2046,13 @@ namespace ICCardManager.Services
 
                 if (unparsed.Count > 0)
                 {
-                    return string.Join("、", new[] { routeSummary }.Concat(unparsed));
+                    return string.Join(RouteSeparator, new[] { routeSummary }.Concat(unparsed));
                 }
                 return routeSummary;
             }
 
             // 経路が1件以下の場合: 重複除去して連結
-            return string.Join("、", allBusStops.Distinct());
+            return string.Join(RouteSeparator, allBusStops.Distinct());
         }
 
         /// <summary>
