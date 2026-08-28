@@ -409,9 +409,10 @@ namespace ICCardManager.Services
                 // 物理タッチ経路（lentAt = null）は現在時刻がそのまま使われるため検証不要で、
                 // 直近履歴の追加クエリもここでは発行しない。
                 var effectiveLentAt = lentAt ?? now;
+                Ledger latestLedger = null;
                 if (lentAt.HasValue)
                 {
-                    var latestLedger = await _ledgerRepository.GetLatestLedgerAsync(cardIdm).ConfigureAwait(false);
+                    latestLedger = await _ledgerRepository.GetLatestLedgerAsync(cardIdm).ConfigureAwait(false);
                     var dateError = ValidateSystemLendDateTime(lentAt.Value, now, latestLedger?.Date);
                     if (dateError != null)
                     {
@@ -422,7 +423,7 @@ namespace ICCardManager.Services
 
                 // Issue #656: カードから残高を読み取れなかった場合、直近の履歴から残高を取得
                 // READ操作はリトライ範囲の外で実行（不要な再クエリを防止）
-                var currentBalance = await ResolveInitialBalanceAsync(cardIdm, balance).ConfigureAwait(false);
+                var currentBalance = await ResolveInitialBalanceAsync(cardIdm, balance, latestLedger).ConfigureAwait(false);
 
                 // トランザクション内で貸出ledger作成 + カード状態更新
                 // 共有モード時のSQLITE_BUSY対策としてリトライでラップ（WRITE操作のみ）
@@ -521,14 +522,18 @@ namespace ICCardManager.Services
         /// <summary>
         /// Issue #656: カードから残高を読み取れなかった場合、直近の ledger 残高を fallback として使用。
         /// </summary>
-        internal async Task<int> ResolveInitialBalanceAsync(string cardIdm, int? balance)
+        internal async Task<int> ResolveInitialBalanceAsync(
+            string cardIdm, int? balance, Ledger prefetchedLatestLedger = null)
         {
             if (balance.HasValue)
             {
                 return balance.Value;
             }
 
-            var latestLedger = await _ledgerRepository.GetLatestLedgerAsync(cardIdm).ConfigureAwait(false);
+            // Issue #1909: 呼び出し元が直近履歴を既に読んでいる場合（貸出日時の検証）は
+            // 同じクエリを 2 度発行しない。共有モードでは 1 往復が SMB のレイテンシ分だけ効く。
+            var latestLedger = prefetchedLatestLedger
+                ?? await _ledgerRepository.GetLatestLedgerAsync(cardIdm).ConfigureAwait(false);
             if (latestLedger != null)
             {
                 _logger.LogInformation(

@@ -55,9 +55,15 @@ public partial class SystemLendViewModel : ViewModelBase
     [ObservableProperty]
     private Staff _selectedStaff;
 
-    /// <summary>貸出日（時刻は <see cref="LentTimeText"/> と合成する）</summary>
+    /// <summary>
+    /// 貸出日（時刻は <see cref="LentTimeText"/> と合成する）。
+    /// <see cref="System.Windows.Controls.DatePicker.SelectedDate"/> は
+    /// <c>DateTime?</c> のため、日付欄を空にした状態を型で受け取れるようにしておく
+    /// （非 Null 許容にすると空欄化のバインドが黙って失敗し、画面は空なのに
+    /// 直前の日付がそのまま記録される）。
+    /// </summary>
     [ObservableProperty]
-    private DateTime _lentDate;
+    private DateTime? _lentDate;
 
     /// <summary>
     /// 貸出時刻。数値以外の入力を保存時に検出できるよう文字列で保持する
@@ -84,6 +90,15 @@ public partial class SystemLendViewModel : ViewModelBase
     /// 作成が確定したときだけ設定される。
     /// </summary>
     public string ResultMessage { get; private set; } = string.Empty;
+
+    /// <summary>
+    /// 貸出記録は確定したが、コミット確定後の後処理（操作ログの記録）が失敗したかどうか。
+    /// </summary>
+    /// <remarks>
+    /// Issue #1727 / #1805: 「記録できた」ことと「付帯情報まで揃った」ことは別の値で伝える。
+    /// 呼び出し元は <see cref="ResultMessage"/> を通常の完了と同じ見た目で出さない。
+    /// </remarks>
+    public bool HasPostCommitFailure { get; private set; }
 
     public SystemLendViewModel(
         IStaffRepository staffRepository,
@@ -137,6 +152,14 @@ public partial class SystemLendViewModel : ViewModelBase
             return;
         }
 
+        if (LentDate == null)
+        {
+            SetError("貸出日が入力されていません。" +
+                     "貸出記録にはカードを持ち出した日が必要です。" +
+                     "カレンダーから日付を選択してください。");
+            return;
+        }
+
         if (!TryBuildLentAt(out var lentAt))
         {
             SetError($"貸出時刻「{LentTimeText}」を時刻として読み取れません。" +
@@ -182,6 +205,7 @@ public partial class SystemLendViewModel : ViewModelBase
                 _logger?.LogError(ex, "貸出記録の操作ログ記録に失敗しました（CardIdm={CardIdm}）",
                     IdmMasker.Mask(_cardIdm));
                 ResultMessage += "（操作ログの記録には失敗しました。ログファイルを確認してください。）";
+                HasPostCommitFailure = true;
             }
 
             IsCompleted = true;
@@ -201,6 +225,11 @@ public partial class SystemLendViewModel : ViewModelBase
     {
         lentAt = default;
 
+        if (LentDate == null)
+        {
+            return false;
+        }
+
         var text = (LentTimeText ?? string.Empty).Trim();
         if (!DateTime.TryParseExact(text, TimeFormats, CultureInfo.InvariantCulture,
                 DateTimeStyles.None, out var parsed))
@@ -208,7 +237,7 @@ public partial class SystemLendViewModel : ViewModelBase
             return false;
         }
 
-        lentAt = LentDate.Date + parsed.TimeOfDay;
+        lentAt = LentDate.Value.Date + parsed.TimeOfDay;
         return true;
     }
 

@@ -165,18 +165,47 @@ public class CardManageViewModelSystemLendTests : IDisposable
     // ============================================================
 
     [Fact]
-    public void CanExecute_未貸出かつ未払戻のカードでのみ実行できる()
+    public void CanExecute_未払戻のカードが選択されていれば実行できる()
     {
         _viewModel.CreateLendRecordCommand.CanExecute(null).Should().BeTrue();
-
-        _viewModel.SelectedCard = new CardDto { CardIdm = CardIdm, IsLent = true };
-        _viewModel.CreateLendRecordCommand.CanExecute(null).Should().BeFalse();
 
         _viewModel.SelectedCard = new CardDto { CardIdm = CardIdm, IsRefunded = true };
         _viewModel.CreateLendRecordCommand.CanExecute(null).Should().BeFalse();
 
         _viewModel.SelectedCard = null;
         _viewModel.CreateLendRecordCommand.CanExecute(null).Should().BeFalse();
+    }
+
+    /// <summary>
+    /// Issue #1109: 貸出中は <c>CanExecute</c> で無効化しない。共有モードのヘルスチェックが
+    /// <c>SelectedCard.IsLent</c> を書き換えると、ボタンが無言で押せなくなり職員に何も伝わらない。
+    /// `CanDelete` / `CanRefund` と同じ扱いに揃える。
+    /// </summary>
+    [Fact]
+    public void CanExecute_貸出中でもボタンを無効化しない()
+    {
+        _viewModel.SelectedCard = new CardDto { CardIdm = CardIdm, IsLent = true };
+
+        _viewModel.CreateLendRecordCommand.CanExecute(null).Should().BeTrue();
+    }
+
+    /// <summary>
+    /// 貸出中であることは、認証を求める前にダイアログで伝える（対の表明）。
+    /// これが無いと、上のテストは「押せるが何も起きない」実装でも緑になる。
+    /// </summary>
+    [Fact]
+    public async Task CreateLendRecordAsync_貸出中なら認証を求めずダイアログで伝える()
+    {
+        _viewModel.SelectedCard = new CardDto { CardIdm = CardIdm, IsLent = true };
+
+        await _viewModel.CreateLendRecordAsync();
+
+        _dialogServiceMock.Verify(
+            d => d.ShowError(It.Is<string>(m => m.Contains("既に貸出中")), It.IsAny<string>()),
+            Times.Once);
+        _staffAuthServiceMock.Verify(
+            s => s.RequestAuthenticationAsync(It.IsAny<string>()), Times.Never);
+        _ledgerRepositoryMock.Verify(r => r.InsertAsync(It.IsAny<Ledger>()), Times.Never);
     }
 
     // ============================================================
@@ -211,6 +240,51 @@ public class CardManageViewModelSystemLendTests : IDisposable
         _viewModel.IsStatusError.Should().BeTrue();
         _viewModel.StatusMessage.Should().Contain("既に貸出中");
         _viewModel.StatusMessage.Should().EndWith("確認してください。");
+    }
+
+    /// <summary>
+    /// 認証の待機中に他 PC が払い戻した場合も、ダイアログを開かずに案内する。
+    /// `LendingService.ValidateLendPreconditionsAsync` は `is_refunded` を見ないため、
+    /// ここで弾かないと払戻済カード（Issue #530 で貸出対象外）が貸出中になる。
+    /// </summary>
+    [Fact]
+    public async Task CreateLendRecordAsync_認証中に他PCが払い戻していたら開かずに案内する()
+    {
+        _cardRepositoryMock.Setup(r => r.GetByIdmAsync(CardIdm, false))
+            .ReturnsAsync(new IcCard
+            {
+                CardIdm = CardIdm,
+                CardType = "はやかけん",
+                CardNumber = "C001",
+                IsLent = false,
+                IsRefunded = true,
+                IsDeleted = false
+            });
+
+        await _viewModel.CreateLendRecordAsync();
+
+        _navigationServiceMock.Verify(
+            n => n.ShowDialog(It.IsAny<Action<SystemLendDialog>>()), Times.Never);
+        _ledgerRepositoryMock.Verify(r => r.InsertAsync(It.IsAny<Ledger>()), Times.Never);
+        _viewModel.IsStatusError.Should().BeTrue();
+        _viewModel.StatusMessage.Should().Contain("既に払戻済");
+        _viewModel.StatusMessage.Should().NotContain("既に貸出中");
+    }
+
+    /// <summary>
+    /// Issue #1759 / #1760: 「再読み込みしました」と案内する以上、先にキャッシュを破棄する。
+    /// 破棄しないと `GetAllAsync` のキャッシュ（既定 TTL 60 秒／共有モード 15 秒）から
+    /// 貸出中になる前の一覧が返り、案内が事実にならない。
+    /// </summary>
+    [Fact]
+    public async Task CreateLendRecordAsync_競合を検出したらキャッシュを破棄してから再読込する()
+    {
+        _cardRepositoryMock.Setup(r => r.GetByIdmAsync(CardIdm, false)).ReturnsAsync(CreateCard(isLent: true));
+
+        await _viewModel.CreateLendRecordAsync();
+
+        _cardRepositoryMock.Verify(r => r.InvalidateCache(), Times.Once);
+        _cardRepositoryMock.Verify(r => r.GetAllAsync(), Times.Once);
     }
 
     [Fact]
@@ -260,6 +334,25 @@ public class CardManageViewModelSystemLendTests : IDisposable
         _viewModel.IsEditing.Should().BeFalse();
         _viewModel.StatusMessage.Should().NotBeEmpty();
         _viewModel.StatusMessage.Should().Contain("記録しました");
+    }
+
+    /// <summary>
+    /// 監査ログが残らなかった場合は、通常の完了と同じ見た目にしない。
+    /// 記録そのものは確定しているため `IsCompleted` は落とさず、ステータスだけ警告色にする。
+    /// </summary>
+    [Fact]
+    public async Task CreateLendRecordAsync_操作ログが残らなかったら完了扱いだが通常の完了とは区別する()
+    {
+        _operationLogRepositoryMock.Setup(r => r.InsertAsync(It.IsAny<OperationLog>()))
+            .ThrowsAsync(new InvalidOperationException("操作ログの書き込みに失敗"));
+        ArrangeDialogSaves();
+
+        await _viewModel.CreateLendRecordAsync();
+
+        _ledgerRepositoryMock.Verify(r => r.InsertAsync(It.IsAny<Ledger>()), Times.Once);
+        _viewModel.StatusMessage.Should().Contain("記録しました");
+        _viewModel.StatusMessage.Should().Contain("操作ログの記録には失敗");
+        _viewModel.IsStatusError.Should().BeTrue();
     }
 
     [Fact]

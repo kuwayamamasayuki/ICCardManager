@@ -225,6 +225,39 @@ public class LendingServiceSystemLendTests : IDisposable
                 It.IsAny<DateTime?>(), It.IsAny<string?>()), Times.Never);
     }
 
+    /// <summary>
+    /// 貸出日時の検証と残額の解決はどちらも直近履歴を必要とするが、クエリは 1 回で済ませる。
+    /// 共有モードでは 1 往復が SMB のレイテンシ分だけ効く。
+    /// </summary>
+    [Fact]
+    public async Task LendAsync_lentAt指定かつ残額未読でも直近履歴の問い合わせは1回だけ()
+    {
+        SetupLatestLedger(Now.AddDays(-5));
+
+        var result = await CreateService().LendAsync(
+            StaffIdm, CardIdm, balance: null, lentAt: Now.AddHours(-2));
+
+        result.Success.Should().BeTrue();
+        // 残額は直近履歴から引き継がれる（カードから読めないため）
+        result.Balance.Should().Be(3000);
+        _ledgerRepositoryMock.Verify(r => r.GetLatestLedgerAsync(CardIdm), Times.Once);
+    }
+
+    /// <summary>
+    /// 対の表明。物理タッチ経路（lentAt 省略）では従来どおり残額解決のためだけに 1 回問い合わせる。
+    /// </summary>
+    [Fact]
+    public async Task LendAsync_lentAt省略かつ残額未読なら残額解決のために1回問い合わせる()
+    {
+        SetupLatestLedger(Now.AddDays(-5));
+
+        var result = await CreateService().LendAsync(StaffIdm, CardIdm, balance: null);
+
+        result.Success.Should().BeTrue();
+        result.Balance.Should().Be(3000);
+        _ledgerRepositoryMock.Verify(r => r.GetLatestLedgerAsync(CardIdm), Times.Once);
+    }
+
     // ============================================================
     // LendAsync（30秒ルールの武装）
     // ============================================================

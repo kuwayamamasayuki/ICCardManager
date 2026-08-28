@@ -187,6 +187,28 @@ public class SystemLendViewModelTests : IDisposable
     }
 
     /// <summary>
+    /// `DatePicker.SelectedDate` は `DateTime?` のため、日付欄を空にすると null が入る。
+    /// 非 Null 許容で受けるとバインドが黙って失敗し、画面は空なのに直前の日付で記録される。
+    /// </summary>
+    [Fact]
+    public async Task SaveAsync_貸出日が空なら記録せず案内する()
+    {
+        var vm = await CreateInitializedAsync();
+        vm.SelectedStaff = vm.StaffList.First(s => s.StaffIdm == BorrowerIdm);
+        vm.LentDate = null;
+
+        await vm.SaveAsync();
+
+        vm.IsCompleted.Should().BeFalse();
+        vm.IsStatusError.Should().BeTrue();
+        vm.StatusMessage.Should().Contain("貸出日");
+        vm.StatusMessage.Should().EndWith("選択してください。");
+        // 時刻欄のエラーと取り違えないこと（原因が違えば「どうすれば」も違う）
+        vm.StatusMessage.Should().NotContain("貸出時刻");
+        _ledgerRepositoryMock.Verify(r => r.InsertAsync(It.IsAny<Ledger>()), Times.Never);
+    }
+
+    /// <summary>
     /// サービス側の日時検証（未来・直近履歴より前）の文言がそのまま画面に出ること。
     /// 「保存できません」と丸めると原因へ到達できない（error-messages.md「なぜ」）。
     /// </summary>
@@ -274,6 +296,24 @@ public class SystemLendViewModelTests : IDisposable
         vm.IsCompleted.Should().BeTrue();
         vm.ResultMessage.Should().Contain("記録しました");
         vm.ResultMessage.Should().Contain("操作ログの記録には失敗");
+        // 「記録できた」ことと「付帯情報まで揃った」ことを別の値で伝える（#1727 / #1805）
+        vm.HasPostCommitFailure.Should().BeTrue();
+    }
+
+    /// <summary>
+    /// 対の表明。片側だけだと「常に後処理失敗を立てる」実装でも緑になる。
+    /// </summary>
+    [Fact]
+    public async Task SaveAsync_操作ログまで成功したら後処理失敗を立てない()
+    {
+        var vm = await CreateInitializedAsync();
+        vm.SelectedStaff = vm.StaffList.First(s => s.StaffIdm == BorrowerIdm);
+
+        await vm.SaveAsync();
+
+        vm.IsCompleted.Should().BeTrue();
+        vm.HasPostCommitFailure.Should().BeFalse();
+        vm.ResultMessage.Should().NotContain("失敗");
     }
 
     /// <summary>

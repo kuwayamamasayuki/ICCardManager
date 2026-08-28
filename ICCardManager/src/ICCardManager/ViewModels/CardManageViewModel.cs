@@ -1211,12 +1211,21 @@ namespace ICCardManager.ViewModels
         /// 貸出記録の作成が可能かどうか（Issue #1909）
         /// </summary>
         /// <remarks>
-        /// 貸出中のカードは既に貸出記録があり、払戻済のカードは貸出対象外（Issue #530）。
-        /// ここでの判定は一覧に載っている値であり、実際の可否は書き込み直前に
-        /// DB から読み直して確定させる（共有モードでは他 PC が先に貸し出し得る）。
+        /// <para>
+        /// 払戻済のカードは貸出対象外（Issue #530）。ここでの判定は一覧に載っている値であり、
+        /// 実際の可否は書き込み直前に DB から読み直して確定させる
+        /// （共有モードでは他 PC が先に貸し出し・払い戻しし得る）。
+        /// </para>
+        /// <para>
+        /// Issue #1109: <c>IsLent</c> チェックはここに入れない（<see cref="CanDelete"/> /
+        /// <see cref="CanRefund"/> と同じ理由）。共有モードで他 PC がカードを貸出中にすると
+        /// ヘルスチェックで <c>SelectedCard.IsLent</c> が true に更新され、ボタンが
+        /// <b>無言で無効化</b>されて職員には何も伝わらない。貸出中であることは
+        /// <see cref="CreateLendRecordAsync"/> の冒頭でダイアログとして伝える。
+        /// </para>
         /// </remarks>
         private bool CanCreateLendRecord() =>
-            SelectedCard != null && !SelectedCard.IsLent && !SelectedCard.IsRefunded;
+            SelectedCard != null && !SelectedCard.IsRefunded;
 
         /// <summary>
         /// システム操作による貸出記録の作成（Issue #1909）
@@ -1238,6 +1247,17 @@ namespace ICCardManager.ViewModels
         {
             if (SelectedCard == null) return;
 
+            if (SelectedCard.IsLent)
+            {
+                // Issue #1109: CanExecute で無効化すると無言で押せなくなるため、
+                // ここでダイアログとして伝える（編集フォーム非表示時でも見えるように）。
+                _dialogService.ShowError(
+                    "このカードは既に貸出中のため、貸出記録を作成できません。" +
+                    "カードが返却されたらメイン画面でタッチしてください。",
+                    "作成できません");
+                return;
+            }
+
             var targetIdm = SelectedCard.CardIdm;
             var targetLabel = FormatCardLabel(SelectedCard.CardType, SelectedCard.CardNumber);
 
@@ -1253,12 +1273,25 @@ namespace ICCardManager.ViewModels
                 return;
             }
 
-            if (card.IsLent)
+            // Issue #1909: CanExecute で見ている条件（貸出中・払戻済）は一覧に載っている値なので、
+            // 書き込み直前に DB から読み直した値で確定させる。認証の待機中に他 PC が貸出・払い戻しし得る。
+            // 払戻済カードは貸出対象外（Issue #530）であり、LendingService の事前検証は
+            // is_refunded を見ないため、ここで弾かないと払戻済のカードが貸出中になる。
+            if (card.IsLent || card.IsRefunded)
             {
+                var reason = card.IsLent ? "既に貸出中のため" : "既に払戻済のため";
+                var cause = card.IsLent
+                    ? "他のパソコンや別の操作で貸し出された可能性があります。"
+                    : "他のパソコンや別の操作で払い戻された可能性があります。";
+
+                // Issue #1759 / #1760: 「再読み込みしました」と案内する以上、先にキャッシュを破棄する。
+                // LoadCardsAsync() が読む GetAllAsync はキャッシュ経由（既定 TTL 60 秒／共有モード 15 秒）
+                // のため、破棄しないと貸出中・払戻済になる前の一覧がそのまま返り、案内が事実にならない。
+                _cardRepository.InvalidateCache();
                 await LoadCardsAsync();
                 StatusMessage =
-                    $"カード「{targetLabel}」は既に貸出中のため、貸出記録を作成できませんでした。" +
-                    "他のパソコンや別の操作で貸し出された可能性があります。" +
+                    $"カード「{targetLabel}」は{reason}、貸出記録を作成できませんでした。" +
+                    cause +
                     "カード一覧を再読み込みしました。状態を確認してください。";
                 IsStatusError = true;
                 return;
@@ -1277,7 +1310,9 @@ namespace ICCardManager.ViewModels
             // Issue #1727 / #1759: CancelEdit() は StatusMessage / IsStatusError をクリアするため、
             // 完了メッセージは必ず後処理のあとに設定する（先に設定すると一度も表示されない）。
             StatusMessage = viewModel.ResultMessage;
-            IsStatusError = false;
+            // 記録そのものは確定しているが、操作ログが残らなかった場合は監査上の欠落なので
+            // 通常の完了と同じ見た目にしない（文言にも失敗の事実が含まれる）。
+            IsStatusError = viewModel.HasPostCommitFailure;
         }
 
         /// <summary>
