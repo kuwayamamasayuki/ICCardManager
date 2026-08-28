@@ -1171,6 +1171,147 @@ public class LedgerRowEditViewModelTests : IDisposable
         ), It.IsAny<SQLiteTransaction>()), Times.Once);
     }
 
+    #region 同行者数（Issue #1906）
+
+    [Fact]
+    public async Task InitializeForEdit_LoadsCompanionCountAndPreview()
+    {
+        var ledger = new Ledger
+        {
+            Id = 1, CardIdm = TestCardIdm, Date = new DateTime(2026, 1, 10),
+            Summary = "鉄道（天神～博多）", Expense = 210, Balance = 2300,
+            LenderIdm = _staffA.StaffIdm, StaffName = _staffA.Name, CompanionCount = 2
+        };
+        _ledgerRepoMock.Setup(r => r.GetByIdAsync(1)).ReturnsAsync(ledger);
+        var dto = new LedgerDto
+        {
+            Id = 1, CardIdm = TestCardIdm, Date = ledger.Date, DateDisplay = "R8.1.10",
+            Summary = ledger.Summary, Expense = 210, Balance = 2300, StaffName = _staffA.Name, CompanionCount = 2
+        };
+
+        await _viewModel.InitializeForEditAsync(dto, TestOperatorIdm);
+
+        _viewModel.CompanionCount.Should().Be(2);
+        _viewModel.DisplayStaffNamePreview.Should().Be("田中太郎 外2名");
+    }
+
+    [Fact]
+    public async Task SaveEdit_PersistsCompanionCount_WithoutTouchingStaffName()
+    {
+        var ledger = new Ledger
+        {
+            Id = 1, CardIdm = TestCardIdm, Date = new DateTime(2026, 1, 10),
+            Summary = "鉄道（天神～博多）", Expense = 210, Balance = 2300,
+            LenderIdm = _staffA.StaffIdm, StaffName = _staffA.Name
+        };
+        _ledgerRepoMock.Setup(r => r.GetByIdAsync(1)).ReturnsAsync(ledger);
+        _ledgerRepoMock.Setup(r => r.UpdateAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>())).ReturnsAsync(true);
+        _staffRepoMock.Setup(r => r.GetByIdmAsync(TestOperatorIdm, It.IsAny<bool>()))
+            .ReturnsAsync(new Staff { StaffIdm = TestOperatorIdm, Name = "操作者" });
+        var dto = new LedgerDto
+        {
+            Id = 1, CardIdm = TestCardIdm, Date = ledger.Date, DateDisplay = "R8.1.10",
+            Summary = ledger.Summary, Expense = 210, Balance = 2300, StaffName = _staffA.Name
+        };
+        await _viewModel.InitializeForEditAsync(dto, TestOperatorIdm);
+
+        _viewModel.CompanionCount = 1;
+        await _viewModel.SaveCommand.ExecuteAsync(null);
+
+        _viewModel.IsSaved.Should().BeTrue();
+        _ledgerRepoMock.Verify(r => r.UpdateAsync(It.Is<Ledger>(l =>
+            l.CompanionCount == 1 && l.StaffName == _staffA.Name
+        ), It.IsAny<SQLiteTransaction>()), Times.Once, "staff_name には「外N名」を書き込まず companion_count だけを更新する");
+    }
+
+    [Fact]
+    public async Task SaveAdd_PersistsCompanionCount()
+    {
+        var allLedgers = CreateTestLedgers();
+        _ledgerRepoMock.Setup(r => r.InsertAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>())).ReturnsAsync(99);
+        _staffRepoMock.Setup(r => r.GetByIdmAsync(TestOperatorIdm, It.IsAny<bool>()))
+            .ReturnsAsync(new Staff { StaffIdm = TestOperatorIdm, Name = "操作者" });
+        await _viewModel.InitializeForAddAsync(TestCardIdm, allLedgers, TestOperatorIdm);
+        _viewModel.Summary = "鉄道（天神～博多）";
+        _viewModel.Expense = 210;
+        _viewModel.SelectedStaff = _staffA;
+        _viewModel.CompanionCount = 3;
+
+        await _viewModel.SaveCommand.ExecuteAsync(null);
+
+        _ledgerRepoMock.Verify(r => r.InsertAsync(It.Is<Ledger>(l => l.CompanionCount == 3 && l.StaffName == _staffA.Name),
+            It.IsAny<SQLiteTransaction>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task SaveEdit_CompanionCountUnchanged_DoesNotRecordFabricatedAuditDiff()
+    {
+        // Issue #1906 / #1726: 更新前スナップショットに CompanionCount を載せ忘れると
+        // 摘要だけ直した保存で「同行者数 0 → 2」という実際には起きていない変更が監査ログに残る
+        var ledger = new Ledger
+        {
+            Id = 1, CardIdm = TestCardIdm, Date = new DateTime(2026, 1, 10),
+            Summary = "元の摘要", Expense = 210, Balance = 2300,
+            LenderIdm = _staffA.StaffIdm, StaffName = _staffA.Name, CompanionCount = 2
+        };
+        _ledgerRepoMock.Setup(r => r.GetByIdAsync(1)).ReturnsAsync(ledger);
+        _ledgerRepoMock.Setup(r => r.UpdateAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>())).ReturnsAsync(true);
+        _staffRepoMock.Setup(r => r.GetByIdmAsync(TestOperatorIdm, It.IsAny<bool>()))
+            .ReturnsAsync(new Staff { StaffIdm = TestOperatorIdm, Name = "操作者" });
+        OperationLog? recorded = null;
+        _operationLogRepoMock
+            .Setup(r => r.InsertAsync(It.IsAny<OperationLog>(), It.IsAny<SQLiteTransaction>()))
+            .Callback<OperationLog, SQLiteTransaction>((log, _) => recorded = log)
+            .ReturnsAsync(1);
+        var dto = new LedgerDto
+        {
+            Id = 1, CardIdm = TestCardIdm, Date = ledger.Date, DateDisplay = "R8.1.10",
+            Summary = "元の摘要", Expense = 210, Balance = 2300, StaffName = _staffA.Name, CompanionCount = 2
+        };
+        await _viewModel.InitializeForEditAsync(dto, TestOperatorIdm);
+
+        _viewModel.Summary = "変更後の摘要";
+        await _viewModel.SaveCommand.ExecuteAsync(null);
+
+        recorded.Should().NotBeNull();
+        recorded!.BeforeData.Should().Contain("\"CompanionCount\":2",
+            "更新前データにも同行者数を載せる（載せないと 0 → 2 の虚偽の差分が 6 年保存の監査ログに残る）");
+    }
+
+    [Theory]
+    [InlineData(-1)]
+    [InlineData(100)]
+    public async Task Validate_CompanionCountOutOfRange_BlocksSaveWithThreeElementMessage(int value)
+    {
+        var allLedgers = CreateTestLedgers();
+        await _viewModel.InitializeForAddAsync(TestCardIdm, allLedgers, TestOperatorIdm);
+        _viewModel.Summary = "鉄道（天神～博多）";
+        _viewModel.Expense = 210;
+
+        _viewModel.CompanionCount = value;
+
+        _viewModel.CanSave.Should().BeFalse();
+        _viewModel.ValidationMessage.Should().Contain(value.ToString())
+            .And.Contain("0～99")
+            .And.EndWith("入力してください。");
+        _viewModel.FirstErrorField.Should().Be(nameof(LedgerRowEditViewModel.CompanionCount));
+    }
+
+    [Fact]
+    public async Task Validate_CompanionCountInRange_AllowsSave()
+    {
+        var allLedgers = CreateTestLedgers();
+        await _viewModel.InitializeForAddAsync(TestCardIdm, allLedgers, TestOperatorIdm);
+        _viewModel.Summary = "鉄道（天神～博多）";
+        _viewModel.Expense = 210;
+
+        _viewModel.CompanionCount = 99;
+
+        _viewModel.CanSave.Should().BeTrue();
+    }
+
+    #endregion
+
     [Fact]
     public async Task SaveAdd_InsertFails_ShowsError()
     {

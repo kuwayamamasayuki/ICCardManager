@@ -105,5 +105,11 @@ namespace ICCardManager.Data.Repositories
         /// バス利用詳細のバス停名を更新
         /// </summary>
         Task UpdateDetailBusStopsAsync(int ledgerId, IEnumerable<(int SequenceNumber, string BusStops)> updates);
+
+        /// <summary>
+        /// 同行者数だけを更新する（Issue #1906、返却時の同行者数入力ダイアログ用）
+        /// </summary>
+        /// <returns>更新できた場合 true。対象行が無い（削除済み等の競合、Issue #1753）場合 false</returns>
+        Task<bool> UpdateCompanionCountAsync(int ledgerId, int companionCount);
     }
 }

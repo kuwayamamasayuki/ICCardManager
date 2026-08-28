@@ -89,6 +89,8 @@ namespace ICCardManager.Services
                             var hasChanges = existingLedger.Summary != parsed.Summary ||
                                             (existingLedger.StaffName ?? "") != parsed.StaffName ||
                                             (existingLedger.Note ?? "") != parsed.Note ||
+                                            // Issue #1906: 列が無い旧形式 CSV（null）は「指定なし」なので変更として数えない
+                                            (parsed.CompanionCount.HasValue && existingLedger.CompanionCount != parsed.CompanionCount.Value) ||
                                             existingLedger.Income != parsed.Income ||
                                             existingLedger.Expense != parsed.Expense ||
                                             existingLedger.Balance != parsed.Balance ||
@@ -133,6 +135,8 @@ namespace ICCardManager.Services
                         Balance = parsed.Balance,
                         StaffName = string.IsNullOrWhiteSpace(parsed.StaffName) ? null : parsed.StaffName,
                         Note = string.IsNullOrWhiteSpace(parsed.Note) ? null : parsed.Note,
+                        // Issue #1906: 列が無い旧形式 CSV では既存値を引き継ぐ（0 で上書きしない。#1726 / #1808）
+                        CompanionCount = parsed.CompanionCount ?? existingLedgerForUpdate?.CompanionCount ?? 0,
                         LenderIdm = existingLedgerForUpdate?.LenderIdm,
                         ReturnerIdm = existingLedgerForUpdate?.ReturnerIdm,
                         LentAt = existingLedgerForUpdate?.LentAt,
@@ -363,7 +367,7 @@ namespace ICCardManager.Services
 
                 // 仮バリデーションでカードIDmを収集（重複チェック用）
                 var cardIdmsInFile = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-                var validatedRecords = new List<(int LineNumber, int? LedgerId, string CardIdm, DateTime Date, string Summary, int Income, int Expense, int Balance, string StaffName, string Note)>();
+                var validatedRecords = new List<(int LineNumber, int? LedgerId, string CardIdm, DateTime Date, string Summary, int Income, int Expense, int Balance, string StaffName, string Note, int? CompanionCount)>();
 
                 for (var i = 1; i < lines.Count; i++)
                 {
@@ -388,7 +392,7 @@ namespace ICCardManager.Services
                     validatedRecords.Add((
                         parsed.LineNumber, parsed.LedgerId, parsed.CardIdm,
                         parsed.Date, parsed.Summary, parsed.Income, parsed.Expense,
-                        parsed.Balance, parsed.StaffName, parsed.Note));
+                        parsed.Balance, parsed.StaffName, parsed.Note, parsed.CompanionCount));
                 }
 
                 // Issue #907: カードごとにDB上の直前残高を取得（最初の行の整合性チェック用）
@@ -409,7 +413,7 @@ namespace ICCardManager.Services
                     : new HashSet<(string CardIdm, DateTime Date, string Summary, int Income, int Expense, int Balance)>();
 
                 // プレビューアイテムを生成
-                foreach (var (lineNumber, ledgerId, cardIdm, date, summary, income, expense, balance, staffName, note) in validatedRecords)
+                foreach (var (lineNumber, ledgerId, cardIdm, date, summary, income, expense, balance, staffName, note, companionCount) in validatedRecords)
                 {
                     ImportAction action;
                     var changes = new List<FieldChange>();
@@ -421,7 +425,7 @@ namespace ICCardManager.Services
                         if (existingLedger != null)
                         {
                             // Issue #639: 金額・日付を含む全フィールドで変更点を検出
-                            DetectLedgerChanges(existingLedger, date, summary, income, expense, balance, staffName, note, changes);
+                            DetectLedgerChanges(existingLedger, date, summary, income, expense, balance, staffName, note, companionCount, changes);
                             if (changes.Count > 0)
                             {
                                 // 変更がある場合は更新
@@ -434,7 +438,7 @@ namespace ICCardManager.Services
                                 action = ImportAction.Skip;
                                 skipCount++;
                                 // Issue #969: スキップ時もデータ内容を表示
-                                changes = CreateLedgerDisplayChanges(date, summary, income, expense, balance, staffName, note);
+                                changes = CreateLedgerDisplayChanges(date, summary, income, expense, balance, staffName, note, companionCount);
                             }
                             else
                             {
@@ -449,7 +453,7 @@ namespace ICCardManager.Services
                             action = ImportAction.Insert;
                             newCount++;
                             // Issue #969: 追加時もデータ内容を表示
-                            changes = CreateLedgerDisplayChanges(date, summary, income, expense, balance, staffName, note);
+                            changes = CreateLedgerDisplayChanges(date, summary, income, expense, balance, staffName, note, companionCount);
                         }
                     }
                     else
@@ -461,14 +465,14 @@ namespace ICCardManager.Services
                             action = ImportAction.Skip;
                             skipCount++;
                             // Issue #969: スキップ時もデータ内容を表示
-                            changes = CreateLedgerDisplayChanges(date, summary, income, expense, balance, staffName, note);
+                            changes = CreateLedgerDisplayChanges(date, summary, income, expense, balance, staffName, note, companionCount);
                         }
                         else
                         {
                             action = ImportAction.Insert;
                             newCount++;
                             // Issue #969: 追加時もデータ内容を表示
-                            changes = CreateLedgerDisplayChanges(date, summary, income, expense, balance, staffName, note);
+                            changes = CreateLedgerDisplayChanges(date, summary, income, expense, balance, staffName, note, companionCount);
                         }
                     }
 

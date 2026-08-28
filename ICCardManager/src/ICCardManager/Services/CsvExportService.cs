@@ -175,7 +175,7 @@ namespace ICCardManager.Services
                 var lines = new List<string>
                 {
                     // ヘッダー行（Issue #265: 管理番号列追加、Issue #266: 日付→日時、Issue #342: ID列追加）
-                    "ID,日時,カードIDm,管理番号,摘要,受入金額,払出金額,残額,利用者,備考"
+                    "ID,日時,カードIDm,管理番号,摘要,受入金額,払出金額,残額,利用者,備考,同行者数"
                 };
 
                 // Issue #592: 同一カードの履歴をまとめて出力
@@ -201,7 +201,9 @@ namespace ICCardManager.Services
                         ledger.Expense > 0 ? ledger.Expense.ToString() : "",
                         ledger.Balance.ToString(),
                         EscapeCsvField(ledger.StaffName ?? ""),
-                        EscapeCsvField(ledger.Note ?? "")
+                        EscapeCsvField(ledger.Note ?? ""),
+                        // Issue #1906: 同行者数は利用者列とは別列に出す（「外N名」を氏名へ混ぜると取込で往復しない、#1808）
+                        ledger.CompanionCount > 0 ? ledger.CompanionCount.ToString() : ""
                     ));
                 }
 
@@ -362,21 +364,22 @@ namespace ICCardManager.Services
                 var lines = new List<string>
                 {
                     // ヘッダー行（インポート形式と同じ）
-                    "ID,日時,カードIDm,管理番号,摘要,受入金額,払出金額,残額,利用者,備考",
+                    "ID,日時,カードIDm,管理番号,摘要,受入金額,払出金額,残額,利用者,備考,同行者数",
                     // サンプル行（コメントアウト形式で記載）
                     $"# このテンプレートを使って履歴データを入力してください",
                     $"# カードIDm: {cardIdm}",
                     $"# 管理番号: {cardNumber}",
                     $"#",
                     $"# 入力例（先頭の#を削除して使用）:",
-                    $"#,2024-04-01 09:00:00,{cardIdm},{cardNumber},鉄道（博多駅～天神駅）,,220,4780,山田太郎,",
-                    $"#,2024-04-02 10:30:00,{cardIdm},{cardNumber},役務費によりチャージ,5000,,9780,,",
+                    $"#,2024-04-01 09:00:00,{cardIdm},{cardNumber},鉄道（博多駅～天神駅）,,220,4780,山田太郎,,",
+                    $"#,2024-04-02 10:30:00,{cardIdm},{cardNumber},役務費によりチャージ,5000,,9780,,,",
                     $"#",
                     $"# 注意:",
                     $"# - ID列は空欄にしてください（新規追加の場合）",
                     $"# - 日時は YYYY-MM-DD HH:MM:SS 形式で入力してください",
                     $"# - 受入金額はチャージ時のみ、払出金額は利用時のみ入力してください",
-                    $"# - 残額は前の行の残額 + 受入金額 - 払出金額 と一致するようにしてください"
+                    $"# - 残額は前の行の残額 + 受入金額 - 払出金額 と一致するようにしてください",
+                    $"# - 同行者数は複数名で利用したときの本人を除く人数（省略時は0）。氏名欄に「外N名」と表示されます"
                 };
 
                 // .NET Framework 4.8ではFile.WriteAllLinesAsyncがないためTask.Runで同期版を使用

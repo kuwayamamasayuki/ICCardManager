@@ -441,6 +441,7 @@ namespace ICCardManager
             services.AddTransient<ReportViewModel>();
 
             services.AddTransient<BusStopInputViewModel>();
+            services.AddTransient<CompanionCountInputViewModel>();
             services.AddTransient<PrintPreviewViewModel>();
             services.AddTransient<DataExportImportViewModel>();
             services.AddTransient<OperationLogSearchViewModel>();
@@ -467,6 +468,7 @@ namespace ICCardManager
             services.AddTransient<Views.Dialogs.ReportPreflightDialog>();
 
             services.AddTransient<Views.Dialogs.BusStopInputDialog>();
+            services.AddTransient<Views.Dialogs.CompanionCountInputDialog>();
             services.AddTransient<Views.Dialogs.PrintPreviewDialog>();
             services.AddTransient<Views.Dialogs.DataExportImportDialog>();
             services.AddTransient<Views.Dialogs.OperationLogDialog>();

@@ -202,6 +202,19 @@
                                    Foreground="{DynamicResource SecondaryTextBrush}"
                                    TextWrapping="Wrap"
                                    Margin="0,5,0,0"/>
+                        <!-- Issue #1906: 同行者数入力のスキップ -->
+                        <CheckBox IsChecked="{Binding SkipCompanionCountInputOnReturn}"
+                                  Content="返却時の同行者数入力をスキップする(_M)"
+                                  Padding="5,0,0,0"
+                                  Margin="0,10,0,0"
+                                  AutomationProperties.Name="同行者数入力スキップ設定"
+                                  AutomationProperties.HelpText="有効にすると、返却時に同行者数入力ダイアログを表示しません"
+                                  ToolTip="有効にすると、返却時に同行者数入力ダイアログを表示せず、必要なときだけ履歴の行編集から入力します（アクセスキー: Alt+M）"/>
+                        <TextBlock Text="※ 複数名で同一の交通系ICカードを利用する運用が無い場合に有効にします。同行者数は履歴の行編集からいつでも入力でき、氏名欄に「外N名」と表示されます"
+                                   FontSize="{DynamicResource SmallFontSize}"
+                                   Foreground="{DynamicResource SecondaryTextBrush}"
+                                   TextWrapping="Wrap"
+                                   Margin="0,5,0,0"/>
                     </StackPanel>
                 </GroupBox>
 

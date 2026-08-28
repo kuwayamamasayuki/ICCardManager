@@ -62,6 +62,21 @@ namespace ICCardManager.Models
         public string Note { get; set; }
 
         /// <summary>
+        /// 同行者数（本人を含まない。既定 0）
+        /// </summary>
+        /// <remarks>
+        /// Issue #1906: 複数名で同一交通系ICカードを利用した場合の人数。
+        /// 氏名欄の「外N名」は <see cref="DisplayStaffName"/> が導出し、<see cref="StaffName"/> には書き込まない。
+        /// </remarks>
+        public int CompanionCount { get; set; }
+
+        /// <summary>
+        /// 表示用の氏名（同行者がいれば「氏名 外N名」、Issue #1906）
+        /// </summary>
+        [System.Text.Json.Serialization.JsonIgnore]
+        public string DisplayStaffName => Common.StaffNameFormatter.Format(StaffName, CompanionCount);
+
+        /// <summary>
         /// 返却者IDm（FK→staff）
         /// </summary>
         public string ReturnerIdm { get; set; }

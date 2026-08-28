@@ -63,6 +63,26 @@ public class ReportRowBuilderTests
 
     #region 繰越行テスト
 
+    /// <summary>
+    /// Issue #1906: 同行者がいる行は氏名欄が「氏名 外N名」になること（物品会計事務の手引きの記載例）
+    /// </summary>
+    [Fact]
+    public void Build_同行者がいる行は氏名欄に外N名を付けること()
+    {
+        var data = CreateBaseData(2026, 8);
+        data.Carryover = null;
+        data.Ledgers = new List<Ledger>
+        {
+            new Ledger { Id = 1, CardIdm = "0102030405060708", Date = new DateTime(2026, 8, 20), Summary = "鉄道（博多～天神）", Expense = 260, Balance = 9740, StaffName = "博多 花子", CompanionCount = 1 },
+            new Ledger { Id = 2, CardIdm = "0102030405060708", Date = new DateTime(2026, 8, 21), Summary = "鉄道（天神～博多）", Expense = 260, Balance = 9480, StaffName = "博多 花子", CompanionCount = 0 },
+        };
+
+        var result = ReportRowBuilder.Build(data);
+
+        result.DataRows[0].StaffName.Should().Be("博多 花子 外1名");
+        result.DataRows[1].StaffName.Should().Be("博多 花子", "同行者 0 の行には付けない");
+    }
+
     [Fact]
     public void Build_繰越行なしの場合にDataRowsに繰越行が含まれないこと()
     {

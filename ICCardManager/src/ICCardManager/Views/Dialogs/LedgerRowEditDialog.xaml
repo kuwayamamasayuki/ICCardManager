@@ -62,6 +62,7 @@
                 <RowDefinition Height="Auto"/>
                 <RowDefinition Height="Auto"/>
                 <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
             </Grid.RowDefinitions>
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="80"/>
@@ -235,8 +236,44 @@
                         ToolTip="利用者の選択を解除して空欄にします"/>
             </StackPanel>
 
-            <!-- 備考 (_N) -->
+            <!-- 同行者数 (_C)（Issue #1906: 複数名で同一の交通系ICカードを利用した場合。氏名欄に「外N名」と表示） -->
             <Label Grid.Row="6" Grid.Column="0"
+                   Content="同行者数(_G):"
+                   Target="{Binding ElementName=CompanionCountTextBox}"
+                   FontSize="{DynamicResource BaseFontSize}"
+                   VerticalAlignment="Center"
+                   Padding="0"/>
+            <!-- 横方向 StackPanel ではプレビューが折り返せないため Grid で幅を制約する（#1687） -->
+            <Grid Grid.Row="6" Grid.Column="1" Margin="0,0,0,8">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+                <TextBox x:Name="CompanionCountTextBox"
+                         Grid.Column="0"
+                         Text="{Binding CompanionCount, UpdateSourceTrigger=PropertyChanged}"
+                         FontSize="{DynamicResource BaseFontSize}"
+                         Padding="10,6"
+                         Width="70"
+                         TextAlignment="Right"
+                         VerticalAlignment="Center"
+                         AutomationProperties.Name="同行者数"
+                         AutomationProperties.HelpText="複数名で利用した場合の本人を除く人数。0～99 の整数。氏名欄に「外N名」と表示されます"
+                         ToolTip="複数名で同一の交通系ICカードを利用した場合の本人を除く人数（0～99）。氏名欄に「外N名」と表示されます（アクセスキー: Alt+G）"/>
+                <TextBlock Grid.Column="1" Text="名" VerticalAlignment="Center" Margin="4,0,12,0"
+                           FontSize="{DynamicResource BaseFontSize}"/>
+                <TextBlock Grid.Column="2"
+                           Text="{Binding DisplayStaffNamePreview, StringFormat=氏名欄の表示: {0}}"
+                           TextWrapping="Wrap"
+                           VerticalAlignment="Center"
+                           Foreground="{DynamicResource SecondaryTextBrush}"
+                           FontSize="{DynamicResource SmallFontSize}"
+                           AutomationProperties.Name="{Binding DisplayStaffNamePreview, StringFormat=氏名欄の表示: {0}}"/>
+            </Grid>
+
+            <!-- 備考 (_N) -->
+            <Label Grid.Row="7" Grid.Column="0"
                    Content="備考(_N):"
                    Target="{Binding ElementName=NoteTextBox}"
                    FontSize="{DynamicResource BaseFontSize}"
@@ -244,7 +281,7 @@
                    Padding="0"
                    Margin="0,6,0,0"/>
             <TextBox x:Name="NoteTextBox"
-                     Grid.Row="6" Grid.Column="1"
+                     Grid.Row="7" Grid.Column="1"
                      Text="{Binding Note, UpdateSourceTrigger=PropertyChanged}"
                      FontSize="{DynamicResource BaseFontSize}"
                      Padding="10,6"

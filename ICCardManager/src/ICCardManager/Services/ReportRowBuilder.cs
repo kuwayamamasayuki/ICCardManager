@@ -54,7 +54,8 @@ namespace ICCardManager.Services
                     Income = (!isMidYearCarryoverRow && ledger.Income > 0) ? (int?)ledger.Income : null,
                     Expense = ledger.Expense > 0 ? ledger.Expense : null,
                     Balance = ledger.Balance,
-                    StaffName = ledger.StaffName,
+                    // Issue #1906: 同行者がいれば「氏名 外N名」（物品会計事務の手引きの記載例）
+                    StaffName = StaffNameFormatter.Format(ledger.StaffName, ledger.CompanionCount),
                     Note = ledger.Note,
                     RowType = ReportRowType.Data
                 });

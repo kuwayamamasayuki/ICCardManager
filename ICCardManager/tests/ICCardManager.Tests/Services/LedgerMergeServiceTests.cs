@@ -924,6 +924,21 @@ public class LedgerMergeServiceTests : IDisposable
     }
 
     /// <summary>
+    /// Issue #1906: 統合先より統合元の同行者数が多い場合、最大値を引き継ぐこと
+    /// </summary>
+    [Fact]
+    [Trait("Category", "Unit")]
+    public void MergeCompanionCount_TakesMaxAcrossMergedLedgers()
+    {
+        var target = new Ledger { Id = 1, CompanionCount = 0 };
+        var source = new Ledger { Id = 2, CompanionCount = 2 };
+
+        var merged = new[] { target, source }.Max(l => l.CompanionCount);
+
+        merged.Should().Be(2, "統合先の値だけを残すと「外N名」が台帳から消える");
+    }
+
+    /// <summary>
     /// LedgerSnapshot.FromLedger/ToLedgerの往復変換が正しく動作すること
     /// </summary>
     [Fact]
@@ -946,7 +961,8 @@ public class LedgerMergeServiceTests : IDisposable
             ReturnerIdm = "2222222222222222",
             LentAt = new DateTime(2026, 2, 3, 8, 0, 0),
             ReturnedAt = new DateTime(2026, 2, 3, 18, 0, 0),
-            IsLentRecord = false
+            IsLentRecord = false,
+            CompanionCount = 2 // Issue #1906
         };
 
         // Act
@@ -968,6 +984,7 @@ public class LedgerMergeServiceTests : IDisposable
         restored.LentAt.Should().Be(original.LentAt);
         restored.ReturnedAt.Should().Be(original.ReturnedAt);
         restored.IsLentRecord.Should().Be(original.IsLentRecord);
+        restored.CompanionCount.Should().Be(2, "Issue #1906: 統合取り消しで同行者数も復元する");
     }
 
     /// <summary>

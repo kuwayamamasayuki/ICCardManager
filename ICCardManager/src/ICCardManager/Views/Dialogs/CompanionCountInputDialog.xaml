@@ -1,0 +1,174 @@
+<Window x:Class="ICCardManager.Views.Dialogs.CompanionCountInputDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:vm="clr-namespace:ICCardManager.ViewModels"
+        mc:Ignorable="d"
+        d:DataContext="{d:DesignInstance Type=vm:CompanionCountInputViewModel}"
+        Title="同行者数入力"
+        Height="420"
+        Width="650"
+        MinHeight="320"
+        MinWidth="520"
+        WindowStartupLocation="CenterOwner"
+        ResizeMode="CanResize"
+        FontSize="{DynamicResource BaseFontSize}"
+        AutomationProperties.Name="同行者数入力ダイアログ"
+        AutomationProperties.HelpText="複数名で同一の交通系ICカードを利用した場合に、本人を除く同行者の人数を入力します。氏名欄に「外N名」と表示されます。">
+
+    <Window.Resources>
+        <BooleanToVisibilityConverter x:Key="BoolToVisibilityConverter"/>
+    </Window.Resources>
+
+    <Grid Margin="20">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <!-- 説明（Issue #1906） -->
+        <Border Grid.Row="0" Background="{DynamicResource ReturnBackgroundBrush}" CornerRadius="4" Padding="15" Margin="0,0,0,15">
+            <StackPanel>
+                <TextBlock Text="複数名で利用した場合は、本人を除く同行者の人数を入力してください"
+                           FontSize="{DynamicResource BaseFontSize}"
+                           FontWeight="Bold"
+                           TextWrapping="Wrap"
+                           Foreground="{DynamicResource ReturnForegroundBrush}"/>
+                <TextBlock FontSize="{DynamicResource SmallFontSize}"
+                           Foreground="{DynamicResource HintForegroundBrush}"
+                           Margin="0,5,0,0"
+                           TextWrapping="Wrap">
+                    <Run Text="1人で利用した場合は 0 のまま Enter キーで閉じてください。"/>
+                    <LineBreak/>
+                    <Run Text="💡 入力すると物品出納簿の氏名欄に「博多 花子 外1名」のように表示されます。後から履歴の行編集でも入力できます。"/>
+                </TextBlock>
+            </StackPanel>
+        </Border>
+
+        <!-- 利用行一覧 -->
+        <ListView Grid.Row="1"
+                  ItemsSource="{Binding Items}"
+                  BorderThickness="1"
+                  BorderBrush="{DynamicResource SubtleBorderBrush}"
+                  ScrollViewer.CanContentScroll="False"
+                  KeyboardNavigation.TabNavigation="Continue">
+            <ListView.ItemTemplate>
+                <DataTemplate>
+                    <!-- 横方向 StackPanel は折り返しが効かないため Grid で幅を制約する（#1687） -->
+                    <Grid Margin="10">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+
+                        <!-- 利用日 -->
+                        <TextBlock Grid.Column="0"
+                                   Text="{Binding UseDateDisplay}"
+                                   VerticalAlignment="Center"
+                                   Margin="0,0,12,0"
+                                   FontSize="{DynamicResource SmallFontSize}"/>
+
+                        <!-- 摘要と氏名プレビュー -->
+                        <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                            <TextBlock Text="{Binding Summary}"
+                                       TextWrapping="Wrap"
+                                       FontSize="{DynamicResource SmallFontSize}"/>
+                            <TextBlock Text="{Binding DisplayStaffNamePreview, StringFormat=氏名欄: {0}}"
+                                       TextWrapping="Wrap"
+                                       Foreground="{DynamicResource SecondaryTextBrush}"
+                                       FontSize="{DynamicResource SmallFontSize}"
+                                       AutomationProperties.Name="{Binding DisplayStaffNamePreview, StringFormat=氏名欄: {0}}"/>
+                        </StackPanel>
+
+                        <!-- 払出金額 -->
+                        <TextBlock Grid.Column="2"
+                                   Text="{Binding ExpenseDisplay}"
+                                   VerticalAlignment="Center"
+                                   Margin="12,0"
+                                   Foreground="{DynamicResource LendingForegroundBrush}"
+                                   FontWeight="Bold"
+                                   FontSize="{DynamicResource SmallFontSize}"/>
+
+                        <!-- 同行者数 -->
+                        <StackPanel Grid.Column="3" Orientation="Horizontal" VerticalAlignment="Center">
+                            <TextBlock Text="外" VerticalAlignment="Center" Margin="0,0,4,0"/>
+                            <TextBox Text="{Binding CompanionCountText, UpdateSourceTrigger=PropertyChanged}"
+                                     Width="60"
+                                     Padding="8,6"
+                                     TextAlignment="Right"
+                                     VerticalAlignment="Center"
+                                     FontSize="{DynamicResource BaseFontSize}"
+                                     AutomationProperties.Name="同行者数"
+                                     AutomationProperties.HelpText="本人を除く同行者の人数。0～99 の整数"
+                                     ToolTip="本人を除く同行者の人数（0～99）"/>
+                            <TextBlock Text="名" VerticalAlignment="Center" Margin="4,0,0,0"/>
+                        </StackPanel>
+                    </Grid>
+                </DataTemplate>
+            </ListView.ItemTemplate>
+            <ListView.ItemContainerStyle>
+                <Style TargetType="ListViewItem">
+                    <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+                    <Setter Property="Padding" Value="0"/>
+                    <Setter Property="Margin" Value="0"/>
+                    <Setter Property="IsTabStop" Value="False"/>
+                </Style>
+            </ListView.ItemContainerStyle>
+        </ListView>
+
+        <!-- ステータスメッセージ（複数行になり得るため折り返し） -->
+        <TextBlock Grid.Row="2"
+                   Text="{Binding StatusMessage}"
+                   TextWrapping="Wrap"
+                   Foreground="{DynamicResource PrimaryBrush}"
+                   FontWeight="Bold"
+                   FontSize="{DynamicResource SmallFontSize}"
+                   Margin="0,10,0,0"
+                   AutomationProperties.Name="{Binding StatusMessage}"/>
+
+        <!-- ボタン -->
+        <StackPanel Grid.Row="3"
+                    Orientation="Horizontal"
+                    HorizontalAlignment="Right"
+                    Margin="0,15,0,0">
+            <Button Content="後で入力（スキップ）(_K)"
+                    Command="{Binding SkipCommand}"
+                    Padding="15,10"
+                    Margin="0,0,10,0"
+                    IsCancel="True"
+                    FontSize="{DynamicResource BaseFontSize}"
+                    AutomationProperties.Name="スキップ"
+                    AutomationProperties.HelpText="同行者数を入力せずにダイアログを閉じます。後で履歴の行編集から入力できます。"
+                    ToolTip="後で入力する場合はスキップ (Escape / Alt+K)"/>
+            <Button Content="保存(_S)"
+                    Command="{Binding SaveCommand}"
+                    Padding="20,10"
+                    Background="{DynamicResource SuccessActionBrush}"
+                    Foreground="{DynamicResource OnPrimaryBrush}"
+                    IsDefault="True"
+                    FontSize="{DynamicResource BaseFontSize}"
+                    AutomationProperties.Name="同行者数を保存"
+                    AutomationProperties.HelpText="入力した同行者数を保存します"
+                    ToolTip="同行者数を保存 (Enter / Alt+S)"/>
+        </StackPanel>
+
+        <!-- 処理中オーバーレイ -->
+        <Border Grid.RowSpan="4"
+                Background="{DynamicResource OverlayBrush}"
+                Visibility="{Binding IsBusy, Converter={StaticResource BoolToVisibilityConverter}}">
+            <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
+                <ProgressBar IsIndeterminate="True" Width="200" Height="4"/>
+                <TextBlock Text="{Binding BusyMessage}"
+                           Foreground="{DynamicResource OnPrimaryBrush}"
+                           FontSize="{DynamicResource BaseFontSize}"
+                           Margin="0,10,0,0"
+                           HorizontalAlignment="Center"/>
+            </StackPanel>
+        </Border>
+    </Grid>
+</Window>

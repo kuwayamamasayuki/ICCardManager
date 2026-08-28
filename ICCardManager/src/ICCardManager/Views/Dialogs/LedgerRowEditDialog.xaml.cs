@@ -82,6 +82,9 @@ namespace ICCardManager.Views.Dialogs
                 nameof(LedgerRowEditViewModel.Income) => IncomeTextBox,
                 nameof(LedgerRowEditViewModel.Expense) => ExpenseTextBox,
                 nameof(LedgerRowEditViewModel.Balance) => BalanceTextBox,
+                // Issue #1906: 対応を足さないと、同行者数が範囲外のとき保存を押しても
+                // どこを直せばよいかフォーカスが示さない
+                nameof(LedgerRowEditViewModel.CompanionCount) => CompanionCountTextBox,
                 _ => null
             };
             target?.Focus();
