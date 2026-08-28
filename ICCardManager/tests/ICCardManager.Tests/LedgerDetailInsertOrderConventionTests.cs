@@ -30,6 +30,17 @@ namespace ICCardManager.Tests;
 /// 検査は「禁止された形の不在」と「正しい形の存在」を対で表明する。前者だけだと、
 /// 呼び出しごと消して別経路で書き込む実装でも緑になる。
 /// </para>
+/// <para>
+/// <b>単数形 <c>InsertDetailAsync</c> は意図的に対象外</b>。1 行だけを書く API は
+/// 呼び出し単位では並び順を表現できず、順序の意味はループの回し方に宿るため、
+/// 引数を見る本検査では判定できない。現在の呼び出し元は
+/// <c>DebugDataService</c>（<c>#if DEBUG</c> のテストデータ生成）と
+/// <c>LendingService</c> の残高不足マージ（Issue #978。チャージ → 利用の順に挿入する
+/// 規約の明示的な例外で、<c>LedgerDetail.SequenceNumber</c> の XML doc に記載済み）だけで、
+/// 本番の一括書き込みはすべて複数形の API を通る。単数形をループで回す本番経路を
+/// 新設するなら、複数形の API へ寄せること（`.claude/rules/development-conventions.md`
+/// 「同じ論理的な書き込みに手段が 2 通りあるか」）。
+/// </para>
 /// </remarks>
 public class LedgerDetailInsertOrderConventionTests
 {

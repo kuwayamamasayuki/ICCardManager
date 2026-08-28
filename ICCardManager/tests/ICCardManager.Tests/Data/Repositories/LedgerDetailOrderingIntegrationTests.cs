@@ -340,5 +340,75 @@ public class LedgerDetailOrderingIntegrationTests : IDisposable
         result!.Details.Should().HaveCount(2);
     }
 
+    /// <summary>
+    /// 期間指定の一括取得も、残高チェーンを構築できないとき時系列昇順で返すこと（Issue #1913）
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>GetAllDetailsInDateRangeAsync</c> の唯一の消費側（<c>CsvExportService</c>）は
+    /// <c>LedgerDetailChronologicalSorter.Sort</c> で並べ替えるが、既定は
+    /// <c>preserveOrderOnFailure: true</c> のため、チェーンを構築できないとき
+    /// （残額が欠けた明細を含む・同日で循環する等）は<b>この SQL の順序をそのまま出力する</b>。
+    /// </para>
+    /// <para>
+    /// rowid は FeliCa 互換で「小さい値ほど新しい」ため、rowid 昇順は逆時系列を意味する。
+    /// 旧実装（`ORDER BY … d.rowid`）はこの状態で CSV を逆順に出しており、その CSV を
+    /// 取り込むと Issue #1913 で入れた <c>Reverse()</c> が重なって完全に反転した並びが
+    /// 保存される（本 Issue が消そうとしている状態そのもの）。
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task GetAllDetailsInDateRange_残高チェーンを構築できないとき_時系列昇順で返すこと()
+    {
+        // Arrange: 残額を持たない明細（＝チェーン構築が失敗する）を、本番と同じ「新しい順」で挿入
+        var ledgerId = await CreateTestLedger("バス利用", expense: 600);
+        var newestFirst = new List<LedgerDetail>
+        {
+            new() { UseDate = DateTime.Today, BusStops = "停C", Amount = 200, Balance = null, IsBus = true },
+            new() { UseDate = DateTime.Today, BusStops = "停B", Amount = 200, Balance = null, IsBus = true },
+            new() { UseDate = DateTime.Today, BusStops = "停A", Amount = 200, Balance = null, IsBus = true }
+        };
+        await _repository.InsertDetailsAsync(ledgerId, newestFirst);
+
+        // Act
+        var result = await _repository.GetAllDetailsInDateRangeAsync(
+            DateTime.Today.AddDays(-1), DateTime.Today.AddDays(1));
+
+        // Assert: 古い順（時系列昇順）。単票クエリ GetDetailsAsync と同じ並び
+        result.Select(d => d.BusStops).Should().Equal(
+            new[] { "停A", "停B", "停C" },
+            "rowid は小さいほど新しいため、時系列昇順にするには rowid 降順で読む（Issue #1913）");
+    }
+
+    /// <summary>
+    /// 対の検査: 残高チェーンを構築できるときも、期間指定の一括取得は単票クエリと同じ並びを返すこと。
+    /// </summary>
+    /// <remarks>
+    /// フォールバック側だけを固定すると、SQL の並びを消して常に rowid 昇順へ倒した実装でも
+    /// 「チェーンが効くケースは消費側が直すから」と見逃せてしまう。
+    /// </remarks>
+    [Fact]
+    public async Task GetAllDetailsInDateRange_残高チェーンがあるとき_単票クエリと同じ並びを返すこと()
+    {
+        // Arrange: 残高が繋がる明細（1000 → 790 → 580）を、本番と同じ「新しい順」で挿入
+        var ledgerId = await CreateTestLedger("鉄道", expense: 420);
+        var newestFirst = new List<LedgerDetail>
+        {
+            new() { UseDate = DateTime.Today, EntryStation = "薬院", ExitStation = "大橋", Amount = 210, Balance = 580 },
+            new() { UseDate = DateTime.Today, EntryStation = "天神", ExitStation = "博多", Amount = 210, Balance = 790 }
+        };
+        await _repository.InsertDetailsAsync(ledgerId, newestFirst);
+
+        // Act
+        var fromRange = await _repository.GetAllDetailsInDateRangeAsync(
+            DateTime.Today.AddDays(-1), DateTime.Today.AddDays(1));
+        var fromSingle = await _repository.GetByIdAsync(ledgerId);
+
+        // Assert
+        fromRange.Select(d => d.Balance).Should().Equal(
+            fromSingle!.Details.Select(d => d.Balance),
+            "期間指定の一括取得と単票クエリで明細の並びが食い違わないこと");
+    }
+
     #endregion
 }
