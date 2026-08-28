@@ -51,8 +51,10 @@ namespace ICCardManager.Dtos
         /// 設定されていたバックアップ保存先（Issue #1924）。未設定の場合は null または空文字
         /// </summary>
         /// <remarks>
-        /// <see cref="BackupFolderPath"/> と食い違う場合、設定した場所が使えず既定パスへ
-        /// 退避していることを意味する。理由は <see cref="BackupFolderFallbackReason"/> に入る。
+        /// 退避したかの判定は <see cref="IsBackupFolderFallback"/>（＝退避理由の有無）で行うこと。
+        /// <see cref="BackupFolderPath"/> は正規化済みで、本プロパティは設定された生の値のため、
+        /// 退避していなくても文字列としては食い違い得る（末尾区切り文字・相対表記の解決など）。
+        /// 理由は <see cref="BackupFolderFallbackReason"/> に入る。
         /// </remarks>
         public string ConfiguredFolderPath { get; set; }
 

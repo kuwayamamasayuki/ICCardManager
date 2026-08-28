@@ -603,6 +603,73 @@ public class PathValidatorTests : IDisposable
         result.ErrorMessage.Should().Contain("ネットワーク共有に到達できません");
     }
 
+    /// <summary>
+    /// Issue #1924: 中間フォルダーごと未作成でも、実在する最も近い祖先が書き込み権限の検査対象になる。
+    /// </summary>
+    /// <remarks>
+    /// 直近の親だけを見る実装では、`a\b\backup` のように中間ごと未作成のパスで検査が
+    /// 丸ごと省略されていた。`Directory.CreateDirectory` が実際に書き込む先は
+    /// 「実在する最も近い祖先」なので、そこを検査しないと権限不足が検証で表に出ず、
+    /// バックアップがどこにも作られない状態（既定パスへの退避も働かない）になり得る。
+    /// </remarks>
+    [Fact]
+    public void FindNearestExistingAncestor_中間フォルダーが未作成でも実在する祖先を返すこと()
+    {
+        // Arrange: _testDirectory は実在し、その下は 3 段とも未作成
+        var deepPath = Path.Combine(_testDirectory, "a", "b", "backup");
+
+        // Act
+        var ancestor = PathValidator.FindNearestExistingAncestor(deepPath);
+
+        // Assert
+        ancestor.Should().Be(_testDirectory);
+    }
+
+    /// <summary>
+    /// Issue #1924: 直近の親が実在するときはそれを返す（従来の検査対象と一致すること）。
+    /// </summary>
+    [Fact]
+    public void FindNearestExistingAncestor_直近の親が実在するときはそれを返すこと()
+    {
+        var path = Path.Combine(_testDirectory, "backup");
+
+        PathValidator.FindNearestExistingAncestor(path).Should().Be(_testDirectory);
+    }
+
+    /// <summary>
+    /// Issue #1924 の対: 返すのは必ず「実在するフォルダー」か null であること。
+    /// </summary>
+    /// <remarks>
+    /// 対の表明が無いと、常に直近の親を返す（＝実在しないフォルダーを書き込み検査の対象にする）
+    /// 実装でも上の 2 件が緑になる。検査対象が実在しなければ書き込みプローブは
+    /// DirectoryNotFoundException になり、検証は「権限あり」でも「権限なし」でもない
+    /// 別の理由で失敗して原因を取り違える。
+    /// </remarks>
+    [Theory]
+    [InlineData("a")]
+    [InlineData("a/b")]
+    [InlineData("a/b/c/backup")]
+    public void FindNearestExistingAncestor_返すのは実在するフォルダーかnullであること(string relative)
+    {
+        var path = Path.Combine(_testDirectory, relative.Replace('/', Path.DirectorySeparatorChar));
+
+        var ancestor = PathValidator.FindNearestExistingAncestor(path);
+
+        ancestor.Should().NotBeNull("_testDirectory は実在するため必ず祖先が見つかる");
+        Directory.Exists(ancestor).Should().BeTrue("書き込みプローブは実在するフォルダーに対してのみ意味を持つ");
+    }
+
+    /// <summary>
+    /// Issue #1924: ルートそのものを渡しても無限ループしないこと。
+    /// </summary>
+    [Fact]
+    public void FindNearestExistingAncestor_ルートを渡しても停止すること()
+    {
+        var act = () => PathValidator.FindNearestExistingAncestor(@"C:\");
+
+        act.Should().NotThrow();
+    }
+
     #endregion
 
     #region テスト用ヘルパー

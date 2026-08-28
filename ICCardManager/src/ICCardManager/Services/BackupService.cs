@@ -259,10 +259,31 @@ namespace ICCardManager.Services
                 }
             }
 
+            // Issue #1924: 正規化に失敗したときの既定パスへの退避も「設定されていたのに使えなかった」
+            // 経路であり、理由を立てないと本 Issue が消そうとした無言のフォールバックがここだけ残る。
+            var normalizedPath = PathValidator.NormalizePath(backupPath);
+            if (normalizedPath == null)
+            {
+                _logger.LogWarning(
+                    "バックアップパスを正規化できません: {Path}。デフォルトパスを使用します",
+                    backupPath);
+
+                // 未設定で既定パスを選んでいる場合は「設定されていたのに使えなかった」ではないため
+                // 理由を立てない（BackupFolderResolution.FallbackReason の契約）。
+                if (fallbackReason == null && !string.IsNullOrWhiteSpace(configuredPath))
+                {
+                    fallbackReason =
+                        "指定されたパスを保存先として解釈できません。" +
+                        "「C:\\Backup」のようにドライブ文字から始まる絶対パス、" +
+                        "または「\\\\server\\share\\backup」形式のネットワークパスを指定してください。";
+                }
+
+                normalizedPath = PathValidator.GetDefaultBackupPath();
+            }
+
             return new BackupFolderResolution
             {
-                EffectiveFolderPath =
-                    PathValidator.NormalizePath(backupPath) ?? PathValidator.GetDefaultBackupPath(),
+                EffectiveFolderPath = normalizedPath,
                 ConfiguredFolderPath = configuredPath,
                 FallbackReason = fallbackReason
             };
@@ -532,27 +553,13 @@ namespace ICCardManager.Services
         /// </summary>
         public virtual async Task<IEnumerable<BackupFileInfo>> GetBackupFilesAsync()
         {
-            var settings = await _settingsRepository.GetAppSettingsAsync().ConfigureAwait(false);
-            var backupPath = settings.BackupPath;
-
-            if (string.IsNullOrWhiteSpace(backupPath))
-            {
-                backupPath = PathValidator.GetDefaultBackupPath();
-            }
-            else
-            {
-                // パスを検証（Issue #1746: リストア画面から UI スレッドで呼ばれるため、
-                // ResolveBackupFolderAsync と同じ理由で非同期版を使う）
-                var validationResult = await PathValidator.ValidateBackupPathAsync(backupPath).ConfigureAwait(false);
-                if (!validationResult.IsValid)
-                {
-                    _logger.LogWarning(
-                        "バックアップパスが無効です: {Path} - {Error}。デフォルトパスを使用します",
-                        backupPath,
-                        validationResult.ErrorMessage);
-                    backupPath = PathValidator.GetDefaultBackupPath();
-                }
-            }
+            // Issue #1924: 保存先の解決は ResolveBackupFolderDetailAsync ただ 1 つに寄せる。
+            // 「設定値 → 検証 → 既定パスへ退避 → 正規化」を各所で書き写すと、
+            // 一覧が見るフォルダと実際に書かれるフォルダが片方だけ変わる日が来る
+            //（正規化の有無・settings が null のときの扱いが実際に食い違っていた）。
+            // 検証は非同期版を通るため、リストア画面から UI スレッドで呼んでも
+            // UNC 到達性チェックでブロックしない（Issue #1746）。
+            var backupPath = await ResolveBackupFolderAsync().ConfigureAwait(false);
 
             if (!Directory.Exists(backupPath))
             {

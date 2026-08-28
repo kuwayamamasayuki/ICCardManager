@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using FluentAssertions;
 using ICCardManager.Data.Repositories;
 using ICCardManager.Infrastructure.Sound;
@@ -502,6 +502,95 @@ public class SettingsViewModelTests
         // Assert
         _viewModel.HasChanges.Should().BeTrue();
     }
+
+    #region Issue #1924: データベース保存先が未作成のときの確認
+
+    /// <summary>
+    /// Issue #1924: データベース保存先フォルダーが未作成なら、続行前に確認する。
+    /// </summary>
+    /// <remarks>
+    /// バックアップ先の検証は「フォルダーがまだ無い」ことを許容する（作成は実行時に行う）が、
+    /// この検証は DB 保存先にも使い回されている。DB の場合、未作成のフォルダーを指定して
+    /// 再起動すると SQLite が新しい空の DB をそこに作り、既存の共有データベースから
+    /// 切り離される（台帳分裂）。入力誤りと初回セットアップはパスだけでは区別できないため、
+    /// 機械的に弾かずに利用者へ判断させる。
+    /// </remarks>
+    [Fact]
+    public void ConfirmCreatingNewDatabaseFolderIfMissing_未作成なら確認しいいえで中止すること()
+    {
+        // Arrange
+        _dialogServiceMock
+            .Setup(d => d.ShowConfirmation(It.IsAny<string>(), It.IsAny<string>()))
+            .Returns(false);
+
+        // Act
+        var proceed = _viewModel.ConfirmCreatingNewDatabaseFolderIfMissing(
+            @"\\server\share\iccrad", folderExists: false);
+
+        // Assert
+        proceed.Should().BeFalse();
+        _dialogServiceMock.Verify(
+            d => d.ShowConfirmation(It.IsAny<string>(), It.IsAny<string>()), Times.Once);
+    }
+
+    /// <summary>
+    /// Issue #1924: 「はい」を選べば続行する。
+    /// </summary>
+    [Fact]
+    public void ConfirmCreatingNewDatabaseFolderIfMissing_未作成でもはいなら続行すること()
+    {
+        _dialogServiceMock
+            .Setup(d => d.ShowConfirmation(It.IsAny<string>(), It.IsAny<string>()))
+            .Returns(true);
+
+        var proceed = _viewModel.ConfirmCreatingNewDatabaseFolderIfMissing(
+            @"\\server\share\iccard", folderExists: false);
+
+        proceed.Should().BeTrue();
+    }
+
+    /// <summary>
+    /// Issue #1924 の対: フォルダーが実在するときは確認を出さない。
+    /// </summary>
+    /// <remarks>
+    /// 対の表明が無いと、DB 保存先を変えるたびに常に確認が出る実装でも上の 2 件が緑になる。
+    /// 通常運用（既存の共有フォルダーを指定し直す）に確認を挟まないことを固定する。
+    /// </remarks>
+    [Fact]
+    public void ConfirmCreatingNewDatabaseFolderIfMissing_実在するなら確認を出さないこと()
+    {
+        var proceed = _viewModel.ConfirmCreatingNewDatabaseFolderIfMissing(
+            @"\\server\share\iccard", folderExists: true);
+
+        proceed.Should().BeTrue();
+        _dialogServiceMock.Verify(
+            d => d.ShowConfirmation(It.IsAny<string>(), It.IsAny<string>()), Times.Never);
+    }
+
+    /// <summary>
+    /// Issue #1924: 確認文言は「何が／なぜ／どうすれば」を含み、対象フォルダーを名指しすること。
+    /// </summary>
+    [Fact]
+    public void ConfirmCreatingNewDatabaseFolderIfMissing_確認文言が3要素を含むこと()
+    {
+        string capturedMessage = null;
+        _dialogServiceMock
+            .Setup(d => d.ShowConfirmation(It.IsAny<string>(), It.IsAny<string>()))
+            .Callback<string, string>((m, _) => capturedMessage = m)
+            .Returns(false);
+
+        _viewModel.ConfirmCreatingNewDatabaseFolderIfMissing(
+            @"\\server\share\iccrad", folderExists: false);
+
+        // 何が: 対象フォルダーを名指しする
+        capturedMessage.Should().Contain(@"\\server\share\iccrad");
+        // なぜ: 続行すると新しい空の DB が作られる
+        capturedMessage.Should().Contain("新しい空のデータベース");
+        // どうすれば: パスの入力誤りを確認させる
+        capturedMessage.Should().Contain("入力誤り");
+    }
+
+    #endregion
 
     #endregion
 }

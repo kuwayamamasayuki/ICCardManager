@@ -1,4 +1,4 @@
-using System.Collections.ObjectModel;
+﻿using System.Collections.ObjectModel;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using ICCardManager.Common;
@@ -336,6 +336,26 @@ public partial class SettingsViewModel : ViewModelBase
                         }
                         validatedFolderPath = normalizedDir;
                         fullDbPath = Path.Combine(normalizedDir, Data.DbContext.DatabaseFileName);
+
+                        // Issue #1924: 保存先フォルダーが未作成なら、続行前に確認する。
+                        //
+                        // バックアップ先の検証（ValidateBackupPathAsync）は「フォルダーが
+                        // まだ無い」ことを許容する（作成は実行時に行う）。この検証は DB 保存先にも
+                        // 使い回されているが、DB の場合は意味が違う ―― 未作成のフォルダーを
+                        // 指定して再起動すると、SQLite が**新しい空の DB**をそこに作り、
+                        // 既存の共有データベースからは切り離される（台帳分裂）。
+                        // 入力誤り（共有名のタイポ）と初回セットアップ（意図的な新規作成）は
+                        // パスだけでは区別できないため、機械的に弾かずに利用者へ判断させる
+                        //（`.claude/rules/development-conventions.md`「曖昧な入力は『塞ぐ』より
+                        // 『解決結果を見せる』」）。
+                        //
+                        // Directory.Exists は UNC でハングし得るため Task.Run へ逃がす（Issue #1746）。
+                        var folderExists = await Task.Run(() => Directory.Exists(normalizedDir));
+                        if (!ConfirmCreatingNewDatabaseFolderIfMissing(normalizedDir, folderExists))
+                        {
+                            SetStatus("データベース保存先の変更を中止しました。", false);
+                            return;
+                        }
                     }
 
                     try
@@ -364,6 +384,46 @@ public partial class SettingsViewModel : ViewModelBase
             {
                 SetStatus("設定の保存に失敗しました", true);
             }
+        }
+    }
+
+    /// <summary>
+    /// データベース保存先フォルダーが未作成のとき、新規データベースが作られることを確認する（Issue #1924）
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// モーダル表示は <c>BeginBusy</c> スコープの内側にあるため <c>SuspendBusy()</c> で囲む。
+    /// 囲まないと全面オーバーレイと不確定 ProgressBar がダイアログの背後で回り続け、
+    /// 利用者の判断を妨げる（Issue #1793 / `03_画面設計書.md` §3.10）。
+    /// </para>
+    /// <para>
+    /// フォルダーの存在確認（I/O）は呼び出し元が行い、本メソッドは<b>判断と提示</b>だけを担う。
+    /// <c>Directory.Exists</c> は UNC でハングし得るため呼び出し元が <c>Task.Run</c> へ逃がしており
+    /// （Issue #1746）、判断を分離することで実ファイルシステムに触れずに単体テストできる
+    /// （Issue #1794「判断を純関数へ切り出す」と同じ形）。
+    /// </para>
+    /// </remarks>
+    /// <param name="folderPath">正規化済みのデータベース保存先フォルダー</param>
+    /// <param name="folderExists">そのフォルダーが実在するか</param>
+    /// <returns>続行してよい場合 true</returns>
+    internal bool ConfirmCreatingNewDatabaseFolderIfMissing(string folderPath, bool folderExists)
+    {
+        if (folderExists)
+        {
+            return true;
+        }
+
+        const string Title = "データベース保存先の確認";
+        var message =
+            "指定されたフォルダーは存在しません。\n\n" +
+            $"　{folderPath}\n\n" +
+            "続行すると、このフォルダーを作成して新しい空のデータベースを作成します。\n" +
+            "既存の共有データベースへ接続するつもりなら、パスの入力誤りがないか確認してください。\n\n" +
+            "このまま続行しますか？";
+
+        using (SuspendBusy())
+        {
+            return _dialogService.ShowConfirmation(message, Title);
         }
     }
 
