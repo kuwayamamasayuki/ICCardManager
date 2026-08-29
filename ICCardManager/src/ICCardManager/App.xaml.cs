@@ -52,6 +52,12 @@ namespace ICCardManager
         private string _rejectedDatabaseConfigPath;
 
         /// <summary>
+        /// Issue #1910: 二重起動防止のガード。プロセスが生きている間ミューテックスのハンドルを
+        /// 保持し続ける必要があるため、フィールドで保持して <see cref="OnExit"/> で破棄する。
+        /// </summary>
+        private SingleInstanceGuard _singleInstanceGuard;
+
+        /// <summary>
         /// 現在のアプリケーションインスタンス
         /// </summary>
         public static new App Current => (App)Application.Current;
@@ -90,12 +96,6 @@ namespace ICCardManager
             // 古いログファイルを削除
             ErrorDialogHelper.CleanupOldLogs();
 
-            // Issue #1600: 帳票作成時に %TEMP%\ICCardManager へ展開された一時テンプレート
-            // （ICCardManager_Template_*.xlsx）を回収する。OnExit ではなく起動時に呼ぶことで、
-            // 前回がクラッシュや起動失敗（Shutdown(1)）で終了した場合でも確実に蓄積分を削除できる。
-            // 内部で例外を握りつぶす実装のため、try より前で直接呼んでよい。
-            TemplateResolver.CleanupTempFiles();
-
             try
             {
                 // 設定ファイルを読み込み
@@ -114,6 +114,22 @@ namespace ICCardManager
                 _logger.LogInformation("アプリケーション起動開始");
 
                 _logger.LogDebug("DIコンテナ構築完了");
+
+                // Issue #1910: 二重起動を防ぐ。二重に起動すると FelicaCardReader が 2 つ動き、
+                // 1 回のタッチが 2 回読み取られて「貸出直後に返却」が 6 年保存の台帳へ残る。
+                // この判定は破壊的な処理（下の CleanupTempFiles）より前に置くこと ―
+                // 一時テンプレートの回収は起動中のインスタンスが使用中のファイルも消し得るため。
+                if (!TryAcquireSingleInstanceLock())
+                {
+                    Shutdown(0);
+                    return;
+                }
+
+                // Issue #1600: 帳票作成時に %TEMP%\ICCardManager へ展開された一時テンプレート
+                // （ICCardManager_Template_*.xlsx）を回収する。OnExit ではなく起動時に呼ぶことで、
+                // 前回がクラッシュや起動失敗（Shutdown(1)）で終了した場合でも確実に蓄積分を削除できる。
+                // 内部で例外を握りつぶす実装のため、失敗しても起動は継続する。
+                TemplateResolver.CleanupTempFiles();
 
                 // データベース初期化（SummaryGenerator等がsettingsテーブルを参照するため、DI解決より先に実行）
                 await InitializeDatabaseAsync();
@@ -192,6 +208,86 @@ namespace ICCardManager
 
                 Shutdown(1);
             }
+        }
+
+        /// <summary>
+        /// 二重起動を判定し、起動を継続してよいかを返す（Issue #1910）
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// 既に起動していた場合は、まず<b>起動済みの画面を前面へ出す</b>。
+        /// 職員が起動アイコンを押した理由は「画面を見たい」であり、それが満たされるなら
+        /// 追加のクリックを要求しない（画面が前に出ること自体が可視の応答になる）。
+        /// </para>
+        /// <para>
+        /// 前面へ出せなかったとき（別ユーザーのセッション・フォアグラウンドロックによる拒否・
+        /// 先行インスタンスが画面をまだ出していない）だけ案内を表示する。
+        /// 案内を出さずに黙って終了すると、職員には「アイコンを押しても何も起きない」ようにしか見えない。
+        /// </para>
+        /// <para>
+        /// 案内の「どうすれば」は<b>前面化の結果</b>（<see cref="ActivationOutcome"/>）で選ぶ。
+        /// <see cref="SingleInstanceStatus"/> は DACL の所有者しか表さないため、
+        /// 同じユーザーが 2 セッションで起動している場合に「タスクバーで切り替えてください」という
+        /// このセッションでは実行できない指示になる。
+        /// </para>
+        /// </remarks>
+        /// <returns>起動を継続してよければ <c>true</c>。中止すべきなら <c>false</c>。</returns>
+        private bool TryAcquireSingleInstanceLock()
+        {
+            _singleInstanceGuard = SingleInstanceGuard.Acquire(AppConstants.SingleInstanceMutexName);
+
+            if (_singleInstanceGuard.Status == SingleInstanceStatus.GuardUnavailable)
+            {
+                // 予防機構の不調で業務を止めない。理由は残す（なぜ二重起動できたのかを後から追うため）。
+                _logger.LogWarning(
+                    _singleInstanceGuard.AcquisitionError,
+                    "二重起動の判定に失敗したため、判定せずに起動を継続します");
+                return true;
+            }
+
+            if (_singleInstanceGuard.IsPrimaryInstance)
+            {
+                return true;
+            }
+
+            // 起動を中止すると決めた時点でハンドルを閉じる。閉じずに案内ダイアログを
+            // 表示している間に先行インスタンスが終了すると、こちらのハンドルだけで
+            // カーネルオブジェクトが生き残り、次の起動が「既に起動しています」と
+            // 誤判定されて誰も起動できなくなる（OnExit まで持ち越さない）。
+            _singleInstanceGuard.Dispose();
+
+            var outcome = ExistingInstanceActivator.TryActivateExistingInstance();
+
+            // 判定の根拠（別セッション判定の元になったアクセス拒否の例外）を必ず載せる。
+            // 残さないと「起動できないのに理由が分からない」問い合わせを切り分けられない。
+            _logger.LogInformation(
+                _singleInstanceGuard.AcquisitionError,
+                "二重起動を検出したため起動を中止しました（Status={Status}、前面化={Outcome}）",
+                _singleInstanceGuard.Status,
+                outcome);
+
+            if (outcome == ActivationOutcome.Activated)
+            {
+                // 画面が前に出たこと自体が可視の応答になるので、案内は表示しない。
+                return false;
+            }
+
+            // 案内の「どうすれば」は前面化の結果で選ぶ。ミューテックスの Status は
+            // 「別ユーザーかどうか」しか表さず、同じユーザーの 2 セッション
+            // （リモートデスクトップ・簡易切り替え）で実行できない指示になる。
+            var message = _singleInstanceGuard.Status == SingleInstanceStatus.AlreadyRunningInOtherSession
+                ? SingleInstanceNotice.BuildOtherUserSessionMessage()
+                : outcome == ActivationOutcome.ActivationRefused
+                    ? SingleInstanceNotice.BuildSameSessionMessage()
+                    : SingleInstanceNotice.BuildWindowNotFoundMessage();
+
+            Common.OwnedMessageBox.Show(
+                message,
+                SingleInstanceNotice.Title,
+                MessageBoxButton.OK,
+                MessageBoxImage.Information);
+
+            return false;
         }
 
         /// <summary>
@@ -879,6 +975,18 @@ namespace ICCardManager
             if (ServiceProvider is IDisposable disposable)
             {
                 disposable.Dispose();
+            }
+
+            // Issue #1910: 二重起動防止のミューテックスを解放する。
+            // プロセスの異常終了時は OS がハンドルを閉じるためここへ来なくてもよいが、
+            // 正常終了では次の起動を待たせないよう明示的に閉じる。
+            try
+            {
+                _singleInstanceGuard?.Dispose();
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogWarning(ex, "二重起動防止ミューテックスの解放でエラー");
             }
 
             base.OnExit(e);

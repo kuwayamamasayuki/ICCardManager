@@ -197,5 +197,30 @@ namespace ICCardManager.Common
         /// 管理者ダッシュボードの稼働状況グラフに表示するカード数の上限（稼働率の低い順）。
         /// </summary>
         public const int AdminDashboardUtilizationChartMaxCards = 15;
+
+        /// <summary>
+        /// 二重起動防止に用いる名前付きミューテックスの名前（Issue #1910）。
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// <c>Global\</c> 接頭辞を付けて<b>端末全体</b>で一意にする。
+        /// <c>Local\</c>（既定）はターミナルサービスのセッションごとに別物になるため、
+        /// ユーザーの簡易切り替えで 2 つのピッすいが同時に 1 台のカードリーダーを
+        /// 取り合う形が残ってしまう。
+        /// </para>
+        /// <para>
+        /// <b>インストール先のパスやデータベースのパスを名前に含めない。</b>
+        /// 含めると「別フォルダーへインストールした 2 つ目のピッすい」や
+        /// 「別データベースを見る 2 つ目のピッすい」が同時に起動でき、
+        /// 1 台しかないカードリーダーを取り合うという本 Issue の欠陥がそのまま残る。
+        /// 排他したい資源は台帳ではなくカードリーダー（＝端末）である。
+        /// </para>
+        /// <para>
+        /// 末尾の GUID は他社製ソフトウェアとの名前衝突を避けるためのもので、意味は持たない。
+        /// <b>変更すると、変更前のバージョンとの間で二重起動できてしまう</b>ため固定する。
+        /// </para>
+        /// </remarks>
+        public const string SingleInstanceMutexName =
+            @"Global\ICCardManager-SingleInstance-{7B4C1B2E-3F5A-4C0D-9E71-2A6D8F0B5C31}";
     }
 }
