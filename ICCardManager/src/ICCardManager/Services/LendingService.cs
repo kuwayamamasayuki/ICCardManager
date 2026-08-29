@@ -1089,9 +1089,12 @@ namespace ICCardManager.Services
                     // （FeliCa 互換で小さい値ほど新しい。下の通常経路が Reverse() で維持している）の
                     // 例外にあたる。残高不足マージで作る台帳の残高は上の mergedLedger.Balance で
                     // 利用後の実残高を直接持たせており、明細の並びからは決めていないため実害はない。
-                    // LedgerMergeService.MergeAsync の残高選択（最大 SequenceNumber を最新とみなす）は
-                    // この並びとだけ整合する。両者の食い違いは本 Issue のスコープ外で、
-                    // 挙動を伴う整理は別 Issue で扱う。
+                    //
+                    // Issue #1932: この台帳を履歴統合の対象にしたときの残額選択は
+                    // LedgerMergeService.OrderChronologically が担う。同メソッドは同一日内の順序を
+                    // まず残高チェーンで解き、解けないときだけ SequenceNumber の規約へ倒すため、
+                    // 規約の例外であるこの並び（チャージ → 利用）でも利用後の実残高が選ばれる。
+                    // ここの挿入順を変えるときは同メソッドの対のテストを確認すること。
                     charge.LedgerId = ledgerId;
                     await InsertDetail(charge).ConfigureAwait(false);
                     usage.LedgerId = ledgerId;

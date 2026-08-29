@@ -43,6 +43,52 @@ namespace ICCardManager.Common
             if (detailList.Count <= 1)
                 return new List<LedgerDetail>(detailList);
 
+            return BuildChain(detailList, strict: false)
+                ?? Fallback(detailList, preserveOrderOnFailure);
+        }
+
+        /// <summary>
+        /// 残高チェーンだけで時系列順を確定できるときにその並びを返し、
+        /// 曖昧・不完全なときは <c>null</c> を返す（Issue #1932）。
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// <see cref="Sort"/> との違いは「解けなかったこと」を呼び出し元へ伝えるかどうか。
+        /// <see cref="Sort"/> は必ず並びを返すためチェーンが途中で切れても残りを
+        /// 残高降順で継ぎ足すが、本メソッドは以下のいずれかに当たれば <c>null</c> を返す。
+        /// </para>
+        /// <list type="bullet">
+        /// <item><description>Balance を持たない明細がある</description></item>
+        /// <item><description>チェーンの先頭候補が 0 個または 2 個以上（開始点が定まらない）</description></item>
+        /// <item><description>途中の後続候補が 0 個または 2 個以上（次が定まらない）</description></item>
+        /// </list>
+        /// <para>
+        /// 呼び出し元は <c>null</c> を受けたら別の定義（SequenceNumber の規約等）へ倒すこと。
+        /// 「解けたことにして半端な並びを返す」と、その並びから採った残額が 6 年保存の台帳へ入る。
+        /// </para>
+        /// </remarks>
+        /// <param name="details">対象の明細リスト</param>
+        /// <returns>時系列順（古い→新しい）の新しいリスト。確定できないときは <c>null</c></returns>
+        internal static List<LedgerDetail>? TrySortByBalanceChain(IEnumerable<LedgerDetail> details)
+        {
+            var detailList = details.ToList();
+
+            if (detailList.Count <= 1)
+                return new List<LedgerDetail>(detailList);
+
+            return BuildChain(detailList, strict: true);
+        }
+
+        /// <summary>
+        /// 残高チェーンを構築する。構築できないときは <c>null</c> を返す。
+        /// </summary>
+        /// <param name="detailList">対象の明細リスト（2 件以上）</param>
+        /// <param name="strict">
+        /// true: 開始点・後続が一意に定まらない、またはチェーンが途中で切れたら <c>null</c>。
+        /// false: 従来挙動（開始点は最初の候補、途中で切れたら残りを残高降順で継ぎ足す）。
+        /// </param>
+        private static List<LedgerDetail>? BuildChain(List<LedgerDetail> detailList, bool strict)
+        {
             // balance_before を計算:
             // 残高増加（チャージ・ポイント還元）: balance_before = Balance - Amount
             // 残高減少（利用）: balance_before = Balance + Amount
@@ -65,7 +111,7 @@ namespace ICCardManager.Common
             // Balance情報が不十分な場合はフォールバック
             if (items.Count < detailList.Count)
             {
-                return Fallback(detailList, preserveOrderOnFailure);
+                return null;
             }
 
             // チェーン構築: balance_before が他のどのdetailの Balance にも一致しないものが先頭
@@ -73,14 +119,24 @@ namespace ICCardManager.Common
             // 自分自身のBalanceではなく他のエントリのBalanceとのみ比較する
             var remaining = new List<(LedgerDetail Detail, int BalanceBefore)>(items);
 
-            var start = remaining.FirstOrDefault(r =>
+            bool IsStartCandidate((LedgerDetail Detail, int BalanceBefore) r) =>
                 !remaining.Any(other =>
                     !ReferenceEquals(other.Detail, r.Detail) &&
-                    other.Detail.Balance!.Value == r.BalanceBefore));
+                    other.Detail.Balance!.Value == r.BalanceBefore);
+
+            // Issue #1932: strict では開始点が 2 つ以上あるときも「確定できなかった」とする。
+            // FirstOrDefault は候補が複数でも黙って 1 つ目を選ぶため、
+            // 「解けた」と「たまたま最初の候補を選んだ」を呼び出し元が区別できない。
+            if (strict && remaining.Count(IsStartCandidate) != 1)
+            {
+                return null;
+            }
+
+            var start = remaining.FirstOrDefault(r => IsStartCandidate(r));
             if (start.Detail == null)
             {
-                // チェーン構築失敗: フォールバック
-                return Fallback(detailList, preserveOrderOnFailure);
+                // チェーン構築失敗
+                return null;
             }
 
             var ordered = new List<LedgerDetail> { start.Detail };
@@ -89,6 +145,12 @@ namespace ICCardManager.Common
 
             while (remaining.Count > 0)
             {
+                // Issue #1932: strict では後続候補が 2 つ以上あるときも確定できないとみなす。
+                if (strict && remaining.Count(r => r.BalanceBefore == currentBalance) != 1)
+                {
+                    return null;
+                }
+
                 var next = remaining.FirstOrDefault(r => r.BalanceBefore == currentBalance);
                 if (next.Detail == null)
                 {
