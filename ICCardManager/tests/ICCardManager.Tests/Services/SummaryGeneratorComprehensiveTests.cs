@@ -3245,6 +3245,15 @@ public class SummaryGeneratorComprehensiveTests : IDisposable
     /// <remarks>
     /// 復元は「循環をひと続きに戻す」だけで、循環の解釈そのものは #878 に委ねる。
     /// 奇数長は個別表示、偶数長（4 以上）は中間で割って往復判定へ渡す。
+    /// <para>
+    /// <b>この期待値は #878 の中間分割の限界をそのまま引き継いでいる</b>（コードレビューで検出）。
+    /// 実際に成立していた 天神⇄博多 の往復が片道へ降格し、行きと帰りで経由地の異なる
+    /// 博多→天神→薬院 と 薬院→大橋→博多 が「博多～薬院 往復」として束ねられ、大橋 は現れない。
+    /// これは #1916 が「バランス判定は行きと帰りで区間数が釣り合うことしか見ない」と記録した
+    /// 既知の性質で、本 Issue が持ち込んだものではない（修正前は
+    /// 「鉄道（天神～博多 往復、天神～博多）」で 薬院 も 大橋 も失われていた）。
+    /// 是正するには #878 の中間分割そのものを見直す必要があるため、本 Issue では扱わない。
+    /// </para>
     /// </remarks>
     [Fact]
     public void Issue1917_復元した循環が偶数長なら878の中間分割で往復になる()
@@ -3293,6 +3302,39 @@ public class SummaryGeneratorComprehensiveTests : IDisposable
         // Assert
         results.Should().HaveCount(1);
         results[0].Summary.Should().Be("鉄道（天神～博多 往復、天神～大橋）");
+        OutputInputAndResult(details, results);
+    }
+
+    /// <summary>
+    /// 対の表明その 3: 逆走ガード以外の理由で打ち切られたチェーンは復元しないこと。
+    /// </summary>
+    /// <remarks>
+    /// 天神→薬院／薬院→博多（往路）、博多→薬院／薬院→天神（復路）のあと、
+    /// つながっていない 大橋→博多 が続く。復路チェーンの打ち切りは
+    /// 「乗車地がつながっていない（大橋）」ためであってガードのためではないので、
+    /// 併合しても閉じた循環にはならない。原因を問わず復元すると
+    /// 独立した 大橋→博多 が復路チェーンを巻き込み、
+    /// <b>実際に成立していた「天神～博多 往復」が失われる</b>。
+    /// </remarks>
+    [Fact]
+    public void Issue1917_逆走ガード以外の理由で閉じたチェーンは復元しない()
+    {
+        // Arrange: 同日の 5 区間（入力は履歴の新しい順）
+        var details = new List<LedgerDetail>
+        {
+            CreateRailwayUsage(new DateTime(2024, 12, 9), "大橋", "博多", 210, 4000),
+            CreateRailwayUsage(new DateTime(2024, 12, 9), "薬院", "天神", 210, 4210),
+            CreateRailwayUsage(new DateTime(2024, 12, 9), "博多", "薬院", 210, 4420),
+            CreateRailwayUsage(new DateTime(2024, 12, 9), "薬院", "博多", 210, 4630),
+            CreateRailwayUsage(new DateTime(2024, 12, 9), "天神", "薬院", 210, 4840),
+        };
+
+        // Act
+        var results = _generator.GenerateByDate(details);
+
+        // Assert
+        results.Should().HaveCount(1);
+        results[0].Summary.Should().Be("鉄道（天神～博多 往復、大橋～博多）");
         OutputInputAndResult(details, results);
     }
 
