@@ -1078,28 +1078,26 @@ namespace ICCardManager.Services
 
             // Issue #878: 乗り継ぎ統合を往復判定より先に行う
             // Issue #974: EnableTransferConsolidation で ON/OFF 可能
-            if (!_options.SummaryRules.EnableTransferConsolidation)
-            {
-                var withoutConsolidation = routes
-                    .Select(r => new ConsolidatedRoute(r.Entry, r.Exit, 1))
-                    .ToList();
-                return FormatRouteBlocks(EvaluateCandidate(withoutConsolidation));
-            }
-
             var suppressedIndices = new HashSet<int>();
-            var best = EvaluateCandidate(ConsolidateRoutes(routes, suppressedIndices));
+            var best = _options.SummaryRules.EnableTransferConsolidation
+                ? EvaluateCandidate(ConsolidateRoutes(routes, suppressedIndices))
+                : EvaluateCandidate(routes
+                    .Select(r => new ConsolidatedRoute(r.Entry, r.Exit, 1)).ToList());
 
             // Issue #1916: 延長を抑止した候補を試し、往復カバレッジで選び直す。
             // 往復検出が無効なら候補を比べる意味がない（すべてカバレッジ 0 になる）。
+            // 乗継統合が無効なら全区間の LegCount が 1 になるため
+            // HasUnexplainedThroughRoute が必ず false になり、ここは素通りする。
             if (_options.SummaryRules.EnableRoundTripDetection
+                && routes.Count <= MaxRoutesForCandidateSearch
                 && HasUnexplainedThroughRoute(best))
             {
                 // 抑止点を 1 つずつ増やす。1 周で何も改善しなければ打ち切るため、
                 // 反復回数は経路数を超えない。
                 for (int round = 1; round < routes.Count; round++)
                 {
+                    RouteCandidate? bestCandidate = null;
                     var bestIndex = -1;
-                    RouteCandidate bestCandidate = default;
 
                     for (int suppressAt = 1; suppressAt < routes.Count; suppressAt++)
                     {
@@ -1121,20 +1119,21 @@ namespace ICCardManager.Services
                             continue;
                         }
 
-                        if (bestIndex < 0 || IsBetterCandidate(candidate, bestCandidate))
+                        if (bestCandidate == null
+                            || IsBetterCandidate(candidate, bestCandidate.Value))
                         {
                             bestIndex = suppressAt;
                             bestCandidate = candidate;
                         }
                     }
 
-                    if (bestIndex < 0)
+                    if (bestCandidate == null)
                     {
                         break;
                     }
 
                     suppressedIndices.Add(bestIndex);
-                    best = bestCandidate;
+                    best = bestCandidate.Value;
                 }
             }
 
@@ -1142,14 +1141,23 @@ namespace ICCardManager.Services
         }
 
         /// <summary>
-        /// 候補が検出した往復がすべて「行きと帰りで区間数が一致する」か（Issue #1916）
+        /// 候補が検出した往復がすべて「行きと帰りで区間数が一致する」か（Issue #1916）。
+        /// <b>交通系固有</b>（往復判定。domain-boundaries.md の分類）
         /// </summary>
         /// <remarks>
         /// <para>
-        /// 本物の往復は行きと帰りで同じ場所を通るため、統合後の両側が束ねている
-        /// 元区間の件数（<see cref="ConsolidatedRoute.LegCount"/>）は一致する。
-        /// 区間数が非対称な「往復」は、片側の統合が隠した場所をもう片側が通っていないことを意味し、
+        /// 統合後の両側が束ねている元区間の件数（<see cref="ConsolidatedRoute.LegCount"/>）が
+        /// 非対称な「往復」は、片側の統合が隠した場所をもう片側がそもそも通っていないことを意味し、
         /// <b>起きていない往復を主張しつつ実際に用務のあった場所を台帳から消す</b>。
+        /// </para>
+        /// <para>
+        /// <b>件数の一致は「行きと帰りで同じ場所を通った」ことまでは保証しない</b>
+        /// （コードレビューでの指摘）。A→B→C の往路と C→D→A の復路はどちらも 2 区間なので
+        /// この判定を通り、摘要は「A～C 往復」になって B と D は現れない。
+        /// ただしこれは<b>偶数長の循環チェーンを中間で割って往復判定へ渡す #878 の解釈と同じ</b>で、
+        /// 途中駅が摘要に現れないのは乗継統合そのものの性質である
+        /// （A→B→C を「A～C」と書くのと同じ）。本メソッドが弾くのは
+        /// 「片側だけが統合されていて往復として釣り合っていない」形に限る。
         /// </para>
         /// <para>
         /// 実例（コードレビューで検出）: 薬院→天神／天神→博多／博多→薬院／薬院→大橋 では、
@@ -1200,7 +1208,8 @@ namespace ICCardManager.Services
         }
 
         /// <summary>
-        /// 統合候補に往復検出を通し、選択に使う指標を算出する（Issue #1916）
+        /// 統合候補に往復検出を通し、選択に使う指標を算出する（Issue #1916）。
+        /// <b>交通系固有</b>（往復・乗継判定。domain-boundaries.md の分類）
         /// </summary>
         private RouteCandidate EvaluateCandidate(List<ConsolidatedRoute> consolidatedRoutes)
         {
@@ -1238,7 +1247,8 @@ namespace ICCardManager.Services
         }
 
         /// <summary>
-        /// 「乗継統合が作った通し区間のうち、往復として説明できていないもの」があるか（Issue #1916）
+        /// 「乗継統合が作った通し区間のうち、往復として説明できていないもの」があるか（Issue #1916）。
+        /// <b>交通系固有</b>（往復・乗継判定。domain-boundaries.md の分類）
         /// </summary>
         /// <remarks>
         /// <para>
@@ -1259,7 +1269,8 @@ namespace ICCardManager.Services
                 r => candidate.ConsolidatedRoutes[r.Index].LegCount >= 2);
 
         /// <summary>
-        /// 統合候補どうしを比較する（Issue #1916）
+        /// 統合候補どうしを比較する（Issue #1916）。
+        /// <b>交通系固有</b>（往復・乗継判定。domain-boundaries.md の分類）
         /// </summary>
         /// <remarks>
         /// 第 1 指標は「往復として説明できた元区間の件数」。実際の移動をより多く
@@ -1278,7 +1289,8 @@ namespace ICCardManager.Services
         }
 
         /// <summary>
-        /// 選ばれた候補を摘要文字列へ整形する（Issue #1916）
+        /// 選ばれた候補を摘要文字列へ整形する（Issue #1916）。
+        /// <b>交通系固有</b>（駅名からの摘要組み立て。domain-boundaries.md の分類）
         /// </summary>
         /// <remarks>
         /// ブロックは<b>利用順（時系列）</b>に並べる。統合後リストは時系列順なので、
@@ -1550,6 +1562,25 @@ namespace ICCardManager.Services
         private const string RouteSeparator = "、";
 
         /// <summary>
+        /// 候補探索を行う経路数の上限（Issue #1916。コードレビューで追加）
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// 探索は「抑止点を増やす回数 × 抑止位置 × 1 候補の評価（乗継統合と往復検出がいずれも O(n²)）」
+        /// で経路数 n に対して O(n⁴) になる。1 日の明細は FeliCa の履歴 20 件が上限に見えるが、
+        /// <b>同日統合（#837）や履歴統合（#1458）で 1 つの日付グループの明細はそれを超えて増える</b>。
+        /// 返却処理は <c>AppState.Processing</c> の UI スレッド上で走り、この間カードタッチは
+        /// すべて破棄されるため（#1725）、青天井の探索は職員をカードリーダーの前で待たせる。
+        /// </para>
+        /// <para>
+        /// 上限を超えた日は候補探索を行わず<b>従来どおりの貪欲統合の結果</b>を使う
+        /// （#1916 の是正が効かなくなるだけで、摘要が壊れることはない）。
+        /// 40 区間なら概算 O(40⁴) ≒ 250 万回で体感できない範囲に収まる。
+        /// </para>
+        /// </remarks>
+        private const int MaxRoutesForCandidateSearch = 40;
+
+        /// <summary>
         /// 自動判定で鉄道利用の摘要を生成（従来のロジック）
         /// </summary>
         private string GenerateRailwaySummaryAutomatic(List<LedgerDetail> sortedTrips)
@@ -1777,7 +1808,7 @@ namespace ICCardManager.Services
         /// </remarks>
         /// <param name="routes">経路の(Entry, Exit)タプルリスト（時系列順）</param>
         /// <param name="suppressedIndices">
-        /// Issue #1916: これらの添字の経路では乗継延長を行わずチェーンを閉じる（null で抑止なし）。
+        /// Issue #1916: これらの添字の経路では乗継延長を行わずチェーンを閉じる（空集合で抑止なし）。
         /// <see cref="BuildRouteSummary"/> が「延長を抑止した候補」を作るために使う。
         /// 添字は<b>最上位の経路リスト</b>のもので、再帰呼び出し（循環チェーンの分割）へは
         /// <paramref name="indexOffset"/> を通じて引き継がれる — 引き継がないと、抑止点が
@@ -1787,10 +1818,14 @@ namespace ICCardManager.Services
         /// <param name="indexOffset">
         /// Issue #1916: <paramref name="routes"/> の先頭が最上位リストの何番目かを表す。
         /// 再帰呼び出しで抑止点の添字を対応付けるために使う。
+        /// なお<b>各リストの先頭（<c>indexOffset</c> そのもの）は抑止できない</b> — 抑止は
+        /// 「i 番目の経路へチェーンを延長しない」という指示で、ループが <c>i = 1</c> から始まるため。
+        /// 最上位では先頭がチェーンの起点なので意味を持たないが、循環分割の後半リストでは
+        /// その先頭位置が候補から漏れる（実害は無く、その 1 候補が既定解と同一物になるだけ）。
         /// </param>
         private List<ConsolidatedRoute> ConsolidateRoutes(
             List<(string Entry, string Exit)> routes,
-            ISet<int> suppressedIndices = null,
+            ISet<int> suppressedIndices,
             int indexOffset = 0)
         {
             if (routes.Count == 0)
@@ -1874,8 +1909,8 @@ namespace ICCardManager.Services
             int chainEnd,
             string consolidatedStart,
             string consolidatedEnd,
-            ISet<int> suppressedIndices = null,
-            int indexOffset = 0)
+            ISet<int> suppressedIndices,
+            int indexOffset)
         {
             // 起点と終点が同じ場合（循環移動）
             // Issue #878: 乗り継ぎ駅も考慮して循環判定

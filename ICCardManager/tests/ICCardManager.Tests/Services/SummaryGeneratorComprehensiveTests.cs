@@ -2162,12 +2162,18 @@ public class SummaryGeneratorComprehensiveTests : IDisposable
     }
 
     /// <summary>
-    /// 対の表明その 5: 逆方向のペアが 1 組も無い日は候補探索へ入らず、
+    /// 対の表明その 5: 逆方向のペアが 1 組も無い日は、候補探索が空振りして
     /// 従来どおりの乗継統合になること。
     /// </summary>
     /// <remarks>
-    /// 探索の足切り（<c>ContainsReversePair</c>）の表明。逆方向のペアが無ければ
-    /// どこで延長を抑止しても往復は生まれないため、探索は必ず空振りする。
+    /// この入力は既定解が「薬院～大橋」（<c>LegCount</c> 3）1 本で余りに残るため
+    /// <c>HasUnexplainedThroughRoute</c> は true になり、<b>候補探索そのものには入る</b>。
+    /// どこで延長を抑止しても逆方向のペアが生まれないためカバレッジは 0 のままで、
+    /// 既定解が保たれる。
+    /// なお「生の経路に逆方向のペアが無ければ探索は空振りする」という足切りは
+    /// <b>置いていない</b> — 乗継統合は元の経路に無い区間（A→B→C から A～C）を作るため、
+    /// 統合後に初めて逆方向のペアが成立する日があり、生の経路だけを見る足切りは不健全である
+    /// （<c>BuildRouteSummary</c> の remarks 参照）。
     /// </remarks>
     [Fact]
     public void Issue1916_逆方向のペアが無い日は乗継統合のまま()
@@ -2292,6 +2298,102 @@ public class SummaryGeneratorComprehensiveTests : IDisposable
         // Assert
         results.Should().HaveCount(1);
         results[0].Summary.Should().Be("鉄道（天神～博多、天神～薬院 往復）");
+        OutputInputAndResult(details, results);
+    }
+
+    /// <summary>
+    /// 往路と復路で経由地が違う一周は、#878 と同じく「往復」として扱うこと。
+    /// </summary>
+    /// <remarks>
+    /// コードレビューでの指摘（区間数の一致は「行きと帰りで同じ場所を通った」ことまでは
+    /// 保証しない）に対する挙動の固定。薬院→天神→博多（往路）と 博多→大橋→薬院（復路）は
+    /// どちらも 2 区間で釣り合うため「薬院～博多 往復」になり、経由地の 天神・大橋 は現れない。
+    /// これは<b>乗継統合そのものの性質</b>（A→B→C を「A～C」と書く）であり、
+    /// 後続区間の無い純粋な一周（下の対のテスト）は <c>origin/main</c> でも同じ結果になる
+    /// ＝ #878 が偶数長の循環チェーンを中間で割って往復判定へ渡す設計に由来する。
+    /// 本 Issue の候補探索は、後続区間が付いた形をその #878 の解釈へ揃える
+    /// （<c>origin/main</c> は「鉄道（薬院～西鉄二日市）」という通しでは乗っていない区間を出していた）。
+    /// </remarks>
+    [Fact]
+    public void Issue1916_経由地の異なる一周は878と同じく往復として扱う()
+    {
+        // Arrange: 薬院→天神／天神→博多／博多→大橋／大橋→薬院／薬院→西鉄二日市（利用順）
+        var details = new List<LedgerDetail>
+        {
+            CreateRailwayUsage(new DateTime(2024, 12, 9), "薬院", "西鉄二日市", 380, 3800),
+            CreateRailwayUsage(new DateTime(2024, 12, 9), "大橋", "薬院", 210, 4000),
+            CreateRailwayUsage(new DateTime(2024, 12, 9), "博多", "大橋", 210, 4210),
+            CreateRailwayUsage(new DateTime(2024, 12, 9), "天神", "博多", 210, 4420),
+            CreateRailwayUsage(new DateTime(2024, 12, 9), "薬院", "天神", 210, 4630),
+        };
+
+        // Act
+        var results = _generator.GenerateByDate(details);
+
+        // Assert
+        results.Should().HaveCount(1);
+        results[0].Summary.Should().Be("鉄道（薬院～博多 往復、薬院～西鉄二日市）");
+        OutputInputAndResult(details, results);
+    }
+
+    /// <summary>
+    /// 対の表明: 後続区間の無い純粋な一周は <c>origin/main</c> と同じ結果であること
+    /// （上のテストが固定した扱いが #878 由来であり、本 Issue が持ち込んだものではない）。
+    /// </summary>
+    [Fact]
+    public void Issue1916_後続区間の無い一周は従来どおりの往復表記()
+    {
+        // Arrange: 薬院→天神／天神→博多／博多→大橋／大橋→薬院（利用順）
+        var details = new List<LedgerDetail>
+        {
+            CreateRailwayUsage(new DateTime(2024, 12, 9), "大橋", "薬院", 210, 4000),
+            CreateRailwayUsage(new DateTime(2024, 12, 9), "博多", "大橋", 210, 4210),
+            CreateRailwayUsage(new DateTime(2024, 12, 9), "天神", "博多", 210, 4420),
+            CreateRailwayUsage(new DateTime(2024, 12, 9), "薬院", "天神", 210, 4630),
+        };
+
+        // Act
+        var results = _generator.GenerateByDate(details);
+
+        // Assert
+        results.Should().HaveCount(1);
+        results[0].Summary.Should().Be("鉄道（薬院～博多 往復）");
+        OutputInputAndResult(details, results);
+    }
+
+    /// <summary>
+    /// 対の表明: 経路数が上限を超える日は候補探索を行わず、貪欲統合の結果になること。
+    /// </summary>
+    /// <remarks>
+    /// コードレビューで検出。探索は経路数 n に対して O(n⁴) で、返却処理は
+    /// <c>AppState.Processing</c> の UI スレッド上で走る。1 日の明細は同日統合（#837）や
+    /// 履歴統合（#1458）で FeliCa の 20 件を超えて増えるため、上限を設けて青天井の探索を防ぐ。
+    /// 上限を超えた日は #1916 の是正が効かなくなるだけで、摘要が壊れることはない。
+    /// </remarks>
+    [Fact]
+    public void Issue1916_経路数が上限を超える日は候補探索を行わない()
+    {
+        // Arrange: #1916 の 3 区間パターンの前に、上限を超えるだけの単純な往復を並べる
+        // （上限 40 に対し 42 区間）
+        var details = new List<LedgerDetail>();
+        var balance = 4000;
+        details.Add(CreateRailwayUsage(new DateTime(2024, 12, 9), "博多", "天神", 210, balance));
+        details.Add(CreateRailwayUsage(new DateTime(2024, 12, 9), "天神", "博多", 210, balance += 210));
+        details.Add(CreateRailwayUsage(new DateTime(2024, 12, 9), "薬院", "天神", 210, balance += 210));
+        for (int i = 0; i < 39; i++)
+        {
+            details.Add(CreateRailwayUsage(
+                new DateTime(2024, 12, 9), "西新", "姪浜", 210, balance += 210));
+        }
+
+        // Act
+        var results = _generator.GenerateByDate(details);
+
+        // Assert: 候補探索が働いていれば「薬院～天神、天神～博多 往復」になるが、
+        // 上限を超えるため貪欲統合の「薬院～博多、博多～天神」のまま
+        results.Should().HaveCount(1);
+        results[0].Summary.Should().Contain("薬院～博多、博多～天神");
+        results[0].Summary.Should().NotContain("天神～博多 往復");
         OutputInputAndResult(details, results);
     }
 
