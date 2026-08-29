@@ -82,8 +82,10 @@ public class IdmMaskerTests
     {
         var masked = IdmMasker.Mask("0123456789ABCDEF");
 
+        // 期待値は本番の定数から導出せずリテラルで書く。定数側を書き換えるだけで
+        // 期待値も一緒に動く形にすると、露出を広げる変更でも緑のまま通る（#1884）。
         masked.Count(c => c == '*').Should().Be(
-            IdmMasker.MinimumMaskedLength,
+            8,
             "伏せる量が減ると総当たりの空間が縮む（32 bit ＝ 約 43 億通りを維持する）");
     }
 

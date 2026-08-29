@@ -44,7 +44,9 @@ namespace ICCardManager.Infrastructure.Security
         public const int VisibleSuffixLength = 4;
 
         /// <summary>
-        /// 伏せる最小文字数。これを下回る長さの入力は部分露出させず全体を伏せる。
+        /// 伏せる部分に確保する最小文字数。可視幅（先頭＋末尾）にこの値を加えた長さ
+        /// （<see cref="VisiblePrefixLength"/> + <see cref="VisibleSuffixLength"/> + 本値 ＝ 16 文字）
+        /// を下回る入力は、部分露出させず全体を伏せる。
         /// </summary>
         public const int MinimumMaskedLength = 8;
 
