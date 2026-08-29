@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Linq;
 using System.Reflection;
 using FluentAssertions;
@@ -15,7 +15,7 @@ namespace ICCardManager.Tests.Services;
 /// <remarks>
 /// <para>
 /// <see cref="ICCardManager.Services.SummaryGenerator"/> の静的フィールド <c>_options</c> /
-/// <c>_transferStationGroups</c> を変更するテスト（<c>Configure</c> / <c>ResetToDefaults</c> 呼び出し）と、
+/// 設定の世代（<c>_context</c>）を変更するテスト（<c>Configure</c> / <c>ResetToDefaults</c> 呼び出し）と、
 /// その影響を受けるテストは、必ず <see cref="SummaryGeneratorCollection.Name"/> Collection に
 /// 属している必要がある。本テストは将来 Collection 属性の付与漏れを静的に検出する。
 /// </para>
@@ -71,6 +71,8 @@ public class SummaryGeneratorCollectionConfigurationTests
     [InlineData(typeof(SummaryGeneratorMidYearCarryoverLikePatternTests))]
     // Issue #1905: SaveGroupsAsync が ApplyTransferStationGroups で静的状態を書き換える
     [InlineData(typeof(TransferStationGroupServiceTests))]
+    // Issue #1919: 生成中の世代差し替えを再現するため ApplyTransferStationGroups を呼ぶ
+    [InlineData(typeof(SummaryGeneratorGenerationSnapshotTests))]
     public void SummaryGenerator関連テストクラスがCollectionに属していること(Type testClass)
     {
         // Act
@@ -106,6 +108,8 @@ public class SummaryGeneratorCollectionConfigurationTests
     [InlineData(typeof(SummaryGeneratorMidYearCarryoverLikePatternTests))]
     // Issue #1905: SaveGroupsAsync が ApplyTransferStationGroups で静的状態を書き換える
     [InlineData(typeof(TransferStationGroupServiceTests))]
+    // Issue #1919: 生成中の世代差し替えを再現するため ApplyTransferStationGroups を呼ぶ
+    [InlineData(typeof(SummaryGeneratorGenerationSnapshotTests))]
     public void Collection対象テストクラスはIDisposableを実装していること(Type testClass)
     {
         // Act

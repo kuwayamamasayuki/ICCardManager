@@ -1,4 +1,4 @@
-using Xunit;
+﻿using Xunit;
 
 namespace ICCardManager.Tests.Services;
 
@@ -8,9 +8,9 @@ namespace ICCardManager.Tests.Services;
 /// <remarks>
 /// <para>
 /// <see cref="ICCardManager.Services.SummaryGenerator"/> は
-/// <c>_options</c> / <c>_transferStationGroups</c> を <c>static</c> フィールドとして保持しており、
+/// 設定の世代（<c>_context</c>）を <c>static</c> フィールドとして保持しており、
 /// <c>SummaryGenerator.Configure()</c> や <c>ResetToDefaults()</c> を呼ぶテストが並列実行されると、
-/// 他のテストが読み取る <c>_options</c> を上書きしてしまい、偶発的な失敗（flaky test）を引き起こす。
+/// 他のテストが読み取る設定を上書きしてしまい、偶発的な失敗（flaky test）を引き起こす。
 /// </para>
 /// <para>
 /// 根本解決（静的状態のインスタンス化）は影響範囲が広いため別チケットで対応予定。
