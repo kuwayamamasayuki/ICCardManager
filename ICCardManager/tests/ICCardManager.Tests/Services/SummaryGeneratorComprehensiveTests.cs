@@ -3146,4 +3146,181 @@ public class SummaryGeneratorComprehensiveTests : IDisposable
     }
 
     #endregion
+    #region Issue #1917: 逆走ガードの後に閉じる循環を #878 の個別表示へ戻す
+
+    // #1902 の逆走ガードはチェーンを打ち切って往復ペアを DetectRoundTrips へ渡す。
+    // その打ち切りが「閉じた循環」を分断すると AddConsolidatedChain の循環検出（#878）へ
+    // 到達できず、循環の後半だけが乗継統合されて途中駅（用務地）が摘要から消えていた。
+    // 仕様判断: 循環は #878 のとおり個別表示（利用実態を隠さない）を正とする。
+
+    /// <summary>
+    /// Issue #1917 再現ケース: 逆走ガードで分断された閉じた循環が
+    /// #878 の個別表示へ戻ること。
+    /// </summary>
+    /// <remarks>
+    /// 天神→博多／博多→天神／天神→薬院／薬院→博多。
+    /// 区間 2〜4（博多→天神→薬院→博多）は起点＝終点の閉じた循環だが、
+    /// 区間 2 の時点で直前チェーン（天神→博多）の完全な逆走が完成するため
+    /// #1902 のガードがチェーンを打ち切り、循環判定に到達しなかった。
+    /// その結果 区間 3＋4 が「天神～博多」へ乗継統合され、
+    /// <b>実際に用務のあった薬院が 6 年保存の台帳から消えて</b>いた
+    /// （さらに「天神～博多 往復、天神～博多」は 3 回乗ったようにも読める）。
+    /// </remarks>
+    [Fact]
+    public void Issue1917_鉄道_逆走ガードの後に閉じる循環は個別表示になる()
+    {
+        // Arrange: 同日の 4 区間（入力は履歴の新しい順）
+        var details = new List<LedgerDetail>
+        {
+            CreateRailwayUsage(new DateTime(2024, 12, 9), "薬院", "博多", 210, 4000),
+            CreateRailwayUsage(new DateTime(2024, 12, 9), "天神", "薬院", 210, 4210),
+            CreateRailwayUsage(new DateTime(2024, 12, 9), "博多", "天神", 210, 4420),
+            CreateRailwayUsage(new DateTime(2024, 12, 9), "天神", "博多", 210, 4630),
+        };
+
+        // Act
+        var results = _generator.GenerateByDate(details);
+
+        // Assert: 薬院が摘要に残る
+        results.Should().HaveCount(1);
+        results[0].Summary.Should().Be("鉄道（天神～博多 往復、天神～薬院、薬院～博多）");
+        OutputInputAndResult(details, results);
+    }
+
+    /// <summary>
+    /// バス側でも同じ形が是正されること。
+    /// </summary>
+    [Fact]
+    public void Issue1917_バス_逆走ガードの後に閉じる循環は個別表示になる()
+    {
+        // Arrange
+        var details = new List<LedgerDetail>
+        {
+            CreateBusUsage(new DateTime(2024, 12, 9), 200, 4000, busStops: "薬院～博多"),
+            CreateBusUsage(new DateTime(2024, 12, 9), 200, 4200, busStops: "天神～薬院"),
+            CreateBusUsage(new DateTime(2024, 12, 9), 200, 4400, busStops: "博多～天神"),
+            CreateBusUsage(new DateTime(2024, 12, 9), 200, 4600, busStops: "天神～博多"),
+        };
+
+        // Act
+        var results = _generator.GenerateByDate(details);
+
+        // Assert
+        results.Should().HaveCount(1);
+        results[0].Summary.Should().Be("バス（天神～博多 往復、天神～薬院、薬院～博多）");
+        OutputInputAndResult(details, results);
+    }
+
+    /// <summary>
+    /// 循環の復元は同一視グループ（#1905）を考慮すること。
+    /// </summary>
+    /// <remarks>
+    /// 復路の降車地が往路の乗車地と別名（天神 / 西鉄福岡(天神)）でも
+    /// 循環として復元され、往復の端点は「往路の名前（復路の名前）」で併記される。
+    /// </remarks>
+    [Fact]
+    public void Issue1917_同一視グループ経由でも循環が復元される()
+    {
+        // Arrange
+        var details = new List<LedgerDetail>
+        {
+            CreateRailwayUsage(new DateTime(2024, 12, 9), "薬院", "博多", 210, 4000),
+            CreateRailwayUsage(new DateTime(2024, 12, 9), "天神", "薬院", 210, 4210),
+            CreateRailwayUsage(new DateTime(2024, 12, 9), "博多", "西鉄福岡(天神)", 210, 4420),
+            CreateRailwayUsage(new DateTime(2024, 12, 9), "天神", "博多", 210, 4630),
+        };
+
+        // Act
+        var results = _generator.GenerateByDate(details);
+
+        // Assert
+        results.Should().HaveCount(1);
+        results[0].Summary.Should().Be("鉄道（天神（西鉄福岡(天神)）～博多 往復、天神～薬院、薬院～博多）");
+        OutputInputAndResult(details, results);
+    }
+
+    /// <summary>
+    /// 復元した循環が偶数長なら、#878 の中間分割を経て往復として扱われること。
+    /// </summary>
+    /// <remarks>
+    /// 復元は「循環をひと続きに戻す」だけで、循環の解釈そのものは #878 に委ねる。
+    /// 奇数長は個別表示、偶数長（4 以上）は中間で割って往復判定へ渡す。
+    /// </remarks>
+    [Fact]
+    public void Issue1917_復元した循環が偶数長なら878の中間分割で往復になる()
+    {
+        // Arrange: 博多→天神→薬院→大橋→博多 の 4 区間循環が逆走ガードで分断される形
+        var details = new List<LedgerDetail>
+        {
+            CreateRailwayUsage(new DateTime(2024, 12, 9), "大橋", "博多", 210, 4000),
+            CreateRailwayUsage(new DateTime(2024, 12, 9), "薬院", "大橋", 210, 4210),
+            CreateRailwayUsage(new DateTime(2024, 12, 9), "天神", "薬院", 210, 4420),
+            CreateRailwayUsage(new DateTime(2024, 12, 9), "博多", "天神", 210, 4630),
+            CreateRailwayUsage(new DateTime(2024, 12, 9), "天神", "博多", 210, 4840),
+        };
+
+        // Act
+        var results = _generator.GenerateByDate(details);
+
+        // Assert
+        results.Should().HaveCount(1);
+        results[0].Summary.Should().Be("鉄道（天神～博多、博多～薬院 往復）");
+        OutputInputAndResult(details, results);
+    }
+
+    /// <summary>
+    /// 対の表明その 1: 逆走ガードの後に循環が閉じない日は、
+    /// 従来どおり後続区間が乗継統合されること（復元が無条件に働かない）。
+    /// </summary>
+    /// <remarks>
+    /// これを置かないと、逆走ガードの後の乗継統合を丸ごと止めた実装でも緑になる。
+    /// </remarks>
+    [Fact]
+    public void Issue1917_循環が閉じない後続区間は乗継統合のまま()
+    {
+        // Arrange: 天神→博多／博多→天神／天神→薬院／薬院→大橋（最後が起点へ戻らない）
+        var details = new List<LedgerDetail>
+        {
+            CreateRailwayUsage(new DateTime(2024, 12, 9), "薬院", "大橋", 210, 4000),
+            CreateRailwayUsage(new DateTime(2024, 12, 9), "天神", "薬院", 210, 4210),
+            CreateRailwayUsage(new DateTime(2024, 12, 9), "博多", "天神", 210, 4420),
+            CreateRailwayUsage(new DateTime(2024, 12, 9), "天神", "博多", 210, 4630),
+        };
+
+        // Act
+        var results = _generator.GenerateByDate(details);
+
+        // Assert
+        results.Should().HaveCount(1);
+        results[0].Summary.Should().Be("鉄道（天神～博多 往復、天神～大橋）");
+        OutputInputAndResult(details, results);
+    }
+
+    /// <summary>
+    /// 対の表明その 2: #1902 の往復 2 組は従来どおり「往復」2 ブロックのままであること
+    /// （復元が逆走ガードの効果そのものを打ち消していない）。
+    /// </summary>
+    [Fact]
+    public void Issue1917_往復2組は従来どおり2つの往復として表示される()
+    {
+        // Arrange: 天神→雑餉隈／雑餉隈→西鉄福岡(天神)／天神→赤坂／赤坂→天神
+        var details = new List<LedgerDetail>
+        {
+            CreateRailwayUsage(new DateTime(2024, 12, 9), "赤坂", "天神", 210, 4000),
+            CreateRailwayUsage(new DateTime(2024, 12, 9), "天神", "赤坂", 210, 4210),
+            CreateRailwayUsage(new DateTime(2024, 12, 9), "雑餉隈", "西鉄福岡(天神)", 260, 4420),
+            CreateRailwayUsage(new DateTime(2024, 12, 9), "天神", "雑餉隈", 260, 4680),
+        };
+
+        // Act
+        var results = _generator.GenerateByDate(details);
+
+        // Assert
+        results.Should().HaveCount(1);
+        results[0].Summary.Should()
+            .Be("鉄道（天神（西鉄福岡(天神)）～雑餉隈 往復、天神～赤坂 往復）");
+        OutputInputAndResult(details, results);
+    }
+
+    #endregion
 }
