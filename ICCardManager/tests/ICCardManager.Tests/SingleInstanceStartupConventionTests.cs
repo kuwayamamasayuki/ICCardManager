@@ -68,6 +68,38 @@ public class SingleInstanceStartupConventionTests
     }
 
     [Fact]
+    public void 起動を中止すると決めた時点でミューテックスを解放していること()
+    {
+        // 案内ダイアログの表示中は職員が閉じるまでブロックする。その間ハンドルを
+        // 握ったままだと、先行インスタンスが終了してもカーネルオブジェクトが
+        // こちらのハンドルで生き残り、次の起動が「既に起動しています」と誤判定される。
+        var code = ReadCodeOnlyAppSource();
+        var body = TestSourceInspection.ExtractMethodBody(code, "private bool TryAcquireSingleInstanceLock");
+
+        var disposeIndex = body.IndexOf("_singleInstanceGuard.Dispose()", System.StringComparison.Ordinal);
+        var noticeIndex = body.IndexOf("OwnedMessageBox.Show(", System.StringComparison.Ordinal);
+
+        disposeIndex.Should().BeGreaterThan(0, "中止経路で解放していること（検査が空振りしていないこと）");
+        noticeIndex.Should().BeGreaterThan(0, "案内の表示が見つかること（検査が空振りしていないこと）");
+        disposeIndex.Should().BeLessThan(noticeIndex, "解放は案内ダイアログの表示より前に行うこと");
+    }
+
+    [Fact]
+    public void 案内文言は前面化の結果で選ぶこと()
+    {
+        // ミューテックスの Status は DACL の所有者（別ユーザーか）しか表さない。
+        // 同じユーザーの 2 セッション（リモートデスクトップ・簡易切り替え）では
+        // 「タスクバーで切り替えてください」がこのセッションで実行できない指示になる。
+        var code = ReadCodeOnlyAppSource();
+        var body = TestSourceInspection.ExtractMethodBody(code, "private bool TryAcquireSingleInstanceLock");
+
+        body.Should().Contain("ActivationOutcome.ActivationRefused",
+            "同一セッションに切り替え先がある場合を区別すること");
+        body.Should().Contain("SingleInstanceNotice.BuildWindowNotFoundMessage()",
+            "切り替え先が見つからない場合に専用の案内を出すこと");
+    }
+
+    [Fact]
     public void 終了時にミューテックスを解放していること()
     {
         var code = ReadCodeOnlyAppSource();

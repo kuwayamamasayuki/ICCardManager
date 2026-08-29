@@ -39,7 +39,7 @@ public class SingleInstanceNoticeTests
     public void 文言のファクトリが漏れなく検査対象になっていること()
     {
         // 対象の網羅も併せて表明する（列挙が 0 件へ縮んでも緑になる形を防ぐ）
-        AllMessages().Should().HaveCount(2);
+        AllMessages().Should().HaveCount(3);
     }
 
     [Theory]
@@ -92,5 +92,28 @@ public class SingleInstanceNoticeTests
 
         sameSession.Should().Contain("タスクバー");
         sameSession.Should().NotBe(SingleInstanceNotice.BuildOtherUserSessionMessage());
+    }
+
+    [Fact]
+    public void 切り替え先が見つからない場合の案内は両方の可能性で実行できる指示であること()
+    {
+        // このセッションに対象の画面が無い原因は 2 つあり、入力からは区別できない。
+        //   (a) 同じユーザーの別セッション（リモートデスクトップ・簡易切り替え）
+        //   (b) 先行インスタンスが起動直後で画面をまだ表示していない
+        // どちらかを断定すると片方で誤った案内になるため、両方で実行できる指示にする。
+        var message = SingleInstanceNotice.BuildWindowNotFoundMessage();
+
+        message.Should().Contain("待って", "(b) の場合に取れる行動を示すこと");
+        message.Should().Contain("ユーザー", "(a) の場合に取れる行動を示すこと");
+    }
+
+    [Fact]
+    public void すべての案内はいずれも互いに異なること()
+    {
+        // 対の表明: 「どうすれば」を分けた意味が失われていないこと。
+        // 同じ文言を返す実装へ退化すると、実行できない指示を出す状態へ戻る。
+        var messages = AllMessages().Select(m => (string)m[1]).ToList();
+
+        messages.Should().OnlyHaveUniqueItems();
     }
 }

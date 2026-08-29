@@ -6,6 +6,35 @@ using System.Runtime.InteropServices;
 namespace ICCardManager.Common
 {
     /// <summary>
+    /// 起動済みインスタンスの前面化を試みた結果（Issue #1910）
+    /// </summary>
+    /// <remarks>
+    /// 案内文言の「どうすれば」はこの結果で選ぶ。ミューテックスの判定結果
+    /// （<see cref="SingleInstanceStatus"/>）は DACL の所有者、つまり<b>別ユーザーかどうか</b>しか
+    /// 表さないため、同じユーザーが 2 セッション（コンソール＋リモートデスクトップ、
+    /// ユーザーの簡易切り替え）で起動している場合に「タスクバーで切り替えてください」という
+    /// <b>このセッションでは実行できない指示</b>を出してしまう。
+    /// 「自分のセッションに切り替え先の画面があるか」を知っているのは前面化の側だけ。
+    /// </remarks>
+    public enum ActivationOutcome
+    {
+        /// <summary>前面へ出せた（案内は表示しない）</summary>
+        Activated,
+
+        /// <summary>
+        /// 同一セッションに対象の画面があったが、前面化が拒否された
+        /// （Windows のフォアグラウンドロック）。タスクバーからの切り替えは有効。
+        /// </summary>
+        ActivationRefused,
+
+        /// <summary>
+        /// 同一セッションに対象の画面が無かった。別のセッションで起動しているか、
+        /// 先行インスタンスがまだ画面を表示していない。
+        /// </summary>
+        NoWindowInThisSession
+    }
+
+    /// <summary>
     /// 起動済みインスタンスのウィンドウを前面へ出す（Issue #1910）
     /// </summary>
     /// <remarks>
@@ -18,8 +47,11 @@ namespace ICCardManager.Common
         /// <summary>
         /// 同一セッションで起動している同名プロセスのメインウィンドウを前面へ出す
         /// </summary>
-        /// <returns>前面へ出せたら <c>true</c>。対象が見つからない・前面化に失敗したら <c>false</c>。</returns>
-        public static bool TryActivateExistingInstance()
+        /// <returns>
+        /// 前面化の結果。呼び出し元はこれで案内文言の「どうすれば」を選ぶ
+        /// （<see cref="ActivationOutcome"/> の remarks 参照）。
+        /// </returns>
+        public static ActivationOutcome TryActivateExistingInstance()
         {
             try
             {
@@ -30,15 +62,24 @@ namespace ICCardManager.Common
                         current.Id,
                         current.SessionId);
 
-                    return target.HasValue && BringToFront(target.Value.MainWindowHandle);
+                    if (!target.HasValue)
+                    {
+                        return ActivationOutcome.NoWindowInThisSession;
+                    }
+
+                    return BringToFront(target.Value.MainWindowHandle)
+                        ? ActivationOutcome.Activated
+                        : ActivationOutcome.ActivationRefused;
                 }
             }
             catch (Exception ex)
             {
                 // 前面化はあくまで利便性のための処理。失敗しても案内表示へ退避できるので
                 // 起動中止という本来の目的は達成される（痕跡だけ残す）。
+                // 「対象が見つからなかった」とは区別できないため、案内の広い側
+                // （NoWindowInThisSession）へ倒す。
                 ErrorDialogHelper.LogException(ex, "起動済みインスタンスの活性化");
-                return false;
+                return ActivationOutcome.NoWindowInThisSession;
             }
         }
 

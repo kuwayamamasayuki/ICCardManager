@@ -104,10 +104,19 @@ namespace ICCardManager.Common
             }
             catch (UnauthorizedAccessException ex)
             {
-                // 既存のミューテックスが別ユーザーの既定 DACL で保護されている
-                // ＝ 同じ端末の別セッションで起動している。
-                return new SingleInstanceGuard(
-                    SingleInstanceStatus.AlreadyRunningInOtherSession, mutex: null, acquisitionError: ex);
+                // アクセス拒否には 2 つの原因があり、区別しないと「誰も起動していないのに
+                // 起動できない」状態を作る。
+                //   (a) 既存のミューテックスが別ユーザーの既定 DACL で保護されている
+                //       ＝ 同じ端末の別セッションで起動している（起動を中止してよい）
+                //   (b) Global\ 名前空間へオブジェクトを作る権限（SeCreateGlobalPrivilege）が
+                //       無い／グループポリシーで剥がされている ＝ 判定不能（起動は止めない）
+                // 判別は「そのミューテックスが実在するか」で行う。OpenMutex は作成の権限を
+                // 要求しないため、存在しなければ (b) と確定できる。
+                return NamedMutexExists(mutexName)
+                    ? new SingleInstanceGuard(
+                        SingleInstanceStatus.AlreadyRunningInOtherSession, mutex: null, acquisitionError: ex)
+                    : new SingleInstanceGuard(
+                        SingleInstanceStatus.GuardUnavailable, mutex: null, acquisitionError: ex);
             }
             catch (Exception ex)
             {
@@ -115,6 +124,44 @@ namespace ICCardManager.Common
                 // 起動は止めず、理由だけを持ち帰る。
                 return new SingleInstanceGuard(
                     SingleInstanceStatus.GuardUnavailable, mutex: null, acquisitionError: ex);
+            }
+        }
+
+        /// <summary>
+        /// その名前のミューテックスが<b>既に存在するか</b>を判定する
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// <c>TryOpenExisting</c> は存在しなければ <c>false</c> を返し、存在するが DACL で
+        /// 拒否されていれば <see cref="UnauthorizedAccessException"/> を投げる。
+        /// <b>「拒否された」は「存在する」ことの証拠</b>なので true を返す。
+        /// </para>
+        /// <para>
+        /// 判定自体に失敗したときは「存在しない」側へ倒す（fail-open：起動を止めない）。
+        /// 「アクセスできないかどうか」ではなく「存在するかどうか」を返す関数として名付けている
+        /// — 呼び出し元が知りたいのは「先行インスタンスがいるか」であり、
+        /// 開けたか拒否されたかはその手掛かりに過ぎない。
+        /// </para>
+        /// </remarks>
+        internal static bool NamedMutexExists(string mutexName)
+        {
+            try
+            {
+                if (Mutex.TryOpenExisting(mutexName, out var existing))
+                {
+                    existing.Dispose();
+                    return true;
+                }
+
+                return false;
+            }
+            catch (UnauthorizedAccessException)
+            {
+                return true;
+            }
+            catch (Exception)
+            {
+                return false;
             }
         }
 

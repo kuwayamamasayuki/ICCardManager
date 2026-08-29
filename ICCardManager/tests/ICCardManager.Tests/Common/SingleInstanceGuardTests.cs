@@ -103,6 +103,35 @@ public class SingleInstanceGuardTests
     }
 
     [Fact]
+    public void 存在するミューテックスを実在と判定すること()
+    {
+        // アクセス拒否の原因を「既に起動している」と「Global\ へ作る権限が無い」に
+        // 切り分ける述語。前者だけを起動中止にしないと、誰も起動していない端末で
+        // 「別のユーザーで起動しています」と言って起動できなくなる。
+        var name = UniqueName();
+        using var existing = SingleInstanceGuard.Acquire(name);
+
+        SingleInstanceGuard.NamedMutexExists(name).Should().BeTrue();
+    }
+
+    [Fact]
+    public void 存在しないミューテックスを実在と判定しないこと()
+    {
+        // 対の表明。ここが常に true を返す実装だと、権限不足の端末で起動できなくなる
+        // （＝ fail-open が効かない）。
+        SingleInstanceGuard.NamedMutexExists(UniqueName()).Should().BeFalse();
+    }
+
+    [Fact]
+    public void 実在判定に失敗する名前は実在しない側へ倒すこと()
+    {
+        // 判定自体が失敗したときに「実在する」へ倒すと起動を止めてしまう。
+        var tooLongName = @"Local\" + new string('a', 300);
+
+        SingleInstanceGuard.NamedMutexExists(tooLongName).Should().BeFalse();
+    }
+
+    [Fact]
     public void 本番が使う名前は端末全体を対象とするGlobal接頭辞であること()
     {
         // Local\ にするとユーザーの簡易切り替えで 2 つのピッすいが 1 台の

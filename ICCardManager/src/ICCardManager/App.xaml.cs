@@ -224,6 +224,12 @@ namespace ICCardManager
         /// 先行インスタンスが画面をまだ出していない）だけ案内を表示する。
         /// 案内を出さずに黙って終了すると、職員には「アイコンを押しても何も起きない」ようにしか見えない。
         /// </para>
+        /// <para>
+        /// 案内の「どうすれば」は<b>前面化の結果</b>（<see cref="ActivationOutcome"/>）で選ぶ。
+        /// <see cref="SingleInstanceStatus"/> は DACL の所有者しか表さないため、
+        /// 同じユーザーが 2 セッションで起動している場合に「タスクバーで切り替えてください」という
+        /// このセッションでは実行できない指示になる。
+        /// </para>
         /// </remarks>
         /// <returns>起動を継続してよければ <c>true</c>。中止すべきなら <c>false</c>。</returns>
         private bool TryAcquireSingleInstanceLock()
@@ -244,21 +250,36 @@ namespace ICCardManager
                 return true;
             }
 
-            if (ExistingInstanceActivator.TryActivateExistingInstance())
+            // 起動を中止すると決めた時点でハンドルを閉じる。閉じずに案内ダイアログを
+            // 表示している間に先行インスタンスが終了すると、こちらのハンドルだけで
+            // カーネルオブジェクトが生き残り、次の起動が「既に起動しています」と
+            // 誤判定されて誰も起動できなくなる（OnExit まで持ち越さない）。
+            _singleInstanceGuard.Dispose();
+
+            var outcome = ExistingInstanceActivator.TryActivateExistingInstance();
+
+            // 判定の根拠（別セッション判定の元になったアクセス拒否の例外）を必ず載せる。
+            // 残さないと「起動できないのに理由が分からない」問い合わせを切り分けられない。
+            _logger.LogInformation(
+                _singleInstanceGuard.AcquisitionError,
+                "二重起動を検出したため起動を中止しました（Status={Status}、前面化={Outcome}）",
+                _singleInstanceGuard.Status,
+                outcome);
+
+            if (outcome == ActivationOutcome.Activated)
             {
-                _logger.LogInformation(
-                    "二重起動を検出したため起動を中止し、起動済みのウィンドウを前面へ出しました（Status={Status}）",
-                    _singleInstanceGuard.Status);
+                // 画面が前に出たこと自体が可視の応答になるので、案内は表示しない。
                 return false;
             }
 
-            _logger.LogInformation(
-                "二重起動を検出したため起動を中止しました（Status={Status}、起動済みウィンドウの前面化は失敗）",
-                _singleInstanceGuard.Status);
-
+            // 案内の「どうすれば」は前面化の結果で選ぶ。ミューテックスの Status は
+            // 「別ユーザーかどうか」しか表さず、同じユーザーの 2 セッション
+            // （リモートデスクトップ・簡易切り替え）で実行できない指示になる。
             var message = _singleInstanceGuard.Status == SingleInstanceStatus.AlreadyRunningInOtherSession
                 ? SingleInstanceNotice.BuildOtherUserSessionMessage()
-                : SingleInstanceNotice.BuildSameSessionMessage();
+                : outcome == ActivationOutcome.ActivationRefused
+                    ? SingleInstanceNotice.BuildSameSessionMessage()
+                    : SingleInstanceNotice.BuildWindowNotFoundMessage();
 
             Common.OwnedMessageBox.Show(
                 message,
