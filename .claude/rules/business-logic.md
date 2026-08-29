@@ -105,7 +105,8 @@ THEN
 - **`staff_name` には「外N名」を書き込まない**。書き込むと職員マスタとの照合（行編集の `SelectedStaff` 復元、管理者ダッシュボードの系列名解決）が壊れ、CSV の往復で氏名が変質する（#1808）。消費側（履歴一覧 `LedgerDto.DisplayStaffName`・帳票 `ReportRowBuilder`）はそれぞれ導出する
 - **入力経路は返却時ダイアログ（`CompanionCountInputDialog`、バス停名入力の後）と履歴の行編集の 2 つ**。返却時は 1 以上の行だけ `UpdateCompanionCountAsync` で書く（0 は INSERT 済み）。保存に失敗しても返却は記録済みなので「再タッチ」と案内しない（#1725）
 - **摘要は変えない**。CSV は利用者列を生の氏名のまま出し、専用列「同行者数」（末尾）で往復させる。列を持たない旧形式は 0 として取り込む
-- 統合は統合先の値を保持（統合元はスナップショットに含める）、分割は両行へ引き継ぐ。`OperationLogExcelExportService.GetFieldNameMap` に `CompanionCount` を載せる（#1726）
+- 統合は**統合対象の最大値**を引き継ぎ（統合元はスナップショットに含める）、分割は両行へ引き継ぐ。`OperationLogExcelExportService.GetFieldNameMap` に `CompanionCount` を載せる（#1726）
+- **統合が再計算する値は、統合の `UPDATE` と取り消しの復元 `UPDATE` の両方の SET 句に載っているかを対で確かめる**（Issue #1942）。`companion_count` は両方から抜けており、`LedgerMergeService` が Max で決めた値は in-memory の統合先にしか残らなかった（画面と `operation_log` の `AfterData` は「外2名」、DB は 0）。**統合側だけを直すと欠陥は消えず取り消し側へ移る** — 統合が 0 のままだった間は復元も 0 で一致するため、取り消し側の欠落は統合を直すまで観測できない。#1726「SET 句はその経路で本当に編集する列に限る」の裏返しであり、列の集合は静的検査（`LedgerMergeUpdateColumnConventionTests`）でリテラルの期待値として固定する（個別の挙動テストは列の増減に追随できない）
 
 ## 共有フォルダモード（複数PC共有DB）
 - DBパスは `C:\ProgramData\ICCardManager\database_config.txt` で指定（空欄/未作成=ローカルデフォルト）。インストーラーの「データベースの保存先」ページまたは設定画面（F5）から設定。設定画面の「デフォルトに戻す」ボタンで `database_config.txt` を削除して復旧可能（Issue #1559）

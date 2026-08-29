@@ -29,6 +29,20 @@ namespace ICCardManager.Data.Repositories
         /// <summary>
         /// 複数のLedgerレコードを1つに統合する
         /// </summary>
+        /// <remarks>
+        /// <para>
+        /// <paramref name="updatedTarget"/> のうち DB へ書き戻すのは<b>統合が再計算する 6 列だけ</b>
+        /// （摘要 / 受入 / 払出 / 残額 / 備考 / 同行者数）。利用日・利用者・カード等は統合で変わらないため
+        /// SET 句に含めない（SET 句は「その経路で本当に編集する列」に限る、Issue #1726）。
+        /// </para>
+        /// <para>
+        /// Issue #1942: 同行者数（<c>companion_count</c>）はこの 6 列に<b>含まれる</b>。
+        /// 抜けると <see cref="Services.LedgerMergeService"/> が決めた「外N名」が in-memory にしか残らず、
+        /// 再読込・物品出納簿から消える一方で監査ログには記録される（記録だけが事実と異なる状態）。
+        /// 列の増減は <c>LedgerMergeUpdateColumnConventionTests</c> が固定しているので、
+        /// 変更するときはそちらの期待値も更新すること。
+        /// </para>
+        /// </remarks>
         Task<bool> MergeLedgersAsync(int targetLedgerId, IEnumerable<int> sourceLedgerIds, Ledger updatedTarget);
 
         /// <summary>
@@ -44,6 +58,11 @@ namespace ICCardManager.Data.Repositories
         /// <summary>
         /// 統合を元に戻す（自前のトランザクションで確定する）
         /// </summary>
+        /// <remarks>
+        /// 統合先の復元は <see cref="MergeLedgersAsync(int, IEnumerable{int}, Ledger)"/> と<b>同じ 6 列</b>を
+        /// スナップショットの値へ戻す。統合が書き換えた列を復元しないと、統合で引き上げた値が
+        /// 取り消し後も残る（Issue #1942 の同行者数がこの形だった）。
+        /// </remarks>
         /// <returns>
         /// 復元が確定したら true。統合後に統合先の明細が編集（rowid 振り直し）・削除されていた、
         /// または統合先そのものが削除されていた場合は競合として false（何も書き込まない。Issue #1806）
