@@ -565,8 +565,9 @@ namespace ICCardManager.Services
         /// 「同一日内の順序は id では決まらない」）。
         /// </description></item>
         /// <item><description>
-        /// チェーンが解けないときだけ <c>SummaryGenerator.SortChronologically</c>
-        /// の規約（FeliCa 互換で小さい <c>SequenceNumber</c> ほど新しい。未設定の 0 は最新側）へ倒す。
+        /// 全体では解けないとき、<b>台帳ごと</b>に分けて解き直す。台帳の中の順序はその台帳の
+        /// 残高チェーンで決め（解けなければ規約へ倒す）、台帳どうしの順序は規約
+        /// （FeliCa 互換で小さい <c>SequenceNumber</c> ほど新しい）で決める。
         /// </description></item>
         /// </list>
         /// <para>
@@ -575,6 +576,15 @@ namespace ICCardManager.Services
         /// この台帳では最大 <c>SequenceNumber</c> が最新であり、規約だけで並べると
         /// チャージ後の残高（＝利用前の過大な値）が 6 年保存の台帳の残額欄に入る。
         /// 残高チェーンはこの台帳も通常の台帳も同じ手順で正しく解く。
+        /// </para>
+        /// <para>
+        /// 段 3 で「まず台帳ごとに分ける」のが要（コードレビューで検出）。統合対象**全体**を
+        /// 1 本のチェーンに掛けると、選択されなかった台帳が間に挟まるだけでチェーンが切れる
+        /// （履歴一覧はチェックボックス選択なので通常操作で起きる）。そこで規約へ丸ごと倒すと、
+        /// 規約の例外である残高不足マージ台帳ではチャージ側が最新と判定され、
+        /// **本 Issue が消したはずの過大な残額が復活する**。台帳の中の並びは統合対象の選び方に
+        /// 左右されないので、そこだけはチェーンが常に解ける（`LedgerRepository.GetByIdAsync` が
+        /// 同じ定義で明細を並べているのと同じ理由）。
         /// </para>
         /// </remarks>
         /// <param name="details">統合対象の全明細（順序は問わない）</param>
@@ -598,9 +608,35 @@ namespace ICCardManager.Services
                 return sameDateDetails;
             }
 
-            // 残高チェーンで一意に決まるならそれが正。決まらないときだけ SequenceNumber の規約へ。
-            return LedgerDetailChronologicalSorter.TrySortByBalanceChain(sameDateDetails)
-                ?? SummaryGenerator.SortChronologically(sameDateDetails);
+            // 残高チェーンで一意に決まるならそれが正。
+            var chained = LedgerDetailChronologicalSorter.TrySortByBalanceChain(sameDateDetails);
+            if (chained != null)
+            {
+                return chained;
+            }
+
+            // 解けないときは台帳ごとに分け直す。台帳の中は再びチェーンで（統合対象の選び方に
+            // 左右されないので通常はここで解ける）、台帳どうしは規約で並べる。
+            return sameDateDetails
+                .GroupBy(d => d.LedgerId)
+                .OrderByDescending(g => g.Min(d => d.SequenceNumber > 0 ? d.SequenceNumber : int.MinValue))
+                .ThenByDescending(g => g.Max(d => d.Balance ?? 0))
+                .SelectMany(g => OrderWithinSameLedger(g.ToList()))
+                .ToList();
+        }
+
+        /// <summary>
+        /// 同一台帳・同一日の明細を時系列順（古い→新しい）に並べる（Issue #1932）
+        /// </summary>
+        private static List<LedgerDetail> OrderWithinSameLedger(List<LedgerDetail> sameLedgerDetails)
+        {
+            if (sameLedgerDetails.Count <= 1)
+            {
+                return sameLedgerDetails;
+            }
+
+            return LedgerDetailChronologicalSorter.TrySortByBalanceChain(sameLedgerDetails)
+                ?? SummaryGenerator.SortChronologically(sameLedgerDetails);
         }
 
         /// <summary>

@@ -1608,6 +1608,47 @@ public class LedgerMergeServiceTests : IDisposable
             "利用後の実残高。チャージ側（210円）を最新とみなすと残額が過大になる");
     }
 
+    /// <summary>
+    /// 残高チェーンが解けない日でも、残高不足マージ台帳の残額はチャージ側にならないこと（Issue #1932）
+    /// </summary>
+    /// <remarks>
+    /// コードレビューで検出。同一日内の明細を**統合対象の全体**でチェーンに掛けると、
+    /// 選択されなかった台帳が間に挟まる（履歴一覧はチェックボックス選択なので通常操作で起きる）だけで
+    /// チェーンが解けず `SequenceNumber` の規約へ倒れる。規約は「小さい値ほど新しい」なので、
+    /// 規約の例外である残高不足マージ台帳（チャージが最小 SequenceNumber）では
+    /// **チャージ側が最新**と判定され、本 Issue が消したはずの過大な残額（利用前の残高）が復活する。
+    /// 台帳をまたぐ順序は規約で、台帳の中の順序はチェーンで決める。
+    /// </remarks>
+    [Fact]
+    [Trait("Category", "Unit")]
+    public async Task MergeAsync_Balance_残高不足マージ台帳_チェーンが解けなくても利用後の実残高が選ばれること()
+    {
+        // Arrange: その日の実際の流れは 1000円 → L1(210円) → 790円 → L2(200円) → 590円
+        //          → L3 残高不足マージ（210円チャージ→800円、800円利用→0円）
+        //          L2 を選択しないため、統合対象だけではチェーンが繋がらない。
+        var date = new DateTime(2026, 2, 3);
+
+        var ledger1 = CreateTestLedger(1, TestCardIdm, date, "鉄道（A～B）", 210, 790);
+        ledger1.Details.Add(CreateRailDetail(1, "A", "B", 210, 790, 50, date));
+
+        // 残高不足マージ台帳は「チャージ → 利用」の順に挿入するため SequenceNumber はチャージ < 利用。
+        // 返却処理は残高不足ペアを先に処理するので、同じ日の通常台帳より小さい rowid になる。
+        var ledger3 = CreateTestLedger(3, TestCardIdm, date, "鉄道（C～D）", 590, 0);
+        ledger3.Details.Add(CreateChargeDetail(3, 210, 800, 40, date));
+        ledger3.Details.Add(CreateRailDetail(3, "C", "D", 800, 0, 41, date));
+
+        SetupGetByIdMocks(ledger1, ledger3);
+        SetupMergeMockSuccess();
+
+        // Act
+        var result = await _service.MergeAsync(new List<int> { 1, 3 });
+
+        // Assert
+        result.Success.Should().BeTrue();
+        result.MergedLedger!.Balance.Should().Be(0,
+            "利用後の実残高。規約へ倒したときにチャージ側（800円＝利用前の残高）を選ぶと本 Issue の欠陥が復活する");
+    }
+
     #endregion
 
     #region Issue #920: 分割・再統合後の摘要欄の順序
