@@ -106,9 +106,28 @@ namespace ICCardManager.Services
         private readonly DepartmentType _departmentType;
 
         /// <summary>
-        /// 組織固有設定（Issue #974）
+        /// 現在有効な設定の世代（組織固有設定 Issue #974 ＋ 同一視グループ Issue #1905）
         /// </summary>
-        private static OrganizationOptions _options = new();
+        /// <remarks>
+        /// Issue #1919: 設定と、そこから導出した同一視グループを 1 つの不変オブジェクトへ
+        /// まとめ、差し替えは参照 1 回の代入で行う（.NET でアトミック）。
+        /// <b>このフィールドを直接読んでよいのは、静的な文言 API と
+        /// <see cref="CaptureContext"/> だけ</b>。摘要生成の各段階が個別に読むと、
+        /// 1 回の生成の途中で世代が入れ替わり、往復の突合が壊れる
+        /// （<see cref="SummaryGenerationContext"/> の remarks 参照）。
+        /// この規約は <c>SummaryGenerationSnapshotConventionTests</c> が静的検査で固定する。
+        /// </remarks>
+        private static SummaryGenerationContext _context =
+            SummaryGenerationContext.Create(new OrganizationOptions());
+
+        /// <summary>
+        /// 静的な文言 API（生成パイプライン外）が参照する現在の組織固有設定
+        /// </summary>
+        /// <remarks>
+        /// 摘要生成の内部からは使わない（引数で受け取った世代の
+        /// <see cref="SummaryGenerationContext.Options"/> を使う）。
+        /// </remarks>
+        private static OrganizationOptions CurrentOptions => _context.Options;
 
         /// <summary>
         /// 設定値が空だった場合のフォールバック元（既定値の単一の真実源、Issue #1818）
@@ -120,17 +139,11 @@ namespace ICCardManager.Services
         private static readonly SummaryTextOptions DefaultSummaryText = new();
 
         /// <summary>
-        /// TransferStationGroups のHashSet版キャッシュ
-        /// </summary>
-        private static List<HashSet<string>> _transferStationGroups = BuildTransferStationGroups(new OrganizationOptions());
-
-        /// <summary>
         /// 組織固有設定を注入（起動時に1回だけ呼ぶ）
         /// </summary>
         public static void Configure(OrganizationOptions options)
         {
-            _options = options ?? new OrganizationOptions();
-            _transferStationGroups = BuildTransferStationGroups(_options);
+            _context = SummaryGenerationContext.Create(options);
         }
 
         /// <summary>
@@ -143,18 +156,19 @@ namespace ICCardManager.Services
         /// Singleton で静的状態を持つため、保存後に本メソッドで反映しないと
         /// アプリを再起動するまで新しいグループが効かない。
         ///
-        /// 差し替えるのはグループだけで、<see cref="_options"/> の他の項目
+        /// 差し替えるのはグループだけで、設定の他の項目
         /// （摘要テキスト・生成ルールの ON/OFF）は保持する
         /// （<c>development-conventions.md</c>「UPDATE の SET 句は、その経路で本当に編集する列に限る」
         /// と同じ判断。全体を差し替えると呼び出し元が組み立て損ねた項目が既定値へ落ちる）。
+        ///
+        /// Issue #1919: 差し替えは<b>世代（<see cref="SummaryGenerationContext"/>）の参照 1 回の代入</b>で行い、
+        /// 現行の設定インスタンスをその場で書き換えない。設定だけ新しくグループが古い中間状態が
+        /// 構造的に存在しなくなり、既に生成を始めている呼び出しは捕捉済みの古い世代を
+        /// 最後まで一貫して見る。
         /// </remarks>
         public static void ApplyTransferStationGroups(IEnumerable<IEnumerable<string>> groups)
         {
-            _options.SummaryRules.TransferStationGroups = (groups ?? Enumerable.Empty<IEnumerable<string>>())
-                .Where(g => g != null)
-                .Select(g => g.ToList())
-                .ToList();
-            _transferStationGroups = BuildTransferStationGroups(_options);
+            _context = _context.WithTransferStationGroups(groups);
         }
 
         /// <summary>
@@ -168,18 +182,29 @@ namespace ICCardManager.Services
         /// 静的状態に影響しないようコピーを返す。
         /// </remarks>
         public static List<List<string>> GetTransferStationGroups()
-            => _options.SummaryRules.TransferStationGroups
-                .Select(g => g.ToList())
-                .ToList();
+            => _context.GetTransferStationGroups();
 
         /// <summary>
         /// 設定をデフォルトにリセット（テスト用）
         /// </summary>
         internal static void ResetToDefaults()
         {
-            _options = new OrganizationOptions();
-            _transferStationGroups = BuildTransferStationGroups(_options);
+            _context = SummaryGenerationContext.Create(new OrganizationOptions());
         }
+
+        /// <summary>
+        /// 1 回の摘要生成が参照する設定の世代を捕捉する（Issue #1919）
+        /// </summary>
+        /// <remarks>
+        /// 生成の入口（<see cref="Generate"/> / <see cref="GenerateByDate"/>）で 1 回だけ呼び、
+        /// 以降の各段階へは戻り値を引数で持ち回る。生成の途中で
+        /// <see cref="ApplyTransferStationGroups"/> が走っても、その生成は捕捉済みの世代を
+        /// 最後まで一貫して見る。
+        ///
+        /// <c>virtual</c> なのは、回帰テストが「捕捉の直後にグループが差し替わる」瞬間を
+        /// 固定時間の待機なしに再現するため（<c>SummaryGeneratorGenerationSnapshotTests</c>）。
+        /// </remarks>
+        internal virtual SummaryGenerationContext CaptureContext() => _context;
 
         /// <summary>
         /// バス利用のラベル（組織設定 <c>SummaryText.BusLabel</c> 由来、Issue #1818）
@@ -187,7 +212,7 @@ namespace ICCardManager.Services
         /// <remarks>
         /// <para>
         /// 摘要の生成・判定・抽出は、いずれもこのプロパティ（および本プロパティから導出する
-        /// <see cref="FormatBusSummary"/> / <see cref="ExtractBusStopBlocks"/> /
+        /// <see cref="FormatBusSummary(string)"/> / <see cref="ExtractBusStopBlocks"/> /
         /// <see cref="TryExtractBusStops"/> / <see cref="ContainsBusLabel"/>）を経由すること。
         /// 生成側だけが設定値を使い判定側がリテラルを直書きすると、ラベルを
         /// 「乗合自動車」等へ変更した組織で判定だけが追従しない（Issue #1604 / #1749 と同型の乖離）。
@@ -202,8 +227,13 @@ namespace ICCardManager.Services
         /// 汎用/固有の別: 交通系固有（バス混在表記）。
         /// </para>
         /// </remarks>
-        public static string BusLabel => Coalesce(
-            _options.SummaryText?.BusLabel, DefaultSummaryText.BusLabel);
+        public static string BusLabel => ResolveBusLabel(_context);
+
+        /// <summary>
+        /// 指定した世代のバスラベルを解決する（Issue #1919）
+        /// </summary>
+        private static string ResolveBusLabel(SummaryGenerationContext context) => Coalesce(
+            context.Options.SummaryText?.BusLabel, DefaultSummaryText.BusLabel);
 
         /// <summary>
         /// バス停名未入力時のプレースホルダ（組織設定 <c>SummaryText.BusPlaceholder</c> 由来、Issue #1818）
@@ -222,8 +252,13 @@ namespace ICCardManager.Services
         /// 汎用/固有の別: 交通系固有（バス混在表記）。
         /// </para>
         /// </remarks>
-        public static string BusPlaceholder => Coalesce(
-            _options.SummaryText?.BusPlaceholder, DefaultSummaryText.BusPlaceholder);
+        public static string BusPlaceholder => ResolveBusPlaceholder(_context);
+
+        /// <summary>
+        /// 指定した世代のバス停名プレースホルダを解決する（Issue #1919）
+        /// </summary>
+        private static string ResolveBusPlaceholder(SummaryGenerationContext context) => Coalesce(
+            context.Options.SummaryText?.BusPlaceholder, DefaultSummaryText.BusPlaceholder);
 
         /// <summary>
         /// 設定値が空（null／空白のみ）なら既定値へフォールバックする
@@ -244,13 +279,19 @@ namespace ICCardManager.Services
         /// 汎用/固有の別: 交通系固有。
         /// </remarks>
         public static string FormatBusSummary(string busStops)
-            => $"{BusLabel}{FullWidthOpenParenthesis}{busStops}{FullWidthCloseParenthesis}";
+            => FormatBusSummary(busStops, _context);
+
+        /// <summary>
+        /// 指定した世代の設定でバス区間の摘要表記を生成する（Issue #1919）
+        /// </summary>
+        private static string FormatBusSummary(string busStops, SummaryGenerationContext context)
+            => $"{ResolveBusLabel(context)}{FullWidthOpenParenthesis}{busStops}{FullWidthCloseParenthesis}";
 
         /// <summary>
         /// 摘要の書式に使う全角開き括弧（Issue #1914）
         /// </summary>
         /// <remarks>
-        /// 生成（<see cref="FormatBusSummary"/>）と抽出（<see cref="ExtractBusStopBlocks"/>）・
+        /// 生成（<see cref="FormatBusSummary(string)"/>）と抽出（<see cref="ExtractBusStopBlocks"/>）・
         /// 対応判定（<see cref="HasBalancedFullWidthParentheses"/>）が同じ文字を見ることを
         /// 定数で保証する。片方だけ半角へ変えるといった乖離を作れなくするため。
         /// </remarks>
@@ -457,78 +498,6 @@ namespace ICCardManager.Services
             => busStops == BusPlaceholder;
 
         /// <summary>
-        /// TransferStationGroups を List&lt;List&lt;string&gt;&gt; から List&lt;HashSet&lt;string&gt;&gt; に変換
-        /// </summary>
-        /// <remarks>
-        /// Issue #1905: 名前を共有するグループどうしは 1 つに併合し、同一視を
-        /// 真の同値関係（反射・対称・<b>推移</b>律を満たす）にする。
-        ///
-        /// 併合しないと [A, B] と [B, C] が登録されたとき A ≡ B、B ≡ C なのに
-        /// A ≢ C という非推移的な判定になり、<see cref="CanonicalStation"/> による
-        /// 正規化（<see cref="GetRemainingRoutes"/> のキー突合が依存する）が成立しない。
-        /// 既定のグループ（天神/西鉄福岡(天神)、千早/西鉄千早）は互いに素なので挙動は変わらない。
-        ///
-        /// 併合が要るのは、本 Issue で管理者が画面からグループを登録できるようになり、
-        /// 「天神日銀前と天神中央郵便局前」「天神中央郵便局前と天神北」のように
-        /// 重なるグループが実際に作られ得るため。
-        /// </remarks>
-        private static List<HashSet<string>> BuildTransferStationGroups(OrganizationOptions options)
-        {
-            var merged = new List<HashSet<string>>();
-
-            foreach (var group in options.SummaryRules.TransferStationGroups)
-            {
-                var names = new HashSet<string>(group.Where(n => !string.IsNullOrWhiteSpace(n)));
-                if (names.Count == 0)
-                {
-                    continue;
-                }
-
-                // 既存グループのうち 1 つでも名前を共有するものをすべて吸収する
-                var overlapping = merged.Where(m => m.Overlaps(names)).ToList();
-                foreach (var m in overlapping)
-                {
-                    names.UnionWith(m);
-                    merged.Remove(m);
-                }
-
-                merged.Add(names);
-            }
-
-            return merged;
-        }
-
-        /// <summary>
-        /// 駅名・バス停名を同一視グループの代表名へ正規化する（Issue #1905）
-        /// </summary>
-        /// <remarks>
-        /// <para>
-        /// <see cref="AreTransferStations"/> は「2 つが同一か」しか答えられないため、
-        /// 名前を辞書のキーにしている処理（<see cref="GetRemainingRoutes"/> の往復消費枠）では使えない。
-        /// 正規化を挟むと <c>CanonicalStation(a) == CanonicalStation(b)</c> が
-        /// <c>AreTransferStations(a, b)</c> と等価になり、辞書のキーとして扱えるようになる。
-        /// </para>
-        /// <para>
-        /// 代表名はグループ内で順序が安定するよう序数比較で最小のものを選ぶ。
-        /// 代表名は突合にのみ使い、<b>摘要へ出力する名前には使わない</b>
-        /// （利用者が実際に乗降した停留所の名前をそのまま表示するため）。
-        /// </para>
-        /// </remarks>
-        private static string CanonicalStation(string station)
-        {
-            foreach (var group in _transferStationGroups)
-            {
-                if (group.Contains(station))
-                {
-                    // .NET Framework 4.8 には Enumerable.Min(IComparer) のオーバーロードが無い
-                    return group.OrderBy(n => n, StringComparer.Ordinal).First();
-                }
-            }
-
-            return station;
-        }
-
-        /// <summary>
         /// コンストラクタ
         /// </summary>
         /// <param name="departmentType">部署種別（チャージ摘要の切替に使用）</param>
@@ -568,41 +537,6 @@ namespace ICCardManager.Services
         }
 
         /// <summary>
-        /// 2つの駅・バス停が同一とみなせるかどうかを判定
-        /// </summary>
-        /// <param name="station1">駅名・バス停名1</param>
-        /// <param name="station2">駅名・バス停名2</param>
-        /// <returns>同一（完全一致または同一グループ内）の場合true</returns>
-        /// <remarks>
-        /// 判定は名前の文字列比較のみで、鉄道／バスの区別を持たない。したがって
-        /// 同一視グループ（<c>SummaryRules.TransferStationGroups</c>）は
-        /// <b>バス停にもそのまま適用される</b>（Issue #1905。道路を挟んで向かい合う
-        /// 「天神日銀前」と「天神中央郵便局前」のような実質同一の停留所を登録する用途）。
-        ///
-        /// <see cref="BuildTransferStationGroups"/> がグループを同値類へ併合済みのため、
-        /// 本メソッドは <c>CanonicalStation(a) == CanonicalStation(b)</c> と等価。
-        /// </remarks>
-        private static bool AreTransferStations(string station1, string station2)
-        {
-            // 完全一致
-            if (station1 == station2)
-            {
-                return true;
-            }
-
-            // 同一グループ内かチェック
-            foreach (var group in _transferStationGroups)
-            {
-                if (group.Contains(station1) && group.Contains(station2))
-                {
-                    return true;
-                }
-            }
-
-            return false;
-        }
-
-        /// <summary>
         /// 利用履歴詳細から日付ごとの摘要リストを生成します。
         /// </summary>
         /// <param name="details">利用履歴詳細のリスト（ICカードから取得した新しい順）</param>
@@ -632,6 +566,8 @@ namespace ICCardManager.Services
         /// <seealso cref="Generate"/>
         public List<DailySummary> GenerateByDate(IEnumerable<LedgerDetail> details)
         {
+            // Issue #1919: 設定の世代を入口で 1 回だけ捕捉し、以降の段階へ持ち回る
+            var context = CaptureContext();
             var detailList = details.ToList();
 
             if (detailList.Count == 0)
@@ -682,7 +618,7 @@ namespace ICCardManager.Services
                         if (currentUsageGroup.Count > 0)
                         {
                             var usageDetails = currentUsageGroup.Select(x => x.Detail).ToList();
-                            var usageSummary = GenerateUsageSummary(usageDetails);
+                            var usageSummary = GenerateUsageSummary(usageDetails, context);
                             if (!string.IsNullOrEmpty(usageSummary))
                             {
                                 var oldestIndex = currentUsageGroup.Max(x => x.Index);
@@ -717,7 +653,7 @@ namespace ICCardManager.Services
                 if (currentUsageGroup.Count > 0)
                 {
                     var usageDetails = currentUsageGroup.Select(x => x.Detail).ToList();
-                    var usageSummary = GenerateUsageSummary(usageDetails);
+                    var usageSummary = GenerateUsageSummary(usageDetails, context);
                     if (!string.IsNullOrEmpty(usageSummary))
                     {
                         var oldestIndex = currentUsageGroup.Max(x => x.Index);
@@ -769,7 +705,8 @@ namespace ICCardManager.Services
         /// 明示グループ（GroupId）は <see cref="CoalesceExplicitGroups"/> で 1 単位として扱う。
         /// </para>
         /// </remarks>
-        private string GenerateUsageSummary(List<LedgerDetail> usageDetails)
+        private string GenerateUsageSummary(
+            List<LedgerDetail> usageDetails, SummaryGenerationContext context)
         {
             var sortedDetails = SortChronologically(usageDetails);
             var runs = SplitIntoModeRuns(CoalesceExplicitGroups(sortedDetails));
@@ -780,14 +717,14 @@ namespace ICCardManager.Services
             {
                 if (run[0].IsBus)
                 {
-                    summaryParts.Add(FormatBusSummary(GenerateBusSummary(run)));
+                    summaryParts.Add(FormatBusSummary(GenerateBusSummary(run, context), context));
                 }
                 else
                 {
-                    var railwaySummary = GenerateRailwaySummary(run);
+                    var railwaySummary = GenerateRailwaySummary(run, context);
                     if (!string.IsNullOrEmpty(railwaySummary))
                     {
-                        summaryParts.Add($"{_options.SummaryText.RailwayLabel}（{railwaySummary}）");
+                        summaryParts.Add($"{context.Options.SummaryText.RailwayLabel}（{railwaySummary}）");
                     }
                 }
             }
@@ -895,11 +832,14 @@ namespace ICCardManager.Services
                 return GetChargeSummary(_departmentType);
             }
 
+            // Issue #1919: 設定の世代を入口で 1 回だけ捕捉し、以降の段階へ持ち回る
+            var context = CaptureContext();
+
             // ポイント還元のみの場合
             // Issue #942: 暗黙のポイント還元（金額が負でチャージでもない）も含めて判定
             if (detailList.All(d => d.IsPointRedemption || IsImplicitPointRedemption(d)))
             {
-                return _options.SummaryText.PointRedemption;
+                return context.Options.SummaryText.PointRedemption;
             }
 
             // Issue #1904: 鉄道/バスの二分割は GenerateUsageSummary に一本化
@@ -908,7 +848,7 @@ namespace ICCardManager.Services
                 .Where(d => !d.IsCharge && !d.IsPointRedemption && !IsImplicitPointRedemption(d))
                 .ToList();
 
-            return GenerateUsageSummary(usageDetails);
+            return GenerateUsageSummary(usageDetails, context);
         }
 
         /// <summary>
@@ -1069,7 +1009,9 @@ namespace ICCardManager.Services
         /// （満たさなければ既定解のまま＝従来挙動）。
         /// </para>
         /// </remarks>
-        private string BuildRouteSummary(List<(string Entry, string Exit)> routes)
+        /// <param name="context">この生成が参照する設定の世代（Issue #1919）</param>
+        private string BuildRouteSummary(
+            List<(string Entry, string Exit)> routes, SummaryGenerationContext context)
         {
             if (routes.Count == 0)
             {
@@ -1079,16 +1021,16 @@ namespace ICCardManager.Services
             // Issue #878: 乗り継ぎ統合を往復判定より先に行う
             // Issue #974: EnableTransferConsolidation で ON/OFF 可能
             var suppressedIndices = new HashSet<int>();
-            var best = _options.SummaryRules.EnableTransferConsolidation
-                ? EvaluateCandidate(ConsolidateRoutes(routes, suppressedIndices))
+            var best = context.Options.SummaryRules.EnableTransferConsolidation
+                ? EvaluateCandidate(ConsolidateRoutes(routes, suppressedIndices, context), context)
                 : EvaluateCandidate(routes
-                    .Select(r => new ConsolidatedRoute(r.Entry, r.Exit, 1)).ToList());
+                    .Select(r => new ConsolidatedRoute(r.Entry, r.Exit, 1)).ToList(), context);
 
             // Issue #1916: 延長を抑止した候補を試し、往復カバレッジで選び直す。
             // 往復検出が無効なら候補を比べる意味がない（すべてカバレッジ 0 になる）。
             // 乗継統合が無効なら全区間の LegCount が 1 になるため
             // HasUnexplainedThroughRoute が必ず false になり、ここは素通りする。
-            if (_options.SummaryRules.EnableRoundTripDetection
+            if (context.Options.SummaryRules.EnableRoundTripDetection
                 && routes.Count <= MaxRoutesForCandidateSearch
                 && HasUnexplainedThroughRoute(best))
             {
@@ -1117,7 +1059,7 @@ namespace ICCardManager.Services
 
                         suppressedIndices.Add(suppressAt);
                         var candidate = EvaluateCandidate(
-                            ConsolidateRoutes(routes, suppressedIndices));
+                            ConsolidateRoutes(routes, suppressedIndices, context), context);
                         suppressedIndices.Remove(suppressAt);
 
                         // 採用の条件はカバレッジの厳密な増加。同点は「同じ回で見つかった
@@ -1146,7 +1088,7 @@ namespace ICCardManager.Services
                 }
             }
 
-            return FormatRouteBlocks(best);
+            return FormatRouteBlocks(best, context);
         }
 
         /// <summary>
@@ -1220,18 +1162,21 @@ namespace ICCardManager.Services
         /// 統合候補に往復検出を通し、選択に使う指標を算出する（Issue #1916）。
         /// <b>交通系固有</b>（往復・乗継判定。domain-boundaries.md の分類）
         /// </summary>
-        private RouteCandidate EvaluateCandidate(List<ConsolidatedRoute> consolidatedRoutes)
+        private RouteCandidate EvaluateCandidate(
+            List<ConsolidatedRoute> consolidatedRoutes, SummaryGenerationContext context)
         {
             var asPairs = consolidatedRoutes
                 .Select(r => (Entry: r.Start, Exit: r.End)).ToList();
 
             // Issue #974: EnableRoundTripDetection で ON/OFF 可能
-            if (_options.SummaryRules.EnableRoundTripDetection && asPairs.Count >= 2)
+            if (context.Options.SummaryRules.EnableRoundTripDetection && asPairs.Count >= 2)
             {
-                var roundTrips = DetectRoundTrips(asPairs);
+                var roundTrips = DetectRoundTrips(asPairs, context);
                 if (roundTrips.Count > 0)
                 {
-                    var remaining = GetRemainingRoutes(asPairs, roundTrips);
+                    // Issue #1919: 突合が成立するのは DetectRoundTrips と同じ世代を
+                    // 渡したときだけ。ここで現在の世代を読み直してはならない
+                    var remaining = GetRemainingRoutes(asPairs, roundTrips, context);
 
                     // カバレッジは統合後の本数ではなく元の区間数で数える。
                     // 本数で数えると「往路 2 区間＋復路 2 区間が 1 往復に畳まれた解」より
@@ -1308,10 +1253,11 @@ namespace ICCardManager.Services
         /// 先に来る形（薬院～天神 → 天神～博多 往復）では移動順と食い違っていた。
         /// 鉄道／バスのブロックを利用順に並べる #1904 と同じ考え方をブロック内にも適用する。
         /// </remarks>
-        private string FormatRouteBlocks(RouteCandidate candidate)
+        private string FormatRouteBlocks(
+            RouteCandidate candidate, SummaryGenerationContext context)
         {
             var blocks = candidate.RoundTrips
-                .Select(rt => (Order: rt.ForwardIndex, Text: FormatRoundTrip(rt)))
+                .Select(rt => (Order: rt.ForwardIndex, Text: FormatRoundTrip(rt, context)))
                 .Concat(candidate.RemainingRoutes
                     .Select(r => (Order: r.Index, Text: $"{r.Entry}～{r.Exit}")))
                 .OrderBy(b => b.Order)
@@ -1339,11 +1285,11 @@ namespace ICCardManager.Services
         /// 名前が完全に一致する通常の往復では括弧を付けない（「A～B 往復」のまま）。
         /// </para>
         /// </remarks>
-        private string FormatRoundTrip(RoundTrip roundTrip)
+        private string FormatRoundTrip(RoundTrip roundTrip, SummaryGenerationContext context)
         {
             var start = FormatEndpoint(roundTrip.Start, roundTrip.ReturnExit);
             var end = FormatEndpoint(roundTrip.End, roundTrip.ReturnEntry);
-            return $"{start}～{end}{_options.SummaryText.RoundTripSuffix}";
+            return $"{start}～{end}{context.Options.SummaryText.RoundTripSuffix}";
         }
 
         /// <summary>
@@ -1415,7 +1361,9 @@ namespace ICCardManager.Services
         /// <item><description>循環移動（始点=終点）の場合は統合せず個別表示</description></item>
         /// </list>
         /// </remarks>
-        private string GenerateRailwaySummary(List<LedgerDetail> trips)
+        /// <param name="context">この生成が参照する設定の世代（Issue #1919）</param>
+        private string GenerateRailwaySummary(
+            List<LedgerDetail> trips, SummaryGenerationContext context)
         {
             if (trips.Count == 0)
             {
@@ -1428,17 +1376,18 @@ namespace ICCardManager.Services
             var hasGroupId = sortedTrips.Any(t => t.GroupId.HasValue);
             if (hasGroupId)
             {
-                return GenerateRailwaySummaryWithGroupId(sortedTrips);
+                return GenerateRailwaySummaryWithGroupId(sortedTrips, context);
             }
 
             // GroupIdが設定されていない場合は従来の自動判定
-            return GenerateRailwaySummaryAutomatic(sortedTrips);
+            return GenerateRailwaySummaryAutomatic(sortedTrips, context);
         }
 
         /// <summary>
         /// GroupIdに基づいて鉄道利用の摘要を生成（Issue #484）
         /// </summary>
-        private string GenerateRailwaySummaryWithGroupId(List<LedgerDetail> sortedTrips)
+        private string GenerateRailwaySummaryWithGroupId(
+            List<LedgerDetail> sortedTrips, SummaryGenerationContext context)
         {
             var result = new List<string>();
 
@@ -1467,10 +1416,10 @@ namespace ICCardManager.Services
                 {
                     // Issue #548: グループ内でも往復・乗継を自動判定
                     // 単純にfirst/lastを使うと往復（A→B, B→A）で「A～A」になるバグがあった
-                    var groupSummary = GenerateRailwaySummaryAutomatic(groupTrips);
+                    var groupSummary = GenerateRailwaySummaryAutomatic(groupTrips, context);
                     if (!string.IsNullOrEmpty(groupSummary))
                     {
-                        result.Add(CollapseExplicitGroupSummary(groupTrips, groupSummary));
+                        result.Add(CollapseExplicitGroupSummary(groupTrips, groupSummary, context));
                     }
                 }
             }
@@ -1478,7 +1427,7 @@ namespace ICCardManager.Services
             // グループ化されていない経路は自動判定
             if (ungroupedTrips.Count > 0)
             {
-                var autoSummary = GenerateRailwaySummaryAutomatic(ungroupedTrips);
+                var autoSummary = GenerateRailwaySummaryAutomatic(ungroupedTrips, context);
                 if (!string.IsNullOrEmpty(autoSummary))
                 {
                     result.Add(autoSummary);
@@ -1524,7 +1473,9 @@ namespace ICCardManager.Services
         /// どちらも「畳まない」＝従来どおり自動判定の結果を使う側へ倒す。
         /// </para>
         /// </remarks>
-        private string CollapseExplicitGroupSummary(List<LedgerDetail> groupTrips, string automaticSummary)
+        /// <param name="context">この生成が参照する設定の世代（Issue #1919）</param>
+        private string CollapseExplicitGroupSummary(
+            List<LedgerDetail> groupTrips, string automaticSummary, SummaryGenerationContext context)
         {
             if (!automaticSummary.Contains(RouteSeparator))
             {
@@ -1533,7 +1484,7 @@ namespace ICCardManager.Services
 
             // 往復が含まれる場合は畳まない（往復の情報が失われ、未乗車の区間を作るため）
             // 接尾辞が空に設定されている場合は Contains が常に true になるため除外する
-            var roundTripSuffix = _options.SummaryText.RoundTripSuffix;
+            var roundTripSuffix = context.Options.SummaryText.RoundTripSuffix;
             if (!string.IsNullOrEmpty(roundTripSuffix) && automaticSummary.Contains(roundTripSuffix))
             {
                 return automaticSummary;
@@ -1557,7 +1508,7 @@ namespace ICCardManager.Services
             }
 
             // 始点＝終点は「A駅～A駅」になるため畳まない（Issue #548 の循環移動と同じ扱い）
-            if (AreTransferStations(start, end))
+            if (context.AreTransferStations(start, end))
             {
                 return automaticSummary;
             }
@@ -1592,7 +1543,8 @@ namespace ICCardManager.Services
         /// <summary>
         /// 自動判定で鉄道利用の摘要を生成（従来のロジック）
         /// </summary>
-        private string GenerateRailwaySummaryAutomatic(List<LedgerDetail> sortedTrips)
+        private string GenerateRailwaySummaryAutomatic(
+            List<LedgerDetail> sortedTrips, SummaryGenerationContext context)
         {
             // Issue #1735: 片側だけ駅名が解決できた明細（StationCode.csv 未収録の新駅等）を
             // 摘要から黙って落とさず、欠落側をプレースホルダで埋めて経路に採用する。
@@ -1603,7 +1555,7 @@ namespace ICCardManager.Services
                 .Select(ToRoute)
                 .ToList();
 
-            return BuildRouteSummary(routes);
+            return BuildRouteSummary(routes, context);
         }
 
         /// <summary>
@@ -1662,7 +1614,9 @@ namespace ICCardManager.Services
         /// - 逆順の場合: [(博多,薬院), (薬院,博多)] → "博多～薬院 往復" (不正)
         /// </para>
         /// </remarks>
-        private List<RoundTrip> DetectRoundTrips(List<(string Entry, string Exit)> routes)
+        /// <param name="context">この生成が参照する設定の世代（Issue #1919）</param>
+        private List<RoundTrip> DetectRoundTrips(
+            List<(string Entry, string Exit)> routes, SummaryGenerationContext context)
         {
             var roundTrips = new List<RoundTrip>();
             var usedIndices = new HashSet<int>();
@@ -1686,8 +1640,8 @@ namespace ICCardManager.Services
                     // Issue #1905: 端点の突合は同一視グループを考慮する
                     // （道路を挟んで向かい合うバス停や、事業者違いで名前が異なる駅を
                     // 往復の折り返し点として認識するため）
-                    if (AreTransferStations(routes[i].Entry, routes[j].Exit)
-                        && AreTransferStations(routes[i].Exit, routes[j].Entry))
+                    if (context.AreTransferStations(routes[i].Entry, routes[j].Exit)
+                        && context.AreTransferStations(routes[i].Exit, routes[j].Entry))
                     {
                         // Issue #1905: 復路の乗降地名も持ち回る。同一視グループにより
                         // 往路の端点とは名前が異なり得るため、摘要へ併記して
@@ -1724,7 +1678,8 @@ namespace ICCardManager.Services
         /// </remarks>
         private List<(int Index, string Entry, string Exit)> GetRemainingRoutes(
             List<(string Entry, string Exit)> allRoutes,
-            List<RoundTrip> roundTrips)
+            List<RoundTrip> roundTrips,
+            SummaryGenerationContext context)
         {
             // 往復の正方向ペアごとに件数を集計（例: (天神,博多) の往復が 2 件 → forwardQuotas[(天神,博多)] = 2）
             //
@@ -1736,7 +1691,7 @@ namespace ICCardManager.Services
             var forwardQuotas = new Dictionary<(string, string), int>();
             foreach (var rt in roundTrips)
             {
-                var key = (CanonicalStation(rt.Start), CanonicalStation(rt.End));
+                var key = (context.CanonicalStation(rt.Start), context.CanonicalStation(rt.End));
                 forwardQuotas[key] = forwardQuotas.TryGetValue(key, out var count) ? count + 1 : 1;
             }
 
@@ -1747,8 +1702,8 @@ namespace ICCardManager.Services
             for (int index = 0; index < allRoutes.Count; index++)
             {
                 var route = allRoutes[index];
-                var canonicalEntry = CanonicalStation(route.Entry);
-                var canonicalExit = CanonicalStation(route.Exit);
+                var canonicalEntry = context.CanonicalStation(route.Entry);
+                var canonicalExit = context.CanonicalStation(route.Exit);
                 var forwardKey = (canonicalEntry, canonicalExit);
                 var reverseKey = (canonicalExit, canonicalEntry);
 
@@ -1786,7 +1741,7 @@ namespace ICCardManager.Services
         /// 注：起点と終点が同じになる循環移動の場合は統合せず、個別の経路を表示
         /// </summary>
         /// <remarks>
-        /// Issue #1580: <c>AreTransferStations</c> の隣接判定だけでは「乗継（順方向に進む）」と
+        /// Issue #1580: <c>SummaryGenerationContext.AreTransferStations</c> の隣接判定だけでは「乗継（順方向に進む）」と
         /// 「往復（戻ってくる）」を区別できないため、A→B→A→B 型のチェーンを 1 経路に
         /// 潰してしまうバグがあった。本実装ではチェーン内の既訪問駅集合を保持し、
         /// 次経路の終点が既訪問なら原則として方向反転とみなして乗継統合を打ち切る。
@@ -1799,7 +1754,7 @@ namespace ICCardManager.Services
         /// 一方 A→B→A（チェーン長 2 の反転）は break して個別化し、後段の
         /// <see cref="DetectRoundTrips"/> に往復ペアとして拾わせる。
         ///
-        /// 既訪問判定は <see cref="AreTransferStations"/> による同一視を考慮する
+        /// 既訪問判定は <see cref="SummaryGenerationContext.AreTransferStations"/> による同一視を考慮する
         /// （例: 天神 と 西鉄福岡(天神) は同一駅とみなす）。
         ///
         /// Issue #1902: さらに、現在のチェーンが「直前に確定したチェーンの完全な逆走」
@@ -1826,7 +1781,7 @@ namespace ICCardManager.Services
         /// 既訪問（#1580）や抑止（#1916）による打ち切りはガードが無くても起きるため、
         /// ガードのせいにして取り消してはならない）。
         ///
-        /// Issue #1905: かつては逆走判定が <see cref="AreTransferStations"/> による同一視を含む一方で
+        /// Issue #1905: かつては逆走判定が <see cref="SummaryGenerationContext.AreTransferStations"/> による同一視を含む一方で
         /// <see cref="DetectRoundTrips"/> の往復ペア照合は駅名の完全一致だったため、
         /// 復路の端点が同一視グループ内の別名（例: 天神→博多 の復路が 博多→西鉄福岡(天神)）だと
         /// 延長の打ち切りだけが働いて摘要は「往復」表記にならなかった。
@@ -1849,9 +1804,11 @@ namespace ICCardManager.Services
         /// 最上位では先頭がチェーンの起点なので意味を持たないが、循環分割の後半リストでは
         /// その先頭位置が候補から漏れる（実害は無く、その 1 候補が既定解と同一物になるだけ）。
         /// </param>
+        /// <param name="context">この生成が参照する設定の世代（Issue #1919）</param>
         private List<ConsolidatedRoute> ConsolidateRoutes(
             List<(string Entry, string Exit)> routes,
             ISet<int> suppressedIndices,
+            SummaryGenerationContext context,
             int indexOffset = 0)
         {
             if (routes.Count == 0)
@@ -1892,7 +1849,7 @@ namespace ICCardManager.Services
                 // ガードは往復ペアを DetectRoundTrips へ渡すための区切りであって、
                 // 循環の解釈（#878 の個別表示）を捨てる指示ではない。
                 if (pendingGuardChainStart >= 0
-                    && AreTransferStations(end, pendingGuardChainStartStation))
+                    && context.AreTransferStations(end, pendingGuardChainStartStation))
                 {
                     result.RemoveRange(
                         pendingGuardResultCount, result.Count - pendingGuardResultCount);
@@ -1903,7 +1860,7 @@ namespace ICCardManager.Services
 
                 AddConsolidatedChain(
                     result, routes, emitChainStart, chainEnd, emitStartStation, end,
-                    suppressedIndices, indexOffset);
+                    suppressedIndices, context, indexOffset);
 
                 if (closedByReturnGuard)
                 {
@@ -1921,18 +1878,18 @@ namespace ICCardManager.Services
 
             for (int i = 1; i < routes.Count; i++)
             {
-                var isTransfer = AreTransferStations(currentEnd, routes[i].Entry);
+                var isTransfer = context.AreTransferStations(currentEnd, routes[i].Entry);
                 var nextExit = routes[i].Exit;
-                var nextExitVisited = visitedInChain.Any(v => AreTransferStations(v, nextExit));
-                var nextExitEqualsStart = AreTransferStations(currentStart, nextExit);
+                var nextExitVisited = visitedInChain.Any(v => context.AreTransferStations(v, nextExit));
+                var nextExitEqualsStart = context.AreTransferStations(currentStart, nextExit);
                 var chainLengthAfter = i - chainStartIndex + 1;
                 var isClosingCircular = nextExitEqualsStart && chainLengthAfter >= 3;
 
                 // Issue #1902: 現在のチェーンが直前チェーンの完全な逆走（往復の復路）なら
                 // ここでチェーンを閉じ、往復ペアを DetectRoundTrips に委ねる
                 var isReturnLegOfPreviousChain = previousChainStart != null
-                    && AreTransferStations(currentStart, previousChainEnd)
-                    && AreTransferStations(currentEnd, previousChainStart);
+                    && context.AreTransferStations(currentStart, previousChainEnd)
+                    && context.AreTransferStations(currentEnd, previousChainStart);
 
                 // Issue #1916: 候補生成のためにこの位置の延長を抑止する
                 var isSuppressed = suppressedIndices.Contains(indexOffset + i);
@@ -2003,11 +1960,12 @@ namespace ICCardManager.Services
             string consolidatedStart,
             string consolidatedEnd,
             ISet<int> suppressedIndices,
+            SummaryGenerationContext context,
             int indexOffset)
         {
             // 起点と終点が同じ場合（循環移動）
             // Issue #878: 乗り継ぎ駅も考慮して循環判定
-            if (AreTransferStations(consolidatedStart, consolidatedEnd) && chainEnd > chainStart)
+            if (context.AreTransferStations(consolidatedStart, consolidatedEnd) && chainEnd > chainStart)
             {
                 var chainLength = chainEnd - chainStart + 1;
 
@@ -2032,9 +1990,9 @@ namespace ICCardManager.Services
                     // Issue #1916: 抑止点の添字は最上位リスト基準なので、分割後の
                     // 部分リストへはそれぞれの先頭位置をオフセットとして渡す
                     result.AddRange(ConsolidateRoutes(
-                        firstHalf, suppressedIndices, indexOffset + chainStart));
+                        firstHalf, suppressedIndices, context, indexOffset + chainStart));
                     result.AddRange(ConsolidateRoutes(
-                        secondHalf, suppressedIndices, indexOffset + mid + 1));
+                        secondHalf, suppressedIndices, context, indexOffset + mid + 1));
                 }
                 else
                 {
@@ -2082,7 +2040,8 @@ namespace ICCardManager.Services
         /// <summary>
         /// バス利用の摘要を生成
         /// </summary>
-        private string GenerateBusSummary(List<LedgerDetail> trips)
+        private string GenerateBusSummary(
+            List<LedgerDetail> trips, SummaryGenerationContext context)
         {
             var sortedTrips = SortChronologically(trips);
 
@@ -2090,16 +2049,17 @@ namespace ICCardManager.Services
             var hasGroupId = sortedTrips.Any(t => t.GroupId.HasValue);
             if (hasGroupId)
             {
-                return GenerateBusSummaryWithGroupId(sortedTrips);
+                return GenerateBusSummaryWithGroupId(sortedTrips, context);
             }
 
-            return GenerateBusSummaryAutomatic(sortedTrips);
+            return GenerateBusSummaryAutomatic(sortedTrips, context);
         }
 
         /// <summary>
         /// GroupIdに基づいてバス利用の摘要を生成
         /// </summary>
-        private string GenerateBusSummaryWithGroupId(List<LedgerDetail> sortedTrips)
+        private string GenerateBusSummaryWithGroupId(
+            List<LedgerDetail> sortedTrips, SummaryGenerationContext context)
         {
             var result = new List<string>();
 
@@ -2117,7 +2077,7 @@ namespace ICCardManager.Services
             foreach (var group in groupedTrips)
             {
                 var groupTrips = SortChronologically(group.ToList());
-                var groupSummary = GenerateBusSummaryAutomatic(groupTrips);
+                var groupSummary = GenerateBusSummaryAutomatic(groupTrips, context);
                 if (!string.IsNullOrEmpty(groupSummary))
                 {
                     result.Add(groupSummary);
@@ -2127,7 +2087,7 @@ namespace ICCardManager.Services
             // グループ化されていない経路は自動判定
             if (ungroupedTrips.Count > 0)
             {
-                var autoSummary = GenerateBusSummaryAutomatic(ungroupedTrips);
+                var autoSummary = GenerateBusSummaryAutomatic(ungroupedTrips, context);
                 if (!string.IsNullOrEmpty(autoSummary))
                 {
                     result.Add(autoSummary);
@@ -2140,7 +2100,8 @@ namespace ICCardManager.Services
         /// <summary>
         /// 自動判定でバス利用の摘要を生成
         /// </summary>
-        private string GenerateBusSummaryAutomatic(List<LedgerDetail> sortedTrips)
+        private string GenerateBusSummaryAutomatic(
+            List<LedgerDetail> sortedTrips, SummaryGenerationContext context)
         {
             // バス停名が入力されているものを時系列順（古い→新しい）で取得
             var allBusStops = sortedTrips
@@ -2151,7 +2112,7 @@ namespace ICCardManager.Services
             if (allBusStops.Count == 0)
             {
                 // 未入力の場合はプレースホルダ
-                return BusPlaceholder;
+                return ResolveBusPlaceholder(context);
             }
 
             // Issue #985: 「A～B」形式のバス停名から乗り継ぎ統合・往復検出を行う
@@ -2170,7 +2131,7 @@ namespace ICCardManager.Services
             if (parsedRoutes.Count >= 2)
             {
                 // 共通パイプラインで統合・往復検出・整形
-                var routeSummary = BuildRouteSummary(parsedRoutes);
+                var routeSummary = BuildRouteSummary(parsedRoutes, context);
 
                 if (unparsed.Count > 0)
                 {
@@ -2204,7 +2165,7 @@ namespace ICCardManager.Services
         /// </summary>
         public static string GetLendingSummary()
         {
-            return _options.SummaryText.LendingSummary;
+            return CurrentOptions.SummaryText.LendingSummary;
         }
 
         /// <summary>
@@ -2223,8 +2184,8 @@ namespace ICCardManager.Services
         public static string GetChargeSummary(DepartmentType departmentType)
         {
             return departmentType == DepartmentType.EnterpriseAccount
-                ? _options.SummaryText.ChargeSummaryEnterprise
-                : _options.SummaryText.ChargeSummaryMayorOffice;
+                ? CurrentOptions.SummaryText.ChargeSummaryEnterprise
+                : CurrentOptions.SummaryText.ChargeSummaryMayorOffice;
         }
 
         /// <summary>
@@ -2232,7 +2193,7 @@ namespace ICCardManager.Services
         /// </summary>
         public static string GetPointRedemptionSummary()
         {
-            return _options.SummaryText.PointRedemption;
+            return CurrentOptions.SummaryText.PointRedemption;
         }
 
         /// <summary>
@@ -2240,7 +2201,7 @@ namespace ICCardManager.Services
         /// </summary>
         public static string GetRefundSummary()
         {
-            return _options.SummaryText.RefundSummary;
+            return CurrentOptions.SummaryText.RefundSummary;
         }
 
         /// <summary>
@@ -2257,7 +2218,7 @@ namespace ICCardManager.Services
         /// </remarks>
         public static string GetUnknownUsageSummary()
         {
-            return _options.SummaryText.UnknownUsageSummary;
+            return CurrentOptions.SummaryText.UnknownUsageSummary;
         }
 
         /// <summary>
@@ -2272,7 +2233,7 @@ namespace ICCardManager.Services
         /// <returns>備考テキスト</returns>
         public static string GetInsufficientBalanceNote(int totalFare, int shortfall)
         {
-            return string.Format(_options.SummaryText.InsufficientBalanceNoteFormat, totalFare, shortfall);
+            return string.Format(CurrentOptions.SummaryText.InsufficientBalanceNoteFormat, totalFare, shortfall);
         }
 
         /// <summary>
@@ -2280,7 +2241,7 @@ namespace ICCardManager.Services
         /// </summary>
         public static string GetCarryoverFromPreviousYearSummary()
         {
-            return _options.SummaryText.CarryoverFromPreviousYear;
+            return CurrentOptions.SummaryText.CarryoverFromPreviousYear;
         }
 
         /// <summary>
@@ -2289,7 +2250,7 @@ namespace ICCardManager.Services
         /// <param name="previousMonth">前月の月番号（1-12）</param>
         public static string GetCarryoverFromPreviousMonthSummary(int previousMonth)
         {
-            return string.Format(_options.SummaryText.CarryoverFromMonthFormat, previousMonth);
+            return string.Format(CurrentOptions.SummaryText.CarryoverFromMonthFormat, previousMonth);
         }
 
         /// <summary>
@@ -2297,7 +2258,7 @@ namespace ICCardManager.Services
         /// </summary>
         public static string GetCarryoverToNextYearSummary()
         {
-            return _options.SummaryText.CarryoverToNextYear;
+            return CurrentOptions.SummaryText.CarryoverToNextYear;
         }
 
         /// <summary>
@@ -2311,7 +2272,7 @@ namespace ICCardManager.Services
         /// </remarks>
         public static string GetMidYearCarryoverSummary(int carryoverMonth)
         {
-            return string.Format(_options.SummaryText.MidYearCarryoverFormat, carryoverMonth);
+            return string.Format(CurrentOptions.SummaryText.MidYearCarryoverFormat, carryoverMonth);
         }
 
         /// <summary>
@@ -2399,7 +2360,7 @@ namespace ICCardManager.Services
 
             try
             {
-                return Regex.IsMatch(summary, _options.SummaryText.MidYearCarryoverPattern);
+                return Regex.IsMatch(summary, CurrentOptions.SummaryText.MidYearCarryoverPattern);
             }
             catch (ArgumentException)
             {
@@ -2447,7 +2408,7 @@ namespace ICCardManager.Services
             string formatted;
             try
             {
-                formatted = string.Format(_options.SummaryText.MidYearCarryoverFormat, placeholder);
+                formatted = string.Format(CurrentOptions.SummaryText.MidYearCarryoverFormat, placeholder);
             }
             catch (Exception ex) when (ex is FormatException or ArgumentNullException)
             {
@@ -2470,7 +2431,7 @@ namespace ICCardManager.Services
         /// </summary>
         public static string GetMonthlySummary(int month)
         {
-            return string.Format(_options.SummaryText.MonthlySummaryFormat, month);
+            return string.Format(CurrentOptions.SummaryText.MonthlySummaryFormat, month);
         }
 
         /// <summary>
@@ -2478,7 +2439,7 @@ namespace ICCardManager.Services
         /// </summary>
         public static string GetCumulativeSummary()
         {
-            return _options.SummaryText.CumulativeSummary;
+            return CurrentOptions.SummaryText.CumulativeSummary;
         }
     }
 }
