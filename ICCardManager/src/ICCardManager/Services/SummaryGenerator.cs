@@ -1809,6 +1809,23 @@ namespace ICCardManager.Services
         /// （例: A→B、B→A、C→D、D→C で復路 B→A が乗換駅グループ経由で
         /// C→D と統合され「B～D」という実際には乗っていない区間になっていた）。
         ///
+        /// Issue #1917: ただし逆走ガードによる打ち切りは「往復ペアを
+        /// <see cref="DetectRoundTrips"/> へ渡すための区切り」であって、
+        /// 循環の解釈（#878 の個別表示）を捨てる指示ではない。
+        /// 打ち切りの直後に始まるチェーンが<b>打ち切ったチェーンの先頭の駅へ戻る</b>とき、
+        /// 両者は本来ひと続きの閉じた循環なので、確定済みのチェーンを取り消して
+        /// 併合した範囲で <see cref="AddConsolidatedChain"/> をやり直す。
+        /// 復元しないと循環の後半だけが乗継統合され、途中駅（用務地）が摘要から消える
+        /// （天神→博多／博多→天神／天神→薬院／薬院→博多 が
+        ///  「鉄道（天神～博多 往復、天神～博多）」となり 薬院 が失われていた）。
+        /// これは<b>先読みではなく後付けの判定</b>である点が重要で、
+        /// 循環が閉じるかどうかは後続のチェーンを確定させて初めて分かる。
+        /// なお復元してよいのは<b>逆走ガードだけが打ち切りの原因</b>だったときに限る
+        /// （乗車地がつながっていない＝<c>isTransfer</c> が false の打ち切りを併合すると
+        /// 「閉じた循環」ではないものを循環として解釈し、成立していた往復を壊す。
+        /// 既訪問（#1580）や抑止（#1916）による打ち切りはガードが無くても起きるため、
+        /// ガードのせいにして取り消してはならない）。
+        ///
         /// Issue #1905: かつては逆走判定が <see cref="AreTransferStations"/> による同一視を含む一方で
         /// <see cref="DetectRoundTrips"/> の往復ペア照合は駅名の完全一致だったため、
         /// 復路の端点が同一視グループ内の別名（例: 天神→博多 の復路が 博多→西鉄福岡(天神)）だと
@@ -1852,6 +1869,56 @@ namespace ICCardManager.Services
             string previousChainStart = null;
             string previousChainEnd = null;
 
+            // Issue #1917: 逆走ガードで閉じた直前チェーンの情報（閉じた循環の復元用）。
+            // pendingGuardChainStart < 0 は「直前の区切りは逆走ガードによるものではない」。
+            var pendingGuardChainStart = -1;
+            string pendingGuardChainStartStation = null;
+            var pendingGuardResultCount = -1;
+
+            // チェーンを result へ確定させる。
+            // closedByReturnGuard は「この区切りが Issue #1902 の逆走ガードによるものか」。
+            void EmitChain(int chainStart, int chainEnd, string start, string end, bool closedByReturnGuard)
+            {
+                var emitChainStart = chainStart;
+                var emitStartStation = start;
+                var countBeforeEmit = result.Count;
+
+                // Issue #1917: 直前チェーンが逆走ガードで閉じられ、いま閉じるチェーンが
+                // その先頭の駅へ戻るなら、両者は本来ひと続きの「閉じた循環」である。
+                // ガードで分断したままだと AddConsolidatedChain の循環検出（Issue #878）へ
+                // 到達できず、循環の後半が乗継統合されて途中駅（用務地）が摘要から消える
+                // （天神→博多／博多→天神／天神→薬院／薬院→博多 で
+                //  「鉄道（天神～博多 往復、天神～博多）」となり 薬院 が失われていた）。
+                // ガードは往復ペアを DetectRoundTrips へ渡すための区切りであって、
+                // 循環の解釈（#878 の個別表示）を捨てる指示ではない。
+                if (pendingGuardChainStart >= 0
+                    && AreTransferStations(end, pendingGuardChainStartStation))
+                {
+                    result.RemoveRange(
+                        pendingGuardResultCount, result.Count - pendingGuardResultCount);
+                    emitChainStart = pendingGuardChainStart;
+                    emitStartStation = pendingGuardChainStartStation;
+                    countBeforeEmit = pendingGuardResultCount;
+                }
+
+                AddConsolidatedChain(
+                    result, routes, emitChainStart, chainEnd, emitStartStation, end,
+                    suppressedIndices, indexOffset);
+
+                if (closedByReturnGuard)
+                {
+                    pendingGuardChainStart = emitChainStart;
+                    pendingGuardChainStartStation = emitStartStation;
+                    pendingGuardResultCount = countBeforeEmit;
+                }
+                else
+                {
+                    pendingGuardChainStart = -1;
+                    pendingGuardChainStartStation = null;
+                    pendingGuardResultCount = -1;
+                }
+            }
+
             for (int i = 1; i < routes.Count; i++)
             {
                 var isTransfer = AreTransferStations(currentEnd, routes[i].Entry);
@@ -1881,9 +1948,27 @@ namespace ICCardManager.Services
                 }
                 else
                 {
-                    AddConsolidatedChain(
-                        result, routes, chainStartIndex, i - 1, currentStart, currentEnd,
-                        suppressedIndices, indexOffset);
+                    // Issue #1917: 復元してよいのは「逆走ガードだけが打ち切りの原因」のとき。
+                    // isReturnLegOfPreviousChain は「このチェーンが直前チェーンの逆走である」
+                    // としか言っておらず、打ち切りの原因がガードかどうかは表さない。
+                    // 原因を問わずに復元すると、
+                    //  ・isTransfer が false（前チェーンの終点と次経路の乗車地がつながっていない）
+                    //    のに併合され、「閉じた循環」ではないものを循環として解釈する
+                    //    （天神→薬院／薬院→博多／博多→薬院／薬院→天神／大橋→博多 で、
+                    //     独立した 大橋→博多 が復路チェーンを巻き込み
+                    //     「天神～博多 往復、大橋～博多」が「天神～博多、博多～薬院、薬院～天神、
+                    //     大橋～博多」へ分解され、実際に成立していた往復が失われる）
+                    //  ・既訪問（#1580）や抑止（#1916）による打ち切り
+                    //    ＝ガードが無くても起きる打ち切り＝までガードのせいにして取り消す
+                    // ため、if 側の条件からガードだけを外した形（＝ガードが唯一の否定要因）で判定する。
+                    var closedByReturnGuard = isReturnLegOfPreviousChain
+                        && isTransfer
+                        && !isSuppressed
+                        && (!nextExitVisited || isClosingCircular);
+
+                    EmitChain(
+                        chainStartIndex, i - 1, currentStart, currentEnd,
+                        closedByReturnGuard);
 
                     // 逆走判定は「直前に result へ確定した経路」を基準にする
                     // （循環分割で複数経路が追加された場合は末尾の経路が直前の移動）
@@ -1899,9 +1984,9 @@ namespace ICCardManager.Services
             }
 
             // 最後のチェーンを追加
-            AddConsolidatedChain(
-                result, routes, chainStartIndex, routes.Count - 1, currentStart, currentEnd,
-                suppressedIndices, indexOffset);
+            EmitChain(
+                chainStartIndex, routes.Count - 1, currentStart, currentEnd,
+                closedByReturnGuard: false);
 
             return result;
         }
