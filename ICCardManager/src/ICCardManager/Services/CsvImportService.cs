@@ -180,6 +180,20 @@ namespace ICCardManager.Services
         private readonly ILogger<CsvImportService>? _logger;
 
         /// <summary>
+        /// 部署種別（チャージ摘要の切替）を解決するための設定リポジトリ。
+        /// </summary>
+        /// <remarks>
+        /// 明細 CSV の取込は <see cref="SummaryGenerator"/> で <c>ledger.summary</c> を作り直すが、
+        /// 引数なしのコンストラクタは <see cref="DepartmentType.MayorOffice"/> を既定に持つため、
+        /// 企業会計部局の組織で「旅費によりチャージ」ではなく「役務費によりチャージ」が
+        /// 6 年保存の台帳と物品出納簿へ書き込まれていた（設定の注入が既定値に静かに置き換わる形。
+        /// <c>development-conventions.md</c>「設定値で生成したものは、設定値で判定する」）。
+        /// 本番は DI が最も引数の多いコンストラクタを選ぶため常に非 null。
+        /// 既存テスト互換のための旧オーバーロード経由でのみ null になり得る。
+        /// </remarks>
+        private readonly ISettingsRepository? _settingsRepository;
+
+        /// <summary>
         /// 6 引数オーバーロード（既存テストの Moq プロキシ生成互換性のため維持）
         /// </summary>
         public CsvImportService(
@@ -204,6 +218,22 @@ namespace ICCardManager.Services
             DbContext dbContext,
             ICacheService cacheService,
             ILogger<CsvImportService>? logger)
+            : this(cardRepository, staffRepository, ledgerRepository, validationService, dbContext, cacheService, logger, settingsRepository: null)
+        {
+        }
+
+        /// <summary>
+        /// 部署種別の解決に使う <see cref="ISettingsRepository"/> を受け取るコンストラクタ（DI はこれを選ぶ）
+        /// </summary>
+        public CsvImportService(
+            ICardRepository cardRepository,
+            IStaffRepository staffRepository,
+            ILedgerRepository ledgerRepository,
+            IValidationService validationService,
+            DbContext dbContext,
+            ICacheService cacheService,
+            ILogger<CsvImportService>? logger,
+            ISettingsRepository? settingsRepository)
         {
             _cardRepository = cardRepository;
             _staffRepository = staffRepository;
@@ -212,6 +242,29 @@ namespace ICCardManager.Services
             _dbContext = dbContext;
             _cacheService = cacheService;
             _logger = logger;
+            _settingsRepository = settingsRepository;
+        }
+
+        /// <summary>
+        /// 摘要の再生成に使う部署種別を解決する。
+        /// </summary>
+        /// <remarks>
+        /// 解決できない場合（旧コンストラクタ経由）は既定値へ倒すが、黙って倒さず警告を残す。
+        /// 「ログには出ている」を免罪符にしないため、本番経路（DI）では必ず解決できる形にしてある。
+        /// </remarks>
+        private async Task<DepartmentType> ResolveDepartmentTypeAsync()
+        {
+            if (_settingsRepository == null)
+            {
+                _logger?.LogWarning(
+                    "CsvImportService: 部署種別を解決できないため既定値（{DepartmentType}）で摘要を再生成します。" +
+                    "企業会計部局の組織ではチャージの摘要が実際の設定と食い違います",
+                    DepartmentType.MayorOffice);
+                return DepartmentType.MayorOffice;
+            }
+
+            var settings = await _settingsRepository.GetAppSettingsAsync().ConfigureAwait(false);
+            return settings.DepartmentType;
         }
 
         // === 共通ユーティリティ ===

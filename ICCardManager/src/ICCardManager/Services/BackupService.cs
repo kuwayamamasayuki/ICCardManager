@@ -571,7 +571,8 @@ namespace ICCardManager.Services
                 {
                     FilePath = f.FullName,
                     FileName = f.Name,
-                    CreatedAt = f.CreationTime,
+                    // Issue #1813: 表示する日時も並び順・世代削除と同じ根拠にする
+                    CreatedAt = ResolveBackupTimestamp(f),
                     FileSize = f.Length
                 });
         }
@@ -596,7 +597,11 @@ namespace ICCardManager.Services
             return Directory.GetFiles(backupPath, $"{BackupFilePrefix}*{BackupFileExtension}")
                 .Where(f => f.EndsWith(BackupFileExtension, StringComparison.OrdinalIgnoreCase))
                 .Select(f => new FileInfo(f))
-                .OrderByDescending(f => f.CreationTime)
+                // Issue #1813: 並び順も世代削除と同じ「ファイル名のタイムスタンプ」で決める。
+                // CreationTime は共有フォルダーへのコピー・移動で書き換わるため、退避しておいた
+                // 古い backup_… を戻すとそれが「最新」として並び、リストアの既定候補になって
+                // 6 年保存の台帳 DB が古いコピーで上書きされ得る。
+                .OrderByDescending(ResolveBackupTimestamp)
                 .ToList();
         }
 

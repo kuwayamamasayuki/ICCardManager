@@ -692,7 +692,13 @@ public partial class ReportViewModel : ViewModelBase
 
         try
         {
-            var cardIdms = SelectedCards.Select(c => c.CardIdm).ToList();
+            // Issue #1761: SelectedCards は画面の選択状態そのもの（TwoWay バインド）で、
+            // 処理中オーバーレイが塞ぐのはマウスのヒットテストだけ。長い一括作成の途中に
+            // キーボードでチェックを外されると SelectedCards.First(...) が
+            // InvalidOperationException を投げ、下の catch(OperationCanceledException) では
+            // 拾えず一括作成そのものが落ちる。ループが使う値は最初の await より前に確定させる。
+            var targetCards = SelectedCards.ToList();
+            var cardIdms = targetCards.Select(c => c.CardIdm).ToList();
             var successCount = 0;
             var failedCards = new List<(string CardName, string ErrorMessage)>();
             var totalCount = cardIdms.Count;
@@ -703,7 +709,7 @@ public partial class ReportViewModel : ViewModelBase
                 busyScope.ThrowIfCancellationRequested();
 
                 var cardIdm = cardIdms[i];
-                var card = SelectedCards.First(c => c.CardIdm == cardIdm);
+                var card = targetCards[i];
                 var outputPath = outputPaths[cardIdm];
 
                 // 別名保存の場合は日時を付加
@@ -753,13 +759,14 @@ public partial class ReportViewModel : ViewModelBase
             // 完了時の進捗を100%に
             busyScope.ReportProgress(totalCount, totalCount, "完了");
 
-            if (successCount == SelectedCards.Count)
+            // 件数も処理対象のスナップショットで数える（途中で選択が変わっても報告と実績が食い違わない）
+            if (successCount == totalCount)
             {
                 SetStatus($"{successCount}件の帳票を作成しました", false);
             }
             else
             {
-                SetStatus($"{successCount}/{SelectedCards.Count}件の帳票を作成しました（一部失敗）", true);
+                SetStatus($"{successCount}/{totalCount}件の帳票を作成しました（一部失敗）", true);
 
                 // 失敗したカードの詳細を表示
                 if (failedCards.Count > 0)

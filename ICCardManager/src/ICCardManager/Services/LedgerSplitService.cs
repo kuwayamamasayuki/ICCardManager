@@ -194,7 +194,9 @@ namespace ICCardManager.Services
                 return new LedgerSplitResult
                 {
                     Success = false,
-                    ErrorMessage = ex.Message
+                    // Issue #1614: 技術的詳細は上の LogError へ。UI には 3 要素の文言を返す
+                    // （兄弟の LedgerMergeService と同じ扱いに揃える）
+                    ErrorMessage = ExceptionMessageFormatter.ToUserMessage(ex, "履歴の分割")
                 };
             }
         }

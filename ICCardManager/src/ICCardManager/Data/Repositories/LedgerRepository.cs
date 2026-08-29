@@ -1185,23 +1185,92 @@ LIMIT 100";
         }
 
         /// <inheritdoc/>
-        public async Task UpdateDetailBusStopsAsync(int ledgerId, IEnumerable<(int SequenceNumber, string BusStops)> updates)
+        public async Task<bool> UpdateDetailBusStopsAsync(int ledgerId, IEnumerable<(int SequenceNumber, string BusStops)> updates)
         {
-            using var lease = await _dbContext.LeaseConnectionAsync();
-            var connection = lease.Connection;
+            // Issue #1724: 1 メソッドで複数文を発行するため 3 分岐にする。
+            // 旧実装は command.Transaction を設定せず N 回 autocommit していたため、
+            // 途中の失敗で「一部の明細だけバス停名が入った」状態が確定していた。
+            var list = updates as IList<(int SequenceNumber, string BusStops)> ?? updates.ToList();
+            if (list.Count == 0)
+            {
+                return true;
+            }
+
+            if (_dbContext.HasActiveTransactionScope)
+            {
+                // 外側スコープに暗黙参加する（BeginTransactionAsync の入れ子は自己デッドロック。#1575）
+                using var lease = await _dbContext.LeaseConnectionAsync().ConfigureAwait(false);
+                return await UpdateDetailBusStopsCore(ledgerId, list, lease.Connection, transaction: null)
+                    .ConfigureAwait(false);
+            }
+
+            using var scope = await _dbContext.BeginTransactionAsync().ConfigureAwait(false);
+            try
+            {
+                var ok = await UpdateDetailBusStopsCore(
+                    ledgerId, list, scope.Lease.Connection, scope.Transaction).ConfigureAwait(false);
+                if (ok)
+                {
+                    scope.Commit();
+                }
+                else
+                {
+                    scope.Rollback();
+                }
+                return ok;
+            }
+            catch
+            {
+                // Issue #1831: 素の Rollback() を呼ばない（詳細は SafeRollback の XML doc）
+                SafeRollback.TryRollback(() => scope.Rollback(), logger: null, "バス停名の更新");
+                throw;
+            }
+        }
+
+        /// <summary>
+        /// バス停名の更新本体。
+        /// </summary>
+        /// <remarks>
+        /// Issue #1806: <c>ledger_detail</c> は暗黙 rowid のテーブルで、<c>ReplaceDetailsAsync</c>
+        /// （DELETE + INSERT）を通ると rowid が振り直される。手元の
+        /// <c>LedgerDetail.SequenceNumber</c> が古いと WHERE に 1 行も一致しない。
+        /// Issue #1753: その影響行数 0 を捨てると、呼び出し元は明細が更新されていないのに
+        /// メモリ上の値から作り直した摘要（「バス（天神～博多）」）だけを保存し、
+        /// <c>ledger_detail.bus_stops</c> は ★ のまま残って 6 年保存の台帳が自己矛盾する。
+        /// </remarks>
+        private static async Task<bool> UpdateDetailBusStopsCore(
+            int ledgerId,
+            IList<(int SequenceNumber, string BusStops)> updates,
+            SQLiteConnection connection,
+            SQLiteTransaction transaction)
+        {
+            using var command = connection.CreateCommand();
+            if (transaction != null)
+            {
+                command.Transaction = transaction;
+            }
+
+            command.CommandText = @"UPDATE ledger_detail SET bus_stops = @busStops
+WHERE ledger_id = @ledgerId AND rowid = @rowid";
+
+            var busStopsParam = command.Parameters.Add("@busStops", System.Data.DbType.String);
+            var ledgerIdParam = command.Parameters.Add("@ledgerId", System.Data.DbType.Int32);
+            var rowidParam = command.Parameters.Add("@rowid", System.Data.DbType.Int32);
+            ledgerIdParam.Value = ledgerId;
 
             foreach (var (sequenceNumber, busStops) in updates)
             {
-                using var command = connection.CreateCommand();
-                command.CommandText = @"UPDATE ledger_detail SET bus_stops = @busStops
-WHERE ledger_id = @ledgerId AND rowid = @rowid";
+                busStopsParam.Value = (object)busStops ?? DBNull.Value;
+                rowidParam.Value = sequenceNumber;
 
-                command.Parameters.AddWithValue("@busStops", (object)busStops ?? DBNull.Value);
-                command.Parameters.AddWithValue("@ledgerId", ledgerId);
-                command.Parameters.AddWithValue("@rowid", sequenceNumber);
-
-                await command.ExecuteNonQueryAsync();
+                var rows = await command.ExecuteNonQueryAsync().ConfigureAwait(false);
+                if (rows != 1)
+                {
+                    return false;
+                }
             }
+
+            return true;
         }
 
         /// <inheritdoc/>
@@ -1710,15 +1779,21 @@ WHERE card_idm IN ({string.Join(", ", parameters)})";
             using (var updateCommand = connection.CreateCommand())
             {
                 updateCommand.Transaction = transaction;
+                // Issue #1906: companion_count も SET に含める。LedgerMergeService は
+                // target.CompanionCount = ledgers.Max(...) で「外N名」を引き継ぐ判断をしているが、
+                // ここで書かないと統合元の行が DELETE される一方で統合先は 0 のまま残り、
+                // 6 年保存の台帳と物品出納簿から「外N名」が黙って消える
+                // （操作ログと戻り値の MergedLedger は新しい値を報告するため食い違う）。
                 updateCommand.CommandText = @"UPDATE ledger
 SET summary = @summary, income = @income, expense = @expense,
-    balance = @balance, note = @note
+    balance = @balance, note = @note, companion_count = @companionCount
 WHERE id = @id";
                 updateCommand.Parameters.AddWithValue("@summary", updatedTarget.Summary);
                 updateCommand.Parameters.AddWithValue("@income", updatedTarget.Income);
                 updateCommand.Parameters.AddWithValue("@expense", updatedTarget.Expense);
                 updateCommand.Parameters.AddWithValue("@balance", updatedTarget.Balance);
                 updateCommand.Parameters.AddWithValue("@note", (object)updatedTarget.Note ?? DBNull.Value);
+                updateCommand.Parameters.AddWithValue("@companionCount", updatedTarget.CompanionCount);
                 updateCommand.Parameters.AddWithValue("@id", targetLedgerId);
 
                 // SQLite の changes() は WHERE に一致した行を（値が変わらなくても）数えるため、

@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
+using ICCardManager.Common;
 using ICCardManager.Data.Repositories;
 using ICCardManager.Models;
 
@@ -16,9 +17,20 @@ namespace ICCardManager.Services.Import.Builders
     {
         private readonly ILedgerRepository _ledgerRepository;
 
-        public NewLedgerFromSegmentsBuilder(ILedgerRepository ledgerRepository)
+        /// <summary>
+        /// 摘要生成に使う部署種別（チャージ摘要の「旅費／役務費」の切替）
+        /// </summary>
+        /// <remarks>
+        /// 既定値を持たせない。<see cref="SummaryGenerator"/> の引数なしコンストラクタは
+        /// <see cref="DepartmentType.MayorOffice"/> を既定に持つため、渡し忘れると企業会計部局の
+        /// 組織で「役務費によりチャージ」が 6 年保存の <c>ledger.summary</c> と物品出納簿に入る。
+        /// </remarks>
+        private readonly DepartmentType _departmentType;
+
+        public NewLedgerFromSegmentsBuilder(ILedgerRepository ledgerRepository, DepartmentType departmentType)
         {
             _ledgerRepository = ledgerRepository;
+            _departmentType = departmentType;
         }
 
         /// <summary>
@@ -63,7 +75,7 @@ namespace ICCardManager.Services.Import.Builders
                     };
                 }
 
-                var summaryGenerator = new SummaryGenerator();
+                var summaryGenerator = new SummaryGenerator(_departmentType);
                 var segmentFailed = false;
 
                 foreach (var segment in segments)
@@ -127,6 +139,12 @@ namespace ICCardManager.Services.Import.Builders
             }
             catch (Exception ex)
             {
+                // Issue #1817: UI 文言を差し替える前に、技術的詳細の出口を用意する
+                // （このクラスは ILogger を持たないため既存のファイルログ機構を使う）。
+                // NOTE: 下の Message は生の ex.Message と IDm を含んでおり Issue #1614 に反するが、
+                //       既存テスト（NewLedgerFromSegmentsBuilderTests）がその内容を明示的に固定して
+                //       いるため、文言の是正は別途仕様判断のうえで行う。
+                ErrorDialogHelper.LogException(ex, "利用履歴の自動作成");
                 errors.Add(new CsvImportError
                 {
                     LineNumber = firstLineNumber,

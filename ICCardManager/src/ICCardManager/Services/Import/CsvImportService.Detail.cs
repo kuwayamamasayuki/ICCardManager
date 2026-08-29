@@ -434,7 +434,10 @@ namespace ICCardManager.Services
             // Issue #918: カードIDm＋日付ごとにグループ化して個別の Ledger を作成
             // Issue #1053: チャージ/ポイント還元境界で分割し、セグメントごとに Ledger を作成
             // Issue #1284: NewLedgerFromSegmentsBuilder に責務分離
-            var newLedgerBuilder = new NewLedgerFromSegmentsBuilder(_ledgerRepository);
+            // 部署種別を渡さないと SummaryGenerator が MayorOffice 既定で摘要を作り、
+            // 企業会計部局の組織で「役務費によりチャージ」が 6 年保存の台帳へ入る
+            var departmentType = await ResolveDepartmentTypeAsync().ConfigureAwait(false);
+            var newLedgerBuilder = new NewLedgerFromSegmentsBuilder(_ledgerRepository, departmentType);
             foreach (var kvp in newDetailsByCardIdmAndDate)
             {
                 importedCount += await newLedgerBuilder.BuildAndInsertAsync(
@@ -446,7 +449,10 @@ namespace ICCardManager.Services
 
             // 既存ledger_idごとにReplaceDetailsAsyncで全置換（変更がある場合のみ）
             var skippedCount = 0;
-            var summaryGenerator = new SummaryGenerator();
+            // 摘要の再生成は部署種別に依存する（チャージ摘要の「旅費／役務費」）。
+            // 引数なしのコンストラクタは MayorOffice 既定のため、設定から解決した値を渡す
+            var summaryGenerator = new SummaryGenerator(
+                await ResolveDepartmentTypeAsync().ConfigureAwait(false));
             foreach (var kvp in detailsByLedgerId)
             {
                 var ledgerId = kvp.Key;

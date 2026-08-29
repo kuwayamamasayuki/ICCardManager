@@ -146,8 +146,13 @@ VALUES (@staffIdm, @name, @number, @note, 0, NULL)";
                 }
                 return result > 0;
             }
-            catch (SQLiteException)
+            catch (SQLiteException ex) when (
+                ex.ResultCode != SQLiteErrorCode.Busy && ex.ResultCode != SQLiteErrorCode.Locked)
             {
+                // Issue #1753: 制約違反など「同じ条件では何度やっても失敗する」ものだけ false に畳む。
+                // SQLITE_BUSY / SQLITE_LOCKED まで畳むと、DbContext.ExecuteWithRetryAsync が
+                // ResultCode で判定するリトライが効かず、他 PC が書き込みロックを持っている一瞬に
+                // 当たっただけの登録が恒久的な失敗として報告される（共有モードの一過性の競合）。
                 return false;
             }
         }

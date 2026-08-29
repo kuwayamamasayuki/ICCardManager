@@ -1035,7 +1035,20 @@ namespace ICCardManager.ViewModels
 
             if (busStopUpdates.Count > 0)
             {
-                await _ledgerRepository.UpdateDetailBusStopsAsync(ledger.Id, busStopUpdates);
+                // Issue #1753 / #1806: 影響行数 0（rowid の振り直し・他 PC による削除）を捨てると、
+                // 摘要だけがバス停名入りで保存され ledger_detail.bus_stops は ★ のまま残る。
+                var updated = await _ledgerRepository.UpdateDetailBusStopsAsync(ledger.Id, busStopUpdates);
+                if (!updated)
+                {
+                    ErrorDialogHelper.LogException(
+                        new InvalidOperationException(
+                            $"ledger_detail のバス停名を更新できませんでした（LedgerId={ledger.Id}）"),
+                        "バス停名の同期");
+                    StatusMessage =
+                        "摘要は保存しましたが、明細のバス停名を更新できませんでした。" +
+                        "対象の明細が他のパソコンや別の操作で変更された可能性があります。" +
+                        "履歴を再表示して、明細のバス停名を確認してください。";
+                }
             }
         }
 

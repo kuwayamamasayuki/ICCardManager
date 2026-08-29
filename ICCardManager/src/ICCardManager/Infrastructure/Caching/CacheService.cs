@@ -98,11 +98,24 @@ namespace ICCardManager.Infrastructure.Caching
                 AbsoluteExpirationRelativeToNow = absoluteExpiration
             };
 
-            // キー追跡のためのコールバックを設定
-            options.RegisterPostEvictionCallback((evictedKey, _, _, _) =>
+            // キー追跡のためのコールバックを設定。
+            // 同じキーへ再度 Set すると、直前のエントリが理由 Replaced で追い出される。
+            // MemoryCache はコールバックをスレッドプールで実行するため、この呼び出しは
+            // 下の _keys.TryAdd より後に走り得る。理由を見ずに削除すると、
+            // キャッシュには生きているのに _keys から消えた状態が生まれ、
+            // InvalidateByPrefix（CardRepository / StaffRepository の唯一の無効化経路）が
+            // そのキーを取りこぼして削除済みの行を TTL いっぱい返し続ける（Issue #1759 が
+            // 防ごうとした状態そのもの）。Replaced は「新しい値が入った」であって
+            // 「追跡をやめてよい」ではないため、追跡は残す。
+            options.RegisterPostEvictionCallback((evictedKey, _, reason, _) =>
             {
+                if (reason == EvictionReason.Replaced)
+                {
+                    return;
+                }
+
                 _keys.TryRemove(evictedKey.ToString()!, out _);
-                _logger.LogTrace("キャッシュ期限切れ: {Key}", evictedKey);
+                _logger.LogTrace("キャッシュ期限切れ: {Key}（理由: {Reason}）", evictedKey, reason);
             });
 
             _cache.Set(key, value, options);

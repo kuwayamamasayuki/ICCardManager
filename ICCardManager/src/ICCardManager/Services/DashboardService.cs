@@ -53,7 +53,12 @@ namespace ICCardManager.Services
 
             var dashboardItems = new List<CardBalanceDashboardItem>();
 
-            foreach (var card in cards)
+            // 払戻済みカードは残額管理の対象外（貸出もできない。IcCard.IsAvailableForLending）。
+            // 払い戻しは残額 0 の台帳行を書いて is_deleted は 0 のまま残すため、除外しないと
+            // 「残額 0 円」の残額不足警告（WarningService.CheckLowBalanceWarnings）が
+            // メイン画面に恒久的に居座り、本当に補充が要るカードの警告を押し出す。
+            // 母集団は管理者ダッシュボード（AdminDashboardService の !IsDeleted && !IsRefunded）と揃える。
+            foreach (var card in cards.Where(c => !c.IsRefunded))
             {
                 var (balance, lastUsageDate) = balances.TryGetValue(card.CardIdm, out var info)
                     ? info

@@ -38,7 +38,7 @@ public class NewLedgerFromSegmentsBuilderTests
     {
         // Arrange - 空リスト
         var repoMock = new Mock<ILedgerRepository>();
-        var builder = new NewLedgerFromSegmentsBuilder(repoMock.Object);
+        var builder = new NewLedgerFromSegmentsBuilder(repoMock.Object, DepartmentType.MayorOffice);
         var errors = new List<CsvImportError>();
 
         // Act
@@ -66,7 +66,7 @@ public class NewLedgerFromSegmentsBuilderTests
         repoMock.Setup(r => r.InsertDetailsAsync(It.IsAny<int>(), It.IsAny<IEnumerable<LedgerDetail>>()))
             .ReturnsAsync(true);
 
-        var builder = new NewLedgerFromSegmentsBuilder(repoMock.Object);
+        var builder = new NewLedgerFromSegmentsBuilder(repoMock.Object, DepartmentType.MayorOffice);
         var errors = new List<CsvImportError>();
         var detail = Usage(new DateTime(2024, 3, 1, 8, 0, 0), amount: 260, balance: 9740);
 
@@ -126,7 +126,7 @@ public class NewLedgerFromSegmentsBuilderTests
         third.EntryStation = "姪浜";
         third.ExitStation = "西新";
 
-        var builder = new NewLedgerFromSegmentsBuilder(repoMock.Object);
+        var builder = new NewLedgerFromSegmentsBuilder(repoMock.Object, DepartmentType.MayorOffice);
         var errors = new List<CsvImportError>();
 
         // Act
@@ -162,7 +162,7 @@ public class NewLedgerFromSegmentsBuilderTests
         repoMock.Setup(r => r.InsertDetailsAsync(It.IsAny<int>(), It.IsAny<IEnumerable<LedgerDetail>>()))
             .ReturnsAsync(true);
 
-        var builder = new NewLedgerFromSegmentsBuilder(repoMock.Object);
+        var builder = new NewLedgerFromSegmentsBuilder(repoMock.Object, DepartmentType.MayorOffice);
         var errors = new List<CsvImportError>();
 
         var earlier = Usage(new DateTime(2024, 5, 10, 8, 0, 0), amount: 260, balance: 9740);
@@ -195,7 +195,7 @@ public class NewLedgerFromSegmentsBuilderTests
         repoMock.Setup(r => r.InsertDetailsAsync(It.IsAny<int>(), It.IsAny<IEnumerable<LedgerDetail>>()))
             .ReturnsAsync(false);
 
-        var builder = new NewLedgerFromSegmentsBuilder(repoMock.Object);
+        var builder = new NewLedgerFromSegmentsBuilder(repoMock.Object, DepartmentType.MayorOffice);
         var errors = new List<CsvImportError>();
         var detail = Usage(new DateTime(2024, 6, 1, 8, 0, 0), amount: 260, balance: 9740);
 
@@ -222,7 +222,7 @@ public class NewLedgerFromSegmentsBuilderTests
         repoMock.Setup(r => r.InsertAsync(It.IsAny<Ledger>()))
             .ThrowsAsync(new InvalidOperationException(boomMessage));
 
-        var builder = new NewLedgerFromSegmentsBuilder(repoMock.Object);
+        var builder = new NewLedgerFromSegmentsBuilder(repoMock.Object, DepartmentType.MayorOffice);
         var errors = new List<CsvImportError>();
         var detail = Usage(new DateTime(2024, 7, 1, 8, 0, 0), amount: 260, balance: 9740);
 

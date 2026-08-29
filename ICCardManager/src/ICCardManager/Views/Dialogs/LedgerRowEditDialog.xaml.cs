@@ -16,6 +16,21 @@ namespace ICCardManager.Views.Dialogs
     {
         private readonly LedgerRowEditViewModel _viewModel;
 
+        /// <summary>
+        /// 既に閉じる処理を行ったかどうか。
+        /// </summary>
+        /// <remarks>
+        /// 「保存して次へ」は <c>SaveAddAsync</c> / <c>SaveEditAsync</c> が <c>IsSaved = true</c> を
+        /// 立てた時点でこのハンドラーが<b>同期的に</b>走って <c>Close()</c> し、そのあと ViewModel が
+        /// <c>IsSaved = false</c> → <c>IsSaveAndEditNextRequested = true</c> を立てる。
+        /// 閉じたあとのウィンドウへ <c>DialogResult</c> を代入すると
+        /// <c>InvalidOperationException</c> になり、それを ViewModel の catch が拾って
+        /// 「保存に失敗した」かのようなログとステータスを既に閉じたダイアログへ書いていた。
+        /// 閉じる処理は 1 度だけにする（フラグ自体は代入時点で ViewModel に立っているため、
+        /// 呼び出し元が読む <c>IsSaveAndEditNextRequested</c> 等の値は失われない）。
+        /// </remarks>
+        private bool _closeRequested;
+
         public LedgerRowEditDialog(LedgerRowEditViewModel viewModel)
         {
             InitializeComponent();
@@ -26,32 +41,39 @@ namespace ICCardManager.Views.Dialogs
             // 保存完了時に自動的に閉じる
             _viewModel.PropertyChanged += (s, e) =>
             {
+                if (_closeRequested) return;
+
                 if (e.PropertyName == nameof(LedgerRowEditViewModel.IsSaved) && _viewModel.IsSaved)
                 {
+                    _closeRequested = true;
                     DialogResult = true;
                     Close();
                 }
                 // Issue #750: 削除要求時にダイアログを閉じる
                 if (e.PropertyName == nameof(LedgerRowEditViewModel.IsDeleteRequested) && _viewModel.IsDeleteRequested)
                 {
+                    _closeRequested = true;
                     DialogResult = false;
                     Close();
                 }
                 // Issue #1134: 「保存して次へ」要求時にダイアログを閉じる
                 if (e.PropertyName == nameof(LedgerRowEditViewModel.IsSaveAndEditNextRequested) && _viewModel.IsSaveAndEditNextRequested)
                 {
+                    _closeRequested = true;
                     DialogResult = true;
                     Close();
                 }
                 // Issue #1134: 「次へ（保存しない）」要求時にダイアログを閉じる
                 if (e.PropertyName == nameof(LedgerRowEditViewModel.IsSkipToNextRequested) && _viewModel.IsSkipToNextRequested)
                 {
+                    _closeRequested = true;
                     DialogResult = false;
                     Close();
                 }
                 // Issue #1134: 「戻る」要求時にダイアログを閉じる
                 if (e.PropertyName == nameof(LedgerRowEditViewModel.IsBackRequested) && _viewModel.IsBackRequested)
                 {
+                    _closeRequested = true;
                     DialogResult = false;
                     Close();
                 }

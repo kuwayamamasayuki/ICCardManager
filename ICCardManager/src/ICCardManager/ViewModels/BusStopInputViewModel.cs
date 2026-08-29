@@ -259,10 +259,14 @@ public partial class BusStopInputViewModel : ViewModelBase
         }
         catch (Exception ex)
         {
-            _ = ex; // 警告抑制（DEBUGビルドでのみ使用）
 #if DEBUG
             System.Diagnostics.Debug.WriteLine($"[BusStopInput] サジェスト候補の読み込みに失敗: {ex.Message}");
 #endif
+            // Issue #1819: Release ビルドで完全に無言だった。候補が空になると
+            // DetectSimilarBusStops（#1133 の取り違え警告）が必ず 0 件を返し、
+            // #1811 の確認ダイアログが出ないまま保存が通る＝ガードが fail-open する。
+            // 障害調査でこの行が無いと「警告が出なかった」理由に到達できない。
+            ErrorDialogHelper.LogException(ex, "バス停名サジェスト候補の読み込み");
             BusStopSuggestions = new List<string>();
         }
     }
@@ -497,7 +501,15 @@ public partial class BusStopInputViewModel : ViewModelBase
                 var updates = items
                     .Select(item => (item.Detail.SequenceNumber, item.Detail.BusStops))
                     .ToList();
-                await _ledgerRepository.UpdateDetailBusStopsAsync(ledger.Id, updates);
+                // Issue #1753 / #1806: 影響行数 0（rowid が振り直されている・他 PC が削除した）を
+                // 捨てると、明細は ★ のままなのに摘要だけバス停名入りで保存され台帳が自己矛盾する。
+                // 明細を書けなかった台帳は摘要も更新しない。
+                var detailsUpdated = await _ledgerRepository.UpdateDetailBusStopsAsync(ledger.Id, updates);
+                if (!detailsUpdated)
+                {
+                    allSuccess = false;
+                    continue;
+                }
             }
 
             ledger.Summary = summaryGenerator.Generate(ledger.Details);

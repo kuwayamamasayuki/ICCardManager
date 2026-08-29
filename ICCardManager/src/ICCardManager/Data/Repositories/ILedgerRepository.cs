@@ -104,7 +104,17 @@ namespace ICCardManager.Data.Repositories
         /// <summary>
         /// バス利用詳細のバス停名を更新
         /// </summary>
-        Task UpdateDetailBusStopsAsync(int ledgerId, IEnumerable<(int SequenceNumber, string BusStops)> updates);
+        /// <returns>
+        /// すべての明細を更新できた場合 true。1 件でも影響行数が 1 でなければ false（更新は巻き戻る）。
+        /// </returns>
+        /// <remarks>
+        /// Issue #1753 / #1806: <c>ledger_detail</c> は暗黙 rowid のテーブルで、明細の全置換
+        /// （<c>ReplaceDetailsAsync</c>）を挟むと rowid が振り直される。
+        /// 手元の <c>SequenceNumber</c> が古いと WHERE に一致せず 0 行になるため、
+        /// <b>呼び出し元は戻り値を必ず確認すること</b>。捨てると、明細は ★ のままなのに
+        /// 摘要だけがバス停名入りで保存され、6 年保存の台帳が自己矛盾する。
+        /// </remarks>
+        Task<bool> UpdateDetailBusStopsAsync(int ledgerId, IEnumerable<(int SequenceNumber, string BusStops)> updates);
 
         /// <summary>
         /// 同行者数だけを更新する（Issue #1906、返却時の同行者数入力ダイアログ用）

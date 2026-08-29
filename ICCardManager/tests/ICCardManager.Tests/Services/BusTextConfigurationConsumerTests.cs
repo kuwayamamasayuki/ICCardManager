@@ -264,7 +264,7 @@ public class BusTextConfigurationConsumerTests : IDisposable
             .ReturnsAsync(Enumerable.Empty<(string BusStops, int UsageCount, DateTime? LastUsedDate)>());
         ledgerRepo.Setup(r => r.UpdateDetailBusStopsAsync(
                 It.IsAny<int>(), It.IsAny<IEnumerable<(int SequenceNumber, string BusStops)>>()))
-            .Returns(Task.CompletedTask);
+            .ReturnsAsync(true);
         ledgerRepo.Setup(r => r.UpdateAsync(It.IsAny<Ledger>())).ReturnsAsync(true);
         ledgerRepo.Setup(r => r.GetByIdAsync(It.IsAny<int>()))
             .ReturnsAsync((Ledger)null);

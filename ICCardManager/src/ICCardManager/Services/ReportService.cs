@@ -323,7 +323,8 @@ namespace ICCardManager.Services
                     ReorderWorksheetsByMonth(workbook);
 
                     // Issue #809: 前月シートの最終ページ番号を考慮してページ番号を決定
-                    var currentPageNumber = GetStartingPageNumberForMonth(workbook, card, month);
+                    var currentPageNumber = GetStartingPageNumberForMonth(
+                        workbook, card, month, _orgOptions.TemplateMapping.PageNumberColumn);
 
                     // ヘッダ情報を設定（Issue #510: ページ番号も設定）
                     SetHeaderInfo(worksheet, card, currentPageNumber);
@@ -353,13 +354,15 @@ namespace ICCardManager.Services
                     // 繰越行 + 各履歴行を出力
                     foreach (var row in rowSet.DataRows)
                     {
-                        (currentRow, rowsOnCurrentPage, currentPageNumber) = CheckAndInsertPageBreak(worksheet, currentRow, rowsOnCurrentPage, RowsPerPage, currentPageNumber);
+                        (currentRow, rowsOnCurrentPage, currentPageNumber) = CheckAndInsertPageBreak(worksheet, currentRow, rowsOnCurrentPage, RowsPerPage, currentPageNumber,
+                            _orgOptions.TemplateMapping.PageNumberColumn);
                         currentRow = WriteReportRow(worksheet, currentRow, row);
                         rowsOnCurrentPage++;
                     }
 
                     // 月計行
-                    (currentRow, rowsOnCurrentPage, currentPageNumber) = CheckAndInsertPageBreak(worksheet, currentRow, rowsOnCurrentPage, RowsPerPage, currentPageNumber);
+                    (currentRow, rowsOnCurrentPage, currentPageNumber) = CheckAndInsertPageBreak(worksheet, currentRow, rowsOnCurrentPage, RowsPerPage, currentPageNumber,
+                            _orgOptions.TemplateMapping.PageNumberColumn);
                     currentRow = WriteMonthlyTotalRow(worksheet, currentRow,
                         rowSet.MonthlyTotal);
                     rowsOnCurrentPage++;
@@ -367,7 +370,8 @@ namespace ICCardManager.Services
                     // 累計行
                     if (rowSet.CumulativeTotal != null)
                     {
-                        (currentRow, rowsOnCurrentPage, currentPageNumber) = CheckAndInsertPageBreak(worksheet, currentRow, rowsOnCurrentPage, RowsPerPage, currentPageNumber);
+                        (currentRow, rowsOnCurrentPage, currentPageNumber) = CheckAndInsertPageBreak(worksheet, currentRow, rowsOnCurrentPage, RowsPerPage, currentPageNumber,
+                            _orgOptions.TemplateMapping.PageNumberColumn);
                         currentRow = WriteCumulativeRow(worksheet, currentRow,
                             rowSet.CumulativeTotal);
                         rowsOnCurrentPage++;
@@ -376,7 +380,8 @@ namespace ICCardManager.Services
                     // 3月の場合は次年度繰越を追加
                     if (rowSet.CarryoverToNextYear.HasValue)
                     {
-                        (currentRow, rowsOnCurrentPage, currentPageNumber) = CheckAndInsertPageBreak(worksheet, currentRow, rowsOnCurrentPage, RowsPerPage, currentPageNumber);
+                        (currentRow, rowsOnCurrentPage, currentPageNumber) = CheckAndInsertPageBreak(worksheet, currentRow, rowsOnCurrentPage, RowsPerPage, currentPageNumber,
+                            _orgOptions.TemplateMapping.PageNumberColumn);
                         WriteCarryoverToNextYearRow(worksheet, currentRow, rowSet.CarryoverToNextYear.Value);
                         currentRow++;
                         rowsOnCurrentPage++;
@@ -753,10 +758,18 @@ namespace ICCardManager.Services
         /// <param name="worksheet">ワークシート</param>
         /// <param name="headerStartRow">ヘッダーの開始行</param>
         /// <param name="pageNumber">ページ番号</param>
-        private static void SetPageNumber(IXLWorksheet worksheet, int headerStartRow, int pageNumber)
+        /// <param name="pageNumberColumn">
+        /// 頁の値を書き込む列（<c>TemplateMapping.PageNumberColumn</c>。既定 12 = L 列）。
+        /// Issue #1820: 設定値を使う処理を <c>static</c> のまま設定へアクセスさせず、引数で受け取る。
+        /// ここを固定値 12 にしていたため、<see cref="SetHeaderInfo"/>（設定どおりの列へ書く）と
+        /// 食い違い、列を変更した組織では 1 ページ目だけ別の列に頁が入り、
+        /// <see cref="GetLastPageNumberFromWorksheet"/> が 0 を返して毎月ページ番号が振り出しに戻っていた。
+        /// </param>
+        private static void SetPageNumber(
+            IXLWorksheet worksheet, int headerStartRow, int pageNumber, int pageNumberColumn)
         {
             var row2 = headerStartRow + 1;  // ヘッダー情報は開始行+1
-            worksheet.Cell(row2, 12).Value = pageNumber;  // L列: 頁の値
+            worksheet.Cell(row2, pageNumberColumn).Value = pageNumber;  // 既定は L列: 頁の値
         }
 
         /// <summary>
@@ -773,9 +786,10 @@ namespace ICCardManager.Services
         /// （<see cref="FindNearestPreviousMonthLastPage"/>）はこの 0 を見て当該シートをスキップする。
         /// </para>
         /// </remarks>
-        internal static int GetLastPageNumberFromWorksheet(IXLWorksheet worksheet)
+        internal static int GetLastPageNumberFromWorksheet(IXLWorksheet worksheet, int pageNumberColumn)
         {
-            var firstPageCell = worksheet.Cell(2, 12);  // L2セル: 1ページ目のページ番号
+            // Issue #1820: 読み取る列も書き込み側（SetHeaderInfo / SetPageNumber）と同じ設定値から採る
+            var firstPageCell = worksheet.Cell(2, pageNumberColumn);  // 既定は L2セル: 1ページ目のページ番号
             if (firstPageCell.IsEmpty())
                 return 0;
 
@@ -801,7 +815,12 @@ namespace ICCardManager.Services
         /// 振る舞いはそちらに集約されている。
         /// </para>
         /// </remarks>
-        internal static int GetStartingPageNumberForMonth(XLWorkbook workbook, IcCard card, int month)
+        /// <param name="workbook">対象ワークブック</param>
+        /// <param name="card">対象カード</param>
+        /// <param name="month">対象月</param>
+        /// <param name="pageNumberColumn">頁の値が入っている列（<c>TemplateMapping.PageNumberColumn</c>）</param>
+        internal static int GetStartingPageNumberForMonth(
+            XLWorkbook workbook, IcCard card, int month, int pageNumberColumn)
         {
             // 年度内の月順序（4月=先頭, 3月=末尾）
             var fiscalMonthOrder = new[] { 4, 5, 6, 7, 8, 9, 10, 11, 12, 1, 2, 3 };
@@ -811,7 +830,8 @@ namespace ICCardManager.Services
             if (currentIndex <= 0)
                 return card.StartingPageNumber;
 
-            var nearestPreviousLastPage = FindNearestPreviousMonthLastPage(workbook, fiscalMonthOrder, currentIndex);
+            var nearestPreviousLastPage = FindNearestPreviousMonthLastPage(
+                workbook, fiscalMonthOrder, currentIndex, pageNumberColumn);
             return nearestPreviousLastPage > 0
                 ? nearestPreviousLastPage + 1
                 : card.StartingPageNumber;
@@ -840,15 +860,16 @@ namespace ICCardManager.Services
         /// 直近の有効な前月シートの最終ページ番号。
         /// どの前月シートも存在しないか、すべて L2 が空/非整数の場合は 0。
         /// </returns>
+        /// <param name="pageNumberColumn">頁の値が入っている列（<c>TemplateMapping.PageNumberColumn</c>）</param>
         internal static int FindNearestPreviousMonthLastPage(
-            XLWorkbook workbook, int[] fiscalMonthOrder, int currentIndex)
+            XLWorkbook workbook, int[] fiscalMonthOrder, int currentIndex, int pageNumberColumn)
         {
             for (int i = currentIndex - 1; i >= 0; i--)
             {
                 var prevMonthName = $"{fiscalMonthOrder[i]}月";
                 if (workbook.Worksheets.TryGetWorksheet(prevMonthName, out var prevSheet))
                 {
-                    var lastPage = GetLastPageNumberFromWorksheet(prevSheet);
+                    var lastPage = GetLastPageNumberFromWorksheet(prevSheet, pageNumberColumn);
                     if (lastPage > 0)
                         return lastPage;
                 }
@@ -1119,6 +1140,10 @@ namespace ICCardManager.Services
         /// <param name="rowsOnCurrentPage">現在のページに書かれた行数</param>
         /// <param name="rowsPerPage">1ページあたりの最大行数</param>
         /// <param name="currentPageNumber">現在のページ番号（省略時はページ番号を設定しない）</param>
+        /// <param name="pageNumberColumn">
+        /// 頁の値を書き込む列（<c>TemplateMapping.PageNumberColumn</c>）。
+        /// Issue #1820: 設定値を使う処理を <c>static</c> のまま設定へアクセスさせず引数で受け取る。
+        /// </param>
         /// <returns>更新された（currentRow, rowsOnCurrentPage, newPageNumber）のタプル</returns>
         /// <remarks>
         /// テンプレート構造（1ページ = 22行）:
@@ -1131,7 +1156,8 @@ namespace ICCardManager.Services
         /// - データは新しいページのデータエリア（ヘッダーの後）に書き込む
         /// </remarks>
         private static (int currentRow, int rowsOnCurrentPage, int pageNumber) CheckAndInsertPageBreak(
-            IXLWorksheet worksheet, int currentRow, int rowsOnCurrentPage, int rowsPerPage, int currentPageNumber)
+            IXLWorksheet worksheet, int currentRow, int rowsOnCurrentPage, int rowsPerPage, int currentPageNumber,
+            int pageNumberColumn)
         {
             const int HeaderRows = 4;   // ヘッダーの行数（1-4行目）
             const int NotesRows = 6;    // 備考欄の行数（17-22行目）
@@ -1158,7 +1184,7 @@ namespace ICCardManager.Services
 
                 // Issue #510: 新しいページにページ番号を設定
                 var newPageNumber = currentPageNumber + 1;
-                SetPageNumber(worksheet, newPageStartRow, newPageNumber);
+                SetPageNumber(worksheet, newPageStartRow, newPageNumber, pageNumberColumn);
 
                 // データの開始行（ヘッダーの後）
                 var newDataStartRow = newPageStartRow + HeaderRows;

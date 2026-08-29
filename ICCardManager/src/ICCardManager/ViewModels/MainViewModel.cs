@@ -191,6 +191,67 @@ public partial class MainViewModel : ViewModelBase
     }
 
     /// <summary>
+    /// カードリーダーのエラー通知を抑制しているスコープの深さ（Issue #656 / #1807）
+    /// </summary>
+    private int _cardReaderErrorSuppressionDepth;
+
+    /// <summary>
+    /// カードから残高・履歴を読む間だけ、リーダーのエラー通知を抑制するスコープを開始する
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// カードを早く離したことによるリーダーエラーを警告エリアへ出さないための抑制（Issue #656）。
+    /// 各所で <c>Error -= OnCardReaderError; try { … } finally { Error += OnCardReaderError; }</c> と
+    /// 書くと、<b>await をまたぐ間に同じ経路へ再入したとき内側の <c>-=</c> が no-op になり、
+    /// 2 つの <c>finally</c> が <c>+=</c> を 2 回実行してハンドラが二重購読される</b>
+    /// （Issue #1807 が未登録カード経路で記録したのと同じ形。二重購読になると以後
+    /// リーダーエラー 1 件につき警告の <c>OccurrenceCount</c> が 2 ずつ増える）。
+    /// </para>
+    /// <para>
+    /// そこで手段をこのスコープ 1 つへ寄せ、深さを数えて<b>最も外側のスコープだけ</b>が
+    /// 購読を復帰させる。復帰は <c>-=</c> してから <c>+=</c> することで、
+    /// 何が起きても購読はちょうど 1 つになる（規約ではなく手段で守る）。
+    /// UI スレッド専用のため排他は不要（<c>_suppressionSources</c> と同じ前提）。
+    /// </para>
+    /// </remarks>
+    private IDisposable SuppressCardReaderErrors()
+    {
+        if (_cardReaderErrorSuppressionDepth == 0)
+        {
+            _cardReader.Error -= OnCardReaderError;
+        }
+
+        _cardReaderErrorSuppressionDepth++;
+        return new CardReaderErrorSuppressionScope(this);
+    }
+
+    /// <summary>
+    /// <see cref="SuppressCardReaderErrors"/> が返す解放スコープ
+    /// </summary>
+    private sealed class CardReaderErrorSuppressionScope : IDisposable
+    {
+        private readonly MainViewModel _owner;
+        private bool _disposed;
+
+        public CardReaderErrorSuppressionScope(MainViewModel owner) => _owner = owner;
+
+        public void Dispose()
+        {
+            if (_disposed) return;
+            _disposed = true;
+
+            if (--_owner._cardReaderErrorSuppressionDepth > 0)
+            {
+                return;
+            }
+
+            // 二重購読を構造的に防ぐ（購読済みなら -= が外し、+= でちょうど 1 つになる）
+            _owner._cardReader.Error -= _owner.OnCardReaderError;
+            _owner._cardReader.Error += _owner.OnCardReaderError;
+        }
+    }
+
+    /// <summary>
     /// 共有モード（ネットワーク共有フォルダ上のDB）かどうか
     /// </summary>
     public bool IsSharedMode => _databaseInfo.IsSharedMode;
@@ -1373,18 +1434,16 @@ public partial class MainViewModel : ViewModelBase
             // カードから残高を読み取る（Issue #526: 貸出時も残高を記録）
             // Issue #656: エラーイベントを一時的に抑制（カード離脱時の警告メッセージを防止）
             int? balance = null;
-            _cardReader.Error -= OnCardReaderError;
-            try
+            using (SuppressCardReaderErrors())
             {
-                balance = await _cardReader.ReadBalanceAsync(card.CardIdm);
-            }
-            catch
-            {
-                // 残高読み取りエラーは無視（貸出処理は続行）
-            }
-            finally
-            {
-                _cardReader.Error += OnCardReaderError;
+                try
+                {
+                    balance = await _cardReader.ReadBalanceAsync(card.CardIdm);
+                }
+                catch
+                {
+                    // 残高読み取りエラーは無視（貸出処理は続行）
+                }
             }
 
             var result = await _lendingService.LendAsync(_currentStaffIdm!, card.CardIdm, balance);
@@ -1775,19 +1834,17 @@ public partial class MainViewModel : ViewModelBase
         // エラーイベントを一時的に抑制（ユーザーに混乱を与えるエラーメッセージを防止）
         int? preReadBalance = null;
         List<LedgerDetail> preReadHistory = null;
-        _cardReader.Error -= OnCardReaderError;
-        try
+        using (SuppressCardReaderErrors())
         {
-            preReadBalance = await _cardReader.ReadBalanceAsync(idm);
-            preReadHistory = (await _cardReader.ReadHistoryAsync(idm))?.ToList();
-        }
-        catch
-        {
-            // 残高・履歴読み取りエラーは無視（カード登録は続行可能）
-        }
-        finally
-        {
-            _cardReader.Error += OnCardReaderError;
+            try
+            {
+                preReadBalance = await _cardReader.ReadBalanceAsync(idm);
+                preReadHistory = (await _cardReader.ReadHistoryAsync(idm))?.ToList();
+            }
+            catch
+            {
+                // 残高・履歴読み取りエラーは無視（カード登録は続行可能）
+            }
         }
 
         // Issue #312: IDmからカード種別を判別することは技術的に不可能なため、
@@ -1854,21 +1911,22 @@ public partial class MainViewModel : ViewModelBase
 
         // Issue #656 と同じ理由でエラーイベントを一時的に抑制する
         // （カードを離したことによるリーダーエラーを警告エリアへ出さない）。
-        _cardReader.Error -= OnCardReaderError;
-        try
+        // この経路は AppState.WaitingForStaffCard のまま await するため、読み取り中に届いた
+        // 別のタッチが同じ経路へ再入し得る。素の -= / += で書くと二重購読になるため
+        // 深さを数えるスコープを使う（Issue #1807）。
+        using (SuppressCardReaderErrors())
         {
-            actualBalance = await _cardReader.ReadBalanceAsync(card.CardIdm);
-        }
-        catch (Exception ex)
-        {
-            // IDm はログへ生で出さない（IdmMasker を通す。Issue #1852）
-            _logger?.LogWarning(ex,
-                "残額の食い違い判定: カードから残額を読み取れませんでした。カード={CardIdm}（管理番号={CardNumber}）",
-                IdmMasker.Mask(card.CardIdm), card.CardNumber);
-        }
-        finally
-        {
-            _cardReader.Error += OnCardReaderError;
+            try
+            {
+                actualBalance = await _cardReader.ReadBalanceAsync(card.CardIdm);
+            }
+            catch (Exception ex)
+            {
+                // IDm はログへ生で出さない（IdmMasker を通す。Issue #1852）
+                _logger?.LogWarning(ex,
+                    "残額の食い違い判定: カードから残額を読み取れませんでした。カード={CardIdm}（管理番号={CardNumber}）",
+                    IdmMasker.Mask(card.CardIdm), card.CardNumber);
+            }
         }
 
         if (actualBalance == null)
@@ -2463,21 +2521,43 @@ public partial class MainViewModel : ViewModelBase
         // 削除実行
         var fullLedger = await _ledgerRepository.GetByIdAsync(ledger.Id);
         if (fullLedger == null) return;
+        // 競合検出（Issue #1753）で名指しする対象は、一覧の再読込で選択が外れる前に確定させる（Issue #1759）
+        var deleteTarget = $"{ledger.DateDisplay} の履歴「{ledger.Summary}」";
+
         // Issue #1458: Ledger DELETE と監査ログ INSERT を同一トランザクションで実行
+        bool deleted;
         using (var scope = await _dbContext.BeginTransactionAsync())
         {
-            await _ledgerRepository.DeleteAsync(ledger.Id, scope.Transaction);
-            await _operationLogger.LogLedgerDeleteAsync(fullLedger, scope.Transaction);
-            scope.Commit();
+            // Issue #1753: 影響行数 0 は「対象行が他の操作で先に削除された」＝競合。
+            // 戻り値を捨てると、削除されなかった行について operation_log に DELETE の
+            // 監査記録がコミットされ（6 年保存の監査ログが事実と食い違う）、
+            // さらに ic_card.is_lent まで解除される。競合時は何も書かずに巻き戻す。
+            deleted = await _ledgerRepository.DeleteAsync(ledger.Id, scope.Transaction);
+            if (deleted)
+            {
+                await _operationLogger.LogLedgerDeleteAsync(fullLedger, scope.Transaction);
+                scope.Commit();
+            }
         }
 
-        // Issue #1574: 貸出中レコードを削除した場合、ic_card.is_lent を整合性リセット
-        await ResetIsLentIfNoOtherLentRecordsAsync(fullLedger);
+        if (deleted)
+        {
+            // Issue #1574: 貸出中レコードを削除した場合、ic_card.is_lent を整合性リセット
+            await ResetIsLentIfNoOtherLentRecordsAsync(fullLedger);
+        }
 
         await LoadHistoryLedgersAsync();
         await RefreshDashboardAsync();
         await CheckWarningsAsync();
         await CheckAndNotifyConsistencyAsync();
+
+        if (!deleted)
+        {
+            // 文言は一覧の再読込のあとで出す（「再読み込みしました」を事実にする。Issue #1753）
+            _navigationService.ShowError(
+                ConcurrencyConflictMessage.ForDelete(deleteTarget, "履歴一覧"),
+                "履歴の削除");
+        }
     }
 
     /// <summary>
@@ -2605,24 +2685,42 @@ public partial class MainViewModel : ViewModelBase
         if (capturedEditDialog?.IsDeleteRequested == true)
         {
             var fullLedger = await _ledgerRepository.GetByIdAsync(ledger.Id);
+            var deleted = false;
+            // 競合検出で名指しする対象は一覧の再読込より前に確定させる（Issue #1759）
+            var deleteTarget = $"{ledger.DateDisplay} の履歴「{ledger.Summary}」";
             if (fullLedger != null)
             {
                 // Issue #1458: Ledger DELETE と監査ログ INSERT を同一トランザクションで実行
                 using (var scope = await _dbContext.BeginTransactionAsync())
                 {
-                    await _ledgerRepository.DeleteAsync(ledger.Id, scope.Transaction);
-                    await _operationLogger.LogLedgerDeleteAsync(fullLedger, scope.Transaction);
-                    scope.Commit();
+                    // Issue #1753: 影響行数 0 は競合。戻り値を捨てると、削除されなかった行について
+                    // operation_log に DELETE の監査記録がコミットされ ic_card.is_lent も解除される。
+                    deleted = await _ledgerRepository.DeleteAsync(ledger.Id, scope.Transaction);
+                    if (deleted)
+                    {
+                        await _operationLogger.LogLedgerDeleteAsync(fullLedger, scope.Transaction);
+                        scope.Commit();
+                    }
                 }
 
-                // Issue #1574: 貸出中レコードを削除した場合、ic_card.is_lent を整合性リセット
-                await ResetIsLentIfNoOtherLentRecordsAsync(fullLedger);
+                if (deleted)
+                {
+                    // Issue #1574: 貸出中レコードを削除した場合、ic_card.is_lent を整合性リセット
+                    await ResetIsLentIfNoOtherLentRecordsAsync(fullLedger);
+                }
             }
 
             await LoadHistoryLedgersAsync();
             await RefreshDashboardAsync();
             await CheckWarningsAsync();
             await CheckAndNotifyConsistencyAsync();
+
+            if (fullLedger != null && !deleted)
+            {
+                _navigationService.ShowError(
+                    ConcurrencyConflictMessage.ForDelete(deleteTarget, "履歴一覧"),
+                    "履歴の削除");
+            }
         }
         else if (dialogResult == true)
         {
@@ -2861,9 +2959,19 @@ public partial class MainViewModel : ViewModelBase
             await LoadHistoryLedgersAsync();
             await RefreshDashboardAsync();
             UndoMergeHistoryLedgersCommand.NotifyCanExecuteChanged();
-            _navigationService.ShowInformation(
-                "履歴を統合しました。\n「統合を元に戻す」ボタンで取り消せます。",
-                "統合完了");
+
+            // Issue #1727 / #1805: 統合は確定したが取り消し情報を保存できなかった場合、
+            // 「元に戻せます」と案内すると事実に反する。成否ではなく付帯情報の欠落として伝える。
+            if (mergeResult.HasPostCommitFailure)
+            {
+                _navigationService.ShowWarning(mergeResult.ErrorMessage, "統合完了（取り消し情報なし）");
+            }
+            else
+            {
+                _navigationService.ShowInformation(
+                    "履歴を統合しました。\n「統合を元に戻す」ボタンで取り消せます。",
+                    "統合完了");
+            }
         }
         else
         {

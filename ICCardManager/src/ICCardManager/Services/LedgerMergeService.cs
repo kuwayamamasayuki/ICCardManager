@@ -20,6 +20,17 @@ namespace ICCardManager.Services
         public bool Success { get; set; }
         public string ErrorMessage { get; set; } = string.Empty;
         public Ledger? MergedLedger { get; set; }
+
+        /// <summary>
+        /// 統合は確定したが、コミット確定後の後処理（統合取り消し用の履歴保存）が失敗したかどうか。
+        /// </summary>
+        /// <remarks>
+        /// Issue #1727 / #1805: 「記録が確定した」ことと「付帯情報まで揃った」ことは別の値で伝える。
+        /// ここを <see cref="Success"/> へ巻き込むと、統合済み（統合元は DELETE 済み）なのに
+        /// 「失敗しました。再度お試しください」と案内することになり、案内どおりに再実行した職員は
+        /// 「統合対象の履歴が見つかりません」に行き着く。
+        /// </remarks>
+        public bool HasPostCommitFailure { get; set; }
     }
 
     /// <summary>
@@ -328,19 +339,38 @@ namespace ICCardManager.Services
                     scope.Commit();
                 }
 
-                // UndoデータをDBに保存（独立した tx。Undo データは別系統のため tx に含めない）
-                var undoJson = JsonSerializer.Serialize(undoData, JsonOptions);
-                await _ledgerRepository.SaveMergeHistoryAsync(target.Id, description, undoJson).ConfigureAwait(false);
-
                 _logger.LogInformation(
                     "Merged {Count} ledgers into ledger {TargetId}: {Summary}",
                     ledgers.Count, target.Id, target.Summary);
 
-                return new LedgerMergeResult
+                var result = new LedgerMergeResult
                 {
                     Success = true,
                     MergedLedger = target
                 };
+
+                // Issue #1727 / #1805: ここから先はコミット確定後の後処理。
+                // UndoデータをDBに保存（独立した tx。Undo データは別系統のため tx に含めない）。
+                // 独立している以上ここでの失敗は統合を取り消さないので、外側の catch へ落として
+                // Success=false を返してはいけない（統合元は DELETE 済みで再実行できない）。
+                try
+                {
+                    var undoJson = JsonSerializer.Serialize(undoData, JsonOptions);
+                    await _ledgerRepository.SaveMergeHistoryAsync(target.Id, description, undoJson).ConfigureAwait(false);
+                }
+                catch (Exception undoException)
+                {
+                    _logger.LogError(undoException,
+                        "Merged ledgers but failed to save undo history for ledger {TargetId}", target.Id);
+                    result.HasPostCommitFailure = true;
+                    // 「何が／なぜ／どうすれば」。統合そのものは確定しているため再実行を案内しない。
+                    result.ErrorMessage =
+                        "履歴の統合は記録されましたが、統合を取り消すための情報を保存できませんでした。" +
+                        "この統合は「統合の取り消し」では元に戻せません。" +
+                        "元の内容へ戻す場合は履歴の分割・行編集で修正してください。";
+                }
+
+                return result;
             }
             catch (Exception ex)
             {

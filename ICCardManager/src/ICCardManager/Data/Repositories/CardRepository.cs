@@ -266,8 +266,13 @@ VALUES (@cardIdm, @cardType, @cardNumber, @note, 0, NULL, 0, NULL, NULL, @starti
             {
                 throw new DuplicateCardNumberException(card.CardType, card.CardNumber, ex);
             }
-            catch (SQLiteException)
+            catch (SQLiteException ex) when (
+                ex.ResultCode != SQLiteErrorCode.Busy && ex.ResultCode != SQLiteErrorCode.Locked)
             {
+                // Issue #1753: 制約違反など「同じ条件では何度やっても失敗する」ものだけ false に畳む。
+                // SQLITE_BUSY / SQLITE_LOCKED まで畳むと、DbContext.ExecuteWithRetryAsync が
+                // ResultCode で判定するリトライが効かず、他 PC が書き込みロックを持っている一瞬に
+                // 当たっただけの登録が恒久的な失敗として報告される（共有モードの一過性の競合）。
                 return false;
             }
         }
@@ -373,11 +378,13 @@ WHERE card_idm = @cardIdm AND is_deleted = 0";
             command.Parameters.AddWithValue("@staffIdm", (object)staffIdm ?? DBNull.Value);
 
             var result = await command.ExecuteNonQueryAsync().ConfigureAwait(false);
-            if (result > 0)
-            {
-                // 貸出状態変更時は即座にキャッシュを無効化
-                InvalidateCardCache();
-            }
+
+            // Issue #1759: 影響行数 0 のときこそ無効化する。0 は「手元のカード一覧が古いと確定した」
+            // 瞬間（他 PC がカードを論理削除した）であり、書き込みが成功したときより根拠が強い。
+            // if (result > 0) の内側に置いていたため、競合後の再読込がキャッシュ（共有モード 15 秒）
+            // から削除済みの行を返し続けていた。
+            InvalidateCardCache();
+
             return result > 0;
         }
 

@@ -4896,6 +4896,11 @@ public class LendingServiceTests : IDisposable
             .ReturnsAsync(staff);
         _ledgerRepositoryMock.Setup(x => x.InsertAsync(It.IsAny<Ledger>()))
             .ReturnsAsync(1);
+        // Issue #1753: UpdateLentStatusAsync の戻り値（影響行数 > 0）は成功の前提。
+        // 未設定だと Moq の既定値 false（＝競合）が返り、本テストが検証したい成功パスを一度も通らない。
+        _cardRepositoryMock.Setup(x => x.UpdateLentStatusAsync(
+                It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<DateTime?>(), It.IsAny<string?>()))
+            .ReturnsAsync(true);
 
         // Act
         var result = await service.LendAsync(TestStaffIdm, TestCardIdm, balance: 1000);

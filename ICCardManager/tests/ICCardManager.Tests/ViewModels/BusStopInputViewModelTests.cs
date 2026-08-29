@@ -244,7 +244,7 @@ public class BusStopInputViewModelTests
 
         _ledgerRepoMock.Setup(r => r.UpdateDetailBusStopsAsync(
                 It.IsAny<int>(), It.IsAny<List<(int, string)>>()))
-            .Returns(Task.CompletedTask);
+            .ReturnsAsync(true);
 
         _ledgerRepoMock.Setup(r => r.UpdateAsync(It.IsAny<Ledger>()))
             .ReturnsAsync(true);
@@ -273,7 +273,7 @@ public class BusStopInputViewModelTests
             .ReturnsAsync(new AppSettings());
         _ledgerRepoMock.Setup(r => r.UpdateDetailBusStopsAsync(
                 It.IsAny<int>(), It.IsAny<List<(int, string)>>()))
-            .Returns(Task.CompletedTask);
+            .ReturnsAsync(true);
         _ledgerRepoMock.Setup(r => r.UpdateAsync(It.IsAny<Ledger>()))
             .ReturnsAsync(true);
 
@@ -301,7 +301,7 @@ public class BusStopInputViewModelTests
             .ReturnsAsync(new AppSettings());
         _ledgerRepoMock.Setup(r => r.UpdateDetailBusStopsAsync(
                 It.IsAny<int>(), It.IsAny<List<(int, string)>>()))
-            .Returns(Task.CompletedTask);
+            .ReturnsAsync(true);
         _ledgerRepoMock.Setup(r => r.UpdateAsync(It.IsAny<Ledger>()))
             .ReturnsAsync(false);
 
@@ -335,7 +335,7 @@ public class BusStopInputViewModelTests
         _settingsRepoMock.Setup(s => s.GetAppSettingsAsync()).ReturnsAsync(new AppSettings());
         _ledgerRepoMock.Setup(r => r.UpdateDetailBusStopsAsync(
                 It.IsAny<int>(), It.IsAny<List<(int, string)>>()))
-            .Returns(Task.CompletedTask);
+            .ReturnsAsync(true);
         _ledgerRepoMock.Setup(r => r.UpdateAsync(It.IsAny<Ledger>())).ReturnsAsync(true);
 
         _viewModel.InitializeWithDetails(ledger, details);
@@ -526,7 +526,7 @@ public class BusStopInputViewModelTests
             .ReturnsAsync(new AppSettings());
         _ledgerRepoMock.Setup(r => r.UpdateDetailBusStopsAsync(
                 It.IsAny<int>(), It.IsAny<List<(int, string)>>()))
-            .Returns(Task.CompletedTask);
+            .ReturnsAsync(true);
         _ledgerRepoMock.Setup(r => r.UpdateAsync(It.IsAny<Ledger>()))
             .ReturnsAsync(true);
 
@@ -556,7 +556,7 @@ public class BusStopInputViewModelTests
             .ReturnsAsync(new AppSettings());
         _ledgerRepoMock.Setup(r => r.UpdateDetailBusStopsAsync(
                 It.IsAny<int>(), It.IsAny<List<(int, string)>>()))
-            .Returns(Task.CompletedTask);
+            .ReturnsAsync(true);
         _ledgerRepoMock.Setup(r => r.UpdateAsync(It.IsAny<Ledger>()))
             .ReturnsAsync(true);
 
@@ -701,7 +701,7 @@ public class BusStopInputViewModelTests
 
         _settingsRepoMock.Setup(s => s.GetAppSettingsAsync()).ReturnsAsync(new AppSettings());
         _ledgerRepoMock.Setup(r => r.UpdateDetailBusStopsAsync(It.IsAny<int>(), It.IsAny<IEnumerable<(int, string)>>()))
-            .Returns(Task.CompletedTask);
+            .ReturnsAsync(true);
         _ledgerRepoMock.Setup(r => r.UpdateAsync(It.IsAny<Ledger>())).ReturnsAsync(true);
 
         await _viewModel.InitializeWithLedgersAsync(new[] { ledger1, ledger2 });
@@ -748,7 +748,7 @@ public class BusStopInputViewModelTests
 
         _settingsRepoMock.Setup(s => s.GetAppSettingsAsync()).ReturnsAsync(new AppSettings());
         _ledgerRepoMock.Setup(r => r.UpdateDetailBusStopsAsync(It.IsAny<int>(), It.IsAny<IEnumerable<(int, string)>>()))
-            .Returns(Task.CompletedTask);
+            .ReturnsAsync(true);
         _ledgerRepoMock.Setup(r => r.UpdateAsync(It.IsAny<Ledger>())).ReturnsAsync(true);
 
         await _viewModel.InitializeWithLedgersAsync(new[] { ledger1, ledger2 });

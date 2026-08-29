@@ -345,6 +345,15 @@ public partial class DataExportImportViewModel : ViewModelBase
     /// IsWaitingForCardTouch が false に戻るすべての経路で
     /// 一律に抑制解除が走るようにここに集約している。
     /// </remarks>
+    /// <summary>
+    /// カード読み取りの本体を実行中かどうか（再入防止、Issue #1807）
+    /// </summary>
+    /// <remarks>
+    /// <see cref="IsWaitingForCardTouch"/> は抑制の保持そのものを表すため、再入を塞ぐ目的で
+    /// 先に false へ落とすと抑制まで解けてしまう。役割を分けて別のフラグで塞ぐ。
+    /// </remarks>
+    private bool _isHandlingCardRead;
+
     partial void OnIsWaitingForCardTouchChanged(bool value)
     {
         _messenger.Send(new CardReadingSuppressedMessage(value, CardReadingSource.DataImport));
@@ -1239,32 +1248,48 @@ public partial class DataExportImportViewModel : ViewModelBase
         // Issue #1816: 入口ゲート（OnCardRead）はカードリーダースレッドで判定され、
         // 解除は UI スレッドのここで初めて行われる。連続タッチでは 2 件目もゲートを
         // 通過済みで queue されているため、取得地点で再判定する（#1807 と同じ形）
-        if (!IsWaitingForCardTouch) return;
+        if (!IsWaitingForCardTouch || _isHandlingCardRead) return;
 
-        IsWaitingForCardTouch = false;
-
-        // 読み取ったIDmで登録済みカードを検索
-        var card = await _cardRepository.GetByIdmAsync(idm);
-
-        if (card != null)
+        // Issue #1807: 抑制（IsWaitingForCardTouch=false が送る解除メッセージ）の解放は
+        // 「1 枚読み取ったら」ではなく「この処理が終わったら」に合わせる。
+        // 先に false へ落とすと、直後の await（GetByIdmAsync）と未登録カードの警告モーダルの
+        // 表示中にメイン画面が抑制なしでタッチを処理し、ダイアログの背後で貸出・返却が走る。
+        // 再入だけは別のフラグで即座に塞ぐ（抑制はまだ手放せないため IsWaitingForCardTouch は使えない）。
+        _isHandlingCardRead = true;
+        try
         {
-            // 登録済みカードが見つかった
-            TouchedCardIdm = card.CardIdm;
-            var shortIdm = card.CardIdm.Length > 8
-                ? card.CardIdm.Substring(0, 8) + "..."
-                : card.CardIdm;
-            TouchedCardInfo = $"{card.CardType} {card.CardNumber} ({shortIdm})";
-            SetStatus($"カードを読み取りました: {card.CardType} {card.CardNumber}", false);
+            // 読み取ったIDmで登録済みカードを検索
+            var card = await _cardRepository.GetByIdmAsync(idm);
+
+            if (card != null)
+            {
+                // 登録済みカードが見つかった
+                TouchedCardIdm = card.CardIdm;
+                var shortIdm = card.CardIdm.Length > 8
+                    ? card.CardIdm.Substring(0, 8) + "..."
+                    : card.CardIdm;
+                TouchedCardInfo = $"{card.CardType} {card.CardNumber} ({shortIdm})";
+                SetStatus($"カードを読み取りました: {card.CardType} {card.CardNumber}", false);
+            }
+            else
+            {
+                // 未登録カード
+                TouchedCardIdm = string.Empty;
+                TouchedCardInfo = "未登録のカードです";
+                SetStatus("このカードはシステムに登録されていません。先にカード管理で登録してください。", true);
+                _dialogService.ShowWarning(
+                    "タッチされたカードはシステムに登録されていません。\n\n利用履歴をインポートするには、先にカード管理で対象の交通系ICカードを登録してください。",
+                    "未登録カード");
+            }
+
+            // ここまで来て初めてタッチ待ちを終える（＝抑制を解放する）。
+            // 失敗時は呼び出し元の catch がタッチ待ちのまま案内するため、ここでは触らない。
+            IsWaitingForCardTouch = false;
         }
-        else
+        finally
         {
-            // 未登録カード
-            TouchedCardIdm = string.Empty;
-            TouchedCardInfo = "未登録のカードです";
-            SetStatus("このカードはシステムに登録されていません。先にカード管理で登録してください。", true);
-            _dialogService.ShowWarning(
-                "タッチされたカードはシステムに登録されていません。\n\n利用履歴をインポートするには、先にカード管理で対象の交通系ICカードを登録してください。",
-                "未登録カード");
+            // Issue #1725: 入力を止めるフラグの解除は finally で保証する
+            _isHandlingCardRead = false;
         }
     }
 

@@ -91,10 +91,14 @@ namespace ICCardManager.Services
             }
             catch (Exception ex)
             {
+                // Issue #1817: UI 文言を 3 要素へ差し替えたら、技術的詳細の出口も対で用意する。
+                // このクラスは ILogger を持たないため既存のファイルログ機構を使う。
+                ErrorDialogHelper.LogException(ex, "CSVエクスポート");
                 return new CsvExportResult
                 {
                     Success = false,
-                    ErrorMessage = ex.Message,
+                    // Issue #1614: 生の ex.Message（SQLite/IO の英語文言）を UI へ出さない
+                    ErrorMessage = ExceptionMessageFormatter.ToUserMessage(ex, "エクスポート"),
                     FilePath = filePath
                 };
             }
@@ -140,10 +144,14 @@ namespace ICCardManager.Services
             }
             catch (Exception ex)
             {
+                // Issue #1817: UI 文言を 3 要素へ差し替えたら、技術的詳細の出口も対で用意する。
+                // このクラスは ILogger を持たないため既存のファイルログ機構を使う。
+                ErrorDialogHelper.LogException(ex, "CSVエクスポート");
                 return new CsvExportResult
                 {
                     Success = false,
-                    ErrorMessage = ex.Message,
+                    // Issue #1614: 生の ex.Message（SQLite/IO の英語文言）を UI へ出さない
+                    ErrorMessage = ExceptionMessageFormatter.ToUserMessage(ex, "エクスポート"),
                     FilePath = filePath
                 };
             }
@@ -219,10 +227,14 @@ namespace ICCardManager.Services
             }
             catch (Exception ex)
             {
+                // Issue #1817: UI 文言を 3 要素へ差し替えたら、技術的詳細の出口も対で用意する。
+                // このクラスは ILogger を持たないため既存のファイルログ機構を使う。
+                ErrorDialogHelper.LogException(ex, "CSVエクスポート");
                 return new CsvExportResult
                 {
                     Success = false,
-                    ErrorMessage = ex.Message,
+                    // Issue #1614: 生の ex.Message（SQLite/IO の英語文言）を UI へ出さない
+                    ErrorMessage = ExceptionMessageFormatter.ToUserMessage(ex, "エクスポート"),
                     FilePath = filePath
                 };
             }
@@ -334,10 +346,14 @@ namespace ICCardManager.Services
             }
             catch (Exception ex)
             {
+                // Issue #1817: UI 文言を 3 要素へ差し替えたら、技術的詳細の出口も対で用意する。
+                // このクラスは ILogger を持たないため既存のファイルログ機構を使う。
+                ErrorDialogHelper.LogException(ex, "CSVエクスポート");
                 return new CsvExportResult
                 {
                     Success = false,
-                    ErrorMessage = ex.Message,
+                    // Issue #1614: 生の ex.Message（SQLite/IO の英語文言）を UI へ出さない
+                    ErrorMessage = ExceptionMessageFormatter.ToUserMessage(ex, "エクスポート"),
                     FilePath = filePath
                 };
             }
@@ -394,10 +410,14 @@ namespace ICCardManager.Services
             }
             catch (Exception ex)
             {
+                // Issue #1817: UI 文言を 3 要素へ差し替えたら、技術的詳細の出口も対で用意する。
+                // このクラスは ILogger を持たないため既存のファイルログ機構を使う。
+                ErrorDialogHelper.LogException(ex, "CSVエクスポート");
                 return new CsvExportResult
                 {
                     Success = false,
-                    ErrorMessage = ex.Message,
+                    // Issue #1614: 生の ex.Message（SQLite/IO の英語文言）を UI へ出さない
+                    ErrorMessage = ExceptionMessageFormatter.ToUserMessage(ex, "エクスポート"),
                     FilePath = filePath
                 };
             }
