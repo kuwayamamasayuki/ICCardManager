@@ -1094,7 +1094,16 @@ namespace ICCardManager.Services
             {
                 // 抑止点を 1 つずつ増やす。1 周で何も改善しなければ打ち切るため、
                 // 反復回数は経路数を超えない。
-                for (int round = 1; round < routes.Count; round++)
+                // Issue #1916(レビュー): ゲート（直そうとしている欠陥が実在するか）は
+                // 各回の best に対して評価する。ゲートの意図をループ全体へ一貫させる保険。
+                // ただし入口で 1 回だけ評価する形と結果が変わる入力は見つかっていない
+                // （5 駅・6〜8 区間の 40 万件をランダム抽出して比較し差分 0 件）。
+                // 採用の条件がカバレッジの厳密な増加なので、欠陥が解消した後の周が
+                // さらに往復を増やす経路は成立しないとみられる。回帰テストを置けないため、
+                // ここを消しても既存テストは緑になる点に注意（04_機能設計書 §5.4 に実測を記載）。
+                for (int round = 1;
+                     round < routes.Count && HasUnexplainedThroughRoute(best);
+                     round++)
                 {
                     RouteCandidate? bestCandidate = null;
                     var bestIndex = -1;
@@ -1859,8 +1868,7 @@ namespace ICCardManager.Services
                     && AreTransferStations(currentEnd, previousChainStart);
 
                 // Issue #1916: 候補生成のためにこの位置の延長を抑止する
-                var isSuppressed = suppressedIndices != null
-                    && suppressedIndices.Contains(indexOffset + i);
+                var isSuppressed = suppressedIndices.Contains(indexOffset + i);
 
                 if (isTransfer && !isReturnLegOfPreviousChain && !isSuppressed
                     && (!nextExitVisited || isClosingCircular))
