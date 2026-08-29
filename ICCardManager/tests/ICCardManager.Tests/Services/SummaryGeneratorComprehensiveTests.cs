@@ -2092,6 +2092,312 @@ public class SummaryGeneratorComprehensiveTests : IDisposable
     }
 
     /// <summary>
+    /// 同じ形が 1 日に 2 回起きても、両方が往復として検出されること。
+    /// </summary>
+    /// <remarks>
+    /// コードレビューで検出。抑止点を 1 箇所しか試さない実装では、2 つの機会のうち
+    /// ブロック数が少なくなる側（後ろ側）だけが救われ、<b>本 Issue が消そうとしている
+    /// 「薬院～博多」がそのまま残る</b>（実測: 「鉄道（薬院～博多、博多～大橋、大橋～西鉄二日市 往復）」）。
+    /// 抑止点を 1 つずつ増やし、カバレッジが厳密に増える間だけ採用することで両方を救う。
+    /// 固定するのは<b>抑止点の累積</b>のみ（1 周で打ち切る実装にすると赤になることを実測済み）。
+    /// カバレッジ指標・同点処理・往復のバランス判定は別テストが固定する。
+    /// </remarks>
+    [Fact]
+    public void Issue1916_同じ形が1日に2回起きても両方が往復になる()
+    {
+        // Arrange: 薬院→天神／天神→博多／博多→天神／天神→大橋／大橋→西鉄二日市／西鉄二日市→大橋
+        var details = new List<LedgerDetail>
+        {
+            CreateRailwayUsage(new DateTime(2024, 12, 9), "西鉄二日市", "大橋", 380, 4000),
+            CreateRailwayUsage(new DateTime(2024, 12, 9), "大橋", "西鉄二日市", 380, 4210),
+            CreateRailwayUsage(new DateTime(2024, 12, 9), "天神", "大橋", 210, 4420),
+            CreateRailwayUsage(new DateTime(2024, 12, 9), "博多", "天神", 210, 4630),
+            CreateRailwayUsage(new DateTime(2024, 12, 9), "天神", "博多", 210, 4840),
+            CreateRailwayUsage(new DateTime(2024, 12, 9), "薬院", "天神", 210, 5050),
+        };
+
+        // Act
+        var results = _generator.GenerateByDate(details);
+
+        // Assert: 通しでは乗っていない「薬院～博多」「博多～大橋」が現れない
+        results.Should().HaveCount(1);
+        results[0].Summary.Should().Be(
+            "鉄道（薬院～天神、天神～博多 往復、天神～大橋、大橋～西鉄二日市 往復）");
+        results[0].Summary.Should().NotContain("薬院～博多");
+        OutputInputAndResult(details, results);
+    }
+
+    /// <summary>
+    /// 対の表明その 4: 候補探索が「起きていない往復」を作らないこと。
+    /// </summary>
+    /// <remarks>
+    /// コードレビューで検出した退行。薬院→天神→博多→薬院 の一方通行ループに
+    /// 後続区間（薬院→大橋）が付くと、1 区間の往路（薬院→天神）と 2 区間へ統合された
+    /// 復路（天神→博多→薬院）がペアになり「鉄道（薬院～天神 往復、薬院～大橋）」という
+    /// <b>起きていない往復</b>が作られ、実際に用務のあった博多が 6 年保存の台帳から消えていた。
+    /// 本物の往復は行きと帰りで同じ場所を通るため両側の区間数が一致する
+    /// （<c>HasOnlyBalancedRoundTrips</c>）。ここでは候補が不採用となり、
+    /// <c>origin/main</c> と同じ既定解が保たれる。
+    /// </remarks>
+    [Fact]
+    public void Issue1916_一方通行のループから往復を捏造しない()
+    {
+        // Arrange: 薬院→天神／天神→博多／博多→薬院／薬院→大橋
+        var details = new List<LedgerDetail>
+        {
+            CreateRailwayUsage(new DateTime(2024, 12, 9), "薬院", "大橋", 210, 4200),
+            CreateRailwayUsage(new DateTime(2024, 12, 9), "博多", "薬院", 210, 4410),
+            CreateRailwayUsage(new DateTime(2024, 12, 9), "天神", "博多", 210, 4620),
+            CreateRailwayUsage(new DateTime(2024, 12, 9), "薬院", "天神", 210, 4830),
+        };
+
+        // Act
+        var results = _generator.GenerateByDate(details);
+
+        // Assert: 従来どおりの統合結果。起きていない「往復」を主張しない
+        results.Should().HaveCount(1);
+        results[0].Summary.Should().Be("鉄道（薬院～大橋）");
+        results[0].Summary.Should().NotContain("往復");
+        OutputInputAndResult(details, results);
+    }
+
+    /// <summary>
+    /// 対の表明その 5: 逆方向のペアが 1 組も無い日は、候補探索が空振りして
+    /// 従来どおりの乗継統合になること。
+    /// </summary>
+    /// <remarks>
+    /// この入力は既定解が「薬院～大橋」（<c>LegCount</c> 3）1 本で余りに残るため
+    /// <c>HasUnexplainedThroughRoute</c> は true になり、<b>候補探索そのものには入る</b>。
+    /// どこで延長を抑止しても逆方向のペアが生まれないためカバレッジは 0 のままで、
+    /// 既定解が保たれる。
+    /// なお「生の経路に逆方向のペアが無ければ探索は空振りする」という足切りは
+    /// <b>置いていない</b> — 乗継統合は元の経路に無い区間（A→B→C から A～C）を作るため、
+    /// 統合後に初めて逆方向のペアが成立する日があり、生の経路だけを見る足切りは不健全である
+    /// （<c>BuildRouteSummary</c> の remarks 参照）。
+    /// </remarks>
+    [Fact]
+    public void Issue1916_逆方向のペアが無い日は乗継統合のまま()
+    {
+        // Arrange: 薬院→天神→博多→大橋（一方向の乗継のみ）
+        var details = new List<LedgerDetail>
+        {
+            CreateRailwayUsage(new DateTime(2024, 12, 9), "博多", "大橋", 210, 4200),
+            CreateRailwayUsage(new DateTime(2024, 12, 9), "天神", "博多", 210, 4410),
+            CreateRailwayUsage(new DateTime(2024, 12, 9), "薬院", "天神", 210, 4620),
+        };
+
+        // Act
+        var results = _generator.GenerateByDate(details);
+
+        // Assert
+        results.Should().HaveCount(1);
+        results[0].Summary.Should().Be("鉄道（薬院～大橋）");
+        OutputInputAndResult(details, results);
+    }
+
+    // 以下 3 件は候補選択の「判断点」を個別に固定する。
+    //
+    // 入力は経路が連結していない（降車地と次の乗車地が一致しない）。総当たり
+    // （4 駅・3〜5 区間の全 271,296 通り）で実測したところ、これら 3 つの判断点は
+    // **連結する経路列では 1 通りも出力を変えず**、飛びのある列でのみ効く。
+    // 実データでは鉄道区間の間に徒歩やバスが挟まるため、この形は現実に起こる。
+    // 期待値は現行実装の出力そのもので、狙いは「判断点を消したら赤くなること」を
+    // 保証する点にある（各テストの remarks に、消したときの出力を実測値で残す）。
+
+    /// <summary>
+    /// 判断点: 往復カバレッジを「統合後の本数」ではなく「元の区間数」で数えること。
+    /// </summary>
+    /// <remarks>
+    /// 区間数の合計を往復の本数（<c>RoundTrips.Count * 2</c>）へ置き換えると
+    /// 「鉄道（大橋～天神、天神～薬院 往復、薬院～博多 往復）」になる（実測。全 271,296 通り中 48 通りで差が出る）。
+    /// 本数で数えると、3 区間を束ねた 1 組の往復より 1 区間ずつの往復 2 組が優先され、
+    /// 実際には 1 往復だった移動が 2 往復に見える。
+    /// </remarks>
+    [Fact]
+    public void Issue1916_往復カバレッジは統合後の本数ではなく元の区間数で数える()
+    {
+        // Arrange: 利用順は 大橋→天神／天神→薬院／薬院→博多／博多→薬院／薬院→天神
+        // （入力リストは ICカード履歴の新しい順）
+        var details = new List<LedgerDetail>
+        {
+            CreateRailwayUsage(new DateTime(2024, 12, 9), "薬院", "天神", 210, 4000),
+            CreateRailwayUsage(new DateTime(2024, 12, 9), "博多", "薬院", 210, 4210),
+            CreateRailwayUsage(new DateTime(2024, 12, 9), "薬院", "博多", 210, 4420),
+            CreateRailwayUsage(new DateTime(2024, 12, 9), "天神", "薬院", 210, 4630),
+            CreateRailwayUsage(new DateTime(2024, 12, 9), "大橋", "天神", 210, 4840),
+        };
+
+        // Act
+        var results = _generator.GenerateByDate(details);
+
+        // Assert
+        results.Should().HaveCount(1);
+        results[0].Summary.Should().Be("鉄道（大橋～天神、天神～博多 往復）");
+        OutputInputAndResult(details, results);
+    }
+
+    /// <summary>
+    /// 判断点: 同じ回に見つかった候補が並んだとき、ブロック数の少ない側を採ること。
+    /// </summary>
+    /// <remarks>
+    /// 同点処理を無効化（常に先に見つかった側を採用）すると
+    /// 「鉄道（薬院～博多 往復、大橋～薬院、薬院～博多、薬院～天神）」になり、
+    /// ブロックが 1 つ増えて同じ区間（薬院～博多）が往復と余りに二重に現れる
+    /// （実測。全 271,296 通り中 72 通りで差が出る）。
+    /// </remarks>
+    [Fact]
+    public void Issue1916_同点の候補はブロック数が少ない側を採る()
+    {
+        // Arrange: 利用順は 薬院→博多／大橋→薬院／薬院→博多／博多→薬院／薬院→天神
+        // （入力リストは ICカード履歴の新しい順）
+        var details = new List<LedgerDetail>
+        {
+            CreateRailwayUsage(new DateTime(2024, 12, 9), "薬院", "天神", 210, 4000),
+            CreateRailwayUsage(new DateTime(2024, 12, 9), "博多", "薬院", 210, 4210),
+            CreateRailwayUsage(new DateTime(2024, 12, 9), "薬院", "博多", 210, 4420),
+            CreateRailwayUsage(new DateTime(2024, 12, 9), "大橋", "薬院", 210, 4630),
+            CreateRailwayUsage(new DateTime(2024, 12, 9), "薬院", "博多", 210, 4840),
+        };
+
+        // Act
+        var results = _generator.GenerateByDate(details);
+
+        // Assert
+        results.Should().HaveCount(1);
+        results[0].Summary.Should().Be("鉄道（薬院～博多 往復、大橋～博多、薬院～天神）");
+        OutputInputAndResult(details, results);
+    }
+
+    /// <summary>
+    /// 判断点: 行きと帰りで区間数が一致しない「往復」を採用しないこと。
+    /// </summary>
+    /// <remarks>
+    /// バランス判定を無効化すると「鉄道（天神～薬院 往復、薬院～博多、天神～薬院）」になり、
+    /// 1 区間の往路と 3 区間へ統合された復路がペアになって、途中の場所が摘要から失われたうえ
+    /// 同じ区間が往復と余りに二重に現れる（実測。全 271,296 通り中 1,800 通りで差が出る）。
+    /// これは #878 が循環移動を個別表示にしたのと同じ判断（ループを往復と言い張らない）を、
+    /// 候補選択の側でも守るもの。
+    /// </remarks>
+    [Fact]
+    public void Issue1916_区間数が非対称な往復は採用しない()
+    {
+        // Arrange: 利用順は 天神→大橋／大橋→薬院／薬院→博多／天神→薬院／薬院→天神
+        // （入力リストは ICカード履歴の新しい順）
+        var details = new List<LedgerDetail>
+        {
+            CreateRailwayUsage(new DateTime(2024, 12, 9), "薬院", "天神", 210, 4000),
+            CreateRailwayUsage(new DateTime(2024, 12, 9), "天神", "薬院", 210, 4210),
+            CreateRailwayUsage(new DateTime(2024, 12, 9), "薬院", "博多", 210, 4420),
+            CreateRailwayUsage(new DateTime(2024, 12, 9), "大橋", "薬院", 210, 4630),
+            CreateRailwayUsage(new DateTime(2024, 12, 9), "天神", "大橋", 210, 4840),
+        };
+
+        // Act
+        var results = _generator.GenerateByDate(details);
+
+        // Assert
+        results.Should().HaveCount(1);
+        results[0].Summary.Should().Be("鉄道（天神～博多、天神～薬院 往復）");
+        OutputInputAndResult(details, results);
+    }
+
+    /// <summary>
+    /// 往路と復路で経由地が違う一周は、#878 と同じく「往復」として扱うこと。
+    /// </summary>
+    /// <remarks>
+    /// コードレビューでの指摘（区間数の一致は「行きと帰りで同じ場所を通った」ことまでは
+    /// 保証しない）に対する挙動の固定。薬院→天神→博多（往路）と 博多→大橋→薬院（復路）は
+    /// どちらも 2 区間で釣り合うため「薬院～博多 往復」になり、経由地の 天神・大橋 は現れない。
+    /// これは<b>乗継統合そのものの性質</b>（A→B→C を「A～C」と書く）であり、
+    /// 後続区間の無い純粋な一周（下の対のテスト）は <c>origin/main</c> でも同じ結果になる
+    /// ＝ #878 が偶数長の循環チェーンを中間で割って往復判定へ渡す設計に由来する。
+    /// 本 Issue の候補探索は、後続区間が付いた形をその #878 の解釈へ揃える
+    /// （<c>origin/main</c> は「鉄道（薬院～西鉄二日市）」という通しでは乗っていない区間を出していた）。
+    /// </remarks>
+    [Fact]
+    public void Issue1916_経由地の異なる一周は878と同じく往復として扱う()
+    {
+        // Arrange: 薬院→天神／天神→博多／博多→大橋／大橋→薬院／薬院→西鉄二日市（利用順）
+        var details = new List<LedgerDetail>
+        {
+            CreateRailwayUsage(new DateTime(2024, 12, 9), "薬院", "西鉄二日市", 380, 3800),
+            CreateRailwayUsage(new DateTime(2024, 12, 9), "大橋", "薬院", 210, 4000),
+            CreateRailwayUsage(new DateTime(2024, 12, 9), "博多", "大橋", 210, 4210),
+            CreateRailwayUsage(new DateTime(2024, 12, 9), "天神", "博多", 210, 4420),
+            CreateRailwayUsage(new DateTime(2024, 12, 9), "薬院", "天神", 210, 4630),
+        };
+
+        // Act
+        var results = _generator.GenerateByDate(details);
+
+        // Assert
+        results.Should().HaveCount(1);
+        results[0].Summary.Should().Be("鉄道（薬院～博多 往復、薬院～西鉄二日市）");
+        OutputInputAndResult(details, results);
+    }
+
+    /// <summary>
+    /// 対の表明: 後続区間の無い純粋な一周は <c>origin/main</c> と同じ結果であること
+    /// （上のテストが固定した扱いが #878 由来であり、本 Issue が持ち込んだものではない）。
+    /// </summary>
+    [Fact]
+    public void Issue1916_後続区間の無い一周は従来どおりの往復表記()
+    {
+        // Arrange: 薬院→天神／天神→博多／博多→大橋／大橋→薬院（利用順）
+        var details = new List<LedgerDetail>
+        {
+            CreateRailwayUsage(new DateTime(2024, 12, 9), "大橋", "薬院", 210, 4000),
+            CreateRailwayUsage(new DateTime(2024, 12, 9), "博多", "大橋", 210, 4210),
+            CreateRailwayUsage(new DateTime(2024, 12, 9), "天神", "博多", 210, 4420),
+            CreateRailwayUsage(new DateTime(2024, 12, 9), "薬院", "天神", 210, 4630),
+        };
+
+        // Act
+        var results = _generator.GenerateByDate(details);
+
+        // Assert
+        results.Should().HaveCount(1);
+        results[0].Summary.Should().Be("鉄道（薬院～博多 往復）");
+        OutputInputAndResult(details, results);
+    }
+
+    /// <summary>
+    /// 対の表明: 経路数が上限を超える日は候補探索を行わず、貪欲統合の結果になること。
+    /// </summary>
+    /// <remarks>
+    /// コードレビューで検出。探索は経路数 n に対して O(n⁴) で、返却処理は
+    /// <c>AppState.Processing</c> の UI スレッド上で走る。1 日の明細は同日統合（#837）や
+    /// 履歴統合（#1458）で FeliCa の 20 件を超えて増えるため、上限を設けて青天井の探索を防ぐ。
+    /// 上限を超えた日は #1916 の是正が効かなくなるだけで、摘要が壊れることはない。
+    /// </remarks>
+    [Fact]
+    public void Issue1916_経路数が上限を超える日は候補探索を行わない()
+    {
+        // Arrange: #1916 の 3 区間パターンの前に、上限を超えるだけの単純な往復を並べる
+        // （上限 40 に対し 42 区間）
+        var details = new List<LedgerDetail>();
+        var balance = 4000;
+        details.Add(CreateRailwayUsage(new DateTime(2024, 12, 9), "博多", "天神", 210, balance));
+        details.Add(CreateRailwayUsage(new DateTime(2024, 12, 9), "天神", "博多", 210, balance += 210));
+        details.Add(CreateRailwayUsage(new DateTime(2024, 12, 9), "薬院", "天神", 210, balance += 210));
+        for (int i = 0; i < 39; i++)
+        {
+            details.Add(CreateRailwayUsage(
+                new DateTime(2024, 12, 9), "西新", "姪浜", 210, balance += 210));
+        }
+
+        // Act
+        var results = _generator.GenerateByDate(details);
+
+        // Assert: 候補探索が働いていれば「薬院～天神、天神～博多 往復」になるが、
+        // 上限を超えるため貪欲統合の「薬院～博多、博多～天神」のまま
+        results.Should().HaveCount(1);
+        results[0].Summary.Should().Contain("薬院～博多、博多～天神");
+        results[0].Summary.Should().NotContain("天神～博多 往復");
+        OutputInputAndResult(details, results);
+    }
+
+    /// <summary>
     /// バス側でも同じバグが発生することを固定する（往復 + 別区間 = 3 経路）。
     /// </summary>
     [Fact]
@@ -2659,6 +2965,184 @@ public class SummaryGeneratorComprehensiveTests : IDisposable
         blocks.Should().Equal(
             "天神日銀前（天神中央郵便局前）～下原中央 往復",
             "★");
+    }
+
+    #endregion
+
+    #region Issue #1916: 往復の往路が直前チェーンの乗継延長に消費される（#1902 の鏡像）
+
+    // #1902 は「往復の復路が次の移動へ統合される」形を後方参照ガードで塞いだ。
+    // #1916 はその鏡像 —「往復の往路が直前チェーンの延長に消費される」形。
+    // 局所的な先読みでは TC038（往路チェーンの統合が完成してから復路が畳まれる形）と
+    // 区別できないため、統合結果を 1 つに決め打たず候補を往復カバレッジで選び直す。
+
+    /// <summary>
+    /// Issue #1916 再現ケース: 往復の往路が直前の乗継統合に消費されないこと。
+    /// </summary>
+    /// <remarks>
+    /// バグ: 薬院→天神 と 天神→博多 が貪欲に統合されて「薬院～博多」になり、
+    /// 往路（天神→博多）が消費されるため 博多→天神 との往復が検出できなかった。
+    /// 「薬院～博多」は<b>通しでは乗っていない区間</b>であり、#1902 が排除した
+    /// 欠陥クラス（実際には乗っていない区間が 6 年保存の台帳へ入る）が残っていた。
+    /// </remarks>
+    [Fact]
+    public void Issue1916_鉄道_往復の往路が直前の乗継統合に消費されない()
+    {
+        // Arrange: 薬院→天神、天神→博多、博多→天神 の 3 経路（同日。入力は履歴の新しい順）
+        var details = new List<LedgerDetail>
+        {
+            CreateRailwayUsage(new DateTime(2024, 12, 9), "博多", "天神", 210, 4370),
+            CreateRailwayUsage(new DateTime(2024, 12, 9), "天神", "博多", 210, 4580),
+            CreateRailwayUsage(new DateTime(2024, 12, 9), "薬院", "天神", 210, 4790),
+        };
+
+        // Act
+        var results = _generator.GenerateByDate(details);
+
+        // Assert: 往復が検出され、ブロックは利用順（余りの 薬院～天神 が先）に並ぶ
+        results.Should().HaveCount(1);
+        results[0].Summary.Should().Be("鉄道（薬院～天神、天神～博多 往復）");
+        OutputInputAndResult(details, results);
+    }
+
+    /// <summary>
+    /// バス側でも同じ形が是正されること。
+    /// </summary>
+    [Fact]
+    public void Issue1916_バス_往復の往路が直前の乗継統合に消費されない()
+    {
+        // Arrange: 薬院→天神、天神→博多、博多→天神 の 3 経路（バス、同日）
+        var details = new List<LedgerDetail>
+        {
+            CreateBusUsage(new DateTime(2024, 12, 9), 200, 4400, busStops: "博多～天神"),
+            CreateBusUsage(new DateTime(2024, 12, 9), 200, 4600, busStops: "天神～博多"),
+            CreateBusUsage(new DateTime(2024, 12, 9), 200, 4800, busStops: "薬院～天神"),
+        };
+
+        // Act
+        var results = _generator.GenerateByDate(details);
+
+        // Assert
+        results.Should().HaveCount(1);
+        results[0].Summary.Should().Be("バス（薬院～天神、天神～博多 往復）");
+        OutputInputAndResult(details, results);
+    }
+
+    /// <summary>
+    /// 同一視グループ内の別名駅で折り返す場合も、往路が消費されないこと。
+    /// </summary>
+    /// <remarks>
+    /// #1916 の候補選択は乗継統合と往復検出の両方が同一視グループを通す前提に立つ。
+    /// 復路の降車地が往路の乗車地と別名（天神 / 西鉄福岡(天神)）でも往復として検出され、
+    /// 端点は「往路の名前（復路の名前）」で併記される（#1905）。
+    /// </remarks>
+    [Fact]
+    public void Issue1916_鉄道_同一視グループ経由でも往路が消費されない()
+    {
+        // Arrange: 薬院→天神、天神→博多、博多→西鉄福岡(天神)
+        var details = new List<LedgerDetail>
+        {
+            CreateRailwayUsage(new DateTime(2024, 12, 9), "博多", "西鉄福岡(天神)", 210, 4370),
+            CreateRailwayUsage(new DateTime(2024, 12, 9), "天神", "博多", 210, 4580),
+            CreateRailwayUsage(new DateTime(2024, 12, 9), "薬院", "天神", 210, 4790),
+        };
+
+        // Act
+        var results = _generator.GenerateByDate(details);
+
+        // Assert
+        results.Should().HaveCount(1);
+        results[0].Summary.Should().Be("鉄道（薬院～天神、天神（西鉄福岡(天神)）～博多 往復）");
+        OutputInputAndResult(details, results);
+    }
+
+    /// <summary>
+    /// 対の表明その 1: 往路チェーンの乗継統合が完成してから復路が畳まれる形
+    /// （TC038 と同型）は、従来どおり通しの往復として表示されること。
+    /// </summary>
+    /// <remarks>
+    /// 素朴な先読みガード「次の経路がその次と往復ペアを成すなら延長しない」は
+    /// この形を「博多～天神 往復、西鉄福岡(天神)～西鉄二日市 往復」へ分解してしまう。
+    /// <para>
+    /// 実際にこの形を守っているのは <c>HasUnexplainedThroughRoute</c> のゲートである。
+    /// 既定解（博多～西鉄二日市／西鉄二日市～博多）は余りが空なのでゲートが false になり、
+    /// 候補探索へ入らない。したがって本テストは<b>カバレッジの数え方（元の区間数か統合後の本数か）を
+    /// 固定していない</b> — その式を <c>roundTrips.Count * 2</c> へ変えても本テストは緑のままである。
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void Issue1916_往路チェーンが完成してから畳まれる往復は通しのまま()
+    {
+        // Arrange: 博多→天神→西鉄福岡(天神)→西鉄二日市 と、その折り返し
+        var details = new List<LedgerDetail>
+        {
+            CreateRailwayUsage(new DateTime(2024, 12, 9), "天神", "博多", 210, 4410),
+            CreateRailwayUsage(new DateTime(2024, 12, 9), "西鉄二日市", "西鉄福岡(天神)", 380, 4620),
+            CreateRailwayUsage(new DateTime(2024, 12, 9), "西鉄福岡(天神)", "西鉄二日市", 380, 5000),
+            CreateRailwayUsage(new DateTime(2024, 12, 9), "博多", "天神", 210, 5380),
+        };
+
+        // Act
+        var results = _generator.GenerateByDate(details);
+
+        // Assert: 往復 2 組へ分解されない
+        results.Should().HaveCount(1);
+        results[0].Summary.Should().Be("鉄道（博多～西鉄二日市 往復）");
+        OutputInputAndResult(details, results);
+    }
+
+    /// <summary>
+    /// 対の表明その 2: 通し区間を作っていない既定解（奇数長の循環移動）は
+    /// 候補探索の対象にならず、#878 の個別表示のまま変わらないこと。
+    /// </summary>
+    /// <remarks>
+    /// 候補探索を無条件に回すと、この形が「天神～姪浜 往復」へ書き換わる
+    /// （実際に TC014 の 12/8 が退行した）。#1916 が消したい欠陥は
+    /// 「通しでは乗っていない区間が摘要に現れる」ことなので、
+    /// 既定解に束ねられた区間（LegCount ≥ 2）が余っているときだけ別解を探す。
+    /// </remarks>
+    [Fact]
+    public void Issue1916_通し区間を作らない循環移動は個別表示のまま()
+    {
+        // Arrange: 天神→姪浜→西新→天神 の 3 区間循環（同日）
+        var details = new List<LedgerDetail>
+        {
+            CreateRailwayUsage(new DateTime(2024, 12, 8), "西新", "天神", 260, 3050),
+            CreateRailwayUsage(new DateTime(2024, 12, 8), "姪浜", "西新", 210, 3310),
+            CreateRailwayUsage(new DateTime(2024, 12, 8), "天神", "姪浜", 260, 3520),
+        };
+
+        // Act
+        var results = _generator.GenerateByDate(details);
+
+        // Assert
+        results.Should().HaveCount(1);
+        results[0].Summary.Should().Be("鉄道（天神～姪浜、姪浜～西新、西新～天神）");
+        OutputInputAndResult(details, results);
+    }
+
+    /// <summary>
+    /// 対の表明その 3: 往復が時系列で先に来る形（#1902 の事例）では
+    /// 従来どおり往復ブロックが先頭に並ぶこと（並べ替えが常に往復を後ろへ送らない）。
+    /// </summary>
+    [Fact]
+    public void Issue1916_往復が時系列で先ならブロックも往復が先頭()
+    {
+        // Arrange: 天神→博多、博多→天神、天神→薬院
+        var details = new List<LedgerDetail>
+        {
+            CreateRailwayUsage(new DateTime(2024, 12, 9), "天神", "薬院", 210, 4370),
+            CreateRailwayUsage(new DateTime(2024, 12, 9), "博多", "天神", 210, 4580),
+            CreateRailwayUsage(new DateTime(2024, 12, 9), "天神", "博多", 210, 4790),
+        };
+
+        // Act
+        var results = _generator.GenerateByDate(details);
+
+        // Assert
+        results.Should().HaveCount(1);
+        results[0].Summary.Should().Be("鉄道（天神～博多 往復、天神～薬院）");
+        OutputInputAndResult(details, results);
     }
 
     #endregion
