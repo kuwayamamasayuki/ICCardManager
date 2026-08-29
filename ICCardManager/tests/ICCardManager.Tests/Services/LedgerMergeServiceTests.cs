@@ -1507,20 +1507,26 @@ public class LedgerMergeServiceTests : IDisposable
     #region MergeAsync 残高計算テスト
 
     /// <summary>
-    /// 残高は最後のDetail（SequenceNumberが最大）の値が使われること
+    /// 残高は時系列で最後（最新）のDetailの値が使われること（Issue #1932）
     /// </summary>
+    /// <remarks>
+    /// 本番と同じ形（明細は新しい順に保存される＝FeliCa 互換で小さい SequenceNumber ほど新しい。
+    /// Issue #548 / #880 / #1913）で並べる。旧実装は「最大 SequenceNumber ＝最新」と
+    /// 取り違えていたため、統合後の残額に最古の明細の残額（800円）が入っていた。
+    /// </remarks>
     [Fact]
     [Trait("Category", "Unit")]
     public async Task MergeAsync_Balance_UsesLatestDetailBalance()
     {
-        // Arrange: SequenceNumber順で最後のDetailの残高が統合後の残高になる
+        // Arrange: 1000円 → A～B(200円) → 800円 → C～D(210円) → 590円
+        // 規約どおり、新しい明細（C～D）の SequenceNumber の方が小さい。
         var date = new DateTime(2026, 2, 3);
 
         var ledger1 = CreateTestLedger(1, TestCardIdm, date, "鉄道（A～B）", 200, 800);
-        ledger1.Details.Add(CreateRailDetail(1, "A", "B", 200, 800, 5, date)); // Seq=5
+        ledger1.Details.Add(CreateRailDetail(1, "A", "B", 200, 800, 5, date)); // Seq=5（古い）
 
         var ledger2 = CreateTestLedger(2, TestCardIdm, date, "鉄道（C～D）", 210, 590);
-        ledger2.Details.Add(CreateRailDetail(2, "C", "D", 210, 590, 3, date)); // Seq=3（ledger1より前）
+        ledger2.Details.Add(CreateRailDetail(2, "C", "D", 210, 590, 3, date)); // Seq=3（新しい）
 
         SetupGetByIdMocks(ledger1, ledger2);
         SetupMergeMockSuccess();
@@ -1528,8 +1534,119 @@ public class LedgerMergeServiceTests : IDisposable
         // Act
         var result = await _service.MergeAsync(new List<int> { 1, 2 });
 
-        // Assert: SequenceNumber=5が最新なのでその残高(800)が使われる
-        result.MergedLedger!.Balance.Should().Be(800);
+        // Assert: 時系列で最後（C～D）の残額が使われる
+        result.MergedLedger!.Balance.Should().Be(590,
+            "統合後の残額は最新の明細の残額。最大 SequenceNumber を最新とみなすと最古の 800 円になる");
+    }
+
+    /// <summary>
+    /// 残高チェーンが解けないときは SequenceNumber の規約（小さい＝新しい）で最新を選ぶこと（Issue #1932）
+    /// </summary>
+    /// <remarks>
+    /// 対の表明。この 1 件が無いと、残高チェーンだけに依存して規約側のフォールバックを
+    /// 持たない実装（統合対象が連続していない日に順序を決められない）でも緑になる。
+    /// </remarks>
+    [Fact]
+    [Trait("Category", "Unit")]
+    public async Task MergeAsync_Balance_残高チェーンが解けない_SequenceNumberの規約で最新を選ぶこと()
+    {
+        // Arrange: 800円 と 500円 は残高の増減で連結しない（間に別の台帳の取引がある形）
+        var date = new DateTime(2026, 2, 3);
+
+        var ledger1 = CreateTestLedger(1, TestCardIdm, date, "鉄道（A～B）", 200, 800);
+        ledger1.Details.Add(CreateRailDetail(1, "A", "B", 200, 800, 5, date)); // Seq=5（古い）
+
+        var ledger2 = CreateTestLedger(2, TestCardIdm, date, "鉄道（C～D）", 210, 500);
+        ledger2.Details.Add(CreateRailDetail(2, "C", "D", 210, 500, 3, date)); // Seq=3（新しい）
+
+        SetupGetByIdMocks(ledger1, ledger2);
+        SetupMergeMockSuccess();
+
+        // Act
+        var result = await _service.MergeAsync(new List<int> { 1, 2 });
+
+        // Assert: SequenceNumber が小さい方（Seq=3）が最新
+        result.MergedLedger!.Balance.Should().Be(500);
+    }
+
+    /// <summary>
+    /// 残高不足マージで作られた台帳（チャージ → 利用の順で挿入）でも利用後の実残高が選ばれること（Issue #1932）
+    /// </summary>
+    /// <remarks>
+    /// 残高不足マージ（Issue #978 / #1822）は「チャージ → 利用」の順に明細を INSERT するため、
+    /// この台帳に限り最大 SequenceNumber が最新になる（SequenceNumber 規約の明示的な例外）。
+    /// 規約だけで並べるとチャージ後の残高（＝利用前の過大な値）が統合後の残額に入るため、
+    /// 同一日内は残高チェーンを優先する。上の 2 件と対で並び順の定義を固定する。
+    /// </remarks>
+    [Fact]
+    [Trait("Category", "Unit")]
+    public async Task MergeAsync_Balance_残高不足マージ台帳_利用後の実残高が選ばれること()
+    {
+        // Arrange:
+        //   ledger1: 通常の利用（残高 200円）
+        //   ledger2: 残高不足マージ台帳。残高200円 → 10円チャージ（残高210円） → 210円利用（残高0円）
+        //            挿入順は「チャージ → 利用」なので SequenceNumber はチャージ < 利用
+        var date = new DateTime(2026, 2, 3);
+
+        var ledger1 = CreateTestLedger(1, TestCardIdm, date, "鉄道（A～B）", 210, 200);
+        ledger1.Details.Add(CreateRailDetail(1, "A", "B", 210, 200, 30, date));
+
+        // 残高不足マージ台帳は Income=0（チャージ分は現金支払いのため受入に計上しない。Issue #978）
+        var ledger2 = CreateTestLedger(2, TestCardIdm, date, "鉄道（C～D）", 200, 0);
+        ledger2.Details.Add(CreateChargeDetail(2, 10, 210, 40, date));       // Seq=40（先に INSERT）
+        ledger2.Details.Add(CreateRailDetail(2, "C", "D", 210, 0, 41, date)); // Seq=41（後に INSERT）
+
+        SetupGetByIdMocks(ledger1, ledger2);
+        SetupMergeMockSuccess();
+
+        // Act
+        var result = await _service.MergeAsync(new List<int> { 1, 2 });
+
+        // Assert
+        result.Success.Should().BeTrue();
+        result.MergedLedger!.Balance.Should().Be(0,
+            "利用後の実残高。チャージ側（210円）を最新とみなすと残額が過大になる");
+    }
+
+    /// <summary>
+    /// 残高チェーンが解けない日でも、残高不足マージ台帳の残額はチャージ側にならないこと（Issue #1932）
+    /// </summary>
+    /// <remarks>
+    /// コードレビューで検出。同一日内の明細を**統合対象の全体**でチェーンに掛けると、
+    /// 選択されなかった台帳が間に挟まる（履歴一覧はチェックボックス選択なので通常操作で起きる）だけで
+    /// チェーンが解けず `SequenceNumber` の規約へ倒れる。規約は「小さい値ほど新しい」なので、
+    /// 規約の例外である残高不足マージ台帳（チャージが最小 SequenceNumber）では
+    /// **チャージ側が最新**と判定され、本 Issue が消したはずの過大な残額（利用前の残高）が復活する。
+    /// 台帳をまたぐ順序は規約で、台帳の中の順序はチェーンで決める。
+    /// </remarks>
+    [Fact]
+    [Trait("Category", "Unit")]
+    public async Task MergeAsync_Balance_残高不足マージ台帳_チェーンが解けなくても利用後の実残高が選ばれること()
+    {
+        // Arrange: その日の実際の流れは 1000円 → L1(210円) → 790円 → L2(200円) → 590円
+        //          → L3 残高不足マージ（210円チャージ→800円、800円利用→0円）
+        //          L2 を選択しないため、統合対象だけではチェーンが繋がらない。
+        var date = new DateTime(2026, 2, 3);
+
+        var ledger1 = CreateTestLedger(1, TestCardIdm, date, "鉄道（A～B）", 210, 790);
+        ledger1.Details.Add(CreateRailDetail(1, "A", "B", 210, 790, 50, date));
+
+        // 残高不足マージ台帳は「チャージ → 利用」の順に挿入するため SequenceNumber はチャージ < 利用。
+        // 返却処理は残高不足ペアを先に処理するので、同じ日の通常台帳より小さい rowid になる。
+        var ledger3 = CreateTestLedger(3, TestCardIdm, date, "鉄道（C～D）", 590, 0);
+        ledger3.Details.Add(CreateChargeDetail(3, 210, 800, 40, date));
+        ledger3.Details.Add(CreateRailDetail(3, "C", "D", 800, 0, 41, date));
+
+        SetupGetByIdMocks(ledger1, ledger3);
+        SetupMergeMockSuccess();
+
+        // Act
+        var result = await _service.MergeAsync(new List<int> { 1, 3 });
+
+        // Assert
+        result.Success.Should().BeTrue();
+        result.MergedLedger!.Balance.Should().Be(0,
+            "利用後の実残高。規約へ倒したときにチャージ側（800円＝利用前の残高）を選ぶと本 Issue の欠陥が復活する");
     }
 
     #endregion

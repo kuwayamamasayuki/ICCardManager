@@ -401,4 +401,126 @@ public class LedgerDetailChronologicalSorterTests
     }
 
     #endregion
+
+    #region TrySortByBalanceChain（Issue #1932）
+
+    /// <summary>
+    /// 残高チェーンが一意に解けるときは時系列順（古い→新しい）を返すこと
+    /// </summary>
+    [Fact]
+    [Trait("Category", "Unit")]
+    public void TrySortByBalanceChain_チェーンが一意に解ける_時系列順を返すこと()
+    {
+        // Arrange: 1000 → 790 → 580（入力は意図的に時系列と無関係な並び）
+        var middle = CreateUsage(amount: 210, balance: 790);
+        var newest = CreateUsage(amount: 210, balance: 580);
+        var oldest = CreateUsage(amount: 210, balance: 1000);
+
+        // Act
+        var result = LedgerDetailChronologicalSorter.TrySortByBalanceChain(
+            new List<LedgerDetail> { middle, newest, oldest });
+
+        // Assert
+        result.Should().NotBeNull();
+        result!.Should().Equal(oldest, middle, newest);
+    }
+
+    /// <summary>
+    /// 残高チェーンが解けないときは null を返し、呼び出し元に別の定義へ倒す機会を与えること
+    /// </summary>
+    /// <remarks>
+    /// Sort() は必ず並びを返すため「解けなかった」ことを呼び出し元へ伝えられない。
+    /// LedgerMergeService はこの null を受けて SequenceNumber の規約へ倒す（Issue #1932）。
+    /// </remarks>
+    [Fact]
+    [Trait("Category", "Unit")]
+    public void TrySortByBalanceChain_チェーンが繋がらない_nullを返すこと()
+    {
+        // Arrange: 1000→790 と 500→290 で連結しない（開始点候補が 2 つ）
+        var a = CreateUsage(amount: 210, balance: 790);
+        var b = CreateUsage(amount: 210, balance: 290);
+
+        // Act
+        var result = LedgerDetailChronologicalSorter.TrySortByBalanceChain(
+            new List<LedgerDetail> { a, b });
+
+        // Assert
+        result.Should().BeNull();
+    }
+
+    /// <summary>
+    /// 残高を持たない明細が混じるときは null を返すこと
+    /// </summary>
+    [Fact]
+    [Trait("Category", "Unit")]
+    public void TrySortByBalanceChain_残高欠落の明細を含む_nullを返すこと()
+    {
+        var withBalance = CreateUsage(amount: 210, balance: 790);
+        var withoutBalance = new LedgerDetail { Amount = 210, Balance = null };
+
+        var result = LedgerDetailChronologicalSorter.TrySortByBalanceChain(
+            new List<LedgerDetail> { withBalance, withoutBalance });
+
+        result.Should().BeNull();
+    }
+
+    /// <summary>
+    /// 後続候補が複数あって次が一意に定まらないときは null を返すこと
+    /// </summary>
+    /// <remarks>
+    /// 同額・同残高の明細が 2 件並ぶと「どちらが次か」を残高では決められない。
+    /// FirstOrDefault で黙って 1 件目を選ぶと、その並びから採った残額が
+    /// 6 年保存の台帳へ入る（Issue #1932）。
+    /// </remarks>
+    [Fact]
+    [Trait("Category", "Unit")]
+    public void TrySortByBalanceChain_後続候補が複数_nullを返すこと()
+    {
+        // Arrange: 1000→790 のあと、790→580 が 2 件（同額・同残高）
+        var start = CreateUsage(amount: 210, balance: 790);
+        var next1 = CreateUsage(amount: 210, balance: 580);
+        var next2 = CreateUsage(amount: 210, balance: 580);
+
+        var result = LedgerDetailChronologicalSorter.TrySortByBalanceChain(
+            new List<LedgerDetail> { start, next1, next2 });
+
+        result.Should().BeNull();
+    }
+
+    /// <summary>
+    /// 対の表明: Sort() の従来挙動（チェーンが切れても必ず並びを返す）を変えていないこと
+    /// </summary>
+    /// <remarks>
+    /// TrySortByBalanceChain の追加は Sort() の内部実装を共有するリファクタリングを伴う。
+    /// この表明が無いと、strict 判定を Sort() まで適用してしまった実装（＝
+    /// リポジトリの明細取得や CSV 出力が広範囲にフォールバックへ倒れる）でも緑になる。
+    /// </remarks>
+    [Fact]
+    [Trait("Category", "Unit")]
+    public void Sort_チェーンを解けない_フォールバックして必ず並びを返すこと()
+    {
+        // 残高欠落（TrySortByBalanceChain が null を返すのと同じ入力）でも
+        // Sort は preserveOrderOnFailure に従って必ず並びを返す
+        var withBalance = CreateUsage(amount: 210, balance: 790);
+        var withoutBalance = new LedgerDetail { Amount = 210, Balance = null };
+        var input = new List<LedgerDetail> { withBalance, withoutBalance };
+
+        var preserved = LedgerDetailChronologicalSorter.Sort(input, preserveOrderOnFailure: true);
+        var reversed = LedgerDetailChronologicalSorter.Sort(input, preserveOrderOnFailure: false);
+
+        // DB読み取り時は入力順を維持し、FeliCa入力時は逆順にする
+        preserved.Should().Equal(withBalance, withoutBalance);
+        reversed.Should().Equal(withoutBalance, withBalance);
+    }
+
+    private static LedgerDetail CreateUsage(int amount, int balance) => new LedgerDetail
+    {
+        UseDate = new DateTime(2026, 3, 10),
+        EntryStation = "天神",
+        ExitStation = "博多",
+        Amount = amount,
+        Balance = balance
+    };
+
+    #endregion
 }

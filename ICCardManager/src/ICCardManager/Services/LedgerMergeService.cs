@@ -252,12 +252,15 @@ namespace ICCardManager.Services
             target.Income = ledgers.Sum(l => l.Income);
             target.Expense = ledgers.Sum(l => l.Expense);
 
-            // 残高: 最新のDetailの残高を使用
-            var latestDetail = allDetails
-                .Where(d => d.Balance.HasValue)
-                .OrderBy(d => d.SequenceNumber > 0 ? d.SequenceNumber : int.MaxValue)
-                .ThenBy(d => d.UseDate ?? DateTime.MaxValue)
-                .LastOrDefault();
+            // Issue #1932: 統合対象の明細を時系列順（古い→新しい）に 1 度だけ並べ、
+            // 残額の選択（末尾＝最新）と摘要の再生成（下の sortedDetailsForSummary）の
+            // 両方をこの並びに載せる。判定を 2 か所に書き分けると片方だけ変わる日が来る
+            // （development-conventions.md「同じ論理的な処理に手段が 2 通りあるか」）。
+            var chronologicalDetails = OrderChronologically(allDetails);
+
+            // 残高: 最新（時系列で末尾）のDetailの残高を使用
+            var latestDetail = chronologicalDetails
+                .LastOrDefault(d => d.Balance.HasValue);
             if (latestDetail != null)
             {
                 target.Balance = latestDetail.Balance!.Value;
@@ -269,12 +272,10 @@ namespace ICCardManager.Services
 
             // Issue #920: 摘要を再生成（詳細を新しい順にソートしてからGenerateに渡す）
             // Generate()はICカードの読み取り順（新しい順）を前提に.Reverse()するため、
-            // DB由来の詳細はUseDate降順・Balance昇順で新しい順に並べ替える必要がある。
-            // 同一日付内ではBalance昇順（低残高＝最新の利用）で時系列の逆順を再現する。
-            var sortedDetailsForSummary = allDetails
-                .OrderByDescending(d => d.UseDate ?? DateTime.MinValue)
-                .ThenBy(d => d.Balance ?? 0)
-                .ToList();
+            // 上で確定した時系列順（古い→新しい）を逆順にして渡す。
+            // Issue #1932: 以前はここだけ独自に「UseDate降順・Balance昇順」で並べていたが、
+            // 残額の選択と並び順の定義が別々だと片方だけ変わる。定義は OrderChronologically 1 つ。
+            var sortedDetailsForSummary = Enumerable.Reverse(chronologicalDetails).ToList();
 
             // GenerateRailwaySummary内部でSequenceNumber DESCに再ソートされるため、
             // ここで正しい順序に対応するSequenceNumberを一時的に再採番する。
@@ -534,6 +535,108 @@ namespace ICCardManager.Services
             }
 
             return null;
+        }
+
+        /// <summary>
+        /// 統合対象の明細を時系列順（古い→新しい）に並べる（Issue #1932）
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// 「最新の明細」は本メソッドの結果の**末尾**で、統合後の残額はそこから採る。
+        /// 統合先の摘要を再生成するときは本メソッドの結果を逆順にして
+        /// <c>SummaryGenerator.Generate</c>（ICカードの読み取り順＝新しい順が前提）へ渡す。
+        /// 並び順の定義をこの 1 か所に置くのは、残額と摘要が別々の定義に載ると
+        /// 片方だけ変わる日が来るため（development-conventions.md）。
+        /// </para>
+        /// <para>
+        /// 決め方は 3 段:
+        /// </para>
+        /// <list type="number">
+        /// <item><description>
+        /// <c>UseDate</c> の日付で昇順にグループ化する（日付なしは末尾）。
+        /// Issue #1904 のとおり第一キーは rowid ではなく日付 —
+        /// 統合済み台帳では別バッチ由来の rowid が日付と無関係に交錯する。
+        /// </description></item>
+        /// <item><description>
+        /// 同一日内は残高チェーンで解決する（<c>LedgerDetailChronologicalSorter</c>。
+        /// <c>LedgerRepository.GetByIdAsync</c> が明細の並びを決めるのに使っているのと同じ定義）。
+        /// 同日の時刻はすべて 00:00 で保存されるため日付では順序が決まらず、
+        /// 残高の増減が唯一の客観的な手掛かりになる（business-logic.md
+        /// 「同一日内の順序は id では決まらない」）。
+        /// </description></item>
+        /// <item><description>
+        /// 全体では解けないとき、<b>台帳ごと</b>に分けて解き直す。台帳の中の順序はその台帳の
+        /// 残高チェーンで決め（解けなければ規約へ倒す）、台帳どうしの順序は規約
+        /// （FeliCa 互換で小さい <c>SequenceNumber</c> ほど新しい）で決める。
+        /// </description></item>
+        /// </list>
+        /// <para>
+        /// 残高チェーンを規約より優先するのは、残高不足マージ（Issue #978）で作られた台帳が
+        /// 「チャージ → 利用」の順に挿入される**規約の明示的な例外**だから。
+        /// この台帳では最大 <c>SequenceNumber</c> が最新であり、規約だけで並べると
+        /// チャージ後の残高（＝利用前の過大な値）が 6 年保存の台帳の残額欄に入る。
+        /// 残高チェーンはこの台帳も通常の台帳も同じ手順で正しく解く。
+        /// </para>
+        /// <para>
+        /// 段 3 で「まず台帳ごとに分ける」のが要（コードレビューで検出）。統合対象**全体**を
+        /// 1 本のチェーンに掛けると、選択されなかった台帳が間に挟まるだけでチェーンが切れる
+        /// （履歴一覧はチェックボックス選択なので通常操作で起きる）。そこで規約へ丸ごと倒すと、
+        /// 規約の例外である残高不足マージ台帳ではチャージ側が最新と判定され、
+        /// **本 Issue が消したはずの過大な残額が復活する**。台帳の中の並びは統合対象の選び方に
+        /// 左右されないので、そこだけはチェーンが常に解ける（`LedgerRepository.GetByIdAsync` が
+        /// 同じ定義で明細を並べているのと同じ理由）。
+        /// </para>
+        /// </remarks>
+        /// <param name="details">統合対象の全明細（順序は問わない）</param>
+        /// <returns>時系列順（古い→新しい）に並べた新しいリスト</returns>
+        internal static List<LedgerDetail> OrderChronologically(IEnumerable<LedgerDetail> details)
+        {
+            return details
+                .GroupBy(d => d.UseDate?.Date ?? DateTime.MaxValue)
+                .OrderBy(g => g.Key)
+                .SelectMany(g => OrderWithinSameDate(g.ToList()))
+                .ToList();
+        }
+
+        /// <summary>
+        /// 同一日の明細を時系列順（古い→新しい）に並べる（Issue #1932）
+        /// </summary>
+        private static List<LedgerDetail> OrderWithinSameDate(List<LedgerDetail> sameDateDetails)
+        {
+            if (sameDateDetails.Count <= 1)
+            {
+                return sameDateDetails;
+            }
+
+            // 残高チェーンで一意に決まるならそれが正。
+            var chained = LedgerDetailChronologicalSorter.TrySortByBalanceChain(sameDateDetails);
+            if (chained != null)
+            {
+                return chained;
+            }
+
+            // 解けないときは台帳ごとに分け直す。台帳の中は再びチェーンで（統合対象の選び方に
+            // 左右されないので通常はここで解ける）、台帳どうしは規約で並べる。
+            return sameDateDetails
+                .GroupBy(d => d.LedgerId)
+                .OrderByDescending(g => g.Min(d => d.SequenceNumber > 0 ? d.SequenceNumber : int.MinValue))
+                .ThenByDescending(g => g.Max(d => d.Balance ?? 0))
+                .SelectMany(g => OrderWithinSameLedger(g.ToList()))
+                .ToList();
+        }
+
+        /// <summary>
+        /// 同一台帳・同一日の明細を時系列順（古い→新しい）に並べる（Issue #1932）
+        /// </summary>
+        private static List<LedgerDetail> OrderWithinSameLedger(List<LedgerDetail> sameLedgerDetails)
+        {
+            if (sameLedgerDetails.Count <= 1)
+            {
+                return sameLedgerDetails;
+            }
+
+            return LedgerDetailChronologicalSorter.TrySortByBalanceChain(sameLedgerDetails)
+                ?? SummaryGenerator.SortChronologically(sameLedgerDetails);
         }
 
         /// <summary>
