@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
@@ -169,6 +169,40 @@ namespace ICCardManager.Common.Exceptions
             return innerException != null
                 ? new BusinessException(message, userMessage, errorCode, innerException)
                 : new BusinessException(message, userMessage, errorCode);
+        }
+
+        /// <summary>
+        /// 貸出状態（<c>ic_card.is_lent</c>）の更新が影響行数 0 になった（競合）
+        /// </summary>
+        /// <param name="cardIdm">対象カードの IDm（ログ用。ユーザー向け文言には含めない）</param>
+        /// <param name="operationName">利用者が行った操作（「貸出」「返却」）。「何が」に相当する</param>
+        /// <remarks>
+        /// <para>
+        /// Issue #1953: <c>UPDATE ic_card … WHERE card_idm = @cardIdm AND is_deleted = 0</c> が
+        /// 0 行になるのは「他のパソコンや別の操作でこのカードが論理削除された」場合だけであり
+        /// （Issue #1753 の影響行数による競合検出）、原因を名指しできる。
+        /// </para>
+        /// <para>
+        /// <see cref="AppException"/> を継承させるのは、<c>LendingService.GetUserFriendlyErrorMessage</c> の
+        /// <c>AppException</c> 分岐がこの <see cref="AppException.UserFriendlyMessage"/> を尊重するため
+        /// （Issue #1757: 捕捉漏れがあっても「予期しないエラー（SYS999）」へ落ちない）。
+        /// </para>
+        /// <para>
+        /// 文言に「もう一度タッチしてください」と書かないのは、再タッチしても同じ競合が続くため
+        /// （<c>.claude/rules/error-messages.md</c>「取れる行動が違う経路には専用の文言を置く」）。
+        /// 戻り先はトースト通知で文字数制約があるため、3 要素を保ちつつ簡潔にまとめている。
+        /// </para>
+        /// </remarks>
+        public static BusinessException LentStatusUpdateConflict(string cardIdm, string operationName)
+        {
+            var message = $"Lent status update affected 0 rows: {cardIdm} ({operationName})";
+            var userMessage =
+                $"{operationName}を記録できませんでした。" +
+                "このカードが削除された可能性があります。" +
+                "カード管理画面（F2）で状態を確認してください。";
+            const string errorCode = "BIZ015";
+
+            return new BusinessException(message, userMessage, errorCode);
         }
 
         /// <summary>

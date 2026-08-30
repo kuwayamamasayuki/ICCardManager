@@ -1,4 +1,4 @@
-using FluentAssertions;
+﻿using FluentAssertions;
 using ICCardManager.Data;
 using ICCardManager.Data.Repositories;
 using ICCardManager.Infrastructure.Security;
@@ -4896,6 +4896,12 @@ public class LendingServiceTests : IDisposable
             .ReturnsAsync(staff);
         _ledgerRepositoryMock.Setup(x => x.InsertAsync(It.IsAny<Ledger>()))
             .ReturnsAsync(1);
+        // Issue #1953: is_lent 更新の影響行数 0 は競合として貸出を巻き戻すため、
+        // 「貸出成功」を表すフィクスチャは true を返す必要がある
+        // （未設定の loose モックは false を返し、本テストの前提が成立しない）
+        _cardRepositoryMock.Setup(x => x.UpdateLentStatusAsync(
+                TestCardIdm, true, It.IsAny<DateTime?>(), TestStaffIdm))
+            .ReturnsAsync(true);
 
         // Act
         var result = await service.LendAsync(TestStaffIdm, TestCardIdm, balance: 1000);

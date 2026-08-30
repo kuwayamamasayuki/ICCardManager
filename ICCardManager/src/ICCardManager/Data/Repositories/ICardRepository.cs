@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
@@ -125,6 +125,14 @@ namespace ICCardManager.Data.Repositories
         /// <param name="isLent">貸出状態</param>
         /// <param name="lentAt">貸出日時（貸出時のみ）</param>
         /// <param name="staffIdm">貸出者IDm（貸出時のみ）</param>
+        /// <returns>
+        /// 更新できたら <c>true</c>。<c>false</c> は<b>競合</b>を意味する（Issue #1753 / #1953）。
+        /// WHERE 句は <c>card_idm = @cardIdm AND is_deleted = 0</c> なので、0 行になるのは
+        /// 「他のパソコンや別の操作でこのカードが論理削除された」場合だけである。
+        /// <b>戻り値を捨ててはならない</b> — 捨てると <c>ledger</c> の貸出中レコードと
+        /// <c>ic_card.is_lent</c> が恒久的に食い違う。
+        /// なお <c>false</c> のときもカードキャッシュは破棄される（Issue #1759）。
+        /// </returns>
         Task<bool> UpdateLentStatusAsync(string cardIdm, bool isLent, DateTime? lentAt, string staffIdm);
 
         /// <summary>

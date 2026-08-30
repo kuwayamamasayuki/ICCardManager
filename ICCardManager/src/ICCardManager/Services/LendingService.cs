@@ -304,8 +304,16 @@ namespace ICCardManager.Services
                         if (hasLentRecord && !card.IsLent)
                         {
                             // 貸出中レコードがあるのにis_lent=0 → is_lent=1に修復
-                            await _cardRepository.UpdateLentStatusAsync(
+                            // Issue #1953: 影響行数 0（他 PC がこのカードを論理削除した）は修復ではない。
+                            // 数えると DB が変わっていないのに「N件修復しました」と報告し、
+                            // 不整合が残ったまま解決済みに見える。
+                            var repaired = await _cardRepository.UpdateLentStatusAsync(
                                 card.CardIdm, true, lentRecord.LentAt, lentRecord.LenderIdm).ConfigureAwait(false);
+                            if (!repaired)
+                            {
+                                LogRepairConflict(IdmMasker.Mask(card.CardIdm), "0→1");
+                                continue;
+                            }
                             _logger.LogWarning(
                                 "Issue #790: 貸出状態の不整合を修復しました（is_lent: 0→1）: CardIdm={CardIdm}, LentAt={LentAt}",
                                 IdmMasker.Mask(card.CardIdm), lentRecord.LentAt);
@@ -314,8 +322,14 @@ namespace ICCardManager.Services
                         else if (!hasLentRecord && card.IsLent)
                         {
                             // 貸出中レコードがないのにis_lent=1 → is_lent=0に修復
-                            await _cardRepository.UpdateLentStatusAsync(
+                            // Issue #1953: 影響行数 0 は修復ではない（0→1 の分岐と同じ理由）。
+                            var repaired = await _cardRepository.UpdateLentStatusAsync(
                                 card.CardIdm, false, null, null).ConfigureAwait(false);
+                            if (!repaired)
+                            {
+                                LogRepairConflict(IdmMasker.Mask(card.CardIdm), "1→0");
+                                continue;
+                            }
                             _logger.LogWarning(
                                 "Issue #790: 貸出状態の不整合を修復しました（is_lent: 1→0）: CardIdm={CardIdm}",
                                 IdmMasker.Mask(card.CardIdm));
@@ -501,7 +515,17 @@ namespace ICCardManager.Services
                     var ledgerId = await _ledgerRepository.InsertAsync(ledger).ConfigureAwait(false);
                     ledger.Id = ledgerId;
 
-                    await _cardRepository.UpdateLentStatusAsync(cardIdm, true, now, staffIdm).ConfigureAwait(false);
+                    // Issue #1953: 影響行数 0（WHERE is_deleted = 0 に一致しない）は競合であり、
+                    // 握りつぶすと ledger に貸出中レコードだけが入り is_lent = 0 のままコミットされる。
+                    // 手元に無いカードが次のタッチで新規貸出として再記録されるため、
+                    // 例外でトランザクションごと巻き戻す（BusinessException は SQLITE_BUSY ではないので
+                    // ExecuteWithRetryAsync のリトライ対象にならず、そのまま LendAsync の catch へ届く）。
+                    var lentStatusUpdated = await _cardRepository
+                        .UpdateLentStatusAsync(cardIdm, true, now, staffIdm).ConfigureAwait(false);
+                    if (!lentStatusUpdated)
+                    {
+                        throw BusinessException.LentStatusUpdateConflict(cardIdm, "貸出");
+                    }
 
                     scope.Commit();
                     createdLedger = ledger;
@@ -644,7 +668,14 @@ namespace ICCardManager.Services
                     // 共有モードで重複した貸出中レコードがある場合にも対応
                     await _ledgerRepository.DeleteAllLentRecordsAsync(cardIdm).ConfigureAwait(false);
 
-                    await _cardRepository.UpdateLentStatusAsync(cardIdm, false, null, null).ConfigureAwait(false);
+                    // Issue #1953: 影響行数 0 は競合。握りつぶすと貸出中レコードだけが消えて
+                    // is_lent = 1 が残り、返却済みカードが長期未返却として督促され続ける。
+                    var lentStatusUpdated = await _cardRepository
+                        .UpdateLentStatusAsync(cardIdm, false, null, null).ConfigureAwait(false);
+                    if (!lentStatusUpdated)
+                    {
+                        throw BusinessException.LentStatusUpdateConflict(cardIdm, "返却");
+                    }
 
                     scope.Commit();
                 }
@@ -1689,6 +1720,30 @@ namespace ICCardManager.Services
             }
 
             return "データベースへの書き込み中に問題が発生しました。";
+        }
+
+        /// <summary>
+        /// 整合性修復の <c>UPDATE</c> が影響行数 0 になった（競合）ことを記録する。
+        /// </summary>
+        /// <remarks>
+        /// Issue #1953: 起動時に毎回走る処理であり例外にはしない（他 PC がカードを論理削除した
+        /// だけで、そのカードの不整合はもはや運用に影響しない）。ただし
+        /// <c>.claude/rules/development-conventions.md</c>「『ログには出ている』は無言失敗の
+        /// 免罪符にならない」の趣旨に沿い、修復件数に数えなかった事実は本番ログへ残す
+        /// （<c>LogDebug</c> は既定の <c>Logging:LogLevel=Information</c> ではファイル出力されない）。
+        /// </remarks>
+        /// <param name="maskedCardIdm">
+        /// <see cref="IdmMasker.Mask"/> 済みの IDm。呼び出し地点でマスクを通すのは、
+        /// 静的検査（<c>IdmLoggingMaskConventionTests</c>）が <c>Log</c> で始まるメソッド呼び出しの
+        /// 引数を見るため（Issue #1852。自前のログヘルパーへ生の IDm を渡す形も同じ欠陥）。
+        /// </param>
+        /// <param name="direction">修復の向き（<c>0→1</c> / <c>1→0</c>）</param>
+        private void LogRepairConflict(string maskedCardIdm, string direction)
+        {
+            _logger.LogWarning(
+                "Issue #1953: 貸出状態の修復が競合しました（is_lent: {Direction}）。" +
+                "他のパソコンでこのカードが削除された可能性があるため修復件数に数えません: CardIdm={CardIdm}",
+                direction, maskedCardIdm);
         }
 
         /// <summary>
