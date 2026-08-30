@@ -1,4 +1,4 @@
-using System.IO;
+﻿using System.IO;
 using FluentAssertions;
 using ICCardManager.Common;
 using ICCardManager.Data;
@@ -549,10 +549,15 @@ public class BackupServiceTests : IDisposable
     }
 
     /// <summary>
-    /// バックアップファイル一覧が作成日時降順でソートされていることを確認
+    /// バックアップファイル一覧がファイル名のタイムスタンプ降順でソートされていることを確認
     /// </summary>
+    /// <remarks>
+    /// Issue #1950: 並びの根拠は <c>CreationTime</c> ではなくファイル名。
+    /// 本テストは名前と作成日時を一致させて作るため両者を区別できない（根拠が入れ替わっても緑になる）。
+    /// 根拠そのものの表明は <see cref="BackupServiceEnumerationOrderTests"/> が担う。
+    /// </remarks>
     [Fact]
-    public async Task GetBackupFilesAsync_ReturnsFilesOrderedByCreationTimeDesc()
+    public async Task GetBackupFilesAsync_ReturnsFilesOrderedByNameTimestampDesc()
     {
         // Arrange - 時間差で3つのバックアップを作成
         var timestamps = new[] { "20240101_120000", "20240101_130000", "20240101_140000" };
