@@ -112,6 +112,15 @@ public class SQLiteBusySwallowConventionTests
                 return false;
             }";
 
+        // 極性が反転した形（一過性ロック「だけ」を false へ畳む）＝本 Issue の欠陥そのもの。
+        // 語の存在だけで判定すると、この形が適合として素通りする。
+        const string inverted = @"
+            try { X(); }
+            catch (SQLiteException ex) when (DbContext.IsTransientLockError(ex))
+            {
+                return false;
+            }";
+
         const string notSwallowing = @"
             try { X(); }
             catch (SQLiteException)
@@ -126,6 +135,11 @@ public class SQLiteBusySwallowConventionTests
         var compliantBlock = ExtractSQLiteCatchBlocks(compliant).Should().ContainSingle().Subject;
         SwallowsToFalse(compliantBlock.Body).Should().BeTrue();
         ExcludesTransientLockError(compliantBlock.Filter).Should().BeTrue();
+
+        var invertedBlock = ExtractSQLiteCatchBlocks(inverted).Should().ContainSingle().Subject;
+        SwallowsToFalse(invertedBlock.Body).Should().BeTrue();
+        ExcludesTransientLockError(invertedBlock.Filter).Should().BeFalse(
+            "極性が反転したフィルタ（一過性ロックだけを false へ畳む）は適合ではなく違反であること");
 
         SwallowsToFalse(ExtractSQLiteCatchBlocks(notSwallowing).Single().Body).Should().BeFalse();
     }
@@ -217,8 +231,19 @@ public class SQLiteBusySwallowConventionTests
     private static bool SwallowsToFalse(string body) =>
         Regex.IsMatch(body ?? string.Empty, @"\breturn\s+false\s*;");
 
+    /// <summary>
+    /// 例外フィルタが一過性ロックを<b>除外</b>しているか（＝否定形で参照しているか）
+    /// </summary>
+    /// <remarks>
+    /// 「<c>IsTransientLockError</c> という語が含まれるか」で判定すると、極性が反転した
+    /// <c>when (DbContext.IsTransientLockError(ex))</c>（＝一過性ロック<b>だけ</b>を false へ畳む、
+    /// この Issue が消そうとしている欠陥そのもの）が検査を素通りする
+    /// （<c>.claude/rules/development-conventions.md</c> #1786「極性の反転」）。
+    /// 否定（<c>!</c>）を伴う参照だけを適合とする。
+    /// </remarks>
     private static bool ExcludesTransientLockError(string filter) =>
-        filter != null && filter.Contains("IsTransientLockError");
+        filter != null &&
+        Regex.IsMatch(filter, @"!\s*\(?\s*(?:DbContext\s*\.\s*)?IsTransientLockError\s*\(");
 
     #endregion
 }
