@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Data;
 using System.Globalization;
@@ -1185,14 +1185,82 @@ LIMIT 100";
         }
 
         /// <inheritdoc/>
-        public async Task UpdateDetailBusStopsAsync(int ledgerId, IEnumerable<(int SequenceNumber, string BusStops)> updates)
-        {
-            using var lease = await _dbContext.LeaseConnectionAsync();
-            var connection = lease.Connection;
+        public Task<bool> UpdateDetailBusStopsAsync(int ledgerId, IEnumerable<(int SequenceNumber, string BusStops)> updates)
+            => UpdateDetailBusStopsAsync(ledgerId, updates, transaction: null);
 
+        /// <inheritdoc/>
+        public async Task<bool> UpdateDetailBusStopsAsync(
+            int ledgerId, IEnumerable<(int SequenceNumber, string BusStops)> updates, SQLiteTransaction transaction)
+        {
+            // Issue #1945: 旧実装は command.Transaction を設定せず N 回 autocommit しており、
+            // 途中で失敗すると一部の明細だけが書き換わって確定していた（Issue #1724 と同じ形）。
+            // さらに影響行数を捨てていたため、履歴詳細の全置換（ReplaceDetailsAsync の DELETE + INSERT）で
+            // rowid が振り直されたあとの更新は 0 行のまま「成功」を返し、呼び出し元が
+            // ledger.summary だけを書き換えて 6 年保存の台帳を自己矛盾させていた（Issue #1806）。
+            // ReplaceDetailsAsync / DeleteAsync と同じ 3 分岐（05_クラス設計書 §5.5b）:
+            //   1. tx 指定           … 呼び出し元の tx を共有し、commit/rollback には介入しない
+            //   2. 外側 tx スコープ内 … 既存接続の活性トランザクションへ暗黙参加する
+            //                          （自前で BeginTransactionAsync すると DbContext._semaphore の
+            //                            再取得でデッドロックするため。Issue #1575）
+            //   3. それ以外           … 自前で BeginTransactionAsync し commit/rollback まで責任を持つ
+            var list = updates as IList<(int SequenceNumber, string BusStops)> ?? updates.ToList();
+
+            if (list.Count == 0)
+            {
+                return true;
+            }
+
+            if (transaction != null)
+            {
+                return await UpdateDetailBusStopsCore(ledgerId, list, transaction.Connection, transaction).ConfigureAwait(false);
+            }
+
+            if (_dbContext.HasActiveTransactionScope)
+            {
+                using var lease = await _dbContext.LeaseConnectionAsync().ConfigureAwait(false);
+                return await UpdateDetailBusStopsCore(ledgerId, list, lease.Connection, transaction: null).ConfigureAwait(false);
+            }
+
+            using var scope = await _dbContext.BeginTransactionAsync().ConfigureAwait(false);
+            try
+            {
+                var ok = await UpdateDetailBusStopsCore(ledgerId, list, scope.Lease.Connection, scope.Transaction).ConfigureAwait(false);
+                if (ok)
+                {
+                    scope.Commit();
+                }
+                else
+                {
+                    scope.Rollback();
+                }
+                return ok;
+            }
+            catch
+            {
+                // Issue #1831: 素の Rollback() を呼ばない（詳細は SafeRollback の XML doc）
+                SafeRollback.TryRollback(() => scope.Rollback(), logger: null, "バス停名の更新");
+                throw;
+            }
+        }
+
+        /// <summary>
+        /// Issue #1945: バス停名更新の本体。
+        /// 呼び出し元が用意した単一の接続・トランザクション上で実行し、commit/rollback には介入しない。
+        /// </summary>
+        /// <remarks>
+        /// WHERE に <c>ledger_id</c> を含めるのは Issue #1806 の規約（暗黙 rowid は再利用されるため、
+        /// rowid だけで行を特定すると無関係な台帳の明細を書き換え得る）。
+        /// </remarks>
+        private static async Task<bool> UpdateDetailBusStopsCore(
+            int ledgerId,
+            IList<(int SequenceNumber, string BusStops)> updates,
+            SQLiteConnection connection,
+            SQLiteTransaction transaction)
+        {
             foreach (var (sequenceNumber, busStops) in updates)
             {
                 using var command = connection.CreateCommand();
+                command.Transaction = transaction;
                 command.CommandText = @"UPDATE ledger_detail SET bus_stops = @busStops
 WHERE ledger_id = @ledgerId AND rowid = @rowid";
 
@@ -1200,8 +1268,17 @@ WHERE ledger_id = @ledgerId AND rowid = @rowid";
                 command.Parameters.AddWithValue("@ledgerId", ledgerId);
                 command.Parameters.AddWithValue("@rowid", sequenceNumber);
 
-                await command.ExecuteNonQueryAsync();
+                // Issue #1753: 影響行数 0 は「WHERE に一致する行が無い」＝競合。
+                // SQLite の changes() は値が変わらなくても一致した行を数えるため、
+                // 「同じバス停名を書き直した」ケースを競合と誤判定することはない。
+                var rows = await command.ExecuteNonQueryAsync().ConfigureAwait(false);
+                if (rows == 0)
+                {
+                    return false;
+                }
             }
+
+            return true;
         }
 
         /// <inheritdoc/>

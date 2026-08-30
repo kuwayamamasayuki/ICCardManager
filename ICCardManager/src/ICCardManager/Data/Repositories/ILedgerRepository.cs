@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Data.SQLite;
 using System.Linq;
@@ -102,9 +102,28 @@ namespace ICCardManager.Data.Repositories
         Task<bool> InsertDetailsAsync(int ledgerId, IEnumerable<LedgerDetail> details, SQLiteTransaction transaction);
 
         /// <summary>
-        /// バス利用詳細のバス停名を更新
+        /// バス利用詳細のバス停名を更新する（Issue #1945）。
         /// </summary>
-        Task UpdateDetailBusStopsAsync(int ledgerId, IEnumerable<(int SequenceNumber, string BusStops)> updates);
+        /// <returns>
+        /// 指定した明細をすべて更新できた場合 true。
+        /// 1 件でも影響行数 0（他のパソコンや履歴詳細の全置換で rowid が振り直された等の競合、Issue #1753 / #1806）
+        /// があった場合 false。このとき書き込みはロールバックされ、1 件も反映されない。
+        /// </returns>
+        /// <remarks>
+        /// 呼び出し元は戻り値を必ず確認し、false のときは <c>ledger.summary</c> の更新を行わないこと。
+        /// 摘要だけが先に確定すると、6 年保存の台帳が「摘要はバス停名入り・明細は★のまま」と自己矛盾する。
+        /// </remarks>
+        Task<bool> UpdateDetailBusStopsAsync(int ledgerId, IEnumerable<(int SequenceNumber, string BusStops)> updates);
+
+        /// <summary>
+        /// バス利用詳細のバス停名を更新する（既存トランザクション参加版・Issue #1945）。
+        /// </summary>
+        /// <remarks>
+        /// 摘要（<c>ledger.summary</c>）の更新と同一トランザクションで束ねるために使う（Issue #1806）。
+        /// commit / rollback は呼び出し元の責務。
+        /// </remarks>
+        Task<bool> UpdateDetailBusStopsAsync(
+            int ledgerId, IEnumerable<(int SequenceNumber, string BusStops)> updates, SQLiteTransaction transaction);
 
         /// <summary>
         /// 同行者数だけを更新する（Issue #1906、返却時の同行者数入力ダイアログ用）

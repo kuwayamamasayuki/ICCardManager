@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.Data.SQLite;
 using System.Linq;
 using System.Threading.Tasks;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -963,35 +964,60 @@ namespace ICCardManager.ViewModels
 
             // Issue #1458: Ledger UPDATE と監査ログ INSERT を同一トランザクションで実行
             bool result;
+            var busStopConflict = false;
             using (var scope = await _dbContext.BeginTransactionAsync())
             {
                 result = await _ledgerRepository.UpdateAsync(ledger, scope.Transaction);
                 if (result)
                 {
                     await _operationLogger.LogLedgerUpdateAsync(beforeLedger, ledger, scope.Transaction);
-                    scope.Commit();
+
+                    // Issue #983: 摘要編集時にバス停名をDetailに同期
+                    // 摘要を直接編集するとLedger.Summaryは更新されるがDetail.BusStopsは更新されない。
+                    // この不整合を放置すると、統合時にSummaryGenerator.Generate()が
+                    // Detail.BusStopsから摘要を再生成し、修正前のバス停名に戻ってしまう。
+                    //
+                    // Issue #1945: 同期は摘要の UPDATE と「同じ論理操作」なので同一 tx に束ねる（#1806）。
+                    // 旧実装は commit のあと tx の外で実行し、しかも戻り値を見ていなかったため、
+                    // 履歴詳細の全置換（ReplaceDetailsAsync の DELETE + INSERT）で rowid が振り直されていると
+                    // 同期が 0 行で素通りし、摘要だけが新しいバス停名で確定して
+                    // 6 年保存の台帳が「摘要はバス停名入り・明細は★のまま」と自己矛盾した。
+                    if (beforeLedger.Summary != ledger.Summary)
+                    {
+                        var syncOk = await SyncBusStopsFromSummaryAsync(ledger, scope.Transaction);
+                        if (!syncOk)
+                        {
+                            // commit せずに抜ける（scope の Dispose で巻き戻る）
+                            result = false;
+                            busStopConflict = true;
+                        }
+                    }
+
+                    if (result)
+                    {
+                        scope.Commit();
+                    }
                 }
             }
 
             if (result)
             {
-                // Issue #983: 摘要編集時にバス停名をDetailに同期
-                // 摘要を直接編集するとLedger.Summaryは更新されるがDetail.BusStopsは更新されない。
-                // この不整合を放置すると、統合時にSummaryGenerator.Generate()が
-                // Detail.BusStopsから摘要を再生成し、修正前のバス停名に戻ってしまう。
-                // SMB 共有モードのロック競合を避けるため tx の外で実行する。
-                if (beforeLedger.Summary != ledger.Summary)
-                {
-                    await SyncBusStopsFromSummaryAsync(ledger);
-                }
-
                 IsSaved = true;
             }
             else
             {
-                StatusMessage = "保存に失敗しました";
+                StatusMessage = busStopConflict ? BusStopConflictMessage : "保存に失敗しました";
             }
         }
+
+        /// <summary>
+        /// Issue #1945: バス停名の同期が競合（影響行数 0）したときの案内文言。
+        /// 「何が」「なぜ」「どうすれば」の 3 要素で組み立てる。
+        /// </summary>
+        internal const string BusStopConflictMessage =
+            "摘要とバス停名を保存できませんでした。この履歴の明細が、他のパソコンや別の編集操作で" +
+            "変更された可能性があります。変更は取り消していますので、画面を閉じて履歴一覧を" +
+            "再読み込みし、最新の内容を確認してからやり直してください。";
 
         /// <summary>
         /// 摘要からバス停名を抽出してDetail.BusStopsに同期する（Issue #983）
@@ -1000,17 +1026,21 @@ namespace ICCardManager.ViewModels
         /// 摘要の直接編集ではLedger.Summaryのみ更新されDetail.BusStopsは未更新のため、
         /// 統合時の摘要再生成で修正前のバス停名に戻る問題を防止する。
         /// </remarks>
-        private async Task SyncBusStopsFromSummaryAsync(Ledger ledger)
+        /// <returns>
+        /// 書き戻す対象が無い場合も含め、明細を更新できた場合 true。
+        /// 影響行数 0（rowid の振り直し等の競合、Issue #1945）の場合 false。
+        /// </returns>
+        private async Task<bool> SyncBusStopsFromSummaryAsync(Ledger ledger, SQLiteTransaction transaction)
         {
             // Issue #1904: バス停名（摘要中の出現順）との位置対応付けは、バス明細を
             // 生成側の出力順（GetBusStopEmissionOrder）で並べて初めて成立する
             //（並び順の定義を消費側に書き写さない。LedgerMergeService.SyncBusStopsFromSummary と同じ）
             var busDetails = SummaryGenerator.GetBusStopEmissionOrder(ledger.Details);
-            if (busDetails.Count == 0) return;
+            if (busDetails.Count == 0) return true;
 
             // Issue #1818: 抽出パターンは組織設定 BusLabel から導出する
             var blocks = SummaryGenerator.ExtractBusStopBlocks(ledger.Summary);
-            if (blocks.Count == 0) return;
+            if (blocks.Count == 0) return true;
 
             var busStopUpdates = new List<(int SequenceNumber, string BusStops)>();
 
@@ -1033,10 +1063,12 @@ namespace ICCardManager.ViewModels
                 }
             }
 
-            if (busStopUpdates.Count > 0)
+            if (busStopUpdates.Count == 0)
             {
-                await _ledgerRepository.UpdateDetailBusStopsAsync(ledger.Id, busStopUpdates);
+                return true;
             }
+
+            return await _ledgerRepository.UpdateDetailBusStopsAsync(ledger.Id, busStopUpdates, transaction);
         }
 
         /// <summary>

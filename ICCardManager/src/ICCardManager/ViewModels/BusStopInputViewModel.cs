@@ -1,4 +1,4 @@
-using System.Collections.ObjectModel;
+﻿using System.Collections.ObjectModel;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using ICCardManager.Common;
@@ -467,7 +467,7 @@ public partial class BusStopInputViewModel : ViewModelBase
             }
             else
             {
-                StatusMessage = "保存に失敗しました";
+                StatusMessage = HasBusStopUpdateConflict ? BusStopConflictMessage : "保存に失敗しました";
             }
         }
     }
@@ -478,6 +478,7 @@ public partial class BusStopInputViewModel : ViewModelBase
     /// </summary>
     private async Task<bool> PersistBusStopsAsync()
     {
+        HasBusStopUpdateConflict = false;
         var settings = await _settingsRepository.GetAppSettingsAsync();
         var summaryGenerator = new SummaryGenerator(settings.DepartmentType);
 
@@ -497,7 +498,18 @@ public partial class BusStopInputViewModel : ViewModelBase
                 var updates = items
                     .Select(item => (item.Detail.SequenceNumber, item.Detail.BusStops))
                     .ToList();
-                await _ledgerRepository.UpdateDetailBusStopsAsync(ledger.Id, updates);
+
+                // Issue #1945: 戻り値を握りつぶさない。履歴詳細の全置換（ReplaceDetailsAsync の
+                // DELETE + INSERT）で rowid が振り直されていると 0 行になるため、ここで止めないと
+                // 摘要だけがバス停名入りで確定し、明細は★のまま残って台帳が自己矛盾する。
+                // 明細 → 摘要の順に書くことで、競合時は摘要へ到達せずに戻れる。
+                var detailsOk = await _ledgerRepository.UpdateDetailBusStopsAsync(ledger.Id, updates);
+                if (!detailsOk)
+                {
+                    HasBusStopUpdateConflict = true;
+                    allSuccess = false;
+                    continue;
+                }
             }
 
             ledger.Summary = summaryGenerator.Generate(ledger.Details);
@@ -507,6 +519,20 @@ public partial class BusStopInputViewModel : ViewModelBase
 
         return allSuccess;
     }
+
+    /// <summary>
+    /// Issue #1945: 直近の保存でバス停名の更新が競合（影響行数 0）したかどうか。
+    /// 失敗の理由が「行が見つからない」ことに特定できるため、汎用の失敗文言と区別して案内する。
+    /// </summary>
+    private bool HasBusStopUpdateConflict { get; set; }
+
+    /// <summary>
+    /// Issue #1945: 保存失敗時の案内文言（「何が」「なぜ」「どうすれば」の 3 要素）。
+    /// </summary>
+    internal const string BusStopConflictMessage =
+        "バス停名を保存できませんでした。この履歴の明細が、他のパソコンや履歴の編集操作で" +
+        "変更された可能性があります。画面を閉じて履歴一覧を再読み込みし、" +
+        "最新の内容を確認してから入力し直してください。";
 
     /// <summary>
     /// スキップ（★マークを付けて保存）
@@ -534,7 +560,7 @@ public partial class BusStopInputViewModel : ViewModelBase
             }
             else
             {
-                StatusMessage = "保存に失敗しました";
+                StatusMessage = HasBusStopUpdateConflict ? BusStopConflictMessage : "保存に失敗しました";
             }
         }
     }

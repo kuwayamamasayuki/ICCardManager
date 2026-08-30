@@ -1620,4 +1620,116 @@ public class LedgerRowEditViewModelTests : IDisposable
     #endregion
 
     #endregion
+
+    #region Issue #1945: 摘要編集時のバス停名同期
+
+    /// <summary>
+    /// Issue #1945 のテスト用: バス明細を 1 件持つ編集対象の台帳を用意する。
+    /// </summary>
+    private LedgerDto ArrangeBusLedgerForEdit(Ledger ledger)
+    {
+        _ledgerRepoMock.Setup(r => r.GetByIdAsync(ledger.Id)).ReturnsAsync(ledger);
+        _ledgerRepoMock.Setup(r => r.UpdateAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>())).ReturnsAsync(true);
+        _staffRepoMock.Setup(r => r.GetByIdmAsync(TestOperatorIdm, It.IsAny<bool>()))
+            .ReturnsAsync(new Staff { StaffIdm = TestOperatorIdm, Name = "操作者" });
+
+        return new LedgerDto
+        {
+            Id = ledger.Id, CardIdm = TestCardIdm, Date = ledger.Date, DateDisplay = "R8.1.10",
+            Summary = ledger.Summary, Expense = ledger.Expense, Balance = ledger.Balance
+        };
+    }
+
+    private static Ledger CreateBusLedger(string summary) => new Ledger
+    {
+        Id = 1, CardIdm = TestCardIdm, Date = new DateTime(2026, 1, 10),
+        Summary = summary, Expense = 200, Balance = 2300,
+        Details = new List<LedgerDetail>
+        {
+            new LedgerDetail { LedgerId = 1, IsBus = true, BusStops = "★", Amount = 200, Balance = 2300, SequenceNumber = 1 }
+        }
+    };
+
+    /// <summary>
+    /// Issue #1945（欠陥を突く側）: 摘要編集に伴うバス停名の同期が競合（影響行数 0）したら、
+    /// 摘要の更新ごと巻き戻して保存失敗とすること。
+    /// 旧実装は commit のあと tx の外で同期し、しかも戻り値を見ていなかったため、
+    /// 摘要だけが新しいバス停名で確定して 6 年保存の台帳が自己矛盾した。
+    /// </summary>
+    [Fact]
+    public async Task SaveEdit_バス停名同期が競合したら保存失敗として巻き戻すこと_Issue1945()
+    {
+        // Arrange
+        var ledger = CreateBusLedger("バス（★）");
+        var dto = ArrangeBusLedgerForEdit(ledger);
+        _ledgerRepoMock.Setup(r => r.UpdateDetailBusStopsAsync(
+                It.IsAny<int>(), It.IsAny<IEnumerable<(int, string)>>(), It.IsAny<SQLiteTransaction>()))
+            .ReturnsAsync(false);
+
+        await _viewModel.InitializeForEditAsync(dto, TestOperatorIdm);
+        _viewModel.Summary = "バス（天神～博多）";
+
+        // Act
+        await _viewModel.SaveCommand.ExecuteAsync(null);
+
+        // Assert
+        _viewModel.IsSaved.Should().BeFalse();
+        _viewModel.StatusMessage.Should().Be(LedgerRowEditViewModel.BusStopConflictMessage);
+    }
+
+    /// <summary>
+    /// Issue #1945 / #1806（対の表明）: 同期は摘要の UPDATE と同一トランザクションで実行すること。
+    /// tx なしのオーバーロードを使うと、摘要のコミット後に同期が失敗した場合に巻き戻せない。
+    /// </summary>
+    [Fact]
+    public async Task SaveEdit_バス停名同期は摘要更新と同一トランザクションで実行されること_Issue1945()
+    {
+        // Arrange
+        var ledger = CreateBusLedger("バス（★）");
+        var dto = ArrangeBusLedgerForEdit(ledger);
+        _ledgerRepoMock.Setup(r => r.UpdateDetailBusStopsAsync(
+                It.IsAny<int>(), It.IsAny<IEnumerable<(int, string)>>(), It.IsAny<SQLiteTransaction>()))
+            .ReturnsAsync(true);
+
+        await _viewModel.InitializeForEditAsync(dto, TestOperatorIdm);
+        _viewModel.Summary = "バス（天神～博多）";
+
+        // Act
+        await _viewModel.SaveCommand.ExecuteAsync(null);
+
+        // Assert
+        _viewModel.IsSaved.Should().BeTrue();
+        _ledgerRepoMock.Verify(r => r.UpdateDetailBusStopsAsync(
+                1, It.IsAny<IEnumerable<(int, string)>>(), It.IsNotNull<SQLiteTransaction>()),
+            Times.Once, "摘要の UPDATE と 1 つの論理操作として束ねる（Issue #1806）");
+        _ledgerRepoMock.Verify(r => r.UpdateDetailBusStopsAsync(
+                It.IsAny<int>(), It.IsAny<IEnumerable<(int, string)>>()),
+            Times.Never, "tx なしのオーバーロードは使わない");
+    }
+
+    /// <summary>
+    /// Issue #1945（対の表明）: 摘要を変えていない保存では同期そのものを行わないこと。
+    /// この表明が無いと「常に同期する」実装でも上の 2 件は緑になる。
+    /// </summary>
+    [Fact]
+    public async Task SaveEdit_摘要が変わっていなければ同期しないこと_Issue1945()
+    {
+        // Arrange
+        var ledger = CreateBusLedger("バス（★）");
+        var dto = ArrangeBusLedgerForEdit(ledger);
+
+        await _viewModel.InitializeForEditAsync(dto, TestOperatorIdm);
+        _viewModel.Note = "備考だけ変更";
+
+        // Act
+        await _viewModel.SaveCommand.ExecuteAsync(null);
+
+        // Assert
+        _viewModel.IsSaved.Should().BeTrue();
+        _ledgerRepoMock.Verify(r => r.UpdateDetailBusStopsAsync(
+                It.IsAny<int>(), It.IsAny<IEnumerable<(int, string)>>(), It.IsAny<SQLiteTransaction>()),
+            Times.Never);
+    }
+
+    #endregion
 }

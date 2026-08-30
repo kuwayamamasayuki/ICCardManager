@@ -244,7 +244,7 @@ public class BusStopInputViewModelTests
 
         _ledgerRepoMock.Setup(r => r.UpdateDetailBusStopsAsync(
                 It.IsAny<int>(), It.IsAny<List<(int, string)>>()))
-            .Returns(Task.CompletedTask);
+            .ReturnsAsync(true);
 
         _ledgerRepoMock.Setup(r => r.UpdateAsync(It.IsAny<Ledger>()))
             .ReturnsAsync(true);
@@ -258,6 +258,106 @@ public class BusStopInputViewModelTests
         detail1.BusStops.Should().Be("★");
         detail2.BusStops.Should().Be("天神バス停");
     }
+
+    #region Issue #1945: バス停名更新の競合
+
+    /// <summary>
+    /// Issue #1945（欠陥を突く側）: バス停名の更新が競合（影響行数 0）したときは、
+    /// 摘要（ledger.summary）を書き換えないこと。
+    /// 旧実装は戻り値を捨てて必ず UpdateAsync まで進んでいたため、
+    /// 「摘要はバス停名入り・明細は★のまま」という自己矛盾した台帳が 6 年間残った。
+    /// </summary>
+    [Fact]
+    public async Task SaveAsync_バス停名更新が競合したら摘要を更新しないこと_Issue1945()
+    {
+        // Arrange
+        var details = new List<LedgerDetail>
+        {
+            new LedgerDetail { LedgerId = 1, IsBus = true, BusStops = "★", Amount = 200, SequenceNumber = 1 }
+        };
+        var ledger = new Ledger { Id = 1, Summary = "バス（★）", Details = details };
+
+        _settingsRepoMock.Setup(s => s.GetAppSettingsAsync()).ReturnsAsync(new AppSettings());
+        _ledgerRepoMock.Setup(r => r.UpdateDetailBusStopsAsync(
+                It.IsAny<int>(), It.IsAny<IEnumerable<(int, string)>>()))
+            .ReturnsAsync(false); // 競合
+        _ledgerRepoMock.Setup(r => r.UpdateAsync(It.IsAny<Ledger>())).ReturnsAsync(true);
+
+        _viewModel.InitializeWithDetails(ledger, details);
+        _viewModel.BusUsages[0].BusStops = "天神～博多";
+
+        // Act
+        await _viewModel.SaveAsync();
+
+        // Assert: 摘要の UPDATE へ到達しない／保存済みにしない／原因を名指しした案内を出す
+        _ledgerRepoMock.Verify(r => r.UpdateAsync(It.IsAny<Ledger>()), Times.Never);
+        _viewModel.IsSaved.Should().BeFalse();
+        _viewModel.StatusMessage.Should().Be(BusStopInputViewModel.BusStopConflictMessage);
+    }
+
+    /// <summary>
+    /// Issue #1945（対の表明）: 競合していないときは従来どおり摘要まで更新すること。
+    /// この表明が無いと「常に摘要を更新しない」実装でも上のテストは緑になる。
+    /// </summary>
+    [Fact]
+    public async Task SaveAsync_バス停名更新が成功したら摘要も更新すること_Issue1945()
+    {
+        // Arrange
+        var details = new List<LedgerDetail>
+        {
+            new LedgerDetail { LedgerId = 1, IsBus = true, BusStops = "★", Amount = 200, SequenceNumber = 1 }
+        };
+        var ledger = new Ledger { Id = 1, Summary = "バス（★）", Details = details };
+
+        _settingsRepoMock.Setup(s => s.GetAppSettingsAsync()).ReturnsAsync(new AppSettings());
+        _ledgerRepoMock.Setup(r => r.UpdateDetailBusStopsAsync(
+                It.IsAny<int>(), It.IsAny<IEnumerable<(int, string)>>()))
+            .ReturnsAsync(true);
+        _ledgerRepoMock.Setup(r => r.UpdateAsync(It.IsAny<Ledger>())).ReturnsAsync(true);
+
+        _viewModel.InitializeWithDetails(ledger, details);
+        _viewModel.BusUsages[0].BusStops = "天神～博多";
+
+        // Act
+        await _viewModel.SaveAsync();
+
+        // Assert
+        _ledgerRepoMock.Verify(r => r.UpdateAsync(It.IsAny<Ledger>()), Times.Once);
+        _viewModel.IsSaved.Should().BeTrue();
+    }
+
+    /// <summary>
+    /// Issue #1945: スキップ（★のまま保存）経路も同じ判定を通ること。
+    /// 保存経路が 2 つあるので、片方だけ直す形を残さない。
+    /// </summary>
+    [Fact]
+    public async Task SkipAsync_バス停名更新が競合したら摘要を更新しないこと_Issue1945()
+    {
+        // Arrange
+        var details = new List<LedgerDetail>
+        {
+            new LedgerDetail { LedgerId = 1, IsBus = true, BusStops = "天神～博多", Amount = 200, SequenceNumber = 1 }
+        };
+        var ledger = new Ledger { Id = 1, Summary = "バス（天神～博多）", Details = details };
+
+        _settingsRepoMock.Setup(s => s.GetAppSettingsAsync()).ReturnsAsync(new AppSettings());
+        _ledgerRepoMock.Setup(r => r.UpdateDetailBusStopsAsync(
+                It.IsAny<int>(), It.IsAny<IEnumerable<(int, string)>>()))
+            .ReturnsAsync(false);
+        _ledgerRepoMock.Setup(r => r.UpdateAsync(It.IsAny<Ledger>())).ReturnsAsync(true);
+
+        _viewModel.InitializeWithDetails(ledger, details);
+
+        // Act
+        await _viewModel.SkipAsync();
+
+        // Assert
+        _ledgerRepoMock.Verify(r => r.UpdateAsync(It.IsAny<Ledger>()), Times.Never);
+        _viewModel.IsSaved.Should().BeFalse();
+        _viewModel.StatusMessage.Should().Be(BusStopInputViewModel.BusStopConflictMessage);
+    }
+
+    #endregion
 
     [Fact]
     public async Task SaveAsync_成功時にIsSavedがtrueになること()
@@ -273,7 +373,7 @@ public class BusStopInputViewModelTests
             .ReturnsAsync(new AppSettings());
         _ledgerRepoMock.Setup(r => r.UpdateDetailBusStopsAsync(
                 It.IsAny<int>(), It.IsAny<List<(int, string)>>()))
-            .Returns(Task.CompletedTask);
+            .ReturnsAsync(true);
         _ledgerRepoMock.Setup(r => r.UpdateAsync(It.IsAny<Ledger>()))
             .ReturnsAsync(true);
 
@@ -301,7 +401,7 @@ public class BusStopInputViewModelTests
             .ReturnsAsync(new AppSettings());
         _ledgerRepoMock.Setup(r => r.UpdateDetailBusStopsAsync(
                 It.IsAny<int>(), It.IsAny<List<(int, string)>>()))
-            .Returns(Task.CompletedTask);
+            .ReturnsAsync(true);
         _ledgerRepoMock.Setup(r => r.UpdateAsync(It.IsAny<Ledger>()))
             .ReturnsAsync(false);
 
@@ -335,7 +435,7 @@ public class BusStopInputViewModelTests
         _settingsRepoMock.Setup(s => s.GetAppSettingsAsync()).ReturnsAsync(new AppSettings());
         _ledgerRepoMock.Setup(r => r.UpdateDetailBusStopsAsync(
                 It.IsAny<int>(), It.IsAny<List<(int, string)>>()))
-            .Returns(Task.CompletedTask);
+            .ReturnsAsync(true);
         _ledgerRepoMock.Setup(r => r.UpdateAsync(It.IsAny<Ledger>())).ReturnsAsync(true);
 
         _viewModel.InitializeWithDetails(ledger, details);
@@ -526,7 +626,7 @@ public class BusStopInputViewModelTests
             .ReturnsAsync(new AppSettings());
         _ledgerRepoMock.Setup(r => r.UpdateDetailBusStopsAsync(
                 It.IsAny<int>(), It.IsAny<List<(int, string)>>()))
-            .Returns(Task.CompletedTask);
+            .ReturnsAsync(true);
         _ledgerRepoMock.Setup(r => r.UpdateAsync(It.IsAny<Ledger>()))
             .ReturnsAsync(true);
 
@@ -556,7 +656,7 @@ public class BusStopInputViewModelTests
             .ReturnsAsync(new AppSettings());
         _ledgerRepoMock.Setup(r => r.UpdateDetailBusStopsAsync(
                 It.IsAny<int>(), It.IsAny<List<(int, string)>>()))
-            .Returns(Task.CompletedTask);
+            .ReturnsAsync(true);
         _ledgerRepoMock.Setup(r => r.UpdateAsync(It.IsAny<Ledger>()))
             .ReturnsAsync(true);
 
@@ -701,7 +801,7 @@ public class BusStopInputViewModelTests
 
         _settingsRepoMock.Setup(s => s.GetAppSettingsAsync()).ReturnsAsync(new AppSettings());
         _ledgerRepoMock.Setup(r => r.UpdateDetailBusStopsAsync(It.IsAny<int>(), It.IsAny<IEnumerable<(int, string)>>()))
-            .Returns(Task.CompletedTask);
+            .ReturnsAsync(true);
         _ledgerRepoMock.Setup(r => r.UpdateAsync(It.IsAny<Ledger>())).ReturnsAsync(true);
 
         await _viewModel.InitializeWithLedgersAsync(new[] { ledger1, ledger2 });
@@ -748,7 +848,7 @@ public class BusStopInputViewModelTests
 
         _settingsRepoMock.Setup(s => s.GetAppSettingsAsync()).ReturnsAsync(new AppSettings());
         _ledgerRepoMock.Setup(r => r.UpdateDetailBusStopsAsync(It.IsAny<int>(), It.IsAny<IEnumerable<(int, string)>>()))
-            .Returns(Task.CompletedTask);
+            .ReturnsAsync(true);
         _ledgerRepoMock.Setup(r => r.UpdateAsync(It.IsAny<Ledger>())).ReturnsAsync(true);
 
         await _viewModel.InitializeWithLedgersAsync(new[] { ledger1, ledger2 });
