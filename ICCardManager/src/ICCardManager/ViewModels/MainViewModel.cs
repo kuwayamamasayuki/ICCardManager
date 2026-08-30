@@ -2460,24 +2460,83 @@ public partial class MainViewModel : ViewModelBase
 
         if (!_navigationService.ShowWarningConfirmation(confirmMessage, "履歴の削除")) return;
 
-        // 削除実行
+        await DeleteLedgerRowCoreAsync(ledger);
+    }
+
+    /// <summary>
+    /// 履歴 1 行を削除し、監査ログを同一トランザクションで記録する（Issue #1458 / Issue #1944）。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Issue #1944: <c>DeleteAsync</c> が <c>false</c> を返すのは<b>影響行数 0</b>のとき、つまり
+    /// 共有モードで他 PC が同じ行を先に削除した競合のときだけである（Issue #1753）。
+    /// 旧実装は戻り値を捨てていたため、削除していないのに
+    /// ①6 年保存の <c>operation_log</c> へ「削除した」という虚偽の監査記録をコミットし、
+    /// ②<c>ic_card.is_lent</c> まで解除し、③UI は成功として戻っていた。
+    /// 履歴の個別削除は職員認証＋確認を経る操作（Issue #635）であり、その記録が事実と食い違うと
+    /// 訂正の追跡ができなくなる。
+    /// </para>
+    /// <para>
+    /// 履歴一覧からの削除（<see cref="DeleteLedgerRow"/>）と行編集ダイアログからの削除要求
+    /// （Issue #750。<see cref="EditLedgerWithAuthAsync"/>）は同じ論理的な書き込みなので、
+    /// 経路ごとに同じ防御を配らずここへ寄せる
+    /// （<c>.claude/rules/development-conventions.md</c>「同じ論理的な書き込みに手段が 2 通りあるか」）。
+    /// 後者はモーダルダイアログを実体化するため ViewModel 単体テストから到達できず、
+    /// 寄せることでしか回帰を担保できない（静的検査は <c>RepositoryDeleteResultConventionTests</c>）。
+    /// </para>
+    /// </remarks>
+    private async Task DeleteLedgerRowCoreAsync(LedgerDto ledger)
+    {
+        // Issue #1759: 案内で名指しする識別情報は、一覧の再読込より前に確定させる
+        // （再読込は HistoryLedgers を作り直すため、後から一覧を辿ると対象が失われる）。
+        var target = $"履歴「{ledger.DateDisplay} {ledger.Summary}」";
+
         var fullLedger = await _ledgerRepository.GetByIdAsync(ledger.Id);
-        if (fullLedger == null) return;
-        // Issue #1458: Ledger DELETE と監査ログ INSERT を同一トランザクションで実行
-        using (var scope = await _dbContext.BeginTransactionAsync())
+        var deleted = false;
+
+        // Issue #1760: 読み取りが null なら書き込みも行わない。
+        // これは DELETE が 0 行になるのと同じ競合（他 PC が先に削除した）なので、
+        // 無言で戻らず下で同じ案内を出す。
+        if (fullLedger != null)
         {
-            await _ledgerRepository.DeleteAsync(ledger.Id, scope.Transaction);
-            await _operationLogger.LogLedgerDeleteAsync(fullLedger, scope.Transaction);
-            scope.Commit();
+            // Issue #1458: Ledger DELETE と監査ログ INSERT を同一トランザクションで実行
+            using (var scope = await _dbContext.BeginTransactionAsync())
+            {
+                deleted = await _ledgerRepository.DeleteAsync(ledger.Id, scope.Transaction);
+                if (deleted)
+                {
+                    await _operationLogger.LogLedgerDeleteAsync(fullLedger, scope.Transaction);
+                    scope.Commit();
+                }
+                else
+                {
+                    // 監査ログを書かずに巻き戻す。業務的失敗による巻き戻しなので
+                    // 素の Rollback() でよい（Issue #1831 の対象は catch 内の巻き戻し）。
+                    scope.Rollback();
+                }
+            }
+
+            if (deleted)
+            {
+                // Issue #1574: 貸出中レコードを削除した場合、ic_card.is_lent を整合性リセット。
+                // Issue #1760: 書き込みをやめたら、書き込みに紐付いた副作用もやめる。
+                await ResetIsLentIfNoOtherLentRecordsAsync(fullLedger);
+            }
         }
 
-        // Issue #1574: 貸出中レコードを削除した場合、ic_card.is_lent を整合性リセット
-        await ResetIsLentIfNoOtherLentRecordsAsync(fullLedger);
-
+        // Issue #1753: 競合の文言が「一覧を再読み込みしました」と述べる以上、案内より前に再読込する。
+        // 成否によらず再読込するのは、競合＝他 PC が実際にデータを変えたということであり、
+        // 一覧だけでなくダッシュボード・警告も古くなっているため。
         await LoadHistoryLedgersAsync();
         await RefreshDashboardAsync();
         await CheckWarningsAsync();
         await CheckAndNotifyConsistencyAsync();
+
+        if (!deleted)
+        {
+            _navigationService.ShowError(
+                ConcurrencyConflictMessage.ForDelete(target, "履歴一覧"), "削除エラー");
+        }
     }
 
     /// <summary>
@@ -2604,25 +2663,10 @@ public partial class MainViewModel : ViewModelBase
         // Issue #750: 削除がリクエストされた場合
         if (capturedEditDialog?.IsDeleteRequested == true)
         {
-            var fullLedger = await _ledgerRepository.GetByIdAsync(ledger.Id);
-            if (fullLedger != null)
-            {
-                // Issue #1458: Ledger DELETE と監査ログ INSERT を同一トランザクションで実行
-                using (var scope = await _dbContext.BeginTransactionAsync())
-                {
-                    await _ledgerRepository.DeleteAsync(ledger.Id, scope.Transaction);
-                    await _operationLogger.LogLedgerDeleteAsync(fullLedger, scope.Transaction);
-                    scope.Commit();
-                }
-
-                // Issue #1574: 貸出中レコードを削除した場合、ic_card.is_lent を整合性リセット
-                await ResetIsLentIfNoOtherLentRecordsAsync(fullLedger);
-            }
-
-            await LoadHistoryLedgersAsync();
-            await RefreshDashboardAsync();
-            await CheckWarningsAsync();
-            await CheckAndNotifyConsistencyAsync();
+            // Issue #1944: 削除と監査ログの書き込みは DeleteLedgerRow と同一の経路へ寄せる。
+            // 旧実装はここにも同じコードの写しを持ち、そちらだけが DeleteAsync の戻り値を
+            // 捨てたまま残る形だった。
+            await DeleteLedgerRowCoreAsync(ledger);
         }
         else if (dialogResult == true)
         {

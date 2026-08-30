@@ -1,4 +1,4 @@
-using CommunityToolkit.Mvvm.Messaging;
+﻿using CommunityToolkit.Mvvm.Messaging;
 using FluentAssertions;
 using ICCardManager.Data;
 using ICCardManager.Data.Repositories;
@@ -48,6 +48,17 @@ public class MainViewModelTests : IDisposable
     private readonly Mock<IMessenger> _messengerMock;
     private readonly Mock<INavigationService> _navigationServiceMock;
     private readonly Mock<OperationLogger> _operationLoggerMock;
+
+    /// <summary>
+    /// 監査ログが実際に書かれたかを表明するためのモック（Issue #1944）。
+    /// </summary>
+    /// <remarks>
+    /// <c>OperationLogger</c> のログ記録メソッドは <c>virtual</c> ではないため
+    /// <c>Mock&lt;OperationLogger&gt;</c> の実体は本物の実装を実行する。したがって
+    /// 「ログが残ったか」は本物が書き込む <see cref="IOperationLogRepository"/> の側で観測する
+    /// （<c>.claude/rules/development-conventions.md</c> Issue #1760）。
+    /// </remarks>
+    private readonly Mock<IOperationLogRepository> _operationLogRepositoryMock;
     private readonly LendingService _lendingService;
     private readonly LedgerMergeService _ledgerMergeService;
     private readonly LedgerConsistencyChecker _ledgerConsistencyChecker;
@@ -75,9 +86,9 @@ public class MainViewModelTests : IDisposable
         _messengerMock = new Mock<IMessenger>();
         _navigationServiceMock = new Mock<INavigationService>();
 
-        var operationLogRepositoryMock = new Mock<IOperationLogRepository>();
+        _operationLogRepositoryMock = new Mock<IOperationLogRepository>();
         _operationLoggerMock = new Mock<OperationLogger>(
-            operationLogRepositoryMock.Object, Mock.Of<ICurrentOperatorContext>());
+            _operationLogRepositoryMock.Object, Mock.Of<ICurrentOperatorContext>());
 
         var summaryGenerator = new SummaryGenerator();
         var lockManager = new CardLockManager(NullLogger<CardLockManager>.Instance);
@@ -3490,6 +3501,25 @@ public class MainViewModelTests : IDisposable
             .Setup(r => r.GetByIdAsync(It.IsAny<int>()))
             .ReturnsAsync((Ledger)null);
 
+        // Issue #1944: 読み取りが null（他 PC が先に削除）でも無言で戻らず、一覧を再読込して
+        // 競合を案内するようになった。後段が最後まで走るようモックを補う。
+        // 本テストの表明（確認の結果に従って GetByIdAsync まで進むか）は変えていない。
+        _settingsRepositoryMock
+            .Setup(s => s.GetAppSettingsAsync())
+            .ReturnsAsync(new AppSettings { WarningBalance = 500 });
+        _cardRepositoryMock
+            .Setup(r => r.GetAllAsync())
+            .ReturnsAsync(new List<IcCard>());
+        _cardRepositoryMock
+            .Setup(r => r.GetLentAsync(It.IsAny<bool>()))
+            .ReturnsAsync(new List<IcCard>());
+        _staffRepositoryMock
+            .Setup(r => r.GetAllAsync())
+            .ReturnsAsync(new List<Staff>());
+        _ledgerRepositoryMock
+            .Setup(r => r.GetAllLatestBalancesAsync())
+            .ReturnsAsync(new Dictionary<string, (int Balance, DateTime? LastUsageDate)>());
+
         var dto = new LedgerDto
         {
             Id = 42,
@@ -3529,6 +3559,212 @@ public class MainViewModelTests : IDisposable
 
         _navigationServiceMock.Verify(
             d => d.ShowWarningConfirmation(It.IsAny<string>(), It.IsAny<string>()), Times.Never);
+    }
+
+    #endregion
+
+    #region 履歴削除の競合検出（Issue #1944）
+
+    private const string DeleteConflictCardIdm = "0123456789ABCDEF";
+
+    /// <summary>
+    /// 削除の案内で名指しする対象（実装と同じ組み立て）。
+    /// </summary>
+    private const string DeleteConflictTarget = "履歴「R8.1.10 鉄道（天神～博多）」";
+
+    /// <summary>
+    /// 履歴削除フローを「認証済み・確認済み」の状態まで進め、対象行の読み取り結果と
+    /// DELETE の影響行数を指定する。戻り値は一覧再読込の要求ページ記録（再読込の観測用）。
+    /// </summary>
+    /// <param name="fullLedger">
+    /// <c>GetByIdAsync</c> が返す行。<c>null</c> は「読み取りの時点で既に他 PC が削除済み」を表す
+    /// </param>
+    /// <param name="deleted"><c>DeleteAsync</c> の戻り値。<c>false</c> ＝影響行数 0 ＝競合</param>
+    private List<int> ArrangeLedgerDelete(Ledger fullLedger, bool deleted)
+    {
+        _staffAuthServiceMock
+            .Setup(a => a.RequestAuthenticationAsync(It.IsAny<string>()))
+            .ReturnsAsync(new StaffAuthResult { Idm = "AABBCCDDEEFF0011", StaffName = "田中太郎" });
+        _navigationServiceMock
+            .Setup(d => d.ShowWarningConfirmation(It.IsAny<string>(), "履歴の削除"))
+            .Returns(true);
+        _ledgerRepositoryMock
+            .Setup(r => r.GetByIdAsync(It.IsAny<int>()))
+            .ReturnsAsync(fullLedger);
+        _ledgerRepositoryMock
+            .Setup(r => r.DeleteAsync(It.IsAny<int>(), It.IsAny<SQLiteTransaction>()))
+            .ReturnsAsync(deleted);
+
+        // 削除の後段（ダッシュボード更新・警告再チェック）が最後まで走るようにする。
+        // 途中で例外になると、案内を出すかどうかの判定にたどり着かない。
+        _settingsRepositoryMock
+            .Setup(s => s.GetAppSettingsAsync())
+            .ReturnsAsync(new AppSettings { WarningBalance = 500 });
+        _cardRepositoryMock
+            .Setup(r => r.GetAllAsync())
+            .ReturnsAsync(new List<IcCard>());
+        _cardRepositoryMock
+            .Setup(r => r.GetLentAsync(It.IsAny<bool>()))
+            .ReturnsAsync(new List<IcCard>());
+        _staffRepositoryMock
+            .Setup(r => r.GetAllAsync())
+            .ReturnsAsync(new List<Staff>());
+        _ledgerRepositoryMock
+            .Setup(r => r.GetAllLatestBalancesAsync())
+            .ReturnsAsync(new Dictionary<string, (int Balance, DateTime? LastUsageDate)>());
+
+        // 削除後の一覧再読込を観測できるようにする（他 PC が削除済みなので総件数 0）
+        return ArrangeHistoryPaging(_ => 0, pageSize: 30);
+    }
+
+    private static LedgerDto DeleteTargetDto() => new LedgerDto
+    {
+        Id = 42,
+        CardIdm = DeleteConflictCardIdm,
+        Date = new DateTime(2026, 1, 10),
+        DateDisplay = "R8.1.10",
+        Summary = "鉄道（天神～博多）",
+        Balance = 2300,
+    };
+
+    /// <summary>
+    /// Issue #1944 の中核。<c>DeleteAsync</c> が 0 行（＝競合）を返したら、
+    /// 6 年保存の監査ログへ「削除した」と記録してはならない。
+    /// </summary>
+    [Fact]
+    public async Task DeleteLedgerRow_削除が0行なら監査ログを記録しないこと()
+    {
+        ArrangeLedgerDelete(new Ledger { Id = 42, CardIdm = DeleteConflictCardIdm }, deleted: false);
+
+        await _viewModel.DeleteLedgerRow(DeleteTargetDto());
+
+        _operationLogRepositoryMock.Verify(
+            r => r.InsertAsync(It.IsAny<OperationLog>(), It.IsAny<SQLiteTransaction>()),
+            Times.Never,
+            "削除していないのに「削除した」と記録すると、履歴の個別削除（Issue #635）の" +
+            "訂正の追跡ができなくなる（Issue #1944）");
+    }
+
+    /// <summary>
+    /// 削除していない以上、書き込みに紐付いていた副作用（<c>ic_card.is_lent</c> の解除）も行わない
+    /// （<c>.claude/rules/development-conventions.md</c> Issue #1760）。
+    /// </summary>
+    [Fact]
+    public async Task DeleteLedgerRow_削除が0行ならis_lentを解除しないこと()
+    {
+        ArrangeLedgerDelete(
+            new Ledger { Id = 42, CardIdm = DeleteConflictCardIdm, IsLentRecord = true },
+            deleted: false);
+        _ledgerRepositoryMock
+            .Setup(r => r.HasOtherLentRecordsAsync(It.IsAny<string>(), It.IsAny<int>()))
+            .ReturnsAsync(false);
+
+        await _viewModel.DeleteLedgerRow(DeleteTargetDto());
+
+        _cardRepositoryMock.Verify(
+            c => c.UpdateLentStatusAsync(
+                It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<DateTime?>(), It.IsAny<string>()),
+            Times.Never,
+            "貸出中レコードを消せていないのに is_lent を解除すると、他 PC の状態まで巻き込む（Issue #1944）");
+    }
+
+    /// <summary>
+    /// 競合は無言で握りつぶさず、<b>一覧を再読込してから</b>案内すること
+    /// （文言が「再読み込みしました」と述べる以上、先に再読込しないと案内どおりに操作できない。Issue #1753）。
+    /// </summary>
+    [Fact]
+    public async Task DeleteLedgerRow_削除が0行なら一覧を再読込してから競合を案内すること()
+    {
+        var requestedPages = ArrangeLedgerDelete(
+            new Ledger { Id = 42, CardIdm = DeleteConflictCardIdm }, deleted: false);
+
+        string message = null;
+        var reloadCountAtNotification = -1;
+        _navigationServiceMock
+            .Setup(d => d.ShowError(It.IsAny<string>(), It.IsAny<string>()))
+            .Callback((string m, string _) =>
+            {
+                message = m;
+                reloadCountAtNotification = requestedPages.Count;
+            });
+
+        await _viewModel.DeleteLedgerRow(DeleteTargetDto());
+
+        message.Should().NotBeNull("競合を無言で握りつぶすと、削除できたように見える（Issue #1944）");
+        message.Should().Be(
+            ICCardManager.Common.ConcurrencyConflictMessage.ForDelete(DeleteConflictTarget, "履歴一覧"),
+            "競合の文言は Common/ConcurrencyConflictMessage へ集約する（Issue #1759）");
+        reloadCountAtNotification.Should().BeGreaterThan(
+            0, "案内する側が先に一覧を再読込すること（Issue #1753）");
+    }
+
+    /// <summary>
+    /// 読み取りの時点で対象行が消えていた場合も、同じ競合として案内すること。
+    /// </summary>
+    /// <remarks>
+    /// 旧実装は <c>if (fullLedger == null) return;</c> で無言で戻っており、
+    /// 同じユーザー操作（同じ故障原因）が経路によって「案内あり」と「無反応」に分かれていた
+    /// （<c>.claude/rules/error-messages.md</c>「同じ制約違反はすべての経路で同じ例外へ変換する」と同じ形）。
+    /// </remarks>
+    [Fact]
+    public async Task DeleteLedgerRow_対象行が既に消えていたら競合を案内すること()
+    {
+        ArrangeLedgerDelete(fullLedger: null, deleted: false);
+
+        await _viewModel.DeleteLedgerRow(DeleteTargetDto());
+
+        _navigationServiceMock.Verify(
+            d => d.ShowError(
+                ICCardManager.Common.ConcurrencyConflictMessage.ForDelete(DeleteConflictTarget, "履歴一覧"),
+                It.IsAny<string>()),
+            Times.Once,
+            "読み取りが null（他 PC が先に削除）でも無言で戻らないこと（Issue #1944）");
+        _operationLogRepositoryMock.Verify(
+            r => r.InsertAsync(It.IsAny<OperationLog>(), It.IsAny<SQLiteTransaction>()),
+            Times.Never,
+            "読み取りが null なら書き込みも行わない（Issue #1760）");
+    }
+
+    /// <summary>
+    /// 対の表明: 正常な削除を塞いでいないこと。
+    /// これが無いと「削除を無条件に競合として扱う」実装でも上の 4 件は緑になる。
+    /// </summary>
+    [Fact]
+    public async Task DeleteLedgerRow_削除できたら監査ログを記録し競合を案内しないこと()
+    {
+        ArrangeLedgerDelete(new Ledger { Id = 42, CardIdm = DeleteConflictCardIdm }, deleted: true);
+
+        await _viewModel.DeleteLedgerRow(DeleteTargetDto());
+
+        _operationLogRepositoryMock.Verify(
+            r => r.InsertAsync(It.IsAny<OperationLog>(), It.IsAny<SQLiteTransaction>()),
+            Times.Once,
+            "正常な削除では監査ログを残すこと");
+        _navigationServiceMock.Verify(
+            d => d.ShowError(It.IsAny<string>(), It.IsAny<string>()),
+            Times.Never,
+            "正常な削除を競合として案内しないこと");
+    }
+
+    /// <summary>
+    /// 対の表明: 貸出中レコードを実際に削除できたときは is_lent を解除すること（Issue #1574 の維持）。
+    /// </summary>
+    [Fact]
+    public async Task DeleteLedgerRow_貸出中レコードを削除できたらis_lentを解除すること()
+    {
+        ArrangeLedgerDelete(
+            new Ledger { Id = 42, CardIdm = DeleteConflictCardIdm, IsLentRecord = true },
+            deleted: true);
+        _ledgerRepositoryMock
+            .Setup(r => r.HasOtherLentRecordsAsync(It.IsAny<string>(), It.IsAny<int>()))
+            .ReturnsAsync(false);
+
+        await _viewModel.DeleteLedgerRow(DeleteTargetDto());
+
+        _cardRepositoryMock.Verify(
+            c => c.UpdateLentStatusAsync(DeleteConflictCardIdm, false, null, null),
+            Times.Once,
+            "Issue #1574 の整合性リセットを、競合検出の導入で壊していないこと");
     }
 
     #endregion
