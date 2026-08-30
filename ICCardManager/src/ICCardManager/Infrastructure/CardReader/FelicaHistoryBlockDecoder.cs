@@ -21,6 +21,7 @@ namespace ICCardManager.Infrastructure.CardReader
     /// <item><description>バス利用判定（駅コード両方0、または駅名両方未解決）</description></item>
     /// <item><description>金額計算（前回残高との差分）</description></item>
     /// <item><description>Issue #942: 利用種別が0x0D以外でも残高増加時はポイント還元として扱う</description></item>
+    /// <item><description>Issue #1948: 上記フォールバック発動時はバス判定を取り下げる（バスとポイント還元は排他）</description></item>
     /// </list>
     /// </remarks>
     public static class FelicaHistoryBlockDecoder
@@ -149,6 +150,20 @@ namespace ICCardManager.Infrastructure.CardReader
                     pointRedemptionFallbackTriggered = true;
                     isPointRedemption = true;
                     amount = -amount.Value;  // 正の金額（入金額）に変換
+
+                    // Issue #1948: バス利用とポイント還元は業務ルール上排他
+                    // （.claude/rules/business-logic.md のバス判別ロジックは is_point_redemption = false を条件に含む）。
+                    // isBus はこのフォールバックより前に確定しているため、取り下げないと
+                    // 「IsBus=true かつ IsPointRedemption=true」の複合状態が 6 年保存の ledger_detail へ入る。
+                    // 摘要生成（SummaryGenerator）と区間表示（RouteDisplayFormatter）はポイント還元を
+                    // 先に判定するため実害が見えないが、BusStopInputViewModel は IsBus だけで対象を絞るため、
+                    // 履歴統合でバス利用行と 1 行になるとバス停名入力に幽霊行として並ぶ。
+                    // 消費側それぞれに順序の規約を配らず、食い違った状態を作らない側で止める（#1883）。
+                    //
+                    // なお isBus=true となる 2 経路（駅コード両方 0／駅名が両方とも未解決）は
+                    // いずれも entryStationName・exitStationName が null であるため、
+                    // ここで isBus を落としても EntryStation / ExitStation の値は変わらない。
+                    isBus = false;
                 }
 
                 // 生データを保持（デバッグ・診断用）
