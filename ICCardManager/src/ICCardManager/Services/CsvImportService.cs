@@ -177,10 +177,11 @@ namespace ICCardManager.Services
         private readonly IValidationService _validationService;
         private readonly DbContext _dbContext;
         private readonly ICacheService _cacheService;
+        private readonly ISettingsRepository _settingsRepository;
         private readonly ILogger<CsvImportService>? _logger;
 
         /// <summary>
-        /// 6 引数オーバーロード（既存テストの Moq プロキシ生成互換性のため維持）
+        /// 7 引数オーバーロード（既存テストの Moq プロキシ生成互換性のため維持）
         /// </summary>
         public CsvImportService(
             ICardRepository cardRepository,
@@ -188,8 +189,9 @@ namespace ICCardManager.Services
             ILedgerRepository ledgerRepository,
             IValidationService validationService,
             DbContext dbContext,
-            ICacheService cacheService)
-            : this(cardRepository, staffRepository, ledgerRepository, validationService, dbContext, cacheService, logger: null)
+            ICacheService cacheService,
+            ISettingsRepository settingsRepository)
+            : this(cardRepository, staffRepository, ledgerRepository, validationService, dbContext, cacheService, settingsRepository, logger: null)
         {
         }
 
@@ -203,6 +205,7 @@ namespace ICCardManager.Services
             IValidationService validationService,
             DbContext dbContext,
             ICacheService cacheService,
+            ISettingsRepository settingsRepository,
             ILogger<CsvImportService>? logger)
         {
             _cardRepository = cardRepository;
@@ -211,7 +214,36 @@ namespace ICCardManager.Services
             _validationService = validationService;
             _dbContext = dbContext;
             _cacheService = cacheService;
+            _settingsRepository = settingsRepository;
             _logger = logger;
+        }
+
+        /// <summary>
+        /// 摘要の再生成に使う <see cref="SummaryGenerator"/> を、DB に保存された部署種別で組み立てる。
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// Issue #1955: 明細 CSV の取込は <c>new SummaryGenerator()</c>（既定 ＝
+        /// <see cref="DepartmentType.MayorOffice"/>）で摘要を作り直していたため、企業会計部局に
+        /// 設定した組織でもチャージ行が「役務費によりチャージ」で 6 年保存の台帳へ書き込まれ、
+        /// そのまま物品出納簿に印字されていた（設定が効く経路と効かない経路が混在する状態。
+        /// <c>.claude/rules/development-conventions.md</c> #1820 と同 family）。
+        /// </para>
+        /// <para>
+        /// DI に登録済みの <see cref="SummaryGenerator"/> シングルトンを注入しないのは、
+        /// あれが<b>起動時</b>の部署種別を捕捉したまま固定されるため。部署種別は設定画面（F5）から
+        /// 実行時に変更でき、注入すると「変更後の最初の取込だけ旧設定で摘要が作られる」窓が残る。
+        /// <c>BusStopInputViewModel.PersistBusStopsAsync</c> が毎回設定を読み直しているのと同じ判断。
+        /// </para>
+        /// <para>
+        /// 組織文言（<c>ChargeSummaryEnterprise</c> 等）は静的な <c>CurrentOptions</c> から引かれるため、
+        /// ここで渡すのは部署種別だけでよい（2 引数コンストラクタは静的状態を書き換えるので使わない）。
+        /// </para>
+        /// </remarks>
+        private async Task<SummaryGenerator> CreateSummaryGeneratorAsync()
+        {
+            var settings = await _settingsRepository.GetAppSettingsAsync().ConfigureAwait(false);
+            return new SummaryGenerator(settings.DepartmentType);
         }
 
         // === 共通ユーティリティ ===

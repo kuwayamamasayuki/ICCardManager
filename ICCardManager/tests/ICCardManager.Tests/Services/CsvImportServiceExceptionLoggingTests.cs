@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Data.SQLite;
 using System.IO;
@@ -32,6 +32,8 @@ public class CsvImportServiceExceptionLoggingTests : IDisposable
     private readonly Mock<ILedgerRepository> _ledgerRepositoryMock;
     private readonly Mock<IValidationService> _validationServiceMock;
     private readonly Mock<ICacheService> _cacheServiceMock;
+    /// <summary>Issue #1955: 摘要の再生成が参照する部署種別の供給元。</summary>
+    private readonly Mock<ISettingsRepository> _settingsRepositoryMock;
     private readonly Mock<ILogger<CsvImportService>> _loggerMock;
 
     private static readonly Encoding CsvEncoding = new UTF8Encoding(true);
@@ -47,6 +49,9 @@ public class CsvImportServiceExceptionLoggingTests : IDisposable
         _validationServiceMock = new Mock<IValidationService>();
         _dbContextMock = new Mock<DbContext>();
         _cacheServiceMock = new Mock<ICacheService>();
+        _settingsRepositoryMock = new Mock<ISettingsRepository>();
+        _settingsRepositoryMock.Setup(x => x.GetAppSettingsAsync())
+            .ReturnsAsync(new AppSettings());
         _loggerMock = new Mock<ILogger<CsvImportService>>();
 
         _validationServiceMock.Setup(x => x.ValidateCardIdm(It.IsAny<string>()))
@@ -80,6 +85,7 @@ public class CsvImportServiceExceptionLoggingTests : IDisposable
             _validationServiceMock.Object,
             _dbContextMock.Object,
             _cacheServiceMock.Object,
+            _settingsRepositoryMock.Object,
             _loggerMock.Object);
     }
 

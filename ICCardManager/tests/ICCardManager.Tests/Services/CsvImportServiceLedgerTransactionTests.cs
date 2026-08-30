@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Data.SQLite;
 using System.IO;
@@ -69,6 +69,16 @@ public class CsvImportServiceLedgerTransactionTests : IDisposable
     }
 
     #region ヘルパー
+
+    /// <summary>
+    /// Issue #1955: 摘要の再生成が参照する部署種別の供給元（既定 ＝ 市長事務部局）。
+    /// </summary>
+    private static ISettingsRepository CreateSettingsRepository()
+    {
+        var mock = new Mock<ISettingsRepository>();
+        mock.Setup(x => x.GetAppSettingsAsync()).ReturnsAsync(new AppSettings());
+        return mock.Object;
+    }
 
     /// <summary>INSERT の呼び出し回数を数えるカウンター</summary>
     private sealed class InsertCounter
@@ -146,6 +156,7 @@ public class CsvImportServiceLedgerTransactionTests : IDisposable
             new Mock<IValidationService>().Object,
             _dbContext,
             new Mock<ICacheService>().Object,
+            CreateSettingsRepository(),
             NullLogger<CsvImportService>.Instance);
 
         return (service, ledgerRepositoryMock);

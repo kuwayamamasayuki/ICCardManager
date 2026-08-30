@@ -1,4 +1,4 @@
-using System.IO;
+﻿using System.IO;
 using System.Text;
 using FluentAssertions;
 using ICCardManager.Common.Exceptions;
@@ -32,6 +32,8 @@ public class CsvImportServiceTests : IDisposable
     private readonly Mock<IValidationService> _validationServiceMock;
     private readonly Mock<DbContext> _dbContextMock;
     private readonly Mock<ICacheService> _cacheServiceMock;
+    /// <summary>Issue #1955: 摘要の再生成が参照する部署種別の供給元。</summary>
+    private readonly Mock<ISettingsRepository> _settingsRepositoryMock;
     private readonly SQLiteConnection _connection;
     private readonly DbContext _realDbContext;
     private readonly CsvImportService _service;
@@ -52,6 +54,9 @@ public class CsvImportServiceTests : IDisposable
         _validationServiceMock = new Mock<IValidationService>();
         _dbContextMock = new Mock<DbContext>();
         _cacheServiceMock = new Mock<ICacheService>();
+        _settingsRepositoryMock = new Mock<ISettingsRepository>();
+        _settingsRepositoryMock.Setup(x => x.GetAppSettingsAsync())
+            .ReturnsAsync(new AppSettings());
 
         // デフォルトのバリデーション設定（すべて有効）
         _validationServiceMock.Setup(x => x.ValidateCardIdm(It.IsAny<string>()))
@@ -78,7 +83,8 @@ public class CsvImportServiceTests : IDisposable
             _ledgerRepositoryMock.Object,
             _validationServiceMock.Object,
             _dbContextMock.Object,
-            _cacheServiceMock.Object);
+            _cacheServiceMock.Object,
+            _settingsRepositoryMock.Object);
     }
 
     public void Dispose()

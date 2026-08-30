@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Data.SQLite;
 using System.Threading.Tasks;
@@ -81,7 +81,9 @@ public class DataExportImportViewModelMessagingTests : IDisposable
             _ledgerRepositoryMock.Object,
             _validationServiceMock.Object,
             _dbContextMock.Object,
-            _cacheServiceMock.Object);
+            _cacheServiceMock.Object,
+            // Issue #1955: 摘要の再生成が参照する部署種別の供給元
+            new Mock<ISettingsRepository>().Object);
 
         var operationLogRepository = new OperationLogRepository(_realDbContext);
         var operatorContext = new CurrentOperatorContext(new SystemClock());
