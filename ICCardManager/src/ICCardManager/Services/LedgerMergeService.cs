@@ -19,7 +19,10 @@ namespace ICCardManager.Services
     {
         /// <summary>
         /// 統合（または取り消し）が<b>確定した</b>かどうか。
-        /// コミット後の後処理の失敗ではこの値は落ちない（Issue #1954）。
+        /// <see cref="LedgerMergeService.MergeAsync"/> では、コミット後の後処理（Undo 情報の保存）の
+        /// 失敗でこの値は落ちない（Issue #1954）。
+        /// <see cref="LedgerMergeService.UnmergeAsync"/> はコミット後に DB I/O を持たないため、
+        /// この扱いの対象になる後処理がそもそも無い（<see cref="HasPostCommitFailure"/> は常に false）。
         /// </summary>
         public bool Success { get; set; }
 
